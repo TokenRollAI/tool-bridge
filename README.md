@@ -1,0 +1,139 @@
+# Tool Bridge
+
+Tool Bridge 是一个可部署到 Cloudflare Workers 的 MCP Streamable HTTP bridge。它把远端 MCP server 暴露的 `tools/list` 和 `tools/call` 转换成普通 HTTP call，并提供一个用于发现和调用 tool 的 Web UI。
+
+本项目不是 HTBP protocol 本身；HTBP 的 RFC 和设计文档放在 `TokenRollAI/HTBP`。
+
+## 能力
+
+- 连接 MCP Streamable HTTP server
+- 将 MCP `tools/list` 暴露为 HTTP JSON API
+- 将 MCP `tools/call` 暴露为普通 `POST` call
+- 为 configured MCP server 生成 `~help` 和 `~skill`
+- 提供 React + TanStack UI
+- 可部署到 Cloudflare Workers
+- 支持 bridge 自身的 Bearer token 或 OAuth JWT verification
+- 支持向上游 MCP server 透传 Bearer token
+
+当前不支持 stdio transport，也不支持 MCP SSE fallback。
+
+## 本地运行
+
+```bash
+npm install
+npm run dev
+```
+
+默认地址：
+
+```txt
+http://127.0.0.1:8787
+```
+
+`npm run dev` 会先构建 UI，再启动完整 Worker。不要只用 Vite UI 来验证 bridge，因为 API 需要 Worker 路由。
+
+## 默认 MCP Server
+
+本地默认配置包含一个公开的 Context7 MCP server：
+
+```txt
+https://mcp.context7.com/mcp
+```
+
+启动后可以直接在 `Configured` tab 看到 `Context7`，也可以在 `Ad-hoc` tab 直接点 `Discover`。
+
+## HTTP API
+
+```txt
+GET  /api/auth/config
+GET  /api/servers
+GET  /api/servers/{server}/tools
+POST /api/servers/{server}/tools/{tool}/call
+
+POST /api/bridge/tools
+POST /api/bridge/call
+
+GET  /mcp/{server}/~help
+GET  /mcp/{server}/~skill
+POST /mcp/{server}/tools/{tool}
+```
+
+示例：
+
+```bash
+curl http://127.0.0.1:8787/api/servers
+
+curl -X POST http://127.0.0.1:8787/api/bridge/tools \
+  -H 'Content-Type: application/json' \
+  --data '{"server":{"name":"context7","endpoint":"https://mcp.context7.com/mcp"}}'
+```
+
+调用 tool：
+
+```bash
+curl -X POST http://127.0.0.1:8787/api/bridge/call \
+  -H 'Content-Type: application/json' \
+  --data '{
+    "server": {"name":"context7","endpoint":"https://mcp.context7.com/mcp"},
+    "tool": "resolve-library-id",
+    "arguments": {"query":"React query library","libraryName":"TanStack Query"}
+  }'
+```
+
+## 配置 MCP Server
+
+通过 `MCP_SERVERS_JSON` 配置 server。非 secret 可以放在 `wrangler.jsonc` 的 `vars` 中；secret 应通过 `.dev.vars` 或 `wrangler secret put` 注入。
+
+```json
+{
+  "context7": {
+    "name": "Context7",
+    "endpoint": "https://mcp.context7.com/mcp",
+    "description": "Public documentation MCP server",
+    "headers": {
+      "Authorization": "Bearer ${CONTEXT7_TOKEN}"
+    },
+    "allowedTools": ["resolve-library-id", "query-docs"]
+  }
+}
+```
+
+上游 header 支持两种 env 引用：
+
+```txt
+Bearer ${TOKEN_NAME}
+Bearer $env:TOKEN_NAME
+```
+
+## Bridge Auth
+
+如果不配置 `AUTH_BEARER_TOKEN` 或 `OAUTH_ISSUER`，bridge 处于 unauthenticated mode。
+
+静态 Bearer gate：
+
+```bash
+wrangler secret put AUTH_BEARER_TOKEN
+```
+
+OAuth JWT verification：
+
+```txt
+OAUTH_ISSUER=https://issuer.example.com
+OAUTH_REQUIRED_AUDIENCE=tool-bridge
+OAUTH_JWKS_URI=https://issuer.example.com/.well-known/jwks.json
+```
+
+`OAUTH_JWKS_URI` 可省略；Worker 会读取 issuer 的 OpenID configuration 来发现 `jwks_uri`。
+
+## 部署
+
+```bash
+npm run deploy
+```
+
+部署前建议先跑：
+
+```bash
+npm run check
+npx wrangler deploy --dry-run
+```
