@@ -9,7 +9,8 @@
     "typecheck": "tsc --noEmit",
     "worker:dev": "wrangler dev --ip 127.0.0.1 --port 8787",
     "deploy": "npm run build && wrangler deploy",
-    "check": "npm run typecheck && npm run build"
+    "check": "npm run typecheck && npm run build",
+    "test": "vitest run"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.90.12",
@@ -27,6 +28,7 @@
     "@vitejs/plugin-react": "^5.1.2",
     "typescript": "^6.0.3",
     "vite": "^8.0.16",
+    "vitest": "^3.2.6",
     "wrangler": "^4.56.0"
   }
 }

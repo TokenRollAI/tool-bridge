@@ -2,9 +2,12 @@ import { useMemo, useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import {
   Braces,
+  ChevronDown,
+  ChevronRight,
   Copy,
   FileText,
   KeyRound,
+  Network,
   Play,
   RefreshCw,
   Search,
@@ -54,6 +57,29 @@ interface AdhocTarget {
   name: string;
   endpoint: string;
   bearerToken: string;
+}
+
+interface EndpointSpec {
+  method: string;
+  inputSchema?: unknown;
+  outputSchema?: unknown;
+  example?: unknown;
+}
+
+interface CrawlNode {
+  kind: 'directory' | 'mcp' | 'http' | 'remote';
+  path: string;
+  title?: string;
+  description?: string;
+  helpUrl: string;
+  children: CrawlNode[];
+  endpoint?: EndpointSpec;
+  error?: string;
+  truncated?: boolean;
+}
+
+interface TreeResponse {
+  tree: CrawlNode;
 }
 
 const AUTH_TOKEN_KEY = 'toolBridge.authToken';
@@ -159,7 +185,7 @@ export function App() {
   const [selectedTool, setSelectedTool] = useState<string>('');
   const [argumentsText, setArgumentsText] = useState('{}');
   const [adhoc, setAdhoc] = useState<AdhocTarget>(() => readAdhocTarget());
-  const [mode, setMode] = useState<'configured' | 'adhoc'>('configured');
+  const [mode, setMode] = useState<'configured' | 'adhoc' | 'tree'>('configured');
   const [copied, setCopied] = useState('');
 
   const authQuery = useQuery({
@@ -196,6 +222,12 @@ export function App() {
           },
         }),
       }),
+  });
+
+  const treeQuery = useQuery({
+    queryKey: ['tree', authToken],
+    queryFn: () => api<TreeResponse>('/api/tree', authToken),
+    enabled: mode === 'tree' && (authQuery.data?.mode === 'none' || authToken.length > 0),
   });
 
   const callMutation = useMutation({
@@ -288,8 +320,34 @@ export function App() {
           <Search size={16} />
           Ad-hoc
         </button>
+        <button className={mode === 'tree' ? 'active' : ''} onClick={() => setMode('tree')}>
+          <Network size={16} />
+          Tree
+        </button>
       </section>
 
+      {mode === 'tree' ? (
+        <section className="workspace tree-workspace">
+          <section className="panel tree-panel">
+            <div className="panel-heading">
+              <div>
+                <h2>Tree</h2>
+                <p>Recursive HTBP walk from the root</p>
+              </div>
+              <button className="icon-button" onClick={() => void treeQuery.refetch()} title="Refresh tree">
+                <RefreshCw size={16} />
+              </button>
+            </div>
+            {treeQuery.isError ? <pre className="error-box">{String(treeQuery.error.message)}</pre> : null}
+            {treeQuery.isLoading ? <p className="empty-state">Crawling…</p> : null}
+            {treeQuery.data ? (
+              <div className="tree-view">
+                <TreeNodeRow node={treeQuery.data.tree} depth={0} onCopy={copy} copied={copied} />
+              </div>
+            ) : null}
+          </section>
+        </section>
+      ) : (
       <section className="workspace">
         <aside className="panel server-panel">
           <div className="panel-heading">
@@ -443,6 +501,67 @@ export function App() {
           {callMutation.data ? <pre className="result-box">{pretty(callMutation.data.result)}</pre> : null}
         </section>
       </section>
+      )}
     </main>
+  );
+}
+
+interface TreeNodeRowProps {
+  node: CrawlNode;
+  depth: number;
+  onCopy: (value: string) => void;
+  copied: string;
+}
+
+function TreeNodeRow({ node, depth, onCopy, copied }: TreeNodeRowProps) {
+  const expandable = node.children.length > 0 || !!node.endpoint;
+  const [expanded, setExpanded] = useState(depth < 2);
+  const kindLabel = node.kind === 'remote' ? 'remote ⇄' : node.kind;
+
+  return (
+    <div className="tree-node">
+      <div className="tree-row" style={{ paddingLeft: `${depth * 16}px` }}>
+        <button
+          className="tree-toggle"
+          onClick={() => setExpanded((value) => !value)}
+          disabled={!expandable}
+          title={expandable ? 'Toggle' : 'Leaf'}
+        >
+          {expandable ? expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} /> : <span className="tree-dot" />}
+        </button>
+        <span className={`tree-kind tree-kind-${node.kind}`}>{kindLabel}</span>
+        <span className="tree-title">{node.title || node.path}</span>
+        {node.endpoint ? <span className="tree-method">{node.endpoint.method}</span> : null}
+        {node.truncated ? <span className="tree-flag">truncated</span> : null}
+        <button className="tree-copy" onClick={() => onCopy(node.helpUrl)} title="Copy ~help URL">
+          <Copy size={13} />
+          {copied === node.helpUrl ? 'Copied' : ''}
+        </button>
+      </div>
+      {node.description ? (
+        <p className="tree-desc" style={{ paddingLeft: `${depth * 16 + 28}px` }}>
+          {node.description}
+        </p>
+      ) : null}
+      {node.error ? (
+        <pre className="error-box" style={{ marginLeft: `${depth * 16 + 28}px` }}>
+          {node.error}
+        </pre>
+      ) : null}
+      {expanded && node.endpoint ? (
+        <details className="schema-box" style={{ marginLeft: `${depth * 16 + 28}px` }} open>
+          <summary>
+            <Braces size={15} />
+            Input schema
+          </summary>
+          <pre>{pretty(node.endpoint.inputSchema ?? {})}</pre>
+        </details>
+      ) : null}
+      {expanded
+        ? node.children.map((child) => (
+            <TreeNodeRow key={child.path} node={child} depth={depth + 1} onCopy={onCopy} copied={copied} />
+          ))
+        : null}
+    </div>
   );
 }

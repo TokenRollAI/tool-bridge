@@ -358,3 +358,117 @@ button {
   }
 }
 
+.tree-workspace {
+  grid-template-columns: 1fr;
+}
+
+.tree-panel {
+  min-height: 0;
+}
+
+.tree-view {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.tree-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  border-radius: 6px;
+  padding: 2px 6px;
+}
+
+.tree-row:hover {
+  background: #f7f8f3;
+}
+
+.tree-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border: none;
+  background: transparent;
+  color: #697066;
+  cursor: pointer;
+}
+
+.tree-toggle:disabled {
+  cursor: default;
+}
+
+.tree-dot {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: #c2c8bd;
+}
+
+.tree-kind {
+  flex: none;
+  border-radius: 4px;
+  padding: 1px 6px;
+  background: #edf0e8;
+  color: #59614f;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.tree-kind-mcp {
+  background: #e4f1ec;
+  color: #146a5d;
+}
+
+.tree-kind-remote {
+  background: #f3e9df;
+  color: #8a5a1f;
+}
+
+.tree-kind-http {
+  background: #e7ecf6;
+  color: #355089;
+}
+
+.tree-title {
+  overflow: hidden;
+  flex: 1;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tree-method {
+  flex: none;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 11px;
+  color: #146a5d;
+}
+
+.tree-flag {
+  flex: none;
+  color: #8a5a1f;
+  font-size: 11px;
+}
+
+.tree-copy {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: none;
+  background: transparent;
+  color: #697066;
+  cursor: pointer;
+  font-size: 11px;
+}
+
+.tree-desc {
+  margin: 0;
+  color: #697066;
+  font-size: 12px;
+}
+

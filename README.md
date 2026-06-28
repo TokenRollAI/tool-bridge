@@ -10,12 +10,49 @@ Tool Bridge 是一个可部署到 Cloudflare Workers 的 MCP Streamable HTTP bri
 - 将 MCP `tools/list` 暴露为 HTTP JSON API
 - 将 MCP `tools/call` 暴露为普通 `POST` call
 - 为 configured MCP server 生成 `~help` 和 `~skill`
-- 提供 React + TanStack UI
+- **把 MCP / HTTP / 远端 TB 实例组织成一棵自描述、可递归的 TB Server 树**
+- 提供 React + TanStack UI（含树视图）
 - 可部署到 Cloudflare Workers
 - 支持 bridge 自身的 Bearer token 或 OAuth JWT verification
 - 支持向上游 MCP server 透传 Bearer token
 
 当前不支持 stdio transport，也不支持 MCP SSE fallback。
+
+## TB Server 树（递归 `~help`）
+
+Tool Bridge 把配置的资源组织成一棵树，每个节点都响应 `GET {path}/~help`，从根 Domain 出发即可逐级下钻：
+
+```txt
+GET /htbp/~help                          # Domain：列出 namespace / 子节点（相对路径）
+GET /htbp/docs/~help                     # mid-path：列出下一层资源
+GET /htbp/docs/context7/~help            # leaf：列出 MCP 工具
+GET /htbp/docs/context7/{tool}/~help     # end-path：内嵌 method + inputSchema + example
+POST /htbp/docs/context7/{tool}          # 调用 end-path 资源
+```
+
+`~help` 默认返回 JSON payload（`description` + 下一层资源列表 + end-path 的 schema）；资源列表中的
+`path` **始终是相对路径**，使任意子树都可被挂载到任意 domain/path。带 `Accept: text/plain` 时返回
+等价的 HTBP text DSL，用于兼容纯文本 Agent。
+
+节点类型（配置在 `MCP_SERVERS_JSON`）：
+
+- `directory`：纯中间节点，`~help` 列出子节点。
+- `mcp`：MCP Streamable HTTP leaf（现有能力）。
+- `http`：Custom HTTP handler，声明 `endpoints[]`（method/url/inputSchema）。
+- `remote`：联邦到另一个 TB 实例（`helpUrl`），由 crawler 跟进其 JSON `~help`。
+
+服务端 crawler：
+
+```txt
+GET  /api/tree            # 从根递归 crawl 整棵树（含工具 schema）
+POST /api/crawl           # 自定义起点 / 深度，body: {start?, maxDepth?, maxNodes?}
+```
+
+crawl 带环检测、深度（≤8）与节点数（≤200）上限；远端节点强制 https、可选
+`HTBP_REMOTE_ALLOWLIST` 白名单、大小与超时上限；单个节点失败不会中断整棵 crawl。
+
+旧的扁平 `MCP_SERVERS_JSON` 与 `/mcp/{server}/...`、`/api/servers` 路由保持完全兼容：扁平配置会被
+自动包装成根 directory 的 `mcp` 子节点。
 
 ## 本地运行
 

@@ -1,4 +1,6 @@
 import { createRemoteJWKSet, jwtVerify } from 'jose';
+import { clampCrawlOptions, crawlTree } from './tb/crawl';
+import { NotFoundError, resolveCall, resolveHelp } from './tb/resolve';
 
 const MCP_PROTOCOL_VERSION = '2025-11-25';
 const CLIENT_NAME = 'tool-bridge';
@@ -663,6 +665,20 @@ async function routeApi(request: Request, env: AppEnv): Promise<Response> {
     return json({ server: publicServer(server), tool: body.tool, result });
   }
 
+  if (path === '/api/tree' && request.method === 'GET') {
+    const tree = await crawlTree(env, { path: '' }, authInfo.mode);
+    return json({ auth: authInfo, tree });
+  }
+
+  if (path === '/api/crawl' && request.method === 'POST') {
+    const body = await readJsonBody<{ start?: { path?: string; url?: string }; maxDepth?: number; maxNodes?: number }>(
+      request
+    );
+    const opts = clampCrawlOptions({ maxDepth: body.maxDepth, maxNodes: body.maxNodes });
+    const tree = await crawlTree(env, body.start ?? { path: '' }, authInfo.mode, opts);
+    return json({ auth: authInfo, tree });
+  }
+
   const serverMatch = /^\/api\/servers\/([^/]+)(\/.*)?$/.exec(path);
   if (serverMatch) {
     const server = resolveServer(env, decodeURIComponent(serverMatch[1] ?? ''));
@@ -671,6 +687,38 @@ async function routeApi(request: Request, env: AppEnv): Promise<Response> {
   }
 
   return errorResponse(404, 'not_found', 'API route not found.');
+}
+
+async function routeHtbp(request: Request, env: AppEnv): Promise<Response> {
+  const authInfo = await authenticate(request, env);
+  if (authInfo instanceof Response) {
+    return authInfo;
+  }
+  const url = new URL(request.url);
+  const rest = url.pathname.replace(/^\/htbp\/?/, '');
+  const rawSegments = rest.split('/').filter((segment) => segment.length > 0);
+
+  // A trailing ~help control segment requests help; otherwise it's an end-path call.
+  const hasHelpSuffix = rawSegments[rawSegments.length - 1] === '~help';
+  const isHelp = rawSegments.length === 0 || hasHelpSuffix;
+  const segments = (hasHelpSuffix ? rawSegments.slice(0, -1) : rawSegments).map(decodeURIComponent);
+
+  try {
+    if (isHelp) {
+      const accept = request.headers.get('Accept') ?? '';
+      return await resolveHelp(env, segments, authInfo.mode, accept);
+    }
+    if (request.method === 'POST') {
+      const input = await readJsonBody<unknown>(request);
+      return await resolveCall(env, segments, authInfo.mode, input);
+    }
+    return errorResponse(405, 'method_not_allowed', 'Use GET {path}/~help or POST {path} to call.');
+  } catch (error) {
+    if (error instanceof NotFoundError) {
+      return errorResponse(404, 'not_found', error.message);
+    }
+    return errorResponse(500, 'internal_error', messageOf(error));
+  }
 }
 
 async function routeMcpBridge(request: Request, env: AppEnv): Promise<Response> {
@@ -739,6 +787,9 @@ async function handleRequest(request: Request, env: AppEnv): Promise<Response> {
     }
     if (url.pathname.startsWith('/mcp/')) {
       return await routeMcpBridge(request, env);
+    }
+    if (url.pathname === '/htbp' || url.pathname.startsWith('/htbp/')) {
+      return await routeHtbp(request, env);
     }
     return env.ASSETS.fetch(request);
   } catch (error) {
