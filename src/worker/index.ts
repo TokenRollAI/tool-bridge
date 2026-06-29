@@ -222,6 +222,12 @@ function parseConfiguredServers(env: AppEnv): ServerConfig[] {
   const raw = env.MCP_SERVERS_JSON || '{}';
   const parsed = JSON.parse(raw) as unknown;
   const entries: ServerConfig[] = [];
+  // Nested tree form: collect every MCP leaf (skip directory/http/remote/mount)
+  // so the legacy /api/servers + /mcp/* routes keep working under a tree config.
+  if (isRecord(parsed) && (parsed.type === 'directory' || Array.isArray(parsed.children))) {
+    collectMcpLeaves(parsed, entries);
+    return entries;
+  }
   if (Array.isArray(parsed)) {
     for (const item of parsed) {
       entries.push(normalizeServerConfig(item));
@@ -234,6 +240,22 @@ function parseConfiguredServers(env: AppEnv): ServerConfig[] {
     }
   }
   return entries;
+}
+
+// Recursively gather `type: "mcp"` nodes from a nested tree config.
+function collectMcpLeaves(node: unknown, out: ServerConfig[]): void {
+  if (!isRecord(node)) {
+    return;
+  }
+  if (node.type === 'mcp') {
+    out.push(normalizeServerConfig(node));
+    return;
+  }
+  if (Array.isArray(node.children)) {
+    for (const child of node.children) {
+      collectMcpLeaves(child, out);
+    }
+  }
 }
 
 function normalizeServerConfig(value: unknown): ServerConfig {
