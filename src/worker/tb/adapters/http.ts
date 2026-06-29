@@ -53,6 +53,10 @@ export const httpAdapter: TBAdapter<HttpNode> = {
       headers.set('Content-Type', 'application/json');
     }
     headers.set('Accept', headers.get('Accept') ?? 'application/json');
+    // Many APIs (e.g. GitHub) reject requests without a User-Agent.
+    if (!headers.has('User-Agent')) {
+      headers.set('User-Agent', 'tool-bridge');
+    }
 
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), REMOTE_FETCH_TIMEOUT_MS);

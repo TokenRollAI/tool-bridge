@@ -16,12 +16,11 @@
   // wrangler provisions the DNS record + TLS cert automatically on deploy.
   "routes": [{ "pattern": "tool-bridge.fantacy.live", "custom_domain": true }],
   "vars": {
-    "MCP_SERVERS_JSON": "{\"type\":\"directory\",\"id\":\"root\",\"title\":\"Tool Bridge A\",\"children\":[{\"type\":\"mcp\",\"id\":\"context7\",\"name\":\"Context7\",\"endpoint\":\"https://mcp.context7.com/mcp\",\"description\":\"Public documentation MCP server\"},{\"type\":\"remote\",\"id\":\"server-b\",\"title\":\"Tool Bridge B (federated)\",\"helpUrl\":\"https://tool-bridge-b.fantacy.live/htbp/~help\"}]}",
+    "MCP_SERVERS_JSON": "{\"type\":\"directory\",\"id\":\"root\",\"title\":\"Tool Bridge A\",\"children\":[{\"type\":\"mcp\",\"id\":\"context7\",\"name\":\"Context7\",\"endpoint\":\"https://mcp.context7.com/mcp\",\"description\":\"Public documentation MCP server\"},{\"type\":\"remote\",\"id\":\"server-b\",\"title\":\"Tool Bridge B (federated)\",\"helpUrl\":\"https://tool-bridge-b.fantacy.live/htbp/~help\"},{\"type\":\"http\",\"id\":\"github\",\"title\":\"GitHub API\",\"summary\":\"Public GitHub REST endpoints\",\"endpoints\":[{\"name\":\"get-repo\",\"method\":\"GET\",\"url\":\"https://api.github.com/repos/TokenRollAI/HTBP\",\"description\":\"Fetch the HTBP repo metadata\"},{\"name\":\"list-commits\",\"method\":\"GET\",\"url\":\"https://api.github.com/repos/TokenRollAI/HTBP/commits\",\"description\":\"List recent commits\"}]},{\"type\":\"mount\",\"id\":\"files\",\"title\":\"Files\",\"bucket\":\"TB_FILES\",\"description\":\"R2-backed file tree\"},{\"type\":\"directory\",\"id\":\"team\",\"title\":\"Team namespace\",\"summary\":\"Nested directory demo\",\"children\":[{\"type\":\"directory\",\"id\":\"docs\",\"title\":\"Docs\",\"children\":[{\"type\":\"mcp\",\"id\":\"context7b\",\"name\":\"Context7 (nested)\",\"endpoint\":\"https://mcp.context7.com/mcp\",\"description\":\"Same MCP, nested two levels deep\"}]}]}]}",
     "OAUTH_REQUIRED_AUDIENCE": ""
   },
   // R2 bucket bindings referenced by `mount` nodes (by their `bucket` name).
-  // Uncomment and create the bucket to enable FS/S3-as-TB mounts.
-  // "r2_buckets": [{ "binding": "TB_FILES", "bucket_name": "tool-bridge-files" }]
+  "r2_buckets": [{ "binding": "TB_FILES", "bucket_name": "tool-bridge-files" }],
   //
   // KV namespace for multi-tenancy + runtime-added (dynamic) servers. Its
   // presence enables tenant mode and the writable /api/servers endpoints.
