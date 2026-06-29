@@ -407,6 +407,13 @@ button {
   padding: 2px 6px;
 }
 
+/* Each nesting level indents and draws a black vertical guide line. */
+.tree-children {
+  margin-left: 14px;
+  padding-left: 14px;
+  border-left: 2px solid #1b1f1a;
+}
+
 .tree-row:hover {
   background: #f7f8f3;
 }

@@ -690,7 +690,7 @@ function TreeNodeRow({ node, depth, onCopy, copied, authToken }: TreeNodeRowProp
 
   return (
     <div className="tree-node">
-      <div className="tree-row" style={{ paddingLeft: `${depth * 16}px` }}>
+      <div className="tree-row">
         <button
           className="tree-toggle"
           onClick={() => setExpanded((value) => !value)}
@@ -715,7 +715,7 @@ function TreeNodeRow({ node, depth, onCopy, copied, authToken }: TreeNodeRowProp
         </button>
       </div>
       {help !== null ? (
-        <details className="schema-box" style={{ marginLeft: `${depth * 16 + 28}px` }} open>
+        <details className="schema-box" style={{ marginLeft: '28px' }} open>
           <summary>
             <Braces size={15} />
             {node.helpUrl}
@@ -724,17 +724,17 @@ function TreeNodeRow({ node, depth, onCopy, copied, authToken }: TreeNodeRowProp
         </details>
       ) : null}
       {node.description ? (
-        <p className="tree-desc" style={{ paddingLeft: `${depth * 16 + 28}px` }}>
+        <p className="tree-desc" style={{ paddingLeft: '28px' }}>
           {node.description}
         </p>
       ) : null}
       {node.error ? (
-        <pre className="error-box" style={{ marginLeft: `${depth * 16 + 28}px` }}>
+        <pre className="error-box" style={{ marginLeft: '28px' }}>
           {node.error}
         </pre>
       ) : null}
       {expanded && node.endpoint?.tools ? (
-        <div className="tree-tools" style={{ marginLeft: `${depth * 16 + 28}px` }}>
+        <div className="tree-tools" style={{ marginLeft: '28px' }}>
           {node.endpoint.tools.map((tool) => (
             <details key={tool.name} className="schema-box">
               <summary>
@@ -749,7 +749,7 @@ function TreeNodeRow({ node, depth, onCopy, copied, authToken }: TreeNodeRowProp
         </div>
       ) : null}
       {expanded && node.endpoint && !node.endpoint.tools ? (
-        <details className="schema-box" style={{ marginLeft: `${depth * 16 + 28}px` }} open>
+        <details className="schema-box" style={{ marginLeft: '28px' }} open>
           <summary>
             <Braces size={15} />
             Input schema
@@ -757,11 +757,13 @@ function TreeNodeRow({ node, depth, onCopy, copied, authToken }: TreeNodeRowProp
           <pre>{pretty(node.endpoint.inputSchema ?? {})}</pre>
         </details>
       ) : null}
-      {expanded
-        ? node.children.map((child) => (
+      {expanded && node.children.length > 0 ? (
+        <div className="tree-children">
+          {node.children.map((child) => (
             <TreeNodeRow key={child.path} node={child} depth={depth + 1} onCopy={onCopy} copied={copied} authToken={authToken} />
-          ))
-        : null}
+          ))}
+        </div>
+      ) : null}
     </div>
   );
 }
