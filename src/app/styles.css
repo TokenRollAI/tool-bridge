@@ -497,6 +497,26 @@ button {
   font-size: 11px;
 }
 
+/* Prominent black action buttons on the left of each tree row. */
+.tree-action {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid #1b1f1a;
+  border-radius: 6px;
+  background: #1b1f1a;
+  color: #f7f8f3;
+  cursor: pointer;
+  padding: 2px 8px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.tree-action:hover {
+  background: #000;
+}
+
 .tree-desc {
   margin: 0;
   color: #697066;
