@@ -417,7 +417,7 @@ export function App() {
             {treeQuery.isLoading ? <p className="empty-state">Crawling…</p> : null}
             {treeQuery.data ? (
               <div className="tree-view">
-                <TreeNodeRow node={treeQuery.data.tree} depth={0} onCopy={copy} copied={copied} />
+                <TreeNodeRow node={treeQuery.data.tree} depth={0} onCopy={copy} copied={copied} authToken={authToken} />
               </div>
             ) : null}
           </section>
@@ -607,12 +607,36 @@ interface TreeNodeRowProps {
   depth: number;
   onCopy: (value: string) => void;
   copied: string;
+  authToken: string;
 }
 
-function TreeNodeRow({ node, depth, onCopy, copied }: TreeNodeRowProps) {
+function TreeNodeRow({ node, depth, onCopy, copied, authToken }: TreeNodeRowProps) {
   const expandable = node.children.length > 0 || !!node.endpoint;
   const [expanded, setExpanded] = useState(depth < 2);
+  const [help, setHelp] = useState<string | null>(null);
   const kindLabel = node.kind === 'remote' ? 'remote ⇄' : node.kind;
+
+  // Fetch this node's own ~help (every level — root / directory / leaf — has one).
+  async function loadHelp() {
+    if (help !== null) {
+      setHelp(null);
+      return;
+    }
+    try {
+      const headers = new Headers({ Accept: 'application/json' });
+      if (authToken) {
+        headers.set('Authorization', `Bearer ${authToken}`);
+      }
+      const response = await fetch(node.helpUrl, { headers });
+      const raw = await response.text();
+      const body = response.headers.get('Content-Type')?.includes('application/json')
+        ? pretty(JSON.parse(raw))
+        : raw;
+      setHelp(response.ok ? body : `HTTP ${response.status}\n\n${body}`);
+    } catch (error) {
+      setHelp(error instanceof Error ? error.message : String(error));
+    }
+  }
 
   return (
     <div className="tree-node">
@@ -630,11 +654,24 @@ function TreeNodeRow({ node, depth, onCopy, copied }: TreeNodeRowProps) {
         {node.endpoint ? <span className="tree-method">{node.endpoint.method}</span> : null}
         {node.endpoint?.tools ? <span className="tree-flag">{node.endpoint.tools.length} tools</span> : null}
         {node.truncated ? <span className="tree-flag">truncated</span> : null}
+        <button className="tree-copy" onClick={() => void loadHelp()} title="View this node's ~help">
+          <Braces size={13} />
+          ~help
+        </button>
         <button className="tree-copy" onClick={() => onCopy(node.helpUrl)} title="Copy ~help URL">
           <Copy size={13} />
           {copied === node.helpUrl ? 'Copied' : ''}
         </button>
       </div>
+      {help !== null ? (
+        <details className="schema-box" style={{ marginLeft: `${depth * 16 + 28}px` }} open>
+          <summary>
+            <Braces size={15} />
+            {node.path}/~help
+          </summary>
+          <pre>{help}</pre>
+        </details>
+      ) : null}
       {node.description ? (
         <p className="tree-desc" style={{ paddingLeft: `${depth * 16 + 28}px` }}>
           {node.description}
@@ -671,7 +708,7 @@ function TreeNodeRow({ node, depth, onCopy, copied }: TreeNodeRowProps) {
       ) : null}
       {expanded
         ? node.children.map((child) => (
-            <TreeNodeRow key={child.path} node={child} depth={depth + 1} onCopy={onCopy} copied={copied} />
+            <TreeNodeRow key={child.path} node={child} depth={depth + 1} onCopy={onCopy} copied={copied} authToken={authToken} />
           ))
         : null}
     </div>

@@ -841,7 +841,12 @@ async function handleRequest(request: Request, env: AppEnv): Promise<Response> {
       return await routeMcpBridge(request, env);
     }
     if (url.pathname === '/htbp' || url.pathname.startsWith('/htbp/')) {
-      return await routeHtbp(request, env);
+      // HTBP control-plane responses are cross-origin fetchable: federation and
+      // browser agents fetch another TB server's ~help from a different origin.
+      const response = await routeHtbp(request, env);
+      const withCors = new Response(response.body, response);
+      withCors.headers.set('Access-Control-Allow-Origin', '*');
+      return withCors;
     }
     return env.ASSETS.fetch(request);
   } catch (error) {
