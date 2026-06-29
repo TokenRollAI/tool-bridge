@@ -703,13 +703,9 @@ function TreeNodeRow({ node, depth, onCopy, copied, authToken }: TreeNodeRowProp
           <Braces size={12} />
           ~help
         </button>
-        <button
-          className="tree-action"
-          onClick={() => onCopy(node.helpUrl)}
-          title="Copy ~help URL"
-        >
-          <Copy size={12} />
-          {copied === node.helpUrl ? 'Copied' : 'Copy'}
+        <button className="tree-copy" onClick={() => onCopy(node.helpUrl)} title="Copy ~help URL">
+          <Copy size={13} />
+          {copied === node.helpUrl ? 'Copied' : ''}
         </button>
         <span className={`tree-kind tree-kind-${node.kind}`}>{kindLabel}</span>
         <span className="tree-title">{node.title || node.path}</span>
