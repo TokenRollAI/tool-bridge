@@ -20,8 +20,12 @@ interface ApiKeyRecord {
   createdAt?: string;
 }
 
+// Tenant mode is opt-in via TENANT_MODE=true (not merely the presence of the
+// TENANTS KV binding, which is also used for non-tenant features like dynamic
+// servers). This keeps a KV-backed deployment usable without forcing every
+// request to carry a Secret Key.
 export function tenantModeEnabled(env: AppEnv): boolean {
-  return !!env.TENANTS;
+  return !!env.TENANTS && env.TENANT_MODE === 'true';
 }
 
 // Hex-encoded sha256 of the value. Used as the KV key for an API key so the raw

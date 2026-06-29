@@ -40,7 +40,9 @@ function flatten(node: CrawlNode, out: CrawlNode[] = []): CrawlNode[] {
 describe('tenant resolution', () => {
   it('reports tenant mode from the TENANTS binding', () => {
     expect(tenantModeEnabled({} as AppEnv)).toBe(false);
-    expect(tenantModeEnabled({ TENANTS: fakeKV({}) } as unknown as AppEnv)).toBe(true);
+    // KV presence alone is not enough; TENANT_MODE must be explicitly enabled.
+    expect(tenantModeEnabled({ TENANTS: fakeKV({}) } as unknown as AppEnv)).toBe(false);
+    expect(tenantModeEnabled({ TENANTS: fakeKV({}), TENANT_MODE: 'true' } as unknown as AppEnv)).toBe(true);
   });
 
   it('resolves a Secret Key to its tenant tree by hash (raw key never stored)', async () => {

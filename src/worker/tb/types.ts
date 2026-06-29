@@ -16,6 +16,7 @@ export type AppEnv = Env & {
   OAUTH_JWKS_URI?: string;
   ALLOW_INSECURE_MCP_HTTP?: string;
   HTBP_REMOTE_ALLOWLIST?: string;
+  TENANT_MODE?: string;
 };
 
 // One entry in a node's "next layer resource list".

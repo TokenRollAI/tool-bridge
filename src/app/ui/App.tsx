@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { useMutation, useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Braces,
   ChevronDown,
@@ -12,6 +12,7 @@ import {
   Search,
   Server,
   Shield,
+  Trash2,
 } from 'lucide-react';
 
 type AuthMode = 'none' | 'bearer' | 'oauth';
@@ -28,6 +29,7 @@ interface ServerSummary {
   endpoint: string;
   description?: string;
   allowedTools?: string[];
+  source?: 'static' | 'dynamic';
 }
 
 interface McpTool {
@@ -39,6 +41,7 @@ interface McpTool {
 
 interface ServersResponse {
   servers: ServerSummary[];
+  dynamicEnabled?: boolean;
 }
 
 interface ToolsResponse {
@@ -238,9 +241,11 @@ export function App() {
   const [selectedTool, setSelectedTool] = useState<string>('');
   const [argumentsText, setArgumentsText] = useState('{}');
   const [adhoc, setAdhoc] = useState<AdhocTarget>(() => readAdhocTarget());
-  const [mode, setMode] = useState<'configured' | 'adhoc' | 'tree'>('configured');
+  const [mode, setMode] = useState<'tree' | 'servers'>('tree');
   const [copied, setCopied] = useState('');
   const [docView, setDocView] = useState<string | null>(null);
+
+  const queryClient = useQueryClient();
 
   const authQuery = useQuery({
     queryKey: ['auth-config'],
@@ -261,9 +266,11 @@ export function App() {
   const configuredToolsQuery = useQuery({
     queryKey: ['tools', selectedServerId, authToken],
     queryFn: () => api<ToolsResponse>(`/api/servers/${encodeURIComponent(selectedServerId)}/tools`, authToken),
-    enabled: mode === 'configured' && selectedServerId.length > 0,
+    enabled: mode === 'servers' && selectedServerId.length > 0,
   });
 
+  // Discover an arbitrary endpoint without saving it: shows its tools as a
+  // read-only preview. Saving it (Save to servers) makes it selectable by id.
   const adhocToolsMutation = useMutation({
     mutationFn: () =>
       api<ToolsResponse>('/api/bridge/tools', authToken, {
@@ -278,6 +285,30 @@ export function App() {
       }),
   });
 
+  const saveServerMutation = useMutation({
+    mutationFn: () =>
+      api<{ server: ServerSummary }>('/api/servers', authToken, {
+        method: 'POST',
+        body: JSON.stringify({ name: adhoc.name, endpoint: adhoc.endpoint }),
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['servers'] });
+    },
+  });
+
+  const deleteServerMutation = useMutation({
+    mutationFn: (id: string) =>
+      api<unknown>(`/api/servers/${encodeURIComponent(id)}`, authToken, { method: 'DELETE' }),
+    onSuccess: (_data, id) => {
+      if (id === selectedServerId) {
+        setSelectedServerId('');
+        setSelectedTool('');
+        setDocView(null);
+      }
+      void queryClient.invalidateQueries({ queryKey: ['servers'] });
+    },
+  });
+
   const treeQuery = useQuery({
     queryKey: ['tree', authToken],
     queryFn: () => api<TreeResponse>('/api/tree', authToken),
@@ -290,22 +321,8 @@ export function App() {
       if (!selectedTool) {
         throw new Error('Select a tool first.');
       }
-      if (mode === 'adhoc') {
-        return api<CallResponse>('/api/bridge/call', authToken, {
-          method: 'POST',
-          body: JSON.stringify({
-            server: {
-              name: adhoc.name,
-              endpoint: adhoc.endpoint,
-              bearerToken: adhoc.bearerToken || undefined,
-            },
-            tool: selectedTool,
-            arguments: args,
-          }),
-        });
-      }
       if (!selectedServerId) {
-        throw new Error('Select a configured server first.');
+        throw new Error('Select a saved server first.');
       }
       return api<CallResponse>(
         `/api/servers/${encodeURIComponent(selectedServerId)}/tools/${encodeURIComponent(selectedTool)}/call`,
@@ -318,8 +335,10 @@ export function App() {
     },
   });
 
-  const tools = mode === 'adhoc' ? adhocToolsMutation.data?.tools : configuredToolsQuery.data?.tools;
-  const activeServer = mode === 'adhoc' ? adhocToolsMutation.data?.server : selectedServer;
+  // Tools come from the selected saved server; a freshly discovered (unsaved)
+  // server shows its tools as a read-only preview from the discover mutation.
+  const tools = selectedServerId ? configuredToolsQuery.data?.tools : adhocToolsMutation.data?.tools;
+  const activeServer = selectedServerId ? selectedServer : adhocToolsMutation.data?.server;
   const authMode = authQuery.data?.mode ?? 'none';
 
   function updateAuthToken(value: string) {
@@ -387,17 +406,13 @@ export function App() {
       </header>
 
       <section className="mode-tabs" aria-label="Bridge mode">
-        <button className={mode === 'configured' ? 'active' : ''} onClick={() => setMode('configured')}>
-          <Server size={16} />
-          Configured
-        </button>
-        <button className={mode === 'adhoc' ? 'active' : ''} onClick={() => setMode('adhoc')}>
-          <Search size={16} />
-          Ad-hoc
-        </button>
         <button className={mode === 'tree' ? 'active' : ''} onClick={() => setMode('tree')}>
           <Network size={16} />
           Tree
+        </button>
+        <button className={mode === 'servers' ? 'active' : ''} onClick={() => setMode('servers')}>
+          <Server size={16} />
+          Servers
         </button>
       </section>
 
@@ -432,66 +447,91 @@ export function App() {
             </button>
           </div>
 
-          {mode === 'configured' ? (
-            <div className="server-list">
-              {(serversQuery.data?.servers ?? []).map((server) => (
-                <button
-                  key={server.id}
-                  className={server.id === selectedServerId ? 'server-row selected' : 'server-row'}
-                  onClick={() => {
-                    setSelectedServerId(server.id);
-                    setSelectedTool('');
-                    setDocView(null);
-                  }}
-                >
-                  <span>{server.name}</span>
-                  <small>{server.endpoint}</small>
-                </button>
-              ))}
-              {serversQuery.isError ? <pre className="error-box">{String(serversQuery.error.message)}</pre> : null}
-              {serversQuery.data?.servers.length === 0 ? <p className="empty-state">No configured servers</p> : null}
-            </div>
-          ) : (
-            <div className="adhoc-form">
-              <label>
-                Name
-                <input
-                  value={adhoc.name}
-                  onChange={(event) => updateAdhoc({ ...adhoc, name: event.target.value })}
-                />
-              </label>
-              <label>
-                Endpoint
-                <input
-                  value={adhoc.endpoint}
-                  onChange={(event) => updateAdhoc({ ...adhoc, endpoint: event.target.value })}
-                  placeholder="https://example.com/mcp"
-                />
-              </label>
-              <label>
-                Upstream bearer
-                <input
-                  type="password"
-                  value={adhoc.bearerToken}
-                  onChange={(event) => updateAdhoc({ ...adhoc, bearerToken: event.target.value })}
-                />
-              </label>
+          <div className="adhoc-form">
+            <label>
+              Name
+              <input
+                value={adhoc.name}
+                onChange={(event) => updateAdhoc({ ...adhoc, name: event.target.value })}
+              />
+            </label>
+            <label>
+              Endpoint
+              <input
+                value={adhoc.endpoint}
+                onChange={(event) => updateAdhoc({ ...adhoc, endpoint: event.target.value })}
+                placeholder="https://example.com/mcp"
+              />
+            </label>
+            <button
+              className="primary-button"
+              disabled={!adhoc.endpoint || adhocToolsMutation.isPending}
+              onClick={() => {
+                setSelectedServerId('');
+                setSelectedTool('');
+                setDocView(null);
+                saveServerMutation.reset();
+                adhocToolsMutation.mutate();
+              }}
+            >
+              <Search size={16} />
+              Discover
+            </button>
+            {adhocToolsMutation.isError ? (
+              <pre className="error-box">{String(adhocToolsMutation.error.message)}</pre>
+            ) : null}
+            {adhocToolsMutation.isSuccess ? (
               <button
                 className="primary-button"
-                disabled={!adhoc.endpoint || adhocToolsMutation.isPending}
+                disabled={saveServerMutation.isPending}
+                onClick={() => saveServerMutation.mutate()}
+              >
+                <Server size={16} />
+                Save to servers
+              </button>
+            ) : null}
+            {saveServerMutation.isError ? (
+              <pre className="error-box">{String(saveServerMutation.error.message)}</pre>
+            ) : null}
+            {saveServerMutation.isSuccess ? (
+              <p className="empty-state">Saved — may take a few seconds to appear in the list (KV).</p>
+            ) : null}
+          </div>
+
+          <div className="server-list">
+            {(serversQuery.data?.servers ?? []).map((server) => (
+              <button
+                key={server.id}
+                className={server.id === selectedServerId ? 'server-row selected' : 'server-row'}
                 onClick={() => {
+                  setSelectedServerId(server.id);
                   setSelectedTool('');
-                  adhocToolsMutation.mutate();
+                  setDocView(null);
                 }}
               >
-                <Search size={16} />
-                Discover
+                <span>{server.name}</span>
+                <small>{server.endpoint}</small>
+                {server.source === 'dynamic' ? (
+                  <span
+                    className="icon-button"
+                    role="button"
+                    title="Delete server"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      deleteServerMutation.mutate(server.id);
+                    }}
+                  >
+                    <Trash2 size={14} />
+                  </span>
+                ) : null}
               </button>
-              {adhocToolsMutation.isError ? (
-                <pre className="error-box">{String(adhocToolsMutation.error.message)}</pre>
-              ) : null}
-            </div>
-          )}
+            ))}
+            {serversQuery.isError ? <pre className="error-box">{String(serversQuery.error.message)}</pre> : null}
+            {deleteServerMutation.isError ? (
+              <pre className="error-box">{String(deleteServerMutation.error.message)}</pre>
+            ) : null}
+            {serversQuery.data?.servers.length === 0 ? <p className="empty-state">No configured servers</p> : null}
+          </div>
         </aside>
 
         <section className="panel tools-panel">
@@ -500,7 +540,7 @@ export function App() {
               <h2>Tools</h2>
               <p>{activeServer?.endpoint ?? 'Select or discover a server'}</p>
             </div>
-            {mode === 'configured' && selectedServerId ? (
+            {selectedServerId ? (
               <button className="icon-button" onClick={() => void configuredToolsQuery.refetch()} title="Refresh tools">
                 <RefreshCw size={16} />
               </button>
@@ -526,17 +566,18 @@ export function App() {
           {configuredToolsQuery.isError ? (
             <pre className="error-box">{String(configuredToolsQuery.error.message)}</pre>
           ) : null}
-          {mode === 'configured' && configuredToolsQuery.isFetching ? (
+          {selectedServerId && configuredToolsQuery.isFetching ? (
             <p className="empty-state">Loading tools…</p>
           ) : null}
-          {mode === 'configured' && !selectedServerId ? (
-            <p className="empty-state">Select a server</p>
+          {adhocToolsMutation.isPending ? <p className="empty-state">Discovering…</p> : null}
+          {!selectedServerId && !adhocToolsMutation.data && !adhocToolsMutation.isPending ? (
+            <p className="empty-state">Select or discover a server</p>
           ) : null}
-          {tools?.length === 0 && !configuredToolsQuery.isFetching ? (
+          {tools?.length === 0 && !configuredToolsQuery.isFetching && !adhocToolsMutation.isPending ? (
             <p className="empty-state">No tools returned</p>
           ) : null}
 
-          {mode === 'configured' && selectedServerId ? (
+          {selectedServerId ? (
             <>
               <div className="link-row">
                 <button onClick={() => void viewDoc()}>

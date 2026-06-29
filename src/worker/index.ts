@@ -3,6 +3,12 @@ import { clampCrawlOptions, crawlTree } from './tb/crawl';
 import { parseTree } from './tb/registry';
 import { NotFoundError, resolveCall, resolveHelp } from './tb/resolve';
 import { resolveTenant, tenantModeEnabled } from './tb/tenant';
+import {
+  deleteDynamicServer,
+  dynamicServersEnabled,
+  listDynamicServers,
+  putDynamicServer,
+} from './tb/dynamic-servers';
 import type { DirectoryNode } from './tb/types';
 
 const MCP_PROTOCOL_VERSION = '2025-11-25';
@@ -298,12 +304,26 @@ function normalizeAdhocServer(value: AdhocServerInput): ServerConfig {
   };
 }
 
-function resolveServer(env: AppEnv, serverId: string): ResolvedServer {
-  const server = parseConfiguredServers(env).find((item) => item.id === serverId || item.name === serverId);
-  if (!server) {
-    throw new Error(`Unknown MCP server '${serverId}'.`);
+// Stable, URL-safe id for a dynamically saved server.
+function slugify(value: string): string {
+  const slug = value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  return slug || 'server';
+}
+
+async function resolveServer(env: AppEnv, serverId: string): Promise<ResolvedServer> {
+  const configured = parseConfiguredServers(env).find((item) => item.id === serverId || item.name === serverId);
+  if (configured) {
+    return materializeServer(env, configured);
   }
-  return materializeServer(env, server);
+  // Fall back to a runtime-added (KV) server.
+  const dynamic = (await listDynamicServers(env)).find((item) => item.id === serverId || item.name === serverId);
+  if (dynamic) {
+    return materializeServer(env, { id: dynamic.id, name: dynamic.name, endpoint: dynamic.endpoint, description: dynamic.description });
+  }
+  throw new Error(`Unknown MCP server '${serverId}'.`);
 }
 
 function materializeServer(env: AppEnv, server: ServerConfig): ResolvedServer {
@@ -687,10 +707,44 @@ async function routeApi(request: Request, env: AppEnv): Promise<Response> {
   }
 
   if (path === '/api/servers' && request.method === 'GET') {
-    return json({
-      auth: authInfo,
-      servers: parseConfiguredServers(env).map(({ headers: _headers, ...server }) => server),
+    const staticServers = parseConfiguredServers(env).map(({ headers: _headers, ...server }) => ({
+      ...server,
+      source: 'static' as const,
+    }));
+    const dynamic = (await listDynamicServers(env)).map((server) => ({ ...server, source: 'dynamic' as const }));
+    // Dynamic entries with an id that collides with a static one are dropped.
+    const staticIds = new Set(staticServers.map((s) => s.id));
+    const merged = [...staticServers, ...dynamic.filter((s) => !staticIds.has(s.id))];
+    return json({ auth: authInfo, servers: merged, dynamicEnabled: dynamicServersEnabled(env) });
+  }
+
+  if (path === '/api/servers' && request.method === 'POST') {
+    if (!dynamicServersEnabled(env)) {
+      return errorResponse(501, 'not_supported', 'Saving servers requires the TENANTS KV binding.');
+    }
+    const body = await readJsonBody<{ name?: string; endpoint?: string; description?: string }>(request);
+    if (!body.endpoint) {
+      return errorResponse(400, 'bad_request', 'endpoint is required.');
+    }
+    // Validate (https enforcement etc.) and derive a stable id from name/endpoint.
+    const resolved = materializeServer(env, normalizeAdhocServer({ name: body.name, endpoint: body.endpoint }));
+    const id = slugify(body.name || resolved.id);
+    await putDynamicServer(env, {
+      id,
+      name: body.name || id,
+      endpoint: resolved.endpoint,
+      description: body.description,
     });
+    return json({ ok: true, id });
+  }
+
+  const deleteMatch = /^\/api\/servers\/([^/]+)$/.exec(path);
+  if (deleteMatch && request.method === 'DELETE') {
+    if (!dynamicServersEnabled(env)) {
+      return errorResponse(501, 'not_supported', 'Deleting servers requires the TENANTS KV binding.');
+    }
+    await deleteDynamicServer(env, decodeURIComponent(deleteMatch[1] ?? ''));
+    return json({ ok: true });
   }
 
   if (path === '/api/bridge/tools' && request.method === 'POST') {
@@ -726,7 +780,7 @@ async function routeApi(request: Request, env: AppEnv): Promise<Response> {
 
   const serverMatch = /^\/api\/servers\/([^/]+)(\/.*)?$/.exec(path);
   if (serverMatch) {
-    const server = resolveServer(env, decodeURIComponent(serverMatch[1] ?? ''));
+    const server = await resolveServer(env, decodeURIComponent(serverMatch[1] ?? ''));
     const suffix = serverMatch[2] ?? '';
     return routeConfiguredServer(request, server, suffix, `/api/servers/${encodeURIComponent(server.id)}`, authInfo.mode);
   }
@@ -783,7 +837,7 @@ async function routeMcpBridge(request: Request, env: AppEnv): Promise<Response> 
   if (!match) {
     return errorResponse(404, 'not_found', 'MCP bridge route not found.');
   }
-  const server = resolveServer(env, decodeURIComponent(match[1] ?? ''));
+  const server = await resolveServer(env, decodeURIComponent(match[1] ?? ''));
   return routeConfiguredServer(request, server, match[2] ?? '', `/mcp/${encodeURIComponent(server.id)}`, authInfo.mode);
 }
 
