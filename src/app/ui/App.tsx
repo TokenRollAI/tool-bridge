@@ -439,7 +439,7 @@ export function App() {
         </section>
       ) : (
       <section className="workspace">
-        <div className="server-column">
+        <div className="workspace-row select-row">
           <section className="panel discover-panel">
             <div className="panel-heading">
               <h2>Discover</h2>
@@ -541,6 +541,7 @@ export function App() {
           </aside>
         </div>
 
+        <div className="workspace-row use-row">
         <section className="panel tools-panel">
           <div className="panel-heading">
             <div>
@@ -644,6 +645,7 @@ export function App() {
             </pre>
           ) : null}
         </section>
+        </div>
       </section>
       )}
     </main>

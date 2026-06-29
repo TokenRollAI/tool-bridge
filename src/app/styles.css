@@ -133,17 +133,25 @@ button {
 }
 
 .workspace {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  align-items: stretch;
+}
+
+/* Row 1: pick a server (Discover + Servers). Row 2: use it (Tools + Call). */
+.workspace-row {
   display: grid;
-  grid-template-columns: 280px minmax(320px, 1fr) minmax(360px, 520px);
   gap: 16px;
   align-items: start;
 }
 
-/* First column stacks the Discover form above the Servers list. */
-.server-column {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
+.select-row {
+  grid-template-columns: 320px minmax(280px, 1fr);
+}
+
+.use-row {
+  grid-template-columns: minmax(320px, 1fr) minmax(360px, 520px);
 }
 
 .panel {
@@ -345,7 +353,7 @@ button {
 }
 
 @media (max-width: 1080px) {
-  .workspace {
+  .workspace-row {
     grid-template-columns: 1fr;
   }
 
