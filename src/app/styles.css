@@ -434,6 +434,11 @@ button {
   color: #355089;
 }
 
+.tree-kind-mount {
+  background: #efe7f6;
+  color: #6a3589;
+}
+
 .tree-title {
   overflow: hidden;
   flex: 1;

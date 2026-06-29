@@ -15,5 +15,8 @@
   "vars": {
     "MCP_SERVERS_JSON": "{\"context7\":{\"name\":\"Context7\",\"endpoint\":\"https://mcp.context7.com/mcp\",\"description\":\"Public documentation MCP server\"}}",
     "OAUTH_REQUIRED_AUDIENCE": ""
-  }
+  },
+  // R2 bucket bindings referenced by `mount` nodes (by their `bucket` name).
+  // Uncomment and create the bucket to enable FS/S3-as-TB mounts.
+  // "r2_buckets": [{ "binding": "TB_FILES", "bucket_name": "tool-bridge-files" }]
 }

@@ -75,7 +75,7 @@ interface EndpointSpec {
 }
 
 interface CrawlNode {
-  kind: 'directory' | 'mcp' | 'http' | 'remote';
+  kind: 'directory' | 'mcp' | 'http' | 'remote' | 'mount';
   path: string;
   title?: string;
   description?: string;

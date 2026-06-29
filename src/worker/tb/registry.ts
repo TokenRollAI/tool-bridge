@@ -11,6 +11,7 @@ import {
   HttpEndpointConfig,
   HttpNode,
   McpNode,
+  MountNode,
   RemoteNode,
   ToolOverride,
   TreeNode,
@@ -74,6 +75,8 @@ function normalizeNode(value: unknown, idPath: string): TreeNode {
       return normalizeHttpNode(value, idPath);
     case 'remote':
       return normalizeRemoteNode(value, idPath);
+    case 'mount':
+      return normalizeMountNode(value, idPath);
     default:
       throw new Error(`Unknown tree node type '${type}' at '${idPath}'.`);
   }
@@ -209,6 +212,26 @@ function normalizeRemoteNode(value: Record<string, unknown>, idPath: string): Re
     summary: stringField(value, 'summary') || stringField(value, 'description'),
     helpUrl,
     headers: recordOfStrings(value.headers),
+  };
+}
+
+function normalizeMountNode(value: Record<string, unknown>, idPath: string): MountNode {
+  const id = stringField(value, 'id') || stringField(value, 'name');
+  if (!id) {
+    throw new Error(`Mount node at '${idPath}' is missing id/name.`);
+  }
+  const bucket = stringField(value, 'bucket') || stringField(value, 'binding');
+  if (!bucket) {
+    throw new Error(`Mount node '${id}' is missing bucket binding name.`);
+  }
+  return {
+    kind: 'mount',
+    id,
+    title: stringField(value, 'title') || stringField(value, 'name') || id,
+    summary: stringField(value, 'summary') || stringField(value, 'description'),
+    bucket,
+    prefix: stringField(value, 'prefix'),
+    description: stringField(value, 'description'),
   };
 }
 

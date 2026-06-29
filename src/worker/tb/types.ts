@@ -6,7 +6,7 @@
 // schema (for end-path leaves). An agent walks the tree by following the
 // relative `resources[].path` links until it reaches an `endpoint`.
 
-export type NodeKind = 'directory' | 'mcp' | 'http' | 'remote';
+export type NodeKind = 'directory' | 'mcp' | 'http' | 'remote' | 'mount';
 
 export type AuthMode = 'none' | 'bearer' | 'oauth';
 
@@ -120,7 +120,43 @@ export interface RemoteNode extends BaseNode {
   headers?: Record<string, string>;
 }
 
-export type TreeNode = DirectoryNode | McpNode | HttpNode | RemoteNode;
+// Mount node: maps an object-storage prefix tree onto TB nodes. Sub-prefixes
+// become directory-like nodes; objects become read-only leaves. Children are
+// listed lazily from storage rather than declared in config.
+export interface MountNode extends BaseNode {
+  kind: 'mount';
+  // Name of the R2 bucket binding on the Worker env (e.g. "TB_FILES").
+  bucket: string;
+  // Optional prefix within the bucket that this mount is rooted at.
+  prefix?: string;
+  description?: string;
+}
+
+export type TreeNode = DirectoryNode | McpNode | HttpNode | RemoteNode | MountNode;
+
+// Minimal object-storage provider used by the mount adapter. R2's binding is
+// one implementation; tests provide an in-memory fake. Keeps the adapter
+// independent of the concrete storage SDK.
+export interface StorageEntry {
+  name: string; // Last path segment (folder or file name).
+  key: string; // Full storage key.
+  isDir: boolean;
+}
+
+export interface StorageObject {
+  key: string;
+  body: string;
+  contentType?: string;
+  size?: number;
+}
+
+export interface StorageProvider {
+  // List immediate children (one level) under `prefix`, treating "/" as the
+  // directory delimiter.
+  list(prefix: string): Promise<StorageEntry[]>;
+  // Fetch a single object by key, or null if it does not exist.
+  get(key: string): Promise<StorageObject | null>;
+}
 
 // Context handed to an adapter when describing or calling a node.
 // `basePath` is for self-inspection only; emitted resource paths stay relative.

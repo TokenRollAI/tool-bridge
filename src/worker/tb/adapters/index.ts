@@ -4,6 +4,7 @@ import { NodeKind, TBAdapter, TreeNode } from '../types';
 import { directoryAdapter } from './directory';
 import { httpAdapter } from './http';
 import { mcpAdapter } from './mcp';
+import { mountAdapter } from './mount';
 import { remoteAdapter } from './remote';
 
 const ADAPTERS: Record<NodeKind, TBAdapter<TreeNode>> = {
@@ -11,6 +12,7 @@ const ADAPTERS: Record<NodeKind, TBAdapter<TreeNode>> = {
   mcp: mcpAdapter as TBAdapter<TreeNode>,
   http: httpAdapter as TBAdapter<TreeNode>,
   remote: remoteAdapter as TBAdapter<TreeNode>,
+  mount: mountAdapter as TBAdapter<TreeNode>,
 };
 
 export function adapterFor(node: TreeNode): TBAdapter<TreeNode> {

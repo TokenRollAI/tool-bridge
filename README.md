@@ -43,6 +43,20 @@ POST /htbp/docs/context7                  # 调用：body {"tool":"<name>","argu
 - `mcp`：MCP Streamable HTTP leaf（整体叶子，工具内嵌）。
 - `http`：Custom HTTP handler，声明 `endpoints[]`（method/url/inputSchema）。
 - `remote`：联邦到另一个 TB 实例（`helpUrl`），由 crawler 跟进其 JSON `~help`。
+- `mount`：把对象存储（Cloudflare R2 bucket）的前缀树挂成 TB 子树。前缀=目录、对象=只读叶子，按层
+  懒加载（访问某层 `~help` 时才 list 该层）。
+
+### Mount（FS / S3 as TB）
+
+`mount` 节点把一个 R2 bucket（或其下某个 `prefix`）映射成 TB 子树：每个文件夹是 directory，每个文件是
+只读 end-path 叶子，`GET` 调用返回文件内容。
+
+```jsonc
+{ "type": "mount", "id": "files", "title": "Files", "bucket": "TB_FILES", "prefix": "docs" }
+```
+
+`bucket` 是 Worker 上的 R2 binding 名称（在 `wrangler.jsonc` 的 `r2_buckets` 里配置）。存储后端通过
+`StorageProvider` 接口接入，目前实现了 R2；S3 兼容 API 等可作为后续 provider 接入而不改 adapter。
 
 ### Tools Management（工具虚拟化）
 
