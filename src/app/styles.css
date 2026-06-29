@@ -472,3 +472,10 @@ button {
   font-size: 12px;
 }
 
+.tree-tools {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 6px;
+}
+

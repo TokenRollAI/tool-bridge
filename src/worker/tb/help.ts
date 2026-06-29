@@ -19,12 +19,28 @@ export function buildTextHelp(payload: HelpPayload, resourcePath: string, auth: 
   lines.push('skill ./~skill', `auth ${auth}`, '');
 
   if (payload.endpoint) {
-    // End-path leaf: emit a single callable command at this resource.
-    lines.push(`cmd call ${payload.endpoint.method} ${resourcePath}`);
-    lines.push('  body application/json {"arguments":object?}');
-    lines.push(`  auth ${auth}`);
-    lines.push('  effect external');
-    lines.push('  returns 200 application/json');
+    const { method, tools } = payload.endpoint;
+    if (tools && tools.length > 0) {
+      // MCP whole-leaf: one cmd per tool, all POSTing to this same resource
+      // with a body that selects the tool by name.
+      for (const tool of tools) {
+        lines.push(`cmd ${tool.name} ${method} ${resourcePath}`);
+        lines.push(`  body application/json {"tool":"${tool.name}","arguments":object?}`);
+        lines.push(`  auth ${auth}`);
+        lines.push('  effect external');
+        lines.push('  returns 200 application/json');
+        if (tool.description) {
+          lines.push(`  note ${oneLine(tool.description)}`);
+        }
+      }
+    } else {
+      // Single-shot end-path (e.g. an HTTP endpoint).
+      lines.push(`cmd call ${method} ${resourcePath}`);
+      lines.push('  body application/json {"arguments":object?}');
+      lines.push(`  auth ${auth}`);
+      lines.push('  effect external');
+      lines.push('  returns 200 application/json');
+    }
   }
 
   for (const resource of payload.resources ?? []) {

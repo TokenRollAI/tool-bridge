@@ -12,6 +12,7 @@ import {
   HttpNode,
   McpNode,
   RemoteNode,
+  ToolOverride,
   TreeNode,
 } from './types';
 import { arrayOfStrings, isRecord, recordOfStrings, stringField } from './util';
@@ -118,7 +119,27 @@ function normalizeMcpNode(value: unknown): McpNode {
     description: stringField(value, 'description'),
     headers: recordOfStrings(value.headers),
     allowedTools: arrayOfStrings(value.allowedTools) ?? arrayOfStrings(value.allowed_tools),
+    namespace: stringField(value, 'namespace'),
+    toolOverrides: parseToolOverrides(value.toolOverrides ?? value.tool_overrides),
   };
+}
+
+function parseToolOverrides(value: unknown): Record<string, ToolOverride> | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+  const result: Record<string, ToolOverride> = {};
+  for (const [toolName, raw] of Object.entries(value)) {
+    if (!isRecord(raw)) {
+      continue;
+    }
+    result[toolName] = {
+      hide: raw.hide === true,
+      rename: stringField(raw, 'rename'),
+      description: stringField(raw, 'description'),
+    };
+  }
+  return Object.keys(result).length > 0 ? result : undefined;
 }
 
 function normalizeHttpNode(value: Record<string, unknown>, idPath: string): HttpNode {

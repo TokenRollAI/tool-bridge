@@ -29,12 +29,25 @@ export interface ResourceRef {
   description?: string;
 }
 
+// One callable tool exposed by an MCP end-path leaf.
+export interface ToolSpec {
+  name: string;
+  description?: string;
+  inputSchema?: unknown;
+  outputSchema?: unknown;
+}
+
 // End-path description: how to actually call the leaf resource.
+// For an MCP leaf the whole server is one end-path; `tools` lists the callable
+// tools and a call selects one via the request body's `tool` field. For a
+// single-shot HTTP endpoint, `tools` is absent and `inputSchema` describes the
+// body directly.
 export interface EndpointSpec {
   method: string;
   inputSchema?: unknown;
   outputSchema?: unknown;
   example?: unknown;
+  tools?: ToolSpec[];
 }
 
 // The JSON body returned by `GET {path}/~help`.
@@ -64,12 +77,25 @@ export interface DirectoryNode extends BaseNode {
   children: TreeNode[];
 }
 
+// Per-tool virtualization override (Tools Management). Keyed by the upstream
+// tool name; controls how (and whether) a tool is exposed.
+export interface ToolOverride {
+  hide?: boolean; // Omit from the exposed tools and reject calls.
+  rename?: string; // Exposed name (before the namespace prefix is applied).
+  description?: string; // Override the exposed description.
+}
+
 export interface McpNode extends BaseNode {
   kind: 'mcp';
   endpoint: string;
   description?: string;
   headers?: Record<string, string>;
   allowedTools?: string[];
+  // Tools Management: a prefix joined to every exposed tool name as
+  // `${namespace}__${name}`, to avoid collisions across servers.
+  namespace?: string;
+  // Per-upstream-tool-name overrides (hide / rename / description).
+  toolOverrides?: Record<string, ToolOverride>;
 }
 
 export interface HttpEndpointConfig {

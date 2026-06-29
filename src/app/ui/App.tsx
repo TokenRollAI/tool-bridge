@@ -59,11 +59,19 @@ interface AdhocTarget {
   bearerToken: string;
 }
 
+interface ToolSpec {
+  name: string;
+  description?: string;
+  inputSchema?: unknown;
+  outputSchema?: unknown;
+}
+
 interface EndpointSpec {
   method: string;
   inputSchema?: unknown;
   outputSchema?: unknown;
   example?: unknown;
+  tools?: ToolSpec[];
 }
 
 interface CrawlNode {
@@ -532,6 +540,7 @@ function TreeNodeRow({ node, depth, onCopy, copied }: TreeNodeRowProps) {
         <span className={`tree-kind tree-kind-${node.kind}`}>{kindLabel}</span>
         <span className="tree-title">{node.title || node.path}</span>
         {node.endpoint ? <span className="tree-method">{node.endpoint.method}</span> : null}
+        {node.endpoint?.tools ? <span className="tree-flag">{node.endpoint.tools.length} tools</span> : null}
         {node.truncated ? <span className="tree-flag">truncated</span> : null}
         <button className="tree-copy" onClick={() => onCopy(node.helpUrl)} title="Copy ~help URL">
           <Copy size={13} />
@@ -548,7 +557,22 @@ function TreeNodeRow({ node, depth, onCopy, copied }: TreeNodeRowProps) {
           {node.error}
         </pre>
       ) : null}
-      {expanded && node.endpoint ? (
+      {expanded && node.endpoint?.tools ? (
+        <div className="tree-tools" style={{ marginLeft: `${depth * 16 + 28}px` }}>
+          {node.endpoint.tools.map((tool) => (
+            <details key={tool.name} className="schema-box">
+              <summary>
+                <Braces size={15} />
+                {tool.name}
+              </summary>
+              {tool.description ? <p className="tree-desc">{tool.description}</p> : null}
+              <pre>{pretty(tool.inputSchema ?? {})}</pre>
+            </details>
+          ))}
+          {node.endpoint.tools.length === 0 ? <p className="empty-state">No tools exposed</p> : null}
+        </div>
+      ) : null}
+      {expanded && node.endpoint && !node.endpoint.tools ? (
         <details className="schema-box" style={{ marginLeft: `${depth * 16 + 28}px` }} open>
           <summary>
             <Braces size={15} />

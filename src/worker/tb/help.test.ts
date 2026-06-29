@@ -46,13 +46,36 @@ describe('buildTextHelp content negotiation', () => {
     expect(textHelp).toContain('link child /htbp/partner/~help');
   });
 
-  it('renders a cmd line for an end-path endpoint payload', () => {
+  it('renders a cmd line for a single-shot end-path endpoint payload', () => {
     const textHelp = buildTextHelp(
-      { htbp: 'draft', kind: 'mcp', title: 'search', endpoint: { method: 'POST', inputSchema: {} } },
-      '/htbp/docs/context7/search',
+      { htbp: 'draft', kind: 'http', title: 'get', endpoint: { method: 'GET', inputSchema: {} } },
+      '/htbp/echo/get',
       'bearer'
     );
-    expect(textHelp).toContain('cmd call POST /htbp/docs/context7/search');
+    expect(textHelp).toContain('cmd call GET /htbp/echo/get');
     expect(textHelp).toContain('auth bearer');
+  });
+
+  it('renders one cmd per tool for an MCP whole-leaf endpoint payload', () => {
+    const textHelp = buildTextHelp(
+      {
+        htbp: 'draft',
+        kind: 'mcp',
+        title: 'Context7',
+        endpoint: {
+          method: 'POST',
+          tools: [
+            { name: 'resolve-library-id', description: 'resolve a name' },
+            { name: 'query-docs' },
+          ],
+        },
+      },
+      '/htbp/docs/context7',
+      'none'
+    );
+    // Each tool is a cmd POSTing to the SAME resource path (the MCP leaf).
+    expect(textHelp).toContain('cmd resolve-library-id POST /htbp/docs/context7');
+    expect(textHelp).toContain('cmd query-docs POST /htbp/docs/context7');
+    expect(textHelp).toContain('"tool":"resolve-library-id"');
   });
 });
