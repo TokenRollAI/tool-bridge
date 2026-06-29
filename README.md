@@ -99,10 +99,16 @@ npm install
 npm run dev
 ```
 
-默认地址：
+默认本地地址：
 
 ```txt
 http://127.0.0.1:8787
+```
+
+线上部署地址：
+
+```txt
+https://tool-bridge.fantacy.live
 ```
 
 `npm run dev` 会先构建 UI，再启动完整 Worker。不要只用 Vite UI 来验证 bridge，因为 API 需要 Worker 路由。
@@ -221,7 +227,7 @@ tenant:{tenantId}              ->  该租户的树配置 JSON（同 MCP_SERVERS_
 wrangler kv key put --binding=TENANTS "tenant:acme" '<tree-json>'
 # hash 用 sha256(secretKey) 计算后填入
 wrangler kv key put --binding=TENANTS "apikey:<sha256hex>" '{"tenantId":"acme"}'
-curl -H "Authorization: Bearer <secretKey>" https://<worker>/htbp/~help
+curl -H "Authorization: Bearer <secretKey>" https://tool-bridge.fantacy.live/htbp/~help
 ```
 
 未配置 `TENANTS` 时,bridge 退回单租户的全局 `MCP_SERVERS_JSON` 树(向后兼容,行为不变)。
