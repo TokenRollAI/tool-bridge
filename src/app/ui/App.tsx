@@ -180,11 +180,57 @@ function parseArguments(value: string): Record<string, unknown> {
   return parsed as Record<string, unknown>;
 }
 
-function toolSchemaSummary(tool: McpTool): string {
-  if (!tool.inputSchema) {
+function toolSchemaSummary(tool: McpTool | undefined): string {
+  if (!tool?.inputSchema) {
     return '{}';
   }
   return pretty(tool.inputSchema);
+}
+
+// Build a starter Arguments object from a tool's JSON Schema: every property
+// gets a typed placeholder (required ones first). Beats an empty {} that always
+// fails validation, and shows the caller exactly which fields to fill.
+function argumentsSkeleton(tool: McpTool | undefined): string {
+  const schema = tool?.inputSchema;
+  if (!schema || typeof schema !== 'object') {
+    return '{}';
+  }
+  const props = (schema as { properties?: Record<string, unknown> }).properties;
+  if (!props || typeof props !== 'object') {
+    return '{}';
+  }
+  const required = new Set(
+    Array.isArray((schema as { required?: unknown }).required)
+      ? ((schema as { required: unknown[] }).required.filter((r): r is string => typeof r === 'string'))
+      : []
+  );
+  const names = Object.keys(props).sort((a, b) => Number(required.has(b)) - Number(required.has(a)));
+  const skeleton: Record<string, unknown> = {};
+  for (const name of names) {
+    skeleton[name] = placeholderFor((props[name] as { type?: unknown })?.type);
+  }
+  return pretty(skeleton);
+}
+
+function placeholderFor(type: unknown): unknown {
+  switch (type) {
+    case 'number':
+    case 'integer':
+      return 0;
+    case 'boolean':
+      return false;
+    case 'array':
+      return [];
+    case 'object':
+      return {};
+    default:
+      return '';
+  }
+}
+
+// MCP tool results carry isError when the upstream rejected the call.
+function isToolError(result: unknown): boolean {
+  return !!result && typeof result === 'object' && (result as { isError?: unknown }).isError === true;
 }
 
 export function App() {
@@ -195,6 +241,7 @@ export function App() {
   const [adhoc, setAdhoc] = useState<AdhocTarget>(() => readAdhocTarget());
   const [mode, setMode] = useState<'configured' | 'adhoc' | 'tree'>('configured');
   const [copied, setCopied] = useState('');
+  const [docView, setDocView] = useState<{ kind: 'help' | 'skill'; text: string } | null>(null);
 
   const authQuery = useQuery({
     queryKey: ['auth-config'],
@@ -275,7 +322,6 @@ export function App() {
   const tools = mode === 'adhoc' ? adhocToolsMutation.data?.tools : configuredToolsQuery.data?.tools;
   const activeServer = mode === 'adhoc' ? adhocToolsMutation.data?.server : selectedServer;
   const authMode = authQuery.data?.mode ?? 'none';
-  const bridgeBase = selectedServerId ? `/mcp/${encodeURIComponent(selectedServerId)}` : '';
 
   function updateAuthToken(value: string) {
     setAuthToken(value);
@@ -291,6 +337,32 @@ export function App() {
     await navigator.clipboard.writeText(value);
     setCopied(value);
     window.setTimeout(() => setCopied(''), 1200);
+  }
+
+  // Fetch and display ~help / ~skill inline instead of only copying the URL.
+  // ~help comes from the JSON TB tree (/htbp/{id}); ~skill from the legacy
+  // text endpoint (/mcp/{id}/~skill).
+  async function viewDoc(kind: 'help' | 'skill') {
+    if (!selectedServerId) {
+      return;
+    }
+    const id = encodeURIComponent(selectedServerId);
+    const url = kind === 'help' ? `/htbp/${id}/~help` : `/htbp/${id}/~skill`;
+    const accept = kind === 'help' ? 'application/json' : 'text/markdown, text/plain';
+    try {
+      const headers = new Headers({ Accept: accept });
+      if (authToken) {
+        headers.set('Authorization', `Bearer ${authToken}`);
+      }
+      const response = await fetch(url, { headers });
+      const raw = await response.text();
+      const text = response.headers.get('Content-Type')?.includes('application/json')
+        ? pretty(JSON.parse(raw))
+        : raw;
+      setDocView({ kind, text: response.ok ? text : `HTTP ${response.status}\n\n${text}` });
+    } catch (error) {
+      setDocView({ kind, text: error instanceof Error ? error.message : String(error) });
+    }
   }
 
   return (
@@ -374,6 +446,7 @@ export function App() {
                   onClick={() => {
                     setSelectedServerId(server.id);
                     setSelectedTool('');
+                    setDocView(null);
                   }}
                 >
                   <span>{server.name}</span>
@@ -446,7 +519,7 @@ export function App() {
                 className={tool.name === selectedTool ? 'tool-row selected' : 'tool-row'}
                 onClick={() => {
                   setSelectedTool(tool.name);
-                  setArgumentsText('{}');
+                  setArgumentsText(argumentsSkeleton(tool));
                 }}
               >
                 <span>{tool.name}</span>
@@ -458,19 +531,38 @@ export function App() {
           {configuredToolsQuery.isError ? (
             <pre className="error-box">{String(configuredToolsQuery.error.message)}</pre>
           ) : null}
-          {tools?.length === 0 ? <p className="empty-state">No tools returned</p> : null}
+          {mode === 'configured' && configuredToolsQuery.isFetching ? (
+            <p className="empty-state">Loading tools…</p>
+          ) : null}
+          {mode === 'configured' && !selectedServerId ? (
+            <p className="empty-state">Select a server</p>
+          ) : null}
+          {tools?.length === 0 && !configuredToolsQuery.isFetching ? (
+            <p className="empty-state">No tools returned</p>
+          ) : null}
 
           {mode === 'configured' && selectedServerId ? (
-            <div className="link-row">
-              <button onClick={() => void copy(`${bridgeBase}/~help`)}>
-                <Copy size={14} />
-                {copied === `${bridgeBase}/~help` ? 'Copied' : '~help'}
-              </button>
-              <button onClick={() => void copy(`${bridgeBase}/~skill`)}>
-                <FileText size={14} />
-                {copied === `${bridgeBase}/~skill` ? 'Copied' : '~skill'}
-              </button>
-            </div>
+            <>
+              <div className="link-row">
+                <button onClick={() => void viewDoc('help')}>
+                  <Copy size={14} />
+                  ~help
+                </button>
+                <button onClick={() => void viewDoc('skill')}>
+                  <FileText size={14} />
+                  ~skill
+                </button>
+              </div>
+              {docView ? (
+                <details className="schema-box" open>
+                  <summary>
+                    {docView.kind === 'help' ? <Braces size={15} /> : <FileText size={15} />}
+                    {docView.kind === 'help' ? '~help (JSON)' : '~skill'}
+                  </summary>
+                  <pre>{docView.text}</pre>
+                </details>
+              ) : null}
+            </>
           ) : null}
         </section>
 
@@ -501,12 +593,17 @@ export function App() {
                 <Braces size={15} />
                 Input schema
               </summary>
-              <pre>{toolSchemaSummary((tools ?? []).find((tool) => tool.name === selectedTool) as McpTool)}</pre>
+              <pre>{toolSchemaSummary((tools ?? []).find((tool) => tool.name === selectedTool))}</pre>
             </details>
           ) : null}
 
           {callMutation.isError ? <pre className="error-box">{String(callMutation.error.message)}</pre> : null}
-          {callMutation.data ? <pre className="result-box">{pretty(callMutation.data.result)}</pre> : null}
+          {callMutation.data ? (
+            <pre className={isToolError(callMutation.data.result) ? 'result-box result-error' : 'result-box'}>
+              {isToolError(callMutation.data.result) ? '⚠ Tool returned an error:\n\n' : ''}
+              {pretty(callMutation.data.result)}
+            </pre>
+          ) : null}
         </section>
       </section>
       )}

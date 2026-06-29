@@ -317,6 +317,12 @@ button {
   color: #eef8ef;
 }
 
+.result-box.result-error {
+  border-color: #e0a7a2;
+  background: #2a1512;
+  color: #ffd9d4;
+}
+
 .error-box {
   margin: 12px;
   border: 1px solid #e0a7a2;

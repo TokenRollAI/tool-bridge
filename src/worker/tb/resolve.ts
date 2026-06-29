@@ -70,6 +70,67 @@ export async function resolveCall(
 
 export class NotFoundError extends Error {}
 
+// GET {path}/~skill — a Markdown operational guide for the resource, derived
+// from its help payload. Works for every node kind (directory / mcp / http /
+// mount / remote) without per-adapter code.
+export async function resolveSkill(
+  env: AppEnv,
+  root: DirectoryNode,
+  segments: string[],
+  authMode: AuthMode
+): Promise<Response> {
+  const { payload, resourcePath } = await describe(env, root, segments, authMode);
+  return text(buildSkillMarkdown(payload, resourcePath, authMode), {
+    headers: { 'Content-Type': 'text/markdown; charset=utf-8' },
+  });
+}
+
+function buildSkillMarkdown(payload: HelpPayload, resourcePath: string, authMode: AuthMode): string {
+  const lines: string[] = [`# ${payload.title}`, ''];
+  if (payload.description) {
+    lines.push(payload.description, '');
+  }
+
+  lines.push('## When To Use', '');
+  lines.push(
+    payload.endpoint
+      ? `这是一个 end-path 资源,直接调用它来完成任务。`
+      : `这是一个目录节点,先读取它的 \`~help\` 列表,选择下一层资源继续下钻。`,
+    ''
+  );
+
+  if (authMode !== 'none') {
+    lines.push('## Authentication', '', '所有请求需带 `Authorization: Bearer <token>`。', '');
+  }
+
+  if (payload.resources && payload.resources.length > 0) {
+    lines.push('## Next Layer', '');
+    for (const ref of payload.resources) {
+      lines.push(`- \`${ref.path}\`${ref.description ? ` — ${ref.description}` : ''}`);
+    }
+    lines.push('');
+  }
+
+  if (payload.endpoint) {
+    lines.push('## Request Construction', '');
+    lines.push('```http', `${payload.endpoint.method} ${resourcePath}`, 'Content-Type: application/json', '```', '');
+    if (payload.endpoint.tools && payload.endpoint.tools.length > 0) {
+      lines.push('请求体用 `tool` 选择具体工具,`arguments` 传该工具参数:', '');
+      lines.push('```json', JSON.stringify(payload.endpoint.example ?? { tool: '', arguments: {} }, null, 2), '```', '');
+      lines.push('### Available Tools', '');
+      for (const tool of payload.endpoint.tools) {
+        lines.push(`- \`${tool.name}\`${tool.description ? ` — ${tool.description}` : ''}`);
+      }
+      lines.push('');
+    } else if (payload.endpoint.example !== undefined) {
+      lines.push('示例请求体:', '', '```json', JSON.stringify(payload.endpoint.example, null, 2), '```', '');
+    }
+  }
+
+  lines.push('## Safety', '', '调用会转发到上游资源;执行有副作用的操作前请先确认意图。', '');
+  return `${lines.join('\n').trimEnd()}\n`;
+}
+
 function prefersText(accept: string): boolean {
   const value = accept.toLowerCase();
   if (value.includes('application/json')) {
