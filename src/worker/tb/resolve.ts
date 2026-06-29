@@ -2,8 +2,8 @@
 
 import { adapterFor } from './adapters';
 import { buildTextHelp } from './help';
-import { findNode, nodePath, parseTree } from './registry';
-import { AdapterContext, AppEnv, AuthMode, HelpPayload } from './types';
+import { findNode, nodePath } from './registry';
+import { AdapterContext, AppEnv, AuthMode, DirectoryNode, HelpPayload } from './types';
 import { json, text } from './util';
 
 export interface ResolvedHelp {
@@ -11,8 +11,15 @@ export interface ResolvedHelp {
   resourcePath: string;
 }
 
-async function describe(env: AppEnv, segments: string[], authMode: AuthMode): Promise<ResolvedHelp> {
-  const root = parseTree(env);
+// `root` is the tree to resolve against — the tenant's tree (multi-tenant) or
+// the global env tree (fallback). Resolving against a single per-request root is
+// the tenant isolation boundary: findNode only descends root.children.
+async function describe(
+  env: AppEnv,
+  root: DirectoryNode,
+  segments: string[],
+  authMode: AuthMode
+): Promise<ResolvedHelp> {
   const found = findNode(root, segments);
   if (!found) {
     throw new NotFoundError(`No TB resource at '/${segments.join('/')}'.`);
@@ -27,11 +34,12 @@ async function describe(env: AppEnv, segments: string[], authMode: AuthMode): Pr
 // `Accept: text/plain`.
 export async function resolveHelp(
   env: AppEnv,
+  root: DirectoryNode,
   segments: string[],
   authMode: AuthMode,
   accept: string
 ): Promise<Response> {
-  const { payload, resourcePath } = await describe(env, segments, authMode);
+  const { payload, resourcePath } = await describe(env, root, segments, authMode);
 
   if (prefersText(accept)) {
     const auth = authMode === 'none' ? 'none' : 'bearer';
@@ -43,8 +51,13 @@ export async function resolveHelp(
 }
 
 // POST {path} — invoke an end-path resource.
-export async function resolveCall(env: AppEnv, segments: string[], authMode: AuthMode, input: unknown): Promise<Response> {
-  const root = parseTree(env);
+export async function resolveCall(
+  env: AppEnv,
+  root: DirectoryNode,
+  segments: string[],
+  authMode: AuthMode,
+  input: unknown
+): Promise<Response> {
   const found = findNode(root, segments);
   if (!found) {
     throw new NotFoundError(`No TB resource at '/${segments.join('/')}'.`);

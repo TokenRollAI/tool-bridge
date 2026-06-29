@@ -1,9 +1,22 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { clampCrawlOptions, crawlTree } from './crawl';
+import { parseTree } from './registry';
 import { AppEnv, CrawlNode } from './types';
 
 function env(json: unknown, extra: Partial<AppEnv> = {}): AppEnv {
   return { MCP_SERVERS_JSON: JSON.stringify(json), ...extra } as unknown as AppEnv;
+}
+
+// Build env + tenant root from one config and crawl it (mirrors host rootFor).
+function crawl(
+  json: unknown,
+  start: { path?: string; url?: string },
+  authMode: 'none' | 'bearer' | 'oauth' = 'none',
+  opts?: { maxDepth: number; maxNodes: number },
+  extra: Partial<AppEnv> = {}
+): Promise<CrawlNode> {
+  const e = env(json, extra);
+  return crawlTree(e, parseTree(e), start, authMode, opts);
 }
 
 function flatten(node: CrawlNode, out: CrawlNode[] = []): CrawlNode[] {
@@ -27,8 +40,8 @@ describe('clampCrawlOptions', () => {
 
 describe('crawlTree (local)', () => {
   it('walks a directory tree down to http end-path leaves', async () => {
-    const tree = await crawlTree(
-      env({
+    const tree = await crawl(
+      {
         type: 'directory',
         id: 'root',
         children: [
@@ -38,7 +51,7 @@ describe('crawlTree (local)', () => {
             endpoints: [{ name: 'current', method: 'GET', url: 'https://api.example.com/w', inputSchema: {} }],
           },
         ],
-      }),
+      },
       { path: '' },
       'none'
     );
@@ -48,14 +61,14 @@ describe('crawlTree (local)', () => {
   });
 
   it('respects the maxDepth ceiling by marking truncation', async () => {
-    const tree = await crawlTree(
-      env({
+    const tree = await crawl(
+      {
         type: 'directory',
         id: 'root',
         children: [
           { type: 'directory', id: 'a', children: [{ type: 'directory', id: 'b', children: [] }] },
         ],
-      }),
+      },
       { path: '' },
       'none',
       { maxDepth: 1, maxNodes: 200 }
@@ -93,8 +106,8 @@ describe('crawlTree (remote)', () => {
       })
     );
 
-    const tree = await crawlTree(
-      env({ type: 'directory', id: 'root', children: [{ type: 'remote', id: 'partner', helpUrl: 'https://partner.example.com/~help' }] }),
+    const tree = await crawl(
+      { type: 'directory', id: 'root', children: [{ type: 'remote', id: 'partner', helpUrl: 'https://partner.example.com/~help' }] },
       { path: '' },
       'none'
     );
@@ -109,8 +122,8 @@ describe('crawlTree (remote)', () => {
       'fetch',
       vi.fn(async () => new Response('boom', { status: 500 }))
     );
-    const tree = await crawlTree(
-      env({
+    const tree = await crawl(
+      {
         type: 'directory',
         id: 'root',
         children: [
@@ -121,7 +134,7 @@ describe('crawlTree (remote)', () => {
             endpoints: [{ name: 'ping', method: 'GET', url: 'https://api.example.com/p' }],
           },
         ],
-      }),
+      },
       { path: '' },
       'none'
     );
@@ -131,8 +144,8 @@ describe('crawlTree (remote)', () => {
   });
 
   it('rejects an http remote help URL unless ALLOW_INSECURE_MCP_HTTP is set', async () => {
-    const tree = await crawlTree(
-      env({ type: 'directory', id: 'root', children: [{ type: 'remote', id: 'insecure', helpUrl: 'http://plain.example.com/~help' }] }),
+    const tree = await crawl(
+      { type: 'directory', id: 'root', children: [{ type: 'remote', id: 'insecure', helpUrl: 'http://plain.example.com/~help' }] },
       { path: '' },
       'none'
     );

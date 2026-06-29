@@ -21,14 +21,20 @@ import { arrayOfStrings, isRecord, recordOfStrings, stringField } from './util';
 export const TREE_PREFIX = '/htbp';
 
 export function parseTree(env: AppEnv): DirectoryNode {
-  const raw = env.MCP_SERVERS_JSON || '{}';
-  const parsed = JSON.parse(raw) as unknown;
+  return parseTreeFromJson(env.MCP_SERVERS_JSON || '{}');
+}
+
+// Parse a tree config JSON string into a normalized, parent-linked DirectoryNode.
+// Shared by the global env tree (parseTree) and per-tenant configs loaded from KV,
+// so both go through the exact same validation + normalization.
+export function parseTreeFromJson(raw: string): DirectoryNode {
+  const parsed = JSON.parse(raw || '{}') as unknown;
 
   // Nested tree form: an object carrying `type`/`children`.
   if (isRecord(parsed) && (parsed.type === 'directory' || Array.isArray(parsed.children))) {
     const node = normalizeNode({ id: 'root', ...parsed }, 'root');
     if (node.kind !== 'directory') {
-      throw new Error('Root MCP_SERVERS_JSON node must be a directory.');
+      throw new Error('Root tree node must be a directory.');
     }
     linkParents(node);
     return node;

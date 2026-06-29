@@ -200,6 +200,33 @@ OAUTH_JWKS_URI=https://issuer.example.com/.well-known/jwks.json
 
 `OAUTH_JWKS_URI` 可省略；Worker 会读取 issuer 的 OpenID configuration 来发现 `jwks_uri`。
 
+## 多租户（Tenant Isolation）
+
+配置 `TENANTS` KV namespace 即开启多租户:**bearer token 此时被当作 Secret Key**,按其
+`sha256` 哈希在 KV 中查到所属租户,加载该租户专属的 TB 树。租户之间互不可见、互不可调用——
+A 的请求只能解析/调用/crawl A 树内的节点,访问 B 独有节点返回 404。
+
+KV schema:
+
+```txt
+apikey:{sha256hex(secretKey)}  ->  {"tenantId":"acme","label":"...","createdAt":"..."}
+tenant:{tenantId}              ->  该租户的树配置 JSON（同 MCP_SERVERS_JSON 形态）
+```
+
+原始 Secret Key 不落盘(只存哈希),按哈希查找,天然常量时间。
+
+种数据并启用:
+
+```bash
+wrangler kv key put --binding=TENANTS "tenant:acme" '<tree-json>'
+# hash 用 sha256(secretKey) 计算后填入
+wrangler kv key put --binding=TENANTS "apikey:<sha256hex>" '{"tenantId":"acme"}'
+curl -H "Authorization: Bearer <secretKey>" https://<worker>/htbp/~help
+```
+
+未配置 `TENANTS` 时,bridge 退回单租户的全局 `MCP_SERVERS_JSON` 树(向后兼容,行为不变)。
+本轮仅做隔离 + Secret Key;OAuth 用户、User Group/per-node 权限、admin 为后续。
+
 ## 部署
 
 ```bash

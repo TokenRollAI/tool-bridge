@@ -19,4 +19,8 @@
   // R2 bucket bindings referenced by `mount` nodes (by their `bucket` name).
   // Uncomment and create the bucket to enable FS/S3-as-TB mounts.
   // "r2_buckets": [{ "binding": "TB_FILES", "bucket_name": "tool-bridge-files" }]
+  //
+  // KV namespace for multi-tenancy. Its presence enables tenant mode: the bearer
+  // token is a Secret Key resolved (by sha256 hash) to a tenant + its TB tree.
+  // "kv_namespaces": [{ "binding": "TENANTS", "id": "<kv-namespace-id>" }]
 }

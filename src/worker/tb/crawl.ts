@@ -7,9 +7,9 @@
 // and per-fetch size/time caps.
 
 import { adapterFor } from './adapters';
-import { findNode, nodePath, parseTree, TREE_PREFIX } from './registry';
+import { findNode, nodePath, TREE_PREFIX } from './registry';
 import { fetchRemoteHelp } from './remote-client';
-import { AdapterContext, AppEnv, AuthMode, CrawlNode, HelpPayload } from './types';
+import { AdapterContext, AppEnv, AuthMode, CrawlNode, DirectoryNode, HelpPayload } from './types';
 
 export interface CrawlOptions {
   maxDepth: number;
@@ -29,6 +29,7 @@ export function clampCrawlOptions(opts: Partial<CrawlOptions> | undefined): Craw
 
 interface CrawlState {
   env: AppEnv;
+  root: DirectoryNode;
   authMode: AuthMode;
   opts: CrawlOptions;
   visited: Set<string>;
@@ -37,11 +38,12 @@ interface CrawlState {
 
 export async function crawlTree(
   env: AppEnv,
+  root: DirectoryNode,
   start: { path?: string; url?: string },
   authMode: AuthMode,
   opts: CrawlOptions = DEFAULT_CRAWL_OPTIONS
 ): Promise<CrawlNode> {
-  const state: CrawlState = { env, authMode, opts, visited: new Set(), count: 0 };
+  const state: CrawlState = { env, root, authMode, opts, visited: new Set(), count: 0 };
   if (start.url) {
     return crawlRemote(state, start.url, 0);
   }
@@ -51,8 +53,9 @@ export async function crawlTree(
 // ---- Local tree walking (no self-HTTP) ----
 
 async function crawlLocal(state: CrawlState, segments: string[], depth: number): Promise<CrawlNode> {
-  const root = parseTree(state.env);
-  const found = findNode(root, segments);
+  // Walk the request's single resolved root (tenant tree or global env tree).
+  // Reusing one root for every recursion is what keeps a crawl tenant-scoped.
+  const found = findNode(state.root, segments);
   const path = segments.length === 0 ? TREE_PREFIX : `${TREE_PREFIX}/${segments.join('/')}`;
   if (!found) {
     return { kind: 'directory', path, helpUrl: `${path}/~help`, children: [], error: 'Resource not found.' };

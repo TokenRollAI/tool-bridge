@@ -1,6 +1,9 @@
 import { createRemoteJWKSet, jwtVerify } from 'jose';
 import { clampCrawlOptions, crawlTree } from './tb/crawl';
+import { parseTree } from './tb/registry';
 import { NotFoundError, resolveCall, resolveHelp } from './tb/resolve';
+import { resolveTenant, tenantModeEnabled } from './tb/tenant';
+import type { DirectoryNode } from './tb/types';
 
 const MCP_PROTOCOL_VERSION = '2025-11-25';
 const CLIENT_NAME = 'tool-bridge';
@@ -50,6 +53,10 @@ type AuthMode = 'none' | 'bearer' | 'oauth';
 interface AuthInfo {
   mode: AuthMode;
   subject?: string;
+  // Set when tenant mode is on and the Secret Key resolved to a tenant.
+  tenantId?: string;
+  // The tenant's tree root; when undefined, requests fall back to the env tree.
+  root?: DirectoryNode;
 }
 
 interface RpcPayload {
@@ -122,6 +129,22 @@ async function constantTimeEqual(a: string, b: string): Promise<boolean> {
 
 async function authenticate(request: Request, env: AppEnv): Promise<AuthInfo | Response> {
   const mode = getAuthMode(env);
+
+  // Tenant mode: the bearer token is a Secret Key resolved to a tenant + tree.
+  // This composes orthogonally on top of the base mode — when TENANTS is set we
+  // always require a token and resolve it, even if the base mode is 'none'.
+  if (tenantModeEnabled(env)) {
+    const token = getBearerToken(request);
+    if (!token) {
+      return errorResponse(401, 'unauthorized', 'Secret Key (bearer token) required.');
+    }
+    const tenant = await resolveTenant(env, token);
+    if (!tenant) {
+      return errorResponse(401, 'unauthorized', 'Secret Key is invalid.');
+    }
+    return { mode, subject: tenant.tenantId, tenantId: tenant.tenantId, root: tenant.root };
+  }
+
   if (mode === 'none') {
     return { mode };
   }
@@ -666,7 +689,7 @@ async function routeApi(request: Request, env: AppEnv): Promise<Response> {
   }
 
   if (path === '/api/tree' && request.method === 'GET') {
-    const tree = await crawlTree(env, { path: '' }, authInfo.mode);
+    const tree = await crawlTree(env, rootFor(authInfo, env), { path: '' }, authInfo.mode);
     return json({ auth: authInfo, tree });
   }
 
@@ -675,7 +698,7 @@ async function routeApi(request: Request, env: AppEnv): Promise<Response> {
       request
     );
     const opts = clampCrawlOptions({ maxDepth: body.maxDepth, maxNodes: body.maxNodes });
-    const tree = await crawlTree(env, body.start ?? { path: '' }, authInfo.mode, opts);
+    const tree = await crawlTree(env, rootFor(authInfo, env), body.start ?? { path: '' }, authInfo.mode, opts);
     return json({ auth: authInfo, tree });
   }
 
@@ -687,6 +710,12 @@ async function routeApi(request: Request, env: AppEnv): Promise<Response> {
   }
 
   return errorResponse(404, 'not_found', 'API route not found.');
+}
+
+// The tree to resolve this request against: the tenant's tree when tenant mode
+// resolved one, otherwise the global env tree (fallback / legacy behavior).
+function rootFor(authInfo: AuthInfo, env: AppEnv): DirectoryNode {
+  return authInfo.root ?? parseTree(env);
 }
 
 async function routeHtbp(request: Request, env: AppEnv): Promise<Response> {
@@ -704,13 +733,14 @@ async function routeHtbp(request: Request, env: AppEnv): Promise<Response> {
   const segments = (hasHelpSuffix ? rawSegments.slice(0, -1) : rawSegments).map(decodeURIComponent);
 
   try {
+    const root = rootFor(authInfo, env);
     if (isHelp) {
       const accept = request.headers.get('Accept') ?? '';
-      return await resolveHelp(env, segments, authInfo.mode, accept);
+      return await resolveHelp(env, root, segments, authInfo.mode, accept);
     }
     if (request.method === 'POST') {
       const input = await readJsonBody<unknown>(request);
-      return await resolveCall(env, segments, authInfo.mode, input);
+      return await resolveCall(env, root, segments, authInfo.mode, input);
     }
     return errorResponse(405, 'method_not_allowed', 'Use GET {path}/~help or POST {path} to call.');
   } catch (error) {
