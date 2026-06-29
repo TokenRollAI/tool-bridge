@@ -16,7 +16,7 @@
   // wrangler provisions the DNS record + TLS cert automatically on deploy.
   "routes": [{ "pattern": "tool-bridge.fantacy.live", "custom_domain": true }],
   "vars": {
-    "MCP_SERVERS_JSON": "{\"context7\":{\"name\":\"Context7\",\"endpoint\":\"https://mcp.context7.com/mcp\",\"description\":\"Public documentation MCP server\"}}",
+    "MCP_SERVERS_JSON": "{\"type\":\"directory\",\"id\":\"root\",\"title\":\"Tool Bridge A\",\"children\":[{\"type\":\"mcp\",\"id\":\"context7\",\"name\":\"Context7\",\"endpoint\":\"https://mcp.context7.com/mcp\",\"description\":\"Public documentation MCP server\"},{\"type\":\"remote\",\"id\":\"server-b\",\"title\":\"Tool Bridge B (federated)\",\"helpUrl\":\"https://tool-bridge-b.fantacy.live/htbp/~help\"}]}",
     "OAUTH_REQUIRED_AUDIENCE": ""
   },
   // R2 bucket bindings referenced by `mount` nodes (by their `bucket` name).

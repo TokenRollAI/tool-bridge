@@ -71,10 +71,20 @@ function parseResources(value: unknown): ResourceRef[] | undefined {
 }
 
 function sanitizeEndpoint(value: Record<string, unknown>): HelpPayload['endpoint'] {
+  const rawTools = Array.isArray(value.tools) ? value.tools : undefined;
+  const tools = rawTools
+    ?.filter((t): t is Record<string, unknown> => isRecord(t) && typeof t.name === 'string')
+    .map((t) => ({
+      name: t.name as string,
+      description: typeof t.description === 'string' ? t.description : undefined,
+      inputSchema: t.inputSchema,
+      outputSchema: t.outputSchema,
+    }));
   return {
     method: typeof value.method === 'string' ? value.method : 'POST',
     inputSchema: value.inputSchema,
     outputSchema: value.outputSchema,
     example: value.example,
+    tools,
   };
 }
