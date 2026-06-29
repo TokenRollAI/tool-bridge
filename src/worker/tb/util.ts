@@ -91,3 +91,6 @@ export async function safeErrorText(response: Response): Promise<string> {
     return '';
   }
 }
+
+// Thrown when a path/tool does not resolve to a node; the host maps it to 404.
+export class NotFoundError extends Error {}

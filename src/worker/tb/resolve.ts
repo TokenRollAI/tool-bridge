@@ -4,7 +4,7 @@ import { adapterFor } from './adapters';
 import { buildTextHelp } from './help';
 import { findNode, nodePath } from './registry';
 import { AdapterContext, AppEnv, AuthMode, DirectoryNode, HelpPayload } from './types';
-import { json, text } from './util';
+import { json, text, NotFoundError } from './util';
 
 export interface ResolvedHelp {
   payload: HelpPayload;
@@ -68,7 +68,7 @@ export async function resolveCall(
   return json({ resource: resourcePath, result });
 }
 
-export class NotFoundError extends Error {}
+export { NotFoundError } from './util';
 
 function prefersText(accept: string): boolean {
   const value = accept.toLowerCase();

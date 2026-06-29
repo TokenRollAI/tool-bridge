@@ -6,6 +6,7 @@
 // dropped from the exposed list and are not callable.
 
 import { McpNode, ToolSpec } from './types';
+import { NotFoundError } from './util';
 
 export interface Virtualized {
   // Tools as exposed to clients, with virtual names/descriptions applied.
@@ -43,7 +44,7 @@ export function resolveUpstreamTool(node: McpNode, upstream: ToolSpec[], virtual
   const { reverse } = virtualizeTools(node, upstream);
   const upstreamName = reverse.get(virtualName);
   if (!upstreamName) {
-    throw new Error(`Tool '${virtualName}' is not exposed by node '${node.id}'.`);
+    throw new NotFoundError(`Tool '${virtualName}' is not exposed by node '${node.id}'.`);
   }
   return upstreamName;
 }
