@@ -1,10 +1,12 @@
-// MCP adapter: the whole MCP server is a single end-path leaf.
+// MCP adapter: the MCP server is a directory of tools; each tool is an end-path
+// leaf.
 //
-//   describe(node, [])  -> end-path: endpoint.tools lists every callable tool
-//                          (the tree does NOT expand each tool into its own node)
-//   call(node, [], in)  -> tools/call, selecting the tool via input.tool
+//   describe(node, [])         -> directory: resources list the tools (name +
+//                                 description + relative path), no schemas
+//   describe(node, [tool])     -> end-path: that tool's full inputSchema
+//   call(node, [tool], args)   -> tools/call with `args` as the arguments
 
-import { AdapterContext, HelpPayload, McpNode, TBAdapter, ToolSpec } from '../types';
+import { AdapterContext, HelpPayload, McpNode, ResourceRef, TBAdapter, ToolSpec } from '../types';
 import { callMcpTool, listMcpTools, McpTool, resolveMcpServer } from '../mcp-client';
 import { oneLine } from '../util';
 import { resolveUpstreamTool, virtualizeTools } from '../virtualize';
@@ -13,53 +15,63 @@ export const mcpAdapter: TBAdapter<McpNode> = {
   kind: 'mcp',
 
   async describe(node, ctx, sub): Promise<HelpPayload> {
-    if (sub.length > 0) {
-      // An MCP server is an atomic leaf; there is no deeper resource path.
-      throw new Error(`MCP node '${node.id}' is a leaf; '${sub.join('/')}' is not a sub-resource.`);
-    }
     const server = resolveMcpServer(ctx.env, node);
     const upstream = (await listMcpTools(server)).map(toToolSpec);
     const { exposed } = virtualizeTools(node, upstream);
-    const example = exposed.length > 0 ? { tool: exposed[0].name, arguments: {} } : { tool: '', arguments: {} };
+
+    // MCP level: list the tools as the next layer (brief: name + description).
+    if (sub.length === 0) {
+      return {
+        htbp: 'draft',
+        kind: 'mcp',
+        title: node.title,
+        description: node.description,
+        cachable: true,
+        resources: exposed.map(toResource),
+      };
+    }
+
+    // Tool level (end-path): the selected tool's full detail.
+    const toolName = sub[0];
+    const tool = exposed.find((item) => item.name === toolName);
+    if (!tool) {
+      throw new Error(`Tool '${toolName}' is not exposed by node '${node.id}'.`);
+    }
     return {
       htbp: 'draft',
       kind: 'mcp',
-      title: node.title,
-      description: node.description,
+      title: tool.name,
+      description: tool.description,
       cachable: true,
       endpoint: {
         method: 'POST',
-        // The request body selects a tool by (virtual) name and carries args.
-        inputSchema: {
-          type: 'object',
-          properties: {
-            tool: { type: 'string', enum: exposed.map((tool) => tool.name) },
-            arguments: { type: 'object' },
-          },
-          required: ['tool'],
-        },
-        example,
-        tools: exposed,
+        inputSchema: tool.inputSchema ?? { type: 'object' },
+        outputSchema: tool.outputSchema,
+        example: {},
       },
     };
   },
 
   async call(node, ctx, sub, input): Promise<unknown> {
-    if (sub.length > 0) {
-      throw new Error(`MCP node '${node.id}' is a leaf; call it directly with {tool, arguments}.`);
-    }
-    const { tool, args } = parseCall(input);
-    if (!tool) {
-      throw new Error(`MCP call to '${node.id}' requires a 'tool' field in the request body.`);
+    if (sub.length === 0) {
+      throw new Error(`MCP node '${node.id}' requires a tool: call POST {path}/{tool}.`);
     }
     const server = resolveMcpServer(ctx.env, node);
     const upstream = (await listMcpTools(server)).map(toToolSpec);
-    // Map the client-facing virtual name back to the upstream tool name; this
-    // also rejects hidden tools.
-    const upstreamName = resolveUpstreamTool(node, upstream, tool);
-    return callMcpTool(server, upstreamName, args);
+    // Map the client-facing (virtual) tool name in the path back to the upstream
+    // name; this also rejects hidden tools.
+    const upstreamName = resolveUpstreamTool(node, upstream, sub[0]);
+    return callMcpTool(server, upstreamName, extractArguments(input));
   },
 };
+
+function toResource(tool: ToolSpec): ResourceRef {
+  return {
+    name: tool.name,
+    path: `./${encodeURIComponent(tool.name)}`,
+    description: tool.description,
+  };
+}
 
 function toToolSpec(tool: McpTool): ToolSpec {
   return {
@@ -70,14 +82,10 @@ function toToolSpec(tool: McpTool): ToolSpec {
   };
 }
 
-// Body form: {tool: string, arguments?: object}.
-function parseCall(input: unknown): { tool?: string; args: unknown } {
-  if (input && typeof input === 'object' && !Array.isArray(input)) {
-    const record = input as { tool?: unknown; arguments?: unknown };
-    return {
-      tool: typeof record.tool === 'string' ? record.tool : undefined,
-      args: record.arguments ?? {},
-    };
+// The request body IS the tool arguments. Tolerate a {arguments:{...}} wrapper.
+function extractArguments(input: unknown): unknown {
+  if (input && typeof input === 'object' && !Array.isArray(input) && 'arguments' in input) {
+    return (input as { arguments?: unknown }).arguments ?? {};
   }
-  return { args: {} };
+  return input ?? {};
 }

@@ -717,7 +717,7 @@ function TreeNodeRow({ node, depth, onCopy, copied, authToken }: TreeNodeRowProp
         <details className="schema-box" style={{ marginLeft: `${depth * 16 + 28}px` }} open>
           <summary>
             <Braces size={15} />
-            {node.path}/~help
+            {node.helpUrl}
           </summary>
           <pre>{help}</pre>
         </details>
