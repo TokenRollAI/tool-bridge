@@ -139,6 +139,13 @@ button {
   align-items: start;
 }
 
+/* First column stacks the Discover form above the Servers list. */
+.server-column {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
 .panel {
   border: 1px solid #d8dccf;
   border-radius: 8px;

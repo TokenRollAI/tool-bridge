@@ -439,100 +439,107 @@ export function App() {
         </section>
       ) : (
       <section className="workspace">
-        <aside className="panel server-panel">
-          <div className="panel-heading">
-            <h2>Servers</h2>
-            <button className="icon-button" onClick={() => void serversQuery.refetch()} title="Refresh servers">
-              <RefreshCw size={16} />
-            </button>
-          </div>
-
-          <div className="adhoc-form">
-            <label>
-              Name
-              <input
-                value={adhoc.name}
-                onChange={(event) => updateAdhoc({ ...adhoc, name: event.target.value })}
-              />
-            </label>
-            <label>
-              Endpoint
-              <input
-                value={adhoc.endpoint}
-                onChange={(event) => updateAdhoc({ ...adhoc, endpoint: event.target.value })}
-                placeholder="https://example.com/mcp"
-              />
-            </label>
-            <button
-              className="primary-button"
-              disabled={!adhoc.endpoint || adhocToolsMutation.isPending}
-              onClick={() => {
-                setSelectedServerId('');
-                setSelectedTool('');
-                setDocView(null);
-                saveServerMutation.reset();
-                adhocToolsMutation.mutate();
-              }}
-            >
-              <Search size={16} />
-              Discover
-            </button>
-            {adhocToolsMutation.isError ? (
-              <pre className="error-box">{String(adhocToolsMutation.error.message)}</pre>
-            ) : null}
-            {adhocToolsMutation.isSuccess ? (
+        <div className="server-column">
+          <section className="panel discover-panel">
+            <div className="panel-heading">
+              <h2>Discover</h2>
+            </div>
+            <div className="adhoc-form">
+              <label>
+                Name
+                <input
+                  value={adhoc.name}
+                  onChange={(event) => updateAdhoc({ ...adhoc, name: event.target.value })}
+                />
+              </label>
+              <label>
+                Endpoint
+                <input
+                  value={adhoc.endpoint}
+                  onChange={(event) => updateAdhoc({ ...adhoc, endpoint: event.target.value })}
+                  placeholder="https://example.com/mcp"
+                />
+              </label>
               <button
                 className="primary-button"
-                disabled={saveServerMutation.isPending}
-                onClick={() => saveServerMutation.mutate()}
-              >
-                <Server size={16} />
-                Save to servers
-              </button>
-            ) : null}
-            {saveServerMutation.isError ? (
-              <pre className="error-box">{String(saveServerMutation.error.message)}</pre>
-            ) : null}
-            {saveServerMutation.isSuccess ? (
-              <p className="empty-state">Saved — may take a few seconds to appear in the list (KV).</p>
-            ) : null}
-          </div>
-
-          <div className="server-list">
-            {(serversQuery.data?.servers ?? []).map((server) => (
-              <button
-                key={server.id}
-                className={server.id === selectedServerId ? 'server-row selected' : 'server-row'}
+                disabled={!adhoc.endpoint || adhocToolsMutation.isPending}
                 onClick={() => {
-                  setSelectedServerId(server.id);
+                  setSelectedServerId('');
                   setSelectedTool('');
                   setDocView(null);
+                  saveServerMutation.reset();
+                  adhocToolsMutation.mutate();
                 }}
               >
-                <span>{server.name}</span>
-                <small>{server.endpoint}</small>
-                {server.source === 'dynamic' ? (
-                  <span
-                    className="icon-button"
-                    role="button"
-                    title="Delete server"
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      deleteServerMutation.mutate(server.id);
-                    }}
-                  >
-                    <Trash2 size={14} />
-                  </span>
-                ) : null}
+                <Search size={16} />
+                Discover
               </button>
-            ))}
-            {serversQuery.isError ? <pre className="error-box">{String(serversQuery.error.message)}</pre> : null}
-            {deleteServerMutation.isError ? (
-              <pre className="error-box">{String(deleteServerMutation.error.message)}</pre>
-            ) : null}
-            {serversQuery.data?.servers.length === 0 ? <p className="empty-state">No configured servers</p> : null}
-          </div>
-        </aside>
+              {adhocToolsMutation.isError ? (
+                <pre className="error-box">{String(adhocToolsMutation.error.message)}</pre>
+              ) : null}
+              {adhocToolsMutation.isSuccess ? (
+                <button
+                  className="primary-button"
+                  disabled={saveServerMutation.isPending}
+                  onClick={() => saveServerMutation.mutate()}
+                >
+                  <Server size={16} />
+                  Save to servers
+                </button>
+              ) : null}
+              {saveServerMutation.isError ? (
+                <pre className="error-box">{String(saveServerMutation.error.message)}</pre>
+              ) : null}
+              {saveServerMutation.isSuccess ? (
+                <p className="empty-state">Saved — may take a few seconds to appear in the list (KV).</p>
+              ) : null}
+            </div>
+          </section>
+
+          <aside className="panel server-panel">
+            <div className="panel-heading">
+              <h2>Servers</h2>
+              <button className="icon-button" onClick={() => void serversQuery.refetch()} title="Refresh servers">
+                <RefreshCw size={16} />
+              </button>
+            </div>
+
+            <div className="server-list">
+              {(serversQuery.data?.servers ?? []).map((server) => (
+                <button
+                  key={server.id}
+                  className={server.id === selectedServerId ? 'server-row selected' : 'server-row'}
+                  onClick={() => {
+                    setSelectedServerId(server.id);
+                    setSelectedTool('');
+                    setDocView(null);
+                  }}
+                >
+                  <span>{server.name}</span>
+                  <small>{server.endpoint}</small>
+                  {server.source === 'dynamic' ? (
+                    <span
+                      className="icon-button"
+                      role="button"
+                      title="Delete server"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        deleteServerMutation.mutate(server.id);
+                      }}
+                    >
+                      <Trash2 size={14} />
+                    </span>
+                  ) : null}
+                </button>
+              ))}
+              {serversQuery.isError ? <pre className="error-box">{String(serversQuery.error.message)}</pre> : null}
+              {deleteServerMutation.isError ? (
+                <pre className="error-box">{String(deleteServerMutation.error.message)}</pre>
+              ) : null}
+              {serversQuery.data?.servers.length === 0 ? <p className="empty-state">No configured servers</p> : null}
+            </div>
+          </aside>
+        </div>
 
         <section className="panel tools-panel">
           <div className="panel-heading">
