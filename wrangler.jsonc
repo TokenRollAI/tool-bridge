@@ -12,6 +12,9 @@
     "enabled": true,
     "head_sampling_rate": 1
   },
+  // Custom domain (the fantacy.live zone is managed in this Cloudflare account).
+  // wrangler provisions the DNS record + TLS cert automatically on deploy.
+  "routes": [{ "pattern": "tool-bridge.fantacy.live", "custom_domain": true }],
   "vars": {
     "MCP_SERVERS_JSON": "{\"context7\":{\"name\":\"Context7\",\"endpoint\":\"https://mcp.context7.com/mcp\",\"description\":\"Public documentation MCP server\"}}",
     "OAUTH_REQUIRED_AUDIENCE": ""
