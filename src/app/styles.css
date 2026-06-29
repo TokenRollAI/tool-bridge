@@ -467,10 +467,16 @@ button {
 
 .tree-title {
   overflow: hidden;
-  flex: 1;
+  flex: 0 1 auto;
+  max-width: 360px;
   font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* Pushes method/flags/copy to the right edge, leaving ~help next to the name. */
+.tree-spacer {
+  flex: 1;
 }
 
 .tree-method {

@@ -699,19 +699,20 @@ function TreeNodeRow({ node, depth, onCopy, copied, authToken }: TreeNodeRowProp
         >
           {expandable ? expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} /> : <span className="tree-dot" />}
         </button>
+        <span className={`tree-kind tree-kind-${node.kind}`}>{kindLabel}</span>
+        <span className="tree-title">{node.title || node.path}</span>
         <button className="tree-action" onClick={() => void loadHelp()} title="View this node's ~help">
           <Braces size={12} />
           ~help
         </button>
+        <span className="tree-spacer" />
+        {node.endpoint ? <span className="tree-method">{node.endpoint.method}</span> : null}
+        {node.endpoint?.tools ? <span className="tree-flag">{node.endpoint.tools.length} tools</span> : null}
+        {node.truncated ? <span className="tree-flag">truncated</span> : null}
         <button className="tree-copy" onClick={() => onCopy(node.helpUrl)} title="Copy ~help URL">
           <Copy size={13} />
           {copied === node.helpUrl ? 'Copied' : ''}
         </button>
-        <span className={`tree-kind tree-kind-${node.kind}`}>{kindLabel}</span>
-        <span className="tree-title">{node.title || node.path}</span>
-        {node.endpoint ? <span className="tree-method">{node.endpoint.method}</span> : null}
-        {node.endpoint?.tools ? <span className="tree-flag">{node.endpoint.tools.length} tools</span> : null}
-        {node.truncated ? <span className="tree-flag">truncated</span> : null}
       </div>
       {help !== null ? (
         <details className="schema-box" style={{ marginLeft: `${depth * 16 + 28}px` }} open>
