@@ -5,7 +5,6 @@ import {
   ChevronDown,
   ChevronRight,
   Copy,
-  FileText,
   KeyRound,
   Network,
   Play,
@@ -241,7 +240,7 @@ export function App() {
   const [adhoc, setAdhoc] = useState<AdhocTarget>(() => readAdhocTarget());
   const [mode, setMode] = useState<'configured' | 'adhoc' | 'tree'>('configured');
   const [copied, setCopied] = useState('');
-  const [docView, setDocView] = useState<{ kind: 'help' | 'skill'; text: string } | null>(null);
+  const [docView, setDocView] = useState<string | null>(null);
 
   const authQuery = useQuery({
     queryKey: ['auth-config'],
@@ -339,29 +338,25 @@ export function App() {
     window.setTimeout(() => setCopied(''), 1200);
   }
 
-  // Fetch and display ~help / ~skill inline instead of only copying the URL.
-  // ~help comes from the JSON TB tree (/htbp/{id}); ~skill from the legacy
-  // text endpoint (/mcp/{id}/~skill).
-  async function viewDoc(kind: 'help' | 'skill') {
+  // Fetch and display the node's JSON ~help inline instead of only copying the URL.
+  async function viewDoc() {
     if (!selectedServerId) {
       return;
     }
-    const id = encodeURIComponent(selectedServerId);
-    const url = kind === 'help' ? `/htbp/${id}/~help` : `/htbp/${id}/~skill`;
-    const accept = kind === 'help' ? 'application/json' : 'text/markdown, text/plain';
+    const url = `/htbp/${encodeURIComponent(selectedServerId)}/~help`;
     try {
-      const headers = new Headers({ Accept: accept });
+      const headers = new Headers({ Accept: 'application/json' });
       if (authToken) {
         headers.set('Authorization', `Bearer ${authToken}`);
       }
       const response = await fetch(url, { headers });
       const raw = await response.text();
-      const text = response.headers.get('Content-Type')?.includes('application/json')
+      const body = response.headers.get('Content-Type')?.includes('application/json')
         ? pretty(JSON.parse(raw))
         : raw;
-      setDocView({ kind, text: response.ok ? text : `HTTP ${response.status}\n\n${text}` });
+      setDocView(response.ok ? body : `HTTP ${response.status}\n\n${body}`);
     } catch (error) {
-      setDocView({ kind, text: error instanceof Error ? error.message : String(error) });
+      setDocView(error instanceof Error ? error.message : String(error));
     }
   }
 
@@ -544,22 +539,18 @@ export function App() {
           {mode === 'configured' && selectedServerId ? (
             <>
               <div className="link-row">
-                <button onClick={() => void viewDoc('help')}>
-                  <Copy size={14} />
+                <button onClick={() => void viewDoc()}>
+                  <Braces size={14} />
                   ~help
-                </button>
-                <button onClick={() => void viewDoc('skill')}>
-                  <FileText size={14} />
-                  ~skill
                 </button>
               </div>
               {docView ? (
                 <details className="schema-box" open>
                   <summary>
-                    {docView.kind === 'help' ? <Braces size={15} /> : <FileText size={15} />}
-                    {docView.kind === 'help' ? '~help (JSON)' : '~skill'}
+                    <Braces size={15} />
+                    ~help (JSON)
                   </summary>
-                  <pre>{docView.text}</pre>
+                  <pre>{docView}</pre>
                 </details>
               ) : null}
             </>

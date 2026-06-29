@@ -1,7 +1,7 @@
 import { createRemoteJWKSet, jwtVerify } from 'jose';
 import { clampCrawlOptions, crawlTree } from './tb/crawl';
 import { parseTree } from './tb/registry';
-import { NotFoundError, resolveCall, resolveHelp, resolveSkill } from './tb/resolve';
+import { NotFoundError, resolveCall, resolveHelp } from './tb/resolve';
 import { resolveTenant, tenantModeEnabled } from './tb/tenant';
 import type { DirectoryNode } from './tb/types';
 
@@ -727,17 +727,13 @@ async function routeHtbp(request: Request, env: AppEnv): Promise<Response> {
   const rest = url.pathname.replace(/^\/htbp\/?/, '');
   const rawSegments = rest.split('/').filter((segment) => segment.length > 0);
 
-  // Trailing ~help / ~skill are control segments; otherwise it's an end-path call.
-  const last = rawSegments[rawSegments.length - 1];
-  const control = last === '~help' || last === '~skill' ? last : undefined;
-  const isHelp = rawSegments.length === 0 || control === '~help';
-  const segments = (control ? rawSegments.slice(0, -1) : rawSegments).map(decodeURIComponent);
+  // A trailing ~help control segment requests help; otherwise it's an end-path call.
+  const hasHelpSuffix = rawSegments[rawSegments.length - 1] === '~help';
+  const isHelp = rawSegments.length === 0 || hasHelpSuffix;
+  const segments = (hasHelpSuffix ? rawSegments.slice(0, -1) : rawSegments).map(decodeURIComponent);
 
   try {
     const root = rootFor(authInfo, env);
-    if (control === '~skill') {
-      return await resolveSkill(env, root, segments, authInfo.mode);
-    }
     if (isHelp) {
       const accept = request.headers.get('Accept') ?? '';
       return await resolveHelp(env, root, segments, authInfo.mode, accept);
