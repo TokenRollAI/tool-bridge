@@ -2,7 +2,7 @@
 
 import { adapterFor } from './adapters';
 import { buildTextHelp } from './help';
-import { findNode, nodePath } from './registry';
+import { findNode, nodePath, TREE_PREFIX } from './registry';
 import { AdapterContext, AppEnv, AuthMode, DirectoryNode, HelpPayload } from './types';
 import { json, text, NotFoundError } from './util';
 
@@ -24,8 +24,10 @@ async function describe(
   if (!found) {
     throw new NotFoundError(`No TB resource at '/${segments.join('/')}'.`);
   }
-  const resourcePath = nodePath(found.node);
-  const ctx: AdapterContext = { env, authMode, basePath: resourcePath };
+  // Use the full request path (node + adapter sub-path) so the text-DSL cmd
+  // lines target the actual resource (e.g. a tool end-path), not just the node.
+  const resourcePath = segments.length > 0 ? `${TREE_PREFIX}/${segments.join('/')}` : TREE_PREFIX;
+  const ctx: AdapterContext = { env, authMode, basePath: nodePath(found.node) };
   const payload = await adapterFor(found.node).describe(found.node, ctx, found.sub);
   return { payload, resourcePath };
 }
@@ -62,8 +64,8 @@ export async function resolveCall(
   if (!found) {
     throw new NotFoundError(`No TB resource at '/${segments.join('/')}'.`);
   }
-  const resourcePath = nodePath(found.node);
-  const ctx: AdapterContext = { env, authMode, basePath: resourcePath };
+  const resourcePath = segments.length > 0 ? `${TREE_PREFIX}/${segments.join('/')}` : TREE_PREFIX;
+  const ctx: AdapterContext = { env, authMode, basePath: nodePath(found.node) };
   const result = await adapterFor(found.node).call(found.node, ctx, found.sub, input);
   return json({ resource: resourcePath, result });
 }
