@@ -12,8 +12,18 @@
     "enabled": true,
     "head_sampling_rate": 1
   },
+  // Custom domain (the fantacy.live zone is managed in this Cloudflare account).
+  // wrangler provisions the DNS record + TLS cert automatically on deploy.
+  "routes": [{ "pattern": "tool-bridge.fantacy.live", "custom_domain": true }],
   "vars": {
-    "MCP_SERVERS_JSON": "{\"context7\":{\"name\":\"Context7\",\"endpoint\":\"https://mcp.context7.com/mcp\",\"description\":\"Public documentation MCP server\"}}",
-    "OAUTH_REQUIRED_AUDIENCE": ""
-  }
+    "MCP_SERVERS_JSON": "{\"type\":\"directory\",\"id\":\"root\",\"title\":\"Tool Bridge A\",\"children\":[{\"type\":\"mcp\",\"id\":\"context7\",\"name\":\"Context7\",\"endpoint\":\"https://mcp.context7.com/mcp\",\"description\":\"Public documentation MCP server\",\"namespace\":\"c7\",\"headers\":{\"X-TB-Demo\":\"${DEMO_HEADER_VALUE}\"},\"toolOverrides\":{\"query-docs\":{\"rename\":\"docs\",\"description\":\"Query the docs (renamed via Tools Management)\"},\"resolve-library-id\":{\"hide\":true}}},{\"type\":\"remote\",\"id\":\"server-b\",\"title\":\"Tool Bridge B (federated)\",\"helpUrl\":\"https://tool-bridge-b.fantacy.live/htbp/~help\"},{\"type\":\"http\",\"id\":\"github\",\"title\":\"GitHub API\",\"summary\":\"Public GitHub REST endpoints\",\"endpoints\":[{\"name\":\"get-repo\",\"method\":\"GET\",\"url\":\"https://api.github.com/repos/TokenRollAI/HTBP\",\"description\":\"Fetch the HTBP repo metadata\"},{\"name\":\"list-commits\",\"method\":\"GET\",\"url\":\"https://api.github.com/repos/TokenRollAI/HTBP/commits\",\"description\":\"List recent commits\"},{\"name\":\"echo-headers\",\"method\":\"GET\",\"url\":\"https://postman-echo.com/get\",\"description\":\"Echo request headers\",\"headers\":{\"X-TB-Injected\":\"${DEMO_HEADER_VALUE}\"}}]},{\"type\":\"mount\",\"id\":\"files\",\"title\":\"Files\",\"bucket\":\"TB_FILES\",\"description\":\"R2-backed file tree\"},{\"type\":\"directory\",\"id\":\"team\",\"title\":\"Team namespace\",\"summary\":\"Nested directory demo\",\"children\":[{\"type\":\"directory\",\"id\":\"docs\",\"title\":\"Docs\",\"children\":[{\"type\":\"mcp\",\"id\":\"context7b\",\"name\":\"Context7 (nested)\",\"endpoint\":\"https://mcp.context7.com/mcp\",\"description\":\"Same MCP, nested two levels deep\"}]}]}]}",
+    "OAUTH_REQUIRED_AUDIENCE": "",
+    "DEMO_HEADER_VALUE": "injected-by-tool-bridge"
+  },
+  // R2 bucket bindings referenced by `mount` nodes (by their `bucket` name).
+  "r2_buckets": [{ "binding": "TB_FILES", "bucket_name": "tool-bridge-files" }],
+  //
+  // KV namespace for multi-tenancy + runtime-added (dynamic) servers. Its
+  // presence enables tenant mode and the writable /api/servers endpoints.
+  "kv_namespaces": [{ "binding": "TENANTS", "id": "a1e48dcf2fe44872a828a992d6efd5e5" }]
 }

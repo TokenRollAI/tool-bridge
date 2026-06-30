@@ -1,0 +1,20 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "tool-bridge-b",
+  "main": "src/worker/index.ts",
+  "compatibility_date": "2026-06-25",
+  "compatibility_flags": ["nodejs_compat"],
+  "assets": {
+    "directory": "./dist/client",
+    "binding": "ASSETS"
+  },
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1
+  },
+  "routes": [{ "pattern": "tool-bridge-b.fantacy.live", "custom_domain": true }],
+  "vars": {
+    "MCP_SERVERS_JSON": "{\"type\":\"directory\",\"id\":\"root\",\"title\":\"Tool Bridge B\",\"summary\":\"Federated TB server exposing DeepWiki (GitHub repo docs).\",\"children\":[{\"type\":\"mcp\",\"id\":\"deepwiki\",\"name\":\"DeepWiki\",\"endpoint\":\"https://mcp.deepwiki.com/mcp\",\"description\":\"AI docs for GitHub repos\"}]}",
+    "OAUTH_REQUIRED_AUDIENCE": ""
+  }
+}

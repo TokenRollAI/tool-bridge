@@ -133,10 +133,30 @@ button {
 }
 
 .workspace {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  align-items: stretch;
+}
+
+/* Row 1: pick a server (Discover + Servers). Row 2: use it (Tools + Call). */
+.workspace-row {
   display: grid;
-  grid-template-columns: 280px minmax(320px, 1fr) minmax(360px, 520px);
   gap: 16px;
   align-items: start;
+}
+
+.select-row {
+  grid-template-columns: minmax(280px, 1fr) 320px;
+}
+
+/* Show the Servers list first (left), Discover form second (right). */
+.select-row .server-panel {
+  order: -1;
+}
+
+.use-row {
+  grid-template-columns: minmax(320px, 1fr) minmax(360px, 520px);
 }
 
 .panel {
@@ -317,6 +337,12 @@ button {
   color: #eef8ef;
 }
 
+.result-box.result-error {
+  border-color: #e0a7a2;
+  background: #2a1512;
+  color: #ffd9d4;
+}
+
 .error-box {
   margin: 12px;
   border: 1px solid #e0a7a2;
@@ -332,7 +358,7 @@ button {
 }
 
 @media (max-width: 1080px) {
-  .workspace {
+  .workspace-row {
     grid-template-columns: 1fr;
   }
 
@@ -356,5 +382,164 @@ button {
   .token-field input {
     width: 100%;
   }
+}
+
+.tree-workspace {
+  grid-template-columns: 1fr;
+}
+
+.tree-panel {
+  min-height: 0;
+}
+
+.tree-view {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.tree-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  border-radius: 6px;
+  padding: 2px 6px;
+}
+
+/* Each nesting level indents and draws a black vertical guide line. */
+.tree-children {
+  margin-left: 14px;
+  padding-left: 14px;
+  border-left: 2px solid #1b1f1a;
+}
+
+.tree-row:hover {
+  background: #f7f8f3;
+}
+
+.tree-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border: none;
+  background: transparent;
+  color: #697066;
+  cursor: pointer;
+}
+
+.tree-toggle:disabled {
+  cursor: default;
+}
+
+.tree-dot {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: #c2c8bd;
+}
+
+.tree-kind {
+  flex: none;
+  border-radius: 4px;
+  padding: 1px 6px;
+  background: #edf0e8;
+  color: #59614f;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.tree-kind-mcp {
+  background: #e4f1ec;
+  color: #146a5d;
+}
+
+.tree-kind-remote {
+  background: #f3e9df;
+  color: #8a5a1f;
+}
+
+.tree-kind-http {
+  background: #e7ecf6;
+  color: #355089;
+}
+
+.tree-kind-mount {
+  background: #efe7f6;
+  color: #6a3589;
+}
+
+.tree-title {
+  overflow: hidden;
+  flex: 0 1 auto;
+  max-width: 360px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Pushes method/flags/copy to the right edge, leaving ~help next to the name. */
+.tree-spacer {
+  flex: 1;
+}
+
+.tree-method {
+  flex: none;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 11px;
+  color: #146a5d;
+}
+
+.tree-flag {
+  flex: none;
+  color: #8a5a1f;
+  font-size: 11px;
+}
+
+.tree-copy {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: none;
+  background: transparent;
+  color: #697066;
+  cursor: pointer;
+  font-size: 11px;
+}
+
+/* Prominent black action buttons on the left of each tree row. */
+.tree-action {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid #1b1f1a;
+  border-radius: 6px;
+  background: #1b1f1a;
+  color: #f7f8f3;
+  cursor: pointer;
+  padding: 2px 8px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.tree-action:hover {
+  background: #000;
+}
+
+.tree-desc {
+  margin: 0;
+  color: #697066;
+  font-size: 12px;
+}
+
+.tree-tools {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 6px;
 }
 

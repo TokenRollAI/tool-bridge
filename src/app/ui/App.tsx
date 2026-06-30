@@ -1,15 +1,18 @@
 import { useMemo, useState } from 'react';
-import { useMutation, useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Braces,
+  ChevronDown,
+  ChevronRight,
   Copy,
-  FileText,
   KeyRound,
+  Network,
   Play,
   RefreshCw,
   Search,
   Server,
   Shield,
+  Trash2,
 } from 'lucide-react';
 
 type AuthMode = 'none' | 'bearer' | 'oauth';
@@ -26,6 +29,7 @@ interface ServerSummary {
   endpoint: string;
   description?: string;
   allowedTools?: string[];
+  source?: 'static' | 'dynamic';
 }
 
 interface McpTool {
@@ -37,6 +41,7 @@ interface McpTool {
 
 interface ServersResponse {
   servers: ServerSummary[];
+  dynamicEnabled?: boolean;
 }
 
 interface ToolsResponse {
@@ -54,6 +59,37 @@ interface AdhocTarget {
   name: string;
   endpoint: string;
   bearerToken: string;
+}
+
+interface ToolSpec {
+  name: string;
+  description?: string;
+  inputSchema?: unknown;
+  outputSchema?: unknown;
+}
+
+interface EndpointSpec {
+  method: string;
+  inputSchema?: unknown;
+  outputSchema?: unknown;
+  example?: unknown;
+  tools?: ToolSpec[];
+}
+
+interface CrawlNode {
+  kind: 'directory' | 'mcp' | 'http' | 'remote' | 'mount';
+  path: string;
+  title?: string;
+  description?: string;
+  helpUrl: string;
+  children: CrawlNode[];
+  endpoint?: EndpointSpec;
+  error?: string;
+  truncated?: boolean;
+}
+
+interface TreeResponse {
+  tree: CrawlNode;
 }
 
 const AUTH_TOKEN_KEY = 'toolBridge.authToken';
@@ -146,11 +182,57 @@ function parseArguments(value: string): Record<string, unknown> {
   return parsed as Record<string, unknown>;
 }
 
-function toolSchemaSummary(tool: McpTool): string {
-  if (!tool.inputSchema) {
+function toolSchemaSummary(tool: McpTool | undefined): string {
+  if (!tool?.inputSchema) {
     return '{}';
   }
   return pretty(tool.inputSchema);
+}
+
+// Build a starter Arguments object from a tool's JSON Schema: every property
+// gets a typed placeholder (required ones first). Beats an empty {} that always
+// fails validation, and shows the caller exactly which fields to fill.
+function argumentsSkeleton(tool: McpTool | undefined): string {
+  const schema = tool?.inputSchema;
+  if (!schema || typeof schema !== 'object') {
+    return '{}';
+  }
+  const props = (schema as { properties?: Record<string, unknown> }).properties;
+  if (!props || typeof props !== 'object') {
+    return '{}';
+  }
+  const required = new Set(
+    Array.isArray((schema as { required?: unknown }).required)
+      ? ((schema as { required: unknown[] }).required.filter((r): r is string => typeof r === 'string'))
+      : []
+  );
+  const names = Object.keys(props).sort((a, b) => Number(required.has(b)) - Number(required.has(a)));
+  const skeleton: Record<string, unknown> = {};
+  for (const name of names) {
+    skeleton[name] = placeholderFor((props[name] as { type?: unknown })?.type);
+  }
+  return pretty(skeleton);
+}
+
+function placeholderFor(type: unknown): unknown {
+  switch (type) {
+    case 'number':
+    case 'integer':
+      return 0;
+    case 'boolean':
+      return false;
+    case 'array':
+      return [];
+    case 'object':
+      return {};
+    default:
+      return '';
+  }
+}
+
+// MCP tool results carry isError when the upstream rejected the call.
+function isToolError(result: unknown): boolean {
+  return !!result && typeof result === 'object' && (result as { isError?: unknown }).isError === true;
 }
 
 export function App() {
@@ -159,8 +241,11 @@ export function App() {
   const [selectedTool, setSelectedTool] = useState<string>('');
   const [argumentsText, setArgumentsText] = useState('{}');
   const [adhoc, setAdhoc] = useState<AdhocTarget>(() => readAdhocTarget());
-  const [mode, setMode] = useState<'configured' | 'adhoc'>('configured');
+  const [mode, setMode] = useState<'tree' | 'servers'>('tree');
   const [copied, setCopied] = useState('');
+  const [docView, setDocView] = useState<string | null>(null);
+
+  const queryClient = useQueryClient();
 
   const authQuery = useQuery({
     queryKey: ['auth-config'],
@@ -181,9 +266,11 @@ export function App() {
   const configuredToolsQuery = useQuery({
     queryKey: ['tools', selectedServerId, authToken],
     queryFn: () => api<ToolsResponse>(`/api/servers/${encodeURIComponent(selectedServerId)}/tools`, authToken),
-    enabled: mode === 'configured' && selectedServerId.length > 0,
+    enabled: mode === 'servers' && selectedServerId.length > 0,
   });
 
+  // Discover an arbitrary endpoint without saving it: shows its tools as a
+  // read-only preview. Saving it (Save to servers) makes it selectable by id.
   const adhocToolsMutation = useMutation({
     mutationFn: () =>
       api<ToolsResponse>('/api/bridge/tools', authToken, {
@@ -198,28 +285,44 @@ export function App() {
       }),
   });
 
+  const saveServerMutation = useMutation({
+    mutationFn: () =>
+      api<{ server: ServerSummary }>('/api/servers', authToken, {
+        method: 'POST',
+        body: JSON.stringify({ name: adhoc.name, endpoint: adhoc.endpoint }),
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['servers'] });
+    },
+  });
+
+  const deleteServerMutation = useMutation({
+    mutationFn: (id: string) =>
+      api<unknown>(`/api/servers/${encodeURIComponent(id)}`, authToken, { method: 'DELETE' }),
+    onSuccess: (_data, id) => {
+      if (id === selectedServerId) {
+        setSelectedServerId('');
+        setSelectedTool('');
+        setDocView(null);
+      }
+      void queryClient.invalidateQueries({ queryKey: ['servers'] });
+    },
+  });
+
+  const treeQuery = useQuery({
+    queryKey: ['tree', authToken],
+    queryFn: () => api<TreeResponse>('/api/tree', authToken),
+    enabled: mode === 'tree' && (authQuery.data?.mode === 'none' || authToken.length > 0),
+  });
+
   const callMutation = useMutation({
     mutationFn: async () => {
       const args = parseArguments(argumentsText);
       if (!selectedTool) {
         throw new Error('Select a tool first.');
       }
-      if (mode === 'adhoc') {
-        return api<CallResponse>('/api/bridge/call', authToken, {
-          method: 'POST',
-          body: JSON.stringify({
-            server: {
-              name: adhoc.name,
-              endpoint: adhoc.endpoint,
-              bearerToken: adhoc.bearerToken || undefined,
-            },
-            tool: selectedTool,
-            arguments: args,
-          }),
-        });
-      }
       if (!selectedServerId) {
-        throw new Error('Select a configured server first.');
+        throw new Error('Select a saved server first.');
       }
       return api<CallResponse>(
         `/api/servers/${encodeURIComponent(selectedServerId)}/tools/${encodeURIComponent(selectedTool)}/call`,
@@ -232,10 +335,11 @@ export function App() {
     },
   });
 
-  const tools = mode === 'adhoc' ? adhocToolsMutation.data?.tools : configuredToolsQuery.data?.tools;
-  const activeServer = mode === 'adhoc' ? adhocToolsMutation.data?.server : selectedServer;
+  // Tools come from the selected saved server; a freshly discovered (unsaved)
+  // server shows its tools as a read-only preview from the discover mutation.
+  const tools = selectedServerId ? configuredToolsQuery.data?.tools : adhocToolsMutation.data?.tools;
+  const activeServer = selectedServerId ? selectedServer : adhocToolsMutation.data?.server;
   const authMode = authQuery.data?.mode ?? 'none';
-  const bridgeBase = selectedServerId ? `/mcp/${encodeURIComponent(selectedServerId)}` : '';
 
   function updateAuthToken(value: string) {
     setAuthToken(value);
@@ -251,6 +355,28 @@ export function App() {
     await navigator.clipboard.writeText(value);
     setCopied(value);
     window.setTimeout(() => setCopied(''), 1200);
+  }
+
+  // Fetch and display the node's JSON ~help inline instead of only copying the URL.
+  async function viewDoc() {
+    if (!selectedServerId) {
+      return;
+    }
+    const url = `/htbp/${encodeURIComponent(selectedServerId)}/~help`;
+    try {
+      const headers = new Headers({ Accept: 'application/json' });
+      if (authToken) {
+        headers.set('Authorization', `Bearer ${authToken}`);
+      }
+      const response = await fetch(url, { headers });
+      const raw = await response.text();
+      const body = response.headers.get('Content-Type')?.includes('application/json')
+        ? pretty(JSON.parse(raw))
+        : raw;
+      setDocView(response.ok ? body : `HTTP ${response.status}\n\n${body}`);
+    } catch (error) {
+      setDocView(error instanceof Error ? error.message : String(error));
+    }
   }
 
   return (
@@ -280,44 +406,44 @@ export function App() {
       </header>
 
       <section className="mode-tabs" aria-label="Bridge mode">
-        <button className={mode === 'configured' ? 'active' : ''} onClick={() => setMode('configured')}>
-          <Server size={16} />
-          Configured
+        <button className={mode === 'tree' ? 'active' : ''} onClick={() => setMode('tree')}>
+          <Network size={16} />
+          Tree
         </button>
-        <button className={mode === 'adhoc' ? 'active' : ''} onClick={() => setMode('adhoc')}>
-          <Search size={16} />
-          Ad-hoc
+        <button className={mode === 'servers' ? 'active' : ''} onClick={() => setMode('servers')}>
+          <Server size={16} />
+          Servers
         </button>
       </section>
 
-      <section className="workspace">
-        <aside className="panel server-panel">
-          <div className="panel-heading">
-            <h2>Servers</h2>
-            <button className="icon-button" onClick={() => void serversQuery.refetch()} title="Refresh servers">
-              <RefreshCw size={16} />
-            </button>
-          </div>
-
-          {mode === 'configured' ? (
-            <div className="server-list">
-              {(serversQuery.data?.servers ?? []).map((server) => (
-                <button
-                  key={server.id}
-                  className={server.id === selectedServerId ? 'server-row selected' : 'server-row'}
-                  onClick={() => {
-                    setSelectedServerId(server.id);
-                    setSelectedTool('');
-                  }}
-                >
-                  <span>{server.name}</span>
-                  <small>{server.endpoint}</small>
-                </button>
-              ))}
-              {serversQuery.isError ? <pre className="error-box">{String(serversQuery.error.message)}</pre> : null}
-              {serversQuery.data?.servers.length === 0 ? <p className="empty-state">No configured servers</p> : null}
+      {mode === 'tree' ? (
+        <section className="workspace tree-workspace">
+          <section className="panel tree-panel">
+            <div className="panel-heading">
+              <div>
+                <h2>Tree</h2>
+                <p>Recursive HTBP walk from the root</p>
+              </div>
+              <button className="icon-button" onClick={() => void treeQuery.refetch()} title="Refresh tree">
+                <RefreshCw size={16} />
+              </button>
             </div>
-          ) : (
+            {treeQuery.isError ? <pre className="error-box">{String(treeQuery.error.message)}</pre> : null}
+            {treeQuery.isLoading ? <p className="empty-state">Crawling…</p> : null}
+            {treeQuery.data ? (
+              <div className="tree-view">
+                <TreeNodeRow node={treeQuery.data.tree} depth={0} onCopy={copy} copied={copied} authToken={authToken} />
+              </div>
+            ) : null}
+          </section>
+        </section>
+      ) : (
+      <section className="workspace">
+        <div className="workspace-row select-row">
+          <section className="panel discover-panel">
+            <div className="panel-heading">
+              <h2>Discover</h2>
+            </div>
             <div className="adhoc-form">
               <label>
                 Name
@@ -334,19 +460,14 @@ export function App() {
                   placeholder="https://example.com/mcp"
                 />
               </label>
-              <label>
-                Upstream bearer
-                <input
-                  type="password"
-                  value={adhoc.bearerToken}
-                  onChange={(event) => updateAdhoc({ ...adhoc, bearerToken: event.target.value })}
-                />
-              </label>
               <button
                 className="primary-button"
                 disabled={!adhoc.endpoint || adhocToolsMutation.isPending}
                 onClick={() => {
+                  setSelectedServerId('');
                   setSelectedTool('');
+                  setDocView(null);
+                  saveServerMutation.reset();
                   adhocToolsMutation.mutate();
                 }}
               >
@@ -356,17 +477,78 @@ export function App() {
               {adhocToolsMutation.isError ? (
                 <pre className="error-box">{String(adhocToolsMutation.error.message)}</pre>
               ) : null}
+              {adhocToolsMutation.isSuccess ? (
+                <button
+                  className="primary-button"
+                  disabled={saveServerMutation.isPending}
+                  onClick={() => saveServerMutation.mutate()}
+                >
+                  <Server size={16} />
+                  Save to servers
+                </button>
+              ) : null}
+              {saveServerMutation.isError ? (
+                <pre className="error-box">{String(saveServerMutation.error.message)}</pre>
+              ) : null}
+              {saveServerMutation.isSuccess ? (
+                <p className="empty-state">Saved — may take a few seconds to appear in the list (KV).</p>
+              ) : null}
             </div>
-          )}
-        </aside>
+          </section>
 
+          <aside className="panel server-panel">
+            <div className="panel-heading">
+              <h2>Servers</h2>
+              <button className="icon-button" onClick={() => void serversQuery.refetch()} title="Refresh servers">
+                <RefreshCw size={16} />
+              </button>
+            </div>
+
+            <div className="server-list">
+              {(serversQuery.data?.servers ?? []).map((server) => (
+                <button
+                  key={server.id}
+                  className={server.id === selectedServerId ? 'server-row selected' : 'server-row'}
+                  onClick={() => {
+                    setSelectedServerId(server.id);
+                    setSelectedTool('');
+                    setDocView(null);
+                  }}
+                >
+                  <span>{server.name}</span>
+                  <small>{server.endpoint}</small>
+                  {server.source === 'dynamic' ? (
+                    <span
+                      className="icon-button"
+                      role="button"
+                      title="Delete server"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        deleteServerMutation.mutate(server.id);
+                      }}
+                    >
+                      <Trash2 size={14} />
+                    </span>
+                  ) : null}
+                </button>
+              ))}
+              {serversQuery.isError ? <pre className="error-box">{String(serversQuery.error.message)}</pre> : null}
+              {deleteServerMutation.isError ? (
+                <pre className="error-box">{String(deleteServerMutation.error.message)}</pre>
+              ) : null}
+              {serversQuery.data?.servers.length === 0 ? <p className="empty-state">No configured servers</p> : null}
+            </div>
+          </aside>
+        </div>
+
+        <div className="workspace-row use-row">
         <section className="panel tools-panel">
           <div className="panel-heading">
             <div>
               <h2>Tools</h2>
               <p>{activeServer?.endpoint ?? 'Select or discover a server'}</p>
             </div>
-            {mode === 'configured' && selectedServerId ? (
+            {selectedServerId ? (
               <button className="icon-button" onClick={() => void configuredToolsQuery.refetch()} title="Refresh tools">
                 <RefreshCw size={16} />
               </button>
@@ -380,7 +562,7 @@ export function App() {
                 className={tool.name === selectedTool ? 'tool-row selected' : 'tool-row'}
                 onClick={() => {
                   setSelectedTool(tool.name);
-                  setArgumentsText('{}');
+                  setArgumentsText(argumentsSkeleton(tool));
                 }}
               >
                 <span>{tool.name}</span>
@@ -392,19 +574,35 @@ export function App() {
           {configuredToolsQuery.isError ? (
             <pre className="error-box">{String(configuredToolsQuery.error.message)}</pre>
           ) : null}
-          {tools?.length === 0 ? <p className="empty-state">No tools returned</p> : null}
+          {selectedServerId && configuredToolsQuery.isFetching ? (
+            <p className="empty-state">Loading tools…</p>
+          ) : null}
+          {adhocToolsMutation.isPending ? <p className="empty-state">Discovering…</p> : null}
+          {!selectedServerId && !adhocToolsMutation.data && !adhocToolsMutation.isPending ? (
+            <p className="empty-state">Select or discover a server</p>
+          ) : null}
+          {tools?.length === 0 && !configuredToolsQuery.isFetching && !adhocToolsMutation.isPending ? (
+            <p className="empty-state">No tools returned</p>
+          ) : null}
 
-          {mode === 'configured' && selectedServerId ? (
-            <div className="link-row">
-              <button onClick={() => void copy(`${bridgeBase}/~help`)}>
-                <Copy size={14} />
-                {copied === `${bridgeBase}/~help` ? 'Copied' : '~help'}
-              </button>
-              <button onClick={() => void copy(`${bridgeBase}/~skill`)}>
-                <FileText size={14} />
-                {copied === `${bridgeBase}/~skill` ? 'Copied' : '~skill'}
-              </button>
-            </div>
+          {selectedServerId ? (
+            <>
+              <div className="link-row">
+                <button onClick={() => void viewDoc()}>
+                  <Braces size={14} />
+                  ~help
+                </button>
+              </div>
+              {docView ? (
+                <details className="schema-box" open>
+                  <summary>
+                    <Braces size={15} />
+                    ~help (JSON)
+                  </summary>
+                  <pre>{docView}</pre>
+                </details>
+              ) : null}
+            </>
           ) : null}
         </section>
 
@@ -435,14 +633,137 @@ export function App() {
                 <Braces size={15} />
                 Input schema
               </summary>
-              <pre>{toolSchemaSummary((tools ?? []).find((tool) => tool.name === selectedTool) as McpTool)}</pre>
+              <pre>{toolSchemaSummary((tools ?? []).find((tool) => tool.name === selectedTool))}</pre>
             </details>
           ) : null}
 
           {callMutation.isError ? <pre className="error-box">{String(callMutation.error.message)}</pre> : null}
-          {callMutation.data ? <pre className="result-box">{pretty(callMutation.data.result)}</pre> : null}
+          {callMutation.data ? (
+            <pre className={isToolError(callMutation.data.result) ? 'result-box result-error' : 'result-box'}>
+              {isToolError(callMutation.data.result) ? '⚠ Tool returned an error:\n\n' : ''}
+              {pretty(callMutation.data.result)}
+            </pre>
+          ) : null}
         </section>
+        </div>
       </section>
+      )}
     </main>
+  );
+}
+
+interface TreeNodeRowProps {
+  node: CrawlNode;
+  depth: number;
+  onCopy: (value: string) => void;
+  copied: string;
+  authToken: string;
+}
+
+function TreeNodeRow({ node, depth, onCopy, copied, authToken }: TreeNodeRowProps) {
+  const expandable = node.children.length > 0 || !!node.endpoint;
+  const [expanded, setExpanded] = useState(depth < 2);
+  const [help, setHelp] = useState<string | null>(null);
+  const kindLabel = node.kind === 'remote' ? 'remote ⇄' : node.kind;
+
+  // Fetch this node's own ~help (every level — root / directory / leaf — has one).
+  async function loadHelp() {
+    if (help !== null) {
+      setHelp(null);
+      return;
+    }
+    try {
+      const headers = new Headers({ Accept: 'application/json' });
+      if (authToken) {
+        headers.set('Authorization', `Bearer ${authToken}`);
+      }
+      const response = await fetch(node.helpUrl, { headers });
+      const raw = await response.text();
+      const body = response.headers.get('Content-Type')?.includes('application/json')
+        ? pretty(JSON.parse(raw))
+        : raw;
+      setHelp(response.ok ? body : `HTTP ${response.status}\n\n${body}`);
+    } catch (error) {
+      setHelp(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  return (
+    <div className="tree-node">
+      <div className="tree-row">
+        <button
+          className="tree-toggle"
+          onClick={() => setExpanded((value) => !value)}
+          disabled={!expandable}
+          title={expandable ? 'Toggle' : 'Leaf'}
+        >
+          {expandable ? expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} /> : <span className="tree-dot" />}
+        </button>
+        <span className={`tree-kind tree-kind-${node.kind}`}>{kindLabel}</span>
+        <span className="tree-title">{node.title || node.path}</span>
+        <button className="tree-action" onClick={() => void loadHelp()} title="View this node's ~help">
+          <Braces size={12} />
+          ~help
+        </button>
+        <span className="tree-spacer" />
+        {node.endpoint ? <span className="tree-method">{node.endpoint.method}</span> : null}
+        {node.endpoint?.tools ? <span className="tree-flag">{node.endpoint.tools.length} tools</span> : null}
+        {node.truncated ? <span className="tree-flag">truncated</span> : null}
+        <button className="tree-copy" onClick={() => onCopy(node.helpUrl)} title="Copy ~help URL">
+          <Copy size={13} />
+          {copied === node.helpUrl ? 'Copied' : ''}
+        </button>
+      </div>
+      {help !== null ? (
+        <details className="schema-box" style={{ marginLeft: '28px' }} open>
+          <summary>
+            <Braces size={15} />
+            {node.helpUrl}
+          </summary>
+          <pre>{help}</pre>
+        </details>
+      ) : null}
+      {node.description ? (
+        <p className="tree-desc" style={{ paddingLeft: '28px' }}>
+          {node.description}
+        </p>
+      ) : null}
+      {node.error ? (
+        <pre className="error-box" style={{ marginLeft: '28px' }}>
+          {node.error}
+        </pre>
+      ) : null}
+      {expanded && node.endpoint?.tools ? (
+        <div className="tree-tools" style={{ marginLeft: '28px' }}>
+          {node.endpoint.tools.map((tool) => (
+            <details key={tool.name} className="schema-box">
+              <summary>
+                <Braces size={15} />
+                {tool.name}
+              </summary>
+              {tool.description ? <p className="tree-desc">{tool.description}</p> : null}
+              <pre>{pretty(tool.inputSchema ?? {})}</pre>
+            </details>
+          ))}
+          {node.endpoint.tools.length === 0 ? <p className="empty-state">No tools exposed</p> : null}
+        </div>
+      ) : null}
+      {expanded && node.endpoint && !node.endpoint.tools ? (
+        <details className="schema-box" style={{ marginLeft: '28px' }} open>
+          <summary>
+            <Braces size={15} />
+            Input schema
+          </summary>
+          <pre>{pretty(node.endpoint.inputSchema ?? {})}</pre>
+        </details>
+      ) : null}
+      {expanded && node.children.length > 0 ? (
+        <div className="tree-children">
+          {node.children.map((child) => (
+            <TreeNodeRow key={child.path} node={child} depth={depth + 1} onCopy={onCopy} copied={copied} authToken={authToken} />
+          ))}
+        </div>
+      ) : null}
+    </div>
   );
 }

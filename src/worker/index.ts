@@ -1,4 +1,15 @@
 import { createRemoteJWKSet, jwtVerify } from 'jose';
+import { clampCrawlOptions, crawlTree } from './tb/crawl';
+import { parseTree } from './tb/registry';
+import { NotFoundError, resolveCall, resolveHelp } from './tb/resolve';
+import { resolveTenant, tenantModeEnabled } from './tb/tenant';
+import {
+  deleteDynamicServer,
+  dynamicServersEnabled,
+  listDynamicServers,
+  putDynamicServer,
+} from './tb/dynamic-servers';
+import type { DirectoryNode } from './tb/types';
 
 const MCP_PROTOCOL_VERSION = '2025-11-25';
 const CLIENT_NAME = 'tool-bridge';
@@ -48,6 +59,10 @@ type AuthMode = 'none' | 'bearer' | 'oauth';
 interface AuthInfo {
   mode: AuthMode;
   subject?: string;
+  // Set when tenant mode is on and the Secret Key resolved to a tenant.
+  tenantId?: string;
+  // The tenant's tree root; when undefined, requests fall back to the env tree.
+  root?: DirectoryNode;
 }
 
 interface RpcPayload {
@@ -120,6 +135,22 @@ async function constantTimeEqual(a: string, b: string): Promise<boolean> {
 
 async function authenticate(request: Request, env: AppEnv): Promise<AuthInfo | Response> {
   const mode = getAuthMode(env);
+
+  // Tenant mode: the bearer token is a Secret Key resolved to a tenant + tree.
+  // This composes orthogonally on top of the base mode — when TENANTS is set we
+  // always require a token and resolve it, even if the base mode is 'none'.
+  if (tenantModeEnabled(env)) {
+    const token = getBearerToken(request);
+    if (!token) {
+      return errorResponse(401, 'unauthorized', 'Secret Key (bearer token) required.');
+    }
+    const tenant = await resolveTenant(env, token);
+    if (!tenant) {
+      return errorResponse(401, 'unauthorized', 'Secret Key is invalid.');
+    }
+    return { mode, subject: tenant.tenantId, tenantId: tenant.tenantId, root: tenant.root };
+  }
+
   if (mode === 'none') {
     return { mode };
   }
@@ -197,6 +228,12 @@ function parseConfiguredServers(env: AppEnv): ServerConfig[] {
   const raw = env.MCP_SERVERS_JSON || '{}';
   const parsed = JSON.parse(raw) as unknown;
   const entries: ServerConfig[] = [];
+  // Nested tree form: collect every MCP leaf (skip directory/http/remote/mount)
+  // so the legacy /api/servers + /mcp/* routes keep working under a tree config.
+  if (isRecord(parsed) && (parsed.type === 'directory' || Array.isArray(parsed.children))) {
+    collectMcpLeaves(parsed, entries);
+    return entries;
+  }
   if (Array.isArray(parsed)) {
     for (const item of parsed) {
       entries.push(normalizeServerConfig(item));
@@ -209,6 +246,22 @@ function parseConfiguredServers(env: AppEnv): ServerConfig[] {
     }
   }
   return entries;
+}
+
+// Recursively gather `type: "mcp"` nodes from a nested tree config.
+function collectMcpLeaves(node: unknown, out: ServerConfig[]): void {
+  if (!isRecord(node)) {
+    return;
+  }
+  if (node.type === 'mcp') {
+    out.push(normalizeServerConfig(node));
+    return;
+  }
+  if (Array.isArray(node.children)) {
+    for (const child of node.children) {
+      collectMcpLeaves(child, out);
+    }
+  }
 }
 
 function normalizeServerConfig(value: unknown): ServerConfig {
@@ -251,12 +304,26 @@ function normalizeAdhocServer(value: AdhocServerInput): ServerConfig {
   };
 }
 
-function resolveServer(env: AppEnv, serverId: string): ResolvedServer {
-  const server = parseConfiguredServers(env).find((item) => item.id === serverId || item.name === serverId);
-  if (!server) {
-    throw new Error(`Unknown MCP server '${serverId}'.`);
+// Stable, URL-safe id for a dynamically saved server.
+function slugify(value: string): string {
+  const slug = value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  return slug || 'server';
+}
+
+async function resolveServer(env: AppEnv, serverId: string): Promise<ResolvedServer> {
+  const configured = parseConfiguredServers(env).find((item) => item.id === serverId || item.name === serverId);
+  if (configured) {
+    return materializeServer(env, configured);
   }
-  return materializeServer(env, server);
+  // Fall back to a runtime-added (KV) server.
+  const dynamic = (await listDynamicServers(env)).find((item) => item.id === serverId || item.name === serverId);
+  if (dynamic) {
+    return materializeServer(env, { id: dynamic.id, name: dynamic.name, endpoint: dynamic.endpoint, description: dynamic.description });
+  }
+  throw new Error(`Unknown MCP server '${serverId}'.`);
 }
 
 function materializeServer(env: AppEnv, server: ServerConfig): ResolvedServer {
@@ -640,10 +707,44 @@ async function routeApi(request: Request, env: AppEnv): Promise<Response> {
   }
 
   if (path === '/api/servers' && request.method === 'GET') {
-    return json({
-      auth: authInfo,
-      servers: parseConfiguredServers(env).map(({ headers: _headers, ...server }) => server),
+    const staticServers = parseConfiguredServers(env).map(({ headers: _headers, ...server }) => ({
+      ...server,
+      source: 'static' as const,
+    }));
+    const dynamic = (await listDynamicServers(env)).map((server) => ({ ...server, source: 'dynamic' as const }));
+    // Dynamic entries with an id that collides with a static one are dropped.
+    const staticIds = new Set(staticServers.map((s) => s.id));
+    const merged = [...staticServers, ...dynamic.filter((s) => !staticIds.has(s.id))];
+    return json({ auth: authInfo, servers: merged, dynamicEnabled: dynamicServersEnabled(env) });
+  }
+
+  if (path === '/api/servers' && request.method === 'POST') {
+    if (!dynamicServersEnabled(env)) {
+      return errorResponse(501, 'not_supported', 'Saving servers requires the TENANTS KV binding.');
+    }
+    const body = await readJsonBody<{ name?: string; endpoint?: string; description?: string }>(request);
+    if (!body.endpoint) {
+      return errorResponse(400, 'bad_request', 'endpoint is required.');
+    }
+    // Validate (https enforcement etc.) and derive a stable id from name/endpoint.
+    const resolved = materializeServer(env, normalizeAdhocServer({ name: body.name, endpoint: body.endpoint }));
+    const id = slugify(body.name || resolved.id);
+    await putDynamicServer(env, {
+      id,
+      name: body.name || id,
+      endpoint: resolved.endpoint,
+      description: body.description,
     });
+    return json({ ok: true, id });
+  }
+
+  const deleteMatch = /^\/api\/servers\/([^/]+)$/.exec(path);
+  if (deleteMatch && request.method === 'DELETE') {
+    if (!dynamicServersEnabled(env)) {
+      return errorResponse(501, 'not_supported', 'Deleting servers requires the TENANTS KV binding.');
+    }
+    await deleteDynamicServer(env, decodeURIComponent(deleteMatch[1] ?? ''));
+    return json({ ok: true });
   }
 
   if (path === '/api/bridge/tools' && request.method === 'POST') {
@@ -663,14 +764,67 @@ async function routeApi(request: Request, env: AppEnv): Promise<Response> {
     return json({ server: publicServer(server), tool: body.tool, result });
   }
 
+  if (path === '/api/tree' && request.method === 'GET') {
+    const tree = await crawlTree(env, rootFor(authInfo, env), { path: '' }, authInfo.mode);
+    return json({ auth: authInfo, tree });
+  }
+
+  if (path === '/api/crawl' && request.method === 'POST') {
+    const body = await readJsonBody<{ start?: { path?: string; url?: string }; maxDepth?: number; maxNodes?: number }>(
+      request
+    );
+    const opts = clampCrawlOptions({ maxDepth: body.maxDepth, maxNodes: body.maxNodes });
+    const tree = await crawlTree(env, rootFor(authInfo, env), body.start ?? { path: '' }, authInfo.mode, opts);
+    return json({ auth: authInfo, tree });
+  }
+
   const serverMatch = /^\/api\/servers\/([^/]+)(\/.*)?$/.exec(path);
   if (serverMatch) {
-    const server = resolveServer(env, decodeURIComponent(serverMatch[1] ?? ''));
+    const server = await resolveServer(env, decodeURIComponent(serverMatch[1] ?? ''));
     const suffix = serverMatch[2] ?? '';
     return routeConfiguredServer(request, server, suffix, `/api/servers/${encodeURIComponent(server.id)}`, authInfo.mode);
   }
 
   return errorResponse(404, 'not_found', 'API route not found.');
+}
+
+// The tree to resolve this request against: the tenant's tree when tenant mode
+// resolved one, otherwise the global env tree (fallback / legacy behavior).
+function rootFor(authInfo: AuthInfo, env: AppEnv): DirectoryNode {
+  return authInfo.root ?? parseTree(env);
+}
+
+async function routeHtbp(request: Request, env: AppEnv): Promise<Response> {
+  const authInfo = await authenticate(request, env);
+  if (authInfo instanceof Response) {
+    return authInfo;
+  }
+  const url = new URL(request.url);
+  const rest = url.pathname.replace(/^\/htbp\/?/, '');
+  const rawSegments = rest.split('/').filter((segment) => segment.length > 0);
+
+  // A trailing ~help control segment requests help; otherwise it's an end-path call.
+  const hasHelpSuffix = rawSegments[rawSegments.length - 1] === '~help';
+  const isHelp = rawSegments.length === 0 || hasHelpSuffix;
+  const segments = (hasHelpSuffix ? rawSegments.slice(0, -1) : rawSegments).map(decodeURIComponent);
+
+  try {
+    const root = rootFor(authInfo, env);
+    if (isHelp) {
+      const accept = request.headers.get('Accept') ?? '';
+      return await resolveHelp(env, root, segments, authInfo.mode, accept);
+    }
+    if (request.method === 'POST') {
+      const input = await readJsonBody<unknown>(request);
+      return await resolveCall(env, root, segments, authInfo.mode, input);
+    }
+    return errorResponse(405, 'method_not_allowed', 'Use GET {path}/~help or POST {path} to call.');
+  } catch (error) {
+    if (error instanceof NotFoundError) {
+      return errorResponse(404, 'not_found', error.message);
+    }
+    return errorResponse(500, 'internal_error', messageOf(error));
+  }
 }
 
 async function routeMcpBridge(request: Request, env: AppEnv): Promise<Response> {
@@ -683,7 +837,7 @@ async function routeMcpBridge(request: Request, env: AppEnv): Promise<Response> 
   if (!match) {
     return errorResponse(404, 'not_found', 'MCP bridge route not found.');
   }
-  const server = resolveServer(env, decodeURIComponent(match[1] ?? ''));
+  const server = await resolveServer(env, decodeURIComponent(match[1] ?? ''));
   return routeConfiguredServer(request, server, match[2] ?? '', `/mcp/${encodeURIComponent(server.id)}`, authInfo.mode);
 }
 
@@ -739,6 +893,14 @@ async function handleRequest(request: Request, env: AppEnv): Promise<Response> {
     }
     if (url.pathname.startsWith('/mcp/')) {
       return await routeMcpBridge(request, env);
+    }
+    if (url.pathname === '/htbp' || url.pathname.startsWith('/htbp/')) {
+      // HTBP control-plane responses are cross-origin fetchable: federation and
+      // browser agents fetch another TB server's ~help from a different origin.
+      const response = await routeHtbp(request, env);
+      const withCors = new Response(response.body, response);
+      withCors.headers.set('Access-Control-Allow-Origin', '*');
+      return withCors;
     }
     return env.ASSETS.fetch(request);
   } catch (error) {
