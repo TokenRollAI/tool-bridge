@@ -78,4 +78,57 @@ describe('buildTextHelp content negotiation', () => {
     expect(textHelp).toContain('cmd query-docs POST /htbp/docs/context7');
     expect(textHelp).toContain('"tool":"resolve-library-id"');
   });
+
+  it('defaults effect to external when tools declare no semantics (backward compatible)', () => {
+    const textHelp = buildTextHelp(
+      {
+        htbp: 'draft',
+        kind: 'mcp',
+        title: 'Context7',
+        endpoint: { method: 'POST', tools: [{ name: 'query-docs' }] },
+      },
+      '/htbp/docs/context7',
+      'none'
+    );
+    expect(textHelp).toContain('  effect external');
+    expect(textHelp).not.toContain('  scope');
+    expect(textHelp).not.toContain('  confirm');
+  });
+
+  it('renders declared effect/scope/confirm per tool for a whole-leaf payload', () => {
+    const textHelp = buildTextHelp(
+      {
+        htbp: 'draft',
+        kind: 'builtin',
+        title: 'Builtins',
+        endpoint: {
+          method: 'POST',
+          tools: [{ name: 'websearch', effect: 'external', scope: 'net.search', confirm: true }],
+        },
+      },
+      '/htbp/tools',
+      'bearer'
+    );
+    expect(textHelp).toContain('cmd websearch POST /htbp/tools');
+    expect(textHelp).toContain('  effect external');
+    expect(textHelp).toContain('  scope net.search');
+    expect(textHelp).toContain('  confirm true');
+  });
+
+  it('renders declared semantics for a single-shot endpoint payload', () => {
+    const textHelp = buildTextHelp(
+      {
+        htbp: 'draft',
+        kind: 'http',
+        title: 'delete',
+        endpoint: { method: 'POST', inputSchema: {}, effect: 'destructive', scope: 'repo.write', confirm: true },
+      },
+      '/htbp/gh/delete',
+      'bearer'
+    );
+    expect(textHelp).toContain('cmd call POST /htbp/gh/delete');
+    expect(textHelp).toContain('  effect destructive');
+    expect(textHelp).toContain('  scope repo.write');
+    expect(textHelp).toContain('  confirm true');
+  });
 });

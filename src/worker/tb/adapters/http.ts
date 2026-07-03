@@ -35,6 +35,9 @@ export const httpAdapter: TBAdapter<HttpNode> = {
         inputSchema: endpoint.inputSchema ?? {},
         outputSchema: endpoint.outputSchema,
         example: endpoint.example,
+        effect: endpoint.effect,
+        scope: endpoint.scope,
+        confirm: endpoint.confirm,
       },
     };
   },

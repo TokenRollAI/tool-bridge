@@ -45,6 +45,43 @@ POST /htbp/docs/context7                  # 调用：body {"tool":"<name>","argu
 - `remote`：联邦到另一个 TB 实例（`helpUrl`），由 crawler 跟进其 JSON `~help`。
 - `mount`：把对象存储（Cloudflare R2 bucket）的前缀树挂成 TB 子树。前缀=目录、对象=只读叶子，按层
   懒加载（访问某层 `~help` 时才 list 该层）。
+- `builtin`：宿主实现的 whole-leaf（形如 MCP 叶子），声明一组静态工具，工具实现由**宿主 Worker** 注入。
+  adapter 只负责树/help/路由，实际 handler 通过 `AdapterContext.builtinHandlers` 传入——这样 tool-bridge
+  保持通用，宿主（如 Watt）注入自己的 `websearch` 等实现。
+
+### Builtin（宿主注入 handler）
+
+`builtin` 节点声明工具及其 `handler` 名，handler 的具体实现由宿主在处理请求时通过
+`AdapterContext.builtinHandlers`（一个 `{ [handler名]: (input, ctx) => result }` 注册表）注入：
+
+```jsonc
+{
+  "type": "builtin",
+  "id": "host",
+  "title": "Host Tools",
+  "builtin": {
+    "tools": [
+      { "name": "echo", "handler": "echo", "effect": "read" },
+      { "name": "websearch", "handler": "websearch", "effect": "external", "scope": "net.search", "confirm": true }
+    ]
+  }
+}
+```
+
+内置 `echoHandler`（`adapters/builtin.ts`）是一个即用参考实现，宿主可直接注册它或自己的 handler。工具的
+`effect` / `scope` / `confirm` 语义字段会随 `~help`（JSON 与 text DSL）一并输出。
+
+### 工具调用语义（effect / scope / confirm）
+
+`mcp` 内嵌工具、`http` 端点、`builtin` 工具都可声明可选的调用语义，供 agent / UI 判断是否需要确认：
+
+- `effect`：`read` | `write` | `destructive` | `external`（缺省视为 `external`，与历史行为一致）。
+- `scope`：该调用所需的权限/能力范围（自由文本）。
+- `confirm`：提示客户端调用前应确认。
+
+这些字段进入 JSON `~help` 的 `endpoint`（whole-leaf 的每个 `tools[]` 条目或单发 endpoint），text DSL 里
+则渲染为 `effect` 行以及可选的 `scope` / `confirm` 行。未声明时行为不变（`effect external`、无 scope、无
+confirm），完全向后兼容。
 
 ### Mount（FS / S3 as TB）
 

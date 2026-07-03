@@ -6,7 +6,13 @@
 // schema (for end-path leaves). An agent walks the tree by following the
 // relative `resources[].path` links until it reaches an `endpoint`.
 
-export type NodeKind = 'directory' | 'mcp' | 'http' | 'remote' | 'mount';
+export type NodeKind = 'directory' | 'mcp' | 'http' | 'remote' | 'mount' | 'builtin';
+
+// Declared side-effect class of a tool / end-path. Advisory metadata an agent
+// (or a UI) uses to decide whether a call needs confirmation. `external` is the
+// backward-compatible default when nothing is declared (matches the historical
+// `effect external` text-DSL line).
+export type ToolEffect = 'read' | 'write' | 'destructive' | 'external';
 
 export type AuthMode = 'none' | 'bearer' | 'oauth';
 
@@ -36,6 +42,11 @@ export interface ToolSpec {
   description?: string;
   inputSchema?: unknown;
   outputSchema?: unknown;
+  // Optional call semantics (advisory). Omitted fields keep the historical
+  // default behavior: effect is treated as `external`, no scope, no confirm.
+  effect?: ToolEffect;
+  scope?: string; // Free-form permission/capability scope this tool needs.
+  confirm?: boolean; // Hint that a client should confirm before calling.
 }
 
 // End-path description: how to actually call the leaf resource.
@@ -49,6 +60,11 @@ export interface EndpointSpec {
   outputSchema?: unknown;
   example?: unknown;
   tools?: ToolSpec[];
+  // Call semantics for a single-shot end-path (no `tools`). Same defaults as
+  // ToolSpec: omitted => effect `external`, no scope, no confirm.
+  effect?: ToolEffect;
+  scope?: string;
+  confirm?: boolean;
 }
 
 // The JSON body returned by `GET {path}/~help`.
@@ -108,6 +124,10 @@ export interface HttpEndpointConfig {
   outputSchema?: unknown;
   example?: unknown;
   headers?: Record<string, string>;
+  // Optional call semantics, surfaced in help. Defaults preserve prior behavior.
+  effect?: ToolEffect;
+  scope?: string;
+  confirm?: boolean;
 }
 
 export interface HttpNode extends BaseNode {
@@ -133,7 +153,45 @@ export interface MountNode extends BaseNode {
   description?: string;
 }
 
-export type TreeNode = DirectoryNode | McpNode | HttpNode | RemoteNode | MountNode;
+export type TreeNode = DirectoryNode | McpNode | HttpNode | RemoteNode | MountNode | BuiltinNode;
+
+// ---- Builtin node ----
+//
+// A `builtin` node is an MCP-shaped whole-leaf: it declares a static list of
+// tools whose implementations live in the HOST worker, not in tool-bridge. The
+// adapter only owns the tree/help/routing; the host injects the actual handler
+// functions via `AdapterContext.builtinHandlers`. This keeps tool-bridge a
+// generic bridge while letting a host (e.g. Watt) plug in its own websearch,
+// echo, etc.
+
+// One tool declared by a builtin node. `handler` names a function the host
+// registered; the semantic fields flow straight through to help output.
+export interface BuiltinToolConfig {
+  name: string;
+  description?: string;
+  handler: string; // Key into the host-provided handler registry.
+  inputSchema?: unknown;
+  outputSchema?: unknown;
+  effect?: ToolEffect;
+  scope?: string;
+  confirm?: boolean;
+}
+
+export interface BuiltinNode extends BaseNode {
+  kind: 'builtin';
+  description?: string;
+  tools: BuiltinToolConfig[];
+}
+
+// A host-implemented builtin tool handler. `input` is the parsed call arguments
+// (already unwrapped from any {arguments:{...}} envelope); the return value is
+// serialized back to the caller as the call result.
+export type BuiltinHandler = (input: unknown, ctx: AdapterContext) => Promise<unknown> | unknown;
+
+// Host-injected registry of builtin handlers, keyed by the `handler` name a
+// BuiltinToolConfig references. Absent by default (tool-bridge ships no
+// handlers of its own beyond what a host or a test registers).
+export type BuiltinHandlerRegistry = Record<string, BuiltinHandler>;
 
 // Minimal object-storage provider used by the mount adapter. R2's binding is
 // one implementation; tests provide an in-memory fake. Keeps the adapter
@@ -165,6 +223,10 @@ export interface AdapterContext {
   env: AppEnv;
   authMode: AuthMode;
   basePath: string;
+  // Host-injected implementations for `builtin` node tools. Only the builtin
+  // adapter reads this; other adapters ignore it. Absent when no host registers
+  // any (builtin `describe`/help still works; `call` then errors clearly).
+  builtinHandlers?: BuiltinHandlerRegistry;
 }
 
 // Pluggable node behaviour. Each NodeKind has an adapter that knows how to
