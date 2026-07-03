@@ -3,7 +3,7 @@
 import { adapterFor } from './adapters';
 import { buildTextHelp } from './help';
 import { findNode, nodePath, TREE_PREFIX } from './registry';
-import { AdapterContext, AppEnv, AuthMode, DirectoryNode, HelpPayload } from './types';
+import { AdapterContext, AppEnv, AuthMode, BuiltinHandlerRegistry, DirectoryNode, HelpPayload } from './types';
 import { json, text, NotFoundError } from './util';
 
 export interface ResolvedHelp {
@@ -18,7 +18,8 @@ async function describe(
   env: AppEnv,
   root: DirectoryNode,
   segments: string[],
-  authMode: AuthMode
+  authMode: AuthMode,
+  builtinHandlers?: BuiltinHandlerRegistry
 ): Promise<ResolvedHelp> {
   const found = findNode(root, segments);
   if (!found) {
@@ -27,7 +28,7 @@ async function describe(
   // Use the full request path (node + adapter sub-path) so the text-DSL cmd
   // lines target the actual resource (e.g. a tool end-path), not just the node.
   const resourcePath = segments.length > 0 ? `${TREE_PREFIX}/${segments.join('/')}` : TREE_PREFIX;
-  const ctx: AdapterContext = { env, authMode, basePath: nodePath(found.node) };
+  const ctx: AdapterContext = { env, authMode, basePath: nodePath(found.node), builtinHandlers };
   const payload = await adapterFor(found.node).describe(found.node, ctx, found.sub);
   return { payload, resourcePath };
 }
@@ -39,9 +40,10 @@ export async function resolveHelp(
   root: DirectoryNode,
   segments: string[],
   authMode: AuthMode,
-  accept: string
+  accept: string,
+  builtinHandlers?: BuiltinHandlerRegistry
 ): Promise<Response> {
-  const { payload, resourcePath } = await describe(env, root, segments, authMode);
+  const { payload, resourcePath } = await describe(env, root, segments, authMode, builtinHandlers);
 
   if (prefersText(accept)) {
     const auth = authMode === 'none' ? 'none' : 'bearer';
@@ -58,14 +60,15 @@ export async function resolveCall(
   root: DirectoryNode,
   segments: string[],
   authMode: AuthMode,
-  input: unknown
+  input: unknown,
+  builtinHandlers?: BuiltinHandlerRegistry
 ): Promise<Response> {
   const found = findNode(root, segments);
   if (!found) {
     throw new NotFoundError(`No TB resource at '/${segments.join('/')}'.`);
   }
   const resourcePath = segments.length > 0 ? `${TREE_PREFIX}/${segments.join('/')}` : TREE_PREFIX;
-  const ctx: AdapterContext = { env, authMode, basePath: nodePath(found.node) };
+  const ctx: AdapterContext = { env, authMode, basePath: nodePath(found.node), builtinHandlers };
   const result = await adapterFor(found.node).call(found.node, ctx, found.sub, input);
   return json({ resource: resourcePath, result });
 }
