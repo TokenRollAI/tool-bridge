@@ -2,6 +2,7 @@ import { createRemoteJWKSet, jwtVerify } from 'jose';
 import { clampCrawlOptions, crawlTree } from './tb/crawl';
 import { materializePlacements } from './tb/entities';
 import { errorResponseOf, ForbiddenError } from './tb/errors';
+import { routeHostApi } from './tb/host-api';
 import { routeProviderApi } from './tb/provider-api';
 import { parseTree } from './tb/registry';
 import { resolveCall, resolveHelp } from './tb/resolve';
@@ -12,7 +13,7 @@ import {
   listDynamicServers,
   putDynamicServer,
 } from './tb/dynamic-servers';
-import type { DirectoryNode } from './tb/types';
+import type { BuiltinHandlerRegistry, DirectoryNode } from './tb/types';
 
 const MCP_PROTOCOL_VERSION = '2025-11-25';
 const CLIENT_NAME = 'tool-bridge';
@@ -734,6 +735,12 @@ async function routeApi(request: Request, env: AppEnv): Promise<Response> {
     return providerApiResponse;
   }
 
+  // Host plane: registration, S2S keys, mounts:sync (M1).
+  const hostApiResponse = await routeHostApi(request, env, authInfo);
+  if (hostApiResponse) {
+    return hostApiResponse;
+  }
+
   if (path === '/api/servers' && request.method === 'GET') {
     const staticServers = parseConfiguredServers(env).map(({ headers: _headers, ...server }) => ({
       ...server,
@@ -827,7 +834,7 @@ async function rootFor(authInfo: AuthInfo, env: AppEnv): Promise<DirectoryNode> 
   return root;
 }
 
-async function routeHtbp(request: Request, env: AppEnv): Promise<Response> {
+async function routeHtbp(request: Request, env: AppEnv, builtinHandlers?: BuiltinHandlerRegistry): Promise<Response> {
   const authInfo = await authenticate(request, env);
   if (authInfo instanceof Response) {
     return authInfo;
@@ -850,11 +857,11 @@ async function routeHtbp(request: Request, env: AppEnv): Promise<Response> {
     const root = await rootFor(authInfo, env);
     if (isHelp) {
       const accept = request.headers.get('Accept') ?? '';
-      return await resolveHelp(env, root, segments, authInfo.mode, accept);
+      return await resolveHelp(env, root, segments, authInfo.mode, accept, builtinHandlers);
     }
     if (request.method === 'POST') {
       const input = await readJsonBody<unknown>(request);
-      return await resolveCall(env, root, segments, authInfo.mode, input);
+      return await resolveCall(env, root, segments, authInfo.mode, input, builtinHandlers);
     }
     return errorResponse(405, 'method_not_allowed', 'Use GET {path}/~help or POST {path} to call.');
   } catch (error) {
@@ -922,7 +929,7 @@ function publicServer(server: ServerConfig): JsonObject {
   };
 }
 
-async function handleRequest(request: Request, env: AppEnv): Promise<Response> {
+async function handleRequest(request: Request, env: AppEnv, options: BridgeOptions = {}): Promise<Response> {
   const url = new URL(request.url);
   try {
     if (url.pathname.startsWith('/api/')) {
@@ -934,7 +941,7 @@ async function handleRequest(request: Request, env: AppEnv): Promise<Response> {
     if (url.pathname === '/htbp' || url.pathname.startsWith('/htbp/')) {
       // HTBP control-plane responses are cross-origin fetchable: federation and
       // browser agents fetch another TB server's ~help from a different origin.
-      const response = await routeHtbp(request, env);
+      const response = await routeHtbp(request, env, options.builtinHandlers);
       const withCors = new Response(response.body, response);
       withCors.headers.set('Access-Control-Allow-Origin', '*');
       return withCors;
@@ -945,8 +952,20 @@ async function handleRequest(request: Request, env: AppEnv): Promise<Response> {
   }
 }
 
-export default {
-  fetch(request, env): Promise<Response> {
-    return handleRequest(request, env);
-  },
-} satisfies ExportedHandler<AppEnv>;
+// Deploy-time embedding surface (SPEC-001 §8.3): a host worker builds its own
+// bridge handler with its builtin tool implementations injected. Builtin
+// injection is a code-level, deploy-time act — there is intentionally no
+// runtime API to register a handler.
+export interface BridgeOptions {
+  builtinHandlers?: BuiltinHandlerRegistry;
+}
+
+export function createBridge(options: BridgeOptions = {}) {
+  return {
+    fetch(request, env): Promise<Response> {
+      return handleRequest(request, env, options);
+    },
+  } satisfies ExportedHandler<AppEnv>;
+}
+
+export default createBridge();
