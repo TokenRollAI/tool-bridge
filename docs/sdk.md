@@ -1,4 +1,4 @@
-# Host SDK / Admin SDK — API 与 curl 等价表
+# Tool Bridge SDK（单包多入口）— API 与 curl 等价表
 
 SPEC-001 §8.1 不变量：wire contract 是产品本体，SDK 只是便利层——**不存在只有 SDK
 能做的事**。下表给出每个 SDK 方法对应的公开 API 与 curl 复现方式。conformance
@@ -23,10 +23,26 @@ Bearer`，绝不进 query string（§8.2）。
 retryable 语义按 code 判定（`RETRYABLE_CODES`），wire 信封不变；SDK 侧暴露为
 `TBApiError.retryable`。
 
-## Host SDK（`@tokenroll/tb-host`，M1）
+## 发布形态：一个包，多个入口
+
+当前 SDK 作为同一个 npm 包发布/接入，不拆成 `tb-host`、`tb-admin`、
+`tb-tunnel-agent` 三个包。下面以目标发布名 `@tokenroll/tool-bridge`
+为例；本地 workspace 可按实际 package alias 使用。不同角色通过 subpath exports 选择入口：
+
+| 入口 | 用途 |
+| --- | --- |
+| `@tokenroll/tool-bridge/host` | Host SDK：宿主嵌入、builtin 注入、mounts.sync、树调用 |
+| `@tokenroll/tool-bridge/admin` | Admin SDK：provider、host、endpoint、audit 等管理面 |
+| `@tokenroll/tool-bridge/tunnel-agent` | Tunnel Agent Kit skeleton |
+| `@tokenroll/tool-bridge/transport` | `https` / `serviceBinding` transport |
+| `@tokenroll/tool-bridge/worker` | Worker bridge embedding surface |
+
+这样保持一个版本号和一个安装包，同时避免 API 混在同一个顶层 namespace 里。
+
+## Host SDK（M1）
 
 ```ts
-import { createToolBridgeHost, https, serviceBinding } from '@tokenroll/tb-host';
+import { createToolBridgeHost, https, serviceBinding } from '@tokenroll/tool-bridge/host';
 
 const tb = createToolBridgeHost({
   transport: serviceBinding(env.TOOLBRIDGE), // 或 https('https://bridge.example.com')
@@ -56,10 +72,12 @@ const tb = createToolBridgeHost({
 | 签发 S2S key | `curl -X POST -H "Authorization: Bearer $ADMIN" -d '{"label":"watt-gateway"}' $TB/api/hosts/watt/keys` （raw key 只返回一次） |
 | 查看宿主 | `curl -H "Authorization: Bearer $ADMIN" $TB/api/hosts/watt` |
 
-## Admin SDK（`@tokenroll/tb-admin` provider 子集，M3）
+## Admin SDK（M1/M2/M3/M4 管理面）
 
 ```ts
-import { createToolBridgeAdmin, https } from '@tokenroll/tb-admin';
+import { createToolBridgeAdmin } from '@tokenroll/tool-bridge/admin';
+import { https } from '@tokenroll/tool-bridge/transport';
+
 const admin = createToolBridgeAdmin({ transport: https(baseUrl), credential: adminKey });
 ```
 
@@ -75,6 +93,15 @@ const admin = createToolBridgeAdmin({ transport: https(baseUrl), credential: adm
 | `admin.placements.dryRun(p)` | `curl -X POST -d '{...,"dryRun":true}' $TB/api/placements` → 受影响 grant/path 预检报告，不落库 |
 | `admin.placements.put(p)` | `curl -X POST -d '{"tenantId":"a","path":"tools/search","pubRef":{"providerId":"acme","pubId":"search"}}' $TB/api/placements` |
 | `admin.placements.delete(id,'a',{dryRun})` | `curl -X DELETE "$TB/api/placements/{id}?tenant=a[&dryRun=true]"` |
+| `admin.hosts.create({id:'watt'})` | `curl -X POST -H "Authorization: Bearer $ADMIN" -d '{"id":"watt"}' $TB/api/hosts` |
+| `admin.hosts.get/createKey('watt')` | `GET /api/hosts/watt` / `POST /api/hosts/watt/keys` |
+| `admin.endpoints.list/create/get/update/revoke()` | `GET/POST /api/endpoints`、`GET/PUT/DELETE /api/endpoints/{id}` |
+| `admin.commandPolicies.list/create/get/update/delete()` | `GET/POST /api/command-policies`、`GET/PUT/DELETE /api/command-policies/{id}` |
+| `admin.audit.events({tenant:'a',limit:50})` | `curl -H "Authorization: Bearer $ADMIN" "$TB/api/audit/events?tenant=a&limit=50"` |
+| `admin.servers.list/create/delete()` | `GET/POST /api/servers`、`DELETE /api/servers/{id}`（legacy MCP server 兼容层，写入 provider/publication/placement） |
+| `admin.servers.tools/help/skill/call(id, tool)` | `GET /api/servers/{id}/tools`、`GET /api/servers/{id}/~help`、`GET /api/servers/{id}/~skill`、`POST /api/servers/{id}/tools/{tool}` |
+| `admin.bridge.tools/call({endpoint}, tool)` | `POST /api/bridge/tools`、`POST /api/bridge/call`（ad-hoc MCP server） |
+| `admin.tree.get/crawl/help/call()` | `GET /api/tree`、`POST /api/crawl`、`GET /htbp/<path>/~help`、`POST /htbp/<path>` |
 
 ## Tunnel / Device（M2）
 
@@ -97,7 +124,7 @@ dispatch 前拒绝危险命令模式。离线 endpoint 返回 `EndpointUnavailab
 Tunnel Agent Kit skeleton：
 
 ```ts
-import { createTunnelAgent } from '@tokenroll/tb-tunnel-agent';
+import { createTunnelAgent } from '@tokenroll/tool-bridge/tunnel-agent';
 
 const agent = createTunnelAgent({
   transport,

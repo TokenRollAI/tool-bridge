@@ -2,6 +2,17 @@
   "name": "tool-bridge",
   "private": true,
   "type": "module",
+  "main": "./src/sdk/index.ts",
+  "types": "./src/sdk/index.ts",
+  "exports": {
+    ".": "./src/sdk/index.ts",
+    "./admin": "./src/sdk/admin/index.ts",
+    "./host": "./src/sdk/host/index.ts",
+    "./tunnel-agent": "./src/sdk/tunnel-agent/index.ts",
+    "./transport": "./src/sdk/transport.ts",
+    "./worker": "./src/worker/index.ts",
+    "./tb": "./src/worker/tb/types.ts"
+  },
   "scripts": {
     "dev": "npm run build && wrangler dev --ip 127.0.0.1 --port 8787",
     "dev:ui": "vite --host 127.0.0.1",

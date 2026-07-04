@@ -1,4 +1,4 @@
-// @tokenroll/tb-host (alpha) — TASK-M1, SPEC-001 §8.3.
+// @tokenroll/tool-bridge/host (alpha) — TASK-M1, SPEC-001 §8.3.
 //
 // The host platform's calling surface for tool-bridge. Everything here is a
 // convenience over public wire contracts (§8.1 no SDK lock-in): each method is

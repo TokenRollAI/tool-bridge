@@ -17,7 +17,7 @@ Tool Bridge 是一个可部署到 Cloudflare Workers 的 MCP Streamable HTTP bri
 - 支持向上游 MCP server 透传 Bearer token
 - 统一错误契约（`UpstreamError → 502` 等，code 级 retryable 语义）
 - Provider / Publication / Placement 控制面实体 + `/api/providers/**` 管理面（`tbp_` 自助 key）
-- Host SDK（`@tokenroll/tb-host`）与 Admin SDK 子集：见 `docs/sdk.md`（含全部 curl 等价表）
+- 单包多入口 SDK（如 `@tokenroll/tool-bridge/host`、`/admin`、`/tunnel-agent`）：见 `docs/sdk.md`（含全部 curl 等价表）
 - 最小审计事件流（describe/call 全路径，含拒绝决策；`/api/audit/events`）
 
 当前不支持 stdio transport，也不支持 MCP SSE fallback。
