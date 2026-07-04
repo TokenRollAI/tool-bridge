@@ -365,6 +365,14 @@ export async function materializePlacements(
       result.skipped.push({ placementId: placement.id, reason: error instanceof Error ? error.message : 'invalid' });
       continue;
     }
+    // Tag provenance for audit (M4): which provider a call ultimately hit.
+    // Non-enumerable so serialized trees stay identical to config-tree nodes.
+    Object.defineProperty(node, 'tbProviderId', {
+      value: provider.id,
+      enumerable: false,
+      writable: true,
+      configurable: true,
+    });
     if (insertNode(root, segments.slice(0, -1), node)) {
       result.applied += 1;
     } else {
