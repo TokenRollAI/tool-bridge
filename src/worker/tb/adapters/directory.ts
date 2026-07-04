@@ -7,6 +7,7 @@
 // local config values if the remote is slow or unreachable.
 
 import { AdapterContext, DirectoryNode, HelpPayload, ResourceRef, RemoteNode, TreeNode } from '../types';
+import { NotFoundError } from '../errors';
 import { fetchRemoteHelp } from '../remote-client';
 
 export const directoryAdapter = {
@@ -16,7 +17,7 @@ export const directoryAdapter = {
     if (sub.length > 0) {
       // findNode would have descended into a real child; leftover segments here
       // mean the child id does not exist.
-      throw new Error(`No child '${sub[0]}' under directory '${node.id}'.`);
+      throw new NotFoundError(`No child '${sub[0]}' under directory '${node.id}'.`);
     }
     const resources = await Promise.all(node.children.map((child) => toResource(child, ctx)));
     return {

@@ -7,6 +7,7 @@
 //   call(node, [tool], args)   -> tools/call with `args` as the arguments
 
 import { AdapterContext, HelpPayload, McpNode, ResourceRef, TBAdapter, ToolSpec } from '../types';
+import { NotFoundError } from '../errors';
 import { callMcpTool, listMcpTools, McpTool, resolveMcpServer } from '../mcp-client';
 import { oneLine } from '../util';
 import { resolveUpstreamTool, virtualizeTools } from '../virtualize';
@@ -35,7 +36,7 @@ export const mcpAdapter: TBAdapter<McpNode> = {
     const toolName = sub[0];
     const tool = exposed.find((item) => item.name === toolName);
     if (!tool) {
-      throw new Error(`Tool '${toolName}' is not exposed by node '${node.id}'.`);
+      throw new NotFoundError(`Tool '${toolName}' is not exposed by node '${node.id}'.`);
     }
     return {
       htbp: 'draft',

@@ -6,6 +6,7 @@
 // reads. Used by the MCP adapter to list and call tools on an upstream server.
 
 import { AppEnv, McpNode } from './types';
+import { NotFoundError, TBError, UpstreamError } from './errors';
 import { materializeHeaders, requireSecureUrl } from './materialize';
 import {
   CLIENT_NAME,
@@ -14,6 +15,7 @@ import {
   MAX_SSE_BYTES,
   MCP_PROTOCOL_VERSION,
   isRecord,
+  messageOf,
   readBoundedText,
   safeErrorText,
 } from './util';
@@ -69,7 +71,7 @@ export async function listMcpTools(server: ResolvedMcpServer): Promise<McpTool[]
 
 export async function callMcpTool(server: ResolvedMcpServer, toolName: string, args: unknown): Promise<unknown> {
   if (server.allowedTools && server.allowedTools.length > 0 && !server.allowedTools.includes(toolName)) {
-    throw new Error(`Tool '${toolName}' is not allowed for server '${server.id}'.`);
+    throw new NotFoundError(`Tool '${toolName}' is not allowed for server '${server.id}'.`);
   }
   return executeMcpRequest(server, 'tools/call', {
     name: toolName,
@@ -77,16 +79,26 @@ export async function callMcpTool(server: ResolvedMcpServer, toolName: string, a
   });
 }
 
+// Single choke point for the upstream error contract (M0): everything inside —
+// network failures, non-2xx statuses, malformed/oversized responses, MCP-level
+// RPC errors — surfaces as UpstreamError → 502.
 async function executeMcpRequest(server: ResolvedMcpServer, method: string, params: unknown): Promise<unknown> {
-  const initialized = await initializeMcpSession(server);
   try {
-    await sendMcpNotification(server, initialized.sessionId, 'notifications/initialized', {});
-    const response = await sendMcpRequest(server, initialized.sessionId, method, params);
-    return response.result;
-  } finally {
-    if (initialized.sessionId) {
-      await terminateMcpSession(server, initialized.sessionId).catch(() => {});
+    const initialized = await initializeMcpSession(server);
+    try {
+      await sendMcpNotification(server, initialized.sessionId, 'notifications/initialized', {});
+      const response = await sendMcpRequest(server, initialized.sessionId, method, params);
+      return response.result;
+    } finally {
+      if (initialized.sessionId) {
+        await terminateMcpSession(server, initialized.sessionId).catch(() => {});
+      }
     }
+  } catch (error) {
+    if (error instanceof TBError) {
+      throw error;
+    }
+    throw new UpstreamError(`MCP server '${server.id}': ${messageOf(error)}`, { upstream: server.id, method });
   }
 }
 

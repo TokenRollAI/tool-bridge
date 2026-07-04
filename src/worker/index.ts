@@ -1,7 +1,8 @@
 import { createRemoteJWKSet, jwtVerify } from 'jose';
 import { clampCrawlOptions, crawlTree } from './tb/crawl';
+import { errorResponseOf } from './tb/errors';
 import { parseTree } from './tb/registry';
-import { NotFoundError, resolveCall, resolveHelp } from './tb/resolve';
+import { resolveCall, resolveHelp } from './tb/resolve';
 import { resolveTenant, tenantModeEnabled } from './tb/tenant';
 import {
   deleteDynamicServer,
@@ -820,10 +821,9 @@ async function routeHtbp(request: Request, env: AppEnv): Promise<Response> {
     }
     return errorResponse(405, 'method_not_allowed', 'Use GET {path}/~help or POST {path} to call.');
   } catch (error) {
-    if (error instanceof NotFoundError) {
-      return errorResponse(404, 'not_found', error.message);
-    }
-    return errorResponse(500, 'internal_error', messageOf(error));
+    // Typed platform errors (NotFoundError → 404, UpstreamError → 502, ...)
+    // carry their own status/code; anything else is a 500 internal_error.
+    return errorResponseOf(error);
   }
 }
 
@@ -904,7 +904,7 @@ async function handleRequest(request: Request, env: AppEnv): Promise<Response> {
     }
     return env.ASSETS.fetch(request);
   } catch (error) {
-    return errorResponse(500, 'internal_error', messageOf(error));
+    return errorResponseOf(error);
   }
 }
 

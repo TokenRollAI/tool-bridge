@@ -21,6 +21,7 @@ import {
   TBAdapter,
   ToolSpec,
 } from '../types';
+import { NotFoundError } from '../errors';
 import { oneLine } from '../util';
 
 export const builtinAdapter: TBAdapter<BuiltinNode> = {
@@ -106,7 +107,7 @@ export function builtinToolSpecs(node: BuiltinNode): ToolSpec[] {
 function findTool(node: BuiltinNode, name: string): BuiltinToolConfig {
   const tool = node.tools.find((item) => item.name === name);
   if (!tool) {
-    throw new Error(`Tool '${name}' is not exposed by builtin node '${node.id}'.`);
+    throw new NotFoundError(`Tool '${name}' is not exposed by builtin node '${node.id}'.`);
   }
   return tool;
 }
