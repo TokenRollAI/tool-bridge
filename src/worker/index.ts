@@ -14,6 +14,7 @@ import { materializePlacements } from './tb/entities';
 import { errorResponseOf, ForbiddenError } from './tb/errors';
 import { routeHostApi } from './tb/host-api';
 import { routeProviderApi } from './tb/provider-api';
+import { routeDeviceHtbp, routeEndpointApi, routeTunnelApi, TunnelBroker } from './tb/device';
 import { parseTree } from './tb/registry';
 import { resolveCall, resolveHelp } from './tb/resolve';
 import { PrincipalKind, resolvePrincipal, tenantModeEnabled } from './tb/tenant';
@@ -82,8 +83,10 @@ interface AuthInfo {
   principal?: PrincipalKind;
   providerId?: string;
   hostId?: string;
-  // Control-plane access: admin keys in tenant mode; any authenticated caller
-  // (or anyone, in `none` mode) otherwise — matching the pre-M3 /api behavior.
+  // Control-plane access: admin keys in tenant mode; static bearer/OAuth in
+  // non-tenant deployments. Anonymous `none` mode is intentionally not admin
+  // once TENANTS exists because KV-backed M1/M3/M4 routes mutate/read shared
+  // control-plane state.
   isAdmin: boolean;
 }
 
@@ -184,7 +187,7 @@ async function authenticate(request: Request, env: AppEnv): Promise<AuthInfo | R
   }
 
   if (mode === 'none') {
-    return { mode, isAdmin: true };
+    return { mode, isAdmin: !env.TENANTS };
   }
 
   const token = getBearerToken(request);
@@ -745,6 +748,12 @@ async function routeApi(request: Request, env: AppEnv): Promise<Response> {
     return providerApiResponse;
   }
 
+  // Tunnel / Device endpoint and command-policy management plane (M2).
+  const endpointApiResponse = await routeEndpointApi(request, env, authInfo);
+  if (endpointApiResponse) {
+    return endpointApiResponse;
+  }
+
   // Host plane: registration, S2S keys, mounts:sync (M1).
   const hostApiResponse = await routeHostApi(request, env, authInfo);
   if (hostApiResponse) {
@@ -854,6 +863,7 @@ async function routeHtbp(
   request: Request,
   env: AppEnv,
   builtinHandlers?: BuiltinHandlerRegistry,
+  tunnelBroker?: TunnelBroker,
   executionCtx?: ExecutionContext
 ): Promise<Response> {
   const startedAt = Date.now();
@@ -894,12 +904,35 @@ async function routeHtbp(
       if (tenantModeEnabled(env) && !authInfo.root && !authInfo.isAdmin) {
         throw new ForbiddenError('This key is not bound to a tenant tree.');
       }
-      const root = await rootFor(authInfo, env);
-      callContext = auditContextFor(root, segments);
-      if (isHelp) {
+      if (segments[0] === '~device') {
+        if (!isHelp && request.method !== 'POST') {
+          response = errorResponse(405, 'method_not_allowed', 'Use GET {path}/~help or POST {path} to call.');
+        } else {
+          const accept = request.headers.get('Accept') ?? '';
+          const body = isHelp ? undefined : await readJsonBody<unknown>(request);
+          input = inputSummary(body);
+          const routed = await routeDeviceHtbp({
+            env,
+            principal: authInfo,
+            segments,
+            isHelp,
+            accept,
+            input: body,
+            traceId,
+            broker: tunnelBroker,
+          });
+          response = routed.response;
+          callContext = routed.audit;
+          tenantId = routed.tenantId ?? tenantId;
+        }
+      } else if (isHelp) {
+        const root = await rootFor(authInfo, env);
+        callContext = auditContextFor(root, segments);
         const accept = request.headers.get('Accept') ?? '';
         response = await resolveHelp(env, root, segments, authInfo.mode, accept, builtinHandlers);
       } else if (request.method === 'POST') {
+        const root = await rootFor(authInfo, env);
+        callContext = auditContextFor(root, segments);
         const body = await readJsonBody<unknown>(request);
         input = inputSummary(body);
         response = await resolveCall(env, root, segments, authInfo.mode, body, builtinHandlers);
@@ -1012,13 +1045,19 @@ async function handleRequest(
     if (url.pathname.startsWith('/api/')) {
       return await routeApi(request, env);
     }
+    if (url.pathname.startsWith('/tunnel/')) {
+      const response = await routeTunnelApi(request, env, options.tunnelBroker);
+      if (response) {
+        return response;
+      }
+    }
     if (url.pathname.startsWith('/mcp/')) {
       return await routeMcpBridge(request, env);
     }
     if (url.pathname === '/htbp' || url.pathname.startsWith('/htbp/')) {
       // HTBP control-plane responses are cross-origin fetchable: federation and
       // browser agents fetch another TB server's ~help from a different origin.
-      const response = await routeHtbp(request, env, options.builtinHandlers, executionCtx);
+      const response = await routeHtbp(request, env, options.builtinHandlers, options.tunnelBroker, executionCtx);
       const withCors = new Response(response.body, response);
       withCors.headers.set('Access-Control-Allow-Origin', '*');
       return withCors;
@@ -1035,6 +1074,7 @@ async function handleRequest(
 // runtime API to register a handler.
 export interface BridgeOptions {
   builtinHandlers?: BuiltinHandlerRegistry;
+  tunnelBroker?: TunnelBroker;
 }
 
 export function createBridge(options: BridgeOptions = {}) {

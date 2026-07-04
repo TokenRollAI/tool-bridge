@@ -76,6 +76,40 @@ const admin = createToolBridgeAdmin({ transport: https(baseUrl), credential: adm
 | `admin.placements.put(p)` | `curl -X POST -d '{"tenantId":"a","path":"tools/search","pubRef":{"providerId":"acme","pubId":"search"}}' $TB/api/placements` |
 | `admin.placements.delete(id,'a',{dryRun})` | `curl -X DELETE "$TB/api/placements/{id}?tenant=a[&dryRun=true]"` |
 
+## Tunnel / Device（M2）
+
+M2 使用占位接口边界：`/tunnel/*` 只处理已注册 endpoint 的最小 session 形状；
+不实现凭据加密、token 轮换、deep verifier、OAuth 或 S2S key 生命周期。
+
+| 操作 | 请求 |
+| --- | --- |
+| 注册 endpoint | `curl -X POST -H "Authorization: Bearer $ADMIN" -d '{"id":"sbx_1","tenantId":"a","kind":"sandbox","capabilities":["exec.run","fs.read","logs.tail"]}' $TB/api/endpoints` |
+| 注册命令策略 | `curl -X POST -H "Authorization: Bearer $ADMIN" -d '{"id":"safe","defaultMode":"deny","allowCommands":["npm","pnpm"],"maxTimeoutMs":30000}' $TB/api/command-policies` |
+| endpoint 建连 | `curl -X POST -d '{"endpointId":"sbx_1"}' $TB/tunnel/connect` → `{sessionId}` |
+| 能力上报 | `curl -X POST -d '{"endpointId":"sbx_1","sessionId":"...","capabilities":["exec.run"]}' $TB/tunnel/capabilities`（只能收窄预注册能力） |
+| device help | `curl -H "Authorization: Bearer $TBK" $TB/htbp/~device/sbx_1/~help` |
+| argv 执行 | `curl -X POST -H "Authorization: Bearer $TBK" -d '{"argv":["npm","test"],"timeoutMs":30000}' $TB/htbp/~device/sbx_1/exec.run` |
+| 文件读取 | `curl -X POST -H "Authorization: Bearer $TBK" -d '{"path":"/workspace/README.md"}' $TB/htbp/~device/sbx_1/fs.read` |
+
+`exec.run` 只接受结构化 `argv`，`shell.run` 默认不暴露；全局策略会在 broker
+dispatch 前拒绝危险命令模式。离线 endpoint 返回 `EndpointUnavailable → 503`。
+
+Tunnel Agent Kit skeleton：
+
+```ts
+import { createTunnelAgent } from '@tokenroll/tb-tunnel-agent';
+
+const agent = createTunnelAgent({
+  transport,
+  endpointId: 'sbx_1',
+  dispatch: async (request) => runLocalCapability(request),
+});
+
+const { sessionId } = await agent.connect();
+await agent.heartbeat();
+await agent.reportCapabilities(['exec.run']);
+```
+
 ## 审计（M4）
 
 | 操作 | 请求 |

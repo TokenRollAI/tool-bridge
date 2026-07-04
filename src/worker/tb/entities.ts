@@ -265,7 +265,6 @@ export function newPlacementId(): string {
 // endpoint or tool fields for http/builtin).
 export function compilePlacementNode(pub: Publication, nodeId: string): TreeNode {
   const raw: Record<string, unknown> = { ...structuredCloneish(pub.binding), id: nodeId };
-  delete raw.name; // `id` decides the path segment; binding `name` must not override it.
   if (pub.shaping?.namespace) {
     raw.namespace = pub.shaping.namespace;
   }

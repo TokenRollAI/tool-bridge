@@ -227,6 +227,24 @@ describe('Admin SDK provider subset drives the same wire contract', () => {
 });
 
 describe('/api/servers compatibility layer', () => {
+  it('does not promote anonymous none-mode callers to KV-backed control-plane admin', async () => {
+    const kv = fakeKV();
+    const env = { TENANTS: kv, MCP_SERVERS_JSON: '{}' } as unknown as AppEnv;
+    const call = fetcher(env);
+
+    for (const [path, init] of [
+      ['/api/providers', {}],
+      ['/api/placements?tenant=a', {}],
+      ['/api/providers/acme/keys', { method: 'POST', body: '{}' }],
+      ['/api/hosts', { method: 'POST', body: JSON.stringify({ id: 'watt' }) }],
+      ['/api/audit/events?tenant=a', {}],
+    ] as const) {
+      const res = await call(path, init);
+      expect(res.status).toBe(403);
+      expect(((await res.json()) as { error: { code: string } }).error.code).toBe('Forbidden');
+    }
+  });
+
   it('translates registration into provider entities and the global tree', async () => {
     const kv = fakeKV();
     // Non-tenant deployment: KV present (dynamic servers enabled), no TENANT_MODE.
