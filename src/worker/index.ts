@@ -1,9 +1,11 @@
 import { createRemoteJWKSet, jwtVerify } from 'jose';
 import { clampCrawlOptions, crawlTree } from './tb/crawl';
-import { errorResponseOf } from './tb/errors';
+import { materializePlacements } from './tb/entities';
+import { errorResponseOf, ForbiddenError } from './tb/errors';
+import { routeProviderApi } from './tb/provider-api';
 import { parseTree } from './tb/registry';
 import { resolveCall, resolveHelp } from './tb/resolve';
-import { resolveTenant, tenantModeEnabled } from './tb/tenant';
+import { PrincipalKind, resolvePrincipal, tenantModeEnabled } from './tb/tenant';
 import {
   deleteDynamicServer,
   dynamicServersEnabled,
@@ -64,6 +66,14 @@ interface AuthInfo {
   tenantId?: string;
   // The tenant's tree root; when undefined, requests fall back to the env tree.
   root?: DirectoryNode;
+  // D-3 unified principal record (tenant mode). Absent in bearer/oauth/none
+  // modes, where the single credential is the deployment admin.
+  principal?: PrincipalKind;
+  providerId?: string;
+  hostId?: string;
+  // Control-plane access: admin keys in tenant mode; any authenticated caller
+  // (or anyone, in `none` mode) otherwise — matching the pre-M3 /api behavior.
+  isAdmin: boolean;
 }
 
 interface RpcPayload {
@@ -137,7 +147,8 @@ async function constantTimeEqual(a: string, b: string): Promise<boolean> {
 async function authenticate(request: Request, env: AppEnv): Promise<AuthInfo | Response> {
   const mode = getAuthMode(env);
 
-  // Tenant mode: the bearer token is a Secret Key resolved to a tenant + tree.
+  // Tenant mode: the bearer token is a Secret Key resolved to a principal
+  // record (agent/provider/host/admin) and, when tenant-bound, its tree.
   // This composes orthogonally on top of the base mode — when TENANTS is set we
   // always require a token and resolve it, even if the base mode is 'none'.
   if (tenantModeEnabled(env)) {
@@ -145,15 +156,24 @@ async function authenticate(request: Request, env: AppEnv): Promise<AuthInfo | R
     if (!token) {
       return errorResponse(401, 'unauthorized', 'Secret Key (bearer token) required.');
     }
-    const tenant = await resolveTenant(env, token);
-    if (!tenant) {
+    const record = await resolvePrincipal(env, token);
+    if (!record) {
       return errorResponse(401, 'unauthorized', 'Secret Key is invalid.');
     }
-    return { mode, subject: tenant.tenantId, tenantId: tenant.tenantId, root: tenant.root };
+    return {
+      mode,
+      subject: record.label ?? record.providerId ?? record.hostId ?? record.tenantId,
+      tenantId: record.tenantId,
+      root: record.root,
+      principal: record.principal,
+      providerId: record.providerId,
+      hostId: record.hostId,
+      isAdmin: record.principal === 'admin',
+    };
   }
 
   if (mode === 'none') {
-    return { mode };
+    return { mode, isAdmin: true };
   }
 
   const token = getBearerToken(request);
@@ -170,7 +190,7 @@ async function authenticate(request: Request, env: AppEnv): Promise<AuthInfo | R
     if (!ok) {
       return errorResponse(401, 'unauthorized', 'Bearer token is invalid.');
     }
-    return { mode, subject: 'static-bearer' };
+    return { mode, subject: 'static-bearer', isAdmin: true };
   }
 
   try {
@@ -187,6 +207,7 @@ async function authenticate(request: Request, env: AppEnv): Promise<AuthInfo | R
     return {
       mode,
       subject: typeof verified.payload.sub === 'string' ? verified.payload.sub : undefined,
+      isAdmin: true,
     };
   } catch (error) {
     return errorResponse(401, 'unauthorized', 'OAuth bearer token is invalid.', messageOf(error));
@@ -707,6 +728,12 @@ async function routeApi(request: Request, env: AppEnv): Promise<Response> {
     return authInfo;
   }
 
+  // Provider/Placement management plane (M3).
+  const providerApiResponse = await routeProviderApi(request, env, authInfo);
+  if (providerApiResponse) {
+    return providerApiResponse;
+  }
+
   if (path === '/api/servers' && request.method === 'GET') {
     const staticServers = parseConfiguredServers(env).map(({ headers: _headers, ...server }) => ({
       ...server,
@@ -766,7 +793,7 @@ async function routeApi(request: Request, env: AppEnv): Promise<Response> {
   }
 
   if (path === '/api/tree' && request.method === 'GET') {
-    const tree = await crawlTree(env, rootFor(authInfo, env), { path: '' }, authInfo.mode);
+    const tree = await crawlTree(env, await rootFor(authInfo, env), { path: '' }, authInfo.mode);
     return json({ auth: authInfo, tree });
   }
 
@@ -775,7 +802,7 @@ async function routeApi(request: Request, env: AppEnv): Promise<Response> {
       request
     );
     const opts = clampCrawlOptions({ maxDepth: body.maxDepth, maxNodes: body.maxNodes });
-    const tree = await crawlTree(env, rootFor(authInfo, env), body.start ?? { path: '' }, authInfo.mode, opts);
+    const tree = await crawlTree(env, await rootFor(authInfo, env), body.start ?? { path: '' }, authInfo.mode, opts);
     return json({ auth: authInfo, tree });
   }
 
@@ -790,9 +817,14 @@ async function routeApi(request: Request, env: AppEnv): Promise<Response> {
 }
 
 // The tree to resolve this request against: the tenant's tree when tenant mode
-// resolved one, otherwise the global env tree (fallback / legacy behavior).
-function rootFor(authInfo: AuthInfo, env: AppEnv): DirectoryNode {
-  return authInfo.root ?? parseTree(env);
+// resolved one, otherwise the global env tree (fallback / legacy behavior) —
+// with the scope's enabled placements compiled in (D-1: request-time
+// materialization; the entity layer never changes the runtime TreeNode shape).
+async function rootFor(authInfo: AuthInfo, env: AppEnv): Promise<DirectoryNode> {
+  const root = authInfo.root ?? parseTree(env);
+  const scope = authInfo.root && authInfo.tenantId ? authInfo.tenantId : null;
+  await materializePlacements(env, root, scope);
+  return root;
 }
 
 async function routeHtbp(request: Request, env: AppEnv): Promise<Response> {
@@ -810,7 +842,12 @@ async function routeHtbp(request: Request, env: AppEnv): Promise<Response> {
   const segments = (hasHelpSuffix ? rawSegments.slice(0, -1) : rawSegments).map(decodeURIComponent);
 
   try {
-    const root = rootFor(authInfo, env);
+    // In tenant mode, only tenant-bound principals (or admin) may use the data
+    // plane; a bare provider key is control-plane only.
+    if (tenantModeEnabled(env) && !authInfo.root && !authInfo.isAdmin) {
+      throw new ForbiddenError('This key is not bound to a tenant tree.');
+    }
+    const root = await rootFor(authInfo, env);
     if (isHelp) {
       const accept = request.headers.get('Accept') ?? '';
       return await resolveHelp(env, root, segments, authInfo.mode, accept);

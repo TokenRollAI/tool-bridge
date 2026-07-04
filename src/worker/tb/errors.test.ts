@@ -38,8 +38,10 @@ const MCP_TREE = {
   children: [{ type: 'mcp', id: 'ctx', endpoint: 'https://mcp.example.com/mcp' }],
 };
 
-function request(path: string, init?: RequestInit): Request {
-  return new Request(`https://bridge.example.com${path}`, init);
+type WorkerRequest = Parameters<typeof worker.fetch>[0];
+
+function request(path: string, init?: RequestInit): WorkerRequest {
+  return new Request(`https://bridge.example.com${path}`, init) as unknown as WorkerRequest;
 }
 
 async function envelopeOf(response: Response): Promise<{ code: string; message: string; details?: unknown }> {

@@ -151,6 +151,9 @@ function parseToolOverrides(value: unknown): Record<string, ToolOverride> | unde
       hide: raw.hide === true,
       rename: stringField(raw, 'rename'),
       description: stringField(raw, 'description'),
+      effect: parseToolEffect(raw.effect),
+      scope: stringField(raw, 'scope'),
+      confirm: raw.confirm === true ? true : undefined,
     };
   }
   return Object.keys(result).length > 0 ? result : undefined;
@@ -319,8 +322,18 @@ function assertUniqueSiblingIds(children: { id: string }[], scope: string): void
   }
 }
 
+// Normalize a single node config object (the shape a Publication `binding`
+// stores: `type` + kind-specific fields). Shares the exact validation the env
+// tree goes through, so materialized placements produce the same TreeNode
+// shapes as static config (D-1: compile, don't rewrite).
+export function normalizeNodeConfig(value: unknown, label: string): TreeNode {
+  return normalizeNode(value, label);
+}
+
 // Attach non-enumerable parent back-references for nodePath() / back-navigation.
-function linkParents(node: TreeNode): void {
+// Exported so entity materialization can re-link after inserting placement
+// nodes into an already-parsed tree.
+export function linkParents(node: TreeNode): void {
   if (node.kind === 'directory') {
     for (const child of node.children) {
       Object.defineProperty(child, 'parent', {

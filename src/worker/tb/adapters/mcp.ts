@@ -49,6 +49,9 @@ export const mcpAdapter: TBAdapter<McpNode> = {
         inputSchema: tool.inputSchema ?? { type: 'object' },
         outputSchema: tool.outputSchema,
         example: {},
+        effect: tool.effect,
+        scope: tool.scope,
+        confirm: tool.confirm,
       },
     };
   },

@@ -100,6 +100,13 @@ export interface ToolOverride {
   hide?: boolean; // Omit from the exposed tools and reject calls.
   rename?: string; // Exposed name (before the namespace prefix is applied).
   description?: string; // Override the exposed description.
+  // Declared call semantics for the exposed tool (SPEC-001 §5.8). Carried onto
+  // the virtualized ToolSpec so ~help renders them; omitted fields keep the
+  // historical defaults (effect external, no scope, no confirm). This is also
+  // how a Publication's per-tool `semantics` reach an mcp binding.
+  effect?: ToolEffect;
+  scope?: string;
+  confirm?: boolean;
 }
 
 export interface McpNode extends BaseNode {
