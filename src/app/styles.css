@@ -159,6 +159,10 @@ button {
   grid-template-columns: minmax(320px, 1fr) minmax(360px, 520px);
 }
 
+.device-row {
+  grid-template-columns: minmax(420px, 1fr) minmax(360px, 520px);
+}
+
 .panel {
   border: 1px solid #d8dccf;
   border-radius: 8px;
@@ -205,7 +209,8 @@ button {
 
 .server-list,
 .tool-list,
-.adhoc-form {
+.adhoc-form,
+.device-form {
   display: grid;
   gap: 8px;
   padding: 12px;
@@ -248,6 +253,7 @@ button {
 }
 
 .adhoc-form label,
+.device-form label,
 .code-label {
   display: grid;
   gap: 6px;
@@ -257,6 +263,7 @@ button {
 }
 
 .adhoc-form input,
+.device-form input,
 .code-label textarea {
   width: 100%;
   border: 1px solid #d8dccf;
@@ -266,9 +273,88 @@ button {
   outline: none;
 }
 
-.adhoc-form input {
+.adhoc-form input,
+.device-form input {
   height: 36px;
   padding: 0 10px;
+}
+
+.device-form {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.device-form-wide {
+  grid-column: 1 / -1;
+}
+
+.capability-fieldset {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 0;
+  border: 1px solid #d8dccf;
+  border-radius: 8px;
+  padding: 10px;
+}
+
+.capability-fieldset legend {
+  padding: 0 4px;
+  color: #4d5549;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.capability-fieldset label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+}
+
+.capability-fieldset input {
+  width: 16px;
+  height: 16px;
+  padding: 0;
+}
+
+.endpoint-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  width: 100%;
+  min-height: 70px;
+  border: 1px solid #e4e7dc;
+  border-radius: 8px;
+  background: #f7f8f3;
+  padding: 10px;
+}
+
+.endpoint-row > div:first-child {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.endpoint-row span,
+.endpoint-row small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.endpoint-row span {
+  font-weight: 700;
+}
+
+.endpoint-row small {
+  color: #697066;
+  font-size: 12px;
+}
+
+.endpoint-actions {
+  display: flex;
+  gap: 6px;
+  align-items: start;
 }
 
 .code-label {
@@ -381,6 +467,10 @@ button {
 
   .token-field input {
     width: 100%;
+  }
+
+  .device-form {
+    grid-template-columns: 1fr;
   }
 }
 
@@ -542,4 +632,3 @@ button {
   gap: 4px;
   margin-bottom: 6px;
 }
-

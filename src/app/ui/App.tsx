@@ -12,6 +12,7 @@ import {
   Search,
   Server,
   Shield,
+  TerminalSquare,
   Trash2,
 } from 'lucide-react';
 
@@ -92,12 +93,73 @@ interface TreeResponse {
   tree: CrawlNode;
 }
 
+type DeviceTool = 'exec.run' | 'fs.read' | 'logs.tail';
+
+interface EndpointRecord {
+  id: string;
+  tenantId?: string;
+  kind: string;
+  driver?: string;
+  label?: string;
+  capabilities: DeviceTool[];
+  status: 'offline' | 'online' | 'revoked';
+  ssh?: {
+    host: string;
+    port?: number;
+    username: string;
+    privateKeyEnv?: string;
+    passphraseEnv?: string;
+    passwordEnv?: string;
+    knownHostSha256: string;
+  };
+}
+
+interface EndpointsResponse {
+  endpoints: EndpointRecord[];
+}
+
+interface EndpointResponse {
+  endpoint: EndpointRecord;
+}
+
+interface SshEndpointDraft {
+  id: string;
+  tenantId: string;
+  label: string;
+  host: string;
+  port: string;
+  username: string;
+  privateKeyEnv: string;
+  passphraseEnv: string;
+  passwordEnv: string;
+  knownHostSha256: string;
+  execRun: boolean;
+  fsRead: boolean;
+  logsTail: boolean;
+}
+
 const AUTH_TOKEN_KEY = 'toolBridge.authToken';
 const ADHOC_KEY = 'toolBridge.adhocTarget';
+const SSH_ENDPOINT_KEY = 'toolBridge.sshEndpointDraft';
 const DEFAULT_ADHOC_TARGET: AdhocTarget = {
   name: 'context7',
   endpoint: 'https://mcp.context7.com/mcp',
   bearerToken: '',
+};
+const DEFAULT_SSH_ENDPOINT: SshEndpointDraft = {
+  id: 'my-server',
+  tenantId: '',
+  label: '',
+  host: '',
+  port: '22',
+  username: 'ubuntu',
+  privateKeyEnv: '',
+  passphraseEnv: '',
+  passwordEnv: '',
+  knownHostSha256: 'SHA256:',
+  execRun: true,
+  fsRead: true,
+  logsTail: false,
 };
 
 function readSessionValue(key: string): string {
@@ -140,6 +202,33 @@ function readAdhocTarget(): AdhocTarget {
 function writeAdhocTarget(value: AdhocTarget): void {
   try {
     localStorage.setItem(ADHOC_KEY, JSON.stringify(value));
+  } catch {
+    // ignore unavailable storage
+  }
+}
+
+function readSshEndpointDraft(): SshEndpointDraft {
+  try {
+    const raw = localStorage.getItem(SSH_ENDPOINT_KEY);
+    if (!raw) {
+      return DEFAULT_SSH_ENDPOINT;
+    }
+    const parsed = JSON.parse(raw) as Partial<SshEndpointDraft>;
+    return {
+      ...DEFAULT_SSH_ENDPOINT,
+      ...parsed,
+      execRun: parsed.execRun ?? DEFAULT_SSH_ENDPOINT.execRun,
+      fsRead: parsed.fsRead ?? DEFAULT_SSH_ENDPOINT.fsRead,
+      logsTail: parsed.logsTail ?? DEFAULT_SSH_ENDPOINT.logsTail,
+    };
+  } catch {
+    return DEFAULT_SSH_ENDPOINT;
+  }
+}
+
+function writeSshEndpointDraft(value: SshEndpointDraft): void {
+  try {
+    localStorage.setItem(SSH_ENDPOINT_KEY, JSON.stringify(value));
   } catch {
     // ignore unavailable storage
   }
@@ -235,13 +324,67 @@ function isToolError(result: unknown): boolean {
   return !!result && typeof result === 'object' && (result as { isError?: unknown }).isError === true;
 }
 
+function endpointCapabilities(draft: SshEndpointDraft): DeviceTool[] {
+  const capabilities: DeviceTool[] = [];
+  if (draft.execRun) {
+    capabilities.push('exec.run');
+  }
+  if (draft.fsRead) {
+    capabilities.push('fs.read');
+  }
+  if (draft.logsTail) {
+    capabilities.push('logs.tail');
+  }
+  return capabilities.length > 0 ? capabilities : ['exec.run'];
+}
+
+function endpointPayload(draft: SshEndpointDraft): Record<string, unknown> {
+  if (!draft.id.trim()) {
+    throw new Error('Endpoint id is required.');
+  }
+  if (!draft.host.trim()) {
+    throw new Error('Host is required.');
+  }
+  if (!draft.username.trim()) {
+    throw new Error('Username is required.');
+  }
+  if (!draft.privateKeyEnv.trim() && !draft.passwordEnv.trim()) {
+    throw new Error('Set privateKeyEnv or passwordEnv.');
+  }
+  if (!draft.knownHostSha256.trim() || draft.knownHostSha256.trim() === 'SHA256:') {
+    throw new Error('Host key fingerprint is required.');
+  }
+  const port = Number(draft.port || '22');
+  if (!Number.isInteger(port) || port <= 0 || port > 65535) {
+    throw new Error('Port must be 1-65535.');
+  }
+  return {
+    id: draft.id.trim(),
+    tenantId: draft.tenantId.trim() || undefined,
+    label: draft.label.trim() || undefined,
+    kind: 'ssh-host',
+    driver: 'ssh',
+    capabilities: endpointCapabilities(draft),
+    ssh: {
+      host: draft.host.trim(),
+      port,
+      username: draft.username.trim(),
+      privateKeyEnv: draft.privateKeyEnv.trim() || undefined,
+      passphraseEnv: draft.passphraseEnv.trim() || undefined,
+      passwordEnv: draft.passwordEnv.trim() || undefined,
+      knownHostSha256: draft.knownHostSha256.trim(),
+    },
+  };
+}
+
 export function App() {
   const [authToken, setAuthToken] = useState(() => readSessionValue(AUTH_TOKEN_KEY));
   const [selectedServerId, setSelectedServerId] = useState<string>('');
   const [selectedTool, setSelectedTool] = useState<string>('');
   const [argumentsText, setArgumentsText] = useState('{}');
   const [adhoc, setAdhoc] = useState<AdhocTarget>(() => readAdhocTarget());
-  const [mode, setMode] = useState<'tree' | 'servers'>('tree');
+  const [sshDraft, setSshDraft] = useState<SshEndpointDraft>(() => readSshEndpointDraft());
+  const [mode, setMode] = useState<'tree' | 'servers' | 'devices'>('tree');
   const [copied, setCopied] = useState('');
   const [docView, setDocView] = useState<string | null>(null);
 
@@ -256,6 +399,12 @@ export function App() {
     queryKey: ['servers', authToken],
     queryFn: () => api<ServersResponse>('/api/servers', authToken),
     enabled: authQuery.data?.mode === 'none' || authToken.length > 0,
+  });
+
+  const endpointsQuery = useQuery({
+    queryKey: ['endpoints', authToken],
+    queryFn: () => api<EndpointsResponse>('/api/endpoints', authToken),
+    enabled: mode === 'devices' && (authQuery.data?.mode === 'none' || authToken.length > 0),
   });
 
   const selectedServer = useMemo(
@@ -309,6 +458,27 @@ export function App() {
     },
   });
 
+  const createEndpointMutation = useMutation({
+    mutationFn: () =>
+      api<EndpointResponse>('/api/endpoints', authToken, {
+        method: 'POST',
+        body: JSON.stringify(endpointPayload(sshDraft)),
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['endpoints'] });
+      void queryClient.invalidateQueries({ queryKey: ['tree'] });
+    },
+  });
+
+  const revokeEndpointMutation = useMutation({
+    mutationFn: (id: string) =>
+      api<EndpointResponse>(`/api/endpoints/${encodeURIComponent(id)}`, authToken, { method: 'DELETE' }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['endpoints'] });
+      void queryClient.invalidateQueries({ queryKey: ['tree'] });
+    },
+  });
+
   const treeQuery = useQuery({
     queryKey: ['tree', authToken],
     queryFn: () => api<TreeResponse>('/api/tree', authToken),
@@ -349,6 +519,11 @@ export function App() {
   function updateAdhoc(next: AdhocTarget) {
     setAdhoc(next);
     writeAdhocTarget(next);
+  }
+
+  function updateSshDraft(next: SshEndpointDraft) {
+    setSshDraft(next);
+    writeSshEndpointDraft(next);
   }
 
   async function copy(value: string) {
@@ -414,6 +589,10 @@ export function App() {
           <Server size={16} />
           Servers
         </button>
+        <button className={mode === 'devices' ? 'active' : ''} onClick={() => setMode('devices')}>
+          <TerminalSquare size={16} />
+          Devices
+        </button>
       </section>
 
       {mode === 'tree' ? (
@@ -436,6 +615,187 @@ export function App() {
               </div>
             ) : null}
           </section>
+        </section>
+      ) : mode === 'devices' ? (
+        <section className="workspace">
+          <div className="workspace-row device-row">
+            <section className="panel device-form-panel">
+              <div className="panel-heading">
+                <div>
+                  <h2>SSH Endpoint</h2>
+                  <p>Register a remote host as /~device</p>
+                </div>
+              </div>
+              <div className="device-form">
+                <label>
+                  ID
+                  <input value={sshDraft.id} onChange={(event) => updateSshDraft({ ...sshDraft, id: event.target.value })} />
+                </label>
+                <label>
+                  Tenant
+                  <input
+                    value={sshDraft.tenantId}
+                    onChange={(event) => updateSshDraft({ ...sshDraft, tenantId: event.target.value })}
+                    placeholder="optional"
+                  />
+                </label>
+                <label>
+                  Label
+                  <input
+                    value={sshDraft.label}
+                    onChange={(event) => updateSshDraft({ ...sshDraft, label: event.target.value })}
+                    placeholder="optional"
+                  />
+                </label>
+                <label>
+                  Host
+                  <input
+                    value={sshDraft.host}
+                    onChange={(event) => updateSshDraft({ ...sshDraft, host: event.target.value })}
+                    placeholder="203.0.113.10"
+                  />
+                </label>
+                <label>
+                  Port
+                  <input value={sshDraft.port} onChange={(event) => updateSshDraft({ ...sshDraft, port: event.target.value })} />
+                </label>
+                <label>
+                  Username
+                  <input
+                    value={sshDraft.username}
+                    onChange={(event) => updateSshDraft({ ...sshDraft, username: event.target.value })}
+                  />
+                </label>
+                <label>
+                  Private key secret
+                  <input
+                    value={sshDraft.privateKeyEnv}
+                    onChange={(event) => updateSshDraft({ ...sshDraft, privateKeyEnv: event.target.value })}
+                    placeholder="MY_SERVER_SSH_KEY"
+                  />
+                </label>
+                <label>
+                  Passphrase secret
+                  <input
+                    value={sshDraft.passphraseEnv}
+                    onChange={(event) => updateSshDraft({ ...sshDraft, passphraseEnv: event.target.value })}
+                    placeholder="optional"
+                  />
+                </label>
+                <label>
+                  Password secret
+                  <input
+                    value={sshDraft.passwordEnv}
+                    onChange={(event) => updateSshDraft({ ...sshDraft, passwordEnv: event.target.value })}
+                    placeholder="MY_SERVER_SSH_PASSWORD"
+                  />
+                </label>
+                <label className="device-form-wide">
+                  Host key fingerprint
+                  <input
+                    value={sshDraft.knownHostSha256}
+                    onChange={(event) => updateSshDraft({ ...sshDraft, knownHostSha256: event.target.value })}
+                    placeholder="SHA256:..."
+                  />
+                </label>
+                <fieldset className="device-form-wide capability-fieldset">
+                  <legend>Capabilities</legend>
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={sshDraft.execRun}
+                      onChange={(event) => updateSshDraft({ ...sshDraft, execRun: event.target.checked })}
+                    />
+                    exec.run
+                  </label>
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={sshDraft.fsRead}
+                      onChange={(event) => updateSshDraft({ ...sshDraft, fsRead: event.target.checked })}
+                    />
+                    fs.read
+                  </label>
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={sshDraft.logsTail}
+                      onChange={(event) => updateSshDraft({ ...sshDraft, logsTail: event.target.checked })}
+                    />
+                    logs.tail
+                  </label>
+                </fieldset>
+                <p className="empty-state device-form-wide">Secret values are created in Cloudflare; this form stores only their names.</p>
+                <button
+                  className="primary-button device-form-wide"
+                  disabled={createEndpointMutation.isPending}
+                  onClick={() => createEndpointMutation.mutate()}
+                >
+                  <TerminalSquare size={16} />
+                  Register endpoint
+                </button>
+                {createEndpointMutation.isError ? (
+                  <pre className="error-box device-form-wide">{String(createEndpointMutation.error.message)}</pre>
+                ) : null}
+                {createEndpointMutation.data ? (
+                  <pre className="result-box device-form-wide">{pretty(createEndpointMutation.data.endpoint)}</pre>
+                ) : null}
+              </div>
+            </section>
+
+            <aside className="panel device-list-panel">
+              <div className="panel-heading">
+                <div>
+                  <h2>Endpoints</h2>
+                  <p>{endpointsQuery.data?.endpoints.length ?? 0} registered</p>
+                </div>
+                <button className="icon-button" onClick={() => void endpointsQuery.refetch()} title="Refresh endpoints">
+                  <RefreshCw size={16} />
+                </button>
+              </div>
+              <div className="server-list">
+                {(endpointsQuery.data?.endpoints ?? []).map((endpoint) => {
+                  const execPath = `/htbp/~device/${encodeURIComponent(endpoint.id)}/exec.run`;
+                  return (
+                    <div key={endpoint.id} className="endpoint-row">
+                      <div>
+                        <span>{endpoint.label || endpoint.id}</span>
+                        <small>
+                          {endpoint.driver ?? 'tunnel'} · {endpoint.status} · {endpoint.capabilities.join(', ')}
+                        </small>
+                        {endpoint.ssh ? (
+                          <small>
+                            {endpoint.ssh.username}@{endpoint.ssh.host}:{endpoint.ssh.port ?? 22}
+                          </small>
+                        ) : null}
+                      </div>
+                      <div className="endpoint-actions">
+                        <button className="icon-button" onClick={() => void copy(execPath)} title="Copy exec path">
+                          <Copy size={14} />
+                        </button>
+                        {endpoint.status !== 'revoked' ? (
+                          <button
+                            className="icon-button"
+                            onClick={() => revokeEndpointMutation.mutate(endpoint.id)}
+                            title="Revoke endpoint"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        ) : null}
+                      </div>
+                    </div>
+                  );
+                })}
+                {endpointsQuery.isLoading ? <p className="empty-state">Loading endpoints…</p> : null}
+                {endpointsQuery.isError ? <pre className="error-box">{String(endpointsQuery.error.message)}</pre> : null}
+                {revokeEndpointMutation.isError ? (
+                  <pre className="error-box">{String(revokeEndpointMutation.error.message)}</pre>
+                ) : null}
+                {endpointsQuery.data?.endpoints.length === 0 ? <p className="empty-state">No registered endpoints</p> : null}
+                {copied ? <p className="empty-state">Copied {copied}</p> : null}
+              </div>
+            </aside>
+          </div>
         </section>
       ) : (
       <section className="workspace">
