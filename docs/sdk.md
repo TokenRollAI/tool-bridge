@@ -112,6 +112,7 @@ agent 不需要关心底层 driver，只调用 `exec.run` / `fs.read` / `logs.ta
 | --- | --- |
 | 注册 tunnel endpoint | `curl -X POST -H "Authorization: Bearer $ADMIN" -d '{"id":"sbx_1","tenantId":"a","kind":"sandbox","driver":"tunnel","capabilities":["exec.run","fs.read","logs.tail"]}' $TB/api/endpoints` |
 | 注册 SSH sandbox | `curl -X POST -H "Authorization: Bearer $ADMIN" -d '{"id":"sandbox_1","tenantId":"a","kind":"sandbox","driver":"ssh","capabilities":["exec.run"],"ssh":{"host":"1.2.3.4","username":"ubuntu","privateKeyEnv":"SANDBOX_1_SSH_KEY","knownHostSha256":"SHA256:..."}}' $TB/api/endpoints` |
+| 注册密码兜底 SSH | `curl -X POST -H "Authorization: Bearer $ADMIN" -d '{"id":"legacy_box","tenantId":"a","kind":"ssh-host","driver":"ssh","capabilities":["exec.run"],"ssh":{"host":"1.2.3.5","username":"ubuntu","passwordEnv":"LEGACY_BOX_SSH_PASSWORD","knownHostSha256":"SHA256:..."}}' $TB/api/endpoints` |
 | 注册 K8S pod | `curl -X POST -H "Authorization: Bearer $ADMIN" -d '{"id":"pod_1","tenantId":"a","kind":"k8s-pod","driver":"k8s-pod","capabilities":["exec.run","logs.tail"],"k8s":{"serverEnv":"K8S_SERVER","tokenEnv":"K8S_TOKEN","namespace":"default","pod":"worker-abc","container":"app"}}' $TB/api/endpoints` |
 | 注册命令策略 | `curl -X POST -H "Authorization: Bearer $ADMIN" -d '{"id":"safe","defaultMode":"deny","allowCommands":["npm","pnpm"],"maxTimeoutMs":30000}' $TB/api/command-policies` |
 | endpoint 建连 | `curl -X POST -d '{"endpointId":"sbx_1"}' $TB/tunnel/connect` → `{sessionId}` |
@@ -138,11 +139,12 @@ export default createBridge({
 ```
 
 内置 SSH driver 由 Worker 直接出站连接远程主机，不要求远程机器安装
-tool-bridge agent。SSH 私钥放在 Worker secret 中，endpoint 里只保存 secret
-变量名：
+tool-bridge agent。SSH 私钥和密码都放在 Worker secret 中，endpoint 里只保存
+secret 变量名：
 
 ```bash
 wrangler secret put SANDBOX_1_SSH_KEY
+wrangler secret put LEGACY_BOX_SSH_PASSWORD
 ```
 
 `knownHostSha256` 使用 OpenSSH host key 指纹格式，例如
@@ -164,6 +166,10 @@ ssh-keygen -lf /tmp/known_hosts -E sha256
 私钥格式限制：当前支持 RSA/ECDSA 的 PEM、PKCS#1、SEC1、PKCS#8；不支持
 Ed25519 和 `-----BEGIN OPENSSH PRIVATE KEY-----` 格式。可用 `ssh-keygen -m PEM`
 或生成 PKCS#8/RSA/ECDSA key 后写入 Worker secret。
+
+认证配置规则：`privateKeyEnv` 和 `passwordEnv` 至少配置一个；两者都配置时，
+driver 会优先尝试私钥认证，同时把密码作为 SSH password fallback。密码登录只
+作为兼容旧机器的兜底，不建议作为默认机器接入方式。
 
 Tunnel Agent Kit skeleton：
 

@@ -6,6 +6,7 @@ import {
   SshClientSession,
   SshExtendedDataType,
   SshSessionConfiguration,
+  type SshClientCredentials,
   type KeyPair,
   type Stream,
 } from '@microsoft/dev-tunnels-ssh';
@@ -66,16 +67,25 @@ async function dispatchSsh(
   ssh: SshEndpointConfig,
   transportFactory: (options: SshTransportOptions) => Promise<SshTransport>
 ): Promise<unknown> {
-  const key = envString(request.env, ssh.privateKeyEnv, 'ssh.privateKeyEnv');
-  if (key.includes(OPENSSH_PRIVATE_KEY_HEADER)) {
-    throw new BadRequestError('ssh.privateKeyEnv must contain an RSA/ECDSA PEM or PKCS#8 private key; OpenSSH private keys are not supported yet.');
+  const credentials: SshClientCredentials = { username: ssh.username };
+  if (ssh.privateKeyEnv) {
+    const key = envString(request.env, ssh.privateKeyEnv, 'ssh.privateKeyEnv');
+    if (key.includes(OPENSSH_PRIVATE_KEY_HEADER)) {
+      throw new BadRequestError('ssh.privateKeyEnv must contain an RSA/ECDSA PEM or PKCS#8 private key; OpenSSH private keys are not supported yet.');
+    }
+    const passphrase = ssh.passphraseEnv ? envString(request.env, ssh.passphraseEnv, 'ssh.passphraseEnv') : null;
+    credentials.publicKeys = [await importPrivateKey(key, passphrase)];
   }
-  const passphrase = ssh.passphraseEnv ? envString(request.env, ssh.passphraseEnv, 'ssh.passphraseEnv') : null;
-  const keyPair = await importPrivateKey(key, passphrase);
+  if (ssh.passwordEnv) {
+    credentials.password = envString(request.env, ssh.passwordEnv, 'ssh.passwordEnv');
+  }
+  if (!credentials.publicKeys?.length && !credentials.password) {
+    throw new BadRequestError('ssh driver requires privateKeyEnv or passwordEnv.');
+  }
   const transport = await transportFactory({ host: ssh.host, port: ssh.port ?? 22 });
   let session: SshClientSession | undefined;
   try {
-    session = await openAuthenticatedSession(transport.stream, ssh, keyPair);
+    session = await openAuthenticatedSession(transport.stream, ssh, credentials);
     if (request.tool === 'exec.run') {
       return await runExec(session, commandFromExecInput(request.input), request.maxOutputBytes);
     }
@@ -101,7 +111,7 @@ async function importPrivateKey(key: string, passphrase: string | null): Promise
   }
 }
 
-async function openAuthenticatedSession(stream: Stream, ssh: SshEndpointConfig, keyPair: KeyPair): Promise<SshClientSession> {
+async function openAuthenticatedSession(stream: Stream, ssh: SshEndpointConfig, credentials: SshClientCredentials): Promise<SshClientSession> {
   const config = new SshSessionConfiguration(true);
   config.keepAliveTimeoutInSeconds = 0;
   const session = new SshClientSession(config);
@@ -115,7 +125,7 @@ async function openAuthenticatedSession(stream: Stream, ssh: SshEndpointConfig, 
   });
   try {
     await session.connect(stream);
-    const authenticated = await session.authenticate({ username: ssh.username, publicKeys: [keyPair] });
+    const authenticated = await session.authenticate(credentials);
     if (!authenticated) {
       throw new EndpointUnavailableError(`SSH authentication failed for '${ssh.username}@${ssh.host}'.`);
     }

@@ -48,4 +48,37 @@ describe('ssh execution driver helpers', () => {
       })
     ).rejects.toThrow('OpenSSH private keys are not supported yet');
   });
+
+  it('accepts password-only configuration before opening transport', async () => {
+    const driver = createSshExecutionDriver({
+      async transport() {
+        throw new Error('transport opened');
+      },
+    });
+    await expect(
+      driver.dispatch({
+        env: { SSH_PASSWORD: 'secret-password' } as never,
+        endpoint: {
+          id: 'ssh_password_1',
+          kind: 'ssh-host',
+          driver: 'ssh',
+          status: 'online',
+          capabilities: ['exec.run'],
+          ssh: {
+            host: '203.0.113.10',
+            username: 'ubuntu',
+            passwordEnv: 'SSH_PASSWORD',
+            knownHostSha256: 'SHA256:test',
+          },
+          createdAt: new Date(0).toISOString(),
+          updatedAt: new Date(0).toISOString(),
+        },
+        tool: 'exec.run',
+        traceId: 'trc_test',
+        input: { argv: ['pwd'] },
+        deadlineMs: 1000,
+        maxOutputBytes: 1024,
+      })
+    ).rejects.toThrow('transport opened');
+  });
 });

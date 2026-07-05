@@ -25,6 +25,7 @@ async function m2Env(): Promise<AppEnv> {
     TENANT_MODE: 'true',
     MCP_SERVERS_JSON: '{}',
     SSH_BOX_PRIVATE_KEY: 'test-private-key',
+    SSH_BOX_PASSWORD: 'test-password',
     K8S_SERVER: 'https://k8s.example.com',
     K8S_TOKEN: 'test-token',
     K8S_CA_CERT: 'test-ca',
@@ -348,6 +349,74 @@ describe('Tunnel / Device M2', () => {
       'tbk_admin'
     );
     expect(missingSshSecret.status).toBe(400);
+
+    const noSshCredential = await request(
+      '/api/endpoints',
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          id: 'no_ssh_credential',
+          tenantId: 'a',
+          kind: 'ssh-host',
+          driver: 'ssh',
+          capabilities: ['exec.run'],
+          ssh: {
+            host: '203.0.113.13',
+            username: 'ubuntu',
+            knownHostSha256: 'SHA256:test',
+          },
+        }),
+      },
+      'tbk_admin'
+    );
+    expect(noSshCredential.status).toBe(400);
+
+    const passwordOnly = await request(
+      '/api/endpoints',
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          id: 'password_ssh',
+          tenantId: 'a',
+          kind: 'ssh-host',
+          driver: 'ssh',
+          capabilities: ['exec.run'],
+          ssh: {
+            host: '203.0.113.15',
+            username: 'ubuntu',
+            passwordEnv: 'SSH_BOX_PASSWORD',
+            knownHostSha256: 'SHA256:test',
+          },
+        }),
+      },
+      'tbk_admin'
+    );
+    expect(passwordOnly.status).toBe(201);
+    expect(((await passwordOnly.json()) as { endpoint: { ssh: { passwordEnv: string; privateKeyEnv?: string } } }).endpoint.ssh).toMatchObject({
+      passwordEnv: 'SSH_BOX_PASSWORD',
+    });
+
+    const missingPasswordSecret = await request(
+      '/api/endpoints',
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          id: 'bad_password_ssh',
+          tenantId: 'a',
+          kind: 'ssh-host',
+          driver: 'ssh',
+          capabilities: ['exec.run'],
+          ssh: {
+            host: '203.0.113.14',
+            username: 'ubuntu',
+            passwordEnv: 'MISSING_PASSWORD',
+            knownHostSha256: 'SHA256:test',
+          },
+        }),
+      },
+      'tbk_admin'
+    );
+    expect(missingPasswordSecret.status).toBe(400);
 
     const k8s = await request(
       '/api/endpoints',

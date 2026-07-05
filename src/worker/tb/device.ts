@@ -24,8 +24,9 @@ export interface SshEndpointConfig {
   host: string;
   port?: number;
   username: string;
-  privateKeyEnv: string;
+  privateKeyEnv?: string;
   passphraseEnv?: string;
+  passwordEnv?: string;
   knownHostSha256: string;
 }
 
@@ -601,9 +602,14 @@ function normalizeEndpointInput(value: Record<string, unknown>, existing?: Endpo
 
 function validateEndpointSecrets(env: AppEnv, endpoint: EndpointRecord): void {
   if (endpoint.driver === 'ssh' && endpoint.ssh) {
-    requireEnvString(env, endpoint.ssh.privateKeyEnv, 'ssh.privateKeyEnv');
+    if (endpoint.ssh.privateKeyEnv) {
+      requireEnvString(env, endpoint.ssh.privateKeyEnv, 'ssh.privateKeyEnv');
+    }
     if (endpoint.ssh.passphraseEnv) {
       requireEnvString(env, endpoint.ssh.passphraseEnv, 'ssh.passphraseEnv');
+    }
+    if (endpoint.ssh.passwordEnv) {
+      requireEnvString(env, endpoint.ssh.passwordEnv, 'ssh.passwordEnv');
     }
   }
   if (endpoint.driver === 'k8s-pod' && endpoint.k8s) {
@@ -674,9 +680,16 @@ function normalizeSshConfig(value: unknown, existing?: SshEndpointConfig): SshEn
   const host = raw ? stringField(raw, 'host') : existing?.host;
   const username = raw ? stringField(raw, 'username') : existing?.username;
   const privateKeyEnv = raw ? stringField(raw, 'privateKeyEnv') : existing?.privateKeyEnv;
+  const passwordEnv = raw ? stringField(raw, 'passwordEnv') : existing?.passwordEnv;
   const knownHostSha256 = raw ? stringField(raw, 'knownHostSha256') : existing?.knownHostSha256;
-  if (!host || !username || !privateKeyEnv || !knownHostSha256) {
-    throw new BadRequestError('ssh driver requires host, username, privateKeyEnv, and knownHostSha256.');
+  if (!host || !username || !knownHostSha256) {
+    throw new BadRequestError('ssh driver requires host, username, and knownHostSha256.');
+  }
+  if (!privateKeyEnv && !passwordEnv) {
+    throw new BadRequestError('ssh driver requires privateKeyEnv or passwordEnv.');
+  }
+  if (!privateKeyEnv && (raw ? stringField(raw, 'passphraseEnv') : existing?.passphraseEnv)) {
+    throw new BadRequestError('ssh.passphraseEnv requires privateKeyEnv.');
   }
   return {
     host,
@@ -684,6 +697,7 @@ function normalizeSshConfig(value: unknown, existing?: SshEndpointConfig): SshEn
     username,
     privateKeyEnv,
     passphraseEnv: raw ? stringField(raw, 'passphraseEnv') : existing?.passphraseEnv,
+    passwordEnv,
     knownHostSha256,
   };
 }
