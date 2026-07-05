@@ -26,8 +26,7 @@ retryable 语义按 code 判定（`RETRYABLE_CODES`），wire 信封不变；SDK
 ## 发布形态：一个包，多个入口
 
 当前 SDK 作为同一个 npm 包发布/接入，不拆成 `tb-host`、`tb-admin`、
-`tb-tunnel-agent` 三个包。下面以目标发布名 `@tokenroll/tool-bridge`
-为例；本地 workspace 可按实际 package alias 使用。不同角色通过 subpath exports 选择入口：
+`tb-tunnel-agent` 三个包。npm 包名为 `@tokenroll/tool-bridge`，不同角色通过 subpath exports 选择入口：
 
 | 入口 | 用途 |
 | --- | --- |

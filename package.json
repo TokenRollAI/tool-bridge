@@ -1,37 +1,71 @@
 {
-  "name": "tool-bridge",
-  "private": true,
+  "name": "@tokenroll/tool-bridge",
+  "version": "0.1.0",
+  "description": "Tool Bridge SDK and Cloudflare Worker bridge for HTBP/MCP tool routing.",
+  "license": "MIT",
   "type": "module",
-  "main": "./src/sdk/index.ts",
-  "types": "./src/sdk/index.ts",
+  "main": "./dist/sdk/index.js",
+  "types": "./dist/types/sdk/index.d.ts",
+  "files": [
+    "dist/sdk",
+    "dist/types",
+    "README.md",
+    "docs/sdk.md"
+  ],
   "exports": {
-    ".": "./src/sdk/index.ts",
-    "./admin": "./src/sdk/admin/index.ts",
-    "./host": "./src/sdk/host/index.ts",
-    "./tunnel-agent": "./src/sdk/tunnel-agent/index.ts",
-    "./transport": "./src/sdk/transport.ts",
-    "./worker": "./src/worker/index.ts",
-    "./tb": "./src/worker/tb/types.ts"
+    ".": {
+      "types": "./dist/types/sdk/index.d.ts",
+      "import": "./dist/sdk/index.js"
+    },
+    "./admin": {
+      "types": "./dist/types/sdk/admin/index.d.ts",
+      "import": "./dist/sdk/admin.js"
+    },
+    "./host": {
+      "types": "./dist/types/sdk/host/index.d.ts",
+      "import": "./dist/sdk/host.js"
+    },
+    "./tunnel-agent": {
+      "types": "./dist/types/sdk/tunnel-agent/index.d.ts",
+      "import": "./dist/sdk/tunnel-agent.js"
+    },
+    "./transport": {
+      "types": "./dist/types/sdk/transport.d.ts",
+      "import": "./dist/sdk/transport.js"
+    },
+    "./worker": {
+      "types": "./dist/types/worker/index.d.ts",
+      "import": "./dist/sdk/worker.js"
+    },
+    "./tb": {
+      "types": "./dist/types/worker/tb/types.d.ts",
+      "import": "./dist/sdk/tb.js"
+    }
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "scripts": {
     "dev": "npm run build && wrangler dev --ip 127.0.0.1 --port 8787",
     "dev:ui": "vite --host 127.0.0.1",
     "build": "vite build",
+    "build:sdk": "rm -rf dist/sdk dist/types && vite build --config vite.sdk.config.ts && tsc -p tsconfig.sdk.json",
     "typecheck": "tsc --noEmit",
     "worker:dev": "wrangler dev --ip 127.0.0.1 --port 8787",
     "deploy": "npm run build && wrangler deploy",
-    "check": "npm run typecheck && npm run build",
+    "check": "npm run typecheck && npm run build && npm run build:sdk",
+    "prepack": "npm run build:sdk",
     "test": "vitest run"
   },
   "dependencies": {
-    "@tanstack/react-query": "^5.90.12",
-    "@tanstack/react-router": "^1.140.0",
-    "jose": "^6.2.0",
-    "lucide-react": "^0.562.0",
-    "react": "^19.2.3",
-    "react-dom": "^19.2.3"
+    "jose": "^6.2.0"
   },
   "devDependencies": {
+    "@tanstack/react-query": "^5.90.12",
+    "@tanstack/react-router": "^1.140.0",
+    "lucide-react": "^0.562.0",
+    "react": "^19.2.3",
+    "react-dom": "^19.2.3",
     "@cloudflare/workers-types": "^4.20260625.1",
     "@types/node": "^25.0.2",
     "@types/react": "^19.2.7",
