@@ -150,6 +150,20 @@ describe('provider lifecycle end-to-end (admin + tbp_ provider key)', () => {
     expect((await call('/htbp/~help', {}, tbpKey)).status).toBe(403);
   });
 
+  it('rejects malformed key expiration dates at mint time', async () => {
+    const { env } = await tenantEnv();
+    const call = fetcher(env);
+    await call('/api/providers', { method: 'POST', body: JSON.stringify({ id: 'acme' }) }, 'tbk_admin');
+
+    const res = await call(
+      '/api/providers/acme/keys',
+      { method: 'POST', body: JSON.stringify({ expiresAt: 'not-a-date' }) },
+      'tbk_admin'
+    );
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: { code: string } }).error.code).toBe('bad_request');
+  });
+
   it('placement dry-run reports affected grants without persisting', async () => {
     const { env } = await tenantEnv();
     const call = fetcher(env);

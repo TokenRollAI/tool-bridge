@@ -127,6 +127,63 @@ describe('Tunnel / Device M2', () => {
     expect(shellHelp.status).toBe(404);
   });
 
+  it('fails closed when command policy restrictions cannot be enforced', async () => {
+    const env = await m2Env();
+    let dispatchCount = 0;
+    const bridge = createBridge({
+      tunnelBroker: {
+        async dispatch() {
+          dispatchCount += 1;
+          return {};
+        },
+      },
+    });
+    const request = call(bridge, env);
+
+    await registerEndpoint(request, { commandPolicyId: 'missing-policy' });
+    await request('/tunnel/connect', { method: 'POST', body: JSON.stringify({ endpointId: 'sbx_1' }) });
+    const missingPolicy = await request(
+      '/htbp/~device/sbx_1/exec.run',
+      { method: 'POST', body: JSON.stringify({ argv: ['npm', 'test'] }) },
+      'tbk_agent_a'
+    );
+    expect(missingPolicy.status).toBe(403);
+    expect(((await missingPolicy.json()) as { error: { code: string } }).error.code).toBe('Forbidden');
+
+    await request(
+      '/api/command-policies',
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          id: 'workspace-only',
+          defaultMode: 'allow',
+          allowedCwdPrefixes: ['/workspace/project'],
+        }),
+      },
+      'tbk_admin'
+    );
+    await request(
+      '/api/endpoints/sbx_1',
+      { method: 'PUT', body: JSON.stringify({ commandPolicyId: 'workspace-only' }) },
+      'tbk_admin'
+    );
+
+    const noCwd = await request(
+      '/htbp/~device/sbx_1/exec.run',
+      { method: 'POST', body: JSON.stringify({ argv: ['npm', 'test'] }) },
+      'tbk_agent_a'
+    );
+    expect(noCwd.status).toBe(403);
+
+    const badCwd = await request(
+      '/htbp/~device/sbx_1/exec.run',
+      { method: 'POST', body: JSON.stringify({ argv: ['npm', 'test'], cwd: '/tmp' }) },
+      'tbk_agent_a'
+    );
+    expect(badCwd.status).toBe(403);
+    expect(dispatchCount).toBe(0);
+  });
+
   it('returns EndpointUnavailable for offline endpoints', async () => {
     const env = await m2Env();
     const bridge = createBridge({

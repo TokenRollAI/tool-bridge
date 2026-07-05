@@ -19,7 +19,8 @@ export function https(baseUrl: string, fetchImpl?: FetcherLike['fetch']): Transp
   const doFetch = fetchImpl ?? ((input: Request | string, init?: RequestInit) => fetch(input as string, init));
   return {
     fetch(path: string, init?: RequestInit): Promise<Response> {
-      return doFetch(`${base}${path}`, init);
+      const normalizedPath = path.startsWith('/') ? path : `/${path}`;
+      return doFetch(`${base}${normalizedPath}`, init);
     },
   };
 }

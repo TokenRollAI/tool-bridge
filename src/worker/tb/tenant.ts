@@ -13,6 +13,7 @@
 // this root).
 
 import { parseTreeFromJson } from './registry';
+import { BadRequestError } from './errors';
 import { AppEnv, DirectoryNode } from './types';
 import { isRecord } from './util';
 
@@ -119,6 +120,9 @@ export function generateKey(prefix: 'tbk' | 'tbp' | 'tbs'): string {
 export async function storeApiKey(env: AppEnv, rawKey: string, record: PrincipalRecord): Promise<void> {
   if (!env.TENANTS) {
     throw new Error('API keys require the TENANTS KV binding.');
+  }
+  if (record.expiresAt && Number.isNaN(Date.parse(record.expiresAt))) {
+    throw new BadRequestError('expiresAt must be a valid date string.');
   }
   await env.TENANTS.put(`apikey:${await sha256Hex(rawKey)}`, JSON.stringify(record));
 }

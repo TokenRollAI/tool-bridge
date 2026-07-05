@@ -419,8 +419,8 @@ async function listJson<T>(env: AppEnv, prefix: string): Promise<T[]> {
   let cursor: string | undefined;
   do {
     const page = await kv.list({ prefix, cursor });
-    for (const key of page.keys) {
-      const value = (await kv.get(key.name, 'json')) as T | null;
+    const values = await Promise.all(page.keys.map((key) => kv.get(key.name, 'json') as Promise<T | null>));
+    for (const value of values) {
       if (value) {
         out.push(value);
       }

@@ -631,6 +631,9 @@ async function prepareExecInput(
     throw new BadRequestError('exec.run requires non-empty argv: string[].');
   }
   const policy = endpoint.commandPolicyId ? await getCommandPolicy(env, endpoint.commandPolicyId) : null;
+  if (endpoint.commandPolicyId && !policy) {
+    throw new ForbiddenError(`Command policy '${endpoint.commandPolicyId}' not found.`);
+  }
   enforceCommandPolicy(argv, args, policy);
   const maxTimeout = policy?.maxTimeoutMs ?? DEFAULT_TIMEOUT_MS;
   const maxOutput = policy?.maxOutputBytes ?? DEFAULT_MAX_OUTPUT_BYTES;
@@ -666,8 +669,13 @@ function enforceCommandPolicy(argv: string[], args: Record<string, unknown>, pol
     throw new ForbiddenError(`Command '${cmd}' is not allowed by policy '${policy.id}'.`);
   }
   const cwd = stringField(args, 'cwd');
-  if (cwd && policy?.allowedCwdPrefixes && !policy.allowedCwdPrefixes.some((prefix) => cwd.startsWith(prefix))) {
-    throw new ForbiddenError(`cwd '${cwd}' is outside policy '${policy.id}'.`);
+  if (policy?.allowedCwdPrefixes && policy.allowedCwdPrefixes.length > 0) {
+    if (!cwd) {
+      throw new ForbiddenError(`cwd is required by policy '${policy.id}'.`);
+    }
+    if (!policy.allowedCwdPrefixes.some((prefix) => cwd.startsWith(prefix))) {
+      throw new ForbiddenError(`cwd '${cwd}' is outside policy '${policy.id}'.`);
+    }
   }
 }
 
