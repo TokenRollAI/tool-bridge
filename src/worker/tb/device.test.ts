@@ -284,6 +284,7 @@ describe('Tunnel / Device M2', () => {
       input: { argv: ['bash', '-lc', 'pwd'], cwd: '/workspace' },
       endpoint: { id: 'sandbox_ssh', driver: 'ssh', kind: 'sandbox' },
     });
+    expect((dispatched[0] as { env?: AppEnv }).env).toBe(env);
   });
 
   it('fails closed when a direct execution driver is not configured', async () => {

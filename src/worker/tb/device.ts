@@ -98,6 +98,7 @@ export interface TunnelBroker {
 }
 
 export interface ExecutionDriverRequest {
+  env: AppEnv;
   endpoint: EndpointRecord;
   tool: DeviceTool;
   traceId: string;
@@ -388,6 +389,7 @@ export async function routeDeviceHtbp(args: {
   const prepared = await prepareDeviceInput(env, endpoint, tool, input);
   emitAuditSummary({ endpointId: endpoint.id, tool, traceId });
   const result = await dispatchDeviceCall(endpoint, {
+    env,
     broker,
     executionDrivers,
     tool,
@@ -406,6 +408,7 @@ export async function routeDeviceHtbp(args: {
 async function dispatchDeviceCall(
   endpoint: EndpointRecord,
   options: {
+    env: AppEnv;
     broker?: TunnelBroker;
     executionDrivers?: ExecutionDriverRegistry;
     tool: DeviceTool;
@@ -438,6 +441,7 @@ async function dispatchDeviceCall(
     throw new EndpointUnavailableError(`Execution driver '${driver}' is not configured.`);
   }
   return executionDriver.dispatch({
+    env: options.env,
     endpoint,
     tool: options.tool,
     traceId: options.traceId,

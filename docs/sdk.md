@@ -127,15 +127,43 @@ driver 返回 `EndpointUnavailable → 503`。
 Worker 内 driver 通过部署期注入：
 
 ```ts
-import { createBridge } from '@tokenroll/tool-bridge/worker';
+import { createBridge, createSshExecutionDriver } from '@tokenroll/tool-bridge/worker';
 
 export default createBridge({
   executionDrivers: {
-    ssh: sshDriver,
+    ssh: createSshExecutionDriver(),
     'k8s-pod': k8sPodDriver,
   },
 });
 ```
+
+内置 SSH driver 由 Worker 直接出站连接远程主机，不要求远程机器安装
+tool-bridge agent。SSH 私钥放在 Worker secret 中，endpoint 里只保存 secret
+变量名：
+
+```bash
+wrangler secret put SANDBOX_1_SSH_KEY
+```
+
+`knownHostSha256` 使用 OpenSSH host key 指纹格式，例如
+`SHA256:AbCd...`。可以在可信网络内先取主机 key：
+
+```bash
+ssh-keyscan -t rsa,ecdsa 1.2.3.4 > /tmp/known_hosts
+ssh-keygen -lf /tmp/known_hosts -E sha256
+```
+
+当前内置 SSH driver 支持：
+
+| 工具 | 行为 |
+| --- | --- |
+| `exec.run` | 把结构化 `argv` 安全 quote 后通过 SSH exec 执行，支持 `cwd`、`timeoutMs`、`maxOutputBytes` |
+| `fs.read` | 通过远端 `cat -- <path>` 读取文件内容，受 endpoint capability 控制 |
+| `logs.tail` | 暂未提供通用 SSH 实现；需要后续为主机日志路径建立显式配置 |
+
+私钥格式限制：当前支持 RSA/ECDSA 的 PEM、PKCS#1、SEC1、PKCS#8；不支持
+Ed25519 和 `-----BEGIN OPENSSH PRIVATE KEY-----` 格式。可用 `ssh-keygen -m PEM`
+或生成 PKCS#8/RSA/ECDSA key 后写入 Worker secret。
 
 Tunnel Agent Kit skeleton：
 

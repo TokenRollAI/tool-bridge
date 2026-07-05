@@ -1,6 +1,6 @@
 {
   "name": "@tokenroll/tool-bridge",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Tool Bridge SDK and Cloudflare Worker bridge for HTBP/MCP tool routing.",
   "license": "MIT",
   "type": "module",
@@ -58,7 +58,10 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "jose": "^6.2.0"
+    "@microsoft/dev-tunnels-ssh": "^3.12.36",
+    "@microsoft/dev-tunnels-ssh-keys": "^3.12.36",
+    "jose": "^6.2.0",
+    "node-rsa": "^2.0.0"
   },
   "devDependencies": {
     "@tanstack/react-query": "^5.90.12",

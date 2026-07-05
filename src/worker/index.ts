@@ -1111,5 +1111,6 @@ export type {
   K8sPodEndpointConfig,
   SshEndpointConfig,
 } from './tb/device';
+export { buildSshExecCommand, createSshExecutionDriver, escapePosixArg } from './tb/ssh-driver';
 
 export default createBridge();

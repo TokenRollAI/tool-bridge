@@ -18,7 +18,7 @@ export default defineConfig({
       formats: ['es'],
     },
     rollupOptions: {
-      external: ['jose'],
+      external: ['cloudflare:sockets', 'jose'],
       output: {
         entryFileNames: '[name].js',
         chunkFileNames: 'chunks/[name]-[hash].js',
