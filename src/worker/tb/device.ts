@@ -16,19 +16,41 @@ import { AuditCallContext } from './audit';
 import { AppEnv, HelpPayload, ResourceRef } from './types';
 import { arrayOfStrings, isRecord, json, stringField } from './util';
 
-export type EndpointKind = 'sandbox' | 'k8s-pod' | 'pc' | 'browser-host' | 'mobile' | 'generic';
+export type EndpointKind = 'sandbox' | 'ssh-host' | 'k8s-pod' | 'pc' | 'browser-host' | 'mobile' | 'generic';
+export type EndpointDriver = 'tunnel' | 'ssh' | 'k8s-pod';
 export type DeviceTool = 'exec.run' | 'fs.read' | 'logs.tail';
+
+export interface SshEndpointConfig {
+  host: string;
+  port?: number;
+  username: string;
+  privateKeyEnv: string;
+  passphraseEnv?: string;
+  knownHostSha256: string;
+}
+
+export interface K8sPodEndpointConfig {
+  serverEnv: string;
+  tokenEnv: string;
+  caCertEnv?: string;
+  namespace: string;
+  pod: string;
+  container?: string;
+}
 
 export interface EndpointRecord {
   id: string;
   tenantId?: string;
   providerId?: string;
   kind: EndpointKind;
+  driver?: EndpointDriver;
   label?: string;
   capabilities: DeviceTool[];
   activeCapabilities?: DeviceTool[];
   status: 'offline' | 'online' | 'revoked';
   commandPolicyId?: string;
+  ssh?: SshEndpointConfig;
+  k8s?: K8sPodEndpointConfig;
   sessionId?: string;
   lastSeenAt?: string;
   createdAt: string;
@@ -74,6 +96,21 @@ export interface TunnelBroker {
   dispatch(endpoint: EndpointRecord, request: TunnelDispatchRequest): Promise<unknown>;
   cancel?(endpoint: EndpointRecord, requestId: string): Promise<void>;
 }
+
+export interface ExecutionDriverRequest {
+  endpoint: EndpointRecord;
+  tool: DeviceTool;
+  traceId: string;
+  input: Record<string, unknown>;
+  deadlineMs: number;
+  maxOutputBytes: number;
+}
+
+export interface ExecutionDriver {
+  dispatch(request: ExecutionDriverRequest): Promise<unknown>;
+}
+
+export type ExecutionDriverRegistry = Partial<Record<EndpointDriver, ExecutionDriver>>;
 
 export interface DeviceRouteResult {
   response: Response;
@@ -175,6 +212,7 @@ export async function routeEndpointApi(
     }
     if (request.method === 'POST') {
       const endpoint = normalizeEndpointInput(await readJson(request));
+      validateEndpointSecrets(env, endpoint);
       await putEndpoint(env, endpoint);
       return json({ endpoint }, { status: 201 });
     }
@@ -192,6 +230,7 @@ export async function routeEndpointApi(
     }
     if (request.method === 'PUT') {
       const endpoint = normalizeEndpointInput(await readJson(request), existing);
+      validateEndpointSecrets(env, endpoint);
       await putEndpoint(env, endpoint);
       return json({ endpoint });
     }
@@ -296,8 +335,9 @@ export async function routeDeviceHtbp(args: {
   input?: unknown;
   traceId: string;
   broker?: TunnelBroker;
+  executionDrivers?: ExecutionDriverRegistry;
 }): Promise<DeviceRouteResult> {
-  const { env, principal, segments, isHelp, input, traceId, broker } = args;
+  const { env, principal, segments, isHelp, input, traceId, broker, executionDrivers } = args;
   if (segments[0] !== '~device') {
     throw new NotFoundError('Device route not found.');
   }
@@ -345,15 +385,11 @@ export async function routeDeviceHtbp(args: {
   if (!exposedCapabilities(endpoint).includes(tool)) {
     throw new NotFoundError(`Device endpoint '${endpoint.id}' does not expose '${tool}'.`);
   }
-  if (endpoint.status !== 'online' || !endpoint.sessionId || !broker) {
-    throw new EndpointUnavailableError(`Endpoint '${endpoint.id}' is offline.`);
-  }
-
   const prepared = await prepareDeviceInput(env, endpoint, tool, input);
   emitAuditSummary({ endpointId: endpoint.id, tool, traceId });
-  const result = await broker.dispatch(endpoint, {
-    endpointId: endpoint.id,
-    sessionId: endpoint.sessionId,
+  const result = await dispatchDeviceCall(endpoint, {
+    broker,
+    executionDrivers,
     tool,
     traceId,
     input: prepared.input,
@@ -365,6 +401,50 @@ export async function routeDeviceHtbp(args: {
     audit,
     tenantId: endpoint.tenantId,
   };
+}
+
+async function dispatchDeviceCall(
+  endpoint: EndpointRecord,
+  options: {
+    broker?: TunnelBroker;
+    executionDrivers?: ExecutionDriverRegistry;
+    tool: DeviceTool;
+    traceId: string;
+    input: Record<string, unknown>;
+    deadlineMs: number;
+    maxOutputBytes: number;
+  }
+): Promise<unknown> {
+  const driver = endpoint.driver ?? 'tunnel';
+  if (endpoint.status !== 'online') {
+    throw new EndpointUnavailableError(`Endpoint '${endpoint.id}' is offline.`);
+  }
+  if (driver === 'tunnel') {
+    if (!endpoint.sessionId || !options.broker) {
+      throw new EndpointUnavailableError(`Endpoint '${endpoint.id}' is offline.`);
+    }
+    return options.broker.dispatch(endpoint, {
+      endpointId: endpoint.id,
+      sessionId: endpoint.sessionId,
+      tool: options.tool,
+      traceId: options.traceId,
+      input: options.input,
+      deadlineMs: options.deadlineMs,
+      maxOutputBytes: options.maxOutputBytes,
+    });
+  }
+  const executionDriver = options.executionDrivers?.[driver];
+  if (!executionDriver) {
+    throw new EndpointUnavailableError(`Execution driver '${driver}' is not configured.`);
+  }
+  return executionDriver.dispatch({
+    endpoint,
+    tool: options.tool,
+    traceId: options.traceId,
+    input: options.input,
+    deadlineMs: options.deadlineMs,
+    maxOutputBytes: options.maxOutputBytes,
+  });
 }
 
 async function deviceRootHelp(env: AppEnv, principal: DevicePrincipal): Promise<HelpPayload> {
@@ -489,24 +569,53 @@ function normalizeEndpointInput(value: Record<string, unknown>, existing?: Endpo
   const capabilities = parseCapabilities(value.capabilities, existing?.capabilities ?? ['exec.run']);
   const kindRaw = stringField(value, 'kind') ?? existing?.kind ?? 'generic';
   const kind = parseEndpointKind(kindRaw);
-  const statusRaw = stringField(value, 'status') ?? existing?.status ?? 'offline';
+  const driver = parseEndpointDriver(stringField(value, 'driver') ?? existing?.driver ?? 'tunnel');
+  const statusRaw = stringField(value, 'status') ?? existing?.status ?? (driver === 'tunnel' ? 'offline' : 'online');
   const status =
     statusRaw === 'online' || statusRaw === 'offline' || statusRaw === 'revoked' ? statusRaw : existing?.status ?? 'offline';
+  const ssh = driver === 'ssh' ? normalizeSshConfig(value.ssh, existing?.ssh) : existing?.ssh;
+  const k8s = driver === 'k8s-pod' ? normalizeK8sConfig(value.k8s, existing?.k8s) : existing?.k8s;
   return {
     id,
     tenantId: stringField(value, 'tenantId') ?? existing?.tenantId,
     providerId: stringField(value, 'providerId') ?? existing?.providerId,
     kind,
+    driver,
     label: stringField(value, 'label') ?? existing?.label,
     capabilities,
     activeCapabilities: existing?.activeCapabilities,
     status,
     commandPolicyId: stringField(value, 'commandPolicyId') ?? existing?.commandPolicyId,
+    ssh,
+    k8s,
     sessionId: existing?.sessionId,
     lastSeenAt: existing?.lastSeenAt,
     createdAt: existing?.createdAt ?? nowIso,
     updatedAt: nowIso,
   };
+}
+
+function validateEndpointSecrets(env: AppEnv, endpoint: EndpointRecord): void {
+  if (endpoint.driver === 'ssh' && endpoint.ssh) {
+    requireEnvString(env, endpoint.ssh.privateKeyEnv, 'ssh.privateKeyEnv');
+    if (endpoint.ssh.passphraseEnv) {
+      requireEnvString(env, endpoint.ssh.passphraseEnv, 'ssh.passphraseEnv');
+    }
+  }
+  if (endpoint.driver === 'k8s-pod' && endpoint.k8s) {
+    requireEnvString(env, endpoint.k8s.serverEnv, 'k8s.serverEnv');
+    requireEnvString(env, endpoint.k8s.tokenEnv, 'k8s.tokenEnv');
+    if (endpoint.k8s.caCertEnv) {
+      requireEnvString(env, endpoint.k8s.caCertEnv, 'k8s.caCertEnv');
+    }
+  }
+}
+
+function requireEnvString(env: AppEnv, key: string, label: string): void {
+  const value = (env as unknown as Record<string, unknown>)[key];
+  if (typeof value !== 'string' || value.length === 0) {
+    throw new BadRequestError(`${label} references missing environment variable '${key}'.`);
+  }
 }
 
 function normalizeCommandPolicyInput(value: Record<string, unknown>, existing?: CommandPolicy): CommandPolicy {
@@ -543,10 +652,55 @@ function parseCapabilities(value: unknown, fallback: DeviceTool[]): DeviceTool[]
 }
 
 function parseEndpointKind(value: string): EndpointKind {
-  if (['sandbox', 'k8s-pod', 'pc', 'browser-host', 'mobile', 'generic'].includes(value)) {
+  if (['sandbox', 'ssh-host', 'k8s-pod', 'pc', 'browser-host', 'mobile', 'generic'].includes(value)) {
     return value as EndpointKind;
   }
   throw new BadRequestError(`Unsupported endpoint kind '${value}'.`);
+}
+
+function parseEndpointDriver(value: string): EndpointDriver {
+  if (value === 'tunnel' || value === 'ssh' || value === 'k8s-pod') {
+    return value;
+  }
+  throw new BadRequestError(`Unsupported endpoint driver '${value}'.`);
+}
+
+function normalizeSshConfig(value: unknown, existing?: SshEndpointConfig): SshEndpointConfig {
+  const raw = isRecord(value) ? value : undefined;
+  const host = raw ? stringField(raw, 'host') : existing?.host;
+  const username = raw ? stringField(raw, 'username') : existing?.username;
+  const privateKeyEnv = raw ? stringField(raw, 'privateKeyEnv') : existing?.privateKeyEnv;
+  const knownHostSha256 = raw ? stringField(raw, 'knownHostSha256') : existing?.knownHostSha256;
+  if (!host || !username || !privateKeyEnv || !knownHostSha256) {
+    throw new BadRequestError('ssh driver requires host, username, privateKeyEnv, and knownHostSha256.');
+  }
+  return {
+    host,
+    port: positiveNumber(raw?.port) ?? existing?.port ?? 22,
+    username,
+    privateKeyEnv,
+    passphraseEnv: raw ? stringField(raw, 'passphraseEnv') : existing?.passphraseEnv,
+    knownHostSha256,
+  };
+}
+
+function normalizeK8sConfig(value: unknown, existing?: K8sPodEndpointConfig): K8sPodEndpointConfig {
+  const raw = isRecord(value) ? value : undefined;
+  const serverEnv = raw ? stringField(raw, 'serverEnv') : existing?.serverEnv;
+  const tokenEnv = raw ? stringField(raw, 'tokenEnv') : existing?.tokenEnv;
+  const namespace = raw ? stringField(raw, 'namespace') : existing?.namespace;
+  const pod = raw ? stringField(raw, 'pod') : existing?.pod;
+  if (!serverEnv || !tokenEnv || !namespace || !pod) {
+    throw new BadRequestError('k8s-pod driver requires serverEnv, tokenEnv, namespace, and pod.');
+  }
+  return {
+    serverEnv,
+    tokenEnv,
+    caCertEnv: raw ? stringField(raw, 'caCertEnv') : existing?.caCertEnv,
+    namespace,
+    pod,
+    container: raw ? stringField(raw, 'container') : existing?.container,
+  };
 }
 
 function positiveNumber(value: unknown): number | undefined {

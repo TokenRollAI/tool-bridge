@@ -14,7 +14,13 @@ import { materializePlacements } from './tb/entities';
 import { errorResponseOf, ForbiddenError } from './tb/errors';
 import { routeHostApi } from './tb/host-api';
 import { routeProviderApi } from './tb/provider-api';
-import { routeDeviceHtbp, routeEndpointApi, routeTunnelApi, TunnelBroker } from './tb/device';
+import {
+  ExecutionDriverRegistry,
+  routeDeviceHtbp,
+  routeEndpointApi,
+  routeTunnelApi,
+  TunnelBroker,
+} from './tb/device';
 import { parseTree } from './tb/registry';
 import { resolveCall, resolveHelp } from './tb/resolve';
 import { PrincipalKind, resolvePrincipal, tenantModeEnabled } from './tb/tenant';
@@ -864,6 +870,7 @@ async function routeHtbp(
   env: AppEnv,
   builtinHandlers?: BuiltinHandlerRegistry,
   tunnelBroker?: TunnelBroker,
+  executionDrivers?: ExecutionDriverRegistry,
   executionCtx?: ExecutionContext
 ): Promise<Response> {
   const startedAt = Date.now();
@@ -920,6 +927,7 @@ async function routeHtbp(
             input: body,
             traceId,
             broker: tunnelBroker,
+            executionDrivers,
           });
           response = routed.response;
           callContext = routed.audit;
@@ -1057,7 +1065,14 @@ async function handleRequest(
     if (url.pathname === '/htbp' || url.pathname.startsWith('/htbp/')) {
       // HTBP control-plane responses are cross-origin fetchable: federation and
       // browser agents fetch another TB server's ~help from a different origin.
-      const response = await routeHtbp(request, env, options.builtinHandlers, options.tunnelBroker, executionCtx);
+      const response = await routeHtbp(
+        request,
+        env,
+        options.builtinHandlers,
+        options.tunnelBroker,
+        options.executionDrivers,
+        executionCtx
+      );
       const withCors = new Response(response.body, response);
       withCors.headers.set('Access-Control-Allow-Origin', '*');
       return withCors;
@@ -1075,6 +1090,7 @@ async function handleRequest(
 export interface BridgeOptions {
   builtinHandlers?: BuiltinHandlerRegistry;
   tunnelBroker?: TunnelBroker;
+  executionDrivers?: ExecutionDriverRegistry;
 }
 
 export function createBridge(options: BridgeOptions = {}) {
@@ -1084,5 +1100,16 @@ export function createBridge(options: BridgeOptions = {}) {
     },
   } satisfies ExportedHandler<AppEnv>;
 }
+
+export type {
+  EndpointDriver,
+  EndpointKind,
+  EndpointRecord,
+  ExecutionDriver,
+  ExecutionDriverRegistry,
+  ExecutionDriverRequest,
+  K8sPodEndpointConfig,
+  SshEndpointConfig,
+} from './tb/device';
 
 export default createBridge();

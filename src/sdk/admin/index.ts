@@ -67,10 +67,13 @@ export interface EndpointInput {
   tenantId?: string;
   providerId?: string;
   kind?: EndpointRecord['kind'];
+  driver?: EndpointRecord['driver'];
   label?: string;
   capabilities?: DeviceTool[];
   status?: EndpointRecord['status'];
   commandPolicyId?: string;
+  ssh?: EndpointRecord['ssh'];
+  k8s?: EndpointRecord['k8s'];
 }
 
 export type CommandPolicyInput = Partial<CommandPolicy> & { id: string };

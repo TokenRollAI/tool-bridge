@@ -7,7 +7,7 @@ import { createBridge } from '../index';
 import { sha256Hex } from './tenant';
 import { fakeKV } from './testing/fake-kv';
 import { AppEnv, HelpPayload } from './types';
-import { TunnelBroker, TunnelDispatchRequest } from './device';
+import { ExecutionDriverRegistry, TunnelBroker, TunnelDispatchRequest } from './device';
 
 type Bridge = ReturnType<typeof createBridge>;
 type WorkerRequest = Parameters<Bridge['fetch']>[0];
@@ -20,7 +20,15 @@ async function m2Env(): Promise<AppEnv> {
     [`apikey:${await sha256Hex('tbk_agent_a')}`]: JSON.stringify({ tenantId: 'a', label: 'agent-a' }),
     [`apikey:${await sha256Hex('tbk_agent_b')}`]: JSON.stringify({ tenantId: 'b', label: 'agent-b' }),
   });
-  return { TENANTS: kv, TENANT_MODE: 'true', MCP_SERVERS_JSON: '{}' } as unknown as AppEnv;
+  return {
+    TENANTS: kv,
+    TENANT_MODE: 'true',
+    MCP_SERVERS_JSON: '{}',
+    SSH_BOX_PRIVATE_KEY: 'test-private-key',
+    K8S_SERVER: 'https://k8s.example.com',
+    K8S_TOKEN: 'test-token',
+    K8S_CA_CERT: 'test-ca',
+  } as unknown as AppEnv;
 }
 
 function call(bridge: Bridge, env: AppEnv) {
@@ -222,5 +230,150 @@ describe('Tunnel / Device M2', () => {
     );
     expect(report.status).toBe(403);
     expect(((await report.json()) as { error: { code: string } }).error.code).toBe('Forbidden');
+  });
+
+  it('routes ssh driver endpoints through an execution driver without a tunnel session', async () => {
+    const env = await m2Env();
+    const dispatched: unknown[] = [];
+    const executionDrivers: ExecutionDriverRegistry = {
+      ssh: {
+        async dispatch(request) {
+          dispatched.push(request);
+          return { exitCode: 0, stdout: 'ok\n', stderr: '' };
+        },
+      },
+    };
+    const bridge = createBridge({ executionDrivers });
+    const request = call(bridge, env);
+
+    const created = await request(
+      '/api/endpoints',
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          id: 'sandbox_ssh',
+          tenantId: 'a',
+          kind: 'sandbox',
+          driver: 'ssh',
+          capabilities: ['exec.run', 'fs.read'],
+          ssh: {
+            host: '203.0.113.10',
+            username: 'ubuntu',
+            privateKeyEnv: 'SSH_BOX_PRIVATE_KEY',
+            knownHostSha256: 'SHA256:test',
+          },
+        }),
+      },
+      'tbk_admin'
+    );
+    expect(created.status).toBe(201);
+    expect(((await created.json()) as { endpoint: { status: string; driver: string } }).endpoint).toMatchObject({
+      driver: 'ssh',
+      status: 'online',
+    });
+
+    const run = await request(
+      '/htbp/~device/sandbox_ssh/exec.run',
+      { method: 'POST', body: JSON.stringify({ argv: ['bash', '-lc', 'pwd'], cwd: '/workspace' }) },
+      'tbk_agent_a'
+    );
+    expect(run.status).toBe(200);
+    expect(((await run.json()) as { result: unknown }).result).toEqual({ exitCode: 0, stdout: 'ok\n', stderr: '' });
+    expect(dispatched[0]).toMatchObject({
+      tool: 'exec.run',
+      input: { argv: ['bash', '-lc', 'pwd'], cwd: '/workspace' },
+      endpoint: { id: 'sandbox_ssh', driver: 'ssh', kind: 'sandbox' },
+    });
+  });
+
+  it('fails closed when a direct execution driver is not configured', async () => {
+    const env = await m2Env();
+    const bridge = createBridge();
+    const request = call(bridge, env);
+    const created = await request(
+      '/api/endpoints',
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          id: 'ssh_missing_driver',
+          tenantId: 'a',
+          kind: 'ssh-host',
+          driver: 'ssh',
+          capabilities: ['exec.run'],
+          ssh: {
+            host: '203.0.113.11',
+            username: 'ubuntu',
+            privateKeyEnv: 'SSH_BOX_PRIVATE_KEY',
+            knownHostSha256: 'SHA256:test',
+          },
+        }),
+      },
+      'tbk_admin'
+    );
+    expect(created.status).toBe(201);
+
+    const run = await request(
+      '/htbp/~device/ssh_missing_driver/exec.run',
+      { method: 'POST', body: JSON.stringify({ argv: ['bash', '-lc', 'pwd'] }) },
+      'tbk_agent_a'
+    );
+    expect(run.status).toBe(503);
+    expect(((await run.json()) as { error: { code: string } }).error.code).toBe('EndpointUnavailable');
+  });
+
+  it('validates direct driver endpoint configuration and secret references', async () => {
+    const env = await m2Env();
+    const bridge = createBridge();
+    const request = call(bridge, env);
+
+    const missingSshSecret = await request(
+      '/api/endpoints',
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          id: 'bad_ssh',
+          tenantId: 'a',
+          kind: 'ssh-host',
+          driver: 'ssh',
+          capabilities: ['exec.run'],
+          ssh: {
+            host: '203.0.113.12',
+            username: 'ubuntu',
+            privateKeyEnv: 'MISSING_KEY',
+            knownHostSha256: 'SHA256:test',
+          },
+        }),
+      },
+      'tbk_admin'
+    );
+    expect(missingSshSecret.status).toBe(400);
+
+    const k8s = await request(
+      '/api/endpoints',
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          id: 'pod_1',
+          tenantId: 'a',
+          kind: 'k8s-pod',
+          driver: 'k8s-pod',
+          capabilities: ['exec.run', 'logs.tail'],
+          k8s: {
+            serverEnv: 'K8S_SERVER',
+            tokenEnv: 'K8S_TOKEN',
+            caCertEnv: 'K8S_CA_CERT',
+            namespace: 'default',
+            pod: 'worker-abc',
+            container: 'app',
+          },
+        }),
+      },
+      'tbk_admin'
+    );
+    expect(k8s.status).toBe(201);
+    expect(((await k8s.json()) as { endpoint: { driver: string; k8s: { pod: string } } }).endpoint).toMatchObject({
+      driver: 'k8s-pod',
+      k8s: { pod: 'worker-abc' },
+    });
   });
 });
