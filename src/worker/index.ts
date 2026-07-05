@@ -192,6 +192,27 @@ async function authenticate(request: Request, env: AppEnv): Promise<AuthInfo | R
     };
   }
 
+  // KV-backed deployments may keep the public data plane in `none` mode while
+  // still requiring explicit admin Secret Keys for mutable control-plane APIs.
+  // In that shape, a provided Bearer token is resolved as a Secret Key, but an
+  // anonymous request remains anonymous rather than becoming admin.
+  const secretKey = env.TENANTS ? getBearerToken(request) : undefined;
+  if (secretKey) {
+    const record = await resolvePrincipal(env, secretKey);
+    if (record) {
+      return {
+        mode,
+        subject: record.label ?? record.providerId ?? record.hostId ?? record.tenantId,
+        tenantId: record.tenantId,
+        root: record.root,
+        principal: record.principal,
+        providerId: record.providerId,
+        hostId: record.hostId,
+        isAdmin: record.principal === 'admin',
+      };
+    }
+  }
+
   if (mode === 'none') {
     return { mode, isAdmin: !env.TENANTS };
   }

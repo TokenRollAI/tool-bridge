@@ -110,7 +110,6 @@ interface EndpointRecord {
     privateKeyEnv?: string;
     passphraseEnv?: string;
     passwordEnv?: string;
-    knownHostSha256: string;
   };
 }
 
@@ -132,7 +131,6 @@ interface SshEndpointDraft {
   privateKeyEnv: string;
   passphraseEnv: string;
   passwordEnv: string;
-  knownHostSha256: string;
   execRun: boolean;
   fsRead: boolean;
   logsTail: boolean;
@@ -156,7 +154,6 @@ const DEFAULT_SSH_ENDPOINT: SshEndpointDraft = {
   privateKeyEnv: '',
   passphraseEnv: '',
   passwordEnv: '',
-  knownHostSha256: 'SHA256:',
   execRun: true,
   fsRead: true,
   logsTail: false,
@@ -351,9 +348,6 @@ function endpointPayload(draft: SshEndpointDraft): Record<string, unknown> {
   if (!draft.privateKeyEnv.trim() && !draft.passwordEnv.trim()) {
     throw new Error('Set privateKeyEnv or passwordEnv.');
   }
-  if (!draft.knownHostSha256.trim() || draft.knownHostSha256.trim() === 'SHA256:') {
-    throw new Error('Host key fingerprint is required.');
-  }
   const port = Number(draft.port || '22');
   if (!Number.isInteger(port) || port <= 0 || port > 65535) {
     throw new Error('Port must be 1-65535.');
@@ -372,7 +366,6 @@ function endpointPayload(draft: SshEndpointDraft): Record<string, unknown> {
       privateKeyEnv: draft.privateKeyEnv.trim() || undefined,
       passphraseEnv: draft.passphraseEnv.trim() || undefined,
       passwordEnv: draft.passwordEnv.trim() || undefined,
-      knownHostSha256: draft.knownHostSha256.trim(),
     },
   };
 }
@@ -686,14 +679,6 @@ export function App() {
                     value={sshDraft.passwordEnv}
                     onChange={(event) => updateSshDraft({ ...sshDraft, passwordEnv: event.target.value })}
                     placeholder="MY_SERVER_SSH_PASSWORD"
-                  />
-                </label>
-                <label className="device-form-wide">
-                  Host key fingerprint
-                  <input
-                    value={sshDraft.knownHostSha256}
-                    onChange={(event) => updateSshDraft({ ...sshDraft, knownHostSha256: event.target.value })}
-                    placeholder="SHA256:..."
                   />
                 </label>
                 <fieldset className="device-form-wide capability-fieldset">

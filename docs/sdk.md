@@ -111,8 +111,8 @@ agent 不需要关心底层 driver，只调用 `exec.run` / `fs.read` / `logs.ta
 | 操作 | 请求 |
 | --- | --- |
 | 注册 tunnel endpoint | `curl -X POST -H "Authorization: Bearer $ADMIN" -d '{"id":"sbx_1","tenantId":"a","kind":"sandbox","driver":"tunnel","capabilities":["exec.run","fs.read","logs.tail"]}' $TB/api/endpoints` |
-| 注册 SSH sandbox | `curl -X POST -H "Authorization: Bearer $ADMIN" -d '{"id":"sandbox_1","tenantId":"a","kind":"sandbox","driver":"ssh","capabilities":["exec.run"],"ssh":{"host":"1.2.3.4","username":"ubuntu","privateKeyEnv":"SANDBOX_1_SSH_KEY","knownHostSha256":"SHA256:..."}}' $TB/api/endpoints` |
-| 注册密码兜底 SSH | `curl -X POST -H "Authorization: Bearer $ADMIN" -d '{"id":"legacy_box","tenantId":"a","kind":"ssh-host","driver":"ssh","capabilities":["exec.run"],"ssh":{"host":"1.2.3.5","username":"ubuntu","passwordEnv":"LEGACY_BOX_SSH_PASSWORD","knownHostSha256":"SHA256:..."}}' $TB/api/endpoints` |
+| 注册 SSH sandbox | `curl -X POST -H "Authorization: Bearer $ADMIN" -d '{"id":"sandbox_1","tenantId":"a","kind":"sandbox","driver":"ssh","capabilities":["exec.run"],"ssh":{"host":"1.2.3.4","username":"ubuntu","privateKeyEnv":"SANDBOX_1_SSH_KEY"}}' $TB/api/endpoints` |
+| 注册密码兜底 SSH | `curl -X POST -H "Authorization: Bearer $ADMIN" -d '{"id":"legacy_box","tenantId":"a","kind":"ssh-host","driver":"ssh","capabilities":["exec.run"],"ssh":{"host":"1.2.3.5","username":"ubuntu","passwordEnv":"LEGACY_BOX_SSH_PASSWORD"}}' $TB/api/endpoints` |
 | 注册 K8S pod | `curl -X POST -H "Authorization: Bearer $ADMIN" -d '{"id":"pod_1","tenantId":"a","kind":"k8s-pod","driver":"k8s-pod","capabilities":["exec.run","logs.tail"],"k8s":{"serverEnv":"K8S_SERVER","tokenEnv":"K8S_TOKEN","namespace":"default","pod":"worker-abc","container":"app"}}' $TB/api/endpoints` |
 | 注册命令策略 | `curl -X POST -H "Authorization: Bearer $ADMIN" -d '{"id":"safe","defaultMode":"deny","allowCommands":["npm","pnpm"],"maxTimeoutMs":30000}' $TB/api/command-policies` |
 | endpoint 建连 | `curl -X POST -d '{"endpointId":"sbx_1"}' $TB/tunnel/connect` → `{sessionId}` |
@@ -145,14 +145,6 @@ secret 变量名：
 ```bash
 wrangler secret put SANDBOX_1_SSH_KEY
 wrangler secret put LEGACY_BOX_SSH_PASSWORD
-```
-
-`knownHostSha256` 使用 OpenSSH host key 指纹格式，例如
-`SHA256:AbCd...`。可以在可信网络内先取主机 key：
-
-```bash
-ssh-keyscan -t rsa,ecdsa 1.2.3.4 > /tmp/known_hosts
-ssh-keygen -lf /tmp/known_hosts -E sha256
 ```
 
 当前内置 SSH driver 支持：

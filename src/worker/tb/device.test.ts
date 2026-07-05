@@ -68,6 +68,32 @@ async function registerEndpoint(request: ReturnType<typeof call>, overrides: Rec
 }
 
 describe('Tunnel / Device M2', () => {
+  it('accepts KV admin Secret Keys for endpoint management outside tenant mode', async () => {
+    const kv = fakeKV({
+      [`apikey:${await sha256Hex('tbk_admin')}`]: JSON.stringify({ principal: 'admin', label: 'root-admin' }),
+    });
+    const env = { TENANTS: kv, MCP_SERVERS_JSON: '{}', SSH_BOX_PASSWORD: 'test-password' } as unknown as AppEnv;
+    const bridge = createBridge();
+    const request = call(bridge, env);
+    const payload = {
+      id: 'ssh_admin',
+      kind: 'ssh-host',
+      driver: 'ssh',
+      capabilities: ['exec.run'],
+      ssh: {
+        host: '203.0.113.20',
+        username: 'ubuntu',
+        passwordEnv: 'SSH_BOX_PASSWORD',
+      },
+    };
+
+    const anonymous = await request('/api/endpoints', { method: 'POST', body: JSON.stringify(payload) });
+    expect(anonymous.status).toBe(403);
+
+    const created = await request('/api/endpoints', { method: 'POST', body: JSON.stringify(payload) }, 'tbk_admin');
+    expect(created.status).toBe(201);
+  });
+
   it('registered endpoint connects and routes authorized ~device calls through the broker', async () => {
     const env = await m2Env();
     const dispatched: TunnelDispatchRequest[] = [];
@@ -261,7 +287,6 @@ describe('Tunnel / Device M2', () => {
             host: '203.0.113.10',
             username: 'ubuntu',
             privateKeyEnv: 'SSH_BOX_PRIVATE_KEY',
-            knownHostSha256: 'SHA256:test',
           },
         }),
       },
@@ -306,7 +331,6 @@ describe('Tunnel / Device M2', () => {
             host: '203.0.113.11',
             username: 'ubuntu',
             privateKeyEnv: 'SSH_BOX_PRIVATE_KEY',
-            knownHostSha256: 'SHA256:test',
           },
         }),
       },
@@ -342,7 +366,6 @@ describe('Tunnel / Device M2', () => {
             host: '203.0.113.12',
             username: 'ubuntu',
             privateKeyEnv: 'MISSING_KEY',
-            knownHostSha256: 'SHA256:test',
           },
         }),
       },
@@ -363,7 +386,6 @@ describe('Tunnel / Device M2', () => {
           ssh: {
             host: '203.0.113.13',
             username: 'ubuntu',
-            knownHostSha256: 'SHA256:test',
           },
         }),
       },
@@ -385,7 +407,6 @@ describe('Tunnel / Device M2', () => {
             host: '203.0.113.15',
             username: 'ubuntu',
             passwordEnv: 'SSH_BOX_PASSWORD',
-            knownHostSha256: 'SHA256:test',
           },
         }),
       },
@@ -410,7 +431,6 @@ describe('Tunnel / Device M2', () => {
             host: '203.0.113.14',
             username: 'ubuntu',
             passwordEnv: 'MISSING_PASSWORD',
-            knownHostSha256: 'SHA256:test',
           },
         }),
       },

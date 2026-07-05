@@ -27,7 +27,6 @@ export interface SshEndpointConfig {
   privateKeyEnv?: string;
   passphraseEnv?: string;
   passwordEnv?: string;
-  knownHostSha256: string;
 }
 
 export interface K8sPodEndpointConfig {
@@ -681,9 +680,8 @@ function normalizeSshConfig(value: unknown, existing?: SshEndpointConfig): SshEn
   const username = raw ? stringField(raw, 'username') : existing?.username;
   const privateKeyEnv = raw ? stringField(raw, 'privateKeyEnv') : existing?.privateKeyEnv;
   const passwordEnv = raw ? stringField(raw, 'passwordEnv') : existing?.passwordEnv;
-  const knownHostSha256 = raw ? stringField(raw, 'knownHostSha256') : existing?.knownHostSha256;
-  if (!host || !username || !knownHostSha256) {
-    throw new BadRequestError('ssh driver requires host, username, and knownHostSha256.');
+  if (!host || !username) {
+    throw new BadRequestError('ssh driver requires host and username.');
   }
   if (!privateKeyEnv && !passwordEnv) {
     throw new BadRequestError('ssh driver requires privateKeyEnv or passwordEnv.');
@@ -698,7 +696,6 @@ function normalizeSshConfig(value: unknown, existing?: SshEndpointConfig): SshEn
     privateKeyEnv,
     passphraseEnv: raw ? stringField(raw, 'passphraseEnv') : existing?.passphraseEnv,
     passwordEnv,
-    knownHostSha256,
   };
 }
 

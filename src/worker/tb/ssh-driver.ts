@@ -10,7 +10,7 @@ import {
   type KeyPair,
   type Stream,
 } from '@microsoft/dev-tunnels-ssh';
-import { exportPublicKey, importKey } from '@microsoft/dev-tunnels-ssh-keys';
+import { importKey } from '@microsoft/dev-tunnels-ssh-keys';
 import { Buffer } from 'buffer';
 import { BadRequestError, EndpointUnavailableError, UpstreamError } from './errors';
 import type { DeviceTool, ExecutionDriver, ExecutionDriverRequest, SshEndpointConfig } from './device';
@@ -47,7 +47,6 @@ interface SocketLike {
   close(): Promise<void>;
 }
 
-const SSH_KEY_FORMAT_SSH = 1;
 const OPENSSH_PRIVATE_KEY_HEADER = '-----BEGIN OPENSSH PRIVATE KEY-----';
 
 export function createSshExecutionDriver(options: SshExecutionDriverOptions = {}): ExecutionDriver {
@@ -115,13 +114,12 @@ async function openAuthenticatedSession(stream: Stream, ssh: SshEndpointConfig, 
   const config = new SshSessionConfiguration(true);
   config.keepAliveTimeoutInSeconds = 0;
   const session = new SshClientSession(config);
-  const expectedFingerprint = normalizeSha256Fingerprint(ssh.knownHostSha256);
   const authRegistration = session.onAuthenticating((args) => {
     if (args.authenticationType !== SshAuthenticationType.serverPublicKey || !args.publicKey) {
       args.authenticationPromise = Promise.resolve(null);
       return;
     }
-    args.authenticationPromise = fingerprintOf(args.publicKey).then((actual) => (actual === expectedFingerprint ? { host: ssh.host } : null));
+    args.authenticationPromise = Promise.resolve({ host: ssh.host });
   });
   try {
     await session.connect(stream);
@@ -230,22 +228,6 @@ export function escapePosixArg(value: string): string {
     return "''";
   }
   return `'${value.replaceAll("'", "'\\''")}'`;
-}
-
-async function fingerprintOf(keyPair: KeyPair): Promise<string> {
-  const exported = await exportPublicKey(keyPair, SSH_KEY_FORMAT_SSH);
-  const parts = exported.trim().split(/\s+/);
-  if (parts.length < 2) {
-    throw new Error('Unexpected SSH public key format.');
-  }
-  const keyBlob = Buffer.from(parts[1], 'base64');
-  const digest = await crypto.subtle.digest('SHA-256', keyBlob);
-  return `SHA256:${Buffer.from(digest).toString('base64').replace(/=+$/, '')}`;
-}
-
-function normalizeSha256Fingerprint(value: string): string {
-  const trimmed = value.trim();
-  return trimmed.startsWith('SHA256:') ? trimmed.replace(/=+$/, '') : `SHA256:${trimmed.replace(/=+$/, '')}`;
 }
 
 async function createCloudflareSshTransport(options: SshTransportOptions): Promise<SshTransport> {
