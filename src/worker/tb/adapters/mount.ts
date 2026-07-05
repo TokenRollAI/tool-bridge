@@ -5,6 +5,7 @@
 // cheap because only the visited level is fetched.
 
 import { AdapterContext, HelpPayload, MountNode, ResourceRef, StorageProvider, TBAdapter } from '../types';
+import { NotFoundError } from '../errors';
 import { r2Provider } from '../storage-r2';
 
 export const mountAdapter: TBAdapter<MountNode> = {
@@ -35,7 +36,7 @@ export const mountAdapter: TBAdapter<MountNode> = {
     // Otherwise treat it as a directory and list its immediate children.
     const entries = await provider.list(key);
     if (entries.length === 0 && sub.length > 0) {
-      throw new Error(`No file or folder at '${key}'.`);
+      throw new NotFoundError(`No file or folder at '${key}'.`);
     }
     return {
       htbp: 'draft',
@@ -52,7 +53,7 @@ export const mountAdapter: TBAdapter<MountNode> = {
     const key = keyFor(node, sub);
     const object = await provider.get(key);
     if (!object) {
-      throw new Error(`File '${key}' not found.`);
+      throw new NotFoundError(`File '${key}' not found.`);
     }
     return { key: object.key, contentType: object.contentType, content: object.body };
   },

@@ -4,7 +4,7 @@
 // line-oriented HTBP DSL (RFC-0001 §8.3/8.4) for `Accept: text/plain` content
 // negotiation and backward compatibility with text-only agents.
 
-import { HelpPayload } from './types';
+import { EndpointSpec, HelpPayload, ToolSpec } from './types';
 import { oneLine } from './util';
 
 export function buildTextHelp(payload: HelpPayload, resourcePath: string, auth: 'none' | 'bearer'): string {
@@ -21,13 +21,13 @@ export function buildTextHelp(payload: HelpPayload, resourcePath: string, auth: 
   if (payload.endpoint) {
     const { method, tools } = payload.endpoint;
     if (tools && tools.length > 0) {
-      // MCP whole-leaf: one cmd per tool, all POSTing to this same resource
-      // with a body that selects the tool by name.
+      // MCP / builtin whole-leaf: one cmd per tool, all POSTing to this same
+      // resource with a body that selects the tool by name.
       for (const tool of tools) {
         lines.push(`cmd ${tool.name} ${method} ${resourcePath}`);
         lines.push(`  body application/json {"tool":"${tool.name}","arguments":object?}`);
         lines.push(`  auth ${auth}`);
-        lines.push('  effect external');
+        appendSemantics(lines, tool);
         lines.push('  returns 200 application/json');
         if (tool.description) {
           lines.push(`  note ${oneLine(tool.description)}`);
@@ -38,7 +38,7 @@ export function buildTextHelp(payload: HelpPayload, resourcePath: string, auth: 
       lines.push(`cmd call ${method} ${resourcePath}`);
       lines.push('  body application/json {"arguments":object?}');
       lines.push(`  auth ${auth}`);
-      lines.push('  effect external');
+      appendSemantics(lines, payload.endpoint);
       lines.push('  returns 200 application/json');
     }
   }
@@ -51,6 +51,20 @@ export function buildTextHelp(payload: HelpPayload, resourcePath: string, auth: 
   }
 
   return `${lines.join('\n').trimEnd()}\n`;
+}
+
+// Emit the call-semantics lines for a tool or single-shot endpoint. `effect`
+// falls back to `external` (the historical default), so pre-existing callers
+// that declare nothing render byte-for-byte the same `effect external` line.
+// `scope` / `confirm` lines appear only when declared.
+function appendSemantics(lines: string[], spec: Pick<ToolSpec, 'effect' | 'scope' | 'confirm'> | EndpointSpec): void {
+  lines.push(`  effect ${spec.effect ?? 'external'}`);
+  if (spec.scope) {
+    lines.push(`  scope ${oneLine(spec.scope)}`);
+  }
+  if (spec.confirm) {
+    lines.push('  confirm true');
+  }
 }
 
 // Resolve a relative resource path (e.g. "./context7") against the node's

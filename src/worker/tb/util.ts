@@ -22,9 +22,9 @@ export function text(data: string, init: ResponseInit = {}): Response {
   return new Response(data, { ...init, headers });
 }
 
-export function errorResponse(status: number, code: string, message: string, details?: unknown): Response {
-  return json({ error: { code, message, details } }, { status });
-}
+// The typed error contract lives in errors.ts; re-exported here so existing
+// imports (adapters, resolve, index) keep working unchanged.
+export { errorResponse, NotFoundError } from './errors';
 
 export function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value);
@@ -91,6 +91,3 @@ export async function safeErrorText(response: Response): Promise<string> {
     return '';
   }
 }
-
-// Thrown when a path/tool does not resolve to a node; the host maps it to 404.
-export class NotFoundError extends Error {}

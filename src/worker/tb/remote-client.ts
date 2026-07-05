@@ -3,8 +3,9 @@
 // allowlist, size cap, and a request timeout — this is the main SSRF surface.
 
 import { AppEnv, HelpPayload, NodeKind, ResourceRef } from './types';
+import { TBError, UpstreamError } from './errors';
 import { assertRemoteHostAllowed, materializeHeaders, requireSecureUrl } from './materialize';
-import { MAX_JSON_BYTES, REMOTE_FETCH_TIMEOUT_MS, isRecord, readBoundedText, safeErrorText } from './util';
+import { MAX_JSON_BYTES, REMOTE_FETCH_TIMEOUT_MS, isRecord, messageOf, readBoundedText, safeErrorText } from './util';
 
 const VALID_KINDS: NodeKind[] = ['directory', 'mcp', 'http', 'remote'];
 
@@ -22,12 +23,22 @@ export async function fetchRemoteHelp(
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), REMOTE_FETCH_TIMEOUT_MS);
   try {
+    // Upstream interaction: unreachable peers, non-2xx statuses and malformed
+    // payloads all surface as UpstreamError → 502 (M0 error contract).
     const response = await fetch(url, { method: 'GET', headers: requestHeaders, signal: controller.signal });
     if (!response.ok) {
-      throw new Error(`Remote help '${url}' returned ${response.status}: ${await safeErrorText(response)}`);
+      throw new UpstreamError(`Remote help '${url}' returned ${response.status}: ${await safeErrorText(response)}`, {
+        upstream: url,
+        status: response.status,
+      });
     }
     const body = await readBoundedText(response, MAX_JSON_BYTES);
     return parseHelpPayload(body);
+  } catch (error) {
+    if (error instanceof TBError) {
+      throw error;
+    }
+    throw new UpstreamError(`Remote help '${url}' failed: ${messageOf(error)}`, { upstream: url });
   } finally {
     clearTimeout(timer);
   }

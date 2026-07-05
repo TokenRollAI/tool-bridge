@@ -6,8 +6,9 @@
 //   call(node, [name], input)  -> forward to the endpoint's url
 
 import { AdapterContext, HelpPayload, HttpEndpointConfig, HttpNode, ResourceRef, TBAdapter } from '../types';
+import { NotFoundError, UpstreamError } from '../errors';
 import { assertRemoteHostAllowed, materializeHeaders, requireSecureUrl } from '../materialize';
-import { MAX_JSON_BYTES, REMOTE_FETCH_TIMEOUT_MS, oneLine, readBoundedText, safeErrorText } from '../util';
+import { MAX_JSON_BYTES, REMOTE_FETCH_TIMEOUT_MS, messageOf, oneLine, readBoundedText, safeErrorText } from '../util';
 
 export const httpAdapter: TBAdapter<HttpNode> = {
   kind: 'http',
@@ -35,6 +36,9 @@ export const httpAdapter: TBAdapter<HttpNode> = {
         inputSchema: endpoint.inputSchema ?? {},
         outputSchema: endpoint.outputSchema,
         example: endpoint.example,
+        effect: endpoint.effect,
+        scope: endpoint.scope,
+        confirm: endpoint.confirm,
       },
     };
   },
@@ -61,18 +65,38 @@ export const httpAdapter: TBAdapter<HttpNode> = {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), REMOTE_FETCH_TIMEOUT_MS);
     try {
-      const response = await fetch(url, {
-        method: endpoint.method,
-        headers,
-        body: hasBody ? JSON.stringify(input ?? {}) : undefined,
-        signal: controller.signal,
-      });
+      // Everything from here on is upstream interaction: network failures,
+      // timeouts, non-2xx statuses and malformed bodies map to UpstreamError.
+      let response: Response;
+      try {
+        response = await fetch(url, {
+          method: endpoint.method,
+          headers,
+          body: hasBody ? JSON.stringify(input ?? {}) : undefined,
+          signal: controller.signal,
+        });
+      } catch (error) {
+        throw new UpstreamError(`HTTP endpoint '${endpoint.name}' fetch failed: ${messageOf(error)}`, {
+          upstream: node.id,
+          endpoint: endpoint.name,
+        });
+      }
       if (!response.ok) {
-        throw new Error(`HTTP endpoint '${endpoint.name}' returned ${response.status}: ${await safeErrorText(response)}`);
+        throw new UpstreamError(
+          `HTTP endpoint '${endpoint.name}' returned ${response.status}: ${await safeErrorText(response)}`,
+          { upstream: node.id, endpoint: endpoint.name, status: response.status }
+        );
       }
       const body = await readBoundedText(response, MAX_JSON_BYTES);
       const contentType = response.headers.get('Content-Type') ?? '';
-      return contentType.includes('application/json') && body ? JSON.parse(body) : body;
+      try {
+        return contentType.includes('application/json') && body ? JSON.parse(body) : body;
+      } catch (error) {
+        throw new UpstreamError(`HTTP endpoint '${endpoint.name}' returned malformed JSON: ${messageOf(error)}`, {
+          upstream: node.id,
+          endpoint: endpoint.name,
+        });
+      }
     } finally {
       clearTimeout(timer);
     }
@@ -90,7 +114,7 @@ function toResource(endpoint: HttpEndpointConfig): ResourceRef {
 function findEndpoint(node: HttpNode, name: string): HttpEndpointConfig {
   const endpoint = node.endpoints.find((item) => item.name === name);
   if (!endpoint) {
-    throw new Error(`Endpoint '${name}' not found on HTTP node '${node.id}'.`);
+    throw new NotFoundError(`Endpoint '${name}' not found on HTTP node '${node.id}'.`);
   }
   return endpoint;
 }

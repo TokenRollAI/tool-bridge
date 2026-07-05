@@ -1,15 +1,30 @@
 import { createRemoteJWKSet, jwtVerify } from 'jose';
+import {
+  AuditActor,
+  AuditCallContext,
+  auditContextFor,
+  emitAuditEvent,
+  errorCodeOf,
+  inputSummary,
+  routeAuditApi,
+  traceIdOf,
+} from './tb/audit';
 import { clampCrawlOptions, crawlTree } from './tb/crawl';
+import { materializePlacements } from './tb/entities';
+import { errorResponseOf, ForbiddenError } from './tb/errors';
+import { routeHostApi } from './tb/host-api';
+import { routeProviderApi } from './tb/provider-api';
+import { routeDeviceHtbp, routeEndpointApi, routeTunnelApi, TunnelBroker } from './tb/device';
 import { parseTree } from './tb/registry';
-import { NotFoundError, resolveCall, resolveHelp } from './tb/resolve';
-import { resolveTenant, tenantModeEnabled } from './tb/tenant';
+import { resolveCall, resolveHelp } from './tb/resolve';
+import { PrincipalKind, resolvePrincipal, tenantModeEnabled } from './tb/tenant';
 import {
   deleteDynamicServer,
   dynamicServersEnabled,
   listDynamicServers,
   putDynamicServer,
 } from './tb/dynamic-servers';
-import type { DirectoryNode } from './tb/types';
+import type { BuiltinHandlerRegistry, DirectoryNode } from './tb/types';
 
 const MCP_PROTOCOL_VERSION = '2025-11-25';
 const CLIENT_NAME = 'tool-bridge';
@@ -63,6 +78,16 @@ interface AuthInfo {
   tenantId?: string;
   // The tenant's tree root; when undefined, requests fall back to the env tree.
   root?: DirectoryNode;
+  // D-3 unified principal record (tenant mode). Absent in bearer/oauth/none
+  // modes, where the single credential is the deployment admin.
+  principal?: PrincipalKind;
+  providerId?: string;
+  hostId?: string;
+  // Control-plane access: admin keys in tenant mode; static bearer/OAuth in
+  // non-tenant deployments. Anonymous `none` mode is intentionally not admin
+  // once TENANTS exists because KV-backed M1/M3/M4 routes mutate/read shared
+  // control-plane state.
+  isAdmin: boolean;
 }
 
 interface RpcPayload {
@@ -136,7 +161,8 @@ async function constantTimeEqual(a: string, b: string): Promise<boolean> {
 async function authenticate(request: Request, env: AppEnv): Promise<AuthInfo | Response> {
   const mode = getAuthMode(env);
 
-  // Tenant mode: the bearer token is a Secret Key resolved to a tenant + tree.
+  // Tenant mode: the bearer token is a Secret Key resolved to a principal
+  // record (agent/provider/host/admin) and, when tenant-bound, its tree.
   // This composes orthogonally on top of the base mode — when TENANTS is set we
   // always require a token and resolve it, even if the base mode is 'none'.
   if (tenantModeEnabled(env)) {
@@ -144,15 +170,24 @@ async function authenticate(request: Request, env: AppEnv): Promise<AuthInfo | R
     if (!token) {
       return errorResponse(401, 'unauthorized', 'Secret Key (bearer token) required.');
     }
-    const tenant = await resolveTenant(env, token);
-    if (!tenant) {
+    const record = await resolvePrincipal(env, token);
+    if (!record) {
       return errorResponse(401, 'unauthorized', 'Secret Key is invalid.');
     }
-    return { mode, subject: tenant.tenantId, tenantId: tenant.tenantId, root: tenant.root };
+    return {
+      mode,
+      subject: record.label ?? record.providerId ?? record.hostId ?? record.tenantId,
+      tenantId: record.tenantId,
+      root: record.root,
+      principal: record.principal,
+      providerId: record.providerId,
+      hostId: record.hostId,
+      isAdmin: record.principal === 'admin',
+    };
   }
 
   if (mode === 'none') {
-    return { mode };
+    return { mode, isAdmin: !env.TENANTS };
   }
 
   const token = getBearerToken(request);
@@ -169,7 +204,7 @@ async function authenticate(request: Request, env: AppEnv): Promise<AuthInfo | R
     if (!ok) {
       return errorResponse(401, 'unauthorized', 'Bearer token is invalid.');
     }
-    return { mode, subject: 'static-bearer' };
+    return { mode, subject: 'static-bearer', isAdmin: true };
   }
 
   try {
@@ -186,6 +221,7 @@ async function authenticate(request: Request, env: AppEnv): Promise<AuthInfo | R
     return {
       mode,
       subject: typeof verified.payload.sub === 'string' ? verified.payload.sub : undefined,
+      isAdmin: true,
     };
   } catch (error) {
     return errorResponse(401, 'unauthorized', 'OAuth bearer token is invalid.', messageOf(error));
@@ -706,6 +742,30 @@ async function routeApi(request: Request, env: AppEnv): Promise<Response> {
     return authInfo;
   }
 
+  // Provider/Placement management plane (M3).
+  const providerApiResponse = await routeProviderApi(request, env, authInfo);
+  if (providerApiResponse) {
+    return providerApiResponse;
+  }
+
+  // Tunnel / Device endpoint and command-policy management plane (M2).
+  const endpointApiResponse = await routeEndpointApi(request, env, authInfo);
+  if (endpointApiResponse) {
+    return endpointApiResponse;
+  }
+
+  // Host plane: registration, S2S keys, mounts:sync (M1).
+  const hostApiResponse = await routeHostApi(request, env, authInfo);
+  if (hostApiResponse) {
+    return hostApiResponse;
+  }
+
+  // Audit query plane (M4).
+  const auditResponse = await routeAuditApi(request, env, authInfo);
+  if (auditResponse) {
+    return auditResponse;
+  }
+
   if (path === '/api/servers' && request.method === 'GET') {
     const staticServers = parseConfiguredServers(env).map(({ headers: _headers, ...server }) => ({
       ...server,
@@ -765,7 +825,7 @@ async function routeApi(request: Request, env: AppEnv): Promise<Response> {
   }
 
   if (path === '/api/tree' && request.method === 'GET') {
-    const tree = await crawlTree(env, rootFor(authInfo, env), { path: '' }, authInfo.mode);
+    const tree = await crawlTree(env, await rootFor(authInfo, env), { path: '' }, authInfo.mode);
     return json({ auth: authInfo, tree });
   }
 
@@ -774,7 +834,7 @@ async function routeApi(request: Request, env: AppEnv): Promise<Response> {
       request
     );
     const opts = clampCrawlOptions({ maxDepth: body.maxDepth, maxNodes: body.maxNodes });
-    const tree = await crawlTree(env, rootFor(authInfo, env), body.start ?? { path: '' }, authInfo.mode, opts);
+    const tree = await crawlTree(env, await rootFor(authInfo, env), body.start ?? { path: '' }, authInfo.mode, opts);
     return json({ auth: authInfo, tree });
   }
 
@@ -789,16 +849,25 @@ async function routeApi(request: Request, env: AppEnv): Promise<Response> {
 }
 
 // The tree to resolve this request against: the tenant's tree when tenant mode
-// resolved one, otherwise the global env tree (fallback / legacy behavior).
-function rootFor(authInfo: AuthInfo, env: AppEnv): DirectoryNode {
-  return authInfo.root ?? parseTree(env);
+// resolved one, otherwise the global env tree (fallback / legacy behavior) —
+// with the scope's enabled placements compiled in (D-1: request-time
+// materialization; the entity layer never changes the runtime TreeNode shape).
+async function rootFor(authInfo: AuthInfo, env: AppEnv): Promise<DirectoryNode> {
+  const root = authInfo.root ?? parseTree(env);
+  const scope = authInfo.root && authInfo.tenantId ? authInfo.tenantId : null;
+  await materializePlacements(env, root, scope);
+  return root;
 }
 
-async function routeHtbp(request: Request, env: AppEnv): Promise<Response> {
-  const authInfo = await authenticate(request, env);
-  if (authInfo instanceof Response) {
-    return authInfo;
-  }
+async function routeHtbp(
+  request: Request,
+  env: AppEnv,
+  builtinHandlers?: BuiltinHandlerRegistry,
+  tunnelBroker?: TunnelBroker,
+  executionCtx?: ExecutionContext
+): Promise<Response> {
+  const startedAt = Date.now();
+  const traceId = traceIdOf(request);
   const url = new URL(request.url);
   const rest = url.pathname.replace(/^\/htbp\/?/, '');
   const rawSegments = rest.split('/').filter((segment) => segment.length > 0);
@@ -808,23 +877,103 @@ async function routeHtbp(request: Request, env: AppEnv): Promise<Response> {
   const isHelp = rawSegments.length === 0 || hasHelpSuffix;
   const segments = (hasHelpSuffix ? rawSegments.slice(0, -1) : rawSegments).map(decodeURIComponent);
 
+  // Audit context (M4): every describe/call — including 401/403/404 denials —
+  // emits one structured event; only the requested path is recorded for
+  // denied/hidden resources, never metadata about what exists there.
+  const actor: AuditActor = {
+    principal: 'anonymous',
+    onBehalfOf: request.headers.get('X-TB-On-Behalf-Of') ?? undefined,
+  };
+  let tenantId: string | undefined;
+  let callContext: AuditCallContext = {};
+  let input: { bytes: number; keys?: string[] } | undefined;
+  let response: Response;
+
   try {
-    const root = rootFor(authInfo, env);
-    if (isHelp) {
-      const accept = request.headers.get('Accept') ?? '';
-      return await resolveHelp(env, root, segments, authInfo.mode, accept);
+    const authInfo = await authenticate(request, env);
+    if (authInfo instanceof Response) {
+      response = authInfo;
+    } else {
+      actor.principal =
+        authInfo.principal ??
+        (authInfo.mode === 'none' ? 'anonymous' : authInfo.mode === 'bearer' ? 'static-bearer' : 'oauth');
+      actor.subject = authInfo.subject;
+      tenantId = authInfo.tenantId;
+      // In tenant mode, only tenant-bound principals (or admin) may use the
+      // data plane; a bare provider key is control-plane only.
+      if (tenantModeEnabled(env) && !authInfo.root && !authInfo.isAdmin) {
+        throw new ForbiddenError('This key is not bound to a tenant tree.');
+      }
+      if (segments[0] === '~device') {
+        if (!isHelp && request.method !== 'POST') {
+          response = errorResponse(405, 'method_not_allowed', 'Use GET {path}/~help or POST {path} to call.');
+        } else {
+          const accept = request.headers.get('Accept') ?? '';
+          const body = isHelp ? undefined : await readJsonBody<unknown>(request);
+          input = inputSummary(body);
+          const routed = await routeDeviceHtbp({
+            env,
+            principal: authInfo,
+            segments,
+            isHelp,
+            accept,
+            input: body,
+            traceId,
+            broker: tunnelBroker,
+          });
+          response = routed.response;
+          callContext = routed.audit;
+          tenantId = routed.tenantId ?? tenantId;
+        }
+      } else if (isHelp) {
+        const root = await rootFor(authInfo, env);
+        callContext = auditContextFor(root, segments);
+        const accept = request.headers.get('Accept') ?? '';
+        response = await resolveHelp(env, root, segments, authInfo.mode, accept, builtinHandlers);
+      } else if (request.method === 'POST') {
+        const root = await rootFor(authInfo, env);
+        callContext = auditContextFor(root, segments);
+        const body = await readJsonBody<unknown>(request);
+        input = inputSummary(body);
+        response = await resolveCall(env, root, segments, authInfo.mode, body, builtinHandlers);
+      } else {
+        response = errorResponse(405, 'method_not_allowed', 'Use GET {path}/~help or POST {path} to call.');
+      }
     }
-    if (request.method === 'POST') {
-      const input = await readJsonBody<unknown>(request);
-      return await resolveCall(env, root, segments, authInfo.mode, input);
-    }
-    return errorResponse(405, 'method_not_allowed', 'Use GET {path}/~help or POST {path} to call.');
   } catch (error) {
-    if (error instanceof NotFoundError) {
-      return errorResponse(404, 'not_found', error.message);
-    }
-    return errorResponse(500, 'internal_error', messageOf(error));
+    // Typed platform errors (NotFoundError → 404, UpstreamError → 502, ...)
+    // carry their own status/code; anything else is a 500 internal_error.
+    response = errorResponseOf(error);
   }
+
+  response = new Response(response.body, response);
+  response.headers.set('X-TB-Trace-Id', traceId);
+
+  await emitAuditEvent(env, executionCtx, {
+    ts: new Date(startedAt).toISOString(),
+    traceId,
+    action: isHelp ? 'describe' : 'call',
+    actor,
+    tenantId,
+    path: url.pathname,
+    tool: callContext.tool,
+    provider: callContext.provider,
+    effect: callContext.effect,
+    scope: callContext.scope,
+    decision:
+      response.status === 401 || response.status === 403
+        ? 'deny'
+        : response.status === 404
+          ? 'not_found'
+          : 'allow',
+    result: response.ok ? 'ok' : 'error',
+    status: response.status,
+    errorCode: response.ok ? undefined : await errorCodeOf(response),
+    latencyMs: Date.now() - startedAt,
+    reason: request.headers.get('X-TB-Reason') ?? undefined,
+    input,
+  });
+  return response;
 }
 
 async function routeMcpBridge(request: Request, env: AppEnv): Promise<Response> {
@@ -885,11 +1034,22 @@ function publicServer(server: ServerConfig): JsonObject {
   };
 }
 
-async function handleRequest(request: Request, env: AppEnv): Promise<Response> {
+async function handleRequest(
+  request: Request,
+  env: AppEnv,
+  options: BridgeOptions = {},
+  executionCtx?: ExecutionContext
+): Promise<Response> {
   const url = new URL(request.url);
   try {
     if (url.pathname.startsWith('/api/')) {
       return await routeApi(request, env);
+    }
+    if (url.pathname.startsWith('/tunnel/')) {
+      const response = await routeTunnelApi(request, env, options.tunnelBroker);
+      if (response) {
+        return response;
+      }
     }
     if (url.pathname.startsWith('/mcp/')) {
       return await routeMcpBridge(request, env);
@@ -897,19 +1057,32 @@ async function handleRequest(request: Request, env: AppEnv): Promise<Response> {
     if (url.pathname === '/htbp' || url.pathname.startsWith('/htbp/')) {
       // HTBP control-plane responses are cross-origin fetchable: federation and
       // browser agents fetch another TB server's ~help from a different origin.
-      const response = await routeHtbp(request, env);
+      const response = await routeHtbp(request, env, options.builtinHandlers, options.tunnelBroker, executionCtx);
       const withCors = new Response(response.body, response);
       withCors.headers.set('Access-Control-Allow-Origin', '*');
       return withCors;
     }
     return env.ASSETS.fetch(request);
   } catch (error) {
-    return errorResponse(500, 'internal_error', messageOf(error));
+    return errorResponseOf(error);
   }
 }
 
-export default {
-  fetch(request, env): Promise<Response> {
-    return handleRequest(request, env);
-  },
-} satisfies ExportedHandler<AppEnv>;
+// Deploy-time embedding surface (SPEC-001 §8.3): a host worker builds its own
+// bridge handler with its builtin tool implementations injected. Builtin
+// injection is a code-level, deploy-time act — there is intentionally no
+// runtime API to register a handler.
+export interface BridgeOptions {
+  builtinHandlers?: BuiltinHandlerRegistry;
+  tunnelBroker?: TunnelBroker;
+}
+
+export function createBridge(options: BridgeOptions = {}) {
+  return {
+    fetch(request, env, executionCtx?: ExecutionContext): Promise<Response> {
+      return handleRequest(request, env, options, executionCtx);
+    },
+  } satisfies ExportedHandler<AppEnv>;
+}
+
+export default createBridge();

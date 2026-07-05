@@ -32,6 +32,11 @@ export function virtualizeTools(node: McpNode, upstream: ToolSpec[]): Virtualize
       description: override?.description ?? tool.description,
       inputSchema: tool.inputSchema,
       outputSchema: tool.outputSchema,
+      // Declared call semantics (SPEC-001 §5.8): overrides win over anything
+      // the upstream declared; omitted fields keep the historical defaults.
+      effect: override?.effect ?? tool.effect,
+      scope: override?.scope ?? tool.scope,
+      confirm: override?.confirm ?? tool.confirm,
     });
   }
 

@@ -7,12 +7,15 @@
 
 import {
   AppEnv,
+  BuiltinNode,
+  BuiltinToolConfig,
   DirectoryNode,
   HttpEndpointConfig,
   HttpNode,
   McpNode,
   MountNode,
   RemoteNode,
+  ToolEffect,
   ToolOverride,
   TreeNode,
 } from './types';
@@ -83,6 +86,8 @@ function normalizeNode(value: unknown, idPath: string): TreeNode {
       return normalizeRemoteNode(value, idPath);
     case 'mount':
       return normalizeMountNode(value, idPath);
+    case 'builtin':
+      return normalizeBuiltinNode(value, idPath);
     default:
       throw new Error(`Unknown tree node type '${type}' at '${idPath}'.`);
   }
@@ -146,6 +151,9 @@ function parseToolOverrides(value: unknown): Record<string, ToolOverride> | unde
       hide: raw.hide === true,
       rename: stringField(raw, 'rename'),
       description: stringField(raw, 'description'),
+      effect: parseToolEffect(raw.effect),
+      scope: stringField(raw, 'scope'),
+      confirm: raw.confirm === true ? true : undefined,
     };
   }
   return Object.keys(result).length > 0 ? result : undefined;
@@ -199,6 +207,9 @@ function normalizeHttpEndpoint(value: unknown, idPath: string): HttpEndpointConf
     outputSchema: value.outputSchema,
     example: value.example,
     headers: recordOfStrings(value.headers),
+    effect: parseToolEffect(value.effect),
+    scope: stringField(value, 'scope'),
+    confirm: value.confirm === true ? true : undefined,
   };
 }
 
@@ -241,6 +252,66 @@ function normalizeMountNode(value: Record<string, unknown>, idPath: string): Mou
   };
 }
 
+function normalizeBuiltinNode(value: Record<string, unknown>, idPath: string): BuiltinNode {
+  const id = stringField(value, 'id') || stringField(value, 'name');
+  if (!id) {
+    throw new Error(`Builtin node at '${idPath}' is missing id/name.`);
+  }
+  // Accept either { builtin: { tools: [...] } } (matches the config shape the
+  // host uses to scope handlers) or a flat { tools: [...] }.
+  const builtinBlock = isRecord(value.builtin) ? value.builtin : value;
+  const rawTools = Array.isArray(builtinBlock.tools) ? builtinBlock.tools : [];
+  const tools = rawTools.map((item, index) => normalizeBuiltinTool(item, `${idPath}/${id}[${index}]`));
+  if (tools.length === 0) {
+    throw new Error(`Builtin node '${id}' must declare at least one tool.`);
+  }
+  assertUniqueSiblingIds(
+    tools.map((t) => ({ id: t.name })),
+    `${idPath}/${id}`
+  );
+  return {
+    kind: 'builtin',
+    id,
+    title: stringField(value, 'title') || stringField(value, 'name') || id,
+    summary: stringField(value, 'summary') || stringField(value, 'description'),
+    description: stringField(value, 'description'),
+    tools,
+  };
+}
+
+function normalizeBuiltinTool(value: unknown, idPath: string): BuiltinToolConfig {
+  if (!isRecord(value)) {
+    throw new Error(`Builtin tool at '${idPath}' must be an object.`);
+  }
+  const name = stringField(value, 'name');
+  const handler = stringField(value, 'handler');
+  if (!name) {
+    throw new Error(`Builtin tool at '${idPath}' is missing name.`);
+  }
+  if (!handler) {
+    throw new Error(`Builtin tool '${name}' is missing handler.`);
+  }
+  return {
+    name,
+    handler,
+    description: stringField(value, 'description'),
+    inputSchema: value.inputSchema,
+    outputSchema: value.outputSchema,
+    effect: parseToolEffect(value.effect),
+    scope: stringField(value, 'scope'),
+    confirm: value.confirm === true ? true : undefined,
+  };
+}
+
+// Validate an optional effect field. Unknown / absent values leave it undefined
+// so help output falls back to the historical `external` default.
+function parseToolEffect(value: unknown): ToolEffect | undefined {
+  if (value === 'read' || value === 'write' || value === 'destructive' || value === 'external') {
+    return value;
+  }
+  return undefined;
+}
+
 function assertUniqueSiblingIds(children: { id: string }[], scope: string): void {
   const seen = new Set<string>();
   for (const child of children) {
@@ -251,8 +322,18 @@ function assertUniqueSiblingIds(children: { id: string }[], scope: string): void
   }
 }
 
+// Normalize a single node config object (the shape a Publication `binding`
+// stores: `type` + kind-specific fields). Shares the exact validation the env
+// tree goes through, so materialized placements produce the same TreeNode
+// shapes as static config (D-1: compile, don't rewrite).
+export function normalizeNodeConfig(value: unknown, label: string): TreeNode {
+  return normalizeNode(value, label);
+}
+
 // Attach non-enumerable parent back-references for nodePath() / back-navigation.
-function linkParents(node: TreeNode): void {
+// Exported so entity materialization can re-link after inserting placement
+// nodes into an already-parsed tree.
+export function linkParents(node: TreeNode): void {
   if (node.kind === 'directory') {
     for (const child of node.children) {
       Object.defineProperty(child, 'parent', {
