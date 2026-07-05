@@ -30,6 +30,7 @@ import {
   listDynamicServers,
   putDynamicServer,
 } from './tb/dynamic-servers';
+import { createSshExecutionDriver } from './tb/ssh-driver';
 import type { BuiltinHandlerRegistry, DirectoryNode } from './tb/types';
 
 const MCP_PROTOCOL_VERSION = '2025-11-25';
@@ -1134,4 +1135,8 @@ export type {
 } from './tb/device';
 export { buildSshExecCommand, createSshExecutionDriver, escapePosixArg } from './tb/ssh-driver';
 
-export default createBridge();
+export default createBridge({
+  executionDrivers: {
+    ssh: createSshExecutionDriver(),
+  },
+});
