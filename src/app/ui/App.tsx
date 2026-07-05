@@ -404,7 +404,7 @@ export function App() {
   const endpointsQuery = useQuery({
     queryKey: ['endpoints', authToken],
     queryFn: () => api<EndpointsResponse>('/api/endpoints', authToken),
-    enabled: mode === 'devices' && (authQuery.data?.mode === 'none' || authToken.length > 0),
+    enabled: mode === 'devices' && authToken.length > 0,
   });
 
   const selectedServer = useMemo(
@@ -566,17 +566,15 @@ export function App() {
             <Shield size={15} />
             {authMode}
           </span>
-          {authMode !== 'none' ? (
-            <label className="token-field">
-              <KeyRound size={15} />
-              <input
-                type="password"
-                value={authToken}
-                onChange={(event) => updateAuthToken(event.target.value)}
-                placeholder="Bearer token"
-              />
-            </label>
-          ) : null}
+          <label className="token-field">
+            <KeyRound size={15} />
+            <input
+              type="password"
+              value={authToken}
+              onChange={(event) => updateAuthToken(event.target.value)}
+              placeholder="Admin/API key"
+            />
+          </label>
         </div>
       </header>
 
@@ -728,7 +726,7 @@ export function App() {
                 <p className="empty-state device-form-wide">Secret values are created in Cloudflare; this form stores only their names.</p>
                 <button
                   className="primary-button device-form-wide"
-                  disabled={createEndpointMutation.isPending}
+                  disabled={!authToken || createEndpointMutation.isPending}
                   onClick={() => createEndpointMutation.mutate()}
                 >
                   <TerminalSquare size={16} />
@@ -786,6 +784,7 @@ export function App() {
                     </div>
                   );
                 })}
+                {!authToken ? <p className="empty-state">Enter an admin/API key to manage endpoints.</p> : null}
                 {endpointsQuery.isLoading ? <p className="empty-state">Loading endpoints…</p> : null}
                 {endpointsQuery.isError ? <pre className="error-box">{String(endpointsQuery.error.message)}</pre> : null}
                 {revokeEndpointMutation.isError ? (
