@@ -294,6 +294,8 @@ storage:
                         #   key 布局(Phase 1 定型):sk:h:<sha256hex>→SecretKey(认证热路径)、
                         #   sk:i:<id>→hash 指针(管理面二级索引)、node:<path>→Node、
                         #   secret:<name>→{iv,ciphertext,updatedAt}、plugin:<id>→manifest、
+                        #   toolcache:<path>→{tools,fetchedAt}(mcp ~help 缓存,TTL 默认
+                        #   300s,Phase 2 定型,失效规则见 Proto §4.2)、
                         #   sys:bootstrapped→引导幂等标志。SQLite 宿主用同构表结构。
                         #   KV 的 list+get 存在最终一致窗口(刚删除的 key 可能仍出现
                         #   在 list 而 get 为 null),StateStore 实现须跳过 null 值

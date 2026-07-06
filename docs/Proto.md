@@ -136,9 +136,9 @@ cmd get-library-docs POST /docs/context7
   ...
 ```
 
-约束:每个 cmd 必须声明 `scope`(对应 §2.2 的动作,供调用方预判权限);`effect`(是否有副作用)与 `confirm`(危险操作)按 HTBP 属性表可选携带;消费方对未知行必须忽略(向前兼容)。
+约束:每个 cmd 必须声明 `scope`(对应 §2.2 的动作,供调用方预判权限);`effect`(是否有副作用)、`confirm`(危险操作)与 `h`(工具级一句话描述,Phase 2 定型)按 HTBP 属性表可选携带——mcp/http 工具的上游 description 落在 `h` 行;消费方对未知行必须忽略(向前兼容)。
 
-**DSL 渲染细节(规范性,Phase 1 定型回写)**:cmd 行的路径带前导 `/`(如 `POST /docs/context7`);根节点的 DSL `node` 行路径显示为 `/`,JSON 表现中 `node.path` 为空串;cmd 属性行按 `body → returns → scope → effect → confirm` 顺序输出,两空格缩进,`body` 为单行紧凑 JSON;`confirm` 仅以属性行的存在表示真值,不携带值。`~tree` 的默认(非 JSON)表现为缩进文本树,具体排版由实现自定——JSON(`TreeJson`)才是规范形状。
+**DSL 渲染细节(规范性,Phase 1 定型回写)**:cmd 行的路径带前导 `/`(如 `POST /docs/context7`);根节点的 DSL `node` 行路径显示为 `/`,JSON 表现中 `node.path` 为空串;cmd 属性行按 `h → body → returns → scope → effect → confirm` 顺序输出(`h` 为 Phase 2 定型新增),两空格缩进,`body` 为单行紧凑 JSON;`confirm` 仅以属性行的存在表示真值,不携带值。`~tree` 的默认(非 JSON)表现为缩进文本树,具体排版由实现自定——JSON(`TreeJson`)才是规范形状。
 
 **cmd 命名(规范性)**:Provider 类节点的 cmd 名 = 其接口方法名,**首字母大写**(context 节点:`List` / `Get` / `Update` / `Write` / `Search`;tool 节点的 cmd 为**工具原名**,如 mcp·http 工具名、device shell 的 `exec`——`ToolProvider.Call` 是内部派发方法,不成为树 cmd);仅 `system/*` builtin 用小写 cmd 名(§4.2)——同类 Provider 节点无论内置还是 Plugin,cmd 名一致,保证"换 Provider 不改 Agent"。
 
@@ -149,6 +149,7 @@ interface HelpJson {
   htbp: string                          // "0.1"
   node: { path: TreePath, kind: Node['kind'], description: string }
   cmds: Array<{ name: string, method: 'POST', path: string,
+                h?: string,            // 工具级一句话描述(= DSL 的 h 行;Phase 2 定型)
                 inputSchema?: unknown, // 该 cmd arguments 的 JSON Schema(= provider 的
                                        //   inputSchema,不含 {tool,arguments} 信封;
                                        //   DSL 的 body 行是请求信封示意,二者语义等价、
@@ -309,7 +310,9 @@ interface Node {
 }
 
 interface Virtualize {
-  prefix?: string                       // 工具名统一加前缀
+  prefix?: string                       // 工具名统一加前缀:纯字符串拼接,平台不注入分隔符,
+                                        //   分隔符由配置者自带(惯例 "ns__");在 rename 之后
+                                        //   应用——先 rename 再加 prefix(Phase 2 定型)
   rename?: Record<string, string>       // 原名 → 虚拟名
   hide?: string[]                       // 隐藏的工具名
   describe?: Record<string, string>     // description override
@@ -321,7 +324,10 @@ interface Virtualize {
 ```ts
 type NodeConfig =
   | { kind: 'mcp',     url: string, authRef?: string }        // Streamable HTTP;authRef → SecretStore
-  | { kind: 'http',    endpoint: string, tools: HttpToolDef[], authRef?: string }
+  | { kind: 'http',    endpoint: string, tools: HttpToolDef[], authRef?: string,
+      authHeader?: string,                                     // 认证头名;默认 "Authorization"(Phase 2 定型)
+      authScheme?: string }                                    // 头值 scheme 前缀;默认 "Bearer",
+                                                               //   空串 = 原样注入 secret 值
   | { kind: 'builtin', module: string }                        // "sk" | "secret" | "registry" | "plugin" | "status"
   | { kind: 'context', provider: string,                       // "r2"|"s3"|"file"|plugin id
       providerConfig?: Record<string, unknown>,                // bucket/AK 引用/根目录……密钥走 authRef
@@ -336,6 +342,8 @@ interface HttpToolDef {
   method: 'GET' | 'POST' | 'PUT' | 'DELETE'
   pathTemplate: string                  // 相对 endpoint;支持 {param} 占位
   inputSchema?: unknown                 // JSON Schema;~help 的数据源
+  effect?: 'readonly' | 'mutating' | 'destructive'   // 进 ~help 的 effect 行;缺省派生:
+                                        //   GET→readonly,其余→mutating(Phase 2 定型)
 }
 ```
 
@@ -366,8 +374,8 @@ type NodeInput = Omit<Node, 'registeredBy' | 'online' | 'createdAt' | 'updatedAt
 `remote` 节点承载 TB.md 的 "Custom HTBP Server" / "Add TB Server":把**任意实现了 HTBP 控制面的服务**(不必是 tool-bridge)联邦为本树的一棵子树。
 
 - **透传**:对 `<path>` 及其后代的 `~help`/`~skill`/`~tree`/`POST` 请求,改写为对 `baseUrl` 下相对路径的同形请求;`skRef` 解析出的凭证作为出站 `Authorization: Bearer`(本地调用者的 SK **不**外传)。
-- **白名单**:`baseUrl` 必须匹配部署配置的 remote 白名单,否则 `Write` 时即拒(`invalid_argument`)。
-- **环检测**:出站请求携带 `X-TB-Via: <本实例标识>` 并追加既有链;收到含自身标识的入站 `X-TB-Via` → `unavailable(retryable:false)`。透传另设**跳数上限**:`X-TB-Via` 链段数超过 maxHops(默认 4,部署配置)→ `unavailable(retryable:false)`;`~tree` 聚合时对 remote 子树计入 §1.1 的深度/节点上限。**已知局限**:环检测依赖链路各方转发 `X-TB-Via`——夹带不转发该头的第三方 HTBP 服务时,环不可被协议检出;`baseUrl` 白名单是主要防线,跳数上限是兜底。
+- **白名单**:`baseUrl` 必须匹配部署配置的 remote 白名单(§7 `remoteAllowlist`,host 后缀白名单;空/缺省 = 拒绝一切 remote 注册,Phase 2 定型),否则 `Write` 时即拒(`invalid_argument`)。
+- **环检测**:出站请求携带 `X-TB-Via: <本实例标识>` 并追加既有链;收到含自身标识的入站 `X-TB-Via` → `unavailable(retryable:false)`。透传另设**跳数上限**:`X-TB-Via` 链段数超过 maxHops(默认 4,§7 `maxHops`)→ `unavailable(retryable:false)`;`~tree` 聚合时对 remote 子树计入 §1.1 的深度/节点上限。**已知局限**:环检测依赖链路各方转发 `X-TB-Via`——夹带不转发该头的第三方 HTBP 服务时,环不可被协议检出;`baseUrl` 白名单是主要防线,跳数上限是兜底。
 - **权限**:本地 Auth 先判(path, action),通过后才透传;远端的再次判定属远端职责——两级都可拒。
 
 ---
@@ -400,9 +408,13 @@ interface ToolResult {
 
 ### 4.2 内置 Provider 义务
 
-- **mcp**:经官方 MCP SDK(Streamable HTTP)连接 `config.url`;`List/Get` 映射 `tools/list`,`Call` 映射 `tools/call`;会话失效自动重建;上游 schema 变化时 `~help` 缓存失效(TTL + 显式刷新)。
-- **http**:按 `HttpToolDef` 拼请求(`{param}` 从 args 取,剩余 args 按 method 入 query/body);`authRef` 解析后注入认证头;响应透传为 `ToolResult`。
+- **mcp**:经官方 MCP SDK(Streamable HTTP)连接 `config.url`;`List/Get` 映射 `tools/list`,`Call` 映射 `tools/call`。**会话一次性(Phase 2 定型)**:每次调用完整握手(initialize → initialized → 操作 → finally DELETE session),不跨请求复用;上游返回 404(会话失效)时重建会话重试一次(与 Reference §3 对齐);跨请求会话复用留待未来(若需要,sessionId 落 StateStore)。**`~help` 缓存(Phase 2 定型)**:上游 `tools/list` 结果缓存于 StateStore,key `toolcache:<path>` → `{ tools, fetchedAt }`,TTL 默认 300s(env `TB_TOOL_CACHE_TTL`,秒);失效触发三者:TTL 到期、该节点的 `NodeRegistry` Write/Update/Delete、`GET <path>/~help?refresh=1`(需 read 权限)。
+- **http**:按 `HttpToolDef` 拼请求(`{param}` 从 args 取,剩余 args 按 method 入 query/body);`authRef` 解析后注入认证头(头名/scheme 见 §3.2 `authHeader`/`authScheme`);响应透传为 `ToolResult`。
 - **builtin**:`system/*` 模块的进程内直调;`~help` 由模块静态声明。**cmd 命名(规范性,Phase 1 定型回写)**:builtin 的 cmd 名与接口方法名对齐(小写:`list` / `get` / `write` / `update` / `delete` / `set`……);CLI 层的 `create`/`rm` 等人性化别名由 CLI 翻译,不进入 `~help`。`system/status` 模块的 cmd 集合:`get`(scope read,免 admin——返回 `{ healthy, version, nodeCount, uptime? }` 健康摘要,`tb status` 登录态下的数据源)。
+
+**上游错误归一(规范性,Phase 2 定型)**:mcp/http Provider 在单一 choke point 把上游传输/协议错误归一为 TBError(§0.2)——上游网络失败 / 5xx / 超时 / 会话重建仍失败 → `unavailable`(retryable: true);上游 4xx(我方拼装错误或上游拒绝)→ `internal`(retryable: false,message 携带上游状态码与摘要,不透传上游 body 原文以防泄漏);MCP RPC 业务错误(`result.isError` / JSON-RPC error)不是 TBError——正常 HTTP 200,落 `ToolResult.isError: true`(§4.1),按 §1.2 协商渲染。
+
+**上游 https 强制(规范性,Phase 2 定型)**:mcp / http / remote 的上游 endpoint(`url` / `endpoint` / `baseUrl`)强制 `https://`;仅当 env `TB_ALLOW_INSECURE_HTTP=true` 时放行 `http://`(仅限本地开发);remote 另叠加 §3.4 白名单。
 
 ---
 
@@ -543,6 +555,11 @@ function createToolBridge(config: {
                                         //   unavailable,与 §2.5 一致)
   deviceTransport?: DeviceTransport     // §6 设备 WS 的网关侧宿主(未注入则 device 能力禁用)
   reservedRoots?: string[]              // §2.4 b 的追加保留根路径
+  remoteAllowlist?: string[]            // §3.4 remote baseUrl 的 host 后缀白名单;空/缺省 =
+                                        //   拒绝一切 remote 注册(Phase 2 定型;CF 宿主经
+                                        //   env TB_REMOTE_ALLOWLIST 逗号分隔注入)
+  maxHops?: number                      // §3.4 X-TB-Via 跳数上限;默认 4(Phase 2 定型;
+                                        //   CF 宿主经 env TB_MAX_HOPS 注入)
 }): ToolBridge
 
 interface ToolBridge {
