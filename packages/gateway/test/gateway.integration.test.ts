@@ -329,8 +329,8 @@ describe('~register body 校验(修复 8)', () => {
   })
 })
 
-describe('非 directory/builtin 节点 ~help → 501(修复 4)', () => {
-  it('挂一个 mcp 节点后 GET 其 ~help → 501(Phase 1 未落地)', async () => {
+describe('mcp 节点 ~help(Phase 2:上游 https 强制)', () => {
+  it('挂一个 http:// url 的 mcp 节点 → ~help 因非 https(未放行)被拒', async () => {
     const sk = await issueSk({
       owner: 'agent:mcp',
       scopes: [{ pattern: '**', actions: ['read', 'register'] }],
@@ -344,14 +344,17 @@ describe('非 directory/builtin 节点 ~help → 501(修复 4)', () => {
           path: 'ext/ctx7',
           kind: 'mcp',
           description: 'ctx7',
-          config: { kind: 'mcp', url: 'https://example.com' },
+          config: { kind: 'mcp', url: 'http://insecure.invalid/mcp' },
         },
       },
       admin(),
     )
     expect(mk.status).toBe(200)
     const res = await SELF.fetch('https://tb.test/ext/ctx7/~help', { headers: auth })
-    expect(res.status).toBe(501)
+    // 未设 TB_ALLOW_INSECURE_HTTP → 400 invalid_argument;若 opt-in 运行放行了 http,
+    // 则转为上游不可达的归一错误(5xx)。两种都不再是 Phase 1 的 501。
+    expect([400, 500, 503]).toContain(res.status)
+    expect(res.status).not.toBe(501)
   })
 })
 

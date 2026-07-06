@@ -9,6 +9,8 @@ import { TEST_ADMIN_SK, TEST_ENCRYPTION_KEY } from './test/fixtures'
 // 测试用 vars 经 miniflare.bindings 注入(不依赖 .dev.vars,保证测试确定性):
 // - TB_SECRET_ENCRYPTION_KEY:32 字节 base64url,secret 能力可用;
 // - TB_BOOTSTRAP_ADMIN_SK:固定 Admin SK 明文,测试用它认证并签发受限 SK(E2E-1 本地版)。
+// - TB_INSTANCE_ID / TB_REMOTE_ALLOWLIST:Phase 2 remote 透传的固定实例标识与白名单(确定性)。
+// - TB_TEST_MCP_URL / TB_ALLOW_INSECURE_HTTP:仅当 process.env 提供时注入(opt-in 真实 echo E2E)。
 
 export default defineConfig({
   plugins: [
@@ -18,6 +20,17 @@ export default defineConfig({
         bindings: {
           TB_SECRET_ENCRYPTION_KEY: TEST_ENCRYPTION_KEY,
           TB_BOOTSTRAP_ADMIN_SK: TEST_ADMIN_SK,
+          TB_INSTANCE_ID: 'tb-test-instance',
+          TB_REMOTE_ALLOWLIST: 'example.com',
+          ...(process.env.TB_TEST_MCP_URL !== undefined
+            ? { TB_TEST_MCP_URL: process.env.TB_TEST_MCP_URL }
+            : {}),
+          ...(process.env.TB_TEST_LIVE_HTTP !== undefined
+            ? { TB_TEST_LIVE_HTTP: process.env.TB_TEST_LIVE_HTTP }
+            : {}),
+          ...(process.env.TB_ALLOW_INSECURE_HTTP !== undefined
+            ? { TB_ALLOW_INSECURE_HTTP: process.env.TB_ALLOW_INSECURE_HTTP }
+            : {}),
         },
       },
     }),
