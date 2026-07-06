@@ -8,7 +8,7 @@
  * 完成后需把新建 KV namespace 的 id 回填到 packages/gateway/wrangler.jsonc 的 TB_KV.id。
  */
 import { execFileSync } from 'node:child_process'
-import { readFileSync } from 'node:fs'
+import { readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { parseEnv } from 'node:util'
 
@@ -42,6 +42,19 @@ function wrangler(args, { capture = false } = {}) {
   })
 }
 
+/** create 分支专用:重新 list 取新 id,回填 wrangler.jsonc 的 TB_KV.id(保留注释/结构)。 */
+function backfillKvId(id) {
+  const wranglerPath = join(root, 'packages', 'gateway', 'wrangler.jsonc')
+  const src = readFileSync(wranglerPath, 'utf8')
+  const next = src.replace(/("binding":\s*"TB_KV",\s*"id":\s*")[^"]*(")/, `$1${id}$2`)
+  if (next === src) {
+    console.warn(`warn: could not locate TB_KV.id in ${wranglerPath}; write id=${id} manually`)
+    return
+  }
+  writeFileSync(wranglerPath, next)
+  console.log(`已回填 TB_KV.id=${id} → packages/gateway/wrangler.jsonc`)
+}
+
 function ensureKv() {
   const out = wrangler(['kv', 'namespace', 'list'], { capture: true })
   let list = []
@@ -57,12 +70,32 @@ function ensureKv() {
   }
   console.log(`creating KV namespace '${kvTitle}'...`)
   wrangler(['kv', 'namespace', 'create', kvTitle])
-  console.log(`created KV '${kvTitle}' — copy its id into packages/gateway/wrangler.jsonc TB_KV.id`)
+  // create 不回吐 id,重新 list 取新建 namespace 的 id 并回填(干净环境 deploy:all 不断链)。
+  const after = wrangler(['kv', 'namespace', 'list'], { capture: true })
+  let created
+  try {
+    created = JSON.parse(after).find((ns) => ns.title === kvTitle)
+  } catch {
+    // 解析失败走下方手动提示
+  }
+  if (created) {
+    backfillKvId(created.id)
+    return created.id
+  }
+  console.log(
+    `created KV '${kvTitle}' but could not read its new id — copy it into packages/gateway/wrangler.jsonc TB_KV.id`,
+  )
 }
 
 function ensureR2() {
   const out = wrangler(['r2', 'bucket', 'list'], { capture: true })
-  if (out.includes(r2Bucket)) {
+  // list 无 --json,按行解析 `name: <bucket>` 做全等比较(对齐 ensureKv 的精确匹配,消除子串假阳性)。
+  const names = out
+    .split('\n')
+    .map((line) => line.match(/^\s*name:\s*(.+?)\s*$/))
+    .filter((m) => m !== null)
+    .map((m) => m[1])
+  if (names.includes(r2Bucket)) {
     console.log(`R2 bucket '${r2Bucket}' exists — skip`)
     return
   }

@@ -41,6 +41,14 @@ describe('保留段占位 → 501 TBError', () => {
     expect(body.code).toBe('unavailable')
     expect(body.retryable).toBe(false)
   })
+
+  it('POST /~register → 501,body code=unavailable,retryable=false(反向注册入口占位)', async () => {
+    const res = await SELF.fetch('https://tb.test/~register', { method: 'POST' })
+    expect(res.status).toBe(501)
+    const body = (await res.json()) as { code: string; retryable: boolean }
+    expect(body.code).toBe('unavailable')
+    expect(body.retryable).toBe(false)
+  })
 })
 
 describe('兜底 → 404 TBError', () => {

@@ -40,6 +40,16 @@ const RETRYABLE_CODES: ReadonlySet<TBErrorCode> = new Set<TBErrorCode>([
   'internal',
 ])
 
+/**
+ * httpStatus 覆盖唯一允许偏离规范映射的两组(Proto §0.2 特例):
+ * (permission_denied, 401) 与 (unavailable, 501)。其余偏离构造抛错。
+ * 与规范状态相等的传入不算偏离(如 deviceOffline 显式传 503)。
+ */
+const STATUS_OVERRIDES: ReadonlySet<string> = new Set<string>([
+  'permission_denied:401',
+  'unavailable:501',
+])
+
 /** 给定错误码的规范 HTTP 状态(不含 401/501 特例)。 */
 export function statusForCode(code: TBErrorCode): number {
   return CODE_TO_STATUS[code]
@@ -70,6 +80,15 @@ export class TBError extends Error {
     const retryable = options.retryable ?? false
     if (retryable && !RETRYABLE_CODES.has(code)) {
       throw new Error(`TBError: retryable=true not allowed for code '${code}' (Proto §0.2)`)
+    }
+    if (
+      options.httpStatus !== undefined &&
+      options.httpStatus !== CODE_TO_STATUS[code] &&
+      !STATUS_OVERRIDES.has(`${code}:${options.httpStatus}`)
+    ) {
+      throw new Error(
+        `TBError: httpStatus=${options.httpStatus} not allowed for code '${code}' (Proto §0.2)`,
+      )
     }
     this.code = code
     this.retryable = retryable

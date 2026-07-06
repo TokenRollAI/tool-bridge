@@ -78,6 +78,30 @@ describe('特例工厂(401 / 501 / 503)', () => {
   })
 })
 
+describe('httpStatus 覆盖约束(Proto §0.2:仅两组偏离允许)', () => {
+  it('(permission_denied, 401) 合法', () => {
+    expect(new TBError('permission_denied', 'x', { httpStatus: 401 }).httpStatus).toBe(401)
+  })
+
+  it('(unavailable, 501) 合法', () => {
+    expect(new TBError('unavailable', 'x', { httpStatus: 501 }).httpStatus).toBe(501)
+  })
+
+  it('httpStatus 等于规范状态不算偏离(如 deviceOffline 显式传 503)', () => {
+    expect(new TBError('unavailable', 'x', { httpStatus: 503 }).httpStatus).toBe(503)
+  })
+
+  const illegal: Array<[TBErrorCode, number]> = [
+    ['not_found', 401],
+    ['permission_denied', 501],
+    ['unavailable', 401],
+    ['internal', 418],
+  ]
+  it.each(illegal)('(%s, %i) 非法覆盖构造抛错', (code, httpStatus) => {
+    expect(() => new TBError(code, 'x', { httpStatus })).toThrow()
+  })
+})
+
 describe('toJSON 只含规范 body 字段(不泄漏 httpStatus)', () => {
   it('形状为 {code,message,retryable}', () => {
     const e = TBError.unauthenticated('nope')
