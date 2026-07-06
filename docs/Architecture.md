@@ -212,7 +212,7 @@
 | 命令 | 背后接口 |
 |---|---|
 | `tb init` | 部署向导(Cloudflare;生成 Admin SK)——M10 |
-| `tb login` / `tb whoami` / `tb use <server>` | SK + BaseURL 存 `~/.tb/credentials`(0600);多 server 配置切换 |
+| `tb login` / `tb whoami` / `tb use <server>` | SK + BaseURL 存 `~/.config/tool-bridge/config.json`(XDG,profile 结构,0600;Phase 1 定型回写,详见 Proto 附A 注记);多 server 配置切换 |
 | `tb status` | `POST /system/status {"tool":"get"}`(登录态健康摘要);未登录/Phase 0 回退树外 `GET /healthz`(Proto §1.1) |
 | `tb ls [path]` / `tb tree [--depth N]` / `tb help <path>` | `~help` / `~tree`(发现面) |
 | `tb call <path> --tool <name> --args '{}'` | `POST <path>`(调用面,Case 7) |
@@ -295,6 +295,9 @@ storage:
                         #   sk:i:<id>→hash 指针(管理面二级索引)、node:<path>→Node、
                         #   secret:<name>→{iv,ciphertext,updatedAt}、plugin:<id>→manifest、
                         #   sys:bootstrapped→引导幂等标志。SQLite 宿主用同构表结构。
+                        #   KV 的 list+get 存在最终一致窗口(刚删除的 key 可能仍出现
+                        #   在 list 而 get 为 null),StateStore 实现须跳过 null 值
+                        #   (Phase 1 定型回写)。
   R2: tb-context        # M3 r2 provider 默认 bucket
   D1: tb-audit          # M5 审计留痕(可选,Phase 后期)
 cli:
