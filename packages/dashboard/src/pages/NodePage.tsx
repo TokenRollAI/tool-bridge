@@ -94,12 +94,12 @@ export function NodePage() {
           )}
 
           {cmds.length > 0 ? (
-            <section className="grid gap-4">
-              <h2 className="-mb-2 text-[10px] font-medium tracking-widest text-muted-foreground uppercase">
+            <section className="grid gap-2">
+              <h2 className="mb-1 text-[10px] font-medium tracking-widest text-muted-foreground uppercase">
                 命令 · {cmds.length}
               </h2>
               {cmds.map((cmd) => (
-                <CmdPanel key={cmd.name} path={path} cmd={cmd} />
+                <CmdPanel key={cmd.name} path={path} cmd={cmd} defaultOpen={cmds.length === 1} />
               ))}
             </section>
           ) : (

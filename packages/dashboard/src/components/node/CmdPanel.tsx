@@ -2,7 +2,7 @@ import Form from '@rjsf/shadcn'
 import type { RJSFSchema } from '@rjsf/utils'
 import validator from '@rjsf/validator-ajv8'
 import { useQueryClient } from '@tanstack/react-query'
-import { Braces, ClipboardList, Loader2, Play, TriangleAlert } from 'lucide-react'
+import { Braces, ChevronRight, ClipboardList, Loader2, Play, TriangleAlert } from 'lucide-react'
 import { useId, useState } from 'react'
 import { ResultView } from '@/components/node/ResultView'
 import {
@@ -16,6 +16,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { Button } from '@/components/ui/button'
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import {
   Select,
   SelectContent,
@@ -93,7 +94,16 @@ function CmdDoc({ h }: { h: string }) {
  * inputSchema → rjsf 表单(可切 JSON 原文编辑);confirm=true 弹二次确认(§6.2 语义在客户端);
  * Accept 可选 markdown(默认表现)/JSON;返回经 ResultView 展示。
  */
-export function CmdPanel({ path, cmd }: { path: string; cmd: HelpCmd }) {
+export function CmdPanel({
+  path,
+  cmd,
+  defaultOpen = false,
+}: {
+  path: string
+  cmd: HelpCmd
+  defaultOpen?: boolean
+}) {
+  const [open, setOpen] = useState(defaultOpen)
   const hasSchema = cmd.inputSchema !== undefined && typeof cmd.inputSchema === 'object'
   // rjsf 渲染不了的形状(如缺 items 的 array)直接落 JSON 编辑,避免表单区出现错误文本。
   const formFriendly = hasSchema && isFormFriendly(cmd.inputSchema)
@@ -193,97 +203,116 @@ export function CmdPanel({ path, cmd }: { path: string; cmd: HelpCmd }) {
   )
 
   return (
-    <section id={`cmd-${cmd.name}`} className="rounded-md border bg-card/60">
-      <header className="flex flex-wrap items-center gap-2 border-b px-4 py-2.5">
-        <h3 className="font-mono text-sm text-foreground">{cmd.name}</h3>
-        <span
-          className={cn(
-            'inline-flex items-center rounded-sm border px-1.5 font-mono text-[10px] leading-4',
-            SCOPE_STYLE[cmd.scope] ?? SCOPE_STYLE.read,
-          )}
-        >
-          {cmd.scope}
-        </span>
-        {cmd.effect && (
-          <span className="inline-flex items-center gap-1 rounded-sm border border-warn/40 px-1.5 font-mono text-[10px] leading-4 text-warn">
-            {cmd.effect === 'destructive' && <TriangleAlert className="size-2.5" />}
-            {cmd.effect}
-          </span>
-        )}
-        {cmd.confirm && (
-          <span className="inline-flex items-center rounded-sm border border-destructive/40 px-1.5 font-mono text-[10px] leading-4 text-destructive">
-            confirm
-          </span>
-        )}
-        {cmd.h && <CmdDoc h={cmd.h} />}
-      </header>
-
-      <div className="px-4 py-3">
-        {mode === 'form' && hasSchema ? (
-          <Form
-            schema={cmd.inputSchema as RJSFSchema}
-            validator={validator}
-            formData={formData}
-            onChange={({ formData: fd }) => setFormData(fd)}
-            onSubmit={({ formData: fd }) => submit(fd)}
-            showErrorList={false}
+    <Collapsible open={open} onOpenChange={setOpen} asChild>
+      <section id={`cmd-${cmd.name}`} className="rounded-md border bg-card/60">
+        {/* 与 ~help 的层级观感对齐:默认只露 cmd 一行,schema 表单点开才展开 */}
+        <CollapsibleTrigger asChild>
+          <header
+            className={cn(
+              'flex w-full cursor-pointer flex-wrap items-center gap-2 px-4 py-2.5 text-left',
+              'hover:bg-secondary/40',
+              open && 'border-b',
+            )}
           >
-            {footer}
-          </Form>
-        ) : (
-          <div>
-            <Textarea
-              value={rawArgs}
-              onChange={(e) => setRawArgs(e.target.value)}
-              spellCheck={false}
-              rows={5}
-              className="font-mono text-xs"
-              aria-label="arguments JSON"
+            <ChevronRight
+              className={cn(
+                'size-3.5 shrink-0 text-muted-foreground/60 transition-transform',
+                open && 'rotate-90',
+              )}
             />
-            {rawErr && <p className="mt-1 text-xs text-destructive">{rawErr}</p>}
-            {footer}
-          </div>
-        )}
-
-        <ResultView
-          className="mt-4"
-          result={invoke.data}
-          error={(invoke.error as ApiError | null) ?? null}
-        />
-      </div>
-
-      <AlertDialog open={pendingArgs !== null} onOpenChange={(o) => !o && setPendingArgs(null)}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle className="font-mono text-base">
-              确认执行 {cmd.name}?
-            </AlertDialogTitle>
-            <AlertDialogDescription asChild>
-              <div>
-                <p className="text-sm">
-                  该命令声明了 <code className="font-mono">confirm</code>
-                  {cmd.effect ? `(effect: ${cmd.effect})` : ''},执行前需二次确认。
-                </p>
-                <pre className="mt-2 max-h-40 overflow-auto rounded-sm border bg-background px-2 py-1.5 text-left font-mono text-xs">
-                  {JSON.stringify(pendingArgs, null, 2)}
-                </pre>
-              </div>
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>取消</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={() => {
-                const args = pendingArgs
-                setPendingArgs(null)
-                doInvoke(args ?? {})
-              }}
+            <h3 className="font-mono text-sm text-foreground">{cmd.name}</h3>
+            <span
+              className={cn(
+                'inline-flex items-center rounded-sm border px-1.5 font-mono text-[10px] leading-4',
+                SCOPE_STYLE[cmd.scope] ?? SCOPE_STYLE.read,
+              )}
             >
-              确认执行
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-    </section>
+              {cmd.scope}
+            </span>
+            {cmd.effect && (
+              <span className="inline-flex items-center gap-1 rounded-sm border border-warn/40 px-1.5 font-mono text-[10px] leading-4 text-warn">
+                {cmd.effect === 'destructive' && <TriangleAlert className="size-2.5" />}
+                {cmd.effect}
+              </span>
+            )}
+            {cmd.confirm && (
+              <span className="inline-flex items-center rounded-sm border border-destructive/40 px-1.5 font-mono text-[10px] leading-4 text-destructive">
+                confirm
+              </span>
+            )}
+            {cmd.h && <CmdDoc h={cmd.h} />}
+          </header>
+        </CollapsibleTrigger>
+
+        <CollapsibleContent>
+          <div className="px-4 py-3">
+            {mode === 'form' && hasSchema ? (
+              <Form
+                schema={cmd.inputSchema as RJSFSchema}
+                validator={validator}
+                formData={formData}
+                onChange={({ formData: fd }) => setFormData(fd)}
+                onSubmit={({ formData: fd }) => submit(fd)}
+                showErrorList={false}
+              >
+                {footer}
+              </Form>
+            ) : (
+              <div>
+                <Textarea
+                  value={rawArgs}
+                  onChange={(e) => setRawArgs(e.target.value)}
+                  spellCheck={false}
+                  rows={5}
+                  className="font-mono text-xs"
+                  aria-label="arguments JSON"
+                />
+                {rawErr && <p className="mt-1 text-xs text-destructive">{rawErr}</p>}
+                {footer}
+              </div>
+            )}
+
+            <ResultView
+              className="mt-4"
+              result={invoke.data}
+              error={(invoke.error as ApiError | null) ?? null}
+            />
+          </div>
+        </CollapsibleContent>
+
+        <AlertDialog open={pendingArgs !== null} onOpenChange={(o) => !o && setPendingArgs(null)}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle className="font-mono text-base">
+                确认执行 {cmd.name}?
+              </AlertDialogTitle>
+              <AlertDialogDescription asChild>
+                <div>
+                  <p className="text-sm">
+                    该命令声明了 <code className="font-mono">confirm</code>
+                    {cmd.effect ? `(effect: ${cmd.effect})` : ''},执行前需二次确认。
+                  </p>
+                  <pre className="mt-2 max-h-40 overflow-auto rounded-sm border bg-background px-2 py-1.5 text-left font-mono text-xs">
+                    {JSON.stringify(pendingArgs, null, 2)}
+                  </pre>
+                </div>
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>取消</AlertDialogCancel>
+              <AlertDialogAction
+                onClick={() => {
+                  const args = pendingArgs
+                  setPendingArgs(null)
+                  doInvoke(args ?? {})
+                }}
+              >
+                确认执行
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      </section>
+    </Collapsible>
   )
 }
