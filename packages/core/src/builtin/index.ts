@@ -8,6 +8,7 @@
 import type { SKRegistryStore } from '../auth/sk'
 import type { SecretStoreImpl } from '../secret/secretStore'
 import type { NodeRegistryStore } from '../tree/registry'
+import type { ScopeChecker } from '../tree/visibility'
 import { LIST_LIMIT_MAX } from '../types'
 import { createRegistryModule } from './registry'
 import { createSecretModule } from './secret'
@@ -23,6 +24,11 @@ export interface BuiltinDeps {
   version: () => string
   /** 时间源;缺省 `new Date().toISOString()`(测试可注入固定时钟)。 */
   now?: () => string
+  /**
+   * 可见性判定(= auth/scope 的 checkScopes),注入给 registry 模块做 §2.3 裁剪
+   * (list 裁剪 / get→not_found)。网关装配一律传入;缺省则 registry 不裁剪(纯逻辑单测)。
+   */
+  visibility?: ScopeChecker
 }
 
 /** 翻页统计 registry 全量节点数(status.nodeCount)。 */
@@ -46,7 +52,7 @@ export function createBuiltins(deps: BuiltinDeps): Map<string, BuiltinModule> {
   const modules = new Map<string, BuiltinModule>()
   modules.set('sk', createSkModule(deps.sk, now))
   modules.set('secret', createSecretModule(deps.secret, now))
-  modules.set('registry', createRegistryModule(deps.registry, now))
+  modules.set('registry', createRegistryModule(deps.registry, now, deps.visibility))
   modules.set(
     'status',
     createStatusModule({ version: deps.version, nodeCount: () => countNodes(deps.registry) }),
@@ -54,7 +60,7 @@ export function createBuiltins(deps: BuiltinDeps): Map<string, BuiltinModule> {
   return modules
 }
 
-export { createRegistryModule } from './registry'
+export { createRegistryModule, parseNodeInput } from './registry'
 export { createSecretModule } from './secret'
 export { createSkModule } from './sk'
 export { createStatusModule, type StatusDeps, type StatusSummary } from './status'

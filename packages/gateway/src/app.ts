@@ -13,9 +13,9 @@ import {
   type HelpModel,
   identify,
   isTBError,
-  type NodeInput,
   NodeRegistryStore,
   negotiate,
+  parseNodeInput,
   type Representation,
   renderHelpDsl,
   renderHelpJson,
@@ -96,11 +96,27 @@ function renderResult(value: unknown, rep: Representation): Response {
   })
 }
 
+/**
+ * 逐段 decodeURIComponent 树路径(Proto:注册的树路径可含空格等,URL 里被百分号编码)。
+ * 逐段解码(而非整段)以免把编码的 '/'(%2F)误解为路径分隔。decode 失败 → 400 invalid_argument。
+ */
+function decodePath(path: TreePath): TreePath {
+  if (path === '') return ''
+  try {
+    return path
+      .split('/')
+      .map((seg) => decodeURIComponent(seg))
+      .join('/')
+  } catch {
+    throw new TBError('invalid_argument', `malformed percent-encoding in path '${path}'`)
+  }
+}
+
 /** 根路径与保留段:从 URL pathname 提取树路径与保留段(如 "docs/x/~help" → { path:"docs/x", seg:"~help" })。 */
 function splitReserved(pathname: string, seg: string): TreePath | null {
   const p = pathname.replace(/^\/+|\/+$/g, '')
   if (p === seg) return '' // 根级 /~help、/~tree
-  if (p.endsWith(`/${seg}`)) return p.slice(0, -(seg.length + 1))
+  if (p.endsWith(`/${seg}`)) return decodePath(p.slice(0, -(seg.length + 1)))
   return null
 }
 
@@ -139,12 +155,35 @@ export function createApp(): Hono<{ Bindings: Env; Variables: Vars }> {
     // 根路径('')免 read 判定(整棵树入口);非根节点需 (path,'read')。
     if (path !== '' && !check(ctx, path, 'read').allow) throw TBError.notFound('not found')
     const registry = new NodeRegistryStore(store)
-    const depth = clampDepth(Number(c.req.query('depth')))
+
+    // 子树根必须真实存在(§否则 ~tree 可伪造任意根)。非根 path 不存在 → 404;
+    // 存在则以真实节点元数据作 rootEntry(kind/description/online),不再伪造为 directory。
+    let rootEntry: TreeEntry | undefined
+    if (path !== '') {
+      let rootNode: TreeNode
+      try {
+        rootNode = await registry.get(path)
+      } catch {
+        throw TBError.notFound('not found')
+      }
+      rootEntry = toEntry(rootNode)
+    }
+
+    // 一次性读入整棵子树(而非每层递归各扫一遍),内存建 parent→直接子 索引 + 可见性裁剪。
+    const nodes = await registry.subtree(path)
+    const byParent = indexByParent(nodes)
     const getChildren = async (p: TreePath): Promise<TreeEntry[]> => {
-      const kids = filterVisible(await registry.children(p), ctx.scopes, checkScopes)
+      const kids = filterVisible(byParent.get(p) ?? [], ctx.scopes, checkScopes)
       return kids.map((n) => toEntry(n))
     }
-    const tree = await buildTree({ root: path, depth, getChildren })
+
+    const depth = clampDepth(Number(c.req.query('depth')))
+    const tree = await buildTree({
+      root: path,
+      depth,
+      getChildren,
+      ...(rootEntry !== undefined ? { rootEntry } : {}),
+    })
     const rep = negotiate(c.req.header('accept'))
     if (rep === 'json') {
       return new Response(JSON.stringify(tree), {
@@ -191,10 +230,11 @@ export function createApp(): Hono<{ Bindings: Env; Variables: Vars }> {
 
   // --- POST /<path> 数据面调用 ---
   const handleInvoke = async (c: AppContext): Promise<Response> => {
-    const raw = new URL(c.req.url).pathname.replace(/^\/+|\/+$/g, '')
-    if (raw === '' || raw.split('/').some((s) => s.startsWith('~'))) {
+    const rawEncoded = new URL(c.req.url).pathname.replace(/^\/+|\/+$/g, '')
+    if (rawEncoded === '' || rawEncoded.split('/').some((s) => s.startsWith('~'))) {
       throw TBError.notFound('no such path')
     }
+    const raw = decodePath(rawEncoded)
     const ctx = c.get('ctx')
     const store = c.get('store')
     const registry = new NodeRegistryStore(store)
@@ -271,10 +311,19 @@ export function createApp(): Hono<{ Bindings: Env; Variables: Vars }> {
     const ctx = c.get('ctx')
     const store = c.get('store')
     const registry = new NodeRegistryStore(store)
-    const body = (await c.req.json().catch(() => null)) as NodeInput | null
-    if (!body || typeof body.path !== 'string') {
-      throw new TBError('invalid_argument', 'body must be a NodeInput with a path')
+    const raw = (await c.req.json().catch(() => null)) as Record<string, unknown> | null
+    if (!raw || typeof raw !== 'object') {
+      throw new TBError('invalid_argument', 'body must be a NodeInput object')
     }
+    // body.path 必须等于 URL path(Proto §3.3);先于 NodeInput 结构校验(路径一致是通道契约)。
+    if (raw.path !== path) {
+      throw new TBError(
+        'invalid_argument',
+        `body.path '${String(raw.path)}' must equal URL path '${path}'`,
+      )
+    }
+    // 复用与 system/registry write 相同的 NodeInput 校验(kind/description 必填、kind 枚举合法)。
+    const body = parseNodeInput(raw)
     // register 判定 + §2.4 路径规则(含 existing 查询)。
     if (!check(ctx, path, 'register').allow) {
       throw new TBError('permission_denied', `no scope grants 'register' on '${path}'`)
@@ -338,7 +387,27 @@ function toEntry(n: TreeNode): TreeEntry {
   return e
 }
 
-/** 节点的 HelpModel:directory 列可见子节点;builtin 取模块 help()。 */
+/**
+ * 按直接父路径索引子树节点(父 = 去掉最后一段;顶层节点父为 '')。
+ * `~tree` 一次读入子树后在内存建此索引,getChildren 从中取直接子,避免每层递归各扫 KV。
+ */
+function indexByParent(nodes: TreeNode[]): Map<TreePath, TreeNode[]> {
+  const byParent = new Map<TreePath, TreeNode[]>()
+  for (const n of nodes) {
+    const segs = n.path.split('/')
+    const parent = segs.slice(0, -1).join('/')
+    const bucket = byParent.get(parent)
+    if (bucket) bucket.push(n)
+    else byParent.set(parent, [n])
+  }
+  return byParent
+}
+
+/**
+ * 节点的 HelpModel:builtin 取模块 help();directory 列可见子节点(空目录 → children:[]);
+ * 其余 kind(mcp/http/context/device/remote)Phase 1 未落地 → 501 unavailable(与数据面
+ * POST 一致,Proto §0.2 未实现占位)。非 directory 节点不得带 children 字段。
+ */
 async function helpModelFor(
   node: TreeNode,
   registry: NodeRegistryStore,
@@ -348,13 +417,17 @@ async function helpModelFor(
   if (node.kind === 'builtin' && node.config?.kind === 'builtin') {
     const mod = builtins.get(node.config.module)
     if (mod) return mod.help(node.path)
+    throw TBError.unimplemented(`builtin module '${node.config.module}' not available`)
   }
-  const children = filterVisible(await registry.children(node.path), ctx.scopes, checkScopes)
-  return {
-    node: { path: node.path, kind: node.kind, description: node.description },
-    cmds: [],
-    children: children.map((n) => ({ path: n.path, kind: n.kind, description: n.description })),
+  if (node.kind === 'directory') {
+    const children = filterVisible(await registry.children(node.path), ctx.scopes, checkScopes)
+    return {
+      node: { path: node.path, kind: node.kind, description: node.description },
+      cmds: [],
+      children: children.map((n) => ({ path: n.path, kind: n.kind, description: n.description })),
+    }
   }
+  throw TBError.unimplemented(`~help for kind '${node.kind}' not implemented yet`)
 }
 
 /** ~tree 的 DSL 文本渲染:每行缩进树(简单实现;JSON 是规范形状,Proto §1.3)。 */

@@ -1,6 +1,7 @@
 import {
   adminBootstrapInput,
   type BuiltinDeps,
+  checkScopes,
   KEY_BOOTSTRAPPED,
   KEY_SK_HASH,
   KEY_SK_ID,
@@ -107,6 +108,8 @@ export function buildDeps(store: StateStore, env: Env, version: string): Builtin
     secret: new SecretStoreImpl(store, env.TB_SECRET_ENCRYPTION_KEY),
     registry: new NodeRegistryStore(store),
     version: () => version,
+    // registry 管理通道也走 §2.3 裁剪(list 裁剪 / get→not_found)。
+    visibility: checkScopes,
   }
 }
 

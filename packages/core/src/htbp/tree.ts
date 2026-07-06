@@ -52,6 +52,11 @@ export interface BuildTreeOpts {
   maxNodes?: number
   /** 拉取某路径的直接子节点(宿主已做可见性裁剪)。 */
   getChildren: (path: TreePath) => Promise<TreeEntry[]>
+  /**
+   * 根节点自身的元数据(kind/description/online)。提供则用它——网关传真实节点,
+   * 避免子树根被伪造为 `directory`;缺省回退 `kind:'directory', description:''`。
+   */
+  rootEntry?: TreeEntry
 }
 
 /**
@@ -62,8 +67,8 @@ export interface BuildTreeOpts {
  * `truncated`。环检测用 visited Set:子节点路径已在集合中 → 作为 `truncated` 叶子收入、不递归
  * (本地树理论无环,此为防 provider 异常,见 Proto §1.1)。
  *
- * 根节点自身元数据:signature 只给 `root: TreePath`,故根渲染为 `kind:'directory'`、
- * `description:''`(自主决策,见回复决策点)。宿主如需真实根描述可在返回后覆盖。
+ * 根节点自身元数据:优先用 `opts.rootEntry`(网关传真实节点的 kind/description/online);
+ * 缺省回退 `kind:'directory'`、`description:''`。
  */
 export async function buildTree(opts: BuildTreeOpts): Promise<TreeJson> {
   const maxNodes = opts.maxNodes ?? DEFAULT_MAX_NODES
@@ -110,5 +115,10 @@ export async function buildTree(opts: BuildTreeOpts): Promise<TreeJson> {
     return node
   }
 
-  return build({ path: opts.root, kind: 'directory', description: '' }, opts.depth)
+  const rootEntry: TreeEntry = opts.rootEntry ?? {
+    path: opts.root,
+    kind: 'directory',
+    description: '',
+  }
+  return build(rootEntry, opts.depth)
 }
