@@ -35,7 +35,7 @@ export class MemoryStateStore implements StateStore {
   private m = new Map<string, unknown>()
 
   async get(key: string): Promise<unknown | null> {
-    return this.m.has(key) ? this.m.get(key)! : null
+    return this.m.has(key) ? (this.m.get(key) as unknown) : null
   }
 
   async put(key: string, value: unknown): Promise<void> {
@@ -56,7 +56,7 @@ export class MemoryStateStore implements StateStore {
     const page = keys.slice(start, start + limit)
     const hasMore = start + limit < keys.length
     return {
-      items: page.map((key) => ({ key, value: this.m.get(key)! })),
+      items: page.map((key) => ({ key, value: this.m.get(key) as unknown })),
       cursor: hasMore ? page[page.length - 1] : undefined,
     }
   }

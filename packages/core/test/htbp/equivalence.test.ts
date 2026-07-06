@@ -1,0 +1,127 @@
+import { describe, expect, it } from 'vitest'
+import { parseHelpDsl, renderHelpDsl, renderHelpJson } from '../../src/htbp/helpDsl'
+import type { HelpModel } from '../../src/htbp/model'
+
+/** 覆盖:必填 scope + 可选 body/returns/effect/confirm + directory children。 */
+const model: HelpModel = {
+  node: { path: 'docs/context7', kind: 'mcp', description: 'Context7 文档检索' },
+  cmds: [
+    {
+      name: 'resolve-library-id',
+      method: 'POST',
+      path: '/docs/context7',
+      body: { tool: 'resolve-library-id', arguments: { libraryName: 'string' } },
+      returns: 'markdown 文档库列表',
+      scope: 'call',
+    },
+    {
+      name: 'delete-cache',
+      method: 'POST',
+      path: '/docs/context7',
+      scope: 'write',
+      effect: '清空本地缓存',
+      confirm: true,
+    },
+  ],
+  children: [{ path: 'docs/context7/sub', kind: 'directory', description: '子目录' }],
+}
+
+describe('DSL↔JSON 语义等价(DOD.md:53:同一 HelpModel 两种表现字段一致)', () => {
+  it('DSL 经 parse 得到的 cmd name/method/path/scope 集合 === JSON cmds 对应字段', () => {
+    const parsed = parseHelpDsl(renderHelpDsl(model))
+    const json = renderHelpJson(model)
+
+    const fromDsl = parsed.cmds.map((c) => ({
+      name: c.name,
+      method: c.method,
+      path: c.path,
+      scope: c.scope,
+    }))
+    const fromJson = json.cmds.map((c) => ({
+      name: c.name,
+      method: c.method,
+      path: c.path,
+      scope: c.scope,
+    }))
+    expect(fromDsl).toEqual(fromJson)
+  })
+
+  it('每个 cmd 都解析出 scope(§1.3:scope 必填)', () => {
+    const parsed = parseHelpDsl(renderHelpDsl(model))
+    expect(parsed.cmds).toHaveLength(2)
+    for (const cmd of parsed.cmds) {
+      expect(cmd.scope).toBeDefined()
+    }
+    expect(parsed.cmds.map((c) => c.scope)).toEqual(['call', 'write'])
+  })
+
+  it('JSON htbp 版本 === DSL 首行版本', () => {
+    const parsed = parseHelpDsl(renderHelpDsl(model))
+    expect(parsed.htbp).toBe(renderHelpJson(model).htbp)
+    expect(parsed.htbp).toBe('0.1')
+  })
+
+  it('directory children 在 DSL(node 行)与 JSON(children)中一致', () => {
+    const parsed = parseHelpDsl(renderHelpDsl(model))
+    const json = renderHelpJson(model)
+    // 解析出的 node 行 = 主节点 + 1 个子节点
+    expect(parsed.nodes).toHaveLength(2)
+    const childNode = parsed.nodes.find((n) => n.path === 'docs/context7/sub')
+    expect(childNode).toEqual({
+      path: 'docs/context7/sub',
+      kind: 'directory',
+      description: '子目录',
+    })
+    expect(json.children).toEqual([
+      { path: 'docs/context7/sub', kind: 'directory', description: '子目录' },
+    ])
+  })
+})
+
+describe('renderHelpJson 字段不多不少(§1.3 规范性)', () => {
+  const json = renderHelpJson(model)
+
+  it('有值字段出现、无值字段缺席(toEqual 精确匹配即断言无多余键)', () => {
+    // 第一条:带 body/returns,无 effect/confirm
+    expect(json.cmds[0]).toEqual({
+      name: 'resolve-library-id',
+      method: 'POST',
+      path: '/docs/context7',
+      scope: 'call',
+      body: { tool: 'resolve-library-id', arguments: { libraryName: 'string' } },
+      returns: 'markdown 文档库列表',
+    })
+    // 第二条:带 effect/confirm,无 body/returns
+    expect(json.cmds[1]).toEqual({
+      name: 'delete-cache',
+      method: 'POST',
+      path: '/docs/context7',
+      scope: 'write',
+      effect: '清空本地缓存',
+      confirm: true,
+    })
+  })
+
+  it('confirm 为 false 时 DSL 与 JSON 都不体现(存在性对齐)', () => {
+    const m: HelpModel = {
+      node: { path: 'x', kind: 'builtin', description: 'x' },
+      cmds: [{ name: 'a', method: 'POST', path: '/x', scope: 'read', confirm: false }],
+    }
+    expect(renderHelpDsl(m)).not.toContain('confirm')
+    // toEqual 精确匹配:无 confirm 键
+    expect(renderHelpJson(m).cmds[0]).toEqual({
+      name: 'a',
+      method: 'POST',
+      path: '/x',
+      scope: 'read',
+    })
+  })
+
+  it('无 children 时 JSON 不含 children 键', () => {
+    const m: HelpModel = {
+      node: { path: 'x', kind: 'builtin', description: 'x' },
+      cmds: [{ name: 'a', method: 'POST', path: '/x', scope: 'read' }],
+    }
+    expect('children' in renderHelpJson(m)).toBe(false)
+  })
+})

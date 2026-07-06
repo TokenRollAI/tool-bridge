@@ -1,0 +1,134 @@
+import { describe, expect, it } from 'vitest'
+import {
+  buildTree,
+  clampDepth,
+  DEFAULT_TREE_DEPTH,
+  MAX_TREE_DEPTH,
+  type TreeEntry,
+} from '../../src/htbp/tree'
+
+/** 用静态邻接表造一个 getChildren。 */
+function childrenFrom(map: Record<string, TreeEntry[]>) {
+  return async (path: string): Promise<TreeEntry[]> => map[path] ?? []
+}
+
+describe('clampDepth(Proto §1.1:默认 2,上限 8,非法→默认)', () => {
+  it('undefined → 默认 2', () => {
+    expect(clampDepth(undefined)).toBe(DEFAULT_TREE_DEPTH)
+    expect(DEFAULT_TREE_DEPTH).toBe(2)
+  })
+  it('0 与负数 → 默认 2', () => {
+    expect(clampDepth(0)).toBe(2)
+    expect(clampDepth(-3)).toBe(2)
+  })
+  it('9(超上限)→ 钳到 8', () => {
+    expect(clampDepth(9)).toBe(MAX_TREE_DEPTH)
+    expect(MAX_TREE_DEPTH).toBe(8)
+  })
+  it('合法值原样返回', () => {
+    expect(clampDepth(1)).toBe(1)
+    expect(clampDepth(5)).toBe(5)
+    expect(clampDepth(8)).toBe(8)
+  })
+  it('非整数 → 默认 2', () => {
+    expect(clampDepth(3.5)).toBe(2)
+    expect(clampDepth(Number.NaN)).toBe(2)
+  })
+})
+
+describe('buildTree 基本形状', () => {
+  const map: Record<string, TreeEntry[]> = {
+    '': [
+      { path: 'a', kind: 'directory', description: 'A' },
+      { path: 'b', kind: 'mcp', description: 'B' },
+    ],
+    a: [{ path: 'a/x', kind: 'mcp', description: 'AX' }],
+    b: [],
+    'a/x': [],
+  }
+
+  it('从根递归构建,根渲染为 directory + 空描述', async () => {
+    const tree = await buildTree({ root: '', depth: 3, getChildren: childrenFrom(map) })
+    expect(tree.path).toBe('')
+    expect(tree.kind).toBe('directory')
+    expect(tree.description).toBe('')
+    expect(tree.children?.map((c) => c.path)).toEqual(['a', 'b'])
+    const a = tree.children?.find((c) => c.path === 'a')
+    expect(a?.children?.map((c) => c.path)).toEqual(['a/x'])
+  })
+
+  it('叶子(无子节点)不设 truncated、不带 children', async () => {
+    const tree = await buildTree({ root: '', depth: 3, getChildren: childrenFrom(map) })
+    const b = tree.children?.find((c) => c.path === 'b')
+    expect(b?.truncated).toBeUndefined()
+    expect(b?.children).toBeUndefined()
+  })
+
+  it('携带 online 字段', async () => {
+    const withOnline: Record<string, TreeEntry[]> = {
+      '': [{ path: 'd', kind: 'device', description: 'D', online: false }],
+      d: [],
+    }
+    const tree = await buildTree({ root: '', depth: 2, getChildren: childrenFrom(withOnline) })
+    expect(tree.children?.[0]?.online).toBe(false)
+  })
+})
+
+describe('buildTree 截断:深度 / 节点上限 / 环', () => {
+  const deep: Record<string, TreeEntry[]> = {
+    '': [{ path: 'a', kind: 'directory', description: 'A' }],
+    a: [{ path: 'a/b', kind: 'directory', description: 'B' }],
+    'a/b': [{ path: 'a/b/c', kind: 'mcp', description: 'C' }],
+    'a/b/c': [],
+  }
+
+  it('深度到底:确有子节点的边界节点标 truncated', async () => {
+    const tree = await buildTree({ root: '', depth: 2, getChildren: childrenFrom(deep) })
+    // 根(depthLeft2)→ a(1)→ a/b(0):a/b 仍有子节点 → truncated,不再展开
+    const a = tree.children?.find((c) => c.path === 'a')
+    const ab = a?.children?.find((c) => c.path === 'a/b')
+    expect(ab?.truncated).toBe(true)
+    expect(ab?.children).toBeUndefined()
+  })
+
+  it('深度足够时,边界叶子不误标 truncated', async () => {
+    const tree = await buildTree({ root: '', depth: 3, getChildren: childrenFrom(deep) })
+    const abc = tree.children?.[0]?.children?.[0]?.children?.find((c) => c.path === 'a/b/c')
+    expect(abc?.truncated).toBeUndefined()
+  })
+
+  it('节点上限:达上限则父节点 truncated 并停止展开', async () => {
+    const wide: Record<string, TreeEntry[]> = {
+      '': [
+        { path: 'a', kind: 'mcp', description: 'A' },
+        { path: 'b', kind: 'mcp', description: 'B' },
+        { path: 'c', kind: 'mcp', description: 'C' },
+      ],
+      a: [],
+      b: [],
+      c: [],
+    }
+    // maxNodes=2:根计 1,展开 a 后计 2,再遇 b 时达上限
+    const tree = await buildTree({
+      root: '',
+      depth: 3,
+      maxNodes: 2,
+      getChildren: childrenFrom(wide),
+    })
+    expect(tree.truncated).toBe(true)
+    expect(tree.children?.map((c) => c.path)).toEqual(['a'])
+  })
+
+  it('环检测:getChildren 构造 a→b→a,重复路径作 truncated 叶子且不递归', async () => {
+    const cyclic: Record<string, TreeEntry[]> = {
+      a: [{ path: 'b', kind: 'directory', description: 'B' }],
+      b: [{ path: 'a', kind: 'directory', description: 'A(环)' }],
+    }
+    const tree = await buildTree({ root: 'a', depth: 5, getChildren: childrenFrom(cyclic) })
+    // 注:根 path='a' 被 buildTree 渲染为 directory;其子 b 的子又指回 a
+    const b = tree.children?.find((c) => c.path === 'b')
+    const backToA = b?.children?.find((c) => c.path === 'a')
+    expect(backToA?.truncated).toBe(true)
+    expect(backToA?.children).toBeUndefined()
+  })
+})

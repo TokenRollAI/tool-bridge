@@ -153,7 +153,13 @@ export type NodeInput = Omit<TreeNode, 'registeredBy' | 'online' | 'createdAt' |
 export const SYSTEM_AUTO = 'system:auto'
 
 /** 保留段(Proto §1.1):不可作为普通路径段。 */
-export const RESERVED_SEGMENTS: readonly string[] = ['~help', '~skill', '~tree', '~register', '~describe']
+export const RESERVED_SEGMENTS: readonly string[] = [
+  '~help',
+  '~skill',
+  '~tree',
+  '~register',
+  '~describe',
+]
 
 /** 平台保留根路径段(Proto §1.1/§2.4b 基础集;部署配置可追加)。 */
 export const RESERVED_ROOTS: readonly string[] = ['system', 'ui']
