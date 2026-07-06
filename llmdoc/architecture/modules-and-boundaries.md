@@ -57,6 +57,14 @@
 
 引导顺序(Architecture.md:304):部署 Worker/DO → 生成 Admin SK → 注册 5 个 builtin 节点(status/sk/secret/registry/plugin)→ Dashboard 可用。
 
+## Phase 1 落地(2026-07-06,M5 + M1 的实际文件映射)
+
+- **core/gateway 职责线**:`packages/core` 是纯逻辑(auth 判定、tree 注册表、Help DSL/协商、SecretStore 加密、builtin cmd 表与 dispatch,全部面向 `StateStore` 接口);`packages/gateway` 只做胶水——`app.ts`(Hono 路由 + 认证中间件)、`bootstrap.ts`(Admin SK 引导 + system 子树物化)、`kvStateStore.ts`(StateStore 的 KV 实现)。core 无任何 Workers 类型依赖。
+- **请求处理次序**(app.ts):`/healthz` 树外免认证 → 认证中间件(Bearer → `identify`,失败 401 裸 TBError)→ 通配路由按末段分派(`~help`/`~tree`/`~skill`/`~register`/数据面 POST)→ 每个 handler 内先 `check(ctx, path, 'read')` 可见性判定,再按 cmd 声明的 scope 过 `Check` → builtin `dispatch`。判定次序是规范(Proto.md:183)。
+- **deny == not_found**:对 (path,'read') 判 deny 的节点,`~help`/`~tree`/数据面一律 404,不泄露存在性;可见但目标动作被 deny 才 403(Proto.md:260)。registry 的 list/get 管理通道同样裁剪。
+- **两条注册通道**(Proto.md:368):`POST <path>/~register` 是受限 SK 通道——只判 URL path 上的 (path,'register') + §2.4,不要求 `system/registry` 可见,body.path 必须等于 URL path;`system/registry` 数据面是管理通道——须对 registry 可见且持 register/admin。两者最终都落 `NodeRegistry.Write`。
+- **引导**(bootstrap.ts):Workers 无启动钩子,首请求惰性引导(模块级 promise 防重入 + KV 幂等标志);Admin SK 明文可由 `TB_BOOTSTRAP_ADMIN_SK` 提供(部署自动化)否则随机生成,只输出一次;物化 `system` directory + sk/secret/registry/status 四个 builtin(plugin 在 Phase 5),`registeredBy: system:boot`。
+
 ## 命名注意
 
 Device 通道接口以 Proto 命名为准:`DeviceTransport`(Proto.md:538)/ `DeviceConn`(Proto.md:541)/ 帧类型 `DeviceFrame`(Proto.md:449)。Architecture 早期用 `DeviceChannel` 泛指该抽象,已于 commit 0d48b06 修订(Architecture.md:157 改列 DeviceTransport/DeviceConn,:27 保留口语化名但加括注);历史记录见 [../memory/doc-gaps.md](../memory/doc-gaps.md) 已处理区 G1。

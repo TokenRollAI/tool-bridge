@@ -7,7 +7,7 @@
 ## must/ — 每轮必读的复发性上下文
 
 - [must/project-brief.md](must/project-brief.md) — 项目定义、七个 User Case、五份规范角色、纪律 0-4、术语表精选。
-- [must/current-state.md](must/current-state.md) — 进度快照(Phase 0 完成 → Phase 1)、已部署资源、代码现状、常用命令、.env 凭据状态表、本机工具链、兜底路径(易变,每轮更新)。
+- [must/current-state.md](must/current-state.md) — 进度快照(Phase 0/1 完成 → Phase 2)、已部署资源、代码现状、常用命令、.env 凭据状态表、本机工具链、兜底路径(易变,每轮更新)。
 
 ## overview/ — 项目形态与边界
 
@@ -25,6 +25,7 @@
 ## guides/ — 一事一篇的工作流
 
 - [guides/deploy-and-verify.md](guides/deploy-and-verify.md) — 从零到线上验证:`pnpm verify` → `pnpm deploy:all` → curl 探活 → `pnpm smoke` → `tb status --json`,每步预期输出 + 排错(多账户歧义、custom domain 生效延迟)。
+- [guides/workers-kv-pitfalls.md](guides/workers-kv-pitfalls.md) — Workers/KV 生产坑:KV list+get 最终一致窗口(须跳 null)、子请求上限约束逐 key get、吊销传播实测 0.3s、vitest-pool-workers 0.18 API 变更。
 
 ## memory/ — 过程记忆
 
@@ -41,5 +42,6 @@
 | 判断代码归属模块/依赖方向/存储选型 | architecture/modules-and-boundaries.md |
 | 实现 v1 已解决过的机制 | reference/v1-lessons.md |
 | 部署/线上验证/部署排错 | guides/deploy-and-verify.md |
+| 写 KV 消费代码/排查 KV 一致性或子请求上限/vitest-pool-workers 配置 | guides/workers-kv-pitfalls.md |
 | 改 docs 或怀疑规范矛盾 | memory/doc-gaps.md |
 | 了解产品定位/非目标 | overview/project-overview.md |
