@@ -72,6 +72,20 @@ describe('buildTree 基本形状', () => {
     const tree = await buildTree({ root: '', depth: 2, getChildren: childrenFrom(withOnline) })
     expect(tree.children?.[0]?.online).toBe(false)
   })
+
+  it('rootEntry 提供时用真实节点元数据(不伪造为 directory)', async () => {
+    const sub: Record<string, TreeEntry[]> = {
+      'system/sk': [],
+    }
+    const tree = await buildTree({
+      root: 'system/sk',
+      depth: 2,
+      getChildren: childrenFrom(sub),
+      rootEntry: { path: 'system/sk', kind: 'builtin', description: 'SK registry' },
+    })
+    expect(tree.kind).toBe('builtin')
+    expect(tree.description).toBe('SK registry')
+  })
 })
 
 describe('buildTree 截断:深度 / 节点上限 / 环', () => {

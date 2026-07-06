@@ -217,3 +217,194 @@ describe('~skill 占位 501', () => {
     expect(res.status).toBe(501)
   })
 })
+
+describe('system/registry 管理通道也遵守可见性裁剪(§2.3,修复 5)', () => {
+  it('宽 allow + 窄 deny:list 不见 denied 节点,get denied 路径 → 404', async () => {
+    // 先以 admin 注册可见/不可见两棵子树。
+    await postJson(
+      'system/registry',
+      { tool: 'write', arguments: { path: 'vis/y', kind: 'directory', description: 'y' } },
+      admin(),
+    )
+    await postJson(
+      'system/registry',
+      { tool: 'write', arguments: { path: 'hidden/x', kind: 'directory', description: 'x' } },
+      admin(),
+    )
+    // 一把对 system/registry 可读、但 deny hidden/** read 的 SK。
+    const sk = await issueSk({
+      owner: 'agent:reg-vis',
+      scopes: [
+        { pattern: '**', actions: ['read', 'register'] },
+        { pattern: 'hidden/**', actions: ['read'], effect: 'deny' },
+      ],
+    })
+    const auth = { authorization: `Bearer ${sk}` }
+
+    const list = await postJson(
+      'system/registry',
+      { tool: 'list', arguments: {} },
+      { headers: auth },
+    )
+    expect(list.status).toBe(200)
+    const body = (await list.json()) as { items: Array<{ path: string }> }
+    const paths = body.items.map((i) => i.path)
+    expect(paths).toContain('vis/y')
+    expect(paths.some((p) => p === 'hidden' || p.startsWith('hidden/'))).toBe(false)
+
+    // get denied 路径 → 404(deny==not_found,不泄露存在性)。
+    const get = await postJson(
+      'system/registry',
+      { tool: 'get', arguments: { path: 'hidden/x' } },
+      { headers: auth },
+    )
+    expect(get.status).toBe(404)
+  })
+})
+
+describe('~tree 子树根真实性(修复 6)', () => {
+  it('GET /ghost/~tree → 404(不存在的子树根)', async () => {
+    const res = await SELF.fetch('https://tb.test/ghost/~tree', admin())
+    expect(res.status).toBe(404)
+  })
+
+  it('GET /system/sk/~tree 根 kind === builtin(用真实节点元数据,不伪造 directory)', async () => {
+    const res = await SELF.fetch(
+      'https://tb.test/system/sk/~tree',
+      admin({ headers: { accept: 'application/json' } }),
+    )
+    expect(res.status).toBe(200)
+    const tree = (await res.json()) as { path: string; kind: string }
+    expect(tree.path).toBe('system/sk')
+    expect(tree.kind).toBe('builtin')
+  })
+})
+
+describe('URL 路径解码(修复 7)', () => {
+  it("注册含空格路径 'docs/hello world' 后 GET /docs/hello%20world/~help → 200", async () => {
+    const regSk = await issueSk({
+      owner: 'agent:space',
+      scopes: [{ pattern: '**', actions: ['read', 'register'] }],
+    })
+    const auth = { authorization: `Bearer ${regSk}` }
+    const mk = await postJson(
+      'system/registry',
+      {
+        tool: 'write',
+        arguments: { path: 'docs/hello world', kind: 'directory', description: 'spaced' },
+      },
+      { headers: auth },
+    )
+    expect(mk.status).toBe(200)
+    const res = await SELF.fetch('https://tb.test/docs/hello%20world/~help', { headers: auth })
+    expect(res.status).toBe(200)
+  })
+})
+
+describe('~register body 校验(修复 8)', () => {
+  it('缺 kind → 400', async () => {
+    const sk = await issueSk({
+      owner: 'agent:reg8a',
+      scopes: [{ pattern: '**', actions: ['read', 'register'] }],
+    })
+    const res = await postJson(
+      'r8a/~register',
+      { path: 'r8a', description: 'no kind' },
+      { headers: { authorization: `Bearer ${sk}` } },
+    )
+    expect(res.status).toBe(400)
+  })
+
+  it('body.path ≠ URL path → 400', async () => {
+    const sk = await issueSk({
+      owner: 'agent:reg8b',
+      scopes: [{ pattern: '**', actions: ['read', 'register'] }],
+    })
+    const res = await postJson(
+      'r8b/~register',
+      { path: 'r8b-other', kind: 'directory', description: 'mismatch' },
+      { headers: { authorization: `Bearer ${sk}` } },
+    )
+    expect(res.status).toBe(400)
+  })
+})
+
+describe('非 directory/builtin 节点 ~help → 501(修复 4)', () => {
+  it('挂一个 mcp 节点后 GET 其 ~help → 501(Phase 1 未落地)', async () => {
+    const sk = await issueSk({
+      owner: 'agent:mcp',
+      scopes: [{ pattern: '**', actions: ['read', 'register'] }],
+    })
+    const auth = { authorization: `Bearer ${sk}` }
+    const mk = await postJson(
+      'system/registry',
+      {
+        tool: 'write',
+        arguments: {
+          path: 'ext/ctx7',
+          kind: 'mcp',
+          description: 'ctx7',
+          config: { kind: 'mcp', url: 'https://example.com' },
+        },
+      },
+      admin(),
+    )
+    expect(mk.status).toBe(200)
+    const res = await SELF.fetch('https://tb.test/ext/ctx7/~help', { headers: auth })
+    expect(res.status).toBe(501)
+  })
+})
+
+describe('SK 吊销 / 认证失效(修复 9,DOD 55/57)', () => {
+  it('issueSk → delete → 被吊销 SK 请求 → 401', async () => {
+    const secret = await issueSk({
+      owner: 'agent:revoke',
+      scopes: [{ pattern: 'docs/**', actions: ['read'] }],
+    })
+    const auth = { authorization: `Bearer ${secret}` }
+    // 吊销前可用(root ~help 200,免 read 判定)。
+    expect((await SELF.fetch('https://tb.test/~help', { headers: auth })).status).toBe(200)
+    // 取该 SK 的 id 以 delete。
+    const list = (await (
+      await postJson('system/sk', { tool: 'list', arguments: {} }, admin())
+    ).json()) as { items: Array<{ id: string; owner: string }> }
+    const id = list.items.find((k) => k.owner === 'agent:revoke')?.id
+    expect(id).toBeDefined()
+    const del = await postJson('system/sk', { tool: 'delete', arguments: { id } }, admin())
+    expect(del.status).toBe(200)
+    // 吊销后 → 401。
+    expect((await SELF.fetch('https://tb.test/~help', { headers: auth })).status).toBe(401)
+  })
+
+  it('update{disabled:true} → 401', async () => {
+    const secret = await issueSk({
+      owner: 'agent:disable',
+      scopes: [{ pattern: 'docs/**', actions: ['read'] }],
+    })
+    const auth = { authorization: `Bearer ${secret}` }
+    expect((await SELF.fetch('https://tb.test/~help', { headers: auth })).status).toBe(200)
+    const list = (await (
+      await postJson('system/sk', { tool: 'list', arguments: {} }, admin())
+    ).json()) as { items: Array<{ id: string; owner: string }> }
+    const id = list.items.find((k) => k.owner === 'agent:disable')?.id
+    const upd = await postJson(
+      'system/sk',
+      { tool: 'update', arguments: { id, patch: { disabled: true } } },
+      admin(),
+    )
+    expect(upd.status).toBe(200)
+    expect((await SELF.fetch('https://tb.test/~help', { headers: auth })).status).toBe(401)
+  })
+
+  it('expiresAt 为过去 → 401(过期视同禁用)', async () => {
+    const secret = await issueSk({
+      owner: 'agent:expired',
+      scopes: [{ pattern: 'docs/**', actions: ['read'] }],
+      expiresAt: '2000-01-01T00:00:00.000Z',
+    })
+    const res = await SELF.fetch('https://tb.test/~help', {
+      headers: { authorization: `Bearer ${secret}` },
+    })
+    expect(res.status).toBe(401)
+  })
+})

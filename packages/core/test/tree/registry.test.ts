@@ -231,6 +231,33 @@ describe('children 直接子节点', () => {
   })
 })
 
+describe('subtree 一次性取整棵子树', () => {
+  it('含 path 自身 + 全部后代,按 path 排序', async () => {
+    await reg.write(mcp('a/b/c'), 'user:1', T1)
+    await reg.write(mcp('a/b/d'), 'user:1', T1)
+    const sub = await reg.subtree('a')
+    expect(sub.map((n) => n.path)).toEqual(['a', 'a/b', 'a/b/c', 'a/b/d'])
+  })
+
+  it('根("")= 全树', async () => {
+    await reg.write(mcp('a/b'), 'user:1', T1)
+    await reg.write(mcp('m/n'), 'user:1', T1)
+    const all = await reg.subtree('')
+    expect(all.map((n) => n.path)).toEqual(['a', 'a/b', 'm', 'm/n'])
+  })
+
+  it('不误纳字符串前缀相邻目录(段级)', async () => {
+    await reg.write(mcp('bulk/leaf'), 'user:1', T1)
+    await reg.write(mcp('bulkx/leaf'), 'user:1', T1)
+    const sub = await reg.subtree('bulk')
+    expect(sub.map((n) => n.path)).toEqual(['bulk', 'bulk/leaf'])
+  })
+
+  it('不存在的根返回空数组', async () => {
+    expect(await reg.subtree('ghost')).toEqual([])
+  })
+})
+
 describe('list 分页与 limit 钳制(Proto §0.3)', () => {
   beforeEach(async () => {
     for (let i = 0; i < 205; i++) {
