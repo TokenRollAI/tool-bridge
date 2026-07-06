@@ -9,7 +9,6 @@ import {
   clampDepth,
   contentTypeFor,
   createBuiltins,
-  filterVisible,
   type HelpModel,
   identify,
   isTBError,
@@ -212,8 +211,9 @@ export function createApp(): Hono<{ Bindings: Env; Variables: Vars }> {
     const nodes = await registry.subtree(path)
     const byParent = indexByParent(nodes)
     const getChildren = async (p: TreePath): Promise<TreeEntry[]> => {
-      const kids = filterVisible(byParent.get(p) ?? [], ctx.scopes, checkScopes)
-      return kids.map((n) => toEntry(n))
+      const localKids = filterListVisible(byParent.get(p) ?? [], ctx.scopes)
+      const remoteKids = await remoteTreeChildren(c, ctx, registry, p)
+      return [...localKids.map((n) => toEntry(n)), ...remoteKids]
     }
 
     const depth = clampDepth(Number(c.req.query('depth')))
@@ -245,7 +245,7 @@ export function createApp(): Hono<{ Bindings: Env; Variables: Vars }> {
 
     if (path === '') {
       // 根:虚拟 directory,列出可见的顶层子节点。
-      const children = filterVisible(await registry.children(''), ctx.scopes, checkScopes)
+      const children = filterListVisible(await registry.children(''), ctx.scopes)
       const model: HelpModel = {
         node: { path: '', kind: 'directory', description: 'tool-bridge root' },
         cmds: [],
@@ -498,6 +498,70 @@ function toEntry(n: TreeNode): TreeEntry {
 }
 
 /**
+ * 目录/~tree 展示裁剪。Phase 2 DOD 要求无 call 权限的 SK 对同一调用节点
+ * `tb call` 为 403,且 `tb ls` 不可见;因此 mcp/http/remote 节点在列表面同时要求 read+call。
+ * 直接访问节点本身仍由 handler 保持 Proto §1.4 的 read→404 / call→403 次序。
+ */
+function filterListVisible(nodes: TreeNode[], scopes: CallContext['scopes']): TreeNode[] {
+  return nodes.filter((node) => {
+    if (!checkScopes(scopes, node.path, 'read')) return false
+    if (
+      (node.kind === 'mcp' || node.kind === 'http' || node.kind === 'remote') &&
+      !checkScopes(scopes, node.path, 'call')
+    ) {
+      return false
+    }
+    return true
+  })
+}
+
+function localizeRemoteEntry(mountPath: TreePath, entry: TreeJson): TreeEntry {
+  const rel = entry.path.replace(/^\/+|\/+$/g, '')
+  const out: TreeEntry = {
+    path: rel === '' ? mountPath : `${mountPath}/${rel}`,
+    kind: entry.kind,
+    description: entry.description,
+  }
+  if (entry.online !== undefined) out.online = entry.online
+  return out
+}
+
+/**
+ * remote 联邦树聚合:本地 `~tree` 构树递归到 remote 节点或其后代时,取远端同形
+ * `~tree` 的直接 children 并把路径加回本地挂载前缀,再交给 buildTree 统一计入深度/节点预算。
+ */
+async function remoteTreeChildren(
+  c: AppContext,
+  ctx: CallContext,
+  registry: NodeRegistryStore,
+  treePath: TreePath,
+): Promise<TreeEntry[]> {
+  if (treePath === '') return []
+  let resolved: { node: TreeNode; rest: string }
+  try {
+    resolved = await registry.resolve(treePath)
+  } catch {
+    return []
+  }
+  if (resolved.node.kind !== 'remote' || resolved.node.config?.kind !== 'remote') return []
+
+  const headers = new Headers(c.req.raw.headers)
+  headers.set('accept', 'application/json')
+  const resp = await remotePassthroughIfMatch(c, ctx, registry, treePath, '~tree', headers)
+  if (resp === null) return []
+  if (!resp.ok) {
+    throw new TBError('unavailable', `remote ~tree returned HTTP ${resp.status}`, {
+      retryable: resp.status >= 500,
+    })
+  }
+  const remoteTree = (await resp.json().catch(() => null)) as TreeJson | null
+  if (remoteTree === null) {
+    throw new TBError('unavailable', 'remote ~tree returned invalid JSON', { retryable: false })
+  }
+  return (remoteTree.children ?? []).map((child) => localizeRemoteEntry(resolved.node.path, child))
+}
+
+/**
  * 按直接父路径索引子树节点(父 = 去掉最后一段;顶层节点父为 '')。
  * `~tree` 一次读入子树后在内存建此索引,getChildren 从中取直接子,避免每层递归各扫 KV。
  */
@@ -531,7 +595,7 @@ async function helpModelFor(
     throw TBError.unimplemented(`builtin module '${node.config.module}' not available`)
   }
   if (node.kind === 'directory') {
-    const children = filterVisible(await registry.children(node.path), ctx.scopes, checkScopes)
+    const children = filterListVisible(await registry.children(node.path), ctx.scopes)
     return {
       node: { path: node.path, kind: node.kind, description: node.description },
       cmds: [],
@@ -588,6 +652,7 @@ async function remotePassthroughIfMatch(
   registry: NodeRegistryStore,
   treePath: TreePath,
   reservedTail: '~help' | '~tree' | '~skill' | null,
+  headers: Headers = c.req.raw.headers,
 ): Promise<Response | null> {
   let resolved: { node: TreeNode; rest: string }
   try {
@@ -614,7 +679,7 @@ async function remotePassthroughIfMatch(
     requestPath,
     method,
     ...(body !== undefined ? { body } : {}),
-    headers: c.req.raw.headers,
+    headers,
     secrets: secretStore(store, c.env),
     env: c.env,
     requestUrl: c.req.url,

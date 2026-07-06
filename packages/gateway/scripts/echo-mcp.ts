@@ -2,8 +2,9 @@
  * 最小 echo MCP server(官方 SDK,Streamable HTTP + 无状态传输)。
  *
  * 供 Phase 2 真实 E2E 用:`pnpm echo-mcp` 起在 127.0.0.1:39001/mcp,暴露一个 `echo` 工具
- * (回显入参 text)。无状态模式(sessionIdGenerator: undefined):每个 POST 独立处理,
- * 客户端一次性会话(initialize → tools/list|tools/call → DELETE)可直接调通。
+ * (回显入参 text)。无状态 + JSON 响应模式:每个 POST 独立处理,客户端一次性会话
+ * (initialize → tools/list|tools/call → DELETE)可直接调通,且避免测试进程被 SDK 内部
+ * 可选 SSE reader 的关闭 AbortError 影响。
  *
  * 用法:`pnpm echo-mcp`(devDependency,不进生产构建);配合
  * `TB_TEST_MCP_URL=http://127.0.0.1:39001/mcp TB_ALLOW_INSECURE_HTTP=true` 跑 opt-in 集成用例。
@@ -45,7 +46,10 @@ const httpServer = createServer((req, res) => {
     }
     // 无状态:每请求新建 server + transport,响应关闭时清理。
     const server = buildServer()
-    const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined })
+    const transport = new StreamableHTTPServerTransport({
+      sessionIdGenerator: undefined,
+      enableJsonResponse: true,
+    })
     res.on('close', () => {
       void transport.close()
       void server.close()

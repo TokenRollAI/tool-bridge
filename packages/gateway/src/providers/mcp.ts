@@ -70,6 +70,25 @@ function toToolResult(res: { content?: unknown; isError?: boolean }): ToolResult
 }
 
 /**
+ * 我们只使用 Streamable HTTP 的 request/response 能力(listTools/callTool),不消费服务端主动
+ * 消息流。MCP SDK 在 initialize 后会自动尝试 GET 打开可选 standalone SSE;这里对 GET 直接
+ * 返回 405(协议允许:服务器不提供 SSE),避免关闭会话时中止一条无用网络连接。
+ */
+const noStandaloneSseFetch: typeof fetch = (input, init) => {
+  const method =
+    init?.method ??
+    (input instanceof Request
+      ? input.method
+      : typeof input === 'object' && 'method' in input
+        ? input.method
+        : 'GET')
+  if (String(method).toUpperCase() === 'GET') {
+    return Promise.resolve(new Response(null, { status: 405, statusText: 'Method Not Allowed' }))
+  }
+  return fetch(input, init)
+}
+
+/**
  * 一次性会话内执行 `fn`:connect(完成 initialize 握手)→ fn → finally 终止会话 + 关闭。
  * 上游 404(会话失效)→ 重建 transport(不带 sessionId)重连重试一次(Reference §3)。
  */
@@ -82,8 +101,11 @@ async function withSession<T>(
     new StreamableHTTPClientTransport(
       new URL(url),
       bearer !== undefined
-        ? { requestInit: { headers: { Authorization: `Bearer ${bearer}` } } }
-        : {},
+        ? {
+            fetch: noStandaloneSseFetch,
+            requestInit: { headers: { Authorization: `Bearer ${bearer}` } },
+          }
+        : { fetch: noStandaloneSseFetch },
     )
 
   const run = async (transport: StreamableHTTPClientTransport): Promise<T> => {
@@ -93,7 +115,9 @@ async function withSession<T>(
       return await fn(client)
     } finally {
       await transport.terminateSession().catch(() => {})
-      await client.close().catch(() => {})
+      // 不调用 client.close():SDK close 会 abort transport,在 workerd 中会把已完成的一次性
+      // HTTP 请求记成 "Network connection lost" 浮动异常。standalone SSE 已由 fetch wrapper 禁用,
+      // list/call 的 POST 响应在 fn 返回前已完成,这里无需再 abort。
     }
   }
 

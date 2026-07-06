@@ -10,6 +10,7 @@
 
 import {
   appendVia,
+  assertSecureUrl,
   checkAllowlist,
   checkVia,
   normalizeUpstreamError,
@@ -32,6 +33,7 @@ interface RemoteEnv {
   TB_REMOTE_ALLOWLIST?: string
   TB_MAX_HOPS?: string
   TB_INSTANCE_ID?: string
+  TB_ALLOW_INSECURE_HTTP?: string
 }
 
 /** 部署配置的 remote 白名单(host 后缀,逗号分隔);缺省/空 = 空数组 = 拒一切 remote。 */
@@ -63,6 +65,8 @@ export function instanceId(env: RemoteEnv, requestUrl: string): string {
 
 /** 注册时的 remote baseUrl 白名单校验(不在白名单 → invalid_argument,Proto §3.4)。 */
 export function assertRemoteAllowed(baseUrl: string, env: RemoteEnv): void {
+  const secErr = assertSecureUrl(baseUrl, env.TB_ALLOW_INSECURE_HTTP === 'true')
+  if (secErr) throw secErr
   if (!checkAllowlist(baseUrl, remoteAllowlist(env))) {
     throw new TBError('invalid_argument', `remote baseUrl 不在白名单:'${baseUrl}'`)
   }
@@ -83,6 +87,8 @@ export async function passthroughRemote(opts: {
   env: RemoteEnv
   requestUrl: string
 }): Promise<Response> {
+  const secErr = assertSecureUrl(opts.config.baseUrl, opts.env.TB_ALLOW_INSECURE_HTTP === 'true')
+  if (secErr) throw secErr
   // 调用时白名单再校验(配置漂移防线);不在白名单 → unavailable(不 retry)。
   if (!checkAllowlist(opts.config.baseUrl, remoteAllowlist(opts.env))) {
     throw new TBError('unavailable', `remote baseUrl 不在白名单:'${opts.config.baseUrl}'`, {

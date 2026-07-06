@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { callCommand, parseCallArgs } from '../src/commands/call'
-import { serverAddCommand } from '../src/commands/server'
+import { serverAddCommand, serverLsCommand, serverRmCommand } from '../src/commands/server'
 import { toolMountCommand, toolRmCommand } from '../src/commands/tool'
 import { resetFetch, setFetch } from '../src/http'
 import { buildVirtualize, parseToolsFile } from '../src/registry'
@@ -59,6 +59,7 @@ describe('tb tool mount --kind mcp', () => {
       prefix: 'ctx__',
       rename: ['resolve=r', 'get-docs=g'],
       hide: ['debug'],
+      describe: ['resolve=Resolve libraries'],
     })
     const [url, init] = fn.mock.calls[0] as [string, RequestInit]
     expect(url).toBe('https://gw/docs/ctx7/~register')
@@ -76,6 +77,7 @@ describe('tb tool mount --kind mcp', () => {
       prefix: 'ctx__',
       rename: { resolve: 'r', 'get-docs': 'g' },
       hide: ['debug'],
+      describe: { resolve: 'Resolve libraries' },
     })
     expect(process.exitCode).toBe(0)
   })
@@ -114,12 +116,16 @@ describe('tb tool mount --kind http', () => {
       endpoint: 'https://echo.example',
       'tools-file': file,
       'auth-ref': 's-http',
+      'auth-header': 'X-Api-Key',
+      'auth-scheme': '',
     })
     const [, init] = fn.mock.calls[0] as [string, RequestInit]
     const payload = JSON.parse(init.body as string)
     expect(payload.config.kind).toBe('http')
     expect(payload.config.endpoint).toBe('https://echo.example')
     expect(payload.config.authRef).toBe('s-http')
+    expect(payload.config.authHeader).toBe('X-Api-Key')
+    expect(payload.config.authScheme).toBe('')
     expect(payload.config.tools).toEqual([
       { name: 'echo', description: 'echo it', method: 'POST', pathTemplate: '/echo' },
     ])
@@ -156,9 +162,10 @@ describe('parseToolsFile', () => {
 describe('buildVirtualize', () => {
   it('重复 --rename "from=to" → Record;无字段 → undefined', () => {
     expect(buildVirtualize({})).toBeUndefined()
-    expect(buildVirtualize({ rename: ['a=b', 'c=d'], hide: 'x' })).toEqual({
+    expect(buildVirtualize({ rename: ['a=b', 'c=d'], hide: 'x', describe: ['a=A tool'] })).toEqual({
       rename: { a: 'b', c: 'd' },
       hide: ['x'],
+      describe: { a: 'A tool' },
     })
   })
 
@@ -189,6 +196,68 @@ describe('tb server add', () => {
       skRef: 's-out',
     })
     expect(process.exitCode).toBe(0)
+  })
+})
+
+describe('tb server ls / rm', () => {
+  it('server ls --json 走 system/registry list 并过滤 remote 节点', async () => {
+    const fn = captureFetch({
+      items: [
+        {
+          path: 'fed/peer',
+          kind: 'remote',
+          description: 'peer',
+          config: { kind: 'remote', baseUrl: 'https://peer.example' },
+        },
+        { path: 'ext/http', kind: 'http', description: 'not remote' },
+      ],
+    })
+    await invoke(serverLsCommand, {
+      json: true,
+      'base-url': 'https://gw',
+      sk: 'tbk_x',
+    })
+    const [url, init] = fn.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe('https://gw/system/registry')
+    expect(JSON.parse(init.body as string)).toEqual({ tool: 'list', arguments: {} })
+    const stdout = process.stdout.write as unknown as ReturnType<typeof vi.fn>
+    const printed = stdout.mock.calls.map((c) => String(c[0])).join('')
+    expect(JSON.parse(printed)).toEqual([
+      {
+        path: 'fed/peer',
+        kind: 'remote',
+        description: 'peer',
+        config: { kind: 'remote', baseUrl: 'https://peer.example' },
+      },
+    ])
+  })
+
+  it('server rm 先确认 kind=remote 再 delete', async () => {
+    const fn = vi.fn(async (_url: string, init?: RequestInit) => {
+      const body = JSON.parse(init?.body as string)
+      if (body.tool === 'get') {
+        return new Response(JSON.stringify({ path: 'fed/peer', kind: 'remote' }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        })
+      }
+      return new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      })
+    })
+    setFetch(fn as unknown as typeof fetch)
+    await invoke(serverRmCommand, {
+      json: true,
+      'base-url': 'https://gw',
+      sk: 'tbk_x',
+      path: 'fed/peer',
+    })
+    expect(fn).toHaveBeenCalledTimes(2)
+    const firstBody = JSON.parse((fn.mock.calls[0]?.[1] as RequestInit).body as string)
+    const secondBody = JSON.parse((fn.mock.calls[1]?.[1] as RequestInit).body as string)
+    expect(firstBody).toEqual({ tool: 'get', arguments: { path: 'fed/peer' } })
+    expect(secondBody).toEqual({ tool: 'delete', arguments: { path: 'fed/peer' } })
   })
 })
 

@@ -1,6 +1,6 @@
 import { env, SELF } from 'cloudflare:test'
 import { parseHelpDsl } from '@tool-bridge/core'
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { TEST_ADMIN_SK } from './fixtures'
 
 // Phase 2(Tool Layer)集成测试:mcp/http Provider、工具虚拟化、调用点 call 判定、
@@ -54,6 +54,14 @@ const HTTP_TOOLS = [
   { name: 'get_thing', description: 'GET a thing', method: 'GET', pathTemplate: '/get' },
   { name: 'post_thing', description: 'POST a thing', method: 'POST', pathTemplate: '/post' },
 ]
+
+const insecureAllowed =
+  (env as { TB_ALLOW_INSECURE_HTTP?: string }).TB_ALLOW_INSECURE_HTTP === 'true'
+const secureOnlyIt = insecureAllowed ? it.skip : it
+
+afterEach(() => {
+  vi.unstubAllGlobals()
+})
 
 describe('http 节点 ~help(DOD 66/71:从 config 生成、DSL 完整、scope=call)', () => {
   it('~help DSL 列出全部工具 cmd(name/method/scope),effect 由 method 派生', async () => {
@@ -126,6 +134,12 @@ describe('调用点 call 判定(DOD 70:无 call → 403;不可见 → 404)', () 
     const ro = { authorization: `Bearer ${roSk}` }
     const denied = await postJson('ext/perm', { tool: 'get_thing', arguments: {} }, { headers: ro })
     expect(denied.status).toBe(403)
+    const parent = await SELF.fetch('https://tb.test/ext/~help', {
+      headers: { ...ro, accept: 'application/json' },
+    })
+    expect(parent.status).toBe(200)
+    const parentJson = (await parent.json()) as { children?: Array<{ path: string }> }
+    expect(parentJson.children?.map((c) => c.path) ?? []).not.toContain('ext/perm')
 
     // 完全不可见(scope 在别处)。
     const otherSk = await issueSk({
@@ -145,6 +159,24 @@ describe('调用点 call 判定(DOD 70:无 call → 403;不可见 → 404)', () 
 })
 
 describe('remote 节点(DOD 67/69:白名单、X-TB-Via 环检测)', () => {
+  secureOnlyIt('http:// baseUrl 默认被拒(即使 host 在白名单内)', async () => {
+    const res = await postJson(
+      'system/registry',
+      {
+        tool: 'write',
+        arguments: {
+          path: 'srv/insecure',
+          kind: 'remote',
+          description: 'insecure',
+          config: { kind: 'remote', baseUrl: 'http://api.example.com/htbp' },
+        },
+      },
+      admin(),
+    )
+    expect(res.status).toBe(400)
+    expect(((await res.json()) as { code: string }).code).toBe('invalid_argument')
+  })
+
   it('白名单外 baseUrl → 注册被拒(invalid_argument 400)', async () => {
     const res = await postJson(
       'system/registry',
@@ -204,6 +236,103 @@ describe('remote 节点(DOD 67/69:白名单、X-TB-Via 环检测)', () => {
     expect(body.code).toBe('unavailable')
     expect(body.retryable).toBe(false)
   })
+
+  it('remote 调用不转发本地 SK,仅用 skRef 换发出站 Authorization', async () => {
+    const setSecret = await postJson(
+      'system/secret',
+      { tool: 'set', arguments: { name: 'remote-sk', value: 'tbk_remote_secret' } },
+      admin(),
+    )
+    expect(setSecret.status).toBe(200)
+    const registered = await postJson(
+      'system/registry',
+      {
+        tool: 'write',
+        arguments: {
+          path: 'srv/peer-auth',
+          kind: 'remote',
+          description: 'peer with skRef',
+          config: {
+            kind: 'remote',
+            baseUrl: 'https://peer.example.com/htbp',
+            skRef: 'remote-sk',
+          },
+        },
+      },
+      admin(),
+    )
+    expect(registered.status).toBe(200)
+
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const headers = new Headers(init?.headers)
+      expect(headers.get('authorization')).toBe('Bearer tbk_remote_secret')
+      expect(headers.get('authorization')).not.toBe(`Bearer ${TEST_ADMIN_SK}`)
+      expect(headers.get('x-tb-via')).toBe('tb-test-instance')
+      return new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const res = await postJson('srv/peer-auth', { tool: 'anything', arguments: { x: 1 } }, admin())
+    expect(res.status).toBe(200)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('根 ~tree 聚合 remote 子树并把远端路径映射到本地挂载前缀', async () => {
+    const registered = await postJson(
+      'system/registry',
+      {
+        tool: 'write',
+        arguments: {
+          path: 'srv/peer-tree',
+          kind: 'remote',
+          description: 'peer tree',
+          config: { kind: 'remote', baseUrl: 'https://peer.example.com/htbp' },
+        },
+      },
+      admin(),
+    )
+    expect(registered.status).toBe(200)
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input)
+        if (url.includes('/alpha/~tree')) {
+          return new Response(
+            JSON.stringify({ path: 'alpha', kind: 'http', description: 'remote alpha' }),
+            { status: 200, headers: { 'content-type': 'application/json' } },
+          )
+        }
+        return new Response(
+          JSON.stringify({
+            path: '',
+            kind: 'directory',
+            description: 'remote root',
+            children: [{ path: 'alpha', kind: 'http', description: 'remote alpha' }],
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        )
+      }) as unknown as typeof fetch,
+    )
+
+    const res = await SELF.fetch(
+      'https://tb.test/~tree?depth=4',
+      admin({ headers: { accept: 'application/json' } }),
+    )
+    expect(res.status).toBe(200)
+    const tree = (await res.json()) as {
+      children?: Array<{
+        path: string
+        children?: Array<{ path: string; children?: Array<{ path: string }> }>
+      }>
+    }
+    const srv = tree.children?.find((n) => n.path === 'srv')
+    const peer = srv?.children?.find((n) => n.path === 'srv/peer-tree')
+    expect(peer?.children?.map((n) => n.path)).toContain('srv/peer-tree/alpha')
+  })
 })
 
 // opt-in:仅当 TB_TEST_MCP_URL 注入(pnpm echo-mcp 起在 127.0.0.1:39001)时运行真实 mcp E2E。
@@ -223,11 +352,9 @@ describe('http 上游真实调用(DOD 68,opt-in via TB_TEST_LIVE_HTTP)', () => {
         { tool: 'get_thing', arguments: { foo: 'bar' } },
         admin(),
       )
-      expect([200, 500, 503]).toContain(res.status)
-      if (res.status === 200) {
-        const body = (await res.json()) as { args?: Record<string, string> }
-        expect(body.args?.foo).toBe('bar')
-      }
+      expect(res.status).toBe(200)
+      const body = (await res.json()) as { args?: Record<string, string> }
+      expect(body.args?.foo).toBe('bar')
     },
     15000,
   )

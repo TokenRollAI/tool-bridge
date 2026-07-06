@@ -25,8 +25,21 @@ export async function registerNode(target: Target, input: NodeInput): Promise<No
  * 卸载节点:无 `~unregister` 端点,delete 走管理面 `system/registry`(§3.3 管理通道)。
  * 调用者无 system 可见性时返回 404 → 补充可操作提示。
  */
-export async function deleteNode(target: Target, path: string): Promise<void> {
+export async function deleteNode(
+  target: Target,
+  path: string,
+  expectedKinds?: readonly string[],
+): Promise<void> {
   try {
+    if (expectedKinds !== undefined) {
+      const node = await callTool<Node>(target, '/system/registry', 'get', { path })
+      if (!expectedKinds.includes(node.kind)) {
+        throw new CliError(
+          `node '${path}' is kind '${node.kind}', expected ${expectedKinds.join(' | ')}`,
+          'invalid_argument',
+        )
+      }
+    }
     await callTool(target, '/system/registry', 'delete', { path })
   } catch (err) {
     if (err instanceof CliError && err.code === 'not_found') {
@@ -47,6 +60,7 @@ export function buildVirtualize(args: {
   prefix?: unknown
   rename?: unknown
   hide?: unknown
+  describe?: unknown
 }): Virtualize | undefined {
   const v: Virtualize = {}
 
@@ -68,6 +82,19 @@ export function buildVirtualize(args: {
 
   const hide = asArray(args.hide)
   if (hide.length) v.hide = hide
+
+  const describe: Record<string, string> = {}
+  for (const spec of asArray(args.describe)) {
+    const idx = spec.indexOf('=')
+    if (idx < 0) {
+      throw new CliError(`invalid --describe "${spec}": expected "from=text"`)
+    }
+    const from = spec.slice(0, idx).trim()
+    const text = spec.slice(idx + 1).trim()
+    if (!from || !text) throw new CliError(`invalid --describe "${spec}": empty from/text`)
+    describe[from] = text
+  }
+  if (Object.keys(describe).length) v.describe = describe
 
   return Object.keys(v).length ? v : undefined
 }

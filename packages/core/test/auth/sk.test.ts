@@ -186,7 +186,7 @@ describe('SKRegistryStore(Proto §2.3 SKRegistry 语义)', () => {
     expect(updated.description).toBe('patched')
     // 原 secret 的 identify 仍成立:hash 未被伪造值改写(仍以 origHash 落库)。
     expect(await store.get(KEY_SK_HASH + origHash)).not.toBeNull()
-    expect(await store.get(KEY_SK_HASH + 'forged-hash')).toBeNull()
+    expect(await store.get(`${KEY_SK_HASH}forged-hash`)).toBeNull()
     const ctx = await identify(store, secret, NOW)
     expect(ctx?.keyId).toBe(key.id)
   })

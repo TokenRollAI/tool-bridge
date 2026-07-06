@@ -118,7 +118,7 @@ export const serverRmCommand = defineCommand({
     await guard(asJson, async () => {
       const path = String(args.path ?? '').trim()
       if (!path) throw new CliError('tree path is required')
-      await deleteNode(resolveTarget(args), path)
+      await deleteNode(resolveTarget(args), path, ['remote'])
       if (asJson) printJson({ ok: true, path })
       else printLine(`removed remote server: ${path}`)
     })

@@ -123,6 +123,8 @@ export interface HttpToolDef {
   pathTemplate: string
   /** JSON Schema;~help 的数据源。 */
   inputSchema?: unknown
+  /** 工具副作用词汇;缺省由 Provider 按 method/schema 派生。 */
+  effect?: 'read' | 'write' | 'destructive'
 }
 
 export interface DeviceExpose {
@@ -133,7 +135,14 @@ export interface DeviceExpose {
 
 export type NodeConfig =
   | { kind: 'mcp'; url: string; authRef?: string }
-  | { kind: 'http'; endpoint: string; tools: HttpToolDef[]; authRef?: string }
+  | {
+      kind: 'http'
+      endpoint: string
+      tools: HttpToolDef[]
+      authRef?: string
+      authHeader?: string
+      authScheme?: string
+    }
   | { kind: 'builtin'; module: string }
   | {
       kind: 'context'
