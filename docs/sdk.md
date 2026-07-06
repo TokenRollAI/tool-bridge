@@ -112,6 +112,7 @@ agent 不需要关心底层 driver，只调用 `exec.run` / `fs.read` / `logs.ta
 | --- | --- |
 | 注册 tunnel endpoint | `curl -X POST -H "Authorization: Bearer $ADMIN" -d '{"id":"sbx_1","tenantId":"a","kind":"sandbox","driver":"tunnel","capabilities":["exec.run","fs.read","logs.tail"]}' $TB/api/endpoints` |
 | 注册 SSH sandbox | `curl -X POST -H "Authorization: Bearer $ADMIN" -d '{"id":"sandbox_1","tenantId":"a","kind":"sandbox","driver":"ssh","capabilities":["exec.run"],"ssh":{"host":"1.2.3.4","username":"ubuntu","privateKeyEnv":"SANDBOX_1_SSH_KEY"}}' $TB/api/endpoints` |
+| 注册 Cloudflare Sandbox | `curl -X POST -H "Authorization: Bearer $ADMIN" -d '{"id":"cf_sandbox","kind":"sandbox","driver":"cloudflare-sandbox","capabilities":["exec.run","fs.read"],"cloudflareSandbox":{"baseUrlEnv":"CLOUDFLARE_SANDBOX_API_URL","apiKeyEnv":"CLOUDFLARE_SANDBOX_API_KEY","sandboxId":"<sandbox-id>"}}' $TB/api/endpoints` |
 | 注册密码兜底 SSH | `curl -X POST -H "Authorization: Bearer $ADMIN" -d '{"id":"legacy_box","tenantId":"a","kind":"ssh-host","driver":"ssh","capabilities":["exec.run"],"ssh":{"host":"1.2.3.5","username":"ubuntu","passwordEnv":"LEGACY_BOX_SSH_PASSWORD"}}' $TB/api/endpoints` |
 | 注册 K8S pod | `curl -X POST -H "Authorization: Bearer $ADMIN" -d '{"id":"pod_1","tenantId":"a","kind":"k8s-pod","driver":"k8s-pod","capabilities":["exec.run","logs.tail"],"k8s":{"serverEnv":"K8S_SERVER","tokenEnv":"K8S_TOKEN","namespace":"default","pod":"worker-abc","container":"app"}}' $TB/api/endpoints` |
 | 注册命令策略 | `curl -X POST -H "Authorization: Bearer $ADMIN" -d '{"id":"safe","defaultMode":"deny","allowCommands":["npm","pnpm"],"maxTimeoutMs":30000}' $TB/api/command-policies` |
@@ -128,10 +129,15 @@ driver 返回 `EndpointUnavailable → 503`。
 Worker 内 driver 通过部署期注入：
 
 ```ts
-import { createBridge, createSshExecutionDriver } from '@tokenroll/tool-bridge/worker';
+import {
+  createBridge,
+  createCloudflareSandboxExecutionDriver,
+  createSshExecutionDriver,
+} from '@tokenroll/tool-bridge/worker';
 
 export default createBridge({
   executionDrivers: {
+    'cloudflare-sandbox': createCloudflareSandboxExecutionDriver(),
     ssh: createSshExecutionDriver(),
     'k8s-pod': k8sPodDriver,
   },
@@ -145,6 +151,15 @@ secret 变量名：
 ```bash
 wrangler secret put SANDBOX_1_SSH_KEY
 wrangler secret put LEGACY_BOX_SSH_PASSWORD
+```
+
+Cloudflare Sandbox driver 通过官方 sandbox bridge HTTP API 调用 sandbox。先部署
+bridge，创建 sandbox，保存 bridge URL/API key 到 Worker secret，再把 sandbox id
+注册成 endpoint：
+
+```bash
+wrangler secret put CLOUDFLARE_SANDBOX_API_URL
+wrangler secret put CLOUDFLARE_SANDBOX_API_KEY
 ```
 
 当前内置 SSH driver 支持：

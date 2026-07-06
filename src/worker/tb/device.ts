@@ -17,7 +17,7 @@ import { AppEnv, HelpPayload, ResourceRef } from './types';
 import { arrayOfStrings, isRecord, json, stringField } from './util';
 
 export type EndpointKind = 'sandbox' | 'ssh-host' | 'k8s-pod' | 'pc' | 'browser-host' | 'mobile' | 'generic';
-export type EndpointDriver = 'tunnel' | 'ssh' | 'k8s-pod';
+export type EndpointDriver = 'tunnel' | 'ssh' | 'k8s-pod' | 'cloudflare-sandbox';
 export type DeviceTool = 'exec.run' | 'fs.read' | 'logs.tail';
 
 export interface SshEndpointConfig {
@@ -38,6 +38,13 @@ export interface K8sPodEndpointConfig {
   container?: string;
 }
 
+export interface CloudflareSandboxEndpointConfig {
+  baseUrlEnv: string;
+  apiKeyEnv: string;
+  sandboxId: string;
+  sessionId?: string;
+}
+
 export interface EndpointRecord {
   id: string;
   tenantId?: string;
@@ -51,6 +58,7 @@ export interface EndpointRecord {
   commandPolicyId?: string;
   ssh?: SshEndpointConfig;
   k8s?: K8sPodEndpointConfig;
+  cloudflareSandbox?: CloudflareSandboxEndpointConfig;
   sessionId?: string;
   lastSeenAt?: string;
   createdAt: string;
@@ -579,6 +587,10 @@ function normalizeEndpointInput(value: Record<string, unknown>, existing?: Endpo
     statusRaw === 'online' || statusRaw === 'offline' || statusRaw === 'revoked' ? statusRaw : existing?.status ?? 'offline';
   const ssh = driver === 'ssh' ? normalizeSshConfig(value.ssh, existing?.ssh) : existing?.ssh;
   const k8s = driver === 'k8s-pod' ? normalizeK8sConfig(value.k8s, existing?.k8s) : existing?.k8s;
+  const cloudflareSandbox =
+    driver === 'cloudflare-sandbox'
+      ? normalizeCloudflareSandboxConfig(value.cloudflareSandbox, existing?.cloudflareSandbox)
+      : existing?.cloudflareSandbox;
   return {
     id,
     tenantId: stringField(value, 'tenantId') ?? existing?.tenantId,
@@ -592,6 +604,7 @@ function normalizeEndpointInput(value: Record<string, unknown>, existing?: Endpo
     commandPolicyId: stringField(value, 'commandPolicyId') ?? existing?.commandPolicyId,
     ssh,
     k8s,
+    cloudflareSandbox,
     sessionId: existing?.sessionId,
     lastSeenAt: existing?.lastSeenAt,
     createdAt: existing?.createdAt ?? nowIso,
@@ -617,6 +630,10 @@ function validateEndpointSecrets(env: AppEnv, endpoint: EndpointRecord): void {
     if (endpoint.k8s.caCertEnv) {
       requireEnvString(env, endpoint.k8s.caCertEnv, 'k8s.caCertEnv');
     }
+  }
+  if (endpoint.driver === 'cloudflare-sandbox' && endpoint.cloudflareSandbox) {
+    requireEnvString(env, endpoint.cloudflareSandbox.baseUrlEnv, 'cloudflareSandbox.baseUrlEnv');
+    requireEnvString(env, endpoint.cloudflareSandbox.apiKeyEnv, 'cloudflareSandbox.apiKeyEnv');
   }
 }
 
@@ -668,7 +685,7 @@ function parseEndpointKind(value: string): EndpointKind {
 }
 
 function parseEndpointDriver(value: string): EndpointDriver {
-  if (value === 'tunnel' || value === 'ssh' || value === 'k8s-pod') {
+  if (value === 'tunnel' || value === 'ssh' || value === 'k8s-pod' || value === 'cloudflare-sandbox') {
     return value;
   }
   throw new BadRequestError(`Unsupported endpoint driver '${value}'.`);
@@ -715,6 +732,25 @@ function normalizeK8sConfig(value: unknown, existing?: K8sPodEndpointConfig): K8
     namespace,
     pod,
     container: raw ? stringField(raw, 'container') : existing?.container,
+  };
+}
+
+function normalizeCloudflareSandboxConfig(
+  value: unknown,
+  existing?: CloudflareSandboxEndpointConfig
+): CloudflareSandboxEndpointConfig {
+  const raw = isRecord(value) ? value : undefined;
+  const baseUrlEnv = raw ? stringField(raw, 'baseUrlEnv') : existing?.baseUrlEnv;
+  const apiKeyEnv = raw ? stringField(raw, 'apiKeyEnv') : existing?.apiKeyEnv;
+  const sandboxId = raw ? stringField(raw, 'sandboxId') : existing?.sandboxId;
+  if (!baseUrlEnv || !apiKeyEnv || !sandboxId) {
+    throw new BadRequestError('cloudflare-sandbox driver requires baseUrlEnv, apiKeyEnv, and sandboxId.');
+  }
+  return {
+    baseUrlEnv,
+    apiKeyEnv,
+    sandboxId,
+    sessionId: raw ? stringField(raw, 'sessionId') : existing?.sessionId,
   };
 }
 

@@ -29,6 +29,8 @@ async function m2Env(): Promise<AppEnv> {
     K8S_SERVER: 'https://k8s.example.com',
     K8S_TOKEN: 'test-token',
     K8S_CA_CERT: 'test-ca',
+    SANDBOX_API_URL: 'https://sandbox.example.com',
+    SANDBOX_API_KEY: 'test-sandbox-key',
   } as unknown as AppEnv;
 }
 
@@ -464,6 +466,33 @@ describe('Tunnel / Device M2', () => {
     expect(((await k8s.json()) as { endpoint: { driver: string; k8s: { pod: string } } }).endpoint).toMatchObject({
       driver: 'k8s-pod',
       k8s: { pod: 'worker-abc' },
+    });
+
+    const cloudflareSandbox = await request(
+      '/api/endpoints',
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          id: 'cf_sandbox_1',
+          tenantId: 'a',
+          kind: 'sandbox',
+          driver: 'cloudflare-sandbox',
+          capabilities: ['exec.run', 'fs.read'],
+          cloudflareSandbox: {
+            baseUrlEnv: 'SANDBOX_API_URL',
+            apiKeyEnv: 'SANDBOX_API_KEY',
+            sandboxId: 'sbx_123',
+          },
+        }),
+      },
+      'tbk_admin'
+    );
+    expect(cloudflareSandbox.status).toBe(201);
+    expect(
+      ((await cloudflareSandbox.json()) as { endpoint: { driver: string; cloudflareSandbox: { sandboxId: string } } }).endpoint
+    ).toMatchObject({
+      driver: 'cloudflare-sandbox',
+      cloudflareSandbox: { sandboxId: 'sbx_123' },
     });
   });
 });

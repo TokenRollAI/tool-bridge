@@ -30,6 +30,7 @@ import {
   listDynamicServers,
   putDynamicServer,
 } from './tb/dynamic-servers';
+import { createCloudflareSandboxExecutionDriver } from './tb/cloudflare-sandbox-driver';
 import { createSshExecutionDriver } from './tb/ssh-driver';
 import type { BuiltinHandlerRegistry, DirectoryNode } from './tb/types';
 
@@ -1134,9 +1135,11 @@ export type {
   SshEndpointConfig,
 } from './tb/device';
 export { buildSshExecCommand, createSshExecutionDriver, escapePosixArg } from './tb/ssh-driver';
+export { createCloudflareSandboxExecutionDriver } from './tb/cloudflare-sandbox-driver';
 
 export default createBridge({
   executionDrivers: {
+    'cloudflare-sandbox': createCloudflareSandboxExecutionDriver(),
     ssh: createSshExecutionDriver(),
   },
 });
