@@ -7,6 +7,7 @@ export * from './auth/authorizer'
 export * from './auth/registerPath'
 export * from './auth/scope'
 export * from './auth/sk'
+export * from './builtin'
 export {
   isTBError,
   statusForCode,
