@@ -4,7 +4,7 @@
 
 ## 当前状态
 
-- **当前 Phase**:Phase 0 已全部勾选(待关门流程);下一 Phase:Phase 1 — Auth(SK)+ HTBP 核心树(DOD.md §3)
+- **当前 Phase**:Phase 1 全部勾选(待关门流程);下一 Phase:Phase 2 — Tool Layer(DOD.md §4)
 - **已勾选 DoD 项**:无
 - **Blockers**:
   - Docker 守护进程未运行(Phase 6 / E2E-4 前需启动 Docker Desktop;不阻塞 Phase 0-5)
@@ -51,3 +51,18 @@
 - 勾选:无新增(Phase 0 已全勾;质量关口通过 = 关门完成)
 - 沉淀:见上(llmdoc 更新 + docs 回写 + reflection)
 - 遗留:Phase 1 开工,首个目标 = core 纯逻辑(scope 判定 + registerPath 规则)单测先行;规格依据 phase1-spec-digest.md + docs 新增章节。
+
+## Round 4 — 2026-07-06(Phase 1 全量)
+- 目标:Phase 1 全部 DoD(DOD.md:51-57)
+- 动作:三波并行 subagent——①4 个 worker 并行写 core 纯逻辑(auth 74 测/tree/htbp 40 测/secret),232→248 单测;②w-gw 实现 builtin 四模块 + gateway 装配(认证中间件/KV StateStore/bootstrap/HTBP 路由,13 集成测试),期间修复 workerd unhandled rejection(裸 return promise → await);③w-cli 实现 8 个 Phase 1 命令(28 单测)。开放问题 6 条由主协调者决策并回写 docs(8903b5e/327ee1e)。部署:生成 Admin SK 入 .env TB_SK + wrangler secret put(TB_BOOTSTRAP_ADMIN_SK/TB_SECRET_ENCRYPTION_KEY)→ deploy。生产实测中发现并修复 1 个真实 bug:KV list 最终一致窗口内返回已删除 key 的 null 值 → TreeNode 消费抛 internal(fix: kvStateStore 跳过 null,commit 见 log)。
+- 验证(生产 https://tool-bridge.pdjjq.org 逐条):
+  - `pnpm verify` 全绿(248 core + 28 cli 单测,13 gateway 集成,0 Errors)
+  - 无 SK `GET /~help` → 401 裸 TBError;Admin SK → 200 DSL 首行 htbp 0.1
+  - `tb login` → `tb whoami --json`(authenticated:true + 健康摘要)→ `tb sk create --scope 'docs/**:read'` → 受限 SK `~tree` 只见 docs 子树(可见性裁剪实证)→ 受限 SK POST system/sk → 404(deny==not_found)
+  - `tb secret set/ls` → list 只见 name+updatedAt,不回显明文
+  - 吊销传播:`tb sk rm` 后轮询,受限 SK 在 ~10s 开始被拒(≤60s 窗口,Proto §2.3)
+  - `TB_SK=… pnpm smoke` → 3 项全过(healthz/401/200);smoke 已升级为 Phase 1 语义
+  - 注册链路:POST docs/notes/~register → 中间 directory 自动物化(registeredBy system:auto),delete 后级联回收(生产验证)
+- 勾选:Phase 1 全部 7 项(DOD.md:51-57)。注:P1-7 吊销"本地宿主立即被拒"部分以 workerd 集成测试覆盖(单实例 KV 即时一致);SQLite 宿主属 Phase 6,届时补验。
+- 沉淀:待 Phase 1 关门轮做 /llmdoc:update + 质量关口
+- 遗留:①w-gw 决策清单待核(两条注册通道定位、~tree 根免判定、~register 判定资源)需回写 docs;②CLI 偏差(whoami 语义、readline 代替 @clack、config 路径)需回写 Proto 附A;③生产 KV 一致性坑(list+get null)值得沉淀 guide。

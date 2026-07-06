@@ -48,13 +48,13 @@
 **范围**:TBError↔HTTP 映射中间件(§0.2,含 401/501);SK 模型 + `sha256` 存取 + `Authorizer.Check`(§2,含 deny 优先、glob 匹配、注册路径规则 §2.4);Admin SK 引导;SecretStore(§2.5:AES-256-GCM + env 主密钥,只写不读);`NodeRegistry`(§3,含中间 directory 自动物化与回收);`~help`/`~skill`/`~tree?depth` 生成(directory + builtin 节点);内容协商(§1.2:markdown 默认 / json 声明);builtin 节点 `system/status`、`system/sk`、`system/secret`、`system/registry`;可见性裁剪;**CLI**:`tb login` / `tb whoami` / `tb use` / `tb sk list|create|rm` / `tb secret set|ls|rm` / `tb ls` / `tb tree` / `tb help <path>`。
 
 **DoD**:
-- [ ] 判定算法单测覆盖:allow/deny 优先级、`*`/`**` glob 语义、无匹配默认拒、registerPaths 收紧(注意 2)、未声明 registerPaths 时保留根路径拒绝(注意 3)、同路径他人节点 conflict——**每条 §2.2/§2.4 规则至少一个正/反用例**。
-- [ ] 认证层单测:disabled/过期(`expiresAt`)SK 视同无法识别 → **401**(不进 `Authorizer.Check`,§0.2);无 SK / 错 SK 同样 401。
-- [ ] 树单测:注册 `a/b/c` 后 `a`、`a/b`、`a/b/c` 三级 `~help` 都可达(注意 4);卸载后空中间节点回收;`~tree` 的 depth 钳制与节点上限;保留段/保留根路径拒绝注册。
-- [ ] 内容协商单测:同一 `~help` 的 DSL 与 JSON 两种表现字段等价;无 Accept 时默认 markdown/plain(注意 6)。
-- [ ] 集成:部署后 Admin SK 引导 → `tb login` → `tb whoami` 显示 admin → `tb sk create`(限定 scope 的新 SK)→ 用新 SK `tb tree` 只见其可见子树;无 SK 调用返回 401 裸 TBError;disabled/过期 SK 调用同样 401(§0.2)。
-- [ ] SecretStore:单测——`Set` 后节点面(`List`/`~help`/返回值)不回显明文、`resolve` 不暴露为节点 cmd、未配置主密钥 `TB_SECRET_ENCRYPTION_KEY` 时 `Set` 返回 `unavailable`;集成——`tb secret set` 后 `tb secret ls` 只见名字与时间戳。
-- [ ] 吊销传播:集成——本地宿主 `tb sk rm` 后立即被拒;部署环境脚本轮询断言被吊销 SK 在 60s 窗口上限内开始被拒(Proto §2.3 的可脚本化验收)。
+- [x] 判定算法单测覆盖:allow/deny 优先级、`*`/`**` glob 语义、无匹配默认拒、registerPaths 收紧(注意 2)、未声明 registerPaths 时保留根路径拒绝(注意 3)、同路径他人节点 conflict——**每条 §2.2/§2.4 规则至少一个正/反用例**。
+- [x] 认证层单测:disabled/过期(`expiresAt`)SK 视同无法识别 → **401**(不进 `Authorizer.Check`,§0.2);无 SK / 错 SK 同样 401。
+- [x] 树单测:注册 `a/b/c` 后 `a`、`a/b`、`a/b/c` 三级 `~help` 都可达(注意 4);卸载后空中间节点回收;`~tree` 的 depth 钳制与节点上限;保留段/保留根路径拒绝注册。
+- [x] 内容协商单测:同一 `~help` 的 DSL 与 JSON 两种表现字段等价;无 Accept 时默认 markdown/plain(注意 6)。
+- [x] 集成:部署后 Admin SK 引导 → `tb login` → `tb whoami` 显示 admin → `tb sk create`(限定 scope 的新 SK)→ 用新 SK `tb tree` 只见其可见子树;无 SK 调用返回 401 裸 TBError;disabled/过期 SK 调用同样 401(§0.2)。
+- [x] SecretStore:单测——`Set` 后节点面(`List`/`~help`/返回值)不回显明文、`resolve` 不暴露为节点 cmd、未配置主密钥 `TB_SECRET_ENCRYPTION_KEY` 时 `Set` 返回 `unavailable`;集成——`tb secret set` 后 `tb secret ls` 只见名字与时间戳。
+- [x] 吊销传播:集成——本地宿主 `tb sk rm` 后立即被拒;部署环境脚本轮询断言被吊销 SK 在 60s 窗口上限内开始被拒(Proto §2.3 的可脚本化验收)。
 
 ## 4. Phase 2 — Tool Layer(M2)
 
