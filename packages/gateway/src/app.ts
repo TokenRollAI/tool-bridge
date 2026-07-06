@@ -467,17 +467,17 @@ export function createApp(): Hono<{ Bindings: Env; Variables: Vars }> {
       if (targetPath === undefined) {
         throw new TBError('invalid_argument', "field 'path' must be a string")
       }
-      // 挂载/更新 remote 节点时校验 baseUrl 白名单(Proto §3.4);context 节点做
-      // provider/结构校验 + s3 连通探测(Proto §5.3)——注册时即拒。
-      if (cmd === 'write') {
-        assertRemoteConfigAllowed(args.config, c.env)
-        await assertContextConfig(args.config, c.env, secretStore(store, c.env))
-      } else if (cmd === 'update') {
-        const patch = args.patch as { config?: unknown } | undefined
-        assertRemoteConfigAllowed(patch?.config, c.env)
-        await assertContextConfig(patch?.config, c.env, secretStore(store, c.env))
-      }
+      // 挂载/更新 remote 节点时校验 baseUrl 白名单(Proto §3.4,注册时即拒)。
+      const cfgPatch =
+        cmd === 'write'
+          ? args.config
+          : cmd === 'update'
+            ? (args.patch as { config?: unknown } | undefined)?.config
+            : undefined
+      assertRemoteConfigAllowed(cfgPatch, c.env)
       await assertRegisterPath(registry, ctx, targetPath, cmd === 'delete' ? 'delete' : 'write')
+      // context 配置校验 + s3 连通探测(Proto §5.3):探测出站网络,须在权限判定之后。
+      await assertContextConfig(cfgPatch, c.env, secretStore(store, c.env))
       registryTarget = targetPath
     }
 
@@ -561,15 +561,15 @@ export function createApp(): Hono<{ Bindings: Env; Variables: Vars }> {
     }
     // 复用与 system/registry write 相同的 NodeInput 校验(kind/description 必填、kind 枚举合法)。
     const body = parseNodeInput(raw)
-    // 挂载 remote 节点时校验 baseUrl 白名单(Proto §3.4);context 节点做 provider/结构
-    // 校验 + s3 连通探测(Proto §5.3)——注册时即拒。
+    // 挂载 remote 节点时校验 baseUrl 白名单(Proto §3.4,注册时即拒)。
     assertRemoteConfigAllowed(body.config, c.env)
-    await assertContextConfig(body.config, c.env, secretStore(store, c.env))
     // register 判定 + §2.4 路径规则(含 existing 查询)。
     if (!check(ctx, path, 'register').allow) {
       throw new TBError('permission_denied', `no scope grants 'register' on '${path}'`)
     }
     await assertRegisterPath(registry, ctx, body.path, 'write')
+    // context 配置校验 + s3 连通探测(Proto §5.3):探测出站网络,须在权限判定之后。
+    await assertContextConfig(body.config, c.env, secretStore(store, c.env))
     const now = new Date().toISOString()
     const node = await registry.write(body, ctx.keyId, now)
     // 注册变更 → 失效该节点工具缓存(Proto §4.2)。
