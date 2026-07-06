@@ -64,6 +64,15 @@ describe('Write', () => {
     expect((await provider.Get('cfg.json')).content).toEqual({ a: 1 })
   })
 
+  it('非 string content 且显式 contentType:不被覆盖', async () => {
+    const { provider } = makeProvider()
+    const meta = await provider.Write('v.json', {
+      contentType: 'application/vnd.x+json',
+      content: [1],
+    })
+    expect(meta.contentType).toBe('application/vnd.x+json')
+  })
+
   it('content 缺失 / string content 无 contentType → invalid_argument', async () => {
     const { provider } = makeProvider()
     expect(await codeOf(provider.Write('x', { contentType: 'text/plain' } as never))).toBe(
@@ -115,6 +124,21 @@ describe('Get', () => {
     expect((await provider.Get('bad.json')).content).toBe('oops{')
   })
 
+  it('head 后对象消失(竞态)→ not_found', async () => {
+    const { store, provider } = makeProvider()
+    await provider.Write('r.txt', { contentType: 'text/plain', content: 'x' })
+    vi.spyOn(store, 'get').mockResolvedValue(null)
+    expect(await codeOf(provider.Get('r.txt'))).toBe('not_found')
+  })
+
+  it('存量对象无 contentType:Meta 回落 application/octet-stream 并走 $ref', async () => {
+    const { store, provider } = makeProvider({ relayRefUrl: (key) => `https://relay/${key}` })
+    await store.put('raw.bin', 'data')
+    const entry = await provider.Get('raw.bin')
+    expect(entry.contentType).toBe('application/octet-stream')
+    expect(entry.content).toEqual({ $ref: 'https://relay/raw.bin' })
+  })
+
   it('$ref 阈值:== 阈值内联,+1 走 relayRefUrl 且不读 body', async () => {
     const { store, provider } = makeProvider({
       refThresholdBytes: 8,
@@ -146,6 +170,8 @@ describe('Get', () => {
     })
     await provider.Write('bin', { contentType: 'application/octet-stream', content: 'xx' })
     expect((await provider.Get('bin')).content).toEqual({ $ref: 'https://signed/bin?ttl=900' })
+    const provider60 = createObjectContextProvider(withPresign, { nsPath: NS, presignTtlSec: 60 })
+    expect((await provider60.Get('bin')).content).toEqual({ $ref: 'https://signed/bin?ttl=60' })
   })
 
   it('presign 与 relayRefUrl 都缺 → unavailable', async () => {
@@ -200,6 +226,20 @@ describe('Update', () => {
     )
     await provider.Update('a.txt', { content: '3', ifVersion: m2.version })
     expect((await provider.Get('a.txt')).content).toBe('3')
+  })
+
+  it('content 为对象:JSON 序列化存储', async () => {
+    const { provider } = makeProvider()
+    await provider.Write('a.json', { contentType: 'application/json', content: '{"a":1}' })
+    await provider.Update('a.json', { content: { b: 2 } })
+    expect((await provider.Get('a.json')).content).toEqual({ b: 2 })
+  })
+
+  it('head 后对象消失(竞态)→ not_found', async () => {
+    const { store, provider } = makeProvider()
+    await provider.Write('a.txt', { contentType: 'text/plain', content: 'x' })
+    vi.spyOn(store, 'get').mockResolvedValue(null)
+    expect(await codeOf(provider.Update('a.txt', { metadata: { k: '2' } }))).toBe('not_found')
   })
 })
 
@@ -257,9 +297,11 @@ describe('List', () => {
     expect(await codeOf(provider.List('', { limit: 0 }))).toBe('invalid_argument')
   })
 
-  it('未声明的 filter 键 → invalid_argument', async () => {
+  it('未声明的 filter 键 → invalid_argument;空 filter 对象放行;limit 非整数拒绝', async () => {
     const { provider } = makeProvider()
     expect(await codeOf(provider.List('', { filter: { k: 'v' } }))).toBe('invalid_argument')
+    await provider.List('', { filter: {} })
+    expect(await codeOf(provider.List('', { limit: 1.5 }))).toBe('invalid_argument')
   })
 
   it('keyPrefix:落盘 key 带前缀、uri 不带', async () => {
@@ -311,6 +353,36 @@ describe('Search', () => {
       'invalid_argument',
     )
     expect(await codeOf(provider.Search(''))).toBe('invalid_argument')
+    expect(await codeOf(provider.Search(123 as unknown as string))).toBe('invalid_argument')
+  })
+
+  it('内部深层遍历跨多页(>200 对象仍能召回末尾条目)', async () => {
+    const { store, provider } = makeProvider()
+    for (let i = 0; i < 201; i++) {
+      await store.put(`bulk/item-${String(i).padStart(3, '0')}.txt`, 'x')
+    }
+    await store.put('zz-target.md', 'x')
+    const page = await provider.Search('zz-target')
+    expect(page.items.map((i) => i.uri)).toEqual([`node://${NS}/zz-target.md`])
+    expect(page.cursor).toBeUndefined()
+  })
+
+  it('list 结果混入 { prefix } 条目(防御)时跳过', async () => {
+    const base = new MemoryObjectStore(() => NOW)
+    const store: ObjectStore = {
+      head: (k) => base.head(k),
+      get: (k) => base.get(k),
+      put: (k, b, o) => base.put(k, b, o),
+      delete: (k) => base.delete(k),
+      list: async (p, o) => {
+        const res = await base.list(p, o)
+        return { ...res, items: [{ prefix: 'fake/' }, ...res.items] }
+      },
+    }
+    const provider = createObjectContextProvider(store, { nsPath: NS })
+    await base.put('hit.md', 'x')
+    const page = await provider.Search('hit')
+    expect(page.items.map((i) => i.uri)).toEqual([`node://${NS}/hit.md`])
   })
 })
 

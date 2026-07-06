@@ -69,7 +69,9 @@ function rejectFilter(opts: ListOptions | undefined): void {
 
 /** contentType 的 mime 主体(去参数、小写)。 */
 function mimeOf(contentType: string | undefined): string {
-  return (contentType ?? '').split(';')[0]?.trim().toLowerCase() ?? ''
+  const ct = contentType ?? ''
+  const idx = ct.indexOf(';')
+  return (idx >= 0 ? ct.slice(0, idx) : ct).trim().toLowerCase()
 }
 
 /** Write 入参 → 落盘 body 与 contentType(非 string content 序列化为 JSON)。 */

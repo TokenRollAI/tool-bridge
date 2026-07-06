@@ -51,6 +51,7 @@ describe('normalizeEntryPath', () => {
         `应拒绝:'${p}'`,
       ).toBe('invalid_argument')
     }
+    expect(codeOf(() => normalizeEntryPath(123 as unknown as string))).toBe('invalid_argument')
   })
 })
 

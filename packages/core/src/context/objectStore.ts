@@ -178,8 +178,9 @@ export class MemoryObjectStore implements ObjectStore {
           continue
         }
       }
-      const stored = this.m.get(key)
-      if (stored) entries.push({ sortKey: key, item: stored.meta })
+      // key 来自 m.keys() 快照且循环内无删除,必命中
+      const stored = this.m.get(key) as StoredObject
+      entries.push({ sortKey: key, item: stored.meta })
     }
     let start = 0
     if (opts?.cursor !== undefined) {

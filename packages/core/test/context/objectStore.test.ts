@@ -126,4 +126,34 @@ describe('MemoryObjectStore', () => {
     expect(p2.items.map((i) => ('prefix' in i ? i.prefix : (i as ObjectMeta).key))).toEqual(['c'])
     expect(p2.cursor).toBeUndefined()
   })
+
+  it('list cursor 越过末尾 → 空页;limit 0 → 空页且无 cursor', async () => {
+    const s = new MemoryObjectStore()
+    await s.put('a', '1')
+    expect((await s.list('', { cursor: 'zzz' })).items).toEqual([])
+    const zero = await s.list('', { limit: 0 })
+    expect(zero.items).toEqual([])
+    expect(zero.cursor).toBeUndefined()
+  })
+
+  it('流 chunk 缺 value(done:false)时安全跳过', async () => {
+    const s = new MemoryObjectStore()
+    let step = 0
+    const stream = {
+      getReader() {
+        return {
+          async read() {
+            step++
+            if (step === 1) return { done: false }
+            if (step === 2) return { done: false, value: new Uint8Array([104, 105]) }
+            return { done: true }
+          },
+          releaseLock() {},
+        }
+      },
+    }
+    const meta = await s.put('k', stream)
+    expect(meta.size).toBe(2)
+    expect(await readBody(s, 'k')).toBe('hi')
+  })
 })
