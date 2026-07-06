@@ -14,7 +14,7 @@
 
 - Cloudflare:wrangler OAuth 已登录(DJJ 账户,与 `CLOUDFLARE_ACCOUNT_ID` 一致);`CLOUDFLARE_API_TOKEN` 空缺属预期(本地 OAuth)。⚠️ whoami 未确认 R2 write 权限,Phase 0 P0-5 绑定 R2 前复核。
 - 工具链:node v26.4.0 / pnpm 11.10.0 / wrangler 4.107.0 / gh 2.96.0(可访问 v1 私有仓)/ docker CLI 29.2.1(daemon 未起)。
-- 核心变量已配置:`CLOUDFLARE_ACCOUNT_ID`、`TB_DOMAIN`、`TB_BASE_URL`、`TB_NAME_PREFIX`、`TB_SECRET_ENCRYPTION_KEY`、`TB_SK`。
+- 核心变量已配置:`CLOUDFLARE_ACCOUNT_ID`、`TB_DOMAIN`、`TB_BASE_URL`、`TB_NAME_PREFIX`、`TB_SECRET_ENCRYPTION_KEY`。`TB_SK` 空缺(预期:Phase 1 Admin SK 引导后回填)。
 
 ## Round 日志
 
@@ -43,3 +43,11 @@
 - 勾选:P0-2、P0-3、P0-4、P0-5 —— **Phase 0 五项全勾**
 - 沉淀:G3 healthz 形状已回写 docs/Proto.md §1.1(Round 1 末commit 1700544)
 - 遗留:Phase 0 关门流程(质量关口 Workflow + /llmdoc:update);smoke 脚本不读 .env,需显式传 TB_BASE_URL(可改进);Phase 1 是下一目标。
+
+## Round 3 — 2026-07-06(Phase 0 关门)
+- 目标:LOOP §5.4 Phase 0 关门(质量关口 + 沉淀)+ Phase 1 预研
+- 动作:质量关口 Workflow(3 维 review → 逐条对抗核查,13 agent):原始发现 10 条,确认 6 条(全部 MINOR,无 BLOCKER/MAJOR)→ 派 worker 修复 5 条代码项(commit 65ae2fc),PROGRESS 的 TB_SK 记录不实由主协调者改正;/llmdoc:update 完成(current-state 刷新、新 guide deploy-and-verify、reflection 2026-07-06-phase0-bootstrap);并行派 investigator 产出 Phase 1 实现级规格摘要(.llmdoc-tmp/investigations/phase1-spec-digest.md,28KB);其 6 个开放问题已由主协调者决策并回写 docs(commit 8903b5e:401 语义、Help/Tree JSON 形状、builtin cmd 命名、system/status cmd 集、自动 directory 规则、KV key 布局)。
+- 验证:修复后 `pnpm verify` 全绿(36 unit + 8 integration);`pnpm provision` 幂等复跑两条 skip;gen-dev-vars 引号转义生效。
+- 勾选:无新增(Phase 0 已全勾;质量关口通过 = 关门完成)
+- 沉淀:见上(llmdoc 更新 + docs 回写 + reflection)
+- 遗留:Phase 1 开工,首个目标 = core 纯逻辑(scope 判定 + registerPath 规则)单测先行;规格依据 phase1-spec-digest.md + docs 新增章节。
