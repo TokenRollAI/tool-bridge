@@ -30,7 +30,6 @@ Proto 中 healthz 仅是 Plugin 的健康端点(`{"healthy":true}`,Proto.md:584)
 
 ## 调查未覆盖面(后续按需补)
 
-- **G6 v1 仓库未检索**:init 阶段计划的 v1 文件级检索地图(`.llmdoc-tmp/investigations/v1-reference-map.md`)未产出(2026-07-06 二次核实:全仓库无此文件);目前仅知 adapter 在 `src/worker/tb/`。首次触发 LOOP §2.1 参考通道时现场检索并回填 [../reference/v1-lessons.md](../reference/v1-lessons.md)。
 - **Proto.md 深读覆盖**:两轮调查已覆盖全部章节地图、附A、§1.3 Help DSL、§0.2 TBError;各接口的完整 TS 签名仍以原文为准,引用前按 [../reference/proto-map.md](../reference/proto-map.md) 行号翻原文核对。
 - **待复核项(docs 自标注)**:partysocket 的 Node 兼容性(Reference.md:72,Phase 4 前);React 19 + antd v5 + @rjsf/antd spike 与 Static Assets 路由次序(DOD.md:115,Phase 6 前);上游 MCP OAuth 2.1(Reference.md:46,排期未定);wrangler OAuth 的 R2 write 权限(见 [../must/current-state.md](../must/current-state.md))。
 
@@ -43,3 +42,7 @@ Proto 中 healthz 仅是 Plugin 的健康端点(`{"healthy":true}`,Proto.md:584)
 ### G2(原 C3)"必须实现且只必须实现四个接口"措辞歧义 — 已修复(commit 0d48b06,2026-07-06)
 
 原问题:Proto.md:371 "必须实现且只必须实现以下四个接口" 与紧随的 `ContextProviderOptional`(Proto.md:385–390)字面冲突。修复:改为 "**每个 Context Provider 必须实现以下四个核心接口(可选能力见其后 `ContextProviderOptional`,须在 `~describe` 的 capabilities 中声明)**"。
+
+### G6 v1 文件级检索地图缺失 — 已解决(2026-07-06)
+
+init 阶段 v1 调查报告一度从磁盘消失导致误判"未产出";已由调查者重写(`.llmdoc-tmp/investigations/v1-reference-map.md`),内容(四个子系统的文件路径+机制+踩坑结论)已内化进 [../reference/v1-lessons.md](../reference/v1-lessons.md)。
