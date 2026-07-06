@@ -7,7 +7,7 @@
 ## must/ — 每轮必读的复发性上下文
 
 - [must/project-brief.md](must/project-brief.md) — 项目定义、七个 User Case、五份规范角色、纪律 0-4、术语表精选。
-- [must/current-state.md](must/current-state.md) — 进度快照、.env 凭据状态表、本机工具链、兜底路径(易变,每轮更新)。
+- [must/current-state.md](must/current-state.md) — 进度快照(Phase 0 完成 → Phase 1)、已部署资源、代码现状、常用命令、.env 凭据状态表、本机工具链、兜底路径(易变,每轮更新)。
 
 ## overview/ — 项目形态与边界
 
@@ -22,15 +22,15 @@
 - [reference/proto-map.md](reference/proto-map.md) — Proto.md 章节检索地图(章节号→行号→接口)、数据模型、TBError、Help DSL、CLI 命令矩阵、内容协商、Phase 0 契约。**引用精确章节号先查这里。**
 - [reference/v1-lessons.md](reference/v1-lessons.md) — v1 前代实现:保留资产、六大缺口、参考通道触发条件与检索现状。
 
-## guides/ — 一事一篇的工作流(当前为空)
+## guides/ — 一事一篇的工作流
 
-实现中沉淀出可复用工作流(如部署排错、E2E 跑法)时由 recorder 补。
+- [guides/deploy-and-verify.md](guides/deploy-and-verify.md) — 从零到线上验证:`pnpm verify` → `pnpm deploy:all` → curl 探活 → `pnpm smoke` → `tb status --json`,每步预期输出 + 排错(多账户歧义、custom domain 生效延迟)。
 
 ## memory/ — 过程记忆
 
-- [memory/doc-gaps.md](memory/doc-gaps.md) — 需回写项(G3 healthz)、实现注意(G4/G5)、已核实非矛盾(原 C4/C5/C6)、调查盲区(G6 v1 未检索)、已处理记录(G1/G2 已修,commit 0d48b06)。
+- [memory/doc-gaps.md](memory/doc-gaps.md) — 实现注意(G4/G5)、已核实非矛盾(原 C4/C5/C6)、调查盲区、已处理记录(G1/G2/G3/G6)。
 - `memory/decisions/`(空)— durable 设计/流程决策,recorder 维护。
-- `memory/reflections/`(空)— 流程反思,reflector 维护。
+- [memory/reflections/2026-07-06-phase0-bootstrap.md](memory/reflections/2026-07-06-phase0-bootstrap.md) — Phase 0 流程教训:scratch 报告易丢需尽快内化、后台 agent 靠产出文件轮询、wrangler 多账户须显式 account、权限用真实操作核实、smoke 不读 .env。reflector 维护。
 
 ## 路由提示
 
@@ -40,5 +40,6 @@
 | 引用接口/错误码/CLI 命令 | reference/proto-map.md |
 | 判断代码归属模块/依赖方向/存储选型 | architecture/modules-and-boundaries.md |
 | 实现 v1 已解决过的机制 | reference/v1-lessons.md |
+| 部署/线上验证/部署排错 | guides/deploy-and-verify.md |
 | 改 docs 或怀疑规范矛盾 | memory/doc-gaps.md |
 | 了解产品定位/非目标 | overview/project-overview.md |

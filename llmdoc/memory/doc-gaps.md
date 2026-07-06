@@ -6,11 +6,9 @@
 
 原 G1/G2 已修复,记录见文末"已处理"区。
 
-## docs 未定义、实现时定义后须回写(1 条)
+## docs 未定义、实现时定义后须回写(当前无)
 
-### G3 平台自身 `/healthz` 响应结构未定义 — Phase 0 即触发
-
-Proto 中 healthz 仅是 Plugin 的健康端点(`{"healthy":true}`,Proto.md:584);平台网关自身 `/healthz` 的唯一硬约束来自 DOD.md:40(200 + 版本号)+ DOD.md:41(`tb status --json` 可解析)。建议 `{"healthy":true,"version":"<x.y.z>"}`;Phase 0 实现定型后按 DOD.md:25 回写 docs。
+G3(healthz 形状)已回写 docs,记录见文末"已处理"区。
 
 ## 实现时注意、无需改 docs(2 条)
 
@@ -31,9 +29,13 @@ Proto 中 healthz 仅是 Plugin 的健康端点(`{"healthy":true}`,Proto.md:584)
 ## 调查未覆盖面(后续按需补)
 
 - **Proto.md 深读覆盖**:两轮调查已覆盖全部章节地图、附A、§1.3 Help DSL、§0.2 TBError;各接口的完整 TS 签名仍以原文为准,引用前按 [../reference/proto-map.md](../reference/proto-map.md) 行号翻原文核对。
-- **待复核项(docs 自标注)**:partysocket 的 Node 兼容性(Reference.md:72,Phase 4 前);React 19 + antd v5 + @rjsf/antd spike 与 Static Assets 路由次序(DOD.md:115,Phase 6 前);上游 MCP OAuth 2.1(Reference.md:46,排期未定);wrangler OAuth 的 R2 write 权限(见 [../must/current-state.md](../must/current-state.md))。
+- **待复核项(docs 自标注)**:partysocket 的 Node 兼容性(Reference.md:72,Phase 4 前);React 19 + antd v5 + @rjsf/antd spike 与 Static Assets 路由次序(DOD.md:115,Phase 6 前);上游 MCP OAuth 2.1(Reference.md:46,排期未定)。(原列的 wrangler OAuth R2 write 权限已于 Phase 0 部署时实测可用,移除。)
 
 ## 已处理(保留记录)
+
+### G3 平台自身 `/healthz` 响应结构 — 已定型并回写(commit 1700544,2026-07-06)
+
+原问题:Proto 中 healthz 仅是 Plugin 的健康端点(`{"healthy":true}`),平台网关自身 `/healthz` 结构未定义。Phase 0 实现定型为 `{"healthy":true,"version":"<x.y.z>"}`,已按 DOD.md:25 回写 docs/Proto.md §1.1(Proto.md:108,树外免认证运维端点,与 Plugin 健康端点形状对齐 + `version` 字段)。
 
 ### G1(原 C1)`DeviceChannel` 命名与 Proto 不一致 — 已修复(commit 0d48b06,2026-07-06)
 
