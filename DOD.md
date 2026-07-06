@@ -35,7 +35,7 @@
 **范围**:monorepo(pnpm workspaces:`core` / `gateway` / `cli`,后续 Phase 增包);`tb-gateway` Worker 骨架(`/healthz`、根 `/~help` 占位);wrangler.jsonc(KV/R2/DO 绑定占位);Vitest 配置;`pnpm verify` / `pnpm deploy:all` / `scripts/smoke.ts`;`.dev.vars` 从 `.env` 生成;**CLI 骨架**(`packages/cli`:命令框架、`--json` 全局开关、`TB_BASE_URL`/`TB_SK` 读取、`tb status` 打 healthz)。
 
 **DoD**:
-- [ ] `pnpm verify` 本地绿(哪怕只有 1 个占位测试)。
+- [x] `pnpm verify` 本地绿(哪怕只有 1 个占位测试)。
 - [ ] `pnpm deploy:all` 部署到 `CLOUDFLARE_ACCOUNT_ID` 指定账户成功。
 - [ ] `curl ${TB_BASE_URL}/healthz` 返回 200 + 版本号。
 - [ ] `tb status` 对部署环境返回健康摘要(`--json` 可解析)。

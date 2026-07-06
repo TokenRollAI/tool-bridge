@@ -105,6 +105,8 @@ POST /<path>/~register      # 可选:HTTP 形态的注册入口(等价 NodeRegis
 
 保留段 `~help / ~skill / ~tree / ~register / ~describe` 不可作为普通路径段;根路径段 `system`(平台管理子树)与 `ui`(Dashboard 静态资源,Architecture M9)为平台保留。
 
+**平台运维端点 `GET /healthz`(树外,免认证)**:返回 `200` + `{"healthy":true,"version":"<x.y.z>"}`——形状与 Plugin 健康端点(§8)对齐并加 `version` 字段,满足 DOD "200 + 版本号" 与 `tb status --json` 可解析(Phase 0 实现定型,2026-07-06 回写)。
+
 ### 1.2 内容协商(规范性)
 
 - 默认(无 `Accept` 或 `Accept: text/markdown`):`~help` 返回 HTBP Help DSL(`text/plain`——DSL 即 `~help` 的唯一非 JSON 表现,不提供 markdown 变体),`~skill` 返回 `text/markdown`,调用返回值渲染为 `text/markdown`。
