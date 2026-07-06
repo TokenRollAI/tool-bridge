@@ -213,7 +213,7 @@
 |---|---|
 | `tb init` | 部署向导(Cloudflare;生成 Admin SK)——M10 |
 | `tb login` / `tb whoami` / `tb use <server>` | SK + BaseURL 存 `~/.tb/credentials`(0600);多 server 配置切换 |
-| `tb status` | `GET /system/status`(健康与摘要) |
+| `tb status` | `POST /system/status {"tool":"get"}`(登录态健康摘要);未登录/Phase 0 回退树外 `GET /healthz`(Proto §1.1) |
 | `tb ls [path]` / `tb tree [--depth N]` / `tb help <path>` | `~help` / `~tree`(发现面) |
 | `tb call <path> --tool <name> --args '{}'` | `POST <path>`(调用面,Case 7) |
 | `tb tool mount/rm` | `NodeRegistry.Write/Delete`(kind=mcp/http) |
@@ -305,4 +305,4 @@ docker:
   tool-bridge (image)   # M10 自部署:core + Hono node + SQLite + FS
 ```
 
-**引导顺序(bootstrap)**:部署 Worker/DO → 生成 Admin SK(哈希入 KV,明文仅输出一次)→ 注册内置节点(`system/status`、`system/sk`、`system/secret`、`system/registry`、`system/plugin`)→ Dashboard 可用 → 用户经 Admin SK 挂载第一批工具/Context。
+**引导顺序(bootstrap,最终态清单)**:部署 Worker/DO → 生成 Admin SK(哈希入 KV,明文仅输出一次)→ 注册内置节点(`system/status`、`system/sk`、`system/secret`、`system/registry`;`system/plugin` 自 Phase 5 随 M8 落地后加入)→ Dashboard 可用 → 用户经 Admin SK 挂载第一批工具/Context。
