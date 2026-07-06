@@ -71,13 +71,18 @@ export function NodePage() {
                 子节点
               </h2>
               <div className="grid gap-px overflow-hidden rounded-md border">
+                {/* ~help 的 children.path 是树内绝对路径,直接作为链接目标 */}
                 {children.map((ch) => (
                   <Link
                     key={ch.path}
-                    to={`/nodes/${path === '' ? '' : `${path}/`}${ch.path}`}
+                    to={`/nodes/${ch.path}`}
                     className="flex items-center gap-2.5 bg-card/60 px-4 py-2.5 hover:bg-secondary/60"
                   >
-                    <span className="font-mono text-sm">{ch.path}</span>
+                    <span className="font-mono text-sm">
+                      {path !== '' && ch.path.startsWith(`${path}/`)
+                        ? ch.path.slice(path.length + 1)
+                        : ch.path}
+                    </span>
                     <KindBadge kind={ch.kind} />
                     <span className="ml-auto truncate pl-4 text-xs text-muted-foreground">
                       {ch.description}

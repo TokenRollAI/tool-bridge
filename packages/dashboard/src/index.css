@@ -97,6 +97,13 @@
   * {
     @apply border-border outline-ring/50;
   }
+  /* 应用内自行管理滚动;锁死文档级滚动,防止 portal 弹层撑出视口时整页(含侧边栏)滚动 */
+  html,
+  body,
+  #root {
+    height: 100%;
+    overflow: hidden;
+  }
   body {
     @apply bg-background text-foreground font-sans antialiased;
   }

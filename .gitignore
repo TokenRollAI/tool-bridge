@@ -5,3 +5,4 @@ dist/
 .wrangler/
 .llmdoc-tmp/
 *.log
+.playwright-mcp/

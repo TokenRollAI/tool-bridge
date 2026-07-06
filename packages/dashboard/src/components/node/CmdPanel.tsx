@@ -42,6 +42,53 @@ const SCOPE_STYLE: Record<string, string> = {
 const MUTATING = /^(write|update|delete|set|rm|remove|unmount|mount)$/i
 
 /**
+ * device shell 的 allow 白名单只编码在 h 文案里(core describeAllow 的三种形态),
+ * 解析出来以标签呈现;不匹配则原样当普通说明文字。
+ */
+function parseShellAllow(h: string): { lead: string; allow: string[] | 'all' | 'none' } | null {
+  const m = /^(.*?)允许命令:\s*(.+?)(?:;其余拒绝)?$/.exec(h)
+  if (!m) return null
+  const lead = m[1].replace(/[;;]\s*$/, '').trim()
+  const body = m[2].trim()
+  if (body === '*') return { lead, allow: 'all' }
+  if (body.startsWith('无')) return { lead, allow: 'none' }
+  return { lead, allow: body.split(/[,,]\s*/).filter(Boolean) }
+}
+
+function CmdDoc({ h }: { h: string }) {
+  const parsed = parseShellAllow(h)
+  if (!parsed) {
+    return <p className="w-full text-xs text-muted-foreground sm:ml-auto sm:w-auto">{h}</p>
+  }
+  return (
+    <div className="flex w-full flex-wrap items-center gap-1.5 text-xs text-muted-foreground sm:ml-auto sm:w-auto">
+      {parsed.lead && <span>{parsed.lead} ·</span>}
+      <span className="text-[11px]">允许命令</span>
+      {parsed.allow === 'all' && (
+        <span className="inline-flex items-center rounded-sm border border-warn/40 px-1.5 font-mono text-[10px] leading-4 text-warn">
+          *(全部放行)
+        </span>
+      )}
+      {parsed.allow === 'none' && (
+        <span className="inline-flex items-center rounded-sm border px-1.5 font-mono text-[10px] leading-4 text-muted-foreground">
+          无(默认拒绝)
+        </span>
+      )}
+      {Array.isArray(parsed.allow) &&
+        parsed.allow.map((cmd) => (
+          <code
+            key={cmd}
+            className="inline-flex items-center rounded-sm border border-emerald-400/30 bg-emerald-400/5 px-1.5 font-mono text-[10px] leading-4 text-emerald-400/90"
+          >
+            {cmd}
+          </code>
+        ))}
+      {Array.isArray(parsed.allow) && <span className="text-[11px]">其余拒绝</span>}
+    </div>
+  )
+}
+
+/**
  * 单条 cmd 的调用面板(Proto §1.3 CmdSpec 的通用渲染器,Case 6):
  * inputSchema → rjsf 表单(可切 JSON 原文编辑);confirm=true 弹二次确认(§6.2 语义在客户端);
  * Accept 可选 markdown(默认表现)/JSON;返回经 ResultView 展示。
@@ -53,7 +100,9 @@ export function CmdPanel({ path, cmd }: { path: string; cmd: HelpCmd }) {
   const [mode, setMode] = useState<'form' | 'json'>(formFriendly ? 'form' : 'json')
   const [formData, setFormData] = useState<unknown>(undefined)
   const [rawArgs, setRawArgs] = useState(() =>
-    hasSchema && !formFriendly ? JSON.stringify(skeletonFromSchema(cmd.inputSchema), null, 2) : '{}',
+    hasSchema && !formFriendly
+      ? JSON.stringify(skeletonFromSchema(cmd.inputSchema), null, 2)
+      : '{}',
   )
   const [rawErr, setRawErr] = useState<string | null>(null)
   const [accept, setAccept] = useState<'markdown' | 'json'>('markdown')
@@ -166,9 +215,7 @@ export function CmdPanel({ path, cmd }: { path: string; cmd: HelpCmd }) {
             confirm
           </span>
         )}
-        {cmd.h && (
-          <p className="w-full text-xs text-muted-foreground sm:ml-auto sm:w-auto">{cmd.h}</p>
-        )}
+        {cmd.h && <CmdDoc h={cmd.h} />}
       </header>
 
       <div className="px-4 py-3">

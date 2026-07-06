@@ -1,11 +1,38 @@
-import { ChevronRight } from 'lucide-react'
+import {
+  Blocks,
+  ChevronRight,
+  Cpu,
+  Database,
+  Folder,
+  Globe,
+  type LucideIcon,
+  Plug,
+  Waypoints,
+} from 'lucide-react'
 import { useState } from 'react'
 import { NavLink } from 'react-router'
-import { KindBadge, OnlineDot } from '@/components/KindBadge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useTree } from '@/lib/queries'
-import type { TreeJson } from '@/lib/types'
+import type { NodeKind, TreeJson } from '@/lib/types'
 import { cn } from '@/lib/utils'
+
+/** kind → 图标 + 色相(与 KindBadge 同一套色相编码,图标替代文字标签)。 */
+const KIND_ICON: Record<NodeKind, { icon: LucideIcon; className: string }> = {
+  directory: { icon: Folder, className: 'text-muted-foreground/70' },
+  builtin: { icon: Blocks, className: 'text-sky-400/80' },
+  mcp: { icon: Plug, className: 'text-violet-400/80' },
+  http: { icon: Globe, className: 'text-teal-400/80' },
+  remote: { icon: Waypoints, className: 'text-fuchsia-400/80' },
+  context: { icon: Database, className: 'text-emerald-400/80' },
+  device: { icon: Cpu, className: 'text-amber-400/80' },
+}
+
+/** 离线设备不进导航树(设备管理页仍可见全部);其余节点原样保留。 */
+function pruneOffline(nodes: TreeJson[]): TreeJson[] {
+  return nodes
+    .filter((n) => n.online !== false)
+    .map((n) => (n.children ? { ...n, children: pruneOffline(n.children) } : n))
+}
 
 /** ~tree 驱动的侧边树导航(可见性即权限:树里没有的就是无权的)。 */
 export function TreeNav() {
@@ -22,12 +49,12 @@ export function TreeNav() {
   if (tree.isError) {
     return <p className="px-3 py-2 text-xs text-destructive">树加载失败:{tree.error.message}</p>
   }
-  const children = tree.data.children ?? []
+  const children = pruneOffline(tree.data.children ?? [])
   if (children.length === 0) {
     return <p className="px-3 py-2 text-xs text-muted-foreground">树为空——先挂载一个节点</p>
   }
   return (
-    <nav className="grid gap-px" aria-label="节点树">
+    <nav className="grid gap-px px-2" aria-label="节点树">
       {children.map((child) => (
         <TreeBranch key={child.path} node={child} depth={0} />
       ))}
@@ -42,38 +69,50 @@ function TreeBranch({ node, depth }: { node: TreeJson; depth: number }) {
   const [open, setOpen] = useState(depth < 1)
   const kids = node.children ?? []
   const label = node.path.split('/').pop() ?? node.path
+  const { icon: Icon, className: iconClass } = KIND_ICON[node.kind] ?? KIND_ICON.directory
   return (
     <div>
-      <div className="group flex items-center gap-1" style={{ paddingLeft: `${depth * 14 + 4}px` }}>
-        {kids.length > 0 ? (
-          <button
-            type="button"
-            aria-label={open ? '收起' : '展开'}
-            onClick={() => setOpen((v) => !v)}
-            className="grid size-4 shrink-0 place-items-center rounded-xs text-muted-foreground hover:text-foreground"
-          >
-            <ChevronRight className={cn('size-3 transition-transform', open && 'rotate-90')} />
-          </button>
-        ) : (
-          <span className="size-4 shrink-0" />
-        )}
+      <div className="group relative flex items-center">
         <NavLink
           to={`/nodes/${node.path}`}
           className={({ isActive }) =>
             cn(
-              'flex min-w-0 flex-1 items-center gap-1.5 rounded-sm px-1.5 py-1 text-[13px] leading-none',
-              'hover:bg-secondary/80',
-              isActive ? 'bg-secondary text-primary' : 'text-foreground/85',
+              'flex h-7 min-w-0 flex-1 items-center gap-1.5 rounded-sm pr-2 pl-6 text-[13px]',
+              'hover:bg-secondary/70',
+              isActive
+                ? 'bg-secondary text-primary shadow-[inset_2px_0_0_var(--primary)]'
+                : 'text-foreground/80',
             )
           }
-          title={node.description}
+          title={`${node.path} · ${node.description}`}
         >
-          <span className="truncate font-mono">{label}</span>
-          <OnlineDot online={node.online} />
-          <KindBadge kind={node.kind} className="ml-auto opacity-0 group-hover:opacity-100" />
+          <Icon className={cn('size-3.5 shrink-0', iconClass)} strokeWidth={1.75} />
+          <span className="truncate font-mono leading-none">{label}</span>
+          {node.online && (
+            <span
+              title="online"
+              className="ml-0.5 inline-block size-1.5 shrink-0 rounded-full bg-ok shadow-[0_0_5px_var(--ok)]"
+            />
+          )}
         </NavLink>
+        {kids.length > 0 && (
+          <button
+            type="button"
+            aria-label={open ? '收起' : '展开'}
+            onClick={() => setOpen((v) => !v)}
+            className="absolute left-0.5 grid size-5 place-items-center rounded-xs text-muted-foreground/60 hover:text-foreground"
+          >
+            <ChevronRight className={cn('size-3 transition-transform', open && 'rotate-90')} />
+          </button>
+        )}
       </div>
-      {open && kids.map((k) => <TreeBranch key={k.path} node={k} depth={depth + 1} />)}
+      {open && kids.length > 0 && (
+        <div className="ml-[15px] border-l border-border/50 pl-1">
+          {kids.map((k) => (
+            <TreeBranch key={k.path} node={k} depth={depth + 1} />
+          ))}
+        </div>
+      )}
     </div>
   )
 }
