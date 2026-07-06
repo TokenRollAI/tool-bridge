@@ -54,7 +54,10 @@ const ENTRY_SCHEMA = {
   type: 'object',
   required: ['content'],
   properties: {
-    contentType: { type: 'string' },
+    contentType: {
+      type: 'string',
+      description: '字符串 content 必填;非字符串 content 缺省 application/json',
+    },
     content: {},
     metadata: METADATA_SCHEMA,
     ifVersion: { type: 'string' },

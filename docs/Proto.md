@@ -467,7 +467,7 @@ interface ContextEntry extends ContextEntryMeta {
                                         //   (阈值与 URL 形态见 §5.2,Phase 3 定型)
 }
 interface ContextEntryInput {
-  contentType: string
+  contentType?: string                  // 字符串 content 必填(缺失 → invalid_argument);非字符串 content 缺省 application/json
   content: string | unknown
   metadata?: Record<string, string>
   ifVersion?: string                    // 不匹配 → conflict
@@ -496,7 +496,7 @@ interface ContextPatch {
 
 **S3 类 authRef 凭证值形状(规范性,Phase 3 定型)**:secret 值为 JSON `{"accessKeyId":"...","secretAccessKey":"..."}`;解析失败 → `invalid_argument`(message 不含值)。
 
-**Search(keyword) 基线范围(规范性,Phase 3 定型)**:r2/s3 的 keyword 匹配 entry 路径名与 metadata 值(子串,大小写不敏感),不拉取对象内容(Workers 子请求上限约束);file provider(node 宿主)才做名称+内容 grep。
+**Search(keyword) 基线范围(规范性,Phase 3 定型)**:r2/s3 的 keyword 匹配 entry 路径名与 metadata 值(子串,大小写不敏感),不拉取对象内容(Workers 子请求上限约束);file provider(node 宿主)才做名称+内容 grep。list 不返回用户 metadata 的后端(如 S3 ListObjectsV2)由实现按需对候选对象 HEAD 补取 metadata 再匹配,单次 Search 补取次数有界(实现常量,当前 200,为子请求上限留余量),超出部分仅按路径名匹配。
 
 ### 5.3 挂载
 

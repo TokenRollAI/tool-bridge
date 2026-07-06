@@ -63,6 +63,9 @@ describe('Write', () => {
     })
     expect(meta.contentType).toBe('application/json')
     expect((await provider.Get('cfg.json')).content).toEqual({ a: 1 })
+    // contentType 字段整个缺省同样落 application/json(Proto §5.1 可选)
+    const meta2 = await provider.Write('cfg2.json', { content: { b: 2 } })
+    expect(meta2.contentType).toBe('application/json')
   })
 
   it('非 string content 且显式 contentType:不被覆盖', async () => {
@@ -82,6 +85,7 @@ describe('Write', () => {
     expect(await codeOf(provider.Write('x', { contentType: '', content: 's' }))).toBe(
       'invalid_argument',
     )
+    expect(await codeOf(provider.Write('x', { content: 's' }))).toBe('invalid_argument')
   })
 
   it('ifVersion:匹配放行;不匹配 / 条目不存在 → conflict', async () => {

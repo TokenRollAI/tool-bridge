@@ -25,7 +25,8 @@ export interface ContextEntry extends ContextEntryMeta {
 }
 
 export interface ContextEntryInput {
-  contentType: string
+  /** 字符串 content 必填(缺失 → invalid_argument);非字符串 content 缺省 application/json。 */
+  contentType?: string
   content: string | unknown
   metadata?: Record<string, string>
   /** 不匹配 → conflict。 */
