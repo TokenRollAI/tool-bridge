@@ -17,6 +17,8 @@ export interface HelpCmd {
   method?: string
   path?: string
   scope?: string
+  /** arguments 的 JSON Schema(Proto §1.3;不含 {tool,arguments} 信封)。 */
+  inputSchema?: unknown
   returns?: string
 }
 

@@ -10,7 +10,11 @@ describe('renderHelpDsl 格式(Proto §1.3)', () => {
         name: 'resolve-library-id',
         method: 'POST',
         path: '/docs/context7',
-        body: { tool: 'resolve-library-id', arguments: { libraryName: 'string' } },
+        inputSchema: {
+          type: 'object',
+          properties: { libraryName: { type: 'string' } },
+          required: ['libraryName'],
+        },
         returns: 'markdown 文档库列表',
         scope: 'call',
       },
@@ -30,9 +34,9 @@ describe('renderHelpDsl 格式(Proto §1.3)', () => {
     expect(lines[2]).toBe('cmd resolve-library-id POST /docs/context7')
   })
 
-  it('body 行为单行 JSON 且带两空格缩进', () => {
+  it('body 行为请求信封示意(tool+arguments),单行 JSON 且带两空格缩进', () => {
     expect(lines[3]).toBe(
-      '  body {"tool":"resolve-library-id","arguments":{"libraryName":"string"}}',
+      '  body {"tool":"resolve-library-id","arguments":{"type":"object","properties":{"libraryName":{"type":"string"}},"required":["libraryName"]}}',
     )
   })
 

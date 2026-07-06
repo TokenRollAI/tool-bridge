@@ -18,14 +18,18 @@ export interface ChildRef {
 /**
  * 单条命令声明(Proto §1.3)。`path` 是数据面调用的 HTTP 路径(如 "/docs/context7",
  * 带前导 '/'),DSL 的 `cmd` 行与 JSON 的 `cmds[].path` 都原样承载它。
- * `scope` 必填(§1.3:每个 cmd 必须声明 scope);`body`/`returns`/`effect`/`confirm` 可选。
+ * `scope` 必填(§1.3:每个 cmd 必须声明 scope);`inputSchema`/`returns`/`effect`/`confirm` 可选。
+ *
+ * `inputSchema` 是该 cmd `arguments` 的 JSON Schema(不含 {tool,arguments} 信封,Proto §1.3)——
+ * JSON 表现直接输出它;DSL 的 `body` 行则由它生成请求信封示意(`renderHelpDsl` 负责),
+ * 二者语义等价、结构表现不同。
  */
 export interface CmdSpec {
   name: string
   method: 'POST'
   path: string
-  /** JSON Schema(有 inputSchema 时);DSL 渲染为单行 JSON 的 `body` 行。 */
-  body?: unknown
+  /** 该 cmd `arguments` 的 JSON Schema(Proto §1.3;不含 {tool,arguments} 信封)。 */
+  inputSchema?: unknown
   returns?: string
   scope: Action
   /** 副作用描述(HTBP 属性表可选)。 */
@@ -54,7 +58,8 @@ export interface HelpJson {
     name: string
     method: 'POST'
     path: string
-    body?: unknown
+    /** arguments 的 JSON Schema(Proto §1.3;不含 {tool,arguments} 信封)。 */
+    inputSchema?: unknown
     returns?: string
     scope: Action
     effect?: string

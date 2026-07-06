@@ -162,6 +162,19 @@ describe('update(Proto §0.4)', () => {
       code: 'invalid_argument',
     })
   })
+
+  it('patch 注入 registeredBy/createdAt 被忽略(只覆盖白名单字段)', async () => {
+    await reg.write(mcp('a/b/c'), 'user:1', T1)
+    const u = await reg.update(
+      'a/b/c',
+      { description: '改', registeredBy: 'attacker', createdAt: T2 } as never,
+      T2,
+    )
+    expect(u.registeredBy).toBe('user:1')
+    expect(u.createdAt).toBe(T1)
+    expect(u.description).toBe('改')
+    expect(u.updatedAt).toBe(T2)
+  })
 })
 
 describe('resolve 最长前缀匹配(Proto §3.3)', () => {

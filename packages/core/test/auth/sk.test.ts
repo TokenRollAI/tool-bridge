@@ -171,6 +171,26 @@ describe('SKRegistryStore(Proto §2.3 SKRegistry 语义)', () => {
     expect(updated.expiresAt).toBe(FUTURE)
   })
 
+  it('update:注入 hash/id/createdAt 被忽略,原 secret 仍可 identify(不可变字段)', async () => {
+    const { key, secret } = await reg.write(input(), NOW)
+    const origHash = await sha256Hex(secret)
+    // patch 携带不可变字段(hash/id/createdAt):update 只覆盖白名单字段,三者应被丢弃。
+    const updated = await reg.update(key.id, {
+      description: 'patched',
+      hash: 'forged-hash',
+      id: 'forged-id',
+      createdAt: FUTURE,
+    } as never)
+    expect(updated.id).toBe(key.id)
+    expect(updated.createdAt).toBe(NOW)
+    expect(updated.description).toBe('patched')
+    // 原 secret 的 identify 仍成立:hash 未被伪造值改写(仍以 origHash 落库)。
+    expect(await store.get(KEY_SK_HASH + origHash)).not.toBeNull()
+    expect(await store.get(KEY_SK_HASH + 'forged-hash')).toBeNull()
+    const ctx = await identify(store, secret, NOW)
+    expect(ctx?.keyId).toBe(key.id)
+  })
+
   it('update:不存在 → not_found', async () => {
     await expect(reg.update('nope', { disabled: true })).rejects.toSatisfy(
       (e) => isTBError(e) && e.code === 'not_found',

@@ -58,19 +58,44 @@ export class NodeRegistryStore {
 
   /** 翻页取尽 node:* 全量。 */
   private async scanAll(): Promise<TreeNode[]> {
+    return this.scanPrefix(KEY_NODE)
+  }
+
+  /**
+   * 翻页扫描给定 KV 键前缀下的所有 TreeNode。
+   *
+   * 只扫子树(前缀限定),不再对全树做内存过滤——避免 children/hasChildren/subtree 的
+   * O(N²)(每层各扫全树)。`opts.limit` 传给底层 `store.list` 以小步取(hasChildren 短路用)。
+   *
+   * **Workers 子请求上限约束**:KvStateStore.list 对每个键各发一次 `get`,即翻页取到的每个
+   * 键消耗一次 Workers 子请求(免费套餐 50 / 付费 1000,含出站 fetch 与 KV 读)。故子树规模
+   * (含中间 directory)应远小于该上限——Phase 1 树规模小(节点数十级)可接受;规模变大后
+   * 需改 KV metadata 承载值(list 不再逐 get)或换 SQLite 宿主。
+   */
+  private async scanPrefix(keyPrefix: string, opts?: { limit?: number }): Promise<TreeNode[]> {
     const out: TreeNode[] = []
     let cursor: string | undefined
     do {
-      const page = await this.store.list(KEY_NODE, { cursor, limit: LIST_LIMIT_MAX })
+      const page = await this.store.list(keyPrefix, {
+        limit: opts?.limit ?? LIST_LIMIT_MAX,
+        ...(cursor !== undefined ? { cursor } : {}),
+      })
       for (const { value } of page.items) out.push(value as TreeNode)
       cursor = page.cursor
     } while (cursor)
     return out
   }
 
+  /** KV 前缀:某路径的子树(含中间 directory)= `node:<path>/`;根('')= `node:`。 */
+  private subtreePrefix(norm: string): string {
+    return norm === '' ? KEY_NODE : `${KEY_NODE}${norm}/`
+  }
+
   private async hasChildren(path: string): Promise<boolean> {
     const norm = normalizePath(path)
-    return (await this.scanAll()).some((n) => n.path !== norm && isPrefixOf(norm, n.path))
+    // 只扫子树前缀,小步取(limit=1);拿到任一后代即短路(存在直接/间接子都算有子)。
+    const page = await this.store.list(this.subtreePrefix(norm), { limit: 1 })
+    return page.items.length > 0
   }
 
   /** 取单个;不存在 → not_found(Proto §0.4)。 */
@@ -99,15 +124,26 @@ export class NodeRegistryStore {
     }
   }
 
-  /** 直接子节点(段深恰好 +1);~help 列子节点用。 */
+  /** 直接子节点(段深恰好 +1);~help 列子节点用。只扫子树前缀,不扫全树。 */
   async children(path: TreePath): Promise<TreeNode[]> {
     const norm = normalizePath(path)
     const depth = segments(norm).length
-    return (await this.scanAll())
-      .filter(
-        (n) => n.path !== norm && isPrefixOf(norm, n.path) && segments(n.path).length === depth + 1,
-      )
-      .sort(byPath)
+    const sub = await this.scanPrefix(this.subtreePrefix(norm))
+    return sub.filter((n) => segments(n.path).length === depth + 1).sort(byPath)
+  }
+
+  /**
+   * 一次性取整棵子树的节点数组(含 `path` 自身 + 全部后代),按 path 排序。
+   * 供 `~tree` 建树一次读入内存(而非每层递归各扫一遍)。根('')= 全树。
+   * 不存在的根返回空数组(调用方自行判 not_found)。
+   */
+  async subtree(path: TreePath): Promise<TreeNode[]> {
+    const norm = normalizePath(path)
+    const descendants = await this.scanPrefix(this.subtreePrefix(norm))
+    if (norm === '') return descendants.sort(byPath)
+    const self = await this.read(norm)
+    const all = self ? [self, ...descendants] : descendants
+    return all.sort(byPath)
   }
 
   /**

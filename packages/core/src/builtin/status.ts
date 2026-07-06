@@ -32,7 +32,7 @@ function statusCmds(nodePath: TreePath): CmdSpec[] {
       name: 'get',
       method: 'POST',
       path: cmdPath(nodePath),
-      body: {},
+      inputSchema: { type: 'object', properties: {} },
       returns: '{ healthy, version, nodeCount }',
       scope: 'read',
     },

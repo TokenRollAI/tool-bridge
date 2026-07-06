@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { parseHelpDsl, renderHelpDsl, renderHelpJson } from '../../src/htbp/helpDsl'
 import type { HelpModel } from '../../src/htbp/model'
 
-/** 覆盖:必填 scope + 可选 body/returns/effect/confirm + directory children。 */
+/** 覆盖:必填 scope + 可选 inputSchema/returns/effect/confirm + directory children。 */
 const model: HelpModel = {
   node: { path: 'docs/context7', kind: 'mcp', description: 'Context7 文档检索' },
   cmds: [
@@ -10,7 +10,11 @@ const model: HelpModel = {
       name: 'resolve-library-id',
       method: 'POST',
       path: '/docs/context7',
-      body: { tool: 'resolve-library-id', arguments: { libraryName: 'string' } },
+      inputSchema: {
+        type: 'object',
+        properties: { libraryName: { type: 'string' } },
+        required: ['libraryName'],
+      },
       returns: 'markdown 文档库列表',
       scope: 'call',
     },
@@ -82,16 +86,20 @@ describe('renderHelpJson 字段不多不少(§1.3 规范性)', () => {
   const json = renderHelpJson(model)
 
   it('有值字段出现、无值字段缺席(toEqual 精确匹配即断言无多余键)', () => {
-    // 第一条:带 body/returns,无 effect/confirm
+    // 第一条:带 inputSchema/returns,无 effect/confirm
     expect(json.cmds[0]).toEqual({
       name: 'resolve-library-id',
       method: 'POST',
       path: '/docs/context7',
       scope: 'call',
-      body: { tool: 'resolve-library-id', arguments: { libraryName: 'string' } },
+      inputSchema: {
+        type: 'object',
+        properties: { libraryName: { type: 'string' } },
+        required: ['libraryName'],
+      },
       returns: 'markdown 文档库列表',
     })
-    // 第二条:带 effect/confirm,无 body/returns
+    // 第二条:带 effect/confirm,无 inputSchema/returns
     expect(json.cmds[1]).toEqual({
       name: 'delete-cache',
       method: 'POST',

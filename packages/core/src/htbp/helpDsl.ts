@@ -24,14 +24,20 @@ function nodeLine(path: string, kind: string, description: string): string {
  * 渲染 Help DSL(Proto §1.3):
  *   首行 `htbp 0.1`;`node` 行;每 cmd 一行 `cmd <name> POST <path>` +
  *   缩进的 `body`/`returns`/`scope`/`effect`/`confirm`;directory 的 children 续为 `node` 行。
- * `scope` 恒有;`body`/`returns`/`effect` 有值才渲染;`confirm` 仅在为真时渲染(其缺席即默认 false)。
+ * `scope` 恒有;`inputSchema`/`returns`/`effect` 有值才渲染;`confirm` 仅在为真时渲染(其缺席即默认 false)。
+ *
+ * `body` 行是**请求信封示意**(Proto §1.3):由 cmd 的 `inputSchema`(arguments 的 JSON Schema)
+ * 包成 `{ "tool": <name>, "arguments": <inputSchema> }` 单行紧凑 JSON——与 JSON 表现的
+ * 裸 `inputSchema` 语义等价、结构表现不同。
  */
 export function renderHelpDsl(model: HelpModel): string {
   const lines: string[] = [HTBP_HELP_HEADER]
   lines.push(nodeLine(model.node.path, model.node.kind, model.node.description))
   for (const cmd of model.cmds) {
     lines.push(`cmd ${cmd.name} ${cmd.method} ${cmd.path}`)
-    if (cmd.body !== undefined) lines.push(`  body ${JSON.stringify(cmd.body)}`)
+    if (cmd.inputSchema !== undefined) {
+      lines.push(`  body ${JSON.stringify({ tool: cmd.name, arguments: cmd.inputSchema })}`)
+    }
     if (cmd.returns !== undefined) lines.push(`  returns ${cmd.returns}`)
     lines.push(`  scope ${cmd.scope}`)
     if (cmd.effect !== undefined) lines.push(`  effect ${cmd.effect}`)
@@ -47,8 +53,9 @@ export function renderHelpDsl(model: HelpModel): string {
 
 /**
  * 渲染 Help JSON(Proto §1.3,规范性)——与 DSL 语义等价、字段不多不少。
- * `body`/`returns`/`effect` 仅在有值时出现;`confirm` 仅在为真时出现(与 DSL 的存在性对齐)。
- * 注:JSON 的 `node.path`/`children[].path` 承载原始 TreePath(根为空串),不做 DSL 的 '/' 显示化。
+ * `inputSchema`/`returns`/`effect` 仅在有值时出现;`confirm` 仅在为真时出现(与 DSL 的存在性对齐)。
+ * 注:JSON 的 `cmds[].inputSchema` 是 arguments 的裸 JSON Schema(不含信封);DSL 的 `body` 行
+ * 才把它包成请求信封示意。JSON 的 `node.path`/`children[].path` 承载原始 TreePath(根为空串)。
  */
 export function renderHelpJson(model: HelpModel): HelpJson {
   const cmds = model.cmds.map((cmd) => {
@@ -58,7 +65,7 @@ export function renderHelpJson(model: HelpModel): HelpJson {
       path: cmd.path,
       scope: cmd.scope,
     }
-    if (cmd.body !== undefined) out.body = cmd.body
+    if (cmd.inputSchema !== undefined) out.inputSchema = cmd.inputSchema
     if (cmd.returns !== undefined) out.returns = cmd.returns
     if (cmd.effect !== undefined) out.effect = cmd.effect
     if (cmd.confirm) out.confirm = cmd.confirm
