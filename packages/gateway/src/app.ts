@@ -15,7 +15,6 @@ import {
   isTBError,
   NodeRegistryStore,
   negotiate,
-  type NodeInput,
   parseNodeInput,
   type Representation,
   renderHelpDsl,
@@ -24,12 +23,12 @@ import {
   SecretStoreImpl,
   type StateStore,
   TBError,
-  toolsToHelpModel,
   type ToolSpec,
   type TreeEntry,
   type TreeJson,
   type TreeNode,
   type TreePath,
+  toolsToHelpModel,
   virtualizeTools,
 } from '@tool-bridge/core'
 import { type Context, Hono } from 'hono'
@@ -189,6 +188,13 @@ export function createApp(): Hono<{ Bindings: Env; Variables: Vars }> {
     if (path !== '' && !check(ctx, path, 'read').allow) throw TBError.notFound('not found')
     const registry = new NodeRegistryStore(store)
 
+    // remote 透传:非根路径命中 remote 节点(或其后代)→ 改写 ~tree 打到 baseUrl,
+    // 远端返回的子树作为响应(query 如 ?depth 一并带过去)。
+    if (path !== '') {
+      const remote = await remotePassthroughIfMatch(c, ctx, registry, path, '~tree')
+      if (remote) return remote
+    }
+
     // 子树根必须真实存在(§否则 ~tree 可伪造任意根)。非根 path 不存在 → 404;
     // 存在则以真实节点元数据作 rootEntry(kind/description/online),不再伪造为 directory。
     let rootEntry: TreeEntry | undefined
@@ -250,6 +256,11 @@ export function createApp(): Hono<{ Bindings: Env; Variables: Vars }> {
 
     // 不可见(read 判不过)→ 404 不泄露存在性(v1 教训:deny==not_found)。
     if (!check(ctx, path, 'read').allow) throw TBError.notFound('not found')
+
+    // remote 透传:命中 remote 节点(或其后代)→ 改写 ~help 打到 baseUrl。
+    const remote = await remotePassthroughIfMatch(c, ctx, registry, path, '~help')
+    if (remote) return remote
+
     let node: TreeNode
     try {
       node = await registry.get(path)
@@ -257,7 +268,14 @@ export function createApp(): Hono<{ Bindings: Env; Variables: Vars }> {
       throw TBError.notFound('not found')
     }
     const builtins = createBuiltins(buildDeps(store, c.env, pkg.version))
-    const model = await helpModelFor(node, registry, ctx, builtins)
+    const refresh = c.req.query('refresh') === '1'
+    const model = await helpModelFor(node, registry, ctx, builtins, {
+      store,
+      secrets: secretStore(store, c.env),
+      env: c.env,
+      refresh,
+      now: new Date().toISOString(),
+    })
     return renderHelp(model, rep)
   }
 
@@ -274,14 +292,48 @@ export function createApp(): Hono<{ Bindings: Env; Variables: Vars }> {
 
     // 节点不可见 → 404(隐藏存在性)。
     if (!check(ctx, raw, 'read').allow) throw TBError.notFound('not found')
+
+    // remote 透传:命中 remote 节点(或其后代)→ 改写 POST 打到 baseUrl(scope 恒 'call')。
+    const remote = await remotePassthroughIfMatch(c, ctx, registry, raw, null)
+    if (remote) return remote
+
     let node: TreeNode
     try {
       node = await registry.get(raw)
     } catch {
       throw TBError.notFound('not found')
     }
+
+    // --- mcp/http 上游工具调用(Proto §4.2):scope 恒 'call';虚拟名反查上游真名再调 Provider。 ---
+    if ((node.kind === 'mcp' || node.kind === 'http') && node.config !== undefined) {
+      if (!check(ctx, node.path, 'call').allow) {
+        throw new TBError('permission_denied', `no scope grants 'call' on '${node.path}'`)
+      }
+      const body = (await c.req.json().catch(() => null)) as {
+        tool?: unknown
+        arguments?: unknown
+      } | null
+      if (!body || typeof body.tool !== 'string') {
+        throw new TBError('invalid_argument', 'body must be {tool, arguments}')
+      }
+      const args = (body.arguments ?? {}) as Record<string, unknown>
+      const provider = providerFor(node, secretStore(store, c.env), c.env)
+      const tools = await upstreamTools(
+        node,
+        provider,
+        store,
+        c.env,
+        false,
+        new Date().toISOString(),
+      )
+      const upstreamName = resolveUpstreamTool(node.virtualize, tools, body.tool)
+      const result = await provider.call(upstreamName, args)
+      // MCP RPC 业务错误(result.isError)是正常返回值(HTTP 200),按 §1.2 协商渲染其 content。
+      return renderResult(result.content, negotiate(c.req.header('accept')))
+    }
+
     if (node.kind !== 'builtin' || node.config?.kind !== 'builtin') {
-      throw TBError.unimplemented(`kind '${node.kind}' not callable in Phase 1`)
+      throw TBError.unimplemented(`kind '${node.kind}' not callable`)
     }
 
     const builtins = createBuiltins(buildDeps(store, c.env, pkg.version))
@@ -307,21 +359,42 @@ export function createApp(): Hono<{ Bindings: Env; Variables: Vars }> {
     }
 
     // registry 模块的 write/update/delete 额外过 §2.4(资源 = arguments.path)。
+    let registryTarget: string | undefined
     if (node.config.module === 'registry' && ['write', 'update', 'delete'].includes(cmd)) {
       const targetPath = typeof args.path === 'string' ? args.path : undefined
       if (targetPath === undefined) {
         throw new TBError('invalid_argument', "field 'path' must be a string")
       }
+      // 挂载/更新 remote 节点时校验 baseUrl 白名单(Proto §3.4,注册时即拒)。
+      if (cmd === 'write') {
+        assertRemoteConfigAllowed(args.config, c.env)
+      } else if (cmd === 'update') {
+        const patch = args.patch as { config?: unknown } | undefined
+        assertRemoteConfigAllowed(patch?.config, c.env)
+      }
       await assertRegisterPath(registry, ctx, targetPath, cmd === 'delete' ? 'delete' : 'write')
+      registryTarget = targetPath
     }
 
     const result = await mod.dispatch(cmd, args, ctx)
+    // 注册变更 → 失效该节点工具缓存(Proto §4.2:Write/Update/Delete 触发失效)。
+    if (registryTarget !== undefined) await invalidateToolCache(store, registryTarget)
     return renderResult(result, negotiate(c.req.header('accept')))
   }
 
-  // --- ~skill:Phase 1 占位 501 ---
-  const handleSkill = (_c: AppContext): Response =>
-    tbErrorResponse(TBError.unimplemented('~skill not implemented yet'))
+  // --- ~skill:remote 透传;本地 Phase 1 占位 501 ---
+  const handleSkill = async (c: AppContext): Promise<Response> => {
+    const path = splitReserved(new URL(c.req.url).pathname, '~skill')
+    if (path === null) throw TBError.notFound('no such path')
+    const ctx = c.get('ctx')
+    const store = c.get('store')
+    const registry = new NodeRegistryStore(store)
+    if (path !== '') {
+      const remote = await remotePassthroughIfMatch(c, ctx, registry, path, '~skill')
+      if (remote) return remote
+    }
+    return tbErrorResponse(TBError.unimplemented('~skill not implemented yet'))
+  }
 
   // GET 通配分派:按 pathname 末段路由到 ~help / ~tree / ~skill;其余 GET 无对应端点 → 404。
   // (不用 `/:path{.*}/~help` 具名后缀路由——Hono 该形式对 3+ 段路径不匹配。)
@@ -332,7 +405,7 @@ export function createApp(): Hono<{ Bindings: Env; Variables: Vars }> {
       const last = new URL(c.req.url).pathname.replace(/\/+$/, '').split('/').pop() ?? ''
       if (last === '~help') return await handleHelp(c)
       if (last === '~tree') return await handleTree(c)
-      if (last === '~skill') return handleSkill(c)
+      if (last === '~skill') return await handleSkill(c)
       throw TBError.notFound('no such path')
     }),
   )
@@ -357,6 +430,8 @@ export function createApp(): Hono<{ Bindings: Env; Variables: Vars }> {
     }
     // 复用与 system/registry write 相同的 NodeInput 校验(kind/description 必填、kind 枚举合法)。
     const body = parseNodeInput(raw)
+    // 挂载 remote 节点时校验 baseUrl 白名单(Proto §3.4,注册时即拒)。
+    assertRemoteConfigAllowed(body.config, c.env)
     // register 判定 + §2.4 路径规则(含 existing 查询)。
     if (!check(ctx, path, 'register').allow) {
       throw new TBError('permission_denied', `no scope grants 'register' on '${path}'`)
@@ -364,6 +439,8 @@ export function createApp(): Hono<{ Bindings: Env; Variables: Vars }> {
     await assertRegisterPath(registry, ctx, body.path, 'write')
     const now = new Date().toISOString()
     const node = await registry.write(body, ctx.keyId, now)
+    // 注册变更 → 失效该节点工具缓存(Proto §4.2)。
+    await invalidateToolCache(store, body.path)
     return new Response(JSON.stringify(node), {
       headers: { 'content-type': contentTypeFor('json') },
     })
@@ -529,7 +606,9 @@ async function remotePassthroughIfMatch(
   const requestPath = reservedTail === null ? treePath : `${treePath}/${reservedTail}`
   const body = method === 'POST' ? await c.req.text() : undefined
   const store = c.get('store')
-  return passthroughRemote({
+  // 必须 await(而非裸 return async promise):裸返回时其 reject 会在链接那一 tick 被
+  // workerd/miniflare 误报为 unhandled rejection,即便 runHandler 最终 catch(同 GET 通配注释)。
+  return await passthroughRemote({
     config: node.config,
     nodePath: node.path,
     requestPath,
@@ -542,11 +621,15 @@ async function remotePassthroughIfMatch(
   })
 }
 
-/** 注册 remote 节点时的白名单校验(kind:'remote' → baseUrl 必须在 §7 白名单内)。 */
-function assertRemoteConfigAllowed(input: Pick<NodeInput, 'kind' | 'config'>, env: Env): void {
-  if (input.kind === 'remote' && input.config?.kind === 'remote') {
-    assertRemoteAllowed(input.config.baseUrl, env)
+/** 注册 remote 节点时的白名单校验:config.kind==='remote' → baseUrl 必须在 §7 白名单内。 */
+function assertRemoteConfigAllowed(config: unknown, env: Env): void {
+  if (config === null || typeof config !== 'object') return
+  if ((config as { kind?: unknown }).kind !== 'remote') return
+  const baseUrl = (config as { baseUrl?: unknown }).baseUrl
+  if (typeof baseUrl !== 'string') {
+    throw new TBError('invalid_argument', 'remote config 缺少 baseUrl')
   }
+  assertRemoteAllowed(baseUrl, env)
 }
 
 /** ~tree 的 DSL 文本渲染:每行缩进树(简单实现;JSON 是规范形状,Proto §1.3)。 */
