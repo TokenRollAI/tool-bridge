@@ -250,7 +250,7 @@
 
 **职责**:`~help` 的**通用渲染器**(Case 6)。给定 SK + BaseURL:拉 `~tree` 渲染导航、拉 `~help` 渲染每个节点的表单(cmd 的参数即表单字段)、`POST` 发送并展示返回值(markdown 渲染 / JSON 视图)。管理视图(SK 管理、节点挂载、Plugin 注册)同样是 `system/*` 子树 `~help` 的渲染,不存在专用后端。
 
-落地:**与 gateway 同 Worker 部署,不额外增加 Pages/Worker**——Dashboard 构建产物作为 Workers Static Assets 挂在 `tb-gateway` 上,路径前缀 `/ui/*`(`ui` 为保留根路径,不与树路径冲突;浏览器 `GET /` 且 `Accept: text/html` 时 302 → `/ui/`)。**路由次序(Phase 6 前置核实)**:Worker 逻辑先行(`run_worker_first`)或将 assets 严格限定 `/ui` 前缀、SPA not_found 回退只在 `/ui` 内生效——静态资源回退不得吞掉根 `~help`、`POST /<path>` 与 `system/*` 路由。**技术栈用成熟前端框架**(Reference §5):React 19 + Vite + Ant Design v5(管理台组件)+ @rjsf(JSON Schema → 表单自动渲染——`~help` JSON 表现中 cmd 的 inputSchema 直接喂给它)+ TanStack Query(数据层)+ react-markdown(返回值渲染)。Docker 部署时由同一镜像在同一端口静态托管构建产物(同样挂 `/ui`)。
+落地:**与 gateway 同 Worker 部署,不额外增加 Pages/Worker**——Dashboard 构建产物作为 Workers Static Assets 挂在 `tb-gateway` 上,路径前缀 `/ui/*`(`ui` 为保留根路径,不与树路径冲突;浏览器 `GET /` 且 `Accept: text/html` 时 302 → `/ui/`)。**路由次序(Phase 6 前置核实)**:Worker 逻辑先行(`run_worker_first`)或将 assets 严格限定 `/ui` 前缀、SPA not_found 回退只在 `/ui` 内生效——静态资源回退不得吞掉根 `~help`、`POST /<path>` 与 `system/*` 路由。**技术栈用成熟前端框架**(Reference §5):React 19 + Vite + Tailwind CSS + shadcn/ui(Radix 底座的管理台组件;**不用 antd**,2026-07-06 用户定案)+ inputSchema→表单渲染(优先 @rjsf/shadcn,React 19 兼容性经 Phase 6 前置 spike 验证,不兼容则以 shadcn Form + react-hook-form 手接有界渲染器兜底)+ TanStack Query(数据层)+ react-markdown(返回值渲染)。Docker 部署时由同一镜像在同一端口静态托管构建产物(同样挂 `/ui`)。
 
 ---
 

@@ -59,7 +59,8 @@ describe('put/head/get/delete 往返(真实文件系统)', () => {
     expect(head?.etag).toBe(meta.etag) // mtime+size 派生:put 后 stat 即稳定
     const got = await store.get('roota/docs/a.md')
     expect(got?.meta.etag).toBe(meta.etag)
-    expect(await readStreamText(got!.body)).toBe('hello')
+    if (got === null) throw new Error('expected object')
+    expect(await readStreamText(got.body)).toBe('hello')
   })
 
   it('覆写(内容不同)→ etag 变化', async () => {
@@ -131,7 +132,8 @@ describe('穿越与 symlink 逃逸拒绝', () => {
     await store.put('roota/real.txt', 'inside')
     await symlink(join(rootA, 'real.txt'), join(rootA, 'alias.txt'))
     const got = await store.get('roota/alias.txt')
-    expect(await readStreamText(got!.body)).toBe('inside')
+    if (got === null) throw new Error('expected object')
+    expect(await readStreamText(got.body)).toBe('inside')
   })
 
   it('list 静默跳过逃逸 symlink', async () => {

@@ -17,6 +17,11 @@ import {
 import type { Env } from './app'
 import { KvStateStore } from './kvStateStore'
 
+interface BootstrapEnv {
+  TB_BOOTSTRAP_ADMIN_SK?: string
+  TB_SECRET_ENCRYPTION_KEY?: string
+}
+
 /**
  * Admin SK 引导 + 内置节点物化(Proto §2.3 Admin SK 引导、Arch:304 引导顺序)。
  *
@@ -53,7 +58,7 @@ async function mintAdminWithPlaintext(
   await store.put(KEY_SK_ID + adminKey.id, adminKey.hash)
 }
 
-async function doBootstrap(store: StateStore, env: Env): Promise<void> {
+async function doBootstrap(store: StateStore, env: BootstrapEnv): Promise<void> {
   if ((await store.get(KEY_BOOTSTRAPPED)) !== null) return
 
   const now = new Date().toISOString()
@@ -90,7 +95,7 @@ async function doBootstrap(store: StateStore, env: Env): Promise<void> {
  * 首个请求时惰性引导(幂等 + 并发安全)。返回后 store 已就绪。
  * env 传入以取 TB_BOOTSTRAP_ADMIN_SK / TB_SECRET_ENCRYPTION_KEY(后者供 secret 能力)。
  */
-export function ensureBootstrapped(store: StateStore, env: Env): Promise<void> {
+export function ensureBootstrapped(store: StateStore, env: BootstrapEnv): Promise<void> {
   if (bootstrapOnce === undefined) {
     bootstrapOnce = doBootstrap(store, env).catch((err) => {
       // 引导失败:重置 once 以便下个请求重试(避免永久卡死)。

@@ -18,7 +18,7 @@
     "gen-dev-vars": "node scripts/gen-dev-vars.mjs",
     "provision": "node scripts/provision.mjs",
     "smoke": "tsx scripts/smoke.ts",
-    "deploy:all": "node scripts/provision.mjs && pnpm --filter @tool-bridge/gateway run deploy"
+    "deploy:all": "node scripts/provision.mjs && pnpm --filter @tool-bridge/dashboard build && pnpm --filter @tool-bridge/gateway run deploy"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.2",

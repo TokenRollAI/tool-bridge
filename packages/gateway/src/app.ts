@@ -15,6 +15,10 @@ import {
   contextScopeForCmd,
   createBuiltins,
   createObjectContextProvider,
+  type DeviceCallResult,
+  deviceDirectoryHelpModel,
+  deviceFsHelpModel,
+  deviceShellHelpModel,
   type HelpModel,
   identify,
   isContextExpired,
@@ -35,6 +39,7 @@ import {
   SecretStoreImpl,
   type StateStore,
   TBError,
+  type TBErrorBody,
   type ToolSpec,
   type TreeEntry,
   type TreeJson,
@@ -46,6 +51,7 @@ import {
 import { type Context, Hono } from 'hono'
 import pkg from '../package.json' with { type: 'json' }
 import { buildDeps, ensureBootstrapped } from './bootstrap'
+import type { DeviceSession } from './deviceSession'
 import { KvStateStore } from './kvStateStore'
 import { createHttpProvider, type HttpConfig } from './providers/http'
 import { createMcpProvider, type McpConfig } from './providers/mcp'
@@ -85,6 +91,12 @@ export interface Env {
   TB_REF_THRESHOLD_BYTES?: string
   /** $ref URL(presign 与 /~ref 中转)有效期秒(缺省 900)。 */
   TB_REF_TTL_SEC?: string
+  /** DeviceSession Durable Object(Phase 4 设备 WS hibernation)。 */
+  TB_DEVICE: DurableObjectNamespace<DeviceSession>
+  /** Dashboard 静态资源(Workers Static Assets,M9;本地测试/未部署 UI 时可缺省)。 */
+  ASSETS?: Fetcher
+  /** 设备断线后未重连的回收秒数(缺省 24h)。 */
+  TB_DEVICE_RECLAIM_SEC?: string
   /** opt-in 集成测试:真实 MCP echo server 的 URL(仅测试注入)。 */
   TB_TEST_MCP_URL?: string
   /** opt-in 集成测试:S3 兼容端点与凭证(仅测试注入)。 */
@@ -221,7 +233,34 @@ export function createApp(): Hono<{ Bindings: Env; Variables: Vars }> {
     }),
   )
 
-  // 认证中间件(除 /healthz 外全路由):Bearer → identify → 401 或注入 ctx(Proto §0.2)。
+  // --- /ui Dashboard 静态资源(Workers Static Assets,Architecture M9)---
+  // wrangler.jsonc assets.run_worker_first=true:一切请求先进 Worker,静态资源仅由
+  // 此处显式转发,SPA 回退只在 /ui 内生效——不可能吞根 ~help、POST 数据面与 system/*。
+  // /ui 免认证:登录页本身须在无 SK 时可加载(SK 只存浏览器,静态资源不含机密)。
+  const serveUi = async (c: AppContext): Promise<Response> => {
+    const assets = c.env.ASSETS
+    if (assets === undefined) {
+      return tbErrorResponse(TBError.notFound('dashboard assets not deployed'))
+    }
+    const url = new URL(c.req.url)
+    // 构建产物是站点根布局(index.html + assets/*),/ui 挂载前缀在此剥离。
+    const sub = url.pathname.slice('/ui'.length) || '/'
+    const res = await assets.fetch(new URL(sub, url.origin))
+    if (res.status !== 404) return res
+    // SPA 回退(仅 /ui 内):深链交给前端路由,由 '/' 取回 index.html。
+    return await assets.fetch(new URL('/', url.origin))
+  }
+  app.get('/ui', (c) => c.redirect('/ui/', 302))
+  app.get('/ui/*', serveUi)
+
+  // 浏览器直开根路径 → Dashboard(Architecture M9:GET / 且 Accept 带 text/html 时 302);
+  // 非 HTML 客户端(Agent/CLI)落回后续路由,行为与此前一致(401/404)。
+  app.get('/', async (c, next) => {
+    if (c.req.header('accept')?.includes('text/html')) return c.redirect('/ui/', 302)
+    await next()
+  })
+
+  // 认证中间件(/healthz、/~ref、/ui 静态资源之外全路由):Bearer → identify → 401 或注入 ctx(Proto §0.2)。
   app.use('*', async (c, next) => {
     const store = new KvStateStore(c.env.TB_KV)
     try {
@@ -237,6 +276,19 @@ export function createApp(): Hono<{ Bindings: Env; Variables: Vars }> {
     }
     await next()
   })
+
+  // WS /system/device/ws?deviceId=<id> → 每 deviceId 一个 DeviceSession DO。
+  // deviceId 同时在 hello 帧中出现;DO 会校验二者一致,以满足 Proto §6.1 的帧契约。
+  app.get('/system/device/ws', (c) =>
+    runHandler(async () => {
+      if (c.req.header('upgrade')?.toLowerCase() !== 'websocket') {
+        throw new TBError('invalid_argument', 'device ws requires WebSocket upgrade')
+      }
+      const deviceId = c.req.query('deviceId')
+      if (!deviceId) throw new TBError('invalid_argument', 'deviceId query is required')
+      return await c.env.TB_DEVICE.getByName(deviceId).fetch(c.req.raw)
+    }),
+  )
 
   // --- ~tree(根级与子树)---
   const handleTree = async (c: AppContext): Promise<Response> => {
@@ -400,6 +452,29 @@ export function createApp(): Hono<{ Bindings: Env; Variables: Vars }> {
       return renderResult(result.content, negotiate(c.req.header('accept')))
     }
 
+    // --- device shell 调用(Proto §6.3):节点级 read/call 后转发到 DeviceSession DO。 ---
+    if (node.kind === 'device' && node.config?.kind === 'device') {
+      if (!check(ctx, node.path, 'call').allow) {
+        throw new TBError('permission_denied', `no scope grants 'call' on '${node.path}'`)
+      }
+      const body = (await c.req.json().catch(() => null)) as {
+        tool?: unknown
+        arguments?: unknown
+      } | null
+      if (!body || typeof body.tool !== 'string') {
+        throw new TBError('invalid_argument', 'body must be {tool, arguments}')
+      }
+      if (body.tool !== 'exec') {
+        throw new TBError('invalid_argument', `unknown cmd '${body.tool}' on '${node.path}'`)
+      }
+      const result = await invokeDevice(c.env, node.config.deviceId, {
+        path: 'shell',
+        tool: body.tool,
+        arguments: (body.arguments ?? {}) as Record<string, unknown>,
+      })
+      return renderResult(result, negotiate(c.req.header('accept')))
+    }
+
     // --- context namespace 数据面(Proto §5):四动词 + Search/Delete,cmd→scope 静态表判定。 ---
     if (node.kind === 'context' && node.config?.kind === 'context') {
       const cfg = node.config
@@ -423,6 +498,14 @@ export function createApp(): Hono<{ Bindings: Env; Variables: Vars }> {
       // readOnly 挂载对写动词直接拒(provider 内亦拒,双保险;Proto §5.3)。
       if (cfg.readOnly === true && scope === 'write') {
         throw new TBError('permission_denied', `readOnly 挂载拒绝 '${body.tool}'(Proto §5.3)`)
+      }
+      if (cfg.provider === 'device-fs') {
+        const result = await invokeDevice(c.env, deviceIdForDeviceFs(cfg), {
+          path: 'fs',
+          tool: body.tool,
+          arguments: (body.arguments ?? {}) as Record<string, unknown>,
+        })
+        return renderResult(result, negotiate(c.req.header('accept')))
       }
       const provider = await contextProviderFor(node, cfg, {
         store,
@@ -615,7 +698,11 @@ async function assertRegisterPath(
     existing = null
   }
   const res = checkRegisterPath({
-    sk: { scopes: ctx.scopes, id: ctx.keyId },
+    sk: {
+      scopes: ctx.scopes,
+      id: ctx.keyId,
+      ...(ctx.registerPaths !== undefined ? { registerPaths: ctx.registerPaths } : {}),
+    },
     targetPath,
     action,
     existing,
@@ -639,7 +726,10 @@ function filterListVisible(nodes: TreeNode[], scopes: CallContext['scopes']): Tr
   return nodes.filter((node) => {
     if (!checkScopes(scopes, node.path, 'read')) return false
     if (
-      (node.kind === 'mcp' || node.kind === 'http' || node.kind === 'remote') &&
+      (node.kind === 'mcp' ||
+        node.kind === 'http' ||
+        node.kind === 'remote' ||
+        node.kind === 'device') &&
       !checkScopes(scopes, node.path, 'call')
     ) {
       return false
@@ -732,6 +822,12 @@ async function helpModelFor(
       await pruneExpiredContext(await registry.children(node.path), registry),
       ctx.scopes,
     )
+    if (node.online !== undefined) {
+      return deviceDirectoryHelpModel(
+        { path: node.path, description: node.description, online: node.online },
+        children.map((n) => ({ path: n.path, kind: n.kind, description: n.description })),
+      )
+    }
     return {
       node: { path: node.path, kind: node.kind, description: node.description },
       cmds: [],
@@ -744,9 +840,18 @@ async function helpModelFor(
     const { exposed } = virtualizeTools(node.virtualize, raw)
     return toolsToHelpModel(node.path, { kind: node.kind, description: node.description }, exposed)
   }
+  if (node.kind === 'device' && node.config?.kind === 'device') {
+    return deviceShellHelpModel(node.path, node.config.expose.shell ?? {})
+  }
   // context:cmd 表静态声明(readOnly 隐藏写动词);~help 命中即做 ttl 懒回收(Proto §5.3)。
   if (node.kind === 'context' && node.config?.kind === 'context') {
     await assertContextAlive(node, node.config, registry)
+    if (node.config.provider === 'device-fs') {
+      return deviceFsHelpModel(
+        { path: node.path, description: node.description },
+        { readOnly: node.config.readOnly ?? false },
+      )
+    }
     return contextHelpModel(node, { readOnly: node.config.readOnly ?? false })
   }
   throw TBError.unimplemented(`~help for kind '${node.kind}' not implemented yet`)
@@ -836,6 +941,32 @@ function assertRemoteConfigAllowed(config: unknown, env: Env): void {
     throw new TBError('invalid_argument', 'remote config 缺少 baseUrl')
   }
   assertRemoteAllowed(baseUrl, env)
+}
+
+// ---------- device 节点(Proto §6,Phase 4) ----------
+
+function tbErrorFromBody(body: TBErrorBody): TBError {
+  return new TBError(body.code, body.message, { retryable: body.retryable })
+}
+
+async function invokeDevice(
+  env: Env,
+  deviceId: string,
+  req: { path: string; tool: string; arguments: Record<string, unknown> },
+): Promise<unknown> {
+  const id = crypto.randomUUID()
+  const body = (await env.TB_DEVICE.getByName(deviceId).invoke({ id, ...req })) as DeviceCallResult
+  if (!body || !('ok' in body)) {
+    throw new TBError('unavailable', 'device session returned invalid result')
+  }
+  if (body.ok) return body.value
+  throw tbErrorFromBody(body.error)
+}
+
+function deviceIdForDeviceFs(cfg: ContextConfig): string {
+  const pc = cfg.providerConfig
+  if (pc && typeof pc === 'object' && typeof pc.deviceId === 'string') return pc.deviceId
+  throw new TBError('invalid_argument', 'device-fs context 缺少 providerConfig.deviceId')
 }
 
 // ---------- context 节点(Proto §5,Phase 3) ----------

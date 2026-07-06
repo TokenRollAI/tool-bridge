@@ -16,10 +16,14 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "citty": "^0.2.2"
+    "@tool-bridge/core": "workspace:*",
+    "citty": "^0.2.2",
+    "partysocket": "1.3.0",
+    "ws": "8.21.0"
   },
   "devDependencies": {
     "@types/node": "^26.1.0",
+    "@types/ws": "8.18.1",
     "tsup": "^8.5.1",
     "vitest": "^4.1.10"
   }

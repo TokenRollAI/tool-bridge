@@ -26,10 +26,20 @@
   // R2:context r2 provider 与大对象 $ref(Reference §4)。
   "r2_buckets": [
     { "binding": "TB_R2", "bucket_name": "tb-r2" }
-  ]
-  // Durable Objects:Phase 4 才引入 DeviceSession DO,届时取消下列注释并补 migrations。
-  // "durable_objects": {
-  //   "bindings": [{ "name": "TB_DEVICE", "class_name": "DeviceSession" }]
-  // },
-  // "migrations": [{ "tag": "v1", "new_sqlite_classes": ["DeviceSession"] }]
+  ],
+  // Durable Objects:M4 每设备一个 DeviceSession(WS hibernation,Reference §4)。
+  "durable_objects": {
+    "bindings": [{ "name": "TB_DEVICE", "class_name": "DeviceSession" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["DeviceSession"] }],
+  // M9 Dashboard 静态资源(Workers Static Assets,挂 /ui,与 gateway 一体部署)。
+  // run_worker_first=true:一切请求先进 Worker,静态资源仅由 app.ts 的 /ui 路由经
+  // ASSETS binding 显式转发——SPA 回退严格限定 /ui,不吞根 ~help/数据面/system/*
+  // (Architecture M9 路由次序要求)。directory 指向 dashboard 构建产物,
+  // deploy 前须先 `pnpm --filter @tool-bridge/dashboard build`(deploy:all 已编排)。
+  "assets": {
+    "directory": "../dashboard/dist",
+    "binding": "ASSETS",
+    "run_worker_first": true
+  }
 }

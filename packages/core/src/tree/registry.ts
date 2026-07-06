@@ -156,7 +156,12 @@ export class NodeRegistryStore {
    *
    * §2.4d 的 conflict(覆盖他人节点)判定在网关注册路径层,不在此——本层是幂等 upsert。
    */
-  async write(node: NodeInput, registeredBy: string, now: Timestamp): Promise<TreeNode> {
+  async write(
+    node: NodeInput,
+    registeredBy: string,
+    now: Timestamp,
+    opts: { online?: boolean } = {},
+  ): Promise<TreeNode> {
     const path = normalizePath(node.path)
     const invalid = validatePath(path)
     if (invalid) throw invalid
@@ -183,6 +188,7 @@ export class NodeRegistryStore {
       description: node.description,
       ...(node.config !== undefined ? { config: node.config } : {}),
       ...(node.virtualize !== undefined ? { virtualize: node.virtualize } : {}),
+      ...(opts.online !== undefined ? { online: opts.online } : {}),
       registeredBy,
       createdAt: existing?.createdAt ?? now,
       updatedAt: now,
@@ -213,6 +219,16 @@ export class NodeRegistryStore {
     return merged
   }
 
+  /** 设备生命周期专用:只更新节点 online 状态,不存在 → not_found。 */
+  async setOnline(path: TreePath, online: boolean, now: Timestamp): Promise<TreeNode> {
+    const norm = normalizePath(path)
+    const existing = await this.read(norm)
+    if (!existing) throw new TBError('not_found', `节点不存在:'${norm}'`)
+    const updated: TreeNode = { ...existing, online, updatedAt: now }
+    await this.store.put(this.keyOf(norm), updated)
+    return updated
+  }
+
   /**
    * 卸载(Proto §3.3);不存在 → not_found。删除后自底向上级联回收:
    * 仅回收 registeredBy=system:auto 且再无子节点的 directory,遇显式节点/仍有子节点即停。
@@ -227,6 +243,26 @@ export class NodeRegistryStore {
     if (await this.hasChildren(norm)) {
       throw new TBError('conflict', `节点 '${norm}' 仍有子节点,不允许删除非空子树`)
     }
+    await this.store.delete(this.keyOf(norm))
+    for (const parent of [...parentPaths(norm)].reverse()) {
+      const p = await this.read(parent)
+      if (!p || p.registeredBy !== SYSTEM_AUTO || p.kind !== 'directory') break
+      if (await this.hasChildren(parent)) break
+      await this.store.delete(this.keyOf(parent))
+    }
+  }
+
+  /**
+   * 设备回收专用:删除一个已知子树(含根与全部后代),再按普通 delete 规则回收自动目录。
+   * 普通管理面仍使用 delete(),不允许误删非空子树。
+   */
+  async deleteSubtree(path: TreePath): Promise<void> {
+    const norm = normalizePath(path)
+    const existing = await this.read(norm)
+    if (!existing) throw new TBError('not_found', `节点不存在:'${norm}'`)
+    const descendants = await this.scanPrefix(this.subtreePrefix(norm))
+    descendants.sort((a, b) => segments(b.path).length - segments(a.path).length || byPath(b, a))
+    for (const n of descendants) await this.store.delete(this.keyOf(n.path))
     await this.store.delete(this.keyOf(norm))
     for (const parent of [...parentPaths(norm)].reverse()) {
       const p = await this.read(parent)

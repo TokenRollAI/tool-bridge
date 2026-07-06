@@ -117,6 +117,26 @@ describe('握手状态机', () => {
     session.handleFrame(HELLO)
     expect(sent).toEqual([])
   })
+
+  it('restoreReady:休眠唤醒恢复 → 直接 ready 且不发帧;call/result 正常工作', () => {
+    const { session, sent } = makeSession()
+    session.restoreReady()
+    expect(session.phase).toBe('ready')
+    expect(sent).toEqual([])
+    const got: DeviceCallResult[] = []
+    session.call({ id: 'r1', path: 'shell', tool: 'exec', arguments: {} }, (r) => got.push(r))
+    expect(sent).toEqual([{ type: 'call', id: 'r1', path: 'shell', tool: 'exec', arguments: {} }])
+    session.handleFrame({ type: 'result', id: 'r1', ok: true, value: 42 })
+    expect(got).toEqual([{ ok: true, value: 42 }])
+  })
+
+  it('restoreReady:已 ready 或 hello 进行中时非法', () => {
+    const s = readySession()
+    expect(() => s.session.restoreReady()).toThrow(/非法时机/)
+    const fresh = makeSession()
+    fresh.session.handleFrame(HELLO)
+    expect(() => fresh.session.restoreReady()).toThrow(/非法时机/)
+  })
 })
 
 describe('call 与 requestId 幂等', () => {

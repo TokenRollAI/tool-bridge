@@ -7,5 +7,6 @@ export default defineConfig({
   target: 'node22',
   clean: true,
   minify: false,
+  noExternal: ['@tool-bridge/core'],
   banner: { js: '#!/usr/bin/env node' },
 })

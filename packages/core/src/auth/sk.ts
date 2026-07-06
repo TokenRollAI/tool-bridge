@@ -194,5 +194,11 @@ export async function identify(
   if (!rec) return null
   const key = rec as SecretKey
   if (!isKeyActive(key, now)) return null
-  return { keyId: key.id, owner: key.owner, scopes: key.scopes, traceId: crypto.randomUUID() }
+  return {
+    keyId: key.id,
+    owner: key.owner,
+    scopes: key.scopes,
+    ...(key.registerPaths !== undefined ? { registerPaths: key.registerPaths } : {}),
+    traceId: crypto.randomUUID(),
+  }
 }

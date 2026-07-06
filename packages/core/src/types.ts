@@ -38,6 +38,8 @@ export interface CallContext {
   keyId: string
   owner: OwnerRef
   scopes: Scope[]
+  /** 反向注册路径收紧规则(Proto §2.4);缺省按非保留根放行。 */
+  registerPaths?: TreePath[]
   /** 全链路观测。 */
   traceId: string
 }

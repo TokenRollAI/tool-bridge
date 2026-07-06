@@ -110,10 +110,10 @@
 
 **目标**:三入口补齐(Dashboard),两条部署路径补齐(Docker),Case 1 全流程闭环。
 
-**范围**:Dashboard(**与 gateway 同 Worker 一体部署**,Workers Static Assets 挂 `/ui`,不额外增加 Pages/Worker:`~tree` 导航、`~help` 表单渲染、调用与返回展示、`system/*` 管理视图;技术栈按 Reference §5——React 19 + Vite + Ant Design + @rjsf + TanStack Query,**禁止以裸 index.html 交付**);`tb init` 向导(wrangler auth 检查 → provision → 部署 → Admin SK 输出 → 可重入);Docker 镜像(node adapter + SQLite StateStore + FS ObjectStore + ws 通道 + Dashboard 静态托管);**CLI**:`tb init` 完整化。
+**范围**:Dashboard(**与 gateway 同 Worker 一体部署**,Workers Static Assets 挂 `/ui`,不额外增加 Pages/Worker:`~tree` 导航、`~help` 表单渲染、调用与返回展示、`system/*` 管理视图;技术栈按 Reference §5——React 19 + Vite + Tailwind CSS + shadcn/ui + TanStack Query(**不用 antd**),**禁止以裸 index.html 交付**);`tb init` 向导(wrangler auth 检查 → provision → 部署 → Admin SK 输出 → 可重入);Docker 镜像(node adapter + SQLite StateStore + FS ObjectStore + ws 通道 + Dashboard 静态托管);**CLI**:`tb init` 完整化。
 
 **DoD**:
-- [ ] 前置 spike:目标版本组合(React 19 + antd v5 + `@ant-design/v5-patch-for-react-19` + `@rjsf/antd`)渲染一个 inputSchema→表单的最小 demo 通过;不通过则启用兜底(@rjsf/mui 或裸 antd Form 手接)并回写 Reference §5。同一 spike 验证 Static Assets 路由次序(SPA 回退严格限定 `/ui`,`run_worker_first` 或等价配置,不吞根 `~help`/树路由/`system/*`,Architecture M9)。
+- [x] 前置 spike:目标版本组合(React 19)渲染一个 inputSchema→表单的最小 demo 通过;不通过则启用兜底(shadcn/ui Form + react-hook-form 手接有界渲染器)并回写 Reference §5。同一 spike 验证 Static Assets 路由次序(SPA 回退严格限定 `/ui`,`run_worker_first` 或等价配置,不吞根 `~help`/树路由/`system/*`,Architecture M9)。
 - [ ] `tb init` 在干净账户上 30 分钟内完成:输出 BaseURL + Admin SK → `tb login` → `tb status` 绿(Case 1 的命令行路径)。
 - [ ] Dashboard:输入 SK+BaseURL → 树导航与任意节点表单可用 → 对一个工具节点发起调用并展示 markdown 返回;`system/sk` 视图可签发/吊销 SK。
 - [ ] Docker:`docker run -v tb-data:/data tool-bridge` → healthz 200 → 首次启动输出 Admin SK → 对同一容器跑通 mount(file)+ call + ctx 四动词冒烟;重启后数据仍在。

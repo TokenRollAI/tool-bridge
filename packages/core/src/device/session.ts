@@ -122,6 +122,18 @@ export class DeviceGatewaySession {
     this.io.send({ type: 'ready', mountPath })
   }
 
+  /**
+   * hibernation 唤醒恢复:该连接的 hello 已在休眠前完成(胶水层据持久化的连接标识判定),
+   * 直接进入 ready,不重发 ready 帧。
+   */
+  restoreReady(): void {
+    if (this.phase_ !== 'awaiting-hello' || this.helloSeen) {
+      throw new Error(`DeviceGatewaySession.restoreReady: 非法时机(phase=${this.phase_})`)
+    }
+    this.helloSeen = true
+    this.phase_ = 'ready'
+  }
+
   /** 拒绝:发拒绝帧后关闭(Proto §6.2)。hello 判定失败与协议违规共用。 */
   reject(error: TBError): void {
     if (this.phase_ === 'closed') return

@@ -6,7 +6,15 @@
     "useIgnoreFile": true
   },
   "files": {
-    "includes": ["**", "!**/dist", "!**/.wrangler", "!**/node_modules", "!**/*.jsonc"]
+    "includes": [
+      "**",
+      "!**/dist",
+      "!**/.wrangler",
+      "!**/node_modules",
+      "!**/*.jsonc",
+      "!packages/dashboard/src/index.css",
+      "!packages/dashboard/public"
+    ]
   },
   "formatter": {
     "enabled": true,

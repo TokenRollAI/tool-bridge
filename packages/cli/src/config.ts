@@ -16,9 +16,15 @@ export interface Profile {
   sk: string
 }
 
+export interface DeviceConfig {
+  id?: string
+}
+
 export interface CliConfig {
   current?: string
   profiles: Record<string, Profile>
+  /** 本机稳定设备身份(Phase 4 tb connect 缺省 deviceId)。 */
+  device?: DeviceConfig
 }
 
 /** 配置目录:尊重 `XDG_CONFIG_HOME`(便于测试注入临时目录)。 */
@@ -38,7 +44,14 @@ export function readConfig(): CliConfig {
   try {
     const parsed = JSON.parse(readFileSync(p, 'utf8')) as Partial<CliConfig>
     if (parsed && typeof parsed === 'object') {
-      return { current: parsed.current, profiles: parsed.profiles ?? {} }
+      return {
+        current: parsed.current,
+        profiles: parsed.profiles ?? {},
+        device:
+          parsed.device && typeof parsed.device === 'object'
+            ? (parsed.device as DeviceConfig)
+            : undefined,
+      }
     }
   } catch {
     // 损坏配置按空处理,避免 CLI 因手改坏文件而完全不可用

@@ -7,14 +7,15 @@
 - **Phase 0 已完成**(2026-07-06,五项 DoD 全勾,DOD.md §2):verify 绿 / deploy 成功 / healthz 200+版本号 / `tb status --json` 可解析 / KV+R2 幂等创建并绑定。
 - **Phase 1 已完成并关门**(2026-07-06,七项 DoD 全勾,DOD.md §3;质量关口 9 条发现全部修复并生产验证):SK 判定 + HTBP 核心树 + SecretStore + builtin 四模块 + 内容协商 + 可见性裁剪 + CLI 子命令。Phase 1 落地事实见 [../architecture/modules-and-boundaries.md](../architecture/modules-and-boundaries.md) "Phase 1 落地"节。
 - **Phase 2 已完成并关门**(2026-07-06,六项 DoD 全勾并经质量关口修复,commit 186a739):mcp/http Provider、remote 联邦(§3.4)、工具虚拟化、调用点 Check、`tb call`/`tb tool mount`/`tb server add|ls|rm`。关门补强:remote `~tree` 聚合、`skRef` 换发测试、CLI 管理面对等、opt-in MCP/live HTTP 可重跑证据。
-- **当前目标:Phase 3 — Context Layer(M3)**(DOD.md §5,DOD.md:74-82):Context 四动词语义、r2/s3 provider、Search、大对象 `$ref`、`tb ctx *`。
+- **Phase 3 已完成**(2026-07-06,DOD.md §5 各项已勾):Context 四动词、r2/s3 provider、Search、大对象 `$ref`(presign 凭证空缺走 `/~ref` 网关中转)、`tb ctx *`。
+- **当前目标:Phase 4 — Device Gateway(M4,反向注册)**(DOD.md §6,DOD.md:85-95):`tb connect` 设备长驻、DeviceSession DO、`device/<id>/shell|fs` 数据面。**主链路已生产验证通过**(2026-07-06):连接后立即调用与空闲 ≥150s 跨休眠窗口调用均成功;两个生产 blocker 已修复(客户端心跳保活 + hibernation 唤醒恢复 ready 态),细节见 [../guides/do-websocket-hibernation.md](../guides/do-websocket-hibernation.md)。
 - 从零到线上验证的完整流程见 [../guides/deploy-and-verify.md](../guides/deploy-and-verify.md);Workers/KV 生产坑见 [../guides/workers-kv-pitfalls.md](../guides/workers-kv-pitfalls.md)。
 
 ## 已部署资源(DJJ 账户)
 
 | 资源 | 名称/地址 | 备注 |
 |---|---|---|
-| Worker | `tb-gateway` @ https://tool-bridge.pdjjq.org | custom domain(zone pdjjq.org);`wrangler.jsonc` 已写死 `account_id`;当前生产 Version `3ff129e1-c5f4-4df1-9dea-0bb35bcd87a2`(Phase 2 关门修复后) |
+| Worker | `tb-gateway` @ https://tool-bridge.pdjjq.org | custom domain(zone pdjjq.org);`wrangler.jsonc` 已写死 `account_id`;当前生产 Version `5832d467-d948-4931-a35e-3924615e3988`(Phase 4 设备通道修复后);DO `DeviceSession` 绑定 `TB_DEVICE`(migration v1,sqlite) |
 | Worker secrets | `TB_BOOTSTRAP_ADMIN_SK` / `TB_SECRET_ENCRYPTION_KEY` | 已 `wrangler secret put`;前者是 Admin SK 明文(引导时 sha256 入库) |
 | KV | `tb-kv`(id `d18c93de33cf4ba2b1fbf7d26fd742f1`) | 绑定名 `TB_KV`;id 已回填 wrangler.jsonc |
 | R2 | `tb-r2` | 绑定名 `TB_R2`;write 权限已实测可用(Phase 1 尚未实际使用) |
