@@ -31,6 +31,19 @@ export default defineConfig({
           ...(process.env.TB_ALLOW_INSECURE_HTTP !== undefined
             ? { TB_ALLOW_INSECURE_HTTP: process.env.TB_ALLOW_INSECURE_HTTP }
             : {}),
+          // opt-in 真实 S3 兼容端点 E2E(四个环境变量齐才跑,context.integration.test.ts)。
+          ...(process.env.TB_TEST_S3_ENDPOINT !== undefined
+            ? { TB_TEST_S3_ENDPOINT: process.env.TB_TEST_S3_ENDPOINT }
+            : {}),
+          ...(process.env.TB_TEST_S3_ACCESS_KEY_ID !== undefined
+            ? { TB_TEST_S3_ACCESS_KEY_ID: process.env.TB_TEST_S3_ACCESS_KEY_ID }
+            : {}),
+          ...(process.env.TB_TEST_S3_SECRET_ACCESS_KEY !== undefined
+            ? { TB_TEST_S3_SECRET_ACCESS_KEY: process.env.TB_TEST_S3_SECRET_ACCESS_KEY }
+            : {}),
+          ...(process.env.TB_TEST_S3_BUCKET !== undefined
+            ? { TB_TEST_S3_BUCKET: process.env.TB_TEST_S3_BUCKET }
+            : {}),
         },
       },
     }),

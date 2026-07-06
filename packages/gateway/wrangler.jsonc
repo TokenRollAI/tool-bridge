@@ -12,6 +12,12 @@
   "observability": {
     "enabled": true
   },
+  // r2 presign 的 S3 兼容端点(account_id 派生)与 bucket 名(Proto §5.2 凭证链);
+  // presign 凭证本体走 SecretStore 'r2-presign' 或 wrangler secret,不入 vars。
+  "vars": {
+    "TB_R2_BUCKET": "tb-r2",
+    "TB_R2_S3_ENDPOINT": "https://0cb9b897010bc426cd8bf33d8c052d11.r2.cloudflarestorage.com"
+  },
   // KV:树配置 / SK 哈希表 / manifest(Reference §4)。id 为占位,由 scripts/provision.mjs
   // 幂等创建后回填;本地 wrangler dev / vitest-pool-workers 用 miniflare 本地实例,不校验该 id。
   "kv_namespaces": [

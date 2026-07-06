@@ -3,22 +3,35 @@ import {
   buildTree,
   type CallContext,
   type CmdSpec,
+  CONTEXT_CAPABILITIES,
+  type ContextEntryInput,
+  type ContextPatch,
   check,
   checkRegisterPath,
   checkScopes,
   clampDepth,
   contentTypeFor,
+  contextHelpModel,
+  contextScopeForCmd,
   createBuiltins,
+  createObjectContextProvider,
   type HelpModel,
   identify,
+  isContextExpired,
   isTBError,
+  type ListOptions,
+  type NodeConfig,
   NodeRegistryStore,
   negotiate,
+  type ObjectContextProvider,
+  type ObjectStore,
+  PRESIGN_TTL_SEC_DEFAULT,
   parseNodeInput,
   type Representation,
   renderHelpDsl,
   renderHelpJson,
   resolveUpstreamTool,
+  type SearchOptions,
   SecretStoreImpl,
   type StateStore,
   TBError,
@@ -36,9 +49,12 @@ import { buildDeps, ensureBootstrapped } from './bootstrap'
 import { KvStateStore } from './kvStateStore'
 import { createHttpProvider, type HttpConfig } from './providers/http'
 import { createMcpProvider, type McpConfig } from './providers/mcp'
+import { createR2ObjectStore, type R2PresignCredentials } from './providers/r2Object'
 import { assertRemoteAllowed, passthroughRemote } from './providers/remote'
+import { createS3ObjectStore, type S3StoreConfig } from './providers/s3Object'
 import { getTools, invalidateToolCache, toolCacheTtl } from './providers/toolCache'
 import type { UpstreamProvider } from './providers/types'
+import { signRefToken, verifyRefToken } from './refToken'
 
 /**
  * Workers 运行时绑定。KV/R2 名称从 TB_NAME_PREFIX 派生(wrangler.jsonc)。
@@ -59,8 +75,23 @@ export interface Env {
   TB_INSTANCE_ID?: string
   /** mcp 工具缓存 TTL 秒(默认 300)。 */
   TB_TOOL_CACHE_TTL?: string
+  /** r2 presign 的 S3 兼容端点(https://<account>.r2.cloudflarestorage.com)与 bucket。 */
+  TB_R2_S3_ENDPOINT?: string
+  TB_R2_BUCKET?: string
+  /** r2 presign 凭证链的 env 段(SecretStore 'r2-presign' 优先,Proto §5.2)。 */
+  TB_R2_ACCESS_KEY_ID?: string
+  TB_R2_SECRET_ACCESS_KEY?: string
+  /** context Get 的 $ref 内联阈值(字节,缺省 1 MiB)。 */
+  TB_REF_THRESHOLD_BYTES?: string
+  /** $ref URL(presign 与 /~ref 中转)有效期秒(缺省 900)。 */
+  TB_REF_TTL_SEC?: string
   /** opt-in 集成测试:真实 MCP echo server 的 URL(仅测试注入)。 */
   TB_TEST_MCP_URL?: string
+  /** opt-in 集成测试:S3 兼容端点与凭证(仅测试注入)。 */
+  TB_TEST_S3_ENDPOINT?: string
+  TB_TEST_S3_ACCESS_KEY_ID?: string
+  TB_TEST_S3_SECRET_ACCESS_KEY?: string
+  TB_TEST_S3_BUCKET?: string
 }
 
 /** http:// 上游是否放行(env `TB_ALLOW_INSECURE_HTTP=true`,仅本地开发)。 */
@@ -160,6 +191,36 @@ export function createApp(): Hono<{ Bindings: Env; Variables: Vars }> {
   // GET /healthz → 200 JSON,树外免认证(Proto §1.1)。version 单一真源:package.json。
   app.get('/healthz', (c) => c.json({ healthy: true, version: pkg.version }))
 
+  // GET /~ref/<token> → 大对象中转下载,树外免认证(Proto §5.2 中转下载路由)。
+  // 注册在认证中间件之前:token 本身即凭证(HMAC 限时签名);验签失败/过期一律 404 不泄露。
+  app.get('/~ref/:token', (c) =>
+    runHandler(async () => {
+      const encKey = c.env.TB_SECRET_ENCRYPTION_KEY
+      if (encKey === undefined) throw TBError.notFound('not found')
+      const payload = await verifyRefToken(c.req.param('token'), encKey)
+      if (payload === null || payload.exp * 1000 <= Date.now()) throw TBError.notFound('not found')
+      const store = new KvStateStore(c.env.TB_KV)
+      const registry = new NodeRegistryStore(store)
+      let node: TreeNode
+      try {
+        node = await registry.get(payload.p)
+      } catch {
+        throw TBError.notFound('not found')
+      }
+      // 签发后节点可能被卸载/换 kind/ttl 到期——须仍是存活的 context 节点。
+      if (node.kind !== 'context' || node.config?.kind !== 'context') {
+        throw TBError.notFound('not found')
+      }
+      await assertContextAlive(node, node.config, registry)
+      const objects = await contextObjectStoreFor(node.config, c.env, secretStore(store, c.env))
+      const got = await objects.get(payload.k)
+      if (got === null) throw TBError.notFound('not found')
+      return new Response(got.body as unknown as BodyInit, {
+        headers: { 'content-type': got.meta.contentType ?? 'application/octet-stream' },
+      })
+    }),
+  )
+
   // 认证中间件(除 /healthz 外全路由):Bearer → identify → 401 或注入 ctx(Proto §0.2)。
   app.use('*', async (c, next) => {
     const store = new KvStateStore(c.env.TB_KV)
@@ -204,11 +265,15 @@ export function createApp(): Hono<{ Bindings: Env; Variables: Vars }> {
       } catch {
         throw TBError.notFound('not found')
       }
+      // 子树根本身是 ttl 到期的 context 节点 → 懒回收 + 404(Proto §5.3)。
+      if (rootNode.kind === 'context' && rootNode.config?.kind === 'context') {
+        await assertContextAlive(rootNode, rootNode.config, registry)
+      }
       rootEntry = toEntry(rootNode)
     }
 
     // 一次性读入整棵子树(而非每层递归各扫一遍),内存建 parent→直接子 索引 + 可见性裁剪。
-    const nodes = await registry.subtree(path)
+    const nodes = await pruneExpiredContext(await registry.subtree(path), registry)
     const byParent = indexByParent(nodes)
     const getChildren = async (p: TreePath): Promise<TreeEntry[]> => {
       const localKids = filterListVisible(byParent.get(p) ?? [], ctx.scopes)
@@ -245,7 +310,10 @@ export function createApp(): Hono<{ Bindings: Env; Variables: Vars }> {
 
     if (path === '') {
       // 根:虚拟 directory,列出可见的顶层子节点。
-      const children = filterListVisible(await registry.children(''), ctx.scopes)
+      const children = filterListVisible(
+        await pruneExpiredContext(await registry.children(''), registry),
+        ctx.scopes,
+      )
       const model: HelpModel = {
         node: { path: '', kind: 'directory', description: 'tool-bridge root' },
         cmds: [],
@@ -332,6 +400,40 @@ export function createApp(): Hono<{ Bindings: Env; Variables: Vars }> {
       return renderResult(result.content, negotiate(c.req.header('accept')))
     }
 
+    // --- context namespace 数据面(Proto §5):四动词 + Search/Delete,cmd→scope 静态表判定。 ---
+    if (node.kind === 'context' && node.config?.kind === 'context') {
+      const cfg = node.config
+      // ttl 懒回收(Proto §5.3):POST 命中即判,过期删节点并 404。
+      await assertContextAlive(node, cfg, registry)
+      const body = (await c.req.json().catch(() => null)) as {
+        tool?: unknown
+        arguments?: unknown
+      } | null
+      if (!body || typeof body.tool !== 'string') {
+        throw new TBError('invalid_argument', 'body must be {tool, arguments}')
+      }
+      const scope = contextScopeForCmd(body.tool)
+      if (scope === null) {
+        throw new TBError('invalid_argument', `unknown cmd '${body.tool}' on '${node.path}'`)
+      }
+      // 节点可见性(read→404)已在上方统一判过;这里按 cmd 的 read/write scope 判 403。
+      if (!check(ctx, node.path, scope).allow) {
+        throw new TBError('permission_denied', `no scope grants '${scope}' on '${node.path}'`)
+      }
+      // readOnly 挂载对写动词直接拒(provider 内亦拒,双保险;Proto §5.3)。
+      if (cfg.readOnly === true && scope === 'write') {
+        throw new TBError('permission_denied', `readOnly 挂载拒绝 '${body.tool}'(Proto §5.3)`)
+      }
+      const provider = await contextProviderFor(node, cfg, {
+        store,
+        env: c.env,
+        requestUrl: c.req.url,
+      })
+      const args = (body.arguments ?? {}) as Record<string, unknown>
+      const result = await dispatchContextCmd(provider, body.tool, args)
+      return renderResult(result, negotiate(c.req.header('accept')))
+    }
+
     if (node.kind !== 'builtin' || node.config?.kind !== 'builtin') {
       throw TBError.unimplemented(`kind '${node.kind}' not callable`)
     }
@@ -365,12 +467,15 @@ export function createApp(): Hono<{ Bindings: Env; Variables: Vars }> {
       if (targetPath === undefined) {
         throw new TBError('invalid_argument', "field 'path' must be a string")
       }
-      // 挂载/更新 remote 节点时校验 baseUrl 白名单(Proto §3.4,注册时即拒)。
+      // 挂载/更新 remote 节点时校验 baseUrl 白名单(Proto §3.4);context 节点做
+      // provider/结构校验 + s3 连通探测(Proto §5.3)——注册时即拒。
       if (cmd === 'write') {
         assertRemoteConfigAllowed(args.config, c.env)
+        await assertContextConfig(args.config, c.env, secretStore(store, c.env))
       } else if (cmd === 'update') {
         const patch = args.patch as { config?: unknown } | undefined
         assertRemoteConfigAllowed(patch?.config, c.env)
+        await assertContextConfig(patch?.config, c.env, secretStore(store, c.env))
       }
       await assertRegisterPath(registry, ctx, targetPath, cmd === 'delete' ? 'delete' : 'write')
       registryTarget = targetPath
@@ -396,6 +501,31 @@ export function createApp(): Hono<{ Bindings: Env; Variables: Vars }> {
     return tbErrorResponse(TBError.unimplemented('~skill not implemented yet'))
   }
 
+  // --- ~describe(Proto §1.1):有可选能力的节点返回 { kind, capabilities };其余 404 ---
+  const handleDescribe = async (c: AppContext): Promise<Response> => {
+    const path = splitReserved(new URL(c.req.url).pathname, '~describe')
+    if (path === null || path === '') throw TBError.notFound('no such path')
+    const ctx = c.get('ctx')
+    const store = c.get('store')
+    const registry = new NodeRegistryStore(store)
+    // 不可见(read 判不过)→ 404 不泄露存在性。
+    if (!check(ctx, path, 'read').allow) throw TBError.notFound('not found')
+    let node: TreeNode
+    try {
+      node = await registry.get(path)
+    } catch {
+      throw TBError.notFound('not found')
+    }
+    if (node.kind === 'context' && node.config?.kind === 'context') {
+      await assertContextAlive(node, node.config, registry)
+      return new Response(JSON.stringify({ kind: 'context', capabilities: CONTEXT_CAPABILITIES }), {
+        headers: { 'content-type': contentTypeFor('json') },
+      })
+    }
+    // 无可选能力的节点(其他 kind)→ 404(Proto §1.1)。
+    throw TBError.notFound(`no capabilities for kind '${node.kind}'`)
+  }
+
   // GET 通配分派:按 pathname 末段路由到 ~help / ~tree / ~skill;其余 GET 无对应端点 → 404。
   // (不用 `/:path{.*}/~help` 具名后缀路由——Hono 该形式对 3+ 段路径不匹配。)
   // handleX(c) 必须 `await`(而非裸 `return handleX(c)`):裸返回 async promise 时其 reject
@@ -406,6 +536,7 @@ export function createApp(): Hono<{ Bindings: Env; Variables: Vars }> {
       if (last === '~help') return await handleHelp(c)
       if (last === '~tree') return await handleTree(c)
       if (last === '~skill') return await handleSkill(c)
+      if (last === '~describe') return await handleDescribe(c)
       throw TBError.notFound('no such path')
     }),
   )
@@ -430,8 +561,10 @@ export function createApp(): Hono<{ Bindings: Env; Variables: Vars }> {
     }
     // 复用与 system/registry write 相同的 NodeInput 校验(kind/description 必填、kind 枚举合法)。
     const body = parseNodeInput(raw)
-    // 挂载 remote 节点时校验 baseUrl 白名单(Proto §3.4,注册时即拒)。
+    // 挂载 remote 节点时校验 baseUrl 白名单(Proto §3.4);context 节点做 provider/结构
+    // 校验 + s3 连通探测(Proto §5.3)——注册时即拒。
     assertRemoteConfigAllowed(body.config, c.env)
+    await assertContextConfig(body.config, c.env, secretStore(store, c.env))
     // register 判定 + §2.4 路径规则(含 existing 查询)。
     if (!check(ctx, path, 'register').allow) {
       throw new TBError('permission_denied', `no scope grants 'register' on '${path}'`)
@@ -579,8 +712,8 @@ function indexByParent(nodes: TreeNode[]): Map<TreePath, TreeNode[]> {
 
 /**
  * 节点的 HelpModel:builtin 取模块 help();directory 列可见子节点;mcp/http 经 Provider 取
- * 上游工具集(mcp 走缓存,`refresh` 强制刷新)→ 虚拟化 → `toolsToHelpModel`;其余 kind
- * (context/device)未落地 → 501。remote 在调用点已透传,不进此函数。
+ * 上游工具集(mcp 走缓存,`refresh` 强制刷新)→ 虚拟化 → `toolsToHelpModel`;context 静态
+ * cmd 表(ttl 懒回收先行);其余 kind(device)未落地 → 501。remote 在调用点已透传,不进此函数。
  */
 async function helpModelFor(
   node: TreeNode,
@@ -595,7 +728,10 @@ async function helpModelFor(
     throw TBError.unimplemented(`builtin module '${node.config.module}' not available`)
   }
   if (node.kind === 'directory') {
-    const children = filterListVisible(await registry.children(node.path), ctx.scopes)
+    const children = filterListVisible(
+      await pruneExpiredContext(await registry.children(node.path), registry),
+      ctx.scopes,
+    )
     return {
       node: { path: node.path, kind: node.kind, description: node.description },
       cmds: [],
@@ -607,6 +743,11 @@ async function helpModelFor(
     const raw = await upstreamTools(node, provider, deps.store, deps.env, deps.refresh, deps.now)
     const { exposed } = virtualizeTools(node.virtualize, raw)
     return toolsToHelpModel(node.path, { kind: node.kind, description: node.description }, exposed)
+  }
+  // context:cmd 表静态声明(readOnly 隐藏写动词);~help 命中即做 ttl 懒回收(Proto §5.3)。
+  if (node.kind === 'context' && node.config?.kind === 'context') {
+    await assertContextAlive(node, node.config, registry)
+    return contextHelpModel(node, { readOnly: node.config.readOnly ?? false })
   }
   throw TBError.unimplemented(`~help for kind '${node.kind}' not implemented yet`)
 }
@@ -695,6 +836,238 @@ function assertRemoteConfigAllowed(config: unknown, env: Env): void {
     throw new TBError('invalid_argument', 'remote config 缺少 baseUrl')
   }
   assertRemoteAllowed(baseUrl, env)
+}
+
+// ---------- context 节点(Proto §5,Phase 3) ----------
+
+type ContextConfig = Extract<NodeConfig, { kind: 'context' }>
+
+/** 正整数 env 解析(TB_REF_THRESHOLD_BYTES / TB_REF_TTL_SEC);非法/缺省 → undefined。 */
+function positiveIntEnv(value: string | undefined): number | undefined {
+  const n = Number(value)
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : undefined
+}
+
+/** S3 类凭证值形状(Proto §5.2):JSON {"accessKeyId","secretAccessKey"};解析失败不回显值。 */
+function parseS3Credentials(
+  raw: string,
+  refName: string,
+): { accessKeyId: string; secretAccessKey: string } {
+  try {
+    const v = JSON.parse(raw) as { accessKeyId?: unknown; secretAccessKey?: unknown }
+    if (typeof v.accessKeyId === 'string' && typeof v.secretAccessKey === 'string') {
+      return { accessKeyId: v.accessKeyId, secretAccessKey: v.secretAccessKey }
+    }
+  } catch {
+    // fallthrough:统一 invalid_argument
+  }
+  throw new TBError(
+    'invalid_argument',
+    `凭证 '${refName}' 不是 {"accessKeyId","secretAccessKey"} 形状的 JSON`,
+  )
+}
+
+/**
+ * r2 presign 凭证链(Proto §5.2,按序):SecretStore 保留名 'r2-presign' →
+ * env TB_R2_ACCESS_KEY_ID/TB_R2_SECRET_ACCESS_KEY → 均缺则 undefined($ref 走 /~ref 中转)。
+ * endpoint/bucket 亦缺则无从 presign。
+ */
+async function r2PresignCredentials(
+  env: Env,
+  secrets: SecretStoreImpl,
+): Promise<R2PresignCredentials | undefined> {
+  const endpoint = env.TB_R2_S3_ENDPOINT
+  const bucket = env.TB_R2_BUCKET
+  if (endpoint === undefined || bucket === undefined) return undefined
+  const stored = await secrets.resolve('r2-presign')
+  if (stored !== undefined) {
+    return { endpoint, bucket, ...parseS3Credentials(stored, 'r2-presign') }
+  }
+  if (env.TB_R2_ACCESS_KEY_ID !== undefined && env.TB_R2_SECRET_ACCESS_KEY !== undefined) {
+    return {
+      endpoint,
+      bucket,
+      accessKeyId: env.TB_R2_ACCESS_KEY_ID,
+      secretAccessKey: env.TB_R2_SECRET_ACCESS_KEY,
+    }
+  }
+  return undefined
+}
+
+/** s3 provider 的 store 构造参数:providerConfig.endpoint/bucket + authRef 解析(均必填)。 */
+async function s3StoreConfig(cfg: ContextConfig, secrets: SecretStoreImpl): Promise<S3StoreConfig> {
+  const pc = (cfg.providerConfig ?? {}) as {
+    endpoint?: unknown
+    bucket?: unknown
+    region?: unknown
+  }
+  if (typeof pc.endpoint !== 'string' || typeof pc.bucket !== 'string') {
+    throw new TBError('invalid_argument', 's3 provider 需要 providerConfig.endpoint 与 bucket')
+  }
+  if (typeof cfg.authRef !== 'string') {
+    throw new TBError('invalid_argument', 's3 provider 需要 authRef(SecretStore 引用名)')
+  }
+  const raw = await secrets.resolve(cfg.authRef)
+  if (raw === undefined) {
+    throw new TBError('invalid_argument', `authRef '${cfg.authRef}' 无法解析`)
+  }
+  return {
+    endpoint: pc.endpoint,
+    bucket: pc.bucket,
+    ...(typeof pc.region === 'string' ? { region: pc.region } : {}),
+    ...parseS3Credentials(raw, cfg.authRef),
+  }
+}
+
+/** providerConfig.prefix(共桶隔离);缺省 r2 按节点路径隔离,s3 为空(整桶即 namespace)。 */
+function contextKeyPrefix(cfg: ContextConfig, nodePath: TreePath): string {
+  const prefix = (cfg.providerConfig as { prefix?: unknown } | undefined)?.prefix
+  if (typeof prefix === 'string') return prefix
+  return cfg.provider === 'r2' ? `ctx/${nodePath}` : ''
+}
+
+/** 按 config.provider 构造底层 ObjectStore(plugin provider 归 Phase 5)。 */
+async function contextObjectStoreFor(
+  cfg: ContextConfig,
+  env: Env,
+  secrets: SecretStoreImpl,
+): Promise<ObjectStore> {
+  if (cfg.provider === 'r2') {
+    return createR2ObjectStore(env.TB_R2, await r2PresignCredentials(env, secrets))
+  }
+  if (cfg.provider === 's3') {
+    return createS3ObjectStore(await s3StoreConfig(cfg, secrets), {
+      allowInsecure: allowInsecure(env),
+    })
+  }
+  throw TBError.unimplemented(`context provider '${cfg.provider}' not implemented yet`)
+}
+
+/**
+ * context 节点的 ContextProvider 装配:四动词语义在 core objectProvider,这里只注入
+ * ObjectStore、keyPrefix、$ref 阈值/有效期与 /~ref 中转 URL 工厂(presign 凭证缺省时生效)。
+ */
+async function contextProviderFor(
+  node: TreeNode,
+  cfg: ContextConfig,
+  deps: { store: StateStore; env: Env; requestUrl: string },
+): Promise<ObjectContextProvider> {
+  const secrets = secretStore(deps.store, deps.env)
+  const objects = await contextObjectStoreFor(cfg, deps.env, secrets)
+  const opts: Parameters<typeof createObjectContextProvider>[1] = {
+    nsPath: node.path,
+    keyPrefix: contextKeyPrefix(cfg, node.path),
+    readOnly: cfg.readOnly ?? false,
+  }
+  const threshold = positiveIntEnv(deps.env.TB_REF_THRESHOLD_BYTES)
+  if (threshold !== undefined) opts.refThresholdBytes = threshold
+  const ttlSec = positiveIntEnv(deps.env.TB_REF_TTL_SEC)
+  if (ttlSec !== undefined) opts.presignTtlSec = ttlSec
+  // /~ref 中转 URL 工厂:token 密钥派生自 TB_SECRET_ENCRYPTION_KEY;密钥缺省则不提供
+  // (presign 也缺时 core 对大对象 Get 报 unavailable)。
+  const encKey = deps.env.TB_SECRET_ENCRYPTION_KEY
+  if (encKey !== undefined) {
+    const origin = new URL(deps.requestUrl).origin
+    const relayTtlSec = ttlSec ?? PRESIGN_TTL_SEC_DEFAULT
+    opts.relayRefUrl = async (key) => {
+      const exp = Math.floor(Date.now() / 1000) + relayTtlSec
+      return `${origin}/~ref/${await signRefToken({ p: node.path, k: key, exp }, encKey)}`
+    }
+  }
+  return createObjectContextProvider(objects, opts)
+}
+
+/** 数据面 {tool} → ContextProvider 方法派发;入参精细校验由 provider 承担。 */
+async function dispatchContextCmd(
+  provider: ObjectContextProvider,
+  tool: string,
+  args: Record<string, unknown>,
+): Promise<unknown> {
+  switch (tool) {
+    case 'List':
+      return await provider.List((args.path as string) ?? '', args.opts as ListOptions | undefined)
+    case 'Get':
+      return await provider.Get(args.path as string)
+    case 'Write':
+      if (typeof args.entry !== 'object' || args.entry === null) {
+        throw new TBError('invalid_argument', "Write 需要对象 'entry'")
+      }
+      return await provider.Write(args.path as string, args.entry as ContextEntryInput)
+    case 'Update':
+      if (typeof args.patch !== 'object' || args.patch === null) {
+        throw new TBError('invalid_argument', "Update 需要对象 'patch'")
+      }
+      return await provider.Update(args.path as string, args.patch as ContextPatch)
+    case 'Delete':
+      return await provider.Delete(args.path as string)
+    case 'Search':
+      return await provider.Search(args.query as string, args.opts as SearchOptions | undefined)
+    default:
+      // contextScopeForCmd 已挡未知 cmd;此处为类型完备性兜底。
+      throw new TBError('invalid_argument', `unknown cmd '${tool}'`)
+  }
+}
+
+/** ttl 懒回收(Proto §5.3)单点判定:过期 → 删节点 + not_found;未过期 → 通过。 */
+async function assertContextAlive(
+  node: TreeNode,
+  cfg: ContextConfig,
+  registry: NodeRegistryStore,
+): Promise<void> {
+  if (!isContextExpired(node.createdAt, cfg.ttl, Date.now())) return
+  await registry.delete(node.path)
+  throw TBError.notFound('not found')
+}
+
+/** 列表面(~tree/目录 ~help)的 ttl 懒回收:过期 context 节点剔除并删除(量少,逐个 await)。 */
+async function pruneExpiredContext(
+  nodes: TreeNode[],
+  registry: NodeRegistryStore,
+): Promise<TreeNode[]> {
+  const now = Date.now()
+  const alive: TreeNode[] = []
+  for (const n of nodes) {
+    if (
+      n.kind === 'context' &&
+      n.config?.kind === 'context' &&
+      isContextExpired(n.createdAt, n.config.ttl, now)
+    ) {
+      await registry.delete(n.path)
+      continue
+    }
+    alive.push(n)
+  }
+  return alive
+}
+
+/**
+ * 注册/更新 context 节点时的配置校验(Proto §3.2/§5.3,注册时即拒):
+ * provider 词表 r2|s3(plugin id 归 Phase 5);s3 必填 endpoint/bucket/authRef,
+ * 且做一次浅 list 连通探测(D8)——失败 → unavailable(retryable);r2 不探测。
+ */
+async function assertContextConfig(
+  config: unknown,
+  env: Env,
+  secrets: SecretStoreImpl,
+): Promise<void> {
+  if (config === null || typeof config !== 'object') return
+  if ((config as { kind?: unknown }).kind !== 'context') return
+  const cfg = config as ContextConfig
+  if (cfg.provider !== 'r2' && cfg.provider !== 's3') {
+    throw new TBError('invalid_argument', `未知 context provider:'${String(cfg.provider)}'`)
+  }
+  if (cfg.provider === 's3') {
+    // 结构/凭证/https 校验失败 → invalid_argument(store 构造抛出)。
+    const store = createS3ObjectStore(await s3StoreConfig(cfg, secrets), {
+      allowInsecure: allowInsecure(env),
+    })
+    try {
+      await store.list(contextKeyPrefix(cfg, ''), { limit: 1 })
+    } catch (err) {
+      const detail = isTBError(err) ? err.message : String(err)
+      throw new TBError('unavailable', `s3 连通探测失败:${detail}`, { retryable: true })
+    }
+  }
 }
 
 /** ~tree 的 DSL 文本渲染:每行缩进树(简单实现;JSON 是规范形状,Proto §1.3)。 */
