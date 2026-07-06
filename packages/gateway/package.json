@@ -8,15 +8,19 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "dev": "wrangler dev",
-    "deploy": "wrangler deploy"
+    "deploy": "wrangler deploy",
+    "echo-mcp": "tsx scripts/echo-mcp.ts"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "@tool-bridge/core": "workspace:*",
     "hono": "^4.12.28"
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "^0.18.0",
     "@cloudflare/workers-types": "^5.20260706.1",
-    "vitest": "^4.1.10"
+    "tsx": "^4.23.0",
+    "vitest": "^4.1.10",
+    "zod": "^3.25.76"
   }
 }
