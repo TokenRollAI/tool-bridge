@@ -1,0 +1,155 @@
+/**
+ * CLI 的 HTTP 层:fetch + Bearer + Accept 内容协商 + TBError 归一。
+ *
+ * 契约(与网关约定,见任务书):
+ * - 认证:`Authorization: Bearer <SK>`;无/无效 → 401 TBError。
+ * - `Accept: application/json` → 结构化 JSON;缺省 text/plain(Help DSL 等)。
+ * - 错误响应:TBError JSON `{code,message,retryable}` + 对应 HTTP 码。
+ */
+
+/** CLI 错误:携带可选 TBError code,统一由 output.reportError 落地为退出码 1。 */
+export class CliError extends Error {
+  readonly code?: string
+  constructor(message: string, code?: string) {
+    super(message)
+    this.name = 'CliError'
+    this.code = code
+  }
+}
+
+export interface Target {
+  baseUrl?: string
+  sk?: string
+}
+
+/** 断言已解析出 baseUrl;否则给出可操作的错误提示。 */
+export function requireTarget(target: Target): { baseUrl: string; sk?: string } {
+  if (!target.baseUrl) {
+    throw new CliError('missing base URL: run `tb login`, pass --base-url, or set TB_BASE_URL')
+  }
+  return { baseUrl: target.baseUrl, sk: target.sk }
+}
+
+// 可注入的 fetch(命令级单测用 setFetch 注入 mock,避免起真实服务器)。
+let fetchImpl: typeof fetch = globalThis.fetch
+
+export function setFetch(f: typeof fetch): void {
+  fetchImpl = f
+}
+
+export function resetFetch(): void {
+  fetchImpl = globalThis.fetch
+}
+
+export interface ApiOptions {
+  method?: 'GET' | 'POST'
+  path: string
+  query?: Record<string, string | number | undefined>
+  body?: unknown
+  accept?: 'json' | 'text'
+}
+
+export interface ApiResult {
+  status: number
+  ok: boolean
+  text: string
+  contentType: string
+}
+
+function buildQuery(query?: ApiOptions['query']): string {
+  if (!query) return ''
+  const parts: string[] = []
+  for (const [k, v] of Object.entries(query)) {
+    if (v !== undefined) parts.push(`${encodeURIComponent(k)}=${encodeURIComponent(String(v))}`)
+  }
+  return parts.length ? `?${parts.join('&')}` : ''
+}
+
+/** 底层请求:构造 URL/头,执行 fetch;网络错误 → CliError。不解析 body 语义。 */
+export async function apiFetch(target: Target, opts: ApiOptions): Promise<ApiResult> {
+  const { baseUrl, sk } = requireTarget(target)
+  const base = baseUrl.replace(/\/+$/, '')
+  const path = opts.path.startsWith('/') ? opts.path : `/${opts.path}`
+  const url = `${base}${path}${buildQuery(opts.query)}`
+
+  const headers: Record<string, string> = {}
+  if (sk) headers.authorization = `Bearer ${sk}`
+  if (opts.accept === 'json') headers.accept = 'application/json'
+  else if (opts.accept === 'text') headers.accept = 'text/plain'
+
+  const init: RequestInit = { method: opts.method ?? 'GET', headers }
+  if (opts.body !== undefined) {
+    headers['content-type'] = 'application/json'
+    init.body = JSON.stringify(opts.body)
+  }
+
+  let res: Response
+  try {
+    res = await fetchImpl(url, init)
+  } catch (err) {
+    throw new CliError(`request failed: ${(err as Error).message}`)
+  }
+  const text = await res.text()
+  return {
+    status: res.status,
+    ok: res.ok,
+    text,
+    contentType: res.headers.get('content-type') ?? '',
+  }
+}
+
+/** 把非 2xx 响应体解释为 TBError(拿不到规范形状则回退到 HTTP 码)。 */
+function toCliError(body: unknown, status: number): CliError {
+  if (
+    body &&
+    typeof body === 'object' &&
+    'code' in body &&
+    'message' in body &&
+    typeof (body as { message: unknown }).message === 'string'
+  ) {
+    const b = body as { code: unknown; message: string }
+    return new CliError(b.message, String(b.code))
+  }
+  return new CliError(`gateway returned HTTP ${status}`)
+}
+
+/** JSON 请求:强制 `Accept: application/json`,成功返回解析结果,失败抛 CliError。 */
+export async function apiJson<T>(target: Target, opts: Omit<ApiOptions, 'accept'>): Promise<T> {
+  const r = await apiFetch(target, { ...opts, accept: 'json' })
+  let body: unknown
+  if (r.text) {
+    try {
+      body = JSON.parse(r.text)
+    } catch {
+      if (!r.ok) throw new CliError(`gateway returned HTTP ${r.status}`)
+      throw new CliError('invalid JSON response from gateway')
+    }
+  }
+  if (!r.ok) throw toCliError(body, r.status)
+  return body as T
+}
+
+/** 文本请求(Help DSL 等):成功返回原始文本,失败尝试解释 TBError JSON。 */
+export async function apiText(target: Target, opts: Omit<ApiOptions, 'accept'>): Promise<string> {
+  const r = await apiFetch(target, { ...opts, accept: 'text' })
+  if (!r.ok) {
+    let body: unknown
+    try {
+      body = JSON.parse(r.text)
+    } catch {
+      // 非 JSON 错误体:回退到 HTTP 码
+    }
+    throw toCliError(body, r.status)
+  }
+  return r.text
+}
+
+/** 数据面工具调用:`POST /<path>` body `{tool, arguments}`。 */
+export async function callTool<T>(
+  target: Target,
+  path: string,
+  tool: string,
+  args: Record<string, unknown> = {},
+): Promise<T> {
+  return apiJson<T>(target, { method: 'POST', path, body: { tool, arguments: args } })
+}

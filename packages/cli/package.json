@@ -12,13 +12,15 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "build": "tsup",
-    "dev": "tsx src/index.ts"
+    "dev": "tsx src/index.ts",
+    "test": "vitest run"
   },
   "dependencies": {
     "citty": "^0.2.2"
   },
   "devDependencies": {
     "@types/node": "^26.1.0",
-    "tsup": "^8.5.1"
+    "tsup": "^8.5.1",
+    "vitest": "^4.1.10"
   }
 }
