@@ -23,8 +23,8 @@ function nodeLine(path: string, kind: string, description: string): string {
 /**
  * 渲染 Help DSL(Proto §1.3):
  *   首行 `htbp 0.1`;`node` 行;每 cmd 一行 `cmd <name> POST <path>` +
- *   缩进的 `body`/`returns`/`scope`/`effect`/`confirm`;directory 的 children 续为 `node` 行。
- * `scope` 恒有;`inputSchema`/`returns`/`effect` 有值才渲染;`confirm` 仅在为真时渲染(其缺席即默认 false)。
+ *   缩进的 `h`/`body`/`returns`/`scope`/`effect`/`confirm`(此顺序,Proto §1.3);directory 的 children 续为 `node` 行。
+ * `scope` 恒有;`h`/`inputSchema`/`returns`/`effect` 有值才渲染;`confirm` 仅在为真时渲染(其缺席即默认 false)。
  *
  * `body` 行是**请求信封示意**(Proto §1.3):由 cmd 的 `inputSchema`(arguments 的 JSON Schema)
  * 包成 `{ "tool": <name>, "arguments": <inputSchema> }` 单行紧凑 JSON——与 JSON 表现的
@@ -35,6 +35,7 @@ export function renderHelpDsl(model: HelpModel): string {
   lines.push(nodeLine(model.node.path, model.node.kind, model.node.description))
   for (const cmd of model.cmds) {
     lines.push(`cmd ${cmd.name} ${cmd.method} ${cmd.path}`)
+    if (cmd.h !== undefined) lines.push(`  h ${cmd.h}`)
     if (cmd.inputSchema !== undefined) {
       lines.push(`  body ${JSON.stringify({ tool: cmd.name, arguments: cmd.inputSchema })}`)
     }
@@ -65,6 +66,7 @@ export function renderHelpJson(model: HelpModel): HelpJson {
       path: cmd.path,
       scope: cmd.scope,
     }
+    if (cmd.h !== undefined) out.h = cmd.h
     if (cmd.inputSchema !== undefined) out.inputSchema = cmd.inputSchema
     if (cmd.returns !== undefined) out.returns = cmd.returns
     if (cmd.effect !== undefined) out.effect = cmd.effect

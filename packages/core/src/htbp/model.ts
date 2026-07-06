@@ -28,6 +28,8 @@ export interface CmdSpec {
   name: string
   method: 'POST'
   path: string
+  /** 工具级一句话描述(Proto §1.3 `h` 行,Phase 2 定型;mcp/http 工具的上游 description 落此)。 */
+  h?: string
   /** 该 cmd `arguments` 的 JSON Schema(Proto §1.3;不含 {tool,arguments} 信封)。 */
   inputSchema?: unknown
   returns?: string
@@ -58,6 +60,8 @@ export interface HelpJson {
     name: string
     method: 'POST'
     path: string
+    /** 工具级一句话描述(Proto §1.3 `h`,Phase 2 定型)。 */
+    h?: string
     /** arguments 的 JSON Schema(Proto §1.3;不含 {tool,arguments} 信封)。 */
     inputSchema?: unknown
     returns?: string
