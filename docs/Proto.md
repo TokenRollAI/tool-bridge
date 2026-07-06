@@ -342,8 +342,9 @@ interface HttpToolDef {
   method: 'GET' | 'POST' | 'PUT' | 'DELETE'
   pathTemplate: string                  // 相对 endpoint;支持 {param} 占位
   inputSchema?: unknown                 // JSON Schema;~help 的数据源
-  effect?: 'readonly' | 'mutating' | 'destructive'   // 进 ~help 的 effect 行;缺省派生:
-                                        //   GET→readonly,其余→mutating(Phase 2 定型)
+  effect?: 'read' | 'write' | 'destructive'   // 与 §4.1 ToolDef.effect 同词汇;进 ~help 的
+                                        //   effect 行;缺省派生:GET→read,其余→write
+                                        //   (Phase 2 定型)
 }
 ```
 
