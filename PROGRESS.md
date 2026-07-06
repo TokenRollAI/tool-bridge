@@ -4,17 +4,17 @@
 
 ## 当前状态
 
-- **当前 Phase**:Phase 2 全部勾选(待关门流程);下一 Phase:Phase 3 — Context Layer(DOD.md §5)
-- **已勾选 DoD 项**:无
+- **当前 Phase**:Phase 2 已关门;当前进入 Phase 3 — Context Layer(DOD.md §5)
+- **已勾选 DoD 项**:Phase 0 5/5;Phase 1 7/7;Phase 2 6/6
 - **Blockers**:
   - Docker 守护进程未运行(Phase 6 / E2E-4 前需启动 Docker Desktop;不阻塞 Phase 0-5)
-  - `TB_TEST_MCP_URL` / `TB_TEST_S3_*` / `TB_R2_ACCESS_KEY_*` 空缺(均有兜底:自建 echo MCP、R2 当外部 S3、网关中转下载;不阻塞 Phase 0-1)
+  - `TB_TEST_S3_*` / `TB_R2_ACCESS_KEY_*` 空缺(均有兜底:R2 当外部 S3、网关中转下载;不阻塞 Phase 3 主路径)
 
 ## 外部前置核对(DOD §9,2026-07-06 核实)
 
 - Cloudflare:wrangler OAuth 已登录(DJJ 账户,与 `CLOUDFLARE_ACCOUNT_ID` 一致);`CLOUDFLARE_API_TOKEN` 空缺属预期(本地 OAuth)。⚠️ whoami 未确认 R2 write 权限,Phase 0 P0-5 绑定 R2 前复核。
 - 工具链:node v26.4.0 / pnpm 11.10.0 / wrangler 4.107.0 / gh 2.96.0(可访问 v1 私有仓)/ docker CLI 29.2.1(daemon 未起)。
-- 核心变量已配置:`CLOUDFLARE_ACCOUNT_ID`、`TB_DOMAIN`、`TB_BASE_URL`、`TB_NAME_PREFIX`、`TB_SECRET_ENCRYPTION_KEY`。`TB_SK` 空缺(预期:Phase 1 Admin SK 引导后回填)。
+- 核心变量已配置:`CLOUDFLARE_ACCOUNT_ID`、`TB_DOMAIN`、`TB_BASE_URL`、`TB_NAME_PREFIX`、`TB_SECRET_ENCRYPTION_KEY`、`TB_SK`(Admin SK)。
 
 ## Round 日志
 
@@ -87,3 +87,17 @@
 - 勾选:Phase 2 全部 6 项(DOD.md:66-71)
 - 沉淀:Phase 2 决策 9 项已回写 docs;待关门轮 /llmdoc:update
 - 遗留:①opt-in mcp E2E teardown 的 SDK 后台 SSE AbortError(harness artifact,非缺陷,已知项);②Phase 2 质量关口(重点补上轮缺失的 auth/contract-cli 维度);③DOD:68 的"tb call 挂真实上游 MCP"用的是本地 echo MCP(DOD §9 允许的兜底),外部真实 MCP 后续有条件再验。
+
+## Round 7 — 2026-07-06(Phase 2 关门)
+- 目标:Phase 2 质量关口 + 修复关门缺口 + 生产复验 + llmdoc 沉淀
+- 动作:4 个 explorer 并行审查(tool 契约/auth 可见性/CLI 对等/证据矩阵),确认并修复 5 类缺口(commit 186a739):①父目录/`~tree` 对 mcp/http/remote 调用节点按 read+call 裁剪,保留直接调用 read→404/call→403;②remote `~tree` 聚合远端子树并本地化路径;③remote `https://` 强制、`skRef` 换发/本地 SK 不外传测试;④CLI 补 `virtualize.describe`、http `authHeader/authScheme`、server ls/rm 测试和 rm kind 前置校验;⑤MCP echo 改 JSON response,provider 禁用可选 standalone SSE GET(保留 SDK Streamable HTTP)。
+- 验证:
+  - `pnpm verify` → 全绿(typecheck+lint;core 322;cli 45;gateway 34 passed/2 opt-in skipped)
+  - `TB_TEST_MCP_URL=http://127.0.0.1:39002/mcp TB_ALLOW_INSECURE_HTTP=true pnpm --filter @tool-bridge/gateway test -- tool.integration.test.ts` → 通过(34 passed/2 skipped;退出码 0;workerd 仍打印 SDK source-map/Network connection lost 诊断噪声,不影响退出码)
+  - `TB_TEST_LIVE_HTTP=1 pnpm --filter @tool-bridge/gateway test -- tool.integration.test.ts` → 通过(35 passed/1 skipped),真实 postman-echo 断言 `foo=bar`
+  - `pnpm deploy:all` → provision 幂等,部署 `tb-gateway` 到 custom domain,Version `3ff129e1-c5f4-4df1-9dea-0bb35bcd87a2`
+  - `TB_BASE_URL=https://tool-bridge.pdjjq.org TB_SK=... pnpm smoke` → healthz 200、无 SK 401、带 SK `~help` 200
+  - 生产 CLI-only HTTP 验证:`node packages/cli/dist/index.js tool mount verify/p2-http-1783355502 --kind http ...` → `tb call` 返回 postman-echo `{"args":{"foo":"bar"}}` → `tb tool rm` 清理成功
+- 勾选:无新增(DOD.md Phase 2 已 6/6 勾选);本轮完成 Phase 2 关门质量关口,证据补强 DOD.md:66-71
+- 沉淀:新增 reflection `llmdoc/memory/reflections/2026-07-06-phase2-closeout.md`;更新 current-state 与 modules-and-boundaries Phase 2 落地
+- 遗留:进入 Phase 3 首项 DoD:Context 四动词语义单测(readOnly/ttl/path traversal 等);Phase 3 前继续注意 `TB_TEST_S3_*` 空缺走 R2 兜底。

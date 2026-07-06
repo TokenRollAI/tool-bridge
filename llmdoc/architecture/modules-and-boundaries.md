@@ -65,6 +65,15 @@
 - **两条注册通道**(Proto.md:368):`POST <path>/~register` 是受限 SK 通道——只判 URL path 上的 (path,'register') + §2.4,不要求 `system/registry` 可见,body.path 必须等于 URL path;`system/registry` 数据面是管理通道——须对 registry 可见且持 register/admin。两者最终都落 `NodeRegistry.Write`。
 - **引导**(bootstrap.ts):Workers 无启动钩子,首请求惰性引导(模块级 promise 防重入 + KV 幂等标志);Admin SK 明文可由 `TB_BOOTSTRAP_ADMIN_SK` 提供(部署自动化)否则随机生成,只输出一次;物化 `system` directory + sk/secret/registry/status 四个 builtin(plugin 在 Phase 5),`registeredBy: system:boot`。
 
+## Phase 2 落地(2026-07-06,M2 Tool Layer 的实际文件映射)
+
+- **core/gateway 职责线**:`packages/core/src/tool/` 只放纯逻辑:HttpToolDef 请求拼装、工具虚拟化、mcp schema→HelpModel、remote path rewrite/allowlist、`X-TB-Via` 解析/环检测、上游错误归一;`packages/gateway/src/providers/` 承担 I/O:mcp 官方 SDK Streamable HTTP、http fetch、remote fetch 透传、toolCache。core 不直接 fetch。
+- **MCP provider**(`providers/mcp.ts`):一次性会话(connect→list/call→terminate),404 会话失效重建重试一次;`authRef` 经 SecretStore.resolve 注入 Bearer;只使用 request/response,用 fetch wrapper 对 SDK 自动 standalone GET/SSE 返回 405,避免关闭无用流造成测试浮动错误。
+- **HTTP provider**(`providers/http.ts`):`buildHttpRequest` 处理 `{param}` 占位与 GET/DELETE query、POST/PUT JSON body;`authHeader/authScheme` 控制上游凭证注入;非 2xx 与网络错误经 `normalizeUpstreamError` 收敛为 TBError。
+- **remote provider**(`providers/remote.ts` + `app.ts`):注册时和调用时都校验 https + host allowlist;本地调用者 SK 不外传,出站 Authorization 只来自 `skRef`;`X-TB-Via` 入站先判环/跳数再追加自身。`~help`/`~skill`/POST 直接同形透传;根/子树 `~tree` 在本地 buildTree 递归时拉取远端 direct children 并把路径映射回本地挂载前缀,计入本地 depth/node 预算。
+- **可见性细则**:直接访问调用节点仍按 Proto §1.4 的 read→404 / call→403;父目录/`~tree` 展示面为了满足 Phase 2 DOD,对 `mcp`/`http`/`remote` 节点同时要求 read+call,无 call 的 SK 不在 `tb ls` 中看到该节点。
+- **CLI 管理面对等**:`packages/cli/src/commands/tool.ts` 覆盖 mcp/http 挂载、`virtualize` 的 prefix/rename/hide/describe、http `authHeader/authScheme`;`server.ts` 覆盖 remote add/ls/rm;`registry.ts deleteNode` 在 `tool rm`/`server rm` 前做 kind 校验,避免命令名误删其它节点。
+
 ## 命名注意
 
 Device 通道接口以 Proto 命名为准:`DeviceTransport`(Proto.md:538)/ `DeviceConn`(Proto.md:541)/ 帧类型 `DeviceFrame`(Proto.md:449)。Architecture 早期用 `DeviceChannel` 泛指该抽象,已于 commit 0d48b06 修订(Architecture.md:157 改列 DeviceTransport/DeviceConn,:27 保留口语化名但加括注);历史记录见 [../memory/doc-gaps.md](../memory/doc-gaps.md) 已处理区 G1。

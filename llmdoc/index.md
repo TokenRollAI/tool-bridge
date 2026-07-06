@@ -7,7 +7,7 @@
 ## must/ — 每轮必读的复发性上下文
 
 - [must/project-brief.md](must/project-brief.md) — 项目定义、七个 User Case、五份规范角色、纪律 0-4、术语表精选。
-- [must/current-state.md](must/current-state.md) — 进度快照(Phase 0/1 完成 → Phase 2)、已部署资源、代码现状、常用命令、.env 凭据状态表、本机工具链、兜底路径(易变,每轮更新)。
+- [must/current-state.md](must/current-state.md) — 进度快照(Phase 0/1/2 完成 → Phase 3)、已部署资源、代码现状、常用命令、.env 凭据状态表、本机工具链、兜底路径(易变,每轮更新)。
 
 ## overview/ — 项目形态与边界
 
@@ -15,7 +15,7 @@
 
 ## architecture/ — 所有权边界与不变量
 
-- [architecture/modules-and-boundaries.md](architecture/modules-and-boundaries.md) — M1-M10 职责/依赖方向/宿主落地、统一注册面、凭证不出网关、KV/R2/DO/D1 分工、Phase→模块映射。
+- [architecture/modules-and-boundaries.md](architecture/modules-and-boundaries.md) — M1-M10 职责/依赖方向/宿主落地、统一注册面、凭证不出网关、KV/R2/DO/D1 分工、Phase→模块映射、Phase 1/2 实际文件边界。
 
 ## reference/ — 稳定查表事实
 
@@ -32,6 +32,7 @@
 - [memory/doc-gaps.md](memory/doc-gaps.md) — 实现注意(G4/G5)、已核实非矛盾(原 C4/C5/C6)、调查盲区、已处理记录(G1/G2/G3/G6)。
 - `memory/decisions/`(空)— durable 设计/流程决策,recorder 维护。
 - [memory/reflections/2026-07-06-phase0-bootstrap.md](memory/reflections/2026-07-06-phase0-bootstrap.md) — Phase 0 流程教训:scratch 报告易丢需尽快内化、后台 agent 靠产出文件轮询、wrangler 多账户须显式 account、权限用真实操作核实、smoke 不读 .env。reflector 维护。
+- [memory/reflections/2026-07-06-phase2-closeout.md](memory/reflections/2026-07-06-phase2-closeout.md) — Phase 2 关门教训:DoD 勾选不等于关门、opt-in 测试看退出码、代理/联邦要测出站边界、CLI 配置面对等。reflector 维护。
 
 ## 路由提示
 
