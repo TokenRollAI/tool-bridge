@@ -1,0 +1,69 @@
+/**
+ * device 节点的静态 HelpModel(Proto §6.3;网关 helpModelFor 的 device 分支数据源)。
+ *
+ * shell 节点:单 cmd `exec`,effect destructive + confirm,allow 白名单进 `h` 行;
+ * fs 节点:复用 context 的静态 help(§5 file provider 语义,不复制 cmd 表);
+ * directory(mountPath)节点:description 呈现 online 状态。
+ */
+
+import { cmdPath } from '../builtin/util'
+import { type ContextHelpOptions, contextHelpModel } from '../context/help'
+import type { ChildRef, CmdSpec, HelpModel } from '../htbp/model'
+import type { TreePath } from '../types'
+import { describeAllow } from './shellAllow'
+
+const SHELL_DESCRIPTION = '设备 shell(远程命令执行)'
+
+/** `<mountPath>/shell` 工具节点的 ~help;h 行含 allow 白名单描述(Proto §6.3)。 */
+export function deviceShellHelpModel(
+  nodePath: TreePath,
+  shell: { description?: string; allow?: string[] } = {},
+): HelpModel {
+  const exec: CmdSpec = {
+    name: 'exec',
+    method: 'POST',
+    path: cmdPath(nodePath),
+    h: `执行 shell 命令;${describeAllow(shell.allow)}`,
+    inputSchema: {
+      type: 'object',
+      required: ['command'],
+      properties: {
+        command: { type: 'string' },
+        cwd: { type: 'string' },
+        timeoutMs: { type: 'number' },
+      },
+    },
+    returns: '{ stdout, stderr, exitCode }',
+    scope: 'call',
+    effect: 'destructive',
+    confirm: true,
+  }
+  return {
+    node: { path: nodePath, kind: 'device', description: shell.description ?? SHELL_DESCRIPTION },
+    cmds: [exec],
+  }
+}
+
+/** `<mountPath>/fs` context 节点的 ~help:即 §5 file provider,复用 context 静态 help。 */
+export function deviceFsHelpModel(
+  node: { path: TreePath; description: string },
+  opts: ContextHelpOptions = {},
+): HelpModel {
+  return contextHelpModel(node, opts)
+}
+
+/** `<mountPath>` directory 节点的 ~help;description 附 online/offline 状态。 */
+export function deviceDirectoryHelpModel(
+  node: { path: TreePath; description: string; online: boolean },
+  children: ChildRef[] = [],
+): HelpModel {
+  return {
+    node: {
+      path: node.path,
+      kind: 'directory',
+      description: `${node.description}(${node.online ? 'online' : 'offline'})`,
+    },
+    cmds: [],
+    children,
+  }
+}

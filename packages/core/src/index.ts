@@ -14,9 +14,15 @@ export * from './context/objectStore'
 export * from './context/path'
 export * from './context/ttl'
 export * from './context/types'
+export * from './device/client'
+export * from './device/frames'
+export * from './device/helpModel'
+export * from './device/session'
+export * from './device/shellAllow'
 export {
   isTBError,
   statusForCode,
+  TB_ERROR_CODES,
   TBError,
   type TBErrorBody,
   type TBErrorCode,
