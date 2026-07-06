@@ -86,6 +86,16 @@ export interface SecretKeyInput {
 
 export type NodeKind = 'directory' | 'mcp' | 'http' | 'builtin' | 'context' | 'device' | 'remote'
 
+export const NODE_KINDS: readonly NodeKind[] = [
+  'directory',
+  'mcp',
+  'http',
+  'builtin',
+  'context',
+  'device',
+  'remote',
+]
+
 export interface TreeNode {
   /** 唯一键。 */
   path: TreePath
@@ -128,9 +138,12 @@ export interface HttpToolDef {
 }
 
 export interface DeviceExpose {
-  shell?: boolean
-  fs?: { root: string; readOnly?: boolean }
-  tools?: string[]
+  /** 挂 `<mountPath>/shell` 工具节点;allow 白名单语义见 Proto §6.2(缺省 [] = 全拒)。 */
+  shell?: { description?: string; allow?: string[] }
+  /** 挂 `<mountPath>/fs` context 节点(file provider);多根语义见 Proto §6.3。 */
+  fs?: { roots: string[]; readOnly?: boolean }
+  /** SDK 自定义节点(路径相对 mountPath)。 */
+  nodes?: NodeInput[]
 }
 
 export type NodeConfig =

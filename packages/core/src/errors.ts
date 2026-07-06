@@ -15,6 +15,17 @@ export type TBErrorCode =
   | 'rate_limited'
   | 'internal'
 
+/** 7 码的常量表(线上 body 校验用,如 DeviceFrame 的 error 字段)。 */
+export const TB_ERROR_CODES: readonly TBErrorCode[] = [
+  'not_found',
+  'permission_denied',
+  'invalid_argument',
+  'conflict',
+  'unavailable',
+  'rate_limited',
+  'internal',
+]
+
 /** 线上 body 形状(Proto §0.2):~help、返回值、错误响应统一用它。 */
 export interface TBErrorBody {
   code: TBErrorCode
