@@ -15,7 +15,7 @@ export interface ToolSpec {
   description?: string
   /** JSON Schema;`~help` 的 body 数据源。 */
   inputSchema?: unknown
-  /** 副作用标记(mcp: read/write/destructive;http: readonly/mutating/destructive);进 `~help` 的 effect 行。 */
+  /** 副作用标记(read/write/destructive,Proto §4.1);进 `~help` 的 effect 行。 */
   effect?: string
   /** 危险操作二次确认;进 `~help` 的 confirm 行。 */
   confirm?: boolean

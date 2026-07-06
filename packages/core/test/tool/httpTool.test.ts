@@ -82,13 +82,13 @@ describe('effectFor 缺省派生(Phase 2 定型)', () => {
   it('显式 effect 优先', () => {
     expect(effectFor({ method: 'GET', effect: 'destructive' })).toBe('destructive')
   })
-  it('缺省:GET → readonly', () => {
-    expect(effectFor({ method: 'GET' })).toBe('readonly')
+  it('缺省:GET → read', () => {
+    expect(effectFor({ method: 'GET' })).toBe('read')
   })
-  it('缺省:POST/PUT/DELETE → mutating', () => {
-    expect(effectFor({ method: 'POST' })).toBe('mutating')
-    expect(effectFor({ method: 'PUT' })).toBe('mutating')
-    expect(effectFor({ method: 'DELETE' })).toBe('mutating')
+  it('缺省:POST/PUT/DELETE → write', () => {
+    expect(effectFor({ method: 'POST' })).toBe('write')
+    expect(effectFor({ method: 'PUT' })).toBe('write')
+    expect(effectFor({ method: 'DELETE' })).toBe('write')
   })
 })
 

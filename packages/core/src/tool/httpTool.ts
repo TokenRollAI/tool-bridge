@@ -8,7 +8,8 @@ import { TBError } from '../errors'
 import type { HttpToolDef } from '../types'
 
 export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'DELETE'
-export type HttpEffect = 'readonly' | 'mutating' | 'destructive'
+/** 工具副作用词汇(Proto §4.1 统一集合)。 */
+export type HttpEffect = 'read' | 'write' | 'destructive'
 
 /** buildHttpRequest 的产物:gateway 据此发 fetch。 */
 export interface BuiltHttpRequest {
@@ -80,11 +81,11 @@ export function buildHttpRequest(
 }
 
 /**
- * 工具的 effect(Phase 2 定型):显式 `effect` 优先;缺省派生——GET→readonly,其余→mutating。
+ * 工具的 effect(Proto §4.1 词汇):显式 `effect` 优先;缺省派生——GET→read,其余→write。
  */
 export function effectFor(def: { method: HttpMethod; effect?: HttpEffect }): HttpEffect {
   if (def.effect !== undefined) return def.effect
-  return def.method === 'GET' ? 'readonly' : 'mutating'
+  return def.method === 'GET' ? 'read' : 'write'
 }
 
 /**
