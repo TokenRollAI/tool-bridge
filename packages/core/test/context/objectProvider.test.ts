@@ -174,6 +174,14 @@ describe('Get', () => {
     expect((await provider60.Get('bin')).content).toEqual({ $ref: 'https://signed/bin?ttl=60' })
   })
 
+  it('relayRefUrl 可为异步工厂(网关 HMAC 签 token 场景)', async () => {
+    const { provider } = makeProvider({
+      relayRefUrl: async (key) => `https://relay/${key}?signed=1`,
+    })
+    await provider.Write('bin', { contentType: 'application/octet-stream', content: 'xx' })
+    expect((await provider.Get('bin')).content).toEqual({ $ref: 'https://relay/bin?signed=1' })
+  })
+
   it('presign 与 relayRefUrl 都缺 → unavailable', async () => {
     const { provider } = makeProvider()
     await provider.Write('bin', { contentType: 'application/octet-stream', content: 'xx' })

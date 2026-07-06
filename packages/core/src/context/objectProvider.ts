@@ -41,8 +41,8 @@ export interface ObjectContextProviderOptions {
   refThresholdBytes?: number
   /** presign URL 有效期(秒);缺省 900。 */
   presignTtlSec?: number
-  /** presign 缺失时的中转 URL 工厂;两者都缺则大对象 Get → unavailable。 */
-  relayRefUrl?: (key: string) => string
+  /** presign 缺失时的中转 URL 工厂(可异步:网关需 HMAC 签 token);两者都缺则大对象 Get → unavailable。 */
+  relayRefUrl?: (key: string) => string | Promise<string>
 }
 
 /** 本 provider 实现了可选能力 Search 与 Delete(CONTEXT_CAPABILITIES 声明)。 */
