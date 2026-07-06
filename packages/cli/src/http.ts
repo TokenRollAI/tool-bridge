@@ -46,7 +46,7 @@ export interface ApiOptions {
   path: string
   query?: Record<string, string | number | undefined>
   body?: unknown
-  accept?: 'json' | 'text'
+  accept?: 'json' | 'text' | 'markdown'
 }
 
 export interface ApiResult {
@@ -75,6 +75,7 @@ export async function apiFetch(target: Target, opts: ApiOptions): Promise<ApiRes
   const headers: Record<string, string> = {}
   if (sk) headers.authorization = `Bearer ${sk}`
   if (opts.accept === 'json') headers.accept = 'application/json'
+  else if (opts.accept === 'markdown') headers.accept = 'text/markdown'
   else if (opts.accept === 'text') headers.accept = 'text/plain'
 
   const init: RequestInit = { method: opts.method ?? 'GET', headers }
@@ -152,4 +153,32 @@ export async function callTool<T>(
   args: Record<string, unknown> = {},
 ): Promise<T> {
   return apiJson<T>(target, { method: 'POST', path, body: { tool, arguments: args } })
+}
+
+/**
+ * 数据面调用(人类模式):`Accept: text/markdown`,返回原始渲染文本(§1.2)。
+ * 非 2xx 时按 TBError 归一为 CliError。
+ */
+export async function callToolText(
+  target: Target,
+  path: string,
+  tool: string,
+  args: Record<string, unknown> = {},
+): Promise<string> {
+  const r = await apiFetch(target, {
+    method: 'POST',
+    path,
+    body: { tool, arguments: args },
+    accept: 'markdown',
+  })
+  if (!r.ok) {
+    let body: unknown
+    try {
+      body = JSON.parse(r.text)
+    } catch {
+      // 非 JSON 错误体:回退到 HTTP 码
+    }
+    throw toCliError(body, r.status)
+  }
+  return r.text
 }

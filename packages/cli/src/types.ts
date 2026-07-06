@@ -78,3 +78,56 @@ export interface StatusView {
   healthy?: boolean
   version?: string
 }
+
+/** 工具虚拟化(Proto §3.1;mcp/http 适用)。 */
+export interface Virtualize {
+  prefix?: string
+  rename?: Record<string, string>
+  hide?: string[]
+  describe?: Record<string, string>
+}
+
+/** http Provider 的单个工具定义(Proto §3.2)。 */
+export interface HttpToolDef {
+  name: string
+  description: string
+  method: 'GET' | 'POST' | 'PUT' | 'DELETE'
+  pathTemplate: string
+  inputSchema?: unknown
+  effect?: 'read' | 'write' | 'destructive'
+}
+
+/** NodeConfig 按 kind(Proto §3.2;CLI 只构造 mcp/http/remote 三形状)。 */
+export type NodeConfig =
+  | { kind: 'mcp'; url: string; authRef?: string }
+  | {
+      kind: 'http'
+      endpoint: string
+      tools: HttpToolDef[]
+      authRef?: string
+      authHeader?: string
+      authScheme?: string
+    }
+  | { kind: 'remote'; baseUrl: string; skRef?: string }
+
+/** Node 投影(NodeRegistry.List/Get 返回;CLI 只取渲染所需字段)。 */
+export interface Node {
+  path: string
+  kind: string
+  description?: string
+  config?: NodeConfig
+  virtualize?: Virtualize
+  registeredBy?: string
+  online?: boolean
+  createdAt?: string
+  updatedAt?: string
+}
+
+/** NodeInput = Omit<Node,'registeredBy'|'online'|'createdAt'|'updatedAt'>(Proto §3.3)。 */
+export interface NodeInput {
+  path: string
+  kind: string
+  description: string
+  config?: NodeConfig
+  virtualize?: Virtualize
+}
