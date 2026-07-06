@@ -291,6 +291,10 @@ durable_objects:
   DeviceSession         # M4 每设备一个(WS hibernation)
 storage:
   KV: tb-state          # M1 树配置 / M5 SK 哈希表 / M8 plugin manifest
+                        #   key 布局(Phase 1 定型):sk:h:<sha256hex>→SecretKey(认证热路径)、
+                        #   sk:i:<id>→hash 指针(管理面二级索引)、node:<path>→Node、
+                        #   secret:<name>→{iv,ciphertext,updatedAt}、plugin:<id>→manifest、
+                        #   sys:bootstrapped→引导幂等标志。SQLite 宿主用同构表结构。
   R2: tb-context        # M3 r2 provider 默认 bucket
   D1: tb-audit          # M5 审计留痕(可选,Phase 后期)
 cli:

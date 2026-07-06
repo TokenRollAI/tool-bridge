@@ -48,7 +48,7 @@ interface TBError {
 
 **TBError ↔ HTTP 映射(规范性)**:`not_found`→404、`permission_denied`→403、`invalid_argument`→400、`conflict`→409、`rate_limited`→429、`unavailable`→503、`internal`→500。`retryable=true` 仅允许出现在 `rate_limited` / `unavailable` / `internal` 上;调用方对 429 与 5xx 且 `retryable=true` 的响应按指数退避重试。
 
-**未认证**:缺失或无法识别的 SK 属认证层失败,发生在进入 `Authorizer.Check` 之前——返回 HTTP **401**,body 复用 `TBError` 形状且 `code: 'permission_denied'`、`retryable: false`(7 码集合不为此扩容:401/403 的区分由 HTTP 状态码承担)。
+**未认证**:缺失或无法识别的 SK 属认证层失败,发生在进入 `Authorizer.Check` 之前——返回 HTTP **401**,body 复用 `TBError` 形状且 `code: 'permission_denied'`、`retryable: false`(7 码集合不为此扩容:401/403 的区分由 HTTP 状态码承担)。**disabled 或已过期(`expiresAt`)的 SK 视同无法识别**,同样返回 401——能否查到记录是实现细节,对外语义一致(Phase 1 定型回写)。
 
 **未实现占位**:尚未落地的路由/能力返回 HTTP **501**,body `code: 'unavailable'`、`retryable: false`。
 
@@ -131,6 +131,25 @@ cmd get-library-docs POST /docs/context7
 ```
 
 约束:每个 cmd 必须声明 `scope`(对应 §2.2 的动作,供调用方预判权限);`effect`(是否有副作用)与 `confirm`(危险操作)按 HTBP 属性表可选携带;消费方对未知行必须忽略(向前兼容)。
+
+**JSON 等价形状(规范性,Phase 1 定型回写)**——`Accept: application/json` 时,`~help` 与 `~tree` 返回以下结构,字段与 DSL 一一对应、不得多/少字段:
+
+```ts
+interface HelpJson {
+  htbp: string                          // "0.1"
+  node: { path: TreePath, kind: Node['kind'], description: string }
+  cmds: Array<{ name: string, method: 'POST', path: string,
+                body?: unknown,        // JSON Schema(有 inputSchema 时)
+                returns?: string, scope: Action,
+                effect?: string, confirm?: boolean }>
+  children?: Array<{ path: TreePath, kind: Node['kind'], description: string }>  // directory 节点
+}
+interface TreeJson {                    // ~tree;递归
+  path: TreePath, kind: Node['kind'], description: string
+  online?: boolean, truncated?: boolean // truncated:深度/节点上限或环检测截断
+  children?: TreeJson[]
+}
+```
 
 ### 1.4 调用形态
 
@@ -321,6 +340,8 @@ type NodeInput = Omit<Node, 'registeredBy' | 'online' | 'createdAt' | 'updatedAt
 
 判定:`Write/Update/Delete` → (path, 'register') + §2.4 路径规则;`List/Get/Resolve` → (path, 'read')。
 
+**自动物化 directory(规范性,Phase 1 定型回写)**:注册 `a/b/c` 时自动物化的中间 directory(`a`、`a/b`)记 `registeredBy: 'system:auto'`;§2.4d 的 conflict 判定对 `system:auto` 的 directory 不生效(任何 SK 都可在其下继续挂载,也可用显式 directory 覆盖其 description);`Delete` 级联回收仅回收 `system:auto` 且再无子节点的 directory,显式注册的 directory 不自动回收。
+
 ### 3.4 remote 节点语义(规范性)
 
 `remote` 节点承载 TB.md 的 "Custom HTBP Server" / "Add TB Server":把**任意实现了 HTBP 控制面的服务**(不必是 tool-bridge)联邦为本树的一棵子树。
@@ -362,7 +383,7 @@ interface ToolResult {
 
 - **mcp**:经官方 MCP SDK(Streamable HTTP)连接 `config.url`;`List/Get` 映射 `tools/list`,`Call` 映射 `tools/call`;会话失效自动重建;上游 schema 变化时 `~help` 缓存失效(TTL + 显式刷新)。
 - **http**:按 `HttpToolDef` 拼请求(`{param}` 从 args 取,剩余 args 按 method 入 query/body);`authRef` 解析后注入认证头;响应透传为 `ToolResult`。
-- **builtin**:`system/*` 模块的进程内直调;`~help` 由模块静态声明。
+- **builtin**:`system/*` 模块的进程内直调;`~help` 由模块静态声明。**cmd 命名(规范性,Phase 1 定型回写)**:builtin 的 cmd 名与接口方法名对齐(小写:`list` / `get` / `write` / `update` / `delete` / `set`……);CLI 层的 `create`/`rm` 等人性化别名由 CLI 翻译,不进入 `~help`。`system/status` 模块的 cmd 集合:`get`(scope read,免 admin——返回 `{ healthy, version, nodeCount, uptime? }` 健康摘要,`tb status` 登录态下的数据源)。
 
 ---
 
