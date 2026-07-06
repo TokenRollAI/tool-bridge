@@ -368,7 +368,7 @@ interface ToolResult {
 
 ### 5.1 ContextProvider(Plugin 接口——核心四动词)
 
-**每个 Context Provider 必须实现且只必须实现以下四个接口**:
+**每个 Context Provider 必须实现以下四个核心接口(可选能力见其后 `ContextProviderOptional`,须在 `~describe` 的 capabilities 中声明)**:
 
 ```ts
 interface ContextProvider {

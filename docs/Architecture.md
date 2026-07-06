@@ -24,7 +24,7 @@
   外围:SDK(M6) · CLI(M7) · Plugin System(M8) · Dashboard(M9) · Server/部署(M10)
 ```
 
-**分层原则**:每一层由一组**纯接口**定义(ToolProvider、ContextProvider、DeviceChannel……);层内实现(内置或 Plugin)都只是接口的 Provider。层与层之间只通过接口交互,接口之外不存在旁路。
+**分层原则**:每一层由一组**纯接口**定义(ToolProvider、ContextProvider、DeviceChannel(= Proto 的 DeviceTransport/DeviceConn)……);层内实现(内置或 Plugin)都只是接口的 Provider。层与层之间只通过接口交互,接口之外不存在旁路。
 
 **两个全局模式**:
 
@@ -154,7 +154,7 @@
 
 ### 必要接口(详见 Proto §6)
 
-- `DeviceChannel` — WS 帧协议(DeviceFrame):`hello` / `ready` / `call` / `result` / `cancel` / `ping|pong`(Proto §6.2);网关侧宿主注入面 `DeviceTransport` 见 Proto §7。
+- `DeviceTransport` / `DeviceConn` — 承载 WS 帧协议 `DeviceFrame`:`hello` / `ready` / `call` / `result` / `cancel` / `ping|pong`(Proto §6.2、§7);本文早前以 `DeviceChannel` 泛指该 WS 帧通道抽象。
 - 设备的挂载/下线复用 `NodeRegistry`(由 Gateway 代写)。
 
 ---
