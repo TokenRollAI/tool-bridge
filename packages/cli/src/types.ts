@@ -97,7 +97,7 @@ export interface HttpToolDef {
   effect?: 'read' | 'write' | 'destructive'
 }
 
-/** NodeConfig 按 kind(Proto §3.2;CLI 只构造 mcp/http/remote 三形状)。 */
+/** NodeConfig 按 kind(Proto §3.2;CLI 构造 mcp/http/remote/context 四形状)。 */
 export type NodeConfig =
   | { kind: 'mcp'; url: string; authRef?: string }
   | {
@@ -109,6 +109,14 @@ export type NodeConfig =
       authScheme?: string
     }
   | { kind: 'remote'; baseUrl: string; skRef?: string }
+  | {
+      kind: 'context'
+      provider: string
+      providerConfig?: Record<string, unknown>
+      authRef?: string
+      readOnly?: boolean
+      ttl?: number
+    }
 
 /** Node 投影(NodeRegistry.List/Get 返回;CLI 只取渲染所需字段)。 */
 export interface Node {
@@ -121,6 +129,21 @@ export interface Node {
   online?: boolean
   createdAt?: string
   updatedAt?: string
+}
+
+/** context entry 元数据(ContextProvider List/Write/Update 返回,Proto §5.1)。 */
+export interface ContextEntryMeta {
+  uri: string
+  contentType: string
+  size?: number
+  version: string
+  updatedAt: string
+  metadata: Record<string, string>
+}
+
+/** context entry 全量(Get 返回;大对象 content = { $ref: <预签名 URL> },Proto §5.1)。 */
+export interface ContextEntry extends ContextEntryMeta {
+  content: string | unknown
 }
 
 /** NodeInput = Omit<Node,'registeredBy'|'online'|'createdAt'|'updatedAt'>(Proto §3.3)。 */
