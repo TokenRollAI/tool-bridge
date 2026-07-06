@@ -102,7 +102,8 @@ export async function objectBodyToBytes(body: ObjectBody): Promise<Uint8Array> {
   return readStreamBytes(body)
 }
 
-function bytesToStream(bytes: Uint8Array): ObjectBodyStream {
+/** 字节 → 单块读流(内存 / file 后端把整读结果包成 ObjectBodyStream 用)。 */
+export function bytesToObjectStream(bytes: Uint8Array): ObjectBodyStream {
   return {
     getReader() {
       let done = false
@@ -137,7 +138,7 @@ export class MemoryObjectStore implements ObjectStore {
   async get(key: string): Promise<{ meta: ObjectMeta; body: ObjectBodyStream } | null> {
     const stored = this.m.get(key)
     if (!stored) return null
-    return { meta: stored.meta, body: bytesToStream(stored.bytes) }
+    return { meta: stored.meta, body: bytesToObjectStream(stored.bytes) }
   }
 
   async put(key: string, body: ObjectBody, opts?: ObjectPutOptions): Promise<ObjectMeta> {
