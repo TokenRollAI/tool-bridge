@@ -4,7 +4,7 @@
 
 ## 当前状态
 
-- **当前 Phase**:Phase 1 已关门(质量关口修复完成);下一 Phase:Phase 2 — Tool Layer(DOD.md §4)
+- **当前 Phase**:Phase 2 全部勾选(待关门流程);下一 Phase:Phase 3 — Context Layer(DOD.md §5)
 - **已勾选 DoD 项**:无
 - **Blockers**:
   - Docker 守护进程未运行(Phase 6 / E2E-4 前需启动 Docker Desktop;不阻塞 Phase 0-5)
@@ -74,3 +74,16 @@
 - 勾选:无新增(Phase 1 已勾;本轮是关门修复)。DOD:55/57 的勾选依据现在有可重跑测试/脚本支撑(质量关口指出的"勾选依据不实"已消除)。
 - 沉淀:Phase 2 决策回写 docs(03a538c);llmdoc update 见下轮开头。
 - 遗留:质量关口的 auth/contract-cli 两个 review 维度因 API 中断未完整跑完——Phase 2 关门时对 auth 面加倍覆盖;Phase 2 开工(规格已齐:phase2-spec-digest.md + docs 定型)。
+
+## Round 6 — 2026-07-06(Phase 2 全量)
+- 目标:Phase 2 全部 DoD(DOD.md:66-71)
+- 动作:①inv-phase2 规格摘要 9 开放问题 → 主协调者拍板 → rec-p2docs 回写 docs(03a538c + 5812de2 effect 词汇统一 read/write/destructive);②w-p2core 实现 core tool 层(虚拟化/httpTool/via/upstreamError/remote/mcpSchema + CmdSpec.h,commits 5495f9c/3ec8e28/014e419/6a16581,core 322 单测);③w-p2gw 实现 gateway providers(mcp 官方 SDK 一次性会话+404 重试、http、remote 透传、toolCache)与 app 接线(commits aa3f954/cc0de64/325800d,gateway 31+2 skip);④w-p2cli 实现 tb tool/server/call(393de02,cli 43 单测);⑤echo MCP server 脚本(packages/gateway/scripts/echo-mcp.ts)。
+- 验证(逐条):
+  - `pnpm verify` 全绿(322 core + 43 cli + 31 gateway)
+  - opt-in mcp E2E(本地 echo MCP):mount mcp → ~help 见 echo 工具 → call 回显 → 9 passed(TB_TEST_MCP_URL 打 tag,本轮跑 2 次:worker 一次 + 主协调者复跑一次)
+  - 生产(75f0a947):`tb tool mount --kind http`(postman-echo)→ `tb help` 输出 cmd/h/effect 行 → `tb call --args '{"msg":"hi-tb"}'` 返回 echo(真实外部 http 上游,打 tag);测后清理
+  - 双实例联邦(本地 dev A/B):A `~register` kind:remote(skRef 换发)→ A 树见 fed/b → 经 A 透传取 B 的 ~help 成功;白名单外 baseUrl → 400 invalid_argument;X-TB-Via 含自身 → 503 unavailable(环检测);B 默认空白名单拒一切 remote 注册(环不可建立)
+  - 权限/虚拟化/parser 断言在 gateway 集成测试内(rename 后原名 404、hide 不可见、无 call 权限 403、parseHelpDsl 断言)
+- 勾选:Phase 2 全部 6 项(DOD.md:66-71)
+- 沉淀:Phase 2 决策 9 项已回写 docs;待关门轮 /llmdoc:update
+- 遗留:①opt-in mcp E2E teardown 的 SDK 后台 SSE AbortError(harness artifact,非缺陷,已知项);②Phase 2 质量关口(重点补上轮缺失的 auth/contract-cli 维度);③DOD:68 的"tb call 挂真实上游 MCP"用的是本地 echo MCP(DOD §9 允许的兜底),外部真实 MCP 后续有条件再验。

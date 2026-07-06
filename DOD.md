@@ -63,12 +63,12 @@
 **范围**:mcp Provider(官方 SDK Streamable HTTP client、会话重建、schema→`~help` 派生与缓存失效);http Provider(HttpToolDef 拼装、authRef 凭证注入);remote 节点(Proto §3.4:联邦任意 HTBP 服务——`~help`/调用透传、skRef 凭证换发、baseUrl 白名单、`X-TB-Via` 环检测,TB.md "Custom HTBP Server"/"Add TB Server");工具虚拟化(prefix/rename/hide/describe);调用点 Check(call 动作);**CLI**:`tb tool mount|rm` / `tb server add|ls|rm` / `tb call`。
 
 **DoD**:
-- [ ] 单测:HttpToolDef 拼装({param} 占位、query/body 分配)、虚拟化映射(rename 后原名不可调、hide 不可见)、mcp schema→Help DSL 生成、上游 TBError 透传形状。
-- [ ] 单测:remote 透传的路径改写、本地调用者 SK 不外传(仅 skRef 换发)、白名单拒绝、`X-TB-Via` 环检测。
-- [ ] 集成:`tb tool mount --kind mcp` 挂一个真实上游 MCP server → `tb help <path>` 输出其工具 → `tb call` 成功;挂一个 http endpoint(如 postman-echo)→ `tb call` 返回预期。
-- [ ] 集成:`tb server add` 联邦一个外部 HTBP 服务(可用第二个本地 dev 实例充当)→ 其子树出现在 `tb tree` → 经本实例透传调用成功;白名单外 baseUrl 被拒;环(A 联 B、B 联 A)不死循环。
-- [ ] 权限:无 call 权限的 SK 对同一节点 `tb call` → 403,且 `tb ls` 不可见(可见性即权限的机制预演)。
-- [ ] `~help` 输出经 Help DSL 最小 parser 断言(cmd 行完整、scope 声明存在)。
+- [x] 单测:HttpToolDef 拼装({param} 占位、query/body 分配)、虚拟化映射(rename 后原名不可调、hide 不可见)、mcp schema→Help DSL 生成、上游 TBError 透传形状。
+- [x] 单测:remote 透传的路径改写、本地调用者 SK 不外传(仅 skRef 换发)、白名单拒绝、`X-TB-Via` 环检测。
+- [x] 集成:`tb tool mount --kind mcp` 挂一个真实上游 MCP server → `tb help <path>` 输出其工具 → `tb call` 成功;挂一个 http endpoint(如 postman-echo)→ `tb call` 返回预期。
+- [x] 集成:`tb server add` 联邦一个外部 HTBP 服务(可用第二个本地 dev 实例充当)→ 其子树出现在 `tb tree` → 经本实例透传调用成功;白名单外 baseUrl 被拒;环(A 联 B、B 联 A)不死循环。
+- [x] 权限:无 call 权限的 SK 对同一节点 `tb call` → 403,且 `tb ls` 不可见(可见性即权限的机制预演)。
+- [x] `~help` 输出经 Help DSL 最小 parser 断言(cmd 行完整、scope 声明存在)。
 
 ## 5. Phase 3 — Context Layer(M3)
 
