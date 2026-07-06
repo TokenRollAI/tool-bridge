@@ -4,11 +4,11 @@
 
 ## 当前状态
 
-- **当前 Phase**:Phase 2 已关门;当前进入 Phase 3 — Context Layer(DOD.md §5)
-- **已勾选 DoD 项**:Phase 0 5/5;Phase 1 7/7;Phase 2 6/6
+- **当前 Phase**:Phase 3 全部 DoD 已勾选(2026-07-06);待 Phase 3 关门(质量关口 + llmdoc 沉淀)后进入 Phase 4 — Device Gateway(DOD.md §6)
+- **已勾选 DoD 项**:Phase 0 5/5;Phase 1 7/7;Phase 2 6/6;Phase 3 4/4
 - **Blockers**:
   - Docker 守护进程未运行(Phase 6 / E2E-4 前需启动 Docker Desktop;不阻塞 Phase 0-5)
-  - `TB_TEST_S3_*` / `TB_R2_ACCESS_KEY_*` 空缺(均有兜底:R2 当外部 S3、网关中转下载;不阻塞 Phase 3 主路径)
+  - `TB_TEST_S3_*` / `TB_R2_ACCESS_KEY_*` 空缺(均有兜底:s3 集成经本地 s3rver opt-in 可重跑、$ref 走 /~ref 网关中转,生产实测通过;presign 主路径与真实 R2 S3 端点复验待凭证创建后 opt-in)
 
 ## 外部前置核对(DOD §9,2026-07-06 核实)
 
@@ -101,3 +101,15 @@
 - 勾选:无新增(DOD.md Phase 2 已 6/6 勾选);本轮完成 Phase 2 关门质量关口,证据补强 DOD.md:66-71
 - 沉淀:新增 reflection `llmdoc/memory/reflections/2026-07-06-phase2-closeout.md`;更新 current-state 与 modules-and-boundaries Phase 2 落地
 - 遗留:进入 Phase 3 首项 DoD:Context 四动词语义单测(readOnly/ttl/path traversal 等);Phase 3 前继续注意 `TB_TEST_S3_*` 空缺走 R2 兜底。
+
+## Round 8 — 2026-07-06(Phase 3 全量)
+- 目标:Phase 3 全部 DoD(DOD.md:80-83)
+- 动作:①inv-phase3 产出规格摘要(.llmdoc-tmp/investigations/phase3-spec-digest.md,10 开放问题)→ 主协调者全部拍板 → rec-p3docs 回写 docs/Proto.md(commit d040093:~describe 形状、providerConfig、$ref 阈值/中转路由 /~ref、presign 凭证链、authRef JSON 形状、Search 基线、ttl 懒回收、readOnly help 隐藏、s3 连通探测、entry 非 Node、§7 ObjectStore 异步签名修订);②w-p3core 实现 core context 层(types/objectStore+Memory/path 穿越/ttl/objectProvider 四动词/help 静态表,commits 4d11b8c/9a30c28/e900757/f5f1cd2/2e864ca,core 372→382 单测);③w-p3cli 实现 tb ctx 七条(commit cae17f5,cli 69 单测);④w-p3gw 实现 r2Object/s3Object(aws4fetch)+ app 接线(context 调用面/~describe//~ref HMAC 中转/ttl 懒回收/挂载校验+s3 连通探测)+ 集成测试 + s3rver 本地 mock(commits 2d9fc13/d20b16d/eb14d44,gateway 46 默认 + 4 opt-in)。三个 worker 并行派发。
+- 验证(逐条):
+  - `pnpm verify` 全绿(382 core + 69 cli 单测,46 gateway 集成 + 4 skipped,退出码 0)
+  - opt-in s3(本地 s3rver:39003):`TB_TEST_S3_* + TB_ALLOW_INSECURE_HTTP=true pnpm --filter @tool-bridge/gateway test -- context.integration.test.ts` → 47 passed/3 skipped,退出码 0(workerd 仍打印一次 Network connection lost 噪声,非失败依据)
+  - 本地 wrangler dev:CLI `ctx mount(r2)→put→ls→cat→patch→search` 全循环 OK;curl Get/Write 与 CLI 输出一致(三入口对等);`~describe` → {kind:context,capabilities:[search,delete]};>1MiB put → Get 返回 $ref(/~ref HMAC token)→ 无 Authorization 下载 1100001 字节一致,篡改 token → 404
+  - 生产(Version 8aeddd45,https://tool-bridge.pdjjq.org):smoke 3 项过;`tb ctx mount verify/p3-ctx-* --provider r2` → put/cat/patch/search 全过;curl Get 对等;>1MiB $ref 中转下载 1100001 字节;Delete + unmount 清理成功
+- 勾选:Phase 3 全部 4 项(DOD.md:80-83)。注:s3 循环用本地 s3rver 兜底(DOD §9 允许;s3rver 不校验 SigV4,签名正确性待真实 R2 S3 端点 opt-in);$ref 走 /~ref 中转(presign 凭证空缺,Proto §5.2 定型兜底)。
+- 沉淀:Phase 3 决策 10 项回写 docs(d040093);待关门轮 /llmdoc:update
+- 遗留:①Phase 3 质量关口(重点:/~ref 免认证端点的 token 语义、s3Object XML 解析边界、CLI 配置面对等矩阵);②真实 S3 端点(R2 S3 API)复验需先创建 R2 Access Key;③本地 dev 的 relayRefUrl origin 用 c.req.url 派生,dev 环境下曾见 origin 为生产域(路由配置 route 所致)——对生产无影响,关门轮核查。

@@ -77,10 +77,10 @@
 **范围**:`ContextProvider` 四动词语义(§5.1:Write 幂等 upsert、Update not_found、ifVersion conflict);内置 r2 / s3(aws4fetch)Provider;`Search(mode:keyword)` 内置基线;大对象 `$ref` 预签名(经 R2 S3 兼容端点 + aws4fetch——R2 binding 不支持 presign,凭证由 `tb init` provision 并入 SecretStore;未配置时走网关中转下载,Proto §5.2);ttl 回收与 readOnly;挂载即 `NodeRegistry.Write{kind:'context'}`;**CLI**:`tb ctx ls|cat|put|patch|search|mount|unmount`。
 
 **DoD**:
-- [ ] 单测:四动词语义逐条(幂等 Write、not_found、conflict)、readOnly 拒写、ttl 到期回收、路径穿越拒绝(file provider 的规范性义务,实现在 core 供 Phase 4/6 复用)。
-- [ ] 集成:`tb ctx mount` 挂 r2 namespace → 经 CLI 走完 put→ls→cat→patch 全循环;挂一个真实 S3 兼容端点(AK/SK 经 authRef)→ 同循环通过;`tb ctx search --mode keyword` 召回已写条目。
-- [ ] 大对象:>1 MiB 条目 `Get` 返回 `$ref` 预签名 URL 且可下载。
-- [ ] 三入口对等预演:同一 namespace 经 CLI 与直接 HTTP(curl)读写结果一致。
+- [x] 单测:四动词语义逐条(幂等 Write、not_found、conflict)、readOnly 拒写、ttl 到期回收、路径穿越拒绝(file provider 的规范性义务,实现在 core 供 Phase 4/6 复用)。
+- [x] 集成:`tb ctx mount` 挂 r2 namespace → 经 CLI 走完 put→ls→cat→patch 全循环;挂一个真实 S3 兼容端点(AK/SK 经 authRef)→ 同循环通过;`tb ctx search --mode keyword` 召回已写条目。(s3 循环经本地 s3rver 兜底 opt-in 可重跑;真实 R2 S3 端点待 R2 Access Key 创建后复验,见 PROGRESS)
+- [x] 大对象:>1 MiB 条目 `Get` 返回 `$ref` 预签名 URL 且可下载。(presign 凭证空缺 → `/~ref` 网关中转路径,生产实测可下载;presign 主路径待凭证后 opt-in)
+- [x] 三入口对等预演:同一 namespace 经 CLI 与直接 HTTP(curl)读写结果一致。
 
 ## 6. Phase 4 — Device Gateway(M4,反向注册)
 
