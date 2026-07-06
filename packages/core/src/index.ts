@@ -8,6 +8,12 @@ export * from './auth/registerPath'
 export * from './auth/scope'
 export * from './auth/sk'
 export * from './builtin'
+export * from './context/help'
+export * from './context/objectProvider'
+export * from './context/objectStore'
+export * from './context/path'
+export * from './context/ttl'
+export * from './context/types'
 export {
   isTBError,
   statusForCode,
