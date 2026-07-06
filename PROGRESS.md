@@ -4,7 +4,7 @@
 
 ## 当前状态
 
-- **当前 Phase**:Phase 1 全部勾选(待关门流程);下一 Phase:Phase 2 — Tool Layer(DOD.md §4)
+- **当前 Phase**:Phase 1 已关门(质量关口修复完成);下一 Phase:Phase 2 — Tool Layer(DOD.md §4)
 - **已勾选 DoD 项**:无
 - **Blockers**:
   - Docker 守护进程未运行(Phase 6 / E2E-4 前需启动 Docker Desktop;不阻塞 Phase 0-5)
@@ -66,3 +66,11 @@
 - 勾选:Phase 1 全部 7 项(DOD.md:51-57)。注:P1-7 吊销"本地宿主立即被拒"部分以 workerd 集成测试覆盖(单实例 KV 即时一致);SQLite 宿主属 Phase 6,届时补验。
 - 沉淀:待 Phase 1 关门轮做 /llmdoc:update + 质量关口
 - 遗留:①w-gw 决策清单待核(两条注册通道定位、~tree 根免判定、~register 判定资源)需回写 docs;②CLI 偏差(whoami 语义、readline 代替 @clack、config 路径)需回写 Proto 附A;③生产 KV 一致性坑(list+get null)值得沉淀 guide。
+
+## Round 5 — 2026-07-06(Phase 1 关门)
+- 目标:Phase 1 质量关口 + 修复 + 沉淀 + Phase 2 预研
+- 动作:①rec-p1docs 回写 Phase 1 决策 9 项 A-I(commit 5a78566);②质量关口 Workflow(4 维 review + 对抗核查,18 agent,2 个 review 维度因 API 中断部分缺失——auth/contract-cli 维度未完整跑完,已跑维度确认 9 条:6 MAJOR + 3 MINOR);③w-p1fix 修复全部 9 条(commits d5d4d4a/50a6df7/afd6a25):registry list/get 可见性裁剪与 deny==not_found、~tree 根真实性(ghost→404、根 kind 真实)、HelpJson body→inputSchema(真 JSON Schema)、URL decodeURIComponent、children/subtree 前缀扫描(消 O(N²))、~register body 校验(kind 必填+body.path==URL path)、吊销/disabled/expired 集成测试补齐、SK patch 白名单负向测试、非 builtin 节点 ~help→501;④新增 scripts/verify-revocation.ts(可重跑的吊销传播验收);⑤inv-phase2 产出 Phase 2 规格摘要(9 开放问题),主协调者拍板全部 9 项并由 rec-p2docs 回写(commit 03a538c)。
+- 验证:修复后 pnpm verify 全绿(258 core + 28 cli + 23 gateway);重部署(Version 4dc3c622)后生产逐条:smoke 3 项过;/ghost/~tree → 404;/system/sk/~tree 根 kind builtin;~help JSON 含规范 inputSchema;verify-revocation.ts → 吊销传播 0.3s(≤60s 窗口)。
+- 勾选:无新增(Phase 1 已勾;本轮是关门修复)。DOD:55/57 的勾选依据现在有可重跑测试/脚本支撑(质量关口指出的"勾选依据不实"已消除)。
+- 沉淀:Phase 2 决策回写 docs(03a538c);llmdoc update 见下轮开头。
+- 遗留:质量关口的 auth/contract-cli 两个 review 维度因 API 中断未完整跑完——Phase 2 关门时对 auth 面加倍覆盖;Phase 2 开工(规格已齐:phase2-spec-digest.md + docs 定型)。
