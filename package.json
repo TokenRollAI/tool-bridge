@@ -1,0 +1,29 @@
+{
+  "name": "tool-bridge",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "packageManager": "pnpm@11.10.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "typecheck": "pnpm -r --if-present typecheck",
+    "lint": "biome check .",
+    "lint:fix": "biome check --write .",
+    "test:unit": "pnpm --filter @tool-bridge/core test",
+    "test:integration": "pnpm --filter @tool-bridge/gateway test",
+    "test": "pnpm -r --if-present test",
+    "verify": "pnpm typecheck && pnpm lint && pnpm test:unit && pnpm test:integration",
+    "gen-dev-vars": "node scripts/gen-dev-vars.mjs",
+    "provision": "node scripts/provision.mjs",
+    "smoke": "tsx scripts/smoke.ts",
+    "deploy:all": "node scripts/provision.mjs && pnpm --filter @tool-bridge/gateway run deploy"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.5.2",
+    "tsx": "^4.23.0",
+    "typescript": "^5.9.3",
+    "wrangler": "4.107.0"
+  }
+}
