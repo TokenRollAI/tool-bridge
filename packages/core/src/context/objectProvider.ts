@@ -27,6 +27,14 @@ export const REF_THRESHOLD_BYTES_DEFAULT = 1024 * 1024
 /** presign URL 有效期缺省 15 分钟。 */
 export const PRESIGN_TTL_SEC_DEFAULT = 900
 
+/**
+ * Search 单次调用经 head 补取 metadata 的次数上限(Proto §5.2:keyword 须匹配
+ * metadata 值,但 S3 ListObjectsV2 不返回用户 metadata,须逐对象 HEAD 补取)。
+ * Workers 付费计划子请求上限 ~1000/请求(guides/workers-kv-pitfalls.md),取 200 留余量;
+ * 预算耗尽后剩余候选只按路径名匹配(边界:超大 namespace 下 metadata 召回不保证完备)。
+ */
+export const SEARCH_METADATA_HEAD_MAX = 200
+
 /** List 目录条目的 contentType(目录无内容,version 恒空串)。 */
 export const DIRECTORY_CONTENT_TYPE = 'application/x-directory'
 
@@ -112,7 +120,7 @@ export function createObjectContextProvider(
     size: m.size,
     version: m.etag,
     updatedAt: m.updatedAt,
-    metadata: m.metadata,
+    metadata: m.metadata ?? {},
   })
 
   const assertWritable = (verb: string): void => {
@@ -246,7 +254,10 @@ export function createObjectContextProvider(
       let lastKey: string | undefined
       let hasMore = false
       let storeCursor: string | undefined
+      let headBudget = SEARCH_METADATA_HEAD_MAX
       // 深层遍历(不带 delimiter),只看 key 与 metadata,不拉 body;
+      // list 未带 metadata(undefined,区别于 {})且路径未命中时 head 补取再匹配,
+      // 补取次数以 SEARCH_METADATA_HEAD_MAX 为界,超出只按路径名匹配;
       // cursor = 最后返回条目的完整 key(对象存储按字典序列举,可续接)。
       do {
         const page = await store.list(keyPrefix, { cursor: storeCursor, limit: LIST_LIMIT_MAX })
@@ -254,12 +265,23 @@ export function createObjectContextProvider(
           if ('prefix' in item) continue // 无 delimiter 不应出现,防御
           if (after !== undefined && item.key <= after) continue
           const entryPath = entryPathOf(item.key)
-          const matched =
-            entryPath.toLowerCase().includes(q) ||
-            Object.values(item.metadata).some((v) => v.toLowerCase().includes(q))
+          let meta = item
+          let matched = entryPath.toLowerCase().includes(q)
+          if (!matched) {
+            let metadata = item.metadata
+            if (metadata === undefined && headBudget > 0) {
+              headBudget--
+              const head = await store.head(item.key)
+              if (head) {
+                meta = head // head 的 meta 更完整(含 contentType/metadata),命中时一并采用
+                metadata = head.metadata
+              }
+            }
+            matched = Object.values(metadata ?? {}).some((v) => v.toLowerCase().includes(q))
+          }
           if (!matched) continue
           if (items.length < limit) {
-            items.push(toMeta(item))
+            items.push(toMeta(meta))
             lastKey = item.key
           } else {
             hasMore = true

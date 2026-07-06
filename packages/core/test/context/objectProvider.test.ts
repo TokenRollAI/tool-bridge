@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import {
   createObjectContextProvider,
   type ObjectContextProvider,
+  SEARCH_METADATA_HEAD_MAX,
 } from '../../src/context/objectProvider'
 import { MemoryObjectStore, type ObjectStore } from '../../src/context/objectStore'
 import type { ContextEntryMeta, SearchOptions } from '../../src/context/types'
@@ -391,6 +392,67 @@ describe('Search', () => {
     await base.put('hit.md', 'x')
     const page = await provider.Search('hit')
     expect(page.items.map((i) => i.uri)).toEqual([`node://${NS}/hit.md`])
+  })
+
+  /** 模拟 s3:list 条目不带 metadata(undefined),head 才有。 */
+  function makeMetadataLessListStore(base: MemoryObjectStore): ObjectStore {
+    return {
+      head: (k) => base.head(k),
+      get: (k) => base.get(k),
+      put: (k, b, o) => base.put(k, b, o),
+      delete: (k) => base.delete(k),
+      list: async (p, o) => {
+        const res = await base.list(p, o)
+        return {
+          ...res,
+          items: res.items.map((i) => {
+            if ('prefix' in i) return i
+            const { metadata: _drop, ...rest } = i
+            return rest
+          }),
+        }
+      },
+    }
+  }
+
+  it('list 不带 metadata(如 s3):head 补取后按 metadata 值召回;路径已命中的不 head', async () => {
+    const base = new MemoryObjectStore(() => NOW)
+    const provider = createObjectContextProvider(makeMetadataLessListStore(base), { nsPath: NS })
+    await provider.Write('docs/alpha.md', { contentType: 'text/markdown', content: 'x' })
+    await provider.Write('docs/beta.md', {
+      contentType: 'text/markdown',
+      content: 'y',
+      metadata: { topic: 'ALPHA' },
+    })
+    await provider.Write('other.md', { contentType: 'text/markdown', content: 'z' })
+    const headSpy = vi.spyOn(base, 'head')
+    const page = await provider.Search('alpha')
+    expect(page.items.map((i) => i.uri).sort()).toEqual([
+      `node://${NS}/docs/alpha.md`,
+      `node://${NS}/docs/beta.md`,
+    ])
+    // metadata 命中的条目采用 head 的完整 meta
+    const beta = page.items.find((i) => i.uri.endsWith('beta.md')) as ContextEntryMeta
+    expect(beta.metadata).toEqual({ topic: 'ALPHA' })
+    expect(beta.contentType).toBe('text/markdown')
+    // 只对路径未命中的候选 head(beta.md 与 other.md),路径命中的 alpha.md 不 head
+    expect(headSpy).toHaveBeenCalledTimes(2)
+  })
+
+  it('head 补取有界:预算耗尽后剩余候选只按路径名匹配', async () => {
+    const base = new MemoryObjectStore(() => NOW)
+    const provider = createObjectContextProvider(makeMetadataLessListStore(base), { nsPath: NS })
+    // 前 200 个(字典序)无命中 metadata 的填充对象耗尽预算
+    for (let i = 0; i < SEARCH_METADATA_HEAD_MAX; i++) {
+      await base.put(`filler-${String(i).padStart(3, '0')}.txt`, 'x')
+    }
+    // 预算耗尽后:metadata 命中的召回不到,路径命中的仍召回
+    await base.put('x-by-meta.md', 'x', { metadata: { tag: 'needle' } })
+    await base.put('zz-needle.md', 'x')
+    const headSpy = vi.spyOn(base, 'head')
+    const page = await provider.Search('needle')
+    expect(page.items.map((i) => i.uri)).toEqual([`node://${NS}/zz-needle.md`])
+    expect(headSpy).toHaveBeenCalledTimes(SEARCH_METADATA_HEAD_MAX)
   })
 })
 

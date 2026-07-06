@@ -3,7 +3,8 @@
  *
  * - 动词映射:head=HEAD / get=GET / put=PUT / delete=DELETE(404 幂等静默)/ list=ListObjectsV2。
  * - 用户 metadata 走 `x-amz-meta-*` 头;条件写 `ifMatchEtag` → `If-Match`(412 → conflict)。
- *   注意 ListObjectsV2 不返回用户 metadata——s3 的 Search 只能匹配 entry 路径名。
+ *   注意 ListObjectsV2 不返回用户 metadata——list 条目 metadata 置 undefined(区别于 {}),
+ *   core Search 对此按需 head 补取再做 metadata 值匹配(有界,见 SEARCH_METADATA_HEAD_MAX)。
  * - endpoint 强制 https://(TB_ALLOW_INSECURE_HTTP=true 放行,和 http provider 同规则)。
  * - 上游非 2xx 归一为 TBError(参照 core upstreamError 思路,不透传上游 body 原文):
  *   5xx → unavailable(retryable) / 403 → permission_denied / 404 → not_found / 其余 4xx → internal。
@@ -207,7 +208,8 @@ export function createS3ObjectStore(
             etag: stripEtagQuotes(xmlText(block, 'ETag') ?? ''),
             size: Number(xmlText(block, 'Size') ?? '0'),
             updatedAt: Number.isNaN(lastModified) ? '' : new Date(lastModified).toISOString(),
-            metadata: {}, // ListObjectsV2 不返回用户 metadata
+            // metadata 缺省(ListObjectsV2 不返回用户 metadata;undefined 表示未知,
+            // 让 core Search 走 head 补取,勿置 {} 假装确认为空)
           },
         })
       }

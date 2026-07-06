@@ -28,7 +28,11 @@ export interface ObjectMeta {
   size: number
   contentType?: string
   updatedAt: string
-  metadata: Record<string, string>
+  /**
+   * 用户 metadata。undefined 表示后端 list 未返回(如 S3 ListObjectsV2),
+   * 区别于空对象 {}(确认无 metadata);Search 对 undefined 按需 head 补取。
+   */
+  metadata?: Record<string, string>
 }
 
 export interface ObjectPutOptions {

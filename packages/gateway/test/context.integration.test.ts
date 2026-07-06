@@ -446,4 +446,22 @@ describe.skipIf(!s3Ready)('s3 provider E2E(opt-in via TB_TEST_S3_*)', () => {
     expect(refUrl).toContain(String(s3Env.TB_TEST_S3_ENDPOINT).replace(/\/+$/, ''))
     expect(refUrl).toContain('X-Amz-Signature=')
   }, 20000)
+
+  it('Search 召回 metadata 值命中(ListObjectsV2 不带 metadata,经 head 补取)', async () => {
+    expect((await mountS3('ctxs3/search')).status).toBe(200)
+    // 路径不含关键字、metadata 值含关键字 → 必须经 head 补取才可召回(Proto §5.2 基线)
+    await ctxCall('ctxs3/search', 'Write', {
+      path: 'docs/plain.md',
+      entry: { contentType: 'text/markdown', content: 'x', metadata: { tag: 'needle-topic' } },
+    })
+    await ctxCall('ctxs3/search', 'Write', {
+      path: 'docs/other.md',
+      entry: { contentType: 'text/markdown', content: 'y' },
+    })
+    const s = await ctxCall('ctxs3/search', 'Search', { query: 'needle' })
+    expect(s.status).toBe(200)
+    const items = ((await s.json()) as { items: EntryMeta[] }).items
+    expect(items.map((i) => i.uri)).toEqual(['node://ctxs3/search/docs/plain.md'])
+    expect(items[0]?.metadata).toEqual({ tag: 'needle-topic' })
+  }, 20000)
 })
