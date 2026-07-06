@@ -16,6 +16,7 @@ import {
   StreamableHTTPClientTransport,
   StreamableHTTPError,
 } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
+import { CfWorkerJsonSchemaValidator } from '@modelcontextprotocol/sdk/validation/cfworker'
 import {
   assertSecureUrl,
   isTBError,
@@ -109,7 +110,13 @@ async function withSession<T>(
     )
 
   const run = async (transport: StreamableHTTPClientTransport): Promise<T> => {
-    const client = new Client({ name: 'tool-bridge', version: '0.0.0' })
+    // SDK 默认的 Ajv 校验器经 new Function 编译 schema,workerd 禁 eval——上游工具一旦声明
+    // outputSchema,tools/list 阶段就会抛 "Code generation from strings disallowed"。
+    // 换 SDK 自带的 @cfworker/json-schema 解释执行实现。
+    const client = new Client(
+      { name: 'tool-bridge', version: '0.0.0' },
+      { jsonSchemaValidator: new CfWorkerJsonSchemaValidator() },
+    )
     await client.connect(transport)
     try {
       return await fn(client)
