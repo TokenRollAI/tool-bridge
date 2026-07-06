@@ -1,0 +1,25 @@
+{
+  // tb-gateway Worker(Phase 0 骨架)。资源名从 TB_NAME_PREFIX(=tb)派生。
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "tb-gateway",
+  "main": "src/index.ts",
+  "compatibility_date": "2025-06-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": {
+    "enabled": true
+  },
+  // KV:树配置 / SK 哈希表 / manifest(Reference §4)。id 为占位,由 scripts/provision.mjs
+  // 幂等创建后回填;本地 wrangler dev / vitest-pool-workers 用 miniflare 本地实例,不校验该 id。
+  "kv_namespaces": [
+    { "binding": "TB_KV", "id": "PLACEHOLDER_TB_KV_ID" }
+  ],
+  // R2:context r2 provider 与大对象 $ref(Reference §4)。
+  "r2_buckets": [
+    { "binding": "TB_R2", "bucket_name": "tb-r2" }
+  ]
+  // Durable Objects:Phase 4 才引入 DeviceSession DO,届时取消下列注释并补 migrations。
+  // "durable_objects": {
+  //   "bindings": [{ "name": "TB_DEVICE", "class_name": "DeviceSession" }]
+  // },
+  // "migrations": [{ "tag": "v1", "new_sqlite_classes": ["DeviceSession"] }]
+}

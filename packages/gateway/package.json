@@ -1,0 +1,22 @@
+{
+  "name": "@tool-bridge/gateway",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy"
+  },
+  "dependencies": {
+    "@tool-bridge/core": "workspace:*",
+    "hono": "^4.12.28"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.18.0",
+    "@cloudflare/workers-types": "^5.20260706.1",
+    "vitest": "^4.1.10"
+  }
+}
