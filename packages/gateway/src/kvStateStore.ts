@@ -32,7 +32,10 @@ export class KvStateStore implements StateStore {
     const result = await this.kv.list(listOpts)
     const items: Array<{ key: string; value: unknown }> = []
     for (const entry of result.keys) {
-      items.push({ key: entry.name, value: await this.kv.get(entry.name, 'json') })
+      const value = await this.kv.get(entry.name, 'json')
+      // KV 最终一致:刚删除的 key 可能仍出现在 list 里而 get 已是 null——跳过,
+      // 否则 null 流入 TreeNode 等消费方(读 .path)抛 internal。
+      if (value !== null) items.push({ key: entry.name, value })
     }
     return result.list_complete ? { items } : { items, cursor: result.cursor }
   }
