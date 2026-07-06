@@ -36,10 +36,10 @@
 
 **DoD**:
 - [x] `pnpm verify` 本地绿(哪怕只有 1 个占位测试)。
-- [ ] `pnpm deploy:all` 部署到 `CLOUDFLARE_ACCOUNT_ID` 指定账户成功。
-- [ ] `curl ${TB_BASE_URL}/healthz` 返回 200 + 版本号。
-- [ ] `tb status` 对部署环境返回健康摘要(`--json` 可解析)。
-- [ ] KV/R2 资源已由幂等脚本创建并绑定(`wrangler kv namespace list` 等可见)。
+- [x] `pnpm deploy:all` 部署到 `CLOUDFLARE_ACCOUNT_ID` 指定账户成功。
+- [x] `curl ${TB_BASE_URL}/healthz` 返回 200 + 版本号。
+- [x] `tb status` 对部署环境返回健康摘要(`--json` 可解析)。
+- [x] KV/R2 资源已由幂等脚本创建并绑定(`wrangler kv namespace list` 等可见)。
 
 ## 3. Phase 1 — Auth(SK)+ HTBP 核心树(横切地基)
 

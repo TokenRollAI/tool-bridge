@@ -5,13 +5,17 @@
   "main": "src/index.ts",
   "compatibility_date": "2025-06-01",
   "compatibility_flags": ["nodejs_compat"],
+  // DJJ 账户(.env CLOUDFLARE_ACCOUNT_ID);wrangler OAuth 下有多账户,须显式指定。
+  "account_id": "0cb9b897010bc426cd8bf33d8c052d11",
+  // 生产入口 = TB_BASE_URL(.env);zone pdjjq.org 在同账户。
+  "routes": [{ "pattern": "tool-bridge.pdjjq.org", "custom_domain": true }],
   "observability": {
     "enabled": true
   },
   // KV:树配置 / SK 哈希表 / manifest(Reference §4)。id 为占位,由 scripts/provision.mjs
   // 幂等创建后回填;本地 wrangler dev / vitest-pool-workers 用 miniflare 本地实例,不校验该 id。
   "kv_namespaces": [
-    { "binding": "TB_KV", "id": "PLACEHOLDER_TB_KV_ID" }
+    { "binding": "TB_KV", "id": "d18c93de33cf4ba2b1fbf7d26fd742f1" }
   ],
   // R2:context r2 provider 与大对象 $ref(Reference §4)。
   "r2_buckets": [

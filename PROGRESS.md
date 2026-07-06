@@ -4,7 +4,7 @@
 
 ## 当前状态
 
-- **当前 Phase**:Phase 0 — 工程骨架与部署管道(DOD.md §2)
+- **当前 Phase**:Phase 0 已全部勾选(待关门流程);下一 Phase:Phase 1 — Auth(SK)+ HTBP 核心树(DOD.md §3)
 - **已勾选 DoD 项**:无
 - **Blockers**:
   - Docker 守护进程未运行(Phase 6 / E2E-4 前需启动 Docker Desktop;不阻塞 Phase 0-5)
@@ -28,3 +28,18 @@
 - 勾选:P0-1(`pnpm verify` 本地绿)
 - 沉淀:llmdoc bootstrap 完成(index/startup/must×2/overview/proto-map/modules-and-boundaries/v1-lessons/doc-gaps);v1 检索地图内化进 v1-lessons;doc-gaps G1/G2/G6 已处理。流程坑:.llmdoc-tmp 的 v1 报告一度丢失(原因不明,已由 inv-v1 重写)——scratch 报告用后应尽快内化进稳定文档。
 - 遗留:Round 2 做 P0-2~P0-5(provision + deploy:all + 线上 smoke + tb status);deploy 前复核 wrangler OAuth 的 R2 write 权限;G3(healthz 形状)实现已定型为 `{"healthy":true,"version"}`,待回写 docs。
+
+## Round 2 — 2026-07-06
+- 目标:Phase 0 / P0-2~P0-5(部署管道,DOD.md:39-42)
+- 动作:回填 tb-kv namespace id(d18c93de…)、wrangler.jsonc 加 account_id 与 custom domain 路由(tool-bridge.pdjjq.org);跑 provision + deploy。R2 write 权限实测可用(`r2 bucket create` 成功,此前的 whoami 截断疑虑解除)。
+- 验证(逐条):
+  - `pnpm provision` → KV `tb-kv` 已存在跳过、R2 `tb-r2` 创建成功(幂等复跑验证过)
+  - `pnpm deploy:all` → Uploaded tb-gateway,custom domain `tool-bridge.pdjjq.org` 绑定,Version 76ddfc3e
+  - `curl https://tool-bridge.pdjjq.org/healthz` → 200 `{"healthy":true,"version":"0.1.0"}`
+  - `curl …/~help` → 200 首行 `htbp 0.1`;`…/~tree` → 501
+  - `TB_BASE_URL=… tb status --json` → 可解析 JSON(ok:true)
+  - `TB_BASE_URL=… pnpm smoke` → smoke passed
+  - 回归 `pnpm verify` → 全绿(29 unit + 7 integration)
+- 勾选:P0-2、P0-3、P0-4、P0-5 —— **Phase 0 五项全勾**
+- 沉淀:G3 healthz 形状已回写 docs/Proto.md §1.1(Round 1 末commit 1700544)
+- 遗留:Phase 0 关门流程(质量关口 Workflow + /llmdoc:update);smoke 脚本不读 .env,需显式传 TB_BASE_URL(可改进);Phase 1 是下一目标。
