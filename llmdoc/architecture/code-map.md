@@ -50,8 +50,8 @@ exports `.` / `./tbApp` / `./bootstrap`(后两者供 SDK 复用,宿主中立)。
 
 ## packages/dashboard — React SPA(private,经 `/ui`)
 
-- `pages/`:LoginPage / OverviewPage / NodePage + `pages/system/`(SkPage / RegistryPage / DevicesPage / SecretsPage)。
-- `components/`:`layout/`(AppShell/TreeNav)、`node/`(CmdPanel/ContextBrowser/ResultView/CliHint)、CommandPalette(⌘K)、`ui/`(shadcn)。
+- `pages/`:LoginPage / OverviewPage / NodePage + `pages/system/`(SkPage / RegistryPage / DevicesPage / SecretsPage / PluginsPage)。
+- `components/`:`layout/`(AppShell/TreeNav)、`node/`(CmdPanel/ContextBrowser/ResultView/CliHint;ContextBrowser 支持条目 metadata 编辑、`$ref` 大对象经 Update 只改 metadata、Search mode 切换)、CommandPalette(⌘K)、`ui/`(shadcn)。
 - `lib/`:api.ts(同源 `baseUrl:''`)、queries.ts、schemaForm.ts(@rjsf)、session.tsx(SK 多 profile,localStorage)、history.ts。
 - 无自有测试;行为由 gateway 的 `ui.integration.test.ts` 覆盖。
 
