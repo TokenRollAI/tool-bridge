@@ -116,5 +116,5 @@ POST /docs/feishu   {"tool":"Get","arguments":{"path":"doccnX8..."}}
 3. 四动词幂等性:`Write` 重放同一 path 结果一致;`Update` 对不存在的 path 返回 `not_found`;
 4. 错误形状:所有失败路径返回 `TBError`(Proto §0.2),`retryable` 标注正确;
 5. 分页:`List` 超过一页时 `cursor` 往返可用;
-6. 鉴权:不带(或带错)凭证的请求必须被拒;
+6. 鉴权:方法调用(`POST {endpoint}` envelope)不带(或带错)凭证必须被拒;生命周期 GET(`{healthPath}`/`~describe`/`~help`)可免鉴权——平台注册时的探活与契约校验即不带凭证;
 7. 挂载到 staging 后,让一个 LLM Agent 只靠 `~help`/`~skill` 正确调用一遍——接口自解释质量的最终验收。

@@ -11,6 +11,10 @@
  * 契约校验(validatePluginContract,失败 → invalid_argument 拒)→ platform-token 时
  * mint SK(owner `plugin:<id>`,scopes 空)+ 明文存 SecretStore 保留名 `plugin-token:<id>`
  * → 存 manifest → 返回 PluginRegistration(pluginToken 仅此一次;get/list 永不回显)。
+ *
+ * update 流程:patch 合并重校验;endpoint/healthPath/kind/interfaceVersion 任一变更时
+ * 走 write 同款重探活 + 重契约校验并刷新 meta/health(失败拒更新不落库),仅本地字段
+ * (enabled 等)变更跳过;auth.kind 切换时吊销/换发 pluginToken(新 token 仅本响应一次)。
  */
 
 import type { SKRegistryStore } from '../auth/sk'
@@ -133,7 +137,7 @@ function pluginCmds(nodePath: TreePath): CmdSpec[] {
         properties: { id: { type: 'string' }, patch: { type: 'object' } },
         required: ['id', 'patch'],
       },
-      returns: 'PluginManifest',
+      returns: 'PluginManifest — pluginToken shown once if auth switched to platform-token',
       scope: 'admin',
     },
     {
@@ -245,21 +249,70 @@ export function createPluginModule(deps: PluginModuleDeps): BuiltinModule {
     return { ...manifest, ...(pluginToken !== undefined ? { pluginToken } : {}) }
   }
 
-  async function update(id: string, patch: Record<string, unknown>): Promise<PluginManifest> {
+  async function update(id: string, patch: Record<string, unknown>): Promise<PluginRegistration> {
     const existing = await require(id)
     if (patch.id !== undefined && patch.id !== id) {
       throw new TBError('invalid_argument', 'id 不可通过 update 变更(Proto §0.4)')
     }
+    const prev = projectManifest(existing)
     // merge 后整体重校验(kind↔interfaceVersion 一致性、endpoint https 强制照旧生效)。
     const merged = parsePluginManifest(
-      { ...projectManifest(existing), ...patch },
+      { ...prev, ...patch },
       { allowInsecureHttp: deps.allowInsecureHttp ?? false },
     )
+
+    // 契约相关字段变更 → 与 write 同流程重探活 + 重抓 ~describe/~help,刷新 meta/health;
+    // 失败即拒不落库。仅本地字段(enabled 等)变更跳过——禁用一个已挂掉的 plugin 不应被探活挡住。
+    const contractChanged =
+      merged.endpoint !== prev.endpoint ||
+      merged.healthPath !== prev.healthPath ||
+      merged.kind !== prev.kind ||
+      merged.interfaceVersion !== prev.interfaceVersion
+    if (contractChanged) {
+      const probed = await deps.probe(merged)
+      if (!probed.healthy) {
+        throw new TBError(
+          'unavailable',
+          `plugin '${id}' 探活失败,拒绝更新${probed.detail !== undefined ? `:${probed.detail}` : ''}(Proto §8.1)`,
+          { retryable: true },
+        )
+      }
+      const contract = await deps.fetchContract(merged)
+      const describe = validatePluginContract({
+        manifest: merged,
+        describe: contract.describe,
+        help: contract.help,
+      })
+      await store.put(KEY_PLUGIN_META + id, describe)
+      await store.put(KEY_PLUGIN_HEALTH + id, {
+        healthy: true,
+        checkedAt: now(),
+        consecutiveFailures: 0,
+      } satisfies PluginHealthRecord)
+    }
+
+    // auth kind 切换:platform-token → bearer 吊销旧 SK/明文;bearer → platform-token
+    // mint 新 SK(pluginToken 仅本响应一次)。同 kind 不换发(换发语义走重注册 write)。
+    let tokenSkId = existing.tokenSkId
+    let pluginToken: string | undefined
+    if (merged.auth.kind !== prev.auth.kind) {
+      if (prev.auth.kind === 'platform-token') {
+        await revokeToken(existing)
+        tokenSkId = undefined
+      }
+      if (merged.auth.kind === 'platform-token') {
+        const minted = await sk.write({ owner: `plugin:${id}`, scopes: [] }, now())
+        await secrets.set(pluginTokenSecretName(id), minted.secret, now())
+        pluginToken = minted.secret
+        tokenSkId = minted.key.id
+      }
+    }
+
     await store.put(KEY_PLUGIN + id, {
       ...merged,
-      ...(existing.tokenSkId !== undefined ? { tokenSkId: existing.tokenSkId } : {}),
+      ...(tokenSkId !== undefined ? { tokenSkId } : {}),
     } satisfies StoredPlugin)
-    return merged
+    return { ...merged, ...(pluginToken !== undefined ? { pluginToken } : {}) }
   }
 
   async function remove(id: string): Promise<void> {

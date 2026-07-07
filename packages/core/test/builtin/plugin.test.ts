@@ -179,6 +179,89 @@ describe('builtin plugin 模块(Proto §8.1/§8.2)', () => {
     )
   })
 
+  it('update:仅本地字段(enabled)变更不重探活/不重抓契约', async () => {
+    await h.mod.dispatch('write', { ...MANIFEST }, ctx)
+    h.probe.mockClear()
+    h.fetchContract.mockClear()
+    await h.mod.dispatch('update', { id: MANIFEST.id, patch: { enabled: false } }, ctx)
+    expect(h.probe).not.toHaveBeenCalled()
+    expect(h.fetchContract).not.toHaveBeenCalled()
+  })
+
+  it('update:endpoint 变更 → 重探活 + 重契约校验并刷新 meta/health', async () => {
+    await h.mod.dispatch('write', { ...MANIFEST }, ctx)
+    h.probe.mockClear()
+    h.fetchContract.mockClear()
+    const endpoint = 'https://plugin-v2.example.com'
+    const updated = (await h.mod.dispatch(
+      'update',
+      { id: MANIFEST.id, patch: { endpoint } },
+      ctx,
+    )) as PluginManifest
+    expect(updated.endpoint).toBe(endpoint)
+    expect(h.probe).toHaveBeenCalledTimes(1)
+    expect(h.fetchContract).toHaveBeenCalledTimes(1)
+    // probe/fetchContract 收到的是 merge 后的 manifest(打向新 endpoint)。
+    expect((h.probe.mock.calls[0]?.[0] as PluginManifest).endpoint).toBe(endpoint)
+    expect(await h.store.get(KEY_PLUGIN_META + MANIFEST.id)).toEqual(DESCRIBE)
+    expect(await h.store.get(KEY_PLUGIN_HEALTH + MANIFEST.id)).toEqual({
+      healthy: true,
+      checkedAt: NOW,
+      consecutiveFailures: 0,
+    })
+  })
+
+  it('update:endpoint 变更探活失败 → unavailable 拒更新,不落库', async () => {
+    await h.mod.dispatch('write', { ...MANIFEST }, ctx)
+    h.probe.mockImplementation(async () => ({ healthy: false, detail: 'HTTP 502' }))
+    await expect(
+      h.mod.dispatch(
+        'update',
+        { id: MANIFEST.id, patch: { endpoint: 'https://dead.example.com' } },
+        ctx,
+      ),
+    ).rejects.toSatisfy((e) => isTBError(e) && e.code === 'unavailable' && e.retryable === true)
+    const stored = (await h.store.get(KEY_PLUGIN + MANIFEST.id)) as PluginManifest
+    expect(stored.endpoint).toBe(MANIFEST.endpoint)
+  })
+
+  it('update:auth platform-token → bearer 吊销旧 SK 与明文', async () => {
+    await h.mod.dispatch('write', { ...MANIFEST }, ctx)
+    const skId = ((await h.store.get(KEY_PLUGIN + MANIFEST.id)) as { tokenSkId: string }).tokenSkId
+    const updated = (await h.mod.dispatch(
+      'update',
+      { id: MANIFEST.id, patch: { auth: { kind: 'bearer', secretRef: 'feishu-cred' } } },
+      ctx,
+    )) as Record<string, unknown>
+    expect(updated.pluginToken).toBeUndefined()
+    await expect(h.sk.get(skId)).rejects.toSatisfy((e) => isTBError(e) && e.code === 'not_found')
+    expect(await h.secrets.resolve(pluginTokenSecretName(MANIFEST.id))).toBeUndefined()
+    expect(
+      ((await h.store.get(KEY_PLUGIN + MANIFEST.id)) as { tokenSkId?: string }).tokenSkId,
+    ).toBeUndefined()
+  })
+
+  it('update:auth bearer → platform-token mint 新 token(仅本响应一次)', async () => {
+    await h.mod.dispatch(
+      'write',
+      { ...MANIFEST, auth: { kind: 'bearer', secretRef: 'feishu-cred' } },
+      ctx,
+    )
+    const updated = (await h.mod.dispatch(
+      'update',
+      { id: MANIFEST.id, patch: { auth: { kind: 'platform-token' } } },
+      ctx,
+    )) as PluginRegistration
+    expect(updated.pluginToken).toMatch(/^tbk_/)
+    expect(await h.secrets.resolve(pluginTokenSecretName(MANIFEST.id))).toBe(updated.pluginToken)
+    const stored = (await h.store.get(KEY_PLUGIN + MANIFEST.id)) as { tokenSkId: string }
+    const key = await h.sk.get(stored.tokenSkId)
+    expect(key.owner).toBe(`plugin:${MANIFEST.id}`)
+    // get 不回显。
+    const got = (await h.mod.dispatch('get', { id: MANIFEST.id }, ctx)) as Record<string, unknown>
+    expect(got.pluginToken).toBeUndefined()
+  })
+
   it('delete:清理 manifest/health/meta/token,幂等静默', async () => {
     await h.mod.dispatch('write', { ...MANIFEST }, ctx)
     const skId = ((await h.store.get(KEY_PLUGIN + MANIFEST.id)) as { tokenSkId: string }).tokenSkId

@@ -35,6 +35,7 @@
 - [memory/reflections/2026-07-06-phase0-bootstrap.md](memory/reflections/2026-07-06-phase0-bootstrap.md) — Phase 0 流程教训:scratch 报告易丢需尽快内化、后台 agent 靠产出文件轮询、wrangler 多账户须显式 account、权限用真实操作核实、smoke 不读 .env。reflector 维护。
 - [memory/reflections/2026-07-06-phase2-closeout.md](memory/reflections/2026-07-06-phase2-closeout.md) — Phase 2 关门教训:DoD 勾选不等于关门、opt-in 测试看退出码、代理/联邦要测出站边界、CLI 配置面对等。reflector 维护。
 - [memory/reflections/2026-07-06-phase4-device-ws-hibernation.md](memory/reflections/2026-07-06-phase4-device-ws-hibernation.md) — Phase 4 生产 blocker 排查教训:本地绿不代表 hibernation 正确、连环根因先取证后改码、验收标识符逐字核对、长驻进程验证管好生命周期。reflector 维护。
+- [memory/reflections/2026-07-07-sdk-dts-bundle-pitfall.md](memory/reflections/2026-07-07-sdk-dts-bundle-pitfall.md) — SDK 发布包 d.ts 内联陷阱:tsup noExternal/dts.resolve 对指向 .ts 源的 workspace 包不生效,须专用 tsconfig paths 映射;类型自包含要用隔离 tsc 验证。reflector 维护。
 
 ## 路由提示
 

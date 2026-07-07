@@ -9,6 +9,7 @@ import {
   pluginListCommand,
   pluginRegisterCommand,
   pluginRmCommand,
+  pluginUpdateCommand,
 } from '../src/commands/plugin'
 import { resetFetch, setFetch } from '../src/http'
 
@@ -187,6 +188,65 @@ describe('tb plugin get', () => {
     expect(payload.arguments).toEqual({ id: 'notion-ctx' })
     expect(JSON.parse(stdoutText())).toEqual(manifest)
     expect(process.exitCode).toBe(0)
+  })
+})
+
+describe('tb plugin update', () => {
+  it('--file <path>:读 patch → system/plugin update,--json 原样输出', async () => {
+    const file = join(tmp, 'patch.json')
+    writeFileSync(file, JSON.stringify({ enabled: false }))
+    const fn = jsonFetch({ ...manifest, enabled: false })
+
+    await invoke(pluginUpdateCommand, {
+      json: true,
+      'base-url': 'https://gw',
+      sk: 'tbk_admin',
+      id: 'notion-ctx',
+      file,
+    })
+
+    const [url, init] = fn.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe('https://gw/system/plugin')
+    const payload = JSON.parse(init.body as string)
+    expect(payload.tool).toBe('update')
+    expect(payload.arguments).toEqual({ id: 'notion-ctx', patch: { enabled: false } })
+    expect(JSON.parse(stdoutText())).toEqual({ ...manifest, enabled: false })
+    expect(process.exitCode).toBe(0)
+  })
+
+  it('人类模式:auth 切到 platform-token 换发 token 时醒目提示"仅此一次"', async () => {
+    const file = join(tmp, 'patch.json')
+    writeFileSync(file, JSON.stringify({ auth: { kind: 'platform-token' } }))
+    jsonFetch({ ...manifest, pluginToken: 'tbk_plugin_rotated' })
+
+    await invoke(pluginUpdateCommand, {
+      json: false,
+      'base-url': 'https://gw',
+      sk: 'tbk_admin',
+      id: 'notion-ctx',
+      file,
+    })
+
+    const out = stdoutText()
+    expect(out).toContain('updated plugin: notion-ctx')
+    expect(out).toContain('shown once')
+    expect(out).toContain('tbk_plugin_rotated')
+    expect(process.exitCode).toBe(0)
+  })
+
+  it('patch 非法 JSON → 退出码 1,不发请求', async () => {
+    const file = join(tmp, 'bad.json')
+    writeFileSync(file, '{not json')
+    const fn = jsonFetch({})
+    await invoke(pluginUpdateCommand, {
+      json: true,
+      'base-url': 'https://gw',
+      sk: 'tbk_admin',
+      id: 'notion-ctx',
+      file,
+    })
+    expect(fn).not.toHaveBeenCalled()
+    expect(process.exitCode).toBe(1)
   })
 })
 

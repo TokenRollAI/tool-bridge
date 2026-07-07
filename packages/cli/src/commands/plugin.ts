@@ -21,7 +21,7 @@ export interface PluginManifest {
   enabled: boolean
 }
 
-/** Write 返回:manifest + pluginToken(auth=platform-token 时仅注册响应出现一次)。 */
+/** Write/Update 返回:manifest + pluginToken(auth=platform-token 时仅该次响应出现一次)。 */
 export interface PluginRegistration extends PluginManifest {
   pluginToken?: string
 }
@@ -163,6 +163,50 @@ export const pluginGetCommand = defineCommand({
   },
 })
 
+/**
+ * `tb plugin update <id> --file <patch.json>` → PluginRegistry.Update(system/plugin)。
+ * patch 为 Partial<PluginManifest>;auth 切到 platform-token 时响应含一次性 pluginToken,
+ * 与 register 同款醒目警示。
+ */
+export const pluginUpdateCommand = defineCommand({
+  meta: { name: 'update', description: 'Update a plugin manifest with a patch file (`-` = stdin)' },
+  args: {
+    ...globalArgs,
+    id: { type: 'positional', description: 'Plugin id', required: true },
+    file: {
+      type: 'string',
+      description: 'Patch JSON file path (Partial<PluginManifest>), or `-` for stdin',
+      required: true,
+    },
+  },
+  async run({ args }) {
+    const asJson = Boolean(args.json)
+    await guard(asJson, async () => {
+      const id = String(args.id ?? '').trim()
+      if (!id) throw new CliError('plugin id is required')
+      const file = String(args.file ?? '').trim()
+      if (!file) throw new CliError('--file is required')
+      const patch = await readManifest(file)
+      const updated = await callTool<PluginRegistration>(
+        resolveTarget(args),
+        '/system/plugin',
+        'update',
+        { id, patch },
+      )
+      if (asJson) {
+        printJson(updated)
+        return
+      }
+      printLine(`updated plugin: ${updated.id} (${updated.kind}, ${updated.endpoint})`)
+      if (updated.pluginToken) {
+        printLine('')
+        printLine('!! PLUGIN TOKEN (shown once — store it now, it cannot be retrieved again):')
+        printLine(`   ${updated.pluginToken}`)
+      }
+    })
+  },
+})
+
 /** `tb plugin health <id>` → 按需探活;unhealthy → 退出码 1。 */
 export const pluginHealthCommand = defineCommand({
   meta: { name: 'health', description: 'Probe a plugin health endpoint (exit 1 if unhealthy)' },
@@ -211,6 +255,7 @@ export const pluginCommand = defineCommand({
     register: pluginRegisterCommand,
     list: pluginListCommand,
     get: pluginGetCommand,
+    update: pluginUpdateCommand,
     health: pluginHealthCommand,
     rm: pluginRmCommand,
   },
