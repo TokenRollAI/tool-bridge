@@ -37,7 +37,7 @@
 - [memory/doc-gaps.md](memory/doc-gaps.md) — llmdoc 文档缺口追踪(当前无缺口)。recorder 维护。
 - `memory/decisions/` — durable 设计/流程决策,recorder 维护。现存:
   - [memory/decisions/plugin-hosted-install.md](memory/decisions/plugin-hosted-install.md) — 2026-07-07:Plugin 托管化安装(插件市场),CF 宿主经 scoped API token 自动部署;多挂载扩展 CallContext(`mountPath`/`mountConfig`);手动 register 通道保留。
-- `memory/reflections/` — 新反思写此目录(reflector 维护),定期把 durable 教训提炼进 guides 后归档。现存:2026-07-07 gateway/dashboard 可发布化(publishConfig 覆盖、隔离 tsc 环境坑)。bootstrap 期存量反思已提炼完毕并归档至 `archive/llmdoc-reflections/`。
+- `memory/reflections/` — 新反思写此目录(reflector 维护),定期把 durable 教训提炼进 guides 后归档。现存:2026-07-07 gateway/dashboard 可发布化(publishConfig 覆盖、隔离 tsc 环境坑);2026-07-07 Dashboard/CLI 能力对等(长驻进程管道坑、共享工作区 lint:fix、双向矩阵审计);2026-07-08 CLI citty→commander 迁移(宽松解析在权限面是安全缺陷、二次补丁即换框架、范例钉模式+workflow 平移打法)。bootstrap 期存量反思已提炼完毕并归档至 `archive/llmdoc-reflections/`。
 
 ## 路由提示
 
