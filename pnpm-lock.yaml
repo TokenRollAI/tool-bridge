@@ -23,9 +23,6 @@ importers:
 
   packages/cli:
     dependencies:
-      '@tool-bridge/core':
-        specifier: workspace:*
-        version: link:../core
       citty:
         specifier: ^0.2.2
         version: 0.2.2
@@ -36,6 +33,9 @@ importers:
         specifier: 8.21.0
         version: 8.21.0
     devDependencies:
+      '@tool-bridge/core':
+        specifier: workspace:*
+        version: link:../core
       '@types/node':
         specifier: ^26.1.0
         version: 26.1.0
