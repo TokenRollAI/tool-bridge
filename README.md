@@ -60,6 +60,8 @@ curl -X POST -H "Authorization: Bearer $TB_SK" \
 ### CLI:`tb`
 
 ```sh
+npm install -g @tool-bridge/cli
+
 tb login                    # 保存 BaseURL + SK
 tb status --json            # 网关状态
 tb tree                     # 树视图
@@ -67,9 +69,17 @@ tb call tools/echo --tool echo --args '{"text":"hi"}'
 tb connect                  # 把本机 shell/fs 反向注册上树
 ```
 
-全部子命令支持 `--json`,与 Proto 接口一一对应,覆盖完整管理面。
+全部子命令支持 `--json`,与接口面一一对应,覆盖完整管理面。
+
+### Dashboard
+
+部署后访问 `https://your-tb.example.com/ui`,输入 SK + BaseURL:树导航、任意节点表单调用、context 条目浏览、SK / Registry / 设备管理。Dashboard 无专用后端,只渲染 `~help`。
 
 ### SDK:内嵌一个 TB 实例
+
+```sh
+npm install @tool-bridge/sdk
+```
 
 ```ts
 import { serve } from '@hono/node-server'
@@ -104,13 +114,13 @@ TB_BASE_URL=https://your-tb.example.com TB_SK=... pnpm smoke
 
 | 包 | 职责 |
 |---|---|
-| `packages/core` | 纯逻辑内核:树 / Auth(SK 作用域判定)/ HTBP 编解码 / SecretStore / builtin 模块,无宿主依赖 |
-| `packages/gateway` | Cloudflare Workers 网关:Hono 路由 + mcp/http/remote Provider + Durable Object 设备通道 |
-| `packages/cli` | `tb` 命令行(citty),纯 API 客户端 |
-| `packages/sdk` | `@tool-bridge/sdk`:内嵌 TB 实例、程序化注册、反向连接 |
+| `packages/core` | 纯逻辑内核:树 / Auth(SK 作用域判定)/ HTBP 编解码 / Context·Device·Plugin 纯逻辑 / SecretStore / builtin 模块,无宿主依赖 |
+| `packages/gateway` | Cloudflare Workers 网关:Hono 路由 + mcp/http/remote/plugin/r2/s3 Provider + Durable Object 设备通道 + Dashboard 静态托管 |
+| `packages/cli` | `tb` 命令行(citty),纯 API 客户端,npm 包 [`@tool-bridge/cli`](https://www.npmjs.com/package/@tool-bridge/cli) |
+| `packages/sdk` | npm 包 [`@tool-bridge/sdk`](https://www.npmjs.com/package/@tool-bridge/sdk):内嵌 TB 实例、程序化注册、反向连接 |
 | `packages/dashboard` | Web 管理面:`~help` 通用渲染器 + 管理表单,无专用后端 |
-| `docs/` | 规范真源:Vision / Architecture / Proto / Plugin / Reference |
-| `llmdoc/` | 面向 LLM 的压缩检索层文档 |
+| `llmdoc/` | 项目知识库(架构边界、协议契约、生产坑、工作流) |
+| `archive/` | bootstrap 期规范与过程文档归档(仅历史追溯) |
 
 ## 开发
 
@@ -121,11 +131,11 @@ pnpm test:integration    # gateway 集成测试(真实 workerd)
 pnpm lint:fix            # biome 自动修复
 ```
 
-工程约定:**实现与文档冲突以 `docs/` 为准**;接口契约唯一规范是 [docs/Proto.md](docs/Proto.md)。
+工程约定:**代码是行为真源**;接口契约、模块边界与生产坑的查表文档在 [llmdoc/](llmdoc/index.md)(契约入口:`llmdoc/reference/protocol-contract.md`)。
 
 ## 项目状态
 
-积极开发中(pre-release)。核心链路——SK 鉴权、HTBP 树、mcp/http/remote 工具层、Context 四动词 + `$ref` 大对象、设备反向注册(WS hibernation)——已在 Cloudflare 生产环境验证;SDK / Plugin 与 Dashboard、Docker 自部署路径正在推进。
+积极开发中(pre-release)。核心能力已全部落地并在 Cloudflare 生产环境验证:SK 鉴权与作用域、HTBP 树与内容协商、工具层(mcp / http / remote 联邦 + 虚拟化)、Context 四动词 + `$ref` 大对象、设备反向注册(WebSocket hibernation)、SDK 与 Plugin 系统、Dashboard;`@tool-bridge/cli` 与 `@tool-bridge/sdk` 已发布 npm。路线图:`tb init` 一键部署向导、Docker 自部署路径、七个 User Case 的端到端验收系统化。
 
 ## License
 

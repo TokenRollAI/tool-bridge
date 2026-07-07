@@ -60,6 +60,8 @@ curl -X POST -H "Authorization: Bearer $TB_SK" \
 ### CLI: `tb`
 
 ```sh
+npm install -g @tool-bridge/cli
+
 tb login                    # save BaseURL + SK
 tb status --json            # gateway status
 tb tree                     # tree view
@@ -67,9 +69,17 @@ tb call tools/echo --tool echo --args '{"text":"hi"}'
 tb connect                  # reverse-register this machine's shell/fs onto the tree
 ```
 
-Every subcommand supports `--json`, maps one-to-one onto the Proto interfaces, and covers the full management surface.
+Every subcommand supports `--json`, maps one-to-one onto the API surface, and covers the full management surface.
+
+### Dashboard
+
+After deploying, open `https://your-tb.example.com/ui` and enter your SK + BaseURL: tree navigation, form-based calls on any node, context entry browsing, and SK / registry / device management. The Dashboard has no dedicated backend — it only renders `~help`.
 
 ### SDK: embed a TB instance
+
+```sh
+npm install @tool-bridge/sdk
+```
 
 ```ts
 import { serve } from '@hono/node-server'
@@ -104,13 +114,13 @@ The full walkthrough and troubleshooting live in `llmdoc/guides/deploy-and-verif
 
 | Package | Responsibility |
 |---|---|
-| `packages/core` | Pure-logic kernel: tree / auth (SK scope checks) / HTBP encoding / SecretStore / builtin modules; zero host dependencies |
-| `packages/gateway` | Cloudflare Workers gateway: Hono routing + mcp/http/remote providers + Durable Object device channel |
-| `packages/cli` | The `tb` command line (citty), a pure API client |
-| `packages/sdk` | `@tool-bridge/sdk`: embedded TB instance, programmatic registration, reverse connect |
+| `packages/core` | Pure-logic kernel: tree / auth (SK scope checks) / HTBP encoding / context·device·plugin pure logic / SecretStore / builtin modules; zero host dependencies |
+| `packages/gateway` | Cloudflare Workers gateway: Hono routing + mcp/http/remote/plugin/r2/s3 providers + Durable Object device channel + Dashboard static hosting |
+| `packages/cli` | The `tb` command line (citty), a pure API client — npm package [`@tool-bridge/cli`](https://www.npmjs.com/package/@tool-bridge/cli) |
+| `packages/sdk` | npm package [`@tool-bridge/sdk`](https://www.npmjs.com/package/@tool-bridge/sdk): embedded TB instance, programmatic registration, reverse connect |
 | `packages/dashboard` | Web management UI: a generic `~help` renderer + admin forms, no dedicated backend |
-| `docs/` | Source of truth for the spec: Vision / Architecture / Proto / Plugin / Reference |
-| `llmdoc/` | Compressed, LLM-oriented retrieval layer over the docs |
+| `llmdoc/` | Project knowledge base (architecture boundaries, protocol contract, production pitfalls, workflows) |
+| `archive/` | Archived bootstrap-era spec & process docs (historical reference only) |
 
 ## Development
 
@@ -121,11 +131,11 @@ pnpm test:integration    # gateway integration tests (real workerd)
 pnpm lint:fix            # biome auto-fix
 ```
 
-Engineering rule: **when implementation and docs disagree, `docs/` wins**; the single normative interface spec is [docs/Proto.md](docs/Proto.md).
+Engineering rule: **the code is the source of truth for behavior**; the lookup docs for the interface contract, module boundaries, and production pitfalls live in [llmdoc/](llmdoc/index.md) (contract entry point: `llmdoc/reference/protocol-contract.md`).
 
 ## Status
 
-Under active development (pre-release). The core path — SK auth, the HTBP tree, the mcp/http/remote tool layer, the four context verbs plus `$ref` large objects, and device reverse registration (WebSocket hibernation) — has been verified in production on Cloudflare. The SDK / plugin system, the Dashboard, and the Docker self-hosting path are in progress.
+Under active development (pre-release). All core capabilities have landed and are verified in production on Cloudflare: SK auth with scopes, the HTBP tree with content negotiation, the tool layer (mcp / http / remote federation + virtualization), the four context verbs plus `$ref` large objects, device reverse registration (WebSocket hibernation), the SDK and plugin system, and the Dashboard. `@tool-bridge/cli` and `@tool-bridge/sdk` are published to npm. Roadmap: a `tb init` one-shot deployment wizard, the Docker self-hosting path, and systematic end-to-end acceptance across the seven user cases.
 
 ## License
 
