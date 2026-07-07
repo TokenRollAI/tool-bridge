@@ -16,7 +16,10 @@ export interface ObjectBodyStream {
   getReader(): {
     read(): Promise<{ done: boolean; value?: Uint8Array }>
     releaseLock(): void
+    /** 消费方(如 Node undici 的 Response 收尾)可能调用;实现方建议提供。 */
+    cancel?(reason?: unknown): Promise<void>
   }
+  cancel?(reason?: unknown): Promise<void>
 }
 
 /** put 可接受的 body 形态(BodyInit 子集;core 无 DOM lib 故自声明)。 */
@@ -114,8 +117,12 @@ export function bytesToObjectStream(bytes: Uint8Array): ObjectBodyStream {
           return { done: false, value: bytes }
         },
         releaseLock() {},
+        async cancel() {
+          done = true
+        },
       }
     },
+    async cancel() {},
   }
 }
 

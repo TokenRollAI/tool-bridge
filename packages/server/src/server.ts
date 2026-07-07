@@ -15,6 +15,7 @@ import { SecretStoreImpl } from '@tool-bridge/core'
 import { runBootstrap } from '@tool-bridge/gateway/bootstrap'
 import { createTbApp, type TbAppDeps } from '@tool-bridge/gateway/tbApp'
 import pkg from '../package.json' with { type: 'json' }
+import { resolveUiAssets } from './assets'
 import type { ServerConfig } from './config'
 import { DeviceHub } from './deviceHub'
 import { createDataObjectStore } from './objects'
@@ -46,6 +47,8 @@ export function createTbServer(config: ServerConfig): TbServer {
     device: hub,
   }
   if (config.encryptionKey !== undefined) deps.encryptionKey = config.encryptionKey
+  const assets = resolveUiAssets(config.uiDir)
+  if (assets !== undefined) deps.assets = assets
   if (config.toolCacheTtlSec !== undefined) deps.toolCacheTtlSec = config.toolCacheTtlSec
   if (config.refThresholdBytes !== undefined) deps.refThresholdBytes = config.refThresholdBytes
   if (config.refTtlSec !== undefined) deps.refTtlSec = config.refTtlSec

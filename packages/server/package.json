@@ -46,6 +46,7 @@
     "@cfworker/json-schema": "^4.1.1",
     "@hono/node-server": "^1.19.7",
     "@modelcontextprotocol/sdk": "^1.29.0",
+    "@tool-bridge/dashboard": "workspace:*",
     "aws4fetch": "^1.0.20",
     "better-sqlite3": "^12.6.0",
     "hono": "^4.12.28",
