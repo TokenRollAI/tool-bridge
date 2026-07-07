@@ -1,0 +1,18 @@
+# Docker 构建上下文裁剪:构建在容器内进行,本地产物/依赖/凭据一律不进上下文。
+.git
+**/node_modules
+**/dist
+**/.wrangler
+.env
+.dev.vars
+*.log
+.llmdoc-tmp
+.claude
+.superset
+.playwright-mcp
+llmdoc
+archive
+scripts
+Dockerfile
+.dockerignore
+.github

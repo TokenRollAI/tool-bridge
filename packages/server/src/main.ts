@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 /**
  * bin 入口:env 配置 → 引导 → 监听 → SIGINT/SIGTERM 优雅关闭。
  * 首次引导的 Admin SK 明文由 runBootstrap console.log 一次(docker logs 可见,

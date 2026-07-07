@@ -14,7 +14,7 @@
  *   探活(isAlive + 周期 ping + terminate)踢半开死连接,避免调用一律吃 60s 超时。
  */
 
-import type { Server as HttpServer, IncomingMessage } from 'node:http'
+import type * as http from 'node:http'
 import type { Duplex } from 'node:stream'
 import {
   type DeviceCallResult,
@@ -93,7 +93,7 @@ export class DeviceHub {
   }
 
   /** 挂到 http.Server 的 'upgrade' 事件(仅处理 DEVICE_WS_PATH,其余 404)。 */
-  attach(server: HttpServer): void {
+  attach(server: http.Server): void {
     server.on('upgrade', (req, socket, head) => {
       this.handleUpgrade(req, socket, head).catch((err) => {
         rejectUpgrade(
@@ -156,7 +156,11 @@ export class DeviceHub {
     await new Promise<void>((resolve) => this.wss.close(() => resolve()))
   }
 
-  private async handleUpgrade(req: IncomingMessage, socket: Duplex, head: Buffer): Promise<void> {
+  private async handleUpgrade(
+    req: http.IncomingMessage,
+    socket: Duplex,
+    head: Buffer,
+  ): Promise<void> {
     const url = new URL(req.url ?? '/', 'http://localhost')
     if (url.pathname !== DEVICE_WS_PATH) {
       rejectUpgrade(socket, TBError.notFound('not found'))

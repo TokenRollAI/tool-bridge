@@ -1,0 +1,13 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@tool-bridge/core": ["../core/src/index.ts"],
+      "@tool-bridge/core/node": ["../core/src/node/index.ts"],
+      "@tool-bridge/gateway/bootstrap": ["../gateway/src/bootstrap.ts"],
+      "@tool-bridge/gateway/deviceHello": ["../gateway/src/deviceHello.ts"],
+      "@tool-bridge/gateway/tbApp": ["../gateway/src/tbApp.ts"]
+    }
+  }
+}

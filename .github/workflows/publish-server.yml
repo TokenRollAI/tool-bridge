@@ -1,0 +1,70 @@
+# 备注:发布走 npm Trusted Publishing(OIDC,免 token)。前置一次性配置见 npmjs.com 包设置页:
+# Package Settings → Trusted Publisher → GitHub Actions,
+# repo `TokenRollAI/tool-bridge`,workflow `publish-server.yml`。
+# 新包首发须先手动 `npm publish`(Trusted Publisher 只能配到已存在的包)。
+
+name: publish-server
+
+on:
+  push:
+    tags:
+      - 'server-v*' # 打 tag 即发布:git tag server-v0.1.0 && git push origin server-v0.1.0
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write # npm Trusted Publishing(OIDC)必需
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4 # 版本取 package.json 的 packageManager 字段
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+
+      # Trusted Publishing 需要 npm >= 11.5.1(setup-node 自带的可能偏旧)
+      - run: npm install -g npm@latest
+
+      - run: pnpm install --frozen-lockfile
+
+      # tag 版本与 package.json 一致性校验(防止 tag 与包版本漂移)
+      - name: Check tag matches package version
+        if: github.ref_type == 'tag'
+        run: |
+          TAG_VERSION="${GITHUB_REF_NAME#server-v}"
+          PKG_VERSION="$(node -p "require('./packages/server/package.json').version")"
+          if [ "$TAG_VERSION" != "$PKG_VERSION" ]; then
+            echo "tag server-v$TAG_VERSION != package.json $PKG_VERSION" >&2
+            exit 1
+          fi
+
+      # server 把 core/gateway bundle 进产物,三包 typecheck 一起过
+      - run: pnpm --filter @tool-bridge/core --filter @tool-bridge/gateway --filter @tool-bridge/server typecheck
+      - run: pnpm --filter @tool-bridge/server test
+      - run: pnpm --filter @tool-bridge/server build
+
+      # dist 冒烟:守护 better-sqlite3 等 native/运行时依赖误 bundle(bundle 炸则起不来)
+      - name: Smoke dist
+        run: |
+          TB_PORT=18787 TB_DATA_DIR=/tmp/tb-smoke node packages/server/dist/main.js &
+          SERVER_PID=$!
+          for i in $(seq 1 20); do
+            sleep 0.5
+            if curl -sf http://127.0.0.1:18787/healthz > /dev/null; then break; fi
+          done
+          curl -sf http://127.0.0.1:18787/healthz
+          kill $SERVER_PID
+
+      # 开发态 exports 指 src,发布形态由 publishConfig 覆盖到 dist;
+      # 覆盖只在 pnpm pack 时应用,故先 pack 再 npm publish tarball。
+      - name: Publish to npm
+        working-directory: packages/server
+        run: |
+          pnpm pack
+          npm publish tool-bridge-server-*.tgz

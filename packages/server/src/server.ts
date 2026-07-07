@@ -8,7 +8,7 @@
  */
 
 import { mkdirSync } from 'node:fs'
-import type { Server as HttpServer } from 'node:http'
+import type * as http from 'node:http'
 import { join } from 'node:path'
 import { type ServerType, serve } from '@hono/node-server'
 import { SecretStoreImpl } from '@tool-bridge/core'
@@ -67,7 +67,7 @@ export function createTbServer(config: ServerConfig): TbServer {
         server = serve({ fetch: app.fetch, port: config.port, hostname: config.host }, (info) => {
           resolve({ port: info.port })
         })
-        hub.attach(server as HttpServer)
+        hub.attach(server as http.Server)
       })
     },
     async close(): Promise<void> {
