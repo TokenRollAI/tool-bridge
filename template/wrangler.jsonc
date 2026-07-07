@@ -1,0 +1,38 @@
+{
+  // tool-bridge gateway — deployable to any Cloudflare account.
+  // The "Deploy to Cloudflare" button reads this file, provisions the KV
+  // namespace / R2 bucket / Durable Object below in your account, and fills
+  // in the resource ids automatically.
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "tool-bridge",
+  "main": "src/index.ts",
+  "compatibility_date": "2025-06-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": {
+    "enabled": true
+  },
+  // KV: node tree config / SecretKey hash table / plugin manifests.
+  // The id is a placeholder — the deploy flow (or `wrangler kv namespace create`)
+  // replaces it. Local `wrangler dev` uses a miniflare instance and ignores it.
+  "kv_namespaces": [
+    { "binding": "TB_KV", "id": "00000000000000000000000000000000" }
+  ],
+  // R2: context objects and large $ref payloads.
+  "r2_buckets": [
+    { "binding": "TB_R2", "bucket_name": "tool-bridge" }
+  ],
+  // Durable Objects: one DeviceSession per device (WebSocket hibernation).
+  "durable_objects": {
+    "bindings": [{ "name": "TB_DEVICE", "class_name": "DeviceSession" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["DeviceSession"] }],
+  // Dashboard static assets, copied from @tool-bridge/dashboard by
+  // scripts/copy-ui.mjs (the dev/deploy scripts run it for you).
+  // run_worker_first=true: every request enters the Worker first; the /ui route
+  // forwards to assets explicitly, so the SPA fallback never swallows the data plane.
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS",
+    "run_worker_first": true
+  }
+}

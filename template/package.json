@@ -1,0 +1,35 @@
+{
+  "name": "tool-bridge-template",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Deploy your own tool-bridge gateway to Cloudflare Workers in one click",
+  "license": "MIT",
+  "scripts": {
+    "dev": "node scripts/copy-ui.mjs && wrangler dev",
+    "deploy": "node scripts/copy-ui.mjs && wrangler deploy",
+    "check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@tool-bridge/dashboard": "^0.1.0",
+    "@tool-bridge/gateway": "^0.1.1"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20260701.1",
+    "typescript": "^5.9.3",
+    "wrangler": "^4.107.0"
+  },
+  "cloudflare": {
+    "bindings": {
+      "TB_KV": {
+        "description": "Gateway state: node tree config, SecretKey hashes, plugin manifests."
+      },
+      "TB_R2": {
+        "description": "Context objects and large `$ref` payloads."
+      },
+      "TB_DEVICE": {
+        "description": "One Durable Object per connected device (WebSocket hibernation)."
+      }
+    }
+  }
+}

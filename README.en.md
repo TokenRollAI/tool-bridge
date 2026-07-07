@@ -14,6 +14,8 @@ Any agent that can do an HTTP fetch can discover and use all of an organization'
 [![npm: sdk](https://img.shields.io/npm/v/@tool-bridge/sdk?label=%40tool-bridge%2Fsdk)](https://www.npmjs.com/package/@tool-bridge/sdk)
 [![license](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/TokenRollAI/tool-bridge/tree/main/template)
+
 </div>
 
 ---
