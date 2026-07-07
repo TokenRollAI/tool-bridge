@@ -49,5 +49,10 @@
     "@types/ws": "8.18.1",
     "tsup": "^8.5.1",
     "vitest": "^4.1.10"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/TokenRollAI/tool-bridge.git",
+    "directory": "packages/sdk"
   }
 }
