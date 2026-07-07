@@ -5,6 +5,7 @@
 ## 项目状态
 
 - **初步实现阶段已完成**(2026-07-07 "破壳"):SK 鉴权与作用域、HTBP 核心树与内容协商、Tool 层(mcp/http/remote 联邦 + 虚拟化)、Context 层(r2/s3 四动词 + Search + `$ref` 大对象)、设备反向注册(DO WebSocket hibernation)、SDK、Plugin 系统、Dashboard 均已落地并经生产验证。
+- 2026-07-07:修复"挂载 MCP 过一段时间失效"生产故障(不合规上游对过期会话回 200+空列表,见 [../guides/mcp-upstream-pitfalls.md](../guides/mcp-upstream-pitfalls.md)),已部署上线并经塞伪 session 复现验证自愈。
 - bootstrap 期过程文档已归档 `archive/`;知识真源 = 代码 + llmdoc(见 [project-brief.md](project-brief.md))。
 - **npm 已发布**:`@tool-bridge/cli` 0.1.1、`@tool-bridge/sdk` 0.1.0(均 public,经 CI Trusted Publishing;core 为 private 不发布)。gateway/dashboard 0.1.0 已改为可发布(为一键部署模板铺路),**待手动首发 + 配 Trusted Publisher**。发布流程见 [../guides/npm-publish.md](../guides/npm-publish.md)。
 
@@ -19,7 +20,7 @@
 
 ## 代码现状(pnpm monorepo,测试数为 2026-07-07 实跑)
 
-- `packages/core` — 纯逻辑内核(唯一运行时依赖 zod),**589 个单测**,模块族:
+- `packages/core` — 纯逻辑内核(唯一运行时依赖 zod),**603 个单测**,模块族:
   - `auth/`(scope 判定 / authorizer / 注册路径规则 / sk 签发与哈希)、`tree/`(path 规则 / NodeRegistryStore / visibility 裁剪)、`htbp/`(helpDsl / HelpModel / negotiate / tree 构建)、`secret/`(AES-256-GCM 只写不读)
   - `builtin/`(**五模块**:sk / secret / registry / status / plugin 的 cmd 表 + dispatch)
   - `tool/`(HttpToolDef 拼装、虚拟化、mcp schema→HelpModel、remote 路径/白名单/Via、上游错误归一)
@@ -28,7 +29,7 @@
   - `plugin/`(manifest 校验 / envelope 编解码 / RequestDedupe / 契约校验)
   - `node/`(`./node` 子导出:FsObjectStore realpath 防逃逸 + shellExecutor 有界缓冲)
   - 顶层 `errors.ts`(TBError)/ `store.ts`(StateStore 接口 + 内存实现)/ `types.ts`。
-- `packages/gateway` — Workers 胶水(可发布 Worker library:tsup 单文件 ESM bundle core,`src/index.ts` 另 export `createApp` 与 `type Env`;dev exports 指 src、发布形态 publishConfig 覆盖指 dist),**82 个默认集成测试 + 6 个 opt-in skipped**(真实 workerd):`app.ts`(Env→deps 适配)/ `tbApp.ts`(**宿主中立 createTbApp**,路由/认证/HTBP/remote 聚合,SDK 复用)/ `bootstrap.ts` / `kvStateStore.ts` / `refToken.ts`(`$ref` 中转 token)/ `deviceSession.ts`(DeviceSession DO)/ `providers/`(mcp / http / remote / pluginTool / pluginContext / pluginClient / r2Object / s3Object / s3Sign / toolCache);`wrangler.jsonc` 在此包内。
+- `packages/gateway` — Workers 胶水(可发布 Worker library:tsup 单文件 ESM bundle core,`src/index.ts` 另 export `createApp` 与 `type Env`;dev exports 指 src、发布形态 publishConfig 覆盖指 dist),**85 个默认集成测试 + 6 个 opt-in skipped**(真实 workerd;含 mcp 过期会话空列表防御的 mock 上游用例):`app.ts`(Env→deps 适配)/ `tbApp.ts`(**宿主中立 createTbApp**,路由/认证/HTBP/remote 聚合,SDK 复用)/ `bootstrap.ts` / `kvStateStore.ts` / `refToken.ts`(`$ref` 中转 token)/ `deviceSession.ts`(DeviceSession DO)/ `providers/`(mcp / http / remote / pluginTool / pluginContext / pluginClient / r2Object / s3Object / s3Sign / toolCache);`wrangler.jsonc` 在此包内。
 - `packages/cli` — citty 框架,**101 个单测**,**17 个命令**:status / login / whoami / use / sk / secret / ls / tree / help / call / tool / server / ctx / connect / device / mount / plugin;全局 `--json`;配置 `~/.config/tool-bridge/config.json`(XDG,多 profile)。
 - `packages/sdk` — 薄装配层(4 个源文件),**12 个单测 + 1 个 opt-in**;公开面 `createToolBridge(config)` → `{ fetch, registerTool, registerContext, connect }`,复用 core + gateway 的 createTbApp;再导出内存宿主实现(MemoryStateStore 等)。
 - `packages/dashboard` — React 19 + Vite + Tailwind 4 + shadcn/ui + @rjsf + TanStack Query SPA(可发布纯静态产物包:只发 dist,依赖全在 devDependencies):树导航 / cmd 表单调用 / context 条目浏览(metadata 编辑、`$ref` 大对象经 Update 只改 metadata、Search mode keyword|semantic 切换)/ SK·Registry·Devices·Secrets·Plugins 管理页(Plugins 对等 `tb plugin` 六 cmd,pluginToken 一次性展示;Registry 挂载面对等 CLI:kind:tool / plugin provider、virtualize 全量、http authHeader/authScheme、context ttl)/ ⌘K 面板;无专用后端(同源消费 HTBP),行为由 gateway 的 `ui.integration.test.ts` 覆盖;`pnpm deploy:all` 先 build dashboard 再部署 gateway。
@@ -38,7 +39,7 @@
 
 ## 常用命令
 
-- `pnpm verify` — typecheck + lint + 单测 + 集成测试一把过(当前 589 core + 101 cli + 12 sdk 单测,82 gateway 默认集成 + 6 opt-in skipped)。
+- `pnpm verify` — typecheck + lint + 单测 + 集成测试一把过(当前 603 core + 101 cli + 12 sdk 单测,85 gateway 默认集成 + 6 opt-in skipped)。
 - `pnpm deploy:all` — 幂等 provision + dashboard build + 部署 gateway。
 - `TB_BASE_URL=https://tool-bridge.pdjjq.org pnpm smoke` — 线上冒烟(**smoke 不读 .env,须显式传 TB_BASE_URL 与 TB_SK**)。
 - `npx tsx scripts/verify-revocation.ts` / `verify-device.ts` / `verify-plugin.ts` — 可重跑生产验收(需 TB_BASE_URL + TB_SK,消耗真实资源)。
@@ -91,3 +92,4 @@
 ## 遗留注意
 
 - opt-in MCP E2E 退出码为 0,但 workerd 会打印 SDK sourcemap 诊断与一次 `Network connection lost` 文本,属 harness 噪声,不作为失败依据。
+- 本机主 checkout(`~/.superset/projects/tool-bridge`)工作区有一份未提交 WIP(deviceSession→deviceHello 抽取重构);**部署必须从与 origin/main 零差异的干净工作区执行**(2026-07-07 部署即为避开该 WIP 从干净 worktree 出发)。

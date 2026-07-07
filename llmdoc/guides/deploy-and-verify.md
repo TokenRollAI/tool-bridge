@@ -14,6 +14,8 @@ typecheck + biome lint + 单测(core/cli/sdk)+ gateway 集成测试(真实 worke
 
 = `node scripts/provision.mjs`(幂等建 KV/R2,存在即跳过)+ `pnpm --filter @tool-bridge/dashboard build`(gateway 部署前须先产出 dashboard dist)+ `pnpm --filter @tool-bridge/gateway run deploy`(wrangler deploy)。
 
+**部署前置检查**:部署工作区必须与 `origin/main` 零差异(`git fetch && git diff origin/main --stat` 为空、`git status` 干净)——主 checkout 可能残留他人/往轮 WIP,直接部署会把未提交改动带上线。从干净 worktree 部署时把主 checkout 的 `.env` 拷过去即可(gitignored;provision/deploy 脚本读仓库根 `.env`)。
+
 预期(资源已存在时):
 
 ```

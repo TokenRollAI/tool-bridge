@@ -28,6 +28,7 @@
 - [guides/deploy-and-verify.md](guides/deploy-and-verify.md) — 从零到线上验证:`pnpm verify` → `pnpm deploy:all` → curl 探活 → `pnpm smoke` → `tb status --json`,每步预期输出 + 排错(多账户歧义、custom domain 生效延迟)。
 - [guides/workers-kv-pitfalls.md](guides/workers-kv-pitfalls.md) — Workers/KV 生产坑:KV list+get 最终一致窗口(须跳 null)、子请求上限约束逐 key get、吊销传播实测 0.3s、vitest-pool-workers 0.18 API 变更。
 - [guides/do-websocket-hibernation.md](guides/do-websocket-hibernation.md) — DO hibernation WS 生产坑:边缘 ~100s 空闲掐断须客户端心跳保活、唤醒后内存状态机须从 storage 恢复(restoreReady)、本地 miniflare 测不出须线上跨休眠窗口验证。**改设备通道前必读。**
+- [guides/mcp-upstream-pitfalls.md](guides/mcp-upstream-pitfalls.md) — MCP 上游生产坑:会话复用机制(mcpsession KV 无 TTL + 400/404 失效信号)、不合规上游对过期会话回 200+空列表(实测 MetaMCP)与空列表防御、生产可重跑排查手法(refresh=1 区分缓存层、幂等 update 强制重握手、塞伪 session 复现)。**挂载/排查 mcp 上游前必读。**
 - [guides/npm-publish.md](guides/npm-publish.md) — cli / sdk / gateway / dashboard 四包的 npm 发布:tsup bundle + dts 内联(paths 映射 + 隔离 tsc 验证)、publishConfig 覆盖模式(pnpm pack + publish tarball)、tag 触发 CI(Trusted Publishing OIDC)、新包"手动首发+配 Trusted Publisher"两段式、EOTP/provenance E422 等坑。
 - [guides/verification-and-commit-practices.md](guides/verification-and-commit-practices.md) — 验证与提交纪律:证据矩阵、收尾同轮更新 current-state、配置面对等、出站边界测试、opt-in 退出码、长驻进程与跨休眠验证、先取证后改码、批量清理后 lint:fix、pathspec 提交与 hook 自动暂存防污染。
 
@@ -51,6 +52,7 @@
 | 部署/线上验证/部署排错 | guides/deploy-and-verify.md |
 | 写 KV 消费代码/排查 KV 一致性/vitest-pool-workers 配置 | guides/workers-kv-pitfalls.md |
 | 改设备 WS 通道/排查设备离线/DO hibernation 行为 | guides/do-websocket-hibernation.md |
+| 挂载 mcp 上游/排查 mcp 节点工具消失或会话异常 | guides/mcp-upstream-pitfalls.md |
 | 发 npm 新版本/新增可发布包/排查 CI 发布失败 | guides/npm-publish.md |
 | 了解产品定位/非目标/模块落地状态 | overview/project-overview.md |
 | 追溯 bootstrap 期规范原文/验收证据 | 仓库根 `archive/`(历史) |

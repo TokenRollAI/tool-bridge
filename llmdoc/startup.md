@@ -17,6 +17,7 @@
 - 部署/线上验证/部署排错 → [guides/deploy-and-verify.md](guides/deploy-and-verify.md)。
 - 写 KV 消费代码/配 vitest-pool-workers/排查 KV 一致性 → [guides/workers-kv-pitfalls.md](guides/workers-kv-pitfalls.md)。
 - 改设备 WS 通道(deviceSession/deviceRuntime/core device)/排查设备离线 → [guides/do-websocket-hibernation.md](guides/do-websocket-hibernation.md)。
+- 挂载 mcp 上游/排查 mcp 节点工具消失或会话异常 → [guides/mcp-upstream-pitfalls.md](guides/mcp-upstream-pitfalls.md)。
 - 发 npm 新版本/新增可发布包 → [guides/npm-publish.md](guides/npm-publish.md)。
 - 有相关 `guides/` 或 `memory/reflections/` 时在计划前读(清单见 [index.md](index.md))。
 - 需要追溯 bootstrap 期的规范原文、验收证据或历史反思 → 仓库根 `archive/`(历史,不作规范)。
