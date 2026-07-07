@@ -1,14 +1,20 @@
+import { useQueryClient } from '@tanstack/react-query'
 import {
   Boxes,
   ChevronsUpDown,
   Cpu,
   KeySquare,
+  ListFilter,
   LogOut,
   Moon,
+  RefreshCw,
+  Search,
   ShieldEllipsis,
   Sun,
 } from 'lucide-react'
+import { useEffect, useState } from 'react'
 import { NavLink, Outlet, useNavigate } from 'react-router'
+import { CommandPalette } from '@/components/CommandPalette'
 import { TreeNav } from '@/components/layout/TreeNav'
 import { Button } from '@/components/ui/button'
 import {
@@ -33,12 +39,28 @@ const MANAGE_LINKS = [
   { to: '/manage/devices', label: '设备', icon: Cpu },
 ] as const
 
-/** 主布局:左侧树导航 + 管理区,右侧路由内容。 */
+const isMac = typeof navigator !== 'undefined' && /Mac/.test(navigator.platform)
+
+/** 主布局:左侧树导航 + 管理区,右侧路由内容;⌘K 全局命令面板。 */
 export function AppShell() {
   const { active, profiles, switchTo, logout } = useSession()
   const [theme, toggleTheme] = useTheme()
   const status = useStatus()
   const navigate = useNavigate()
+  const qc = useQueryClient()
+  const [paletteOpen, setPaletteOpen] = useState(false)
+  const [treeFilter, setTreeFilter] = useState('')
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault()
+        setPaletteOpen((v) => !v)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
 
   return (
     <div className="flex h-svh overflow-hidden">
@@ -66,18 +88,59 @@ export function AppShell() {
             />
             {status.isError ? 'unreachable' : status.data?.healthy ? 'operational' : 'checking…'}
             {status.data && (
-              <span className="ml-auto font-mono">{status.data.nodeCount} nodes</span>
+              <span className="ml-auto font-mono tabular-nums">{status.data.nodeCount} nodes</span>
             )}
           </div>
+        </div>
+
+        <div className="px-3 pb-2">
+          <button
+            type="button"
+            onClick={() => setPaletteOpen(true)}
+            className={cn(
+              'flex h-7 w-full items-center gap-2 rounded-sm border bg-background/60 px-2.5',
+              'text-xs text-muted-foreground hover:border-primary/40 hover:text-foreground',
+            )}
+          >
+            <Search className="size-3" />
+            搜索节点…
+            <kbd className="ml-auto rounded-xs border bg-secondary px-1 font-mono text-[10px] leading-4">
+              {isMac ? '⌘K' : 'Ctrl K'}
+            </kbd>
+          </button>
         </div>
 
         <Separator />
 
         <ScrollArea className="min-h-0 flex-1 px-1 py-2">
-          <p className="px-3 pb-1 text-[10px] font-medium tracking-widest text-muted-foreground uppercase">
-            树
-          </p>
-          <TreeNav />
+          <div className="flex items-center px-3 pb-1">
+            <p className="text-[10px] font-medium tracking-widest text-muted-foreground uppercase">
+              树
+            </p>
+            <button
+              type="button"
+              aria-label="刷新树"
+              title="刷新树"
+              onClick={() => qc.invalidateQueries({ queryKey: ['tb'] })}
+              className="ml-auto grid size-5 place-items-center rounded-xs text-muted-foreground/60 hover:text-foreground"
+            >
+              <RefreshCw className="size-3" />
+            </button>
+          </div>
+          <div className="relative mx-2 mb-1.5">
+            <ListFilter className="pointer-events-none absolute top-1/2 left-2 size-3 -translate-y-1/2 text-muted-foreground/50" />
+            <input
+              value={treeFilter}
+              onChange={(e) => setTreeFilter(e.target.value)}
+              placeholder="过滤…"
+              aria-label="过滤树"
+              className={cn(
+                'h-6.5 w-full rounded-sm border bg-transparent pr-2 pl-6.5 font-mono text-xs',
+                'placeholder:text-muted-foreground/50 focus:border-primary/40 focus:outline-none',
+              )}
+            />
+          </div>
+          <TreeNav filter={treeFilter} />
           <p className="px-3 pt-4 pb-1 text-[10px] font-medium tracking-widest text-muted-foreground uppercase">
             管理
           </p>
@@ -147,6 +210,8 @@ export function AppShell() {
       <main className="min-w-0 flex-1 overflow-y-auto">
         <Outlet />
       </main>
+
+      <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} />
     </div>
   )
 }

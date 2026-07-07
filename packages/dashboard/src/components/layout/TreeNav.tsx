@@ -1,31 +1,11 @@
-import {
-  Blocks,
-  ChevronRight,
-  Cpu,
-  Database,
-  Folder,
-  Globe,
-  type LucideIcon,
-  Plug,
-  Waypoints,
-} from 'lucide-react'
+import { ChevronRight } from 'lucide-react'
 import { useState } from 'react'
 import { NavLink } from 'react-router'
+import { KIND_ICON } from '@/components/KindBadge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useTree } from '@/lib/queries'
-import type { NodeKind, TreeJson } from '@/lib/types'
+import type { TreeJson } from '@/lib/types'
 import { cn } from '@/lib/utils'
-
-/** kind → 图标 + 色相(与 KindBadge 同一套色相编码,图标替代文字标签)。 */
-const KIND_ICON: Record<NodeKind, { icon: LucideIcon; className: string }> = {
-  directory: { icon: Folder, className: 'text-muted-foreground/70' },
-  builtin: { icon: Blocks, className: 'text-sky-400/80' },
-  mcp: { icon: Plug, className: 'text-violet-400/80' },
-  http: { icon: Globe, className: 'text-teal-400/80' },
-  remote: { icon: Waypoints, className: 'text-fuchsia-400/80' },
-  context: { icon: Database, className: 'text-emerald-400/80' },
-  device: { icon: Cpu, className: 'text-amber-400/80' },
-}
 
 /** 离线设备不进导航树(设备管理页仍可见全部);其余节点原样保留。 */
 function pruneOffline(nodes: TreeJson[]): TreeJson[] {
@@ -34,8 +14,21 @@ function pruneOffline(nodes: TreeJson[]): TreeJson[] {
     .map((n) => (n.children ? { ...n, children: pruneOffline(n.children) } : n))
 }
 
+/** 过滤:保留自身或任一后代匹配 q(路径子串,大小写不敏感)的分支。 */
+function filterTree(nodes: TreeJson[], q: string): TreeJson[] {
+  const needle = q.toLowerCase()
+  const out: TreeJson[] = []
+  for (const n of nodes) {
+    const kids = n.children ? filterTree(n.children, q) : []
+    if (n.path.toLowerCase().includes(needle) || kids.length > 0) {
+      out.push({ ...n, children: kids.length > 0 ? kids : n.children })
+    }
+  }
+  return out
+}
+
 /** ~tree 驱动的侧边树导航(可见性即权限:树里没有的就是无权的)。 */
-export function TreeNav() {
+export function TreeNav({ filter = '' }: { filter?: string }) {
   const tree = useTree('', 8)
   if (tree.isPending) {
     return (
@@ -49,14 +42,20 @@ export function TreeNav() {
   if (tree.isError) {
     return <p className="px-3 py-2 text-xs text-destructive">树加载失败:{tree.error.message}</p>
   }
-  const children = pruneOffline(tree.data.children ?? [])
+  const pruned = pruneOffline(tree.data.children ?? [])
+  const filtering = filter.trim() !== ''
+  const children = filtering ? filterTree(pruned, filter.trim()) : pruned
   if (children.length === 0) {
-    return <p className="px-3 py-2 text-xs text-muted-foreground">树为空——先挂载一个节点</p>
+    return (
+      <p className="px-3 py-2 text-xs text-muted-foreground">
+        {filtering ? '无匹配节点' : '树为空——先挂载一个节点'}
+      </p>
+    )
   }
   return (
     <nav className="grid gap-px px-2" aria-label="节点树">
       {children.map((child) => (
-        <TreeBranch key={child.path} node={child} depth={0} />
+        <TreeBranch key={child.path} node={child} depth={0} forceOpen={filtering} />
       ))}
       {tree.data.truncated && (
         <p className="px-3 py-1 text-[10px] text-muted-foreground">…树已按深度/节点数截断</p>
@@ -65,8 +64,17 @@ export function TreeNav() {
   )
 }
 
-function TreeBranch({ node, depth }: { node: TreeJson; depth: number }) {
+function TreeBranch({
+  node,
+  depth,
+  forceOpen = false,
+}: {
+  node: TreeJson
+  depth: number
+  forceOpen?: boolean
+}) {
   const [open, setOpen] = useState(depth < 1)
+  const effectiveOpen = forceOpen || open
   const kids = node.children ?? []
   const label = node.path.split('/').pop() ?? node.path
   const { icon: Icon, className: iconClass } = KIND_ICON[node.kind] ?? KIND_ICON.directory
@@ -98,18 +106,20 @@ function TreeBranch({ node, depth }: { node: TreeJson; depth: number }) {
         {kids.length > 0 && (
           <button
             type="button"
-            aria-label={open ? '收起' : '展开'}
+            aria-label={effectiveOpen ? '收起' : '展开'}
             onClick={() => setOpen((v) => !v)}
             className="absolute left-0.5 grid size-5 place-items-center rounded-xs text-muted-foreground/60 hover:text-foreground"
           >
-            <ChevronRight className={cn('size-3 transition-transform', open && 'rotate-90')} />
+            <ChevronRight
+              className={cn('size-3 transition-transform', effectiveOpen && 'rotate-90')}
+            />
           </button>
         )}
       </div>
-      {open && kids.length > 0 && (
+      {effectiveOpen && kids.length > 0 && (
         <div className="ml-[15px] border-l border-border/50 pl-1">
           {kids.map((k) => (
-            <TreeBranch key={k.path} node={k} depth={depth + 1} />
+            <TreeBranch key={k.path} node={k} depth={depth + 1} forceOpen={forceOpen} />
           ))}
         </div>
       )}

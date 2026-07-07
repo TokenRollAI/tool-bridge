@@ -1,3 +1,13 @@
+import {
+  Blocks,
+  Cpu,
+  Database,
+  Folder,
+  Globe,
+  type LucideIcon,
+  Plug,
+  Waypoints,
+} from 'lucide-react'
 import type { NodeKind } from '@/lib/types'
 import { cn } from '@/lib/utils'
 
@@ -10,6 +20,17 @@ const KIND_STYLE: Record<NodeKind, string> = {
   remote: 'text-fuchsia-400/90 border-fuchsia-400/30',
   context: 'text-emerald-400/90 border-emerald-400/30',
   device: 'text-amber-400/90 border-amber-400/30',
+}
+
+/** kind → 图标 + 色相(与 KIND_STYLE 同一套色相编码;树导航与命令面板共用)。 */
+export const KIND_ICON: Record<NodeKind, { icon: LucideIcon; className: string }> = {
+  directory: { icon: Folder, className: 'text-muted-foreground/70' },
+  builtin: { icon: Blocks, className: 'text-sky-400/80' },
+  mcp: { icon: Plug, className: 'text-violet-400/80' },
+  http: { icon: Globe, className: 'text-teal-400/80' },
+  remote: { icon: Waypoints, className: 'text-fuchsia-400/80' },
+  context: { icon: Database, className: 'text-emerald-400/80' },
+  device: { icon: Cpu, className: 'text-amber-400/80' },
 }
 
 export function KindBadge({ kind, className }: { kind: NodeKind; className?: string }) {
