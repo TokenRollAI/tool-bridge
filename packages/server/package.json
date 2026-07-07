@@ -1,0 +1,69 @@
+{
+  "name": "@tool-bridge/server",
+  "version": "0.1.0",
+  "description": "tool-bridge self-hosted server: run the HTBP gateway on Node with SQLite persistence, filesystem object storage and WebSocket device channel — single container via docker run",
+  "type": "module",
+  "license": "MIT",
+  "main": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "bin": {
+    "tool-bridge-server": "./dist/main.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "publishConfig": {
+    "access": "public",
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts",
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "import": "./dist/index.js"
+      }
+    }
+  },
+  "keywords": [
+    "self-hosted",
+    "docker",
+    "mcp",
+    "htbp",
+    "tool-bridge",
+    "agent-tools"
+  ],
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "build": "tsup",
+    "start": "tsx src/main.ts"
+  },
+  "dependencies": {
+    "@cfworker/json-schema": "^4.1.1",
+    "@hono/node-server": "^1.19.7",
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "aws4fetch": "^1.0.20",
+    "better-sqlite3": "^12.6.0",
+    "hono": "^4.12.28",
+    "ws": "8.21.0"
+  },
+  "devDependencies": {
+    "@tool-bridge/core": "workspace:*",
+    "@tool-bridge/gateway": "workspace:*",
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^26.1.0",
+    "@types/ws": "8.18.1",
+    "tsup": "^8.5.1",
+    "tsx": "^4.23.0",
+    "vitest": "^4.1.10"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/TokenRollAI/tool-bridge.git",
+    "directory": "packages/server"
+  }
+}
