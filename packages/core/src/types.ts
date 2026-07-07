@@ -154,7 +154,22 @@ export interface DeviceExpose {
   /** 挂 `<mountPath>/fs` context 节点(file provider);多根语义见 Proto §6.3。 */
   fs?: { roots: string[]; readOnly?: boolean }
   /** SDK 自定义节点(路径相对 mountPath)。 */
-  nodes?: NodeInput[]
+  nodes?: DeviceNodeInput[]
+}
+
+/**
+ * expose.nodes 元素(Proto §6.3):NodeInput + 可选工具表 `cmds`(ToolSpec 形状,
+ * SDK 随注册上送;网关存入代写节点的 providerConfig 作 `~help` 数据源,不新增帧类型)。
+ */
+export type DeviceNodeInput = NodeInput & { cmds?: DeviceNodeCmd[] }
+
+/** 设备自定义节点随注册上送的单条工具元数据(与 tool/types.ts 的 ToolSpec 同形)。 */
+export interface DeviceNodeCmd {
+  name: string
+  description?: string
+  inputSchema?: unknown
+  effect?: string
+  confirm?: boolean
 }
 
 export type NodeConfig =
@@ -179,8 +194,9 @@ export type NodeConfig =
     }
   | { kind: 'device'; deviceId: string; expose: DeviceExpose }
   | { kind: 'remote'; baseUrl: string; skRef?: string }
-  /** tool-provider 挂载(Phase 5,Proto §8.1):provider = plugin id 或 SDK 内部保留 id(如 '@local')。 */
-  | { kind: 'tool'; provider: string }
+  /** tool-provider 挂载(Phase 5,Proto §8.1):provider = plugin id 或 SDK 内部保留 id(如 '@local')。
+   *  providerConfig:设备自定义节点的转发标记(deviceId+mountPath+cmds,Proto §6.3,网关代写)。 */
+  | { kind: 'tool'; provider: string; providerConfig?: Record<string, unknown> }
 
 export type NodeInput = Omit<TreeNode, 'registeredBy' | 'online' | 'createdAt' | 'updatedAt'>
 

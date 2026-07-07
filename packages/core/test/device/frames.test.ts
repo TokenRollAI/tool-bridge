@@ -71,6 +71,54 @@ describe('encode/decode 往返', () => {
     })
   })
 
+  it('hello 的 node 可携带 cmds 工具表,往返保持(Proto §6.3 Phase 5)', () => {
+    const hello: DeviceFrame = {
+      type: 'hello',
+      deviceId: 'sdk-01',
+      expose: {
+        nodes: [
+          {
+            path: 'tools/echo',
+            kind: 'tool',
+            description: '回声工具',
+            cmds: [
+              {
+                name: 'echo',
+                description: '原样返回',
+                inputSchema: { type: 'object', properties: { text: { type: 'string' } } },
+                effect: 'read',
+              },
+              { name: 'wipe', effect: 'destructive', confirm: true },
+            ],
+          },
+        ],
+      },
+    }
+    expect(decodeDeviceFrame(encodeDeviceFrame(hello))).toEqual(hello)
+  })
+
+  it('node 不带 cmds 向后兼容(老客户端);cmds 形状非法 → invalid_argument', () => {
+    const plain =
+      '{"type":"hello","deviceId":"d","expose":{"nodes":[{"path":"x","kind":"tool","description":"t"}]}}'
+    expect(decodeDeviceFrame(plain)).toMatchObject({
+      expose: { nodes: [{ path: 'x', kind: 'tool' }] },
+    })
+    const bad = [
+      // cmds 非数组
+      '{"type":"hello","deviceId":"d","expose":{"nodes":[{"path":"x","kind":"tool","description":"t","cmds":{}}]}}',
+      // cmd 缺 name
+      '{"type":"hello","deviceId":"d","expose":{"nodes":[{"path":"x","kind":"tool","description":"t","cmds":[{"description":"m"}]}]}}',
+      // name 空串
+      '{"type":"hello","deviceId":"d","expose":{"nodes":[{"path":"x","kind":"tool","description":"t","cmds":[{"name":""}]}]}}',
+    ]
+    for (const text of bad) {
+      expect(
+        codeOf(() => decodeDeviceFrame(text)),
+        `应拒绝:${text}`,
+      ).toBe('invalid_argument')
+    }
+  })
+
   it('ping/pong 序列化为稳定字面量(DO autoResponse 精确匹配)', () => {
     expect(encodeDeviceFrame({ type: 'ping' })).toBe(PING_FRAME_JSON)
     expect(encodeDeviceFrame({ type: 'pong' })).toBe(PONG_FRAME_JSON)

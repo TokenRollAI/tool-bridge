@@ -7,6 +7,7 @@ import {
   type DeviceCallResult,
   type DeviceExpose,
   type DeviceFrame,
+  type DeviceNodeInput,
   DeviceGatewaySession,
   decodeDeviceFrame,
   encodeDeviceFrame,
@@ -368,9 +369,37 @@ export class DeviceSession extends DurableObject<DeviceSessionEnv> {
       })
     }
     for (const raw of expose.nodes ?? []) {
-      nodes.push(parseNodeInput({ ...raw, path: joinTreePath(mountPath, raw.path) }))
+      nodes.push(this.customNodeInput(mountPath, deviceId, raw))
     }
     return nodes
+  }
+
+  /**
+   * expose.nodes 自定义节点(Proto §6.3 Phase 5):路径挂到 mountPath 下,并对可调用
+   * kind(tool/context)注入 providerConfig 转发标记 { deviceId, mountPath, cmds? }
+   * (与 device-fs 同构)——网关据此把调用经帧协议 call 转发回设备;cmds(SDK 随
+   * NodeInput 上送的工具表)是节点 ~help 的数据源。标记为网关权威,覆盖设备侧同名字段。
+   */
+  private customNodeInput(
+    mountPath: TreePath,
+    deviceId: string,
+    raw: DeviceNodeInput,
+  ): NodeInput {
+    const { cmds, ...rest } = raw
+    const input = parseNodeInput({ ...rest, path: joinTreePath(mountPath, raw.path) })
+    const marker = { deviceId, mountPath, ...(cmds !== undefined ? { cmds } : {}) }
+    if (input.kind === 'tool') {
+      const base =
+        input.config?.kind === 'tool' ? input.config : { kind: 'tool' as const, provider: '@local' }
+      input.config = { ...base, providerConfig: { ...(base.providerConfig ?? {}), ...marker } }
+    } else if (input.kind === 'context') {
+      const base =
+        input.config?.kind === 'context'
+          ? input.config
+          : { kind: 'context' as const, provider: '@local' }
+      input.config = { ...base, providerConfig: { ...(base.providerConfig ?? {}), ...marker } }
+    }
+    return input
   }
 
   private async assertRegisterPath(

@@ -437,6 +437,28 @@ export function createApp(): Hono<{ Bindings: Env; Variables: Vars }> {
       throw TBError.notFound('not found')
     }
 
+    // --- device 自定义 tool 节点(Proto §6.3 Phase 5):providerConfig 标记 → 帧协议 call 转发。 ---
+    // 须先于 mcp/http/tool 通用分支:provider 是设备本地保留 id(如 '@local'),不是 plugin。
+    const toolMarker = deviceToolMarker(node)
+    if (toolMarker !== null) {
+      if (!check(ctx, node.path, 'call').allow) {
+        throw new TBError('permission_denied', `no scope grants 'call' on '${node.path}'`)
+      }
+      const body = (await c.req.json().catch(() => null)) as {
+        tool?: unknown
+        arguments?: unknown
+      } | null
+      if (!body || typeof body.tool !== 'string') {
+        throw new TBError('invalid_argument', 'body must be {tool, arguments}')
+      }
+      const result = await invokeDevice(c.env, toolMarker.deviceId, {
+        path: relativeDevicePath(node.path, toolMarker.mountPath),
+        tool: body.tool,
+        arguments: (body.arguments ?? {}) as Record<string, unknown>,
+      })
+      return renderResult(result, negotiate(c.req.header('accept')))
+    }
+
     // --- mcp/http/tool 上游工具调用(Proto §4.2/§8.1):scope 恒 'call';虚拟名反查上游真名再调 Provider。 ---
     if (
       (node.kind === 'mcp' || node.kind === 'http' || node.kind === 'tool') &&
@@ -518,6 +540,16 @@ export function createApp(): Hono<{ Bindings: Env; Variables: Vars }> {
       if (cfg.provider === 'device-fs') {
         const result = await invokeDevice(c.env, deviceIdForDeviceFs(cfg), {
           path: 'fs',
+          tool: body.tool,
+          arguments: (body.arguments ?? {}) as Record<string, unknown>,
+        })
+        return renderResult(result, negotiate(c.req.header('accept')))
+      }
+      // device 自定义 context 节点(Proto §6.3 Phase 5):标记命中 → 相对路径转发到设备。
+      const contextMarker = deviceMarkerOf(cfg.providerConfig)
+      if (cfg.provider !== 'r2' && cfg.provider !== 's3' && contextMarker !== null) {
+        const result = await invokeDevice(c.env, contextMarker.deviceId, {
+          path: relativeDevicePath(node.path, contextMarker.mountPath),
           tool: body.tool,
           arguments: (body.arguments ?? {}) as Record<string, unknown>,
         })
@@ -879,6 +911,17 @@ async function helpModelFor(
       children: children.map((n) => ({ path: n.path, kind: n.kind, description: n.description })),
     }
   }
+  // device 自定义 tool 节点(Proto §6.3 Phase 5):~help 来自注册时上送的工具表(cmds),
+  // 不打设备;索引形态与 mcp/http 对齐,单工具全量 spec 走工具级 ~help(toolHelpModelFor)。
+  const toolMarker = deviceToolMarker(node)
+  if (toolMarker !== null) {
+    return toolsToHelpModel(
+      node.path,
+      { kind: node.kind, description: node.description },
+      toolMarker.cmds ?? [],
+      { index: true },
+    )
+  }
   if (node.kind === 'mcp' || node.kind === 'http' || node.kind === 'tool') {
     const provider = await providerFor(node, ctx, deps.secrets, deps.env, deps.store)
     const raw = await upstreamTools(node, provider, deps.store, deps.env, deps.refresh, deps.now)
@@ -904,6 +947,10 @@ async function helpModelFor(
         { path: node.path, description: node.description },
         { readOnly: node.config.readOnly ?? false },
       )
+    }
+    // device 自定义 context 节点(Proto §6.3 Phase 5):静态动词表(readOnly 隐藏写动词)。
+    if (deviceMarkerOf(node.config.providerConfig) !== null) {
+      return contextHelpModel(node, { readOnly: node.config.readOnly ?? false })
     }
     // plugin-backed 节点:只列四动词 + 注册时声明的可选方法(Proto §8.2 注记,Q12)。
     if (node.config.provider !== 'r2' && node.config.provider !== 's3') {
@@ -946,6 +993,13 @@ async function toolHelpModelFor(
   }
   if (rest === '' || rest.includes('/')) return null
   if (!check(ctx, node.path, 'read').allow || !check(ctx, node.path, 'call').allow) return null
+  // device 自定义 tool 节点(Proto §6.3):工具表来自注册时缓存的 providerConfig.cmds,不打设备。
+  const marker = deviceToolMarker(node)
+  if (marker !== null) {
+    const cached = (marker.cmds ?? []).find((t) => t.name === rest)
+    if (cached === undefined) return null
+    return toolHelpModel(node.path, { kind: node.kind, description: node.description }, cached)
+  }
   const store = c.get('store')
   const provider = await providerFor(node, ctx, secretStore(store, c.env), c.env, store)
   const refresh = c.req.query('refresh') === '1'
@@ -1081,6 +1135,37 @@ function deviceIdForDeviceFs(cfg: ContextConfig): string {
   const pc = cfg.providerConfig
   if (pc && typeof pc === 'object' && typeof pc.deviceId === 'string') return pc.deviceId
   throw new TBError('invalid_argument', 'device-fs context 缺少 providerConfig.deviceId')
+}
+
+/** device 自定义节点转发标记(Proto §6.3 Phase 5):hello 代注册时网关写入 providerConfig。 */
+interface DeviceNodeMarker {
+  deviceId: string
+  mountPath: string
+  /** 注册时随 NodeInput 上送的工具表(~help 数据源);老客户端不带。 */
+  cmds?: ToolSpec[]
+}
+
+function deviceMarkerOf(pc: Record<string, unknown> | undefined): DeviceNodeMarker | null {
+  if (pc === undefined || typeof pc.deviceId !== 'string' || typeof pc.mountPath !== 'string') {
+    return null
+  }
+  return {
+    deviceId: pc.deviceId,
+    mountPath: pc.mountPath,
+    ...(Array.isArray(pc.cmds) ? { cmds: pc.cmds as ToolSpec[] } : {}),
+  }
+}
+
+/** kind:'tool' 且带设备标记的自定义节点(SDK registerTool → connect 代注册产物)。 */
+function deviceToolMarker(node: TreeNode): DeviceNodeMarker | null {
+  if (node.kind !== 'tool' || node.config?.kind !== 'tool') return null
+  return deviceMarkerOf(node.config.providerConfig)
+}
+
+/** 帧协议 call 的 path = 节点路径相对设备 mountPath(Proto §6.2,如 'tools/echo')。 */
+function relativeDevicePath(nodePath: TreePath, mountPath: string): string {
+  if (nodePath.startsWith(`${mountPath}/`)) return nodePath.slice(mountPath.length + 1)
+  throw new TBError('invalid_argument', `device 节点 '${nodePath}' 不在挂载 '${mountPath}' 下`)
 }
 
 // ---------- plugin 挂载消费(Proto §8,Phase 5) ----------

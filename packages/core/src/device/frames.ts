@@ -81,12 +81,24 @@ const tbErrorBodySchema = z.object({
 /**
  * NodeInput 只做边界校验(path/kind/description),config/virtualize 等经 passthrough
  * 原样保留——注册时由 NodeRegistry 全量校验,帧层不复刻。
+ * cmds:可选工具表(Proto §6.3,~help 数据源);老客户端不带则该节点 ~help 只有节点描述。
  */
+const deviceNodeCmdSchema = z
+  .object({
+    name: z.string().min(1),
+    description: z.string().optional(),
+    inputSchema: z.unknown().optional(),
+    effect: z.string().optional(),
+    confirm: z.boolean().optional(),
+  })
+  .passthrough()
+
 const nodeInputSchema = z
   .object({
     path: z.string().min(1),
     kind: z.enum(NODE_KINDS as [NodeKind, ...NodeKind[]]),
     description: z.string(),
+    cmds: z.array(deviceNodeCmdSchema).optional(),
   })
   .passthrough()
 
