@@ -104,10 +104,11 @@ export function ContextBrowser({ path, cmds }: { path: string; cmds: HelpCmd[] }
 
   const [prefixInput, setPrefixInput] = useState('')
   const [queryInput, setQueryInput] = useState('')
+  const [searchMode, setSearchMode] = useState<'keyword' | 'semantic'>('keyword')
   const prefix = useDebounced(prefixInput)
   const query = useDebounced(queryInput)
 
-  const entries = useCtxEntries(path, prefix, canSearch ? query : '')
+  const entries = useCtxEntries(path, prefix, canSearch ? query : '', searchMode)
   const invoke = useInvoke()
   const qc = useQueryClient()
 
@@ -145,16 +146,34 @@ export function ContextBrowser({ path, cmds }: { path: string; cmds: HelpCmd[] }
           />
         </div>
         {canSearch && (
-          <div className="relative">
-            <Search className="pointer-events-none absolute top-1/2 left-2.5 size-3 -translate-y-1/2 text-muted-foreground/60" />
-            <Input
-              value={queryInput}
-              onChange={(e) => setQueryInput(e.target.value)}
-              placeholder="keyword 检索…"
-              aria-label="keyword 检索"
-              className="h-8 w-44 pl-7 font-mono text-xs"
-            />
-          </div>
+          <>
+            <div className="relative">
+              <Search className="pointer-events-none absolute top-1/2 left-2.5 size-3 -translate-y-1/2 text-muted-foreground/60" />
+              <Input
+                value={queryInput}
+                onChange={(e) => setQueryInput(e.target.value)}
+                placeholder={searchMode === 'semantic' ? 'semantic 检索…' : 'keyword 检索…'}
+                aria-label="检索"
+                className="h-8 w-44 pl-7 font-mono text-xs"
+              />
+            </div>
+            <Select
+              value={searchMode}
+              onValueChange={(v) => setSearchMode(v as 'keyword' | 'semantic')}
+            >
+              <SelectTrigger className="h-8 font-mono text-xs" aria-label="检索模式">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="keyword" className="font-mono text-xs">
+                  keyword
+                </SelectItem>
+                <SelectItem value="semantic" className="font-mono text-xs">
+                  semantic
+                </SelectItem>
+              </SelectContent>
+            </Select>
+          </>
         )}
         <Button
           variant="ghost"
@@ -443,7 +462,30 @@ function EntryViewDialog({
 
 const CONTENT_TYPES = ['text/markdown', 'text/plain', 'application/json'] as const
 
-/** 新建/编辑条目(Write 幂等 upsert;编辑先 Get 预填,带 ifVersion 乐观并发)。 */
+/** "key=value" 行 → metadata Record(空返回 undefined;非法行抛错,对等 CLI --meta)。 */
+function parseMetaLines(spec: string): Record<string, string> | undefined {
+  const out: Record<string, string> = {}
+  for (const line of spec.split('\n')) {
+    const s = line.trim()
+    if (!s) continue
+    const idx = s.indexOf('=')
+    const k = idx < 0 ? '' : s.slice(0, idx).trim()
+    if (!k) throw new Error(`metadata 每行须为 "key=value" 形式:"${s}"`)
+    out[k] = s.slice(idx + 1).trim()
+  }
+  return Object.keys(out).length ? out : undefined
+}
+
+function metaToLines(metadata: Record<string, string> | undefined): string {
+  return Object.entries(metadata ?? {})
+    .map(([k, v]) => `${k}=${v}`)
+    .join('\n')
+}
+
+/**
+ * 新建/编辑条目(对等 `tb ctx put/patch`):新建与内容编辑走 Write(幂等 upsert,
+ * 带 ifVersion 乐观并发);大对象($ref)不可就地改内容,但可经 Update 只改 metadata。
+ */
 function EntryEditDialog({
   path,
   entryPath,
@@ -463,20 +505,52 @@ function EntryEditDialog({
   const [rel, setRel] = useState(entryPath)
   const [contentType, setContentType] = useState<string>('text/markdown')
   const [content, setContent] = useState('')
+  const [metaSpec, setMetaSpec] = useState('')
   const [err, setErr] = useState<string | null>(null)
   const [hydrated, setHydrated] = useState(false)
 
-  // 编辑模式:Get 到位后一次性预填(大对象 $ref 不可就地编辑)。
+  // 编辑模式:Get 到位后一次性预填(大对象 $ref 不可就地编辑内容)。
   const e = existing.data
   const ref = e ? refOf(e.content) : null
   useEffect(() => {
     if (isNew || !e || hydrated) return
     setContentType(e.contentType)
     setContent(typeof e.content === 'string' ? e.content : JSON.stringify(e.content, null, 2))
+    setMetaSpec(metaToLines(e.metadata))
     setHydrated(true)
   }, [isNew, e, hydrated])
 
   const submit = () => {
+    let metadata: Record<string, string> | undefined
+    try {
+      metadata = parseMetaLines(metaSpec)
+    } catch (ex) {
+      setErr((ex as Error).message)
+      return
+    }
+
+    // 大对象:内容不可就地改,只走 Update 改 metadata(对等 tb ctx patch --meta)。
+    if (!isNew && ref !== null) {
+      invoke.mutate(
+        {
+          path,
+          tool: 'Update',
+          args: {
+            path: entryPath,
+            patch: { metadata: metadata ?? {}, ...(e ? { ifVersion: e.version } : {}) },
+          },
+        },
+        {
+          onSuccess: () => {
+            toast.success(`已更新 ${entryPath} 的 metadata`)
+            onSaved()
+          },
+          onError: (er) => setErr(er.message),
+        },
+      )
+      return
+    }
+
     const p = rel.trim().replace(/^\/+/, '')
     if (p === '') {
       setErr('条目路径必填')
@@ -500,6 +574,7 @@ function EntryEditDialog({
           entry: {
             content: body,
             ...(typeof body === 'string' ? { contentType } : {}),
+            ...(metadata ? { metadata } : {}),
             ...(!isNew && e ? { ifVersion: e.version } : {}),
           },
         },
@@ -520,77 +595,89 @@ function EntryEditDialog({
         <DialogHeader>
           <DialogTitle className="text-base">{isNew ? '新建条目' : '编辑条目'}</DialogTitle>
           <DialogDescription>
-            Write 是幂等 upsert{!isNew && ';携带 ifVersion,被并发修改时返回 conflict'}。
+            {!isNew && ref !== null
+              ? '大对象($ref)不支持就地编辑内容;metadata 可经 Update 部分更新。'
+              : `Write 是幂等 upsert${isNew ? '' : ';携带 ifVersion,被并发修改时返回 conflict'}。`}
           </DialogDescription>
         </DialogHeader>
 
-        {!isNew && ref !== null ? (
-          <p className="rounded-sm border border-warn/40 bg-warn/5 px-3 py-2 text-sm">
-            该条目是大对象($ref),不支持就地编辑;可新建同路径条目整体覆盖。
-          </p>
-        ) : (
-          <div className="grid gap-4">
-            <div className="grid grid-cols-[1fr_12rem] gap-3">
+        <div className="grid gap-4">
+          {(isNew || ref === null) && (
+            <>
+              <div className="grid grid-cols-[1fr_12rem] gap-3">
+                <div className="grid gap-1.5">
+                  <Label htmlFor="entry-path" className="text-xs">
+                    条目路径 *
+                  </Label>
+                  <Input
+                    id="entry-path"
+                    className="font-mono text-sm"
+                    placeholder="docs/notes.md"
+                    value={rel}
+                    disabled={!isNew}
+                    onChange={(ev) => setRel(ev.target.value)}
+                  />
+                </div>
+                <div className="grid gap-1.5">
+                  <Label className="text-xs">contentType</Label>
+                  <Select value={contentType} onValueChange={setContentType}>
+                    <SelectTrigger className="font-mono text-xs">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {CONTENT_TYPES.includes(
+                        contentType as (typeof CONTENT_TYPES)[number],
+                      ) ? null : (
+                        <SelectItem value={contentType} className="font-mono text-xs">
+                          {contentType}
+                        </SelectItem>
+                      )}
+                      {CONTENT_TYPES.map((t) => (
+                        <SelectItem key={t} value={t} className="font-mono text-xs">
+                          {t}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
               <div className="grid gap-1.5">
-                <Label htmlFor="entry-path" className="text-xs">
-                  条目路径 *
+                <Label htmlFor="entry-content" className="text-xs">
+                  content
                 </Label>
-                <Input
-                  id="entry-path"
-                  className="font-mono text-sm"
-                  placeholder="docs/notes.md"
-                  value={rel}
-                  disabled={!isNew}
-                  onChange={(ev) => setRel(ev.target.value)}
+                <Textarea
+                  id="entry-content"
+                  className="font-mono text-xs"
+                  rows={12}
+                  spellCheck={false}
+                  value={content}
+                  onChange={(ev) => setContent(ev.target.value)}
                 />
               </div>
-              <div className="grid gap-1.5">
-                <Label className="text-xs">contentType</Label>
-                <Select value={contentType} onValueChange={setContentType}>
-                  <SelectTrigger className="font-mono text-xs">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {CONTENT_TYPES.includes(
-                      contentType as (typeof CONTENT_TYPES)[number],
-                    ) ? null : (
-                      <SelectItem value={contentType} className="font-mono text-xs">
-                        {contentType}
-                      </SelectItem>
-                    )}
-                    {CONTENT_TYPES.map((t) => (
-                      <SelectItem key={t} value={t} className="font-mono text-xs">
-                        {t}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-            <div className="grid gap-1.5">
-              <Label htmlFor="entry-content" className="text-xs">
-                content
-              </Label>
-              <Textarea
-                id="entry-content"
-                className="font-mono text-xs"
-                rows={12}
-                spellCheck={false}
-                value={content}
-                onChange={(ev) => setContent(ev.target.value)}
-              />
-            </div>
-            {err && <p className="text-xs text-destructive">{err}</p>}
+            </>
+          )}
+          <div className="grid gap-1.5">
+            <Label htmlFor="entry-meta" className="text-xs">
+              metadata(每行 key=value,可空)
+            </Label>
+            <Textarea
+              id="entry-meta"
+              className="font-mono text-xs"
+              rows={2}
+              spellCheck={false}
+              placeholder={'source=manual\nowner=alice'}
+              value={metaSpec}
+              onChange={(ev) => setMetaSpec(ev.target.value)}
+            />
           </div>
-        )}
+          {err && <p className="text-xs text-destructive">{err}</p>}
+        </div>
 
         <DialogFooter>
-          {(isNew || ref === null) && (
-            <Button disabled={invoke.isPending || (!isNew && existing.isPending)} onClick={submit}>
-              {invoke.isPending && <Loader2 className="animate-spin" />}
-              写入
-            </Button>
-          )}
+          <Button disabled={invoke.isPending || (!isNew && existing.isPending)} onClick={submit}>
+            {invoke.isPending && <Loader2 className="animate-spin" />}
+            {!isNew && ref !== null ? '更新 metadata' : '写入'}
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

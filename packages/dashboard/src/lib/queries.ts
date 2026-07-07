@@ -195,18 +195,24 @@ export function useStatus() {
 // ---- context 浏览器(条目枚举/读取;与 CLI `tb ctx ls|cat` 同一数据面)----
 
 /**
- * context 条目分页枚举:query 非空走 Search,否则走 List(prefix 过滤)。
+ * context 条目分页枚举:query 非空走 Search(mode = keyword | semantic,对等
+ * `tb ctx search --mode`),否则走 List(prefix 过滤)。
  * cursor 分页交给 useInfiniteQuery(Page 语义)。
  */
-export function useCtxEntries(nodePath: string, prefix: string, query: string) {
+export function useCtxEntries(
+  nodePath: string,
+  prefix: string,
+  query: string,
+  mode: 'keyword' | 'semantic' = 'keyword',
+) {
   const conn = useConn()
   const base = useKeyBase()
   return useInfiniteQuery({
-    queryKey: [...base, 'ctx-entries', nodePath, prefix, query],
+    queryKey: [...base, 'ctx-entries', nodePath, prefix, query, query ? mode : ''],
     queryFn: async ({ pageParam }) => {
       const opts = pageParam ? { cursor: pageParam } : {}
       const r = query
-        ? await invoke(conn, nodePath, 'Search', { query, opts })
+        ? await invoke(conn, nodePath, 'Search', { query, opts: { ...opts, mode } })
         : await invoke(conn, nodePath, 'List', { path: prefix, opts })
       return r.json as Page<ContextEntryMeta>
     },
