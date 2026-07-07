@@ -12,6 +12,8 @@
       "!**/.wrangler",
       "!**/node_modules",
       "!**/*.jsonc",
+      "!.claude",
+      "!.superset",
       "!packages/dashboard/src/index.css",
       "!packages/dashboard/public"
     ]
