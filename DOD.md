@@ -91,7 +91,7 @@
 **DoD**:
 - [x] 单测:帧编解码与状态机(未 hello 先 call → 拒;重复 requestId 幂等;超时 → unavailable+cancel 帧)、注册路径规则与 §2.4 联动、断线节点 offline 语义、shell 契约(`~help` 含 effect destructive)、shell 白名单匹配器(默认拒/list 精确匹配/`*` 放行/元字符拒)每规则正反用例。
 - [x] 集成(vitest-pool-workers 内真实 DO):模拟设备 WS 接入 → `device/<id>/shell` 与 `/fs` 节点出现在树上 → 经 HTTP 调用 shell echo 成功 → 断开 WS → 调用返回 503 retryable → 重连恢复。
-- [ ] 真实环境:本机 `tb connect ${TB_BASE_URL}` → 另一终端 `tb call device/<id>/shell --tool exec --args '{"command":"echo hi"}'` 返回 stdout;`tb ctx cat device/<id>/fs/<file>` 读到真实文件。
+- [x] 真实环境:本机 `tb connect ${TB_BASE_URL}` → 另一终端 `tb call device/<id>/shell --tool exec --args '{"command":"echo hi"}'` 返回 stdout;`tb ctx cat device/<id>/fs/<file>` 读到真实文件。
 - [x] 权限:registerPaths 限定的 SK 只能挂在指定前缀下(注意 2 的线上验证)。
 
 ## 7. Phase 5 — SDK + Plugin(M6 + M8)
@@ -101,10 +101,10 @@
 **范围**:`@tool-bridge/sdk` 公开面(§7:createToolBridge / registerTool / registerContext / connect);`PluginRegistry` + 契约校验(探活 + `~help`/`~describe` 核对);Plugin 传输契约(§8.3:X-TB-Context、X-TB-Request-Id 幂等、$ref 大载荷);**CLI**:`tb plugin register|list|health`。
 
 **DoD**:
-- [ ] 单测:manifest 校验(interfaceVersion 与方法集合不符 → 拒)、传输 envelope 编解码、Request-Id 重试去重。
-- [ ] 集成:用 SDK 在 Node 进程内 `createToolBridge` + `registerTool`(一个本地函数工具)→ 本地 HTTP 可调;同一实例 `connect` 到已部署网关 → 该工具出现在远程树上并可经远程调用(HTTP→WS 的全链路)。
-- [ ] 集成:实现 Plugin.md §4 的示例 Provider(可用 stub 数据)→ `tb plugin register` → 契约校验通过 → `NodeRegistry.Write` 引用挂载 → 四动词经树可用;`tb plugin health` 反映探活状态。
-- [ ] 文档核对:SDK 公开面与 Proto §7 签名一致;Plugin.md 调试清单 **1~6 条**对示例 Provider 逐条通过(第 7 条"LLM 只靠 `~help` 调对"为非阻塞质量参考——不可确定性重跑,客观兜底由 E2E-5① 的 fetch-only 脚本承担)。
+- [x] 单测:manifest 校验(interfaceVersion 与方法集合不符 → 拒)、传输 envelope 编解码、Request-Id 重试去重。
+- [x] 集成:用 SDK 在 Node 进程内 `createToolBridge` + `registerTool`(一个本地函数工具)→ 本地 HTTP 可调;同一实例 `connect` 到已部署网关 → 该工具出现在远程树上并可经远程调用(HTTP→WS 的全链路)。
+- [x] 集成:实现 Plugin.md §4 的示例 Provider(可用 stub 数据)→ `tb plugin register` → 契约校验通过 → `NodeRegistry.Write` 引用挂载 → 四动词经树可用;`tb plugin health` 反映探活状态。
+- [x] 文档核对:SDK 公开面与 Proto §7 签名一致;Plugin.md 调试清单 **1~6 条**对示例 Provider 逐条通过(第 7 条"LLM 只靠 `~help` 调对"为非阻塞质量参考——不可确定性重跑,客观兜底由 E2E-5① 的 fetch-only 脚本承担)。
 
 ## 8. Phase 6 — Dashboard + Docker 自部署 + 初始化闭环(M9 + M10)
 

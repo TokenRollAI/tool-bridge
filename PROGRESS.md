@@ -125,3 +125,16 @@
 - 动作:①dashboard 初版(210c350 新包 React 19+Vite+shadcn/ui;bafe667/b88cf84 迭代:树导航重设计/cmd 面板折叠/shell allow 徽章),新增 ui.integration.test.ts(11 例);②MCP client 换 CfWorkerJsonSchemaValidator(8950801,workerd 禁 eval);③~help 两级披露(节点级索引 + GET /<node>/<tool>/~help 全量 spec,Proto §4.2)+ MCP 会话复用(Mcp-Session-Id 入 StateStore,失效重握手一次)+ dashboard schema 懒补水(3622756);④npm 发布准备 @tool-bridge/cli + publish GitHub Action(98d0186);⑤current-state 更新生产 Version 01278057(877756b)。
 - 勾选:Phase 6 spike 项(DOD.md:116,210c350 已勾,此处补记依据)。
 - 遗留:dashboard 属 Phase 6 提前预演,其余 Phase 6 DoD 未动;npm 实际发布(打 tag)未执行。
+
+## Round 11 — 2026-07-07(Phase 4 收尾 + Phase 5 全量)
+- 目标:Phase 4 DoD-3/4 补证 + Phase 5 全部 DoD(DOD.md:104-107)
+- 动作:①inv-phase5 规格摘要(phase5-spec-digest.md,15 开放问题)→ 主协调者全部拍板(采纳建议)→ rec-p5docs 回写 docs(22fa506:kind:'tool'、plugin 契约校验/探活/platform-token/重试、expose.nodes 转发、SDK deviceId);②w-p5core:core plugin 模块(manifest zod/envelope 编解码/RequestDedupe/契约校验)+ kind:'tool'(9a2f420/40ff407/cc7ce75,core +83 测);③w-p5gw:system/plugin builtin + pluginClient/pluginContext/pluginTool providers + bootstrap 幂等 ensure(Q15)+ 集成 14 例(67ade36/7287d68/82833a9);④w-p5cli:tb plugin register/list/get/health/rm(0e9611e,+11 测);⑤w-p5example:stub-provider 示例 + scripts/verify-plugin.ts 全流程验收(0d2ada4);⑥w-p5q3b:expose.nodes 自定义节点 HTTP→WS 转发 + hello 帧可选 cmds(e30446b/92803d5);⑦w-p5sdk:参数化重构 app.ts→createTbApp(deps)+ Workers 薄适配层(b286bb3/680506a/ca41081/3342114/8c67b41)→ packages/sdk @tool-bridge/sdk(bb6511d/2e49e61/c02d918),重构后重部署生产;⑧w-p4evidence:scripts/verify-device.ts(81bd7fd)+ 生产清理 11 个测试残骸设备,发现 3 个真实 bug;⑨w-p5bugfix 修复:fs contentType 缺失致 $ref 503(98a2c09)、tb connect 被拒退出码 0(afe46d0)、citty repeatable flag last-wins(84f36c6)。
+- 验证(逐条):
+  - `pnpm verify` 全绿(core 584 + cli 98 + sdk 12+1 skip 单测,gateway 82 集成 + 6 skipped)
+  - Phase 4 DoD-3/4:主协调者生产复跑 `npx tsx scripts/verify-device.ts` → 5 断言全过(shell exec hi-p4 / fs cat 真实文件 / 越界 registerPaths 拒 / 前缀内 ready),https://tool-bridge.pdjjq.org
+  - P5-2:`TB_TEST_SDK_REMOTE=1 pnpm --filter @tool-bridge/sdk test` → 13 passed(含生产 connect 全链路:registerTool → connect → 远程树可见 → 远程调用返回本地函数结果 → teardown 节点回收)
+  - P5-3:inv-p5doccheck 复跑 `scripts/verify-plugin.ts`(本地 wrangler dev)→ 退出码 0,register/pluginToken 单次/health/挂载/四动词全过
+  - P5-4:phase5-doc-check.md——Proto §7 逐符号一致(3 处可接受偏离待回写);Plugin.md §7 调试清单①~⑥全 PASS
+- 勾选:Phase 4 DoD-3、DoD-4(Phase 4 4/4 全勾);Phase 5 全部 4 项(DOD.md:104-107)
+- 沉淀:memory 新增共享工作区多 agent 提交纪律;待关门轮 /llmdoc:update
+- 遗留:①doc-check §④ 4 条轻微偏离回写(DeviceTransport Phase 6 注记/SDK 引导扩展字段/SecretStore 接口名/ObjectMeta.metadata 可选)+ w-p5gw 的 secret 冒号保留命名空间注记 + plugin id 字符约束;②Phase 5 质量关口 Workflow;③CLI deviceRuntime 迁移为 SDK 消费者(Q10 后半)未做;④生产 device/demo-mac 疑似残骸未删(待用户确认)。
