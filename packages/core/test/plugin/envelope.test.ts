@@ -44,6 +44,26 @@ describe('CallContext 编解码(X-TB-Context)', () => {
     expect(decodeCallContext(encodeCallContext(min))).toEqual(min)
   })
 
+  it('挂载上下文(mountPath + mountConfig)往返恒等', () => {
+    const mounted: CallContext = {
+      ...CTX,
+      mountPath: 'im/feishu-cn',
+      mountConfig: { defaultChat: 'oc_123', nested: { a: 1 } },
+    }
+    expect(decodeCallContext(encodeCallContext(mounted))).toEqual(mounted)
+  })
+
+  it('mountPath 空串 → invalid_argument;mountConfig 非对象 → invalid_argument', () => {
+    expectInvalid(() =>
+      decodeCallContext(encodeCallContext({ ...CTX, mountPath: '' } as CallContext)),
+    )
+    expectInvalid(() =>
+      decodeCallContext(
+        encodeCallContext({ ...CTX, mountConfig: ['x'] } as unknown as CallContext),
+      ),
+    )
+  })
+
   it('编码产物是 base64url(无 +/=,可进 HTTP header)', () => {
     const header = encodeCallContext(CTX)
     expect(header).toMatch(/^[A-Za-z0-9_-]+$/)

@@ -36,6 +36,8 @@ const callContextSchema = z.object({
   ),
   registerPaths: z.array(z.string()).optional(),
   traceId: z.string().min(1),
+  mountPath: z.string().min(1).optional(),
+  mountConfig: z.record(z.unknown()).optional(),
 })
 
 /** CallContext → base64url(`X-TB-Context` header 值)。 */

@@ -576,7 +576,7 @@ export function createTbApp(deps: TbAppDeps): Hono<{ Variables: Vars }> {
         const provider = createPluginContextProvider({
           manifest,
           secrets: deps.secrets,
-          ctx,
+          ctx: mountCallContext(ctx, node.path, cfg.providerConfig),
           capabilities: await pluginCapabilities(store, cfg.provider),
         })
         const result = await dispatchContextCmd(provider, body.tool, args)
@@ -1064,7 +1064,11 @@ async function providerFor(
     if (local !== undefined) return local
     // plugin 工具源:provider = 已注册 tool-provider plugin 的 id。
     const manifest = await requirePlugin(deps.state, node.config.provider, 'tool-provider', 'tool')
-    return createPluginToolProvider({ manifest, secrets: deps.secrets, ctx })
+    return createPluginToolProvider({
+      manifest,
+      secrets: deps.secrets,
+      ctx: mountCallContext(ctx, node.path, node.config.providerConfig),
+    })
   }
   throw TBError.unimplemented(`kind '${node.kind}' has no tool provider`)
 }
@@ -1249,6 +1253,23 @@ async function requirePlugin(
 async function pluginCapabilities(store: StateStore, id: string): Promise<readonly string[]> {
   const meta = (await store.get(KEY_PLUGIN_META + id)) as PluginDescribe | null
   return meta?.capabilities ?? []
+}
+
+/**
+ * plugin 调用的挂载上下文:同一 plugin 可多路径挂载,envelope 里带 mountPath 与
+ * 挂载节点的 providerConfig(mountConfig)供 plugin 区分挂载来源;老 plugin 按
+ * "未知字段忽略"原则不受影响。
+ */
+function mountCallContext(
+  ctx: CallContext,
+  mountPath: TreePath,
+  providerConfig: Record<string, unknown> | undefined,
+): CallContext {
+  return {
+    ...ctx,
+    mountPath,
+    ...(providerConfig !== undefined ? { mountConfig: providerConfig } : {}),
+  }
 }
 
 /**

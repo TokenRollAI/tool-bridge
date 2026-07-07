@@ -41,6 +41,10 @@ export interface CallContext {
   registerPaths?: TreePath[]
   /** 全链路观测。 */
   traceId: string
+  /** 平台→Plugin envelope 专用:本次调用来自哪个挂载节点(同一 plugin 可多路径挂载)。 */
+  mountPath?: TreePath
+  /** 平台→Plugin envelope 专用:挂载节点 config.providerConfig 透传(每挂载非敏感配置)。 */
+  mountConfig?: Record<string, unknown>
 }
 
 // ---------- Auth ----------

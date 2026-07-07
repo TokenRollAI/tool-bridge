@@ -1,5 +1,5 @@
 import { SELF } from 'cloudflare:test'
-import { parseHelpDsl } from '@tool-bridge/core'
+import { type CallContext, decodeCallContext, parseHelpDsl } from '@tool-bridge/core'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { TEST_ADMIN_SK } from './fixtures'
 
@@ -109,7 +109,11 @@ async function registerPlugin(m: Record<string, unknown>): Promise<{ pluginToken
   return (await res.json()) as { pluginToken?: string }
 }
 
-async function mountContext(path: string, provider: string): Promise<Response> {
+async function mountContext(
+  path: string,
+  provider: string,
+  providerConfig?: Record<string, unknown>,
+): Promise<Response> {
   return postJson(
     'system/registry',
     {
@@ -118,7 +122,7 @@ async function mountContext(path: string, provider: string): Promise<Response> {
         path,
         kind: 'context',
         description: 'plugin ctx',
-        config: { kind: 'context', provider },
+        config: { kind: 'context', provider, ...(providerConfig ? { providerConfig } : {}) },
       },
     },
     admin(),
@@ -340,6 +344,34 @@ describe('plugin-backed context 挂载消费(envelope)', () => {
     expect(new Set(ids).size).toBe(ids.length)
   })
 
+  it('多挂载:同一 plugin 挂两个路径,envelope 按挂载带 mountPath/mountConfig', async () => {
+    const emptyPage = (): Response =>
+      new Response(JSON.stringify({ items: [] }), {
+        headers: { 'content-type': 'application/json' },
+      })
+    const { seen } = stubProvider({ invoke: () => emptyPage() })
+    await registerPlugin(manifest('feishu-multi'))
+    expect((await mountContext('docs/feishu-cn', 'feishu-multi', { space: 'cn' })).status).toBe(200)
+    // 第二个挂载不带 providerConfig:mountConfig 应缺省。
+    expect((await mountContext('docs/feishu-us', 'feishu-multi')).status).toBe(200)
+
+    expect(
+      (await postJson('docs/feishu-cn', { tool: 'List', arguments: { path: '' } }, admin())).status,
+    ).toBe(200)
+    expect(
+      (await postJson('docs/feishu-us', { tool: 'List', arguments: { path: '' } }, admin())).status,
+    ).toBe(200)
+
+    expect(seen.length).toBe(2)
+    const contexts = seen.map(
+      (s) => decodeCallContext(s.headers.get('x-tb-context') as string) as CallContext,
+    )
+    expect(contexts[0]?.mountPath).toBe('docs/feishu-cn')
+    expect(contexts[0]?.mountConfig).toEqual({ space: 'cn' })
+    expect(contexts[1]?.mountPath).toBe('docs/feishu-us')
+    expect(contexts[1]?.mountConfig).toBeUndefined()
+  })
+
   it('未声明的可选方法(Delete)→ 400 unknown cmd,永不打到 plugin', async () => {
     const { seen } = stubProvider({})
     await registerPlugin(manifest('feishu-nodelete'))
@@ -451,7 +483,11 @@ describe("kind:'tool' 挂载消费(tool-provider plugin)", () => {
     })
   }
 
-  async function mountTool(path: string, provider: string): Promise<Response> {
+  async function mountTool(
+    path: string,
+    provider: string,
+    providerConfig?: Record<string, unknown>,
+  ): Promise<Response> {
     return postJson(
       'system/registry',
       {
@@ -460,7 +496,7 @@ describe("kind:'tool' 挂载消费(tool-provider plugin)", () => {
           path,
           kind: 'tool',
           description: 'plugin tools',
-          config: { kind: 'tool', provider },
+          config: { kind: 'tool', provider, ...(providerConfig ? { providerConfig } : {}) },
         },
       },
       admin(),
@@ -475,7 +511,7 @@ describe("kind:'tool' 挂载消费(tool-provider plugin)", () => {
         interfaceVersion: 'tool-provider/v1',
       }),
     )
-    expect((await mountTool('tools/orders', 'orders-plugin')).status).toBe(200)
+    expect((await mountTool('tools/orders', 'orders-plugin', { region: 'cn' })).status).toBe(200)
 
     const help = await SELF.fetch('https://tb.test/tools/orders/~help', admin())
     expect(help.status).toBe(200)
@@ -493,6 +529,12 @@ describe("kind:'tool' 挂载消费(tool-provider plugin)", () => {
     // envelope 的 tool 是方法名(List/Call),工具名在 arguments.name。
     const callEnvelope = seen.find((s) => s.body.tool === 'Call') as SeenEnvelope
     expect(callEnvelope.body.arguments).toEqual({ name: 'create_order', args: { sku: 'A1' } })
+    // kind:'tool' 挂载同样带挂载上下文。
+    const callCtx = decodeCallContext(
+      callEnvelope.headers.get('x-tb-context') as string,
+    ) as CallContext
+    expect(callCtx.mountPath).toBe('tools/orders')
+    expect(callCtx.mountConfig).toEqual({ region: 'cn' })
   })
 
   it('挂载 kind:tool 但 provider 是 context-provider plugin → 400', async () => {
