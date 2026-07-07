@@ -1,6 +1,6 @@
-> 备注:发布走 npm Trusted Publishing(OIDC,免 token)。前置一次性配置见仓库 `docs/`
-> 或 npmjs.com 包设置页:Package Settings → Trusted Publisher → GitHub Actions,
-> repo `TokenRollAI/tool-bridge`,workflow `publish-cli.yml`。
+# 备注:发布走 npm Trusted Publishing(OIDC,免 token)。前置一次性配置见仓库 `docs/`
+# 或 npmjs.com 包设置页:Package Settings → Trusted Publisher → GitHub Actions,
+# repo `TokenRollAI/tool-bridge`,workflow `publish-cli.yml`。
 
 name: publish-cli
 
