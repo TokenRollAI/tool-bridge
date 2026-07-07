@@ -224,6 +224,42 @@ describe('DeviceSession DO + /system/device/ws(Phase 4)', () => {
     ws2.close(1000)
   })
 
+  it('fs Get result 不带 contentType 也原样透传(内联判定在设备侧,网关不补/不改帧)', async () => {
+    // 回归注记:上面的用例手造帧自带 contentType,曾掩盖设备侧 FsObjectStore 不产
+    // contentType → isInlineable 判 false → $ref → 503 的 bug;设备帧的 value 对网关
+    // 是 z.unknown() 透传,此用例钉死"缺 contentType 网关也不介入"。
+    const deviceId = `d-${crypto.randomUUID().slice(0, 8)}`
+    const ws = await connectDevice(deviceId, { fs: { roots: ['/tmp'], readOnly: true } })
+    const callSeen = nextFrame(ws)
+    const invoke = postJson(
+      `device/${deviceId}/fs`,
+      { tool: 'Get', arguments: { path: 'tmp/bare.txt' } },
+      admin(),
+    )
+    const call = await callSeen
+    if (call.type !== 'call') throw new Error('expected call frame')
+    ws.send(
+      encodeDeviceFrame({
+        type: 'result',
+        id: call.id,
+        ok: true,
+        value: {
+          uri: `node://device/${deviceId}/fs/tmp/bare.txt`,
+          version: 'v1',
+          updatedAt: '2026-07-07T00:00:00Z',
+          metadata: {},
+          content: 'bare content',
+        },
+      }),
+    )
+    const res = await invoke
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as Record<string, unknown>
+    expect(body).toMatchObject({ content: 'bare content' })
+    expect(body).not.toHaveProperty('contentType')
+    ws.close(1000)
+  })
+
   it('registerPaths 限定:默认路径被拒,指定允许路径成功', async () => {
     const allowedPath = `device/allowed-${crypto.randomUUID().slice(0, 8)}`
     const sk = await issueSk({

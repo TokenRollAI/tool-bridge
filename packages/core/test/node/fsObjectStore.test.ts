@@ -2,6 +2,7 @@ import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promis
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { createObjectContextProvider } from '../../src/context/objectProvider'
 import { type ObjectMeta, readStreamText } from '../../src/context/objectStore'
 import { isTBError } from '../../src/errors'
 import { FsObjectStore } from '../../src/node/fsObjectStore'
@@ -141,6 +142,59 @@ describe('穿越与 symlink 逃逸拒绝', () => {
     const { items } = await store.list('roota/leak')
     const keys = items.map((i) => ('key' in i ? i.key : i.prefix))
     expect(keys).toEqual([]) // leak.txt / leakdir 均被跳过
+  })
+})
+
+describe('contentType 按扩展名推断(objectProvider 内联判定依赖)', () => {
+  const cases: Array<[string, string]> = [
+    ['a.txt', 'text/plain'],
+    ['a.md', 'text/markdown'],
+    ['a.json', 'application/json'],
+    ['a.js', 'text/javascript'],
+    ['a.ts', 'text/x-typescript'],
+    ['a.html', 'text/html'],
+    ['a.css', 'text/css'],
+    ['a.xml', 'text/xml'],
+    ['a.yaml', 'text/yaml'],
+    ['a.yml', 'text/yaml'],
+    ['a.csv', 'text/csv'],
+  ]
+
+  it('已知文本扩展名 → 对应 mime(head/get/list 一致;扩展名大小写不敏感)', async () => {
+    const store = new FsObjectStore([rootA])
+    for (const [name, expected] of cases) {
+      const key = `roota/ct/${name}`
+      const meta = await store.put(key, 'x')
+      expect(meta.contentType, key).toBe(expected)
+      expect((await store.head(key))?.contentType, key).toBe(expected)
+      expect((await store.get(key))?.meta.contentType, key).toBe(expected)
+    }
+    const upper = await store.put('roota/ct/UPPER.TXT', 'x')
+    expect(upper.contentType).toBe('text/plain')
+    const { items } = await store.list('roota/ct/')
+    for (const item of items) {
+      if (!('key' in item)) continue
+      expect(item.contentType, item.key).toBeDefined()
+    }
+  })
+
+  it('未知扩展名 / 无扩展名 / dotfile → application/octet-stream', async () => {
+    const store = new FsObjectStore([rootA])
+    for (const name of ['blob.bin', 'noext', '.dotfile']) {
+      const meta = await store.put(`roota/ct2/${name}`, 'x')
+      expect(meta.contentType, name).toBe('application/octet-stream')
+    }
+  })
+
+  it('回归:文本文件经 objectProvider Get 走内联(不判 $ref → 设备场景不再 503)', async () => {
+    const store = new FsObjectStore([rootA])
+    await store.put('roota/inline/note.txt', 'hello inline')
+    await store.put('roota/inline/data.json', '{"n":1}')
+    const provider = createObjectContextProvider(store, { nsPath: 'device/d1/fs' })
+    const txt = await provider.Get('roota/inline/note.txt')
+    expect(txt.content).toBe('hello inline') // 内联原文,而非 { $ref } / unavailable
+    const json = await provider.Get('roota/inline/data.json')
+    expect(json.content).toEqual({ n: 1 }) // application/json → 解析后内联
   })
 })
 

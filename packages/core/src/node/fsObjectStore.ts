@@ -7,8 +7,10 @@
  *
  * etag = mtimeMs+size 派生(36 进制拼接):put 后 stat 即稳定,head/list 无需读内容;
  * 同毫秒同尺寸覆写存在碰撞窗口,但 etag 只支撑乐观并发(ifMatchEtag),可接受。
- * FS 无用户 metadata / contentType:meta.metadata 恒 {},put 的 metadata/contentType
- * 不持久化(file provider 侧语义降级,与 r2/s3 的差异见 Proto §5)。
+ * FS 无用户 metadata:meta.metadata 恒 {},put 的 metadata 不持久化。contentType 不落盘,
+ * 由扩展名推断(objectProvider.isInlineable 只内联 text/* 与 application/json,文本扩展名
+ * 必须产出 text/* mime,否则设备 fs 的 Get 一律走 $ref → 无 presign/relay 时 503);
+ * put 传入的 contentType 同样不持久化,读回以扩展名推断为准(与 r2/s3 的差异见 Proto §5)。
  */
 
 import { mkdir, readdir, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises'
@@ -33,6 +35,48 @@ function isErrnoCode(e: unknown, code: string): boolean {
 
 function escapeError(key: string): TBError {
   return new TBError('invalid_argument', `非法 entry 路径 '${key}':symlink 逃逸根目录`)
+}
+
+/** 扩展名 → contentType;文本类必须映射为 text/*(或 application/json)才能被内联。 */
+const CONTENT_TYPE_BY_EXT: Record<string, string> = {
+  '.txt': 'text/plain',
+  '.log': 'text/plain',
+  '.md': 'text/markdown',
+  '.markdown': 'text/markdown',
+  '.json': 'application/json',
+  '.js': 'text/javascript',
+  '.mjs': 'text/javascript',
+  '.cjs': 'text/javascript',
+  '.jsx': 'text/javascript',
+  '.ts': 'text/x-typescript',
+  '.tsx': 'text/x-typescript',
+  '.html': 'text/html',
+  '.htm': 'text/html',
+  '.css': 'text/css',
+  '.xml': 'text/xml',
+  '.yaml': 'text/yaml',
+  '.yml': 'text/yaml',
+  '.toml': 'text/plain',
+  '.csv': 'text/csv',
+  '.tsv': 'text/tab-separated-values',
+  '.svg': 'image/svg+xml',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.webp': 'image/webp',
+  '.pdf': 'application/pdf',
+  '.zip': 'application/zip',
+  '.gz': 'application/gzip',
+  '.wasm': 'application/wasm',
+}
+
+/** key 扩展名(大小写不敏感)→ contentType;未知/无扩展名/dotfile → octet-stream。 */
+export function fsContentTypeOf(key: string): string {
+  const base = key.slice(key.lastIndexOf('/') + 1)
+  const dot = base.lastIndexOf('.')
+  if (dot <= 0) return 'application/octet-stream'
+  return CONTENT_TYPE_BY_EXT[base.slice(dot).toLowerCase()] ?? 'application/octet-stream'
 }
 
 interface ResolvedKey {
@@ -242,6 +286,7 @@ export class FsObjectStore implements ObjectStore {
       key,
       etag: `${st.mtimeMs.toString(36)}-${st.size.toString(36)}`,
       size: st.size,
+      contentType: fsContentTypeOf(key),
       updatedAt: st.mtime.toISOString(),
       metadata: {},
     }
