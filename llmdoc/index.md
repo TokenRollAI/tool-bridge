@@ -39,6 +39,7 @@
   - 2026-07-06-phase4-device-ws-hibernation — 本地绿不代表 hibernation 正确、连环根因先取证后改码、验收标识符逐字核对、长驻进程验证管好生命周期。
   - 2026-07-07-sdk-dts-bundle-pitfall — tsup dts 对指向 .ts 源的 workspace 包不生效,须专用 tsconfig paths;类型自包含用隔离 tsc 验证。
   - 2026-07-07-npm-publish-sdk-cli — 2FA/EOTP 认证 URL 对 agent 脱敏须用户亲自 publish、新包两段式发布、git push SSL 抖动直接重试。
+  - 2026-07-07-hatching-doc-restructure — 破壳重构教训:文档漂移靠实跑审计暴露、hook 自动暂存须核对暂存区再分块提交、批量删注释后先 lint:fix、运行时字符串引用与测试断言耦合。
 
 ## 路由提示
 
