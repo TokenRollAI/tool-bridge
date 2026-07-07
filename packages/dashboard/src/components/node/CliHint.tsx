@@ -46,7 +46,10 @@ export function CliHint({ path, tool, args }: { path: string; tool: string; args
             { label: 'tb', cmd: tb },
             { label: 'curl', cmd: curl },
           ].map(({ label, cmd }) => (
-            <div key={label} className="flex items-start gap-1.5 rounded-sm border bg-background/60">
+            <div
+              key={label}
+              className="flex items-start gap-1.5 rounded-sm border bg-background/60"
+            >
               <span className="shrink-0 border-r px-2 py-1.5 font-mono text-[10px] text-primary/80">
                 {label}
               </span>

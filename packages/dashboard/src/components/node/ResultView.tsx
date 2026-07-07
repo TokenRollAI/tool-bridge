@@ -8,7 +8,11 @@ import type { ApiError, InvokeResult } from '@/lib/api'
 import { cn } from '@/lib/utils'
 
 function download(text: string, contentType: string) {
-  const ext = contentType.includes('json') ? 'json' : contentType.includes('markdown') ? 'md' : 'txt'
+  const ext = contentType.includes('json')
+    ? 'json'
+    : contentType.includes('markdown')
+      ? 'md'
+      : 'txt'
   const url = URL.createObjectURL(new Blob([text], { type: contentType || 'text/plain' }))
   const a = document.createElement('a')
   a.href = url

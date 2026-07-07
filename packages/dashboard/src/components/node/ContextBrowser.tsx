@@ -551,7 +551,9 @@ function EntryEditDialog({
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {CONTENT_TYPES.includes(contentType as (typeof CONTENT_TYPES)[number]) ? null : (
+                    {CONTENT_TYPES.includes(
+                      contentType as (typeof CONTENT_TYPES)[number],
+                    ) ? null : (
                       <SelectItem value={contentType} className="font-mono text-xs">
                         {contentType}
                       </SelectItem>

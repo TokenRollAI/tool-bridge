@@ -1,8 +1,11 @@
 import { useQueryClient } from '@tanstack/react-query'
-import { Ban, Check, Copy, KeyRound, Loader2, Plus, Trash2 } from 'lucide-react'
+import { Ban, Check, Copy, KeyRound, KeySquare, Loader2, Plus, Search, Trash2 } from 'lucide-react'
 import { useState } from 'react'
 import { toast } from 'sonner'
 import { ConfirmAction } from '@/components/ConfirmAction'
+import { CopyButton } from '@/components/CopyButton'
+import { EmptyState } from '@/components/EmptyState'
+import { PageHeader } from '@/components/PageHeader'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -39,6 +42,7 @@ export function SkPage() {
   const invoke = useInvoke()
   const qc = useQueryClient()
   const [issued, setIssued] = useState<{ id: string; secret: string } | null>(null)
+  const [filter, setFilter] = useState('')
 
   const refresh = () => qc.invalidateQueries({ queryKey: ['tb'] })
 
@@ -68,19 +72,42 @@ export function SkPage() {
     )
   }
 
+  const all = list.data?.items ?? []
+  const needle = filter.trim().toLowerCase()
+  const items =
+    needle === ''
+      ? all
+      : all.filter((sk) =>
+          [sk.id, sk.owner, sk.description ?? ''].some((s) => s.toLowerCase().includes(needle)),
+        )
+
   return (
     <div className="mx-auto max-w-4xl px-8 py-8">
-      <header className="flex items-center gap-3">
-        <div>
-          <h1 className="font-mono text-xl tracking-tight">Secret Key</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
+      <PageHeader
+        title="Secret Key"
+        description={
+          <>
             签发、限定 scope、吊销——对等 <code className="font-mono text-xs">tb sk</code>
-          </p>
-        </div>
-        <div className="ml-auto">
-          <CreateSkDialog onIssued={(v) => setIssued(v)} />
-        </div>
-      </header>
+          </>
+        }
+        actions={
+          <>
+            {all.length > 3 && (
+              <div className="relative">
+                <Search className="pointer-events-none absolute top-1/2 left-2.5 size-3 -translate-y-1/2 text-muted-foreground/60" />
+                <Input
+                  value={filter}
+                  onChange={(e) => setFilter(e.target.value)}
+                  placeholder="过滤 id / owner…"
+                  aria-label="过滤"
+                  className="h-8 w-44 pl-7 font-mono text-xs"
+                />
+              </div>
+            )}
+            <CreateSkDialog onIssued={(v) => setIssued(v)} />
+          </>
+        }
+      />
 
       <div className="mt-6 overflow-hidden rounded-md border">
         {list.isPending ? (
@@ -90,6 +117,12 @@ export function SkPage() {
           </div>
         ) : list.isError ? (
           <p className="p-4 text-sm text-destructive">{list.error.message}</p>
+        ) : items.length === 0 ? (
+          <EmptyState
+            icon={KeySquare}
+            title={needle ? '无匹配 SK' : '还没有签发任何 SK'}
+            className="border-0"
+          />
         ) : (
           <Table>
             <TableHeader>
@@ -97,17 +130,25 @@ export function SkPage() {
                 <TableHead>id</TableHead>
                 <TableHead>owner</TableHead>
                 <TableHead>scopes</TableHead>
+                <TableHead className="w-36">时间</TableHead>
                 <TableHead>状态</TableHead>
                 <TableHead className="w-24" />
               </TableRow>
             </TableHeader>
             <TableBody>
-              {(list.data?.items ?? []).map((sk) => {
+              {items.map((sk) => {
                 const expired = sk.expiresAt !== undefined && Date.parse(sk.expiresAt) <= Date.now()
                 return (
                   <TableRow key={sk.id}>
                     <TableCell className="font-mono text-xs">
-                      {sk.id}
+                      <span className="group/id inline-flex items-center gap-1">
+                        {sk.id}
+                        <CopyButton
+                          value={sk.id}
+                          label="复制 id"
+                          className="opacity-0 group-hover/id:opacity-100"
+                        />
+                      </span>
                       {sk.description && (
                         <p className="mt-0.5 max-w-48 truncate font-sans text-muted-foreground">
                           {sk.description}
@@ -137,6 +178,18 @@ export function SkPage() {
                           </Badge>
                         ))}
                       </div>
+                    </TableCell>
+                    <TableCell className="font-mono text-[10px] leading-4 text-muted-foreground">
+                      {sk.createdAt && (
+                        <p title={`创建 ${sk.createdAt}`}>
+                          {new Date(sk.createdAt).toLocaleDateString()}
+                        </p>
+                      )}
+                      {sk.expiresAt && (
+                        <p className={expired ? 'text-warn' : ''} title={`过期 ${sk.expiresAt}`}>
+                          → {new Date(sk.expiresAt).toLocaleDateString()}
+                        </p>
+                      )}
                     </TableCell>
                     <TableCell>
                       {sk.disabled ? (

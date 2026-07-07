@@ -1,10 +1,13 @@
 import { useQueryClient } from '@tanstack/react-query'
-import { ExternalLink, Loader2, Plus, Trash2 } from 'lucide-react'
+import { Boxes, ExternalLink, FileJson2, Loader2, Plus, Search, Trash2 } from 'lucide-react'
 import { useState } from 'react'
 import { Link } from 'react-router'
 import { toast } from 'sonner'
 import { ConfirmAction } from '@/components/ConfirmAction'
+import { CopyButton } from '@/components/CopyButton'
+import { EmptyState } from '@/components/EmptyState'
 import { KindBadge, OnlineDot } from '@/components/KindBadge'
+import { PageHeader } from '@/components/PageHeader'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import {
@@ -36,6 +39,11 @@ import {
 } from '@/components/ui/table'
 import { Textarea } from '@/components/ui/textarea'
 import { useInvoke, useRegistryList } from '@/lib/queries'
+import type { RegistryNode } from '@/lib/types'
+import { cn } from '@/lib/utils'
+
+const KIND_FILTERS = ['all', 'mcp', 'http', 'context', 'remote', 'device'] as const
+type KindFilter = (typeof KIND_FILTERS)[number]
 
 /**
  * 节点注册管理(对等 `tb tool mount|rm` / `tb server add|ls|rm` / `tb ctx mount|unmount`;
@@ -45,6 +53,9 @@ export function RegistryPage() {
   const list = useRegistryList()
   const invoke = useInvoke()
   const qc = useQueryClient()
+  const [kindFilter, setKindFilter] = useState<KindFilter>('all')
+  const [search, setSearch] = useState('')
+  const [inspecting, setInspecting] = useState<RegistryNode | null>(null)
 
   const unmount = (path: string) => {
     invoke.mutate(
@@ -59,23 +70,64 @@ export function RegistryPage() {
     )
   }
 
-  const items = (list.data?.items ?? []).filter((n) => !n.path.startsWith('system'))
+  const mounted = (list.data?.items ?? []).filter((n) => !n.path.startsWith('system'))
+  const needle = search.trim().toLowerCase()
+  const items = mounted.filter(
+    (n) =>
+      (kindFilter === 'all' || n.kind === kindFilter) &&
+      (needle === '' ||
+        n.path.toLowerCase().includes(needle) ||
+        n.description.toLowerCase().includes(needle)),
+  )
+  const countByKind = (k: KindFilter) =>
+    k === 'all' ? mounted.length : mounted.filter((n) => n.kind === k).length
 
   return (
     <div className="mx-auto max-w-4xl px-8 py-8">
-      <header className="flex items-center gap-3">
-        <div>
-          <h1 className="font-mono text-xl tracking-tight">节点注册</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            挂载工具(mcp/http)、context namespace、联邦 HTBP 服务(remote)
-          </p>
-        </div>
-        <div className="ml-auto">
-          <MountDialog />
-        </div>
-      </header>
+      <PageHeader
+        title="节点注册"
+        description="挂载工具(mcp/http)、context namespace、联邦 HTBP 服务(remote)"
+        actions={<MountDialog />}
+      />
 
-      <div className="mt-6 overflow-hidden rounded-md border">
+      <div className="mt-6 flex flex-wrap items-center gap-2">
+        <div className="flex overflow-hidden rounded-md border">
+          {KIND_FILTERS.map((k) => {
+            const count = countByKind(k)
+            if (k !== 'all' && count === 0) return null
+            return (
+              <button
+                key={k}
+                type="button"
+                onClick={() => setKindFilter(k)}
+                className={cn(
+                  'border-r px-2.5 py-1 font-mono text-[11px] last:border-r-0',
+                  kindFilter === k
+                    ? 'bg-secondary text-primary'
+                    : 'text-muted-foreground hover:bg-secondary/50 hover:text-foreground',
+                )}
+              >
+                {k === 'all' ? '全部' : k}
+                <span className="ml-1 opacity-60 tabular-nums">{count}</span>
+              </button>
+            )
+          })}
+        </div>
+        {mounted.length > 3 && (
+          <div className="relative ml-auto">
+            <Search className="pointer-events-none absolute top-1/2 left-2.5 size-3 -translate-y-1/2 text-muted-foreground/60" />
+            <Input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="过滤 path / 描述…"
+              aria-label="过滤"
+              className="h-8 w-48 pl-7 font-mono text-xs"
+            />
+          </div>
+        )}
+      </div>
+
+      <div className="mt-3 overflow-hidden rounded-md border">
         {list.isPending ? (
           <div className="grid gap-2 p-4">
             <Skeleton className="h-5 w-full" />
@@ -84,9 +136,15 @@ export function RegistryPage() {
         ) : list.isError ? (
           <p className="p-4 text-sm text-destructive">{list.error.message}</p>
         ) : items.length === 0 ? (
-          <p className="px-4 py-6 text-sm text-muted-foreground">
-            还没有挂载任何节点。点右上「挂载节点」开始。
-          </p>
+          <EmptyState
+            icon={Boxes}
+            title={mounted.length === 0 ? '还没有挂载任何节点' : '无匹配节点'}
+            className="border-0"
+          >
+            {mounted.length === 0 && (
+              <p>点右上「挂载节点」开始,或用 CLI:tb tool mount / tb ctx mount</p>
+            )}
+          </EmptyState>
         ) : (
           <Table>
             <TableHeader>
@@ -94,7 +152,7 @@ export function RegistryPage() {
                 <TableHead>path</TableHead>
                 <TableHead>kind</TableHead>
                 <TableHead>描述</TableHead>
-                <TableHead className="w-20" />
+                <TableHead className="w-28" />
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -114,6 +172,15 @@ export function RegistryPage() {
                   </TableCell>
                   <TableCell>
                     <div className="flex justify-end gap-1">
+                      <Button
+                        variant="ghost"
+                        size="icon-xs"
+                        aria-label="查看配置"
+                        title="查看配置"
+                        onClick={() => setInspecting(n)}
+                      >
+                        <FileJson2 />
+                      </Button>
                       <Button variant="ghost" size="icon-xs" asChild aria-label="查看节点">
                         <Link to={`/nodes/${n.path}`}>
                           <ExternalLink />
@@ -138,6 +205,44 @@ export function RegistryPage() {
           </Table>
         )}
       </div>
+
+      {/* 节点配置查看(registry get 的展示面;凭证只以 authRef 名义出现) */}
+      <Dialog open={inspecting !== null} onOpenChange={(o) => !o && setInspecting(null)}>
+        <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 font-mono text-sm">
+              {inspecting?.path}
+              {inspecting && <KindBadge kind={inspecting.kind} />}
+            </DialogTitle>
+            <DialogDescription>节点注册配置(凭证经 authRef 引用,无明文)</DialogDescription>
+          </DialogHeader>
+          {inspecting && (
+            <div className="relative">
+              <pre className="max-h-96 overflow-auto rounded-sm border bg-card px-3 py-2 font-mono text-xs leading-relaxed">
+                {JSON.stringify(
+                  {
+                    path: inspecting.path,
+                    kind: inspecting.kind,
+                    description: inspecting.description,
+                    ...(inspecting.config ? { config: inspecting.config } : {}),
+                    ...(inspecting.virtualize ? { virtualize: inspecting.virtualize } : {}),
+                    ...(inspecting.owner ? { owner: inspecting.owner } : {}),
+                    ...(inspecting.createdAt ? { createdAt: inspecting.createdAt } : {}),
+                    ...(inspecting.updatedAt ? { updatedAt: inspecting.updatedAt } : {}),
+                  },
+                  null,
+                  2,
+                )}
+              </pre>
+              <CopyButton
+                value={JSON.stringify(inspecting, null, 2)}
+                label="复制配置"
+                className="absolute top-1.5 right-1.5"
+              />
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

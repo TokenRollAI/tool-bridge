@@ -3,6 +3,9 @@ import { Loader2, Plus, ShieldEllipsis, Trash2 } from 'lucide-react'
 import { useState } from 'react'
 import { toast } from 'sonner'
 import { ConfirmAction } from '@/components/ConfirmAction'
+import { CopyButton } from '@/components/CopyButton'
+import { EmptyState } from '@/components/EmptyState'
+import { PageHeader } from '@/components/PageHeader'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -51,17 +54,11 @@ export function SecretsPage() {
 
   return (
     <div className="mx-auto max-w-3xl px-8 py-8">
-      <header className="flex items-center gap-3">
-        <div>
-          <h1 className="font-mono text-xl tracking-tight">凭证保管</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            SecretStore 只写不读:值加密落库,仅网关内部经 authRef 解析(Proto §2.5)
-          </p>
-        </div>
-        <div className="ml-auto">
-          <SetSecretDialog />
-        </div>
-      </header>
+      <PageHeader
+        title="凭证保管"
+        description="SecretStore 只写不读:值加密落库,仅网关内部经 authRef 解析(Proto §2.5)"
+        actions={<SetSecretDialog />}
+      />
 
       <div className="mt-6 overflow-hidden rounded-md border">
         {list.isPending ? (
@@ -72,25 +69,36 @@ export function SecretsPage() {
         ) : list.isError ? (
           <p className="p-4 text-sm text-destructive">{list.error.message}</p>
         ) : (list.data?.items ?? []).length === 0 ? (
-          <div className="flex items-center gap-3 px-4 py-6 text-sm text-muted-foreground">
-            <ShieldEllipsis className="size-4" />
-            还没有保存任何凭证。挂载 s3 context 或带鉴权的上游前,先在这里 set。
-          </div>
+          <EmptyState icon={ShieldEllipsis} title="还没有保存任何凭证" className="border-0">
+            <p>挂载 s3 context 或带鉴权的上游前,先在这里 set,再以 authRef 名义引用。</p>
+          </EmptyState>
         ) : (
           <Table>
             <TableHeader>
               <TableRow>
                 <TableHead>name(authRef 引用名)</TableHead>
-                <TableHead>更新时间</TableHead>
+                <TableHead className="w-44">更新时间</TableHead>
                 <TableHead className="w-12" />
               </TableRow>
             </TableHeader>
             <TableBody>
               {(list.data?.items ?? []).map((s) => (
                 <TableRow key={s.name}>
-                  <TableCell className="font-mono text-xs">{s.name}</TableCell>
-                  <TableCell className="font-mono text-xs text-muted-foreground">
-                    {s.updatedAt}
+                  <TableCell className="font-mono text-xs">
+                    <span className="group/name inline-flex items-center gap-1">
+                      {s.name}
+                      <CopyButton
+                        value={s.name}
+                        label="复制引用名"
+                        className="opacity-0 group-hover/name:opacity-100"
+                      />
+                    </span>
+                  </TableCell>
+                  <TableCell
+                    className="font-mono text-[11px] text-muted-foreground"
+                    title={s.updatedAt}
+                  >
+                    {new Date(s.updatedAt).toLocaleString()}
                   </TableCell>
                   <TableCell>
                     <ConfirmAction

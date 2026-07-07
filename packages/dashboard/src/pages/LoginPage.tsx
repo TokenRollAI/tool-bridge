@@ -1,5 +1,5 @@
 import { useMutation } from '@tanstack/react-query'
-import { KeyRound, Loader2 } from 'lucide-react'
+import { KeyRound, Loader2, X } from 'lucide-react'
 import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -12,7 +12,7 @@ import { useSession } from '@/lib/session'
  * BaseURL 缺省同源——生产形态 Dashboard 与 gateway 同 Worker。
  */
 export function LoginPage() {
-  const { login, profiles, switchTo } = useSession()
+  const { login, profiles, switchTo, removeProfile } = useSession()
   const [baseUrl, setBaseUrl] = useState('')
   const [sk, setSk] = useState('')
   const [name, setName] = useState('default')
@@ -40,9 +40,27 @@ export function LoginPage() {
         className="absolute -top-40 left-1/2 h-80 w-[42rem] -translate-x-1/2 rounded-full bg-primary/10 blur-3xl"
       />
 
-      <div className="flex min-h-full items-center justify-center">
-        <div className="relative w-full max-w-sm px-6 py-10">
-          <header className="mb-8 animate-in fade-in slide-in-from-bottom-2 duration-500">
+      <div className="flex min-h-full items-center justify-center px-6 py-10">
+        <div className="relative w-full max-w-sm border bg-card/50 px-7 py-8 backdrop-blur-sm">
+          {/* 面板四角刻度 */}
+          <span
+            aria-hidden
+            className="absolute -top-px -left-px size-3 border-t-2 border-l-2 border-primary"
+          />
+          <span
+            aria-hidden
+            className="absolute -top-px -right-px size-3 border-t-2 border-r-2 border-primary"
+          />
+          <span
+            aria-hidden
+            className="absolute -bottom-px -left-px size-3 border-b-2 border-l-2 border-primary"
+          />
+          <span
+            aria-hidden
+            className="absolute -right-px -bottom-px size-3 border-r-2 border-b-2 border-primary"
+          />
+
+          <header className="mb-7 animate-in fade-in slide-in-from-bottom-2 duration-500">
             <div className="mb-3 h-px w-10 bg-primary" />
             <h1 className="font-mono text-2xl tracking-tight">
               tool<span className="text-primary">-</span>bridge
@@ -112,19 +130,31 @@ export function LoginPage() {
           </form>
 
           {profiles.length > 0 && (
-            <div className="mt-8 animate-in fade-in duration-500 [animation-delay:240ms] [animation-fill-mode:backwards]">
+            <div className="mt-7 animate-in fade-in duration-500 [animation-delay:240ms] [animation-fill-mode:backwards]">
               <p className="mb-2 text-xs text-muted-foreground">已保存档案</p>
               <div className="flex flex-wrap gap-2">
                 {profiles.map((p) => (
-                  <Button
-                    key={p.name}
-                    variant="outline"
-                    size="sm"
-                    className="font-mono text-xs"
-                    onClick={() => switchTo(p.name)}
-                  >
-                    {p.name}
-                  </Button>
+                  <span key={p.name} className="group/profile inline-flex items-stretch">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="rounded-r-none font-mono text-xs"
+                      title={p.baseUrl || '同源'}
+                      onClick={() => switchTo(p.name)}
+                    >
+                      {p.name}
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="icon-sm"
+                      aria-label={`删除档案 ${p.name}`}
+                      title="删除档案"
+                      className="rounded-l-none border-l-0 text-muted-foreground hover:text-destructive"
+                      onClick={() => removeProfile(p.name)}
+                    >
+                      <X className="size-3" />
+                    </Button>
+                  </span>
                 ))}
               </div>
             </div>
