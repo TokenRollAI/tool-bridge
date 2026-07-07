@@ -65,12 +65,15 @@ export function AppShell() {
   return (
     <div className="flex h-svh overflow-hidden">
       <aside className="flex w-64 shrink-0 flex-col border-r bg-card/40">
-        <NavLink to="/" className="flex items-baseline gap-2 px-4 pt-4 pb-3">
-          <span className="font-mono text-base tracking-tight">
-            tool<span className="text-primary">-</span>bridge
-          </span>
-          <span className="font-mono text-[10px] text-muted-foreground">
-            {status.data?.version ? `v${status.data.version}` : ''}
+        <NavLink to="/" className="flex items-center gap-2 px-4 pt-4 pb-3">
+          <img src="/ui/icon-light.png" alt="" className="size-6 shrink-0 dark:invert" />
+          <span className="flex items-baseline gap-2">
+            <span className="font-mono text-base tracking-tight">
+              tool<span className="text-primary">-</span>bridge
+            </span>
+            <span className="font-mono text-[10px] text-muted-foreground">
+              {status.data?.version ? `v${status.data.version}` : ''}
+            </span>
           </span>
         </NavLink>
 
