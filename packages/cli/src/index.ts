@@ -8,6 +8,7 @@ import { helpCommand } from './commands/help'
 import { loginCommand } from './commands/login'
 import { lsCommand } from './commands/ls'
 import { mountCommand } from './commands/mount'
+import { pluginCommand } from './commands/plugin'
 import { secretCommand } from './commands/secret'
 import { serverCommand } from './commands/server'
 import { skCommand } from './commands/sk'
@@ -23,6 +24,7 @@ import { whoamiCommand } from './commands/whoami'
  * Phase 2(DOD.md:62):tool mount/rm、server add/ls/rm、call。
  * Phase 3(DOD.md:79):ctx ls/cat/put/patch/search/mount/unmount。
  * Phase 4(DOD.md:93):connect、device ls、mount fs。
+ * Phase 5(DOD.md:106):plugin register/list/get/health/rm。
  */
 const main = defineCommand({
   meta: {
@@ -47,6 +49,7 @@ const main = defineCommand({
     connect: connectCommand,
     device: deviceCommand,
     mount: mountCommand,
+    plugin: pluginCommand,
   },
 })
 
