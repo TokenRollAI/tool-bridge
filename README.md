@@ -20,6 +20,9 @@
 
 tool-bridge 是 [HTBP](https://github.com/TokenRollAI/HTBP)(HTTP ToolBridge Protocol)的参考实现。核心理念:**能 fetch URL,就能学会用对应的工具**。
 
+<div align="center">
+<table><tr><td>
+
 ```
 ┌──────────────────────────────────────────────────────┐
 │  任意 Agent / CLI / Dashboard(只需 SK + BaseURL)     │  ← GET /~help 渐进发现
@@ -33,6 +36,9 @@ tool-bridge 是 [HTBP](https://github.com/TokenRollAI/HTBP)(HTTP ToolBridge Prot
 │  设备:任何跑得动 CLI/SDK 的机器(WebSocket 反向接入) │
 └──────────────────────────────────────────────────────┘
 ```
+
+</td></tr></table>
+</div>
 
 ## 它解决什么问题
 

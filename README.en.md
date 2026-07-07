@@ -20,6 +20,9 @@ Any agent that can do an HTTP fetch can discover and use all of an organization'
 
 tool-bridge is the reference implementation of [HTBP](https://github.com/TokenRollAI/HTBP) (HTTP ToolBridge Protocol). The core idea: **if you can fetch a URL, you can learn to use the tool behind it**.
 
+<div align="center">
+<table><tr><td>
+
 ```
 ┌──────────────────────────────────────────────────────┐
 │  Any Agent / CLI / Dashboard (just SK + BaseURL)      │  ← GET /~help progressive discovery
@@ -33,6 +36,9 @@ tool-bridge is the reference implementation of [HTBP](https://github.com/TokenRo
 │  Devices: any machine that can run the CLI/SDK (WS)   │
 └──────────────────────────────────────────────────────┘
 ```
+
+</td></tr></table>
+</div>
 
 ## The problem
 
