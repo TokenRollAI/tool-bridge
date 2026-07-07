@@ -6,7 +6,8 @@
 
 - **core/gateway 是 private workspace 包,不发布**。cli/sdk 是仅有的两个可发布包。
 - cli/sdk 用 tsup `noExternal` 把 workspace 依赖 bundle 成**单文件 ESM**(workspace 包放 devDependencies,运行时 dependencies 只留真正的外部包)。配置见 `packages/sdk/tsup.config.ts`、`packages/cli/package.json`。
-- **dts 用 tsconfig.build.json 的 paths 把 workspace 包类型内联进 `dist/index.d.ts`**——core/gateway 不随发布走,不内联则发布包的类型入口悬空。陷阱细节见 [../memory/reflections/2026-07-07-sdk-dts-bundle-pitfall.md](../memory/reflections/2026-07-07-sdk-dts-bundle-pitfall.md)。
+- **dts 用 tsconfig.build.json 的 paths 把 workspace 包类型内联进 `dist/index.d.ts`**——core/gateway 不随发布走,不内联则发布包的类型入口悬空。陷阱:tsup 的 `noExternal` 只影响 JS bundle 不影响 dts;`dts.resolve`(true 或数组)对 exports 指向 .ts 源的 workspace 包(如 core 的 `"." → "./src/index.ts"`)**均不生效**。唯一生效修法:专用 `tsconfig.build.json` 用 `compilerOptions.paths` 把 `@tool-bridge/core` 等映射到对方 `src/*.ts`,tsup 设 `tsconfig: 'tsconfig.build.json'` + `dts: { resolve: true }`。
+- **验证类型自包含要用隔离 tsc,grep 不够**:在仓库外的隔离目录写一个只 import dist 类型的 check.ts,用仓库 `node_modules/.bin/tsc`(不开 skipLibCheck)编译通过才算数——"可独立消费性"不在常规 `pnpm verify` 覆盖内。
 - `files: ["dist"]` + `publishConfig.access: "public"`(scoped 包默认 restricted,必须显式 public)。
 
 ## 发新版本标准流程(Trusted Publisher 已配置的包)

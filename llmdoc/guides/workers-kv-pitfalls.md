@@ -30,4 +30,4 @@ SK 记录经 KV 分发(最终一致),吊销/禁用在全球边缘的传播窗口
 ## 相关坑(其他文档)
 
 - workerd 会把裸 `return asyncFn()` 的 reject 误报为 unhandled rejection——handler 里必须 `await`(`app.ts:295` 注释)。
-- 多账户 wrangler 须显式 account、smoke 不读 .env → [deploy-and-verify.md](deploy-and-verify.md) 与 [../memory/reflections/2026-07-06-phase0-bootstrap.md](../memory/reflections/2026-07-06-phase0-bootstrap.md)。
+- 多账户 wrangler 须显式 account、smoke 不读 .env → [deploy-and-verify.md](deploy-and-verify.md)。

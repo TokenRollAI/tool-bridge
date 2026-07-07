@@ -82,9 +82,9 @@
 ## 未竟事项(路线图,非进度账本)
 
 - **`tb init` 向导**:干净账户一条命令拉起(wrangler auth 检查 → provision → 部署 → Admin SK 输出,可重入);当前部署路径是 `pnpm deploy:all`。
-- **Docker 自部署路径**:node adapter(@hono/node-server)+ SQLite StateStore + FS ObjectStore + ws 设备通道 + Dashboard 静态托管,`/data` 卷持久化;SDK 已具备宿主中立装配面,缺镜像、SQLite StateStore 与验收(SQLite 宿主的吊销即时性验证也在此时补)。
+- **Docker 自部署路径**:node adapter(@hono/node-server)+ SQLite StateStore + FS ObjectStore + ws 设备通道 + Dashboard 静态托管,`/data` 卷持久化;SDK 已具备宿主中立装配面,缺镜像、SQLite StateStore 与验收(SQLite 宿主的吊销即时性验证也在此时补)。落地时补一篇 Docker 宿主 guide。
 - **端到端验收系统化**:七个 User Case 的脚本化 E2E(CLI `--json` 驱动 + Dashboard 浏览器侧)未拉通;现有 smoke + 三个 verify-* 脚本覆盖主链路。
-- **遗留小项**:CLI deviceRuntime 迁移为 SDK 消费者;R2 Access Key 创建后 presign 主路径 opt-in 复验;dashboard bundle 1.14MB 未 code-split(vite 警告,不阻塞);生产 `device/demo-mac` 疑似测试残骸待确认清理。
+- **遗留小项**:CLI deviceRuntime 迁移为 SDK 消费者;R2 Access Key 创建后 presign 主路径 opt-in 复验;dashboard bundle 1.14MB 未 code-split(vite 警告,不阻塞);生产 `device/demo-mac` 疑似测试残骸待确认清理;dashboard 本地开发流程(vite dev + wrangler dev 联调)下次涉及时补 guide。
 
 ## 遗留注意
 

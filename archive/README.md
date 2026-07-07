@@ -13,5 +13,6 @@
 | `LOOP.md` | 持续开发 loop 的每轮执行契约 |
 | `DOD.md` | 分 Phase 的完成标准(Definition of Done) |
 | `PROGRESS.md` | loop 自维护的进度账本(Round 1-12 记录) |
+| `llmdoc-reflections/` | bootstrap 期的过程反思(durable 教训已提炼进 `llmdoc/guides/`,尤其 verification-and-commit-practices) |
 
 **现在的知识来源**:代码本身 + [`llmdoc/`](../llmdoc/index.md)(项目知识库)。当时沉淀下来的契约、边界与踩坑结论均已内化进 llmdoc;本目录仅供追溯历史决策与验收证据。

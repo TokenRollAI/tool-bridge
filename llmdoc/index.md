@@ -16,6 +16,7 @@
 ## architecture/ — 所有权边界与不变量
 
 - [architecture/modules-and-boundaries.md](architecture/modules-and-boundaries.md) — 全局模式(统一注册面/唯一判定入口/凭证不出网关/宿主注入点)、模块表(职责→代码落点)、依赖方向、存储分工、网关判定次序、注册通道、引导、Provider 边界细则、Dashboard 集成。
+- [architecture/code-map.md](architecture/code-map.md) — 代码检索地图:"要改 X 去哪个文件",按包→目录/文件族→关键符号。**动代码前先查这里。**
 
 ## reference/ — 稳定查表事实
 
@@ -27,27 +28,24 @@
 - [guides/deploy-and-verify.md](guides/deploy-and-verify.md) — 从零到线上验证:`pnpm verify` → `pnpm deploy:all` → curl 探活 → `pnpm smoke` → `tb status --json`,每步预期输出 + 排错(多账户歧义、custom domain 生效延迟)。
 - [guides/workers-kv-pitfalls.md](guides/workers-kv-pitfalls.md) — Workers/KV 生产坑:KV list+get 最终一致窗口(须跳 null)、子请求上限约束逐 key get、吊销传播实测 0.3s、vitest-pool-workers 0.18 API 变更。
 - [guides/do-websocket-hibernation.md](guides/do-websocket-hibernation.md) — DO hibernation WS 生产坑:边缘 ~100s 空闲掐断须客户端心跳保活、唤醒后内存状态机须从 storage 恢复(restoreReady)、本地 miniflare 测不出须线上跨休眠窗口验证。**改设备通道前必读。**
-- [guides/npm-publish.md](guides/npm-publish.md) — @tool-bridge/cli 与 @tool-bridge/sdk 的 npm 发布:tsup bundle + dts 内联的包形态、tag 触发 CI(Trusted Publishing OIDC)、新包"手动首发+配 Trusted Publisher"两段式、EOTP/provenance E422 等坑。
+- [guides/npm-publish.md](guides/npm-publish.md) — @tool-bridge/cli 与 @tool-bridge/sdk 的 npm 发布:tsup bundle + dts 内联(paths 映射 + 隔离 tsc 验证)、tag 触发 CI(Trusted Publishing OIDC)、新包"手动首发+配 Trusted Publisher"两段式、EOTP/provenance E422 等坑。
+- [guides/verification-and-commit-practices.md](guides/verification-and-commit-practices.md) — 验证与提交纪律:证据矩阵、收尾同轮更新 current-state、配置面对等、出站边界测试、opt-in 退出码、长驻进程与跨休眠验证、先取证后改码、批量清理后 lint:fix、pathspec 提交与 hook 自动暂存防污染。
 
 ## memory/ — 过程记忆
 
-- [memory/doc-gaps.md](memory/doc-gaps.md) — llmdoc 文档缺口追踪(当前:Docker 宿主 guide、dashboard 开发 guide)。recorder 维护。
+- [memory/doc-gaps.md](memory/doc-gaps.md) — llmdoc 文档缺口追踪(当前无缺口)。recorder 维护。
 - `memory/decisions/`(空)— durable 设计/流程决策,recorder 维护。
-- [memory/reflections/](memory/reflections/) — 历史反思(按日期,reflector 维护;记录当时事实,含已归档的阶段称谓属正常):
-  - 2026-07-06-phase0-bootstrap — scratch 报告易丢需尽快内化、wrangler 多账户须显式 account、权限用真实操作核实、smoke 不读 .env。
-  - 2026-07-06-phase2-closeout — 勾选不等于关门、opt-in 测试看退出码、代理/联邦要测出站边界、CLI 配置面对等。
-  - 2026-07-06-phase4-device-ws-hibernation — 本地绿不代表 hibernation 正确、连环根因先取证后改码、验收标识符逐字核对、长驻进程验证管好生命周期。
-  - 2026-07-07-sdk-dts-bundle-pitfall — tsup dts 对指向 .ts 源的 workspace 包不生效,须专用 tsconfig paths;类型自包含用隔离 tsc 验证。
-  - 2026-07-07-npm-publish-sdk-cli — 2FA/EOTP 认证 URL 对 agent 脱敏须用户亲自 publish、新包两段式发布、git push SSL 抖动直接重试。
-  - 2026-07-07-hatching-doc-restructure — 破壳重构教训:文档漂移靠实跑审计暴露、hook 自动暂存须核对暂存区再分块提交、批量删注释后先 lint:fix、运行时字符串引用与测试断言耦合。
+- `memory/reflections/`(当前为空)— 新反思仍写此目录(reflector 维护),定期把 durable 教训提炼进 guides 后归档。bootstrap 期存量反思已提炼完毕并归档至 `archive/llmdoc-reflections/`。
 
 ## 路由提示
 
 | 你要做的事 | 先读 |
 |---|---|
 | 每轮开场 | [startup.md](startup.md) 按序走 |
+| 改代码找文件/符号 | architecture/code-map.md |
 | 引用接口/错误码/CLI 命令 | reference/protocol-contract.md |
 | 判断代码归属模块/依赖方向/存储选型 | architecture/modules-and-boundaries.md |
+| 功能收尾验收/真实环境验证/批量改动/提交 | guides/verification-and-commit-practices.md |
 | 实现 v1 已解决过的机制 | reference/v1-lessons.md |
 | 部署/线上验证/部署排错 | guides/deploy-and-verify.md |
 | 写 KV 消费代码/排查 KV 一致性/vitest-pool-workers 配置 | guides/workers-kv-pitfalls.md |
