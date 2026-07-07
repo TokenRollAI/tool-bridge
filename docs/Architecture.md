@@ -310,4 +310,4 @@ docker:
   tool-bridge (image)   # M10 自部署:core + Hono node + SQLite + FS
 ```
 
-**引导顺序(bootstrap,最终态清单)**:部署 Worker/DO → 生成 Admin SK(哈希入 KV,明文仅输出一次)→ 注册内置节点(`system/status`、`system/sk`、`system/secret`、`system/registry`;`system/plugin` 自 Phase 5 随 M8 落地后加入)→ Dashboard 可用 → 用户经 Admin SK 挂载第一批工具/Context。
+**引导顺序(bootstrap,最终态清单)**:部署 Worker/DO → 生成 Admin SK(哈希入 KV,明文仅输出一次)→ 注册内置节点(`system/status`、`system/sk`、`system/secret`、`system/registry`;`system/plugin` 自 Phase 5 随 M8 落地后加入)→ Dashboard 可用 → 用户经 Admin SK 挂载第一批工具/Context。**已引导实例的内置节点补挂(Phase 5 定型回写)**:`sys:bootstrapped` 标志已置位的存量实例,bootstrap 仍对内置节点清单做幂等 ensure(registry write 本身是幂等 upsert,`registeredBy system:boot` 不触发 conflict)——理由:否则 `system/plugin` 等后续 Phase 新增的内置节点在存量部署上不会自动出现。
