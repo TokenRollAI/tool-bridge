@@ -16,6 +16,7 @@ import {
 } from '@tool-bridge/core'
 import type { Env } from './app'
 import { KvStateStore } from './kvStateStore'
+import { fetchPluginContract, probePlugin } from './providers/pluginClient'
 
 interface BootstrapEnv {
   TB_BOOTSTRAP_ADMIN_SK?: string
@@ -34,14 +35,15 @@ interface BootstrapEnv {
  * - 否则由 mintKey 生成随机明文。
  */
 
-/** 引导时注册的内置节点(system directory + 四个 builtin;plugin 在 Phase 5)。 */
-const BUILTIN_MODULES = ['sk', 'secret', 'registry', 'status'] as const
+/** 引导时注册的内置节点(system directory + 五个 builtin;plugin 自 Phase 5 加入,Arch:313)。 */
+const BUILTIN_MODULES = ['sk', 'secret', 'registry', 'status', 'plugin'] as const
 
 const BUILTIN_DESCRIPTIONS: Record<string, string> = {
   sk: 'SecretKey registry',
   secret: 'Upstream credential store',
   registry: 'Node registry',
   status: 'Gateway health and summary',
+  plugin: 'Plugin registry',
 }
 
 let bootstrapOnce: Promise<void> | undefined
@@ -58,37 +60,51 @@ async function mintAdminWithPlaintext(
   await store.put(KEY_SK_ID + adminKey.id, adminKey.hash)
 }
 
-async function doBootstrap(store: StateStore, env: BootstrapEnv): Promise<void> {
-  if ((await store.get(KEY_BOOTSTRAPPED)) !== null) return
-
-  const now = new Date().toISOString()
-  const sk = new SKRegistryStore(store)
-
-  // 1) Admin SK:提供明文则用之,否则随机生成;明文只输出一次。
-  if (env.TB_BOOTSTRAP_ADMIN_SK !== undefined && env.TB_BOOTSTRAP_ADMIN_SK.length > 0) {
-    await mintAdminWithPlaintext(store, env.TB_BOOTSTRAP_ADMIN_SK, now)
-    console.log('[tool-bridge] bootstrapped: Admin SK = <provided via TB_BOOTSTRAP_ADMIN_SK>')
-  } else {
-    const { secret } = await sk.write(adminBootstrapInput(), now)
-    console.log(`[tool-bridge] bootstrapped: Admin SK (shown once) = ${secret}`)
+/**
+ * 内置节点幂等 ensure(Q15,Phase 5 定型):已引导实例(幂等标志已置位)升级后也要
+ * 补挂新加入的内置节点(如 system/plugin)。只写缺失节点(get miss → write),
+ * 不覆盖既有节点——避免每个 isolate 冷启动都重写 KV,也不动管理面改过的描述。
+ */
+async function ensureBuiltinNodes(registry: NodeRegistryStore, now: string): Promise<void> {
+  const ensure = async (node: NodeInput): Promise<void> => {
+    try {
+      await registry.get(node.path)
+    } catch {
+      await registry.write(node, 'system:boot', now)
+    }
   }
-
-  // 2) 内置节点:system directory + 四个 builtin。registeredBy = system:boot。
-  const registry = new NodeRegistryStore(store)
-  const systemDir: NodeInput = { path: 'system', kind: 'directory', description: 'Platform admin' }
-  await registry.write(systemDir, 'system:boot', now)
+  await ensure({ path: 'system', kind: 'directory', description: 'Platform admin' })
   for (const module of BUILTIN_MODULES) {
-    const node: NodeInput = {
+    await ensure({
       path: `system/${module}`,
       kind: 'builtin',
       description: BUILTIN_DESCRIPTIONS[module] ?? module,
       config: { kind: 'builtin', module },
+    })
+  }
+}
+
+async function doBootstrap(store: StateStore, env: BootstrapEnv): Promise<void> {
+  const now = new Date().toISOString()
+  const bootstrapped = (await store.get(KEY_BOOTSTRAPPED)) !== null
+
+  // 1) Admin SK(仅首次引导):提供明文则用之,否则随机生成;明文只输出一次。
+  if (!bootstrapped) {
+    const sk = new SKRegistryStore(store)
+    if (env.TB_BOOTSTRAP_ADMIN_SK !== undefined && env.TB_BOOTSTRAP_ADMIN_SK.length > 0) {
+      await mintAdminWithPlaintext(store, env.TB_BOOTSTRAP_ADMIN_SK, now)
+      console.log('[tool-bridge] bootstrapped: Admin SK = <provided via TB_BOOTSTRAP_ADMIN_SK>')
+    } else {
+      const { secret } = await sk.write(adminBootstrapInput(), now)
+      console.log(`[tool-bridge] bootstrapped: Admin SK (shown once) = ${secret}`)
     }
-    await registry.write(node, 'system:boot', now)
   }
 
-  // 3) 幂等标志。
-  await store.put(KEY_BOOTSTRAPPED, true)
+  // 2) 内置节点:system directory + 各 builtin;已引导实例也幂等 ensure(Q15)。
+  await ensureBuiltinNodes(new NodeRegistryStore(store), now)
+
+  // 3) 幂等标志(Admin SK 引导不重复;E2E-1③ 重跑不重复输出明文)。
+  if (!bootstrapped) await store.put(KEY_BOOTSTRAPPED, true)
 }
 
 /**
@@ -115,6 +131,13 @@ export function buildDeps(store: StateStore, env: Env, version: string): Builtin
     version: () => version,
     // registry 管理通道也走 §2.3 裁剪(list 裁剪 / get→not_found)。
     visibility: checkScopes,
+    // plugin 模块(Proto §8.1):探活/契约抓取的 I/O 回调在此注入,core 保持无 I/O。
+    plugin: {
+      store,
+      probe: probePlugin,
+      fetchContract: fetchPluginContract,
+      allowInsecureHttp: env.TB_ALLOW_INSECURE_HTTP === 'true',
+    },
   }
 }
 

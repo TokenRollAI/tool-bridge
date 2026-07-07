@@ -15,6 +15,7 @@ import {
   contextScopeForCmd,
   createBuiltins,
   createObjectContextProvider,
+  type ContextProvider,
   type DeviceCallResult,
   deviceDirectoryHelpModel,
   deviceFsHelpModel,
@@ -23,14 +24,19 @@ import {
   identify,
   isContextExpired,
   isTBError,
+  KEY_PLUGIN,
+  KEY_PLUGIN_META,
   type ListOptions,
   type NodeConfig,
   NodeRegistryStore,
   negotiate,
-  type ObjectContextProvider,
   type ObjectStore,
+  optionalMethodsForCapabilities,
   PRESIGN_TTL_SEC_DEFAULT,
   parseNodeInput,
+  type PluginDescribe,
+  type PluginKind,
+  type PluginManifest,
   type Representation,
   renderHelpDsl,
   renderHelpJson,
@@ -56,6 +62,8 @@ import type { DeviceSession } from './deviceSession'
 import { KvStateStore } from './kvStateStore'
 import { createHttpProvider, type HttpConfig } from './providers/http'
 import { createMcpProvider, invalidateMcpSession, type McpConfig } from './providers/mcp'
+import { createPluginContextProvider } from './providers/pluginContext'
+import { createPluginToolProvider } from './providers/pluginTool'
 import { createR2ObjectStore, type R2PresignCredentials } from './providers/r2Object'
 import { assertRemoteAllowed, passthroughRemote } from './providers/remote'
 import { createS3ObjectStore, type S3StoreConfig } from './providers/s3Object'
@@ -429,8 +437,11 @@ export function createApp(): Hono<{ Bindings: Env; Variables: Vars }> {
       throw TBError.notFound('not found')
     }
 
-    // --- mcp/http 上游工具调用(Proto §4.2):scope 恒 'call';虚拟名反查上游真名再调 Provider。 ---
-    if ((node.kind === 'mcp' || node.kind === 'http') && node.config !== undefined) {
+    // --- mcp/http/tool 上游工具调用(Proto §4.2/§8.1):scope 恒 'call';虚拟名反查上游真名再调 Provider。 ---
+    if (
+      (node.kind === 'mcp' || node.kind === 'http' || node.kind === 'tool') &&
+      node.config !== undefined
+    ) {
       if (!check(ctx, node.path, 'call').allow) {
         throw new TBError('permission_denied', `no scope grants 'call' on '${node.path}'`)
       }
@@ -442,7 +453,7 @@ export function createApp(): Hono<{ Bindings: Env; Variables: Vars }> {
         throw new TBError('invalid_argument', 'body must be {tool, arguments}')
       }
       const args = (body.arguments ?? {}) as Record<string, unknown>
-      const provider = providerFor(node, secretStore(store, c.env), c.env, store)
+      const provider = await providerFor(node, ctx, secretStore(store, c.env), c.env, store)
       const tools = await upstreamTools(
         node,
         provider,
@@ -512,6 +523,20 @@ export function createApp(): Hono<{ Bindings: Env; Variables: Vars }> {
         })
         return renderResult(result, negotiate(c.req.header('accept')))
       }
+      // plugin-backed context(Proto §8.1):provider 非 r2/s3 视为 plugin id,
+      // 经 §8.3 envelope 转发;plugin 不存在/禁用/kind 不符 → invalid_argument。
+      if (cfg.provider !== 'r2' && cfg.provider !== 's3') {
+        const manifest = await requirePlugin(store, cfg.provider, 'context-provider', 'context')
+        const provider = createPluginContextProvider({
+          manifest,
+          secrets: secretStore(store, c.env),
+          ctx,
+          capabilities: await pluginCapabilities(store, cfg.provider),
+        })
+        const args = (body.arguments ?? {}) as Record<string, unknown>
+        const result = await dispatchContextCmd(provider, body.tool, args)
+        return renderResult(result, negotiate(c.req.header('accept')))
+      }
       const provider = await contextProviderFor(node, cfg, {
         store,
         env: c.env,
@@ -565,7 +590,9 @@ export function createApp(): Hono<{ Bindings: Env; Variables: Vars }> {
       assertRemoteConfigAllowed(cfgPatch, c.env)
       await assertRegisterPath(registry, ctx, targetPath, cmd === 'delete' ? 'delete' : 'write')
       // context 配置校验 + s3 连通探测(Proto §5.3):探测出站网络,须在权限判定之后。
-      await assertContextConfig(cfgPatch, c.env, secretStore(store, c.env))
+      await assertContextConfig(cfgPatch, c.env, secretStore(store, c.env), store)
+      // kind:'tool' 挂载校验(Proto §8.1):provider 必须是已注册且启用的 tool-provider plugin。
+      await assertToolConfig(cfgPatch, store)
       registryTarget = targetPath
     }
 
@@ -609,7 +636,13 @@ export function createApp(): Hono<{ Bindings: Env; Variables: Vars }> {
     }
     if (node.kind === 'context' && node.config?.kind === 'context') {
       await assertContextAlive(node, node.config, registry)
-      return new Response(JSON.stringify({ kind: 'context', capabilities: CONTEXT_CAPABILITIES }), {
+      // plugin-backed 节点回注册时抓取缓存的 capabilities(Q12);内置 provider 回固定表。
+      const cfg = node.config
+      const capabilities =
+        cfg.provider === 'r2' || cfg.provider === 's3' || cfg.provider === 'device-fs'
+          ? CONTEXT_CAPABILITIES
+          : await pluginCapabilities(store, cfg.provider)
+      return new Response(JSON.stringify({ kind: 'context', capabilities }), {
         headers: { 'content-type': contentTypeFor('json') },
       })
     }
@@ -660,7 +693,9 @@ export function createApp(): Hono<{ Bindings: Env; Variables: Vars }> {
     }
     await assertRegisterPath(registry, ctx, body.path, 'write')
     // context 配置校验 + s3 连通探测(Proto §5.3):探测出站网络,须在权限判定之后。
-    await assertContextConfig(body.config, c.env, secretStore(store, c.env))
+    await assertContextConfig(body.config, c.env, secretStore(store, c.env), store)
+    // kind:'tool' 挂载校验(Proto §8.1):provider 必须是已注册且启用的 tool-provider plugin。
+    await assertToolConfig(body.config, store)
     const now = new Date().toISOString()
     const node = await registry.write(body, ctx.keyId, now)
     // 注册变更 → 失效该节点工具缓存 + mcp 会话缓存(Proto §4.2)。
@@ -738,7 +773,8 @@ function filterListVisible(nodes: TreeNode[], scopes: CallContext['scopes']): Tr
       (node.kind === 'mcp' ||
         node.kind === 'http' ||
         node.kind === 'remote' ||
-        node.kind === 'device') &&
+        node.kind === 'device' ||
+        node.kind === 'tool') &&
       !checkScopes(scopes, node.path, 'call')
     ) {
       return false
@@ -843,8 +879,8 @@ async function helpModelFor(
       children: children.map((n) => ({ path: n.path, kind: n.kind, description: n.description })),
     }
   }
-  if (node.kind === 'mcp' || node.kind === 'http') {
-    const provider = providerFor(node, deps.secrets, deps.env, deps.store)
+  if (node.kind === 'mcp' || node.kind === 'http' || node.kind === 'tool') {
+    const provider = await providerFor(node, ctx, deps.secrets, deps.env, deps.store)
     const raw = await upstreamTools(node, provider, deps.store, deps.env, deps.refresh, deps.now)
     const { exposed } = virtualizeTools(node.virtualize, raw)
     // 索引形态(Proto §4.2 两级披露):不含 inputSchema;全量 spec 走工具级 ~help。
@@ -868,6 +904,15 @@ async function helpModelFor(
         { path: node.path, description: node.description },
         { readOnly: node.config.readOnly ?? false },
       )
+    }
+    // plugin-backed 节点:只列四动词 + 注册时声明的可选方法(Proto §8.2 注记,Q12)。
+    if (node.config.provider !== 'r2' && node.config.provider !== 's3') {
+      const declared = optionalMethodsForCapabilities(
+        await pluginCapabilities(deps.store, node.config.provider),
+      )
+      const model = contextHelpModel(node, { readOnly: node.config.readOnly ?? false })
+      const core = new Set(['List', 'Get', 'Write', 'Update'])
+      return { ...model, cmds: model.cmds.filter((c) => core.has(c.name) || declared.has(c.name)) }
     }
     return contextHelpModel(node, { readOnly: node.config.readOnly ?? false })
   }
@@ -893,11 +938,16 @@ async function toolHelpModelFor(
     return null
   }
   const { node, rest } = resolved
-  if ((node.kind !== 'mcp' && node.kind !== 'http') || node.config === undefined) return null
+  if (
+    (node.kind !== 'mcp' && node.kind !== 'http' && node.kind !== 'tool') ||
+    node.config === undefined
+  ) {
+    return null
+  }
   if (rest === '' || rest.includes('/')) return null
   if (!check(ctx, node.path, 'read').allow || !check(ctx, node.path, 'call').allow) return null
   const store = c.get('store')
-  const provider = providerFor(node, secretStore(store, c.env), c.env, store)
+  const provider = await providerFor(node, ctx, secretStore(store, c.env), c.env, store)
   const refresh = c.req.query('refresh') === '1'
   const raw = await upstreamTools(node, provider, store, c.env, refresh, new Date().toISOString())
   const { exposed } = virtualizeTools(node.virtualize, raw)
@@ -906,13 +956,14 @@ async function toolHelpModelFor(
   return toolHelpModel(node.path, { kind: node.kind, description: node.description }, tool)
 }
 
-/** 为 mcp/http 节点构造对应 Provider(其余 kind 无 Provider → unimplemented)。 */
-function providerFor(
+/** 为 mcp/http/tool 节点构造对应 Provider(其余 kind 无 Provider → unimplemented)。 */
+async function providerFor(
   node: TreeNode,
+  ctx: CallContext,
   secrets: SecretStoreImpl,
   env: Env,
   store: StateStore,
-): UpstreamProvider {
+): Promise<UpstreamProvider> {
   const insecure = allowInsecure(env)
   if (node.kind === 'mcp' && node.config?.kind === 'mcp') {
     return createMcpProvider(node.config as McpConfig, secrets, {
@@ -924,10 +975,15 @@ function providerFor(
   if (node.kind === 'http' && node.config?.kind === 'http') {
     return createHttpProvider(node.config as HttpConfig, secrets, { allowInsecure: insecure })
   }
+  // plugin 工具源(Proto §8.1):provider = 已注册 tool-provider plugin 的 id。
+  if (node.kind === 'tool' && node.config?.kind === 'tool') {
+    const manifest = await requirePlugin(store, node.config.provider, 'tool-provider', 'tool')
+    return createPluginToolProvider({ manifest, secrets, ctx })
+  }
   throw TBError.unimplemented(`kind '${node.kind}' has no tool provider`)
 }
 
-/** 取上游工具集:mcp 走 `toolcache:<path>` 缓存(TTL + refresh);http 从 config 直接生成。 */
+/** 取上游工具集:mcp/tool 走 `toolcache:<path>` 缓存(TTL + refresh);http 从 config 直接生成。 */
 function upstreamTools(
   node: TreeNode,
   provider: UpstreamProvider,
@@ -936,7 +992,7 @@ function upstreamTools(
   refresh: boolean,
   now: string,
 ): Promise<ToolSpec[]> {
-  if (node.kind === 'mcp') {
+  if (node.kind === 'mcp' || node.kind === 'tool') {
     return getTools(store, node.path, () => provider.list(), {
       refresh,
       ttl: toolCacheTtl(env),
@@ -1025,6 +1081,52 @@ function deviceIdForDeviceFs(cfg: ContextConfig): string {
   const pc = cfg.providerConfig
   if (pc && typeof pc === 'object' && typeof pc.deviceId === 'string') return pc.deviceId
   throw new TBError('invalid_argument', 'device-fs context 缺少 providerConfig.deviceId')
+}
+
+// ---------- plugin 挂载消费(Proto §8,Phase 5) ----------
+
+/**
+ * 取已注册且启用的 plugin manifest(挂载校验与调用点共用)。
+ * 不存在/kind 不符 → invalid_argument(与既有「未知 provider」口径一致,不泄露更多);
+ * 禁用 → invalid_argument。落盘记录含平台内部 tokenSkId,网关内部使用无须投影。
+ */
+async function requirePlugin(
+  store: StateStore,
+  id: string,
+  kind: PluginKind,
+  what: 'context' | 'tool',
+): Promise<PluginManifest> {
+  const manifest = (await store.get(KEY_PLUGIN + id)) as PluginManifest | null
+  if (manifest === null || manifest.kind !== kind) {
+    throw new TBError('invalid_argument', `未知 ${what} provider:'${id}'`)
+  }
+  if (manifest.enabled !== true) {
+    throw new TBError('invalid_argument', `plugin '${id}' 已禁用`)
+  }
+  return manifest
+}
+
+/** 注册时抓取缓存的 `~describe.capabilities`(pluginmeta:<id>;缺失回空表)。 */
+async function pluginCapabilities(store: StateStore, id: string): Promise<readonly string[]> {
+  const meta = (await store.get(KEY_PLUGIN_META + id)) as PluginDescribe | null
+  return meta?.capabilities ?? []
+}
+
+/**
+ * 注册/更新 kind:'tool' 节点时的配置校验(Proto §8.1,注册时即拒):
+ * provider 必须是已注册且启用的 tool-provider plugin(SDK 保留 id 如 '@local' 不属网关面)。
+ */
+async function assertToolConfig(config: unknown, store: StateStore): Promise<void> {
+  if (config === null || typeof config !== 'object') return
+  if ((config as { kind?: unknown }).kind !== 'tool') return
+  const provider = (config as { provider?: unknown }).provider
+  if (typeof provider !== 'string' || provider === '') {
+    throw new TBError(
+      'invalid_argument',
+      "kind:'tool' 节点需要 config.provider(plugin id,Proto §3.2)",
+    )
+  }
+  await requirePlugin(store, provider, 'tool-provider', 'tool')
 }
 
 // ---------- context 节点(Proto §5,Phase 3) ----------
@@ -1140,7 +1242,7 @@ async function contextProviderFor(
   node: TreeNode,
   cfg: ContextConfig,
   deps: { store: StateStore; env: Env; requestUrl: string },
-): Promise<ObjectContextProvider> {
+): Promise<ContextProvider> {
   const secrets = secretStore(deps.store, deps.env)
   const objects = await contextObjectStoreFor(cfg, deps.env, secrets)
   const opts: Parameters<typeof createObjectContextProvider>[1] = {
@@ -1166,9 +1268,13 @@ async function contextProviderFor(
   return createObjectContextProvider(objects, opts)
 }
 
-/** 数据面 {tool} → ContextProvider 方法派发;入参精细校验由 provider 承担。 */
+/**
+ * 数据面 {tool} → ContextProvider 方法派发;入参精细校验由 provider 承担。
+ * 可选方法(Search/Delete)未实现(plugin 未在 capabilities 声明)→ 按 unknown cmd 拒
+ * (未声明的可选方法平台永不调用,Proto §8.2)。
+ */
 async function dispatchContextCmd(
-  provider: ObjectContextProvider,
+  provider: ContextProvider,
   tool: string,
   args: Record<string, unknown>,
 ): Promise<unknown> {
@@ -1188,8 +1294,14 @@ async function dispatchContextCmd(
       }
       return await provider.Update(args.path as string, args.patch as ContextPatch)
     case 'Delete':
+      if (provider.Delete === undefined) {
+        throw new TBError('invalid_argument', `unknown cmd '${tool}'(capability 未声明)`)
+      }
       return await provider.Delete(args.path as string)
     case 'Search':
+      if (provider.Search === undefined) {
+        throw new TBError('invalid_argument', `unknown cmd '${tool}'(capability 未声明)`)
+      }
       return await provider.Search(args.query as string, args.opts as SearchOptions | undefined)
     default:
       // contextScopeForCmd 已挡未知 cmd;此处为类型完备性兜底。
@@ -1230,20 +1342,24 @@ async function pruneExpiredContext(
 }
 
 /**
- * 注册/更新 context 节点时的配置校验(Proto §3.2/§5.3,注册时即拒):
- * provider 词表 r2|s3(plugin id 归 Phase 5);s3 必填 endpoint/bucket/authRef,
- * 且做一次浅 list 连通探测(D8)——失败 → unavailable(retryable);r2 不探测。
+ * 注册/更新 context 节点时的配置校验(Proto §3.2/§5.3/§8.1,注册时即拒):
+ * provider = r2|s3 或已注册且启用的 context-provider plugin id(Phase 5);
+ * s3 必填 endpoint/bucket/authRef,且做一次浅 list 连通探测(D8)——失败 →
+ * unavailable(retryable);r2 与 plugin 不探测(plugin 在 PluginRegistry.Write 时已探活)。
  */
 async function assertContextConfig(
   config: unknown,
   env: Env,
   secrets: SecretStoreImpl,
+  store: StateStore,
 ): Promise<void> {
   if (config === null || typeof config !== 'object') return
   if ((config as { kind?: unknown }).kind !== 'context') return
   const cfg = config as ContextConfig
   if (cfg.provider !== 'r2' && cfg.provider !== 's3') {
-    throw new TBError('invalid_argument', `未知 context provider:'${String(cfg.provider)}'`)
+    // plugin 挂载:不存在/kind 不符/禁用 → invalid_argument(device-fs 由网关代写,不经注册面)。
+    await requirePlugin(store, cfg.provider, 'context-provider', 'context')
+    return
   }
   if (cfg.provider === 's3') {
     // 结构/凭证/https 校验失败 → invalid_argument(store 构造抛出)。
