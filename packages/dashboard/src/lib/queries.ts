@@ -11,7 +11,14 @@ import {
 } from './api'
 import { type InvokeRecord, loadHistory, recordInvoke, subscribeHistory } from './history'
 import { useConn, useSession } from './session'
-import type { ContextEntry, ContextEntryMeta, Page, RegistryNode, SecretKeyInfo } from './types'
+import type {
+  ContextEntry,
+  ContextEntryMeta,
+  Page,
+  PluginManifest,
+  RegistryNode,
+  SecretKeyInfo,
+} from './types'
 
 /** queryKey 前缀含 profile 标识:切换档案后互不串缓存。 */
 function useKeyBase(): readonly unknown[] {
@@ -144,6 +151,18 @@ export function useSecretList() {
     queryFn: async () => {
       const r = await invoke(conn, 'system/secret', 'list', {})
       return r.json as Page<{ name: string; updatedAt: string }>
+    },
+  })
+}
+
+export function usePluginList() {
+  const conn = useConn()
+  const base = useKeyBase()
+  return useQuery({
+    queryKey: [...base, 'plugin-list'],
+    queryFn: async () => {
+      const r = await invoke(conn, 'system/plugin', 'list', {})
+      return r.json as Page<PluginManifest>
     },
   })
 }

@@ -38,11 +38,11 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { Textarea } from '@/components/ui/textarea'
-import { useInvoke, useRegistryList } from '@/lib/queries'
+import { useInvoke, usePluginList, useRegistryList } from '@/lib/queries'
 import type { RegistryNode } from '@/lib/types'
 import { cn } from '@/lib/utils'
 
-const KIND_FILTERS = ['all', 'mcp', 'http', 'context', 'remote', 'device'] as const
+const KIND_FILTERS = ['all', 'mcp', 'http', 'context', 'remote', 'device', 'tool'] as const
 type KindFilter = (typeof KIND_FILTERS)[number]
 
 /**
@@ -86,7 +86,7 @@ export function RegistryPage() {
     <div className="mx-auto max-w-4xl px-8 py-8">
       <PageHeader
         title="节点注册"
-        description="挂载工具(mcp/http)、context namespace、联邦 HTBP 服务(remote)"
+        description="挂载工具(mcp/http/plugin)、context namespace、联邦 HTBP 服务(remote)"
         actions={<MountDialog />}
       />
 
@@ -247,12 +247,13 @@ export function RegistryPage() {
   )
 }
 
-type MountKind = 'mcp' | 'http' | 'context' | 'remote'
+type MountKind = 'mcp' | 'http' | 'context' | 'remote' | 'tool'
 
-/** 挂载表单(按 kind 分支出 NodeConfig)。 */
+/** 挂载表单(按 kind 分支出 NodeConfig;tool 与 context 可引用已注册 plugin 为 provider)。 */
 function MountDialog() {
   const invoke = useInvoke()
   const qc = useQueryClient()
+  const plugins = usePluginList()
   const [open, setOpen] = useState(false)
   const [kind, setKind] = useState<MountKind>('mcp')
   const [path, setPath] = useState('')
@@ -261,24 +262,75 @@ function MountDialog() {
   // mcp
   const [mcpUrl, setMcpUrl] = useState('')
   const [mcpAuthRef, setMcpAuthRef] = useState('')
+  // 虚拟化(mcp/http/tool 共用;对等 CLI --prefix/--rename/--hide/--describe)
   const [prefix, setPrefix] = useState('')
+  const [renameSpec, setRenameSpec] = useState('')
+  const [hideSpec, setHideSpec] = useState('')
+  const [describeSpec, setDescribeSpec] = useState('')
   // http
   const [endpoint, setEndpoint] = useState('')
   const [toolsJson, setToolsJson] = useState(
     '[\n  {\n    "name": "echo",\n    "description": "…",\n    "method": "POST",\n    "pathTemplate": "/post"\n  }\n]',
   )
   const [httpAuthRef, setHttpAuthRef] = useState('')
-  // context
-  const [provider, setProvider] = useState<'r2' | 's3'>('r2')
+  const [authHeader, setAuthHeader] = useState('')
+  const [authScheme, setAuthScheme] = useState('')
+  // context(provider = r2 | s3 | 已注册 context-provider plugin id)
+  const [provider, setProvider] = useState('r2')
   const [ctxPrefix, setCtxPrefix] = useState('')
   const [s3Endpoint, setS3Endpoint] = useState('')
   const [s3Bucket, setS3Bucket] = useState('')
   const [s3Region, setS3Region] = useState('')
   const [ctxAuthRef, setCtxAuthRef] = useState('')
   const [readOnly, setReadOnly] = useState(false)
+  const [ttl, setTtl] = useState('')
   // remote
   const [baseUrl, setBaseUrl] = useState('')
   const [skRef, setSkRef] = useState('')
+  // tool(plugin 工具源)
+  const [toolProvider, setToolProvider] = useState('')
+
+  const pluginItems = plugins.data?.items ?? []
+  const toolPlugins = pluginItems.filter((p) => p.kind === 'tool-provider')
+  const ctxPlugins = pluginItems.filter((p) => p.kind === 'context-provider')
+
+  /** "from=to" 行 → Record(与 CLI buildVirtualize 同规则;非法行即抛)。 */
+  const parsePairs = (spec: string, flag: string): Record<string, string> => {
+    const out: Record<string, string> = {}
+    for (const line of spec.split('\n')) {
+      const s = line.trim()
+      if (!s) continue
+      const idx = s.indexOf('=')
+      const from = idx < 0 ? '' : s.slice(0, idx).trim()
+      const to = idx < 0 ? '' : s.slice(idx + 1).trim()
+      if (!from || !to) throw new Error(`${flag} 每行须为 "from=to" 形式:"${s}"`)
+      out[from] = to
+    }
+    return out
+  }
+
+  const buildVirt = (): Record<string, unknown> | undefined => {
+    if (kind !== 'mcp' && kind !== 'http' && kind !== 'tool') return undefined
+    const v: Record<string, unknown> = {}
+    if (prefix.trim()) v.prefix = prefix.trim()
+    const rename = parsePairs(renameSpec, 'rename')
+    if (Object.keys(rename).length) v.rename = rename
+    const hide = hideSpec
+      .split(/[,\n]/)
+      .map((s) => s.trim())
+      .filter(Boolean)
+    if (hide.length) v.hide = hide
+    const describe = parsePairs(describeSpec, 'describe')
+    if (Object.keys(describe).length) v.describe = describe
+    return Object.keys(v).length ? v : undefined
+  }
+
+  const parseTtl = (): number | undefined => {
+    if (!ttl.trim()) return undefined
+    const n = Number(ttl.trim())
+    if (!Number.isInteger(n) || n <= 0) throw new Error('ttl 须为正整数秒')
+    return n
+  }
 
   const buildConfig = (): Record<string, unknown> => {
     switch (kind) {
@@ -303,9 +355,12 @@ function MountDialog() {
           endpoint: endpoint.trim(),
           tools,
           ...(httpAuthRef.trim() ? { authRef: httpAuthRef.trim() } : {}),
+          ...(authHeader.trim() ? { authHeader: authHeader.trim() } : {}),
+          ...(authScheme.trim() !== '' ? { authScheme: authScheme.trim() } : {}),
         }
       }
       case 'context': {
+        const ttlSeconds = parseTtl()
         if (provider === 's3') {
           if (!s3Endpoint.trim() || !s3Bucket.trim()) throw new Error('s3 需要 endpoint 与 bucket')
           if (!ctxAuthRef.trim()) throw new Error('s3 需要 authRef(先在「凭证保管」set)')
@@ -320,13 +375,24 @@ function MountDialog() {
             },
             authRef: ctxAuthRef.trim(),
             ...(readOnly ? { readOnly: true } : {}),
+            ...(ttlSeconds !== undefined ? { ttl: ttlSeconds } : {}),
           }
         }
+        if (provider === 'r2') {
+          return {
+            kind: 'context',
+            provider: 'r2',
+            ...(ctxPrefix.trim() ? { providerConfig: { prefix: ctxPrefix.trim() } } : {}),
+            ...(readOnly ? { readOnly: true } : {}),
+            ...(ttlSeconds !== undefined ? { ttl: ttlSeconds } : {}),
+          }
+        }
+        // context-provider plugin:provider = plugin id(存储细节在 plugin 侧)
         return {
           kind: 'context',
-          provider: 'r2',
-          ...(ctxPrefix.trim() ? { providerConfig: { prefix: ctxPrefix.trim() } } : {}),
+          provider,
           ...(readOnly ? { readOnly: true } : {}),
+          ...(ttlSeconds !== undefined ? { ttl: ttlSeconds } : {}),
         }
       }
       case 'remote':
@@ -336,6 +402,10 @@ function MountDialog() {
           baseUrl: baseUrl.trim(),
           ...(skRef.trim() ? { skRef: skRef.trim() } : {}),
         }
+      case 'tool':
+        if (!toolProvider)
+          throw new Error('先选择一个 tool-provider plugin(没有则去「Plugin」注册)')
+        return { kind: 'tool', provider: toolProvider }
     }
   }
 
@@ -345,25 +415,24 @@ function MountDialog() {
       return
     }
     let config: Record<string, unknown>
+    let virtualize: Record<string, unknown> | undefined
     try {
       config = buildConfig()
+      virtualize = buildVirt()
     } catch (e) {
       setErr((e as Error).message)
       return
     }
-    const nodeKind = kind === 'mcp' || kind === 'http' ? kind : kind
     invoke.mutate(
       {
         path: 'system/registry',
         tool: 'write',
         args: {
           path: path.trim(),
-          kind: nodeKind,
+          kind,
           description: description.trim(),
           config,
-          ...(prefix.trim() && (kind === 'mcp' || kind === 'http')
-            ? { virtualize: { prefix: prefix.trim() } }
-            : {}),
+          ...(virtualize ? { virtualize } : {}),
         },
       },
       {
@@ -418,6 +487,9 @@ function MountDialog() {
                   <SelectItem value="remote" className="font-mono text-xs">
                     remote — 联邦 HTBP 服务
                   </SelectItem>
+                  <SelectItem value="tool" className="font-mono text-xs">
+                    tool — plugin 工具源
+                  </SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -461,29 +533,16 @@ function MountDialog() {
                   onChange={(e) => setMcpUrl(e.target.value)}
                 />
               </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="grid gap-1.5">
-                  <Label htmlFor="mcp-auth" className="text-xs">
-                    authRef(可空)
-                  </Label>
-                  <Input
-                    id="mcp-auth"
-                    className="font-mono text-xs"
-                    value={mcpAuthRef}
-                    onChange={(e) => setMcpAuthRef(e.target.value)}
-                  />
-                </div>
-                <div className="grid gap-1.5">
-                  <Label htmlFor="mcp-prefix" className="text-xs">
-                    工具名前缀(虚拟化,可空)
-                  </Label>
-                  <Input
-                    id="mcp-prefix"
-                    className="font-mono text-xs"
-                    value={prefix}
-                    onChange={(e) => setPrefix(e.target.value)}
-                  />
-                </div>
+              <div className="grid gap-1.5">
+                <Label htmlFor="mcp-auth" className="text-xs">
+                  authRef(可空)
+                </Label>
+                <Input
+                  id="mcp-auth"
+                  className="font-mono text-xs"
+                  value={mcpAuthRef}
+                  onChange={(e) => setMcpAuthRef(e.target.value)}
+                />
               </div>
             </>
           )}
@@ -515,16 +574,42 @@ function MountDialog() {
                   onChange={(e) => setToolsJson(e.target.value)}
                 />
               </div>
-              <div className="grid gap-1.5">
-                <Label htmlFor="http-auth" className="text-xs">
-                  authRef(可空)
-                </Label>
-                <Input
-                  id="http-auth"
-                  className="font-mono text-xs"
-                  value={httpAuthRef}
-                  onChange={(e) => setHttpAuthRef(e.target.value)}
-                />
+              <div className="grid grid-cols-3 gap-3">
+                <div className="grid gap-1.5">
+                  <Label htmlFor="http-auth" className="text-xs">
+                    authRef(可空)
+                  </Label>
+                  <Input
+                    id="http-auth"
+                    className="font-mono text-xs"
+                    value={httpAuthRef}
+                    onChange={(e) => setHttpAuthRef(e.target.value)}
+                  />
+                </div>
+                <div className="grid gap-1.5">
+                  <Label htmlFor="http-auth-header" className="text-xs">
+                    authHeader(可空)
+                  </Label>
+                  <Input
+                    id="http-auth-header"
+                    className="font-mono text-xs"
+                    placeholder="Authorization"
+                    value={authHeader}
+                    onChange={(e) => setAuthHeader(e.target.value)}
+                  />
+                </div>
+                <div className="grid gap-1.5">
+                  <Label htmlFor="http-auth-scheme" className="text-xs">
+                    authScheme(可空)
+                  </Label>
+                  <Input
+                    id="http-auth-scheme"
+                    className="font-mono text-xs"
+                    placeholder="Bearer"
+                    value={authScheme}
+                    onChange={(e) => setAuthScheme(e.target.value)}
+                  />
+                </div>
               </div>
             </>
           )}
@@ -534,7 +619,7 @@ function MountDialog() {
               <div className="grid grid-cols-2 gap-3">
                 <div className="grid gap-1.5">
                   <Label className="text-xs">provider</Label>
-                  <Select value={provider} onValueChange={(v) => setProvider(v as 'r2' | 's3')}>
+                  <Select value={provider} onValueChange={setProvider}>
                     <SelectTrigger className="font-mono text-xs">
                       <SelectValue />
                     </SelectTrigger>
@@ -545,20 +630,27 @@ function MountDialog() {
                       <SelectItem value="s3" className="font-mono text-xs">
                         s3(外部 S3 兼容端点)
                       </SelectItem>
+                      {ctxPlugins.map((p) => (
+                        <SelectItem key={p.id} value={p.id} className="font-mono text-xs">
+                          {p.id}(plugin)
+                        </SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                 </div>
-                <div className="grid gap-1.5">
-                  <Label htmlFor="ctx-prefix" className="text-xs">
-                    key 前缀(可空)
-                  </Label>
-                  <Input
-                    id="ctx-prefix"
-                    className="font-mono text-xs"
-                    value={ctxPrefix}
-                    onChange={(e) => setCtxPrefix(e.target.value)}
-                  />
-                </div>
+                {(provider === 'r2' || provider === 's3') && (
+                  <div className="grid gap-1.5">
+                    <Label htmlFor="ctx-prefix" className="text-xs">
+                      key 前缀(可空)
+                    </Label>
+                    <Input
+                      id="ctx-prefix"
+                      className="font-mono text-xs"
+                      value={ctxPrefix}
+                      onChange={(e) => setCtxPrefix(e.target.value)}
+                    />
+                  </div>
+                )}
               </div>
               {provider === 's3' && (
                 <>
@@ -614,11 +706,25 @@ function MountDialog() {
                   </div>
                 </>
               )}
-              {/* biome-ignore lint/a11y/noLabelWithoutControl: Radix Checkbox 是 label 内可交互控件,规则只识别原生 input */}
-              <label className="flex items-center gap-2 text-xs">
-                <Checkbox checked={readOnly} onCheckedChange={(v) => setReadOnly(v === true)} />
-                readOnly(拒绝 Write/Update/Delete)
-              </label>
+              <div className="grid grid-cols-2 items-end gap-3">
+                <div className="grid gap-1.5">
+                  <Label htmlFor="ctx-ttl" className="text-xs">
+                    ttl 秒(可空;到期整节点回收)
+                  </Label>
+                  <Input
+                    id="ctx-ttl"
+                    className="font-mono text-xs"
+                    placeholder="86400"
+                    value={ttl}
+                    onChange={(e) => setTtl(e.target.value)}
+                  />
+                </div>
+                {/* biome-ignore lint/a11y/noLabelWithoutControl: Radix Checkbox 是 label 内可交互控件,规则只识别原生 input */}
+                <label className="flex items-center gap-2 pb-2 text-xs">
+                  <Checkbox checked={readOnly} onCheckedChange={(v) => setReadOnly(v === true)} />
+                  readOnly(拒绝 Write/Update/Delete)
+                </label>
+              </div>
             </>
           )}
 
@@ -646,6 +752,98 @@ function MountDialog() {
                   value={skRef}
                   onChange={(e) => setSkRef(e.target.value)}
                 />
+              </div>
+            </div>
+          )}
+
+          {kind === 'tool' && (
+            <div className="grid gap-1.5">
+              <Label className="text-xs">provider *(tool-provider plugin)</Label>
+              <Select value={toolProvider} onValueChange={setToolProvider}>
+                <SelectTrigger className="font-mono text-xs">
+                  <SelectValue
+                    placeholder={toolPlugins.length === 0 ? '无已注册 plugin' : '选择 plugin…'}
+                  />
+                </SelectTrigger>
+                <SelectContent>
+                  {toolPlugins.map((p) => (
+                    <SelectItem key={p.id} value={p.id} className="font-mono text-xs">
+                      {p.id}
+                      {p.enabled ? '' : '(disabled)'}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {toolPlugins.length === 0 && (
+                <p className="text-[11px] text-muted-foreground">
+                  先在
+                  <Link to="/manage/plugins" className="mx-0.5 underline underline-offset-2">
+                    Plugin
+                  </Link>
+                  注册 tool-provider,再回来挂载。
+                </p>
+              )}
+            </div>
+          )}
+
+          {(kind === 'mcp' || kind === 'http' || kind === 'tool') && (
+            <div className="grid gap-3 rounded-sm border px-3 py-2.5">
+              <p className="text-[11px] font-medium text-muted-foreground">
+                虚拟化(可空;hide → rename → prefix → describe)
+              </p>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="grid gap-1.5">
+                  <Label htmlFor="virt-prefix" className="text-xs">
+                    工具名前缀(纯拼接,惯例 ns__)
+                  </Label>
+                  <Input
+                    id="virt-prefix"
+                    className="font-mono text-xs"
+                    placeholder="gh__"
+                    value={prefix}
+                    onChange={(e) => setPrefix(e.target.value)}
+                  />
+                </div>
+                <div className="grid gap-1.5">
+                  <Label htmlFor="virt-hide" className="text-xs">
+                    hide(原名,逗号分隔)
+                  </Label>
+                  <Input
+                    id="virt-hide"
+                    className="font-mono text-xs"
+                    placeholder="dangerous_tool"
+                    value={hideSpec}
+                    onChange={(e) => setHideSpec(e.target.value)}
+                  />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="grid gap-1.5">
+                  <Label htmlFor="virt-rename" className="text-xs">
+                    rename(每行 from=to)
+                  </Label>
+                  <Textarea
+                    id="virt-rename"
+                    className="font-mono text-xs"
+                    rows={2}
+                    spellCheck={false}
+                    value={renameSpec}
+                    onChange={(e) => setRenameSpec(e.target.value)}
+                  />
+                </div>
+                <div className="grid gap-1.5">
+                  <Label htmlFor="virt-describe" className="text-xs">
+                    describe(每行 from=描述)
+                  </Label>
+                  <Textarea
+                    id="virt-describe"
+                    className="font-mono text-xs"
+                    rows={2}
+                    spellCheck={false}
+                    value={describeSpec}
+                    onChange={(e) => setDescribeSpec(e.target.value)}
+                  />
+                </div>
               </div>
             </div>
           )}

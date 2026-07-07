@@ -3,7 +3,15 @@
  * Dashboard 是纯 API 客户端,不 import core——形状按网关契约手抄,字段不多不少。
  */
 
-export type NodeKind = 'directory' | 'builtin' | 'mcp' | 'http' | 'remote' | 'context' | 'device'
+export type NodeKind =
+  | 'directory'
+  | 'builtin'
+  | 'mcp'
+  | 'http'
+  | 'remote'
+  | 'context'
+  | 'device'
+  | 'tool'
 
 export type Action = 'read' | 'write' | 'call' | 'register' | 'admin'
 
@@ -86,6 +94,34 @@ export interface SecretKeyInfo {
 export interface Page<T> {
   items: T[]
   cursor?: string
+}
+
+/** system/plugin 的 manifest(plugin/manifest.ts 契约手抄)。 */
+export type PluginKind = 'tool-provider' | 'context-provider'
+
+export interface PluginManifest {
+  id: string
+  kind: PluginKind
+  /** "tool-provider/v1" | "context-provider/v1";前缀必须与 kind 一致。 */
+  interfaceVersion: string
+  /** https:// 或 `binding:<name>`。 */
+  endpoint: string
+  auth: { kind: 'platform-token' } | { kind: 'bearer'; secretRef: string }
+  /** 如 "/healthz";必须以 '/' 开头。 */
+  healthPath: string
+  enabled: boolean
+}
+
+/** write/update 返回:pluginToken 仅该次响应出现一次(auth=platform-token 时)。 */
+export interface PluginRegistration extends PluginManifest {
+  pluginToken?: string
+}
+
+/** system/plugin health cmd 返回(按需探活)。 */
+export interface PluginHealth {
+  id: string
+  healthy: boolean
+  checkedAt: string
 }
 
 /** context 条目元数据(ContextEntryMeta)。 */

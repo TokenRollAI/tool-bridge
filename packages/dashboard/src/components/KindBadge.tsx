@@ -7,6 +7,7 @@ import {
   type LucideIcon,
   Plug,
   Waypoints,
+  Wrench,
 } from 'lucide-react'
 import type { NodeKind } from '@/lib/types'
 import { cn } from '@/lib/utils'
@@ -20,6 +21,7 @@ const KIND_STYLE: Record<NodeKind, string> = {
   remote: 'text-fuchsia-400/90 border-fuchsia-400/30',
   context: 'text-emerald-400/90 border-emerald-400/30',
   device: 'text-amber-400/90 border-amber-400/30',
+  tool: 'text-rose-400/90 border-rose-400/30',
 }
 
 /** kind → 图标 + 色相(与 KIND_STYLE 同一套色相编码;树导航与命令面板共用)。 */
@@ -31,6 +33,7 @@ export const KIND_ICON: Record<NodeKind, { icon: LucideIcon; className: string }
   remote: { icon: Waypoints, className: 'text-fuchsia-400/80' },
   context: { icon: Database, className: 'text-emerald-400/80' },
   device: { icon: Cpu, className: 'text-amber-400/80' },
+  tool: { icon: Wrench, className: 'text-rose-400/80' },
 }
 
 export function KindBadge({ kind, className }: { kind: NodeKind; className?: string }) {

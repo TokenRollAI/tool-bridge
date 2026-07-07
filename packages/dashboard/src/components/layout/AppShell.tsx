@@ -7,6 +7,7 @@ import {
   ListFilter,
   LogOut,
   Moon,
+  Plug2,
   RefreshCw,
   Search,
   ShieldEllipsis,
@@ -37,6 +38,7 @@ const MANAGE_LINKS = [
   { to: '/manage/sk', label: 'Secret Key', icon: KeySquare },
   { to: '/manage/secrets', label: '凭证保管', icon: ShieldEllipsis },
   { to: '/manage/devices', label: '设备', icon: Cpu },
+  { to: '/manage/plugins', label: 'Plugin', icon: Plug2 },
 ] as const
 
 const isMac = typeof navigator !== 'undefined' && /Mac/.test(navigator.platform)

@@ -5,6 +5,7 @@ import { LoginPage } from '@/pages/LoginPage'
 import { NodePage } from '@/pages/NodePage'
 import { OverviewPage } from '@/pages/OverviewPage'
 import { DevicesPage } from '@/pages/system/DevicesPage'
+import { PluginsPage } from '@/pages/system/PluginsPage'
 import { RegistryPage } from '@/pages/system/RegistryPage'
 import { SecretsPage } from '@/pages/system/SecretsPage'
 import { SkPage } from '@/pages/system/SkPage'
@@ -21,6 +22,7 @@ export default function App() {
         <Route path="manage/secrets" element={<SecretsPage />} />
         <Route path="manage/registry" element={<RegistryPage />} />
         <Route path="manage/devices" element={<DevicesPage />} />
+        <Route path="manage/plugins" element={<PluginsPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>
     </Routes>
