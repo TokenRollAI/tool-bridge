@@ -28,14 +28,15 @@
 - [guides/deploy-and-verify.md](guides/deploy-and-verify.md) — 从零到线上验证:`pnpm verify` → `pnpm deploy:all` → curl 探活 → `pnpm smoke` → `tb status --json`,每步预期输出 + 排错(多账户歧义、custom domain 生效延迟)。
 - [guides/workers-kv-pitfalls.md](guides/workers-kv-pitfalls.md) — Workers/KV 生产坑:KV list+get 最终一致窗口(须跳 null)、子请求上限约束逐 key get、吊销传播实测 0.3s、vitest-pool-workers 0.18 API 变更。
 - [guides/do-websocket-hibernation.md](guides/do-websocket-hibernation.md) — DO hibernation WS 生产坑:边缘 ~100s 空闲掐断须客户端心跳保活、唤醒后内存状态机须从 storage 恢复(restoreReady)、本地 miniflare 测不出须线上跨休眠窗口验证。**改设备通道前必读。**
-- [guides/npm-publish.md](guides/npm-publish.md) — @tool-bridge/cli 与 @tool-bridge/sdk 的 npm 发布:tsup bundle + dts 内联(paths 映射 + 隔离 tsc 验证)、tag 触发 CI(Trusted Publishing OIDC)、新包"手动首发+配 Trusted Publisher"两段式、EOTP/provenance E422 等坑。
+- [guides/npm-publish.md](guides/npm-publish.md) — cli / sdk / gateway / dashboard 四包的 npm 发布:tsup bundle + dts 内联(paths 映射 + 隔离 tsc 验证)、publishConfig 覆盖模式(pnpm pack + publish tarball)、tag 触发 CI(Trusted Publishing OIDC)、新包"手动首发+配 Trusted Publisher"两段式、EOTP/provenance E422 等坑。
 - [guides/verification-and-commit-practices.md](guides/verification-and-commit-practices.md) — 验证与提交纪律:证据矩阵、收尾同轮更新 current-state、配置面对等、出站边界测试、opt-in 退出码、长驻进程与跨休眠验证、先取证后改码、批量清理后 lint:fix、pathspec 提交与 hook 自动暂存防污染。
 
 ## memory/ — 过程记忆
 
 - [memory/doc-gaps.md](memory/doc-gaps.md) — llmdoc 文档缺口追踪(当前无缺口)。recorder 维护。
-- `memory/decisions/`(空)— durable 设计/流程决策,recorder 维护。
-- `memory/reflections/`(当前为空)— 新反思仍写此目录(reflector 维护),定期把 durable 教训提炼进 guides 后归档。bootstrap 期存量反思已提炼完毕并归档至 `archive/llmdoc-reflections/`。
+- `memory/decisions/` — durable 设计/流程决策,recorder 维护。现存:
+  - [memory/decisions/plugin-hosted-install.md](memory/decisions/plugin-hosted-install.md) — 2026-07-07:Plugin 托管化安装(插件市场),CF 宿主经 scoped API token 自动部署;多挂载扩展 CallContext(`mountPath`/`mountConfig`);手动 register 通道保留。
+- `memory/reflections/` — 新反思写此目录(reflector 维护),定期把 durable 教训提炼进 guides 后归档。现存:2026-07-07 gateway/dashboard 可发布化(publishConfig 覆盖、隔离 tsc 环境坑)。bootstrap 期存量反思已提炼完毕并归档至 `archive/llmdoc-reflections/`。
 
 ## 路由提示
 

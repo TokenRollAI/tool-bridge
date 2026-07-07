@@ -1,12 +1,12 @@
 # 当前状态(MUST)
 
-> 用途:每次会话开场必读的易变状态快照(部署、代码现状、凭据配置、工具链、未竟事项)。更新时机:部署/凭据/工具链/能力面变化时,由当轮 Agent 更新本文件。最后核实日期:2026-07-07。
+> 用途:每次会话开场必读的易变状态快照(部署、代码现状、凭据配置、工具链、未竟事项)。更新时机:部署/凭据/工具链/能力面变化时,由当轮 Agent 更新本文件。最后核实日期:2026-07-08。
 
 ## 项目状态
 
 - **初步实现阶段已完成**(2026-07-07 "破壳"):SK 鉴权与作用域、HTBP 核心树与内容协商、Tool 层(mcp/http/remote 联邦 + 虚拟化)、Context 层(r2/s3 四动词 + Search + `$ref` 大对象)、设备反向注册(DO WebSocket hibernation)、SDK、Plugin 系统、Dashboard 均已落地并经生产验证。
 - bootstrap 期过程文档已归档 `archive/`;知识真源 = 代码 + llmdoc(见 [project-brief.md](project-brief.md))。
-- **npm 已发布**:`@tool-bridge/cli` 0.1.1、`@tool-bridge/sdk` 0.1.0(均 public,经 CI Trusted Publishing;core/gateway/dashboard 为 private 不发布)。发布流程见 [../guides/npm-publish.md](../guides/npm-publish.md)。
+- **npm 已发布**:`@tool-bridge/cli` 0.1.1、`@tool-bridge/sdk` 0.1.0(均 public,经 CI Trusted Publishing;core 为 private 不发布)。gateway/dashboard 0.1.0 已改为可发布(为一键部署模板铺路),**待手动首发 + 配 Trusted Publisher**。发布流程见 [../guides/npm-publish.md](../guides/npm-publish.md)。
 
 ## 已部署资源(DJJ 账户)
 
@@ -28,12 +28,12 @@
   - `plugin/`(manifest 校验 / envelope 编解码 / RequestDedupe / 契约校验)
   - `node/`(`./node` 子导出:FsObjectStore realpath 防逃逸 + shellExecutor 有界缓冲)
   - 顶层 `errors.ts`(TBError)/ `store.ts`(StateStore 接口 + 内存实现)/ `types.ts`。
-- `packages/gateway` — Workers 胶水(private),**82 个默认集成测试 + 6 个 opt-in skipped**(真实 workerd):`app.ts`(Env→deps 适配)/ `tbApp.ts`(**宿主中立 createTbApp**,路由/认证/HTBP/remote 聚合,SDK 复用)/ `bootstrap.ts` / `kvStateStore.ts` / `refToken.ts`(`$ref` 中转 token)/ `deviceSession.ts`(DeviceSession DO)/ `providers/`(mcp / http / remote / pluginTool / pluginContext / pluginClient / r2Object / s3Object / s3Sign / toolCache);`wrangler.jsonc` 在此包内。
+- `packages/gateway` — Workers 胶水(可发布 Worker library:tsup 单文件 ESM bundle core,`src/index.ts` 另 export `createApp` 与 `type Env`;dev exports 指 src、发布形态 publishConfig 覆盖指 dist),**82 个默认集成测试 + 6 个 opt-in skipped**(真实 workerd):`app.ts`(Env→deps 适配)/ `tbApp.ts`(**宿主中立 createTbApp**,路由/认证/HTBP/remote 聚合,SDK 复用)/ `bootstrap.ts` / `kvStateStore.ts` / `refToken.ts`(`$ref` 中转 token)/ `deviceSession.ts`(DeviceSession DO)/ `providers/`(mcp / http / remote / pluginTool / pluginContext / pluginClient / r2Object / s3Object / s3Sign / toolCache);`wrangler.jsonc` 在此包内。
 - `packages/cli` — citty 框架,**101 个单测**,**17 个命令**:status / login / whoami / use / sk / secret / ls / tree / help / call / tool / server / ctx / connect / device / mount / plugin;全局 `--json`;配置 `~/.config/tool-bridge/config.json`(XDG,多 profile)。
 - `packages/sdk` — 薄装配层(4 个源文件),**12 个单测 + 1 个 opt-in**;公开面 `createToolBridge(config)` → `{ fetch, registerTool, registerContext, connect }`,复用 core + gateway 的 createTbApp;再导出内存宿主实现(MemoryStateStore 等)。
-- `packages/dashboard` — React 19 + Vite + Tailwind 4 + shadcn/ui + @rjsf + TanStack Query SPA(private):树导航 / cmd 表单调用 / context 条目浏览 / SK·Registry·Devices·Secrets 管理页 / ⌘K 面板;无专用后端(同源消费 HTBP),行为由 gateway 的 `ui.integration.test.ts` 覆盖;`pnpm deploy:all` 先 build dashboard 再部署 gateway。
+- `packages/dashboard` — React 19 + Vite + Tailwind 4 + shadcn/ui + @rjsf + TanStack Query SPA(可发布纯静态产物包:只发 dist,依赖全在 devDependencies):树导航 / cmd 表单调用 / context 条目浏览 / SK·Registry·Devices·Secrets 管理页 / ⌘K 面板;无专用后端(同源消费 HTBP),行为由 gateway 的 `ui.integration.test.ts` 覆盖;`pnpm deploy:all` 先 build dashboard 再部署 gateway。
 - `scripts/` — `gen-dev-vars.mjs` / `provision.mjs` / `smoke.ts`(healthz + 无 SK 401 + 带 SK 200)+ 三个可重跑生产验收脚本:`verify-revocation.ts`(吊销传播,实测 0.3s)/ `verify-device.ts`(设备 shell/fs/registerPaths 全链路,可选跨休眠用例)/ `verify-plugin.ts`(Plugin 注册→挂载→四动词全流程)。
-- CI(.github/workflows/):`publish-cli.yml`(tag `cli-v*`)与 `publish-sdk.yml`(tag `sdk-v*`),npm Trusted Publishing(OIDC);**无主干测试 CI**。
+- CI(.github/workflows/):`publish-cli.yml`(tag `cli-v*`)/ `publish-sdk.yml`(tag `sdk-v*`)/ `publish-gateway.yml`(tag `gateway-v*`)/ `publish-dashboard.yml`(tag `dashboard-v*`),npm Trusted Publishing(OIDC);**无主干测试 CI**。
 - 工具链:lint 用 biome;测试 vitest 4 + @cloudflare/vitest-pool-workers 0.18(API 变更注意见 [../guides/workers-kv-pitfalls.md](../guides/workers-kv-pitfalls.md))。
 
 ## 常用命令
@@ -81,6 +81,8 @@
 
 ## 未竟事项(路线图,非进度账本)
 
+- **gateway/dashboard 首发**:两包 0.1.0 待用户手动 `npm publish` 首发 + npmjs.com 配 Trusted Publisher(workflow 分别为 `publish-gateway.yml` / `publish-dashboard.yml`),见 [../guides/npm-publish.md](../guides/npm-publish.md)。
+- **tool-bridge-template 模板仓库**(未动工):公开仓库挂 Deploy to Cloudflare 按钮——3 行 `src/index.ts`(import app + `DeviceSession` from `@tool-bridge/gateway`)+ 无 account_id/routes 的干净 wrangler.jsonc(KV/R2/DO 由 Deploy 按钮自动创建回填)+ copy-ui 脚本(dashboard 包 dist → public);presign/ASSETS/TB_BOOTSTRAP_ADMIN_SK 在运行时均可选且已优雅降级,无需改运行时代码。
 - **`tb init` 向导**:干净账户一条命令拉起(wrangler auth 检查 → provision → 部署 → Admin SK 输出,可重入);当前部署路径是 `pnpm deploy:all`。
 - **Docker 自部署路径**:node adapter(@hono/node-server)+ SQLite StateStore + FS ObjectStore + ws 设备通道 + Dashboard 静态托管,`/data` 卷持久化;SDK 已具备宿主中立装配面,缺镜像、SQLite StateStore 与验收(SQLite 宿主的吊销即时性验证也在此时补)。落地时补一篇 Docker 宿主 guide。
 - **端到端验收系统化**:七个 User Case 的脚本化 E2E(CLI `--json` 驱动 + Dashboard 浏览器侧)未拉通;现有 smoke + 三个 verify-* 脚本覆盖主链路。
