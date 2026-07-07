@@ -289,6 +289,7 @@ interface SecretStore {                  // 节点面挂载为 builtin 节点 sy
 ```
 
 - **只写不读**:节点面只有 `Set/List/Delete`;任何接口(含 `~help`、返回值、审计留痕)不得回显明文。
+- **保留命名空间(Phase 5 定型)**:含 `:` 的 name 为平台保留命名空间(如 `plugin-token:<id>`)——SecretStore 实现层放行,builtin 节点面(`system/secret` set/delete)拒绝,防用户伪造/误删平台托管凭证。
 - **落地**:值经 AES-256-GCM 加密后存 StateStore;主密钥 `TB_SECRET_ENCRYPTION_KEY` 为部署期 env-only(CF `wrangler secret` / Docker env)——信任根不自举存储。
 - Case 2 的实际流程:Dashboard/CLI 先 `Set("s3-main", <SK>)`,再 `NodeRegistry.Write{kind:'context', config:{provider:'s3', authRef:'s3-main'}}`。
 
@@ -594,14 +595,21 @@ function createToolBridge(config: {
   secrets?: SecretStore                 // §2.5 上游凭证(宿主注入;缺省实现 = 基于 state 的加密存储,
                                         //   同样要求主密钥——env TB_SECRET_ENCRYPTION_KEY 或
                                         //   config 显式传入;两者皆无 → secret 能力禁用,Set 返回
-                                        //   unavailable,与 §2.5 一致)
-  deviceTransport?: DeviceTransport     // §6 设备 WS 的网关侧宿主(未注入则 device 能力禁用)
+                                        //   unavailable,与 §2.5 一致;Phase 5 注记:实现以
+                                        //   SecretStoreImpl 具体类交付,core 未抽同名接口,
+                                        //   语义与 §2.5 逐方法一致)
+  deviceTransport?: DeviceTransport     // §6 设备 WS 的网关侧宿主(未注入则 device 能力禁用;
+                                        //   Phase 5 注记:SDK 宿主当前注入会得 unimplemented,
+                                        //   网关侧消费属 Phase 6 Docker 宿主)
   reservedRoots?: string[]              // §2.4 b 的追加保留根路径
   remoteAllowlist?: string[]            // §3.4 remote baseUrl 的 host 后缀白名单;空/缺省 =
                                         //   拒绝一切 remote 注册(Phase 2 定型;CF 宿主经
                                         //   env TB_REMOTE_ALLOWLIST 逗号分隔注入)
   maxHops?: number                      // §3.4 X-TB-Via 跳数上限;默认 4(Phase 2 定型;
                                         //   CF 宿主经 env TB_MAX_HOPS 注入)
+  // Phase 5 注记:SDK 宿主另有引导扩展字段(adminSk / allowInsecureHttp / instanceId;
+  //   encryptionKey 即上文 secrets 注释中「config 显式传入」的落点),属 §7 之外的
+  //   宿主装配面,见 packages/sdk README
 }): ToolBridge
 
 interface ToolBridge {
@@ -637,7 +645,8 @@ interface ObjectMeta {                  // Phase 3 定型:签名修订——R2/S
   size: number
   contentType?: string
   updatedAt: Timestamp
-  metadata: Record<string, string>
+  metadata?: Record<string, string>     // Phase 5 定型回写:可选——undefined 表示后端 list 未返回
+                                        //   user metadata(S3 ListObjectsV2 行为),区别于空对象
 }
 interface ObjectStore {                 // CF=R2 / Docker=FS 或 S3
   head(key: string): Promise<ObjectMeta | null>
@@ -679,7 +688,8 @@ interface PluginRegistry {              // 挂载为 builtin 节点 system/plugi
 }
 
 interface PluginManifest {
-  id: string
+  id: string                            // 字符约束 [A-Za-z0-9][A-Za-z0-9._-]*(进 KV key 与
+                                        //   config.provider 引用,拒 '/'、':'、空白;Phase 5 定型回写)
   kind: 'tool-provider' | 'context-provider'
   interfaceVersion: string              // "tool-provider/v1" | "context-provider/v1"
   endpoint: string                      // https:// 或 binding:<name>(平台内 service binding)
