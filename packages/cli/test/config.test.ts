@@ -65,7 +65,7 @@ describe('resolveTarget 优先级 flag > env > config', () => {
 
   it('flag 覆盖 env 与配置', () => {
     process.env.TB_BASE_URL = 'https://env'
-    expect(resolveTarget({ 'base-url': 'https://flag', sk: 'tbk_flag' })).toEqual({
+    expect(resolveTarget({ baseUrl: 'https://flag', sk: 'tbk_flag' })).toEqual({
       baseUrl: 'https://flag',
       sk: 'tbk_flag',
     })

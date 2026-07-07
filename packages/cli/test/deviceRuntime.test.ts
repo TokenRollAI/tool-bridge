@@ -3,9 +3,9 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import ReconnectingWebSocket from 'partysocket/ws'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { connectCommand } from '../src/commands/connect'
 import { startDeviceConnection } from '../src/deviceRuntime'
 import { CliError } from '../src/http'
+import { runCli } from './cliHarness'
 
 // 复现 partysocket 关键行为:close() 会同步派发 close 事件——bug(拒绝被吞、
 // 退出码 0)正是 onRejected 里 close 触发的 resolveClosed 抢先于 rejectClosed。
@@ -93,18 +93,16 @@ describe('网关拒绝帧(error + close 1008)', () => {
   })
 
   it('tb connect 被拒 → stderr 输出错误信息、退出码非 0', async () => {
-    const running = Promise.resolve(
-      (connectCommand as { run?: (ctx: unknown) => unknown }).run?.({
-        args: {
-          'base-url': 'https://gw.example',
-          sk: 'tbk_x',
-          'device-id': 'd-rej-cmd',
-          json: false,
-        },
-        cmd: connectCommand,
-        rawArgs: [],
-      }),
-    )
+    // connect 是长驻命令:runCli 的 promise 在连接关闭后才 resolve,先派发帧再 await。
+    const running = runCli([
+      'connect',
+      '--base-url',
+      'https://gw.example',
+      '--sk',
+      'tbk_x',
+      '--device-id',
+      'd-rej-cmd',
+    ])
     await vi.waitFor(() => expect(FakeWs.instances.length).toBe(1))
     const socket = FakeWs.instances[0]
     socket?.dispatch('open', {})

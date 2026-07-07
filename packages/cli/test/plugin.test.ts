@@ -3,23 +3,11 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Readable } from 'node:stream'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import {
-  pluginGetCommand,
-  pluginHealthCommand,
-  pluginListCommand,
-  pluginRegisterCommand,
-  pluginRmCommand,
-  pluginUpdateCommand,
-} from '../src/commands/plugin'
 import { resetFetch, setFetch } from '../src/http'
+import { runCli } from './cliHarness'
 
-function invoke(
-  // biome-ignore lint/suspicious/noExplicitAny: citty run context 仅用到 args,测试直接注入。
-  cmd: { run?: (ctx: any) => unknown },
-  args: Record<string, unknown>,
-): Promise<unknown> {
-  return Promise.resolve(cmd.run?.({ args, cmd, rawArgs: [] }))
-}
+/** gw 三件套:每条命令都要带的目标与输出开关(经真实 commander 解析)。 */
+const gw = ['--base-url', 'https://gw', '--sk', 'tbk_admin'] as const
 
 const manifest = {
   id: 'notion-ctx',
@@ -82,12 +70,7 @@ describe('tb plugin register', () => {
     writeFileSync(file, JSON.stringify(manifest))
     const fn = jsonFetch({ ...manifest, pluginToken: 'tbk_plugin_once' })
 
-    await invoke(pluginRegisterCommand, {
-      json: true,
-      'base-url': 'https://gw',
-      sk: 'tbk_admin',
-      file,
-    })
+    await runCli(['plugin', 'register', ...gw, '--json', '--file', file])
 
     const [url, init] = fn.mock.calls[0] as [string, RequestInit]
     expect(url).toBe('https://gw/system/plugin')
@@ -102,12 +85,7 @@ describe('tb plugin register', () => {
     const restore = withStdin(JSON.stringify(manifest))
     try {
       const fn = jsonFetch(manifest)
-      await invoke(pluginRegisterCommand, {
-        json: true,
-        'base-url': 'https://gw',
-        sk: 'tbk_admin',
-        file: '-',
-      })
+      await runCli(['plugin', 'register', ...gw, '--json', '--file', '-'])
       const [, init] = fn.mock.calls[0] as [string, RequestInit]
       expect(JSON.parse(init.body as string).arguments).toEqual(manifest)
       expect(process.exitCode).toBe(0)
@@ -121,12 +99,7 @@ describe('tb plugin register', () => {
     writeFileSync(file, JSON.stringify(manifest))
     jsonFetch({ ...manifest, pluginToken: 'tbk_plugin_once' })
 
-    await invoke(pluginRegisterCommand, {
-      json: false,
-      'base-url': 'https://gw',
-      sk: 'tbk_admin',
-      file,
-    })
+    await runCli(['plugin', 'register', ...gw, '--file', file])
 
     const out = stdoutText()
     expect(out).toContain('registered plugin: notion-ctx')
@@ -139,12 +112,7 @@ describe('tb plugin register', () => {
     const file = join(tmp, 'bad.json')
     writeFileSync(file, '{not json')
     const fn = jsonFetch({})
-    await invoke(pluginRegisterCommand, {
-      json: true,
-      'base-url': 'https://gw',
-      sk: 'tbk_admin',
-      file,
-    })
+    await runCli(['plugin', 'register', ...gw, '--json', '--file', file])
     expect(fn).not.toHaveBeenCalled()
     expect(process.exitCode).toBe(1)
   })
@@ -153,7 +121,7 @@ describe('tb plugin register', () => {
 describe('tb plugin list', () => {
   it('--json 原样输出 Page;请求 tool=list', async () => {
     const fn = jsonFetch({ items: [manifest] })
-    await invoke(pluginListCommand, { json: true, 'base-url': 'https://gw', sk: 'tbk_admin' })
+    await runCli(['plugin', 'list', ...gw, '--json'])
     const [url, init] = fn.mock.calls[0] as [string, RequestInit]
     expect(url).toBe('https://gw/system/plugin')
     expect(JSON.parse(init.body as string).tool).toBe('list')
@@ -163,7 +131,7 @@ describe('tb plugin list', () => {
 
   it('人类模式:表格含 id/kind/endpoint/enabled', async () => {
     jsonFetch({ items: [manifest] })
-    await invoke(pluginListCommand, { json: false, 'base-url': 'https://gw', sk: 'tbk_admin' })
+    await runCli(['plugin', 'list', ...gw])
     const out = stdoutText()
     expect(out).toContain('notion-ctx')
     expect(out).toContain('context-provider')
@@ -176,12 +144,7 @@ describe('tb plugin list', () => {
 describe('tb plugin get', () => {
   it('请求 tool=get + id;--json 原样输出 manifest', async () => {
     const fn = jsonFetch(manifest)
-    await invoke(pluginGetCommand, {
-      json: true,
-      'base-url': 'https://gw',
-      sk: 'tbk_admin',
-      id: 'notion-ctx',
-    })
+    await runCli(['plugin', 'get', 'notion-ctx', ...gw, '--json'])
     const [, init] = fn.mock.calls[0] as [string, RequestInit]
     const payload = JSON.parse(init.body as string)
     expect(payload.tool).toBe('get')
@@ -197,13 +160,7 @@ describe('tb plugin update', () => {
     writeFileSync(file, JSON.stringify({ enabled: false }))
     const fn = jsonFetch({ ...manifest, enabled: false })
 
-    await invoke(pluginUpdateCommand, {
-      json: true,
-      'base-url': 'https://gw',
-      sk: 'tbk_admin',
-      id: 'notion-ctx',
-      file,
-    })
+    await runCli(['plugin', 'update', 'notion-ctx', ...gw, '--json', '--file', file])
 
     const [url, init] = fn.mock.calls[0] as [string, RequestInit]
     expect(url).toBe('https://gw/system/plugin')
@@ -219,13 +176,7 @@ describe('tb plugin update', () => {
     writeFileSync(file, JSON.stringify({ auth: { kind: 'platform-token' } }))
     jsonFetch({ ...manifest, pluginToken: 'tbk_plugin_rotated' })
 
-    await invoke(pluginUpdateCommand, {
-      json: false,
-      'base-url': 'https://gw',
-      sk: 'tbk_admin',
-      id: 'notion-ctx',
-      file,
-    })
+    await runCli(['plugin', 'update', 'notion-ctx', ...gw, '--file', file])
 
     const out = stdoutText()
     expect(out).toContain('updated plugin: notion-ctx')
@@ -238,13 +189,7 @@ describe('tb plugin update', () => {
     const file = join(tmp, 'bad.json')
     writeFileSync(file, '{not json')
     const fn = jsonFetch({})
-    await invoke(pluginUpdateCommand, {
-      json: true,
-      'base-url': 'https://gw',
-      sk: 'tbk_admin',
-      id: 'notion-ctx',
-      file,
-    })
+    await runCli(['plugin', 'update', 'notion-ctx', ...gw, '--json', '--file', file])
     expect(fn).not.toHaveBeenCalled()
     expect(process.exitCode).toBe(1)
   })
@@ -253,12 +198,7 @@ describe('tb plugin update', () => {
 describe('tb plugin health', () => {
   it('healthy → 输出 healthy/checkedAt,退出码 0', async () => {
     jsonFetch({ healthy: true, checkedAt: '2026-07-07T00:00:00Z' })
-    await invoke(pluginHealthCommand, {
-      json: false,
-      'base-url': 'https://gw',
-      sk: 'tbk_admin',
-      id: 'notion-ctx',
-    })
+    await runCli(['plugin', 'health', 'notion-ctx', ...gw])
     const out = stdoutText()
     expect(out).toContain('healthy')
     expect(out).toContain('2026-07-07T00:00:00Z')
@@ -267,12 +207,7 @@ describe('tb plugin health', () => {
 
   it('unhealthy → 退出码 1(--json 也一样)', async () => {
     jsonFetch({ healthy: false, checkedAt: '2026-07-07T00:00:00Z', consecutiveFailures: 3 })
-    await invoke(pluginHealthCommand, {
-      json: true,
-      'base-url': 'https://gw',
-      sk: 'tbk_admin',
-      id: 'notion-ctx',
-    })
+    await runCli(['plugin', 'health', 'notion-ctx', ...gw, '--json'])
     expect(JSON.parse(stdoutText()).healthy).toBe(false)
     expect(process.exitCode).toBe(1)
   })
@@ -281,12 +216,7 @@ describe('tb plugin health', () => {
 describe('tb plugin rm', () => {
   it('请求 tool=delete + id;人类模式回显 removed', async () => {
     const fn = jsonFetch({})
-    await invoke(pluginRmCommand, {
-      json: false,
-      'base-url': 'https://gw',
-      sk: 'tbk_admin',
-      id: 'notion-ctx',
-    })
+    await runCli(['plugin', 'rm', 'notion-ctx', ...gw])
     const [, init] = fn.mock.calls[0] as [string, RequestInit]
     const payload = JSON.parse(init.body as string)
     expect(payload.tool).toBe('delete')
@@ -299,7 +229,7 @@ describe('tb plugin rm', () => {
 describe('TBError 透出', () => {
   it('403 TBError → 退出码 1 + --json 保留 code', async () => {
     jsonFetch({ code: 'permission_denied', message: 'admin required', retryable: false }, 403)
-    await invoke(pluginListCommand, { json: true, 'base-url': 'https://gw', sk: 'tbk_x' })
+    await runCli(['plugin', 'list', '--base-url', 'https://gw', '--sk', 'tbk_x', '--json'])
     const out = JSON.parse(stdoutText())
     expect(out.ok).toBe(false)
     expect(out.code).toBe('permission_denied')

@@ -2,26 +2,9 @@ import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import {
-  ctxCatCommand,
-  ctxLsCommand,
-  ctxMountCommand,
-  ctxPatchCommand,
-  ctxPutCommand,
-  ctxSearchCommand,
-  ctxUnmountCommand,
-  guessContentType,
-  parseMeta,
-} from '../src/commands/ctx'
+import { guessContentType, parseMeta } from '../src/commands/ctx'
 import { resetFetch, setFetch } from '../src/http'
-
-function invoke(
-  // biome-ignore lint/suspicious/noExplicitAny: citty run context 仅用到 args,测试直接注入。
-  cmd: { run?: (ctx: any) => unknown },
-  args: Record<string, unknown>,
-): Promise<unknown> {
-  return Promise.resolve(cmd.run?.({ args, cmd, rawArgs: [] }))
-}
+import { runCli } from './cliHarness'
 
 /** 捕获请求并按 body 应答;返回 mock 以断言 URL/body。 */
 function captureFetch(body: unknown, status = 200): ReturnType<typeof vi.fn> {
@@ -41,7 +24,7 @@ function stdoutText(): string {
   return stdout.mock.calls.map((c) => String(c[0])).join('')
 }
 
-const gw = { 'base-url': 'https://gw', sk: 'tbk_x' }
+const gw = ['--base-url', 'https://gw', '--sk', 'tbk_x']
 
 beforeEach(() => {
   process.exitCode = 0
@@ -58,7 +41,7 @@ afterEach(() => {
 describe('tb ctx ls', () => {
   it('无 prefix → List{path:""},不带 opts', async () => {
     const fn = captureFetch({ items: [] })
-    await invoke(ctxLsCommand, { ...gw, json: true, ns: 'ctx/notes' })
+    await runCli(['ctx', 'ls', 'ctx/notes', ...gw, '--json'])
     const [url, init] = fn.mock.calls[0] as [string, RequestInit]
     expect(url).toBe('https://gw/ctx/notes')
     expect((init.method ?? '').toUpperCase()).toBe('POST')
@@ -83,14 +66,18 @@ describe('tb ctx ls', () => {
       cursor: 'c2',
     }
     const fn = captureFetch(page)
-    await invoke(ctxLsCommand, {
+    await runCli([
+      'ctx',
+      'ls',
+      'ctx/notes',
+      'guides/',
+      '--limit',
+      '10',
+      '--cursor',
+      'c1',
       ...gw,
-      json: true,
-      ns: 'ctx/notes',
-      prefix: 'guides/',
-      limit: '10',
-      cursor: 'c1',
-    })
+      '--json',
+    ])
     const [, init] = fn.mock.calls[0] as [string, RequestInit]
     expect(JSON.parse(init.body as string)).toEqual({
       tool: 'List',
@@ -112,7 +99,7 @@ describe('tb ctx ls', () => {
         },
       ],
     })
-    await invoke(ctxLsCommand, { ...gw, json: false, ns: 'ctx/notes' })
+    await runCli(['ctx', 'ls', 'ctx/notes', ...gw])
     const printed = stdoutText()
     expect(printed).toContain('node://ctx/notes/a.md')
     expect(printed).toContain('12')
@@ -131,7 +118,7 @@ describe('tb ctx cat', () => {
       metadata: {},
       content: 'hello world\n',
     })
-    await invoke(ctxCatCommand, { ...gw, json: false, ns: 'ctx/notes', entry: 'a.md' })
+    await runCli(['ctx', 'cat', 'ctx/notes', 'a.md', ...gw])
     const [url, init] = fn.mock.calls[0] as [string, RequestInit]
     expect(url).toBe('https://gw/ctx/notes')
     expect(JSON.parse(init.body as string)).toEqual({
@@ -152,7 +139,7 @@ describe('tb ctx cat', () => {
       metadata: {},
       content: { $ref: 'https://r2.example/presigned?sig=abc' },
     })
-    await invoke(ctxCatCommand, { ...gw, json: false, ns: 'ctx/notes', entry: 'big.bin' })
+    await runCli(['ctx', 'cat', 'ctx/notes', 'big.bin', ...gw])
     expect(stdoutText()).toBe('https://r2.example/presigned?sig=abc\n')
     const stderr = process.stderr.write as unknown as ReturnType<typeof vi.fn>
     const err = stderr.mock.calls.map((c) => String(c[0])).join('')
@@ -170,7 +157,7 @@ describe('tb ctx cat', () => {
       content: { $ref: 'https://r2.example/presigned?sig=abc' },
     }
     captureFetch(entry)
-    await invoke(ctxCatCommand, { ...gw, json: true, ns: 'ctx/notes', entry: 'big.bin' })
+    await runCli(['ctx', 'cat', 'ctx/notes', 'big.bin', ...gw, '--json'])
     expect(JSON.parse(stdoutText())).toEqual(entry)
   })
 })
@@ -178,15 +165,22 @@ describe('tb ctx cat', () => {
 describe('tb ctx put', () => {
   it('--content + --meta + --if-version → Write{path,entry},缺省 contentType text/plain', async () => {
     const fn = captureFetch({ uri: 'node://ctx/notes/a', version: 'v2' })
-    await invoke(ctxPutCommand, {
+    await runCli([
+      'ctx',
+      'put',
+      'ctx/notes',
+      'a',
+      '--content',
+      'hi',
+      '--meta',
+      'author=djj',
+      '--meta',
+      'topic=phase=3',
+      '--if-version',
+      'v1',
       ...gw,
-      json: true,
-      ns: 'ctx/notes',
-      entry: 'a',
-      content: 'hi',
-      meta: ['author=djj', 'topic=phase=3'],
-      'if-version': 'v1',
-    })
+      '--json',
+    ])
     const [url, init] = fn.mock.calls[0] as [string, RequestInit]
     expect(url).toBe('https://gw/ctx/notes')
     expect(JSON.parse(init.body as string)).toEqual({
@@ -210,7 +204,7 @@ describe('tb ctx put', () => {
     const file = join(dir, 'note.md')
     writeFileSync(file, '# title\n')
     const fn = captureFetch({ uri: 'node://ctx/notes/note.md', version: 'v1' })
-    await invoke(ctxPutCommand, { ...gw, json: true, ns: 'ctx/notes', entry: 'note.md', file })
+    await runCli(['ctx', 'put', 'ctx/notes', 'note.md', '--file', file, ...gw, '--json'])
     const [, init] = fn.mock.calls[0] as [string, RequestInit]
     expect(JSON.parse(init.body as string)).toEqual({
       tool: 'Write',
@@ -223,29 +217,38 @@ describe('tb ctx put', () => {
 
   it('--content-type 显式覆盖推断', async () => {
     const fn = captureFetch({ uri: 'node://ctx/notes/a', version: 'v1' })
-    await invoke(ctxPutCommand, {
+    await runCli([
+      'ctx',
+      'put',
+      'ctx/notes',
+      'a',
+      '--content',
+      '{}',
+      '--content-type',
+      'application/json',
       ...gw,
-      json: true,
-      ns: 'ctx/notes',
-      entry: 'a',
-      content: '{}',
-      'content-type': 'application/json',
-    })
+      '--json',
+    ])
     const [, init] = fn.mock.calls[0] as [string, RequestInit]
     const payload = JSON.parse(init.body as string)
     expect(payload.arguments.entry.contentType).toBe('application/json')
   })
 
   it('--meta 缺 "=" → 退出码 1,不发请求', async () => {
+    // --content 始终提供,避免 put 落到 stdin 分支(parseMeta 先于内容解析抛错)。
     const fn = captureFetch({})
-    await invoke(ctxPutCommand, {
+    await runCli([
+      'ctx',
+      'put',
+      'ctx/notes',
+      'a',
+      '--content',
+      'hi',
+      '--meta',
+      'noequals',
       ...gw,
-      json: true,
-      ns: 'ctx/notes',
-      entry: 'a',
-      content: 'hi',
-      meta: ['noequals'],
-    })
+      '--json',
+    ])
     expect(fn).not.toHaveBeenCalled()
     expect(process.exitCode).toBe(1)
   })
@@ -270,14 +273,18 @@ describe('parseMeta / guessContentType', () => {
 describe('tb ctx patch', () => {
   it('--content → Update{path,patch:{content}}', async () => {
     const fn = captureFetch({ uri: 'node://ctx/notes/a', version: 'v3' })
-    await invoke(ctxPatchCommand, {
+    await runCli([
+      'ctx',
+      'patch',
+      'ctx/notes',
+      'a',
+      '--content',
+      'new body',
+      '--if-version',
+      'v2',
       ...gw,
-      json: true,
-      ns: 'ctx/notes',
-      entry: 'a',
-      content: 'new body',
-      'if-version': 'v2',
-    })
+      '--json',
+    ])
     const [url, init] = fn.mock.calls[0] as [string, RequestInit]
     expect(url).toBe('https://gw/ctx/notes')
     expect(JSON.parse(init.body as string)).toEqual({
@@ -288,13 +295,7 @@ describe('tb ctx patch', () => {
 
   it('仅 --meta → patch 只带 metadata', async () => {
     const fn = captureFetch({ uri: 'node://ctx/notes/a', version: 'v3' })
-    await invoke(ctxPatchCommand, {
-      ...gw,
-      json: true,
-      ns: 'ctx/notes',
-      entry: 'a',
-      meta: 'reviewed=yes',
-    })
+    await runCli(['ctx', 'patch', 'ctx/notes', 'a', '--meta', 'reviewed=yes', ...gw, '--json'])
     const [, init] = fn.mock.calls[0] as [string, RequestInit]
     expect(JSON.parse(init.body as string)).toEqual({
       tool: 'Update',
@@ -304,7 +305,7 @@ describe('tb ctx patch', () => {
 
   it('content 与 meta 都缺 → 本地退出码 1,不发请求', async () => {
     const fn = captureFetch({})
-    await invoke(ctxPatchCommand, { ...gw, json: true, ns: 'ctx/notes', entry: 'a' })
+    await runCli(['ctx', 'patch', 'ctx/notes', 'a', ...gw, '--json'])
     expect(fn).not.toHaveBeenCalled()
     expect(process.exitCode).toBe(1)
   })
@@ -313,14 +314,18 @@ describe('tb ctx patch', () => {
 describe('tb ctx search', () => {
   it('--mode/--limit → Search{query,opts}', async () => {
     const fn = captureFetch({ items: [] })
-    await invoke(ctxSearchCommand, {
+    await runCli([
+      'ctx',
+      'search',
+      'ctx/notes',
+      'phase',
+      '--mode',
+      'keyword',
+      '--limit',
+      '5',
       ...gw,
-      json: true,
-      ns: 'ctx/notes',
-      query: 'phase',
-      mode: 'keyword',
-      limit: '5',
-    })
+      '--json',
+    ])
     const [url, init] = fn.mock.calls[0] as [string, RequestInit]
     expect(url).toBe('https://gw/ctx/notes')
     expect(JSON.parse(init.body as string)).toEqual({
@@ -332,7 +337,7 @@ describe('tb ctx search', () => {
 
   it('缺省不带 opts;非法 --mode → 退出码 1', async () => {
     const fn = captureFetch({ items: [] })
-    await invoke(ctxSearchCommand, { ...gw, json: true, ns: 'ctx/notes', query: 'phase' })
+    await runCli(['ctx', 'search', 'ctx/notes', 'phase', ...gw, '--json'])
     const [, init] = fn.mock.calls[0] as [string, RequestInit]
     expect(JSON.parse(init.body as string)).toEqual({
       tool: 'Search',
@@ -340,13 +345,7 @@ describe('tb ctx search', () => {
     })
 
     fn.mockClear()
-    await invoke(ctxSearchCommand, {
-      ...gw,
-      json: true,
-      ns: 'ctx/notes',
-      query: 'phase',
-      mode: 'fuzzy',
-    })
+    await runCli(['ctx', 'search', 'ctx/notes', 'phase', '--mode', 'fuzzy', ...gw, '--json'])
     expect(fn).not.toHaveBeenCalled()
     expect(process.exitCode).toBe(1)
   })
@@ -355,16 +354,22 @@ describe('tb ctx search', () => {
 describe('tb ctx mount', () => {
   it('r2 → ~register,config {kind:context,provider:r2,providerConfig:{prefix},readOnly,ttl}', async () => {
     const fn = captureFetch({ path: 'ctx/notes', kind: 'context' })
-    await invoke(ctxMountCommand, {
+    await runCli([
+      'ctx',
+      'mount',
+      'ctx/notes',
+      '--provider',
+      'r2',
+      '--description',
+      'team notes',
+      '--prefix',
+      'notes/',
+      '--read-only',
+      '--ttl',
+      '3600',
       ...gw,
-      json: true,
-      path: 'ctx/notes',
-      provider: 'r2',
-      description: 'team notes',
-      prefix: 'notes/',
-      'read-only': true,
-      ttl: '3600',
-    })
+      '--json',
+    ])
     const [url, init] = fn.mock.calls[0] as [string, RequestInit]
     expect(url).toBe('https://gw/ctx/notes/~register')
     const payload = JSON.parse(init.body as string)
@@ -386,24 +391,32 @@ describe('tb ctx mount', () => {
 
   it('r2 无 --prefix → 不带 providerConfig', async () => {
     const fn = captureFetch({ path: 'ctx/notes', kind: 'context' })
-    await invoke(ctxMountCommand, { ...gw, json: true, path: 'ctx/notes', provider: 'r2' })
+    await runCli(['ctx', 'mount', 'ctx/notes', '--provider', 'r2', ...gw, '--json'])
     const [, init] = fn.mock.calls[0] as [string, RequestInit]
     expect(JSON.parse(init.body as string).config).toEqual({ kind: 'context', provider: 'r2' })
   })
 
   it('s3 → providerConfig {endpoint,bucket,region,prefix} + authRef', async () => {
     const fn = captureFetch({ path: 'ctx/ext', kind: 'context' })
-    await invoke(ctxMountCommand, {
+    await runCli([
+      'ctx',
+      'mount',
+      'ctx/ext',
+      '--provider',
+      's3',
+      '--endpoint',
+      'https://s3.example',
+      '--bucket',
+      'docs',
+      '--region',
+      'auto',
+      '--prefix',
+      'team/',
+      '--auth-ref',
+      's3-main',
       ...gw,
-      json: true,
-      path: 'ctx/ext',
-      provider: 's3',
-      endpoint: 'https://s3.example',
-      bucket: 'docs',
-      region: 'auto',
-      prefix: 'team/',
-      'auth-ref': 's3-main',
-    })
+      '--json',
+    ])
     const [, init] = fn.mock.calls[0] as [string, RequestInit]
     expect(JSON.parse(init.body as string).config).toEqual({
       kind: 'context',
@@ -420,33 +433,43 @@ describe('tb ctx mount', () => {
 
   it('s3 缺 --endpoint / --bucket / --auth-ref → 退出码 1,不发请求', async () => {
     const fn = captureFetch({})
-    await invoke(ctxMountCommand, {
+    await runCli([
+      'ctx',
+      'mount',
+      'ctx/ext',
+      '--provider',
+      's3',
+      '--bucket',
+      'docs',
+      '--auth-ref',
+      's3-main',
       ...gw,
-      json: true,
-      path: 'ctx/ext',
-      provider: 's3',
-      bucket: 'docs',
-      'auth-ref': 's3-main',
-    })
+      '--json',
+    ])
     expect(fn).not.toHaveBeenCalled()
     expect(process.exitCode).toBe(1)
 
     process.exitCode = 0
-    await invoke(ctxMountCommand, {
+    await runCli([
+      'ctx',
+      'mount',
+      'ctx/ext',
+      '--provider',
+      's3',
+      '--endpoint',
+      'https://s3.example',
+      '--bucket',
+      'docs',
       ...gw,
-      json: true,
-      path: 'ctx/ext',
-      provider: 's3',
-      endpoint: 'https://s3.example',
-      bucket: 'docs',
-    })
+      '--json',
+    ])
     expect(fn).not.toHaveBeenCalled()
     expect(process.exitCode).toBe(1)
   })
 
   it('非法 --provider → 退出码 1,不发请求', async () => {
     const fn = captureFetch({})
-    await invoke(ctxMountCommand, { ...gw, json: true, path: 'ctx/x', provider: 'gcs' })
+    await runCli(['ctx', 'mount', 'ctx/x', '--provider', 'gcs', ...gw, '--json'])
     expect(fn).not.toHaveBeenCalled()
     expect(process.exitCode).toBe(1)
   })
@@ -468,7 +491,7 @@ describe('tb ctx unmount', () => {
       })
     })
     setFetch(fn as unknown as typeof fetch)
-    await invoke(ctxUnmountCommand, { ...gw, json: true, path: 'ctx/notes' })
+    await runCli(['ctx', 'unmount', 'ctx/notes', ...gw, '--json'])
     expect(fn).toHaveBeenCalledTimes(2)
     expect(String(fn.mock.calls[0]?.[0])).toBe('https://gw/system/registry')
     expect(JSON.parse((fn.mock.calls[0]?.[1] as RequestInit).body as string)).toEqual({
@@ -491,7 +514,7 @@ describe('tb ctx unmount', () => {
         }),
     )
     setFetch(fn as unknown as typeof fetch)
-    await invoke(ctxUnmountCommand, { ...gw, json: false, path: 'docs/ctx7' })
+    await runCli(['ctx', 'unmount', 'docs/ctx7', ...gw])
     expect(fn).toHaveBeenCalledTimes(1) // 只有前置 get,没有 delete
     expect(process.exitCode).toBe(1)
     const stderr = process.stderr.write as unknown as ReturnType<typeof vi.fn>
