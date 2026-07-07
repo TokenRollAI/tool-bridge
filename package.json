@@ -11,7 +11,7 @@
     "typecheck": "pnpm -r --if-present typecheck",
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
-    "test:unit": "pnpm --filter @tool-bridge/core --filter @tool-bridge/cli test",
+    "test:unit": "pnpm --filter @tool-bridge/core --filter @tool-bridge/cli --filter @tool-bridge/sdk test",
     "test:integration": "pnpm --filter @tool-bridge/gateway test",
     "test": "pnpm -r --if-present test",
     "verify": "pnpm typecheck && pnpm lint && pnpm test:unit && pnpm test:integration",

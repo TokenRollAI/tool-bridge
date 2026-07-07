@@ -9,7 +9,7 @@ import {
   type NodeInput,
   NodeRegistryStore,
   type SecretKey,
-  SecretStoreImpl,
+  type SecretStoreImpl,
   SKRegistryStore,
   type StateStore,
   sha256Hex,

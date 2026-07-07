@@ -53,7 +53,8 @@ export async function verifyRefToken(
   const ok = await crypto.subtle.verify(
     'HMAC',
     await hmacKey(secret),
-    sig,
+    // Node 的 WebCrypto 类型要求 Uint8Array<ArrayBuffer>;base64urlDecode 的产物满足但类型面是 ArrayBufferLike。
+    sig as Uint8Array<ArrayBuffer>,
     new TextEncoder().encode(body),
   )
   if (!ok) return null

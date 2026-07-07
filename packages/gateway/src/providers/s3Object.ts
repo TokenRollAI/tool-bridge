@@ -22,7 +22,7 @@ import {
   TBError,
 } from '@tool-bridge/core'
 import { AwsClient } from 'aws4fetch'
-import { encodeObjectKey, presignS3Url } from './r2Object'
+import { encodeObjectKey, presignS3Url } from './s3Sign'
 
 /** s3 provider 的构造参数(providerConfig + authRef 解析出的凭证;Proto §3.2)。 */
 export interface S3StoreConfig {

@@ -251,7 +251,8 @@ export function createTbApp(deps: TbAppDeps): Hono<{ Variables: Vars }> {
       const objects = await contextObjectStoreFor(node.config, deps)
       const got = await objects.get(payload.k)
       if (got === null) throw TBError.notFound('not found')
-      return new Response(got.body as unknown as BodyInit, {
+      // core 的最小流形状与全局 ReadableStream 结构兼容(Workers/Node 皆然)。
+      return new Response(got.body as unknown as ReadableStream, {
         headers: { 'content-type': got.meta.contentType ?? 'application/octet-stream' },
       })
     }),

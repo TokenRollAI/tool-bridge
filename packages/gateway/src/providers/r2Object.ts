@@ -18,6 +18,7 @@ import {
   TBError,
 } from '@tool-bridge/core'
 import { AwsClient } from 'aws4fetch'
+import { encodeObjectKey, presignS3Url } from './s3Sign'
 
 /** R2 S3 兼容端点的 presign 参数(凭证链解析见 app.ts;缺省 = 不提供 presign)。 */
 export interface R2PresignCredentials {
@@ -25,25 +26,6 @@ export interface R2PresignCredentials {
   bucket: string
   accessKeyId: string
   secretAccessKey: string
-}
-
-/** key 逐段 percent-encode(key 可含空格等;'/' 保持为路径分隔)。 */
-export function encodeObjectKey(key: string): string {
-  return key.split('/').map(encodeURIComponent).join('/')
-}
-
-/** presign GET URL:SigV4 signQuery(service 's3'、region 'auto'),ttlSec → X-Amz-Expires。 */
-export async function presignS3Url(
-  client: AwsClient,
-  url: string,
-  ttlSec: number,
-): Promise<string> {
-  const target = new URL(url)
-  target.searchParams.set('X-Amz-Expires', String(ttlSec))
-  const signed = await client.sign(new Request(target.toString(), { method: 'GET' }), {
-    aws: { signQuery: true },
-  })
-  return signed.url
 }
 
 function toMeta(obj: R2Object): ObjectMeta {
