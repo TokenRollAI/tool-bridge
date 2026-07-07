@@ -1,5 +1,5 @@
-import { defineCommand } from 'citty'
-import { globalArgs, resolveTarget } from '../args'
+import { Command } from 'commander'
+import { resolveTarget, withGlobalOpts } from '../args'
 import { apiJson, CliError } from '../http'
 import { guard, printJson, printLine } from '../output'
 import { nodePath } from '../paths'
@@ -19,33 +19,38 @@ export function renderTree(node: TreeJson, depth = 0): string {
   return lines.join('\n')
 }
 
+interface TreeOpts {
+  depth?: string
+  json?: boolean
+  baseUrl?: string
+  sk?: string
+}
+
 /**
  * `tb tree [path] [--depth N]` —— GET <path>/~tree?depth=N(根缺省)。
  * 人类模式画缩进树;--json 原样输出 TreeJson。
  */
-export const treeCommand = defineCommand({
-  meta: { name: 'tree', description: 'Show the node tree (depth-limited)' },
-  args: {
-    ...globalArgs,
-    path: { type: 'positional', description: 'Tree path (default: root)', required: false },
-    depth: { type: 'string', description: 'Max depth (gateway default 2, cap 8)' },
-  },
-  async run({ args }) {
-    const asJson = Boolean(args.json)
-    await guard(asJson, async () => {
-      let depth: number | undefined
-      if (args.depth !== undefined) {
-        depth = Number(args.depth)
-        if (!Number.isInteger(depth) || depth < 0) {
-          throw new CliError(`invalid --depth "${args.depth}": expected a non-negative integer`)
+export function treeCommand(): Command {
+  return withGlobalOpts(new Command('tree'))
+    .description('Show the node tree (depth-limited)')
+    .argument('[path]', 'Tree path (default: root)')
+    .option('--depth <n>', 'Max depth (gateway default 2, cap 8)')
+    .action(async (path: string | undefined, opts: TreeOpts) => {
+      const asJson = Boolean(opts.json)
+      await guard(asJson, async () => {
+        let depth: number | undefined
+        if (opts.depth !== undefined) {
+          depth = Number(opts.depth)
+          if (!Number.isInteger(depth) || depth < 0) {
+            throw new CliError(`invalid --depth "${opts.depth}": expected a non-negative integer`)
+          }
         }
-      }
-      const tree = await apiJson<TreeJson>(resolveTarget(args), {
-        path: nodePath('~tree', args.path as string | undefined),
-        query: { depth },
+        const tree = await apiJson<TreeJson>(resolveTarget(opts), {
+          path: nodePath('~tree', path),
+          query: { depth },
+        })
+        if (asJson) printJson(tree)
+        else printLine(renderTree(tree))
       })
-      if (asJson) printJson(tree)
-      else printLine(renderTree(tree))
     })
-  },
-})
+}
