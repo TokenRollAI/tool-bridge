@@ -27,6 +27,7 @@
 - [guides/deploy-and-verify.md](guides/deploy-and-verify.md) — 从零到线上验证:`pnpm verify` → `pnpm deploy:all` → curl 探活 → `pnpm smoke` → `tb status --json`,每步预期输出 + 排错(多账户歧义、custom domain 生效延迟)。
 - [guides/workers-kv-pitfalls.md](guides/workers-kv-pitfalls.md) — Workers/KV 生产坑:KV list+get 最终一致窗口(须跳 null)、子请求上限约束逐 key get、吊销传播实测 0.3s、vitest-pool-workers 0.18 API 变更。
 - [guides/do-websocket-hibernation.md](guides/do-websocket-hibernation.md) — DO hibernation WS 生产坑:边缘 ~100s 空闲掐断须客户端心跳保活、唤醒后内存状态机须从 storage 恢复(restoreReady)、本地 miniflare 测不出须线上跨休眠窗口验证。**改设备通道(deviceSession/deviceRuntime/core device)前必读。**
+- [guides/npm-publish.md](guides/npm-publish.md) — @tool-bridge/cli 与 @tool-bridge/sdk 的 npm 发布:tsup bundle + dts 内联的包形态、tag 触发 CI(Trusted Publishing OIDC)、新包"手动首发+配 Trusted Publisher"两段式、EOTP/provenance E422 等坑。
 
 ## memory/ — 过程记忆
 
@@ -36,6 +37,7 @@
 - [memory/reflections/2026-07-06-phase2-closeout.md](memory/reflections/2026-07-06-phase2-closeout.md) — Phase 2 关门教训:DoD 勾选不等于关门、opt-in 测试看退出码、代理/联邦要测出站边界、CLI 配置面对等。reflector 维护。
 - [memory/reflections/2026-07-06-phase4-device-ws-hibernation.md](memory/reflections/2026-07-06-phase4-device-ws-hibernation.md) — Phase 4 生产 blocker 排查教训:本地绿不代表 hibernation 正确、连环根因先取证后改码、验收标识符逐字核对、长驻进程验证管好生命周期。reflector 维护。
 - [memory/reflections/2026-07-07-sdk-dts-bundle-pitfall.md](memory/reflections/2026-07-07-sdk-dts-bundle-pitfall.md) — SDK 发布包 d.ts 内联陷阱:tsup noExternal/dts.resolve 对指向 .ts 源的 workspace 包不生效,须专用 tsconfig paths 映射;类型自包含要用隔离 tsc 验证。reflector 维护。
+- [memory/reflections/2026-07-07-npm-publish-sdk-cli.md](memory/reflections/2026-07-07-npm-publish-sdk-cli.md) — npm 发布流程教训:2FA/EOTP 认证 URL 对 agent 脱敏须用户亲自 publish 或给 --otp、新包"手动首发+配置 Trusted Publisher+CI"两段式、git push SSL 抖动直接重试。reflector 维护。
 
 ## 路由提示
 
@@ -48,5 +50,6 @@
 | 部署/线上验证/部署排错 | guides/deploy-and-verify.md |
 | 写 KV 消费代码/排查 KV 一致性或子请求上限/vitest-pool-workers 配置 | guides/workers-kv-pitfalls.md |
 | 改设备 WS 通道/排查设备离线/DO hibernation 行为 | guides/do-websocket-hibernation.md |
+| 发 npm 新版本/新增可发布包/排查 CI 发布失败 | guides/npm-publish.md |
 | 改 docs 或怀疑规范矛盾 | memory/doc-gaps.md |
 | 了解产品定位/非目标 | overview/project-overview.md |

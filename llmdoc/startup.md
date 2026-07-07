@@ -21,4 +21,5 @@
 - 动手改 docs/ 或遇到疑似规范矛盾 → 先查 [memory/doc-gaps.md](memory/doc-gaps.md)(已核实的待修项与"已确认非矛盾"清单)。
 - 写 KV 消费代码/配 vitest-pool-workers/排查 KV 一致性 → [guides/workers-kv-pitfalls.md](guides/workers-kv-pitfalls.md)。
 - 改设备 WS 通道(deviceSession/deviceRuntime/core device)/排查设备离线 → [guides/do-websocket-hibernation.md](guides/do-websocket-hibernation.md)。
+- 发 npm 新版本/新增可发布包 → [guides/npm-publish.md](guides/npm-publish.md)。
 - 有相关 `guides/` 或 `memory/reflections/` 时在计划前读(清单见 [index.md](index.md))。

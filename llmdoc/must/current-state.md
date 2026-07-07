@@ -1,6 +1,6 @@
 # 当前状态(MUST)
 
-> 用途:每轮开场必读的易变状态快照(进度、部署、代码现状、凭据配置、工具链、兜底路径)。更新时机:每当部署/凭据/工具链/Phase 进度发生变化时,由当轮 Agent 更新本文件。最后核实日期:2026-07-06。
+> 用途:每轮开场必读的易变状态快照(进度、部署、代码现状、凭据配置、工具链、兜底路径)。更新时机:每当部署/凭据/工具链/Phase 进度发生变化时,由当轮 Agent 更新本文件。最后核实日期:2026-07-07。
 
 ## 进度
 
@@ -32,6 +32,7 @@
   - 另有 `errors.ts`(TBError)/ `store.ts`(StateStore 接口 + 内存实现)/ `types.ts`。
 - `packages/gateway` — Workers 胶水,**34 个默认集成测试 + 2 个 opt-in**跑真实 workerd:`app.ts`(Hono 路由 + 认证/HTBP/remote 聚合)/ `providers/`(mcp/http/remote/toolCache)/ `bootstrap.ts` / `kvStateStore.ts` / `index.ts`;`wrangler.jsonc` 在此包内。
 - `packages/cli` — citty 框架,**45 个单测**,12 个命令:`status` / `login` / `whoami` / `use` / `sk` / `secret` / `ls` / `tree` / `help` / `call` / `tool` / `server`;全局 `--json`;配置 `~/.config/tool-bridge/config.json`(Proto 附A 注记)。
+- **npm 发布**:@tool-bridge/cli(0.1.1)与 @tool-bridge/sdk(0.1.0)均已发布 npm(public;core/gateway 为 private 不发布),流程见 [../guides/npm-publish.md](../guides/npm-publish.md)。cli 0.1.1 经 CI Trusted Publishing 发布成功(此前因 package.json 缺 `repository.url` 被 provenance 校验拒过,commit c20afae 已补齐两包)。
 - `scripts/` — `gen-dev-vars.mjs` / `provision.mjs` / `smoke.ts`(已升级 Phase 1 语义:healthz + 无 SK 401 + 带 SK 200)/ **`verify-revocation.ts`(新增:吊销传播可重跑验收,生产实测 0.3s,上限 60s)**。
 - 工具链:lint 用 biome;测试 vitest 4 + @cloudflare/vitest-pool-workers 0.18(API 变更注意见 [../guides/workers-kv-pitfalls.md](../guides/workers-kv-pitfalls.md))。
 
