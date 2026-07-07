@@ -2,8 +2,17 @@ import Form from '@rjsf/shadcn'
 import type { RJSFSchema } from '@rjsf/utils'
 import validator from '@rjsf/validator-ajv8'
 import { useQueryClient } from '@tanstack/react-query'
-import { Braces, ChevronRight, ClipboardList, Loader2, Play, TriangleAlert } from 'lucide-react'
+import {
+  Braces,
+  ChevronRight,
+  ClipboardList,
+  History,
+  Loader2,
+  Play,
+  TriangleAlert,
+} from 'lucide-react'
 import { useEffect, useId, useState } from 'react'
+import { CliHint } from '@/components/node/CliHint'
 import { ResultView } from '@/components/node/ResultView'
 import {
   AlertDialog,
@@ -27,8 +36,10 @@ import {
 import { Skeleton } from '@/components/ui/skeleton'
 import { Textarea } from '@/components/ui/textarea'
 import type { ApiError } from '@/lib/api'
+import { lastArgsFor } from '@/lib/history'
 import { useInvoke, useToolHelp } from '@/lib/queries'
 import { isFormFriendly, skeletonFromSchema } from '@/lib/schemaForm'
+import { useSession } from '@/lib/session'
 import type { HelpCmd } from '@/lib/types'
 import { cn } from '@/lib/utils'
 
@@ -126,6 +137,29 @@ export function CmdPanel({
   const invoke = useInvoke()
   const qc = useQueryClient()
   const acceptId = useId()
+  const { active } = useSession()
+  const lastArgs = lastArgsFor(active?.name ?? '', path, cmd.name)
+
+  /** 当前编辑中的参数(CliHint 展示用;JSON 模式解析失败时回落 {})。 */
+  const currentArgs = (() => {
+    if (mode === 'form') return formData ?? {}
+    try {
+      return rawArgs.trim() === '' ? {} : JSON.parse(rawArgs)
+    } catch {
+      return {}
+    }
+  })()
+
+  const restoreLast = () => {
+    if (lastArgs === undefined) return
+    setRawArgs(JSON.stringify(lastArgs, null, 2))
+    if (formFriendly) {
+      setFormData(lastArgs)
+      setMode('form')
+    } else {
+      setMode('json')
+    }
+  }
 
   // 懒补水到位后一次性初始化编辑器形态(仅当用户尚未输入;guard 保证幂等)。
   useEffect(() => {
@@ -214,6 +248,19 @@ export function CmdPanel({
           {mode === 'form' ? 'JSON 编辑' : '表单编辑'}
         </Button>
       )}
+      {lastArgs !== undefined && (
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className={cn('text-xs text-muted-foreground', !formFriendly && 'ml-auto')}
+          title="填入最近一次调用的参数"
+          onClick={restoreLast}
+        >
+          <History />
+          上次参数
+        </Button>
+      )}
     </div>
   )
 
@@ -291,6 +338,8 @@ export function CmdPanel({
                 {footer}
               </div>
             )}
+
+            <CliHint path={path} tool={cmd.name} args={currentArgs} />
 
             <ResultView
               className="mt-4"

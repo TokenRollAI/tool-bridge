@@ -87,3 +87,19 @@ export interface Page<T> {
   items: T[]
   cursor?: string
 }
+
+/** context 条目元数据(Proto §5.1 ContextEntryMeta)。 */
+export interface ContextEntryMeta {
+  /** node://<namespace-path>/<entry-path>。 */
+  uri: string
+  contentType: string
+  size?: number
+  version: string
+  updatedAt: string
+  metadata: Record<string, string>
+}
+
+/** context 条目(含内容;大对象 content = { $ref })。 */
+export interface ContextEntry extends ContextEntryMeta {
+  content: string | unknown
+}

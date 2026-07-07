@@ -2,6 +2,7 @@ import { Fragment } from 'react'
 import { Link, useParams } from 'react-router'
 import { KindBadge } from '@/components/KindBadge'
 import { CmdPanel } from '@/components/node/CmdPanel'
+import { ContextBrowser } from '@/components/node/ContextBrowser'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import type { ApiError } from '@/lib/api'
@@ -43,6 +44,7 @@ export function NodePage() {
   }
 
   const { node, cmds, children } = help.data
+  const isContext = node.kind === 'context'
   return (
     <div className="mx-auto max-w-3xl px-8 py-8">
       <Crumbs path={path} />
@@ -54,8 +56,14 @@ export function NodePage() {
       </header>
       <p className="mt-1.5 text-sm text-muted-foreground">{node.description}</p>
 
-      <Tabs defaultValue="invoke" className="mt-6">
+      {/* key=path:切换节点时重置 tab 选择(context 节点默认落「条目」) */}
+      <Tabs key={path} defaultValue={isContext ? 'browse' : 'invoke'} className="mt-6">
         <TabsList className="h-8">
+          {isContext && (
+            <TabsTrigger value="browse" className="px-3 text-xs">
+              条目
+            </TabsTrigger>
+          )}
           <TabsTrigger value="invoke" className="px-3 text-xs">
             调用
           </TabsTrigger>
@@ -63,6 +71,12 @@ export function NodePage() {
             ~help 原文
           </TabsTrigger>
         </TabsList>
+
+        {isContext && (
+          <TabsContent value="browse" className="mt-4">
+            <ContextBrowser path={path} cmds={cmds} />
+          </TabsContent>
+        )}
 
         <TabsContent value="invoke" className="mt-4 grid gap-6">
           {children && children.length > 0 && (

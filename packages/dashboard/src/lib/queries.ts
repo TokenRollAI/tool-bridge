@@ -1,9 +1,9 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useSyncExternalStore } from 'react'
 import { type ApiError, getHealthz, getHelp, getHelpDsl, getTree, type InvokeResult, invoke } from './api'
 import { type InvokeRecord, loadHistory, recordInvoke, subscribeHistory } from './history'
 import { useConn, useSession } from './session'
-import type { Page, RegistryNode, SecretKeyInfo } from './types'
+import type { ContextEntry, ContextEntryMeta, Page, RegistryNode, SecretKeyInfo } from './types'
 
 /** queryKey 前缀含 profile 标识:切换档案后互不串缓存。 */
 function useKeyBase(): readonly unknown[] {
@@ -162,5 +162,42 @@ export function useStatus() {
       return r.json as { healthy: boolean; version: string; nodeCount: number }
     },
     refetchInterval: 30_000,
+  })
+}
+
+// ---- context 浏览器(条目枚举/读取;与 CLI `tb ctx ls|cat` 同一数据面)----
+
+/**
+ * context 条目分页枚举:query 非空走 Search,否则走 List(prefix 过滤)。
+ * cursor 分页交给 useInfiniteQuery(Proto §0.3 Page 语义)。
+ */
+export function useCtxEntries(nodePath: string, prefix: string, query: string) {
+  const conn = useConn()
+  const base = useKeyBase()
+  return useInfiniteQuery({
+    queryKey: [...base, 'ctx-entries', nodePath, prefix, query],
+    queryFn: async ({ pageParam }) => {
+      const opts = pageParam ? { cursor: pageParam } : {}
+      const r = query
+        ? await invoke(conn, nodePath, 'Search', { query, opts })
+        : await invoke(conn, nodePath, 'List', { path: prefix, opts })
+      return r.json as Page<ContextEntryMeta>
+    },
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (last) => last.cursor,
+  })
+}
+
+/** 单条目读取(查看/编辑对话框按需取;大对象 content = { $ref })。 */
+export function useCtxEntry(nodePath: string, entryPath: string | null) {
+  const conn = useConn()
+  const base = useKeyBase()
+  return useQuery({
+    queryKey: [...base, 'ctx-entry', nodePath, entryPath ?? ''],
+    queryFn: async () => {
+      const r = await invoke(conn, nodePath, 'Get', { path: entryPath })
+      return r.json as ContextEntry
+    },
+    enabled: entryPath !== null,
   })
 }
