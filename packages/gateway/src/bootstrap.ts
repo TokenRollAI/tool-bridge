@@ -14,7 +14,6 @@ import {
   type StateStore,
   sha256Hex,
 } from '@tool-bridge/core'
-import type { Env } from './app'
 import { KvStateStore } from './kvStateStore'
 import { fetchPluginContract, probePlugin } from './providers/pluginClient'
 
@@ -84,15 +83,15 @@ async function ensureBuiltinNodes(registry: NodeRegistryStore, now: string): Pro
   }
 }
 
-async function doBootstrap(store: StateStore, env: BootstrapEnv): Promise<void> {
+async function doBootstrap(store: StateStore, adminSk: string | undefined): Promise<void> {
   const now = new Date().toISOString()
   const bootstrapped = (await store.get(KEY_BOOTSTRAPPED)) !== null
 
   // 1) Admin SK(仅首次引导):提供明文则用之,否则随机生成;明文只输出一次。
   if (!bootstrapped) {
     const sk = new SKRegistryStore(store)
-    if (env.TB_BOOTSTRAP_ADMIN_SK !== undefined && env.TB_BOOTSTRAP_ADMIN_SK.length > 0) {
-      await mintAdminWithPlaintext(store, env.TB_BOOTSTRAP_ADMIN_SK, now)
+    if (adminSk !== undefined && adminSk.length > 0) {
+      await mintAdminWithPlaintext(store, adminSk, now)
       console.log('[tool-bridge] bootstrapped: Admin SK = <provided via TB_BOOTSTRAP_ADMIN_SK>')
     } else {
       const { secret } = await sk.write(adminBootstrapInput(), now)
@@ -108,12 +107,20 @@ async function doBootstrap(store: StateStore, env: BootstrapEnv): Promise<void> 
 }
 
 /**
+ * 宿主中立的一次性引导(SDK 等嵌入宿主直接调用;幂等,但不做并发去重——
+ * 嵌入宿主自管 once,Workers 用下方 ensureBootstrapped 的模块级 once)。
+ */
+export function runBootstrap(store: StateStore, opts?: { adminSk?: string }): Promise<void> {
+  return doBootstrap(store, opts?.adminSk)
+}
+
+/**
  * 首个请求时惰性引导(幂等 + 并发安全)。返回后 store 已就绪。
  * env 传入以取 TB_BOOTSTRAP_ADMIN_SK / TB_SECRET_ENCRYPTION_KEY(后者供 secret 能力)。
  */
 export function ensureBootstrapped(store: StateStore, env: BootstrapEnv): Promise<void> {
   if (bootstrapOnce === undefined) {
-    bootstrapOnce = doBootstrap(store, env).catch((err) => {
+    bootstrapOnce = doBootstrap(store, env.TB_BOOTSTRAP_ADMIN_SK).catch((err) => {
       // 引导失败:重置 once 以便下个请求重试(避免永久卡死)。
       bootstrapOnce = undefined
       throw err
@@ -122,21 +129,31 @@ export function ensureBootstrapped(store: StateStore, env: BootstrapEnv): Promis
   return bootstrapOnce
 }
 
-/** 装配 BuiltinDeps(供 createBuiltins);version 由调用方注入。 */
-export function buildDeps(store: StateStore, env: Env, version: string): BuiltinDeps {
+/** builtin 装配入参(宿主解析后注入;不吃 Workers Env)。 */
+export interface BuiltinAssemblyOpts {
+  store: StateStore
+  secrets: SecretStoreImpl
+  /** 网关 version(单一真源:package.json)。 */
+  version: string
+  /** 放行 http:// plugin endpoint(仅本地开发)。 */
+  allowInsecureHttp: boolean
+}
+
+/** 装配 BuiltinDeps(供 createBuiltins)。 */
+export function buildDeps(opts: BuiltinAssemblyOpts): BuiltinDeps {
   return {
-    sk: new SKRegistryStore(store),
-    secret: new SecretStoreImpl(store, env.TB_SECRET_ENCRYPTION_KEY),
-    registry: new NodeRegistryStore(store),
-    version: () => version,
+    sk: new SKRegistryStore(opts.store),
+    secret: opts.secrets,
+    registry: new NodeRegistryStore(opts.store),
+    version: () => opts.version,
     // registry 管理通道也走 §2.3 裁剪(list 裁剪 / get→not_found)。
     visibility: checkScopes,
     // plugin 模块(Proto §8.1):探活/契约抓取的 I/O 回调在此注入,core 保持无 I/O。
     plugin: {
-      store,
+      store: opts.store,
       probe: probePlugin,
       fetchContract: fetchPluginContract,
-      allowInsecureHttp: env.TB_ALLOW_INSECURE_HTTP === 'true',
+      allowInsecureHttp: opts.allowInsecureHttp,
     },
   }
 }

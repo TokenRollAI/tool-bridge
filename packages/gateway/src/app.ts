@@ -419,7 +419,14 @@ export function createApp(): Hono<{ Bindings: Env; Variables: Vars }> {
       if (toolModel !== null) return renderHelp(toolModel, rep)
       throw TBError.notFound('not found')
     }
-    const builtins = createBuiltins(buildDeps(store, c.env, pkg.version))
+    const builtins = createBuiltins(
+      buildDeps({
+        store,
+        secrets: secretStore(store, c.env),
+        version: pkg.version,
+        allowInsecureHttp: allowInsecure(c.env),
+      }),
+    )
     const refresh = c.req.query('refresh') === '1'
     const model = await helpModelFor(node, registry, ctx, builtins, {
       store,
@@ -602,7 +609,14 @@ export function createApp(): Hono<{ Bindings: Env; Variables: Vars }> {
       throw TBError.unimplemented(`kind '${node.kind}' not callable`)
     }
 
-    const builtins = createBuiltins(buildDeps(store, c.env, pkg.version))
+    const builtins = createBuiltins(
+      buildDeps({
+        store,
+        secrets: secretStore(store, c.env),
+        version: pkg.version,
+        allowInsecureHttp: allowInsecure(c.env),
+      }),
+    )
     const mod = builtins.get(node.config.module)
     if (!mod) throw TBError.unimplemented(`builtin module '${node.config.module}' not available`)
 
