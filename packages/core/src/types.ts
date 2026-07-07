@@ -86,7 +86,15 @@ export interface SecretKeyInput {
 
 // ---------- §3 Tree ----------
 
-export type NodeKind = 'directory' | 'mcp' | 'http' | 'builtin' | 'context' | 'device' | 'remote'
+export type NodeKind =
+  | 'directory'
+  | 'mcp'
+  | 'http'
+  | 'builtin'
+  | 'context'
+  | 'device'
+  | 'remote'
+  | 'tool'
 
 export const NODE_KINDS: readonly NodeKind[] = [
   'directory',
@@ -96,6 +104,7 @@ export const NODE_KINDS: readonly NodeKind[] = [
   'context',
   'device',
   'remote',
+  'tool',
 ]
 
 export interface TreeNode {
@@ -170,6 +179,8 @@ export type NodeConfig =
     }
   | { kind: 'device'; deviceId: string; expose: DeviceExpose }
   | { kind: 'remote'; baseUrl: string; skRef?: string }
+  /** tool-provider 挂载(Phase 5,Proto §8.1):provider = plugin id 或 SDK 内部保留 id(如 '@local')。 */
+  | { kind: 'tool'; provider: string }
 
 export type NodeInput = Omit<TreeNode, 'registeredBy' | 'online' | 'createdAt' | 'updatedAt'>
 

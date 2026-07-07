@@ -21,6 +21,7 @@ import type {
   TreePath,
   Virtualize,
 } from '../types'
+import { NODE_KINDS } from '../types'
 import type { BuiltinModule } from './types'
 import { cmdPath, optListOptions, optString, requireObject, requireString, VOID_ACK } from './util'
 
@@ -96,20 +97,10 @@ function registryCmds(nodePath: TreePath): CmdSpec[] {
   ]
 }
 
-/** 合法的 NodeKind 集合(Proto §3.1);校验 write/~register 的 kind 枚举。 */
-const NODE_KINDS: readonly NodeKind[] = [
-  'directory',
-  'mcp',
-  'http',
-  'builtin',
-  'context',
-  'device',
-  'remote',
-]
-
 /**
  * 校验并构造 NodeInput(Proto §1.4 / §3.1):args 整体即 NodeInput。
- * path 必填非空;kind 必填且须为合法枚举;description 必填;透传 config/virtualize。
+ * path 必填非空;kind 必填且须为合法枚举(词表 = types.ts NODE_KINDS,单一真源);
+ * description 必填;透传 config/virtualize。
  * 校验失败 → invalid_argument。`~register` 与 system/registry write 复用此函数。
  */
 export function parseNodeInput(args: Record<string, unknown>): NodeInput {
