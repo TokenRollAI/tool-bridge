@@ -18,7 +18,7 @@
 | KV | `tb-kv`(id `d18c93de33cf4ba2b1fbf7d26fd742f1`) | 绑定名 `TB_KV`;id 已回填 wrangler.jsonc |
 | R2 | `tb-r2` | 绑定名 `TB_R2` |
 
-## 代码现状(pnpm monorepo,测试数为 2026-07-07 实跑)
+## 代码现状(pnpm monorepo,测试数为 2026-07-08 实跑)
 
 - `packages/core` — 纯逻辑内核(唯一运行时依赖 zod),**603 个单测**,模块族:
   - `auth/`(scope 判定 / authorizer / 注册路径规则 / sk 签发与哈希)、`tree/`(path 规则 / NodeRegistryStore / visibility 裁剪)、`htbp/`(helpDsl / HelpModel / negotiate / tree 构建)、`secret/`(AES-256-GCM 只写不读)
@@ -30,7 +30,7 @@
   - `node/`(`./node` 子导出:FsObjectStore realpath 防逃逸 + shellExecutor 有界缓冲)
   - 顶层 `errors.ts`(TBError)/ `store.ts`(StateStore 接口 + 内存实现)/ `types.ts`。
 - `packages/gateway` — Workers 胶水(可发布 Worker library:tsup 单文件 ESM bundle core,`src/index.ts` 另 export `createApp` 与 `type Env`;dev exports 指 src、发布形态 publishConfig 覆盖指 dist),**85 个默认集成测试 + 6 个 opt-in skipped**(真实 workerd;含 mcp 过期会话空列表防御的 mock 上游用例):`app.ts`(Env→deps 适配)/ `tbApp.ts`(**宿主中立 createTbApp**,路由/认证/HTBP/remote 聚合,SDK 复用)/ `bootstrap.ts` / `kvStateStore.ts` / `refToken.ts`(`$ref` 中转 token)/ `deviceSession.ts`(DeviceSession DO)/ `providers/`(mcp / http / remote / pluginTool / pluginContext / pluginClient / r2Object / s3Object / s3Sign / toolCache);`wrangler.jsonc` 在此包内。
-- `packages/cli` — citty 框架,**101 个单测**,**17 个命令**:status / login / whoami / use / sk / secret / ls / tree / help / call / tool / server / ctx / connect / device / mount / plugin;全局 `--json`;配置 `~/.config/tool-bridge/config.json`(XDG,多 profile)。
+- `packages/cli` — commander 框架(严格解析:未知 flag/子命令报错,防权限误配),**124 个单测**(含拼错 flag 事故回归 strictParsing),**17 个命令**:status / login / whoami / use / sk / secret / ls / tree / help / call / tool / server / ctx / connect / device / mount / plugin;全局 `--json`;配置 `~/.config/tool-bridge/config.json`(XDG,多 profile)。
 - `packages/sdk` — 薄装配层(4 个源文件),**12 个单测 + 1 个 opt-in**;公开面 `createToolBridge(config)` → `{ fetch, registerTool, registerContext, connect }`,复用 core + gateway 的 createTbApp;再导出内存宿主实现(MemoryStateStore 等)。
 - `packages/dashboard` — React 19 + Vite + Tailwind 4 + shadcn/ui + @rjsf + TanStack Query SPA(可发布纯静态产物包:只发 dist,依赖全在 devDependencies):树导航 / cmd 表单调用 / context 条目浏览(metadata 编辑、`$ref` 大对象经 Update 只改 metadata、Search mode keyword|semantic 切换)/ SK·Registry·Devices·Secrets·Plugins 管理页(Plugins 对等 `tb plugin` 六 cmd,pluginToken 一次性展示;Registry 挂载面对等 CLI:kind:tool / plugin provider、virtualize 全量、http authHeader/authScheme、context ttl)/ ⌘K 面板;无专用后端(同源消费 HTBP),行为由 gateway 的 `ui.integration.test.ts` 覆盖;`pnpm deploy:all` 先 build dashboard 再部署 gateway。
 - `scripts/` — `gen-dev-vars.mjs` / `provision.mjs` / `smoke.ts`(healthz + 无 SK 401 + 带 SK 200)+ 三个可重跑生产验收脚本:`verify-revocation.ts`(吊销传播,实测 0.3s)/ `verify-device.ts`(设备 shell/fs/registerPaths 全链路,可选跨休眠用例)/ `verify-plugin.ts`(Plugin 注册→挂载→四动词全流程)。
@@ -39,7 +39,7 @@
 
 ## 常用命令
 
-- `pnpm verify` — typecheck + lint + 单测 + 集成测试一把过(当前 603 core + 101 cli + 12 sdk 单测,85 gateway 默认集成 + 6 opt-in skipped)。
+- `pnpm verify` — typecheck + lint + 单测 + 集成测试一把过(当前 603 core + 124 cli + 12 sdk 单测,85 gateway 默认集成 + 6 opt-in skipped)。
 - `pnpm deploy:all` — 幂等 provision + dashboard build + 部署 gateway。
 - `TB_BASE_URL=https://tool-bridge.pdjjq.org pnpm smoke` — 线上冒烟(**smoke 不读 .env,须显式传 TB_BASE_URL 与 TB_SK**)。
 - `npx tsx scripts/verify-revocation.ts` / `verify-device.ts` / `verify-plugin.ts` — 可重跑生产验收(需 TB_BASE_URL + TB_SK,消耗真实资源)。
