@@ -14,7 +14,6 @@ import {
   type StateStore,
   sha256Hex,
 } from '@tool-bridge/core'
-import { KvStateStore } from './kvStateStore'
 import { fetchPluginContract, probePlugin } from './providers/pluginClient'
 
 interface BootstrapEnv {
@@ -162,5 +161,3 @@ export function buildDeps(opts: BuiltinAssemblyOpts): BuiltinDeps {
 export function resetBootstrapForTest(): void {
   bootstrapOnce = undefined
 }
-
-export { KvStateStore }
