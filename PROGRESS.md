@@ -4,8 +4,8 @@
 
 ## 当前状态
 
-- **当前 Phase**:Phase 3 全部 DoD 已勾选(2026-07-06);待 Phase 3 关门(质量关口 + llmdoc 沉淀)后进入 Phase 4 — Device Gateway(DOD.md §6)
-- **已勾选 DoD 项**:Phase 0 5/5;Phase 1 7/7;Phase 2 6/6;Phase 3 4/4
+- **当前 Phase**:Phase 5 — SDK + Plugin(DOD.md §7)。Phase 4 主链路已完成(DoD 1/2 勾选,3/4 缺生产验证记录待补,见 Round 9 补记);Phase 6 dashboard 已提前预演(spike 项已勾)。
+- **已勾选 DoD 项**:Phase 0 5/5;Phase 1 7/7;Phase 2 6/6;Phase 3 4/4;Phase 4 2/4;Phase 6 1/5(spike)
 - **Blockers**:
   - Docker 守护进程未运行(Phase 6 / E2E-4 前需启动 Docker Desktop;不阻塞 Phase 0-5)
   - `TB_TEST_S3_*` / `TB_R2_ACCESS_KEY_*` 空缺(均有兜底:s3 集成经本地 s3rver opt-in 可重跑、$ref 走 /~ref 网关中转,生产实测通过;presign 主路径与真实 R2 S3 端点复验待凭证创建后 opt-in)
@@ -113,3 +113,15 @@
 - 勾选:Phase 3 全部 4 项(DOD.md:80-83)。注:s3 循环用本地 s3rver 兜底(DOD §9 允许;s3rver 不校验 SigV4,签名正确性待真实 R2 S3 端点 opt-in);$ref 走 /~ref 中转(presign 凭证空缺,Proto §5.2 定型兜底)。
 - 沉淀:Phase 3 决策 10 项回写 docs(d040093);待关门轮 /llmdoc:update
 - 遗留:①Phase 3 质量关口(重点:/~ref 免认证端点的 token 语义、s3Object XML 解析边界、CLI 配置面对等矩阵);②真实 S3 端点(R2 S3 API)复验需先创建 R2 Access Key;③本地 dev 的 relayRefUrl origin 用 c.req.url 派生,dev 环境下曾见 origin 为生产域(路由配置 route 所致)——对生产无影响,关门轮核查。
+
+## Round 9 — 2026-07-06(Phase 4 主链路,2026-07-07 补记)
+- 目标:Phase 4 DoD 1-3(DOD.md:92-94)
+- 动作:①契约定型回写 docs(a459cc8 hello mountPath/shell allow/error 帧/生命周期;83e96a5 partysocket Node spike 结论);②core device 五件套(035a4ee 帧编解码 / 1c6ef33 shell 白名单 / bfd28d2 会话状态机+设备侧 client / f96321b HelpModel / ef27450 node 子导出:FsObjectStore realpath 防逃逸 + shellExecutor 有界缓冲);③gateway DeviceSession DO(WS hibernation)+ CLI `tb connect`/`tb device`/`tb mount` + deviceRuntime + device/ui 集成测试(210c350);④生产 blocker 两连修:客户端 30s 心跳(边缘 ~100s 掐断半开无感知)+ hibernation 唤醒 restoreReady(内存态从 storage 恢复),沉淀 guides/do-websocket-hibernation.md + reflection。
+- 验证:core device 61 单测 + node 27 + cli device 8;gateway device.integration.test.ts 真实 DO 全链路(401/树节点/shell echo/fs Get/断线 503 retryable/重连恢复/registerPaths 拒放);生产:`tb connect` 后 t0 调用与 ≥150s 跨休眠窗口调用均成功(细节见 guide);2026-07-07 复跑 `pnpm verify` 全绿。
+- 勾选:Phase 4 DoD-1(单测)、DoD-2(集成)。DoD-3 缺 `tb ctx cat device/<id>/fs/<file>` 生产读取记录与可重跑脚本;DoD-4 缺 registerPaths 线上验证记录——均待补(见 phase4-ledger-audit.md §⑤)。
+- 遗留:①跨休眠可重跑验收脚本(类 verify-revocation.ts);②生产 registry 有约 6 个离线设备注册残骸待清理;③210c350 为 wip 大杂烩(含 Phase 6 spike 勾选与技术栈 antd→shadcn/ui 的 DOD 修改),此处补记依据。
+
+## Round 10 — 2026-07-06(Phase 6 预演 + 横切改进,2026-07-07 补记)
+- 动作:①dashboard 初版(210c350 新包 React 19+Vite+shadcn/ui;bafe667/b88cf84 迭代:树导航重设计/cmd 面板折叠/shell allow 徽章),新增 ui.integration.test.ts(11 例);②MCP client 换 CfWorkerJsonSchemaValidator(8950801,workerd 禁 eval);③~help 两级披露(节点级索引 + GET /<node>/<tool>/~help 全量 spec,Proto §4.2)+ MCP 会话复用(Mcp-Session-Id 入 StateStore,失效重握手一次)+ dashboard schema 懒补水(3622756);④npm 发布准备 @tool-bridge/cli + publish GitHub Action(98d0186);⑤current-state 更新生产 Version 01278057(877756b)。
+- 勾选:Phase 6 spike 项(DOD.md:116,210c350 已勾,此处补记依据)。
+- 遗留:dashboard 属 Phase 6 提前预演,其余 Phase 6 DoD 未动;npm 实际发布(打 tag)未执行。

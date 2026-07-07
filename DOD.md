@@ -89,8 +89,8 @@
 **范围**:`DeviceSession` DO(WS hibernation、待决表、心跳 autoResponse);帧协议(§6.2:hello/ready/call/result/ping/cancel、requestId 幂等、60s 超时);设备侧实现(core 复用:shell executor + file provider);挂载/下线/回收生命周期(§6.3);**反向注册接口**(§6.1):仅知 public tb server 时,凭 SK + TB domain 即可完成挂载/注册;**shell 白名单**(§6.2):默认拒一切命令,声明后才放行,支持 list 与 `*` 通配;**CLI**:`tb connect`(长驻)/ `tb device ls` / `tb mount fs`。
 
 **DoD**:
-- [ ] 单测:帧编解码与状态机(未 hello 先 call → 拒;重复 requestId 幂等;超时 → unavailable+cancel 帧)、注册路径规则与 §2.4 联动、断线节点 offline 语义、shell 契约(`~help` 含 effect destructive)、shell 白名单匹配器(默认拒/list 精确匹配/`*` 放行/元字符拒)每规则正反用例。
-- [ ] 集成(vitest-pool-workers 内真实 DO):模拟设备 WS 接入 → `device/<id>/shell` 与 `/fs` 节点出现在树上 → 经 HTTP 调用 shell echo 成功 → 断开 WS → 调用返回 503 retryable → 重连恢复。
+- [x] 单测:帧编解码与状态机(未 hello 先 call → 拒;重复 requestId 幂等;超时 → unavailable+cancel 帧)、注册路径规则与 §2.4 联动、断线节点 offline 语义、shell 契约(`~help` 含 effect destructive)、shell 白名单匹配器(默认拒/list 精确匹配/`*` 放行/元字符拒)每规则正反用例。
+- [x] 集成(vitest-pool-workers 内真实 DO):模拟设备 WS 接入 → `device/<id>/shell` 与 `/fs` 节点出现在树上 → 经 HTTP 调用 shell echo 成功 → 断开 WS → 调用返回 503 retryable → 重连恢复。
 - [ ] 真实环境:本机 `tb connect ${TB_BASE_URL}` → 另一终端 `tb call device/<id>/shell --tool exec --args '{"command":"echo hi"}'` 返回 stdout;`tb ctx cat device/<id>/fs/<file>` 读到真实文件。
 - [ ] 权限:registerPaths 限定的 SK 只能挂在指定前缀下(注意 2 的线上验证)。
 
