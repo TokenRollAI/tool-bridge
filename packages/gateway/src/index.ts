@@ -1,5 +1,6 @@
 import { createApp } from './app'
 
+export { createApp, type Env } from './app'
 export { DeviceSession } from './deviceSession'
 
 /**

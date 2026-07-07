@@ -1,0 +1,10 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@tool-bridge/core": ["../core/src/index.ts"]
+    }
+  },
+  "include": ["src"]
+}

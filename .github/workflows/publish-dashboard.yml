@@ -1,0 +1,51 @@
+# 备注:发布走 npm Trusted Publishing(OIDC,免 token)。前置一次性配置见 npmjs.com 包设置页:
+# Package Settings → Trusted Publisher → GitHub Actions,
+# repo `TokenRollAI/tool-bridge`,workflow `publish-dashboard.yml`。
+
+name: publish-dashboard
+
+on:
+  push:
+    tags:
+      - 'dashboard-v*' # 打 tag 即发布:git tag dashboard-v0.1.0 && git push origin dashboard-v0.1.0
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write # npm Trusted Publishing(OIDC)必需
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4 # 版本取 package.json 的 packageManager 字段
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+
+      # Trusted Publishing 需要 npm >= 11.5.1(setup-node 自带的可能偏旧)
+      - run: npm install -g npm@latest
+
+      - run: pnpm install --frozen-lockfile
+
+      # tag 版本与 package.json 一致性校验(防止 tag 与包版本漂移)
+      - name: Check tag matches package version
+        if: github.ref_type == 'tag'
+        run: |
+          TAG_VERSION="${GITHUB_REF_NAME#dashboard-v}"
+          PKG_VERSION="$(node -p "require('./packages/dashboard/package.json').version")"
+          if [ "$TAG_VERSION" != "$PKG_VERSION" ]; then
+            echo "tag dashboard-v$TAG_VERSION != package.json $PKG_VERSION" >&2
+            exit 1
+          fi
+
+      # 发布物 = vite build 产物(dist),typecheck 含在 build 的 tsc -b 里
+      - run: pnpm --filter @tool-bridge/dashboard build
+
+      - name: Publish to npm
+        working-directory: packages/dashboard
+        run: npm publish
