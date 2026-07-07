@@ -67,6 +67,9 @@ import { getTools, invalidateToolCache } from './providers/toolCache'
 import type { UpstreamProvider } from './providers/types'
 import { signRefToken, verifyRefToken } from './refToken'
 
+export type { RemoteSettings } from './providers/remote'
+export type { UpstreamProvider } from './providers/types'
+
 /** 帧协议 call 转发的入参(id 由调用点生成,幂等键)。 */
 export interface DeviceInvokeRequest {
   id: string
@@ -1392,9 +1395,9 @@ async function contextProviderFor(
 /**
  * 数据面 {tool} → ContextProvider 方法派发;入参精细校验由 provider 承担。
  * 可选方法(Search/Delete)未实现(plugin 未在 capabilities 声明)→ 按 unknown cmd 拒
- * (未声明的可选方法平台永不调用,Proto §8.2)。
+ * (未声明的可选方法平台永不调用,Proto §8.2)。SDK 设备侧 handler 派发同形复用(导出)。
  */
-async function dispatchContextCmd(
+export async function dispatchContextCmd(
   provider: ContextProvider,
   tool: string,
   args: Record<string, unknown>,
