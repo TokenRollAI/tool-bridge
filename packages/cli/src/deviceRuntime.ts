@@ -189,8 +189,10 @@ export function startDeviceConnection(opts: DeviceConnectionOptions): DeviceConn
     },
     onStateChange: opts.onStateChange,
     onRejected: (error) => {
-      socket.close(1008, error.message)
+      // 先 reject 再 close:partysocket 的 close() 同步派发 close 事件,若先 close,
+      // close listener 的 resolveClosed 会抢先 settle,拒绝被吞(退出码 0 且无输出)。
       rejectClosed(new CliError(error.message, error.code))
+      socket.close(1008, error.message)
     },
     handler: async (call) => {
       if (call.path === 'shell') {
