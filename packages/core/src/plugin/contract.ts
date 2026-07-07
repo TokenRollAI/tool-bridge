@@ -31,6 +31,20 @@ const OPTIONAL_METHOD_BY_CAPABILITY: Record<string, string> = {
   delete: 'Delete',
 }
 
+/**
+ * capabilities → 已声明的可选方法名集合(去重;未知基名忽略)。
+ * 挂载后 `~help` 只列"四动词 + 已声明可选方法"(Proto §8.2 注记)的过滤依据。
+ */
+export function optionalMethodsForCapabilities(capabilities: readonly string[]): Set<string> {
+  const methods = new Set<string>()
+  for (const capability of capabilities) {
+    const base = capability.split(':', 1)[0] ?? capability
+    const method = OPTIONAL_METHOD_BY_CAPABILITY[base]
+    if (method !== undefined) methods.add(method)
+  }
+  return methods
+}
+
 const describeSchema = z.object({
   kind: z.string().min(1),
   interfaceVersion: z.string().min(1),

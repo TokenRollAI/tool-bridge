@@ -14,6 +14,19 @@ import { cmdPath, optListOptions, requireString, VOID_ACK } from './util'
 
 const DESCRIPTION = 'Upstream credential store: write-only (set / list / delete), admin only'
 
+/**
+ * cmd 面的 name 守卫:含 ':' 的名字是平台内部保留命名空间(如 `plugin-token:<id>`,
+ * Proto §8.1),节点面不得创建/删除——防止伪造或误删平台托管凭证。
+ */
+function assertUserSecretName(name: string): void {
+  if (name.includes(':')) {
+    throw new TBError(
+      'invalid_argument',
+      `secret name must not contain ':' (reserved for platform-internal entries)`,
+    )
+  }
+}
+
 function secretCmds(nodePath: TreePath): CmdSpec[] {
   const path = cmdPath(nodePath)
   return [
@@ -68,14 +81,20 @@ export function createSecretModule(store: SecretStoreImpl, now: () => string): B
       _ctx: CallContext,
     ): Promise<unknown> {
       switch (cmd) {
-        case 'set':
-          await store.set(requireString(args, 'name'), requireString(args, 'value'), now())
+        case 'set': {
+          const name = requireString(args, 'name')
+          assertUserSecretName(name)
+          await store.set(name, requireString(args, 'value'), now())
           return VOID_ACK
+        }
         case 'list':
           return store.list(optListOptions(args))
-        case 'delete':
-          await store.delete(requireString(args, 'name'))
+        case 'delete': {
+          const name = requireString(args, 'name')
+          assertUserSecretName(name)
+          await store.delete(name)
           return VOID_ACK
+        }
         default:
           throw new TBError('invalid_argument', `unknown cmd '${cmd}' on system/secret`)
       }

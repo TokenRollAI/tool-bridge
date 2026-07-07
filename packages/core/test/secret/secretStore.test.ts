@@ -121,12 +121,13 @@ describe('SecretStoreImpl(可用态)', () => {
     await expect(secret.delete('never')).rejects.toMatchObject({ code: 'not_found' })
   })
 
-  it('name 非法(空 / 含冒号)→ invalid_argument', async () => {
+  it('name 非法(空)→ invalid_argument;含冒号是平台保留命名空间,impl 层放行', async () => {
     const { secret } = freshStore()
     await expect(secret.set('', 'v', NOW)).rejects.toMatchObject({ code: 'invalid_argument' })
-    await expect(secret.set('ns:name', 'v', NOW)).rejects.toMatchObject({
-      code: 'invalid_argument',
-    })
+    // 含 ':' 的名字(如 plugin-token:<id>,Proto §8.1)由平台代码直接写入;
+    // 节点面的拒绝在 builtin/secret cmd 层(见 builtin/secret.test.ts)。
+    await secret.set('plugin-token:demo', 'v', NOW)
+    expect(await secret.resolve('plugin-token:demo')).toBe('v')
   })
 })
 

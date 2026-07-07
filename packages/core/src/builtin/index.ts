@@ -10,6 +10,7 @@ import type { SecretStoreImpl } from '../secret/secretStore'
 import type { NodeRegistryStore } from '../tree/registry'
 import type { ScopeChecker } from '../tree/visibility'
 import { LIST_LIMIT_MAX } from '../types'
+import { createPluginModule, type PluginModuleDeps } from './plugin'
 import { createRegistryModule } from './registry'
 import { createSecretModule } from './secret'
 import { createSkModule } from './sk'
@@ -29,6 +30,11 @@ export interface BuiltinDeps {
    * (list 裁剪 / get→not_found)。网关装配一律传入;缺省则 registry 不裁剪(纯逻辑单测)。
    */
   visibility?: ScopeChecker
+  /**
+   * plugin 模块装配(Phase 5,Proto §8.1):store + 探活/契约抓取回调(I/O 在宿主)。
+   * 缺省不装配 system/plugin(sk/secrets/now 复用上方注入)。
+   */
+  plugin?: Omit<PluginModuleDeps, 'sk' | 'secrets' | 'now'>
 }
 
 /** 翻页统计 registry 全量节点数(status.nodeCount)。 */
@@ -46,7 +52,7 @@ async function countNodes(registry: NodeRegistryStore): Promise<number> {
   return count
 }
 
-/** 构造 module 名 → BuiltinModule 映射(sk / secret / registry / status)。 */
+/** 构造 module 名 → BuiltinModule 映射(sk / secret / registry / status / plugin)。 */
 export function createBuiltins(deps: BuiltinDeps): Map<string, BuiltinModule> {
   const now = deps.now ?? (() => new Date().toISOString())
   const modules = new Map<string, BuiltinModule>()
@@ -57,9 +63,22 @@ export function createBuiltins(deps: BuiltinDeps): Map<string, BuiltinModule> {
     'status',
     createStatusModule({ version: deps.version, nodeCount: () => countNodes(deps.registry) }),
   )
+  if (deps.plugin !== undefined) {
+    modules.set(
+      'plugin',
+      createPluginModule({ ...deps.plugin, sk: deps.sk, secrets: deps.secret, now }),
+    )
+  }
   return modules
 }
 
+export {
+  createPluginModule,
+  type PluginHealthRecord,
+  type PluginModuleDeps,
+  type PluginProbeResult,
+  pluginTokenSecretName,
+} from './plugin'
 export { createRegistryModule, parseNodeInput } from './registry'
 export { createSecretModule } from './secret'
 export { createSkModule } from './sk'

@@ -121,12 +121,16 @@ function isStoredSecret(value: unknown): value is StoredSecret {
   )
 }
 
-/** name 校验:空 / 含 ':'(会破坏 key 布局)→ invalid_argument。 */
+/**
+ * name 校验:空 → invalid_argument。含 ':' 的名字是**平台内部保留命名空间**
+ * (如 `plugin-token:<id>`,Proto §8.1 platform-token 注记)——impl 层放行(平台代码
+ * 直接调 set),节点面(builtin/secret 的 set/delete cmd)拒绝,防止用户伪造/误删平台凭证。
+ */
 function assertValidName(name: string): void {
-  if (name.length === 0 || name.includes(':')) {
+  if (name.length === 0) {
     throw new TBError(
       'invalid_argument',
-      `secret name must be non-empty and must not contain ':' (got ${JSON.stringify(name)})`,
+      `secret name must be non-empty (got ${JSON.stringify(name)})`,
     )
   }
 }

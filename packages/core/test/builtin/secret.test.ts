@@ -61,6 +61,15 @@ describe('builtin secret 模块', () => {
     )
   })
 
+  it("含 ':' 的 name(平台保留命名空间)set/delete 一律拒(Proto §8.1 plugin-token:<id>)", async () => {
+    await expect(
+      mod.dispatch('set', { name: 'plugin-token:demo', value: 'v' }, ctx),
+    ).rejects.toSatisfy((e) => isTBError(e) && e.code === 'invalid_argument')
+    await expect(mod.dispatch('delete', { name: 'plugin-token:demo' }, ctx)).rejects.toSatisfy(
+      (e) => isTBError(e) && e.code === 'invalid_argument',
+    )
+  })
+
   it('未配置主密钥时 set → unavailable(Proto §2.5;DOD.md:55)', async () => {
     const disabled = createSecretModule(new SecretStoreImpl(store, undefined), () => NOW)
     await expect(disabled.dispatch('set', { name: 'k', value: 'v' }, ctx)).rejects.toSatisfy(

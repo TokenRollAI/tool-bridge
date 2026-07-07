@@ -28,6 +28,10 @@ export const KEY_SK_ID = 'sk:i:'
 export const KEY_NODE = 'node:'
 export const KEY_SECRET = 'secret:'
 export const KEY_PLUGIN = 'plugin:'
+/** 按需探活的健康态(Proto §8.2 注记):{ healthy, checkedAt, consecutiveFailures }。 */
+export const KEY_PLUGIN_HEALTH = 'pluginhealth:'
+/** 注册时抓取的 ~describe 缓存(Proto §8.2 注记):挂载节点 ~describe/~help 的能力来源。 */
+export const KEY_PLUGIN_META = 'pluginmeta:'
 export const KEY_BOOTSTRAPPED = 'sys:bootstrapped'
 
 /** 进程内存实现:单测与 SDK 内嵌宿主用。 */
