@@ -40,6 +40,7 @@ export interface SpawnedProcess {
   stdout: { on(event: 'data', cb: (chunk: Uint8Array | string) => void): void } | null
   stderr: { on(event: 'data', cb: (chunk: Uint8Array | string) => void): void } | null
   on(event: 'close', cb: (code: number | null, signal: string | null) => void): void
+  on(event: 'exit', cb: (code: number | null, signal: string | null) => void): void
   on(event: 'error', cb: (err: Error) => void): void
   kill(signal?: 'SIGKILL'): void
 }
@@ -108,6 +109,17 @@ export function createShellExecutor(opts: ShellExecutorOptions = {}): ShellExecu
       child.stderr?.on('data', (chunk) => stderr.push(chunk))
       let settled = false
       let timedOut = false
+      const settle = (code: number | null) => {
+        if (settled) return
+        settled = true
+        clearTimeout(timer)
+        const suffix = timedOut ? `\n[timeout: killed after ${timeoutMs}ms (SIGKILL)]` : ''
+        resolvePromise({
+          stdout: stdout.text(),
+          stderr: stderr.text() + suffix,
+          exitCode: timedOut ? SHELL_TIMEOUT_EXIT_CODE : (code ?? -1),
+        })
+      }
       const timer = setTimeout(() => {
         timedOut = true
         child.kill('SIGKILL')
@@ -118,16 +130,12 @@ export function createShellExecutor(opts: ShellExecutorOptions = {}): ShellExecu
         clearTimeout(timer)
         rejectPromise(new TBError('internal', `spawn 失败:${err.message}`))
       })
-      child.on('close', (code) => {
-        if (settled) return
-        settled = true
-        clearTimeout(timer)
-        const suffix = timedOut ? `\n[timeout: killed after ${timeoutMs}ms (SIGKILL)]` : ''
-        resolvePromise({
-          stdout: stdout.text(),
-          stderr: stderr.text() + suffix,
-          exitCode: timedOut ? SHELL_TIMEOUT_EXIT_CODE : (code ?? -1),
-        })
+      // 正常路径等 'close'(stdio 排空,输出完整)。超时被杀后改等 'exit' 立即结算:
+      // shell:true 下 sh 可能 fork 而非 exec,SIGKILL 只杀 shell,孙进程仍握着
+      // stdout/stderr 管道,'close' 会拖到孙进程自然退出(v1 教训:CI 上直接撞测试超时)。
+      child.on('close', (code) => settle(code))
+      child.on('exit', (code) => {
+        if (timedOut) settle(code)
       })
     })
   }
