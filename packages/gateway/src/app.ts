@@ -65,7 +65,7 @@ import { createMcpProvider, invalidateMcpSession, type McpConfig } from './provi
 import { createPluginContextProvider } from './providers/pluginContext'
 import { createPluginToolProvider } from './providers/pluginTool'
 import { createR2ObjectStore, type R2PresignCredentials } from './providers/r2Object'
-import { assertRemoteAllowed, passthroughRemote } from './providers/remote'
+import { assertRemoteAllowed, passthroughRemote, type RemoteSettings } from './providers/remote'
 import { createS3ObjectStore, type S3StoreConfig } from './providers/s3Object'
 import { getTools, invalidateToolCache, toolCacheTtl } from './providers/toolCache'
 import type { UpstreamProvider } from './providers/types'
@@ -118,6 +118,25 @@ export interface Env {
 /** http:// 上游是否放行(env `TB_ALLOW_INSECURE_HTTP=true`,仅本地开发)。 */
 function allowInsecure(env: Env): boolean {
   return env.TB_ALLOW_INSECURE_HTTP === 'true'
+}
+
+const DEFAULT_MAX_HOPS = 4
+
+/** env → remote 透传配置(TB_REMOTE_ALLOWLIST 逗号分隔;TB_MAX_HOPS 缺省 4)。 */
+function remoteSettingsFromEnv(env: Env): RemoteSettings {
+  const allowlist = (env.TB_REMOTE_ALLOWLIST ?? '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0)
+  const hops = Number(env.TB_MAX_HOPS)
+  return {
+    allowlist,
+    maxHops: Number.isFinite(hops) && hops > 0 ? hops : DEFAULT_MAX_HOPS,
+    ...(env.TB_INSTANCE_ID !== undefined && env.TB_INSTANCE_ID.length > 0
+      ? { instanceId: env.TB_INSTANCE_ID }
+      : {}),
+    allowInsecure: allowInsecure(env),
+  }
 }
 
 /** 构造网关内部 SecretStore(解析 authRef/skRef;不暴露为节点 cmd)。 */
@@ -1099,7 +1118,7 @@ async function remotePassthroughIfMatch(
     ...(body !== undefined ? { body } : {}),
     headers,
     secrets: secretStore(store, c.env),
-    env: c.env,
+    settings: remoteSettingsFromEnv(c.env),
     requestUrl: c.req.url,
   })
 }
@@ -1112,7 +1131,7 @@ function assertRemoteConfigAllowed(config: unknown, env: Env): void {
   if (typeof baseUrl !== 'string') {
     throw new TBError('invalid_argument', 'remote config 缺少 baseUrl')
   }
-  assertRemoteAllowed(baseUrl, env)
+  assertRemoteAllowed(baseUrl, remoteSettingsFromEnv(env))
 }
 
 // ---------- device 节点(Proto §6,Phase 4) ----------

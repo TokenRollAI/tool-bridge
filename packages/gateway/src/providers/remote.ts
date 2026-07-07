@@ -2,10 +2,13 @@
  * remote 节点透传(Proto §3.4):把对 `<path>` 及其后代的 `~help`/`~skill`/`~tree`/`POST`
  * 请求,改写为对 `baseUrl` 下相对路径的**同形**请求。
  *
- * - `baseUrl` 白名单(env `TB_REMOTE_ALLOWLIST` 逗号分隔;空 = 拒一切)——注册时与调用时双重校验。
+ * - `baseUrl` 白名单(空 = 拒一切)——注册时与调用时双重校验。
  * - `skRef` 解析出的凭证作为出站 `Authorization: Bearer`;**本地调用者的 SK 不外传**。
  * - `X-TB-Via`:入站链经 `checkVia` 判环/跳数(在追加自身之前);出站 `appendVia` 追加自身标识。
  * - 传输失败经 `normalizeUpstreamError` 归一;远端返回的响应(含其自身 TBError)原样透传。
+ *
+ * 宿主中立(Proto §7 核心零分叉):部署配置以解析后的 {@link RemoteSettings} 注入,
+ * env 解析(TB_REMOTE_ALLOWLIST 等)在宿主适配层(gateway app.ts / SDK config)。
  */
 
 import {
@@ -22,40 +25,29 @@ import {
 } from '@tool-bridge/core'
 
 const VIA_HEADER = 'x-tb-via'
-const DEFAULT_MAX_HOPS = 4
 
 export interface RemoteConfig {
   baseUrl: string
   skRef?: string
 }
 
-interface RemoteEnv {
-  TB_REMOTE_ALLOWLIST?: string
-  TB_MAX_HOPS?: string
-  TB_INSTANCE_ID?: string
-  TB_ALLOW_INSECURE_HTTP?: string
+/** remote 透传的部署配置(宿主解析后注入;Proto §3.4/§7)。 */
+export interface RemoteSettings {
+  /** baseUrl 的 host 后缀白名单;空数组 = 拒一切 remote。 */
+  allowlist: string[]
+  /** X-TB-Via 跳数上限(Proto §7 缺省 4,由宿主适配层落默认)。 */
+  maxHops: number
+  /** 本实例 X-TB-Via 标识;缺省用**入站请求 host** 派生(跨实例联邦须显式配置才能可靠去环)。 */
+  instanceId?: string
+  /** 放行 http:// 上游(仅本地开发,Proto §4.2)。 */
+  allowInsecure: boolean
 }
 
-/** 部署配置的 remote 白名单(host 后缀,逗号分隔);缺省/空 = 空数组 = 拒一切 remote。 */
-export function remoteAllowlist(env: RemoteEnv): string[] {
-  return (env.TB_REMOTE_ALLOWLIST ?? '')
-    .split(',')
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0)
-}
-
-/** X-TB-Via 跳数上限:env `TB_MAX_HOPS` 为正数则用之,否则默认 4。 */
-export function maxHops(env: RemoteEnv): number {
-  const n = Number(env.TB_MAX_HOPS)
-  return Number.isFinite(n) && n > 0 ? n : DEFAULT_MAX_HOPS
-}
-
-/**
- * 本实例的 X-TB-Via 标识:优先 env `TB_INSTANCE_ID`;缺省时用**入站请求 host** 派生
- * (同域自环可检出;跨实例联邦须各方显式配 `TB_INSTANCE_ID` 才能可靠去环——见 §3.4 已知局限)。
- */
-export function instanceId(env: RemoteEnv, requestUrl: string): string {
-  if (env.TB_INSTANCE_ID !== undefined && env.TB_INSTANCE_ID.length > 0) return env.TB_INSTANCE_ID
+/** 本实例的 X-TB-Via 标识:显式配置优先;缺省用入站请求 host 派生(§3.4 已知局限)。 */
+function selfInstanceId(settings: RemoteSettings, requestUrl: string): string {
+  if (settings.instanceId !== undefined && settings.instanceId.length > 0) {
+    return settings.instanceId
+  }
   try {
     return new URL(requestUrl).host
   } catch {
@@ -64,10 +56,10 @@ export function instanceId(env: RemoteEnv, requestUrl: string): string {
 }
 
 /** 注册时的 remote baseUrl 白名单校验(不在白名单 → invalid_argument,Proto §3.4)。 */
-export function assertRemoteAllowed(baseUrl: string, env: RemoteEnv): void {
-  const secErr = assertSecureUrl(baseUrl, env.TB_ALLOW_INSECURE_HTTP === 'true')
+export function assertRemoteAllowed(baseUrl: string, settings: RemoteSettings): void {
+  const secErr = assertSecureUrl(baseUrl, settings.allowInsecure)
   if (secErr) throw secErr
-  if (!checkAllowlist(baseUrl, remoteAllowlist(env))) {
+  if (!checkAllowlist(baseUrl, settings.allowlist)) {
     throw new TBError('invalid_argument', `remote baseUrl 不在白名单:'${baseUrl}'`)
   }
 }
@@ -84,21 +76,21 @@ export async function passthroughRemote(opts: {
   body?: string
   headers: Headers
   secrets: SecretStoreImpl
-  env: RemoteEnv
+  settings: RemoteSettings
   requestUrl: string
 }): Promise<Response> {
-  const secErr = assertSecureUrl(opts.config.baseUrl, opts.env.TB_ALLOW_INSECURE_HTTP === 'true')
+  const secErr = assertSecureUrl(opts.config.baseUrl, opts.settings.allowInsecure)
   if (secErr) throw secErr
   // 调用时白名单再校验(配置漂移防线);不在白名单 → unavailable(不 retry)。
-  if (!checkAllowlist(opts.config.baseUrl, remoteAllowlist(opts.env))) {
+  if (!checkAllowlist(opts.config.baseUrl, opts.settings.allowlist)) {
     throw new TBError('unavailable', `remote baseUrl 不在白名单:'${opts.config.baseUrl}'`, {
       retryable: false,
     })
   }
 
-  const self = instanceId(opts.env, opts.requestUrl)
+  const self = selfInstanceId(opts.settings, opts.requestUrl)
   const chain = parseVia(opts.headers.get(VIA_HEADER) ?? undefined)
-  const viaErr = checkVia(chain, self, maxHops(opts.env))
+  const viaErr = checkVia(chain, self, opts.settings.maxHops)
   if (viaErr) throw viaErr
 
   // 改写目标 URL,并把入站 query(如 ~tree 的 ?depth=)原样带过去。
