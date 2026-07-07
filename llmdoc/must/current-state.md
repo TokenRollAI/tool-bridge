@@ -15,7 +15,7 @@
 
 | 资源 | 名称/地址 | 备注 |
 |---|---|---|
-| Worker | `tb-gateway` @ https://tool-bridge.pdjjq.org | custom domain(zone pdjjq.org);`wrangler.jsonc` 已写死 `account_id`;当前生产 Version `5832d467-d948-4931-a35e-3924615e3988`(Phase 4 设备通道修复后);DO `DeviceSession` 绑定 `TB_DEVICE`(migration v1,sqlite) |
+| Worker | `tb-gateway` @ https://tool-bridge.pdjjq.org | custom domain(zone pdjjq.org);`wrangler.jsonc` 已写死 `account_id`;当前生产 Version `01278057-c86c-4abf-86b7-b691de330f38`(~help 两级披露 + MCP 会话复用,commit 3622756);DO `DeviceSession` 绑定 `TB_DEVICE`(migration v1,sqlite) |
 | Worker secrets | `TB_BOOTSTRAP_ADMIN_SK` / `TB_SECRET_ENCRYPTION_KEY` | 已 `wrangler secret put`;前者是 Admin SK 明文(引导时 sha256 入库) |
 | KV | `tb-kv`(id `d18c93de33cf4ba2b1fbf7d26fd742f1`) | 绑定名 `TB_KV`;id 已回填 wrangler.jsonc |
 | R2 | `tb-r2` | 绑定名 `TB_R2`;write 权限已实测可用(Phase 1 尚未实际使用) |
