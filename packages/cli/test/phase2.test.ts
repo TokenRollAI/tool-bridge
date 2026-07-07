@@ -2,19 +2,10 @@ import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { callCommand, parseCallArgs } from '../src/commands/call'
-import { serverAddCommand, serverLsCommand, serverRmCommand } from '../src/commands/server'
-import { toolMountCommand, toolRmCommand } from '../src/commands/tool'
+import { parseCallArgs } from '../src/commands/call'
 import { resetFetch, setFetch } from '../src/http'
 import { buildVirtualize, parseToolsFile } from '../src/registry'
-
-function invoke(
-  // biome-ignore lint/suspicious/noExplicitAny: citty run context 仅用到 args,测试直接注入。
-  cmd: { run?: (ctx: any) => unknown },
-  args: Record<string, unknown>,
-): Promise<unknown> {
-  return Promise.resolve(cmd.run?.({ args, cmd, rawArgs: [] }))
-}
+import { runCli } from './cliHarness'
 
 /** 捕获请求并按 body 应答;返回 mock 以断言 URL/body。 */
 function captureFetch(body: unknown, status = 200): ReturnType<typeof vi.fn> {
@@ -47,20 +38,34 @@ afterEach(() => {
 describe('tb tool mount --kind mcp', () => {
   it('走 ~register,构造 mcp NodeInput 形状(含 authRef 与 virtualize)', async () => {
     const fn = captureFetch({ path: 'docs/ctx7', kind: 'mcp' })
-    await invoke(toolMountCommand, {
-      json: true,
-      'base-url': 'https://gw',
-      sk: 'tbk_x',
-      path: 'docs/ctx7',
-      kind: 'mcp',
-      url: 'https://mcp.example/sse',
-      'auth-ref': 's-mcp',
-      description: 'Context7',
-      prefix: 'ctx__',
-      rename: ['resolve=r', 'get-docs=g'],
-      hide: ['debug'],
-      describe: ['resolve=Resolve libraries'],
-    })
+    await runCli([
+      'tool',
+      'mount',
+      'docs/ctx7',
+      '--json',
+      '--base-url',
+      'https://gw',
+      '--sk',
+      'tbk_x',
+      '--kind',
+      'mcp',
+      '--url',
+      'https://mcp.example/sse',
+      '--auth-ref',
+      's-mcp',
+      '--description',
+      'Context7',
+      '--prefix',
+      'ctx__',
+      '--rename',
+      'resolve=r',
+      '--rename',
+      'get-docs=g',
+      '--hide',
+      'debug',
+      '--describe',
+      'resolve=Resolve libraries',
+    ])
     const [url, init] = fn.mock.calls[0] as [string, RequestInit]
     expect(url).toBe('https://gw/docs/ctx7/~register')
     const payload = JSON.parse(init.body as string)
@@ -84,13 +89,18 @@ describe('tb tool mount --kind mcp', () => {
 
   it('缺 --url → 退出码 1,不发请求', async () => {
     const fn = captureFetch({})
-    await invoke(toolMountCommand, {
-      json: true,
-      'base-url': 'https://gw',
-      sk: 'tbk_x',
-      path: 'docs/ctx7',
-      kind: 'mcp',
-    })
+    await runCli([
+      'tool',
+      'mount',
+      'docs/ctx7',
+      '--json',
+      '--base-url',
+      'https://gw',
+      '--sk',
+      'tbk_x',
+      '--kind',
+      'mcp',
+    ])
     expect(fn).not.toHaveBeenCalled()
     expect(process.exitCode).toBe(1)
   })
@@ -107,18 +117,28 @@ describe('tb tool mount --kind http', () => {
       ]),
     )
     const fn = captureFetch({ path: 'svc/echo', kind: 'http' })
-    await invoke(toolMountCommand, {
-      json: true,
-      'base-url': 'https://gw',
-      sk: 'tbk_x',
-      path: 'svc/echo',
-      kind: 'http',
-      endpoint: 'https://echo.example',
-      'tools-file': file,
-      'auth-ref': 's-http',
-      'auth-header': 'X-Api-Key',
-      'auth-scheme': '',
-    })
+    await runCli([
+      'tool',
+      'mount',
+      'svc/echo',
+      '--json',
+      '--base-url',
+      'https://gw',
+      '--sk',
+      'tbk_x',
+      '--kind',
+      'http',
+      '--endpoint',
+      'https://echo.example',
+      '--tools-file',
+      file,
+      '--auth-ref',
+      's-http',
+      '--auth-header',
+      'X-Api-Key',
+      '--auth-scheme',
+      '',
+    ])
     const [, init] = fn.mock.calls[0] as [string, RequestInit]
     const payload = JSON.parse(init.body as string)
     expect(payload.config.kind).toBe('http')
@@ -178,14 +198,20 @@ describe('tb server add', () => {
   it('构造 kind:remote NodeInput,--base-url 指远端,网关取自 env', async () => {
     process.env.TB_BASE_URL = 'https://gw'
     const fn = captureFetch({ path: 'fed/peer', kind: 'remote' })
-    await invoke(serverAddCommand, {
-      json: true,
-      sk: 'tbk_x',
-      path: 'fed/peer',
-      'base-url': 'https://peer.example',
-      'sk-ref': 's-out',
-      description: 'peer',
-    })
+    await runCli([
+      'server',
+      'add',
+      'fed/peer',
+      '--json',
+      '--sk',
+      'tbk_x',
+      '--base-url',
+      'https://peer.example',
+      '--sk-ref',
+      's-out',
+      '--description',
+      'peer',
+    ])
     const [url, init] = fn.mock.calls[0] as [string, RequestInit]
     expect(url).toBe('https://gw/fed/peer/~register')
     const payload = JSON.parse(init.body as string)
@@ -212,11 +238,7 @@ describe('tb server ls / rm', () => {
         { path: 'ext/http', kind: 'http', description: 'not remote' },
       ],
     })
-    await invoke(serverLsCommand, {
-      json: true,
-      'base-url': 'https://gw',
-      sk: 'tbk_x',
-    })
+    await runCli(['server', 'ls', '--json', '--base-url', 'https://gw', '--sk', 'tbk_x'])
     const [url, init] = fn.mock.calls[0] as [string, RequestInit]
     expect(url).toBe('https://gw/system/registry')
     expect(JSON.parse(init.body as string)).toEqual({ tool: 'list', arguments: {} })
@@ -247,12 +269,16 @@ describe('tb server ls / rm', () => {
       })
     })
     setFetch(fn as unknown as typeof fetch)
-    await invoke(serverRmCommand, {
-      json: true,
-      'base-url': 'https://gw',
-      sk: 'tbk_x',
-      path: 'fed/peer',
-    })
+    await runCli([
+      'server',
+      'rm',
+      'fed/peer',
+      '--json',
+      '--base-url',
+      'https://gw',
+      '--sk',
+      'tbk_x',
+    ])
     expect(fn).toHaveBeenCalledTimes(2)
     const firstBody = JSON.parse((fn.mock.calls[0]?.[1] as RequestInit).body as string)
     const secondBody = JSON.parse((fn.mock.calls[1]?.[1] as RequestInit).body as string)
@@ -264,14 +290,19 @@ describe('tb server ls / rm', () => {
 describe('tb call', () => {
   it('构造数据面 body {tool, arguments}(--json)', async () => {
     const fn = captureFetch({ ok: true })
-    await invoke(callCommand, {
-      json: true,
-      'base-url': 'https://gw',
-      sk: 'tbk_x',
-      path: 'docs/ctx7',
-      tool: 'resolve',
-      args: '{"libraryName":"react"}',
-    })
+    await runCli([
+      'call',
+      'docs/ctx7',
+      '--json',
+      '--base-url',
+      'https://gw',
+      '--sk',
+      'tbk_x',
+      '--tool',
+      'resolve',
+      '--args',
+      '{"libraryName":"react"}',
+    ])
     const [url, init] = fn.mock.calls[0] as [string, RequestInit]
     expect(url).toBe('https://gw/docs/ctx7')
     expect(JSON.parse(init.body as string)).toEqual({
@@ -283,14 +314,19 @@ describe('tb call', () => {
 
   it('非法 --args JSON → 退出码 1', async () => {
     captureFetch({})
-    await invoke(callCommand, {
-      json: true,
-      'base-url': 'https://gw',
-      sk: 'tbk_x',
-      path: 'docs/ctx7',
-      tool: 'resolve',
-      args: 'not-json',
-    })
+    await runCli([
+      'call',
+      'docs/ctx7',
+      '--json',
+      '--base-url',
+      'https://gw',
+      '--sk',
+      'tbk_x',
+      '--tool',
+      'resolve',
+      '--args',
+      'not-json',
+    ])
     expect(process.exitCode).toBe(1)
   })
 })
@@ -318,12 +354,7 @@ describe('tb tool rm — 404 提示', () => {
           ),
       ) as unknown as typeof fetch,
     )
-    await invoke(toolRmCommand, {
-      json: false,
-      'base-url': 'https://gw',
-      sk: 'tbk_x',
-      path: 'docs/ctx7',
-    })
+    await runCli(['tool', 'rm', 'docs/ctx7', '--base-url', 'https://gw', '--sk', 'tbk_x'])
     expect(process.exitCode).toBe(1)
     const stderr = process.stderr.write as unknown as ReturnType<typeof vi.fn>
     const printed = stderr.mock.calls.map((c) => String(c[0])).join('')

@@ -3,19 +3,11 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { buildExpose } from '../src/commands/connect'
-import { deviceLsCommand } from '../src/commands/device'
 import { configPath } from '../src/config'
 import { normalizeDeviceId, resolveDeviceId } from '../src/deviceId'
 import { deviceWsUrl, startHeartbeat } from '../src/deviceRuntime'
 import { resetFetch, setFetch } from '../src/http'
-
-function invoke(
-  // biome-ignore lint/suspicious/noExplicitAny: citty run context 仅用到 args,测试直接注入。
-  cmd: { run?: (ctx: any) => unknown },
-  args: Record<string, unknown>,
-): Promise<unknown> {
-  return Promise.resolve(cmd.run?.({ args, cmd, rawArgs: [] }))
-}
+import { runCli } from './cliHarness'
 
 function stdoutText(): string {
   const stdout = process.stdout.write as unknown as ReturnType<typeof vi.fn>
@@ -80,11 +72,11 @@ describe('device runtime helpers', () => {
 
   it('buildExpose:默认暴露 shell(allow 默认 []);--no-shell + --fs 只暴露 fs', () => {
     expect(buildExpose({})).toEqual({ shell: { allow: [] } })
-    expect(buildExpose({ allow: ['echo', 'git'], fs: ['/tmp'], 'fs-readonly': true })).toEqual({
+    expect(buildExpose({ allow: ['echo', 'git'], fs: ['/tmp'], fsReadonly: true })).toEqual({
       shell: { allow: ['echo', 'git'] },
       fs: { roots: ['/tmp'], readOnly: true },
     })
-    expect(buildExpose({ 'no-shell': true, fs: '/tmp' })).toEqual({
+    expect(buildExpose({ shell: false, fs: '/tmp' })).toEqual({
       fs: { roots: ['/tmp'], readOnly: false },
     })
   })
@@ -153,11 +145,7 @@ describe('tb device ls', () => {
         { path: 'device/d2', kind: 'directory', description: '设备 d2', online: false },
       ],
     })
-    await invoke(deviceLsCommand, {
-      'base-url': 'https://gw',
-      sk: 'tbk_x',
-      json: false,
-    })
+    await runCli(['device', 'ls', '--base-url', 'https://gw', '--sk', 'tbk_x'])
     const [url, init] = fn.mock.calls[0] as [string, RequestInit]
     expect(url).toBe('https://gw/system/registry')
     expect(JSON.parse(init.body as string)).toEqual({
