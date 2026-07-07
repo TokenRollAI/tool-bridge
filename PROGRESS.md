@@ -138,3 +138,10 @@
 - 勾选:Phase 4 DoD-3、DoD-4(Phase 4 4/4 全勾);Phase 5 全部 4 项(DOD.md:104-107)
 - 沉淀:memory 新增共享工作区多 agent 提交纪律;待关门轮 /llmdoc:update
 - 遗留:①doc-check §④ 4 条轻微偏离回写(DeviceTransport Phase 6 注记/SDK 引导扩展字段/SecretStore 接口名/ObjectMeta.metadata 可选)+ w-p5gw 的 secret 冒号保留命名空间注记 + plugin id 字符约束;②Phase 5 质量关口 Workflow;③CLI deviceRuntime 迁移为 SDK 消费者(Q10 后半)未做;④生产 device/demo-mac 疑似残骸未删(待用户确认)。
+
+## Round 12 — 2026-07-07(Dashboard 重构:功能性/实用性/美观)
+- 目标:重构 Phase 6 预演的 Dashboard(用户直接要求,非 DoD 项)
+- 动作(4 commits:5e497fc/34b8392/a361910/97c8e64):①基础层——invoke 端到端耗时、per-profile 调用历史(localStorage 封顶 50 条)、CopyButton/PageHeader/EmptyState 共享组件;②⌘K 命令面板(cmdk,全树模糊跳转/管理页/主题/刷新/登出)+ 树导航过滤与刷新按钮;③context 节点新增「条目」浏览 tab(List 浅层钻取/Search 防抖/Get 预览 markdown 渲染+$ref 大对象提示/Write 新建编辑带 ifVersion/Delete 确认),CmdPanel 增「等价 CLI/curl」对照(SK 以 $TB_SK 占位)与「上次参数」恢复,ResultView 增耗时/复制/下载;④管理页重做——SK 页(时间列/过滤/id 复制)、Registry 页(kind 过滤 chips/搜索/config 查看对话框)、Devices 页(在线统计/connect 命令复制/离线残骸清理=registry delete)、Overview(kind 分布/设备在线统计/最近调用历史)、Login(面板四角刻度/档案删除)。
+- 验证:`pnpm verify` 全绿(typecheck+lint+单测+集成,gateway 82 passed/6 skipped 含 ui.integration 11 例);`pnpm --filter dashboard build` 成功;本地 wrangler dev(临时 TB_BOOTSTRAP_ADMIN_SK,测后清 .wrangler/state)+ vite dev 浏览器实测:登录→挂载 r2 context→条目 Write/List 钻取/Get 预览→CmdPanel 调用 13ms→⌘K 面板→浅色主题,console 零 error/warn。
+- 勾选:无(Dashboard 属 Phase 6,DOD.md:118 待该 Phase 关门时按 E2E-6 验收)
+- 遗留:①bundle 1.14MB 未 code-split(vite 警告,不阻塞);②调用历史仅存本机 localStorage(设计如此);③Phase 6 其余 DoD(tb init 向导/Docker)未动。
