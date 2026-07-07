@@ -15,7 +15,7 @@ import {
   type ToolResult,
   type ToolSpec,
 } from '@tool-bridge/core'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { createToolBridge, type ToolBridge } from '../src'
 
 const ADMIN_SK = 'tbk_sdk_test_admin_0000000000'
@@ -265,21 +265,28 @@ describe('createToolBridge:本地 HTTP(@hono/node-server)', () => {
 
 describe('createToolBridge:配置语义', () => {
   it('secret 禁用语义:无主密钥 → set 返回 unavailable', async () => {
-    const tb = createToolBridge({ state: new MemoryStateStore(), adminSk: ADMIN_SK })
-    const res = await tb.fetch(
-      new Request('http://tb.local/system/secret', {
-        method: 'POST',
-        headers: {
-          authorization: `Bearer ${ADMIN_SK}`,
-          'content-type': 'application/json',
-          accept: 'application/json',
-        },
-        body: JSON.stringify({ tool: 'set', arguments: { name: 'k', value: 'v' } }),
-      }),
-    )
-    expect(res.status).toBe(503)
-    const body = (await res.json()) as { code: string }
-    expect(body.code).toBe('unavailable')
+    // Proto §7:config.encryptionKey 与 env TB_SECRET_ENCRYPTION_KEY 皆无才禁用——
+    // 隔离宿主 env(本机 .env 可能带该变量),否则测试会命中 env 回退。
+    vi.stubEnv('TB_SECRET_ENCRYPTION_KEY', undefined)
+    try {
+      const tb = createToolBridge({ state: new MemoryStateStore(), adminSk: ADMIN_SK })
+      const res = await tb.fetch(
+        new Request('http://tb.local/system/secret', {
+          method: 'POST',
+          headers: {
+            authorization: `Bearer ${ADMIN_SK}`,
+            'content-type': 'application/json',
+            accept: 'application/json',
+          },
+          body: JSON.stringify({ tool: 'set', arguments: { name: 'k', value: 'v' } }),
+        }),
+      )
+      expect(res.status).toBe(503)
+      const body = (await res.json()) as { code: string }
+      expect(body.code).toBe('unavailable')
+    } finally {
+      vi.unstubAllEnvs()
+    }
   })
 
   it('reservedRoots 生效:追加保留根下注册被拒', async () => {
