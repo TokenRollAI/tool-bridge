@@ -39,6 +39,13 @@ function positiveIntEnv(value: string | undefined): number | undefined {
   return Number.isFinite(n) && n > 0 ? Math.floor(n) : undefined
 }
 
+/** 端口解析:0 合法(系统分配临时端口,测试用);非法/缺省 → undefined。 */
+function portEnv(value: string | undefined): number | undefined {
+  if (value === undefined || value === '') return undefined
+  const n = Number(value)
+  return Number.isInteger(n) && n >= 0 && n <= 65535 ? n : undefined
+}
+
 export function configFromEnv(env: NodeJS.ProcessEnv = process.env): ServerConfig {
   const allowInsecure = env.TB_ALLOW_INSECURE_HTTP === 'true'
   const allowlist = (env.TB_REMOTE_ALLOWLIST ?? '')
@@ -46,7 +53,7 @@ export function configFromEnv(env: NodeJS.ProcessEnv = process.env): ServerConfi
     .map((s) => s.trim())
     .filter((s) => s.length > 0)
   const config: ServerConfig = {
-    port: positiveIntEnv(env.TB_PORT) ?? DEFAULT_PORT,
+    port: portEnv(env.TB_PORT) ?? DEFAULT_PORT,
     host: env.TB_HOST !== undefined && env.TB_HOST.length > 0 ? env.TB_HOST : '0.0.0.0',
     dataDir:
       env.TB_DATA_DIR !== undefined && env.TB_DATA_DIR.length > 0 ? env.TB_DATA_DIR : './data',

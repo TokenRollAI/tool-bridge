@@ -1,4 +1,5 @@
 export { configFromEnv, type ServerConfig } from './config'
+export { DEVICE_WS_PATH, DeviceHub } from './deviceHub'
 export { createDataObjectStore } from './objects'
 export { createTbServer, type TbServer } from './server'
 export { SqliteStateStore } from './sqliteStateStore'

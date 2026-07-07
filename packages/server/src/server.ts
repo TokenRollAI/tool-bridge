@@ -8,6 +8,7 @@
  */
 
 import { mkdirSync } from 'node:fs'
+import type { Server as HttpServer } from 'node:http'
 import { join } from 'node:path'
 import { type ServerType, serve } from '@hono/node-server'
 import { SecretStoreImpl } from '@tool-bridge/core'
@@ -15,13 +16,15 @@ import { runBootstrap } from '@tool-bridge/gateway/bootstrap'
 import { createTbApp, type TbAppDeps } from '@tool-bridge/gateway/tbApp'
 import pkg from '../package.json' with { type: 'json' }
 import type { ServerConfig } from './config'
+import { DeviceHub } from './deviceHub'
 import { createDataObjectStore } from './objects'
 import { SqliteStateStore } from './sqliteStateStore'
 
 export interface TbServer {
   app: ReturnType<typeof createTbApp>
   state: SqliteStateStore
-  /** 引导(幂等)+ 监听;返回实际端口(config.port=0 时由系统分配)。 */
+  deviceHub: DeviceHub
+  /** 引导(幂等)+ 孤儿设备回收排程 + 监听;返回实际端口(config.port=0 时由系统分配)。 */
   start(): Promise<{ port: number }>
   close(): Promise<void>
 }
@@ -31,6 +34,7 @@ export function createTbServer(config: ServerConfig): TbServer {
   const state = new SqliteStateStore(join(config.dataDir, 'state.sqlite3'))
   const secrets = new SecretStoreImpl(state, config.encryptionKey)
   const objects = createDataObjectStore(config.dataDir)
+  const hub = new DeviceHub({ store: state, reclaimSec: config.deviceReclaimSec })
 
   const deps: TbAppDeps = {
     state,
@@ -39,6 +43,7 @@ export function createTbServer(config: ServerConfig): TbServer {
     remote: config.remote,
     allowInsecureHttp: config.allowInsecureHttp,
     objects: () => objects,
+    device: hub,
   }
   if (config.encryptionKey !== undefined) deps.encryptionKey = config.encryptionKey
   if (config.toolCacheTtlSec !== undefined) deps.toolCacheTtlSec = config.toolCacheTtlSec
@@ -51,15 +56,19 @@ export function createTbServer(config: ServerConfig): TbServer {
   return {
     app,
     state,
+    deviceHub: hub,
     async start(): Promise<{ port: number }> {
       await runBootstrap(state, config.adminSk !== undefined ? { adminSk: config.adminSk } : {})
+      await hub.sweepOrphans()
       return await new Promise((resolve) => {
         server = serve({ fetch: app.fetch, port: config.port, hostname: config.host }, (info) => {
           resolve({ port: info.port })
         })
+        hub.attach(server as HttpServer)
       })
     },
     async close(): Promise<void> {
+      await hub.close()
       if (server !== undefined) {
         await new Promise<void>((resolve, reject) => {
           server?.close((err) => (err ? reject(err) : resolve()))
