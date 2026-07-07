@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { parseHelpDsl, renderHelpDsl } from '../../src/htbp/helpDsl'
-import { toolsToHelpModel } from '../../src/tool/mcpSchema'
+import { toolHelpModel, toolsToHelpModel } from '../../src/tool/mcpSchema'
 import type { ToolSpec } from '../../src/tool/types'
 
 const tools: ToolSpec[] = [
@@ -74,5 +74,41 @@ describe('toolsToHelpModel(Proto §4.1 → §1.3)', () => {
     const dsl = renderHelpDsl(m)
     expect(dsl).not.toContain('  h ')
     expect(dsl).toContain('cmd bare POST /x')
+  })
+})
+
+describe('两级披露(Proto §4.2):索引形态与单工具全量', () => {
+  it('index:true → cmd 不含 inputSchema;h/scope/effect/confirm 保留', () => {
+    const m = toolsToHelpModel('docs/context7', { kind: 'mcp', description: 'Context7' }, tools, {
+      index: true,
+    })
+    expect(m.cmds[0]?.inputSchema).toBeUndefined()
+    expect(m.cmds[0]?.h).toBe('解析库 id')
+    expect(m.cmds[0]?.scope).toBe('call')
+    expect(m.cmds[1]?.confirm).toBe(true)
+    // DSL 表现:无 body 行
+    expect(renderHelpDsl(m)).not.toContain('  body ')
+  })
+
+  it('index:true → 节点描述附工具级 ~help 提示', () => {
+    const m = toolsToHelpModel('docs/context7', { kind: 'mcp', description: 'Context7' }, tools, {
+      index: true,
+    })
+    expect(m.node.description).toContain('GET /docs/context7/<tool>/~help')
+  })
+
+  it('toolHelpModel:node 行是工具伪节点路径,cmd path 仍指向节点', () => {
+    const tool = tools[0] as ToolSpec
+    const m = toolHelpModel('docs/context7', { kind: 'mcp', description: 'Context7' }, tool)
+    expect(m.node.path).toBe('docs/context7/resolve-library-id')
+    expect(m.node.description).toBe('解析库 id')
+    expect(m.cmds).toHaveLength(1)
+    expect(m.cmds[0]?.path).toBe('/docs/context7')
+    expect(m.cmds[0]?.inputSchema).toEqual(tool.inputSchema)
+  })
+
+  it('toolHelpModel:无 description 的工具回落节点描述', () => {
+    const m = toolHelpModel('x', { kind: 'http', description: 'X 上游' }, { name: 'bare' })
+    expect(m.node.description).toBe('X 上游')
   })
 })

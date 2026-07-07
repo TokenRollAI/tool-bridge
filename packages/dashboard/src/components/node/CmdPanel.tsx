@@ -3,7 +3,7 @@ import type { RJSFSchema } from '@rjsf/utils'
 import validator from '@rjsf/validator-ajv8'
 import { useQueryClient } from '@tanstack/react-query'
 import { Braces, ChevronRight, ClipboardList, Loader2, Play, TriangleAlert } from 'lucide-react'
-import { useId, useState } from 'react'
+import { useEffect, useId, useState } from 'react'
 import { ResultView } from '@/components/node/ResultView'
 import {
   AlertDialog,
@@ -24,9 +24,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { Skeleton } from '@/components/ui/skeleton'
 import { Textarea } from '@/components/ui/textarea'
 import type { ApiError } from '@/lib/api'
-import { useInvoke } from '@/lib/queries'
+import { useInvoke, useToolHelp } from '@/lib/queries'
 import { isFormFriendly, skeletonFromSchema } from '@/lib/schemaForm'
 import type { HelpCmd } from '@/lib/types'
 import { cn } from '@/lib/utils'
@@ -93,26 +94,31 @@ function CmdDoc({ h }: { h: string }) {
  * 单条 cmd 的调用面板(Proto §1.3 CmdSpec 的通用渲染器,Case 6):
  * inputSchema → rjsf 表单(可切 JSON 原文编辑);confirm=true 弹二次确认(§6.2 语义在客户端);
  * Accept 可选 markdown(默认表现)/JSON;返回经 ResultView 展示。
+ * `lazySchema`(mcp/http 节点):节点级 ~help 是索引形态(无 inputSchema),
+ * 面板展开时经工具级 ~help 按需补水(Proto §4.2 两级披露)。
  */
 export function CmdPanel({
   path,
   cmd,
   defaultOpen = false,
+  lazySchema = false,
 }: {
   path: string
   cmd: HelpCmd
   defaultOpen?: boolean
+  lazySchema?: boolean
 }) {
   const [open, setOpen] = useState(defaultOpen)
-  const hasSchema = cmd.inputSchema !== undefined && typeof cmd.inputSchema === 'object'
+  const lazyNeeded = lazySchema && cmd.inputSchema === undefined
+  const toolHelp = useToolHelp(path, cmd.name, lazyNeeded && open)
+  const inputSchema = cmd.inputSchema ?? toolHelp.data?.cmds[0]?.inputSchema
+  const hasSchema = inputSchema !== undefined && typeof inputSchema === 'object'
   // rjsf 渲染不了的形状(如缺 items 的 array)直接落 JSON 编辑,避免表单区出现错误文本。
-  const formFriendly = hasSchema && isFormFriendly(cmd.inputSchema)
+  const formFriendly = hasSchema && isFormFriendly(inputSchema)
   const [mode, setMode] = useState<'form' | 'json'>(formFriendly ? 'form' : 'json')
   const [formData, setFormData] = useState<unknown>(undefined)
   const [rawArgs, setRawArgs] = useState(() =>
-    hasSchema && !formFriendly
-      ? JSON.stringify(skeletonFromSchema(cmd.inputSchema), null, 2)
-      : '{}',
+    hasSchema && !formFriendly ? JSON.stringify(skeletonFromSchema(inputSchema), null, 2) : '{}',
   )
   const [rawErr, setRawErr] = useState<string | null>(null)
   const [accept, setAccept] = useState<'markdown' | 'json'>('markdown')
@@ -120,6 +126,15 @@ export function CmdPanel({
   const invoke = useInvoke()
   const qc = useQueryClient()
   const acceptId = useId()
+
+  // 懒补水到位后一次性初始化编辑器形态(仅当用户尚未输入;guard 保证幂等)。
+  useEffect(() => {
+    if (!lazyNeeded || inputSchema === undefined) return
+    const pristine = rawArgs === '{}' && formData === undefined
+    if (!pristine) return
+    if (isFormFriendly(inputSchema)) setMode('form')
+    else setRawArgs(JSON.stringify(skeletonFromSchema(inputSchema), null, 2))
+  }, [lazyNeeded, inputSchema, rawArgs, formData])
 
   const doInvoke = (args: unknown) => {
     invoke.mutate(
@@ -246,9 +261,14 @@ export function CmdPanel({
 
         <CollapsibleContent>
           <div className="px-4 py-3">
-            {mode === 'form' && hasSchema ? (
+            {lazyNeeded && toolHelp.isPending ? (
+              <div className="grid gap-2">
+                <Skeleton className="h-8 w-full" />
+                <Skeleton className="h-8 w-2/3" />
+              </div>
+            ) : mode === 'form' && hasSchema ? (
               <Form
-                schema={cmd.inputSchema as RJSFSchema}
+                schema={inputSchema as RJSFSchema}
                 validator={validator}
                 formData={formData}
                 onChange={({ formData: fd }) => setFormData(fd)}

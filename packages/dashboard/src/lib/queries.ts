@@ -27,6 +27,21 @@ export function useHelp(path: string) {
   })
 }
 
+/**
+ * 工具级 `~help`(Proto §4.2 两级披露的细节级):mcp/http 节点级 ~help 是索引形态
+ * (cmd 不含 inputSchema),面板展开时按需取 `GET /<path>/<tool>/~help` 补水 schema。
+ * 网关侧命中同一 toolcache,不额外打上游。
+ */
+export function useToolHelp(path: string, tool: string, enabled: boolean) {
+  const conn = useConn()
+  const base = useKeyBase()
+  return useQuery({
+    queryKey: [...base, 'help', `${path}/${tool}`],
+    queryFn: ({ signal }) => getHelp(conn, `${path}/${tool}`, signal),
+    enabled,
+  })
+}
+
 export function useHelpDsl(path: string, enabled = true) {
   const conn = useConn()
   const base = useKeyBase()

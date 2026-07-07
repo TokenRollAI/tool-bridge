@@ -99,7 +99,14 @@ export function NodePage() {
                 命令 · {cmds.length}
               </h2>
               {cmds.map((cmd) => (
-                <CmdPanel key={cmd.name} path={path} cmd={cmd} defaultOpen={cmds.length === 1} />
+                <CmdPanel
+                  key={cmd.name}
+                  path={path}
+                  cmd={cmd}
+                  defaultOpen={cmds.length === 1}
+                  // mcp/http 节点级 ~help 是索引形态(Proto §4.2):展开时懒取工具级 schema
+                  lazySchema={node.kind === 'mcp' || node.kind === 'http'}
+                />
               ))}
             </section>
           ) : (

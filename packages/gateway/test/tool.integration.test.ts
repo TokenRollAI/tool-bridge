@@ -158,6 +158,87 @@ describe('调用点 call 判定(DOD 70:无 call → 403;不可见 → 404)', () 
   })
 })
 
+describe('两级披露(Proto §4.2:节点级索引 + 工具级全量)', () => {
+  const SCHEMA_TOOLS = [
+    {
+      name: 'lookup',
+      description: '查一个东西',
+      method: 'GET',
+      pathTemplate: '/get',
+      inputSchema: { type: 'object', required: ['q'], properties: { q: { type: 'string' } } },
+    },
+    { name: 'other', description: '另一个', method: 'GET', pathTemplate: '/get' },
+  ]
+
+  it('节点级 ~help 是索引形态:cmd 无 inputSchema,描述附工具级提示', async () => {
+    await mountHttp('ext/two-level', SCHEMA_TOOLS)
+    const res = await SELF.fetch(
+      'https://tb.test/ext/two-level/~help',
+      admin({ headers: { accept: 'application/json' } }),
+    )
+    expect(res.status).toBe(200)
+    const json = (await res.json()) as {
+      node: { description: string }
+      cmds: Array<{ name: string; h?: string; inputSchema?: unknown }>
+    }
+    const lookup = json.cmds.find((c) => c.name === 'lookup')
+    expect(lookup?.h).toBe('查一个东西')
+    expect(lookup?.inputSchema).toBeUndefined()
+    expect(json.node.description).toContain('GET /ext/two-level/<tool>/~help')
+  })
+
+  it('工具级 ~help 返回单工具全量 spec(inputSchema 在,cmd path 指向节点)', async () => {
+    await mountHttp('ext/two-level2', SCHEMA_TOOLS)
+    const res = await SELF.fetch(
+      'https://tb.test/ext/two-level2/lookup/~help',
+      admin({ headers: { accept: 'application/json' } }),
+    )
+    expect(res.status).toBe(200)
+    const json = (await res.json()) as {
+      node: { path: string; description: string }
+      cmds: Array<{ name: string; path: string; inputSchema?: unknown }>
+    }
+    expect(json.node.path).toBe('ext/two-level2/lookup')
+    expect(json.cmds).toHaveLength(1)
+    expect(json.cmds[0]?.name).toBe('lookup')
+    expect(json.cmds[0]?.path).toBe('/ext/two-level2')
+    expect(json.cmds[0]?.inputSchema).toEqual(SCHEMA_TOOLS[0]?.inputSchema)
+  })
+
+  it('工具级 ~help 尊重虚拟化:虚拟名可查,hidden/原名 404', async () => {
+    await mountHttp('ext/two-level3', SCHEMA_TOOLS, {
+      hide: ['other'],
+      rename: { lookup: 'shiny-lookup' },
+    })
+    const virtual = await SELF.fetch('https://tb.test/ext/two-level3/shiny-lookup/~help', admin())
+    expect(virtual.status).toBe(200)
+    const original = await SELF.fetch('https://tb.test/ext/two-level3/lookup/~help', admin())
+    expect(original.status).toBe(404)
+    const hidden = await SELF.fetch('https://tb.test/ext/two-level3/other/~help', admin())
+    expect(hidden.status).toBe(404)
+  })
+
+  it('不存在的工具名 → 404;深于一段的子路径 → 404', async () => {
+    await mountHttp('ext/two-level4', SCHEMA_TOOLS)
+    const missing = await SELF.fetch('https://tb.test/ext/two-level4/nope/~help', admin())
+    expect(missing.status).toBe(404)
+    const deep = await SELF.fetch('https://tb.test/ext/two-level4/lookup/extra/~help', admin())
+    expect(deep.status).toBe(404)
+  })
+
+  it('无 call 权限的 SK:工具级 ~help 一律 404(不泄露存在性)', async () => {
+    await mountHttp('ext/two-level5', SCHEMA_TOOLS)
+    const roSk = await issueSk({
+      owner: 'agent:ro-tool-help',
+      scopes: [{ pattern: 'ext/**', actions: ['read'] }],
+    })
+    const res = await SELF.fetch('https://tb.test/ext/two-level5/lookup/~help', {
+      headers: { authorization: `Bearer ${roSk}` },
+    })
+    expect(res.status).toBe(404)
+  })
+})
+
 describe('remote 节点(DOD 67/69:白名单、X-TB-Via 环检测)', () => {
   secureOnlyIt('http:// baseUrl 默认被拒(即使 host 在白名单内)', async () => {
     const res = await postJson(
@@ -389,5 +470,34 @@ describe('mcp 真实上游 E2E(opt-in via TB_TEST_MCP_URL)', () => {
     )
     expect(call.status).toBe(200)
     expect(JSON.stringify(await call.json())).toContain('hello-tb')
+  })
+
+  mcpIt('会话复用:两次调用落在同一上游会话(第二次跳过 initialize 握手)', async () => {
+    const mk = await postJson(
+      'system/registry',
+      {
+        tool: 'write',
+        arguments: {
+          path: 'ext/mcp-session',
+          kind: 'mcp',
+          description: 'echo mcp(session reuse)',
+          config: { kind: 'mcp', url: mcpUrl },
+        },
+      },
+      admin(),
+    )
+    expect(mk.status).toBe(200)
+
+    // echo-mcp 默认有状态:whoami 回显当前会话 id。两次调用同一 id ⇔ 网关复用了
+    // mcpsession:<path> 缓存的会话,而不是每次重新握手(Reference §3 演进)。
+    const whoami = async (): Promise<string> => {
+      const res = await postJson('ext/mcp-session', { tool: 'whoami', arguments: {} }, admin())
+      expect(res.status).toBe(200)
+      return JSON.stringify(await res.json())
+    }
+    const first = await whoami()
+    expect(first).not.toContain('stateless') // 上游确实签发了会话(有状态模式)
+    const second = await whoami()
+    expect(second).toBe(first)
   })
 })

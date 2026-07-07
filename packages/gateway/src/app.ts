@@ -45,6 +45,7 @@ import {
   type TreeJson,
   type TreeNode,
   type TreePath,
+  toolHelpModel,
   toolsToHelpModel,
   virtualizeTools,
 } from '@tool-bridge/core'
@@ -54,7 +55,7 @@ import { buildDeps, ensureBootstrapped } from './bootstrap'
 import type { DeviceSession } from './deviceSession'
 import { KvStateStore } from './kvStateStore'
 import { createHttpProvider, type HttpConfig } from './providers/http'
-import { createMcpProvider, type McpConfig } from './providers/mcp'
+import { createMcpProvider, invalidateMcpSession, type McpConfig } from './providers/mcp'
 import { createR2ObjectStore, type R2PresignCredentials } from './providers/r2Object'
 import { assertRemoteAllowed, passthroughRemote } from './providers/remote'
 import { createS3ObjectStore, type S3StoreConfig } from './providers/s3Object'
@@ -385,6 +386,10 @@ export function createApp(): Hono<{ Bindings: Env; Variables: Vars }> {
     try {
       node = await registry.get(path)
     } catch {
+      // 非注册路径:尝试工具级 ~help(Proto §4.2 两级披露)——最长前缀命中 mcp/http 节点
+      // 且剩余恰一段(工具虚拟名)→ 单工具全量 spec(命中同一 toolcache,不额外打上游)。
+      const toolModel = await toolHelpModelFor(c, ctx, registry, path)
+      if (toolModel !== null) return renderHelp(toolModel, rep)
       throw TBError.notFound('not found')
     }
     const builtins = createBuiltins(buildDeps(store, c.env, pkg.version))
@@ -437,7 +442,7 @@ export function createApp(): Hono<{ Bindings: Env; Variables: Vars }> {
         throw new TBError('invalid_argument', 'body must be {tool, arguments}')
       }
       const args = (body.arguments ?? {}) as Record<string, unknown>
-      const provider = providerFor(node, secretStore(store, c.env), c.env)
+      const provider = providerFor(node, secretStore(store, c.env), c.env, store)
       const tools = await upstreamTools(
         node,
         provider,
@@ -565,8 +570,11 @@ export function createApp(): Hono<{ Bindings: Env; Variables: Vars }> {
     }
 
     const result = await mod.dispatch(cmd, args, ctx)
-    // 注册变更 → 失效该节点工具缓存(Proto §4.2:Write/Update/Delete 触发失效)。
-    if (registryTarget !== undefined) await invalidateToolCache(store, registryTarget)
+    // 注册变更 → 失效该节点工具缓存 + mcp 会话缓存(Proto §4.2:Write/Update/Delete 触发失效)。
+    if (registryTarget !== undefined) {
+      await invalidateToolCache(store, registryTarget)
+      await invalidateMcpSession(store, registryTarget)
+    }
     return renderResult(result, negotiate(c.req.header('accept')))
   }
 
@@ -655,8 +663,9 @@ export function createApp(): Hono<{ Bindings: Env; Variables: Vars }> {
     await assertContextConfig(body.config, c.env, secretStore(store, c.env))
     const now = new Date().toISOString()
     const node = await registry.write(body, ctx.keyId, now)
-    // 注册变更 → 失效该节点工具缓存(Proto §4.2)。
+    // 注册变更 → 失效该节点工具缓存 + mcp 会话缓存(Proto §4.2)。
     await invalidateToolCache(store, body.path)
+    await invalidateMcpSession(store, body.path)
     return new Response(JSON.stringify(node), {
       headers: { 'content-type': contentTypeFor('json') },
     })
@@ -835,10 +844,18 @@ async function helpModelFor(
     }
   }
   if (node.kind === 'mcp' || node.kind === 'http') {
-    const provider = providerFor(node, deps.secrets, deps.env)
+    const provider = providerFor(node, deps.secrets, deps.env, deps.store)
     const raw = await upstreamTools(node, provider, deps.store, deps.env, deps.refresh, deps.now)
     const { exposed } = virtualizeTools(node.virtualize, raw)
-    return toolsToHelpModel(node.path, { kind: node.kind, description: node.description }, exposed)
+    // 索引形态(Proto §4.2 两级披露):不含 inputSchema;全量 spec 走工具级 ~help。
+    return toolsToHelpModel(
+      node.path,
+      { kind: node.kind, description: node.description },
+      exposed,
+      {
+        index: true,
+      },
+    )
   }
   if (node.kind === 'device' && node.config?.kind === 'device') {
     return deviceShellHelpModel(node.path, node.config.expose.shell ?? {})
@@ -857,11 +874,52 @@ async function helpModelFor(
   throw TBError.unimplemented(`~help for kind '${node.kind}' not implemented yet`)
 }
 
+/**
+ * 工具级 `~help`(Proto §4.2 两级披露的细节级):path 非注册节点时,最长前缀 resolve 命中
+ * mcp/http 节点且 rest 恰为一段(工具虚拟名)→ 单工具全量 HelpModel。工具集取自与节点级
+ * 相同的缓存(getTools),不额外打上游。不匹配/工具不存在 → null(调用方 404)。
+ * 可见性与列表面一致(read+call;deny==not_found 不泄露存在性)。
+ */
+async function toolHelpModelFor(
+  c: AppContext,
+  ctx: CallContext,
+  registry: NodeRegistryStore,
+  path: TreePath,
+): Promise<HelpModel | null> {
+  let resolved: { node: TreeNode; rest: string }
+  try {
+    resolved = await registry.resolve(path)
+  } catch {
+    return null
+  }
+  const { node, rest } = resolved
+  if ((node.kind !== 'mcp' && node.kind !== 'http') || node.config === undefined) return null
+  if (rest === '' || rest.includes('/')) return null
+  if (!check(ctx, node.path, 'read').allow || !check(ctx, node.path, 'call').allow) return null
+  const store = c.get('store')
+  const provider = providerFor(node, secretStore(store, c.env), c.env, store)
+  const refresh = c.req.query('refresh') === '1'
+  const raw = await upstreamTools(node, provider, store, c.env, refresh, new Date().toISOString())
+  const { exposed } = virtualizeTools(node.virtualize, raw)
+  const tool = exposed.find((t) => t.name === rest)
+  if (tool === undefined) return null
+  return toolHelpModel(node.path, { kind: node.kind, description: node.description }, tool)
+}
+
 /** 为 mcp/http 节点构造对应 Provider(其余 kind 无 Provider → unimplemented)。 */
-function providerFor(node: TreeNode, secrets: SecretStoreImpl, env: Env): UpstreamProvider {
+function providerFor(
+  node: TreeNode,
+  secrets: SecretStoreImpl,
+  env: Env,
+  store: StateStore,
+): UpstreamProvider {
   const insecure = allowInsecure(env)
   if (node.kind === 'mcp' && node.config?.kind === 'mcp') {
-    return createMcpProvider(node.config as McpConfig, secrets, { allowInsecure: insecure })
+    return createMcpProvider(node.config as McpConfig, secrets, {
+      allowInsecure: insecure,
+      // 会话复用凭证存 StateStore(mcpsession:<path>);调用结果不缓存(providers/mcp.ts)。
+      session: { store, nodePath: node.path },
+    })
   }
   if (node.kind === 'http' && node.config?.kind === 'http') {
     return createHttpProvider(node.config as HttpConfig, secrets, { allowInsecure: insecure })

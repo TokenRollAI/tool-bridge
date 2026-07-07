@@ -1,9 +1,10 @@
 /**
  * 上游工具集 → HelpModel(Proto §4.1 → §1.3,`~help` 从上游派生的核心映射)。
  *
- * 每个(虚拟化后的)工具 → 一条 CmdSpec:name=虚拟名、method POST、path=`/<nodePath>`、
- * inputSchema 透传、h=description、scope 恒 'call'、effect/confirm 透传。纯逻辑;产出的
- * HelpModel 经 renderHelpDsl/renderHelpJson 渲染(DSL↔JSON 语义等价)。
+ * 两级渐进披露(Proto §4.2):节点级 `~help` 出**索引形态**(每工具一行 name+h+scope,
+ * 不含 inputSchema/returns——大工具集不再一次性塞满 agent 上下文);单工具全量 spec 经
+ * `GET /<node>/<tool>/~help`(toolHelpModel)按需获取。纯逻辑;产出的 HelpModel 经
+ * renderHelpDsl/renderHelpJson 渲染(DSL↔JSON 语义等价)。
  */
 
 import { cmdPath } from '../builtin/util'
@@ -11,33 +12,59 @@ import type { CmdSpec, HelpModel } from '../htbp/model'
 import type { NodeKind, TreePath } from '../types'
 import type { ToolSpec } from './types'
 
+/** 单个(虚拟化后)ToolSpec → CmdSpec;index=true 时略去 inputSchema/returns(索引形态)。 */
+function toolToCmd(nodePath: TreePath, tool: ToolSpec, index: boolean): CmdSpec {
+  const cmd: CmdSpec = {
+    name: tool.name,
+    method: 'POST',
+    path: cmdPath(nodePath),
+    scope: 'call',
+  }
+  if (tool.description !== undefined) cmd.h = tool.description
+  if (!index && tool.inputSchema !== undefined) cmd.inputSchema = tool.inputSchema
+  if (tool.effect !== undefined) cmd.effect = tool.effect
+  const confirm = tool.confirm ?? (tool.effect === 'destructive' ? true : undefined)
+  if (confirm) cmd.confirm = confirm
+  return cmd
+}
+
 /**
  * 派生 mcp/http 节点的 `~help` 模型。`tools` 应为**虚拟化后**的 ToolSpec(名字已是虚拟名)。
  * `effect==='destructive'` 且工具未显式给 `confirm` 时,派生 `confirm:true`(危险操作二次确认)。
+ * `opts.index` → 索引形态:cmd 不含 inputSchema/returns,节点描述附工具级 ~help 提示。
  */
 export function toolsToHelpModel(
   nodePath: TreePath,
   node: { kind: NodeKind; description: string },
   tools: ToolSpec[],
+  opts: { index?: boolean } = {},
 ): HelpModel {
-  const path = cmdPath(nodePath)
-  const cmds: CmdSpec[] = tools.map((tool) => {
-    const cmd: CmdSpec = {
-      name: tool.name,
-      method: 'POST',
-      path,
-      scope: 'call',
-    }
-    if (tool.description !== undefined) cmd.h = tool.description
-    if (tool.inputSchema !== undefined) cmd.inputSchema = tool.inputSchema
-    if (tool.effect !== undefined) cmd.effect = tool.effect
-    const confirm = tool.confirm ?? (tool.effect === 'destructive' ? true : undefined)
-    if (confirm) cmd.confirm = confirm
-    return cmd
-  })
-
+  const index = opts.index === true
+  const description = index
+    ? `${node.description};工具入参 schema 经 GET /${nodePath}/<tool>/~help 按需获取`
+    : node.description
   return {
-    node: { path: nodePath, kind: node.kind, description: node.description },
-    cmds,
+    node: { path: nodePath, kind: node.kind, description },
+    cmds: tools.map((tool) => toolToCmd(nodePath, tool, index)),
+  }
+}
+
+/**
+ * 单工具的 `~help` 模型(`GET /<node>/<tool>/~help`,Proto §4.2 两级披露的细节级)。
+ * node 行呈现工具伪节点路径 `<nodePath>/<tool>`;cmd 的调用 path 仍是 `/<nodePath>`
+ * (数据面入口不变:POST /<node> + {tool,arguments})。
+ */
+export function toolHelpModel(
+  nodePath: TreePath,
+  node: { kind: NodeKind; description: string },
+  tool: ToolSpec,
+): HelpModel {
+  return {
+    node: {
+      path: `${nodePath}/${tool.name}`,
+      kind: node.kind,
+      description: tool.description ?? node.description,
+    },
+    cmds: [toolToCmd(nodePath, tool, false)],
   }
 }
