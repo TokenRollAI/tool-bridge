@@ -6,13 +6,13 @@
 
 ### 1. 本地验证:`pnpm verify`
 
-typecheck + biome lint + core 单测 + gateway 集成测试(真实 workerd)一把过。
+typecheck + biome lint + 单测(core/cli/sdk)+ gateway 集成测试(真实 workerd)一把过。
 
-预期:四段全绿,末尾 core `Tests 29 passed`、gateway `Tests 7 passed`(数字随开发增长,以全 pass 为准)。任一段红即停,先修再继续。
+预期:四段全绿,末尾 core `589 passed`、cli `101 passed`、sdk `12 passed`、gateway `82 passed | 6 skipped`(数字随开发增长,以全 pass 为准)。任一段红即停,先修再继续。
 
 ### 2. 部署:`pnpm deploy:all`
 
-= `node scripts/provision.mjs`(幂等建 KV/R2,存在即跳过)+ `pnpm --filter @tool-bridge/gateway run deploy`(wrangler deploy)。
+= `node scripts/provision.mjs`(幂等建 KV/R2,存在即跳过)+ `pnpm --filter @tool-bridge/dashboard build`(gateway 部署前须先产出 dashboard dist)+ `pnpm --filter @tool-bridge/gateway run deploy`(wrangler deploy)。
 
 预期(资源已存在时):
 
@@ -33,7 +33,7 @@ Current Version ID: …
 
 ```sh
 curl -s https://tool-bridge.pdjjq.org/healthz
-# → {"healthy":true,"version":"0.1.0"}(形状定案于 docs/Proto.md §1.1)
+# → {"healthy":true,"version":"0.1.0"}
 curl -s https://tool-bridge.pdjjq.org/~help | head -1
 # → htbp 0.1
 ```

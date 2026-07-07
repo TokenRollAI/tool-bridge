@@ -1,6 +1,6 @@
 # DO WebSocket Hibernation 生产坑(设备网关)
 
-> 用途:Durable Object hibernation WebSocket 在**生产环境**的行为约束与本项目的既定解法。任何改动 `packages/gateway/src/deviceSession.ts`、`packages/core/src/device/`、`packages/cli/src/deviceRuntime.ts` 前必读。更新时机:设备通道协议或休眠策略变化时。来源:2026-07-06 Phase 4 生产 blocker 实测(反思见 [../memory/reflections/2026-07-06-phase4-device-ws-hibernation.md](../memory/reflections/2026-07-06-phase4-device-ws-hibernation.md))。
+> 用途:Durable Object hibernation WebSocket 在**生产环境**的行为约束与本项目的既定解法。任何改动 `packages/gateway/src/deviceSession.ts`、`packages/core/src/device/`、`packages/cli/src/deviceRuntime.ts` 前必读。更新时机:设备通道协议或休眠策略变化时。来源:2026-07-06 设备通道生产 blocker 实测(反思见 [../memory/reflections/2026-07-06-phase4-device-ws-hibernation.md](../memory/reflections/2026-07-06-phase4-device-ws-hibernation.md))。
 
 ## 坑 1:空闲 WS 约 100 秒被边缘掐断,且客户端半开无感知
 
