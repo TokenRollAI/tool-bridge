@@ -44,9 +44,10 @@ export function createPluginContextProvider(opts: PluginContextOptions): Context
   const declared = optionalMethodsForCapabilities(opts.capabilities)
   if (declared.has('Search')) {
     provider.Search = (query: string, searchOpts?: SearchOptions) =>
-      call('Search', { query, ...(searchOpts !== undefined ? { opts: searchOpts } : {}) }) as Promise<
-        Page<ContextEntryMeta>
-      >
+      call('Search', {
+        query,
+        ...(searchOpts !== undefined ? { opts: searchOpts } : {}),
+      }) as Promise<Page<ContextEntryMeta>>
   }
   if (declared.has('Delete')) {
     provider.Delete = async (path: string): Promise<void> => {

@@ -36,11 +36,13 @@ const DESCRIBE = {
 
 const HELP = { cmds: ['List', 'Get', 'Update', 'Write', 'Search'].map((name) => ({ name })) }
 
-function makeHarness(overrides: {
-  probe?: (m: PluginManifest) => Promise<PluginProbeResult>
-  describe?: unknown
-  help?: unknown
-} = {}) {
+function makeHarness(
+  overrides: {
+    probe?: (m: PluginManifest) => Promise<PluginProbeResult>
+    describe?: unknown
+    help?: unknown
+  } = {},
+) {
   const store = new MemoryStateStore()
   const sk = new SKRegistryStore(store)
   const secrets = new SecretStoreImpl(

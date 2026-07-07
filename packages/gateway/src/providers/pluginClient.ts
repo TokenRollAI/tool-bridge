@@ -11,13 +11,13 @@
  */
 
 import {
+  assertPluginPayloadSize,
   type CallContext,
   encodeCallContext,
   encodePluginCall,
   HEADER_TB_CONTEXT,
   HEADER_TB_REQUEST_ID,
   isTBError,
-  assertPluginPayloadSize,
   type PluginManifest,
   type PluginProbeResult,
   pluginTokenSecretName,
@@ -162,7 +162,11 @@ function tbErrorFromPluginResponse(status: number, text: string): TBError {
   })
 }
 
-async function attempt(url: string, headers: Record<string, string>, body: string): Promise<unknown> {
+async function attempt(
+  url: string,
+  headers: Record<string, string>,
+  body: string,
+): Promise<unknown> {
   let resp: Response
   try {
     resp = await fetch(url, {

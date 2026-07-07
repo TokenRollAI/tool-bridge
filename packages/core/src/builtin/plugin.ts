@@ -18,9 +18,9 @@ import { TBError } from '../errors'
 import type { CmdSpec, HelpModel } from '../htbp/model'
 import { validatePluginContract } from '../plugin/contract'
 import {
-  parsePluginManifest,
   type PluginManifest,
   type PluginRegistration,
+  parsePluginManifest,
 } from '../plugin/manifest'
 import type { SecretStoreImpl } from '../secret/secretStore'
 import { KEY_PLUGIN, KEY_PLUGIN_HEALTH, KEY_PLUGIN_META, type StateStore } from '../store'
