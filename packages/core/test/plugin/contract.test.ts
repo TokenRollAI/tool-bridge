@@ -193,7 +193,7 @@ describe('~describe 与 manifest 一致性', () => {
   })
 })
 
-describe('capabilities ↔ 可选方法对齐(Plugin.md §3)', () => {
+describe('capabilities ↔ 可选方法对齐', () => {
   it('声明 search 且 ~help 有 Search → 通过', () => {
     expect(() =>
       validatePluginContract({

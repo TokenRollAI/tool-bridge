@@ -1,5 +1,5 @@
 /**
- * http 内置 Provider(Proto §4.2):按 `HttpToolDef` 拼请求,`authRef` 解析后注入认证头。
+ * http 内置 Provider:按 `HttpToolDef` 拼请求,`authRef` 解析后注入认证头。
  *
  * - `List` 直接从 `config.tools`(HttpToolDef[])生成 ToolSpec(effect 经 `effectFor` 派生);
  *   无需网络。
@@ -22,7 +22,7 @@ import {
 } from '@tool-bridge/core'
 import type { UpstreamProvider } from './types'
 
-/** http 节点 config(Proto §3.2;authHeader/authScheme 为 Phase 2 定型的可选认证头形态)。 */
+/** http 节点 config(authHeader/authScheme 为可选认证头形态)。 */
 export interface HttpConfig {
   endpoint: string
   tools: HttpToolDef[]
@@ -38,7 +38,7 @@ function toSpec(t: HttpToolDef): ToolSpec {
 }
 
 /**
- * 构造 http Provider。构造即对 `endpoint` 做 https 强制(Proto §4.2)。
+ * 构造 http Provider。构造即对 `endpoint` 做 https 强制。
  * `allowInsecure`(env `TB_ALLOW_INSECURE_HTTP=true`)放行 http:// endpoint。
  */
 export function createHttpProvider(

@@ -1,5 +1,5 @@
 /**
- * X-TB-Request-Id 幂等去重表(Proto §8.3;纯逻辑,Plugin 侧 / 平台 stub 侧通用)。
+ * X-TB-Request-Id 幂等去重表(纯逻辑,Plugin 侧 / 平台 stub 侧通用)。
  *
  * 同 id 重放返回首次执行结果(成功值或错误原样重放);同 id 并发只执行一次
  * (in-flight 合并)。已完成结果进有界缓存,超限逐最旧(与 device/client.ts 的

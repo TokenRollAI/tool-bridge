@@ -63,7 +63,7 @@ describe('白名单前置判定(执行前完成)', () => {
     expect(spawn).not.toHaveBeenCalled()
   })
 
-  it('缺省 allow = [] → 一切拒(与 Proto §6.2 默认拒对齐)', async () => {
+  it('缺省 allow = [] → 一切拒(与默认拒对齐)', async () => {
     const exec = createShellExecutor({})
     await expect(exec('echo hi')).rejects.toMatchObject({ code: 'permission_denied' })
   })

@@ -1,5 +1,5 @@
 /**
- * Scope 判定(Proto §2.2,行 194-216)。
+ * Scope 判定。
  *
  * 纯逻辑,无 I/O:SK 记录由认证层预取入 CallContext.scopes。
  * 判定序(规范性,按序):
@@ -46,7 +46,7 @@ const effectOf = (scope: Scope): 'allow' | 'deny' => scope.effect ?? 'allow'
 const matches = (scope: Scope, path: TreePath, action: Action): boolean =>
   scope.actions.includes(action) && matchGlob(scope.pattern, path)
 
-/** Proto §2.2 判定序:deny 优先 → allow → 默认拒。 */
+/** 判定序:deny 优先 → allow → 默认拒。 */
 export function checkScopes(scopes: Scope[], path: TreePath, action: Action): boolean {
   for (const scope of scopes) {
     if (effectOf(scope) === 'deny' && matches(scope, path, action)) return false

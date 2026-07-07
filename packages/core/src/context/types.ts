@@ -1,5 +1,5 @@
 /**
- * Context Layer 类型(Proto §5.1,原样转写;方法签名异步化以兼容对象存储后端)。
+ * Context Layer 类型(原样转写;方法签名异步化以兼容对象存储后端)。
  *
  * 四核心动词(List/Get/Update/Write)每个 Provider 必须实现;可选能力
  * (Search/Watch/Delete)须在 ~describe 的 capabilities 中声明,调用方先探测再用。
@@ -13,14 +13,14 @@ export interface ContextEntryMeta {
   /** "text/markdown" | "application/json" | ... */
   contentType: string
   size?: number
-  /** 乐观并发:Update/Write 可携带 ifVersion;对象存储后端 = etag(Proto §5.2)。 */
+  /** 乐观并发:Update/Write 可携带 ifVersion;对象存储后端 = etag。 */
   version: string
   updatedAt: Timestamp
   metadata: Record<string, string>
 }
 
 export interface ContextEntry extends ContextEntryMeta {
-  /** 文本或 JSON;大对象返回 { $ref: <预签名或中转 URL> }(Proto §5.1)。 */
+  /** 文本或 JSON;大对象返回 { $ref: <预签名或中转 URL> }。 */
   content: string | unknown
 }
 
@@ -45,7 +45,7 @@ export interface SearchOptions extends ListOptions {
   mode?: 'keyword' | 'semantic'
 }
 
-/** 四核心动词 + 可选能力(Proto §5.1)。 */
+/** 四核心动词 + 可选能力。 */
 export interface ContextProvider {
   /** 枚举条目(浅层列表 + 分页);path 为 namespace 内相对路径前缀。 */
   List(path: string, opts?: ListOptions): Promise<Page<ContextEntryMeta>>
@@ -56,7 +56,7 @@ export interface ContextProvider {
   /** 创建或整体替换条目(幂等 upsert)。 */
   Write(path: string, entry: ContextEntryInput): Promise<ContextEntryMeta>
   Search?(query: string, opts?: SearchOptions): Promise<Page<ContextEntryMeta>>
-  /** Phase 3 不实现(占位,Proto §5.1)。 */
+  /** 暂不实现(占位)。 */
   Watch?(path: string): Promise<{ watchId: string }>
   Delete?(path: string): Promise<void>
 }

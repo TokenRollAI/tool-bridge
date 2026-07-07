@@ -33,9 +33,9 @@ import { useInvoke, useSkList } from '@/lib/queries'
 import { ACTIONS, type Action, type Scope, type SecretKeyInfo } from '@/lib/types'
 
 /**
- * Secret Key 管理(对等 `tb sk list|create|rm`,DOD §8:签发/吊销;E2E-6)。
+ * Secret Key 管理(对等 `tb sk list|create|rm`:签发/吊销)。
  * 底层与 CLI 同一接口:POST /system/sk {tool: list|write|update|delete}。
- * 签发返回的 secret 明文只显示一次(Proto §2:服务端只存 sha256)。
+ * 签发返回的 secret 明文只显示一次(服务端只存 sha256)。
  */
 export function SkPage() {
   const list = useSkList()
@@ -358,7 +358,7 @@ function CreateSkDialog({ onIssued }: { onIssued: (v: { id: string; secret: stri
           <DialogTitle className="text-base">签发 Secret Key</DialogTitle>
           <DialogDescription>
             scope 判定:deny 优先,glob 支持 <code className="font-mono">*</code>/
-            <code className="font-mono">**</code>,无匹配默认拒(Proto §2.2)。
+            <code className="font-mono">**</code>,无匹配默认拒。
           </DialogDescription>
         </DialogHeader>
         <div className="grid gap-4">

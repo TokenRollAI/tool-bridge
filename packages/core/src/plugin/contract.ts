@@ -1,5 +1,5 @@
 /**
- * 注册时契约校验(Proto §8.1 注册流程 / Plugin.md §3)。
+ * 注册时契约校验(注册流程)。
  *
  * 输入 = manifest + 平台抓取的 `~describe` JSON 与 `~help` 响应;纯逻辑,抓取本身在宿主。
  * `~help` 优先按 HelpJson(cmds[].name)取方法集合;非 JSON 响应退化为 Help DSL 的
@@ -15,14 +15,14 @@ import { TBError } from '../errors'
 import { parseHelpDsl } from '../htbp/helpDsl'
 import type { PluginKind, PluginManifest } from './manifest'
 
-/** 各 kind 的必需方法集合(Proto §4.1 / §5.1;v1)。 */
+/** 各 kind 的必需方法集合(v1)。 */
 export const REQUIRED_METHODS: Record<PluginKind, readonly string[]> = {
   'tool-provider': ['List', 'Get', 'Call'],
   'context-provider': ['List', 'Get', 'Update', 'Write'],
 }
 
 /**
- * capability 基名 → 可选方法名(context-provider/v1;Proto §5.1)。
+ * capability 基名 → 可选方法名(context-provider/v1)。
  * 限定词(如 `search:semantic`)按 ':' 前的基名判定;未知基名忽略(向前兼容)。
  */
 const OPTIONAL_METHOD_BY_CAPABILITY: Record<string, string> = {
@@ -33,7 +33,7 @@ const OPTIONAL_METHOD_BY_CAPABILITY: Record<string, string> = {
 
 /**
  * capabilities → 已声明的可选方法名集合(去重;未知基名忽略)。
- * 挂载后 `~help` 只列"四动词 + 已声明可选方法"(Proto §8.2 注记)的过滤依据。
+ * 挂载后 `~help` 只列"四动词 + 已声明可选方法"的过滤依据。
  */
 export function optionalMethodsForCapabilities(capabilities: readonly string[]): Set<string> {
   const methods = new Set<string>()
@@ -51,7 +51,7 @@ const describeSchema = z.object({
   capabilities: z.array(z.string()).optional(),
 })
 
-/** `~describe` 响应形状(Proto §8.2)。 */
+/** `~describe` 响应形状。 */
 export interface PluginDescribe {
   kind: string
   interfaceVersion: string

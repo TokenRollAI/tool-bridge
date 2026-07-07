@@ -15,7 +15,7 @@ function node(path: string): TreeNode {
 
 const nodes = [node('docs'), node('docs/context7'), node('device/build-01'), node('system/sk')]
 
-describe('filterVisible(Proto §2.3 可见性裁剪)', () => {
+describe('filterVisible(可见性裁剪)', () => {
   it('剔除对 (path,read) 判不过的节点', async () => {
     // 行内 stub:只放行 docs 子树的 read(真实 checkScopes 由并行 worker 提供)
     const stub: ScopeChecker = (_scopes, path, action) =>

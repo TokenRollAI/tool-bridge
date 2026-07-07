@@ -26,7 +26,7 @@ describe('builtin registry 模块', () => {
     mod = createRegistryModule(registry, () => NOW)
   })
 
-  it('help():list/get scope=read,write/update/delete scope=register(Proto §3.3)', () => {
+  it('help():list/get scope=read,write/update/delete scope=register', () => {
     const help = mod.help('system/registry')
     const scopeOf = (name: string) => help.cmds.find((c) => c.name === name)?.scope
     expect(scopeOf('list')).toBe('read')
@@ -70,7 +70,7 @@ describe('builtin registry 模块', () => {
   })
 })
 
-describe('builtin registry 可见性裁剪(§2.3,注入 visibility)', () => {
+describe('builtin registry 可见性裁剪(注入 visibility)', () => {
   let store: MemoryStateStore
   let registry: NodeRegistryStore
   let mod: BuiltinModule

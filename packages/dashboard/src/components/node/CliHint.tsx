@@ -11,7 +11,7 @@ function sq(s: string): string {
 
 /**
  * 三入口对照:当前表单参数的等价 `tb call` 与 curl 命令(可复制)。
- * SK 一律以 $TB_SK 占位,不落明文——Dashboard 能做的 CLI/API 必须能做(DOD §1)。
+ * SK 一律以 $TB_SK 占位,不落明文——Dashboard 能做的 CLI/API 必须能做。
  */
 export function CliHint({ path, tool, args }: { path: string; tool: string; args: unknown }) {
   const [open, setOpen] = useState(false)

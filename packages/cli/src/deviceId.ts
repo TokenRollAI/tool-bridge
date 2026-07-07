@@ -2,7 +2,7 @@ import { hostname } from 'node:os'
 import { readConfig, writeConfig } from './config'
 import { CliError } from './http'
 
-/** Proto §6.1 实现注记:hostname 小写,非法路径段字符替换为 '-'。 */
+/** hostname 小写,非法路径段字符替换为 '-'。 */
 export function normalizeDeviceId(input: string): string {
   const id = input
     .trim()

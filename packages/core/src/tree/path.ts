@@ -1,8 +1,8 @@
 /**
- * 树路径工具(纯函数,Proto §3 / §1.1)。
+ * 树路径工具(纯函数)。
  *
  * 路径以 '/' 分隔、按段(segment)语义比较——不是字符串前缀。
- * 保留段(以 '~' 开头,Proto §1.1)不得作为普通路径段。
+ * 保留段(以 '~' 开头)不得作为普通路径段。
  */
 
 import { TBError } from '../errors'
@@ -26,10 +26,10 @@ export function segments(path: string): string[] {
  * 路径合法性:合法返回 null,否则返回对应 TBError(不抛)。
  * - 空路径 = 根:仅在 `opts.allowRoot` 时合法(如 ~tree 根视图);
  * - 任何段为空(内部 '//')→ invalid_argument;
- * - 任何段以 '~' 开头(保留段,Proto §1.1)→ invalid_argument。
+ * - 任何段以 '~' 开头(保留段)→ invalid_argument。
  *
- * 注:此处只拒"保留段"。保留根(system/ui,Proto §2.4b)的拒绝属认证/注册路径
- * 规则,不在 registry 的路径校验层——见 registry.ts 与 §2.4。
+ * 注:此处只拒"保留段"。保留根(system/ui)的拒绝属认证/注册路径
+ * 规则,不在 registry 的路径校验层——见 registry.ts 与注册路径规则。
  */
 export function validatePath(path: TreePath, opts: { allowRoot?: boolean } = {}): TBError | null {
   const normalized = normalizePath(path)
@@ -43,7 +43,7 @@ export function validatePath(path: TreePath, opts: { allowRoot?: boolean } = {})
       return new TBError('invalid_argument', `路径含空段:'${path}'`)
     }
     if (seg.startsWith('~')) {
-      return new TBError('invalid_argument', `路径含保留段:'${seg}'(Proto §1.1)`)
+      return new TBError('invalid_argument', `路径含保留段:'${seg}'`)
     }
   }
   return null

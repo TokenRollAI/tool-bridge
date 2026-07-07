@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { contentTypeFor, negotiate } from '../../src/htbp/negotiate'
 
-describe('negotiate(Proto §1.2 全分支)', () => {
+describe('negotiate(全分支)', () => {
   it('缺失 Accept → dsl(默认表现)', () => {
     expect(negotiate(undefined)).toBe('dsl')
     expect(negotiate('')).toBe('dsl')
@@ -29,7 +29,7 @@ describe('negotiate(Proto §1.2 全分支)', () => {
   })
 })
 
-describe('contentTypeFor(Proto §1.2)', () => {
+describe('contentTypeFor', () => {
   it('三种表现的 Content-Type', () => {
     expect(contentTypeFor('dsl')).toBe('text/plain; charset=utf-8')
     expect(contentTypeFor('json')).toBe('application/json; charset=utf-8')

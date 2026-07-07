@@ -1,7 +1,7 @@
 /**
- * 网关侧设备会话状态机(Proto §6.2/§6.3;纯逻辑,I/O 与时间注入,DO 只做胶水)。
+ * 网关侧设备会话状态机(纯逻辑,I/O 与时间注入,DO 只做胶水)。
  *
- * - awaiting-hello → ready:hello 经 io.onHello 交胶水层做 Check(register)+§2.4,
+ * - awaiting-hello → ready:hello 经 io.onHello 交胶水层做 Check(register),
  *   通过则 accept(mountPath)(回 ready 帧),否则 reject(error)(拒绝帧 + close(1008))。
  * - 未 hello 先发非 hello 帧 / hello 重复 / 设备发出网关方向帧 → 拒绝帧 + 关闭。
  * - call:requestId 幂等表——已有结果的重复 id 立即以首次结果应答;结果未到的重复 id
@@ -14,10 +14,10 @@ import type { TBErrorBody } from '../errors'
 import { TBError } from '../errors'
 import { type DeviceFrame, deviceErrorFrame, type HelloFrame } from './frames'
 
-/** 设备调用超时(Proto §6.2);区别于 Plugin 30s / Workers CPU 30s,勿混用常量。 */
+/** 设备调用超时;区别于 Plugin 30s / Workers CPU 30s,勿混用常量。 */
 export const DEVICE_CALL_TIMEOUT_MS = 60_000
 
-/** 拒绝帧发送后的关闭码(Proto §6.2:close(1008))。 */
+/** 拒绝帧发送后的关闭码(close(1008))。 */
 export const DEVICE_REJECT_CLOSE_CODE = 1008
 
 export type DeviceCallResult = { ok: true; value: unknown } | { ok: false; error: TBErrorBody }
@@ -134,7 +134,7 @@ export class DeviceGatewaySession {
     this.phase_ = 'ready'
   }
 
-  /** 拒绝:发拒绝帧后关闭(Proto §6.2)。hello 判定失败与协议违规共用。 */
+  /** 拒绝:发拒绝帧后关闭。hello 判定失败与协议违规共用。 */
   reject(error: TBError): void {
     if (this.phase_ === 'closed') return
     this.io.send(deviceErrorFrame(error))

@@ -10,7 +10,7 @@ const upstream: ToolSpec[] = [
   { name: 'delete', description: '删除' },
 ]
 
-describe('virtualizeTools(Proto §3.1)', () => {
+describe('virtualizeTools', () => {
   it('无 Virtualize:原样暴露 + 恒等 reverse', () => {
     const { exposed, reverse } = virtualizeTools(undefined, upstream)
     expect(exposed.map((t) => t.name)).toEqual(['search', 'fetch', 'delete'])

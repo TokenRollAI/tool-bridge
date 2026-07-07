@@ -7,7 +7,7 @@ import type { HelpJson } from '../types'
 
 /**
  * `tb ls [path]` —— 列出节点的子节点(GET <path>/~help 的 children;根缺省)。
- * 可见性已由网关按调用者裁剪(Proto §2.3)。
+ * 可见性已由网关按调用者裁剪。
  */
 export const lsCommand = defineCommand({
   meta: { name: 'ls', description: 'List child nodes of a path (default: root)' },

@@ -1,10 +1,10 @@
 /**
- * PluginManifest 校验(Proto §8.1)。
+ * PluginManifest 校验。
  *
- * 类型原样转写规范;校验失败统一抛 TBError invalid_argument(Proto §0.2)。
+ * 类型原样转写规范;校验失败统一抛 TBError invalid_argument。
  * endpoint 与上游 provider 同规则:https:// 强制,`allowInsecureHttp`
  * (宿主由 env `TB_ALLOW_INSECURE_HTTP=true` 注入)放行本地 http;
- * `binding:<name>` 为平台内 service binding(Proto §8.1)。
+ * `binding:<name>` 为平台内 service binding。
  */
 
 import { z } from 'zod'
@@ -20,7 +20,7 @@ export type PluginAuth = { kind: 'platform-token' } | { kind: 'bearer'; secretRe
 export interface PluginManifest {
   id: string
   kind: PluginKind
-  /** "tool-provider/v1" | "context-provider/v1";前缀必须与 kind 一致(Plugin.md §6)。 */
+  /** "tool-provider/v1" | "context-provider/v1";前缀必须与 kind 一致。 */
   interfaceVersion: string
   /** https:// 或 `binding:<name>`(平台内 service binding)。 */
   endpoint: string
@@ -30,7 +30,7 @@ export interface PluginManifest {
   enabled: boolean
 }
 
-/** pluginToken 仅注册响应出现一次(Proto §8.1)。 */
+/** pluginToken 仅注册响应出现一次。 */
 export interface PluginRegistration extends PluginManifest {
   pluginToken?: string
 }
@@ -51,10 +51,10 @@ const manifestSchema = z.object({
   kind: z.enum(PLUGIN_KINDS as [PluginKind, ...PluginKind[]]),
   interfaceVersion: z
     .string()
-    .regex(INTERFACE_VERSION_RE, 'interfaceVersion 须形如 <kind>/v<major>(Proto §8.1)'),
+    .regex(INTERFACE_VERSION_RE, 'interfaceVersion 须形如 <kind>/v<major>'),
   endpoint: z.string().min(1),
   auth: authSchema,
-  healthPath: z.string().regex(/^\//, "healthPath 须以 '/' 开头(Proto §8.1)"),
+  healthPath: z.string().regex(/^\//, "healthPath 须以 '/' 开头"),
   enabled: z.boolean(),
 })
 
@@ -64,8 +64,8 @@ export interface ParsePluginManifestOptions {
 }
 
 /**
- * 校验并构造 PluginManifest(Proto §8.1):
- * - 字段形状经 zod(未知字段剥离 = 忽略,Plugin.md §6);
+ * 校验并构造 PluginManifest:
+ * - 字段形状经 zod(未知字段剥离 = 忽略);
  * - interfaceVersion 前缀必须等于 kind;
  * - endpoint 为 `binding:<name>` 或过 {@link assertSecureUrl} 的 URL。
  * 任何不符 → TBError invalid_argument。
@@ -87,7 +87,7 @@ export function parsePluginManifest(
   if (!manifest.interfaceVersion.startsWith(`${manifest.kind}/`)) {
     throw new TBError(
       'invalid_argument',
-      `interfaceVersion '${manifest.interfaceVersion}' 与 kind '${manifest.kind}' 不一致(Proto §8.1)`,
+      `interfaceVersion '${manifest.interfaceVersion}' 与 kind '${manifest.kind}' 不一致`,
     )
   }
 

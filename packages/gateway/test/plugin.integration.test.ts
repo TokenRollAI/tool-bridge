@@ -3,7 +3,7 @@ import { parseHelpDsl } from '@tool-bridge/core'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { TEST_ADMIN_SK } from './fixtures'
 
-// Phase 5(Plugin 面)集成测试:system/plugin 注册全流程、§8.3 envelope 挂载消费、
+// Plugin 面集成测试:system/plugin 注册全流程、envelope 挂载消费、
 // Request-Id 重试、health cmd、admin-only。外部 Provider 用 vi.stubGlobal('fetch')
 // 在 workerd 内 mock 出站(Q13;先例:tool.integration.test.ts 的 remote 用例)。
 
@@ -129,7 +129,7 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-describe('system/plugin 注册全流程(Proto §8.1)', () => {
+describe('system/plugin 注册全流程', () => {
   it('write:探活 + 契约校验通过 → PluginRegistration(pluginToken 仅此一次);list/get 不回显', async () => {
     stubProvider({})
     const reg = await registerPlugin(manifest('feishu-docs'))
@@ -247,7 +247,7 @@ describe('system/plugin 注册全流程(Proto §8.1)', () => {
   })
 })
 
-describe('plugin-backed context 挂载消费(Proto §8.3 envelope)', () => {
+describe('plugin-backed context 挂载消费(envelope)', () => {
   it('四动词经树可用:envelope 带 Authorization/X-TB-Context/X-TB-Request-Id,响应原样透传', async () => {
     const { seen } = stubProvider({
       invoke: (entry) => {
@@ -318,7 +318,7 @@ describe('plugin-backed context 挂载消费(Proto §8.3 envelope)', () => {
     )
     expect(searched.status).toBe(200)
 
-    // envelope 契约(Proto §8.3):方法名 + 命名参数;三个 header 齐且 Authorization
+    // envelope 契约:方法名 + 命名参数;三个 header 齐且 Authorization
     // 是注册时 mint 的 pluginToken(platform-token 语义)。
     expect(seen.length).toBe(5)
     const first = seen[0] as SeenEnvelope
@@ -428,7 +428,7 @@ describe('plugin-backed context 挂载消费(Proto §8.3 envelope)', () => {
   })
 })
 
-describe("kind:'tool' 挂载消费(tool-provider plugin,Proto §8.1)", () => {
+describe("kind:'tool' 挂载消费(tool-provider plugin)", () => {
   const TOOLS = [
     { name: 'create_order', description: '下单', effect: 'write' },
     { name: 'get_order', description: '查单', effect: 'read' },
@@ -490,7 +490,7 @@ describe("kind:'tool' 挂载消费(tool-provider plugin,Proto §8.1)", () => {
     expect(call.status).toBe(200)
     expect(((await call.json()) as { echo: { args: { sku: string } } }).echo.args.sku).toBe('A1')
 
-    // envelope 的 tool 是方法名(List/Call),工具名在 arguments.name(Proto §8.3)。
+    // envelope 的 tool 是方法名(List/Call),工具名在 arguments.name。
     const callEnvelope = seen.find((s) => s.body.tool === 'Call') as SeenEnvelope
     expect(callEnvelope.body.arguments).toEqual({ name: 'create_order', args: { sku: 'A1' } })
   })

@@ -1,8 +1,8 @@
 # @tool-bridge/sdk
 
-tool-bridge 的库形态(Proto §7):在任意 Node / Workers 宿主内嵌一个 TB 实例,程序化注册本地 Provider,并可反向连接到远程网关把本地工具挂上远程树。
+tool-bridge 的库形态:在任意 Node / Workers 宿主内嵌一个 TB 实例,程序化注册本地 Provider,并可反向连接到远程网关把本地工具挂上远程树。
 
-公开面与 Proto 接口一一对应,不存在私有通道:`createToolBridge(config)` → `{ fetch, registerTool, registerContext, connect }`。
+公开面即全部通道,不存在私有通道:`createToolBridge(config)` → `{ fetch, registerTool, registerContext, connect }`。
 
 ## 安装
 
@@ -49,15 +49,15 @@ await conn.ready               // ready 帧到达,本实例注册的节点已挂
 conn.close()                   // 下线;远程节点保留标记 offline,超回收期自动删除
 ```
 
-## 配置要点(Proto §7)
+## 配置要点
 
 | 字段 | 语义 |
 |---|---|
 | `state`(必填) | 树配置 / SK / manifest 的存取 |
 | `objects?` | context 对象存储(`provider:'r2'` 的落点);缺省该 provider 返回 unavailable |
-| `secrets?` | §2.5 上游凭证;缺省 = 基于 state 的加密存储,主密钥 `encryptionKey` 或 env `TB_SECRET_ENCRYPTION_KEY`,皆无则 secret 能力禁用(Set 返回 unavailable) |
+| `secrets?` | 上游凭证;缺省 = 基于 state 的加密存储,主密钥 `encryptionKey` 或 env `TB_SECRET_ENCRYPTION_KEY`,皆无则 secret 能力禁用(Set 返回 unavailable) |
 | `deviceTransport?` | 网关侧设备 WS 宿主;未注入则 device 能力禁用 |
-| `reservedRoots?` / `remoteAllowlist?` / `maxHops?` | §2.4b 追加保留根 / §3.4 remote 白名单(空 = 拒一切 remote)/ Via 跳数上限(默认 4) |
+| `reservedRoots?` / `remoteAllowlist?` / `maxHops?` | 追加保留根 / remote 白名单(空 = 拒一切 remote)/ Via 跳数上限(默认 4) |
 
 ## License
 

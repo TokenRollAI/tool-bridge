@@ -13,7 +13,7 @@ const tools: ToolSpec[] = [
   { name: 'drop-db', description: '删库', effect: 'destructive' },
 ]
 
-describe('toolsToHelpModel(Proto §4.1 → §1.3)', () => {
+describe('toolsToHelpModel(上游工具集 → HelpModel)', () => {
   const model = toolsToHelpModel('docs/context7', { kind: 'mcp', description: 'Context7' }, tools)
 
   it('node 行:节点路径/kind/description', () => {
@@ -77,7 +77,7 @@ describe('toolsToHelpModel(Proto §4.1 → §1.3)', () => {
   })
 })
 
-describe('两级披露(Proto §4.2):索引形态与单工具全量', () => {
+describe('两级披露:索引形态与单工具全量', () => {
   it('index:true → cmd 不含 inputSchema;h/scope/effect/confirm 保留', () => {
     const m = toolsToHelpModel('docs/context7', { kind: 'mcp', description: 'Context7' }, tools, {
       index: true,

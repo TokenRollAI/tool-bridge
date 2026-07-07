@@ -2,8 +2,7 @@ import type { Scope } from './scope'
 
 /**
  * 网关返回的线格式类型(CLI 本地镜像,只取渲染所需字段;未知字段透传忽略)。
- * 与 Proto §1/§2/§3 的 JSON 等价表现对齐(HelpJson/TreeJson 精确 schema 属实现自定,
- * 见 phase1-spec-digest §4.2/§4.3;此处按 team-lead 约定的契约建模)。
+ * HelpJson/TreeJson 为渲染所需的精确 schema,按网关契约建模。
  */
 
 export interface NodeSummary {
@@ -17,7 +16,7 @@ export interface HelpCmd {
   method?: string
   path?: string
   scope?: string
-  /** arguments 的 JSON Schema(Proto §1.3;不含 {tool,arguments} 信封)。 */
+  /** arguments 的 JSON Schema(不含 {tool,arguments} 信封)。 */
   inputSchema?: unknown
   returns?: string
 }
@@ -43,7 +42,7 @@ export interface Page<T> {
   cursor?: string
 }
 
-/** SecretKey 投影(hash 永不出网关,Proto §2.3)。 */
+/** SecretKey 投影(hash 永不出网关)。 */
 export interface SecretKeyView {
   id: string
   owner: string
@@ -79,7 +78,7 @@ export interface StatusView {
   version?: string
 }
 
-/** 工具虚拟化(Proto §3.1;mcp/http 适用)。 */
+/** 工具虚拟化(mcp/http 适用)。 */
 export interface Virtualize {
   prefix?: string
   rename?: Record<string, string>
@@ -87,7 +86,7 @@ export interface Virtualize {
   describe?: Record<string, string>
 }
 
-/** http Provider 的单个工具定义(Proto §3.2)。 */
+/** http Provider 的单个工具定义。 */
 export interface HttpToolDef {
   name: string
   description: string
@@ -97,7 +96,7 @@ export interface HttpToolDef {
   effect?: 'read' | 'write' | 'destructive'
 }
 
-/** NodeConfig 按 kind(Proto §3.2;CLI 构造 mcp/http/remote/context 四形状)。 */
+/** NodeConfig 按 kind(CLI 构造 mcp/http/remote/context 四形状)。 */
 export type NodeConfig =
   | { kind: 'mcp'; url: string; authRef?: string }
   | {
@@ -131,7 +130,7 @@ export interface Node {
   updatedAt?: string
 }
 
-/** context entry 元数据(ContextProvider List/Write/Update 返回,Proto §5.1)。 */
+/** context entry 元数据(ContextProvider List/Write/Update 返回)。 */
 export interface ContextEntryMeta {
   uri: string
   contentType: string
@@ -141,12 +140,12 @@ export interface ContextEntryMeta {
   metadata: Record<string, string>
 }
 
-/** context entry 全量(Get 返回;大对象 content = { $ref: <预签名 URL> },Proto §5.1)。 */
+/** context entry 全量(Get 返回;大对象 content = { $ref: <预签名 URL> })。 */
 export interface ContextEntry extends ContextEntryMeta {
   content: string | unknown
 }
 
-/** NodeInput = Omit<Node,'registeredBy'|'online'|'createdAt'|'updatedAt'>(Proto §3.3)。 */
+/** NodeInput = Omit<Node,'registeredBy'|'online'|'createdAt'|'updatedAt'>。 */
 export interface NodeInput {
   path: string
   kind: string

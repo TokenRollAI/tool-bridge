@@ -6,7 +6,7 @@ import { buildVirtualize, deleteNode, parseToolsFile, registerNode } from '../re
 import type { NodeConfig, NodeInput } from '../types'
 
 /**
- * `tb tool mount <path>` —— 挂载 mcp / http 工具源(NodeRegistry.Write via ~register,§3.3)。
+ * `tb tool mount <path>` —— 挂载 mcp / http 工具源(NodeRegistry.Write via ~register)。
  * mcp:`--kind mcp --url <u> [--auth-ref name]`。
  * http:`--kind http --endpoint <u> --tools-file <json> [--auth-ref name]`。
  * 共用:`--description d` 与虚拟化 `--prefix p / --rename from=to / --hide t / --describe from=text`。
@@ -91,7 +91,7 @@ export const toolMountCommand = defineCommand({
   },
 })
 
-/** `tb tool rm <path>` —— 卸载节点(管理面 system/registry delete,§3.3)。 */
+/** `tb tool rm <path>` —— 卸载节点(管理面 system/registry delete)。 */
 export const toolRmCommand = defineCommand({
   meta: { name: 'rm', description: 'Unmount a tool node' },
   args: {

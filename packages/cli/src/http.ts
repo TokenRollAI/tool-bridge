@@ -156,7 +156,7 @@ export async function callTool<T>(
 }
 
 /**
- * 数据面调用(人类模式):`Accept: text/markdown`,返回原始渲染文本(§1.2)。
+ * 数据面调用(人类模式):`Accept: text/markdown`,返回原始渲染文本。
  * 非 2xx 时按 TBError 归一为 CliError。
  */
 export async function callToolText(

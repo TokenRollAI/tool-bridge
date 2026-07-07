@@ -34,7 +34,7 @@ beforeEach(() => {
   reg = new NodeRegistryStore(new MemoryStateStore())
 })
 
-describe('自动物化中间 directory(Proto §3.3,注意 4)', () => {
+describe('自动物化中间 directory', () => {
   it('write a/b/c 后 a、a/b、a/b/c 三级都可 get', async () => {
     await reg.write(mcp('a/b/c'), 'user:1', T1)
     const a = await reg.get('a')
@@ -60,7 +60,7 @@ describe('自动物化中间 directory(Proto §3.3,注意 4)', () => {
   })
 })
 
-describe('write 幂等 upsert(Proto §0.4)', () => {
+describe('write 幂等 upsert', () => {
   it('同输入两次:createdAt 不变、updatedAt 刷新', async () => {
     const first = await reg.write(mcp('a/b/c'), 'user:1', T1)
     const second = await reg.write(mcp('a/b/c'), 'user:1', T2)
@@ -87,7 +87,7 @@ describe('write 校验', () => {
     expect(e.code).toBe('invalid_argument')
   })
 
-  it('保留根(system/*)在 registry 层不拒(那是 §2.4 的事)', async () => {
+  it('保留根(system/*)在 registry 层不拒(那是注册路径规则的事)', async () => {
     const n = await reg.write(
       {
         path: 'system/foo',
@@ -102,7 +102,7 @@ describe('write 校验', () => {
   })
 })
 
-describe('delete 级联回收(Proto §3.3)', () => {
+describe('delete 级联回收', () => {
   it('卸载 a/b/c 后空中间节点 a、a/b 回收', async () => {
     await reg.write(mcp('a/b/c'), 'user:1', T1)
     await reg.delete('a/b/c')
@@ -140,7 +140,7 @@ describe('delete 级联回收(Proto §3.3)', () => {
   })
 })
 
-describe('update(Proto §0.4)', () => {
+describe('update', () => {
   it('不存在 → not_found', async () => {
     expect(await grabError(() => reg.update('nope', { description: 'x' }, T2))).toMatchObject({
       code: 'not_found',
@@ -177,7 +177,7 @@ describe('update(Proto §0.4)', () => {
   })
 })
 
-describe('resolve 最长前缀匹配(Proto §3.3)', () => {
+describe('resolve 最长前缀匹配', () => {
   it('命中中间节点,rest 为剩余段', async () => {
     await reg.write(
       {
@@ -258,7 +258,7 @@ describe('subtree 一次性取整棵子树', () => {
   })
 })
 
-describe('list 分页与 limit 钳制(Proto §0.3)', () => {
+describe('list 分页与 limit 钳制', () => {
   beforeEach(async () => {
     for (let i = 0; i < 205; i++) {
       await reg.write(mcp(`bulk/n${String(i).padStart(3, '0')}`), 'user:1', T1)

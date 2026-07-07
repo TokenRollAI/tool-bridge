@@ -71,7 +71,7 @@ describe('encode/decode 往返', () => {
     })
   })
 
-  it('hello 的 node 可携带 cmds 工具表,往返保持(Proto §6.3 Phase 5)', () => {
+  it('hello 的 node 可携带 cmds 工具表,往返保持', () => {
     const hello: DeviceFrame = {
       type: 'hello',
       deviceId: 'sdk-01',

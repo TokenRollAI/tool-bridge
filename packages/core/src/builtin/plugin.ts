@@ -1,13 +1,13 @@
 /**
- * builtin 模块 "plugin" → PluginRegistry(Proto §8.1;挂载为 system/plugin 节点,全 cmd 需 admin)。
+ * builtin 模块 "plugin" → PluginRegistry(挂载为 system/plugin 节点,全 cmd 需 admin)。
  *
- * cmd 名对齐接口方法(list/get/write/update/delete)+ 按需探活 health(Proto §8.2 注记:
- * Workers 无常驻定时器,Phase 5 = 注册时探活 + health cmd 按需探活;Cron 属 Phase 6+)。
+ * cmd 名对齐接口方法(list/get/write/update/delete)+ 按需探活 health(Workers 无常驻
+ * 定时器,注册时探活 + health cmd 按需探活)。
  *
  * dispatch 只做纯逻辑与存储(KV key `plugin:<id>` / `pluginhealth:<id>` / `pluginmeta:<id>`);
  * 探活与抓 ~describe/~help 的 I/O 经 deps 注入的回调(probe / fetchContract),core 无 I/O。
  *
- * write 流程(Proto §8.1 注册流程):manifest 校验 → 探活(失败 → unavailable 拒)→
+ * write 流程(注册流程):manifest 校验 → 探活(失败 → unavailable 拒)→
  * 契约校验(validatePluginContract,失败 → invalid_argument 拒)→ platform-token 时
  * mint SK(owner `plugin:<id>`,scopes 空)+ 明文存 SecretStore 保留名 `plugin-token:<id>`
  * → 存 manifest → 返回 PluginRegistration(pluginToken 仅此一次;get/list 永不回显)。
@@ -40,7 +40,7 @@ import { cmdPath, optListOptions, requireString, VOID_ACK } from './util'
 
 const DESCRIPTION = 'Plugin registry: register / list / probe external providers (admin only)'
 
-/** SecretStore 保留名:platform-token 明文的存放处(Proto §8.1 注记)。 */
+/** SecretStore 保留名:platform-token 明文的存放处。 */
 export function pluginTokenSecretName(id: string): string {
   return `plugin-token:${id}`
 }
@@ -51,7 +51,7 @@ export interface PluginProbeResult {
   detail?: string
 }
 
-/** `pluginhealth:<id>` 的落盘形状(Proto §8.2 注记)。 */
+/** `pluginhealth:<id>` 的落盘形状。 */
 export interface PluginHealthRecord {
   healthy: boolean
   checkedAt: Timestamp
@@ -204,12 +204,12 @@ export function createPluginModule(deps: PluginModuleDeps): BuiltinModule {
       allowInsecureHttp: deps.allowInsecureHttp ?? false,
     })
 
-    // 探活(Proto §8.1:失败拒注册)。
+    // 探活(失败拒注册)。
     const probed = await deps.probe(manifest)
     if (!probed.healthy) {
       throw new TBError(
         'unavailable',
-        `plugin '${manifest.id}' 探活失败,拒绝注册${probed.detail !== undefined ? `:${probed.detail}` : ''}(Proto §8.1)`,
+        `plugin '${manifest.id}' 探活失败,拒绝注册${probed.detail !== undefined ? `:${probed.detail}` : ''}`,
         { retryable: true },
       )
     }
@@ -252,7 +252,7 @@ export function createPluginModule(deps: PluginModuleDeps): BuiltinModule {
   async function update(id: string, patch: Record<string, unknown>): Promise<PluginRegistration> {
     const existing = await require(id)
     if (patch.id !== undefined && patch.id !== id) {
-      throw new TBError('invalid_argument', 'id 不可通过 update 变更(Proto §0.4)')
+      throw new TBError('invalid_argument', 'id 不可通过 update 变更')
     }
     const prev = projectManifest(existing)
     // merge 后整体重校验(kind↔interfaceVersion 一致性、endpoint https 强制照旧生效)。
@@ -273,7 +273,7 @@ export function createPluginModule(deps: PluginModuleDeps): BuiltinModule {
       if (!probed.healthy) {
         throw new TBError(
           'unavailable',
-          `plugin '${id}' 探活失败,拒绝更新${probed.detail !== undefined ? `:${probed.detail}` : ''}(Proto §8.1)`,
+          `plugin '${id}' 探活失败,拒绝更新${probed.detail !== undefined ? `:${probed.detail}` : ''}`,
           { retryable: true },
         )
       }

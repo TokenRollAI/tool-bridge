@@ -15,7 +15,7 @@ function def(over: Partial<HttpToolDef>): HttpToolDef {
   }
 }
 
-describe('buildHttpRequest 拼装(Proto §3.2 Phase 2 定型)', () => {
+describe('buildHttpRequest 拼装(定型)', () => {
   it('{param} 占位从 args 取,URL 编码后替换,取用即移出剩余集', () => {
     const req = buildHttpRequest(
       def({ method: 'GET', pathTemplate: '/users/{id}/repos' }),
@@ -78,7 +78,7 @@ describe('buildHttpRequest 拼装(Proto §3.2 Phase 2 定型)', () => {
   })
 })
 
-describe('effectFor 缺省派生(Phase 2 定型)', () => {
+describe('effectFor 缺省派生(定型)', () => {
   it('显式 effect 优先', () => {
     expect(effectFor({ method: 'GET', effect: 'destructive' })).toBe('destructive')
   })
@@ -92,7 +92,7 @@ describe('effectFor 缺省派生(Phase 2 定型)', () => {
   })
 })
 
-describe('authHeaderFor(Proto §3.2 定型)', () => {
+describe('authHeaderFor(定型)', () => {
   it('默认 Authorization / Bearer', () => {
     expect(authHeaderFor({}, 'tok')).toEqual(['Authorization', 'Bearer tok'])
   })

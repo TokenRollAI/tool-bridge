@@ -7,15 +7,14 @@ interface HealthzBody {
 }
 
 /**
- * `tb status` —— 部署环境健康摘要(DOD.md:41)。
+ * `tb status` —— 部署环境健康摘要。
  *
- * Phase 0 阶段直接打 `GET /healthz`(DOD.md:35;Proto 附A:Phase 0 用 healthz,
- * Phase 1 起改走 builtin system/status)。`--json` 输出可解析对象。
+ * 直接打 `GET /healthz`。`--json` 输出可解析对象。
  */
 export const statusCommand = defineCommand({
   meta: {
     name: 'status',
-    description: 'Show deployment health summary (Phase 0: GET /healthz)',
+    description: 'Show deployment health summary (GET /healthz)',
   },
   args: globalArgs,
   async run({ args }) {

@@ -1,8 +1,8 @@
 /**
  * builtin 模块 "status" → 网关健康与摘要(挂载为 system/status 节点)。
  *
- * Proto 未集中定义 status 的 cmd 集合(仅附A/附B/Arch 引用)——本模块的 cmd `get`
- * 与返回字段为 Phase 1 实现约定(待回写 docs,见任务决策清单)。scope=read:能读到
+ * status 的 cmd 集合无集中规范定义——本模块的 cmd `get`
+ * 与返回字段为当前实现约定。scope=read:能读到
  * 该节点即可查健康摘要,不要求 admin(区别于其他 system/* 管理面)。
  */
 

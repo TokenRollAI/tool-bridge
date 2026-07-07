@@ -1,5 +1,5 @@
 /**
- * context 节点 ttl 判定(Proto §5.3:ttl 到期由网关回收整个节点)。
+ * context 节点 ttl 判定(ttl 到期由网关回收整个节点)。
  *
  * core 只出纯判定;回收动作(registry.delete + 404)在网关的懒回收接线点执行。
  */

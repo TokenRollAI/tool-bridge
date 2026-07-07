@@ -10,14 +10,14 @@ if (!existsSync('../dashboard/dist/index.html')) {
   execSync('pnpm --filter @tool-bridge/dashboard build', { stdio: 'inherit' })
 }
 
-// 集成测试跑在真实 workerd 里(DOD.md:26/27)。vitest-pool-workers 0.18(vitest 4)已改为
+// 集成测试跑在真实 workerd 里。vitest-pool-workers 0.18(vitest 4)已改为
 // Vite 插件形态:cloudflareTest(...) 取代旧的 test.poolOptions.workers。
 // 从 wrangler.jsonc 读取 main 与 KV/R2 绑定,由 miniflare 起本地实例,SELF.fetch 打进 Worker。
 //
 // 测试用 vars 经 miniflare.bindings 注入(不依赖 .dev.vars,保证测试确定性):
 // - TB_SECRET_ENCRYPTION_KEY:32 字节 base64url,secret 能力可用;
 // - TB_BOOTSTRAP_ADMIN_SK:固定 Admin SK 明文,测试用它认证并签发受限 SK(E2E-1 本地版)。
-// - TB_INSTANCE_ID / TB_REMOTE_ALLOWLIST:Phase 2 remote 透传的固定实例标识与白名单(确定性)。
+// - TB_INSTANCE_ID / TB_REMOTE_ALLOWLIST:remote 透传的固定实例标识与白名单(确定性)。
 // - TB_TEST_MCP_URL / TB_ALLOW_INSECURE_HTTP:仅当 process.env 提供时注入(opt-in 真实 echo E2E)。
 
 export default defineConfig({

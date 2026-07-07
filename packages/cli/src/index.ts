@@ -19,12 +19,13 @@ import { useCommand } from './commands/use'
 import { whoamiCommand } from './commands/whoami'
 
 /**
- * `tb` —— tool-bridge CLI(纯 API 客户端,随各 Phase 生长;DOD.md:17)。
- * Phase 0:`tb status`。Phase 1(DOD.md:48):login/whoami/use/sk/secret/ls/tree/help。
- * Phase 2(DOD.md:62):tool mount/rm、server add/ls/rm、call。
- * Phase 3(DOD.md:79):ctx ls/cat/put/patch/search/mount/unmount。
- * Phase 4(DOD.md:93):connect、device ls、mount fs。
- * Phase 5(DOD.md:106):plugin register/list/get/health/rm。
+ * `tb` —— tool-bridge CLI(纯 API 客户端)。命令族:
+ * - status:部署健康摘要。
+ * - login/whoami/use/sk/secret/ls/tree/help:档案、SK、密钥与工具树浏览。
+ * - tool mount/rm、server add/ls/rm、call:挂载工具源与数据面调用。
+ * - ctx ls/cat/put/patch/search/mount/unmount:Context Layer。
+ * - connect、device ls、mount fs:设备反向注册。
+ * - plugin register/list/get/health/rm:插件注册表。
  */
 const main = defineCommand({
   meta: {

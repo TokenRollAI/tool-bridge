@@ -102,11 +102,11 @@ function CmdDoc({ h }: { h: string }) {
 }
 
 /**
- * 单条 cmd 的调用面板(Proto §1.3 CmdSpec 的通用渲染器,Case 6):
- * inputSchema → rjsf 表单(可切 JSON 原文编辑);confirm=true 弹二次确认(§6.2 语义在客户端);
+ * 单条 cmd 的调用面板(CmdSpec 的通用渲染器):
+ * inputSchema → rjsf 表单(可切 JSON 原文编辑);confirm=true 弹二次确认(语义在客户端);
  * Accept 可选 markdown(默认表现)/JSON;返回经 ResultView 展示。
  * `lazySchema`(mcp/http 节点):节点级 ~help 是索引形态(无 inputSchema),
- * 面板展开时经工具级 ~help 按需补水(Proto §4.2 两级披露)。
+ * 面板展开时经工具级 ~help 按需补水(两级披露)。
  */
 export function CmdPanel({
   path,

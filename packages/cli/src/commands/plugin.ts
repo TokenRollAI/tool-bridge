@@ -6,8 +6,8 @@ import { guard, printJson, printLine, table } from '../output'
 import type { Page } from '../types'
 
 /**
- * `tb plugin` → builtin `system/plugin`(PluginRegistry,Proto §8.1;全部需 admin)。
- * cmd 表 = list/get/write/update/delete/health(附A `tb plugin` 实现注记,Phase 5 定型)。
+ * `tb plugin` → builtin `system/plugin`(PluginRegistry;全部需 admin)。
+ * cmd 表 = list/get/write/update/delete/health。
  * 线格式类型仅本文件使用,故就地定义(不进 types.ts)。
  */
 
@@ -26,7 +26,7 @@ export interface PluginRegistration extends PluginManifest {
   pluginToken?: string
 }
 
-/** health cmd 返回(Proto §8.2 探活落地注记:独立 key,按需刷新)。 */
+/** health cmd 返回(探活:独立 key,按需刷新)。 */
 export interface PluginHealth {
   healthy: boolean
   checkedAt?: string

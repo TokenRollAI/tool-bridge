@@ -64,7 +64,7 @@ export async function runConnect(args: ConnectArgs): Promise<void> {
   })
 }
 
-/** `tb connect [url]` —— 设备反向注册长驻进程(Proto §6 / 附A)。 */
+/** `tb connect [url]` —— 设备反向注册长驻进程。 */
 export const connectCommand = defineCommand({
   meta: { name: 'connect', description: 'Connect this machine as a device' },
   args: {

@@ -12,7 +12,7 @@ function deferred<T>() {
   return { promise, resolve, reject }
 }
 
-describe('同 id 重放(Proto §8.3:重试时 Request-Id 不变,以此去重实现幂等)', () => {
+describe('同 id 重放(重试时 Request-Id 不变,以此去重实现幂等)', () => {
   it('第二次执行同 id 返回首次结果,executor 只跑一次', async () => {
     const dedupe = new RequestDedupe()
     let runs = 0

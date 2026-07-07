@@ -2,7 +2,7 @@ import { env, SELF } from 'cloudflare:test'
 import { describe, expect, it } from 'vitest'
 import { TEST_ADMIN_SK } from './fixtures'
 
-// Phase 3(Context Layer)集成测试:r2 namespace 四动词 + Search/Delete、readOnly、
+// Context Layer 集成测试:r2 namespace 四动词 + Search/Delete、readOnly、
 // ttl 懒回收、~describe、entry 非 Node、大对象 $ref(/~ref 中转)、权限、路径穿越、
 // 挂载校验。默认套件只依赖 miniflare 本地 R2 binding(无外部网络);
 // s3 provider 走 opt-in(TB_TEST_S3_* 四变量齐才跑,可用 `pnpm s3-mock` 起本地端点)。
@@ -64,7 +64,7 @@ interface EntryMeta {
   metadata: Record<string, string>
 }
 
-describe('r2 namespace 四动词循环(DOD Phase 3)', () => {
+describe('r2 namespace 四动词循环', () => {
   it('~register 挂载 → Write→List→Get→Update 全循环', async () => {
     expect((await mountR2('ctxtest/rw')).status).toBe(200)
 
@@ -172,7 +172,7 @@ describe('Search(keyword 基线;semantic 未声明 → 400)', () => {
   })
 })
 
-describe('readOnly 挂载(Proto §5.3 / D11)', () => {
+describe('readOnly 挂载(D11)', () => {
   it('~help JSON 隐藏写动词;POST Write → 403', async () => {
     expect((await mountR2('ctxtest/ro', { readOnly: true })).status).toBe(200)
     const help = await SELF.fetch(
@@ -193,7 +193,7 @@ describe('readOnly 挂载(Proto §5.3 / D11)', () => {
   })
 })
 
-describe('ttl 懒回收(Proto §5.3:下次访问回收)', () => {
+describe('ttl 懒回收(下次访问回收)', () => {
   it('ttl=1 → 过期后 POST 404,节点从 ~tree 消失', async () => {
     expect((await mountR2('ctxtest/tmp', { ttl: 1 })).status).toBe(200)
     expect((await ctxCall('ctxtest/tmp', 'List', {})).status).toBe(200)
@@ -212,7 +212,7 @@ describe('ttl 懒回收(Proto §5.3:下次访问回收)', () => {
   }, 10000)
 })
 
-describe('~describe(Proto §1.1)', () => {
+describe('~describe', () => {
   it('context 节点 → {kind, capabilities};非 context 节点 → 404', async () => {
     expect((await mountR2('ctxtest/desc')).status).toBe(200)
     const res = await SELF.fetch('https://tb.test/ctxtest/desc/~describe', admin())
@@ -224,7 +224,7 @@ describe('~describe(Proto §1.1)', () => {
   })
 })
 
-describe('entry 非 Node(Proto §5.3 / D10)', () => {
+describe('entry 非 Node(D10)', () => {
   it('/<ns>/<entry> 的 ~help/~describe/POST 一律 404', async () => {
     expect((await mountR2('ctxtest/leaf')).status).toBe(200)
     await ctxCall('ctxtest/leaf', 'Write', {
@@ -241,7 +241,7 @@ describe('entry 非 Node(Proto §5.3 / D10)', () => {
   })
 })
 
-describe('大对象 $ref(/~ref 中转,Proto §5.2)', () => {
+describe('大对象 $ref(/~ref 中转)', () => {
   it('>1MiB 文本 → content.$ref 含 /~ref/,免 SK fetch 内容一致;篡改 token → 404', async () => {
     expect((await mountR2('ctxtest/big')).status).toBe(200)
     const bigText = 'A'.repeat(1024 * 1024 + 1)
@@ -312,7 +312,7 @@ describe('权限(read/write scope 分离)', () => {
   })
 })
 
-describe('挂载校验(Proto §3.2/§5.3)', () => {
+describe('挂载校验', () => {
   it("provider:'file' → 400(词表外);s3 缺 authRef → 400", async () => {
     const file = await postJson(
       'ctxbad/file/~register',
@@ -360,7 +360,7 @@ const s3Ready =
 
 describe.skipIf(!s3Ready)('s3 provider E2E(opt-in via TB_TEST_S3_*)', () => {
   async function mountS3(path: string): Promise<Response> {
-    // 凭证按 Proto §5.2 形状入 SecretStore,挂载走 authRef 引用。
+    // 凭证按 S3 类形状入 SecretStore,挂载走 authRef 引用。
     const cred = await postJson(
       'system/secret',
       {
@@ -449,7 +449,7 @@ describe.skipIf(!s3Ready)('s3 provider E2E(opt-in via TB_TEST_S3_*)', () => {
 
   it('Search 召回 metadata 值命中(ListObjectsV2 不带 metadata,经 head 补取)', async () => {
     expect((await mountS3('ctxs3/search')).status).toBe(200)
-    // 路径不含关键字、metadata 值含关键字 → 必须经 head 补取才可召回(Proto §5.2 基线)
+    // 路径不含关键字、metadata 值含关键字 → 必须经 head 补取才可召回(基线)
     await ctxCall('ctxs3/search', 'Write', {
       path: 'docs/plain.md',
       entry: { contentType: 'text/markdown', content: 'x', metadata: { tag: 'needle-topic' } },

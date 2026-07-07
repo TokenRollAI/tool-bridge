@@ -51,7 +51,7 @@ describe("registry 对 kind:'tool' 的写入/读取", () => {
     expect(node.config).toEqual(TOOL_CONFIG)
   })
 
-  it("kind:'tool' 配错误 config.kind → invalid_argument(§3.2 一致性照旧生效)", async () => {
+  it("kind:'tool' 配错误 config.kind → invalid_argument(一致性照旧生效)", async () => {
     const store = makeStore()
     await expect(
       store.write(

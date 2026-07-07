@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { TBError } from '../../src/errors'
 import { PLUGIN_KINDS, parsePluginManifest } from '../../src/plugin/manifest'
 
-/** Plugin.md §4 Step 2 的注册样例(feishu-docs)。 */
+/** 注册样例(feishu-docs)。 */
 const FEISHU = {
   id: 'feishu-docs',
   kind: 'context-provider',
@@ -25,7 +25,7 @@ function expectInvalid(value: unknown, opts?: { allowInsecureHttp?: boolean }): 
 }
 
 describe('合法 manifest', () => {
-  it('Plugin.md 的 feishu-docs 样例原样通过', () => {
+  it('feishu-docs 样例原样通过', () => {
     expect(parsePluginManifest(FEISHU)).toEqual(FEISHU)
   })
 
@@ -47,12 +47,12 @@ describe('合法 manifest', () => {
     expect('futureField' in parsed).toBe(false)
   })
 
-  it('PLUGIN_KINDS 词表 = 两种 Provider(Proto §8.1)', () => {
+  it('PLUGIN_KINDS 词表 = 两种 Provider', () => {
     expect(PLUGIN_KINDS).toEqual(['tool-provider', 'context-provider'])
   })
 })
 
-describe('kind ↔ interfaceVersion 一致性(Plugin.md §6)', () => {
+describe('kind ↔ interfaceVersion 一致性', () => {
   it('kind=tool-provider 配 context-provider/v1 → 拒', () => {
     const err = expectInvalid({
       ...FEISHU,
@@ -85,7 +85,7 @@ describe('kind ↔ interfaceVersion 一致性(Plugin.md §6)', () => {
   })
 })
 
-describe('endpoint 形状(Proto §8.1:https:// 或 binding:<name>)', () => {
+describe('endpoint 形状(https:// 或 binding:<name>)', () => {
   it('裸 http 缺省拒,并提示 TB_ALLOW_INSECURE_HTTP', () => {
     const err = expectInvalid({ ...FEISHU, endpoint: 'http://127.0.0.1:8787' })
     expect(err.message).toContain('TB_ALLOW_INSECURE_HTTP')
@@ -111,7 +111,7 @@ describe('endpoint 形状(Proto §8.1:https:// 或 binding:<name>)', () => {
   })
 })
 
-describe('auth 两变体(Proto §8.1)', () => {
+describe('auth 两变体', () => {
   it('bearer 缺 secretRef → 拒', () => {
     expectInvalid({ ...FEISHU, auth: { kind: 'bearer' } })
   })

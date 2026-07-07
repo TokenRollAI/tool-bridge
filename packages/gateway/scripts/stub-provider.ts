@@ -1,18 +1,18 @@
 /**
- * 示例 context-provider Plugin(Plugin.md §4;内存 stub 数据版)。
+ * 示例 context-provider Plugin(内存 stub 数据版)。
  *
  * 供真实 E2E 用(echo-mcp 同款模式,devDependency tsx 直跑,不进生产构建):
- * 实现 Plugin 通用契约(Plugin.md §3 / Proto §8.2/§8.3)——
+ * 实现 Plugin 通用契约——
  *   GET  /healthz     → { healthy: true }
  *   GET  /~describe   → { kind, interfaceVersion, capabilities: [search, delete] }
  *   GET  /~help       → Help DSL(Accept: application/json → HelpJson;复用 core 渲染器)
- *   POST /            → §8.3 envelope {"tool":"<Method>","arguments":{...}}
+ *   POST /            → envelope {"tool":"<Method>","arguments":{...}}
  * 数据是内存里的几条 markdown 条目(进程退出即失);List 支持 cursor 分页,
  * X-TB-Request-Id 幂等去重复用 core 的 RequestDedupe(重放返回首次结果,含错误)。
  *
  * 鉴权:envelope 调用必须带非空 `Authorization: Bearer <token>`;设了环境变量
- * STUB_PROVIDER_TOKEN(注册后由运维把平台 mint 的 pluginToken 配进来,Proto §8.1
- * platform-token 语义)时还要求逐字相等——无/错凭证一律 401 TBError。
+ * STUB_PROVIDER_TOKEN(注册后由运维把平台 mint 的 pluginToken 配进来,platform-token
+ * 语义)时还要求逐字相等——无/错凭证一律 401 TBError。
  * 生命周期 GET(healthz/~describe/~help)不鉴权(平台注册探活即无凭证)。
  *
  * 用法:`pnpm stub-provider`(默认 127.0.0.1:39004);配合
@@ -70,7 +70,7 @@ for (const [path, content] of SEED) {
   })
 }
 
-/** 落盘条目 → ContextEntryMeta(Proto §5.1;uri 用 stub 自己的命名空间)。 */
+/** 落盘条目 → ContextEntryMeta(uri 用 stub 自己的命名空间)。 */
 function toMeta(path: string, e: StoredEntry): Record<string, unknown> {
   return {
     uri: `node://stub/${path}`,
@@ -82,7 +82,7 @@ function toMeta(path: string, e: StoredEntry): Record<string, unknown> {
   }
 }
 
-// ---------- 方法实现(动词映射语义见 Plugin.md §4:由 Plugin 自定,合理即可) ----------
+// ---------- 方法实现(动词映射语义由 Plugin 自定,合理即可) ----------
 
 function requirePath(args: Record<string, unknown>): string {
   const path = args.path
@@ -98,7 +98,7 @@ function requireEntry(path: string): StoredEntry {
   return e
 }
 
-/** cursor = 上一页最后一个 entry path;limit 缺省 50、上限 200(Proto §0.3)。 */
+/** cursor = 上一页最后一个 entry path;limit 缺省 50、上限 200。 */
 function pageOf(keys: string[], opts: Record<string, unknown>): Record<string, unknown> {
   const rawLimit = typeof opts.limit === 'number' ? opts.limit : 50
   const limit = Math.min(Math.max(1, rawLimit), 200)
@@ -129,7 +129,7 @@ function doWrite(args: Record<string, unknown>): Record<string, unknown> {
   }
   const { content, contentType, metadata, ifVersion } = input as Record<string, unknown>
   if (content === undefined) {
-    throw new TBError('invalid_argument', 'entry.content is required(Proto §5.1)')
+    throw new TBError('invalid_argument', 'entry.content is required')
   }
   const prev = entries.get(path)
   if (typeof ifVersion === 'string' && prev !== undefined && String(prev.revision) !== ifVersion) {
@@ -158,7 +158,7 @@ function doUpdate(args: Record<string, unknown>): Record<string, unknown> {
   if (typeof patch !== 'object' || patch === null) {
     throw new TBError('invalid_argument', "Update 需要对象 'patch'")
   }
-  const prev = requireEntry(path) // 不存在 → not_found(Proto §5.1)
+  const prev = requireEntry(path) // 不存在 → not_found
   const { content, metadata, ifVersion } = patch as Record<string, unknown>
   if (typeof ifVersion === 'string' && String(prev.revision) !== ifVersion) {
     throw new TBError('conflict', `version mismatch: expected ${ifVersion}, at ${prev.revision}`)
@@ -168,7 +168,7 @@ function doUpdate(args: Record<string, unknown>): Record<string, unknown> {
     ...(content !== undefined ? { content } : {}),
     metadata:
       typeof metadata === 'object' && metadata !== null
-        ? { ...prev.metadata, ...(metadata as Record<string, string>) } // 浅合并(Proto §5.1)
+        ? { ...prev.metadata, ...(metadata as Record<string, string>) } // 浅合并
         : prev.metadata,
     revision: prev.revision + 1,
     updatedAt: new Date().toISOString(),
@@ -184,7 +184,7 @@ function doSearch(args: Record<string, unknown>): Record<string, unknown> {
   }
   const opts = optsOf(args)
   if (opts.mode === 'semantic') {
-    // capabilities 只声明了 'search'(keyword);semantic 未声明(Proto §5.1)。
+    // capabilities 只声明了 'search'(keyword);semantic 未声明。
     throw new TBError('invalid_argument', "search mode 'semantic' not declared in capabilities")
   }
   const hits = [...entries.keys()]
@@ -291,7 +291,7 @@ function writeJson(res: ServerResponse, status: number, value: unknown): void {
   res.end(JSON.stringify(value))
 }
 
-/** 所有失败路径统一 TBError 形状(Plugin.md §7 调试清单④)。 */
+/** 所有失败路径统一 TBError 形状。 */
 function writeError(res: ServerResponse, err: unknown): void {
   const tb = isTBError(err)
     ? err
@@ -300,7 +300,7 @@ function writeError(res: ServerResponse, err: unknown): void {
 }
 
 async function handleEnvelope(req: IncomingMessage, res: ServerResponse, raw: string) {
-  // 鉴权(Plugin.md §7 调试清单⑥):Bearer 非空;配置了 token 时还须逐字相等。
+  // 鉴权:Bearer 非空;配置了 token 时还须逐字相等。
   const auth = req.headers.authorization
   const token = typeof auth === 'string' && auth.startsWith('Bearer ') ? auth.slice(7).trim() : ''
   if (token === '') throw TBError.unauthenticated('missing Bearer token')
@@ -312,7 +312,7 @@ async function handleEnvelope(req: IncomingMessage, res: ServerResponse, raw: st
   const ctxHeader = req.headers['x-tb-context']
   const owner = typeof ctxHeader === 'string' ? decodeCallContext(ctxHeader).owner : undefined
 
-  // X-TB-Request-Id 幂等去重(Proto §8.3):同 id 重放返回首次结果(含错误)。
+  // X-TB-Request-Id 幂等去重:同 id 重放返回首次结果(含错误)。
   const requestId = req.headers['x-tb-request-id']
   const exec = (): unknown => invoke(call.tool, call.arguments)
   const result =

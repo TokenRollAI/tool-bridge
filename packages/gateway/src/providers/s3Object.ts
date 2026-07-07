@@ -1,5 +1,5 @@
 /**
- * S3 兼容端点 ObjectStore 适配(Proto §5.2 s3 义务):aws4fetch SigV4 → core `ObjectStore`。
+ * S3 兼容端点 ObjectStore 适配(s3 义务):aws4fetch SigV4 → core `ObjectStore`。
  *
  * - 动词映射:head=HEAD / get=GET / put=PUT / delete=DELETE(404 幂等静默)/ list=ListObjectsV2。
  * - 用户 metadata 走 `x-amz-meta-*` 头;条件写 `ifMatchEtag` → `If-Match`(412 → conflict)。
@@ -24,7 +24,7 @@ import {
 import { AwsClient } from 'aws4fetch'
 import { encodeObjectKey, presignS3Url } from './s3Sign'
 
-/** s3 provider 的构造参数(providerConfig + authRef 解析出的凭证;Proto §3.2)。 */
+/** s3 provider 的构造参数(providerConfig + authRef 解析出的凭证)。 */
 export interface S3StoreConfig {
   endpoint: string
   bucket: string

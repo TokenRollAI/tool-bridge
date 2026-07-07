@@ -60,7 +60,7 @@ describe('contextScopeForCmd', () => {
 })
 
 describe('CONTEXT_CAPABILITIES', () => {
-  it('声明 search 与 delete(Proto §5.1 可选能力)', () => {
+  it('声明 search 与 delete(可选能力)', () => {
     expect([...CONTEXT_CAPABILITIES].sort()).toEqual(['delete', 'search'])
   })
 })

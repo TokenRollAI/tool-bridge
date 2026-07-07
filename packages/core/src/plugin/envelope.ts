@@ -1,7 +1,7 @@
 /**
- * Plugin 传输契约编解码(Proto §8.3;纯逻辑)。
+ * Plugin 传输契约编解码(纯逻辑)。
  *
- * 与 §1.4 节点调用同形:POST {endpoint},body `{"tool":"<Method>","arguments":{...}}`
+ * 与节点调用同形:POST {endpoint},body `{"tool":"<Method>","arguments":{...}}`
  * (arguments 按名传递,opts 整体传不平铺);调用上下文经 `X-TB-Context` header
  * 以 CallContext JSON 的 base64url 承载(唯一载体,body 不重复);`X-TB-Request-Id`
  * 每次逻辑调用唯一、重试不变(去重表见 dedupe.ts)。
@@ -16,12 +16,12 @@ import { ACTIONS, type Action, type CallContext } from '../types'
 declare const TextEncoder: { new (): { encode(input: string): Uint8Array } }
 declare const TextDecoder: { new (): { decode(input: Uint8Array): string } }
 
-/** 平台 → Plugin 的调用上下文 header(Proto §8.3)。 */
+/** 平台 → Plugin 的调用上下文 header。 */
 export const HEADER_TB_CONTEXT = 'X-TB-Context'
-/** 逻辑调用唯一 id 的 header;重试时不变,Plugin 以此去重实现幂等(Proto §8.3)。 */
+/** 逻辑调用唯一 id 的 header;重试时不变,Plugin 以此去重实现幂等。 */
 export const HEADER_TB_REQUEST_ID = 'X-TB-Request-Id'
 
-/** 单次请求/响应体上限:1 MiB(Proto §8.3)。 */
+/** 单次请求/响应体上限:1 MiB。 */
 export const PLUGIN_PAYLOAD_MAX_BYTES = 1024 * 1024
 
 const callContextSchema = z.object({
@@ -71,7 +71,7 @@ export function decodeCallContext(header: string): CallContext {
   return parsed.data as CallContext
 }
 
-/** 请求体形状(Proto §8.3):tool 是**方法名**(如 "List"),arguments 按名传递。 */
+/** 请求体形状:tool 是**方法名**(如 "List"),arguments 按名传递。 */
 export interface PluginCall {
   tool: string
   arguments: Record<string, unknown>
@@ -82,13 +82,13 @@ const pluginCallSchema = z.object({
   arguments: z.record(z.unknown()),
 })
 
-/** payload(UTF-8 字节数)超 1 MiB → invalid_argument(Proto §8.3)。 */
+/** payload(UTF-8 字节数)超 1 MiB → invalid_argument。 */
 export function assertPluginPayloadSize(payload: string): void {
   const bytes = new TextEncoder().encode(payload).length
   if (bytes > PLUGIN_PAYLOAD_MAX_BYTES) {
     throw new TBError(
       'invalid_argument',
-      `payload ${bytes} 字节超过上限 ${PLUGIN_PAYLOAD_MAX_BYTES}(Proto §8.3 ≤ 1 MiB;更大内容经 $ref)`,
+      `payload ${bytes} 字节超过上限 ${PLUGIN_PAYLOAD_MAX_BYTES}(≤ 1 MiB;更大内容经 $ref)`,
     )
   }
 }
@@ -107,7 +107,7 @@ export function decodePluginCall(body: string): PluginCall {
   try {
     raw = JSON.parse(body)
   } catch {
-    throw new TBError('invalid_argument', '请求体非 JSON(Proto §8.3)')
+    throw new TBError('invalid_argument', '请求体非 JSON')
   }
   const parsed = pluginCallSchema.safeParse(raw)
   if (!parsed.success) {

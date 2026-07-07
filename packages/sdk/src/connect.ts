@@ -1,5 +1,5 @@
 /**
- * SDK 侧设备连接胶水(Proto §7 connect;自 cli/src/deviceRuntime.ts 下沉):
+ * SDK 侧设备连接胶水(自 cli/src/deviceRuntime.ts 下沉):
  * partysocket 重连 + 握手 Bearer 注入 + 30s 应用层心跳(DO hibernation 生产坑:
  * 空闲 WS 会被边缘 ~100s 掐断且客户端毫无感知,须 ping 保活 + 死链主动 reconnect,
  * 见 llmdoc guides/do-websocket-hibernation)。

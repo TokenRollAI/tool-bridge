@@ -1,6 +1,6 @@
 /**
  * @tool-bridge/core —— 树 / Auth / 协议编解码的纯逻辑内核(无宿主依赖)。
- * 网关、SDK、CLI 都装配它;Phase 1 起是公共内核(Architecture.md、DOD.md:19)。
+ * 网关、SDK、CLI 都装配它;是公共内核。
  */
 
 export * from './auth/authorizer'

@@ -1,8 +1,8 @@
 /**
- * builtin 模块 "sk" → SKRegistryStore(Proto §2.3;挂载为 system/sk 节点,全 cmd 需 admin)。
+ * builtin 模块 "sk" → SKRegistryStore(挂载为 system/sk 节点,全 cmd 需 admin)。
  *
  * cmd 名对齐接口方法(list/get/write/update/delete,小写);CLI 的 create/rm 别名在 CLI 层做。
- * write 返回 { key, secret },secret(明文)仅此一次(Proto §2.3);list/get/update 一律无 hash。
+ * write 返回 { key, secret },secret(明文)仅此一次;list/get/update 一律无 hash。
  */
 
 import type { SKRegistryStore, SKUpdatePatch } from '../auth/sk'
@@ -82,7 +82,7 @@ function skCmds(nodePath: TreePath): CmdSpec[] {
   ]
 }
 
-/** args 整体即 SecretKeyInput(Proto §1.4);校验 owner/scopes,透传可选字段。 */
+/** args 整体即 SecretKeyInput;校验 owner/scopes,透传可选字段。 */
 function asSecretKeyInput(args: Record<string, unknown>): SecretKeyInput {
   const owner = requireString(args, 'owner')
   if (!Array.isArray(args.scopes)) {

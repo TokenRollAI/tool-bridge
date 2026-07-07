@@ -1,10 +1,10 @@
 /**
- * SDK connect 全链路(DoD ② 后半,DOD.md:105;opt-in,消耗真实资源):
+ * SDK connect 全链路(opt-in,消耗真实资源):
  * `TB_TEST_SDK_REMOTE=1 TB_BASE_URL=... TB_SK=...` 时对已部署网关跑——
  * SDK 实例 registerTool 本地函数工具 → connect(随机 deviceId)→ 远程树出现该
  * 工具节点 → 经远程 HTTP 调用返回本地函数结果 → close + teardown(节点回收确认)。
  *
- * teardown 注意 §2.4d:节点只能由注册它的 SK 删除;此处 connect 与 delete 用同一把 SK。
+ * teardown 注意:节点只能由注册它的 SK 删除;此处 connect 与 delete 用同一把 SK。
  */
 
 import { MemoryStateStore, type ToolResult, type ToolSpec } from '@tool-bridge/core'
@@ -80,7 +80,7 @@ describeRemote('SDK connect 全链路(生产网关,opt-in)', () => {
     } finally {
       conn.close()
       await conn.closed
-      // teardown:子节点在前(§2.4d 同 SK 删除;失败仅告警,残骸有 24h 自动回收兜底)。
+      // teardown:子节点在前(同 SK 删除;失败仅告警,残骸有 24h 自动回收兜底)。
       for (const p of [`${mountPath}/tools/echo`, `${mountPath}/tools`, mountPath]) {
         const res = await deleteNode(p)
         if (res.status !== 200) {

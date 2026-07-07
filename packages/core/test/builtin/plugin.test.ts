@@ -65,7 +65,7 @@ function makeHarness(
   return { store, sk, secrets, probe, fetchContract, mod }
 }
 
-describe('builtin plugin 模块(Proto §8.1/§8.2)', () => {
+describe('builtin plugin 模块', () => {
   let h: ReturnType<typeof makeHarness>
 
   beforeEach(() => {

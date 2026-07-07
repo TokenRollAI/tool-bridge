@@ -1,5 +1,5 @@
 /**
- * DeviceFrame:设备 WS 帧协议的类型与编解码(Proto §6.2)。
+ * DeviceFrame:设备 WS 帧协议的类型与编解码。
  *
  * JSON 文本帧、`type` 区分;decode 拒绝非 JSON / 未知 type / 缺字段(invalid_argument),
  * encode 产出紧凑 JSON。ping/pong 序列化为稳定字面量(PING_FRAME_JSON/PONG_FRAME_JSON)——
@@ -10,9 +10,9 @@ import { z } from 'zod'
 import { TB_ERROR_CODES, TBError, type TBErrorBody, type TBErrorCode } from '../errors'
 import { type DeviceExpose, NODE_KINDS, type NodeKind, type TreePath } from '../types'
 
-// ---------- 帧类型(以 Proto §6.2 的 TS 定义为真源) ----------
+// ---------- 帧类型(TS 定义为真源) ----------
 
-/** 设备 → 网关:连接后第一帧;mountPath 缺省 device/<deviceId>(Proto §6.1)。 */
+/** 设备 → 网关:连接后第一帧;mountPath 缺省 device/<deviceId>。 */
 export interface HelloFrame {
   type: 'hello'
   deviceId: string
@@ -81,7 +81,7 @@ const tbErrorBodySchema = z.object({
 /**
  * NodeInput 只做边界校验(path/kind/description),config/virtualize 等经 passthrough
  * 原样保留——注册时由 NodeRegistry 全量校验,帧层不复刻。
- * cmds:可选工具表(Proto §6.3,~help 数据源);老客户端不带则该节点 ~help 只有节点描述。
+ * cmds:可选工具表(~help 数据源);老客户端不带则该节点 ~help 只有节点描述。
  */
 const deviceNodeCmdSchema = z
   .object({
@@ -191,7 +191,7 @@ export function encodeDeviceFrame(frame: DeviceFrame): string {
   return JSON.stringify(frame)
 }
 
-/** TBError → 拒绝帧(Proto §6.2:发送后网关 close(1008))。 */
+/** TBError → 拒绝帧(发送后网关 close(1008))。 */
 export function deviceErrorFrame(error: TBError): ErrorFrame {
   return { type: 'error', error: error.toJSON() }
 }

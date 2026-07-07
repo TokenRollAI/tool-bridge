@@ -1,5 +1,5 @@
 /**
- * expose.nodes 自定义节点的 HTTP→WS 调用转发(Proto §6.3 Phase 5):
+ * expose.nodes 自定义节点的 HTTP→WS 调用转发:
  * hello 携带自定义 tool 节点(含 cmds 工具表)→ 树上出现、~help 列工具表、
  * HTTP 调用经帧协议 call 转发(path 相对 mountPath)、断线 503 retryable;
  * 注册面手工伪造 device 转发标记 → 拒。
@@ -71,7 +71,7 @@ async function connectDevice(deviceId: string, expose: DeviceExpose): Promise<We
   return ws
 }
 
-describe('expose.nodes 自定义节点转发(Proto §6.3 Phase 5)', () => {
+describe('expose.nodes 自定义节点转发', () => {
   it('hello 带自定义 tool 节点 → 树上出现、~help 列工具表、调用经 WS call 转发、断线 503', async () => {
     const deviceId = `sdk-${crypto.randomUUID().slice(0, 8)}`
     const ws = await connectDevice(deviceId, {

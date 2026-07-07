@@ -1,10 +1,10 @@
 /**
- * 工具虚拟化(Proto §3.1 Virtualize,mcp/http 适用)。
+ * 工具虚拟化(Virtualize,mcp/http 适用)。
  *
  * 对外只暴露虚拟名,请求时反查上游真名。这是 **core 纯逻辑**:输入
  * `(Virtualize, ToolSpec[])`,输出 `{exposed, reverse}`,无 I/O、可 100% 分支覆盖。
  *
- * 应用顺序(Phase 2 定型,Proto §3.1):
+ * 应用顺序(定型):
  *   1. hide:`hide` 列表中的**原名**从 exposed 剔除,且不进 reverse(不可见、不可调用)。
  *   2. rename:`rename[原名]` → 虚拟名。
  *   3. prefix:再套前缀——**纯字符串拼接**,平台不注入分隔符(分隔符由配置者自带,惯例 "ns__")。

@@ -1,7 +1,7 @@
 /**
- * 设备侧 shell executor(Proto §6.3 shell 契约):spawn(shell:true) 执行整条 command,
+ * 设备侧 shell executor(shell 契约):spawn(shell:true) 执行整条 command,
  * 聚合 { stdout, stderr, exitCode }。执行前必过 isCommandAllowed(白名单),不过 →
- * TBError permission_denied(判定在设备侧执行前完成,Proto §6.2)。
+ * TBError permission_denied(判定在设备侧执行前完成)。
  *
  * 有界缓冲:stdout/stderr 各上限 SHELL_OUTPUT_LIMIT_BYTES,超出截断加标记(v1 教训:
  * 无界读取会 OOM)。超时 kill(SIGKILL),exitCode 记 124(GNU timeout 约定)并在
@@ -48,7 +48,7 @@ export interface SpawnedProcess {
 export type SpawnFn = (command: string, opts: { shell: true; cwd?: string }) => SpawnedProcess
 
 export interface ShellExecutorOptions {
-  /** 白名单(Proto §6.2 语义);缺省 [] = 拒绝一切。 */
+  /** 白名单;缺省 [] = 拒绝一切。 */
   allow?: string[]
   /** 单测注入;缺省 node:child_process.spawn。 */
   spawn?: SpawnFn

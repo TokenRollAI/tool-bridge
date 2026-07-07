@@ -24,7 +24,7 @@ describe('builtin sk 模块', () => {
     mod = createSkModule(new SKRegistryStore(store), () => NOW)
   })
 
-  it('help() 列出全部 cmd 且 scope 均为 admin(Proto §2.3)', () => {
+  it('help() 列出全部 cmd 且 scope 均为 admin', () => {
     const help = mod.help('system/sk')
     expect(help.node).toEqual({
       path: 'system/sk',
@@ -72,7 +72,7 @@ describe('builtin sk 模块', () => {
     expect(page.items).toHaveLength(0)
   })
 
-  it('未知 cmd → invalid_argument(Proto §0.2)', async () => {
+  it('未知 cmd → invalid_argument', async () => {
     await expect(mod.dispatch('frobnicate', {}, ctx)).rejects.toSatisfy(
       (e) => isTBError(e) && e.code === 'invalid_argument',
     )

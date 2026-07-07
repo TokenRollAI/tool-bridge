@@ -9,7 +9,7 @@ import type { ApiError } from '@/lib/api'
 import { useHelp, useHelpDsl } from '@/lib/queries'
 
 /**
- * 节点页 = `~help` 的通用渲染器(Architecture M9 的核心职责):
+ * 节点页 = `~help` 的通用渲染器:
  * 描述 + 子节点导航 + 每条 cmd 的表单调用面板;"~help 原文" tab 对等 `tb help <path>`。
  */
 export function NodePage() {
@@ -118,7 +118,7 @@ export function NodePage() {
                   path={path}
                   cmd={cmd}
                   defaultOpen={cmds.length === 1}
-                  // mcp/http 节点级 ~help 是索引形态(Proto §4.2):展开时懒取工具级 schema
+                  // mcp/http 节点级 ~help 是索引形态:展开时懒取工具级 schema
                   lazySchema={node.kind === 'mcp' || node.kind === 'http'}
                 />
               ))}

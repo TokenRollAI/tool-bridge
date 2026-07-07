@@ -5,13 +5,13 @@ import { nodePath } from './paths'
 import type { HttpToolDef, Node, NodeInput, Virtualize } from './types'
 
 /**
- * 挂载/卸载节点的共用逻辑(Proto §3.3)。CLI 统一走 `~register` 注册(受限 SK 亦可用),
+ * 挂载/卸载节点的共用逻辑。CLI 统一走 `~register` 注册(受限 SK 亦可用),
  * 卸载走管理面 `system/registry` delete。
  */
 
 /**
- * 走 `POST /<path>/~register` 注册节点(§1.1 / §3.3 两条注册通道)。
- * body = NodeInput,且 body.path 必须等于 URL path(§3.3 规范要求)。
+ * 走 `POST /<path>/~register` 注册节点。
+ * body = NodeInput,且 body.path 必须等于 URL path。
  */
 export async function registerNode(target: Target, input: NodeInput): Promise<Node> {
   return apiJson<Node>(target, {
@@ -22,7 +22,7 @@ export async function registerNode(target: Target, input: NodeInput): Promise<No
 }
 
 /**
- * 卸载节点:无 `~unregister` 端点,delete 走管理面 `system/registry`(§3.3 管理通道)。
+ * 卸载节点:无 `~unregister` 端点,delete 走管理面 `system/registry`(管理通道)。
  * 调用者无 system 可见性时返回 404 → 补充可操作提示。
  */
 export async function deleteNode(
@@ -54,7 +54,7 @@ export async function deleteNode(
 
 /**
  * 由 --prefix / --rename(可重复 "from=to")/ --hide(可重复)构造 Virtualize。
- * 无任一字段时返回 undefined(不塞空对象)。rename 在 prefix 之前应用(§3.1)。
+ * 无任一字段时返回 undefined(不塞空对象)。rename 在 prefix 之前应用。
  */
 export function buildVirtualize(args: {
   prefix?: unknown

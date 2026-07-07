@@ -1,7 +1,7 @@
 /**
- * 上游工具集 → HelpModel(Proto §4.1 → §1.3,`~help` 从上游派生的核心映射)。
+ * 上游工具集 → HelpModel(`~help` 从上游派生的核心映射)。
  *
- * 两级渐进披露(Proto §4.2):节点级 `~help` 出**索引形态**(每工具一行 name+h+scope,
+ * 两级渐进披露:节点级 `~help` 出**索引形态**(每工具一行 name+h+scope,
  * 不含 inputSchema/returns——大工具集不再一次性塞满 agent 上下文);单工具全量 spec 经
  * `GET /<node>/<tool>/~help`(toolHelpModel)按需获取。纯逻辑;产出的 HelpModel 经
  * renderHelpDsl/renderHelpJson 渲染(DSL↔JSON 语义等价)。
@@ -50,7 +50,7 @@ export function toolsToHelpModel(
 }
 
 /**
- * 单工具的 `~help` 模型(`GET /<node>/<tool>/~help`,Proto §4.2 两级披露的细节级)。
+ * 单工具的 `~help` 模型(`GET /<node>/<tool>/~help`,两级披露的细节级)。
  * node 行呈现工具伪节点路径 `<nodePath>/<tool>`;cmd 的调用 path 仍是 `/<nodePath>`
  * (数据面入口不变:POST /<node> + {tool,arguments})。
  */

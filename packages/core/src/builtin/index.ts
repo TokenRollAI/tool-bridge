@@ -2,7 +2,7 @@
  * builtin 装配:把四个 system/* 模块组装为 `module → BuiltinModule` 映射。
  *
  * 存储实例(SKRegistryStore / SecretStoreImpl / NodeRegistryStore)由网关注入并复用;
- * status 的 nodeCount 经翻页统计 registry 全量节点(Phase 1 树规模小,可接受)。
+ * status 的 nodeCount 经翻页统计 registry 全量节点(当前树规模小,可接受)。
  */
 
 import type { SKRegistryStore } from '../auth/sk'
@@ -26,12 +26,12 @@ export interface BuiltinDeps {
   /** 时间源;缺省 `new Date().toISOString()`(测试可注入固定时钟)。 */
   now?: () => string
   /**
-   * 可见性判定(= auth/scope 的 checkScopes),注入给 registry 模块做 §2.3 裁剪
+   * 可见性判定(= auth/scope 的 checkScopes),注入给 registry 模块做可见性裁剪
    * (list 裁剪 / get→not_found)。网关装配一律传入;缺省则 registry 不裁剪(纯逻辑单测)。
    */
   visibility?: ScopeChecker
   /**
-   * plugin 模块装配(Phase 5,Proto §8.1):store + 探活/契约抓取回调(I/O 在宿主)。
+   * plugin 模块装配:store + 探活/契约抓取回调(I/O 在宿主)。
    * 缺省不装配 system/plugin(sk/secrets/now 复用上方注入)。
    */
   plugin?: Omit<PluginModuleDeps, 'sk' | 'secrets' | 'now'>

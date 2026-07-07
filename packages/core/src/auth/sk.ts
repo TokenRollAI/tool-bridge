@@ -1,5 +1,5 @@
 /**
- * SecretKey 签发 / 认证 / SKRegistry(Proto §2.1、§2.3,行 178-239)。
+ * SecretKey 签发 / 认证 / SKRegistry。
  *
  * 纯逻辑内核:不 import 任何 Workers / Node 专属 API。WebCrypto 全局(`crypto`、
  * `TextEncoder`)在 Workers 与 Node18+ 均可用;core 不引入 @cloudflare/workers-types
@@ -80,13 +80,13 @@ export async function mintKey(
   return { key, secret }
 }
 
-/** 投影:剥离 hash(hash 永不出网关,Proto §2.3)。 */
+/** 投影:剥离 hash(hash 永不出网关)。 */
 export function projectKey(key: SecretKey): Omit<SecretKey, 'hash'> {
   const { hash: _hash, ...rest } = key
   return rest
 }
 
-/** Admin SK 引导输入(Case 1,Proto §2.3 行 244):owner user:admin,全动作 ** scope。 */
+/** Admin SK 引导输入(Case 1):owner user:admin,全动作 ** scope。 */
 export function adminBootstrapInput(): SecretKeyInput {
   return {
     owner: 'user:admin',
@@ -94,7 +94,7 @@ export function adminBootstrapInput(): SecretKeyInput {
   }
 }
 
-/** 认证层有效性:disabled 或 expiresAt 已过 → 视同禁用(Proto §2.1)。 */
+/** 认证层有效性:disabled 或 expiresAt 已过 → 视同禁用。 */
 export function isKeyActive(key: SecretKey, now: Timestamp): boolean {
   if (key.disabled) return false
   if (key.expiresAt !== undefined && Date.parse(key.expiresAt) <= Date.parse(now)) return false
@@ -106,11 +106,11 @@ function clampLimit(limit?: number): number {
   return Math.min(Math.max(1, limit), LIST_LIMIT_MAX)
 }
 
-/** SKRegistry 更新补丁:SecretKeyInput 的部分字段 + 认证层 disabled(Proto §2.1)。 */
+/** SKRegistry 更新补丁:SecretKeyInput 的部分字段 + 认证层 disabled。 */
 export type SKUpdatePatch = Partial<SecretKeyInput> & { disabled?: boolean }
 
 /**
- * SKRegistry 存储实现(Proto §2.3;挂载为 builtin 节点 system/sk,需 admin 动作)。
+ * SKRegistry 存储实现(挂载为 builtin 节点 system/sk,需 admin 动作)。
  * KV 布局(store.ts):sk:h:<sha256hex> → SecretKey(认证热路径);
  * sk:i:<id> → sha256hex(管理面二级索引)。
  */

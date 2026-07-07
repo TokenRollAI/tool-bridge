@@ -1,5 +1,5 @@
 /**
- * remote 节点透传(Proto §3.4):把对 `<path>` 及其后代的 `~help`/`~skill`/`~tree`/`POST`
+ * remote 节点透传:把对 `<path>` 及其后代的 `~help`/`~skill`/`~tree`/`POST`
  * 请求,改写为对 `baseUrl` 下相对路径的**同形**请求。
  *
  * - `baseUrl` 白名单(空 = 拒一切)——注册时与调用时双重校验。
@@ -7,7 +7,7 @@
  * - `X-TB-Via`:入站链经 `checkVia` 判环/跳数(在追加自身之前);出站 `appendVia` 追加自身标识。
  * - 传输失败经 `normalizeUpstreamError` 归一;远端返回的响应(含其自身 TBError)原样透传。
  *
- * 宿主中立(Proto §7 核心零分叉):部署配置以解析后的 {@link RemoteSettings} 注入,
+ * 宿主中立(核心零分叉):部署配置以解析后的 {@link RemoteSettings} 注入,
  * env 解析(TB_REMOTE_ALLOWLIST 等)在宿主适配层(gateway app.ts / SDK config)。
  */
 
@@ -31,19 +31,19 @@ export interface RemoteConfig {
   skRef?: string
 }
 
-/** remote 透传的部署配置(宿主解析后注入;Proto §3.4/§7)。 */
+/** remote 透传的部署配置(宿主解析后注入)。 */
 export interface RemoteSettings {
   /** baseUrl 的 host 后缀白名单;空数组 = 拒一切 remote。 */
   allowlist: string[]
-  /** X-TB-Via 跳数上限(Proto §7 缺省 4,由宿主适配层落默认)。 */
+  /** X-TB-Via 跳数上限(缺省 4,由宿主适配层落默认)。 */
   maxHops: number
   /** 本实例 X-TB-Via 标识;缺省用**入站请求 host** 派生(跨实例联邦须显式配置才能可靠去环)。 */
   instanceId?: string
-  /** 放行 http:// 上游(仅本地开发,Proto §4.2)。 */
+  /** 放行 http:// 上游(仅本地开发)。 */
   allowInsecure: boolean
 }
 
-/** 本实例的 X-TB-Via 标识:显式配置优先;缺省用入站请求 host 派生(§3.4 已知局限)。 */
+/** 本实例的 X-TB-Via 标识:显式配置优先;缺省用入站请求 host 派生(已知局限)。 */
 function selfInstanceId(settings: RemoteSettings, requestUrl: string): string {
   if (settings.instanceId !== undefined && settings.instanceId.length > 0) {
     return settings.instanceId
@@ -55,7 +55,7 @@ function selfInstanceId(settings: RemoteSettings, requestUrl: string): string {
   }
 }
 
-/** 注册时的 remote baseUrl 白名单校验(不在白名单 → invalid_argument,Proto §3.4)。 */
+/** 注册时的 remote baseUrl 白名单校验(不在白名单 → invalid_argument)。 */
 export function assertRemoteAllowed(baseUrl: string, settings: RemoteSettings): void {
   const secErr = assertSecureUrl(baseUrl, settings.allowInsecure)
   if (secErr) throw secErr

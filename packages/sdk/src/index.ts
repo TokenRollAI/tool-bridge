@@ -1,7 +1,7 @@
 /**
- * @tool-bridge/sdk 公开面(Proto §7):createToolBridge / ToolBridge / Connection +
+ * @tool-bridge/sdk 公开面:createToolBridge / ToolBridge / Connection +
  * 四个宿主注入点。核心逻辑来自 @tool-bridge/core 与 gateway 的宿主中立 tbApp
- * (createTbApp),SDK 只做装配——公开面与 Proto 接口一一对应,不存在私有通道。
+ * (createTbApp),SDK 只做装配——公开面即全部通道,不存在私有通道。
  */
 
 // 常用类型与内存宿主实现的再导出(嵌入方实现 Provider / 注入 store 用)。

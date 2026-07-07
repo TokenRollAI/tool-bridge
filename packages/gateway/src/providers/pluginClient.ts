@@ -1,12 +1,12 @@
 /**
- * Plugin 传输客户端(Proto §8.2/§8.3):探活、契约抓取、envelope 调用。
+ * Plugin 传输客户端:探活、契约抓取、envelope 调用。
  *
  * - envelope 与节点调用同形:POST {endpoint} body `{"tool":"<Method>","arguments":{...}}`,
  *   `X-TB-Context` 承载 CallContext(base64url,唯一载体)、`X-TB-Request-Id` 每次逻辑调用
  *   唯一;编解码复用 core plugin/envelope(体积守卫 ≤ 1 MiB)。
  * - Authorization 按 manifest.auth 解析:platform-token → SecretStore 保留名
- *   `plugin-token:<id>`;bearer → secretRef(Proto §8.1 注记)。
- * - 重试(Proto §8.3 注记):仅对 retryable TBError 与网络失败重试 1 次,Request-Id 不变。
+ *   `plugin-token:<id>`;bearer → secretRef。
+ * - 重试:仅对 retryable TBError 与网络失败重试 1 次,Request-Id 不变。
  * - 超时 30s;响应 4xx/5xx 按 TBError body 归一;`$ref` 不解引用(原样透传调用方)。
  */
 
@@ -27,10 +27,10 @@ import {
   type TBErrorCode,
 } from '@tool-bridge/core'
 
-/** 单次探活/抓取/调用超时(Proto §8.3:默认 30s)。 */
+/** 单次探活/抓取/调用超时(默认 30s)。 */
 const PLUGIN_TIMEOUT_MS = 30_000
 
-/** retryable:true 仅允许在这三码上(Proto §0.2);plugin 响应的 retryable 据此消毒。 */
+/** retryable:true 仅允许在这三码上;plugin 响应的 retryable 据此消毒。 */
 const RETRYABLE_CODES: ReadonlySet<TBErrorCode> = new Set<TBErrorCode>([
   'rate_limited',
   'unavailable',
@@ -39,18 +39,18 @@ const RETRYABLE_CODES: ReadonlySet<TBErrorCode> = new Set<TBErrorCode>([
 
 /**
  * endpoint 解析(尾斜杠归一)。`binding:<name>`(平台内 service binding)的转发
- * Phase 5 未接线 → 501(注记:注册/调用一律拒,待 service binding 装配)。
+ * 尚未接线 → 501(注册/调用一律拒,待 service binding 装配)。
  */
 export function resolvePluginEndpoint(manifest: PluginManifest): string {
   if (manifest.endpoint.startsWith('binding:')) {
     throw TBError.unimplemented(
-      `plugin '${manifest.id}' endpoint '${manifest.endpoint}':service binding 转发未实现(Phase 5)`,
+      `plugin '${manifest.id}' endpoint '${manifest.endpoint}':service binding 转发未实现`,
     )
   }
   return manifest.endpoint.replace(/\/+$/, '')
 }
 
-/** GET {endpoint}{healthPath} → { healthy: true }(Proto §8.2);网络失败按 unhealthy 报告。 */
+/** GET {endpoint}{healthPath} → { healthy: true };网络失败按 unhealthy 报告。 */
 export async function probePlugin(manifest: PluginManifest): Promise<PluginProbeResult> {
   const url = resolvePluginEndpoint(manifest) + manifest.healthPath
   let resp: Response
@@ -113,7 +113,7 @@ export async function fetchPluginContract(
 export interface PluginCallOptions {
   manifest: PluginManifest
   secrets: SecretStoreImpl
-  /** 调用上下文,经 X-TB-Context 透传(Proto §8.3)。 */
+  /** 调用上下文,经 X-TB-Context 透传。 */
   ctx: CallContext
 }
 
@@ -188,7 +188,7 @@ async function attempt(
     assertPluginPayloadSize(text)
   } catch {
     // 响应超 1 MiB 是 plugin 违约(应改走 $ref),归为 unavailable 而非调用方参数错。
-    throw new TBError('unavailable', 'plugin 响应超过 1 MiB(Proto §8.3:更大内容应经 $ref)', {
+    throw new TBError('unavailable', 'plugin 响应超过 1 MiB(更大内容应经 $ref)', {
       retryable: false,
     })
   }
@@ -196,12 +196,12 @@ async function attempt(
   try {
     return JSON.parse(text) as unknown
   } catch {
-    throw new TBError('unavailable', 'plugin 响应非 JSON(Proto §8.3)', { retryable: false })
+    throw new TBError('unavailable', 'plugin 响应非 JSON', { retryable: false })
   }
 }
 
 /**
- * envelope 调用(Proto §8.3):`tool` 是**方法名**(如 "List"/"Call"),arguments 按名传递。
+ * envelope 调用:`tool` 是**方法名**(如 "List"/"Call"),arguments 按名传递。
  * 重试 1 次(retryable TBError / 网络失败),X-TB-Request-Id 不变;响应 `$ref` 原样透传。
  */
 export async function callPlugin(

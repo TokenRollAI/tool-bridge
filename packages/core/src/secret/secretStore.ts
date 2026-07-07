@@ -1,9 +1,9 @@
 /**
- * SecretStore(Proto §2.5,行 257-268):上游凭证的"只进不出"加密保管。
+ * SecretStore:上游凭证的"只进不出"加密保管。
  *
  * 值经 AES-256-GCM 加密后写入注入的 StateStore(key 布局 `secret:<name>`,store.ts)。
  * 主密钥 `TB_SECRET_ENCRYPTION_KEY` 是部署期 env-only 的 base64url(32 字节)——
- * 信任根不自举存储(spec-digest §2)。主密钥缺失/格式非法时能力禁用:Set 抛 unavailable。
+ * 信任根不自举存储(spec-digest)。主密钥缺失/格式非法时能力禁用:Set 抛 unavailable。
  *
  * 纯逻辑,仅依赖 WebCrypto(core 无宿主依赖)。`crypto` / `TextEncoder` / `TextDecoder`
  * 在 Workers 与 Node 20+ 均为全局;此处以模块作用域最小声明补齐类型(不改 tsconfig、不污染全局)。
@@ -123,7 +123,7 @@ function isStoredSecret(value: unknown): value is StoredSecret {
 
 /**
  * name 校验:空 → invalid_argument。含 ':' 的名字是**平台内部保留命名空间**
- * (如 `plugin-token:<id>`,Proto §8.1 platform-token 注记)——impl 层放行(平台代码
+ * (如 `plugin-token:<id>`,platform-token 注记)——impl 层放行(平台代码
  * 直接调 set),节点面(builtin/secret 的 set/delete cmd)拒绝,防止用户伪造/误删平台凭证。
  */
 function assertValidName(name: string): void {
@@ -139,7 +139,7 @@ function assertValidName(name: string): void {
  * SecretStore 的纯逻辑实现。以注入的 StateStore 为后端。
  *
  * 主密钥缺失或格式非法(非 base64url / 非 32 字节)→ 实例处于 **unavailable 态**:
- * Set 抛 unavailable(Proto §2.5),resolve 返回 undefined(见方法注释)。
+ * Set 抛 unavailable,resolve 返回 undefined(见方法注释)。
  */
 export class SecretStoreImpl {
   private readonly store: StateStore
@@ -190,7 +190,7 @@ export class SecretStoreImpl {
   }
 
   /**
-   * 写入 / 替换 secret;明文仅在此请求中出现(Proto §2.5)。
+   * 写入 / 替换 secret;明文仅在此请求中出现。
    * unavailable 态 → 抛 unavailable(retryable:false):主密钥缺失时 Set 不可用。
    */
   async set(name: string, value: string, now: Timestamp): Promise<void> {
@@ -216,8 +216,8 @@ export class SecretStoreImpl {
   }
 
   /**
-   * 枚举 secret 元数据。**绝不返回明文/密文**——只出 name + updatedAt(Proto §2.5 只进不出)。
-   * limit 默认 50、上限 200 钳制(Proto §0.3)。
+   * 枚举 secret 元数据。**绝不返回明文/密文**——只出 name + updatedAt(只进不出)。
+   * limit 默认 50、上限 200 钳制。
    */
   async list(opts?: ListOptions): Promise<Page<{ name: string; updatedAt: Timestamp }>> {
     const limit = Math.min(opts?.limit ?? LIST_LIMIT_DEFAULT, LIST_LIMIT_MAX)
@@ -244,7 +244,7 @@ export class SecretStoreImpl {
    * 解密并返回明文(不存在 → undefined)。
    *
    * **仅供网关内部 Provider 解析引用名(authRef/skRef/secretRef);不暴露为节点 cmd**
-   * (Proto §2.5:节点面只有 Set/List/Delete,resolve 不是 cmd)。
+   * (节点面只有 Set/List/Delete,resolve 不是 cmd)。
    * unavailable 态 → 返回 undefined:主密钥缺失时无从解密,与"引用名不存在"同样处理为不可解析,
    * 由 Provider 侧降级(避免在数据面抛 unavailable)。
    */

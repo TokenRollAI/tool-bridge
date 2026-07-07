@@ -34,7 +34,7 @@ export function parseCallArgs(argsStr?: string, argsFile?: string): Record<strin
 }
 
 /**
- * `tb call <path> --tool <name> [--args '<json>' | --args-file <f>]` —— 数据面调用(§1.4)。
+ * `tb call <path> --tool <name> [--args '<json>' | --args-file <f>]` —— 数据面调用。
  * 默认人类模式:markdown 原样打印;`--json`:输出原始 JSON。TBError → stderr + exit 1。
  */
 export const callCommand = defineCommand({

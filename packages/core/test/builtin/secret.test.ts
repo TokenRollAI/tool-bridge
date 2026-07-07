@@ -25,14 +25,14 @@ describe('builtin secret 模块', () => {
     mod = createSecretModule(new SecretStoreImpl(store, makeMasterKey()), () => NOW)
   })
 
-  it('help() 只含 set/list/delete(resolve 不暴露为 cmd)且 scope=admin(Proto §2.5)', () => {
+  it('help() 只含 set/list/delete(resolve 不暴露为 cmd)且 scope=admin', () => {
     const help = mod.help('system/secret')
     expect(help.cmds.map((c) => c.name).sort()).toEqual(['delete', 'list', 'set'])
     expect(help.cmds.some((c) => c.name === 'resolve')).toBe(false)
     expect(help.cmds.every((c) => c.scope === 'admin')).toBe(true)
   })
 
-  it('set 返回不回显 value;set → list 只见 name + updatedAt;落盘不含明文(§2.5 只进不出)', async () => {
+  it('set 返回不回显 value;set → list 只见 name + updatedAt;落盘不含明文(只进不出)', async () => {
     const SECRET_VALUE = 'super-secret-upstream-token-42'
     const ack = await mod.dispatch('set', { name: 'ctx7', value: SECRET_VALUE }, ctx)
     expect(JSON.stringify(ack)).not.toContain(SECRET_VALUE)
@@ -61,7 +61,7 @@ describe('builtin secret 模块', () => {
     )
   })
 
-  it("含 ':' 的 name(平台保留命名空间)set/delete 一律拒(Proto §8.1 plugin-token:<id>)", async () => {
+  it("含 ':' 的 name(平台保留命名空间)set/delete 一律拒(plugin-token:<id>)", async () => {
     await expect(
       mod.dispatch('set', { name: 'plugin-token:demo', value: 'v' }, ctx),
     ).rejects.toSatisfy((e) => isTBError(e) && e.code === 'invalid_argument')
@@ -70,7 +70,7 @@ describe('builtin secret 模块', () => {
     )
   })
 
-  it('未配置主密钥时 set → unavailable(Proto §2.5;DOD.md:55)', async () => {
+  it('未配置主密钥时 set → unavailable', async () => {
     const disabled = createSecretModule(new SecretStoreImpl(store, undefined), () => NOW)
     await expect(disabled.dispatch('set', { name: 'k', value: 'v' }, ctx)).rejects.toSatisfy(
       (e) => isTBError(e) && e.code === 'unavailable',

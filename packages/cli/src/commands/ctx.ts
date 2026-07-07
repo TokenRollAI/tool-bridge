@@ -8,8 +8,8 @@ import { deleteNode, registerNode } from '../registry'
 import type { ContextEntry, ContextEntryMeta, NodeConfig, NodeInput, Page } from '../types'
 
 /**
- * `tb ctx *` —— Context Layer 命令族(Proto 附A / §5)。
- * 数据面四动词 + Search 走 `POST /<ns>` `{tool,arguments}`(cmd 名首字母大写,§1.3);
+ * `tb ctx *` —— Context Layer 命令族。
+ * 数据面四动词 + Search 走 `POST /<ns>` `{tool,arguments}`(cmd 名首字母大写);
  * mount/unmount 与 tool.ts 同通道:`~register` 注册 / 管理面 `system/registry` delete。
  */
 
@@ -88,7 +88,7 @@ function printEntries(page: Page<ContextEntryMeta>): void {
   if (page.cursor) printLine(`next cursor: ${page.cursor}`)
 }
 
-/** `tb ctx ls <ns> [prefix]` —— 浅层列表(ContextProvider.List,§5.1)。 */
+/** `tb ctx ls <ns> [prefix]` —— 浅层列表(ContextProvider.List)。 */
 export const ctxLsCommand = defineCommand({
   meta: { name: 'ls', description: 'List entries in a context namespace' },
   args: {
@@ -122,7 +122,7 @@ export const ctxLsCommand = defineCommand({
   },
 })
 
-/** `tb ctx cat <ns> <entry>` —— 读取 entry(ContextProvider.Get,§5.1)。 */
+/** `tb ctx cat <ns> <entry>` —— 读取 entry(ContextProvider.Get)。 */
 export const ctxCatCommand = defineCommand({
   meta: { name: 'cat', description: 'Print a context entry' },
   args: {
@@ -149,7 +149,7 @@ export const ctxCatCommand = defineCommand({
       if (typeof content === 'string') {
         printLine(content.replace(/\n$/, ''))
       } else if (content && typeof content === 'object' && '$ref' in content) {
-        // 大对象:content = { $ref: <预签名 URL> }(Proto §5.1)。
+        // 大对象:content = { $ref: <预签名 URL> }。
         process.stderr.write('large object, download via URL\n')
         printLine(String((content as { $ref: unknown }).$ref))
       } else {
@@ -159,7 +159,7 @@ export const ctxCatCommand = defineCommand({
   },
 })
 
-/** `tb ctx put <ns> <entry>` —— 创建/整体替换(ContextProvider.Write,幂等 upsert,§5.1)。 */
+/** `tb ctx put <ns> <entry>` —— 创建/整体替换(ContextProvider.Write,幂等 upsert)。 */
 export const ctxPutCommand = defineCommand({
   meta: { name: 'put', description: 'Write (create or replace) a context entry' },
   args: {
@@ -206,7 +206,7 @@ export const ctxPutCommand = defineCommand({
   },
 })
 
-/** `tb ctx patch <ns> <entry>` —— 部分更新(ContextProvider.Update,不存在 → not_found,§5.1)。 */
+/** `tb ctx patch <ns> <entry>` —— 部分更新(ContextProvider.Update,不存在 → not_found)。 */
 export const ctxPatchCommand = defineCommand({
   meta: { name: 'patch', description: 'Update content and/or metadata of a context entry' },
   args: {
@@ -248,7 +248,7 @@ export const ctxPatchCommand = defineCommand({
   },
 })
 
-/** `tb ctx search <ns> <query>` —— 检索(ContextProvider.Search,可选能力,§5.1)。 */
+/** `tb ctx search <ns> <query>` —— 检索(ContextProvider.Search,可选能力)。 */
 export const ctxSearchCommand = defineCommand({
   meta: { name: 'search', description: 'Search entries in a context namespace' },
   args: {
@@ -288,7 +288,7 @@ export const ctxSearchCommand = defineCommand({
 
 /**
  * `tb ctx mount <path> --provider r2|s3` —— 挂载 context namespace
- * (NodeRegistry.Write{kind:'context'} via ~register,§5.3;tool.ts mount 同通道)。
+ * (NodeRegistry.Write{kind:'context'} via ~register;tool.ts mount 同通道)。
  * providerConfig:r2 `{prefix?}`;s3 `{endpoint,bucket,region?,prefix?}` 且 --auth-ref 必填。
  */
 export const ctxMountCommand = defineCommand({
@@ -357,7 +357,7 @@ export const ctxMountCommand = defineCommand({
   },
 })
 
-/** `tb ctx unmount <path>` —— 卸载 context 节点(管理面 system/registry delete,§3.3)。 */
+/** `tb ctx unmount <path>` —— 卸载 context 节点(管理面 system/registry delete)。 */
 export const ctxUnmountCommand = defineCommand({
   meta: { name: 'unmount', description: 'Unmount a context namespace' },
   args: {

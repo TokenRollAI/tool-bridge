@@ -1,8 +1,8 @@
 /**
- * context 节点的静态 ~help 模型与 cmd→scope 表(Proto §1.3/§2.2)。
+ * context 节点的静态 ~help 模型与 cmd→scope 表。
  *
- * cmd 名 = 接口方法名首字母大写(Proto §1.3;仅 system/* builtin 小写);
- * List/Get/Search = read,Write/Update/Delete = write(Proto §2.2 规范性)。
+ * cmd 名 = 接口方法名首字母大写(仅 system/* builtin 小写);
+ * List/Get/Search = read,Write/Update/Delete = write(规范性)。
  * cmd 表静态声明(区别于 mcp/http 的上游发现);readOnly 挂载隐藏三个写动词(决策 D11)。
  */
 
@@ -10,7 +10,7 @@ import { cmdPath } from '../builtin/util'
 import type { CmdSpec, HelpModel } from '../htbp/model'
 import type { TreePath } from '../types'
 
-/** ~describe 声明的可选能力(Proto §5.1:本实现提供 Search 与 Delete)。 */
+/** ~describe 声明的可选能力(本实现提供 Search 与 Delete)。 */
 export const CONTEXT_CAPABILITIES: readonly string[] = ['search', 'delete']
 
 const SCOPE_BY_CMD: Record<string, 'read' | 'write'> = {

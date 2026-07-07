@@ -1,5 +1,5 @@
 /**
- * 吊销传播验收(Proto §2.3、DOD Phase 1):对已部署的 TB_BASE_URL 端到端验证
+ * 吊销传播验收:对已部署的 TB_BASE_URL 端到端验证
  * SK 吊销后请求被拒(401),并测量传播耗时(CF KV 最终一致,上限窗口 60s)。
  *
  * 流程:用 admin SK 经 system/sk 签发一把临时 SK(仅 read scope)→ 确认其可用(~help 200)

@@ -1,5 +1,5 @@
 /**
- * `~tree` 深度受限树视图的构建(Proto §1.1、§1.3 TreeJson)。
+ * `~tree` 深度受限树视图的构建(TreeJson)。
  *
  * 纯逻辑:节点数据经注入的 `getChildren` 拉取(宿主对接 NodeRegistry + 可见性裁剪)。
  * 约束:默认 depth=2、上限 8;节点上限默认 500;深度到底 / 超节点上限 / 环 → `truncated:true`。
@@ -7,15 +7,15 @@
 
 import type { NodeKind, TreePath } from '../types'
 
-/** `~tree` 深度默认值(Proto §1.1)。 */
+/** `~tree` 深度默认值。 */
 export const DEFAULT_TREE_DEPTH = 2
-/** `~tree` 深度上限(Proto §1.1)。 */
+/** `~tree` 深度上限。 */
 export const MAX_TREE_DEPTH = 8
-/** 树节点总数上限(Proto §1.1);超限则该节点 `truncated`。 */
+/** 树节点总数上限;超限则该节点 `truncated`。 */
 export const DEFAULT_MAX_NODES = 500
 
 /**
- * 钳制 depth(Proto §1.1):默认 2、上限 8。
+ * 钳制 depth:默认 2、上限 8。
  * undefined / 非整数 / < 1 视为非法 → 默认 2;> 8 → 8。
  */
 export function clampDepth(depth: number | undefined): number {
@@ -33,7 +33,7 @@ export interface TreeEntry {
   online?: boolean
 }
 
-/** `~tree` 响应形状(Proto §1.3,规范性);递归。 */
+/** `~tree` 响应形状(规范性);递归。 */
 export interface TreeJson {
   path: TreePath
   kind: NodeKind
@@ -60,12 +60,12 @@ export interface BuildTreeOpts {
 }
 
 /**
- * 构建受限深度树(Proto §1.1)。
+ * 构建受限深度树。
  *
  * 语义:根为 depthLeft=depth;每下一层 depthLeft-1;depthLeft<=0 时不再展开,
  * 若该节点确有子节点则标 `truncated`。节点计数达 `maxNodes` → 停止展开并标父节点
  * `truncated`。环检测用 visited Set:子节点路径已在集合中 → 作为 `truncated` 叶子收入、不递归
- * (本地树理论无环,此为防 provider 异常,见 Proto §1.1)。
+ * (本地树理论无环,此为防 provider 异常)。
  *
  * 根节点自身元数据:优先用 `opts.rootEntry`(网关传真实节点的 kind/description/online);
  * 缺省回退 `kind:'directory'`、`description:''`。

@@ -1,9 +1,9 @@
 /**
- * Context entry 路径规范化与穿越拒绝(Proto §5.2 规范性:解析后必须仍在根内)。
+ * Context entry 路径规范化与穿越拒绝(规范性:解析后必须仍在根内)。
  *
  * entry 路径是 namespace 内的相对路径('/' 分隔),与树路径(tree/path.ts)是两套
- * 规则:树路径拒绝保留段,entry 路径拒绝穿越。实现在 core,r2/s3(Phase 3)与
- * file provider(Phase 4/6)复用同一份判定(DOD.md Phase 3)。
+ * 规则:树路径拒绝保留段,entry 路径拒绝穿越。实现在 core,r2/s3 与
+ * file provider 复用同一份判定。
  */
 
 import { TBError } from '../errors'

@@ -1,7 +1,7 @@
 import { CliError } from './http'
 
 /**
- * SK Scope 与动作(Proto §2.2,行 177-197)。CLI 本地镜像线格式,不依赖 core。
+ * SK Scope 与动作。CLI 本地镜像线格式,不依赖 core。
  */
 export type Action = 'read' | 'write' | 'call' | 'register' | 'admin'
 

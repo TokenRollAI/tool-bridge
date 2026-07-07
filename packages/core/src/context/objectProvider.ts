@@ -1,9 +1,9 @@
 /**
- * 通用对象存储 ContextProvider(Proto §5.1 四动词 + Search/Delete)。
+ * 通用对象存储 ContextProvider(四动词 + Search/Delete)。
  *
  * 全部动词语义(幂等 Write / Update not_found / ifVersion conflict / readOnly 拒写 /
- * $ref 阈值判定 / keyword Search)集中在此——r2、s3(Phase 3)与 file(Phase 4/6)
- * 只提供 ObjectStore 适配,不各自复刻语义。version = 对象 etag(Proto §5.2)。
+ * $ref 阈值判定 / keyword Search)集中在此——r2、s3 与 file
+ * 只提供 ObjectStore 适配,不各自复刻语义。version = 对象 etag。
  */
 
 import { TBError } from '../errors'
@@ -22,13 +22,13 @@ import type {
   SearchOptions,
 } from './types'
 
-/** $ref 内联阈值缺省 1 MiB(DOD.md Phase 3;Proto §5.1 只说"大对象")。 */
+/** $ref 内联阈值缺省 1 MiB(只针对"大对象")。 */
 export const REF_THRESHOLD_BYTES_DEFAULT = 1024 * 1024
 /** presign URL 有效期缺省 15 分钟。 */
 export const PRESIGN_TTL_SEC_DEFAULT = 900
 
 /**
- * Search 单次调用经 head 补取 metadata 的次数上限(Proto §5.2:keyword 须匹配
+ * Search 单次调用经 head 补取 metadata 的次数上限(keyword 须匹配
  * metadata 值,但 S3 ListObjectsV2 不返回用户 metadata,须逐对象 HEAD 补取)。
  * Workers 付费计划子请求上限 ~1000/请求(guides/workers-kv-pitfalls.md),取 200 留余量;
  * 预算耗尽后剩余候选只按路径名匹配(边界:超大 namespace 下 metadata 召回不保证完备)。
@@ -43,7 +43,7 @@ export interface ObjectContextProviderOptions {
   nsPath: TreePath
   /** 对象 key 前缀(多 namespace 共桶隔离);不参与 uri 与 entry 路径。 */
   keyPrefix?: string
-  /** readOnly 挂载:Write/Update/Delete → permission_denied(Proto §5.3)。 */
+  /** readOnly 挂载:Write/Update/Delete → permission_denied。 */
   readOnly?: boolean
   /** 内联上限(字节):超过或非文本 contentType 走 $ref;缺省 1 MiB。 */
   refThresholdBytes?: number
@@ -59,7 +59,7 @@ export type ObjectContextProvider = ContextProvider & {
   Delete: NonNullable<ContextProvider['Delete']>
 }
 
-/** limit 缺省 50、超上限 200 静默钳制(Proto §0.3);非正整数拒绝。 */
+/** limit 缺省 50、超上限 200 静默钳制;非正整数拒绝。 */
 function clampLimit(limit: number | undefined): number {
   if (limit === undefined) return LIST_LIMIT_DEFAULT
   if (!Number.isInteger(limit) || limit < 1) {
@@ -68,10 +68,10 @@ function clampLimit(limit: number | undefined): number {
   return Math.min(limit, LIST_LIMIT_MAX)
 }
 
-/** List/Search 未声明任何 filter 键(Proto §0.3:未声明的键 → invalid_argument)。 */
+/** List/Search 未声明任何 filter 键(未声明的键 → invalid_argument)。 */
 function rejectFilter(opts: ListOptions | undefined): void {
   if (opts?.filter && Object.keys(opts.filter).length > 0) {
-    throw new TBError('invalid_argument', 'List/Search 未声明任何 filter 键(Proto §0.3)')
+    throw new TBError('invalid_argument', 'List/Search 未声明任何 filter 键')
   }
 }
 
@@ -125,7 +125,7 @@ export function createObjectContextProvider(
 
   const assertWritable = (verb: string): void => {
     if (readOnly) {
-      throw new TBError('permission_denied', `readOnly 挂载拒绝 ${verb}(Proto §5.3)`)
+      throw new TBError('permission_denied', `readOnly 挂载拒绝 ${verb}`)
     }
   }
 
@@ -235,10 +235,7 @@ export function createObjectContextProvider(
     async Search(query: string, searchOpts?: SearchOptions): Promise<Page<ContextEntryMeta>> {
       const mode = searchOpts?.mode ?? 'keyword'
       if (mode === 'semantic') {
-        throw new TBError(
-          'invalid_argument',
-          "semantic 检索未声明('search:semantic' capability,Proto §5.1)",
-        )
+        throw new TBError('invalid_argument', "semantic 检索未声明('search:semantic' capability)")
       }
       if (mode !== 'keyword') {
         throw new TBError('invalid_argument', `未知 search mode:'${mode}'`)

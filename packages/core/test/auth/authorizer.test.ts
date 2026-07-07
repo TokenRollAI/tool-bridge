@@ -9,7 +9,7 @@ const ctxWith = (scopes: Scope[]): CallContext => ({
   traceId: 't1',
 })
 
-describe('check(Authorizer 纯 scope 判定包装,Proto §2.3)', () => {
+describe('check(Authorizer 纯 scope 判定包装)', () => {
   it('scope 允许 → { allow: true }', () => {
     const ctx = ctxWith([{ pattern: '**', actions: ['read'] }])
     expect(check(ctx, 'docs/x', 'read')).toEqual({ allow: true })

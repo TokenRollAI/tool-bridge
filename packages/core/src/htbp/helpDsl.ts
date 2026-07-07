@@ -1,10 +1,10 @@
 /**
- * Help DSL / Help JSON 的渲染与最小解析(Proto §1.3)。
+ * Help DSL / Help JSON 的渲染与最小解析。
  *
- * 两个渲染器都只吃同一个 HelpModel(model.ts),这是 DSL↔JSON 语义等价的保证
- * (DOD.md:53)。parseHelpDsl 是消费侧的最小 parser:只回收断言所需字段
+ * 两个渲染器都只吃同一个 HelpModel(model.ts),这是 DSL↔JSON 语义等价的保证。
+ * parseHelpDsl 是消费侧的最小 parser:只回收断言所需字段
  * (htbp 版本、cmd 的 name/method/path/scope、node 三元组),未知行一律忽略
- * (Proto §1.3:消费方对未知行必须忽略 = 向前兼容)。
+ * (消费方对未知行必须忽略 = 向前兼容)。
  */
 
 import { HTBP_HELP_HEADER, HTBP_VERSION } from '../version'
@@ -15,18 +15,18 @@ function displayPath(path: string): string {
   return path === '' || path === '/' ? '/' : path
 }
 
-/** 一行 `node <path> <kind> "<description>"`(description 假定不含双引号,Phase 1 不转义)。 */
+/** 一行 `node <path> <kind> "<description>"`(description 假定不含双引号,当前不转义)。 */
 function nodeLine(path: string, kind: string, description: string): string {
   return `node ${displayPath(path)} ${kind} "${description}"`
 }
 
 /**
- * 渲染 Help DSL(Proto §1.3):
+ * 渲染 Help DSL:
  *   首行 `htbp 0.1`;`node` 行;每 cmd 一行 `cmd <name> POST <path>` +
- *   缩进的 `h`/`body`/`returns`/`scope`/`effect`/`confirm`(此顺序,Proto §1.3);directory 的 children 续为 `node` 行。
+ *   缩进的 `h`/`body`/`returns`/`scope`/`effect`/`confirm`(此顺序);directory 的 children 续为 `node` 行。
  * `scope` 恒有;`h`/`inputSchema`/`returns`/`effect` 有值才渲染;`confirm` 仅在为真时渲染(其缺席即默认 false)。
  *
- * `body` 行是**请求信封示意**(Proto §1.3):由 cmd 的 `inputSchema`(arguments 的 JSON Schema)
+ * `body` 行是**请求信封示意**:由 cmd 的 `inputSchema`(arguments 的 JSON Schema)
  * 包成 `{ "tool": <name>, "arguments": <inputSchema> }` 单行紧凑 JSON——与 JSON 表现的
  * 裸 `inputSchema` 语义等价、结构表现不同。
  */
@@ -53,7 +53,7 @@ export function renderHelpDsl(model: HelpModel): string {
 }
 
 /**
- * 渲染 Help JSON(Proto §1.3,规范性)——与 DSL 语义等价、字段不多不少。
+ * 渲染 Help JSON(规范性)——与 DSL 语义等价、字段不多不少。
  * `inputSchema`/`returns`/`effect` 仅在有值时出现;`confirm` 仅在为真时出现(与 DSL 的存在性对齐)。
  * 注:JSON 的 `cmds[].inputSchema` 是 arguments 的裸 JSON Schema(不含信封);DSL 的 `body` 行
  * 才把它包成请求信封示意。JSON 的 `node.path`/`children[].path` 承载原始 TreePath(根为空串)。
@@ -88,7 +88,7 @@ export function renderHelpJson(model: HelpModel): HelpJson {
   return json
 }
 
-/** parseHelpDsl 的产物:断言所需的最小字段集(Proto §1.3 向前兼容:未知行忽略)。 */
+/** parseHelpDsl 的产物:断言所需的最小字段集(向前兼容:未知行忽略)。 */
 export interface ParsedHelp {
   htbp: string
   cmds: Array<{ name: string; method: string; path: string; scope?: string }>
@@ -101,7 +101,7 @@ const CMD_RE = /^cmd\s+(\S+)\s+(\S+)\s+(\S+)\s*$/
 const SCOPE_RE = /^\s+scope\s+(\S+)\s*$/
 
 /**
- * 最小 DSL parser(DOD Phase 2:70 用于断言等价性)。
+ * 最小 DSL parser(用于断言等价性)。
  * 逐行匹配 header / node / cmd / scope;`scope` 行归属最近的 cmd;其余行(body/returns/
  * effect/confirm 及任何未知行)一律忽略。容忍 CRLF 行尾。
  */

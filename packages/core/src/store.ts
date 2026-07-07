@@ -1,15 +1,15 @@
 /**
- * StateStore:宿主注入的状态存储接口(Proto §7)。
+ * StateStore:宿主注入的状态存储接口。
  *
  * CF = KV / Docker = SQLite / SDK 内嵌 = 内存。core 只依赖此接口;
  * 一切树配置、SK 哈希表、加密 secret 都经它读写。异步签名以兼容 KV。
  *
- * key 布局(Architecture「storage」节,Phase 1 定型):
+ * key 布局:
  *   sk:h:<sha256hex>  → SecretKey(认证热路径)
  *   sk:i:<id>         → sha256hex(管理面二级索引,指向 sk:h:*)
  *   node:<path>       → TreeNode
  *   secret:<name>     → { iv, ciphertext, updatedAt }
- *   plugin:<id>       → PluginManifest(Phase 5)
+ *   plugin:<id>       → PluginManifest
  *   sys:bootstrapped  → true(Admin SK 引导幂等标志)
  */
 
@@ -28,9 +28,9 @@ export const KEY_SK_ID = 'sk:i:'
 export const KEY_NODE = 'node:'
 export const KEY_SECRET = 'secret:'
 export const KEY_PLUGIN = 'plugin:'
-/** 按需探活的健康态(Proto §8.2 注记):{ healthy, checkedAt, consecutiveFailures }。 */
+/** 按需探活的健康态:{ healthy, checkedAt, consecutiveFailures }。 */
 export const KEY_PLUGIN_HEALTH = 'pluginhealth:'
-/** 注册时抓取的 ~describe 缓存(Proto §8.2 注记):挂载节点 ~describe/~help 的能力来源。 */
+/** 注册时抓取的 ~describe 缓存:挂载节点 ~describe/~help 的能力来源。 */
 export const KEY_PLUGIN_META = 'pluginmeta:'
 export const KEY_BOOTSTRAPPED = 'sys:bootstrapped'
 

@@ -1,5 +1,5 @@
 /**
- * SDK 集成测试(DoD ② 前半,DOD.md:105):createToolBridge + registerTool(本地函数工具)
+ * SDK 集成测试:createToolBridge + registerTool(本地函数工具)
  * → @hono/node-server 起本地 HTTP → ~help 可见工具、POST 调用成功;registerContext 同理;
  * secret 禁用语义;reservedRoots 生效。
  *
@@ -202,7 +202,7 @@ describe('createToolBridge:本地 HTTP(@hono/node-server)', () => {
     })
     expect(update.status).toBe(200)
 
-    // Delete 未实现 → capability 未声明,unknown cmd 拒(Proto §8.2 同口径)。
+    // Delete 未实现 → capability 未声明,unknown cmd 拒。
     const del = await call(h, 'notes', {
       method: 'POST',
       body: JSON.stringify({ tool: 'Delete', arguments: { path: 'a.md' } }),
@@ -265,7 +265,7 @@ describe('createToolBridge:本地 HTTP(@hono/node-server)', () => {
 
 describe('createToolBridge:配置语义', () => {
   it('secret 禁用语义:无主密钥 → set 返回 unavailable', async () => {
-    // Proto §7:config.encryptionKey 与 env TB_SECRET_ENCRYPTION_KEY 皆无才禁用——
+    // config.encryptionKey 与 env TB_SECRET_ENCRYPTION_KEY 皆无才禁用——
     // 隔离宿主 env(本机 .env 可能带该变量),否则测试会命中 env 回退。
     vi.stubEnv('TB_SECRET_ENCRYPTION_KEY', undefined)
     try {
@@ -295,7 +295,7 @@ describe('createToolBridge:配置语义', () => {
       adminSk: ADMIN_SK,
       reservedRoots: ['corp'],
     })
-    // admin 无 registerPaths → §2.4b:保留根(含追加)下注册一律拒。
+    // admin 无 registerPaths → 保留根(含追加)下注册一律拒。
     const res = await tb.fetch(
       new Request('http://tb.local/corp/x/~register', {
         method: 'POST',

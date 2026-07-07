@@ -17,9 +17,9 @@ export interface Env {
   TB_R2: R2Bucket
   TB_SECRET_ENCRYPTION_KEY?: string
   TB_BOOTSTRAP_ADMIN_SK?: string
-  /** 放行 http:// 上游(仅本地开发,Proto §4.2)。 */
+  /** 放行 http:// 上游(仅本地开发)。 */
   TB_ALLOW_INSECURE_HTTP?: string
-  /** remote baseUrl 的 host 后缀白名单(逗号分隔;空 = 拒一切 remote,Proto §3.4)。 */
+  /** remote baseUrl 的 host 后缀白名单(逗号分隔;空 = 拒一切 remote)。 */
   TB_REMOTE_ALLOWLIST?: string
   /** X-TB-Via 跳数上限(默认 4)。 */
   TB_MAX_HOPS?: string
@@ -30,16 +30,16 @@ export interface Env {
   /** r2 presign 的 S3 兼容端点(https://<account>.r2.cloudflarestorage.com)与 bucket。 */
   TB_R2_S3_ENDPOINT?: string
   TB_R2_BUCKET?: string
-  /** r2 presign 凭证链的 env 段(SecretStore 'r2-presign' 优先,Proto §5.2)。 */
+  /** r2 presign 凭证链的 env 段(SecretStore 'r2-presign' 优先)。 */
   TB_R2_ACCESS_KEY_ID?: string
   TB_R2_SECRET_ACCESS_KEY?: string
   /** context Get 的 $ref 内联阈值(字节,缺省 1 MiB)。 */
   TB_REF_THRESHOLD_BYTES?: string
   /** $ref URL(presign 与 /~ref 中转)有效期秒(缺省 900)。 */
   TB_REF_TTL_SEC?: string
-  /** DeviceSession Durable Object(Phase 4 设备 WS hibernation)。 */
+  /** DeviceSession Durable Object(设备 WS hibernation)。 */
   TB_DEVICE: DurableObjectNamespace<DeviceSession>
-  /** Dashboard 静态资源(Workers Static Assets,M9;本地测试/未部署 UI 时可缺省)。 */
+  /** Dashboard 静态资源(Workers Static Assets;本地测试/未部署 UI 时可缺省)。 */
   ASSETS?: Fetcher
   /** 设备断线后未重连的回收秒数(缺省 24h)。 */
   TB_DEVICE_RECLAIM_SEC?: string
@@ -83,7 +83,7 @@ function positiveIntEnv(value: string | undefined): number | undefined {
 }
 
 /**
- * r2 presign 凭证链(Proto §5.2,按序):SecretStore 保留名 'r2-presign' →
+ * r2 presign 凭证链(按序):SecretStore 保留名 'r2-presign' →
  * env TB_R2_ACCESS_KEY_ID/TB_R2_SECRET_ACCESS_KEY → 均缺则 undefined($ref 走 /~ref 中转)。
  * endpoint/bucket 亦缺则无从 presign。
  */
@@ -109,7 +109,7 @@ async function r2PresignCredentials(
   return undefined
 }
 
-/** Env → TbAppDeps(Workers 宿主适配:KV/R2/DO/Static Assets → Proto §7 四注入点)。 */
+/** Env → TbAppDeps(Workers 宿主适配:KV/R2/DO/Static Assets → 四注入点)。 */
 function depsFromEnv(env: Env): TbAppDeps {
   const state: StateStore = new KvStateStore(env.TB_KV)
   const secrets = new SecretStoreImpl(state, env.TB_SECRET_ENCRYPTION_KEY)

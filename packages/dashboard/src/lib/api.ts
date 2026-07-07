@@ -1,6 +1,6 @@
 import type { HelpJson, TBErrorBody, TreeJson } from './types'
 
-/** TBError 线上形状的客户端异常(Proto §0.2:{code,message,retryable} + HTTP 状态)。 */
+/** TBError 线上形状的客户端异常({code,message,retryable} + HTTP 状态)。 */
 export class ApiError extends Error {
   readonly code: TBErrorBody['code'] | 'network'
   readonly status: number
@@ -87,7 +87,7 @@ export interface InvokeResult {
 }
 
 /**
- * POST /<path> {tool, arguments} 数据面调用(Proto §1.2)。
+ * POST /<path> {tool, arguments} 数据面调用。
  * accept 'json' 拿结构化返回,'markdown' 拿默认 markdown 表现。
  */
 export async function invoke(

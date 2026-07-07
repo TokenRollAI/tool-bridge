@@ -7,8 +7,8 @@ import type { StatusView } from '../types'
 /**
  * `tb whoami` —— 呈现当前"配置态 + 可达性"。
  *
- * 偏差说明:Proto 附A 列了 whoami,但网关无专门 whoami 端点(SKRegistry 需 admin,
- * 不能反查自身身份)。故按 team-lead 约定用"配置态 + 可达性"呈现:
+ * 网关无专门 whoami 端点(SKRegistry 需 admin,不能反查自身身份),
+ * 故用"配置态 + 可达性"呈现:
  * - 显示配置的 baseUrl 与打码 SK;
  * - `GET /~help` 探可达/认证(401 = SK 被拒,其它 = 已认证);
  * - 若能调 `system/status get` 则附健康摘要(失败静默忽略)。

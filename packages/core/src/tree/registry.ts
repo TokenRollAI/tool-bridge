@@ -1,10 +1,10 @@
 /**
- * NodeRegistry 纯逻辑实现(Proto §3.3)。
+ * NodeRegistry 纯逻辑实现。
  *
  * 以注入的 {@link StateStore} 为后端(key = `node:<path>`)。core 不做 I/O 策略,
  * 存储批量成本(全量 scan)由宿主实现承担;判定/物化/回收全在本层完成。
  *
- * 权限判定(register / read + §2.4 路径规则)不在此——那是网关中间件的事;
+ * 权限判定(register / read + 反向注册路径规则)不在此——那是网关中间件的事;
  * 本类只负责数据结构语义:幂等 upsert、中间 directory 自动物化与级联回收、
  * 最长前缀 resolve、按段前缀 list。
  */
@@ -24,19 +24,19 @@ import {
 } from '../types'
 import { isPrefixOf, normalizePath, parentPaths, segments, validatePath } from './path'
 
-/** limit 钳制:缺省 50、上限 200 静默钳制、非正数回落默认(Proto §0.3)。 */
+/** limit 钳制:缺省 50、上限 200 静默钳制、非正数回落默认。 */
 function clampLimit(limit?: number): number {
   if (limit === undefined || limit < 1) return LIST_LIMIT_DEFAULT
   return limit > LIST_LIMIT_MAX ? LIST_LIMIT_MAX : limit
 }
 
-/** config 存在时,其 kind 必须与节点 kind 一致(Proto §3.2)。 */
+/** config 存在时,其 kind 必须与节点 kind 一致。 */
 function assertKindConfig(node: Pick<NodeInput, 'kind' | 'config'>): void {
   if (node.config === undefined) return
   if (node.config.kind !== node.kind) {
     throw new TBError(
       'invalid_argument',
-      `kind='${node.kind}' 与 config.kind='${node.config.kind}' 不一致(Proto §3.2)`,
+      `kind='${node.kind}' 与 config.kind='${node.config.kind}' 不一致`,
     )
   }
 }
@@ -69,7 +69,7 @@ export class NodeRegistryStore {
    *
    * **Workers 子请求上限约束**:KvStateStore.list 对每个键各发一次 `get`,即翻页取到的每个
    * 键消耗一次 Workers 子请求(免费套餐 50 / 付费 1000,含出站 fetch 与 KV 读)。故子树规模
-   * (含中间 directory)应远小于该上限——Phase 1 树规模小(节点数十级)可接受;规模变大后
+   * (含中间 directory)应远小于该上限——当前树规模小(节点数十级)可接受;规模变大后
    * 需改 KV metadata 承载值(list 不再逐 get)或换 SQLite 宿主。
    */
   private async scanPrefix(keyPrefix: string, opts?: { limit?: number }): Promise<TreeNode[]> {
@@ -98,7 +98,7 @@ export class NodeRegistryStore {
     return page.items.length > 0
   }
 
-  /** 取单个;不存在 → not_found(Proto §0.4)。 */
+  /** 取单个;不存在 → not_found。 */
   async get(path: TreePath): Promise<TreeNode> {
     const norm = normalizePath(path)
     const node = await this.read(norm)
@@ -147,14 +147,14 @@ export class NodeRegistryStore {
   }
 
   /**
-   * 幂等 upsert(Proto §0.4 / §3.3):
+   * 幂等 upsert:
    * - 校验路径(空/空段/保留段)与 kind↔config 一致性;
    * - 自动物化 parentPaths 中缺失的中间 directory(registeredBy=system:auto,description='');
    *   已存在的祖先(无论显式或自动)一律不动;
    * - createdAt 保留原值(存在时)否则取 now;updatedAt 始终刷新为 now;
    * - registeredBy 由调用方注入(device 节点由 Gateway 代写)。
    *
-   * §2.4d 的 conflict(覆盖他人节点)判定在网关注册路径层,不在此——本层是幂等 upsert。
+   * conflict(覆盖他人节点)判定在网关注册路径层,不在此——本层是幂等 upsert。
    */
   async write(
     node: NodeInput,
@@ -197,13 +197,13 @@ export class NodeRegistryStore {
     return full
   }
 
-  /** 部分更新(patch);不存在 → not_found;path 不可改(Proto §0.4)。 */
+  /** 部分更新(patch);不存在 → not_found;path 不可改。 */
   async update(path: TreePath, patch: Partial<NodeInput>, now: Timestamp): Promise<TreeNode> {
     const norm = normalizePath(path)
     const existing = await this.read(norm)
     if (!existing) throw new TBError('not_found', `节点不存在:'${norm}'`)
     if (patch.path !== undefined && normalizePath(patch.path) !== norm) {
-      throw new TBError('invalid_argument', 'path 不可通过 Update 变更(Proto §0.4)')
+      throw new TBError('invalid_argument', 'path 不可通过 Update 变更')
     }
     const merged: TreeNode = {
       ...existing,
@@ -230,10 +230,10 @@ export class NodeRegistryStore {
   }
 
   /**
-   * 卸载(Proto §3.3);不存在 → not_found。删除后自底向上级联回收:
+   * 卸载;不存在 → not_found。删除后自底向上级联回收:
    * 仅回收 registeredBy=system:auto 且再无子节点的 directory,遇显式节点/仍有子节点即停。
    *
-   * 实现决策(Proto 未明写,待回写 docs):被删节点若仍有后代 → conflict
+   * 实现决策(待回写 docs):被删节点若仍有后代 → conflict
    * (不允许删除非空子树;显式 directory 同理)。
    */
   async delete(path: TreePath): Promise<void> {
@@ -273,7 +273,7 @@ export class NodeRegistryStore {
   }
 
   /**
-   * 最长前缀匹配(Proto §3.3):返回命中节点与剩余段('/' 连接)。
+   * 最长前缀匹配:返回命中节点与剩余段('/' 连接)。
    * 完全匹配 → rest=''。无任何匹配 → not_found。
    */
   async resolve(path: TreePath): Promise<{ node: TreeNode; rest: string }> {

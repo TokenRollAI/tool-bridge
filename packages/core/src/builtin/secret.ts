@@ -1,7 +1,7 @@
 /**
- * builtin 模块 "secret" → SecretStoreImpl(Proto §2.5;挂载为 system/secret 节点,需 admin)。
+ * builtin 模块 "secret" → SecretStoreImpl(挂载为 system/secret 节点,需 admin)。
  *
- * 只写不读(Proto §2.5):cmd 表只有 set/list/delete。`set` 返回不回显 value;
+ * 只写不读:cmd 表只有 set/list/delete。`set` 返回不回显 value;
  * `list` 只出 name + updatedAt;`resolve` 不出现在 cmd 表(仅供网关内部 Provider 解析引用名)。
  */
 
@@ -15,8 +15,8 @@ import { cmdPath, optListOptions, requireString, VOID_ACK } from './util'
 const DESCRIPTION = 'Upstream credential store: write-only (set / list / delete), admin only'
 
 /**
- * cmd 面的 name 守卫:含 ':' 的名字是平台内部保留命名空间(如 `plugin-token:<id>`,
- * Proto §8.1),节点面不得创建/删除——防止伪造或误删平台托管凭证。
+ * cmd 面的 name 守卫:含 ':' 的名字是平台内部保留命名空间(如 `plugin-token:<id>`),
+ * 节点面不得创建/删除——防止伪造或误删平台托管凭证。
  */
 function assertUserSecretName(name: string): void {
   if (name.includes(':')) {

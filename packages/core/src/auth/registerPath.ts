@@ -1,7 +1,7 @@
 /**
- * 反向注册路径规则(Proto §2.4,行 248-255,TB.md 注意 2/3)。
+ * 反向注册路径规则。
  *
- * 对 NodeRegistry.Write/Delete(含 ~register、WS 反向注册)在 §2.2 通用规则之上叠加:
+ * 对 NodeRegistry.Write/Delete(含 ~register、WS 反向注册)在通用 scope 规则之上叠加:
  *   a. 声明了 registerPaths → 目标须落在某前缀之下,否则 permission_denied;
  *   b. 未声明 registerPaths → 拒保留根(RESERVED_ROOTS + 部署追加)下的注册,其余放行;
  *   c. 两种情形都仍需 (path, 'register') scope 通过——registerPaths 是收紧,不是授权来源;

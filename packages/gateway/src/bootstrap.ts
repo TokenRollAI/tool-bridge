@@ -22,7 +22,7 @@ interface BootstrapEnv {
 }
 
 /**
- * Admin SK 引导 + 内置节点物化(Proto §2.3 Admin SK 引导、Arch:304 引导顺序)。
+ * Admin SK 引导 + 内置节点物化(先引导 Admin SK,再物化内置节点)。
  *
  * Workers 无启动钩子,故在首个请求时惰性执行;模块级 promise 防并发重入(单 isolate 内
  * 只跑一次真正的引导逻辑)。幂等标志 KEY_BOOTSTRAPPED 存在即整体跳过(E2E-1③ 重跑不重复
@@ -33,7 +33,7 @@ interface BootstrapEnv {
  * - 否则由 mintKey 生成随机明文。
  */
 
-/** 引导时注册的内置节点(system directory + 五个 builtin;plugin 自 Phase 5 加入,Arch:313)。 */
+/** 引导时注册的内置节点(system directory + 五个 builtin,含 plugin)。 */
 const BUILTIN_MODULES = ['sk', 'secret', 'registry', 'status', 'plugin'] as const
 
 const BUILTIN_DESCRIPTIONS: Record<string, string> = {
@@ -59,7 +59,7 @@ async function mintAdminWithPlaintext(
 }
 
 /**
- * 内置节点幂等 ensure(Q15,Phase 5 定型):已引导实例(幂等标志已置位)升级后也要
+ * 内置节点幂等 ensure(Q15):已引导实例(幂等标志已置位)升级后也要
  * 补挂新加入的内置节点(如 system/plugin)。只写缺失节点(get miss → write),
  * 不覆盖既有节点——避免每个 isolate 冷启动都重写 KV,也不动管理面改过的描述。
  */
@@ -145,9 +145,9 @@ export function buildDeps(opts: BuiltinAssemblyOpts): BuiltinDeps {
     secret: opts.secrets,
     registry: new NodeRegistryStore(opts.store),
     version: () => opts.version,
-    // registry 管理通道也走 §2.3 裁剪(list 裁剪 / get→not_found)。
+    // registry 管理通道也走可见性裁剪(list 裁剪 / get→not_found)。
     visibility: checkScopes,
-    // plugin 模块(Proto §8.1):探活/契约抓取的 I/O 回调在此注入,core 保持无 I/O。
+    // plugin 模块:探活/契约抓取的 I/O 回调在此注入,core 保持无 I/O。
     plugin: {
       store: opts.store,
       probe: probePlugin,

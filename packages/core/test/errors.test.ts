@@ -8,8 +8,8 @@ import {
   type TBErrorCode,
 } from '../src/index'
 
-describe('TBError ↔ HTTP 映射(Proto §0.2 七码表)', () => {
-  // 逐码断言规范映射(Proto.md:49)
+describe('TBError ↔ HTTP 映射(七码表)', () => {
+  // 逐码断言规范映射
   const cases: Array<[TBErrorCode, number]> = [
     ['not_found', 404],
     ['permission_denied', 403],
@@ -29,7 +29,7 @@ describe('TBError ↔ HTTP 映射(Proto §0.2 七码表)', () => {
   })
 })
 
-describe('retryable 约束(Proto §0.2:仅三码允许 true)', () => {
+describe('retryable 约束(仅三码允许 true)', () => {
   const allowed: TBErrorCode[] = ['rate_limited', 'unavailable', 'internal']
   const forbidden: TBErrorCode[] = [
     'not_found',
@@ -78,7 +78,7 @@ describe('特例工厂(401 / 501 / 503)', () => {
   })
 })
 
-describe('httpStatus 覆盖约束(Proto §0.2:仅两组偏离允许)', () => {
+describe('httpStatus 覆盖约束(仅两组偏离允许)', () => {
   it('(permission_denied, 401) 合法', () => {
     expect(new TBError('permission_denied', 'x', { httpStatus: 401 }).httpStatus).toBe(401)
   })

@@ -79,7 +79,7 @@ describe('mintKey / projectKey', () => {
   })
 })
 
-describe('adminBootstrapInput(Proto §2.3 Case 1)', () => {
+describe('adminBootstrapInput(Case 1)', () => {
   it('owner user:admin,全动作 ** scope', () => {
     const boot = adminBootstrapInput()
     expect(boot.owner).toBe('user:admin')
@@ -89,7 +89,7 @@ describe('adminBootstrapInput(Proto §2.3 Case 1)', () => {
   })
 })
 
-describe('isKeyActive(Proto §2.1:disabled / expiresAt 过期视同禁用)', () => {
+describe('isKeyActive(disabled / expiresAt 过期视同禁用)', () => {
   const base: SecretKey = {
     id: 'k',
     hash: 'h',
@@ -112,7 +112,7 @@ describe('isKeyActive(Proto §2.1:disabled / expiresAt 过期视同禁用)', () 
   })
 })
 
-describe('SKRegistryStore(Proto §2.3 SKRegistry 语义)', () => {
+describe('SKRegistryStore(SKRegistry 语义)', () => {
   let store: MemoryStateStore
   let reg: SKRegistryStore
 
@@ -206,7 +206,7 @@ describe('SKRegistryStore(Proto §2.3 SKRegistry 语义)', () => {
   })
 })
 
-describe('identify(mint→identify 往返,Proto §0.3 CallContext)', () => {
+describe('identify(mint→identify 往返,CallContext)', () => {
   let store: MemoryStateStore
   let reg: SKRegistryStore
 

@@ -1,5 +1,5 @@
 /**
- * `/~ref/<token>` 中转下载 token(Proto §5.2 中转下载路由,Phase 3 定型)。
+ * `/~ref/<token>` 中转下载 token(大对象中转下载路由)。
  *
  * token = base64url(JSON{p,k,exp}) + '.' + base64url(HMAC-SHA256(payload, 密钥))。
  * 密钥派生自 `TB_SECRET_ENCRYPTION_KEY`(信任根,env-only);语义与预签名 URL 对齐:

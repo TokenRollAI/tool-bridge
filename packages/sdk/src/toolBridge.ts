@@ -30,7 +30,7 @@ import type {
   ToolProviderLike,
 } from './types'
 
-/** SDK 进程内 Provider 的保留 provider id(Proto §3.2 注记;不经注册面,只由 SDK 落库)。 */
+/** SDK 进程内 Provider 的保留 provider id(不经注册面,只由 SDK 落库)。 */
 const LOCAL_PROVIDER_ID = '@local'
 
 /** SDK 代写节点的 registeredBy 标记(与 'system:boot'/'system:auto' 同一命名空间)。 */
@@ -42,7 +42,7 @@ type Registration =
   | { kind: 'tool'; path: TreePath; provider: ToolProviderLike; meta?: Partial<NodeInput> }
   | { kind: 'context'; path: TreePath; provider: ContextProvider; meta?: Partial<NodeInput> }
 
-/** Proto §6.1 实现注记:hostname 小写,非法路径段字符替换为 '-'(与 CLI 同规则,不持久化)。 */
+/** hostname 小写,非法路径段字符替换为 '-'(与 CLI 同规则,不持久化)。 */
 function normalizeDeviceId(input: string): string {
   const id = input
     .trim()
@@ -72,7 +72,7 @@ function cmdsOf(specs: Awaited<ReturnType<ToolProviderLike['List']>>): DeviceNod
   }))
 }
 
-/** 嵌入式运行一个 TB 实例(Proto §7)。 */
+/** 嵌入式运行一个 TB 实例。 */
 export function createToolBridge(config: ToolBridgeConfig): ToolBridge {
   const state = config.state
   const secrets =
@@ -156,14 +156,12 @@ export function createToolBridge(config: ToolBridgeConfig): ToolBridge {
   const encryptionKey = config.encryptionKey ?? process.env.TB_SECRET_ENCRYPTION_KEY
   if (encryptionKey !== undefined) deps.encryptionKey = encryptionKey
   if (config.deviceTransport !== undefined) {
-    throw TBError.unimplemented(
-      'deviceTransport 宿主注入(网关侧设备通道)属 Docker 宿主(Phase 6);本轮 SDK 未实现',
-    )
+    throw TBError.unimplemented('deviceTransport 宿主注入(网关侧设备通道)SDK 未实现')
   }
 
   const app = createTbApp(deps)
 
-  /** 缺省 expose:本实例注册的节点经 hello 帧 nodes+cmds 上报(Proto §6.3/§7)。 */
+  /** 缺省 expose:本实例注册的节点经 hello 帧 nodes+cmds 上报。 */
   const defaultExpose = async (): Promise<DeviceExpose> => {
     const nodes: DeviceNodeInput[] = []
     for (const reg of registrations.values()) {
@@ -194,7 +192,7 @@ export function createToolBridge(config: ToolBridgeConfig): ToolBridge {
     return { nodes }
   }
 
-  /** 设备侧 call 帧派发:path 相对 mountPath = 本实例注册路径(Proto §6.3)。 */
+  /** 设备侧 call 帧派发:path 相对 mountPath = 本实例注册路径。 */
   const handler = async (call: {
     path: string
     tool: string

@@ -16,7 +16,7 @@ async function prompt(question: string): Promise<string> {
 }
 
 /**
- * `tb login` —— 存 BaseURL + SK 到本地 profile(Proto 附A:纯本地,无服务端接口)。
+ * `tb login` —— 存 BaseURL + SK 到本地 profile(纯本地,无服务端接口)。
  *
  * 输入:`--base-url`/`--sk`(缺省则交互式提问);`--profile` 命名(默认 "default")。
  * 验证:`GET /~help` 带 Bearer——401 视为 SK 被拒;其它状态(含 403 无根读权但已认证)

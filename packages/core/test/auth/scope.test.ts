@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { checkScopes, matchGlob } from '../../src/auth/scope'
 import type { Action, Scope } from '../../src/types'
 
-describe('matchGlob(Proto §2.2 glob 语义:行 216)', () => {
+describe('matchGlob(glob 语义)', () => {
   describe('** 匹配任意层级(含零段)', () => {
     it.each(['', 'a', 'a/b', 'a/b/c/d'])('matchGlob("**", %o) === true', (path) => {
       expect(matchGlob('**', path)).toBe(true)
@@ -87,7 +87,7 @@ describe('matchGlob(Proto §2.2 glob 语义:行 216)', () => {
   })
 })
 
-describe('checkScopes(Proto §2.2 判定序:行 210-214)', () => {
+describe('checkScopes(判定序)', () => {
   const rule = (pattern: string, actions: Action[], effect?: 'allow' | 'deny'): Scope =>
     effect ? { pattern, actions, effect } : { pattern, actions }
 

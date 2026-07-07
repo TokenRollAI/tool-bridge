@@ -6,7 +6,7 @@ import {
 } from '../../src/device/helpModel'
 import { renderHelpDsl } from '../../src/htbp/helpDsl'
 
-describe('deviceShellHelpModel(Proto §6.3 shell 契约)', () => {
+describe('deviceShellHelpModel(shell 契约)', () => {
   it('单 cmd exec:effect destructive + confirm,scope call,签名与返回', () => {
     const model = deviceShellHelpModel('device/d1/shell', { allow: ['echo', 'git'] })
     expect(model.node).toEqual({

@@ -1,8 +1,8 @@
 /**
- * device 节点的静态 HelpModel(Proto §6.3;网关 helpModelFor 的 device 分支数据源)。
+ * device 节点的静态 HelpModel(网关 helpModelFor 的 device 分支数据源)。
  *
  * shell 节点:单 cmd `exec`,effect destructive + confirm,allow 白名单进 `h` 行;
- * fs 节点:复用 context 的静态 help(§5 file provider 语义,不复制 cmd 表);
+ * fs 节点:复用 context 的静态 help(file provider 语义,不复制 cmd 表);
  * directory(mountPath)节点:description 呈现 online 状态。
  */
 
@@ -14,7 +14,7 @@ import { describeAllow } from './shellAllow'
 
 const SHELL_DESCRIPTION = '设备 shell(远程命令执行)'
 
-/** `<mountPath>/shell` 工具节点的 ~help;h 行含 allow 白名单描述(Proto §6.3)。 */
+/** `<mountPath>/shell` 工具节点的 ~help;h 行含 allow 白名单描述。 */
 export function deviceShellHelpModel(
   nodePath: TreePath,
   shell: { description?: string; allow?: string[] } = {},
@@ -44,7 +44,7 @@ export function deviceShellHelpModel(
   }
 }
 
-/** `<mountPath>/fs` context 节点的 ~help:即 §5 file provider,复用 context 静态 help。 */
+/** `<mountPath>/fs` context 节点的 ~help:即 file provider,复用 context 静态 help。 */
 export function deviceFsHelpModel(
   node: { path: TreePath; description: string },
   opts: ContextHelpOptions = {},

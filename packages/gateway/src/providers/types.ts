@@ -1,7 +1,7 @@
 import type { ToolResult, ToolSpec } from '@tool-bridge/core'
 
 /**
- * gateway 侧的**异步**工具源(Proto §4.1)。
+ * gateway 侧的**异步**工具源。
  *
  * core 的 `ToolProvider` 是同步逻辑契约(纯逻辑内核不做 I/O);gateway 的 mcp/http 实现要发
  * 网络请求,故这里用返回 Promise 的等价形状。`List` 产出**虚拟化前**的上游原始 `ToolSpec[]`

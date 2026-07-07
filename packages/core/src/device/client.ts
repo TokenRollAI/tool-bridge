@@ -1,5 +1,5 @@
 /**
- * 设备侧状态机(Proto §6.2/§7 Connection;纯逻辑,WS 以最小接口注入,不依赖 ws 包)。
+ * 设备侧状态机(纯逻辑,WS 以最小接口注入,不依赖 ws 包)。
  *
  * 宿主胶水(CLI/SDK)负责建连与重连循环:每次 socket 打开调 socketOpened(自动重发
  * hello)、来消息调 socketMessage、断开调 socketClosed;state === 'reconnecting' 即

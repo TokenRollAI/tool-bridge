@@ -3,7 +3,7 @@ import { checkAllowlist, rewriteRemotePath } from '../../src/tool/remote'
 
 const base = 'https://peer.example.com/tb'
 
-describe('rewriteRemotePath(Proto §3.4 透传改写)', () => {
+describe('rewriteRemotePath(透传改写)', () => {
   it('节点根:请求 path === 挂载前缀 → baseUrl 本身', () => {
     expect(rewriteRemotePath('docs/remote', 'docs/remote', base)).toBe(
       'https://peer.example.com/tb',
@@ -39,7 +39,7 @@ describe('rewriteRemotePath(Proto §3.4 透传改写)', () => {
   })
 })
 
-describe('checkAllowlist(Proto §3.4 host 后缀白名单)', () => {
+describe('checkAllowlist(host 后缀白名单)', () => {
   it('后缀命中(子域)', () => {
     expect(checkAllowlist('https://api.example.com/x', ['example.com'])).toBe(true)
   })

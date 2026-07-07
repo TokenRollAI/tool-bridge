@@ -249,7 +249,7 @@ export function RegistryPage() {
 
 type MountKind = 'mcp' | 'http' | 'context' | 'remote'
 
-/** 挂载表单(按 kind 分支出 NodeConfig,Proto §3.2)。 */
+/** 挂载表单(按 kind 分支出 NodeConfig)。 */
 function MountDialog() {
   const invoke = useInvoke()
   const qc = useQueryClient()

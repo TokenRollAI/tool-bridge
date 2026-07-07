@@ -13,7 +13,7 @@ async function readStdin(): Promise<string> {
 
 /**
  * `tb secret set --name <n> [--value <v>]` → SecretStore.Set(system/secret)。
- * 值经 --value 或 stdin(建议 stdin,避免明文进 shell history)。只写不读(Proto §2.5)。
+ * 值经 --value 或 stdin(建议 stdin,避免明文进 shell history)。只写不读。
  */
 export const secretSetCommand = defineCommand({
   meta: { name: 'set', description: 'Set an upstream secret (write-only; prefer stdin for value)' },

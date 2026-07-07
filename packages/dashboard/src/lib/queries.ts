@@ -38,7 +38,7 @@ export function useHelp(path: string) {
 }
 
 /**
- * 工具级 `~help`(Proto §4.2 两级披露的细节级):mcp/http 节点级 ~help 是索引形态
+ * 工具级 `~help`(两级披露的细节级):mcp/http 节点级 ~help 是索引形态
  * (cmd 不含 inputSchema),面板展开时按需取 `GET /<path>/<tool>/~help` 补水 schema。
  * 网关侧命中同一 toolcache,不额外打上游。
  */
@@ -177,7 +177,7 @@ export function useStatus() {
 
 /**
  * context 条目分页枚举:query 非空走 Search,否则走 List(prefix 过滤)。
- * cursor 分页交给 useInfiniteQuery(Proto §0.3 Page 语义)。
+ * cursor 分页交给 useInfiniteQuery(Page 语义)。
  */
 export function useCtxEntries(nodePath: string, prefix: string, query: string) {
   const conn = useConn()

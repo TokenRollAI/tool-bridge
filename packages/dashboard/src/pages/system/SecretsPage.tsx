@@ -31,7 +31,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { useInvoke, useSecretList } from '@/lib/queries'
 
 /**
- * 凭证保管(SecretStore,对等 `tb secret set|ls|rm`;Proto §2.5 只写不读)。
+ * 凭证保管(SecretStore,对等 `tb secret set|ls|rm`;只写不读)。
  * 列表只见名字与时间戳,值永不回显——挂载 s3/mcp 时以 authRef 引用名字。
  */
 export function SecretsPage() {
@@ -56,7 +56,7 @@ export function SecretsPage() {
     <div className="mx-auto max-w-3xl px-8 py-8">
       <PageHeader
         title="凭证保管"
-        description="SecretStore 只写不读:值加密落库,仅网关内部经 authRef 解析(Proto §2.5)"
+        description="SecretStore 只写不读:值加密落库,仅网关内部经 authRef 解析"
         actions={<SetSecretDialog />}
       />
 

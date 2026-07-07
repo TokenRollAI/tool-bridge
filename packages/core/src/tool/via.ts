@@ -1,5 +1,5 @@
 /**
- * X-TB-Via 环检测与跳数上限(Proto §3.4,跨实例透传环检测)。
+ * X-TB-Via 环检测与跳数上限(跨实例透传环检测)。
  *
  * remote 透传时出站请求携带 `X-TB-Via: <本实例标识>` 并追加既有链。收到含**自身标识**的
  * 入站链 → 环;链段数 ≥ maxHops → 跳数超限。两者都归 `unavailable(retryable:false)`。

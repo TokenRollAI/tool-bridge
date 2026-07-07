@@ -1,6 +1,6 @@
 /**
- * HTBP 线上形状(与 core 的 HelpJson/TreeJson/TBError 对齐,Proto §1.3/§0.2)。
- * Dashboard 是纯 API 客户端,不 import core——形状以 Proto 为契约手抄,字段不多不少。
+ * HTBP 线上形状(与 core 的 HelpJson/TreeJson/TBError 对齐)。
+ * Dashboard 是纯 API 客户端,不 import core——形状按网关契约手抄,字段不多不少。
  */
 
 export type NodeKind = 'directory' | 'builtin' | 'mcp' | 'http' | 'remote' | 'context' | 'device'
@@ -10,7 +10,7 @@ export type Action = 'read' | 'write' | 'call' | 'register' | 'admin'
 export const ACTIONS: readonly Action[] = ['read', 'write', 'call', 'register', 'admin']
 
 export interface Scope {
-  /** 树路径 glob:"**" | "docs/**"(Proto §2.2)。 */
+  /** 树路径 glob:"**" | "docs/**"。 */
   pattern: string
   actions: Action[]
   /** 默认 allow;deny 优先于一切 allow。 */
@@ -88,7 +88,7 @@ export interface Page<T> {
   cursor?: string
 }
 
-/** context 条目元数据(Proto §5.1 ContextEntryMeta)。 */
+/** context 条目元数据(ContextEntryMeta)。 */
 export interface ContextEntryMeta {
   /** node://<namespace-path>/<entry-path>。 */
   uri: string

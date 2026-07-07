@@ -1,5 +1,5 @@
 /**
- * Plugin 全流程验收(Proto §8、Plugin.md §4/§7、DOD Phase 5 DoD③):对 TB_BASE_URL
+ * Plugin 全流程验收:对 TB_BASE_URL
  * 端到端验证示例 context-provider 的注册→挂载→四动词消费→调试清单 1~6→注销。
  *
  * 流程:
@@ -8,11 +8,11 @@
  *   2. `tb plugin register --file <manifest>` → 断言契约校验通过、pluginToken 仅注册
  *      响应出现一次(list/get 不回显);
  *   3. 用 pluginToken 重启 stub(STUB_PROVIDER_TOKEN 钉扎)→ 平台→Plugin 调用凭证
- *      端到端闭环(Proto §8.1 platform-token 语义);
+ *      端到端闭环(platform-token 语义);
  *   4. `tb plugin list/health`;
  *   5. 挂载(system/registry write,kind:'context',provider=<plugin-id>)→ 四动词经树:
  *      put→ls→cat→patch→search(`tb ctx *`);
- *   6. Plugin.md §7 调试清单逐条断言:
+ *   6. 调试清单逐条断言:
  *      ① ~help 列全方法(DSL 与 HelpJson 双表现);② ~describe 与 manifest 一致;
  *      ③ Write 同 Request-Id 重放幂等 + Update 不存在 → not_found;
  *      ④ 错误 TBError 形状 {code,message,retryable};
@@ -183,7 +183,7 @@ async function envelope(
   return { status: res.status, body: await res.json().catch(() => null) }
 }
 
-/** TBError 形状断言(Plugin.md §7 ④):{code,message,retryable} 三字段类型齐。 */
+/** TBError 形状断言:{code,message,retryable} 三字段类型齐。 */
 function assertTBErrorShape(body: unknown, what: string): { code: string } {
   assert.ok(body !== null && typeof body === 'object', `${what}:错误响应须为 JSON 对象`)
   const e = body as { code?: unknown; message?: unknown; retryable?: unknown }
@@ -285,7 +285,7 @@ async function main(): Promise<void> {
       assert.equal(h.healthy, true, `health 预期 healthy,实际 ${JSON.stringify(h)}`)
     })
 
-    // 5) 挂载:NodeRegistry.Write{kind:'context', provider:<plugin-id>}(Proto §8.1)。
+    // 5) 挂载:NodeRegistry.Write{kind:'context', provider:<plugin-id>}。
     //    tb ctx mount 只收 r2|s3(内置 provider),plugin 挂载走管理面 system/registry。
     await step('挂载 plugin-backed context 节点', async () => {
       await cliJson([
@@ -362,7 +362,7 @@ async function main(): Promise<void> {
       )
     })
 
-    // ---------- Plugin.md §7 调试清单 1~6 ----------
+    // ---------- 调试清单 1~6 ----------
 
     await step('清单① ~help 列全方法(DSL 与 HelpJson 双表现)', async () => {
       const dsl = await (await fetch(`${stubUrl}/~help`)).text()
@@ -394,7 +394,7 @@ async function main(): Promise<void> {
       assert.equal(describe.kind, 'context-provider')
       assert.equal(describe.interfaceVersion, 'context-provider/v1')
       assert.deepEqual([...describe.capabilities].sort(), ['delete', 'search'])
-      // 网关侧一致性:挂载节点 ~describe 回注册时缓存的 capabilities(Proto §8.2 注记)。
+      // 网关侧一致性:挂载节点 ~describe 回注册时缓存的 capabilities。
       const nodeDescribe = await fetch(`${baseUrl}/${mountPath}/~describe`, {
         headers: { authorization: `Bearer ${adminSk}`, accept: 'application/json' },
       })

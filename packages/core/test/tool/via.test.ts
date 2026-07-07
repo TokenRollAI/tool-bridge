@@ -11,7 +11,7 @@ describe('parseVia', () => {
   })
 })
 
-describe('checkVia 环 / 跳数检测(Proto §3.4)', () => {
+describe('checkVia 环 / 跳数检测', () => {
   it('链中含自身 → unavailable(retryable:false)', () => {
     const err = checkVia(['x', 'self', 'y'], 'self', 4)
     expect(err?.code).toBe('unavailable')

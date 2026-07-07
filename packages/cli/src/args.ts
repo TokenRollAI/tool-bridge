@@ -6,7 +6,7 @@ import { asArray } from './output'
 
 /**
  * 全局开关(每个子命令共享):
- * - `--json`:输出可解析 JSON(DOD.md:35 CLI 骨架义务)。
+ * - `--json`:输出可解析 JSON。
  * - `--base-url` / `--sk`:覆盖环境变量与配置文件。
  *
  * citty 的父命令 args 不会自动下发到子命令,故以共享对象在各子命令 spread。

@@ -1,8 +1,8 @@
 /**
- * 部署冒烟:对 TB_BASE_URL 断言 /healthz 与 /~help(DOD.md:28)。
+ * 部署冒烟:对 TB_BASE_URL 断言 /healthz 与 /~help。
  *
  * 用法:`TB_BASE_URL=https://... TB_SK=tbk_... pnpm smoke`(或 `tsx scripts/smoke.ts <baseUrl>`)。
- * Phase 1 起 `~help` 需要认证:提供 TB_SK 时断言 200;未提供时断言 401 裸 TBError(Proto §0.2)。
+ * `~help` 需要认证:提供 TB_SK 时断言 200;未提供时断言 401 裸 TBError。
  * **只对已部署环境跑,不对生产误跑破坏性操作**——本脚本仅只读探测。
  */
 import assert from 'node:assert/strict'
@@ -21,10 +21,10 @@ async function main(): Promise<void> {
   assert.equal(health.status, 200, `GET /healthz expected 200, got ${health.status}`)
   const body = (await health.json()) as { healthy?: boolean; version?: string }
   assert.equal(body.healthy, true, '/healthz body.healthy must be true')
-  assert.ok(body.version, '/healthz body.version must be present (DOD.md:40)')
+  assert.ok(body.version, '/healthz body.version must be present')
   console.log(`ok  GET /healthz → 200 healthy version=${body.version}`)
 
-  // 2) 无 SK 的 /~help → 401 裸 TBError(Proto §0.2)
+  // 2) 无 SK 的 /~help → 401 裸 TBError
   const anon = await fetch(`${baseUrl}/~help`)
   assert.equal(anon.status, 401, `GET /~help without SK expected 401, got ${anon.status}`)
   const err = (await anon.json()) as { code?: string; retryable?: boolean }

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { assertSecureUrl, normalizeUpstreamError } from '../../src/tool/upstreamError'
 
-describe('normalizeUpstreamError 全分支(Proto §4.2 Phase 2 定型)', () => {
+describe('normalizeUpstreamError 全分支', () => {
   it('network → unavailable(retryable:true)', () => {
     const err = normalizeUpstreamError({ kind: 'network', message: 'ECONNRESET' })
     expect(err.code).toBe('unavailable')
@@ -45,7 +45,7 @@ describe('normalizeUpstreamError 全分支(Proto §4.2 Phase 2 定型)', () => {
   })
 })
 
-describe('assertSecureUrl(Proto §3.2 上游 https 强制)', () => {
+describe('assertSecureUrl(上游 https 强制)', () => {
   it('https:// → 通过(null)', () => {
     expect(assertSecureUrl('https://api.example.com/x', false)).toBeNull()
   })

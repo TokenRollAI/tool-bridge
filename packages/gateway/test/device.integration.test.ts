@@ -90,7 +90,7 @@ async function connectDevice(
   return ws as WebSocket
 }
 
-describe('DeviceSession DO + /system/device/ws(Phase 4)', () => {
+describe('DeviceSession DO + /system/device/ws', () => {
   it('无 SK 的 WS 连接 → 401', async () => {
     const res = await SELF.fetch('https://tb.test/system/device/ws?deviceId=noauth', {
       headers: { upgrade: 'websocket' },

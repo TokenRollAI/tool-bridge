@@ -1,8 +1,8 @@
 /**
- * builtin 模块 "registry" → NodeRegistryStore(Proto §3.3;挂载为 system/registry 节点)。
+ * builtin 模块 "registry" → NodeRegistryStore(挂载为 system/registry 节点)。
  *
  * cmd:list/get(scope read)、write/update/delete(scope register)。
- * **§2.4 反向注册路径判定(registerPaths 收紧 / 保留根 / conflict)不在 dispatch 内做**——
+ * **反向注册路径判定(registerPaths 收紧 / 保留根 / conflict)不在 dispatch 内做**——
  * 网关在调用点(POST /<path> 与 POST /<path>/~register)统一过 checkRegisterPath 后才 dispatch,
  * 见 gateway/app.ts。dispatch 只做数据结构语义(幂等 upsert、物化、回收),registeredBy=调用者 keyId。
  */
@@ -98,7 +98,7 @@ function registryCmds(nodePath: TreePath): CmdSpec[] {
 }
 
 /**
- * 校验并构造 NodeInput(Proto §1.4 / §3.1):args 整体即 NodeInput。
+ * 校验并构造 NodeInput:args 整体即 NodeInput。
  * path 必填非空;kind 必填且须为合法枚举(词表 = types.ts NODE_KINDS,单一真源);
  * description 必填;透传 config/virtualize。
  * 校验失败 → invalid_argument。`~register` 与 system/registry write 复用此函数。
@@ -107,7 +107,7 @@ export function parseNodeInput(args: Record<string, unknown>): NodeInput {
   const path = requireString(args, 'path')
   const kind = requireString(args, 'kind') as NodeKind
   if (!NODE_KINDS.includes(kind)) {
-    throw new TBError('invalid_argument', `invalid kind '${kind}' (Proto §3.1)`)
+    throw new TBError('invalid_argument', `invalid kind '${kind}'`)
   }
   const description = requireString(args, 'description')
   const node: NodeInput = { path, kind, description }
@@ -120,9 +120,9 @@ export function parseNodeInput(args: Record<string, unknown>): NodeInput {
  * 构造 registry builtin 模块。
  *
  * `visibility`(可选,网关注入 = auth/scope 的 checkScopes)让**管理通道**(system/registry
- * 数据面)也遵守 §2.3「可见性即权限 / deny==not_found」:list 结果按 (path,'read') 裁剪;
+ * 数据面)也遵守「可见性即权限 / deny==not_found」:list 结果按 (path,'read') 裁剪;
  * get 对 arguments.path 判 (path,'read'),deny → not_found(不泄露不可见节点的存在性)。
- * 未注入时不裁剪(纯逻辑单测场景;网关装配一律注入)。§2.2/§2.4 的写面判定仍在网关调用点。
+ * 未注入时不裁剪(纯逻辑单测场景;网关装配一律注入)。写面判定仍在网关调用点。
  */
 export function createRegistryModule(
   store: NodeRegistryStore,
@@ -151,7 +151,7 @@ export function createRegistryModule(
         }
         case 'get': {
           const path = requireString(args, 'path')
-          // deny==not_found(§2.3):不可见节点不泄露存在性。
+          // deny==not_found:不可见节点不泄露存在性。
           if (visibility && !visibility(ctx.scopes, path, 'read')) {
             throw new TBError('not_found', `节点不存在:'${path}'`)
           }

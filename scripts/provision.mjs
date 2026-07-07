@@ -2,7 +2,7 @@
 /**
  * 幂等 provision:创建 KV namespace 与 R2 bucket(存在即跳过)。名称从 TB_NAME_PREFIX 派生。
  *
- * 用成熟 CLI(wrangler)完成,不手写 CF API 调用(LOOP.md 纪律 4)。凭据走 wrangler OAuth
+ * 用成熟 CLI(wrangler)完成,不手写 CF API 调用。凭据走 wrangler OAuth
  * 或 CLOUDFLARE_API_TOKEN(见 .env)。**本脚本由主协调者在部署前执行,worker 不运行它。**
  *
  * 完成后需把新建 KV namespace 的 id 回填到 packages/gateway/wrangler.jsonc 的 TB_KV.id。

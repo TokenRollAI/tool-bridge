@@ -1,5 +1,5 @@
 /**
- * mcp `~help` 缓存(Proto §4.2 定型):上游 `tools/list` 结果缓存于 StateStore。
+ * mcp `~help` 缓存:上游 `tools/list` 结果缓存于 StateStore。
  *
  * key `toolcache:<path>` → `{ tools, fetchedAt }`;TTL 默认 300s(env `TB_TOOL_CACHE_TTL`,秒)。
  * 失效触发三者:TTL 到期、该节点的 NodeRegistry Write/Update/Delete(gateway 注册点调

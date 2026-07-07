@@ -34,7 +34,7 @@ function expectInvalid(fn: () => unknown): TBError {
   throw new Error('expected invalid_argument')
 }
 
-describe('CallContext 编解码(Proto §8.3 X-TB-Context)', () => {
+describe('CallContext 编解码(X-TB-Context)', () => {
   it('往返恒等(含 deny scope 与 registerPaths)', () => {
     expect(decodeCallContext(encodeCallContext(CTX))).toEqual(CTX)
   })
@@ -76,7 +76,7 @@ describe('CallContext 编解码(Proto §8.3 X-TB-Context)', () => {
     expectInvalid(() => decodeCallContext(encodeCallContext(bad)))
   })
 
-  it('header 常量与 Proto §8.3 逐字一致', () => {
+  it('header 常量逐字一致', () => {
     expect(HEADER_TB_CONTEXT).toBe('X-TB-Context')
     expect(HEADER_TB_REQUEST_ID).toBe('X-TB-Request-Id')
   })
@@ -105,7 +105,7 @@ describe('请求体构造/解析({"tool":"<Method>","arguments":{...}})', () => 
   })
 })
 
-describe('体积守卫(Proto §8.3 ≤ 1 MiB)', () => {
+describe('体积守卫(≤ 1 MiB)', () => {
   it('上限常量 = 1 MiB', () => {
     expect(PLUGIN_PAYLOAD_MAX_BYTES).toBe(1024 * 1024)
   })

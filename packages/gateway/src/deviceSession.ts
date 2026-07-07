@@ -72,10 +72,7 @@ function parsePositiveInt(value: string | undefined, fallback: number): number {
 
 function assertDeviceId(deviceId: string): void {
   if (!/^[A-Za-z0-9._-]+$/.test(deviceId)) {
-    throw new TBError(
-      'invalid_argument',
-      "deviceId 只能包含字母、数字、'.'、'_'、'-'(Phase 4 DO 路由约束)",
-    )
+    throw new TBError('invalid_argument', "deviceId 只能包含字母、数字、'.'、'_'、'-'(DO 路由约束)")
   }
 }
 
@@ -146,7 +143,7 @@ function invokeRequestFromBody(body: unknown): DeviceCallRequest {
 }
 
 /**
- * DeviceSession Durable Object(Phase 4):每 deviceId 一个 DO,负责 WS hibernation、
+ * DeviceSession Durable Object:每 deviceId 一个 DO,负责 WS hibernation、
  * requestId 待决/结果表、设备节点生命周期与 HTTP→WS 调用转发。
  */
 export class DeviceSession extends DurableObject<DeviceSessionEnv> {
@@ -375,7 +372,7 @@ export class DeviceSession extends DurableObject<DeviceSessionEnv> {
   }
 
   /**
-   * expose.nodes 自定义节点(Proto §6.3 Phase 5):路径挂到 mountPath 下,并对可调用
+   * expose.nodes 自定义节点:路径挂到 mountPath 下,并对可调用
    * kind(tool/context)注入 providerConfig 转发标记 { deviceId, mountPath, cmds? }
    * (与 device-fs 同构)——网关据此把调用经帧协议 call 转发回设备;cmds(SDK 随
    * NodeInput 上送的工具表)是节点 ~help 的数据源。标记为网关权威,覆盖设备侧同名字段。

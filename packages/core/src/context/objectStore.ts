@@ -1,5 +1,5 @@
 /**
- * ObjectStore:对象存储抽象(Proto §7,Phase 3 修订形状)。
+ * ObjectStore:对象存储抽象。
  *
  * r2(R2 binding)、s3(aws4fetch)与单测内存实现共用此接口;ContextProvider 的
  * 四动词语义全部落在 objectProvider.ts,后端只做本接口适配。core 无 DOM lib:

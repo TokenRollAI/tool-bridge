@@ -1,5 +1,5 @@
 /**
- * remote 透传的路径改写与白名单(Proto §3.4,纯逻辑)。
+ * remote 透传的路径改写与白名单(纯逻辑)。
  *
  * gateway 负责实际 fetch、skRef 换发、X-TB-Via 注入(见 via.ts);此处只算改写后的目标 URL
  * 与白名单判定。
@@ -72,8 +72,8 @@ function hostOf(url: string): string | undefined {
 }
 
 /**
- * baseUrl 白名单判定(Proto §3.4):host **后缀**匹配 allowlist 任一条目。
- * 空 allowlist = 拒绝一切 remote(Phase 2 定型)。URL 无 host → 拒。
+ * baseUrl 白名单判定:host **后缀**匹配 allowlist 任一条目。
+ * 空 allowlist = 拒绝一切 remote(定型)。URL 无 host → 拒。
  *
  * 后缀匹配按 host 段边界:`example.com` 命中 `api.example.com`,但不命中 `notexample.com`。
  */

@@ -73,7 +73,7 @@ function humanTime(iso: string): string {
   return new Date(t).toLocaleString()
 }
 
-/** 大对象条目:content 是 { $ref } 而非内联(Proto §5.1)。 */
+/** 大对象条目:content 是 { $ref } 而非内联。 */
 function refOf(content: unknown): string | null {
   if (typeof content === 'object' && content !== null && '$ref' in content) {
     const v = (content as { $ref: unknown }).$ref

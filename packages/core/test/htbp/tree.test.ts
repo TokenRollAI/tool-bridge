@@ -12,7 +12,7 @@ function childrenFrom(map: Record<string, TreeEntry[]>) {
   return async (path: string): Promise<TreeEntry[]> => map[path] ?? []
 }
 
-describe('clampDepth(Proto §1.1:默认 2,上限 8,非法→默认)', () => {
+describe('clampDepth(默认 2,上限 8,非法→默认)', () => {
   it('undefined → 默认 2', () => {
     expect(clampDepth(undefined)).toBe(DEFAULT_TREE_DEPTH)
     expect(DEFAULT_TREE_DEPTH).toBe(2)

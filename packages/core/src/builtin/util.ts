@@ -1,8 +1,8 @@
 /**
  * builtin 模块共用小工具:cmd 路径拼装、参数校验、void 应答。
  *
- * 参数校验故意从简(Phase 1):只挡明显非法(缺必填 / 类型错),复杂 schema 校验
- * 留待后续。校验失败一律 invalid_argument(Proto §0.2)。
+ * 参数校验故意从简:只挡明显非法(缺必填 / 类型错),复杂 schema 校验
+ * 留待后续。校验失败一律 invalid_argument。
  */
 
 import { TBError } from '../errors'
@@ -35,7 +35,7 @@ export function optString(args: Record<string, unknown>, field: string): string 
   return v
 }
 
-/** 取可选 `opts: ListOptions`(整体对象传入,不平铺,Proto §1.4)。 */
+/** 取可选 `opts: ListOptions`(整体对象传入,不平铺)。 */
 export function optListOptions(args: Record<string, unknown>): ListOptions | undefined {
   const opts = args.opts
   if (opts === undefined) return undefined

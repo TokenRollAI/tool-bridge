@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { parseHelpDsl, renderHelpDsl } from '../../src/htbp/helpDsl'
 import type { HelpModel } from '../../src/htbp/model'
 
-describe('renderHelpDsl 格式(Proto §1.3)', () => {
+describe('renderHelpDsl 格式', () => {
   const model: HelpModel = {
     node: { path: 'docs/context7', kind: 'mcp', description: 'Context7 文档检索' },
     cmds: [

@@ -1,16 +1,16 @@
 /**
- * 设备网关验收(Proto §6、DOD Phase 4 DoD-3/4):对已部署的 TB_BASE_URL 端到端验证
+ * 设备网关验收:对已部署的 TB_BASE_URL 端到端验证
  * 反向注册全链路——tb connect 长驻接入、shell/fs 数据面、registerPaths 越界拒绝。
  *
  * 流程:
  *   1. spawn `tb connect --device-id verify-dev-<rand> --allow echo --fs <tmp>`,等 ready 事件;
  *   2. 断言①:`tb call device/<id>/shell --tool exec` → stdout 含 hi-p4;
  *   3. 断言②:`tb ctx cat device/<id>/fs <root>/hello.txt` → 读到临时文件真实内容;
- *   4. 断言③(DoD-4):admin SK 签发 registerPaths=[device/allowed-<rand>] 的受限 SK →
+ *   4. 断言③:admin SK 签发 registerPaths=[device/allowed-<rand>] 的受限 SK →
  *      越界 `--device-id outside-<rand>` 被拒(网关发 error 帧关连接:进程退出不重连、
  *      从未 ready、registry 无该节点)→ 前缀内 `--device-id allowed-<rand>` 连接 ready;
  *   5. teardown(幂等可重跑):杀 connect 子进程、registry delete 注册节点(各设备用
- *      注册它的 SK 删,§2.4d;回收 alarm 默认 24h 不等它)、吊销受限 SK、删临时目录。
+ *      注册它的 SK 删;回收 alarm 默认 24h 不等它)、吊销受限 SK、删临时目录。
  *
  * 用法:`TB_BASE_URL=https://... TB_SK=tbk_... pnpm tsx scripts/verify-device.ts`
  *   (需先 `pnpm --filter @tool-bridge/cli build` 产出 CLI dist。)
@@ -196,7 +196,7 @@ async function waitSkUsable(sk: string): Promise<void> {
 
 /**
  * teardown:删设备注册节点(子节点在前;not_found 等失败静默,保证幂等可重跑)。
- * sk 须是注册该设备的 SK——§2.4 规则 d:他人注册的节点 delete 得 conflict,admin 也不例外。
+ * sk 须是注册该设备的 SK——他人注册的节点 delete 得 conflict,admin 也不例外。
  * 设备断开时 DO 的 markDisconnected 会 setOnline(false) 回写主节点,与本删除存在竞态,
  * 故删后校验:节点仍在(被回写)则再删一轮。
  */
@@ -258,7 +258,7 @@ async function main(): Promise<void> {
   const fsKey = `${basename(tmpRoot)}/hello.txt` // fs entry 首段 = root basename
 
   const handles: ConnectHandle[] = []
-  /** teardown 清单:§2.4 规则 d 下节点只能由注册它的 SK 删除(admin 也会得 conflict)。 */
+  /** teardown 清单:节点只能由注册它的 SK 删除(admin 也会得 conflict)。 */
   const cleanups: Array<{ deviceId: string; sk: string }> = [{ deviceId, sk: adminSk }]
   let restrictedSkId: string | undefined
 
@@ -321,7 +321,7 @@ async function main(): Promise<void> {
       })
     }
 
-    // 4) 断言③:registerPaths 收紧(Proto §2.4a——段级前缀,scope 给足以隔离变量)。
+    // 4) 断言③:registerPaths 收紧(段级前缀,scope 给足以隔离变量)。
     const issued = await step('③ 签发受限 SK', async () => {
       const created = await cliJson<{ key: { id: string }; secret: string }>(
         [

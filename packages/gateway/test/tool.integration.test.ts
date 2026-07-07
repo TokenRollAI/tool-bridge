@@ -3,7 +3,7 @@ import { parseHelpDsl } from '@tool-bridge/core'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { TEST_ADMIN_SK } from './fixtures'
 
-// Phase 2(Tool Layer)集成测试:mcp/http Provider、工具虚拟化、调用点 call 判定、
+// Tool Layer 集成测试:mcp/http Provider、工具虚拟化、调用点 call 判定、
 // remote 白名单 + X-TB-Via 环检测。上游真实网络仅用于 opt-in / 容错用例;其余用例
 // 全部在网络之前分叉(https 强制、虚拟化反查、权限、白名单、环检测),确定性且离线。
 
@@ -63,7 +63,7 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-describe('http 节点 ~help(DOD 66/71:从 config 生成、DSL 完整、scope=call)', () => {
+describe('http 节点 ~help(从 config 生成、DSL 完整、scope=call)', () => {
   it('~help DSL 列出全部工具 cmd(name/method/scope),effect 由 method 派生', async () => {
     await mountHttp('ext/echo', HTTP_TOOLS)
     const res = await SELF.fetch('https://tb.test/ext/echo/~help', admin())
@@ -75,7 +75,7 @@ describe('http 节点 ~help(DOD 66/71:从 config 生成、DSL 完整、scope=cal
     for (const c of parsed.cmds) {
       expect(c.method).toBe('POST') // 工具调用形态恒 POST /<path>
       expect(c.path).toBe('/ext/echo')
-      expect(c.scope).toBe('call') // DOD 71:scope 声明存在
+      expect(c.scope).toBe('call') // scope 声明存在
     }
     // effect:GET→read、POST→write(HttpToolDef 缺省派生)。
     expect(dsl).toContain('effect read')
@@ -98,7 +98,7 @@ describe('http 节点 ~help(DOD 66/71:从 config 生成、DSL 完整、scope=cal
   })
 })
 
-describe('工具虚拟化(DOD 66:hide 不可见、rename 后原名不可调)', () => {
+describe('工具虚拟化(hide 不可见、rename 后原名不可调)', () => {
   const tools = [
     { name: 'secret_tool', description: 'hidden', method: 'GET', pathTemplate: '/get' },
     { name: 'real', description: 'renamed', method: 'GET', pathTemplate: '/get' },
@@ -122,7 +122,7 @@ describe('工具虚拟化(DOD 66:hide 不可见、rename 后原名不可调)', (
   })
 })
 
-describe('调用点 call 判定(DOD 70:无 call → 403;不可见 → 404)', () => {
+describe('调用点 call 判定(无 call → 403;不可见 → 404)', () => {
   it('可见但无 call 的 SK → POST 403;不可见的 SK → POST 404 且 ~help 404', async () => {
     await mountHttp('ext/perm', HTTP_TOOLS)
 
@@ -158,7 +158,7 @@ describe('调用点 call 判定(DOD 70:无 call → 403;不可见 → 404)', () 
   })
 })
 
-describe('两级披露(Proto §4.2:节点级索引 + 工具级全量)', () => {
+describe('两级披露(节点级索引 + 工具级全量)', () => {
   const SCHEMA_TOOLS = [
     {
       name: 'lookup',
@@ -239,7 +239,7 @@ describe('两级披露(Proto §4.2:节点级索引 + 工具级全量)', () => {
   })
 })
 
-describe('remote 节点(DOD 67/69:白名单、X-TB-Via 环检测)', () => {
+describe('remote 节点(白名单、X-TB-Via 环检测)', () => {
   secureOnlyIt('http:// baseUrl 默认被拒(即使 host 在白名单内)', async () => {
     const res = await postJson(
       'system/registry',
@@ -423,7 +423,7 @@ const mcpIt = mcpUrl !== undefined ? it : it.skip
 const liveHttp = (env as { TB_TEST_LIVE_HTTP?: string }).TB_TEST_LIVE_HTTP !== undefined
 const liveIt = liveHttp ? it : it.skip
 
-describe('http 上游真实调用(DOD 68,opt-in via TB_TEST_LIVE_HTTP)', () => {
+describe('http 上游真实调用(opt-in via TB_TEST_LIVE_HTTP)', () => {
   liveIt(
     'POST get_thing → postman-echo 回显 query',
     async () => {
@@ -489,7 +489,7 @@ describe('mcp 真实上游 E2E(opt-in via TB_TEST_MCP_URL)', () => {
     expect(mk.status).toBe(200)
 
     // echo-mcp 默认有状态:whoami 回显当前会话 id。两次调用同一 id ⇔ 网关复用了
-    // mcpsession:<path> 缓存的会话,而不是每次重新握手(Reference §3 演进)。
+    // mcpsession:<path> 缓存的会话,而不是每次重新握手。
     const whoami = async (): Promise<string> => {
       const res = await postJson('ext/mcp-session', { tool: 'whoami', arguments: {} }, admin())
       expect(res.status).toBe(200)

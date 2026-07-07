@@ -3,8 +3,8 @@ import { describe, expect, it } from 'vitest'
 import pkg from '../package.json' with { type: 'json' }
 import { TEST_ADMIN_SK } from './fixtures'
 
-// 穿透测试(DOD.md:27):HTTP 进 → Worker 出。Phase 1:认证 + HTBP 核心树 + builtin。
-// 认证策略:除 /healthz 外全部要求 SK(Proto §0.2 缺 SK → 401)。测试 Admin SK 经
+// 穿透测试:HTTP 进 → Worker 出(认证 + HTBP 核心树 + builtin)。
+// 认证策略:除 /healthz 外全部要求 SK(缺 SK → 401)。测试 Admin SK 经
 // miniflare bindings 注入(vitest.config.ts),引导时以它为 Admin SK 明文。
 
 const admin = (extra: RequestInit = {}): RequestInit => ({
@@ -34,8 +34,8 @@ async function issueSk(input: unknown): Promise<string> {
   return body.secret
 }
 
-describe('GET /healthz(树外免认证,Phase 0 回归)', () => {
-  it('200 + JSON {healthy, version},无需 SK(DOD.md:40)', async () => {
+describe('GET /healthz(树外免认证)', () => {
+  it('200 + JSON {healthy, version},无需 SK', async () => {
     const res = await SELF.fetch('https://tb.test/healthz')
     expect(res.status).toBe(200)
     const body = (await res.json()) as { healthy: boolean; version: string }
@@ -44,8 +44,8 @@ describe('GET /healthz(树外免认证,Phase 0 回归)', () => {
   })
 })
 
-describe('认证(Proto §0.2:除 /healthz 外全路由要求 SK)', () => {
-  it('无 SK → 401 裸 TBError(permission_denied, retryable false)(DOD.md:54)', async () => {
+describe('认证(除 /healthz 外全路由要求 SK)', () => {
+  it('无 SK → 401 裸 TBError(permission_denied, retryable false)', async () => {
     const res = await SELF.fetch('https://tb.test/~help')
     expect(res.status).toBe(401)
     const body = (await res.json()) as { code: string; retryable: boolean }
@@ -76,7 +76,7 @@ describe('根 ~help / ~tree(Admin 视角)', () => {
     expect(text).toContain('system')
   })
 
-  it('system/sk ~help:DSL 与 JSON 语义等价(抽查 cmd 名集合)(DOD.md:53)', async () => {
+  it('system/sk ~help:DSL 与 JSON 语义等价(抽查 cmd 名集合)', async () => {
     const dslRes = await SELF.fetch('https://tb.test/system/sk/~help', admin())
     const jsonRes = await SELF.fetch(
       'https://tb.test/system/sk/~help',
@@ -104,7 +104,7 @@ describe('根 ~help / ~tree(Admin 视角)', () => {
   })
 })
 
-describe('受限 SK 的可见性裁剪(DOD.md:54 本地版)', () => {
+describe('受限 SK 的可见性裁剪', () => {
   it('新 SK 只见其可见子树,且不能调 system/sk(403)', async () => {
     const docsSk = await issueSk({
       owner: 'agent:docs',
@@ -145,7 +145,7 @@ describe('受限 SK 的可见性裁剪(DOD.md:54 本地版)', () => {
   })
 })
 
-describe('注册与三级 ~help(DOD.md:52 集成面)', () => {
+describe('注册与三级 ~help(集成面)', () => {
   it('POST system/registry write 挂 a/b/c → a、a/b、a/b/c 三级 ~help 都 200', async () => {
     const regSk = await issueSk({
       owner: 'agent:reg',
@@ -164,7 +164,7 @@ describe('注册与三级 ~help(DOD.md:52 集成面)', () => {
     }
   })
 
-  it('保留根 system 下 ~register 被拒(§2.4b):未声明 registerPaths 的 SK → 403', async () => {
+  it('保留根 system 下 ~register 被拒:未声明 registerPaths 的 SK → 403', async () => {
     const regSk = await issueSk({
       owner: 'agent:reg2',
       scopes: [{ pattern: '**', actions: ['read', 'register'] }],
@@ -179,7 +179,7 @@ describe('注册与三级 ~help(DOD.md:52 集成面)', () => {
   })
 })
 
-describe('secret 只写不读(DOD.md:55 集成面)', () => {
+describe('secret 只写不读(集成面)', () => {
   it('admin set → list 只见 name + updatedAt,不回显明文', async () => {
     const SECRET = 'upstream-token-xyz'
     const set = await postJson(
@@ -218,7 +218,7 @@ describe('~skill 占位 501', () => {
   })
 })
 
-describe('system/registry 管理通道也遵守可见性裁剪(§2.3,修复 5)', () => {
+describe('system/registry 管理通道也遵守可见性裁剪(修复 5)', () => {
   it('宽 allow + 窄 deny:list 不见 denied 节点,get denied 路径 → 404', async () => {
     // 先以 admin 注册可见/不可见两棵子树。
     await postJson(
@@ -329,7 +329,7 @@ describe('~register body 校验(修复 8)', () => {
   })
 })
 
-describe('mcp 节点 ~help(Phase 2:上游 https 强制)', () => {
+describe('mcp 节点 ~help(上游 https 强制)', () => {
   it('挂一个 http:// url 的 mcp 节点 → ~help 因非 https(未放行)被拒', async () => {
     const sk = await issueSk({
       owner: 'agent:mcp',
@@ -352,13 +352,13 @@ describe('mcp 节点 ~help(Phase 2:上游 https 强制)', () => {
     expect(mk.status).toBe(200)
     const res = await SELF.fetch('https://tb.test/ext/ctx7/~help', { headers: auth })
     // 未设 TB_ALLOW_INSECURE_HTTP → 400 invalid_argument;若 opt-in 运行放行了 http,
-    // 则转为上游不可达的归一错误(5xx)。两种都不再是 Phase 1 的 501。
+    // 则转为上游不可达的归一错误(5xx)。两种都不是 501。
     expect([400, 500, 503]).toContain(res.status)
     expect(res.status).not.toBe(501)
   })
 })
 
-describe('SK 吊销 / 认证失效(修复 9,DOD 55/57)', () => {
+describe('SK 吊销 / 认证失效(修复 9)', () => {
   it('issueSk → delete → 被吊销 SK 请求 → 401', async () => {
     const secret = await issueSk({
       owner: 'agent:revoke',

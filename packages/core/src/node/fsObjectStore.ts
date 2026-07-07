@@ -1,5 +1,5 @@
 /**
- * FsObjectStore:node:fs/promises 实现的 ObjectStore(Proto §6.3 fs 契约 / §5 file provider)。
+ * FsObjectStore:node:fs/promises 实现的 ObjectStore(fs 契约 / file provider)。
  *
  * 多根语义:roots 数组,entry key 首段 = 各 root 的 basename(basename 冲突由调用方
  * hello 校验拒,本模块构造时防御性抛 invalid_argument)。路径安全两层:
@@ -10,7 +10,7 @@
  * FS 无用户 metadata:meta.metadata 恒 {},put 的 metadata 不持久化。contentType 不落盘,
  * 由扩展名推断(objectProvider.isInlineable 只内联 text/* 与 application/json,文本扩展名
  * 必须产出 text/* mime,否则设备 fs 的 Get 一律走 $ref → 无 presign/relay 时 503);
- * put 传入的 contentType 同样不持久化,读回以扩展名推断为准(与 r2/s3 的差异见 Proto §5)。
+ * put 传入的 contentType 同样不持久化,读回以扩展名推断为准(与 r2/s3 的差异见文件语义)。
  */
 
 import { mkdir, readdir, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises'

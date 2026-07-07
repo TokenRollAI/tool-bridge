@@ -78,7 +78,7 @@ export interface DeviceInvokeRequest {
   arguments: Record<string, unknown>
 }
 
-/** 设备通道宿主(CF = DeviceSession DO / Docker = ws;Proto §7 deviceTransport 的消费面)。 */
+/** 设备通道宿主(CF = DeviceSession DO / Docker = ws;deviceTransport 的消费面)。 */
 export interface DeviceChannel {
   /** HTTP→WS 调用转发:结果为 DeviceCallResult 形状(设备侧 result 帧)。 */
   invoke(deviceId: string, req: DeviceInvokeRequest): Promise<unknown>
@@ -86,7 +86,7 @@ export interface DeviceChannel {
   ws(deviceId: string, request: Request): Promise<Response>
 }
 
-/** 进程内本地 Provider 钩子(SDK registerTool/registerContext 的装配面,Proto §7)。 */
+/** 进程内本地 Provider 钩子(SDK registerTool/registerContext 的装配面)。 */
 export interface LocalProviderHooks {
   /** kind:'tool' 节点按路径取进程内工具源;undefined → 走 plugin 解析。 */
   tool?(nodePath: TreePath): UpstreamProvider | undefined
@@ -95,7 +95,7 @@ export interface LocalProviderHooks {
 }
 
 /**
- * tb app 的宿主注入面(Proto §7 四注入点 + 解析后的部署配置)。
+ * tb app 的宿主注入面(四注入点 + 解析后的部署配置)。
  * 核心业务逻辑零分叉:Workers 适配层(app.ts)与 SDK(packages/sdk)都注入此形状。
  */
 export interface TbAppDeps {
@@ -105,17 +105,17 @@ export interface TbAppDeps {
   version: string
   /** 认证前的实例就绪钩子(引导/延迟注册 flush);每请求调用,幂等由宿主保证。 */
   ensureReady?: () => Promise<void>
-  /** remote 联邦透传配置(Proto §3.4/§7)。 */
+  /** remote 联邦透传配置。 */
   remote: RemoteSettings
-  /** 放行 http:// 上游(仅本地开发,Proto §4.2)。 */
+  /** 放行 http:// 上游(仅本地开发)。 */
   allowInsecureHttp: boolean
-  /** §2.4 b 的追加保留根路径(Proto §7)。 */
+  /** 追加保留根路径(在内置保留根之外额外声明)。 */
   reservedRoots?: string[]
-  /** context 平台对象存储('r2' provider 的落点,Proto §7 objects);缺省 → 该 provider unavailable。 */
+  /** context 平台对象存储('r2' provider 的落点);缺省 → 该 provider unavailable。 */
   objects?: () => Promise<ObjectStore> | ObjectStore
   /** $ref 中转 token 签名密钥(TB_SECRET_ENCRYPTION_KEY);缺省 → /~ref 404、大对象走 presign 或 unavailable。 */
   encryptionKey?: string
-  /** 设备通道;缺省 → device 能力禁用(Proto §7)。 */
+  /** 设备通道;缺省 → device 能力禁用。 */
   device?: DeviceChannel
   /** Dashboard 静态资源(Workers Static Assets);缺省 → /ui 404。 */
   assets?: (request: Request) => Promise<Response>
@@ -135,7 +135,7 @@ type Vars = { ctx: CallContext; store: StateStore }
 
 type AppContext = Context<{ Variables: Vars }>
 
-/** 把 TBError 渲染为线上响应(Proto §0.2)。 */
+/** 把 TBError 渲染为线上响应。 */
 function tbErrorResponse(err: TBError): Response {
   return new Response(JSON.stringify(err.toJSON()), {
     status: err.httpStatus,
@@ -168,13 +168,13 @@ function renderHelp(model: HelpModel, rep: Representation): Response {
       headers: { 'content-type': contentTypeFor('json') },
     })
   }
-  // ~help 只有 DSL(text/plain)与 JSON 两种;markdown 一并按 DSL 处理(Proto §1.2)。
+  // ~help 只有 DSL(text/plain)与 JSON 两种;markdown 一并按 DSL 处理。
   return new Response(renderHelpDsl(model), {
     headers: { 'content-type': contentTypeFor('dsl') },
   })
 }
 
-/** 渲染数据面调用返回值:json → 原始 JSON;默认 → markdown(```json 包裹,Phase 后续美化)。 */
+/** 渲染数据面调用返回值:json → 原始 JSON;默认 → markdown(```json 包裹)。 */
 function renderResult(value: unknown, rep: Representation): Response {
   const json = JSON.stringify(value ?? null)
   if (rep === 'json') {
@@ -186,7 +186,7 @@ function renderResult(value: unknown, rep: Representation): Response {
 }
 
 /**
- * 逐段 decodeURIComponent 树路径(Proto:注册的树路径可含空格等,URL 里被百分号编码)。
+ * 逐段 decodeURIComponent 树路径(注册的树路径可含空格等,URL 里被百分号编码)。
  * 逐段解码(而非整段)以免把编码的 '/'(%2F)误解为路径分隔。decode 失败 → 400 invalid_argument。
  */
 function decodePath(path: TreePath): TreePath {
@@ -224,10 +224,10 @@ export function createTbApp(deps: TbAppDeps): Hono<{ Variables: Vars }> {
       }),
     )
 
-  // GET /healthz → 200 JSON,树外免认证(Proto §1.1)。version 单一真源:宿主 package.json。
+  // GET /healthz → 200 JSON,树外免认证。version 单一真源:宿主 package.json。
   app.get('/healthz', (c) => c.json({ healthy: true, version: deps.version }))
 
-  // GET /~ref/<token> → 大对象中转下载,树外免认证(Proto §5.2 中转下载路由)。
+  // GET /~ref/<token> → 大对象中转下载,树外免认证(中转下载路由)。
   // 注册在认证中间件之前:token 本身即凭证(HMAC 限时签名);验签失败/过期一律 404 不泄露。
   app.get('/~ref/:token', (c) =>
     runHandler(async () => {
@@ -258,7 +258,7 @@ export function createTbApp(deps: TbAppDeps): Hono<{ Variables: Vars }> {
     }),
   )
 
-  // --- /ui Dashboard 静态资源(Workers Static Assets,Architecture M9)---
+  // --- /ui Dashboard 静态资源(Workers Static Assets)---
   // 一切请求先进本 app,静态资源仅由 assets 注入点显式转发,SPA 回退只在 /ui 内生效——
   // 不可能吞根 ~help、POST 数据面与 system/*。
   // /ui 免认证:登录页本身须在无 SK 时可加载(SK 只存浏览器,静态资源不含机密)。
@@ -278,14 +278,14 @@ export function createTbApp(deps: TbAppDeps): Hono<{ Variables: Vars }> {
   app.get('/ui', (c) => c.redirect('/ui/', 302))
   app.get('/ui/*', serveUi)
 
-  // 浏览器直开根路径 → Dashboard(Architecture M9:GET / 且 Accept 带 text/html 时 302);
+  // 浏览器直开根路径 → Dashboard(GET / 且 Accept 带 text/html 时 302);
   // 非 HTML 客户端(Agent/CLI)落回后续路由,行为与此前一致(401/404)。
   app.get('/', async (c, next) => {
     if (c.req.header('accept')?.includes('text/html')) return c.redirect('/ui/', 302)
     await next()
   })
 
-  // 认证中间件(/healthz、/~ref、/ui 静态资源之外全路由):Bearer → identify → 401 或注入 ctx(Proto §0.2)。
+  // 认证中间件(/healthz、/~ref、/ui 静态资源之外全路由):Bearer → identify → 401 或注入 ctx。
   app.use('*', async (c, next) => {
     const store = deps.state
     try {
@@ -303,7 +303,7 @@ export function createTbApp(deps: TbAppDeps): Hono<{ Variables: Vars }> {
   })
 
   // WS /system/device/ws?deviceId=<id> → 设备通道宿主(CF:每 deviceId 一个 DeviceSession DO)。
-  // deviceId 同时在 hello 帧中出现;通道侧会校验二者一致,以满足 Proto §6.1 的帧契约。
+  // deviceId 同时在 hello 帧中出现;通道侧会校验二者一致,以满足设备帧契约。
   app.get('/system/device/ws', (c) =>
     runHandler(async () => {
       const device = requireDevice(deps)
@@ -333,7 +333,7 @@ export function createTbApp(deps: TbAppDeps): Hono<{ Variables: Vars }> {
       if (remote) return remote
     }
 
-    // 子树根必须真实存在(§否则 ~tree 可伪造任意根)。非根 path 不存在 → 404;
+    // 子树根必须真实存在(否则 ~tree 可伪造任意根)。非根 path 不存在 → 404;
     // 存在则以真实节点元数据作 rootEntry(kind/description/online),不再伪造为 directory。
     let rootEntry: TreeEntry | undefined
     if (path !== '') {
@@ -343,7 +343,7 @@ export function createTbApp(deps: TbAppDeps): Hono<{ Variables: Vars }> {
       } catch {
         throw TBError.notFound('not found')
       }
-      // 子树根本身是 ttl 到期的 context 节点 → 懒回收 + 404(Proto §5.3)。
+      // 子树根本身是 ttl 到期的 context 节点 → 懒回收 + 404。
       if (rootNode.kind === 'context' && rootNode.config?.kind === 'context') {
         await assertContextAlive(rootNode, rootNode.config, registry)
       }
@@ -411,7 +411,7 @@ export function createTbApp(deps: TbAppDeps): Hono<{ Variables: Vars }> {
     try {
       node = await registry.get(path)
     } catch {
-      // 非注册路径:尝试工具级 ~help(Proto §4.2 两级披露)——最长前缀命中 mcp/http 节点
+      // 非注册路径:尝试工具级 ~help(两级披露)——最长前缀命中 mcp/http 节点
       // 且剩余恰一段(工具虚拟名)→ 单工具全量 spec(命中同一 toolcache,不额外打上游)。
       const toolModel = await toolHelpModelFor(c, ctx, registry, path, deps)
       if (toolModel !== null) return renderHelp(toolModel, rep)
@@ -451,7 +451,7 @@ export function createTbApp(deps: TbAppDeps): Hono<{ Variables: Vars }> {
       throw TBError.notFound('not found')
     }
 
-    // --- device 自定义 tool 节点(Proto §6.3 Phase 5):providerConfig 标记 → 帧协议 call 转发。 ---
+    // --- device 自定义 tool 节点:providerConfig 标记 → 帧协议 call 转发。 ---
     // 须先于 mcp/http/tool 通用分支:provider 是设备本地保留 id(如 '@local'),不是 plugin。
     const toolMarker = deviceToolMarker(node)
     if (toolMarker !== null) {
@@ -473,7 +473,7 @@ export function createTbApp(deps: TbAppDeps): Hono<{ Variables: Vars }> {
       return renderResult(result, negotiate(c.req.header('accept')))
     }
 
-    // --- mcp/http/tool 上游工具调用(Proto §4.2/§8.1):scope 恒 'call';虚拟名反查上游真名再调 Provider。 ---
+    // --- mcp/http/tool 上游工具调用:scope 恒 'call';虚拟名反查上游真名再调 Provider。 ---
     if (
       (node.kind === 'mcp' || node.kind === 'http' || node.kind === 'tool') &&
       node.config !== undefined
@@ -493,11 +493,11 @@ export function createTbApp(deps: TbAppDeps): Hono<{ Variables: Vars }> {
       const tools = await upstreamTools(node, provider, deps, false, new Date().toISOString())
       const upstreamName = resolveUpstreamTool(node.virtualize, tools, body.tool)
       const result = await provider.call(upstreamName, args)
-      // MCP RPC 业务错误(result.isError)是正常返回值(HTTP 200),按 §1.2 协商渲染其 content。
+      // MCP RPC 业务错误(result.isError)是正常返回值(HTTP 200),按协商渲染其 content。
       return renderResult(result.content, negotiate(c.req.header('accept')))
     }
 
-    // --- device shell 调用(Proto §6.3):节点级 read/call 后转发到设备通道。 ---
+    // --- device shell 调用:节点级 read/call 后转发到设备通道。 ---
     if (node.kind === 'device' && node.config?.kind === 'device') {
       if (!check(ctx, node.path, 'call').allow) {
         throw new TBError('permission_denied', `no scope grants 'call' on '${node.path}'`)
@@ -520,10 +520,10 @@ export function createTbApp(deps: TbAppDeps): Hono<{ Variables: Vars }> {
       return renderResult(result, negotiate(c.req.header('accept')))
     }
 
-    // --- context namespace 数据面(Proto §5):四动词 + Search/Delete,cmd→scope 静态表判定。 ---
+    // --- context namespace 数据面:四动词 + Search/Delete,cmd→scope 静态表判定。 ---
     if (node.kind === 'context' && node.config?.kind === 'context') {
       const cfg = node.config
-      // ttl 懒回收(Proto §5.3):POST 命中即判,过期删节点并 404。
+      // ttl 懒回收:POST 命中即判,过期删节点并 404。
       await assertContextAlive(node, cfg, registry)
       const body = (await c.req.json().catch(() => null)) as {
         tool?: unknown
@@ -540,9 +540,9 @@ export function createTbApp(deps: TbAppDeps): Hono<{ Variables: Vars }> {
       if (!check(ctx, node.path, scope).allow) {
         throw new TBError('permission_denied', `no scope grants '${scope}' on '${node.path}'`)
       }
-      // readOnly 挂载对写动词直接拒(provider 内亦拒,双保险;Proto §5.3)。
+      // readOnly 挂载对写动词直接拒(provider 内亦拒,双保险)。
       if (cfg.readOnly === true && scope === 'write') {
-        throw new TBError('permission_denied', `readOnly 挂载拒绝 '${body.tool}'(Proto §5.3)`)
+        throw new TBError('permission_denied', `readOnly 挂载拒绝 '${body.tool}'`)
       }
       const args = (body.arguments ?? {}) as Record<string, unknown>
       if (cfg.provider === 'device-fs') {
@@ -553,7 +553,7 @@ export function createTbApp(deps: TbAppDeps): Hono<{ Variables: Vars }> {
         })
         return renderResult(result, negotiate(c.req.header('accept')))
       }
-      // device 自定义 context 节点(Proto §6.3 Phase 5):标记命中 → 相对路径转发到设备。
+      // device 自定义 context 节点:标记命中 → 相对路径转发到设备。
       const contextMarker = deviceMarkerOf(cfg.providerConfig)
       if (cfg.provider !== 'r2' && cfg.provider !== 's3' && contextMarker !== null) {
         const result = await invokeDevice(deps, contextMarker.deviceId, {
@@ -564,14 +564,14 @@ export function createTbApp(deps: TbAppDeps): Hono<{ Variables: Vars }> {
         return renderResult(result, negotiate(c.req.header('accept')))
       }
       if (cfg.provider !== 'r2' && cfg.provider !== 's3') {
-        // SDK 进程内 context Provider(Proto §7 registerContext):按节点路径查本实例表。
+        // SDK 进程内 context Provider(registerContext):按节点路径查本实例表。
         const local = localContext(deps, node)
         if (local !== null) {
           const result = await dispatchContextCmd(local, body.tool, args)
           return renderResult(result, negotiate(c.req.header('accept')))
         }
-        // plugin-backed context(Proto §8.1):provider 非 r2/s3 视为 plugin id,
-        // 经 §8.3 envelope 转发;plugin 不存在/禁用/kind 不符 → invalid_argument。
+        // plugin-backed context:provider 非 r2/s3 视为 plugin id,
+        // 经 envelope 转发;plugin 不存在/禁用/kind 不符 → invalid_argument。
         const manifest = await requirePlugin(store, cfg.provider, 'context-provider', 'context')
         const provider = createPluginContextProvider({
           manifest,
@@ -613,14 +613,14 @@ export function createTbApp(deps: TbAppDeps): Hono<{ Variables: Vars }> {
       throw new TBError('permission_denied', `no scope grants '${spec.scope}' on '${node.path}'`)
     }
 
-    // registry 模块的 write/update/delete 额外过 §2.4(资源 = arguments.path)。
+    // registry 模块的 write/update/delete 额外过注册路径规则(资源 = arguments.path)。
     let registryTarget: string | undefined
     if (node.config.module === 'registry' && ['write', 'update', 'delete'].includes(cmd)) {
       const targetPath = typeof args.path === 'string' ? args.path : undefined
       if (targetPath === undefined) {
         throw new TBError('invalid_argument', "field 'path' must be a string")
       }
-      // 挂载/更新 remote 节点时校验 baseUrl 白名单(Proto §3.4,注册时即拒)。
+      // 挂载/更新 remote 节点时校验 baseUrl 白名单(注册时即拒)。
       const cfgPatch =
         cmd === 'write'
           ? args.config
@@ -635,15 +635,15 @@ export function createTbApp(deps: TbAppDeps): Hono<{ Variables: Vars }> {
         cmd === 'delete' ? 'delete' : 'write',
         deps,
       )
-      // context 配置校验 + s3 连通探测(Proto §5.3):探测出站网络,须在权限判定之后。
+      // context 配置校验 + s3 连通探测:探测出站网络,须在权限判定之后。
       await assertContextConfig(cfgPatch, deps)
-      // kind:'tool' 挂载校验(Proto §8.1):provider 必须是已注册且启用的 tool-provider plugin。
+      // kind:'tool' 挂载校验:provider 必须是已注册且启用的 tool-provider plugin。
       await assertToolConfig(cfgPatch, store)
       registryTarget = targetPath
     }
 
     const result = await mod.dispatch(cmd, args, ctx)
-    // 注册变更 → 失效该节点工具缓存 + mcp 会话缓存(Proto §4.2:Write/Update/Delete 触发失效)。
+    // 注册变更 → 失效该节点工具缓存 + mcp 会话缓存(Write/Update/Delete 触发失效)。
     if (registryTarget !== undefined) {
       await invalidateToolCache(store, registryTarget)
       await invalidateMcpSession(store, registryTarget)
@@ -651,7 +651,7 @@ export function createTbApp(deps: TbAppDeps): Hono<{ Variables: Vars }> {
     return renderResult(result, negotiate(c.req.header('accept')))
   }
 
-  // --- ~skill:remote 透传;本地 Phase 1 占位 501 ---
+  // --- ~skill:remote 透传;本地占位 501 ---
   const handleSkill = async (c: AppContext): Promise<Response> => {
     const path = splitReserved(new URL(c.req.url).pathname, '~skill')
     if (path === null) throw TBError.notFound('no such path')
@@ -665,7 +665,7 @@ export function createTbApp(deps: TbAppDeps): Hono<{ Variables: Vars }> {
     return tbErrorResponse(TBError.unimplemented('~skill not implemented yet'))
   }
 
-  // --- ~describe(Proto §1.1):有可选能力的节点返回 { kind, capabilities };其余 404 ---
+  // --- ~describe:有可选能力的节点返回 { kind, capabilities };其余 404 ---
   const handleDescribe = async (c: AppContext): Promise<Response> => {
     const path = splitReserved(new URL(c.req.url).pathname, '~describe')
     if (path === null || path === '') throw TBError.notFound('no such path')
@@ -683,7 +683,7 @@ export function createTbApp(deps: TbAppDeps): Hono<{ Variables: Vars }> {
     if (node.kind === 'context' && node.config?.kind === 'context') {
       await assertContextAlive(node, node.config, registry)
       // plugin-backed 节点回注册时抓取缓存的 capabilities(Q12);内置 provider 与
-      // device 自定义 context 节点(带转发标记,Proto §6.3)回固定表;
+      // device 自定义 context 节点(带转发标记)回固定表;
       // SDK 进程内 Provider 按可选方法实现存在性推导。
       const cfg = node.config
       const local = cfg.provider !== 'r2' && cfg.provider !== 's3' ? localContext(deps, node) : null
@@ -700,7 +700,7 @@ export function createTbApp(deps: TbAppDeps): Hono<{ Variables: Vars }> {
         headers: { 'content-type': contentTypeFor('json') },
       })
     }
-    // 无可选能力的节点(其他 kind)→ 404(Proto §1.1)。
+    // 无可选能力的节点(其他 kind)→ 404。
     throw TBError.notFound(`no capabilities for kind '${node.kind}'`)
   }
 
@@ -730,7 +730,7 @@ export function createTbApp(deps: TbAppDeps): Hono<{ Variables: Vars }> {
     if (!raw || typeof raw !== 'object') {
       throw new TBError('invalid_argument', 'body must be a NodeInput object')
     }
-    // body.path 必须等于 URL path(Proto §3.3);先于 NodeInput 结构校验(路径一致是通道契约)。
+    // body.path 必须等于 URL path;先于 NodeInput 结构校验(路径一致是通道契约)。
     if (raw.path !== path) {
       throw new TBError(
         'invalid_argument',
@@ -739,20 +739,20 @@ export function createTbApp(deps: TbAppDeps): Hono<{ Variables: Vars }> {
     }
     // 复用与 system/registry write 相同的 NodeInput 校验(kind/description 必填、kind 枚举合法)。
     const body = parseNodeInput(raw)
-    // 挂载 remote 节点时校验 baseUrl 白名单(Proto §3.4,注册时即拒)。
+    // 挂载 remote 节点时校验 baseUrl 白名单(注册时即拒)。
     assertRemoteConfigAllowed(body.config, deps.remote)
-    // register 判定 + §2.4 路径规则(含 existing 查询)。
+    // register 判定 + 注册路径规则(含 existing 查询)。
     if (!check(ctx, path, 'register').allow) {
       throw new TBError('permission_denied', `no scope grants 'register' on '${path}'`)
     }
     await assertRegisterPath(registry, ctx, body.path, 'write', deps)
-    // context 配置校验 + s3 连通探测(Proto §5.3):探测出站网络,须在权限判定之后。
+    // context 配置校验 + s3 连通探测:探测出站网络,须在权限判定之后。
     await assertContextConfig(body.config, deps)
-    // kind:'tool' 挂载校验(Proto §8.1):provider 必须是已注册且启用的 tool-provider plugin。
+    // kind:'tool' 挂载校验:provider 必须是已注册且启用的 tool-provider plugin。
     await assertToolConfig(body.config, store)
     const now = new Date().toISOString()
     const node = await registry.write(body, ctx.keyId, now)
-    // 注册变更 → 失效该节点工具缓存 + mcp 会话缓存(Proto §4.2)。
+    // 注册变更 → 失效该节点工具缓存 + mcp 会话缓存。
     await invalidateToolCache(store, body.path)
     await invalidateMcpSession(store, body.path)
     return new Response(JSON.stringify(node), {
@@ -782,7 +782,7 @@ export function createTbApp(deps: TbAppDeps): Hono<{ Variables: Vars }> {
   return app
 }
 
-/** §2.4 反向注册路径判定(查 existing 占用者;deps.reservedRoots 追加保留根)。allow=false 则抛其 error。 */
+/** 反向注册路径判定(查 existing 占用者;deps.reservedRoots 追加保留根)。allow=false 则抛其 error。 */
 async function assertRegisterPath(
   registry: NodeRegistryStore,
   ctx: CallContext,
@@ -818,9 +818,9 @@ function toEntry(n: TreeNode): TreeEntry {
 }
 
 /**
- * 目录/~tree 展示裁剪。Phase 2 DOD 要求无 call 权限的 SK 对同一调用节点
- * `tb call` 为 403,且 `tb ls` 不可见;因此 mcp/http/remote 节点在列表面同时要求 read+call。
- * 直接访问节点本身仍由 handler 保持 Proto §1.4 的 read→404 / call→403 次序。
+ * 目录/~tree 展示裁剪。无 call 权限的 SK 对同一调用节点 `tb call` 为 403,
+ * 且 `tb ls` 不可见;因此 mcp/http/remote 节点在列表面同时要求 read+call。
+ * 直接访问节点本身仍由 handler 保持 read→404 / call→403 次序。
  */
 function filterListVisible(nodes: TreeNode[], scopes: CallContext['scopes']): TreeNode[] {
   return nodes.filter((node) => {
@@ -937,7 +937,7 @@ async function helpModelFor(
       children: children.map((n) => ({ path: n.path, kind: n.kind, description: n.description })),
     }
   }
-  // device 自定义 tool 节点(Proto §6.3 Phase 5):~help 来自注册时上送的工具表(cmds),
+  // device 自定义 tool 节点:~help 来自注册时上送的工具表(cmds),
   // 不打设备;索引形态与 mcp/http 对齐,单工具全量 spec 走工具级 ~help(toolHelpModelFor)。
   const toolMarker = deviceToolMarker(node)
   if (toolMarker !== null) {
@@ -952,7 +952,7 @@ async function helpModelFor(
     const provider = await providerFor(node, ctx, deps)
     const raw = await upstreamTools(node, provider, deps, opts.refresh, opts.now)
     const { exposed } = virtualizeTools(node.virtualize, raw)
-    // 索引形态(Proto §4.2 两级披露):不含 inputSchema;全量 spec 走工具级 ~help。
+    // 索引形态(两级披露):不含 inputSchema;全量 spec 走工具级 ~help。
     return toolsToHelpModel(
       node.path,
       { kind: node.kind, description: node.description },
@@ -965,7 +965,7 @@ async function helpModelFor(
   if (node.kind === 'device' && node.config?.kind === 'device') {
     return deviceShellHelpModel(node.path, node.config.expose.shell ?? {})
   }
-  // context:cmd 表静态声明(readOnly 隐藏写动词);~help 命中即做 ttl 懒回收(Proto §5.3)。
+  // context:cmd 表静态声明(readOnly 隐藏写动词);~help 命中即做 ttl 懒回收。
   if (node.kind === 'context' && node.config?.kind === 'context') {
     await assertContextAlive(node, node.config, registry)
     if (node.config.provider === 'device-fs') {
@@ -974,7 +974,7 @@ async function helpModelFor(
         { readOnly: node.config.readOnly ?? false },
       )
     }
-    // device 自定义 context 节点(Proto §6.3 Phase 5):静态动词表(readOnly 隐藏写动词)。
+    // device 自定义 context 节点:静态动词表(readOnly 隐藏写动词)。
     if (deviceMarkerOf(node.config.providerConfig) !== null) {
       return contextHelpModel(node, { readOnly: node.config.readOnly ?? false })
     }
@@ -982,7 +982,7 @@ async function helpModelFor(
       const model = contextHelpModel(node, { readOnly: node.config.readOnly ?? false })
       const core = new Set(['List', 'Get', 'Write', 'Update'])
       // SDK 进程内 Provider:可选方法按实现存在性裁剪(与 ~describe 推导一致);
-      // plugin-backed 节点:只列四动词 + 注册时声明的可选方法(Proto §8.2 注记,Q12)。
+      // plugin-backed 节点:只列四动词 + 注册时声明的可选方法(Q12)。
       const local = localContext(deps, node)
       const declared =
         local !== null
@@ -998,7 +998,7 @@ async function helpModelFor(
 }
 
 /**
- * 工具级 `~help`(Proto §4.2 两级披露的细节级):path 非注册节点时,最长前缀 resolve 命中
+ * 工具级 `~help`(两级披露的细节级):path 非注册节点时,最长前缀 resolve 命中
  * mcp/http 节点且 rest 恰为一段(工具虚拟名)→ 单工具全量 HelpModel。工具集取自与节点级
  * 相同的缓存(getTools),不额外打上游。不匹配/工具不存在 → null(调用方 404)。
  * 可见性与列表面一致(read+call;deny==not_found 不泄露存在性)。
@@ -1025,7 +1025,7 @@ async function toolHelpModelFor(
   }
   if (rest === '' || rest.includes('/')) return null
   if (!check(ctx, node.path, 'read').allow || !check(ctx, node.path, 'call').allow) return null
-  // device 自定义 tool 节点(Proto §6.3):工具表来自注册时缓存的 providerConfig.cmds,不打设备。
+  // device 自定义 tool 节点:工具表来自注册时缓存的 providerConfig.cmds,不打设备。
   const marker = deviceToolMarker(node)
   if (marker !== null) {
     const cached = (marker.cmds ?? []).find((t) => t.name === rest)
@@ -1059,10 +1059,10 @@ async function providerFor(
     return createHttpProvider(node.config as HttpConfig, deps.secrets, { allowInsecure: insecure })
   }
   if (node.kind === 'tool' && node.config?.kind === 'tool') {
-    // SDK 进程内工具源(Proto §7 registerTool):按节点路径查本实例表,先于 plugin 解析。
+    // SDK 进程内工具源(registerTool):按节点路径查本实例表,先于 plugin 解析。
     const local = deps.locals?.tool?.(node.path)
     if (local !== undefined) return local
-    // plugin 工具源(Proto §8.1):provider = 已注册 tool-provider plugin 的 id。
+    // plugin 工具源:provider = 已注册 tool-provider plugin 的 id。
     const manifest = await requirePlugin(deps.state, node.config.provider, 'tool-provider', 'tool')
     return createPluginToolProvider({ manifest, secrets: deps.secrets, ctx })
   }
@@ -1088,7 +1088,7 @@ function upstreamTools(
 }
 
 /**
- * remote 透传(Proto §3.4):最长前缀 resolve 命中 remote 节点则改写请求打到 baseUrl。
+ * remote 透传:最长前缀 resolve 命中 remote 节点则改写请求打到 baseUrl。
  * 非 remote → 返回 null(交给普通流程)。本地两级权限:先可见(read),POST 另需 call。
  */
 async function remotePassthroughIfMatch(
@@ -1131,7 +1131,7 @@ async function remotePassthroughIfMatch(
   })
 }
 
-/** 注册 remote 节点时的白名单校验:config.kind==='remote' → baseUrl 必须在 §7 白名单内。 */
+/** 注册 remote 节点时的白名单校验:config.kind==='remote' → baseUrl 必须在白名单内。 */
 function assertRemoteConfigAllowed(config: unknown, settings: RemoteSettings): void {
   if (config === null || typeof config !== 'object') return
   if ((config as { kind?: unknown }).kind !== 'remote') return
@@ -1142,16 +1142,16 @@ function assertRemoteConfigAllowed(config: unknown, settings: RemoteSettings): v
   assertRemoteAllowed(baseUrl, settings)
 }
 
-// ---------- device 节点(Proto §6,Phase 4) ----------
+// ---------- device 节点 ----------
 
 function tbErrorFromBody(body: TBErrorBody): TBError {
   return new TBError(body.code, body.message, { retryable: body.retryable })
 }
 
-/** 设备通道缺省(Proto §7:deviceTransport 未注入)→ device 能力禁用。 */
+/** 设备通道缺省(deviceTransport 未注入)→ device 能力禁用。 */
 function requireDevice(deps: TbAppDeps): DeviceChannel {
   if (deps.device === undefined) {
-    throw TBError.unimplemented('device capability disabled: no device transport (Proto §7)')
+    throw TBError.unimplemented('device capability disabled: no device transport')
   }
   return deps.device
 }
@@ -1176,7 +1176,7 @@ function deviceIdForDeviceFs(cfg: ContextConfig): string {
   throw new TBError('invalid_argument', 'device-fs context 缺少 providerConfig.deviceId')
 }
 
-/** device 自定义节点转发标记(Proto §6.3 Phase 5):hello 代注册时网关写入 providerConfig。 */
+/** device 自定义节点转发标记:hello 代注册时网关写入 providerConfig。 */
 interface DeviceNodeMarker {
   deviceId: string
   mountPath: string
@@ -1201,13 +1201,13 @@ function deviceToolMarker(node: TreeNode): DeviceNodeMarker | null {
   return deviceMarkerOf(node.config.providerConfig)
 }
 
-/** 帧协议 call 的 path = 节点路径相对设备 mountPath(Proto §6.2,如 'tools/echo')。 */
+/** 帧协议 call 的 path = 节点路径相对设备 mountPath(如 'tools/echo')。 */
 function relativeDevicePath(nodePath: TreePath, mountPath: string): string {
   if (nodePath.startsWith(`${mountPath}/`)) return nodePath.slice(mountPath.length + 1)
   throw new TBError('invalid_argument', `device 节点 '${nodePath}' 不在挂载 '${mountPath}' 下`)
 }
 
-// ---------- SDK 进程内 Provider(Proto §7,Phase 5) ----------
+// ---------- SDK 进程内 Provider ----------
 
 /** 按节点路径查 SDK 进程内 ContextProvider(未注入/未命中 → null)。 */
 function localContext(deps: TbAppDeps, node: TreeNode): ContextProvider | null {
@@ -1222,7 +1222,7 @@ function localCapabilities(provider: ContextProvider): string[] {
   ]
 }
 
-// ---------- plugin 挂载消费(Proto §8,Phase 5) ----------
+// ---------- plugin 挂载消费 ----------
 
 /**
  * 取已注册且启用的 plugin manifest(挂载校验与调用点共用)。
@@ -1252,7 +1252,7 @@ async function pluginCapabilities(store: StateStore, id: string): Promise<readon
 }
 
 /**
- * 注册/更新 kind:'tool' 节点时的配置校验(Proto §8.1,注册时即拒):
+ * 注册/更新 kind:'tool' 节点时的配置校验(注册时即拒):
  * provider 必须是已注册且启用的 tool-provider plugin(SDK 保留 id '@local' 由
  * SDK 内部注册通道落库,不经注册面)。
  */
@@ -1262,16 +1262,13 @@ async function assertToolConfig(config: unknown, store: StateStore): Promise<voi
   assertNoDeviceMarker(config)
   const provider = (config as { provider?: unknown }).provider
   if (typeof provider !== 'string' || provider === '') {
-    throw new TBError(
-      'invalid_argument',
-      "kind:'tool' 节点需要 config.provider(plugin id,Proto §3.2)",
-    )
+    throw new TBError('invalid_argument', "kind:'tool' 节点需要 config.provider(plugin id)")
   }
   await requirePlugin(store, provider, 'tool-provider', 'tool')
 }
 
 /**
- * device 转发标记(Proto §6.3)只能由 hello 代注册写入:注册面手工携带 providerConfig
+ * device 转发标记只能由 hello 代注册写入:注册面手工携带 providerConfig
  * 的 deviceId+mountPath → 拒,防止把任意节点调用劫持转发到他人设备(与 device-fs 口径一致)。
  */
 function assertNoDeviceMarker(config: unknown): void {
@@ -1283,16 +1280,16 @@ function assertNoDeviceMarker(config: unknown): void {
   ) {
     throw new TBError(
       'invalid_argument',
-      'providerConfig 的 device 转发标记由网关代写,不得经注册面携带(Proto §6.3)',
+      'providerConfig 的 device 转发标记由网关代写,不得经注册面携带',
     )
   }
 }
 
-// ---------- context 节点(Proto §5,Phase 3) ----------
+// ---------- context 节点 ----------
 
 type ContextConfig = Extract<NodeConfig, { kind: 'context' }>
 
-/** S3 类凭证值形状(Proto §5.2):JSON {"accessKeyId","secretAccessKey"};解析失败不回显值。 */
+/** S3 类凭证值形状:JSON {"accessKeyId","secretAccessKey"};解析失败不回显值。 */
 export function parseS3Credentials(
   raw: string,
   refName: string,
@@ -1343,11 +1340,11 @@ function contextKeyPrefix(cfg: ContextConfig, nodePath: TreePath): string {
   return cfg.provider === 'r2' ? `ctx/${nodePath}` : ''
 }
 
-/** 按 config.provider 构造底层 ObjectStore('r2' = 宿主注入的平台对象存储,Proto §7 objects)。 */
+/** 按 config.provider 构造底层 ObjectStore('r2' = 宿主注入的平台对象存储)。 */
 async function contextObjectStoreFor(cfg: ContextConfig, deps: TbAppDeps): Promise<ObjectStore> {
   if (cfg.provider === 'r2') {
     if (deps.objects === undefined) {
-      throw new TBError('unavailable', 'object store not configured(Proto §7 objects 未注入)', {
+      throw new TBError('unavailable', 'object store not configured(objects 未注入)', {
         retryable: false,
       })
     }
@@ -1396,7 +1393,7 @@ async function contextProviderFor(
 /**
  * 数据面 {tool} → ContextProvider 方法派发;入参精细校验由 provider 承担。
  * 可选方法(Search/Delete)未实现(plugin 未在 capabilities 声明)→ 按 unknown cmd 拒
- * (未声明的可选方法平台永不调用,Proto §8.2)。SDK 设备侧 handler 派发同形复用(导出)。
+ * (未声明的可选方法平台永不调用)。SDK 设备侧 handler 派发同形复用(导出)。
  */
 export async function dispatchContextCmd(
   provider: ContextProvider,
@@ -1434,7 +1431,7 @@ export async function dispatchContextCmd(
   }
 }
 
-/** ttl 懒回收(Proto §5.3)单点判定:过期 → 删节点 + not_found;未过期 → 通过。 */
+/** ttl 懒回收单点判定:过期 → 删节点 + not_found;未过期 → 通过。 */
 async function assertContextAlive(
   node: TreeNode,
   cfg: ContextConfig,
@@ -1467,8 +1464,8 @@ async function pruneExpiredContext(
 }
 
 /**
- * 注册/更新 context 节点时的配置校验(Proto §3.2/§5.3/§8.1,注册时即拒):
- * provider = r2|s3 或已注册且启用的 context-provider plugin id(Phase 5);
+ * 注册/更新 context 节点时的配置校验(注册时即拒):
+ * provider = r2|s3 或已注册且启用的 context-provider plugin id;
  * s3 必填 endpoint/bucket/authRef,且做一次浅 list 连通探测(D8)——失败 →
  * unavailable(retryable);r2 与 plugin 不探测(plugin 在 PluginRegistry.Write 时已探活)。
  */
@@ -1497,7 +1494,7 @@ async function assertContextConfig(config: unknown, deps: TbAppDeps): Promise<vo
   }
 }
 
-/** ~tree 的 DSL 文本渲染:每行缩进树(简单实现;JSON 是规范形状,Proto §1.3)。 */
+/** ~tree 的 DSL 文本渲染:每行缩进树(简单实现;JSON 是规范形状)。 */
 function renderTreeDsl(tree: TreeJson): string {
   const lines: string[] = []
   const walk = (n: TreeJson, depth: number): void => {

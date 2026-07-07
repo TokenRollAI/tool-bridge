@@ -1,5 +1,5 @@
 /**
- * 内容协商(Proto §1.2,规范性)。
+ * 内容协商(规范性)。
  *
  * 把 `Accept` 头归类为三种表现之一。调用点(gateway)据此决定实际渲染:
  * `~help` 只有 dsl(text/plain)与 json 两种(无 markdown 变体),故 `~help` 端点会把
@@ -10,10 +10,10 @@
 export type Representation = 'dsl' | 'json' | 'markdown'
 
 /**
- * 归类 `Accept`(Proto §1.2):
+ * 归类 `Accept`:
  *   含 `application/json` → 'json';含 `text/markdown` → 'markdown';
  *   其余(`*​/*`、`text/plain`、缺失/空)→ 'dsl'(默认表现)。
- * 仅做大小写无关的子串匹配,不解析 q 值(Phase 1 不需要;后续如需可在此升级)。
+ * 仅做大小写无关的子串匹配,不解析 q 值(当前不需要;后续如需可在此升级)。
  * json 优先于 markdown:两者同时出现时取 json(机器可读优先)。
  */
 export function negotiate(acceptHeader: string | undefined): Representation {
@@ -24,7 +24,7 @@ export function negotiate(acceptHeader: string | undefined): Representation {
   return 'dsl'
 }
 
-/** 表现 → 出网关的 Content-Type(Proto §1.2)。 */
+/** 表现 → 出网关的 Content-Type。 */
 export function contentTypeFor(kind: Representation): string {
   switch (kind) {
     case 'json':

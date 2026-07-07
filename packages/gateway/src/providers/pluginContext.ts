@@ -1,10 +1,10 @@
 /**
- * plugin-backed context Provider(Proto §8.1 挂载消费;kind='context',provider=<plugin-id>)。
+ * plugin-backed context Provider(挂载消费;kind='context',provider=<plugin-id>)。
  *
  * 实现 core `ContextProvider` 语义:四核心动词恒有;可选方法(Search/Delete)只在注册时
- * `~describe.capabilities` 声明过才挂上——未声明的平台永不调用(Proto §8.2),网关调度
+ * `~describe.capabilities` 声明过才挂上——未声明的平台永不调用,网关调度
  * (app.ts dispatchContextCmd)对缺失方法按 unknown cmd 拒。
- * 每个方法一次 §8.3 envelope 调用;返回值(含 `$ref`)原样透传。
+ * 每个方法一次 envelope 调用;返回值(含 `$ref`)原样透传。
  */
 
 import type {

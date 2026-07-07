@@ -1,5 +1,5 @@
 /**
- * shell 命令白名单匹配器(Proto §6.2「shell 命令白名单」,规范性)。
+ * shell 命令白名单匹配器(规范性)。
  *
  * 规则:allow 缺省/空数组 = 拒绝一切(默认拒);单值 ['*'] = 放行全部;其余对 command
  * 做 shell-word 切分取 argv[0] 的 basename,与条目精确匹配;白名单非 ['*'] 时 command
@@ -55,7 +55,7 @@ export function isCommandAllowed(command: string, allow: readonly string[] | und
   return allow.includes(name)
 }
 
-/** allow 的人读描述(进 shell 节点 ~help 的 exec cmd `h` 行,Proto §6.3)。 */
+/** allow 的人读描述(进 shell 节点 ~help 的 exec cmd `h` 行)。 */
 export function describeAllow(allow: readonly string[] | undefined): string {
   if (!allow || allow.length === 0) return '允许命令: 无(默认拒绝一切)'
   if (isAllowAll(allow)) return '允许命令: *'

@@ -1,5 +1,5 @@
 {
-  // tb-gateway Worker(Phase 0 骨架)。资源名从 TB_NAME_PREFIX(=tb)派生。
+  // tb-gateway Worker。资源名从 TB_NAME_PREFIX(=tb)派生。
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "tb-gateway",
   "main": "src/index.ts",
@@ -12,30 +12,30 @@
   "observability": {
     "enabled": true
   },
-  // r2 presign 的 S3 兼容端点(account_id 派生)与 bucket 名(Proto §5.2 凭证链);
+  // r2 presign 的 S3 兼容端点(account_id 派生)与 bucket 名;
   // presign 凭证本体走 SecretStore 'r2-presign' 或 wrangler secret,不入 vars。
   "vars": {
     "TB_R2_BUCKET": "tb-r2",
     "TB_R2_S3_ENDPOINT": "https://0cb9b897010bc426cd8bf33d8c052d11.r2.cloudflarestorage.com"
   },
-  // KV:树配置 / SK 哈希表 / manifest(Reference §4)。id 为占位,由 scripts/provision.mjs
+  // KV:树配置 / SK 哈希表 / manifest。id 为占位,由 scripts/provision.mjs
   // 幂等创建后回填;本地 wrangler dev / vitest-pool-workers 用 miniflare 本地实例,不校验该 id。
   "kv_namespaces": [
     { "binding": "TB_KV", "id": "d18c93de33cf4ba2b1fbf7d26fd742f1" }
   ],
-  // R2:context r2 provider 与大对象 $ref(Reference §4)。
+  // R2:context r2 provider 与大对象 $ref。
   "r2_buckets": [
     { "binding": "TB_R2", "bucket_name": "tb-r2" }
   ],
-  // Durable Objects:M4 每设备一个 DeviceSession(WS hibernation,Reference §4)。
+  // Durable Objects:每设备一个 DeviceSession(WS hibernation)。
   "durable_objects": {
     "bindings": [{ "name": "TB_DEVICE", "class_name": "DeviceSession" }]
   },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["DeviceSession"] }],
-  // M9 Dashboard 静态资源(Workers Static Assets,挂 /ui,与 gateway 一体部署)。
+  // Dashboard 静态资源(Workers Static Assets,挂 /ui,与 gateway 一体部署)。
   // run_worker_first=true:一切请求先进 Worker,静态资源仅由 app.ts 的 /ui 路由经
   // ASSETS binding 显式转发——SPA 回退严格限定 /ui,不吞根 ~help/数据面/system/*
-  // (Architecture M9 路由次序要求)。directory 指向 dashboard 构建产物,
+  // (路由次序要求)。directory 指向 dashboard 构建产物,
   // deploy 前须先 `pnpm --filter @tool-bridge/dashboard build`(deploy:all 已编排)。
   "assets": {
     "directory": "../dashboard/dist",

@@ -9,7 +9,7 @@ import { readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { parseEnv } from 'node:util'
 
-// Worker 运行时白名单(Proto §2.5:TB_SECRET_ENCRYPTION_KEY 为 SecretStore 主密钥,env-only)。
+// Worker 运行时白名单(TB_SECRET_ENCRYPTION_KEY 为 SecretStore 主密钥,env-only)。
 const RUNTIME_WHITELIST = [
   'TB_NAME_PREFIX',
   'TB_SECRET_ENCRYPTION_KEY',

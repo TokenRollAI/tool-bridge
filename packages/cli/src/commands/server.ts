@@ -6,7 +6,7 @@ import { deleteNode, registerNode } from '../registry'
 import type { Node, NodeInput, Page, TreeJson } from '../types'
 
 /**
- * `tb server add <path> --base-url <u>` —— 联邦一个外部 HTBP 服务(kind:'remote',§3.4)。
+ * `tb server add <path> --base-url <u>` —— 联邦一个外部 HTBP 服务(kind:'remote')。
  *
  * 注意:此处 `--base-url` 指**远端 HTBP 服务地址**(config.baseUrl),与全局网关 `--base-url`
  * 语义冲突;本命令下网关地址仅取自 $TB_BASE_URL / 当前 profile(不接受网关 --base-url 覆盖)。
@@ -106,7 +106,7 @@ export const serverLsCommand = defineCommand({
   },
 })
 
-/** `tb server rm <path>` —— 卸载 remote 节点(管理面 system/registry delete,§3.3)。 */
+/** `tb server rm <path>` —— 卸载 remote 节点(管理面 system/registry delete)。 */
 export const serverRmCommand = defineCommand({
   meta: { name: 'rm', description: 'Remove a federated remote server' },
   args: {

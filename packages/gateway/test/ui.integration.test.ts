@@ -2,7 +2,7 @@ import { SELF } from 'cloudflare:test'
 import { describe, expect, it } from 'vitest'
 import { TEST_ADMIN_SK } from './fixtures'
 
-// Phase 6(Dashboard)集成测试:/ui 静态资源托管与路由次序(Architecture M9、DOD §8 前置 spike)。
+// Dashboard 集成测试:/ui 静态资源托管与路由次序。
 // wrangler.jsonc assets.run_worker_first=true + app.ts 显式转发——断言:
 // ① /ui 免认证可加载(登录页前置条件);② SPA 回退仅在 /ui 内生效(深链回 index.html);
 // ③ 根 ~help / POST 数据面 / system/* 不被静态资源吞掉;④ GET / 的 Accept 分流(浏览器 302 → /ui/)。

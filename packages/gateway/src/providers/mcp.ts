@@ -1,10 +1,10 @@
 /**
- * mcp 内置 Provider(Proto §4.2):经官方 MCP SDK 的 Streamable HTTP client 连接 `config.url`。
+ * mcp 内置 Provider:经官方 MCP SDK 的 Streamable HTTP client 连接 `config.url`。
  *
  * - `List` ← `tools/list`,`Call` ← `tools/call`;上游 `tools[].inputSchema` 已是 JSON Schema,
  *   直接进 `ToolSpec.inputSchema`;annotations 派生 effect(readOnlyHint→read、
  *   destructiveHint→destructive;无提示则不标注,避免过度声明)。
- * - **会话复用**(Proto §4.2 演进):上游签发 `Mcp-Session-Id` 时存 StateStore
+ * - **会话复用**:上游签发 `Mcp-Session-Id` 时存 StateStore
  *   `mcpsession:<nodePath>`(连同协商的 protocolVersion),后续请求带 sessionId 重建
  *   transport——SDK 对已有 sessionId 跳过 initialize,单次调用只剩一趟上游往返。
  *   会话失效(上游 400/404)→ 清缓存、完整握手重试一次并回填新会话。
@@ -32,7 +32,7 @@ import {
 } from '@tool-bridge/core'
 import type { UpstreamProvider } from './types'
 
-/** mcp 节点 config(Proto §3.2)。 */
+/** mcp 节点 config。 */
 export interface McpConfig {
   url: string
   authRef?: string
@@ -46,7 +46,7 @@ interface McpTool {
   annotations?: { readOnlyHint?: boolean; destructiveHint?: boolean }
 }
 
-/** annotations → effect(Proto §4.1 词汇);无明确提示则返回 undefined(不臆测 write)。 */
+/** annotations → effect 词汇;无明确提示则返回 undefined(不臆测 write)。 */
 function effectFromAnnotations(a: McpTool['annotations']): string | undefined {
   if (!a) return undefined
   if (a.readOnlyHint === true) return 'read'
@@ -229,7 +229,7 @@ async function guard<T>(fn: () => Promise<T>): Promise<T> {
 
 /**
  * 构造 mcp Provider。`allowInsecure`(env `TB_ALLOW_INSECURE_HTTP=true`)放行 http:// 上游。
- * 构造即做 https 强制(Proto §4.2):非法 url → 抛 invalid_argument(在 guard 之外,快速失败)。
+ * 构造即做 https 强制:非法 url → 抛 invalid_argument(在 guard 之外,快速失败)。
  */
 export function createMcpProvider(
   config: McpConfig,

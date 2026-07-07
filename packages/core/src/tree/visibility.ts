@@ -1,5 +1,5 @@
 /**
- * 可见性裁剪(Proto §2.3,行 223):"可见性即权限"。
+ * 可见性裁剪:"可见性即权限"。
  *
  * `~help` / `~tree` / 各 List 的结果必须按调用者裁剪——对 (path,'read') 判不过的
  * 节点不出现在结果里。裁剪是体验,不是判定;数据面每次调用仍必须过 Check。
@@ -15,7 +15,7 @@
 
 import type { Action, Scope, TreeNode, TreePath } from '../types'
 
-/** (scopes, path, action) → 是否放行;由 auth/scope.ts 的 checkScopes 满足(Proto §2.2)。 */
+/** (scopes, path, action) → 是否放行;由 auth/scope.ts 的 checkScopes 满足。 */
 export type ScopeChecker = (scopes: Scope[], path: TreePath, action: Action) => boolean
 
 /** 剔除对 (node.path,'read') 判定不过的节点。 */

@@ -3,13 +3,12 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 
 /**
- * CLI 本地凭据配置(`tb login`/`use` 维护;Proto 附A `tb login` = 纯本地无服务端接口)。
+ * CLI 本地凭据配置(`tb login`/`use` 维护;纯本地,无服务端接口)。
  *
  * 落盘位置:`$XDG_CONFIG_HOME/tool-bridge/config.json`(缺省 `~/.config/tool-bridge/config.json`)。
  * 目录 0700、文件 0600(凭据不出网关之外,亦不宽权落盘)。
  *
- * 注:Proto 附A 原文写 `~/.tb/credentials`;此处按 team-lead 指定用 XDG 路径 +
- * profile 结构(见任务书)。属对 docs 的偏差,已在交付说明标注。
+ * 采用 XDG 路径 + 多 profile 结构(而非单文件 credentials)。
  */
 export interface Profile {
   baseUrl: string
@@ -23,7 +22,7 @@ export interface DeviceConfig {
 export interface CliConfig {
   current?: string
   profiles: Record<string, Profile>
-  /** 本机稳定设备身份(Phase 4 tb connect 缺省 deviceId)。 */
+  /** 本机稳定设备身份(tb connect 缺省 deviceId)。 */
   device?: DeviceConfig
 }
 

@@ -12,7 +12,7 @@ const sk = (over: Partial<SkArg> = {}): SkArg => ({
   ...over,
 })
 
-describe('checkRegisterPath(Proto §2.4 反向注册路径规则)', () => {
+describe('checkRegisterPath(反向注册路径规则)', () => {
   describe('规则 a:声明 registerPaths 后目标必须落在某前缀之下', () => {
     it('正例:registerPaths 内的目标放行', () => {
       const r = checkRegisterPath({

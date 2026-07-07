@@ -1,15 +1,14 @@
 /**
- * 公共类型(Proto §0.3/§0.4、§2、§3)。
+ * 公共类型。
  *
- * 原样转写规范中的 TS 定义;字段与注释以 docs/Proto.md 为真源,
- * 此处仅补充实现所需的最小派生(如 ACTIONS 常量表)。
+ * 原样转写规范中的 TS 定义;此处仅补充实现所需的最小派生(如 ACTIONS 常量表)。
  */
 
-/** 资源 URI(Proto §0.1)。 */
+/** 资源 URI。 */
 export type URI = string
-/** 树上路径,'/' 分隔,不含保留段;如 "docs/context7"(Proto §0.3)。 */
+/** 树上路径,'/' 分隔,不含保留段;如 "docs/context7"。 */
 export type TreePath = string
-/** ISO 8601, UTC(Proto §0.3)。 */
+/** ISO 8601, UTC。 */
 export type Timestamp = string
 
 export interface Page<T> {
@@ -20,17 +19,17 @@ export interface Page<T> {
 
 export interface ListOptions {
   cursor?: string
-  /** 规范默认 50、上限 200,超上限静默钳制(Proto §0.3)。 */
+  /** 规范默认 50、上限 200,超上限静默钳制。 */
   limit?: number
   /** 键集合由各接口 ~help 声明;未声明的键 → invalid_argument。 */
   filter?: Record<string, string>
 }
 
-/** List limit 的规范默认与上限(Proto §0.3)。 */
+/** List limit 的规范默认与上限。 */
 export const LIST_LIMIT_DEFAULT = 50
 export const LIST_LIMIT_MAX = 200
 
-/** "user:alice" | "agent:researcher" | "device:build-01"(Proto §0.3)。 */
+/** "user:alice" | "agent:researcher" | "device:build-01"。 */
 export type OwnerRef = string
 
 export interface CallContext {
@@ -38,20 +37,20 @@ export interface CallContext {
   keyId: string
   owner: OwnerRef
   scopes: Scope[]
-  /** 反向注册路径收紧规则(Proto §2.4);缺省按非保留根放行。 */
+  /** 反向注册路径收紧规则;缺省按非保留根放行。 */
   registerPaths?: TreePath[]
   /** 全链路观测。 */
   traceId: string
 }
 
-// ---------- §2 Auth ----------
+// ---------- Auth ----------
 
 export type Action = 'read' | 'write' | 'call' | 'register' | 'admin'
 
 export const ACTIONS: readonly Action[] = ['read', 'write', 'call', 'register', 'admin']
 
 export interface Scope {
-  /** 树路径 glob:"**" | "docs/**" | "device/build-01/**"(Proto §2.2)。 */
+  /** 树路径 glob:"**" | "docs/**" | "device/build-01/**"。 */
   pattern: string
   actions: Action[]
   /** 默认 allow;deny 优先于一切 allow。 */
@@ -65,9 +64,9 @@ export interface SecretKey {
   hash: string
   owner: OwnerRef
   description?: string
-  /** 空数组 = 无任何权限(Proto §2.2)。 */
+  /** 空数组 = 无任何权限。 */
   scopes: Scope[]
-  /** 反向注册路径约束(Proto §2.4);缺省见规则 b。 */
+  /** 反向注册路径约束;缺省见规则 b。 */
   registerPaths?: TreePath[]
   /** 吊销 = Update{disabled:true} 或 Delete。 */
   disabled?: boolean
@@ -84,7 +83,7 @@ export interface SecretKeyInput {
   expiresAt?: Timestamp
 }
 
-// ---------- §3 Tree ----------
+// ---------- Tree ----------
 
 export type NodeKind =
   | 'directory'
@@ -113,11 +112,11 @@ export interface TreeNode {
   kind: NodeKind
   /** 一句话;上级 ~help 列子节点时展示。 */
   description: string
-  /** 按 kind 区分(Proto §3.2)。 */
+  /** 按 kind 区分。 */
   config?: NodeConfig
   /** 工具虚拟化(mcp/http 适用)。 */
   virtualize?: Virtualize
-  /** keyId;device 节点由 Gateway 代写;自动物化 directory 为 'system:auto'(Proto §3.3)。 */
+  /** keyId;device 节点由 Gateway 代写;自动物化 directory 为 'system:auto'。 */
   registeredBy: string
   /** 仅 device:连接状态。 */
   online?: boolean
@@ -149,16 +148,16 @@ export interface HttpToolDef {
 }
 
 export interface DeviceExpose {
-  /** 挂 `<mountPath>/shell` 工具节点;allow 白名单语义见 Proto §6.2(缺省 [] = 全拒)。 */
+  /** 挂 `<mountPath>/shell` 工具节点;allow 白名单语义:缺省 [] = 全拒。 */
   shell?: { description?: string; allow?: string[] }
-  /** 挂 `<mountPath>/fs` context 节点(file provider);多根语义见 Proto §6.3。 */
+  /** 挂 `<mountPath>/fs` context 节点(file provider);支持多根。 */
   fs?: { roots: string[]; readOnly?: boolean }
   /** SDK 自定义节点(路径相对 mountPath)。 */
   nodes?: DeviceNodeInput[]
 }
 
 /**
- * expose.nodes 元素(Proto §6.3):NodeInput + 可选工具表 `cmds`(ToolSpec 形状,
+ * expose.nodes 元素:NodeInput + 可选工具表 `cmds`(ToolSpec 形状,
  * SDK 随注册上送;网关存入代写节点的 providerConfig 作 `~help` 数据源,不新增帧类型)。
  */
 export type DeviceNodeInput = NodeInput & { cmds?: DeviceNodeCmd[] }
@@ -194,16 +193,16 @@ export type NodeConfig =
     }
   | { kind: 'device'; deviceId: string; expose: DeviceExpose }
   | { kind: 'remote'; baseUrl: string; skRef?: string }
-  /** tool-provider 挂载(Phase 5,Proto §8.1):provider = plugin id 或 SDK 内部保留 id(如 '@local')。
-   *  providerConfig:设备自定义节点的转发标记(deviceId+mountPath+cmds,Proto §6.3,网关代写)。 */
+  /** tool-provider 挂载:provider = plugin id 或 SDK 内部保留 id(如 '@local')。
+   *  providerConfig:设备自定义节点的转发标记(deviceId+mountPath+cmds,网关代写)。 */
   | { kind: 'tool'; provider: string; providerConfig?: Record<string, unknown> }
 
 export type NodeInput = Omit<TreeNode, 'registeredBy' | 'online' | 'createdAt' | 'updatedAt'>
 
-/** 自动物化中间 directory 的 registeredBy 标记(Proto §3.3)。 */
+/** 自动物化中间 directory 的 registeredBy 标记。 */
 export const SYSTEM_AUTO = 'system:auto'
 
-/** 保留段(Proto §1.1):不可作为普通路径段。 */
+/** 保留段:不可作为普通路径段。 */
 export const RESERVED_SEGMENTS: readonly string[] = [
   '~help',
   '~skill',
@@ -212,5 +211,5 @@ export const RESERVED_SEGMENTS: readonly string[] = [
   '~describe',
 ]
 
-/** 平台保留根路径段(Proto §1.1/§2.4b 基础集;部署配置可追加)。 */
+/** 平台保留根路径段(基础集;部署配置可追加)。 */
 export const RESERVED_ROOTS: readonly string[] = ['system', 'ui']
