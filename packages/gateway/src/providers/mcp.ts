@@ -9,6 +9,10 @@
  *   transport——SDK 对已有 sessionId 跳过 initialize,单次调用只剩一趟上游往返。
  *   会话失效(上游 400/404)→ 清缓存、完整握手重试一次并回填新会话。
  *   缓存的只有会话凭证与 tools/list(toolCache);**调用结果永不缓存**。
+ * - **空列表防御**:不合规上游(实测 MetaMCP)对过期会话不按 spec 回 404,而是当作
+ *   空会话正常返回 200 + 空 tools——网关侧毫无失效信号。故 `list` 在"复用缓存会话且
+ *   拿到空列表"时视为可疑:清会话、完整重握手再取一次,仍空才相信(只重试一次,
+ *   真空列表上游至多多付一趟握手)。
  * - `authRef` 经 SecretStore.resolve 注入 `requestInit.headers` 的静态 `Authorization: Bearer`。
  * - **单一 choke point**(`guard`):一切传输/协议错误经 `normalizeUpstreamError` 归一为 TBError;
  *   MCP RPC 业务错误(`result.isError`)不是错误——落 `ToolResult.isError`,正常返回。
@@ -155,6 +159,12 @@ function isSessionInvalid(err: unknown): boolean {
   return err instanceof StreamableHTTPError && (err.code === 404 || err.code === 400)
 }
 
+/** `withSession` 的返回:结果值 + 本次是否复用了缓存会话(未经历完整 initialize)。 */
+interface SessionOutcome<T> {
+  value: T
+  viaCachedSession: boolean
+}
+
 /**
  * 会话内执行 `fn`:有缓存会话则带 sessionId 重建 transport(SDK 跳过 initialize,单趟往返);
  * 无缓存/会话失效则完整握手并回填缓存。**不再主动 terminateSession**——会话跨请求存续,
@@ -165,7 +175,7 @@ async function withSession<T>(
   bearer: string | undefined,
   session: McpSessionStore | undefined,
   fn: (client: Client) => Promise<T>,
-): Promise<T> {
+): Promise<SessionOutcome<T>> {
   const makeTransport = (sessionId: string | undefined): StreamableHTTPClientTransport =>
     new StreamableHTTPClientTransport(new URL(url), {
       fetch: noStandaloneSseFetch,
@@ -184,12 +194,12 @@ async function withSession<T>(
       { jsonSchemaValidator: new CfWorkerJsonSchemaValidator() },
     )
 
-  const runFresh = async (): Promise<T> => {
+  const runFresh = async (): Promise<SessionOutcome<T>> => {
     const transport = makeTransport(undefined)
     const client = makeClient()
     await client.connect(transport) // initialize 握手;成功后 transport 持有新 sessionId(如有)
     await saveSession(session, transport)
-    return await fn(client)
+    return { value: await fn(client), viaCachedSession: false }
   }
 
   const cached = await loadSession(session)
@@ -201,7 +211,7 @@ async function withSession<T>(
       transport.setProtocolVersion(cached.protocolVersion)
     }
     try {
-      return await fn(client)
+      return { value: await fn(client), viaCachedSession: true }
     } catch (err) {
       if (!isSessionInvalid(err)) throw err
       await clearSession(session)
@@ -246,20 +256,25 @@ export function createMcpProvider(
     list: () =>
       guard(async () => {
         const b = await bearer()
-        const { tools } = (await withSession(config.url, b, opts.session, (c) =>
-          c.listTools(),
-        )) as {
-          tools: McpTool[]
+        const listOnce = (): Promise<SessionOutcome<{ tools: McpTool[] }>> =>
+          withSession(config.url, b, opts.session, (c) => c.listTools()) as Promise<
+            SessionOutcome<{ tools: McpTool[] }>
+          >
+        let res = await listOnce()
+        // 空列表防御(见文件头):复用缓存会话拿到空列表 → 清会话完整重握手再取一次。
+        if (res.viaCachedSession && res.value.tools.length === 0) {
+          await clearSession(opts.session)
+          res = await listOnce()
         }
-        return tools.map(toSpec)
+        return res.value.tools.map(toSpec)
       }),
     call: (name, args) =>
       guard(async () => {
         const b = await bearer()
-        const res = await withSession(config.url, b, opts.session, (c) =>
+        const { value } = await withSession(config.url, b, opts.session, (c) =>
           c.callTool({ name, arguments: args }),
         )
-        return toToolResult(res as { content?: unknown; isError?: boolean })
+        return toToolResult(value as { content?: unknown; isError?: boolean })
       }),
   }
 }

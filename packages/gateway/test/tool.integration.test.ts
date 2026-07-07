@@ -416,6 +416,120 @@ describe('remote 节点(白名单、X-TB-Via 环检测)', () => {
   })
 })
 
+/**
+ * 极简 Streamable HTTP MCP 上游 mock(有状态会话,JSON 应答面覆盖 SDK client 所需的
+ * initialize / notifications/initialized / tools/list)。`expireAll()` 模拟上游空闲回收
+ * 会话后的**不合规行为**(实测 MetaMCP):对过期会话不按 spec 回 404,而是当作空会话
+ * 正常返回 200 + 空 tools。GET(standalone SSE)不会到达这里——provider 侧已拦成 405。
+ */
+function mcpUpstreamMock(tools: Array<{ name: string; description: string }>) {
+  const sessions = new Set<string>()
+  let issued = 0
+  let initializeCount = 0
+  const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+    const body = JSON.parse(String(init?.body)) as {
+      id?: number | string
+      method: string
+      params?: { protocolVersion?: string }
+    }
+    const rpc = (result: unknown, headers: Record<string, string> = {}) =>
+      new Response(JSON.stringify({ jsonrpc: '2.0', id: body.id, result }), {
+        status: 200,
+        headers: { 'content-type': 'application/json', ...headers },
+      })
+
+    if (body.method === 'initialize') {
+      initializeCount += 1
+      issued += 1
+      const sid = `sess-${issued}`
+      sessions.add(sid)
+      return rpc(
+        {
+          protocolVersion: body.params?.protocolVersion ?? '2025-03-26',
+          capabilities: { tools: {} },
+          serverInfo: { name: 'mock-mcp', version: '0.0.0' },
+        },
+        { 'mcp-session-id': sid },
+      )
+    }
+    if (body.method === 'notifications/initialized') return new Response(null, { status: 202 })
+    if (body.method === 'tools/list') {
+      const sid = new Headers(init?.headers).get('mcp-session-id')
+      const live = sid !== null && sessions.has(sid)
+      return rpc({
+        tools: live ? tools.map((t) => ({ ...t, inputSchema: { type: 'object' } })) : [],
+      })
+    }
+    return new Response(
+      JSON.stringify({
+        jsonrpc: '2.0',
+        id: body.id,
+        error: { code: -32601, message: `unknown method ${body.method}` },
+      }),
+      { status: 200, headers: { 'content-type': 'application/json' } },
+    )
+  })
+  return { fetchMock, expireAll: () => sessions.clear(), initializeCalls: () => initializeCount }
+}
+
+async function mountMcp(path: string): Promise<void> {
+  const res = await postJson(
+    'system/registry',
+    {
+      tool: 'write',
+      arguments: {
+        path,
+        kind: 'mcp',
+        description: 'mock mcp',
+        config: { kind: 'mcp', url: 'https://mcp-mock.test/mcp' },
+      },
+    },
+    admin(),
+  )
+  expect(res.status).toBe(200)
+}
+
+describe('mcp 会话复用:过期会话空列表防御(默认离线,上游为 fetch mock)', () => {
+  it('上游回收会话后回 200+空列表(不合规)→ 清会话重握手一次,工具列表恢复', async () => {
+    const upstream = mcpUpstreamMock([{ name: 'echo', description: 'echo back' }])
+    vi.stubGlobal('fetch', upstream.fetchMock)
+    await mountMcp('ext/mcp-expiry')
+
+    // 首次 ~help:完整握手 + tools/list,见 echo;会话回填 mcpsession:<path>。
+    const first = await SELF.fetch('https://tb.test/ext/mcp-expiry/~help', admin())
+    expect(first.status).toBe(200)
+    expect(parseHelpDsl(await first.text()).cmds.map((c) => c.name)).toContain('echo')
+    expect(upstream.initializeCalls()).toBe(1)
+
+    upstream.expireAll()
+
+    // refresh=1 跳过 toolCache 强制打上游:复用的缓存会话拿到空列表 → 防御生效,
+    // 清会话完整重握手(第二次 initialize)后恢复工具列表,而不是把空列表当真。
+    const second = await SELF.fetch('https://tb.test/ext/mcp-expiry/~help?refresh=1', admin())
+    expect(second.status).toBe(200)
+    expect(parseHelpDsl(await second.text()).cmds.map((c) => c.name)).toContain('echo')
+    expect(upstream.initializeCalls()).toBe(2)
+  })
+
+  it('真空列表上游:完整握手拿到的空列表原样相信;缓存会话空列表只重试一次不循环', async () => {
+    const upstream = mcpUpstreamMock([])
+    vi.stubGlobal('fetch', upstream.fetchMock)
+    await mountMcp('ext/mcp-empty')
+
+    // 首次:完整握手(非缓存会话)拿到空列表 → 直接相信,不触发重试。
+    const first = await SELF.fetch('https://tb.test/ext/mcp-empty/~help', admin())
+    expect(first.status).toBe(200)
+    expect(parseHelpDsl(await first.text()).cmds).toHaveLength(0)
+    expect(upstream.initializeCalls()).toBe(1)
+
+    // 再次(会话未过期):缓存会话拿到空列表 → 恰好一次重握手复核,仍空则相信。
+    const second = await SELF.fetch('https://tb.test/ext/mcp-empty/~help?refresh=1', admin())
+    expect(second.status).toBe(200)
+    expect(parseHelpDsl(await second.text()).cmds).toHaveLength(0)
+    expect(upstream.initializeCalls()).toBe(2)
+  })
+})
+
 // opt-in:仅当 TB_TEST_MCP_URL 注入(pnpm echo-mcp 起在 127.0.0.1:39001)时运行真实 mcp E2E。
 const mcpUrl = (env as { TB_TEST_MCP_URL?: string }).TB_TEST_MCP_URL
 const mcpIt = mcpUrl !== undefined ? it : it.skip
