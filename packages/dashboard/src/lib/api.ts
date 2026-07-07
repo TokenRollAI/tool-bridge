@@ -82,6 +82,8 @@ export interface InvokeResult {
   text: string
   /** application/json 时的解析结果。 */
   json?: unknown
+  /** 端到端耗时(fetch 发起到 body 读完)。 */
+  ms: number
 }
 
 /**
@@ -95,6 +97,7 @@ export async function invoke(
   args: unknown,
   accept: 'json' | 'markdown' = 'json',
 ): Promise<InvokeResult> {
+  const started = performance.now()
   const res = await request(conn, `/${path}`, {
     method: 'POST',
     body: { tool, arguments: args ?? {} },
@@ -102,14 +105,15 @@ export async function invoke(
   })
   const contentType = res.headers.get('content-type') ?? ''
   const text = await res.text()
+  const ms = Math.round(performance.now() - started)
   if (contentType.includes('application/json')) {
     try {
-      return { contentType, text, json: JSON.parse(text) }
+      return { contentType, text, json: JSON.parse(text), ms }
     } catch {
-      return { contentType, text }
+      return { contentType, text, ms }
     }
   }
-  return { contentType, text }
+  return { contentType, text, ms }
 }
 
 /** 登录校验:GET /~help 能过认证即有效(与 tb login 同一判据)。 */

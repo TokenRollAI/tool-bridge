@@ -1,5 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { getHealthz, getHelp, getHelpDsl, getTree, type InvokeResult, invoke } from './api'
+import { useSyncExternalStore } from 'react'
+import { type ApiError, getHealthz, getHelp, getHelpDsl, getTree, type InvokeResult, invoke } from './api'
+import { type InvokeRecord, loadHistory, recordInvoke, subscribeHistory } from './history'
 import { useConn, useSession } from './session'
 import type { Page, RegistryNode, SecretKeyInfo } from './types'
 
@@ -69,12 +71,40 @@ export interface InvokeInput {
   accept?: 'json' | 'markdown'
 }
 
-/** 数据面调用(变更型;成功后由调用方决定失效哪些查询)。 */
+/** 数据面调用(变更型;成功后由调用方决定失效哪些查询)。全部调用落 per-profile 历史。 */
 export function useInvoke() {
   const conn = useConn()
+  const { active } = useSession()
+  const profile = active?.name ?? ''
   return useMutation<InvokeResult, Error, InvokeInput>({
     mutationFn: ({ path, tool, args, accept }) => invoke(conn, path, tool, args, accept ?? 'json'),
+    onSuccess: (r, { path, tool, args }) =>
+      recordInvoke(profile, {
+        path,
+        tool,
+        args,
+        ok: true,
+        ms: r.ms,
+        at: new Date().toISOString(),
+      }),
+    onError: (e, { path, tool, args }) =>
+      recordInvoke(profile, {
+        path,
+        tool,
+        args,
+        ok: false,
+        code: (e as ApiError).code ?? 'internal',
+        ms: 0,
+        at: new Date().toISOString(),
+      }),
   })
+}
+
+/** 当前 profile 的调用历史(响应式)。 */
+export function useHistory(): InvokeRecord[] {
+  const { active } = useSession()
+  const profile = active?.name ?? ''
+  return useSyncExternalStore(subscribeHistory, () => loadHistory(profile))
 }
 
 /** 使树与节点级缓存失效(挂载/卸载/SK 变更后)。 */
