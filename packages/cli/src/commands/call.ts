@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
-import { defineCommand } from 'citty'
-import { globalArgs, resolveTarget } from '../args'
+import { Command } from 'commander'
+import { resolveTarget, withGlobalOpts } from '../args'
 import { CliError, callTool, callToolText } from '../http'
 import { guard, printJson, printLine } from '../output'
 
@@ -37,37 +37,41 @@ export function parseCallArgs(argsStr?: string, argsFile?: string): Record<strin
  * `tb call <path> --tool <name> [--args '<json>' | --args-file <f>]` —— 数据面调用。
  * 默认人类模式:markdown 原样打印;`--json`:输出原始 JSON。TBError → stderr + exit 1。
  */
-export const callCommand = defineCommand({
-  meta: { name: 'call', description: 'Invoke a tool on a node (POST /<path>)' },
-  args: {
-    ...globalArgs,
-    path: { type: 'positional', description: 'Node tree path', required: true },
-    tool: { type: 'string', description: 'Tool/cmd name', required: true },
-    args: { type: 'string', description: 'Arguments as inline JSON object' },
-    'args-file': { type: 'string', description: 'Arguments from a JSON file' },
-  },
-  async run({ args }) {
-    const asJson = Boolean(args.json)
-    await guard(asJson, async () => {
-      const path = String(args.path ?? '').trim()
-      if (!path) throw new CliError('node path is required')
-      const tool = String(args.tool ?? '').trim()
-      if (!tool) throw new CliError('--tool is required')
+export interface CallArgs {
+  tool: string
+  args?: string
+  argsFile?: string
+  json?: boolean
+  baseUrl?: string
+  sk?: string
+}
 
-      const callArgs = parseCallArgs(
-        args.args as string | undefined,
-        args['args-file'] as string | undefined,
-      )
-      const target = resolveTarget(args)
-      const nodeUri = `/${path.replace(/^\/+|\/+$/g, '')}`
+export function callCommand(): Command {
+  return withGlobalOpts(new Command('call'))
+    .description('Invoke a tool on a node (POST /<path>)')
+    .argument('<path>', 'Node tree path')
+    .requiredOption('--tool <name>', 'Tool/cmd name')
+    .option('--args <json>', 'Arguments as inline JSON object')
+    .option('--args-file <file>', 'Arguments from a JSON file')
+    .action(async (pathArg: string, opts: CallArgs) => {
+      const asJson = Boolean(opts.json)
+      await guard(asJson, async () => {
+        const path = String(pathArg ?? '').trim()
+        if (!path) throw new CliError('node path is required')
+        const tool = String(opts.tool ?? '').trim()
+        if (!tool) throw new CliError('--tool is required')
 
-      if (asJson) {
-        const result = await callTool<unknown>(target, nodeUri, tool, callArgs)
-        printJson(result)
-      } else {
-        const text = await callToolText(target, nodeUri, tool, callArgs)
-        printLine(text.replace(/\n$/, ''))
-      }
+        const callArgs = parseCallArgs(opts.args, opts.argsFile)
+        const target = resolveTarget(opts)
+        const nodeUri = `/${path.replace(/^\/+|\/+$/g, '')}`
+
+        if (asJson) {
+          const result = await callTool<unknown>(target, nodeUri, tool, callArgs)
+          printJson(result)
+        } else {
+          const text = await callToolText(target, nodeUri, tool, callArgs)
+          printLine(text.replace(/\n$/, ''))
+        }
+      })
     })
-  },
-})
+}

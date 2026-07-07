@@ -30,7 +30,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "citty": "^0.2.2",
+    "commander": "^15.0.0",
     "partysocket": "1.3.0",
     "ws": "8.21.0"
   },

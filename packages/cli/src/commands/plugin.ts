@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises'
-import { defineCommand } from 'citty'
-import { globalArgs, resolveTarget } from '../args'
+import { Command } from 'commander'
+import { resolveTarget, withGlobalOpts } from '../args'
 import { CliError, callTool } from '../http'
 import { guard, printJson, printLine, table } from '../output'
 import type { Page } from '../types'
@@ -31,6 +31,16 @@ export interface PluginHealth {
   healthy: boolean
   checkedAt?: string
   consecutiveFailures?: number
+}
+
+interface PluginOpts {
+  json?: boolean
+  baseUrl?: string
+  sk?: string
+}
+
+interface PluginFileOpts extends PluginOpts {
+  file: string
 }
 
 /** 从 stdin 读取全部内容(`--file -`;与 secret set 的 stdin 语义一致)。 */
@@ -71,192 +81,178 @@ async function readManifest(file: string): Promise<Record<string, unknown>> {
  * `tb plugin register --file <manifest.json>` → PluginRegistry.Write(system/plugin)。
  * pluginToken 仅注册响应出现一次:人类模式醒目警示,--json 原样输出 PluginRegistration。
  */
-export const pluginRegisterCommand = defineCommand({
-  meta: { name: 'register', description: 'Register a plugin from a manifest file (`-` = stdin)' },
-  args: {
-    ...globalArgs,
-    file: {
-      type: 'string',
-      description: 'Manifest JSON file path, or `-` for stdin',
-      required: true,
-    },
-  },
-  async run({ args }) {
-    const asJson = Boolean(args.json)
-    await guard(asJson, async () => {
-      const file = String(args.file ?? '').trim()
-      if (!file) throw new CliError('--file is required')
-      const manifest = await readManifest(file)
-      const reg = await callTool<PluginRegistration>(
-        resolveTarget(args),
-        '/system/plugin',
-        'write',
-        manifest,
-      )
-      if (asJson) {
-        printJson(reg)
-        return
-      }
-      printLine(`registered plugin: ${reg.id} (${reg.kind}, ${reg.endpoint})`)
-      if (reg.pluginToken) {
-        printLine('')
-        printLine('!! PLUGIN TOKEN (shown once — store it now, it cannot be retrieved again):')
-        printLine(`   ${reg.pluginToken}`)
-      }
+export function pluginRegisterCommand(): Command {
+  return withGlobalOpts(new Command('register'))
+    .description('Register a plugin from a manifest file (`-` = stdin)')
+    .requiredOption('--file <path>', 'Manifest JSON file path, or `-` for stdin')
+    .action(async (opts: PluginFileOpts) => {
+      const asJson = Boolean(opts.json)
+      await guard(asJson, async () => {
+        const file = String(opts.file ?? '').trim()
+        if (!file) throw new CliError('--file is required')
+        const manifest = await readManifest(file)
+        const reg = await callTool<PluginRegistration>(
+          resolveTarget(opts),
+          '/system/plugin',
+          'write',
+          manifest,
+        )
+        if (asJson) {
+          printJson(reg)
+          return
+        }
+        printLine(`registered plugin: ${reg.id} (${reg.kind}, ${reg.endpoint})`)
+        if (reg.pluginToken) {
+          printLine('')
+          printLine('!! PLUGIN TOKEN (shown once — store it now, it cannot be retrieved again):')
+          printLine(`   ${reg.pluginToken}`)
+        }
+      })
     })
-  },
-})
+}
 
 /** `tb plugin list` → PluginRegistry.List。 */
-export const pluginListCommand = defineCommand({
-  meta: { name: 'list', description: 'List registered plugins' },
-  args: globalArgs,
-  async run({ args }) {
-    const asJson = Boolean(args.json)
-    await guard(asJson, async () => {
-      const page = await callTool<Page<PluginManifest>>(
-        resolveTarget(args),
-        '/system/plugin',
-        'list',
-        {},
-      )
-      if (asJson) {
-        printJson(page)
-        return
-      }
-      const rows = (page.items ?? []).map((p) => [
-        p.id,
-        p.kind,
-        p.endpoint,
-        p.enabled ? 'enabled' : 'disabled',
-      ])
-      printLine(table(['ID', 'KIND', 'ENDPOINT', 'STATE'], rows))
+export function pluginListCommand(): Command {
+  return withGlobalOpts(new Command('list'))
+    .description('List registered plugins')
+    .action(async (opts: PluginOpts) => {
+      const asJson = Boolean(opts.json)
+      await guard(asJson, async () => {
+        const page = await callTool<Page<PluginManifest>>(
+          resolveTarget(opts),
+          '/system/plugin',
+          'list',
+          {},
+        )
+        if (asJson) {
+          printJson(page)
+          return
+        }
+        const rows = (page.items ?? []).map((p) => [
+          p.id,
+          p.kind,
+          p.endpoint,
+          p.enabled ? 'enabled' : 'disabled',
+        ])
+        printLine(table(['ID', 'KIND', 'ENDPOINT', 'STATE'], rows))
+      })
     })
-  },
-})
+}
 
 /** `tb plugin get <id>` → PluginRegistry.Get。 */
-export const pluginGetCommand = defineCommand({
-  meta: { name: 'get', description: 'Show one plugin manifest' },
-  args: {
-    ...globalArgs,
-    id: { type: 'positional', description: 'Plugin id', required: true },
-  },
-  async run({ args }) {
-    const asJson = Boolean(args.json)
-    await guard(asJson, async () => {
-      const id = String(args.id ?? '').trim()
-      if (!id) throw new CliError('plugin id is required')
-      const m = await callTool<PluginManifest>(resolveTarget(args), '/system/plugin', 'get', { id })
-      if (asJson) {
-        printJson(m)
-        return
-      }
-      printLine(`id:               ${m.id}`)
-      printLine(`kind:             ${m.kind}`)
-      printLine(`interfaceVersion: ${m.interfaceVersion}`)
-      printLine(`endpoint:         ${m.endpoint}`)
-      printLine(`auth:             ${m.auth?.kind ?? '-'}`)
-      printLine(`healthPath:       ${m.healthPath}`)
-      printLine(`state:            ${m.enabled ? 'enabled' : 'disabled'}`)
+export function pluginGetCommand(): Command {
+  return withGlobalOpts(new Command('get'))
+    .description('Show one plugin manifest')
+    .argument('<id>', 'Plugin id')
+    .action(async (idArg: string, opts: PluginOpts) => {
+      const asJson = Boolean(opts.json)
+      await guard(asJson, async () => {
+        const id = String(idArg ?? '').trim()
+        if (!id) throw new CliError('plugin id is required')
+        const m = await callTool<PluginManifest>(resolveTarget(opts), '/system/plugin', 'get', {
+          id,
+        })
+        if (asJson) {
+          printJson(m)
+          return
+        }
+        printLine(`id:               ${m.id}`)
+        printLine(`kind:             ${m.kind}`)
+        printLine(`interfaceVersion: ${m.interfaceVersion}`)
+        printLine(`endpoint:         ${m.endpoint}`)
+        printLine(`auth:             ${m.auth?.kind ?? '-'}`)
+        printLine(`healthPath:       ${m.healthPath}`)
+        printLine(`state:            ${m.enabled ? 'enabled' : 'disabled'}`)
+      })
     })
-  },
-})
+}
 
 /**
  * `tb plugin update <id> --file <patch.json>` → PluginRegistry.Update(system/plugin)。
  * patch 为 Partial<PluginManifest>;auth 切到 platform-token 时响应含一次性 pluginToken,
  * 与 register 同款醒目警示。
  */
-export const pluginUpdateCommand = defineCommand({
-  meta: { name: 'update', description: 'Update a plugin manifest with a patch file (`-` = stdin)' },
-  args: {
-    ...globalArgs,
-    id: { type: 'positional', description: 'Plugin id', required: true },
-    file: {
-      type: 'string',
-      description: 'Patch JSON file path (Partial<PluginManifest>), or `-` for stdin',
-      required: true,
-    },
-  },
-  async run({ args }) {
-    const asJson = Boolean(args.json)
-    await guard(asJson, async () => {
-      const id = String(args.id ?? '').trim()
-      if (!id) throw new CliError('plugin id is required')
-      const file = String(args.file ?? '').trim()
-      if (!file) throw new CliError('--file is required')
-      const patch = await readManifest(file)
-      const updated = await callTool<PluginRegistration>(
-        resolveTarget(args),
-        '/system/plugin',
-        'update',
-        { id, patch },
-      )
-      if (asJson) {
-        printJson(updated)
-        return
-      }
-      printLine(`updated plugin: ${updated.id} (${updated.kind}, ${updated.endpoint})`)
-      if (updated.pluginToken) {
-        printLine('')
-        printLine('!! PLUGIN TOKEN (shown once — store it now, it cannot be retrieved again):')
-        printLine(`   ${updated.pluginToken}`)
-      }
+export function pluginUpdateCommand(): Command {
+  return withGlobalOpts(new Command('update'))
+    .description('Update a plugin manifest with a patch file (`-` = stdin)')
+    .argument('<id>', 'Plugin id')
+    .requiredOption(
+      '--file <path>',
+      'Patch JSON file path (Partial<PluginManifest>), or `-` for stdin',
+    )
+    .action(async (idArg: string, opts: PluginFileOpts) => {
+      const asJson = Boolean(opts.json)
+      await guard(asJson, async () => {
+        const id = String(idArg ?? '').trim()
+        if (!id) throw new CliError('plugin id is required')
+        const file = String(opts.file ?? '').trim()
+        if (!file) throw new CliError('--file is required')
+        const patch = await readManifest(file)
+        const updated = await callTool<PluginRegistration>(
+          resolveTarget(opts),
+          '/system/plugin',
+          'update',
+          { id, patch },
+        )
+        if (asJson) {
+          printJson(updated)
+          return
+        }
+        printLine(`updated plugin: ${updated.id} (${updated.kind}, ${updated.endpoint})`)
+        if (updated.pluginToken) {
+          printLine('')
+          printLine('!! PLUGIN TOKEN (shown once — store it now, it cannot be retrieved again):')
+          printLine(`   ${updated.pluginToken}`)
+        }
+      })
     })
-  },
-})
+}
 
 /** `tb plugin health <id>` → 按需探活;unhealthy → 退出码 1。 */
-export const pluginHealthCommand = defineCommand({
-  meta: { name: 'health', description: 'Probe a plugin health endpoint (exit 1 if unhealthy)' },
-  args: {
-    ...globalArgs,
-    id: { type: 'positional', description: 'Plugin id', required: true },
-  },
-  async run({ args }) {
-    const asJson = Boolean(args.json)
-    await guard(asJson, async () => {
-      const id = String(args.id ?? '').trim()
-      if (!id) throw new CliError('plugin id is required')
-      const h = await callTool<PluginHealth>(resolveTarget(args), '/system/plugin', 'health', {
-        id,
+export function pluginHealthCommand(): Command {
+  return withGlobalOpts(new Command('health'))
+    .description('Probe a plugin health endpoint (exit 1 if unhealthy)')
+    .argument('<id>', 'Plugin id')
+    .action(async (idArg: string, opts: PluginOpts) => {
+      const asJson = Boolean(opts.json)
+      await guard(asJson, async () => {
+        const id = String(idArg ?? '').trim()
+        if (!id) throw new CliError('plugin id is required')
+        const h = await callTool<PluginHealth>(resolveTarget(opts), '/system/plugin', 'health', {
+          id,
+        })
+        if (asJson) printJson(h)
+        else
+          printLine(`${id}: ${h.healthy ? 'healthy' : 'unhealthy'} (checked ${h.checkedAt ?? '-'})`)
+        if (!h.healthy) process.exitCode = 1
       })
-      if (asJson) printJson(h)
-      else
-        printLine(`${id}: ${h.healthy ? 'healthy' : 'unhealthy'} (checked ${h.checkedAt ?? '-'})`)
-      if (!h.healthy) process.exitCode = 1
     })
-  },
-})
+}
 
 /** `tb plugin rm <id>` → PluginRegistry.Delete(与 sk rm 同为直删,无确认交互)。 */
-export const pluginRmCommand = defineCommand({
-  meta: { name: 'rm', description: 'Unregister (delete) a plugin' },
-  args: {
-    ...globalArgs,
-    id: { type: 'positional', description: 'Plugin id', required: true },
-  },
-  async run({ args }) {
-    const asJson = Boolean(args.json)
-    await guard(asJson, async () => {
-      const id = String(args.id ?? '').trim()
-      if (!id) throw new CliError('plugin id is required')
-      await callTool(resolveTarget(args), '/system/plugin', 'delete', { id })
-      if (asJson) printJson({ ok: true, id })
-      else printLine(`removed plugin: ${id}`)
+export function pluginRmCommand(): Command {
+  return withGlobalOpts(new Command('rm'))
+    .description('Unregister (delete) a plugin')
+    .argument('<id>', 'Plugin id')
+    .action(async (idArg: string, opts: PluginOpts) => {
+      const asJson = Boolean(opts.json)
+      await guard(asJson, async () => {
+        const id = String(idArg ?? '').trim()
+        if (!id) throw new CliError('plugin id is required')
+        await callTool(resolveTarget(opts), '/system/plugin', 'delete', { id })
+        if (asJson) printJson({ ok: true, id })
+        else printLine(`removed plugin: ${id}`)
+      })
     })
-  },
-})
+}
 
-export const pluginCommand = defineCommand({
-  meta: { name: 'plugin', description: 'Manage plugins (system/plugin; admin scope)' },
-  subCommands: {
-    register: pluginRegisterCommand,
-    list: pluginListCommand,
-    get: pluginGetCommand,
-    update: pluginUpdateCommand,
-    health: pluginHealthCommand,
-    rm: pluginRmCommand,
-  },
-})
+export function pluginCommand(): Command {
+  return new Command('plugin')
+    .description('Manage plugins (system/plugin; admin scope)')
+    .addCommand(pluginRegisterCommand())
+    .addCommand(pluginListCommand())
+    .addCommand(pluginGetCommand())
+    .addCommand(pluginUpdateCommand())
+    .addCommand(pluginHealthCommand())
+    .addCommand(pluginRmCommand())
+}
