@@ -10,7 +10,8 @@
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
     "echo-mcp": "tsx scripts/echo-mcp.ts",
-    "s3-mock": "tsx scripts/s3-mock.ts"
+    "s3-mock": "tsx scripts/s3-mock.ts",
+    "stub-provider": "tsx scripts/stub-provider.ts"
   },
   "dependencies": {
     "@cfworker/json-schema": "^4.1.1",
