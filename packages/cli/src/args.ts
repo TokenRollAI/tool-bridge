@@ -1,6 +1,8 @@
+import { parseArgs as parseNodeArgs } from 'node:util'
 import type { ArgsDef } from 'citty'
 import { currentProfile, readConfig } from './config'
 import type { Target } from './http'
+import { asArray } from './output'
 
 /**
  * 全局开关(每个子命令共享):
@@ -39,4 +41,37 @@ export function resolveTarget(args: { 'base-url'?: string; sk?: string }): Targe
     baseUrl: args['base-url'] ?? process.env.TB_BASE_URL ?? profile?.baseUrl,
     sk: args.sk ?? process.env.TB_SK ?? profile?.sk,
   }
+}
+
+/**
+ * 声明为 repeatable 的 string flag:citty 0.2.2 底层 node parseArgs 未开 multiple,
+ * 重复 flag last-wins(`--scope a --scope b` 只剩 b),须从 rawArgs 重收集全部值;
+ * kebab 与 camel 两种拼写都认(citty 自动加 camel alias)。rawArgs 无命中时退回
+ * citty 解析值(编程调用/测试直接注 args 的场景)。
+ */
+export function repeatableArg(
+  value: unknown,
+  rawArgs: string[] | undefined,
+  name: string,
+): string[] {
+  const camel = name.replace(/-([a-z])/g, (_, c: string) => c.toUpperCase())
+  const options: Record<string, { type: 'string'; multiple: true }> = {
+    [name]: { type: 'string', multiple: true },
+  }
+  if (camel !== name) options[camel] = { type: 'string', multiple: true }
+  const collected: string[] = []
+  if (rawArgs !== undefined && rawArgs.length > 0) {
+    const { values } = parseNodeArgs({
+      args: rawArgs,
+      options,
+      allowPositionals: true,
+      strict: false,
+    })
+    for (const key of Object.keys(options)) {
+      const v = values[key]
+      if (Array.isArray(v)) collected.push(...v.filter((x): x is string => typeof x === 'string'))
+      else if (typeof v === 'string') collected.push(v)
+    }
+  }
+  return collected.length > 0 ? collected : asArray(value)
 }

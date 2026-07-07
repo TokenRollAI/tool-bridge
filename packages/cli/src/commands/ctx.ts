@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { extname } from 'node:path'
 import { defineCommand } from 'citty'
-import { globalArgs, resolveTarget } from '../args'
+import { globalArgs, repeatableArg, resolveTarget } from '../args'
 import { CliError, callTool } from '../http'
 import { asArray, guard, printJson, printLine, table } from '../output'
 import { deleteNode, registerNode } from '../registry'
@@ -172,7 +172,7 @@ export const ctxPutCommand = defineCommand({
     meta: { type: 'string', description: 'Metadata "key=value" (repeatable)' },
     'if-version': { type: 'string', description: 'Optimistic concurrency: expected version' },
   },
-  async run({ args }) {
+  async run({ args, rawArgs }) {
     const asJson = Boolean(args.json)
     await guard(asJson, async () => {
       const ns = String(args.ns ?? '').trim()
@@ -180,7 +180,7 @@ export const ctxPutCommand = defineCommand({
       const entryPath = String(args.entry ?? '').trim()
       if (!entryPath) throw new CliError('entry path is required')
 
-      const metadata = parseMeta(args.meta)
+      const metadata = parseMeta(repeatableArg(args.meta, rawArgs, 'meta'))
       const file = args.file ? String(args.file) : undefined
       // 内容来源优先级:--content > --file > stdin。
       let content: string
@@ -218,7 +218,7 @@ export const ctxPatchCommand = defineCommand({
     meta: { type: 'string', description: 'Metadata "key=value" to merge (repeatable)' },
     'if-version': { type: 'string', description: 'Optimistic concurrency: expected version' },
   },
-  async run({ args }) {
+  async run({ args, rawArgs }) {
     const asJson = Boolean(args.json)
     await guard(asJson, async () => {
       const ns = String(args.ns ?? '').trim()
@@ -226,7 +226,7 @@ export const ctxPatchCommand = defineCommand({
       const entryPath = String(args.entry ?? '').trim()
       if (!entryPath) throw new CliError('entry path is required')
 
-      const metadata = parseMeta(args.meta)
+      const metadata = parseMeta(repeatableArg(args.meta, rawArgs, 'meta'))
       let content: string | undefined
       if (args.content !== undefined) content = String(args.content)
       else if (args.file) content = readContentFile(String(args.file))

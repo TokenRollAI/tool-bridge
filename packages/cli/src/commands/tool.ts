@@ -1,5 +1,5 @@
 import { defineCommand } from 'citty'
-import { globalArgs, resolveTarget } from '../args'
+import { globalArgs, repeatableArg, resolveTarget } from '../args'
 import { CliError } from '../http'
 import { guard, printJson, printLine } from '../output'
 import { buildVirtualize, deleteNode, parseToolsFile, registerNode } from '../registry'
@@ -35,7 +35,7 @@ export const toolMountCommand = defineCommand({
       description: 'Virtualize: override description "from=text" (repeatable)',
     },
   },
-  async run({ args }) {
+  async run({ args, rawArgs }) {
     const asJson = Boolean(args.json)
     await guard(asJson, async () => {
       const path = String(args.path ?? '').trim()
@@ -70,7 +70,12 @@ export const toolMountCommand = defineCommand({
         throw new CliError(`invalid --kind "${kind}"; valid: mcp, http`)
       }
 
-      const virtualize = buildVirtualize(args)
+      const virtualize = buildVirtualize({
+        prefix: args.prefix,
+        rename: repeatableArg(args.rename, rawArgs, 'rename'),
+        hide: repeatableArg(args.hide, rawArgs, 'hide'),
+        describe: repeatableArg(args.describe, rawArgs, 'describe'),
+      })
       const input: NodeInput = {
         path,
         kind,

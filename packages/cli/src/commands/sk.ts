@@ -1,7 +1,7 @@
 import { defineCommand } from 'citty'
-import { globalArgs, resolveTarget } from '../args'
+import { globalArgs, repeatableArg, resolveTarget } from '../args'
 import { CliError, callTool } from '../http'
-import { asArray, guard, printJson, printLine, table } from '../output'
+import { guard, printJson, printLine, table } from '../output'
 import { parseScope } from '../scope'
 import type { Page, SecretKeyCreated, SecretKeyInput, SecretKeyView } from '../types'
 
@@ -55,14 +55,14 @@ export const skCreateCommand = defineCommand({
     expires: { type: 'string', description: 'Expiry ISO 8601 timestamp' },
     description: { type: 'string', description: 'Human description' },
   },
-  async run({ args }) {
+  async run({ args, rawArgs }) {
     const asJson = Boolean(args.json)
     await guard(asJson, async () => {
       const owner = String(args.owner ?? '').trim()
       if (!owner) throw new CliError('--owner is required')
 
-      const scopes = asArray(args.scope).map(parseScope)
-      const registerPaths = asArray(args['register-path'])
+      const scopes = repeatableArg(args.scope, rawArgs, 'scope').map(parseScope)
+      const registerPaths = repeatableArg(args['register-path'], rawArgs, 'register-path')
       const input: SecretKeyInput = {
         owner,
         scopes,

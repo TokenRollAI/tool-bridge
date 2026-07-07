@@ -1,6 +1,6 @@
 import type { DeviceExpose } from '@tool-bridge/core'
 import { defineCommand } from 'citty'
-import { globalArgs, resolveTarget } from '../args'
+import { globalArgs, repeatableArg, resolveTarget } from '../args'
 import { resolveDeviceId } from '../deviceId'
 import { runDeviceConnection } from '../deviceRuntime'
 import { CliError } from '../http'
@@ -77,8 +77,14 @@ export const connectCommand = defineCommand({
     'fs-readonly': { type: 'boolean', description: 'Expose fs as read-only', default: false },
     'no-shell': { type: 'boolean', description: 'Do not expose shell', default: false },
   },
-  async run({ args }) {
+  async run({ args, rawArgs }) {
     const asJson = Boolean(args.json)
-    await guard(asJson, async () => runConnect(args as ConnectArgs))
+    await guard(asJson, async () =>
+      runConnect({
+        ...(args as ConnectArgs),
+        allow: repeatableArg(args.allow, rawArgs, 'allow'),
+        fs: repeatableArg(args.fs, rawArgs, 'fs'),
+      }),
+    )
   },
 })
