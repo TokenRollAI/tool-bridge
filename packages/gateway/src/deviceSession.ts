@@ -7,8 +7,8 @@ import {
   type DeviceCallResult,
   type DeviceExpose,
   type DeviceFrame,
-  type DeviceNodeInput,
   DeviceGatewaySession,
+  type DeviceNodeInput,
   decodeDeviceFrame,
   encodeDeviceFrame,
   identify,
@@ -380,11 +380,7 @@ export class DeviceSession extends DurableObject<DeviceSessionEnv> {
    * (与 device-fs 同构)——网关据此把调用经帧协议 call 转发回设备;cmds(SDK 随
    * NodeInput 上送的工具表)是节点 ~help 的数据源。标记为网关权威,覆盖设备侧同名字段。
    */
-  private customNodeInput(
-    mountPath: TreePath,
-    deviceId: string,
-    raw: DeviceNodeInput,
-  ): NodeInput {
+  private customNodeInput(mountPath: TreePath, deviceId: string, raw: DeviceNodeInput): NodeInput {
     const { cmds, ...rest } = raw
     const input = parseNodeInput({ ...rest, path: joinTreePath(mountPath, raw.path) })
     const marker = { deviceId, mountPath, ...(cmds !== undefined ? { cmds } : {}) }

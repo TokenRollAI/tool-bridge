@@ -668,10 +668,14 @@ export function createApp(): Hono<{ Bindings: Env; Variables: Vars }> {
     }
     if (node.kind === 'context' && node.config?.kind === 'context') {
       await assertContextAlive(node, node.config, registry)
-      // plugin-backed 节点回注册时抓取缓存的 capabilities(Q12);内置 provider 回固定表。
+      // plugin-backed 节点回注册时抓取缓存的 capabilities(Q12);内置 provider 与
+      // device 自定义 context 节点(带转发标记,Proto §6.3)回固定表。
       const cfg = node.config
       const capabilities =
-        cfg.provider === 'r2' || cfg.provider === 's3' || cfg.provider === 'device-fs'
+        cfg.provider === 'r2' ||
+        cfg.provider === 's3' ||
+        cfg.provider === 'device-fs' ||
+        deviceMarkerOf(cfg.providerConfig) !== null
           ? CONTEXT_CAPABILITIES
           : await pluginCapabilities(store, cfg.provider)
       return new Response(JSON.stringify({ kind: 'context', capabilities }), {
@@ -1204,6 +1208,7 @@ async function pluginCapabilities(store: StateStore, id: string): Promise<readon
 async function assertToolConfig(config: unknown, store: StateStore): Promise<void> {
   if (config === null || typeof config !== 'object') return
   if ((config as { kind?: unknown }).kind !== 'tool') return
+  assertNoDeviceMarker(config)
   const provider = (config as { provider?: unknown }).provider
   if (typeof provider !== 'string' || provider === '') {
     throw new TBError(
@@ -1212,6 +1217,24 @@ async function assertToolConfig(config: unknown, store: StateStore): Promise<voi
     )
   }
   await requirePlugin(store, provider, 'tool-provider', 'tool')
+}
+
+/**
+ * device 转发标记(Proto §6.3)只能由 hello 代注册写入:注册面手工携带 providerConfig
+ * 的 deviceId+mountPath → 拒,防止把任意节点调用劫持转发到他人设备(与 device-fs 口径一致)。
+ */
+function assertNoDeviceMarker(config: unknown): void {
+  const pc = (config as { providerConfig?: unknown }).providerConfig
+  if (
+    pc !== null &&
+    typeof pc === 'object' &&
+    deviceMarkerOf(pc as Record<string, unknown>) !== null
+  ) {
+    throw new TBError(
+      'invalid_argument',
+      'providerConfig 的 device 转发标记由网关代写,不得经注册面携带(Proto §6.3)',
+    )
+  }
 }
 
 // ---------- context 节点(Proto §5,Phase 3) ----------
@@ -1440,6 +1463,7 @@ async function assertContextConfig(
 ): Promise<void> {
   if (config === null || typeof config !== 'object') return
   if ((config as { kind?: unknown }).kind !== 'context') return
+  assertNoDeviceMarker(config)
   const cfg = config as ContextConfig
   if (cfg.provider !== 'r2' && cfg.provider !== 's3') {
     // plugin 挂载:不存在/kind 不符/禁用 → invalid_argument(device-fs 由网关代写,不经注册面)。
