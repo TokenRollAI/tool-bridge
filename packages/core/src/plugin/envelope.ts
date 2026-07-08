@@ -20,6 +20,11 @@ declare const TextDecoder: { new (): { decode(input: Uint8Array): string } }
 export const HEADER_TB_CONTEXT = 'X-TB-Context'
 /** 逻辑调用唯一 id 的 header;重试时不变,Plugin 以此去重实现幂等。 */
 export const HEADER_TB_REQUEST_ID = 'X-TB-Request-Id'
+/**
+ * 平台代解析的上游凭证 header(base64url):挂载 config.authRef 经 SecretStore.resolve
+ * 后随调用注入,Plugin 无须自持上游凭证(多租户:同一 plugin 部署可服务不同凭证的挂载)。
+ */
+export const HEADER_TB_UPSTREAM_AUTH = 'X-TB-Upstream-Auth'
 
 /** 单次请求/响应体上限:1 MiB。 */
 export const PLUGIN_PAYLOAD_MAX_BYTES = 1024 * 1024

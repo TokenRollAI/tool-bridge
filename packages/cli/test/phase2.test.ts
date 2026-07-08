@@ -104,9 +104,92 @@ describe('tb tool mount --kind mcp', () => {
     expect(fn).not.toHaveBeenCalled()
     expect(process.exitCode).toBe(1)
   })
+
+  it('自定义凭证头 + 静态头(飞书形态):--auth-header/--auth-scheme ""/--header 进 config', async () => {
+    const fn = captureFetch({ path: 'feishu', kind: 'mcp' })
+    await runCli([
+      'tool',
+      'mount',
+      'feishu',
+      '--json',
+      '--base-url',
+      'https://gw',
+      '--sk',
+      'tbk_x',
+      '--kind',
+      'mcp',
+      '--url',
+      'https://mcp.feishu.cn/mcp',
+      '--auth-ref',
+      'feishu-tat',
+      '--auth-header',
+      'X-Lark-MCP-TAT',
+      '--auth-scheme',
+      '',
+      '--header',
+      'X-Lark-MCP-Allowed-Tools=search-doc,fetch-doc',
+      '--header',
+      'X-Extra=1',
+    ])
+    const [, init] = fn.mock.calls[0] as [string, RequestInit]
+    const payload = JSON.parse(init.body as string)
+    expect(payload.config).toEqual({
+      kind: 'mcp',
+      url: 'https://mcp.feishu.cn/mcp',
+      authRef: 'feishu-tat',
+      authHeader: 'X-Lark-MCP-TAT',
+      authScheme: '',
+      headers: { 'X-Lark-MCP-Allowed-Tools': 'search-doc,fetch-doc', 'X-Extra': '1' },
+    })
+    expect(process.exitCode).toBe(0)
+  })
+
+  it('--header 缺 "=" → 退出码 1,不发请求', async () => {
+    const fn = captureFetch({})
+    await runCli([
+      'tool',
+      'mount',
+      'feishu',
+      '--json',
+      '--base-url',
+      'https://gw',
+      '--sk',
+      'tbk_x',
+      '--kind',
+      'mcp',
+      '--url',
+      'https://mcp.feishu.cn/mcp',
+      '--header',
+      'X-Bad-Header',
+    ])
+    expect(fn).not.toHaveBeenCalled()
+    expect(process.exitCode).toBe(1)
+  })
 })
 
 describe('tb tool mount --kind http', () => {
+  it('--header 仅 mcp 支持 → 退出码 1,不发请求', async () => {
+    const fn = captureFetch({})
+    await runCli([
+      'tool',
+      'mount',
+      'api/x',
+      '--json',
+      '--base-url',
+      'https://gw',
+      '--sk',
+      'tbk_x',
+      '--kind',
+      'http',
+      '--endpoint',
+      'https://api.example',
+      '--header',
+      'X-Foo=1',
+    ])
+    expect(fn).not.toHaveBeenCalled()
+    expect(process.exitCode).toBe(1)
+  })
+
   it('从 --tools-file 读 HttpToolDef[] 放进 config.tools', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'tb-tools-'))
     const file = join(dir, 'tools.json')

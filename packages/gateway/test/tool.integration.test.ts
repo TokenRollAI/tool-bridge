@@ -535,7 +535,9 @@ function mcpUpstreamMock(tools: Array<{ name: string; description: string }>) {
   const sessions = new Set<string>()
   let issued = 0
   let initializeCount = 0
+  const headersSeen: Headers[] = []
   const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+    headersSeen.push(new Headers(init?.headers))
     const body = JSON.parse(String(init?.body)) as {
       id?: number | string
       method: string
@@ -586,7 +588,12 @@ function mcpUpstreamMock(tools: Array<{ name: string; description: string }>) {
       { status: 200, headers: { 'content-type': 'application/json' } },
     )
   })
-  return { fetchMock, expireAll: () => sessions.clear(), initializeCalls: () => initializeCount }
+  return {
+    fetchMock,
+    expireAll: () => sessions.clear(),
+    initializeCalls: () => initializeCount,
+    headersSeen: () => headersSeen,
+  }
 }
 
 async function mountMcp(path: string): Promise<void> {
@@ -676,6 +683,55 @@ describe('mcp 会话复用:过期会话空列表防御(默认离线,上游为 fe
     // 拿回的是删不掉的旧会话,这里将得到空列表。
     expect((await provider.list()).map((t) => t.name)).toContain('echo')
     expect(upstream.initializeCalls()).toBe(2)
+  })
+})
+
+describe('mcp 自定义请求头(飞书形态:凭证进自定义头 + 静态白名单头)', () => {
+  it('authHeader + 空 authScheme 原样注入凭证;静态 headers 随每趟上游请求发出', async () => {
+    const upstream = mcpUpstreamMock([{ name: 'search-doc', description: 'search cloud docs' }])
+    vi.stubGlobal('fetch', upstream.fetchMock)
+
+    const setSecret = await postJson(
+      'system/secret',
+      { tool: 'set', arguments: { name: 'lark-tat', value: 't-tat-secret' } },
+      admin(),
+    )
+    expect(setSecret.status).toBe(200)
+    const mounted = await postJson(
+      'system/registry',
+      {
+        tool: 'write',
+        arguments: {
+          path: 'ext/lark',
+          kind: 'mcp',
+          description: 'feishu mcp',
+          config: {
+            kind: 'mcp',
+            url: 'https://mcp-mock.test/mcp',
+            authRef: 'lark-tat',
+            authHeader: 'X-Lark-MCP-TAT',
+            authScheme: '',
+            headers: { 'X-Lark-MCP-Allowed-Tools': 'search-doc,fetch-doc' },
+          },
+        },
+      },
+      admin(),
+    )
+    expect(mounted.status).toBe(200)
+
+    const help = await SELF.fetch('https://tb.test/ext/lark/~help', admin())
+    expect(help.status).toBe(200)
+    expect(parseHelpDsl(await help.text()).cmds.map((c) => c.name)).toContain('search-doc')
+
+    // initialize / notifications/initialized / tools/list 每趟都须带两个头;
+    // 空 scheme = 凭证原样注入(无 "Bearer " 前缀),且不再发默认 Authorization。
+    const seen = upstream.headersSeen()
+    expect(seen.length).toBeGreaterThan(0)
+    for (const h of seen) {
+      expect(h.get('X-Lark-MCP-TAT')).toBe('t-tat-secret')
+      expect(h.get('X-Lark-MCP-Allowed-Tools')).toBe('search-doc,fetch-doc')
+      expect(h.get('Authorization')).toBeNull()
+    }
   })
 })
 

@@ -33,7 +33,7 @@ exports `.` / `./tbApp` / `./bootstrap` / `./deviceHello`(供 SDK 与 server 复
 | `kvStateStore.ts` | StateStore 的 KV 实现(list 跳 null、子树前缀扫描,头注释有约束说明) |
 | `deviceSession.ts` | `DeviceSession` DO 胶水:WS hibernation、待决表、`setWebSocketAutoResponse`、惰性会话重建(协议行为在 deviceHello.ts) |
 | `refToken.ts` | `$ref` 网关中转的 HMAC token 签发/校验 |
-| `providers/` | 全部上游 I/O:`mcp.ts`(SDK Streamable HTTP,会话复用 + 404 重握手一次;auth:'oauth' 挂 `../oauth.ts` 的 authProvider)、`http.ts`、`remote.ts`、`toolCache.ts`、`r2Object.ts`、`s3Object.ts` + `s3Sign.ts`(aws4fetch)、`pluginClient.ts` + `pluginTool.ts` + `pluginContext.ts` |
+| `providers/` | 全部上游 I/O:`mcp.ts`(SDK Streamable HTTP,会话复用 + 404 重握手一次;auth:'oauth' 挂 `../oauth.ts` 的 authProvider)、`http.ts`、`remote.ts`、`toolCache.ts`、`r2Object.ts`、`s3Object.ts` + `s3Sign.ts`(aws4fetch)、`pluginClient.ts`(`upstreamAuthRef` → resolve 后经 `X-TB-Upstream-Auth` 注入,失败 → unavailable)+ `pluginTool.ts` + `pluginContext.ts` |
 | `test/` | 8 个集成测试(gateway/tool/context/device/deviceNodes/plugin/ui/oauth `.integration.test.ts`),真实 workerd;`scripts/` 有 echo-mcp / s3-mock / stub-provider 兜底上游 |
 | `wrangler.jsonc` | 绑定 TB_KV / TB_R2 / TB_DEVICE(DO)/ ASSETS(dashboard dist,`run_worker_first`)+ `account_id` + custom domain |
 
@@ -57,6 +57,18 @@ exports `.` / `./tbApp` / `./bootstrap` / `./deviceHello`(供 SDK 与 server 复
 - `components/`:`layout/`(AppShell/TreeNav)、`node/`(CmdPanel/ContextBrowser/ResultView/CliHint;ContextBrowser 支持条目 metadata 编辑、`$ref` 大对象经 Update 只改 metadata、Search mode 切换)、CommandPalette(⌘K)、`ui/`(shadcn)。
 - `lib/`:api.ts(同源 `baseUrl:''`)、queries.ts、schemaForm.ts(@rjsf)、session.tsx(SK 多 profile,localStorage)、history.ts。
 - 无自有测试;行为由 gateway 的 `ui.integration.test.ts` 覆盖。
+
+## packages/plugin-feishu — 飞书 tool-provider Plugin(private,CF Worker)
+
+飞书官方远程 MCP(`https://mcp.feishu.cn/mcp`)的 tool-provider/v1 plugin,解决 TAT(tenant_access_token,约 2h 过期)人工续期问题:自部署进用户 CF 账户,经 `tb plugin register` 注册后 `kind:'tool'` 挂载。首个 in-repo plugin 参考实现;背景见 [../guides/mcp-upstream-pitfalls.md](../guides/mcp-upstream-pitfalls.md) 飞书小节。
+
+| 文件 | 管什么 |
+|---|---|
+| `src/index.ts` | 契约面 GET `/healthz` / `/~describe` / `/~help`(negotiate DSL/JSON,复用 core 渲染器)+ POST `/` envelope(List/Get/Call;Get 由 List 过滤实现);`PLUGIN_TOKEN` Bearer 鉴权(未配置时仅要求非空);`RequestDedupe` 幂等;**上游凭证不自持**:从 `X-TB-Upstream-Auth` 读(base64url JSON `{"app_id","app_secret"}`,缺头 → unavailable 503 报"挂载须配 authRef",坏形状 → invalid_argument 400);**上游 401 → 强制重换发 TAT 重试一次**(`withTatRetry`) |
+| `src/tat.ts` | TAT 换发(app_id/app_secret → token+expire)+ isolate 内存缓存(**按 app_id 键控**,同一部署可服务多凭证挂载不串号;刷新余量 5min);`force` 绕过缓存(纠错路径不回读缓存,教训同 mcp 空列表防御) |
+| `src/feishuMcp.ts` | MCP SDK Streamable HTTP client:每趟请求带 `X-Lark-MCP-TAT`(原样)+ `X-Lark-MCP-Allowed-Tools`;isolate 内存会话复用(**按 app_id 键控**;400/404 清会话重握手一次);401 原样抛出;`CfWorkerJsonSchemaValidator`(workerd 禁 eval,同 gateway 坑) |
+| `test/plugin.integration.test.ts` | 8 例集成测试(vitest-pool-workers 真实 workerd;mock 换发接口与 MCP 上游,默认离线),含吊销 token 后 401 强制重换发自愈、凭证头缺失/坏形状、多租户不串号 |
+| env(`wrangler.jsonc`) | secrets:仅 `PLUGIN_TOKEN`(飞书凭证不落 plugin,由挂载 authRef 经 `X-TB-Upstream-Auth` 注入);vars:`FEISHU_ALLOWED_TOOLS`(默认白名单 8 工具;search-user/search-doc 仅 UAT 不列)、`FEISHU_MCP_URL` / `FEISHU_AUTH_URL`(测试 override) |
 
 ## packages/server — Node/Docker 宿主胶水(npm 发布物,bin `tool-bridge-server`)
 

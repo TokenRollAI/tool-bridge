@@ -12,7 +12,7 @@
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
     "test:unit": "pnpm --filter @tool-bridge/core --filter @tool-bridge/cli --filter @tool-bridge/sdk test",
-    "test:integration": "pnpm --filter @tool-bridge/gateway --filter @tool-bridge/server test",
+    "test:integration": "pnpm --filter @tool-bridge/gateway --filter @tool-bridge/server --filter @tool-bridge/plugin-feishu test",
     "test": "pnpm -r --if-present test",
     "verify": "pnpm typecheck && pnpm lint && pnpm test:unit && pnpm test:integration",
     "gen-dev-vars": "node scripts/gen-dev-vars.mjs",

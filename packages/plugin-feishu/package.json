@@ -1,0 +1,26 @@
+{
+  "name": "@tool-bridge/plugin-feishu",
+  "version": "0.1.0",
+  "private": true,
+  "description": "tool-bridge tool-provider plugin: Feishu official remote MCP with auto-refreshed tenant_access_token",
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy"
+  },
+  "dependencies": {
+    "@cfworker/json-schema": "^4.1.1",
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@tool-bridge/core": "workspace:*"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.18.0",
+    "@cloudflare/workers-types": "^5.20260706.1",
+    "vitest": "^4.1.10",
+    "wrangler": "^4.107.0",
+    "zod": "^3.25.76"
+  }
+}
