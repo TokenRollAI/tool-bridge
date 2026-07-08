@@ -38,7 +38,7 @@
 - [memory/doc-gaps.md](memory/doc-gaps.md) — llmdoc 文档缺口追踪(当前无缺口)。recorder 维护。
 - `memory/decisions/` — durable 设计/流程决策,recorder 维护。现存:
   - [memory/decisions/plugin-hosted-install.md](memory/decisions/plugin-hosted-install.md) — 2026-07-07:Plugin 托管化安装(插件市场),CF 宿主经 scoped API token 自动部署;多挂载扩展 CallContext(`mountPath`/`mountConfig`);手动 register 通道保留。
-- `memory/reflections/` — 新反思写此目录(reflector 维护),定期把 durable 教训提炼进 guides 后归档。现存:2026-07-07 gateway/dashboard 可发布化(publishConfig 覆盖、隔离 tsc 环境坑);2026-07-07 Dashboard/CLI 能力对等(长驻进程管道坑、共享工作区 lint:fix、双向矩阵审计);2026-07-08 CLI citty→commander 迁移(宽松解析在权限面是安全缺陷、二次补丁即换框架、范例钉模式+workflow 平移打法);2026-07-08 ~help 可读性重构(UX 类抱怨也先拉线上真实输出取证、协议扩展走未知行忽略通道不拼语义字段、markdown 定位可读性表现避免等价矩阵、行式多行值双层防御);[memory/reflections/2026-07-08-docker-node-host.md](memory/reflections/2026-07-08-docker-node-host.md) Docker/Node 宿主落地(环境污染排查与 dts/端口/流接口等教训)。bootstrap 期存量反思已提炼完毕并归档至 `archive/llmdoc-reflections/`。
+- `memory/reflections/` — 新反思写此目录(reflector 维护),定期把 durable 教训提炼进 guides 后归档。现存:2026-07-07 gateway/dashboard 可发布化(publishConfig 覆盖、隔离 tsc 环境坑);2026-07-07 Dashboard/CLI 能力对等(长驻进程管道坑、共享工作区 lint:fix、双向矩阵审计);2026-07-08 CLI citty→commander 迁移(宽松解析在权限面是安全缺陷、二次补丁即换框架、范例钉模式+workflow 平移打法);2026-07-08 ~help 可读性重构(UX 类抱怨也先拉线上真实输出取证、协议扩展走未知行忽略通道不拼语义字段、markdown 定位可读性表现避免等价矩阵、行式多行值双层防御);[memory/reflections/2026-07-08-docker-node-host.md](memory/reflections/2026-07-08-docker-node-host.md) Docker/Node 宿主落地(环境污染排查与 dts/端口/流接口等教训);[memory/reflections/2026-07-08-annotation-feedback.md](memory/reflections/2026-07-08-annotation-feedback.md) annotation+feedback 能力(协议级 vs 管理面级形态先对齐、保留段继承 path 级权限、core store/协议壳分层压低返工)。bootstrap 期存量反思已提炼完毕并归档至 `archive/llmdoc-reflections/`。
 
 ## 路由提示
 
