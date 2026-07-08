@@ -5,10 +5,12 @@ import { connectCommand } from './commands/connect'
 import { ctxCommand } from './commands/ctx'
 import { deviceCommand } from './commands/device'
 import { federationCommand } from './commands/federation'
+import { feedbackCommand } from './commands/feedback'
 import { helpCommand } from './commands/help'
 import { loginCommand } from './commands/login'
 import { lsCommand } from './commands/ls'
 import { mountCommand } from './commands/mount'
+import { noteCommand } from './commands/note'
 import { pluginCommand } from './commands/plugin'
 import { secretCommand } from './commands/secret'
 import { serverCommand } from './commands/server'
@@ -24,6 +26,8 @@ import { whoamiCommand } from './commands/whoami'
  * - status:部署健康摘要。
  * - login/whoami/use/sk/secret/ls/tree/help:档案、SK、密钥与工具树浏览。
  * - federation ls/add/rm:remote 联邦 host 白名单(运行时叠加 env 基线)。
+ * - note ls/get/set/rm:Path 补充说明(展示在 ~help;set/rm 需 admin)。
+ * - feedback ls/get/submit/vote/rm:Agent 使用反馈(头部条目进 ~help)。
  * - tool mount/rm、server add/ls/rm、call:挂载工具源与数据面调用。
  * - ctx ls/cat/put/patch/search/mount/unmount:Context Layer。
  * - connect、device ls、mount fs:设备反向注册。
@@ -45,6 +49,8 @@ export function buildProgram(): Command {
   program.addCommand(skCommand())
   program.addCommand(secretCommand())
   program.addCommand(federationCommand())
+  program.addCommand(noteCommand())
+  program.addCommand(feedbackCommand())
   program.addCommand(lsCommand())
   program.addCommand(treeCommand())
   program.addCommand(helpCommand())
