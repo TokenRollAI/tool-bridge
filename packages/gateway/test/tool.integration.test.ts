@@ -74,8 +74,8 @@ describe('http 节点 ~help(从 config 生成、DSL 完整、scope=call)', () =>
     const byName = new Map(parsed.cmds.map((c) => [c.name, c]))
     expect([...byName.keys()].sort()).toEqual(['get_thing', 'post_thing'])
     for (const c of parsed.cmds) {
-      expect(c.method).toBe('POST') // 工具调用形态恒 POST /<path>
-      expect(c.path).toBe('/ext/echo')
+      expect(c.method).toBe('POST') // 工具调用形态恒 POST /<node>/<tool> 直连
+      expect(c.path).toBe(`/ext/echo/${c.name}`)
       expect(c.scope).toBe('call') // scope 声明存在
     }
     // effect:GET→read、POST→write(HttpToolDef 缺省派生)。
@@ -120,6 +120,113 @@ describe('工具虚拟化(hide 不可见、rename 后原名不可调)', () => {
     expect(a.status).toBe(404)
     const b = await postJson('ext/v2', { tool: 'secret_tool', arguments: {} }, admin())
     expect(b.status).toBe(404)
+  })
+})
+
+describe('直连工具调用(POST /<node>/<tool>,body 即 arguments)', () => {
+  it('mcp 节点:直连调用命中工具,body 扁平传参;空 body 视为无参', async () => {
+    const upstream = mcpUpstreamMock([{ name: 'echo', description: 'echo back' }])
+    vi.stubGlobal('fetch', upstream.fetchMock)
+    await mountMcp('ext/direct')
+
+    const res = await postJson('ext/direct/echo', { text: 'hi' }, admin())
+    expect(res.status).toBe(200)
+    expect(await res.json()).toBe('called:echo:{"text":"hi"}')
+
+    // 空 body → arguments {}。
+    const empty = await SELF.fetch('https://tb.test/ext/direct/echo', {
+      method: 'POST',
+      ...admin({ headers: { accept: 'application/json' } }),
+    })
+    expect(empty.status).toBe(200)
+  })
+
+  it('信封入口不受影响:POST /<node> + {tool,arguments} 仍可调用', async () => {
+    const upstream = mcpUpstreamMock([{ name: 'echo', description: 'echo back' }])
+    vi.stubGlobal('fetch', upstream.fetchMock)
+    await mountMcp('ext/direct-legacy')
+
+    const res = await postJson(
+      'ext/direct-legacy',
+      { tool: 'echo', arguments: { text: 'hi' } },
+      admin(),
+    )
+    expect(res.status).toBe(200)
+    expect(await res.json()).toBe('called:echo:{"text":"hi"}')
+  })
+
+  it('直连虚拟化:rename 后新名可直连、原名与 hidden 404;未知工具 404', async () => {
+    const upstream = mcpUpstreamMock([
+      { name: 'real', description: 'renamed' },
+      { name: 'secret_tool', description: 'hidden' },
+    ])
+    vi.stubGlobal('fetch', upstream.fetchMock)
+    const res = await postJson(
+      'system/registry',
+      {
+        tool: 'write',
+        arguments: {
+          path: 'ext/direct-v',
+          kind: 'mcp',
+          description: 'mock mcp',
+          config: { kind: 'mcp', url: 'https://mcp-mock.test/mcp' },
+          virtualize: { hide: ['secret_tool'], rename: { real: 'shiny' } },
+        },
+      },
+      admin(),
+    )
+    expect(res.status).toBe(200)
+
+    const ok = await postJson('ext/direct-v/shiny', {}, admin())
+    expect(ok.status).toBe(200)
+    expect(await ok.text()).toContain('called:real:') // 虚拟名反查上游真名
+
+    for (const name of ['real', 'secret_tool', 'nope']) {
+      const r = await postJson(`ext/direct-v/${name}`, {}, admin())
+      expect(r.status).toBe(404)
+    }
+  })
+
+  it('直连 body 非对象(数组/字符串)→ 400 invalid_argument', async () => {
+    const upstream = mcpUpstreamMock([{ name: 'echo', description: 'echo back' }])
+    vi.stubGlobal('fetch', upstream.fetchMock)
+    await mountMcp('ext/direct-bad')
+
+    const arr = await postJson('ext/direct-bad/echo', [1, 2], admin())
+    expect(arr.status).toBe(400)
+    const str = await postJson('ext/direct-bad/echo', 'oops', admin())
+    expect(str.status).toBe(400)
+  })
+
+  it('直连权限:read-only SK → 403;无关 SK → 404(不泄露);多余路径段 → 404', async () => {
+    const upstream = mcpUpstreamMock([{ name: 'echo', description: 'echo back' }])
+    vi.stubGlobal('fetch', upstream.fetchMock)
+    await mountMcp('ext/direct-perm')
+
+    const roSk = await issueSk({
+      owner: 'agent:ro-direct',
+      scopes: [{ pattern: 'ext/**', actions: ['read'] }],
+    })
+    const denied = await postJson(
+      'ext/direct-perm/echo',
+      {},
+      { headers: { authorization: `Bearer ${roSk}` } },
+    )
+    expect(denied.status).toBe(403)
+
+    const otherSk = await issueSk({
+      owner: 'agent:other-direct',
+      scopes: [{ pattern: 'other/**', actions: ['read', 'call'] }],
+    })
+    const invisible = await postJson(
+      'ext/direct-perm/echo',
+      {},
+      { headers: { authorization: `Bearer ${otherSk}` } },
+    )
+    expect(invisible.status).toBe(404)
+
+    const deep = await postJson('ext/direct-perm/echo/extra', {}, admin())
+    expect(deep.status).toBe(404)
   })
 })
 
@@ -202,7 +309,7 @@ describe('两级披露(节点级索引 + 工具级全量)', () => {
     expect(json.node.path).toBe('ext/two-level2/lookup')
     expect(json.cmds).toHaveLength(1)
     expect(json.cmds[0]?.name).toBe('lookup')
-    expect(json.cmds[0]?.path).toBe('/ext/two-level2')
+    expect(json.cmds[0]?.path).toBe('/ext/two-level2/lookup')
     expect(json.cmds[0]?.inputSchema).toEqual(SCHEMA_TOOLS[0]?.inputSchema)
   })
 
@@ -459,6 +566,14 @@ function mcpUpstreamMock(tools: Array<{ name: string; description: string }>) {
       const live = sid !== null && sessions.has(sid)
       return rpc({
         tools: live ? tools.map((t) => ({ ...t, inputSchema: { type: 'object' } })) : [],
+      })
+    }
+    if (body.method === 'tools/call') {
+      const params = (body as { params?: { name?: string; arguments?: unknown } }).params
+      return rpc({
+        content: [
+          { type: 'text', text: `called:${params?.name}:${JSON.stringify(params?.arguments)}` },
+        ],
       })
     }
     return new Response(

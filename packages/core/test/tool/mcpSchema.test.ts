@@ -20,13 +20,14 @@ describe('toolsToHelpModel(上游工具集 → HelpModel)', () => {
     expect(model.node).toEqual({ path: 'docs/context7', kind: 'mcp', description: 'Context7' })
   })
 
-  it('每工具一条 cmd:name=虚拟名、POST、path=/<nodePath>、scope=call', () => {
+  it('每工具一条 cmd:name=虚拟名、POST、path=/<nodePath>/<tool> 直连、scope=call', () => {
     expect(model.cmds).toHaveLength(2)
     const c0 = model.cmds[0]
     expect(c0?.name).toBe('resolve-library-id')
     expect(c0?.method).toBe('POST')
-    expect(c0?.path).toBe('/docs/context7')
+    expect(c0?.path).toBe('/docs/context7/resolve-library-id')
     expect(c0?.scope).toBe('call')
+    expect(c0?.flatBody).toBe(true)
   })
 
   it('description → h 行;inputSchema 透传;effect 透传', () => {
@@ -45,14 +46,19 @@ describe('toolsToHelpModel(上游工具集 → HelpModel)', () => {
     expect(c1?.confirm).toBe(true)
   })
 
-  it('经 renderHelpDsl:cmd 行完整,h 行在 scope 前,scope call 存在', () => {
+  it('经 renderHelpDsl:cmd 行是直连路径,h 行在 scope 前,body 为裸 inputSchema', () => {
     const dsl = renderHelpDsl(model)
     const lines = dsl.split('\n')
-    expect(lines).toContain('cmd resolve-library-id POST /docs/context7')
+    expect(lines).toContain('cmd resolve-library-id POST /docs/context7/resolve-library-id')
     expect(lines).toContain('  h 解析库 id')
     expect(lines).toContain('  scope call')
+    // flatBody:body 行是裸 inputSchema,不含 {tool,arguments} 信封
+    const bodyLine = lines.find((l) => l.startsWith('  body '))
+    expect(bodyLine).toBeDefined()
+    expect(bodyLine).not.toContain('"tool"')
+    expect(JSON.parse((bodyLine ?? '').slice('  body '.length))).toEqual(tools[0]?.inputSchema)
     // h 行位于对应 cmd 的 scope 行之前
-    const cmdIdx = lines.indexOf('cmd resolve-library-id POST /docs/context7')
+    const cmdIdx = lines.indexOf('cmd resolve-library-id POST /docs/context7/resolve-library-id')
     const hIdx = lines.indexOf('  h 解析库 id')
     const scopeIdx = lines.indexOf('  scope call')
     expect(cmdIdx).toBeLessThan(hIdx)
@@ -64,7 +70,7 @@ describe('toolsToHelpModel(上游工具集 → HelpModel)', () => {
     expect(parsed.cmds[0]).toEqual({
       name: 'resolve-library-id',
       method: 'POST',
-      path: '/docs/context7',
+      path: '/docs/context7/resolve-library-id',
       scope: 'call',
     })
   })
@@ -73,7 +79,7 @@ describe('toolsToHelpModel(上游工具集 → HelpModel)', () => {
     const m = toolsToHelpModel('x', { kind: 'http', description: 'X' }, [{ name: 'bare' }])
     const dsl = renderHelpDsl(m)
     expect(dsl).not.toContain('  h ')
-    expect(dsl).toContain('cmd bare POST /x')
+    expect(dsl).toContain('cmd bare POST /x/bare')
   })
 })
 
@@ -97,13 +103,13 @@ describe('两级披露:索引形态与单工具全量', () => {
     expect(m.node.description).toContain('GET /docs/context7/<tool>/~help')
   })
 
-  it('toolHelpModel:node 行是工具伪节点路径,cmd path 仍指向节点', () => {
+  it('toolHelpModel:node 行是工具伪节点路径,cmd path 同为直连路径', () => {
     const tool = tools[0] as ToolSpec
     const m = toolHelpModel('docs/context7', { kind: 'mcp', description: 'Context7' }, tool)
     expect(m.node.path).toBe('docs/context7/resolve-library-id')
     expect(m.node.description).toBe('解析库 id')
     expect(m.cmds).toHaveLength(1)
-    expect(m.cmds[0]?.path).toBe('/docs/context7')
+    expect(m.cmds[0]?.path).toBe('/docs/context7/resolve-library-id')
     expect(m.cmds[0]?.inputSchema).toEqual(tool.inputSchema)
   })
 
