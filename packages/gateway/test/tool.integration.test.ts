@@ -764,3 +764,77 @@ describe('mcp 真实上游 E2E(opt-in via TB_TEST_MCP_URL)', () => {
     expect(second).toBe(first)
   })
 })
+
+describe('system/federation 运行时白名单(env 基线 ∪ 运行时叠加)', () => {
+  const mountRemote = (path: string, host: string): Promise<Response> =>
+    postJson(
+      'system/registry',
+      {
+        tool: 'write',
+        arguments: {
+          path,
+          kind: 'remote',
+          description: 'runtime allowlisted',
+          config: { kind: 'remote', baseUrl: `https://${host}/htbp` },
+        },
+      },
+      admin(),
+    )
+
+  it('运行时 add 后,原本白名单外的 baseUrl 可挂载', async () => {
+    // env 基线只含 example.com;api.newpeer.io 初始被拒。
+    const before = await mountRemote('srv/rt-before', 'api.newpeer.io')
+    expect(before.status).toBe(400)
+    expect(((await before.json()) as { code: string }).code).toBe('invalid_argument')
+
+    const add = await postJson(
+      'system/federation',
+      { tool: 'add', arguments: { host: 'newpeer.io' } },
+      admin(),
+    )
+    expect(add.status).toBe(200)
+
+    // 叠加生效后,后缀匹配 newpeer.io 的 host 放行(env base ∪ 运行时)。
+    const after = await mountRemote('srv/rt-after', 'api.newpeer.io')
+    expect(after.status).toBe(200)
+  })
+
+  it('list 合并视图:env 基线不可删、运行时条目可删;remove env 基线 → 400', async () => {
+    await postJson('system/federation', { tool: 'add', arguments: { host: 'newpeer.io' } }, admin())
+
+    const listRes = await postJson('system/federation', { tool: 'list', arguments: {} }, admin())
+    expect(listRes.status).toBe(200)
+    const items = (
+      (await listRes.json()) as {
+        items: Array<{ host: string; source: string; removable: boolean }>
+      }
+    ).items
+    expect(items).toContainEqual({ host: 'example.com', source: 'env', removable: false })
+    expect(items).toContainEqual(
+      expect.objectContaining({ host: 'newpeer.io', source: 'store', removable: true }),
+    )
+
+    // env 基线条目不可经管理面删除(须改 TB_REMOTE_ALLOWLIST 重新部署)。
+    const rm = await postJson(
+      'system/federation',
+      { tool: 'remove', arguments: { host: 'example.com' } },
+      admin(),
+    )
+    expect(rm.status).toBe(400)
+    expect(((await rm.json()) as { code: string }).code).toBe('invalid_argument')
+  })
+
+  it('非 admin SK 调 system/federation → 权限拒绝(白名单是 SSRF 闸门)', async () => {
+    // 只读 SK:无 admin scope。
+    const roSk = await issueSk({
+      owner: 'agent:ro',
+      scopes: [{ pattern: '**', actions: ['read'] }],
+    })
+    const res = await postJson(
+      'system/federation',
+      { tool: 'add', arguments: { host: 'evil.io' } },
+      { headers: { authorization: `Bearer ${roSk}` } },
+    )
+    expect(res.status).toBe(403)
+  })
+})

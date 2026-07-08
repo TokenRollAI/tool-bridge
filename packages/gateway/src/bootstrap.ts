@@ -8,6 +8,7 @@ import {
   mintKey,
   type NodeInput,
   NodeRegistryStore,
+  RemoteAllowlistStore,
   type SecretKey,
   type SecretStoreImpl,
   SKRegistryStore,
@@ -33,8 +34,8 @@ interface BootstrapEnv {
  * - 否则由 mintKey 生成随机明文。
  */
 
-/** 引导时注册的内置节点(system directory + 五个 builtin,含 plugin)。 */
-const BUILTIN_MODULES = ['sk', 'secret', 'registry', 'status', 'plugin'] as const
+/** 引导时注册的内置节点(system directory + 六个 builtin,含 plugin/federation)。 */
+const BUILTIN_MODULES = ['sk', 'secret', 'registry', 'status', 'plugin', 'federation'] as const
 
 const BUILTIN_DESCRIPTIONS: Record<string, string> = {
   sk: 'SecretKey registry',
@@ -42,6 +43,7 @@ const BUILTIN_DESCRIPTIONS: Record<string, string> = {
   registry: 'Node registry',
   status: 'Gateway health and summary',
   plugin: 'Plugin registry',
+  federation: 'Remote federation host allowlist',
 }
 
 let bootstrapOnce: Promise<void> | undefined
@@ -136,6 +138,8 @@ export interface BuiltinAssemblyOpts {
   version: string
   /** 放行 http:// plugin endpoint(仅本地开发)。 */
   allowInsecureHttp: boolean
+  /** remote 联邦白名单的 env 基线(TB_REMOTE_ALLOWLIST 解析后;供 system/federation list 标注不可删)。 */
+  remoteAllowlistBase: string[]
 }
 
 /** 装配 BuiltinDeps(供 createBuiltins)。 */
@@ -154,6 +158,8 @@ export function buildDeps(opts: BuiltinAssemblyOpts): BuiltinDeps {
       fetchContract: fetchPluginContract,
       allowInsecureHttp: opts.allowInsecureHttp,
     },
+    // federation 模块:remote host 白名单运行时存储 + env 基线。
+    federation: { store: new RemoteAllowlistStore(opts.store), base: opts.remoteAllowlistBase },
   }
 }
 
