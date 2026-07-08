@@ -3,6 +3,7 @@ import {
   Boxes,
   ChevronsUpDown,
   Cpu,
+  Globe,
   KeySquare,
   ListFilter,
   LogOut,
@@ -39,6 +40,7 @@ const MANAGE_LINKS = [
   { to: '/manage/secrets', label: '凭证保管', icon: ShieldEllipsis },
   { to: '/manage/devices', label: '设备', icon: Cpu },
   { to: '/manage/plugins', label: 'Plugin', icon: Plug2 },
+  { to: '/manage/federation', label: '联邦白名单', icon: Globe },
 ] as const
 
 const isMac = typeof navigator !== 'undefined' && /Mac/.test(navigator.platform)

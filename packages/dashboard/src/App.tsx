@@ -5,6 +5,7 @@ import { LoginPage } from '@/pages/LoginPage'
 import { NodePage } from '@/pages/NodePage'
 import { OverviewPage } from '@/pages/OverviewPage'
 import { DevicesPage } from '@/pages/system/DevicesPage'
+import { FederationPage } from '@/pages/system/FederationPage'
 import { PluginsPage } from '@/pages/system/PluginsPage'
 import { RegistryPage } from '@/pages/system/RegistryPage'
 import { SecretsPage } from '@/pages/system/SecretsPage'
@@ -23,6 +24,7 @@ export default function App() {
         <Route path="manage/registry" element={<RegistryPage />} />
         <Route path="manage/devices" element={<DevicesPage />} />
         <Route path="manage/plugins" element={<PluginsPage />} />
+        <Route path="manage/federation" element={<FederationPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>
     </Routes>

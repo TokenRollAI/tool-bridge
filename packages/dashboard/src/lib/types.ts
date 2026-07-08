@@ -96,6 +96,14 @@ export interface Page<T> {
   cursor?: string
 }
 
+/** system/federation list 的一行:remote 联邦 host 白名单合并视图。 */
+export interface FederationHost {
+  host: string
+  source: 'env' | 'store'
+  removable: boolean
+  updatedAt?: string
+}
+
 /** system/plugin 的 manifest(plugin/manifest.ts 契约手抄)。 */
 export type PluginKind = 'tool-provider' | 'context-provider'
 
