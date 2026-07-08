@@ -20,7 +20,8 @@
 | Context Layer | 多来源上下文统一读写检索面(四动词 + Search + `$ref`) | `context/` | gateway `providers/r2Object|s3Object|s3Sign` + `refToken.ts` |
 | Device Gateway | 设备 WS 反向注册 + 调用转发 | `device/`(帧/状态机/shell 白名单/设备侧 client) | **协议行为单一真源:gateway `deviceHello.ts`(processDeviceHello,宿主中立)**;两个宿主胶水:gateway `deviceSession.ts`(DO,WS hibernation)与 server `deviceHub.ts`(Node ws);cli `deviceRuntime.ts`;core `node/`(FsObjectStore/shellExecutor) |
 | Auth(横切) | SK 签发/作用域/访问判定/SecretStore | `auth/` + `secret/` | gateway 认证中间件;SK 哈希与密文存 StateStore |
-| builtin 管理面 | `system/*` 六模块:sk / secret / registry / status / plugin / federation | `builtin/` | 经 gateway dispatch |
+| builtin 管理面 | `system/*` 七模块:sk / secret / registry / status / plugin / federation / annotation | `builtin/` | 经 gateway dispatch |
+| Agent 反馈 | `~feedback` 保留段(per-path 一级协议能力,非 builtin):提交/投票/下钻,头部条目注入 ~help | core `feedback/` 存储 + gateway `tbApp.ts` 路由 | 权限判定落目标 path |
 | SDK | 内嵌 TB 实例 / 程序化注册 / 反向连接 | —(装配层) | `packages/sdk`:createToolBridge = core + gateway 的 createTbApp + 内存宿主缺省 |
 | CLI | 纯 API 客户端 `tb`,18 个子命令一一映射接口面,**无专用端点** | — | `packages/cli`(commander;npm 发布物) |
 | Plugin System | 自定义 Provider 注册与生命周期(探活/契约校验/信封传输) | `plugin/` | gateway `providers/pluginClient|pluginTool|pluginContext` + builtin `system/plugin`;首个 in-repo plugin 参考实现:`packages/plugin-feishu`(CF Worker,飞书 TAT 自动换发) |
@@ -60,7 +61,7 @@
 
 ## 引导(bootstrap.ts)
 
-Workers 无启动钩子,首请求惰性引导(模块级 promise 防重入 + KV 幂等标志);Admin SK 明文可由 `TB_BOOTSTRAP_ADMIN_SK` 提供(部署自动化)否则随机生成,只输出一次;物化 `system` directory + sk/secret/registry/status/plugin/federation 六个 builtin(`registeredBy: system:boot`);Plugin 引导节点幂等 ensure。
+Workers 无启动钩子,首请求惰性引导(模块级 promise 防重入 + KV 幂等标志);Admin SK 明文可由 `TB_BOOTSTRAP_ADMIN_SK` 提供(部署自动化)否则随机生成,只输出一次;物化 `system` directory + sk/secret/registry/status/plugin/federation/annotation 七个 builtin(`registeredBy: system:boot`);Plugin 引导节点幂等 ensure。
 
 ## Provider 边界细则
 
