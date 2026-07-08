@@ -1,4 +1,4 @@
-import type { HelpJson, TBErrorBody, TreeJson } from './types'
+import type { FeedbackView, HelpJson, TBErrorBody, TreeJson } from './types'
 
 /** TBError 线上形状的客户端异常({code,message,retryable} + HTTP 状态)。 */
 export class ApiError extends Error {
@@ -22,7 +22,7 @@ export interface Connection {
 }
 
 interface RequestOpts {
-  method?: 'GET' | 'POST'
+  method?: 'GET' | 'POST' | 'DELETE'
   body?: unknown
   /** Accept 头;缺省 application/json。 */
   accept?: string
@@ -137,4 +137,57 @@ export async function getHealthz(baseUrl: string) {
   const res = await fetch(`${baseUrl.replace(/\/+$/, '')}/healthz`)
   if (!res.ok) throw new ApiError('unavailable', res.status, `healthz HTTP ${res.status}`, true)
   return (await res.json()) as { healthy: boolean; version: string }
+}
+
+// --- ~feedback 保留段(per-path Agent 反馈,对等 `tb feedback`)---
+
+/** GET /<path>/~feedback;hidden 含净分 ≤ 阈值的隐藏条目。 */
+export async function feedbackList(
+  conn: Connection,
+  path: string,
+  hidden: boolean,
+  signal?: AbortSignal,
+) {
+  const p = `/${path}/~feedback${hidden ? '?hidden=1' : ''}`
+  return (await (await request(conn, p, { signal })).json()) as { items: FeedbackView[] }
+}
+
+/** GET /<path>/~feedback/<id>(含 detail)。 */
+export async function feedbackGet(
+  conn: Connection,
+  path: string,
+  id: string,
+  signal?: AbortSignal,
+) {
+  return (await (
+    await request(conn, `/${path}/~feedback/${id}`, { signal })
+  ).json()) as FeedbackView
+}
+
+/** POST /<path>/~feedback → 提交(title/detail 强制短)。 */
+export async function feedbackSubmit(
+  conn: Connection,
+  path: string,
+  input: { title: string; detail: string },
+) {
+  return (await (
+    await request(conn, `/${path}/~feedback`, { method: 'POST', body: input })
+  ).json()) as { id: string; path: string; title: string }
+}
+
+/** POST /<path>/~feedback/<id> → 投票(每身份一票,可改票)。 */
+export async function feedbackVote(
+  conn: Connection,
+  path: string,
+  id: string,
+  vote: 'up' | 'down' | 'clear',
+) {
+  return (await (
+    await request(conn, `/${path}/~feedback/${id}`, { method: 'POST', body: { vote } })
+  ).json()) as FeedbackView
+}
+
+/** DELETE /<path>/~feedback/<id>(admin)。 */
+export async function feedbackRemove(conn: Connection, path: string, id: string) {
+  await request(conn, `/${path}/~feedback/${id}`, { method: 'DELETE' })
 }
