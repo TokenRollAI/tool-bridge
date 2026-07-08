@@ -93,6 +93,32 @@ describe('根 ~help / ~tree(Admin 视角)', () => {
     expect(json.htbp).toBe('0.1')
   })
 
+  it('~help Accept: text/markdown → 可读 Markdown 表现(text/markdown)', async () => {
+    const res = await SELF.fetch(
+      'https://tb.test/system/sk/~help',
+      admin({ headers: { accept: 'text/markdown' } }),
+    )
+    expect(res.status).toBe(200)
+    expect(res.headers.get('content-type')).toContain('text/markdown')
+    const md = await res.text()
+    expect(md.startsWith('# /system/sk\n')).toBe(true)
+    expect(md).toContain('## How to call')
+    expect(md).toContain('### `write`')
+    expect(md).toContain('- Required scope: `admin`')
+  })
+
+  it('根 ~help markdown:children 表格 + 下钻 hint', async () => {
+    const res = await SELF.fetch(
+      'https://tb.test/~help',
+      admin({ headers: { accept: 'text/markdown' } }),
+    )
+    expect(res.status).toBe(200)
+    const md = await res.text()
+    expect(md).toContain('## Child nodes')
+    expect(md).toContain('| `system` | directory |')
+    expect(md).toContain('> **Next step**: GET /<child-path>/~help')
+  })
+
   it('root ~tree json 含 system 子树', async () => {
     const res = await SELF.fetch(
       'https://tb.test/~tree',
