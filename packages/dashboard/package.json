@@ -1,6 +1,6 @@
 {
   "name": "@tool-bridge/dashboard",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "tool-bridge dashboard as prebuilt static assets (Vite build output in dist/), serve via Workers Static Assets or any static host",
   "type": "module",
   "license": "MIT",

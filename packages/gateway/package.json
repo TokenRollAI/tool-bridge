@@ -1,6 +1,6 @@
 {
   "name": "@tool-bridge/gateway",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "tool-bridge gateway as a Cloudflare Worker library: default-export the HTBP app plus the DeviceSession Durable Object, deploy with your own wrangler config",
   "type": "module",
   "license": "MIT",
