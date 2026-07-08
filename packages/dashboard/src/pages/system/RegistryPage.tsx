@@ -81,6 +81,7 @@ export function RegistryPage() {
   }
 
   // auth:'oauth' 挂载的授权入口(对等 tb tool auth):redirect → 新标签打开 AS 授权页。
+  // 严格上游(DCR 只放行 localhost 回调,如 Bytebase)→ 指引 CLI --local 通道。
   const authorize = (path: string) => {
     oauth.mutate(path, {
       onSuccess: (r) => {
@@ -93,7 +94,12 @@ export function RegistryPage() {
           toast.info('已打开授权页,完成授权后即可调用')
         }
       },
-      onError: (e) => toast.error(e.message),
+      onError: (e) =>
+        toast.error(
+          /redirect/i.test(e.message)
+            ? `该上游只允许 localhost 回调,请用 CLI 完成授权:tb tool auth ${path} --local`
+            : e.message,
+        ),
     })
   }
 
@@ -500,7 +506,12 @@ function MountDialog() {
                   toast.info('已打开授权页,完成授权后即可调用')
                 }
               },
-              onError: (e) => toast.error(`发起授权失败:${e.message}(可稍后在列表点钥匙重试)`),
+              onError: (e) =>
+                toast.error(
+                  /redirect/i.test(e.message)
+                    ? `该上游只允许 localhost 回调,请用 CLI 完成授权:tb tool auth ${mounted} --local`
+                    : `发起授权失败:${e.message}(可稍后在列表点钥匙重试)`,
+                ),
             })
           }
         },

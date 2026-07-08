@@ -53,6 +53,7 @@ function oauthUpstreamMock(tools: Array<{ name: string; description: string }>) 
   const validTokens = new Set(['at-1'])
   let tokenIssued = 0
   const grants: string[] = []
+  const tokenRequests: URLSearchParams[] = []
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const req = input instanceof Request ? input : new Request(String(input), init)
     const url = new URL(req.url)
@@ -92,6 +93,7 @@ function oauthUpstreamMock(tools: Array<{ name: string; description: string }>) 
     if (req.method === 'POST' && url.pathname === '/token') {
       const params = new URLSearchParams(await req.text())
       grants.push(params.get('grant_type') ?? '')
+      tokenRequests.push(params)
       if (params.get('grant_type') === 'authorization_code') {
         // PKCE:code_verifier 必须随兑换请求带上(state 加密载荷还原成功的证明)。
         if (!params.get('code_verifier') || params.get('code') !== 'code-ok') {
@@ -156,6 +158,7 @@ function oauthUpstreamMock(tools: Array<{ name: string; description: string }>) 
   return {
     fetchMock,
     grants,
+    tokenRequests,
     /** 作废现存 access token(refresh_token 仍有效)→ 下次调用走 401→refresh 自愈。 */
     revokeAccessTokens: () => validTokens.clear(),
   }
@@ -238,6 +241,46 @@ describe('mcp 托管 OAuth:授权全链路(默认离线,上游为 fetch mock)', 
     const res = await postJson('db/bb-re/~authorize', {}, admin())
     expect(res.status).toBe(200)
     expect(((await res.json()) as { status: string }).status).toBe('authorized')
+  })
+
+  it('本地回调通道(body.redirectUri = loopback):授权/兑换均复用该 redirect_uri', async () => {
+    const upstream = oauthUpstreamMock([{ name: 'query', description: 'run query' }])
+    vi.stubGlobal('fetch', upstream.fetchMock)
+    await mountOAuthMcp('db/bb-local')
+
+    const localUri = 'http://127.0.0.1:51234/callback'
+    const res = await postJson(`db/bb-local/~authorize`, { redirectUri: localUri }, admin())
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { status: string; authorizationUrl?: string }
+    expect(body.status).toBe('redirect')
+    const authUrl = new URL(body.authorizationUrl as string)
+    // 授权 URL 与 DCR 注册的 redirect_uri 都是本地回调,而非网关 callback。
+    expect(authUrl.searchParams.get('redirect_uri')).toBe(localUri)
+
+    // CLI 把本地收到的 code+state 转交网关 callback;兑换用 state 内嵌的 redirect_uri。
+    const cb = await callback({ code: 'code-ok', state: authUrl.searchParams.get('state') ?? '' })
+    expect(cb.status).toBe(200)
+    const tokenReq = upstream.tokenRequests.find(
+      (p) => p.get('grant_type') === 'authorization_code',
+    )
+    expect(tokenReq?.get('redirect_uri')).toBe(localUri)
+
+    const help = await SELF.fetch('https://tb.test/db/bb-local/~help', admin())
+    expect(help.status).toBe(200)
+    expect(parseHelpDsl(await help.text()).cmds.map((c) => c.name)).toContain('query')
+  })
+
+  it('非 loopback 的 redirectUri → invalid_argument 拒绝', async () => {
+    const upstream = oauthUpstreamMock([])
+    vi.stubGlobal('fetch', upstream.fetchMock)
+    await mountOAuthMcp('db/bb-evil')
+    const res = await postJson(
+      `db/bb-evil/~authorize`,
+      { redirectUri: 'https://evil.example/callback' },
+      admin(),
+    )
+    expect(res.status).toBe(400)
+    expect(((await res.json()) as { code: string }).code).toBe('invalid_argument')
   })
 })
 

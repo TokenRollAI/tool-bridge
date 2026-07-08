@@ -61,11 +61,16 @@ export function reauthorizeRequired(nodePath: string): TBError {
 
 // ---------- self-contained state(AES-256-GCM,零存储) ----------
 
-/** state 载荷:p = mcp 节点树路径,v = PKCE code_verifier,exp = 过期时刻(epoch 秒)。 */
+/**
+ * state 载荷:p = mcp 节点树路径,v = PKCE code_verifier,exp = 过期时刻(epoch 秒);
+ * r = 本次授权用的 redirect_uri(仅非默认网关回调时携带——严格上游只放行 localhost
+ * 回调时走 CLI 本地回调通道,token 兑换必须复用同一 redirect_uri)。
+ */
 export interface OAuthStatePayload {
   p: string
   v: string
   exp: number
+  r?: string
 }
 
 /**
@@ -113,7 +118,8 @@ export async function openOAuthState(
     if (
       typeof payload.p !== 'string' ||
       typeof payload.v !== 'string' ||
-      typeof payload.exp !== 'number'
+      typeof payload.exp !== 'number' ||
+      (payload.r !== undefined && typeof payload.r !== 'string')
     ) {
       return null
     }
@@ -140,6 +146,12 @@ export interface McpOAuthProviderOpts {
    * deny 模式不发起交互,占位 .invalid 域仅用于满足 SDK 的非空判定(交互路径必抛)。
    */
   origin?: string
+  /**
+   * 显式 redirect_uri 覆盖(CLI 本地回调通道):严格上游的 DCR 只放行 localhost 回调时,
+   * 授权跳本地临时端口,code 再由 CLI 转交网关 callback 兑换。覆盖时同时进 clientMetadata
+   * 与 state 载荷(兑换必须复用同一 redirect_uri)。
+   */
+  redirectUri?: string
 }
 
 export class GatewayMcpOAuthProvider implements OAuthClientProvider {
@@ -153,6 +165,7 @@ export class GatewayMcpOAuthProvider implements OAuthClientProvider {
   }
 
   get redirectUrl(): string {
+    if (this.opts.redirectUri !== undefined) return this.opts.redirectUri
     const origin = this.opts.origin ?? 'https://tool-bridge.invalid'
     return `${origin}${OAUTH_CALLBACK_PATH}`
   }
@@ -208,13 +221,14 @@ export class GatewayMcpOAuthProvider implements OAuthClientProvider {
 
   async redirectToAuthorization(authorizationUrl: URL): Promise<void> {
     if (this.opts.mode === 'deny') throw reauthorizeRequired(this.opts.nodePath)
-    // 此刻 SDK 已 saveCodeVerifier —— 把 {nodePath, codeVerifier, exp} 加密进 state,
-    // 回调侧解密即得全部续跑状态(零存储,不吃 KV 一致性窗口)。
+    // 此刻 SDK 已 saveCodeVerifier —— 把 {nodePath, codeVerifier, exp(, redirectUri)} 加密进
+    // state,回调侧解密即得全部续跑状态(零存储,不吃 KV 一致性窗口)。
     const state = await sealOAuthState(
       {
         p: this.opts.nodePath,
         v: this.codeVerifier(),
         exp: Math.floor(Date.now() / 1000) + STATE_TTL_SEC,
+        ...(this.opts.redirectUri !== undefined ? { r: this.opts.redirectUri } : {}),
       },
       this.opts.encryptionKey,
     )
@@ -253,11 +267,35 @@ export interface McpOAuthFlowOpts {
   serverUrl: string
   /** 当前请求的网关 origin。 */
   origin: string
+  /** 显式 redirect_uri(CLI 本地回调通道;仅允许 localhost,startMcpAuthorization 校验)。 */
+  redirectUri?: string
 }
 
 export type StartAuthorizationResult =
   | { status: 'authorized' }
   | { status: 'redirect'; authorizationUrl: string }
+
+/**
+ * 校验 CLI 本地回调通道的 redirect_uri:只放行 http://localhost|127.0.0.1|[::1](任意端口
+ * 任意路径)。这不是网关持有的回调,授权 code 会落到用户本机——限定 loopback 防止把
+ * code 引到任意第三方 URL。
+ */
+export function assertLocalRedirectUri(uri: string): void {
+  let u: URL
+  try {
+    u = new URL(uri)
+  } catch {
+    throw new TBError('invalid_argument', `redirectUri 不是合法 URL:'${uri}'`)
+  }
+  const host = u.hostname.toLowerCase()
+  const isLoopback = host === 'localhost' || host === '127.0.0.1' || host === '::1'
+  if ((u.protocol !== 'http:' && u.protocol !== 'https:') || !isLoopback) {
+    throw new TBError(
+      'invalid_argument',
+      'redirectUri 仅允许 localhost/127.0.0.1 回调(CLI 本地回调通道)',
+    )
+  }
+}
 
 /** OAuth 编排错误归一:TBError 原样;其余 → unavailable(上游 AS/网络问题)。 */
 async function guardOAuth<T>(fn: () => Promise<T>): Promise<T> {
@@ -276,16 +314,28 @@ async function guardOAuth<T>(fn: () => Promise<T>): Promise<T> {
 /**
  * 发起授权:SDK `auth()` 一次编排 discovery + DCR + PKCE。
  * 已有 refresh_token 且静默刷新成功 → authorized(免交互);否则捕获授权 URL 返回。
+ * `redirectUri`(CLI 本地回调通道)仅允许 loopback;与缓存 client 注册的 redirect_uris
+ * 不符时清 client 强制重 DCR(AS 按注册值精确校验 redirect_uri)。
  */
 export async function startMcpAuthorization(
   opts: McpOAuthFlowOpts,
 ): Promise<StartAuthorizationResult> {
+  if (opts.redirectUri !== undefined) {
+    assertLocalRedirectUri(opts.redirectUri)
+    const cached = (await opts.store.get(KEY_OAUTH_CLIENT + opts.nodePath)) as {
+      redirect_uris?: string[]
+    } | null
+    if (cached !== null && !(cached.redirect_uris ?? []).includes(opts.redirectUri)) {
+      await opts.store.delete(KEY_OAUTH_CLIENT + opts.nodePath)
+    }
+  }
   const provider = new GatewayMcpOAuthProvider({
     store: opts.store,
     nodePath: opts.nodePath,
     encryptionKey: opts.encryptionKey,
     mode: 'interactive',
     origin: opts.origin,
+    ...(opts.redirectUri !== undefined ? { redirectUri: opts.redirectUri } : {}),
   })
   return await guardOAuth(async () => {
     const result = await auth(provider, { serverUrl: opts.serverUrl })
@@ -298,7 +348,10 @@ export async function startMcpAuthorization(
   })
 }
 
-/** 回调段:注入 state 还原的 code_verifier,兑换 code → token 落 StateStore。 */
+/**
+ * 回调段:注入 state 还原的 code_verifier(与 redirect_uri,如走本地回调通道),
+ * 兑换 code → token 落 StateStore。
+ */
 export async function finishMcpAuthorization(
   opts: McpOAuthFlowOpts & { code: string; codeVerifier: string },
 ): Promise<void> {
@@ -308,6 +361,7 @@ export async function finishMcpAuthorization(
     encryptionKey: opts.encryptionKey,
     mode: 'interactive',
     origin: opts.origin,
+    ...(opts.redirectUri !== undefined ? { redirectUri: opts.redirectUri } : {}),
   })
   provider.setCodeVerifier(opts.codeVerifier)
   await guardOAuth(async () => {

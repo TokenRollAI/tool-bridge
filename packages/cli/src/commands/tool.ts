@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process'
 import { Command } from 'commander'
 import { collect, resolveTarget, withGlobalOpts } from '../args'
-import { apiJson, CliError } from '../http'
+import { apiJson, CliError, requireTarget } from '../http'
 import { guard, printJson, printLine } from '../output'
 import { buildVirtualize, deleteNode, parseToolsFile, registerNode } from '../registry'
 import type { NodeConfig, NodeInput } from '../types'
@@ -144,29 +144,133 @@ function openBrowser(url: string): void {
   }
 }
 
+/** 上游 DCR 拒绝网关回调的典型报错(Bytebase 等严格上游)→ 提示改走 --local。 */
+function isRedirectRejection(message: string): boolean {
+  return /redirect/i.test(message)
+}
+
+/**
+ * 本地回调通道(--local):127.0.0.1 起临时 server 接收 AS 回跳的 code+state,
+ * 转交网关 `/~oauth/callback` 完成兑换(token 仍只落网关)。适配只放行 localhost
+ * 回调的严格上游(如 Bytebase 的 DCR 白名单)。
+ */
+async function runLocalCallbackFlow(
+  target: ReturnType<typeof resolveTarget>,
+  path: string,
+  open: boolean,
+): Promise<void> {
+  const { createServer } = await import('node:http')
+  const { once } = await import('node:events')
+
+  const server = createServer()
+  server.listen(0, '127.0.0.1')
+  await once(server, 'listening')
+  const addr = server.address()
+  if (addr === null || typeof addr === 'string') throw new CliError('failed to bind local port')
+  const redirectUri = `http://127.0.0.1:${addr.port}/callback`
+
+  try {
+    const result = await apiJson<AuthorizeResult>(target, {
+      method: 'POST',
+      path: `${path}/~authorize`,
+      body: { redirectUri },
+    })
+    if (result.status === 'authorized') {
+      printLine(`already authorized: ${path}`)
+      return
+    }
+    if (!result.authorizationUrl) throw new CliError('gateway returned no authorization URL')
+    printLine('open this URL in a browser to authorize:')
+    printLine(`  ${result.authorizationUrl}`)
+    if (open) openBrowser(result.authorizationUrl)
+    printLine('waiting for the browser callback…(Ctrl-C to abort)')
+
+    // 等 AS 回跳本地;拿到 code+state 即向浏览器回执并关停。
+    const { code, state } = await new Promise<{ code: string; state: string }>(
+      (resolve, reject) => {
+        server.on('request', (req, res) => {
+          const u = new URL(req.url ?? '/', redirectUri)
+          if (u.pathname !== '/callback') {
+            res.writeHead(404).end()
+            return
+          }
+          const err = u.searchParams.get('error')
+          const code = u.searchParams.get('code')
+          const state = u.searchParams.get('state')
+          if (err !== null || code === null || state === null) {
+            res
+              .writeHead(400, { 'content-type': 'text/plain; charset=utf-8' })
+              .end(`authorization failed: ${err ?? 'missing code/state'}`)
+            reject(new CliError(`authorization failed: ${err ?? 'missing code/state'}`))
+            return
+          }
+          res
+            .writeHead(200, { 'content-type': 'text/plain; charset=utf-8' })
+            .end('Authorization received. Finishing up — you can close this tab.')
+          resolve({ code, state })
+        })
+      },
+    )
+
+    // code+state 转交网关 callback 兑换(与浏览器直达同一端点;state 自含校验)。
+    const { baseUrl } = requireTarget(target)
+    const cb = new URL('/~oauth/callback', baseUrl)
+    cb.searchParams.set('code', code)
+    cb.searchParams.set('state', state)
+    const res = await fetch(cb)
+    const text = await res.text()
+    if (!res.ok) {
+      const detail = /<p>([^<]+)<\/p>/.exec(text)?.[1] ?? `gateway returned HTTP ${res.status}`
+      throw new CliError(`token exchange failed: ${detail}`)
+    }
+    printLine(`authorized: ${path}`)
+  } finally {
+    server.close()
+  }
+}
+
 /**
  * `tb tool auth <path>` —— 为 auth:'oauth' 的 mcp 挂载发起网关托管 OAuth 授权。
- * 网关已有有效凭证(静默刷新成功)→ 直接完成;否则打印授权 URL 并尝试打开浏览器,
- * 用户在浏览器完成授权后网关回调页确认,无需再回 CLI。
+ * 默认:授权回跳直达网关 `/~oauth/callback`,浏览器完成即结束。
+ * `--local`:上游 DCR 只放行 localhost 回调时(如 Bytebase),本机起临时端口接收回跳,
+ * code 由 CLI 转交网关兑换(token 仍不出网关)。
  */
 export function toolAuthCommand(): Command {
   return withGlobalOpts(new Command('auth'))
     .description('Authorize an OAuth-backed mcp mount (gateway-managed flow)')
     .argument('<path>', 'Tree path of the mcp mount')
     .option('--no-open', 'Print the authorization URL without opening a browser')
+    .option('--local', 'Use a localhost callback (for upstreams that only allow loopback URIs)')
     .action(
       async (
         pathArg: string,
-        opts: { json?: boolean; baseUrl?: string; sk?: string; open?: boolean },
+        opts: { json?: boolean; baseUrl?: string; sk?: string; open?: boolean; local?: boolean },
       ) => {
         const asJson = Boolean(opts.json)
         await guard(asJson, async () => {
           const path = String(pathArg ?? '').trim()
           if (!path) throw new CliError('tree path is required')
-          const result = await apiJson<AuthorizeResult>(resolveTarget(opts), {
-            method: 'POST',
-            path: `${path}/~authorize`,
-          })
+          const target = resolveTarget(opts)
+          if (opts.local) {
+            if (asJson) throw new CliError('--local is interactive; --json is not supported')
+            await runLocalCallbackFlow(target, path, opts.open !== false)
+            return
+          }
+          let result: AuthorizeResult
+          try {
+            result = await apiJson<AuthorizeResult>(target, {
+              method: 'POST',
+              path: `${path}/~authorize`,
+            })
+          } catch (err) {
+            // 严格上游拒网关回调(DCR redirect 白名单)→ 指引本地回调通道。
+            if (err instanceof CliError && isRedirectRejection(err.message)) {
+              throw new CliError(
+                `${err.message}\nhint: this upstream only allows localhost callbacks — retry with: tb tool auth ${path} --local`,
+              )
+            }
+            throw err
+          }
           if (asJson) {
             printJson(result)
             return

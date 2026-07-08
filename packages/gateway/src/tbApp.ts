@@ -343,6 +343,8 @@ export function createTbApp(deps: TbAppDeps): Hono<{ Variables: Vars }> {
           origin: new URL(c.req.url).origin,
           code,
           codeVerifier: payload.v,
+          // 本地回调通道(CLI --local):兑换必须复用授权时的 redirect_uri。
+          ...(payload.r !== undefined ? { redirectUri: payload.r } : {}),
         })
       } catch (err) {
         const detail = isTBError(err) ? err.message : 'token exchange failed'
@@ -884,12 +886,17 @@ export function createTbApp(deps: TbAppDeps): Hono<{ Variables: Vars }> {
     if (node.kind !== 'mcp' || node.config?.kind !== 'mcp' || node.config.auth !== 'oauth') {
       throw new TBError('invalid_argument', `'${path}' 不是 auth:'oauth' 的 mcp 挂载`)
     }
+    // 可选 body {redirectUri}:CLI 本地回调通道(严格上游只放行 loopback 回调时)。
+    const body = (await c.req.json().catch(() => null)) as { redirectUri?: unknown } | null
+    const redirectUri =
+      body !== null && typeof body.redirectUri === 'string' ? body.redirectUri : undefined
     const result = await startMcpAuthorization({
       store,
       encryptionKey: encKey,
       nodePath: path,
       serverUrl: node.config.url,
       origin: new URL(c.req.url).origin,
+      ...(redirectUri !== undefined ? { redirectUri } : {}),
     })
     return new Response(JSON.stringify(result), {
       headers: { 'content-type': contentTypeFor('json') },
