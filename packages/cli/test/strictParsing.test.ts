@@ -95,7 +95,7 @@ describe('缺 required option / positional 必须报错', () => {
     [['tool', 'mount', 'p'], 'commander.missingMandatoryOptionValue'],
     [['ctx', 'mount', 'p'], 'commander.missingMandatoryOptionValue'],
     [['server', 'add', 'p'], 'commander.missingMandatoryOptionValue'],
-    [['call', 'p'], 'commander.missingMandatoryOptionValue'],
+    // call 的 --tool 已非 required(省略 = path 即直连工具路径),不在此表。
     [['plugin', 'register'], 'commander.missingMandatoryOptionValue'],
     [['secret', 'set'], 'commander.missingMandatoryOptionValue'],
     [['sk', 'rm'], 'commander.missingArgument'],
