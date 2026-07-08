@@ -15,11 +15,14 @@
  *   一次,真空列表上游至多多付一趟握手)。重试不得回读会话缓存:KV 边缘读缓存
  *   (≥60s)会把刚删的旧会话又还回来,重试再次复用死会话,防御被击穿
  *   (2026-07-08 生产复发取证)。
- * - `authRef` 经 SecretStore.resolve 注入 `requestInit.headers` 的静态 `Authorization: Bearer`。
+ * - `authRef` 经 SecretStore.resolve 注入 `requestInit.headers` 的静态 `Authorization: Bearer`;
+ *   `auth:'oauth'` 时改挂网关托管 OAuthClientProvider(oauth.ts;mode:'deny'):SDK 自动带
+ *   token、401 时自动 refresh;需要交互(重新)授权 → reauthorizeRequired 指引 `tb tool auth`。
  * - **单一 choke point**(`guard`):一切传输/协议错误经 `normalizeUpstreamError` 归一为 TBError;
  *   MCP RPC 业务错误(`result.isError`)不是错误——落 `ToolResult.isError`,正常返回。
  */
 
+import { UnauthorizedError } from '@modelcontextprotocol/sdk/client/auth.js'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import {
   StreamableHTTPClientTransport,
@@ -32,16 +35,19 @@ import {
   normalizeUpstreamError,
   type SecretStoreImpl,
   type StateStore,
+  TBError,
   type ToolResult,
   type ToolSpec,
   type TreePath,
 } from '@tool-bridge/core'
+import { GatewayMcpOAuthProvider, reauthorizeRequired } from '../oauth'
 import type { UpstreamProvider } from './types'
 
-/** mcp 节点 config。 */
+/** mcp 节点 config。auth:'oauth' → 凭证走网关托管 OAuth(oauth.ts),authRef 忽略。 */
 export interface McpConfig {
   url: string
   authRef?: string
+  auth?: 'oauth'
 }
 
 /** MCP SDK 返回的单个工具形状(仅取我们用到的字段)。 */
@@ -83,8 +89,10 @@ function toToolResult(res: { content?: unknown; isError?: boolean }): ToolResult
 
 /**
  * 我们只使用 Streamable HTTP 的 request/response 能力(listTools/callTool),不消费服务端主动
- * 消息流。MCP SDK 在 initialize 后会自动尝试 GET 打开可选 standalone SSE;这里对 GET 直接
- * 返回 405(协议允许:服务器不提供 SSE),避免关闭会话时中止一条无用网络连接。
+ * 消息流。MCP SDK 在 initialize 后会自动尝试 GET 打开可选 standalone SSE;这里对 SSE GET
+ * (Accept: text/event-stream)直接返回 405(协议允许:服务器不提供 SSE),避免关闭会话时
+ * 中止一条无用网络连接。只拦 SSE:authProvider 的 OAuth discovery/token 刷新也复用本 fetch,
+ * 其 GET(.well-known)必须放行。
  */
 const noStandaloneSseFetch: typeof fetch = (input, init) => {
   const method =
@@ -94,7 +102,11 @@ const noStandaloneSseFetch: typeof fetch = (input, init) => {
       : typeof input === 'object' && 'method' in input
         ? input.method
         : 'GET')
-  if (String(method).toUpperCase() === 'GET') {
+  const accept =
+    new Headers(init?.headers ?? (input instanceof Request ? input.headers : undefined)).get(
+      'accept',
+    ) ?? ''
+  if (String(method).toUpperCase() === 'GET' && accept.includes('text/event-stream')) {
     return Promise.resolve(new Response(null, { status: 405, statusText: 'Method Not Allowed' }))
   }
   return fetch(input, init)
@@ -167,6 +179,12 @@ interface SessionOutcome<T> {
   viaCachedSession: boolean
 }
 
+/** withSession 的上游认证形态:静态 bearer 或网关托管 OAuth provider(二选一)。 */
+interface UpstreamAuth {
+  bearer?: string
+  oauth?: GatewayMcpOAuthProvider
+}
+
 /**
  * 会话内执行 `fn`:有缓存会话则带 sessionId 重建 transport(SDK 跳过 initialize,单趟往返);
  * 无缓存/会话失效则完整握手并回填缓存。**不再主动 terminateSession**——会话跨请求存续,
@@ -176,7 +194,7 @@ interface SessionOutcome<T> {
  */
 async function withSession<T>(
   url: string,
-  bearer: string | undefined,
+  auth: UpstreamAuth,
   session: McpSessionStore | undefined,
   fn: (client: Client) => Promise<T>,
   forceFresh = false,
@@ -184,8 +202,9 @@ async function withSession<T>(
   const makeTransport = (sessionId: string | undefined): StreamableHTTPClientTransport =>
     new StreamableHTTPClientTransport(new URL(url), {
       fetch: noStandaloneSseFetch,
-      ...(bearer !== undefined
-        ? { requestInit: { headers: { Authorization: `Bearer ${bearer}` } } }
+      ...(auth.oauth !== undefined ? { authProvider: auth.oauth } : {}),
+      ...(auth.bearer !== undefined
+        ? { requestInit: { headers: { Authorization: `Bearer ${auth.bearer}` } } }
         : {}),
       ...(sessionId !== undefined ? { sessionId } : {}),
     })
@@ -245,43 +264,87 @@ async function guard<T>(fn: () => Promise<T>): Promise<T> {
 /**
  * 构造 mcp Provider。`allowInsecure`(env `TB_ALLOW_INSECURE_HTTP=true`)放行 http:// 上游。
  * 构造即做 https 强制:非法 url → 抛 invalid_argument(在 guard 之外,快速失败)。
+ * `config.auth==='oauth'` 需要 opts.oauth(StateStore + 加密密钥);缺省 → unavailable。
  */
 export function createMcpProvider(
   config: McpConfig,
   secrets: SecretStoreImpl,
-  opts: { allowInsecure: boolean; session?: McpSessionStore },
+  opts: {
+    allowInsecure: boolean
+    session?: McpSessionStore
+    /** 托管 OAuth 的存取面(auth:'oauth' 节点必需;encryptionKey 缺省时不传)。 */
+    oauth?: { store: StateStore; encryptionKey: string }
+  },
 ): UpstreamProvider {
   const secErr = assertSecureUrl(config.url, opts.allowInsecure)
   if (secErr) throw secErr
 
-  const bearer = (): Promise<string | undefined> =>
-    config.authRef !== undefined ? secrets.resolve(config.authRef) : Promise.resolve(undefined)
+  const nodePath = opts.session?.nodePath ?? ''
+  const makeAuth = async (): Promise<UpstreamAuth> => {
+    if (config.auth === 'oauth') {
+      if (opts.oauth === undefined) {
+        throw new TBError('unavailable', 'OAuth-backed mcp 需要 TB_SECRET_ENCRYPTION_KEY', {
+          retryable: false,
+        })
+      }
+      return {
+        oauth: new GatewayMcpOAuthProvider({
+          store: opts.oauth.store,
+          nodePath,
+          encryptionKey: opts.oauth.encryptionKey,
+          mode: 'deny',
+        }),
+      }
+    }
+    return config.authRef !== undefined ? { bearer: await secrets.resolve(config.authRef) } : {}
+  }
+
+  // SDK 静默刷新失败/无 token 时抛 UnauthorizedError(非 OAuthError 子类,guard 会归一成
+  // network)——在 guard 之前显式映射为「重新授权」指引。
+  const mapUnauthorized = async <T>(fn: () => Promise<T>): Promise<T> => {
+    try {
+      return await fn()
+    } catch (err) {
+      if (config.auth === 'oauth' && err instanceof UnauthorizedError) {
+        throw reauthorizeRequired(nodePath)
+      }
+      throw err
+    }
+  }
 
   return {
     list: () =>
-      guard(async () => {
-        const b = await bearer()
-        const listOnce = (forceFresh = false): Promise<SessionOutcome<{ tools: McpTool[] }>> =>
-          withSession(config.url, b, opts.session, (c) => c.listTools(), forceFresh) as Promise<
-            SessionOutcome<{ tools: McpTool[] }>
-          >
-        let res = await listOnce()
-        // 空列表防御(见文件头):复用缓存会话拿到空列表 → 清会话、强制完整重握手再取
-        // 一次。重试必须 forceFresh:清会话后回读 KV 会命中边缘读缓存拿回旧会话,
-        // 重试再次复用死会话,防御被击穿。
-        if (res.viaCachedSession && res.value.tools.length === 0) {
-          await clearSession(opts.session)
-          res = await listOnce(true)
-        }
-        return res.value.tools.map(toSpec)
-      }),
+      guard(() =>
+        mapUnauthorized(async () => {
+          const auth = await makeAuth()
+          const listOnce = (forceFresh = false): Promise<SessionOutcome<{ tools: McpTool[] }>> =>
+            withSession(
+              config.url,
+              auth,
+              opts.session,
+              (c) => c.listTools(),
+              forceFresh,
+            ) as Promise<SessionOutcome<{ tools: McpTool[] }>>
+          let res = await listOnce()
+          // 空列表防御(见文件头):复用缓存会话拿到空列表 → 清会话、强制完整重握手再取
+          // 一次。重试必须 forceFresh:清会话后回读 KV 会命中边缘读缓存拿回旧会话,
+          // 重试再次复用死会话,防御被击穿。
+          if (res.viaCachedSession && res.value.tools.length === 0) {
+            await clearSession(opts.session)
+            res = await listOnce(true)
+          }
+          return res.value.tools.map(toSpec)
+        }),
+      ),
     call: (name, args) =>
-      guard(async () => {
-        const b = await bearer()
-        const { value } = await withSession(config.url, b, opts.session, (c) =>
-          c.callTool({ name, arguments: args }),
-        )
-        return toToolResult(value as { content?: unknown; isError?: boolean })
-      }),
+      guard(() =>
+        mapUnauthorized(async () => {
+          const auth = await makeAuth()
+          const { value } = await withSession(config.url, auth, opts.session, (c) =>
+            c.callTool({ name, arguments: args }),
+          )
+          return toToolResult(value as { content?: unknown; isError?: boolean })
+        }),
+      ),
   }
 }

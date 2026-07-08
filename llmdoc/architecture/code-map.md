@@ -33,8 +33,8 @@ exports `.` / `./tbApp` / `./bootstrap` / `./deviceHello`(供 SDK 与 server 复
 | `kvStateStore.ts` | StateStore 的 KV 实现(list 跳 null、子树前缀扫描,头注释有约束说明) |
 | `deviceSession.ts` | `DeviceSession` DO 胶水:WS hibernation、待决表、`setWebSocketAutoResponse`、惰性会话重建(协议行为在 deviceHello.ts) |
 | `refToken.ts` | `$ref` 网关中转的 HMAC token 签发/校验 |
-| `providers/` | 全部上游 I/O:`mcp.ts`(SDK Streamable HTTP,会话复用 + 404 重握手一次)、`http.ts`、`remote.ts`、`toolCache.ts`、`r2Object.ts`、`s3Object.ts` + `s3Sign.ts`(aws4fetch)、`pluginClient.ts` + `pluginTool.ts` + `pluginContext.ts` |
-| `test/` | 7 个集成测试(gateway/tool/context/device/deviceNodes/plugin/ui `.integration.test.ts`),真实 workerd;`scripts/` 有 echo-mcp / s3-mock / stub-provider 兜底上游 |
+| `providers/` | 全部上游 I/O:`mcp.ts`(SDK Streamable HTTP,会话复用 + 404 重握手一次;auth:'oauth' 挂 `../oauth.ts` 的 authProvider)、`http.ts`、`remote.ts`、`toolCache.ts`、`r2Object.ts`、`s3Object.ts` + `s3Sign.ts`(aws4fetch)、`pluginClient.ts` + `pluginTool.ts` + `pluginContext.ts` |
+| `test/` | 8 个集成测试(gateway/tool/context/device/deviceNodes/plugin/ui/oauth `.integration.test.ts`),真实 workerd;`scripts/` 有 echo-mcp / s3-mock / stub-provider 兜底上游 |
 | `wrangler.jsonc` | 绑定 TB_KV / TB_R2 / TB_DEVICE(DO)/ ASSETS(dashboard dist,`run_worker_first`)+ `account_id` + custom domain |
 
 ## packages/cli — `tb`(npm 发布物)

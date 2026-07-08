@@ -58,6 +58,14 @@ import {
 } from '@tool-bridge/core'
 import { type Context, Hono } from 'hono'
 import { buildDeps } from './bootstrap'
+import {
+  finishMcpAuthorization,
+  invalidateMcpOAuth,
+  OAUTH_CALLBACK_PATH,
+  openOAuthState,
+  renderOAuthCallbackHtml,
+  startMcpAuthorization,
+} from './oauth'
 import { createHttpProvider, type HttpConfig } from './providers/http'
 import { createMcpProvider, invalidateMcpSession, type McpConfig } from './providers/mcp'
 import { createPluginContextProvider } from './providers/pluginContext'
@@ -290,7 +298,56 @@ export function createTbApp(deps: TbAppDeps): Hono<{ Variables: Vars }> {
     await next()
   })
 
-  // 认证中间件(/healthz、/~ref、/ui 静态资源之外全路由):Bearer → identify → 401 或注入 ctx。
+  // GET /~oauth/callback → mcp 托管 OAuth 的授权回调,树外免认证(浏览器跳转无法带 SK)。
+  // state 本身即凭证:AES-GCM 加密载荷(nodePath + code_verifier + exp),解不开/过期一律拒。
+  app.get(OAUTH_CALLBACK_PATH, (c) =>
+    runHandler(async () => {
+      const encKey = deps.encryptionKey
+      if (encKey === undefined) throw TBError.notFound('not found')
+      const q = c.req.query()
+      // AS 用户拒绝授权等错误回跳(error=access_denied 等):展示失败页,不泄露内部状态。
+      if (q.error !== undefined) {
+        return renderOAuthCallbackHtml(false, `authorization server returned: ${q.error}`)
+      }
+      const code = q.code
+      const state = q.state
+      if (code === undefined || state === undefined) {
+        return renderOAuthCallbackHtml(false, 'missing code or state parameter')
+      }
+      const payload = await openOAuthState(state, encKey)
+      if (payload === null || payload.exp * 1000 <= Date.now()) {
+        return renderOAuthCallbackHtml(false, 'state is invalid or expired; restart authorization')
+      }
+      await deps.ensureReady?.()
+      const registry = new NodeRegistryStore(deps.state)
+      let node: TreeNode
+      try {
+        node = await registry.get(payload.p)
+      } catch {
+        return renderOAuthCallbackHtml(false, 'target node no longer exists')
+      }
+      if (node.kind !== 'mcp' || node.config?.kind !== 'mcp' || node.config.auth !== 'oauth') {
+        return renderOAuthCallbackHtml(false, 'target node is not an OAuth-backed mcp mount')
+      }
+      try {
+        await finishMcpAuthorization({
+          store: deps.state,
+          encryptionKey: encKey,
+          nodePath: payload.p,
+          serverUrl: node.config.url,
+          origin: new URL(c.req.url).origin,
+          code,
+          codeVerifier: payload.v,
+        })
+      } catch (err) {
+        const detail = isTBError(err) ? err.message : 'token exchange failed'
+        return renderOAuthCallbackHtml(false, detail)
+      }
+      return renderOAuthCallbackHtml(true, `mcp mount '${payload.p}' is now authorized`)
+    }),
+  )
+
+  // 认证中间件(/healthz、/~ref、/~oauth/callback、/ui 静态资源之外全路由):Bearer → identify → 401 或注入 ctx。
   app.use('*', async (c, next) => {
     const store = deps.state
     try {
@@ -674,10 +731,11 @@ export function createTbApp(deps: TbAppDeps): Hono<{ Variables: Vars }> {
     }
 
     const result = await mod.dispatch(cmd, args, ctx)
-    // 注册变更 → 失效该节点工具缓存 + mcp 会话缓存(Write/Update/Delete 触发失效)。
+    // 注册变更 → 失效该节点工具缓存 + mcp 会话/OAuth 缓存(Write/Update/Delete 触发失效)。
     if (registryTarget !== undefined) {
       await invalidateToolCache(store, registryTarget)
       await invalidateMcpSession(store, registryTarget)
+      await invalidateMcpOAuth(store, registryTarget)
     }
     return renderResult(result, negotiate(c.req.header('accept')))
   }
@@ -783,19 +841,59 @@ export function createTbApp(deps: TbAppDeps): Hono<{ Variables: Vars }> {
     await assertToolConfig(body.config, store)
     const now = new Date().toISOString()
     const node = await registry.write(body, ctx.keyId, now)
-    // 注册变更 → 失效该节点工具缓存 + mcp 会话缓存。
+    // 注册变更 → 失效该节点工具缓存 + mcp 会话/OAuth 缓存。
     await invalidateToolCache(store, body.path)
     await invalidateMcpSession(store, body.path)
+    await invalidateMcpOAuth(store, body.path)
     return new Response(JSON.stringify(node), {
       headers: { 'content-type': contentTypeFor('json') },
     })
   }
 
-  // POST 通配分派:末段为 ~register → 反向注册;否则数据面调用。
+  // --- POST ~authorize(mcp 托管 OAuth 发起;需对节点有 register 权限——与挂载同权)---
+  const handleAuthorize = async (c: AppContext): Promise<Response> => {
+    const path = splitReserved(new URL(c.req.url).pathname, '~authorize')
+    if (path === null || path === '') throw TBError.notFound('no such path')
+    const ctx = c.get('ctx')
+    const store = c.get('store')
+    if (!check(ctx, path, 'read').allow) throw TBError.notFound('not found')
+    if (!check(ctx, path, 'register').allow) {
+      throw new TBError('permission_denied', `no scope grants 'register' on '${path}'`)
+    }
+    const encKey = deps.encryptionKey
+    if (encKey === undefined) {
+      throw new TBError('unavailable', 'OAuth 托管需要 TB_SECRET_ENCRYPTION_KEY', {
+        retryable: false,
+      })
+    }
+    const registry = new NodeRegistryStore(store)
+    let node: TreeNode
+    try {
+      node = await registry.get(path)
+    } catch {
+      throw TBError.notFound('not found')
+    }
+    if (node.kind !== 'mcp' || node.config?.kind !== 'mcp' || node.config.auth !== 'oauth') {
+      throw new TBError('invalid_argument', `'${path}' 不是 auth:'oauth' 的 mcp 挂载`)
+    }
+    const result = await startMcpAuthorization({
+      store,
+      encryptionKey: encKey,
+      nodePath: path,
+      serverUrl: node.config.url,
+      origin: new URL(c.req.url).origin,
+    })
+    return new Response(JSON.stringify(result), {
+      headers: { 'content-type': contentTypeFor('json') },
+    })
+  }
+
+  // POST 通配分派:末段为 ~register → 反向注册;~authorize → OAuth 发起;否则数据面调用。
   app.post('/*', (c) =>
     runHandler(async () => {
       const last = new URL(c.req.url).pathname.replace(/\/+$/, '').split('/').pop() ?? ''
       if (last === '~register') return await handleRegister(c)
+      if (last === '~authorize') return await handleAuthorize(c)
       return await handleInvoke(c)
     }),
   )
@@ -1085,6 +1183,10 @@ async function providerFor(
       allowInsecure: insecure,
       // 会话复用凭证存 StateStore(mcpsession:<path>);调用结果不缓存(providers/mcp.ts)。
       session: { store: deps.state, nodePath: node.path },
+      // auth:'oauth' 节点的托管凭证存取面(mcpoauth:*);密钥缺省 → provider 内报 unavailable。
+      ...(deps.encryptionKey !== undefined
+        ? { oauth: { store: deps.state, encryptionKey: deps.encryptionKey } }
+        : {}),
     })
   }
   if (node.kind === 'http' && node.config?.kind === 'http') {

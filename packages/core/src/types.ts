@@ -176,7 +176,8 @@ export interface DeviceNodeCmd {
 }
 
 export type NodeConfig =
-  | { kind: 'mcp'; url: string; authRef?: string }
+  /** auth:'oauth' 时凭证由网关托管 OAuth 流程获取(POST /<path>/~authorize 发起),authRef 忽略。 */
+  | { kind: 'mcp'; url: string; authRef?: string; auth?: 'oauth' }
   | {
       kind: 'http'
       endpoint: string
@@ -213,6 +214,7 @@ export const RESERVED_SEGMENTS: readonly string[] = [
   '~tree',
   '~register',
   '~describe',
+  '~authorize',
 ]
 
 /** 平台保留根路径段(基础集;部署配置可追加)。 */
