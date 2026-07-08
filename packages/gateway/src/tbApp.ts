@@ -37,6 +37,7 @@ import {
   type PluginManifest,
   PRESIGN_TTL_SEC_DEFAULT,
   parseNodeInput,
+  RemoteAllowlistStore,
   type Representation,
   renderHelpDsl,
   renderHelpJson,
@@ -140,6 +141,9 @@ export interface TbAppDeps {
 
 const TOOL_CACHE_TTL_DEFAULT = 300
 
+/** `~tree` 深度边界上免 fetch 探测、直接标 truncated 的 kind:remote 联邦(子树在远端,探测需远端往返)。 */
+const REMOTE_OPAQUE_KINDS = new Set(['remote'])
+
 type Vars = { ctx: CallContext; store: StateStore }
 
 type AppContext = Context<{ Variables: Vars }>
@@ -234,6 +238,7 @@ export function createTbApp(deps: TbAppDeps): Hono<{ Variables: Vars }> {
         secrets: deps.secrets,
         version: deps.version,
         allowInsecureHttp: deps.allowInsecureHttp,
+        remoteAllowlistBase: deps.remote.allowlist,
       }),
     )
 
@@ -426,6 +431,8 @@ export function createTbApp(deps: TbAppDeps): Hono<{ Variables: Vars }> {
       root: path,
       depth,
       getChildren,
+      // remote 节点在深度边界免 fetch 探测,直接标 truncated(消除聚合树里对 remote 的边界远端往返)。
+      opaqueKinds: REMOTE_OPAQUE_KINDS,
       ...(rootEntry !== undefined ? { rootEntry } : {}),
     })
     const rep = negotiate(c.req.header('accept'))
@@ -715,7 +722,8 @@ export function createTbApp(deps: TbAppDeps): Hono<{ Variables: Vars }> {
           : cmd === 'update'
             ? (args.patch as { config?: unknown } | undefined)?.config
             : undefined
-      assertRemoteConfigAllowed(cfgPatch, deps.remote)
+      // 挂载/更新 remote 节点时校验 baseUrl 白名单(注册时即拒;env 基线 ∪ 运行时条目)。
+      assertRemoteConfigAllowed(cfgPatch, await resolveRemoteSettings(store, deps.remote))
       await assertRegisterPath(
         registry,
         ctx,
@@ -828,8 +836,8 @@ export function createTbApp(deps: TbAppDeps): Hono<{ Variables: Vars }> {
     }
     // 复用与 system/registry write 相同的 NodeInput 校验(kind/description 必填、kind 枚举合法)。
     const body = parseNodeInput(raw)
-    // 挂载 remote 节点时校验 baseUrl 白名单(注册时即拒)。
-    assertRemoteConfigAllowed(body.config, deps.remote)
+    // 挂载 remote 节点时校验 baseUrl 白名单(注册时即拒;env 基线 ∪ 运行时条目)。
+    assertRemoteConfigAllowed(body.config, await resolveRemoteSettings(store, deps.remote))
     // register 判定 + 注册路径规则(含 existing 查询)。
     if (!check(ctx, path, 'register').allow) {
       throw new TBError('permission_denied', `no scope grants 'register' on '${path}'`)
@@ -1264,9 +1272,22 @@ async function remotePassthroughIfMatch(
     ...(body !== undefined ? { body } : {}),
     headers,
     secrets: deps.secrets,
-    settings: deps.remote,
+    settings: await resolveRemoteSettings(deps.state, deps.remote),
     requestUrl: c.req.url,
   })
+}
+
+/**
+ * 生效的 remote 白名单 = env 基线 ∪ 运行时条目(system/federation 管理)。
+ * 请求期读取(app 被 WeakMap 按 env 缓存,不能在装配期定死);运行时无条目 → 原样返回基线。
+ */
+async function resolveRemoteSettings(
+  state: StateStore,
+  base: RemoteSettings,
+): Promise<RemoteSettings> {
+  const runtime = await new RemoteAllowlistStore(state).hosts()
+  if (runtime.length === 0) return base
+  return { ...base, allowlist: [...new Set([...base.allowlist, ...runtime])] }
 }
 
 /** 注册 remote 节点时的白名单校验:config.kind==='remote' → baseUrl 必须在白名单内。 */
