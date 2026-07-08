@@ -2,8 +2,8 @@
  * 内容协商(规范性)。
  *
  * 把 `Accept` 头归类为三种表现之一。调用点(gateway)据此决定实际渲染:
- * `~help` 只有 dsl(text/plain)与 json 两种(无 markdown 变体),故 `~help` 端点会把
- * 'markdown' 与 'dsl' 一并按 DSL 处理;调用返回值端点则把默认表现渲染为 markdown。
+ * `~help` 三种表现俱全——dsl(text/plain,默认)/ json(规范机器可读)/
+ * markdown(可读性表现,renderHelpMarkdown);调用返回值端点把默认表现渲染为 markdown。
  * negotiate 只负责归类,不承担这层端点语义。
  */
 

@@ -90,6 +90,37 @@ describe('renderHelpDsl 格式', () => {
       'node a/c http "C"',
     ])
   })
+
+  it('hint 有值 → node 行后渲染单行 hint 行(多行折叠)', () => {
+    const m: HelpModel = {
+      node: { path: 'a', kind: 'directory', description: 'A' },
+      cmds: [],
+      hint: '下一步\n看子节点',
+    }
+    expect(renderHelpDsl(m).split('\n')[2]).toBe('hint 下一步 看子节点')
+  })
+
+  it('node 行 description 含换行 → 折叠为单行(行式结构不被破坏)', () => {
+    const m: HelpModel = {
+      node: { path: 'x', kind: 'mcp', description: '第一行\n第二行' },
+      cmds: [],
+    }
+    expect(renderHelpDsl(m).split('\n')[1]).toBe('node x mcp "第一行 第二行"')
+  })
+
+  it('多行 h → 首行随 h 属性,续行 4 空格缩进(最小 parser 按未知行忽略)', () => {
+    const m: HelpModel = {
+      node: { path: 'x', kind: 'mcp', description: 'x' },
+      cmds: [
+        { name: 'a', method: 'POST', path: '/x', h: '概述句。\n\n## 详情\n正文', scope: 'call' },
+      ],
+    }
+    const out = renderHelpDsl(m)
+    expect(out).toContain('  h 概述句。\n    \n    ## 详情\n    正文\n  scope call')
+    // 结构字段不受多行 h 干扰
+    const parsed = parseHelpDsl(out)
+    expect(parsed.cmds).toEqual([{ name: 'a', method: 'POST', path: '/x', scope: 'call' }])
+  })
 })
 
 describe('parseHelpDsl(最小 parser,向前兼容)', () => {

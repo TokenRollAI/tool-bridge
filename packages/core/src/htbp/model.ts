@@ -52,6 +52,16 @@ export interface HelpModel {
   cmds: CmdSpec[]
   /** directory 节点携带:上级/自身 `~help` 列出的子节点。 */
   children?: ChildRef[]
+  /**
+   * 面向消费者的下一步指引(如"入参 schema 经 GET <path>/<tool>/~help 获取")。
+   * DSL 渲染为 `hint` 行(消费方按未知行忽略,向前兼容);JSON/Markdown 渲染为同名字段/引言。
+   */
+  hint?: string
+  /**
+   * 索引形态标记(两级披露的节点级 `~help`:cmd 不含 inputSchema/returns)。
+   * 仅供渲染器措辞用(Markdown 区分"schema 未展示"与"无参数"),不进任何表现。
+   */
+  index?: boolean
 }
 
 /**
@@ -62,6 +72,8 @@ export interface HelpJson {
   /** 协议版本,对应 DSL 首行 `htbp <ver>`。 */
   htbp: string
   node: { path: TreePath; kind: NodeKind; description: string }
+  /** 下一步指引,对应 DSL 的 `hint` 行(有值才出现)。 */
+  hint?: string
   cmds: Array<{
     name: string
     method: 'POST'
