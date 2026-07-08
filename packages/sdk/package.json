@@ -1,6 +1,6 @@
 {
   "name": "@tool-bridge/sdk",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "tool-bridge SDK: embed a TB instance (createToolBridge), register local providers, and connect to a remote gateway",
   "type": "module",
   "license": "MIT",
