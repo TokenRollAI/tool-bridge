@@ -85,24 +85,29 @@ export function NodePage() {
                 子节点
               </h2>
               <div className="grid gap-px overflow-hidden rounded-md border">
-                {/* ~help 的 children.path 是树内绝对路径,直接作为链接目标 */}
-                {children.map((ch) => (
-                  <Link
-                    key={ch.path}
-                    to={`/nodes/${ch.path}`}
-                    className="flex items-center gap-2.5 bg-card/60 px-4 py-2.5 hover:bg-secondary/60"
-                  >
-                    <span className="font-mono text-sm">
-                      {path !== '' && ch.path.startsWith(`${path}/`)
-                        ? ch.path.slice(path.length + 1)
-                        : ch.path}
-                    </span>
-                    <KindBadge kind={ch.kind} />
-                    <span className="ml-auto truncate pl-4 text-xs text-muted-foreground">
-                      {ch.description}
-                    </span>
-                  </Link>
-                ))}
+                {/*
+                 * ch.path 对本地节点是树内绝对路径;对 remote 透传节点则是「远端树内路径」
+                 * (不含本地挂载前缀,如 remote/djj 下的上游节点回 `tipsy` 而非 `remote/djj/tipsy`)。
+                 * 统一以「当前 path + 子节点名(path 末段)」构造本地可导航路径:本地节点下
+                 * target 恒等于 ch.path(行为不变),remote 子节点则补回挂载前缀(修 remote 子节点 404)。
+                 */}
+                {children.map((ch) => {
+                  const name = ch.path.split('/').pop() ?? ch.path
+                  const target = path === '' ? ch.path : `${path}/${name}`
+                  return (
+                    <Link
+                      key={ch.path}
+                      to={`/nodes/${target}`}
+                      className="flex items-center gap-2.5 bg-card/60 px-4 py-2.5 hover:bg-secondary/60"
+                    >
+                      <span className="font-mono text-sm">{name}</span>
+                      <KindBadge kind={ch.kind} />
+                      <span className="ml-auto truncate pl-4 text-xs text-muted-foreground">
+                        {ch.description}
+                      </span>
+                    </Link>
+                  )
+                })}
               </div>
             </section>
           )}

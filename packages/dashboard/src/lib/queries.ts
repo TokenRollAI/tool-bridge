@@ -15,6 +15,7 @@ import { useConn, useSession } from './session'
 import type {
   ContextEntry,
   ContextEntryMeta,
+  FederationHost,
   Page,
   PluginManifest,
   RegistryNode,
@@ -27,12 +28,13 @@ function useKeyBase(): readonly unknown[] {
   return ['tb', active?.name ?? '', active?.baseUrl ?? ''] as const
 }
 
-export function useTree(path = '', depth = 8) {
+export function useTree(path = '', depth = 8, options?: { enabled?: boolean }) {
   const conn = useConn()
   const base = useKeyBase()
   return useQuery({
     queryKey: [...base, 'tree', path, depth],
     queryFn: ({ signal }) => getTree(conn, path, depth, signal),
+    enabled: options?.enabled ?? true,
   })
 }
 
@@ -175,6 +177,19 @@ export function usePluginList() {
     queryFn: async () => {
       const r = await invoke(conn, 'system/plugin', 'list', {})
       return r.json as Page<PluginManifest>
+    },
+  })
+}
+
+/** remote 联邦 host 白名单合并视图(env 基线 + 运行时条目;对等 `tb federation ls`)。 */
+export function useFederationList() {
+  const conn = useConn()
+  const base = useKeyBase()
+  return useQuery({
+    queryKey: [...base, 'federation-list'],
+    queryFn: async () => {
+      const r = await invoke(conn, 'system/federation', 'list', {})
+      return r.json as { items: FederationHost[] }
     },
   })
 }

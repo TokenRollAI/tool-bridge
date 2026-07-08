@@ -2,6 +2,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import {
   Boxes,
   Cpu,
+  Globe,
   Home,
   KeySquare,
   LogOut,
@@ -55,6 +56,7 @@ const PAGES = [
   { to: '/manage/secrets', label: '凭证保管', icon: ShieldEllipsis },
   { to: '/manage/devices', label: '设备', icon: Cpu },
   { to: '/manage/plugins', label: 'Plugin', icon: Plug2 },
+  { to: '/manage/federation', label: '联邦白名单', icon: Globe },
 ] as const
 
 /**
