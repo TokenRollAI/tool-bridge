@@ -11,6 +11,8 @@
 - bootstrap 期过程文档已归档 `archive/`;知识真源 = 代码 + llmdoc(见 [project-brief.md](project-brief.md))。
 - 2026-07-08:**直连工具调用**上线(PR #9)——`POST /<node>/<tool>` body 即 arguments 本体,`~help` 宣告直连路径(CmdSpec `flatBody`);信封入口 `POST /<node>` + `{tool,arguments}` 保留。CLI(`tb call <node>/<tool>`,--tool 变 optional)与 Dashboard(CmdPanel 按 cmd.path 判别、CliHint 同步)同轮对齐。已部署上线并经生产直连调用实测。
 - 2026-07-08:**mcp 托管 OAuth 上线**——`config.auth:'oauth'` 的 mcp 挂载由网关全托管授权码流程(SDK auth() 编排 discovery+DCR+PKCE;`POST /<path>/~authorize` 发起、`GET /~oauth/callback` 回调,state 为 AES-GCM 加密自包含载荷零 KV 存储;token/client/discovery 落 `mcpoauth:*`,SDK 自动刷新;CLI `tb tool mount --auth oauth` + `tb tool auth`)。已知限制:refresh token rotation 上游 + 多 isolate 并发刷新可能互相作废(失败回「重新授权」指引可自救)。**尚未部署/未经真实上游验证**(mock 上游集成测试覆盖)。
+- 2026-07-08:remote 联邦 host 白名单从"部署期 env-only"扩为"env 基线 ∪ 运行时可增删"——新增 builtin `system/federation`(admin scope)+ `RemoteAllowlistStore`,三入口对等(`tb federation ls|add|rm` + Dashboard「联邦白名单」页 + API);env 基线条目只读不可删。**已部署上线**(evilstar 账户)。
+- 2026-07-08:Dashboard 树发现性能修复(远端联邦树慢)——根因是根 `~tree` 聚合 remote 子树时 `getChildren` 对**每个**远端节点单独 fetch 上游(N+1,首屏 21s;上游自身仅 1.8s)。修复两处:①前端 TreeNav 改**懒加载**(首屏 depth=1 不碰远端,展开某节点按需拉;remote 节点/其后代走纯透传 depth=3,本地目录 depth=1 免 N+1;NodePage/TreeNav 对纯透传返回的远端 path 做 localize 补挂载前缀);②core `buildTree` 加 `opaqueKinds`——深度边界(`depthLeft<=0`)对 remote 节点免 fetch 直接标 truncated(gateway 传 `{'remote'}`),消除边界探测的远端往返。实测首屏 21s→<1s(热)、展开 remote 目录 7s→<1s。**已部署上线**。
 - **npm 已发布**(四包均经 CI Trusted Publishing;core 为 private 不发布):`@tool-bridge/cli` 0.3.0、`@tool-bridge/sdk` 0.2.0、`@tool-bridge/gateway` 0.2.0、`@tool-bridge/dashboard` 0.2.0(2026-07-08,直连工具调用)。gateway/dashboard 的 Trusted Publisher 已配置生效(0.2.0 即经 CI 发布);`@tool-bridge/server` 0.1.0 可发布,**待手动首发 + 配 Trusted Publisher**。发布流程见 [../guides/npm-publish.md](../guides/npm-publish.md)。**坑:一次推多个 tag(`git push origin tag1 tag2 …`)不触发 tag workflows,须逐个 push**(2026-07-08 实测:四 tag 同推零触发,删除后逐个重推全部触发)。
 
 ## 已部署资源(DJJ 账户)
@@ -24,19 +26,19 @@
 
 ## 代码现状(pnpm monorepo,测试数为 2026-07-08 实跑)
 
-- `packages/core` — 纯逻辑内核(唯一运行时依赖 zod),**623 个单测**,模块族:
+- `packages/core` — 纯逻辑内核(唯一运行时依赖 zod),**644 个单测**,模块族:
   - `auth/`(scope 判定 / authorizer / 注册路径规则 / sk 签发与哈希)、`tree/`(path 规则 / NodeRegistryStore / visibility 裁剪)、`htbp/`(helpDsl / helpMarkdown / summary / HelpModel / negotiate / tree 构建)、`secret/`(AES-256-GCM 只写不读)
-  - `builtin/`(**五模块**:sk / secret / registry / status / plugin 的 cmd 表 + dispatch)
-  - `tool/`(HttpToolDef 拼装、虚拟化、mcp schema→HelpModel、remote 路径/白名单/Via、上游错误归一)
+  - `builtin/`(**六模块**:sk / secret / registry / status / plugin / federation 的 cmd 表 + dispatch)
+  - `tool/`(HttpToolDef 拼装、虚拟化、mcp schema→HelpModel、remote 路径/白名单/Via、上游错误归一、**RemoteAllowlistStore** 运行时白名单存储)
   - `context/`(四动词 objectProvider / objectStore 接口 / path 穿越防护 / ttl)
   - `device/`(帧编解码 / 会话状态机 / 设备侧 client / shell 白名单 / helpModel)
   - `plugin/`(manifest 校验 / envelope 编解码 / RequestDedupe / 契约校验)
   - `node/`(`./node` 子导出:FsObjectStore realpath 防逃逸 + shellExecutor 有界缓冲)
   - 顶层 `errors.ts`(TBError)/ `store.ts`(StateStore 接口 + 内存实现)/ `types.ts`。
-- `packages/gateway` — Workers 胶水(可发布 Worker library:tsup 单文件 ESM bundle core,`src/index.ts` 另 export `createApp` 与 `type Env`;dev exports 指 src(含 `./deviceHello`)、发布形态 publishConfig 覆盖指 dist),**101 个默认集成测试 + 6 个 opt-in skipped**(真实 workerd;含 mcp 过期会话空列表防御与托管 OAuth 全链路的 mock 上游用例):`app.ts`(Env→deps 适配)/ `tbApp.ts`(**宿主中立 createTbApp**,路由/认证/HTBP/remote 聚合,SDK 复用)/ `bootstrap.ts` / `deviceHello.ts`(宿主中立 processDeviceHello,DO 与 Node DeviceHub 共用)/ `oauth.ts`(mcp 托管 OAuth:加密 state + OAuthClientProvider + 发起/回调编排)/ `kvStateStore.ts` / `refToken.ts`(`$ref` 中转 token)/ `deviceSession.ts`(DeviceSession DO 胶水)/ `providers/`(mcp / http / remote / pluginTool / pluginContext / pluginClient / r2Object / s3Object / s3Sign / toolCache);`wrangler.jsonc` 在此包内。
-- `packages/cli` — commander 框架(严格解析:未知 flag/子命令报错,防权限误配),**133 个单测**(含拼错 flag 事故回归 strictParsing),**17 个命令**:status / login / whoami / use / sk / secret / ls / tree / help / call / tool / server / ctx / connect / device / mount / plugin;全局 `--json`;配置 `~/.config/tool-bridge/config.json`(XDG,多 profile)。
+- `packages/gateway` — Workers 胶水(可发布 Worker library:tsup 单文件 ESM bundle core,`src/index.ts` 另 export `createApp` 与 `type Env`;dev exports 指 src(含 `./deviceHello`)、发布形态 publishConfig 覆盖指 dist),**104 个默认集成测试 + 6 个 opt-in skipped**(真实 workerd;含 mcp 过期会话空列表防御与托管 OAuth 全链路的 mock 上游用例、system/federation 运行时白名单叠加用例):`app.ts`(Env→deps 适配)/ `tbApp.ts`(**宿主中立 createTbApp**,路由/认证/HTBP/remote 聚合,SDK 复用;remote 白名单经 `resolveRemoteSettings` 取 env 基线 ∪ 运行时条目)/ `bootstrap.ts` / `deviceHello.ts`(宿主中立 processDeviceHello,DO 与 Node DeviceHub 共用)/ `oauth.ts`(mcp 托管 OAuth:加密 state + OAuthClientProvider + 发起/回调编排)/ `kvStateStore.ts` / `refToken.ts`(`$ref` 中转 token)/ `deviceSession.ts`(DeviceSession DO 胶水)/ `providers/`(mcp / http / remote / pluginTool / pluginContext / pluginClient / r2Object / s3Object / s3Sign / toolCache);`wrangler.jsonc` 在此包内。
+- `packages/cli` — commander 框架(严格解析:未知 flag/子命令报错,防权限误配),**137 个单测**(含拼错 flag 事故回归 strictParsing),**18 个命令**:status / login / whoami / use / sk / secret / federation / ls / tree / help / call / tool / server / ctx / connect / device / mount / plugin;全局 `--json`;配置 `~/.config/tool-bridge/config.json`(XDG,多 profile)。
 - `packages/sdk` — 薄装配层(4 个源文件),**12 个单测 + 1 个 opt-in**;公开面 `createToolBridge(config)` → `{ fetch, registerTool, registerContext, connect }`,复用 core + gateway 的 createTbApp;再导出内存宿主实现(MemoryStateStore 等)。
-- `packages/dashboard` — React 19 + Vite + Tailwind 4 + shadcn/ui + @rjsf + TanStack Query SPA(可发布纯静态产物包:只发 dist,依赖全在 devDependencies):树导航 / cmd 表单调用 / context 条目浏览(metadata 编辑、`$ref` 大对象经 Update 只改 metadata、Search mode keyword|semantic 切换)/ SK·Registry·Devices·Secrets·Plugins 管理页(Plugins 对等 `tb plugin` 六 cmd,pluginToken 一次性展示;Registry 挂载面对等 CLI:kind:tool / plugin provider、virtualize 全量、http authHeader/authScheme、context ttl)/ ⌘K 面板;无专用后端(同源消费 HTBP),行为由 gateway 的 `ui.integration.test.ts` 覆盖;`pnpm deploy:all` 先 build dashboard 再部署 gateway。
+- `packages/dashboard` — React 19 + Vite + Tailwind 4 + shadcn/ui + @rjsf + TanStack Query SPA(可发布纯静态产物包:只发 dist,依赖全在 devDependencies):树导航(懒加载:首屏 depth=1,展开按需拉子树,remote 走纯透传)/ cmd 表单调用 / context 条目浏览(metadata 编辑、`$ref` 大对象经 Update 只改 metadata、Search mode keyword|semantic 切换)/ SK·Registry·Devices·Secrets·Plugins·Federation 管理页(Plugins 对等 `tb plugin` 六 cmd,pluginToken 一次性展示;Registry 挂载面对等 CLI:kind:tool / plugin provider、virtualize 全量、http authHeader/authScheme、context ttl;**Federation 联邦白名单对等 `tb federation ls|add|rm`,env 基线条目只读不可删**)/ ⌘K 面板;无专用后端(同源消费 HTBP),行为由 gateway 的 `ui.integration.test.ts` 覆盖;`pnpm deploy:all` 先 build dashboard 再部署 gateway。
 - `packages/server` — Node/Docker 宿主胶水(可发布 bin `tool-bridge-server`,0.1.0),**23 个测试**(5 文件,纯 Node vitest):`sqliteStateStore.ts`(better-sqlite3 单表 kv,WAL,强一致)/ `config.ts`(configFromEnv,TB_PORT/TB_HOST/TB_DATA_DIR/TB_UI_DIR)/ `objects.ts`(FsObjectStore 前缀适配)/ `deviceHub.ts`(ws 设备通道,复用 core DeviceGatewaySession + gateway processDeviceHello)/ `assets.ts`(/ui 静态托管)/ `server.ts` + `main.ts`;tsup bundle core+gateway,better-sqlite3/ws/hono 等留 external;根 Dockerfile 产出镜像。详见 [../guides/docker-host.md](../guides/docker-host.md)。
 - `scripts/` — `gen-dev-vars.mjs` / `provision.mjs` / `smoke.ts`(healthz + 无 SK 401 + 带 SK 200)+ 三个可重跑生产验收脚本:`verify-revocation.ts`(吊销传播,实测 0.3s)/ `verify-device.ts`(设备 shell/fs/registerPaths 全链路,可选跨休眠用例)/ `verify-plugin.ts`(Plugin 注册→挂载→四动词全流程)。
 - CI(.github/workflows/):`publish-cli.yml`(tag `cli-v*`)/ `publish-sdk.yml`(tag `sdk-v*`)/ `publish-gateway.yml`(tag `gateway-v*`)/ `publish-dashboard.yml`(tag `dashboard-v*`)/ `publish-server.yml` + `publish-docker.yml`(同 tag `server-v*`:npm 发布 + GHCR 镜像 `ghcr.io/tokenrollai/tool-bridge`),npm Trusted Publishing(OIDC);**无主干测试 CI**。
@@ -44,7 +46,7 @@
 
 ## 常用命令
 
-- `pnpm verify` — typecheck + lint + 单测 + 集成测试一把过(当前 623 core + 133 cli + 12 sdk 单测,101 gateway 默认集成 + 6 opt-in skipped,23 server;根 `test:integration` 已并入 server)。
+- `pnpm verify` — typecheck + lint + 单测 + 集成测试一把过(当前 644 core + 137 cli + 12 sdk 单测,104 gateway 默认集成 + 6 opt-in skipped,23 server;根 `test:integration` 已并入 server)。
 - `pnpm deploy:all` — 幂等 provision + dashboard build + 部署 gateway。
 - `pnpm --filter @tool-bridge/server start` — 本机起 Node 宿主(默认 :8787,数据落 ./data;env 面见 [../guides/docker-host.md](../guides/docker-host.md))。
 - `docker build -t tool-bridge . && docker run -p 8787:8787 -v tbdata:/data …` — Docker 路径,验收命令全套见 [../guides/docker-host.md](../guides/docker-host.md)。
