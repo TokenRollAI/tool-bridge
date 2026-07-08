@@ -4,7 +4,7 @@ import {
   type ApiError,
   getHealthz,
   getHelp,
-  getHelpDsl,
+  getHelpMarkdown,
   getTree,
   type InvokeResult,
   invoke,
@@ -62,12 +62,12 @@ export function useToolHelp(path: string, tool: string, enabled: boolean) {
   })
 }
 
-export function useHelpDsl(path: string, enabled = true) {
+export function useHelpMarkdown(path: string, enabled = true) {
   const conn = useConn()
   const base = useKeyBase()
   return useQuery({
-    queryKey: [...base, 'helpDsl', path],
-    queryFn: ({ signal }) => getHelpDsl(conn, path, signal),
+    queryKey: [...base, 'helpMarkdown', path],
+    queryFn: ({ signal }) => getHelpMarkdown(conn, path, signal),
     enabled,
   })
 }

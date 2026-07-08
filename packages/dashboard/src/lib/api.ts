@@ -64,10 +64,10 @@ export async function getHelp(conn: Connection, path: string, signal?: AbortSign
   return (await (await request(conn, p, { signal })).json()) as HelpJson
 }
 
-/** GET <path>/~help(Help DSL 原文,text/plain)。 */
-export async function getHelpDsl(conn: Connection, path: string, signal?: AbortSignal) {
+/** GET <path>/~help(可读 Markdown 表现,text/markdown = 协议默认)。 */
+export async function getHelpMarkdown(conn: Connection, path: string, signal?: AbortSignal) {
   const p = path === '' ? '/~help' : `/${path}/~help`
-  return await (await request(conn, p, { accept: 'text/plain', signal })).text()
+  return await (await request(conn, p, { accept: 'text/markdown', signal })).text()
 }
 
 /** GET <path>/~tree?depth=N。 */
