@@ -46,8 +46,8 @@ function attrLines(key: string, value: string): string[] {
  *
  * `note`/`feedback` 走"未知行忽略"扩展通道(同 `hint` 先例):最小 parser 不识别它们,
  * 老消费者零破坏;条目行以 `fb_` id 开头、指引行以 `use` 开头,不会撞上 `scope` 归属正则。
- * `feedback` 块的端点与 `use` 指引由 node.path 派生(类比 `body` 行由 inputSchema 派生,
- * 属表现不属语义);JSON 侧的语义等价字段是 `note` 与 `feedback[]`。
+ * `feedback` 块的端点与 `use` 指引由 node.path 派生(`/<path>/~feedback` 保留段端点;
+ * 类比 `body` 行由 inputSchema 派生,属表现不属语义);JSON 侧的语义等价字段是 `note` 与 `feedback[]`。
  *
  * `body` 行是**请求体示意**:缺省由 cmd 的 `inputSchema`(arguments 的 JSON Schema)
  * 包成 `{ "tool": <name>, "arguments": <inputSchema> }` 单行紧凑 JSON;`flatBody` 的 cmd
@@ -77,12 +77,13 @@ export function renderHelpDsl(model: HelpModel): string {
     }
   }
   if (model.feedback !== undefined && model.feedback.length > 0) {
-    lines.push(`feedback ${model.feedback.length} POST /system/feedback`)
+    const fbPath = `/${model.node.path}/~feedback`
+    lines.push(`feedback ${model.feedback.length} GET ${fbPath}`)
     for (const f of model.feedback) {
       lines.push(`  ${f.id} ${f.score} "${collapseToOneLine(f.title)}"`)
     }
     lines.push(
-      `  use {"tool":"get","arguments":{"path":"${model.node.path}","id":"<id>"}} for detail; submit/vote/list: GET /system/feedback/~help`,
+      `  use GET ${fbPath}/<id> for detail; POST ${fbPath} {"title","detail"} to submit; POST ${fbPath}/<id> {"vote":"up|down|clear"} to rate`,
     )
   }
   return lines.join('\n')

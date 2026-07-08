@@ -147,7 +147,7 @@ describe('note/feedback 的 DSL↔JSON 等价(新扩展字段)', () => {
     expect(json.feedback).toEqual([{ id: 'fb_abc123', title: '坑:参数大小写敏感', score: 2 }])
     const dsl = renderHelpDsl(enriched)
     expect(dsl).toContain('note "管理员补充"')
-    expect(dsl).toContain('feedback 1 POST /system/feedback')
+    expect(dsl).toContain('feedback 1 GET /docs/context7/~feedback')
     expect(dsl).toContain('  fb_abc123 2 "坑:参数大小写敏感"')
   })
 

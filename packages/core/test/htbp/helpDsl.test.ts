@@ -207,15 +207,18 @@ describe('note 行与 feedback 块(未知行忽略扩展通道)', () => {
 
   it('note 行紧跟 hint 之后,值折叠为单行并加引号', () => {
     const hintIdx = lines.findIndex((l) => l.startsWith('hint '))
-    expect(lines[hintIdx + 1]).toBe('note "应用身份建的文档归属应用 create-doc 记得传 folder_token"')
+    expect(lines[hintIdx + 1]).toBe(
+      'note "应用身份建的文档归属应用 create-doc 记得传 folder_token"',
+    )
   })
 
   it('feedback 块置尾:头行 <count> + 端点,条目行 <id> <score> "<title>",use 指引行含 path', () => {
     const headIdx = lines.findIndex((l) => l.startsWith('feedback '))
-    expect(lines[headIdx]).toBe('feedback 2 POST /system/feedback')
+    expect(lines[headIdx]).toBe('feedback 2 GET /feishu/~feedback')
     expect(lines[headIdx + 1]).toBe('  fb_a1x9k2 3 "create-doc 的 mode 参数必填"')
     expect(lines[headIdx + 2]).toBe('  fb_m4n5p6 1 "list-docs 需要 drive:drive 权限"')
-    expect(lines[headIdx + 3]).toContain('"path":"feishu"')
+    expect(lines[headIdx + 3]).toContain('GET /feishu/~feedback/<id>')
+    expect(lines[headIdx + 3]).toContain('POST /feishu/~feedback')
     expect(lines[headIdx + 3]).toMatch(/^ {2}use /)
   })
 

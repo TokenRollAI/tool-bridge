@@ -21,6 +21,7 @@ import {
   deviceDirectoryHelpModel,
   deviceFsHelpModel,
   deviceShellHelpModel,
+  FEEDBACK_HIDE_SCORE,
   FeedbackStore,
   type HelpModel,
   identify,
@@ -249,6 +250,23 @@ function splitReserved(pathname: string, seg: string): TreePath | null {
   const p = pathname.replace(/^\/+|\/+$/g, '')
   if (p === seg) return '' // 根级 /~help、/~tree
   if (p.endsWith(`/${seg}`)) return decodePath(p.slice(0, -(seg.length + 1)))
+  return null
+}
+
+/**
+ * 解析 ~feedback 保留段 URL(feedback 是 per-path 一级协议能力):
+ * `/<path>/~feedback` → { path };`/<path>/~feedback/<id>` → { path, id };其余形状 → null。
+ */
+function splitFeedback(pathname: string): { path: TreePath; id?: string } | null {
+  const p = pathname.replace(/^\/+|\/+$/g, '')
+  const segs = p.split('/')
+  const last = segs[segs.length - 1] ?? ''
+  if (last === '~feedback') {
+    return { path: decodePath(segs.slice(0, -1).join('/')) }
+  }
+  if (segs.length >= 2 && segs[segs.length - 2] === '~feedback' && !last.startsWith('~')) {
+    return { path: decodePath(segs.slice(0, -2).join('/')), id: decodeURIComponent(last) }
+  }
   return null
 }
 
@@ -837,17 +855,118 @@ export function createTbApp(deps: TbAppDeps): Hono<{ Variables: Vars }> {
     throw TBError.notFound(`no capabilities for kind '${node.kind}'`)
   }
 
+  // --- ~feedback(保留段:per-path Agent 反馈,一级协议能力)---
+  // 权限判定落在目标 path 本身(而非集中管理节点):窄 scope SK(如仅 feishu/**)对
+  // 自己够得着的路径天然可读/可反馈。read 判不过 → 404 不泄露存在性(与 ~help 同则)。
+  // 排序/阈值/防刷在 core FeedbackStore;~help 默认区块经 enrichHelp 注入。
+
+  /** 反馈条目的线上视图:投票人集合不外露,只回计数与净分。 */
+  const feedbackJson = (value: unknown): Response =>
+    new Response(JSON.stringify(value), { headers: { 'content-type': contentTypeFor('json') } })
+
+  // GET /<path>/~feedback → 列表(?hidden=1 含净分 ≤ 阈值的隐藏条目);GET .../~feedback/<id> → 单条详情。
+  const handleFeedbackGet = async (c: AppContext): Promise<Response> => {
+    const target = splitFeedback(new URL(c.req.url).pathname)
+    if (target === null || target.path === '') throw TBError.notFound('no such path')
+    const ctx = c.get('ctx')
+    if (!check(ctx, target.path, 'read').allow) throw TBError.notFound('not found')
+    const fb = new FeedbackStore(c.get('store'))
+    if (target.id !== undefined) {
+      const e = await fb.get(target.path, target.id)
+      return feedbackJson({
+        id: e.id,
+        path: target.path,
+        title: e.title,
+        detail: e.detail,
+        by: e.by,
+        at: e.at,
+        up: e.up.length,
+        down: e.down.length,
+        score: e.up.length - e.down.length,
+      })
+    }
+    const views = await fb.listViews(target.path)
+    const items =
+      c.req.query('hidden') === '1' ? views : views.filter((v) => v.score > FEEDBACK_HIDE_SCORE)
+    return feedbackJson({ items })
+  }
+
+  // POST /<path>/~feedback {title,detail} → 提交;POST .../~feedback/<id> {vote} → 投票(每身份一票,可改票)。
+  const handleFeedbackPost = async (c: AppContext): Promise<Response> => {
+    const target = splitFeedback(new URL(c.req.url).pathname)
+    if (target === null || target.path === '') throw TBError.notFound('no such path')
+    const ctx = c.get('ctx')
+    const store = c.get('store')
+    if (!check(ctx, target.path, 'read').allow) throw TBError.notFound('not found')
+    if (!check(ctx, target.path, 'call').allow) {
+      throw new TBError('permission_denied', `no scope grants 'call' on '${target.path}'`)
+    }
+    const body = (await c.req.json().catch(() => null)) as Record<string, unknown> | null
+    if (body === null || typeof body !== 'object') {
+      throw new TBError('invalid_argument', 'body must be a JSON object')
+    }
+    const fb = new FeedbackStore(store)
+    if (target.id !== undefined) {
+      const vote = body.vote
+      if (vote !== 'up' && vote !== 'down' && vote !== 'clear') {
+        throw new TBError('invalid_argument', `body.vote must be 'up' | 'down' | 'clear'`)
+      }
+      return feedbackJson(await fb.vote(target.path, target.id, ctx.owner, vote))
+    }
+    if (typeof body.title !== 'string' || typeof body.detail !== 'string') {
+      throw new TBError('invalid_argument', 'body must be { title: string, detail: string }')
+    }
+    // path 须挂在真实节点(或其工具子路径)下,防悬空路径积垃圾。
+    await new NodeRegistryStore(store).resolve(target.path)
+    const entry = await fb.submit(
+      target.path,
+      { title: body.title, detail: body.detail },
+      ctx.owner,
+      new Date().toISOString(),
+    )
+    return feedbackJson({ id: entry.id, path: target.path, title: entry.title, at: entry.at })
+  }
+
+  // DELETE /<path>/~feedback/<id> → 管理面清理(admin)。
+  const handleFeedbackDelete = async (c: AppContext): Promise<Response> => {
+    const target = splitFeedback(new URL(c.req.url).pathname)
+    if (target === null || target.path === '' || target.id === undefined) {
+      throw TBError.notFound('no such path')
+    }
+    const ctx = c.get('ctx')
+    if (!check(ctx, target.path, 'read').allow) throw TBError.notFound('not found')
+    if (!check(ctx, target.path, 'admin').allow) {
+      throw new TBError('permission_denied', `no scope grants 'admin' on '${target.path}'`)
+    }
+    await new FeedbackStore(c.get('store')).remove(target.path, target.id)
+    return feedbackJson({ ok: true })
+  }
+
   // GET 通配分派:按 pathname 末段路由到 ~help / ~tree / ~skill;其余 GET 无对应端点 → 404。
   // (不用 `/:path{.*}/~help` 具名后缀路由——Hono 该形式对 3+ 段路径不匹配。)
   // handleX(c) 必须 `await`(而非裸 `return handleX(c)`):裸返回 async promise 时其 reject
   // 会在链接那一 tick 被 workerd 误报为 unhandled,即便 runHandler 最终 catch。
   app.get('/*', (c) =>
     runHandler(async () => {
-      const last = new URL(c.req.url).pathname.replace(/\/+$/, '').split('/').pop() ?? ''
+      const segs = new URL(c.req.url).pathname.replace(/\/+$/, '').split('/')
+      const last = segs.pop() ?? ''
       if (last === '~help') return await handleHelp(c)
       if (last === '~tree') return await handleTree(c)
       if (last === '~skill') return await handleSkill(c)
       if (last === '~describe') return await handleDescribe(c)
+      // ~feedback 是末段(列表)或倒数第二段(详情);更深嵌套由 splitFeedback 判 404。
+      if (last === '~feedback' || segs[segs.length - 1] === '~feedback') {
+        return await handleFeedbackGet(c)
+      }
+      throw TBError.notFound('no such path')
+    }),
+  )
+
+  // DELETE 通配分派:仅 ~feedback 详情(管理面清理);其余 DELETE 无对应端点 → 404。
+  app.delete('/*', (c) =>
+    runHandler(async () => {
+      const segs = new URL(c.req.url).pathname.replace(/\/+$/, '').split('/')
+      if (segs[segs.length - 2] === '~feedback') return await handleFeedbackDelete(c)
       throw TBError.notFound('no such path')
     }),
   )
@@ -937,12 +1056,17 @@ export function createTbApp(deps: TbAppDeps): Hono<{ Variables: Vars }> {
     })
   }
 
-  // POST 通配分派:末段为 ~register → 反向注册;~authorize → OAuth 发起;否则数据面调用。
+  // POST 通配分派:末段为 ~register → 反向注册;~authorize → OAuth 发起;~feedback(末段或
+  // 倒数第二段)→ 反馈提交/投票;否则数据面调用。
   app.post('/*', (c) =>
     runHandler(async () => {
-      const last = new URL(c.req.url).pathname.replace(/\/+$/, '').split('/').pop() ?? ''
+      const segs = new URL(c.req.url).pathname.replace(/\/+$/, '').split('/')
+      const last = segs.pop() ?? ''
       if (last === '~register') return await handleRegister(c)
       if (last === '~authorize') return await handleAuthorize(c)
+      if (last === '~feedback' || segs[segs.length - 1] === '~feedback') {
+        return await handleFeedbackPost(c)
+      }
       return await handleInvoke(c)
     }),
   )

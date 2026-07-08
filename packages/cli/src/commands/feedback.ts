@@ -1,6 +1,6 @@
 import { Command } from 'commander'
 import { resolveTarget, withGlobalOpts } from '../args'
-import { CliError, callTool } from '../http'
+import { apiJson, CliError } from '../http'
 import { guard, printJson, printLine, table } from '../output'
 
 interface FeedbackGlobalOpts {
@@ -9,7 +9,7 @@ interface FeedbackGlobalOpts {
   sk?: string
 }
 
-/** system/feedback list 的一行(不含 detail;下钻用 get)。 */
+/** ~feedback 列表的一行(不含 detail;下钻用 get)。 */
 interface FeedbackView {
   id: string
   title: string
@@ -20,7 +20,16 @@ interface FeedbackView {
   score: number
 }
 
-/** `tb feedback ls <path>` → 该路径全部反馈(净分排序;--hidden 含被隐藏条目)。 */
+/** `/<path>/~feedback[/<id>]` 端点路径(feedback 是 per-path 保留段能力)。 */
+function fbPath(pathArg: string, id?: string): string {
+  const p = String(pathArg ?? '')
+    .trim()
+    .replace(/^\/+|\/+$/g, '')
+  if (p === '') throw new CliError('path is required (feedback is per-path)')
+  return id !== undefined ? `/${p}/~feedback/${id}` : `/${p}/~feedback`
+}
+
+/** `tb feedback ls <path>` → GET /<path>/~feedback(净分排序;--hidden 含隐藏条目)。 */
 export function feedbackLsCommand(): Command {
   return withGlobalOpts(new Command('ls'))
     .description('List feedback of a path, sorted by score')
@@ -29,12 +38,10 @@ export function feedbackLsCommand(): Command {
     .action(async (pathArg: string, opts: FeedbackGlobalOpts & { hidden?: boolean }) => {
       const asJson = Boolean(opts.json)
       await guard(asJson, async () => {
-        const page = await callTool<{ items: FeedbackView[] }>(
-          resolveTarget(opts),
-          '/system/feedback',
-          'list',
-          { path: pathArg, ...(opts.hidden ? { includeHidden: true } : {}) },
-        )
+        const page = await apiJson<{ items: FeedbackView[] }>(resolveTarget(opts), {
+          path: fbPath(pathArg),
+          ...(opts.hidden ? { query: { hidden: 1 } } : {}),
+        })
         if (asJson) {
           printJson(page)
           return
@@ -51,7 +58,7 @@ export function feedbackLsCommand(): Command {
     })
 }
 
-/** `tb feedback get <path> <id>` → 单条完整反馈(含 detail)。 */
+/** `tb feedback get <path> <id>` → GET /<path>/~feedback/<id>(含 detail)。 */
 export function feedbackGetCommand(): Command {
   return withGlobalOpts(new Command('get'))
     .description('Show full detail of one feedback (ids appear in ~help / ls)')
@@ -60,12 +67,9 @@ export function feedbackGetCommand(): Command {
     .action(async (pathArg: string, idArg: string, opts: FeedbackGlobalOpts) => {
       const asJson = Boolean(opts.json)
       await guard(asJson, async () => {
-        const entry = await callTool<FeedbackView & { detail: string }>(
-          resolveTarget(opts),
-          '/system/feedback',
-          'get',
-          { path: pathArg, id: idArg },
-        )
+        const entry = await apiJson<FeedbackView & { detail: string }>(resolveTarget(opts), {
+          path: fbPath(pathArg, idArg),
+        })
         if (asJson) {
           printJson(entry)
           return
@@ -78,7 +82,7 @@ export function feedbackGetCommand(): Command {
     })
 }
 
-/** `tb feedback submit <path> --title <t> --detail <d>` → 提交反馈(call scope)。 */
+/** `tb feedback submit <path> --title <t> --detail <d>` → POST /<path>/~feedback(call scope)。 */
 export function feedbackSubmitCommand(): Command {
   return withGlobalOpts(new Command('submit'))
     .description('Share a pitfall you hit on a path (keep it short)')
@@ -89,11 +93,13 @@ export function feedbackSubmitCommand(): Command {
       async (pathArg: string, opts: FeedbackGlobalOpts & { title: string; detail: string }) => {
         const asJson = Boolean(opts.json)
         await guard(asJson, async () => {
-          const entry = await callTool<{ id: string; path: string; title: string }>(
+          const entry = await apiJson<{ id: string; path: string; title: string }>(
             resolveTarget(opts),
-            '/system/feedback',
-            'submit',
-            { path: pathArg, title: opts.title, detail: opts.detail },
+            {
+              method: 'POST',
+              path: fbPath(pathArg),
+              body: { title: opts.title, detail: opts.detail },
+            },
           )
           if (asJson) printJson(entry)
           else printLine(`feedback ${entry.id} submitted on ${entry.path}`)
@@ -104,7 +110,7 @@ export function feedbackSubmitCommand(): Command {
 
 const VOTE_VALUES = ['up', 'down', 'clear']
 
-/** `tb feedback vote <path> <id> <up|down|clear>` → 投票(每身份一票,可改票)。 */
+/** `tb feedback vote <path> <id> <up|down|clear>` → POST /<path>/~feedback/<id>。 */
 export function feedbackVoteCommand(): Command {
   return withGlobalOpts(new Command('vote'))
     .description('Rate a feedback: up / down / clear (one vote per identity, revote overrides)')
@@ -118,10 +124,10 @@ export function feedbackVoteCommand(): Command {
         if (!VOTE_VALUES.includes(value)) {
           throw new CliError(`value must be one of: ${VOTE_VALUES.join(' | ')}`)
         }
-        const view = await callTool<FeedbackView>(resolveTarget(opts), '/system/feedback', 'vote', {
-          path: pathArg,
-          id: idArg,
-          value,
+        const view = await apiJson<FeedbackView>(resolveTarget(opts), {
+          method: 'POST',
+          path: fbPath(pathArg, idArg),
+          body: { vote: value },
         })
         if (asJson) printJson(view)
         else printLine(`${view.id}: score ${view.score} (+${view.up}/-${view.down})`)
@@ -129,7 +135,7 @@ export function feedbackVoteCommand(): Command {
     })
 }
 
-/** `tb feedback rm <path> <id>` → 删除一条反馈(admin scope)。 */
+/** `tb feedback rm <path> <id>` → DELETE /<path>/~feedback/<id>(admin scope)。 */
 export function feedbackRmCommand(): Command {
   return withGlobalOpts(new Command('rm'))
     .description('Remove one feedback (admin scope)')
@@ -138,10 +144,7 @@ export function feedbackRmCommand(): Command {
     .action(async (pathArg: string, idArg: string, opts: FeedbackGlobalOpts) => {
       const asJson = Boolean(opts.json)
       await guard(asJson, async () => {
-        await callTool(resolveTarget(opts), '/system/feedback', 'remove', {
-          path: pathArg,
-          id: idArg,
-        })
+        await apiJson(resolveTarget(opts), { method: 'DELETE', path: fbPath(pathArg, idArg) })
         if (asJson) printJson({ ok: true, id: idArg })
         else printLine(`feedback ${idArg} removed`)
       })
@@ -150,7 +153,7 @@ export function feedbackRmCommand(): Command {
 
 export function feedbackCommand(): Command {
   return new Command('feedback')
-    .description('Agent feedback on paths (system/feedback): top entries show up in ~help')
+    .description('Agent feedback on paths (~feedback endpoint): top entries show up in ~help')
     .addCommand(feedbackLsCommand())
     .addCommand(feedbackGetCommand())
     .addCommand(feedbackSubmitCommand())

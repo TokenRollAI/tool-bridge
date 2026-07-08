@@ -141,7 +141,7 @@ export function renderHelpMarkdown(model: HelpModel): string {
   }
 
   if (model.feedback !== undefined && model.feedback.length > 0) {
-    const p = model.node.path
+    const fbPath = `/${model.node.path}/~feedback`
     out.push('## Agent feedback')
     out.push('')
     out.push('Pitfalls shared by other agents on this path (sorted by votes, top entries only):')
@@ -152,11 +152,12 @@ export function renderHelpMarkdown(model: HelpModel): string {
       out.push(`| \`${f.id}\` | ${f.score} | ${tableCell(f.title)} |`)
     }
     out.push('')
+    out.push(`Full detail of one entry: \`GET ${fbPath}/<id>\`.`)
     out.push(
-      `Full detail of one entry: \`POST /system/feedback\` with body \`{"tool":"get","arguments":{"path":"${p}","id":"<id>"}}\`.`,
+      `Hit a pitfall yourself? \`POST ${fbPath}\` with body \`{"title": "...", "detail": "..."}\` (keep both short).`,
     )
     out.push(
-      `Hit a pitfall yourself, or found an entry (un)helpful? Submit or vote via \`POST /system/feedback\` — usage: \`GET /system/feedback/~help\`.`,
+      `Found an entry (un)helpful? \`POST ${fbPath}/<id>\` with body \`{"vote": "up"|"down"|"clear"}\`.`,
     )
     out.push('')
   }
