@@ -62,7 +62,12 @@ describe('FeedbackStore', () => {
   })
 
   it('submit → get 回读;id 形如 fb_ + 6 位;title/detail trim', async () => {
-    const e = await fb.submit('feishu', { title: ' mode 必填 ', detail: ' 传 append ' }, AGENT_A, NOW)
+    const e = await fb.submit(
+      'feishu',
+      { title: ' mode 必填 ', detail: ' 传 append ' },
+      AGENT_A,
+      NOW,
+    )
     expect(e.id).toMatch(/^fb_[a-z0-9]{6}$/)
     const got = await fb.get('feishu', e.id)
     expect(got.title).toBe('mode 必填')
@@ -102,8 +107,12 @@ describe('FeedbackStore', () => {
     expect(await codeOf(() => fb.submit('a', { title: 'over', detail: 'd' }, AGENT_A, NOW))).toBe(
       'rate_limited',
     )
-    expect(await codeOf(() => fb.submit('a', { title: 'ok', detail: 'd' }, AGENT_B, NOW))).toBeNull()
-    expect(await codeOf(() => fb.submit('b', { title: 'ok', detail: 'd' }, AGENT_A, NOW))).toBeNull()
+    expect(
+      await codeOf(() => fb.submit('a', { title: 'ok', detail: 'd' }, AGENT_B, NOW)),
+    ).toBeNull()
+    expect(
+      await codeOf(() => fb.submit('b', { title: 'ok', detail: 'd' }, AGENT_A, NOW)),
+    ).toBeNull()
   })
 
   it('vote 改票与撤票:每 owner 一票', async () => {

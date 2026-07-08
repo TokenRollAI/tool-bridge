@@ -3,6 +3,7 @@
  * 网关、SDK、CLI 都装配它;是公共内核。
  */
 
+export * from './annotation/store'
 export * from './auth/authorizer'
 export * from './auth/registerPath'
 export * from './auth/scope'
@@ -28,6 +29,7 @@ export {
   type TBErrorCode,
   type TBErrorOptions,
 } from './errors'
+export * from './feedback/store'
 export * from './htbp/helpDsl'
 export * from './htbp/helpMarkdown'
 export * from './htbp/model'

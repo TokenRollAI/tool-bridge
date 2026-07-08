@@ -16,6 +16,11 @@ import { KEY_FEEDBACK, type StateStore } from '../store'
 import { normalizePath, validatePath } from '../tree/path'
 import type { OwnerRef, Timestamp, TreePath } from '../types'
 
+/** WebCrypto 全局(Workers 与 Node ≥19 均有);core 不引宿主类型,按 sk.ts 惯例局部声明。 */
+declare const crypto: {
+  getRandomValues<T extends Uint8Array>(array: T): T
+}
+
 /** 一条反馈。up/down 是投票人集合(每身份一票、可改票的真源);净分为派生值不落库。 */
 export interface FeedbackEntry {
   id: string
@@ -195,7 +200,12 @@ export class FeedbackStore {
   }
 
   /** 投票:每 owner 一票,改票 = 先从两集合摘除再加入;'clear' 撤票。不存在 → not_found。 */
-  async vote(path: TreePath, id: string, voter: OwnerRef, value: FeedbackVote): Promise<FeedbackView> {
+  async vote(
+    path: TreePath,
+    id: string,
+    voter: OwnerRef,
+    value: FeedbackVote,
+  ): Promise<FeedbackView> {
     const norm = normalizeFeedbackPath(path)
     const entries = await this.listFor(norm)
     const entry = entries.find((e) => e.id === id)
