@@ -18,19 +18,20 @@
 | HTBP Tree(核心枢纽) | 节点注册表、路由、`~help`/`~skill`/`~tree`/`~describe`、内容协商、调用分发 | `tree/` + `htbp/` | gateway `tbApp.ts`(宿主中立 createTbApp)+ `kvStateStore.ts` |
 | Tool Layer | mcp/http/builtin Provider 聚合与调用代理、虚拟化、remote 联邦 | `tool/` | gateway `providers/mcp|http|remote|toolCache` |
 | Context Layer | 多来源上下文统一读写检索面(四动词 + Search + `$ref`) | `context/` | gateway `providers/r2Object|s3Object|s3Sign` + `refToken.ts` |
-| Device Gateway | 设备 WS 反向注册 + 调用转发 | `device/`(帧/状态机/shell 白名单/设备侧 client) | gateway `deviceSession.ts`(DO,WS hibernation);cli `deviceRuntime.ts`;core `node/`(FsObjectStore/shellExecutor) |
+| Device Gateway | 设备 WS 反向注册 + 调用转发 | `device/`(帧/状态机/shell 白名单/设备侧 client) | **协议行为单一真源:gateway `deviceHello.ts`(processDeviceHello,宿主中立)**;两个宿主胶水:gateway `deviceSession.ts`(DO,WS hibernation)与 server `deviceHub.ts`(Node ws);cli `deviceRuntime.ts`;core `node/`(FsObjectStore/shellExecutor) |
 | Auth(横切) | SK 签发/作用域/访问判定/SecretStore | `auth/` + `secret/` | gateway 认证中间件;SK 哈希与密文存 StateStore |
 | builtin 管理面 | `system/*` 五模块:sk / secret / registry / status / plugin | `builtin/` | 经 gateway dispatch |
 | SDK | 内嵌 TB 实例 / 程序化注册 / 反向连接 | —(装配层) | `packages/sdk`:createToolBridge = core + gateway 的 createTbApp + 内存宿主缺省 |
 | CLI | 纯 API 客户端 `tb`,17 个子命令一一映射接口面,**无专用端点** | — | `packages/cli`(commander;npm 发布物) |
 | Plugin System | 自定义 Provider 注册与生命周期(探活/契约校验/信封传输) | `plugin/` | gateway `providers/pluginClient|pluginTool|pluginContext` + builtin `system/plugin` |
 | Dashboard | `~help` 通用渲染器 + 管理表单,**无专用后端** | — | `packages/dashboard`(React SPA)经 gateway Static Assets 挂 `/ui` |
-| 部署 | CF 与 Docker 两条路径产出同一棵树 | — | CF:`scripts/provision.mjs` + wrangler;Docker:**未实现**(见 current-state 未竟事项) |
+| 部署 | CF 与 Docker 两条路径产出同一棵树 | — | CF:`scripts/provision.mjs` + wrangler;Docker/Node:`packages/server`(SQLite/FS/ws DeviceHub)+ 根 Dockerfile,见 [../guides/docker-host.md](../guides/docker-host.md) |
 
 ## 依赖方向要点
 
-- **core 是纯逻辑基座**:无宿主依赖(唯一运行时依赖 zod),不直接 fetch;gateway、SDK、CLI 都装配它。core 的 `./node` 子导出是唯一含 Node API 的部分(FsObjectStore/shellExecutor,供设备侧与未来 Docker 宿主复用)。
-- **gateway 的 `tbApp.ts` 是宿主中立装配面**:接收 deps(StateStore/ObjectStore/SecretStore/设备宿主/version)产出 Hono app;`app.ts` 只做 Workers Env→deps 适配。SDK 直接复用 createTbApp,这就是"网关与 SDK 同一棵树"的机制保证。
+- **core 是纯逻辑基座**:无宿主依赖(唯一运行时依赖 zod),不直接 fetch;gateway、SDK、CLI、server 都装配它。core 的 `./node` 子导出是唯一含 Node API 的部分(FsObjectStore/shellExecutor,设备侧与 Docker/Node 宿主复用)。
+- **gateway 的 `tbApp.ts` 是宿主中立装配面**:接收 deps(StateStore/ObjectStore/SecretStore/设备宿主/version)产出 Hono app;`app.ts` 只做 Workers Env→deps 适配,server `server.ts` 做 Node env→deps 适配。SDK 直接复用 createTbApp,这就是"网关与 SDK 同一棵树"的机制保证。
+- **设备 hello 单一真源**:hello 验证 + 落库统一在 gateway `src/deviceHello.ts`(`processDeviceHello`,宿主中立,dev exports `./deviceHello`);`deviceSession.ts`(DO)与 server `deviceHub.ts` 只是宿主胶水——防两宿主树形态漂移,改协议行为只改 deviceHello。
 - **providers 承担全部 I/O**:core `tool/`、`context/`、`plugin/` 只放纯逻辑(拼装/映射/校验/归一);上游 fetch、MCP SDK、aws4fetch 签名都在 gateway `providers/`。
 
 ## 存储与宿主原语分工

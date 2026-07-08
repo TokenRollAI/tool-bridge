@@ -6,9 +6,9 @@
 
 ### 1. 本地验证:`pnpm verify`
 
-typecheck + biome lint + 单测(core/cli/sdk)+ gateway 集成测试(真实 workerd)一把过。
+typecheck + biome lint + 单测(core/cli/sdk)+ 集成测试(gateway 真实 workerd + server 纯 Node)一把过。
 
-预期:四段全绿,末尾 core `589 passed`、cli `101 passed`、sdk `12 passed`、gateway `82 passed | 6 skipped`(数字随开发增长,以全 pass 为准)。任一段红即停,先修再继续。
+预期:全绿,末尾 core `603 passed`、cli `101 passed`、sdk `12 passed`、gateway `85 passed | 6 skipped`、server `23 passed`(数字随开发增长,以全 pass 为准)。任一段红即停,先修再继续。
 
 ### 2. 部署:`pnpm deploy:all`
 

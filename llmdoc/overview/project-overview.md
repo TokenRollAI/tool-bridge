@@ -29,14 +29,14 @@
 | CLI | 纯 API 客户端 `tb`,子命令一一映射接口面 | 已落地(npm 发布) |
 | Plugin System | 自定义 Provider 注册与生命周期 | 已落地 |
 | Dashboard | `~help` 通用渲染器 + 管理表单(无专用后端) | 已落地 |
-| Server/部署 | CF 与 Docker 两条部署路径产出同一棵树 | CF 已落地;Docker 未实现 |
+| Server/部署 | CF 与 Docker 两条部署路径产出同一棵树 | 均已落地(CF 生产上线;Docker 镜像验收通过) |
 
 职责边界与依赖方向详见 [../architecture/modules-and-boundaries.md](../architecture/modules-and-boundaries.md)。
 
 ## 部署形态
 
 - **Cloudflare(默认宿主,已上线)**:单 Worker `tb-gateway`(Hono 路由,API + Dashboard 静态资源一体,Dashboard 挂 `/ui`);KV `tb-kv`(树配置/SK 哈希/manifest);R2 `tb-r2`(context + 大对象);每设备一个 Durable Object `DeviceSession`(WS hibernation)。云上资源统一 `tb-` 前缀(`TB_NAME_PREFIX` 派生)。
-- **Docker(自部署,未实现)**:单镜像 `node:22-slim`,core + @hono/node-server + SQLite + FS,`/data` 卷持久化。
+- **Docker/Node(自部署,已落地)**:`@tool-bridge/server` 单进程(better-sqlite3 StateStore + FS ObjectStore + ws 设备通道 + Dashboard 静态托管),`/data` 卷持久化;根 Dockerfile 产出镜像 `ghcr.io/tokenrollai/tool-bridge`(node:22 bookworm-slim)。见 [../guides/docker-host.md](../guides/docker-host.md)。
 - 两条路径的差异全部收敛在四个宿主注入点 StateStore/ObjectStore/SecretStore/DeviceTransport,业务代码零分叉;SDK 的 `createToolBridge(deps)` 即该装配面。
 
 ## 三入口对等原则

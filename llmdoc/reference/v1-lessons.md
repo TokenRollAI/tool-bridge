@@ -23,7 +23,7 @@
 2. Device 反向注册(WebSocket)——**已实现**。
 3. SK 作用域细粒度(v1 是租户级整树隔离,无 path×action)——**已实现**。
 4. SDK/Plugin 一等支持——**已实现**。
-5. Docker 自部署——**未实现**(见 current-state 未竟事项)。
+5. Docker 自部署——**已实现**(`packages/server`,见 [../guides/docker-host.md](../guides/docker-host.md))。
 6. 内容协商(markdown 默认)——**已实现**。
 
 ## 文件级检索地图(2026-07-06 已检索)

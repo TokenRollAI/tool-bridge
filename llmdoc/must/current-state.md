@@ -7,9 +7,10 @@
 - **初步实现阶段已完成**(2026-07-07 "破壳"):SK 鉴权与作用域、HTBP 核心树与内容协商、Tool 层(mcp/http/remote 联邦 + 虚拟化)、Context 层(r2/s3 四动词 + Search + `$ref` 大对象)、设备反向注册(DO WebSocket hibernation)、SDK、Plugin 系统、Dashboard 均已落地并经生产验证。
 - 2026-07-07:修复"挂载 MCP 过一段时间失效"生产故障(不合规上游对过期会话回 200+空列表,见 [../guides/mcp-upstream-pitfalls.md](../guides/mcp-upstream-pitfalls.md))。2026-07-08 同故障复发:初版防御的重试回读 KV 被边缘读缓存击穿(拿回刚删的旧会话),已改为重试强制完整重握手(`forceFresh`,PR #8)并补钉死用例,**已部署上线**且经塞伪 session 复现验证自愈(工具列表恢复、KV 回填新会话)。
 - 2026-07-08:`~help` 可读性重构:新增 `Accept: text/markdown` 可读表现(renderHelpMarkdown)、`hint` 行/字段(下一步指引)、索引形态 h 一句话摘要(此前上游 mcp 整篇多行 description 原样撑爆索引并破坏 DSL 行结构)、DSL 多行值安全化(node 行折叠单行、多行 h 续行缩进)、`tb help --md`;契约见 [../reference/protocol-contract.md](../reference/protocol-contract.md)。**已部署上线**(smoke 通过;生产实测根/mcp 索引/单工具三级 markdown 与索引一句话化均生效)。
+- **Docker/Node 宿主部署路径已落地**(2026-07-08):`@tool-bridge/server` 包(SQLite + FS + ws DeviceHub)+ 根 Dockerfile + GHCR/npm 双发布 workflow;本机与 Docker 验收全过(smoke/verify-device/verify-plugin/重启持久)。见 [../guides/docker-host.md](../guides/docker-host.md)。
 - bootstrap 期过程文档已归档 `archive/`;知识真源 = 代码 + llmdoc(见 [project-brief.md](project-brief.md))。
 - 2026-07-08:**直连工具调用**上线(PR #9)——`POST /<node>/<tool>` body 即 arguments 本体,`~help` 宣告直连路径(CmdSpec `flatBody`);信封入口 `POST /<node>` + `{tool,arguments}` 保留。CLI(`tb call <node>/<tool>`,--tool 变 optional)与 Dashboard(CmdPanel 按 cmd.path 判别、CliHint 同步)同轮对齐。已部署上线并经生产直连调用实测。
-- **npm 已发布**(四包均经 CI Trusted Publishing;core 为 private 不发布):`@tool-bridge/cli` 0.3.0、`@tool-bridge/sdk` 0.2.0、`@tool-bridge/gateway` 0.2.0、`@tool-bridge/dashboard` 0.2.0(2026-07-08,直连工具调用)。gateway/dashboard 的 Trusted Publisher 已配置生效(0.2.0 即经 CI 发布)。发布流程见 [../guides/npm-publish.md](../guides/npm-publish.md)。**坑:一次推多个 tag(`git push origin tag1 tag2 …`)不触发 tag workflows,须逐个 push**(2026-07-08 实测:四 tag 同推零触发,删除后逐个重推全部触发)。
+- **npm 已发布**(四包均经 CI Trusted Publishing;core 为 private 不发布):`@tool-bridge/cli` 0.3.0、`@tool-bridge/sdk` 0.2.0、`@tool-bridge/gateway` 0.2.0、`@tool-bridge/dashboard` 0.2.0(2026-07-08,直连工具调用)。gateway/dashboard 的 Trusted Publisher 已配置生效(0.2.0 即经 CI 发布);`@tool-bridge/server` 0.1.0 可发布,**待手动首发 + 配 Trusted Publisher**。发布流程见 [../guides/npm-publish.md](../guides/npm-publish.md)。**坑:一次推多个 tag(`git push origin tag1 tag2 …`)不触发 tag workflows,须逐个 push**(2026-07-08 实测:四 tag 同推零触发,删除后逐个重推全部触发)。
 
 ## 已部署资源(DJJ 账户)
 
@@ -31,18 +32,21 @@
   - `plugin/`(manifest 校验 / envelope 编解码 / RequestDedupe / 契约校验)
   - `node/`(`./node` 子导出:FsObjectStore realpath 防逃逸 + shellExecutor 有界缓冲)
   - 顶层 `errors.ts`(TBError)/ `store.ts`(StateStore 接口 + 内存实现)/ `types.ts`。
-- `packages/gateway` — Workers 胶水(可发布 Worker library:tsup 单文件 ESM bundle core,`src/index.ts` 另 export `createApp` 与 `type Env`;dev exports 指 src、发布形态 publishConfig 覆盖指 dist),**93 个默认集成测试 + 6 个 opt-in skipped**(真实 workerd;含 mcp 过期会话空列表防御的 mock 上游用例):`app.ts`(Env→deps 适配)/ `tbApp.ts`(**宿主中立 createTbApp**,路由/认证/HTBP/remote 聚合,SDK 复用)/ `bootstrap.ts` / `kvStateStore.ts` / `refToken.ts`(`$ref` 中转 token)/ `deviceSession.ts`(DeviceSession DO)/ `providers/`(mcp / http / remote / pluginTool / pluginContext / pluginClient / r2Object / s3Object / s3Sign / toolCache);`wrangler.jsonc` 在此包内。
+- `packages/gateway` — Workers 胶水(可发布 Worker library:tsup 单文件 ESM bundle core,`src/index.ts` 另 export `createApp` 与 `type Env`;dev exports 指 src(含 `./deviceHello`)、发布形态 publishConfig 覆盖指 dist),**93 个默认集成测试 + 6 个 opt-in skipped**(真实 workerd;含 mcp 过期会话空列表防御的 mock 上游用例):`app.ts`(Env→deps 适配)/ `tbApp.ts`(**宿主中立 createTbApp**,路由/认证/HTBP/remote 聚合,SDK 复用)/ `bootstrap.ts` / `deviceHello.ts`(宿主中立 processDeviceHello,DO 与 Node DeviceHub 共用)/ `kvStateStore.ts` / `refToken.ts`(`$ref` 中转 token)/ `deviceSession.ts`(DeviceSession DO 胶水)/ `providers/`(mcp / http / remote / pluginTool / pluginContext / pluginClient / r2Object / s3Object / s3Sign / toolCache);`wrangler.jsonc` 在此包内。
 - `packages/cli` — commander 框架(严格解析:未知 flag/子命令报错,防权限误配),**127 个单测**(含拼错 flag 事故回归 strictParsing),**17 个命令**:status / login / whoami / use / sk / secret / ls / tree / help / call / tool / server / ctx / connect / device / mount / plugin;全局 `--json`;配置 `~/.config/tool-bridge/config.json`(XDG,多 profile)。
 - `packages/sdk` — 薄装配层(4 个源文件),**12 个单测 + 1 个 opt-in**;公开面 `createToolBridge(config)` → `{ fetch, registerTool, registerContext, connect }`,复用 core + gateway 的 createTbApp;再导出内存宿主实现(MemoryStateStore 等)。
 - `packages/dashboard` — React 19 + Vite + Tailwind 4 + shadcn/ui + @rjsf + TanStack Query SPA(可发布纯静态产物包:只发 dist,依赖全在 devDependencies):树导航 / cmd 表单调用 / context 条目浏览(metadata 编辑、`$ref` 大对象经 Update 只改 metadata、Search mode keyword|semantic 切换)/ SK·Registry·Devices·Secrets·Plugins 管理页(Plugins 对等 `tb plugin` 六 cmd,pluginToken 一次性展示;Registry 挂载面对等 CLI:kind:tool / plugin provider、virtualize 全量、http authHeader/authScheme、context ttl)/ ⌘K 面板;无专用后端(同源消费 HTBP),行为由 gateway 的 `ui.integration.test.ts` 覆盖;`pnpm deploy:all` 先 build dashboard 再部署 gateway。
+- `packages/server` — Node/Docker 宿主胶水(可发布 bin `tool-bridge-server`,0.1.0),**23 个测试**(5 文件,纯 Node vitest):`sqliteStateStore.ts`(better-sqlite3 单表 kv,WAL,强一致)/ `config.ts`(configFromEnv,TB_PORT/TB_HOST/TB_DATA_DIR/TB_UI_DIR)/ `objects.ts`(FsObjectStore 前缀适配)/ `deviceHub.ts`(ws 设备通道,复用 core DeviceGatewaySession + gateway processDeviceHello)/ `assets.ts`(/ui 静态托管)/ `server.ts` + `main.ts`;tsup bundle core+gateway,better-sqlite3/ws/hono 等留 external;根 Dockerfile 产出镜像。详见 [../guides/docker-host.md](../guides/docker-host.md)。
 - `scripts/` — `gen-dev-vars.mjs` / `provision.mjs` / `smoke.ts`(healthz + 无 SK 401 + 带 SK 200)+ 三个可重跑生产验收脚本:`verify-revocation.ts`(吊销传播,实测 0.3s)/ `verify-device.ts`(设备 shell/fs/registerPaths 全链路,可选跨休眠用例)/ `verify-plugin.ts`(Plugin 注册→挂载→四动词全流程)。
-- CI(.github/workflows/):`publish-cli.yml`(tag `cli-v*`)/ `publish-sdk.yml`(tag `sdk-v*`)/ `publish-gateway.yml`(tag `gateway-v*`)/ `publish-dashboard.yml`(tag `dashboard-v*`),npm Trusted Publishing(OIDC);**无主干测试 CI**。
+- CI(.github/workflows/):`publish-cli.yml`(tag `cli-v*`)/ `publish-sdk.yml`(tag `sdk-v*`)/ `publish-gateway.yml`(tag `gateway-v*`)/ `publish-dashboard.yml`(tag `dashboard-v*`)/ `publish-server.yml` + `publish-docker.yml`(同 tag `server-v*`:npm 发布 + GHCR 镜像 `ghcr.io/tokenrollai/tool-bridge`),npm Trusted Publishing(OIDC);**无主干测试 CI**。
 - 工具链:lint 用 biome;测试 vitest 4 + @cloudflare/vitest-pool-workers 0.18(API 变更注意见 [../guides/workers-kv-pitfalls.md](../guides/workers-kv-pitfalls.md))。
 
 ## 常用命令
 
-- `pnpm verify` — typecheck + lint + 单测 + 集成测试一把过(当前 623 core + 127 cli + 12 sdk 单测,93 gateway 默认集成 + 6 opt-in skipped)。
+- `pnpm verify` — typecheck + lint + 单测 + 集成测试一把过(当前 623 core + 127 cli + 12 sdk 单测,93 gateway 默认集成 + 6 opt-in skipped,23 server;根 `test:integration` 已并入 server)。
 - `pnpm deploy:all` — 幂等 provision + dashboard build + 部署 gateway。
+- `pnpm --filter @tool-bridge/server start` — 本机起 Node 宿主(默认 :8787,数据落 ./data;env 面见 [../guides/docker-host.md](../guides/docker-host.md))。
+- `docker build -t tool-bridge . && docker run -p 8787:8787 -v tbdata:/data …` — Docker 路径,验收命令全套见 [../guides/docker-host.md](../guides/docker-host.md)。
 - `TB_BASE_URL=https://tool-bridge.pdjjq.org pnpm smoke` — 线上冒烟(**smoke 不读 .env,须显式传 TB_BASE_URL 与 TB_SK**)。
 - `npx tsx scripts/verify-revocation.ts` / `verify-device.ts` / `verify-plugin.ts` — 可重跑生产验收(需 TB_BASE_URL + TB_SK,消耗真实资源)。
 - `TB_TEST_MCP_URL=http://127.0.0.1:39002/mcp TB_ALLOW_INSECURE_HTTP=true pnpm --filter @tool-bridge/gateway test -- tool.integration.test.ts` — opt-in MCP E2E(先 `ECHO_MCP_PORT=39002 pnpm --filter @tool-bridge/gateway echo-mcp` 起兜底上游)。
@@ -68,7 +72,6 @@
 - **真实上游 MCP 空缺** → `pnpm --filter @tool-bridge/gateway echo-mcp` 自建 echo MCP 兜底。
 - **外部 S3 空缺** → 本地 s3rver mock opt-in 可重跑;或用 DJJ 账户 R2 的 S3 兼容 API 当"外部 S3"。
 - **R2 预签名 AK 空缺** → 大对象走 `/~ref` 网关中转下载路由,功能不缺(生产实测通过)。
-- **Docker 守护进程未运行** → 仅阻塞 Docker 自部署路径的开发验收,启动 Docker Desktop 即可。
 
 ## 本机工具链(2026-07-06 核实)
 
@@ -78,15 +81,15 @@
 | pnpm | 11.10.0 |
 | wrangler | 4.107.0,已 OAuth 登录(可访问 DJJ 与 Lightspeed 两账户) |
 | gh | 2.96.0,已登录 Disdjj(有 repo scope,可访问 v1 私有仓库) |
-| docker | CLI 29.2.1 在,**守护进程未运行** |
+| docker | CLI 29.2.1,守护进程可用(2026-07-08 核实;build/run/restart 镜像验收已过) |
 
 **注意**:wrangler OAuth 下有多账户,所有 wrangler 命令须显式指定账户(`wrangler.jsonc` 已写 `account_id`;脚本内用 `CLOUDFLARE_ACCOUNT_ID`),否则报多账户歧义错误。
 
 ## 未竟事项(路线图,非进度账本)
 
+- **server 首发**:`@tool-bridge/server` 0.1.0 待用户手动 `npm publish` 首发 + npmjs.com 配 Trusted Publisher(workflow `publish-server.yml`);**server 的 npm 安装形态依赖 dashboard 已发布**(regular dependency,dashboard 0.2.0 已在 npm),见 [../guides/npm-publish.md](../guides/npm-publish.md)。
 - **tool-bridge-template 模板仓库**(未动工):公开仓库挂 Deploy to Cloudflare 按钮——3 行 `src/index.ts`(import app + `DeviceSession` from `@tool-bridge/gateway`)+ 无 account_id/routes 的干净 wrangler.jsonc(KV/R2/DO 由 Deploy 按钮自动创建回填)+ copy-ui 脚本(dashboard 包 dist → public);presign/ASSETS/TB_BOOTSTRAP_ADMIN_SK 在运行时均可选且已优雅降级,无需改运行时代码。
 - **`tb init` 向导**:干净账户一条命令拉起(wrangler auth 检查 → provision → 部署 → Admin SK 输出,可重入);当前部署路径是 `pnpm deploy:all`。
-- **Docker 自部署路径**:node adapter(@hono/node-server)+ SQLite StateStore + FS ObjectStore + ws 设备通道 + Dashboard 静态托管,`/data` 卷持久化;SDK 已具备宿主中立装配面,缺镜像、SQLite StateStore 与验收(SQLite 宿主的吊销即时性验证也在此时补)。落地时补一篇 Docker 宿主 guide。
 - **端到端验收系统化**:七个 User Case 的脚本化 E2E(CLI `--json` 驱动 + Dashboard 浏览器侧)未拉通;现有 smoke + 三个 verify-* 脚本覆盖主链路。
 - **遗留小项**:CLI deviceRuntime 迁移为 SDK 消费者;R2 Access Key 创建后 presign 主路径 opt-in 复验;dashboard bundle 1.14MB 未 code-split(vite 警告,不阻塞);生产 `device/demo-mac` 疑似测试残骸待确认清理;dashboard 本地开发流程(vite dev + wrangler dev 联调)下次涉及时补 guide。
 
