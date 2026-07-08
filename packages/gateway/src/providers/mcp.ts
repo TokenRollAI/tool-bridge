@@ -15,7 +15,9 @@
  *   一次,真空列表上游至多多付一趟握手)。重试不得回读会话缓存:KV 边缘读缓存
  *   (≥60s)会把刚删的旧会话又还回来,重试再次复用死会话,防御被击穿
  *   (2026-07-08 生产复发取证)。
- * - `authRef` 经 SecretStore.resolve 注入 `requestInit.headers` 的静态 `Authorization: Bearer`;
+ * - 上游请求头 = `headers`(静态明文,如上游要求的工具白名单头)+ `authRef` 凭证头
+ *   (`authHeaderFor` 语义:默认 `Authorization: Bearer`,可经 `authHeader`/`authScheme`
+ *   改头名/前缀,空 scheme 原样注入;凭证头覆盖同名静态头)。
  *   `auth:'oauth'` 时改挂网关托管 OAuthClientProvider(oauth.ts;mode:'deny'):SDK 自动带
  *   token、401 时自动 refresh;需要交互(重新)授权 → reauthorizeRequired 指引 `tb tool auth`。
  * - **单一 choke point**(`guard`):一切传输/协议错误经 `normalizeUpstreamError` 归一为 TBError;
@@ -31,6 +33,7 @@ import {
 import { CfWorkerJsonSchemaValidator } from '@modelcontextprotocol/sdk/validation/cfworker'
 import {
   assertSecureUrl,
+  authHeaderFor,
   isTBError,
   normalizeUpstreamError,
   type SecretStoreImpl,
@@ -48,6 +51,12 @@ export interface McpConfig {
   url: string
   authRef?: string
   auth?: 'oauth'
+  /** authRef 凭证注入的头名(默认 Authorization)。 */
+  authHeader?: string
+  /** 凭证前缀;空串 = 原样注入(默认 Bearer)。 */
+  authScheme?: string
+  /** 静态明文请求头(非机密);authRef 凭证头覆盖同名项。 */
+  headers?: Record<string, string>
 }
 
 /** MCP SDK 返回的单个工具形状(仅取我们用到的字段)。 */
@@ -179,9 +188,9 @@ interface SessionOutcome<T> {
   viaCachedSession: boolean
 }
 
-/** withSession 的上游认证形态:静态 bearer 或网关托管 OAuth provider(二选一)。 */
+/** withSession 的上游认证形态:静态请求头(headers+authRef 拼装)或网关托管 OAuth provider(二选一)。 */
 interface UpstreamAuth {
-  bearer?: string
+  headers?: Record<string, string>
   oauth?: GatewayMcpOAuthProvider
 }
 
@@ -203,9 +212,7 @@ async function withSession<T>(
     new StreamableHTTPClientTransport(new URL(url), {
       fetch: noStandaloneSseFetch,
       ...(auth.oauth !== undefined ? { authProvider: auth.oauth } : {}),
-      ...(auth.bearer !== undefined
-        ? { requestInit: { headers: { Authorization: `Bearer ${auth.bearer}` } } }
-        : {}),
+      ...(auth.headers !== undefined ? { requestInit: { headers: auth.headers } } : {}),
       ...(sessionId !== undefined ? { sessionId } : {}),
     })
 
@@ -296,7 +303,16 @@ export function createMcpProvider(
         }),
       }
     }
-    return config.authRef !== undefined ? { bearer: await secrets.resolve(config.authRef) } : {}
+    // 静态头形态:headers(明文)+ authRef 凭证头(authHeaderFor 语义,覆盖同名)。
+    const h: Record<string, string> = { ...(config.headers ?? {}) }
+    if (config.authRef !== undefined) {
+      const cred = await secrets.resolve(config.authRef)
+      if (cred !== undefined) {
+        const [hn, hv] = authHeaderFor(config, cred)
+        h[hn] = hv
+      }
+    }
+    return Object.keys(h).length > 0 ? { headers: h } : {}
   }
 
   // SDK 静默刷新失败/无 token 时抛 UnauthorizedError(非 OAuthError 子类,guard 会归一成

@@ -12,11 +12,13 @@
 
 import {
   assertPluginPayloadSize,
+  base64urlEncode,
   type CallContext,
   encodeCallContext,
   encodePluginCall,
   HEADER_TB_CONTEXT,
   HEADER_TB_REQUEST_ID,
+  HEADER_TB_UPSTREAM_AUTH,
   isTBError,
   type PluginManifest,
   type PluginProbeResult,
@@ -115,6 +117,11 @@ export interface PluginCallOptions {
   secrets: SecretStoreImpl
   /** 调用上下文,经 X-TB-Context 透传。 */
   ctx: CallContext
+  /**
+   * 挂载 config.authRef:上游凭证引用。给出时每次调用 resolve 并经
+   * X-TB-Upstream-Auth(base64url)注入——plugin 无须自持上游凭证。
+   */
+  upstreamAuthRef?: string
 }
 
 /** Authorization 按 manifest.auth 从 SecretStore 解析;无法解析 → unavailable。 */
@@ -203,6 +210,8 @@ async function attempt(
 /**
  * envelope 调用:`tool` 是**方法名**(如 "List"/"Call"),arguments 按名传递。
  * 重试 1 次(retryable TBError / 网络失败),X-TB-Request-Id 不变;响应 `$ref` 原样透传。
+ * upstreamAuthRef 给出时 resolve 并经 X-TB-Upstream-Auth(base64url)注入;
+ * 引用无法解析 → unavailable(与 pluginToken 同语义:配置错误即快速失败)。
  */
 export async function callPlugin(
   opts: PluginCallOptions,
@@ -217,6 +226,17 @@ export async function callPlugin(
     authorization: await pluginAuthorization(opts.manifest, opts.secrets),
     [HEADER_TB_CONTEXT]: encodeCallContext(opts.ctx),
     [HEADER_TB_REQUEST_ID]: crypto.randomUUID(),
+  }
+  if (opts.upstreamAuthRef !== undefined) {
+    const cred = await opts.secrets.resolve(opts.upstreamAuthRef)
+    if (cred === undefined) {
+      throw new TBError(
+        'unavailable',
+        `plugin '${opts.manifest.id}' 上游凭证 '${opts.upstreamAuthRef}' 无法解析`,
+        { retryable: false },
+      )
+    }
+    headers[HEADER_TB_UPSTREAM_AUTH] = base64urlEncode(new TextEncoder().encode(cred))
   }
   try {
     return await attempt(url, headers, body)

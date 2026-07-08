@@ -1,5 +1,10 @@
 import { SELF } from 'cloudflare:test'
-import { type CallContext, decodeCallContext, parseHelpDsl } from '@tool-bridge/core'
+import {
+  base64urlDecode,
+  type CallContext,
+  decodeCallContext,
+  parseHelpDsl,
+} from '@tool-bridge/core'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { TEST_ADMIN_SK } from './fixtures'
 
@@ -542,5 +547,59 @@ describe("kind:'tool' 挂载消费(tool-provider plugin)", () => {
     await registerPlugin(manifest('ctx-only'))
     const res = await mountTool('tools/bad', 'ctx-only')
     expect(res.status).toBe(400)
+  })
+
+  it('挂载带 authRef:凭证经 X-TB-Upstream-Auth(base64url)注入;不带则无此头', async () => {
+    const { seen } = stubToolProvider()
+    await registerPlugin(
+      manifest('feishu-like', { kind: 'tool-provider', interfaceVersion: 'tool-provider/v1' }),
+    )
+    const setSecret = await postJson(
+      'system/secret',
+      { tool: 'set', arguments: { name: 'feishu-app', value: '{"app_id":"a","app_secret":"s"}' } },
+      admin(),
+    )
+    expect(setSecret.status).toBe(200)
+
+    const mounted = await postJson(
+      'system/registry',
+      {
+        tool: 'write',
+        arguments: {
+          path: 'tools/feishu-auth',
+          kind: 'tool',
+          description: 'plugin tools with upstream auth',
+          config: { kind: 'tool', provider: 'feishu-like', authRef: 'feishu-app' },
+        },
+      },
+      admin(),
+    )
+    expect(mounted.status).toBe(200)
+
+    const call = await postJson(
+      'tools/feishu-auth',
+      { tool: 'create_order', arguments: {} },
+      admin(),
+    )
+    expect(call.status).toBe(200)
+    // List(取工具表)与 Call 都须带平台代解析的凭证头,且值为 base64url(secret 明文)。
+    const withAuth = seen.filter((s) => s.headers.get('x-tb-upstream-auth') !== null)
+    expect(withAuth.length).toBe(seen.length)
+    expect(seen.length).toBeGreaterThan(0)
+    const decoded = new TextDecoder().decode(
+      base64urlDecode(seen[0]?.headers.get('x-tb-upstream-auth') as string),
+    )
+    expect(JSON.parse(decoded)).toEqual({ app_id: 'a', app_secret: 's' })
+
+    // 对照:不带 authRef 的挂载(前一用例的 tools/orders 形态)不发该头。
+    seen.length = 0
+    expect((await mountTool('tools/no-auth', 'feishu-like')).status).toBe(200)
+    const plainCall = await postJson(
+      'tools/no-auth',
+      { tool: 'create_order', arguments: {} },
+      admin(),
+    )
+    expect(plainCall.status).toBe(200)
+    expect(seen.every((s) => s.headers.get('x-tb-upstream-auth') === null)).toBe(true)
   })
 })

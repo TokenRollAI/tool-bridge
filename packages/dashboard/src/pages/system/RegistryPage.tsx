@@ -309,6 +309,11 @@ function MountDialog() {
   const [mcpUrl, setMcpUrl] = useState('')
   const [mcpAuthMode, setMcpAuthMode] = useState<'none' | 'authRef' | 'oauth'>('none')
   const [mcpAuthRef, setMcpAuthRef] = useState('')
+  const [mcpAuthHeader, setMcpAuthHeader] = useState('')
+  // 凭证前缀三态:bearer = 缺省(Bearer)、raw = 空串原样注入、custom = 自定义前缀
+  const [mcpSchemeMode, setMcpSchemeMode] = useState<'bearer' | 'raw' | 'custom'>('bearer')
+  const [mcpAuthScheme, setMcpAuthScheme] = useState('')
+  const [mcpHeadersSpec, setMcpHeadersSpec] = useState('')
   // 虚拟化(mcp/http/tool 共用;对等 CLI --prefix/--rename/--hide/--describe)
   const [prefix, setPrefix] = useState('')
   const [renameSpec, setRenameSpec] = useState('')
@@ -336,6 +341,7 @@ function MountDialog() {
   const [skRef, setSkRef] = useState('')
   // tool(plugin 工具源)
   const [toolProvider, setToolProvider] = useState('')
+  const [toolAuthRef, setToolAuthRef] = useState('')
 
   const pluginItems = plugins.data?.items ?? []
   const toolPlugins = pluginItems.filter((p) => p.kind === 'tool-provider')
@@ -381,17 +387,30 @@ function MountDialog() {
 
   const buildConfig = (): Record<string, unknown> => {
     switch (kind) {
-      case 'mcp':
+      case 'mcp': {
         if (!mcpUrl.trim()) throw new Error('url 必填')
         if (mcpAuthMode === 'authRef' && !mcpAuthRef.trim()) {
           throw new Error('authRef 必填(先在「凭证保管」set)')
         }
+        const headers = parsePairs(mcpHeadersSpec, 'headers')
         return {
           kind: 'mcp',
           url: mcpUrl.trim(),
           ...(mcpAuthMode === 'authRef' ? { authRef: mcpAuthRef.trim() } : {}),
           ...(mcpAuthMode === 'oauth' ? { auth: 'oauth' } : {}),
+          ...(mcpAuthMode === 'authRef' && mcpAuthHeader.trim()
+            ? { authHeader: mcpAuthHeader.trim() }
+            : {}),
+          ...(mcpAuthMode === 'authRef'
+            ? mcpSchemeMode === 'raw'
+              ? { authScheme: '' }
+              : mcpSchemeMode === 'custom' && mcpAuthScheme.trim()
+                ? { authScheme: mcpAuthScheme.trim() }
+                : {}
+            : {}),
+          ...(Object.keys(headers).length ? { headers } : {}),
         }
+      }
       case 'http': {
         if (!endpoint.trim()) throw new Error('endpoint 必填')
         let tools: unknown
@@ -456,7 +475,11 @@ function MountDialog() {
       case 'tool':
         if (!toolProvider)
           throw new Error('先选择一个 tool-provider plugin(没有则去「Plugin」注册)')
-        return { kind: 'tool', provider: toolProvider }
+        return {
+          kind: 'tool',
+          provider: toolProvider,
+          ...(toolAuthRef.trim() ? { authRef: toolAuthRef.trim() } : {}),
+        }
     }
   }
 
@@ -619,7 +642,7 @@ function MountDialog() {
                         无(公开上游)
                       </SelectItem>
                       <SelectItem value="authRef" className="font-mono text-xs">
-                        authRef — 静态 Bearer
+                        authRef — 静态凭证
                       </SelectItem>
                       <SelectItem value="oauth" className="font-mono text-xs">
                         oauth — 网关托管 OAuth
@@ -640,6 +663,72 @@ function MountDialog() {
                     />
                   </div>
                 )}
+              </div>
+              {mcpAuthMode === 'authRef' && (
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="grid gap-1.5">
+                    <Label htmlFor="mcp-auth-header" className="text-xs">
+                      authHeader(可空)
+                    </Label>
+                    <Input
+                      id="mcp-auth-header"
+                      className="font-mono text-xs"
+                      placeholder="Authorization"
+                      value={mcpAuthHeader}
+                      onChange={(e) => setMcpAuthHeader(e.target.value)}
+                    />
+                  </div>
+                  <div className="grid gap-1.5">
+                    <Label className="text-xs">authScheme</Label>
+                    <Select
+                      value={mcpSchemeMode}
+                      onValueChange={(v) => setMcpSchemeMode(v as 'bearer' | 'raw' | 'custom')}
+                    >
+                      <SelectTrigger className="font-mono text-xs">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="bearer" className="font-mono text-xs">
+                          Bearer(默认)
+                        </SelectItem>
+                        <SelectItem value="raw" className="font-mono text-xs">
+                          无前缀(原样注入)
+                        </SelectItem>
+                        <SelectItem value="custom" className="font-mono text-xs">
+                          自定义前缀
+                        </SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+              )}
+              {mcpAuthMode === 'authRef' && mcpSchemeMode === 'custom' && (
+                <div className="grid gap-1.5">
+                  <Label htmlFor="mcp-auth-scheme" className="text-xs">
+                    自定义 scheme 前缀
+                  </Label>
+                  <Input
+                    id="mcp-auth-scheme"
+                    className="font-mono text-xs"
+                    placeholder="Token"
+                    value={mcpAuthScheme}
+                    onChange={(e) => setMcpAuthScheme(e.target.value)}
+                  />
+                </div>
+              )}
+              <div className="grid gap-1.5">
+                <Label htmlFor="mcp-headers" className="text-xs">
+                  静态 headers(可空;每行 Name=value,明文非机密)
+                </Label>
+                <Textarea
+                  id="mcp-headers"
+                  className="font-mono text-xs"
+                  rows={3}
+                  spellCheck={false}
+                  placeholder={'X-Lark-MCP-Allowed-Tools=search-doc,fetch-doc'}
+                  value={mcpHeadersSpec}
+                  onChange={(e) => setMcpHeadersSpec(e.target.value)}
+                />
               </div>
               {mcpAuthMode === 'oauth' && (
                 <p className="text-[11px] text-muted-foreground">
@@ -860,33 +949,46 @@ function MountDialog() {
           )}
 
           {kind === 'tool' && (
-            <div className="grid gap-1.5">
-              <Label className="text-xs">provider *(tool-provider plugin)</Label>
-              <Select value={toolProvider} onValueChange={setToolProvider}>
-                <SelectTrigger className="font-mono text-xs">
-                  <SelectValue
-                    placeholder={toolPlugins.length === 0 ? '无已注册 plugin' : '选择 plugin…'}
-                  />
-                </SelectTrigger>
-                <SelectContent>
-                  {toolPlugins.map((p) => (
-                    <SelectItem key={p.id} value={p.id} className="font-mono text-xs">
-                      {p.id}
-                      {p.enabled ? '' : '(disabled)'}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              {toolPlugins.length === 0 && (
-                <p className="text-[11px] text-muted-foreground">
-                  先在
-                  <Link to="/manage/plugins" className="mx-0.5 underline underline-offset-2">
-                    Plugin
-                  </Link>
-                  注册 tool-provider,再回来挂载。
-                </p>
-              )}
-            </div>
+            <>
+              <div className="grid gap-1.5">
+                <Label className="text-xs">provider *(tool-provider plugin)</Label>
+                <Select value={toolProvider} onValueChange={setToolProvider}>
+                  <SelectTrigger className="font-mono text-xs">
+                    <SelectValue
+                      placeholder={toolPlugins.length === 0 ? '无已注册 plugin' : '选择 plugin…'}
+                    />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {toolPlugins.map((p) => (
+                      <SelectItem key={p.id} value={p.id} className="font-mono text-xs">
+                        {p.id}
+                        {p.enabled ? '' : '(disabled)'}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {toolPlugins.length === 0 && (
+                  <p className="text-[11px] text-muted-foreground">
+                    先在
+                    <Link to="/manage/plugins" className="mx-0.5 underline underline-offset-2">
+                      Plugin
+                    </Link>
+                    注册 tool-provider,再回来挂载。
+                  </p>
+                )}
+              </div>
+              <div className="grid gap-1.5">
+                <Label htmlFor="tool-auth" className="text-xs">
+                  authRef(可空;上游凭证引用,调用时平台代解析经 X-TB-Upstream-Auth 注入)
+                </Label>
+                <Input
+                  id="tool-auth"
+                  className="font-mono text-xs"
+                  value={toolAuthRef}
+                  onChange={(e) => setToolAuthRef(e.target.value)}
+                />
+              </div>
+            </>
           )}
 
           {(kind === 'mcp' || kind === 'http' || kind === 'tool') && (

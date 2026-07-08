@@ -73,6 +73,7 @@ cmd resolve-library-id POST /docs/context7/resolve-library-id  ← cmd 行:<name
 ## 5. 核心数据模型
 
 - `Node{path,kind,description,config?,virtualize?,registeredBy,online?}`:主键 `path`('/' 分隔,不含保留段);七种 kind(directory/mcp/http/builtin/context/device/remote);`registeredBy=keyId`(device 由网关代写;自动物化中间 directory 记 `system:auto`,引导节点记 `system:boot`)。config 存在时其 kind 必须与节点 kind 一致。
+- mcp/http NodeConfig 上游认证(语义两 kind 一致,复用 `authHeaderFor`):`authRef` 指 SecretStore 凭证名,注入头名 `authHeader`(默认 `Authorization`)、前缀 `authScheme`(默认 `Bearer`,**空串 = secret 原样注入**)。mcp 另有 `headers?: Record<string,string>`(静态明文请求头,非机密,如上游要求的工具白名单头),每趟上游请求(initialize/list/call)均携带;凭证头覆盖同名静态头。kind:'tool'(plugin 挂载)NodeConfig 也有 `authRef?`:平台调用时 resolve 后经 `X-TB-Upstream-Auth` 注入 plugin(见第 8 节)。
 - `SecretKey{id,hash,owner,scopes,registerPaths?,disabled?,expiresAt?}`:主键 `id`(可公开,审计用);`hash=sha256(明文)`,明文仅签发响应出现一次;`owner: OwnerRef`(`user:`/`agent:`/`device:` 前缀)。
 - `Scope{pattern,actions,effect?}`:动作 = read/write/call/register/admin;**deny 优先 → allow → 无匹配默认拒**;`*`/`**` glob 语义。
 - `ContextEntry`:主键 `uri = node://<namespace-path>/<entry-path>`;`version` 乐观并发(`ifVersion` 不符 → conflict;r2 落地 etag=version);`contentType` 决定表现;>1 MiB 的 Get 返回 `$ref`。
@@ -99,6 +100,7 @@ cmd resolve-library-id POST /docs/context7/resolve-library-id  ← cmd 行:<name
 ## 8. Plugin 传输契约(平台 → Plugin)
 
 - `POST {endpoint}`,上下文唯一载体 `X-TB-Context`(base64url 信封);`X-TB-Request-Id` 重试去重;载荷 ≤1 MiB(超限走 `$ref`);超时 30s。
+- `X-TB-Upstream-Auth`(可选):挂载节点配置 `authRef` 时,平台每次调用经 SecretStore resolve 后以 base64url 编码注入该头(明文形状由 plugin 约定,如 JSON);plugin 不自持上游凭证,轮换只需 `tb secret set`。resolve 失败 → unavailable 快速失败;无 authRef 则不发该头。常量:core `plugin/envelope.ts`(`HEADER_TB_UPSTREAM_AUTH`)。
 - `pluginToken`(Plugin 回调平台的令牌)注册时签发仅一次。
 - 生命周期:注册时自动探活(`GET {healthPath}`)+ `~describe`/`~help` 契约校验;未声明的可选方法不会被调用;周期探活反映健康态但不自动注销。
 
@@ -112,7 +114,7 @@ CLI 是纯 API 客户端,无专用端点;全局 `--json`;读 `TB_BASE_URL`/`TB_S
 | `tb login` / `whoami` / `use` | 本地凭据管理,无服务端接口(whoami = 本地配置态 + `~help` 探测 + status 摘要) |
 | `tb ls` / `tree` / `help` | `~help` / `GET /~tree?depth=N`;`tb help --md` 请求 Markdown 表现(Accept: text/markdown) |
 | `tb call` | 直连 `POST /<path>`(path 即工具路径,body 为 arguments 本体);`--tool` 给出时信封 `POST /<path>` + `{tool,arguments}`(builtin/context 等通用) |
-| `tb tool mount` / `rm` | NodeRegistry.Write/Delete(kind=mcp/http;含 virtualize prefix/rename/hide/describe、http authHeader/authScheme;mcp 另有 `--auth oauth`,与 `--auth-ref` 互斥) |
+| `tb tool mount` / `rm` | NodeRegistry.Write/Delete(kind=mcp/http;含 virtualize prefix/rename/hide/describe;`--auth-header`/`--auth-scheme` mcp/http 共用;可重复 `--header <Name=value>` 静态头仅 mcp,http 用报错;mcp 另有 `--auth oauth`,与 `--auth-ref` 互斥) |
 | `tb tool auth <path>` | mcp 托管 OAuth 发起(POST `/<path>/~authorize`):authorized → 直接完成;redirect → 打印授权 URL 并尝试开浏览器(`--no-open` 只打印)。`--local`:本机 127.0.0.1 临时端口收 AS 回跳,code+state 转交网关 `/~oauth/callback` 兑换(适配 Bytebase 等只放行 loopback 回调的严格上游;默认流程遇 redirect 类报错会提示) |
 | `tb server add` / `ls` / `rm` | NodeRegistry(kind=remote 联邦) |
 | `tb ctx ls/cat/put/patch/search` | Context 四动词 + Search |

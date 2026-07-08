@@ -177,7 +177,18 @@ export interface DeviceNodeCmd {
 
 export type NodeConfig =
   /** auth:'oauth' 时凭证由网关托管 OAuth 流程获取(POST /<path>/~authorize 发起),authRef 忽略。 */
-  | { kind: 'mcp'; url: string; authRef?: string; auth?: 'oauth' }
+  | {
+      kind: 'mcp'
+      url: string
+      authRef?: string
+      auth?: 'oauth'
+      /** authRef 凭证注入的头名(默认 Authorization)。 */
+      authHeader?: string
+      /** 凭证前缀;空串 = 原样注入(默认 Bearer)。 */
+      authScheme?: string
+      /** 静态明文请求头(非机密,如上游要求的工具白名单头);authRef 头优先。 */
+      headers?: Record<string, string>
+    }
   | {
       kind: 'http'
       endpoint: string
@@ -199,8 +210,9 @@ export type NodeConfig =
   | { kind: 'device'; deviceId: string; expose: DeviceExpose }
   | { kind: 'remote'; baseUrl: string; skRef?: string }
   /** tool-provider 挂载:provider = plugin id 或 SDK 内部保留 id(如 '@local')。
-   *  providerConfig:设备自定义节点的转发标记(deviceId+mountPath+cmds,网关代写)。 */
-  | { kind: 'tool'; provider: string; providerConfig?: Record<string, unknown> }
+   *  providerConfig:设备自定义节点的转发标记(deviceId+mountPath+cmds,网关代写)。
+   *  authRef:上游凭证引用,调用时平台 resolve 后经 X-TB-Upstream-Auth 注入 plugin。 */
+  | { kind: 'tool'; provider: string; providerConfig?: Record<string, unknown>; authRef?: string }
 
 export type NodeInput = Omit<TreeNode, 'registeredBy' | 'online' | 'createdAt' | 'updatedAt'>
 

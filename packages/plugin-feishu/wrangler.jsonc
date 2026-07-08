@@ -1,0 +1,18 @@
+{
+  // 飞书 MCP tool-provider plugin Worker。secrets:FEISHU_APP_ID / FEISHU_APP_SECRET /
+  // PLUGIN_TOKEN(注册后 wrangler secret put);白名单等非敏感配置走 vars。
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "tb-plugin-feishu",
+  "main": "src/index.ts",
+  "compatibility_date": "2025-06-01",
+  "compatibility_flags": ["nodejs_compat"],
+  // DJJ 账户(与 gateway 同;wrangler OAuth 多账户须显式指定)。
+  "account_id": "0cb9b897010bc426cd8bf33d8c052d11",
+  "observability": {
+    "enabled": true
+  },
+  "vars": {
+    // 飞书 MCP 工具白名单(必填):无此头上游恒回空列表。search-user/search-doc 仅 UAT 可用,不列。
+    "FEISHU_ALLOWED_TOOLS": "create-doc,fetch-doc,list-docs,update-doc,get-comments,add-comments,get-user,fetch-file"
+  }
+}

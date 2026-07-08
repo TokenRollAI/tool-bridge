@@ -98,7 +98,15 @@ export interface HttpToolDef {
 
 /** NodeConfig 按 kind(CLI 构造 mcp/http/remote/context 四形状)。 */
 export type NodeConfig =
-  | { kind: 'mcp'; url: string; authRef?: string; auth?: 'oauth' }
+  | {
+      kind: 'mcp'
+      url: string
+      authRef?: string
+      auth?: 'oauth'
+      authHeader?: string
+      authScheme?: string
+      headers?: Record<string, string>
+    }
   | {
       kind: 'http'
       endpoint: string

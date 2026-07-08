@@ -18,6 +18,7 @@ interface ToolMountOpts {
   authRef?: string
   authHeader?: string
   authScheme?: string
+  header: string[]
   description?: string
   prefix?: string
   rename: string[]
@@ -25,11 +26,28 @@ interface ToolMountOpts {
   describe: string[]
 }
 
+/** 可重复 `--header Name=value` → headers 对象;空数组返回 undefined(不塞空对象)。 */
+function parseHeaderSpecs(specs: string[]): Record<string, string> | undefined {
+  const headers: Record<string, string> = {}
+  for (const spec of specs) {
+    const idx = spec.indexOf('=')
+    if (idx < 0) {
+      throw new CliError(`invalid --header "${spec}": expected "Name=value"`)
+    }
+    const name = spec.slice(0, idx).trim()
+    const value = spec.slice(idx + 1).trim()
+    if (!name || !value) throw new CliError(`invalid --header "${spec}": empty name/value`)
+    headers[name] = value
+  }
+  return Object.keys(headers).length ? headers : undefined
+}
+
 /**
  * `tb tool mount <path>` —— 挂载 mcp / http 工具源(NodeRegistry.Write via ~register)。
- * mcp:`--kind mcp --url <u> [--auth-ref name | --auth oauth]`(oauth 挂载后跑 `tb tool auth`)。
+ * mcp:`--kind mcp --url <u> [--auth-ref name | --auth oauth] [--header k=v …]`(oauth 挂载后跑 `tb tool auth`)。
  * http:`--kind http --endpoint <u> --tools-file <json> [--auth-ref name]`。
- * 共用:`--description d` 与虚拟化 `--prefix p / --rename from=to / --hide t / --describe from=text`。
+ * 共用:`--auth-header/--auth-scheme`(凭证头名/前缀,空 scheme 原样注入)、`--description d`
+ * 与虚拟化 `--prefix p / --rename from=to / --hide t / --describe from=text`。
  */
 export function toolMountCommand(): Command {
   return withGlobalOpts(new Command('mount'))
@@ -41,8 +59,14 @@ export function toolMountCommand(): Command {
     .option('--tools-file <file>', '[http] JSON file of HttpToolDef[]')
     .option('--auth <mode>', "[mcp] 'oauth': gateway-managed OAuth (then run `tb tool auth`)")
     .option('--auth-ref <name>', 'SecretStore ref for upstream credential')
-    .option('--auth-header <name>', '[http] header name for authRef credential')
-    .option('--auth-scheme <scheme>', '[http] auth scheme; empty string sends the secret as-is')
+    .option('--auth-header <name>', 'header name for authRef credential')
+    .option('--auth-scheme <scheme>', 'auth scheme; empty string sends the secret as-is')
+    .option(
+      '--header <name=value>',
+      '[mcp] static plaintext request header (repeatable)',
+      collect,
+      [],
+    )
     .option('--description <text>', 'One-line node description')
     .option('--prefix <p>', 'Virtualize: prefix added to tool names')
     .option('--rename <from=to>', 'Virtualize: rename "from=to" (repeatable)', collect, [])
@@ -60,6 +84,9 @@ export function toolMountCommand(): Command {
         if (!path) throw new CliError('tree path is required')
         const kind = String(opts.kind ?? '').trim()
         const authRef = opts.authRef ? String(opts.authRef) : undefined
+        const authHeader =
+          opts.authHeader !== undefined ? String(opts.authHeader).trim() : undefined
+        const authScheme = opts.authScheme !== undefined ? String(opts.authScheme) : undefined
 
         let config: NodeConfig
         if (kind === 'mcp') {
@@ -77,16 +104,22 @@ export function toolMountCommand(): Command {
             url,
             ...(authRef ? { authRef } : {}),
             ...(auth === 'oauth' ? { auth: 'oauth' as const } : {}),
+            ...(authHeader ? { authHeader } : {}),
+            ...(authScheme !== undefined ? { authScheme } : {}),
+            ...(() => {
+              const headers = parseHeaderSpecs(opts.header)
+              return headers ? { headers } : {}
+            })(),
           }
         } else if (kind === 'http') {
+          if (opts.header.length > 0) {
+            throw new CliError('--header is only supported for --kind mcp')
+          }
           const endpoint = String(opts.endpoint ?? '').trim()
           if (!endpoint) throw new CliError('--endpoint is required for --kind http')
           const toolsFile = String(opts.toolsFile ?? '').trim()
           if (!toolsFile) throw new CliError('--tools-file is required for --kind http')
           const tools = parseToolsFile(toolsFile)
-          const authHeader =
-            opts.authHeader !== undefined ? String(opts.authHeader).trim() : undefined
-          const authScheme = opts.authScheme !== undefined ? String(opts.authScheme) : undefined
           config = {
             kind: 'http',
             endpoint,

@@ -675,6 +675,8 @@ export function createTbApp(deps: TbAppDeps): Hono<{ Variables: Vars }> {
           secrets: deps.secrets,
           ctx: mountCallContext(ctx, node.path, cfg.providerConfig),
           capabilities: await pluginCapabilities(store, cfg.provider),
+          // 挂载 authRef = 上游凭证引用,平台代解析经 X-TB-Upstream-Auth 注入。
+          ...(cfg.authRef !== undefined ? { upstreamAuthRef: cfg.authRef } : {}),
         })
         const result = await dispatchContextCmd(provider, body.tool, args)
         return renderResult(result, negotiate(c.req.header('accept')))
@@ -1217,6 +1219,8 @@ async function providerFor(
       manifest,
       secrets: deps.secrets,
       ctx: mountCallContext(ctx, node.path, node.config.providerConfig),
+      // 挂载 authRef = 上游凭证引用,平台代解析经 X-TB-Upstream-Auth 注入。
+      ...(node.config.authRef !== undefined ? { upstreamAuthRef: node.config.authRef } : {}),
     })
   }
   throw TBError.unimplemented(`kind '${node.kind}' has no tool provider`)
