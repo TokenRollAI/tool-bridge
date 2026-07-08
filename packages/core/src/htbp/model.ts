@@ -8,6 +8,14 @@
 
 import type { Action, NodeKind, TreePath } from '../types'
 
+/** ~help 默认 feedback 区块的单条形态(只露 id+title+score,详情经 system/feedback get 下钻)。 */
+export interface HelpFeedbackItem {
+  id: string
+  title: string
+  /** 净分(赞-踩)。 */
+  score: number
+}
+
 /** directory 节点在上级 `~help` 中列出的子节点引用(相对路径 + 一句话描述)。 */
 export interface ChildRef {
   path: TreePath
@@ -62,6 +70,16 @@ export interface HelpModel {
    * 仅供渲染器措辞用(Markdown 区分"schema 未展示"与"无参数"),不进任何表现。
    */
   index?: boolean
+  /**
+   * 管理员对该 path 的补充说明(annotation:<path>,网关 ~help 注入)。
+   * DSL 渲染为 `note` 行(消费方按未知行忽略,向前兼容);JSON 同名字段;Markdown Notes 节。
+   */
+  note?: string
+  /**
+   * Agent feedback 默认区块(该 path 头部可见条目,网关 ~help 注入;空数组不注入)。
+   * DSL 渲染为 `feedback` 头行 + 缩进条目行(未知行忽略通道);JSON 同名字段;Markdown Feedback 节。
+   */
+  feedback?: HelpFeedbackItem[]
 }
 
 /**
@@ -89,4 +107,8 @@ export interface HelpJson {
   }>
   /** directory 节点携带。 */
   children?: Array<{ path: TreePath; kind: NodeKind; description: string }>
+  /** 管理员补充说明,对应 DSL 的 `note` 行(有值才出现)。 */
+  note?: string
+  /** Agent feedback 默认区块,对应 DSL 的 `feedback` 块(有条目才出现)。 */
+  feedback?: HelpFeedbackItem[]
 }

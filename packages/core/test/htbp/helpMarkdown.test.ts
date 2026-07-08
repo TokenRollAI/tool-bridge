@@ -136,3 +136,37 @@ describe('renderHelpMarkdown:使用路径清晰(索引形态与 children)', () =
     expect(md).not.toContain('/docs/x/echo/echo')
   })
 })
+
+describe('renderHelpMarkdown:Notes 与 Agent feedback 节', () => {
+  const model: HelpModel = {
+    node: { path: 'feishu', kind: 'mcp', description: '飞书官方 MCP' },
+    note: '应用身份建的文档归属应用;create-doc 记得传 folder_token',
+    cmds: [{ name: 'create-doc', method: 'POST', path: '/feishu/create-doc', scope: 'call' }],
+    feedback: [
+      { id: 'fb_a1x9k2', title: 'create-doc 的 mode 参数必填', score: 3 },
+      { id: 'fb_m4n5p6', title: 'title 里的 | 要转义', score: 0 },
+    ],
+  }
+  const md = renderHelpMarkdown(model)
+
+  it('Notes 节在 How to call 之前,全文保留', () => {
+    expect(md.indexOf('## Notes')).toBeGreaterThan(-1)
+    expect(md.indexOf('## Notes')).toBeLessThan(md.indexOf('## How to call'))
+    expect(md).toContain('应用身份建的文档归属应用;create-doc 记得传 folder_token')
+  })
+
+  it('Agent feedback 节:表格 id/score/title + get 下钻与 submit/vote 指引(含 path)', () => {
+    expect(md).toContain('## Agent feedback')
+    expect(md).toContain('| `fb_a1x9k2` | 3 | create-doc 的 mode 参数必填 |')
+    expect(md).toContain('| `fb_m4n5p6` | 0 | title 里的 \\| 要转义 |')
+    expect(md).toContain('{"tool":"get","arguments":{"path":"feishu","id":"<id>"}}')
+    expect(md).toContain('GET /system/feedback/~help')
+  })
+
+  it('无 note/feedback 时两节缺席;空串 note 不渲染', () => {
+    const bare = renderHelpMarkdown({ ...model, note: undefined, feedback: undefined })
+    expect(bare).not.toContain('## Notes')
+    expect(bare).not.toContain('## Agent feedback')
+    expect(renderHelpMarkdown({ ...model, note: '  ' })).not.toContain('## Notes')
+  })
+})

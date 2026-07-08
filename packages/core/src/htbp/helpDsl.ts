@@ -35,11 +35,19 @@ function attrLines(key: string, value: string): string[] {
 
 /**
  * 渲染 Help DSL:
- *   首行 `htbp 0.1`;`node` 行;可选 `hint` 行(下一步指引,单行);每 cmd 一行
+ *   首行 `htbp 0.1`;`node` 行;可选 `hint` 行(下一步指引,单行);可选 `note` 行
+ *   (管理员补充说明,单行);每 cmd 一行
  *   `cmd <name> POST <path>` + 缩进的 `h`/`body`/`returns`/`scope`/`effect`/`confirm`
- *   (此顺序);directory 的 children 续为 `node` 行。
+ *   (此顺序);directory 的 children 续为 `node` 行;末尾可选 `feedback` 块
+ *   (`feedback <count> POST /system/feedback` 头行 + 缩进的 `<id> <score> "<title>"` 条目行
+ *   + 缩进的 `use` 指引行)。
  * `scope` 恒有;`h`/`inputSchema`/`returns`/`effect` 有值才渲染;`confirm` 仅在为真时渲染(其缺席即默认 false)。
  * 多行 `h` 经 attrLines 以续行(4 空格缩进)保留全文;消费方按未知行忽略即可。
+ *
+ * `note`/`feedback` 走"未知行忽略"扩展通道(同 `hint` 先例):最小 parser 不识别它们,
+ * 老消费者零破坏;条目行以 `fb_` id 开头、指引行以 `use` 开头,不会撞上 `scope` 归属正则。
+ * `feedback` 块的端点与 `use` 指引由 node.path 派生(类比 `body` 行由 inputSchema 派生,
+ * 属表现不属语义);JSON 侧的语义等价字段是 `note` 与 `feedback[]`。
  *
  * `body` 行是**请求体示意**:缺省由 cmd 的 `inputSchema`(arguments 的 JSON Schema)
  * 包成 `{ "tool": <name>, "arguments": <inputSchema> }` 单行紧凑 JSON;`flatBody` 的 cmd
@@ -50,6 +58,7 @@ export function renderHelpDsl(model: HelpModel): string {
   const lines: string[] = [HTBP_HELP_HEADER]
   lines.push(nodeLine(model.node.path, model.node.kind, model.node.description))
   if (model.hint !== undefined) lines.push(`hint ${collapseToOneLine(model.hint)}`)
+  if (model.note !== undefined) lines.push(`note "${collapseToOneLine(model.note)}"`)
   for (const cmd of model.cmds) {
     lines.push(`cmd ${cmd.name} ${cmd.method} ${cmd.path}`)
     if (cmd.h !== undefined) lines.push(...attrLines('h', cmd.h))
@@ -66,6 +75,15 @@ export function renderHelpDsl(model: HelpModel): string {
     for (const child of model.children) {
       lines.push(nodeLine(child.path, child.kind, child.description))
     }
+  }
+  if (model.feedback !== undefined && model.feedback.length > 0) {
+    lines.push(`feedback ${model.feedback.length} POST /system/feedback`)
+    for (const f of model.feedback) {
+      lines.push(`  ${f.id} ${f.score} "${collapseToOneLine(f.title)}"`)
+    }
+    lines.push(
+      `  use {"tool":"get","arguments":{"path":"${model.node.path}","id":"<id>"}} for detail; submit/vote/list: GET /system/feedback/~help`,
+    )
   }
   return lines.join('\n')
 }
@@ -97,6 +115,10 @@ export function renderHelpJson(model: HelpModel): HelpJson {
     cmds,
   }
   if (model.hint !== undefined) json.hint = model.hint
+  if (model.note !== undefined) json.note = model.note
+  if (model.feedback !== undefined && model.feedback.length > 0) {
+    json.feedback = model.feedback.map((f) => ({ id: f.id, title: f.title, score: f.score }))
+  }
   if (model.children) {
     json.children = model.children.map((child) => ({
       path: child.path,

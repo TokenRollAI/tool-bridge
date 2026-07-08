@@ -83,6 +83,11 @@ export function renderHelpMarkdown(model: HelpModel): string {
   if (model.hint !== undefined) {
     out.push(`> **Next step**: ${collapseToOneLine(model.hint)}`, '')
   }
+  if (model.note !== undefined && model.note.trim() !== '') {
+    out.push('## Notes')
+    out.push('')
+    out.push(model.note.trim(), '')
+  }
 
   if (model.cmds.length > 0) {
     const allFlat = model.cmds.every((c) => c.flatBody === true)
@@ -132,6 +137,27 @@ export function renderHelpMarkdown(model: HelpModel): string {
     }
     out.push('')
     out.push('Fetch `GET /<path>/~help` to learn how to use a child node.')
+    out.push('')
+  }
+
+  if (model.feedback !== undefined && model.feedback.length > 0) {
+    const p = model.node.path
+    out.push('## Agent feedback')
+    out.push('')
+    out.push('Pitfalls shared by other agents on this path (sorted by votes, top entries only):')
+    out.push('')
+    out.push('| id | score | title |')
+    out.push('|---|---|---|')
+    for (const f of model.feedback) {
+      out.push(`| \`${f.id}\` | ${f.score} | ${tableCell(f.title)} |`)
+    }
+    out.push('')
+    out.push(
+      `Full detail of one entry: \`POST /system/feedback\` with body \`{"tool":"get","arguments":{"path":"${p}","id":"<id>"}}\`.`,
+    )
+    out.push(
+      `Hit a pitfall yourself, or found an entry (un)helpful? Submit or vote via \`POST /system/feedback\` — usage: \`GET /system/feedback/~help\`.`,
+    )
     out.push('')
   }
 
