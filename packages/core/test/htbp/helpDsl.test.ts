@@ -190,3 +190,48 @@ describe('parseHelpDsl(最小 parser,向前兼容)', () => {
     expect(parsed.nodes.map((n) => n.path)).toEqual(['a', 'a/b'])
   })
 })
+
+describe('note 行与 feedback 块(未知行忽略扩展通道)', () => {
+  const model: HelpModel = {
+    node: { path: 'feishu', kind: 'mcp', description: '飞书官方 MCP' },
+    hint: 'GET /feishu/<tool>/~help for full spec',
+    note: '应用身份建的文档归属应用\ncreate-doc 记得传 folder_token',
+    cmds: [{ name: 'create-doc', method: 'POST', path: '/feishu/create-doc', scope: 'call' }],
+    feedback: [
+      { id: 'fb_a1x9k2', title: 'create-doc 的 mode 参数必填', score: 3 },
+      { id: 'fb_m4n5p6', title: 'list-docs 需要 drive:drive 权限', score: 1 },
+    ],
+  }
+  const text = renderHelpDsl(model)
+  const lines = text.split('\n')
+
+  it('note 行紧跟 hint 之后,值折叠为单行并加引号', () => {
+    const hintIdx = lines.findIndex((l) => l.startsWith('hint '))
+    expect(lines[hintIdx + 1]).toBe('note "应用身份建的文档归属应用 create-doc 记得传 folder_token"')
+  })
+
+  it('feedback 块置尾:头行 <count> + 端点,条目行 <id> <score> "<title>",use 指引行含 path', () => {
+    const headIdx = lines.findIndex((l) => l.startsWith('feedback '))
+    expect(lines[headIdx]).toBe('feedback 2 POST /system/feedback')
+    expect(lines[headIdx + 1]).toBe('  fb_a1x9k2 3 "create-doc 的 mode 参数必填"')
+    expect(lines[headIdx + 2]).toBe('  fb_m4n5p6 1 "list-docs 需要 drive:drive 权限"')
+    expect(lines[headIdx + 3]).toContain('"path":"feishu"')
+    expect(lines[headIdx + 3]).toMatch(/^ {2}use /)
+  })
+
+  it('note/feedback 对最小 parser 是未知行:解析结果与去掉它们完全一致', () => {
+    const parsed = parseHelpDsl(text)
+    const { note: _n, feedback: _f, ...bare } = model
+    expect(parsed).toEqual(parseHelpDsl(renderHelpDsl(bare)))
+    expect(parsed.cmds).toEqual([
+      { name: 'create-doc', method: 'POST', path: '/feishu/create-doc', scope: 'call' },
+    ])
+    expect(parsed.nodes).toHaveLength(1)
+  })
+
+  it('feedback 空数组不渲染块;无 note 不渲染 note 行', () => {
+    const bare = renderHelpDsl({ ...model, note: undefined, feedback: [] })
+    expect(bare).not.toContain('note "')
+    expect(bare).not.toContain('feedback ')
+  })
+})

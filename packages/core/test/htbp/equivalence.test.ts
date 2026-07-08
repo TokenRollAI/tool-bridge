@@ -133,3 +133,35 @@ describe('renderHelpJson 字段不多不少(规范性)', () => {
     expect('children' in renderHelpJson(m)).toBe(false)
   })
 })
+
+describe('note/feedback 的 DSL↔JSON 等价(新扩展字段)', () => {
+  const enriched: HelpModel = {
+    ...model,
+    note: '管理员补充',
+    feedback: [{ id: 'fb_abc123', title: '坑:参数大小写敏感', score: 2 }],
+  }
+
+  it('JSON 输出同名字段;DSL 输出对应行(同一 HelpModel 两侧同源)', () => {
+    const json = renderHelpJson(enriched)
+    expect(json.note).toBe('管理员补充')
+    expect(json.feedback).toEqual([{ id: 'fb_abc123', title: '坑:参数大小写敏感', score: 2 }])
+    const dsl = renderHelpDsl(enriched)
+    expect(dsl).toContain('note "管理员补充"')
+    expect(dsl).toContain('feedback 1 POST /system/feedback')
+    expect(dsl).toContain('  fb_abc123 2 "坑:参数大小写敏感"')
+  })
+
+  it('无值/空数组时两侧都缺席(存在性对齐)', () => {
+    const json = renderHelpJson(model)
+    expect('note' in json).toBe(false)
+    expect('feedback' in json).toBe(false)
+    const emptyJson = renderHelpJson({ ...model, feedback: [] })
+    expect('feedback' in emptyJson).toBe(false)
+    const dsl = renderHelpDsl({ ...model, feedback: [] })
+    expect(dsl).not.toContain('feedback ')
+  })
+
+  it('新行不影响既有消费方(parse 结果与未扩展时一致)', () => {
+    expect(parseHelpDsl(renderHelpDsl(enriched))).toEqual(parseHelpDsl(renderHelpDsl(model)))
+  })
+})
