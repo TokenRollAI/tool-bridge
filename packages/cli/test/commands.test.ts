@@ -132,11 +132,11 @@ describe('TBError → 退出码 1', () => {
   })
 })
 
-describe('tb help --md', () => {
-  it('发送 Accept: text/markdown 并原样打印响应', async () => {
+describe('tb help 表现选择', () => {
+  it('默认发送 Accept: text/markdown 并原样打印响应', async () => {
     const fn = vi.fn(async () => new Response('# /docs\n\n## Commands\n', { status: 200 }))
     setFetch(fn as unknown as typeof fetch)
-    await runCli(['help', 'docs', '--md', '--base-url', 'https://gw', '--sk', 'tbk_x'])
+    await runCli(['help', 'docs', '--base-url', 'https://gw', '--sk', 'tbk_x'])
     const [url, init] = fn.mock.calls[0] as unknown as [string, RequestInit]
     expect(url).toBe('https://gw/docs/~help')
     expect((init.headers as Record<string, string>).accept).toBe('text/markdown')
@@ -145,5 +145,40 @@ describe('tb help --md', () => {
       .map((c) => String(c[0]))
       .join('')
     expect(written).toContain('## Commands')
+  })
+
+  it('--md 是默认行为的别名(同样 Accept: text/markdown)', async () => {
+    const fn = vi.fn(async () => new Response('# /docs\n', { status: 200 }))
+    setFetch(fn as unknown as typeof fetch)
+    await runCli(['help', 'docs', '--md', '--base-url', 'https://gw', '--sk', 'tbk_x'])
+    const [, init] = fn.mock.calls[0] as unknown as [string, RequestInit]
+    expect((init.headers as Record<string, string>).accept).toBe('text/markdown')
+    expect(process.exitCode).toBe(0)
+  })
+
+  it('--dsl 发送 Accept: text/plain(紧凑 Help DSL)', async () => {
+    const fn = vi.fn(
+      async () => new Response('htbp 0.1\nnode docs directory "d"\n', { status: 200 }),
+    )
+    setFetch(fn as unknown as typeof fetch)
+    await runCli(['help', 'docs', '--dsl', '--base-url', 'https://gw', '--sk', 'tbk_x'])
+    const [, init] = fn.mock.calls[0] as unknown as [string, RequestInit]
+    expect((init.headers as Record<string, string>).accept).toBe('text/plain')
+    expect(process.exitCode).toBe(0)
+    const written = (process.stdout.write as ReturnType<typeof vi.fn>).mock.calls
+      .map((c) => String(c[0]))
+      .join('')
+    expect(written).toContain('htbp 0.1')
+  })
+
+  it('--dsl 与 --md / --json 互斥 → 退出码 1', async () => {
+    const fn = vi.fn(async () => new Response('x', { status: 200 }))
+    setFetch(fn as unknown as typeof fetch)
+    await runCli(['help', 'docs', '--dsl', '--md', '--base-url', 'https://gw', '--sk', 'tbk_x'])
+    expect(process.exitCode).toBe(1)
+    process.exitCode = 0
+    await runCli(['help', 'docs', '--dsl', '--json', '--base-url', 'https://gw', '--sk', 'tbk_x'])
+    expect(process.exitCode).toBe(1)
+    expect(fn).not.toHaveBeenCalled()
   })
 })
