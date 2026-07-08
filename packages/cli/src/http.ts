@@ -130,9 +130,15 @@ export async function apiJson<T>(target: Target, opts: Omit<ApiOptions, 'accept'
   return body as T
 }
 
-/** 文本请求(Help DSL 等):成功返回原始文本,失败尝试解释 TBError JSON。 */
-export async function apiText(target: Target, opts: Omit<ApiOptions, 'accept'>): Promise<string> {
-  const r = await apiFetch(target, { ...opts, accept: 'text' })
+/**
+ * 文本请求(Help DSL / Markdown 等):成功返回原始文本,失败尝试解释 TBError JSON。
+ * 缺省 `Accept: text/plain`;`accept: 'markdown'` 请求可读 Markdown 表现。
+ */
+export async function apiText(
+  target: Target,
+  opts: Omit<ApiOptions, 'accept'> & { accept?: 'text' | 'markdown' },
+): Promise<string> {
+  const r = await apiFetch(target, { ...opts, accept: opts.accept ?? 'text' })
   if (!r.ok) {
     let body: unknown
     try {
