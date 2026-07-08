@@ -7,7 +7,7 @@
 | 端点 | 语义 |
 |---|---|
 | `GET /healthz` | 树外免认证运维端点,200 + `{"healthy":true,"version":"<x.y.z>"}` |
-| `GET /<path>/~help` | 节点自描述;默认 `text/plain` Help DSL,`Accept: application/json` 得等价 `HelpJson`。**两级披露**:节点 `~help` 是索引,`GET /<node>/<tool>/~help` 给单工具全量 spec |
+| `GET /<path>/~help` | 节点自描述;默认 `text/plain` Help DSL,`Accept: application/json` 得等价 `HelpJson`,`Accept: text/markdown` 得可读 Markdown 表现。**两级披露**:节点 `~help` 是索引,`GET /<node>/<tool>/~help` 给单工具全量 spec |
 | `GET /~tree?depth=N` | 受限深度树视图(默认 2,上限 8 钳制;节点上限 500);子树根必须真实存在,非根不存在 → 404 |
 | `GET /<path>/~skill` | 本地 501 占位(`unavailable`,retryable:false);remote 节点透传 |
 | `GET /<path>/~describe` | 有可选能力的节点返回 `{ kind, capabilities }`;其余 404 |
@@ -22,8 +22,9 @@
 
 ## 2. 内容协商
 
-- 默认(无 Accept):`~help` → `text/plain`(Help DSL,唯一非 JSON 表现,无 markdown 变体);`~skill` 与调用返回值 → `text/markdown`(IANA 注册类型,不用 `application/markdown`)。
-- `Accept: application/json` → 结构化 JSON;两种表现**语义等价**,JSON 不得多/少字段。
+- 默认(无 Accept):`~help` → `text/plain`(Help DSL);`~skill` 与调用返回值 → `text/markdown`(IANA 注册类型,不用 `application/markdown`)。
+- `Accept: application/json` → 结构化 JSON;DSL 与 JSON 两种表现**语义等价**,JSON 不得多/少字段。
+- `Accept: text/markdown` → `~help` 的**可读性表现**(renderHelpMarkdown):同一 HelpModel 渲染,完整语句解释调用信封/scope/effect/confirm、每个下一步给可执行 GET/POST 路径、inputSchema 缩进 JSON。排版自定,消费方不应对其做结构化解析(机器可读用 JSON)。json 与 markdown 同时出现时取 json。
 - `~tree` 的非 JSON 表现是缩进文本树(排版实现自定);JSON(`TreeJson`)才是规范形状。
 
 ## 3. TBError 形状与 HTTP 映射
@@ -48,7 +49,8 @@ interface TBError {
 
 ```
 htbp 0.1                                       ← 首行:协议版本
-node docs/context7 mcp "Context7 文档检索"      ← node 行:<path> <kind> <一句话描述>
+node docs/context7 mcp "Context7 文档检索"      ← node 行:<path> <kind> <一句话描述>(值恒单行)
+hint this is an index; GET /docs/context7/<tool>/~help …   ← 可选:下一步指引(单行)
 cmd resolve-library-id POST /docs/context7/resolve-library-id  ← cmd 行:<name> <METHOD> </path>(直连工具路径)
   body { "libraryName": string }               ← 直连 cmd 的 body 即 arguments 本体(裸 inputSchema)
   returns markdown 文档库列表
@@ -58,12 +60,13 @@ cmd resolve-library-id POST /docs/context7/resolve-library-id  ← cmd 行:<name
 约束:
 
 - 每个 cmd **必须**声明 `scope`;`effect`(read/write/destructive)/`confirm`/`h`(工具级一句话)可选。
-- 属性行输出顺序 `h → body → returns → scope → effect → confirm`,两空格缩进。
+- 属性行输出顺序 `h → body → returns → scope → effect → confirm`,两空格缩进;多行 `h` 的续行 4 空格缩进(最小 parser 按未知行忽略,全文保留在单工具全量 `~help`)。
+- **索引形态**(mcp/http/device-tool 节点级 `~help`):cmd 不含 inputSchema/returns,`h` 压缩为一句话摘要(summarizeOneLine,上限 160 字符);下钻指引在 `hint` 行/字段,不污染 description。
 - cmd 命名:Provider 类节点 = 接口方法名**首字母大写**(context:`List/Get/Update/Write/Search`)或**工具原名**(mcp/http);仅 `system/*` builtin 用小写。
 - **body 行两种形态**:mcp/http/tool 工具 cmd 宣告直连路径(`/<node>/<tool>`),body 即裸 inputSchema(CmdSpec `flatBody`);builtin/context/device-shell 等 cmd 仍宣告节点路径,body 为 `{tool,arguments}` 信封。消费方以 cmd path 为准(path 含工具段 ⇒ 扁平 body)。
-- 消费方对未知行**必须忽略**(向前兼容)。
+- 消费方对未知行**必须忽略**(向前兼容;`hint` 行即以此扩展)。
 - directory 节点的 `~help` 列子节点相对路径 + 一句话描述。
-- JSON 等价形状 `HelpJson`/`TreeJson`:cmds 的 `inputSchema` 是真 JSON Schema(不含 `{tool,arguments}` 信封),供 Dashboard @rjsf 渲染。
+- JSON 等价形状 `HelpJson`/`TreeJson`:cmds 的 `inputSchema` 是真 JSON Schema(不含 `{tool,arguments}` 信封),供 Dashboard @rjsf 渲染;`hint` 为可选同名字段。
 
 ## 5. 核心数据模型
 
@@ -105,7 +108,7 @@ CLI 是纯 API 客户端,无专用端点;全局 `--json`;读 `TB_BASE_URL`/`TB_S
 |---|---|
 | `tb status` | builtin `system/status` 的 `get`(登录态)/ 树外 `/healthz`(未登录回退) |
 | `tb login` / `whoami` / `use` | 本地凭据管理,无服务端接口(whoami = 本地配置态 + `~help` 探测 + status 摘要) |
-| `tb ls` / `tree` / `help` | `~help` / `GET /~tree?depth=N` |
+| `tb ls` / `tree` / `help` | `~help` / `GET /~tree?depth=N`;`tb help --md` 请求 Markdown 表现(Accept: text/markdown) |
 | `tb call` | 直连 `POST /<path>`(path 即工具路径,body 为 arguments 本体);`--tool` 给出时信封 `POST /<path>` + `{tool,arguments}`(builtin/context 等通用) |
 | `tb tool mount` / `rm` | NodeRegistry.Write/Delete(kind=mcp/http;含 virtualize prefix/rename/hide/describe、http authHeader/authScheme) |
 | `tb server add` / `ls` / `rm` | NodeRegistry(kind=remote 联邦) |

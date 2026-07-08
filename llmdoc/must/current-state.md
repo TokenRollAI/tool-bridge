@@ -5,7 +5,12 @@
 ## 项目状态
 
 - **初步实现阶段已完成**(2026-07-07 "破壳"):SK 鉴权与作用域、HTBP 核心树与内容协商、Tool 层(mcp/http/remote 联邦 + 虚拟化)、Context 层(r2/s3 四动词 + Search + `$ref` 大对象)、设备反向注册(DO WebSocket hibernation)、SDK、Plugin 系统、Dashboard 均已落地并经生产验证。
+<<<<<<< HEAD
 - 2026-07-07:修复"挂载 MCP 过一段时间失效"生产故障(不合规上游对过期会话回 200+空列表,见 [../guides/mcp-upstream-pitfalls.md](../guides/mcp-upstream-pitfalls.md))。2026-07-08 同故障复发:初版防御的重试回读 KV 被边缘读缓存击穿(拿回刚删的旧会话),已改为重试强制完整重握手(`forceFresh`,PR #8)并补钉死用例,**已部署上线**且经塞伪 session 复现验证自愈(工具列表恢复、KV 回填新会话)。
+=======
+- 2026-07-07:修复"挂载 MCP 过一段时间失效"生产故障(不合规上游对过期会话回 200+空列表,见 [../guides/mcp-upstream-pitfalls.md](../guides/mcp-upstream-pitfalls.md)),已部署上线并经塞伪 session 复现验证自愈。2026-07-08 同故障复发:初版防御的重试回读 KV 被边缘读缓存击穿(拿回刚删的旧会话),已改为重试强制完整重握手(`forceFresh`)并补钉死用例,**待部署上线**(线上已用手动清 `mcpsession:` 应急恢复)。
+- 2026-07-08:`~help` 可读性重构:新增 `Accept: text/markdown` 可读表现(renderHelpMarkdown)、`hint` 行/字段(下一步指引)、索引形态 h 一句话摘要(此前上游 mcp 整篇多行 description 原样撑爆索引并破坏 DSL 行结构)、DSL 多行值安全化(node 行折叠单行、多行 h 续行缩进)、`tb help --md`;契约见 [../reference/protocol-contract.md](../reference/protocol-contract.md),**待部署上线**。
+>>>>>>> ffb671e (docs(llmdoc): ~help 契约更新——markdown 表现/hint 行/索引一句话摘要/DSL 多行安全化入契约与状态快照)
 - bootstrap 期过程文档已归档 `archive/`;知识真源 = 代码 + llmdoc(见 [project-brief.md](project-brief.md))。
 - 2026-07-08:**直连工具调用**上线(PR #9)——`POST /<node>/<tool>` body 即 arguments 本体,`~help` 宣告直连路径(CmdSpec `flatBody`);信封入口 `POST /<node>` + `{tool,arguments}` 保留。CLI(`tb call <node>/<tool>`,--tool 变 optional)与 Dashboard(CmdPanel 按 cmd.path 判别、CliHint 同步)同轮对齐。已部署上线并经生产直连调用实测。
 - **npm 已发布**(四包均经 CI Trusted Publishing;core 为 private 不发布):`@tool-bridge/cli` 0.3.0、`@tool-bridge/sdk` 0.2.0、`@tool-bridge/gateway` 0.2.0、`@tool-bridge/dashboard` 0.2.0(2026-07-08,直连工具调用)。gateway/dashboard 的 Trusted Publisher 已配置生效(0.2.0 即经 CI 发布)。发布流程见 [../guides/npm-publish.md](../guides/npm-publish.md)。**坑:一次推多个 tag(`git push origin tag1 tag2 …`)不触发 tag workflows,须逐个 push**(2026-07-08 实测:四 tag 同推零触发,删除后逐个重推全部触发)。
@@ -21,8 +26,8 @@
 
 ## 代码现状(pnpm monorepo,测试数为 2026-07-08 实跑)
 
-- `packages/core` — 纯逻辑内核(唯一运行时依赖 zod),**603 个单测**,模块族:
-  - `auth/`(scope 判定 / authorizer / 注册路径规则 / sk 签发与哈希)、`tree/`(path 规则 / NodeRegistryStore / visibility 裁剪)、`htbp/`(helpDsl / HelpModel / negotiate / tree 构建)、`secret/`(AES-256-GCM 只写不读)
+- `packages/core` — 纯逻辑内核(唯一运行时依赖 zod),**622 个单测**,模块族:
+  - `auth/`(scope 判定 / authorizer / 注册路径规则 / sk 签发与哈希)、`tree/`(path 规则 / NodeRegistryStore / visibility 裁剪)、`htbp/`(helpDsl / helpMarkdown / summary / HelpModel / negotiate / tree 构建)、`secret/`(AES-256-GCM 只写不读)
   - `builtin/`(**五模块**:sk / secret / registry / status / plugin 的 cmd 表 + dispatch)
   - `tool/`(HttpToolDef 拼装、虚拟化、mcp schema→HelpModel、remote 路径/白名单/Via、上游错误归一)
   - `context/`(四动词 objectProvider / objectStore 接口 / path 穿越防护 / ttl)
@@ -30,8 +35,13 @@
   - `plugin/`(manifest 校验 / envelope 编解码 / RequestDedupe / 契约校验)
   - `node/`(`./node` 子导出:FsObjectStore realpath 防逃逸 + shellExecutor 有界缓冲)
   - 顶层 `errors.ts`(TBError)/ `store.ts`(StateStore 接口 + 内存实现)/ `types.ts`。
+<<<<<<< HEAD
 - `packages/gateway` — Workers 胶水(可发布 Worker library:tsup 单文件 ESM bundle core,`src/index.ts` 另 export `createApp` 与 `type Env`;dev exports 指 src、发布形态 publishConfig 覆盖指 dist),**91 个默认集成测试 + 6 个 opt-in skipped**(真实 workerd;含 mcp 过期会话空列表防御的 mock 上游用例):`app.ts`(Env→deps 适配)/ `tbApp.ts`(**宿主中立 createTbApp**,路由/认证/HTBP/remote 聚合,SDK 复用)/ `bootstrap.ts` / `kvStateStore.ts` / `refToken.ts`(`$ref` 中转 token)/ `deviceSession.ts`(DeviceSession DO)/ `providers/`(mcp / http / remote / pluginTool / pluginContext / pluginClient / r2Object / s3Object / s3Sign / toolCache);`wrangler.jsonc` 在此包内。
 - `packages/cli` — commander 框架(严格解析:未知 flag/子命令报错,防权限误配),**125 个单测**(含拼错 flag 事故回归 strictParsing),**17 个命令**:status / login / whoami / use / sk / secret / ls / tree / help / call / tool / server / ctx / connect / device / mount / plugin;全局 `--json`;配置 `~/.config/tool-bridge/config.json`(XDG,多 profile)。
+=======
+- `packages/gateway` — Workers 胶水(可发布 Worker library:tsup 单文件 ESM bundle core,`src/index.ts` 另 export `createApp` 与 `type Env`;dev exports 指 src、发布形态 publishConfig 覆盖指 dist),**88 个默认集成测试 + 6 个 opt-in skipped**(真实 workerd;含 mcp 过期会话空列表防御的 mock 上游用例):`app.ts`(Env→deps 适配)/ `tbApp.ts`(**宿主中立 createTbApp**,路由/认证/HTBP/remote 聚合,SDK 复用)/ `bootstrap.ts` / `kvStateStore.ts` / `refToken.ts`(`$ref` 中转 token)/ `deviceSession.ts`(DeviceSession DO)/ `providers/`(mcp / http / remote / pluginTool / pluginContext / pluginClient / r2Object / s3Object / s3Sign / toolCache);`wrangler.jsonc` 在此包内。
+- `packages/cli` — commander 框架(严格解析:未知 flag/子命令报错,防权限误配),**126 个单测**(含拼错 flag 事故回归 strictParsing),**17 个命令**:status / login / whoami / use / sk / secret / ls / tree / help / call / tool / server / ctx / connect / device / mount / plugin;全局 `--json`;配置 `~/.config/tool-bridge/config.json`(XDG,多 profile)。
+>>>>>>> ffb671e (docs(llmdoc): ~help 契约更新——markdown 表现/hint 行/索引一句话摘要/DSL 多行安全化入契约与状态快照)
 - `packages/sdk` — 薄装配层(4 个源文件),**12 个单测 + 1 个 opt-in**;公开面 `createToolBridge(config)` → `{ fetch, registerTool, registerContext, connect }`,复用 core + gateway 的 createTbApp;再导出内存宿主实现(MemoryStateStore 等)。
 - `packages/dashboard` — React 19 + Vite + Tailwind 4 + shadcn/ui + @rjsf + TanStack Query SPA(可发布纯静态产物包:只发 dist,依赖全在 devDependencies):树导航 / cmd 表单调用 / context 条目浏览(metadata 编辑、`$ref` 大对象经 Update 只改 metadata、Search mode keyword|semantic 切换)/ SK·Registry·Devices·Secrets·Plugins 管理页(Plugins 对等 `tb plugin` 六 cmd,pluginToken 一次性展示;Registry 挂载面对等 CLI:kind:tool / plugin provider、virtualize 全量、http authHeader/authScheme、context ttl)/ ⌘K 面板;无专用后端(同源消费 HTBP),行为由 gateway 的 `ui.integration.test.ts` 覆盖;`pnpm deploy:all` 先 build dashboard 再部署 gateway。
 - `scripts/` — `gen-dev-vars.mjs` / `provision.mjs` / `smoke.ts`(healthz + 无 SK 401 + 带 SK 200)+ 三个可重跑生产验收脚本:`verify-revocation.ts`(吊销传播,实测 0.3s)/ `verify-device.ts`(设备 shell/fs/registerPaths 全链路,可选跨休眠用例)/ `verify-plugin.ts`(Plugin 注册→挂载→四动词全流程)。
@@ -40,7 +50,11 @@
 
 ## 常用命令
 
+<<<<<<< HEAD
 - `pnpm verify` — typecheck + lint + 单测 + 集成测试一把过(当前 603 core + 125 cli + 12 sdk 单测,91 gateway 默认集成 + 6 opt-in skipped)。
+=======
+- `pnpm verify` — typecheck + lint + 单测 + 集成测试一把过(当前 622 core + 126 cli + 12 sdk 单测,88 gateway 默认集成 + 6 opt-in skipped)。
+>>>>>>> ffb671e (docs(llmdoc): ~help 契约更新——markdown 表现/hint 行/索引一句话摘要/DSL 多行安全化入契约与状态快照)
 - `pnpm deploy:all` — 幂等 provision + dashboard build + 部署 gateway。
 - `TB_BASE_URL=https://tool-bridge.pdjjq.org pnpm smoke` — 线上冒烟(**smoke 不读 .env,须显式传 TB_BASE_URL 与 TB_SK**)。
 - `npx tsx scripts/verify-revocation.ts` / `verify-device.ts` / `verify-plugin.ts` — 可重跑生产验收(需 TB_BASE_URL + TB_SK,消耗真实资源)。
