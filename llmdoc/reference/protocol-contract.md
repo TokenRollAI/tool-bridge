@@ -106,7 +106,7 @@ CLI 是纯 API 客户端,无专用端点;全局 `--json`;读 `TB_BASE_URL`/`TB_S
 | `tb status` | builtin `system/status` 的 `get`(登录态)/ 树外 `/healthz`(未登录回退) |
 | `tb login` / `whoami` / `use` | 本地凭据管理,无服务端接口(whoami = 本地配置态 + `~help` 探测 + status 摘要) |
 | `tb ls` / `tree` / `help` | `~help` / `GET /~tree?depth=N` |
-| `tb call` | `POST /<path>` body `{tool,arguments}` |
+| `tb call` | 直连 `POST /<path>`(path 即工具路径,body 为 arguments 本体);`--tool` 给出时信封 `POST /<path>` + `{tool,arguments}`(builtin/context 等通用) |
 | `tb tool mount` / `rm` | NodeRegistry.Write/Delete(kind=mcp/http;含 virtualize prefix/rename/hide/describe、http authHeader/authScheme) |
 | `tb server add` / `ls` / `rm` | NodeRegistry(kind=remote 联邦) |
 | `tb ctx ls/cat/put/patch/search` | Context 四动词 + Search |
