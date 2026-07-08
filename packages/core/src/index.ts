@@ -29,8 +29,10 @@ export {
   type TBErrorOptions,
 } from './errors'
 export * from './htbp/helpDsl'
+export * from './htbp/helpMarkdown'
 export * from './htbp/model'
 export * from './htbp/negotiate'
+export * from './htbp/summary'
 export * from './htbp/tree'
 export * from './plugin/contract'
 export * from './plugin/dedupe'

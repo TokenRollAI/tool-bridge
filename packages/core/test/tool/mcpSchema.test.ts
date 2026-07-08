@@ -96,11 +96,33 @@ describe('两级披露:索引形态与单工具全量', () => {
     expect(renderHelpDsl(m)).not.toContain('  body ')
   })
 
-  it('index:true → 节点描述附工具级 ~help 提示', () => {
+  it('index:true → description 保持干净,下钻指引落 hint 字段(index 标记为真)', () => {
     const m = toolsToHelpModel('docs/context7', { kind: 'mcp', description: 'Context7' }, tools, {
       index: true,
     })
-    expect(m.node.description).toContain('GET /docs/context7/<tool>/~help')
+    expect(m.node.description).toBe('Context7')
+    expect(m.index).toBe(true)
+    expect(m.hint).toContain('GET /docs/context7/<tool>/~help')
+    // DSL 表现:hint 行紧随 node 行
+    const lines = renderHelpDsl(m).split('\n')
+    expect(lines[2]?.startsWith('hint ')).toBe(true)
+  })
+
+  it('index:true → 多行 description 的 h 压缩为一句话摘要(全文只在单工具全量)', () => {
+    const longTool: ToolSpec = {
+      name: 'explore',
+      description:
+        '查看日志数据聚合分析结果。\n\n## 功能概述\n\n该工具可以给出概览信息。\n\nArgs:\n    project: 项目名',
+    }
+    const m = toolsToHelpModel('logs', { kind: 'mcp', description: 'SLS' }, [longTool], {
+      index: true,
+    })
+    expect(m.cmds[0]?.h).toBe('查看日志数据聚合分析结果。')
+    // 单工具全量保留全文
+    const full = toolHelpModel('logs', { kind: 'mcp', description: 'SLS' }, longTool)
+    expect(full.cmds[0]?.h).toBe(longTool.description)
+    // 但 node 行 description 是一句话摘要(不整篇重复)
+    expect(full.node.description).toBe('查看日志数据聚合分析结果。')
   })
 
   it('toolHelpModel:node 行是工具伪节点路径,cmd path 同为直连路径', () => {

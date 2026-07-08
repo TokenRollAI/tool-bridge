@@ -9,22 +9,37 @@
 
 import { HTBP_HELP_HEADER, HTBP_VERSION } from '../version'
 import type { HelpJson, HelpModel } from './model'
+import { collapseToOneLine } from './summary'
 
 /** node 行的路径显示:根路径(空串或 '/')渲染为 '/'。 */
 function displayPath(path: string): string {
   return path === '' || path === '/' ? '/' : path
 }
 
-/** 一行 `node <path> <kind> "<description>"`(description 假定不含双引号,当前不转义)。 */
+/**
+ * 一行 `node <path> <kind> "<description>"`(description 假定不含双引号,当前不转义)。
+ * description 折叠为单行:node 行是行式 DSL 的结构锚点,多行值会破坏消费侧解析。
+ */
 function nodeLine(path: string, kind: string, description: string): string {
-  return `node ${displayPath(path)} ${kind} "${description}"`
+  return `node ${displayPath(path)} ${kind} "${collapseToOneLine(description)}"`
+}
+
+/**
+ * 属性行渲染:首行 `  <key> <首行值>`;多行值的续行统一 4 空格缩进
+ * (比属性缩进更深,最小 parser 按未知行忽略——全文得以保留且不破坏行结构)。
+ */
+function attrLines(key: string, value: string): string[] {
+  const [first = '', ...rest] = value.split('\n')
+  return [`  ${key} ${first.trimEnd()}`, ...rest.map((line) => `    ${line.trimEnd()}`)]
 }
 
 /**
  * 渲染 Help DSL:
- *   首行 `htbp 0.1`;`node` 行;每 cmd 一行 `cmd <name> POST <path>` +
- *   缩进的 `h`/`body`/`returns`/`scope`/`effect`/`confirm`(此顺序);directory 的 children 续为 `node` 行。
+ *   首行 `htbp 0.1`;`node` 行;可选 `hint` 行(下一步指引,单行);每 cmd 一行
+ *   `cmd <name> POST <path>` + 缩进的 `h`/`body`/`returns`/`scope`/`effect`/`confirm`
+ *   (此顺序);directory 的 children 续为 `node` 行。
  * `scope` 恒有;`h`/`inputSchema`/`returns`/`effect` 有值才渲染;`confirm` 仅在为真时渲染(其缺席即默认 false)。
+ * 多行 `h` 经 attrLines 以续行(4 空格缩进)保留全文;消费方按未知行忽略即可。
  *
  * `body` 行是**请求体示意**:缺省由 cmd 的 `inputSchema`(arguments 的 JSON Schema)
  * 包成 `{ "tool": <name>, "arguments": <inputSchema> }` 单行紧凑 JSON;`flatBody` 的 cmd
@@ -34,14 +49,15 @@ function nodeLine(path: string, kind: string, description: string): string {
 export function renderHelpDsl(model: HelpModel): string {
   const lines: string[] = [HTBP_HELP_HEADER]
   lines.push(nodeLine(model.node.path, model.node.kind, model.node.description))
+  if (model.hint !== undefined) lines.push(`hint ${collapseToOneLine(model.hint)}`)
   for (const cmd of model.cmds) {
     lines.push(`cmd ${cmd.name} ${cmd.method} ${cmd.path}`)
-    if (cmd.h !== undefined) lines.push(`  h ${cmd.h}`)
+    if (cmd.h !== undefined) lines.push(...attrLines('h', cmd.h))
     if (cmd.inputSchema !== undefined) {
       const body = cmd.flatBody ? cmd.inputSchema : { tool: cmd.name, arguments: cmd.inputSchema }
       lines.push(`  body ${JSON.stringify(body)}`)
     }
-    if (cmd.returns !== undefined) lines.push(`  returns ${cmd.returns}`)
+    if (cmd.returns !== undefined) lines.push(...attrLines('returns', cmd.returns))
     lines.push(`  scope ${cmd.scope}`)
     if (cmd.effect !== undefined) lines.push(`  effect ${cmd.effect}`)
     if (cmd.confirm) lines.push('  confirm')
@@ -56,7 +72,7 @@ export function renderHelpDsl(model: HelpModel): string {
 
 /**
  * 渲染 Help JSON(规范性)——与 DSL 语义等价、字段不多不少。
- * `inputSchema`/`returns`/`effect` 仅在有值时出现;`confirm` 仅在为真时出现(与 DSL 的存在性对齐)。
+ * `hint`/`inputSchema`/`returns`/`effect` 仅在有值时出现;`confirm` 仅在为真时出现(与 DSL 的存在性对齐)。
  * 注:JSON 的 `cmds[].inputSchema` 是 arguments 的裸 JSON Schema(不含信封);DSL 的 `body` 行
  * 才把它包成请求信封示意。JSON 的 `node.path`/`children[].path` 承载原始 TreePath(根为空串)。
  */
@@ -80,6 +96,7 @@ export function renderHelpJson(model: HelpModel): HelpJson {
     node: { path: model.node.path, kind: model.node.kind, description: model.node.description },
     cmds,
   }
+  if (model.hint !== undefined) json.hint = model.hint
   if (model.children) {
     json.children = model.children.map((child) => ({
       path: child.path,
