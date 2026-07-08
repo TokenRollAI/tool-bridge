@@ -87,7 +87,8 @@ export interface InvokeResult {
 }
 
 /**
- * POST /<path> {tool, arguments} 数据面调用。
+ * POST 数据面调用。`direct`(mcp/http/tool 工具,~help 宣告直连路径)→
+ * `POST /<path>/<tool>`,body 即 arguments 本体;否则信封 `POST /<path>` + {tool,arguments}。
  * accept 'json' 拿结构化返回,'markdown' 拿默认 markdown 表现。
  */
 export async function invoke(
@@ -96,11 +97,12 @@ export async function invoke(
   tool: string,
   args: unknown,
   accept: 'json' | 'markdown' = 'json',
+  direct = false,
 ): Promise<InvokeResult> {
   const started = performance.now()
-  const res = await request(conn, `/${path}`, {
+  const res = await request(conn, direct ? `/${path}/${tool}` : `/${path}`, {
     method: 'POST',
-    body: { tool, arguments: args ?? {} },
+    body: direct ? (args ?? {}) : { tool, arguments: args ?? {} },
     accept: accept === 'json' ? 'application/json' : 'text/markdown',
   })
   const contentType = res.headers.get('content-type') ?? ''

@@ -120,6 +120,9 @@ export function CmdPanel({
   lazySchema?: boolean
 }) {
   const [open, setOpen] = useState(defaultOpen)
+  // 直连工具 cmd(mcp/http/tool):~help 宣告的 path 含工具段(协议判别规则)
+  // → POST /<path>/<tool>,body 即 arguments;否则信封 POST /<path>。
+  const direct = cmd.path === `/${path}/${cmd.name}`
   const lazyNeeded = lazySchema && cmd.inputSchema === undefined
   const toolHelp = useToolHelp(path, cmd.name, lazyNeeded && open)
   const inputSchema = cmd.inputSchema ?? toolHelp.data?.cmds[0]?.inputSchema
@@ -172,7 +175,7 @@ export function CmdPanel({
 
   const doInvoke = (args: unknown) => {
     invoke.mutate(
-      { path, tool: cmd.name, args, accept },
+      { path, tool: cmd.name, args, accept, direct },
       {
         onSuccess: () => {
           if (MUTATING.test(cmd.name)) qc.invalidateQueries({ queryKey: ['tb'] })
@@ -339,7 +342,7 @@ export function CmdPanel({
               </div>
             )}
 
-            <CliHint path={path} tool={cmd.name} args={currentArgs} />
+            <CliHint path={path} tool={cmd.name} args={currentArgs} direct={direct} />
 
             <ResultView
               className="mt-4"

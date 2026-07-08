@@ -84,6 +84,8 @@ export interface InvokeInput {
   tool: string
   args: unknown
   accept?: 'json' | 'markdown'
+  /** 直连工具调用(mcp/http/tool 工具):POST /<path>/<tool>,body 即 arguments。 */
+  direct?: boolean
 }
 
 /** 数据面调用(变更型;成功后由调用方决定失效哪些查询)。全部调用落 per-profile 历史。 */
@@ -92,7 +94,8 @@ export function useInvoke() {
   const { active } = useSession()
   const profile = active?.name ?? ''
   return useMutation<InvokeResult, Error, InvokeInput>({
-    mutationFn: ({ path, tool, args, accept }) => invoke(conn, path, tool, args, accept ?? 'json'),
+    mutationFn: ({ path, tool, args, accept, direct }) =>
+      invoke(conn, path, tool, args, accept ?? 'json', direct ?? false),
     onSuccess: (r, { path, tool, args }) =>
       recordInvoke(profile, {
         path,
