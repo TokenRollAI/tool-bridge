@@ -5,13 +5,17 @@
  * status 的 nodeCount 经翻页统计 registry 全量节点(当前树规模小,可接受)。
  */
 
+import type { AnnotationStore } from '../annotation/store'
 import type { SKRegistryStore } from '../auth/sk'
+import type { FeedbackStore } from '../feedback/store'
 import type { SecretStoreImpl } from '../secret/secretStore'
 import type { RemoteAllowlistStore } from '../tool/allowlist'
 import type { NodeRegistryStore } from '../tree/registry'
 import type { ScopeChecker } from '../tree/visibility'
 import { LIST_LIMIT_MAX } from '../types'
+import { createAnnotationModule } from './annotation'
 import { createFederationModule } from './federation'
+import { createFeedbackModule } from './feedback'
 import { createPluginModule, type PluginModuleDeps } from './plugin'
 import { createRegistryModule } from './registry'
 import { createSecretModule } from './secret'
@@ -42,6 +46,10 @@ export interface BuiltinDeps {
    * 缺省不装配 system/federation(纯逻辑单测无需)。
    */
   federation?: { store: RemoteAllowlistStore; base: string[] }
+  /** annotation 模块装配(Path 补充说明;registry 复用上方注入)。缺省不装配。 */
+  annotation?: { store: AnnotationStore }
+  /** feedback 模块装配(Agent 使用反馈;registry 复用上方注入)。缺省不装配。 */
+  feedback?: { store: FeedbackStore }
 }
 
 /** 翻页统计 registry 全量节点数(status.nodeCount)。 */
@@ -82,14 +90,34 @@ export function createBuiltins(deps: BuiltinDeps): Map<string, BuiltinModule> {
       createFederationModule({ store: deps.federation.store, base: deps.federation.base, now }),
     )
   }
+  if (deps.annotation !== undefined) {
+    modules.set(
+      'annotation',
+      createAnnotationModule({ store: deps.annotation.store, registry: deps.registry, now }),
+    )
+  }
+  if (deps.feedback !== undefined) {
+    modules.set(
+      'feedback',
+      createFeedbackModule({ store: deps.feedback.store, registry: deps.registry, now }),
+    )
+  }
   return modules
 }
 
+export {
+  type AnnotationModuleDeps,
+  createAnnotationModule,
+} from './annotation'
 export {
   createFederationModule,
   type FederationHost,
   type FederationModuleDeps,
 } from './federation'
+export {
+  createFeedbackModule,
+  type FeedbackModuleDeps,
+} from './feedback'
 export {
   createPluginModule,
   type PluginHealthRecord,
