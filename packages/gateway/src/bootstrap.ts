@@ -1,7 +1,9 @@
 import {
+  AnnotationStore,
   adminBootstrapInput,
   type BuiltinDeps,
   checkScopes,
+  FeedbackStore,
   KEY_BOOTSTRAPPED,
   KEY_SK_HASH,
   KEY_SK_ID,
@@ -34,8 +36,17 @@ interface BootstrapEnv {
  * - 否则由 mintKey 生成随机明文。
  */
 
-/** 引导时注册的内置节点(system directory + 六个 builtin,含 plugin/federation)。 */
-const BUILTIN_MODULES = ['sk', 'secret', 'registry', 'status', 'plugin', 'federation'] as const
+/** 引导时注册的内置节点(system directory + 八个 builtin,含 annotation/feedback)。 */
+const BUILTIN_MODULES = [
+  'sk',
+  'secret',
+  'registry',
+  'status',
+  'plugin',
+  'federation',
+  'annotation',
+  'feedback',
+] as const
 
 const BUILTIN_DESCRIPTIONS: Record<string, string> = {
   sk: 'SecretKey registry',
@@ -44,6 +55,8 @@ const BUILTIN_DESCRIPTIONS: Record<string, string> = {
   status: 'Gateway health and summary',
   plugin: 'Plugin registry',
   federation: 'Remote federation host allowlist',
+  annotation: 'Admin notes shown in ~help of any path',
+  feedback: 'Agent feedback on paths: submit / vote / drill down',
 }
 
 let bootstrapOnce: Promise<void> | undefined
@@ -160,6 +173,9 @@ export function buildDeps(opts: BuiltinAssemblyOpts): BuiltinDeps {
     },
     // federation 模块:remote host 白名单运行时存储 + env 基线。
     federation: { store: new RemoteAllowlistStore(opts.store), base: opts.remoteAllowlistBase },
+    // annotation/feedback 模块:Path 补充说明与 Agent 反馈(registry 复用上方注入做 path 校验)。
+    annotation: { store: new AnnotationStore(opts.store) },
+    feedback: { store: new FeedbackStore(opts.store) },
   }
 }
 

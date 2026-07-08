@@ -1,4 +1,5 @@
 import {
+  AnnotationStore,
   type BuiltinModule,
   buildTree,
   type CallContext,
@@ -20,6 +21,7 @@ import {
   deviceDirectoryHelpModel,
   deviceFsHelpModel,
   deviceShellHelpModel,
+  FeedbackStore,
   type HelpModel,
   identify,
   isContextExpired,
@@ -189,6 +191,30 @@ function renderHelp(model: HelpModel, rep: Representation): Response {
   return new Response(renderHelpDsl(model), {
     headers: { 'content-type': contentTypeFor('dsl') },
   })
+}
+
+/**
+ * ~help 注入:读该 path 的管理员补充说明(annotation:<path>)与 Agent feedback 头部条目
+ * (feedback:<path>,排序/阈值在 core FeedbackStore.helpItems),合并进 HelpModel 的
+ * note/feedback 字段。handleHelp 三个出口(根/节点级/工具级)统一走这里,注入对
+ * 注册节点与工具子路径同样生效。成本 = 并发 2 次 KV get。
+ * 注入失败不打挂 ~help(增强信息,非关键路径):catch 后原样返回。
+ * remote 透传路径不经此(响应来自上游,本地不解析)。
+ */
+async function enrichHelp(model: HelpModel, path: TreePath, store: StateStore): Promise<HelpModel> {
+  try {
+    const [annotation, feedback] = await Promise.all([
+      new AnnotationStore(store).get(path),
+      path === '' ? Promise.resolve([]) : new FeedbackStore(store).helpItems(path),
+    ])
+    return {
+      ...model,
+      ...(annotation !== null ? { note: annotation.text } : {}),
+      ...(feedback.length > 0 ? { feedback } : {}),
+    }
+  } catch {
+    return model
+  }
 }
 
 /** 渲染数据面调用返回值:json → 原始 JSON;默认 → markdown(```json 包裹)。 */
@@ -475,7 +501,7 @@ export function createTbApp(deps: TbAppDeps): Hono<{ Variables: Vars }> {
         children: children.map((n) => ({ path: n.path, kind: n.kind, description: n.description })),
         hint: 'GET /<child-path>/~help describes a child node; GET /~tree?depth=N shows the subtree',
       }
-      return renderHelp(model, rep)
+      return renderHelp(await enrichHelp(model, '', store), rep)
     }
 
     // 不可见(read 判不过)→ 404 不泄露存在性(v1 教训:deny==not_found)。
@@ -492,7 +518,7 @@ export function createTbApp(deps: TbAppDeps): Hono<{ Variables: Vars }> {
       // 非注册路径:尝试工具级 ~help(两级披露)——最长前缀命中 mcp/http 节点
       // 且剩余恰一段(工具虚拟名)→ 单工具全量 spec(命中同一 toolcache,不额外打上游)。
       const toolModel = await toolHelpModelFor(c, ctx, registry, path, deps)
-      if (toolModel !== null) return renderHelp(toolModel, rep)
+      if (toolModel !== null) return renderHelp(await enrichHelp(toolModel, path, store), rep)
       throw TBError.notFound('not found')
     }
     const builtins = builtinsOf(store)
@@ -501,7 +527,7 @@ export function createTbApp(deps: TbAppDeps): Hono<{ Variables: Vars }> {
       refresh,
       now: new Date().toISOString(),
     })
-    return renderHelp(model, rep)
+    return renderHelp(await enrichHelp(model, path, store), rep)
   }
 
   // --- POST /<path> 数据面调用 ---
