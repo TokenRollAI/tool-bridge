@@ -102,7 +102,7 @@ cmd resolve-library-id POST /docs/context7/resolve-library-id  ← cmd 行:<name
 - `pluginToken`(Plugin 回调平台的令牌)注册时签发仅一次。
 - 生命周期:注册时自动探活(`GET {healthPath}`)+ `~describe`/`~help` 契约校验;未声明的可选方法不会被调用;周期探活反映健康态但不自动注销。
 
-## 9. CLI 命令矩阵(17 命令)
+## 9. CLI 命令矩阵(18 命令)
 
 CLI 是纯 API 客户端,无专用端点;全局 `--json`;读 `TB_BASE_URL`/`TB_SK`,配置 `~/.config/tool-bridge/config.json`(XDG,多 profile)。
 
@@ -122,6 +122,7 @@ CLI 是纯 API 客户端,无专用端点;全局 `--json`;读 `TB_BASE_URL`/`TB_S
 | `tb mount fs` | 设备 fs 挂载 |
 | `tb sk list/create/rm` | SKRegistry(create 可带 register scope + registerPaths) |
 | `tb secret set/ls/rm` | SecretStore(authRef/skRef 来源;ls 只见 name+updatedAt,不回显明文) |
+| `tb federation ls/add/rm` | builtin `system/federation`:remote 联邦 host 白名单(list 合并 env 基线 ∪ 运行时;add/rm 只动运行时叠加层,env 基线条目 removable=false 不可删) |
 | `tb plugin register/list/get/health/rm` | PluginRegistry + 探活 |
 
 `tool rm`/`server rm` 前有 kind 校验,防止命令名误删其它节点。`tb init`(部署向导)未实现,见 [../must/current-state.md](../must/current-state.md) 未竟事项。

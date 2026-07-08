@@ -20,9 +20,9 @@
 | Context Layer | 多来源上下文统一读写检索面(四动词 + Search + `$ref`) | `context/` | gateway `providers/r2Object|s3Object|s3Sign` + `refToken.ts` |
 | Device Gateway | 设备 WS 反向注册 + 调用转发 | `device/`(帧/状态机/shell 白名单/设备侧 client) | **协议行为单一真源:gateway `deviceHello.ts`(processDeviceHello,宿主中立)**;两个宿主胶水:gateway `deviceSession.ts`(DO,WS hibernation)与 server `deviceHub.ts`(Node ws);cli `deviceRuntime.ts`;core `node/`(FsObjectStore/shellExecutor) |
 | Auth(横切) | SK 签发/作用域/访问判定/SecretStore | `auth/` + `secret/` | gateway 认证中间件;SK 哈希与密文存 StateStore |
-| builtin 管理面 | `system/*` 五模块:sk / secret / registry / status / plugin | `builtin/` | 经 gateway dispatch |
+| builtin 管理面 | `system/*` 六模块:sk / secret / registry / status / plugin / federation | `builtin/` | 经 gateway dispatch |
 | SDK | 内嵌 TB 实例 / 程序化注册 / 反向连接 | —(装配层) | `packages/sdk`:createToolBridge = core + gateway 的 createTbApp + 内存宿主缺省 |
-| CLI | 纯 API 客户端 `tb`,17 个子命令一一映射接口面,**无专用端点** | — | `packages/cli`(commander;npm 发布物) |
+| CLI | 纯 API 客户端 `tb`,18 个子命令一一映射接口面,**无专用端点** | — | `packages/cli`(commander;npm 发布物) |
 | Plugin System | 自定义 Provider 注册与生命周期(探活/契约校验/信封传输) | `plugin/` | gateway `providers/pluginClient|pluginTool|pluginContext` + builtin `system/plugin` |
 | Dashboard | `~help` 通用渲染器 + 管理表单,**无专用后端** | — | `packages/dashboard`(React SPA)经 gateway Static Assets 挂 `/ui` |
 | 部署 | CF 与 Docker 两条路径产出同一棵树 | — | CF:`scripts/provision.mjs` + wrangler;Docker/Node:`packages/server`(SQLite/FS/ws DeviceHub)+ 根 Dockerfile,见 [../guides/docker-host.md](../guides/docker-host.md) |
@@ -60,13 +60,13 @@
 
 ## 引导(bootstrap.ts)
 
-Workers 无启动钩子,首请求惰性引导(模块级 promise 防重入 + KV 幂等标志);Admin SK 明文可由 `TB_BOOTSTRAP_ADMIN_SK` 提供(部署自动化)否则随机生成,只输出一次;物化 `system` directory + sk/secret/registry/status/plugin 五个 builtin(`registeredBy: system:boot`);Plugin 引导节点幂等 ensure。
+Workers 无启动钩子,首请求惰性引导(模块级 promise 防重入 + KV 幂等标志);Admin SK 明文可由 `TB_BOOTSTRAP_ADMIN_SK` 提供(部署自动化)否则随机生成,只输出一次;物化 `system` directory + sk/secret/registry/status/plugin/federation 六个 builtin(`registeredBy: system:boot`);Plugin 引导节点幂等 ensure。
 
 ## Provider 边界细则
 
 - **mcp**(`providers/mcp.ts`):官方 SDK Streamable HTTP;`Mcp-Session-Id` 会话复用(入 StateStore,失效 404 重握手一次);`authRef` 经 SecretStore.resolve 注入 Bearer;禁用 standalone SSE GET(fetch wrapper 返 405);schema 校验用 `@cfworker/json-schema`(workerd 禁 eval)。
 - **http**(`providers/http.ts`):`buildHttpRequest` 处理 `{param}` 占位与 GET/DELETE query、POST/PUT JSON body;`authHeader/authScheme` 控制上游凭证注入;非 2xx 与网络错误经 `normalizeUpstreamError` 收敛为 TBError。
-- **remote**(`providers/remote.ts`):注册时与调用时都校验 https 强制 + host allowlist;本地调用者 SK 不外传,出站 Authorization 只来自 `skRef` 换发;`X-TB-Via` 入站先判环/跳数再追加自身。
+- **remote**(`providers/remote.ts`):注册时与调用时都校验 https 强制 + host allowlist(生效白名单 = env 基线 `TB_REMOTE_ALLOWLIST` ∪ 运行时条目,后者经 builtin `system/federation` 增删、存 `tool/allowlist.ts` 的 RemoteAllowlistStore,gateway `tbApp.ts` 请求期 `resolveRemoteSettings` 合并);本地调用者 SK 不外传,出站 Authorization 只来自 `skRef` 换发;`X-TB-Via` 入站先判环/跳数再追加自身。
 - **r2/s3 object**(`r2Object.ts`/`s3Object.ts`):etag=version 乐观并发;s3 用 aws4fetch(`s3Sign.ts`);挂载时做连通探测;ttl 懒回收;readOnly 拒写并在 help 隐藏写动词。
 - **plugin**(`pluginClient/pluginTool/pluginContext`):平台→Plugin 传输用 `X-TB-Context`(base64url 信封,唯一上下文载体)+ `X-TB-Request-Id`(重试去重);注册时探活 + `~describe`/`~help` 契约校验;周期探活不自动注销。
 - **工具级两级披露**:节点 `~help` 是索引(cmd 行 + `h` 一句话),`GET /<node>/<tool>/~help` 给全量 spec;Dashboard schema 懒补水同源。
