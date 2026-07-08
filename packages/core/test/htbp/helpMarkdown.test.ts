@@ -112,4 +112,27 @@ describe('renderHelpMarkdown:使用路径清晰(索引形态与 children)', () =
     const m: HelpModel = { node: { path: 'x', kind: 'directory', description: '' }, cmds: [] }
     expect(renderHelpMarkdown(m)).toContain('This node exposes no commands and no child nodes.')
   })
+
+  it('flatBody(直连工具路径):body 即 arguments 本体,下钻路径不重复工具段', () => {
+    const m: HelpModel = {
+      node: { path: 'docs/x', kind: 'mcp', description: 'X' },
+      cmds: [
+        {
+          name: 'echo',
+          method: 'POST',
+          path: '/docs/x/echo',
+          h: '回显',
+          scope: 'call',
+          flatBody: true,
+        },
+      ],
+      index: true,
+      hint: 'index',
+    }
+    const md = renderHelpMarkdown(m)
+    expect(md).toContain('Each command has its own direct URL')
+    expect(md).toContain('- Invoke: `POST /docs/x/echo` with body `{...arguments}`')
+    expect(md).toContain('- Arguments: schema not shown in this index — `GET /docs/x/echo/~help`')
+    expect(md).not.toContain('/docs/x/echo/echo')
+  })
 })
