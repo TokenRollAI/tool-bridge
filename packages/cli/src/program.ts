@@ -4,6 +4,7 @@ import { callCommand } from './commands/call'
 import { connectCommand } from './commands/connect'
 import { ctxCommand } from './commands/ctx'
 import { deviceCommand } from './commands/device'
+import { federationCommand } from './commands/federation'
 import { helpCommand } from './commands/help'
 import { loginCommand } from './commands/login'
 import { lsCommand } from './commands/ls'
@@ -22,6 +23,7 @@ import { whoamiCommand } from './commands/whoami'
  * `tb` —— tool-bridge CLI(纯 API 客户端)。命令族:
  * - status:部署健康摘要。
  * - login/whoami/use/sk/secret/ls/tree/help:档案、SK、密钥与工具树浏览。
+ * - federation ls/add/rm:remote 联邦 host 白名单(运行时叠加 env 基线)。
  * - tool mount/rm、server add/ls/rm、call:挂载工具源与数据面调用。
  * - ctx ls/cat/put/patch/search/mount/unmount:Context Layer。
  * - connect、device ls、mount fs:设备反向注册。
@@ -42,6 +44,7 @@ export function buildProgram(): Command {
   program.addCommand(useCommand())
   program.addCommand(skCommand())
   program.addCommand(secretCommand())
+  program.addCommand(federationCommand())
   program.addCommand(lsCommand())
   program.addCommand(treeCommand())
   program.addCommand(helpCommand())
