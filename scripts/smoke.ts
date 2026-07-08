@@ -32,15 +32,29 @@ async function main(): Promise<void> {
   assert.equal(err.retryable, false, '401 body.retryable must be false')
   console.log('ok  GET /~help (no SK) → 401 TBError permission_denied')
 
-  // 3) 带 SK 的 /~help → 200 text/plain,首行 htbp 0.1
+  // 3) 带 SK 的 /~help → 默认 200 text/markdown;显式 Accept: text/plain 得 DSL(首行 htbp 0.1)
   if (sk) {
     const help = await fetch(`${baseUrl}/~help`, { headers: { authorization: `Bearer ${sk}` } })
     assert.equal(help.status, 200, `GET /~help with SK expected 200, got ${help.status}`)
     const ct = help.headers.get('content-type') ?? ''
-    assert.ok(ct.includes('text/plain'), `/~help content-type must be text/plain, got '${ct}'`)
-    const text = await help.text()
-    assert.equal(text.split('\n')[0], 'htbp 0.1', '/~help first line must be "htbp 0.1"')
-    console.log('ok  GET /~help (with SK) → 200 text/plain first line "htbp 0.1"')
+    assert.ok(
+      ct.includes('text/markdown'),
+      `/~help default content-type must be text/markdown, got '${ct}'`,
+    )
+    console.log('ok  GET /~help (with SK) → 200 text/markdown (default representation)')
+
+    const dsl = await fetch(`${baseUrl}/~help`, {
+      headers: { authorization: `Bearer ${sk}`, accept: 'text/plain' },
+    })
+    assert.equal(dsl.status, 200, `GET /~help (Accept: text/plain) expected 200, got ${dsl.status}`)
+    const dslCt = dsl.headers.get('content-type') ?? ''
+    assert.ok(
+      dslCt.includes('text/plain'),
+      `/~help DSL content-type must be text/plain, got '${dslCt}'`,
+    )
+    const text = await dsl.text()
+    assert.equal(text.split('\n')[0], 'htbp 0.1', '/~help DSL first line must be "htbp 0.1"')
+    console.log('ok  GET /~help (Accept: text/plain) → 200 first line "htbp 0.1"')
   } else {
     console.log('skip GET /~help with SK — TB_SK not set')
   }
