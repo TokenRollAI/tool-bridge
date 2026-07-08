@@ -12,6 +12,7 @@
 | `GET /<path>/~skill` | 本地 501 占位(`unavailable`,retryable:false);remote 节点透传 |
 | `GET /<path>/~describe` | 有可选能力的节点返回 `{ kind, capabilities }`;其余 404 |
 | `POST /<path>` | 数据面调用,body `{"tool","arguments"}`;`opts` 整体传不平铺 |
+| `POST /<node>/<tool>` | **直连工具调用**(mcp/http/tool 节点,含 device 自定义 tool):tool 名取自 URL 末段(虚拟名),body 即 arguments 本体(可空 = `{}`;非对象 → 400)。`~help` 宣告的即此形态;信封入口仍受理。多余路径段/未知工具 → 404 |
 | `POST /<path>/~register` | 自助反向注册(受限 SK 通道),等价 `NodeRegistry.Write`;body.path 必须等于 URL path,kind 必填 |
 | `GET /~ref/<token>` | 大对象网关中转下载,树外免认证(HMAC token 即授权,有效期缺省 900s,篡改 → 404) |
 | `WS /system/device/ws?deviceId=<id>` | 设备通道升级(Bearer SK);mountPath 缺省 `device/<deviceId>` |
@@ -48,8 +49,8 @@ interface TBError {
 ```
 htbp 0.1                                       ← 首行:协议版本
 node docs/context7 mcp "Context7 文档检索"      ← node 行:<path> <kind> <一句话描述>
-cmd resolve-library-id POST /docs/context7      ← cmd 行:<name> <METHOD> </path>(带前导 /)
-  body { "tool":"resolve-library-id", "arguments": { "libraryName": string } }
+cmd resolve-library-id POST /docs/context7/resolve-library-id  ← cmd 行:<name> <METHOD> </path>(直连工具路径)
+  body { "libraryName": string }               ← 直连 cmd 的 body 即 arguments 本体(裸 inputSchema)
   returns markdown 文档库列表
   scope call                                    ← 必须声明
 ```
@@ -59,6 +60,7 @@ cmd resolve-library-id POST /docs/context7      ← cmd 行:<name> <METHOD> </pa
 - 每个 cmd **必须**声明 `scope`;`effect`(read/write/destructive)/`confirm`/`h`(工具级一句话)可选。
 - 属性行输出顺序 `h → body → returns → scope → effect → confirm`,两空格缩进。
 - cmd 命名:Provider 类节点 = 接口方法名**首字母大写**(context:`List/Get/Update/Write/Search`)或**工具原名**(mcp/http);仅 `system/*` builtin 用小写。
+- **body 行两种形态**:mcp/http/tool 工具 cmd 宣告直连路径(`/<node>/<tool>`),body 即裸 inputSchema(CmdSpec `flatBody`);builtin/context/device-shell 等 cmd 仍宣告节点路径,body 为 `{tool,arguments}` 信封。消费方以 cmd path 为准(path 含工具段 ⇒ 扁平 body)。
 - 消费方对未知行**必须忽略**(向前兼容)。
 - directory 节点的 `~help` 列子节点相对路径 + 一句话描述。
 - JSON 等价形状 `HelpJson`/`TreeJson`:cmds 的 `inputSchema` 是真 JSON Schema(不含 `{tool,arguments}` 信封),供 Dashboard @rjsf 渲染。
