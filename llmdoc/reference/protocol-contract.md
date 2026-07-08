@@ -14,7 +14,7 @@
 | `POST /<path>` | 数据面调用,body `{"tool","arguments"}`;`opts` 整体传不平铺 |
 | `POST /<node>/<tool>` | **直连工具调用**(mcp/http/tool 节点,含 device 自定义 tool):tool 名取自 URL 末段(虚拟名),body 即 arguments 本体(可空 = `{}`;非对象 → 400)。`~help` 宣告的即此形态;信封入口仍受理。多余路径段/未知工具 → 404 |
 | `POST /<path>/~register` | 自助反向注册(受限 SK 通道),等价 `NodeRegistry.Write`;body.path 必须等于 URL path,kind 必填 |
-| `POST /<path>/~authorize` | mcp 托管 OAuth 发起(节点须 `config.auth:'oauth'`;需 read+register):有有效凭证(静默刷新成功)→ `{status:'authorized'}`;否则 `{status:'redirect', authorizationUrl}`(URL 内嵌 AES-GCM 加密 state,含 PKCE code_verifier) |
+| `POST /<path>/~authorize` | mcp 托管 OAuth 发起(节点须 `config.auth:'oauth'`;需 read+register):有有效凭证(静默刷新成功)→ `{status:'authorized'}`;否则 `{status:'redirect', authorizationUrl}`(URL 内嵌 AES-GCM 加密 state,含 PKCE code_verifier)。可选 body `{redirectUri}`(仅 loopback):严格上游 DCR 只放行 localhost 回调时的本地回调通道,state 载荷带 r 供兑换复用 |
 | `GET /~oauth/callback?code&state` | OAuth 授权回调,树外免认证(state 即凭证,解不开/过期/节点不符一律拒);兑换 code → token 落 StateStore,返回一次性 HTML 结果页 |
 | `GET /~ref/<token>` | 大对象网关中转下载,树外免认证(HMAC token 即授权,有效期缺省 900s,篡改 → 404) |
 | `WS /system/device/ws?deviceId=<id>` | 设备通道升级(Bearer SK);mountPath 缺省 `device/<deviceId>` |
@@ -113,7 +113,7 @@ CLI 是纯 API 客户端,无专用端点;全局 `--json`;读 `TB_BASE_URL`/`TB_S
 | `tb ls` / `tree` / `help` | `~help` / `GET /~tree?depth=N`;`tb help --md` 请求 Markdown 表现(Accept: text/markdown) |
 | `tb call` | 直连 `POST /<path>`(path 即工具路径,body 为 arguments 本体);`--tool` 给出时信封 `POST /<path>` + `{tool,arguments}`(builtin/context 等通用) |
 | `tb tool mount` / `rm` | NodeRegistry.Write/Delete(kind=mcp/http;含 virtualize prefix/rename/hide/describe、http authHeader/authScheme;mcp 另有 `--auth oauth`,与 `--auth-ref` 互斥) |
-| `tb tool auth <path>` | mcp 托管 OAuth 发起(POST `/<path>/~authorize`):authorized → 直接完成;redirect → 打印授权 URL 并尝试开浏览器(`--no-open` 只打印) |
+| `tb tool auth <path>` | mcp 托管 OAuth 发起(POST `/<path>/~authorize`):authorized → 直接完成;redirect → 打印授权 URL 并尝试开浏览器(`--no-open` 只打印)。`--local`:本机 127.0.0.1 临时端口收 AS 回跳,code+state 转交网关 `/~oauth/callback` 兑换(适配 Bytebase 等只放行 loopback 回调的严格上游;默认流程遇 redirect 类报错会提示) |
 | `tb server add` / `ls` / `rm` | NodeRegistry(kind=remote 联邦) |
 | `tb ctx ls/cat/put/patch/search` | Context 四动词 + Search |
 | `tb ctx mount` / `unmount` | NodeRegistry(kind=context,provider=r2/s3) |
