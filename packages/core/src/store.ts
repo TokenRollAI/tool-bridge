@@ -11,6 +11,8 @@
  *   secret:<name>     → { iv, ciphertext, updatedAt }
  *   plugin:<id>       → PluginManifest
  *   sys:bootstrapped  → true(Admin SK 引导幂等标志)
+ *   annotation:<path> → { text, updatedAt, updatedBy }(管理员 Path 补充说明)
+ *   feedback:<path>   → FeedbackEntry[](Agent 使用反馈,单 key 整存)
  */
 
 export interface StateStore {
@@ -35,6 +37,10 @@ export const KEY_PLUGIN_META = 'pluginmeta:'
 export const KEY_BOOTSTRAPPED = 'sys:bootstrapped'
 /** remote 联邦 host 白名单的运行时条目(单 key 存 AllowlistEntry[];与 env 基线取并集)。 */
 export const KEY_REMOTE_ALLOWLIST = 'sys:remoteallowlist'
+/** 管理员对任意树路径(含工具子路径)的补充说明:{ text, updatedAt, updatedBy }。 */
+export const KEY_ANNOTATION = 'annotation:'
+/** 每 path 一份 FeedbackEntry[](单 key 整存整取,allowlist 先例)。 */
+export const KEY_FEEDBACK = 'feedback:'
 
 /** 进程内存实现:单测与 SDK 内嵌宿主用。 */
 export class MemoryStateStore implements StateStore {
