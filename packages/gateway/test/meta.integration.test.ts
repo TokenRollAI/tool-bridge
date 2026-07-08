@@ -3,9 +3,10 @@ import { parseHelpDsl } from '@tool-bridge/core'
 import { describe, expect, it } from 'vitest'
 import { TEST_ADMIN_SK } from './fixtures'
 
-// system/annotation + system/feedback 集成测试:builtin 物化、权限面(agent SK 开箱可
-// submit/vote 但写不了 annotation)、~help 三表现注入(节点级 + 工具级子路径)、
-// 净分阈值隐藏。全部离线(http 节点 ~help 从 config 生成,不打上游)。
+// system/annotation(builtin)+ ~feedback(保留段,per-path 一级协议能力)集成测试:
+// builtin 物化、权限面(agent SK 开箱 submit/vote 但写不了 annotation;权限判定落目标
+// path,窄 scope SK 对自己够得着的路径天然可反馈)、~help 三表现注入(节点级 + 工具级
+// 子路径)、净分阈值隐藏。全部离线(http 节点 ~help 从 config 生成,不打上游)。
 
 const admin = (extra: RequestInit = {}): RequestInit => ({
   ...extra,
@@ -27,6 +28,13 @@ async function postJson(path: string, body: unknown, init: RequestInit = {}): Pr
   })
 }
 
+async function getJson(path: string, init: RequestInit = {}): Promise<Response> {
+  return SELF.fetch(`https://tb.test/${path}`, {
+    ...init,
+    headers: { accept: 'application/json', ...(init.headers ?? {}) },
+  })
+}
+
 async function issueSk(input: unknown): Promise<string> {
   const res = await postJson('system/sk', { tool: 'write', arguments: input }, admin())
   expect(res.status).toBe(200)
@@ -34,10 +42,10 @@ async function issueSk(input: unknown): Promise<string> {
 }
 
 /** 典型 agent SK:全树 read+call(无 write/admin)。 */
-async function issueAgentSk(name: string): Promise<string> {
+async function issueAgentSk(name: string, pattern = '**'): Promise<string> {
   return issueSk({
     owner: `agent:${name}`,
-    scopes: [{ pattern: '**', actions: ['read', 'call'] }],
+    scopes: [{ pattern, actions: ['read', 'call'] }],
   })
 }
 
@@ -80,8 +88,19 @@ async function helpJson(path: string): Promise<HelpJsonLite> {
   return JSON.parse(await helpOf(path, 'application/json')) as HelpJsonLite
 }
 
+/** submit 反馈并返回 id(缺省 admin 身份)。 */
+async function submitFeedback(
+  path: string,
+  title: string,
+  init: RequestInit = admin(),
+): Promise<string> {
+  const res = await postJson(`${path}/~feedback`, { title, detail: 'd' }, init)
+  expect(res.status).toBe(200)
+  return ((await res.json()) as { id: string }).id
+}
+
 describe('builtin 物化与 ~help 契约', () => {
-  it('system/annotation 与 system/feedback 节点存在且 cmd/scope 符合契约', async () => {
+  it('system/annotation 节点存在且 cmd/scope 符合契约;system/feedback 不存在(走 ~feedback)', async () => {
     const anno = parseHelpDsl(await helpOf('system/annotation', 'text/plain'))
     expect(Object.fromEntries(anno.cmds.map((c) => [c.name, c.scope]))).toEqual({
       set: 'admin',
@@ -89,14 +108,8 @@ describe('builtin 物化与 ~help 契约', () => {
       remove: 'admin',
       list: 'read',
     })
-    const fb = parseHelpDsl(await helpOf('system/feedback', 'text/plain'))
-    expect(Object.fromEntries(fb.cmds.map((c) => [c.name, c.scope]))).toEqual({
-      submit: 'call',
-      get: 'read',
-      list: 'read',
-      vote: 'call',
-      remove: 'admin',
-    })
+    const fb = await SELF.fetch('https://tb.test/system/feedback/~help', admin())
+    expect(fb.status).toBe(404)
   })
 })
 
@@ -155,109 +168,107 @@ describe('annotation:admin 写,~help 三表现注入(节点级 + 工具级 + 根
   })
 })
 
-describe('feedback:agent 开箱提交/投票,~help 区块与阈值隐藏', () => {
-  it('agent SK submit → 节点 ~help 三表现出现区块;get 下钻含 detail', async () => {
+describe('~feedback 保留段:agent 开箱提交/投票,~help 区块与阈值隐藏', () => {
+  it('agent SK POST /<path>/~feedback → ~help 三表现出现区块;GET .../<id> 下钻含 detail', async () => {
     await mountEcho('ext/fb-node')
     const agentSk = await issueAgentSk('reporter')
-    const submit = await postJson(
-      'system/feedback',
-      {
-        tool: 'submit',
-        arguments: { path: 'ext/fb-node', title: 'get_thing 偶发 500', detail: '重试一次即可恢复' },
-      },
+    const res = await postJson(
+      'ext/fb-node/~feedback',
+      { title: 'get_thing 偶发 500', detail: '重试一次即可恢复' },
       bearer(agentSk),
     )
-    expect(submit.status).toBe(200)
-    const { id } = (await submit.json()) as { id: string }
+    expect(res.status).toBe(200)
+    const { id } = (await res.json()) as { id: string }
     expect(id).toMatch(/^fb_[a-z0-9]{6}$/)
 
     const json = await helpJson('ext/fb-node')
     expect(json.feedback).toEqual([{ id, title: 'get_thing 偶发 500', score: 0 }])
     const dsl = await helpOf('ext/fb-node', 'text/plain')
-    expect(dsl).toContain('feedback 1 POST /system/feedback')
+    expect(dsl).toContain('feedback 1 GET /ext/fb-node/~feedback')
     expect(dsl).toContain(`  ${id} 0 "get_thing 偶发 500"`)
     const md = await helpOf('ext/fb-node', 'text/markdown')
     expect(md).toContain('## Agent feedback')
-    expect(md).toContain(`\`${id}\``)
+    expect(md).toContain('POST /ext/fb-node/~feedback')
 
-    const got = await postJson(
-      'system/feedback',
-      { tool: 'get', arguments: { path: 'ext/fb-node', id } },
-      bearer(agentSk),
-    )
-    expect(((await got.json()) as { detail: string }).detail).toBe('重试一次即可恢复')
+    const got = await getJson(`ext/fb-node/~feedback/${id}`, bearer(agentSk))
+    expect(got.status).toBe(200)
+    const detail = (await got.json()) as { detail: string; by: string }
+    expect(detail.detail).toBe('重试一次即可恢复')
+    expect(detail.by).toBe('agent:reporter')
   })
 
-  it('净分被踩到 -3 → 从 ~help 区块与默认 list 消失,includeHidden 仍可查', async () => {
+  it('工具子路径可反馈;窄 scope SK 对自己够得着的路径可反馈,树外路径 404', async () => {
+    await mountEcho('ext/fb-scoped')
+    await mountEcho('ext/fb-other')
+    const narrowSk = await issueAgentSk('narrow', 'ext/fb-scoped/**')
+
+    const onTool = await postJson(
+      'ext/fb-scoped/get_thing/~feedback',
+      { title: '参数要小写', detail: 'x' },
+      bearer(narrowSk),
+    )
+    expect(onTool.status).toBe(200)
+    expect((await helpJson('ext/fb-scoped/get_thing')).feedback).toHaveLength(1)
+
+    // 窄 scope 之外的路径:read 判不过 → 404 不泄露存在性。
+    const outside = await postJson(
+      'ext/fb-other/~feedback',
+      { title: 't', detail: 'd' },
+      bearer(narrowSk),
+    )
+    expect(outside.status).toBe(404)
+  })
+
+  it('vote 改净分:被踩到 -3 → ~help 区块与默认列表消失,?hidden=1 仍可查', async () => {
     await mountEcho('ext/fb-hide')
     const author = await issueAgentSk('author')
-    const submit = await postJson(
-      'system/feedback',
-      { tool: 'submit', arguments: { path: 'ext/fb-hide', title: '误导性反馈', detail: 'x' } },
-      bearer(author),
-    )
-    const { id } = (await submit.json()) as { id: string }
+    const id = await submitFeedback('ext/fb-hide', '误导性反馈', bearer(author))
 
     for (const name of ['voter1', 'voter2', 'voter3']) {
       const voterSk = await issueAgentSk(name)
-      const res = await postJson(
-        'system/feedback',
-        { tool: 'vote', arguments: { path: 'ext/fb-hide', id, value: 'down' } },
-        bearer(voterSk),
-      )
+      const res = await postJson(`ext/fb-hide/~feedback/${id}`, { vote: 'down' }, bearer(voterSk))
       expect(res.status).toBe(200)
     }
 
     expect((await helpJson('ext/fb-hide')).feedback).toBeUndefined()
-    const dft = await postJson(
-      'system/feedback',
-      { tool: 'list', arguments: { path: 'ext/fb-hide' } },
-      bearer(author),
-    )
+    const dft = await getJson('ext/fb-hide/~feedback', bearer(author))
     expect(((await dft.json()) as { items: unknown[] }).items).toHaveLength(0)
-    const full = await postJson(
-      'system/feedback',
-      { tool: 'list', arguments: { path: 'ext/fb-hide', includeHidden: true } },
-      bearer(author),
-    )
+    const full = await getJson('ext/fb-hide/~feedback?hidden=1', bearer(author))
     const items = ((await full.json()) as { items: Array<{ id: string; score: number }> }).items
     expect(items).toEqual([expect.objectContaining({ id, score: -3 })])
   })
 
-  it('校验与权限:title 超长 → 400;悬空路径 → 404;agent remove → 403,admin remove 生效', async () => {
+  it('校验与权限:title 超长 → 400;非法 vote → 400;悬空路径 → 404;DELETE 仅 admin', async () => {
     await mountEcho('ext/fb-guard')
     const agentSk = await issueAgentSk('guard')
+
     const tooLong = await postJson(
-      'system/feedback',
-      { tool: 'submit', arguments: { path: 'ext/fb-guard', title: 'x'.repeat(81), detail: 'd' } },
+      'ext/fb-guard/~feedback',
+      { title: 'x'.repeat(81), detail: 'd' },
       bearer(agentSk),
     )
     expect(tooLong.status).toBe(400)
 
-    const dangling = await postJson(
-      'system/feedback',
-      { tool: 'submit', arguments: { path: 'no/such/node', title: 't', detail: 'd' } },
-      bearer(agentSk),
-    )
+    const dangling = await postJson('no/such/node/~feedback', { title: 't', detail: 'd' }, admin())
     expect(dangling.status).toBe(404)
 
-    const submit = await postJson(
-      'system/feedback',
-      { tool: 'submit', arguments: { path: 'ext/fb-guard', title: 't', detail: 'd' } },
+    const id = await submitFeedback('ext/fb-guard', 't', bearer(agentSk))
+    const badVote = await postJson(
+      `ext/fb-guard/~feedback/${id}`,
+      { vote: 'sideways' },
       bearer(agentSk),
     )
-    const { id } = (await submit.json()) as { id: string }
-    const denied = await postJson(
-      'system/feedback',
-      { tool: 'remove', arguments: { path: 'ext/fb-guard', id } },
-      bearer(agentSk),
-    )
+    expect(badVote.status).toBe(400)
+
+    const denied = await SELF.fetch(`https://tb.test/ext/fb-guard/~feedback/${id}`, {
+      method: 'DELETE',
+      ...bearer(agentSk),
+    })
     expect(denied.status).toBe(403)
-    const removed = await postJson(
-      'system/feedback',
-      { tool: 'remove', arguments: { path: 'ext/fb-guard', id } },
-      admin(),
-    )
+    const removed = await SELF.fetch(`https://tb.test/ext/fb-guard/~feedback/${id}`, {
+      method: 'DELETE',
+      ...admin(),
+    })
     expect(removed.status).toBe(200)
     expect((await helpJson('ext/fb-guard')).feedback).toBeUndefined()
   })

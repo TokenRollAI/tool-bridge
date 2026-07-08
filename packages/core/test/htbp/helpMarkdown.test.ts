@@ -159,8 +159,9 @@ describe('renderHelpMarkdown:Notes 与 Agent feedback 节', () => {
     expect(md).toContain('## Agent feedback')
     expect(md).toContain('| `fb_a1x9k2` | 3 | create-doc 的 mode 参数必填 |')
     expect(md).toContain('| `fb_m4n5p6` | 0 | title 里的 \\| 要转义 |')
-    expect(md).toContain('{"tool":"get","arguments":{"path":"feishu","id":"<id>"}}')
-    expect(md).toContain('GET /system/feedback/~help')
+    expect(md).toContain('GET /feishu/~feedback/<id>')
+    expect(md).toContain('POST /feishu/~feedback')
+    expect(md).toContain('"vote"')
   })
 
   it('无 note/feedback 时两节缺席;空串 note 不渲染', () => {

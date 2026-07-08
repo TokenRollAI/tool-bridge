@@ -45,42 +45,39 @@ const VIEW = {
   score: 2,
 }
 
-describe('tb feedback', () => {
-  it('ls <path> → system/feedback list;--hidden 加 includeHidden', async () => {
+describe('tb feedback(~feedback 保留段端点)', () => {
+  it('ls <path> → GET /<path>/~feedback;--hidden 加 ?hidden=1', async () => {
     const fn = jsonFetch({ items: [VIEW] })
     await runCli(['feedback', 'ls', 'feishu', ...gw, '--json'])
     let [url, init] = fn.mock.calls[0] as [string, RequestInit]
-    expect(url).toBe('https://gw/system/feedback')
-    let payload = JSON.parse(init.body as string)
-    expect(payload.tool).toBe('list')
-    expect(payload.arguments).toEqual({ path: 'feishu' })
+    expect(url).toBe('https://gw/feishu/~feedback')
+    expect(init.method).toBe('GET')
+    expect(JSON.parse(stdoutText())).toEqual({ items: [VIEW] })
 
     await runCli(['feedback', 'ls', 'feishu', '--hidden', ...gw, '--json'])
     ;[url, init] = fn.mock.calls[1] as [string, RequestInit]
-    payload = JSON.parse(init.body as string)
-    expect(payload.arguments).toEqual({ path: 'feishu', includeHidden: true })
+    expect(url).toBe('https://gw/feishu/~feedback?hidden=1')
     expect(process.exitCode).toBe(0)
   })
 
-  it('get <path> <id> → system/feedback get;非 json 含 title 与 detail', async () => {
+  it('get <path> <id> → GET /<path>/~feedback/<id>;非 json 含 title 与 detail', async () => {
     const fn = jsonFetch({ ...VIEW, detail: '不传报 invalid_argument' })
-    await runCli(['feedback', 'get', 'feishu', 'fb_a1x9k2', ...gw])
-    const [, init] = fn.mock.calls[0] as [string, RequestInit]
-    const payload = JSON.parse(init.body as string)
-    expect(payload.tool).toBe('get')
-    expect(payload.arguments).toEqual({ path: 'feishu', id: 'fb_a1x9k2' })
+    await runCli(['feedback', 'get', 'feishu/create-doc', 'fb_a1x9k2', ...gw])
+    const [url, init] = fn.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe('https://gw/feishu/create-doc/~feedback/fb_a1x9k2')
+    expect(init.method).toBe('GET')
     expect(stdoutText()).toContain('mode 必填')
     expect(stdoutText()).toContain('不传报 invalid_argument')
     expect(process.exitCode).toBe(0)
   })
 
-  it('submit <path> --title --detail → system/feedback submit', async () => {
+  it('submit <path> --title --detail → POST /<path>/~feedback,body 为 {title,detail}', async () => {
     const fn = jsonFetch({ id: 'fb_new123', path: 'feishu', title: 't' })
     await runCli(['feedback', 'submit', 'feishu', '--title', 't', '--detail', 'd', ...gw, '--json'])
-    const [, init] = fn.mock.calls[0] as [string, RequestInit]
-    const payload = JSON.parse(init.body as string)
-    expect(payload.tool).toBe('submit')
-    expect(payload.arguments).toEqual({ path: 'feishu', title: 't', detail: 'd' })
+    const [url, init] = fn.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe('https://gw/feishu/~feedback')
+    expect(init.method).toBe('POST')
+    expect(JSON.parse(init.body as string)).toEqual({ title: 't', detail: 'd' })
     expect(process.exitCode).toBe(0)
   })
 
@@ -92,13 +89,13 @@ describe('tb feedback', () => {
     expect(fn).not.toHaveBeenCalled()
   })
 
-  it('vote <path> <id> <value> → system/feedback vote;非法 value 本地拒绝', async () => {
+  it('vote <path> <id> <value> → POST /<path>/~feedback/<id> {vote};非法 value 本地拒绝', async () => {
     const fn = jsonFetch(VIEW)
     await runCli(['feedback', 'vote', 'feishu', 'fb_a1x9k2', 'up', ...gw, '--json'])
-    const [, init] = fn.mock.calls[0] as [string, RequestInit]
-    const payload = JSON.parse(init.body as string)
-    expect(payload.tool).toBe('vote')
-    expect(payload.arguments).toEqual({ path: 'feishu', id: 'fb_a1x9k2', value: 'up' })
+    const [url, init] = fn.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe('https://gw/feishu/~feedback/fb_a1x9k2')
+    expect(init.method).toBe('POST')
+    expect(JSON.parse(init.body as string)).toEqual({ vote: 'up' })
     expect(process.exitCode).toBe(0)
 
     await runCli(['feedback', 'vote', 'feishu', 'fb_a1x9k2', 'sideways', ...gw])
@@ -106,13 +103,12 @@ describe('tb feedback', () => {
     expect(process.exitCode).toBe(1)
   })
 
-  it('rm <path> <id> → system/feedback remove', async () => {
+  it('rm <path> <id> → DELETE /<path>/~feedback/<id>', async () => {
     const fn = jsonFetch({ ok: true })
     await runCli(['feedback', 'rm', 'feishu', 'fb_a1x9k2', ...gw, '--json'])
-    const [, init] = fn.mock.calls[0] as [string, RequestInit]
-    const payload = JSON.parse(init.body as string)
-    expect(payload.tool).toBe('remove')
-    expect(payload.arguments).toEqual({ path: 'feishu', id: 'fb_a1x9k2' })
+    const [url, init] = fn.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe('https://gw/feishu/~feedback/fb_a1x9k2')
+    expect(init.method).toBe('DELETE')
     expect(process.exitCode).toBe(0)
   })
 })
