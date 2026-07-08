@@ -40,6 +40,7 @@ import {
   type Representation,
   renderHelpDsl,
   renderHelpJson,
+  renderHelpMarkdown,
   resolveUpstreamTool,
   type SearchOptions,
   type SecretStoreImpl,
@@ -161,14 +162,18 @@ function scopeForCmd(mod: BuiltinModule, nodePath: TreePath, cmd: string): CmdSp
   return mod.help(nodePath).cmds.find((c) => c.name === cmd)
 }
 
-/** 渲染 HelpModel:按协商表现输出 DSL(text/plain)或 JSON。 */
+/** 渲染 HelpModel:按协商表现输出 DSL(text/plain)、JSON 或 Markdown(可读性表现)。 */
 function renderHelp(model: HelpModel, rep: Representation): Response {
   if (rep === 'json') {
     return new Response(JSON.stringify(renderHelpJson(model)), {
       headers: { 'content-type': contentTypeFor('json') },
     })
   }
-  // ~help 只有 DSL(text/plain)与 JSON 两种;markdown 一并按 DSL 处理。
+  if (rep === 'markdown') {
+    return new Response(renderHelpMarkdown(model), {
+      headers: { 'content-type': contentTypeFor('markdown') },
+    })
+  }
   return new Response(renderHelpDsl(model), {
     headers: { 'content-type': contentTypeFor('dsl') },
   })
@@ -396,6 +401,7 @@ export function createTbApp(deps: TbAppDeps): Hono<{ Variables: Vars }> {
         node: { path: '', kind: 'directory', description: 'tool-bridge root' },
         cmds: [],
         children: children.map((n) => ({ path: n.path, kind: n.kind, description: n.description })),
+        hint: 'GET /<child-path>/~help describes a child node; GET /~tree?depth=N shows the subtree',
       }
       return renderHelp(model, rep)
     }
@@ -960,6 +966,7 @@ async function helpModelFor(
       node: { path: node.path, kind: node.kind, description: node.description },
       cmds: [],
       children: children.map((n) => ({ path: n.path, kind: n.kind, description: n.description })),
+      hint: 'GET /<child-path>/~help describes a child node',
     }
   }
   // device 自定义 tool 节点:~help 来自注册时上送的工具表(cmds),

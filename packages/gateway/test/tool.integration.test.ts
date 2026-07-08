@@ -278,7 +278,7 @@ describe('两级披露(节点级索引 + 工具级全量)', () => {
     { name: 'other', description: '另一个', method: 'GET', pathTemplate: '/get' },
   ]
 
-  it('节点级 ~help 是索引形态:cmd 无 inputSchema,描述附工具级提示', async () => {
+  it('节点级 ~help 是索引形态:cmd 无 inputSchema,工具级下钻指引在 hint 字段', async () => {
     await mountHttp('ext/two-level', SCHEMA_TOOLS)
     const res = await SELF.fetch(
       'https://tb.test/ext/two-level/~help',
@@ -287,12 +287,13 @@ describe('两级披露(节点级索引 + 工具级全量)', () => {
     expect(res.status).toBe(200)
     const json = (await res.json()) as {
       node: { description: string }
+      hint?: string
       cmds: Array<{ name: string; h?: string; inputSchema?: unknown }>
     }
     const lookup = json.cmds.find((c) => c.name === 'lookup')
     expect(lookup?.h).toBe('查一个东西')
     expect(lookup?.inputSchema).toBeUndefined()
-    expect(json.node.description).toContain('GET /ext/two-level/<tool>/~help')
+    expect(json.hint).toContain('GET /ext/two-level/<tool>/~help')
   })
 
   it('工具级 ~help 返回单工具全量 spec(inputSchema 在,cmd path 指向节点)', async () => {
