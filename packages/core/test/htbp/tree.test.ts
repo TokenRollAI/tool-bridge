@@ -145,4 +145,45 @@ describe('buildTree 截断:深度 / 节点上限 / 环', () => {
     expect(backToA?.truncated).toBe(true)
     expect(backToA?.children).toBeUndefined()
   })
+
+  it('opaqueKinds:深度边界遇 remote 节点直接标 truncated,不调 getChildren 探测', async () => {
+    const map: Record<string, TreeEntry[]> = {
+      '': [{ path: 'r', kind: 'remote', description: 'R' }],
+      // r 确有子,但边界探测不应调用 getChildren('r')
+      r: [{ path: 'r/x', kind: 'http', description: 'RX' }],
+    }
+    const probed: string[] = []
+    const getChildren = async (path: string): Promise<TreeEntry[]> => {
+      probed.push(path)
+      return map[path] ?? []
+    }
+    // depth=1:根展开一层,r 落在 depthLeft=0 边界
+    const tree = await buildTree({
+      root: '',
+      depth: 1,
+      getChildren,
+      opaqueKinds: new Set(['remote']),
+    })
+    const r = tree.children?.find((c) => c.path === 'r')
+    expect(r?.truncated).toBe(true)
+    expect(r?.children).toBeUndefined()
+    // 关键:边界上没有为探测 r 的子而调用 getChildren('r')(remote 免 fetch)
+    expect(probed).not.toContain('r')
+  })
+
+  it('opaqueKinds:depthLeft>0 时 remote 节点仍正常展开(只影响边界探测)', async () => {
+    const map: Record<string, TreeEntry[]> = {
+      '': [{ path: 'r', kind: 'remote', description: 'R' }],
+      r: [{ path: 'r/x', kind: 'http', description: 'RX' }],
+    }
+    // depth=2:r 落在 depthLeft=1,应正常展开其子 r/x
+    const tree = await buildTree({
+      root: '',
+      depth: 2,
+      getChildren: childrenFrom(map),
+      opaqueKinds: new Set(['remote']),
+    })
+    const r = tree.children?.find((c) => c.path === 'r')
+    expect(r?.children?.map((c) => c.path)).toEqual(['r/x'])
+  })
 })

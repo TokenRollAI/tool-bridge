@@ -57,6 +57,13 @@ export interface BuildTreeOpts {
    * 避免子树根被伪造为 `directory`;缺省回退 `kind:'directory', description:''`。
    */
   rootEntry?: TreeEntry
+  /**
+   * 「不透明」kind 集合:这些 kind 的节点在深度边界(`depthLeft<=0`)直接标 `truncated`,
+   * 不调 `getChildren` 探测有无子。用于 remote 联邦节点——它必然可能有远端子,无需为标
+   * truncated 而付一次远端 fetch(边界探测的远端往返是纯浪费)。仅影响边界探测,不影响
+   * `depthLeft>0` 时的实际聚合。
+   */
+  opaqueKinds?: Set<string>
 }
 
 /**
@@ -82,6 +89,11 @@ export async function buildTree(opts: BuildTreeOpts): Promise<TreeJson> {
     if (entry.online !== undefined) node.online = entry.online
 
     if (depthLeft <= 0) {
+      // 不透明 kind(如 remote 联邦):必然可能有子,直接标 truncated,免去边界探测的远端 fetch。
+      if (opts.opaqueKinds?.has(entry.kind)) {
+        node.truncated = true
+        return node
+      }
       // 达深度上限:不展开,仅探测是否存在子节点以决定 truncated
       const kids = await opts.getChildren(entry.path)
       if (kids.length > 0) node.truncated = true
