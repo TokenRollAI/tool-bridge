@@ -88,6 +88,13 @@ describe('apiText', () => {
     expect(await apiText(TARGET, { path: '/~help' })).toBe('htbp 0.1\n')
   })
 
+  it("accept: 'markdown' → 发送 Accept: text/markdown(tb help --md 用)", async () => {
+    const fn = mockOnce('# /\n', { status: 200 })
+    expect(await apiText(TARGET, { path: '/~help', accept: 'markdown' })).toBe('# /\n')
+    const [, init] = fn.mock.calls[0] as [string, RequestInit]
+    expect((init.headers as Record<string, string>).accept).toBe('text/markdown')
+  })
+
   it('401 → CliError', async () => {
     mockOnce(JSON.stringify({ code: 'permission_denied', message: 'unauth', retryable: false }), {
       status: 401,

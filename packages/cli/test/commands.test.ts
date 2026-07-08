@@ -131,3 +131,19 @@ describe('TBError → 退出码 1', () => {
     expect(process.exitCode).toBe(1)
   })
 })
+
+describe('tb help --md', () => {
+  it('发送 Accept: text/markdown 并原样打印响应', async () => {
+    const fn = vi.fn(async () => new Response('# /docs\n\n## Commands\n', { status: 200 }))
+    setFetch(fn as unknown as typeof fetch)
+    await runCli(['help', 'docs', '--md', '--base-url', 'https://gw', '--sk', 'tbk_x'])
+    const [url, init] = fn.mock.calls[0] as unknown as [string, RequestInit]
+    expect(url).toBe('https://gw/docs/~help')
+    expect((init.headers as Record<string, string>).accept).toBe('text/markdown')
+    expect(process.exitCode).toBe(0)
+    const written = (process.stdout.write as ReturnType<typeof vi.fn>).mock.calls
+      .map((c) => String(c[0]))
+      .join('')
+    expect(written).toContain('## Commands')
+  })
+})
