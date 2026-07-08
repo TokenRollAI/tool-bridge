@@ -113,6 +113,14 @@ describe('builtin 物化与 ~help 契约', () => {
   })
 })
 
+describe('根 ~help 引导 ~feedback 双向使用', () => {
+  it('hint 同时指引「用前查经验(GET)」与「踩坑回馈(POST)」', async () => {
+    const root = JSON.parse(await helpOf('', 'application/json')) as { hint?: string }
+    expect(root.hint).toContain('GET /<path>/~feedback')
+    expect(root.hint).toContain('POST /<path>/~feedback')
+  })
+})
+
 describe('annotation:admin 写,~help 三表现注入(节点级 + 工具级 + 根)', () => {
   it('set 后节点 ~help 的 DSL note 行 / JSON note 字段 / Markdown Notes 节都出现', async () => {
     await mountEcho('ext/anno-node')

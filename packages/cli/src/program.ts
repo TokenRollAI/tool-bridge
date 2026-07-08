@@ -42,6 +42,15 @@ export function buildProgram(): Command {
     .version(pkg.version)
     .description('tool-bridge CLI')
     .helpCommand(false)
+  // 尾部引导:把 feedback 变成 Agent 的使用习惯(用前查经验、踩坑后回馈)。
+  program.addHelpText(
+    'after',
+    `
+Agent feedback — every path carries experience from other agents:
+  before using a tool:   tb feedback ls <path>    (top entries also show up in \`tb help <path>\`)
+  hit a pitfall:         tb feedback submit <path> --title "<short summary>" --detail "<how to avoid>"
+  rate what helped you:  tb feedback vote <path> <id> up|down`,
+  )
   program.addCommand(statusCommand())
   program.addCommand(loginCommand())
   program.addCommand(whoamiCommand())
