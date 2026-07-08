@@ -1,16 +1,19 @@
 import { Fragment } from 'react'
+import Markdown from 'react-markdown'
 import { Link, useParams } from 'react-router'
+import remarkGfm from 'remark-gfm'
 import { KindBadge } from '@/components/KindBadge'
 import { CmdPanel } from '@/components/node/CmdPanel'
 import { ContextBrowser } from '@/components/node/ContextBrowser'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import type { ApiError } from '@/lib/api'
-import { useHelp, useHelpDsl } from '@/lib/queries'
+import { useHelp, useHelpMarkdown } from '@/lib/queries'
 
 /**
  * 节点页 = `~help` 的通用渲染器:
- * 描述 + 子节点导航 + 每条 cmd 的表单调用面板;"~help 原文" tab 对等 `tb help <path>`。
+ * 描述 + 子节点导航 + 每条 cmd 的表单调用面板;"~help 文档" tab 展示可读 Markdown
+ * 表现(协议默认),对等 `tb help <path>`。
  */
 export function NodePage() {
   const { '*': splat } = useParams()
@@ -67,8 +70,8 @@ export function NodePage() {
           <TabsTrigger value="invoke" className="px-3 text-xs">
             调用
           </TabsTrigger>
-          <TabsTrigger value="dsl" className="px-3 text-xs">
-            ~help 原文
+          <TabsTrigger value="markdown" className="px-3 text-xs">
+            ~help 文档
           </TabsTrigger>
         </TabsList>
 
@@ -135,22 +138,22 @@ export function NodePage() {
           )}
         </TabsContent>
 
-        <TabsContent value="dsl" className="mt-4">
-          <DslView path={path} />
+        <TabsContent value="markdown" className="mt-4">
+          <HelpMarkdownView path={path} />
         </TabsContent>
       </Tabs>
     </div>
   )
 }
 
-function DslView({ path }: { path: string }) {
-  const dsl = useHelpDsl(path)
-  if (dsl.isPending) return <Skeleton className="h-40 w-full" />
-  if (dsl.isError) return <p className="text-sm text-destructive">{dsl.error.message}</p>
+function HelpMarkdownView({ path }: { path: string }) {
+  const md = useHelpMarkdown(path)
+  if (md.isPending) return <Skeleton className="h-40 w-full" />
+  if (md.isError) return <p className="text-sm text-destructive">{md.error.message}</p>
   return (
-    <pre className="overflow-auto rounded-md border bg-card/60 px-4 py-3 font-mono text-xs leading-relaxed">
-      {dsl.data}
-    </pre>
+    <div className="prose prose-sm dark:prose-invert max-w-none rounded-md border bg-card/60 px-4 py-3 prose-pre:bg-background prose-pre:text-xs prose-code:font-mono">
+      <Markdown remarkPlugins={[remarkGfm]}>{md.data}</Markdown>
+    </div>
   )
 }
 
