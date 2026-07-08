@@ -1,6 +1,6 @@
 # Guide:MCP 上游生产坑(会话复用与不合规上游)
 
-> 用途:挂载/排查 `kind:mcp` 上游时的已知坑与可重跑排查手法。来源:2026-07-07 生产故障取证与修复(挂载 MetaMCP 后"过一段时间工具全部消失")。更新时机:MCP provider 会话机制变化或新上游坑出现时。
+> 用途:挂载/排查 `kind:mcp` 上游时的已知坑与可重跑排查手法。来源:2026-07-07 生产故障取证与修复(挂载 MetaMCP 后"过一段时间工具全部消失")+ 2026-07-08 同故障复发取证(初版防御被 KV 读缓存击穿)。更新时机:MCP provider 会话机制变化或新上游坑出现时。
 
 ## 会话复用机制(gateway `providers/mcp.ts`)
 
@@ -12,7 +12,8 @@
 
 - MCP spec 要求对过期 session 回 404;MetaMCP 空闲回收会话后把旧 session 当空会话,`tools/list` 正常返回空数组——网关侧毫无失效信号。
 - 症状:节点 `~help` `cmds:[]`、调用一律 404「未知工具」,且不自愈(空列表还进 toolCache);注册面变更(触发 invalidate)前永不恢复。
-- **防御(已实现)**:`list` 在"复用缓存会话 + 空列表"时视为可疑——清会话、完整重握手再取一次,仍空才相信;只重试一次不循环,真空列表的合规上游至多多付一趟握手。测试:gateway `tool.integration.test.ts`「mcp 会话复用:过期会话空列表防御」(默认离线,mock Streamable HTTP 上游)。
+- **防御(已实现)**:`list` 在"复用缓存会话 + 空列表"时视为可疑——清会话、**强制完整重握手**(`forceFresh`,不回读会话缓存)再取一次,仍空才相信;只重试一次不循环,真空列表的合规上游至多多付一趟握手。测试:gateway `tool.integration.test.ts`「mcp 会话复用:过期会话空列表防御」(默认离线,mock Streamable HTTP 上游)。
+- **坑中坑:防御重试不得回读 KV(2026-07-08 复发根因)**。初版防御是"清会话(KV delete)→ 重试时 loadSession 回读 KV":同一请求内刚 get 过该 key,Cloudflare KV 边缘读缓存(≥60s)把刚删的旧会话又还回来 → 重试再次复用死会话 → 又拿到空列表 → 防御被击穿,空列表照进 toolCache。缓存命中是概率性的,故防御"有时自愈有时不能"——修复当天塞伪 session 验证通过、次日生产复发。修复:重试直接强制完整握手,不经会话缓存;钉死用例为同文件「KV 边缘读缓存吞掉 delete」(注入 delete 为 no-op 的 StateStore 模拟缓存窗口)。教训同 [workers-kv-pitfalls.md](workers-kv-pitfalls.md):**"删缓存后立刻回读"在 KV 上不成立,凡纠错路径都应绕开缓存读**。
 - `call` 路径无此防御:工具名解析不到时走不到 call;上游对过期会话的 call 若返回 JSON-RPC 业务错误,网关无法与真实业务错误区分。
 
 ## 排查手法(生产可重跑)
