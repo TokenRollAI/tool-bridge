@@ -38,6 +38,12 @@ export interface CmdSpec {
   effect?: string
   /** 危险操作需二次确认(HTBP 属性表可选)。 */
   confirm?: boolean
+  /**
+   * body 即 arguments 本体(直连工具路径,无 {tool,arguments} 信封)。
+   * 仅影响 DSL `body` 行渲染;JSON 表现恒为裸 inputSchema,body 形状由 path 判别
+   * (path 含工具段 ⇒ 扁平)。
+   */
+  flatBody?: boolean
 }
 
 /** `~help` 的内部模型:一个节点 + 其 cmd 集合 + (directory)子节点引用。 */

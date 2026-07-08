@@ -445,10 +445,48 @@ export function createTbApp(deps: TbAppDeps): Hono<{ Variables: Vars }> {
     if (remote) return remote
 
     let node: TreeNode
+    // 直连工具路径(POST /<node>/<tool>)命中时为工具虚拟名;body 即 arguments 本体。
+    let directTool: string | null = null
     try {
       node = await registry.get(raw)
     } catch {
-      throw TBError.notFound('not found')
+      // 非注册路径:最长前缀命中 mcp/http/tool 节点且剩余恰一段 → 直连工具调用
+      // (与工具级 ~help 同一路径面);其余 404。可见性按节点 path 复判
+      // (raw 含工具段,scope 精确到节点路径时会漏判)。
+      const resolved = await registry.resolve(raw).catch(() => null)
+      if (
+        resolved === null ||
+        (resolved.node.kind !== 'mcp' &&
+          resolved.node.kind !== 'http' &&
+          resolved.node.kind !== 'tool') ||
+        resolved.node.config === undefined ||
+        resolved.rest === '' ||
+        resolved.rest.includes('/')
+      ) {
+        throw TBError.notFound('not found')
+      }
+      if (!check(ctx, resolved.node.path, 'read').allow) throw TBError.notFound('not found')
+      node = resolved.node
+      directTool = resolved.rest
+    }
+
+    // 解析调用体:直连路径 body 即 arguments(可空);节点路径沿用 {tool,arguments} 信封。
+    const readInvokeBody = async (): Promise<{
+      tool: string
+      args: Record<string, unknown>
+    }> => {
+      const parsed = (await c.req.json().catch(() => null)) as unknown
+      if (directTool !== null) {
+        if (parsed !== null && (typeof parsed !== 'object' || Array.isArray(parsed))) {
+          throw new TBError('invalid_argument', 'body must be a JSON object (tool arguments)')
+        }
+        return { tool: directTool, args: (parsed ?? {}) as Record<string, unknown> }
+      }
+      const body = parsed as { tool?: unknown; arguments?: unknown } | null
+      if (!body || typeof body.tool !== 'string') {
+        throw new TBError('invalid_argument', 'body must be {tool, arguments}')
+      }
+      return { tool: body.tool, args: (body.arguments ?? {}) as Record<string, unknown> }
     }
 
     // --- device 自定义 tool 节点:providerConfig 标记 → 帧协议 call 转发。 ---
@@ -458,17 +496,11 @@ export function createTbApp(deps: TbAppDeps): Hono<{ Variables: Vars }> {
       if (!check(ctx, node.path, 'call').allow) {
         throw new TBError('permission_denied', `no scope grants 'call' on '${node.path}'`)
       }
-      const body = (await c.req.json().catch(() => null)) as {
-        tool?: unknown
-        arguments?: unknown
-      } | null
-      if (!body || typeof body.tool !== 'string') {
-        throw new TBError('invalid_argument', 'body must be {tool, arguments}')
-      }
+      const { tool, args } = await readInvokeBody()
       const result = await invokeDevice(deps, toolMarker.deviceId, {
         path: relativeDevicePath(node.path, toolMarker.mountPath),
-        tool: body.tool,
-        arguments: (body.arguments ?? {}) as Record<string, unknown>,
+        tool,
+        arguments: args,
       })
       return renderResult(result, negotiate(c.req.header('accept')))
     }
@@ -481,17 +513,10 @@ export function createTbApp(deps: TbAppDeps): Hono<{ Variables: Vars }> {
       if (!check(ctx, node.path, 'call').allow) {
         throw new TBError('permission_denied', `no scope grants 'call' on '${node.path}'`)
       }
-      const body = (await c.req.json().catch(() => null)) as {
-        tool?: unknown
-        arguments?: unknown
-      } | null
-      if (!body || typeof body.tool !== 'string') {
-        throw new TBError('invalid_argument', 'body must be {tool, arguments}')
-      }
-      const args = (body.arguments ?? {}) as Record<string, unknown>
+      const { tool, args } = await readInvokeBody()
       const provider = await providerFor(node, ctx, deps)
       const tools = await upstreamTools(node, provider, deps, false, new Date().toISOString())
-      const upstreamName = resolveUpstreamTool(node.virtualize, tools, body.tool)
+      const upstreamName = resolveUpstreamTool(node.virtualize, tools, tool)
       const result = await provider.call(upstreamName, args)
       // MCP RPC 业务错误(result.isError)是正常返回值(HTTP 200),按协商渲染其 content。
       return renderResult(result.content, negotiate(c.req.header('accept')))

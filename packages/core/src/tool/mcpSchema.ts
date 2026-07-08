@@ -12,13 +12,18 @@ import type { CmdSpec, HelpModel } from '../htbp/model'
 import type { NodeKind, TreePath } from '../types'
 import type { ToolSpec } from './types'
 
-/** 单个(虚拟化后)ToolSpec → CmdSpec;index=true 时略去 inputSchema/returns(索引形态)。 */
+/**
+ * 单个(虚拟化后)ToolSpec → CmdSpec;index=true 时略去 inputSchema/returns(索引形态)。
+ * cmd 宣告**直连工具路径** `POST /<node>/<tool>`(body 即 arguments 本体,flatBody);
+ * 兼容入口 `POST /<node>` + `{tool,arguments}` 信封仍受理但不再宣告。
+ */
 function toolToCmd(nodePath: TreePath, tool: ToolSpec, index: boolean): CmdSpec {
   const cmd: CmdSpec = {
     name: tool.name,
     method: 'POST',
-    path: cmdPath(nodePath),
+    path: `${cmdPath(nodePath)}/${tool.name}`,
     scope: 'call',
+    flatBody: true,
   }
   if (tool.description !== undefined) cmd.h = tool.description
   if (!index && tool.inputSchema !== undefined) cmd.inputSchema = tool.inputSchema
@@ -41,7 +46,7 @@ export function toolsToHelpModel(
 ): HelpModel {
   const index = opts.index === true
   const description = index
-    ? `${node.description};工具入参 schema 经 GET /${nodePath}/<tool>/~help 按需获取`
+    ? `${node.description};工具入参 schema 经 GET /${nodePath}/<tool>/~help 按需获取,调用 POST /${nodePath}/<tool>`
     : node.description
   return {
     node: { path: nodePath, kind: node.kind, description },
@@ -51,8 +56,8 @@ export function toolsToHelpModel(
 
 /**
  * 单工具的 `~help` 模型(`GET /<node>/<tool>/~help`,两级披露的细节级)。
- * node 行呈现工具伪节点路径 `<nodePath>/<tool>`;cmd 的调用 path 仍是 `/<nodePath>`
- * (数据面入口不变:POST /<node> + {tool,arguments})。
+ * node 行呈现工具伪节点路径 `<nodePath>/<tool>`;cmd 的调用 path 同为直连路径
+ * `POST /<nodePath>/<tool>`(body 即 arguments 本体)。
  */
 export function toolHelpModel(
   nodePath: TreePath,

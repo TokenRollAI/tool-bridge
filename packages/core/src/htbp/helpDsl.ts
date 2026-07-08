@@ -26,8 +26,9 @@ function nodeLine(path: string, kind: string, description: string): string {
  *   缩进的 `h`/`body`/`returns`/`scope`/`effect`/`confirm`(此顺序);directory 的 children 续为 `node` 行。
  * `scope` 恒有;`h`/`inputSchema`/`returns`/`effect` 有值才渲染;`confirm` 仅在为真时渲染(其缺席即默认 false)。
  *
- * `body` 行是**请求信封示意**:由 cmd 的 `inputSchema`(arguments 的 JSON Schema)
- * 包成 `{ "tool": <name>, "arguments": <inputSchema> }` 单行紧凑 JSON——与 JSON 表现的
+ * `body` 行是**请求体示意**:缺省由 cmd 的 `inputSchema`(arguments 的 JSON Schema)
+ * 包成 `{ "tool": <name>, "arguments": <inputSchema> }` 单行紧凑 JSON;`flatBody` 的 cmd
+ * (直连工具路径 `POST /<node>/<tool>`)body 即裸 `inputSchema`——两种都与 JSON 表现的
  * 裸 `inputSchema` 语义等价、结构表现不同。
  */
 export function renderHelpDsl(model: HelpModel): string {
@@ -37,7 +38,8 @@ export function renderHelpDsl(model: HelpModel): string {
     lines.push(`cmd ${cmd.name} ${cmd.method} ${cmd.path}`)
     if (cmd.h !== undefined) lines.push(`  h ${cmd.h}`)
     if (cmd.inputSchema !== undefined) {
-      lines.push(`  body ${JSON.stringify({ tool: cmd.name, arguments: cmd.inputSchema })}`)
+      const body = cmd.flatBody ? cmd.inputSchema : { tool: cmd.name, arguments: cmd.inputSchema }
+      lines.push(`  body ${JSON.stringify(body)}`)
     }
     if (cmd.returns !== undefined) lines.push(`  returns ${cmd.returns}`)
     lines.push(`  scope ${cmd.scope}`)
