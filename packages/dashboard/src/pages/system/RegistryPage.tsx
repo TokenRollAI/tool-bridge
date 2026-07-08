@@ -1,5 +1,14 @@
 import { useQueryClient } from '@tanstack/react-query'
-import { Boxes, ExternalLink, FileJson2, Loader2, Plus, Search, Trash2 } from 'lucide-react'
+import {
+  Boxes,
+  ExternalLink,
+  FileJson2,
+  KeyRound,
+  Loader2,
+  Plus,
+  Search,
+  Trash2,
+} from 'lucide-react'
 import { useState } from 'react'
 import { Link } from 'react-router'
 import { toast } from 'sonner'
@@ -38,7 +47,7 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { Textarea } from '@/components/ui/textarea'
-import { useInvoke, usePluginList, useRegistryList } from '@/lib/queries'
+import { useInvoke, useOAuthAuthorize, usePluginList, useRegistryList } from '@/lib/queries'
 import type { RegistryNode } from '@/lib/types'
 import { cn } from '@/lib/utils'
 
@@ -52,6 +61,7 @@ type KindFilter = (typeof KIND_FILTERS)[number]
 export function RegistryPage() {
   const list = useRegistryList()
   const invoke = useInvoke()
+  const oauth = useOAuthAuthorize()
   const qc = useQueryClient()
   const [kindFilter, setKindFilter] = useState<KindFilter>('all')
   const [search, setSearch] = useState('')
@@ -68,6 +78,23 @@ export function RegistryPage() {
         onError: (e) => toast.error(e.message),
       },
     )
+  }
+
+  // auth:'oauth' 挂载的授权入口(对等 tb tool auth):redirect → 新标签打开 AS 授权页。
+  const authorize = (path: string) => {
+    oauth.mutate(path, {
+      onSuccess: (r) => {
+        if (r.status === 'authorized') {
+          toast.success(`${path} 已授权(凭证有效)`)
+          return
+        }
+        if (r.authorizationUrl) {
+          window.open(r.authorizationUrl, '_blank', 'noopener')
+          toast.info('已打开授权页,完成授权后即可调用')
+        }
+      },
+      onError: (e) => toast.error(e.message),
+    })
   }
 
   const mounted = (list.data?.items ?? []).filter((n) => !n.path.startsWith('system'))
@@ -172,6 +199,18 @@ export function RegistryPage() {
                   </TableCell>
                   <TableCell>
                     <div className="flex justify-end gap-1">
+                      {n.kind === 'mcp' && n.config?.auth === 'oauth' && (
+                        <Button
+                          variant="ghost"
+                          size="icon-xs"
+                          aria-label="OAuth 授权"
+                          title="OAuth 授权"
+                          disabled={oauth.isPending}
+                          onClick={() => authorize(n.path)}
+                        >
+                          <KeyRound />
+                        </Button>
+                      )}
                       <Button
                         variant="ghost"
                         size="icon-xs"
@@ -252,6 +291,7 @@ type MountKind = 'mcp' | 'http' | 'context' | 'remote' | 'tool'
 /** 挂载表单(按 kind 分支出 NodeConfig;tool 与 context 可引用已注册 plugin 为 provider)。 */
 function MountDialog() {
   const invoke = useInvoke()
+  const oauth = useOAuthAuthorize()
   const qc = useQueryClient()
   const plugins = usePluginList()
   const [open, setOpen] = useState(false)
@@ -259,8 +299,9 @@ function MountDialog() {
   const [path, setPath] = useState('')
   const [description, setDescription] = useState('')
   const [err, setErr] = useState<string | null>(null)
-  // mcp
+  // mcp(auth:none = 无凭证;authRef = 静态 Bearer;oauth = 网关托管 OAuth,挂载后即发起授权)
   const [mcpUrl, setMcpUrl] = useState('')
+  const [mcpAuthMode, setMcpAuthMode] = useState<'none' | 'authRef' | 'oauth'>('none')
   const [mcpAuthRef, setMcpAuthRef] = useState('')
   // 虚拟化(mcp/http/tool 共用;对等 CLI --prefix/--rename/--hide/--describe)
   const [prefix, setPrefix] = useState('')
@@ -336,10 +377,14 @@ function MountDialog() {
     switch (kind) {
       case 'mcp':
         if (!mcpUrl.trim()) throw new Error('url 必填')
+        if (mcpAuthMode === 'authRef' && !mcpAuthRef.trim()) {
+          throw new Error('authRef 必填(先在「凭证保管」set)')
+        }
         return {
           kind: 'mcp',
           url: mcpUrl.trim(),
-          ...(mcpAuthRef.trim() ? { authRef: mcpAuthRef.trim() } : {}),
+          ...(mcpAuthMode === 'authRef' ? { authRef: mcpAuthRef.trim() } : {}),
+          ...(mcpAuthMode === 'oauth' ? { auth: 'oauth' } : {}),
         }
       case 'http': {
         if (!endpoint.trim()) throw new Error('endpoint 必填')
@@ -437,12 +482,27 @@ function MountDialog() {
       },
       {
         onSuccess: () => {
-          toast.success(`已挂载 ${path.trim()}`)
+          const mounted = path.trim()
+          toast.success(`已挂载 ${mounted}`)
           setOpen(false)
           setErr(null)
           setPath('')
           setDescription('')
           qc.invalidateQueries({ queryKey: ['tb'] })
+          // oauth 挂载:挂载完立即发起授权(redirect → 新标签打开 AS 授权页)。
+          if (kind === 'mcp' && mcpAuthMode === 'oauth') {
+            oauth.mutate(mounted, {
+              onSuccess: (r) => {
+                if (r.status === 'authorized') {
+                  toast.success(`${mounted} 已授权(凭证有效)`)
+                } else if (r.authorizationUrl) {
+                  window.open(r.authorizationUrl, '_blank', 'noopener')
+                  toast.info('已打开授权页,完成授权后即可调用')
+                }
+              },
+              onError: (e) => toast.error(`发起授权失败:${e.message}(可稍后在列表点钥匙重试)`),
+            })
+          }
         },
         onError: (e) => setErr(e.message),
       },
@@ -533,17 +593,49 @@ function MountDialog() {
                   onChange={(e) => setMcpUrl(e.target.value)}
                 />
               </div>
-              <div className="grid gap-1.5">
-                <Label htmlFor="mcp-auth" className="text-xs">
-                  authRef(可空)
-                </Label>
-                <Input
-                  id="mcp-auth"
-                  className="font-mono text-xs"
-                  value={mcpAuthRef}
-                  onChange={(e) => setMcpAuthRef(e.target.value)}
-                />
+              <div className="grid grid-cols-2 gap-3">
+                <div className="grid gap-1.5">
+                  <Label className="text-xs">上游认证</Label>
+                  <Select
+                    value={mcpAuthMode}
+                    onValueChange={(v) => setMcpAuthMode(v as typeof mcpAuthMode)}
+                  >
+                    <SelectTrigger className="font-mono text-xs">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none" className="font-mono text-xs">
+                        无(公开上游)
+                      </SelectItem>
+                      <SelectItem value="authRef" className="font-mono text-xs">
+                        authRef — 静态 Bearer
+                      </SelectItem>
+                      <SelectItem value="oauth" className="font-mono text-xs">
+                        oauth — 网关托管 OAuth
+                      </SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                {mcpAuthMode === 'authRef' && (
+                  <div className="grid gap-1.5">
+                    <Label htmlFor="mcp-auth" className="text-xs">
+                      authRef *(凭证保管里的名字)
+                    </Label>
+                    <Input
+                      id="mcp-auth"
+                      className="font-mono text-xs"
+                      value={mcpAuthRef}
+                      onChange={(e) => setMcpAuthRef(e.target.value)}
+                    />
+                  </div>
+                )}
               </div>
+              {mcpAuthMode === 'oauth' && (
+                <p className="text-[11px] text-muted-foreground">
+                  挂载后自动打开上游授权页(OAuth 授权码 + PKCE,token 由网关保管、自动续期);
+                  之后可在列表行的钥匙按钮重新授权。
+                </p>
+              )}
             </>
           )}
 

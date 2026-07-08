@@ -123,6 +123,15 @@ export async function validateConnection(conn: Connection): Promise<void> {
   await getHelp(conn, '')
 }
 
+/** POST /<path>/~authorize:mcp 托管 OAuth 发起(auth:'oauth' 挂载;对等 `tb tool auth`)。 */
+export async function startOAuthAuthorize(
+  conn: Connection,
+  path: string,
+): Promise<{ status: 'authorized' | 'redirect'; authorizationUrl?: string }> {
+  const res = await request(conn, `/${path}/~authorize`, { method: 'POST' })
+  return (await res.json()) as { status: 'authorized' | 'redirect'; authorizationUrl?: string }
+}
+
 /** GET /healthz(免认证;tb status 同款)。 */
 export async function getHealthz(baseUrl: string) {
   const res = await fetch(`${baseUrl.replace(/\/+$/, '')}/healthz`)

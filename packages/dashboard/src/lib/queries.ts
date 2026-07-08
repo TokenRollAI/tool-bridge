@@ -8,6 +8,7 @@ import {
   getTree,
   type InvokeResult,
   invoke,
+  startOAuthAuthorize,
 } from './api'
 import { type InvokeRecord, loadHistory, recordInvoke, subscribeHistory } from './history'
 import { useConn, useSession } from './session'
@@ -115,6 +116,14 @@ export function useInvoke() {
         ms: 0,
         at: new Date().toISOString(),
       }),
+  })
+}
+
+/** mcp 托管 OAuth 发起(POST /<path>/~authorize;对等 `tb tool auth`)。 */
+export function useOAuthAuthorize() {
+  const conn = useConn()
+  return useMutation({
+    mutationFn: (path: string) => startOAuthAuthorize(conn, path),
   })
 }
 
