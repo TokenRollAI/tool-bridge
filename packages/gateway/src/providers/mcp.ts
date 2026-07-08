@@ -11,8 +11,10 @@
  *   缓存的只有会话凭证与 tools/list(toolCache);**调用结果永不缓存**。
  * - **空列表防御**:不合规上游(实测 MetaMCP)对过期会话不按 spec 回 404,而是当作
  *   空会话正常返回 200 + 空 tools——网关侧毫无失效信号。故 `list` 在"复用缓存会话且
- *   拿到空列表"时视为可疑:清会话、完整重握手再取一次,仍空才相信(只重试一次,
- *   真空列表上游至多多付一趟握手)。
+ *   拿到空列表"时视为可疑:清会话、**强制完整重握手**再取一次,仍空才相信(只重试
+ *   一次,真空列表上游至多多付一趟握手)。重试不得回读会话缓存:KV 边缘读缓存
+ *   (≥60s)会把刚删的旧会话又还回来,重试再次复用死会话,防御被击穿
+ *   (2026-07-08 生产复发取证)。
  * - `authRef` 经 SecretStore.resolve 注入 `requestInit.headers` 的静态 `Authorization: Bearer`。
  * - **单一 choke point**(`guard`):一切传输/协议错误经 `normalizeUpstreamError` 归一为 TBError;
  *   MCP RPC 业务错误(`result.isError`)不是错误——落 `ToolResult.isError`,正常返回。
@@ -169,12 +171,15 @@ interface SessionOutcome<T> {
  * 会话内执行 `fn`:有缓存会话则带 sessionId 重建 transport(SDK 跳过 initialize,单趟往返);
  * 无缓存/会话失效则完整握手并回填缓存。**不再主动 terminateSession**——会话跨请求存续,
  * 由上游按空闲策略回收;失效信号(400/404)驱动重握手。
+ * `forceFresh` 跳过缓存会话直接完整握手——供空列表防御的重试使用(不得回读 KV,
+ * 边缘读缓存会把刚删的旧会话还回来)。
  */
 async function withSession<T>(
   url: string,
   bearer: string | undefined,
   session: McpSessionStore | undefined,
   fn: (client: Client) => Promise<T>,
+  forceFresh = false,
 ): Promise<SessionOutcome<T>> {
   const makeTransport = (sessionId: string | undefined): StreamableHTTPClientTransport =>
     new StreamableHTTPClientTransport(new URL(url), {
@@ -202,7 +207,7 @@ async function withSession<T>(
     return { value: await fn(client), viaCachedSession: false }
   }
 
-  const cached = await loadSession(session)
+  const cached = forceFresh ? null : await loadSession(session)
   if (cached !== null) {
     const transport = makeTransport(cached.sessionId)
     const client = makeClient()
@@ -256,15 +261,17 @@ export function createMcpProvider(
     list: () =>
       guard(async () => {
         const b = await bearer()
-        const listOnce = (): Promise<SessionOutcome<{ tools: McpTool[] }>> =>
-          withSession(config.url, b, opts.session, (c) => c.listTools()) as Promise<
+        const listOnce = (forceFresh = false): Promise<SessionOutcome<{ tools: McpTool[] }>> =>
+          withSession(config.url, b, opts.session, (c) => c.listTools(), forceFresh) as Promise<
             SessionOutcome<{ tools: McpTool[] }>
           >
         let res = await listOnce()
-        // 空列表防御(见文件头):复用缓存会话拿到空列表 → 清会话完整重握手再取一次。
+        // 空列表防御(见文件头):复用缓存会话拿到空列表 → 清会话、强制完整重握手再取
+        // 一次。重试必须 forceFresh:清会话后回读 KV 会命中边缘读缓存拿回旧会话,
+        // 重试再次复用死会话,防御被击穿。
         if (res.viaCachedSession && res.value.tools.length === 0) {
           await clearSession(opts.session)
-          res = await listOnce()
+          res = await listOnce(true)
         }
         return res.value.tools.map(toSpec)
       }),

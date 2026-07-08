@@ -1,6 +1,7 @@
 import { env, SELF } from 'cloudflare:test'
-import { parseHelpDsl } from '@tool-bridge/core'
+import { MemoryStateStore, parseHelpDsl, SecretStoreImpl, type StateStore } from '@tool-bridge/core'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { createMcpProvider } from '../src/providers/mcp'
 import { TEST_ADMIN_SK } from './fixtures'
 
 // Tool Layer 集成测试:mcp/http Provider、工具虚拟化、调用点 call 判定、
@@ -526,6 +527,38 @@ describe('mcp 会话复用:过期会话空列表防御(默认离线,上游为 fe
     const second = await SELF.fetch('https://tb.test/ext/mcp-empty/~help?refresh=1', admin())
     expect(second.status).toBe(200)
     expect(parseHelpDsl(await second.text()).cmds).toHaveLength(0)
+    expect(upstream.initializeCalls()).toBe(2)
+  })
+
+  it('KV 边缘读缓存吞掉 delete(删后 get 仍回旧值)时:重试强制重握手,工具列表仍恢复', async () => {
+    const upstream = mcpUpstreamMock([{ name: 'echo', description: 'echo back' }])
+    vi.stubGlobal('fetch', upstream.fetchMock)
+
+    // 模拟 Cloudflare KV 边缘读缓存的最坏情况:同请求内刚读过的 key,delete 后 get
+    // 在 ≥60s 窗口内仍返回旧值。防御若靠"清缓存后回读"取新会话,必被这层缓存击穿
+    // (2026-07-08 生产复发根因)。
+    const backing = new MemoryStateStore()
+    const staleStore: StateStore = {
+      get: (key) => backing.get(key),
+      put: (key, value) => backing.put(key, value),
+      delete: async () => {},
+      list: (prefix, opts) => backing.list(prefix, opts),
+    }
+    const provider = createMcpProvider(
+      { url: 'https://mcp-mock.test/mcp' },
+      new SecretStoreImpl(backing, undefined),
+      { allowInsecure: false, session: { store: staleStore, nodePath: 'ext/mcp-stale' } },
+    )
+
+    // 首次:完整握手,会话回填 staleStore。
+    expect((await provider.list()).map((t) => t.name)).toContain('echo')
+    expect(upstream.initializeCalls()).toBe(1)
+
+    upstream.expireAll()
+
+    // 复用的死会话拿到空列表 → 防御必须强制重握手恢复;若重试回读会话缓存,
+    // 拿回的是删不掉的旧会话,这里将得到空列表。
+    expect((await provider.list()).map((t) => t.name)).toContain('echo')
     expect(upstream.initializeCalls()).toBe(2)
   })
 })
