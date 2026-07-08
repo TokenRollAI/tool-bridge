@@ -67,17 +67,28 @@ describe('认证(除 /healthz 外全路由要求 SK)', () => {
 })
 
 describe('根 ~help / ~tree(Admin 视角)', () => {
-  it('根 ~help 首行 htbp 0.1,列出 system 顶层节点', async () => {
+  it('根 ~help 默认 markdown;显式 text/plain 得 DSL(首行 htbp 0.1)', async () => {
     const res = await SELF.fetch('https://tb.test/~help', admin())
     expect(res.status).toBe(200)
-    expect(res.headers.get('content-type')).toContain('text/plain')
-    const text = await res.text()
+    expect(res.headers.get('content-type')).toContain('text/markdown')
+    expect(await res.text()).toContain('system')
+
+    const dslRes = await SELF.fetch(
+      'https://tb.test/~help',
+      admin({ headers: { accept: 'text/plain' } }),
+    )
+    expect(dslRes.status).toBe(200)
+    expect(dslRes.headers.get('content-type')).toContain('text/plain')
+    const text = await dslRes.text()
     expect(text.split('\n')[0]).toBe('htbp 0.1')
     expect(text).toContain('system')
   })
 
   it('system/sk ~help:DSL 与 JSON 语义等价(抽查 cmd 名集合)', async () => {
-    const dslRes = await SELF.fetch('https://tb.test/system/sk/~help', admin())
+    const dslRes = await SELF.fetch(
+      'https://tb.test/system/sk/~help',
+      admin({ headers: { accept: 'text/plain' } }),
+    )
     const jsonRes = await SELF.fetch(
       'https://tb.test/system/sk/~help',
       admin({ headers: { accept: 'application/json' } }),
@@ -127,6 +138,26 @@ describe('根 ~help / ~tree(Admin 视角)', () => {
     expect(res.status).toBe(200)
     const tree = (await res.json()) as { children?: Array<{ path: string }> }
     expect(tree.children?.some((c) => c.path === 'system')).toBe(true)
+  })
+
+  it('root ~tree 默认 markdown(code fence 包缩进树);显式 text/plain 得裸文本', async () => {
+    const res = await SELF.fetch('https://tb.test/~tree', admin())
+    expect(res.status).toBe(200)
+    expect(res.headers.get('content-type')).toContain('text/markdown')
+    const md = await res.text()
+    expect(md.startsWith('```text\n')).toBe(true)
+    expect(md.endsWith('```\n')).toBe(true)
+    expect(md).toContain('system [directory]')
+
+    const plain = await SELF.fetch(
+      'https://tb.test/~tree',
+      admin({ headers: { accept: 'text/plain' } }),
+    )
+    expect(plain.status).toBe(200)
+    expect(plain.headers.get('content-type')).toContain('text/plain')
+    const text = await plain.text()
+    expect(text).not.toContain('```')
+    expect(text).toContain('system [directory]')
   })
 })
 

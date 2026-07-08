@@ -107,7 +107,10 @@ describe('expose.nodes 自定义节点转发', () => {
     expect(treeText).toContain(`device/${deviceId}/tools/bare`)
 
     // 节点级 ~help:索引形态列工具表(两级披露与 mcp/http 对齐)。
-    const helpRes = await SELF.fetch(`https://tb.test/device/${deviceId}/tools/echo/~help`, admin())
+    const helpRes = await SELF.fetch(
+      `https://tb.test/device/${deviceId}/tools/echo/~help`,
+      admin({ headers: { accept: 'text/plain' } }),
+    )
     expect(helpRes.status).toBe(200)
     const help = await helpRes.text()
     expect(help).toContain('cmd echo POST')
@@ -117,7 +120,7 @@ describe('expose.nodes 自定义节点转发', () => {
     // 工具级 ~help:全量 spec 来自注册时缓存的 cmds,不打设备。
     const toolHelpRes = await SELF.fetch(
       `https://tb.test/device/${deviceId}/tools/echo/echo/~help`,
-      admin(),
+      admin({ headers: { accept: 'text/plain' } }),
     )
     expect(toolHelpRes.status).toBe(200)
     expect(await toolHelpRes.text()).toContain('text')
@@ -125,7 +128,7 @@ describe('expose.nodes 自定义节点转发', () => {
     // 无 cmds 节点:~help 只有节点描述,无 cmd 行。
     const bareHelpRes = await SELF.fetch(
       `https://tb.test/device/${deviceId}/tools/bare/~help`,
-      admin(),
+      admin({ headers: { accept: 'text/plain' } }),
     )
     expect(bareHelpRes.status).toBe(200)
     const bareHelp = await bareHelpRes.text()

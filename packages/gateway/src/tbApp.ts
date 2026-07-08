@@ -443,8 +443,14 @@ export function createTbApp(deps: TbAppDeps): Hono<{ Variables: Vars }> {
         headers: { 'content-type': contentTypeFor('json') },
       })
     }
-    return new Response(renderTreeDsl(tree), {
-      headers: { 'content-type': contentTypeFor('dsl') },
+    if (rep === 'dsl') {
+      return new Response(renderTreeDsl(tree), {
+        headers: { 'content-type': contentTypeFor('dsl') },
+      })
+    }
+    // markdown(默认):缩进树本身就是文本,包 code fence 防 markdown 渲染吞掉缩进。
+    return new Response(`\`\`\`text\n${renderTreeDsl(tree)}\`\`\`\n`, {
+      headers: { 'content-type': contentTypeFor('markdown') },
     })
   }
 

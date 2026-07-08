@@ -399,7 +399,10 @@ describe('plugin-backed context 挂载消费(envelope)', () => {
     expect(describe.status).toBe(200)
     expect(await describe.json()).toEqual({ kind: 'context', capabilities: ['search'] })
 
-    const help = await SELF.fetch('https://tb.test/docs/caps/~help', admin())
+    const help = await SELF.fetch(
+      'https://tb.test/docs/caps/~help',
+      admin({ headers: { accept: 'text/plain' } }),
+    )
     expect(help.status).toBe(200)
     const names = parseHelpDsl(await help.text())
       .cmds.map((c) => c.name)
@@ -518,7 +521,10 @@ describe("kind:'tool' 挂载消费(tool-provider plugin)", () => {
     )
     expect((await mountTool('tools/orders', 'orders-plugin', { region: 'cn' })).status).toBe(200)
 
-    const help = await SELF.fetch('https://tb.test/tools/orders/~help', admin())
+    const help = await SELF.fetch(
+      'https://tb.test/tools/orders/~help',
+      admin({ headers: { accept: 'text/plain' } }),
+    )
     expect(help.status).toBe(200)
     const names = parseHelpDsl(await help.text()).cmds.map((c) => c.name)
     expect(names.sort()).toEqual(['create_order', 'get_order'])
