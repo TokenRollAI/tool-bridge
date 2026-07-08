@@ -2,6 +2,8 @@ import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tansta
 import { useSyncExternalStore } from 'react'
 import {
   type ApiError,
+  feedbackGet,
+  feedbackList,
   getHealthz,
   getHelp,
   getHelpMarkdown,
@@ -191,6 +193,28 @@ export function useFederationList() {
       const r = await invoke(conn, 'system/federation', 'list', {})
       return r.json as { items: FederationHost[] }
     },
+  })
+}
+
+/** 某 path 的全部反馈(~feedback 保留段,含隐藏条目;对等 `tb feedback ls --hidden`)。 */
+export function useFeedbackList(path: string, options?: { enabled?: boolean }) {
+  const conn = useConn()
+  const base = useKeyBase()
+  return useQuery({
+    queryKey: [...base, 'feedback-list', path],
+    queryFn: ({ signal }) => feedbackList(conn, path, true, signal),
+    enabled: options?.enabled ?? path !== '',
+  })
+}
+
+/** 单条反馈详情(含 detail;展开时懒取,对等 `tb feedback get`)。 */
+export function useFeedbackDetail(path: string, id: string | null) {
+  const conn = useConn()
+  const base = useKeyBase()
+  return useQuery({
+    queryKey: [...base, 'feedback-detail', path, id ?? ''],
+    queryFn: ({ signal }) => feedbackGet(conn, path, id ?? '', signal),
+    enabled: id !== null,
   })
 }
 

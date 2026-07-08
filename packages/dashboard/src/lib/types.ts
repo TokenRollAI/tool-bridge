@@ -55,6 +55,22 @@ export interface HelpJson {
   node: { path: string; kind: NodeKind; description: string }
   cmds: HelpCmd[]
   children?: Array<{ path: string; kind: NodeKind; description: string }>
+  /** 管理员补充说明(system/annotation,网关 ~help 注入)。 */
+  note?: string
+  /** Agent feedback 默认区块(头部条目,只含 id/title/score)。 */
+  feedback?: Array<{ id: string; title: string; score: number }>
+}
+
+/** ~feedback 端点的条目视图(list 不含 detail;get 含)。 */
+export interface FeedbackView {
+  id: string
+  title: string
+  by: string
+  at: string
+  up: number
+  down: number
+  score: number
+  detail?: string
 }
 
 export interface TreeJson {

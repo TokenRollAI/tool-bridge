@@ -5,6 +5,8 @@ import remarkGfm from 'remark-gfm'
 import { KindBadge } from '@/components/KindBadge'
 import { CmdPanel } from '@/components/node/CmdPanel'
 import { ContextBrowser } from '@/components/node/ContextBrowser'
+import { FeedbackPanel } from '@/components/node/FeedbackPanel'
+import { NoteCard } from '@/components/node/NoteCard'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import type { ApiError } from '@/lib/api'
@@ -46,7 +48,7 @@ export function NodePage() {
     )
   }
 
-  const { node, cmds, children } = help.data
+  const { node, cmds, children, note, feedback } = help.data
   const isContext = node.kind === 'context'
   return (
     <div className="mx-auto max-w-3xl px-8 py-8">
@@ -58,6 +60,9 @@ export function NodePage() {
         <KindBadge kind={node.kind} />
       </header>
       <p className="mt-1.5 text-sm text-muted-foreground">{node.description}</p>
+      <div className="mt-3">
+        <NoteCard path={path} {...(note !== undefined ? { note } : {})} />
+      </div>
 
       {/* key=path:切换节点时重置 tab 选择(context 节点默认落「条目」) */}
       <Tabs key={path} defaultValue={isContext ? 'browse' : 'invoke'} className="mt-6">
@@ -70,6 +75,11 @@ export function NodePage() {
           <TabsTrigger value="invoke" className="px-3 text-xs">
             调用
           </TabsTrigger>
+          {path !== '' && (
+            <TabsTrigger value="feedback" className="px-3 text-xs">
+              反馈{feedback && feedback.length > 0 ? ` · ${feedback.length}` : ''}
+            </TabsTrigger>
+          )}
           <TabsTrigger value="markdown" className="px-3 text-xs">
             ~help 文档
           </TabsTrigger>
@@ -137,6 +147,12 @@ export function NodePage() {
             )
           )}
         </TabsContent>
+
+        {path !== '' && (
+          <TabsContent value="feedback" className="mt-4">
+            <FeedbackPanel path={path} />
+          </TabsContent>
+        )}
 
         <TabsContent value="markdown" className="mt-4">
           <HelpMarkdownView path={path} />
