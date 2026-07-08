@@ -1,6 +1,6 @@
 # Guide:npm 发布(cli / sdk / gateway / dashboard / server)
 
-> 用途:发布 public npm 包的新版本,以及新增可发布包的首发流程。适用:发 cli/sdk/gateway/dashboard/server 新版本、新增可发布包、排查 CI 发布失败。现状:cli 0.4.0 / sdk 0.3.0 / gateway 0.3.0 / dashboard 0.3.0 已发布且 Trusted Publisher 均已配置;server 0.1.0 **待手动首发 + 配 Trusted Publisher**。快照见 [../must/current-state.md](../must/current-state.md)。
+> 用途:发布 public npm 包的新版本,以及新增可发布包的首发流程。适用:发 cli/sdk/gateway/dashboard/server 新版本、新增可发布包、排查 CI 发布失败。现状:cli 0.5.0 / sdk 0.4.0 / gateway 0.4.0 / dashboard 0.4.0 已发布且 Trusted Publisher 均已配置;server 0.1.0 **待手动首发 + 配 Trusted Publisher**。快照见 [../must/current-state.md](../must/current-state.md)。
 
 ## 包形态(发布模式)
 
