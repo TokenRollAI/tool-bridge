@@ -145,7 +145,7 @@ export async function apiText(target: Target, opts: Omit<ApiOptions, 'accept'>):
   return r.text
 }
 
-/** 数据面工具调用:`POST /<path>` body `{tool, arguments}`。 */
+/** 数据面工具调用(信封形态):`POST /<path>` body `{tool, arguments}`。 */
 export async function callTool<T>(
   target: Target,
   path: string,
@@ -153,6 +153,15 @@ export async function callTool<T>(
   args: Record<string, unknown> = {},
 ): Promise<T> {
   return apiJson<T>(target, { method: 'POST', path, body: { tool, arguments: args } })
+}
+
+/** 直连工具调用:`POST /<node>/<tool>`,body 即 arguments 本体(无信封)。 */
+export async function callDirect<T>(
+  target: Target,
+  toolPath: string,
+  args: Record<string, unknown> = {},
+): Promise<T> {
+  return apiJson<T>(target, { method: 'POST', path: toolPath, body: args })
 }
 
 /**
@@ -165,10 +174,23 @@ export async function callToolText(
   tool: string,
   args: Record<string, unknown> = {},
 ): Promise<string> {
+  return invokeText(target, path, { tool, arguments: args })
+}
+
+/** 直连工具调用(人类模式):body 即 arguments 本体。 */
+export async function callDirectText(
+  target: Target,
+  toolPath: string,
+  args: Record<string, unknown> = {},
+): Promise<string> {
+  return invokeText(target, toolPath, args)
+}
+
+async function invokeText(target: Target, path: string, body: unknown): Promise<string> {
   const r = await apiFetch(target, {
     method: 'POST',
     path,
-    body: { tool, arguments: args },
+    body,
     accept: 'markdown',
   })
   if (!r.ok) {

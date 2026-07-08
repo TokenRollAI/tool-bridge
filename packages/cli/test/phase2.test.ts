@@ -288,7 +288,7 @@ describe('tb server ls / rm', () => {
 })
 
 describe('tb call', () => {
-  it('构造数据面 body {tool, arguments}(--json)', async () => {
+  it('--tool 给出 → 信封 body {tool, arguments}(--json)', async () => {
     const fn = captureFetch({ ok: true })
     await runCli([
       'call',
@@ -309,6 +309,42 @@ describe('tb call', () => {
       tool: 'resolve',
       arguments: { libraryName: 'react' },
     })
+    expect(process.exitCode).toBe(0)
+  })
+
+  it('--tool 省略 → path 即直连工具路径,body 为 arguments 本体(--json)', async () => {
+    const fn = captureFetch({ ok: true })
+    await runCli([
+      'call',
+      'docs/ctx7/resolve',
+      '--json',
+      '--base-url',
+      'https://gw',
+      '--sk',
+      'tbk_x',
+      '--args',
+      '{"libraryName":"react"}',
+    ])
+    const [url, init] = fn.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe('https://gw/docs/ctx7/resolve')
+    expect(JSON.parse(init.body as string)).toEqual({ libraryName: 'react' })
+    expect(process.exitCode).toBe(0)
+  })
+
+  it('--tool 省略且无 --args → 直连空对象 body', async () => {
+    const fn = captureFetch({ ok: true })
+    await runCli([
+      'call',
+      'docs/ctx7/resolve',
+      '--json',
+      '--base-url',
+      'https://gw',
+      '--sk',
+      'tbk_x',
+    ])
+    const [url, init] = fn.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe('https://gw/docs/ctx7/resolve')
+    expect(JSON.parse(init.body as string)).toEqual({})
     expect(process.exitCode).toBe(0)
   })
 
