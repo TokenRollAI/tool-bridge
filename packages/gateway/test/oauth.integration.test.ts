@@ -206,7 +206,10 @@ describe('mcp 托管 OAuth:授权全链路(默认离线,上游为 fetch mock)', 
     expect(upstream.grants).toContain('authorization_code')
 
     // 数据面:~help 触发 tools/list,SDK 自动带 Bearer。
-    const help = await SELF.fetch('https://tb.test/db/bb/~help', admin())
+    const help = await SELF.fetch(
+      'https://tb.test/db/bb/~help',
+      admin({ headers: { accept: 'text/plain' } }),
+    )
     expect(help.status).toBe(200)
     expect(parseHelpDsl(await help.text()).cmds.map((c) => c.name)).toContain('query')
 
@@ -225,7 +228,10 @@ describe('mcp 托管 OAuth:授权全链路(默认离线,上游为 fetch mock)', 
 
     upstream.revokeAccessTokens()
 
-    const help = await SELF.fetch('https://tb.test/db/bb-refresh/~help?refresh=1', admin())
+    const help = await SELF.fetch(
+      'https://tb.test/db/bb-refresh/~help?refresh=1',
+      admin({ headers: { accept: 'text/plain' } }),
+    )
     expect(help.status).toBe(200)
     expect(parseHelpDsl(await help.text()).cmds.map((c) => c.name)).toContain('query')
     expect(upstream.grants).toContain('refresh_token')
@@ -265,7 +271,10 @@ describe('mcp 托管 OAuth:授权全链路(默认离线,上游为 fetch mock)', 
     )
     expect(tokenReq?.get('redirect_uri')).toBe(localUri)
 
-    const help = await SELF.fetch('https://tb.test/db/bb-local/~help', admin())
+    const help = await SELF.fetch(
+      'https://tb.test/db/bb-local/~help',
+      admin({ headers: { accept: 'text/plain' } }),
+    )
     expect(help.status).toBe(200)
     expect(parseHelpDsl(await help.text()).cmds.map((c) => c.name)).toContain('query')
   })

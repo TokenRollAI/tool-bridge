@@ -114,7 +114,10 @@ describe('DeviceSession DO + /system/device/ws', () => {
     expect(treeText).toContain(`device/${deviceId}/shell`)
     expect(treeText).toContain(`device/${deviceId}/fs`)
 
-    const helpRes = await SELF.fetch(`https://tb.test/device/${deviceId}/shell/~help`, admin())
+    const helpRes = await SELF.fetch(
+      `https://tb.test/device/${deviceId}/shell/~help`,
+      admin({ headers: { accept: 'text/plain' } }),
+    )
     expect(helpRes.status).toBe(200)
     const help = await helpRes.text()
     expect(help).toContain('cmd exec POST')

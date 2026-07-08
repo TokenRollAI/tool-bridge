@@ -63,7 +63,7 @@ async function postJson(
 }
 
 describe('Node 宿主 HTTP 面', () => {
-  it('healthz 免认证;~help 无 SK 401、Admin SK 200 且首行 htbp 0.1', async () => {
+  it('healthz 免认证;~help 无 SK 401、Admin SK 200(默认 markdown,text/plain 得 DSL)', async () => {
     const { server, baseUrl } = await startServer(tmpDataDir())
     cleanups.push(() => server.close())
 
@@ -80,7 +80,12 @@ describe('Node 宿主 HTTP 面', () => {
 
     const help = await fetch(`${baseUrl}/~help`, admin())
     expect(help.status).toBe(200)
-    const text = await help.text()
+    expect(help.headers.get('content-type')).toContain('text/markdown')
+    expect(await help.text()).toContain('system')
+
+    const dsl = await fetch(`${baseUrl}/~help`, admin({ headers: { accept: 'text/plain' } }))
+    expect(dsl.status).toBe(200)
+    const text = await dsl.text()
     expect(text.split('\n')[0]).toBe('htbp 0.1')
     expect(text).toContain('system')
   })

@@ -44,11 +44,11 @@ describe('/ui 静态资源(免认证)', () => {
 })
 
 describe('路由次序:Worker 逻辑不被 assets 吞', () => {
-  it('根 ~help(带 SK)仍由 Worker 返回 Help DSL', async () => {
+  it('根 ~help(带 SK)仍由 Worker 返回帮助(默认 markdown)', async () => {
     const res = await SELF.fetch('https://tb.test/~help', admin())
     expect(res.status).toBe(200)
-    expect(res.headers.get('content-type')).toContain('text/plain')
-    expect(await res.text()).toContain('htbp')
+    expect(res.headers.get('content-type')).toContain('text/markdown')
+    expect(await res.text()).toContain('HTBP')
   })
 
   it('浏览器形态的 GET /~help(Accept: text/html)也不落入 SPA 回退', async () => {
@@ -58,7 +58,7 @@ describe('路由次序:Worker 逻辑不被 assets 吞', () => {
       redirect: 'manual',
     })
     expect(res.status).toBe(200)
-    expect(await res.text()).toContain('htbp')
+    expect(await res.text()).toContain('HTBP')
   })
 
   it('POST /system/status 数据面正常(不被静态回退拦截)', async () => {
