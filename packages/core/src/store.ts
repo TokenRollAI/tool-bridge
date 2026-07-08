@@ -33,6 +33,8 @@ export const KEY_PLUGIN_HEALTH = 'pluginhealth:'
 /** 注册时抓取的 ~describe 缓存:挂载节点 ~describe/~help 的能力来源。 */
 export const KEY_PLUGIN_META = 'pluginmeta:'
 export const KEY_BOOTSTRAPPED = 'sys:bootstrapped'
+/** remote 联邦 host 白名单的运行时条目(单 key 存 AllowlistEntry[];与 env 基线取并集)。 */
+export const KEY_REMOTE_ALLOWLIST = 'sys:remoteallowlist'
 
 /** 进程内存实现:单测与 SDK 内嵌宿主用。 */
 export class MemoryStateStore implements StateStore {

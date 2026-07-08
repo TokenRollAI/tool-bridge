@@ -7,9 +7,11 @@
 
 import type { SKRegistryStore } from '../auth/sk'
 import type { SecretStoreImpl } from '../secret/secretStore'
+import type { RemoteAllowlistStore } from '../tool/allowlist'
 import type { NodeRegistryStore } from '../tree/registry'
 import type { ScopeChecker } from '../tree/visibility'
 import { LIST_LIMIT_MAX } from '../types'
+import { createFederationModule } from './federation'
 import { createPluginModule, type PluginModuleDeps } from './plugin'
 import { createRegistryModule } from './registry'
 import { createSecretModule } from './secret'
@@ -35,6 +37,11 @@ export interface BuiltinDeps {
    * 缺省不装配 system/plugin(sk/secrets/now 复用上方注入)。
    */
   plugin?: Omit<PluginModuleDeps, 'sk' | 'secrets' | 'now'>
+  /**
+   * federation 模块装配:remote host 白名单的运行时存储 + env 基线。
+   * 缺省不装配 system/federation(纯逻辑单测无需)。
+   */
+  federation?: { store: RemoteAllowlistStore; base: string[] }
 }
 
 /** 翻页统计 registry 全量节点数(status.nodeCount)。 */
@@ -69,9 +76,20 @@ export function createBuiltins(deps: BuiltinDeps): Map<string, BuiltinModule> {
       createPluginModule({ ...deps.plugin, sk: deps.sk, secrets: deps.secret, now }),
     )
   }
+  if (deps.federation !== undefined) {
+    modules.set(
+      'federation',
+      createFederationModule({ store: deps.federation.store, base: deps.federation.base, now }),
+    )
+  }
   return modules
 }
 
+export {
+  createFederationModule,
+  type FederationHost,
+  type FederationModuleDeps,
+} from './federation'
 export {
   createPluginModule,
   type PluginHealthRecord,
