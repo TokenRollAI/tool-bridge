@@ -7,7 +7,7 @@
 | 端点 | 语义 |
 |---|---|
 | `GET /healthz` | 树外免认证运维端点,200 + `{"healthy":true,"version":"<x.y.z>"}` |
-| `GET /<path>/~help` | 节点自描述;默认 `text/plain` Help DSL,`Accept: application/json` 得等价 `HelpJson`,`Accept: text/markdown` 得可读 Markdown 表现。**两级披露**:节点 `~help` 是索引,`GET /<node>/<tool>/~help` 给单工具全量 spec |
+| `GET /<path>/~help` | 节点自描述;默认 `text/markdown` 可读表现,`Accept: application/json` 得等价 `HelpJson`,`Accept: text/plain` 得紧凑 Help DSL(面向 LLM 省 token)。**两级披露**:节点 `~help` 是索引,`GET /<node>/<tool>/~help` 给单工具全量 spec |
 | `GET /~tree?depth=N` | 受限深度树视图(默认 2,上限 8 钳制;节点上限 500);子树根必须真实存在,非根不存在 → 404 |
 | `GET /<path>/~skill` | 本地 501 占位(`unavailable`,retryable:false);remote 节点透传 |
 | `GET /<path>/~describe` | 有可选能力的节点返回 `{ kind, capabilities }`;其余 404 |
@@ -24,10 +24,12 @@
 
 ## 2. 内容协商
 
-- 默认(无 Accept):`~help` → `text/plain`(Help DSL);`~skill` 与调用返回值 → `text/markdown`(IANA 注册类型,不用 `application/markdown`)。
-- `Accept: application/json` → 结构化 JSON;DSL 与 JSON 两种表现**语义等价**,JSON 不得多/少字段。
-- `Accept: text/markdown` → `~help` 的**可读性表现**(renderHelpMarkdown):同一 HelpModel 渲染,完整语句解释调用信封/scope/effect/confirm、每个下一步给可执行 GET/POST 路径、inputSchema 缩进 JSON。排版自定,消费方不应对其做结构化解析(机器可读用 JSON)。json 与 markdown 同时出现时取 json。
-- `~tree` 的非 JSON 表现是缩进文本树(排版实现自定);JSON(`TreeJson`)才是规范形状。
+- **默认一律 `text/markdown`**(无 Accept、`*/*`、未知类型):`~help` → 可读性表现(renderHelpMarkdown);`~tree` → code fence 包缩进文本树;`~skill` 与调用返回值 → markdown(IANA 注册类型,不用 `application/markdown`)。只有显式声明才拿到其它表现。
+- `Accept: application/json` → 结构化 JSON;DSL/markdown 与 JSON 两种表现**语义等价**,JSON 不得多/少字段。
+- `Accept: text/plain`(显式)→ 紧凑表现:`~help` → Help DSL;`~tree` → 裸缩进文本树。调用返回值无 plain 表现,仍渲染 markdown。
+- markdown 可读性表现:同一 HelpModel 渲染,完整语句解释调用信封/scope/effect/confirm、每个下一步给可执行 GET/POST 路径、inputSchema 缩进 JSON。排版自定,消费方不应对其做结构化解析(机器可读用 JSON)。
+- 优先级 json > markdown > plain(共存时取高优先)。归类逻辑在 core `htbp/negotiate.ts`(唯一入口)。
+- `~tree` 的 JSON(`TreeJson`)才是规范形状;文本/markdown 树排版实现自定。
 
 ## 3. TBError 形状与 HTTP 映射
 
@@ -112,7 +114,7 @@ CLI 是纯 API 客户端,无专用端点;全局 `--json`;读 `TB_BASE_URL`/`TB_S
 |---|---|
 | `tb status` | builtin `system/status` 的 `get`(登录态)/ 树外 `/healthz`(未登录回退) |
 | `tb login` / `whoami` / `use` | 本地凭据管理,无服务端接口(whoami = 本地配置态 + `~help` 探测 + status 摘要) |
-| `tb ls` / `tree` / `help` | `~help` / `GET /~tree?depth=N`;`tb help --md` 请求 Markdown 表现(Accept: text/markdown) |
+| `tb ls` / `tree` / `help` | `~help` / `GET /~tree?depth=N`;`tb help` 默认 Markdown 表现(协议默认),`--dsl` 请求紧凑 DSL(Accept: text/plain),`--md` 为默认的无操作别名,`--json` 结构化 |
 | `tb call` | 直连 `POST /<path>`(path 即工具路径,body 为 arguments 本体);`--tool` 给出时信封 `POST /<path>` + `{tool,arguments}`(builtin/context 等通用) |
 | `tb tool mount` / `rm` | NodeRegistry.Write/Delete(kind=mcp/http;含 virtualize prefix/rename/hide/describe;`--auth-header`/`--auth-scheme` mcp/http 共用;可重复 `--header <Name=value>` 静态头仅 mcp,http 用报错;mcp 另有 `--auth oauth`,与 `--auth-ref` 互斥) |
 | `tb tool auth <path>` | mcp 托管 OAuth 发起(POST `/<path>/~authorize`):authorized → 直接完成;redirect → 打印授权 URL 并尝试开浏览器(`--no-open` 只打印)。`--local`:本机 127.0.0.1 临时端口收 AS 回跳,code+state 转交网关 `/~oauth/callback` 兑换(适配 Bytebase 等只放行 loopback 回调的严格上游;默认流程遇 redirect 类报错会提示) |
