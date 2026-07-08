@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { resetFetch, setFetch } from '../src/http'
+import { buildProgram } from '../src/program'
 import { parseError, runCli } from './cliHarness'
 
 const gw = ['--base-url', 'https://gw', '--sk', 'tbk_agent'] as const
@@ -110,5 +111,28 @@ describe('tb feedback(~feedback 保留段端点)', () => {
     expect(url).toBe('https://gw/feishu/~feedback/fb_a1x9k2')
     expect(init.method).toBe('DELETE')
     expect(process.exitCode).toBe(0)
+  })
+})
+
+describe('tb --help 的 feedback 引导', () => {
+  it('尾部引导双向使用习惯:用前 ls 查经验、踩坑 submit 回馈、vote 评价', async () => {
+    const program = buildProgram()
+    program.exitOverride()
+    let out = ''
+    program.configureOutput({
+      writeOut: (s) => {
+        out += s
+      },
+      writeErr: () => {},
+    })
+    try {
+      await program.parseAsync(['--help'], { from: 'user' })
+    } catch {
+      // commander.helpDisplayed:帮助已输出,预期退出路径。
+    }
+    expect(out).toContain('Agent feedback')
+    expect(out).toContain('tb feedback ls <path>')
+    expect(out).toContain('tb feedback submit <path>')
+    expect(out).toContain('tb feedback vote <path> <id>')
   })
 })

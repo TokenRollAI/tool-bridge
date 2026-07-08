@@ -517,7 +517,7 @@ export function createTbApp(deps: TbAppDeps): Hono<{ Variables: Vars }> {
         node: { path: '', kind: 'directory', description: 'tool-bridge root' },
         cmds: [],
         children: children.map((n) => ({ path: n.path, kind: n.kind, description: n.description })),
-        hint: 'GET /<child-path>/~help describes a child node; GET /~tree?depth=N shows the subtree',
+        hint: 'GET /<child-path>/~help describes a child node; GET /~tree?depth=N shows the subtree. Every path also serves ~feedback: GET /<path>/~feedback lists pitfalls other agents hit — check it before using a tool; POST /<path>/~feedback {"title","detail"} to share your own',
       }
       return renderHelp(await enrichHelp(model, '', store), rep)
     }
