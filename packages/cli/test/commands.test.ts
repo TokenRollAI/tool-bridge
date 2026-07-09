@@ -147,7 +147,7 @@ describe('tb help 表现选择', () => {
     expect(written).toContain('## Commands')
   })
 
-  it('--md 是默认行为的别名(同样 Accept: text/markdown)', async () => {
+  it('--md 强制裸 markdown(同样 Accept: text/markdown,跳过终端渲染)', async () => {
     const fn = vi.fn(async () => new Response('# /docs\n', { status: 200 }))
     setFetch(fn as unknown as typeof fetch)
     await runCli(['help', 'docs', '--md', '--base-url', 'https://gw', '--sk', 'tbk_x'])

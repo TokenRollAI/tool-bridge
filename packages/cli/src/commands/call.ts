@@ -2,7 +2,8 @@ import { readFileSync } from 'node:fs'
 import { Command } from 'commander'
 import { resolveTarget, withGlobalOpts } from '../args'
 import { CliError, callDirect, callDirectText, callTool, callToolText } from '../http'
-import { guard, printJson, printLine } from '../output'
+import { printMarkdown } from '../markdown'
+import { guard, printJson } from '../output'
 
 /** 解析 --args / --args-file 为 arguments 对象(互斥;缺省 {})。 */
 export function parseCallArgs(argsStr?: string, argsFile?: string): Record<string, unknown> {
@@ -92,7 +93,8 @@ Examples:
             tool !== undefined
               ? await callToolText(target, nodeUri, tool, callArgs)
               : await callDirectText(target, nodeUri, callArgs)
-          printLine(text.replace(/\n$/, ''))
+          // 人类模式的结果是网关的 markdown 表现:TTY → ANSI 渲染,管道 → 原样。
+          printMarkdown(text)
         }
       })
     })

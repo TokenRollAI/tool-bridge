@@ -43,7 +43,7 @@ exports `.` / `./tbApp` / `./bootstrap` / `./deviceHello`(供 SDK 与 server 复
 
 - 框架 commander,**严格解析是刻意的**(未知 flag/子命令、flag 缺值、多余 positional 一律报错并带拼写建议——防拼错 flag 被静默吞掉导致 shell 白名单等权限误配)。
 - `index.ts` 薄入口(仅 parseAsync);`program.ts`(`buildProgram()` 装配 20 个命令,`.helpCommand(false)` 保留业务 `tb help [path]`);`commands/` 每命令一文件、导出工厂函数 `xCommand(): Command`(status/login/whoami/use/sk/secret/federation/note/feedback/ls/tree/help/call/tool/server/ctx/connect/device/mount/plugin);`--no-shell` 用 commander 原生否定(`opts.shell === false`)。
-- 横切:`config.ts`(XDG 配置、多 profile)、`http.ts`(API 客户端)、`output.ts`(`--json`)、`args.ts`(`withGlobalOpts` 挂全局 --json/--base-url/--sk、`collect` repeatable 收集器、`resolveTarget({baseUrl, sk})` camelCase)、`scope.ts`、`registry.ts`(节点管理助手,rm 前 kind 校验)、`deviceRuntime.ts`(`tb connect` 长驻:partysocket 重连 + 30s 心跳判死链)、`deviceId.ts`。
+- 横切:`config.ts`(XDG 配置、多 profile)、`http.ts`(API 客户端)、`output.ts`(`--json`)、`markdown.ts`(`printMarkdown`:TTY → marked-terminal ANSI 渲染,管道/NO_COLOR → 裸 markdown)、`args.ts`(`withGlobalOpts` 挂全局 --json/--base-url/--sk、`collect` repeatable 收集器、`resolveTarget({baseUrl, sk})` camelCase)、`scope.ts`、`registry.ts`(节点管理助手,rm 前 kind 校验)、`deviceRuntime.ts`(`tb connect` 长驻:partysocket 重连 + 30s 心跳判死链)、`deviceId.ts`。
 - 测试基建:`test/cliHarness.ts`(runCli/parseError;exitOverride 须逐层应用,commander 不向子命令继承)+ `test/strictParsing.test.ts`(拼错 flag 事故回归 + 全部叶子命令的未知 flag 矩阵)。
 
 ## packages/sdk — 薄装配层(npm 发布物,4 个源文件)
