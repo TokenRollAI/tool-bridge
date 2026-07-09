@@ -422,6 +422,15 @@ export function ctxUnmountCommand(): Command {
 export function ctxCommand(): Command {
   return new Command('ctx')
     .description('Context Layer: mount namespaces & read/write entries')
+    .addHelpText(
+      'after',
+      `
+Examples:
+  tb ctx mount notes --provider r2 --description "team notes"
+  tb ctx put notes meeting/2026-07.md --file ./notes.md
+  tb ctx cat notes meeting/2026-07.md
+  tb ctx search notes "budget"`,
+    )
     .addCommand(ctxLsCommand())
     .addCommand(ctxCatCommand())
     .addCommand(ctxPutCommand())

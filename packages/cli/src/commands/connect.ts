@@ -67,7 +67,9 @@ export async function runConnect(args: ConnectArgs): Promise<void> {
 /** `tb connect [url]` —— 设备反向注册长驻进程。 */
 export function connectCommand(): Command {
   return withGlobalOpts(new Command('connect'))
-    .description('Connect this machine as a device')
+    .description(
+      'Connect this machine as a device (long-running; exposes shell and/or fs on the tree)',
+    )
     .argument('[url]', 'Gateway base URL')
     .option('--device-id <id>', 'Override stable local device id')
     .option('--path <path>', 'Mount path (default: device/<device-id>)')
@@ -75,6 +77,14 @@ export function connectCommand(): Command {
     .option('--fs <root>', 'Expose local filesystem root (repeatable)', collect, [])
     .option('--fs-readonly', 'Expose fs as read-only', false)
     .option('--no-shell', 'Do not expose shell')
+    .addHelpText(
+      'after',
+      `
+Examples:
+  tb connect --allow git --allow npm            # shell restricted to git/npm
+  tb connect --no-shell --fs ~/projects --fs-readonly
+  tb connect --path device/build-01 --allow '*'   # full shell (trusted machines only)`,
+    )
     .action(async (url: string | undefined, opts: Omit<ConnectArgs, 'url'>) => {
       await guard(Boolean(opts.json), () => runConnect({ ...opts, url }))
     })

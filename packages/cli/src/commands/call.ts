@@ -53,11 +53,22 @@ export interface CallArgs {
 
 export function callCommand(): Command {
   return withGlobalOpts(new Command('call'))
-    .description('Invoke a tool (path = node path + --tool, or direct tool path)')
-    .argument('<path>', 'Direct tool path, or node path when --tool is given')
+    .description('Invoke a tool: `tb call <node>/<tool>` or `tb call <node> --tool <name>`')
+    .argument(
+      '<path>',
+      'Direct tool path (e.g. docs/context7/resolve-library-id), or node path when --tool is given',
+    )
     .option('--tool <name>', 'Tool/cmd name (envelope form; works for every node kind)')
     .option('--args <json>', 'Arguments as inline JSON object')
     .option('--args-file <file>', 'Arguments from a JSON file')
+    .addHelpText(
+      'after',
+      `
+Examples:
+  tb call docs/context7/resolve-library-id --args '{"libraryName":"react"}'
+  tb call system/status --tool get
+  tb help <path>   shows each tool's arguments schema before you call it`,
+    )
     .action(async (pathArg: string, opts: CallArgs) => {
       const asJson = Boolean(opts.json)
       await guard(asJson, async () => {

@@ -62,11 +62,24 @@ interface SkCreateOpts extends SkGlobalOpts {
 export function skCreateCommand(): Command {
   return withGlobalOpts(new Command('create'))
     .description('Issue a new secret key (secret shown ONCE)')
-    .requiredOption('--owner <ref>', 'Owner ref, e.g. user:alice / agent:x')
-    .option('--scope <scope>', 'Scope "pattern:actions" (repeatable)', collect, [])
+    .requiredOption('--owner <ref>', 'Owner ref: user:<name> / agent:<name> / device:<id>')
+    .option(
+      '--scope <scope>',
+      'Scope "pattern:actions" — path glob + comma-joined actions (read/write/call/register/admin); repeatable',
+      collect,
+      [],
+    )
     .option('--register-path <prefix>', 'Allowed register path prefix (repeatable)', collect, [])
     .option('--expires <ts>', 'Expiry ISO 8601 timestamp')
     .option('--description <text>', 'Human description')
+    .addHelpText(
+      'after',
+      `
+Examples:
+  tb sk create --owner agent:researcher --scope 'docs/**:read,call' --description "read-only docs agent"
+  tb sk create --owner user:alice --scope '**:read,write,call,register,admin'
+  tb sk create --owner device:build-01 --scope 'device/build-01/**:read,call' --register-path device/build-01`,
+    )
     .action(async (opts: SkCreateOpts) => {
       const asJson = Boolean(opts.json)
       await guard(asJson, async () => {
