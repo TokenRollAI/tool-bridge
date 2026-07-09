@@ -15,7 +15,7 @@ import type { StatusView } from '../types'
  */
 export function whoamiCommand(): Command {
   return withGlobalOpts(new Command('whoami'))
-    .description('Show configured target + reachability (no whoami endpoint)')
+    .description('Show the configured target (base URL, masked SK) and whether it authenticates')
     .action(async (opts: { json?: boolean; baseUrl?: string; sk?: string }) => {
       const asJson = Boolean(opts.json)
       await guard(asJson, async () => {

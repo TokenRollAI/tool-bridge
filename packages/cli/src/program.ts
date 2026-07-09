@@ -40,7 +40,9 @@ import { whoamiCommand } from './commands/whoami'
 export function buildProgram(): Command {
   const program = new Command('tb')
     .version(pkg.version)
-    .description('tool-bridge CLI')
+    .description(
+      'tool-bridge CLI — one gateway for tools, context stores and devices.\nStart with `tb login`, explore with `tb ls` / `tb help <path>`, invoke with `tb call <path>`.\nEvery command supports --json for parseable output.',
+    )
     .helpCommand(false)
   // 尾部引导:把 feedback 变成 Agent 的使用习惯(用前查经验、踩坑后回馈)。
   program.addHelpText(

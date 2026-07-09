@@ -77,6 +77,15 @@ export function toolMountCommand(): Command {
       collect,
       [],
     )
+    .addHelpText(
+      'after',
+      `
+Examples:
+  tb tool mount docs/context7 --kind mcp --url https://mcp.context7.com/mcp
+  tb tool mount jira --kind mcp --url https://mcp.example.com/mcp --auth-ref jira-token
+  tb tool mount gh --kind mcp --url https://api.example.com/mcp --auth oauth   # then: tb tool auth gh
+  tb tool mount weather --kind http --endpoint https://api.weather.com --tools-file tools.json`,
+    )
     .action(async (pathArg: string, opts: ToolMountOpts) => {
       const asJson = Boolean(opts.json)
       await guard(asJson, async () => {
