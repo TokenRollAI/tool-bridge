@@ -1,17 +1,7 @@
-import Form from '@rjsf/shadcn'
 import type { RJSFSchema } from '@rjsf/utils'
-import validator from '@rjsf/validator-ajv8'
 import { useQueryClient } from '@tanstack/react-query'
-import {
-  Braces,
-  ChevronRight,
-  ClipboardList,
-  History,
-  Loader2,
-  Play,
-  TriangleAlert,
-} from 'lucide-react'
-import { useEffect, useId, useState } from 'react'
+import { Braces, ChevronRight, ClipboardList, Loader2, Play, TriangleAlert } from 'lucide-react'
+import { lazy, Suspense, useEffect, useId, useState } from 'react'
 import { CliHint } from '@/components/node/CliHint'
 import { ResultView } from '@/components/node/ResultView'
 import {
@@ -36,12 +26,12 @@ import {
 import { Skeleton } from '@/components/ui/skeleton'
 import { Textarea } from '@/components/ui/textarea'
 import type { ApiError } from '@/lib/api'
-import { lastArgsFor } from '@/lib/history'
 import { useInvoke, useToolHelp } from '@/lib/queries'
 import { isFormFriendly, skeletonFromSchema } from '@/lib/schemaForm'
-import { useSession } from '@/lib/session'
 import type { HelpCmd } from '@/lib/types'
 import { cn } from '@/lib/utils'
+
+const SchemaFormRenderer = lazy(() => import('@/components/node/SchemaFormRenderer'))
 
 const SCOPE_STYLE: Record<string, string> = {
   read: 'text-sky-400/90 border-sky-400/30',
@@ -140,8 +130,6 @@ export function CmdPanel({
   const invoke = useInvoke()
   const qc = useQueryClient()
   const acceptId = useId()
-  const { active } = useSession()
-  const lastArgs = lastArgsFor(active?.name ?? '', path, cmd.name)
 
   /** 当前编辑中的参数(CliHint 展示用;JSON 模式解析失败时回落 {})。 */
   const currentArgs = (() => {
@@ -152,17 +140,6 @@ export function CmdPanel({
       return {}
     }
   })()
-
-  const restoreLast = () => {
-    if (lastArgs === undefined) return
-    setRawArgs(JSON.stringify(lastArgs, null, 2))
-    if (formFriendly) {
-      setFormData(lastArgs)
-      setMode('form')
-    } else {
-      setMode('json')
-    }
-  }
 
   // 懒补水到位后一次性初始化编辑器形态(仅当用户尚未输入;guard 保证幂等)。
   useEffect(() => {
@@ -210,7 +187,7 @@ export function CmdPanel({
         {invoke.isPending ? <Loader2 className="animate-spin" /> : <Play />}
         调用
       </Button>
-      <label htmlFor={acceptId} className="ml-2 text-xs text-muted-foreground">
+      <label htmlFor={acceptId} className="text-xs text-muted-foreground sm:ml-2">
         Accept
       </label>
       <Select value={accept} onValueChange={(v) => setAccept(v as 'markdown' | 'json')}>
@@ -231,7 +208,7 @@ export function CmdPanel({
           type="button"
           variant="ghost"
           size="sm"
-          className="ml-auto text-xs text-muted-foreground"
+          className="text-xs text-muted-foreground sm:ml-auto"
           onClick={() => {
             if (mode === 'form') {
               setRawArgs(JSON.stringify(formData ?? {}, null, 2))
@@ -251,19 +228,6 @@ export function CmdPanel({
           {mode === 'form' ? 'JSON 编辑' : '表单编辑'}
         </Button>
       )}
-      {lastArgs !== undefined && (
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          className={cn('text-xs text-muted-foreground', !formFriendly && 'ml-auto')}
-          title="填入最近一次调用的参数"
-          onClick={restoreLast}
-        >
-          <History />
-          上次参数
-        </Button>
-      )}
     </div>
   )
 
@@ -271,62 +235,74 @@ export function CmdPanel({
     <Collapsible open={open} onOpenChange={setOpen} asChild>
       <section id={`cmd-${cmd.name}`} className="rounded-md border bg-card/60">
         {/* 与 ~help 的层级观感对齐:默认只露 cmd 一行,schema 表单点开才展开 */}
-        <CollapsibleTrigger asChild>
-          <header
-            className={cn(
-              'flex w-full cursor-pointer flex-wrap items-center gap-2 px-4 py-2.5 text-left',
-              'hover:bg-secondary/40',
-              open && 'border-b',
-            )}
-          >
-            <ChevronRight
+        <header>
+          <CollapsibleTrigger asChild>
+            <button
+              type="button"
               className={cn(
-                'size-3.5 shrink-0 text-muted-foreground/60 transition-transform',
-                open && 'rotate-90',
-              )}
-            />
-            <h3 className="font-mono text-sm text-foreground">{cmd.name}</h3>
-            <span
-              className={cn(
-                'inline-flex items-center rounded-sm border px-1.5 font-mono text-[10px] leading-4',
-                SCOPE_STYLE[cmd.scope] ?? SCOPE_STYLE.read,
+                'flex w-full cursor-pointer flex-wrap items-center gap-2 px-3 py-2.5 text-left sm:px-4',
+                'hover:bg-secondary/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60 focus-visible:ring-inset',
+                open && 'border-b',
               )}
             >
-              {cmd.scope}
-            </span>
-            {cmd.effect && (
-              <span className="inline-flex items-center gap-1 rounded-sm border border-warn/40 px-1.5 font-mono text-[10px] leading-4 text-warn">
-                {cmd.effect === 'destructive' && <TriangleAlert className="size-2.5" />}
-                {cmd.effect}
+              <ChevronRight
+                aria-hidden="true"
+                className={cn(
+                  'size-3.5 shrink-0 text-muted-foreground/60 transition-transform',
+                  open && 'rotate-90',
+                )}
+              />
+              <span className="font-mono text-sm text-foreground">{cmd.name}</span>
+              <span
+                className={cn(
+                  'inline-flex items-center rounded-sm border px-1.5 font-mono text-[10px] leading-4',
+                  SCOPE_STYLE[cmd.scope] ?? SCOPE_STYLE.read,
+                )}
+              >
+                {cmd.scope}
               </span>
-            )}
-            {cmd.confirm && (
-              <span className="inline-flex items-center rounded-sm border border-destructive/40 px-1.5 font-mono text-[10px] leading-4 text-destructive">
-                confirm
-              </span>
-            )}
-            {cmd.h && <CmdDoc h={cmd.h} />}
-          </header>
-        </CollapsibleTrigger>
+              {cmd.effect && (
+                <span className="inline-flex items-center gap-1 rounded-sm border border-warn/40 px-1.5 font-mono text-[10px] leading-4 text-warn">
+                  {cmd.effect === 'destructive' && <TriangleAlert className="size-2.5" />}
+                  {cmd.effect}
+                </span>
+              )}
+              {cmd.confirm && (
+                <span className="inline-flex items-center rounded-sm border border-destructive/40 px-1.5 font-mono text-[10px] leading-4 text-destructive">
+                  confirm
+                </span>
+              )}
+              {cmd.h && <CmdDoc h={cmd.h} />}
+            </button>
+          </CollapsibleTrigger>
+        </header>
 
         <CollapsibleContent>
-          <div className="px-4 py-3">
+          <div className="min-w-0 px-3 py-3 sm:px-4">
             {lazyNeeded && toolHelp.isPending ? (
               <div className="grid gap-2">
                 <Skeleton className="h-8 w-full" />
                 <Skeleton className="h-8 w-2/3" />
               </div>
             ) : mode === 'form' && hasSchema ? (
-              <Form
-                schema={inputSchema as RJSFSchema}
-                validator={validator}
-                formData={formData}
-                onChange={({ formData: fd }) => setFormData(fd)}
-                onSubmit={({ formData: fd }) => submit(fd)}
-                showErrorList={false}
+              <Suspense
+                fallback={
+                  <div className="grid gap-2" role="status" aria-label="正在加载表单引擎">
+                    <Skeleton className="h-9 w-full" />
+                    <Skeleton className="h-9 w-5/6" />
+                    <Skeleton className="h-8 w-32" />
+                  </div>
+                }
               >
-                {footer}
-              </Form>
+                <SchemaFormRenderer
+                  schema={inputSchema as RJSFSchema}
+                  formData={formData}
+                  onChange={setFormData}
+                  onSubmit={submit}
+                >
+                  {footer}
+                </SchemaFormRenderer>
+              </Suspense>
             ) : (
               <div>
                 <Textarea
@@ -364,7 +340,7 @@ export function CmdPanel({
                     该命令声明了 <code className="font-mono">confirm</code>
                     {cmd.effect ? `(effect: ${cmd.effect})` : ''},执行前需二次确认。
                   </p>
-                  <pre className="mt-2 max-h-40 overflow-auto rounded-sm border bg-background px-2 py-1.5 text-left font-mono text-xs">
+                  <pre className="mt-2 max-h-40 max-w-full overflow-auto rounded-sm border bg-background px-2 py-1.5 text-left font-mono text-xs whitespace-pre-wrap break-words">
                     {JSON.stringify(pendingArgs, null, 2)}
                   </pre>
                 </div>

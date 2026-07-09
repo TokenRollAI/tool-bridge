@@ -1,5 +1,5 @@
 import { ChevronRight } from 'lucide-react'
-import { useState } from 'react'
+import { useId, useState } from 'react'
 import { NavLink } from 'react-router'
 import { KIND_ICON } from '@/components/KindBadge'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -63,7 +63,7 @@ const LAZY_DEPTH_LOCAL = 1
 const LAZY_DEPTH_REMOTE = 3
 
 /** ~tree 驱动的侧边树导航(可见性即权限:树里没有的就是无权的)。 */
-export function TreeNav({ filter = '' }: { filter?: string }) {
+export function TreeNav({ filter = '', onNavigate }: { filter?: string; onNavigate?: () => void }) {
   const filtering = filter.trim() !== ''
   // 非过滤:首屏只拉 depth=1(本地结构秒开,不碰远端);展开某节点时由 TreeBranch 按需懒加载。
   // 过滤:需全树子串匹配,拉满 depth=8(用户主动搜索;filter 不进 queryKey → 仅触发一次请求,
@@ -93,7 +93,13 @@ export function TreeNav({ filter = '' }: { filter?: string }) {
   return (
     <nav className="grid gap-px px-2" aria-label="节点树">
       {children.map((child) => (
-        <TreeBranch key={child.path} node={child} depth={0} forceOpen={filtering} />
+        <TreeBranch
+          key={child.path}
+          node={child}
+          depth={0}
+          forceOpen={filtering}
+          onNavigate={onNavigate}
+        />
       ))}
       {tree.data.truncated && (
         <p className="px-3 py-1 text-[10px] text-muted-foreground">…树已按深度/节点数截断</p>
@@ -107,14 +113,24 @@ function TreeBranch({
   depth,
   forceOpen = false,
   underRemote = false,
+  onNavigate,
 }: {
   node: TreeJson
   depth: number
   forceOpen?: boolean
   /** 是否处于 remote 挂载子树内(其下请求走纯透传,懒加载可用较大深度)。 */
   underRemote?: boolean
+  onNavigate?: () => void
 }) {
-  const [open, setOpen] = useState(depth < 1)
+  // 首层本地、已随根查询拿到 children 的目录可默认展开；remote / truncated 必须等用户显式展开，
+  // 否则会在首屏悄悄触发 remote 透传或下一层查询，抵消 depth=1 的性能边界。
+  const [open, setOpen] = useState(
+    () =>
+      depth < 1 &&
+      node.kind !== 'remote' &&
+      node.truncated !== true &&
+      (node.children?.length ?? 0) > 0,
+  )
   const effectiveOpen = forceOpen || open
   // truncated:该节点还有未加载的子树(remote 联邦或本地深层被首屏 depth 截断)。
   // 过滤模式用全树(depth=8),不再懒加载,避免全展开触发大量并发请求。
@@ -127,12 +143,31 @@ function TreeBranch({
   const kids = lazyKids ?? node.children ?? []
   const expandable = kids.length > 0 || lazy
   const label = node.path.split('/').pop() ?? node.path
+  const childrenId = useId()
   const { icon: Icon, className: iconClass } = KIND_ICON[node.kind] ?? KIND_ICON.directory
   return (
     <div>
       <div className="group relative flex items-center">
+        {expandable && !forceOpen && (
+          <button
+            type="button"
+            aria-label={`${effectiveOpen ? '收起' : '展开'}节点 ${label}`}
+            aria-expanded={effectiveOpen}
+            aria-controls={childrenId}
+            onClick={() => setOpen((v) => !v)}
+            className={cn(
+              'absolute left-0 z-10 grid size-6 place-items-center rounded-xs text-muted-foreground/80',
+              'hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none',
+            )}
+          >
+            <ChevronRight
+              className={cn('size-3 transition-transform', effectiveOpen && 'rotate-90')}
+            />
+          </button>
+        )}
         <NavLink
           to={`/nodes/${node.path}`}
+          onClick={onNavigate}
           className={({ isActive }) =>
             cn(
               'flex h-7 min-w-0 flex-1 items-center gap-1.5 rounded-sm pr-2 pl-6 text-[13px]',
@@ -153,21 +188,9 @@ function TreeBranch({
             />
           )}
         </NavLink>
-        {expandable && (
-          <button
-            type="button"
-            aria-label={effectiveOpen ? '收起' : '展开'}
-            onClick={() => setOpen((v) => !v)}
-            className="absolute left-0.5 grid size-5 place-items-center rounded-xs text-muted-foreground/60 hover:text-foreground"
-          >
-            <ChevronRight
-              className={cn('size-3 transition-transform', effectiveOpen && 'rotate-90')}
-            />
-          </button>
-        )}
       </div>
       {effectiveOpen && (
-        <div className="ml-[15px] border-l border-border/50 pl-1">
+        <div id={childrenId} className="ml-[15px] border-l border-border/50 pl-1">
           {lazy && sub.isPending ? (
             <div className="grid gap-1.5 py-1 pl-5">
               <Skeleton className="h-3.5 w-2/3" />
@@ -183,6 +206,7 @@ function TreeBranch({
                 depth={depth + 1}
                 forceOpen={forceOpen}
                 underRemote={isRemoteScope}
+                onNavigate={onNavigate}
               />
             ))
           )}

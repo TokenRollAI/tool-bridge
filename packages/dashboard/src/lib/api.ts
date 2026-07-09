@@ -43,7 +43,10 @@ async function request(conn: Connection, path: string, opts: RequestOpts = {}): 
       },
       ...(opts.body !== undefined ? { body: JSON.stringify(opts.body) } : {}),
     })
-  } catch {
+  } catch (error) {
+    // React Query 会用 AbortSignal 取消过时的路由/搜索请求;取消不是网络故障,
+    // 保留原始 AbortError 才不会触发 retry 或“网关不可达”误报。
+    if (error instanceof DOMException && error.name === 'AbortError') throw error
     throw new ApiError('network', 0, '网络请求失败:网关不可达或跨域未放行', true)
   }
   if (!res.ok) {

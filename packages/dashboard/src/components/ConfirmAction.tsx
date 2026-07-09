@@ -18,7 +18,7 @@ export function ConfirmAction({
   title,
   description,
   actionLabel = '确认执行',
-  pending = false,
+  pending: externalPending = false,
   onConfirm,
 }: {
   trigger: ReactNode
@@ -26,11 +26,27 @@ export function ConfirmAction({
   description?: ReactNode
   actionLabel?: string
   pending?: boolean
-  onConfirm: () => void
+  onConfirm: () => void | Promise<void>
 }) {
   const [open, setOpen] = useState(false)
+  const [internalPending, setInternalPending] = useState(false)
+  const pending = externalPending || internalPending
+
+  const confirm = async () => {
+    if (pending) return
+    setInternalPending(true)
+    try {
+      await onConfirm()
+      setOpen(false)
+    } catch {
+      // 调用方负责 toast/错误呈现；失败时保留弹窗，允许用户重试或取消。
+    } finally {
+      setInternalPending(false)
+    }
+  }
+
   return (
-    <AlertDialog open={open} onOpenChange={setOpen}>
+    <AlertDialog open={open} onOpenChange={(next) => !pending && setOpen(next)}>
       <AlertDialogTrigger asChild>{trigger}</AlertDialogTrigger>
       <AlertDialogContent>
         <AlertDialogHeader>
@@ -42,15 +58,8 @@ export function ConfirmAction({
           )}
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogCancel>取消</AlertDialogCancel>
-          <Button
-            variant="destructive"
-            disabled={pending}
-            onClick={() => {
-              onConfirm()
-              setOpen(false)
-            }}
-          >
+          <AlertDialogCancel disabled={pending}>取消</AlertDialogCancel>
+          <Button variant="destructive" disabled={pending} onClick={() => void confirm()}>
             {pending && <Loader2 className="animate-spin" />}
             {actionLabel}
           </Button>

@@ -17,6 +17,7 @@ import { CopyButton } from '@/components/CopyButton'
 import { EmptyState } from '@/components/EmptyState'
 import { KindBadge, OnlineDot } from '@/components/KindBadge'
 import { PageHeader } from '@/components/PageHeader'
+import { PaginationFooter } from '@/components/PaginationFooter'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import {
@@ -67,8 +68,8 @@ export function RegistryPage() {
   const [search, setSearch] = useState('')
   const [inspecting, setInspecting] = useState<RegistryNode | null>(null)
 
-  const unmount = (path: string) => {
-    invoke.mutate(
+  const unmount = async (path: string) => {
+    await invoke.mutateAsync(
       { path: 'system/registry', tool: 'delete', args: { path } },
       {
         onSuccess: () => {
@@ -103,7 +104,9 @@ export function RegistryPage() {
     })
   }
 
-  const mounted = (list.data?.items ?? []).filter((n) => !n.path.startsWith('system'))
+  const mounted = (list.data?.items ?? []).filter(
+    (n) => n.path !== 'system' && !n.path.startsWith('system/'),
+  )
   const needle = search.trim().toLowerCase()
   const items = mounted.filter(
     (n) =>
@@ -116,7 +119,7 @@ export function RegistryPage() {
     k === 'all' ? mounted.length : mounted.filter((n) => n.kind === k).length
 
   return (
-    <div className="mx-auto max-w-4xl px-8 py-8">
+    <div className="mx-auto max-w-4xl px-4 py-5 sm:px-6 sm:py-6 lg:px-8 lg:py-8">
       <PageHeader
         title="节点注册"
         description="挂载工具(mcp/http/plugin)、context namespace、联邦 HTBP 服务(remote)"
@@ -124,7 +127,7 @@ export function RegistryPage() {
       />
 
       <div className="mt-6 flex flex-wrap items-center gap-2">
-        <div className="flex overflow-hidden rounded-md border">
+        <div className="flex max-w-full overflow-x-auto rounded-md border">
           {KIND_FILTERS.map((k) => {
             const count = countByKind(k)
             if (k !== 'all' && count === 0) return null
@@ -147,14 +150,14 @@ export function RegistryPage() {
           })}
         </div>
         {mounted.length > 3 && (
-          <div className="relative ml-auto">
+          <div className="relative ml-auto w-full sm:w-auto">
             <Search className="pointer-events-none absolute top-1/2 left-2.5 size-3 -translate-y-1/2 text-muted-foreground/60" />
             <Input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="过滤 path / 描述…"
               aria-label="过滤"
-              className="h-8 w-48 pl-7 font-mono text-xs"
+              className="h-8 w-full pl-7 font-mono text-xs sm:w-48"
             />
           </div>
         )}
@@ -179,7 +182,7 @@ export function RegistryPage() {
             )}
           </EmptyState>
         ) : (
-          <Table>
+          <Table className="min-w-[680px]">
             <TableHeader>
               <TableRow>
                 <TableHead>path</TableHead>
@@ -249,11 +252,20 @@ export function RegistryPage() {
             </TableBody>
           </Table>
         )}
+        {!list.isPending && !list.isError && (
+          <PaginationFooter
+            count={mounted.length}
+            unit="个节点"
+            hasNextPage={Boolean(list.hasNextPage)}
+            isFetchingNextPage={list.isFetchingNextPage}
+            onLoadMore={() => void list.fetchNextPage()}
+          />
+        )}
       </div>
 
       {/* 节点配置查看(registry get 的展示面;凭证只以 authRef 名义出现) */}
       <Dialog open={inspecting !== null} onOpenChange={(o) => !o && setInspecting(null)}>
-        <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-lg">
+        <DialogContent className="max-h-[85vh] overflow-y-auto p-4 sm:max-w-lg sm:p-6">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 font-mono text-sm">
               {inspecting?.path}
@@ -271,7 +283,7 @@ export function RegistryPage() {
                     description: inspecting.description,
                     ...(inspecting.config ? { config: inspecting.config } : {}),
                     ...(inspecting.virtualize ? { virtualize: inspecting.virtualize } : {}),
-                    ...(inspecting.owner ? { owner: inspecting.owner } : {}),
+                    ...(inspecting.registeredBy ? { registeredBy: inspecting.registeredBy } : {}),
                     ...(inspecting.createdAt ? { createdAt: inspecting.createdAt } : {}),
                     ...(inspecting.updatedAt ? { updatedAt: inspecting.updatedAt } : {}),
                   },
@@ -326,6 +338,7 @@ function MountDialog() {
   )
   const [httpAuthRef, setHttpAuthRef] = useState('')
   const [authHeader, setAuthHeader] = useState('')
+  const [httpSchemeMode, setHttpSchemeMode] = useState<'bearer' | 'raw' | 'custom'>('bearer')
   const [authScheme, setAuthScheme] = useState('')
   // context(provider = r2 | s3 | 已注册 context-provider plugin id)
   const [provider, setProvider] = useState('r2')
@@ -426,7 +439,11 @@ function MountDialog() {
           tools,
           ...(httpAuthRef.trim() ? { authRef: httpAuthRef.trim() } : {}),
           ...(authHeader.trim() ? { authHeader: authHeader.trim() } : {}),
-          ...(authScheme.trim() !== '' ? { authScheme: authScheme.trim() } : {}),
+          ...(httpSchemeMode === 'raw'
+            ? { authScheme: '' }
+            : httpSchemeMode === 'custom' && authScheme.trim()
+              ? { authScheme: authScheme.trim() }
+              : {}),
         }
       }
       case 'context': {
@@ -461,6 +478,7 @@ function MountDialog() {
         return {
           kind: 'context',
           provider,
+          ...(ctxAuthRef.trim() ? { authRef: ctxAuthRef.trim() } : {}),
           ...(readOnly ? { readOnly: true } : {}),
           ...(ttlSeconds !== undefined ? { ttl: ttlSeconds } : {}),
         }
@@ -551,7 +569,7 @@ function MountDialog() {
           挂载节点
         </Button>
       </DialogTrigger>
-      <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-lg">
+      <DialogContent className="max-h-[85vh] overflow-y-auto p-4 sm:max-w-lg sm:p-6">
         <DialogHeader>
           <DialogTitle className="text-base">挂载节点</DialogTitle>
           <DialogDescription>
@@ -561,7 +579,7 @@ function MountDialog() {
         </DialogHeader>
 
         <div className="grid gap-4">
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid gap-3 sm:grid-cols-2">
             <div className="grid gap-1.5">
               <Label className="text-xs">kind</Label>
               <Select value={kind} onValueChange={(v) => setKind(v as MountKind)}>
@@ -627,7 +645,7 @@ function MountDialog() {
                   onChange={(e) => setMcpUrl(e.target.value)}
                 />
               </div>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid gap-3 sm:grid-cols-2">
                 <div className="grid gap-1.5">
                   <Label className="text-xs">上游认证</Label>
                   <Select
@@ -665,7 +683,7 @@ function MountDialog() {
                 )}
               </div>
               {mcpAuthMode === 'authRef' && (
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid gap-3 sm:grid-cols-2">
                   <div className="grid gap-1.5">
                     <Label htmlFor="mcp-auth-header" className="text-xs">
                       authHeader(可空)
@@ -766,7 +784,7 @@ function MountDialog() {
                   onChange={(e) => setToolsJson(e.target.value)}
                 />
               </div>
-              <div className="grid grid-cols-3 gap-3">
+              <div className="grid gap-3 sm:grid-cols-3">
                 <div className="grid gap-1.5">
                   <Label htmlFor="http-auth" className="text-xs">
                     authRef(可空)
@@ -791,24 +809,48 @@ function MountDialog() {
                   />
                 </div>
                 <div className="grid gap-1.5">
+                  <Label className="text-xs">authScheme</Label>
+                  <Select
+                    value={httpSchemeMode}
+                    onValueChange={(v) => setHttpSchemeMode(v as 'bearer' | 'raw' | 'custom')}
+                  >
+                    <SelectTrigger className="font-mono text-xs">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="bearer" className="font-mono text-xs">
+                        Bearer(默认)
+                      </SelectItem>
+                      <SelectItem value="raw" className="font-mono text-xs">
+                        无前缀(原样注入)
+                      </SelectItem>
+                      <SelectItem value="custom" className="font-mono text-xs">
+                        自定义前缀
+                      </SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              {httpSchemeMode === 'custom' && (
+                <div className="grid gap-1.5">
                   <Label htmlFor="http-auth-scheme" className="text-xs">
-                    authScheme(可空)
+                    自定义 scheme 前缀
                   </Label>
                   <Input
                     id="http-auth-scheme"
                     className="font-mono text-xs"
-                    placeholder="Bearer"
+                    placeholder="Token"
                     value={authScheme}
                     onChange={(e) => setAuthScheme(e.target.value)}
                   />
                 </div>
-              </div>
+              )}
             </>
           )}
 
           {kind === 'context' && (
             <>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid gap-3 sm:grid-cols-2">
                 <div className="grid gap-1.5">
                   <Label className="text-xs">provider</Label>
                   <Select value={provider} onValueChange={setProvider}>
@@ -844,9 +886,35 @@ function MountDialog() {
                   </div>
                 )}
               </div>
+              {plugins.hasNextPage && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="xs"
+                  className="justify-self-start"
+                  disabled={plugins.isFetchingNextPage}
+                  onClick={() => void plugins.fetchNextPage()}
+                >
+                  {plugins.isFetchingNextPage && <Loader2 className="animate-spin" />}
+                  继续加载 Plugin（已加载 {pluginItems.length}）
+                </Button>
+              )}
+              {provider !== 'r2' && provider !== 's3' && (
+                <div className="grid gap-1.5">
+                  <Label htmlFor="ctx-plugin-auth" className="text-xs">
+                    authRef(可空;上游凭证由平台代解析后注入 Plugin)
+                  </Label>
+                  <Input
+                    id="ctx-plugin-auth"
+                    className="font-mono text-xs"
+                    value={ctxAuthRef}
+                    onChange={(e) => setCtxAuthRef(e.target.value)}
+                  />
+                </div>
+              )}
               {provider === 's3' && (
                 <>
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid gap-3 sm:grid-cols-2">
                     <div className="grid gap-1.5">
                       <Label htmlFor="s3-endpoint" className="text-xs">
                         endpoint *
@@ -871,7 +939,7 @@ function MountDialog() {
                       />
                     </div>
                   </div>
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid gap-3 sm:grid-cols-2">
                     <div className="grid gap-1.5">
                       <Label htmlFor="s3-region" className="text-xs">
                         region(可空,缺省 auto)
@@ -898,7 +966,7 @@ function MountDialog() {
                   </div>
                 </>
               )}
-              <div className="grid grid-cols-2 items-end gap-3">
+              <div className="grid gap-3 sm:grid-cols-2 sm:items-end">
                 <div className="grid gap-1.5">
                   <Label htmlFor="ctx-ttl" className="text-xs">
                     ttl 秒(可空;到期整节点回收)
@@ -921,7 +989,7 @@ function MountDialog() {
           )}
 
           {kind === 'remote' && (
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid gap-3 sm:grid-cols-2">
               <div className="grid gap-1.5">
                 <Label htmlFor="remote-url" className="text-xs">
                   baseUrl *(须在白名单内)
@@ -976,6 +1044,19 @@ function MountDialog() {
                     注册 tool-provider,再回来挂载。
                   </p>
                 )}
+                {plugins.hasNextPage && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="xs"
+                    className="justify-self-start"
+                    disabled={plugins.isFetchingNextPage}
+                    onClick={() => void plugins.fetchNextPage()}
+                  >
+                    {plugins.isFetchingNextPage && <Loader2 className="animate-spin" />}
+                    继续加载 Plugin（已加载 {pluginItems.length}）
+                  </Button>
+                )}
               </div>
               <div className="grid gap-1.5">
                 <Label htmlFor="tool-auth" className="text-xs">
@@ -996,7 +1077,7 @@ function MountDialog() {
               <p className="text-[11px] font-medium text-muted-foreground">
                 虚拟化(可空;hide → rename → prefix → describe)
               </p>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid gap-3 sm:grid-cols-2">
                 <div className="grid gap-1.5">
                   <Label htmlFor="virt-prefix" className="text-xs">
                     工具名前缀(纯拼接,惯例 ns__)
@@ -1022,7 +1103,7 @@ function MountDialog() {
                   />
                 </div>
               </div>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid gap-3 sm:grid-cols-2">
                 <div className="grid gap-1.5">
                   <Label htmlFor="virt-rename" className="text-xs">
                     rename(每行 from=to)

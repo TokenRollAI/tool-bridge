@@ -24,7 +24,7 @@ export function NodePage() {
 
   if (help.isPending) {
     return (
-      <div className="mx-auto max-w-3xl px-8 py-8">
+      <div className="mx-auto max-w-3xl px-4 py-5 sm:px-6 sm:py-7 lg:px-8 lg:py-8">
         <Skeleton className="h-6 w-64" />
         <Skeleton className="mt-3 h-4 w-96" />
         <Skeleton className="mt-8 h-40 w-full" />
@@ -34,7 +34,7 @@ export function NodePage() {
   if (help.isError) {
     const err = help.error as ApiError
     return (
-      <div className="mx-auto max-w-3xl px-8 py-8">
+      <div className="mx-auto max-w-3xl px-4 py-5 sm:px-6 sm:py-7 lg:px-8 lg:py-8">
         <Crumbs path={path} />
         <div className="mt-6 rounded-sm border border-destructive/40 bg-destructive/10 px-4 py-3">
           <p className="font-mono text-xs text-destructive-foreground/90">
@@ -51,10 +51,10 @@ export function NodePage() {
   const { node, cmds, children, note, feedback } = help.data
   const isContext = node.kind === 'context'
   return (
-    <div className="mx-auto max-w-3xl px-8 py-8">
+    <div className="mx-auto max-w-3xl px-4 py-5 sm:px-6 sm:py-7 lg:px-8 lg:py-8">
       <Crumbs path={path} />
-      <header className="mt-2 flex items-center gap-3">
-        <h1 className="min-w-0 truncate font-mono text-xl tracking-tight">
+      <header className="mt-2 flex min-w-0 flex-wrap items-center gap-2 sm:gap-3">
+        <h1 className="min-w-0 max-w-full truncate font-mono text-xl tracking-tight">
           {path === '' ? '/' : path.split('/').pop()}
         </h1>
         <KindBadge kind={node.kind} />
@@ -66,24 +66,26 @@ export function NodePage() {
 
       {/* key=path:切换节点时重置 tab 选择(context 节点默认落「条目」) */}
       <Tabs key={path} defaultValue={isContext ? 'browse' : 'invoke'} className="mt-6">
-        <TabsList className="h-8">
-          {isContext && (
-            <TabsTrigger value="browse" className="px-3 text-xs">
-              条目
+        <div className="-mx-1 overflow-x-auto px-1 pb-1">
+          <TabsList className="h-8 min-w-max">
+            {isContext && (
+              <TabsTrigger value="browse" className="px-3 text-xs">
+                条目
+              </TabsTrigger>
+            )}
+            <TabsTrigger value="invoke" className="px-3 text-xs">
+              调用
             </TabsTrigger>
-          )}
-          <TabsTrigger value="invoke" className="px-3 text-xs">
-            调用
-          </TabsTrigger>
-          {path !== '' && (
-            <TabsTrigger value="feedback" className="px-3 text-xs">
-              反馈{feedback && feedback.length > 0 ? ` · ${feedback.length}` : ''}
+            {path !== '' && (
+              <TabsTrigger value="feedback" className="px-3 text-xs">
+                反馈{feedback && feedback.length > 0 ? ` · ${feedback.length}` : ''}
+              </TabsTrigger>
+            )}
+            <TabsTrigger value="markdown" className="px-3 text-xs">
+              ~help 文档
             </TabsTrigger>
-          )}
-          <TabsTrigger value="markdown" className="px-3 text-xs">
-            ~help 文档
-          </TabsTrigger>
-        </TabsList>
+          </TabsList>
+        </div>
 
         {isContext && (
           <TabsContent value="browse" className="mt-4">
@@ -111,11 +113,11 @@ export function NodePage() {
                     <Link
                       key={ch.path}
                       to={`/nodes/${target}`}
-                      className="flex items-center gap-2.5 bg-card/60 px-4 py-2.5 hover:bg-secondary/60"
+                      className="flex min-w-0 flex-wrap items-center gap-2 bg-card/60 px-3 py-2.5 hover:bg-secondary/60 sm:flex-nowrap sm:gap-2.5 sm:px-4"
                     >
-                      <span className="font-mono text-sm">{name}</span>
+                      <span className="min-w-0 truncate font-mono text-sm">{name}</span>
                       <KindBadge kind={ch.kind} />
-                      <span className="ml-auto truncate pl-4 text-xs text-muted-foreground">
+                      <span className="w-full truncate text-xs text-muted-foreground sm:ml-auto sm:w-auto sm:pl-4">
                         {ch.description}
                       </span>
                     </Link>
@@ -167,7 +169,7 @@ function HelpMarkdownView({ path }: { path: string }) {
   if (md.isPending) return <Skeleton className="h-40 w-full" />
   if (md.isError) return <p className="text-sm text-destructive">{md.error.message}</p>
   return (
-    <div className="prose prose-sm dark:prose-invert max-w-none rounded-md border bg-card/60 px-4 py-3 prose-pre:bg-background prose-pre:text-xs prose-code:font-mono">
+    <div className="prose prose-sm dark:prose-invert max-w-none overflow-x-auto rounded-md border bg-card/60 px-3 py-3 break-words prose-pre:max-w-full prose-pre:overflow-x-auto prose-pre:bg-background prose-pre:text-xs prose-code:font-mono sm:px-4">
       <Markdown remarkPlugins={[remarkGfm]}>{md.data}</Markdown>
     </div>
   )

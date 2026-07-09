@@ -12,7 +12,13 @@ import {
   invoke,
   startOAuthAuthorize,
 } from './api'
-import { type InvokeRecord, loadHistory, recordInvoke, subscribeHistory } from './history'
+import {
+  historyScope,
+  type InvokeRecord,
+  loadHistory,
+  recordInvoke,
+  subscribeHistory,
+} from './history'
 import { useConn, useSession } from './session'
 import type {
   ContextEntry,
@@ -26,8 +32,8 @@ import type {
 
 /** queryKey 前缀含 profile 标识:切换档案后互不串缓存。 */
 function useKeyBase(): readonly unknown[] {
-  const { active } = useSession()
-  return ['tb', active?.name ?? '', active?.baseUrl ?? ''] as const
+  const { active, revision } = useSession()
+  return ['tb', active?.id ?? '', active?.baseUrl ?? '', revision] as const
 }
 
 export function useTree(path = '', depth = 8, options?: { enabled?: boolean }) {
@@ -97,24 +103,26 @@ export interface InvokeInput {
 export function useInvoke() {
   const conn = useConn()
   const { active } = useSession()
-  const profile = active?.name ?? ''
+  const scope = active ? historyScope(active) : ''
   return useMutation<InvokeResult, Error, InvokeInput>({
+    // variables/data 可含凭证、Context 正文或一次性 token。observer 存活时保留
+    // 结果供 UI 展示;reset/卸载后最多保留 1s(而非默认 5min)。不用 0,
+    // 避免长调用 pending 期卸载 observer 后 query-core 持续重排 0ms GC timer。
+    gcTime: 1_000,
     mutationFn: ({ path, tool, args, accept, direct }) =>
       invoke(conn, path, tool, args, accept ?? 'json', direct ?? false),
-    onSuccess: (r, { path, tool, args }) =>
-      recordInvoke(profile, {
+    onSuccess: (r, { path, tool }) =>
+      recordInvoke(scope, {
         path,
         tool,
-        args,
         ok: true,
         ms: r.ms,
         at: new Date().toISOString(),
       }),
-    onError: (e, { path, tool, args }) =>
-      recordInvoke(profile, {
+    onError: (e, { path, tool }) =>
+      recordInvoke(scope, {
         path,
         tool,
-        args,
         ok: false,
         code: (e as ApiError).code ?? 'internal',
         ms: 0,
@@ -134,8 +142,8 @@ export function useOAuthAuthorize() {
 /** 当前 profile 的调用历史(响应式)。 */
 export function useHistory(): InvokeRecord[] {
   const { active } = useSession()
-  const profile = active?.name ?? ''
-  return useSyncExternalStore(subscribeHistory, () => loadHistory(profile))
+  const scope = active ? historyScope(active) : ''
+  return useSyncExternalStore(subscribeHistory, () => loadHistory(scope))
 }
 
 /** 使树与节点级缓存失效(挂载/卸载/SK 变更后)。 */
@@ -147,40 +155,42 @@ export function useInvalidateTree() {
 
 // ---- system/* 结构化便捷查询(管理视图消费;与通用调用同一数据面)----
 
-export function useSkList() {
+/**
+ * builtin list 的 cursor 分页适配。对页面仍暴露合并后的 `data.items`,
+ * 同时保留 `hasNextPage/fetchNextPage/isFetchingNextPage`,避免管理面静默只显示前 50 条。
+ */
+function usePagedBuiltin<T>(key: string, path: string, args: Record<string, unknown> = {}) {
   const conn = useConn()
   const base = useKeyBase()
-  return useQuery({
-    queryKey: [...base, 'sk-list'],
-    queryFn: async () => {
-      const r = await invoke(conn, 'system/sk', 'list', {})
-      return r.json as Page<SecretKeyInfo>
+  const query = useInfiniteQuery({
+    queryKey: [...base, key, args],
+    queryFn: async ({ pageParam }) => {
+      const opts = pageParam ? { cursor: pageParam } : {}
+      const r = await invoke(conn, path, 'list', { ...args, opts })
+      return r.json as Page<T>
     },
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (last) => last.cursor,
   })
+  const data = query.data
+    ? {
+        items: query.data.pages.flatMap((page) => page.items),
+        ...(query.data.pages.at(-1)?.cursor ? { cursor: query.data.pages.at(-1)?.cursor } : {}),
+      }
+    : undefined
+  return { ...query, data }
+}
+
+export function useSkList() {
+  return usePagedBuiltin<SecretKeyInfo>('sk-list', 'system/sk')
 }
 
 export function useSecretList() {
-  const conn = useConn()
-  const base = useKeyBase()
-  return useQuery({
-    queryKey: [...base, 'secret-list'],
-    queryFn: async () => {
-      const r = await invoke(conn, 'system/secret', 'list', {})
-      return r.json as Page<{ name: string; updatedAt: string }>
-    },
-  })
+  return usePagedBuiltin<{ name: string; updatedAt: string }>('secret-list', 'system/secret')
 }
 
 export function usePluginList() {
-  const conn = useConn()
-  const base = useKeyBase()
-  return useQuery({
-    queryKey: [...base, 'plugin-list'],
-    queryFn: async () => {
-      const r = await invoke(conn, 'system/plugin', 'list', {})
-      return r.json as Page<PluginManifest>
-    },
-  })
+  return usePagedBuiltin<PluginManifest>('plugin-list', 'system/plugin')
 }
 
 /** remote 联邦 host 白名单合并视图(env 基线 + 运行时条目;对等 `tb federation ls`)。 */
@@ -219,15 +229,11 @@ export function useFeedbackDetail(path: string, id: string | null) {
 }
 
 export function useRegistryList(prefix?: string) {
-  const conn = useConn()
-  const base = useKeyBase()
-  return useQuery({
-    queryKey: [...base, 'registry-list', prefix ?? ''],
-    queryFn: async () => {
-      const r = await invoke(conn, 'system/registry', 'list', prefix ? { prefix } : {})
-      return r.json as Page<RegistryNode>
-    },
-  })
+  return usePagedBuiltin<RegistryNode>(
+    `registry-list:${prefix ?? ''}`,
+    'system/registry',
+    prefix ? { prefix } : {},
+  )
 }
 
 export function useStatus() {

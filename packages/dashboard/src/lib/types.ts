@@ -89,7 +89,7 @@ export interface RegistryNode {
   description: string
   config?: Record<string, unknown>
   virtualize?: Record<string, unknown>
-  owner?: string
+  registeredBy?: string
   online?: boolean
   createdAt?: string
   updatedAt?: string

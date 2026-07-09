@@ -107,8 +107,12 @@ export function ContextBrowser({ path, cmds }: { path: string; cmds: HelpCmd[] }
   const [searchMode, setSearchMode] = useState<'keyword' | 'semantic'>('keyword')
   const prefix = useDebounced(prefixInput)
   const query = useDebounced(queryInput)
+  const effectiveQuery = canSearch ? query.trim() : ''
+  // Search 与 List(prefix) 是两个独立协议动作；检索期间明确停用 prefix，避免误以为会组合过滤。
+  const searchRequested = canSearch && queryInput.trim() !== ''
+  const searchActive = canSearch && effectiveQuery !== ''
 
-  const entries = useCtxEntries(path, prefix, canSearch ? query : '', searchMode)
+  const entries = useCtxEntries(path, searchActive ? '' : prefix, effectiveQuery, searchMode)
   const invoke = useInvoke()
   const qc = useQueryClient()
 
@@ -117,8 +121,8 @@ export function ContextBrowser({ path, cmds }: { path: string; cmds: HelpCmd[] }
 
   const refresh = () => qc.invalidateQueries({ queryKey: ['tb'] })
 
-  const remove = (entryPath: string) => {
-    invoke.mutate(
+  const remove = async (entryPath: string) => {
+    await invoke.mutateAsync(
       { path, tool: 'Delete', args: { path: entryPath } },
       {
         onSuccess: () => {
@@ -134,34 +138,41 @@ export function ContextBrowser({ path, cmds }: { path: string; cmds: HelpCmd[] }
 
   return (
     <section className="grid gap-3">
-      <div className="flex flex-wrap items-center gap-2">
-        <div className="relative">
+      <div className="grid grid-cols-1 gap-2 sm:flex sm:flex-wrap sm:items-center">
+        <div className="relative min-w-0">
           <ListFilter className="pointer-events-none absolute top-1/2 left-2.5 size-3 -translate-y-1/2 text-muted-foreground/60" />
           <Input
             value={prefixInput}
             onChange={(e) => setPrefixInput(e.target.value)}
-            placeholder="前缀过滤,如 docs/"
+            placeholder={searchRequested || searchActive ? '检索时不使用前缀' : '前缀过滤,如 docs/'}
             aria-label="前缀过滤"
-            className="h-8 w-44 pl-7 font-mono text-xs"
+            aria-describedby={
+              searchRequested || searchActive ? 'context-prefix-search-note' : undefined
+            }
+            disabled={searchRequested || searchActive}
+            className="h-8 w-full pl-7 font-mono text-xs sm:w-44"
           />
         </div>
         {canSearch && (
           <>
-            <div className="relative">
+            <div className="relative min-w-0">
               <Search className="pointer-events-none absolute top-1/2 left-2.5 size-3 -translate-y-1/2 text-muted-foreground/60" />
               <Input
                 value={queryInput}
                 onChange={(e) => setQueryInput(e.target.value)}
                 placeholder={searchMode === 'semantic' ? 'semantic 检索…' : 'keyword 检索…'}
                 aria-label="检索"
-                className="h-8 w-44 pl-7 font-mono text-xs"
+                className="h-8 w-full pl-7 font-mono text-xs sm:w-44"
               />
             </div>
             <Select
               value={searchMode}
               onValueChange={(v) => setSearchMode(v as 'keyword' | 'semantic')}
             >
-              <SelectTrigger className="h-8 font-mono text-xs" aria-label="检索模式">
+              <SelectTrigger
+                className="h-8 w-full font-mono text-xs sm:w-auto"
+                aria-label="检索模式"
+              >
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -180,18 +191,31 @@ export function ContextBrowser({ path, cmds }: { path: string; cmds: HelpCmd[] }
           size="icon-sm"
           aria-label="刷新"
           title="刷新"
-          className="text-muted-foreground"
+          className="justify-self-start text-muted-foreground"
           onClick={() => entries.refetch()}
         >
           <RefreshCw className={cn('size-3.5', entries.isFetching && 'animate-spin')} />
         </Button>
         {canWrite && (
-          <Button size="sm" className="ml-auto" onClick={() => setEditing({ entryPath: '' })}>
+          <Button
+            size="sm"
+            className="w-full sm:ml-auto sm:w-auto"
+            onClick={() => setEditing({ entryPath: '' })}
+          >
             <FilePlus2 />
             新建条目
           </Button>
         )}
       </div>
+      {(searchRequested || searchActive) && (
+        <p
+          id="context-prefix-search-note"
+          role="status"
+          className="-mt-1 text-xs text-muted-foreground"
+        >
+          当前使用 Search；前缀过滤只适用于 List，检索期间不会生效。
+        </p>
+      )}
 
       <div className="overflow-hidden rounded-md border">
         {entries.isPending ? (
@@ -204,10 +228,10 @@ export function ContextBrowser({ path, cmds }: { path: string; cmds: HelpCmd[] }
         ) : items.length === 0 ? (
           <EmptyState
             icon={Database}
-            title={query ? '无匹配条目' : 'namespace 是空的'}
+            title={effectiveQuery ? '无匹配条目' : 'namespace 是空的'}
             className="border-0"
           >
-            {canWrite && !query && (
+            {canWrite && !effectiveQuery && (
               <p>
                 点「新建条目」写入第一条,或用 CLI:
                 <code className="ml-1 font-mono">tb ctx put {path}/&lt;条目路径&gt;</code>
@@ -314,9 +338,9 @@ export function ContextBrowser({ path, cmds }: { path: string; cmds: HelpCmd[] }
         )}
       </div>
 
-      <div className="flex items-center gap-3">
+      <div className="flex flex-wrap items-center gap-3">
         <p className="font-mono text-[11px] text-muted-foreground tabular-nums">
-          {items.length} 条{query ? '(检索结果)' : ''}
+          {items.length} 条{effectiveQuery ? '(检索结果)' : ''}
         </p>
         {entries.hasNextPage && (
           <Button
@@ -385,7 +409,9 @@ function EntryViewDialog({
     <Dialog open={entryPath !== null} onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-2xl">
         <DialogHeader>
-          <DialogTitle className="min-w-0 truncate pr-6 font-mono text-sm">{entryPath}</DialogTitle>
+          <DialogTitle className="min-w-0 break-all pr-6 font-mono text-sm">
+            {entryPath}
+          </DialogTitle>
           {e && (
             <DialogDescription asChild>
               <div className="flex flex-wrap gap-x-4 gap-y-1 font-mono text-[11px]">
@@ -419,11 +445,11 @@ function EntryViewDialog({
             </Button>
           </div>
         ) : e?.contentType.includes('markdown') ? (
-          <div className="prose prose-sm dark:prose-invert max-w-none rounded-sm border bg-card px-4 py-3 prose-pre:bg-background prose-pre:text-xs prose-code:font-mono">
+          <div className="prose prose-sm dark:prose-invert max-w-none overflow-x-auto rounded-sm border bg-card px-3 py-3 break-words prose-pre:max-w-full prose-pre:overflow-x-auto prose-pre:bg-background prose-pre:text-xs prose-code:font-mono sm:px-4">
             <Markdown remarkPlugins={[remarkGfm]}>{text}</Markdown>
           </div>
         ) : (
-          <pre className="max-h-96 overflow-auto rounded-sm border bg-card px-3 py-2 font-mono text-xs leading-relaxed whitespace-pre-wrap">
+          <pre className="max-h-96 max-w-full overflow-auto rounded-sm border bg-card px-3 py-2 font-mono text-xs leading-relaxed whitespace-pre-wrap break-words">
             {text}
           </pre>
         )}
@@ -508,19 +534,31 @@ function EntryEditDialog({
   const [metaSpec, setMetaSpec] = useState('')
   const [err, setErr] = useState<string | null>(null)
   const [hydrated, setHydrated] = useState(false)
+  const [baselineVersion, setBaselineVersion] = useState<string | null>(null)
+  const [baselineRef, setBaselineRef] = useState<string | null>(null)
 
   // 编辑模式:Get 到位后一次性预填(大对象 $ref 不可就地编辑内容)。
   const e = existing.data
-  const ref = e ? refOf(e.content) : null
   useEffect(() => {
     if (isNew || !e || hydrated) return
     setContentType(e.contentType)
     setContent(typeof e.content === 'string' ? e.content : JSON.stringify(e.content, null, 2))
     setMetaSpec(metaToLines(e.metadata))
+    // 内容与 version 必须原子取自同一次 Get。后台 refetch 即使更新 query data,
+    // 提交仍使用这个 baseline,让服务端的乐观锁能阻止“旧正文 + 新 version”覆盖。
+    setBaselineVersion(e.version)
+    setBaselineRef(refOf(e.content))
     setHydrated(true)
   }, [isNew, e, hydrated])
+  const waitingForExisting = !isNew && (existing.isPending || (existing.isSuccess && !hydrated))
+  const ref = isNew ? null : baselineRef
 
   const submit = () => {
+    // 编辑必须基于成功 Get 的 version；缺少基线时绝不降级成无 ifVersion 的覆盖写。
+    if (!isNew && (!hydrated || baselineVersion === null)) {
+      setErr('未能读取现有条目，无法安全保存；请重试读取。')
+      return
+    }
     let metadata: Record<string, string> | undefined
     try {
       metadata = parseMetaLines(metaSpec)
@@ -537,7 +575,7 @@ function EntryEditDialog({
           tool: 'Update',
           args: {
             path: entryPath,
-            patch: { metadata: metadata ?? {}, ...(e ? { ifVersion: e.version } : {}) },
+            patch: { metadata: metadata ?? {}, ifVersion: baselineVersion },
           },
         },
         {
@@ -575,7 +613,7 @@ function EntryEditDialog({
             content: body,
             ...(typeof body === 'string' ? { contentType } : {}),
             ...(metadata ? { metadata } : {}),
-            ...(!isNew && e ? { ifVersion: e.version } : {}),
+            ...(!isNew && baselineVersion !== null ? { ifVersion: baselineVersion } : {}),
           },
         },
       },
@@ -593,92 +631,130 @@ function EntryEditDialog({
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-2xl">
         <DialogHeader>
-          <DialogTitle className="text-base">{isNew ? '新建条目' : '编辑条目'}</DialogTitle>
+          <DialogTitle className="break-words text-base">
+            {isNew ? '新建条目' : `编辑条目 · ${entryPath}`}
+          </DialogTitle>
           <DialogDescription>
-            {!isNew && ref !== null
-              ? '大对象($ref)不支持就地编辑内容;metadata 可经 Update 部分更新。'
-              : `Write 是幂等 upsert${isNew ? '' : ';携带 ifVersion,被并发修改时返回 conflict'}。`}
+            {waitingForExisting
+              ? '正在读取现有条目与 version；读取完成前不会允许保存。'
+              : !isNew && existing.isError && !hydrated
+                ? '读取现有条目失败。为避免无 version 覆盖，保存已被阻止。'
+                : !isNew && ref !== null
+                  ? '大对象($ref)不支持就地编辑内容;metadata 可经 Update 部分更新。'
+                  : `Write 是幂等 upsert${isNew ? '' : ';携带 ifVersion,被并发修改时返回 conflict'}。`}
           </DialogDescription>
         </DialogHeader>
 
-        <div className="grid gap-4">
-          {(isNew || ref === null) && (
-            <>
-              <div className="grid grid-cols-[1fr_12rem] gap-3">
+        {waitingForExisting ? (
+          <div role="status" className="grid gap-2" aria-label="正在读取条目">
+            <Skeleton className="h-9 w-full" />
+            <Skeleton className="h-36 w-full" />
+            <Skeleton className="h-14 w-full" />
+          </div>
+        ) : !isNew && existing.isError && !hydrated ? (
+          <div
+            role="alert"
+            className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-3"
+          >
+            <p className="text-sm text-destructive">{existing.error.message}</p>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="mt-3"
+              disabled={existing.isFetching}
+              onClick={() => existing.refetch()}
+            >
+              <RefreshCw className={cn(existing.isFetching && 'animate-spin')} />
+              重试读取
+            </Button>
+          </div>
+        ) : (
+          <div className="grid gap-4">
+            {(isNew || ref === null) && (
+              <>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,1fr)_12rem]">
+                  <div className="grid gap-1.5">
+                    <Label htmlFor="entry-path" className="text-xs">
+                      条目路径 *
+                    </Label>
+                    <Input
+                      id="entry-path"
+                      className="font-mono text-sm"
+                      placeholder="docs/notes.md"
+                      value={rel}
+                      disabled={!isNew}
+                      onChange={(ev) => setRel(ev.target.value)}
+                    />
+                  </div>
+                  <div className="grid gap-1.5">
+                    <Label className="text-xs">contentType</Label>
+                    <Select value={contentType} onValueChange={setContentType}>
+                      <SelectTrigger className="w-full font-mono text-xs">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {CONTENT_TYPES.includes(
+                          contentType as (typeof CONTENT_TYPES)[number],
+                        ) ? null : (
+                          <SelectItem value={contentType} className="font-mono text-xs">
+                            {contentType}
+                          </SelectItem>
+                        )}
+                        {CONTENT_TYPES.map((t) => (
+                          <SelectItem key={t} value={t} className="font-mono text-xs">
+                            {t}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
                 <div className="grid gap-1.5">
-                  <Label htmlFor="entry-path" className="text-xs">
-                    条目路径 *
+                  <Label htmlFor="entry-content" className="text-xs">
+                    content
                   </Label>
-                  <Input
-                    id="entry-path"
-                    className="font-mono text-sm"
-                    placeholder="docs/notes.md"
-                    value={rel}
-                    disabled={!isNew}
-                    onChange={(ev) => setRel(ev.target.value)}
+                  <Textarea
+                    id="entry-content"
+                    className="font-mono text-xs"
+                    rows={12}
+                    spellCheck={false}
+                    value={content}
+                    onChange={(ev) => setContent(ev.target.value)}
                   />
                 </div>
-                <div className="grid gap-1.5">
-                  <Label className="text-xs">contentType</Label>
-                  <Select value={contentType} onValueChange={setContentType}>
-                    <SelectTrigger className="font-mono text-xs">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {CONTENT_TYPES.includes(
-                        contentType as (typeof CONTENT_TYPES)[number],
-                      ) ? null : (
-                        <SelectItem value={contentType} className="font-mono text-xs">
-                          {contentType}
-                        </SelectItem>
-                      )}
-                      {CONTENT_TYPES.map((t) => (
-                        <SelectItem key={t} value={t} className="font-mono text-xs">
-                          {t}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-              <div className="grid gap-1.5">
-                <Label htmlFor="entry-content" className="text-xs">
-                  content
-                </Label>
-                <Textarea
-                  id="entry-content"
-                  className="font-mono text-xs"
-                  rows={12}
-                  spellCheck={false}
-                  value={content}
-                  onChange={(ev) => setContent(ev.target.value)}
-                />
-              </div>
-            </>
-          )}
-          <div className="grid gap-1.5">
-            <Label htmlFor="entry-meta" className="text-xs">
-              metadata(每行 key=value,可空)
-            </Label>
-            <Textarea
-              id="entry-meta"
-              className="font-mono text-xs"
-              rows={2}
-              spellCheck={false}
-              placeholder={'source=manual\nowner=alice'}
-              value={metaSpec}
-              onChange={(ev) => setMetaSpec(ev.target.value)}
-            />
+              </>
+            )}
+            <div className="grid gap-1.5">
+              <Label htmlFor="entry-meta" className="text-xs">
+                metadata(每行 key=value,可空)
+              </Label>
+              <Textarea
+                id="entry-meta"
+                className="font-mono text-xs"
+                rows={2}
+                spellCheck={false}
+                placeholder={'source=manual\nowner=alice'}
+                value={metaSpec}
+                onChange={(ev) => setMetaSpec(ev.target.value)}
+              />
+            </div>
+            {err && (
+              <p role="alert" className="text-xs text-destructive">
+                {err}
+              </p>
+            )}
           </div>
-          {err && <p className="text-xs text-destructive">{err}</p>}
-        </div>
+        )}
 
-        <DialogFooter>
-          <Button disabled={invoke.isPending || (!isNew && existing.isPending)} onClick={submit}>
-            {invoke.isPending && <Loader2 className="animate-spin" />}
-            {!isNew && ref !== null ? '更新 metadata' : '写入'}
-          </Button>
-        </DialogFooter>
+        {(isNew || hydrated) && (
+          <DialogFooter>
+            <Button disabled={invoke.isPending} onClick={submit}>
+              {invoke.isPending && <Loader2 className="animate-spin" />}
+              {!isNew && ref !== null ? '更新 metadata' : '写入'}
+            </Button>
+          </DialogFooter>
+        )}
       </DialogContent>
     </Dialog>
   )

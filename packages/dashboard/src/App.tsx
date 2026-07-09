@@ -1,32 +1,147 @@
+import { lazy, type ReactNode, Suspense } from 'react'
 import { Navigate, Route, Routes } from 'react-router'
-import { AppShell } from '@/components/layout/AppShell'
 import { useSession } from '@/lib/session'
-import { LoginPage } from '@/pages/LoginPage'
-import { NodePage } from '@/pages/NodePage'
-import { OverviewPage } from '@/pages/OverviewPage'
-import { DevicesPage } from '@/pages/system/DevicesPage'
-import { FederationPage } from '@/pages/system/FederationPage'
-import { PluginsPage } from '@/pages/system/PluginsPage'
-import { RegistryPage } from '@/pages/system/RegistryPage'
-import { SecretsPage } from '@/pages/system/SecretsPage'
-import { SkPage } from '@/pages/system/SkPage'
+
+// 路由级拆包:登录门不再下载 RJSF/AJV 与千行管理表单;进入某页时才加载对应能力。
+const AppShell = lazy(() =>
+  import('@/components/layout/AppShell').then((module) => ({ default: module.AppShell })),
+)
+const LoginPage = lazy(() =>
+  import('@/pages/LoginPage').then((module) => ({ default: module.LoginPage })),
+)
+const OverviewPage = lazy(() =>
+  import('@/pages/OverviewPage').then((module) => ({ default: module.OverviewPage })),
+)
+const NodePage = lazy(() =>
+  import('@/pages/NodePage').then((module) => ({ default: module.NodePage })),
+)
+const DevicesPage = lazy(() =>
+  import('@/pages/system/DevicesPage').then((module) => ({ default: module.DevicesPage })),
+)
+const FederationPage = lazy(() =>
+  import('@/pages/system/FederationPage').then((module) => ({ default: module.FederationPage })),
+)
+const PluginsPage = lazy(() =>
+  import('@/pages/system/PluginsPage').then((module) => ({ default: module.PluginsPage })),
+)
+const RegistryPage = lazy(() =>
+  import('@/pages/system/RegistryPage').then((module) => ({ default: module.RegistryPage })),
+)
+const SecretsPage = lazy(() =>
+  import('@/pages/system/SecretsPage').then((module) => ({ default: module.SecretsPage })),
+)
+const SkPage = lazy(() =>
+  import('@/pages/system/SkPage').then((module) => ({ default: module.SkPage })),
+)
+
+function AppBooting() {
+  return (
+    <div className="grid h-svh place-items-center bg-background text-foreground">
+      <div className="flex items-center gap-3 font-mono text-xs text-muted-foreground">
+        <span className="size-2 animate-pulse rounded-full bg-primary shadow-[0_0_12px_var(--primary)]" />
+        control plane / loading
+      </div>
+    </div>
+  )
+}
+
+function PageLoading() {
+  return (
+    <div className="mx-auto w-full max-w-4xl px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
+      <div className="h-3 w-24 animate-pulse rounded-sm bg-muted" />
+      <div className="mt-4 h-8 w-56 animate-pulse rounded-sm bg-muted" />
+      <div className="mt-8 grid gap-3 sm:grid-cols-2">
+        <div className="h-28 animate-pulse rounded-lg border bg-card/50" />
+        <div className="h-28 animate-pulse rounded-lg border bg-card/50" />
+      </div>
+    </div>
+  )
+}
+
+function DeferredPage({ children }: { children: ReactNode }) {
+  return <Suspense fallback={<PageLoading />}>{children}</Suspense>
+}
 
 export default function App() {
   const { conn } = useSession()
-  if (!conn) return <LoginPage />
+  if (!conn) {
+    return (
+      <Suspense fallback={<AppBooting />}>
+        <LoginPage />
+      </Suspense>
+    )
+  }
   return (
-    <Routes>
-      <Route element={<AppShell />}>
-        <Route index element={<OverviewPage />} />
-        <Route path="nodes/*" element={<NodePage />} />
-        <Route path="manage/sk" element={<SkPage />} />
-        <Route path="manage/secrets" element={<SecretsPage />} />
-        <Route path="manage/registry" element={<RegistryPage />} />
-        <Route path="manage/devices" element={<DevicesPage />} />
-        <Route path="manage/plugins" element={<PluginsPage />} />
-        <Route path="manage/federation" element={<FederationPage />} />
-        <Route path="*" element={<Navigate to="/" replace />} />
-      </Route>
-    </Routes>
+    <Suspense fallback={<AppBooting />}>
+      <Routes>
+        <Route element={<AppShell />}>
+          <Route
+            index
+            element={
+              <DeferredPage>
+                <OverviewPage />
+              </DeferredPage>
+            }
+          />
+          <Route
+            path="nodes/*"
+            element={
+              <DeferredPage>
+                <NodePage />
+              </DeferredPage>
+            }
+          />
+          <Route
+            path="manage/sk"
+            element={
+              <DeferredPage>
+                <SkPage />
+              </DeferredPage>
+            }
+          />
+          <Route
+            path="manage/secrets"
+            element={
+              <DeferredPage>
+                <SecretsPage />
+              </DeferredPage>
+            }
+          />
+          <Route
+            path="manage/registry"
+            element={
+              <DeferredPage>
+                <RegistryPage />
+              </DeferredPage>
+            }
+          />
+          <Route
+            path="manage/devices"
+            element={
+              <DeferredPage>
+                <DevicesPage />
+              </DeferredPage>
+            }
+          />
+          <Route
+            path="manage/plugins"
+            element={
+              <DeferredPage>
+                <PluginsPage />
+              </DeferredPage>
+            }
+          />
+          <Route
+            path="manage/federation"
+            element={
+              <DeferredPage>
+                <FederationPage />
+              </DeferredPage>
+            }
+          />
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Route>
+      </Routes>
+    </Suspense>
   )
 }

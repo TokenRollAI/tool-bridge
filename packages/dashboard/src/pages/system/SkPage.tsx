@@ -6,6 +6,7 @@ import { ConfirmAction } from '@/components/ConfirmAction'
 import { CopyButton } from '@/components/CopyButton'
 import { EmptyState } from '@/components/EmptyState'
 import { PageHeader } from '@/components/PageHeader'
+import { PaginationFooter } from '@/components/PaginationFooter'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -59,8 +60,8 @@ export function SkPage() {
     )
   }
 
-  const remove = (sk: SecretKeyInfo) => {
-    invoke.mutate(
+  const remove = async (sk: SecretKeyInfo) => {
+    await invoke.mutateAsync(
       { path: 'system/sk', tool: 'delete', args: { id: sk.id } },
       {
         onSuccess: () => {
@@ -82,7 +83,7 @@ export function SkPage() {
         )
 
   return (
-    <div className="mx-auto max-w-4xl px-8 py-8">
+    <div className="mx-auto max-w-4xl px-4 py-5 sm:px-6 sm:py-6 lg:px-8 lg:py-8">
       <PageHeader
         title="Secret Key"
         description={
@@ -124,7 +125,7 @@ export function SkPage() {
             className="border-0"
           />
         ) : (
-          <Table>
+          <Table className="min-w-[760px]">
             <TableHeader>
               <TableRow>
                 <TableHead>id</TableHead>
@@ -241,11 +242,20 @@ export function SkPage() {
             </TableBody>
           </Table>
         )}
+        {!list.isPending && !list.isError && (
+          <PaginationFooter
+            count={all.length}
+            unit="把 SK"
+            hasNextPage={Boolean(list.hasNextPage)}
+            isFetchingNextPage={list.isFetchingNextPage}
+            onLoadMore={() => void list.fetchNextPage()}
+          />
+        )}
       </div>
 
       {/* 签发结果:secret 明文仅此一次 */}
-      <Dialog open={issued !== null} onOpenChange={(o) => !o && setIssued(null)}>
-        <DialogContent>
+      <Dialog open={issued !== null}>
+        <DialogContent className="p-4 sm:p-6" showCloseButton={false}>
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-base">
               <KeyRound className="size-4 text-primary" />
@@ -339,6 +349,8 @@ function CreateSkDialog({ onIssued }: { onIssued: (v: { id: string; secret: stri
           setErr(null)
           onIssued({ id: data.key.id, secret: data.secret })
           qc.invalidateQueries({ queryKey: ['tb'] })
+          // 明文已转移到受保护的一次性弹窗,清除 mutation data 中的副本。
+          setTimeout(() => invoke.reset(), 0)
         },
         onError: (e) => setErr(e.message),
       },
@@ -353,7 +365,7 @@ function CreateSkDialog({ onIssued }: { onIssued: (v: { id: string; secret: stri
           签发 SK
         </Button>
       </DialogTrigger>
-      <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-lg">
+      <DialogContent className="max-h-[85vh] overflow-y-auto p-4 sm:max-w-lg sm:p-6">
         <DialogHeader>
           <DialogTitle className="text-base">签发 Secret Key</DialogTitle>
           <DialogDescription>
@@ -362,7 +374,7 @@ function CreateSkDialog({ onIssued }: { onIssued: (v: { id: string; secret: stri
           </DialogDescription>
         </DialogHeader>
         <div className="grid gap-4">
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid gap-3 sm:grid-cols-2">
             <div className="grid gap-1.5">
               <Label htmlFor="sk-owner" className="text-xs">
                 owner *
@@ -468,7 +480,7 @@ function CreateSkDialog({ onIssued }: { onIssued: (v: { id: string; secret: stri
             </Button>
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid gap-3 sm:grid-cols-2">
             <div className="grid gap-1.5">
               <Label htmlFor="sk-rp" className="text-xs">
                 registerPaths(逗号分隔,可空)

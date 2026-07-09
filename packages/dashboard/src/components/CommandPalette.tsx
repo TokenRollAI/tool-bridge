@@ -70,7 +70,8 @@ export function CommandPalette({
   open: boolean
   onOpenChange: (open: boolean) => void
 }) {
-  const tree = useTree('', 8)
+  // 命令面板关闭时不拉全树,避免首屏绕过 TreeNav 的 remote 懒加载。
+  const tree = useTree('', 8, { enabled: open })
   const navigate = useNavigate()
   const [theme, toggleTheme] = useTheme()
   const { logout } = useSession()

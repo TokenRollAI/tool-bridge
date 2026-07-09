@@ -40,8 +40,8 @@ export function FederationPage() {
   const qc = useQueryClient()
   const items = list.data?.items ?? []
 
-  const remove = (host: string) => {
-    invoke.mutate(
+  const remove = async (host: string) => {
+    await invoke.mutateAsync(
       { path: 'system/federation', tool: 'remove', args: { host } },
       {
         onSuccess: () => {
@@ -54,7 +54,7 @@ export function FederationPage() {
   }
 
   return (
-    <div className="mx-auto max-w-3xl px-8 py-8">
+    <div className="mx-auto max-w-3xl px-4 py-5 sm:px-6 sm:py-6 lg:px-8 lg:py-8">
       <PageHeader
         title="联邦白名单"
         description="remote 节点只能挂到白名单内的 host 后缀(空 = 拒一切 remote);env 基线只读,运行时条目可增删"
@@ -74,7 +74,7 @@ export function FederationPage() {
             <p>添加目标 HTBP 服务器的 host 后缀(如 example.com),才能挂载 kind=remote 节点。</p>
           </EmptyState>
         ) : (
-          <Table>
+          <Table className="min-w-[620px]">
             <TableHeader>
               <TableRow>
                 <TableHead>host 后缀</TableHead>
@@ -166,7 +166,7 @@ function AddHostDialog() {
           添加 host
         </Button>
       </DialogTrigger>
-      <DialogContent>
+      <DialogContent className="p-4 sm:p-6">
         <DialogHeader>
           <DialogTitle className="text-base">添加白名单 host</DialogTitle>
           <DialogDescription>

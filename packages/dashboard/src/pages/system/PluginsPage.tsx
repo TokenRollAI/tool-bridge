@@ -18,6 +18,7 @@ import { ConfirmAction } from '@/components/ConfirmAction'
 import { CopyButton } from '@/components/CopyButton'
 import { EmptyState } from '@/components/EmptyState'
 import { PageHeader } from '@/components/PageHeader'
+import { PaginationFooter } from '@/components/PaginationFooter'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -79,8 +80,8 @@ export function PluginsPage() {
     )
   }
 
-  const remove = (p: PluginManifest) => {
-    invoke.mutate(
+  const remove = async (p: PluginManifest) => {
+    await invoke.mutateAsync(
       { path: 'system/plugin', tool: 'delete', args: { id: p.id } },
       {
         onSuccess: () => {
@@ -115,7 +116,7 @@ export function PluginsPage() {
   const items = list.data?.items ?? []
 
   return (
-    <div className="mx-auto max-w-4xl px-8 py-8">
+    <div className="mx-auto max-w-4xl px-4 py-5 sm:px-6 sm:py-6 lg:px-8 lg:py-8">
       <PageHeader
         title="Plugin"
         description={
@@ -144,7 +145,7 @@ export function PluginsPage() {
             <p>实现 tool-provider / context-provider 契约的服务,注册后可作为节点的 provider。</p>
           </EmptyState>
         ) : (
-          <Table>
+          <Table className="min-w-[900px]">
             <TableHeader>
               <TableRow>
                 <TableHead>id</TableHead>
@@ -270,6 +271,15 @@ export function PluginsPage() {
             </TableBody>
           </Table>
         )}
+        {!list.isPending && !list.isError && (
+          <PaginationFooter
+            count={items.length}
+            unit="个 Plugin"
+            hasNextPage={Boolean(list.hasNextPage)}
+            isFetchingNextPage={list.isFetchingNextPage}
+            onLoadMore={() => void list.fetchNextPage()}
+          />
+        )}
       </div>
 
       {editing && (
@@ -281,8 +291,8 @@ export function PluginsPage() {
       )}
 
       {/* pluginToken 仅注册/auth 切换响应出现一次 */}
-      <Dialog open={token !== null} onOpenChange={(o) => !o && setToken(null)}>
-        <DialogContent>
+      <Dialog open={token !== null}>
+        <DialogContent className="p-4 sm:p-6" showCloseButton={false}>
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-base">
               <KeyRound className="size-4 text-primary" />
@@ -356,7 +366,7 @@ function ManifestFields({
 }) {
   return (
     <>
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid gap-3 sm:grid-cols-2">
         <div className="grid gap-1.5">
           <Label className="text-xs">kind</Label>
           <Select
@@ -403,7 +413,7 @@ function ManifestFields({
         />
       </div>
 
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid gap-3 sm:grid-cols-2">
         <div className="grid gap-1.5">
           <Label htmlFor="plugin-health" className="text-xs">
             healthPath
@@ -513,6 +523,7 @@ function RegisterPluginDialog({
           setForm(INITIAL_FORM)
           if (reg.pluginToken) onToken({ id: reg.id, token: reg.pluginToken })
           qc.invalidateQueries({ queryKey: ['tb'] })
+          if (reg.pluginToken) setTimeout(() => invoke.reset(), 0)
         },
         onError: (e) => setErr(e.message),
       },
@@ -527,7 +538,7 @@ function RegisterPluginDialog({
           注册 plugin
         </Button>
       </DialogTrigger>
-      <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-lg">
+      <DialogContent className="max-h-[85vh] overflow-y-auto p-4 sm:max-w-lg sm:p-6">
         <DialogHeader>
           <DialogTitle className="text-base">注册 plugin(write)</DialogTitle>
           <DialogDescription>
@@ -606,6 +617,7 @@ function EditPluginDialog({
           onClose()
           if (reg.pluginToken) onToken({ id: plugin.id, token: reg.pluginToken })
           qc.invalidateQueries({ queryKey: ['tb'] })
+          if (reg.pluginToken) setTimeout(() => invoke.reset(), 0)
         },
         onError: (e) => setErr(e.message),
       },
@@ -614,7 +626,7 @@ function EditPluginDialog({
 
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-lg">
+      <DialogContent className="max-h-[85vh] overflow-y-auto p-4 sm:max-w-lg sm:p-6">
         <DialogHeader>
           <DialogTitle className="font-mono text-sm">编辑 {plugin.id}</DialogTitle>
           <DialogDescription>

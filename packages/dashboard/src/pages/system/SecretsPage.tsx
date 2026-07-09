@@ -6,6 +6,7 @@ import { ConfirmAction } from '@/components/ConfirmAction'
 import { CopyButton } from '@/components/CopyButton'
 import { EmptyState } from '@/components/EmptyState'
 import { PageHeader } from '@/components/PageHeader'
+import { PaginationFooter } from '@/components/PaginationFooter'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -39,8 +40,8 @@ export function SecretsPage() {
   const invoke = useInvoke()
   const qc = useQueryClient()
 
-  const remove = (name: string) => {
-    invoke.mutate(
+  const remove = async (name: string) => {
+    await invoke.mutateAsync(
       { path: 'system/secret', tool: 'delete', args: { name } },
       {
         onSuccess: () => {
@@ -53,7 +54,7 @@ export function SecretsPage() {
   }
 
   return (
-    <div className="mx-auto max-w-3xl px-8 py-8">
+    <div className="mx-auto max-w-3xl px-4 py-5 sm:px-6 sm:py-6 lg:px-8 lg:py-8">
       <PageHeader
         title="凭证保管"
         description="SecretStore 只写不读:值加密落库,仅网关内部经 authRef 解析"
@@ -73,7 +74,7 @@ export function SecretsPage() {
             <p>挂载 s3 context 或带鉴权的上游前,先在这里 set,再以 authRef 名义引用。</p>
           </EmptyState>
         ) : (
-          <Table>
+          <Table className="min-w-[560px]">
             <TableHeader>
               <TableRow>
                 <TableHead>name(authRef 引用名)</TableHead>
@@ -118,6 +119,15 @@ export function SecretsPage() {
             </TableBody>
           </Table>
         )}
+        {!list.isPending && !list.isError && (
+          <PaginationFooter
+            count={list.data?.items.length ?? 0}
+            unit="个凭证"
+            hasNextPage={Boolean(list.hasNextPage)}
+            isFetchingNextPage={list.isFetchingNextPage}
+            onLoadMore={() => void list.fetchNextPage()}
+          />
+        )}
       </div>
     </div>
   )
@@ -131,6 +141,13 @@ function SetSecretDialog() {
   const [value, setValue] = useState('')
   const [err, setErr] = useState<string | null>(null)
 
+  const reset = () => {
+    setName('')
+    setValue('')
+    setErr(null)
+    invoke.reset()
+  }
+
   const submit = () => {
     if (name.trim() === '' || value === '') {
       setErr('name 与 value 均必填')
@@ -141,11 +158,13 @@ function SetSecretDialog() {
       {
         onSuccess: () => {
           toast.success(`凭证 ${name.trim()} 已保存(值不回显)`)
+          qc.invalidateQueries({ queryKey: ['tb'] })
           setOpen(false)
           setName('')
           setValue('')
           setErr(null)
-          qc.invalidateQueries({ queryKey: ['tb'] })
+          // mutation variables 含凭证明文;成功回调完成后丢弃 observer 状态。
+          setTimeout(() => invoke.reset(), 0)
         },
         onError: (e) => setErr(e.message),
       },
@@ -153,14 +172,27 @@ function SetSecretDialog() {
   }
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        // 请求已发出时不能把 observer reset 成“像是取消了”;等 settled 后再关闭。
+        if (invoke.isPending) return
+        setOpen(next)
+        if (!next) reset()
+      }}
+    >
       <DialogTrigger asChild>
         <Button size="sm">
           <Plus />
           保存凭证
         </Button>
       </DialogTrigger>
-      <DialogContent>
+      <DialogContent
+        className="p-4 sm:p-6"
+        showCloseButton={!invoke.isPending}
+        onEscapeKeyDown={(event) => invoke.isPending && event.preventDefault()}
+        onPointerDownOutside={(event) => invoke.isPending && event.preventDefault()}
+      >
         <DialogHeader>
           <DialogTitle className="text-base">保存凭证(set)</DialogTitle>
           <DialogDescription>

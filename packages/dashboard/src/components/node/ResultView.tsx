@@ -53,8 +53,8 @@ export function ResultView({
   const pretty = isJson && result.json !== undefined ? JSON.stringify(result.json, null, 2) : null
 
   return (
-    <Tabs defaultValue="rendered" className={className}>
-      <div className="flex items-center gap-1">
+    <Tabs defaultValue="rendered" className={cn('min-w-0 max-w-full', className)}>
+      <div className="flex min-w-0 flex-wrap items-center gap-1.5">
         <TabsList className="h-7">
           <TabsTrigger value="rendered" className="px-2.5 py-0.5 text-xs">
             {isJson ? 'JSON' : 'Markdown'}
@@ -63,7 +63,7 @@ export function ResultView({
             原文
           </TabsTrigger>
         </TabsList>
-        <span className="ml-auto font-mono text-[10px] text-muted-foreground tabular-nums">
+        <span className="ml-auto shrink-0 font-mono text-[10px] text-muted-foreground tabular-nums">
           {result.ms} ms
         </span>
         <CopyButton value={pretty ?? result.text} label="复制返回值" />
@@ -81,17 +81,17 @@ export function ResultView({
       </div>
       <TabsContent value="rendered">
         {isJson ? (
-          <pre className="max-h-96 overflow-auto rounded-sm border bg-card px-3 py-2 font-mono text-xs leading-relaxed">
+          <pre className="max-h-96 max-w-full overflow-auto rounded-sm border bg-card px-3 py-2 font-mono text-xs leading-relaxed whitespace-pre-wrap break-words">
             {pretty ?? result.text}
           </pre>
         ) : (
-          <div className="prose prose-sm dark:prose-invert max-w-none rounded-sm border bg-card px-4 py-3 prose-pre:bg-background prose-pre:text-xs prose-code:font-mono">
+          <div className="prose prose-sm dark:prose-invert max-w-none overflow-x-auto rounded-sm border bg-card px-3 py-3 break-words prose-pre:max-w-full prose-pre:overflow-x-auto prose-pre:bg-background prose-pre:text-xs prose-code:font-mono sm:px-4">
             <Markdown remarkPlugins={[remarkGfm]}>{result.text}</Markdown>
           </div>
         )}
       </TabsContent>
       <TabsContent value="raw">
-        <pre className="max-h-96 overflow-auto rounded-sm border bg-card px-3 py-2 font-mono text-xs leading-relaxed whitespace-pre-wrap">
+        <pre className="max-h-96 max-w-full overflow-auto rounded-sm border bg-card px-3 py-2 font-mono text-xs leading-relaxed whitespace-pre-wrap break-words">
           {result.text}
         </pre>
       </TabsContent>

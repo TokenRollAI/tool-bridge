@@ -43,7 +43,7 @@ export function CliHint({
   ].join(' \\\n  ')
 
   return (
-    <div className="mt-3">
+    <div className="mt-3 min-w-0 max-w-full">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
@@ -56,19 +56,19 @@ export function CliHint({
         {open ? '收起' : '等价 CLI / curl'}
       </button>
       {open && (
-        <div className="mt-2 grid gap-1.5">
+        <div className="mt-2 grid min-w-0 gap-1.5">
           {[
             { label: 'tb', cmd: tb },
             { label: 'curl', cmd: curl },
           ].map(({ label, cmd }) => (
             <div
               key={label}
-              className="flex items-start gap-1.5 rounded-sm border bg-background/60"
+              className="grid min-w-0 max-w-full grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-1 rounded-sm border bg-background/60 sm:gap-1.5"
             >
               <span className="shrink-0 border-r px-2 py-1.5 font-mono text-[10px] text-primary/80">
                 {label}
               </span>
-              <pre className="min-w-0 flex-1 self-center overflow-x-auto px-1 py-1.5 font-mono text-[11px] leading-relaxed whitespace-pre-wrap break-all">
+              <pre className="min-w-0 max-w-full self-center overflow-x-auto px-1 py-1.5 font-mono text-[11px] leading-relaxed whitespace-pre-wrap break-all">
                 {cmd}
               </pre>
               <CopyButton value={cmd} className="m-1 shrink-0" />

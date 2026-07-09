@@ -2,6 +2,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { BrowserRouter } from 'react-router'
+import { AppErrorBoundary } from '@/components/AppErrorBoundary'
 import { Toaster } from '@/components/ui/sonner'
 import { SessionProvider } from '@/lib/session'
 import './index.css'
@@ -26,10 +27,12 @@ createRoot(root).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
       <SessionProvider>
-        {/* Vite base 与 gateway 静态挂载点都是 /ui,路由 basename 与之对齐 */}
-        <BrowserRouter basename="/ui">
-          <App />
-        </BrowserRouter>
+        <AppErrorBoundary>
+          {/* Vite base 与 gateway 静态挂载点都是 /ui,路由 basename 与之对齐 */}
+          <BrowserRouter basename="/ui">
+            <App />
+          </BrowserRouter>
+        </AppErrorBoundary>
         <Toaster position="bottom-right" richColors />
       </SessionProvider>
     </QueryClientProvider>

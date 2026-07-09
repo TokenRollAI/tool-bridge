@@ -1,12 +1,10 @@
-import { useQueryClient } from '@tanstack/react-query'
-import { Cpu, ExternalLink, Trash2 } from 'lucide-react'
+import { Cpu, ExternalLink, RefreshCw } from 'lucide-react'
 import { Link } from 'react-router'
-import { toast } from 'sonner'
-import { ConfirmAction } from '@/components/ConfirmAction'
 import { CopyButton } from '@/components/CopyButton'
 import { EmptyState } from '@/components/EmptyState'
 import { OnlineDot } from '@/components/KindBadge'
 import { PageHeader } from '@/components/PageHeader'
+import { PaginationFooter } from '@/components/PaginationFooter'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import {
@@ -17,18 +15,17 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import { useInvoke, useRegistryList } from '@/lib/queries'
+import { useRegistryList } from '@/lib/queries'
 import { useSession } from '@/lib/session'
 import { cn } from '@/lib/utils'
 
 /**
  * 设备列表(对等 `tb device ls`)。`tb connect` / `tb mount fs` 是设备侧长驻 WS 进程,
- * 属三入口对等的天然例外——Dashboard 负责展示、引导与离线残骸清理,不承担设备接入本身。
+ * 属三入口对等的天然例外——Dashboard 负责展示与引导,不承担设备接入或递归清理。
+ * registry delete 只允许叶节点,不能把带 shell/fs 后代的设备根伪装成可一键删除。
  */
 export function DevicesPage() {
   const list = useRegistryList('device')
-  const invoke = useInvoke()
-  const qc = useQueryClient()
   const { active } = useSession()
   const baseUrl = active?.baseUrl || window.location.origin
 
@@ -39,32 +36,31 @@ export function DevicesPage() {
   const offline = devices.length - online
   const connectCmd = `tb connect ${baseUrl}`
 
-  /** 离线设备清理:与 CLI `tb device rm` 同一 registry delete(在线设备不提供删除)。 */
-  const remove = (path: string) => {
-    invoke.mutate(
-      { path: 'system/registry', tool: 'delete', args: { path } },
-      {
-        onSuccess: () => {
-          toast.success(`已清理 ${path}`)
-          qc.invalidateQueries({ queryKey: ['tb'] })
-        },
-        onError: (e) => toast.error(e.message),
-      },
-    )
-  }
-
   return (
-    <div className="mx-auto max-w-3xl px-8 py-8">
+    <div className="mx-auto max-w-3xl px-4 py-5 sm:px-6 sm:py-6 lg:px-8 lg:py-8">
       <PageHeader
         title="设备"
         description="反向注册接入的机器(Case 3);断线节点保留并标记 offline,调用返回 503 retryable"
         actions={
-          devices.length > 0 && (
-            <p className="font-mono text-xs text-muted-foreground tabular-nums">
-              <span className="text-ok">{online} online</span>
-              {offline > 0 && <span className="ml-2 opacity-70">{offline} offline</span>}
-            </p>
-          )
+          <div className="flex items-center gap-2">
+            {devices.length > 0 && (
+              <p className="font-mono text-xs text-muted-foreground tabular-nums">
+                <span className="text-ok">{online} online</span>
+                {offline > 0 && <span className="ml-2 opacity-70">{offline} offline</span>}
+              </p>
+            )}
+            <Button
+              type="button"
+              variant="outline"
+              size="icon-sm"
+              aria-label="刷新设备状态"
+              title="刷新设备状态"
+              disabled={list.isRefetching}
+              onClick={() => void list.refetch()}
+            >
+              <RefreshCw className={cn(list.isRefetching && 'animate-spin')} />
+            </Button>
+          </div>
         }
       />
 
@@ -87,14 +83,14 @@ export function DevicesPage() {
             <p>在目标机器上运行上方 connect 命令,shell/fs 将自动挂上树。</p>
           </EmptyState>
         ) : (
-          <Table>
+          <Table className="min-w-[680px]">
             <TableHeader>
               <TableRow>
                 <TableHead>path</TableHead>
                 <TableHead className="w-24">状态</TableHead>
                 <TableHead>描述</TableHead>
                 <TableHead className="w-28">最近活动</TableHead>
-                <TableHead className="w-16" />
+                <TableHead className="w-12" />
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -123,28 +119,6 @@ export function DevicesPage() {
                           <ExternalLink />
                         </Link>
                       </Button>
-                      {!d.online && (
-                        <ConfirmAction
-                          title={`清理离线设备 ${d.path}?`}
-                          description={
-                            <p>
-                              删除其注册残骸(含 shell/fs 子节点)。设备重新 connect 会再次挂上树。
-                            </p>
-                          }
-                          actionLabel="清理"
-                          onConfirm={() => remove(d.path)}
-                          trigger={
-                            <Button
-                              variant="ghost"
-                              size="icon-xs"
-                              aria-label="清理"
-                              title="清理离线残骸"
-                            >
-                              <Trash2 className="text-destructive" />
-                            </Button>
-                          }
-                        />
-                      )}
                     </div>
                   </TableCell>
                 </TableRow>
@@ -152,13 +126,24 @@ export function DevicesPage() {
             </TableBody>
           </Table>
         )}
+        {!list.isPending && !list.isError && (
+          <PaginationFooter
+            count={devices.length}
+            unit="台设备"
+            hasNextPage={Boolean(list.hasNextPage)}
+            isFetchingNextPage={list.isFetchingNextPage}
+            onLoadMore={() => void list.fetchNextPage()}
+          />
+        )}
       </div>
 
-      {devices.length > 0 && (
-        <p className="mt-3 text-xs text-muted-foreground">
-          子节点 shell/fs 可在树导航中直接调用(shell 默认白名单全拒,须设备侧声明)
+      <div className="mt-3 grid gap-1 text-xs text-muted-foreground">
+        <p>子节点 shell/fs 可在树导航中直接调用(shell 默认白名单全拒,须设备侧声明)。</p>
+        <p>
+          offline 仅表示当前会话不可用；普通 registry delete 不支持递归删除带后代的设备根，
+          因此这里不提供会失败的“清理”按钮。设备重新 connect 会复用原挂载路径。
         </p>
-      )}
+      </div>
     </div>
   )
 }

@@ -1,5 +1,6 @@
 import { Check, Copy } from 'lucide-react'
 import { useRef, useState } from 'react'
+import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 
@@ -21,10 +22,14 @@ export function CopyButton({
   const timer = useRef<ReturnType<typeof setTimeout>>(null)
 
   const copy = async () => {
-    await navigator.clipboard.writeText(value)
-    setCopied(true)
-    if (timer.current) clearTimeout(timer.current)
-    timer.current = setTimeout(() => setCopied(false), 1200)
+    try {
+      await navigator.clipboard.writeText(value)
+      setCopied(true)
+      if (timer.current) clearTimeout(timer.current)
+      timer.current = setTimeout(() => setCopied(false), 1200)
+    } catch {
+      toast.error('复制失败，请手动选中内容')
+    }
   }
 
   return (
@@ -34,7 +39,10 @@ export function CopyButton({
       size={size}
       aria-label={label}
       title={label}
-      className={cn('text-muted-foreground hover:text-foreground', className)}
+      className={cn(
+        'text-muted-foreground hover:text-foreground focus-visible:opacity-100 group-focus-within:opacity-100',
+        className,
+      )}
       onClick={copy}
     >
       {copied ? <Check className="text-ok" /> : <Copy />}

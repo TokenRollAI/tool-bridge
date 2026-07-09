@@ -29,9 +29,9 @@ export function NoteCard({ path, note }: { path: string; note?: string }) {
     )
   }
   return (
-    <div className="flex items-start gap-2.5 rounded-md border border-amber-500/30 bg-amber-500/10 px-3.5 py-2.5">
+    <div className="flex min-w-0 items-start gap-2.5 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2.5 sm:px-3.5">
       <StickyNote className="mt-0.5 size-3.5 shrink-0 text-amber-600 dark:text-amber-400" />
-      <p className="min-w-0 flex-1 whitespace-pre-wrap text-sm">{note}</p>
+      <p className="min-w-0 flex-1 whitespace-pre-wrap break-words text-sm">{note}</p>
       <NoteDialog
         path={path}
         current={note}
@@ -103,9 +103,9 @@ function NoteDialog({
       }}
     >
       <DialogTrigger asChild>{trigger}</DialogTrigger>
-      <DialogContent>
+      <DialogContent className="max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle className="text-base">
+          <DialogTitle className="break-words text-base">
             补充说明 · <code className="font-mono text-sm">{path === '' ? '/' : path}</code>
           </DialogTitle>
           <DialogDescription>
@@ -119,7 +119,11 @@ function NoteDialog({
           onChange={(e) => setText(e.target.value)}
           placeholder="这个路径的使用要点、前置条件、已知坑……"
         />
-        {err && <p className="text-xs text-destructive">{err}</p>}
+        {err && (
+          <p role="alert" className="text-xs text-destructive">
+            {err}
+          </p>
+        )}
         <DialogFooter>
           {current !== '' && (
             <Button variant="outline" disabled={invoke.isPending} onClick={remove}>

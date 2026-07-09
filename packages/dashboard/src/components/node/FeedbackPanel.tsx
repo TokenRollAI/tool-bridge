@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { Loader2, MessageSquarePlus, ThumbsDown, ThumbsUp, Trash2 } from 'lucide-react'
+import { Loader2, MessageSquarePlus, Minus, ThumbsDown, ThumbsUp, Trash2 } from 'lucide-react'
 import { useState } from 'react'
 import { toast } from 'sonner'
 import { ConfirmAction } from '@/components/ConfirmAction'
@@ -39,7 +39,7 @@ export function FeedbackPanel({ path }: { path: string }) {
 
   return (
     <div className="grid gap-3">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col items-start gap-2 sm:flex-row sm:items-center sm:justify-between">
         <p className="text-xs text-muted-foreground">
           Agent 使用经验沉淀:头部条目会出现在该路径 ~help 的 feedback 区块里。
         </p>
@@ -90,7 +90,7 @@ function FeedbackRow({
   const refresh = () => qc.invalidateQueries({ queryKey: ['tb'] })
 
   const vote = useMutation({
-    mutationFn: (value: 'up' | 'down') => feedbackVote(conn, path, item.id, value),
+    mutationFn: (value: 'up' | 'down' | 'clear') => feedbackVote(conn, path, item.id, value),
     onSuccess: refresh,
     onError: (e) => toast.error(e.message),
   })
@@ -105,11 +105,12 @@ function FeedbackRow({
 
   return (
     <div className="bg-card/60">
-      <div className="flex items-center gap-2.5 px-3.5 py-2">
+      <div className="flex flex-col gap-2 px-3 py-2 sm:flex-row sm:items-center sm:gap-2.5 sm:px-3.5">
         <button
           type="button"
           onClick={onToggle}
-          className="flex min-w-0 flex-1 items-center gap-2.5 text-left"
+          aria-expanded={expanded}
+          className="flex min-w-0 flex-1 flex-wrap items-center gap-2 text-left sm:flex-nowrap sm:gap-2.5"
         >
           <Badge
             variant={item.score < 0 ? 'secondary' : 'outline'}
@@ -117,17 +118,17 @@ function FeedbackRow({
           >
             {item.score > 0 ? `+${item.score}` : item.score}
           </Badge>
-          <span className="min-w-0 truncate text-sm">{item.title}</span>
+          <span className="min-w-0 flex-1 truncate text-sm">{item.title}</span>
           {item.score <= HIDE_SCORE && (
             <Badge variant="secondary" className="text-[10px]">
               已从 ~help 隐藏
             </Badge>
           )}
-          <span className="ml-auto shrink-0 font-mono text-[11px] text-muted-foreground">
+          <span className="w-full shrink-0 font-mono text-[11px] text-muted-foreground sm:ml-auto sm:w-auto">
             {item.by}
           </span>
         </button>
-        <div className="flex shrink-0 items-center gap-0.5">
+        <div className="flex shrink-0 items-center gap-0.5 self-end sm:self-auto">
           <Button
             variant="ghost"
             size="icon-xs"
@@ -148,11 +149,21 @@ function FeedbackRow({
           >
             <ThumbsDown />
           </Button>
+          <Button
+            variant="ghost"
+            size="icon-xs"
+            aria-label="清除投票"
+            title="清除我的投票"
+            disabled={vote.isPending}
+            onClick={() => vote.mutate('clear')}
+          >
+            <Minus />
+          </Button>
           <ConfirmAction
             title={`删除反馈 ${item.id}?`}
             description={<p>删除后不可恢复(需 admin scope)。</p>}
             actionLabel="删除"
-            onConfirm={() => remove.mutate()}
+            onConfirm={() => remove.mutateAsync()}
             trigger={
               <Button variant="ghost" size="icon-xs" aria-label="删除" title="删除(admin)">
                 <Trash2 className="text-destructive" />
@@ -175,9 +186,9 @@ function FeedbackDetail({ path, id }: { path: string; id: string }) {
     return <p className="px-3.5 pb-3 text-xs text-destructive">{detail.error.message}</p>
   }
   return (
-    <div className="border-t bg-background/40 px-3.5 py-2.5">
-      <p className="whitespace-pre-wrap text-sm">{detail.data.detail}</p>
-      <p className="mt-1.5 font-mono text-[11px] text-muted-foreground">
+    <div className="min-w-0 border-t bg-background/40 px-3.5 py-2.5">
+      <p className="whitespace-pre-wrap break-words text-sm">{detail.data.detail}</p>
+      <p className="mt-1.5 break-all font-mono text-[11px] text-muted-foreground">
         {detail.data.id} · +{detail.data.up}/-{detail.data.down} ·{' '}
         {detail.data.at ? new Date(detail.data.at).toLocaleString() : '-'}
       </p>
@@ -222,7 +233,7 @@ function SubmitDialog({ path }: { path: string }) {
           提交反馈
         </Button>
       </DialogTrigger>
-      <DialogContent>
+      <DialogContent className="max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="text-base">
             提交反馈 · <code className="font-mono text-sm">{path}</code>
@@ -257,7 +268,11 @@ function SubmitDialog({ path }: { path: string }) {
               placeholder="报错、原因、绕过方式……"
             />
           </div>
-          {err && <p className="text-xs text-destructive">{err}</p>}
+          {err && (
+            <p role="alert" className="text-xs text-destructive">
+              {err}
+            </p>
+          )}
         </div>
         <DialogFooter>
           <Button disabled={submit.isPending} onClick={doSubmit}>
