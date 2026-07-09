@@ -6,3 +6,5 @@ dist/
 .llmdoc-tmp/
 *.log
 .playwright-mcp/
+.playwright-cli/
+output/playwright/
