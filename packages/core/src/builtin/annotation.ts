@@ -30,8 +30,11 @@ function annotationCmds(nodePath: TreePath): CmdSpec[] {
       inputSchema: {
         type: 'object',
         properties: {
-          path: { type: 'string' },
-          text: { type: 'string', maxLength: 2000 },
+          path: {
+            type: 'string',
+            description: 'tree path (tool sub-paths like "feishu/create-doc" work); "" = tree-wide',
+          },
+          text: { type: 'string', maxLength: 2000, description: 'the note (max 2000 chars)' },
         },
         required: ['path', 'text'],
       },
@@ -42,9 +45,10 @@ function annotationCmds(nodePath: TreePath): CmdSpec[] {
       name: 'get',
       method: 'POST',
       path,
+      h: 'read the note of one path (not_found if none)',
       inputSchema: {
         type: 'object',
-        properties: { path: { type: 'string' } },
+        properties: { path: { type: 'string', description: 'tree path; "" = tree-wide notice' } },
         required: ['path'],
       },
       returns: '{ path, text, updatedAt, updatedBy }',
@@ -54,9 +58,10 @@ function annotationCmds(nodePath: TreePath): CmdSpec[] {
       name: 'remove',
       method: 'POST',
       path,
+      h: 'remove the note of a path (idempotent)',
       inputSchema: {
         type: 'object',
-        properties: { path: { type: 'string' } },
+        properties: { path: { type: 'string', description: 'tree path; "" = tree-wide notice' } },
         required: ['path'],
       },
       returns: 'void',
@@ -69,7 +74,9 @@ function annotationCmds(nodePath: TreePath): CmdSpec[] {
       h: 'all annotated paths (optionally under a prefix)',
       inputSchema: {
         type: 'object',
-        properties: { prefix: { type: 'string' } },
+        properties: {
+          prefix: { type: 'string', description: 'only paths under this prefix' },
+        },
       },
       returns: '{ items: Array<{ path, text, updatedAt, updatedBy }> }',
       scope: 'read',

@@ -71,9 +71,11 @@ describe("isCommandAllowed:非 ['*'] 时元字符直接拒", () => {
 
 describe('describeAllow', () => {
   it('三种形态', () => {
-    expect(describeAllow(undefined)).toBe('允许命令: 无(默认拒绝一切)')
-    expect(describeAllow([])).toBe('允许命令: 无(默认拒绝一切)')
-    expect(describeAllow(['*'])).toBe('允许命令: *')
-    expect(describeAllow(['echo', 'git'])).toBe('允许命令: echo, git;其余拒绝')
+    expect(describeAllow(undefined)).toBe('allowed commands: none (deny all by default)')
+    expect(describeAllow([])).toBe('allowed commands: none (deny all by default)')
+    expect(describeAllow(['*'])).toBe('allowed commands: *')
+    expect(describeAllow(['echo', 'git'])).toBe(
+      'allowed commands: echo, git; everything else denied',
+    )
   })
 })

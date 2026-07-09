@@ -12,7 +12,7 @@ import type { ChildRef, CmdSpec, HelpModel } from '../htbp/model'
 import type { TreePath } from '../types'
 import { describeAllow } from './shellAllow'
 
-const SHELL_DESCRIPTION = '设备 shell(远程命令执行)'
+const SHELL_DESCRIPTION = 'device shell (remote command execution)'
 
 /** `<mountPath>/shell` 工具节点的 ~help;h 行含 allow 白名单描述。 */
 export function deviceShellHelpModel(
@@ -23,14 +23,14 @@ export function deviceShellHelpModel(
     name: 'exec',
     method: 'POST',
     path: cmdPath(nodePath),
-    h: `执行 shell 命令;${describeAllow(shell.allow)}`,
+    h: `run a shell command on the device; ${describeAllow(shell.allow)}`,
     inputSchema: {
       type: 'object',
       required: ['command'],
       properties: {
-        command: { type: 'string' },
-        cwd: { type: 'string' },
-        timeoutMs: { type: 'number' },
+        command: { type: 'string', description: 'command line to run' },
+        cwd: { type: 'string', description: 'working directory on the device' },
+        timeoutMs: { type: 'number', description: 'kill the command after this many ms' },
       },
     },
     returns: '{ stdout, stderr, exitCode }',
@@ -61,7 +61,7 @@ export function deviceDirectoryHelpModel(
     node: {
       path: node.path,
       kind: 'directory',
-      description: `${node.description}(${node.online ? 'online' : 'offline'})`,
+      description: `${node.description} (${node.online ? 'online' : 'offline'})`,
     },
     cmds: [],
     children,

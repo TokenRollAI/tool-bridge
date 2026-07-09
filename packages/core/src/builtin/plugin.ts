@@ -36,9 +36,10 @@ import {
   type TreePath,
 } from '../types'
 import type { BuiltinModule } from './types'
-import { cmdPath, optListOptions, requireString, VOID_ACK } from './util'
+import { cmdPath, LIST_OPTS_SCHEMA, optListOptions, requireString, VOID_ACK } from './util'
 
-const DESCRIPTION = 'Plugin registry: register / list / probe external providers (admin only)'
+const DESCRIPTION =
+  'Plugin registry: register / probe external tool & context providers, then mount them via system/registry (admin only)'
 
 /** SecretStore 保留名:platform-token 明文的存放处。 */
 export function pluginTokenSecretName(id: string): string {
@@ -88,7 +89,7 @@ function pluginCmds(nodePath: TreePath): CmdSpec[] {
   const path = cmdPath(nodePath)
   const idSchema = {
     type: 'object',
-    properties: { id: { type: 'string' } },
+    properties: { id: { type: 'string', description: 'plugin id' } },
     required: ['id'],
   }
   return [
@@ -96,7 +97,8 @@ function pluginCmds(nodePath: TreePath): CmdSpec[] {
       name: 'list',
       method: 'POST',
       path,
-      inputSchema: { type: 'object', properties: { opts: { type: 'object' } } },
+      h: 'list registered plugins (pluginToken never returned)',
+      inputSchema: { type: 'object', properties: { opts: LIST_OPTS_SCHEMA } },
       returns: 'Page<PluginManifest>',
       scope: 'admin',
     },
@@ -104,6 +106,7 @@ function pluginCmds(nodePath: TreePath): CmdSpec[] {
       name: 'get',
       method: 'POST',
       path,
+      h: 'fetch one plugin manifest by id',
       inputSchema: idSchema,
       returns: 'PluginManifest',
       scope: 'admin',
@@ -112,15 +115,20 @@ function pluginCmds(nodePath: TreePath): CmdSpec[] {
       name: 'write',
       method: 'POST',
       path,
+      h: 'register a plugin: probes health and validates its contract before accepting; then mount it via system/registry (kind "tool"/"context" with config.provider = "plugin:<id>")',
       inputSchema: {
         type: 'object',
         properties: {
-          id: { type: 'string' },
+          id: { type: 'string', description: 'unique plugin id' },
           kind: { type: 'string', enum: ['tool-provider', 'context-provider'] },
-          interfaceVersion: { type: 'string' },
-          endpoint: { type: 'string' },
-          auth: { type: 'object' },
-          healthPath: { type: 'string' },
+          interfaceVersion: { type: 'string', description: 'plugin interface version, e.g. "v1"' },
+          endpoint: { type: 'string', description: 'https base URL of the plugin service' },
+          auth: {
+            type: 'object',
+            description:
+              '{ kind: "platform-token" } — gateway mints the token (shown once in the response); or { kind: "bearer", token }',
+          },
+          healthPath: { type: 'string', description: 'GET probe path, e.g. "/healthz"' },
           enabled: { type: 'boolean' },
         },
         required: ['id', 'kind', 'interfaceVersion', 'endpoint', 'auth', 'healthPath', 'enabled'],
@@ -132,9 +140,16 @@ function pluginCmds(nodePath: TreePath): CmdSpec[] {
       name: 'update',
       method: 'POST',
       path,
+      h: 'patch a registration; endpoint/kind changes re-probe and re-validate the contract before applying',
       inputSchema: {
         type: 'object',
-        properties: { id: { type: 'string' }, patch: { type: 'object' } },
+        properties: {
+          id: { type: 'string', description: 'plugin id' },
+          patch: {
+            type: 'object',
+            description: 'fields to change; same shape as write, all optional',
+          },
+        },
         required: ['id', 'patch'],
       },
       returns: 'PluginManifest — pluginToken shown once if auth switched to platform-token',
@@ -144,6 +159,7 @@ function pluginCmds(nodePath: TreePath): CmdSpec[] {
       name: 'delete',
       method: 'POST',
       path,
+      h: 'unregister a plugin and revoke its platform token; mounted nodes referencing it stop working',
       inputSchema: idSchema,
       returns: 'void',
       scope: 'admin',
@@ -152,6 +168,7 @@ function pluginCmds(nodePath: TreePath): CmdSpec[] {
       name: 'health',
       method: 'POST',
       path,
+      h: 'probe the plugin health endpoint now',
       inputSchema: idSchema,
       returns: '{ id, healthy, checkedAt }',
       scope: 'admin',

@@ -98,7 +98,10 @@ export function createShellExecutor(opts: ShellExecutorOptions = {}): ShellExecu
 
   return async (command, execOpts = {}) => {
     if (!isCommandAllowed(command, opts.allow)) {
-      throw new TBError('permission_denied', `命令不在白名单:${describeAllow(opts.allow)}`)
+      throw new TBError(
+        'permission_denied',
+        `command not in allowlist — ${describeAllow(opts.allow)}`,
+      )
     }
     const timeoutMs = execOpts.timeoutMs ?? defaultTimeoutMs
     return new Promise<ShellExecResult>((resolvePromise, rejectPromise) => {

@@ -123,7 +123,7 @@ describe('DeviceSession DO + /system/device/ws', () => {
     expect(help).toContain('cmd exec POST')
     expect(help).toContain('scope call')
     expect(help).toContain('effect destructive')
-    expect(help).toContain('允许命令: echo;其余拒绝')
+    expect(help).toContain('allowed commands: echo; everything else denied')
 
     const callSeen = nextFrame(ws)
     const invoke = postJson(

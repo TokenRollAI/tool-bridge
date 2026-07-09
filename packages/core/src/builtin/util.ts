@@ -11,6 +11,16 @@ import type { ListOptions, TreePath } from '../types'
 /** void 语义 cmd(delete / set)的应答体:不回显任何值(secret.set 明确不回显 value)。 */
 export const VOID_ACK = { ok: true } as const
 
+/** list 类 cmd 的 `opts: ListOptions` 在 ~help 中的共用 schema(默认/上限对齐 types.ts)。 */
+export const LIST_OPTS_SCHEMA = {
+  type: 'object',
+  description: 'pagination options',
+  properties: {
+    cursor: { type: 'string', description: 'opaque cursor returned by the previous page' },
+    limit: { type: 'number', description: 'page size (default 50, max 200)' },
+  },
+} as const
+
 /** 节点数据面调用的 HTTP 路径(带前导 '/'):cmd 行的 `POST /<nodePath>`。 */
 export function cmdPath(nodePath: TreePath): string {
   return `/${nodePath}`

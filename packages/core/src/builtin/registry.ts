@@ -23,9 +23,39 @@ import type {
 } from '../types'
 import { NODE_KINDS } from '../types'
 import type { BuiltinModule } from './types'
-import { cmdPath, optListOptions, optString, requireObject, requireString, VOID_ACK } from './util'
+import {
+  cmdPath,
+  LIST_OPTS_SCHEMA,
+  optListOptions,
+  optString,
+  requireObject,
+  requireString,
+  VOID_ACK,
+} from './util'
 
-const DESCRIPTION = 'Node registry: mount / list / unmount tree nodes'
+const DESCRIPTION =
+  'Node registry: the single mount surface — everything on the tree (mcp/http/context/device/remote nodes) is mounted, listed and unmounted here'
+
+/** write 的 NodeInput 字段 schema(update.patch 复用,全可选)。 */
+const NODE_FIELD_SCHEMAS = {
+  path: { type: 'string', description: 'tree path to mount at, e.g. "docs/context7"' },
+  kind: {
+    type: 'string',
+    enum: [...NODE_KINDS],
+    description: 'node kind; determines the config shape',
+  },
+  description: { type: 'string', description: 'one-line description shown in parent ~help' },
+  config: {
+    type: 'object',
+    description:
+      'kind-specific config, e.g. mcp: { url, auth?, authRef? } / http: { endpoint, tools } / context: { provider, bucket, … } / remote: { baseUrl, skRef }; credentials go by authRef/skRef name, never inline',
+  },
+  virtualize: {
+    type: 'object',
+    description:
+      'optional tool virtualization: { prefix?, rename?: {from:to}, hide?: [name], describe?: {name:text} }',
+  },
+} as const
 
 function registryCmds(nodePath: TreePath): CmdSpec[] {
   const path = cmdPath(nodePath)
@@ -34,9 +64,13 @@ function registryCmds(nodePath: TreePath): CmdSpec[] {
       name: 'list',
       method: 'POST',
       path,
+      h: 'list registered nodes, optionally under a path prefix',
       inputSchema: {
         type: 'object',
-        properties: { prefix: { type: 'string' }, opts: { type: 'object' } },
+        properties: {
+          prefix: { type: 'string', description: 'only nodes under this path prefix' },
+          opts: LIST_OPTS_SCHEMA,
+        },
       },
       returns: 'Page<Node>',
       scope: 'read',
@@ -45,9 +79,10 @@ function registryCmds(nodePath: TreePath): CmdSpec[] {
       name: 'get',
       method: 'POST',
       path,
+      h: 'fetch one node registration (kind, description, config) by path',
       inputSchema: {
         type: 'object',
-        properties: { path: { type: 'string' } },
+        properties: { path: { type: 'string', description: 'exact tree path' } },
         required: ['path'],
       },
       returns: 'Node',
@@ -57,14 +92,10 @@ function registryCmds(nodePath: TreePath): CmdSpec[] {
       name: 'write',
       method: 'POST',
       path,
+      h: 'mount (or replace) a node at a path; idempotent upsert, intermediate directories auto-created',
       inputSchema: {
         type: 'object',
-        properties: {
-          path: { type: 'string' },
-          kind: { type: 'string' },
-          description: { type: 'string' },
-          config: { type: 'object' },
-        },
+        properties: NODE_FIELD_SCHEMAS,
         required: ['path', 'kind', 'description'],
       },
       returns: 'Node',
@@ -74,9 +105,17 @@ function registryCmds(nodePath: TreePath): CmdSpec[] {
       name: 'update',
       method: 'POST',
       path,
+      h: 'patch fields of a mounted node (description, config, virtualize, …) without remounting',
       inputSchema: {
         type: 'object',
-        properties: { path: { type: 'string' }, patch: { type: 'object' } },
+        properties: {
+          path: { type: 'string', description: 'exact tree path' },
+          patch: {
+            type: 'object',
+            description: 'fields to change; same shape as write, all optional',
+            properties: NODE_FIELD_SCHEMAS,
+          },
+        },
         required: ['path', 'patch'],
       },
       returns: 'Node',
@@ -86,9 +125,10 @@ function registryCmds(nodePath: TreePath): CmdSpec[] {
       name: 'delete',
       method: 'POST',
       path,
+      h: 'unmount a node (and reclaim empty auto-created parents)',
       inputSchema: {
         type: 'object',
-        properties: { path: { type: 'string' } },
+        properties: { path: { type: 'string', description: 'exact tree path' } },
         required: ['path'],
       },
       returns: 'void',
