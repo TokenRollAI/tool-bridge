@@ -1,6 +1,6 @@
 # Guide:npm 发布(cli / sdk / gateway / dashboard / server)
 
-> 用途:发布 public npm 包的新版本,以及新增可发布包的首发流程。适用:发 cli/sdk/gateway/dashboard/server 新版本、新增可发布包、排查 CI 发布失败。现状:cli 0.5.0 / sdk 0.4.0 / gateway 0.4.0 / dashboard 0.4.0 已发布且 Trusted Publisher 均已配置;server 0.1.0 **待手动首发 + 配 Trusted Publisher**。快照见 [../must/current-state.md](../must/current-state.md)。
+> 用途:发布 public npm 包的新版本,以及新增可发布包的首发流程。适用:发 cli/sdk/gateway/dashboard/server 新版本、新增可发布包、排查 CI 发布失败。现状:cli 0.6.1 / sdk 0.4.0 / gateway 0.4.0 / dashboard 0.5.0 已发布且 Trusted Publisher 均已配置;server 0.1.0 **待手动首发 + 配 Trusted Publisher**。快照见 [../must/current-state.md](../must/current-state.md)。
 
 ## 包形态(发布模式)
 
@@ -34,6 +34,12 @@
    - typecheck / test / build(`publish-server.yml` 额外做 **dist 起服冒烟**:从构建产物直接起进程探活,防"测试绿但发布物起不来");
    - `npm publish` 走 **npm Trusted Publishing(OIDC,免 token)**。workflow 里先 `npm install -g npm@11`(OIDC 发布需 npm >= 11.5.1,setup-node 自带的可能偏旧;**不要用 `npm@latest`**,见坑)。
 4. 验证:`npm view @tool-bridge/<pkg> version`。
+
+### Dashboard 有两个独立发布面
+
+- `dashboard-v<版本>` 触发 `publish-dashboard.yml`,只证明 `@tool-bridge/dashboard` 已发布到 npm;证据是 Actions run 成功 + `npm view @tool-bridge/dashboard dist-tags.latest` 命中目标版本。
+- 生产 `https://tool-bridge.pdjjq.org/ui/` 是 Gateway Worker 的 Static Assets,不从 npm dist-tag 自动更新;它随承载 Gateway 的部署流水线生效。当前项目在仓库外配置 Cloudflare Git 集成,`main` 推送后可能已经自动部署,仓库内没有对应 deploy workflow。
+- 因此 Dashboard 发版必须分别报告「Dashboard npm 版本」与「生产 Worker version + `/ui` 产物身份」。`/healthz.version` 属于 Gateway 运行时,不能用来判断 Dashboard npm/静态资产版本。生产侧的部署去重、HTML/chunk hash 与 smoke 验收见 [deploy-and-verify.md](deploy-and-verify.md)。
 
 ## 新增可发布包首发(两段式)
 
