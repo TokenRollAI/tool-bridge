@@ -120,7 +120,7 @@ CLI 是纯 API 客户端,无专用端点;全局 `--json`;读 `TB_BASE_URL`/`TB_S
 |---|---|
 | `tb status` | builtin `system/status` 的 `get`(登录态)/ 树外 `/healthz`(未登录回退) |
 | `tb login` / `whoami` / `use` | 本地凭据管理,无服务端接口(whoami = 本地配置态 + `~help` 探测 + status 摘要) |
-| `tb ls` / `tree` / `help` | `~help` / `GET /~tree?depth=N`;`tb help` 默认 Markdown 表现(协议默认),`--dsl` 请求紧凑 DSL(Accept: text/plain),`--md` 为默认的无操作别名,`--json` 结构化 |
+| `tb ls` / `tree` / `help` | `~help` / `GET /~tree?depth=N`;`tb help` 默认 Markdown 表现(TTY 下经 marked-terminal 渲染 ANSI 富文本,管道/非 TTY/NO_COLOR 输出裸 markdown),`--md` 强制裸 markdown,`--dsl` 请求紧凑 DSL(Accept: text/plain),`--json` 结构化 |
 | `tb call` | 直连 `POST /<path>`(path 即工具路径,body 为 arguments 本体);`--tool` 给出时信封 `POST /<path>` + `{tool,arguments}`(builtin/context 等通用) |
 | `tb tool mount` / `rm` | NodeRegistry.Write/Delete(kind=mcp/http;含 virtualize prefix/rename/hide/describe;`--auth-header`/`--auth-scheme` mcp/http 共用;可重复 `--header <Name=value>` 静态头仅 mcp,http 用报错;mcp 另有 `--auth oauth`,与 `--auth-ref` 互斥) |
 | `tb tool auth <path>` | mcp 托管 OAuth 发起(POST `/<path>/~authorize`):authorized → 直接完成;redirect → 打印授权 URL 并尝试开浏览器(`--no-open` 只打印)。`--local`:本机 127.0.0.1 临时端口收 AS 回跳,code+state 转交网关 `/~oauth/callback` 兑换(适配 Bytebase 等只放行 loopback 回调的严格上游;默认流程遇 redirect 类报错会提示) |
