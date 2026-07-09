@@ -63,4 +63,12 @@ describe('renderMarkdownAnsi', () => {
     expect(rendered).toContain('┌')
     expect(rendered).toContain('│')
   })
+
+  it('~ 保留段不被当删除线吃掉(GFM 单波浪号回归:/~help … /~tree 同行)', () => {
+    const rendered = renderMarkdownAnsi(
+      '> **Next step**: GET /<child-path>/~help describes a child node; GET /~tree?depth=N shows the subtree',
+    )
+    expect(rendered).toContain('~help')
+    expect(rendered).toContain('~tree')
+  })
 })

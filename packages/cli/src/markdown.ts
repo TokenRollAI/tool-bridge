@@ -20,6 +20,9 @@ export function renderMarkdownAnsi(md: string): string {
     // @types/marked-terminal 把返回值标成 TerminalRenderer,但 markedTerminal() 实际返回
     // MarkedExtension(官方 README 用法);断言桥接这个上游类型缺口。
     renderer.use(markedTerminal() as Parameters<Marked['use']>[0])
+    // 禁用删除线分词:GFM 单波浪号 `~x~` 也算删除线,HTBP 保留段全以 ~ 开头
+    // (`/~help … /~tree`),同一行两个保留段会被配对成删除线把 ~ 吃掉。
+    renderer.use({ tokenizer: { del: () => undefined } })
   }
   return renderer.parse(md, { async: false })
 }
