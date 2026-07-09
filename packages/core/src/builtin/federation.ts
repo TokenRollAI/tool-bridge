@@ -14,7 +14,7 @@ import type { BuiltinModule } from './types'
 import { cmdPath, requireString, VOID_ACK } from './util'
 
 const DESCRIPTION =
-  'Remote federation host allowlist: list / add / remove (env baseline is read-only), admin only'
+  'Remote federation host allowlist: which hosts kind=remote nodes may connect to (env baseline is read-only; admin only)'
 
 /** list 合并视图的一行:host + 来源 + 是否可删 + 运行时条目的写入时间。 */
 export interface FederationHost {
@@ -31,6 +31,7 @@ function federationCmds(nodePath: TreePath): CmdSpec[] {
       name: 'list',
       method: 'POST',
       path,
+      h: 'merged allowlist view: env baseline entries (removable=false) plus runtime entries',
       inputSchema: { type: 'object', properties: {} },
       returns: 'Page<{ host, source: "env"|"store", removable, updatedAt? }>',
       scope: 'admin',
@@ -39,9 +40,15 @@ function federationCmds(nodePath: TreePath): CmdSpec[] {
       name: 'add',
       method: 'POST',
       path,
+      h: 'allow a host (suffix match covers subdomains); takes effect immediately',
       inputSchema: {
         type: 'object',
-        properties: { host: { type: 'string' } },
+        properties: {
+          host: {
+            type: 'string',
+            description: 'bare host suffix, e.g. "example.com" — no scheme/port/path',
+          },
+        },
         required: ['host'],
       },
       returns: '{ host, updatedAt } — bare host suffix; no scheme/port/path',
@@ -51,9 +58,10 @@ function federationCmds(nodePath: TreePath): CmdSpec[] {
       name: 'remove',
       method: 'POST',
       path,
+      h: 'remove a runtime-added host; env baseline entries cannot be removed here',
       inputSchema: {
         type: 'object',
-        properties: { host: { type: 'string' } },
+        properties: { host: { type: 'string', description: 'bare host suffix as listed' } },
         required: ['host'],
       },
       returns: 'void — env baseline entries are not removable',

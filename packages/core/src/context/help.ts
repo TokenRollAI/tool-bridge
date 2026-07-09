@@ -29,23 +29,26 @@ export function contextScopeForCmd(tool: string): 'read' | 'write' | null {
 
 const OPTS_SCHEMA = {
   type: 'object',
+  description: 'pagination options',
   properties: {
-    cursor: { type: 'string' },
-    limit: { type: 'number' },
+    cursor: { type: 'string', description: 'opaque cursor returned by the previous page' },
+    limit: { type: 'number', description: 'page size (default 50, max 200)' },
   },
 } as const
 
 const SEARCH_OPTS_SCHEMA = {
   type: 'object',
+  description: 'pagination + search mode',
   properties: {
-    cursor: { type: 'string' },
-    limit: { type: 'number' },
-    mode: { type: 'string', enum: ['keyword', 'semantic'] },
+    cursor: { type: 'string', description: 'opaque cursor returned by the previous page' },
+    limit: { type: 'number', description: 'page size (default 50, max 200)' },
+    mode: { type: 'string', enum: ['keyword', 'semantic'], description: 'default "keyword"' },
   },
 } as const
 
 const METADATA_SCHEMA = {
   type: 'object',
+  description: 'string-to-string metadata map',
   additionalProperties: { type: 'string' },
 } as const
 
@@ -56,20 +59,22 @@ const ENTRY_SCHEMA = {
   properties: {
     contentType: {
       type: 'string',
-      description: '字符串 content 必填;非字符串 content 缺省 application/json',
+      description:
+        'required when content is a string; defaults to application/json for non-string content',
     },
-    content: {},
+    content: { description: 'entry body: string, or any JSON value' },
     metadata: METADATA_SCHEMA,
-    ifVersion: { type: 'string' },
+    ifVersion: { type: 'string', description: 'optimistic concurrency: expected current version' },
   },
 } as const
 
 const PATCH_SCHEMA = {
   type: 'object',
+  description: 'partial update; omitted fields keep their current value',
   properties: {
-    content: {},
+    content: { description: 'replacement content' },
     metadata: METADATA_SCHEMA,
-    ifVersion: { type: 'string' },
+    ifVersion: { type: 'string', description: 'optimistic concurrency: expected current version' },
   },
 } as const
 
@@ -80,10 +85,13 @@ function contextCmds(nodePath: TreePath): CmdSpec[] {
       name: 'List',
       method: 'POST',
       path,
-      h: '枚举条目(浅层列表 + 分页)',
+      h: 'list entries directly under a path (shallow, paginated)',
       inputSchema: {
         type: 'object',
-        properties: { path: { type: 'string' }, opts: OPTS_SCHEMA },
+        properties: {
+          path: { type: 'string', description: 'entry path prefix inside the namespace' },
+          opts: OPTS_SCHEMA,
+        },
       },
       returns: 'Page<ContextEntryMeta>',
       scope: 'read',
@@ -92,11 +100,13 @@ function contextCmds(nodePath: TreePath): CmdSpec[] {
       name: 'Get',
       method: 'POST',
       path,
-      h: '读取单个条目(含内容;大对象 content = { $ref })',
+      h: 'read one entry with content (oversized content comes back as { $ref: <download URL> })',
       inputSchema: {
         type: 'object',
         required: ['path'],
-        properties: { path: { type: 'string' } },
+        properties: {
+          path: { type: 'string', description: 'entry path inside the namespace' },
+        },
       },
       returns: 'ContextEntry',
       scope: 'read',
@@ -105,11 +115,14 @@ function contextCmds(nodePath: TreePath): CmdSpec[] {
       name: 'Write',
       method: 'POST',
       path,
-      h: '创建或整体替换条目(幂等 upsert)',
+      h: 'create or fully replace an entry (idempotent upsert)',
       inputSchema: {
         type: 'object',
         required: ['path', 'entry'],
-        properties: { path: { type: 'string' }, entry: ENTRY_SCHEMA },
+        properties: {
+          path: { type: 'string', description: 'entry path inside the namespace' },
+          entry: ENTRY_SCHEMA,
+        },
       },
       returns: 'ContextEntryMeta',
       scope: 'write',
@@ -118,11 +131,14 @@ function contextCmds(nodePath: TreePath): CmdSpec[] {
       name: 'Update',
       method: 'POST',
       path,
-      h: '部分更新内容或 metadata(浅合并);不存在 → not_found',
+      h: 'partially update content and/or metadata (shallow merge); not_found if the entry does not exist',
       inputSchema: {
         type: 'object',
         required: ['path', 'patch'],
-        properties: { path: { type: 'string' }, patch: PATCH_SCHEMA },
+        properties: {
+          path: { type: 'string', description: 'entry path inside the namespace' },
+          patch: PATCH_SCHEMA,
+        },
       },
       returns: 'ContextEntryMeta',
       scope: 'write',
@@ -131,11 +147,13 @@ function contextCmds(nodePath: TreePath): CmdSpec[] {
       name: 'Delete',
       method: 'POST',
       path,
-      h: '删除条目(幂等)',
+      h: 'delete an entry (idempotent)',
       inputSchema: {
         type: 'object',
         required: ['path'],
-        properties: { path: { type: 'string' } },
+        properties: {
+          path: { type: 'string', description: 'entry path inside the namespace' },
+        },
       },
       scope: 'write',
       effect: 'destructive',
@@ -144,11 +162,14 @@ function contextCmds(nodePath: TreePath): CmdSpec[] {
       name: 'Search',
       method: 'POST',
       path,
-      h: 'keyword 检索(路径名与 metadata 值子串匹配)',
+      h: 'keyword search: substring match on entry paths and metadata values',
       inputSchema: {
         type: 'object',
         required: ['query'],
-        properties: { query: { type: 'string' }, opts: SEARCH_OPTS_SCHEMA },
+        properties: {
+          query: { type: 'string', description: 'substring to match' },
+          opts: SEARCH_OPTS_SCHEMA,
+        },
       },
       returns: 'Page<ContextEntryMeta>',
       scope: 'read',

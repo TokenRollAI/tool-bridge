@@ -58,7 +58,7 @@ describe('白名单前置判定(执行前完成)', () => {
       expect.unreachable('应当抛 permission_denied')
     } catch (e) {
       expect(isTBError(e) && e.code).toBe('permission_denied')
-      expect(isTBError(e) && e.message).toContain('允许命令: echo')
+      expect(isTBError(e) && e.message).toContain('allowed commands: echo')
     }
     expect(spawn).not.toHaveBeenCalled()
   })

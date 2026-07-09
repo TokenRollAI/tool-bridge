@@ -12,7 +12,7 @@ import type { CallContext, TreePath } from '../types'
 import type { BuiltinModule } from './types'
 import { cmdPath } from './util'
 
-const DESCRIPTION = 'Gateway health and summary'
+const DESCRIPTION = 'Gateway health and summary (readable without admin)'
 
 /** status 摘要;version 与 nodeCount 经构造注入的 getter 求值。 */
 export interface StatusSummary {
@@ -32,6 +32,7 @@ function statusCmds(nodePath: TreePath): CmdSpec[] {
       name: 'get',
       method: 'POST',
       path: cmdPath(nodePath),
+      h: 'health summary: gateway version and node count; no arguments',
       inputSchema: { type: 'object', properties: {} },
       returns: '{ healthy, version, nodeCount }',
       scope: 'read',

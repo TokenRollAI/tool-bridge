@@ -10,9 +10,10 @@ import type { CmdSpec, HelpModel } from '../htbp/model'
 import type { SecretStoreImpl } from '../secret/secretStore'
 import type { CallContext, TreePath } from '../types'
 import type { BuiltinModule } from './types'
-import { cmdPath, optListOptions, requireString, VOID_ACK } from './util'
+import { cmdPath, LIST_OPTS_SCHEMA, optListOptions, requireString, VOID_ACK } from './util'
 
-const DESCRIPTION = 'Upstream credential store: write-only (set / list / delete), admin only'
+const DESCRIPTION =
+  'Upstream credential vault: write-only; mounts reference entries by name (authRef), values can never be read back (admin only)'
 
 /**
  * cmd 面的 name 守卫:含 ':' 的名字是平台内部保留命名空间(如 `plugin-token:<id>`),
@@ -34,9 +35,19 @@ function secretCmds(nodePath: TreePath): CmdSpec[] {
       name: 'set',
       method: 'POST',
       path,
+      h: 'store or rotate a credential under a name; mount configs reference it as authRef',
       inputSchema: {
         type: 'object',
-        properties: { name: { type: 'string' }, value: { type: 'string' } },
+        properties: {
+          name: {
+            type: 'string',
+            description: 'reference name used as authRef in mount configs (":" is reserved)',
+          },
+          value: {
+            type: 'string',
+            description: 'the credential (token / key / JSON); encrypted at rest, never echoed',
+          },
+        },
         required: ['name', 'value'],
       },
       returns: 'void — value never echoed',
@@ -46,7 +57,8 @@ function secretCmds(nodePath: TreePath): CmdSpec[] {
       name: 'list',
       method: 'POST',
       path,
-      inputSchema: { type: 'object', properties: { opts: { type: 'object' } } },
+      h: 'list stored credential names (names and timestamps only, never values)',
+      inputSchema: { type: 'object', properties: { opts: LIST_OPTS_SCHEMA } },
       returns: 'Page<{ name, updatedAt }>',
       scope: 'admin',
     },
@@ -54,9 +66,10 @@ function secretCmds(nodePath: TreePath): CmdSpec[] {
       name: 'delete',
       method: 'POST',
       path,
+      h: 'delete a credential; mounts still referencing it will fail to resolve',
       inputSchema: {
         type: 'object',
-        properties: { name: { type: 'string' } },
+        properties: { name: { type: 'string', description: 'reference name' } },
         required: ['name'],
       },
       returns: 'void',

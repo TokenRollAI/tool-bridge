@@ -57,7 +57,7 @@ export function isCommandAllowed(command: string, allow: readonly string[] | und
 
 /** allow 的人读描述(进 shell 节点 ~help 的 exec cmd `h` 行)。 */
 export function describeAllow(allow: readonly string[] | undefined): string {
-  if (!allow || allow.length === 0) return '允许命令: 无(默认拒绝一切)'
-  if (isAllowAll(allow)) return '允许命令: *'
-  return `允许命令: ${allow.join(', ')};其余拒绝`
+  if (!allow || allow.length === 0) return 'allowed commands: none (deny all by default)'
+  if (isAllowAll(allow)) return 'allowed commands: *'
+  return `allowed commands: ${allow.join(', ')}; everything else denied`
 }

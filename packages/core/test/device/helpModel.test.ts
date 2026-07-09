@@ -12,7 +12,7 @@ describe('deviceShellHelpModel(shell 契约)', () => {
     expect(model.node).toEqual({
       path: 'device/d1/shell',
       kind: 'device',
-      description: '设备 shell(远程命令执行)',
+      description: 'device shell (remote command execution)',
     })
     expect(model.cmds).toHaveLength(1)
     const exec = model.cmds[0]
@@ -37,10 +37,14 @@ describe('deviceShellHelpModel(shell 契约)', () => {
 
   it('h 行含 allow 白名单描述(Agent 调用前可预判)', () => {
     expect(deviceShellHelpModel('d/s', { allow: ['echo', 'git'] }).cmds[0]?.h).toContain(
-      '允许命令: echo, git;其余拒绝',
+      'allowed commands: echo, git; everything else denied',
     )
-    expect(deviceShellHelpModel('d/s', { allow: ['*'] }).cmds[0]?.h).toContain('允许命令: *')
-    expect(deviceShellHelpModel('d/s').cmds[0]?.h).toContain('允许命令: 无(默认拒绝一切)')
+    expect(deviceShellHelpModel('d/s', { allow: ['*'] }).cmds[0]?.h).toContain(
+      'allowed commands: *',
+    )
+    expect(deviceShellHelpModel('d/s').cmds[0]?.h).toContain(
+      'allowed commands: none (deny all by default)',
+    )
   })
 
   it('自定义 description 透传;DSL 渲染含 effect destructive(DoD:~help 含 effect destructive)', () => {
@@ -83,7 +87,7 @@ describe('deviceDirectoryHelpModel(mountPath 节点 online 呈现)', () => {
     expect(online.node).toEqual({
       path: 'device/d1',
       kind: 'directory',
-      description: '设备 d1(online)',
+      description: '设备 d1 (online)',
     })
     expect(online.children).toEqual(children)
     expect(online.cmds).toEqual([])
@@ -92,7 +96,7 @@ describe('deviceDirectoryHelpModel(mountPath 节点 online 呈现)', () => {
       description: '设备 d1',
       online: false,
     })
-    expect(offline.node.description).toBe('设备 d1(offline)')
+    expect(offline.node.description).toBe('设备 d1 (offline)')
     expect(offline.children).toEqual([])
   })
 })

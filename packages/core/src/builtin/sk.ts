@@ -10,9 +10,51 @@ import { TBError } from '../errors'
 import type { CmdSpec, HelpModel } from '../htbp/model'
 import type { CallContext, Scope, SecretKeyInput, TreePath } from '../types'
 import type { BuiltinModule } from './types'
-import { cmdPath, optListOptions, requireObject, requireString, VOID_ACK } from './util'
+import {
+  cmdPath,
+  LIST_OPTS_SCHEMA,
+  optListOptions,
+  requireObject,
+  requireString,
+  VOID_ACK,
+} from './util'
 
-const DESCRIPTION = 'SecretKey registry: issue / list / revoke SKs (admin only)'
+const DESCRIPTION =
+  'Secret Key registry: issue / list / update / revoke access keys (the only credential form; admin only)'
+
+/** write 与 update.patch 共用的 SK 字段 schema(update 全可选,另加 disabled)。 */
+const SK_FIELD_SCHEMAS = {
+  owner: {
+    type: 'string',
+    description: 'owner ref: "user:<name>" | "agent:<name>" | "device:<id>"',
+  },
+  description: { type: 'string', description: 'what this key is for (shown in list)' },
+  scopes: {
+    type: 'array',
+    description: 'permission grants; deny wins over allow, no match = denied',
+    items: {
+      type: 'object',
+      properties: {
+        pattern: {
+          type: 'string',
+          description: 'tree path glob, e.g. "**" (everything) or "docs/**"',
+        },
+        actions: {
+          type: 'array',
+          items: { type: 'string', enum: ['read', 'write', 'call', 'register', 'admin'] },
+        },
+        effect: { type: 'string', enum: ['allow', 'deny'], description: 'default "allow"' },
+      },
+      required: ['pattern', 'actions'],
+    },
+  },
+  registerPaths: {
+    type: 'array',
+    items: { type: 'string' },
+    description: 'path prefixes this key may self-register nodes under (via ~register)',
+  },
+  expiresAt: { type: 'string', description: 'expiry, ISO 8601 timestamp; omit = never' },
+} as const
 
 function skCmds(nodePath: TreePath): CmdSpec[] {
   const path = cmdPath(nodePath)
@@ -21,7 +63,8 @@ function skCmds(nodePath: TreePath): CmdSpec[] {
       name: 'list',
       method: 'POST',
       path,
-      inputSchema: { type: 'object', properties: { opts: { type: 'object' } } },
+      h: 'list issued keys (id, owner, scopes; the secret itself is never returned)',
+      inputSchema: { type: 'object', properties: { opts: LIST_OPTS_SCHEMA } },
       returns: 'Page<SecretKey without hash>',
       scope: 'admin',
     },
@@ -29,9 +72,12 @@ function skCmds(nodePath: TreePath): CmdSpec[] {
       name: 'get',
       method: 'POST',
       path,
+      h: 'fetch one key by id',
       inputSchema: {
         type: 'object',
-        properties: { id: { type: 'string' } },
+        properties: {
+          id: { type: 'string', description: 'key id (from list or the issue response)' },
+        },
         required: ['id'],
       },
       returns: 'SecretKey without hash',
@@ -41,15 +87,10 @@ function skCmds(nodePath: TreePath): CmdSpec[] {
       name: 'write',
       method: 'POST',
       path,
+      h: 'issue a new key — the response carries the plaintext secret exactly once, store it immediately',
       inputSchema: {
         type: 'object',
-        properties: {
-          owner: { type: 'string' },
-          description: { type: 'string' },
-          scopes: { type: 'array' },
-          registerPaths: { type: 'array', items: { type: 'string' } },
-          expiresAt: { type: 'string' },
-        },
+        properties: SK_FIELD_SCHEMAS,
         required: ['owner', 'scopes'],
       },
       returns: '{ key: SecretKey without hash, secret } — secret shown once',
@@ -59,9 +100,20 @@ function skCmds(nodePath: TreePath): CmdSpec[] {
       name: 'update',
       method: 'POST',
       path,
+      h: 'patch fields of an issued key (scopes, expiresAt, disabled, …); takes effect immediately',
       inputSchema: {
         type: 'object',
-        properties: { id: { type: 'string' }, patch: { type: 'object' } },
+        properties: {
+          id: { type: 'string', description: 'key id' },
+          patch: {
+            type: 'object',
+            description: 'fields to change; same shape as write (all optional) plus disabled',
+            properties: {
+              ...SK_FIELD_SCHEMAS,
+              disabled: { type: 'boolean', description: 'true = key rejected until re-enabled' },
+            },
+          },
+        },
         required: ['id', 'patch'],
       },
       returns: 'SecretKey without hash',
@@ -71,9 +123,10 @@ function skCmds(nodePath: TreePath): CmdSpec[] {
       name: 'delete',
       method: 'POST',
       path,
+      h: 'revoke a key permanently; takes effect immediately',
       inputSchema: {
         type: 'object',
-        properties: { id: { type: 'string' } },
+        properties: { id: { type: 'string', description: 'key id' } },
         required: ['id'],
       },
       returns: 'void',
