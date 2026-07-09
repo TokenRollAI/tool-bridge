@@ -28,8 +28,9 @@ jobs:
           node-version: 22
           registry-url: https://registry.npmjs.org
 
-      # Trusted Publishing 需要 npm >= 11.5.1(setup-node 自带的可能偏旧)
-      - run: npm install -g npm@latest
+      # Trusted Publishing 需要 npm >= 11.5.1(setup-node 自带的可能偏旧)。
+      # 钉 11.x:npm 12.0.0(2026-07-08 发布)publish 缺 sigstore 模块直接崩(MODULE_NOT_FOUND)。
+      - run: npm install -g npm@11
 
       - run: pnpm install --frozen-lockfile
 
