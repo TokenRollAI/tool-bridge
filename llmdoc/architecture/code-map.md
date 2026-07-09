@@ -55,10 +55,11 @@ exports `.` / `./tbApp` / `./bootstrap` / `./deviceHello`(供 SDK 与 server 复
 
 ## packages/dashboard — React SPA(可发布纯静态产物包,经 `/ui`)
 
-- `pages/`:LoginPage / OverviewPage / NodePage + `pages/system/`(SkPage / RegistryPage / DevicesPage / SecretsPage / PluginsPage / FederationPage)。
-- `components/`:`layout/`(AppShell/TreeNav)、`node/`(CmdPanel/ContextBrowser/ResultView/CliHint/NoteCard(补充说明展示+admin 编辑)/FeedbackPanel(反馈 tab:列表/详情/投票/提交/删除);ContextBrowser 支持条目 metadata 编辑、`$ref` 大对象经 Update 只改 metadata、Search mode 切换)、CommandPalette(⌘K)、`ui/`(shadcn)。
-- `lib/`:api.ts(同源 `baseUrl:''`)、queries.ts、schemaForm.ts(@rjsf)、session.tsx(SK 多 profile,localStorage)、history.ts。
-- 无自有测试;行为由 gateway 的 `ui.integration.test.ts` 覆盖。
+- `App.tsx`:认证内外路由边界;页面全部 `React.lazy`。`main.tsx` 外包 `AppErrorBoundary`,动态 chunk/runtime 失败可刷新恢复。
+- `pages/`:LoginPage / OverviewPage / NodePage + `pages/system/`(SkPage / RegistryPage / DevicesPage / SecretsPage / PluginsPage / FederationPage);管理列表共用 cursor 分页,不把首个 `items` 当全集。
+- `components/`:`layout/`(AppShell 桌面侧栏/移动 Dialog 抽屉、TreeNav 按需取子树)、`node/`(CmdPanel/ContextBrowser/ResultView/CliHint/NoteCard/FeedbackPanel;`SchemaFormRenderer` 把 RJSF/AJV 拆为独立 lazy chunk)、CommandPalette(⌘K 打开时才取 depth=8)、PaginationFooter、AppErrorBoundary、`ui/`(shadcn)。
+- `lib/`:api.ts(同源 `baseUrl:''`,保留 AbortError)、queries.ts(`usePagedBuiltin` + profile id/BaseURL/revision query key)、schemaForm.ts、session.tsx(SK 多 profile;换凭据/删档案清 Query/Mutation cache)、history.ts(v2 metadata allowlist,不持久化调用参数)。
+- 无专用前端测试;协议行为由 gateway 的 `ui.integration.test.ts` 覆盖。产品级可重跑浏览器回归仍缺,真实浏览器验收矩阵见 [../guides/verification-and-commit-practices.md](../guides/verification-and-commit-practices.md)。
 
 ## packages/plugin-feishu — 飞书 tool-provider Plugin(private,CF Worker)
 
