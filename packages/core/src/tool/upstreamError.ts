@@ -26,16 +26,18 @@ export interface UpstreamError {
  */
 export function normalizeUpstreamError(e: UpstreamError): TBError {
   if (e.kind === 'network') {
-    return new TBError('unavailable', `上游不可用:${e.message ?? '网络错误'}`, {
+    return new TBError('unavailable', `upstream unavailable: ${e.message ?? 'network error'}`, {
       retryable: true,
     })
   }
   const status = e.status
   if (status !== undefined && status >= 400 && status < 500) {
-    return new TBError('internal', `上游返回 ${status}`, { retryable: false })
+    return new TBError('internal', `upstream returned HTTP ${status}`, { retryable: false })
   }
   // 5xx 及其它异常状态:暂时不可用
-  return new TBError('unavailable', `上游返回 ${status ?? '未知状态'}`, { retryable: true })
+  return new TBError('unavailable', `upstream returned HTTP ${status ?? 'unknown'}`, {
+    retryable: true,
+  })
 }
 
 /**
@@ -48,13 +50,13 @@ export function normalizeUpstreamError(e: UpstreamError): TBError {
 export function assertSecureUrl(url: string, allowInsecure: boolean): TBError | null {
   const m = /^([a-zA-Z][a-zA-Z0-9+.-]*):\/\//.exec(url)
   if (m === null) {
-    return new TBError('invalid_argument', `非法 URL:'${url}'`)
+    return new TBError('invalid_argument', `invalid URL: '${url}'`)
   }
   const scheme = (m[1] ?? '').toLowerCase()
   if (scheme === 'https') return null
   if (scheme === 'http' && allowInsecure) return null
   return new TBError(
     'invalid_argument',
-    `上游 endpoint 必须为 https://(得到 '${scheme}://');设 TB_ALLOW_INSECURE_HTTP=true 放行本地 http`,
+    `upstream endpoint must be https:// (got '${scheme}://'); set TB_ALLOW_INSECURE_HTTP=true to allow local http`,
   )
 }
