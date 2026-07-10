@@ -56,8 +56,12 @@ exports `.` / `./tbApp` / `./bootstrap` / `./deviceHello`(供 SDK 与 server 复
 ## packages/dashboard — React SPA(可发布纯静态产物包,经 `/ui`)
 
 - `App.tsx`:认证内外路由边界;页面全部 `React.lazy`。`main.tsx` 外包 `AppErrorBoundary`,动态 chunk/runtime 失败可刷新恢复。
-- `pages/`:LoginPage / OverviewPage / NodePage + `pages/system/`(SkPage / RegistryPage / DevicesPage / SecretsPage / PluginsPage / FederationPage);管理列表共用 cursor 分页,不把首个 `items` 当全集。
-- `components/`:`layout/`(AppShell 桌面侧栏/移动 Dialog 抽屉、TreeNav 按需取子树)、`node/`(CmdPanel/ContextBrowser/ResultView/CliHint/NoteCard/FeedbackPanel;`SchemaFormRenderer` 把 RJSF/AJV 拆为独立 lazy chunk)、CommandPalette(⌘K 打开时才取 depth=8)、PaginationFooter、AppErrorBoundary、`ui/`(shadcn)。
+- `components/layout/AppShell.tsx`(`AppShell`):ActivityRail / ExplorerPanel / Workspace 的组合与生命周期边界,管理 Explorer 折叠、移动 Dialog 焦点恢复和 CommandPalette。
+- `components/layout/ActivityRail.tsx`(`ActivityRail`):桌面全局/管理导航及 health/theme/profile 入口;`ExplorerPanel.tsx`(`ExplorerPanel`):过滤、当前路径、TreeNav 与移动端资源/管理/账户面板;`navigation.ts`(`MANAGE_LINKS`)为两者共用的管理导航元数据。
+- `components/layout/TreeNav.tsx`(`TreeNav` / `TreeBranch` / `localizeSubtree` / `handleTreeKeyDown`):根树 depth=1、本地截断懒取 depth=1、remote 及后代纯透传 depth=3、仅非空过滤走 root depth=8;同一受控状态维护展开、过滤后的可见顺序与 ARIA tree 键盘焦点。
+- `pages/`:LoginPage / OverviewPage;`NodePage` 是未知节点的通用协议回退并编排命令、Context、帮助、Note/Feedback tabs。`pages/system/` 的 SkPage / RegistryPage / DevicesPage / SecretsPage / PluginsPage / FederationPage 承载已知 builtin 工作流,cursor 分页与危险操作结算;其中 Registry 覆盖全 NodeConfig/OAuth/virtualize,Plugins 覆盖六动作,SK 覆盖完整 scope,Devices 只表达后端支持的删除语义,Federation 保持 env 条目只读。
+- `components/node/CommandWorkspace.tsx`(`CommandWorkspace`):只挂载当前命令的 CmdPanel;`CmdPanel.tsx`(`CmdPanel`):schema 表单、tool-level `~help`、调用与 mutation→invalidate Promise 链;`ContextBrowser.tsx`(`ContextBrowser`):桌面 master-detail/移动 dialog,List/Search/cursor/metadata/`$ref` 和原子 content/version/`$ref` 编辑基线。`ResultView` / `CliHint` / `SchemaFormRenderer` / `NoteCard` / `FeedbackPanel` 分别承载结果、CLI 提示、lazy RJSF、注解与反馈。
+- `components/PageHeader.tsx` / `EmptyState.tsx` / `PaginationFooter.tsx` / `ConfirmAction.tsx` + `components/ui/table.tsx`:系统页共用的页面头、空态、分页、确认和表格骨架;`CommandPalette.tsx`、`AppErrorBoundary.tsx` 与 `components/ui/` 为横切组件。
 - `lib/`:api.ts(同源 `baseUrl:''`,保留 AbortError)、queries.ts(`usePagedBuiltin` + profile id/BaseURL/revision query key)、schemaForm.ts、session.tsx(SK 多 profile;换凭据/删档案清 Query/Mutation cache)、history.ts(v2 metadata allowlist,不持久化调用参数)。
 - 无专用前端测试;协议行为由 gateway 的 `ui.integration.test.ts` 覆盖。产品级可重跑浏览器回归仍缺,真实浏览器验收矩阵见 [../guides/verification-and-commit-practices.md](../guides/verification-and-commit-practices.md)。
 
