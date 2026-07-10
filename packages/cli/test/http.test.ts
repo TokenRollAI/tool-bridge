@@ -73,12 +73,48 @@ describe('apiJson TBError 归一', () => {
     ).rejects.toMatchObject({ message: 'nope', code: 'permission_denied' })
   })
 
+  it('TBError 的 retryable 透传(503 unavailable → retryable:true)', async () => {
+    mockOnce(JSON.stringify({ code: 'unavailable', message: 'upstream down', retryable: true }), {
+      status: 503,
+      headers: { 'content-type': 'application/json' },
+    })
+    await expect(apiJson(TARGET, { path: '/x' })).rejects.toMatchObject({
+      code: 'unavailable',
+      retryable: true,
+    })
+  })
+
   it('2xx JSON 正常解析', async () => {
     mockOnce(JSON.stringify({ items: [1, 2] }), {
       status: 200,
       headers: { 'content-type': 'application/json' },
     })
     expect(await apiJson(TARGET, { path: '/x' })).toEqual({ items: [1, 2] })
+  })
+})
+
+describe('apiFetch 超时', () => {
+  it('timeoutMs 到点 → retryable CliError(unavailable),message 提示 --timeout', async () => {
+    setFetch(
+      vi.fn(
+        (_url: string, init: RequestInit) =>
+          new Promise((_resolve, reject) => {
+            init.signal?.addEventListener('abort', () => reject(init.signal?.reason))
+          }),
+      ) as unknown as typeof fetch,
+    )
+    await expect(apiFetch({ ...TARGET, timeoutMs: 30 }, { path: '/x' })).rejects.toMatchObject({
+      code: 'unavailable',
+      retryable: true,
+      message: expect.stringMatching(/timed out .* --timeout/),
+    })
+  })
+
+  it('未显式给 timeout → 默认信号仍挂上(AbortSignal 存在)', async () => {
+    const fn = mockOnce('ok', { status: 200 })
+    await apiFetch(TARGET, { path: '/x' })
+    const [, init] = fn.mock.calls[0] as [string, RequestInit]
+    expect(init.signal).toBeInstanceOf(AbortSignal)
   })
 })
 

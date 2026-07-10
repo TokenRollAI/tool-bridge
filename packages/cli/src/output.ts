@@ -13,14 +13,25 @@ export function printJson(value: unknown): void {
   process.stdout.write(`${JSON.stringify(value, null, 2)}\n`)
 }
 
-/** TBError / 网络错误 → 退出码 1。--json 时输出 `{ok:false,error,code}`。 */
+/** TBError / 网络错误 → 退出码 1。--json 时输出 `{ok:false,error,code,retryable,…}`。 */
 export function reportError(asJson: boolean, err: unknown): void {
   const message = err instanceof Error ? err.message : String(err)
-  const code = err instanceof CliError ? err.code : undefined
+  const cli = err instanceof CliError ? err : undefined
   if (asJson) {
-    process.stdout.write(`${JSON.stringify({ ok: false, error: message, code })}\n`)
+    process.stdout.write(
+      `${JSON.stringify({
+        ok: false,
+        error: message,
+        code: cli?.code,
+        retryable: cli?.retryable,
+        hint: cli?.hint,
+        feedback: cli?.feedback,
+      })}\n`,
+    )
   } else {
-    process.stderr.write(`error: ${message}\n`)
+    const retry = cli?.retryable === true ? ' (retryable — try again)' : ''
+    process.stderr.write(`error: ${message}${retry}\n`)
+    if (cli?.hint) process.stderr.write(`${cli.hint}\n`)
   }
   process.exitCode = 1
 }
