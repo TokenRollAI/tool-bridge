@@ -1,9 +1,10 @@
+import { ArrowUpRight, GitBranch, TerminalSquare } from 'lucide-react'
 import { Fragment } from 'react'
 import Markdown from 'react-markdown'
 import { Link, useParams } from 'react-router'
 import remarkGfm from 'remark-gfm'
-import { KindBadge } from '@/components/KindBadge'
-import { CmdPanel } from '@/components/node/CmdPanel'
+import { KIND_ICON, KindBadge } from '@/components/KindBadge'
+import { CommandWorkspace } from '@/components/node/CommandWorkspace'
 import { ContextBrowser } from '@/components/node/ContextBrowser'
 import { FeedbackPanel } from '@/components/node/FeedbackPanel'
 import { NoteCard } from '@/components/node/NoteCard'
@@ -24,17 +25,17 @@ export function NodePage() {
 
   if (help.isPending) {
     return (
-      <div className="mx-auto max-w-3xl px-4 py-5 sm:px-6 sm:py-7 lg:px-8 lg:py-8">
+      <div className="mx-auto w-full max-w-[100rem] px-4 py-5 sm:px-6 sm:py-7 lg:px-8 lg:py-8 xl:px-10">
         <Skeleton className="h-6 w-64" />
         <Skeleton className="mt-3 h-4 w-96" />
-        <Skeleton className="mt-8 h-40 w-full" />
+        <Skeleton className="mt-8 h-48 w-full rounded-xl" />
       </div>
     )
   }
   if (help.isError) {
     const err = help.error as ApiError
     return (
-      <div className="mx-auto max-w-3xl px-4 py-5 sm:px-6 sm:py-7 lg:px-8 lg:py-8">
+      <div className="mx-auto w-full max-w-[100rem] px-4 py-5 sm:px-6 sm:py-7 lg:px-8 lg:py-8 xl:px-10">
         <Crumbs path={path} />
         <div className="mt-6 rounded-sm border border-destructive/40 bg-destructive/10 px-4 py-3">
           <p className="font-mono text-xs text-destructive-foreground/90">
@@ -50,38 +51,66 @@ export function NodePage() {
 
   const { node, cmds, children, note, feedback } = help.data
   const isContext = node.kind === 'context'
+  const { icon: NodeIcon, className: nodeIconClass } = KIND_ICON[node.kind] ?? KIND_ICON.directory
   return (
-    <div className="mx-auto max-w-3xl px-4 py-5 sm:px-6 sm:py-7 lg:px-8 lg:py-8">
+    <div className="mx-auto w-full max-w-[100rem] px-4 py-5 sm:px-6 sm:py-7 lg:px-8 lg:py-8 xl:px-10">
       <Crumbs path={path} />
-      <header className="mt-2 flex min-w-0 flex-wrap items-center gap-2 sm:gap-3">
-        <h1 className="min-w-0 max-w-full truncate font-mono text-xl tracking-tight">
-          {path === '' ? '/' : path.split('/').pop()}
-        </h1>
-        <KindBadge kind={node.kind} />
-      </header>
-      <p className="mt-1.5 text-sm text-muted-foreground">{node.description}</p>
-      <div className="mt-3">
-        <NoteCard path={path} {...(note !== undefined ? { note } : {})} />
-      </div>
+
+      <section className="relative mt-3 overflow-hidden rounded-2xl border bg-card/55 px-4 py-5 sm:px-6 sm:py-6">
+        <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-primary via-primary/45 to-transparent" />
+        <div className="absolute -top-24 right-0 size-64 rounded-full bg-primary/[0.045] blur-3xl" />
+        <div className="relative flex min-w-0 flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
+          <div className="flex min-w-0 items-start gap-3.5 sm:gap-4">
+            <span className="grid size-11 shrink-0 place-items-center rounded-xl border bg-background/75 shadow-sm sm:size-12">
+              <NodeIcon className={`size-5 sm:size-5.5 ${nodeIconClass}`} strokeWidth={1.7} />
+            </span>
+            <div className="min-w-0">
+              <div className="flex min-w-0 flex-wrap items-center gap-2.5">
+                <h1 className="min-w-0 truncate font-mono text-2xl tracking-tight sm:text-3xl">
+                  {path === '' ? '/' : path.split('/').pop()}
+                </h1>
+                <KindBadge kind={node.kind} className="leading-5" />
+              </div>
+              <p className="mt-1.5 max-w-3xl text-sm leading-6 text-muted-foreground sm:text-[15px]">
+                {node.description || '该节点没有提供说明。'}
+              </p>
+              <p
+                className="mt-2 max-w-full truncate font-mono text-[11px] text-muted-foreground/70"
+                title={path || '/'}
+              >
+                node://{path || '/'}
+              </p>
+            </div>
+          </div>
+
+          <div className="grid shrink-0 grid-cols-2 gap-px overflow-hidden rounded-xl border bg-border/70 lg:min-w-56">
+            <NodeMetric icon={TerminalSquare} label="COMMANDS" value={cmds.length} />
+            <NodeMetric icon={GitBranch} label="CHILDREN" value={children?.length ?? 0} />
+          </div>
+        </div>
+        <div className="relative mt-5 border-t pt-4">
+          <NoteCard path={path} {...(note !== undefined ? { note } : {})} />
+        </div>
+      </section>
 
       {/* key=path:切换节点时重置 tab 选择(context 节点默认落「条目」) */}
-      <Tabs key={path} defaultValue={isContext ? 'browse' : 'invoke'} className="mt-6">
-        <div className="-mx-1 overflow-x-auto px-1 pb-1">
-          <TabsList className="h-8 min-w-max">
+      <Tabs key={path} defaultValue={isContext ? 'browse' : 'invoke'} className="mt-6 gap-0">
+        <div className="-mx-1 overflow-x-auto border-b px-1">
+          <TabsList variant="line" className="h-11 min-w-max gap-5 p-0">
             {isContext && (
-              <TabsTrigger value="browse" className="px-3 text-xs">
+              <TabsTrigger value="browse" className="px-0 text-xs">
                 条目
               </TabsTrigger>
             )}
-            <TabsTrigger value="invoke" className="px-3 text-xs">
-              调用
+            <TabsTrigger value="invoke" className="px-0 text-xs">
+              调用工作台
             </TabsTrigger>
             {path !== '' && (
-              <TabsTrigger value="feedback" className="px-3 text-xs">
+              <TabsTrigger value="feedback" className="px-0 text-xs">
                 反馈{feedback && feedback.length > 0 ? ` · ${feedback.length}` : ''}
               </TabsTrigger>
             )}
-            <TabsTrigger value="markdown" className="px-3 text-xs">
+            <TabsTrigger value="markdown" className="px-0 text-xs">
               ~help 文档
             </TabsTrigger>
           </TabsList>
@@ -93,13 +122,17 @@ export function NodePage() {
           </TabsContent>
         )}
 
-        <TabsContent value="invoke" className="mt-4 grid gap-6">
+        <TabsContent value="invoke" className="mt-5 grid gap-5">
           {children && children.length > 0 && (
-            <section>
-              <h2 className="mb-2 text-[10px] font-medium tracking-widest text-muted-foreground uppercase">
-                子节点
-              </h2>
-              <div className="grid gap-px overflow-hidden rounded-md border">
+            <section className="rounded-xl border bg-card/35 p-3 sm:p-4">
+              <div className="mb-3 flex items-center gap-2">
+                <GitBranch className="size-4 text-primary" />
+                <h2 className="text-sm font-medium">子节点</h2>
+                <span className="font-mono text-[10px] text-muted-foreground">
+                  {children.length} BRANCHES
+                </span>
+              </div>
+              <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
                 {/*
                  * ch.path 对本地节点是树内绝对路径;对 remote 透传节点则是「远端树内路径」
                  * (不含本地挂载前缀,如 remote/djj 下的上游节点回 `tipsy` 而非 `remote/djj/tipsy`)。
@@ -113,13 +146,18 @@ export function NodePage() {
                     <Link
                       key={ch.path}
                       to={`/nodes/${target}`}
-                      className="flex min-w-0 flex-wrap items-center gap-2 bg-card/60 px-3 py-2.5 hover:bg-secondary/60 sm:flex-nowrap sm:gap-2.5 sm:px-4"
+                      className="group flex min-w-0 items-center gap-3 rounded-lg border bg-background/50 px-3 py-3 transition-colors hover:border-primary/35 hover:bg-secondary/45"
                     >
-                      <span className="min-w-0 truncate font-mono text-sm">{name}</span>
-                      <KindBadge kind={ch.kind} />
-                      <span className="w-full truncate text-xs text-muted-foreground sm:ml-auto sm:w-auto sm:pl-4">
-                        {ch.description}
+                      <span className="min-w-0 flex-1">
+                        <span className="flex items-center gap-2">
+                          <span className="min-w-0 truncate font-mono text-sm">{name}</span>
+                          <KindBadge kind={ch.kind} />
+                        </span>
+                        <span className="mt-1 block truncate text-xs text-muted-foreground">
+                          {ch.description}
+                        </span>
                       </span>
+                      <ArrowUpRight className="size-4 shrink-0 text-muted-foreground transition-transform group-hover:-translate-y-0.5 group-hover:translate-x-0.5 group-hover:text-primary" />
                     </Link>
                   )
                 })}
@@ -128,21 +166,12 @@ export function NodePage() {
           )}
 
           {cmds.length > 0 ? (
-            <section className="grid gap-2">
-              <h2 className="mb-1 text-[10px] font-medium tracking-widest text-muted-foreground uppercase">
-                命令 · {cmds.length}
-              </h2>
-              {cmds.map((cmd) => (
-                <CmdPanel
-                  key={cmd.name}
-                  path={path}
-                  cmd={cmd}
-                  defaultOpen={cmds.length === 1}
-                  // mcp/http 节点级 ~help 是索引形态:展开时懒取工具级 schema
-                  lazySchema={node.kind === 'mcp' || node.kind === 'http'}
-                />
-              ))}
-            </section>
+            <CommandWorkspace
+              path={path}
+              cmds={cmds}
+              // mcp/http 节点级 ~help 是索引形态:仅为当前选中工具懒取 schema
+              lazySchema={node.kind === 'mcp' || node.kind === 'http'}
+            />
           ) : (
             (children?.length ?? 0) === 0 && (
               <p className="text-sm text-muted-foreground">该节点没有可调用的命令。</p>
@@ -164,6 +193,26 @@ export function NodePage() {
   )
 }
 
+function NodeMetric({
+  icon: Icon,
+  label,
+  value,
+}: {
+  icon: typeof TerminalSquare
+  label: string
+  value: number
+}) {
+  return (
+    <div className="bg-background/75 px-3.5 py-3">
+      <div className="flex items-center gap-1.5 font-mono text-[9px] tracking-[0.13em] text-muted-foreground">
+        <Icon className="size-3" />
+        {label}
+      </div>
+      <p className="mt-1.5 font-mono text-lg text-foreground tabular-nums">{value}</p>
+    </div>
+  )
+}
+
 function HelpMarkdownView({ path }: { path: string }) {
   const md = useHelpMarkdown(path)
   if (md.isPending) return <Skeleton className="h-40 w-full" />
@@ -178,19 +227,28 @@ function HelpMarkdownView({ path }: { path: string }) {
 function Crumbs({ path }: { path: string }) {
   const segs = path === '' ? [] : path.split('/')
   return (
-    <nav aria-label="路径" className="flex flex-wrap items-center gap-1 font-mono text-xs">
-      <Link to="/" className="text-muted-foreground hover:text-foreground">
-        ~
+    <nav
+      aria-label="路径"
+      className="flex min-w-0 flex-wrap items-center gap-1.5 font-mono text-[11px]"
+    >
+      <Link
+        to="/"
+        className="rounded-md border bg-card/45 px-2 py-1 text-muted-foreground hover:border-primary/35 hover:text-foreground"
+      >
+        ROOT
       </Link>
       {segs.map((seg, i) => {
         const prefix = segs.slice(0, i + 1).join('/')
         return (
           <Fragment key={prefix}>
-            <span className="text-muted-foreground/50">/</span>
+            <span className="text-muted-foreground/35">/</span>
             {i === segs.length - 1 ? (
-              <span className="text-primary">{seg}</span>
+              <span className="rounded-md bg-primary/8 px-1.5 py-1 text-primary">{seg}</span>
             ) : (
-              <Link to={`/nodes/${prefix}`} className="text-muted-foreground hover:text-foreground">
+              <Link
+                to={`/nodes/${prefix}`}
+                className="rounded-md px-1.5 py-1 text-muted-foreground hover:bg-secondary hover:text-foreground"
+              >
                 {seg}
               </Link>
             )}

@@ -43,17 +43,18 @@ export function CliHint({
   ].join(' \\\n  ')
 
   return (
-    <div className="mt-3 min-w-0 max-w-full">
+    <div className="mt-4 min-w-0 max-w-full rounded-lg border border-dashed bg-background/20 px-3 py-2.5">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
         className={cn(
-          'inline-flex items-center gap-1.5 font-mono text-[11px] text-muted-foreground/70',
+          'inline-flex w-full items-center gap-1.5 text-left font-mono text-[11px] text-muted-foreground/75',
           'hover:text-foreground',
         )}
       >
         <SquareTerminal className="size-3" />
-        {open ? '收起' : '等价 CLI / curl'}
+        等价 CLI / curl
+        <span className="ml-auto font-sans text-[10px]">{open ? '收起' : '展开'}</span>
       </button>
       {open && (
         <div className="mt-2 grid min-w-0 gap-1.5">
@@ -63,7 +64,7 @@ export function CliHint({
           ].map(({ label, cmd }) => (
             <div
               key={label}
-              className="grid min-w-0 max-w-full grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-1 rounded-sm border bg-background/60 sm:gap-1.5"
+              className="grid min-w-0 max-w-full grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-1 rounded-lg border bg-background/60 sm:gap-1.5"
             >
               <span className="shrink-0 border-r px-2 py-1.5 font-mono text-[10px] text-primary/80">
                 {label}

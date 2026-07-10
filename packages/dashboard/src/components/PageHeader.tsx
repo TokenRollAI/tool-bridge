@@ -1,9 +1,6 @@
 import type { ReactNode } from 'react'
 
-/**
- * 页头统一形制:琥珀刻度线 + 等宽标题 + 说明,右侧动作区。
- * 所有页面共用,保证"工业面板"的版式一致性。
- */
+/** 页面定位与动作的统一入口：分区标签、无衬线标题、说明和右侧动作。 */
 export function PageHeader({
   title,
   description,
@@ -13,27 +10,29 @@ export function PageHeader({
   title: ReactNode
   description?: ReactNode
   actions?: ReactNode
-  /** 可选的页面分区标签；不传时保持原有单刻度线形制。 */
+  /** 可选的页面分区标签；只用于说明所属工作区，不重复页面标题。 */
   eyebrow?: ReactNode
 }) {
   return (
-    <header className="flex flex-col items-stretch gap-3 sm:flex-row sm:flex-wrap sm:items-end">
-      <div className="min-w-0">
-        <div className={`mb-1.5 flex items-center gap-2 ${eyebrow ? 'min-h-2.5' : 'h-px'}`}>
-          <span className="h-px w-10 shrink-0 bg-primary" />
+    <header className="flex flex-col items-stretch gap-4 sm:flex-row sm:flex-wrap sm:items-end sm:gap-x-6">
+      <div className="min-w-0 flex-1">
+        <div className={`mb-2 flex items-center gap-2.5 ${eyebrow ? 'min-h-3' : 'h-px'}`}>
+          <span className="h-px w-8 shrink-0 bg-primary" />
           {eyebrow && (
-            <span className="font-mono text-[10px] tracking-[0.16em] text-primary uppercase">
+            <span className="text-[10px] font-semibold tracking-[0.18em] text-primary uppercase">
               {eyebrow}
             </span>
           )}
         </div>
-        <h1 className="font-mono text-xl tracking-tight">{title}</h1>
+        <h1 className="text-2xl font-semibold tracking-[-0.025em] text-balance">{title}</h1>
         {description && (
-          <p className="mt-1 max-w-2xl text-sm break-words text-muted-foreground">{description}</p>
+          <p className="mt-1.5 max-w-3xl text-sm leading-6 break-words text-muted-foreground">
+            {description}
+          </p>
         )}
       </div>
       {actions && (
-        <div className="flex w-full min-w-0 flex-wrap items-center gap-2 pb-0.5 sm:ml-auto sm:w-auto sm:shrink-0 sm:justify-end">
+        <div className="flex w-full min-w-0 flex-wrap items-center gap-2 sm:ml-auto sm:w-auto sm:shrink-0 sm:justify-end sm:pb-0.5">
           {actions}
         </div>
       )}

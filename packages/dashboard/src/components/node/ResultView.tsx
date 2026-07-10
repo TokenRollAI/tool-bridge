@@ -1,4 +1,4 @@
-import { Download } from 'lucide-react'
+import { CheckCircle2, Download } from 'lucide-react'
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { CopyButton } from '@/components/CopyButton'
@@ -35,7 +35,7 @@ export function ResultView({
     return (
       <div
         className={cn(
-          'rounded-sm border border-destructive/40 bg-destructive/10 px-3 py-2',
+          'rounded-xl border border-destructive/40 bg-destructive/10 px-4 py-3.5',
           className,
         )}
       >
@@ -53,8 +53,18 @@ export function ResultView({
   const pretty = isJson && result.json !== undefined ? JSON.stringify(result.json, null, 2) : null
 
   return (
-    <Tabs defaultValue="rendered" className={cn('min-w-0 max-w-full', className)}>
-      <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+    <Tabs
+      defaultValue="rendered"
+      className={cn(
+        'min-w-0 max-w-full gap-0 overflow-hidden rounded-xl border bg-background/25',
+        className,
+      )}
+    >
+      <div className="flex min-w-0 flex-wrap items-center gap-2 border-b bg-card/35 px-3 py-2.5 sm:px-4">
+        <span className="mr-1 inline-flex items-center gap-1.5 font-mono text-[10px] tracking-[0.12em] text-ok">
+          <CheckCircle2 className="size-3.5" />
+          RESPONSE
+        </span>
         <TabsList className="h-7">
           <TabsTrigger value="rendered" className="px-2.5 py-0.5 text-xs">
             {isJson ? 'JSON' : 'Markdown'}
@@ -79,19 +89,19 @@ export function ResultView({
           <Download />
         </Button>
       </div>
-      <TabsContent value="rendered">
+      <TabsContent value="rendered" className="m-0 p-3 sm:p-4">
         {isJson ? (
-          <pre className="max-h-96 max-w-full overflow-auto rounded-sm border bg-card px-3 py-2 font-mono text-xs leading-relaxed whitespace-pre-wrap break-words">
+          <pre className="max-h-[32rem] max-w-full overflow-auto rounded-lg border bg-card/60 px-3 py-3 font-mono text-xs leading-relaxed whitespace-pre-wrap break-words">
             {pretty ?? result.text}
           </pre>
         ) : (
-          <div className="prose prose-sm dark:prose-invert max-w-none overflow-x-auto rounded-sm border bg-card px-3 py-3 break-words prose-pre:max-w-full prose-pre:overflow-x-auto prose-pre:bg-background prose-pre:text-xs prose-code:font-mono sm:px-4">
+          <div className="prose prose-sm dark:prose-invert max-w-none overflow-x-auto rounded-lg border bg-card/60 px-3 py-3 break-words prose-pre:max-w-full prose-pre:overflow-x-auto prose-pre:bg-background prose-pre:text-xs prose-code:font-mono sm:px-4">
             <Markdown remarkPlugins={[remarkGfm]}>{result.text}</Markdown>
           </div>
         )}
       </TabsContent>
-      <TabsContent value="raw">
-        <pre className="max-h-96 max-w-full overflow-auto rounded-sm border bg-card px-3 py-2 font-mono text-xs leading-relaxed whitespace-pre-wrap break-words">
+      <TabsContent value="raw" className="m-0 p-3 sm:p-4">
+        <pre className="max-h-[32rem] max-w-full overflow-auto rounded-lg border bg-card/60 px-3 py-3 font-mono text-xs leading-relaxed whitespace-pre-wrap break-words">
           {result.text}
         </pre>
       </TabsContent>

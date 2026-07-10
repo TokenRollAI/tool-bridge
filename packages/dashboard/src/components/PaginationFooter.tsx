@@ -2,7 +2,7 @@ import { Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 
-/** 管理列表统一分页脚注：明确当前已加载数量，并按 cursor 继续取下一页。 */
+/** 数据工作台的分页脚注：保持已加载内容可见，并显式追加下一页。 */
 export function PaginationFooter({
   count,
   hasNextPage,
@@ -20,14 +20,18 @@ export function PaginationFooter({
 }) {
   return (
     <div
+      aria-busy={isFetchingNextPage}
       className={cn(
-        'flex min-h-10 flex-wrap items-center justify-between gap-2 border-t bg-card/30 px-3 py-2',
+        'flex min-h-11 flex-wrap items-center justify-between gap-3 border-t bg-muted/15 px-3 py-2.5 sm:px-4',
         className,
       )}
     >
-      <p className="text-xs text-muted-foreground" aria-live="polite">
-        已加载 <span className="font-mono tabular-nums text-foreground">{count}</span> {unit}
-      </p>
+      <div className="flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
+        <span className="size-1.5 shrink-0 rounded-full bg-primary" aria-hidden="true" />
+        <p aria-live="polite">
+          当前已加载 <span className="font-mono tabular-nums text-foreground">{count}</span> {unit}
+        </p>
+      </div>
       {hasNextPage ? (
         <Button
           type="button"
@@ -37,10 +41,10 @@ export function PaginationFooter({
           onClick={onLoadMore}
         >
           {isFetchingNextPage && <Loader2 className="animate-spin" aria-hidden="true" />}
-          {isFetchingNextPage ? '加载中…' : '继续加载'}
+          {isFetchingNextPage ? '正在追加…' : '加载下一页'}
         </Button>
       ) : (
-        count > 0 && <span className="text-[11px] text-muted-foreground">已全部加载</span>
+        count > 0 && <span className="text-[11px] text-muted-foreground">已经到底</span>
       )}
     </div>
   )
