@@ -114,14 +114,14 @@ cmd resolve-library-id POST /docs/context7/resolve-library-id  ← cmd 行:<name
 
 ## 9. CLI 命令矩阵(20 命令)
 
-CLI 是纯 API 客户端,无专用端点;全局 `--json`;读 `TB_BASE_URL`/`TB_SK`,配置 `~/.config/tool-bridge/config.json`(XDG,多 profile)。
+CLI 是纯 API 客户端,无专用端点;全局 `--json` / `--timeout <seconds>`(单请求等待上限,默认 120s;超时报 retryable 错误);读 `TB_BASE_URL`/`TB_SK`,配置 `~/.config/tool-bridge/config.json`(XDG,多 profile)。错误呈现:TBError 的 `retryable:true` 在人类模式加 `(retryable — try again)` 尾注,`--json` 错误对象含 `retryable`(及 call 失败时的结构化 `feedback`)。
 
 | 命令 | 对应接口面 |
 |---|---|
 | `tb status` | builtin `system/status` 的 `get`(登录态)/ 树外 `/healthz`(未登录回退) |
 | `tb login` / `whoami` / `use` | 本地凭据管理,无服务端接口(whoami = 本地配置态 + `~help` 探测 + status 摘要) |
 | `tb ls` / `tree` / `help` | `~help` / `GET /~tree?depth=N`;`tb help` 默认 Markdown 表现(TTY 下经 marked-terminal 渲染 ANSI 富文本,管道/非 TTY/NO_COLOR 输出裸 markdown),`--md` 强制裸 markdown,`--dsl` 请求紧凑 DSL(Accept: text/plain),`--json` 结构化 |
-| `tb call` | 直连 `POST /<path>`(path 即工具路径,body 为 arguments 本体);`--tool` 给出时信封 `POST /<path>` + `{tool,arguments}`(builtin/context 等通用) |
+| `tb call` | 直连 `POST /<path>`(path 即工具路径,body 为 arguments 本体);`--tool` 给出时信封 `POST /<path>` + `{tool,arguments}`(builtin/context 等通用)。arguments 三种给法互斥:第二 positional 裸 JSON(`tb call <path> '{...}'`)/ `--args` / `--args-file`。调用失败(unavailable/internal/invalid_argument/rate_limited)时尽力拉取该 path `~feedback` 注入提示(有条目列 top 3,无条目引导 submit;拉取限时 5s、失败静默) |
 | `tb tool mount` / `rm` | NodeRegistry.Write/Delete(kind=mcp/http;含 virtualize prefix/rename/hide/describe;`--auth-header`/`--auth-scheme` mcp/http 共用;可重复 `--header <Name=value>` 静态头仅 mcp,http 用报错;mcp 另有 `--auth oauth`,与 `--auth-ref` 互斥) |
 | `tb tool auth <path>` | mcp 托管 OAuth 发起(POST `/<path>/~authorize`):authorized → 直接完成;redirect → 打印授权 URL 并尝试开浏览器(`--no-open` 只打印)。`--local`:本机 127.0.0.1 临时端口收 AS 回跳,code+state 转交网关 `/~oauth/callback` 兑换(适配 Bytebase 等只放行 loopback 回调的严格上游;默认流程遇 redirect 类报错会提示) |
 | `tb server add` / `ls` / `rm` | NodeRegistry(kind=remote 联邦) |
