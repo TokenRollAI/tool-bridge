@@ -7,19 +7,28 @@
  * - 错误响应:TBError JSON `{code,message,retryable}` + 对应 HTTP 码。
  */
 
-/** CLI 错误:携带可选 TBError code,统一由 output.reportError 落地为退出码 1。 */
+/** CLI 错误:携带可选 TBError code/retryable,统一由 output.reportError 落地为退出码 1。 */
 export class CliError extends Error {
   readonly code?: string
-  constructor(message: string, code?: string) {
+  /** TBError 的 retryable 语义(true → 呈现"try again"提示);本地错误缺席。 */
+  readonly retryable?: boolean
+  /** 附加提示(如 ~feedback 已知坑),reportError 在主错误后落地。 */
+  hint?: string
+  /** 该 path 的 feedback 头部条目(--json 时结构化输出)。 */
+  feedback?: Array<{ id: string; title: string; score: number }>
+  constructor(message: string, code?: string, retryable?: boolean) {
     super(message)
     this.name = 'CliError'
     this.code = code
+    this.retryable = retryable
   }
 }
 
 export interface Target {
   baseUrl?: string
   sk?: string
+  /** 单请求等待上限(毫秒);缺席 = 默认 120s。见 args.resolveTarget。 */
+  timeoutMs?: number
 }
 
 /** 断言已解析出 baseUrl;否则给出可操作的错误提示。 */
@@ -65,9 +74,13 @@ function buildQuery(query?: ApiOptions['query']): string {
   return parts.length ? `?${parts.join('&')}` : ''
 }
 
-/** 底层请求:构造 URL/头,执行 fetch;网络错误 → CliError。不解析 body 语义。 */
+/** 无显式 --timeout 时的单请求等待上限(上游长查询可用 --timeout 加大)。 */
+export const DEFAULT_TIMEOUT_MS = 120_000
+
+/** 底层请求:构造 URL/头,执行 fetch;网络错误 → CliError,超时 → retryable CliError。 */
 export async function apiFetch(target: Target, opts: ApiOptions): Promise<ApiResult> {
   const { baseUrl, sk } = requireTarget(target)
+  const timeoutMs = target.timeoutMs ?? DEFAULT_TIMEOUT_MS
   const base = baseUrl.replace(/\/+$/, '')
   const path = opts.path.startsWith('/') ? opts.path : `/${opts.path}`
   const url = `${base}${path}${buildQuery(opts.query)}`
@@ -78,7 +91,11 @@ export async function apiFetch(target: Target, opts: ApiOptions): Promise<ApiRes
   else if (opts.accept === 'markdown') headers.accept = 'text/markdown'
   else if (opts.accept === 'text') headers.accept = 'text/plain'
 
-  const init: RequestInit = { method: opts.method ?? 'GET', headers }
+  const init: RequestInit = {
+    method: opts.method ?? 'GET',
+    headers,
+    signal: AbortSignal.timeout(timeoutMs),
+  }
   if (opts.body !== undefined) {
     headers['content-type'] = 'application/json'
     init.body = JSON.stringify(opts.body)
@@ -88,6 +105,13 @@ export async function apiFetch(target: Target, opts: ApiOptions): Promise<ApiRes
   try {
     res = await fetchImpl(url, init)
   } catch (err) {
+    if (err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError')) {
+      throw new CliError(
+        `request timed out after ${Math.round(timeoutMs / 1000)}s — the upstream may still be processing; retry or raise --timeout`,
+        'unavailable',
+        true,
+      )
+    }
     throw new CliError(`request failed: ${(err as Error).message}`)
   }
   const text = await res.text()
@@ -108,8 +132,9 @@ function toCliError(body: unknown, status: number): CliError {
     'message' in body &&
     typeof (body as { message: unknown }).message === 'string'
   ) {
-    const b = body as { code: unknown; message: string }
-    return new CliError(b.message, String(b.code))
+    const b = body as { code: unknown; message: string; retryable?: unknown }
+    const retryable = typeof b.retryable === 'boolean' ? b.retryable : undefined
+    return new CliError(b.message, String(b.code), retryable)
   }
   return new CliError(`gateway returned HTTP ${status}`)
 }
