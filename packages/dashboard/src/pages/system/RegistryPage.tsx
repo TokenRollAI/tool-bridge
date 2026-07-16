@@ -516,13 +516,20 @@ function ConfigFact({ label, value }: { label: string; value: string }) {
 
 type MountKind = 'mcp' | 'http' | 'context' | 'skillhub' | 'remote' | 'tool'
 
-/** 挂载表单(按 kind 分支出 NodeConfig;tool 与 context 可引用已注册 plugin 为 provider)。 */
-function MountDialog({
+/**
+ * 挂载表单(按 kind 分支出 NodeConfig;tool 与 context 可引用已注册 plugin 为 provider)。
+ * 可复用:`defaultPath` 预填 path(打开时);`trigger` 自定义触发按钮(缺省回退默认)。
+ */
+export function MountDialog({
   existingPaths,
-  hasUnloadedPaths,
+  hasUnloadedPaths = false,
+  defaultPath,
+  trigger,
 }: {
   existingPaths: string[]
-  hasUnloadedPaths: boolean
+  hasUnloadedPaths?: boolean
+  defaultPath?: string
+  trigger?: ReactNode
 }) {
   const invoke = useInvoke()
   const oauth = useOAuthAuthorize()
@@ -530,7 +537,7 @@ function MountDialog({
   const plugins = usePluginList()
   const [open, setOpen] = useState(false)
   const [kind, setKind] = useState<MountKind>('mcp')
-  const [path, setPath] = useState('')
+  const [path, setPath] = useState(defaultPath ?? '')
   const [description, setDescription] = useState('')
   const [err, setErr] = useState<string | null>(null)
   const normalizedPath = path.trim()
@@ -819,16 +826,22 @@ function MountDialog({
   const changeOpen = (next: boolean) => {
     if (invoke.isPending) return
     setOpen(next)
-    if (next) setErr(null)
+    if (next) {
+      setErr(null)
+      // 每次打开都回到调用方给定的前缀(如节点页「挂载子节点」预填 `skills/`)。
+      if (defaultPath !== undefined) setPath(defaultPath)
+    }
   }
 
   return (
     <Dialog open={open} onOpenChange={changeOpen}>
       <DialogTrigger asChild>
-        <Button size="sm">
-          <Plus />
-          挂载节点
-        </Button>
+        {trigger ?? (
+          <Button size="sm">
+            <Plus />
+            挂载节点
+          </Button>
+        )}
       </DialogTrigger>
       <DialogContent
         className="top-0 right-0 bottom-0 left-auto flex h-dvh max-h-none w-full max-w-full translate-x-0 translate-y-0 flex-col gap-0 rounded-none border-y-0 border-r-0 p-0 sm:max-w-3xl"
