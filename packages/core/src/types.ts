@@ -98,6 +98,7 @@ export type NodeKind =
   | 'device'
   | 'remote'
   | 'tool'
+  | 'skillhub'
 
 export const NODE_KINDS: readonly NodeKind[] = [
   'directory',
@@ -108,6 +109,7 @@ export const NODE_KINDS: readonly NodeKind[] = [
   'device',
   'remote',
   'tool',
+  'skillhub',
 ]
 
 export interface TreeNode {
@@ -213,6 +215,17 @@ export type NodeConfig =
    *  providerConfig:设备自定义节点的转发标记(deviceId+mountPath+cmds,网关代写)。
    *  authRef:上游凭证引用,调用时平台 resolve 后经 X-TB-Upstream-Auth 注入 plugin。 */
   | { kind: 'tool'; provider: string; providerConfig?: Record<string, unknown>; authRef?: string }
+  /** skillhub:与 context 同形的内容型 kind,存 Agent Skill(每 skill = <id>/SKILL.md + 若干文本文件)。
+   *  底层复用 context 的对象存储(provider r2 用平台自带桶,无需外部凭证;s3 需 authRef)。 */
+  | {
+      kind: 'skillhub'
+      provider: string
+      providerConfig?: Record<string, unknown>
+      authRef?: string
+      readOnly?: boolean
+      /** ttl 秒:到期整节点回收(临时 hub)。 */
+      ttl?: number
+    }
 
 export type NodeInput = Omit<TreeNode, 'registeredBy' | 'online' | 'createdAt' | 'updatedAt'>
 

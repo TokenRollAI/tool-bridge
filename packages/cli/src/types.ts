@@ -96,7 +96,7 @@ export interface HttpToolDef {
   effect?: 'read' | 'write' | 'destructive'
 }
 
-/** NodeConfig 按 kind(CLI 构造 mcp/http/remote/context 四形状)。 */
+/** NodeConfig 按 kind(CLI 构造 mcp/http/remote/context/skillhub 形状)。 */
 export type NodeConfig =
   | {
       kind: 'mcp'
@@ -118,6 +118,14 @@ export type NodeConfig =
   | { kind: 'remote'; baseUrl: string; skRef?: string }
   | {
       kind: 'context'
+      provider: string
+      providerConfig?: Record<string, unknown>
+      authRef?: string
+      readOnly?: boolean
+      ttl?: number
+    }
+  | {
+      kind: 'skillhub'
       provider: string
       providerConfig?: Record<string, unknown>
       authRef?: string

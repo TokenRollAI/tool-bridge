@@ -90,6 +90,7 @@ const KIND_TONE: Record<NodeKind, string> = {
   http: 'border-teal-400/25 bg-teal-400/10 text-teal-400',
   remote: 'border-fuchsia-400/25 bg-fuchsia-400/10 text-fuchsia-400',
   context: 'border-emerald-400/25 bg-emerald-400/10 text-emerald-400',
+  skillhub: 'border-indigo-400/25 bg-indigo-400/10 text-indigo-400',
   device: 'border-amber-400/25 bg-amber-400/10 text-amber-400',
   tool: 'border-rose-400/25 bg-rose-400/10 text-rose-400',
 }

@@ -22,7 +22,21 @@
 | `WS /system/device/ws?deviceId=<id>` | 设备通道升级(Bearer SK);mountPath 缺省 `device/<deviceId>` |
 | `GET /ui` | Dashboard 静态资源(免认证,SPA 回退严格限定 `/ui`) |
 
-保留段:`~help / ~skill / ~tree / ~register / ~describe / ~authorize / ~feedback`;保留根:`system`、`ui`(部署配置可追加)。注册 `a/b/c` 时 `a`、`a/b`、`a/b/c` 三级 `~help` 都必须可达(中间 directory 自动物化)。
+保留段:`~help / ~skill / ~tree / ~register / ~describe / ~authorize / ~feedback`;保留根:`system`、`ui`(部署配置可追加)。注册 `a/b/c` 时 `a`、`a/b`、`a/b/c` 三级 `~help` 都必须可达(中间 directory 自动物化)。**注意 `~skill`(保留段,节点使用指南,当前本地 501 占位)与 `skillhub`(节点 kind)是两个正交概念:前者是任意节点的一个 GET 保留路径段,后者是内容型 kind 的判别值,互不冲突。**
+
+## 1b. skillhub kind 数据面(与 context 同构的内容型 kind)
+
+skillhub 存 Agent Skill:每 skill = 对象前缀 `<id>/`,含 `SKILL.md`(Claude 约定 YAML frontmatter,`name`/`description` 必填)+ 若干 UTF-8 文本文件。NodeConfig 与 context 同形(`provider` r2/s3、`providerConfig?`、`authRef?`、`readOnly?`、`ttl?`);底层 ObjectStore/objectProvider 与大对象 `$ref`/`~ref`、etag 版本、`skills/<nodePath>` 前缀隔离全部复用 context。`~describe` capabilities = `['search']`。数据面 `POST /<hub>` `{tool,arguments}`:
+
+| cmd | scope | args → 返回 |
+|---|---|---|
+| `List` | read | `{opts?}` → `Page<SkillSummary{id,name,description,version?,updatedAt}>`(name/description 由服务端解析 SKILL.md frontmatter) |
+| `Get` | read | `{id}` → `SkillDetail{...summary, content(SKILL.md 原文), files:[{path,contentType,size?,version}]}`;`{id,file}` → `SkillFile{path,contentType,size?,version,content}`(大/二进制文件 content = `{$ref}`) |
+| `Search` | read | `{query,opts?}` → `Page<SkillSummary>`(keyword 命中 id/name/description) |
+| `Publish` | write | `{id?,files:[{path,content,contentType?}]}` → `{id,name,description,fileCount}`;整体替换(未列文件删除);校验含 `SKILL.md` 且 frontmatter 有 name+description;缺 → invalid_argument。id 缺省取 frontmatter name 的 slug |
+| `Remove` | write | `{id}` → void;不存在 → not_found |
+
+readOnly 挂载在 `~help` 隐藏 Publish/Remove 并对写动词 403。本期不支持二进制上传(Publish content 须字符串)与 plugin/device provider。
 
 ## 2. 内容协商
 
@@ -78,7 +92,7 @@ cmd resolve-library-id POST /docs/context7/resolve-library-id  ← cmd 行:<name
 
 ## 5. 核心数据模型
 
-- `Node{path,kind,description,config?,virtualize?,registeredBy,online?}`:主键 `path`('/' 分隔,不含保留段);七种 kind(directory/mcp/http/builtin/context/device/remote);`registeredBy=keyId`(device 由网关代写;自动物化中间 directory 记 `system:auto`,引导节点记 `system:boot`)。config 存在时其 kind 必须与节点 kind 一致。
+- `Node{path,kind,description,config?,virtualize?,registeredBy,online?}`:主键 `path`('/' 分隔,不含保留段);八种 kind(directory/mcp/http/builtin/context/device/remote/tool/skillhub);`registeredBy=keyId`(device 由网关代写;自动物化中间 directory 记 `system:auto`,引导节点记 `system:boot`)。config 存在时其 kind 必须与节点 kind 一致。
 - mcp/http NodeConfig 上游认证(语义两 kind 一致,复用 `authHeaderFor`):`authRef` 指 SecretStore 凭证名,注入头名 `authHeader`(默认 `Authorization`)、前缀 `authScheme`(默认 `Bearer`,**空串 = secret 原样注入**)。mcp 另有 `headers?: Record<string,string>`(静态明文请求头,非机密,如上游要求的工具白名单头),每趟上游请求(initialize/list/call)均携带;凭证头覆盖同名静态头。kind:'tool'(plugin 挂载)NodeConfig 也有 `authRef?`:平台调用时 resolve 后经 `X-TB-Upstream-Auth` 注入 plugin(见第 8 节)。
 - `SecretKey{id,hash,owner,scopes,registerPaths?,disabled?,expiresAt?}`:主键 `id`(可公开,审计用);`hash=sha256(明文)`,明文仅签发响应出现一次;`owner: OwnerRef`(`user:`/`agent:`/`device:` 前缀)。
 - `Scope{pattern,actions,effect?}`:动作 = read/write/call/register/admin;**deny 优先 → allow → 无匹配默认拒**;`*`/`**` glob 语义。
@@ -112,7 +126,7 @@ cmd resolve-library-id POST /docs/context7/resolve-library-id  ← cmd 行:<name
 - `pluginToken`(Plugin 回调平台的令牌)注册时签发仅一次。
 - 生命周期:注册时自动探活(`GET {healthPath}`)+ `~describe`/`~help` 契约校验;未声明的可选方法不会被调用;周期探活反映健康态但不自动注销。
 
-## 9. CLI 命令矩阵(20 命令)
+## 9. CLI 命令矩阵(21 命令)
 
 CLI 是纯 API 客户端,无专用端点;全局 `--json` / `--timeout <seconds>`(单请求等待上限,默认 120s;超时报 retryable 错误);读 `TB_BASE_URL`/`TB_SK`,配置 `~/.config/tool-bridge/config.json`(XDG,多 profile)。错误呈现:TBError 的 `retryable:true` 在人类模式加 `(retryable — try again)` 尾注,`--json` 错误对象含 `retryable`(及 call 失败时的结构化 `feedback`)。
 
@@ -127,6 +141,8 @@ CLI 是纯 API 客户端,无专用端点;全局 `--json` / `--timeout <seconds>`
 | `tb server add` / `ls` / `rm` | NodeRegistry(kind=remote 联邦) |
 | `tb ctx ls/cat/put/patch/search` | Context 四动词 + Search |
 | `tb ctx mount` / `unmount` | NodeRegistry(kind=context,provider=r2/s3) |
+| `tb skill ls/get/search/publish/rm` | skillhub 数据面(List/Get/Search/Publish/Remove;`get --out` 落本地目录、`publish <dir>` 递归读文本文件) |
+| `tb skill mount` / `unmount` | NodeRegistry(kind=skillhub,provider 默认 r2 无需凭证 / s3 opt-in) |
 | `tb connect` | 设备长驻(WS 反向注册,partysocket 重连 + 心跳) |
 | `tb device ls` | NodeRegistry `List(prefix="device")` |
 | `tb mount fs` | 设备 fs 挂载 |

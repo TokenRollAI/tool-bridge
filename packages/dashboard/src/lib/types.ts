@@ -10,6 +10,7 @@ export type NodeKind =
   | 'http'
   | 'remote'
   | 'context'
+  | 'skillhub'
   | 'device'
   | 'tool'
 
@@ -162,4 +163,29 @@ export interface ContextEntryMeta {
 /** context 条目(含内容;大对象 content = { $ref })。 */
 export interface ContextEntry extends ContextEntryMeta {
   content: string | unknown
+}
+
+/** skillhub 目录条目摘要(List/Search 返回的 SkillSummary)。 */
+export interface SkillSummary {
+  id: string
+  name: string
+  description: string
+  version?: string
+  updatedAt?: string
+}
+
+/** skillhub 技能内文件(Get{id,file} 返回;大对象 content = { $ref })。 */
+export interface SkillFile {
+  path: string
+  contentType: string
+  size?: number
+  version: string
+  content?: string | { $ref: string }
+}
+
+/** skillhub 技能详情(Get{id} 返回:SKILL.md 正文 + 文件清单)。 */
+export interface SkillDetail extends SkillSummary {
+  /** SKILL.md 正文(YAML frontmatter + Markdown)。 */
+  content: string
+  files: SkillFile[]
 }

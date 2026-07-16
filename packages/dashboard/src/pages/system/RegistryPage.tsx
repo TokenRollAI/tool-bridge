@@ -57,7 +57,16 @@ import { useInvoke, useOAuthAuthorize, usePluginList, useRegistryList } from '@/
 import type { RegistryNode } from '@/lib/types'
 import { cn } from '@/lib/utils'
 
-const KIND_FILTERS = ['all', 'mcp', 'http', 'context', 'remote', 'device', 'tool'] as const
+const KIND_FILTERS = [
+  'all',
+  'mcp',
+  'http',
+  'context',
+  'skillhub',
+  'remote',
+  'device',
+  'tool',
+] as const
 type KindFilter = (typeof KIND_FILTERS)[number]
 
 function configSummary(node: RegistryNode): { target: string; detail: string } {
@@ -83,6 +92,11 @@ function configSummary(node: RegistryNode): { target: string; detail: string } {
       return {
         target: value('provider') || 'context provider',
         detail: config.readOnly ? '只读 namespace' : '可读写 namespace',
+      }
+    case 'skillhub':
+      return {
+        target: value('provider') || 'skill provider',
+        detail: config.readOnly ? '只读技能目录' : '可发布技能目录',
       }
     case 'remote':
       return {
@@ -162,6 +176,7 @@ export function RegistryPage() {
 
   const serviceCount = mounted.filter((node) => ['mcp', 'http', 'tool'].includes(node.kind)).length
   const contextCount = mounted.filter((node) => node.kind === 'context').length
+  const skillhubCount = mounted.filter((node) => node.kind === 'skillhub').length
   const remoteCount = mounted.filter((node) => node.kind === 'remote').length
 
   return (
@@ -188,9 +203,9 @@ export function RegistryPage() {
         />
         <RegistryMetric
           icon={Database}
-          label="Context"
-          value={contextCount}
-          detail="对象与知识空间"
+          label="内容节点"
+          value={contextCount + skillhubCount}
+          detail={`Context ${contextCount} · Skillhub ${skillhubCount}`}
         />
         <RegistryMetric icon={Globe2} label="Remote" value={remoteCount} detail="联邦 HTBP" />
       </div>
@@ -499,7 +514,7 @@ function ConfigFact({ label, value }: { label: string; value: string }) {
   )
 }
 
-type MountKind = 'mcp' | 'http' | 'context' | 'remote' | 'tool'
+type MountKind = 'mcp' | 'http' | 'context' | 'skillhub' | 'remote' | 'tool'
 
 /** 挂载表单(按 kind 分支出 NodeConfig;tool 与 context 可引用已注册 plugin 为 provider)。 */
 function MountDialog({
@@ -553,6 +568,8 @@ function MountDialog({
   const [ctxAuthRef, setCtxAuthRef] = useState('')
   const [readOnly, setReadOnly] = useState(false)
   const [ttl, setTtl] = useState('')
+  // skillhub(provider = r2 | s3;与 context 同形,复用 ctxPrefix/s3*/ctxAuthRef/readOnly/ttl)
+  const [skillProvider, setSkillProvider] = useState('r2')
   // remote
   const [baseUrl, setBaseUrl] = useState('')
   const [skRef, setSkRef] = useState('')
@@ -683,6 +700,34 @@ function MountDialog({
           kind: 'context',
           provider,
           ...(ctxAuthRef.trim() ? { authRef: ctxAuthRef.trim() } : {}),
+          ...(readOnly ? { readOnly: true } : {}),
+          ...(ttlSeconds !== undefined ? { ttl: ttlSeconds } : {}),
+        }
+      }
+      case 'skillhub': {
+        // skillhub 与 context 配置形状一致(provider r2|s3),复用同一组表单状态。
+        const ttlSeconds = parseTtl()
+        if (skillProvider === 's3') {
+          if (!s3Endpoint.trim() || !s3Bucket.trim()) throw new Error('s3 需要 endpoint 与 bucket')
+          if (!ctxAuthRef.trim()) throw new Error('s3 需要 authRef(先在「凭证保管」set)')
+          return {
+            kind: 'skillhub',
+            provider: 's3',
+            providerConfig: {
+              endpoint: s3Endpoint.trim(),
+              bucket: s3Bucket.trim(),
+              ...(s3Region.trim() ? { region: s3Region.trim() } : {}),
+              ...(ctxPrefix.trim() ? { prefix: ctxPrefix.trim() } : {}),
+            },
+            authRef: ctxAuthRef.trim(),
+            ...(readOnly ? { readOnly: true } : {}),
+            ...(ttlSeconds !== undefined ? { ttl: ttlSeconds } : {}),
+          }
+        }
+        return {
+          kind: 'skillhub',
+          provider: 'r2',
+          ...(ctxPrefix.trim() ? { providerConfig: { prefix: ctxPrefix.trim() } } : {}),
           ...(readOnly ? { readOnly: true } : {}),
           ...(ttlSeconds !== undefined ? { ttl: ttlSeconds } : {}),
         }
@@ -822,6 +867,9 @@ function MountDialog({
                       </SelectItem>
                       <SelectItem value="context" className="font-mono text-xs">
                         context — 存储 namespace
+                      </SelectItem>
+                      <SelectItem value="skillhub" className="font-mono text-xs">
+                        skillhub — Agent 技能目录
                       </SelectItem>
                       <SelectItem value="remote" className="font-mono text-xs">
                         remote — 联邦 HTBP 服务
@@ -1236,6 +1284,116 @@ function MountDialog({
                         onCheckedChange={(v) => setReadOnly(v === true)}
                       />
                       readOnly(拒绝 Write/Update/Delete)
+                    </label>
+                  </div>
+                </>
+              )}
+
+              {kind === 'skillhub' && (
+                <>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="grid gap-1.5">
+                      <Label className="text-xs">provider</Label>
+                      <Select value={skillProvider} onValueChange={setSkillProvider}>
+                        <SelectTrigger className="font-mono text-xs">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="r2" className="font-mono text-xs">
+                            r2(实例自带桶)
+                          </SelectItem>
+                          <SelectItem value="s3" className="font-mono text-xs">
+                            s3(外部 S3 兼容端点)
+                          </SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="grid gap-1.5">
+                      <Label htmlFor="skill-prefix" className="text-xs">
+                        key 前缀(可空)
+                      </Label>
+                      <Input
+                        id="skill-prefix"
+                        className="font-mono text-xs"
+                        value={ctxPrefix}
+                        onChange={(e) => setCtxPrefix(e.target.value)}
+                      />
+                    </div>
+                  </div>
+                  {skillProvider === 's3' && (
+                    <>
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        <div className="grid gap-1.5">
+                          <Label htmlFor="skill-s3-endpoint" className="text-xs">
+                            endpoint *
+                          </Label>
+                          <Input
+                            id="skill-s3-endpoint"
+                            className="font-mono text-xs"
+                            placeholder="https://….r2.cloudflarestorage.com"
+                            value={s3Endpoint}
+                            onChange={(e) => setS3Endpoint(e.target.value)}
+                          />
+                        </div>
+                        <div className="grid gap-1.5">
+                          <Label htmlFor="skill-s3-bucket" className="text-xs">
+                            bucket *
+                          </Label>
+                          <Input
+                            id="skill-s3-bucket"
+                            className="font-mono text-xs"
+                            value={s3Bucket}
+                            onChange={(e) => setS3Bucket(e.target.value)}
+                          />
+                        </div>
+                      </div>
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        <div className="grid gap-1.5">
+                          <Label htmlFor="skill-s3-region" className="text-xs">
+                            region(可空,缺省 auto)
+                          </Label>
+                          <Input
+                            id="skill-s3-region"
+                            className="font-mono text-xs"
+                            value={s3Region}
+                            onChange={(e) => setS3Region(e.target.value)}
+                          />
+                        </div>
+                        <div className="grid gap-1.5">
+                          <Label htmlFor="skill-auth" className="text-xs">
+                            authRef *(凭证保管里的名字)
+                          </Label>
+                          <Input
+                            id="skill-auth"
+                            className="font-mono text-xs"
+                            placeholder="s3-main"
+                            value={ctxAuthRef}
+                            onChange={(e) => setCtxAuthRef(e.target.value)}
+                          />
+                        </div>
+                      </div>
+                    </>
+                  )}
+                  <div className="grid gap-3 sm:grid-cols-2 sm:items-end">
+                    <div className="grid gap-1.5">
+                      <Label htmlFor="skill-ttl" className="text-xs">
+                        ttl 秒(可空;到期整节点回收)
+                      </Label>
+                      <Input
+                        id="skill-ttl"
+                        className="font-mono text-xs"
+                        placeholder="86400"
+                        value={ttl}
+                        onChange={(e) => setTtl(e.target.value)}
+                      />
+                    </div>
+                    {/* biome-ignore lint/a11y/noLabelWithoutControl: Radix Checkbox 是 label 内可交互控件,规则只识别原生 input */}
+                    <label className="flex items-center gap-2 pb-2 text-xs">
+                      <Checkbox
+                        checked={readOnly}
+                        onCheckedChange={(v) => setReadOnly(v === true)}
+                      />
+                      readOnly(隐藏 Publish/Remove)
                     </label>
                   </div>
                 </>
