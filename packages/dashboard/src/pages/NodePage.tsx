@@ -8,6 +8,7 @@ import { CommandWorkspace } from '@/components/node/CommandWorkspace'
 import { ContextBrowser } from '@/components/node/ContextBrowser'
 import { FeedbackPanel } from '@/components/node/FeedbackPanel'
 import { NoteCard } from '@/components/node/NoteCard'
+import { SkillBrowser } from '@/components/node/SkillBrowser'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import type { ApiError } from '@/lib/api'
@@ -51,6 +52,9 @@ export function NodePage() {
 
   const { node, cmds, children, note, feedback } = help.data
   const isContext = node.kind === 'context'
+  const isSkillhub = node.kind === 'skillhub'
+  // context / skillhub 均是内容服务节点,默认落「浏览」tab(条目 / 技能目录)。
+  const hasBrowser = isContext || isSkillhub
   const { icon: NodeIcon, className: nodeIconClass } = KIND_ICON[node.kind] ?? KIND_ICON.directory
   return (
     <div className="mx-auto w-full max-w-[100rem] px-4 py-5 sm:px-6 sm:py-7 lg:px-8 lg:py-8 xl:px-10">
@@ -93,13 +97,13 @@ export function NodePage() {
         </div>
       </section>
 
-      {/* key=path:切换节点时重置 tab 选择(context 节点默认落「条目」) */}
-      <Tabs key={path} defaultValue={isContext ? 'browse' : 'invoke'} className="mt-6 gap-0">
+      {/* key=path:切换节点时重置 tab 选择(context / skillhub 节点默认落「浏览」) */}
+      <Tabs key={path} defaultValue={hasBrowser ? 'browse' : 'invoke'} className="mt-6 gap-0">
         <div className="-mx-1 overflow-x-auto border-b px-1">
           <TabsList variant="line" className="h-11 min-w-max gap-5 p-0">
-            {isContext && (
+            {hasBrowser && (
               <TabsTrigger value="browse" className="px-0 text-xs">
-                条目
+                {isSkillhub ? '技能目录' : '条目'}
               </TabsTrigger>
             )}
             <TabsTrigger value="invoke" className="px-0 text-xs">
@@ -116,9 +120,13 @@ export function NodePage() {
           </TabsList>
         </div>
 
-        {isContext && (
+        {hasBrowser && (
           <TabsContent value="browse" className="mt-4">
-            <ContextBrowser path={path} cmds={cmds} />
+            {isSkillhub ? (
+              <SkillBrowser path={path} cmds={cmds} />
+            ) : (
+              <ContextBrowser path={path} cmds={cmds} />
+            )}
           </TabsContent>
         )}
 

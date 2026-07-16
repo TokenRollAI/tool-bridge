@@ -28,6 +28,9 @@ import type {
   PluginManifest,
   RegistryNode,
   SecretKeyInfo,
+  SkillDetail,
+  SkillFile,
+  SkillSummary,
 } from './types'
 
 /** queryKey 前缀含 profile 标识:切换档案后互不串缓存。 */
@@ -289,5 +292,56 @@ export function useCtxEntry(nodePath: string, entryPath: string | null) {
       return r.json as ContextEntry
     },
     enabled: entryPath !== null,
+  })
+}
+
+// ---- skillhub 浏览器(技能目录枚举/读取;与 CLI `tb skill ls|cat` 同一数据面)----
+
+/**
+ * skillhub 技能分页枚举:query 非空走 Search(对等 `tb skill search`),否则走 List。
+ * cursor 分页交给 useInfiniteQuery(Page 语义)。
+ */
+export function useSkills(nodePath: string, query: string) {
+  const conn = useConn()
+  const base = useKeyBase()
+  return useInfiniteQuery({
+    queryKey: [...base, 'skills', nodePath, query],
+    queryFn: async ({ pageParam }) => {
+      const opts = pageParam ? { cursor: pageParam } : {}
+      const r = query
+        ? await invoke(conn, nodePath, 'Search', { query, opts })
+        : await invoke(conn, nodePath, 'List', { opts })
+      return r.json as Page<SkillSummary>
+    },
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (last) => last.cursor,
+  })
+}
+
+/** 单个技能读取(选中技能后取 SKILL.md 正文 + 文件清单)。 */
+export function useSkill(nodePath: string, id: string | null) {
+  const conn = useConn()
+  const base = useKeyBase()
+  return useQuery({
+    queryKey: [...base, 'skill', nodePath, id ?? ''],
+    queryFn: async () => {
+      const r = await invoke(conn, nodePath, 'Get', { id })
+      return r.json as SkillDetail
+    },
+    enabled: id !== null,
+  })
+}
+
+/** 技能内单文件读取(点击文件时按需取;大对象 content = { $ref })。 */
+export function useSkillFile(nodePath: string, id: string | null, file: string | null) {
+  const conn = useConn()
+  const base = useKeyBase()
+  return useQuery({
+    queryKey: [...base, 'skill-file', nodePath, id ?? '', file ?? ''],
+    queryFn: async () => {
+      const r = await invoke(conn, nodePath, 'Get', { id, file })
+      return r.json as SkillFile
+    },
+    enabled: id !== null && file !== null,
   })
 }

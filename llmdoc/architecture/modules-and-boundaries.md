@@ -5,7 +5,7 @@
 ## 全局模式
 
 - 每层由**纯接口**定义,层间只经接口交互,无旁路。
-- **单一 HTBP 树**:所有能力都是树上节点(七种 kind:directory/mcp/http/builtin/context/device/remote)。
+- **单一 HTBP 树**:所有能力都是树上节点(八种 kind:directory/mcp/http/builtin/context/device/remote/tool/skillhub)。
 - **统一注册面**:一切"挂上树"的动作最终落 `NodeRegistry.Write`——tool/context/remote 直接写,device 由网关代写(`registeredBy` 记 device),Plugin 注册后经 NodeRegistry 引用挂载;context 无独立 Registry。
 - **`Authorizer.Check` 是唯一权限判定入口**:所有调用点都过它,任何模块不得自行判权;PEP 在网关分发前的中间件。
 - **凭证不出网关**:上游凭证经 `tb secret set` 进 SecretStore(AES-256-GCM,只写不读),节点配置只存 `authRef`/`skRef` 引用名;Plugin 上游凭证同此语义——存平台 SecretStore(kind:'tool' config `authRef`),调用时 resolve 后经 `X-TB-Upstream-Auth` 注入,plugin 不自持凭证(泄漏 PLUGIN_TOKEN 拿不到凭证,轮换免重部署)。
@@ -18,6 +18,7 @@
 | HTBP Tree(核心枢纽) | 节点注册表、路由、`~help`/`~skill`/`~tree`/`~describe`、内容协商、调用分发 | `tree/` + `htbp/` | gateway `tbApp.ts`(宿主中立 createTbApp)+ `kvStateStore.ts` |
 | Tool Layer | mcp/http/builtin Provider 聚合与调用代理、虚拟化、remote 联邦 | `tool/` | gateway `providers/mcp|http|remote|toolCache` |
 | Context Layer | 多来源上下文统一读写检索面(四动词 + Search + `$ref`) | `context/` | gateway `providers/r2Object|s3Object|s3Sign` + `refToken.ts` |
+| Skillhub Layer | Agent Skill 仓库(每 skill = `<id>/SKILL.md` + 文本文件;List/Get/Search/Publish/Remove) | `skillhub/`(frontmatter 解析 + provider,复用 context 的 ObjectStore/objectProvider) | 复用 context 的 gateway providers(r2/s3);网关 `tbApp.ts` 装配 `skillhubProviderFor` 落 `skills/<path>` 前缀 |
 | Device Gateway | 设备 WS 反向注册 + 调用转发 | `device/`(帧/状态机/shell 白名单/设备侧 client) | **协议行为单一真源:gateway `deviceHello.ts`(processDeviceHello,宿主中立)**;两个宿主胶水:gateway `deviceSession.ts`(DO,WS hibernation)与 server `deviceHub.ts`(Node ws);cli `deviceRuntime.ts`;core `node/`(FsObjectStore/shellExecutor) |
 | Auth(横切) | SK 签发/作用域/访问判定/SecretStore | `auth/` + `secret/` | gateway 认证中间件;SK 哈希与密文存 StateStore |
 | builtin 管理面 | `system/*` 七模块:sk / secret / registry / status / plugin / federation / annotation | `builtin/` | 经 gateway dispatch |

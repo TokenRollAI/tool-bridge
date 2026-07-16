@@ -17,6 +17,7 @@
 | `feedback/` | Agent 反馈存储 | `store.ts`(`FeedbackStore`:`feedback:<path>` 单 key 数组;submit/vote/get/listViews/remove + `helpItems` 排序/阈值/top-5 唯一真源;owner 投票去重、每 path 每 owner ≤10 防刷;消费面是网关 `~feedback` 保留段路由) |
 | `tool/` | 工具层纯逻辑 | `httpTool.ts`(HttpToolDef 拼装、`{param}` 占位)、`virtualize.ts`(prefix/rename/hide/describe)、`mcpSchema.ts`(mcp schema→HelpModel)、`remote.ts`(路径改写/白名单)、`via.ts`(X-TB-Via 环检测)、`upstreamError.ts`(上游错误归一) |
 | `context/` | Context 层纯逻辑 | `types.ts`(ContextEntry)、`objectStore.ts`(ObjectStore 接口 + Memory 实现)、`objectProvider.ts`(四动词语义)、`path.ts`(穿越防护)、`ttl.ts`(懒回收)、`help.ts`(静态 cmd 表) |
+| `skillhub/` | Skillhub 层纯逻辑(内容型 kind,复用 context 存储) | `frontmatter.ts`(SKILL.md YAML frontmatter 最小解析,无 yaml 依赖)、`provider.ts`(`createSkillhubProvider`:以 `<id>/` 分组 + frontmatter 目录;List/Get/GetFile/Search/Publish/Remove;单文件 inline/`$ref` 复用 objectProvider)、`help.ts`(静态 cmd 表 + `SKILLHUB_CAPABILITIES`) |
 | `device/` | 设备通道纯逻辑 | `frames.ts`(`DeviceFrame` 编解码;ping/pong 是稳定字面量,供 DO autoResponse 精确匹配)、`session.ts`(网关侧状态机 `DeviceGatewaySession`,含 `restoreReady` 休眠恢复)、`client.ts`(设备侧 `DeviceClient`,重连后自动重发 hello)、`shellAllow.ts`(shell 白名单匹配)、`helpModel.ts` |
 | `plugin/` | Plugin 纯逻辑 | `manifest.ts`(zod 校验)、`envelope.ts`(X-TB-Context 信封编解码)、`dedupe.ts`(`RequestDedupe`)、`contract.ts`(契约校验) |
 | `node/` | `./node` 子导出(唯一含 Node API) | `fsObjectStore.ts`(FsObjectStore,realpath 防逃逸)、`shellExecutor.ts`(有界缓冲、超时后等 exit 结算) |
@@ -42,7 +43,7 @@ exports `.` / `./tbApp` / `./bootstrap` / `./deviceHello`(供 SDK 与 server 复
 ## packages/cli — `tb`(npm 发布物)
 
 - 框架 commander,**严格解析是刻意的**(未知 flag/子命令、flag 缺值、多余 positional 一律报错并带拼写建议——防拼错 flag 被静默吞掉导致 shell 白名单等权限误配)。
-- `index.ts` 薄入口(仅 parseAsync);`program.ts`(`buildProgram()` 装配 20 个命令,`.helpCommand(false)` 保留业务 `tb help [path]`);`commands/` 每命令一文件、导出工厂函数 `xCommand(): Command`(status/login/whoami/use/sk/secret/federation/note/feedback/ls/tree/help/call/tool/server/ctx/connect/device/mount/plugin);`--no-shell` 用 commander 原生否定(`opts.shell === false`)。
+- `index.ts` 薄入口(仅 parseAsync);`program.ts`(`buildProgram()` 装配 21 个命令,`.helpCommand(false)` 保留业务 `tb help [path]`);`commands/` 每命令一文件、导出工厂函数 `xCommand(): Command`(status/login/whoami/use/sk/secret/federation/note/feedback/ls/tree/help/call/tool/server/ctx/skill/connect/device/mount/plugin);`--no-shell` 用 commander 原生否定(`opts.shell === false`)。`skill`(skillhub 命令族)镜像 `ctx`:mount/unmount 走 `~register`/`system/registry`,数据面 ls/get/search/publish/rm 走 `{tool,arguments}` 信封;`publish <dir>` 递归读本地文本文件、`get --out <dir>` 逐文件落盘(遇 `$ref` 提示)。
 - 横切:`config.ts`(XDG 配置、多 profile)、`http.ts`(API 客户端)、`output.ts`(`--json`)、`markdown.ts`(`printMarkdown`:TTY → marked-terminal ANSI 渲染,管道/NO_COLOR → 裸 markdown)、`args.ts`(`withGlobalOpts` 挂全局 --json/--base-url/--sk、`collect` repeatable 收集器、`resolveTarget({baseUrl, sk})` camelCase)、`scope.ts`、`registry.ts`(节点管理助手,rm 前 kind 校验)、`deviceRuntime.ts`(`tb connect` 长驻:partysocket 重连 + 30s 心跳判死链)、`deviceId.ts`。
 - 测试基建:`test/cliHarness.ts`(runCli/parseError;exitOverride 须逐层应用,commander 不向子命令继承)+ `test/strictParsing.test.ts`(拼错 flag 事故回归 + 全部叶子命令的未知 flag 矩阵)。
 

@@ -15,6 +15,7 @@ import { pluginCommand } from './commands/plugin'
 import { secretCommand } from './commands/secret'
 import { serverCommand } from './commands/server'
 import { skCommand } from './commands/sk'
+import { skillCommand } from './commands/skillhub'
 import { statusCommand } from './commands/status'
 import { toolCommand } from './commands/tool'
 import { treeCommand } from './commands/tree'
@@ -30,6 +31,7 @@ import { whoamiCommand } from './commands/whoami'
  * - feedback ls/get/submit/vote/rm:Agent 使用反馈(头部条目进 ~help)。
  * - tool mount/rm、server add/ls/rm、call:挂载工具源与数据面调用。
  * - ctx ls/cat/put/patch/search/mount/unmount:Context Layer。
+ * - skill ls/get/search/publish/rm/mount/unmount:skillhub(Agent Skill 仓库)。
  * - connect、device ls、mount fs:设备反向注册。
  * - plugin register/list/get/health/rm:插件注册表。
  *
@@ -69,6 +71,7 @@ Agent feedback — every path carries experience from other agents:
   program.addCommand(serverCommand())
   program.addCommand(callCommand())
   program.addCommand(ctxCommand())
+  program.addCommand(skillCommand())
   program.addCommand(connectCommand())
   program.addCommand(deviceCommand())
   program.addCommand(mountCommand())

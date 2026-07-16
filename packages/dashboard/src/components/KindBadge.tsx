@@ -1,5 +1,6 @@
 import {
   Blocks,
+  BookMarked,
   Cpu,
   Database,
   Folder,
@@ -20,6 +21,7 @@ const KIND_STYLE: Record<NodeKind, string> = {
   http: 'text-teal-400/90 border-teal-400/30',
   remote: 'text-fuchsia-400/90 border-fuchsia-400/30',
   context: 'text-emerald-400/90 border-emerald-400/30',
+  skillhub: 'text-indigo-400/90 border-indigo-400/30',
   device: 'text-amber-400/90 border-amber-400/30',
   tool: 'text-rose-400/90 border-rose-400/30',
 }
@@ -32,6 +34,7 @@ export const KIND_ICON: Record<NodeKind, { icon: LucideIcon; className: string }
   http: { icon: Globe, className: 'text-teal-400/80' },
   remote: { icon: Waypoints, className: 'text-fuchsia-400/80' },
   context: { icon: Database, className: 'text-emerald-400/80' },
+  skillhub: { icon: BookMarked, className: 'text-indigo-400/80' },
   device: { icon: Cpu, className: 'text-amber-400/80' },
   tool: { icon: Wrench, className: 'text-rose-400/80' },
 }

@@ -17,6 +17,7 @@ import {
   contextScopeForCmd,
   createBuiltins,
   createObjectContextProvider,
+  createSkillhubProvider,
   type DeviceCallResult,
   deviceDirectoryHelpModel,
   deviceFsHelpModel,
@@ -48,7 +49,12 @@ import {
   resolveUpstreamTool,
   type SearchOptions,
   type SecretStoreImpl,
+  SKILLHUB_CAPABILITIES,
+  type SkillhubProvider,
+  type SkillPublishFile,
   type StateStore,
+  skillhubHelpModel,
+  skillhubScopeForCmd,
   TBError,
   type TBErrorBody,
   type ToolSpec,
@@ -305,12 +311,17 @@ export function createTbApp(deps: TbAppDeps): Hono<{ Variables: Vars }> {
       } catch {
         throw TBError.notFound('not found')
       }
-      // 签发后节点可能被卸载/换 kind/ttl 到期——须仍是存活的 context 节点。
-      if (node.kind !== 'context' || node.config?.kind !== 'context') {
+      // 签发后节点可能被卸载/换 kind/ttl 到期——须仍是存活的 context/skillhub 对象节点。
+      const cfg = node.config
+      if (
+        (node.kind !== 'context' && node.kind !== 'skillhub') ||
+        cfg === undefined ||
+        cfg.kind !== node.kind
+      ) {
         throw TBError.notFound('not found')
       }
-      await assertContextAlive(node, node.config, registry)
-      const objects = await contextObjectStoreFor(node.config, deps)
+      await assertContextAlive(node, cfg, registry)
+      const objects = await contextObjectStoreFor(cfg, deps)
       const got = await objects.get(payload.k)
       if (got === null) throw TBError.notFound('not found')
       // core 的最小流形状与全局 ReadableStream 结构兼容(Workers/Node 皆然)。
@@ -736,6 +747,35 @@ export function createTbApp(deps: TbAppDeps): Hono<{ Variables: Vars }> {
       return renderResult(result, negotiate(c.req.header('accept')))
     }
 
+    // --- skillhub 数据面:List/Get/Search(read)+ Publish/Remove(write)。 ---
+    if (node.kind === 'skillhub' && node.config?.kind === 'skillhub') {
+      const cfg = node.config
+      // ttl 懒回收:POST 命中即判,过期删节点并 404。
+      await assertContextAlive(node, cfg, registry)
+      const body = (await c.req.json().catch(() => null)) as {
+        tool?: unknown
+        arguments?: unknown
+      } | null
+      if (!body || typeof body.tool !== 'string') {
+        throw new TBError('invalid_argument', 'body must be {tool, arguments}')
+      }
+      const scope = skillhubScopeForCmd(body.tool)
+      if (scope === null) {
+        throw new TBError('invalid_argument', `unknown cmd '${body.tool}' on '${node.path}'`)
+      }
+      // 节点可见性(read→404)已统一判过;这里按 cmd 的 read/write scope 判 403。
+      if (!check(ctx, node.path, scope).allow) {
+        throw new TBError('permission_denied', `no scope grants '${scope}' on '${node.path}'`)
+      }
+      if (cfg.readOnly === true && scope === 'write') {
+        throw new TBError('permission_denied', `readOnly 挂载拒绝 '${body.tool}'`)
+      }
+      const args = (body.arguments ?? {}) as Record<string, unknown>
+      const provider = await skillhubProviderFor(node, cfg, deps, c.req.url)
+      const result = await dispatchSkillhubCmd(provider, body.tool, args)
+      return renderResult(result, negotiate(c.req.header('accept')))
+    }
+
     if (node.kind !== 'builtin' || node.config?.kind !== 'builtin') {
       throw TBError.unimplemented(`kind '${node.kind}' not callable`)
     }
@@ -787,6 +827,8 @@ export function createTbApp(deps: TbAppDeps): Hono<{ Variables: Vars }> {
       )
       // context 配置校验 + s3 连通探测:探测出站网络,须在权限判定之后。
       await assertContextConfig(cfgPatch, deps)
+      // skillhub 配置校验(provider r2/s3;s3 连通探测)。
+      await assertSkillhubConfig(cfgPatch, deps)
       // kind:'tool' 挂载校验:provider 必须是已注册且启用的 tool-provider plugin。
       await assertToolConfig(cfgPatch, store)
       registryTarget = targetPath
@@ -850,6 +892,13 @@ export function createTbApp(deps: TbAppDeps): Hono<{ Variables: Vars }> {
       return new Response(JSON.stringify({ kind: 'context', capabilities }), {
         headers: { 'content-type': contentTypeFor('json') },
       })
+    }
+    if (node.kind === 'skillhub' && node.config?.kind === 'skillhub') {
+      await assertContextAlive(node, node.config, registry)
+      return new Response(
+        JSON.stringify({ kind: 'skillhub', capabilities: SKILLHUB_CAPABILITIES }),
+        { headers: { 'content-type': contentTypeFor('json') } },
+      )
     }
     // 无可选能力的节点(其他 kind)→ 404。
     throw TBError.notFound(`no capabilities for kind '${node.kind}'`)
@@ -1000,6 +1049,8 @@ export function createTbApp(deps: TbAppDeps): Hono<{ Variables: Vars }> {
     await assertRegisterPath(registry, ctx, body.path, 'write', deps)
     // context 配置校验 + s3 连通探测:探测出站网络,须在权限判定之后。
     await assertContextConfig(body.config, deps)
+    // skillhub 配置校验(provider r2/s3;s3 连通探测)。
+    await assertSkillhubConfig(body.config, deps)
     // kind:'tool' 挂载校验:provider 必须是已注册且启用的 tool-provider plugin。
     await assertToolConfig(body.config, store)
     const now = new Date().toISOString()
@@ -1296,6 +1347,10 @@ async function helpModelFor(
       return { ...model, cmds: model.cmds.filter((c) => core.has(c.name) || declared.has(c.name)) }
     }
     return contextHelpModel(node, { readOnly: node.config.readOnly ?? false })
+  }
+  if (node.kind === 'skillhub' && node.config?.kind === 'skillhub') {
+    await assertContextAlive(node, node.config, registry)
+    return skillhubHelpModel(node, { readOnly: node.config.readOnly ?? false })
   }
   throw TBError.unimplemented(`~help for kind '${node.kind}' not implemented yet`)
 }
@@ -1631,6 +1686,9 @@ function assertNoDeviceMarker(config: unknown): void {
 // ---------- context 节点 ----------
 
 type ContextConfig = Extract<NodeConfig, { kind: 'context' }>
+type SkillhubConfig = Extract<NodeConfig, { kind: 'skillhub' }>
+/** context 与 skillhub 共用对象存储装配(provider/providerConfig/authRef 同形)。 */
+type ObjectNodeConfig = ContextConfig | SkillhubConfig
 
 /** S3 类凭证值形状:JSON {"accessKeyId","secretAccessKey"};解析失败不回显值。 */
 export function parseS3Credentials(
@@ -1652,7 +1710,10 @@ export function parseS3Credentials(
 }
 
 /** s3 provider 的 store 构造参数:providerConfig.endpoint/bucket + authRef 解析(均必填)。 */
-async function s3StoreConfig(cfg: ContextConfig, secrets: SecretStoreImpl): Promise<S3StoreConfig> {
+async function s3StoreConfig(
+  cfg: ObjectNodeConfig,
+  secrets: SecretStoreImpl,
+): Promise<S3StoreConfig> {
   const pc = (cfg.providerConfig ?? {}) as {
     endpoint?: unknown
     bucket?: unknown
@@ -1684,7 +1745,7 @@ function contextKeyPrefix(cfg: ContextConfig, nodePath: TreePath): string {
 }
 
 /** 按 config.provider 构造底层 ObjectStore('r2' = 宿主注入的平台对象存储)。 */
-async function contextObjectStoreFor(cfg: ContextConfig, deps: TbAppDeps): Promise<ObjectStore> {
+async function contextObjectStoreFor(cfg: ObjectNodeConfig, deps: TbAppDeps): Promise<ObjectStore> {
   if (cfg.provider === 'r2') {
     if (deps.objects === undefined) {
       throw new TBError('unavailable', 'object store not configured(objects 未注入)', {
@@ -1733,6 +1794,74 @@ async function contextProviderFor(
   return createObjectContextProvider(objects, opts)
 }
 
+/** skillhub 的 keyPrefix:共桶隔离,r2 默认 `skills/<nodePath>`,s3 默认整桶。 */
+function skillhubKeyPrefix(cfg: SkillhubConfig, nodePath: TreePath): string {
+  const prefix = (cfg.providerConfig as { prefix?: unknown } | undefined)?.prefix
+  if (typeof prefix === 'string') return prefix
+  return cfg.provider === 'r2' ? `skills/${nodePath}` : ''
+}
+
+/**
+ * skillhub 节点的 SkillhubProvider 装配:底层对象存储与 $ref 中转 URL 工厂与 context 同源,
+ * 只是 keyPrefix 落在 `skills/<path>` 且叠加 skill 单位语义(core skillhub/provider)。
+ */
+async function skillhubProviderFor(
+  node: TreeNode,
+  cfg: SkillhubConfig,
+  deps: TbAppDeps,
+  requestUrl: string,
+): Promise<SkillhubProvider> {
+  const objects = await contextObjectStoreFor(cfg, deps)
+  const opts: Parameters<typeof createSkillhubProvider>[1] = {
+    nsPath: node.path,
+    keyPrefix: skillhubKeyPrefix(cfg, node.path),
+    readOnly: cfg.readOnly ?? false,
+  }
+  if (deps.refThresholdBytes !== undefined) opts.refThresholdBytes = deps.refThresholdBytes
+  if (deps.refTtlSec !== undefined) opts.presignTtlSec = deps.refTtlSec
+  const encKey = deps.encryptionKey
+  if (encKey !== undefined) {
+    const origin = new URL(requestUrl).origin
+    const relayTtlSec = deps.refTtlSec ?? PRESIGN_TTL_SEC_DEFAULT
+    opts.relayRefUrl = async (key) => {
+      const exp = Math.floor(Date.now() / 1000) + relayTtlSec
+      return `${origin}/~ref/${await signRefToken({ p: node.path, k: key, exp }, encKey)}`
+    }
+  }
+  return createSkillhubProvider(objects, opts)
+}
+
+/** 数据面 {tool} → SkillhubProvider 方法派发;入参精细校验由 provider 承担。 */
+async function dispatchSkillhubCmd(
+  provider: SkillhubProvider,
+  tool: string,
+  args: Record<string, unknown>,
+): Promise<unknown> {
+  switch (tool) {
+    case 'List':
+      return await provider.List(args.opts as ListOptions | undefined)
+    case 'Get':
+      return typeof args.file === 'string'
+        ? await provider.GetFile(args.id as string, args.file)
+        : await provider.Get(args.id as string)
+    case 'Search':
+      return await provider.Search(args.query as string, args.opts as ListOptions | undefined)
+    case 'Publish':
+      if (!Array.isArray(args.files)) {
+        throw new TBError('invalid_argument', "Publish 需要数组 'files'")
+      }
+      return await provider.Publish({
+        ...(typeof args.id === 'string' ? { id: args.id } : {}),
+        files: args.files as SkillPublishFile[],
+      })
+    case 'Remove':
+      return await provider.Remove(args.id as string)
+    default:
+      // skillhubScopeForCmd 已挡未知 cmd;此处为类型完备性兜底。
+      throw new TBError('invalid_argument', `unknown cmd '${tool}'`)
+  }
+}
+
 /**
  * 数据面 {tool} → ContextProvider 方法派发;入参精细校验由 provider 承担。
  * 可选方法(Search/Delete)未实现(plugin 未在 capabilities 声明)→ 按 unknown cmd 拒
@@ -1774,10 +1903,10 @@ export async function dispatchContextCmd(
   }
 }
 
-/** ttl 懒回收单点判定:过期 → 删节点 + not_found;未过期 → 通过。 */
+/** ttl 懒回收单点判定:过期 → 删节点 + not_found;未过期 → 通过。context/skillhub 共用。 */
 async function assertContextAlive(
   node: TreeNode,
-  cfg: ContextConfig,
+  cfg: { ttl?: number },
   registry: NodeRegistryStore,
 ): Promise<void> {
   if (!isContextExpired(node.createdAt, cfg.ttl, Date.now())) return
@@ -1785,7 +1914,7 @@ async function assertContextAlive(
   throw TBError.notFound('not found')
 }
 
-/** 列表面(~tree/目录 ~help)的 ttl 懒回收:过期 context 节点剔除并删除(量少,逐个 await)。 */
+/** 列表面(~tree/目录 ~help)的 ttl 懒回收:过期 context/skillhub 节点剔除并删除。 */
 async function pruneExpiredContext(
   nodes: TreeNode[],
   registry: NodeRegistryStore,
@@ -1793,10 +1922,11 @@ async function pruneExpiredContext(
   const now = Date.now()
   const alive: TreeNode[] = []
   for (const n of nodes) {
+    const cfg = n.config
     if (
-      n.kind === 'context' &&
-      n.config?.kind === 'context' &&
-      isContextExpired(n.createdAt, n.config.ttl, now)
+      (n.kind === 'context' || n.kind === 'skillhub') &&
+      cfg?.kind === n.kind &&
+      isContextExpired(n.createdAt, (cfg as { ttl?: number }).ttl, now)
     ) {
       await registry.delete(n.path)
       continue
@@ -1830,6 +1960,33 @@ async function assertContextConfig(config: unknown, deps: TbAppDeps): Promise<vo
     })
     try {
       await store.list(contextKeyPrefix(cfg, ''), { limit: 1 })
+    } catch (err) {
+      const detail = isTBError(err) ? err.message : String(err)
+      throw new TBError('unavailable', `s3 连通探测失败:${detail}`, { retryable: true })
+    }
+  }
+}
+
+/**
+ * 注册/更新 skillhub 节点时的配置校验:provider 仅 r2|s3(本期不支持 plugin/device);
+ * s3 做一次浅 list 连通探测(与 context 同则),r2 用平台桶不探测。
+ */
+async function assertSkillhubConfig(config: unknown, deps: TbAppDeps): Promise<void> {
+  if (config === null || typeof config !== 'object') return
+  if ((config as { kind?: unknown }).kind !== 'skillhub') return
+  const cfg = config as SkillhubConfig
+  if (cfg.provider !== 'r2' && cfg.provider !== 's3') {
+    throw new TBError(
+      'invalid_argument',
+      `skillhub provider 仅支持 'r2' 或 's3',收到 '${cfg.provider}'`,
+    )
+  }
+  if (cfg.provider === 's3') {
+    const store = createS3ObjectStore(await s3StoreConfig(cfg, deps.secrets), {
+      allowInsecure: deps.allowInsecureHttp,
+    })
+    try {
+      await store.list(skillhubKeyPrefix(cfg, ''), { limit: 1 })
     } catch (err) {
       const detail = isTBError(err) ? err.message : String(err)
       throw new TBError('unavailable', `s3 连通探测失败:${detail}`, { retryable: true })
