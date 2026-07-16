@@ -1,18 +1,23 @@
-import { ArrowUpRight, GitBranch, TerminalSquare } from 'lucide-react'
+import { useQueryClient } from '@tanstack/react-query'
+import { ArrowUpRight, GitBranch, Plus, TerminalSquare, Trash2 } from 'lucide-react'
 import { Fragment } from 'react'
 import Markdown from 'react-markdown'
-import { Link, useParams } from 'react-router'
+import { Link, useNavigate, useParams } from 'react-router'
 import remarkGfm from 'remark-gfm'
+import { toast } from 'sonner'
+import { ConfirmAction } from '@/components/ConfirmAction'
 import { KIND_ICON, KindBadge } from '@/components/KindBadge'
 import { CommandWorkspace } from '@/components/node/CommandWorkspace'
 import { ContextBrowser } from '@/components/node/ContextBrowser'
 import { FeedbackPanel } from '@/components/node/FeedbackPanel'
 import { NoteCard } from '@/components/node/NoteCard'
 import { SkillBrowser } from '@/components/node/SkillBrowser'
+import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import type { ApiError } from '@/lib/api'
-import { useHelp, useHelpMarkdown } from '@/lib/queries'
+import { useHelp, useHelpMarkdown, useInvoke } from '@/lib/queries'
+import { MountDialog } from './system/RegistryPage'
 
 /**
  * 节点页 = `~help` 的通用渲染器:
@@ -23,6 +28,28 @@ export function NodePage() {
   const { '*': splat } = useParams()
   const path = (splat ?? '').replace(/\/+$/, '')
   const help = useHelp(path)
+  const invoke = useInvoke()
+  const qc = useQueryClient()
+  const navigate = useNavigate()
+
+  // 卸载 = registry delete;成功后失效 ['tb'](刷新树 + 本页)。错误由此处 toast,再抛给
+  // ConfirmAction 以保留其弹窗(允许重试)。
+  const unmount = async (target: string) => {
+    try {
+      await invoke.mutateAsync({ path: 'system/registry', tool: 'delete', args: { path: target } })
+      toast.success(`已卸载 ${target}`)
+      await qc.invalidateQueries({ queryKey: ['tb'] })
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '卸载节点失败')
+      throw error
+    }
+  }
+
+  const unmountSelf = async () => {
+    await unmount(path)
+    const parent = path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : ''
+    navigate(parent === '' ? '/' : `/nodes/${parent}`)
+  }
 
   if (help.isPending) {
     return (
@@ -56,6 +83,11 @@ export function NodePage() {
   // context / skillhub 均是内容服务节点,默认落「浏览」tab(条目 / 技能目录)。
   const hasBrowser = isContext || isSkillhub
   const { icon: NodeIcon, className: nodeIconClass } = KIND_ICON[node.kind] ?? KIND_ICON.directory
+  // system builtin 子树与 root 不可由用户卸载;挂载子节点在非 system 任意处均可。
+  const isSystem = node.kind === 'builtin' || path === 'system' || path.startsWith('system/')
+  const canMountChild = !isSystem
+  const canUnmountSelf = path !== '' && !isSystem
+  const childDefaultPath = path === '' ? '' : `${path}/`
   return (
     <div className="mx-auto w-full max-w-[100rem] px-4 py-5 sm:px-6 sm:py-7 lg:px-8 lg:py-8 xl:px-10">
       <Crumbs path={path} />
@@ -87,9 +119,41 @@ export function NodePage() {
             </div>
           </div>
 
-          <div className="grid shrink-0 grid-cols-2 gap-px overflow-hidden rounded-xl border bg-border/70 lg:min-w-56">
-            <NodeMetric icon={TerminalSquare} label="COMMANDS" value={cmds.length} />
-            <NodeMetric icon={GitBranch} label="CHILDREN" value={children?.length ?? 0} />
+          <div className="flex shrink-0 flex-col gap-3 lg:items-end">
+            <div className="grid grid-cols-2 gap-px overflow-hidden rounded-xl border bg-border/70 lg:min-w-56">
+              <NodeMetric icon={TerminalSquare} label="COMMANDS" value={cmds.length} />
+              <NodeMetric icon={GitBranch} label="CHILDREN" value={children?.length ?? 0} />
+            </div>
+            {(canMountChild || canUnmountSelf) && (
+              <div className="flex flex-wrap gap-2 lg:justify-end">
+                {canMountChild && (
+                  <MountDialog
+                    existingPaths={children?.map((c) => c.path) ?? []}
+                    defaultPath={childDefaultPath}
+                    trigger={
+                      <Button size="sm" variant="outline">
+                        <Plus />
+                        挂载子节点
+                      </Button>
+                    }
+                  />
+                )}
+                {canUnmountSelf && (
+                  <ConfirmAction
+                    title={`卸载 ${path}?`}
+                    description={<p>卸载后该子树不可见；空的中间目录将被回收。</p>}
+                    actionLabel="卸载"
+                    onConfirm={unmountSelf}
+                    trigger={
+                      <Button size="sm" variant="outline">
+                        <Trash2 className="text-destructive" />
+                        卸载此节点
+                      </Button>
+                    }
+                  />
+                )}
+              </div>
+            )}
           </div>
         </div>
         <div className="relative mt-5 border-t pt-4">
@@ -150,23 +214,45 @@ export function NodePage() {
                 {children.map((ch) => {
                   const name = ch.path.split('/').pop() ?? ch.path
                   const target = path === '' ? ch.path : `${path}/${name}`
+                  const childIsSystem =
+                    ch.kind === 'builtin' || target === 'system' || target.startsWith('system/')
                   return (
-                    <Link
-                      key={ch.path}
-                      to={`/nodes/${target}`}
-                      className="group flex min-w-0 items-center gap-3 rounded-lg border bg-background/50 px-3 py-3 transition-colors hover:border-primary/35 hover:bg-secondary/45"
-                    >
-                      <span className="min-w-0 flex-1">
-                        <span className="flex items-center gap-2">
-                          <span className="min-w-0 truncate font-mono text-sm">{name}</span>
-                          <KindBadge kind={ch.kind} />
+                    <div key={ch.path} className="group flex items-stretch gap-1">
+                      <Link
+                        to={`/nodes/${target}`}
+                        className="flex min-w-0 flex-1 items-center gap-3 rounded-lg border bg-background/50 px-3 py-3 transition-colors hover:border-primary/35 hover:bg-secondary/45"
+                      >
+                        <span className="min-w-0 flex-1">
+                          <span className="flex items-center gap-2">
+                            <span className="min-w-0 truncate font-mono text-sm">{name}</span>
+                            <KindBadge kind={ch.kind} />
+                          </span>
+                          <span className="mt-1 block truncate text-xs text-muted-foreground">
+                            {ch.description}
+                          </span>
                         </span>
-                        <span className="mt-1 block truncate text-xs text-muted-foreground">
-                          {ch.description}
-                        </span>
-                      </span>
-                      <ArrowUpRight className="size-4 shrink-0 text-muted-foreground transition-transform group-hover:-translate-y-0.5 group-hover:translate-x-0.5 group-hover:text-primary" />
-                    </Link>
+                        <ArrowUpRight className="size-4 shrink-0 text-muted-foreground transition-transform group-hover:-translate-y-0.5 group-hover:translate-x-0.5 group-hover:text-primary" />
+                      </Link>
+                      {/* 卸载按钮置于 Link 之外,点击不会触发卡片跳转。 */}
+                      {!childIsSystem && (
+                        <ConfirmAction
+                          title={`卸载 ${target}?`}
+                          description={<p>卸载后该子树不可见；空的中间目录将被回收。</p>}
+                          actionLabel="卸载"
+                          onConfirm={() => unmount(target)}
+                          trigger={
+                            <Button
+                              variant="ghost"
+                              size="icon-sm"
+                              className="self-center"
+                              aria-label={`卸载 ${target}`}
+                            >
+                              <Trash2 className="text-destructive" />
+                            </Button>
+                          }
+                        />
+                      )}
+                    </div>
                   )
                 })}
               </div>
