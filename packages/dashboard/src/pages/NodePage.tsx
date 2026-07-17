@@ -11,13 +11,82 @@ import { CommandWorkspace } from '@/components/node/CommandWorkspace'
 import { useHelp, useHelpMarkdown, useInvoke } from '@/lib/queries'
 import { ContextBrowser } from '@/components/node/ContextBrowser'
 import { FeedbackPanel } from '@/components/node/FeedbackPanel'
-import { KIND_ICON, KindBadge } from '@/components/KindBadge'
 import { SkillBrowser } from '@/components/node/SkillBrowser'
 import { ConfirmAction } from '@/components/ConfirmAction'
 import { NoteCard } from '@/components/node/NoteCard'
 import { Skeleton } from '@/components/ui/skeleton'
+import { KindBadge } from '@/components/KindBadge'
+import { KIND_ICON } from '@/components/kind-icon'
 import { Button } from '@/components/ui/button'
 import { MountDialog } from './system/RegistryPage'
+
+function NodeMetric({
+  icon: Icon,
+  label,
+  value,
+}: {
+  icon: typeof TerminalSquare
+  label: string
+  value: number
+}) {
+  return (
+    <div className="bg-background/75 px-3.5 py-3">
+      <div className="flex items-center gap-1.5 font-mono text-[9px] tracking-[0.13em] text-muted-foreground">
+        <Icon className="size-3" />
+        {label}
+      </div>
+      <p className="mt-1.5 font-mono text-lg text-foreground tabular-nums">{value}</p>
+    </div>
+  )
+}
+
+function HelpMarkdownView({ path }: { path: string }) {
+  const md = useHelpMarkdown(path)
+  if (md.isPending) return <Skeleton className="h-40 w-full" />
+  if (md.isError) return <p className="text-sm text-destructive">{md.error.message}</p>
+  return (
+    <div className="prose prose-sm dark:prose-invert max-w-none overflow-x-auto rounded-md border bg-card/60 px-3 py-3 break-words prose-pre:max-w-full prose-pre:overflow-x-auto prose-pre:bg-background prose-pre:text-xs prose-code:font-mono sm:px-4">
+      <Markdown remarkPlugins={[remarkGfm]}>{md.data}</Markdown>
+    </div>
+  )
+}
+
+function Crumbs({ path }: { path: string }) {
+  const segs = path === '' ? [] : path.split('/')
+  return (
+    <nav
+      aria-label="路径"
+      className="flex min-w-0 flex-wrap items-center gap-1.5 font-mono text-[11px]"
+    >
+      <Link
+        className="rounded-md border bg-card/45 px-2 py-1 text-muted-foreground hover:border-primary/35 hover:text-foreground"
+        to="/"
+      >
+        ROOT
+      </Link>
+      {segs.map((seg, i) => {
+        const prefix = segs.slice(0, i + 1).join('/')
+        return (
+          <Fragment key={prefix}>
+            <span className="text-muted-foreground/35">/</span>
+            {i === segs.length - 1
+              ? (
+                  <span className="rounded-md bg-primary/8 px-1.5 py-1 text-primary">{seg}</span>
+                )
+              : (
+                  <Link
+                    className="rounded-md px-1.5 py-1 text-muted-foreground hover:bg-secondary hover:text-foreground"
+                    to={`/nodes/${prefix}`}
+                  >
+                    {seg}
+                  </Link>
+                )}
+          </Fragment>
+        )
+      })}
+    </nav>
+  )
+}
 
 /**
  * 节点页 = `~help` 的通用渲染器:
@@ -268,18 +337,20 @@ export function NodePage() {
             </section>
           )}
 
-          {cmds.length > 0 ? (
-            <CommandWorkspace
-              cmds={cmds}
-              // mcp/http 节点级 ~help 是索引形态:仅为当前选中工具懒取 schema
-              lazySchema={node.kind === 'mcp' || node.kind === 'http'}
-              path={path}
-            />
-          ) : (
-            (children?.length ?? 0) === 0 && (
-              <p className="text-sm text-muted-foreground">该节点没有可调用的命令。</p>
-            )
-          )}
+          {cmds.length > 0
+            ? (
+                <CommandWorkspace
+                  cmds={cmds}
+                  // mcp/http 节点级 ~help 是索引形态:仅为当前选中工具懒取 schema
+                  lazySchema={node.kind === 'mcp' || node.kind === 'http'}
+                  path={path}
+                />
+              )
+            : (
+                (children?.length ?? 0) === 0 && (
+                  <p className="text-sm text-muted-foreground">该节点没有可调用的命令。</p>
+                )
+              )}
         </TabsContent>
 
         {path !== '' && (
@@ -293,73 +364,5 @@ export function NodePage() {
         </TabsContent>
       </Tabs>
     </div>
-  )
-}
-
-function NodeMetric({
-  icon: Icon,
-  label,
-  value,
-}: {
-  icon: typeof TerminalSquare
-  label: string
-  value: number
-}) {
-  return (
-    <div className="bg-background/75 px-3.5 py-3">
-      <div className="flex items-center gap-1.5 font-mono text-[9px] tracking-[0.13em] text-muted-foreground">
-        <Icon className="size-3" />
-        {label}
-      </div>
-      <p className="mt-1.5 font-mono text-lg text-foreground tabular-nums">{value}</p>
-    </div>
-  )
-}
-
-function HelpMarkdownView({ path }: { path: string }) {
-  const md = useHelpMarkdown(path)
-  if (md.isPending) return <Skeleton className="h-40 w-full" />
-  if (md.isError) return <p className="text-sm text-destructive">{md.error.message}</p>
-  return (
-    <div className="prose prose-sm dark:prose-invert max-w-none overflow-x-auto rounded-md border bg-card/60 px-3 py-3 break-words prose-pre:max-w-full prose-pre:overflow-x-auto prose-pre:bg-background prose-pre:text-xs prose-code:font-mono sm:px-4">
-      <Markdown remarkPlugins={[remarkGfm]}>{md.data}</Markdown>
-    </div>
-  )
-}
-
-function Crumbs({ path }: { path: string }) {
-  const segs = path === '' ? [] : path.split('/')
-  return (
-    <nav
-      aria-label="路径"
-      className="flex min-w-0 flex-wrap items-center gap-1.5 font-mono text-[11px]"
-    >
-      <Link
-        className="rounded-md border bg-card/45 px-2 py-1 text-muted-foreground hover:border-primary/35 hover:text-foreground"
-        to="/"
-      >
-        ROOT
-      </Link>
-      {segs.map((seg, i) => {
-        const prefix = segs.slice(0, i + 1).join('/')
-        return (
-          <Fragment key={prefix}>
-            <span className="text-muted-foreground/35">/</span>
-            {i === segs.length - 1
-              ? (
-                  <span className="rounded-md bg-primary/8 px-1.5 py-1 text-primary">{seg}</span>
-                )
-              : (
-                  <Link
-                    className="rounded-md px-1.5 py-1 text-muted-foreground hover:bg-secondary hover:text-foreground"
-                    to={`/nodes/${prefix}`}
-                  >
-                    {seg}
-                  </Link>
-                )}
-          </Fragment>
-        )
-      })}
-    </nav>
   )
 }

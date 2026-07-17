@@ -7,8 +7,8 @@
 
 import type { SecretStoreImpl } from '../secret/secretStore'
 import type { CmdSpec, HelpModel } from '../htbp/model'
-import type { CallContext, TreePath } from '../types'
 import type { BuiltinModule } from './types'
+import type { TreePath } from '../types'
 import { cmdPath, LIST_OPTS_SCHEMA, optListOptions, requireString, VOID_ACK } from './util'
 import { TBError } from '../errors'
 
@@ -88,11 +88,7 @@ export function createSecretModule(store: SecretStoreImpl, now: () => string): B
         cmds: secretCmds(nodePath),
       }
     },
-    async dispatch(
-      cmd: string,
-      args: Record<string, unknown>,
-      _ctx: CallContext,
-    ): Promise<unknown> {
+    async dispatch(cmd: string, args: Record<string, unknown>): Promise<unknown> {
       switch (cmd) {
         case 'set': {
           const name = requireString(args, 'name')

@@ -1,6 +1,6 @@
 import { lazy, type ReactNode, Suspense } from 'react'
 import { Navigate, Route, Routes } from 'react-router'
-import { useSession } from '@/lib/session'
+import { useSession } from '@/lib/session-context'
 
 // 路由级拆包:登录门不再下载 RJSF/AJV 与千行管理表单;进入某页时才加载对应能力。
 const AppShell = lazy(() =>

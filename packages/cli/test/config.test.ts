@@ -12,6 +12,11 @@ const savedEnv = {
   sk: process.env.TB_SK,
 }
 
+function restore(key: string, value: string | undefined): void {
+  if (value === undefined) delete process.env[key]
+  else process.env[key] = value
+}
+
 beforeEach(() => {
   tmp = mkdtempSync(join(tmpdir(), 'tb-cfg-'))
   process.env.XDG_CONFIG_HOME = tmp
@@ -24,11 +29,6 @@ afterEach(() => {
   restore('TB_BASE_URL', savedEnv.url)
   restore('TB_SK', savedEnv.sk)
 })
-
-function restore(key: string, value: string | undefined): void {
-  if (value === undefined) delete process.env[key]
-  else process.env[key] = value
-}
 
 describe('config 读写', () => {
   it('缺文件 → 空配置', () => {

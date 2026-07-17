@@ -62,6 +62,92 @@ function joinTreePath(base: TreePath, rel: string): TreePath {
   return normalizePath(`${base}/${rel.replace(/^\/+|\/+$/g, '')}`)
 }
 
+/**
+ * expose.nodes 自定义节点:路径挂到 mountPath 下,并对可调用
+ * kind(tool/context)注入 providerConfig 转发标记 { deviceId, mountPath, cmds? }
+ * (与 device-fs 同构)——网关据此把调用经帧协议 call 转发回设备;cmds(SDK 随
+ * NodeInput 上送的工具表)是节点 ~help 的数据源。标记为网关权威,覆盖设备侧同名字段。
+ */
+function customNodeInput(mountPath: TreePath, deviceId: string, raw: DeviceNodeInput): NodeInput {
+  const { cmds, ...rest } = raw
+  const input = parseNodeInput({ ...rest, path: joinTreePath(mountPath, raw.path) })
+  const marker = { deviceId, mountPath, ...(cmds !== undefined ? { cmds } : {}) }
+  if (input.kind === 'tool') {
+    const base
+      = input.config?.kind === 'tool' ? input.config : { kind: 'tool' as const, provider: '@local' }
+    input.config = { ...base, providerConfig: { ...(base.providerConfig ?? {}), ...marker } }
+  } else if (input.kind === 'context') {
+    const base
+      = input.config?.kind === 'context'
+        ? input.config
+        : { kind: 'context' as const, provider: '@local' }
+    input.config = { ...base, providerConfig: { ...(base.providerConfig ?? {}), ...marker } }
+  }
+  return input
+}
+
+function nodesForHello(mountPath: TreePath, deviceId: string, expose: DeviceExpose): NodeInput[] {
+  const nodes: NodeInput[] = [
+    {
+      path: mountPath,
+      kind: 'directory',
+      description: `设备 ${deviceId}`,
+    },
+  ]
+  if (expose.shell !== undefined) {
+    nodes.push({
+      path: joinTreePath(mountPath, 'shell'),
+      kind: 'device',
+      description: expose.shell.description ?? '设备 shell(远程命令执行)',
+      config: { kind: 'device', deviceId, expose: { shell: expose.shell } },
+    })
+  }
+  if (expose.fs !== undefined) {
+    nodes.push({
+      path: joinTreePath(mountPath, 'fs'),
+      kind: 'context',
+      description: '设备文件系统',
+      config: {
+        kind: 'context',
+        provider: 'device-fs',
+        readOnly: expose.fs.readOnly ?? false,
+        providerConfig: { deviceId, mountPath, roots: expose.fs.roots },
+      },
+    })
+  }
+  for (const raw of expose.nodes ?? []) {
+    nodes.push(customNodeInput(mountPath, deviceId, raw))
+  }
+  return nodes
+}
+
+async function assertRegisterPath(
+  registry: NodeRegistryStore,
+  ctx: CallContext,
+  targetPath: TreePath,
+): Promise<void> {
+  if (!check(ctx, targetPath, 'register').allow) {
+    throw new TBError('permission_denied', `no scope grants 'register' on '${targetPath}'`)
+  }
+  let existing: { registeredBy: string } | null = null
+  try {
+    existing = await registry.get(targetPath)
+  } catch {
+    existing = null
+  }
+  const res = checkRegisterPath({
+    sk: {
+      scopes: ctx.scopes,
+      id: ctx.keyId,
+      ...(ctx.registerPaths !== undefined ? { registerPaths: ctx.registerPaths } : {}),
+    },
+    targetPath,
+    action: 'write',
+    existing,
+  })
+  if (!res.allow) throw res.error
+}
+
 export async function processDeviceHello(opts: {
   authorization: string | undefined
   deviceIdHint: string
@@ -100,90 +186,4 @@ export async function processDeviceHello(opts: {
     )
   }
   return { mountPath, keyId: authCtx.keyId }
-}
-
-function nodesForHello(mountPath: TreePath, deviceId: string, expose: DeviceExpose): NodeInput[] {
-  const nodes: NodeInput[] = [
-    {
-      path: mountPath,
-      kind: 'directory',
-      description: `设备 ${deviceId}`,
-    },
-  ]
-  if (expose.shell !== undefined) {
-    nodes.push({
-      path: joinTreePath(mountPath, 'shell'),
-      kind: 'device',
-      description: expose.shell.description ?? '设备 shell(远程命令执行)',
-      config: { kind: 'device', deviceId, expose: { shell: expose.shell } },
-    })
-  }
-  if (expose.fs !== undefined) {
-    nodes.push({
-      path: joinTreePath(mountPath, 'fs'),
-      kind: 'context',
-      description: '设备文件系统',
-      config: {
-        kind: 'context',
-        provider: 'device-fs',
-        readOnly: expose.fs.readOnly ?? false,
-        providerConfig: { deviceId, mountPath, roots: expose.fs.roots },
-      },
-    })
-  }
-  for (const raw of expose.nodes ?? []) {
-    nodes.push(customNodeInput(mountPath, deviceId, raw))
-  }
-  return nodes
-}
-
-/**
- * expose.nodes 自定义节点:路径挂到 mountPath 下,并对可调用
- * kind(tool/context)注入 providerConfig 转发标记 { deviceId, mountPath, cmds? }
- * (与 device-fs 同构)——网关据此把调用经帧协议 call 转发回设备;cmds(SDK 随
- * NodeInput 上送的工具表)是节点 ~help 的数据源。标记为网关权威,覆盖设备侧同名字段。
- */
-function customNodeInput(mountPath: TreePath, deviceId: string, raw: DeviceNodeInput): NodeInput {
-  const { cmds, ...rest } = raw
-  const input = parseNodeInput({ ...rest, path: joinTreePath(mountPath, raw.path) })
-  const marker = { deviceId, mountPath, ...(cmds !== undefined ? { cmds } : {}) }
-  if (input.kind === 'tool') {
-    const base
-      = input.config?.kind === 'tool' ? input.config : { kind: 'tool' as const, provider: '@local' }
-    input.config = { ...base, providerConfig: { ...(base.providerConfig ?? {}), ...marker } }
-  } else if (input.kind === 'context') {
-    const base
-      = input.config?.kind === 'context'
-        ? input.config
-        : { kind: 'context' as const, provider: '@local' }
-    input.config = { ...base, providerConfig: { ...(base.providerConfig ?? {}), ...marker } }
-  }
-  return input
-}
-
-async function assertRegisterPath(
-  registry: NodeRegistryStore,
-  ctx: CallContext,
-  targetPath: TreePath,
-): Promise<void> {
-  if (!check(ctx, targetPath, 'register').allow) {
-    throw new TBError('permission_denied', `no scope grants 'register' on '${targetPath}'`)
-  }
-  let existing: { registeredBy: string } | null = null
-  try {
-    existing = await registry.get(targetPath)
-  } catch {
-    existing = null
-  }
-  const res = checkRegisterPath({
-    sk: {
-      scopes: ctx.scopes,
-      id: ctx.keyId,
-      ...(ctx.registerPaths !== undefined ? { registerPaths: ctx.registerPaths } : {}),
-    },
-    targetPath,
-    action: 'write',
-    existing,
-  })
-  if (!res.allow) throw res.error
 }

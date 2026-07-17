@@ -15,36 +15,6 @@ import { Textarea } from '@/components/ui/textarea'
 import { Button } from '@/components/ui/button'
 import { useInvoke } from '@/lib/queries'
 
-/**
- * Path 补充说明卡片(system/annotation,对等 `tb note`):
- * 展示来自 ~help 注入的 note(零额外请求),编辑/清除走 system/annotation set/remove
- * (admin scope,无权时 403 toast)。
- */
-export function NoteCard({ path, note }: { note?: string, path: string }) {
-  if (note === undefined) {
-    return (
-      <div className="flex items-center gap-2">
-        <NoteDialog current="" path={path} trigger={<AddNoteTrigger />} />
-      </div>
-    )
-  }
-  return (
-    <div className="flex min-w-0 items-start gap-2.5 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2.5 sm:px-3.5">
-      <StickyNote className="mt-0.5 size-3.5 shrink-0 text-amber-600 dark:text-amber-400" />
-      <p className="min-w-0 flex-1 whitespace-pre-wrap break-words text-sm">{note}</p>
-      <NoteDialog
-        current={note}
-        path={path}
-        trigger={(
-          <Button aria-label="编辑补充说明" size="icon-xs" title="编辑补充说明" variant="ghost">
-            <Pencil />
-          </Button>
-        )}
-      />
-    </div>
-  )
-}
-
 function AddNoteTrigger() {
   return (
     <Button className="h-6 px-2 text-xs text-muted-foreground" size="sm" variant="ghost">
@@ -139,5 +109,35 @@ function NoteDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  )
+}
+
+/**
+ * Path 补充说明卡片(system/annotation,对等 `tb note`):
+ * 展示来自 ~help 注入的 note(零额外请求),编辑/清除走 system/annotation set/remove
+ * (admin scope,无权时 403 toast)。
+ */
+export function NoteCard({ path, note }: { note?: string, path: string }) {
+  if (note === undefined) {
+    return (
+      <div className="flex items-center gap-2">
+        <NoteDialog current="" path={path} trigger={<AddNoteTrigger />} />
+      </div>
+    )
+  }
+  return (
+    <div className="flex min-w-0 items-start gap-2.5 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2.5 sm:px-3.5">
+      <StickyNote className="mt-0.5 size-3.5 shrink-0 text-amber-600 dark:text-amber-400" />
+      <p className="min-w-0 flex-1 whitespace-pre-wrap break-words text-sm">{note}</p>
+      <NoteDialog
+        current={note}
+        path={path}
+        trigger={(
+          <Button aria-label="编辑补充说明" size="icon-xs" title="编辑补充说明" variant="ghost">
+            <Pencil />
+          </Button>
+        )}
+      />
+    </div>
   )
 }

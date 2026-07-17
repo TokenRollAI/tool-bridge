@@ -7,8 +7,8 @@
  */
 
 import type { CmdSpec, HelpModel } from '../htbp/model'
-import type { CallContext, TreePath } from '../types'
 import type { BuiltinModule } from './types'
+import type { TreePath } from '../types'
 import { TBError } from '../errors'
 import { cmdPath } from './util'
 
@@ -50,11 +50,7 @@ export function createStatusModule(deps: StatusDeps): BuiltinModule {
         cmds: statusCmds(nodePath),
       }
     },
-    async dispatch(
-      cmd: string,
-      _args: Record<string, unknown>,
-      _ctx: CallContext,
-    ): Promise<unknown> {
+    async dispatch(cmd: string): Promise<unknown> {
       if (cmd !== 'get') {
         throw new TBError('invalid_argument', `unknown cmd '${cmd}' on system/status`)
       }

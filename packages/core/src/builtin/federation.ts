@@ -7,8 +7,8 @@
  */
 
 import type { CmdSpec, HelpModel } from '../htbp/model'
-import type { CallContext, TreePath } from '../types'
 import type { BuiltinModule } from './types'
+import type { TreePath } from '../types'
 import { normalizeAllowHost, type RemoteAllowlistStore } from '../tool/allowlist'
 import { cmdPath, requireString, VOID_ACK } from './util'
 import { TBError } from '../errors'
@@ -106,11 +106,7 @@ export function createFederationModule(deps: FederationModuleDeps): BuiltinModul
         cmds: federationCmds(nodePath),
       }
     },
-    async dispatch(
-      cmd: string,
-      args: Record<string, unknown>,
-      _ctx: CallContext,
-    ): Promise<unknown> {
+    async dispatch(cmd: string, args: Record<string, unknown>): Promise<unknown> {
       switch (cmd) {
         case 'list': {
           const items = mergedView(deps.base, await deps.store.list())

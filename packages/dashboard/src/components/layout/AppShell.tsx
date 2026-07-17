@@ -16,6 +16,64 @@ interface HealthView {
   isError: boolean
 }
 
+function healthLabel(health: HealthView): string {
+  if (health.isError) return '网关不可达'
+  if (health.data?.healthy) return '网关运行正常'
+  if (health.data) return '网关状态异常'
+  return '正在检查网关状态'
+}
+
+function MobileHeader({
+  health,
+  navButtonRef,
+  onOpenNav,
+  onOpenPalette,
+}: {
+  health: HealthView
+  navButtonRef: RefObject<HTMLButtonElement | null>
+  onOpenNav: () => void
+  onOpenPalette: () => void
+}) {
+  return (
+    <header className="app-mobile-header flex h-14 shrink-0 items-center gap-2 border-b px-2 lg:hidden">
+      <Button
+        aria-label="打开资源与管理导航"
+        onClick={onOpenNav}
+        ref={navButtonRef}
+        size="icon-sm"
+        variant="ghost"
+      >
+        <Menu />
+      </Button>
+      <NavLink className="flex min-w-0 items-center gap-2" to="/">
+        <img alt="" className="size-5 shrink-0 dark:invert" src="/ui/icon-light.png" />
+        <span className="truncate font-mono text-sm tracking-tight">
+          tool
+          <span className="text-primary">-</span>
+          bridge
+        </span>
+      </NavLink>
+      <span
+        aria-label={healthLabel(health)}
+        className={cn(
+          'ml-auto size-2 shrink-0 rounded-full',
+          health.isError
+            ? 'bg-destructive'
+            : health.data?.healthy
+              ? 'bg-ok shadow-[0_0_6px_var(--ok)]'
+              : 'bg-warn',
+        )}
+        role="img"
+        title={healthLabel(health)}
+      />
+      <Button aria-label="打开全局跳转" onClick={onOpenPalette} size="icon-sm" variant="ghost">
+        <Search />
+        <span className="sr-only">{isMac ? '快捷键 Command K' : '快捷键 Control K'}</span>
+      </Button>
+    </header>
+  )
+}
+
 /**
  * 主框架：桌面为 ActivityRail + Resource Explorer + Workspace；平板/移动使用顶栏抽屉。
  * Explorer 的显式折叠只改变布局，不卸载 Workspace，也不改变树查询边界。
@@ -140,62 +198,4 @@ export function AppShell() {
       <CommandPalette onOpenChange={setPaletteOpen} open={paletteOpen} />
     </div>
   )
-}
-
-function MobileHeader({
-  health,
-  navButtonRef,
-  onOpenNav,
-  onOpenPalette,
-}: {
-  health: HealthView
-  navButtonRef: RefObject<HTMLButtonElement | null>
-  onOpenNav: () => void
-  onOpenPalette: () => void
-}) {
-  return (
-    <header className="app-mobile-header flex h-14 shrink-0 items-center gap-2 border-b px-2 lg:hidden">
-      <Button
-        aria-label="打开资源与管理导航"
-        onClick={onOpenNav}
-        ref={navButtonRef}
-        size="icon-sm"
-        variant="ghost"
-      >
-        <Menu />
-      </Button>
-      <NavLink className="flex min-w-0 items-center gap-2" to="/">
-        <img alt="" className="size-5 shrink-0 dark:invert" src="/ui/icon-light.png" />
-        <span className="truncate font-mono text-sm tracking-tight">
-          tool
-          <span className="text-primary">-</span>
-          bridge
-        </span>
-      </NavLink>
-      <span
-        aria-label={healthLabel(health)}
-        className={cn(
-          'ml-auto size-2 shrink-0 rounded-full',
-          health.isError
-            ? 'bg-destructive'
-            : health.data?.healthy
-              ? 'bg-ok shadow-[0_0_6px_var(--ok)]'
-              : 'bg-warn',
-        )}
-        role="img"
-        title={healthLabel(health)}
-      />
-      <Button aria-label="打开全局跳转" onClick={onOpenPalette} size="icon-sm" variant="ghost">
-        <Search />
-        <span className="sr-only">{isMac ? '快捷键 Command K' : '快捷键 Control K'}</span>
-      </Button>
-    </header>
-  )
-}
-
-function healthLabel(health: HealthView): string {
-  if (health.isError) return '网关不可达'
-  if (health.data?.healthy) return '网关运行正常'
-  if (health.data) return '网关状态异常'
-  return '正在检查网关状态'
 }

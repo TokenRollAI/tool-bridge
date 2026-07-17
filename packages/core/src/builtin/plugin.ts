@@ -22,17 +22,16 @@ import type { CmdSpec, HelpModel } from '../htbp/model'
 import type { SKRegistryStore } from '../auth/sk'
 import type { BuiltinModule } from './types'
 import {
-  type CallContext,
+  parsePluginManifest,
+  type PluginManifest,
+  type PluginRegistration,
+} from '../plugin/manifest'
+import {
   LIST_LIMIT_DEFAULT,
   LIST_LIMIT_MAX,
   type Timestamp,
   type TreePath,
 } from '../types'
-import {
-  parsePluginManifest,
-  type PluginManifest,
-  type PluginRegistration,
-} from '../plugin/manifest'
 import { cmdPath, LIST_OPTS_SCHEMA, optListOptions, requireString, VOID_ACK } from './util'
 import { KEY_PLUGIN, KEY_PLUGIN_HEALTH, KEY_PLUGIN_META, type StateStore } from '../store'
 import { validatePluginContract } from '../plugin/contract'
@@ -66,7 +65,8 @@ export interface PluginHealthRecord {
 type StoredPlugin = PluginManifest & { tokenSkId?: string }
 
 function projectManifest(record: StoredPlugin): PluginManifest {
-  const { tokenSkId: _tokenSkId, ...manifest } = record
+  const manifest = { ...record }
+  delete manifest.tokenSkId
   return manifest
 }
 
@@ -350,11 +350,7 @@ export function createPluginModule(deps: PluginModuleDeps): BuiltinModule {
         cmds: pluginCmds(nodePath),
       }
     },
-    async dispatch(
-      cmd: string,
-      args: Record<string, unknown>,
-      _ctx: CallContext,
-    ): Promise<unknown> {
+    async dispatch(cmd: string, args: Record<string, unknown>): Promise<unknown> {
       switch (cmd) {
         case 'list': {
           const opts = optListOptions(args)

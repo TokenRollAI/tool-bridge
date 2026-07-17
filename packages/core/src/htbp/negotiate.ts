@@ -13,7 +13,7 @@ export type Representation = 'dsl' | 'json' | 'markdown'
 /**
  * 归类 `Accept`:
  *   含 `application/json` → 'json';含 `text/plain` → 'dsl'(紧凑 DSL,显式声明才给);
- *   其余(`text/markdown`、`*​/*`、未知类型、缺失/空)→ 'markdown'(默认表现)。
+ *   其余(`text/markdown`、任意类型、未知类型、缺失/空)→ 'markdown'(默认表现)。
  * 仅做大小写无关的子串匹配,不解析 q 值(当前不需要;后续如需可在此升级)。
  * 优先级 json > markdown > dsl:声明 json 一定拿 json;markdown 与 plain 共存取 markdown。
  */

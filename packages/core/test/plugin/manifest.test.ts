@@ -135,7 +135,8 @@ describe('其余字段', () => {
   })
 
   it('enabled 缺失或非 boolean → 拒', () => {
-    const { enabled: _enabled, ...rest } = FEISHU
+    const rest = { ...FEISHU }
+    delete (rest as { enabled?: unknown }).enabled
     expectInvalid(rest)
     expectInvalid({ ...FEISHU, enabled: 'true' })
   })

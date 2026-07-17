@@ -20,8 +20,8 @@ import { EmptyState } from '@/components/EmptyState'
 import { PageHeader } from '@/components/PageHeader'
 import { Skeleton } from '@/components/ui/skeleton'
 import { KindBadge } from '@/components/KindBadge'
+import { useSession } from '@/lib/session-context'
 import { Button } from '@/components/ui/button'
-import { useSession } from '@/lib/session'
 import { cn } from '@/lib/utils'
 
 const QUICK_LINKS = [
@@ -58,6 +58,50 @@ function relTime(iso: string): string {
   if (diff < 3_600_000) return `${Math.floor(diff / 60_000)} 分钟前`
   if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)} 小时前`
   return new Date(iso).toLocaleDateString()
+}
+
+function HeroMetric({
+  label,
+  value,
+  pending,
+}: {
+  label: string
+  pending?: boolean
+  value: string
+}) {
+  return (
+    <div className="bg-background/80 px-3 py-3.5">
+      <p className="font-mono text-[10px] tracking-[0.14em] text-muted-foreground">{label}</p>
+      {pending
+        ? (
+            <Skeleton className="mx-auto mt-2 h-5 w-12" />
+          )
+        : (
+            <p className="mt-1.5 font-mono text-sm text-foreground tabular-nums">{value}</p>
+          )}
+    </div>
+  )
+}
+
+function SectionHeader({
+  icon: Icon,
+  title,
+  meta,
+  action,
+}: {
+  action?: React.ReactNode
+  icon: typeof Activity
+  meta?: string
+  title: string
+}) {
+  return (
+    <div className="flex min-h-12 items-center gap-2.5 px-4 py-3 sm:px-5">
+      <Icon className="size-4 text-primary" />
+      <h2 className="text-sm font-medium">{title}</h2>
+      {meta && <span className="font-mono text-[10px] text-muted-foreground">{meta}</span>}
+      {action && <div className="ml-auto">{action}</div>}
+    </div>
+  )
 }
 
 /**
@@ -402,50 +446,6 @@ export function OverviewPage() {
           </div>
         </section>
       </div>
-    </div>
-  )
-}
-
-function HeroMetric({
-  label,
-  value,
-  pending,
-}: {
-  label: string
-  pending?: boolean
-  value: string
-}) {
-  return (
-    <div className="bg-background/80 px-3 py-3.5">
-      <p className="font-mono text-[10px] tracking-[0.14em] text-muted-foreground">{label}</p>
-      {pending
-        ? (
-            <Skeleton className="mx-auto mt-2 h-5 w-12" />
-          )
-        : (
-            <p className="mt-1.5 font-mono text-sm text-foreground tabular-nums">{value}</p>
-          )}
-    </div>
-  )
-}
-
-function SectionHeader({
-  icon: Icon,
-  title,
-  meta,
-  action,
-}: {
-  action?: React.ReactNode
-  icon: typeof Activity
-  meta?: string
-  title: string
-}) {
-  return (
-    <div className="flex min-h-12 items-center gap-2.5 px-4 py-3 sm:px-5">
-      <Icon className="size-4 text-primary" />
-      <h2 className="text-sm font-medium">{title}</h2>
-      {meta && <span className="font-mono text-[10px] text-muted-foreground">{meta}</span>}
-      {action && <div className="ml-auto">{action}</div>}
     </div>
   )
 }

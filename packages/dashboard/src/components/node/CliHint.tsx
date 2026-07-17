@@ -1,7 +1,7 @@
 import { SquareTerminal } from 'lucide-react'
 import { useState } from 'react'
 import { CopyButton } from '@/components/CopyButton'
-import { useSession } from '@/lib/session'
+import { useSession } from '@/lib/session-context'
 import { cn } from '@/lib/utils'
 
 /** shell 单引号安全包裹。 */

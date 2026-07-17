@@ -5,8 +5,8 @@
  * write 返回 { key, secret },secret(明文)仅此一次;list/get/update 一律无 hash。
  */
 
-import type { CallContext, Scope, SecretKeyInput, TreePath } from '../types'
 import type { SKRegistryStore, SKUpdatePatch } from '../auth/sk'
+import type { Scope, SecretKeyInput, TreePath } from '../types'
 import type { CmdSpec, HelpModel } from '../htbp/model'
 import type { BuiltinModule } from './types'
 import {
@@ -158,11 +158,7 @@ export function createSkModule(store: SKRegistryStore, now: () => string): Built
         cmds: skCmds(nodePath),
       }
     },
-    async dispatch(
-      cmd: string,
-      args: Record<string, unknown>,
-      _ctx: CallContext,
-    ): Promise<unknown> {
+    async dispatch(cmd: string, args: Record<string, unknown>): Promise<unknown> {
       switch (cmd) {
         case 'list':
           return store.list(optListOptions(args))

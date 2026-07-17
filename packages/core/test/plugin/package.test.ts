@@ -46,7 +46,10 @@ describe('parsePluginPackage', () => {
   })
 
   it('configSchema/mountConfigSchema/description 可缺省', () => {
-    const { configSchema: _c, mountConfigSchema: _m, description: _d, ...min } = ENTRY
+    const min = { ...ENTRY }
+    delete (min as { configSchema?: unknown, description?: unknown, mountConfigSchema?: unknown }).configSchema
+    delete (min as { configSchema?: unknown, description?: unknown, mountConfigSchema?: unknown }).mountConfigSchema
+    delete (min as { configSchema?: unknown, description?: unknown, mountConfigSchema?: unknown }).description
     const pkg = parsePluginPackage(min)
     expect(pkg.configSchema).toBeUndefined()
     expect(pkg.mountConfigSchema).toBeUndefined()

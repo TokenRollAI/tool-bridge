@@ -9,7 +9,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
-import { useSession } from '@/lib/session'
+import { useSession } from '@/lib/session-context'
 import { useTheme } from '@/lib/theme'
 import { cn } from '@/lib/utils'
 import { MANAGE_LINKS } from './navigation'
@@ -20,6 +20,17 @@ interface ActivityRailProps {
   healthError: boolean
   onOpenPalette: () => void
   onToggleExplorer: () => void
+}
+
+function RailTip({ label, children }: { children: React.ReactNode, label: string }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>{children}</TooltipTrigger>
+      <TooltipContent side="right" sideOffset={8}>
+        {label}
+      </TooltipContent>
+    </Tooltip>
+  )
 }
 
 /**
@@ -192,16 +203,5 @@ export function ActivityRail({
         </div>
       </aside>
     </TooltipProvider>
-  )
-}
-
-function RailTip({ label, children }: { children: React.ReactNode, label: string }) {
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>{children}</TooltipTrigger>
-      <TooltipContent side="right" sideOffset={8}>
-        {label}
-      </TooltipContent>
-    </Tooltip>
   )
 }
