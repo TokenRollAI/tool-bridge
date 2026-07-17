@@ -8,8 +8,7 @@ let stdoutSpy: ReturnType<typeof vi.spyOn>
 
 beforeEach(() => {
   process.exitCode = 0
-  // biome-ignore lint/suspicious/noExplicitAny: spyOn 重载推断,与其他命令测试同法。
-  stdoutSpy = vi.spyOn(process.stdout, 'write').mockReturnValue(true) as any
+  stdoutSpy = vi.spyOn(process.stdout, 'write').mockReturnValue(true) as unknown as typeof stdoutSpy
   vi.spyOn(process.stderr, 'write').mockReturnValue(true)
 })
 

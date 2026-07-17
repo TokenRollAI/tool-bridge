@@ -16,14 +16,6 @@ function segments(path: string): string[] {
   return path.split('/').filter(s => s.length > 0)
 }
 
-/**
- * 段级 glob 匹配。`*` 恰好匹配一段,`**` 匹配零或多段,其余段字面比较。
- * pattern 与 path 都按 '/' 归一为段序列;空 path(根)以零段参与匹配。
- */
-export function matchGlob(pattern: string, path: TreePath): boolean {
-  return matchFrom(segments(pattern), 0, segments(path), 0)
-}
-
 function matchFrom(pat: string[], pi: number, seg: string[], si: number): boolean {
   if (pi === pat.length) return si === seg.length
   const token = pat[pi]
@@ -39,6 +31,14 @@ function matchFrom(pat: string[], pi: number, seg: string[], si: number): boolea
     return matchFrom(pat, pi + 1, seg, si + 1)
   }
   return false
+}
+
+/**
+ * 段级 glob 匹配。`*` 恰好匹配一段,`**` 匹配零或多段,其余段字面比较。
+ * pattern 与 path 都按 '/' 归一为段序列;空 path(根)以零段参与匹配。
+ */
+export function matchGlob(pattern: string, path: TreePath): boolean {
+  return matchFrom(segments(pattern), 0, segments(path), 0)
 }
 
 const effectOf = (scope: Scope): 'allow' | 'deny' => scope.effect ?? 'allow'

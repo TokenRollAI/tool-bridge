@@ -82,7 +82,8 @@ export async function mintKey(
 
 /** 投影:剥离 hash(hash 永不出网关)。 */
 export function projectKey(key: SecretKey): Omit<SecretKey, 'hash'> {
-  const { hash: _hash, ...rest } = key
+  const rest: Omit<SecretKey, 'hash'> & { hash?: string } = { ...key }
+  delete rest.hash
   return rest
 }
 

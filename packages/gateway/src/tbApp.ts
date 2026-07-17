@@ -279,6 +279,878 @@ function splitFeedback(pathname: string): { id?: string, path: TreePath } | null
 /**
  * 构造 tool-bridge 的 Hono app(宿主中立;Workers 适配见 app.ts,SDK 装配见 packages/sdk)。
  */
+/** 反向注册路径判定(查 existing 占用者;deps.reservedRoots 追加保留根)。allow=false 则抛其 error。 */
+async function assertRegisterPath(
+  registry: NodeRegistryStore,
+  ctx: CallContext,
+  targetPath: TreePath,
+  action: 'write' | 'delete',
+  deps: TbAppDeps,
+): Promise<void> {
+  let existing: { registeredBy: string } | null = null
+  try {
+    existing = await registry.get(targetPath)
+  } catch {
+    existing = null
+  }
+  const res = checkRegisterPath({
+    sk: {
+      scopes: ctx.scopes,
+      id: ctx.keyId,
+      ...(ctx.registerPaths !== undefined ? { registerPaths: ctx.registerPaths } : {}),
+    },
+    targetPath,
+    action,
+    existing,
+    ...(deps.reservedRoots !== undefined ? { reservedRoots: deps.reservedRoots } : {}),
+  })
+  if (!res.allow) throw res.error
+}
+
+/** TreeNode → TreeEntry(丢弃 config 等,仅保留 tree 视图字段)。 */
+function toEntry(n: TreeNode): TreeEntry {
+  const e: TreeEntry = { path: n.path, kind: n.kind, description: n.description }
+  if (n.online !== undefined) e.online = n.online
+  return e
+}
+
+/**
+ * 目录/~tree 展示裁剪。无 call 权限的 SK 对同一调用节点 `tb call` 为 403,
+ * 且 `tb ls` 不可见;因此 mcp/http/remote 节点在列表面同时要求 read+call。
+ * 直接访问节点本身仍由 handler 保持 read→404 / call→403 次序。
+ */
+function filterListVisible(nodes: TreeNode[], scopes: CallContext['scopes']): TreeNode[] {
+  return nodes.filter((node) => {
+    if (!checkScopes(scopes, node.path, 'read')) return false
+    if (
+      (node.kind === 'mcp'
+        || node.kind === 'http'
+        || node.kind === 'remote'
+        || node.kind === 'device'
+        || node.kind === 'tool')
+      && !checkScopes(scopes, node.path, 'call')
+    ) {
+      return false
+    }
+    return true
+  })
+}
+
+function localizeRemoteEntry(mountPath: TreePath, entry: TreeJson): TreeEntry {
+  const rel = entry.path.replace(/^\/+|\/+$/g, '')
+  const out: TreeEntry = {
+    path: rel === '' ? mountPath : `${mountPath}/${rel}`,
+    kind: entry.kind,
+    description: entry.description,
+  }
+  if (entry.online !== undefined) out.online = entry.online
+  return out
+}
+
+/**
+ * 按直接父路径索引子树节点(父 = 去掉最后一段;顶层节点父为 '')。
+ * `~tree` 一次读入子树后在内存建此索引,getChildren 从中取直接子,避免每层递归各扫 KV。
+ */
+function indexByParent(nodes: TreeNode[]): Map<TreePath, TreeNode[]> {
+  const byParent = new Map<TreePath, TreeNode[]>()
+  for (const n of nodes) {
+    const segs = n.path.split('/')
+    const parent = segs.slice(0, -1).join('/')
+    const bucket = byParent.get(parent)
+    if (bucket) bucket.push(n)
+    else byParent.set(parent, [n])
+  }
+  return byParent
+}
+
+/** 取上游工具集:mcp/tool 走 `toolcache:<path>` 缓存(TTL + refresh);http 从 config 直接生成。 */
+function upstreamTools(
+  node: TreeNode,
+  provider: UpstreamProvider,
+  deps: TbAppDeps,
+  refresh: boolean,
+  now: string,
+): Promise<ToolSpec[]> {
+  if (node.kind === 'mcp' || node.kind === 'tool') {
+    return getTools(deps.state, node.path, () => provider.list(), {
+      refresh,
+      ttl: deps.toolCacheTtlSec ?? TOOL_CACHE_TTL_DEFAULT,
+      now,
+    })
+  }
+  return provider.list()
+}
+
+/**
+ * 生效的 remote 白名单 = env 基线 ∪ 运行时条目(system/federation 管理)。
+ * 请求期读取(app 被 WeakMap 按 env 缓存,不能在装配期定死);运行时无条目 → 原样返回基线。
+ */
+async function resolveRemoteSettings(
+  state: StateStore,
+  base: RemoteSettings,
+): Promise<RemoteSettings> {
+  const runtime = await new RemoteAllowlistStore(state).hosts()
+  if (runtime.length === 0) return base
+  return { ...base, allowlist: [...new Set([...base.allowlist, ...runtime])] }
+}
+
+/**
+ * remote 透传:最长前缀 resolve 命中 remote 节点则改写请求打到 baseUrl。
+ * 非 remote → 返回 null(交给普通流程)。本地两级权限:先可见(read),POST 另需 call。
+ */
+async function remotePassthroughIfMatch(
+  c: AppContext,
+  ctx: CallContext,
+  registry: NodeRegistryStore,
+  treePath: TreePath,
+  reservedTail: '~help' | '~tree' | '~skill' | null,
+  deps: TbAppDeps,
+  headers: Headers = c.req.raw.headers,
+): Promise<Response | null> {
+  let resolved: { node: TreeNode, rest: string }
+  try {
+    resolved = await registry.resolve(treePath)
+  } catch {
+    return null
+  }
+  const node = resolved.node
+  if (node.kind !== 'remote' || node.config?.kind !== 'remote') return null
+
+  if (!check(ctx, treePath, 'read').allow) throw TBError.notFound('not found')
+  const method = reservedTail === null ? 'POST' : 'GET'
+  if (method === 'POST' && !check(ctx, treePath, 'call').allow) {
+    throw new TBError('permission_denied', `no scope grants 'call' on '${treePath}'`)
+  }
+  const requestPath = reservedTail === null ? treePath : `${treePath}/${reservedTail}`
+  const body = method === 'POST' ? await c.req.text() : undefined
+  // 必须 await(而非裸 return async promise):裸返回时其 reject 会在链接那一 tick 被
+  // workerd/miniflare 误报为 unhandled rejection,即便 runHandler 最终 catch(同 GET 通配注释)。
+  return await passthroughRemote({
+    config: node.config,
+    nodePath: node.path,
+    requestPath,
+    method,
+    ...(body !== undefined ? { body } : {}),
+    headers,
+    secrets: deps.secrets,
+    settings: await resolveRemoteSettings(deps.state, deps.remote),
+    requestUrl: c.req.url,
+  })
+}
+
+/**
+ * remote 联邦树聚合:本地 `~tree` 构树递归到 remote 节点或其后代时,取远端同形
+ * `~tree` 的直接 children 并把路径加回本地挂载前缀,再交给 buildTree 统一计入深度/节点预算。
+ */
+async function remoteTreeChildren(
+  c: AppContext,
+  ctx: CallContext,
+  registry: NodeRegistryStore,
+  treePath: TreePath,
+  deps: TbAppDeps,
+): Promise<TreeEntry[]> {
+  if (treePath === '') return []
+  let resolved: { node: TreeNode, rest: string }
+  try {
+    resolved = await registry.resolve(treePath)
+  } catch {
+    return []
+  }
+  if (resolved.node.kind !== 'remote' || resolved.node.config?.kind !== 'remote') return []
+
+  const headers = new Headers(c.req.raw.headers)
+  headers.set('accept', 'application/json')
+  const resp = await remotePassthroughIfMatch(c, ctx, registry, treePath, '~tree', deps, headers)
+  if (resp === null) return []
+  if (!resp.ok) {
+    throw new TBError('unavailable', `remote ~tree returned HTTP ${resp.status}`, {
+      retryable: resp.status >= 500,
+    })
+  }
+  const remoteTree = (await resp.json().catch(() => null)) as TreeJson | null
+  if (remoteTree === null) {
+    throw new TBError('unavailable', 'remote ~tree returned invalid JSON', { retryable: false })
+  }
+  return (remoteTree.children ?? []).map(child => localizeRemoteEntry(resolved.node.path, child))
+}
+
+/** 注册 remote 节点时的白名单校验:config.kind==='remote' → baseUrl 必须在白名单内。 */
+function assertRemoteConfigAllowed(config: unknown, settings: RemoteSettings): void {
+  if (config === null || typeof config !== 'object') return
+  if ((config as { kind?: unknown }).kind !== 'remote') return
+  const baseUrl = (config as { baseUrl?: unknown }).baseUrl
+  if (typeof baseUrl !== 'string') {
+    throw new TBError('invalid_argument', 'remote config 缺少 baseUrl')
+  }
+  assertRemoteAllowed(baseUrl, settings)
+}
+
+// ---------- device 节点 ----------
+
+function tbErrorFromBody(body: TBErrorBody): TBError {
+  return new TBError(body.code, body.message, { retryable: body.retryable })
+}
+
+/** 设备通道缺省(deviceTransport 未注入)→ device 能力禁用。 */
+function requireDevice(deps: TbAppDeps): DeviceChannel {
+  if (deps.device === undefined) {
+    throw TBError.unimplemented('device capability disabled: no device transport')
+  }
+  return deps.device
+}
+
+async function invokeDevice(
+  deps: TbAppDeps,
+  deviceId: string,
+  req: { arguments: Record<string, unknown>, path: string, tool: string },
+): Promise<unknown> {
+  const id = crypto.randomUUID()
+  const body = (await requireDevice(deps).invoke(deviceId, { id, ...req })) as DeviceCallResult
+  if (!body || !('ok' in body)) {
+    throw new TBError('unavailable', 'device session returned invalid result')
+  }
+  if (body.ok) return body.value
+  throw tbErrorFromBody(body.error)
+}
+
+/** device 自定义节点转发标记:hello 代注册时网关写入 providerConfig。 */
+interface DeviceNodeMarker {
+  /** 注册时随 NodeInput 上送的工具表(~help 数据源);老客户端不带。 */
+  cmds?: ToolSpec[]
+  deviceId: string
+  mountPath: string
+}
+
+function deviceMarkerOf(pc: Record<string, unknown> | undefined): DeviceNodeMarker | null {
+  if (pc === undefined || typeof pc.deviceId !== 'string' || typeof pc.mountPath !== 'string') {
+    return null
+  }
+  return {
+    deviceId: pc.deviceId,
+    mountPath: pc.mountPath,
+    ...(Array.isArray(pc.cmds) ? { cmds: pc.cmds as ToolSpec[] } : {}),
+  }
+}
+
+/** kind:'tool' 且带设备标记的自定义节点(SDK registerTool → connect 代注册产物)。 */
+function deviceToolMarker(node: TreeNode): DeviceNodeMarker | null {
+  if (node.kind !== 'tool' || node.config?.kind !== 'tool') return null
+  return deviceMarkerOf(node.config.providerConfig)
+}
+
+/** 帧协议 call 的 path = 节点路径相对设备 mountPath(如 'tools/echo')。 */
+function relativeDevicePath(nodePath: TreePath, mountPath: string): string {
+  if (nodePath.startsWith(`${mountPath}/`)) return nodePath.slice(mountPath.length + 1)
+  throw new TBError('invalid_argument', `device 节点 '${nodePath}' 不在挂载 '${mountPath}' 下`)
+}
+
+// ---------- SDK 进程内 Provider ----------
+
+/** 按节点路径查 SDK 进程内 ContextProvider(未注入/未命中 → null)。 */
+function localContext(deps: TbAppDeps, node: TreeNode): ContextProvider | null {
+  return deps.locals?.context?.(node.path) ?? null
+}
+
+/** 进程内 Provider 的 capabilities:按可选方法实现存在性推导(~describe/~help 共用)。 */
+function localCapabilities(provider: ContextProvider): string[] {
+  return [
+    ...(provider.Search !== undefined ? ['search'] : []),
+    ...(provider.Delete !== undefined ? ['delete'] : []),
+  ]
+}
+
+// ---------- plugin 挂载消费 ----------
+
+/**
+ * 取已注册且启用的 plugin manifest(挂载校验与调用点共用)。
+ * 不存在/kind 不符 → invalid_argument(与既有「未知 provider」口径一致,不泄露更多);
+ * 禁用 → invalid_argument。落盘记录含平台内部 tokenSkId,网关内部使用无须投影。
+ */
+async function requirePlugin(
+  store: StateStore,
+  id: string,
+  kind: PluginKind,
+  what: 'context' | 'tool',
+): Promise<PluginManifest> {
+  const manifest = (await store.get(KEY_PLUGIN + id)) as PluginManifest | null
+  if (manifest === null || manifest.kind !== kind) {
+    throw new TBError('invalid_argument', `未知 ${what} provider:'${id}'`)
+  }
+  if (manifest.enabled !== true) {
+    throw new TBError('invalid_argument', `plugin '${id}' 已禁用`)
+  }
+  return manifest
+}
+
+/** 注册时抓取缓存的 `~describe.capabilities`(pluginmeta:<id>;缺失回空表)。 */
+async function pluginCapabilities(store: StateStore, id: string): Promise<readonly string[]> {
+  const meta = (await store.get(KEY_PLUGIN_META + id)) as PluginDescribe | null
+  return meta?.capabilities ?? []
+}
+
+/**
+ * plugin 调用的挂载上下文:同一 plugin 可多路径挂载,envelope 里带 mountPath 与
+ * 挂载节点的 providerConfig(mountConfig)供 plugin 区分挂载来源;老 plugin 按
+ * "未知字段忽略"原则不受影响。
+ */
+function mountCallContext(
+  ctx: CallContext,
+  mountPath: TreePath,
+  providerConfig: Record<string, unknown> | undefined,
+): CallContext {
+  return {
+    ...ctx,
+    mountPath,
+    ...(providerConfig !== undefined ? { mountConfig: providerConfig } : {}),
+  }
+}
+
+/** 为 mcp/http/tool 节点构造对应 Provider(其余 kind 无 Provider → unimplemented)。 */
+async function providerFor(
+  node: TreeNode,
+  ctx: CallContext,
+  deps: TbAppDeps,
+): Promise<UpstreamProvider> {
+  const insecure = deps.allowInsecureHttp
+  if (node.kind === 'mcp' && node.config?.kind === 'mcp') {
+    return createMcpProvider(node.config as McpConfig, deps.secrets, {
+      allowInsecure: insecure,
+      // 会话复用凭证存 StateStore(mcpsession:<path>);调用结果不缓存(providers/mcp.ts)。
+      session: { store: deps.state, nodePath: node.path },
+      // auth:'oauth' 节点的托管凭证存取面(mcpoauth:*);密钥缺省 → provider 内报 unavailable。
+      ...(deps.encryptionKey !== undefined
+        ? { oauth: { store: deps.state, encryptionKey: deps.encryptionKey } }
+        : {}),
+    })
+  }
+  if (node.kind === 'http' && node.config?.kind === 'http') {
+    return createHttpProvider(node.config as HttpConfig, deps.secrets, { allowInsecure: insecure })
+  }
+  if (node.kind === 'tool' && node.config?.kind === 'tool') {
+    // SDK 进程内工具源(registerTool):按节点路径查本实例表,先于 plugin 解析。
+    const local = deps.locals?.tool?.(node.path)
+    if (local !== undefined) return local
+    // plugin 工具源:provider = 已注册 tool-provider plugin 的 id。
+    const manifest = await requirePlugin(deps.state, node.config.provider, 'tool-provider', 'tool')
+    return createPluginToolProvider({
+      manifest,
+      secrets: deps.secrets,
+      ctx: mountCallContext(ctx, node.path, node.config.providerConfig),
+      // 挂载 authRef = 上游凭证引用,平台代解析经 X-TB-Upstream-Auth 注入。
+      ...(node.config.authRef !== undefined ? { upstreamAuthRef: node.config.authRef } : {}),
+    })
+  }
+  throw TBError.unimplemented(`kind '${node.kind}' has no tool provider`)
+}
+
+/**
+ * 工具级 `~help`(两级披露的细节级):path 非注册节点时,最长前缀 resolve 命中
+ * mcp/http 节点且 rest 恰为一段(工具虚拟名)→ 单工具全量 HelpModel。工具集取自与节点级
+ * 相同的缓存(getTools),不额外打上游。不匹配/工具不存在 → null(调用方 404)。
+ * 可见性与列表面一致(read+call;deny==not_found 不泄露存在性)。
+ */
+async function toolHelpModelFor(
+  c: AppContext,
+  ctx: CallContext,
+  registry: NodeRegistryStore,
+  path: TreePath,
+  deps: TbAppDeps,
+): Promise<HelpModel | null> {
+  let resolved: { node: TreeNode, rest: string }
+  try {
+    resolved = await registry.resolve(path)
+  } catch {
+    return null
+  }
+  const { node, rest } = resolved
+  if (
+    (node.kind !== 'mcp' && node.kind !== 'http' && node.kind !== 'tool')
+    || node.config === undefined
+  ) {
+    return null
+  }
+  if (rest === '' || rest.includes('/')) return null
+  if (!check(ctx, node.path, 'read').allow || !check(ctx, node.path, 'call').allow) return null
+  // device 自定义 tool 节点:工具表来自注册时缓存的 providerConfig.cmds,不打设备。
+  const marker = deviceToolMarker(node)
+  if (marker !== null) {
+    const cached = (marker.cmds ?? []).find(t => t.name === rest)
+    if (cached === undefined) return null
+    return toolHelpModel(node.path, { kind: node.kind, description: node.description }, cached)
+  }
+  const provider = await providerFor(node, ctx, deps)
+  const refresh = c.req.query('refresh') === '1'
+  const raw = await upstreamTools(node, provider, deps, refresh, new Date().toISOString())
+  const { exposed } = virtualizeTools(node.virtualize, raw)
+  const tool = exposed.find(t => t.name === rest)
+  if (tool === undefined) return null
+  return toolHelpModel(node.path, { kind: node.kind, description: node.description }, tool)
+}
+
+/**
+ * device 转发标记只能由 hello 代注册写入:注册面手工携带 providerConfig
+ * 的 deviceId+mountPath → 拒,防止把任意节点调用劫持转发到他人设备(与 device-fs 口径一致)。
+ */
+function assertNoDeviceMarker(config: unknown): void {
+  const pc = (config as { providerConfig?: unknown }).providerConfig
+  if (
+    pc !== null
+    && typeof pc === 'object'
+    && deviceMarkerOf(pc as Record<string, unknown>) !== null
+  ) {
+    throw new TBError(
+      'invalid_argument',
+      'providerConfig 的 device 转发标记由网关代写,不得经注册面携带',
+    )
+  }
+}
+
+/**
+ * 注册/更新 kind:'tool' 节点时的配置校验(注册时即拒):
+ * provider 必须是已注册且启用的 tool-provider plugin(SDK 保留 id '@local' 由
+ * SDK 内部注册通道落库,不经注册面)。
+ */
+async function assertToolConfig(config: unknown, store: StateStore): Promise<void> {
+  if (config === null || typeof config !== 'object') return
+  if ((config as { kind?: unknown }).kind !== 'tool') return
+  assertNoDeviceMarker(config)
+  const provider = (config as { provider?: unknown }).provider
+  if (typeof provider !== 'string' || provider === '') {
+    throw new TBError('invalid_argument', 'kind:\'tool\' 节点需要 config.provider(plugin id)')
+  }
+  await requirePlugin(store, provider, 'tool-provider', 'tool')
+}
+
+// ---------- context 节点 ----------
+
+type ContextConfig = Extract<NodeConfig, { kind: 'context' }>
+type SkillhubConfig = Extract<NodeConfig, { kind: 'skillhub' }>
+/** context 与 skillhub 共用对象存储装配(provider/providerConfig/authRef 同形)。 */
+type ObjectNodeConfig = ContextConfig | SkillhubConfig
+
+/** S3 类凭证值形状:JSON {"accessKeyId","secretAccessKey"};解析失败不回显值。 */
+export function parseS3Credentials(
+  raw: string,
+  refName: string,
+): { accessKeyId: string, secretAccessKey: string } {
+  try {
+    const v = JSON.parse(raw) as { accessKeyId?: unknown, secretAccessKey?: unknown }
+    if (typeof v.accessKeyId === 'string' && typeof v.secretAccessKey === 'string') {
+      return { accessKeyId: v.accessKeyId, secretAccessKey: v.secretAccessKey }
+    }
+  } catch {
+    // fallthrough:统一 invalid_argument
+  }
+  throw new TBError(
+    'invalid_argument',
+    `凭证 '${refName}' 不是 {"accessKeyId","secretAccessKey"} 形状的 JSON`,
+  )
+}
+
+function deviceIdForDeviceFs(cfg: ContextConfig): string {
+  const pc = cfg.providerConfig
+  if (pc && typeof pc === 'object' && typeof pc.deviceId === 'string') return pc.deviceId
+  throw new TBError('invalid_argument', 'device-fs context 缺少 providerConfig.deviceId')
+}
+
+/** s3 provider 的 store 构造参数:providerConfig.endpoint/bucket + authRef 解析(均必填)。 */
+async function s3StoreConfig(
+  cfg: ObjectNodeConfig,
+  secrets: SecretStoreImpl,
+): Promise<S3StoreConfig> {
+  const pc = (cfg.providerConfig ?? {}) as {
+    bucket?: unknown
+    endpoint?: unknown
+    region?: unknown
+  }
+  if (typeof pc.endpoint !== 'string' || typeof pc.bucket !== 'string') {
+    throw new TBError('invalid_argument', 's3 provider 需要 providerConfig.endpoint 与 bucket')
+  }
+  if (typeof cfg.authRef !== 'string') {
+    throw new TBError('invalid_argument', 's3 provider 需要 authRef(SecretStore 引用名)')
+  }
+  const raw = await secrets.resolve(cfg.authRef)
+  if (raw === undefined) {
+    throw new TBError('invalid_argument', `authRef '${cfg.authRef}' 无法解析`)
+  }
+  return {
+    endpoint: pc.endpoint,
+    bucket: pc.bucket,
+    ...(typeof pc.region === 'string' ? { region: pc.region } : {}),
+    ...parseS3Credentials(raw, cfg.authRef),
+  }
+}
+
+/** providerConfig.prefix(共桶隔离);缺省 r2 按节点路径隔离,s3 为空(整桶即 namespace)。 */
+function contextKeyPrefix(cfg: ContextConfig, nodePath: TreePath): string {
+  const prefix = (cfg.providerConfig as { prefix?: unknown } | undefined)?.prefix
+  if (typeof prefix === 'string') return prefix
+  return cfg.provider === 'r2' ? `ctx/${nodePath}` : ''
+}
+
+/** 按 config.provider 构造底层 ObjectStore('r2' = 宿主注入的平台对象存储)。 */
+async function contextObjectStoreFor(cfg: ObjectNodeConfig, deps: TbAppDeps): Promise<ObjectStore> {
+  if (cfg.provider === 'r2') {
+    if (deps.objects === undefined) {
+      throw new TBError('unavailable', 'object store not configured(objects 未注入)', {
+        retryable: false,
+      })
+    }
+    return await deps.objects()
+  }
+  if (cfg.provider === 's3') {
+    return createS3ObjectStore(await s3StoreConfig(cfg, deps.secrets), {
+      allowInsecure: deps.allowInsecureHttp,
+    })
+  }
+  throw TBError.unimplemented(`context provider '${cfg.provider}' not implemented yet`)
+}
+
+/**
+ * context 节点的 ContextProvider 装配:四动词语义在 core objectProvider,这里只注入
+ * ObjectStore、keyPrefix、$ref 阈值/有效期与 /~ref 中转 URL 工厂(presign 凭证缺省时生效)。
+ */
+async function contextProviderFor(
+  node: TreeNode,
+  cfg: ContextConfig,
+  deps: TbAppDeps,
+  requestUrl: string,
+): Promise<ContextProvider> {
+  const objects = await contextObjectStoreFor(cfg, deps)
+  const opts: Parameters<typeof createObjectContextProvider>[1] = {
+    nsPath: node.path,
+    keyPrefix: contextKeyPrefix(cfg, node.path),
+    readOnly: cfg.readOnly ?? false,
+  }
+  if (deps.refThresholdBytes !== undefined) opts.refThresholdBytes = deps.refThresholdBytes
+  if (deps.refTtlSec !== undefined) opts.presignTtlSec = deps.refTtlSec
+  // /~ref 中转 URL 工厂:token 密钥派生自 TB_SECRET_ENCRYPTION_KEY;密钥缺省则不提供
+  // (presign 也缺时 core 对大对象 Get 报 unavailable)。
+  const encKey = deps.encryptionKey
+  if (encKey !== undefined) {
+    const origin = new URL(requestUrl).origin
+    const relayTtlSec = deps.refTtlSec ?? PRESIGN_TTL_SEC_DEFAULT
+    opts.relayRefUrl = async (key) => {
+      const exp = Math.floor(Date.now() / 1000) + relayTtlSec
+      return `${origin}/~ref/${await signRefToken({ p: node.path, k: key, exp }, encKey)}`
+    }
+  }
+  return createObjectContextProvider(objects, opts)
+}
+
+/** skillhub 的 keyPrefix:共桶隔离,r2 默认 `skills/<nodePath>`,s3 默认整桶。 */
+function skillhubKeyPrefix(cfg: SkillhubConfig, nodePath: TreePath): string {
+  const prefix = (cfg.providerConfig as { prefix?: unknown } | undefined)?.prefix
+  if (typeof prefix === 'string') return prefix
+  return cfg.provider === 'r2' ? `skills/${nodePath}` : ''
+}
+
+/**
+ * skillhub 节点的 SkillhubProvider 装配:底层对象存储与 $ref 中转 URL 工厂与 context 同源,
+ * 只是 keyPrefix 落在 `skills/<path>` 且叠加 skill 单位语义(core skillhub/provider)。
+ */
+async function skillhubProviderFor(
+  node: TreeNode,
+  cfg: SkillhubConfig,
+  deps: TbAppDeps,
+  requestUrl: string,
+): Promise<SkillhubProvider> {
+  const objects = await contextObjectStoreFor(cfg, deps)
+  const opts: Parameters<typeof createSkillhubProvider>[1] = {
+    nsPath: node.path,
+    keyPrefix: skillhubKeyPrefix(cfg, node.path),
+    readOnly: cfg.readOnly ?? false,
+  }
+  if (deps.refThresholdBytes !== undefined) opts.refThresholdBytes = deps.refThresholdBytes
+  if (deps.refTtlSec !== undefined) opts.presignTtlSec = deps.refTtlSec
+  const encKey = deps.encryptionKey
+  if (encKey !== undefined) {
+    const origin = new URL(requestUrl).origin
+    const relayTtlSec = deps.refTtlSec ?? PRESIGN_TTL_SEC_DEFAULT
+    opts.relayRefUrl = async (key) => {
+      const exp = Math.floor(Date.now() / 1000) + relayTtlSec
+      return `${origin}/~ref/${await signRefToken({ p: node.path, k: key, exp }, encKey)}`
+    }
+  }
+  return createSkillhubProvider(objects, opts)
+}
+
+/** 数据面 {tool} → SkillhubProvider 方法派发;入参精细校验由 provider 承担。 */
+async function dispatchSkillhubCmd(
+  provider: SkillhubProvider,
+  tool: string,
+  args: Record<string, unknown>,
+): Promise<unknown> {
+  switch (tool) {
+    case 'List':
+      return await provider.List(args.opts as ListOptions | undefined)
+    case 'Get':
+      return typeof args.file === 'string'
+        ? await provider.GetFile(args.id as string, args.file)
+        : await provider.Get(args.id as string)
+    case 'Search':
+      return await provider.Search(args.query as string, args.opts as ListOptions | undefined)
+    case 'Publish':
+      if (!Array.isArray(args.files)) {
+        throw new TBError('invalid_argument', 'Publish 需要数组 \'files\'')
+      }
+      return await provider.Publish({
+        ...(typeof args.id === 'string' ? { id: args.id } : {}),
+        files: args.files as SkillPublishFile[],
+      })
+    case 'Remove':
+      return await provider.Remove(args.id as string)
+    default:
+      // skillhubScopeForCmd 已挡未知 cmd;此处为类型完备性兜底。
+      throw new TBError('invalid_argument', `unknown cmd '${tool}'`)
+  }
+}
+
+/**
+ * 数据面 {tool} → ContextProvider 方法派发;入参精细校验由 provider 承担。
+ * 可选方法(Search/Delete)未实现(plugin 未在 capabilities 声明)→ 按 unknown cmd 拒
+ * (未声明的可选方法平台永不调用)。SDK 设备侧 handler 派发同形复用(导出)。
+ */
+export async function dispatchContextCmd(
+  provider: ContextProvider,
+  tool: string,
+  args: Record<string, unknown>,
+): Promise<unknown> {
+  switch (tool) {
+    case 'List':
+      return await provider.List((args.path as string) ?? '', args.opts as ListOptions | undefined)
+    case 'Get':
+      return await provider.Get(args.path as string)
+    case 'Write':
+      if (typeof args.entry !== 'object' || args.entry === null) {
+        throw new TBError('invalid_argument', 'Write 需要对象 \'entry\'')
+      }
+      return await provider.Write(args.path as string, args.entry as ContextEntryInput)
+    case 'Update':
+      if (typeof args.patch !== 'object' || args.patch === null) {
+        throw new TBError('invalid_argument', 'Update 需要对象 \'patch\'')
+      }
+      return await provider.Update(args.path as string, args.patch as ContextPatch)
+    case 'Delete':
+      if (provider.Delete === undefined) {
+        throw new TBError('invalid_argument', `unknown cmd '${tool}'(capability 未声明)`)
+      }
+      return await provider.Delete(args.path as string)
+    case 'Search':
+      if (provider.Search === undefined) {
+        throw new TBError('invalid_argument', `unknown cmd '${tool}'(capability 未声明)`)
+      }
+      return await provider.Search(args.query as string, args.opts as SearchOptions | undefined)
+    default:
+      // contextScopeForCmd 已挡未知 cmd;此处为类型完备性兜底。
+      throw new TBError('invalid_argument', `unknown cmd '${tool}'`)
+  }
+}
+
+/** ttl 懒回收单点判定:过期 → 删节点 + not_found;未过期 → 通过。context/skillhub 共用。 */
+async function assertContextAlive(
+  node: TreeNode,
+  cfg: { ttl?: number },
+  registry: NodeRegistryStore,
+): Promise<void> {
+  if (!isContextExpired(node.createdAt, cfg.ttl, Date.now())) return
+  await registry.delete(node.path)
+  throw TBError.notFound('not found')
+}
+
+/** 列表面(~tree/目录 ~help)的 ttl 懒回收:过期 context/skillhub 节点剔除并删除。 */
+async function pruneExpiredContext(
+  nodes: TreeNode[],
+  registry: NodeRegistryStore,
+): Promise<TreeNode[]> {
+  const now = Date.now()
+  const alive: TreeNode[] = []
+  for (const n of nodes) {
+    const cfg = n.config
+    if (
+      (n.kind === 'context' || n.kind === 'skillhub')
+      && cfg?.kind === n.kind
+      && isContextExpired(n.createdAt, (cfg as { ttl?: number }).ttl, now)
+    ) {
+      await registry.delete(n.path)
+      continue
+    }
+    alive.push(n)
+  }
+  return alive
+}
+
+/**
+ * 节点的 HelpModel:builtin 取模块 help();directory 列可见子节点;mcp/http 经 Provider 取
+ * 上游工具集(mcp 走缓存,`refresh` 强制刷新)→ 虚拟化 → `toolsToHelpModel`;context 静态
+ * cmd 表(ttl 懒回收先行);其余 kind(device)未落地 → 501。remote 在调用点已透传,不进此函数。
+ */
+async function helpModelFor(
+  node: TreeNode,
+  registry: NodeRegistryStore,
+  ctx: CallContext,
+  builtins: Map<string, BuiltinModule>,
+  deps: TbAppDeps,
+  opts: { now: string, refresh: boolean },
+): Promise<HelpModel> {
+  if (node.kind === 'builtin' && node.config?.kind === 'builtin') {
+    const mod = builtins.get(node.config.module)
+    if (mod) return mod.help(node.path)
+    throw TBError.unimplemented(`builtin module '${node.config.module}' not available`)
+  }
+  if (node.kind === 'directory') {
+    const children = filterListVisible(
+      await pruneExpiredContext(await registry.children(node.path), registry),
+      ctx.scopes,
+    )
+    if (node.online !== undefined) {
+      return deviceDirectoryHelpModel(
+        { path: node.path, description: node.description, online: node.online },
+        children.map(n => ({ path: n.path, kind: n.kind, description: n.description })),
+      )
+    }
+    return {
+      node: { path: node.path, kind: node.kind, description: node.description },
+      cmds: [],
+      children: children.map(n => ({ path: n.path, kind: n.kind, description: n.description })),
+      hint: 'GET /<child-path>/~help describes a child node',
+    }
+  }
+  // device 自定义 tool 节点:~help 来自注册时上送的工具表(cmds),
+  // 不打设备;索引形态与 mcp/http 对齐,单工具全量 spec 走工具级 ~help(toolHelpModelFor)。
+  const toolMarker = deviceToolMarker(node)
+  if (toolMarker !== null) {
+    return toolsToHelpModel(
+      node.path,
+      { kind: node.kind, description: node.description },
+      toolMarker.cmds ?? [],
+      { index: true },
+    )
+  }
+  if (node.kind === 'mcp' || node.kind === 'http' || node.kind === 'tool') {
+    const provider = await providerFor(node, ctx, deps)
+    const raw = await upstreamTools(node, provider, deps, opts.refresh, opts.now)
+    const { exposed } = virtualizeTools(node.virtualize, raw)
+    // 索引形态(两级披露):不含 inputSchema;全量 spec 走工具级 ~help。
+    return toolsToHelpModel(
+      node.path,
+      { kind: node.kind, description: node.description },
+      exposed,
+      {
+        index: true,
+      },
+    )
+  }
+  if (node.kind === 'device' && node.config?.kind === 'device') {
+    return deviceShellHelpModel(node.path, node.config.expose.shell ?? {})
+  }
+  // context:cmd 表静态声明(readOnly 隐藏写动词);~help 命中即做 ttl 懒回收。
+  if (node.kind === 'context' && node.config?.kind === 'context') {
+    await assertContextAlive(node, node.config, registry)
+    if (node.config.provider === 'device-fs') {
+      return deviceFsHelpModel(
+        { path: node.path, description: node.description },
+        { readOnly: node.config.readOnly ?? false },
+      )
+    }
+    // device 自定义 context 节点:静态动词表(readOnly 隐藏写动词)。
+    if (deviceMarkerOf(node.config.providerConfig) !== null) {
+      return contextHelpModel(node, { readOnly: node.config.readOnly ?? false })
+    }
+    if (node.config.provider !== 'r2' && node.config.provider !== 's3') {
+      const model = contextHelpModel(node, { readOnly: node.config.readOnly ?? false })
+      const core = new Set(['List', 'Get', 'Write', 'Update'])
+      // SDK 进程内 Provider:可选方法按实现存在性裁剪(与 ~describe 推导一致);
+      // plugin-backed 节点:只列四动词 + 注册时声明的可选方法(Q12)。
+      const local = localContext(deps, node)
+      const declared
+        = local !== null
+          ? optionalMethodsForCapabilities(localCapabilities(local))
+          : optionalMethodsForCapabilities(
+              await pluginCapabilities(deps.state, node.config.provider),
+            )
+      return { ...model, cmds: model.cmds.filter(c => core.has(c.name) || declared.has(c.name)) }
+    }
+    return contextHelpModel(node, { readOnly: node.config.readOnly ?? false })
+  }
+  if (node.kind === 'skillhub' && node.config?.kind === 'skillhub') {
+    await assertContextAlive(node, node.config, registry)
+    return skillhubHelpModel(node, { readOnly: node.config.readOnly ?? false })
+  }
+  throw TBError.unimplemented(`~help for kind '${node.kind}' not implemented yet`)
+}
+
+/**
+ * 注册/更新 context 节点时的配置校验(注册时即拒):
+ * provider = r2|s3 或已注册且启用的 context-provider plugin id;
+ * s3 必填 endpoint/bucket/authRef,且做一次浅 list 连通探测(D8)——失败 →
+ * unavailable(retryable);r2 与 plugin 不探测(plugin 在 PluginRegistry.Write 时已探活)。
+ */
+async function assertContextConfig(config: unknown, deps: TbAppDeps): Promise<void> {
+  if (config === null || typeof config !== 'object') return
+  if ((config as { kind?: unknown }).kind !== 'context') return
+  assertNoDeviceMarker(config)
+  const cfg = config as ContextConfig
+  if (cfg.provider !== 'r2' && cfg.provider !== 's3') {
+    // plugin 挂载:不存在/kind 不符/禁用 → invalid_argument(device-fs 由网关代写、
+    // SDK '@local' 由 registerContext 内部通道落库,均不经注册面)。
+    await requirePlugin(deps.state, cfg.provider, 'context-provider', 'context')
+    return
+  }
+  if (cfg.provider === 's3') {
+    // 结构/凭证/https 校验失败 → invalid_argument(store 构造抛出)。
+    const store = createS3ObjectStore(await s3StoreConfig(cfg, deps.secrets), {
+      allowInsecure: deps.allowInsecureHttp,
+    })
+    try {
+      await store.list(contextKeyPrefix(cfg, ''), { limit: 1 })
+    } catch (err) {
+      const detail = isTBError(err) ? err.message : String(err)
+      throw new TBError('unavailable', `s3 连通探测失败:${detail}`, { retryable: true })
+    }
+  }
+}
+
+/**
+ * 注册/更新 skillhub 节点时的配置校验:provider 仅 r2|s3(本期不支持 plugin/device);
+ * s3 做一次浅 list 连通探测(与 context 同则),r2 用平台桶不探测。
+ */
+async function assertSkillhubConfig(config: unknown, deps: TbAppDeps): Promise<void> {
+  if (config === null || typeof config !== 'object') return
+  if ((config as { kind?: unknown }).kind !== 'skillhub') return
+  const cfg = config as SkillhubConfig
+  if (cfg.provider !== 'r2' && cfg.provider !== 's3') {
+    throw new TBError(
+      'invalid_argument',
+      `skillhub provider 仅支持 'r2' 或 's3',收到 '${cfg.provider}'`,
+    )
+  }
+  if (cfg.provider === 's3') {
+    const store = createS3ObjectStore(await s3StoreConfig(cfg, deps.secrets), {
+      allowInsecure: deps.allowInsecureHttp,
+    })
+    try {
+      await store.list(skillhubKeyPrefix(cfg, ''), { limit: 1 })
+    } catch (err) {
+      const detail = isTBError(err) ? err.message : String(err)
+      throw new TBError('unavailable', `s3 连通探测失败:${detail}`, { retryable: true })
+    }
+  }
+}
+
+/** ~tree 的 DSL 文本渲染:每行缩进树(简单实现;JSON 是规范形状)。 */
+function renderTreeDsl(tree: TreeJson): string {
+  const lines: string[] = []
+  const walk = (n: TreeJson, depth: number): void => {
+    const indent = '  '.repeat(depth)
+    const label = n.path === '' ? '/' : n.path
+    const trunc = n.truncated ? ' …' : ''
+    lines.push(`${indent}${label} [${n.kind}] ${n.description}${trunc}`)
+    for (const child of n.children ?? []) walk(child, depth + 1)
+  }
+  walk(tree, 0)
+  return `${lines.join('\n')}\n`
+}
 export function createTbApp(deps: TbAppDeps): Hono<{ Variables: Vars }> {
   const app = new Hono<{ Variables: Vars }>()
   const builtinsOf = (store: StateStore): Map<string, BuiltinModule> =>
@@ -1133,877 +2005,4 @@ export function createTbApp(deps: TbAppDeps): Hono<{ Variables: Vars }> {
   })
 
   return app
-}
-
-/** 反向注册路径判定(查 existing 占用者;deps.reservedRoots 追加保留根)。allow=false 则抛其 error。 */
-async function assertRegisterPath(
-  registry: NodeRegistryStore,
-  ctx: CallContext,
-  targetPath: TreePath,
-  action: 'write' | 'delete',
-  deps: TbAppDeps,
-): Promise<void> {
-  let existing: { registeredBy: string } | null = null
-  try {
-    existing = await registry.get(targetPath)
-  } catch {
-    existing = null
-  }
-  const res = checkRegisterPath({
-    sk: {
-      scopes: ctx.scopes,
-      id: ctx.keyId,
-      ...(ctx.registerPaths !== undefined ? { registerPaths: ctx.registerPaths } : {}),
-    },
-    targetPath,
-    action,
-    existing,
-    ...(deps.reservedRoots !== undefined ? { reservedRoots: deps.reservedRoots } : {}),
-  })
-  if (!res.allow) throw res.error
-}
-
-/** TreeNode → TreeEntry(丢弃 config 等,仅保留 tree 视图字段)。 */
-function toEntry(n: TreeNode): TreeEntry {
-  const e: TreeEntry = { path: n.path, kind: n.kind, description: n.description }
-  if (n.online !== undefined) e.online = n.online
-  return e
-}
-
-/**
- * 目录/~tree 展示裁剪。无 call 权限的 SK 对同一调用节点 `tb call` 为 403,
- * 且 `tb ls` 不可见;因此 mcp/http/remote 节点在列表面同时要求 read+call。
- * 直接访问节点本身仍由 handler 保持 read→404 / call→403 次序。
- */
-function filterListVisible(nodes: TreeNode[], scopes: CallContext['scopes']): TreeNode[] {
-  return nodes.filter((node) => {
-    if (!checkScopes(scopes, node.path, 'read')) return false
-    if (
-      (node.kind === 'mcp'
-        || node.kind === 'http'
-        || node.kind === 'remote'
-        || node.kind === 'device'
-        || node.kind === 'tool')
-      && !checkScopes(scopes, node.path, 'call')
-    ) {
-      return false
-    }
-    return true
-  })
-}
-
-function localizeRemoteEntry(mountPath: TreePath, entry: TreeJson): TreeEntry {
-  const rel = entry.path.replace(/^\/+|\/+$/g, '')
-  const out: TreeEntry = {
-    path: rel === '' ? mountPath : `${mountPath}/${rel}`,
-    kind: entry.kind,
-    description: entry.description,
-  }
-  if (entry.online !== undefined) out.online = entry.online
-  return out
-}
-
-/**
- * remote 联邦树聚合:本地 `~tree` 构树递归到 remote 节点或其后代时,取远端同形
- * `~tree` 的直接 children 并把路径加回本地挂载前缀,再交给 buildTree 统一计入深度/节点预算。
- */
-async function remoteTreeChildren(
-  c: AppContext,
-  ctx: CallContext,
-  registry: NodeRegistryStore,
-  treePath: TreePath,
-  deps: TbAppDeps,
-): Promise<TreeEntry[]> {
-  if (treePath === '') return []
-  let resolved: { node: TreeNode, rest: string }
-  try {
-    resolved = await registry.resolve(treePath)
-  } catch {
-    return []
-  }
-  if (resolved.node.kind !== 'remote' || resolved.node.config?.kind !== 'remote') return []
-
-  const headers = new Headers(c.req.raw.headers)
-  headers.set('accept', 'application/json')
-  const resp = await remotePassthroughIfMatch(c, ctx, registry, treePath, '~tree', deps, headers)
-  if (resp === null) return []
-  if (!resp.ok) {
-    throw new TBError('unavailable', `remote ~tree returned HTTP ${resp.status}`, {
-      retryable: resp.status >= 500,
-    })
-  }
-  const remoteTree = (await resp.json().catch(() => null)) as TreeJson | null
-  if (remoteTree === null) {
-    throw new TBError('unavailable', 'remote ~tree returned invalid JSON', { retryable: false })
-  }
-  return (remoteTree.children ?? []).map(child => localizeRemoteEntry(resolved.node.path, child))
-}
-
-/**
- * 按直接父路径索引子树节点(父 = 去掉最后一段;顶层节点父为 '')。
- * `~tree` 一次读入子树后在内存建此索引,getChildren 从中取直接子,避免每层递归各扫 KV。
- */
-function indexByParent(nodes: TreeNode[]): Map<TreePath, TreeNode[]> {
-  const byParent = new Map<TreePath, TreeNode[]>()
-  for (const n of nodes) {
-    const segs = n.path.split('/')
-    const parent = segs.slice(0, -1).join('/')
-    const bucket = byParent.get(parent)
-    if (bucket) bucket.push(n)
-    else byParent.set(parent, [n])
-  }
-  return byParent
-}
-
-/**
- * 节点的 HelpModel:builtin 取模块 help();directory 列可见子节点;mcp/http 经 Provider 取
- * 上游工具集(mcp 走缓存,`refresh` 强制刷新)→ 虚拟化 → `toolsToHelpModel`;context 静态
- * cmd 表(ttl 懒回收先行);其余 kind(device)未落地 → 501。remote 在调用点已透传,不进此函数。
- */
-async function helpModelFor(
-  node: TreeNode,
-  registry: NodeRegistryStore,
-  ctx: CallContext,
-  builtins: Map<string, BuiltinModule>,
-  deps: TbAppDeps,
-  opts: { now: string, refresh: boolean },
-): Promise<HelpModel> {
-  if (node.kind === 'builtin' && node.config?.kind === 'builtin') {
-    const mod = builtins.get(node.config.module)
-    if (mod) return mod.help(node.path)
-    throw TBError.unimplemented(`builtin module '${node.config.module}' not available`)
-  }
-  if (node.kind === 'directory') {
-    const children = filterListVisible(
-      await pruneExpiredContext(await registry.children(node.path), registry),
-      ctx.scopes,
-    )
-    if (node.online !== undefined) {
-      return deviceDirectoryHelpModel(
-        { path: node.path, description: node.description, online: node.online },
-        children.map(n => ({ path: n.path, kind: n.kind, description: n.description })),
-      )
-    }
-    return {
-      node: { path: node.path, kind: node.kind, description: node.description },
-      cmds: [],
-      children: children.map(n => ({ path: n.path, kind: n.kind, description: n.description })),
-      hint: 'GET /<child-path>/~help describes a child node',
-    }
-  }
-  // device 自定义 tool 节点:~help 来自注册时上送的工具表(cmds),
-  // 不打设备;索引形态与 mcp/http 对齐,单工具全量 spec 走工具级 ~help(toolHelpModelFor)。
-  const toolMarker = deviceToolMarker(node)
-  if (toolMarker !== null) {
-    return toolsToHelpModel(
-      node.path,
-      { kind: node.kind, description: node.description },
-      toolMarker.cmds ?? [],
-      { index: true },
-    )
-  }
-  if (node.kind === 'mcp' || node.kind === 'http' || node.kind === 'tool') {
-    const provider = await providerFor(node, ctx, deps)
-    const raw = await upstreamTools(node, provider, deps, opts.refresh, opts.now)
-    const { exposed } = virtualizeTools(node.virtualize, raw)
-    // 索引形态(两级披露):不含 inputSchema;全量 spec 走工具级 ~help。
-    return toolsToHelpModel(
-      node.path,
-      { kind: node.kind, description: node.description },
-      exposed,
-      {
-        index: true,
-      },
-    )
-  }
-  if (node.kind === 'device' && node.config?.kind === 'device') {
-    return deviceShellHelpModel(node.path, node.config.expose.shell ?? {})
-  }
-  // context:cmd 表静态声明(readOnly 隐藏写动词);~help 命中即做 ttl 懒回收。
-  if (node.kind === 'context' && node.config?.kind === 'context') {
-    await assertContextAlive(node, node.config, registry)
-    if (node.config.provider === 'device-fs') {
-      return deviceFsHelpModel(
-        { path: node.path, description: node.description },
-        { readOnly: node.config.readOnly ?? false },
-      )
-    }
-    // device 自定义 context 节点:静态动词表(readOnly 隐藏写动词)。
-    if (deviceMarkerOf(node.config.providerConfig) !== null) {
-      return contextHelpModel(node, { readOnly: node.config.readOnly ?? false })
-    }
-    if (node.config.provider !== 'r2' && node.config.provider !== 's3') {
-      const model = contextHelpModel(node, { readOnly: node.config.readOnly ?? false })
-      const core = new Set(['List', 'Get', 'Write', 'Update'])
-      // SDK 进程内 Provider:可选方法按实现存在性裁剪(与 ~describe 推导一致);
-      // plugin-backed 节点:只列四动词 + 注册时声明的可选方法(Q12)。
-      const local = localContext(deps, node)
-      const declared
-        = local !== null
-          ? optionalMethodsForCapabilities(localCapabilities(local))
-          : optionalMethodsForCapabilities(
-              await pluginCapabilities(deps.state, node.config.provider),
-            )
-      return { ...model, cmds: model.cmds.filter(c => core.has(c.name) || declared.has(c.name)) }
-    }
-    return contextHelpModel(node, { readOnly: node.config.readOnly ?? false })
-  }
-  if (node.kind === 'skillhub' && node.config?.kind === 'skillhub') {
-    await assertContextAlive(node, node.config, registry)
-    return skillhubHelpModel(node, { readOnly: node.config.readOnly ?? false })
-  }
-  throw TBError.unimplemented(`~help for kind '${node.kind}' not implemented yet`)
-}
-
-/**
- * 工具级 `~help`(两级披露的细节级):path 非注册节点时,最长前缀 resolve 命中
- * mcp/http 节点且 rest 恰为一段(工具虚拟名)→ 单工具全量 HelpModel。工具集取自与节点级
- * 相同的缓存(getTools),不额外打上游。不匹配/工具不存在 → null(调用方 404)。
- * 可见性与列表面一致(read+call;deny==not_found 不泄露存在性)。
- */
-async function toolHelpModelFor(
-  c: AppContext,
-  ctx: CallContext,
-  registry: NodeRegistryStore,
-  path: TreePath,
-  deps: TbAppDeps,
-): Promise<HelpModel | null> {
-  let resolved: { node: TreeNode, rest: string }
-  try {
-    resolved = await registry.resolve(path)
-  } catch {
-    return null
-  }
-  const { node, rest } = resolved
-  if (
-    (node.kind !== 'mcp' && node.kind !== 'http' && node.kind !== 'tool')
-    || node.config === undefined
-  ) {
-    return null
-  }
-  if (rest === '' || rest.includes('/')) return null
-  if (!check(ctx, node.path, 'read').allow || !check(ctx, node.path, 'call').allow) return null
-  // device 自定义 tool 节点:工具表来自注册时缓存的 providerConfig.cmds,不打设备。
-  const marker = deviceToolMarker(node)
-  if (marker !== null) {
-    const cached = (marker.cmds ?? []).find(t => t.name === rest)
-    if (cached === undefined) return null
-    return toolHelpModel(node.path, { kind: node.kind, description: node.description }, cached)
-  }
-  const provider = await providerFor(node, ctx, deps)
-  const refresh = c.req.query('refresh') === '1'
-  const raw = await upstreamTools(node, provider, deps, refresh, new Date().toISOString())
-  const { exposed } = virtualizeTools(node.virtualize, raw)
-  const tool = exposed.find(t => t.name === rest)
-  if (tool === undefined) return null
-  return toolHelpModel(node.path, { kind: node.kind, description: node.description }, tool)
-}
-
-/** 为 mcp/http/tool 节点构造对应 Provider(其余 kind 无 Provider → unimplemented)。 */
-async function providerFor(
-  node: TreeNode,
-  ctx: CallContext,
-  deps: TbAppDeps,
-): Promise<UpstreamProvider> {
-  const insecure = deps.allowInsecureHttp
-  if (node.kind === 'mcp' && node.config?.kind === 'mcp') {
-    return createMcpProvider(node.config as McpConfig, deps.secrets, {
-      allowInsecure: insecure,
-      // 会话复用凭证存 StateStore(mcpsession:<path>);调用结果不缓存(providers/mcp.ts)。
-      session: { store: deps.state, nodePath: node.path },
-      // auth:'oauth' 节点的托管凭证存取面(mcpoauth:*);密钥缺省 → provider 内报 unavailable。
-      ...(deps.encryptionKey !== undefined
-        ? { oauth: { store: deps.state, encryptionKey: deps.encryptionKey } }
-        : {}),
-    })
-  }
-  if (node.kind === 'http' && node.config?.kind === 'http') {
-    return createHttpProvider(node.config as HttpConfig, deps.secrets, { allowInsecure: insecure })
-  }
-  if (node.kind === 'tool' && node.config?.kind === 'tool') {
-    // SDK 进程内工具源(registerTool):按节点路径查本实例表,先于 plugin 解析。
-    const local = deps.locals?.tool?.(node.path)
-    if (local !== undefined) return local
-    // plugin 工具源:provider = 已注册 tool-provider plugin 的 id。
-    const manifest = await requirePlugin(deps.state, node.config.provider, 'tool-provider', 'tool')
-    return createPluginToolProvider({
-      manifest,
-      secrets: deps.secrets,
-      ctx: mountCallContext(ctx, node.path, node.config.providerConfig),
-      // 挂载 authRef = 上游凭证引用,平台代解析经 X-TB-Upstream-Auth 注入。
-      ...(node.config.authRef !== undefined ? { upstreamAuthRef: node.config.authRef } : {}),
-    })
-  }
-  throw TBError.unimplemented(`kind '${node.kind}' has no tool provider`)
-}
-
-/** 取上游工具集:mcp/tool 走 `toolcache:<path>` 缓存(TTL + refresh);http 从 config 直接生成。 */
-function upstreamTools(
-  node: TreeNode,
-  provider: UpstreamProvider,
-  deps: TbAppDeps,
-  refresh: boolean,
-  now: string,
-): Promise<ToolSpec[]> {
-  if (node.kind === 'mcp' || node.kind === 'tool') {
-    return getTools(deps.state, node.path, () => provider.list(), {
-      refresh,
-      ttl: deps.toolCacheTtlSec ?? TOOL_CACHE_TTL_DEFAULT,
-      now,
-    })
-  }
-  return provider.list()
-}
-
-/**
- * remote 透传:最长前缀 resolve 命中 remote 节点则改写请求打到 baseUrl。
- * 非 remote → 返回 null(交给普通流程)。本地两级权限:先可见(read),POST 另需 call。
- */
-async function remotePassthroughIfMatch(
-  c: AppContext,
-  ctx: CallContext,
-  registry: NodeRegistryStore,
-  treePath: TreePath,
-  reservedTail: '~help' | '~tree' | '~skill' | null,
-  deps: TbAppDeps,
-  headers: Headers = c.req.raw.headers,
-): Promise<Response | null> {
-  let resolved: { node: TreeNode, rest: string }
-  try {
-    resolved = await registry.resolve(treePath)
-  } catch {
-    return null
-  }
-  const node = resolved.node
-  if (node.kind !== 'remote' || node.config?.kind !== 'remote') return null
-
-  if (!check(ctx, treePath, 'read').allow) throw TBError.notFound('not found')
-  const method = reservedTail === null ? 'POST' : 'GET'
-  if (method === 'POST' && !check(ctx, treePath, 'call').allow) {
-    throw new TBError('permission_denied', `no scope grants 'call' on '${treePath}'`)
-  }
-  const requestPath = reservedTail === null ? treePath : `${treePath}/${reservedTail}`
-  const body = method === 'POST' ? await c.req.text() : undefined
-  // 必须 await(而非裸 return async promise):裸返回时其 reject 会在链接那一 tick 被
-  // workerd/miniflare 误报为 unhandled rejection,即便 runHandler 最终 catch(同 GET 通配注释)。
-  return await passthroughRemote({
-    config: node.config,
-    nodePath: node.path,
-    requestPath,
-    method,
-    ...(body !== undefined ? { body } : {}),
-    headers,
-    secrets: deps.secrets,
-    settings: await resolveRemoteSettings(deps.state, deps.remote),
-    requestUrl: c.req.url,
-  })
-}
-
-/**
- * 生效的 remote 白名单 = env 基线 ∪ 运行时条目(system/federation 管理)。
- * 请求期读取(app 被 WeakMap 按 env 缓存,不能在装配期定死);运行时无条目 → 原样返回基线。
- */
-async function resolveRemoteSettings(
-  state: StateStore,
-  base: RemoteSettings,
-): Promise<RemoteSettings> {
-  const runtime = await new RemoteAllowlistStore(state).hosts()
-  if (runtime.length === 0) return base
-  return { ...base, allowlist: [...new Set([...base.allowlist, ...runtime])] }
-}
-
-/** 注册 remote 节点时的白名单校验:config.kind==='remote' → baseUrl 必须在白名单内。 */
-function assertRemoteConfigAllowed(config: unknown, settings: RemoteSettings): void {
-  if (config === null || typeof config !== 'object') return
-  if ((config as { kind?: unknown }).kind !== 'remote') return
-  const baseUrl = (config as { baseUrl?: unknown }).baseUrl
-  if (typeof baseUrl !== 'string') {
-    throw new TBError('invalid_argument', 'remote config 缺少 baseUrl')
-  }
-  assertRemoteAllowed(baseUrl, settings)
-}
-
-// ---------- device 节点 ----------
-
-function tbErrorFromBody(body: TBErrorBody): TBError {
-  return new TBError(body.code, body.message, { retryable: body.retryable })
-}
-
-/** 设备通道缺省(deviceTransport 未注入)→ device 能力禁用。 */
-function requireDevice(deps: TbAppDeps): DeviceChannel {
-  if (deps.device === undefined) {
-    throw TBError.unimplemented('device capability disabled: no device transport')
-  }
-  return deps.device
-}
-
-async function invokeDevice(
-  deps: TbAppDeps,
-  deviceId: string,
-  req: { arguments: Record<string, unknown>, path: string, tool: string },
-): Promise<unknown> {
-  const id = crypto.randomUUID()
-  const body = (await requireDevice(deps).invoke(deviceId, { id, ...req })) as DeviceCallResult
-  if (!body || !('ok' in body)) {
-    throw new TBError('unavailable', 'device session returned invalid result')
-  }
-  if (body.ok) return body.value
-  throw tbErrorFromBody(body.error)
-}
-
-function deviceIdForDeviceFs(cfg: ContextConfig): string {
-  const pc = cfg.providerConfig
-  if (pc && typeof pc === 'object' && typeof pc.deviceId === 'string') return pc.deviceId
-  throw new TBError('invalid_argument', 'device-fs context 缺少 providerConfig.deviceId')
-}
-
-/** device 自定义节点转发标记:hello 代注册时网关写入 providerConfig。 */
-interface DeviceNodeMarker {
-  /** 注册时随 NodeInput 上送的工具表(~help 数据源);老客户端不带。 */
-  cmds?: ToolSpec[]
-  deviceId: string
-  mountPath: string
-}
-
-function deviceMarkerOf(pc: Record<string, unknown> | undefined): DeviceNodeMarker | null {
-  if (pc === undefined || typeof pc.deviceId !== 'string' || typeof pc.mountPath !== 'string') {
-    return null
-  }
-  return {
-    deviceId: pc.deviceId,
-    mountPath: pc.mountPath,
-    ...(Array.isArray(pc.cmds) ? { cmds: pc.cmds as ToolSpec[] } : {}),
-  }
-}
-
-/** kind:'tool' 且带设备标记的自定义节点(SDK registerTool → connect 代注册产物)。 */
-function deviceToolMarker(node: TreeNode): DeviceNodeMarker | null {
-  if (node.kind !== 'tool' || node.config?.kind !== 'tool') return null
-  return deviceMarkerOf(node.config.providerConfig)
-}
-
-/** 帧协议 call 的 path = 节点路径相对设备 mountPath(如 'tools/echo')。 */
-function relativeDevicePath(nodePath: TreePath, mountPath: string): string {
-  if (nodePath.startsWith(`${mountPath}/`)) return nodePath.slice(mountPath.length + 1)
-  throw new TBError('invalid_argument', `device 节点 '${nodePath}' 不在挂载 '${mountPath}' 下`)
-}
-
-// ---------- SDK 进程内 Provider ----------
-
-/** 按节点路径查 SDK 进程内 ContextProvider(未注入/未命中 → null)。 */
-function localContext(deps: TbAppDeps, node: TreeNode): ContextProvider | null {
-  return deps.locals?.context?.(node.path) ?? null
-}
-
-/** 进程内 Provider 的 capabilities:按可选方法实现存在性推导(~describe/~help 共用)。 */
-function localCapabilities(provider: ContextProvider): string[] {
-  return [
-    ...(provider.Search !== undefined ? ['search'] : []),
-    ...(provider.Delete !== undefined ? ['delete'] : []),
-  ]
-}
-
-// ---------- plugin 挂载消费 ----------
-
-/**
- * 取已注册且启用的 plugin manifest(挂载校验与调用点共用)。
- * 不存在/kind 不符 → invalid_argument(与既有「未知 provider」口径一致,不泄露更多);
- * 禁用 → invalid_argument。落盘记录含平台内部 tokenSkId,网关内部使用无须投影。
- */
-async function requirePlugin(
-  store: StateStore,
-  id: string,
-  kind: PluginKind,
-  what: 'context' | 'tool',
-): Promise<PluginManifest> {
-  const manifest = (await store.get(KEY_PLUGIN + id)) as PluginManifest | null
-  if (manifest === null || manifest.kind !== kind) {
-    throw new TBError('invalid_argument', `未知 ${what} provider:'${id}'`)
-  }
-  if (manifest.enabled !== true) {
-    throw new TBError('invalid_argument', `plugin '${id}' 已禁用`)
-  }
-  return manifest
-}
-
-/** 注册时抓取缓存的 `~describe.capabilities`(pluginmeta:<id>;缺失回空表)。 */
-async function pluginCapabilities(store: StateStore, id: string): Promise<readonly string[]> {
-  const meta = (await store.get(KEY_PLUGIN_META + id)) as PluginDescribe | null
-  return meta?.capabilities ?? []
-}
-
-/**
- * plugin 调用的挂载上下文:同一 plugin 可多路径挂载,envelope 里带 mountPath 与
- * 挂载节点的 providerConfig(mountConfig)供 plugin 区分挂载来源;老 plugin 按
- * "未知字段忽略"原则不受影响。
- */
-function mountCallContext(
-  ctx: CallContext,
-  mountPath: TreePath,
-  providerConfig: Record<string, unknown> | undefined,
-): CallContext {
-  return {
-    ...ctx,
-    mountPath,
-    ...(providerConfig !== undefined ? { mountConfig: providerConfig } : {}),
-  }
-}
-
-/**
- * 注册/更新 kind:'tool' 节点时的配置校验(注册时即拒):
- * provider 必须是已注册且启用的 tool-provider plugin(SDK 保留 id '@local' 由
- * SDK 内部注册通道落库,不经注册面)。
- */
-async function assertToolConfig(config: unknown, store: StateStore): Promise<void> {
-  if (config === null || typeof config !== 'object') return
-  if ((config as { kind?: unknown }).kind !== 'tool') return
-  assertNoDeviceMarker(config)
-  const provider = (config as { provider?: unknown }).provider
-  if (typeof provider !== 'string' || provider === '') {
-    throw new TBError('invalid_argument', 'kind:\'tool\' 节点需要 config.provider(plugin id)')
-  }
-  await requirePlugin(store, provider, 'tool-provider', 'tool')
-}
-
-/**
- * device 转发标记只能由 hello 代注册写入:注册面手工携带 providerConfig
- * 的 deviceId+mountPath → 拒,防止把任意节点调用劫持转发到他人设备(与 device-fs 口径一致)。
- */
-function assertNoDeviceMarker(config: unknown): void {
-  const pc = (config as { providerConfig?: unknown }).providerConfig
-  if (
-    pc !== null
-    && typeof pc === 'object'
-    && deviceMarkerOf(pc as Record<string, unknown>) !== null
-  ) {
-    throw new TBError(
-      'invalid_argument',
-      'providerConfig 的 device 转发标记由网关代写,不得经注册面携带',
-    )
-  }
-}
-
-// ---------- context 节点 ----------
-
-type ContextConfig = Extract<NodeConfig, { kind: 'context' }>
-type SkillhubConfig = Extract<NodeConfig, { kind: 'skillhub' }>
-/** context 与 skillhub 共用对象存储装配(provider/providerConfig/authRef 同形)。 */
-type ObjectNodeConfig = ContextConfig | SkillhubConfig
-
-/** S3 类凭证值形状:JSON {"accessKeyId","secretAccessKey"};解析失败不回显值。 */
-export function parseS3Credentials(
-  raw: string,
-  refName: string,
-): { accessKeyId: string, secretAccessKey: string } {
-  try {
-    const v = JSON.parse(raw) as { accessKeyId?: unknown, secretAccessKey?: unknown }
-    if (typeof v.accessKeyId === 'string' && typeof v.secretAccessKey === 'string') {
-      return { accessKeyId: v.accessKeyId, secretAccessKey: v.secretAccessKey }
-    }
-  } catch {
-    // fallthrough:统一 invalid_argument
-  }
-  throw new TBError(
-    'invalid_argument',
-    `凭证 '${refName}' 不是 {"accessKeyId","secretAccessKey"} 形状的 JSON`,
-  )
-}
-
-/** s3 provider 的 store 构造参数:providerConfig.endpoint/bucket + authRef 解析(均必填)。 */
-async function s3StoreConfig(
-  cfg: ObjectNodeConfig,
-  secrets: SecretStoreImpl,
-): Promise<S3StoreConfig> {
-  const pc = (cfg.providerConfig ?? {}) as {
-    bucket?: unknown
-    endpoint?: unknown
-    region?: unknown
-  }
-  if (typeof pc.endpoint !== 'string' || typeof pc.bucket !== 'string') {
-    throw new TBError('invalid_argument', 's3 provider 需要 providerConfig.endpoint 与 bucket')
-  }
-  if (typeof cfg.authRef !== 'string') {
-    throw new TBError('invalid_argument', 's3 provider 需要 authRef(SecretStore 引用名)')
-  }
-  const raw = await secrets.resolve(cfg.authRef)
-  if (raw === undefined) {
-    throw new TBError('invalid_argument', `authRef '${cfg.authRef}' 无法解析`)
-  }
-  return {
-    endpoint: pc.endpoint,
-    bucket: pc.bucket,
-    ...(typeof pc.region === 'string' ? { region: pc.region } : {}),
-    ...parseS3Credentials(raw, cfg.authRef),
-  }
-}
-
-/** providerConfig.prefix(共桶隔离);缺省 r2 按节点路径隔离,s3 为空(整桶即 namespace)。 */
-function contextKeyPrefix(cfg: ContextConfig, nodePath: TreePath): string {
-  const prefix = (cfg.providerConfig as { prefix?: unknown } | undefined)?.prefix
-  if (typeof prefix === 'string') return prefix
-  return cfg.provider === 'r2' ? `ctx/${nodePath}` : ''
-}
-
-/** 按 config.provider 构造底层 ObjectStore('r2' = 宿主注入的平台对象存储)。 */
-async function contextObjectStoreFor(cfg: ObjectNodeConfig, deps: TbAppDeps): Promise<ObjectStore> {
-  if (cfg.provider === 'r2') {
-    if (deps.objects === undefined) {
-      throw new TBError('unavailable', 'object store not configured(objects 未注入)', {
-        retryable: false,
-      })
-    }
-    return await deps.objects()
-  }
-  if (cfg.provider === 's3') {
-    return createS3ObjectStore(await s3StoreConfig(cfg, deps.secrets), {
-      allowInsecure: deps.allowInsecureHttp,
-    })
-  }
-  throw TBError.unimplemented(`context provider '${cfg.provider}' not implemented yet`)
-}
-
-/**
- * context 节点的 ContextProvider 装配:四动词语义在 core objectProvider,这里只注入
- * ObjectStore、keyPrefix、$ref 阈值/有效期与 /~ref 中转 URL 工厂(presign 凭证缺省时生效)。
- */
-async function contextProviderFor(
-  node: TreeNode,
-  cfg: ContextConfig,
-  deps: TbAppDeps,
-  requestUrl: string,
-): Promise<ContextProvider> {
-  const objects = await contextObjectStoreFor(cfg, deps)
-  const opts: Parameters<typeof createObjectContextProvider>[1] = {
-    nsPath: node.path,
-    keyPrefix: contextKeyPrefix(cfg, node.path),
-    readOnly: cfg.readOnly ?? false,
-  }
-  if (deps.refThresholdBytes !== undefined) opts.refThresholdBytes = deps.refThresholdBytes
-  if (deps.refTtlSec !== undefined) opts.presignTtlSec = deps.refTtlSec
-  // /~ref 中转 URL 工厂:token 密钥派生自 TB_SECRET_ENCRYPTION_KEY;密钥缺省则不提供
-  // (presign 也缺时 core 对大对象 Get 报 unavailable)。
-  const encKey = deps.encryptionKey
-  if (encKey !== undefined) {
-    const origin = new URL(requestUrl).origin
-    const relayTtlSec = deps.refTtlSec ?? PRESIGN_TTL_SEC_DEFAULT
-    opts.relayRefUrl = async (key) => {
-      const exp = Math.floor(Date.now() / 1000) + relayTtlSec
-      return `${origin}/~ref/${await signRefToken({ p: node.path, k: key, exp }, encKey)}`
-    }
-  }
-  return createObjectContextProvider(objects, opts)
-}
-
-/** skillhub 的 keyPrefix:共桶隔离,r2 默认 `skills/<nodePath>`,s3 默认整桶。 */
-function skillhubKeyPrefix(cfg: SkillhubConfig, nodePath: TreePath): string {
-  const prefix = (cfg.providerConfig as { prefix?: unknown } | undefined)?.prefix
-  if (typeof prefix === 'string') return prefix
-  return cfg.provider === 'r2' ? `skills/${nodePath}` : ''
-}
-
-/**
- * skillhub 节点的 SkillhubProvider 装配:底层对象存储与 $ref 中转 URL 工厂与 context 同源,
- * 只是 keyPrefix 落在 `skills/<path>` 且叠加 skill 单位语义(core skillhub/provider)。
- */
-async function skillhubProviderFor(
-  node: TreeNode,
-  cfg: SkillhubConfig,
-  deps: TbAppDeps,
-  requestUrl: string,
-): Promise<SkillhubProvider> {
-  const objects = await contextObjectStoreFor(cfg, deps)
-  const opts: Parameters<typeof createSkillhubProvider>[1] = {
-    nsPath: node.path,
-    keyPrefix: skillhubKeyPrefix(cfg, node.path),
-    readOnly: cfg.readOnly ?? false,
-  }
-  if (deps.refThresholdBytes !== undefined) opts.refThresholdBytes = deps.refThresholdBytes
-  if (deps.refTtlSec !== undefined) opts.presignTtlSec = deps.refTtlSec
-  const encKey = deps.encryptionKey
-  if (encKey !== undefined) {
-    const origin = new URL(requestUrl).origin
-    const relayTtlSec = deps.refTtlSec ?? PRESIGN_TTL_SEC_DEFAULT
-    opts.relayRefUrl = async (key) => {
-      const exp = Math.floor(Date.now() / 1000) + relayTtlSec
-      return `${origin}/~ref/${await signRefToken({ p: node.path, k: key, exp }, encKey)}`
-    }
-  }
-  return createSkillhubProvider(objects, opts)
-}
-
-/** 数据面 {tool} → SkillhubProvider 方法派发;入参精细校验由 provider 承担。 */
-async function dispatchSkillhubCmd(
-  provider: SkillhubProvider,
-  tool: string,
-  args: Record<string, unknown>,
-): Promise<unknown> {
-  switch (tool) {
-    case 'List':
-      return await provider.List(args.opts as ListOptions | undefined)
-    case 'Get':
-      return typeof args.file === 'string'
-        ? await provider.GetFile(args.id as string, args.file)
-        : await provider.Get(args.id as string)
-    case 'Search':
-      return await provider.Search(args.query as string, args.opts as ListOptions | undefined)
-    case 'Publish':
-      if (!Array.isArray(args.files)) {
-        throw new TBError('invalid_argument', 'Publish 需要数组 \'files\'')
-      }
-      return await provider.Publish({
-        ...(typeof args.id === 'string' ? { id: args.id } : {}),
-        files: args.files as SkillPublishFile[],
-      })
-    case 'Remove':
-      return await provider.Remove(args.id as string)
-    default:
-      // skillhubScopeForCmd 已挡未知 cmd;此处为类型完备性兜底。
-      throw new TBError('invalid_argument', `unknown cmd '${tool}'`)
-  }
-}
-
-/**
- * 数据面 {tool} → ContextProvider 方法派发;入参精细校验由 provider 承担。
- * 可选方法(Search/Delete)未实现(plugin 未在 capabilities 声明)→ 按 unknown cmd 拒
- * (未声明的可选方法平台永不调用)。SDK 设备侧 handler 派发同形复用(导出)。
- */
-export async function dispatchContextCmd(
-  provider: ContextProvider,
-  tool: string,
-  args: Record<string, unknown>,
-): Promise<unknown> {
-  switch (tool) {
-    case 'List':
-      return await provider.List((args.path as string) ?? '', args.opts as ListOptions | undefined)
-    case 'Get':
-      return await provider.Get(args.path as string)
-    case 'Write':
-      if (typeof args.entry !== 'object' || args.entry === null) {
-        throw new TBError('invalid_argument', 'Write 需要对象 \'entry\'')
-      }
-      return await provider.Write(args.path as string, args.entry as ContextEntryInput)
-    case 'Update':
-      if (typeof args.patch !== 'object' || args.patch === null) {
-        throw new TBError('invalid_argument', 'Update 需要对象 \'patch\'')
-      }
-      return await provider.Update(args.path as string, args.patch as ContextPatch)
-    case 'Delete':
-      if (provider.Delete === undefined) {
-        throw new TBError('invalid_argument', `unknown cmd '${tool}'(capability 未声明)`)
-      }
-      return await provider.Delete(args.path as string)
-    case 'Search':
-      if (provider.Search === undefined) {
-        throw new TBError('invalid_argument', `unknown cmd '${tool}'(capability 未声明)`)
-      }
-      return await provider.Search(args.query as string, args.opts as SearchOptions | undefined)
-    default:
-      // contextScopeForCmd 已挡未知 cmd;此处为类型完备性兜底。
-      throw new TBError('invalid_argument', `unknown cmd '${tool}'`)
-  }
-}
-
-/** ttl 懒回收单点判定:过期 → 删节点 + not_found;未过期 → 通过。context/skillhub 共用。 */
-async function assertContextAlive(
-  node: TreeNode,
-  cfg: { ttl?: number },
-  registry: NodeRegistryStore,
-): Promise<void> {
-  if (!isContextExpired(node.createdAt, cfg.ttl, Date.now())) return
-  await registry.delete(node.path)
-  throw TBError.notFound('not found')
-}
-
-/** 列表面(~tree/目录 ~help)的 ttl 懒回收:过期 context/skillhub 节点剔除并删除。 */
-async function pruneExpiredContext(
-  nodes: TreeNode[],
-  registry: NodeRegistryStore,
-): Promise<TreeNode[]> {
-  const now = Date.now()
-  const alive: TreeNode[] = []
-  for (const n of nodes) {
-    const cfg = n.config
-    if (
-      (n.kind === 'context' || n.kind === 'skillhub')
-      && cfg?.kind === n.kind
-      && isContextExpired(n.createdAt, (cfg as { ttl?: number }).ttl, now)
-    ) {
-      await registry.delete(n.path)
-      continue
-    }
-    alive.push(n)
-  }
-  return alive
-}
-
-/**
- * 注册/更新 context 节点时的配置校验(注册时即拒):
- * provider = r2|s3 或已注册且启用的 context-provider plugin id;
- * s3 必填 endpoint/bucket/authRef,且做一次浅 list 连通探测(D8)——失败 →
- * unavailable(retryable);r2 与 plugin 不探测(plugin 在 PluginRegistry.Write 时已探活)。
- */
-async function assertContextConfig(config: unknown, deps: TbAppDeps): Promise<void> {
-  if (config === null || typeof config !== 'object') return
-  if ((config as { kind?: unknown }).kind !== 'context') return
-  assertNoDeviceMarker(config)
-  const cfg = config as ContextConfig
-  if (cfg.provider !== 'r2' && cfg.provider !== 's3') {
-    // plugin 挂载:不存在/kind 不符/禁用 → invalid_argument(device-fs 由网关代写、
-    // SDK '@local' 由 registerContext 内部通道落库,均不经注册面)。
-    await requirePlugin(deps.state, cfg.provider, 'context-provider', 'context')
-    return
-  }
-  if (cfg.provider === 's3') {
-    // 结构/凭证/https 校验失败 → invalid_argument(store 构造抛出)。
-    const store = createS3ObjectStore(await s3StoreConfig(cfg, deps.secrets), {
-      allowInsecure: deps.allowInsecureHttp,
-    })
-    try {
-      await store.list(contextKeyPrefix(cfg, ''), { limit: 1 })
-    } catch (err) {
-      const detail = isTBError(err) ? err.message : String(err)
-      throw new TBError('unavailable', `s3 连通探测失败:${detail}`, { retryable: true })
-    }
-  }
-}
-
-/**
- * 注册/更新 skillhub 节点时的配置校验:provider 仅 r2|s3(本期不支持 plugin/device);
- * s3 做一次浅 list 连通探测(与 context 同则),r2 用平台桶不探测。
- */
-async function assertSkillhubConfig(config: unknown, deps: TbAppDeps): Promise<void> {
-  if (config === null || typeof config !== 'object') return
-  if ((config as { kind?: unknown }).kind !== 'skillhub') return
-  const cfg = config as SkillhubConfig
-  if (cfg.provider !== 'r2' && cfg.provider !== 's3') {
-    throw new TBError(
-      'invalid_argument',
-      `skillhub provider 仅支持 'r2' 或 's3',收到 '${cfg.provider}'`,
-    )
-  }
-  if (cfg.provider === 's3') {
-    const store = createS3ObjectStore(await s3StoreConfig(cfg, deps.secrets), {
-      allowInsecure: deps.allowInsecureHttp,
-    })
-    try {
-      await store.list(skillhubKeyPrefix(cfg, ''), { limit: 1 })
-    } catch (err) {
-      const detail = isTBError(err) ? err.message : String(err)
-      throw new TBError('unavailable', `s3 连通探测失败:${detail}`, { retryable: true })
-    }
-  }
-}
-
-/** ~tree 的 DSL 文本渲染:每行缩进树(简单实现;JSON 是规范形状)。 */
-function renderTreeDsl(tree: TreeJson): string {
-  const lines: string[] = []
-  const walk = (n: TreeJson, depth: number): void => {
-    const indent = '  '.repeat(depth)
-    const label = n.path === '' ? '/' : n.path
-    const trunc = n.truncated ? ' …' : ''
-    lines.push(`${indent}${label} [${n.kind}] ${n.description}${trunc}`)
-    for (const child of n.children ?? []) walk(child, depth + 1)
-  }
-  walk(tree, 0)
-  return `${lines.join('\n')}\n`
 }

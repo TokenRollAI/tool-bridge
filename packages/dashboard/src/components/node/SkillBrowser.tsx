@@ -88,6 +88,568 @@ function useDesktopLayout(): boolean {
   return desktop
 }
 
+function SkillFacts({ skill }: { skill: SkillDetail }) {
+  return (
+    <p className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1 font-mono text-[10px] text-muted-foreground">
+      <span className="break-all">{skill.id}</span>
+      <span>
+        {skill.files.length}
+        {' '}
+        个文件
+      </span>
+      {skill.updatedAt && <span title={skill.updatedAt}>{humanTime(skill.updatedAt)}</span>}
+    </p>
+  )
+}
+
+/** 技能内单文件预览:文本内联渲染;大对象($ref)给下载链接。 */
+function SkillFileDialog({
+  path,
+  id,
+  file,
+  onClose,
+}: {
+  file: string
+  id: string
+  onClose: () => void
+  path: string
+}) {
+  const query = useSkillFile(path, id, file)
+  const f = query.data
+  const ref = f ? refOf(f.content) : null
+  const text = f && ref === null && typeof f.content === 'string' ? f.content : ''
+
+  return (
+    <Dialog onOpenChange={o => !o && onClose()} open>
+      <DialogContent className="max-h-[calc(100dvh-1rem)] overflow-y-auto p-4 sm:max-h-[85vh] sm:max-w-2xl sm:p-6">
+        <DialogHeader>
+          <DialogTitle className="min-w-0 break-all pr-6 font-mono text-sm">{file}</DialogTitle>
+          {f && (
+            <DialogDescription asChild>
+              <p className="flex flex-wrap gap-x-3 font-mono text-[10px] text-muted-foreground">
+                <span>{f.contentType}</span>
+                <span>{humanSize(f.size)}</span>
+                <span title={`version ${f.version}`}>
+                  v:
+                  {f.version.slice(0, 12)}
+                </span>
+              </p>
+            </DialogDescription>
+          )}
+        </DialogHeader>
+
+        {query.isPending
+          ? (
+              <div className="grid gap-2">
+                <Skeleton className="h-4 w-full" />
+                <Skeleton className="h-4 w-5/6" />
+                <Skeleton className="h-4 w-3/6" />
+              </div>
+            )
+          : query.isError
+            ? (
+                <div
+                  className="rounded-lg border border-destructive/40 bg-destructive/10 p-3"
+                  role="alert"
+                >
+                  <p className="text-sm text-destructive">{query.error.message}</p>
+                  <Button
+                    className="mt-3"
+                    disabled={query.isFetching}
+                    onClick={() => query.refetch()}
+                    size="sm"
+                    variant="outline"
+                  >
+                    <RefreshCw className={cn(query.isFetching && 'animate-spin')} />
+                    重试读取
+                  </Button>
+                </div>
+              )
+            : f && ref !== null
+              ? (
+                  <section className="rounded-lg border border-warn/40 bg-warn/5 p-3.5 text-sm">
+                    <p className="font-medium">大对象通过 $ref 提供</p>
+                    <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                      内容超过内联阈值,链接可能有时效,请及时下载。
+                    </p>
+                    <Button asChild className="mt-3 font-mono text-xs" size="sm" variant="outline">
+                      <a href={ref} rel="noreferrer" target="_blank">
+                        <ExternalLink />
+                        打开 $ref
+                      </a>
+                    </Button>
+                  </section>
+                )
+              : f
+                ? (
+                    <pre className="max-h-[34rem] max-w-full overflow-auto rounded-lg border bg-background/55 px-4 py-3 font-mono text-xs leading-relaxed whitespace-pre-wrap break-words">
+                      {text}
+                    </pre>
+                  )
+                : null}
+
+        <DialogFooter className="items-center sm:justify-between">
+          <div className="flex items-center gap-1">
+            {ref === null && f && <CopyButton label="复制内容" size="icon-sm" value={text} />}
+          </div>
+          <Button onClick={onClose}>关闭</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+/** 技能详情:描述 + SKILL.md(Markdown)+ 文件清单(点击取文件内容)。 */
+function SkillBody({ path, skill }: { path: string, skill: SkillDetail }) {
+  const [openFile, setOpenFile] = useState<string | null>(null)
+  return (
+    <div className="grid gap-5">
+      {skill.description && (
+        <p className="text-xs leading-5 text-muted-foreground">{skill.description}</p>
+      )}
+      <section>
+        <p className="mb-2 font-mono text-[9px] tracking-[0.14em] text-muted-foreground">
+          SKILL.md
+        </p>
+        <div className="prose prose-sm dark:prose-invert max-w-none overflow-x-auto rounded-lg border bg-background/55 px-4 py-4 break-words prose-pre:max-w-full prose-pre:overflow-x-auto prose-pre:bg-background prose-pre:text-xs prose-code:font-mono">
+          <Markdown remarkPlugins={[remarkGfm]}>{skill.content}</Markdown>
+        </div>
+      </section>
+      <section>
+        <div className="mb-2 flex items-center justify-between gap-3">
+          <p className="font-mono text-[9px] tracking-[0.14em] text-muted-foreground">FILES</p>
+          <span className="font-mono text-[10px] text-muted-foreground tabular-nums">
+            {skill.files.length}
+            {' '}
+            个
+          </span>
+        </div>
+        {skill.files.length === 0
+          ? (
+              <p className="rounded-lg border border-dashed px-3 py-4 text-xs text-muted-foreground">
+                此技能没有附加文件。
+              </p>
+            )
+          : (
+              <ul className="overflow-hidden rounded-lg border bg-background/45">
+                {skill.files.map(f => (
+                  <li className="border-b last:border-b-0" key={f.path}>
+                    <button
+                      className="flex w-full min-w-0 items-center gap-3 px-3 py-2.5 text-left outline-none transition-colors hover:bg-secondary/40 focus-visible:bg-secondary/60"
+                      onClick={() => setOpenFile(f.path)}
+                      type="button"
+                    >
+                      <FileText className="size-4 shrink-0 text-sky-400" />
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate font-mono text-xs" title={f.path}>
+                          {f.path}
+                        </span>
+                        <span className="mt-0.5 flex flex-wrap gap-x-2 font-mono text-[10px] text-muted-foreground">
+                          <span className="max-w-44 truncate">{f.contentType}</span>
+                          <span className="tabular-nums">{humanSize(f.size)}</span>
+                        </span>
+                      </span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+      </section>
+      {openFile !== null && (
+        <SkillFileDialog
+          file={openFile}
+          id={skill.id}
+          onClose={() => setOpenFile(null)}
+          path={path}
+        />
+      )}
+    </div>
+  )
+}
+
+function SkillDetailPane({
+  path,
+  id,
+  canRemove,
+  onDelete,
+}: {
+  canRemove: boolean
+  id: string | null
+  onDelete: (id: string) => Promise<void>
+  path: string
+}) {
+  const skill = useSkill(path, id)
+  const s = skill.data
+
+  return (
+    <aside className="hidden min-w-0 overflow-hidden rounded-xl border bg-card/35 lg:sticky lg:top-4 lg:flex lg:min-h-[40rem] lg:max-h-[calc(100dvh-8rem)] lg:flex-col">
+      {id === null
+        ? (
+            <div className="grid min-h-[40rem] place-items-center p-8 text-center">
+              <div className="max-w-64">
+                <span className="mx-auto grid size-12 place-items-center rounded-xl border bg-background/70 text-muted-foreground">
+                  <PanelRight className="size-5" />
+                </span>
+                <h2 className="mt-4 text-sm font-medium">选择技能查看详情</h2>
+                <p className="mt-1.5 text-xs leading-5 text-muted-foreground">
+                  详情会固定在这里,筛选与翻页上下文都不会丢失。
+                </p>
+              </div>
+            </div>
+          )
+        : (
+            <>
+              <header className="flex min-h-16 items-start justify-between gap-4 border-b px-4 py-3.5">
+                <div className="min-w-0">
+                  <p className="font-mono text-[9px] tracking-[0.14em] text-muted-foreground">SKILL</p>
+                  <h2 className="mt-1 break-words text-sm font-medium">{s?.name ?? id}</h2>
+                  {s && <SkillFacts skill={s} />}
+                </div>
+                <div className="flex shrink-0 items-center gap-1">
+                  <Button
+                    aria-label="刷新详情"
+                    disabled={skill.isFetching}
+                    onClick={() => skill.refetch()}
+                    size="icon-sm"
+                    title="刷新详情"
+                    variant="ghost"
+                  >
+                    <RefreshCw className={cn(skill.isFetching && 'animate-spin')} />
+                  </Button>
+                  {canRemove && (
+                    <ConfirmAction
+                      actionLabel="删除"
+                      description={<p>删除是幂等的，但内容不可恢复。</p>}
+                      onConfirm={() => onDelete(id)}
+                      title={`删除技能 ${id}?`}
+                      trigger={(
+                        <Button aria-label="删除技能" size="icon-sm" title="删除" variant="ghost">
+                          <Trash2 className="text-destructive" />
+                        </Button>
+                      )}
+                    />
+                  )}
+                </div>
+              </header>
+
+              <div className="min-h-0 flex-1 overflow-y-auto p-4">
+                {skill.isPending
+                  ? (
+                      <div aria-label="正在读取技能" className="grid gap-3" role="status">
+                        <Skeleton className="h-5 w-full" />
+                        <Skeleton className="h-5 w-5/6" />
+                        <Skeleton className="h-48 w-full" />
+                      </div>
+                    )
+                  : skill.isError
+                    ? (
+                        <div
+                          className="rounded-lg border border-destructive/40 bg-destructive/10 p-3"
+                          role="alert"
+                        >
+                          <p className="text-sm text-destructive">{skill.error.message}</p>
+                          <Button
+                            className="mt-3"
+                            disabled={skill.isFetching}
+                            onClick={() => skill.refetch()}
+                            size="sm"
+                            variant="outline"
+                          >
+                            <RefreshCw className={cn(skill.isFetching && 'animate-spin')} />
+                            重试读取
+                          </Button>
+                        </div>
+                      )
+                    : s
+                      ? (
+                          <SkillBody path={path} skill={s} />
+                        )
+                      : null}
+              </div>
+
+              {s && (
+                <footer className="flex min-h-12 items-center justify-between gap-3 border-t bg-background/25 px-4 py-2.5">
+                  <p
+                    className="min-w-0 truncate font-mono text-[10px] text-muted-foreground"
+                    title={s.version}
+                  >
+                    {s.version ? `version · ${s.version}` : `${s.files.length} 个文件`}
+                  </p>
+                  <CopyButton label="复制 SKILL.md" size="icon-sm" value={s.content} />
+                </footer>
+              )}
+            </>
+          )}
+    </aside>
+  )
+}
+
+/** 移动端技能详情对话框(桌面走常驻 pane)。 */
+function SkillDetailDialog({
+  path,
+  id,
+  canRemove,
+  onClose,
+  onDelete,
+}: {
+  canRemove: boolean
+  id: string | null
+  onClose: () => void
+  onDelete: (id: string) => Promise<void>
+  path: string
+}) {
+  const skill = useSkill(path, id)
+  const s = skill.data
+
+  return (
+    <Dialog onOpenChange={o => !o && onClose()} open={id !== null}>
+      <DialogContent className="max-h-[calc(100dvh-1rem)] overflow-y-auto p-4 sm:max-h-[85vh] sm:max-w-2xl sm:p-6">
+        <DialogHeader>
+          <DialogTitle className="min-w-0 break-words pr-6 text-base">{s?.name ?? id}</DialogTitle>
+          {s && (
+            <DialogDescription asChild>
+              <div>
+                <SkillFacts skill={s} />
+              </div>
+            </DialogDescription>
+          )}
+        </DialogHeader>
+
+        {skill.isPending
+          ? (
+              <div className="grid gap-2">
+                <Skeleton className="h-4 w-full" />
+                <Skeleton className="h-4 w-5/6" />
+                <Skeleton className="h-4 w-3/6" />
+              </div>
+            )
+          : skill.isError
+            ? (
+                <div
+                  className="rounded-lg border border-destructive/40 bg-destructive/10 p-3"
+                  role="alert"
+                >
+                  <p className="text-sm text-destructive">{skill.error.message}</p>
+                  <Button
+                    className="mt-3"
+                    disabled={skill.isFetching}
+                    onClick={() => skill.refetch()}
+                    size="sm"
+                    variant="outline"
+                  >
+                    <RefreshCw className={cn(skill.isFetching && 'animate-spin')} />
+                    重试读取
+                  </Button>
+                </div>
+              )
+            : s
+              ? (
+                  <SkillBody path={path} skill={s} />
+                )
+              : null}
+
+        <DialogFooter className="items-center sm:justify-between">
+          <div className="flex items-center gap-1">
+            {s && <CopyButton label="复制 SKILL.md" size="icon-sm" value={s.content} />}
+          </div>
+          <div className="flex gap-2">
+            {canRemove && id && (
+              <ConfirmAction
+                actionLabel="删除"
+                description={<p>删除是幂等的，但内容不可恢复。</p>}
+                onConfirm={() => onDelete(id)}
+                title={`删除技能 ${id}?`}
+                trigger={(
+                  <Button aria-label="删除技能" variant="outline">
+                    <Trash2 className="text-destructive" />
+                    删除
+                  </Button>
+                )}
+              />
+            )}
+            <Button onClick={onClose}>关闭</Button>
+          </div>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+interface DraftFile {
+  content: string
+  path: string
+}
+
+const SKILL_MD_PLACEHOLDER = `---
+name: my-skill
+description: 一句话说明这个技能做什么、何时用。
+---
+
+# 用法
+
+在这里写技能正文(Markdown)。`
+
+/**
+ * 发布技能(对等 `tb skill publish`):Publish 是幂等 upsert。
+ * 必须包含一个 SKILL.md 文件,其 frontmatter 含 name + description;可选追加更多文件。
+ */
+function SkillPublishDialog({
+  path,
+  onClose,
+  onSaved,
+}: {
+  onClose: () => void
+  onSaved: () => void
+  path: string
+}) {
+  const invoke = useInvoke()
+  const [id, setId] = useState('')
+  const [skillMd, setSkillMd] = useState('')
+  const [extraFiles, setExtraFiles] = useState<DraftFile[]>([])
+  const [err, setErr] = useState<string | null>(null)
+
+  const addFile = () => setExtraFiles(prev => [...prev, { path: '', content: '' }])
+  const updateFile = (index: number, patch: Partial<DraftFile>) =>
+    setExtraFiles(prev => prev.map((f, i) => (i === index ? { ...f, ...patch } : f)))
+  const removeFile = (index: number) => setExtraFiles(prev => prev.filter((_, i) => i !== index))
+
+  const submit = async () => {
+    if (!skillMd.trim()) {
+      setErr('SKILL.md 必填(frontmatter 需含 name 与 description)')
+      return
+    }
+    const files: Array<{ content: string, path: string }> = [{ path: 'SKILL.md', content: skillMd }]
+    for (const f of extraFiles) {
+      const p = f.path.trim().replace(/^\/+/, '')
+      if (p === '') {
+        setErr('每个追加文件都需要一个路径')
+        return
+      }
+      if (p === 'SKILL.md') {
+        setErr('SKILL.md 已由上方文本框提供,追加文件请用其他路径')
+        return
+      }
+      files.push({ path: p, content: f.content })
+    }
+    try {
+      const r = await invoke.mutateAsync({
+        path,
+        tool: 'Publish',
+        args: { ...(id.trim() ? { id: id.trim() } : {}), files },
+      })
+      const published = (r.json as { id?: string })?.id ?? id.trim()
+      toast.success(published ? `已发布 ${published}` : '已发布技能')
+      onSaved()
+    } catch (error) {
+      setErr((error as Error).message)
+    }
+  }
+
+  const requestOpenChange = (next: boolean) => {
+    if (invoke.isPending) return
+    if (!next) onClose()
+  }
+
+  return (
+    <Dialog onOpenChange={requestOpenChange} open>
+      <DialogContent
+        className="max-h-[85vh] overflow-y-auto sm:max-w-2xl"
+        onEscapeKeyDown={event => invoke.isPending && event.preventDefault()}
+        onPointerDownOutside={event => invoke.isPending && event.preventDefault()}
+        showCloseButton={!invoke.isPending}
+      >
+        <DialogHeader>
+          <DialogTitle className="break-words text-base">发布技能</DialogTitle>
+          <DialogDescription>
+            Publish 是幂等 upsert;必须含 SKILL.md(frontmatter 提供 name 与
+            description),可追加更多文件。
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="grid gap-4">
+          <div className="grid gap-1.5">
+            <Label className="text-xs" htmlFor="skill-id">
+              技能 id(可空;留空由服务端从 SKILL.md 生成)
+            </Label>
+            <Input
+              className="font-mono text-sm"
+              id="skill-id"
+              onChange={e => setId(e.target.value)}
+              placeholder="my-skill"
+              value={id}
+            />
+          </div>
+          <div className="grid gap-1.5">
+            <Label className="text-xs" htmlFor="skill-md">
+              SKILL.md *
+            </Label>
+            <Textarea
+              className="font-mono text-xs"
+              id="skill-md"
+              onChange={e => setSkillMd(e.target.value)}
+              placeholder={SKILL_MD_PLACEHOLDER}
+              rows={12}
+              spellCheck={false}
+              value={skillMd}
+            />
+          </div>
+          <div className="grid gap-2.5">
+            <div className="flex items-center justify-between">
+              <Label className="text-xs">附加文件(可空)</Label>
+              <Button onClick={addFile} size="xs" type="button" variant="ghost">
+                <Plus />
+                添加文件
+              </Button>
+            </div>
+            {extraFiles.map((f, index) => (
+              // biome-ignore lint/suspicious/noArrayIndexKey: 草稿行顺序稳定,无稳定 id
+              <div className="grid gap-2 rounded-lg border bg-muted/10 p-3" key={index}>
+                <div className="flex items-center gap-2">
+                  <Input
+                    className="h-8 font-mono text-xs"
+                    onChange={e => updateFile(index, { path: e.target.value })}
+                    placeholder="reference/example.txt"
+                    value={f.path}
+                  />
+                  <Button
+                    aria-label="移除文件"
+                    onClick={() => removeFile(index)}
+                    size="icon-sm"
+                    type="button"
+                    variant="ghost"
+                  >
+                    <X />
+                  </Button>
+                </div>
+                <Textarea
+                  className="font-mono text-xs"
+                  onChange={e => updateFile(index, { content: e.target.value })}
+                  placeholder="文件内容…"
+                  rows={4}
+                  spellCheck={false}
+                  value={f.content}
+                />
+              </div>
+            ))}
+          </div>
+          {err && (
+            <p className="text-xs text-destructive" role="alert">
+              {err}
+            </p>
+          )}
+        </div>
+
+        <DialogFooter>
+          <Button disabled={invoke.isPending} onClick={() => void submit()}>
+            {invoke.isPending && <Loader2 className="animate-spin" />}
+            发布
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
 /**
  * skillhub 节点的技能浏览器(context 浏览器的姊妹形制):
  * List(目录)/ Search / Get 详情(SKILL.md + 文件清单)/ Publish 发布 / Remove。
@@ -358,567 +920,5 @@ export function SkillBrowser({ path, cmds }: { cmds: HelpCmd[], path: string }) 
         />
       )}
     </section>
-  )
-}
-
-function SkillDetailPane({
-  path,
-  id,
-  canRemove,
-  onDelete,
-}: {
-  canRemove: boolean
-  id: string | null
-  onDelete: (id: string) => Promise<void>
-  path: string
-}) {
-  const skill = useSkill(path, id)
-  const s = skill.data
-
-  return (
-    <aside className="hidden min-w-0 overflow-hidden rounded-xl border bg-card/35 lg:sticky lg:top-4 lg:flex lg:min-h-[40rem] lg:max-h-[calc(100dvh-8rem)] lg:flex-col">
-      {id === null
-        ? (
-            <div className="grid min-h-[40rem] place-items-center p-8 text-center">
-              <div className="max-w-64">
-                <span className="mx-auto grid size-12 place-items-center rounded-xl border bg-background/70 text-muted-foreground">
-                  <PanelRight className="size-5" />
-                </span>
-                <h2 className="mt-4 text-sm font-medium">选择技能查看详情</h2>
-                <p className="mt-1.5 text-xs leading-5 text-muted-foreground">
-                  详情会固定在这里,筛选与翻页上下文都不会丢失。
-                </p>
-              </div>
-            </div>
-          )
-        : (
-            <>
-              <header className="flex min-h-16 items-start justify-between gap-4 border-b px-4 py-3.5">
-                <div className="min-w-0">
-                  <p className="font-mono text-[9px] tracking-[0.14em] text-muted-foreground">SKILL</p>
-                  <h2 className="mt-1 break-words text-sm font-medium">{s?.name ?? id}</h2>
-                  {s && <SkillFacts skill={s} />}
-                </div>
-                <div className="flex shrink-0 items-center gap-1">
-                  <Button
-                    aria-label="刷新详情"
-                    disabled={skill.isFetching}
-                    onClick={() => skill.refetch()}
-                    size="icon-sm"
-                    title="刷新详情"
-                    variant="ghost"
-                  >
-                    <RefreshCw className={cn(skill.isFetching && 'animate-spin')} />
-                  </Button>
-                  {canRemove && (
-                    <ConfirmAction
-                      actionLabel="删除"
-                      description={<p>删除是幂等的，但内容不可恢复。</p>}
-                      onConfirm={() => onDelete(id)}
-                      title={`删除技能 ${id}?`}
-                      trigger={(
-                        <Button aria-label="删除技能" size="icon-sm" title="删除" variant="ghost">
-                          <Trash2 className="text-destructive" />
-                        </Button>
-                      )}
-                    />
-                  )}
-                </div>
-              </header>
-
-              <div className="min-h-0 flex-1 overflow-y-auto p-4">
-                {skill.isPending
-                  ? (
-                      <div aria-label="正在读取技能" className="grid gap-3" role="status">
-                        <Skeleton className="h-5 w-full" />
-                        <Skeleton className="h-5 w-5/6" />
-                        <Skeleton className="h-48 w-full" />
-                      </div>
-                    )
-                  : skill.isError
-                    ? (
-                        <div
-                          className="rounded-lg border border-destructive/40 bg-destructive/10 p-3"
-                          role="alert"
-                        >
-                          <p className="text-sm text-destructive">{skill.error.message}</p>
-                          <Button
-                            className="mt-3"
-                            disabled={skill.isFetching}
-                            onClick={() => skill.refetch()}
-                            size="sm"
-                            variant="outline"
-                          >
-                            <RefreshCw className={cn(skill.isFetching && 'animate-spin')} />
-                            重试读取
-                          </Button>
-                        </div>
-                      )
-                    : s
-                      ? (
-                          <SkillBody path={path} skill={s} />
-                        )
-                      : null}
-              </div>
-
-              {s && (
-                <footer className="flex min-h-12 items-center justify-between gap-3 border-t bg-background/25 px-4 py-2.5">
-                  <p
-                    className="min-w-0 truncate font-mono text-[10px] text-muted-foreground"
-                    title={s.version}
-                  >
-                    {s.version ? `version · ${s.version}` : `${s.files.length} 个文件`}
-                  </p>
-                  <CopyButton label="复制 SKILL.md" size="icon-sm" value={s.content} />
-                </footer>
-              )}
-            </>
-          )}
-    </aside>
-  )
-}
-
-function SkillFacts({ skill }: { skill: SkillDetail }) {
-  return (
-    <p className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1 font-mono text-[10px] text-muted-foreground">
-      <span className="break-all">{skill.id}</span>
-      <span>
-        {skill.files.length}
-        {' '}
-        个文件
-      </span>
-      {skill.updatedAt && <span title={skill.updatedAt}>{humanTime(skill.updatedAt)}</span>}
-    </p>
-  )
-}
-
-/** 技能详情:描述 + SKILL.md(Markdown)+ 文件清单(点击取文件内容)。 */
-function SkillBody({ path, skill }: { path: string, skill: SkillDetail }) {
-  const [openFile, setOpenFile] = useState<string | null>(null)
-  return (
-    <div className="grid gap-5">
-      {skill.description && (
-        <p className="text-xs leading-5 text-muted-foreground">{skill.description}</p>
-      )}
-      <section>
-        <p className="mb-2 font-mono text-[9px] tracking-[0.14em] text-muted-foreground">
-          SKILL.md
-        </p>
-        <div className="prose prose-sm dark:prose-invert max-w-none overflow-x-auto rounded-lg border bg-background/55 px-4 py-4 break-words prose-pre:max-w-full prose-pre:overflow-x-auto prose-pre:bg-background prose-pre:text-xs prose-code:font-mono">
-          <Markdown remarkPlugins={[remarkGfm]}>{skill.content}</Markdown>
-        </div>
-      </section>
-      <section>
-        <div className="mb-2 flex items-center justify-between gap-3">
-          <p className="font-mono text-[9px] tracking-[0.14em] text-muted-foreground">FILES</p>
-          <span className="font-mono text-[10px] text-muted-foreground tabular-nums">
-            {skill.files.length}
-            {' '}
-            个
-          </span>
-        </div>
-        {skill.files.length === 0
-          ? (
-              <p className="rounded-lg border border-dashed px-3 py-4 text-xs text-muted-foreground">
-                此技能没有附加文件。
-              </p>
-            )
-          : (
-              <ul className="overflow-hidden rounded-lg border bg-background/45">
-                {skill.files.map(f => (
-                  <li className="border-b last:border-b-0" key={f.path}>
-                    <button
-                      className="flex w-full min-w-0 items-center gap-3 px-3 py-2.5 text-left outline-none transition-colors hover:bg-secondary/40 focus-visible:bg-secondary/60"
-                      onClick={() => setOpenFile(f.path)}
-                      type="button"
-                    >
-                      <FileText className="size-4 shrink-0 text-sky-400" />
-                      <span className="min-w-0 flex-1">
-                        <span className="block truncate font-mono text-xs" title={f.path}>
-                          {f.path}
-                        </span>
-                        <span className="mt-0.5 flex flex-wrap gap-x-2 font-mono text-[10px] text-muted-foreground">
-                          <span className="max-w-44 truncate">{f.contentType}</span>
-                          <span className="tabular-nums">{humanSize(f.size)}</span>
-                        </span>
-                      </span>
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
-      </section>
-      {openFile !== null && (
-        <SkillFileDialog
-          file={openFile}
-          id={skill.id}
-          onClose={() => setOpenFile(null)}
-          path={path}
-        />
-      )}
-    </div>
-  )
-}
-
-/** 技能内单文件预览:文本内联渲染;大对象($ref)给下载链接。 */
-function SkillFileDialog({
-  path,
-  id,
-  file,
-  onClose,
-}: {
-  file: string
-  id: string
-  onClose: () => void
-  path: string
-}) {
-  const query = useSkillFile(path, id, file)
-  const f = query.data
-  const ref = f ? refOf(f.content) : null
-  const text = f && ref === null && typeof f.content === 'string' ? f.content : ''
-
-  return (
-    <Dialog onOpenChange={o => !o && onClose()} open>
-      <DialogContent className="max-h-[calc(100dvh-1rem)] overflow-y-auto p-4 sm:max-h-[85vh] sm:max-w-2xl sm:p-6">
-        <DialogHeader>
-          <DialogTitle className="min-w-0 break-all pr-6 font-mono text-sm">{file}</DialogTitle>
-          {f && (
-            <DialogDescription asChild>
-              <p className="flex flex-wrap gap-x-3 font-mono text-[10px] text-muted-foreground">
-                <span>{f.contentType}</span>
-                <span>{humanSize(f.size)}</span>
-                <span title={`version ${f.version}`}>
-                  v:
-                  {f.version.slice(0, 12)}
-                </span>
-              </p>
-            </DialogDescription>
-          )}
-        </DialogHeader>
-
-        {query.isPending
-          ? (
-              <div className="grid gap-2">
-                <Skeleton className="h-4 w-full" />
-                <Skeleton className="h-4 w-5/6" />
-                <Skeleton className="h-4 w-3/6" />
-              </div>
-            )
-          : query.isError
-            ? (
-                <div
-                  className="rounded-lg border border-destructive/40 bg-destructive/10 p-3"
-                  role="alert"
-                >
-                  <p className="text-sm text-destructive">{query.error.message}</p>
-                  <Button
-                    className="mt-3"
-                    disabled={query.isFetching}
-                    onClick={() => query.refetch()}
-                    size="sm"
-                    variant="outline"
-                  >
-                    <RefreshCw className={cn(query.isFetching && 'animate-spin')} />
-                    重试读取
-                  </Button>
-                </div>
-              )
-            : f && ref !== null
-              ? (
-                  <section className="rounded-lg border border-warn/40 bg-warn/5 p-3.5 text-sm">
-                    <p className="font-medium">大对象通过 $ref 提供</p>
-                    <p className="mt-1 text-xs leading-5 text-muted-foreground">
-                      内容超过内联阈值,链接可能有时效,请及时下载。
-                    </p>
-                    <Button asChild className="mt-3 font-mono text-xs" size="sm" variant="outline">
-                      <a href={ref} rel="noreferrer" target="_blank">
-                        <ExternalLink />
-                        打开 $ref
-                      </a>
-                    </Button>
-                  </section>
-                )
-              : f
-                ? (
-                    <pre className="max-h-[34rem] max-w-full overflow-auto rounded-lg border bg-background/55 px-4 py-3 font-mono text-xs leading-relaxed whitespace-pre-wrap break-words">
-                      {text}
-                    </pre>
-                  )
-                : null}
-
-        <DialogFooter className="items-center sm:justify-between">
-          <div className="flex items-center gap-1">
-            {ref === null && f && <CopyButton label="复制内容" size="icon-sm" value={text} />}
-          </div>
-          <Button onClick={onClose}>关闭</Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  )
-}
-
-/** 移动端技能详情对话框(桌面走常驻 pane)。 */
-function SkillDetailDialog({
-  path,
-  id,
-  canRemove,
-  onClose,
-  onDelete,
-}: {
-  canRemove: boolean
-  id: string | null
-  onClose: () => void
-  onDelete: (id: string) => Promise<void>
-  path: string
-}) {
-  const skill = useSkill(path, id)
-  const s = skill.data
-
-  return (
-    <Dialog onOpenChange={o => !o && onClose()} open={id !== null}>
-      <DialogContent className="max-h-[calc(100dvh-1rem)] overflow-y-auto p-4 sm:max-h-[85vh] sm:max-w-2xl sm:p-6">
-        <DialogHeader>
-          <DialogTitle className="min-w-0 break-words pr-6 text-base">{s?.name ?? id}</DialogTitle>
-          {s && (
-            <DialogDescription asChild>
-              <div>
-                <SkillFacts skill={s} />
-              </div>
-            </DialogDescription>
-          )}
-        </DialogHeader>
-
-        {skill.isPending
-          ? (
-              <div className="grid gap-2">
-                <Skeleton className="h-4 w-full" />
-                <Skeleton className="h-4 w-5/6" />
-                <Skeleton className="h-4 w-3/6" />
-              </div>
-            )
-          : skill.isError
-            ? (
-                <div
-                  className="rounded-lg border border-destructive/40 bg-destructive/10 p-3"
-                  role="alert"
-                >
-                  <p className="text-sm text-destructive">{skill.error.message}</p>
-                  <Button
-                    className="mt-3"
-                    disabled={skill.isFetching}
-                    onClick={() => skill.refetch()}
-                    size="sm"
-                    variant="outline"
-                  >
-                    <RefreshCw className={cn(skill.isFetching && 'animate-spin')} />
-                    重试读取
-                  </Button>
-                </div>
-              )
-            : s
-              ? (
-                  <SkillBody path={path} skill={s} />
-                )
-              : null}
-
-        <DialogFooter className="items-center sm:justify-between">
-          <div className="flex items-center gap-1">
-            {s && <CopyButton label="复制 SKILL.md" size="icon-sm" value={s.content} />}
-          </div>
-          <div className="flex gap-2">
-            {canRemove && id && (
-              <ConfirmAction
-                actionLabel="删除"
-                description={<p>删除是幂等的，但内容不可恢复。</p>}
-                onConfirm={() => onDelete(id)}
-                title={`删除技能 ${id}?`}
-                trigger={(
-                  <Button aria-label="删除技能" variant="outline">
-                    <Trash2 className="text-destructive" />
-                    删除
-                  </Button>
-                )}
-              />
-            )}
-            <Button onClick={onClose}>关闭</Button>
-          </div>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  )
-}
-
-interface DraftFile {
-  content: string
-  path: string
-}
-
-const SKILL_MD_PLACEHOLDER = `---
-name: my-skill
-description: 一句话说明这个技能做什么、何时用。
----
-
-# 用法
-
-在这里写技能正文(Markdown)。`
-
-/**
- * 发布技能(对等 `tb skill publish`):Publish 是幂等 upsert。
- * 必须包含一个 SKILL.md 文件,其 frontmatter 含 name + description;可选追加更多文件。
- */
-function SkillPublishDialog({
-  path,
-  onClose,
-  onSaved,
-}: {
-  onClose: () => void
-  onSaved: () => void
-  path: string
-}) {
-  const invoke = useInvoke()
-  const [id, setId] = useState('')
-  const [skillMd, setSkillMd] = useState('')
-  const [extraFiles, setExtraFiles] = useState<DraftFile[]>([])
-  const [err, setErr] = useState<string | null>(null)
-
-  const addFile = () => setExtraFiles(prev => [...prev, { path: '', content: '' }])
-  const updateFile = (index: number, patch: Partial<DraftFile>) =>
-    setExtraFiles(prev => prev.map((f, i) => (i === index ? { ...f, ...patch } : f)))
-  const removeFile = (index: number) => setExtraFiles(prev => prev.filter((_, i) => i !== index))
-
-  const submit = async () => {
-    if (!skillMd.trim()) {
-      setErr('SKILL.md 必填(frontmatter 需含 name 与 description)')
-      return
-    }
-    const files: Array<{ content: string, path: string }> = [{ path: 'SKILL.md', content: skillMd }]
-    for (const f of extraFiles) {
-      const p = f.path.trim().replace(/^\/+/, '')
-      if (p === '') {
-        setErr('每个追加文件都需要一个路径')
-        return
-      }
-      if (p === 'SKILL.md') {
-        setErr('SKILL.md 已由上方文本框提供,追加文件请用其他路径')
-        return
-      }
-      files.push({ path: p, content: f.content })
-    }
-    try {
-      const r = await invoke.mutateAsync({
-        path,
-        tool: 'Publish',
-        args: { ...(id.trim() ? { id: id.trim() } : {}), files },
-      })
-      const published = (r.json as { id?: string })?.id ?? id.trim()
-      toast.success(published ? `已发布 ${published}` : '已发布技能')
-      onSaved()
-    } catch (error) {
-      setErr((error as Error).message)
-    }
-  }
-
-  const requestOpenChange = (next: boolean) => {
-    if (invoke.isPending) return
-    if (!next) onClose()
-  }
-
-  return (
-    <Dialog onOpenChange={requestOpenChange} open>
-      <DialogContent
-        className="max-h-[85vh] overflow-y-auto sm:max-w-2xl"
-        onEscapeKeyDown={event => invoke.isPending && event.preventDefault()}
-        onPointerDownOutside={event => invoke.isPending && event.preventDefault()}
-        showCloseButton={!invoke.isPending}
-      >
-        <DialogHeader>
-          <DialogTitle className="break-words text-base">发布技能</DialogTitle>
-          <DialogDescription>
-            Publish 是幂等 upsert;必须含 SKILL.md(frontmatter 提供 name 与
-            description),可追加更多文件。
-          </DialogDescription>
-        </DialogHeader>
-
-        <div className="grid gap-4">
-          <div className="grid gap-1.5">
-            <Label className="text-xs" htmlFor="skill-id">
-              技能 id(可空;留空由服务端从 SKILL.md 生成)
-            </Label>
-            <Input
-              className="font-mono text-sm"
-              id="skill-id"
-              onChange={e => setId(e.target.value)}
-              placeholder="my-skill"
-              value={id}
-            />
-          </div>
-          <div className="grid gap-1.5">
-            <Label className="text-xs" htmlFor="skill-md">
-              SKILL.md *
-            </Label>
-            <Textarea
-              className="font-mono text-xs"
-              id="skill-md"
-              onChange={e => setSkillMd(e.target.value)}
-              placeholder={SKILL_MD_PLACEHOLDER}
-              rows={12}
-              spellCheck={false}
-              value={skillMd}
-            />
-          </div>
-          <div className="grid gap-2.5">
-            <div className="flex items-center justify-between">
-              <Label className="text-xs">附加文件(可空)</Label>
-              <Button onClick={addFile} size="xs" type="button" variant="ghost">
-                <Plus />
-                添加文件
-              </Button>
-            </div>
-            {extraFiles.map((f, index) => (
-              // biome-ignore lint/suspicious/noArrayIndexKey: 草稿行顺序稳定,无稳定 id
-              <div className="grid gap-2 rounded-lg border bg-muted/10 p-3" key={index}>
-                <div className="flex items-center gap-2">
-                  <Input
-                    className="h-8 font-mono text-xs"
-                    onChange={e => updateFile(index, { path: e.target.value })}
-                    placeholder="reference/example.txt"
-                    value={f.path}
-                  />
-                  <Button
-                    aria-label="移除文件"
-                    onClick={() => removeFile(index)}
-                    size="icon-sm"
-                    type="button"
-                    variant="ghost"
-                  >
-                    <X />
-                  </Button>
-                </div>
-                <Textarea
-                  className="font-mono text-xs"
-                  onChange={e => updateFile(index, { content: e.target.value })}
-                  placeholder="文件内容…"
-                  rows={4}
-                  spellCheck={false}
-                  value={f.content}
-                />
-              </div>
-            ))}
-          </div>
-          {err && (
-            <p className="text-xs text-destructive" role="alert">
-              {err}
-            </p>
-          )}
-        </div>
-
-        <DialogFooter>
-          <Button disabled={invoke.isPending} onClick={() => void submit()}>
-            {invoke.isPending && <Loader2 className="animate-spin" />}
-            发布
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
   )
 }

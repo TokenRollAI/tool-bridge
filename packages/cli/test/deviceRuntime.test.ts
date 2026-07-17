@@ -17,7 +17,7 @@ vi.mock('partysocket/ws', () => {
     readyState = 1
     sent: string[] = []
     private listeners = new Map<string, Listener[]>()
-    constructor(_url: string, _protocols?: unknown, _opts?: unknown) {
+    constructor() {
       FakeReconnectingWebSocket.instances.push(this)
     }
 
@@ -31,7 +31,7 @@ vi.mock('partysocket/ws', () => {
       this.sent.push(String(data))
     }
 
-    close(_code?: number, _reason?: string): void {
+    close(): void {
       this.dispatch('close', {})
     }
 

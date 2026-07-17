@@ -224,7 +224,9 @@ describe('note 行与 feedback 块(未知行忽略扩展通道)', () => {
 
   it('note/feedback 对最小 parser 是未知行:解析结果与去掉它们完全一致', () => {
     const parsed = parseHelpDsl(text)
-    const { note: _n, feedback: _f, ...bare } = model
+    const bare = { ...model }
+    delete (bare as { feedback?: unknown, note?: unknown }).note
+    delete (bare as { feedback?: unknown, note?: unknown }).feedback
     expect(parsed).toEqual(parseHelpDsl(renderHelpDsl(bare)))
     expect(parsed.cmds).toEqual([
       { name: 'create-doc', method: 'POST', path: '/feishu/create-doc', scope: 'call' },

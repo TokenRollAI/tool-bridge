@@ -19,63 +19,37 @@ import { EmptyState } from '@/components/EmptyState'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Textarea } from '@/components/ui/textarea'
 import { Button } from '@/components/ui/button'
+import { useConn } from '@/lib/session-context'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { useConn } from '@/lib/session'
 
 /** 净分 ≤ 此值的条目不进 ~help 默认区块(与网关一致,仅作展示标注)。 */
 const HIDE_SCORE = -3
 
-/**
- * Agent 反馈面板(~feedback 保留段,对等 `tb feedback`):
- * 净分排序列表(含被隐藏条目,标注「已隐藏」)、点击展开 detail、投票(每身份一票,
- * 可改票)、提交与删除(删除需 admin)。头部条目会进该路径 ~help 的默认区块。
- */
-export function FeedbackPanel({ path }: { path: string }) {
-  const list = useFeedbackList(path)
-  const [expanded, setExpanded] = useState<string | null>(null)
-  const items = list.data?.items ?? []
-
+function FeedbackDetail({ path, id }: { id: string, path: string }) {
+  const detail = useFeedbackDetail(path, id)
+  if (detail.isPending) {
+    return <Skeleton className="mx-3.5 mb-3 h-10" />
+  }
+  if (detail.isError) {
+    return <p className="px-3.5 pb-3 text-xs text-destructive">{detail.error.message}</p>
+  }
   return (
-    <div className="grid gap-3">
-      <div className="flex flex-col items-start gap-2 sm:flex-row sm:items-center sm:justify-between">
-        <p className="text-xs text-muted-foreground">
-          Agent 使用经验沉淀:头部条目会出现在该路径 ~help 的 feedback 区块里。
-        </p>
-        <SubmitDialog path={path} />
-      </div>
-
-      {list.isPending
-        ? (
-            <div className="grid gap-2">
-              <Skeleton className="h-10 w-full" />
-              <Skeleton className="h-10 w-4/6" />
-            </div>
-          )
-        : list.isError
-          ? (
-              <p className="text-sm text-destructive">{list.error.message}</p>
-            )
-          : items.length === 0
-            ? (
-                <EmptyState icon={MessageSquarePlus} title="还没有反馈">
-                  <p>用过这个路径的工具后踩了坑?提交一条简短反馈,帮后来的 Agent 少走弯路。</p>
-                </EmptyState>
-              )
-            : (
-                <div className="grid gap-px overflow-hidden rounded-md border">
-                  {items.map(f => (
-                    <FeedbackRow
-                      expanded={expanded === f.id}
-                      item={f}
-                      key={f.id}
-                      onToggle={() => setExpanded(expanded === f.id ? null : f.id)}
-                      path={path}
-                    />
-                  ))}
-                </div>
-              )}
+    <div className="min-w-0 border-t bg-background/40 px-3.5 py-2.5">
+      <p className="whitespace-pre-wrap break-words text-sm">{detail.data.detail}</p>
+      <p className="mt-1.5 break-all font-mono text-[11px] text-muted-foreground">
+        {detail.data.id}
+        {' '}
+        · +
+        {detail.data.up}
+        /-
+        {detail.data.down}
+        {' '}
+        ·
+        {' '}
+        {detail.data.at ? new Date(detail.data.at).toLocaleString() : '-'}
+      </p>
     </div>
   )
 }
@@ -183,33 +157,6 @@ function FeedbackRow({
   )
 }
 
-function FeedbackDetail({ path, id }: { id: string, path: string }) {
-  const detail = useFeedbackDetail(path, id)
-  if (detail.isPending) {
-    return <Skeleton className="mx-3.5 mb-3 h-10" />
-  }
-  if (detail.isError) {
-    return <p className="px-3.5 pb-3 text-xs text-destructive">{detail.error.message}</p>
-  }
-  return (
-    <div className="min-w-0 border-t bg-background/40 px-3.5 py-2.5">
-      <p className="whitespace-pre-wrap break-words text-sm">{detail.data.detail}</p>
-      <p className="mt-1.5 break-all font-mono text-[11px] text-muted-foreground">
-        {detail.data.id}
-        {' '}
-        · +
-        {detail.data.up}
-        /-
-        {detail.data.down}
-        {' '}
-        ·
-        {' '}
-        {detail.data.at ? new Date(detail.data.at).toLocaleString() : '-'}
-      </p>
-    </div>
-  )
-}
-
 function SubmitDialog({ path }: { path: string }) {
   const conn = useConn()
   const qc = useQueryClient()
@@ -298,5 +245,58 @@ function SubmitDialog({ path }: { path: string }) {
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  )
+}
+
+/**
+ * Agent 反馈面板(~feedback 保留段,对等 `tb feedback`):
+ * 净分排序列表(含被隐藏条目,标注「已隐藏」)、点击展开 detail、投票(每身份一票,
+ * 可改票)、提交与删除(删除需 admin)。头部条目会进该路径 ~help 的默认区块。
+ */
+export function FeedbackPanel({ path }: { path: string }) {
+  const list = useFeedbackList(path)
+  const [expanded, setExpanded] = useState<string | null>(null)
+  const items = list.data?.items ?? []
+
+  return (
+    <div className="grid gap-3">
+      <div className="flex flex-col items-start gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <p className="text-xs text-muted-foreground">
+          Agent 使用经验沉淀:头部条目会出现在该路径 ~help 的 feedback 区块里。
+        </p>
+        <SubmitDialog path={path} />
+      </div>
+
+      {list.isPending
+        ? (
+            <div className="grid gap-2">
+              <Skeleton className="h-10 w-full" />
+              <Skeleton className="h-10 w-4/6" />
+            </div>
+          )
+        : list.isError
+          ? (
+              <p className="text-sm text-destructive">{list.error.message}</p>
+            )
+          : items.length === 0
+            ? (
+                <EmptyState icon={MessageSquarePlus} title="还没有反馈">
+                  <p>用过这个路径的工具后踩了坑?提交一条简短反馈,帮后来的 Agent 少走弯路。</p>
+                </EmptyState>
+              )
+            : (
+                <div className="grid gap-px overflow-hidden rounded-md border">
+                  {items.map(f => (
+                    <FeedbackRow
+                      expanded={expanded === f.id}
+                      item={f}
+                      key={f.id}
+                      onToggle={() => setExpanded(expanded === f.id ? null : f.id)}
+                      path={path}
+                    />
+                  ))}
+                </div>
+              )}
+    </div>
   )
 }

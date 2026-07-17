@@ -12,6 +12,16 @@ interface StatusOpts {
   sk?: string
 }
 
+/** 统一错误出口:`--json` 时输出可解析对象,否则写 stderr;退出码非 0。 */
+function emitError(asJson: boolean, message: string, url?: string): void {
+  if (asJson) {
+    process.stdout.write(`${JSON.stringify({ ok: false, healthy: false, error: message, url })}\n`)
+  } else {
+    process.stderr.write(`error: ${message}\n`)
+  }
+  process.exitCode = 1
+}
+
 /**
  * `tb status` —— 部署环境健康摘要。
  *
@@ -70,14 +80,4 @@ export function statusCommand(): Command {
 
       process.exitCode = healthy ? 0 : 1
     })
-}
-
-/** 统一错误出口:`--json` 时输出可解析对象,否则写 stderr;退出码非 0。 */
-function emitError(asJson: boolean, message: string, url?: string): void {
-  if (asJson) {
-    process.stdout.write(`${JSON.stringify({ ok: false, healthy: false, error: message, url })}\n`)
-  } else {
-    process.stderr.write(`error: ${message}\n`)
-  }
-  process.exitCode = 1
 }

@@ -189,13 +189,13 @@ export class DeviceHub {
     deviceId: string,
     authorization: string | undefined,
   ): void {
-    const session = new DeviceGatewaySession(
+    const conn: Conn = { deviceId, authorization, ws, session: new DeviceGatewaySession(
       {
         send: frame => ws.send(encodeDeviceFrame(frame)),
         close: code => ws.close(code),
         onHello: (hello) => {
           this.acceptHello(conn, hello).catch((err) => {
-            session.reject(err instanceof TBError ? err : new TBError('internal', 'hello 失败'))
+            conn.session.reject(err instanceof TBError ? err : new TBError('internal', 'hello 失败'))
           })
         },
       },
@@ -205,17 +205,16 @@ export class DeviceHub {
           return () => clearTimeout(id)
         },
       },
-    )
-    const conn: Conn = { deviceId, authorization, ws, session, isAlive: true }
+    ), isAlive: true }
     this.connections.add(conn)
     ws.on('pong', () => {
       conn.isAlive = true
     })
     ws.on('message', (data) => {
       try {
-        session.handleFrame(decodeDeviceFrame(data.toString()))
+        conn.session.handleFrame(decodeDeviceFrame(data.toString()))
       } catch (err) {
-        session.reject(err instanceof TBError ? err : new TBError('invalid_argument', '非法帧'))
+        conn.session.reject(err instanceof TBError ? err : new TBError('invalid_argument', '非法帧'))
       }
     })
     ws.on('close', () => {

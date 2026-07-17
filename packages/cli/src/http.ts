@@ -195,6 +195,25 @@ export async function callDirect<T>(
   return apiJson<T>(target, { method: 'POST', path: toolPath, body: args })
 }
 
+async function invokeText(target: Target, path: string, body: unknown): Promise<string> {
+  const r = await apiFetch(target, {
+    method: 'POST',
+    path,
+    body,
+    accept: 'markdown',
+  })
+  if (!r.ok) {
+    let body: unknown
+    try {
+      body = JSON.parse(r.text)
+    } catch {
+      // 非 JSON 错误体:回退到 HTTP 码
+    }
+    throw toCliError(body, r.status)
+  }
+  return r.text
+}
+
 /**
  * 数据面调用(人类模式):`Accept: text/markdown`,返回原始渲染文本。
  * 非 2xx 时按 TBError 归一为 CliError。
@@ -215,23 +234,4 @@ export async function callDirectText(
   args: Record<string, unknown> = {},
 ): Promise<string> {
   return invokeText(target, toolPath, args)
-}
-
-async function invokeText(target: Target, path: string, body: unknown): Promise<string> {
-  const r = await apiFetch(target, {
-    method: 'POST',
-    path,
-    body,
-    accept: 'markdown',
-  })
-  if (!r.ok) {
-    let body: unknown
-    try {
-      body = JSON.parse(r.text)
-    } catch {
-      // 非 JSON 错误体:回退到 HTTP 码
-    }
-    throw toCliError(body, r.status)
-  }
-  return r.text
 }

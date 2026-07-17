@@ -23,8 +23,9 @@ import {
   CommandList,
   CommandSeparator,
 } from '@/components/ui/command'
-import { KIND_ICON, KindBadge } from '@/components/KindBadge'
-import { useSession } from '@/lib/session'
+import { KindBadge } from '@/components/KindBadge'
+import { KIND_ICON } from '@/components/kind-icon'
+import { useSession } from '@/lib/session-context'
 import { useTree } from '@/lib/queries'
 import { useTheme } from '@/lib/theme'
 import { cn } from '@/lib/utils'

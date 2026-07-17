@@ -102,6 +102,628 @@ function useDesktopContextLayout(): boolean {
   return desktop
 }
 
+function entryText(entry: ContextEntry): string {
+  return typeof entry.content === 'string' ? entry.content : JSON.stringify(entry.content, null, 2)
+}
+
+function EntryFacts({ entry }: { entry: ContextEntry }) {
+  return (
+    <p className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1 font-mono text-[10px] text-muted-foreground">
+      <span>{entry.contentType}</span>
+      <span>{humanSize(entry.size)}</span>
+      <span title={entry.updatedAt}>{humanTime(entry.updatedAt)}</span>
+      <span title={`version ${entry.version}`}>
+        v:
+        {entry.version.slice(0, 12)}
+      </span>
+    </p>
+  )
+}
+
+function EntryContent({ entry }: { entry: ContextEntry }) {
+  const ref = refOf(entry.content)
+  const text = ref === null ? entryText(entry) : ''
+  if (ref !== null) {
+    return (
+      <section className="rounded-lg border border-warn/40 bg-warn/5 p-3.5 text-sm">
+        <p className="font-medium">大对象通过 $ref 提供</p>
+        <p className="mt-1 text-xs leading-5 text-muted-foreground">
+          内容超过内联阈值（1 MiB），链接可能有时效，请及时下载。
+        </p>
+        <Button asChild className="mt-3 font-mono text-xs" size="sm" variant="outline">
+          <a href={ref} rel="noreferrer" target="_blank">
+            <ExternalLink />
+            打开 $ref
+          </a>
+        </Button>
+      </section>
+    )
+  }
+  if (entry.contentType.includes('markdown')) {
+    return (
+      <section>
+        <p className="mb-2 font-mono text-[9px] tracking-[0.14em] text-muted-foreground">CONTENT</p>
+        <div className="prose prose-sm dark:prose-invert max-w-none overflow-x-auto rounded-lg border bg-background/55 px-4 py-4 break-words prose-pre:max-w-full prose-pre:overflow-x-auto prose-pre:bg-background prose-pre:text-xs prose-code:font-mono">
+          <Markdown remarkPlugins={[remarkGfm]}>{text}</Markdown>
+        </div>
+      </section>
+    )
+  }
+  return (
+    <section>
+      <p className="mb-2 font-mono text-[9px] tracking-[0.14em] text-muted-foreground">CONTENT</p>
+      <pre className="max-h-[34rem] max-w-full overflow-auto rounded-lg border bg-background/55 px-4 py-3 font-mono text-xs leading-relaxed whitespace-pre-wrap break-words">
+        {text}
+      </pre>
+    </section>
+  )
+}
+
+function EntryMetadata({ entry }: { entry: ContextEntry }) {
+  const metadata = Object.entries(entry.metadata ?? {})
+  return (
+    <section>
+      <div className="mb-2 flex items-center justify-between gap-3">
+        <p className="font-mono text-[9px] tracking-[0.14em] text-muted-foreground">METADATA</p>
+        <span className="font-mono text-[10px] text-muted-foreground tabular-nums">
+          {metadata.length}
+          {' '}
+          FIELDS
+        </span>
+      </div>
+      {metadata.length === 0
+        ? (
+            <p className="rounded-lg border border-dashed px-3 py-4 text-xs text-muted-foreground">
+              此条目没有 metadata。
+            </p>
+          )
+        : (
+            <dl className="overflow-hidden rounded-lg border bg-background/45">
+              {metadata.map(([key, value]) => (
+                <div
+                  className="grid min-w-0 grid-cols-[minmax(7rem,0.35fr)_minmax(0,1fr)] border-b last:border-b-0"
+                  key={key}
+                >
+                  <dt className="border-r bg-secondary/20 px-3 py-2 font-mono text-[10px] text-muted-foreground">
+                    {key}
+                  </dt>
+                  <dd className="min-w-0 break-all px-3 py-2 font-mono text-[10px]">{value}</dd>
+                </div>
+              ))}
+            </dl>
+          )}
+    </section>
+  )
+}
+
+const CONTENT_TYPES = ['text/markdown', 'text/plain', 'application/json'] as const
+
+/** "key=value" 行 → metadata Record(空返回 undefined;非法行抛错,对等 CLI --meta)。 */
+function parseMetaLines(spec: string): Record<string, string> | undefined {
+  const out: Record<string, string> = {}
+  for (const line of spec.split('\n')) {
+    const s = line.trim()
+    if (!s) continue
+    const idx = s.indexOf('=')
+    const k = idx < 0 ? '' : s.slice(0, idx).trim()
+    if (!k) throw new Error(`metadata 每行须为 "key=value" 形式:"${s}"`)
+    out[k] = s.slice(idx + 1).trim()
+  }
+  return Object.keys(out).length ? out : undefined
+}
+
+function metaToLines(metadata: Record<string, string> | undefined): string {
+  return Object.entries(metadata ?? {})
+    .map(([k, v]) => `${k}=${v}`)
+    .join('\n')
+}
+
+function EntryPreviewPane({
+  path,
+  entryPath,
+  canWrite,
+  canDelete,
+  onEdit,
+  onDelete,
+}: {
+  canDelete: boolean
+  canWrite: boolean
+  entryPath: string | null
+  onDelete: (rel: string) => Promise<void>
+  onEdit: (rel: string) => void
+  path: string
+}) {
+  const entry = useCtxEntry(path, entryPath)
+  const e = entry.data
+  const ref = e ? refOf(e.content) : null
+  const text = e && ref === null ? entryText(e) : ''
+
+  return (
+    <aside className="hidden min-w-0 overflow-hidden rounded-xl border bg-card/35 lg:sticky lg:top-4 lg:flex lg:min-h-[40rem] lg:max-h-[calc(100dvh-8rem)] lg:flex-col">
+      {entryPath === null
+        ? (
+            <div className="grid min-h-[40rem] place-items-center p-8 text-center">
+              <div className="max-w-64">
+                <span className="mx-auto grid size-12 place-items-center rounded-xl border bg-background/70 text-muted-foreground">
+                  <PanelRight className="size-5" />
+                </span>
+                <h2 className="mt-4 text-sm font-medium">选择条目查看详情</h2>
+                <p className="mt-1.5 text-xs leading-5 text-muted-foreground">
+                  预览会固定在这里，筛选、翻页和目录上下文都不会丢失。
+                </p>
+              </div>
+            </div>
+          )
+        : (
+            <>
+              <header className="flex min-h-16 items-start justify-between gap-4 border-b px-4 py-3.5">
+                <div className="min-w-0">
+                  <p className="font-mono text-[9px] tracking-[0.14em] text-muted-foreground">
+                    PREVIEW
+                  </p>
+                  <h2 className="mt-1 break-all font-mono text-sm font-medium">{entryPath}</h2>
+                  {e && <EntryFacts entry={e} />}
+                </div>
+                <div className="flex shrink-0 items-center gap-1">
+                  <Button
+                    aria-label="刷新预览"
+                    disabled={entry.isFetching}
+                    onClick={() => entry.refetch()}
+                    size="icon-sm"
+                    title="刷新预览"
+                    variant="ghost"
+                  >
+                    <RefreshCw className={cn(entry.isFetching && 'animate-spin')} />
+                  </Button>
+                  {canWrite && (
+                    <Button onClick={() => onEdit(entryPath)} size="sm" variant="outline">
+                      <Pencil />
+                      编辑
+                    </Button>
+                  )}
+                  {canDelete && (
+                    <ConfirmAction
+                      actionLabel="删除"
+                      description={<p>删除是幂等的，但内容不可恢复。</p>}
+                      onConfirm={() => onDelete(entryPath)}
+                      title={`删除条目 ${entryPath}?`}
+                      trigger={(
+                        <Button aria-label="删除条目" size="icon-sm" title="删除" variant="ghost">
+                          <Trash2 className="text-destructive" />
+                        </Button>
+                      )}
+                    />
+                  )}
+                </div>
+              </header>
+
+              <div className="min-h-0 flex-1 overflow-y-auto p-4">
+                {entry.isPending
+                  ? (
+                      <div aria-label="正在读取条目" className="grid gap-3" role="status">
+                        <Skeleton className="h-5 w-full" />
+                        <Skeleton className="h-5 w-5/6" />
+                        <Skeleton className="h-48 w-full" />
+                      </div>
+                    )
+                  : entry.isError
+                    ? (
+                        <div
+                          className="rounded-lg border border-destructive/40 bg-destructive/10 p-3"
+                          role="alert"
+                        >
+                          <p className="text-sm text-destructive">{entry.error.message}</p>
+                          <Button
+                            className="mt-3"
+                            disabled={entry.isFetching}
+                            onClick={() => entry.refetch()}
+                            size="sm"
+                            variant="outline"
+                          >
+                            <RefreshCw className={cn(entry.isFetching && 'animate-spin')} />
+                            重试读取
+                          </Button>
+                        </div>
+                      )
+                    : e
+                      ? (
+                          <div className="grid gap-5">
+                            <EntryContent entry={e} />
+                            <EntryMetadata entry={e} />
+                          </div>
+                        )
+                      : null}
+              </div>
+
+              {e && (
+                <footer className="flex min-h-12 items-center justify-between gap-3 border-t bg-background/25 px-4 py-2.5">
+                  <p
+                    className="min-w-0 truncate font-mono text-[10px] text-muted-foreground"
+                    title={e.version}
+                  >
+                    version ·
+                    {' '}
+                    {e.version}
+                  </p>
+                  {ref === null && <CopyButton label="复制内容" size="icon-sm" value={text} />}
+                </footer>
+              )}
+            </>
+          )}
+    </aside>
+  )
+}
+
+/** 条目预览:meta + 内容(markdown/json/text);大对象给 $ref 下载链接。 */
+function EntryViewDialog({
+  path,
+  entryPath,
+  canWrite,
+  canDelete,
+  onClose,
+  onEdit,
+  onDelete,
+}: {
+  canDelete: boolean
+  canWrite: boolean
+  entryPath: string | null
+  onClose: () => void
+  onDelete: (rel: string) => Promise<void>
+  onEdit: (rel: string) => void
+  path: string
+}) {
+  const entry = useCtxEntry(path, entryPath)
+  const e = entry.data
+  const ref = e ? refOf(e.content) : null
+  const text = e && ref === null ? entryText(e) : ''
+
+  return (
+    <Dialog onOpenChange={o => !o && onClose()} open={entryPath !== null}>
+      <DialogContent className="max-h-[calc(100dvh-1rem)] overflow-y-auto p-4 sm:max-h-[85vh] sm:max-w-2xl sm:p-6">
+        <DialogHeader>
+          <DialogTitle className="min-w-0 break-all pr-6 font-mono text-sm">
+            {entryPath}
+          </DialogTitle>
+          {e && (
+            <DialogDescription asChild>
+              <div>
+                <EntryFacts entry={e} />
+              </div>
+            </DialogDescription>
+          )}
+        </DialogHeader>
+
+        {entry.isPending
+          ? (
+              <div className="grid gap-2">
+                <Skeleton className="h-4 w-full" />
+                <Skeleton className="h-4 w-5/6" />
+                <Skeleton className="h-4 w-3/6" />
+              </div>
+            )
+          : entry.isError
+            ? (
+                <div
+                  className="rounded-lg border border-destructive/40 bg-destructive/10 p-3"
+                  role="alert"
+                >
+                  <p className="text-sm text-destructive">{entry.error.message}</p>
+                  <Button
+                    className="mt-3"
+                    disabled={entry.isFetching}
+                    onClick={() => entry.refetch()}
+                    size="sm"
+                    variant="outline"
+                  >
+                    <RefreshCw className={cn(entry.isFetching && 'animate-spin')} />
+                    重试读取
+                  </Button>
+                </div>
+              )
+            : e
+              ? (
+                  <div className="grid gap-5">
+                    <EntryContent entry={e} />
+                    <EntryMetadata entry={e} />
+                  </div>
+                )
+              : null}
+
+        <DialogFooter className="items-center sm:justify-between">
+          <div className="flex items-center gap-1">
+            {ref === null && e && <CopyButton label="复制内容" size="icon-sm" value={text} />}
+          </div>
+          <div className="flex gap-2">
+            {canDelete && entryPath && (
+              <ConfirmAction
+                actionLabel="删除"
+                description={<p>删除是幂等的，但内容不可恢复。</p>}
+                onConfirm={() => onDelete(entryPath)}
+                title={`删除条目 ${entryPath}?`}
+                trigger={(
+                  <Button aria-label="删除条目" variant="outline">
+                    <Trash2 className="text-destructive" />
+                    删除
+                  </Button>
+                )}
+              />
+            )}
+            {canWrite && entryPath && (
+              <Button onClick={() => onEdit(entryPath)} variant="outline">
+                <Pencil />
+                编辑
+              </Button>
+            )}
+            <Button onClick={onClose}>关闭</Button>
+          </div>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+/**
+ * 新建/编辑条目(对等 `tb ctx put/patch`):新建与内容编辑走 Write(幂等 upsert,
+ * 带 ifVersion 乐观并发);大对象($ref)不可就地改内容,但可经 Update 只改 metadata。
+ */
+function EntryEditDialog({
+  path,
+  entryPath,
+  onClose,
+  onSaved,
+}: {
+  /** '' = 新建。 */
+  entryPath: string
+  onClose: () => void
+  onSaved: () => void
+  path: string
+}) {
+  const isNew = entryPath === ''
+  const existing = useCtxEntry(path, isNew ? null : entryPath)
+  const invoke = useInvoke()
+
+  const [rel, setRel] = useState(entryPath)
+  const [contentType, setContentType] = useState<string>('text/markdown')
+  const [content, setContent] = useState('')
+  const [metaSpec, setMetaSpec] = useState('')
+  const [err, setErr] = useState<string | null>(null)
+  const [hydrated, setHydrated] = useState(false)
+  const [baselineVersion, setBaselineVersion] = useState<string | null>(null)
+  const [baselineRef, setBaselineRef] = useState<string | null>(null)
+
+  // 编辑模式:Get 到位后一次性预填(大对象 $ref 不可就地编辑内容)。
+  const e = existing.data
+  useEffect(() => {
+    if (isNew || !e || hydrated) return
+    setContentType(e.contentType)
+    setContent(typeof e.content === 'string' ? e.content : JSON.stringify(e.content, null, 2))
+    setMetaSpec(metaToLines(e.metadata))
+    // 内容与 version 必须原子取自同一次 Get。后台 refetch 即使更新 query data,
+    // 提交仍使用这个 baseline,让服务端的乐观锁能阻止“旧正文 + 新 version”覆盖。
+    setBaselineVersion(e.version)
+    setBaselineRef(refOf(e.content))
+    setHydrated(true)
+  }, [isNew, e, hydrated])
+  const waitingForExisting = !isNew && (existing.isPending || (existing.isSuccess && !hydrated))
+  const ref = isNew ? null : baselineRef
+
+  const submit = async () => {
+    // 编辑必须基于成功 Get 的 version；缺少基线时绝不降级成无 ifVersion 的覆盖写。
+    if (!isNew && (!hydrated || baselineVersion === null)) {
+      setErr('未能读取现有条目，无法安全保存；请重试读取。')
+      return
+    }
+    let metadata: Record<string, string> | undefined
+    try {
+      metadata = parseMetaLines(metaSpec)
+    } catch (ex) {
+      setErr((ex as Error).message)
+      return
+    }
+
+    // 大对象:内容不可就地改,只走 Update 改 metadata(对等 tb ctx patch --meta)。
+    if (!isNew && ref !== null) {
+      try {
+        await invoke.mutateAsync({
+          path,
+          tool: 'Update',
+          args: {
+            path: entryPath,
+            patch: { metadata: metadata ?? {}, ifVersion: baselineVersion },
+          },
+        })
+        toast.success(`已更新 ${entryPath} 的 metadata`)
+        onSaved()
+      } catch (error) {
+        setErr((error as Error).message)
+      }
+      return
+    }
+
+    const p = rel.trim().replace(/^\/+/, '')
+    if (p === '') {
+      setErr('条目路径必填')
+      return
+    }
+    let body: unknown = content
+    if (contentType === 'application/json') {
+      try {
+        body = JSON.parse(content)
+      } catch {
+        setErr('content 不是合法 JSON(application/json 类型要求)')
+        return
+      }
+    }
+    try {
+      await invoke.mutateAsync({
+        path,
+        tool: 'Write',
+        args: {
+          path: p,
+          entry: {
+            content: body,
+            ...(typeof body === 'string' ? { contentType } : {}),
+            ...(metadata ? { metadata } : {}),
+            ...(!isNew && baselineVersion !== null ? { ifVersion: baselineVersion } : {}),
+          },
+        },
+      })
+      toast.success(`已写入 ${p}`)
+      onSaved()
+    } catch (error) {
+      setErr((error as Error).message)
+    }
+  }
+
+  const requestOpenChange = (next: boolean) => {
+    if (invoke.isPending) return
+    if (!next) onClose()
+  }
+
+  return (
+    <Dialog onOpenChange={requestOpenChange} open>
+      <DialogContent
+        className="max-h-[85vh] overflow-y-auto sm:max-w-2xl"
+        onEscapeKeyDown={event => invoke.isPending && event.preventDefault()}
+        onPointerDownOutside={event => invoke.isPending && event.preventDefault()}
+        showCloseButton={!invoke.isPending}
+      >
+        <DialogHeader>
+          <DialogTitle className="break-words text-base">
+            {isNew ? '新建条目' : `编辑条目 · ${entryPath}`}
+          </DialogTitle>
+          <DialogDescription>
+            {waitingForExisting
+              ? '正在读取现有条目与 version；读取完成前不会允许保存。'
+              : !isNew && existing.isError && !hydrated
+                  ? '读取现有条目失败。为避免无 version 覆盖，保存已被阻止。'
+                  : !isNew && ref !== null
+                      ? '大对象($ref)不支持就地编辑内容;metadata 可经 Update 部分更新。'
+                      : `Write 是幂等 upsert${isNew ? '' : ';携带 ifVersion,被并发修改时返回 conflict'}。`}
+          </DialogDescription>
+        </DialogHeader>
+
+        {waitingForExisting
+          ? (
+              <div aria-label="正在读取条目" className="grid gap-2" role="status">
+                <Skeleton className="h-9 w-full" />
+                <Skeleton className="h-36 w-full" />
+                <Skeleton className="h-14 w-full" />
+              </div>
+            )
+          : !isNew && existing.isError && !hydrated
+              ? (
+                  <div
+                    className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-3"
+                    role="alert"
+                  >
+                    <p className="text-sm text-destructive">{existing.error.message}</p>
+                    <Button
+                      className="mt-3"
+                      disabled={existing.isFetching}
+                      onClick={() => existing.refetch()}
+                      size="sm"
+                      type="button"
+                      variant="outline"
+                    >
+                      <RefreshCw className={cn(existing.isFetching && 'animate-spin')} />
+                      重试读取
+                    </Button>
+                  </div>
+                )
+              : (
+                  <div className="grid gap-4">
+                    {(isNew || ref === null) && (
+                      <>
+                        <div className="grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,1fr)_12rem]">
+                          <div className="grid gap-1.5">
+                            <Label className="text-xs" htmlFor="entry-path">
+                              条目路径 *
+                            </Label>
+                            <Input
+                              className="font-mono text-sm"
+                              disabled={!isNew}
+                              id="entry-path"
+                              onChange={ev => setRel(ev.target.value)}
+                              placeholder="docs/notes.md"
+                              value={rel}
+                            />
+                          </div>
+                          <div className="grid gap-1.5">
+                            <Label className="text-xs">contentType</Label>
+                            <Select onValueChange={setContentType} value={contentType}>
+                              <SelectTrigger className="w-full font-mono text-xs">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {CONTENT_TYPES.includes(
+                                  contentType as (typeof CONTENT_TYPES)[number],
+                                )
+                                  ? null
+                                  : (
+                                      <SelectItem className="font-mono text-xs" value={contentType}>
+                                        {contentType}
+                                      </SelectItem>
+                                    )}
+                                {CONTENT_TYPES.map(t => (
+                                  <SelectItem className="font-mono text-xs" key={t} value={t}>
+                                    {t}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                        </div>
+                        <div className="grid gap-1.5">
+                          <Label className="text-xs" htmlFor="entry-content">
+                            content
+                          </Label>
+                          <Textarea
+                            className="font-mono text-xs"
+                            id="entry-content"
+                            onChange={ev => setContent(ev.target.value)}
+                            rows={12}
+                            spellCheck={false}
+                            value={content}
+                          />
+                        </div>
+                      </>
+                    )}
+                    <div className="grid gap-1.5">
+                      <Label className="text-xs" htmlFor="entry-meta">
+                        metadata(每行 key=value,可空)
+                      </Label>
+                      <Textarea
+                        className="font-mono text-xs"
+                        id="entry-meta"
+                        onChange={ev => setMetaSpec(ev.target.value)}
+                        placeholder={'source=manual\nowner=alice'}
+                        rows={2}
+                        spellCheck={false}
+                        value={metaSpec}
+                      />
+                    </div>
+                    {err && (
+                      <p className="text-xs text-destructive" role="alert">
+                        {err}
+                      </p>
+                    )}
+                  </div>
+                )}
+
+        {(isNew || hydrated) && (
+          <DialogFooter>
+            <Button disabled={invoke.isPending} onClick={() => void submit()}>
+              {invoke.isPending && <Loader2 className="animate-spin" />}
+              {!isNew && ref !== null ? '更新 metadata' : '写入'}
+            </Button>
+          </DialogFooter>
+        )}
+      </DialogContent>
+    </Dialog>
+  )
+}
+
 /**
  * context 节点的条目浏览器(E2E-6 ③④ 的 Dashboard 路径):
  * List(前缀过滤)/ Search / Get 预览 / Write 新建编辑 / Delete。
@@ -465,627 +1087,5 @@ export function ContextBrowser({ path, cmds }: { cmds: HelpCmd[], path: string }
         />
       )}
     </section>
-  )
-}
-
-function EntryPreviewPane({
-  path,
-  entryPath,
-  canWrite,
-  canDelete,
-  onEdit,
-  onDelete,
-}: {
-  canDelete: boolean
-  canWrite: boolean
-  entryPath: string | null
-  onDelete: (rel: string) => Promise<void>
-  onEdit: (rel: string) => void
-  path: string
-}) {
-  const entry = useCtxEntry(path, entryPath)
-  const e = entry.data
-  const ref = e ? refOf(e.content) : null
-  const text = e && ref === null ? entryText(e) : ''
-
-  return (
-    <aside className="hidden min-w-0 overflow-hidden rounded-xl border bg-card/35 lg:sticky lg:top-4 lg:flex lg:min-h-[40rem] lg:max-h-[calc(100dvh-8rem)] lg:flex-col">
-      {entryPath === null
-        ? (
-            <div className="grid min-h-[40rem] place-items-center p-8 text-center">
-              <div className="max-w-64">
-                <span className="mx-auto grid size-12 place-items-center rounded-xl border bg-background/70 text-muted-foreground">
-                  <PanelRight className="size-5" />
-                </span>
-                <h2 className="mt-4 text-sm font-medium">选择条目查看详情</h2>
-                <p className="mt-1.5 text-xs leading-5 text-muted-foreground">
-                  预览会固定在这里，筛选、翻页和目录上下文都不会丢失。
-                </p>
-              </div>
-            </div>
-          )
-        : (
-            <>
-              <header className="flex min-h-16 items-start justify-between gap-4 border-b px-4 py-3.5">
-                <div className="min-w-0">
-                  <p className="font-mono text-[9px] tracking-[0.14em] text-muted-foreground">
-                    PREVIEW
-                  </p>
-                  <h2 className="mt-1 break-all font-mono text-sm font-medium">{entryPath}</h2>
-                  {e && <EntryFacts entry={e} />}
-                </div>
-                <div className="flex shrink-0 items-center gap-1">
-                  <Button
-                    aria-label="刷新预览"
-                    disabled={entry.isFetching}
-                    onClick={() => entry.refetch()}
-                    size="icon-sm"
-                    title="刷新预览"
-                    variant="ghost"
-                  >
-                    <RefreshCw className={cn(entry.isFetching && 'animate-spin')} />
-                  </Button>
-                  {canWrite && (
-                    <Button onClick={() => onEdit(entryPath)} size="sm" variant="outline">
-                      <Pencil />
-                      编辑
-                    </Button>
-                  )}
-                  {canDelete && (
-                    <ConfirmAction
-                      actionLabel="删除"
-                      description={<p>删除是幂等的，但内容不可恢复。</p>}
-                      onConfirm={() => onDelete(entryPath)}
-                      title={`删除条目 ${entryPath}?`}
-                      trigger={(
-                        <Button aria-label="删除条目" size="icon-sm" title="删除" variant="ghost">
-                          <Trash2 className="text-destructive" />
-                        </Button>
-                      )}
-                    />
-                  )}
-                </div>
-              </header>
-
-              <div className="min-h-0 flex-1 overflow-y-auto p-4">
-                {entry.isPending
-                  ? (
-                      <div aria-label="正在读取条目" className="grid gap-3" role="status">
-                        <Skeleton className="h-5 w-full" />
-                        <Skeleton className="h-5 w-5/6" />
-                        <Skeleton className="h-48 w-full" />
-                      </div>
-                    )
-                  : entry.isError
-                    ? (
-                        <div
-                          className="rounded-lg border border-destructive/40 bg-destructive/10 p-3"
-                          role="alert"
-                        >
-                          <p className="text-sm text-destructive">{entry.error.message}</p>
-                          <Button
-                            className="mt-3"
-                            disabled={entry.isFetching}
-                            onClick={() => entry.refetch()}
-                            size="sm"
-                            variant="outline"
-                          >
-                            <RefreshCw className={cn(entry.isFetching && 'animate-spin')} />
-                            重试读取
-                          </Button>
-                        </div>
-                      )
-                    : e
-                      ? (
-                          <div className="grid gap-5">
-                            <EntryContent entry={e} />
-                            <EntryMetadata entry={e} />
-                          </div>
-                        )
-                      : null}
-              </div>
-
-              {e && (
-                <footer className="flex min-h-12 items-center justify-between gap-3 border-t bg-background/25 px-4 py-2.5">
-                  <p
-                    className="min-w-0 truncate font-mono text-[10px] text-muted-foreground"
-                    title={e.version}
-                  >
-                    version ·
-                    {' '}
-                    {e.version}
-                  </p>
-                  {ref === null && <CopyButton label="复制内容" size="icon-sm" value={text} />}
-                </footer>
-              )}
-            </>
-          )}
-    </aside>
-  )
-}
-
-function entryText(entry: ContextEntry): string {
-  return typeof entry.content === 'string' ? entry.content : JSON.stringify(entry.content, null, 2)
-}
-
-function EntryFacts({ entry }: { entry: ContextEntry }) {
-  return (
-    <p className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1 font-mono text-[10px] text-muted-foreground">
-      <span>{entry.contentType}</span>
-      <span>{humanSize(entry.size)}</span>
-      <span title={entry.updatedAt}>{humanTime(entry.updatedAt)}</span>
-      <span title={`version ${entry.version}`}>
-        v:
-        {entry.version.slice(0, 12)}
-      </span>
-    </p>
-  )
-}
-
-function EntryContent({ entry }: { entry: ContextEntry }) {
-  const ref = refOf(entry.content)
-  const text = ref === null ? entryText(entry) : ''
-  if (ref !== null) {
-    return (
-      <section className="rounded-lg border border-warn/40 bg-warn/5 p-3.5 text-sm">
-        <p className="font-medium">大对象通过 $ref 提供</p>
-        <p className="mt-1 text-xs leading-5 text-muted-foreground">
-          内容超过内联阈值（1 MiB），链接可能有时效，请及时下载。
-        </p>
-        <Button asChild className="mt-3 font-mono text-xs" size="sm" variant="outline">
-          <a href={ref} rel="noreferrer" target="_blank">
-            <ExternalLink />
-            打开 $ref
-          </a>
-        </Button>
-      </section>
-    )
-  }
-  if (entry.contentType.includes('markdown')) {
-    return (
-      <section>
-        <p className="mb-2 font-mono text-[9px] tracking-[0.14em] text-muted-foreground">CONTENT</p>
-        <div className="prose prose-sm dark:prose-invert max-w-none overflow-x-auto rounded-lg border bg-background/55 px-4 py-4 break-words prose-pre:max-w-full prose-pre:overflow-x-auto prose-pre:bg-background prose-pre:text-xs prose-code:font-mono">
-          <Markdown remarkPlugins={[remarkGfm]}>{text}</Markdown>
-        </div>
-      </section>
-    )
-  }
-  return (
-    <section>
-      <p className="mb-2 font-mono text-[9px] tracking-[0.14em] text-muted-foreground">CONTENT</p>
-      <pre className="max-h-[34rem] max-w-full overflow-auto rounded-lg border bg-background/55 px-4 py-3 font-mono text-xs leading-relaxed whitespace-pre-wrap break-words">
-        {text}
-      </pre>
-    </section>
-  )
-}
-
-function EntryMetadata({ entry }: { entry: ContextEntry }) {
-  const metadata = Object.entries(entry.metadata ?? {})
-  return (
-    <section>
-      <div className="mb-2 flex items-center justify-between gap-3">
-        <p className="font-mono text-[9px] tracking-[0.14em] text-muted-foreground">METADATA</p>
-        <span className="font-mono text-[10px] text-muted-foreground tabular-nums">
-          {metadata.length}
-          {' '}
-          FIELDS
-        </span>
-      </div>
-      {metadata.length === 0
-        ? (
-            <p className="rounded-lg border border-dashed px-3 py-4 text-xs text-muted-foreground">
-              此条目没有 metadata。
-            </p>
-          )
-        : (
-            <dl className="overflow-hidden rounded-lg border bg-background/45">
-              {metadata.map(([key, value]) => (
-                <div
-                  className="grid min-w-0 grid-cols-[minmax(7rem,0.35fr)_minmax(0,1fr)] border-b last:border-b-0"
-                  key={key}
-                >
-                  <dt className="border-r bg-secondary/20 px-3 py-2 font-mono text-[10px] text-muted-foreground">
-                    {key}
-                  </dt>
-                  <dd className="min-w-0 break-all px-3 py-2 font-mono text-[10px]">{value}</dd>
-                </div>
-              ))}
-            </dl>
-          )}
-    </section>
-  )
-}
-
-/** 条目预览:meta + 内容(markdown/json/text);大对象给 $ref 下载链接。 */
-function EntryViewDialog({
-  path,
-  entryPath,
-  canWrite,
-  canDelete,
-  onClose,
-  onEdit,
-  onDelete,
-}: {
-  canDelete: boolean
-  canWrite: boolean
-  entryPath: string | null
-  onClose: () => void
-  onDelete: (rel: string) => Promise<void>
-  onEdit: (rel: string) => void
-  path: string
-}) {
-  const entry = useCtxEntry(path, entryPath)
-  const e = entry.data
-  const ref = e ? refOf(e.content) : null
-  const text = e && ref === null ? entryText(e) : ''
-
-  return (
-    <Dialog onOpenChange={o => !o && onClose()} open={entryPath !== null}>
-      <DialogContent className="max-h-[calc(100dvh-1rem)] overflow-y-auto p-4 sm:max-h-[85vh] sm:max-w-2xl sm:p-6">
-        <DialogHeader>
-          <DialogTitle className="min-w-0 break-all pr-6 font-mono text-sm">
-            {entryPath}
-          </DialogTitle>
-          {e && (
-            <DialogDescription asChild>
-              <div>
-                <EntryFacts entry={e} />
-              </div>
-            </DialogDescription>
-          )}
-        </DialogHeader>
-
-        {entry.isPending
-          ? (
-              <div className="grid gap-2">
-                <Skeleton className="h-4 w-full" />
-                <Skeleton className="h-4 w-5/6" />
-                <Skeleton className="h-4 w-3/6" />
-              </div>
-            )
-          : entry.isError
-            ? (
-                <div
-                  className="rounded-lg border border-destructive/40 bg-destructive/10 p-3"
-                  role="alert"
-                >
-                  <p className="text-sm text-destructive">{entry.error.message}</p>
-                  <Button
-                    className="mt-3"
-                    disabled={entry.isFetching}
-                    onClick={() => entry.refetch()}
-                    size="sm"
-                    variant="outline"
-                  >
-                    <RefreshCw className={cn(entry.isFetching && 'animate-spin')} />
-                    重试读取
-                  </Button>
-                </div>
-              )
-            : e
-              ? (
-                  <div className="grid gap-5">
-                    <EntryContent entry={e} />
-                    <EntryMetadata entry={e} />
-                  </div>
-                )
-              : null}
-
-        <DialogFooter className="items-center sm:justify-between">
-          <div className="flex items-center gap-1">
-            {ref === null && e && <CopyButton label="复制内容" size="icon-sm" value={text} />}
-          </div>
-          <div className="flex gap-2">
-            {canDelete && entryPath && (
-              <ConfirmAction
-                actionLabel="删除"
-                description={<p>删除是幂等的，但内容不可恢复。</p>}
-                onConfirm={() => onDelete(entryPath)}
-                title={`删除条目 ${entryPath}?`}
-                trigger={(
-                  <Button aria-label="删除条目" variant="outline">
-                    <Trash2 className="text-destructive" />
-                    删除
-                  </Button>
-                )}
-              />
-            )}
-            {canWrite && entryPath && (
-              <Button onClick={() => onEdit(entryPath)} variant="outline">
-                <Pencil />
-                编辑
-              </Button>
-            )}
-            <Button onClick={onClose}>关闭</Button>
-          </div>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  )
-}
-
-const CONTENT_TYPES = ['text/markdown', 'text/plain', 'application/json'] as const
-
-/** "key=value" 行 → metadata Record(空返回 undefined;非法行抛错,对等 CLI --meta)。 */
-function parseMetaLines(spec: string): Record<string, string> | undefined {
-  const out: Record<string, string> = {}
-  for (const line of spec.split('\n')) {
-    const s = line.trim()
-    if (!s) continue
-    const idx = s.indexOf('=')
-    const k = idx < 0 ? '' : s.slice(0, idx).trim()
-    if (!k) throw new Error(`metadata 每行须为 "key=value" 形式:"${s}"`)
-    out[k] = s.slice(idx + 1).trim()
-  }
-  return Object.keys(out).length ? out : undefined
-}
-
-function metaToLines(metadata: Record<string, string> | undefined): string {
-  return Object.entries(metadata ?? {})
-    .map(([k, v]) => `${k}=${v}`)
-    .join('\n')
-}
-
-/**
- * 新建/编辑条目(对等 `tb ctx put/patch`):新建与内容编辑走 Write(幂等 upsert,
- * 带 ifVersion 乐观并发);大对象($ref)不可就地改内容,但可经 Update 只改 metadata。
- */
-function EntryEditDialog({
-  path,
-  entryPath,
-  onClose,
-  onSaved,
-}: {
-  /** '' = 新建。 */
-  entryPath: string
-  onClose: () => void
-  onSaved: () => void
-  path: string
-}) {
-  const isNew = entryPath === ''
-  const existing = useCtxEntry(path, isNew ? null : entryPath)
-  const invoke = useInvoke()
-
-  const [rel, setRel] = useState(entryPath)
-  const [contentType, setContentType] = useState<string>('text/markdown')
-  const [content, setContent] = useState('')
-  const [metaSpec, setMetaSpec] = useState('')
-  const [err, setErr] = useState<string | null>(null)
-  const [hydrated, setHydrated] = useState(false)
-  const [baselineVersion, setBaselineVersion] = useState<string | null>(null)
-  const [baselineRef, setBaselineRef] = useState<string | null>(null)
-
-  // 编辑模式:Get 到位后一次性预填(大对象 $ref 不可就地编辑内容)。
-  const e = existing.data
-  useEffect(() => {
-    if (isNew || !e || hydrated) return
-    setContentType(e.contentType)
-    setContent(typeof e.content === 'string' ? e.content : JSON.stringify(e.content, null, 2))
-    setMetaSpec(metaToLines(e.metadata))
-    // 内容与 version 必须原子取自同一次 Get。后台 refetch 即使更新 query data,
-    // 提交仍使用这个 baseline,让服务端的乐观锁能阻止“旧正文 + 新 version”覆盖。
-    setBaselineVersion(e.version)
-    setBaselineRef(refOf(e.content))
-    setHydrated(true)
-  }, [isNew, e, hydrated])
-  const waitingForExisting = !isNew && (existing.isPending || (existing.isSuccess && !hydrated))
-  const ref = isNew ? null : baselineRef
-
-  const submit = async () => {
-    // 编辑必须基于成功 Get 的 version；缺少基线时绝不降级成无 ifVersion 的覆盖写。
-    if (!isNew && (!hydrated || baselineVersion === null)) {
-      setErr('未能读取现有条目，无法安全保存；请重试读取。')
-      return
-    }
-    let metadata: Record<string, string> | undefined
-    try {
-      metadata = parseMetaLines(metaSpec)
-    } catch (ex) {
-      setErr((ex as Error).message)
-      return
-    }
-
-    // 大对象:内容不可就地改,只走 Update 改 metadata(对等 tb ctx patch --meta)。
-    if (!isNew && ref !== null) {
-      try {
-        await invoke.mutateAsync({
-          path,
-          tool: 'Update',
-          args: {
-            path: entryPath,
-            patch: { metadata: metadata ?? {}, ifVersion: baselineVersion },
-          },
-        })
-        toast.success(`已更新 ${entryPath} 的 metadata`)
-        onSaved()
-      } catch (error) {
-        setErr((error as Error).message)
-      }
-      return
-    }
-
-    const p = rel.trim().replace(/^\/+/, '')
-    if (p === '') {
-      setErr('条目路径必填')
-      return
-    }
-    let body: unknown = content
-    if (contentType === 'application/json') {
-      try {
-        body = JSON.parse(content)
-      } catch {
-        setErr('content 不是合法 JSON(application/json 类型要求)')
-        return
-      }
-    }
-    try {
-      await invoke.mutateAsync({
-        path,
-        tool: 'Write',
-        args: {
-          path: p,
-          entry: {
-            content: body,
-            ...(typeof body === 'string' ? { contentType } : {}),
-            ...(metadata ? { metadata } : {}),
-            ...(!isNew && baselineVersion !== null ? { ifVersion: baselineVersion } : {}),
-          },
-        },
-      })
-      toast.success(`已写入 ${p}`)
-      onSaved()
-    } catch (error) {
-      setErr((error as Error).message)
-    }
-  }
-
-  const requestOpenChange = (next: boolean) => {
-    if (invoke.isPending) return
-    if (!next) onClose()
-  }
-
-  return (
-    <Dialog onOpenChange={requestOpenChange} open>
-      <DialogContent
-        className="max-h-[85vh] overflow-y-auto sm:max-w-2xl"
-        onEscapeKeyDown={event => invoke.isPending && event.preventDefault()}
-        onPointerDownOutside={event => invoke.isPending && event.preventDefault()}
-        showCloseButton={!invoke.isPending}
-      >
-        <DialogHeader>
-          <DialogTitle className="break-words text-base">
-            {isNew ? '新建条目' : `编辑条目 · ${entryPath}`}
-          </DialogTitle>
-          <DialogDescription>
-            {waitingForExisting
-              ? '正在读取现有条目与 version；读取完成前不会允许保存。'
-              : !isNew && existing.isError && !hydrated
-                  ? '读取现有条目失败。为避免无 version 覆盖，保存已被阻止。'
-                  : !isNew && ref !== null
-                      ? '大对象($ref)不支持就地编辑内容;metadata 可经 Update 部分更新。'
-                      : `Write 是幂等 upsert${isNew ? '' : ';携带 ifVersion,被并发修改时返回 conflict'}。`}
-          </DialogDescription>
-        </DialogHeader>
-
-        {waitingForExisting
-          ? (
-              <div aria-label="正在读取条目" className="grid gap-2" role="status">
-                <Skeleton className="h-9 w-full" />
-                <Skeleton className="h-36 w-full" />
-                <Skeleton className="h-14 w-full" />
-              </div>
-            )
-          : !isNew && existing.isError && !hydrated
-              ? (
-                  <div
-                    className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-3"
-                    role="alert"
-                  >
-                    <p className="text-sm text-destructive">{existing.error.message}</p>
-                    <Button
-                      className="mt-3"
-                      disabled={existing.isFetching}
-                      onClick={() => existing.refetch()}
-                      size="sm"
-                      type="button"
-                      variant="outline"
-                    >
-                      <RefreshCw className={cn(existing.isFetching && 'animate-spin')} />
-                      重试读取
-                    </Button>
-                  </div>
-                )
-              : (
-                  <div className="grid gap-4">
-                    {(isNew || ref === null) && (
-                      <>
-                        <div className="grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,1fr)_12rem]">
-                          <div className="grid gap-1.5">
-                            <Label className="text-xs" htmlFor="entry-path">
-                              条目路径 *
-                            </Label>
-                            <Input
-                              className="font-mono text-sm"
-                              disabled={!isNew}
-                              id="entry-path"
-                              onChange={ev => setRel(ev.target.value)}
-                              placeholder="docs/notes.md"
-                              value={rel}
-                            />
-                          </div>
-                          <div className="grid gap-1.5">
-                            <Label className="text-xs">contentType</Label>
-                            <Select onValueChange={setContentType} value={contentType}>
-                              <SelectTrigger className="w-full font-mono text-xs">
-                                <SelectValue />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {CONTENT_TYPES.includes(
-                                  contentType as (typeof CONTENT_TYPES)[number],
-                                )
-                                  ? null
-                                  : (
-                                      <SelectItem className="font-mono text-xs" value={contentType}>
-                                        {contentType}
-                                      </SelectItem>
-                                    )}
-                                {CONTENT_TYPES.map(t => (
-                                  <SelectItem className="font-mono text-xs" key={t} value={t}>
-                                    {t}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                          </div>
-                        </div>
-                        <div className="grid gap-1.5">
-                          <Label className="text-xs" htmlFor="entry-content">
-                            content
-                          </Label>
-                          <Textarea
-                            className="font-mono text-xs"
-                            id="entry-content"
-                            onChange={ev => setContent(ev.target.value)}
-                            rows={12}
-                            spellCheck={false}
-                            value={content}
-                          />
-                        </div>
-                      </>
-                    )}
-                    <div className="grid gap-1.5">
-                      <Label className="text-xs" htmlFor="entry-meta">
-                        metadata(每行 key=value,可空)
-                      </Label>
-                      <Textarea
-                        className="font-mono text-xs"
-                        id="entry-meta"
-                        onChange={ev => setMetaSpec(ev.target.value)}
-                        placeholder={'source=manual\nowner=alice'}
-                        rows={2}
-                        spellCheck={false}
-                        value={metaSpec}
-                      />
-                    </div>
-                    {err && (
-                      <p className="text-xs text-destructive" role="alert">
-                        {err}
-                      </p>
-                    )}
-                  </div>
-                )}
-
-        {(isNew || hydrated) && (
-          <DialogFooter>
-            <Button disabled={invoke.isPending} onClick={() => void submit()}>
-              {invoke.isPending && <Loader2 className="animate-spin" />}
-              {!isNew && ref !== null ? '更新 metadata' : '写入'}
-            </Button>
-          </DialogFooter>
-        )}
-      </DialogContent>
-    </Dialog>
   )
 }

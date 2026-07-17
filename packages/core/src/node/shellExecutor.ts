@@ -112,6 +112,10 @@ export function createShellExecutor(opts: ShellExecutorOptions = {}): ShellExecu
       child.stderr?.on('data', chunk => stderr.push(chunk))
       let settled = false
       let timedOut = false
+      const timer = setTimeout(() => {
+        timedOut = true
+        child.kill('SIGKILL')
+      }, timeoutMs)
       const settle = (code: number | null) => {
         if (settled) return
         settled = true
@@ -123,10 +127,7 @@ export function createShellExecutor(opts: ShellExecutorOptions = {}): ShellExecu
           exitCode: timedOut ? SHELL_TIMEOUT_EXIT_CODE : (code ?? -1),
         })
       }
-      const timer = setTimeout(() => {
-        timedOut = true
-        child.kill('SIGKILL')
-      }, timeoutMs)
+
       child.on('error', (err) => {
         if (settled) return
         settled = true

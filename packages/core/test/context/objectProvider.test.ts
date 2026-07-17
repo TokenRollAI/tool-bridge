@@ -411,7 +411,8 @@ describe('Search', () => {
           ...res,
           items: res.items.map((i) => {
             if ('prefix' in i) return i
-            const { metadata: _drop, ...rest } = i
+            const rest = { ...i }
+            delete (rest as { metadata?: unknown }).metadata
             return rest
           }),
         }

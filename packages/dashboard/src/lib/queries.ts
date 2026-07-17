@@ -31,7 +31,7 @@ import {
   recordInvoke,
   subscribeHistory,
 } from './history'
-import { useConn, useSession } from './session'
+import { useConn, useSession } from './session-context'
 
 /** queryKey 前缀含 profile 标识:切换档案后互不串缓存。 */
 function useKeyBase(): readonly unknown[] {

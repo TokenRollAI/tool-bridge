@@ -9,8 +9,8 @@ import { ChevronRight, CircleAlert, Loader2, RefreshCw, Route, SearchX } from 'l
 import { Link, NavLink, useLocation } from 'react-router'
 import type { NodeKind, TreeJson } from '@/lib/types'
 import { Skeleton } from '@/components/ui/skeleton'
-import { KIND_ICON } from '@/components/KindBadge'
-import { useSession } from '@/lib/session'
+import { KIND_ICON } from '@/components/kind-icon'
+import { useSession } from '@/lib/session-context'
 import { useTree } from '@/lib/queries'
 import { cn } from '@/lib/utils'
 
@@ -95,200 +95,171 @@ const KIND_TONE: Record<NodeKind, string> = {
   tool: 'border-rose-400/25 bg-rose-400/10 text-rose-400',
 }
 
-/**
- * 协议树资源浏览器。
- *
- * 性能硬边界：常态只取 root depth=1；filter 非空才启用 depth=8；本地 lazy=1；
- * remote 及其后代 lazy=3。展开集合集中管理，刷新查询不会重置用户的浏览位置。
- */
-export function TreeNav({ filter = '', onNavigate }: { filter?: string, onNavigate?: () => void }) {
-  const query = filter.trim()
-  const filtering = query !== ''
-  const root = useTree('', ROOT_DEPTH)
-  const deep = useTree('', 8, { enabled: filtering })
-  const { active } = useSession()
-  const location = useLocation()
-  const activePath = nodePathFromLocation(location.pathname)
-  const initializedProfile = useRef<string | null>(null)
-  const [expandedPaths, setExpandedPaths] = useState<Set<string>>(() => new Set())
-  const [tabStopPath, setTabStopPath] = useState<string | null>(null)
-
-  // 深树尚未返回时保留 root 树，避免输入筛选后导航瞬间清空。
-  const source = filtering ? (deep.data ?? root.data) : root.data
-  const pruned = useMemo(() => pruneOffline(source?.children ?? []), [source])
-  const filtered = useMemo(
-    () => (filtering ? filterTree(pruned, query) : { nodes: pruned, matches: new Set<string>() }),
-    [filtering, pruned, query],
-  )
-  const loadedPaths = useMemo(() => collectPaths(pruned), [pruned])
-  const firstVisiblePath = filtered.nodes[0]?.path ?? null
-
-  // 首批结果或首个匹配根变化时把唯一 Tab 入口放到第一个可见节点；树内移动由 focus 更新。
-  useEffect(() => {
-    setTabStopPath(firstVisiblePath)
-  }, [firstVisiblePath])
-
-  // 每个 profile 第一次拿到根树时，展开首层已随 root 返回的本地目录；remote/truncated 不预取。
-  useEffect(() => {
-    if (!root.data) return
-    const profileId = active?.id ?? ''
-    if (initializedProfile.current === profileId) return
-    initializedProfile.current = profileId
-    setExpandedPaths(
-      new Set(
-        (root.data.children ?? [])
-          .filter(
-            node =>
-              node.kind !== 'remote' && node.truncated !== true && (node.children?.length ?? 0) > 0,
-          )
-          .map(node => node.path),
-      ),
-    )
-  }, [active?.id, root.data])
-
-  // direct URL 只展开已经加载的祖先，不因为“定位”静默触发 remote/depth=8 请求。
-  useEffect(() => {
-    if (activePath === null || activePath === '') return
-    const ancestors = pathAncestors(activePath).filter(path => loadedPaths.has(path))
-    if (ancestors.length === 0) return
-    setExpandedPaths((previous) => {
-      const next = new Set(previous)
-      let changed = false
-      for (const path of ancestors) {
-        if (!next.has(path)) {
-          next.add(path)
-          changed = true
-        }
-      }
-      return changed ? next : previous
-    })
-  }, [activePath, loadedPaths])
-
-  const toggleExpanded = (path: string) => {
-    setTabStopPath(current =>
-      current?.startsWith(`${path}/`) && expandedPaths.has(path) ? path : current,
-    )
-    setExpandedPaths((previous) => {
-      const next = new Set(previous)
-      if (next.has(path)) next.delete(path)
-      else next.add(path)
-      return next
-    })
+function nodePathFromLocation(pathname: string): string | null {
+  if (pathname === '/') return ''
+  if (!pathname.startsWith('/nodes/')) return null
+  const encoded = pathname.slice('/nodes/'.length).replace(/\/+$/, '')
+  try {
+    return decodeURIComponent(encoded)
+  } catch {
+    return encoded
   }
+}
 
-  if (root.isPending && !root.data) return <TreeSkeleton />
-
-  if (root.isError && !root.data) {
-    return (
-      <div
-        className="mx-2 rounded-lg border border-destructive/30 bg-destructive/8 p-3"
-        role="alert"
-      >
-        <div className="flex items-start gap-2 text-xs text-destructive">
-          <CircleAlert className="mt-0.5 size-4 shrink-0" />
-          <p className="min-w-0 break-words">
-            资源树加载失败：
-            {root.error.message}
-          </p>
-        </div>
-        <button
-          className="mt-2 inline-flex h-8 items-center gap-1.5 rounded-md border px-2.5 text-xs hover:bg-secondary focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-          onClick={() => root.refetch()}
-          type="button"
-        >
-          <RefreshCw className="size-3.5" />
-          重试
-        </button>
-      </div>
-    )
+function collectPaths(nodes: TreeJson[]): Set<string> {
+  const paths = new Set<string>()
+  const visit = (node: TreeJson) => {
+    paths.add(node.path)
+    node.children?.forEach(visit)
   }
+  nodes.forEach(visit)
+  return paths
+}
 
+function pathAncestors(path: string): string[] {
+  const segments = path.split('/').filter(Boolean)
+  return segments.slice(0, -1).map((_, index) => segments.slice(0, index + 1).join('/'))
+}
+
+function TreeRowSkeleton({ width }: { width: string }) {
   return (
-    <div className="min-w-0">
-      {filtering && (
-        <div className="mx-2 mb-2 flex min-h-7 items-center gap-2 rounded-md border bg-background/35 px-2 text-[10px] text-muted-foreground">
-          {deep.isFetching
-            ? (
-                <>
-                  <Loader2 className="size-3 animate-spin text-primary" />
-                  <span>正在搜索完整可见树…</span>
-                  {filtered.matches.size > 0 && (
-                    <span className="ml-auto font-mono">
-                      ≥
-                      {filtered.matches.size}
-                    </span>
-                  )}
-                </>
-              )
-            : (
-                <>
-                  <Route className="size-3 text-primary" />
-                  <span>
-                    {filtered.matches.size}
-                    {' '}
-                    个匹配
-                    {source?.truncated ? ' · 结果已截断' : ''}
-                  </span>
-                </>
-              )}
-        </div>
-      )}
+    <div className="flex h-11 items-center gap-2 px-2 lg:h-9">
+      <Skeleton className="size-6 shrink-0 rounded-md" />
+      <Skeleton className="h-3" style={{ width }} />
+    </div>
+  )
+}
 
-      {filtering && deep.isError && (
-        <div
-          className="mx-2 mb-2 flex items-center gap-2 rounded-md border border-destructive/30 bg-destructive/8 px-2 py-1.5 text-[10px] text-destructive"
-          role="alert"
-        >
-          <span className="min-w-0 flex-1 truncate">完整树搜索失败，当前仅显示已加载结果</span>
+function TreeSkeleton() {
+  return (
+    <div aria-label="正在加载资源树" className="grid gap-1 px-2" role="status">
+      <TreeRowSkeleton width="76%" />
+      <TreeRowSkeleton width="58%" />
+      <TreeRowSkeleton width="68%" />
+      <TreeRowSkeleton width="48%" />
+    </div>
+  )
+}
+
+function TreeEmpty({ filtering, onRefresh }: { filtering: boolean, onRefresh: () => void }) {
+  return (
+    <div className="mx-2 rounded-lg border border-dashed bg-background/25 px-4 py-6 text-center">
+      <SearchX className="mx-auto size-6 text-muted-foreground/60" />
+      <p className="mt-2 text-sm font-medium">{filtering ? '没有匹配资源' : '资源树为空'}</p>
+      <p className="mt-1 text-xs leading-5 text-muted-foreground">
+        {filtering ? '换一个路径关键词，或按 Esc 清除筛选。' : '注册或挂载节点后会显示在这里。'}
+      </p>
+      {!filtering && (
+        <div className="mt-3 flex flex-wrap justify-center gap-2">
           <button
-            className="shrink-0 underline underline-offset-2"
-            onClick={() => deep.refetch()}
+            className="inline-flex h-8 items-center gap-1.5 rounded-md border px-2.5 text-xs hover:bg-secondary focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+            onClick={onRefresh}
             type="button"
           >
-            重试
+            <RefreshCw className="size-3.5" />
+            刷新
           </button>
+          <Link
+            className="inline-flex h-8 items-center rounded-md bg-primary px-2.5 text-xs text-primary-foreground hover:opacity-90 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+            to="/manage/registry"
+          >
+            节点注册
+          </Link>
         </div>
-      )}
-
-      {filtered.nodes.length === 0
-        ? (
-            <TreeEmpty filtering={filtering} onRefresh={() => root.refetch()} />
-          )
-        : (
-            <nav aria-label="节点资源树" className="px-1.5">
-              <div
-                aria-label="工具与上下文资源"
-                className="grid gap-0.5"
-                onKeyDown={handleTreeKeyDown}
-                role="tree"
-              >
-                {filtered.nodes.map(node => (
-                  <TreeBranch
-                    activePath={activePath}
-                    depth={0}
-                    expandedPaths={expandedPaths}
-                    filter={query}
-                    filtering={filtering}
-                    key={node.path}
-                    matches={filtered.matches}
-                    node={node}
-                    onItemFocus={setTabStopPath}
-                    onNavigate={onNavigate}
-                    onToggle={toggleExpanded}
-                    tabStopPath={tabStopPath}
-                  />
-                ))}
-              </div>
-            </nav>
-          )}
-
-      {!filtering && source?.truncated && (
-        <p className="mx-3 mt-2 border-t pt-2 text-[10px] leading-4 text-muted-foreground">
-          根视图按深度加载；展开节点可继续浏览。
-        </p>
       )}
     </div>
   )
+}
+
+function HighlightedLabel({
+  label,
+  query,
+  matched,
+}: {
+  label: string
+  matched: boolean
+  query: string
+}) {
+  if (!matched || query === '') return label
+  const index = label.toLocaleLowerCase().indexOf(query.toLocaleLowerCase())
+  if (index < 0) {
+    return <span className="text-primary">{label}</span>
+  }
+  return (
+    <>
+      {label.slice(0, index)}
+      <mark className="rounded-sm bg-primary/20 px-0.5 text-primary">
+        {label.slice(index, index + query.length)}
+      </mark>
+      {label.slice(index + query.length)}
+    </>
+  )
+}
+
+/** ARIA tree 键盘模型:方向键在可见节点间移动,左右键展开/收起或进入/返回层级。 */
+function handleTreeKeyDown(event: ReactKeyboardEvent<HTMLDivElement>) {
+  const target = (event.target as HTMLElement).closest<HTMLElement>('[role="treeitem"]')
+  if (!target) return
+
+  const visible = Array.from(
+    event.currentTarget.querySelectorAll<HTMLElement>('[role="treeitem"]'),
+  ).filter(item => item.offsetParent !== null)
+  const index = visible.indexOf(target)
+  const focusAt = (next: number) => {
+    const item = visible[next]
+    if (!item) return
+    event.preventDefault()
+    item.focus()
+  }
+
+  if (event.key === 'ArrowDown') focusAt(Math.min(index + 1, visible.length - 1))
+  if (event.key === 'ArrowUp') focusAt(Math.max(index - 1, 0))
+  if (event.key === 'Home') focusAt(0)
+  if (event.key === 'End') focusAt(visible.length - 1)
+  if (event.key === ' ') {
+    event.preventDefault()
+    target.click()
+    return
+  }
+
+  const branch = target.closest<HTMLElement>('[data-tree-branch]')
+  const toggle = branch?.querySelector<HTMLButtonElement>(
+    ':scope > [data-tree-row] > button[aria-expanded]',
+  )
+  const expanded = target.getAttribute('aria-expanded')
+
+  if (event.key === 'ArrowRight') {
+    if (expanded === 'false' && toggle && !toggle.disabled) {
+      event.preventDefault()
+      toggle.click()
+      return
+    }
+    if (expanded === 'true') {
+      const child = branch?.querySelector<HTMLElement>(
+        ':scope > [data-tree-group] > [data-tree-branch] > [data-tree-row] [role="treeitem"]',
+      )
+      if (child) {
+        event.preventDefault()
+        child.focus()
+      }
+    }
+  }
+
+  if (event.key === 'ArrowLeft') {
+    if (expanded === 'true' && toggle && !toggle.disabled) {
+      event.preventDefault()
+      toggle.click()
+      return
+    }
+    const parentGroup = branch?.parentElement?.closest<HTMLElement>('[data-tree-group]')
+    const parentItem = parentGroup?.parentElement?.querySelector<HTMLElement>(
+      ':scope > [data-tree-row] [role="treeitem"]',
+    )
+    if (parentItem) {
+      event.preventDefault()
+      parentItem.focus()
+    }
+  }
 }
 
 function TreeBranch({
@@ -497,169 +468,198 @@ function TreeBranch({
   )
 }
 
-/** ARIA tree 键盘模型:方向键在可见节点间移动,左右键展开/收起或进入/返回层级。 */
-function handleTreeKeyDown(event: ReactKeyboardEvent<HTMLDivElement>) {
-  const target = (event.target as HTMLElement).closest<HTMLElement>('[role="treeitem"]')
-  if (!target) return
+/**
+ * 协议树资源浏览器。
+ *
+ * 性能硬边界：常态只取 root depth=1；filter 非空才启用 depth=8；本地 lazy=1；
+ * remote 及其后代 lazy=3。展开集合集中管理，刷新查询不会重置用户的浏览位置。
+ */
+export function TreeNav({ filter = '', onNavigate }: { filter?: string, onNavigate?: () => void }) {
+  const query = filter.trim()
+  const filtering = query !== ''
+  const root = useTree('', ROOT_DEPTH)
+  const deep = useTree('', 8, { enabled: filtering })
+  const { active } = useSession()
+  const location = useLocation()
+  const activePath = nodePathFromLocation(location.pathname)
+  const initializedProfile = useRef<string | null>(null)
+  const [expandedPaths, setExpandedPaths] = useState<Set<string>>(() => new Set())
+  const [tabStopPath, setTabStopPath] = useState<string | null>(null)
 
-  const visible = Array.from(
-    event.currentTarget.querySelectorAll<HTMLElement>('[role="treeitem"]'),
-  ).filter(item => item.offsetParent !== null)
-  const index = visible.indexOf(target)
-  const focusAt = (next: number) => {
-    const item = visible[next]
-    if (!item) return
-    event.preventDefault()
-    item.focus()
-  }
-
-  if (event.key === 'ArrowDown') focusAt(Math.min(index + 1, visible.length - 1))
-  if (event.key === 'ArrowUp') focusAt(Math.max(index - 1, 0))
-  if (event.key === 'Home') focusAt(0)
-  if (event.key === 'End') focusAt(visible.length - 1)
-  if (event.key === ' ') {
-    event.preventDefault()
-    target.click()
-    return
-  }
-
-  const branch = target.closest<HTMLElement>('[data-tree-branch]')
-  const toggle = branch?.querySelector<HTMLButtonElement>(
-    ':scope > [data-tree-row] > button[aria-expanded]',
+  // 深树尚未返回时保留 root 树，避免输入筛选后导航瞬间清空。
+  const source = filtering ? (deep.data ?? root.data) : root.data
+  const pruned = useMemo(() => pruneOffline(source?.children ?? []), [source])
+  const filtered = useMemo(
+    () => (filtering ? filterTree(pruned, query) : { nodes: pruned, matches: new Set<string>() }),
+    [filtering, pruned, query],
   )
-  const expanded = target.getAttribute('aria-expanded')
+  const loadedPaths = useMemo(() => collectPaths(pruned), [pruned])
+  const firstVisiblePath = filtered.nodes[0]?.path ?? null
 
-  if (event.key === 'ArrowRight') {
-    if (expanded === 'false' && toggle && !toggle.disabled) {
-      event.preventDefault()
-      toggle.click()
-      return
-    }
-    if (expanded === 'true') {
-      const child = branch?.querySelector<HTMLElement>(
-        ':scope > [data-tree-group] > [data-tree-branch] > [data-tree-row] [role="treeitem"]',
-      )
-      if (child) {
-        event.preventDefault()
-        child.focus()
-      }
-    }
-  }
+  // 首批结果或首个匹配根变化时把唯一 Tab 入口放到第一个可见节点；树内移动由 focus 更新。
+  useEffect(() => {
+    setTabStopPath(firstVisiblePath)
+  }, [firstVisiblePath])
 
-  if (event.key === 'ArrowLeft') {
-    if (expanded === 'true' && toggle && !toggle.disabled) {
-      event.preventDefault()
-      toggle.click()
-      return
-    }
-    const parentGroup = branch?.parentElement?.closest<HTMLElement>('[data-tree-group]')
-    const parentItem = parentGroup?.parentElement?.querySelector<HTMLElement>(
-      ':scope > [data-tree-row] [role="treeitem"]',
+  // 每个 profile 第一次拿到根树时，展开首层已随 root 返回的本地目录；remote/truncated 不预取。
+  useEffect(() => {
+    if (!root.data) return
+    const profileId = active?.id ?? ''
+    if (initializedProfile.current === profileId) return
+    initializedProfile.current = profileId
+    setExpandedPaths(
+      new Set(
+        (root.data.children ?? [])
+          .filter(
+            node =>
+              node.kind !== 'remote' && node.truncated !== true && (node.children?.length ?? 0) > 0,
+          )
+          .map(node => node.path),
+      ),
     )
-    if (parentItem) {
-      event.preventDefault()
-      parentItem.focus()
-    }
+  }, [active?.id, root.data])
+
+  // direct URL 只展开已经加载的祖先，不因为“定位”静默触发 remote/depth=8 请求。
+  useEffect(() => {
+    if (activePath === null || activePath === '') return
+    const ancestors = pathAncestors(activePath).filter(path => loadedPaths.has(path))
+    if (ancestors.length === 0) return
+    setExpandedPaths((previous) => {
+      const next = new Set(previous)
+      let changed = false
+      for (const path of ancestors) {
+        if (!next.has(path)) {
+          next.add(path)
+          changed = true
+        }
+      }
+      return changed ? next : previous
+    })
+  }, [activePath, loadedPaths])
+
+  const toggleExpanded = (path: string) => {
+    setTabStopPath(current =>
+      current?.startsWith(`${path}/`) && expandedPaths.has(path) ? path : current,
+    )
+    setExpandedPaths((previous) => {
+      const next = new Set(previous)
+      if (next.has(path)) next.delete(path)
+      else next.add(path)
+      return next
+    })
   }
-}
 
-function HighlightedLabel({
-  label,
-  query,
-  matched,
-}: {
-  label: string
-  matched: boolean
-  query: string
-}) {
-  if (!matched || query === '') return label
-  const index = label.toLocaleLowerCase().indexOf(query.toLocaleLowerCase())
-  if (index < 0) {
-    return <span className="text-primary">{label}</span>
+  if (root.isPending && !root.data) return <TreeSkeleton />
+
+  if (root.isError && !root.data) {
+    return (
+      <div
+        className="mx-2 rounded-lg border border-destructive/30 bg-destructive/8 p-3"
+        role="alert"
+      >
+        <div className="flex items-start gap-2 text-xs text-destructive">
+          <CircleAlert className="mt-0.5 size-4 shrink-0" />
+          <p className="min-w-0 break-words">
+            资源树加载失败：
+            {root.error.message}
+          </p>
+        </div>
+        <button
+          className="mt-2 inline-flex h-8 items-center gap-1.5 rounded-md border px-2.5 text-xs hover:bg-secondary focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+          onClick={() => root.refetch()}
+          type="button"
+        >
+          <RefreshCw className="size-3.5" />
+          重试
+        </button>
+      </div>
+    )
   }
-  return (
-    <>
-      {label.slice(0, index)}
-      <mark className="rounded-sm bg-primary/20 px-0.5 text-primary">
-        {label.slice(index, index + query.length)}
-      </mark>
-      {label.slice(index + query.length)}
-    </>
-  )
-}
 
-function TreeSkeleton() {
   return (
-    <div aria-label="正在加载资源树" className="grid gap-1 px-2" role="status">
-      <TreeRowSkeleton width="76%" />
-      <TreeRowSkeleton width="58%" />
-      <TreeRowSkeleton width="68%" />
-      <TreeRowSkeleton width="48%" />
-    </div>
-  )
-}
+    <div className="min-w-0">
+      {filtering && (
+        <div className="mx-2 mb-2 flex min-h-7 items-center gap-2 rounded-md border bg-background/35 px-2 text-[10px] text-muted-foreground">
+          {deep.isFetching
+            ? (
+                <>
+                  <Loader2 className="size-3 animate-spin text-primary" />
+                  <span>正在搜索完整可见树…</span>
+                  {filtered.matches.size > 0 && (
+                    <span className="ml-auto font-mono">
+                      ≥
+                      {filtered.matches.size}
+                    </span>
+                  )}
+                </>
+              )
+            : (
+                <>
+                  <Route className="size-3 text-primary" />
+                  <span>
+                    {filtered.matches.size}
+                    {' '}
+                    个匹配
+                    {source?.truncated ? ' · 结果已截断' : ''}
+                  </span>
+                </>
+              )}
+        </div>
+      )}
 
-function TreeRowSkeleton({ width }: { width: string }) {
-  return (
-    <div className="flex h-11 items-center gap-2 px-2 lg:h-9">
-      <Skeleton className="size-6 shrink-0 rounded-md" />
-      <Skeleton className="h-3" style={{ width }} />
-    </div>
-  )
-}
-
-function TreeEmpty({ filtering, onRefresh }: { filtering: boolean, onRefresh: () => void }) {
-  return (
-    <div className="mx-2 rounded-lg border border-dashed bg-background/25 px-4 py-6 text-center">
-      <SearchX className="mx-auto size-6 text-muted-foreground/60" />
-      <p className="mt-2 text-sm font-medium">{filtering ? '没有匹配资源' : '资源树为空'}</p>
-      <p className="mt-1 text-xs leading-5 text-muted-foreground">
-        {filtering ? '换一个路径关键词，或按 Esc 清除筛选。' : '注册或挂载节点后会显示在这里。'}
-      </p>
-      {!filtering && (
-        <div className="mt-3 flex flex-wrap justify-center gap-2">
+      {filtering && deep.isError && (
+        <div
+          className="mx-2 mb-2 flex items-center gap-2 rounded-md border border-destructive/30 bg-destructive/8 px-2 py-1.5 text-[10px] text-destructive"
+          role="alert"
+        >
+          <span className="min-w-0 flex-1 truncate">完整树搜索失败，当前仅显示已加载结果</span>
           <button
-            className="inline-flex h-8 items-center gap-1.5 rounded-md border px-2.5 text-xs hover:bg-secondary focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-            onClick={onRefresh}
+            className="shrink-0 underline underline-offset-2"
+            onClick={() => deep.refetch()}
             type="button"
           >
-            <RefreshCw className="size-3.5" />
-            刷新
+            重试
           </button>
-          <Link
-            className="inline-flex h-8 items-center rounded-md bg-primary px-2.5 text-xs text-primary-foreground hover:opacity-90 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-            to="/manage/registry"
-          >
-            节点注册
-          </Link>
         </div>
+      )}
+
+      {filtered.nodes.length === 0
+        ? (
+            <TreeEmpty filtering={filtering} onRefresh={() => root.refetch()} />
+          )
+        : (
+            <nav aria-label="节点资源树" className="px-1.5">
+              <div
+                aria-label="工具与上下文资源"
+                className="grid gap-0.5"
+                onKeyDown={handleTreeKeyDown}
+                role="tree"
+              >
+                {filtered.nodes.map(node => (
+                  <TreeBranch
+                    activePath={activePath}
+                    depth={0}
+                    expandedPaths={expandedPaths}
+                    filter={query}
+                    filtering={filtering}
+                    key={node.path}
+                    matches={filtered.matches}
+                    node={node}
+                    onItemFocus={setTabStopPath}
+                    onNavigate={onNavigate}
+                    onToggle={toggleExpanded}
+                    tabStopPath={tabStopPath}
+                  />
+                ))}
+              </div>
+            </nav>
+          )}
+
+      {!filtering && source?.truncated && (
+        <p className="mx-3 mt-2 border-t pt-2 text-[10px] leading-4 text-muted-foreground">
+          根视图按深度加载；展开节点可继续浏览。
+        </p>
       )}
     </div>
   )
-}
-
-function collectPaths(nodes: TreeJson[]): Set<string> {
-  const paths = new Set<string>()
-  const visit = (node: TreeJson) => {
-    paths.add(node.path)
-    node.children?.forEach(visit)
-  }
-  nodes.forEach(visit)
-  return paths
-}
-
-function pathAncestors(path: string): string[] {
-  const segments = path.split('/').filter(Boolean)
-  return segments.slice(0, -1).map((_, index) => segments.slice(0, index + 1).join('/'))
-}
-
-function nodePathFromLocation(pathname: string): string | null {
-  if (pathname === '/') return ''
-  if (!pathname.startsWith('/nodes/')) return null
-  const encoded = pathname.slice('/nodes/'.length).replace(/\/+$/, '')
-  try {
-    return decodeURIComponent(encoded)
-  } catch {
-    return encoded
-  }
 }

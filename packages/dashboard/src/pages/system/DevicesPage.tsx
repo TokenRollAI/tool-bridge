@@ -24,10 +24,10 @@ import { CopyButton } from '@/components/CopyButton'
 import { EmptyState } from '@/components/EmptyState'
 import { PageHeader } from '@/components/PageHeader'
 import { Skeleton } from '@/components/ui/skeleton'
+import { useSession } from '@/lib/session-context'
 import { Button } from '@/components/ui/button'
 import { useRegistryList } from '@/lib/queries'
 import { Badge } from '@/components/ui/badge'
-import { useSession } from '@/lib/session'
 import { cn } from '@/lib/utils'
 
 function formatActivity(value?: string): string {

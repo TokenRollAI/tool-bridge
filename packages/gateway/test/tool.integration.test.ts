@@ -129,6 +129,94 @@ describe('工具虚拟化(hide 不可见、rename 后原名不可调)', () => {
   })
 })
 
+/**
+ * 极简 Streamable HTTP MCP 上游 mock(有状态会话,JSON 应答面覆盖 SDK client 所需的
+ * initialize / notifications/initialized / tools/list)。`expireAll()` 模拟上游空闲回收
+ * 会话后的**不合规行为**(实测 MetaMCP):对过期会话不按 spec 回 404,而是当作空会话
+ * 正常返回 200 + 空 tools。GET(standalone SSE)不会到达这里——provider 侧已拦成 405。
+ */
+function mcpUpstreamMock(tools: Array<{ description: string, name: string }>) {
+  const sessions = new Set<string>()
+  let issued = 0
+  let initializeCount = 0
+  const headersSeen: Headers[] = []
+  const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+    headersSeen.push(new Headers(init?.headers))
+    const body = JSON.parse(String(init?.body)) as {
+      id?: number | string
+      method: string
+      params?: { protocolVersion?: string }
+    }
+    const rpc = (result: unknown, headers: Record<string, string> = {}) =>
+      new Response(JSON.stringify({ jsonrpc: '2.0', id: body.id, result }), {
+        status: 200,
+        headers: { 'content-type': 'application/json', ...headers },
+      })
+
+    if (body.method === 'initialize') {
+      initializeCount += 1
+      issued += 1
+      const sid = `sess-${issued}`
+      sessions.add(sid)
+      return rpc(
+        {
+          protocolVersion: body.params?.protocolVersion ?? '2025-03-26',
+          capabilities: { tools: {} },
+          serverInfo: { name: 'mock-mcp', version: '0.0.0' },
+        },
+        { 'mcp-session-id': sid },
+      )
+    }
+    if (body.method === 'notifications/initialized') return new Response(null, { status: 202 })
+    if (body.method === 'tools/list') {
+      const sid = new Headers(init?.headers).get('mcp-session-id')
+      const live = sid !== null && sessions.has(sid)
+      return rpc({
+        tools: live ? tools.map(t => ({ ...t, inputSchema: { type: 'object' } })) : [],
+      })
+    }
+    if (body.method === 'tools/call') {
+      const params = (body as { params?: { arguments?: unknown, name?: string } }).params
+      return rpc({
+        content: [
+          { type: 'text', text: `called:${params?.name}:${JSON.stringify(params?.arguments)}` },
+        ],
+      })
+    }
+    return new Response(
+      JSON.stringify({
+        jsonrpc: '2.0',
+        id: body.id,
+        error: { code: -32601, message: `unknown method ${body.method}` },
+      }),
+      { status: 200, headers: { 'content-type': 'application/json' } },
+    )
+  })
+  return {
+    fetchMock,
+    expireAll: () => sessions.clear(),
+    initializeCalls: () => initializeCount,
+    headersSeen: () => headersSeen,
+  }
+}
+
+async function mountMcp(path: string): Promise<void> {
+  const res = await postJson(
+    'system/registry',
+    {
+      tool: 'write',
+      arguments: {
+        path,
+        kind: 'mcp',
+        description: 'mock mcp',
+        config: { kind: 'mcp', url: 'https://mcp-mock.test/mcp' },
+      },
+    },
+    admin(),
+  )
+  expect(res.status).toBe(200)
+}
+
 describe('直连工具调用(POST /<node>/<tool>,body 即 arguments)', () => {
   it('mcp 节点:直连调用命中工具,body 扁平传参;空 body 视为无参', async () => {
     const upstream = mcpUpstreamMock([{ name: 'echo', description: 'echo back' }])
@@ -530,94 +618,6 @@ describe('remote 节点(白名单、X-TB-Via 环检测)', () => {
     expect(peer?.children?.map(n => n.path)).toContain('srv/peer-tree/alpha')
   })
 })
-
-/**
- * 极简 Streamable HTTP MCP 上游 mock(有状态会话,JSON 应答面覆盖 SDK client 所需的
- * initialize / notifications/initialized / tools/list)。`expireAll()` 模拟上游空闲回收
- * 会话后的**不合规行为**(实测 MetaMCP):对过期会话不按 spec 回 404,而是当作空会话
- * 正常返回 200 + 空 tools。GET(standalone SSE)不会到达这里——provider 侧已拦成 405。
- */
-function mcpUpstreamMock(tools: Array<{ description: string, name: string }>) {
-  const sessions = new Set<string>()
-  let issued = 0
-  let initializeCount = 0
-  const headersSeen: Headers[] = []
-  const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
-    headersSeen.push(new Headers(init?.headers))
-    const body = JSON.parse(String(init?.body)) as {
-      id?: number | string
-      method: string
-      params?: { protocolVersion?: string }
-    }
-    const rpc = (result: unknown, headers: Record<string, string> = {}) =>
-      new Response(JSON.stringify({ jsonrpc: '2.0', id: body.id, result }), {
-        status: 200,
-        headers: { 'content-type': 'application/json', ...headers },
-      })
-
-    if (body.method === 'initialize') {
-      initializeCount += 1
-      issued += 1
-      const sid = `sess-${issued}`
-      sessions.add(sid)
-      return rpc(
-        {
-          protocolVersion: body.params?.protocolVersion ?? '2025-03-26',
-          capabilities: { tools: {} },
-          serverInfo: { name: 'mock-mcp', version: '0.0.0' },
-        },
-        { 'mcp-session-id': sid },
-      )
-    }
-    if (body.method === 'notifications/initialized') return new Response(null, { status: 202 })
-    if (body.method === 'tools/list') {
-      const sid = new Headers(init?.headers).get('mcp-session-id')
-      const live = sid !== null && sessions.has(sid)
-      return rpc({
-        tools: live ? tools.map(t => ({ ...t, inputSchema: { type: 'object' } })) : [],
-      })
-    }
-    if (body.method === 'tools/call') {
-      const params = (body as { params?: { arguments?: unknown, name?: string } }).params
-      return rpc({
-        content: [
-          { type: 'text', text: `called:${params?.name}:${JSON.stringify(params?.arguments)}` },
-        ],
-      })
-    }
-    return new Response(
-      JSON.stringify({
-        jsonrpc: '2.0',
-        id: body.id,
-        error: { code: -32601, message: `unknown method ${body.method}` },
-      }),
-      { status: 200, headers: { 'content-type': 'application/json' } },
-    )
-  })
-  return {
-    fetchMock,
-    expireAll: () => sessions.clear(),
-    initializeCalls: () => initializeCount,
-    headersSeen: () => headersSeen,
-  }
-}
-
-async function mountMcp(path: string): Promise<void> {
-  const res = await postJson(
-    'system/registry',
-    {
-      tool: 'write',
-      arguments: {
-        path,
-        kind: 'mcp',
-        description: 'mock mcp',
-        config: { kind: 'mcp', url: 'https://mcp-mock.test/mcp' },
-      },
-    },
-    admin(),
-  )
-  expect(res.status).toBe(200)
-}
 
 describe('mcp 会话复用:过期会话空列表防御(默认离线,上游为 fetch mock)', () => {
   it('上游回收会话后回 200+空列表(不合规)→ 清会话重握手一次,工具列表恢复', async () => {

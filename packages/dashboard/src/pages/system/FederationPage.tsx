@@ -59,126 +59,6 @@ function previewHost(raw: string): HostPreview {
   return { normalized }
 }
 
-/**
- * 联邦白名单(system/federation,对等 `tb federation ls|add|rm`)。
- * remote 节点只能挂到白名单内的 host 后缀,空 = 拒一切 remote。
- * env 基线(TB_REMOTE_ALLOWLIST)只读不可删;运行时条目在此增删。
- */
-export function FederationPage() {
-  const list = useFederationList()
-  const invoke = useInvoke()
-  const qc = useQueryClient()
-  const items = list.data?.items ?? []
-  const envItems = items.filter(item => item.source === 'env')
-  const runtimeItems = items.filter(item => item.source === 'store')
-
-  const remove = async (host: string) => {
-    try {
-      await invoke.mutateAsync({ path: 'system/federation', tool: 'remove', args: { host } })
-      toast.success(`已移除 ${host}`)
-      await qc.invalidateQueries({ queryKey: ['tb'] })
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : '移除联邦白名单失败')
-      throw error
-    }
-  }
-
-  return (
-    <div className="mx-auto max-w-7xl px-4 py-5 sm:px-6 sm:py-6 lg:px-8 lg:py-8">
-      <PageHeader
-        actions={<AddHostDialog />}
-        description="控制 kind=remote 节点可以连接的 HTBP 主机；空白名单意味着拒绝全部联邦出站。"
-        eyebrow="NETWORK / FEDERATION"
-        title="联邦出站边界"
-      />
-
-      <section className="mt-6 overflow-hidden rounded-xl border border-primary/20 bg-card/65">
-        <div className="grid gap-5 p-5 lg:grid-cols-[minmax(0,1.2fr)_minmax(320px,0.8fr)] lg:items-center lg:p-6">
-          <div className="flex min-w-0 gap-4">
-            <span className="grid size-10 shrink-0 place-items-center rounded-lg border border-primary/25 bg-primary/8 text-primary">
-              <ShieldAlert className="size-4.5" />
-            </span>
-            <div className="min-w-0">
-              <p className="text-xs font-semibold tracking-[0.14em] text-primary uppercase">
-                SSRF guardrail
-              </p>
-              <h2 className="mt-1.5 text-lg font-semibold tracking-tight">
-                白名单是 remote 请求的网络闸门
-              </h2>
-              <p className="mt-1.5 max-w-3xl text-sm leading-6 text-muted-foreground">
-                网关只允许 HTTPS
-                remote，并按主机名段边界执行后缀匹配。允许范围越宽，可访问的子域越多；仅添加你信任并负责的域。
-              </p>
-            </div>
-          </div>
-          <div className="grid gap-2 rounded-lg border bg-background/60 p-3 font-mono text-[11px]">
-            <MatchExample ok value="example.com → api.example.com" />
-            <MatchExample ok value="example.com → example.com" />
-            <MatchExample value="example.com ↛ example.com.evil.test" />
-          </div>
-        </div>
-      </section>
-
-      <div className="mt-4 grid gap-3 sm:grid-cols-3">
-        <MetricCard icon={Globe} label="当前生效" suffix="hosts" value={items.length} />
-        <MetricCard icon={Lock} label="部署基线" suffix="env" value={envItems.length} />
-        <MetricCard
-          icon={ServerCog}
-          label="运行时叠加"
-          suffix="runtime"
-          value={runtimeItems.length}
-        />
-      </div>
-
-      {list.isPending
-        ? (
-            <div className="mt-4 grid gap-3 rounded-lg border bg-card/45 p-4">
-              <Skeleton className="h-12 w-full" />
-              <Skeleton className="h-12 w-5/6" />
-            </div>
-          )
-        : list.isError
-          ? (
-              <EmptyState
-                action={(
-                  <Button onClick={() => void list.refetch()} size="sm" variant="outline">
-                    <RefreshCw />
-                    重试
-                  </Button>
-                )}
-                className="mt-4"
-                icon={Globe}
-                title="白名单读取失败"
-                tone="danger"
-              >
-                <p>{list.error.message}</p>
-              </EmptyState>
-            )
-          : (
-              <div className="mt-4 grid gap-4 xl:grid-cols-2">
-                <HostLayer
-                  badge="ENV"
-                  description="来自 TB_REMOTE_ALLOWLIST。作为只读安全基线，修改后需重新部署。"
-                  empty="当前部署没有配置 env 基线。"
-                  icon={Lock}
-                  items={envItems}
-                  title="部署基线"
-                />
-                <HostLayer
-                  badge="RUNTIME"
-                  description="由管理员即时增删并持久化；与部署基线取并集后生效。"
-                  empty="还没有运行时 host；可以按需添加最小后缀。"
-                  icon={ServerCog}
-                  items={runtimeItems}
-                  onRemove={remove}
-                  title="运行时叠加"
-                />
-              </div>
-            )}
-    </div>
-  )
-}
-
 function MatchExample({ ok = false, value }: { ok?: boolean, value: string }) {
   return (
     <div className="flex items-center gap-2 text-muted-foreground">
@@ -455,5 +335,125 @@ function AddHostDialog() {
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  )
+}
+
+/**
+ * 联邦白名单(system/federation,对等 `tb federation ls|add|rm`)。
+ * remote 节点只能挂到白名单内的 host 后缀,空 = 拒一切 remote。
+ * env 基线(TB_REMOTE_ALLOWLIST)只读不可删;运行时条目在此增删。
+ */
+export function FederationPage() {
+  const list = useFederationList()
+  const invoke = useInvoke()
+  const qc = useQueryClient()
+  const items = list.data?.items ?? []
+  const envItems = items.filter(item => item.source === 'env')
+  const runtimeItems = items.filter(item => item.source === 'store')
+
+  const remove = async (host: string) => {
+    try {
+      await invoke.mutateAsync({ path: 'system/federation', tool: 'remove', args: { host } })
+      toast.success(`已移除 ${host}`)
+      await qc.invalidateQueries({ queryKey: ['tb'] })
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '移除联邦白名单失败')
+      throw error
+    }
+  }
+
+  return (
+    <div className="mx-auto max-w-7xl px-4 py-5 sm:px-6 sm:py-6 lg:px-8 lg:py-8">
+      <PageHeader
+        actions={<AddHostDialog />}
+        description="控制 kind=remote 节点可以连接的 HTBP 主机；空白名单意味着拒绝全部联邦出站。"
+        eyebrow="NETWORK / FEDERATION"
+        title="联邦出站边界"
+      />
+
+      <section className="mt-6 overflow-hidden rounded-xl border border-primary/20 bg-card/65">
+        <div className="grid gap-5 p-5 lg:grid-cols-[minmax(0,1.2fr)_minmax(320px,0.8fr)] lg:items-center lg:p-6">
+          <div className="flex min-w-0 gap-4">
+            <span className="grid size-10 shrink-0 place-items-center rounded-lg border border-primary/25 bg-primary/8 text-primary">
+              <ShieldAlert className="size-4.5" />
+            </span>
+            <div className="min-w-0">
+              <p className="text-xs font-semibold tracking-[0.14em] text-primary uppercase">
+                SSRF guardrail
+              </p>
+              <h2 className="mt-1.5 text-lg font-semibold tracking-tight">
+                白名单是 remote 请求的网络闸门
+              </h2>
+              <p className="mt-1.5 max-w-3xl text-sm leading-6 text-muted-foreground">
+                网关只允许 HTTPS
+                remote，并按主机名段边界执行后缀匹配。允许范围越宽，可访问的子域越多；仅添加你信任并负责的域。
+              </p>
+            </div>
+          </div>
+          <div className="grid gap-2 rounded-lg border bg-background/60 p-3 font-mono text-[11px]">
+            <MatchExample ok value="example.com → api.example.com" />
+            <MatchExample ok value="example.com → example.com" />
+            <MatchExample value="example.com ↛ example.com.evil.test" />
+          </div>
+        </div>
+      </section>
+
+      <div className="mt-4 grid gap-3 sm:grid-cols-3">
+        <MetricCard icon={Globe} label="当前生效" suffix="hosts" value={items.length} />
+        <MetricCard icon={Lock} label="部署基线" suffix="env" value={envItems.length} />
+        <MetricCard
+          icon={ServerCog}
+          label="运行时叠加"
+          suffix="runtime"
+          value={runtimeItems.length}
+        />
+      </div>
+
+      {list.isPending
+        ? (
+            <div className="mt-4 grid gap-3 rounded-lg border bg-card/45 p-4">
+              <Skeleton className="h-12 w-full" />
+              <Skeleton className="h-12 w-5/6" />
+            </div>
+          )
+        : list.isError
+          ? (
+              <EmptyState
+                action={(
+                  <Button onClick={() => void list.refetch()} size="sm" variant="outline">
+                    <RefreshCw />
+                    重试
+                  </Button>
+                )}
+                className="mt-4"
+                icon={Globe}
+                title="白名单读取失败"
+                tone="danger"
+              >
+                <p>{list.error.message}</p>
+              </EmptyState>
+            )
+          : (
+              <div className="mt-4 grid gap-4 xl:grid-cols-2">
+                <HostLayer
+                  badge="ENV"
+                  description="来自 TB_REMOTE_ALLOWLIST。作为只读安全基线，修改后需重新部署。"
+                  empty="当前部署没有配置 env 基线。"
+                  icon={Lock}
+                  items={envItems}
+                  title="部署基线"
+                />
+                <HostLayer
+                  badge="RUNTIME"
+                  description="由管理员即时增删并持久化；与部署基线取并集后生效。"
+                  empty="还没有运行时 host；可以按需添加最小后缀。"
+                  icon={ServerCog}
+                  items={runtimeItems}
+                  onRemove={remove}
+                  title="运行时叠加"
+                />
+              </div>
+            )}
+    </div>
   )
 }

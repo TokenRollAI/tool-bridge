@@ -12,8 +12,8 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { TreeNav } from '@/components/layout/TreeNav'
+import { useSession } from '@/lib/session-context'
 import { Button } from '@/components/ui/button'
-import { useSession } from '@/lib/session'
 import { useTheme } from '@/lib/theme'
 import { cn } from '@/lib/utils'
 import { MANAGE_LINKS } from './navigation'
@@ -25,6 +25,76 @@ interface ExplorerPanelProps {
   nodeCount?: number
   nodeCountRestricted: boolean
   onClose?: () => void
+}
+
+function nodePathFromLocation(pathname: string): string | null {
+  if (pathname === '/') return ''
+  if (!pathname.startsWith('/nodes/')) return null
+  const encoded = pathname.slice('/nodes/'.length).replace(/\/+$/, '')
+  try {
+    return decodeURIComponent(encoded)
+  } catch {
+    return encoded
+  }
+}
+
+function MobileAccountFooter({ onClose }: { onClose?: () => void }) {
+  const { active, profiles, switchTo, logout } = useSession()
+  const [theme, toggleTheme] = useTheme()
+  const navigate = useNavigate()
+
+  const switchProfile = (name: string) => {
+    switchTo(name)
+    navigate('/')
+    onClose?.()
+  }
+
+  return (
+    <footer className="flex shrink-0 items-center gap-1 border-t p-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button
+            className="min-w-0 flex-1 justify-start font-mono text-xs"
+            size="sm"
+            variant="ghost"
+          >
+            <span className="truncate">{active?.name}</span>
+            <ChevronsUpDown className="ml-auto size-3 text-muted-foreground" />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="start" className="w-60">
+          <DropdownMenuLabel className="font-mono text-[10px] break-all text-muted-foreground">
+            {active?.baseUrl || window.location.origin}
+          </DropdownMenuLabel>
+          <DropdownMenuSeparator />
+          {profiles.map(profile => (
+            <DropdownMenuItem
+              className="font-mono text-xs"
+              key={profile.id}
+              onClick={() => switchProfile(profile.name)}
+            >
+              {profile.name}
+              {profile.id === active?.id && <span className="ml-auto text-primary">●</span>}
+            </DropdownMenuItem>
+          ))}
+        </DropdownMenuContent>
+      </DropdownMenu>
+      <Button aria-label="切换主题" onClick={toggleTheme} size="icon-sm" variant="ghost">
+        {theme === 'dark' ? <Sun /> : <Moon />}
+      </Button>
+      <Button
+        aria-label="退出登录"
+        onClick={() => {
+          onClose?.()
+          logout()
+        }}
+        size="icon-sm"
+        variant="ghost"
+      >
+        <LogOut />
+      </Button>
+    </footer>
+  )
 }
 
 /** 资源浏览器：树是唯一主任务；移动端通过显式分段切到管理入口。 */
@@ -236,74 +306,4 @@ export function ExplorerPanel({
       {mobile && <MobileAccountFooter onClose={onClose} />}
     </div>
   )
-}
-
-function MobileAccountFooter({ onClose }: { onClose?: () => void }) {
-  const { active, profiles, switchTo, logout } = useSession()
-  const [theme, toggleTheme] = useTheme()
-  const navigate = useNavigate()
-
-  const switchProfile = (name: string) => {
-    switchTo(name)
-    navigate('/')
-    onClose?.()
-  }
-
-  return (
-    <footer className="flex shrink-0 items-center gap-1 border-t p-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button
-            className="min-w-0 flex-1 justify-start font-mono text-xs"
-            size="sm"
-            variant="ghost"
-          >
-            <span className="truncate">{active?.name}</span>
-            <ChevronsUpDown className="ml-auto size-3 text-muted-foreground" />
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="start" className="w-60">
-          <DropdownMenuLabel className="font-mono text-[10px] break-all text-muted-foreground">
-            {active?.baseUrl || window.location.origin}
-          </DropdownMenuLabel>
-          <DropdownMenuSeparator />
-          {profiles.map(profile => (
-            <DropdownMenuItem
-              className="font-mono text-xs"
-              key={profile.id}
-              onClick={() => switchProfile(profile.name)}
-            >
-              {profile.name}
-              {profile.id === active?.id && <span className="ml-auto text-primary">●</span>}
-            </DropdownMenuItem>
-          ))}
-        </DropdownMenuContent>
-      </DropdownMenu>
-      <Button aria-label="切换主题" onClick={toggleTheme} size="icon-sm" variant="ghost">
-        {theme === 'dark' ? <Sun /> : <Moon />}
-      </Button>
-      <Button
-        aria-label="退出登录"
-        onClick={() => {
-          onClose?.()
-          logout()
-        }}
-        size="icon-sm"
-        variant="ghost"
-      >
-        <LogOut />
-      </Button>
-    </footer>
-  )
-}
-
-function nodePathFromLocation(pathname: string): string | null {
-  if (pathname === '/') return ''
-  if (!pathname.startsWith('/nodes/')) return null
-  const encoded = pathname.slice('/nodes/'.length).replace(/\/+$/, '')
-  try {
-    return decodeURIComponent(encoded)
-  } catch {
-    return encoded
-  }
 }

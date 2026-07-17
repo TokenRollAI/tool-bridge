@@ -36,24 +36,21 @@ async function postJson(path: string, body: unknown, init: RequestInit = {}): Pr
 
 function nextFrame(ws: WebSocket): Promise<DeviceFrame> {
   return new Promise((resolve, reject) => {
-    const onMessage = (event: MessageEvent) => {
-      cleanup()
+    // AbortController 统一摘监听:signal.abort() 一次移除全部,避免 onMessage/onClose
+    // 互相引用对方来 removeEventListener（那会造成 use-before-define 环）。
+    const ac = new AbortController()
+    ws.addEventListener('message', (event: MessageEvent) => {
+      ac.abort()
       try {
         resolve(decodeDeviceFrame(String(event.data)))
       } catch (err) {
         reject(err)
       }
-    }
-    const onClose = () => {
-      cleanup()
+    }, { signal: ac.signal })
+    ws.addEventListener('close', () => {
+      ac.abort()
       reject(new Error('websocket closed before next frame'))
-    }
-    const cleanup = () => {
-      ws.removeEventListener('message', onMessage)
-      ws.removeEventListener('close', onClose)
-    }
-    ws.addEventListener('message', onMessage)
-    ws.addEventListener('close', onClose)
+    }, { signal: ac.signal })
   })
 }
 
