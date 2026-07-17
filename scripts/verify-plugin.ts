@@ -1,3 +1,7 @@
+import { type ChildProcess, spawn } from 'node:child_process'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { randomBytes } from 'node:crypto'
+import { fileURLToPath } from 'node:url'
 /**
  * Plugin 全流程验收:对 TB_BASE_URL
  * 端到端验证示例 context-provider 的注册→挂载→四动词消费→调试清单 1~6→注销。
@@ -28,13 +32,9 @@
  * 退出码:0=全过;1=任一断言失败或超时。
  */
 import assert from 'node:assert/strict'
-import { type ChildProcess, spawn } from 'node:child_process'
-import { randomBytes } from 'node:crypto'
 import { existsSync } from 'node:fs'
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { fileURLToPath } from 'node:url'
 
 const baseUrl = (process.argv[2] ?? process.env.TB_BASE_URL)?.replace(/\/+$/, '')
 const adminSk = process.env.TB_ADMIN_SK ?? process.env.TB_SK
@@ -68,12 +68,12 @@ const stubUrl = externalStubUrl ?? `http://127.0.0.1:${STUB_PORT}`
 const CLI_TIMEOUT_MS = 60_000
 const STUB_READY_TIMEOUT_MS = 15_000
 
-const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
+const sleep = (ms: number): Promise<void> => new Promise(r => setTimeout(r, ms))
 
 interface CliResult {
   code: number | null
-  stdout: string
   stderr: string
+  stdout: string
 }
 
 /** 跑一条一次性 tb 命令(凭证经环境变量传入,不落 argv;verify-device 同款)。 */
@@ -133,7 +133,7 @@ async function stopStub(): Promise<void> {
   const child = stubChild
   stubChild = undefined
   if (child === undefined || child.exitCode !== null || child.killed) return
-  const closed = new Promise<void>((resolve) => child.once('close', () => resolve()))
+  const closed = new Promise<void>(resolve => child.once('close', () => resolve()))
   child.kill('SIGTERM')
   const done = await Promise.race([closed.then(() => true), sleep(3_000).then(() => false)])
   if (!done) {
@@ -160,18 +160,18 @@ async function startStub(pinnedToken?: string): Promise<void> {
 // ---------- 直连 stub 的 envelope 调用(调试清单 ③/④/⑥ 用) ----------
 
 interface EnvelopeResult {
-  status: number
   body: unknown
+  status: number
 }
 
 async function envelope(
   tool: string,
   args: Record<string, unknown>,
-  opts: { token?: string; requestId?: string } = {},
+  opts: { requestId?: string, token?: string } = {},
 ): Promise<EnvelopeResult> {
   const headers: Record<string, string> = {
     'content-type': 'application/json',
-    accept: 'application/json',
+    'accept': 'application/json',
   }
   if (opts.token !== undefined) headers.authorization = `Bearer ${opts.token}`
   if (opts.requestId !== undefined) headers['x-tb-request-id'] = opts.requestId
@@ -186,7 +186,7 @@ async function envelope(
 /** TBError 形状断言:{code,message,retryable} 三字段类型齐。 */
 function assertTBErrorShape(body: unknown, what: string): { code: string } {
   assert.ok(body !== null && typeof body === 'object', `${what}:错误响应须为 JSON 对象`)
-  const e = body as { code?: unknown; message?: unknown; retryable?: unknown }
+  const e = body as { code?: unknown, message?: unknown, retryable?: unknown }
   assert.equal(typeof e.code, 'string', `${what}:错误须有 string code,实际 ${JSON.stringify(body)}`)
   assert.equal(typeof e.message, 'string', `${what}:错误须有 string message`)
   assert.equal(typeof e.retryable, 'boolean', `${what}:错误须有 boolean retryable`)
@@ -196,9 +196,9 @@ function assertTBErrorShape(body: unknown, what: string): { code: string } {
 // ---------- 主流程 ----------
 
 interface PluginRegistration {
+  enabled: boolean
   id: string
   kind: string
-  enabled: boolean
   pluginToken?: string
 }
 
@@ -260,7 +260,7 @@ async function main(): Promise<void> {
     // 2) pluginToken 只出现一次:list/get 均不回显。
     await step('pluginToken 仅注册响应出现一次(list/get 不回显)', async () => {
       const page = await cliJson<{ items: Array<Record<string, unknown>> }>(['plugin', 'list'])
-      const item = page.items.find((p) => p.id === pluginId)
+      const item = page.items.find(p => p.id === pluginId)
       assert.ok(item !== undefined, `plugin list 未见 ${pluginId}`)
       assert.ok(!('pluginToken' in item), 'list 不得回显 pluginToken')
       assert.ok(!('tokenSkId' in item), 'list 不得回显 tokenSkId')
@@ -277,7 +277,7 @@ async function main(): Promise<void> {
 
     // 4) tb plugin health:钉扎后按需探活仍 healthy。
     await step('tb plugin health → healthy', async () => {
-      const h = await cliJson<{ healthy: boolean; checkedAt: string }>([
+      const h = await cliJson<{ checkedAt: string, healthy: boolean }>([
         'plugin',
         'health',
         pluginId,
@@ -309,7 +309,7 @@ async function main(): Promise<void> {
     const entryPath = `verify/hello-${rand}.md`
     const content = `# hello\n\nverify-plugin ${rand}`
     await step('四动词经树:put→ls→cat→patch→search', async () => {
-      const written = await cliJson<{ uri: string; version: string }>([
+      const written = await cliJson<{ uri: string, version: string }>([
         'ctx',
         'put',
         mountPath,
@@ -328,11 +328,11 @@ async function main(): Promise<void> {
         'verify/',
       ])
       assert.ok(
-        listed.items.some((m) => m.uri.endsWith(entryPath)),
-        `ls 预期含 ${entryPath},实际 ${JSON.stringify(listed.items.map((m) => m.uri))}`,
+        listed.items.some(m => m.uri.endsWith(entryPath)),
+        `ls 预期含 ${entryPath},实际 ${JSON.stringify(listed.items.map(m => m.uri))}`,
       )
 
-      const got = await cliJson<{ content: string; version: string }>([
+      const got = await cliJson<{ content: string, version: string }>([
         'ctx',
         'cat',
         mountPath,
@@ -357,7 +357,7 @@ async function main(): Promise<void> {
         `verify-plugin ${rand}`,
       ])
       assert.ok(
-        found.items.some((m) => m.uri.endsWith(entryPath)),
+        found.items.some(m => m.uri.endsWith(entryPath)),
         `search 预期命中 ${entryPath}(capability 'search' 已声明)`,
       )
     })
@@ -373,23 +373,23 @@ async function main(): Promise<void> {
         headers: { accept: 'application/json' },
       })
       assert.match(jsonRes.headers.get('content-type') ?? '', /application\/json/)
-      const helpJson = (await jsonRes.json()) as { cmds: Array<{ name: string; scope: string }> }
+      const helpJson = (await jsonRes.json()) as { cmds: Array<{ name: string, scope: string }> }
       assert.deepEqual(
-        helpJson.cmds.map((c) => c.name).sort(),
+        helpJson.cmds.map(c => c.name).sort(),
         [...allMethods].sort(),
         'HelpJson cmds 与 DSL 应同集合',
       )
       assert.ok(
-        helpJson.cmds.every((c) => c.scope === 'read' || c.scope === 'write'),
+        helpJson.cmds.every(c => c.scope === 'read' || c.scope === 'write'),
         '每个 cmd 应声明 scope',
       )
     })
 
     await step('清单② ~describe 与 manifest/实现一致', async () => {
       const describe = (await (await fetch(`${stubUrl}/~describe`)).json()) as {
-        kind: string
-        interfaceVersion: string
         capabilities: string[]
+        interfaceVersion: string
+        kind: string
       }
       assert.equal(describe.kind, 'context-provider')
       assert.equal(describe.interfaceVersion, 'context-provider/v1')
@@ -399,7 +399,7 @@ async function main(): Promise<void> {
         headers: { authorization: `Bearer ${adminSk}`, accept: 'application/json' },
       })
       assert.equal(nodeDescribe.status, 200)
-      const nd = (await nodeDescribe.json()) as { kind: string; capabilities: string[] }
+      const nd = (await nodeDescribe.json()) as { capabilities: string[], kind: string }
       assert.deepEqual([...nd.capabilities].sort(), ['delete', 'search'])
     })
 
@@ -445,7 +445,7 @@ async function main(): Promise<void> {
       let cursor: string | undefined
       let pages = 0
       do {
-        const page = await cliJson<{ items: Array<{ uri: string }>; cursor?: string }>([
+        const page = await cliJson<{ cursor?: string, items: Array<{ uri: string }> }>([
           'ctx',
           'ls',
           mountPath,
@@ -453,7 +453,7 @@ async function main(): Promise<void> {
           '2',
           ...(cursor !== undefined ? ['--cursor', cursor] : []),
         ])
-        uris.push(...page.items.map((m) => m.uri))
+        uris.push(...page.items.map(m => m.uri))
         cursor = page.cursor
         pages += 1
         assert.ok(pages <= 20, 'cursor 未收敛(>20 页)')
@@ -463,8 +463,8 @@ async function main(): Promise<void> {
       // 本轮写入的 2 条(put + replay)必须都被翻到;总量种子 5 + 2(外部 stub 复跑会累积,不设上限)。
       assert.ok(uris.length >= 7, `预期 ≥7 条,实际 ${uris.length}:${JSON.stringify(uris)}`)
       assert.ok(
-        uris.some((u) => u.endsWith(entryPath)) &&
-          uris.some((u) => u.endsWith(`verify/replay-${rand}.md`)),
+        uris.some(u => u.endsWith(entryPath))
+        && uris.some(u => u.endsWith(`verify/replay-${rand}.md`)),
         '分页聚合应包含本轮写入的两条 entry',
       )
     })

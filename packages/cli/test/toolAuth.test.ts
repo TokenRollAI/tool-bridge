@@ -33,7 +33,7 @@ afterEach(() => {
 const base = ['--json', '--base-url', 'https://gw', '--sk', 'tbk_x']
 
 describe('tb tool mount --auth oauth', () => {
-  it("config 带 auth:'oauth' 且不带 authRef", async () => {
+  it('config 带 auth:\'oauth\' 且不带 authRef', async () => {
     const fn = captureFetch({ path: 'db/bytebase', kind: 'mcp' })
     await runCli([
       'tool',

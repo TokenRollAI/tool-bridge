@@ -9,16 +9,16 @@
 
 /** 上游工具的中立形状(mcp/http 归一目标)。 */
 export interface ToolSpec {
-  /** 工具名(虚拟化前为上游原名,虚拟化后为对外虚拟名)。 */
-  name: string
-  /** 一句话描述;进 `~help` 的 `h` 行。上游可能不带 → 可缺省。 */
-  description?: string
-  /** JSON Schema;`~help` 的 body 数据源。 */
-  inputSchema?: unknown
-  /** 副作用标记(read/write/destructive);进 `~help` 的 effect 行。 */
-  effect?: string
   /** 危险操作二次确认;进 `~help` 的 confirm 行。 */
   confirm?: boolean
+  /** 一句话描述;进 `~help` 的 `h` 行。上游可能不带 → 可缺省。 */
+  description?: string
+  /** 副作用标记(read/write/destructive);进 `~help` 的 effect 行。 */
+  effect?: string
+  /** JSON Schema;`~help` 的 body 数据源。 */
+  inputSchema?: unknown
+  /** 工具名(虚拟化前为上游原名,虚拟化后为对外虚拟名)。 */
+  name: string
 }
 
 /**
@@ -38,10 +38,10 @@ export interface ToolResult {
  * (工具源天然小,豁免分页)。此接口是逻辑契约,I/O 实现(gateway)可返回 Promise。
  */
 export interface ToolProvider {
-  /** 枚举该源的全部工具(虚拟化前的原始名;网关做映射)。 */
-  List(): ToolSpec[]
-  /** 单个工具的完整 schema/描述 —— `~help` 的数据源。 */
-  Get(name: string): ToolSpec
   /** 调用。 */
   Call(name: string, args: Record<string, unknown>): ToolResult
+  /** 单个工具的完整 schema/描述 —— `~help` 的数据源。 */
+  Get(name: string): ToolSpec
+  /** 枚举该源的全部工具(虚拟化前的原始名;网关做映射)。 */
+  List(): ToolSpec[]
 }

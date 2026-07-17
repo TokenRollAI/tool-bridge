@@ -6,9 +6,9 @@ import { CliError } from './http'
 export type Action = 'read' | 'write' | 'call' | 'register' | 'admin'
 
 export interface Scope {
-  pattern: string
   actions: Action[]
   effect?: 'allow' | 'deny'
+  pattern: string
 }
 
 const ACTIONS: readonly Action[] = ['read', 'write', 'call', 'register', 'admin']
@@ -31,7 +31,7 @@ export function parseScope(spec: string): Scope {
   const actions = spec
     .slice(idx + 1)
     .split(',')
-    .map((a) => a.trim())
+    .map(a => a.trim())
     .filter(Boolean)
   if (actions.length === 0) throw new CliError(`invalid --scope "${spec}": no actions`)
 

@@ -1,7 +1,7 @@
-import path from 'node:path'
 import tailwindcss from '@tailwindcss/vite'
 import react from '@vitejs/plugin-react'
 import { defineConfig } from 'vite'
+import path from 'node:path'
 
 // base=/ui/:构建产物由 tb-gateway 以 Workers Static Assets 挂在 /ui 前缀下。
 // dev 模式经 proxy 把 HTBP API(除 /ui 与 vite 内部路径外)

@@ -6,9 +6,9 @@
  * SKILL.md 的 frontmatter(name/description)由服务端解析成目录(List)与检索面(Search)。
  */
 
-import { cmdPath } from '../builtin/util'
 import type { CmdSpec, HelpModel } from '../htbp/model'
 import type { TreePath } from '../types'
+import { cmdPath } from '../builtin/util'
 
 /** ~describe 声明的可选能力(本实现提供 Search)。 */
 export const SKILLHUB_CAPABILITIES: readonly string[] = ['search']
@@ -41,7 +41,7 @@ const PUBLISH_FILE_SCHEMA = {
   properties: {
     path: {
       type: 'string',
-      description: "file path relative to the skill root, e.g. 'SKILL.md', 'scripts/run.sh'",
+      description: 'file path relative to the skill root, e.g. \'SKILL.md\', \'scripts/run.sh\'',
     },
     content: { type: 'string', description: 'UTF-8 text content' },
     contentType: { type: 'string', description: 'optional; inferred from extension when omitted' },
@@ -67,7 +67,7 @@ function skillhubCmds(nodePath: TreePath): CmdSpec[] {
       name: 'Get',
       method: 'POST',
       path,
-      h: "read a skill: SKILL.md body + file manifest; pass 'file' to fetch one bundled file (oversized/binary as { $ref })",
+      h: 'read a skill: SKILL.md body + file manifest; pass \'file\' to fetch one bundled file (oversized/binary as { $ref })',
       inputSchema: {
         type: 'object',
         required: ['id'],
@@ -143,12 +143,12 @@ export interface SkillhubHelpOptions {
 }
 
 export function skillhubHelpModel(
-  node: { path: TreePath; description: string },
+  node: { description: string, path: TreePath },
   opts: SkillhubHelpOptions = {},
 ): HelpModel {
   const cmds = skillhubCmds(node.path)
   return {
     node: { path: node.path, kind: 'skillhub', description: node.description },
-    cmds: opts.readOnly ? cmds.filter((c) => c.scope === 'read') : cmds,
+    cmds: opts.readOnly ? cmds.filter(c => c.scope === 'read') : cmds,
   }
 }

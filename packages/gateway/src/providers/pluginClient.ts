@@ -100,7 +100,7 @@ async function fetchLifecycle(base: string, seg: string): Promise<Response> {
  */
 export async function fetchPluginContract(
   manifest: PluginManifest,
-): Promise<{ describe: unknown; help: unknown }> {
+): Promise<{ describe: unknown, help: unknown }> {
   const base = resolvePluginEndpoint(manifest)
   const describeResp = await fetchLifecycle(base, '~describe')
   const describe = (await describeResp.json().catch(() => null)) as unknown
@@ -113,10 +113,10 @@ export async function fetchPluginContract(
 }
 
 export interface PluginCallOptions {
-  manifest: PluginManifest
-  secrets: SecretStoreImpl
   /** 调用上下文,经 X-TB-Context 透传。 */
   ctx: CallContext
+  manifest: PluginManifest
+  secrets: SecretStoreImpl
   /**
    * 挂载 config.authRef:上游凭证引用。给出时每次调用 resolve 并经
    * X-TB-Upstream-Auth(base64url)注入——plugin 无须自持上游凭证。
@@ -129,8 +129,8 @@ async function pluginAuthorization(
   manifest: PluginManifest,
   secrets: SecretStoreImpl,
 ): Promise<string> {
-  const name =
-    manifest.auth.kind === 'platform-token'
+  const name
+    = manifest.auth.kind === 'platform-token'
       ? pluginTokenSecretName(manifest.id)
       : manifest.auth.secretRef
   const token = await secrets.resolve(name)
@@ -222,8 +222,8 @@ export async function callPlugin(
   const body = encodePluginCall({ tool: method, arguments: args })
   const headers: Record<string, string> = {
     'content-type': 'application/json',
-    accept: 'application/json',
-    authorization: await pluginAuthorization(opts.manifest, opts.secrets),
+    'accept': 'application/json',
+    'authorization': await pluginAuthorization(opts.manifest, opts.secrets),
     [HEADER_TB_CONTEXT]: encodeCallContext(opts.ctx),
     [HEADER_TB_REQUEST_ID]: crypto.randomUUID(),
   }

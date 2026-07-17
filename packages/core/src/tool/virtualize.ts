@@ -11,9 +11,9 @@
  *   4. describe:`describe[原名]` override 上游 description。
  */
 
-import { TBError } from '../errors'
 import type { Virtualize } from '../types'
 import type { ToolSpec } from './types'
+import { TBError } from '../errors'
 
 export interface VirtualizeResult {
   /** 对外暴露的工具(虚拟名 + override 后的 description)。 */

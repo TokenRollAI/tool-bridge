@@ -1,13 +1,13 @@
 import { Command } from 'commander'
-import { resolveTarget, withGlobalOpts } from '../args'
-import { apiJson } from '../http'
-import { guard, printJson, printLine, table } from '../output'
-import { nodePath } from '../paths'
 import type { HelpJson } from '../types'
+import { guard, printJson, printLine, table } from '../output'
+import { resolveTarget, withGlobalOpts } from '../args'
+import { nodePath } from '../paths'
+import { apiJson } from '../http'
 
 interface LsOpts {
-  json?: boolean
   baseUrl?: string
+  json?: boolean
   sk?: string
 }
 
@@ -34,7 +34,7 @@ export function lsCommand(): Command {
           printLine('(no child nodes)')
           return
         }
-        const rows = children.map((c) => [c.path, c.kind, c.description ?? ''])
+        const rows = children.map(c => [c.path, c.kind, c.description ?? ''])
         printLine(table(['PATH', 'KIND', 'DESCRIPTION'], rows))
       })
     })

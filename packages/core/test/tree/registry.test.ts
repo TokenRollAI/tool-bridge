@@ -1,9 +1,8 @@
 import { beforeEach, describe, expect, it } from 'vitest'
+import { type NodeInput, SYSTEM_AUTO } from '../../src/types'
+import { NodeRegistryStore } from '../../src/tree/registry'
 import { isTBError, type TBError } from '../../src/index'
 import { MemoryStateStore } from '../../src/store'
-import { NodeRegistryStore } from '../../src/tree/registry'
-import type { NodeInput } from '../../src/types'
-import { SYSTEM_AUTO } from '../../src/types'
 
 const T1 = '2026-01-01T00:00:00.000Z'
 const T2 = '2026-02-02T00:00:00.000Z'
@@ -218,16 +217,16 @@ describe('children 直接子节点', () => {
     await reg.write(mcp('a/b/c'), 'user:1', T1)
     await reg.write(mcp('a/b/d'), 'user:1', T1)
     const abKids = await reg.children('a/b')
-    expect(abKids.map((n) => n.path)).toEqual(['a/b/c', 'a/b/d'])
+    expect(abKids.map(n => n.path)).toEqual(['a/b/c', 'a/b/d'])
     const aKids = await reg.children('a')
-    expect(aKids.map((n) => n.path)).toEqual(['a/b'])
+    expect(aKids.map(n => n.path)).toEqual(['a/b'])
   })
 
   it('根的直接子节点为单段节点', async () => {
     await reg.write(mcp('a/b/c'), 'user:1', T1)
     await reg.write(mcp('m/n'), 'user:1', T1)
     const rootKids = await reg.children('')
-    expect(rootKids.map((n) => n.path)).toEqual(['a', 'm'])
+    expect(rootKids.map(n => n.path)).toEqual(['a', 'm'])
   })
 })
 
@@ -236,21 +235,21 @@ describe('subtree 一次性取整棵子树', () => {
     await reg.write(mcp('a/b/c'), 'user:1', T1)
     await reg.write(mcp('a/b/d'), 'user:1', T1)
     const sub = await reg.subtree('a')
-    expect(sub.map((n) => n.path)).toEqual(['a', 'a/b', 'a/b/c', 'a/b/d'])
+    expect(sub.map(n => n.path)).toEqual(['a', 'a/b', 'a/b/c', 'a/b/d'])
   })
 
   it('根("")= 全树', async () => {
     await reg.write(mcp('a/b'), 'user:1', T1)
     await reg.write(mcp('m/n'), 'user:1', T1)
     const all = await reg.subtree('')
-    expect(all.map((n) => n.path)).toEqual(['a', 'a/b', 'm', 'm/n'])
+    expect(all.map(n => n.path)).toEqual(['a', 'a/b', 'm', 'm/n'])
   })
 
   it('不误纳字符串前缀相邻目录(段级)', async () => {
     await reg.write(mcp('bulk/leaf'), 'user:1', T1)
     await reg.write(mcp('bulkx/leaf'), 'user:1', T1)
     const sub = await reg.subtree('bulk')
-    expect(sub.map((n) => n.path)).toEqual(['bulk', 'bulk/leaf'])
+    expect(sub.map(n => n.path)).toEqual(['bulk', 'bulk/leaf'])
   })
 
   it('不存在的根返回空数组', async () => {
@@ -288,6 +287,6 @@ describe('list 分页与 limit 钳制', () => {
   it('list 按段前缀匹配(不误纳字符串前缀相邻目录)', async () => {
     await reg.write(mcp('bulkx/leaf'), 'user:1', T1)
     const page = await reg.list('bulk', { limit: 1000 })
-    expect(page.items.every((n) => n.path === 'bulk' || n.path.startsWith('bulk/'))).toBe(true)
+    expect(page.items.every(n => n.path === 'bulk' || n.path.startsWith('bulk/'))).toBe(true)
   })
 })

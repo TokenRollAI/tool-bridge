@@ -1,17 +1,17 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { buildExpose } from '../src/commands/connect'
-import { configPath } from '../src/config'
 import { normalizeDeviceId, resolveDeviceId } from '../src/deviceId'
 import { deviceWsUrl, startHeartbeat } from '../src/deviceRuntime'
+import { buildExpose } from '../src/commands/connect'
 import { resetFetch, setFetch } from '../src/http'
+import { configPath } from '../src/config'
 import { runCli } from './cliHarness'
 
 function stdoutText(): string {
   const stdout = process.stdout.write as unknown as ReturnType<typeof vi.fn>
-  return stdout.mock.calls.map((c) => String(c[0])).join('')
+  return stdout.mock.calls.map(c => String(c[0])).join('')
 }
 
 function captureFetch(body: unknown, status = 200): ReturnType<typeof vi.fn> {

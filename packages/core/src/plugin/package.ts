@@ -9,9 +9,9 @@
  */
 
 import { z } from 'zod'
-import { TBError } from '../errors'
-import { assertSecureUrl } from '../tool/upstreamError'
 import { PLUGIN_KINDS, type PluginKind } from './manifest'
+import { assertSecureUrl } from '../tool/upstreamError'
+import { TBError } from '../errors'
 
 declare const crypto: {
   subtle: { digest(algorithm: string, data: Uint8Array): Promise<ArrayBuffer> }
@@ -21,21 +21,21 @@ declare const crypto: {
 export const PLUGIN_BUNDLE_MAX_BYTES = 5 * 1024 * 1024
 
 export interface PluginPackage {
-  /** 安装后的默认 plugin id;与 manifest id 同字符集约束。 */
-  name: string
-  version: string
   /** 单文件 ESM Worker bundle 的下载地址(https 强制)。 */
   bundleUrl: string
-  /** bundle 内容的 sha256(hex 小写);安装时逐字节校验。 */
-  sha256: string
-  kind: PluginKind
-  interfaceVersion: string
-  healthPath: string
-  description?: string
   /** 安装时向用户收集的配置(JSON Schema);值全部注入为插件 Worker 的 secrets。 */
   configSchema?: Record<string, unknown>
+  description?: string
+  healthPath: string
+  interfaceVersion: string
+  kind: PluginKind
   /** 每挂载配置(JSON Schema);挂载时校验节点 config.providerConfig。 */
   mountConfigSchema?: Record<string, unknown>
+  /** 安装后的默认 plugin id;与 manifest id 同字符集约束。 */
+  name: string
+  /** bundle 内容的 sha256(hex 小写);安装时逐字节校验。 */
+  sha256: string
+  version: string
 }
 
 // 与 manifest.ts 的 ID_RE 同一约束(name 直接用作 plugin id 与 Worker script 名成分)。
@@ -53,7 +53,7 @@ const packageSchema = z.object({
   interfaceVersion: z
     .string()
     .regex(INTERFACE_VERSION_RE, 'interfaceVersion 须形如 <kind>/v<major>'),
-  healthPath: z.string().regex(/^\//, "healthPath 须以 '/' 开头"),
+  healthPath: z.string().regex(/^\//, 'healthPath 须以 \'/\' 开头'),
   description: z.string().optional(),
   configSchema: z.record(z.unknown()).optional(),
   mountConfigSchema: z.record(z.unknown()).optional(),
@@ -100,14 +100,14 @@ export function parsePluginIndex(
   if (!Array.isArray(value)) {
     throw new TBError('invalid_argument', '插件索引须为条目数组')
   }
-  return value.map((entry) => parsePluginPackage(entry, opts))
+  return value.map(entry => parsePluginPackage(entry, opts))
 }
 
 /** sha256(hex 小写)。 */
 export async function bytesSha256Hex(bytes: Uint8Array): Promise<string> {
   const digest = await crypto.subtle.digest('SHA-256', bytes)
   return Array.from(new Uint8Array(digest))
-    .map((b) => b.toString(16).padStart(2, '0'))
+    .map(b => b.toString(16).padStart(2, '0'))
     .join('')
 }
 

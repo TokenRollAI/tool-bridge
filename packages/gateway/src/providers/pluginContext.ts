@@ -7,17 +7,15 @@
  * 每个方法一次 envelope 调用;返回值(含 `$ref`)原样透传。
  */
 
-import type {
-  ContextEntry,
-  ContextEntryInput,
-  ContextEntryMeta,
-  ContextPatch,
-  ContextProvider,
-  ListOptions,
-  Page,
-  SearchOptions,
-} from '@tool-bridge/core'
-import { optionalMethodsForCapabilities } from '@tool-bridge/core'
+import { type ContextEntry,
+  type ContextEntryInput,
+  type ContextEntryMeta,
+  type ContextPatch,
+  type ContextProvider,
+  type ListOptions,
+  optionalMethodsForCapabilities,
+  type Page,
+  type SearchOptions } from '@tool-bridge/core'
 import { callPlugin, type PluginCallOptions } from './pluginClient'
 
 export interface PluginContextOptions extends PluginCallOptions {

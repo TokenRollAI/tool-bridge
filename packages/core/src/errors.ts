@@ -6,14 +6,14 @@
  */
 
 /** 7 个规范错误码。 */
-export type TBErrorCode =
-  | 'not_found'
-  | 'permission_denied'
-  | 'invalid_argument'
-  | 'conflict'
-  | 'unavailable'
-  | 'rate_limited'
-  | 'internal'
+export type TBErrorCode
+  = | 'not_found'
+    | 'permission_denied'
+    | 'invalid_argument'
+    | 'conflict'
+    | 'unavailable'
+    | 'rate_limited'
+    | 'internal'
 
 /** 7 码的常量表(线上 body 校验用,如 DeviceFrame 的 error 字段)。 */
 export const TB_ERROR_CODES: readonly TBErrorCode[] = [
@@ -67,14 +67,14 @@ export function statusForCode(code: TBErrorCode): number {
 }
 
 export interface TBErrorOptions {
-  /** 缺省 false;设为 true 时 code 必须属于可重试三码集,否则构造抛错。 */
-  retryable?: boolean
   /**
    * HTTP 状态覆盖:仅用于两个特例——
    * 401(未认证,code 仍为 permission_denied)与 501(未实现,code 仍为 unavailable)。
    * 缺省时按 CODE_TO_STATUS 推导。
    */
   httpStatus?: number
+  /** 缺省 false;设为 true 时 code 必须属于可重试三码集,否则构造抛错。 */
+  retryable?: boolean
 }
 
 /**
@@ -93,9 +93,9 @@ export class TBError extends Error {
       throw new Error(`TBError: retryable=true not allowed for code '${code}'`)
     }
     if (
-      options.httpStatus !== undefined &&
-      options.httpStatus !== CODE_TO_STATUS[code] &&
-      !STATUS_OVERRIDES.has(`${code}:${options.httpStatus}`)
+      options.httpStatus !== undefined
+      && options.httpStatus !== CODE_TO_STATUS[code]
+      && !STATUS_OVERRIDES.has(`${code}:${options.httpStatus}`)
     ) {
       throw new Error(`TBError: httpStatus=${options.httpStatus} not allowed for code '${code}'`)
     }

@@ -6,8 +6,6 @@
  * 或 @types/node,故在此声明所需最小子集(仅类型,运行时用真实全局)。
  */
 
-import { TBError } from '../errors'
-import { KEY_SK_HASH, KEY_SK_ID, type StateStore } from '../store'
 import {
   type CallContext,
   LIST_LIMIT_DEFAULT,
@@ -18,10 +16,12 @@ import {
   type SecretKeyInput,
   type Timestamp,
 } from '../types'
+import { KEY_SK_HASH, KEY_SK_ID, type StateStore } from '../store'
+import { TBError } from '../errors'
 
 declare const crypto: {
-  randomUUID(): string
   getRandomValues(array: Uint8Array): Uint8Array
+  randomUUID(): string
   subtle: { digest(algorithm: string, data: Uint8Array): Promise<ArrayBuffer> }
 }
 declare class TextEncoder {
@@ -52,7 +52,7 @@ function base64url(bytes: Uint8Array): string {
 /** sha256 十六进制摘要(WebCrypto)。 */
 export async function sha256Hex(text: string): Promise<string> {
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text))
-  return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, '0')).join('')
+  return Array.from(new Uint8Array(digest), b => b.toString(16).padStart(2, '0')).join('')
 }
 
 /** 生成明文 secret:`tbk_` 前缀 + 128 位熵 base64url。 */
@@ -65,7 +65,7 @@ export function generateSecret(): string {
 export async function mintKey(
   input: SecretKeyInput,
   now: Timestamp,
-): Promise<{ key: SecretKey; secret: string }> {
+): Promise<{ key: SecretKey, secret: string }> {
   const secret = generateSecret()
   const key: SecretKey = {
     id: crypto.randomUUID(),
@@ -125,7 +125,7 @@ export class SKRegistryStore {
   }
 
   async list(opts?: ListOptions): Promise<Page<Omit<SecretKey, 'hash'>>> {
-    const listOpts: { limit: number; cursor?: string } = { limit: clampLimit(opts?.limit) }
+    const listOpts: { cursor?: string, limit: number } = { limit: clampLimit(opts?.limit) }
     if (opts?.cursor !== undefined) listOpts.cursor = opts.cursor
     const page = await this.store.list(KEY_SK_ID, listOpts)
     const items: Array<Omit<SecretKey, 'hash'>> = []
@@ -147,7 +147,7 @@ export class SKRegistryStore {
   async write(
     input: SecretKeyInput,
     now: Timestamp,
-  ): Promise<{ key: Omit<SecretKey, 'hash'>; secret: string }> {
+  ): Promise<{ key: Omit<SecretKey, 'hash'>, secret: string }> {
     const { key, secret } = await mintKey(input, now)
     await this.store.put(KEY_SK_HASH + key.hash, key)
     await this.store.put(KEY_SK_ID + key.id, key.hash)

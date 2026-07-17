@@ -32,9 +32,9 @@ import {
   type HelpModel,
   isTBError,
   negotiate,
-  RequestDedupe,
   renderHelpDsl,
   renderHelpJson,
+  RequestDedupe,
   TBError,
 } from '@tool-bridge/core'
 import {
@@ -49,9 +49,9 @@ import { tenantAccessToken } from './tat'
 
 export interface Env {
   FEISHU_ALLOWED_TOOLS: string
-  PLUGIN_TOKEN?: string
-  FEISHU_MCP_URL?: string
   FEISHU_AUTH_URL?: string
+  FEISHU_MCP_URL?: string
+  PLUGIN_TOKEN?: string
 }
 
 /** X-TB-Upstream-Auth 解码后的飞书凭证形状。 */
@@ -97,10 +97,10 @@ const dedupe = new RequestDedupe()
 // ---------- ToolSpec 转换(annotations → effect,与 gateway providers/mcp.ts 同规则) ----------
 
 interface ToolSpec {
-  name: string
   description?: string
-  inputSchema?: unknown
   effect?: string
+  inputSchema?: unknown
+  name: string
 }
 
 function toSpec(t: FeishuTool): ToolSpec {
@@ -164,23 +164,23 @@ async function invoke(
     case 'Get': {
       const name = args.name
       if (typeof name !== 'string' || name === '') {
-        throw new TBError('invalid_argument', "field 'name' must be a non-empty string")
+        throw new TBError('invalid_argument', 'field \'name\' must be a non-empty string')
       }
-      const found = (await withTatRetry(env, cred, listTools)).find((t) => t.name === name)
+      const found = (await withTatRetry(env, cred, listTools)).find(t => t.name === name)
       if (found === undefined) throw TBError.notFound(`未知工具:'${name}'`)
       return toSpec(found)
     }
     case 'Call': {
       const name = args.name
       if (typeof name !== 'string' || name === '') {
-        throw new TBError('invalid_argument', "field 'name' must be a non-empty string")
+        throw new TBError('invalid_argument', 'field \'name\' must be a non-empty string')
       }
-      const callArgs =
-        typeof args.args === 'object' && args.args !== null
+      const callArgs
+        = typeof args.args === 'object' && args.args !== null
           ? (args.args as Record<string, unknown>)
           : {}
       // MCP RPC 业务错误(isError)是正常返回值,原样进 ToolResult。
-      return await withTatRetry(env, cred, (cfg) => callTool(cfg, name, callArgs))
+      return await withTatRetry(env, cred, cfg => callTool(cfg, name, callArgs))
     }
     default:
       throw new TBError('invalid_argument', `unknown method '${tool}'(见 ~help)`)
@@ -250,8 +250,8 @@ async function handleEnvelope(req: Request, env: Env): Promise<Response> {
   const cred = upstreamCredential(req)
   const requestId = req.headers.get('x-tb-request-id')
   const exec = (): Promise<unknown> => invoke(env, cred, call.tool, call.arguments)
-  const result =
-    requestId !== null && requestId !== '' ? await dedupe.run(requestId, exec) : await exec()
+  const result
+    = requestId !== null && requestId !== '' ? await dedupe.run(requestId, exec) : await exec()
   return json(result ?? null)
 }
 

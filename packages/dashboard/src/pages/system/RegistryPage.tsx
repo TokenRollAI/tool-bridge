@@ -1,4 +1,3 @@
-import { useQueryClient } from '@tanstack/react-query'
 import {
   Boxes,
   Database,
@@ -13,18 +12,11 @@ import {
   Trash2,
   TriangleAlert,
 } from 'lucide-react'
+import { useQueryClient } from '@tanstack/react-query'
 import { type ReactNode, useState } from 'react'
 import { Link } from 'react-router'
 import { toast } from 'sonner'
-import { ConfirmAction } from '@/components/ConfirmAction'
-import { CopyButton } from '@/components/CopyButton'
-import { EmptyState } from '@/components/EmptyState'
-import { KindBadge } from '@/components/KindBadge'
-import { PageHeader } from '@/components/PageHeader'
-import { PaginationFooter } from '@/components/PaginationFooter'
-import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
-import { Checkbox } from '@/components/ui/checkbox'
+import type { RegistryNode } from '@/lib/types'
 import {
   Dialog,
   DialogContent,
@@ -34,16 +26,6 @@ import {
   DialogTitle,
   DialogTrigger,
 } from '@/components/ui/dialog'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
-import { Skeleton } from '@/components/ui/skeleton'
 import {
   Table,
   TableBody,
@@ -52,9 +34,27 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import { Textarea } from '@/components/ui/textarea'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { useInvoke, useOAuthAuthorize, usePluginList, useRegistryList } from '@/lib/queries'
-import type { RegistryNode } from '@/lib/types'
+import { PaginationFooter } from '@/components/PaginationFooter'
+import { ConfirmAction } from '@/components/ConfirmAction'
+import { CopyButton } from '@/components/CopyButton'
+import { EmptyState } from '@/components/EmptyState'
+import { PageHeader } from '@/components/PageHeader'
+import { Checkbox } from '@/components/ui/checkbox'
+import { Skeleton } from '@/components/ui/skeleton'
+import { Textarea } from '@/components/ui/textarea'
+import { KindBadge } from '@/components/KindBadge'
+import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import { cn } from '@/lib/utils'
 
 const KIND_FILTERS = [
@@ -69,7 +69,7 @@ const KIND_FILTERS = [
 ] as const
 type KindFilter = (typeof KIND_FILTERS)[number]
 
-function configSummary(node: RegistryNode): { target: string; detail: string } {
+function configSummary(node: RegistryNode): { detail: string, target: string } {
   const config = node.config ?? {}
   const value = (key: string) => (typeof config[key] === 'string' ? config[key] : '')
   switch (node.kind) {
@@ -151,7 +151,7 @@ export function RegistryPage() {
           toast.info('已打开授权页,完成授权后即可调用')
         }
       },
-      onError: (e) =>
+      onError: e =>
         toast.error(
           /redirect/i.test(e.message)
             ? `该上游只允许 localhost 回调,请用 CLI 完成授权:tb tool auth ${path} --local`
@@ -161,53 +161,53 @@ export function RegistryPage() {
   }
 
   const mounted = (list.data?.items ?? []).filter(
-    (n) => n.path !== 'system' && !n.path.startsWith('system/'),
+    n => n.path !== 'system' && !n.path.startsWith('system/'),
   )
   const needle = search.trim().toLowerCase()
   const items = mounted.filter(
-    (n) =>
-      (kindFilter === 'all' || n.kind === kindFilter) &&
-      (needle === '' ||
-        n.path.toLowerCase().includes(needle) ||
-        n.description.toLowerCase().includes(needle)),
+    n =>
+      (kindFilter === 'all' || n.kind === kindFilter)
+      && (needle === ''
+        || n.path.toLowerCase().includes(needle)
+        || n.description.toLowerCase().includes(needle)),
   )
   const countByKind = (k: KindFilter) =>
-    k === 'all' ? mounted.length : mounted.filter((n) => n.kind === k).length
+    k === 'all' ? mounted.length : mounted.filter(n => n.kind === k).length
 
-  const serviceCount = mounted.filter((node) => ['mcp', 'http', 'tool'].includes(node.kind)).length
-  const contextCount = mounted.filter((node) => node.kind === 'context').length
-  const skillhubCount = mounted.filter((node) => node.kind === 'skillhub').length
-  const remoteCount = mounted.filter((node) => node.kind === 'remote').length
+  const serviceCount = mounted.filter(node => ['mcp', 'http', 'tool'].includes(node.kind)).length
+  const contextCount = mounted.filter(node => node.kind === 'context').length
+  const skillhubCount = mounted.filter(node => node.kind === 'skillhub').length
+  const remoteCount = mounted.filter(node => node.kind === 'remote').length
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-5 sm:px-6 sm:py-6 lg:px-8 lg:py-8">
       <PageHeader
-        eyebrow="SYSTEM / REGISTRY"
-        title="节点注册"
-        description="把 MCP、HTTP、Plugin、Context 与远端 HTBP 服务挂入统一能力树，并集中查看连接与认证边界。"
-        actions={
+        actions={(
           <MountDialog
-            existingPaths={mounted.map((node) => node.path)}
+            existingPaths={mounted.map(node => node.path)}
             hasUnloadedPaths={Boolean(list.hasNextPage)}
           />
-        }
+        )}
+        description="把 MCP、HTTP、Plugin、Context 与远端 HTBP 服务挂入统一能力树，并集中查看连接与认证边界。"
+        eyebrow="SYSTEM / REGISTRY"
+        title="节点注册"
       />
 
       <div className="mt-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <RegistryMetric icon={Boxes} label="已加载挂载" value={mounted.length} detail="全部资源" />
+        <RegistryMetric detail="全部资源" icon={Boxes} label="已加载挂载" value={mounted.length} />
         <RegistryMetric
+          detail="MCP · HTTP · Plugin"
           icon={Layers3}
           label="工具服务"
           value={serviceCount}
-          detail="MCP · HTTP · Plugin"
         />
         <RegistryMetric
+          detail={`Context ${contextCount} · Skillhub ${skillhubCount}`}
           icon={Database}
           label="内容节点"
           value={contextCount + skillhubCount}
-          detail={`Context ${contextCount} · Skillhub ${skillhubCount}`}
         />
-        <RegistryMetric icon={Globe2} label="Remote" value={remoteCount} detail="联邦 HTBP" />
+        <RegistryMetric detail="联邦 HTBP" icon={Globe2} label="Remote" value={remoteCount} />
       </div>
 
       <section className="mt-4 overflow-hidden rounded-lg border bg-card/45">
@@ -217,15 +217,15 @@ export function RegistryPage() {
               const count = countByKind(kind)
               return (
                 <button
-                  key={kind}
-                  type="button"
-                  onClick={() => setKindFilter(kind)}
                   className={cn(
                     'min-h-8 border-r px-3 font-mono text-[10px] whitespace-nowrap last:border-r-0',
                     kindFilter === kind
                       ? 'bg-primary/10 text-primary shadow-[inset_0_-2px_var(--primary)]'
                       : 'text-muted-foreground hover:bg-muted/40 hover:text-foreground',
                   )}
+                  key={kind}
+                  onClick={() => setKindFilter(kind)}
+                  type="button"
                 >
                   {kind === 'all' ? '全部' : kind}
                   <span className="ml-1.5 tabular-nums opacity-60">{count}</span>
@@ -236,198 +236,206 @@ export function RegistryPage() {
           <div className="relative w-full sm:w-72">
             <Search className="pointer-events-none absolute top-1/2 left-3 size-3.5 -translate-y-1/2 text-muted-foreground" />
             <Input
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-              placeholder="搜索 path 或描述"
               aria-label="搜索挂载节点"
               className="h-9 bg-background/70 pl-9 font-mono text-xs"
+              onChange={event => setSearch(event.target.value)}
+              placeholder="搜索 path 或描述"
+              value={search}
             />
           </div>
         </div>
 
-        {list.isPending ? (
-          <div className="grid gap-2 p-4">
-            <Skeleton className="h-12 w-full" />
-            <Skeleton className="h-12 w-5/6" />
-          </div>
-        ) : list.isError ? (
-          <EmptyState
-            icon={Boxes}
-            title="注册表读取失败"
-            tone="danger"
-            className="m-4"
-            action={
-              <Button variant="outline" size="sm" onClick={() => void list.refetch()}>
-                重试
-              </Button>
-            }
-          >
-            <p>{list.error.message}</p>
-          </EmptyState>
-        ) : items.length === 0 ? (
-          <EmptyState
-            icon={Boxes}
-            title={mounted.length === 0 ? '还没有挂载任何节点' : '没有符合筛选条件的节点'}
-            className="m-4"
-            action={
-              mounted.length > 0 ? (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => {
-                    setKindFilter('all')
-                    setSearch('')
-                  }}
+        {list.isPending
+          ? (
+              <div className="grid gap-2 p-4">
+                <Skeleton className="h-12 w-full" />
+                <Skeleton className="h-12 w-5/6" />
+              </div>
+            )
+          : list.isError
+            ? (
+                <EmptyState
+                  action={(
+                    <Button onClick={() => void list.refetch()} size="sm" variant="outline">
+                      重试
+                    </Button>
+                  )}
+                  className="m-4"
+                  icon={Boxes}
+                  title="注册表读取失败"
+                  tone="danger"
                 >
-                  清除筛选
-                </Button>
-              ) : undefined
-            }
-          >
-            {mounted.length === 0 && <p>使用“挂载节点”，或通过 CLI 挂载工具与 Context。</p>}
-          </EmptyState>
-        ) : (
-          <Table className="min-w-[1040px]">
-            <TableHeader>
-              <TableRow>
-                <TableHead>资源身份</TableHead>
-                <TableHead className="w-28">Kind</TableHead>
-                <TableHead>连接 / Provider</TableHead>
-                <TableHead className="w-40">注册来源</TableHead>
-                <TableHead className="w-28">状态</TableHead>
-                <TableHead className="w-40">
-                  <span className="sr-only">操作</span>
-                </TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {items.map((node) => {
-                const summary = configSummary(node)
-                return (
-                  <TableRow key={node.path}>
-                    <TableCell className="max-w-80 whitespace-normal">
-                      <button
-                        type="button"
-                        className="block max-w-full text-left outline-none focus-visible:rounded-sm focus-visible:ring-2 focus-visible:ring-ring"
-                        onClick={() => setInspecting(node)}
-                      >
-                        <span className="block truncate font-mono text-xs text-foreground">
-                          {node.path}
-                        </span>
-                        <span className="mt-1 block line-clamp-2 text-xs leading-5 text-muted-foreground">
-                          {node.description}
-                        </span>
-                      </button>
-                    </TableCell>
-                    <TableCell>
-                      <KindBadge kind={node.kind} />
-                    </TableCell>
-                    <TableCell className="max-w-80 whitespace-normal">
-                      <p className="truncate font-mono text-xs" title={summary.target}>
-                        {summary.target}
-                      </p>
-                      <p className="mt-1 text-[11px] text-muted-foreground">{summary.detail}</p>
-                    </TableCell>
-                    <TableCell>
-                      <p
-                        className="truncate font-mono text-[11px] text-muted-foreground"
-                        title={node.registeredBy}
-                      >
-                        {node.registeredBy || 'system'}
-                      </p>
-                      {node.updatedAt && (
-                        <p className="mt-1 font-mono text-[10px] text-muted-foreground">
-                          {new Date(node.updatedAt).toLocaleDateString()}
-                        </p>
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      <Badge
-                        variant="outline"
-                        className={cn(
-                          'font-mono text-[10px]',
-                          node.online === true && 'border-ok/35 bg-ok/[0.045] text-ok',
-                          node.online === false && 'text-muted-foreground',
-                        )}
-                      >
-                        <span
-                          className={cn(
-                            'size-1.5 rounded-full bg-muted-foreground',
-                            node.online === true && 'bg-ok',
-                          )}
-                        />
-                        {node.online === undefined
-                          ? 'registered'
-                          : node.online
-                            ? 'online'
-                            : 'offline'}
-                      </Badge>
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex justify-end gap-1">
-                        {node.kind === 'mcp' && node.config?.auth === 'oauth' && (
-                          <Button
-                            variant="ghost"
-                            size="icon-sm"
-                            aria-label={`授权 ${node.path}`}
-                            title="OAuth 授权"
-                            disabled={oauth.isPending}
-                            onClick={() => authorize(node.path)}
-                          >
-                            <KeyRound />
-                          </Button>
-                        )}
-                        <Button
-                          variant="ghost"
-                          size="icon-sm"
-                          aria-label={`查看 ${node.path} 配置`}
-                          title="查看配置"
-                          onClick={() => setInspecting(node)}
-                        >
-                          <FileJson2 />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon-sm"
-                          asChild
-                          aria-label={`打开 ${node.path}`}
-                        >
-                          <Link to={`/nodes/${node.path}`}>
-                            <ExternalLink />
-                          </Link>
-                        </Button>
-                        <ConfirmAction
-                          title={`卸载 ${node.path}?`}
-                          description={<p>卸载后该子树不可见；空的中间目录将被回收。</p>}
-                          actionLabel="卸载"
-                          onConfirm={() => unmount(node.path)}
-                          trigger={
-                            <Button variant="ghost" size="icon-sm" aria-label={`卸载 ${node.path}`}>
-                              <Trash2 className="text-destructive" />
+                  <p>{list.error.message}</p>
+                </EmptyState>
+              )
+            : items.length === 0
+              ? (
+                  <EmptyState
+                    action={
+                      mounted.length > 0
+                        ? (
+                            <Button
+                              onClick={() => {
+                                setKindFilter('all')
+                                setSearch('')
+                              }}
+                              size="sm"
+                              variant="outline"
+                            >
+                              清除筛选
                             </Button>
-                          }
-                        />
-                      </div>
-                    </TableCell>
-                  </TableRow>
+                          )
+                        : undefined
+                    }
+                    className="m-4"
+                    icon={Boxes}
+                    title={mounted.length === 0 ? '还没有挂载任何节点' : '没有符合筛选条件的节点'}
+                  >
+                    {mounted.length === 0 && <p>使用“挂载节点”，或通过 CLI 挂载工具与 Context。</p>}
+                  </EmptyState>
                 )
-              })}
-            </TableBody>
-          </Table>
-        )}
+              : (
+                  <Table className="min-w-[1040px]">
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>资源身份</TableHead>
+                        <TableHead className="w-28">Kind</TableHead>
+                        <TableHead>连接 / Provider</TableHead>
+                        <TableHead className="w-40">注册来源</TableHead>
+                        <TableHead className="w-28">状态</TableHead>
+                        <TableHead className="w-40">
+                          <span className="sr-only">操作</span>
+                        </TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {items.map((node) => {
+                        const summary = configSummary(node)
+                        return (
+                          <TableRow key={node.path}>
+                            <TableCell className="max-w-80 whitespace-normal">
+                              <button
+                                className="block max-w-full text-left outline-none focus-visible:rounded-sm focus-visible:ring-2 focus-visible:ring-ring"
+                                onClick={() => setInspecting(node)}
+                                type="button"
+                              >
+                                <span className="block truncate font-mono text-xs text-foreground">
+                                  {node.path}
+                                </span>
+                                <span className="mt-1 block line-clamp-2 text-xs leading-5 text-muted-foreground">
+                                  {node.description}
+                                </span>
+                              </button>
+                            </TableCell>
+                            <TableCell>
+                              <KindBadge kind={node.kind} />
+                            </TableCell>
+                            <TableCell className="max-w-80 whitespace-normal">
+                              <p className="truncate font-mono text-xs" title={summary.target}>
+                                {summary.target}
+                              </p>
+                              <p className="mt-1 text-[11px] text-muted-foreground">{summary.detail}</p>
+                            </TableCell>
+                            <TableCell>
+                              <p
+                                className="truncate font-mono text-[11px] text-muted-foreground"
+                                title={node.registeredBy}
+                              >
+                                {node.registeredBy || 'system'}
+                              </p>
+                              {node.updatedAt && (
+                                <p className="mt-1 font-mono text-[10px] text-muted-foreground">
+                                  {new Date(node.updatedAt).toLocaleDateString()}
+                                </p>
+                              )}
+                            </TableCell>
+                            <TableCell>
+                              <Badge
+                                className={cn(
+                                  'font-mono text-[10px]',
+                                  node.online === true && 'border-ok/35 bg-ok/[0.045] text-ok',
+                                  node.online === false && 'text-muted-foreground',
+                                )}
+                                variant="outline"
+                              >
+                                <span
+                                  className={cn(
+                                    'size-1.5 rounded-full bg-muted-foreground',
+                                    node.online === true && 'bg-ok',
+                                  )}
+                                />
+                                {node.online === undefined
+                                  ? 'registered'
+                                  : node.online
+                                    ? 'online'
+                                    : 'offline'}
+                              </Badge>
+                            </TableCell>
+                            <TableCell>
+                              <div className="flex justify-end gap-1">
+                                {node.kind === 'mcp' && node.config?.auth === 'oauth' && (
+                                  <Button
+                                    aria-label={`授权 ${node.path}`}
+                                    disabled={oauth.isPending}
+                                    onClick={() => authorize(node.path)}
+                                    size="icon-sm"
+                                    title="OAuth 授权"
+                                    variant="ghost"
+                                  >
+                                    <KeyRound />
+                                  </Button>
+                                )}
+                                <Button
+                                  aria-label={`查看 ${node.path} 配置`}
+                                  onClick={() => setInspecting(node)}
+                                  size="icon-sm"
+                                  title="查看配置"
+                                  variant="ghost"
+                                >
+                                  <FileJson2 />
+                                </Button>
+                                <Button
+                                  aria-label={`打开 ${node.path}`}
+                                  asChild
+                                  size="icon-sm"
+                                  variant="ghost"
+                                >
+                                  <Link to={`/nodes/${node.path}`}>
+                                    <ExternalLink />
+                                  </Link>
+                                </Button>
+                                <ConfirmAction
+                                  actionLabel="卸载"
+                                  description={<p>卸载后该子树不可见；空的中间目录将被回收。</p>}
+                                  onConfirm={() => unmount(node.path)}
+                                  title={`卸载 ${node.path}?`}
+                                  trigger={(
+                                    <Button aria-label={`卸载 ${node.path}`} size="icon-sm" variant="ghost">
+                                      <Trash2 className="text-destructive" />
+                                    </Button>
+                                  )}
+                                />
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        )
+                      })}
+                    </TableBody>
+                  </Table>
+                )}
         {!list.isPending && !list.isError && (
           <PaginationFooter
             count={mounted.length}
-            unit="个节点"
             hasNextPage={Boolean(list.hasNextPage)}
             isFetchingNextPage={list.isFetchingNextPage}
             onLoadMore={() => void list.fetchNextPage()}
+            unit="个节点"
           />
         )}
       </section>
 
       {/* 节点配置查看(registry get 的展示面;凭证只以 authRef 名义出现) */}
-      <Dialog open={inspecting !== null} onOpenChange={(next) => !next && setInspecting(null)}>
+      <Dialog onOpenChange={next => !next && setInspecting(null)} open={inspecting !== null}>
         <DialogContent className="top-0 right-0 bottom-0 left-auto flex h-dvh max-h-none w-full max-w-full translate-x-0 translate-y-0 flex-col gap-0 rounded-none border-y-0 border-r-0 p-0 sm:max-w-xl">
           <DialogHeader className="border-b px-5 py-5 sm:px-6">
             <div className="flex flex-wrap items-center gap-2 pr-8">
@@ -464,7 +472,7 @@ export function RegistryPage() {
                   <p className="text-[10px] font-semibold tracking-[0.14em] text-muted-foreground uppercase">
                     Raw registry record
                   </p>
-                  <CopyButton value={JSON.stringify(inspecting, null, 2)} label="复制配置" />
+                  <CopyButton label="复制配置" value={JSON.stringify(inspecting, null, 2)} />
                 </div>
                 <pre className="max-h-[55vh] overflow-auto rounded-lg border bg-card px-4 py-3 font-mono text-xs leading-relaxed">
                   {JSON.stringify(inspecting, null, 2)}
@@ -484,10 +492,10 @@ function RegistryMetric({
   value,
   detail,
 }: {
+  detail: string
   icon: typeof Boxes
   label: string
   value: number
-  detail: string
 }) {
   return (
     <div className="rounded-lg border bg-card/55 p-4">
@@ -501,7 +509,7 @@ function RegistryMetric({
   )
 }
 
-function ConfigFact({ label, value }: { label: string; value: string }) {
+function ConfigFact({ label, value }: { label: string, value: string }) {
   return (
     <div className="rounded-md border bg-muted/10 p-3">
       <p className="text-[10px] font-semibold tracking-[0.12em] text-muted-foreground uppercase">
@@ -526,9 +534,9 @@ export function MountDialog({
   defaultPath,
   trigger,
 }: {
+  defaultPath?: string
   existingPaths: string[]
   hasUnloadedPaths?: boolean
-  defaultPath?: string
   trigger?: ReactNode
 }) {
   const invoke = useInvoke()
@@ -585,8 +593,8 @@ export function MountDialog({
   const [toolAuthRef, setToolAuthRef] = useState('')
 
   const pluginItems = plugins.data?.items ?? []
-  const toolPlugins = pluginItems.filter((p) => p.kind === 'tool-provider')
-  const ctxPlugins = pluginItems.filter((p) => p.kind === 'context-provider')
+  const toolPlugins = pluginItems.filter(p => p.kind === 'tool-provider')
+  const ctxPlugins = pluginItems.filter(p => p.kind === 'context-provider')
 
   /** "from=to" 行 → Record(与 CLI buildVirtualize 同规则;非法行即抛)。 */
   const parsePairs = (spec: string, flag: string): Record<string, string> => {
@@ -611,7 +619,7 @@ export function MountDialog({
     if (Object.keys(rename).length) v.rename = rename
     const hide = hideSpec
       .split(/[,\n]/)
-      .map((s) => s.trim())
+      .map(s => s.trim())
       .filter(Boolean)
     if (hide.length) v.hide = hide
     const describe = parsePairs(describeSpec, 'describe')
@@ -809,7 +817,7 @@ export function MountDialog({
                   toast.info('已打开授权页,完成授权后即可调用')
                 }
               },
-              onError: (e) =>
+              onError: e =>
                 toast.error(
                   /redirect/i.test(e.message)
                     ? `该上游只允许 localhost 回调,请用 CLI 完成授权:tb tool auth ${mounted} --local`
@@ -818,7 +826,7 @@ export function MountDialog({
             })
           }
         },
-        onError: (e) => setErr(e.message),
+        onError: e => setErr(e.message),
       },
     )
   }
@@ -834,7 +842,7 @@ export function MountDialog({
   }
 
   return (
-    <Dialog open={open} onOpenChange={changeOpen}>
+    <Dialog onOpenChange={changeOpen} open={open}>
       <DialogTrigger asChild>
         {trigger ?? (
           <Button size="sm">
@@ -852,7 +860,9 @@ export function MountDialog({
             {isReplacement ? '替换现有节点' : '挂载节点'}
           </DialogTitle>
           <DialogDescription>
-            <code className="font-mono text-xs">system/registry write</code> 是 upsert：同 path
+            <code className="font-mono text-xs">system/registry write</code>
+            {' '}
+            是 upsert：同 path
             会替换原记录。切换 kind 不会清空各分支草稿；凭证只通过 authRef 引用。
           </DialogDescription>
         </DialogHeader>
@@ -860,49 +870,49 @@ export function MountDialog({
         <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5 sm:px-7 sm:py-6">
           <div className="grid gap-5">
             <FormSection
+              description="确定节点在能力树中的位置、类型与面向使用者的说明。"
               index="01"
               title="基础身份"
-              description="确定节点在能力树中的位置、类型与面向使用者的说明。"
             >
               <div className="grid gap-3 sm:grid-cols-2">
                 <div className="grid gap-1.5">
                   <Label className="text-xs">kind</Label>
-                  <Select value={kind} onValueChange={(v) => setKind(v as MountKind)}>
+                  <Select onValueChange={v => setKind(v as MountKind)} value={kind}>
                     <SelectTrigger className="font-mono text-xs">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="mcp" className="font-mono text-xs">
+                      <SelectItem className="font-mono text-xs" value="mcp">
                         mcp — MCP server
                       </SelectItem>
-                      <SelectItem value="http" className="font-mono text-xs">
+                      <SelectItem className="font-mono text-xs" value="http">
                         http — HTTP endpoint
                       </SelectItem>
-                      <SelectItem value="context" className="font-mono text-xs">
+                      <SelectItem className="font-mono text-xs" value="context">
                         context — 存储 namespace
                       </SelectItem>
-                      <SelectItem value="skillhub" className="font-mono text-xs">
+                      <SelectItem className="font-mono text-xs" value="skillhub">
                         skillhub — Agent 技能目录
                       </SelectItem>
-                      <SelectItem value="remote" className="font-mono text-xs">
+                      <SelectItem className="font-mono text-xs" value="remote">
                         remote — 联邦 HTBP 服务
                       </SelectItem>
-                      <SelectItem value="tool" className="font-mono text-xs">
+                      <SelectItem className="font-mono text-xs" value="tool">
                         tool — plugin 工具源
                       </SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
                 <div className="grid gap-1.5">
-                  <Label htmlFor="mount-path" className="text-xs">
+                  <Label className="text-xs" htmlFor="mount-path">
                     path *
                   </Label>
                   <Input
-                    id="mount-path"
                     className="font-mono text-sm"
+                    id="mount-path"
+                    onChange={e => setPath(e.target.value)}
                     placeholder="docs/context7"
                     value={path}
-                    onChange={(e) => setPath(e.target.value)}
                   />
                 </div>
               </div>
@@ -910,70 +920,71 @@ export function MountDialog({
               {(isReplacement || mayReplaceUnloaded) && (
                 <div className="flex items-start gap-2.5 rounded-lg border border-warn/30 bg-warn/[0.045] px-3 py-2.5 text-xs">
                   <TriangleAlert
-                    className="mt-0.5 size-3.5 shrink-0 text-warn"
                     aria-hidden="true"
+                    className="mt-0.5 size-3.5 shrink-0 text-warn"
                   />
                   <p>
                     <span className="font-medium text-warn">
                       {isReplacement
                         ? '这个 path 已存在。'
                         : '列表还有未加载页，该 path 可能已经存在。'}
-                    </span>{' '}
+                    </span>
+                    {' '}
                     继续写入会整体替换同 path 的 kind、描述、连接配置与虚拟化设置。
                   </p>
                 </div>
               )}
 
               <div className="grid gap-1.5">
-                <Label htmlFor="mount-desc" className="text-xs">
+                <Label className="text-xs" htmlFor="mount-desc">
                   描述 *
                 </Label>
                 <Input
-                  id="mount-desc"
                   className="text-sm"
+                  id="mount-desc"
+                  onChange={e => setDescription(e.target.value)}
                   value={description}
-                  onChange={(e) => setDescription(e.target.value)}
                 />
               </div>
             </FormSection>
 
             <FormSection
+              description="配置 Provider、端点与凭证引用；认证材料本体始终留在凭证保管中。"
               index="02"
               title="连接与认证"
-              description="配置 Provider、端点与凭证引用；认证材料本体始终留在凭证保管中。"
             >
               {kind === 'mcp' && (
                 <>
                   <div className="grid gap-1.5">
-                    <Label htmlFor="mcp-url" className="text-xs">
+                    <Label className="text-xs" htmlFor="mcp-url">
                       url *(Streamable HTTP)
                     </Label>
                     <Input
-                      id="mcp-url"
                       className="font-mono text-xs"
+                      id="mcp-url"
+                      onChange={e => setMcpUrl(e.target.value)}
                       placeholder="https://mcp.example.com/mcp"
                       value={mcpUrl}
-                      onChange={(e) => setMcpUrl(e.target.value)}
                     />
                   </div>
                   <div className="grid gap-3 sm:grid-cols-2">
                     <div className="grid gap-1.5">
                       <Label className="text-xs">上游认证</Label>
                       <Select
+                        onValueChange={v => setMcpAuthMode(v as typeof mcpAuthMode)}
                         value={mcpAuthMode}
-                        onValueChange={(v) => setMcpAuthMode(v as typeof mcpAuthMode)}
                       >
                         <SelectTrigger className="font-mono text-xs">
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="none" className="font-mono text-xs">
+                          <SelectItem className="font-mono text-xs" value="none">
                             无(公开上游)
                           </SelectItem>
-                          <SelectItem value="authRef" className="font-mono text-xs">
+                          <SelectItem className="font-mono text-xs" value="authRef">
                             authRef — 静态凭证
                           </SelectItem>
-                          <SelectItem value="oauth" className="font-mono text-xs">
+                          <SelectItem className="font-mono text-xs" value="oauth">
                             oauth — 网关托管 OAuth
                           </SelectItem>
                         </SelectContent>
@@ -981,14 +992,14 @@ export function MountDialog({
                     </div>
                     {mcpAuthMode === 'authRef' && (
                       <div className="grid gap-1.5">
-                        <Label htmlFor="mcp-auth" className="text-xs">
+                        <Label className="text-xs" htmlFor="mcp-auth">
                           authRef *(凭证保管里的名字)
                         </Label>
                         <Input
-                          id="mcp-auth"
                           className="font-mono text-xs"
+                          id="mcp-auth"
+                          onChange={e => setMcpAuthRef(e.target.value)}
                           value={mcpAuthRef}
-                          onChange={(e) => setMcpAuthRef(e.target.value)}
                         />
                       </div>
                     )}
@@ -996,34 +1007,34 @@ export function MountDialog({
                   {mcpAuthMode === 'authRef' && (
                     <div className="grid gap-3 sm:grid-cols-2">
                       <div className="grid gap-1.5">
-                        <Label htmlFor="mcp-auth-header" className="text-xs">
+                        <Label className="text-xs" htmlFor="mcp-auth-header">
                           authHeader(可空)
                         </Label>
                         <Input
-                          id="mcp-auth-header"
                           className="font-mono text-xs"
+                          id="mcp-auth-header"
+                          onChange={e => setMcpAuthHeader(e.target.value)}
                           placeholder="Authorization"
                           value={mcpAuthHeader}
-                          onChange={(e) => setMcpAuthHeader(e.target.value)}
                         />
                       </div>
                       <div className="grid gap-1.5">
                         <Label className="text-xs">authScheme</Label>
                         <Select
+                          onValueChange={v => setMcpSchemeMode(v as 'bearer' | 'raw' | 'custom')}
                           value={mcpSchemeMode}
-                          onValueChange={(v) => setMcpSchemeMode(v as 'bearer' | 'raw' | 'custom')}
                         >
                           <SelectTrigger className="font-mono text-xs">
                             <SelectValue />
                           </SelectTrigger>
                           <SelectContent>
-                            <SelectItem value="bearer" className="font-mono text-xs">
+                            <SelectItem className="font-mono text-xs" value="bearer">
                               Bearer(默认)
                             </SelectItem>
-                            <SelectItem value="raw" className="font-mono text-xs">
+                            <SelectItem className="font-mono text-xs" value="raw">
                               无前缀(原样注入)
                             </SelectItem>
-                            <SelectItem value="custom" className="font-mono text-xs">
+                            <SelectItem className="font-mono text-xs" value="custom">
                               自定义前缀
                             </SelectItem>
                           </SelectContent>
@@ -1033,30 +1044,30 @@ export function MountDialog({
                   )}
                   {mcpAuthMode === 'authRef' && mcpSchemeMode === 'custom' && (
                     <div className="grid gap-1.5">
-                      <Label htmlFor="mcp-auth-scheme" className="text-xs">
+                      <Label className="text-xs" htmlFor="mcp-auth-scheme">
                         自定义 scheme 前缀
                       </Label>
                       <Input
-                        id="mcp-auth-scheme"
                         className="font-mono text-xs"
+                        id="mcp-auth-scheme"
+                        onChange={e => setMcpAuthScheme(e.target.value)}
                         placeholder="Token"
                         value={mcpAuthScheme}
-                        onChange={(e) => setMcpAuthScheme(e.target.value)}
                       />
                     </div>
                   )}
                   <div className="grid gap-1.5">
-                    <Label htmlFor="mcp-headers" className="text-xs">
+                    <Label className="text-xs" htmlFor="mcp-headers">
                       静态 headers(可空;每行 Name=value,明文非机密)
                     </Label>
                     <Textarea
-                      id="mcp-headers"
                       className="font-mono text-xs"
+                      id="mcp-headers"
+                      onChange={e => setMcpHeadersSpec(e.target.value)}
+                      placeholder="X-Lark-MCP-Allowed-Tools=search-doc,fetch-doc"
                       rows={3}
                       spellCheck={false}
-                      placeholder={'X-Lark-MCP-Allowed-Tools=search-doc,fetch-doc'}
                       value={mcpHeadersSpec}
-                      onChange={(e) => setMcpHeadersSpec(e.target.value)}
                     />
                   </div>
                   {mcpAuthMode === 'oauth' && (
@@ -1071,71 +1082,71 @@ export function MountDialog({
               {kind === 'http' && (
                 <>
                   <div className="grid gap-1.5">
-                    <Label htmlFor="http-endpoint" className="text-xs">
+                    <Label className="text-xs" htmlFor="http-endpoint">
                       endpoint *
                     </Label>
                     <Input
-                      id="http-endpoint"
                       className="font-mono text-xs"
+                      id="http-endpoint"
+                      onChange={e => setEndpoint(e.target.value)}
                       placeholder="https://postman-echo.com"
                       value={endpoint}
-                      onChange={(e) => setEndpoint(e.target.value)}
                     />
                   </div>
                   <div className="grid gap-1.5">
-                    <Label htmlFor="http-tools" className="text-xs">
+                    <Label className="text-xs" htmlFor="http-tools">
                       tools *(HttpToolDef[] JSON)
                     </Label>
                     <Textarea
-                      id="http-tools"
                       className="font-mono text-xs"
+                      id="http-tools"
+                      onChange={e => setToolsJson(e.target.value)}
                       rows={7}
                       spellCheck={false}
                       value={toolsJson}
-                      onChange={(e) => setToolsJson(e.target.value)}
                     />
                   </div>
                   <div className="grid gap-3 sm:grid-cols-3">
                     <div className="grid gap-1.5">
-                      <Label htmlFor="http-auth" className="text-xs">
+                      <Label className="text-xs" htmlFor="http-auth">
                         authRef(可空)
                       </Label>
                       <Input
-                        id="http-auth"
                         className="font-mono text-xs"
+                        id="http-auth"
+                        onChange={e => setHttpAuthRef(e.target.value)}
                         value={httpAuthRef}
-                        onChange={(e) => setHttpAuthRef(e.target.value)}
                       />
                     </div>
                     <div className="grid gap-1.5">
-                      <Label htmlFor="http-auth-header" className="text-xs">
+                      <Label className="text-xs" htmlFor="http-auth-header">
                         authHeader(可空)
                       </Label>
                       <Input
-                        id="http-auth-header"
                         className="font-mono text-xs"
+                        id="http-auth-header"
+                        onChange={e => setAuthHeader(e.target.value)}
                         placeholder="Authorization"
                         value={authHeader}
-                        onChange={(e) => setAuthHeader(e.target.value)}
                       />
                     </div>
                     <div className="grid gap-1.5">
                       <Label className="text-xs">authScheme</Label>
                       <Select
+                        onValueChange={v => setHttpSchemeMode(v as 'bearer' | 'raw' | 'custom')}
                         value={httpSchemeMode}
-                        onValueChange={(v) => setHttpSchemeMode(v as 'bearer' | 'raw' | 'custom')}
                       >
                         <SelectTrigger className="font-mono text-xs">
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="bearer" className="font-mono text-xs">
+                          <SelectItem className="font-mono text-xs" value="bearer">
                             Bearer(默认)
                           </SelectItem>
-                          <SelectItem value="raw" className="font-mono text-xs">
+                          <SelectItem className="font-mono text-xs" value="raw">
                             无前缀(原样注入)
                           </SelectItem>
-                          <SelectItem value="custom" className="font-mono text-xs">
+                          <SelectItem className="font-mono text-xs" value="custom">
                             自定义前缀
                           </SelectItem>
                         </SelectContent>
@@ -1144,15 +1155,15 @@ export function MountDialog({
                   </div>
                   {httpSchemeMode === 'custom' && (
                     <div className="grid gap-1.5">
-                      <Label htmlFor="http-auth-scheme" className="text-xs">
+                      <Label className="text-xs" htmlFor="http-auth-scheme">
                         自定义 scheme 前缀
                       </Label>
                       <Input
-                        id="http-auth-scheme"
                         className="font-mono text-xs"
+                        id="http-auth-scheme"
+                        onChange={e => setAuthScheme(e.target.value)}
                         placeholder="Token"
                         value={authScheme}
-                        onChange={(e) => setAuthScheme(e.target.value)}
                       />
                     </div>
                   )}
@@ -1164,20 +1175,21 @@ export function MountDialog({
                   <div className="grid gap-3 sm:grid-cols-2">
                     <div className="grid gap-1.5">
                       <Label className="text-xs">provider</Label>
-                      <Select value={provider} onValueChange={setProvider}>
+                      <Select onValueChange={setProvider} value={provider}>
                         <SelectTrigger className="font-mono text-xs">
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="r2" className="font-mono text-xs">
+                          <SelectItem className="font-mono text-xs" value="r2">
                             r2(实例自带桶)
                           </SelectItem>
-                          <SelectItem value="s3" className="font-mono text-xs">
+                          <SelectItem className="font-mono text-xs" value="s3">
                             s3(外部 S3 兼容端点)
                           </SelectItem>
-                          {ctxPlugins.map((p) => (
-                            <SelectItem key={p.id} value={p.id} className="font-mono text-xs">
-                              {p.id}(plugin)
+                          {ctxPlugins.map(p => (
+                            <SelectItem className="font-mono text-xs" key={p.id} value={p.id}>
+                              {p.id}
+                              (plugin)
                             </SelectItem>
                           ))}
                         </SelectContent>
@@ -1185,41 +1197,44 @@ export function MountDialog({
                     </div>
                     {(provider === 'r2' || provider === 's3') && (
                       <div className="grid gap-1.5">
-                        <Label htmlFor="ctx-prefix" className="text-xs">
+                        <Label className="text-xs" htmlFor="ctx-prefix">
                           key 前缀(可空)
                         </Label>
                         <Input
-                          id="ctx-prefix"
                           className="font-mono text-xs"
+                          id="ctx-prefix"
+                          onChange={e => setCtxPrefix(e.target.value)}
                           value={ctxPrefix}
-                          onChange={(e) => setCtxPrefix(e.target.value)}
                         />
                       </div>
                     )}
                   </div>
                   {plugins.hasNextPage && (
                     <Button
-                      type="button"
-                      variant="ghost"
-                      size="xs"
                       className="justify-self-start"
                       disabled={plugins.isFetchingNextPage}
                       onClick={() => void plugins.fetchNextPage()}
+                      size="xs"
+                      type="button"
+                      variant="ghost"
                     >
                       {plugins.isFetchingNextPage && <Loader2 className="animate-spin" />}
-                      继续加载 Plugin（已加载 {pluginItems.length}）
+                      继续加载 Plugin（已加载
+                      {' '}
+                      {pluginItems.length}
+                      ）
                     </Button>
                   )}
                   {provider !== 'r2' && provider !== 's3' && (
                     <div className="grid gap-1.5">
-                      <Label htmlFor="ctx-plugin-auth" className="text-xs">
+                      <Label className="text-xs" htmlFor="ctx-plugin-auth">
                         authRef(可空;上游凭证由平台代解析后注入 Plugin)
                       </Label>
                       <Input
-                        id="ctx-plugin-auth"
                         className="font-mono text-xs"
+                        id="ctx-plugin-auth"
+                        onChange={e => setCtxAuthRef(e.target.value)}
                         value={ctxAuthRef}
-                        onChange={(e) => setCtxAuthRef(e.target.value)}
                       />
                     </div>
                   )}
@@ -1227,51 +1242,51 @@ export function MountDialog({
                     <>
                       <div className="grid gap-3 sm:grid-cols-2">
                         <div className="grid gap-1.5">
-                          <Label htmlFor="s3-endpoint" className="text-xs">
+                          <Label className="text-xs" htmlFor="s3-endpoint">
                             endpoint *
                           </Label>
                           <Input
-                            id="s3-endpoint"
                             className="font-mono text-xs"
+                            id="s3-endpoint"
+                            onChange={e => setS3Endpoint(e.target.value)}
                             placeholder="https://….r2.cloudflarestorage.com"
                             value={s3Endpoint}
-                            onChange={(e) => setS3Endpoint(e.target.value)}
                           />
                         </div>
                         <div className="grid gap-1.5">
-                          <Label htmlFor="s3-bucket" className="text-xs">
+                          <Label className="text-xs" htmlFor="s3-bucket">
                             bucket *
                           </Label>
                           <Input
-                            id="s3-bucket"
                             className="font-mono text-xs"
+                            id="s3-bucket"
+                            onChange={e => setS3Bucket(e.target.value)}
                             value={s3Bucket}
-                            onChange={(e) => setS3Bucket(e.target.value)}
                           />
                         </div>
                       </div>
                       <div className="grid gap-3 sm:grid-cols-2">
                         <div className="grid gap-1.5">
-                          <Label htmlFor="s3-region" className="text-xs">
+                          <Label className="text-xs" htmlFor="s3-region">
                             region(可空,缺省 auto)
                           </Label>
                           <Input
-                            id="s3-region"
                             className="font-mono text-xs"
+                            id="s3-region"
+                            onChange={e => setS3Region(e.target.value)}
                             value={s3Region}
-                            onChange={(e) => setS3Region(e.target.value)}
                           />
                         </div>
                         <div className="grid gap-1.5">
-                          <Label htmlFor="ctx-auth" className="text-xs">
+                          <Label className="text-xs" htmlFor="ctx-auth">
                             authRef *(凭证保管里的名字)
                           </Label>
                           <Input
-                            id="ctx-auth"
                             className="font-mono text-xs"
+                            id="ctx-auth"
+                            onChange={e => setCtxAuthRef(e.target.value)}
                             placeholder="s3-main"
                             value={ctxAuthRef}
-                            onChange={(e) => setCtxAuthRef(e.target.value)}
                           />
                         </div>
                       </div>
@@ -1279,22 +1294,22 @@ export function MountDialog({
                   )}
                   <div className="grid gap-3 sm:grid-cols-2 sm:items-end">
                     <div className="grid gap-1.5">
-                      <Label htmlFor="ctx-ttl" className="text-xs">
+                      <Label className="text-xs" htmlFor="ctx-ttl">
                         ttl 秒(可空;到期整节点回收)
                       </Label>
                       <Input
-                        id="ctx-ttl"
                         className="font-mono text-xs"
+                        id="ctx-ttl"
+                        onChange={e => setTtl(e.target.value)}
                         placeholder="86400"
                         value={ttl}
-                        onChange={(e) => setTtl(e.target.value)}
                       />
                     </div>
                     {/* biome-ignore lint/a11y/noLabelWithoutControl: Radix Checkbox 是 label 内可交互控件,规则只识别原生 input */}
                     <label className="flex items-center gap-2 pb-2 text-xs">
                       <Checkbox
                         checked={readOnly}
-                        onCheckedChange={(v) => setReadOnly(v === true)}
+                        onCheckedChange={v => setReadOnly(v === true)}
                       />
                       readOnly(拒绝 Write/Update/Delete)
                     </label>
@@ -1307,29 +1322,29 @@ export function MountDialog({
                   <div className="grid gap-3 sm:grid-cols-2">
                     <div className="grid gap-1.5">
                       <Label className="text-xs">provider</Label>
-                      <Select value={skillProvider} onValueChange={setSkillProvider}>
+                      <Select onValueChange={setSkillProvider} value={skillProvider}>
                         <SelectTrigger className="font-mono text-xs">
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="r2" className="font-mono text-xs">
+                          <SelectItem className="font-mono text-xs" value="r2">
                             r2(实例自带桶)
                           </SelectItem>
-                          <SelectItem value="s3" className="font-mono text-xs">
+                          <SelectItem className="font-mono text-xs" value="s3">
                             s3(外部 S3 兼容端点)
                           </SelectItem>
                         </SelectContent>
                       </Select>
                     </div>
                     <div className="grid gap-1.5">
-                      <Label htmlFor="skill-prefix" className="text-xs">
+                      <Label className="text-xs" htmlFor="skill-prefix">
                         key 前缀(可空)
                       </Label>
                       <Input
-                        id="skill-prefix"
                         className="font-mono text-xs"
+                        id="skill-prefix"
+                        onChange={e => setCtxPrefix(e.target.value)}
                         value={ctxPrefix}
-                        onChange={(e) => setCtxPrefix(e.target.value)}
                       />
                     </div>
                   </div>
@@ -1337,51 +1352,51 @@ export function MountDialog({
                     <>
                       <div className="grid gap-3 sm:grid-cols-2">
                         <div className="grid gap-1.5">
-                          <Label htmlFor="skill-s3-endpoint" className="text-xs">
+                          <Label className="text-xs" htmlFor="skill-s3-endpoint">
                             endpoint *
                           </Label>
                           <Input
-                            id="skill-s3-endpoint"
                             className="font-mono text-xs"
+                            id="skill-s3-endpoint"
+                            onChange={e => setS3Endpoint(e.target.value)}
                             placeholder="https://….r2.cloudflarestorage.com"
                             value={s3Endpoint}
-                            onChange={(e) => setS3Endpoint(e.target.value)}
                           />
                         </div>
                         <div className="grid gap-1.5">
-                          <Label htmlFor="skill-s3-bucket" className="text-xs">
+                          <Label className="text-xs" htmlFor="skill-s3-bucket">
                             bucket *
                           </Label>
                           <Input
-                            id="skill-s3-bucket"
                             className="font-mono text-xs"
+                            id="skill-s3-bucket"
+                            onChange={e => setS3Bucket(e.target.value)}
                             value={s3Bucket}
-                            onChange={(e) => setS3Bucket(e.target.value)}
                           />
                         </div>
                       </div>
                       <div className="grid gap-3 sm:grid-cols-2">
                         <div className="grid gap-1.5">
-                          <Label htmlFor="skill-s3-region" className="text-xs">
+                          <Label className="text-xs" htmlFor="skill-s3-region">
                             region(可空,缺省 auto)
                           </Label>
                           <Input
-                            id="skill-s3-region"
                             className="font-mono text-xs"
+                            id="skill-s3-region"
+                            onChange={e => setS3Region(e.target.value)}
                             value={s3Region}
-                            onChange={(e) => setS3Region(e.target.value)}
                           />
                         </div>
                         <div className="grid gap-1.5">
-                          <Label htmlFor="skill-auth" className="text-xs">
+                          <Label className="text-xs" htmlFor="skill-auth">
                             authRef *(凭证保管里的名字)
                           </Label>
                           <Input
-                            id="skill-auth"
                             className="font-mono text-xs"
+                            id="skill-auth"
+                            onChange={e => setCtxAuthRef(e.target.value)}
                             placeholder="s3-main"
                             value={ctxAuthRef}
-                            onChange={(e) => setCtxAuthRef(e.target.value)}
                           />
                         </div>
                       </div>
@@ -1389,22 +1404,22 @@ export function MountDialog({
                   )}
                   <div className="grid gap-3 sm:grid-cols-2 sm:items-end">
                     <div className="grid gap-1.5">
-                      <Label htmlFor="skill-ttl" className="text-xs">
+                      <Label className="text-xs" htmlFor="skill-ttl">
                         ttl 秒(可空;到期整节点回收)
                       </Label>
                       <Input
-                        id="skill-ttl"
                         className="font-mono text-xs"
+                        id="skill-ttl"
+                        onChange={e => setTtl(e.target.value)}
                         placeholder="86400"
                         value={ttl}
-                        onChange={(e) => setTtl(e.target.value)}
                       />
                     </div>
                     {/* biome-ignore lint/a11y/noLabelWithoutControl: Radix Checkbox 是 label 内可交互控件,规则只识别原生 input */}
                     <label className="flex items-center gap-2 pb-2 text-xs">
                       <Checkbox
                         checked={readOnly}
-                        onCheckedChange={(v) => setReadOnly(v === true)}
+                        onCheckedChange={v => setReadOnly(v === true)}
                       />
                       readOnly(隐藏 Publish/Remove)
                     </label>
@@ -1415,26 +1430,26 @@ export function MountDialog({
               {kind === 'remote' && (
                 <div className="grid gap-3 sm:grid-cols-2">
                   <div className="grid gap-1.5">
-                    <Label htmlFor="remote-url" className="text-xs">
+                    <Label className="text-xs" htmlFor="remote-url">
                       baseUrl *(须在白名单内)
                     </Label>
                     <Input
-                      id="remote-url"
                       className="font-mono text-xs"
+                      id="remote-url"
+                      onChange={e => setBaseUrl(e.target.value)}
                       placeholder="https://tb.example.com"
                       value={baseUrl}
-                      onChange={(e) => setBaseUrl(e.target.value)}
                     />
                   </div>
                   <div className="grid gap-1.5">
-                    <Label htmlFor="remote-skref" className="text-xs">
+                    <Label className="text-xs" htmlFor="remote-skref">
                       skRef(远端 SK 的 authRef,可空)
                     </Label>
                     <Input
-                      id="remote-skref"
                       className="font-mono text-xs"
+                      id="remote-skref"
+                      onChange={e => setSkRef(e.target.value)}
                       value={skRef}
-                      onChange={(e) => setSkRef(e.target.value)}
                     />
                   </div>
                 </div>
@@ -1444,7 +1459,7 @@ export function MountDialog({
                 <>
                   <div className="grid gap-1.5">
                     <Label className="text-xs">provider *(tool-provider plugin)</Label>
-                    <Select value={toolProvider} onValueChange={setToolProvider}>
+                    <Select onValueChange={setToolProvider} value={toolProvider}>
                       <SelectTrigger className="font-mono text-xs">
                         <SelectValue
                           placeholder={
@@ -1453,8 +1468,8 @@ export function MountDialog({
                         />
                       </SelectTrigger>
                       <SelectContent>
-                        {toolPlugins.map((p) => (
-                          <SelectItem key={p.id} value={p.id} className="font-mono text-xs">
+                        {toolPlugins.map(p => (
+                          <SelectItem className="font-mono text-xs" key={p.id} value={p.id}>
                             {p.id}
                             {p.enabled ? '' : '(disabled)'}
                           </SelectItem>
@@ -1464,7 +1479,7 @@ export function MountDialog({
                     {toolPlugins.length === 0 && (
                       <p className="text-[11px] text-muted-foreground">
                         先在
-                        <Link to="/manage/plugins" className="mx-0.5 underline underline-offset-2">
+                        <Link className="mx-0.5 underline underline-offset-2" to="/manage/plugins">
                           Plugin
                         </Link>
                         注册 tool-provider,再回来挂载。
@@ -1472,27 +1487,30 @@ export function MountDialog({
                     )}
                     {plugins.hasNextPage && (
                       <Button
-                        type="button"
-                        variant="ghost"
-                        size="xs"
                         className="justify-self-start"
                         disabled={plugins.isFetchingNextPage}
                         onClick={() => void plugins.fetchNextPage()}
+                        size="xs"
+                        type="button"
+                        variant="ghost"
                       >
                         {plugins.isFetchingNextPage && <Loader2 className="animate-spin" />}
-                        继续加载 Plugin（已加载 {pluginItems.length}）
+                        继续加载 Plugin（已加载
+                        {' '}
+                        {pluginItems.length}
+                        ）
                       </Button>
                     )}
                   </div>
                   <div className="grid gap-1.5">
-                    <Label htmlFor="tool-auth" className="text-xs">
+                    <Label className="text-xs" htmlFor="tool-auth">
                       authRef(可空;上游凭证引用,调用时平台代解析经 X-TB-Upstream-Auth 注入)
                     </Label>
                     <Input
-                      id="tool-auth"
                       className="font-mono text-xs"
+                      id="tool-auth"
+                      onChange={e => setToolAuthRef(e.target.value)}
                       value={toolAuthRef}
-                      onChange={(e) => setToolAuthRef(e.target.value)}
                     />
                   </div>
                 </>
@@ -1501,61 +1519,61 @@ export function MountDialog({
 
             {(kind === 'mcp' || kind === 'http' || kind === 'tool') && (
               <FormSection
+                description="可选：按 hide → rename → prefix → describe 顺序重塑工具暴露面。"
                 index="03"
                 title="高级虚拟化"
-                description="可选：按 hide → rename → prefix → describe 顺序重塑工具暴露面。"
               >
                 <div className="grid gap-3 sm:grid-cols-2">
                   <div className="grid gap-1.5">
-                    <Label htmlFor="virt-prefix" className="text-xs">
+                    <Label className="text-xs" htmlFor="virt-prefix">
                       工具名前缀(纯拼接,惯例 ns__)
                     </Label>
                     <Input
-                      id="virt-prefix"
                       className="font-mono text-xs"
+                      id="virt-prefix"
+                      onChange={e => setPrefix(e.target.value)}
                       placeholder="gh__"
                       value={prefix}
-                      onChange={(e) => setPrefix(e.target.value)}
                     />
                   </div>
                   <div className="grid gap-1.5">
-                    <Label htmlFor="virt-hide" className="text-xs">
+                    <Label className="text-xs" htmlFor="virt-hide">
                       hide(原名,逗号分隔)
                     </Label>
                     <Input
-                      id="virt-hide"
                       className="font-mono text-xs"
+                      id="virt-hide"
+                      onChange={e => setHideSpec(e.target.value)}
                       placeholder="dangerous_tool"
                       value={hideSpec}
-                      onChange={(e) => setHideSpec(e.target.value)}
                     />
                   </div>
                 </div>
                 <div className="grid gap-3 sm:grid-cols-2">
                   <div className="grid gap-1.5">
-                    <Label htmlFor="virt-rename" className="text-xs">
+                    <Label className="text-xs" htmlFor="virt-rename">
                       rename(每行 from=to)
                     </Label>
                     <Textarea
-                      id="virt-rename"
                       className="font-mono text-xs"
+                      id="virt-rename"
+                      onChange={e => setRenameSpec(e.target.value)}
                       rows={2}
                       spellCheck={false}
                       value={renameSpec}
-                      onChange={(e) => setRenameSpec(e.target.value)}
                     />
                   </div>
                   <div className="grid gap-1.5">
-                    <Label htmlFor="virt-describe" className="text-xs">
+                    <Label className="text-xs" htmlFor="virt-describe">
                       describe(每行 from=描述)
                     </Label>
                     <Textarea
-                      id="virt-describe"
                       className="font-mono text-xs"
+                      id="virt-describe"
+                      onChange={e => setDescribeSpec(e.target.value)}
                       rows={2}
                       spellCheck={false}
                       value={describeSpec}
-                      onChange={(e) => setDescribeSpec(e.target.value)}
                     />
                   </div>
                 </div>
@@ -1594,10 +1612,10 @@ function FormSection({
   description,
   children,
 }: {
+  children: ReactNode
+  description: string
   index: string
   title: string
-  description: string
-  children: ReactNode
 }) {
   return (
     <section className="overflow-hidden rounded-lg border bg-card/45">

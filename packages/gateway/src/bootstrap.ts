@@ -1,6 +1,6 @@
 import {
-  AnnotationStore,
   adminBootstrapInput,
+  AnnotationStore,
   type BuiltinDeps,
   checkScopes,
   KEY_BOOTSTRAPPED,
@@ -12,9 +12,9 @@ import {
   RemoteAllowlistStore,
   type SecretKey,
   type SecretStoreImpl,
+  sha256Hex,
   SKRegistryStore,
   type StateStore,
-  sha256Hex,
 } from '@tool-bridge/core'
 import { fetchPluginContract, probePlugin } from './providers/pluginClient'
 
@@ -142,14 +142,14 @@ export function ensureBootstrapped(store: StateStore, env: BootstrapEnv): Promis
 
 /** builtin 装配入参(宿主解析后注入;不吃 Workers Env)。 */
 export interface BuiltinAssemblyOpts {
-  store: StateStore
-  secrets: SecretStoreImpl
-  /** 网关 version(单一真源:package.json)。 */
-  version: string
   /** 放行 http:// plugin endpoint(仅本地开发)。 */
   allowInsecureHttp: boolean
   /** remote 联邦白名单的 env 基线(TB_REMOTE_ALLOWLIST 解析后;供 system/federation list 标注不可删)。 */
   remoteAllowlistBase: string[]
+  secrets: SecretStoreImpl
+  store: StateStore
+  /** 网关 version(单一真源:package.json)。 */
+  version: string
 }
 
 /** 装配 BuiltinDeps(供 createBuiltins)。 */

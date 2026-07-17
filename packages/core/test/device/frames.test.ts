@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import {
-  type DeviceFrame,
   decodeDeviceFrame,
   deviceErrorFrame,
+  type DeviceFrame,
   encodeDeviceFrame,
   PING_FRAME_JSON,
   PONG_FRAME_JSON,
@@ -98,8 +98,8 @@ describe('encode/decode 往返', () => {
   })
 
   it('node 不带 cmds 向后兼容(老客户端);cmds 形状非法 → invalid_argument', () => {
-    const plain =
-      '{"type":"hello","deviceId":"d","expose":{"nodes":[{"path":"x","kind":"tool","description":"t"}]}}'
+    const plain
+      = '{"type":"hello","deviceId":"d","expose":{"nodes":[{"path":"x","kind":"tool","description":"t"}]}}'
     expect(decodeDeviceFrame(plain)).toMatchObject({
       expose: { nodes: [{ path: 'x', kind: 'tool' }] },
     })

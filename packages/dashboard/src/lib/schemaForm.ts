@@ -5,16 +5,16 @@
  */
 
 interface SchemaObj {
-  type?: unknown
-  properties?: Record<string, unknown>
-  items?: unknown
-  required?: unknown
-  enum?: unknown
-  default?: unknown
   additionalProperties?: unknown
-  anyOf?: unknown
-  oneOf?: unknown
   allOf?: unknown
+  anyOf?: unknown
+  default?: unknown
+  enum?: unknown
+  items?: unknown
+  oneOf?: unknown
+  properties?: Record<string, unknown>
+  required?: unknown
+  type?: unknown
 }
 
 function asObj(v: unknown): SchemaObj | null {

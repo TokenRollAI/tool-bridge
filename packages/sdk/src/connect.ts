@@ -51,9 +51,9 @@ function authorizedWebSocket(sk: string): typeof WS {
         headers: { ...(opts?.headers ?? {}), authorization: `Bearer ${sk}` },
       })
       if (
-        protocolsOrOptions !== undefined &&
-        typeof protocolsOrOptions === 'object' &&
-        !Array.isArray(protocolsOrOptions)
+        protocolsOrOptions !== undefined
+        && typeof protocolsOrOptions === 'object'
+        && !Array.isArray(protocolsOrOptions)
       ) {
         super(address, withAuth(protocolsOrOptions))
         return
@@ -67,8 +67,8 @@ export const HEARTBEAT_INTERVAL_MS = 30_000
 
 interface HeartbeatSocket {
   readyState: number
-  send(data: string): void
   reconnect(): void
+  send(data: string): void
 }
 
 interface HeartbeatHandle {
@@ -112,12 +112,12 @@ function startHeartbeat(
 
 export interface OpenConnectionConfig {
   baseUrl: string
-  sk: string
   deviceId: string
-  mountPath?: string
   /** 建连前解析(工具表收集可能异步);失败 → ready reject + closed。 */
   expose: () => Promise<DeviceExpose>
   handler: DeviceCallHandler
+  mountPath?: string
+  sk: string
 }
 
 export function openConnection(cfg: OpenConnectionConfig): SdkConnection {
@@ -175,7 +175,7 @@ export function openConnection(cfg: OpenConnectionConfig): SdkConnection {
       onStateChange: (s) => {
         state = s
       },
-      onReady: (mountPath) => resolveReady(mountPath),
+      onReady: mountPath => resolveReady(mountPath),
       onRejected: (error) => {
         // 网关拒绝帧 = 权限拒绝等,不重连(DeviceClient 已置 closed)。
         rejectReady(new TBError(error.code, error.message, { retryable: error.retryable }))
@@ -187,8 +187,8 @@ export function openConnection(cfg: OpenConnectionConfig): SdkConnection {
 
     ws.addEventListener('open', () => {
       dc.socketOpened({
-        send: (data) => ws.send(data),
-        close: (code) => ws.close(code),
+        send: data => ws.send(data),
+        close: code => ws.close(code),
       })
     })
     ws.addEventListener('message', (event) => {

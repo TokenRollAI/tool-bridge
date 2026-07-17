@@ -16,13 +16,13 @@
  */
 
 export interface StateStore {
-  get(key: string): Promise<unknown | null>
-  put(key: string, value: unknown): Promise<void>
   delete(key: string): Promise<void>
+  get(key: string): Promise<unknown | null>
   list(
     prefix: string,
-    opts?: { cursor?: string; limit?: number },
-  ): Promise<{ items: Array<{ key: string; value: unknown }>; cursor?: string }>
+    opts?: { cursor?: string, limit?: number },
+  ): Promise<{ cursor?: string, items: Array<{ key: string, value: unknown }> }>
+  put(key: string, value: unknown): Promise<void>
 }
 
 export const KEY_SK_HASH = 'sk:h:'
@@ -60,15 +60,15 @@ export class MemoryStateStore implements StateStore {
 
   async list(
     prefix: string,
-    opts?: { cursor?: string; limit?: number },
-  ): Promise<{ items: Array<{ key: string; value: unknown }>; cursor?: string }> {
-    const keys = [...this.m.keys()].filter((k) => k.startsWith(prefix)).sort()
+    opts?: { cursor?: string, limit?: number },
+  ): Promise<{ cursor?: string, items: Array<{ key: string, value: unknown }> }> {
+    const keys = [...this.m.keys()].filter(k => k.startsWith(prefix)).sort()
     const start = opts?.cursor ? keys.indexOf(opts.cursor) + 1 : 0
     const limit = opts?.limit ?? 1000
     const page = keys.slice(start, start + limit)
     const hasMore = start + limit < keys.length
     return {
-      items: page.map((key) => ({ key, value: this.m.get(key) as unknown })),
+      items: page.map(key => ({ key, value: this.m.get(key) as unknown })),
       cursor: hasMore ? page[page.length - 1] : undefined,
     }
   }

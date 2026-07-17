@@ -68,11 +68,11 @@ describe('SecretStoreImpl(可用态)', () => {
     await secret.set('a', 'va', NOW)
     await secret.set('b', 'vb', LATER)
     const page = await secret.list()
-    expect(page.items.map((i) => i.name).sort()).toEqual(['a', 'b'])
+    expect(page.items.map(i => i.name).sort()).toEqual(['a', 'b'])
     for (const item of page.items) {
       expect(Object.keys(item).sort()).toEqual(['name', 'updatedAt'])
     }
-    const a = page.items.find((i) => i.name === 'a')
+    const a = page.items.find(i => i.name === 'a')
     expect(a?.updatedAt).toBe(NOW)
   })
 

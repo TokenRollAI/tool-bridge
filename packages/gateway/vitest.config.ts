@@ -1,7 +1,7 @@
-import { execSync } from 'node:child_process'
-import { existsSync } from 'node:fs'
 import { cloudflareTest } from '@cloudflare/vitest-pool-workers'
+import { execSync } from 'node:child_process'
 import { defineConfig } from 'vitest/config'
+import { existsSync } from 'node:fs'
 import { TEST_ADMIN_SK, TEST_ENCRYPTION_KEY } from './test/fixtures'
 
 // wrangler.jsonc 的 assets.directory 指向 dashboard 构建产物;目录缺失时 miniflare

@@ -19,12 +19,12 @@ import {
   bytesToObjectStream,
   type ObjectBody,
   type ObjectBodyStream,
+  objectBodyToBytes,
   type ObjectListOptions,
   type ObjectListResult,
   type ObjectMeta,
   type ObjectPutOptions,
   type ObjectStore,
-  objectBodyToBytes,
 } from '../context/objectStore'
 import { normalizeEntryPath } from '../context/path'
 import { TBError } from '../errors'
@@ -80,14 +80,14 @@ export function fsContentTypeOf(key: string): string {
 }
 
 interface ResolvedKey {
-  /** 根的绝对路径。 */
-  root: string
-  /** 根内相对路径(不含 basename 首段)。 */
-  rel: string
   /** 磁盘绝对路径。 */
   full: string
   /** 规范化后的完整 key(<rootBasename>/<rel>)。 */
   key: string
+  /** 根内相对路径(不含 basename 首段)。 */
+  rel: string
+  /** 根的绝对路径。 */
+  root: string
 }
 
 export class FsObjectStore implements ObjectStore {
@@ -125,7 +125,7 @@ export class FsObjectStore implements ObjectStore {
     }
   }
 
-  async get(key: string): Promise<{ meta: ObjectMeta; body: ObjectBodyStream } | null> {
+  async get(key: string): Promise<{ body: ObjectBodyStream, meta: ObjectMeta } | null> {
     const r = this.resolveKey(key)
     if (r === null) return null
     await this.assertInRoot(r.root, r.full, key)
@@ -177,7 +177,7 @@ export class FsObjectStore implements ObjectStore {
     const delimiter = opts?.delimiter
     const limit = opts?.limit ?? 1000
     // 枚举全部根下文件的 (key, meta),按 key 字典序;逃逸/悬空 symlink 静默跳过。
-    const files: Array<{ key: string; meta: ObjectMeta }> = []
+    const files: Array<{ key: string, meta: ObjectMeta }> = []
     for (const [base, root] of this.rootsByBase) {
       // 剪枝:该根的所有 key 均以 `${base}/` 开头,与 prefix 无交集则跳过
       const rootPrefix = `${base}/`
@@ -207,7 +207,7 @@ export class FsObjectStore implements ObjectStore {
     }
     files.sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0))
     // delimiter 折叠 + cursor 分页:与 MemoryObjectStore 同一套语义(sortKey 字典序)
-    const entries: Array<{ sortKey: string; item: ObjectMeta | { prefix: string } }> = []
+    const entries: Array<{ item: ObjectMeta | { prefix: string }, sortKey: string }> = []
     const seenPrefixes = new Set<string>()
     for (const file of files) {
       if (delimiter !== undefined) {
@@ -228,15 +228,15 @@ export class FsObjectStore implements ObjectStore {
     let start = 0
     if (opts?.cursor !== undefined) {
       const cursor = opts.cursor
-      start = entries.findIndex((e) => e.sortKey > cursor)
+      start = entries.findIndex(e => e.sortKey > cursor)
       if (start < 0) return { items: [] }
     }
     const page = entries.slice(start, start + limit)
     const hasMore = start + limit < entries.length
     const last = page[page.length - 1]
     return hasMore && last
-      ? { items: page.map((e) => e.item), cursor: last.sortKey }
-      : { items: page.map((e) => e.item) }
+      ? { items: page.map(e => e.item), cursor: last.sortKey }
+      : { items: page.map(e => e.item) }
   }
 
   /** key → 磁盘路径;穿越 → 抛 invalid_argument(normalizeEntryPath),未知根/根本身 → null。 */
@@ -281,7 +281,7 @@ export class FsObjectStore implements ObjectStore {
     }
   }
 
-  private metaOf(key: string, st: { mtimeMs: number; size: number; mtime: Date }): ObjectMeta {
+  private metaOf(key: string, st: { mtime: Date, mtimeMs: number, size: number }): ObjectMeta {
     return {
       key,
       etag: `${st.mtimeMs.toString(36)}-${st.size.toString(36)}`,

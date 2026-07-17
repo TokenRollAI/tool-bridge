@@ -1,14 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import { DeviceClient, type DeviceClientState, type DeviceSocket } from '../../src/device/client'
-import { type DeviceFrame, decodeDeviceFrame, encodeDeviceFrame } from '../../src/device/frames'
+import { decodeDeviceFrame, type DeviceFrame, encodeDeviceFrame } from '../../src/device/frames'
 import { TBError, type TBErrorBody } from '../../src/errors'
 
 function fakeSocket() {
   const sent: DeviceFrame[] = []
   const closed: Array<number | undefined> = []
   const socket: DeviceSocket = {
-    send: (data) => sent.push(decodeDeviceFrame(data)),
-    close: (code) => closed.push(code),
+    send: data => sent.push(decodeDeviceFrame(data)),
+    close: code => closed.push(code),
   }
   return { socket, sent, closed }
 }
@@ -21,9 +21,9 @@ function makeClient(overrides: Partial<ConstructorParameters<typeof DeviceClient
     deviceId: 'd1',
     expose: { shell: { allow: ['echo'] } },
     handler: async () => 'ok',
-    onStateChange: (s) => states.push(s),
-    onReady: (m) => readies.push(m),
-    onRejected: (e) => rejections.push(e),
+    onStateChange: s => states.push(s),
+    onReady: m => readies.push(m),
+    onRejected: e => rejections.push(e),
     ...overrides,
   })
   return { client, states, readies, rejections }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { checkRegisterPath } from '../../src/auth/registerPath'
 import type { Scope, SecretKey } from '../../src/types'
+import { checkRegisterPath } from '../../src/auth/registerPath'
 
 type SkArg = Pick<SecretKey, 'scopes' | 'registerPaths' | 'id'>
 

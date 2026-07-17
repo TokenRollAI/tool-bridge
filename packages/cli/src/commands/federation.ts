@@ -1,19 +1,19 @@
 import { Command } from 'commander'
-import { resolveTarget, withGlobalOpts } from '../args'
-import { CliError, callTool } from '../http'
 import { guard, printJson, printLine, table } from '../output'
+import { resolveTarget, withGlobalOpts } from '../args'
+import { callTool, CliError } from '../http'
 
 interface FederationGlobalOpts {
-  json?: boolean
   baseUrl?: string
+  json?: boolean
   sk?: string
 }
 
 /** system/federation list 的一行(env 基线不可删;运行时条目可删)。 */
 interface FederationHost {
   host: string
-  source: 'env' | 'store'
   removable: boolean
+  source: 'env' | 'store'
   updatedAt?: string
 }
 
@@ -37,7 +37,7 @@ export function federationLsCommand(): Command {
           printJson(page)
           return
         }
-        const rows = (page.items ?? []).map((h) => [
+        const rows = (page.items ?? []).map(h => [
           h.host,
           h.source,
           h.removable ? 'yes' : 'no',
@@ -58,7 +58,7 @@ export function federationAddCommand(): Command {
       await guard(asJson, async () => {
         const host = String(hostArg ?? '').trim()
         if (!host) throw new CliError('host is required')
-        const entry = await callTool<{ host: string; updatedAt: string }>(
+        const entry = await callTool<{ host: string, updatedAt: string }>(
           resolveTarget(opts),
           '/system/federation',
           'add',

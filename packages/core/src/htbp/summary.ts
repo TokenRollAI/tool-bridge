@@ -19,7 +19,7 @@ export function collapseToOneLine(text: string): string {
  * 折叠空白,超过 `max` 时在字符边界截断并补 `…`。
  */
 export function summarizeOneLine(text: string, max: number = ONE_LINE_MAX): string {
-  const firstLine = text.split('\n').find((line) => line.trim() !== '') ?? ''
+  const firstLine = text.split('\n').find(line => line.trim() !== '') ?? ''
   const collapsed = collapseToOneLine(firstLine)
   if (collapsed.length <= max) return collapsed
   return `${collapsed.slice(0, max - 1).trimEnd()}…`

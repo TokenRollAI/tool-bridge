@@ -21,7 +21,7 @@ afterEach(() => {
 })
 
 function stdoutText(): string {
-  return stdoutSpy.mock.calls.map((c) => String(c[0])).join('')
+  return stdoutSpy.mock.calls.map(c => String(c[0])).join('')
 }
 
 function jsonFetch(body: unknown, status = 200) {

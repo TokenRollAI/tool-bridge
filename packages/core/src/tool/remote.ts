@@ -5,8 +5,8 @@
  * 与白名单判定。
  */
 
-import { segments } from '../tree/path'
 import type { TreePath } from '../types'
+import { segments } from '../tree/path'
 
 /**
  * 把对 remote 节点 `<nodePath>` 及其后代的请求改写为对 `baseUrl` 下相对路径的**同形**请求。
@@ -30,9 +30,9 @@ export function rewriteRemotePath(
   const rawSegs = requestPath
     .replace(/^\/+|\/+$/g, '')
     .split('/')
-    .filter((s) => s.length > 0)
-  const reserved =
-    rawSegs.length > 0 && rawSegs[rawSegs.length - 1]?.startsWith('~') ? rawSegs.pop() : undefined
+    .filter(s => s.length > 0)
+  const reserved
+    = rawSegs.length > 0 && rawSegs[rawSegs.length - 1]?.startsWith('~') ? rawSegs.pop() : undefined
 
   const nodeSegs = segments(nodePath)
   const pathSegs = rawSegs

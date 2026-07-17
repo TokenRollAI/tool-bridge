@@ -1,9 +1,9 @@
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { mkdtempSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { resolveTarget } from '../src/args'
 import { configPath, readConfig, writeConfig } from '../src/config'
+import { resolveTarget } from '../src/args'
 
 let tmp: string
 const savedEnv = {

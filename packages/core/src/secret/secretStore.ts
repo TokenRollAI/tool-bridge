@@ -9,8 +9,6 @@
  * 在 Workers 与 Node 20+ 均为全局;此处以模块作用域最小声明补齐类型(不改 tsconfig、不污染全局)。
  */
 
-import { TBError } from '../errors'
-import { KEY_SECRET, type StateStore } from '../store'
 import {
   LIST_LIMIT_DEFAULT,
   LIST_LIMIT_MAX,
@@ -18,6 +16,8 @@ import {
   type Page,
   type Timestamp,
 } from '../types'
+import { KEY_SECRET, type StateStore } from '../store'
+import { TBError } from '../errors'
 
 // ---------- 最小 WebCrypto 类型声明(模块作用域) ----------
 
@@ -28,6 +28,16 @@ interface MinimalCryptoKey {
 }
 
 interface MinimalSubtleCrypto {
+  decrypt(
+    algorithm: { iv: Uint8Array, name: 'AES-GCM' },
+    key: MinimalCryptoKey,
+    data: Aes256GcmKeyBytes,
+  ): Promise<ArrayBuffer>
+  encrypt(
+    algorithm: { iv: Uint8Array, name: 'AES-GCM' },
+    key: MinimalCryptoKey,
+    data: Aes256GcmKeyBytes,
+  ): Promise<ArrayBuffer>
   importKey(
     format: 'raw',
     keyData: Aes256GcmKeyBytes,
@@ -35,16 +45,6 @@ interface MinimalSubtleCrypto {
     extractable: boolean,
     keyUsages: Array<'encrypt' | 'decrypt'>,
   ): Promise<MinimalCryptoKey>
-  encrypt(
-    algorithm: { name: 'AES-GCM'; iv: Uint8Array },
-    key: MinimalCryptoKey,
-    data: Aes256GcmKeyBytes,
-  ): Promise<ArrayBuffer>
-  decrypt(
-    algorithm: { name: 'AES-GCM'; iv: Uint8Array },
-    key: MinimalCryptoKey,
-    data: Aes256GcmKeyBytes,
-  ): Promise<ArrayBuffer>
 }
 
 declare const crypto: {
@@ -101,10 +101,10 @@ export function base64urlDecode(input: string): Uint8Array {
 
 /** StateStore 中 `secret:<name>` 的落盘值——只存密文,绝不含明文。 */
 interface StoredSecret {
-  /** 每次 Set 随机生成的 12 字节 IV(base64url)。 */
-  iv: string
   /** AES-256-GCM 密文(含 GCM tag,base64url)。 */
   ciphertext: string
+  /** 每次 Set 随机生成的 12 字节 IV(base64url)。 */
+  iv: string
   updatedAt: Timestamp
 }
 
@@ -113,11 +113,11 @@ const MASTER_KEY_BYTES = 32
 
 function isStoredSecret(value: unknown): value is StoredSecret {
   return (
-    typeof value === 'object' &&
-    value !== null &&
-    typeof (value as StoredSecret).iv === 'string' &&
-    typeof (value as StoredSecret).ciphertext === 'string' &&
-    typeof (value as StoredSecret).updatedAt === 'string'
+    typeof value === 'object'
+    && value !== null
+    && typeof (value as StoredSecret).iv === 'string'
+    && typeof (value as StoredSecret).ciphertext === 'string'
+    && typeof (value as StoredSecret).updatedAt === 'string'
   )
 }
 
@@ -219,7 +219,7 @@ export class SecretStoreImpl {
    * 枚举 secret 元数据。**绝不返回明文/密文**——只出 name + updatedAt(只进不出)。
    * limit 默认 50、上限 200 钳制。
    */
-  async list(opts?: ListOptions): Promise<Page<{ name: string; updatedAt: Timestamp }>> {
+  async list(opts?: ListOptions): Promise<Page<{ name: string, updatedAt: Timestamp }>> {
     const limit = Math.min(opts?.limit ?? LIST_LIMIT_DEFAULT, LIST_LIMIT_MAX)
     const { items, cursor } = await this.store.list(KEY_SECRET, { cursor: opts?.cursor, limit })
     return {

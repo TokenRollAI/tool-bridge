@@ -19,18 +19,18 @@
  * `TB_ALLOW_INSECURE_HTTP=true` 的本地网关注册消费,见 scripts/verify-plugin.ts。
  */
 
-import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import {
   decodeCallContext,
   decodePluginCall,
   type HelpModel,
   isTBError,
   negotiate,
-  RequestDedupe,
   renderHelpDsl,
   renderHelpJson,
+  RequestDedupe,
   TBError,
 } from '@tool-bridge/core'
+import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 
 const PORT = Number(process.env.STUB_PROVIDER_PORT ?? 39004)
 const HOST = process.env.STUB_PROVIDER_HOST ?? '127.0.0.1'
@@ -44,8 +44,8 @@ const CAPABILITIES = ['search', 'delete'] as const
 // ---------- 内存 stub 数据 ----------
 
 interface StoredEntry {
-  contentType: string
   content: unknown
+  contentType: string
   metadata: Record<string, string>
   revision: number
   updatedAt: string
@@ -87,7 +87,7 @@ function toMeta(path: string, e: StoredEntry): Record<string, unknown> {
 function requirePath(args: Record<string, unknown>): string {
   const path = args.path
   if (typeof path !== 'string' || path === '') {
-    throw new TBError('invalid_argument', "field 'path' must be a non-empty string")
+    throw new TBError('invalid_argument', 'field \'path\' must be a non-empty string')
   }
   return path
 }
@@ -109,7 +109,7 @@ function pageOf(keys: string[], opts: Record<string, unknown>): Record<string, u
     start = idx + 1
   }
   const slice = keys.slice(start, start + limit)
-  const items = slice.map((k) => toMeta(k, requireEntry(k)))
+  const items = slice.map(k => toMeta(k, requireEntry(k)))
   return start + limit < keys.length && slice.length > 0
     ? { items, cursor: slice[slice.length - 1] }
     : { items }
@@ -125,7 +125,7 @@ function doWrite(args: Record<string, unknown>): Record<string, unknown> {
   const path = requirePath(args)
   const input = args.entry
   if (typeof input !== 'object' || input === null) {
-    throw new TBError('invalid_argument', "Write 需要对象 'entry'")
+    throw new TBError('invalid_argument', 'Write 需要对象 \'entry\'')
   }
   const { content, contentType, metadata, ifVersion } = input as Record<string, unknown>
   if (content === undefined) {
@@ -156,7 +156,7 @@ function doUpdate(args: Record<string, unknown>): Record<string, unknown> {
   const path = requirePath(args)
   const patch = args.patch
   if (typeof patch !== 'object' || patch === null) {
-    throw new TBError('invalid_argument', "Update 需要对象 'patch'")
+    throw new TBError('invalid_argument', 'Update 需要对象 \'patch\'')
   }
   const prev = requireEntry(path) // 不存在 → not_found
   const { content, metadata, ifVersion } = patch as Record<string, unknown>
@@ -180,16 +180,16 @@ function doUpdate(args: Record<string, unknown>): Record<string, unknown> {
 function doSearch(args: Record<string, unknown>): Record<string, unknown> {
   const query = args.query
   if (typeof query !== 'string' || query === '') {
-    throw new TBError('invalid_argument', "field 'query' must be a non-empty string")
+    throw new TBError('invalid_argument', 'field \'query\' must be a non-empty string')
   }
   const opts = optsOf(args)
   if (opts.mode === 'semantic') {
     // capabilities 只声明了 'search'(keyword);semantic 未声明。
-    throw new TBError('invalid_argument', "search mode 'semantic' not declared in capabilities")
+    throw new TBError('invalid_argument', 'search mode \'semantic\' not declared in capabilities')
   }
   const hits = [...entries.keys()]
     .sort()
-    .filter((k) => k.includes(query) || String(entries.get(k)?.content ?? '').includes(query))
+    .filter(k => k.includes(query) || String(entries.get(k)?.content ?? '').includes(query))
   return pageOf(hits, opts)
 }
 
@@ -197,7 +197,7 @@ function invoke(tool: string, args: Record<string, unknown>): unknown {
   switch (tool) {
     case 'List': {
       const prefix = typeof args.path === 'string' ? args.path : ''
-      const keys = [...entries.keys()].sort().filter((k) => k.startsWith(prefix))
+      const keys = [...entries.keys()].sort().filter(k => k.startsWith(prefix))
       return pageOf(keys, optsOf(args))
     }
     case 'Get': {
@@ -315,8 +315,8 @@ async function handleEnvelope(req: IncomingMessage, res: ServerResponse, raw: st
   // X-TB-Request-Id 幂等去重:同 id 重放返回首次结果(含错误)。
   const requestId = req.headers['x-tb-request-id']
   const exec = (): unknown => invoke(call.tool, call.arguments)
-  const result =
-    typeof requestId === 'string' && requestId !== '' ? await dedupe.run(requestId, exec) : exec()
+  const result
+    = typeof requestId === 'string' && requestId !== '' ? await dedupe.run(requestId, exec) : exec()
   console.log(`[stub-provider] ${call.tool}${owner !== undefined ? ` by ${owner}` : ''}`)
   writeJson(res, 200, result ?? null)
 }

@@ -24,13 +24,6 @@
  *   MCP RPC 业务错误(`result.isError`)不是错误——落 `ToolResult.isError`,正常返回。
  */
 
-import { UnauthorizedError } from '@modelcontextprotocol/sdk/client/auth.js'
-import { Client } from '@modelcontextprotocol/sdk/client/index.js'
-import {
-  StreamableHTTPClientTransport,
-  StreamableHTTPError,
-} from '@modelcontextprotocol/sdk/client/streamableHttp.js'
-import { CfWorkerJsonSchemaValidator } from '@modelcontextprotocol/sdk/validation/cfworker'
 import {
   assertSecureUrl,
   authHeaderFor,
@@ -43,28 +36,35 @@ import {
   type ToolSpec,
   type TreePath,
 } from '@tool-bridge/core'
-import { GatewayMcpOAuthProvider, reauthorizeRequired } from '../oauth'
+import {
+  StreamableHTTPClientTransport,
+  StreamableHTTPError,
+} from '@modelcontextprotocol/sdk/client/streamableHttp.js'
+import { CfWorkerJsonSchemaValidator } from '@modelcontextprotocol/sdk/validation/cfworker'
+import { UnauthorizedError } from '@modelcontextprotocol/sdk/client/auth.js'
+import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import type { UpstreamProvider } from './types'
+import { GatewayMcpOAuthProvider, reauthorizeRequired } from '../oauth'
 
 /** mcp 节点 config。auth:'oauth' → 凭证走网关托管 OAuth(oauth.ts),authRef 忽略。 */
 export interface McpConfig {
-  url: string
-  authRef?: string
   auth?: 'oauth'
   /** authRef 凭证注入的头名(默认 Authorization)。 */
   authHeader?: string
+  authRef?: string
   /** 凭证前缀;空串 = 原样注入(默认 Bearer)。 */
   authScheme?: string
   /** 静态明文请求头(非机密);authRef 凭证头覆盖同名项。 */
   headers?: Record<string, string>
+  url: string
 }
 
 /** MCP SDK 返回的单个工具形状(仅取我们用到的字段)。 */
 interface McpTool {
-  name: string
+  annotations?: { destructiveHint?: boolean, readOnlyHint?: boolean }
   description?: string
   inputSchema?: unknown
-  annotations?: { readOnlyHint?: boolean; destructiveHint?: boolean }
+  name: string
 }
 
 /** annotations → effect 词汇;无明确提示则返回 undefined(不臆测 write)。 */
@@ -85,12 +85,12 @@ function toSpec(t: McpTool): ToolSpec {
 }
 
 /** callTool 结果 → ToolResult:全 text 片段拼接;含非 text 片段则结构化原样返回。 */
-function toToolResult(res: { content?: unknown; isError?: boolean }): ToolResult {
+function toToolResult(res: { content?: unknown, isError?: boolean }): ToolResult {
   const parts = Array.isArray(res.content)
-    ? (res.content as Array<{ type: string; text?: string }>)
+    ? (res.content as Array<{ text?: string, type: string }>)
     : []
-  const allText = parts.length > 0 && parts.every((p) => p.type === 'text')
-  const content: unknown = allText ? parts.map((p) => p.text ?? '').join('') : res.content
+  const allText = parts.length > 0 && parts.every(p => p.type === 'text')
+  const content: unknown = allText ? parts.map(p => p.text ?? '').join('') : res.content
   const out: ToolResult = { content }
   if (res.isError === true) out.isError = true
   return out
@@ -104,15 +104,15 @@ function toToolResult(res: { content?: unknown; isError?: boolean }): ToolResult
  * 其 GET(.well-known)必须放行。
  */
 const noStandaloneSseFetch: typeof fetch = (input, init) => {
-  const method =
-    init?.method ??
-    (input instanceof Request
-      ? input.method
-      : typeof input === 'object' && 'method' in input
+  const method
+    = init?.method
+      ?? (input instanceof Request
         ? input.method
-        : 'GET')
-  const accept =
-    new Headers(init?.headers ?? (input instanceof Request ? input.headers : undefined)).get(
+        : typeof input === 'object' && 'method' in input
+          ? input.method
+          : 'GET')
+  const accept
+    = new Headers(init?.headers ?? (input instanceof Request ? input.headers : undefined)).get(
       'accept',
     ) ?? ''
   if (String(method).toUpperCase() === 'GET' && accept.includes('text/event-stream')) {
@@ -126,13 +126,13 @@ const noStandaloneSseFetch: typeof fetch = (input, init) => {
  * 不设 TTL——有效性由上游裁决(400/404 即失效,届时清缓存重握手)。
  */
 export interface McpSessionStore {
-  store: StateStore
   nodePath: TreePath
+  store: StateStore
 }
 
 interface CachedSession {
-  sessionId: string
   protocolVersion?: string
+  sessionId: string
   updatedAt: string
 }
 
@@ -278,9 +278,9 @@ export function createMcpProvider(
   secrets: SecretStoreImpl,
   opts: {
     allowInsecure: boolean
-    session?: McpSessionStore
     /** 托管 OAuth 的存取面(auth:'oauth' 节点必需;encryptionKey 缺省时不传)。 */
-    oauth?: { store: StateStore; encryptionKey: string }
+    oauth?: { encryptionKey: string, store: StateStore }
+    session?: McpSessionStore
   },
 ): UpstreamProvider {
   const secErr = assertSecureUrl(config.url, opts.allowInsecure)
@@ -338,7 +338,7 @@ export function createMcpProvider(
               config.url,
               auth,
               opts.session,
-              (c) => c.listTools(),
+              c => c.listTools(),
               forceFresh,
             ) as Promise<SessionOutcome<{ tools: McpTool[] }>>
           let res = await listOnce()
@@ -356,10 +356,10 @@ export function createMcpProvider(
       guard(() =>
         mapUnauthorized(async () => {
           const auth = await makeAuth()
-          const { value } = await withSession(config.url, auth, opts.session, (c) =>
+          const { value } = await withSession(config.url, auth, opts.session, c =>
             c.callTool({ name, arguments: args }),
           )
-          return toToolResult(value as { content?: unknown; isError?: boolean })
+          return toToolResult(value as { content?: unknown, isError?: boolean })
         }),
       ),
   }

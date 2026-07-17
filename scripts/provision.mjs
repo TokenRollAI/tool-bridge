@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { readFileSync, writeFileSync } from 'node:fs'
 /**
  * 幂等 provision:创建 KV namespace 与 R2 bucket(存在即跳过)。名称从 TB_NAME_PREFIX 派生。
  *
@@ -8,9 +9,8 @@
  * 完成后需把新建 KV namespace 的 id 回填到 packages/gateway/wrangler.jsonc 的 TB_KV.id。
  */
 import { execFileSync } from 'node:child_process'
-import { readFileSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
 import { parseEnv } from 'node:util'
+import { join } from 'node:path'
 
 const root = join(import.meta.dirname, '..')
 
@@ -63,7 +63,7 @@ function ensureKv() {
   } catch {
     console.warn('warn: could not parse `kv namespace list` output; attempting create anyway')
   }
-  const existing = list.find((ns) => ns.title === kvTitle)
+  const existing = list.find(ns => ns.title === kvTitle)
   if (existing) {
     console.log(`KV namespace '${kvTitle}' exists (id=${existing.id}) — skip`)
     return existing.id
@@ -74,7 +74,7 @@ function ensureKv() {
   const after = wrangler(['kv', 'namespace', 'list'], { capture: true })
   let created
   try {
-    created = JSON.parse(after).find((ns) => ns.title === kvTitle)
+    created = JSON.parse(after).find(ns => ns.title === kvTitle)
   } catch {
     // 解析失败走下方手动提示
   }
@@ -92,9 +92,9 @@ function ensureR2() {
   // list 无 --json,按行解析 `name: <bucket>` 做全等比较(对齐 ensureKv 的精确匹配,消除子串假阳性)。
   const names = out
     .split('\n')
-    .map((line) => line.match(/^\s*name:\s*(.+?)\s*$/))
-    .filter((m) => m !== null)
-    .map((m) => m[1])
+    .map(line => line.match(/^\s*name:\s*(.+?)\s*$/))
+    .filter(m => m !== null)
+    .map(m => m[1])
   if (names.includes(r2Bucket)) {
     console.log(`R2 bucket '${r2Bucket}' exists — skip`)
     return

@@ -1,6 +1,6 @@
-import { SELF } from 'cloudflare:test'
-import { parseHelpDsl } from '@tool-bridge/core'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { parseHelpDsl } from '@tool-bridge/core'
+import { SELF } from 'cloudflare:test'
 import { TEST_ADMIN_SK } from './fixtures'
 
 // mcp 托管 OAuth 全链路(默认离线,上游为 fetch mock):
@@ -19,7 +19,7 @@ async function postJson(path: string, body: unknown, init: RequestInit = {}): Pr
     ...init,
     headers: {
       'content-type': 'application/json',
-      accept: 'application/json',
+      'accept': 'application/json',
       ...(init.headers ?? {}),
     },
     body: JSON.stringify(body),
@@ -49,7 +49,7 @@ async function mountOAuthMcp(path: string): Promise<void> {
  * - AS metadata / DCR / token 端点齐备(PKCE S256);
  * - /mcp 端点要求 Bearer ∈ validTokens,否则 401(触发 SDK 刷新/授权)。
  */
-function oauthUpstreamMock(tools: Array<{ name: string; description: string }>) {
+function oauthUpstreamMock(tools: Array<{ description: string, name: string }>) {
   const validTokens = new Set(['at-1'])
   let tokenIssued = 0
   const grants: string[] = []
@@ -62,9 +62,9 @@ function oauthUpstreamMock(tools: Array<{ name: string; description: string }>) 
       return new Response('not found', { status: 404 })
     }
     if (
-      req.method === 'GET' &&
-      (url.pathname.includes('.well-known/oauth-authorization-server') ||
-        url.pathname.includes('.well-known/openid-configuration'))
+      req.method === 'GET'
+      && (url.pathname.includes('.well-known/oauth-authorization-server')
+        || url.pathname.includes('.well-known/openid-configuration'))
     ) {
       return Response.json({
         issuer: 'https://mcp-oauth.test',
@@ -122,7 +122,7 @@ function oauthUpstreamMock(tools: Array<{ name: string; description: string }>) 
       if (!validTokens.has(bearer)) {
         return new Response('unauthorized', { status: 401 })
       }
-      const body = (await req.json()) as { id?: number | string; method: string; params?: unknown }
+      const body = (await req.json()) as { id?: number | string, method: string, params?: unknown }
       const rpc = (result: unknown, headers: Record<string, string> = {}) =>
         Response.json({ jsonrpc: '2.0', id: body.id, result }, { headers })
       if (body.method === 'initialize') {
@@ -137,10 +137,10 @@ function oauthUpstreamMock(tools: Array<{ name: string; description: string }>) 
       }
       if (body.method === 'notifications/initialized') return new Response(null, { status: 202 })
       if (body.method === 'tools/list') {
-        return rpc({ tools: tools.map((t) => ({ ...t, inputSchema: { type: 'object' } })) })
+        return rpc({ tools: tools.map(t => ({ ...t, inputSchema: { type: 'object' } })) })
       }
       if (body.method === 'tools/call') {
-        const params = body.params as { name?: string; arguments?: unknown }
+        const params = body.params as { arguments?: unknown, name?: string }
         return rpc({
           content: [
             { type: 'text', text: `called:${params?.name}:${JSON.stringify(params?.arguments)}` },
@@ -168,7 +168,7 @@ function oauthUpstreamMock(tools: Array<{ name: string; description: string }>) 
 async function startAuthorize(path: string): Promise<URL> {
   const res = await postJson(`${path}/~authorize`, {}, admin())
   expect(res.status).toBe(200)
-  const body = (await res.json()) as { status: string; authorizationUrl?: string }
+  const body = (await res.json()) as { authorizationUrl?: string, status: string }
   expect(body.status).toBe('redirect')
   expect(body.authorizationUrl).toBeDefined()
   return new URL(body.authorizationUrl as string)
@@ -211,7 +211,7 @@ describe('mcp 托管 OAuth:授权全链路(默认离线,上游为 fetch mock)', 
       admin({ headers: { accept: 'text/plain' } }),
     )
     expect(help.status).toBe(200)
-    expect(parseHelpDsl(await help.text()).cmds.map((c) => c.name)).toContain('query')
+    expect(parseHelpDsl(await help.text()).cmds.map(c => c.name)).toContain('query')
 
     // 直连调用同样成功。
     const call = await postJson('db/bb/query', { sql: 'select 1' }, admin())
@@ -233,7 +233,7 @@ describe('mcp 托管 OAuth:授权全链路(默认离线,上游为 fetch mock)', 
       admin({ headers: { accept: 'text/plain' } }),
     )
     expect(help.status).toBe(200)
-    expect(parseHelpDsl(await help.text()).cmds.map((c) => c.name)).toContain('query')
+    expect(parseHelpDsl(await help.text()).cmds.map(c => c.name)).toContain('query')
     expect(upstream.grants).toContain('refresh_token')
   })
 
@@ -257,7 +257,7 @@ describe('mcp 托管 OAuth:授权全链路(默认离线,上游为 fetch mock)', 
     const localUri = 'http://127.0.0.1:51234/callback'
     const res = await postJson(`db/bb-local/~authorize`, { redirectUri: localUri }, admin())
     expect(res.status).toBe(200)
-    const body = (await res.json()) as { status: string; authorizationUrl?: string }
+    const body = (await res.json()) as { authorizationUrl?: string, status: string }
     expect(body.status).toBe('redirect')
     const authUrl = new URL(body.authorizationUrl as string)
     // 授权 URL 与 DCR 注册的 redirect_uri 都是本地回调,而非网关 callback。
@@ -267,7 +267,7 @@ describe('mcp 托管 OAuth:授权全链路(默认离线,上游为 fetch mock)', 
     const cb = await callback({ code: 'code-ok', state: authUrl.searchParams.get('state') ?? '' })
     expect(cb.status).toBe(200)
     const tokenReq = upstream.tokenRequests.find(
-      (p) => p.get('grant_type') === 'authorization_code',
+      p => p.get('grant_type') === 'authorization_code',
     )
     expect(tokenReq?.get('redirect_uri')).toBe(localUri)
 
@@ -276,7 +276,7 @@ describe('mcp 托管 OAuth:授权全链路(默认离线,上游为 fetch mock)', 
       admin({ headers: { accept: 'text/plain' } }),
     )
     expect(help.status).toBe(200)
-    expect(parseHelpDsl(await help.text()).cmds.map((c) => c.name)).toContain('query')
+    expect(parseHelpDsl(await help.text()).cmds.map(c => c.name)).toContain('query')
   })
 
   it('非 loopback 的 redirectUri → invalid_argument 拒绝', async () => {
@@ -300,7 +300,7 @@ describe('mcp 托管 OAuth:拒绝路径', () => {
     await mountOAuthMcp('db/bb-cold')
     const help = await SELF.fetch('https://tb.test/db/bb-cold/~help', admin())
     expect(help.status).toBe(403)
-    const body = (await help.json()) as { code: string; message: string }
+    const body = (await help.json()) as { code: string, message: string }
     expect(body.code).toBe('permission_denied')
     expect(body.message).toContain('tb tool auth db/bb-cold')
   })

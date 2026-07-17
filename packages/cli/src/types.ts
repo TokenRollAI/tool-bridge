@@ -6,60 +6,60 @@ import type { Scope } from './scope'
  */
 
 export interface NodeSummary {
-  path: string
-  kind: string
   description?: string
+  kind: string
+  path: string
 }
 
 export interface HelpCmd {
-  name: string
-  method?: string
-  path?: string
-  scope?: string
   /** arguments 的 JSON Schema(不含 {tool,arguments} 信封)。 */
   inputSchema?: unknown
+  method?: string
+  name: string
+  path?: string
   returns?: string
+  scope?: string
 }
 
 export interface HelpJson {
+  children?: NodeSummary[]
+  cmds: HelpCmd[]
   htbp: string
   node: NodeSummary
-  cmds: HelpCmd[]
-  children?: NodeSummary[]
 }
 
 export interface TreeJson {
-  path: string
-  kind: string
-  description?: string
-  online?: boolean
-  truncated?: boolean
   children?: TreeJson[]
+  description?: string
+  kind: string
+  online?: boolean
+  path: string
+  truncated?: boolean
 }
 
 export interface Page<T> {
-  items: T[]
   cursor?: string
+  items: T[]
 }
 
 /** SecretKey 投影(hash 永不出网关)。 */
 export interface SecretKeyView {
+  createdAt?: string
+  description?: string
+  disabled?: boolean
+  expiresAt?: string
   id: string
   owner: string
-  description?: string
-  scopes: Scope[]
   registerPaths?: string[]
-  disabled?: boolean
-  createdAt?: string
-  expiresAt?: string
+  scopes: Scope[]
 }
 
 export interface SecretKeyInput {
-  owner: string
   description?: string
-  scopes: Scope[]
-  registerPaths?: string[]
   expiresAt?: string
+  owner: string
+  registerPaths?: string[]
+  scopes: Scope[]
 }
 
 /** SKRegistry.Write 返回:密钥投影 + 明文(仅此一次)。 */
@@ -80,80 +80,80 @@ export interface StatusView {
 
 /** 工具虚拟化(mcp/http 适用)。 */
 export interface Virtualize {
+  describe?: Record<string, string>
+  hide?: string[]
   prefix?: string
   rename?: Record<string, string>
-  hide?: string[]
-  describe?: Record<string, string>
 }
 
 /** http Provider 的单个工具定义。 */
 export interface HttpToolDef {
-  name: string
   description: string
-  method: 'GET' | 'POST' | 'PUT' | 'DELETE'
-  pathTemplate: string
-  inputSchema?: unknown
   effect?: 'read' | 'write' | 'destructive'
+  inputSchema?: unknown
+  method: 'GET' | 'POST' | 'PUT' | 'DELETE'
+  name: string
+  pathTemplate: string
 }
 
 /** NodeConfig 按 kind(CLI 构造 mcp/http/remote/context/skillhub 形状)。 */
-export type NodeConfig =
+export type NodeConfig
+  = | {
+    auth?: 'oauth'
+    authHeader?: string
+    authRef?: string
+    authScheme?: string
+    headers?: Record<string, string>
+    kind: 'mcp'
+    url: string
+  }
   | {
-      kind: 'mcp'
-      url: string
-      authRef?: string
-      auth?: 'oauth'
-      authHeader?: string
-      authScheme?: string
-      headers?: Record<string, string>
-    }
+    authHeader?: string
+    authRef?: string
+    authScheme?: string
+    endpoint: string
+    kind: 'http'
+    tools: HttpToolDef[]
+  }
+  | { baseUrl: string, kind: 'remote', skRef?: string }
   | {
-      kind: 'http'
-      endpoint: string
-      tools: HttpToolDef[]
-      authRef?: string
-      authHeader?: string
-      authScheme?: string
-    }
-  | { kind: 'remote'; baseUrl: string; skRef?: string }
+    authRef?: string
+    kind: 'context'
+    provider: string
+    providerConfig?: Record<string, unknown>
+    readOnly?: boolean
+    ttl?: number
+  }
   | {
-      kind: 'context'
-      provider: string
-      providerConfig?: Record<string, unknown>
-      authRef?: string
-      readOnly?: boolean
-      ttl?: number
-    }
-  | {
-      kind: 'skillhub'
-      provider: string
-      providerConfig?: Record<string, unknown>
-      authRef?: string
-      readOnly?: boolean
-      ttl?: number
-    }
+    authRef?: string
+    kind: 'skillhub'
+    provider: string
+    providerConfig?: Record<string, unknown>
+    readOnly?: boolean
+    ttl?: number
+  }
 
 /** Node 投影(NodeRegistry.List/Get 返回;CLI 只取渲染所需字段)。 */
 export interface Node {
-  path: string
-  kind: string
-  description?: string
   config?: NodeConfig
-  virtualize?: Virtualize
-  registeredBy?: string
-  online?: boolean
   createdAt?: string
+  description?: string
+  kind: string
+  online?: boolean
+  path: string
+  registeredBy?: string
   updatedAt?: string
+  virtualize?: Virtualize
 }
 
 /** context entry 元数据(ContextProvider List/Write/Update 返回)。 */
 export interface ContextEntryMeta {
-  uri: string
   contentType: string
-  size?: number
-  version: string
-  updatedAt: string
   metadata: Record<string, string>
+  size?: number
+  updatedAt: string
+  uri: string
+  version: string
 }
 
 /** context entry 全量(Get 返回;大对象 content = { $ref: <预签名 URL> })。 */
@@ -163,9 +163,9 @@ export interface ContextEntry extends ContextEntryMeta {
 
 /** NodeInput = Omit<Node,'registeredBy'|'online'|'createdAt'|'updatedAt'>。 */
 export interface NodeInput {
-  path: string
-  kind: string
-  description: string
   config?: NodeConfig
+  description: string
+  kind: string
+  path: string
   virtualize?: Virtualize
 }

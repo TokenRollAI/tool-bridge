@@ -1,21 +1,21 @@
 import { Command } from 'commander'
-import { resolveTarget, withGlobalOpts } from '../args'
-import { apiJson, CliError, callTool } from '../http'
-import { guard, printJson, printLine, table } from '../output'
-import { deleteNode, registerNode } from '../registry'
 import type { Node, NodeInput, Page, TreeJson } from '../types'
+import { guard, printJson, printLine, table } from '../output'
+import { resolveTarget, withGlobalOpts } from '../args'
+import { deleteNode, registerNode } from '../registry'
+import { apiJson, callTool, CliError } from '../http'
 
 interface ServerAddOpts {
+  baseUrl: string
+  description?: string
   json?: boolean
   sk?: string
-  baseUrl: string
   skRef?: string
-  description?: string
 }
 
 interface GlobalOpts {
-  json?: boolean
   baseUrl?: string
+  json?: boolean
   sk?: string
 }
 
@@ -79,7 +79,7 @@ export function serverLsCommand(): Command {
         const target = resolveTarget(opts)
         try {
           const page = await callTool<Page<Node>>(target, '/system/registry', 'list', {})
-          const remotes = (page.items ?? []).filter((n) => n.kind === 'remote')
+          const remotes = (page.items ?? []).filter(n => n.kind === 'remote')
           if (asJson) {
             printJson(remotes)
             return
@@ -88,7 +88,7 @@ export function serverLsCommand(): Command {
             printLine('(no remote servers)')
             return
           }
-          const rows = remotes.map((n) => [
+          const rows = remotes.map(n => [
             n.path,
             n.config && n.config.kind === 'remote' ? n.config.baseUrl : '-',
             n.description ?? '',
@@ -102,7 +102,7 @@ export function serverLsCommand(): Command {
           collectRemotes(tree, remotes)
           if (asJson) {
             printJson(
-              remotes.map((n) => ({ path: n.path, kind: n.kind, description: n.description })),
+              remotes.map(n => ({ path: n.path, kind: n.kind, description: n.description })),
             )
             return
           }
@@ -110,7 +110,7 @@ export function serverLsCommand(): Command {
             printLine('(no remote servers)')
             return
           }
-          const rows = remotes.map((n) => [n.path, '(not visible)', n.description ?? ''])
+          const rows = remotes.map(n => [n.path, '(not visible)', n.description ?? ''])
           printLine(table(['PATH', 'BASEURL', 'DESCRIPTION'], rows))
           printLine('')
           printLine('note: baseUrl unavailable via ~tree (no system/registry visibility)')

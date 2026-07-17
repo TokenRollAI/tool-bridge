@@ -7,11 +7,11 @@
  * 本模块只按 pathname 读文件;contentType 复用 core 的扩展名推断表。
  */
 
-import { existsSync } from 'node:fs'
+import { fsContentTypeOf } from '@tool-bridge/core/node'
+import { dirname, join, resolve, sep } from 'node:path'
 import { readFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
-import { dirname, join, resolve, sep } from 'node:path'
-import { fsContentTypeOf } from '@tool-bridge/core/node'
+import { existsSync } from 'node:fs'
 
 export type AssetsFetcher = (request: Request) => Promise<Response>
 

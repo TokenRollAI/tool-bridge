@@ -1,11 +1,11 @@
 import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises'
+import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { createObjectContextProvider } from '../../src/context/objectProvider'
 import { type ObjectMeta, readStreamText } from '../../src/context/objectStore'
-import { isTBError } from '../../src/errors'
+import { createObjectContextProvider } from '../../src/context/objectProvider'
 import { FsObjectStore } from '../../src/node/fsObjectStore'
+import { isTBError } from '../../src/errors'
 
 /** 执行并返回 TBError code(未抛/正常完成 → null)。 */
 async function codeOf(fn: () => Promise<unknown>): Promise<string | null> {
@@ -140,7 +140,7 @@ describe('穿越与 symlink 逃逸拒绝', () => {
   it('list 静默跳过逃逸 symlink', async () => {
     const store = new FsObjectStore([rootA])
     const { items } = await store.list('roota/leak')
-    const keys = items.map((i) => ('key' in i ? i.key : i.prefix))
+    const keys = items.map(i => ('key' in i ? i.key : i.prefix))
     expect(keys).toEqual([]) // leak.txt / leakdir 均被跳过
   })
 })
@@ -210,7 +210,7 @@ describe('list:多根、delimiter 折叠、分页', () => {
   it('多根命名空间:prefix "" 走全部根;根缺文件视同空', async () => {
     const store = await seededStore()
     const { items } = await store.list('')
-    const keys = items.filter((i): i is ObjectMeta => 'key' in i).map((i) => i.key)
+    const keys = items.filter((i): i is ObjectMeta => 'key' in i).map(i => i.key)
     expect(keys).toContain('roota/list/a.txt')
     expect(keys).toContain('rootb/c.txt')
   })
@@ -230,7 +230,7 @@ describe('list:多根、delimiter 折叠、分页', () => {
     expect(first.items).toHaveLength(1)
     expect(first.cursor).toBeDefined()
     const second = await store.list('roota/list/', { limit: 5, cursor: first.cursor })
-    const all = [...first.items, ...second.items].map((i) => ('key' in i ? i.key : i.prefix))
+    const all = [...first.items, ...second.items].map(i => ('key' in i ? i.key : i.prefix))
     expect(all).toEqual(['roota/list/a.txt', 'roota/list/sub/b.txt'])
     expect(second.cursor).toBeUndefined()
   })

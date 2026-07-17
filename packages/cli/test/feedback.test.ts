@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { resetFetch, setFetch } from '../src/http'
-import { buildProgram } from '../src/program'
 import { parseError, runCli } from './cliHarness'
+import { buildProgram } from '../src/program'
 
 const gw = ['--base-url', 'https://gw', '--sk', 'tbk_agent'] as const
 
@@ -21,7 +21,7 @@ afterEach(() => {
 })
 
 function stdoutText(): string {
-  return stdoutSpy.mock.calls.map((c) => String(c[0])).join('')
+  return stdoutSpy.mock.calls.map(c => String(c[0])).join('')
 }
 
 function jsonFetch(body: unknown, status = 200) {

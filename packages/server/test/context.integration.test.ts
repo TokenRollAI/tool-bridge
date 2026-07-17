@@ -3,10 +3,10 @@
  * 重启持久、小阈值触发 $ref → /~ref 免 SK 中转下载。
  */
 
+import { afterEach, describe, expect, it } from 'vitest'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
 import { configFromEnv, createTbServer, type TbServer } from '../src'
 
 const ADMIN_SK = 'tbk_server_test_admin_00000000'
@@ -27,7 +27,7 @@ function tmpDataDir(): string {
 async function startServer(
   dataDir: string,
   extraEnv: Record<string, string> = {},
-): Promise<{ server: TbServer; baseUrl: string }> {
+): Promise<{ baseUrl: string, server: TbServer }> {
   const config = configFromEnv({
     TB_PORT: '0',
     TB_HOST: '127.0.0.1',
@@ -57,7 +57,7 @@ async function postJson(
     ...init,
     headers: {
       'content-type': 'application/json',
-      accept: 'application/json',
+      'accept': 'application/json',
       ...(init.headers ?? {}),
     },
     body: JSON.stringify(body),
@@ -98,13 +98,13 @@ describe('context 平台对象存储(fs-backed)', () => {
       entry: { contentType: 'text/markdown', content: '# hi node' },
     })
     expect(w.status).toBe(200)
-    const wrote = (await w.json()) as { uri: string; version: string }
+    const wrote = (await w.json()) as { uri: string, version: string }
     expect(wrote.uri).toBe('node://ctxtest/rw/notes/a.md')
 
     const l = await ctxCall(baseUrl, 'ctxtest/rw', 'List', {})
     expect(l.status).toBe(200)
-    const listed = (await l.json()) as { items: Array<{ uri: string; contentType: string }> }
-    const dir = listed.items.find((i) => i.uri === 'node://ctxtest/rw/notes/')
+    const listed = (await l.json()) as { items: Array<{ contentType: string, uri: string }> }
+    const dir = listed.items.find(i => i.uri === 'node://ctxtest/rw/notes/')
     expect(dir?.contentType).toBe('application/x-directory')
 
     const g = await ctxCall(baseUrl, 'ctxtest/rw', 'Get', { path: 'notes/a.md' })

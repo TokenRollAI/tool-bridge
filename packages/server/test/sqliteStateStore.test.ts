@@ -3,11 +3,11 @@
  * 前缀过滤含 SQL 通配符字符与多字节 key)+ SQLite 特有的重开持久断言。
  */
 
+import { MemoryStateStore, type StateStore } from '@tool-bridge/core'
+import { afterEach, describe, expect, it } from 'vitest'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { MemoryStateStore, type StateStore } from '@tool-bridge/core'
-import { afterEach, describe, expect, it } from 'vitest'
 import { SqliteStateStore } from '../src/sqliteStateStore'
 
 const cleanups: Array<() => void> = []
@@ -67,12 +67,12 @@ describe('SqliteStateStore 契约(vs MemoryStateStore)', () => {
     await contract(async (store) => {
       await seed(store)
       return {
-        nodes: (await store.list('node:')).items.map((i) => i.key),
-        exactUnderscore: (await store.list('node:a_')).items.map((i) => i.key),
-        percent: (await store.list('node:a%')).items.map((i) => i.key),
-        bracket: (await store.list('node:a[')).items.map((i) => i.key),
-        cjk: (await store.list('node:中文/')).items.map((i) => i.key),
-        all: (await store.list('')).items.map((i) => i.key),
+        nodes: (await store.list('node:')).items.map(i => i.key),
+        exactUnderscore: (await store.list('node:a_')).items.map(i => i.key),
+        percent: (await store.list('node:a%')).items.map(i => i.key),
+        bracket: (await store.list('node:a[')).items.map(i => i.key),
+        cjk: (await store.list('node:中文/')).items.map(i => i.key),
+        all: (await store.list('')).items.map(i => i.key),
         missPrefix: (await store.list('zzz:')).items,
       }
     })
@@ -85,7 +85,7 @@ describe('SqliteStateStore 契约(vs MemoryStateStore)', () => {
       let cursor: string | undefined
       for (;;) {
         const res = await store.list('node:', { limit: 2, ...(cursor ? { cursor } : {}) })
-        pages.push(res.items.map((i) => i.key))
+        pages.push(res.items.map(i => i.key))
         if (res.cursor === undefined) break
         cursor = res.cursor
       }
@@ -98,7 +98,7 @@ describe('SqliteStateStore 契约(vs MemoryStateStore)', () => {
       await store.put('p:1', 1)
       await store.put('p:2', 2)
       const res = await store.list('p:', { limit: 2 })
-      return { keys: res.items.map((i) => i.key), cursor: res.cursor }
+      return { keys: res.items.map(i => i.key), cursor: res.cursor }
     })
   })
 

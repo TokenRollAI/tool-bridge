@@ -1,4 +1,3 @@
-import { ChevronRight, CircleAlert, Loader2, RefreshCw, Route, SearchX } from 'lucide-react'
 import {
   type KeyboardEvent as ReactKeyboardEvent,
   useEffect,
@@ -6,24 +5,25 @@ import {
   useRef,
   useState,
 } from 'react'
+import { ChevronRight, CircleAlert, Loader2, RefreshCw, Route, SearchX } from 'lucide-react'
 import { Link, NavLink, useLocation } from 'react-router'
-import { KIND_ICON } from '@/components/KindBadge'
-import { Skeleton } from '@/components/ui/skeleton'
-import { useTree } from '@/lib/queries'
-import { useSession } from '@/lib/session'
 import type { NodeKind, TreeJson } from '@/lib/types'
+import { Skeleton } from '@/components/ui/skeleton'
+import { KIND_ICON } from '@/components/KindBadge'
+import { useSession } from '@/lib/session'
+import { useTree } from '@/lib/queries'
 import { cn } from '@/lib/utils'
 
 /** 离线设备不进导航树（设备管理页仍可见全部）；其余节点原样保留。 */
 function pruneOffline(nodes: TreeJson[]): TreeJson[] {
   return nodes
-    .filter((node) => node.online !== false)
-    .map((node) => (node.children ? { ...node, children: pruneOffline(node.children) } : node))
+    .filter(node => node.online !== false)
+    .map(node => (node.children ? { ...node, children: pruneOffline(node.children) } : node))
 }
 
 interface FilteredTree {
-  nodes: TreeJson[]
   matches: Set<string>
+  nodes: TreeJson[]
 }
 
 /** 保留命中节点及其祖先；节点自身命中时保留其已加载子树作为路径上下文。 */
@@ -61,8 +61,8 @@ function filterTree(nodes: TreeJson[], query: string): FilteredTree {
 function localizeSubtree(root: TreeJson, basePath: string): TreeJson[] {
   const rootPath = root.path
   const rebase = (node: TreeJson): TreeJson => {
-    const relative =
-      rootPath === '' || rootPath === '/'
+    const relative
+      = rootPath === '' || rootPath === '/'
         ? node.path.replace(/^\/+/, '')
         : node.path === rootPath
           ? ''
@@ -101,7 +101,7 @@ const KIND_TONE: Record<NodeKind, string> = {
  * 性能硬边界：常态只取 root depth=1；filter 非空才启用 depth=8；本地 lazy=1；
  * remote 及其后代 lazy=3。展开集合集中管理，刷新查询不会重置用户的浏览位置。
  */
-export function TreeNav({ filter = '', onNavigate }: { filter?: string; onNavigate?: () => void }) {
+export function TreeNav({ filter = '', onNavigate }: { filter?: string, onNavigate?: () => void }) {
   const query = filter.trim()
   const filtering = query !== ''
   const root = useTree('', ROOT_DEPTH)
@@ -138,10 +138,10 @@ export function TreeNav({ filter = '', onNavigate }: { filter?: string; onNaviga
       new Set(
         (root.data.children ?? [])
           .filter(
-            (node) =>
+            node =>
               node.kind !== 'remote' && node.truncated !== true && (node.children?.length ?? 0) > 0,
           )
-          .map((node) => node.path),
+          .map(node => node.path),
       ),
     )
   }, [active?.id, root.data])
@@ -149,7 +149,7 @@ export function TreeNav({ filter = '', onNavigate }: { filter?: string; onNaviga
   // direct URL 只展开已经加载的祖先，不因为“定位”静默触发 remote/depth=8 请求。
   useEffect(() => {
     if (activePath === null || activePath === '') return
-    const ancestors = pathAncestors(activePath).filter((path) => loadedPaths.has(path))
+    const ancestors = pathAncestors(activePath).filter(path => loadedPaths.has(path))
     if (ancestors.length === 0) return
     setExpandedPaths((previous) => {
       const next = new Set(previous)
@@ -165,7 +165,7 @@ export function TreeNav({ filter = '', onNavigate }: { filter?: string; onNaviga
   }, [activePath, loadedPaths])
 
   const toggleExpanded = (path: string) => {
-    setTabStopPath((current) =>
+    setTabStopPath(current =>
       current?.startsWith(`${path}/`) && expandedPaths.has(path) ? path : current,
     )
     setExpandedPaths((previous) => {
@@ -186,12 +186,15 @@ export function TreeNav({ filter = '', onNavigate }: { filter?: string; onNaviga
       >
         <div className="flex items-start gap-2 text-xs text-destructive">
           <CircleAlert className="mt-0.5 size-4 shrink-0" />
-          <p className="min-w-0 break-words">资源树加载失败：{root.error.message}</p>
+          <p className="min-w-0 break-words">
+            资源树加载失败：
+            {root.error.message}
+          </p>
         </div>
         <button
-          type="button"
           className="mt-2 inline-flex h-8 items-center gap-1.5 rounded-md border px-2.5 text-xs hover:bg-secondary focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
           onClick={() => root.refetch()}
+          type="button"
         >
           <RefreshCw className="size-3.5" />
           重试
@@ -204,23 +207,30 @@ export function TreeNav({ filter = '', onNavigate }: { filter?: string; onNaviga
     <div className="min-w-0">
       {filtering && (
         <div className="mx-2 mb-2 flex min-h-7 items-center gap-2 rounded-md border bg-background/35 px-2 text-[10px] text-muted-foreground">
-          {deep.isFetching ? (
-            <>
-              <Loader2 className="size-3 animate-spin text-primary" />
-              <span>正在搜索完整可见树…</span>
-              {filtered.matches.size > 0 && (
-                <span className="ml-auto font-mono">≥ {filtered.matches.size}</span>
+          {deep.isFetching
+            ? (
+                <>
+                  <Loader2 className="size-3 animate-spin text-primary" />
+                  <span>正在搜索完整可见树…</span>
+                  {filtered.matches.size > 0 && (
+                    <span className="ml-auto font-mono">
+                      ≥
+                      {filtered.matches.size}
+                    </span>
+                  )}
+                </>
+              )
+            : (
+                <>
+                  <Route className="size-3 text-primary" />
+                  <span>
+                    {filtered.matches.size}
+                    {' '}
+                    个匹配
+                    {source?.truncated ? ' · 结果已截断' : ''}
+                  </span>
+                </>
               )}
-            </>
-          ) : (
-            <>
-              <Route className="size-3 text-primary" />
-              <span>
-                {filtered.matches.size} 个匹配
-                {source?.truncated ? ' · 结果已截断' : ''}
-              </span>
-            </>
-          )}
         </div>
       )}
 
@@ -231,44 +241,46 @@ export function TreeNav({ filter = '', onNavigate }: { filter?: string; onNaviga
         >
           <span className="min-w-0 flex-1 truncate">完整树搜索失败，当前仅显示已加载结果</span>
           <button
-            type="button"
             className="shrink-0 underline underline-offset-2"
             onClick={() => deep.refetch()}
+            type="button"
           >
             重试
           </button>
         </div>
       )}
 
-      {filtered.nodes.length === 0 ? (
-        <TreeEmpty filtering={filtering} onRefresh={() => root.refetch()} />
-      ) : (
-        <nav aria-label="节点资源树" className="px-1.5">
-          <div
-            role="tree"
-            aria-label="工具与上下文资源"
-            className="grid gap-0.5"
-            onKeyDown={handleTreeKeyDown}
-          >
-            {filtered.nodes.map((node) => (
-              <TreeBranch
-                key={node.path}
-                node={node}
-                depth={0}
-                activePath={activePath}
-                filter={query}
-                filtering={filtering}
-                matches={filtered.matches}
-                expandedPaths={expandedPaths}
-                tabStopPath={tabStopPath}
-                onToggle={toggleExpanded}
-                onItemFocus={setTabStopPath}
-                onNavigate={onNavigate}
-              />
-            ))}
-          </div>
-        </nav>
-      )}
+      {filtered.nodes.length === 0
+        ? (
+            <TreeEmpty filtering={filtering} onRefresh={() => root.refetch()} />
+          )
+        : (
+            <nav aria-label="节点资源树" className="px-1.5">
+              <div
+                aria-label="工具与上下文资源"
+                className="grid gap-0.5"
+                onKeyDown={handleTreeKeyDown}
+                role="tree"
+              >
+                {filtered.nodes.map(node => (
+                  <TreeBranch
+                    activePath={activePath}
+                    depth={0}
+                    expandedPaths={expandedPaths}
+                    filter={query}
+                    filtering={filtering}
+                    key={node.path}
+                    matches={filtered.matches}
+                    node={node}
+                    onItemFocus={setTabStopPath}
+                    onNavigate={onNavigate}
+                    onToggle={toggleExpanded}
+                    tabStopPath={tabStopPath}
+                  />
+                ))}
+              </div>
+            </nav>
+          )}
 
       {!filtering && source?.truncated && (
         <p className="mx-3 mt-2 border-t pt-2 text-[10px] leading-4 text-muted-foreground">
@@ -293,18 +305,18 @@ function TreeBranch({
   underRemote = false,
   onNavigate,
 }: {
-  node: TreeJson
-  depth: number
   activePath: string | null
+  depth: number
+  expandedPaths: Set<string>
   filter: string
   filtering: boolean
   matches: Set<string>
-  expandedPaths: Set<string>
-  tabStopPath: string | null
-  onToggle: (path: string) => void
+  node: TreeJson
   onItemFocus: (path: string) => void
-  underRemote?: boolean
   onNavigate?: () => void
+  onToggle: (path: string) => void
+  tabStopPath: string | null
+  underRemote?: boolean
 }) {
   const manuallyOpen = expandedPaths.has(node.path)
   const effectiveOpen = filtering || manuallyOpen
@@ -312,21 +324,20 @@ function TreeBranch({
   const remoteScope = underRemote || node.kind === 'remote'
   const lazyDepth = remoteScope ? LAZY_DEPTH_REMOTE : LAZY_DEPTH_LOCAL
   const subtree = useTree(node.path, lazyDepth, { enabled: effectiveOpen && lazy })
-  const lazyChildren =
-    lazy && subtree.data ? pruneOffline(localizeSubtree(subtree.data, node.path)) : undefined
+  const lazyChildren
+    = lazy && subtree.data ? pruneOffline(localizeSubtree(subtree.data, node.path)) : undefined
   const children = lazyChildren ?? node.children ?? []
   const expandable = children.length > 0 || lazy
   const label = node.path.split('/').pop() ?? node.path
   const isActive = activePath === node.path
-  const isActiveAncestor =
-    activePath !== null && activePath !== '' && activePath.startsWith(`${node.path}/`)
+  const isActiveAncestor
+    = activePath !== null && activePath !== '' && activePath.startsWith(`${node.path}/`)
   const matched = matches.has(node.path)
   const { icon: Icon } = KIND_ICON[node.kind] ?? KIND_ICON.directory
 
   return (
     <div className="min-w-0" data-tree-branch>
       <div
-        data-tree-row
         className={cn(
           'group/tree-row relative flex min-w-0 items-center rounded-md',
           'h-11 lg:h-9',
@@ -337,53 +348,56 @@ function TreeBranch({
               : 'text-foreground/82 hover:bg-secondary/65',
           filtering && !matched && !isActive && 'text-foreground/55',
         )}
+        data-tree-row
       >
-        {expandable ? (
-          <button
-            type="button"
-            tabIndex={-1}
-            aria-label={`${effectiveOpen ? '收起' : '展开'}节点 ${label}`}
-            aria-expanded={effectiveOpen}
-            disabled={filtering}
-            title={filtering ? '筛选期间自动展开匹配路径' : undefined}
-            onClick={(event) => {
-              onItemFocus(node.path)
-              event.currentTarget.parentElement
-                ?.querySelector<HTMLElement>('[role="treeitem"]')
-                ?.focus()
-              onToggle(node.path)
-            }}
-            className={cn(
-              'grid h-full w-8 shrink-0 place-items-center rounded-l-md text-muted-foreground',
-              'hover:text-foreground focus-visible:z-10 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none',
-              filtering && 'cursor-default opacity-55',
+        {expandable
+          ? (
+              <button
+                aria-expanded={effectiveOpen}
+                aria-label={`${effectiveOpen ? '收起' : '展开'}节点 ${label}`}
+                className={cn(
+                  'grid h-full w-8 shrink-0 place-items-center rounded-l-md text-muted-foreground',
+                  'hover:text-foreground focus-visible:z-10 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none',
+                  filtering && 'cursor-default opacity-55',
+                )}
+                disabled={filtering}
+                onClick={(event) => {
+                  onItemFocus(node.path)
+                  event.currentTarget.parentElement
+                    ?.querySelector<HTMLElement>('[role="treeitem"]')
+                    ?.focus()
+                  onToggle(node.path)
+                }}
+                tabIndex={-1}
+                title={filtering ? '筛选期间自动展开匹配路径' : undefined}
+                type="button"
+              >
+                <ChevronRight
+                  className={cn('size-3.5 transition-transform', effectiveOpen && 'rotate-90')}
+                />
+              </button>
+            )
+          : (
+              <span aria-hidden="true" className="h-full w-8 shrink-0" />
             )}
-          >
-            <ChevronRight
-              className={cn('size-3.5 transition-transform', effectiveOpen && 'rotate-90')}
-            />
-          </button>
-        ) : (
-          <span className="h-full w-8 shrink-0" aria-hidden="true" />
-        )}
 
         <NavLink
-          end
-          role="treeitem"
-          aria-level={depth + 1}
-          aria-expanded={expandable ? effectiveOpen : undefined}
-          aria-selected={isActive}
-          tabIndex={node.path === tabStopPath ? 0 : -1}
-          to={`/nodes/${node.path}`}
-          onClick={onNavigate}
-          onFocus={() => onItemFocus(node.path)}
           aria-current={isActive ? 'page' : undefined}
+          aria-expanded={expandable ? effectiveOpen : undefined}
           aria-label={`${label}，${node.kind}`}
-          title={`${node.path} · ${node.description}`}
+          aria-level={depth + 1}
+          aria-selected={isActive}
           className={cn(
             'flex h-full min-w-0 flex-1 items-center gap-2 pr-2 focus-visible:z-10 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none',
             isActive && 'text-foreground',
           )}
+          end
+          onClick={onNavigate}
+          onFocus={() => onItemFocus(node.path)}
+          role="treeitem"
+          tabIndex={node.path === tabStopPath ? 0 : -1}
+          title={`${node.path} · ${node.description}`}
+          to={`/nodes/${node.path}`}
         >
           <span
             className={cn(
@@ -394,7 +408,7 @@ function TreeBranch({
             <Icon className="size-3.5" strokeWidth={1.8} />
           </span>
           <span className="min-w-0 flex-1 truncate font-mono text-[12px] leading-none">
-            <HighlightedLabel label={label} query={filter} matched={matched} />
+            <HighlightedLabel label={label} matched={matched} query={filter} />
           </span>
           {node.kind === 'remote' && (
             <span className="shrink-0 rounded-sm border border-fuchsia-400/25 bg-fuchsia-400/8 px-1 font-mono text-[7px] leading-3 text-fuchsia-400/90">
@@ -403,17 +417,17 @@ function TreeBranch({
           )}
           {node.online === true && (
             <span
-              title="online"
               className="size-1.5 shrink-0 rounded-full bg-ok shadow-[0_0_5px_var(--ok)]"
+              title="online"
             />
           )}
           {node.truncated === true && !subtree.isFetching && (
             <span
-              title={remoteScope ? '远端子树按需加载' : '子树按需加载'}
               className={cn(
                 'size-1.5 shrink-0 rounded-full ring-2 ring-background',
                 remoteScope ? 'bg-fuchsia-400' : 'bg-primary',
               )}
+              title={remoteScope ? '远端子树按需加载' : '子树按需加载'}
             />
           )}
           {lazy && subtree.isFetching && (
@@ -427,52 +441,56 @@ function TreeBranch({
 
       {effectiveOpen && expandable && (
         <fieldset
-          data-tree-group
           className={cn(
             'ml-4 min-w-0 border-l pl-1.5',
             isActiveAncestor ? 'border-primary/40' : 'border-border/65',
             remoteScope && 'border-fuchsia-400/25',
           )}
+          data-tree-group
         >
-          {lazy && subtree.isPending ? (
-            <div className="grid gap-0.5 py-0.5" role="status" aria-label="正在加载子树">
-              <TreeRowSkeleton width="72%" />
-              <TreeRowSkeleton width="54%" />
-            </div>
-          ) : lazy && subtree.isError ? (
-            <div
-              className="my-1 mr-1 flex min-h-10 items-center gap-2 rounded-md border border-destructive/25 bg-destructive/7 px-2 text-[10px] text-destructive"
-              role="alert"
-            >
-              <CircleAlert className="size-3.5 shrink-0" />
-              <span className="min-w-0 flex-1 truncate">子树加载失败</span>
-              <button
-                type="button"
-                className="shrink-0 underline underline-offset-2 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-                onClick={() => subtree.refetch()}
-              >
-                重试
-              </button>
-            </div>
-          ) : (
-            children.map((child) => (
-              <TreeBranch
-                key={child.path}
-                node={child}
-                depth={depth + 1}
-                activePath={activePath}
-                filter={filter}
-                filtering={filtering}
-                matches={matches}
-                expandedPaths={expandedPaths}
-                tabStopPath={tabStopPath}
-                onToggle={onToggle}
-                onItemFocus={onItemFocus}
-                underRemote={remoteScope}
-                onNavigate={onNavigate}
-              />
-            ))
-          )}
+          {lazy && subtree.isPending
+            ? (
+                <div aria-label="正在加载子树" className="grid gap-0.5 py-0.5" role="status">
+                  <TreeRowSkeleton width="72%" />
+                  <TreeRowSkeleton width="54%" />
+                </div>
+              )
+            : lazy && subtree.isError
+              ? (
+                  <div
+                    className="my-1 mr-1 flex min-h-10 items-center gap-2 rounded-md border border-destructive/25 bg-destructive/7 px-2 text-[10px] text-destructive"
+                    role="alert"
+                  >
+                    <CircleAlert className="size-3.5 shrink-0" />
+                    <span className="min-w-0 flex-1 truncate">子树加载失败</span>
+                    <button
+                      className="shrink-0 underline underline-offset-2 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+                      onClick={() => subtree.refetch()}
+                      type="button"
+                    >
+                      重试
+                    </button>
+                  </div>
+                )
+              : (
+                  children.map(child => (
+                    <TreeBranch
+                      activePath={activePath}
+                      depth={depth + 1}
+                      expandedPaths={expandedPaths}
+                      filter={filter}
+                      filtering={filtering}
+                      key={child.path}
+                      matches={matches}
+                      node={child}
+                      onItemFocus={onItemFocus}
+                      onNavigate={onNavigate}
+                      onToggle={onToggle}
+                      tabStopPath={tabStopPath}
+                      underRemote={remoteScope}
+                    />
+                  ))
+                )}
         </fieldset>
       )}
     </div>
@@ -486,7 +504,7 @@ function handleTreeKeyDown(event: ReactKeyboardEvent<HTMLDivElement>) {
 
   const visible = Array.from(
     event.currentTarget.querySelectorAll<HTMLElement>('[role="treeitem"]'),
-  ).filter((item) => item.offsetParent !== null)
+  ).filter(item => item.offsetParent !== null)
   const index = visible.indexOf(target)
   const focusAt = (next: number) => {
     const item = visible[next]
@@ -551,8 +569,8 @@ function HighlightedLabel({
   matched,
 }: {
   label: string
-  query: string
   matched: boolean
+  query: string
 }) {
   if (!matched || query === '') return label
   const index = label.toLocaleLowerCase().indexOf(query.toLocaleLowerCase())
@@ -572,7 +590,7 @@ function HighlightedLabel({
 
 function TreeSkeleton() {
   return (
-    <div className="grid gap-1 px-2" role="status" aria-label="正在加载资源树">
+    <div aria-label="正在加载资源树" className="grid gap-1 px-2" role="status">
       <TreeRowSkeleton width="76%" />
       <TreeRowSkeleton width="58%" />
       <TreeRowSkeleton width="68%" />
@@ -590,7 +608,7 @@ function TreeRowSkeleton({ width }: { width: string }) {
   )
 }
 
-function TreeEmpty({ filtering, onRefresh }: { filtering: boolean; onRefresh: () => void }) {
+function TreeEmpty({ filtering, onRefresh }: { filtering: boolean, onRefresh: () => void }) {
   return (
     <div className="mx-2 rounded-lg border border-dashed bg-background/25 px-4 py-6 text-center">
       <SearchX className="mx-auto size-6 text-muted-foreground/60" />
@@ -601,16 +619,16 @@ function TreeEmpty({ filtering, onRefresh }: { filtering: boolean; onRefresh: ()
       {!filtering && (
         <div className="mt-3 flex flex-wrap justify-center gap-2">
           <button
-            type="button"
-            onClick={onRefresh}
             className="inline-flex h-8 items-center gap-1.5 rounded-md border px-2.5 text-xs hover:bg-secondary focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+            onClick={onRefresh}
+            type="button"
           >
             <RefreshCw className="size-3.5" />
             刷新
           </button>
           <Link
-            to="/manage/registry"
             className="inline-flex h-8 items-center rounded-md bg-primary px-2.5 text-xs text-primary-foreground hover:opacity-90 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+            to="/manage/registry"
           >
             节点注册
           </Link>

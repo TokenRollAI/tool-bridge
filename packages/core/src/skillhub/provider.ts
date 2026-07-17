@@ -14,14 +14,12 @@ import {
   PRESIGN_TTL_SEC_DEFAULT,
   REF_THRESHOLD_BYTES_DEFAULT,
 } from '../context/objectProvider'
-import type { ObjectMeta, ObjectStore } from '../context/objectStore'
-import { readStreamText } from '../context/objectStore'
+import { LIST_LIMIT_DEFAULT, LIST_LIMIT_MAX, type ListOptions, type Page, type TreePath } from '../types'
+import { type ObjectMeta, type ObjectStore, readStreamText } from '../context/objectStore'
 import { normalizeEntryPath } from '../context/path'
-import { TBError } from '../errors'
-import { normalizePath } from '../tree/path'
-import type { ListOptions, Page, TreePath } from '../types'
-import { LIST_LIMIT_DEFAULT, LIST_LIMIT_MAX } from '../types'
 import { parseFrontmatter } from './frontmatter'
+import { normalizePath } from '../tree/path'
+import { TBError } from '../errors'
 
 /** skill 的 frontmatter 中 Claude 约定的必填字段。 */
 export const SKILL_DOC = 'SKILL.md'
@@ -30,17 +28,17 @@ export const SKILL_SCAN_MAX = 200
 
 /** List/Search 返回的目录条目(渐进式发现:先看 name/description,再取正文)。 */
 export interface SkillSummary {
+  description: string
   id: string
   name: string
-  description: string
-  version?: string
   updatedAt: string
+  version?: string
 }
 
 /** 单个文件的元信息(path 相对 skill 根,含 SKILL.md)。 */
 export interface SkillFileMeta {
-  path: string
   contentType: string
+  path: string
   size?: number
   version: string
 }
@@ -58,32 +56,32 @@ export interface SkillFile extends SkillFileMeta {
 }
 
 export interface SkillPublishFile {
-  /** 相对 skill 根的路径,如 "SKILL.md"、"scripts/run.sh"。 */
-  path: string
   content: string
   contentType?: string
+  /** 相对 skill 根的路径,如 "SKILL.md"、"scripts/run.sh"。 */
+  path: string
 }
 
 export interface SkillPublishInput {
+  files: SkillPublishFile[]
   /** 缺省从 SKILL.md 的 frontmatter name 派生 slug。 */
   id?: string
-  files: SkillPublishFile[]
 }
 
 export interface SkillPublishResult {
-  id: string
-  name: string
   description: string
   fileCount: number
+  id: string
+  name: string
 }
 
 export interface SkillhubProvider {
-  List(opts?: ListOptions): Promise<Page<SkillSummary>>
   Get(id: string): Promise<SkillDetail>
   GetFile(id: string, file: string): Promise<SkillFile>
-  Search(query: string, opts?: ListOptions): Promise<Page<SkillSummary>>
+  List(opts?: ListOptions): Promise<Page<SkillSummary>>
   Publish(input: SkillPublishInput): Promise<SkillPublishResult>
   Remove(id: string): Promise<void>
+  Search(query: string, opts?: ListOptions): Promise<Page<SkillSummary>>
 }
 
 /** provider 选项与 ObjectContextProvider 同形(直接透传底层存储能力)。 */
@@ -167,7 +165,7 @@ export function createSkillhubProvider(
   }
 
   /** 读 SKILL.md 原文;不存在 → not_found。 */
-  const readDoc = async (id: string): Promise<{ text: string; meta: ObjectMeta }> => {
+  const readDoc = async (id: string): Promise<{ meta: ObjectMeta, text: string }> => {
     const key = docKey(id)
     const got = await store.get(key)
     if (!got) throw TBError.notFound(`skill 不存在:'${id}'`)
@@ -318,7 +316,7 @@ export function createSkillhubProvider(
         }
         return { rel: normalizeEntryPath(f.path), content: f.content, contentType: f.contentType }
       })
-      const doc = files.find((f) => f.rel === SKILL_DOC)
+      const doc = files.find(f => f.rel === SKILL_DOC)
       if (!doc) {
         throw new TBError('invalid_argument', `skill 必须包含 '${SKILL_DOC}'`)
       }
@@ -333,7 +331,7 @@ export function createSkillhubProvider(
 
       // 整体替换语义:删除该 skill 下不在本次提交中的旧文件。
       const prefix = skillPrefix(id)
-      const keep = new Set(files.map((f) => `${prefix}${f.rel}`))
+      const keep = new Set(files.map(f => `${prefix}${f.rel}`))
       let cursor: string | undefined
       do {
         const page = await store.list(prefix, { cursor, limit: LIST_LIMIT_MAX })

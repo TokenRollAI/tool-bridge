@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { filterVisible, type ScopeChecker } from '../../src/tree/visibility'
 import type { Scope, TreeNode } from '../../src/types'
+import { filterVisible, type ScopeChecker } from '../../src/tree/visibility'
 
 function node(path: string): TreeNode {
   return {
@@ -21,7 +21,7 @@ describe('filterVisible(可见性裁剪)', () => {
     const stub: ScopeChecker = (_scopes, path, action) =>
       action === 'read' && (path === 'docs' || path.startsWith('docs/'))
     const visible = filterVisible(nodes, [], stub)
-    expect(visible.map((n) => n.path)).toEqual(['docs', 'docs/context7'])
+    expect(visible.map(n => n.path)).toEqual(['docs', 'docs/context7'])
   })
 
   it('checker 始终以 read 动作与 node.path 调用', async () => {

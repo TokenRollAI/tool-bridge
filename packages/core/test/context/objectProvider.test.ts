@@ -1,19 +1,19 @@
 import { describe, expect, it, vi } from 'vitest'
+import type { ContextEntryMeta, SearchOptions } from '../../src/context/types'
 import {
   createObjectContextProvider,
   type ObjectContextProvider,
   SEARCH_METADATA_HEAD_MAX,
 } from '../../src/context/objectProvider'
 import { MemoryObjectStore, type ObjectStore } from '../../src/context/objectStore'
-import type { ContextEntryMeta, SearchOptions } from '../../src/context/types'
 import { isTBError, type TBErrorCode } from '../../src/errors'
 
 const NOW = '2026-07-07T00:00:00.000Z'
 const NS = 'ctx/main'
 
 function makeProvider(opts: Partial<Parameters<typeof createObjectContextProvider>[1]> = {}): {
-  store: MemoryObjectStore
   provider: ObjectContextProvider
+  store: MemoryObjectStore
 } {
   const store = new MemoryObjectStore(() => NOW)
   const provider = createObjectContextProvider(store, { nsPath: NS, ...opts })
@@ -137,7 +137,7 @@ describe('Get', () => {
   })
 
   it('存量对象无 contentType:Meta 回落 application/octet-stream 并走 $ref', async () => {
-    const { store, provider } = makeProvider({ relayRefUrl: (key) => `https://relay/${key}` })
+    const { store, provider } = makeProvider({ relayRefUrl: key => `https://relay/${key}` })
     await store.put('raw.bin', 'data')
     const entry = await provider.Get('raw.bin')
     expect(entry.contentType).toBe('application/octet-stream')
@@ -147,7 +147,7 @@ describe('Get', () => {
   it('$ref 阈值:== 阈值内联,+1 走 relayRefUrl 且不读 body', async () => {
     const { store, provider } = makeProvider({
       refThresholdBytes: 8,
-      relayRefUrl: (key) => `https://relay/${key}`,
+      relayRefUrl: key => `https://relay/${key}`,
     })
     await provider.Write('small.txt', { contentType: 'text/plain', content: '12345678' })
     await provider.Write('big.txt', { contentType: 'text/plain', content: '123456789' })
@@ -159,7 +159,7 @@ describe('Get', () => {
   })
 
   it('非文本 contentType(小对象)也走 $ref', async () => {
-    const { provider } = makeProvider({ relayRefUrl: (key) => `https://relay/${key}` })
+    const { provider } = makeProvider({ relayRefUrl: key => `https://relay/${key}` })
     await provider.Write('bin', { contentType: 'application/octet-stream', content: 'xx' })
     expect((await provider.Get('bin')).content).toEqual({ $ref: 'https://relay/bin' })
   })
@@ -171,7 +171,7 @@ describe('Get', () => {
     })
     const provider = createObjectContextProvider(withPresign, {
       nsPath: NS,
-      relayRefUrl: (key) => `https://relay/${key}`,
+      relayRefUrl: key => `https://relay/${key}`,
     })
     await provider.Write('bin', { contentType: 'application/octet-stream', content: 'xx' })
     expect((await provider.Get('bin')).content).toEqual({ $ref: 'https://signed/bin?ttl=900' })
@@ -181,7 +181,7 @@ describe('Get', () => {
 
   it('relayRefUrl 可为异步工厂(网关 HMAC 签 token 场景)', async () => {
     const { provider } = makeProvider({
-      relayRefUrl: async (key) => `https://relay/${key}?signed=1`,
+      relayRefUrl: async key => `https://relay/${key}?signed=1`,
     })
     await provider.Write('bin', { contentType: 'application/octet-stream', content: 'xx' })
     expect((await provider.Get('bin')).content).toEqual({ $ref: 'https://relay/bin?signed=1' })
@@ -278,7 +278,7 @@ describe('List', () => {
     const { provider } = makeProvider()
     await seed(provider)
     const top = await provider.List('')
-    expect(top.items.map((i) => i.uri)).toEqual([`node://${NS}/a.md`, `node://${NS}/docs/`])
+    expect(top.items.map(i => i.uri)).toEqual([`node://${NS}/a.md`, `node://${NS}/docs/`])
     const dir = top.items[1] as ContextEntryMeta
     expect(dir.contentType).toBe('application/x-directory')
     expect(dir.version).toBe('')
@@ -290,7 +290,7 @@ describe('List', () => {
     await seed(provider)
     await store.put('docs/', '')
     const page = await provider.List('docs')
-    expect(page.items.map((i) => i.uri)).toEqual([
+    expect(page.items.map(i => i.uri)).toEqual([
       `node://${NS}/docs/deep/`,
       `node://${NS}/docs/one.md`,
       `node://${NS}/docs/two.md`,
@@ -304,7 +304,7 @@ describe('List', () => {
     expect(p1.items).toHaveLength(2)
     expect(p1.cursor).toBeDefined()
     const p2 = await provider.List('docs', { limit: 2, cursor: p1.cursor })
-    expect(p2.items.map((i) => i.uri)).toEqual([`node://${NS}/docs/two.md`])
+    expect(p2.items.map(i => i.uri)).toEqual([`node://${NS}/docs/two.md`])
     expect(p2.cursor).toBeUndefined()
     await provider.List('', { limit: 500 })
     expect(await codeOf(provider.List('', { limit: 0 }))).toBe('invalid_argument')
@@ -323,7 +323,7 @@ describe('List', () => {
     expect(meta.uri).toBe(`node://${NS}/x.md`)
     expect(await store.head('tenant/x.md')).not.toBeNull()
     const page = await provider.List('')
-    expect(page.items.map((i) => i.uri)).toEqual([`node://${NS}/x.md`])
+    expect(page.items.map(i => i.uri)).toEqual([`node://${NS}/x.md`])
   })
 })
 
@@ -339,7 +339,7 @@ describe('Search', () => {
     await provider.Write('other.md', { contentType: 'text/markdown', content: 'x' })
     const getSpy = vi.spyOn(store, 'get')
     const page = await provider.Search('alpha')
-    expect(page.items.map((i) => i.uri).sort()).toEqual([
+    expect(page.items.map(i => i.uri).sort()).toEqual([
       `node://${NS}/docs/Alpha-notes.md`,
       `node://${NS}/docs/deep/beta.md`,
     ])
@@ -355,7 +355,7 @@ describe('Search', () => {
     expect(p1.items).toHaveLength(2)
     expect(p1.cursor).toBeDefined()
     const p2 = await provider.Search('note', { limit: 2, cursor: p1.cursor })
-    expect(p2.items.map((i) => i.uri)).toEqual([`node://${NS}/note3.md`])
+    expect(p2.items.map(i => i.uri)).toEqual([`node://${NS}/note3.md`])
     expect(p2.cursor).toBeUndefined()
   })
 
@@ -376,17 +376,17 @@ describe('Search', () => {
     }
     await store.put('zz-target.md', 'x')
     const page = await provider.Search('zz-target')
-    expect(page.items.map((i) => i.uri)).toEqual([`node://${NS}/zz-target.md`])
+    expect(page.items.map(i => i.uri)).toEqual([`node://${NS}/zz-target.md`])
     expect(page.cursor).toBeUndefined()
   })
 
   it('list 结果混入 { prefix } 条目(防御)时跳过', async () => {
     const base = new MemoryObjectStore(() => NOW)
     const store: ObjectStore = {
-      head: (k) => base.head(k),
-      get: (k) => base.get(k),
+      head: k => base.head(k),
+      get: k => base.get(k),
       put: (k, b, o) => base.put(k, b, o),
-      delete: (k) => base.delete(k),
+      delete: k => base.delete(k),
       list: async (p, o) => {
         const res = await base.list(p, o)
         return { ...res, items: [{ prefix: 'fake/' }, ...res.items] }
@@ -395,16 +395,16 @@ describe('Search', () => {
     const provider = createObjectContextProvider(store, { nsPath: NS })
     await base.put('hit.md', 'x')
     const page = await provider.Search('hit')
-    expect(page.items.map((i) => i.uri)).toEqual([`node://${NS}/hit.md`])
+    expect(page.items.map(i => i.uri)).toEqual([`node://${NS}/hit.md`])
   })
 
   /** 模拟 s3:list 条目不带 metadata(undefined),head 才有。 */
   function makeMetadataLessListStore(base: MemoryObjectStore): ObjectStore {
     return {
-      head: (k) => base.head(k),
-      get: (k) => base.get(k),
+      head: k => base.head(k),
+      get: k => base.get(k),
       put: (k, b, o) => base.put(k, b, o),
-      delete: (k) => base.delete(k),
+      delete: k => base.delete(k),
       list: async (p, o) => {
         const res = await base.list(p, o)
         return {
@@ -431,12 +431,12 @@ describe('Search', () => {
     await provider.Write('other.md', { contentType: 'text/markdown', content: 'z' })
     const headSpy = vi.spyOn(base, 'head')
     const page = await provider.Search('alpha')
-    expect(page.items.map((i) => i.uri).sort()).toEqual([
+    expect(page.items.map(i => i.uri).sort()).toEqual([
       `node://${NS}/docs/alpha.md`,
       `node://${NS}/docs/beta.md`,
     ])
     // metadata 命中的条目采用 head 的完整 meta
-    const beta = page.items.find((i) => i.uri.endsWith('beta.md')) as ContextEntryMeta
+    const beta = page.items.find(i => i.uri.endsWith('beta.md')) as ContextEntryMeta
     expect(beta.metadata).toEqual({ topic: 'ALPHA' })
     expect(beta.contentType).toBe('text/markdown')
     // 只对路径未命中的候选 head(beta.md 与 other.md),路径命中的 alpha.md 不 head
@@ -455,7 +455,7 @@ describe('Search', () => {
     await base.put('zz-needle.md', 'x')
     const headSpy = vi.spyOn(base, 'head')
     const page = await provider.Search('needle')
-    expect(page.items.map((i) => i.uri)).toEqual([`node://${NS}/zz-needle.md`])
+    expect(page.items.map(i => i.uri)).toEqual([`node://${NS}/zz-needle.md`])
     expect(headSpy).toHaveBeenCalledTimes(SEARCH_METADATA_HEAD_MAX)
   })
 })

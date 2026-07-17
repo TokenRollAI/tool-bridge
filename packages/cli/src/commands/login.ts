@@ -1,9 +1,9 @@
 import { createInterface } from 'node:readline/promises'
 import { Command } from 'commander'
-import { withGlobalOpts } from '../args'
+import { guard, printJson, printLine } from '../output'
 import { readConfig, writeConfig } from '../config'
 import { apiFetch, CliError } from '../http'
-import { guard, printJson, printLine } from '../output'
+import { withGlobalOpts } from '../args'
 
 /** 交互式读取一行(仅在缺 flag 且为 TTY 时用;SK 明文回显,见交付说明的偏差项)。 */
 async function prompt(question: string): Promise<string> {
@@ -16,10 +16,10 @@ async function prompt(question: string): Promise<string> {
 }
 
 interface LoginOpts {
-  json?: boolean
   baseUrl?: string
-  sk?: string
+  json?: boolean
   profile?: string
+  sk?: string
 }
 
 /**

@@ -1,3 +1,9 @@
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { createInterface } from 'node:readline'
+import { spawn } from 'node:child_process'
+import { basename, join } from 'node:path'
+import { randomBytes } from 'node:crypto'
+import { fileURLToPath } from 'node:url'
 /**
  * 设备网关验收:对已部署的 TB_BASE_URL 端到端验证
  * 反向注册全链路——tb connect 长驻接入、shell/fs 数据面、registerPaths 越界拒绝。
@@ -21,14 +27,8 @@
  * 退出码:0=全过;1=任一断言失败或超时。
  */
 import assert from 'node:assert/strict'
-import { spawn } from 'node:child_process'
-import { randomBytes } from 'node:crypto'
 import { existsSync } from 'node:fs'
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { basename, join } from 'node:path'
-import { createInterface } from 'node:readline'
-import { fileURLToPath } from 'node:url'
 
 const baseUrl = (process.argv[2] ?? process.env.TB_BASE_URL)?.replace(/\/+$/, '')
 const adminSk = process.env.TB_ADMIN_SK ?? process.env.TB_SK
@@ -56,7 +56,7 @@ const CLI_TIMEOUT_MS = 90_000 // 设备调用超时 60s(DEVICE_CALL_TIMEOUT_MS)+
 const SK_PROPAGATION_TIMEOUT_MS = 60_000 // KV 官方传播窗口上限(同 verify-revocation)
 const HIBERNATION_IDLE_MS = 155_000 // 边缘空闲掐断 ~100s + DO 休眠,>150s 才算跨窗口
 
-const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
+const sleep = (ms: number): Promise<void> => new Promise(r => setTimeout(r, ms))
 
 async function withTimeout<T>(p: Promise<T>, ms: number, what: string): Promise<T> {
   let timer: NodeJS.Timeout | undefined
@@ -72,8 +72,8 @@ async function withTimeout<T>(p: Promise<T>, ms: number, what: string): Promise<
 
 interface CliResult {
   code: number | null
-  stdout: string
   stderr: string
+  stdout: string
 }
 
 /** 跑一条一次性 tb 命令(凭证经环境变量传入,不落 argv)。 */
@@ -113,9 +113,9 @@ async function cliJson<T>(args: string[], sk: string): Promise<T> {
 
 interface ConnectHandle {
   deviceId: string
+  exit: Promise<CliResult>
   /** ready 事件(resolve 为 mountPath);被拒的连接永不 resolve。 */
   ready: Promise<string>
-  exit: Promise<CliResult>
   stop(): Promise<CliResult>
 }
 
@@ -145,7 +145,7 @@ function startConnect(deviceId: string, extraArgs: string[], sk: string): Connec
     const text = chunk
     chunk = ''
     try {
-      const evt = JSON.parse(text) as { event?: string; mountPath?: string }
+      const evt = JSON.parse(text) as { event?: string, mountPath?: string }
       if (evt.event === 'ready') resolveReady(String(evt.mountPath))
     } catch {
       // 未闭合/非 JSON 块:继续累积由后续行闭合;最终原文都在 stdout 供失败诊断。
@@ -156,7 +156,7 @@ function startConnect(deviceId: string, extraArgs: string[], sk: string): Connec
     stderr += String(c)
   })
   const exit = new Promise<CliResult>((resolve) => {
-    child.on('close', (code) => resolve({ code, stdout, stderr }))
+    child.on('close', code => resolve({ code, stdout, stderr }))
   })
   return {
     deviceId,
@@ -236,9 +236,9 @@ async function cleanupDeviceNodes(deviceId: string, sk: string): Promise<void> {
 }
 
 interface ExecResult {
-  stdout: string
-  stderr: string
   exitCode: number
+  stderr: string
+  stdout: string
 }
 
 function callShell(deviceId: string, command: string): Promise<ExecResult> {
@@ -259,7 +259,7 @@ async function main(): Promise<void> {
 
   const handles: ConnectHandle[] = []
   /** teardown 清单:节点只能由注册它的 SK 删除(admin 也会得 conflict)。 */
-  const cleanups: Array<{ deviceId: string; sk: string }> = [{ deviceId, sk: adminSk }]
+  const cleanups: Array<{ deviceId: string, sk: string }> = [{ deviceId, sk: adminSk }]
   let restrictedSkId: string | undefined
 
   // 逐断言收集失败:一条失败不阻断其余断言,最后统一汇总(退出码 0=全过)。
@@ -323,7 +323,7 @@ async function main(): Promise<void> {
 
     // 4) 断言③:registerPaths 收紧(段级前缀,scope 给足以隔离变量)。
     const issued = await step('③ 签发受限 SK', async () => {
-      const created = await cliJson<{ key: { id: string }; secret: string }>(
+      const created = await cliJson<{ key: { id: string }, secret: string }>(
         [
           'sk',
           'create',

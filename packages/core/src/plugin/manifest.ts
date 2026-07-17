@@ -8,26 +8,26 @@
  */
 
 import { z } from 'zod'
-import { TBError } from '../errors'
 import { assertSecureUrl } from '../tool/upstreamError'
+import { TBError } from '../errors'
 
 export type PluginKind = 'tool-provider' | 'context-provider'
 
 export const PLUGIN_KINDS: readonly PluginKind[] = ['tool-provider', 'context-provider']
 
-export type PluginAuth = { kind: 'platform-token' } | { kind: 'bearer'; secretRef: string }
+export type PluginAuth = { kind: 'platform-token' } | { kind: 'bearer', secretRef: string }
 
 export interface PluginManifest {
-  id: string
-  kind: PluginKind
-  /** "tool-provider/v1" | "context-provider/v1";前缀必须与 kind 一致。 */
-  interfaceVersion: string
+  auth: PluginAuth
+  enabled: boolean
   /** https:// 或 `binding:<name>`(平台内 service binding)。 */
   endpoint: string
-  auth: PluginAuth
   /** 如 "/healthz";必须以 '/' 开头。 */
   healthPath: string
-  enabled: boolean
+  id: string
+  /** "tool-provider/v1" | "context-provider/v1";前缀必须与 kind 一致。 */
+  interfaceVersion: string
+  kind: PluginKind
 }
 
 /** pluginToken 仅注册响应出现一次。 */
@@ -54,7 +54,7 @@ const manifestSchema = z.object({
     .regex(INTERFACE_VERSION_RE, 'interfaceVersion 须形如 <kind>/v<major>'),
   endpoint: z.string().min(1),
   auth: authSchema,
-  healthPath: z.string().regex(/^\//, "healthPath 须以 '/' 开头"),
+  healthPath: z.string().regex(/^\//, 'healthPath 须以 \'/\' 开头'),
   enabled: z.boolean(),
 })
 

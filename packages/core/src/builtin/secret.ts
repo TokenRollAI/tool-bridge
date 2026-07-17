@@ -5,15 +5,15 @@
  * `list` 只出 name + updatedAt;`resolve` 不出现在 cmd 表(仅供网关内部 Provider 解析引用名)。
  */
 
-import { TBError } from '../errors'
-import type { CmdSpec, HelpModel } from '../htbp/model'
 import type { SecretStoreImpl } from '../secret/secretStore'
+import type { CmdSpec, HelpModel } from '../htbp/model'
 import type { CallContext, TreePath } from '../types'
 import type { BuiltinModule } from './types'
 import { cmdPath, LIST_OPTS_SCHEMA, optListOptions, requireString, VOID_ACK } from './util'
+import { TBError } from '../errors'
 
-const DESCRIPTION =
-  'Upstream credential vault: write-only; mounts reference entries by name (authRef), values can never be read back (admin only)'
+const DESCRIPTION
+  = 'Upstream credential vault: write-only; mounts reference entries by name (authRef), values can never be read back (admin only)'
 
 /**
  * cmd 面的 name 守卫:含 ':' 的名字是平台内部保留命名空间(如 `plugin-token:<id>`),

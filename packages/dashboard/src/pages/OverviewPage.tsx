@@ -14,13 +14,13 @@ import {
   Trash2,
 } from 'lucide-react'
 import { Link } from 'react-router'
-import { EmptyState } from '@/components/EmptyState'
-import { KindBadge } from '@/components/KindBadge'
-import { PageHeader } from '@/components/PageHeader'
-import { Button } from '@/components/ui/button'
-import { Skeleton } from '@/components/ui/skeleton'
-import { clearHistory, historyScope } from '@/lib/history'
 import { useHealthz, useHistory, useStatus, useTree } from '@/lib/queries'
+import { clearHistory, historyScope } from '@/lib/history'
+import { EmptyState } from '@/components/EmptyState'
+import { PageHeader } from '@/components/PageHeader'
+import { Skeleton } from '@/components/ui/skeleton'
+import { KindBadge } from '@/components/KindBadge'
+import { Button } from '@/components/ui/button'
 import { useSession } from '@/lib/session'
 import { cn } from '@/lib/utils'
 
@@ -85,9 +85,9 @@ export function OverviewPage() {
   return (
     <div className="mx-auto w-full max-w-6xl px-4 py-5 sm:px-6 sm:py-7 lg:px-10 lg:py-9">
       <PageHeader
+        description="确认控制面状态，然后从根命名空间继续发现、授权与调用组织能力。"
         eyebrow="WORKSPACE / OVERVIEW"
         title="网关总览"
-        description="确认控制面状态，然后从根命名空间继续发现、授权与调用组织能力。"
       />
 
       <section className="relative mt-6 overflow-hidden rounded-xl border bg-card/70 p-5 sm:p-6">
@@ -113,9 +113,9 @@ export function OverviewPage() {
               </span>
               {health.isError && (
                 <button
-                  type="button"
                   className="text-[11px] text-primary underline-offset-4 hover:underline"
                   onClick={() => void health.refetch()}
+                  type="button"
                 >
                   重新检测
                 </button>
@@ -132,44 +132,59 @@ export function OverviewPage() {
             </p>
 
             <div className="mt-5 flex flex-col items-start gap-2.5 sm:flex-row sm:items-center">
-              {tree.isPending ? (
-                <Button disabled>
-                  <Loader2 className="animate-spin" />
-                  正在读取能力树
-                </Button>
-              ) : tree.isError ? (
-                <Button type="button" onClick={() => void tree.refetch()}>
-                  <RefreshCw />
-                  重新读取能力树
-                </Button>
-              ) : firstRoot ? (
-                <Button asChild>
-                  <Link to={`/nodes/${firstRoot.path}`}>
-                    继续探索能力树
-                    <ArrowRight />
-                  </Link>
-                </Button>
-              ) : (
-                <Button asChild>
-                  <Link to="/manage/registry">
-                    挂载第一个节点
-                    <ArrowRight />
-                  </Link>
-                </Button>
-              )}
+              {tree.isPending
+                ? (
+                    <Button disabled>
+                      <Loader2 className="animate-spin" />
+                      正在读取能力树
+                    </Button>
+                  )
+                : tree.isError
+                  ? (
+                      <Button onClick={() => void tree.refetch()} type="button">
+                        <RefreshCw />
+                        重新读取能力树
+                      </Button>
+                    )
+                  : firstRoot
+                    ? (
+                        <Button asChild>
+                          <Link to={`/nodes/${firstRoot.path}`}>
+                            继续探索能力树
+                            <ArrowRight />
+                          </Link>
+                        </Button>
+                      )
+                    : (
+                        <Button asChild>
+                          <Link to="/manage/registry">
+                            挂载第一个节点
+                            <ArrowRight />
+                          </Link>
+                        </Button>
+                      )}
               <span className="text-[11px] leading-5 text-muted-foreground">
-                {firstRoot ? (
-                  <>
-                    从 <span className="font-mono text-foreground">{firstRoot.path}</span>{' '}
-                    根节点开始
-                  </>
-                ) : tree.isError ? (
-                  '保留当前页面并重试，不会清除已有档案。'
-                ) : tree.isPending ? (
-                  '仅读取 depth=1 的根命名空间。'
-                ) : (
-                  '新节点挂载后会立即成为树入口。'
-                )}
+                {firstRoot
+                  ? (
+                      <>
+                        从
+                        {' '}
+                        <span className="font-mono text-foreground">{firstRoot.path}</span>
+                        {' '}
+                        根节点开始
+                      </>
+                    )
+                  : tree.isError
+                    ? (
+                        '保留当前页面并重试，不会清除已有档案。'
+                      )
+                    : tree.isPending
+                      ? (
+                          '仅读取 depth=1 的根命名空间。'
+                        )
+                      : (
+                          '新节点挂载后会立即成为树入口。'
+                        )}
               </span>
             </div>
           </div>
@@ -177,26 +192,26 @@ export function OverviewPage() {
           <div className="grid grid-cols-3 gap-px overflow-hidden rounded-lg border bg-border/70 text-center">
             <HeroMetric
               label="VERSION"
-              value={health.data ? `v${health.data.version}` : '—'}
               pending={health.isPending}
+              value={health.data ? `v${health.data.version}` : '—'}
             />
             <HeroMetric
               label="NODES"
-              value={status.data ? String(status.data.nodeCount) : status.isError ? '受限' : '—'}
               pending={status.isPending}
+              value={status.data ? String(status.data.nodeCount) : status.isError ? '受限' : '—'}
             />
             <HeroMetric
               label="ROOTS"
-              value={tree.data ? String(rootChildren.length) : tree.isError ? '受限' : '—'}
               pending={tree.isPending}
+              value={tree.data ? String(rootChildren.length) : tree.isError ? '受限' : '—'}
             />
           </div>
         </div>
       </section>
 
       <nav
-        className="mt-4 flex flex-col gap-1 rounded-lg border bg-card/40 p-2 lg:flex-row lg:items-stretch"
         aria-label="管理动作"
+        className="mt-4 flex flex-col gap-1 rounded-lg border bg-card/40 p-2 lg:flex-row lg:items-stretch"
       >
         <div className="flex items-center gap-2 px-2 py-2 lg:w-36 lg:shrink-0">
           <Activity className="size-4 text-primary" />
@@ -208,9 +223,9 @@ export function OverviewPage() {
         <div className="grid min-w-0 flex-1 gap-1 sm:grid-cols-2 lg:grid-cols-4">
           {QUICK_LINKS.map(({ to, label, desc, icon: Icon }) => (
             <Link
+              className="group flex min-w-0 items-center gap-2.5 rounded-md px-3 py-2 transition-colors hover:bg-secondary/55 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
               key={to}
               to={to}
-              className="group flex min-w-0 items-center gap-2.5 rounded-md px-3 py-2 transition-colors hover:bg-secondary/55 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
             >
               <span className="grid size-8 shrink-0 place-items-center rounded-md border bg-background/60 text-muted-foreground group-hover:text-primary">
                 <Icon className="size-3.5" />
@@ -231,147 +246,159 @@ export function OverviewPage() {
         <section className="rounded-lg border bg-card/45">
           <SectionHeader
             icon={Network}
-            title="能力树入口"
             meta={tree.data ? `${rootChildren.length} 个根节点` : undefined}
+            title="能力树入口"
           />
           <div className="border-t">
-            {tree.isPending ? (
-              <div className="grid gap-3 p-4">
-                <Skeleton className="h-14 w-full" />
-                <Skeleton className="h-14 w-full" />
-              </div>
-            ) : tree.isError ? (
-              <EmptyState
-                icon={Network}
-                title="无法读取能力树"
-                tone="danger"
-                className="border-0"
-                action={
-                  <Button variant="outline" size="sm" onClick={() => void tree.refetch()}>
-                    <RefreshCw />
-                    重新读取
-                  </Button>
-                }
-              >
-                <p>{tree.error.message}</p>
-              </EmptyState>
-            ) : rootChildren.length === 0 ? (
-              <EmptyState
-                icon={Boxes}
-                title="树还是空的"
-                className="border-0"
-                action={
-                  <Button asChild size="sm">
-                    <Link to="/manage/registry">挂载第一个节点</Link>
-                  </Button>
-                }
-              >
-                <p>工具、Context 或联邦服务挂载完成后，会立即成为这里的入口。</p>
-              </EmptyState>
-            ) : (
-              <div className="divide-y">
-                {rootChildren.map((node) => (
-                  <Link
-                    key={node.path}
-                    to={`/nodes/${node.path}`}
-                    className="group flex min-w-0 items-center gap-3 px-4 py-3.5 transition-colors hover:bg-secondary/45 sm:px-5"
-                    title={`打开根节点 ${node.path}`}
-                  >
-                    <span className="grid size-9 shrink-0 place-items-center rounded-md border bg-background/60 font-mono text-xs text-primary">
-                      {node.path.slice(0, 2).toUpperCase()}
-                    </span>
-                    <span className="min-w-0 flex-1">
-                      <span className="flex items-center gap-2">
-                        <span className="truncate font-mono text-sm">{node.path}</span>
-                        <KindBadge kind={node.kind} />
-                      </span>
-                      <span className="mt-1 block truncate text-xs text-muted-foreground">
-                        {node.description}
-                      </span>
-                    </span>
-                    <span className="hidden shrink-0 items-center gap-1 text-[11px] text-muted-foreground group-hover:text-primary sm:flex">
-                      打开节点
-                      <ArrowUpRight className="size-3.5 transition-transform group-hover:-translate-y-0.5 group-hover:translate-x-0.5" />
-                    </span>
-                  </Link>
-                ))}
-              </div>
-            )}
+            {tree.isPending
+              ? (
+                  <div className="grid gap-3 p-4">
+                    <Skeleton className="h-14 w-full" />
+                    <Skeleton className="h-14 w-full" />
+                  </div>
+                )
+              : tree.isError
+                ? (
+                    <EmptyState
+                      action={(
+                        <Button onClick={() => void tree.refetch()} size="sm" variant="outline">
+                          <RefreshCw />
+                          重新读取
+                        </Button>
+                      )}
+                      className="border-0"
+                      icon={Network}
+                      title="无法读取能力树"
+                      tone="danger"
+                    >
+                      <p>{tree.error.message}</p>
+                    </EmptyState>
+                  )
+                : rootChildren.length === 0
+                  ? (
+                      <EmptyState
+                        action={(
+                          <Button asChild size="sm">
+                            <Link to="/manage/registry">挂载第一个节点</Link>
+                          </Button>
+                        )}
+                        className="border-0"
+                        icon={Boxes}
+                        title="树还是空的"
+                      >
+                        <p>工具、Context 或联邦服务挂载完成后，会立即成为这里的入口。</p>
+                      </EmptyState>
+                    )
+                  : (
+                      <div className="divide-y">
+                        {rootChildren.map(node => (
+                          <Link
+                            className="group flex min-w-0 items-center gap-3 px-4 py-3.5 transition-colors hover:bg-secondary/45 sm:px-5"
+                            key={node.path}
+                            title={`打开根节点 ${node.path}`}
+                            to={`/nodes/${node.path}`}
+                          >
+                            <span className="grid size-9 shrink-0 place-items-center rounded-md border bg-background/60 font-mono text-xs text-primary">
+                              {node.path.slice(0, 2).toUpperCase()}
+                            </span>
+                            <span className="min-w-0 flex-1">
+                              <span className="flex items-center gap-2">
+                                <span className="truncate font-mono text-sm">{node.path}</span>
+                                <KindBadge kind={node.kind} />
+                              </span>
+                              <span className="mt-1 block truncate text-xs text-muted-foreground">
+                                {node.description}
+                              </span>
+                            </span>
+                            <span className="hidden shrink-0 items-center gap-1 text-[11px] text-muted-foreground group-hover:text-primary sm:flex">
+                              打开节点
+                              <ArrowUpRight className="size-3.5 transition-transform group-hover:-translate-y-0.5 group-hover:translate-x-0.5" />
+                            </span>
+                          </Link>
+                        ))}
+                      </div>
+                    )}
           </div>
         </section>
 
         <section className="rounded-lg border bg-card/45">
           <SectionHeader
-            icon={History}
-            title="最近调用"
-            meta={history.length > 0 ? `${history.length} 条本地记录` : undefined}
             action={
-              history.length > 0 ? (
-                <Button
-                  variant="ghost"
-                  size="icon-xs"
-                  aria-label="清空历史"
-                  title="清空历史"
-                  className="text-muted-foreground"
-                  onClick={() => clearHistory(active ? historyScope(active) : '')}
-                >
-                  <Trash2 />
-                </Button>
-              ) : undefined
+              history.length > 0
+                ? (
+                    <Button
+                      aria-label="清空历史"
+                      className="text-muted-foreground"
+                      onClick={() => clearHistory(active ? historyScope(active) : '')}
+                      size="icon-xs"
+                      title="清空历史"
+                      variant="ghost"
+                    >
+                      <Trash2 />
+                    </Button>
+                  )
+                : undefined
             }
+            icon={History}
+            meta={history.length > 0 ? `${history.length} 条本地记录` : undefined}
+            title="最近调用"
           />
           <div className="border-t">
-            {history.length === 0 ? (
-              <EmptyState
-                icon={TerminalSquare}
-                title="还没有调用记录"
-                className="border-0 py-9"
-                action={
-                  firstRoot ? (
-                    <Button asChild variant="outline" size="sm">
-                      <Link to={`/nodes/${firstRoot.path}`}>打开一个节点</Link>
-                    </Button>
-                  ) : undefined
-                }
-              >
-                <p>从任意节点发起调用后，这里只保存路径、结果和耗时；参数不会落盘。</p>
-              </EmptyState>
-            ) : (
-              <div className="divide-y">
-                {history.slice(0, 8).map((record) => (
-                  <Link
-                    key={`${record.at}:${record.path}:${record.tool}`}
-                    to={`/nodes/${record.path}`}
-                    className="flex min-w-0 items-center gap-3 px-4 py-3 hover:bg-secondary/45"
+            {history.length === 0
+              ? (
+                  <EmptyState
+                    action={
+                      firstRoot
+                        ? (
+                            <Button asChild size="sm" variant="outline">
+                              <Link to={`/nodes/${firstRoot.path}`}>打开一个节点</Link>
+                            </Button>
+                          )
+                        : undefined
+                    }
+                    className="border-0 py-9"
+                    icon={TerminalSquare}
+                    title="还没有调用记录"
                   >
-                    <span
-                      className={cn(
-                        'size-2 shrink-0 rounded-full',
-                        record.ok ? 'bg-ok' : 'bg-destructive',
-                      )}
-                      title={record.ok ? 'ok' : (record.code ?? 'error')}
-                    />
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate font-mono text-xs">{record.path}</span>
-                      <span className="mt-0.5 block truncate font-mono text-[10px] text-muted-foreground">
-                        {record.tool}
-                      </span>
-                    </span>
-                    <span className="shrink-0 text-right font-mono text-[10px] text-muted-foreground tabular-nums">
-                      {!record.ok && (
-                        <span className="block max-w-20 truncate text-destructive">
-                          {record.code}
+                    <p>从任意节点发起调用后，这里只保存路径、结果和耗时；参数不会落盘。</p>
+                  </EmptyState>
+                )
+              : (
+                  <div className="divide-y">
+                    {history.slice(0, 8).map(record => (
+                      <Link
+                        className="flex min-w-0 items-center gap-3 px-4 py-3 hover:bg-secondary/45"
+                        key={`${record.at}:${record.path}:${record.tool}`}
+                        to={`/nodes/${record.path}`}
+                      >
+                        <span
+                          className={cn(
+                            'size-2 shrink-0 rounded-full',
+                            record.ok ? 'bg-ok' : 'bg-destructive',
+                          )}
+                          title={record.ok ? 'ok' : (record.code ?? 'error')}
+                        />
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate font-mono text-xs">{record.path}</span>
+                          <span className="mt-0.5 block truncate font-mono text-[10px] text-muted-foreground">
+                            {record.tool}
+                          </span>
                         </span>
-                      )}
-                      <span className="block">
-                        {record.ok ? `${record.ms} ms · ` : ''}
-                        {relTime(record.at)}
-                      </span>
-                    </span>
-                  </Link>
-                ))}
-              </div>
-            )}
+                        <span className="shrink-0 text-right font-mono text-[10px] text-muted-foreground tabular-nums">
+                          {!record.ok && (
+                            <span className="block max-w-20 truncate text-destructive">
+                              {record.code}
+                            </span>
+                          )}
+                          <span className="block">
+                            {record.ok ? `${record.ms} ms · ` : ''}
+                            {relTime(record.at)}
+                          </span>
+                        </span>
+                      </Link>
+                    ))}
+                  </div>
+                )}
           </div>
         </section>
       </div>
@@ -385,17 +412,19 @@ function HeroMetric({
   pending,
 }: {
   label: string
-  value: string
   pending?: boolean
+  value: string
 }) {
   return (
     <div className="bg-background/80 px-3 py-3.5">
       <p className="font-mono text-[10px] tracking-[0.14em] text-muted-foreground">{label}</p>
-      {pending ? (
-        <Skeleton className="mx-auto mt-2 h-5 w-12" />
-      ) : (
-        <p className="mt-1.5 font-mono text-sm text-foreground tabular-nums">{value}</p>
-      )}
+      {pending
+        ? (
+            <Skeleton className="mx-auto mt-2 h-5 w-12" />
+          )
+        : (
+            <p className="mt-1.5 font-mono text-sm text-foreground tabular-nums">{value}</p>
+          )}
     </div>
   )
 }
@@ -406,10 +435,10 @@ function SectionHeader({
   meta,
   action,
 }: {
-  icon: typeof Activity
-  title: string
-  meta?: string
   action?: React.ReactNode
+  icon: typeof Activity
+  meta?: string
+  title: string
 }) {
   return (
     <div className="flex min-h-12 items-center gap-2.5 px-4 py-3 sm:px-5">

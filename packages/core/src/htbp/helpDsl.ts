@@ -7,8 +7,8 @@
  * (消费方对未知行必须忽略 = 向前兼容)。
  */
 
-import { HTBP_HELP_HEADER, HTBP_VERSION } from '../version'
 import type { HelpJson, HelpModel } from './model'
+import { HTBP_HELP_HEADER, HTBP_VERSION } from '../version'
 import { collapseToOneLine } from './summary'
 
 /** node 行的路径显示:根路径(空串或 '/')渲染为 '/'。 */
@@ -30,7 +30,7 @@ function nodeLine(path: string, kind: string, description: string): string {
  */
 function attrLines(key: string, value: string): string[] {
   const [first = '', ...rest] = value.split('\n')
-  return [`  ${key} ${first.trimEnd()}`, ...rest.map((line) => `    ${line.trimEnd()}`)]
+  return [`  ${key} ${first.trimEnd()}`, ...rest.map(line => `    ${line.trimEnd()}`)]
 }
 
 /**
@@ -118,10 +118,10 @@ export function renderHelpJson(model: HelpModel): HelpJson {
   if (model.hint !== undefined) json.hint = model.hint
   if (model.note !== undefined) json.note = model.note
   if (model.feedback !== undefined && model.feedback.length > 0) {
-    json.feedback = model.feedback.map((f) => ({ id: f.id, title: f.title, score: f.score }))
+    json.feedback = model.feedback.map(f => ({ id: f.id, title: f.title, score: f.score }))
   }
   if (model.children) {
-    json.children = model.children.map((child) => ({
+    json.children = model.children.map(child => ({
       path: child.path,
       kind: child.kind,
       description: child.description,
@@ -132,9 +132,9 @@ export function renderHelpJson(model: HelpModel): HelpJson {
 
 /** parseHelpDsl 的产物:断言所需的最小字段集(向前兼容:未知行忽略)。 */
 export interface ParsedHelp {
+  cmds: Array<{ method: string, name: string, path: string, scope?: string }>
   htbp: string
-  cmds: Array<{ name: string; method: string; path: string; scope?: string }>
-  nodes: Array<{ path: string; kind: string; description: string }>
+  nodes: Array<{ description: string, kind: string, path: string }>
 }
 
 const HEADER_RE = /^htbp\s+(\S+)\s*$/

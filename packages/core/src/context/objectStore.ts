@@ -13,60 +13,60 @@ declare const TextDecoder: { new (): { decode(input: Uint8Array): string } }
 
 /** 最小读流(结构兼容全局 ReadableStream<Uint8Array>)。 */
 export interface ObjectBodyStream {
+  cancel?(reason?: unknown): Promise<void>
   getReader(): {
-    read(): Promise<{ done: boolean; value?: Uint8Array }>
-    releaseLock(): void
     /** 消费方(如 Node undici 的 Response 收尾)可能调用;实现方建议提供。 */
     cancel?(reason?: unknown): Promise<void>
+    read(): Promise<{ done: boolean, value?: Uint8Array }>
+    releaseLock(): void
   }
-  cancel?(reason?: unknown): Promise<void>
 }
 
 /** put 可接受的 body 形态(BodyInit 子集;core 无 DOM lib 故自声明)。 */
 export type ObjectBody = string | Uint8Array | ArrayBuffer | ObjectBodyStream
 
 export interface ObjectMeta {
-  key: string
-  etag: string
-  size: number
   contentType?: string
-  updatedAt: string
+  etag: string
+  key: string
   /**
    * 用户 metadata。undefined 表示后端 list 未返回(如 S3 ListObjectsV2),
    * 区别于空对象 {}(确认无 metadata);Search 对 undefined 按需 head 补取。
    */
   metadata?: Record<string, string>
+  size: number
+  updatedAt: string
 }
 
 export interface ObjectPutOptions {
   contentType?: string
-  metadata?: Record<string, string>
   /** 与现存对象 etag 不符(含对象不存在)→ TBError conflict。 */
   ifMatchEtag?: string
+  metadata?: Record<string, string>
 }
 
 export interface ObjectListOptions {
   cursor?: string
-  limit?: number
   /** 提供时浅层列举:共同子前缀折叠为 { prefix }(含 delimiter 本身)。 */
   delimiter?: string
+  limit?: number
 }
 
 export interface ObjectListResult {
+  cursor?: string
   /** 文件与折叠前缀按字典序混排(与 R2/S3 行为一致)。 */
   items: Array<ObjectMeta | { prefix: string }>
-  cursor?: string
 }
 
 export interface ObjectStore {
-  head(key: string): Promise<ObjectMeta | null>
-  get(key: string): Promise<{ meta: ObjectMeta; body: ObjectBodyStream } | null>
-  put(key: string, body: ObjectBody, opts?: ObjectPutOptions): Promise<ObjectMeta>
   /** 幂等:不存在静默。 */
   delete(key: string): Promise<void>
+  get(key: string): Promise<{ body: ObjectBodyStream, meta: ObjectMeta } | null>
+  head(key: string): Promise<ObjectMeta | null>
   list(prefix: string, opts?: ObjectListOptions): Promise<ObjectListResult>
   /** 生成限时直连 URL;后端不支持则缺省(provider 退化到 relayRefUrl)。 */
   presign?(key: string, ttlSec: number): Promise<string>
+  put(key: string, body: ObjectBody, opts?: ObjectPutOptions): Promise<ObjectMeta>
 }
 
 /** 读尽流并拼接为单个 Uint8Array(二进制安全)。 */
@@ -142,7 +142,7 @@ export class MemoryObjectStore implements ObjectStore {
     return this.m.get(key)?.meta ?? null
   }
 
-  async get(key: string): Promise<{ meta: ObjectMeta; body: ObjectBodyStream } | null> {
+  async get(key: string): Promise<{ body: ObjectBodyStream, meta: ObjectMeta } | null> {
     const stored = this.m.get(key)
     if (!stored) return null
     return { meta: stored.meta, body: bytesToObjectStream(stored.bytes) }
@@ -173,9 +173,9 @@ export class MemoryObjectStore implements ObjectStore {
   async list(prefix: string, opts?: ObjectListOptions): Promise<ObjectListResult> {
     const delimiter = opts?.delimiter
     const limit = opts?.limit ?? 1000
-    const keys = [...this.m.keys()].filter((k) => k.startsWith(prefix)).sort()
+    const keys = [...this.m.keys()].filter(k => k.startsWith(prefix)).sort()
     // sortKey:文件 = key、折叠前缀 = 前缀串;keys 已按字典序,折叠后仍有序。
-    const entries: Array<{ sortKey: string; item: ObjectMeta | { prefix: string } }> = []
+    const entries: Array<{ item: ObjectMeta | { prefix: string }, sortKey: string }> = []
     const seenPrefixes = new Set<string>()
     for (const key of keys) {
       if (delimiter !== undefined) {
@@ -197,14 +197,14 @@ export class MemoryObjectStore implements ObjectStore {
     let start = 0
     if (opts?.cursor !== undefined) {
       const cursor = opts.cursor
-      start = entries.findIndex((e) => e.sortKey > cursor)
+      start = entries.findIndex(e => e.sortKey > cursor)
       if (start < 0) return { items: [] }
     }
     const page = entries.slice(start, start + limit)
     const hasMore = start + limit < entries.length
     const last = page[page.length - 1]
     return hasMore && last
-      ? { items: page.map((e) => e.item), cursor: last.sortKey }
-      : { items: page.map((e) => e.item) }
+      ? { items: page.map(e => e.item), cursor: last.sortKey }
+      : { items: page.map(e => e.item) }
   }
 }

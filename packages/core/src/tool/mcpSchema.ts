@@ -7,11 +7,11 @@
  * renderHelpDsl/renderHelpJson 渲染(DSL↔JSON 语义等价)。
  */
 
-import { cmdPath } from '../builtin/util'
 import type { CmdSpec, HelpModel } from '../htbp/model'
-import { summarizeOneLine } from '../htbp/summary'
 import type { NodeKind, TreePath } from '../types'
 import type { ToolSpec } from './types'
+import { summarizeOneLine } from '../htbp/summary'
+import { cmdPath } from '../builtin/util'
 
 /**
  * 单个(虚拟化后)ToolSpec → CmdSpec;index=true 时略去 inputSchema/returns(索引形态),
@@ -46,14 +46,14 @@ function toolToCmd(nodePath: TreePath, tool: ToolSpec, index: boolean): CmdSpec 
  */
 export function toolsToHelpModel(
   nodePath: TreePath,
-  node: { kind: NodeKind; description: string },
+  node: { description: string, kind: NodeKind },
   tools: ToolSpec[],
   opts: { index?: boolean } = {},
 ): HelpModel {
   const index = opts.index === true
   const model: HelpModel = {
     node: { path: nodePath, kind: node.kind, description: node.description },
-    cmds: tools.map((tool) => toolToCmd(nodePath, tool, index)),
+    cmds: tools.map(tool => toolToCmd(nodePath, tool, index)),
   }
   if (index) {
     model.index = true
@@ -70,7 +70,7 @@ export function toolsToHelpModel(
  */
 export function toolHelpModel(
   nodePath: TreePath,
-  node: { kind: NodeKind; description: string },
+  node: { description: string, kind: NodeKind },
   tool: ToolSpec,
 ): HelpModel {
   return {

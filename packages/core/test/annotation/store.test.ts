@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { ANNOTATION_TEXT_MAX, AnnotationStore } from '../../src/annotation/store'
-import { isTBError } from '../../src/errors'
 import { MemoryStateStore } from '../../src/store'
+import { isTBError } from '../../src/errors'
 
 const NOW = '2026-07-08T00:00:00.000Z'
 
@@ -77,14 +77,14 @@ describe('AnnotationStore', () => {
     await anno.set('a', '3', 'k', NOW)
     await anno.set('c', '4', 'k', NOW)
     const under = await anno.list('a/b')
-    expect(under.map((e) => e.path)).toEqual(['a/b'])
+    expect(under.map(e => e.path)).toEqual(['a/b'])
     const all = await anno.list()
-    expect(all.map((e) => e.path)).toEqual(['a', 'a/b', 'a/bx', 'c'])
+    expect(all.map(e => e.path)).toEqual(['a', 'a/b', 'a/bx', 'c'])
   })
 
   it('list 跳过脏值', async () => {
     await store.put('annotation:bad', { nope: true })
     await anno.set('good', 'x', 'k', NOW)
-    expect((await anno.list()).map((e) => e.path)).toEqual(['good'])
+    expect((await anno.list()).map(e => e.path)).toEqual(['good'])
   })
 })

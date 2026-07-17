@@ -1,4 +1,3 @@
-import { hostname } from 'node:os'
 import {
   type ContextProvider,
   type DeviceExpose,
@@ -13,15 +12,14 @@ import {
   type TreePath,
   validatePath,
 } from '@tool-bridge/core'
-import { runBootstrap } from '@tool-bridge/gateway/bootstrap'
 import {
   createTbApp,
   dispatchContextCmd,
   type TbAppDeps,
   type UpstreamProvider,
 } from '@tool-bridge/gateway/tbApp'
-import pkg from '../package.json' with { type: 'json' }
-import { openConnection } from './connect'
+import { runBootstrap } from '@tool-bridge/gateway/bootstrap'
+import { hostname } from 'node:os'
 import type {
   ConnectOptions,
   SdkConnection,
@@ -29,6 +27,8 @@ import type {
   ToolBridgeConfig,
   ToolProviderLike,
 } from './types'
+import pkg from '../package.json' with { type: 'json' }
+import { openConnection } from './connect'
 
 /** SDK 进程内 Provider 的保留 provider id(不经注册面,只由 SDK 落库)。 */
 const LOCAL_PROVIDER_ID = '@local'
@@ -38,9 +38,9 @@ const REGISTERED_BY_SDK = 'system:sdk'
 
 const DEFAULT_MAX_HOPS = 4
 
-type Registration =
-  | { kind: 'tool'; path: TreePath; provider: ToolProviderLike; meta?: Partial<NodeInput> }
-  | { kind: 'context'; path: TreePath; provider: ContextProvider; meta?: Partial<NodeInput> }
+type Registration
+  = | { kind: 'tool', meta?: Partial<NodeInput>, path: TreePath, provider: ToolProviderLike }
+    | { kind: 'context', meta?: Partial<NodeInput>, path: TreePath, provider: ContextProvider }
 
 /** hostname 小写,非法路径段字符替换为 '-'(与 CLI 同规则,不持久化)。 */
 function normalizeDeviceId(input: string): string {
@@ -63,7 +63,7 @@ function upstreamOf(provider: ToolProviderLike): UpstreamProvider {
 
 /** ToolSpec → hello 帧 nodes[].cmds 元素(同形收窄;inputSchema 原样上送作 ~help 数据源)。 */
 function cmdsOf(specs: Awaited<ReturnType<ToolProviderLike['List']>>): DeviceNodeCmd[] {
-  return specs.map((t) => ({
+  return specs.map(t => ({
     name: t.name,
     ...(t.description !== undefined ? { description: t.description } : {}),
     ...(t.inputSchema !== undefined ? { inputSchema: t.inputSchema } : {}),
@@ -75,9 +75,9 @@ function cmdsOf(specs: Awaited<ReturnType<ToolProviderLike['List']>>): DeviceNod
 /** 嵌入式运行一个 TB 实例。 */
 export function createToolBridge(config: ToolBridgeConfig): ToolBridge {
   const state = config.state
-  const secrets =
-    config.secrets ??
-    new SecretStoreImpl(state, config.encryptionKey ?? process.env.TB_SECRET_ENCRYPTION_KEY)
+  const secrets
+    = config.secrets
+      ?? new SecretStoreImpl(state, config.encryptionKey ?? process.env.TB_SECRET_ENCRYPTION_KEY)
 
   // 进程内 provider 表(Q14:register* 同步登记;NodeRegistry 写延迟到首次 fetch/connect 前)。
   const registrations = new Map<TreePath, Registration>()
@@ -116,8 +116,8 @@ export function createToolBridge(config: ToolBridgeConfig): ToolBridge {
         description: meta.description ?? '',
         ...(meta.virtualize !== undefined ? { virtualize: meta.virtualize } : {}),
         config:
-          meta.config ??
-          (reg.kind === 'tool'
+          meta.config
+          ?? (reg.kind === 'tool'
             ? { kind: 'tool', provider: LOCAL_PROVIDER_ID }
             : { kind: 'context', provider: LOCAL_PROVIDER_ID }),
       }
@@ -194,9 +194,9 @@ export function createToolBridge(config: ToolBridgeConfig): ToolBridge {
 
   /** 设备侧 call 帧派发:path 相对 mountPath = 本实例注册路径。 */
   const handler = async (call: {
+    arguments: Record<string, unknown>
     path: string
     tool: string
-    arguments: Record<string, unknown>
   }): Promise<unknown> => {
     const reg = registrations.get(normalizePath(call.path))
     if (reg === undefined) throw TBError.notFound(`device path not exposed:'${call.path}'`)
@@ -220,8 +220,8 @@ export function createToolBridge(config: ToolBridgeConfig): ToolBridge {
     },
 
     connect(remoteBaseUrl: string, sk: string, opts?: ConnectOptions): SdkConnection {
-      const deviceId =
-        opts?.deviceId !== undefined && opts.deviceId.trim() !== ''
+      const deviceId
+        = opts?.deviceId !== undefined && opts.deviceId.trim() !== ''
           ? normalizeDeviceId(opts.deviceId)
           : normalizeDeviceId(hostname())
       return openConnection({

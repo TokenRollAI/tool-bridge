@@ -3,8 +3,8 @@ import { defineConfig, globalIgnores } from 'eslint/config'
 import unusedImports from 'eslint-plugin-unused-imports'
 import perfectionist from 'eslint-plugin-perfectionist'
 import reactRefresh from 'eslint-plugin-react-refresh'
-import stylistic from '@stylistic/eslint-plugin'
 import reactHooks from 'eslint-plugin-react-hooks'
+import stylistic from '@stylistic/eslint-plugin'
 import importPlugin from 'eslint-plugin-import'
 import tseslint from 'typescript-eslint'
 import jsonc from 'eslint-plugin-jsonc'
@@ -66,7 +66,9 @@ export default [
       'perfectionist/sort-named-exports': ['error', { type: 'natural' }],
       'perfectionist/sort-named-imports': ['error', { type: 'natural' }],
       'perfectionist/sort-object-types': ['error', { type: 'natural' }],
-      'perfectionist/sort-objects': ['error', { type: 'natural' }],
+      // sort-objects 关掉：会重排顺序敏感的选项对象（如 useInfiniteQuery 的
+      // getNextPageParam/queryFn 顺序影响 TanStack 类型推断），破坏语义。
+      'perfectionist/sort-objects': 'off',
       'unused-imports/no-unused-imports': 'error',
       'unused-imports/no-unused-vars': 'error',
     },
@@ -76,7 +78,8 @@ export default [
     extends: [reactRefresh.configs.vite],
     files: ['packages/dashboard/**/*.{ts,tsx,js,jsx}'],
     plugins: {
-      'react-hooks': reactHooks,
+      // v7 的 configs.flat 形状与 eslint Plugin 类型不严格兼容，运行时只用其 rules；就地放宽。
+      'react-hooks': /** @type {import('eslint').ESLint.Plugin} */ (reactHooks),
     },
     rules: {
       'react-hooks/exhaustive-deps': 'warn',

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
+import type { CallContext } from '../../src/types'
 import { createStatusModule } from '../../src/builtin/status'
 import { isTBError } from '../../src/errors'
-import type { CallContext } from '../../src/types'
 
 const ctx: CallContext = { keyId: 'k', owner: 'user:admin', scopes: [], traceId: 't' }
 
@@ -10,7 +10,7 @@ describe('builtin status 模块', () => {
 
   it('help():单 cmd get,scope=read', () => {
     const help = mod.help('system/status')
-    expect(help.cmds.map((c) => c.name)).toEqual(['get'])
+    expect(help.cmds.map(c => c.name)).toEqual(['get'])
     expect(help.cmds[0]?.scope).toBe('read')
   })
 
@@ -21,7 +21,7 @@ describe('builtin status 模块', () => {
 
   it('未知 cmd → invalid_argument', async () => {
     await expect(mod.dispatch('list', {}, ctx)).rejects.toSatisfy(
-      (e) => isTBError(e) && e.code === 'invalid_argument',
+      e => isTBError(e) && e.code === 'invalid_argument',
     )
   })
 })

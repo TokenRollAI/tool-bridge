@@ -1,17 +1,17 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { SKRegistryStore } from '../../src/auth/sk'
+import type { PluginManifest, PluginRegistration } from '../../src/plugin/manifest'
+import type { BuiltinModule } from '../../src/builtin/types'
+import type { CallContext } from '../../src/types'
 import {
   createPluginModule,
   type PluginHealthRecord,
   type PluginProbeResult,
   pluginTokenSecretName,
 } from '../../src/builtin/plugin'
-import type { BuiltinModule } from '../../src/builtin/types'
-import { isTBError } from '../../src/errors'
-import type { PluginManifest, PluginRegistration } from '../../src/plugin/manifest'
-import { base64urlEncode, SecretStoreImpl } from '../../src/secret/secretStore'
 import { KEY_PLUGIN, KEY_PLUGIN_HEALTH, KEY_PLUGIN_META, MemoryStateStore } from '../../src/store'
-import type { CallContext } from '../../src/types'
+import { base64urlEncode, SecretStoreImpl } from '../../src/secret/secretStore'
+import { SKRegistryStore } from '../../src/auth/sk'
+import { isTBError } from '../../src/errors'
 
 const NOW = '2026-07-07T00:00:00.000Z'
 const ctx: CallContext = { keyId: 'k', owner: 'user:admin', scopes: [], traceId: 't' }
@@ -34,13 +34,13 @@ const DESCRIBE = {
   capabilities: ['search'],
 }
 
-const HELP = { cmds: ['List', 'Get', 'Update', 'Write', 'Search'].map((name) => ({ name })) }
+const HELP = { cmds: ['List', 'Get', 'Update', 'Write', 'Search'].map(name => ({ name })) }
 
 function makeHarness(
   overrides: {
-    probe?: (m: PluginManifest) => Promise<PluginProbeResult>
     describe?: unknown
     help?: unknown
+    probe?: (m: PluginManifest) => Promise<PluginProbeResult>
   } = {},
 ) {
   const store = new MemoryStateStore()
@@ -74,7 +74,7 @@ describe('builtin plugin 模块', () => {
 
   it('help():cmd 表 = list/get/write/update/delete/health,全 admin scope', () => {
     const help = h.mod.help('system/plugin')
-    expect(help.cmds.map((c) => c.name).sort()).toEqual([
+    expect(help.cmds.map(c => c.name).sort()).toEqual([
       'delete',
       'get',
       'health',
@@ -82,7 +82,7 @@ describe('builtin plugin 模块', () => {
       'update',
       'write',
     ])
-    expect(help.cmds.every((c) => c.scope === 'admin')).toBe(true)
+    expect(help.cmds.every(c => c.scope === 'admin')).toBe(true)
   })
 
   it('write 全流程:探活 → 契约校验 → mint pluginToken(platform-token)→ 存 manifest/meta/health', async () => {
@@ -124,7 +124,7 @@ describe('builtin plugin 模块', () => {
     const second = (await h.mod.dispatch('write', { ...MANIFEST }, ctx)) as PluginRegistration
     expect(second.pluginToken).not.toBe(first.pluginToken)
     await expect(h.sk.get(firstSkId)).rejects.toSatisfy(
-      (e) => isTBError(e) && e.code === 'not_found',
+      e => isTBError(e) && e.code === 'not_found',
     )
     expect(await h.secrets.resolve(pluginTokenSecretName(MANIFEST.id))).toBe(second.pluginToken)
   })
@@ -139,7 +139,7 @@ describe('builtin plugin 模块', () => {
   it('探活失败 → unavailable(retryable)拒注册,不落盘', async () => {
     const failing = makeHarness({ probe: async () => ({ healthy: false, detail: 'HTTP 500' }) })
     await expect(failing.mod.dispatch('write', { ...MANIFEST }, ctx)).rejects.toSatisfy(
-      (e) => isTBError(e) && e.code === 'unavailable' && e.retryable === true,
+      e => isTBError(e) && e.code === 'unavailable' && e.retryable === true,
     )
     expect(await failing.store.get(KEY_PLUGIN + MANIFEST.id)).toBeNull()
     expect(failing.fetchContract).not.toHaveBeenCalled()
@@ -148,14 +148,14 @@ describe('builtin plugin 模块', () => {
   it('契约缺必需方法 → invalid_argument 拒注册', async () => {
     const missing = makeHarness({ help: { cmds: [{ name: 'List' }, { name: 'Get' }] } })
     await expect(missing.mod.dispatch('write', { ...MANIFEST }, ctx)).rejects.toSatisfy(
-      (e) => isTBError(e) && e.code === 'invalid_argument' && e.message.includes('Update'),
+      e => isTBError(e) && e.code === 'invalid_argument' && e.message.includes('Update'),
     )
     expect(await missing.store.get(KEY_PLUGIN + MANIFEST.id)).toBeNull()
   })
 
   it('manifest 形状非法 → invalid_argument(不探活)', async () => {
     await expect(h.mod.dispatch('write', { ...MANIFEST, id: 'a/b' }, ctx)).rejects.toSatisfy(
-      (e) => isTBError(e) && e.code === 'invalid_argument',
+      e => isTBError(e) && e.code === 'invalid_argument',
     )
     expect(h.probe).not.toHaveBeenCalled()
   })
@@ -170,12 +170,12 @@ describe('builtin plugin 模块', () => {
     expect(updated).toEqual({ ...MANIFEST, enabled: false })
     await expect(
       h.mod.dispatch('update', { id: MANIFEST.id, patch: { id: 'other' } }, ctx),
-    ).rejects.toSatisfy((e) => isTBError(e) && e.code === 'invalid_argument')
+    ).rejects.toSatisfy(e => isTBError(e) && e.code === 'invalid_argument')
     await expect(
       h.mod.dispatch('update', { id: MANIFEST.id, patch: { kind: 'tool-provider' } }, ctx),
-    ).rejects.toSatisfy((e) => isTBError(e) && e.code === 'invalid_argument') // interfaceVersion 前缀不符
+    ).rejects.toSatisfy(e => isTBError(e) && e.code === 'invalid_argument') // interfaceVersion 前缀不符
     await expect(h.mod.dispatch('update', { id: 'nope', patch: {} }, ctx)).rejects.toSatisfy(
-      (e) => isTBError(e) && e.code === 'not_found',
+      e => isTBError(e) && e.code === 'not_found',
     )
   })
 
@@ -220,7 +220,7 @@ describe('builtin plugin 模块', () => {
         { id: MANIFEST.id, patch: { endpoint: 'https://dead.example.com' } },
         ctx,
       ),
-    ).rejects.toSatisfy((e) => isTBError(e) && e.code === 'unavailable' && e.retryable === true)
+    ).rejects.toSatisfy(e => isTBError(e) && e.code === 'unavailable' && e.retryable === true)
     const stored = (await h.store.get(KEY_PLUGIN + MANIFEST.id)) as PluginManifest
     expect(stored.endpoint).toBe(MANIFEST.endpoint)
   })
@@ -234,7 +234,7 @@ describe('builtin plugin 模块', () => {
       ctx,
     )) as Record<string, unknown>
     expect(updated.pluginToken).toBeUndefined()
-    await expect(h.sk.get(skId)).rejects.toSatisfy((e) => isTBError(e) && e.code === 'not_found')
+    await expect(h.sk.get(skId)).rejects.toSatisfy(e => isTBError(e) && e.code === 'not_found')
     expect(await h.secrets.resolve(pluginTokenSecretName(MANIFEST.id))).toBeUndefined()
     expect(
       ((await h.store.get(KEY_PLUGIN + MANIFEST.id)) as { tokenSkId?: string }).tokenSkId,
@@ -270,7 +270,7 @@ describe('builtin plugin 模块', () => {
     expect(await h.store.get(KEY_PLUGIN_HEALTH + MANIFEST.id)).toBeNull()
     expect(await h.store.get(KEY_PLUGIN_META + MANIFEST.id)).toBeNull()
     expect(await h.secrets.resolve(pluginTokenSecretName(MANIFEST.id))).toBeUndefined()
-    await expect(h.sk.get(skId)).rejects.toSatisfy((e) => isTBError(e) && e.code === 'not_found')
+    await expect(h.sk.get(skId)).rejects.toSatisfy(e => isTBError(e) && e.code === 'not_found')
     // 重复 delete 幂等。
     await expect(h.mod.dispatch('delete', { id: MANIFEST.id }, ctx)).resolves.toEqual({ ok: true })
   })
@@ -294,13 +294,13 @@ describe('builtin plugin 模块', () => {
     expect(record.consecutiveFailures).toBe(0)
 
     await expect(flappy.mod.dispatch('health', { id: 'nope' }, ctx)).rejects.toSatisfy(
-      (e) => isTBError(e) && e.code === 'not_found',
+      e => isTBError(e) && e.code === 'not_found',
     )
   })
 
   it('未知 cmd → invalid_argument', async () => {
     await expect(h.mod.dispatch('probe', {}, ctx)).rejects.toSatisfy(
-      (e) => isTBError(e) && e.code === 'invalid_argument',
+      e => isTBError(e) && e.code === 'invalid_argument',
     )
   })
 })

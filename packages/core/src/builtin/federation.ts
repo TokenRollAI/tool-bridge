@@ -6,21 +6,21 @@
  * `list` 输出合并视图(标注 source:env|store,env 条目 removable=false)。
  */
 
-import { TBError } from '../errors'
 import type { CmdSpec, HelpModel } from '../htbp/model'
-import { normalizeAllowHost, type RemoteAllowlistStore } from '../tool/allowlist'
 import type { CallContext, TreePath } from '../types'
 import type { BuiltinModule } from './types'
+import { normalizeAllowHost, type RemoteAllowlistStore } from '../tool/allowlist'
 import { cmdPath, requireString, VOID_ACK } from './util'
+import { TBError } from '../errors'
 
-const DESCRIPTION =
-  'Remote federation host allowlist: which hosts kind=remote nodes may connect to (env baseline is read-only; admin only)'
+const DESCRIPTION
+  = 'Remote federation host allowlist: which hosts kind=remote nodes may connect to (env baseline is read-only; admin only)'
 
 /** list 合并视图的一行:host + 来源 + 是否可删 + 运行时条目的写入时间。 */
 export interface FederationHost {
   host: string
-  source: 'env' | 'store'
   removable: boolean
+  source: 'env' | 'store'
   updatedAt?: string
 }
 
@@ -71,16 +71,16 @@ function federationCmds(nodePath: TreePath): CmdSpec[] {
 }
 
 export interface FederationModuleDeps {
-  store: RemoteAllowlistStore
   /** 部署期 env 白名单基线(只读、不可删;来自 TB_REMOTE_ALLOWLIST)。 */
   base: string[]
   now: () => string
+  store: RemoteAllowlistStore
 }
 
 /** 合并 env 基线与运行时条目为 list 视图(env 优先标注,去重)。 */
 function mergedView(
   base: string[],
-  entries: { host: string; updatedAt: string }[],
+  entries: { host: string, updatedAt: string }[],
 ): FederationHost[] {
   const byHost = new Map<string, FederationHost>()
   for (const raw of base) {
@@ -119,14 +119,14 @@ export function createFederationModule(deps: FederationModuleDeps): BuiltinModul
         case 'add': {
           const host = normalizeAllowHost(requireString(args, 'host'))
           // 已在 env 基线中 → 无需(也不能)增删;明确报错,避免"加了却看不到 store 条目"的困惑。
-          if (deps.base.some((b) => b.trim().toLowerCase() === host)) {
+          if (deps.base.some(b => b.trim().toLowerCase() === host)) {
             throw new TBError('invalid_argument', `host 已在部署基线(env)中,无需添加:'${host}'`)
           }
           return await deps.store.add(host, deps.now())
         }
         case 'remove': {
           const host = normalizeAllowHost(requireString(args, 'host'))
-          if (deps.base.some((b) => b.trim().toLowerCase() === host)) {
+          if (deps.base.some(b => b.trim().toLowerCase() === host)) {
             throw new TBError(
               'invalid_argument',
               `env 基线条目不可删除:'${host}'(改 TB_REMOTE_ALLOWLIST 并重新部署)`,

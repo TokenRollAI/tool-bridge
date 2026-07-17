@@ -1,23 +1,23 @@
 import { Command } from 'commander'
+import { guard, printJson, printLine, table } from '../output'
 import { resolveTarget, withGlobalOpts } from '../args'
 import { apiJson, CliError } from '../http'
-import { guard, printJson, printLine, table } from '../output'
 
 interface FeedbackGlobalOpts {
-  json?: boolean
   baseUrl?: string
+  json?: boolean
   sk?: string
 }
 
 /** ~feedback 列表的一行(不含 detail;下钻用 get)。 */
 interface FeedbackView {
-  id: string
-  title: string
-  by: string
   at: string
-  up: number
+  by: string
   down: number
+  id: string
   score: number
+  title: string
+  up: number
 }
 
 /** `/<path>/~feedback[/<id>]` 端点路径(feedback 是 per-path 保留段能力)。 */
@@ -46,7 +46,7 @@ export function feedbackLsCommand(): Command {
           printJson(page)
           return
         }
-        const rows = (page.items ?? []).map((f) => [
+        const rows = (page.items ?? []).map(f => [
           f.id,
           String(f.score),
           f.title,
@@ -90,10 +90,10 @@ export function feedbackSubmitCommand(): Command {
     .requiredOption('--title <title>', 'One-line summary (<= 80 chars)')
     .requiredOption('--detail <detail>', 'Short detail (<= 500 chars)')
     .action(
-      async (pathArg: string, opts: FeedbackGlobalOpts & { title: string; detail: string }) => {
+      async (pathArg: string, opts: FeedbackGlobalOpts & { detail: string, title: string }) => {
         const asJson = Boolean(opts.json)
         await guard(asJson, async () => {
-          const entry = await apiJson<{ id: string; path: string; title: string }>(
+          const entry = await apiJson<{ id: string, path: string, title: string }>(
             resolveTarget(opts),
             {
               method: 'POST',

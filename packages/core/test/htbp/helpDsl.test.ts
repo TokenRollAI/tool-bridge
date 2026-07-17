@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { parseHelpDsl, renderHelpDsl } from '../../src/htbp/helpDsl'
 import type { HelpModel } from '../../src/htbp/model'
+import { parseHelpDsl, renderHelpDsl } from '../../src/htbp/helpDsl'
 
 describe('renderHelpDsl 格式', () => {
   const model: HelpModel = {
@@ -162,7 +162,7 @@ describe('parseHelpDsl(最小 parser,向前兼容)', () => {
       '  scope call',
     ].join('\n')
     const parsed = parseHelpDsl(text)
-    expect(parsed.cmds.map((c) => [c.name, c.scope])).toEqual([
+    expect(parsed.cmds.map(c => [c.name, c.scope])).toEqual([
       ['a', 'read'],
       ['b', 'call'],
     ])
@@ -187,7 +187,7 @@ describe('parseHelpDsl(最小 parser,向前兼容)', () => {
     }
     const parsed = parseHelpDsl(renderHelpDsl(model))
     expect(parsed.cmds).toEqual([{ name: 'x', method: 'POST', path: '/a', scope: 'call' }])
-    expect(parsed.nodes.map((n) => n.path)).toEqual(['a', 'a/b'])
+    expect(parsed.nodes.map(n => n.path)).toEqual(['a', 'a/b'])
   })
 })
 
@@ -206,14 +206,14 @@ describe('note 行与 feedback 块(未知行忽略扩展通道)', () => {
   const lines = text.split('\n')
 
   it('note 行紧跟 hint 之后,值折叠为单行并加引号', () => {
-    const hintIdx = lines.findIndex((l) => l.startsWith('hint '))
+    const hintIdx = lines.findIndex(l => l.startsWith('hint '))
     expect(lines[hintIdx + 1]).toBe(
       'note "应用身份建的文档归属应用 create-doc 记得传 folder_token"',
     )
   })
 
   it('feedback 块置尾:头行 <count> + 端点,条目行 <id> <score> "<title>",use 指引行含 path', () => {
-    const headIdx = lines.findIndex((l) => l.startsWith('feedback '))
+    const headIdx = lines.findIndex(l => l.startsWith('feedback '))
     expect(lines[headIdx]).toBe('feedback 2 GET /feishu/~feedback')
     expect(lines[headIdx + 1]).toBe('  fb_a1x9k2 3 "create-doc 的 mode 参数必填"')
     expect(lines[headIdx + 2]).toBe('  fb_m4n5p6 1 "list-docs 需要 drive:drive 权限"')

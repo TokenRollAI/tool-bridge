@@ -8,8 +8,6 @@
  * (消费方视 cursor 为不透明串)。无 presign → $ref 走 /~ref 网关中转(现有降级)。
  */
 
-import { mkdirSync } from 'node:fs'
-import { join } from 'node:path'
 import type {
   ObjectBody,
   ObjectListOptions,
@@ -19,6 +17,8 @@ import type {
   ObjectStore,
 } from '@tool-bridge/core'
 import { FsObjectStore } from '@tool-bridge/core/node'
+import { mkdirSync } from 'node:fs'
+import { join } from 'node:path'
 
 const INTERNAL_ROOT = 'objects'
 
@@ -56,7 +56,7 @@ export function createDataObjectStore(dataDir: string): ObjectStore {
     async list(prefix: string, opts?: ObjectListOptions): Promise<ObjectListResult> {
       const result = await fs.list(toInternal(prefix), opts)
       return {
-        items: result.items.map((item) =>
+        items: result.items.map(item =>
           'prefix' in item ? { prefix: toExternal(item.prefix) } : externalMeta(item),
         ),
         ...(result.cursor !== undefined ? { cursor: result.cursor } : {}),

@@ -1,9 +1,9 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { readConfig } from '../src/config'
 import { resetFetch, setFetch } from '../src/http'
+import { readConfig } from '../src/config'
 import { runCli } from './cliHarness'
 
 const savedXdg = process.env.XDG_CONFIG_HOME
@@ -142,7 +142,7 @@ describe('tb help 表现选择', () => {
     expect((init.headers as Record<string, string>).accept).toBe('text/markdown')
     expect(process.exitCode).toBe(0)
     const written = (process.stdout.write as ReturnType<typeof vi.fn>).mock.calls
-      .map((c) => String(c[0]))
+      .map(c => String(c[0]))
       .join('')
     expect(written).toContain('## Commands')
   })
@@ -166,7 +166,7 @@ describe('tb help 表现选择', () => {
     expect((init.headers as Record<string, string>).accept).toBe('text/plain')
     expect(process.exitCode).toBe(0)
     const written = (process.stdout.write as ReturnType<typeof vi.fn>).mock.calls
-      .map((c) => String(c[0]))
+      .map(c => String(c[0]))
       .join('')
     expect(written).toContain('htbp 0.1')
   })

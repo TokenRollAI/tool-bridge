@@ -13,8 +13,8 @@ export function parseVia(header: string | undefined): string[] {
   if (header === undefined) return []
   return header
     .split(',')
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0)
+    .map(s => s.trim())
+    .filter(s => s.length > 0)
 }
 
 /**

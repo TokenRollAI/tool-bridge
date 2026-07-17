@@ -6,10 +6,10 @@
  * 该节点即可查健康摘要,不要求 admin(区别于其他 system/* 管理面)。
  */
 
-import { TBError } from '../errors'
 import type { CmdSpec, HelpModel } from '../htbp/model'
 import type { CallContext, TreePath } from '../types'
 import type { BuiltinModule } from './types'
+import { TBError } from '../errors'
 import { cmdPath } from './util'
 
 const DESCRIPTION = 'Gateway health and summary (readable without admin)'
@@ -17,13 +17,13 @@ const DESCRIPTION = 'Gateway health and summary (readable without admin)'
 /** status 摘要;version 与 nodeCount 经构造注入的 getter 求值。 */
 export interface StatusSummary {
   healthy: boolean
-  version: string
   nodeCount: number
+  version: string
 }
 
 export interface StatusDeps {
-  version: () => string
   nodeCount: () => Promise<number>
+  version: () => string
 }
 
 function statusCmds(nodePath: TreePath): CmdSpec[] {

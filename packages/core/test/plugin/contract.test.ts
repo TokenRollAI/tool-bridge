@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { TBError } from '../../src/errors'
-import { renderHelpDsl } from '../../src/htbp/helpDsl'
+import type { PluginManifest } from '../../src/plugin/manifest'
 import type { HelpModel } from '../../src/htbp/model'
 import { validatePluginContract } from '../../src/plugin/contract'
-import type { PluginManifest } from '../../src/plugin/manifest'
+import { renderHelpDsl } from '../../src/htbp/helpDsl'
+import { TBError } from '../../src/errors'
 
 const CONTEXT_MANIFEST: PluginManifest = {
   id: 'feishu-docs',
@@ -27,7 +27,7 @@ function helpJson(names: string[]): unknown {
   return {
     htbp: '0.1',
     node: { path: '', kind: 'context', description: 'stub' },
-    cmds: names.map((name) => ({ name, method: 'POST', path: '/', scope: 'read' })),
+    cmds: names.map(name => ({ name, method: 'POST', path: '/', scope: 'read' })),
   }
 }
 
@@ -35,7 +35,7 @@ function helpJson(names: string[]): unknown {
 function helpDsl(names: string[]): string {
   const model: HelpModel = {
     node: { path: '', kind: 'context', description: 'stub' },
-    cmds: names.map((name) => ({
+    cmds: names.map(name => ({
       name,
       method: 'POST' as const,
       path: '/',

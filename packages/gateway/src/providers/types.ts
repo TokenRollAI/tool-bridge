@@ -8,8 +8,8 @@ import type { ToolResult, ToolSpec } from '@tool-bridge/core'
  * (名字是上游真名);虚拟化与反查在调用点用 core 的 `virtualizeTools`/`resolveUpstreamTool`。
  */
 export interface UpstreamProvider {
-  /** 枚举上游全部工具(虚拟化前的原名)。 */
-  list(): Promise<ToolSpec[]>
   /** 用**上游真名**调用(调用点已把虚拟名反查为真名)。 */
   call(name: string, args: Record<string, unknown>): Promise<ToolResult>
+  /** 枚举上游全部工具(虚拟化前的原名)。 */
+  list(): Promise<ToolSpec[]>
 }

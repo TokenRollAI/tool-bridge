@@ -27,15 +27,15 @@ if (!adminSk) {
 const POLL_TIMEOUT_MS = 60_000
 const POLL_INTERVAL_MS = 2_000
 
-const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
+const sleep = (ms: number): Promise<void> => new Promise(r => setTimeout(r, ms))
 
 async function skCall(cmd: string, args: unknown): Promise<Response> {
   return fetch(`${baseUrl}/system/sk`, {
     method: 'POST',
     headers: {
-      authorization: `Bearer ${adminSk}`,
+      'authorization': `Bearer ${adminSk}`,
       'content-type': 'application/json',
-      accept: 'application/json',
+      'accept': 'application/json',
     },
     body: JSON.stringify({ tool: cmd, arguments: args }),
   })
@@ -55,7 +55,7 @@ async function main(): Promise<void> {
     scopes: [{ pattern: '**', actions: ['read'] }],
   })
   assert.equal(issue.status, 200, `issue temp SK expected 200, got ${issue.status}`)
-  const issued = (await issue.json()) as { key: { id: string }; secret: string }
+  const issued = (await issue.json()) as { key: { id: string }, secret: string }
   const tempId = issued.key.id
   const tempSk = issued.secret
   console.log(`ok  issued temp SK id=${tempId}`)

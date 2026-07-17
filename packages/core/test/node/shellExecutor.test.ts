@@ -1,8 +1,7 @@
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
-import { isTBError } from '../../src/errors'
 import {
   createShellExecutor,
   SHELL_EXEC_DEFAULT_TIMEOUT_MS,
@@ -11,6 +10,7 @@ import {
   type SpawnedProcess,
   type SpawnFn,
 } from '../../src/node/shellExecutor'
+import { isTBError } from '../../src/errors'
 
 let cwd: string
 

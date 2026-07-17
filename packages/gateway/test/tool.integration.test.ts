@@ -1,6 +1,6 @@
-import { env, SELF } from 'cloudflare:test'
 import { MemoryStateStore, parseHelpDsl, SecretStoreImpl, type StateStore } from '@tool-bridge/core'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { env, SELF } from 'cloudflare:test'
 import { createMcpProvider } from '../src/providers/mcp'
 import { TEST_ADMIN_SK } from './fixtures'
 
@@ -19,7 +19,7 @@ async function postJson(path: string, body: unknown, init: RequestInit = {}): Pr
     ...init,
     headers: {
       'content-type': 'application/json',
-      accept: 'application/json',
+      'accept': 'application/json',
       ...(init.headers ?? {}),
     },
     body: JSON.stringify(body),
@@ -56,8 +56,8 @@ const HTTP_TOOLS = [
   { name: 'post_thing', description: 'POST a thing', method: 'POST', pathTemplate: '/post' },
 ]
 
-const insecureAllowed =
-  (env as { TB_ALLOW_INSECURE_HTTP?: string }).TB_ALLOW_INSECURE_HTTP === 'true'
+const insecureAllowed
+  = (env as { TB_ALLOW_INSECURE_HTTP?: string }).TB_ALLOW_INSECURE_HTTP === 'true'
 const secureOnlyIt = insecureAllowed ? it.skip : it
 
 afterEach(() => {
@@ -74,7 +74,7 @@ describe('http 节点 ~help(从 config 生成、DSL 完整、scope=call)', () =>
     expect(res.status).toBe(200)
     const dsl = await res.text()
     const parsed = parseHelpDsl(dsl)
-    const byName = new Map(parsed.cmds.map((c) => [c.name, c]))
+    const byName = new Map(parsed.cmds.map(c => [c.name, c]))
     expect([...byName.keys()].sort()).toEqual(['get_thing', 'post_thing'])
     for (const c of parsed.cmds) {
       expect(c.method).toBe('POST') // 工具调用形态恒 POST /<node>/<tool> 直连
@@ -94,9 +94,9 @@ describe('http 节点 ~help(从 config 生成、DSL 完整、scope=call)', () =>
     )
     expect(res.status).toBe(200)
     const json = (await res.json()) as {
-      cmds: Array<{ name: string; scope: string; effect?: string }>
+      cmds: Array<{ effect?: string, name: string, scope: string }>
     }
-    const get = json.cmds.find((c) => c.name === 'get_thing')
+    const get = json.cmds.find(c => c.name === 'get_thing')
     expect(get?.scope).toBe('call')
     expect(get?.effect).toBe('read')
   })
@@ -114,7 +114,7 @@ describe('工具虚拟化(hide 不可见、rename 后原名不可调)', () => {
       'https://tb.test/ext/v/~help',
       admin({ headers: { accept: 'text/plain' } }),
     )
-    const names = parseHelpDsl(await res.text()).cmds.map((c) => c.name)
+    const names = parseHelpDsl(await res.text()).cmds.map(c => c.name)
     expect(names).toContain('shiny')
     expect(names).not.toContain('secret_tool')
     expect(names).not.toContain('real')
@@ -253,7 +253,7 @@ describe('调用点 call 判定(无 call → 403;不可见 → 404)', () => {
     })
     expect(parent.status).toBe(200)
     const parentJson = (await parent.json()) as { children?: Array<{ path: string }> }
-    expect(parentJson.children?.map((c) => c.path) ?? []).not.toContain('ext/perm')
+    expect(parentJson.children?.map(c => c.path) ?? []).not.toContain('ext/perm')
 
     // 完全不可见(scope 在别处)。
     const otherSk = await issueSk({
@@ -292,11 +292,11 @@ describe('两级披露(节点级索引 + 工具级全量)', () => {
     )
     expect(res.status).toBe(200)
     const json = (await res.json()) as {
-      node: { description: string }
+      cmds: Array<{ h?: string, inputSchema?: unknown, name: string }>
       hint?: string
-      cmds: Array<{ name: string; h?: string; inputSchema?: unknown }>
+      node: { description: string }
     }
-    const lookup = json.cmds.find((c) => c.name === 'lookup')
+    const lookup = json.cmds.find(c => c.name === 'lookup')
     expect(lookup?.h).toBe('查一个东西')
     expect(lookup?.inputSchema).toBeUndefined()
     expect(json.hint).toContain('GET /ext/two-level/<tool>/~help')
@@ -310,8 +310,8 @@ describe('两级披露(节点级索引 + 工具级全量)', () => {
     )
     expect(res.status).toBe(200)
     const json = (await res.json()) as {
-      node: { path: string; description: string }
-      cmds: Array<{ name: string; path: string; inputSchema?: unknown }>
+      cmds: Array<{ inputSchema?: unknown, name: string, path: string }>
+      node: { description: string, path: string }
     }
     expect(json.node.path).toBe('ext/two-level2/lookup')
     expect(json.cmds).toHaveLength(1)
@@ -428,7 +428,7 @@ describe('remote 节点(白名单、X-TB-Via 环检测)', () => {
       admin({ headers: { 'x-tb-via': 'tb-test-instance' } }),
     )
     expect(res.status).toBe(503)
-    const body = (await res.json()) as { code: string; retryable: boolean }
+    const body = (await res.json()) as { code: string, retryable: boolean }
     expect(body.code).toBe('unavailable')
     expect(body.retryable).toBe(false)
   })
@@ -521,13 +521,13 @@ describe('remote 节点(白名单、X-TB-Via 环检测)', () => {
     expect(res.status).toBe(200)
     const tree = (await res.json()) as {
       children?: Array<{
+        children?: Array<{ children?: Array<{ path: string }>, path: string }>
         path: string
-        children?: Array<{ path: string; children?: Array<{ path: string }> }>
       }>
     }
-    const srv = tree.children?.find((n) => n.path === 'srv')
-    const peer = srv?.children?.find((n) => n.path === 'srv/peer-tree')
-    expect(peer?.children?.map((n) => n.path)).toContain('srv/peer-tree/alpha')
+    const srv = tree.children?.find(n => n.path === 'srv')
+    const peer = srv?.children?.find(n => n.path === 'srv/peer-tree')
+    expect(peer?.children?.map(n => n.path)).toContain('srv/peer-tree/alpha')
   })
 })
 
@@ -537,7 +537,7 @@ describe('remote 节点(白名单、X-TB-Via 环检测)', () => {
  * 会话后的**不合规行为**(实测 MetaMCP):对过期会话不按 spec 回 404,而是当作空会话
  * 正常返回 200 + 空 tools。GET(standalone SSE)不会到达这里——provider 侧已拦成 405。
  */
-function mcpUpstreamMock(tools: Array<{ name: string; description: string }>) {
+function mcpUpstreamMock(tools: Array<{ description: string, name: string }>) {
   const sessions = new Set<string>()
   let issued = 0
   let initializeCount = 0
@@ -574,11 +574,11 @@ function mcpUpstreamMock(tools: Array<{ name: string; description: string }>) {
       const sid = new Headers(init?.headers).get('mcp-session-id')
       const live = sid !== null && sessions.has(sid)
       return rpc({
-        tools: live ? tools.map((t) => ({ ...t, inputSchema: { type: 'object' } })) : [],
+        tools: live ? tools.map(t => ({ ...t, inputSchema: { type: 'object' } })) : [],
       })
     }
     if (body.method === 'tools/call') {
-      const params = (body as { params?: { name?: string; arguments?: unknown } }).params
+      const params = (body as { params?: { arguments?: unknown, name?: string } }).params
       return rpc({
         content: [
           { type: 'text', text: `called:${params?.name}:${JSON.stringify(params?.arguments)}` },
@@ -631,7 +631,7 @@ describe('mcp 会话复用:过期会话空列表防御(默认离线,上游为 fe
       admin({ headers: { accept: 'text/plain' } }),
     )
     expect(first.status).toBe(200)
-    expect(parseHelpDsl(await first.text()).cmds.map((c) => c.name)).toContain('echo')
+    expect(parseHelpDsl(await first.text()).cmds.map(c => c.name)).toContain('echo')
     expect(upstream.initializeCalls()).toBe(1)
 
     upstream.expireAll()
@@ -643,7 +643,7 @@ describe('mcp 会话复用:过期会话空列表防御(默认离线,上游为 fe
       admin({ headers: { accept: 'text/plain' } }),
     )
     expect(second.status).toBe(200)
-    expect(parseHelpDsl(await second.text()).cmds.map((c) => c.name)).toContain('echo')
+    expect(parseHelpDsl(await second.text()).cmds.map(c => c.name)).toContain('echo')
     expect(upstream.initializeCalls()).toBe(2)
   })
 
@@ -680,7 +680,7 @@ describe('mcp 会话复用:过期会话空列表防御(默认离线,上游为 fe
     // (2026-07-08 生产复发根因)。
     const backing = new MemoryStateStore()
     const staleStore: StateStore = {
-      get: (key) => backing.get(key),
+      get: key => backing.get(key),
       put: (key, value) => backing.put(key, value),
       delete: async () => {},
       list: (prefix, opts) => backing.list(prefix, opts),
@@ -692,14 +692,14 @@ describe('mcp 会话复用:过期会话空列表防御(默认离线,上游为 fe
     )
 
     // 首次:完整握手,会话回填 staleStore。
-    expect((await provider.list()).map((t) => t.name)).toContain('echo')
+    expect((await provider.list()).map(t => t.name)).toContain('echo')
     expect(upstream.initializeCalls()).toBe(1)
 
     upstream.expireAll()
 
     // 复用的死会话拿到空列表 → 防御必须强制重握手恢复;若重试回读会话缓存,
     // 拿回的是删不掉的旧会话,这里将得到空列表。
-    expect((await provider.list()).map((t) => t.name)).toContain('echo')
+    expect((await provider.list()).map(t => t.name)).toContain('echo')
     expect(upstream.initializeCalls()).toBe(2)
   })
 })
@@ -742,7 +742,7 @@ describe('mcp 自定义请求头(飞书形态:凭证进自定义头 + 静态白�
       admin({ headers: { accept: 'text/plain' } }),
     )
     expect(help.status).toBe(200)
-    expect(parseHelpDsl(await help.text()).cmds.map((c) => c.name)).toContain('search-doc')
+    expect(parseHelpDsl(await help.text()).cmds.map(c => c.name)).toContain('search-doc')
 
     // initialize / notifications/initialized / tools/list 每趟都须带两个头;
     // 空 scheme = 凭证原样注入(无 "Bearer " 前缀),且不再发默认 Authorization。
@@ -803,7 +803,7 @@ describe('mcp 真实上游 E2E(opt-in via TB_TEST_MCP_URL)', () => {
       admin({ headers: { accept: 'text/plain' } }),
     )
     expect(help.status).toBe(200)
-    const names = parseHelpDsl(await help.text()).cmds.map((c) => c.name)
+    const names = parseHelpDsl(await help.text()).cmds.map(c => c.name)
     expect(names).toContain('echo')
 
     const call = await postJson(
@@ -886,7 +886,7 @@ describe('system/federation 运行时白名单(env 基线 ∪ 运行时叠加)',
     expect(listRes.status).toBe(200)
     const items = (
       (await listRes.json()) as {
-        items: Array<{ host: string; source: string; removable: boolean }>
+        items: Array<{ host: string, removable: boolean, source: string }>
       }
     ).items
     expect(items).toContainEqual({ host: 'example.com', source: 'env', removable: false })

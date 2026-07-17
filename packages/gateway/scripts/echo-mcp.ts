@@ -14,11 +14,11 @@
  * `TB_TEST_MCP_URL=http://127.0.0.1:39001/mcp TB_ALLOW_INSECURE_HTTP=true` 跑 opt-in 集成用例。
  */
 
-import { randomUUID } from 'node:crypto'
-import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js'
+import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js'
+import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
+import { randomUUID } from 'node:crypto'
 import { z } from 'zod'
 
 const PORT = Number(process.env.ECHO_MCP_PORT ?? 39001)
@@ -32,7 +32,7 @@ function buildServer(): McpServer {
     { description: 'echo back the given text', inputSchema: { text: z.string() } },
     async ({ text }) => ({ content: [{ type: 'text', text }] }),
   )
-  server.registerTool('whoami', { description: 'return current session id' }, async (extra) => ({
+  server.registerTool('whoami', { description: 'return current session id' }, async extra => ({
     content: [{ type: 'text', text: extra.sessionId ?? 'stateless' }],
   }))
   return server
@@ -66,7 +66,7 @@ async function handleStateful(
   const transport = new StreamableHTTPServerTransport({
     sessionIdGenerator: () => randomUUID(),
     enableJsonResponse: true,
-    onsessioninitialized: (id) => sessions.set(id, transport),
+    onsessioninitialized: id => sessions.set(id, transport),
   })
   transport.onclose = () => {
     if (transport.sessionId !== undefined) sessions.delete(transport.sessionId)

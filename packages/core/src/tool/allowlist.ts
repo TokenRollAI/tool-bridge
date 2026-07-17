@@ -6,9 +6,8 @@
  * 单 key 存整份数组(白名单规模小,免翻页);条目做规范化 host + 去重 + 时间戳。
  */
 
+import { KEY_REMOTE_ALLOWLIST, type StateStore } from '../store'
 import { TBError } from '../errors'
-import type { StateStore } from '../store'
-import { KEY_REMOTE_ALLOWLIST } from '../store'
 
 /** 一条运行时白名单条目:host 后缀 + 写入时间。 */
 export interface AllowlistEntry {
@@ -48,9 +47,9 @@ export class RemoteAllowlistStore {
     const entries: AllowlistEntry[] = []
     for (const item of raw) {
       if (
-        item !== null &&
-        typeof item === 'object' &&
-        typeof (item as AllowlistEntry).host === 'string'
+        item !== null
+        && typeof item === 'object'
+        && typeof (item as AllowlistEntry).host === 'string'
       ) {
         const e = item as AllowlistEntry
         entries.push({
@@ -64,13 +63,13 @@ export class RemoteAllowlistStore {
 
   /** 仅取 host 列表(供 checkAllowlist 与 env 基线取并集)。 */
   async hosts(): Promise<string[]> {
-    return (await this.list()).map((e) => e.host)
+    return (await this.list()).map(e => e.host)
   }
 
   /** 新增一条(规范化 + 幂等:同名则刷新时间戳)。 */
   async add(rawHost: string, now: string): Promise<AllowlistEntry> {
     const host = normalizeAllowHost(rawHost)
-    const entries = (await this.list()).filter((e) => e.host !== host)
+    const entries = (await this.list()).filter(e => e.host !== host)
     const entry: AllowlistEntry = { host, updatedAt: now }
     entries.push(entry)
     entries.sort((a, b) => a.host.localeCompare(b.host))
@@ -82,7 +81,7 @@ export class RemoteAllowlistStore {
   async remove(rawHost: string): Promise<void> {
     const host = normalizeAllowHost(rawHost)
     const entries = await this.list()
-    const next = entries.filter((e) => e.host !== host)
+    const next = entries.filter(e => e.host !== host)
     if (next.length === entries.length) {
       throw TBError.notFound(`host 不在运行时白名单:'${host}'`)
     }

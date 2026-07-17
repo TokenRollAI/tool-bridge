@@ -18,12 +18,12 @@ import { CliError } from './http'
 
 export interface DeviceConnectionOptions {
   baseUrl: string
-  sk: string
   deviceId: string
-  mountPath?: string
   expose: DeviceExpose
+  mountPath?: string
   onReady?: (mountPath: string) => void
   onStateChange?: (state: DeviceClientState) => void
+  sk: string
 }
 
 export interface DeviceConnectionHandle {
@@ -61,9 +61,9 @@ function authorizedWebSocket(sk: string): typeof WS {
         headers: { ...(opts?.headers ?? {}), authorization: `Bearer ${sk}` },
       })
       if (
-        protocolsOrOptions !== undefined &&
-        typeof protocolsOrOptions === 'object' &&
-        !Array.isArray(protocolsOrOptions)
+        protocolsOrOptions !== undefined
+        && typeof protocolsOrOptions === 'object'
+        && !Array.isArray(protocolsOrOptions)
       ) {
         super(address, withAuth(protocolsOrOptions))
         return
@@ -77,8 +77,8 @@ export const HEARTBEAT_INTERVAL_MS = 30_000
 
 export interface HeartbeatSocket {
   readyState: number
-  send(data: string): void
   reconnect(): void
+  send(data: string): void
 }
 
 export interface HeartbeatHandle {
@@ -131,12 +131,12 @@ function dispatchFs(
       return provider.Get(args.path as string)
     case 'Write':
       if (typeof args.entry !== 'object' || args.entry === null) {
-        throw new TBError('invalid_argument', "Write 需要对象 'entry'")
+        throw new TBError('invalid_argument', 'Write 需要对象 \'entry\'')
       }
       return provider.Write(args.path as string, args.entry as ContextEntryInput)
     case 'Update':
       if (typeof args.patch !== 'object' || args.patch === null) {
-        throw new TBError('invalid_argument', "Update 需要对象 'patch'")
+        throw new TBError('invalid_argument', 'Update 需要对象 \'patch\'')
       }
       return provider.Update(args.path as string, args.patch as ContextPatch)
     case 'Delete':
@@ -201,7 +201,7 @@ export function startDeviceConnection(opts: DeviceConnectionOptions): DeviceConn
         if (shell === undefined) throw TBError.notFound('shell not exposed')
         const command = call.arguments.command
         if (typeof command !== 'string' || command.trim() === '') {
-          throw new TBError('invalid_argument', "exec 需要字符串 'command'")
+          throw new TBError('invalid_argument', 'exec 需要字符串 \'command\'')
         }
         return shell(command, {
           ...(typeof call.arguments.cwd === 'string' ? { cwd: call.arguments.cwd } : {}),
@@ -220,8 +220,8 @@ export function startDeviceConnection(opts: DeviceConnectionOptions): DeviceConn
 
   socket.addEventListener('open', () => {
     client.socketOpened({
-      send: (data) => socket.send(data),
-      close: (code) => socket.close(code),
+      send: data => socket.send(data),
+      close: code => socket.close(code),
     })
   })
   socket.addEventListener('message', (event) => {
@@ -233,8 +233,8 @@ export function startDeviceConnection(opts: DeviceConnectionOptions): DeviceConn
     if (client.state === 'closed') resolveClosed()
   })
   socket.addEventListener('error', (event) => {
-    const message =
-      typeof (event as { message?: unknown }).message === 'string'
+    const message
+      = typeof (event as { message?: unknown }).message === 'string'
         ? String((event as { message: unknown }).message)
         : 'ws error'
     opts.onStateChange?.('reconnecting')

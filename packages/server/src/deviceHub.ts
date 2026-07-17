@@ -14,12 +14,13 @@
  *   探活(isAlive + 周期 ping + terminate)踢半开死连接,避免调用一律吃 60s 超时。
  */
 
-import type * as http from 'node:http'
+import type { DeviceInvokeRequest } from '@tool-bridge/gateway/tbApp'
 import type { Duplex } from 'node:stream'
+import type * as http from 'node:http'
 import {
+  decodeDeviceFrame,
   type DeviceCallResult,
   DeviceGatewaySession,
-  decodeDeviceFrame,
   encodeDeviceFrame,
   identify,
   NodeRegistryStore,
@@ -28,7 +29,6 @@ import {
   type TreePath,
 } from '@tool-bridge/core'
 import { assertDeviceId, processDeviceHello } from '@tool-bridge/gateway/deviceHello'
-import type { DeviceInvokeRequest } from '@tool-bridge/gateway/tbApp'
 import { type WebSocket, WebSocketServer } from 'ws'
 
 export const DEVICE_WS_PATH = '/system/device/ws'
@@ -36,27 +36,27 @@ const KEY_DEVICE_META = 'devicemeta:'
 const DEFAULT_HEARTBEAT_MS = 30_000
 
 interface DeviceMeta {
-  deviceId: string
-  mountPath: TreePath
-  keyId: string
   connectedAt?: string
+  deviceId: string
   disconnectedAt?: string
+  keyId: string
+  mountPath: TreePath
 }
 
 interface Conn {
-  deviceId: string
   authorization: string | undefined
-  ws: WebSocket
-  session: DeviceGatewaySession
+  deviceId: string
   isAlive: boolean
+  session: DeviceGatewaySession
+  ws: WebSocket
 }
 
 function isDeviceMeta(value: unknown): value is DeviceMeta {
   return (
-    typeof value === 'object' &&
-    value !== null &&
-    typeof (value as { deviceId?: unknown }).deviceId === 'string' &&
-    typeof (value as { mountPath?: unknown }).mountPath === 'string'
+    typeof value === 'object'
+    && value !== null
+    && typeof (value as { deviceId?: unknown }).deviceId === 'string'
+    && typeof (value as { mountPath?: unknown }).mountPath === 'string'
   )
 }
 
@@ -66,11 +66,11 @@ function rejectUpgrade(socket: Duplex, error: TBError): void {
   const status = error.httpStatus
   const reason = status === 401 ? 'Unauthorized' : status === 404 ? 'Not Found' : 'Bad Request'
   socket.write(
-    `HTTP/1.1 ${status} ${reason}\r\n` +
-      'content-type: application/json; charset=utf-8\r\n' +
-      `content-length: ${Buffer.byteLength(body)}\r\n` +
-      'connection: close\r\n\r\n' +
-      body,
+    `HTTP/1.1 ${status} ${reason}\r\n`
+    + 'content-type: application/json; charset=utf-8\r\n'
+    + `content-length: ${Buffer.byteLength(body)}\r\n`
+    + 'connection: close\r\n\r\n'
+    + body,
   )
   socket.destroy()
 }
@@ -84,7 +84,7 @@ export class DeviceHub {
   private readonly reclaimTimers = new Map<string, NodeJS.Timeout>()
   private heartbeat: NodeJS.Timeout | undefined
 
-  constructor(opts: { store: StateStore; reclaimSec: number; heartbeatMs?: number }) {
+  constructor(opts: { heartbeatMs?: number, reclaimSec: number, store: StateStore }) {
     this.store = opts.store
     this.reclaimSec = opts.reclaimSec
     const heartbeatMs = opts.heartbeatMs ?? DEFAULT_HEARTBEAT_MS
@@ -111,7 +111,7 @@ export class DeviceHub {
       const offline: DeviceCallResult = { ok: false, error: TBError.deviceOffline().toJSON() }
       return offline
     }
-    return await new Promise<DeviceCallResult>((resolve) => conn.session.call(req, resolve))
+    return await new Promise<DeviceCallResult>(resolve => conn.session.call(req, resolve))
   }
 
   /** DeviceChannel.ws:Node 宿主的升级在 http 层处理,永不应命中此路由。 */
@@ -153,7 +153,7 @@ export class DeviceHub {
     for (const conn of this.connections) conn.ws.terminate()
     this.connections.clear()
     this.activeByDevice.clear()
-    await new Promise<void>((resolve) => this.wss.close(() => resolve()))
+    await new Promise<void>(resolve => this.wss.close(() => resolve()))
   }
 
   private async handleUpgrade(
@@ -191,8 +191,8 @@ export class DeviceHub {
   ): void {
     const session = new DeviceGatewaySession(
       {
-        send: (frame) => ws.send(encodeDeviceFrame(frame)),
-        close: (code) => ws.close(code),
+        send: frame => ws.send(encodeDeviceFrame(frame)),
+        close: code => ws.close(code),
         onHello: (hello) => {
           this.acceptHello(conn, hello).catch((err) => {
             session.reject(err instanceof TBError ? err : new TBError('internal', 'hello 失败'))
@@ -226,7 +226,7 @@ export class DeviceHub {
 
   private async acceptHello(
     conn: Conn,
-    hello: { deviceId: string; mountPath?: TreePath; expose: DeviceMetaExpose },
+    hello: { deviceId: string, expose: DeviceMetaExpose, mountPath?: TreePath },
   ): Promise<void> {
     const now = new Date().toISOString()
     const { mountPath, keyId } = await processDeviceHello({

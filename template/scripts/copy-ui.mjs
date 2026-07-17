@@ -1,8 +1,8 @@
+import { createRequire } from 'node:module'
+import { dirname, join } from 'node:path'
 // Copy the prebuilt dashboard (npm package @tool-bridge/dashboard) into ./public,
 // where wrangler.jsonc's assets.directory expects it. Runs before dev/deploy.
 import { cpSync, rmSync } from 'node:fs'
-import { createRequire } from 'node:module'
-import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const require = createRequire(import.meta.url)

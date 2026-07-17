@@ -1,18 +1,18 @@
-import { Menu, Search } from 'lucide-react'
 import { type RefObject, useEffect, useRef, useState } from 'react'
 import { NavLink, Outlet, useLocation } from 'react-router'
-import { CommandPalette } from '@/components/CommandPalette'
-import { ActivityRail } from '@/components/layout/ActivityRail'
-import { ExplorerPanel } from '@/components/layout/ExplorerPanel'
-import { Button } from '@/components/ui/button'
+import { Menu, Search } from 'lucide-react'
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog'
+import { ExplorerPanel } from '@/components/layout/ExplorerPanel'
+import { ActivityRail } from '@/components/layout/ActivityRail'
+import { CommandPalette } from '@/components/CommandPalette'
 import { useHealthz, useStatus } from '@/lib/queries'
+import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 
 const isMac = typeof navigator !== 'undefined' && /Mac/.test(navigator.platform)
 
 interface HealthView {
-  data?: { healthy: boolean; version: string }
+  data?: { healthy: boolean, version: string }
   isError: boolean
 }
 
@@ -34,7 +34,7 @@ export function AppShell() {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
         event.preventDefault()
         setMobileNavOpen(false)
-        setPaletteOpen((open) => !open)
+        setPaletteOpen(open => !open)
       }
     }
     window.addEventListener('keydown', onKey)
@@ -64,25 +64,25 @@ export function AppShell() {
   return (
     <div className="flex h-svh min-w-0 overflow-hidden">
       <a
-        href="#main-content"
         className={cn(
           'fixed top-3 left-3 z-[100] -translate-y-20 rounded-md border bg-background px-3 py-2 text-sm shadow-lg',
           'focus-visible:translate-y-0 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none',
         )}
+        href="#main-content"
       >
         跳到主内容
       </a>
 
       <ActivityRail
         explorerOpen={explorerOpen}
-        onToggleExplorer={() => setExplorerOpen((open) => !open)}
-        onOpenPalette={openPalette}
         health={health.data}
         healthError={health.isError}
+        onOpenPalette={openPalette}
+        onToggleExplorer={() => setExplorerOpen(open => !open)}
       />
 
       {explorerOpen && (
-        <aside className="hidden h-svh w-80 shrink-0 border-r lg:flex" aria-label="资源浏览器">
+        <aside aria-label="资源浏览器" className="hidden h-svh w-80 shrink-0 border-r lg:flex">
           <ExplorerPanel
             health={health.data}
             healthError={health.isError}
@@ -101,17 +101,16 @@ export function AppShell() {
         />
 
         <main
+          className="app-workspace min-h-0 min-w-0 flex-1 overflow-y-auto focus:outline-none"
           id="main-content"
           tabIndex={-1}
-          className="app-workspace min-h-0 min-w-0 flex-1 overflow-y-auto focus:outline-none"
         >
           <Outlet />
         </main>
       </div>
 
-      <Dialog open={mobileNavOpen} onOpenChange={setMobileNavOpen}>
+      <Dialog onOpenChange={setMobileNavOpen} open={mobileNavOpen}>
         <DialogContent
-          showCloseButton={false}
           className={cn(
             'top-0 left-0 h-svh w-[min(92vw,22.5rem)] max-w-none translate-x-0 translate-y-0 gap-0',
             'rounded-none border-y-0 border-l-0 bg-background p-0 shadow-2xl lg:hidden',
@@ -121,15 +120,16 @@ export function AppShell() {
             event.preventDefault()
             mobileNavButtonRef.current?.focus()
           }}
+          showCloseButton={false}
         >
           <DialogTitle className="sr-only">资源与管理导航</DialogTitle>
           <DialogDescription className="sr-only">
             浏览工具树、管理页面与当前连接档案。
           </DialogDescription>
           <ExplorerPanel
-            mobile
             health={health.data}
             healthError={health.isError}
+            mobile
             nodeCount={status.data?.nodeCount}
             nodeCountRestricted={status.isError}
             onClose={() => setMobileNavOpen(false)}
@@ -137,7 +137,7 @@ export function AppShell() {
         </DialogContent>
       </Dialog>
 
-      <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} />
+      <CommandPalette onOpenChange={setPaletteOpen} open={paletteOpen} />
     </div>
   )
 }
@@ -156,24 +156,24 @@ function MobileHeader({
   return (
     <header className="app-mobile-header flex h-14 shrink-0 items-center gap-2 border-b px-2 lg:hidden">
       <Button
-        ref={navButtonRef}
-        variant="ghost"
-        size="icon-sm"
         aria-label="打开资源与管理导航"
         onClick={onOpenNav}
+        ref={navButtonRef}
+        size="icon-sm"
+        variant="ghost"
       >
         <Menu />
       </Button>
-      <NavLink to="/" className="flex min-w-0 items-center gap-2">
-        <img src="/ui/icon-light.png" alt="" className="size-5 shrink-0 dark:invert" />
+      <NavLink className="flex min-w-0 items-center gap-2" to="/">
+        <img alt="" className="size-5 shrink-0 dark:invert" src="/ui/icon-light.png" />
         <span className="truncate font-mono text-sm tracking-tight">
-          tool<span className="text-primary">-</span>bridge
+          tool
+          <span className="text-primary">-</span>
+          bridge
         </span>
       </NavLink>
       <span
-        role="img"
         aria-label={healthLabel(health)}
-        title={healthLabel(health)}
         className={cn(
           'ml-auto size-2 shrink-0 rounded-full',
           health.isError
@@ -182,8 +182,10 @@ function MobileHeader({
               ? 'bg-ok shadow-[0_0_6px_var(--ok)]'
               : 'bg-warn',
         )}
+        role="img"
+        title={healthLabel(health)}
       />
-      <Button variant="ghost" size="icon-sm" aria-label="打开全局跳转" onClick={onOpenPalette}>
+      <Button aria-label="打开全局跳转" onClick={onOpenPalette} size="icon-sm" variant="ghost">
         <Search />
         <span className="sr-only">{isMac ? '快捷键 Command K' : '快捷键 Control K'}</span>
       </Button>

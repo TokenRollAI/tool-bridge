@@ -8,14 +8,14 @@
  */
 
 export interface InvokeRecord {
-  path: string
-  tool: string
-  ok: boolean
+  /** ISO 时间戳。 */
+  at: string
   /** TBError code(失败时)。 */
   code?: string
   ms: number
-  /** ISO 时间戳。 */
-  at: string
+  ok: boolean
+  path: string
+  tool: string
 }
 
 const CAP = 50
@@ -23,8 +23,8 @@ const KEY_PREFIX = 'tb.history.v2.'
 const LEGACY_PREFIX = 'tb.history.'
 
 export interface HistoryProfile {
-  id: string
   baseUrl: string
+  id: string
 }
 
 /** 同名 profile 改连接地址时不串历史;同源用明确占位符。 */
@@ -41,11 +41,11 @@ function sanitizeRecord(value: unknown): InvokeRecord | null {
   if (typeof value !== 'object' || value === null) return null
   const v = value as Record<string, unknown>
   if (
-    typeof v.path !== 'string' ||
-    typeof v.tool !== 'string' ||
-    typeof v.ok !== 'boolean' ||
-    typeof v.ms !== 'number' ||
-    typeof v.at !== 'string'
+    typeof v.path !== 'string'
+    || typeof v.tool !== 'string'
+    || typeof v.ok !== 'boolean'
+    || typeof v.ms !== 'number'
+    || typeof v.at !== 'string'
   ) {
     return null
   }
@@ -158,6 +158,6 @@ export function clearProfileHistory(profileId: string): void {
 export function subscribeHistory(cb: () => void): () => void {
   listeners.push(cb)
   return () => {
-    listeners = listeners.filter((l) => l !== cb)
+    listeners = listeners.filter(l => l !== cb)
   }
 }

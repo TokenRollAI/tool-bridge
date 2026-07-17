@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { check } from '../../src/auth/authorizer'
 import type { CallContext, Scope } from '../../src/types'
+import { check } from '../../src/auth/authorizer'
 
 const ctxWith = (scopes: Scope[]): CallContext => ({
   keyId: 'k1',

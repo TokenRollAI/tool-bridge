@@ -1,25 +1,5 @@
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useSyncExternalStore } from 'react'
-import {
-  type ApiError,
-  feedbackGet,
-  feedbackList,
-  getHealthz,
-  getHelp,
-  getHelpMarkdown,
-  getTree,
-  type InvokeResult,
-  invoke,
-  startOAuthAuthorize,
-} from './api'
-import {
-  historyScope,
-  type InvokeRecord,
-  loadHistory,
-  recordInvoke,
-  subscribeHistory,
-} from './history'
-import { useConn, useSession } from './session'
 import type {
   ContextEntry,
   ContextEntryMeta,
@@ -32,6 +12,26 @@ import type {
   SkillFile,
   SkillSummary,
 } from './types'
+import {
+  type ApiError,
+  feedbackGet,
+  feedbackList,
+  getHealthz,
+  getHelp,
+  getHelpMarkdown,
+  getTree,
+  invoke,
+  type InvokeResult,
+  startOAuthAuthorize,
+} from './api'
+import {
+  historyScope,
+  type InvokeRecord,
+  loadHistory,
+  recordInvoke,
+  subscribeHistory,
+} from './history'
+import { useConn, useSession } from './session'
 
 /** queryKey 前缀含 profile 标识:切换档案后互不串缓存。 */
 function useKeyBase(): readonly unknown[] {
@@ -94,12 +94,12 @@ export function useHealthz() {
 }
 
 export interface InvokeInput {
-  path: string
-  tool: string
-  args: unknown
   accept?: 'json' | 'markdown'
+  args: unknown
   /** 直连工具调用(mcp/http/tool 工具):POST /<path>/<tool>,body 即 arguments。 */
   direct?: boolean
+  path: string
+  tool: string
 }
 
 /** 数据面调用(变更型;成功后由调用方决定失效哪些查询)。全部调用落 per-profile 历史。 */
@@ -173,11 +173,11 @@ function usePagedBuiltin<T>(key: string, path: string, args: Record<string, unkn
       return r.json as Page<T>
     },
     initialPageParam: undefined as string | undefined,
-    getNextPageParam: (last) => last.cursor,
+    getNextPageParam: last => last.cursor,
   })
   const data = query.data
     ? {
-        items: query.data.pages.flatMap((page) => page.items),
+        items: query.data.pages.flatMap(page => page.items),
         ...(query.data.pages.at(-1)?.cursor ? { cursor: query.data.pages.at(-1)?.cursor } : {}),
       }
     : undefined
@@ -189,7 +189,7 @@ export function useSkList() {
 }
 
 export function useSecretList() {
-  return usePagedBuiltin<{ name: string; updatedAt: string }>('secret-list', 'system/secret')
+  return usePagedBuiltin<{ name: string, updatedAt: string }>('secret-list', 'system/secret')
 }
 
 export function usePluginList() {
@@ -246,7 +246,7 @@ export function useStatus() {
     queryKey: [...base, 'status'],
     queryFn: async () => {
       const r = await invoke(conn, 'system/status', 'get', {})
-      return r.json as { healthy: boolean; version: string; nodeCount: number }
+      return r.json as { healthy: boolean, nodeCount: number, version: string }
     },
     refetchInterval: 30_000,
   })
@@ -277,7 +277,7 @@ export function useCtxEntries(
       return r.json as Page<ContextEntryMeta>
     },
     initialPageParam: undefined as string | undefined,
-    getNextPageParam: (last) => last.cursor,
+    getNextPageParam: last => last.cursor,
   })
 }
 
@@ -314,7 +314,7 @@ export function useSkills(nodePath: string, query: string) {
       return r.json as Page<SkillSummary>
     },
     initialPageParam: undefined as string | undefined,
-    getNextPageParam: (last) => last.cursor,
+    getNextPageParam: last => last.cursor,
   })
 }
 

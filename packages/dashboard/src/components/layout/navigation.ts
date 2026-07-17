@@ -1,10 +1,10 @@
 import { Boxes, Cpu, Globe, KeySquare, type LucideIcon, Plug2, ShieldEllipsis } from 'lucide-react'
 
 export interface ManageLink {
-  to: string
+  icon: LucideIcon
   label: string
   shortLabel: string
-  icon: LucideIcon
+  to: string
 }
 
 /** 固定在 ActivityRail / 移动管理面板的控制面入口，不再随长树一起滚动。 */

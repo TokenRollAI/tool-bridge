@@ -25,9 +25,9 @@ export const SHELL_EXEC_DEFAULT_TIMEOUT_MS = 55_000
 export const SHELL_TIMEOUT_EXIT_CODE = 124
 
 export interface ShellExecResult {
-  stdout: string
-  stderr: string
   exitCode: number
+  stderr: string
+  stdout: string
 }
 
 export interface ShellExecOptions {
@@ -37,25 +37,25 @@ export interface ShellExecOptions {
 
 /** 注入用最小子进程面(node:child_process 的 ChildProcess 结构兼容)。 */
 export interface SpawnedProcess {
-  stdout: { on(event: 'data', cb: (chunk: Uint8Array | string) => void): void } | null
-  stderr: { on(event: 'data', cb: (chunk: Uint8Array | string) => void): void } | null
+  kill(signal?: 'SIGKILL'): void
   on(event: 'close', cb: (code: number | null, signal: string | null) => void): void
   on(event: 'exit', cb: (code: number | null, signal: string | null) => void): void
   on(event: 'error', cb: (err: Error) => void): void
-  kill(signal?: 'SIGKILL'): void
+  stderr: { on(event: 'data', cb: (chunk: Uint8Array | string) => void): void } | null
+  stdout: { on(event: 'data', cb: (chunk: Uint8Array | string) => void): void } | null
 }
 
-export type SpawnFn = (command: string, opts: { shell: true; cwd?: string }) => SpawnedProcess
+export type SpawnFn = (command: string, opts: { cwd?: string, shell: true }) => SpawnedProcess
 
 export interface ShellExecutorOptions {
   /** 白名单;缺省 [] = 拒绝一切。 */
   allow?: string[]
-  /** 单测注入;缺省 node:child_process.spawn。 */
-  spawn?: SpawnFn
-  /** 单流输出上限;缺省 SHELL_OUTPUT_LIMIT_BYTES。 */
-  maxOutputBytes?: number
   /** 缺省 SHELL_EXEC_DEFAULT_TIMEOUT_MS。 */
   defaultTimeoutMs?: number
+  /** 单流输出上限;缺省 SHELL_OUTPUT_LIMIT_BYTES。 */
+  maxOutputBytes?: number
+  /** 单测注入;缺省 node:child_process.spawn。 */
+  spawn?: SpawnFn
 }
 
 export type ShellExecutor = (command: string, opts?: ShellExecOptions) => Promise<ShellExecResult>
@@ -108,8 +108,8 @@ export function createShellExecutor(opts: ShellExecutorOptions = {}): ShellExecu
       const child = spawn(command, { shell: true, cwd: execOpts.cwd })
       const stdout = new BoundedBuffer(limit)
       const stderr = new BoundedBuffer(limit)
-      child.stdout?.on('data', (chunk) => stdout.push(chunk))
-      child.stderr?.on('data', (chunk) => stderr.push(chunk))
+      child.stdout?.on('data', chunk => stdout.push(chunk))
+      child.stderr?.on('data', chunk => stderr.push(chunk))
       let settled = false
       let timedOut = false
       const settle = (code: number | null) => {
@@ -136,7 +136,7 @@ export function createShellExecutor(opts: ShellExecutorOptions = {}): ShellExecu
       // 正常路径等 'close'(stdio 排空,输出完整)。超时被杀后改等 'exit' 立即结算:
       // shell:true 下 sh 可能 fork 而非 exec,SIGKILL 只杀 shell,孙进程仍握着
       // stdout/stderr 管道,'close' 会拖到孙进程自然退出(v1 教训:CI 上直接撞测试超时)。
-      child.on('close', (code) => settle(code))
+      child.on('close', code => settle(code))
       child.on('exit', (code) => {
         if (timedOut) settle(code)
       })

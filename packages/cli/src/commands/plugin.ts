@@ -1,9 +1,9 @@
 import { readFile } from 'node:fs/promises'
 import { Command } from 'commander'
-import { resolveTarget, withGlobalOpts } from '../args'
-import { CliError, callTool } from '../http'
-import { guard, printJson, printLine, table } from '../output'
 import type { Page } from '../types'
+import { guard, printJson, printLine, table } from '../output'
+import { resolveTarget, withGlobalOpts } from '../args'
+import { callTool, CliError } from '../http'
 
 /**
  * `tb plugin` → builtin `system/plugin`(PluginRegistry;全部需 admin)。
@@ -12,13 +12,13 @@ import type { Page } from '../types'
  */
 
 export interface PluginManifest {
-  id: string
-  kind: 'tool-provider' | 'context-provider'
-  interfaceVersion: string
-  endpoint: string
-  auth: { kind: 'platform-token' } | { kind: 'bearer'; secretRef: string }
-  healthPath: string
+  auth: { kind: 'platform-token' } | { kind: 'bearer', secretRef: string }
   enabled: boolean
+  endpoint: string
+  healthPath: string
+  id: string
+  interfaceVersion: string
+  kind: 'tool-provider' | 'context-provider'
 }
 
 /** Write/Update 返回:manifest + pluginToken(auth=platform-token 时仅该次响应出现一次)。 */
@@ -28,14 +28,14 @@ export interface PluginRegistration extends PluginManifest {
 
 /** health cmd 返回(探活:独立 key,按需刷新)。 */
 export interface PluginHealth {
-  healthy: boolean
   checkedAt?: string
   consecutiveFailures?: number
+  healthy: boolean
 }
 
 interface PluginOpts {
-  json?: boolean
   baseUrl?: string
+  json?: boolean
   sk?: string
 }
 
@@ -128,7 +128,7 @@ export function pluginListCommand(): Command {
           printJson(page)
           return
         }
-        const rows = (page.items ?? []).map((p) => [
+        const rows = (page.items ?? []).map(p => [
           p.id,
           p.kind,
           p.endpoint,

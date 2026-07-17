@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { checkScopes, matchGlob } from '../../src/auth/scope'
 import type { Action, Scope } from '../../src/types'
+import { checkScopes, matchGlob } from '../../src/auth/scope'
 
 describe('matchGlob(glob 语义)', () => {
   describe('** 匹配任意层级(含零段)', () => {

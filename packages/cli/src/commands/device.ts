@@ -1,8 +1,8 @@
 import { Command } from 'commander'
+import type { Node, Page } from '../types'
+import { guard, printJson, printLine, table } from '../output'
 import { resolveTarget, withGlobalOpts } from '../args'
 import { callTool } from '../http'
-import { guard, printJson, printLine, table } from '../output'
-import type { Node, Page } from '../types'
 
 function deviceIdFromPath(path: string): string {
   const parts = path.split('/')
@@ -10,8 +10,8 @@ function deviceIdFromPath(path: string): string {
 }
 
 interface DeviceLsOpts {
-  json?: boolean
   baseUrl?: string
+  json?: boolean
   sk?: string
 }
 
@@ -26,7 +26,7 @@ export function deviceLsCommand(): Command {
           prefix: 'device',
         })
         const devices = (page.items ?? []).filter(
-          (n) => n.kind === 'directory' && n.online !== undefined,
+          n => n.kind === 'directory' && n.online !== undefined,
         )
         const out: Page<Node> = page.cursor
           ? { items: devices, cursor: page.cursor }
@@ -42,7 +42,7 @@ export function deviceLsCommand(): Command {
         printLine(
           table(
             ['DEVICE_ID', 'PATH', 'ONLINE', 'DESCRIPTION'],
-            devices.map((n) => [
+            devices.map(n => [
               deviceIdFromPath(n.path),
               n.path,
               n.online ? 'yes' : 'no',

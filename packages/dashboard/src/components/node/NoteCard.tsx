@@ -1,8 +1,7 @@
-import { useQueryClient } from '@tanstack/react-query'
 import { Loader2, Pencil, StickyNote } from 'lucide-react'
+import { useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { toast } from 'sonner'
-import { Button } from '@/components/ui/button'
 import {
   Dialog,
   DialogContent,
@@ -13,6 +12,7 @@ import {
   DialogTrigger,
 } from '@/components/ui/dialog'
 import { Textarea } from '@/components/ui/textarea'
+import { Button } from '@/components/ui/button'
 import { useInvoke } from '@/lib/queries'
 
 /**
@@ -20,11 +20,11 @@ import { useInvoke } from '@/lib/queries'
  * 展示来自 ~help 注入的 note(零额外请求),编辑/清除走 system/annotation set/remove
  * (admin scope,无权时 403 toast)。
  */
-export function NoteCard({ path, note }: { path: string; note?: string }) {
+export function NoteCard({ path, note }: { note?: string, path: string }) {
   if (note === undefined) {
     return (
       <div className="flex items-center gap-2">
-        <NoteDialog path={path} current="" trigger={<AddNoteTrigger />} />
+        <NoteDialog current="" path={path} trigger={<AddNoteTrigger />} />
       </div>
     )
   }
@@ -33,13 +33,13 @@ export function NoteCard({ path, note }: { path: string; note?: string }) {
       <StickyNote className="mt-0.5 size-3.5 shrink-0 text-amber-600 dark:text-amber-400" />
       <p className="min-w-0 flex-1 whitespace-pre-wrap break-words text-sm">{note}</p>
       <NoteDialog
-        path={path}
         current={note}
-        trigger={
-          <Button variant="ghost" size="icon-xs" aria-label="编辑补充说明" title="编辑补充说明">
+        path={path}
+        trigger={(
+          <Button aria-label="编辑补充说明" size="icon-xs" title="编辑补充说明" variant="ghost">
             <Pencil />
           </Button>
-        }
+        )}
       />
     </div>
   )
@@ -47,7 +47,7 @@ export function NoteCard({ path, note }: { path: string; note?: string }) {
 
 function AddNoteTrigger() {
   return (
-    <Button variant="ghost" size="sm" className="h-6 px-2 text-xs text-muted-foreground">
+    <Button className="h-6 px-2 text-xs text-muted-foreground" size="sm" variant="ghost">
       <StickyNote />
       添加补充说明
     </Button>
@@ -59,8 +59,8 @@ function NoteDialog({
   current,
   trigger,
 }: {
-  path: string
   current: string
+  path: string
   trigger: React.ReactNode
 }) {
   const invoke = useInvoke()
@@ -83,30 +83,32 @@ function NoteDialog({
     }
     invoke.mutate(
       { path: 'system/annotation', tool: 'set', args: { path, text: text.trim() } },
-      { onSuccess: () => done('补充说明已保存'), onError: (e) => setErr(e.message) },
+      { onSuccess: () => done('补充说明已保存'), onError: e => setErr(e.message) },
     )
   }
 
   const remove = () => {
     invoke.mutate(
       { path: 'system/annotation', tool: 'remove', args: { path } },
-      { onSuccess: () => done('补充说明已移除'), onError: (e) => setErr(e.message) },
+      { onSuccess: () => done('补充说明已移除'), onError: e => setErr(e.message) },
     )
   }
 
   return (
     <Dialog
-      open={open}
       onOpenChange={(o) => {
         setOpen(o)
         if (o) setText(current)
       }}
+      open={open}
     >
       <DialogTrigger asChild>{trigger}</DialogTrigger>
       <DialogContent className="max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="break-words text-base">
-            补充说明 · <code className="font-mono text-sm">{path === '' ? '/' : path}</code>
+            补充说明 ·
+            {' '}
+            <code className="font-mono text-sm">{path === '' ? '/' : path}</code>
           </DialogTitle>
           <DialogDescription>
             展示在该路径 ~help 的 Notes 区块(admin scope;≤ 2000 字符)。
@@ -115,18 +117,18 @@ function NoteDialog({
         <Textarea
           className="min-h-28 text-sm"
           maxLength={2000}
-          value={text}
-          onChange={(e) => setText(e.target.value)}
+          onChange={e => setText(e.target.value)}
           placeholder="这个路径的使用要点、前置条件、已知坑……"
+          value={text}
         />
         {err && (
-          <p role="alert" className="text-xs text-destructive">
+          <p className="text-xs text-destructive" role="alert">
             {err}
           </p>
         )}
         <DialogFooter>
           {current !== '' && (
-            <Button variant="outline" disabled={invoke.isPending} onClick={remove}>
+            <Button disabled={invoke.isPending} onClick={remove} variant="outline">
               移除
             </Button>
           )}

@@ -1,10 +1,10 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { buildVirtualize, parseToolsFile } from '../src/registry'
 import { parseCallArgs } from '../src/commands/call'
 import { resetFetch, setFetch } from '../src/http'
-import { buildVirtualize, parseToolsFile } from '../src/registry'
 import { runCli } from './cliHarness'
 
 /** 捕获请求并按 body 应答;返回 mock 以断言 URL/body。 */
@@ -80,7 +80,7 @@ describe('tb tool mount --kind mcp', () => {
     })
     expect(payload.virtualize).toEqual({
       prefix: 'ctx__',
-      rename: { resolve: 'r', 'get-docs': 'g' },
+      rename: { 'resolve': 'r', 'get-docs': 'g' },
       hide: ['debug'],
       describe: { resolve: 'Resolve libraries' },
     })
@@ -326,7 +326,7 @@ describe('tb server ls / rm', () => {
     expect(url).toBe('https://gw/system/registry')
     expect(JSON.parse(init.body as string)).toEqual({ tool: 'list', arguments: {} })
     const stdout = process.stdout.write as unknown as ReturnType<typeof vi.fn>
-    const printed = stdout.mock.calls.map((c) => String(c[0])).join('')
+    const printed = stdout.mock.calls.map(c => String(c[0])).join('')
     expect(JSON.parse(printed)).toEqual([
       {
         path: 'fed/peer',
@@ -476,7 +476,7 @@ describe('tb tool rm — 404 提示', () => {
     await runCli(['tool', 'rm', 'docs/ctx7', '--base-url', 'https://gw', '--sk', 'tbk_x'])
     expect(process.exitCode).toBe(1)
     const stderr = process.stderr.write as unknown as ReturnType<typeof vi.fn>
-    const printed = stderr.mock.calls.map((c) => String(c[0])).join('')
+    const printed = stderr.mock.calls.map(c => String(c[0])).join('')
     expect(printed).toMatch(/system\/registry/)
   })
 })

@@ -61,7 +61,7 @@ describe('deviceFsHelpModel(复用 context 静态 help)', () => {
     const node = { path: 'device/d1/fs', description: '设备文件' }
     const full = deviceFsHelpModel(node)
     expect(full.node.kind).toBe('context')
-    expect(full.cmds.map((c) => c.name)).toEqual([
+    expect(full.cmds.map(c => c.name)).toEqual([
       'List',
       'Get',
       'Write',
@@ -70,7 +70,7 @@ describe('deviceFsHelpModel(复用 context 静态 help)', () => {
       'Search',
     ])
     const readOnly = deviceFsHelpModel(node, { readOnly: true })
-    expect(readOnly.cmds.map((c) => c.name)).toEqual(['List', 'Get', 'Search'])
+    expect(readOnly.cmds.map(c => c.name)).toEqual(['List', 'Get', 'Search'])
   })
 })
 

@@ -1,11 +1,11 @@
 import { readFileSync } from 'node:fs'
 import { extname } from 'node:path'
 import { Command } from 'commander'
-import { collect, resolveTarget, withGlobalOpts } from '../args'
-import { CliError, callTool } from '../http'
-import { asArray, guard, printJson, printLine, table } from '../output'
-import { deleteNode, registerNode } from '../registry'
 import type { ContextEntry, ContextEntryMeta, NodeConfig, NodeInput, Page } from '../types'
+import { asArray, guard, printJson, printLine, table } from '../output'
+import { collect, resolveTarget, withGlobalOpts } from '../args'
+import { deleteNode, registerNode } from '../registry'
+import { callTool, CliError } from '../http'
 
 /**
  * `tb ctx *` —— Context Layer 命令族。
@@ -79,7 +79,7 @@ function printEntries(page: Page<ContextEntryMeta>): void {
     printLine('(no entries)')
     return
   }
-  const rows = items.map((m) => [
+  const rows = items.map(m => [
     m.uri,
     m.size !== undefined ? String(m.size) : '-',
     m.updatedAt ?? '',
@@ -89,8 +89,8 @@ function printEntries(page: Page<ContextEntryMeta>): void {
 }
 
 interface GlobalOpts {
-  json?: boolean
   baseUrl?: string
+  json?: boolean
   sk?: string
 }
 
@@ -106,7 +106,7 @@ export function ctxLsCommand(): Command {
       async (
         nsArg: string,
         prefix: string | undefined,
-        opts: GlobalOpts & { limit?: string; cursor?: string },
+        opts: GlobalOpts & { cursor?: string, limit?: string },
       ) => {
         const asJson = Boolean(opts.json)
         await guard(asJson, async () => {
@@ -184,11 +184,11 @@ export function ctxPutCommand(): Command {
         nsArg: string,
         entryArg: string,
         opts: GlobalOpts & {
-          file?: string
           content?: string
           contentType?: string
-          meta: string[]
+          file?: string
           ifVersion?: string
+          meta: string[]
         },
       ) => {
         const asJson = Boolean(opts.json)
@@ -240,10 +240,10 @@ export function ctxPatchCommand(): Command {
         nsArg: string,
         entryArg: string,
         opts: GlobalOpts & {
-          file?: string
           content?: string
-          meta: string[]
+          file?: string
           ifVersion?: string
+          meta: string[]
         },
       ) => {
         const asJson = Boolean(opts.json)
@@ -288,7 +288,7 @@ export function ctxSearchCommand(): Command {
       async (
         nsArg: string,
         queryArg: string,
-        opts: GlobalOpts & { mode?: string; limit?: string },
+        opts: GlobalOpts & { limit?: string, mode?: string },
       ) => {
         const asJson = Boolean(opts.json)
         await guard(asJson, async () => {
@@ -340,15 +340,15 @@ export function ctxMountCommand(): Command {
       async (
         pathArg: string,
         opts: GlobalOpts & {
-          provider: string
-          description?: string
           authRef?: string
-          readOnly?: boolean
-          ttl?: string
-          prefix?: string
-          endpoint?: string
           bucket?: string
+          description?: string
+          endpoint?: string
+          prefix?: string
+          provider: string
+          readOnly?: boolean
           region?: string
+          ttl?: string
         },
       ) => {
         const asJson = Boolean(opts.json)

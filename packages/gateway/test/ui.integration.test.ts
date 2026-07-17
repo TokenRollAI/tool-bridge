@@ -1,5 +1,5 @@
-import { SELF } from 'cloudflare:test'
 import { describe, expect, it } from 'vitest'
+import { SELF } from 'cloudflare:test'
 import { TEST_ADMIN_SK } from './fixtures'
 
 // Dashboard 集成测试:/ui 静态资源托管与路由次序。
@@ -66,9 +66,9 @@ describe('路由次序:Worker 逻辑不被 assets 吞', () => {
       method: 'POST',
       ...admin(),
       headers: {
-        authorization: `Bearer ${TEST_ADMIN_SK}`,
+        'authorization': `Bearer ${TEST_ADMIN_SK}`,
         'content-type': 'application/json',
-        accept: 'application/json',
+        'accept': 'application/json',
       },
       body: JSON.stringify({ tool: 'get', arguments: {} }),
     })

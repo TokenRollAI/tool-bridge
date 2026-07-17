@@ -1,19 +1,19 @@
 import {
   AnnotationStore,
-  type BuiltinModule,
   buildTree,
+  type BuiltinModule,
   type CallContext,
-  type CmdSpec,
-  CONTEXT_CAPABILITIES,
-  type ContextEntryInput,
-  type ContextPatch,
-  type ContextProvider,
   check,
   checkRegisterPath,
   checkScopes,
   clampDepth,
+  type CmdSpec,
   contentTypeFor,
+  CONTEXT_CAPABILITIES,
+  type ContextEntryInput,
   contextHelpModel,
+  type ContextPatch,
+  type ContextProvider,
   contextScopeForCmd,
   createBuiltins,
   createObjectContextProvider,
@@ -31,43 +31,43 @@ import {
   KEY_PLUGIN,
   KEY_PLUGIN_META,
   type ListOptions,
+  negotiate,
   type NodeConfig,
   NodeRegistryStore,
-  negotiate,
   type ObjectStore,
   optionalMethodsForCapabilities,
+  parseNodeInput,
   type PluginDescribe,
   type PluginKind,
   type PluginManifest,
   PRESIGN_TTL_SEC_DEFAULT,
-  parseNodeInput,
   RemoteAllowlistStore,
-  type Representation,
   renderHelpDsl,
   renderHelpJson,
   renderHelpMarkdown,
+  type Representation,
   resolveUpstreamTool,
   type SearchOptions,
   type SecretStoreImpl,
   SKILLHUB_CAPABILITIES,
+  skillhubHelpModel,
   type SkillhubProvider,
+  skillhubScopeForCmd,
   type SkillPublishFile,
   type StateStore,
-  skillhubHelpModel,
-  skillhubScopeForCmd,
   TBError,
   type TBErrorBody,
+  toolHelpModel,
   type ToolSpec,
+  toolsToHelpModel,
   type TreeEntry,
   type TreeJson,
   type TreeNode,
   type TreePath,
-  toolHelpModel,
-  toolsToHelpModel,
   virtualizeTools,
 } from '@tool-bridge/core'
 import { type Context, Hono } from 'hono'
-import { buildDeps } from './bootstrap'
+import type { UpstreamProvider } from './providers/types'
 import {
   finishMcpAuthorization,
   invalidateMcpOAuth,
@@ -76,25 +76,25 @@ import {
   renderOAuthCallbackHtml,
   startMcpAuthorization,
 } from './oauth'
-import { createHttpProvider, type HttpConfig } from './providers/http'
-import { createMcpProvider, invalidateMcpSession, type McpConfig } from './providers/mcp'
-import { createPluginContextProvider } from './providers/pluginContext'
-import { createPluginToolProvider } from './providers/pluginTool'
 import { assertRemoteAllowed, passthroughRemote, type RemoteSettings } from './providers/remote'
+import { createMcpProvider, invalidateMcpSession, type McpConfig } from './providers/mcp'
 import { createS3ObjectStore, type S3StoreConfig } from './providers/s3Object'
+import { createPluginContextProvider } from './providers/pluginContext'
+import { createHttpProvider, type HttpConfig } from './providers/http'
 import { getTools, invalidateToolCache } from './providers/toolCache'
-import type { UpstreamProvider } from './providers/types'
+import { createPluginToolProvider } from './providers/pluginTool'
 import { signRefToken, verifyRefToken } from './refToken'
+import { buildDeps } from './bootstrap'
 
 export type { RemoteSettings } from './providers/remote'
 export type { UpstreamProvider } from './providers/types'
 
 /** 帧协议 call 转发的入参(id 由调用点生成,幂等键)。 */
 export interface DeviceInvokeRequest {
+  arguments: Record<string, unknown>
   id: string
   path: string
   tool: string
-  arguments: Record<string, unknown>
 }
 
 /** 设备通道宿主(CF = DeviceSession DO / Docker = ws;deviceTransport 的消费面)。 */
@@ -107,10 +107,10 @@ export interface DeviceChannel {
 
 /** 进程内本地 Provider 钩子(SDK registerTool/registerContext 的装配面)。 */
 export interface LocalProviderHooks {
-  /** kind:'tool' 节点按路径取进程内工具源;undefined → 走 plugin 解析。 */
-  tool?(nodePath: TreePath): UpstreamProvider | undefined
   /** kind:'context' 节点按路径取进程内 ContextProvider;undefined → 走 plugin 解析。 */
   context?(nodePath: TreePath): ContextProvider | undefined
+  /** kind:'tool' 节点按路径取进程内工具源;undefined → 走 plugin 解析。 */
+  tool?(nodePath: TreePath): UpstreamProvider | undefined
 }
 
 /**
@@ -118,34 +118,34 @@ export interface LocalProviderHooks {
  * 核心业务逻辑零分叉:Workers 适配层(app.ts)与 SDK(packages/sdk)都注入此形状。
  */
 export interface TbAppDeps {
-  state: StateStore
-  secrets: SecretStoreImpl
-  /** healthz 与 system/status 回显的版本号(单一真源:宿主 package.json)。 */
-  version: string
-  /** 认证前的实例就绪钩子(引导/延迟注册 flush);每请求调用,幂等由宿主保证。 */
-  ensureReady?: () => Promise<void>
-  /** remote 联邦透传配置。 */
-  remote: RemoteSettings
   /** 放行 http:// 上游(仅本地开发)。 */
   allowInsecureHttp: boolean
-  /** 追加保留根路径(在内置保留根之外额外声明)。 */
-  reservedRoots?: string[]
-  /** context 平台对象存储('r2' provider 的落点);缺省 → 该 provider unavailable。 */
-  objects?: () => Promise<ObjectStore> | ObjectStore
-  /** $ref 中转 token 签名密钥(TB_SECRET_ENCRYPTION_KEY);缺省 → /~ref 404、大对象走 presign 或 unavailable。 */
-  encryptionKey?: string
-  /** 设备通道;缺省 → device 能力禁用。 */
-  device?: DeviceChannel
   /** Dashboard 静态资源(Workers Static Assets);缺省 → /ui 404。 */
   assets?: (request: Request) => Promise<Response>
+  /** 设备通道;缺省 → device 能力禁用。 */
+  device?: DeviceChannel
+  /** $ref 中转 token 签名密钥(TB_SECRET_ENCRYPTION_KEY);缺省 → /~ref 404、大对象走 presign 或 unavailable。 */
+  encryptionKey?: string
+  /** 认证前的实例就绪钩子(引导/延迟注册 flush);每请求调用,幂等由宿主保证。 */
+  ensureReady?: () => Promise<void>
   /** SDK 进程内 Provider 表(缺省无)。 */
   locals?: LocalProviderHooks
-  /** mcp/tool 工具缓存 TTL 秒(缺省 300)。 */
-  toolCacheTtlSec?: number
+  /** context 平台对象存储('r2' provider 的落点);缺省 → 该 provider unavailable。 */
+  objects?: () => Promise<ObjectStore> | ObjectStore
   /** context Get 的 $ref 内联阈值(字节,缺省 1 MiB)。 */
   refThresholdBytes?: number
   /** $ref URL(presign 与 /~ref 中转)有效期秒(缺省 900)。 */
   refTtlSec?: number
+  /** remote 联邦透传配置。 */
+  remote: RemoteSettings
+  /** 追加保留根路径(在内置保留根之外额外声明)。 */
+  reservedRoots?: string[]
+  secrets: SecretStoreImpl
+  state: StateStore
+  /** mcp/tool 工具缓存 TTL 秒(缺省 300)。 */
+  toolCacheTtlSec?: number
+  /** healthz 与 system/status 回显的版本号(单一真源:宿主 package.json)。 */
+  version: string
 }
 
 const TOOL_CACHE_TTL_DEFAULT = 300
@@ -153,7 +153,7 @@ const TOOL_CACHE_TTL_DEFAULT = 300
 /** `~tree` 深度边界上免 fetch 探测、直接标 truncated 的 kind:remote 联邦(子树在远端,探测需远端往返)。 */
 const REMOTE_OPAQUE_KINDS = new Set(['remote'])
 
-type Vars = { ctx: CallContext; store: StateStore }
+type Vars = { ctx: CallContext, store: StateStore }
 
 type AppContext = Context<{ Variables: Vars }>
 
@@ -180,7 +180,7 @@ async function runHandler(fn: () => Response | Promise<Response>): Promise<Respo
 
 /** cmd → scope 表(builtin help() 静态声明);未知 cmd → undefined。 */
 function scopeForCmd(mod: BuiltinModule, nodePath: TreePath, cmd: string): CmdSpec | undefined {
-  return mod.help(nodePath).cmds.find((c) => c.name === cmd)
+  return mod.help(nodePath).cmds.find(c => c.name === cmd)
 }
 
 /** 渲染 HelpModel:按协商表现输出 DSL(text/plain)、JSON 或 Markdown(可读性表现)。 */
@@ -244,7 +244,7 @@ function decodePath(path: TreePath): TreePath {
   try {
     return path
       .split('/')
-      .map((seg) => decodeURIComponent(seg))
+      .map(seg => decodeURIComponent(seg))
       .join('/')
   } catch {
     throw new TBError('invalid_argument', `malformed percent-encoding in path '${path}'`)
@@ -263,7 +263,7 @@ function splitReserved(pathname: string, seg: string): TreePath | null {
  * 解析 ~feedback 保留段 URL(feedback 是 per-path 一级协议能力):
  * `/<path>/~feedback` → { path };`/<path>/~feedback/<id>` → { path, id };其余形状 → null。
  */
-function splitFeedback(pathname: string): { path: TreePath; id?: string } | null {
+function splitFeedback(pathname: string): { id?: string, path: TreePath } | null {
   const p = pathname.replace(/^\/+|\/+$/g, '')
   const segs = p.split('/')
   const last = segs[segs.length - 1] ?? ''
@@ -293,11 +293,11 @@ export function createTbApp(deps: TbAppDeps): Hono<{ Variables: Vars }> {
     )
 
   // GET /healthz → 200 JSON,树外免认证。version 单一真源:宿主 package.json。
-  app.get('/healthz', (c) => c.json({ healthy: true, version: deps.version }))
+  app.get('/healthz', c => c.json({ healthy: true, version: deps.version }))
 
   // GET /~ref/<token> → 大对象中转下载,树外免认证(中转下载路由)。
   // 注册在认证中间件之前:token 本身即凭证(HMAC 限时签名);验签失败/过期一律 404 不泄露。
-  app.get('/~ref/:token', (c) =>
+  app.get('/~ref/:token', c =>
     runHandler(async () => {
       const encKey = deps.encryptionKey
       if (encKey === undefined) throw TBError.notFound('not found')
@@ -314,9 +314,9 @@ export function createTbApp(deps: TbAppDeps): Hono<{ Variables: Vars }> {
       // 签发后节点可能被卸载/换 kind/ttl 到期——须仍是存活的 context/skillhub 对象节点。
       const cfg = node.config
       if (
-        (node.kind !== 'context' && node.kind !== 'skillhub') ||
-        cfg === undefined ||
-        cfg.kind !== node.kind
+        (node.kind !== 'context' && node.kind !== 'skillhub')
+        || cfg === undefined
+        || cfg.kind !== node.kind
       ) {
         throw TBError.notFound('not found')
       }
@@ -348,7 +348,7 @@ export function createTbApp(deps: TbAppDeps): Hono<{ Variables: Vars }> {
     // SPA 回退(仅 /ui 内):深链交给前端路由,由 '/' 取回 index.html。
     return await assets(new Request(new URL('/', url.origin)))
   }
-  app.get('/ui', (c) => c.redirect('/ui/', 302))
+  app.get('/ui', c => c.redirect('/ui/', 302))
   app.get('/ui/*', serveUi)
 
   // 浏览器直开根路径 → Dashboard(GET / 且 Accept 带 text/html 时 302);
@@ -360,7 +360,7 @@ export function createTbApp(deps: TbAppDeps): Hono<{ Variables: Vars }> {
 
   // GET /~oauth/callback → mcp 托管 OAuth 的授权回调,树外免认证(浏览器跳转无法带 SK)。
   // state 本身即凭证:AES-GCM 加密载荷(nodePath + code_verifier + exp),解不开/过期一律拒。
-  app.get(OAUTH_CALLBACK_PATH, (c) =>
+  app.get(OAUTH_CALLBACK_PATH, c =>
     runHandler(async () => {
       const encKey = deps.encryptionKey
       if (encKey === undefined) throw TBError.notFound('not found')
@@ -428,7 +428,7 @@ export function createTbApp(deps: TbAppDeps): Hono<{ Variables: Vars }> {
 
   // WS /system/device/ws?deviceId=<id> → 设备通道宿主(CF:每 deviceId 一个 DeviceSession DO)。
   // deviceId 同时在 hello 帧中出现;通道侧会校验二者一致,以满足设备帧契约。
-  app.get('/system/device/ws', (c) =>
+  app.get('/system/device/ws', c =>
     runHandler(async () => {
       const device = requireDevice(deps)
       if (c.req.header('upgrade')?.toLowerCase() !== 'websocket') {
@@ -480,7 +480,7 @@ export function createTbApp(deps: TbAppDeps): Hono<{ Variables: Vars }> {
     const getChildren = async (p: TreePath): Promise<TreeEntry[]> => {
       const localKids = filterListVisible(byParent.get(p) ?? [], ctx.scopes)
       const remoteKids = await remoteTreeChildren(c, ctx, registry, p, deps)
-      return [...localKids.map((n) => toEntry(n)), ...remoteKids]
+      return [...localKids.map(n => toEntry(n)), ...remoteKids]
     }
 
     const depth = clampDepth(Number(c.req.query('depth')))
@@ -527,7 +527,7 @@ export function createTbApp(deps: TbAppDeps): Hono<{ Variables: Vars }> {
       const model: HelpModel = {
         node: { path: '', kind: 'directory', description: 'tool-bridge root' },
         cmds: [],
-        children: children.map((n) => ({ path: n.path, kind: n.kind, description: n.description })),
+        children: children.map(n => ({ path: n.path, kind: n.kind, description: n.description })),
         hint: 'GET /<child-path>/~help describes a child node; GET /~tree?depth=N shows the subtree. Every path also serves ~feedback: GET /<path>/~feedback lists pitfalls other agents hit — check it before using a tool; POST /<path>/~feedback {"title","detail"} to share your own',
       }
       return renderHelp(await enrichHelp(model, '', store), rep)
@@ -562,7 +562,7 @@ export function createTbApp(deps: TbAppDeps): Hono<{ Variables: Vars }> {
   // --- POST /<path> 数据面调用 ---
   const handleInvoke = async (c: AppContext): Promise<Response> => {
     const rawEncoded = new URL(c.req.url).pathname.replace(/^\/+|\/+$/g, '')
-    if (rawEncoded === '' || rawEncoded.split('/').some((s) => s.startsWith('~'))) {
+    if (rawEncoded === '' || rawEncoded.split('/').some(s => s.startsWith('~'))) {
       throw TBError.notFound('no such path')
     }
     const raw = decodePath(rawEncoded)
@@ -588,13 +588,13 @@ export function createTbApp(deps: TbAppDeps): Hono<{ Variables: Vars }> {
       // (raw 含工具段,scope 精确到节点路径时会漏判)。
       const resolved = await registry.resolve(raw).catch(() => null)
       if (
-        resolved === null ||
-        (resolved.node.kind !== 'mcp' &&
-          resolved.node.kind !== 'http' &&
-          resolved.node.kind !== 'tool') ||
-        resolved.node.config === undefined ||
-        resolved.rest === '' ||
-        resolved.rest.includes('/')
+        resolved === null
+        || (resolved.node.kind !== 'mcp'
+          && resolved.node.kind !== 'http'
+          && resolved.node.kind !== 'tool')
+        || resolved.node.config === undefined
+        || resolved.rest === ''
+        || resolved.rest.includes('/')
       ) {
         throw TBError.notFound('not found')
       }
@@ -605,8 +605,8 @@ export function createTbApp(deps: TbAppDeps): Hono<{ Variables: Vars }> {
 
     // 解析调用体:直连路径 body 即 arguments(可空);节点路径沿用 {tool,arguments} 信封。
     const readInvokeBody = async (): Promise<{
-      tool: string
       args: Record<string, unknown>
+      tool: string
     }> => {
       const parsed = (await c.req.json().catch(() => null)) as unknown
       if (directTool !== null) {
@@ -615,7 +615,7 @@ export function createTbApp(deps: TbAppDeps): Hono<{ Variables: Vars }> {
         }
         return { tool: directTool, args: (parsed ?? {}) as Record<string, unknown> }
       }
-      const body = parsed as { tool?: unknown; arguments?: unknown } | null
+      const body = parsed as { arguments?: unknown, tool?: unknown } | null
       if (!body || typeof body.tool !== 'string') {
         throw new TBError('invalid_argument', 'body must be {tool, arguments}')
       }
@@ -640,8 +640,8 @@ export function createTbApp(deps: TbAppDeps): Hono<{ Variables: Vars }> {
 
     // --- mcp/http/tool 上游工具调用:scope 恒 'call';虚拟名反查上游真名再调 Provider。 ---
     if (
-      (node.kind === 'mcp' || node.kind === 'http' || node.kind === 'tool') &&
-      node.config !== undefined
+      (node.kind === 'mcp' || node.kind === 'http' || node.kind === 'tool')
+      && node.config !== undefined
     ) {
       if (!check(ctx, node.path, 'call').allow) {
         throw new TBError('permission_denied', `no scope grants 'call' on '${node.path}'`)
@@ -661,8 +661,8 @@ export function createTbApp(deps: TbAppDeps): Hono<{ Variables: Vars }> {
         throw new TBError('permission_denied', `no scope grants 'call' on '${node.path}'`)
       }
       const body = (await c.req.json().catch(() => null)) as {
-        tool?: unknown
         arguments?: unknown
+        tool?: unknown
       } | null
       if (!body || typeof body.tool !== 'string') {
         throw new TBError('invalid_argument', 'body must be {tool, arguments}')
@@ -684,8 +684,8 @@ export function createTbApp(deps: TbAppDeps): Hono<{ Variables: Vars }> {
       // ttl 懒回收:POST 命中即判,过期删节点并 404。
       await assertContextAlive(node, cfg, registry)
       const body = (await c.req.json().catch(() => null)) as {
-        tool?: unknown
         arguments?: unknown
+        tool?: unknown
       } | null
       if (!body || typeof body.tool !== 'string') {
         throw new TBError('invalid_argument', 'body must be {tool, arguments}')
@@ -753,8 +753,8 @@ export function createTbApp(deps: TbAppDeps): Hono<{ Variables: Vars }> {
       // ttl 懒回收:POST 命中即判,过期删节点并 404。
       await assertContextAlive(node, cfg, registry)
       const body = (await c.req.json().catch(() => null)) as {
-        tool?: unknown
         arguments?: unknown
+        tool?: unknown
       } | null
       if (!body || typeof body.tool !== 'string') {
         throw new TBError('invalid_argument', 'body must be {tool, arguments}')
@@ -785,8 +785,8 @@ export function createTbApp(deps: TbAppDeps): Hono<{ Variables: Vars }> {
     if (!mod) throw TBError.unimplemented(`builtin module '${node.config.module}' not available`)
 
     const body = (await c.req.json().catch(() => null)) as {
-      tool?: unknown
       arguments?: unknown
+      tool?: unknown
     } | null
     if (!body || typeof body.tool !== 'string') {
       throw new TBError('invalid_argument', 'body must be {tool, arguments}')
@@ -807,11 +807,11 @@ export function createTbApp(deps: TbAppDeps): Hono<{ Variables: Vars }> {
     if (node.config.module === 'registry' && ['write', 'update', 'delete'].includes(cmd)) {
       const targetPath = typeof args.path === 'string' ? args.path : undefined
       if (targetPath === undefined) {
-        throw new TBError('invalid_argument', "field 'path' must be a string")
+        throw new TBError('invalid_argument', 'field \'path\' must be a string')
       }
       // 挂载/更新 remote 节点时校验 baseUrl 白名单(注册时即拒)。
-      const cfgPatch =
-        cmd === 'write'
+      const cfgPatch
+        = cmd === 'write'
           ? args.config
           : cmd === 'update'
             ? (args.patch as { config?: unknown } | undefined)?.config
@@ -880,11 +880,11 @@ export function createTbApp(deps: TbAppDeps): Hono<{ Variables: Vars }> {
       // SDK 进程内 Provider 按可选方法实现存在性推导。
       const cfg = node.config
       const local = cfg.provider !== 'r2' && cfg.provider !== 's3' ? localContext(deps, node) : null
-      const capabilities =
-        cfg.provider === 'r2' ||
-        cfg.provider === 's3' ||
-        cfg.provider === 'device-fs' ||
-        deviceMarkerOf(cfg.providerConfig) !== null
+      const capabilities
+        = cfg.provider === 'r2'
+          || cfg.provider === 's3'
+          || cfg.provider === 'device-fs'
+          || deviceMarkerOf(cfg.providerConfig) !== null
           ? CONTEXT_CAPABILITIES
           : local !== null
             ? localCapabilities(local)
@@ -935,8 +935,8 @@ export function createTbApp(deps: TbAppDeps): Hono<{ Variables: Vars }> {
       })
     }
     const views = await fb.listViews(target.path)
-    const items =
-      c.req.query('hidden') === '1' ? views : views.filter((v) => v.score > FEEDBACK_HIDE_SCORE)
+    const items
+      = c.req.query('hidden') === '1' ? views : views.filter(v => v.score > FEEDBACK_HIDE_SCORE)
     return feedbackJson({ items })
   }
 
@@ -995,7 +995,7 @@ export function createTbApp(deps: TbAppDeps): Hono<{ Variables: Vars }> {
   // (不用 `/:path{.*}/~help` 具名后缀路由——Hono 该形式对 3+ 段路径不匹配。)
   // handleX(c) 必须 `await`(而非裸 `return handleX(c)`):裸返回 async promise 时其 reject
   // 会在链接那一 tick 被 workerd 误报为 unhandled,即便 runHandler 最终 catch。
-  app.get('/*', (c) =>
+  app.get('/*', c =>
     runHandler(async () => {
       const segs = new URL(c.req.url).pathname.replace(/\/+$/, '').split('/')
       const last = segs.pop() ?? ''
@@ -1012,7 +1012,7 @@ export function createTbApp(deps: TbAppDeps): Hono<{ Variables: Vars }> {
   )
 
   // DELETE 通配分派:仅 ~feedback 详情(管理面清理);其余 DELETE 无对应端点 → 404。
-  app.delete('/*', (c) =>
+  app.delete('/*', c =>
     runHandler(async () => {
       const segs = new URL(c.req.url).pathname.replace(/\/+$/, '').split('/')
       if (segs[segs.length - 2] === '~feedback') return await handleFeedbackDelete(c)
@@ -1092,8 +1092,8 @@ export function createTbApp(deps: TbAppDeps): Hono<{ Variables: Vars }> {
     }
     // 可选 body {redirectUri}:CLI 本地回调通道(严格上游只放行 loopback 回调时)。
     const body = (await c.req.json().catch(() => null)) as { redirectUri?: unknown } | null
-    const redirectUri =
-      body !== null && typeof body.redirectUri === 'string' ? body.redirectUri : undefined
+    const redirectUri
+      = body !== null && typeof body.redirectUri === 'string' ? body.redirectUri : undefined
     const result = await startMcpAuthorization({
       store,
       encryptionKey: encKey,
@@ -1109,7 +1109,7 @@ export function createTbApp(deps: TbAppDeps): Hono<{ Variables: Vars }> {
 
   // POST 通配分派:末段为 ~register → 反向注册;~authorize → OAuth 发起;~feedback(末段或
   // 倒数第二段)→ 反馈提交/投票;否则数据面调用。
-  app.post('/*', (c) =>
+  app.post('/*', c =>
     runHandler(async () => {
       const segs = new URL(c.req.url).pathname.replace(/\/+$/, '').split('/')
       const last = segs.pop() ?? ''
@@ -1179,12 +1179,12 @@ function filterListVisible(nodes: TreeNode[], scopes: CallContext['scopes']): Tr
   return nodes.filter((node) => {
     if (!checkScopes(scopes, node.path, 'read')) return false
     if (
-      (node.kind === 'mcp' ||
-        node.kind === 'http' ||
-        node.kind === 'remote' ||
-        node.kind === 'device' ||
-        node.kind === 'tool') &&
-      !checkScopes(scopes, node.path, 'call')
+      (node.kind === 'mcp'
+        || node.kind === 'http'
+        || node.kind === 'remote'
+        || node.kind === 'device'
+        || node.kind === 'tool')
+      && !checkScopes(scopes, node.path, 'call')
     ) {
       return false
     }
@@ -1215,7 +1215,7 @@ async function remoteTreeChildren(
   deps: TbAppDeps,
 ): Promise<TreeEntry[]> {
   if (treePath === '') return []
-  let resolved: { node: TreeNode; rest: string }
+  let resolved: { node: TreeNode, rest: string }
   try {
     resolved = await registry.resolve(treePath)
   } catch {
@@ -1236,7 +1236,7 @@ async function remoteTreeChildren(
   if (remoteTree === null) {
     throw new TBError('unavailable', 'remote ~tree returned invalid JSON', { retryable: false })
   }
-  return (remoteTree.children ?? []).map((child) => localizeRemoteEntry(resolved.node.path, child))
+  return (remoteTree.children ?? []).map(child => localizeRemoteEntry(resolved.node.path, child))
 }
 
 /**
@@ -1266,7 +1266,7 @@ async function helpModelFor(
   ctx: CallContext,
   builtins: Map<string, BuiltinModule>,
   deps: TbAppDeps,
-  opts: { refresh: boolean; now: string },
+  opts: { now: string, refresh: boolean },
 ): Promise<HelpModel> {
   if (node.kind === 'builtin' && node.config?.kind === 'builtin') {
     const mod = builtins.get(node.config.module)
@@ -1281,13 +1281,13 @@ async function helpModelFor(
     if (node.online !== undefined) {
       return deviceDirectoryHelpModel(
         { path: node.path, description: node.description, online: node.online },
-        children.map((n) => ({ path: n.path, kind: n.kind, description: n.description })),
+        children.map(n => ({ path: n.path, kind: n.kind, description: n.description })),
       )
     }
     return {
       node: { path: node.path, kind: node.kind, description: node.description },
       cmds: [],
-      children: children.map((n) => ({ path: n.path, kind: n.kind, description: n.description })),
+      children: children.map(n => ({ path: n.path, kind: n.kind, description: n.description })),
       hint: 'GET /<child-path>/~help describes a child node',
     }
   }
@@ -1338,13 +1338,13 @@ async function helpModelFor(
       // SDK 进程内 Provider:可选方法按实现存在性裁剪(与 ~describe 推导一致);
       // plugin-backed 节点:只列四动词 + 注册时声明的可选方法(Q12)。
       const local = localContext(deps, node)
-      const declared =
-        local !== null
+      const declared
+        = local !== null
           ? optionalMethodsForCapabilities(localCapabilities(local))
           : optionalMethodsForCapabilities(
               await pluginCapabilities(deps.state, node.config.provider),
             )
-      return { ...model, cmds: model.cmds.filter((c) => core.has(c.name) || declared.has(c.name)) }
+      return { ...model, cmds: model.cmds.filter(c => core.has(c.name) || declared.has(c.name)) }
     }
     return contextHelpModel(node, { readOnly: node.config.readOnly ?? false })
   }
@@ -1368,7 +1368,7 @@ async function toolHelpModelFor(
   path: TreePath,
   deps: TbAppDeps,
 ): Promise<HelpModel | null> {
-  let resolved: { node: TreeNode; rest: string }
+  let resolved: { node: TreeNode, rest: string }
   try {
     resolved = await registry.resolve(path)
   } catch {
@@ -1376,8 +1376,8 @@ async function toolHelpModelFor(
   }
   const { node, rest } = resolved
   if (
-    (node.kind !== 'mcp' && node.kind !== 'http' && node.kind !== 'tool') ||
-    node.config === undefined
+    (node.kind !== 'mcp' && node.kind !== 'http' && node.kind !== 'tool')
+    || node.config === undefined
   ) {
     return null
   }
@@ -1386,7 +1386,7 @@ async function toolHelpModelFor(
   // device 自定义 tool 节点:工具表来自注册时缓存的 providerConfig.cmds,不打设备。
   const marker = deviceToolMarker(node)
   if (marker !== null) {
-    const cached = (marker.cmds ?? []).find((t) => t.name === rest)
+    const cached = (marker.cmds ?? []).find(t => t.name === rest)
     if (cached === undefined) return null
     return toolHelpModel(node.path, { kind: node.kind, description: node.description }, cached)
   }
@@ -1394,7 +1394,7 @@ async function toolHelpModelFor(
   const refresh = c.req.query('refresh') === '1'
   const raw = await upstreamTools(node, provider, deps, refresh, new Date().toISOString())
   const { exposed } = virtualizeTools(node.virtualize, raw)
-  const tool = exposed.find((t) => t.name === rest)
+  const tool = exposed.find(t => t.name === rest)
   if (tool === undefined) return null
   return toolHelpModel(node.path, { kind: node.kind, description: node.description }, tool)
 }
@@ -1468,7 +1468,7 @@ async function remotePassthroughIfMatch(
   deps: TbAppDeps,
   headers: Headers = c.req.raw.headers,
 ): Promise<Response | null> {
-  let resolved: { node: TreeNode; rest: string }
+  let resolved: { node: TreeNode, rest: string }
   try {
     resolved = await registry.resolve(treePath)
   } catch {
@@ -1540,7 +1540,7 @@ function requireDevice(deps: TbAppDeps): DeviceChannel {
 async function invokeDevice(
   deps: TbAppDeps,
   deviceId: string,
-  req: { path: string; tool: string; arguments: Record<string, unknown> },
+  req: { arguments: Record<string, unknown>, path: string, tool: string },
 ): Promise<unknown> {
   const id = crypto.randomUUID()
   const body = (await requireDevice(deps).invoke(deviceId, { id, ...req })) as DeviceCallResult
@@ -1559,10 +1559,10 @@ function deviceIdForDeviceFs(cfg: ContextConfig): string {
 
 /** device 自定义节点转发标记:hello 代注册时网关写入 providerConfig。 */
 interface DeviceNodeMarker {
-  deviceId: string
-  mountPath: string
   /** 注册时随 NodeInput 上送的工具表(~help 数据源);老客户端不带。 */
   cmds?: ToolSpec[]
+  deviceId: string
+  mountPath: string
 }
 
 function deviceMarkerOf(pc: Record<string, unknown> | undefined): DeviceNodeMarker | null {
@@ -1660,7 +1660,7 @@ async function assertToolConfig(config: unknown, store: StateStore): Promise<voi
   assertNoDeviceMarker(config)
   const provider = (config as { provider?: unknown }).provider
   if (typeof provider !== 'string' || provider === '') {
-    throw new TBError('invalid_argument', "kind:'tool' 节点需要 config.provider(plugin id)")
+    throw new TBError('invalid_argument', 'kind:\'tool\' 节点需要 config.provider(plugin id)')
   }
   await requirePlugin(store, provider, 'tool-provider', 'tool')
 }
@@ -1672,9 +1672,9 @@ async function assertToolConfig(config: unknown, store: StateStore): Promise<voi
 function assertNoDeviceMarker(config: unknown): void {
   const pc = (config as { providerConfig?: unknown }).providerConfig
   if (
-    pc !== null &&
-    typeof pc === 'object' &&
-    deviceMarkerOf(pc as Record<string, unknown>) !== null
+    pc !== null
+    && typeof pc === 'object'
+    && deviceMarkerOf(pc as Record<string, unknown>) !== null
   ) {
     throw new TBError(
       'invalid_argument',
@@ -1694,9 +1694,9 @@ type ObjectNodeConfig = ContextConfig | SkillhubConfig
 export function parseS3Credentials(
   raw: string,
   refName: string,
-): { accessKeyId: string; secretAccessKey: string } {
+): { accessKeyId: string, secretAccessKey: string } {
   try {
-    const v = JSON.parse(raw) as { accessKeyId?: unknown; secretAccessKey?: unknown }
+    const v = JSON.parse(raw) as { accessKeyId?: unknown, secretAccessKey?: unknown }
     if (typeof v.accessKeyId === 'string' && typeof v.secretAccessKey === 'string') {
       return { accessKeyId: v.accessKeyId, secretAccessKey: v.secretAccessKey }
     }
@@ -1715,8 +1715,8 @@ async function s3StoreConfig(
   secrets: SecretStoreImpl,
 ): Promise<S3StoreConfig> {
   const pc = (cfg.providerConfig ?? {}) as {
-    endpoint?: unknown
     bucket?: unknown
+    endpoint?: unknown
     region?: unknown
   }
   if (typeof pc.endpoint !== 'string' || typeof pc.bucket !== 'string') {
@@ -1848,7 +1848,7 @@ async function dispatchSkillhubCmd(
       return await provider.Search(args.query as string, args.opts as ListOptions | undefined)
     case 'Publish':
       if (!Array.isArray(args.files)) {
-        throw new TBError('invalid_argument', "Publish 需要数组 'files'")
+        throw new TBError('invalid_argument', 'Publish 需要数组 \'files\'')
       }
       return await provider.Publish({
         ...(typeof args.id === 'string' ? { id: args.id } : {}),
@@ -1879,12 +1879,12 @@ export async function dispatchContextCmd(
       return await provider.Get(args.path as string)
     case 'Write':
       if (typeof args.entry !== 'object' || args.entry === null) {
-        throw new TBError('invalid_argument', "Write 需要对象 'entry'")
+        throw new TBError('invalid_argument', 'Write 需要对象 \'entry\'')
       }
       return await provider.Write(args.path as string, args.entry as ContextEntryInput)
     case 'Update':
       if (typeof args.patch !== 'object' || args.patch === null) {
-        throw new TBError('invalid_argument', "Update 需要对象 'patch'")
+        throw new TBError('invalid_argument', 'Update 需要对象 \'patch\'')
       }
       return await provider.Update(args.path as string, args.patch as ContextPatch)
     case 'Delete':
@@ -1924,9 +1924,9 @@ async function pruneExpiredContext(
   for (const n of nodes) {
     const cfg = n.config
     if (
-      (n.kind === 'context' || n.kind === 'skillhub') &&
-      cfg?.kind === n.kind &&
-      isContextExpired(n.createdAt, (cfg as { ttl?: number }).ttl, now)
+      (n.kind === 'context' || n.kind === 'skillhub')
+      && cfg?.kind === n.kind
+      && isContextExpired(n.createdAt, (cfg as { ttl?: number }).ttl, now)
     ) {
       await registry.delete(n.path)
       continue

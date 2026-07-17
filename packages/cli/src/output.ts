@@ -59,7 +59,7 @@ export function maskSecret(sk: string): string {
 
 /** 极简对齐表格(人类可读输出)。 */
 export function table(headers: string[], rows: string[][]): string {
-  const widths = headers.map((h, i) => Math.max(h.length, ...rows.map((r) => (r[i] ?? '').length)))
+  const widths = headers.map((h, i) => Math.max(h.length, ...rows.map(r => (r[i] ?? '').length)))
   const fmt = (cells: string[]): string =>
     cells
       .map((c, i) => (c ?? '').padEnd(widths[i] ?? 0))

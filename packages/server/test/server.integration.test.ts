@@ -4,12 +4,12 @@
  * 核心断言)/ SK 吊销即时生效(SQLite 强一致,无 KV 最终一致窗口)。
  */
 
+import { afterEach, describe, expect, it } from 'vitest'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
-import pkg from '../package.json' with { type: 'json' }
 import { configFromEnv, createTbServer, type TbServer } from '../src'
+import pkg from '../package.json' with { type: 'json' }
 
 const ADMIN_SK = 'tbk_server_test_admin_00000000'
 const ENCRYPTION_KEY = '3ZwpbBkSrp3eT9ylcZedfN33yq9fJLlmeusH98qNbt8'
@@ -26,7 +26,7 @@ function tmpDataDir(): string {
   return dir
 }
 
-async function startServer(dataDir: string): Promise<{ server: TbServer; baseUrl: string }> {
+async function startServer(dataDir: string): Promise<{ baseUrl: string, server: TbServer }> {
   const config = configFromEnv({
     TB_PORT: '0',
     TB_HOST: '127.0.0.1',
@@ -55,7 +55,7 @@ async function postJson(
     ...init,
     headers: {
       'content-type': 'application/json',
-      accept: 'application/json',
+      'accept': 'application/json',
       ...(init.headers ?? {}),
     },
     body: JSON.stringify(body),
@@ -69,7 +69,7 @@ describe('Node 宿主 HTTP 面', () => {
 
     const health = await fetch(`${baseUrl}/healthz`)
     expect(health.status).toBe(200)
-    const healthBody = (await health.json()) as { healthy: boolean; version: string }
+    const healthBody = (await health.json()) as { healthy: boolean, version: string }
     expect(healthBody.healthy).toBe(true)
     expect(healthBody.version).toBe(pkg.version)
 
@@ -127,7 +127,7 @@ describe('Node 宿主 HTTP 面', () => {
       admin(),
     )
     expect(mint.status).toBe(200)
-    const minted = (await mint.json()) as { key: { id: string }; secret: string }
+    const minted = (await mint.json()) as { key: { id: string }, secret: string }
 
     const before = await fetch(`${baseUrl}/~help`, {
       headers: { authorization: `Bearer ${minted.secret}` },

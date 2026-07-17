@@ -1,9 +1,9 @@
 import type { RJSFSchema } from '@rjsf/utils'
-import { useQueryClient } from '@tanstack/react-query'
 import { Braces, ChevronRight, ClipboardList, Loader2, Play, TriangleAlert } from 'lucide-react'
 import { lazy, Suspense, useEffect, useId, useState } from 'react'
-import { CliHint } from '@/components/node/CliHint'
-import { ResultView } from '@/components/node/ResultView'
+import { useQueryClient } from '@tanstack/react-query'
+import type { HelpCmd } from '@/lib/types'
+import type { ApiError } from '@/lib/api'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -14,8 +14,6 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
-import { Button } from '@/components/ui/button'
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import {
   Select,
   SelectContent,
@@ -23,12 +21,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
+import { isFormFriendly, skeletonFromSchema } from '@/lib/schemaForm'
+import { ResultView } from '@/components/node/ResultView'
+import { useInvoke, useToolHelp } from '@/lib/queries'
+import { CliHint } from '@/components/node/CliHint'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Textarea } from '@/components/ui/textarea'
-import type { ApiError } from '@/lib/api'
-import { useInvoke, useToolHelp } from '@/lib/queries'
-import { isFormFriendly, skeletonFromSchema } from '@/lib/schemaForm'
-import type { HelpCmd } from '@/lib/types'
+import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 
 const SchemaFormRenderer = lazy(() => import('@/components/node/SchemaFormRenderer'))
@@ -48,7 +48,7 @@ const MUTATING = /^(write|update|delete|set|rm|remove|unmount|mount)$/i
  * device shell 的 allow 白名单只编码在 h 文案里(core describeAllow 的三种形态),
  * 解析出来以标签呈现;不匹配则原样当普通说明文字。
  */
-function parseShellAllow(h: string): { lead: string; allow: string[] | 'all' | 'none' } | null {
+function parseShellAllow(h: string): { allow: string[] | 'all' | 'none', lead: string } | null {
   const m = /^(.*?)允许命令:\s*(.+?)(?:;其余拒绝)?$/.exec(h)
   if (!m) return null
   const lead = (m[1] ?? '').replace(/[;;]\s*$/, '').trim()
@@ -65,7 +65,13 @@ function CmdDoc({ h }: { h: string }) {
   }
   return (
     <div className="flex w-full flex-wrap items-center gap-1.5 text-xs text-muted-foreground sm:ml-auto sm:w-auto">
-      {parsed.lead && <span>{parsed.lead} ·</span>}
+      {parsed.lead && (
+        <span>
+          {parsed.lead}
+          {' '}
+          ·
+        </span>
+      )}
       <span className="text-[11px]">允许命令</span>
       {parsed.allow === 'all' && (
         <span className="inline-flex items-center rounded-sm border border-warn/40 px-1.5 font-mono text-[10px] leading-4 text-warn">
@@ -77,11 +83,11 @@ function CmdDoc({ h }: { h: string }) {
           无(默认拒绝)
         </span>
       )}
-      {Array.isArray(parsed.allow) &&
-        parsed.allow.map((cmd) => (
+      {Array.isArray(parsed.allow)
+        && parsed.allow.map(cmd => (
           <code
-            key={cmd}
             className="inline-flex items-center rounded-sm border border-emerald-400/30 bg-emerald-400/5 px-1.5 font-mono text-[10px] leading-4 text-emerald-400/90"
+            key={cmd}
           >
             {cmd}
           </code>
@@ -106,13 +112,13 @@ export function CmdPanel({
   variant = 'accordion',
   onPendingChange,
 }: {
-  path: string
   cmd: HelpCmd
   defaultOpen?: boolean
   lazySchema?: boolean
-  variant?: 'accordion' | 'workbench'
   /** 工作区用：调用存活期间阻止父级 remount 当前面板。 */
   onPendingChange?: (pending: boolean) => void
+  path: string
+  variant?: 'accordion' | 'workbench'
 }) {
   const [open, setOpen] = useState(defaultOpen)
   const workbench = variant === 'workbench'
@@ -194,35 +200,32 @@ export function CmdPanel({
       )}
     >
       <Button
-        type={mode === 'form' ? 'submit' : 'button'}
-        size="sm"
         disabled={invoke.isPending}
         onClick={mode === 'json' ? submitRaw : undefined}
+        size="sm"
+        type={mode === 'form' ? 'submit' : 'button'}
       >
         {invoke.isPending ? <Loader2 className="animate-spin" /> : <Play />}
         调用
       </Button>
-      <label htmlFor={acceptId} className="text-xs text-muted-foreground sm:ml-2">
+      <label className="text-xs text-muted-foreground sm:ml-2" htmlFor={acceptId}>
         Accept
       </label>
-      <Select value={accept} onValueChange={(v) => setAccept(v as 'markdown' | 'json')}>
-        <SelectTrigger id={acceptId} size="sm" className="h-8 w-32 font-mono text-xs">
+      <Select onValueChange={v => setAccept(v as 'markdown' | 'json')} value={accept}>
+        <SelectTrigger className="h-8 w-32 font-mono text-xs" id={acceptId} size="sm">
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
-          <SelectItem value="markdown" className="font-mono text-xs">
+          <SelectItem className="font-mono text-xs" value="markdown">
             markdown
           </SelectItem>
-          <SelectItem value="json" className="font-mono text-xs">
+          <SelectItem className="font-mono text-xs" value="json">
             json
           </SelectItem>
         </SelectContent>
       </Select>
       {formFriendly && (
         <Button
-          type="button"
-          variant="ghost"
-          size="sm"
           className="text-xs text-muted-foreground sm:ml-auto"
           onClick={() => {
             if (mode === 'form') {
@@ -238,6 +241,9 @@ export function CmdPanel({
               }
             }
           }}
+          size="sm"
+          type="button"
+          variant="ghost"
         >
           {mode === 'form' ? <Braces /> : <ClipboardList />}
           {mode === 'form' ? 'JSON 编辑' : '表单编辑'}
@@ -247,137 +253,143 @@ export function CmdPanel({
   )
 
   return (
-    <Collapsible open={effectiveOpen} onOpenChange={workbench ? undefined : setOpen} asChild>
+    <Collapsible asChild onOpenChange={workbench ? undefined : setOpen} open={effectiveOpen}>
       <section
-        id={`cmd-${cmd.name}`}
         className={cn(
           'border bg-card/60',
           workbench
             ? 'min-h-[30rem] overflow-hidden rounded-xl bg-card/45 shadow-sm'
             : 'rounded-md',
         )}
+        id={`cmd-${cmd.name}`}
       >
         {/* 与 ~help 的层级观感对齐:默认只露 cmd 一行,schema 表单点开才展开 */}
         <header className={cn(workbench && 'border-b bg-background/28 px-4 py-4 sm:px-5')}>
-          {workbench ? (
-            <div className="flex min-w-0 flex-col gap-2">
-              <div className="flex min-w-0 flex-wrap items-center gap-2">
-                <span className="font-mono text-lg text-foreground sm:text-xl">{cmd.name}</span>
-                <span
-                  className={cn(
-                    'inline-flex items-center rounded-md border px-2 font-mono text-[10px] leading-5 uppercase',
-                    SCOPE_STYLE[cmd.scope] ?? SCOPE_STYLE.read,
-                  )}
-                >
-                  {cmd.scope}
-                </span>
-                {cmd.effect && (
-                  <span className="inline-flex items-center gap-1 rounded-md border border-warn/40 bg-warn/5 px-2 font-mono text-[10px] leading-5 text-warn">
-                    {cmd.effect === 'destructive' && <TriangleAlert className="size-2.5" />}
-                    {cmd.effect}
-                  </span>
-                )}
-                {cmd.confirm && (
-                  <span className="inline-flex items-center rounded-md border border-destructive/40 bg-destructive/5 px-2 font-mono text-[10px] leading-5 text-destructive">
-                    confirm
-                  </span>
-                )}
-              </div>
-              {cmd.h && <CmdDoc h={cmd.h} />}
-            </div>
-          ) : (
-            <CollapsibleTrigger asChild>
-              <button
-                type="button"
-                className={cn(
-                  'flex w-full cursor-pointer flex-wrap items-center gap-2 px-3 py-2.5 text-left sm:px-4',
-                  'hover:bg-secondary/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60 focus-visible:ring-inset',
-                  effectiveOpen && 'border-b',
-                )}
-              >
-                <ChevronRight
-                  aria-hidden="true"
-                  className={cn(
-                    'size-3.5 shrink-0 text-muted-foreground/60 transition-transform',
-                    effectiveOpen && 'rotate-90',
-                  )}
-                />
-                <span className="font-mono text-sm text-foreground">{cmd.name}</span>
-                <span
-                  className={cn(
-                    'inline-flex items-center rounded-sm border px-1.5 font-mono text-[10px] leading-4',
-                    SCOPE_STYLE[cmd.scope] ?? SCOPE_STYLE.read,
-                  )}
-                >
-                  {cmd.scope}
-                </span>
-                {cmd.effect && (
-                  <span className="inline-flex items-center gap-1 rounded-sm border border-warn/40 px-1.5 font-mono text-[10px] leading-4 text-warn">
-                    {cmd.effect === 'destructive' && <TriangleAlert className="size-2.5" />}
-                    {cmd.effect}
-                  </span>
-                )}
-                {cmd.confirm && (
-                  <span className="inline-flex items-center rounded-sm border border-destructive/40 px-1.5 font-mono text-[10px] leading-4 text-destructive">
-                    confirm
-                  </span>
-                )}
-                {cmd.h && <CmdDoc h={cmd.h} />}
-              </button>
-            </CollapsibleTrigger>
-          )}
+          {workbench
+            ? (
+                <div className="flex min-w-0 flex-col gap-2">
+                  <div className="flex min-w-0 flex-wrap items-center gap-2">
+                    <span className="font-mono text-lg text-foreground sm:text-xl">{cmd.name}</span>
+                    <span
+                      className={cn(
+                        'inline-flex items-center rounded-md border px-2 font-mono text-[10px] leading-5 uppercase',
+                        SCOPE_STYLE[cmd.scope] ?? SCOPE_STYLE.read,
+                      )}
+                    >
+                      {cmd.scope}
+                    </span>
+                    {cmd.effect && (
+                      <span className="inline-flex items-center gap-1 rounded-md border border-warn/40 bg-warn/5 px-2 font-mono text-[10px] leading-5 text-warn">
+                        {cmd.effect === 'destructive' && <TriangleAlert className="size-2.5" />}
+                        {cmd.effect}
+                      </span>
+                    )}
+                    {cmd.confirm && (
+                      <span className="inline-flex items-center rounded-md border border-destructive/40 bg-destructive/5 px-2 font-mono text-[10px] leading-5 text-destructive">
+                        confirm
+                      </span>
+                    )}
+                  </div>
+                  {cmd.h && <CmdDoc h={cmd.h} />}
+                </div>
+              )
+            : (
+                <CollapsibleTrigger asChild>
+                  <button
+                    className={cn(
+                      'flex w-full cursor-pointer flex-wrap items-center gap-2 px-3 py-2.5 text-left sm:px-4',
+                      'hover:bg-secondary/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60 focus-visible:ring-inset',
+                      effectiveOpen && 'border-b',
+                    )}
+                    type="button"
+                  >
+                    <ChevronRight
+                      aria-hidden="true"
+                      className={cn(
+                        'size-3.5 shrink-0 text-muted-foreground/60 transition-transform',
+                        effectiveOpen && 'rotate-90',
+                      )}
+                    />
+                    <span className="font-mono text-sm text-foreground">{cmd.name}</span>
+                    <span
+                      className={cn(
+                        'inline-flex items-center rounded-sm border px-1.5 font-mono text-[10px] leading-4',
+                        SCOPE_STYLE[cmd.scope] ?? SCOPE_STYLE.read,
+                      )}
+                    >
+                      {cmd.scope}
+                    </span>
+                    {cmd.effect && (
+                      <span className="inline-flex items-center gap-1 rounded-sm border border-warn/40 px-1.5 font-mono text-[10px] leading-4 text-warn">
+                        {cmd.effect === 'destructive' && <TriangleAlert className="size-2.5" />}
+                        {cmd.effect}
+                      </span>
+                    )}
+                    {cmd.confirm && (
+                      <span className="inline-flex items-center rounded-sm border border-destructive/40 px-1.5 font-mono text-[10px] leading-4 text-destructive">
+                        confirm
+                      </span>
+                    )}
+                    {cmd.h && <CmdDoc h={cmd.h} />}
+                  </button>
+                </CollapsibleTrigger>
+              )}
         </header>
 
         <CollapsibleContent>
           <div className={cn('min-w-0 px-3 py-3 sm:px-4', workbench && 'p-4 sm:p-5')}>
-            {lazyNeeded && toolHelp.isPending ? (
-              <div className="grid gap-2">
-                <Skeleton className="h-8 w-full" />
-                <Skeleton className="h-8 w-2/3" />
-              </div>
-            ) : mode === 'form' && hasSchema ? (
-              <Suspense
-                fallback={
-                  <div className="grid gap-2" role="status" aria-label="正在加载表单引擎">
-                    <Skeleton className="h-9 w-full" />
-                    <Skeleton className="h-9 w-5/6" />
-                    <Skeleton className="h-8 w-32" />
+            {lazyNeeded && toolHelp.isPending
+              ? (
+                  <div className="grid gap-2">
+                    <Skeleton className="h-8 w-full" />
+                    <Skeleton className="h-8 w-2/3" />
                   </div>
-                }
-              >
-                <SchemaFormRenderer
-                  schema={inputSchema as RJSFSchema}
-                  formData={formData}
-                  onChange={setFormData}
-                  onSubmit={submit}
-                >
-                  {footer}
-                </SchemaFormRenderer>
-              </Suspense>
-            ) : (
-              <div>
-                <Textarea
-                  value={rawArgs}
-                  onChange={(e) => setRawArgs(e.target.value)}
-                  spellCheck={false}
-                  rows={workbench ? 10 : 5}
-                  className={cn(
-                    'font-mono text-xs',
-                    workbench && 'min-h-56 rounded-xl bg-background/55',
+                )
+              : mode === 'form' && hasSchema
+                ? (
+                    <Suspense
+                      fallback={(
+                        <div aria-label="正在加载表单引擎" className="grid gap-2" role="status">
+                          <Skeleton className="h-9 w-full" />
+                          <Skeleton className="h-9 w-5/6" />
+                          <Skeleton className="h-8 w-32" />
+                        </div>
+                      )}
+                    >
+                      <SchemaFormRenderer
+                        formData={formData}
+                        onChange={setFormData}
+                        onSubmit={submit}
+                        schema={inputSchema as RJSFSchema}
+                      >
+                        {footer}
+                      </SchemaFormRenderer>
+                    </Suspense>
+                  )
+                : (
+                    <div>
+                      <Textarea
+                        aria-label="arguments JSON"
+                        className={cn(
+                          'font-mono text-xs',
+                          workbench && 'min-h-56 rounded-xl bg-background/55',
+                        )}
+                        onChange={e => setRawArgs(e.target.value)}
+                        rows={workbench ? 10 : 5}
+                        spellCheck={false}
+                        value={rawArgs}
+                      />
+                      {rawErr && <p className="mt-1 text-xs text-destructive">{rawErr}</p>}
+                      {footer}
+                    </div>
                   )}
-                  aria-label="arguments JSON"
-                />
-                {rawErr && <p className="mt-1 text-xs text-destructive">{rawErr}</p>}
-                {footer}
-              </div>
-            )}
 
-            <CliHint path={path} tool={cmd.name} args={currentArgs} direct={direct} />
+            <CliHint args={currentArgs} direct={direct} path={path} tool={cmd.name} />
 
             <ResultView
               className="mt-5"
-              result={invoke.data}
               error={(invoke.error as ApiError | null) ?? null}
+              result={invoke.data}
             />
             {!invoke.data && !invoke.error && workbench && (
               <div className="mt-5 grid min-h-32 place-items-center rounded-xl border border-dashed bg-background/25 px-5 py-8 text-center">
@@ -392,17 +404,23 @@ export function CmdPanel({
           </div>
         </CollapsibleContent>
 
-        <AlertDialog open={pendingArgs !== null} onOpenChange={(o) => !o && setPendingArgs(null)}>
+        <AlertDialog onOpenChange={o => !o && setPendingArgs(null)} open={pendingArgs !== null}>
           <AlertDialogContent>
             <AlertDialogHeader>
               <AlertDialogTitle className="font-mono text-base">
-                确认执行 {cmd.name}?
+                确认执行
+                {' '}
+                {cmd.name}
+                ?
               </AlertDialogTitle>
               <AlertDialogDescription asChild>
                 <div>
                   <p className="text-sm">
-                    该命令声明了 <code className="font-mono">confirm</code>
-                    {cmd.effect ? `(effect: ${cmd.effect})` : ''},执行前需二次确认。
+                    该命令声明了
+                    {' '}
+                    <code className="font-mono">confirm</code>
+                    {cmd.effect ? `(effect: ${cmd.effect})` : ''}
+                    ,执行前需二次确认。
                   </p>
                   <pre className="mt-2 max-h-40 max-w-full overflow-auto rounded-sm border bg-background px-2 py-1.5 text-left font-mono text-xs whitespace-pre-wrap break-words">
                     {JSON.stringify(pendingArgs, null, 2)}

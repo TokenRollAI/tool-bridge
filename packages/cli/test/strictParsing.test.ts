@@ -1,7 +1,7 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { buildProgram } from '../src/program'
 import { parseError } from './cliHarness'
 
@@ -183,7 +183,7 @@ describe('--no-shell 语义(commander 原生否定 flag)', () => {
 
 describe('tb help 让位为业务命令', () => {
   it('buildProgram 不注册内置 help 子命令(help [path] 是节点 ~help)', () => {
-    const names = buildProgram().commands.map((c) => c.name())
-    expect(names.filter((n) => n === 'help')).toHaveLength(1)
+    const names = buildProgram().commands.map(c => c.name())
+    expect(names.filter(n => n === 'help')).toHaveLength(1)
   })
 })

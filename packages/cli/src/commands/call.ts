@@ -1,17 +1,17 @@
 import { readFileSync } from 'node:fs'
 import { Command } from 'commander'
-import { resolveTarget, withGlobalOpts } from '../args'
 import {
   apiJson,
-  CliError,
   callDirect,
   callDirectText,
   callTool,
   callToolText,
+  CliError,
   type Target,
 } from '../http'
-import { printMarkdown } from '../markdown'
+import { resolveTarget, withGlobalOpts } from '../args'
 import { guard, printJson } from '../output'
+import { printMarkdown } from '../markdown'
 
 /** 解析 positional JSON / --args / --args-file 为 arguments 对象(三源互斥;缺省 {})。 */
 export function parseCallArgs(
@@ -67,7 +67,7 @@ export async function attachFeedbackHint(
   if (!FEEDBACK_HINT_CODES.has(err.code)) return
   const cleanPath = nodeUri.replace(/^\/+/, '')
   try {
-    const page = await apiJson<{ items?: Array<{ id: string; title: string; score: number }> }>(
+    const page = await apiJson<{ items?: Array<{ id: string, score: number, title: string }> }>(
       { ...target, timeoutMs: Math.min(target.timeoutMs ?? 5000, 5000) },
       { path: `${nodeUri}/~feedback` },
     )
@@ -76,7 +76,7 @@ export async function attachFeedbackHint(
       err.feedback = items.map(({ id, title, score }) => ({ id, title, score }))
       err.hint = [
         `hint: known pitfalls from other agents — details: tb feedback get ${cleanPath} <id>`,
-        ...items.map((f) => `  - ${f.id} (${f.score >= 0 ? '+' : ''}${f.score}) "${f.title}"`),
+        ...items.map(f => `  - ${f.id} (${f.score >= 0 ? '+' : ''}${f.score}) "${f.title}"`),
       ].join('\n')
     } else {
       err.hint = `hint: no known pitfalls recorded for this path yet — if you figure this out, help the next agent:\n  tb feedback submit ${cleanPath} --title "<short summary>" --detail "<how to avoid>"`
@@ -97,19 +97,19 @@ export async function attachFeedbackHint(
  * 默认人类模式:markdown 原样打印;`--json`:输出原始 JSON。TBError → stderr + exit 1。
  */
 export interface CallArgs {
-  tool?: string
   args?: string
   argsFile?: string
-  json?: boolean
   baseUrl?: string
+  json?: boolean
   sk?: string
   timeout?: string
+  tool?: string
 }
 
 export function callCommand(): Command {
   return withGlobalOpts(new Command('call'))
     .description(
-      "Invoke a tool: `tb call <node>/<tool> '<json>'` or `tb call <node> --tool <name>`",
+      'Invoke a tool: `tb call <node>/<tool> \'<json>\'` or `tb call <node> --tool <name>`',
     )
     .argument(
       '<path>',
@@ -142,14 +142,14 @@ Examples:
 
         try {
           if (asJson) {
-            const result =
-              tool !== undefined
+            const result
+              = tool !== undefined
                 ? await callTool<unknown>(target, nodeUri, tool, callArgs)
                 : await callDirect<unknown>(target, nodeUri, callArgs)
             printJson(result)
           } else {
-            const text =
-              tool !== undefined
+            const text
+              = tool !== undefined
                 ? await callToolText(target, nodeUri, tool, callArgs)
                 : await callDirectText(target, nodeUri, callArgs)
             // 人类模式的结果是网关的 markdown 表现:TTY → ANSI 渲染,管道 → 原样。

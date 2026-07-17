@@ -66,8 +66,8 @@ export class SqliteStateStore implements StateStore {
 
   async list(
     prefix: string,
-    opts?: { cursor?: string; limit?: number },
-  ): Promise<{ items: Array<{ key: string; value: unknown }>; cursor?: string }> {
+    opts?: { cursor?: string, limit?: number },
+  ): Promise<{ cursor?: string, items: Array<{ key: string, value: unknown }> }> {
     const limit = opts?.limit ?? DEFAULT_LIST_LIMIT
     // 下界:prefix 与 cursor(严格大于)取更紧者;上界:prefix 后继(空 prefix 无上界)。
     const lowerByCursor = opts?.cursor !== undefined && opts.cursor >= prefix
@@ -91,10 +91,10 @@ export class SqliteStateStore implements StateStore {
       key: string
       value: string
     }>
-    const matched = rows.filter((r) => r.key.startsWith(prefix))
+    const matched = rows.filter(r => r.key.startsWith(prefix))
     const hasMore = matched.length > limit
     const page = hasMore ? matched.slice(0, limit) : matched
-    const items = page.map((r) => ({ key: r.key, value: JSON.parse(r.value) as unknown }))
+    const items = page.map(r => ({ key: r.key, value: JSON.parse(r.value) as unknown }))
     const last = page[page.length - 1]
     return hasMore && last !== undefined ? { items, cursor: last.key } : { items }
   }

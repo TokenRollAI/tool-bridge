@@ -1,13 +1,13 @@
 import { describe, expect, it } from 'vitest'
-import { TBError } from '../../src/errors'
 import {
   assertBundleIntegrity,
   bytesSha256Hex,
-  PLUGIN_BUNDLE_MAX_BYTES,
-  type PluginPackage,
   parsePluginIndex,
   parsePluginPackage,
+  PLUGIN_BUNDLE_MAX_BYTES,
+  type PluginPackage,
 } from '../../src/plugin/package'
+import { TBError } from '../../src/errors'
 
 const ENTRY: Record<string, unknown> = {
   name: 'feishu',

@@ -1,5 +1,5 @@
-import { useQueryClient } from '@tanstack/react-query'
 import { createContext, type ReactNode, useCallback, useContext, useMemo, useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import type { Connection } from './api'
 import { clearProfileHistory } from './history'
 
@@ -8,10 +8,10 @@ import { clearProfileHistory } from './history'
  * SK 存 localStorage(与 CLI 明文落 ~/.config/tool-bridge/config.json 同级的信任模型)。
  */
 export interface Profile {
+  baseUrl: string
   /** 本机稳定标识,用于隔离同名档案的历史与缓存。 */
   id: string
   name: string
-  baseUrl: string
   sk: string
 }
 
@@ -39,8 +39,8 @@ function loadProfiles(): Profile[] {
           typeof p?.name === 'string' && p.name.length > 0 && typeof p.sk === 'string',
       )
       .map((p) => {
-        const validId =
-          typeof p.id === 'string' && p.id.length > 0 && !seenIds.has(p.id) ? p.id : null
+        const validId
+          = typeof p.id === 'string' && p.id.length > 0 && !seenIds.has(p.id) ? p.id : null
         const id = validId ?? createProfileId()
         const baseUrl = typeof p.baseUrl === 'string' ? p.baseUrl : ''
         if (validId === null || baseUrl !== p.baseUrl) migrated = true
@@ -55,16 +55,16 @@ function loadProfiles(): Profile[] {
 }
 
 interface SessionState {
-  profiles: Profile[]
   active: Profile | null
-  /** 档案/凭据每次切换都递增,让 query key 无需包含 SK 明文也能隔离。 */
-  revision: number
   /** 当前连接(active 的视图);未登录为 null。 */
   conn: Connection | null
   login: (profile: ProfileInput) => void
-  switchTo: (name: string) => void
-  removeProfile: (name: string) => void
   logout: () => void
+  profiles: Profile[]
+  removeProfile: (name: string) => void
+  /** 档案/凭据每次切换都递增,让 query key 无需包含 SK 明文也能隔离。 */
+  revision: number
+  switchTo: (name: string) => void
 }
 
 const SessionContext = createContext<SessionState | null>(null)
@@ -86,16 +86,16 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       queryClient.clear()
       setProfiles(next)
       setActiveName(nextActive)
-      setRevision((value) => value + 1)
+      setRevision(value => value + 1)
     },
     [queryClient],
   )
 
   const login = useCallback(
     (profile: ProfileInput) => {
-      const previous = profiles.find((p) => p.name === profile.name)
+      const previous = profiles.find(p => p.name === profile.name)
       const nextProfile: Profile = { ...profile, id: previous?.id ?? createProfileId() }
-      const next = [...profiles.filter((p) => p.name !== profile.name), nextProfile]
+      const next = [...profiles.filter(p => p.name !== profile.name), nextProfile]
       persist(next, nextProfile.name)
     },
     [profiles, persist],
@@ -103,15 +103,15 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
   const switchTo = useCallback(
     (name: string) => {
-      if (profiles.some((p) => p.name === name)) persist(profiles, name)
+      if (profiles.some(p => p.name === name)) persist(profiles, name)
     },
     [profiles, persist],
   )
 
   const removeProfile = useCallback(
     (name: string) => {
-      const removed = profiles.find((p) => p.name === name)
-      const next = profiles.filter((p) => p.name !== name)
+      const removed = profiles.find(p => p.name === name)
+      const next = profiles.filter(p => p.name !== name)
       if (removed) clearProfileHistory(removed.id)
       persist(next, activeName === name ? (next[0]?.name ?? null) : activeName)
     },
@@ -121,7 +121,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const logout = useCallback(() => persist(profiles, null), [profiles, persist])
 
   const value = useMemo<SessionState>(() => {
-    const active = profiles.find((p) => p.name === activeName) ?? null
+    const active = profiles.find(p => p.name === activeName) ?? null
     return {
       profiles,
       active,

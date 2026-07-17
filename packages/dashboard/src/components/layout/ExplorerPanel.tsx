@@ -1,9 +1,7 @@
-import { useQueryClient } from '@tanstack/react-query'
 import { ChevronsUpDown, ListFilter, LogOut, Moon, RefreshCw, Sun, X } from 'lucide-react'
-import { useState } from 'react'
 import { NavLink, useLocation, useNavigate } from 'react-router'
-import { TreeNav } from '@/components/layout/TreeNav'
-import { Button } from '@/components/ui/button'
+import { useQueryClient } from '@tanstack/react-query'
+import { useState } from 'react'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -13,17 +11,19 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { ScrollArea } from '@/components/ui/scroll-area'
+import { TreeNav } from '@/components/layout/TreeNav'
+import { Button } from '@/components/ui/button'
 import { useSession } from '@/lib/session'
 import { useTheme } from '@/lib/theme'
 import { cn } from '@/lib/utils'
 import { MANAGE_LINKS } from './navigation'
 
 interface ExplorerPanelProps {
-  health?: { healthy: boolean; version: string }
+  health?: { healthy: boolean, version: string }
   healthError: boolean
+  mobile?: boolean
   nodeCount?: number
   nodeCountRestricted: boolean
-  mobile?: boolean
   onClose?: () => void
 }
 
@@ -54,8 +54,8 @@ export function ExplorerPanel({
       <header className="shrink-0 border-b px-3.5 pt-3 pb-3">
         <div className="flex min-w-0 items-start gap-2">
           {mobile && (
-            <NavLink to="/" onClick={onClose} className="mt-0.5 shrink-0">
-              <img src="/ui/icon-light.png" alt="" className="size-6 dark:invert" />
+            <NavLink className="mt-0.5 shrink-0" onClick={onClose} to="/">
+              <img alt="" className="size-6 dark:invert" src="/ui/icon-light.png" />
             </NavLink>
           )}
           <div className="min-w-0 flex-1">
@@ -65,7 +65,8 @@ export function ExplorerPanel({
               </h2>
               {health?.version && (
                 <span className="font-mono text-[9px] text-muted-foreground">
-                  gateway v{health.version}
+                  gateway v
+                  {health.version}
                 </span>
               )}
             </div>
@@ -81,15 +82,21 @@ export function ExplorerPanel({
                 )}
               />
               <span>{healthLabel}</span>
-              {nodeCount !== undefined ? (
-                <span className="ml-auto font-mono tabular-nums">{nodeCount} nodes</span>
-              ) : (
-                nodeCountRestricted && <span className="ml-auto font-mono">受限</span>
-              )}
+              {nodeCount !== undefined
+                ? (
+                    <span className="ml-auto font-mono tabular-nums">
+                      {nodeCount}
+                      {' '}
+                      nodes
+                    </span>
+                  )
+                : (
+                    nodeCountRestricted && <span className="ml-auto font-mono">受限</span>
+                  )}
             </div>
           </div>
           {mobile && (
-            <Button variant="ghost" size="icon-sm" aria-label="关闭导航" onClick={onClose}>
+            <Button aria-label="关闭导航" onClick={onClose} size="icon-sm" variant="ghost">
               <X />
             </Button>
           )}
@@ -98,30 +105,30 @@ export function ExplorerPanel({
         {mobile && (
           <div className="mt-3 grid grid-cols-2 rounded-md bg-background/55 p-1" role="tablist">
             <button
-              type="button"
-              role="tab"
               aria-selected={mobileMode === 'resources'}
-              onClick={() => setMobileMode('resources')}
               className={cn(
                 'h-8 rounded-sm text-xs font-medium',
                 mobileMode === 'resources'
                   ? 'bg-secondary text-foreground shadow-sm'
                   : 'text-muted-foreground',
               )}
+              onClick={() => setMobileMode('resources')}
+              role="tab"
+              type="button"
             >
               资源树
             </button>
             <button
-              type="button"
-              role="tab"
               aria-selected={mobileMode === 'manage'}
-              onClick={() => setMobileMode('manage')}
               className={cn(
                 'h-8 rounded-sm text-xs font-medium',
                 mobileMode === 'manage'
                   ? 'bg-secondary text-foreground shadow-sm'
                   : 'text-muted-foreground',
               )}
+              onClick={() => setMobileMode('manage')}
+              role="tab"
+              type="button"
             >
               管理
             </button>
@@ -136,8 +143,8 @@ export function ExplorerPanel({
               Current path
             </p>
             <div
-              title={currentPath === null ? '当前位于管理页面' : currentPath || '~'}
               className="flex min-h-8 min-w-0 items-center rounded-md border bg-background/45 px-2.5"
+              title={currentPath === null ? '当前位于管理页面' : currentPath || '~'}
             >
               <span className="mr-1.5 font-mono text-xs text-primary">~</span>
               <span className="min-w-0 truncate font-mono text-[11px] text-foreground/90">
@@ -152,11 +159,11 @@ export function ExplorerPanel({
                 Resources
               </p>
               <button
-                type="button"
                 aria-label="刷新资源树"
-                title="刷新资源树"
-                onClick={() => qc.invalidateQueries({ queryKey: ['tb'] })}
                 className="ml-auto grid size-7 place-items-center rounded-md text-muted-foreground hover:bg-secondary hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+                onClick={() => qc.invalidateQueries({ queryKey: ['tb'] })}
+                title="刷新资源树"
+                type="button"
               >
                 <RefreshCw className="size-3.5" />
               </button>
@@ -164,8 +171,12 @@ export function ExplorerPanel({
             <div className="relative">
               <ListFilter className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground/70" />
               <input
-                value={filter}
-                onChange={(event) => setFilter(event.target.value)}
+                aria-label="筛选资源树"
+                className={cn(
+                  'h-9 w-full rounded-md border bg-background/45 pr-8 pl-8 font-mono text-xs',
+                  'placeholder:text-muted-foreground/65 focus:border-primary/50 focus:ring-2 focus:ring-ring/35 focus:outline-none',
+                )}
+                onChange={event => setFilter(event.target.value)}
                 onKeyDown={(event) => {
                   if (event.key === 'Escape' && filter !== '') {
                     event.preventDefault()
@@ -173,18 +184,14 @@ export function ExplorerPanel({
                   }
                 }}
                 placeholder="筛选资源路径…"
-                aria-label="筛选资源树"
-                className={cn(
-                  'h-9 w-full rounded-md border bg-background/45 pr-8 pl-8 font-mono text-xs',
-                  'placeholder:text-muted-foreground/65 focus:border-primary/50 focus:ring-2 focus:ring-ring/35 focus:outline-none',
-                )}
+                value={filter}
               />
               {filter !== '' && (
                 <button
-                  type="button"
                   aria-label="清除筛选"
-                  onClick={() => setFilter('')}
                   className="absolute top-1/2 right-1.5 grid size-6 -translate-y-1/2 place-items-center rounded-sm text-muted-foreground hover:bg-secondary hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+                  onClick={() => setFilter('')}
+                  type="button"
                 >
                   <X className="size-3" />
                 </button>
@@ -200,12 +207,9 @@ export function ExplorerPanel({
 
       {mobile && mobileMode === 'manage' && (
         <ScrollArea className="min-h-0 flex-1 p-3">
-          <nav className="grid gap-2" aria-label="管理入口">
+          <nav aria-label="管理入口" className="grid gap-2">
             {MANAGE_LINKS.map(({ to, label, shortLabel, icon: Icon }) => (
               <NavLink
-                key={to}
-                to={to}
-                onClick={onClose}
                 className={({ isActive }) =>
                   cn(
                     'flex min-h-12 items-center gap-3 rounded-lg border px-3 text-sm',
@@ -213,8 +217,10 @@ export function ExplorerPanel({
                     isActive
                       ? 'border-primary/35 bg-primary/10 text-primary'
                       : 'bg-background/35 text-foreground/90',
-                  )
-                }
+                  )}
+                key={to}
+                onClick={onClose}
+                to={to}
               >
                 <span className="grid size-8 place-items-center rounded-md bg-secondary">
                   <Icon className="size-4" />
@@ -248,9 +254,9 @@ function MobileAccountFooter({ onClose }: { onClose?: () => void }) {
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <Button
-            variant="ghost"
-            size="sm"
             className="min-w-0 flex-1 justify-start font-mono text-xs"
+            size="sm"
+            variant="ghost"
           >
             <span className="truncate">{active?.name}</span>
             <ChevronsUpDown className="ml-auto size-3 text-muted-foreground" />
@@ -261,10 +267,10 @@ function MobileAccountFooter({ onClose }: { onClose?: () => void }) {
             {active?.baseUrl || window.location.origin}
           </DropdownMenuLabel>
           <DropdownMenuSeparator />
-          {profiles.map((profile) => (
+          {profiles.map(profile => (
             <DropdownMenuItem
-              key={profile.id}
               className="font-mono text-xs"
+              key={profile.id}
               onClick={() => switchProfile(profile.name)}
             >
               {profile.name}
@@ -273,17 +279,17 @@ function MobileAccountFooter({ onClose }: { onClose?: () => void }) {
           ))}
         </DropdownMenuContent>
       </DropdownMenu>
-      <Button variant="ghost" size="icon-sm" aria-label="切换主题" onClick={toggleTheme}>
+      <Button aria-label="切换主题" onClick={toggleTheme} size="icon-sm" variant="ghost">
         {theme === 'dark' ? <Sun /> : <Moon />}
       </Button>
       <Button
-        variant="ghost"
-        size="icon-sm"
         aria-label="退出登录"
         onClick={() => {
           onClose?.()
           logout()
         }}
+        size="icon-sm"
+        variant="ghost"
       >
         <LogOut />
       </Button>

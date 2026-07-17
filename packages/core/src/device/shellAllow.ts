@@ -12,7 +12,7 @@ const SHELL_METACHARS = [';', '|', '&', '`', '>', '<'] as const
 
 function hasShellMetachar(command: string): boolean {
   if (command.includes('$(')) return true
-  return SHELL_METACHARS.some((c) => command.includes(c))
+  return SHELL_METACHARS.some(c => command.includes(c))
 }
 
 /** 全放行仅限单值 ['*'];`['*','echo']` 中的 '*' 是普通条目(匹配不到任何 basename)。 */
@@ -28,7 +28,7 @@ function argv0(command: string): string | null {
   const trimmed = command.trimStart()
   if (trimmed === '') return null
   const quote = trimmed[0]
-  if (quote === "'" || quote === '"') {
+  if (quote === '\'' || quote === '"') {
     const end = trimmed.indexOf(quote, 1)
     if (end < 0) return null
     return trimmed.slice(1, end)

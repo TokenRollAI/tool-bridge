@@ -7,8 +7,8 @@
  */
 
 import { TBError, type ToolResult, type ToolSpec } from '@tool-bridge/core'
-import { callPlugin, type PluginCallOptions } from './pluginClient'
 import type { UpstreamProvider } from './types'
+import { callPlugin, type PluginCallOptions } from './pluginClient'
 
 export function createPluginToolProvider(opts: PluginCallOptions): UpstreamProvider {
   return {

@@ -1,8 +1,8 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import ReconnectingWebSocket from 'partysocket/ws'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import ReconnectingWebSocket from 'partysocket/ws'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { startDeviceConnection } from '../src/deviceRuntime'
 import { CliError } from '../src/http'
 import { runCli } from './cliHarness'
@@ -20,17 +20,21 @@ vi.mock('partysocket/ws', () => {
     constructor(_url: string, _protocols?: unknown, _opts?: unknown) {
       FakeReconnectingWebSocket.instances.push(this)
     }
+
     addEventListener(type: string, fn: Listener): void {
       const arr = this.listeners.get(type) ?? []
       arr.push(fn)
       this.listeners.set(type, arr)
     }
+
     send(data: string): void {
       this.sent.push(String(data))
     }
+
     close(_code?: number, _reason?: string): void {
       this.dispatch('close', {})
     }
+
     reconnect(): void {}
     dispatch(type: string, ev: unknown): void {
       for (const fn of this.listeners.get(type) ?? []) fn(ev)
@@ -40,8 +44,8 @@ vi.mock('partysocket/ws', () => {
 })
 
 interface FakeSocket {
-  sent: string[]
   dispatch(type: string, ev: unknown): void
+  sent: string[]
 }
 
 const FakeWs = ReconnectingWebSocket as unknown as { instances: FakeSocket[] }
@@ -82,7 +86,7 @@ describe('网关拒绝帧(error + close 1008)', () => {
     const socket = FakeWs.instances[0]
     expect(socket).toBeDefined()
     socket?.dispatch('open', {})
-    expect(socket?.sent.some((f) => f.includes('"type":"hello"'))).toBe(true)
+    expect(socket?.sent.some(f => f.includes('"type":"hello"'))).toBe(true)
     socket?.dispatch('message', { data: REJECT_FRAME })
     await expect(handle.closed).rejects.toMatchObject({
       name: 'CliError',
@@ -110,7 +114,7 @@ describe('网关拒绝帧(error + close 1008)', () => {
     await running
     expect(process.exitCode).toBe(1)
     const stderr = (process.stderr.write as unknown as ReturnType<typeof vi.fn>).mock.calls
-      .map((c) => String(c[0]))
+      .map(c => String(c[0]))
       .join('')
     expect(stderr).toContain('registerPaths 越界')
   })

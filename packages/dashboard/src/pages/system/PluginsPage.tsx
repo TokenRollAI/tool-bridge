@@ -1,4 +1,3 @@
-import { useQueryClient } from '@tanstack/react-query'
 import {
   Activity,
   AlertTriangle,
@@ -19,16 +18,10 @@ import {
   Trash2,
 } from 'lucide-react'
 import { type ReactNode, useRef, useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router'
 import { toast } from 'sonner'
-import { ConfirmAction } from '@/components/ConfirmAction'
-import { CopyButton } from '@/components/CopyButton'
-import { EmptyState } from '@/components/EmptyState'
-import { PageHeader } from '@/components/PageHeader'
-import { PaginationFooter } from '@/components/PaginationFooter'
-import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
-import { Checkbox } from '@/components/ui/checkbox'
+import type { PluginHealth, PluginKind, PluginManifest, PluginRegistration } from '@/lib/types'
 import {
   Dialog,
   DialogContent,
@@ -38,16 +31,6 @@ import {
   DialogTitle,
   DialogTrigger,
 } from '@/components/ui/dialog'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
-import { Skeleton } from '@/components/ui/skeleton'
 import {
   Table,
   TableBody,
@@ -56,18 +39,35 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import { PaginationFooter } from '@/components/PaginationFooter'
+import { ConfirmAction } from '@/components/ConfirmAction'
 import { useInvoke, usePluginList } from '@/lib/queries'
-import type { PluginHealth, PluginKind, PluginManifest, PluginRegistration } from '@/lib/types'
+import { CopyButton } from '@/components/CopyButton'
+import { EmptyState } from '@/components/EmptyState'
+import { PageHeader } from '@/components/PageHeader'
+import { Checkbox } from '@/components/ui/checkbox'
+import { Skeleton } from '@/components/ui/skeleton'
+import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 
 const REQUIRED_METHODS: Record<PluginKind, readonly string[]> = {
   'tool-provider': ['List', 'Get', 'Call'],
   'context-provider': ['List', 'Get', 'Update', 'Write'],
 }
 
-type HealthView =
-  | { state: 'probing' }
-  | { state: 'result'; data: PluginHealth }
-  | { state: 'error'; message: string }
+type HealthView
+  = | { state: 'probing' }
+    | { data: PluginHealth, state: 'result' }
+    | { message: string, state: 'error' }
 
 function formatCheckedAt(value: string): string {
   const timestamp = Date.parse(value)
@@ -84,7 +84,7 @@ export function PluginsPage() {
   const detailsInvoke = useInvoke()
   const qc = useQueryClient()
   const inspectingId = useRef<string | null>(null)
-  const [token, setToken] = useState<{ id: string; token: string } | null>(null)
+  const [token, setToken] = useState<{ id: string, token: string } | null>(null)
   const [editing, setEditing] = useState<PluginManifest | null>(null)
   const [inspecting, setInspecting] = useState<PluginManifest | null>(null)
   const [changingEnabled, setChangingEnabled] = useState<string | null>(null)
@@ -113,7 +113,7 @@ export function PluginsPage() {
     } catch (error) {
       toast.error(error instanceof Error ? error.message : '更新 Plugin 生命周期失败')
     } finally {
-      setChangingEnabled((current) => (current === plugin.id ? null : current))
+      setChangingEnabled(current => (current === plugin.id ? null : current))
     }
   }
 
@@ -134,19 +134,19 @@ export function PluginsPage() {
   }
 
   const probe = async (plugin: PluginManifest) => {
-    setHealth((current) => ({ ...current, [plugin.id]: { state: 'probing' } }))
+    setHealth(current => ({ ...current, [plugin.id]: { state: 'probing' } }))
     try {
       const response = await invoke.mutateAsync({
         path: 'system/plugin',
         tool: 'health',
         args: { id: plugin.id },
       })
-      setHealth((current) => ({
+      setHealth(current => ({
         ...current,
         [plugin.id]: { state: 'result', data: response.json as PluginHealth },
       }))
     } catch (error) {
-      setHealth((current) => ({
+      setHealth(current => ({
         ...current,
         [plugin.id]: {
           state: 'error',
@@ -179,27 +179,30 @@ export function PluginsPage() {
   }
 
   const items = list.data?.items ?? []
-  const enabledCount = items.filter((plugin) => plugin.enabled).length
+  const enabledCount = items.filter(plugin => plugin.enabled).length
 
   return (
     <div className="mx-auto w-full max-w-7xl px-4 py-5 sm:px-6 sm:py-6 lg:px-8 lg:py-8">
       <PageHeader
-        eyebrow="CONTROL PLANE / PROVIDERS"
-        title="Plugin"
-        description={
+        actions={<RegisterPluginDialog onRegistered={id => clearHealth(id)} onToken={setToken} />}
+        description={(
           <>
             注册自定义 Provider，验证远端契约，再到
             <Link
-              to="/manage/registry"
               className="mx-1 text-foreground underline underline-offset-3"
+              to="/manage/registry"
             >
               节点注册
             </Link>
-            将它挂上能力树。管理能力与 <code className="font-mono text-xs">tb plugin</code>{' '}
+            将它挂上能力树。管理能力与
+            {' '}
+            <code className="font-mono text-xs">tb plugin</code>
+            {' '}
             六个命令保持对等。
           </>
-        }
-        actions={<RegisterPluginDialog onToken={setToken} onRegistered={(id) => clearHealth(id)} />}
+        )}
+        eyebrow="CONTROL PLANE / PROVIDERS"
+        title="Plugin"
       />
 
       <section className="mt-6 flex flex-col gap-3 rounded-lg border bg-card/45 px-4 py-3.5 sm:flex-row sm:items-center">
@@ -209,230 +212,254 @@ export function PluginsPage() {
         <div className="min-w-0 flex-1">
           <p className="text-sm font-medium">生命周期与健康状态彼此独立</p>
           <p className="mt-1 text-xs leading-5 text-muted-foreground">
-            Enabled 只决定平台是否允许调用；注册或契约字段更新时会自动探活并校验{' '}
+            Enabled 只决定平台是否允许调用；注册或契约字段更新时会自动探活并校验
+            {' '}
             <span className="font-mono">~describe / ~help</span>
             。列表健康状态只在点击检查后刷新，不做后台轮询。
           </p>
         </div>
         {!list.isPending && !list.isError && (
           <div className="flex shrink-0 flex-wrap gap-1.5 text-[10px]">
-            <Badge variant="outline" className="border-ok/35 text-ok">
-              {enabledCount} enabled
+            <Badge className="border-ok/35 text-ok" variant="outline">
+              {enabledCount}
+              {' '}
+              enabled
             </Badge>
-            <Badge variant="outline" className="text-muted-foreground">
-              {items.length - enabledCount} disabled
+            <Badge className="text-muted-foreground" variant="outline">
+              {items.length - enabledCount}
+              {' '}
+              disabled
             </Badge>
-            <Badge variant="secondary">当前已加载 {items.length}</Badge>
+            <Badge variant="secondary">
+              当前已加载
+              {items.length}
+            </Badge>
           </div>
         )}
       </section>
 
       <div className="mt-4 overflow-hidden rounded-lg border bg-card/30">
-        {list.isPending ? (
-          <div className="grid gap-3 p-4">
-            <Skeleton className="h-14 w-full" />
-            <Skeleton className="h-14 w-full" />
-          </div>
-        ) : list.isError ? (
-          <EmptyState
-            icon={Plug2}
-            title="无法读取 Plugin 注册表"
-            tone="danger"
-            className="border-0"
-            action={
-              <Button variant="outline" size="sm" onClick={() => void list.refetch()}>
-                <RefreshCw />
-                重新加载
-              </Button>
-            }
-          >
-            <p>{list.error.message}</p>
-          </EmptyState>
-        ) : items.length === 0 ? (
-          <EmptyState icon={Plug2} title="还没有注册任何 Plugin" className="border-0">
-            <p>先注册实现 tool-provider 或 context-provider 契约的服务，再把它挂载成节点。</p>
-          </EmptyState>
-        ) : (
-          <Table className="min-w-[1060px]">
-            <TableHeader>
-              <TableRow>
-                <TableHead className="w-56">Plugin / Interface</TableHead>
-                <TableHead>Endpoint</TableHead>
-                <TableHead className="w-44">Auth</TableHead>
-                <TableHead className="w-40">Lifecycle</TableHead>
-                <TableHead className="w-64">Health · on demand</TableHead>
-                <TableHead className="w-28" />
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {items.map((plugin) => (
-                <TableRow key={plugin.id}>
-                  <TableCell className="whitespace-normal">
-                    <div className="flex min-w-0 items-center gap-1">
-                      <button
-                        type="button"
-                        className="group/details flex min-w-0 items-center gap-1 text-left font-mono text-xs font-medium text-foreground outline-none hover:text-primary focus-visible:text-primary focus-visible:underline"
-                        onClick={() => openDetails(plugin)}
-                      >
-                        <span className="truncate">{plugin.id}</span>
-                        <ChevronRight className="size-3.5 shrink-0 text-muted-foreground transition-transform group-hover/details:translate-x-0.5 group-hover/details:text-primary" />
-                      </button>
-                      <CopyButton
-                        value={plugin.id}
-                        label="复制 Plugin id"
-                        className="opacity-60 hover:opacity-100"
-                      />
-                    </div>
-                    <div className="mt-1.5 flex items-center gap-1.5">
-                      <Badge variant="outline" className="font-mono text-[10px]">
-                        {plugin.kind === 'tool-provider' ? 'tool' : 'context'}
-                      </Badge>
-                      <span className="font-mono text-[10px] text-muted-foreground">
-                        {plugin.interfaceVersion}
-                      </span>
-                    </div>
-                  </TableCell>
-                  <TableCell className="max-w-80 whitespace-normal">
-                    <p className="truncate font-mono text-xs" title={plugin.endpoint}>
-                      {plugin.endpoint}
-                    </p>
-                    <p className="mt-1 font-mono text-[10px] text-muted-foreground">
-                      health {plugin.healthPath}
-                    </p>
-                  </TableCell>
-                  <TableCell className="whitespace-normal">
-                    <Badge variant="secondary" className="font-mono text-[10px]">
-                      {plugin.auth.kind}
-                    </Badge>
-                    {plugin.auth.kind === 'bearer' ? (
-                      <p
-                        className="mt-1.5 max-w-36 truncate font-mono text-[10px] text-muted-foreground"
-                        title={plugin.auth.secretRef}
-                      >
-                        secretRef · {plugin.auth.secretRef}
-                      </p>
-                    ) : (
-                      <p className="mt-1.5 text-[10px] text-muted-foreground">平台托管 · 不回显</p>
-                    )}
-                  </TableCell>
-                  <TableCell className="whitespace-normal">
-                    <Badge
-                      variant="outline"
-                      className={
-                        plugin.enabled
-                          ? 'border-ok/40 text-[10px] text-ok'
-                          : 'border-border text-[10px] text-muted-foreground'
-                      }
-                    >
-                      {plugin.enabled ? 'enabled' : 'disabled'}
-                    </Badge>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="xs"
-                      className="mt-1.5 -ml-2 text-muted-foreground"
-                      disabled={changingEnabled !== null}
-                      onClick={() => void setEnabled(plugin, !plugin.enabled)}
-                    >
-                      {changingEnabled === plugin.id ? (
-                        <Loader2 className="animate-spin" />
-                      ) : plugin.enabled ? (
-                        <Ban />
-                      ) : (
-                        <Check />
-                      )}
-                      {changingEnabled === plugin.id
-                        ? '正在更新'
-                        : plugin.enabled
-                          ? '禁用调用'
-                          : '重新启用'}
+        {list.isPending
+          ? (
+              <div className="grid gap-3 p-4">
+                <Skeleton className="h-14 w-full" />
+                <Skeleton className="h-14 w-full" />
+              </div>
+            )
+          : list.isError
+            ? (
+                <EmptyState
+                  action={(
+                    <Button onClick={() => void list.refetch()} size="sm" variant="outline">
+                      <RefreshCw />
+                      重新加载
                     </Button>
-                  </TableCell>
-                  <TableCell className="whitespace-normal">
-                    <PluginHealthCell
-                      state={health[plugin.id]}
-                      onProbe={() => void probe(plugin)}
-                    />
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex justify-end gap-1">
-                      <Button
-                        variant="ghost"
-                        size="icon-xs"
-                        aria-label={`查看 ${plugin.id} manifest`}
-                        title="查看 manifest 与契约"
-                        onClick={() => openDetails(plugin)}
-                      >
-                        <FileJson2 />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon-xs"
-                        aria-label={`编辑 ${plugin.id}`}
-                        title="编辑 manifest"
-                        onClick={() => setEditing(plugin)}
-                      >
-                        <Pencil />
-                      </Button>
-                      <ConfirmAction
-                        title={`注销 plugin ${plugin.id}?`}
-                        description={
-                          <p>
-                            引用它的挂载节点将在下次调用时失败；platform-token
-                            将被吊销。此操作不可撤销。
-                          </p>
-                        }
-                        actionLabel="注销"
-                        onConfirm={() => remove(plugin)}
-                        trigger={
-                          <Button
-                            variant="ghost"
-                            size="icon-xs"
-                            aria-label={`注销 ${plugin.id}`}
-                            title="注销 Plugin"
-                          >
-                            <Trash2 className="text-destructive" />
-                          </Button>
-                        }
-                      />
-                    </div>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        )}
+                  )}
+                  className="border-0"
+                  icon={Plug2}
+                  title="无法读取 Plugin 注册表"
+                  tone="danger"
+                >
+                  <p>{list.error.message}</p>
+                </EmptyState>
+              )
+            : items.length === 0
+              ? (
+                  <EmptyState className="border-0" icon={Plug2} title="还没有注册任何 Plugin">
+                    <p>先注册实现 tool-provider 或 context-provider 契约的服务，再把它挂载成节点。</p>
+                  </EmptyState>
+                )
+              : (
+                  <Table className="min-w-[1060px]">
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="w-56">Plugin / Interface</TableHead>
+                        <TableHead>Endpoint</TableHead>
+                        <TableHead className="w-44">Auth</TableHead>
+                        <TableHead className="w-40">Lifecycle</TableHead>
+                        <TableHead className="w-64">Health · on demand</TableHead>
+                        <TableHead className="w-28" />
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {items.map(plugin => (
+                        <TableRow key={plugin.id}>
+                          <TableCell className="whitespace-normal">
+                            <div className="flex min-w-0 items-center gap-1">
+                              <button
+                                className="group/details flex min-w-0 items-center gap-1 text-left font-mono text-xs font-medium text-foreground outline-none hover:text-primary focus-visible:text-primary focus-visible:underline"
+                                onClick={() => openDetails(plugin)}
+                                type="button"
+                              >
+                                <span className="truncate">{plugin.id}</span>
+                                <ChevronRight className="size-3.5 shrink-0 text-muted-foreground transition-transform group-hover/details:translate-x-0.5 group-hover/details:text-primary" />
+                              </button>
+                              <CopyButton
+                                className="opacity-60 hover:opacity-100"
+                                label="复制 Plugin id"
+                                value={plugin.id}
+                              />
+                            </div>
+                            <div className="mt-1.5 flex items-center gap-1.5">
+                              <Badge className="font-mono text-[10px]" variant="outline">
+                                {plugin.kind === 'tool-provider' ? 'tool' : 'context'}
+                              </Badge>
+                              <span className="font-mono text-[10px] text-muted-foreground">
+                                {plugin.interfaceVersion}
+                              </span>
+                            </div>
+                          </TableCell>
+                          <TableCell className="max-w-80 whitespace-normal">
+                            <p className="truncate font-mono text-xs" title={plugin.endpoint}>
+                              {plugin.endpoint}
+                            </p>
+                            <p className="mt-1 font-mono text-[10px] text-muted-foreground">
+                              health
+                              {' '}
+                              {plugin.healthPath}
+                            </p>
+                          </TableCell>
+                          <TableCell className="whitespace-normal">
+                            <Badge className="font-mono text-[10px]" variant="secondary">
+                              {plugin.auth.kind}
+                            </Badge>
+                            {plugin.auth.kind === 'bearer'
+                              ? (
+                                  <p
+                                    className="mt-1.5 max-w-36 truncate font-mono text-[10px] text-muted-foreground"
+                                    title={plugin.auth.secretRef}
+                                  >
+                                    secretRef ·
+                                    {' '}
+                                    {plugin.auth.secretRef}
+                                  </p>
+                                )
+                              : (
+                                  <p className="mt-1.5 text-[10px] text-muted-foreground">平台托管 · 不回显</p>
+                                )}
+                          </TableCell>
+                          <TableCell className="whitespace-normal">
+                            <Badge
+                              className={
+                                plugin.enabled
+                                  ? 'border-ok/40 text-[10px] text-ok'
+                                  : 'border-border text-[10px] text-muted-foreground'
+                              }
+                              variant="outline"
+                            >
+                              {plugin.enabled ? 'enabled' : 'disabled'}
+                            </Badge>
+                            <Button
+                              className="mt-1.5 -ml-2 text-muted-foreground"
+                              disabled={changingEnabled !== null}
+                              onClick={() => void setEnabled(plugin, !plugin.enabled)}
+                              size="xs"
+                              type="button"
+                              variant="ghost"
+                            >
+                              {changingEnabled === plugin.id
+                                ? (
+                                    <Loader2 className="animate-spin" />
+                                  )
+                                : plugin.enabled
+                                  ? (
+                                      <Ban />
+                                    )
+                                  : (
+                                      <Check />
+                                    )}
+                              {changingEnabled === plugin.id
+                                ? '正在更新'
+                                : plugin.enabled
+                                  ? '禁用调用'
+                                  : '重新启用'}
+                            </Button>
+                          </TableCell>
+                          <TableCell className="whitespace-normal">
+                            <PluginHealthCell
+                              onProbe={() => void probe(plugin)}
+                              state={health[plugin.id]}
+                            />
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex justify-end gap-1">
+                              <Button
+                                aria-label={`查看 ${plugin.id} manifest`}
+                                onClick={() => openDetails(plugin)}
+                                size="icon-xs"
+                                title="查看 manifest 与契约"
+                                variant="ghost"
+                              >
+                                <FileJson2 />
+                              </Button>
+                              <Button
+                                aria-label={`编辑 ${plugin.id}`}
+                                onClick={() => setEditing(plugin)}
+                                size="icon-xs"
+                                title="编辑 manifest"
+                                variant="ghost"
+                              >
+                                <Pencil />
+                              </Button>
+                              <ConfirmAction
+                                actionLabel="注销"
+                                description={(
+                                  <p>
+                                    引用它的挂载节点将在下次调用时失败；platform-token
+                                    将被吊销。此操作不可撤销。
+                                  </p>
+                                )}
+                                onConfirm={() => remove(plugin)}
+                                title={`注销 plugin ${plugin.id}?`}
+                                trigger={(
+                                  <Button
+                                    aria-label={`注销 ${plugin.id}`}
+                                    size="icon-xs"
+                                    title="注销 Plugin"
+                                    variant="ghost"
+                                  >
+                                    <Trash2 className="text-destructive" />
+                                  </Button>
+                                )}
+                              />
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                )}
         {!list.isPending && !list.isError && (
           <PaginationFooter
             count={items.length}
-            unit="个 Plugin"
             hasNextPage={Boolean(list.hasNextPage)}
             isFetchingNextPage={list.isFetchingNextPage}
             onLoadMore={() => void list.fetchNextPage()}
+            unit="个 Plugin"
           />
         )}
       </div>
 
       {inspecting && (
         <PluginDetailsDialog
-          plugin={inspecting}
-          loading={detailsInvoke.isPending}
           error={detailsInvoke.error?.message}
+          loading={detailsInvoke.isPending}
           onClose={closeDetails}
           onEdit={() => {
             const snapshot = inspecting
             closeDetails()
             setEditing(snapshot)
           }}
+          plugin={inspecting}
         />
       )}
 
       {editing && (
         <EditPluginDialog
-          plugin={editing}
           onClose={() => setEditing(null)}
           onToken={setToken}
-          onUpdated={(id) => clearHealth(id)}
+          onUpdated={id => clearHealth(id)}
+          plugin={editing}
         />
       )}
 
@@ -440,10 +467,10 @@ export function PluginsPage() {
       <Dialog open={token !== null}>
         <DialogContent
           className="p-4 sm:max-w-xl sm:p-6"
+          onEscapeKeyDown={event => event.preventDefault()}
+          onInteractOutside={event => event.preventDefault()}
+          onPointerDownOutside={event => event.preventDefault()}
           showCloseButton={false}
-          onEscapeKeyDown={(event) => event.preventDefault()}
-          onInteractOutside={(event) => event.preventDefault()}
-          onPointerDownOutside={(event) => event.preventDefault()}
         >
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-base">
@@ -468,8 +495,6 @@ export function PluginsPage() {
                 {token?.token}
               </code>
               <Button
-                size="icon"
-                variant="outline"
                 aria-label="复制 Plugin Token"
                 onClick={async () => {
                   if (!token) return
@@ -480,6 +505,8 @@ export function PluginsPage() {
                     toast.error('复制失败，请手动选择并复制')
                   }
                 }}
+                size="icon"
+                variant="outline"
               >
                 <Copy />
               </Button>
@@ -497,14 +524,14 @@ export function PluginsPage() {
   )
 }
 
-function PluginHealthCell({ state, onProbe }: { state?: HealthView; onProbe: () => void }) {
+function PluginHealthCell({ state, onProbe }: { onProbe: () => void, state?: HealthView }) {
   if (!state) {
     return (
       <div className="flex items-center gap-2">
-        <Badge variant="outline" className="text-[10px] text-muted-foreground">
+        <Badge className="text-[10px] text-muted-foreground" variant="outline">
           未检查
         </Badge>
-        <Button variant="outline" size="xs" onClick={onProbe}>
+        <Button onClick={onProbe} size="xs" variant="outline">
           <Activity />
           立即检查
         </Button>
@@ -525,10 +552,10 @@ function PluginHealthCell({ state, onProbe }: { state?: HealthView; onProbe: () 
     return (
       <div className="min-w-0">
         <div className="flex items-center gap-2">
-          <Badge variant="outline" className="border-destructive/40 text-[10px] text-destructive">
+          <Badge className="border-destructive/40 text-[10px] text-destructive" variant="outline">
             检查失败
           </Badge>
-          <Button variant="ghost" size="xs" className="text-destructive" onClick={onProbe}>
+          <Button className="text-destructive" onClick={onProbe} size="xs" variant="ghost">
             <RefreshCw />
             重试
           </Button>
@@ -545,31 +572,33 @@ function PluginHealthCell({ state, onProbe }: { state?: HealthView; onProbe: () 
     <div className="min-w-0">
       <div className="flex items-center gap-2">
         <Badge
-          variant="outline"
           className={
             data.healthy
               ? 'border-ok/40 text-[10px] text-ok'
               : 'border-destructive/40 text-[10px] text-destructive'
           }
+          variant="outline"
         >
           {data.healthy ? 'healthy' : 'unhealthy'}
         </Badge>
         <Button
-          variant="ghost"
-          size="xs"
           className={data.healthy ? 'text-muted-foreground' : 'text-destructive'}
           onClick={onProbe}
+          size="xs"
+          variant="ghost"
         >
           <RefreshCw />
           {data.healthy ? '重新检查' : '重试'}
         </Button>
       </div>
       <time
-        dateTime={data.checkedAt}
         className="mt-1 block font-mono text-[10px] text-muted-foreground"
+        dateTime={data.checkedAt}
         title={data.checkedAt}
       >
-        checked {formatCheckedAt(data.checkedAt)}
+        checked
+        {' '}
+        {formatCheckedAt(data.checkedAt)}
       </time>
     </div>
   )
@@ -582,30 +611,30 @@ function PluginDetailsDialog({
   onClose,
   onEdit,
 }: {
-  plugin: PluginManifest
-  loading: boolean
   error?: string
+  loading: boolean
   onClose: () => void
   onEdit: () => void
+  plugin: PluginManifest
 }) {
   const methods = REQUIRED_METHODS[plugin.kind]
   const healthUrl = `${plugin.endpoint.replace(/\/+$/, '')}${plugin.healthPath}`
   return (
-    <Dialog open onOpenChange={(open) => !open && onClose()}>
+    <Dialog onOpenChange={open => !open && onClose()} open>
       <DialogContent className="max-h-[90svh] overflow-y-auto p-4 sm:max-w-2xl sm:p-6">
         <DialogHeader>
           <div className="flex flex-wrap items-center gap-2 pr-8">
             <Badge
-              variant="outline"
               className={
                 plugin.enabled
                   ? 'border-ok/40 text-[10px] text-ok'
                   : 'text-[10px] text-muted-foreground'
               }
+              variant="outline"
             >
               {plugin.enabled ? 'enabled' : 'disabled'}
             </Badge>
-            <Badge variant="secondary" className="font-mono text-[10px]">
+            <Badge className="font-mono text-[10px]" variant="secondary">
               {plugin.kind}
             </Badge>
             {loading && (
@@ -617,17 +646,22 @@ function PluginDetailsDialog({
           </div>
           <DialogTitle className="font-mono text-base">{plugin.id}</DialogTitle>
           <DialogDescription>
-            这里通过 <code className="font-mono text-xs">get</code> 读取当前
+            这里通过
+            {' '}
+            <code className="font-mono text-xs">get</code>
+            {' '}
+            读取当前
             manifest；契约摘要来自平台注册时实际执行的校验规则。
           </DialogDescription>
         </DialogHeader>
 
         {error && (
           <div
-            role="alert"
             className="rounded-md border border-destructive/35 bg-destructive/[0.05] px-3 py-2 text-xs leading-5 text-destructive"
+            role="alert"
           >
-            无法刷新最新 manifest，当前显示列表快照：{error}
+            无法刷新最新 manifest，当前显示列表快照：
+            {error}
           </div>
         )}
 
@@ -681,7 +715,9 @@ function PluginDetailsDialog({
               <span>
                 <span className="font-medium">Health probe</span>
                 <span className="mt-0.5 block font-mono text-[10px] text-muted-foreground break-all">
-                  GET {healthUrl}
+                  GET
+                  {' '}
+                  {healthUrl}
                 </span>
               </span>
             </li>
@@ -690,7 +726,9 @@ function PluginDetailsDialog({
               <span>
                 <span className="font-medium">Describe match</span>
                 <span className="mt-0.5 block text-[10px] leading-5 text-muted-foreground">
-                  <span className="font-mono">~describe</span> 的 kind 与 interfaceVersion 必须和
+                  <span className="font-mono">~describe</span>
+                  {' '}
+                  的 kind 与 interfaceVersion 必须和
                   manifest 一致。
                 </span>
               </span>
@@ -700,14 +738,16 @@ function PluginDetailsDialog({
               <span className="min-w-0">
                 <span className="font-medium">Required methods</span>
                 <span className="mt-1.5 flex flex-wrap gap-1.5">
-                  {methods.map((method) => (
-                    <Badge key={method} variant="outline" className="font-mono text-[10px]">
+                  {methods.map(method => (
+                    <Badge className="font-mono text-[10px]" key={method} variant="outline">
                       {method}
                     </Badge>
                   ))}
                 </span>
                 <span className="mt-1.5 block text-[10px] leading-5 text-muted-foreground">
-                  <span className="font-mono">~help</span> 必须包含全部必需方法；声明的可选
+                  <span className="font-mono">~help</span>
+                  {' '}
+                  必须包含全部必需方法；声明的可选
                   capability 也必须有对应命令。
                 </span>
               </span>
@@ -725,8 +765,8 @@ function PluginDetailsDialog({
         </details>
 
         <DialogFooter className="gap-2">
-          <Button variant="outline" asChild>
-            <Link to="/manage/registry" onClick={onClose}>
+          <Button asChild variant="outline">
+            <Link onClick={onClose} to="/manage/registry">
               挂载为节点
               <ArrowUpRight />
             </Link>
@@ -746,9 +786,9 @@ function ManifestFact({
   wide = false,
   children,
 }: {
+  children: ReactNode
   label: string
   wide?: boolean
-  children: ReactNode
 }) {
   return (
     <div className={`min-w-0 bg-background px-4 py-3 ${wide ? 'sm:col-span-2' : ''}`}>
@@ -761,13 +801,13 @@ function ManifestFact({
 }
 
 interface ManifestFormState {
-  kind: PluginKind
-  versionMajor: string
+  authKind: 'platform-token' | 'bearer'
+  enabled: boolean
   endpoint: string
   healthPath: string
-  authKind: 'platform-token' | 'bearer'
+  kind: PluginKind
   secretRef: string
-  enabled: boolean
+  versionMajor: string
 }
 
 /** 表单态 → manifest 字段（id 由调用方补；interfaceVersion 前缀强制与 kind 一致）。 */
@@ -791,10 +831,10 @@ function FormSection({
   description,
   children,
 }: {
+  children: ReactNode
+  description: string
   number: string
   title: string
-  description: string
-  children: ReactNode
 }) {
   return (
     <section className="rounded-lg border bg-card/30">
@@ -816,10 +856,10 @@ function ManifestFields({
   idPrefix,
   disabled = false,
 }: {
-  state: ManifestFormState
-  onChange: (next: ManifestFormState) => void
-  idPrefix: string
   disabled?: boolean
+  idPrefix: string
+  onChange: (next: ManifestFormState) => void
+  state: ManifestFormState
 }) {
   const endpointId = `${idPrefix}-endpoint`
   const healthId = `${idPrefix}-health`
@@ -832,34 +872,34 @@ function ManifestFields({
   return (
     <div className="grid gap-3">
       <FormSection
+        description="平台访问 Plugin 与健康端点的位置；生产环境使用 HTTPS，或填写平台 service binding。"
         number="01"
         title="Endpoint"
-        description="平台访问 Plugin 与健康端点的位置；生产环境使用 HTTPS，或填写平台 service binding。"
       >
         <div className="grid gap-1.5">
-          <Label htmlFor={endpointId} className="text-xs">
+          <Label className="text-xs" htmlFor={endpointId}>
             Plugin endpoint *
           </Label>
           <Input
-            id={endpointId}
             className="font-mono text-xs"
+            disabled={disabled}
+            id={endpointId}
+            onChange={event => onChange({ ...state, endpoint: event.target.value })}
             placeholder="https://plugin.example.com 或 binding:MY_PLUGIN"
             value={state.endpoint}
-            disabled={disabled}
-            onChange={(event) => onChange({ ...state, endpoint: event.target.value })}
           />
         </div>
         <div className="grid gap-1.5 sm:max-w-xs">
-          <Label htmlFor={healthId} className="text-xs">
+          <Label className="text-xs" htmlFor={healthId}>
             Health path *
           </Label>
           <Input
-            id={healthId}
             className="font-mono text-xs"
+            disabled={disabled}
+            id={healthId}
+            onChange={event => onChange({ ...state, healthPath: event.target.value })}
             placeholder="/healthz"
             value={state.healthPath}
-            disabled={disabled}
-            onChange={(event) => onChange({ ...state, healthPath: event.target.value })}
           />
           <p className="text-[10px] leading-5 text-muted-foreground">
             必须以 / 开头；注册时和手动检查都会请求它。
@@ -868,54 +908,58 @@ function ManifestFields({
       </FormSection>
 
       <FormSection
+        description="声明 Provider 类型与契约主版本；平台会读取 ~describe 和 ~help 逐项核对。"
         number="02"
         title="Interface"
-        description="声明 Provider 类型与契约主版本；平台会读取 ~describe 和 ~help 逐项核对。"
       >
         <div className="grid gap-3 sm:grid-cols-2">
           <div className="grid gap-1.5">
-            <Label htmlFor={kindId} className="text-xs">
+            <Label className="text-xs" htmlFor={kindId}>
               Provider kind *
             </Label>
             <Select
-              value={state.kind}
               disabled={disabled}
-              onValueChange={(value) => onChange({ ...state, kind: value as PluginKind })}
+              onValueChange={value => onChange({ ...state, kind: value as PluginKind })}
+              value={state.kind}
             >
-              <SelectTrigger id={kindId} className="font-mono text-xs">
+              <SelectTrigger className="font-mono text-xs" id={kindId}>
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="tool-provider" className="font-mono text-xs">
+                <SelectItem className="font-mono text-xs" value="tool-provider">
                   tool-provider — 工具源
                 </SelectItem>
-                <SelectItem value="context-provider" className="font-mono text-xs">
+                <SelectItem className="font-mono text-xs" value="context-provider">
                   context-provider — 存储源
                 </SelectItem>
               </SelectContent>
             </Select>
           </div>
           <div className="grid gap-1.5">
-            <Label htmlFor={versionId} className="text-xs">
+            <Label className="text-xs" htmlFor={versionId}>
               接口主版本 *
             </Label>
             <Input
-              id={versionId}
               className="font-mono text-xs"
+              disabled={disabled}
+              id={versionId}
+              onChange={event => onChange({ ...state, versionMajor: event.target.value })}
               placeholder="v1"
               value={state.versionMajor}
-              disabled={disabled}
-              onChange={(event) => onChange({ ...state, versionMajor: event.target.value })}
             />
           </div>
         </div>
         <div className="rounded-md border bg-background/55 px-3 py-2.5">
           <p className="font-mono text-[10px] text-muted-foreground">
-            {state.kind}/{state.versionMajor.trim() || 'v1'} requires
+            {state.kind}
+            /
+            {state.versionMajor.trim() || 'v1'}
+            {' '}
+            requires
           </p>
           <div className="mt-2 flex flex-wrap gap-1.5">
-            {REQUIRED_METHODS[state.kind].map((method) => (
-              <Badge key={method} variant="outline" className="font-mono text-[10px]">
+            {REQUIRED_METHODS[state.kind].map(method => (
+              <Badge className="font-mono text-[10px]" key={method} variant="outline">
                 {method}
               </Badge>
             ))}
@@ -924,83 +968,84 @@ function ManifestFields({
       </FormSection>
 
       <FormSection
+        description="选择平台签发的一次性 Token，或引用凭证保管中的 bearer secret。"
         number="03"
         title="Authentication"
-        description="选择平台签发的一次性 Token，或引用凭证保管中的 bearer secret。"
       >
         <div className="grid gap-1.5 sm:max-w-sm">
-          <Label htmlFor={authId} className="text-xs">
+          <Label className="text-xs" htmlFor={authId}>
             Auth mode *
           </Label>
           <Select
-            value={state.authKind}
             disabled={disabled}
-            onValueChange={(value) =>
-              onChange({ ...state, authKind: value as 'platform-token' | 'bearer' })
-            }
+            onValueChange={value =>
+              onChange({ ...state, authKind: value as 'platform-token' | 'bearer' })}
+            value={state.authKind}
           >
-            <SelectTrigger id={authId} className="font-mono text-xs">
+            <SelectTrigger className="font-mono text-xs" id={authId}>
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="platform-token" className="font-mono text-xs">
+              <SelectItem className="font-mono text-xs" value="platform-token">
                 platform-token — 平台签发
               </SelectItem>
-              <SelectItem value="bearer" className="font-mono text-xs">
+              <SelectItem className="font-mono text-xs" value="bearer">
                 bearer — 引用已存凭证
               </SelectItem>
             </SelectContent>
           </Select>
         </div>
 
-        {state.authKind === 'bearer' ? (
-          <div className="grid gap-1.5">
-            <Label htmlFor={secretId} className="text-xs">
-              Secret reference *
-            </Label>
-            <Input
-              id={secretId}
-              className="font-mono text-xs"
-              placeholder="my-plugin-token"
-              value={state.secretRef}
-              disabled={disabled}
-              onChange={(event) => onChange({ ...state, secretRef: event.target.value })}
-            />
-            <p className="text-[10px] leading-5 text-muted-foreground">
-              这里只填写
-              <Link
-                to="/manage/secrets"
-                className="mx-1 text-foreground underline underline-offset-2"
-              >
-                凭证保管
-              </Link>
-              中的名字，明文不会进入 manifest。
-            </p>
-          </div>
-        ) : (
-          <div className="flex items-start gap-2.5 rounded-md border border-primary/20 bg-primary/[0.045] px-3 py-2.5">
-            <KeyRound className="mt-0.5 size-3.5 shrink-0 text-primary" />
-            <p className="text-[10px] leading-5 text-muted-foreground">
-              注册成功，或从 bearer 切换到 platform-token 后，Token
-              只在该次响应显示。页面会阻止关闭，直到你明确确认已保存。
-            </p>
-          </div>
-        )}
+        {state.authKind === 'bearer'
+          ? (
+              <div className="grid gap-1.5">
+                <Label className="text-xs" htmlFor={secretId}>
+                  Secret reference *
+                </Label>
+                <Input
+                  className="font-mono text-xs"
+                  disabled={disabled}
+                  id={secretId}
+                  onChange={event => onChange({ ...state, secretRef: event.target.value })}
+                  placeholder="my-plugin-token"
+                  value={state.secretRef}
+                />
+                <p className="text-[10px] leading-5 text-muted-foreground">
+                  这里只填写
+                  <Link
+                    className="mx-1 text-foreground underline underline-offset-2"
+                    to="/manage/secrets"
+                  >
+                    凭证保管
+                  </Link>
+                  中的名字，明文不会进入 manifest。
+                </p>
+              </div>
+            )
+          : (
+              <div className="flex items-start gap-2.5 rounded-md border border-primary/20 bg-primary/[0.045] px-3 py-2.5">
+                <KeyRound className="mt-0.5 size-3.5 shrink-0 text-primary" />
+                <p className="text-[10px] leading-5 text-muted-foreground">
+                  注册成功，或从 bearer 切换到 platform-token 后，Token
+                  只在该次响应显示。页面会阻止关闭，直到你明确确认已保存。
+                </p>
+              </div>
+            )}
       </FormSection>
 
       <FormSection
+        description="决定注册完成后是否立即允许挂载节点调用；它不代表远端当前健康。"
         number="04"
         title="Lifecycle"
-        description="决定注册完成后是否立即允许挂载节点调用；它不代表远端当前健康。"
       >
         <div className="flex items-start gap-3 rounded-md border bg-background/55 px-3 py-3">
           <Checkbox
-            id={enabledId}
             checked={state.enabled}
             disabled={disabled}
-            onCheckedChange={(value) => onChange({ ...state, enabled: value === true })}
+            id={enabledId}
+            onCheckedChange={value => onChange({ ...state, enabled: value === true })}
           />
-          <Label htmlFor={enabledId} className="grid cursor-pointer gap-1 text-xs leading-5">
+          <Label className="grid cursor-pointer gap-1 text-xs leading-5" htmlFor={enabledId}>
             <span>注册后启用调用</span>
             <span className="font-normal text-[10px] text-muted-foreground">
               关闭后 manifest 仍保留，但挂载节点调用会返回 unavailable，可随时重新启用。
@@ -1026,8 +1071,8 @@ function RegisterPluginDialog({
   onToken,
   onRegistered,
 }: {
-  onToken: (value: { id: string; token: string }) => void
   onRegistered: (id: string) => void
+  onToken: (value: { id: string, token: string }) => void
 }) {
   const invoke = useInvoke()
   const qc = useQueryClient()
@@ -1075,13 +1120,13 @@ function RegisterPluginDialog({
           }
           qc.invalidateQueries({ queryKey: ['tb'] })
         },
-        onError: (submitError) => setError(submitError.message),
+        onError: submitError => setError(submitError.message),
       },
     )
   }
 
   return (
-    <Dialog open={open} onOpenChange={changeOpen}>
+    <Dialog onOpenChange={changeOpen} open={open}>
       <DialogTrigger asChild>
         <Button size="sm">
           <Plus />
@@ -1090,9 +1135,9 @@ function RegisterPluginDialog({
       </DialogTrigger>
       <DialogContent
         className="max-h-[90svh] overflow-y-auto p-4 sm:max-w-2xl sm:p-6"
+        onEscapeKeyDown={event => invoke.isPending && event.preventDefault()}
+        onPointerDownOutside={event => invoke.isPending && event.preventDefault()}
         showCloseButton={!invoke.isPending}
-        onEscapeKeyDown={(event) => invoke.isPending && event.preventDefault()}
-        onPointerDownOutside={(event) => invoke.isPending && event.preventDefault()}
       >
         <DialogHeader>
           <DialogTitle className="text-base">注册 Plugin</DialogTitle>
@@ -1113,20 +1158,20 @@ function RegisterPluginDialog({
               </div>
             </div>
             <div className="grid gap-1.5 p-4">
-              <Label htmlFor="register-plugin-id" className="text-xs">
+              <Label className="text-xs" htmlFor="register-plugin-id">
                 Plugin id *
               </Label>
               <Input
-                id="register-plugin-id"
-                className="font-mono text-sm"
-                placeholder="my-provider"
-                value={id}
-                disabled={invoke.isPending}
                 aria-describedby={error ? 'register-plugin-error' : undefined}
+                className="font-mono text-sm"
+                disabled={invoke.isPending}
+                id="register-plugin-id"
                 onChange={(event) => {
                   setId(event.target.value)
                   setError(null)
                 }}
+                placeholder="my-provider"
+                value={id}
               />
               <p className="text-[10px] text-muted-foreground">
                 允许 A–Z、a–z、0–9、点、下划线和短横线，且不能以标点开头。
@@ -1135,27 +1180,27 @@ function RegisterPluginDialog({
           </section>
 
           <ManifestFields
-            state={form}
+            disabled={invoke.isPending}
+            idPrefix="register-plugin"
             onChange={(next) => {
               setForm(next)
               setError(null)
             }}
-            idPrefix="register-plugin"
-            disabled={invoke.isPending}
+            state={form}
           />
 
           {error && (
             <p
+              className="rounded-md border border-destructive/35 bg-destructive/[0.05] px-3 py-2.5 text-xs leading-5 text-destructive"
               id="register-plugin-error"
               role="alert"
-              className="rounded-md border border-destructive/35 bg-destructive/[0.05] px-3 py-2.5 text-xs leading-5 text-destructive"
             >
               {error}
             </p>
           )}
         </div>
         <DialogFooter className="border-t pt-4">
-          <Button variant="outline" disabled={invoke.isPending} onClick={() => changeOpen(false)}>
+          <Button disabled={invoke.isPending} onClick={() => changeOpen(false)} variant="outline">
             取消
           </Button>
           <Button disabled={invoke.isPending} onClick={submit}>
@@ -1175,10 +1220,10 @@ function EditPluginDialog({
   onToken,
   onUpdated,
 }: {
-  plugin: PluginManifest
   onClose: () => void
-  onToken: (value: { id: string; token: string }) => void
+  onToken: (value: { id: string, token: string }) => void
   onUpdated: (id: string) => void
+  plugin: PluginManifest
 }) {
   const invoke = useInvoke()
   const qc = useQueryClient()
@@ -1226,21 +1271,24 @@ function EditPluginDialog({
           }
           qc.invalidateQueries({ queryKey: ['tb'] })
         },
-        onError: (submitError) => setError(submitError.message),
+        onError: submitError => setError(submitError.message),
       },
     )
   }
 
   return (
-    <Dialog open onOpenChange={(open) => !open && close()}>
+    <Dialog onOpenChange={open => !open && close()} open>
       <DialogContent
         className="max-h-[90svh] overflow-y-auto p-4 sm:max-w-2xl sm:p-6"
+        onEscapeKeyDown={event => invoke.isPending && event.preventDefault()}
+        onPointerDownOutside={event => invoke.isPending && event.preventDefault()}
         showCloseButton={!invoke.isPending}
-        onEscapeKeyDown={(event) => invoke.isPending && event.preventDefault()}
-        onPointerDownOutside={(event) => invoke.isPending && event.preventDefault()}
       >
         <DialogHeader>
-          <DialogTitle className="font-mono text-base">编辑 {plugin.id}</DialogTitle>
+          <DialogTitle className="font-mono text-base">
+            编辑
+            {plugin.id}
+          </DialogTitle>
           <DialogDescription>
             Endpoint、healthPath、kind 或接口版本变化时会重新探活并校验契约；失败不会覆盖当前
             manifest。
@@ -1248,26 +1296,26 @@ function EditPluginDialog({
         </DialogHeader>
 
         <ManifestFields
-          state={form}
+          disabled={invoke.isPending}
+          idPrefix={`edit-plugin-${plugin.id}`}
           onChange={(next) => {
             setForm(next)
             setError(null)
           }}
-          idPrefix={`edit-plugin-${plugin.id}`}
-          disabled={invoke.isPending}
+          state={form}
         />
 
         {error && (
           <p
-            role="alert"
             className="rounded-md border border-destructive/35 bg-destructive/[0.05] px-3 py-2.5 text-xs leading-5 text-destructive"
+            role="alert"
           >
             {error}
           </p>
         )}
 
         <DialogFooter className="border-t pt-4">
-          <Button variant="outline" disabled={invoke.isPending} onClick={close}>
+          <Button disabled={invoke.isPending} onClick={close} variant="outline">
             取消
           </Button>
           <Button disabled={invoke.isPending} onClick={submit}>

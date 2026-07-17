@@ -7,22 +7,19 @@
  * 见 gateway/app.ts。dispatch 只做数据结构语义(幂等 upsert、物化、回收),registeredBy=调用者 keyId。
  */
 
-import { TBError } from '../errors'
-import type { CmdSpec, HelpModel } from '../htbp/model'
 import type { NodeRegistryStore } from '../tree/registry'
+import type { CmdSpec, HelpModel } from '../htbp/model'
 import type { ScopeChecker } from '../tree/visibility'
-import type {
-  CallContext,
-  NodeConfig,
-  NodeInput,
-  NodeKind,
-  Page,
-  TreeNode,
-  TreePath,
-  Virtualize,
-} from '../types'
-import { NODE_KINDS } from '../types'
 import type { BuiltinModule } from './types'
+import { type CallContext,
+  NODE_KINDS,
+  type NodeConfig,
+  type NodeInput,
+  type NodeKind,
+  type Page,
+  type TreeNode,
+  type TreePath,
+  type Virtualize } from '../types'
 import {
   cmdPath,
   LIST_OPTS_SCHEMA,
@@ -32,9 +29,10 @@ import {
   requireString,
   VOID_ACK,
 } from './util'
+import { TBError } from '../errors'
 
-const DESCRIPTION =
-  'Node registry: the single mount surface — everything on the tree (mcp/http/context/device/remote nodes) is mounted, listed and unmounted here'
+const DESCRIPTION
+  = 'Node registry: the single mount surface — everything on the tree (mcp/http/context/device/remote nodes) is mounted, listed and unmounted here'
 
 /** write 的 NodeInput 字段 schema(update.patch 复用,全可选)。 */
 const NODE_FIELD_SCHEMAS = {
@@ -186,7 +184,7 @@ export function createRegistryModule(
             optListOptions(args),
           )) as Page<TreeNode>
           if (!visibility) return page
-          const items = page.items.filter((n) => visibility(ctx.scopes, n.path, 'read'))
+          const items = page.items.filter(n => visibility(ctx.scopes, n.path, 'read'))
           return page.cursor !== undefined ? { items, cursor: page.cursor } : { items }
         }
         case 'get': {

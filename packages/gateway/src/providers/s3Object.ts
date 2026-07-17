@@ -14,11 +14,11 @@ import {
   assertSecureUrl,
   normalizeUpstreamError,
   type ObjectBodyStream,
+  objectBodyToBytes,
   type ObjectListOptions,
   type ObjectListResult,
   type ObjectMeta,
   type ObjectStore,
-  objectBodyToBytes,
   TBError,
 } from '@tool-bridge/core'
 import { AwsClient } from 'aws4fetch'
@@ -26,11 +26,11 @@ import { encodeObjectKey, presignS3Url } from './s3Sign'
 
 /** s3 provider 的构造参数(providerConfig + authRef 解析出的凭证)。 */
 export interface S3StoreConfig {
-  endpoint: string
+  accessKeyId: string
   bucket: string
+  endpoint: string
   /** 缺省 'auto'(R2 S3 兼容端点的约定;AWS 端点应显式给区域)。 */
   region?: string
-  accessKeyId: string
   secretAccessKey: string
 }
 
@@ -58,7 +58,7 @@ function xmlUnescape(s: string): string {
     )
     .replace(/&#(\d+);/g, (_, dec: string) => String.fromCodePoint(Number(dec)))
     .replace(/&quot;/g, '"')
-    .replace(/&apos;/g, "'")
+    .replace(/&apos;/g, '\'')
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>')
     .replace(/&amp;/g, '&')
@@ -195,7 +195,7 @@ export function createS3ObjectStore(
       // ListObjectsV2 XML 用轻量正则抽取(解析上游响应,不引 XML 框架):
       // <Contents>(Key/ETag/Size/LastModified)、<CommonPrefixes><Prefix>、
       // <NextContinuationToken>、<IsTruncated>。
-      const entries: Array<{ sortKey: string; item: ObjectMeta | { prefix: string } }> = []
+      const entries: Array<{ item: ObjectMeta | { prefix: string }, sortKey: string }> = []
       for (const m of xml.matchAll(/<Contents>([\s\S]*?)<\/Contents>/g)) {
         const block = m[1] ?? ''
         const key = xmlText(block, 'Key')
@@ -220,7 +220,7 @@ export function createS3ObjectStore(
         entries.push({ sortKey: p, item: { prefix: p } })
       }
       entries.sort((a, b) => (a.sortKey < b.sortKey ? -1 : 1))
-      const items = entries.map((e) => e.item)
+      const items = entries.map(e => e.item)
 
       const truncated = xmlText(xml, 'IsTruncated') === 'true'
       const next = xmlText(xml, 'NextContinuationToken')

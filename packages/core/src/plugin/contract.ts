@@ -11,9 +11,9 @@
  */
 
 import { z } from 'zod'
-import { TBError } from '../errors'
-import { parseHelpDsl } from '../htbp/helpDsl'
 import type { PluginKind, PluginManifest } from './manifest'
+import { parseHelpDsl } from '../htbp/helpDsl'
+import { TBError } from '../errors'
 
 /** 各 kind 的必需方法集合(v1)。 */
 export const REQUIRED_METHODS: Record<PluginKind, readonly string[]> = {
@@ -53,9 +53,9 @@ const describeSchema = z.object({
 
 /** `~describe` 响应形状。 */
 export interface PluginDescribe {
-  kind: string
-  interfaceVersion: string
   capabilities?: string[]
+  interfaceVersion: string
+  kind: string
 }
 
 const helpJsonSchema = z.object({
@@ -72,22 +72,22 @@ export function helpMethodNames(help: unknown): Set<string> {
     try {
       value = JSON.parse(value)
     } catch {
-      return new Set(parseHelpDsl(value as string).cmds.map((c) => c.name))
+      return new Set(parseHelpDsl(value as string).cmds.map(c => c.name))
     }
   }
   const parsed = helpJsonSchema.safeParse(value)
   if (!parsed.success) {
     throw new TBError('invalid_argument', '~help 响应既非 HelpJson(cmds[])也非 Help DSL 文本')
   }
-  return new Set(parsed.data.cmds.map((c) => c.name))
+  return new Set(parsed.data.cmds.map(c => c.name))
 }
 
 export interface PluginContractInput {
-  manifest: PluginManifest
   /** 抓取到的 `~describe` JSON(已 parse 的值)。 */
   describe: unknown
   /** 抓取到的 `~help` 响应:HelpJson 对象或 DSL/JSON 文本。 */
   help: unknown
+  manifest: PluginManifest
 }
 
 /** 契约校验入口;通过返回解析后的 ~describe(capabilities 供挂载后 ~describe/~help 缓存)。 */
@@ -116,7 +116,7 @@ export function validatePluginContract(input: PluginContractInput): PluginDescri
   }
 
   const methods = helpMethodNames(input.help)
-  const missing = REQUIRED_METHODS[manifest.kind].filter((m) => !methods.has(m))
+  const missing = REQUIRED_METHODS[manifest.kind].filter(m => !methods.has(m))
   if (missing.length > 0) {
     throw new TBError(
       'invalid_argument',
