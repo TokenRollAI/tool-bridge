@@ -1,5 +1,5 @@
-import { SELF } from 'cloudflare:test'
 import { describe, expect, it } from 'vitest'
+import { SELF } from 'cloudflare:test'
 import { TEST_ADMIN_SK } from './fixtures'
 
 // skillhub 集成测试(默认套件只依赖 miniflare 本地 R2 binding,无外部网络):
@@ -23,7 +23,7 @@ async function postJson(path: string, body: unknown, init: RequestInit = {}): Pr
     ...init,
     headers: {
       'content-type': 'application/json',
-      accept: 'application/json',
+      'accept': 'application/json',
       ...(init.headers ?? {}),
     },
     body: JSON.stringify(body),
@@ -70,9 +70,9 @@ Use scripts/fill.py to fill a form.
 `
 
 interface SkillSummary {
+  description: string
   id: string
   name: string
-  description: string
   version?: string
 }
 
@@ -89,7 +89,7 @@ describe('skillhub 发布/发现循环', () => {
       ],
     })
     expect(pub.status).toBe(200)
-    const pubbed = (await pub.json()) as { id: string; name: string; fileCount: number }
+    const pubbed = (await pub.json()) as { fileCount: number, id: string, name: string }
     expect(pubbed.id).toBe('pdf-tools') // slug from frontmatter name
     expect(pubbed.name).toBe('pdf-tools')
     expect(pubbed.fileCount).toBe(3)
@@ -98,7 +98,7 @@ describe('skillhub 发布/发现循环', () => {
     const l = await call('hubtest/main', 'List', {})
     expect(l.status).toBe(200)
     const listed = (await l.json()) as { items: SkillSummary[] }
-    const entry = listed.items.find((s) => s.id === 'pdf-tools')
+    const entry = listed.items.find(s => s.id === 'pdf-tools')
     expect(entry?.name).toBe('pdf-tools')
     expect(entry?.description).toBe('Fill and read PDF forms.')
     expect(entry?.version).toBe('1.2.0')
@@ -108,12 +108,12 @@ describe('skillhub 发布/发现循环', () => {
     expect(g.status).toBe(200)
     const detail = (await g.json()) as {
       content: string
-      files: { path: string }[]
       description: string
+      files: { path: string }[]
     }
     expect(detail.content).toContain('# PDF tools')
     expect(detail.description).toBe('Fill and read PDF forms.')
-    expect(detail.files.map((f) => f.path).sort()).toEqual([
+    expect(detail.files.map(f => f.path).sort()).toEqual([
       'SKILL.md',
       'references/spec.md',
       'scripts/fill.py',
@@ -122,7 +122,7 @@ describe('skillhub 发布/发现循环', () => {
     // GetFile:取单个 bundled 文件(内联文本)。
     const gf = await call('hubtest/main', 'Get', { id: 'pdf-tools', file: 'scripts/fill.py' })
     expect(gf.status).toBe(200)
-    const one = (await gf.json()) as { path: string; content: unknown }
+    const one = (await gf.json()) as { content: unknown, path: string }
     expect(one.path).toBe('scripts/fill.py')
     expect(one.content).toBe('print("fill")\n')
 
@@ -130,7 +130,7 @@ describe('skillhub 发布/发现循环', () => {
     const s = await call('hubtest/main', 'Search', { query: 'pdf' })
     expect(s.status).toBe(200)
     expect(
-      ((await s.json()) as { items: SkillSummary[] }).items.some((x) => x.id === 'pdf-tools'),
+      ((await s.json()) as { items: SkillSummary[] }).items.some(x => x.id === 'pdf-tools'),
     ).toBe(true)
 
     // Remove → 再 Get 404;Remove 不存在 → 404。
@@ -154,7 +154,7 @@ describe('skillhub 发布/发现循环', () => {
     })
     const g = await call('hubtest/replace', 'Get', { id: 's' })
     const detail = (await g.json()) as { files: { path: string }[] }
-    expect(detail.files.map((f) => f.path)).toEqual(['SKILL.md'])
+    expect(detail.files.map(f => f.path)).toEqual(['SKILL.md'])
   })
 })
 
@@ -224,9 +224,9 @@ describe('skillhub ~help / ~describe', () => {
       admin({ headers: { accept: 'application/json' } }),
     )
     expect(res.status).toBe(200)
-    const help = (await res.json()) as { node: { kind: string }; cmds: { name: string }[] }
+    const help = (await res.json()) as { cmds: { name: string }[], node: { kind: string } }
     expect(help.node.kind).toBe('skillhub')
-    const names = help.cmds.map((c) => c.name).sort()
+    const names = help.cmds.map(c => c.name).sort()
     expect(names).toEqual(['Get', 'List', 'Publish', 'Remove', 'Search'])
   })
 
@@ -234,7 +234,7 @@ describe('skillhub ~help / ~describe', () => {
     expect((await mountHub('hubtest/desc')).status).toBe(200)
     const res = await SELF.fetch('https://tb.test/hubtest/desc/~describe', admin())
     expect(res.status).toBe(200)
-    const d = (await res.json()) as { kind: string; capabilities: string[] }
+    const d = (await res.json()) as { capabilities: string[], kind: string }
     expect(d.kind).toBe('skillhub')
     expect(d.capabilities).toContain('search')
   })
@@ -246,7 +246,7 @@ describe('skillhub ~help / ~describe', () => {
       admin({ headers: { accept: 'application/json' } }),
     )
     const help = (await res.json()) as { cmds: { name: string }[] }
-    const names = help.cmds.map((c) => c.name)
+    const names = help.cmds.map(c => c.name)
     expect(names).not.toContain('Publish')
     expect(names).not.toContain('Remove')
     expect(names).toContain('List')

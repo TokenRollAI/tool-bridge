@@ -7,27 +7,27 @@
  * 装配点注入(deps.device / deps.assets)。
  */
 
-import { mkdirSync } from 'node:fs'
 import type * as http from 'node:http'
-import { join } from 'node:path'
-import { type ServerType, serve } from '@hono/node-server'
-import { SecretStoreImpl } from '@tool-bridge/core'
-import { runBootstrap } from '@tool-bridge/gateway/bootstrap'
 import { createTbApp, type TbAppDeps } from '@tool-bridge/gateway/tbApp'
-import pkg from '../package.json' with { type: 'json' }
-import { resolveUiAssets } from './assets'
+import { runBootstrap } from '@tool-bridge/gateway/bootstrap'
+import { serve, type ServerType } from '@hono/node-server'
+import { SecretStoreImpl } from '@tool-bridge/core'
+import { mkdirSync } from 'node:fs'
+import { join } from 'node:path'
 import type { ServerConfig } from './config'
-import { DeviceHub } from './deviceHub'
-import { createDataObjectStore } from './objects'
+import pkg from '../package.json' with { type: 'json' }
 import { SqliteStateStore } from './sqliteStateStore'
+import { createDataObjectStore } from './objects'
+import { resolveUiAssets } from './assets'
+import { DeviceHub } from './deviceHub'
 
 export interface TbServer {
   app: ReturnType<typeof createTbApp>
-  state: SqliteStateStore
+  close(): Promise<void>
   deviceHub: DeviceHub
   /** 引导(幂等)+ 孤儿设备回收排程 + 监听;返回实际端口(config.port=0 时由系统分配)。 */
   start(): Promise<{ port: number }>
-  close(): Promise<void>
+  state: SqliteStateStore
 }
 
 export function createTbServer(config: ServerConfig): TbServer {
@@ -74,7 +74,7 @@ export function createTbServer(config: ServerConfig): TbServer {
       await hub.close()
       if (server !== undefined) {
         await new Promise<void>((resolve, reject) => {
-          server?.close((err) => (err ? reject(err) : resolve()))
+          server?.close(err => (err ? reject(err) : resolve()))
         })
         server = undefined
       }

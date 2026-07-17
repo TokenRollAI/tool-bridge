@@ -27,7 +27,7 @@ const KIND_STYLE: Record<NodeKind, string> = {
 }
 
 /** kind → 图标 + 色相(与 KIND_STYLE 同一套色相编码;树导航与命令面板共用)。 */
-export const KIND_ICON: Record<NodeKind, { icon: LucideIcon; className: string }> = {
+export const KIND_ICON: Record<NodeKind, { className: string, icon: LucideIcon }> = {
   directory: { icon: Folder, className: 'text-muted-foreground/70' },
   builtin: { icon: Blocks, className: 'text-sky-400/80' },
   mcp: { icon: Plug, className: 'text-violet-400/80' },
@@ -39,7 +39,7 @@ export const KIND_ICON: Record<NodeKind, { icon: LucideIcon; className: string }
   tool: { icon: Wrench, className: 'text-rose-400/80' },
 }
 
-export function KindBadge({ kind, className }: { kind: NodeKind; className?: string }) {
+export function KindBadge({ kind, className }: { className?: string, kind: NodeKind }) {
   return (
     <span
       className={cn(
@@ -58,11 +58,11 @@ export function OnlineDot({ online }: { online: boolean | undefined }) {
   if (online === undefined) return null
   return (
     <span
-      title={online ? 'online' : 'offline'}
       className={cn(
         'inline-block size-1.5 shrink-0 rounded-full',
         online ? 'bg-ok shadow-[0_0_6px_var(--ok)]' : 'bg-muted-foreground/40',
       )}
+      title={online ? 'online' : 'offline'}
     />
   )
 }

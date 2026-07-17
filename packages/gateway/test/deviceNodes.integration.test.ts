@@ -5,14 +5,14 @@
  * 注册面手工伪造 device 转发标记 → 拒。
  */
 
-import { SELF } from 'cloudflare:test'
 import {
+  decodeDeviceFrame,
   type DeviceExpose,
   type DeviceFrame,
-  decodeDeviceFrame,
   encodeDeviceFrame,
 } from '@tool-bridge/core'
 import { describe, expect, it } from 'vitest'
+import { SELF } from 'cloudflare:test'
 import { TEST_ADMIN_SK } from './fixtures'
 
 const adminHeaders = { authorization: `Bearer ${TEST_ADMIN_SK}` }
@@ -27,7 +27,7 @@ async function postJson(path: string, body: unknown, init: RequestInit = {}): Pr
     ...init,
     headers: {
       'content-type': 'application/json',
-      accept: 'application/json',
+      'accept': 'application/json',
       ...(init.headers ?? {}),
     },
     body: JSON.stringify(body),
@@ -157,7 +157,7 @@ describe('expose.nodes 自定义节点转发', () => {
 
     // 设备断开 → 503 unavailable retryable(与 shell 口径一致)。
     ws.close(1000)
-    await new Promise((resolve) => setTimeout(resolve, 20))
+    await new Promise(resolve => setTimeout(resolve, 20))
     const offline = await postJson(
       `device/${deviceId}/tools/echo`,
       { tool: 'echo', arguments: { text: 'hi' } },

@@ -1,7 +1,7 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { resetFetch, setFetch } from '../src/http'
 import { parseError, runCli } from './cliHarness'
 
@@ -81,7 +81,7 @@ describe('tb sk create:--scope / --register-path 可重复', () => {
       ...gw,
     ])
     const body = requestBody(fn)
-    const args = body.arguments as { scopes: unknown[]; registerPaths: string[] }
+    const args = body.arguments as { registerPaths: string[], scopes: unknown[] }
     expect(args.scopes).toEqual([
       { pattern: 'a/**', actions: ['read'] },
       { pattern: 'b/**', actions: ['call'] },

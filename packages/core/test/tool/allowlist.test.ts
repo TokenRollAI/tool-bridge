@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import { isTBError } from '../../src/errors'
-import { MemoryStateStore } from '../../src/store'
 import { normalizeAllowHost, RemoteAllowlistStore } from '../../src/tool/allowlist'
+import { MemoryStateStore } from '../../src/store'
+import { isTBError } from '../../src/errors'
 
 const NOW = '2026-07-08T00:00:00.000Z'
 
@@ -52,8 +52,8 @@ describe('RemoteAllowlistStore', () => {
     await al.add('a.com', NOW)
     await al.add('a.com', '2026-07-09T00:00:00.000Z') // 幂等刷新
     const entries = await al.list()
-    expect(entries.map((e) => e.host)).toEqual(['a.com', 'b.com'])
-    expect(entries.find((e) => e.host === 'a.com')?.updatedAt).toBe('2026-07-09T00:00:00.000Z')
+    expect(entries.map(e => e.host)).toEqual(['a.com', 'b.com'])
+    expect(entries.find(e => e.host === 'a.com')?.updatedAt).toBe('2026-07-09T00:00:00.000Z')
     expect(await al.hosts()).toEqual(['a.com', 'b.com'])
   })
 
@@ -62,7 +62,7 @@ describe('RemoteAllowlistStore', () => {
     await al.remove('A.COM') // 规范化后匹配
     expect(await al.hosts()).toEqual([])
     await expect(al.remove('a.com')).rejects.toSatisfy(
-      (e) => isTBError(e) && e.code === 'not_found',
+      e => isTBError(e) && e.code === 'not_found',
     )
   })
 

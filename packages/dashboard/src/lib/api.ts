@@ -22,10 +22,10 @@ export interface Connection {
 }
 
 interface RequestOpts {
-  method?: 'GET' | 'POST' | 'DELETE'
-  body?: unknown
   /** Accept 头;缺省 application/json。 */
   accept?: string
+  body?: unknown
+  method?: 'GET' | 'POST' | 'DELETE'
   signal?: AbortSignal
 }
 
@@ -81,12 +81,12 @@ export async function getTree(conn: Connection, path: string, depth: number, sig
 
 export interface InvokeResult {
   contentType: string
-  /** 响应原文(json 时为 pretty 前的原始文本)。 */
-  text: string
   /** application/json 时的解析结果。 */
   json?: unknown
   /** 端到端耗时(fetch 发起到 body 读完)。 */
   ms: number
+  /** 响应原文(json 时为 pretty 前的原始文本)。 */
+  text: string
 }
 
 /**
@@ -130,16 +130,16 @@ export async function validateConnection(conn: Connection): Promise<void> {
 export async function startOAuthAuthorize(
   conn: Connection,
   path: string,
-): Promise<{ status: 'authorized' | 'redirect'; authorizationUrl?: string }> {
+): Promise<{ authorizationUrl?: string, status: 'authorized' | 'redirect' }> {
   const res = await request(conn, `/${path}/~authorize`, { method: 'POST' })
-  return (await res.json()) as { status: 'authorized' | 'redirect'; authorizationUrl?: string }
+  return (await res.json()) as { authorizationUrl?: string, status: 'authorized' | 'redirect' }
 }
 
 /** GET /healthz(免认证;tb status 同款)。 */
 export async function getHealthz(baseUrl: string) {
   const res = await fetch(`${baseUrl.replace(/\/+$/, '')}/healthz`)
   if (!res.ok) throw new ApiError('unavailable', res.status, `healthz HTTP ${res.status}`, true)
-  return (await res.json()) as { healthy: boolean; version: string }
+  return (await res.json()) as { healthy: boolean, version: string }
 }
 
 // --- ~feedback 保留段(per-path Agent 反馈,对等 `tb feedback`)---
@@ -171,11 +171,11 @@ export async function feedbackGet(
 export async function feedbackSubmit(
   conn: Connection,
   path: string,
-  input: { title: string; detail: string },
+  input: { detail: string, title: string },
 ) {
   return (await (
     await request(conn, `/${path}/~feedback`, { method: 'POST', body: input })
-  ).json()) as { id: string; path: string; title: string }
+  ).json()) as { id: string, path: string, title: string }
 }
 
 /** POST /<path>/~feedback/<id> → 投票(每身份一票,可改票)。 */

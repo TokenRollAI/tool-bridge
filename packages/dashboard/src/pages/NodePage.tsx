@@ -1,22 +1,22 @@
-import { useQueryClient } from '@tanstack/react-query'
 import { ArrowUpRight, GitBranch, Plus, TerminalSquare, Trash2 } from 'lucide-react'
-import { Fragment } from 'react'
-import Markdown from 'react-markdown'
 import { Link, useNavigate, useParams } from 'react-router'
+import { useQueryClient } from '@tanstack/react-query'
+import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import { Fragment } from 'react'
 import { toast } from 'sonner'
-import { ConfirmAction } from '@/components/ConfirmAction'
-import { KIND_ICON, KindBadge } from '@/components/KindBadge'
+import type { ApiError } from '@/lib/api'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { CommandWorkspace } from '@/components/node/CommandWorkspace'
+import { useHelp, useHelpMarkdown, useInvoke } from '@/lib/queries'
 import { ContextBrowser } from '@/components/node/ContextBrowser'
 import { FeedbackPanel } from '@/components/node/FeedbackPanel'
-import { NoteCard } from '@/components/node/NoteCard'
+import { KIND_ICON, KindBadge } from '@/components/KindBadge'
 import { SkillBrowser } from '@/components/node/SkillBrowser'
-import { Button } from '@/components/ui/button'
+import { ConfirmAction } from '@/components/ConfirmAction'
+import { NoteCard } from '@/components/node/NoteCard'
 import { Skeleton } from '@/components/ui/skeleton'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import type { ApiError } from '@/lib/api'
-import { useHelp, useHelpMarkdown, useInvoke } from '@/lib/queries'
+import { Button } from '@/components/ui/button'
 import { MountDialog } from './system/RegistryPage'
 
 /**
@@ -67,7 +67,10 @@ export function NodePage() {
         <Crumbs path={path} />
         <div className="mt-6 rounded-sm border border-destructive/40 bg-destructive/10 px-4 py-3">
           <p className="font-mono text-xs text-destructive-foreground/90">
-            {err.code} · HTTP {err.status}
+            {err.code}
+            {' '}
+            · HTTP
+            {err.status}
           </p>
           <p className="mt-1 text-sm">
             {err.status === 404 ? '节点不存在或当前 SK 无权可见(可见性即权限)' : err.message}
@@ -105,7 +108,7 @@ export function NodePage() {
                 <h1 className="min-w-0 truncate font-mono text-2xl tracking-tight sm:text-3xl">
                   {path === '' ? '/' : path.split('/').pop()}
                 </h1>
-                <KindBadge kind={node.kind} className="leading-5" />
+                <KindBadge className="leading-5" kind={node.kind} />
               </div>
               <p className="mt-1.5 max-w-3xl text-sm leading-6 text-muted-foreground sm:text-[15px]">
                 {node.description || '该节点没有提供说明。'}
@@ -114,7 +117,8 @@ export function NodePage() {
                 className="mt-2 max-w-full truncate font-mono text-[11px] text-muted-foreground/70"
                 title={path || '/'}
               >
-                node://{path || '/'}
+                node://
+                {path || '/'}
               </p>
             </div>
           </div>
@@ -128,28 +132,28 @@ export function NodePage() {
               <div className="flex flex-wrap gap-2 lg:justify-end">
                 {canMountChild && (
                   <MountDialog
-                    existingPaths={children?.map((c) => c.path) ?? []}
                     defaultPath={childDefaultPath}
-                    trigger={
+                    existingPaths={children?.map(c => c.path) ?? []}
+                    trigger={(
                       <Button size="sm" variant="outline">
                         <Plus />
                         挂载子节点
                       </Button>
-                    }
+                    )}
                   />
                 )}
                 {canUnmountSelf && (
                   <ConfirmAction
-                    title={`卸载 ${path}?`}
-                    description={<p>卸载后该子树不可见；空的中间目录将被回收。</p>}
                     actionLabel="卸载"
+                    description={<p>卸载后该子树不可见；空的中间目录将被回收。</p>}
                     onConfirm={unmountSelf}
-                    trigger={
+                    title={`卸载 ${path}?`}
+                    trigger={(
                       <Button size="sm" variant="outline">
                         <Trash2 className="text-destructive" />
                         卸载此节点
                       </Button>
-                    }
+                    )}
                   />
                 )}
               </div>
@@ -162,46 +166,51 @@ export function NodePage() {
       </section>
 
       {/* key=path:切换节点时重置 tab 选择(context / skillhub 节点默认落「浏览」) */}
-      <Tabs key={path} defaultValue={hasBrowser ? 'browse' : 'invoke'} className="mt-6 gap-0">
+      <Tabs className="mt-6 gap-0" defaultValue={hasBrowser ? 'browse' : 'invoke'} key={path}>
         <div className="-mx-1 overflow-x-auto border-b px-1">
-          <TabsList variant="line" className="h-11 min-w-max gap-5 p-0">
+          <TabsList className="h-11 min-w-max gap-5 p-0" variant="line">
             {hasBrowser && (
-              <TabsTrigger value="browse" className="px-0 text-xs">
+              <TabsTrigger className="px-0 text-xs" value="browse">
                 {isSkillhub ? '技能目录' : '条目'}
               </TabsTrigger>
             )}
-            <TabsTrigger value="invoke" className="px-0 text-xs">
+            <TabsTrigger className="px-0 text-xs" value="invoke">
               调用工作台
             </TabsTrigger>
             {path !== '' && (
-              <TabsTrigger value="feedback" className="px-0 text-xs">
-                反馈{feedback && feedback.length > 0 ? ` · ${feedback.length}` : ''}
+              <TabsTrigger className="px-0 text-xs" value="feedback">
+                反馈
+                {feedback && feedback.length > 0 ? ` · ${feedback.length}` : ''}
               </TabsTrigger>
             )}
-            <TabsTrigger value="markdown" className="px-0 text-xs">
+            <TabsTrigger className="px-0 text-xs" value="markdown">
               ~help 文档
             </TabsTrigger>
           </TabsList>
         </div>
 
         {hasBrowser && (
-          <TabsContent value="browse" className="mt-4">
-            {isSkillhub ? (
-              <SkillBrowser path={path} cmds={cmds} />
-            ) : (
-              <ContextBrowser path={path} cmds={cmds} />
-            )}
+          <TabsContent className="mt-4" value="browse">
+            {isSkillhub
+              ? (
+                  <SkillBrowser cmds={cmds} path={path} />
+                )
+              : (
+                  <ContextBrowser cmds={cmds} path={path} />
+                )}
           </TabsContent>
         )}
 
-        <TabsContent value="invoke" className="mt-5 grid gap-5">
+        <TabsContent className="mt-5 grid gap-5" value="invoke">
           {children && children.length > 0 && (
             <section className="rounded-xl border bg-card/35 p-3 sm:p-4">
               <div className="mb-3 flex items-center gap-2">
                 <GitBranch className="size-4 text-primary" />
                 <h2 className="text-sm font-medium">子节点</h2>
                 <span className="font-mono text-[10px] text-muted-foreground">
-                  {children.length} BRANCHES
+                  {children.length}
+                  {' '}
+                  BRANCHES
                 </span>
               </div>
               <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
@@ -214,13 +223,13 @@ export function NodePage() {
                 {children.map((ch) => {
                   const name = ch.path.split('/').pop() ?? ch.path
                   const target = path === '' ? ch.path : `${path}/${name}`
-                  const childIsSystem =
-                    ch.kind === 'builtin' || target === 'system' || target.startsWith('system/')
+                  const childIsSystem
+                    = ch.kind === 'builtin' || target === 'system' || target.startsWith('system/')
                   return (
-                    <div key={ch.path} className="group flex items-stretch gap-1">
+                    <div className="group flex items-stretch gap-1" key={ch.path}>
                       <Link
-                        to={`/nodes/${target}`}
                         className="flex min-w-0 flex-1 items-center gap-3 rounded-lg border bg-background/50 px-3 py-3 transition-colors hover:border-primary/35 hover:bg-secondary/45"
+                        to={`/nodes/${target}`}
                       >
                         <span className="min-w-0 flex-1">
                           <span className="flex items-center gap-2">
@@ -236,20 +245,20 @@ export function NodePage() {
                       {/* 卸载按钮置于 Link 之外,点击不会触发卡片跳转。 */}
                       {!childIsSystem && (
                         <ConfirmAction
-                          title={`卸载 ${target}?`}
-                          description={<p>卸载后该子树不可见；空的中间目录将被回收。</p>}
                           actionLabel="卸载"
+                          description={<p>卸载后该子树不可见；空的中间目录将被回收。</p>}
                           onConfirm={() => unmount(target)}
-                          trigger={
+                          title={`卸载 ${target}?`}
+                          trigger={(
                             <Button
-                              variant="ghost"
-                              size="icon-sm"
-                              className="self-center"
                               aria-label={`卸载 ${target}`}
+                              className="self-center"
+                              size="icon-sm"
+                              variant="ghost"
                             >
                               <Trash2 className="text-destructive" />
                             </Button>
-                          }
+                          )}
                         />
                       )}
                     </div>
@@ -261,10 +270,10 @@ export function NodePage() {
 
           {cmds.length > 0 ? (
             <CommandWorkspace
-              path={path}
               cmds={cmds}
               // mcp/http 节点级 ~help 是索引形态:仅为当前选中工具懒取 schema
               lazySchema={node.kind === 'mcp' || node.kind === 'http'}
+              path={path}
             />
           ) : (
             (children?.length ?? 0) === 0 && (
@@ -274,12 +283,12 @@ export function NodePage() {
         </TabsContent>
 
         {path !== '' && (
-          <TabsContent value="feedback" className="mt-4">
+          <TabsContent className="mt-4" value="feedback">
             <FeedbackPanel path={path} />
           </TabsContent>
         )}
 
-        <TabsContent value="markdown" className="mt-4">
+        <TabsContent className="mt-4" value="markdown">
           <HelpMarkdownView path={path} />
         </TabsContent>
       </Tabs>
@@ -326,8 +335,8 @@ function Crumbs({ path }: { path: string }) {
       className="flex min-w-0 flex-wrap items-center gap-1.5 font-mono text-[11px]"
     >
       <Link
-        to="/"
         className="rounded-md border bg-card/45 px-2 py-1 text-muted-foreground hover:border-primary/35 hover:text-foreground"
+        to="/"
       >
         ROOT
       </Link>
@@ -336,16 +345,18 @@ function Crumbs({ path }: { path: string }) {
         return (
           <Fragment key={prefix}>
             <span className="text-muted-foreground/35">/</span>
-            {i === segs.length - 1 ? (
-              <span className="rounded-md bg-primary/8 px-1.5 py-1 text-primary">{seg}</span>
-            ) : (
-              <Link
-                to={`/nodes/${prefix}`}
-                className="rounded-md px-1.5 py-1 text-muted-foreground hover:bg-secondary hover:text-foreground"
-              >
-                {seg}
-              </Link>
-            )}
+            {i === segs.length - 1
+              ? (
+                  <span className="rounded-md bg-primary/8 px-1.5 py-1 text-primary">{seg}</span>
+                )
+              : (
+                  <Link
+                    className="rounded-md px-1.5 py-1 text-muted-foreground hover:bg-secondary hover:text-foreground"
+                    to={`/nodes/${prefix}`}
+                  >
+                    {seg}
+                  </Link>
+                )}
           </Fragment>
         )
       })}

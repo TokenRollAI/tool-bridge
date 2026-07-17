@@ -8,15 +8,15 @@
 import type { ListOptions, Page, Timestamp, URI } from '../types'
 
 export interface ContextEntryMeta {
-  /** node://<namespace-path>/<entry-path>;目录条目以尾 '/' 表示。 */
-  uri: URI
   /** "text/markdown" | "application/json" | ... */
   contentType: string
+  metadata: Record<string, string>
   size?: number
+  updatedAt: Timestamp
+  /** node://<namespace-path>/<entry-path>;目录条目以尾 '/' 表示。 */
+  uri: URI
   /** 乐观并发:Update/Write 可携带 ifVersion;对象存储后端 = etag。 */
   version: string
-  updatedAt: Timestamp
-  metadata: Record<string, string>
 }
 
 export interface ContextEntry extends ContextEntryMeta {
@@ -25,19 +25,19 @@ export interface ContextEntry extends ContextEntryMeta {
 }
 
 export interface ContextEntryInput {
+  content: string | unknown
   /** 字符串 content 必填(缺失 → invalid_argument);非字符串 content 缺省 application/json。 */
   contentType?: string
-  content: string | unknown
-  metadata?: Record<string, string>
   /** 不匹配 → conflict。 */
   ifVersion?: string
+  metadata?: Record<string, string>
 }
 
 export interface ContextPatch {
   content?: string | unknown
+  ifVersion?: string
   /** 浅合并。 */
   metadata?: Record<string, string>
-  ifVersion?: string
 }
 
 export interface SearchOptions extends ListOptions {
@@ -47,16 +47,16 @@ export interface SearchOptions extends ListOptions {
 
 /** 四核心动词 + 可选能力。 */
 export interface ContextProvider {
-  /** 枚举条目(浅层列表 + 分页);path 为 namespace 内相对路径前缀。 */
-  List(path: string, opts?: ListOptions): Promise<Page<ContextEntryMeta>>
+  Delete?(path: string): Promise<void>
   /** 读取单个条目(含内容);不存在 → not_found。 */
   Get(path: string): Promise<ContextEntry>
+  /** 枚举条目(浅层列表 + 分页);path 为 namespace 内相对路径前缀。 */
+  List(path: string, opts?: ListOptions): Promise<Page<ContextEntryMeta>>
+  Search?(query: string, opts?: SearchOptions): Promise<Page<ContextEntryMeta>>
   /** 部分更新已存在条目的内容或 metadata;不存在 → not_found。 */
   Update(path: string, patch: ContextPatch): Promise<ContextEntryMeta>
-  /** 创建或整体替换条目(幂等 upsert)。 */
-  Write(path: string, entry: ContextEntryInput): Promise<ContextEntryMeta>
-  Search?(query: string, opts?: SearchOptions): Promise<Page<ContextEntryMeta>>
   /** 暂不实现(占位)。 */
   Watch?(path: string): Promise<{ watchId: string }>
-  Delete?(path: string): Promise<void>
+  /** 创建或整体替换条目(幂等 upsert)。 */
+  Write(path: string, entry: ContextEntryInput): Promise<ContextEntryMeta>
 }

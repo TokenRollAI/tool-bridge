@@ -31,13 +31,13 @@ export class KvStateStore implements StateStore {
 
   async list(
     prefix: string,
-    opts?: { cursor?: string; limit?: number },
-  ): Promise<{ items: Array<{ key: string; value: unknown }>; cursor?: string }> {
+    opts?: { cursor?: string, limit?: number },
+  ): Promise<{ cursor?: string, items: Array<{ key: string, value: unknown }> }> {
     const listOpts: KVNamespaceListOptions = { prefix }
     if (opts?.cursor !== undefined) listOpts.cursor = opts.cursor
     if (opts?.limit !== undefined) listOpts.limit = opts.limit
     const result = await this.kv.list(listOpts)
-    const items: Array<{ key: string; value: unknown }> = []
+    const items: Array<{ key: string, value: unknown }> = []
     for (const entry of result.keys) {
       const value = await this.kv.get(entry.name, 'json')
       // KV 最终一致:刚删除的 key 可能仍出现在 list 里而 get 已是 null——跳过,

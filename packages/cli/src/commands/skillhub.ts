@@ -1,11 +1,11 @@
 import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join, relative, sep } from 'node:path'
 import { Command } from 'commander'
-import { resolveTarget, withGlobalOpts } from '../args'
-import { CliError, callTool } from '../http'
-import { guard, printJson, printLine, table } from '../output'
-import { deleteNode, registerNode } from '../registry'
 import type { Node, NodeConfig, NodeInput, Page } from '../types'
+import { guard, printJson, printLine, table } from '../output'
+import { resolveTarget, withGlobalOpts } from '../args'
+import { deleteNode, registerNode } from '../registry'
+import { callTool, CliError } from '../http'
 
 /**
  * `tb skill *` —— skillhub 命令族(与 device 并列的一等 kind:Agent Skill 仓库)。
@@ -22,16 +22,16 @@ function hubUri(hub: string): string {
 }
 
 interface SkillSummary {
+  description: string
   id: string
   name: string
-  description: string
-  version?: string
   updatedAt?: string
+  version?: string
 }
 
 interface SkillFileMeta {
-  path: string
   contentType: string
+  path: string
   size?: number
   version: string
 }
@@ -46,8 +46,8 @@ interface SkillFile extends SkillFileMeta {
 }
 
 interface GlobalOpts {
-  json?: boolean
   baseUrl?: string
+  json?: boolean
   sk?: string
 }
 
@@ -67,14 +67,14 @@ function printSkills(page: Page<SkillSummary>): void {
     printLine('(no skills)')
     return
   }
-  const rows = items.map((s) => [s.id, s.name ?? '', s.description ?? ''])
+  const rows = items.map(s => [s.id, s.name ?? '', s.description ?? ''])
   printLine(table(['ID', 'NAME', 'DESCRIPTION'], rows))
   if (page.cursor) printLine(`next cursor: ${page.cursor}`)
 }
 
 /** 递归读取本地目录下的全部文本文件为发布负载(跳过 dotfile 与 node_modules)。 */
-function readSkillDir(dir: string): { path: string; content: string }[] {
-  const out: { path: string; content: string }[] = []
+function readSkillDir(dir: string): { content: string, path: string }[] {
+  const out: { content: string, path: string }[] = []
   const readEntries = (cur: string) => {
     try {
       return readdirSync(cur, { withFileTypes: true })
@@ -114,7 +114,7 @@ export function skillLsCommand(): Command {
     .argument('<hub>', 'Skillhub tree path')
     .option('--limit <n>', 'Page size')
     .option('--cursor <cursor>', 'Page cursor from previous call')
-    .action(async (hubArg: string, opts: GlobalOpts & { limit?: string; cursor?: string }) => {
+    .action(async (hubArg: string, opts: GlobalOpts & { cursor?: string, limit?: string }) => {
       const asJson = Boolean(opts.json)
       await guard(asJson, async () => {
         const hub = String(hubArg ?? '').trim()
@@ -141,7 +141,7 @@ export function skillGetCommand(): Command {
     .option('--file <path>', 'Fetch one bundled file instead of the manifest')
     .option('--out <dir>', 'Download the whole skill into this local directory')
     .action(
-      async (hubArg: string, idArg: string, opts: GlobalOpts & { file?: string; out?: string }) => {
+      async (hubArg: string, idArg: string, opts: GlobalOpts & { file?: string, out?: string }) => {
         const asJson = Boolean(opts.json)
         await guard(asJson, async () => {
           const hub = String(hubArg ?? '').trim()
@@ -205,7 +205,7 @@ export function skillGetCommand(): Command {
           }
           printLine(detail.content.replace(/\n$/, ''))
           if (detail.files.length > 0) {
-            process.stderr.write(`\nfiles: ${detail.files.map((f) => f.path).join(', ')}\n`)
+            process.stderr.write(`\nfiles: ${detail.files.map(f => f.path).join(', ')}\n`)
           }
         })
       },
@@ -259,10 +259,10 @@ export function skillPublishCommand(): Command {
         const dir = String(dirArg ?? '').trim()
         if (!dir) throw new CliError('skill directory is required')
         const files = readSkillDir(dir)
-        if (!files.some((f) => f.path === SKILL_DOC)) {
+        if (!files.some(f => f.path === SKILL_DOC)) {
           throw new CliError(`directory "${dir}" has no ${SKILL_DOC} at its root`)
         }
-        const result = await callTool<{ id: string; name: string; fileCount: number }>(
+        const result = await callTool<{ fileCount: number, id: string, name: string }>(
           resolveTarget(opts),
           hubUri(hub),
           'Publish',
@@ -315,15 +315,15 @@ export function skillMountCommand(): Command {
       async (
         pathArg: string,
         opts: GlobalOpts & {
-          provider?: string
-          description?: string
           authRef?: string
-          readOnly?: boolean
-          ttl?: string
-          prefix?: string
-          endpoint?: string
           bucket?: string
+          description?: string
+          endpoint?: string
+          prefix?: string
+          provider?: string
+          readOnly?: boolean
           region?: string
+          ttl?: string
         },
       ) => {
         const asJson = Boolean(opts.json)

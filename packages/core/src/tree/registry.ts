@@ -9,8 +9,6 @@
  * 最长前缀 resolve、按段前缀 list。
  */
 
-import { TBError } from '../errors'
-import { KEY_NODE, type StateStore } from '../store'
 import {
   LIST_LIMIT_DEFAULT,
   LIST_LIMIT_MAX,
@@ -23,6 +21,8 @@ import {
   type TreePath,
 } from '../types'
 import { isPrefixOf, normalizePath, parentPaths, segments, validatePath } from './path'
+import { KEY_NODE, type StateStore } from '../store'
+import { TBError } from '../errors'
 
 /** limit 钳制:缺省 50、上限 200 静默钳制、非正数回落默认。 */
 function clampLimit(limit?: number): number {
@@ -113,9 +113,9 @@ export class NodeRegistryStore {
   async list(prefix?: TreePath, opts?: ListOptions): Promise<Page<TreeNode>> {
     const normPrefix = prefix === undefined ? '' : normalizePath(prefix)
     const limit = clampLimit(opts?.limit)
-    const all = (await this.scanAll()).filter((n) => isPrefixOf(normPrefix, n.path)).sort(byPath)
+    const all = (await this.scanAll()).filter(n => isPrefixOf(normPrefix, n.path)).sort(byPath)
     const cursor = opts?.cursor
-    const start = cursor ? all.findIndex((n) => n.path === cursor) + 1 : 0
+    const start = cursor ? all.findIndex(n => n.path === cursor) + 1 : 0
     const items = all.slice(start, start + limit)
     const hasMore = start + limit < all.length
     return {
@@ -129,7 +129,7 @@ export class NodeRegistryStore {
     const norm = normalizePath(path)
     const depth = segments(norm).length
     const sub = await this.scanPrefix(this.subtreePrefix(norm))
-    return sub.filter((n) => segments(n.path).length === depth + 1).sort(byPath)
+    return sub.filter(n => segments(n.path).length === depth + 1).sort(byPath)
   }
 
   /**
@@ -276,7 +276,7 @@ export class NodeRegistryStore {
    * 最长前缀匹配:返回命中节点与剩余段('/' 连接)。
    * 完全匹配 → rest=''。无任何匹配 → not_found。
    */
-  async resolve(path: TreePath): Promise<{ node: TreeNode; rest: string }> {
+  async resolve(path: TreePath): Promise<{ node: TreeNode, rest: string }> {
     const norm = normalizePath(path)
     const candidates = [norm, ...parentPaths(norm).reverse()]
     for (const cand of candidates) {

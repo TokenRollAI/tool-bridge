@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { isTBError } from '../../src/errors'
-import { authHeaderFor, buildHttpRequest, effectFor } from '../../src/tool/httpTool'
 import type { HttpToolDef } from '../../src/types'
+import { authHeaderFor, buildHttpRequest, effectFor } from '../../src/tool/httpTool'
+import { isTBError } from '../../src/errors'
 
 const endpoint = 'https://api.example.com'
 

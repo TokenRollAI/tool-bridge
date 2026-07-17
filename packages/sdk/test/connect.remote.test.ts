@@ -68,7 +68,7 @@ describeRemote('SDK connect 全链路(生产网关,opt-in)', () => {
       const help = await remote(`${nodePath}/~help`)
       expect(help.status).toBe(200)
       const model = (await help.json()) as { cmds: Array<{ name: string }> }
-      expect(model.cmds.map((c) => c.name)).toContain('echo')
+      expect(model.cmds.map(c => c.name)).toContain('echo')
 
       // 经远程 HTTP 调用 → HTTP→WS 帧转发 → 本地函数结果回传。
       const call = await remote(nodePath, {

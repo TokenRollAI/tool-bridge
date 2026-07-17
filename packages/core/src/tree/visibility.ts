@@ -20,5 +20,5 @@ export type ScopeChecker = (scopes: Scope[], path: TreePath, action: Action) => 
 
 /** 剔除对 (node.path,'read') 判定不过的节点。 */
 export function filterVisible(nodes: TreeNode[], scopes: Scope[], check: ScopeChecker): TreeNode[] {
-  return nodes.filter((node) => check(scopes, node.path, 'read'))
+  return nodes.filter(node => check(scopes, node.path, 'read'))
 }

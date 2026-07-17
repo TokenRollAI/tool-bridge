@@ -33,14 +33,14 @@ export interface RemoteConfig {
 
 /** remote 透传的部署配置(宿主解析后注入)。 */
 export interface RemoteSettings {
-  /** baseUrl 的 host 后缀白名单;空数组 = 拒一切 remote。 */
-  allowlist: string[]
-  /** X-TB-Via 跳数上限(缺省 4,由宿主适配层落默认)。 */
-  maxHops: number
-  /** 本实例 X-TB-Via 标识;缺省用**入站请求 host** 派生(跨实例联邦须显式配置才能可靠去环)。 */
-  instanceId?: string
   /** 放行 http:// 上游(仅本地开发)。 */
   allowInsecure: boolean
+  /** baseUrl 的 host 后缀白名单;空数组 = 拒一切 remote。 */
+  allowlist: string[]
+  /** 本实例 X-TB-Via 标识;缺省用**入站请求 host** 派生(跨实例联邦须显式配置才能可靠去环)。 */
+  instanceId?: string
+  /** X-TB-Via 跳数上限(缺省 4,由宿主适配层落默认)。 */
+  maxHops: number
 }
 
 /** 本实例的 X-TB-Via 标识:显式配置优先;缺省用入站请求 host 派生(已知局限)。 */
@@ -69,15 +69,15 @@ export function assertRemoteAllowed(baseUrl: string, settings: RemoteSettings): 
  * `nodePath` 是 remote 节点挂载前缀。本地 Auth 已在调用点判定,这里只做透传与环检测。
  */
 export async function passthroughRemote(opts: {
+  body?: string
   config: RemoteConfig
+  headers: Headers
+  method: string
   nodePath: TreePath
   requestPath: TreePath
-  method: string
-  body?: string
-  headers: Headers
+  requestUrl: string
   secrets: SecretStoreImpl
   settings: RemoteSettings
-  requestUrl: string
 }): Promise<Response> {
   const secErr = assertSecureUrl(opts.config.baseUrl, opts.settings.allowInsecure)
   if (secErr) throw secErr

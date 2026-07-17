@@ -14,14 +14,14 @@
 
 import { TBError } from '@tool-bridge/core'
 
-export const DEFAULT_AUTH_URL =
-  'https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal'
+export const DEFAULT_AUTH_URL
+  = 'https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal'
 
 const REFRESH_MARGIN_MS = 5 * 60_000
 
 interface CachedTat {
-  token: string
   expiresAtMs: number
+  token: string
 }
 
 const cache = new Map<string, CachedTat>()
@@ -40,9 +40,9 @@ export interface TatConfig {
 
 interface TatResponse {
   code?: number
+  expire?: number
   msg?: string
   tenant_access_token?: string
-  expire?: number
 }
 
 /** 取可用 TAT:该 app_id 的缓存余量充足直接返回,否则换发并回填。 */
@@ -67,10 +67,10 @@ export async function tenantAccessToken(cfg: TatConfig, force = false): Promise<
   }
   const body = (await resp.json().catch(() => null)) as TatResponse | null
   if (
-    !resp.ok ||
-    body === null ||
-    body.code !== 0 ||
-    typeof body.tenant_access_token !== 'string'
+    !resp.ok
+    || body === null
+    || body.code !== 0
+    || typeof body.tenant_access_token !== 'string'
   ) {
     throw new TBError(
       'unavailable',

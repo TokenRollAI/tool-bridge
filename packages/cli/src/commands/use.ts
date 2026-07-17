@@ -1,7 +1,7 @@
 import { Command } from 'commander'
+import { guard, printJson, printLine } from '../output'
 import { readConfig, writeConfig } from '../config'
 import { CliError } from '../http'
-import { guard, printJson, printLine } from '../output'
 
 /**
  * `tb use <profile>` —— 切换当前 profile(纯本地;多 server 配置切换,Arch:215)。

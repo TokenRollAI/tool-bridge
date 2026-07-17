@@ -21,10 +21,10 @@ export function CliHint({
   args,
   direct = false,
 }: {
-  path: string
-  tool: string
   args: unknown
   direct?: boolean
+  path: string
+  tool: string
 }) {
   const [open, setOpen] = useState(false)
   const { active } = useSession()
@@ -45,12 +45,12 @@ export function CliHint({
   return (
     <div className="mt-4 min-w-0 max-w-full rounded-lg border border-dashed bg-background/20 px-3 py-2.5">
       <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
         className={cn(
           'inline-flex w-full items-center gap-1.5 text-left font-mono text-[11px] text-muted-foreground/75',
           'hover:text-foreground',
         )}
+        onClick={() => setOpen(v => !v)}
+        type="button"
       >
         <SquareTerminal className="size-3" />
         等价 CLI / curl
@@ -63,8 +63,8 @@ export function CliHint({
             { label: 'curl', cmd: curl },
           ].map(({ label, cmd }) => (
             <div
-              key={label}
               className="grid min-w-0 max-w-full grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-1 rounded-lg border bg-background/60 sm:gap-1.5"
+              key={label}
             >
               <span className="shrink-0 border-r px-2 py-1.5 font-mono text-[10px] text-primary/80">
                 {label}
@@ -72,7 +72,7 @@ export function CliHint({
               <pre className="min-w-0 max-w-full self-center overflow-x-auto px-1 py-1.5 font-mono text-[11px] leading-relaxed whitespace-pre-wrap break-all">
                 {cmd}
               </pre>
-              <CopyButton value={cmd} className="m-1 shrink-0" />
+              <CopyButton className="m-1 shrink-0" value={cmd} />
             </div>
           ))}
         </div>

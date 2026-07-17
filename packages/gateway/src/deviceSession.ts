@@ -1,11 +1,10 @@
-import { DurableObject } from 'cloudflare:workers'
 import {
+  decodeDeviceFrame,
   type DeviceCallRequest,
   type DeviceCallResult,
   type DeviceExpose,
   type DeviceFrame,
   DeviceGatewaySession,
-  decodeDeviceFrame,
   encodeDeviceFrame,
   NodeRegistryStore,
   PING_FRAME_JSON,
@@ -14,31 +13,32 @@ import {
   TBError,
   type TreePath,
 } from '@tool-bridge/core'
-import { ensureBootstrapped } from './bootstrap'
+import { DurableObject } from 'cloudflare:workers'
 import { assertDeviceId, processDeviceHello } from './deviceHello'
+import { ensureBootstrapped } from './bootstrap'
 import { KvStateStore } from './kvStateStore'
 
 interface DeviceSessionEnv {
-  TB_KV: KVNamespace
   TB_BOOTSTRAP_ADMIN_SK?: string
-  TB_SECRET_ENCRYPTION_KEY?: string
   TB_DEVICE_RECLAIM_SEC?: string
+  TB_KV: KVNamespace
+  TB_SECRET_ENCRYPTION_KEY?: string
 }
 
 interface SocketAttachment {
+  authorization?: string
   connId: string
   deviceIdHint: string
-  authorization?: string
 }
 
 interface DeviceMeta {
-  deviceId: string
-  mountPath: TreePath
-  keyId: string
-  expose: DeviceExpose
   activeConnId?: string
   connectedAt?: string
+  deviceId: string
   disconnectedAt?: string
+  expose: DeviceExpose
+  keyId: string
+  mountPath: TreePath
 }
 
 const META_KEY = 'meta'
@@ -68,10 +68,10 @@ function resultKey(id: string): string {
 
 function isSocketAttachment(value: unknown): value is SocketAttachment {
   return (
-    typeof value === 'object' &&
-    value !== null &&
-    typeof (value as { connId?: unknown }).connId === 'string' &&
-    typeof (value as { deviceIdHint?: unknown }).deviceIdHint === 'string'
+    typeof value === 'object'
+    && value !== null
+    && typeof (value as { connId?: unknown }).connId === 'string'
+    && typeof (value as { deviceIdHint?: unknown }).deviceIdHint === 'string'
   )
 }
 
@@ -89,12 +89,12 @@ function invokeRequestFromBody(body: unknown): DeviceCallRequest {
   }
   const b = body as Record<string, unknown>
   if (
-    typeof b.id !== 'string' ||
-    typeof b.path !== 'string' ||
-    typeof b.tool !== 'string' ||
-    typeof b.arguments !== 'object' ||
-    b.arguments === null ||
-    Array.isArray(b.arguments)
+    typeof b.id !== 'string'
+    || typeof b.path !== 'string'
+    || typeof b.tool !== 'string'
+    || typeof b.arguments !== 'object'
+    || b.arguments === null
+    || Array.isArray(b.arguments)
   ) {
     throw new TBError('invalid_argument', 'device invoke body must be {id,path,tool,arguments}')
   }
@@ -140,8 +140,8 @@ export class DeviceSession extends DurableObject<DeviceSessionEnv> {
     const session = await this.sessionFor(ws)
     let frame: DeviceFrame
     try {
-      const text =
-        typeof message === 'string' ? message : new TextDecoder().decode(new Uint8Array(message))
+      const text
+        = typeof message === 'string' ? message : new TextDecoder().decode(new Uint8Array(message))
       frame = decodeDeviceFrame(text)
     } catch (err) {
       session.reject(err instanceof TBError ? err : new TBError('invalid_argument', '非法帧'))
@@ -161,9 +161,9 @@ export class DeviceSession extends DurableObject<DeviceSessionEnv> {
   override async alarm(): Promise<void> {
     const meta = await this.ctx.storage.get<DeviceMeta>(META_KEY)
     if (
-      meta === undefined ||
-      meta.activeConnId !== undefined ||
-      meta.disconnectedAt === undefined
+      meta === undefined
+      || meta.activeConnId !== undefined
+      || meta.disconnectedAt === undefined
     ) {
       return
     }
@@ -227,8 +227,8 @@ export class DeviceSession extends DurableObject<DeviceSessionEnv> {
   private createSession(ws: WebSocket): DeviceGatewaySession {
     const session = new DeviceGatewaySession(
       {
-        send: (frame) => ws.send(encodeDeviceFrame(frame)),
-        close: (code) => ws.close(code),
+        send: frame => ws.send(encodeDeviceFrame(frame)),
+        close: code => ws.close(code),
         onHello: (hello) => {
           this.ctx.waitUntil(
             this.acceptHello(ws, session, hello).catch((err) => {
@@ -254,7 +254,7 @@ export class DeviceSession extends DurableObject<DeviceSessionEnv> {
   private async acceptHello(
     ws: WebSocket,
     session: DeviceGatewaySession,
-    hello: { deviceId: string; mountPath?: TreePath; expose: DeviceExpose },
+    hello: { deviceId: string, expose: DeviceExpose, mountPath?: TreePath },
   ): Promise<void> {
     const attachment = attachmentOf(ws)
     const store = new KvStateStore(this.env.TB_KV)
@@ -336,7 +336,7 @@ export class DeviceSession extends DurableObject<DeviceSessionEnv> {
       return { ok: false, error: TBError.deviceOffline().toJSON() }
     }
     const session = await this.sessionFor(ws)
-    return await new Promise<DeviceCallResult>((resolve) => session.call(req, resolve))
+    return await new Promise<DeviceCallResult>(resolve => session.call(req, resolve))
   }
 
   private async activeSocket(): Promise<WebSocket | null> {

@@ -1,4 +1,3 @@
-import { SELF } from 'cloudflare:test'
 import {
   base64urlDecode,
   type CallContext,
@@ -6,6 +5,7 @@ import {
   parseHelpDsl,
 } from '@tool-bridge/core'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { SELF } from 'cloudflare:test'
 import { TEST_ADMIN_SK } from './fixtures'
 
 // Plugin 面集成测试:system/plugin 注册全流程、envelope 挂载消费、
@@ -23,7 +23,7 @@ async function postJson(path: string, body: unknown, init: RequestInit = {}): Pr
     ...init,
     headers: {
       'content-type': 'application/json',
-      accept: 'application/json',
+      'accept': 'application/json',
       ...(init.headers ?? {}),
     },
     body: JSON.stringify(body),
@@ -52,20 +52,20 @@ function manifest(id: string, overrides: Record<string, unknown> = {}): Record<s
 }
 
 const CONTEXT_HELP = {
-  cmds: ['List', 'Get', 'Update', 'Write', 'Search'].map((name) => ({ name })),
+  cmds: ['List', 'Get', 'Update', 'Write', 'Search'].map(name => ({ name })),
 }
 const CONTEXT_DESCRIBE = {
   kind: 'context-provider',
   interfaceVersion: 'context-provider/v1',
   capabilities: ['search'],
 }
-const TOOL_HELP = { cmds: ['List', 'Get', 'Call'].map((name) => ({ name })) }
+const TOOL_HELP = { cmds: ['List', 'Get', 'Call'].map(name => ({ name })) }
 const TOOL_DESCRIBE = { kind: 'tool-provider', interfaceVersion: 'tool-provider/v1' }
 
 interface SeenEnvelope {
-  url: string
+  body: { arguments: Record<string, unknown>, tool: string }
   headers: Headers
-  body: { tool: string; arguments: Record<string, unknown> }
+  url: string
 }
 
 /**
@@ -73,8 +73,8 @@ interface SeenEnvelope {
  * opts.invoke(缺省 501),并把每次 envelope 请求记入 seen。
  */
 function stubProvider(opts: {
-  healthy?: unknown
   describe?: unknown
+  healthy?: unknown
   help?: unknown
   invoke?: (seen: SeenEnvelope, n: number) => Response
 }): { seen: SeenEnvelope[] } {
@@ -147,7 +147,7 @@ describe('system/plugin 注册全流程', () => {
     const list = await postJson('system/plugin', { tool: 'list', arguments: {} }, admin())
     expect(list.status).toBe(200)
     const page = (await list.json()) as { items: Array<Record<string, unknown>> }
-    const item = page.items.find((p) => p.id === 'feishu-docs')
+    const item = page.items.find(p => p.id === 'feishu-docs')
     expect(item).toBeDefined()
     expect(item).not.toHaveProperty('pluginToken')
     expect(item).not.toHaveProperty('tokenSkId')
@@ -182,7 +182,7 @@ describe('system/plugin 注册全流程', () => {
       admin(),
     )
     expect(res.status).toBe(400)
-    const body = (await res.json()) as { code: string; message: string }
+    const body = (await res.json()) as { code: string, message: string }
     expect(body.code).toBe('invalid_argument')
     expect(body.message).toContain('Update')
   })
@@ -197,7 +197,7 @@ describe('system/plugin 注册全流程', () => {
       admin(),
     )
     expect(up.status).toBe(200)
-    const upBody = (await up.json()) as { id: string; healthy: boolean; checkedAt: string }
+    const upBody = (await up.json()) as { checkedAt: string, healthy: boolean, id: string }
     expect(upBody.id).toBe('health-plugin')
     expect(upBody.healthy).toBe(true)
     expect(typeof upBody.checkedAt).toBe('string')
@@ -243,8 +243,8 @@ describe('system/plugin 注册全流程', () => {
       admin({ headers: { accept: 'application/json' } }),
     )
     expect(res.status).toBe(200)
-    const json = (await res.json()) as { cmds: Array<{ name: string; scope: string }> }
-    expect(json.cmds.map((c) => c.name).sort()).toEqual([
+    const json = (await res.json()) as { cmds: Array<{ name: string, scope: string }> }
+    expect(json.cmds.map(c => c.name).sort()).toEqual([
       'delete',
       'get',
       'health',
@@ -252,7 +252,7 @@ describe('system/plugin 注册全流程', () => {
       'update',
       'write',
     ])
-    expect(json.cmds.every((c) => c.scope === 'admin')).toBe(true)
+    expect(json.cmds.every(c => c.scope === 'admin')).toBe(true)
   })
 })
 
@@ -345,7 +345,7 @@ describe('plugin-backed context 挂载消费(envelope)', () => {
     expect(decoded.traceId).toBeTruthy()
     expect(first.headers.get('x-tb-request-id')).toBeTruthy()
     // 每次逻辑调用 Request-Id 唯一。
-    const ids = seen.map((s) => s.headers.get('x-tb-request-id'))
+    const ids = seen.map(s => s.headers.get('x-tb-request-id'))
     expect(new Set(ids).size).toBe(ids.length)
   })
 
@@ -369,7 +369,7 @@ describe('plugin-backed context 挂载消费(envelope)', () => {
 
     expect(seen.length).toBe(2)
     const contexts = seen.map(
-      (s) => decodeCallContext(s.headers.get('x-tb-context') as string) as CallContext,
+      s => decodeCallContext(s.headers.get('x-tb-context') as string) as CallContext,
     )
     expect(contexts[0]?.mountPath).toBe('docs/feishu-cn')
     expect(contexts[0]?.mountConfig).toEqual({ space: 'cn' })
@@ -405,7 +405,7 @@ describe('plugin-backed context 挂载消费(envelope)', () => {
     )
     expect(help.status).toBe(200)
     const names = parseHelpDsl(await help.text())
-      .cmds.map((c) => c.name)
+      .cmds.map(c => c.name)
       .sort()
     expect(names).toEqual(['Get', 'List', 'Search', 'Update', 'Write'])
   })
@@ -468,7 +468,7 @@ describe('plugin-backed context 挂载消费(envelope)', () => {
   })
 })
 
-describe("kind:'tool' 挂载消费(tool-provider plugin)", () => {
+describe('kind:\'tool\' 挂载消费(tool-provider plugin)', () => {
   const TOOLS = [
     { name: 'create_order', description: '下单', effect: 'write' },
     { name: 'get_order', description: '查单', effect: 'read' },
@@ -526,7 +526,7 @@ describe("kind:'tool' 挂载消费(tool-provider plugin)", () => {
       admin({ headers: { accept: 'text/plain' } }),
     )
     expect(help.status).toBe(200)
-    const names = parseHelpDsl(await help.text()).cmds.map((c) => c.name)
+    const names = parseHelpDsl(await help.text()).cmds.map(c => c.name)
     expect(names.sort()).toEqual(['create_order', 'get_order'])
 
     const call = await postJson(
@@ -538,7 +538,7 @@ describe("kind:'tool' 挂载消费(tool-provider plugin)", () => {
     expect(((await call.json()) as { echo: { args: { sku: string } } }).echo.args.sku).toBe('A1')
 
     // envelope 的 tool 是方法名(List/Call),工具名在 arguments.name。
-    const callEnvelope = seen.find((s) => s.body.tool === 'Call') as SeenEnvelope
+    const callEnvelope = seen.find(s => s.body.tool === 'Call') as SeenEnvelope
     expect(callEnvelope.body.arguments).toEqual({ name: 'create_order', args: { sku: 'A1' } })
     // kind:'tool' 挂载同样带挂载上下文。
     const callCtx = decodeCallContext(
@@ -589,7 +589,7 @@ describe("kind:'tool' 挂载消费(tool-provider plugin)", () => {
     )
     expect(call.status).toBe(200)
     // List(取工具表)与 Call 都须带平台代解析的凭证头,且值为 base64url(secret 明文)。
-    const withAuth = seen.filter((s) => s.headers.get('x-tb-upstream-auth') !== null)
+    const withAuth = seen.filter(s => s.headers.get('x-tb-upstream-auth') !== null)
     expect(withAuth.length).toBe(seen.length)
     expect(seen.length).toBeGreaterThan(0)
     const decoded = new TextDecoder().decode(
@@ -606,6 +606,6 @@ describe("kind:'tool' 挂载消费(tool-provider plugin)", () => {
       admin(),
     )
     expect(plainCall.status).toBe(200)
-    expect(seen.every((s) => s.headers.get('x-tb-upstream-auth') === null)).toBe(true)
+    expect(seen.every(s => s.headers.get('x-tb-upstream-auth') === null)).toBe(true)
   })
 })

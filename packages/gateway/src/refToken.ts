@@ -11,9 +11,9 @@ import { base64urlDecode, base64urlEncode } from '@tool-bridge/core'
 
 /** token 载荷:p = context 节点树路径,k = 底层对象 key,exp = 过期时刻(epoch 秒)。 */
 export interface RefTokenPayload {
-  p: string
-  k: string
   exp: number
+  k: string
+  p: string
 }
 
 async function hmacKey(secret: string): Promise<CryptoKey> {
@@ -61,9 +61,9 @@ export async function verifyRefToken(
   try {
     const payload = JSON.parse(new TextDecoder().decode(base64urlDecode(body))) as RefTokenPayload
     if (
-      typeof payload.p !== 'string' ||
-      typeof payload.k !== 'string' ||
-      typeof payload.exp !== 'number'
+      typeof payload.p !== 'string'
+      || typeof payload.k !== 'string'
+      || typeof payload.exp !== 'number'
     ) {
       return null
     }

@@ -1,16 +1,16 @@
 import { Command } from 'commander'
+import type { HelpJson } from '../types'
 import { resolveTarget, withGlobalOpts } from '../args'
+import { guard, printJson, printLine } from '../output'
 import { apiJson, apiText, CliError } from '../http'
 import { printMarkdown } from '../markdown'
-import { guard, printJson, printLine } from '../output'
 import { nodePath } from '../paths'
-import type { HelpJson } from '../types'
 
 interface HelpOpts {
+  baseUrl?: string
+  dsl?: boolean
   json?: boolean
   md?: boolean
-  dsl?: boolean
-  baseUrl?: string
   sk?: string
 }
 

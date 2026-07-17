@@ -1,55 +1,55 @@
 import { SecretStoreImpl, type StateStore } from '@tool-bridge/core'
 import { Hono } from 'hono'
+import type { RemoteSettings } from './providers/remote'
+import type { DeviceSession } from './deviceSession'
+import { createR2ObjectStore, type R2PresignCredentials } from './providers/r2Object'
+import { createTbApp, parseS3Credentials, type TbAppDeps } from './tbApp'
 import pkg from '../package.json' with { type: 'json' }
 import { ensureBootstrapped } from './bootstrap'
-import type { DeviceSession } from './deviceSession'
 import { KvStateStore } from './kvStateStore'
-import { createR2ObjectStore, type R2PresignCredentials } from './providers/r2Object'
-import type { RemoteSettings } from './providers/remote'
-import { createTbApp, parseS3Credentials, type TbAppDeps } from './tbApp'
 
 /**
  * Workers 运行时绑定。KV/R2 名称从 TB_NAME_PREFIX 派生(wrangler.jsonc)。
  * TB_SECRET_ENCRYPTION_KEY / TB_BOOTSTRAP_ADMIN_SK 经 wrangler secret 或 .dev.vars 注入。
  */
 export interface Env {
-  TB_KV: KVNamespace
-  TB_R2: R2Bucket
-  TB_SECRET_ENCRYPTION_KEY?: string
-  TB_BOOTSTRAP_ADMIN_SK?: string
+  /** Dashboard 静态资源(Workers Static Assets;本地测试/未部署 UI 时可缺省)。 */
+  ASSETS?: Fetcher
   /** 放行 http:// 上游(仅本地开发)。 */
   TB_ALLOW_INSECURE_HTTP?: string
-  /** remote baseUrl 的 host 后缀白名单(逗号分隔;空 = 拒一切 remote)。 */
-  TB_REMOTE_ALLOWLIST?: string
-  /** X-TB-Via 跳数上限(默认 4)。 */
-  TB_MAX_HOPS?: string
+  TB_BOOTSTRAP_ADMIN_SK?: string
+  /** DeviceSession Durable Object(设备 WS hibernation)。 */
+  TB_DEVICE: DurableObjectNamespace<DeviceSession>
+  /** 设备断线后未重连的回收秒数(缺省 24h)。 */
+  TB_DEVICE_RECLAIM_SEC?: string
   /** 本实例 X-TB-Via 标识(缺省用入站 host 派生)。 */
   TB_INSTANCE_ID?: string
-  /** mcp 工具缓存 TTL 秒(默认 300)。 */
-  TB_TOOL_CACHE_TTL?: string
-  /** r2 presign 的 S3 兼容端点(https://<account>.r2.cloudflarestorage.com)与 bucket。 */
-  TB_R2_S3_ENDPOINT?: string
-  TB_R2_BUCKET?: string
+  TB_KV: KVNamespace
+  /** X-TB-Via 跳数上限(默认 4)。 */
+  TB_MAX_HOPS?: string
+  TB_R2: R2Bucket
   /** r2 presign 凭证链的 env 段(SecretStore 'r2-presign' 优先)。 */
   TB_R2_ACCESS_KEY_ID?: string
+  TB_R2_BUCKET?: string
+  /** r2 presign 的 S3 兼容端点(https://<account>.r2.cloudflarestorage.com)与 bucket。 */
+  TB_R2_S3_ENDPOINT?: string
   TB_R2_SECRET_ACCESS_KEY?: string
   /** context Get 的 $ref 内联阈值(字节,缺省 1 MiB)。 */
   TB_REF_THRESHOLD_BYTES?: string
   /** $ref URL(presign 与 /~ref 中转)有效期秒(缺省 900)。 */
   TB_REF_TTL_SEC?: string
-  /** DeviceSession Durable Object(设备 WS hibernation)。 */
-  TB_DEVICE: DurableObjectNamespace<DeviceSession>
-  /** Dashboard 静态资源(Workers Static Assets;本地测试/未部署 UI 时可缺省)。 */
-  ASSETS?: Fetcher
-  /** 设备断线后未重连的回收秒数(缺省 24h)。 */
-  TB_DEVICE_RECLAIM_SEC?: string
+  /** remote baseUrl 的 host 后缀白名单(逗号分隔;空 = 拒一切 remote)。 */
+  TB_REMOTE_ALLOWLIST?: string
+  TB_SECRET_ENCRYPTION_KEY?: string
   /** opt-in 集成测试:真实 MCP echo server 的 URL(仅测试注入)。 */
   TB_TEST_MCP_URL?: string
+  TB_TEST_S3_ACCESS_KEY_ID?: string
+  TB_TEST_S3_BUCKET?: string
   /** opt-in 集成测试:S3 兼容端点与凭证(仅测试注入)。 */
   TB_TEST_S3_ENDPOINT?: string
-  TB_TEST_S3_ACCESS_KEY_ID?: string
   TB_TEST_S3_SECRET_ACCESS_KEY?: string
-  TB_TEST_S3_BUCKET?: string
+  /** mcp 工具缓存 TTL 秒(默认 300)。 */
+  TB_TOOL_CACHE_TTL?: string
 }
 
 /** http:// 上游是否放行(env `TB_ALLOW_INSECURE_HTTP=true`,仅本地开发)。 */
@@ -63,8 +63,8 @@ const DEFAULT_MAX_HOPS = 4
 function remoteSettingsFromEnv(env: Env): RemoteSettings {
   const allowlist = (env.TB_REMOTE_ALLOWLIST ?? '')
     .split(',')
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0)
+    .map(s => s.trim())
+    .filter(s => s.length > 0)
   const hops = Number(env.TB_MAX_HOPS)
   return {
     allowlist,
@@ -128,7 +128,7 @@ function depsFromEnv(env: Env): TbAppDeps {
   }
   if (env.TB_SECRET_ENCRYPTION_KEY !== undefined) deps.encryptionKey = env.TB_SECRET_ENCRYPTION_KEY
   const assets = env.ASSETS
-  if (assets !== undefined) deps.assets = (request) => assets.fetch(request)
+  if (assets !== undefined) deps.assets = request => assets.fetch(request)
   const ttl = positiveIntEnv(env.TB_TOOL_CACHE_TTL)
   if (ttl !== undefined) deps.toolCacheTtlSec = ttl
   const refThreshold = positiveIntEnv(env.TB_REF_THRESHOLD_BYTES)
@@ -153,6 +153,6 @@ export function createApp(): Hono<{ Bindings: Env }> {
     return app
   }
   const outer = new Hono<{ Bindings: Env }>()
-  outer.all('*', (c) => appFor(c.env).fetch(c.req.raw))
+  outer.all('*', c => appFor(c.env).fetch(c.req.raw))
   return outer
 }

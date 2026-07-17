@@ -9,24 +9,23 @@
  * 保留段(~ 开头段)出现在路径中 → invalid_argument(输入非法,先于其余判定)。
  */
 
-import { TBError } from '../errors'
-import type { SecretKey, TreePath } from '../types'
-import { RESERVED_ROOTS, SYSTEM_AUTO } from '../types'
+import { RESERVED_ROOTS, type SecretKey, SYSTEM_AUTO, type TreePath } from '../types'
 import { checkScopes } from './scope'
+import { TBError } from '../errors'
 
 export interface CheckRegisterPathInput {
-  sk: Pick<SecretKey, 'scopes' | 'registerPaths' | 'id'>
-  targetPath: TreePath
   action: 'write' | 'delete'
   /** 目标路径当前占用者;null / 缺省表示不存在。 */
   existing?: { registeredBy: string } | null
   /** 部署配置追加的保留根(叠加在 RESERVED_ROOTS 之上)。 */
   reservedRoots?: string[]
+  sk: Pick<SecretKey, 'scopes' | 'registerPaths' | 'id'>
+  targetPath: TreePath
 }
 
-export type CheckRegisterPathResult = { allow: true } | { allow: false; error: TBError }
+export type CheckRegisterPathResult = { allow: true } | { allow: false, error: TBError }
 
-const segments = (path: string): string[] => path.split('/').filter((s) => s.length > 0)
+const segments = (path: string): string[] => path.split('/').filter(s => s.length > 0)
 
 /** target 的段序列以 prefix 的段序列为前缀(段级,含相等)。 */
 function isUnderPrefix(target: string[], prefix: string[]): boolean {
@@ -44,7 +43,7 @@ export function checkRegisterPath(input: CheckRegisterPathInput): CheckRegisterP
   const target = segments(targetPath)
 
   // 保留段:~ 开头段不可作普通路径段(输入非法,先判)。
-  if (target.some((seg) => seg.startsWith('~'))) {
+  if (target.some(seg => seg.startsWith('~'))) {
     return {
       allow: false,
       error: new TBError('invalid_argument', `reserved segment in path '${targetPath}'`),
@@ -53,7 +52,7 @@ export function checkRegisterPath(input: CheckRegisterPathInput): CheckRegisterP
 
   if (sk.registerPaths !== undefined) {
     // a:声明后必须落在某前缀之下。
-    const ok = sk.registerPaths.some((p) => isUnderPrefix(target, segments(p)))
+    const ok = sk.registerPaths.some(p => isUnderPrefix(target, segments(p)))
     if (!ok) {
       return deny(`path '${targetPath}' is outside declared registerPaths`)
     }

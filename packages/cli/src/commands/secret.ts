@@ -1,8 +1,8 @@
 import { Command } from 'commander'
-import { resolveTarget, withGlobalOpts } from '../args'
-import { CliError, callTool } from '../http'
-import { guard, printJson, printLine, table } from '../output'
 import type { Page, SecretSummary } from '../types'
+import { guard, printJson, printLine, table } from '../output'
+import { resolveTarget, withGlobalOpts } from '../args'
+import { callTool, CliError } from '../http'
 
 /** 从 stdin 读取全部内容(去掉尾随换行)——用于 secret set 避免值进 shell history。 */
 async function readStdin(): Promise<string> {
@@ -12,8 +12,8 @@ async function readStdin(): Promise<string> {
 }
 
 interface SecretGlobalOpts {
-  json?: boolean
   baseUrl?: string
+  json?: boolean
   sk?: string
 }
 
@@ -26,7 +26,7 @@ export function secretSetCommand(): Command {
     .description('Set an upstream secret (write-only; prefer stdin for value)')
     .requiredOption('--name <name>', 'Secret name')
     .option('--value <value>', 'Secret value (omit to read from stdin)')
-    .action(async (opts: SecretGlobalOpts & { name: string; value?: string }) => {
+    .action(async (opts: SecretGlobalOpts & { name: string, value?: string }) => {
       const asJson = Boolean(opts.json)
       await guard(asJson, async () => {
         const name = String(opts.name ?? '').trim()
@@ -62,7 +62,7 @@ export function secretLsCommand(): Command {
           printJson(page)
           return
         }
-        const rows = (page.items ?? []).map((s) => [s.name, s.updatedAt ?? '-'])
+        const rows = (page.items ?? []).map(s => [s.name, s.updatedAt ?? '-'])
         printLine(table(['NAME', 'UPDATED'], rows))
       })
     })

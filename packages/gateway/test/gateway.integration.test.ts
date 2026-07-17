@@ -1,5 +1,5 @@
-import { SELF } from 'cloudflare:test'
 import { describe, expect, it } from 'vitest'
+import { SELF } from 'cloudflare:test'
 import pkg from '../package.json' with { type: 'json' }
 import { TEST_ADMIN_SK } from './fixtures'
 
@@ -19,7 +19,7 @@ async function postJson(path: string, body: unknown, init: RequestInit = {}): Pr
     headers: {
       'content-type': 'application/json',
       // 数据面默认返回 markdown(```json 包裹);测试断言 JSON,故显式声明 Accept。
-      accept: 'application/json',
+      'accept': 'application/json',
       ...(init.headers ?? {}),
     },
     body: JSON.stringify(body),
@@ -38,7 +38,7 @@ describe('GET /healthz(树外免认证)', () => {
   it('200 + JSON {healthy, version},无需 SK', async () => {
     const res = await SELF.fetch('https://tb.test/healthz')
     expect(res.status).toBe(200)
-    const body = (await res.json()) as { healthy: boolean; version: string }
+    const body = (await res.json()) as { healthy: boolean, version: string }
     expect(body.healthy).toBe(true)
     expect(body.version).toBe(pkg.version)
   })
@@ -48,7 +48,7 @@ describe('认证(除 /healthz 外全路由要求 SK)', () => {
   it('无 SK → 401 裸 TBError(permission_denied, retryable false)', async () => {
     const res = await SELF.fetch('https://tb.test/~help')
     expect(res.status).toBe(401)
-    const body = (await res.json()) as { code: string; retryable: boolean }
+    const body = (await res.json()) as { code: string, retryable: boolean }
     expect(body.code).toBe('permission_denied')
     expect(body.retryable).toBe(false)
   })
@@ -96,9 +96,9 @@ describe('根 ~help / ~tree(Admin 视角)', () => {
     expect(dslRes.status).toBe(200)
     expect(jsonRes.status).toBe(200)
     const dsl = await dslRes.text()
-    const json = (await jsonRes.json()) as { htbp: string; cmds: Array<{ name: string }> }
-    const jsonNames = json.cmds.map((c) => c.name).sort()
-    const dslNames = [...dsl.matchAll(/^cmd (\S+) /gm)].map((m) => m[1]).sort()
+    const json = (await jsonRes.json()) as { cmds: Array<{ name: string }>, htbp: string }
+    const jsonNames = json.cmds.map(c => c.name).sort()
+    const dslNames = [...dsl.matchAll(/^cmd (\S+) /gm)].map(m => m[1]).sort()
     expect(jsonNames).toEqual(['delete', 'get', 'list', 'update', 'write'])
     expect(dslNames).toEqual(jsonNames)
     expect(json.htbp).toBe('0.1')
@@ -137,7 +137,7 @@ describe('根 ~help / ~tree(Admin 视角)', () => {
     )
     expect(res.status).toBe(200)
     const tree = (await res.json()) as { children?: Array<{ path: string }> }
-    expect(tree.children?.some((c) => c.path === 'system')).toBe(true)
+    expect(tree.children?.some(c => c.path === 'system')).toBe(true)
   })
 
   it('root ~tree 默认 markdown(code fence 包缩进树);显式 text/plain 得裸文本', async () => {
@@ -185,7 +185,7 @@ describe('受限 SK 的可见性裁剪', () => {
         headers: { ...authDocs, accept: 'application/json' },
       })
     ).json()) as { children?: Array<{ path: string }> }
-    const topPaths = (tree.children ?? []).map((c) => c.path)
+    const topPaths = (tree.children ?? []).map(c => c.path)
     expect(topPaths).toContain('docs')
     expect(topPaths).not.toContain('system')
 
@@ -249,8 +249,8 @@ describe('secret 只写不读(集成面)', () => {
     expect(setText).not.toContain(SECRET)
 
     const list = await postJson('system/secret', { tool: 'list', arguments: {} }, admin())
-    const body = (await list.json()) as { items: Array<{ name: string; updatedAt: string }> }
-    const item = body.items.find((i) => i.name === 'ctx7')
+    const body = (await list.json()) as { items: Array<{ name: string, updatedAt: string }> }
+    const item = body.items.find(i => i.name === 'ctx7')
     expect(item).toBeDefined()
     expect(Object.keys(item ?? {}).sort()).toEqual(['name', 'updatedAt'])
     expect(JSON.stringify(body)).not.toContain(SECRET)
@@ -261,7 +261,7 @@ describe('status get', () => {
   it('admin 调 system/status get → { healthy, version, nodeCount }', async () => {
     const res = await postJson('system/status', { tool: 'get', arguments: {} }, admin())
     expect(res.status).toBe(200)
-    const body = (await res.json()) as { healthy: boolean; version: string; nodeCount: number }
+    const body = (await res.json()) as { healthy: boolean, nodeCount: number, version: string }
     expect(body.healthy).toBe(true)
     expect(body.version).toBe(pkg.version)
     expect(typeof body.nodeCount).toBe('number')
@@ -305,9 +305,9 @@ describe('system/registry 管理通道也遵守可见性裁剪(修复 5)', () =>
     )
     expect(list.status).toBe(200)
     const body = (await list.json()) as { items: Array<{ path: string }> }
-    const paths = body.items.map((i) => i.path)
+    const paths = body.items.map(i => i.path)
     expect(paths).toContain('vis/y')
-    expect(paths.some((p) => p === 'hidden' || p.startsWith('hidden/'))).toBe(false)
+    expect(paths.some(p => p === 'hidden' || p.startsWith('hidden/'))).toBe(false)
 
     // get denied 路径 → 404(deny==not_found,不泄露存在性)。
     const get = await postJson(
@@ -331,14 +331,14 @@ describe('~tree 子树根真实性(修复 6)', () => {
       admin({ headers: { accept: 'application/json' } }),
     )
     expect(res.status).toBe(200)
-    const tree = (await res.json()) as { path: string; kind: string }
+    const tree = (await res.json()) as { kind: string, path: string }
     expect(tree.path).toBe('system/sk')
     expect(tree.kind).toBe('builtin')
   })
 })
 
 describe('URL 路径解码(修复 7)', () => {
-  it("注册含空格路径 'docs/hello world' 后 GET /docs/hello%20world/~help → 200", async () => {
+  it('注册含空格路径 \'docs/hello world\' 后 GET /docs/hello%20world/~help → 200', async () => {
     const regSk = await issueSk({
       owner: 'agent:space',
       scopes: [{ pattern: '**', actions: ['read', 'register'] }],
@@ -427,8 +427,8 @@ describe('SK 吊销 / 认证失效(修复 9)', () => {
     // 取该 SK 的 id 以 delete。
     const list = (await (
       await postJson('system/sk', { tool: 'list', arguments: {} }, admin())
-    ).json()) as { items: Array<{ id: string; owner: string }> }
-    const id = list.items.find((k) => k.owner === 'agent:revoke')?.id
+    ).json()) as { items: Array<{ id: string, owner: string }> }
+    const id = list.items.find(k => k.owner === 'agent:revoke')?.id
     expect(id).toBeDefined()
     const del = await postJson('system/sk', { tool: 'delete', arguments: { id } }, admin())
     expect(del.status).toBe(200)
@@ -445,8 +445,8 @@ describe('SK 吊销 / 认证失效(修复 9)', () => {
     expect((await SELF.fetch('https://tb.test/~help', { headers: auth })).status).toBe(200)
     const list = (await (
       await postJson('system/sk', { tool: 'list', arguments: {} }, admin())
-    ).json()) as { items: Array<{ id: string; owner: string }> }
-    const id = list.items.find((k) => k.owner === 'agent:disable')?.id
+    ).json()) as { items: Array<{ id: string, owner: string }> }
+    const id = list.items.find(k => k.owner === 'agent:disable')?.id
     const upd = await postJson(
       'system/sk',
       { tool: 'update', arguments: { id, patch: { disabled: true } } },

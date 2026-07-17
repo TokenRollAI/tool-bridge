@@ -1,6 +1,6 @@
-import { SELF } from 'cloudflare:test'
 import { base64urlEncode, HEADER_TB_UPSTREAM_AUTH } from '@tool-bridge/core'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { SELF } from 'cloudflare:test'
 import { clearSessionCache } from '../src/feishuMcp'
 import { clearTatCache } from '../src/tat'
 
@@ -24,7 +24,7 @@ function upstreamAuth(appId = 'cli_test_app', appSecret = 'test_secret'): string
  * X-Lark-MCP-TAT ∈ 有效集、X-Lark-MCP-Allowed-Tools 非空才宣告工具)。
  * `revokeAllTokens()` 模拟 TAT 被吊销/过期:老 token 请求一律 401。
  */
-function feishuMock(tools: Array<{ name: string; description: string }>) {
+function feishuMock(tools: Array<{ description: string, name: string }>) {
   const validTokens = new Set<string>()
   const sessions = new Set<string>()
   let tokenSeq = 0
@@ -36,7 +36,7 @@ function feishuMock(tools: Array<{ name: string; description: string }>) {
 
     if (url.href === AUTH_URL) {
       authCalls += 1
-      const body = JSON.parse(String(init?.body)) as { app_id?: string; app_secret?: string }
+      const body = JSON.parse(String(init?.body)) as { app_id?: string, app_secret?: string }
       // 任意 app_id + 固定 secret 视为有效(多租户用例用不同 app_id)。
       if (!body.app_id || body.app_secret !== 'test_secret') {
         return new Response(JSON.stringify({ code: 10003, msg: 'invalid app credential' }), {
@@ -61,12 +61,12 @@ function feishuMock(tools: Array<{ name: string; description: string }>) {
       }
       const allowed = (headers.get('X-Lark-MCP-Allowed-Tools') ?? '')
         .split(',')
-        .map((s) => s.trim())
+        .map(s => s.trim())
         .filter(Boolean)
       const body = JSON.parse(String(init?.body)) as {
         id?: number | string
         method: string
-        params?: { protocolVersion?: string; name?: string; arguments?: unknown }
+        params?: { arguments?: unknown, name?: string, protocolVersion?: string }
       }
       const rpc = (result: unknown, extra: Record<string, string> = {}) =>
         new Response(JSON.stringify({ jsonrpc: '2.0', id: body.id, result }), {
@@ -90,8 +90,8 @@ function feishuMock(tools: Array<{ name: string; description: string }>) {
       if (body.method === 'tools/list') {
         return rpc({
           tools: tools
-            .filter((t) => allowed.includes(t.name))
-            .map((t) => ({
+            .filter(t => allowed.includes(t.name))
+            .map(t => ({
               ...t,
               inputSchema: { type: 'object' },
               annotations: { readOnlyHint: t.name.startsWith('fetch') },
@@ -137,7 +137,7 @@ async function envelope(
     ...init,
     headers: {
       'content-type': 'application/json',
-      authorization: `Bearer ${PLUGIN_TOKEN}`,
+      'authorization': `Bearer ${PLUGIN_TOKEN}`,
       'x-tb-request-id': crypto.randomUUID(),
       [HEADER_TB_UPSTREAM_AUTH]: upstreamAuth(),
       ...(init.headers ?? {}),
@@ -167,7 +167,7 @@ describe('契约面(生命周期 GET,不鉴权)', () => {
       headers: { accept: 'application/json' },
     })
     const cmds = ((await helpJson.json()) as { cmds: Array<{ name: string }> }).cmds
-    expect(cmds.map((c) => c.name).sort()).toEqual(['Call', 'Get', 'List'])
+    expect(cmds.map(c => c.name).sort()).toEqual(['Call', 'Get', 'List'])
 
     const helpDsl = await SELF.fetch('https://plugin.test/~help')
     expect(await helpDsl.text()).toContain('cmd List')
@@ -208,10 +208,10 @@ describe('List / Get / Call(TAT 自动换发)', () => {
 
     const first = await envelope('List', {})
     expect(first.status).toBe(200)
-    const specs = (await first.json()) as Array<{ name: string; effect?: string }>
+    const specs = (await first.json()) as Array<{ effect?: string, name: string }>
     // 白名单 create-doc,fetch-doc(vitest.config)之外的 search-doc 不宣告。
-    expect(specs.map((s) => s.name).sort()).toEqual(['create-doc', 'fetch-doc'])
-    expect(specs.find((s) => s.name === 'fetch-doc')?.effect).toBe('read')
+    expect(specs.map(s => s.name).sort()).toEqual(['create-doc', 'fetch-doc'])
+    expect(specs.find(s => s.name === 'fetch-doc')?.effect).toBe('read')
     expect(upstream.authCalls()).toBe(1)
 
     const second = await envelope('List', {})
@@ -268,7 +268,7 @@ describe('List / Get / Call(TAT 自动换发)', () => {
     const after = await envelope('List', {})
     expect(after.status).toBe(200)
     const specs = (await after.json()) as Array<{ name: string }>
-    expect(specs.map((s) => s.name)).toContain('create-doc')
+    expect(specs.map(s => s.name)).toContain('create-doc')
     expect(upstream.authCalls()).toBe(2)
   })
 

@@ -1,8 +1,8 @@
 import { Command } from 'commander'
-import { resolveTarget, withGlobalOpts } from '../args'
-import { apiFetch, callTool, requireTarget } from '../http'
-import { guard, maskSecret, printJson, printLine } from '../output'
 import type { StatusView } from '../types'
+import { guard, maskSecret, printJson, printLine } from '../output'
+import { apiFetch, callTool, requireTarget } from '../http'
+import { resolveTarget, withGlobalOpts } from '../args'
 
 /**
  * `tb whoami` —— 呈现当前"配置态 + 可达性"。
@@ -16,7 +16,7 @@ import type { StatusView } from '../types'
 export function whoamiCommand(): Command {
   return withGlobalOpts(new Command('whoami'))
     .description('Show the configured target (base URL, masked SK) and whether it authenticates')
-    .action(async (opts: { json?: boolean; baseUrl?: string; sk?: string }) => {
+    .action(async (opts: { baseUrl?: string, json?: boolean, sk?: string }) => {
       const asJson = Boolean(opts.json)
       await guard(asJson, async () => {
         const target = resolveTarget(opts)

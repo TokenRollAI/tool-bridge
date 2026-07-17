@@ -3,27 +3,27 @@
  * Dashboard 是纯 API 客户端,不 import core——形状按网关契约手抄,字段不多不少。
  */
 
-export type NodeKind =
-  | 'directory'
-  | 'builtin'
-  | 'mcp'
-  | 'http'
-  | 'remote'
-  | 'context'
-  | 'skillhub'
-  | 'device'
-  | 'tool'
+export type NodeKind
+  = | 'directory'
+    | 'builtin'
+    | 'mcp'
+    | 'http'
+    | 'remote'
+    | 'context'
+    | 'skillhub'
+    | 'device'
+    | 'tool'
 
 export type Action = 'read' | 'write' | 'call' | 'register' | 'admin'
 
 export const ACTIONS: readonly Action[] = ['read', 'write', 'call', 'register', 'admin']
 
 export interface Scope {
-  /** 树路径 glob:"**" | "docs/**"。 */
-  pattern: string
   actions: Action[]
   /** 默认 allow;deny 优先于一切 allow。 */
   effect?: 'allow' | 'deny'
+  /** 树路径 glob:"**" | "docs/**"。 */
+  pattern: string
 }
 
 export interface TBErrorBody {
@@ -40,84 +40,84 @@ export interface TBErrorBody {
 }
 
 export interface HelpCmd {
-  name: string
-  method: 'POST'
-  path: string
+  confirm?: boolean
+  effect?: string
   h?: string
   inputSchema?: Record<string, unknown>
+  method: 'POST'
+  name: string
+  path: string
   returns?: string
   scope: Action
-  effect?: string
-  confirm?: boolean
 }
 
 export interface HelpJson {
-  htbp: string
-  node: { path: string; kind: NodeKind; description: string }
+  children?: Array<{ description: string, kind: NodeKind, path: string }>
   cmds: HelpCmd[]
-  children?: Array<{ path: string; kind: NodeKind; description: string }>
+  /** Agent feedback 默认区块(头部条目,只含 id/title/score)。 */
+  feedback?: Array<{ id: string, score: number, title: string }>
+  htbp: string
+  node: { description: string, kind: NodeKind, path: string }
   /** 管理员补充说明(system/annotation,网关 ~help 注入)。 */
   note?: string
-  /** Agent feedback 默认区块(头部条目,只含 id/title/score)。 */
-  feedback?: Array<{ id: string; title: string; score: number }>
 }
 
 /** ~feedback 端点的条目视图(list 不含 detail;get 含)。 */
 export interface FeedbackView {
-  id: string
-  title: string
-  by: string
   at: string
-  up: number
-  down: number
-  score: number
+  by: string
   detail?: string
+  down: number
+  id: string
+  score: number
+  title: string
+  up: number
 }
 
 export interface TreeJson {
-  path: string
-  kind: NodeKind
-  description: string
-  online?: boolean
-  truncated?: boolean
   children?: TreeJson[]
+  description: string
+  kind: NodeKind
+  online?: boolean
+  path: string
+  truncated?: boolean
 }
 
 /** system/registry 返回的节点(builtin/registry.ts 的 Node 面)。 */
 export interface RegistryNode {
-  path: string
-  kind: NodeKind
-  description: string
   config?: Record<string, unknown>
-  virtualize?: Record<string, unknown>
-  registeredBy?: string
-  online?: boolean
   createdAt?: string
+  description: string
+  kind: NodeKind
+  online?: boolean
+  path: string
+  registeredBy?: string
   updatedAt?: string
+  virtualize?: Record<string, unknown>
 }
 
 /** system/sk 返回的 SecretKey(无 hash)。 */
 export interface SecretKeyInfo {
-  id: string
-  owner: string
+  createdAt?: string
   description?: string
-  scopes: Scope[]
-  registerPaths?: string[]
   disabled?: boolean
   expiresAt?: string
-  createdAt?: string
+  id: string
+  owner: string
+  registerPaths?: string[]
+  scopes: Scope[]
 }
 
 export interface Page<T> {
-  items: T[]
   cursor?: string
+  items: T[]
 }
 
 /** system/federation list 的一行:remote 联邦 host 白名单合并视图。 */
 export interface FederationHost {
   host: string
-  source: 'env' | 'store'
   removable: boolean
+  source: 'env' | 'store'
   updatedAt?: string
 }
 
@@ -125,16 +125,16 @@ export interface FederationHost {
 export type PluginKind = 'tool-provider' | 'context-provider'
 
 export interface PluginManifest {
-  id: string
-  kind: PluginKind
-  /** "tool-provider/v1" | "context-provider/v1";前缀必须与 kind 一致。 */
-  interfaceVersion: string
+  auth: { kind: 'platform-token' } | { kind: 'bearer', secretRef: string }
+  enabled: boolean
   /** https:// 或 `binding:<name>`。 */
   endpoint: string
-  auth: { kind: 'platform-token' } | { kind: 'bearer'; secretRef: string }
   /** 如 "/healthz";必须以 '/' 开头。 */
   healthPath: string
-  enabled: boolean
+  id: string
+  /** "tool-provider/v1" | "context-provider/v1";前缀必须与 kind 一致。 */
+  interfaceVersion: string
+  kind: PluginKind
 }
 
 /** write/update 返回:pluginToken 仅该次响应出现一次(auth=platform-token 时)。 */
@@ -144,20 +144,20 @@ export interface PluginRegistration extends PluginManifest {
 
 /** system/plugin health cmd 返回(按需探活)。 */
 export interface PluginHealth {
-  id: string
-  healthy: boolean
   checkedAt: string
+  healthy: boolean
+  id: string
 }
 
 /** context 条目元数据(ContextEntryMeta)。 */
 export interface ContextEntryMeta {
+  contentType: string
+  metadata: Record<string, string>
+  size?: number
+  updatedAt: string
   /** node://<namespace-path>/<entry-path>。 */
   uri: string
-  contentType: string
-  size?: number
   version: string
-  updatedAt: string
-  metadata: Record<string, string>
 }
 
 /** context 条目(含内容;大对象 content = { $ref })。 */
@@ -167,20 +167,20 @@ export interface ContextEntry extends ContextEntryMeta {
 
 /** skillhub 目录条目摘要(List/Search 返回的 SkillSummary)。 */
 export interface SkillSummary {
+  description: string
   id: string
   name: string
-  description: string
-  version?: string
   updatedAt?: string
+  version?: string
 }
 
 /** skillhub 技能内文件(Get{id,file} 返回;大对象 content = { $ref })。 */
 export interface SkillFile {
-  path: string
+  content?: string | { $ref: string }
   contentType: string
+  path: string
   size?: number
   version: string
-  content?: string | { $ref: string }
 }
 
 /** skillhub 技能详情(Get{id} 返回:SKILL.md 正文 + 文件清单)。 */

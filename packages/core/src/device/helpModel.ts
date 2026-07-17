@@ -6,18 +6,18 @@
  * directory(mountPath)节点:description 呈现 online 状态。
  */
 
-import { cmdPath } from '../builtin/util'
-import { type ContextHelpOptions, contextHelpModel } from '../context/help'
 import type { ChildRef, CmdSpec, HelpModel } from '../htbp/model'
 import type { TreePath } from '../types'
+import { contextHelpModel, type ContextHelpOptions } from '../context/help'
 import { describeAllow } from './shellAllow'
+import { cmdPath } from '../builtin/util'
 
 const SHELL_DESCRIPTION = 'device shell (remote command execution)'
 
 /** `<mountPath>/shell` 工具节点的 ~help;h 行含 allow 白名单描述。 */
 export function deviceShellHelpModel(
   nodePath: TreePath,
-  shell: { description?: string; allow?: string[] } = {},
+  shell: { allow?: string[], description?: string } = {},
 ): HelpModel {
   const exec: CmdSpec = {
     name: 'exec',
@@ -46,7 +46,7 @@ export function deviceShellHelpModel(
 
 /** `<mountPath>/fs` context 节点的 ~help:即 file provider,复用 context 静态 help。 */
 export function deviceFsHelpModel(
-  node: { path: TreePath; description: string },
+  node: { description: string, path: TreePath },
   opts: ContextHelpOptions = {},
 ): HelpModel {
   return contextHelpModel(node, opts)
@@ -54,7 +54,7 @@ export function deviceFsHelpModel(
 
 /** `<mountPath>` directory 节点的 ~help;description 附 online/offline 状态。 */
 export function deviceDirectoryHelpModel(
-  node: { path: TreePath; description: string; online: boolean },
+  node: { description: string, online: boolean, path: TreePath },
   children: ChildRef[] = [],
 ): HelpModel {
   return {

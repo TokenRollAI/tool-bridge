@@ -5,9 +5,9 @@
  */
 
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { afterEach, describe, expect, it } from 'vitest'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
 import { configFromEnv, createTbServer, type TbServer } from '../src'
 
 const ADMIN_SK = 'tbk_server_test_admin_00000000'
@@ -34,7 +34,7 @@ function makeUiFixture(): string {
   return dir
 }
 
-async function startServer(uiDir: string): Promise<{ server: TbServer; baseUrl: string }> {
+async function startServer(uiDir: string): Promise<{ baseUrl: string, server: TbServer }> {
   const config = configFromEnv({
     TB_PORT: '0',
     TB_HOST: '127.0.0.1',

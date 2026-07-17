@@ -1,7 +1,7 @@
-import Form from '@rjsf/shadcn'
 import type { RJSFSchema } from '@rjsf/utils'
-import validator from '@rjsf/validator-ajv8'
 import type { ReactNode } from 'react'
+import validator from '@rjsf/validator-ajv8'
+import Form from '@rjsf/shadcn'
 
 /**
  * RJSF 的惰性边界。表单引擎及 AJV 只在用户展开一个可表单化命令时下载；
@@ -14,20 +14,20 @@ export default function SchemaFormRenderer({
   onSubmit,
   children,
 }: {
-  schema: RJSFSchema
+  children: ReactNode
   formData: unknown
   onChange: (formData: unknown) => void
   onSubmit: (formData: unknown) => void
-  children: ReactNode
+  schema: RJSFSchema
 }) {
   return (
     <Form
-      schema={schema}
-      validator={validator}
       formData={formData}
       onChange={({ formData: next }) => onChange(next)}
       onSubmit={({ formData: next }) => onSubmit(next)}
+      schema={schema}
       showErrorList={false}
+      validator={validator}
     >
       {children}
     </Form>

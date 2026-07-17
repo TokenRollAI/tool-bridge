@@ -1,19 +1,19 @@
 import { Command } from 'commander'
-import { collect, resolveTarget, withGlobalOpts } from '../args'
-import { CliError, callTool } from '../http'
-import { guard, printJson, printLine, table } from '../output'
-import { parseScope } from '../scope'
 import type { Page, SecretKeyCreated, SecretKeyInput, SecretKeyView } from '../types'
+import { collect, resolveTarget, withGlobalOpts } from '../args'
+import { guard, printJson, printLine, table } from '../output'
+import { callTool, CliError } from '../http'
+import { parseScope } from '../scope'
 
 interface SkGlobalOpts {
-  json?: boolean
   baseUrl?: string
+  json?: boolean
   sk?: string
 }
 
 export function scopeSummary(k: SecretKeyView): string {
   return (k.scopes ?? [])
-    .map((s) => `${s.pattern}:${s.actions.join('+')}${s.effect === 'deny' ? '(deny)' : ''}`)
+    .map(s => `${s.pattern}:${s.actions.join('+')}${s.effect === 'deny' ? '(deny)' : ''}`)
     .join(' ')
 }
 
@@ -34,7 +34,7 @@ export function skListCommand(): Command {
           printJson(page)
           return
         }
-        const rows = (page.items ?? []).map((k) => [
+        const rows = (page.items ?? []).map(k => [
           k.id,
           k.owner,
           k.disabled ? 'disabled' : 'active',
@@ -47,11 +47,11 @@ export function skListCommand(): Command {
 }
 
 interface SkCreateOpts extends SkGlobalOpts {
-  owner: string
-  scope: string[]
-  registerPath: string[]
-  expires?: string
   description?: string
+  expires?: string
+  owner: string
+  registerPath: string[]
+  scope: string[]
 }
 
 /**

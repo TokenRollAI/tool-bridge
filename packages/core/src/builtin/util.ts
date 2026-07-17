@@ -5,8 +5,8 @@
  * 留待后续。校验失败一律 invalid_argument。
  */
 
-import { TBError } from '../errors'
 import type { ListOptions, TreePath } from '../types'
+import { TBError } from '../errors'
 
 /** void 语义 cmd(delete / set)的应答体:不回显任何值(secret.set 明确不回显 value)。 */
 export const VOID_ACK = { ok: true } as const
@@ -50,7 +50,7 @@ export function optListOptions(args: Record<string, unknown>): ListOptions | und
   const opts = args.opts
   if (opts === undefined) return undefined
   if (typeof opts !== 'object' || opts === null) {
-    throw new TBError('invalid_argument', "field 'opts' must be an object")
+    throw new TBError('invalid_argument', 'field \'opts\' must be an object')
   }
   return opts as ListOptions
 }

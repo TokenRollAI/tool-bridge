@@ -9,15 +9,8 @@ import {
   Wifi,
   WifiOff,
 } from 'lucide-react'
-import { useState } from 'react'
 import { Link } from 'react-router'
-import { CopyButton } from '@/components/CopyButton'
-import { EmptyState } from '@/components/EmptyState'
-import { PageHeader } from '@/components/PageHeader'
-import { PaginationFooter } from '@/components/PaginationFooter'
-import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
-import { Skeleton } from '@/components/ui/skeleton'
+import { useState } from 'react'
 import {
   Table,
   TableBody,
@@ -26,7 +19,14 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import { PaginationFooter } from '@/components/PaginationFooter'
+import { CopyButton } from '@/components/CopyButton'
+import { EmptyState } from '@/components/EmptyState'
+import { PageHeader } from '@/components/PageHeader'
+import { Skeleton } from '@/components/ui/skeleton'
+import { Button } from '@/components/ui/button'
 import { useRegistryList } from '@/lib/queries'
+import { Badge } from '@/components/ui/badge'
 import { useSession } from '@/lib/session'
 import { cn } from '@/lib/utils'
 
@@ -53,9 +53,9 @@ export function DevicesPage() {
   const baseUrl = active?.baseUrl || window.location.origin
 
   const devices = (list.data?.items ?? []).filter(
-    (n) => n.kind === 'directory' && n.online !== undefined,
+    n => n.kind === 'directory' && n.online !== undefined,
   )
-  const online = devices.filter((d) => d.online).length
+  const online = devices.filter(d => d.online).length
   const offline = devices.length - online
   const connectCmd = `tb connect ${baseUrl}`
 
@@ -67,21 +67,21 @@ export function DevicesPage() {
   return (
     <div className="mx-auto max-w-7xl px-4 py-5 sm:px-6 sm:py-6 lg:px-8 lg:py-8">
       <PageHeader
-        eyebrow="SYSTEM / DEVICES"
-        title="设备接入"
-        description="查看反向注册机器的实时会话状态，并把新设备安全接入同一棵能力树。"
-        actions={
+        actions={(
           <Button
-            type="button"
-            variant="outline"
-            size="sm"
             disabled={list.isRefetching}
             onClick={() => void refresh()}
+            size="sm"
+            type="button"
+            variant="outline"
           >
             <RefreshCw className={cn(list.isRefetching && 'animate-spin')} />
             {list.isRefetching ? '正在刷新' : '刷新状态'}
           </Button>
-        }
+        )}
+        description="查看反向注册机器的实时会话状态，并把新设备安全接入同一棵能力树。"
+        eyebrow="SYSTEM / DEVICES"
+        title="设备接入"
       />
 
       <section className="mt-6 overflow-hidden rounded-xl border bg-card/70">
@@ -104,8 +104,8 @@ export function DevicesPage() {
                 需要具备 register 权限的 SK
               </span>
               <Link
-                to="/manage/sk"
                 className="inline-flex items-center gap-1 text-foreground underline decoration-border underline-offset-4 hover:text-primary"
+                to="/manage/sk"
               >
                 管理 Secret Key
                 <ArrowRight className="size-3" />
@@ -118,7 +118,7 @@ export function DevicesPage() {
               <span className="font-mono text-[10px] tracking-[0.12em] text-muted-foreground uppercase">
                 Terminal
               </span>
-              <CopyButton value={connectCmd} label="复制 connect 命令" />
+              <CopyButton label="复制 connect 命令" value={connectCmd} />
             </div>
             <code className="block overflow-x-auto rounded-md bg-muted/35 px-3 py-3 font-mono text-xs leading-5 whitespace-nowrap text-foreground">
               {connectCmd}
@@ -163,8 +163,8 @@ export function DevicesPage() {
             </p>
           </div>
           <p
-            className="flex items-center gap-1.5 text-[11px] text-muted-foreground"
             aria-live="polite"
+            className="flex items-center gap-1.5 text-[11px] text-muted-foreground"
           >
             <Clock3 className="size-3.5" />
             {list.isRefetching
@@ -175,117 +175,123 @@ export function DevicesPage() {
           </p>
         </div>
 
-        {list.isPending ? (
-          <div className="grid gap-2 p-4">
-            <Skeleton className="h-10 w-full" />
-            <Skeleton className="h-10 w-4/6" />
-          </div>
-        ) : list.isError ? (
-          <EmptyState
-            icon={WifiOff}
-            title="设备状态读取失败"
-            tone="danger"
-            className="m-4"
-            action={
-              <Button variant="outline" size="sm" onClick={() => void refresh()}>
-                <RefreshCw />
-                重试
-              </Button>
-            }
-          >
-            <p>{list.error.message}</p>
-          </EmptyState>
-        ) : devices.length === 0 ? (
-          <EmptyState icon={Cpu} title="还没有设备接入" className="m-4">
-            <p>在目标机器上运行上方 connect 命令，shell / fs 将自动挂上能力树。</p>
-          </EmptyState>
-        ) : (
-          <Table className="min-w-[760px]">
-            <TableHeader>
-              <TableRow>
-                <TableHead>设备路径</TableHead>
-                <TableHead className="w-28">会话状态</TableHead>
-                <TableHead>能力说明</TableHead>
-                <TableHead className="w-44">最近活动</TableHead>
-                <TableHead className="w-16">
-                  <span className="sr-only">操作</span>
-                </TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {devices.map((device) => (
-                <TableRow key={device.path}>
-                  <TableCell>
-                    <div className="flex min-w-52 items-center gap-3">
-                      <span
-                        className={cn(
-                          'grid size-8 shrink-0 place-items-center rounded-md border',
-                          device.online
-                            ? 'border-ok/25 bg-ok/[0.06] text-ok'
-                            : 'bg-muted/20 text-muted-foreground',
-                        )}
-                      >
-                        <Cpu className="size-3.5" />
-                      </span>
-                      <div className="min-w-0">
-                        <p className="font-mono text-xs text-foreground">{device.path}</p>
-                        <p className="mt-0.5 text-[11px] text-muted-foreground">device namespace</p>
-                      </div>
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    <Badge
-                      variant="outline"
-                      className={cn(
-                        'font-mono text-[10px]',
-                        device.online
-                          ? 'border-ok/35 bg-ok/[0.045] text-ok'
-                          : 'bg-muted/20 text-muted-foreground',
-                      )}
-                    >
-                      {device.online ? <Wifi /> : <WifiOff />}
-                      {device.online ? 'online' : 'offline'}
-                    </Badge>
-                  </TableCell>
-                  <TableCell className="max-w-80 whitespace-normal">
-                    <p className="line-clamp-2 text-xs leading-5 text-muted-foreground">
-                      {device.description || '设备通过反向通道注册的能力集合'}
-                    </p>
-                  </TableCell>
-                  <TableCell title={device.updatedAt}>
-                    <p className="font-mono text-xs text-foreground">
-                      {formatActivity(device.updatedAt)}
-                    </p>
-                    {device.updatedAt && (
-                      <p className="mt-0.5 font-mono text-[10px] text-muted-foreground">
-                        {new Date(device.updatedAt).toLocaleString()}
-                      </p>
-                    )}
-                  </TableCell>
-                  <TableCell>
-                    <Button
-                      variant="ghost"
-                      size="icon-sm"
-                      asChild
-                      aria-label={`打开 ${device.path}`}
-                    >
-                      <Link to={`/nodes/${device.path}`}>
-                        <ExternalLink />
-                      </Link>
+        {list.isPending
+          ? (
+              <div className="grid gap-2 p-4">
+                <Skeleton className="h-10 w-full" />
+                <Skeleton className="h-10 w-4/6" />
+              </div>
+            )
+          : list.isError
+            ? (
+                <EmptyState
+                  action={(
+                    <Button onClick={() => void refresh()} size="sm" variant="outline">
+                      <RefreshCw />
+                      重试
                     </Button>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        )}
+                  )}
+                  className="m-4"
+                  icon={WifiOff}
+                  title="设备状态读取失败"
+                  tone="danger"
+                >
+                  <p>{list.error.message}</p>
+                </EmptyState>
+              )
+            : devices.length === 0
+              ? (
+                  <EmptyState className="m-4" icon={Cpu} title="还没有设备接入">
+                    <p>在目标机器上运行上方 connect 命令，shell / fs 将自动挂上能力树。</p>
+                  </EmptyState>
+                )
+              : (
+                  <Table className="min-w-[760px]">
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>设备路径</TableHead>
+                        <TableHead className="w-28">会话状态</TableHead>
+                        <TableHead>能力说明</TableHead>
+                        <TableHead className="w-44">最近活动</TableHead>
+                        <TableHead className="w-16">
+                          <span className="sr-only">操作</span>
+                        </TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {devices.map(device => (
+                        <TableRow key={device.path}>
+                          <TableCell>
+                            <div className="flex min-w-52 items-center gap-3">
+                              <span
+                                className={cn(
+                                  'grid size-8 shrink-0 place-items-center rounded-md border',
+                                  device.online
+                                    ? 'border-ok/25 bg-ok/[0.06] text-ok'
+                                    : 'bg-muted/20 text-muted-foreground',
+                                )}
+                              >
+                                <Cpu className="size-3.5" />
+                              </span>
+                              <div className="min-w-0">
+                                <p className="font-mono text-xs text-foreground">{device.path}</p>
+                                <p className="mt-0.5 text-[11px] text-muted-foreground">device namespace</p>
+                              </div>
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            <Badge
+                              className={cn(
+                                'font-mono text-[10px]',
+                                device.online
+                                  ? 'border-ok/35 bg-ok/[0.045] text-ok'
+                                  : 'bg-muted/20 text-muted-foreground',
+                              )}
+                              variant="outline"
+                            >
+                              {device.online ? <Wifi /> : <WifiOff />}
+                              {device.online ? 'online' : 'offline'}
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="max-w-80 whitespace-normal">
+                            <p className="line-clamp-2 text-xs leading-5 text-muted-foreground">
+                              {device.description || '设备通过反向通道注册的能力集合'}
+                            </p>
+                          </TableCell>
+                          <TableCell title={device.updatedAt}>
+                            <p className="font-mono text-xs text-foreground">
+                              {formatActivity(device.updatedAt)}
+                            </p>
+                            {device.updatedAt && (
+                              <p className="mt-0.5 font-mono text-[10px] text-muted-foreground">
+                                {new Date(device.updatedAt).toLocaleString()}
+                              </p>
+                            )}
+                          </TableCell>
+                          <TableCell>
+                            <Button
+                              aria-label={`打开 ${device.path}`}
+                              asChild
+                              size="icon-sm"
+                              variant="ghost"
+                            >
+                              <Link to={`/nodes/${device.path}`}>
+                                <ExternalLink />
+                              </Link>
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                )}
         {!list.isPending && !list.isError && (
           <PaginationFooter
             count={devices.length}
-            unit="台设备"
             hasNextPage={Boolean(list.hasNextPage)}
             isFetchingNextPage={list.isFetchingNextPage}
             onLoadMore={() => void list.fetchNextPage()}
+            unit="台设备"
           />
         )}
       </section>

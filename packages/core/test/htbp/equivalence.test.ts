@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { parseHelpDsl, renderHelpDsl, renderHelpJson } from '../../src/htbp/helpDsl'
 import type { HelpModel } from '../../src/htbp/model'
+import { parseHelpDsl, renderHelpDsl, renderHelpJson } from '../../src/htbp/helpDsl'
 
 /** 覆盖:必填 scope + 可选 inputSchema/returns/effect/confirm + directory children。 */
 const model: HelpModel = {
@@ -35,13 +35,13 @@ describe('DSL↔JSON 语义等价(同一 HelpModel 两种表现字段一致)', (
     const parsed = parseHelpDsl(renderHelpDsl(model))
     const json = renderHelpJson(model)
 
-    const fromDsl = parsed.cmds.map((c) => ({
+    const fromDsl = parsed.cmds.map(c => ({
       name: c.name,
       method: c.method,
       path: c.path,
       scope: c.scope,
     }))
-    const fromJson = json.cmds.map((c) => ({
+    const fromJson = json.cmds.map(c => ({
       name: c.name,
       method: c.method,
       path: c.path,
@@ -56,7 +56,7 @@ describe('DSL↔JSON 语义等价(同一 HelpModel 两种表现字段一致)', (
     for (const cmd of parsed.cmds) {
       expect(cmd.scope).toBeDefined()
     }
-    expect(parsed.cmds.map((c) => c.scope)).toEqual(['call', 'write'])
+    expect(parsed.cmds.map(c => c.scope)).toEqual(['call', 'write'])
   })
 
   it('JSON htbp 版本 === DSL 首行版本', () => {
@@ -70,7 +70,7 @@ describe('DSL↔JSON 语义等价(同一 HelpModel 两种表现字段一致)', (
     const json = renderHelpJson(model)
     // 解析出的 node 行 = 主节点 + 1 个子节点
     expect(parsed.nodes).toHaveLength(2)
-    const childNode = parsed.nodes.find((n) => n.path === 'docs/context7/sub')
+    const childNode = parsed.nodes.find(n => n.path === 'docs/context7/sub')
     expect(childNode).toEqual({
       path: 'docs/context7/sub',
       kind: 'directory',

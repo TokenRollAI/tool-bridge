@@ -62,10 +62,10 @@ describe('MemoryObjectStore', () => {
     const m1 = await s.put('k', 'one')
     await s.put('k', 'two', { ifMatchEtag: m1.etag })
     await expect(s.put('k', 'three', { ifMatchEtag: m1.etag })).rejects.toSatisfy(
-      (e) => isTBError(e) && e.code === 'conflict',
+      e => isTBError(e) && e.code === 'conflict',
     )
     await expect(s.put('ghost', 'x', { ifMatchEtag: 'v0' })).rejects.toSatisfy(
-      (e) => isTBError(e) && e.code === 'conflict',
+      e => isTBError(e) && e.code === 'conflict',
     )
   })
 
@@ -87,14 +87,14 @@ describe('MemoryObjectStore', () => {
 
     const top = await s.list('', { delimiter: '/' })
     expect(top.cursor).toBeUndefined()
-    expect(top.items.map((i) => ('prefix' in i ? i.prefix : (i as ObjectMeta).key))).toEqual([
+    expect(top.items.map(i => ('prefix' in i ? i.prefix : (i as ObjectMeta).key))).toEqual([
       'a.md',
       'dir/',
       'other/',
     ])
 
     const dir = await s.list('dir/', { delimiter: '/' })
-    expect(dir.items.map((i) => ('prefix' in i ? i.prefix : (i as ObjectMeta).key))).toEqual([
+    expect(dir.items.map(i => ('prefix' in i ? i.prefix : (i as ObjectMeta).key))).toEqual([
       'dir/sub/',
       'dir/x.md',
       'dir/y.md',
@@ -107,7 +107,7 @@ describe('MemoryObjectStore', () => {
     await s.put('dir/x.md', '2')
     await s.put('dir/sub/z.md', '3')
     const all = await s.list('')
-    expect(all.items.map((i) => ('prefix' in i ? i.prefix : (i as ObjectMeta).key))).toEqual([
+    expect(all.items.map(i => ('prefix' in i ? i.prefix : (i as ObjectMeta).key))).toEqual([
       'a.md',
       'dir/sub/z.md',
       'dir/x.md',
@@ -123,7 +123,7 @@ describe('MemoryObjectStore', () => {
     expect(p1.items).toHaveLength(2)
     expect(p1.cursor).toBeDefined()
     const p2 = await s.list('', { limit: 2, cursor: p1.cursor })
-    expect(p2.items.map((i) => ('prefix' in i ? i.prefix : (i as ObjectMeta).key))).toEqual(['c'])
+    expect(p2.items.map(i => ('prefix' in i ? i.prefix : (i as ObjectMeta).key))).toEqual(['c'])
     expect(p2.cursor).toBeUndefined()
   })
 

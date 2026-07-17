@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
+import { parsePluginManifest, PLUGIN_KINDS } from '../../src/plugin/manifest'
 import { TBError } from '../../src/errors'
-import { PLUGIN_KINDS, parsePluginManifest } from '../../src/plugin/manifest'
 
 /** 注册样例(feishu-docs)。 */
 const FEISHU = {

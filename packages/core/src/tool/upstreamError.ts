@@ -11,10 +11,10 @@ import { TBError } from '../errors'
 export interface UpstreamError {
   /** network:网络失败/超时/会话重建仍失败;http:拿到响应但状态码非 2xx。 */
   kind: 'network' | 'http'
-  /** kind==='http' 时的状态码。 */
-  status?: number
   /** 诊断用简述(不含上游 body 原文)。 */
   message?: string
+  /** kind==='http' 时的状态码。 */
+  status?: number
 }
 
 /**

@@ -10,9 +10,8 @@
  *   迟到的 result 仅入幂等表(后续重复 id 以它应答)。
  */
 
-import type { TBErrorBody } from '../errors'
-import { TBError } from '../errors'
-import { type DeviceFrame, deviceErrorFrame, type HelloFrame } from './frames'
+import { deviceErrorFrame, type DeviceFrame, type HelloFrame } from './frames'
+import { TBError, type TBErrorBody } from '../errors'
 
 /** 设备调用超时;区别于 Plugin 30s / Workers CPU 30s,勿混用常量。 */
 export const DEVICE_CALL_TIMEOUT_MS = 60_000
@@ -20,19 +19,19 @@ export const DEVICE_CALL_TIMEOUT_MS = 60_000
 /** 拒绝帧发送后的关闭码(close(1008))。 */
 export const DEVICE_REJECT_CLOSE_CODE = 1008
 
-export type DeviceCallResult = { ok: true; value: unknown } | { ok: false; error: TBErrorBody }
+export type DeviceCallResult = { ok: true, value: unknown } | { error: TBErrorBody, ok: false }
 
 export type CancelTimer = () => void
 /** 时间注入:到期回调 + 返回取消函数(生产 = setTimeout/clearTimeout,单测 = 假时钟)。 */
 export type SetTimer = (cb: () => void, ms: number) => CancelTimer
 
 export interface DeviceSessionIo {
-  send(frame: DeviceFrame): void
   close(code: number): void
   /** hello 通过结构校验后回调;胶水层完成注册判定后调 accept()/reject()。 */
   onHello(hello: HelloFrame): void
   /** result 落幂等表时回调(胶水层可持久化到 ctx.storage 做跨休眠回放)。 */
   onResult?(id: string, result: DeviceCallResult): void
+  send(frame: DeviceFrame): void
 }
 
 export type DeviceSessionPhase = 'awaiting-hello' | 'ready' | 'closed'
@@ -44,16 +43,16 @@ export interface DeviceSessionOptions {
 }
 
 interface PendingCall {
-  waiters: Array<(result: DeviceCallResult) => void>
   cancelTimer: CancelTimer
+  waiters: Array<(result: DeviceCallResult) => void>
 }
 
 export interface DeviceCallRequest {
+  arguments: Record<string, unknown>
   id: string
   /** 相对 mountPath,如 "shell"。 */
   path: string
   tool: string
-  arguments: Record<string, unknown>
 }
 
 export class DeviceGatewaySession {

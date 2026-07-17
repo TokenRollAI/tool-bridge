@@ -1,5 +1,4 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import { isTBError } from '../../src/errors'
 import {
   FEEDBACK_DETAIL_MAX,
   FEEDBACK_HELP_LIMIT,
@@ -11,6 +10,7 @@ import {
   sortFeedback,
 } from '../../src/feedback/store'
 import { MemoryStateStore } from '../../src/store'
+import { isTBError } from '../../src/errors'
 
 const NOW = '2026-07-08T00:00:00.000Z'
 const AGENT_A = 'agent:a'
@@ -36,7 +36,7 @@ describe('排序与 ~help 选条(纯函数)', () => {
       entry({ id: 'new-zero', at: '2026-07-07T00:00:00.000Z' }),
       entry({ id: 'liked', at: '2026-07-01T00:00:00.000Z', up: ['agent:x'] }),
     ])
-    expect(sorted.map((e) => e.id)).toEqual(['liked', 'new-zero', 'old-zero'])
+    expect(sorted.map(e => e.id)).toEqual(['liked', 'new-zero', 'old-zero'])
   })
 
   it('净分 ≤ -3 从 ~help 选条隐藏;取前 5 条;输出 id/title/score', () => {
@@ -47,7 +47,7 @@ describe('排序与 ~help 选条(纯函数)', () => {
     )
     const items = selectHelpItems([hidden, boundary, ...rest])
     expect(items).toHaveLength(FEEDBACK_HELP_LIMIT)
-    expect(items.map((e) => e.id)).not.toContain('hidden')
+    expect(items.map(e => e.id)).not.toContain('hidden')
     expect(items[0]).toEqual({ id: 'fb_000005', title: 't', score: 1 })
   })
 })
@@ -141,16 +141,16 @@ describe('FeedbackStore', () => {
       await fb.vote('a', bad.id, voter, 'down')
     }
     const views = await fb.listViews('a')
-    expect(views.map((v) => v.title)).toEqual(['good', 'bad'])
+    expect(views.map(v => v.title)).toEqual(['good', 'bad'])
     expect(views[0]).not.toHaveProperty('detail')
-    expect((await fb.helpItems('a')).map((i) => i.title)).toEqual(['good'])
+    expect((await fb.helpItems('a')).map(i => i.title)).toEqual(['good'])
   })
 
   it('remove 删单条;删空后整 key 回收', async () => {
     const e1 = await fb.submit('a', { title: 't1', detail: 'd' }, AGENT_A, NOW)
     const e2 = await fb.submit('a', { title: 't2', detail: 'd' }, AGENT_A, NOW)
     await fb.remove('a', e1.id)
-    expect((await fb.listFor('a')).map((e) => e.id)).toEqual([e2.id])
+    expect((await fb.listFor('a')).map(e => e.id)).toEqual([e2.id])
     await fb.remove('a', e2.id)
     expect(await store.get('feedback:a')).toBeNull()
   })

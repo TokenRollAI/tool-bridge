@@ -1,5 +1,5 @@
-import { Files, LogOut, Moon, Search, Sun } from 'lucide-react'
 import { NavLink, useLocation, useNavigate } from 'react-router'
+import { Files, LogOut, Moon, Search, Sun } from 'lucide-react'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -16,10 +16,10 @@ import { MANAGE_LINKS } from './navigation'
 
 interface ActivityRailProps {
   explorerOpen: boolean
-  onToggleExplorer: () => void
-  onOpenPalette: () => void
   health?: { healthy: boolean }
   healthError: boolean
+  onOpenPalette: () => void
+  onToggleExplorer: () => void
 }
 
 /**
@@ -48,19 +48,19 @@ export function ActivityRail({
   return (
     <TooltipProvider delayDuration={250}>
       <aside
-        className="app-activity-rail hidden h-svh w-14 shrink-0 flex-col items-center border-r lg:flex"
         aria-label="全局活动栏"
+        className="app-activity-rail hidden h-svh w-14 shrink-0 flex-col items-center border-r lg:flex"
       >
         <RailTip label="总览">
           <NavLink
-            to="/"
             aria-label="前往总览"
             className={cn(
               'mt-2 grid size-10 place-items-center rounded-lg border border-transparent',
               'hover:border-border hover:bg-white/5 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none',
             )}
+            to="/"
           >
-            <img src="/ui/icon-light.png" alt="" className="size-6 dark:invert" />
+            <img alt="" className="size-6 dark:invert" src="/ui/icon-light.png" />
           </NavLink>
         </RailTip>
 
@@ -68,15 +68,15 @@ export function ActivityRail({
 
         <RailTip label={explorerOpen ? '收起资源浏览器' : '展开资源浏览器'}>
           <button
-            type="button"
             aria-label={explorerOpen ? '收起资源浏览器' : '展开资源浏览器'}
             aria-pressed={explorerOpen}
-            onClick={onToggleExplorer}
             className={cn(
               'relative grid size-10 place-items-center rounded-lg text-muted-foreground',
               'hover:bg-white/5 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none',
               (explorerOpen || resourceRoute) && 'bg-primary/12 text-primary',
             )}
+            onClick={onToggleExplorer}
+            type="button"
           >
             <Files className="size-[18px]" />
             {(explorerOpen || resourceRoute) && (
@@ -87,10 +87,10 @@ export function ActivityRail({
 
         <RailTip label="全局跳转（⌘/Ctrl K）">
           <button
-            type="button"
             aria-label="打开全局跳转"
-            onClick={onOpenPalette}
             className="grid size-10 place-items-center rounded-lg text-muted-foreground hover:bg-white/5 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+            onClick={onOpenPalette}
+            type="button"
           >
             <Search className="size-[18px]" />
           </button>
@@ -99,19 +99,18 @@ export function ActivityRail({
         <p className="mt-3 mb-1 font-mono text-[8px] tracking-[0.16em] text-muted-foreground/70 uppercase">
           管理
         </p>
-        <nav className="grid gap-0.5" aria-label="管理入口">
+        <nav aria-label="管理入口" className="grid gap-0.5">
           {MANAGE_LINKS.map(({ to, label, icon: Icon }) => (
             <RailTip key={to} label={label}>
               <NavLink
-                to={to}
                 aria-label={label}
                 className={({ isActive }) =>
                   cn(
                     'relative grid size-10 place-items-center rounded-lg text-muted-foreground',
                     'hover:bg-white/5 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none',
                     isActive && 'bg-primary/12 text-primary',
-                  )
-                }
+                  )}
+                to={to}
               >
                 {({ isActive }) => (
                   <>
@@ -129,7 +128,6 @@ export function ActivityRail({
         <div className="mt-auto grid justify-items-center gap-1 pb-2">
           <RailTip label={healthText}>
             <span
-              role="img"
               aria-label={healthText}
               className={cn(
                 'mb-1 size-2 rounded-full',
@@ -139,15 +137,16 @@ export function ActivityRail({
                     ? 'bg-ok shadow-[0_0_7px_var(--ok)]'
                     : 'bg-warn',
               )}
+              role="img"
             />
           </RailTip>
 
           <RailTip label={theme === 'dark' ? '切换到浅色主题' : '切换到深色主题'}>
             <button
-              type="button"
               aria-label="切换主题"
-              onClick={toggleTheme}
               className="grid size-9 place-items-center rounded-lg text-muted-foreground hover:bg-white/5 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+              onClick={toggleTheme}
+              type="button"
             >
               {theme === 'dark' ? <Sun className="size-4" /> : <Moon className="size-4" />}
             </button>
@@ -157,15 +156,15 @@ export function ActivityRail({
             <RailTip label={`连接档案：${active?.name ?? '未选择'}`}>
               <DropdownMenuTrigger asChild>
                 <button
-                  type="button"
                   aria-label="切换连接档案"
                   className="grid size-9 place-items-center rounded-lg border bg-background/45 font-mono text-[10px] font-medium text-foreground hover:border-primary/40 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+                  type="button"
                 >
                   {(active?.name ?? '--').slice(0, 2).toUpperCase()}
                 </button>
               </DropdownMenuTrigger>
             </RailTip>
-            <DropdownMenuContent side="right" align="end" className="w-60">
+            <DropdownMenuContent align="end" className="w-60" side="right">
               <DropdownMenuLabel>
                 <span className="block text-xs">连接档案</span>
                 <span className="mt-0.5 block truncate font-mono text-[10px] font-normal text-muted-foreground">
@@ -173,10 +172,10 @@ export function ActivityRail({
                 </span>
               </DropdownMenuLabel>
               <DropdownMenuSeparator />
-              {profiles.map((profile) => (
+              {profiles.map(profile => (
                 <DropdownMenuItem
-                  key={profile.id}
                   className="font-mono text-xs"
+                  key={profile.id}
                   onClick={() => switchProfile(profile.name)}
                 >
                   <span className="truncate">{profile.name}</span>
@@ -184,7 +183,7 @@ export function ActivityRail({
                 </DropdownMenuItem>
               ))}
               <DropdownMenuSeparator />
-              <DropdownMenuItem variant="destructive" onClick={logout}>
+              <DropdownMenuItem onClick={logout} variant="destructive">
                 <LogOut />
                 退出登录
               </DropdownMenuItem>
@@ -196,7 +195,7 @@ export function ActivityRail({
   )
 }
 
-function RailTip({ label, children }: { label: string; children: React.ReactNode }) {
+function RailTip({ label, children }: { children: React.ReactNode, label: string }) {
   return (
     <Tooltip>
       <TooltipTrigger asChild>{children}</TooltipTrigger>

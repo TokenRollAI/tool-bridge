@@ -14,9 +14,9 @@ const KEY_PREFIX = 'toolcache:'
 const DEFAULT_TTL_SECONDS = 300
 
 interface CachedTools {
-  tools: ToolSpec[]
   /** ISO 8601 写入时刻。 */
   fetchedAt: string
+  tools: ToolSpec[]
 }
 
 function keyOf(path: string): string {
@@ -31,10 +31,10 @@ export function toolCacheTtl(env: { TB_TOOL_CACHE_TTL?: string }): number {
 
 function isCached(v: unknown): v is CachedTools {
   return (
-    typeof v === 'object' &&
-    v !== null &&
-    Array.isArray((v as CachedTools).tools) &&
-    typeof (v as CachedTools).fetchedAt === 'string'
+    typeof v === 'object'
+    && v !== null
+    && Array.isArray((v as CachedTools).tools)
+    && typeof (v as CachedTools).fetchedAt === 'string'
   )
 }
 
@@ -57,7 +57,7 @@ export async function getTools(
   store: StateStore,
   path: string,
   fetchList: () => Promise<ToolSpec[]>,
-  opts: { refresh: boolean; ttl: number; now: string },
+  opts: { now: string, refresh: boolean, ttl: number },
 ): Promise<ToolSpec[]> {
   if (!opts.refresh) {
     const raw = await store.get(keyOf(path))

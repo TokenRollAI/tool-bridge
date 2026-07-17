@@ -19,7 +19,7 @@ async function main(): Promise<void> {
   // 1) /healthz → 200 + JSON {healthy:true, version}(树外免认证)
   const health = await fetch(`${baseUrl}/healthz`)
   assert.equal(health.status, 200, `GET /healthz expected 200, got ${health.status}`)
-  const body = (await health.json()) as { healthy?: boolean; version?: string }
+  const body = (await health.json()) as { healthy?: boolean, version?: string }
   assert.equal(body.healthy, true, '/healthz body.healthy must be true')
   assert.ok(body.version, '/healthz body.version must be present')
   console.log(`ok  GET /healthz → 200 healthy version=${body.version}`)
@@ -27,7 +27,7 @@ async function main(): Promise<void> {
   // 2) 无 SK 的 /~help → 401 裸 TBError
   const anon = await fetch(`${baseUrl}/~help`)
   assert.equal(anon.status, 401, `GET /~help without SK expected 401, got ${anon.status}`)
-  const err = (await anon.json()) as { code?: string; retryable?: boolean }
+  const err = (await anon.json()) as { code?: string, retryable?: boolean }
   assert.equal(err.code, 'permission_denied', '401 body.code must be permission_denied')
   assert.equal(err.retryable, false, '401 body.retryable must be false')
   console.log('ok  GET /~help (no SK) → 401 TBError permission_denied')

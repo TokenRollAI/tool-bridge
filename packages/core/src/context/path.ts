@@ -26,7 +26,7 @@ function assertNoTraversal(form: string, original: string): void {
   if (form.includes('\\')) throw invalid(original, '不允许反斜杠')
   if (hasControlChar(form)) throw invalid(original, '不允许控制字符')
   if (form.startsWith('/')) throw invalid(original, '不允许绝对路径(前导 /)')
-  if (form.split('/').some((seg) => seg === '..')) throw invalid(original, "不允许 '..' 段")
+  if (form.split('/').some(seg => seg === '..')) throw invalid(original, '不允许 \'..\' 段')
 }
 
 /**
@@ -44,7 +44,7 @@ export function normalizeEntryPath(path: string): string {
     // 名字里字面 '%'(如 "100%")合法:无法解码就没有编码穿越,跳过复查。
   }
   if (decoded !== null && decoded !== path) assertNoTraversal(decoded, path)
-  const segs = path.split('/').filter((seg) => seg !== '' && seg !== '.')
+  const segs = path.split('/').filter(seg => seg !== '' && seg !== '.')
   if (segs.length === 0) throw invalid(path, '规范化后为空')
   return segs.join('/')
 }

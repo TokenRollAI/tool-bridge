@@ -1,5 +1,5 @@
-import { Loader2 } from 'lucide-react'
 import { type ReactNode, useState } from 'react'
+import { Loader2 } from 'lucide-react'
 import {
   AlertDialog,
   AlertDialogCancel,
@@ -21,12 +21,12 @@ export function ConfirmAction({
   pending: externalPending = false,
   onConfirm,
 }: {
-  trigger: ReactNode
-  title: string
-  description?: ReactNode
   actionLabel?: string
-  pending?: boolean
+  description?: ReactNode
   onConfirm: () => void | Promise<void>
+  pending?: boolean
+  title: string
+  trigger: ReactNode
 }) {
   const [open, setOpen] = useState(false)
   const [internalPending, setInternalPending] = useState(false)
@@ -46,7 +46,7 @@ export function ConfirmAction({
   }
 
   return (
-    <AlertDialog open={open} onOpenChange={(next) => !pending && setOpen(next)}>
+    <AlertDialog onOpenChange={next => !pending && setOpen(next)} open={open}>
       <AlertDialogTrigger asChild>{trigger}</AlertDialogTrigger>
       <AlertDialogContent>
         <AlertDialogHeader>
@@ -59,7 +59,7 @@ export function ConfirmAction({
         </AlertDialogHeader>
         <AlertDialogFooter>
           <AlertDialogCancel disabled={pending}>取消</AlertDialogCancel>
-          <Button variant="destructive" disabled={pending} onClick={() => void confirm()}>
+          <Button disabled={pending} onClick={() => void confirm()} variant="destructive">
             {pending && <Loader2 className="animate-spin" />}
             {actionLabel}
           </Button>

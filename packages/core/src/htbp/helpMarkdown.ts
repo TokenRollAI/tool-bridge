@@ -13,9 +13,9 @@
  * 3. 方法说明完整:cmd 的 description 全文保留,inputSchema 以缩进 JSON 呈现。
  */
 
-import { HTBP_VERSION } from '../version'
 import type { CmdSpec, HelpModel } from './model'
 import { collapseToOneLine } from './summary'
+import { HTBP_VERSION } from '../version'
 
 /** 根路径显示为 '/'。 */
 function displayPath(path: string): string {
@@ -90,7 +90,7 @@ export function renderHelpMarkdown(model: HelpModel): string {
   }
 
   if (model.cmds.length > 0) {
-    const allFlat = model.cmds.every((c) => c.flatBody === true)
+    const allFlat = model.cmds.every(c => c.flatBody === true)
     out.push('## How to call')
     out.push('')
     if (allFlat) {

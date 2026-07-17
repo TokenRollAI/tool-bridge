@@ -1,8 +1,8 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mkdtempSync, writeFileSync } from 'node:fs'
+import { Readable } from 'node:stream'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { Readable } from 'node:stream'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { resetFetch, setFetch } from '../src/http'
 import { runCli } from './cliHarness'
 
@@ -37,7 +37,7 @@ afterEach(() => {
 })
 
 function stdoutText(): string {
-  return stdoutSpy.mock.calls.map((c) => String(c[0])).join('')
+  return stdoutSpy.mock.calls.map(c => String(c[0])).join('')
 }
 
 function jsonFetch(body: unknown, status = 200) {

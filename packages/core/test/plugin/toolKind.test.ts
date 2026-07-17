@@ -1,22 +1,22 @@
 import { describe, expect, it } from 'vitest'
+import { NODE_KINDS, type NodeConfig, type Scope, type TreeNode } from '../../src/types'
 import { createRegistryModule, parseNodeInput } from '../../src/builtin/registry'
 import { decodeDeviceFrame } from '../../src/device/frames'
-import { TBError } from '../../src/errors'
-import { MemoryStateStore } from '../../src/store'
 import { NodeRegistryStore } from '../../src/tree/registry'
 import { filterVisible } from '../../src/tree/visibility'
-import { NODE_KINDS, type NodeConfig, type Scope, type TreeNode } from '../../src/types'
+import { MemoryStateStore } from '../../src/store'
+import { TBError } from '../../src/errors'
 
 const NOW = '2026-07-07T00:00:00Z'
 
 const TOOL_CONFIG: NodeConfig = { kind: 'tool', provider: 'orders' }
 
-describe("Node.kind 词表增 'tool'(Q2)", () => {
-  it("NODE_KINDS 含 'tool'", () => {
+describe('Node.kind 词表增 \'tool\'(Q2)', () => {
+  it('NODE_KINDS 含 \'tool\'', () => {
     expect(NODE_KINDS).toContain('tool')
   })
 
-  it("parseNodeInput 接受 kind:'tool'", () => {
+  it('parseNodeInput 接受 kind:\'tool\'', () => {
     const input = parseNodeInput({
       path: 'tools/orders',
       kind: 'tool',
@@ -34,7 +34,7 @@ describe("Node.kind 词表增 'tool'(Q2)", () => {
   })
 })
 
-describe("registry 对 kind:'tool' 的写入/读取", () => {
+describe('registry 对 kind:\'tool\' 的写入/读取', () => {
   function makeStore() {
     return new NodeRegistryStore(new MemoryStateStore())
   }
@@ -51,7 +51,7 @@ describe("registry 对 kind:'tool' 的写入/读取", () => {
     expect(node.config).toEqual(TOOL_CONFIG)
   })
 
-  it("kind:'tool' 配错误 config.kind → invalid_argument(一致性照旧生效)", async () => {
+  it('kind:\'tool\' 配错误 config.kind → invalid_argument(一致性照旧生效)', async () => {
     const store = makeStore()
     await expect(
       store.write(
@@ -82,7 +82,7 @@ describe("registry 对 kind:'tool' 的写入/读取", () => {
   })
 })
 
-describe("visibility 对 kind:'tool' 的行为", () => {
+describe('visibility 对 kind:\'tool\' 的行为', () => {
   const toolNode: TreeNode = {
     path: 'tools/orders',
     kind: 'tool',
@@ -95,7 +95,7 @@ describe("visibility 对 kind:'tool' 的行为", () => {
 
   // 简化 checker:pattern 'tools/**' 且 action read 放行。
   const check = (scopes: Scope[], path: string) =>
-    scopes.some((s) => s.pattern === 'tools/**' && path.startsWith('tools/'))
+    scopes.some(s => s.pattern === 'tools/**' && path.startsWith('tools/'))
 
   it('有 read scope 时可见', () => {
     const scopes: Scope[] = [{ pattern: 'tools/**', actions: ['read'] }]
@@ -107,8 +107,8 @@ describe("visibility 对 kind:'tool' 的行为", () => {
   })
 })
 
-describe("expose.nodes 帧层接受 kind:'tool'(SDK 自定义节点经 hello 挂载)", () => {
-  it("hello 帧 nodes 含 kind:'tool' 节点可解码,config 经 passthrough 保留", () => {
+describe('expose.nodes 帧层接受 kind:\'tool\'(SDK 自定义节点经 hello 挂载)', () => {
+  it('hello 帧 nodes 含 kind:\'tool\' 节点可解码,config 经 passthrough 保留', () => {
     const frame = decodeDeviceFrame(
       JSON.stringify({
         type: 'hello',

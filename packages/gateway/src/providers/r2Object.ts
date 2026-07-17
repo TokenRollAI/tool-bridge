@@ -10,11 +10,11 @@
  */
 
 import {
+  objectBodyToBytes,
   type ObjectListOptions,
   type ObjectListResult,
   type ObjectMeta,
   type ObjectStore,
-  objectBodyToBytes,
   TBError,
 } from '@tool-bridge/core'
 import { AwsClient } from 'aws4fetch'
@@ -22,9 +22,9 @@ import { encodeObjectKey, presignS3Url } from './s3Sign'
 
 /** R2 S3 兼容端点的 presign 参数(凭证链解析见 app.ts;缺省 = 不提供 presign)。 */
 export interface R2PresignCredentials {
-  endpoint: string
-  bucket: string
   accessKeyId: string
+  bucket: string
+  endpoint: string
   secretAccessKey: string
 }
 
@@ -81,14 +81,14 @@ export function createR2ObjectStore(bucket: R2Bucket, presign?: R2PresignCredent
       // 跳过 key 与 prefix 完全相等的目录占位对象。
       const entries = [
         ...res.objects
-          .filter((o) => o.key !== prefix)
-          .map((o) => ({ sortKey: o.key, item: toMeta(o) as ObjectMeta | { prefix: string } })),
-        ...res.delimitedPrefixes.map((p) => ({
+          .filter(o => o.key !== prefix)
+          .map(o => ({ sortKey: o.key, item: toMeta(o) as ObjectMeta | { prefix: string } })),
+        ...res.delimitedPrefixes.map(p => ({
           sortKey: p,
           item: { prefix: p } as ObjectMeta | { prefix: string },
         })),
       ].sort((a, b) => (a.sortKey < b.sortKey ? -1 : 1))
-      const items = entries.map((e) => e.item)
+      const items = entries.map(e => e.item)
       return res.truncated ? { items, cursor: res.cursor } : { items }
     },
   }

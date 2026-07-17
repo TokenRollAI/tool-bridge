@@ -13,7 +13,7 @@ import type { Action, Scope, TreePath } from '../types'
 
 /** 归一路径为段数组:'/' 分隔,丢弃空段(容忍前后/重复斜杠);根路径 → []。 */
 function segments(path: string): string[] {
-  return path.split('/').filter((s) => s.length > 0)
+  return path.split('/').filter(s => s.length > 0)
 }
 
 /**

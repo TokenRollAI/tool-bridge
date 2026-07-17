@@ -7,10 +7,10 @@
  * (`~help` 404 到不了注入点),list 可见供管理面清理。
  */
 
-import { TBError } from '../errors'
-import { KEY_ANNOTATION, type StateStore } from '../store'
-import { isPrefixOf, normalizePath, validatePath } from '../tree/path'
 import type { Timestamp, TreePath } from '../types'
+import { isPrefixOf, normalizePath, validatePath } from '../tree/path'
+import { KEY_ANNOTATION, type StateStore } from '../store'
+import { TBError } from '../errors'
 
 /** 一条补充说明:path + 全文 + 审计字段。 */
 export interface Annotation {

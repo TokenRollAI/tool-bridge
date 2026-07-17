@@ -5,10 +5,10 @@
  * 回收窗口内重连不误删。
  */
 
+import { afterEach, describe, expect, it } from 'vitest'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
 import { WebSocket } from 'ws'
 import { configFromEnv, createTbServer, type TbServer } from '../src'
 
@@ -21,7 +21,7 @@ afterEach(async () => {
   for (const fn of cleanups.splice(0)) await fn()
 })
 
-const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
+const sleep = (ms: number): Promise<void> => new Promise(r => setTimeout(r, ms))
 
 function tmpDataDir(): string {
   const dir = mkdtempSync(join(tmpdir(), 'tb-device-'))
@@ -32,7 +32,7 @@ function tmpDataDir(): string {
 async function startServer(
   dataDir: string,
   reclaimSec = 60,
-): Promise<{ server: TbServer; baseUrl: string; wsBase: string }> {
+): Promise<{ baseUrl: string, server: TbServer, wsBase: string }> {
   const config = configFromEnv({
     TB_PORT: '0',
     TB_HOST: '127.0.0.1',
@@ -59,9 +59,9 @@ async function registryGet(baseUrl: string, path: string): Promise<Response> {
   return fetch(`${baseUrl}/system/registry`, {
     method: 'POST',
     headers: {
-      authorization: `Bearer ${ADMIN_SK}`,
+      'authorization': `Bearer ${ADMIN_SK}`,
       'content-type': 'application/json',
-      accept: 'application/json',
+      'accept': 'application/json',
     },
     body: JSON.stringify({ tool: 'get', arguments: { path } }),
   })
@@ -78,7 +78,7 @@ function wsConnect(wsBase: string, deviceId: string, sk?: string): Promise<WebSo
     ws.on('unexpected-response', (_req, res) => {
       reject(new Error(`upgrade rejected: ${res.statusCode}`))
     })
-    ws.on('error', (err) => reject(err))
+    ws.on('error', err => reject(err))
   })
 }
 
@@ -113,7 +113,7 @@ async function connectDevice(
   expect(frame.mountPath).toBe(`device/${deviceId}`)
   if (opts.autoReply !== false) {
     ws.on('message', (data) => {
-      const f = JSON.parse(data.toString()) as { type: string; id?: string; arguments?: unknown }
+      const f = JSON.parse(data.toString()) as { arguments?: unknown, id?: string, type: string }
       if (f.type === 'call' && f.id !== undefined) {
         ws.send(
           JSON.stringify({
@@ -176,9 +176,9 @@ describe('DeviceHub 全链路', () => {
     const call = await fetch(`${baseUrl}/device/dev1/shell`, {
       method: 'POST',
       headers: {
-        authorization: `Bearer ${ADMIN_SK}`,
+        'authorization': `Bearer ${ADMIN_SK}`,
         'content-type': 'application/json',
-        accept: 'application/json',
+        'accept': 'application/json',
       },
       body: JSON.stringify({ tool: 'exec', arguments: { command: 'echo hi' } }),
     })
@@ -193,7 +193,7 @@ describe('DeviceHub 全链路', () => {
 
     let callFrames = 0
     ws.on('message', (data) => {
-      const f = JSON.parse(data.toString()) as { type: string; id?: string }
+      const f = JSON.parse(data.toString()) as { id?: string, type: string }
       if (f.type === 'call' && f.id !== undefined) {
         callFrames++
         ws.send(JSON.stringify({ type: 'result', id: f.id, ok: true, value: { n: callFrames } }))
@@ -201,8 +201,8 @@ describe('DeviceHub 全链路', () => {
     })
 
     const req = { id: 'fixed-id-1', path: 'shell', tool: 'exec', arguments: {} }
-    const first = (await server.deviceHub.invoke('dev2', req)) as { ok: boolean; value: unknown }
-    const second = (await server.deviceHub.invoke('dev2', req)) as { ok: boolean; value: unknown }
+    const first = (await server.deviceHub.invoke('dev2', req)) as { ok: boolean, value: unknown }
+    const second = (await server.deviceHub.invoke('dev2', req)) as { ok: boolean, value: unknown }
     expect(first).toEqual({ ok: true, value: { n: 1 } })
     expect(second).toEqual(first)
     expect(callFrames).toBe(1)
@@ -216,7 +216,7 @@ describe('DeviceHub 全链路', () => {
       path: 'shell',
       tool: 'exec',
       arguments: {},
-    })) as { ok: boolean; error?: { code: string } }
+    })) as { error?: { code: string }, ok: boolean }
     expect(res.ok).toBe(false)
     expect(res.error?.code).toBe('unavailable')
   })

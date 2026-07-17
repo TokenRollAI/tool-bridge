@@ -11,7 +11,7 @@ import { TBError } from '../../src/errors'
 
 /** 手动时钟:fire(i) 触发第 i 个未取消的定时器。 */
 function fakeTimer() {
-  const timers: Array<{ cb: () => void; ms: number; cancelled: boolean }> = []
+  const timers: Array<{ cancelled: boolean, cb: () => void, ms: number }> = []
   const setTimer: SetTimer = (cb, ms) => {
     const entry = { cb, ms, cancelled: false }
     timers.push(entry)
@@ -30,9 +30,9 @@ function makeSession(opts: { timeoutMs?: number } = {}) {
   const { timers, setTimer } = fakeTimer()
   const session = new DeviceGatewaySession(
     {
-      send: (frame) => sent.push(frame),
-      close: (code) => closed.push(code),
-      onHello: (hello) => hellos.push(hello),
+      send: frame => sent.push(frame),
+      close: code => closed.push(code),
+      onHello: hello => hellos.push(hello),
       onResult: (id, result) => stored.push([id, result]),
     },
     { setTimer, timeoutMs: opts.timeoutMs },
@@ -124,7 +124,7 @@ describe('握手状态机', () => {
     expect(session.phase).toBe('ready')
     expect(sent).toEqual([])
     const got: DeviceCallResult[] = []
-    session.call({ id: 'r1', path: 'shell', tool: 'exec', arguments: {} }, (r) => got.push(r))
+    session.call({ id: 'r1', path: 'shell', tool: 'exec', arguments: {} }, r => got.push(r))
     expect(sent).toEqual([{ type: 'call', id: 'r1', path: 'shell', tool: 'exec', arguments: {} }])
     session.handleFrame({ type: 'result', id: 'r1', ok: true, value: 42 })
     expect(got).toEqual([{ ok: true, value: 42 }])
@@ -145,7 +145,7 @@ describe('call 与 requestId 幂等', () => {
   it('call → 下发 call 帧;result → 回调调用方并入幂等表', () => {
     const { session, sent, stored } = readySession()
     const got: DeviceCallResult[] = []
-    session.call(REQ, (r) => got.push(r))
+    session.call(REQ, r => got.push(r))
     expect(sent).toEqual([{ type: 'call', ...REQ }])
     session.handleFrame({ type: 'result', id: 'r1', ok: true, value: 'out' })
     expect(got).toEqual([{ ok: true, value: 'out' }])
@@ -158,7 +158,7 @@ describe('call 与 requestId 幂等', () => {
     session.handleFrame({ type: 'result', id: 'r1', ok: true, value: 'first' })
     sent.length = 0
     const got: DeviceCallResult[] = []
-    session.call(REQ, (r) => got.push(r))
+    session.call(REQ, r => got.push(r))
     expect(got).toEqual([{ ok: true, value: 'first' }])
     expect(sent).toEqual([])
   })
@@ -167,9 +167,9 @@ describe('call 与 requestId 幂等', () => {
     const { session, sent } = readySession()
     const got1: DeviceCallResult[] = []
     const got2: DeviceCallResult[] = []
-    session.call(REQ, (r) => got1.push(r))
-    session.call(REQ, (r) => got2.push(r))
-    expect(sent.filter((f) => f.type === 'call')).toHaveLength(1)
+    session.call(REQ, r => got1.push(r))
+    session.call(REQ, r => got2.push(r))
+    expect(sent.filter(f => f.type === 'call')).toHaveLength(1)
     session.handleFrame({
       type: 'result',
       id: 'r1',
@@ -185,10 +185,10 @@ describe('call 与 requestId 幂等', () => {
   it('重复 result 帧:以首次为准', () => {
     const { session } = readySession()
     const got: DeviceCallResult[] = []
-    session.call(REQ, (r) => got.push(r))
+    session.call(REQ, r => got.push(r))
     session.handleFrame({ type: 'result', id: 'r1', ok: true, value: 'first' })
     session.handleFrame({ type: 'result', id: 'r1', ok: true, value: 'second' })
-    session.call(REQ, (r) => got.push(r))
+    session.call(REQ, r => got.push(r))
     expect(got).toEqual([
       { ok: true, value: 'first' },
       { ok: true, value: 'first' },
@@ -199,7 +199,7 @@ describe('call 与 requestId 幂等', () => {
     const { session, sent } = readySession()
     session.seedResult('r9', { ok: true, value: 42 })
     const got: DeviceCallResult[] = []
-    session.call({ ...REQ, id: 'r9' }, (r) => got.push(r))
+    session.call({ ...REQ, id: 'r9' }, r => got.push(r))
     expect(got).toEqual([{ ok: true, value: 42 }])
     expect(sent).toEqual([])
   })
@@ -218,7 +218,7 @@ describe('超时语义(60s → unavailable retryable + cancel 帧)', () => {
   it('到期:调用方收 unavailable(retryable:true),设备收 cancel 帧', () => {
     const { session, sent, timers } = readySession()
     const got: DeviceCallResult[] = []
-    session.call(REQ, (r) => got.push(r))
+    session.call(REQ, r => got.push(r))
     timers[0]?.cb()
     expect(got).toEqual([
       {
@@ -232,12 +232,12 @@ describe('超时语义(60s → unavailable retryable + cancel 帧)', () => {
   it('迟到的 result 仅入幂等表(不再回调),后续重复 id 以真实结果应答', () => {
     const { session, timers, stored } = readySession()
     const got: DeviceCallResult[] = []
-    session.call(REQ, (r) => got.push(r))
+    session.call(REQ, r => got.push(r))
     timers[0]?.cb()
     session.handleFrame({ type: 'result', id: 'r1', ok: true, value: 'late' })
     expect(got).toHaveLength(1) // 只有超时那次
     expect(stored).toEqual([['r1', { ok: true, value: 'late' }]])
-    session.call(REQ, (r) => got.push(r))
+    session.call(REQ, r => got.push(r))
     expect(got.at(-1)).toEqual({ ok: true, value: 'late' })
   })
 
@@ -261,7 +261,7 @@ describe('心跳与断线', () => {
   it('dispose:待决调用回 unavailable(retryable),定时器取消', () => {
     const { session, timers } = readySession()
     const got: DeviceCallResult[] = []
-    session.call({ id: 'r1', path: 'shell', tool: 'exec', arguments: {} }, (r) => got.push(r))
+    session.call({ id: 'r1', path: 'shell', tool: 'exec', arguments: {} }, r => got.push(r))
     session.dispose()
     expect(got).toEqual([
       { ok: false, error: expect.objectContaining({ code: 'unavailable', retryable: true }) },
@@ -274,7 +274,7 @@ describe('心跳与断线', () => {
     const { session } = readySession()
     session.dispose()
     const got: DeviceCallResult[] = []
-    session.call({ id: 'rx', path: 'shell', tool: 'exec', arguments: {} }, (r) => got.push(r))
+    session.call({ id: 'rx', path: 'shell', tool: 'exec', arguments: {} }, r => got.push(r))
     expect(got).toEqual([
       { ok: false, error: expect.objectContaining({ code: 'unavailable', retryable: true }) },
     ])

@@ -7,43 +7,43 @@
  * 对重复 call id 以本地结果缓存幂等应答(有界,超限逐最旧)。
  */
 
-import { isTBError, type TBErrorBody } from '../errors'
 import type { DeviceExpose, TreePath } from '../types'
 import {
   type CallFrame,
-  type DeviceFrame,
   decodeDeviceFrame,
+  type DeviceFrame,
   encodeDeviceFrame,
   PONG_FRAME_JSON,
   type ResultFrame,
 } from './frames'
+import { isTBError, type TBErrorBody } from '../errors'
 
 export type DeviceClientState = 'connecting' | 'ready' | 'reconnecting' | 'closed'
 
 /** 注入的最小 WS 面(node ws / 浏览器 WebSocket 均可适配)。 */
 export interface DeviceSocket {
-  send(data: string): void
   close(code?: number): void
+  send(data: string): void
 }
 
 export type DeviceCallHandler = (call: {
+  arguments: Record<string, unknown>
   path: string
   tool: string
-  arguments: Record<string, unknown>
 }) => Promise<unknown> | unknown
 
 export interface DeviceClientOptions {
   deviceId: string
-  mountPath?: TreePath
   expose: DeviceExpose
   /** call 帧的执行器(shell executor / file provider / 自定义 nodes 的分发在胶水层)。 */
   handler: DeviceCallHandler
-  onStateChange?: (state: DeviceClientState) => void
+  /** 结果幂等缓存上限(缺省 1000;超限逐最旧)。 */
+  maxCachedResults?: number
+  mountPath?: TreePath
   onReady?: (mountPath: string) => void
   /** 网关拒绝帧(TBError):权限拒绝等,收到后进入 closed、不重连。 */
   onRejected?: (error: TBErrorBody) => void
-  /** 结果幂等缓存上限(缺省 1000;超限逐最旧)。 */
-  maxCachedResults?: number
+  onStateChange?: (state: DeviceClientState) => void
 }
 
 const DEFAULT_MAX_CACHED_RESULTS = 1000

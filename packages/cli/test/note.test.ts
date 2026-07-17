@@ -20,7 +20,7 @@ afterEach(() => {
 })
 
 function stdoutText(): string {
-  return stdoutSpy.mock.calls.map((c) => String(c[0])).join('')
+  return stdoutSpy.mock.calls.map(c => String(c[0])).join('')
 }
 
 function jsonFetch(body: unknown, status = 200) {
@@ -74,7 +74,7 @@ describe('tb note', () => {
     expect(process.exitCode).toBe(0)
   })
 
-  it("set <path> <text> → system/annotation set;'/' 化为根空串", async () => {
+  it('set <path> <text> → system/annotation set;\'/\' 化为根空串', async () => {
     const fn = jsonFetch({ ...ANNO, path: '', text: '全树公告' })
     await runCli(['note', 'set', '/', '全树公告', ...gw, '--json'])
     const [, init] = fn.mock.calls[0] as [string, RequestInit]

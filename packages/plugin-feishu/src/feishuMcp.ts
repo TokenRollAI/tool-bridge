@@ -9,22 +9,22 @@
  *   (同 gateway providers/mcp.ts 的坑)。
  */
 
-import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import {
   StreamableHTTPClientTransport,
   StreamableHTTPError,
 } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 import { CfWorkerJsonSchemaValidator } from '@modelcontextprotocol/sdk/validation/cfworker'
 import { isTBError, normalizeUpstreamError, TBError } from '@tool-bridge/core'
+import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 
 export const DEFAULT_MCP_URL = 'https://mcp.feishu.cn/mcp'
 
 /** 上游工具形状(仅取转发所需字段;与 gateway providers/mcp.ts 同构)。 */
 export interface FeishuTool {
-  name: string
+  annotations?: { destructiveHint?: boolean, readOnlyHint?: boolean }
   description?: string
   inputSchema?: unknown
-  annotations?: { readOnlyHint?: boolean; destructiveHint?: boolean }
+  name: string
 }
 
 export interface FeishuToolResult {
@@ -33,8 +33,8 @@ export interface FeishuToolResult {
 }
 
 interface CachedSession {
-  sessionId: string
   protocolVersion?: string
+  sessionId: string
 }
 
 /** MCP 会话按 app_id 键控(同一部署可服务多凭证挂载,会话不得串号)。 */
@@ -46,11 +46,11 @@ export function clearSessionCache(): void {
 }
 
 export interface FeishuMcpConfig {
-  url: string
+  allowedTools: string
   /** TAT 所属应用,作会话缓存键。 */
   appId: string
   tat: string
-  allowedTools: string
+  url: string
 }
 
 /** SDK 在 initialize 后自动 GET 打开可选 standalone SSE;这里不消费,直接 405。 */
@@ -146,7 +146,7 @@ async function guard<T>(fn: () => Promise<T>): Promise<T> {
 
 export async function listTools(cfg: FeishuMcpConfig): Promise<FeishuTool[]> {
   return guard(async () => {
-    const res = (await withSession(cfg, (c) => c.listTools())) as { tools: FeishuTool[] }
+    const res = (await withSession(cfg, c => c.listTools())) as { tools: FeishuTool[] }
     // 空列表几乎必是 Allowed-Tools 头缺失/写错(飞书对无白名单请求回空而非报错)。
     if (res.tools.length === 0 && cfg.allowedTools.trim() === '') {
       throw new TBError('unavailable', 'FEISHU_ALLOWED_TOOLS 为空:飞书 MCP 不宣告任何工具', {
@@ -163,7 +163,7 @@ export async function callTool(
   args: Record<string, unknown>,
 ): Promise<FeishuToolResult> {
   return guard(async () => {
-    const res = await withSession(cfg, (c) => c.callTool({ name, arguments: args }))
+    const res = await withSession(cfg, c => c.callTool({ name, arguments: args }))
     return res as FeishuToolResult
   })
 }

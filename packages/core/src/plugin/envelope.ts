@@ -9,9 +9,9 @@
  */
 
 import { z } from 'zod'
-import { TBError } from '../errors'
 import { base64urlDecode, base64urlEncode } from '../secret/secretStore'
-import { ACTIONS, type Action, type CallContext } from '../types'
+import { type Action, ACTIONS, type CallContext } from '../types'
+import { TBError } from '../errors'
 
 declare const TextEncoder: { new (): { encode(input: string): Uint8Array } }
 declare const TextDecoder: { new (): { decode(input: Uint8Array): string } }
@@ -80,8 +80,8 @@ export function decodeCallContext(header: string): CallContext {
 
 /** 请求体形状:tool 是**方法名**(如 "List"),arguments 按名传递。 */
 export interface PluginCall {
-  tool: string
   arguments: Record<string, unknown>
+  tool: string
 }
 
 const pluginCallSchema = z.object({

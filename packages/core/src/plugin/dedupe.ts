@@ -6,7 +6,7 @@
  * 幂等结果缓存同模式,缺省 1000);in-flight 条目不受逐出影响。
  */
 
-type Settled = { ok: true; value: unknown } | { ok: false; error: unknown }
+type Settled = { ok: true, value: unknown } | { error: unknown, ok: false }
 
 const DEFAULT_MAX_ENTRIES = 1000
 

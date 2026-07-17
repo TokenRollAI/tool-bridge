@@ -24,11 +24,11 @@ import type { UpstreamProvider } from './types'
 
 /** http 节点 config(authHeader/authScheme 为可选认证头形态)。 */
 export interface HttpConfig {
+  authHeader?: string
+  authRef?: string
+  authScheme?: string
   endpoint: string
   tools: HttpToolDef[]
-  authRef?: string
-  authHeader?: string
-  authScheme?: string
 }
 
 function toSpec(t: HttpToolDef): ToolSpec {
@@ -52,7 +52,7 @@ export function createHttpProvider(
   return {
     list: () => Promise.resolve(config.tools.map(toSpec)),
     call: async (name, args) => {
-      const def = config.tools.find((t) => t.name === name)
+      const def = config.tools.find(t => t.name === name)
       if (!def) throw TBError.notFound(`未知工具:'${name}'`)
 
       const req = buildHttpRequest(def, config.endpoint, args)

@@ -1,11 +1,11 @@
 import { Command } from 'commander'
+import { guard, printJson, printLine, table } from '../output'
 import { resolveTarget, withGlobalOpts } from '../args'
 import { callTool } from '../http'
-import { guard, printJson, printLine, table } from '../output'
 
 interface NoteGlobalOpts {
-  json?: boolean
   baseUrl?: string
+  json?: boolean
   sk?: string
 }
 
@@ -46,7 +46,7 @@ export function noteLsCommand(): Command {
           printJson(page)
           return
         }
-        const rows = (page.items ?? []).map((a) => [
+        const rows = (page.items ?? []).map(a => [
           displayPath(a.path),
           a.text,
           a.updatedAt ? new Date(a.updatedAt).toLocaleString() : '-',
@@ -60,7 +60,7 @@ export function noteLsCommand(): Command {
 export function noteGetCommand(): Command {
   return withGlobalOpts(new Command('get'))
     .description('Show the note of a path')
-    .argument('<path>', "Tree path (use '/' for the tree-wide notice)")
+    .argument('<path>', 'Tree path (use \'/\' for the tree-wide notice)')
     .action(async (pathArg: string, opts: NoteGlobalOpts) => {
       const asJson = Boolean(opts.json)
       await guard(asJson, async () => {
@@ -76,7 +76,7 @@ export function noteGetCommand(): Command {
 /** `tb note set <path> <text>` → 覆盖写入(展示在该 path 的 ~help;admin scope)。 */
 export function noteSetCommand(): Command {
   return withGlobalOpts(new Command('set'))
-    .description("Upsert the note shown in ~help of a path (use '/' for a tree-wide notice)")
+    .description('Upsert the note shown in ~help of a path (use \'/\' for a tree-wide notice)')
     .argument('<path>', 'Tree path (tool sub-paths allowed, e.g. feishu/create-doc)')
     .argument('<text>', 'Note text (<= 2000 chars)')
     .action(async (pathArg: string, textArg: string, opts: NoteGlobalOpts) => {
@@ -96,7 +96,7 @@ export function noteSetCommand(): Command {
 export function noteRmCommand(): Command {
   return withGlobalOpts(new Command('rm'))
     .description('Remove the note of a path')
-    .argument('<path>', "Tree path (use '/' for the tree-wide notice)")
+    .argument('<path>', 'Tree path (use \'/\' for the tree-wide notice)')
     .action(async (pathArg: string, opts: NoteGlobalOpts) => {
       const asJson = Boolean(opts.json)
       await guard(asJson, async () => {

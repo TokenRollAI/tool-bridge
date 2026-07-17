@@ -25,18 +25,18 @@ import {
 
 export interface DeviceHello {
   deviceId: string
-  mountPath?: TreePath
   expose: DeviceExpose
+  mountPath?: TreePath
 }
 
 export interface HelloAcceptance {
-  mountPath: TreePath
   keyId: string
+  mountPath: TreePath
 }
 
 export function assertDeviceId(deviceId: string): void {
   if (!/^[A-Za-z0-9._-]+$/.test(deviceId)) {
-    throw new TBError('invalid_argument', "deviceId 只能包含字母、数字、'.'、'_'、'-'(DO 路由约束)")
+    throw new TBError('invalid_argument', 'deviceId 只能包含字母、数字、\'.\'、\'_\'、\'-\'(DO 路由约束)')
   }
 }
 
@@ -63,11 +63,11 @@ function joinTreePath(base: TreePath, rel: string): TreePath {
 }
 
 export async function processDeviceHello(opts: {
-  store: StateStore
   authorization: string | undefined
   deviceIdHint: string
   hello: DeviceHello
   now?: string
+  store: StateStore
 }): Promise<HelloAcceptance> {
   const { store, hello } = opts
   if (hello.deviceId !== opts.deviceIdHint) {
@@ -148,12 +148,12 @@ function customNodeInput(mountPath: TreePath, deviceId: string, raw: DeviceNodeI
   const input = parseNodeInput({ ...rest, path: joinTreePath(mountPath, raw.path) })
   const marker = { deviceId, mountPath, ...(cmds !== undefined ? { cmds } : {}) }
   if (input.kind === 'tool') {
-    const base =
-      input.config?.kind === 'tool' ? input.config : { kind: 'tool' as const, provider: '@local' }
+    const base
+      = input.config?.kind === 'tool' ? input.config : { kind: 'tool' as const, provider: '@local' }
     input.config = { ...base, providerConfig: { ...(base.providerConfig ?? {}), ...marker } }
   } else if (input.kind === 'context') {
-    const base =
-      input.config?.kind === 'context'
+    const base
+      = input.config?.kind === 'context'
         ? input.config
         : { kind: 'context' as const, provider: '@local' }
     input.config = { ...base, providerConfig: { ...(base.providerConfig ?? {}), ...marker } }

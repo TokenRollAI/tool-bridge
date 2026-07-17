@@ -37,7 +37,7 @@ describe('parseFrontmatter', () => {
   })
 
   it('单引号包裹的值', () => {
-    const { meta } = parseFrontmatter("---\nname: 'quoted name'\ndescription: d\n---\nx")
+    const { meta } = parseFrontmatter('---\nname: \'quoted name\'\ndescription: d\n---\nx')
     expect(meta.name).toBe('quoted name')
   })
 })

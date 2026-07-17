@@ -21,9 +21,9 @@ export interface DeviceConfig {
 
 export interface CliConfig {
   current?: string
-  profiles: Record<string, Profile>
   /** 本机稳定设备身份(tb connect 缺省 deviceId)。 */
   device?: DeviceConfig
+  profiles: Record<string, Profile>
 }
 
 /** 配置目录:尊重 `XDG_CONFIG_HOME`(便于测试注入临时目录)。 */

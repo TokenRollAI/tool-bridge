@@ -1,7 +1,7 @@
 import { Command } from 'commander'
+import { type ConnectArgs, runConnect } from './connect'
 import { withGlobalOpts } from '../args'
 import { guard } from '../output'
-import { type ConnectArgs, runConnect } from './connect'
 
 export function mountFsCommand(): Command {
   return withGlobalOpts(new Command('fs'))

@@ -1,4 +1,3 @@
-import { useMutation } from '@tanstack/react-query'
 import {
   ArrowRight,
   Boxes,
@@ -10,14 +9,15 @@ import {
   Sun,
   X,
 } from 'lucide-react'
+import { useMutation } from '@tanstack/react-query'
 import { useState } from 'react'
-import hero from '@/assets/hero.png'
+import { type ApiError, validateConnection } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { type ApiError, validateConnection } from '@/lib/api'
 import { useSession } from '@/lib/session'
 import { useTheme } from '@/lib/theme'
+import hero from '@/assets/hero.png'
 
 const FEATURES = [
   { icon: Network, label: '渐进发现', text: '从 /~help 开始，按需展开能力树' },
@@ -61,7 +61,7 @@ export function LoginPage() {
       await validateConnection({ baseUrl: normalized, sk: sk.trim() })
       return { name: name.trim() || 'default', baseUrl: normalized, sk: sk.trim() }
     },
-    onSuccess: (profile) => login(profile),
+    onSuccess: profile => login(profile),
   })
 
   const error = mutation.error as ApiError | null
@@ -81,27 +81,29 @@ export function LoginPage() {
 
       <header className="relative z-10 flex h-16 items-center justify-between px-5 sm:px-8 lg:px-12">
         <div className="flex items-center gap-3">
-          <img src="/ui/icon-light.png" alt="" className="size-7 dark:invert" />
+          <img alt="" className="size-7 dark:invert" src="/ui/icon-light.png" />
           <span className="font-mono text-sm tracking-tight">
-            tool<span className="text-primary">-</span>bridge
+            tool
+            <span className="text-primary">-</span>
+            bridge
           </span>
           <span className="hidden rounded-sm border px-1.5 py-0.5 text-[10px] font-semibold tracking-wider text-muted-foreground sm:inline">
             HTBP CONTROL PLANE
           </span>
         </div>
-        <Button variant="ghost" size="icon-sm" aria-label="切换主题" onClick={toggleTheme}>
+        <Button aria-label="切换主题" onClick={toggleTheme} size="icon-sm" variant="ghost">
           {theme === 'dark' ? <Sun /> : <Moon />}
         </Button>
       </header>
 
       <main className="relative z-10 mx-auto grid min-h-[calc(100svh-4rem)] w-full max-w-7xl items-center gap-12 px-5 py-8 sm:px-8 lg:grid-cols-[minmax(0,1.08fr)_minmax(22rem,0.72fr)] lg:px-12 lg:py-12">
-        <section className="hidden min-w-0 lg:block" aria-labelledby="login-product-title">
+        <section aria-labelledby="login-product-title" className="hidden min-w-0 lg:block">
           <p className="text-xs font-semibold tracking-[0.2em] text-primary uppercase">
             One tree. One gateway.
           </p>
           <h1
-            id="login-product-title"
             className="mt-4 max-w-2xl text-4xl leading-[1.08] font-semibold tracking-[-0.04em] xl:text-5xl"
+            id="login-product-title"
           >
             让每一个 Agent，
             <span className="text-muted-foreground">都能安全地找到并使用组织能力。</span>
@@ -112,7 +114,7 @@ export function LoginPage() {
 
           <div className="mt-9 grid max-w-2xl grid-cols-3 gap-6">
             {FEATURES.map(({ icon: Icon, label, text }) => (
-              <div key={label} className="border-l border-border/80 pl-4">
+              <div className="border-l border-border/80 pl-4" key={label}>
                 <Icon className="size-4 text-primary" />
                 <p className="mt-3 text-sm font-medium">{label}</p>
                 <p className="mt-1.5 text-xs leading-5 text-muted-foreground">{text}</p>
@@ -121,11 +123,11 @@ export function LoginPage() {
           </div>
 
           <div aria-hidden className="absolute bottom-5 left-[42%] opacity-45 xl:bottom-3">
-            <img src={hero} alt="" className="w-40 xl:w-48" />
+            <img alt="" className="w-40 xl:w-48" src={hero} />
           </div>
         </section>
 
-        <section className="mx-auto w-full max-w-md" aria-labelledby="login-title">
+        <section aria-labelledby="login-title" className="mx-auto w-full max-w-md">
           <div className="relative overflow-hidden rounded-xl border bg-card/80 p-5 shadow-xl shadow-black/[0.08] backdrop-blur-xl sm:p-7">
             <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-primary to-transparent" />
 
@@ -133,7 +135,7 @@ export function LoginPage() {
               <div className="mb-4 grid size-10 place-items-center rounded-lg border bg-primary/[0.07] text-primary">
                 <KeyRound className="size-4.5" />
               </div>
-              <h2 id="login-title" className="text-xl font-semibold tracking-[-0.02em]">
+              <h2 className="text-xl font-semibold tracking-[-0.02em]" id="login-title">
                 接入网关
               </h2>
               <p className="mt-1.5 text-sm leading-6 text-muted-foreground">
@@ -142,27 +144,29 @@ export function LoginPage() {
             </div>
 
             {profiles.length > 0 && (
-              <section className="mb-6" aria-labelledby="saved-profile-title">
+              <section aria-labelledby="saved-profile-title" className="mb-6">
                 <div className="mb-2.5 flex items-center justify-between gap-3">
-                  <h3 id="saved-profile-title" className="text-xs font-medium">
+                  <h3 className="text-xs font-medium" id="saved-profile-title">
                     继续使用
                   </h3>
                   <span className="rounded-full bg-secondary px-2 py-0.5 font-mono text-[10px] text-muted-foreground">
-                    {profiles.length} 个本地档案
+                    {profiles.length}
+                    {' '}
+                    个本地档案
                   </span>
                 </div>
                 <div className="grid max-h-52 gap-2 overflow-y-auto pr-1">
-                  {profiles.map((profile) => (
+                  {profiles.map(profile => (
                     <div
-                      key={profile.id}
                       className="group/profile flex min-w-0 overflow-hidden rounded-md border bg-background/45"
+                      key={profile.id}
                     >
                       <button
-                        type="button"
                         className="flex min-w-0 flex-1 items-center gap-3 px-3 py-2.5 text-left outline-none transition-colors hover:bg-secondary/45 focus-visible:bg-secondary focus-visible:ring-2 focus-visible:ring-ring/50 disabled:pointer-events-none disabled:opacity-50"
-                        title={`使用 ${profile.name} · ${profile.baseUrl || window.location.origin}`}
                         disabled={mutation.isPending}
                         onClick={() => switchTo(profile.name)}
+                        title={`使用 ${profile.name} · ${profile.baseUrl || window.location.origin}`}
+                        type="button"
                       >
                         <span className="grid size-8 shrink-0 place-items-center rounded-md border bg-card text-muted-foreground">
                           <KeyRound className="size-3.5" />
@@ -178,14 +182,14 @@ export function LoginPage() {
                         <ArrowRight className="size-3.5 shrink-0 text-muted-foreground transition-transform group-hover/profile:translate-x-0.5 group-hover/profile:text-primary" />
                       </button>
                       <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
                         aria-label={`删除档案 ${profile.name}`}
-                        title="删除本地档案"
                         className="h-auto w-10 rounded-none border-l text-muted-foreground hover:text-destructive"
                         disabled={mutation.isPending}
                         onClick={() => removeProfile(profile.name)}
+                        size="icon"
+                        title="删除本地档案"
+                        type="button"
+                        variant="ghost"
                       >
                         <X className="size-3.5" />
                       </Button>
@@ -196,11 +200,11 @@ export function LoginPage() {
             )}
 
             <section
-              className={profiles.length > 0 ? 'border-t pt-5' : undefined}
               aria-labelledby="new-connection-title"
+              className={profiles.length > 0 ? 'border-t pt-5' : undefined}
             >
               <div className="mb-4 flex items-center justify-between gap-3">
-                <h3 id="new-connection-title" className="text-xs font-medium">
+                <h3 className="text-xs font-medium" id="new-connection-title">
                   {profiles.length > 0 ? '添加新连接' : '建立第一条连接'}
                 </h3>
                 <span className="font-mono text-[10px] text-muted-foreground">GET /~help</span>
@@ -226,14 +230,14 @@ export function LoginPage() {
                       </span>
                     </span>
                     <Button
-                      type="button"
-                      variant={usesSameOrigin ? 'secondary' : 'outline'}
-                      size="xs"
                       disabled={mutation.isPending}
                       onClick={() => {
                         setBaseUrl('')
                         if (!mutation.isPending) mutation.reset()
                       }}
+                      size="xs"
+                      type="button"
+                      variant={usesSameOrigin ? 'secondary' : 'outline'}
                     >
                       {usesSameOrigin ? <ShieldCheck /> : <ArrowRight />}
                       {usesSameOrigin ? '已选择' : '改用同源'}
@@ -247,98 +251,110 @@ export function LoginPage() {
                     <span className="text-[11px] text-muted-foreground">可选 · 适用于远程网关</span>
                   </div>
                   <Input
-                    id="baseUrl"
+                    autoComplete="url"
                     className="h-10 font-mono text-sm"
-                    placeholder="https://gateway.example.com"
-                    value={baseUrl}
                     disabled={mutation.isPending}
+                    id="baseUrl"
                     onChange={(event) => {
                       setBaseUrl(event.target.value)
                       if (!mutation.isPending) mutation.reset()
                     }}
-                    autoComplete="url"
+                    placeholder="https://gateway.example.com"
                     spellCheck={false}
+                    value={baseUrl}
                   />
                 </div>
 
                 <div className="grid gap-1.5">
                   <Label htmlFor="sk">Secret Key</Label>
                   <Input
-                    id="sk"
+                    aria-describedby={error ? 'connection-note login-error' : 'connection-note'}
+                    aria-invalid={Boolean(error)}
+                    autoComplete="off"
                     className="h-10 font-mono text-sm"
-                    type="password"
-                    placeholder="tbk_…"
-                    value={sk}
                     disabled={mutation.isPending}
+                    id="sk"
                     onChange={(event) => {
                       setSk(event.target.value)
                       if (!mutation.isPending) mutation.reset()
                     }}
-                    autoComplete="off"
+                    placeholder="tbk_…"
                     required
-                    aria-invalid={Boolean(error)}
-                    aria-describedby={error ? 'connection-note login-error' : 'connection-note'}
+                    type="password"
+                    value={sk}
                   />
                 </div>
 
                 <div className="grid gap-1.5">
                   <Label htmlFor="profile">档案名</Label>
                   <Input
-                    id="profile"
+                    autoComplete="off"
                     className="h-10 font-mono text-sm"
-                    value={name}
                     disabled={mutation.isPending}
+                    id="profile"
                     onChange={(event) => {
                       setName(event.target.value)
                       if (!mutation.isPending) mutation.reset()
                     }}
-                    autoComplete="off"
+                    value={name}
                   />
                   <p className="text-[11px] text-muted-foreground">
-                    对应 <code className="font-mono">tb --profile</code>；同名档案会被更新。
+                    对应
+                    {' '}
+                    <code className="font-mono">tb --profile</code>
+                    ；同名档案会被更新。
                   </p>
                 </div>
 
                 <div
-                  id="connection-note"
                   className="flex items-start gap-2.5 rounded-md border border-primary/20 bg-primary/[0.045] px-3 py-2.5"
+                  id="connection-note"
                 >
-                  {mutation.isPending ? (
-                    <Loader2 className="mt-0.5 size-3.5 shrink-0 animate-spin text-primary" />
-                  ) : (
-                    <ShieldCheck className="mt-0.5 size-3.5 shrink-0 text-primary" />
-                  )}
+                  {mutation.isPending
+                    ? (
+                        <Loader2 className="mt-0.5 size-3.5 shrink-0 animate-spin text-primary" />
+                      )
+                    : (
+                        <ShieldCheck className="mt-0.5 size-3.5 shrink-0 text-primary" />
+                      )}
                   <p
-                    className="min-w-0 text-[11px] leading-5 text-muted-foreground"
                     aria-live="polite"
+                    className="min-w-0 text-[11px] leading-5 text-muted-foreground"
                   >
-                    {mutation.isPending ? (
-                      <>
-                        正在读取{' '}
-                        <span className="break-all font-mono text-foreground">{target}/~help</span>{' '}
-                        验证连接与权限…
-                      </>
-                    ) : (
-                      <>只读取 /~help 完成验证；凭据保存在本浏览器，请仅在受信任设备使用。</>
-                    )}
+                    {mutation.isPending
+                      ? (
+                          <>
+                            正在读取
+                            {' '}
+                            <span className="break-all font-mono text-foreground">
+                              {target}
+                              /~help
+                            </span>
+                            {' '}
+                            验证连接与权限…
+                          </>
+                        )
+                      : (
+                          <>只读取 /~help 完成验证；凭据保存在本浏览器，请仅在受信任设备使用。</>
+                        )}
                   </p>
                 </div>
 
                 {error && (
                   <div
+                    className="rounded-md border border-destructive/40 bg-destructive/[0.07] px-3 py-2.5 text-xs leading-5 text-destructive"
                     id="login-error"
                     role="alert"
-                    className="rounded-md border border-destructive/40 bg-destructive/[0.07] px-3 py-2.5 text-xs leading-5 text-destructive"
                   >
                     {connectionErrorMessage(error)}
                   </div>
                 )}
 
                 <Button
-                  type="submit"
-                  size="lg"
                   className="mt-1 w-full"
                   disabled={mutation.isPending || sk.trim() === ''}
+                  size="lg"
+                  type="submit"
                 >
                   {mutation.isPending ? <Loader2 className="animate-spin" /> : <KeyRound />}
                   {mutation.isPending ? '正在验证…' : '验证并接入'}

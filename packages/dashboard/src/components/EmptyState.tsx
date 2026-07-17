@@ -11,22 +11,22 @@ export function EmptyState({
   tone = 'neutral',
   className,
 }: {
+  action?: ReactNode
+  children?: ReactNode
+  className?: string
   icon: LucideIcon
   title: string
-  children?: ReactNode
-  action?: ReactNode
   /** 错误态使用 danger，避免与“当前没有数据”混淆。 */
   tone?: 'neutral' | 'danger'
-  className?: string
 }) {
   return (
     <div
-      role={tone === 'danger' ? 'alert' : undefined}
       className={cn(
         'flex flex-col items-center rounded-lg border border-dashed bg-muted/10 px-6 py-10 text-center',
         tone === 'danger' && 'border-destructive/35 bg-destructive/[0.035]',
         className,
       )}
+      role={tone === 'danger' ? 'alert' : undefined}
     >
       <div
         className={cn(

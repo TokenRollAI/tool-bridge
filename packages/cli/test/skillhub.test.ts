@@ -1,7 +1,7 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { resetFetch, setFetch } from '../src/http'
 import { runCli } from './cliHarness'
 
@@ -20,7 +20,7 @@ function captureFetch(body: unknown, status = 200): ReturnType<typeof vi.fn> {
 
 function stdoutText(): string {
   const stdout = process.stdout.write as unknown as ReturnType<typeof vi.fn>
-  return stdout.mock.calls.map((c) => String(c[0])).join('')
+  return stdout.mock.calls.map(c => String(c[0])).join('')
 }
 
 const gw = ['--base-url', 'https://gw', '--sk', 'tbk_x']
@@ -114,11 +114,11 @@ describe('tb skill publish', () => {
     const [url, init] = fn.mock.calls[0] as [string, RequestInit]
     expect(url).toBe('https://gw/skills/team')
     const body = JSON.parse(init.body as string) as {
+      arguments: { files: { content: string, path: string }[] }
       tool: string
-      arguments: { files: { path: string; content: string }[] }
     }
     expect(body.tool).toBe('Publish')
-    const paths = body.arguments.files.map((f) => f.path).sort()
+    const paths = body.arguments.files.map(f => f.path).sort()
     expect(paths).toEqual(['SKILL.md', 'scripts/run.sh'])
     expect(process.exitCode).toBe(0)
   })

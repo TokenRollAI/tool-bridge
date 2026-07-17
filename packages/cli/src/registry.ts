@@ -1,8 +1,8 @@
 import { readFileSync } from 'node:fs'
-import { apiJson, CliError, callTool, type Target } from './http'
+import type { HttpToolDef, Node, NodeInput, Virtualize } from './types'
+import { apiJson, callTool, CliError, type Target } from './http'
 import { asArray } from './output'
 import { nodePath } from './paths'
-import type { HttpToolDef, Node, NodeInput, Virtualize } from './types'
 
 /**
  * 挂载/卸载节点的共用逻辑。CLI 统一走 `~register` 注册(受限 SK 亦可用),
@@ -57,10 +57,10 @@ export async function deleteNode(
  * 无任一字段时返回 undefined(不塞空对象)。rename 在 prefix 之前应用。
  */
 export function buildVirtualize(args: {
+  describe?: unknown
+  hide?: unknown
   prefix?: unknown
   rename?: unknown
-  hide?: unknown
-  describe?: unknown
 }): Virtualize | undefined {
   const v: Virtualize = {}
 

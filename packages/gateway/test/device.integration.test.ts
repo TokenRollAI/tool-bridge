@@ -1,6 +1,6 @@
-import { SELF } from 'cloudflare:test'
-import { type DeviceFrame, decodeDeviceFrame, encodeDeviceFrame } from '@tool-bridge/core'
+import { decodeDeviceFrame, type DeviceFrame, encodeDeviceFrame } from '@tool-bridge/core'
 import { describe, expect, it } from 'vitest'
+import { SELF } from 'cloudflare:test'
 import { TEST_ADMIN_SK } from './fixtures'
 
 const adminHeaders = { authorization: `Bearer ${TEST_ADMIN_SK}` }
@@ -15,7 +15,7 @@ async function postJson(path: string, body: unknown, init: RequestInit = {}): Pr
     ...init,
     headers: {
       'content-type': 'application/json',
-      accept: 'application/json',
+      'accept': 'application/json',
       ...(init.headers ?? {}),
     },
     body: JSON.stringify(body),
@@ -55,10 +55,10 @@ function nextFrame(ws: WebSocket): Promise<DeviceFrame> {
 async function connectDevice(
   deviceId: string,
   init: {
-    sk?: string
+    fs?: { readOnly?: boolean, roots: string[] }
     mountPath?: string
     shell?: { allow?: string[] }
-    fs?: { roots: string[]; readOnly?: boolean }
+    sk?: string
   } = {},
 ): Promise<WebSocket> {
   const res = await SELF.fetch(`https://tb.test/system/device/ws?deviceId=${deviceId}`, {
@@ -185,14 +185,14 @@ describe('DeviceSession DO + /system/device/ws', () => {
     expect(await fsRes.json()).toMatchObject({ content: 'hello fs' })
 
     ws.close(1000)
-    await new Promise((resolve) => setTimeout(resolve, 20))
+    await new Promise(resolve => setTimeout(resolve, 20))
     const offline = await postJson(
       `device/${deviceId}/shell`,
       { tool: 'exec', arguments: { command: 'echo hi' } },
       admin(),
     )
     expect(offline.status).toBe(503)
-    const body = (await offline.json()) as { code: string; retryable: boolean }
+    const body = (await offline.json()) as { code: string, retryable: boolean }
     expect(body).toMatchObject({ code: 'unavailable', retryable: true })
 
     const ws2 = await connectDevice(deviceId, {

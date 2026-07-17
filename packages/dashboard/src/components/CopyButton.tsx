@@ -12,11 +12,11 @@ export function CopyButton({
   variant = 'ghost',
   className,
 }: {
-  value: string
+  className?: string
   label?: string
   size?: 'icon-xs' | 'icon-sm'
+  value: string
   variant?: 'ghost' | 'outline'
-  className?: string
 }) {
   const [copied, setCopied] = useState(false)
   const timer = useRef<ReturnType<typeof setTimeout>>(null)
@@ -34,16 +34,16 @@ export function CopyButton({
 
   return (
     <Button
-      type="button"
-      variant={variant}
-      size={size}
       aria-label={label}
-      title={label}
       className={cn(
         'text-muted-foreground hover:text-foreground focus-visible:opacity-100 group-focus-within:opacity-100',
         className,
       )}
       onClick={copy}
+      size={size}
+      title={label}
+      type="button"
+      variant={variant}
     >
       {copied ? <Check className="text-ok" /> : <Copy />}
     </Button>

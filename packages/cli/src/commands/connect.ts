@@ -1,23 +1,23 @@
 import type { DeviceExpose } from '@tool-bridge/core'
 import { Command } from 'commander'
 import { collect, resolveTarget, withGlobalOpts } from '../args'
-import { resolveDeviceId } from '../deviceId'
-import { runDeviceConnection } from '../deviceRuntime'
-import { CliError } from '../http'
 import { asArray, guard, printJson, printLine } from '../output'
+import { runDeviceConnection } from '../deviceRuntime'
+import { resolveDeviceId } from '../deviceId'
+import { CliError } from '../http'
 
 export interface ConnectArgs {
-  url?: string
-  baseUrl?: string
-  sk?: string
-  deviceId?: string
-  path?: string
   allow?: string | string[]
+  baseUrl?: string
+  deviceId?: string
   fs?: string | string[]
   fsReadonly?: boolean
+  json?: boolean
+  path?: string
   /** `--no-shell` → false;缺省(undefined)= 暴露 shell。 */
   shell?: boolean
-  json?: boolean
+  sk?: string
+  url?: string
 }
 
 export function buildExpose(args: ConnectArgs): DeviceExpose {

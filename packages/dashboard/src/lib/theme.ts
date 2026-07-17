@@ -25,7 +25,7 @@ export function useTheme(): ['dark' | 'light', () => void] {
     (cb) => {
       listeners.push(cb)
       return () => {
-        listeners = listeners.filter((l) => l !== cb)
+        listeners = listeners.filter(l => l !== cb)
       }
     },
     currentTheme,

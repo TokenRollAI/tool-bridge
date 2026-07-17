@@ -10,10 +10,10 @@
  */
 
 export interface Frontmatter {
-  /** 顶层标量键值对(值已 trim、去引号)。 */
-  meta: Record<string, string>
   /** frontmatter 之后的正文;无 frontmatter 时为整段内容。 */
   body: string
+  /** 顶层标量键值对(值已 trim、去引号)。 */
+  meta: Record<string, string>
 }
 
 /** 去掉成对的首尾单/双引号(仅一层)。 */
@@ -22,7 +22,7 @@ function unquote(v: string): string {
   if (s.length >= 2) {
     const first = s[0]
     const last = s[s.length - 1]
-    if ((first === '"' && last === '"') || (first === "'" && last === "'")) {
+    if ((first === '"' && last === '"') || (first === '\'' && last === '\'')) {
       return s.slice(1, -1)
     }
   }

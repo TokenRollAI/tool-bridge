@@ -26,37 +26,31 @@ export function clampDepth(depth: number | undefined): number {
 
 /** `getChildren` 返回的子节点条目。 */
 export interface TreeEntry {
-  path: TreePath
-  kind: NodeKind
   description: string
+  kind: NodeKind
   /** 仅 device:连接状态。 */
   online?: boolean
+  path: TreePath
 }
 
 /** `~tree` 响应形状(规范性);递归。 */
 export interface TreeJson {
-  path: TreePath
-  kind: NodeKind
+  children?: TreeJson[]
   description: string
+  kind: NodeKind
   online?: boolean
+  path: TreePath
   /** 深度上限 / 节点上限 / 环检测截断。 */
   truncated?: boolean
-  children?: TreeJson[]
 }
 
 export interface BuildTreeOpts {
-  root: TreePath
   /** 已钳制的深度(调用方先过 clampDepth)。 */
   depth: number
-  /** 节点上限,缺省 500。 */
-  maxNodes?: number
   /** 拉取某路径的直接子节点(宿主已做可见性裁剪)。 */
   getChildren: (path: TreePath) => Promise<TreeEntry[]>
-  /**
-   * 根节点自身的元数据(kind/description/online)。提供则用它——网关传真实节点,
-   * 避免子树根被伪造为 `directory`;缺省回退 `kind:'directory', description:''`。
-   */
-  rootEntry?: TreeEntry
+  /** 节点上限,缺省 500。 */
+  maxNodes?: number
   /**
    * 「不透明」kind 集合:这些 kind 的节点在深度边界(`depthLeft<=0`)直接标 `truncated`,
    * 不调 `getChildren` 探测有无子。用于 remote 联邦节点——它必然可能有远端子,无需为标
@@ -64,6 +58,12 @@ export interface BuildTreeOpts {
    * `depthLeft>0` 时的实际聚合。
    */
   opaqueKinds?: Set<string>
+  root: TreePath
+  /**
+   * 根节点自身的元数据(kind/description/online)。提供则用它——网关传真实节点,
+   * 避免子树根被伪造为 `directory`;缺省回退 `kind:'directory', description:''`。
+   */
+  rootEntry?: TreeEntry
 }
 
 /**

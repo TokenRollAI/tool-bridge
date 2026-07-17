@@ -5,8 +5,8 @@
  * 保留段(以 '~' 开头)不得作为普通路径段。
  */
 
-import { TBError } from '../errors'
 import type { TreePath } from '../types'
+import { TBError } from '../errors'
 
 /**
  * 去首尾 '/'。内部空段(来自 '//')不在此折叠,交由 {@link validatePath} 判非法,

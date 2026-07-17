@@ -21,17 +21,17 @@
  * 失败落回「重新授权」指引,可自救。多域名网关:redirect_uri 钉在发起授权时的 origin。
  */
 
-import {
-  auth,
-  type OAuthClientProvider,
-  type OAuthDiscoveryState,
-} from '@modelcontextprotocol/sdk/client/auth.js'
 import type {
   OAuthClientInformationFull,
   OAuthClientInformationMixed,
   OAuthClientMetadata,
   OAuthTokens,
 } from '@modelcontextprotocol/sdk/shared/auth.js'
+import {
+  auth,
+  type OAuthClientProvider,
+  type OAuthDiscoveryState,
+} from '@modelcontextprotocol/sdk/client/auth.js'
 import { base64urlDecode, base64urlEncode, type StateStore, TBError } from '@tool-bridge/core'
 
 /** 回调路径(固定值:DCR 注册的 redirect_uri 尾段;树外免认证,state 即凭证)。 */
@@ -67,10 +67,10 @@ export function reauthorizeRequired(nodePath: string): TBError {
  * 回调时走 CLI 本地回调通道,token 兑换必须复用同一 redirect_uri)。
  */
 export interface OAuthStatePayload {
-  p: string
-  v: string
   exp: number
+  p: string
   r?: string
+  v: string
 }
 
 /**
@@ -116,10 +116,10 @@ export async function openOAuthState(
     )
     const payload = JSON.parse(new TextDecoder().decode(plain)) as OAuthStatePayload
     if (
-      typeof payload.p !== 'string' ||
-      typeof payload.v !== 'string' ||
-      typeof payload.exp !== 'number' ||
-      (payload.r !== undefined && typeof payload.r !== 'string')
+      typeof payload.p !== 'string'
+      || typeof payload.v !== 'string'
+      || typeof payload.exp !== 'number'
+      || (payload.r !== undefined && typeof payload.r !== 'string')
     ) {
       return null
     }
@@ -132,8 +132,6 @@ export async function openOAuthState(
 // ---------- OAuthClientProvider(StateStore 支撑) ----------
 
 export interface McpOAuthProviderOpts {
-  store: StateStore
-  nodePath: string
   /** TB_SECRET_ENCRYPTION_KEY 原文(state 加密密钥派生源)。 */
   encryptionKey: string
   /**
@@ -141,6 +139,7 @@ export interface McpOAuthProviderOpts {
    * 'deny':数据面消费,只允许静默刷新;要走交互授权即抛 reauthorizeRequired。
    */
   mode: 'interactive' | 'deny'
+  nodePath: string
   /**
    * 授权流所在网关 origin(redirect_uri = `<origin>/~oauth/callback`)。
    * deny 模式不发起交互,占位 .invalid 域仅用于满足 SDK 的非空判定(交互路径必抛)。
@@ -152,6 +151,7 @@ export interface McpOAuthProviderOpts {
    * 与 state 载荷(兑换必须复用同一 redirect_uri)。
    */
   redirectUri?: string
+  store: StateStore
 }
 
 export class GatewayMcpOAuthProvider implements OAuthClientProvider {
@@ -260,20 +260,20 @@ export class GatewayMcpOAuthProvider implements OAuthClientProvider {
 // ---------- 流程编排(tbApp 调用面) ----------
 
 export interface McpOAuthFlowOpts {
-  store: StateStore
   encryptionKey: string
   nodePath: string
-  /** mcp 节点 config.url(资源服务器;discovery 起点)。 */
-  serverUrl: string
   /** 当前请求的网关 origin。 */
   origin: string
   /** 显式 redirect_uri(CLI 本地回调通道;仅允许 localhost,startMcpAuthorization 校验)。 */
   redirectUri?: string
+  /** mcp 节点 config.url(资源服务器;discovery 起点)。 */
+  serverUrl: string
+  store: StateStore
 }
 
-export type StartAuthorizationResult =
-  | { status: 'authorized' }
-  | { status: 'redirect'; authorizationUrl: string }
+export type StartAuthorizationResult
+  = | { status: 'authorized' }
+    | { authorizationUrl: string, status: 'redirect' }
 
 /**
  * 校验 CLI 本地回调通道的 redirect_uri:只放行 http://localhost|127.0.0.1|[::1](任意端口
@@ -353,7 +353,7 @@ export async function startMcpAuthorization(
  * 兑换 code → token 落 StateStore。
  */
 export async function finishMcpAuthorization(
-  opts: McpOAuthFlowOpts & { code: string; codeVerifier: string },
+  opts: McpOAuthFlowOpts & { code: string, codeVerifier: string },
 ): Promise<void> {
   const provider = new GatewayMcpOAuthProvider({
     store: opts.store,

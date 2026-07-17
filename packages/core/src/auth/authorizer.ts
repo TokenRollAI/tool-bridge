@@ -12,7 +12,7 @@ export function check(
   ctx: CallContext,
   path: TreePath,
   action: Action,
-): { allow: boolean; reason?: string } {
+): { allow: boolean, reason?: string } {
   if (checkScopes(ctx.scopes, path, action)) return { allow: true }
   return { allow: false, reason: `no scope grants '${action}' on '${path || '/'}'` }
 }

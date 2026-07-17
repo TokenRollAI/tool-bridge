@@ -7,7 +7,6 @@
  * SDK 与 curl 等价。
  */
 
-import { serve } from '@hono/node-server'
 import {
   MemoryObjectStore,
   MemoryStateStore,
@@ -16,6 +15,7 @@ import {
   type ToolSpec,
 } from '@tool-bridge/core'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
+import { serve } from '@hono/node-server'
 import { createToolBridge, type ToolBridge } from '../src'
 
 const ADMIN_SK = 'tbk_sdk_test_admin_0000000000'
@@ -43,8 +43,8 @@ function echoProvider() {
 
 /** 极简内存 ContextProvider(四动词;无 Search/Delete → 可选能力不出现)。 */
 function memoryContextProvider() {
-  const entries = new Map<string, { content: unknown; version: number; updatedAt: string }>()
-  const meta = (path: string, e: { version: number; updatedAt: string }) => ({
+  const entries = new Map<string, { content: unknown, updatedAt: string, version: number }>()
+  const meta = (path: string, e: { updatedAt: string, version: number }) => ({
     uri: `node://notes/${path}`,
     contentType: 'text/markdown',
     version: String(e.version),
@@ -87,9 +87,9 @@ function memoryContextProvider() {
 }
 
 interface Harness {
-  tb: ToolBridge
   baseUrl: string
   close: () => void
+  tb: ToolBridge
 }
 
 async function startHarness(config?: { encryptionKey?: string }): Promise<Harness> {
@@ -139,7 +139,7 @@ describe('createToolBridge:本地 HTTP(@hono/node-server)', () => {
   it('healthz 免认证可达', async () => {
     const res = await fetch(`${h.baseUrl}/healthz`)
     expect(res.status).toBe(200)
-    const body = (await res.json()) as { healthy: boolean; version: string }
+    const body = (await res.json()) as { healthy: boolean, version: string }
     expect(body.healthy).toBe(true)
   })
 
@@ -157,7 +157,7 @@ describe('createToolBridge:本地 HTTP(@hono/node-server)', () => {
     const help = await call(h, 'tools/echo/~help')
     expect(help.status).toBe(200)
     const model = (await help.json()) as { cmds: Array<{ name: string }> }
-    expect(model.cmds.map((c) => c.name)).toContain('echo')
+    expect(model.cmds.map(c => c.name)).toContain('echo')
   })
 
   it('POST 调用本地函数工具成功返回', async () => {
@@ -274,9 +274,9 @@ describe('createToolBridge:配置语义', () => {
         new Request('http://tb.local/system/secret', {
           method: 'POST',
           headers: {
-            authorization: `Bearer ${ADMIN_SK}`,
+            'authorization': `Bearer ${ADMIN_SK}`,
             'content-type': 'application/json',
-            accept: 'application/json',
+            'accept': 'application/json',
           },
           body: JSON.stringify({ tool: 'set', arguments: { name: 'k', value: 'v' } }),
         }),
@@ -300,9 +300,9 @@ describe('createToolBridge:配置语义', () => {
       new Request('http://tb.local/corp/x/~register', {
         method: 'POST',
         headers: {
-          authorization: `Bearer ${ADMIN_SK}`,
+          'authorization': `Bearer ${ADMIN_SK}`,
           'content-type': 'application/json',
-          accept: 'application/json',
+          'accept': 'application/json',
         },
         body: JSON.stringify({ path: 'corp/x', kind: 'directory', description: 'nope' }),
       }),
@@ -313,9 +313,9 @@ describe('createToolBridge:配置语义', () => {
       new Request('http://tb.local/free/x/~register', {
         method: 'POST',
         headers: {
-          authorization: `Bearer ${ADMIN_SK}`,
+          'authorization': `Bearer ${ADMIN_SK}`,
           'content-type': 'application/json',
-          accept: 'application/json',
+          'accept': 'application/json',
         },
         body: JSON.stringify({ path: 'free/x', kind: 'directory', description: 'ok' }),
       }),
@@ -326,9 +326,9 @@ describe('createToolBridge:配置语义', () => {
   it('objects 未注入:r2 provider → 503 unavailable', async () => {
     const tb = createToolBridge({ state: new MemoryStateStore(), adminSk: ADMIN_SK })
     const headers = {
-      authorization: `Bearer ${ADMIN_SK}`,
+      'authorization': `Bearer ${ADMIN_SK}`,
       'content-type': 'application/json',
-      accept: 'application/json',
+      'accept': 'application/json',
     }
     const mount = await tb.fetch(
       new Request('http://tb.local/system/registry', {

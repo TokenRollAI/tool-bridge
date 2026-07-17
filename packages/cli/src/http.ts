@@ -15,7 +15,7 @@ export class CliError extends Error {
   /** 附加提示(如 ~feedback 已知坑),reportError 在主错误后落地。 */
   hint?: string
   /** 该 path 的 feedback 头部条目(--json 时结构化输出)。 */
-  feedback?: Array<{ id: string; title: string; score: number }>
+  feedback?: Array<{ id: string, score: number, title: string }>
   constructor(message: string, code?: string, retryable?: boolean) {
     super(message)
     this.name = 'CliError'
@@ -32,7 +32,7 @@ export interface Target {
 }
 
 /** 断言已解析出 baseUrl;否则给出可操作的错误提示。 */
-export function requireTarget(target: Target): { baseUrl: string; sk?: string } {
+export function requireTarget(target: Target): { baseUrl: string, sk?: string } {
   if (!target.baseUrl) {
     throw new CliError('missing base URL: run `tb login`, pass --base-url, or set TB_BASE_URL')
   }
@@ -51,18 +51,18 @@ export function resetFetch(): void {
 }
 
 export interface ApiOptions {
+  accept?: 'json' | 'text' | 'markdown'
+  body?: unknown
   method?: 'GET' | 'POST' | 'DELETE'
   path: string
   query?: Record<string, string | number | undefined>
-  body?: unknown
-  accept?: 'json' | 'text' | 'markdown'
 }
 
 export interface ApiResult {
-  status: number
-  ok: boolean
-  text: string
   contentType: string
+  ok: boolean
+  status: number
+  text: string
 }
 
 function buildQuery(query?: ApiOptions['query']): string {
@@ -126,13 +126,13 @@ export async function apiFetch(target: Target, opts: ApiOptions): Promise<ApiRes
 /** 把非 2xx 响应体解释为 TBError(拿不到规范形状则回退到 HTTP 码)。 */
 function toCliError(body: unknown, status: number): CliError {
   if (
-    body &&
-    typeof body === 'object' &&
-    'code' in body &&
-    'message' in body &&
-    typeof (body as { message: unknown }).message === 'string'
+    body
+    && typeof body === 'object'
+    && 'code' in body
+    && 'message' in body
+    && typeof (body as { message: unknown }).message === 'string'
   ) {
-    const b = body as { code: unknown; message: string; retryable?: unknown }
+    const b = body as { code: unknown, message: string, retryable?: unknown }
     const retryable = typeof b.retryable === 'boolean' ? b.retryable : undefined
     return new CliError(b.message, String(b.code), retryable)
   }

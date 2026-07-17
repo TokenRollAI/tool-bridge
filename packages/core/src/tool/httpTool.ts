@@ -4,8 +4,8 @@
  * 全部为 **core 纯逻辑**:只计算 `{url, method, body, headers}`,不发 fetch(gateway 拿去发)。
  */
 
-import { TBError } from '../errors'
 import type { HttpToolDef } from '../types'
+import { TBError } from '../errors'
 
 export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'DELETE'
 /** 工具副作用词汇(统一集合)。 */
@@ -13,11 +13,11 @@ export type HttpEffect = 'read' | 'write' | 'destructive'
 
 /** buildHttpRequest 的产物:gateway 据此发 fetch。 */
 export interface BuiltHttpRequest {
-  url: string
-  method: string
   /** GET/DELETE 无 body;POST/PUT 为剩余 args 的 JSON。 */
   body?: string
   headers: Record<string, string>
+  method: string
+  url: string
 }
 
 /** pathTemplate 的 `{param}` 占位(不含嵌套花括号)。 */
@@ -83,7 +83,7 @@ export function buildHttpRequest(
 /**
  * 工具的 effect(副作用词汇):显式 `effect` 优先;缺省派生——GET→read,其余→write。
  */
-export function effectFor(def: { method: HttpMethod; effect?: HttpEffect }): HttpEffect {
+export function effectFor(def: { effect?: HttpEffect, method: HttpMethod }): HttpEffect {
   if (def.effect !== undefined) return def.effect
   return def.method === 'GET' ? 'read' : 'write'
 }
@@ -93,12 +93,12 @@ export function effectFor(def: { method: HttpMethod; effect?: HttpEffect }): Htt
  * `authScheme` 为空串 → 原样注入 secret 值(无 scheme 前缀)。返回 `[headerName, headerValue]`。
  */
 export function authHeaderFor(
-  config: { authHeader?: string; authScheme?: string },
+  config: { authHeader?: string, authScheme?: string },
   secret: string,
 ): [string, string] {
   const name = config.authHeader ?? 'Authorization'
   const scheme = config.authScheme
-  const value =
-    scheme === undefined ? `Bearer ${secret}` : scheme === '' ? secret : `${scheme} ${secret}`
+  const value
+    = scheme === undefined ? `Bearer ${secret}` : scheme === '' ? secret : `${scheme} ${secret}`
   return [name, value]
 }

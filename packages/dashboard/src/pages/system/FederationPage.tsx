@@ -1,4 +1,3 @@
-import { useQueryClient } from '@tanstack/react-query'
 import {
   CheckCircle2,
   Globe,
@@ -11,13 +10,10 @@ import {
   ShieldAlert,
   Trash2,
 } from 'lucide-react'
+import { useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { toast } from 'sonner'
-import { ConfirmAction } from '@/components/ConfirmAction'
-import { EmptyState } from '@/components/EmptyState'
-import { PageHeader } from '@/components/PageHeader'
-import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
+import type { FederationHost } from '@/lib/types'
 import {
   Dialog,
   DialogContent,
@@ -27,9 +23,6 @@ import {
   DialogTitle,
   DialogTrigger,
 } from '@/components/ui/dialog'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { Skeleton } from '@/components/ui/skeleton'
 import {
   Table,
   TableBody,
@@ -39,11 +32,18 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { useFederationList, useInvoke } from '@/lib/queries'
-import type { FederationHost } from '@/lib/types'
+import { ConfirmAction } from '@/components/ConfirmAction'
+import { EmptyState } from '@/components/EmptyState'
+import { PageHeader } from '@/components/PageHeader'
+import { Skeleton } from '@/components/ui/skeleton'
+import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 
 interface HostPreview {
-  normalized: string
   error?: string
+  normalized: string
 }
 
 /** 与 core normalizeAllowHost 对齐的即时反馈；服务端仍是最终校验入口。 */
@@ -69,8 +69,8 @@ export function FederationPage() {
   const invoke = useInvoke()
   const qc = useQueryClient()
   const items = list.data?.items ?? []
-  const envItems = items.filter((item) => item.source === 'env')
-  const runtimeItems = items.filter((item) => item.source === 'store')
+  const envItems = items.filter(item => item.source === 'env')
+  const runtimeItems = items.filter(item => item.source === 'store')
 
   const remove = async (host: string) => {
     try {
@@ -86,10 +86,10 @@ export function FederationPage() {
   return (
     <div className="mx-auto max-w-7xl px-4 py-5 sm:px-6 sm:py-6 lg:px-8 lg:py-8">
       <PageHeader
+        actions={<AddHostDialog />}
+        description="控制 kind=remote 节点可以连接的 HTBP 主机；空白名单意味着拒绝全部联邦出站。"
         eyebrow="NETWORK / FEDERATION"
         title="联邦出站边界"
-        description="控制 kind=remote 节点可以连接的 HTBP 主机；空白名单意味着拒绝全部联邦出站。"
-        actions={<AddHostDialog />}
       />
 
       <section className="mt-6 overflow-hidden rounded-xl border border-primary/20 bg-card/65">
@@ -120,71 +120,77 @@ export function FederationPage() {
       </section>
 
       <div className="mt-4 grid gap-3 sm:grid-cols-3">
-        <MetricCard icon={Globe} label="当前生效" value={items.length} suffix="hosts" />
-        <MetricCard icon={Lock} label="部署基线" value={envItems.length} suffix="env" />
+        <MetricCard icon={Globe} label="当前生效" suffix="hosts" value={items.length} />
+        <MetricCard icon={Lock} label="部署基线" suffix="env" value={envItems.length} />
         <MetricCard
           icon={ServerCog}
           label="运行时叠加"
-          value={runtimeItems.length}
           suffix="runtime"
+          value={runtimeItems.length}
         />
       </div>
 
-      {list.isPending ? (
-        <div className="mt-4 grid gap-3 rounded-lg border bg-card/45 p-4">
-          <Skeleton className="h-12 w-full" />
-          <Skeleton className="h-12 w-5/6" />
-        </div>
-      ) : list.isError ? (
-        <EmptyState
-          icon={Globe}
-          title="白名单读取失败"
-          tone="danger"
-          className="mt-4"
-          action={
-            <Button variant="outline" size="sm" onClick={() => void list.refetch()}>
-              <RefreshCw />
-              重试
-            </Button>
-          }
-        >
-          <p>{list.error.message}</p>
-        </EmptyState>
-      ) : (
-        <div className="mt-4 grid gap-4 xl:grid-cols-2">
-          <HostLayer
-            icon={Lock}
-            title="部署基线"
-            badge="ENV"
-            description="来自 TB_REMOTE_ALLOWLIST。作为只读安全基线，修改后需重新部署。"
-            items={envItems}
-            empty="当前部署没有配置 env 基线。"
-          />
-          <HostLayer
-            icon={ServerCog}
-            title="运行时叠加"
-            badge="RUNTIME"
-            description="由管理员即时增删并持久化；与部署基线取并集后生效。"
-            items={runtimeItems}
-            empty="还没有运行时 host；可以按需添加最小后缀。"
-            onRemove={remove}
-          />
-        </div>
-      )}
+      {list.isPending
+        ? (
+            <div className="mt-4 grid gap-3 rounded-lg border bg-card/45 p-4">
+              <Skeleton className="h-12 w-full" />
+              <Skeleton className="h-12 w-5/6" />
+            </div>
+          )
+        : list.isError
+          ? (
+              <EmptyState
+                action={(
+                  <Button onClick={() => void list.refetch()} size="sm" variant="outline">
+                    <RefreshCw />
+                    重试
+                  </Button>
+                )}
+                className="mt-4"
+                icon={Globe}
+                title="白名单读取失败"
+                tone="danger"
+              >
+                <p>{list.error.message}</p>
+              </EmptyState>
+            )
+          : (
+              <div className="mt-4 grid gap-4 xl:grid-cols-2">
+                <HostLayer
+                  badge="ENV"
+                  description="来自 TB_REMOTE_ALLOWLIST。作为只读安全基线，修改后需重新部署。"
+                  empty="当前部署没有配置 env 基线。"
+                  icon={Lock}
+                  items={envItems}
+                  title="部署基线"
+                />
+                <HostLayer
+                  badge="RUNTIME"
+                  description="由管理员即时增删并持久化；与部署基线取并集后生效。"
+                  empty="还没有运行时 host；可以按需添加最小后缀。"
+                  icon={ServerCog}
+                  items={runtimeItems}
+                  onRemove={remove}
+                  title="运行时叠加"
+                />
+              </div>
+            )}
     </div>
   )
 }
 
-function MatchExample({ ok = false, value }: { ok?: boolean; value: string }) {
+function MatchExample({ ok = false, value }: { ok?: boolean, value: string }) {
   return (
     <div className="flex items-center gap-2 text-muted-foreground">
-      {ok ? (
-        <CheckCircle2 className="size-3.5 shrink-0 text-ok" />
-      ) : (
-        <span className="grid size-3.5 shrink-0 place-items-center rounded-full border text-[8px]">
-          ×
-        </span>
-      )}
+      {ok
+        ? (
+            <CheckCircle2 className="size-3.5 shrink-0 text-ok" />
+          )
+        : (
+            <span className="grid size-3.5 shrink-0 place-items-center rounded-full border text-[8px]">
+              ×
+            </span>
+          )}
       <span>{value}</span>
     </div>
   )
@@ -198,8 +204,8 @@ function MetricCard({
 }: {
   icon: typeof Globe
   label: string
-  value: number
   suffix: string
+  value: number
 }) {
   return (
     <div className="rounded-lg border bg-card/55 p-4">
@@ -226,13 +232,13 @@ function HostLayer({
   empty,
   onRemove,
 }: {
-  icon: typeof Globe
-  title: string
   badge: string
   description: string
-  items: FederationHost[]
   empty: string
+  icon: typeof Globe
+  items: FederationHost[]
   onRemove?: (host: string) => Promise<void>
+  title: string
 }) {
   return (
     <section className="overflow-hidden rounded-lg border bg-card/45">
@@ -243,7 +249,7 @@ function HostLayer({
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
             <h2 className="text-sm font-semibold">{title}</h2>
-            <Badge variant="outline" className="font-mono text-[9px] tracking-[0.12em]">
+            <Badge className="font-mono text-[9px] tracking-[0.12em]" variant="outline">
               {badge}
             </Badge>
           </div>
@@ -252,55 +258,57 @@ function HostLayer({
         <span className="font-mono text-xs text-muted-foreground tabular-nums">{items.length}</span>
       </div>
 
-      {items.length === 0 ? (
-        <div className="flex min-h-32 items-center justify-center px-6 py-8 text-center text-xs text-muted-foreground">
-          {empty}
-        </div>
-      ) : (
-        <Table className="min-w-[520px]">
-          <TableHeader>
-            <TableRow>
-              <TableHead>Host suffix</TableHead>
-              <TableHead className="w-40">更新时间</TableHead>
-              {onRemove && (
-                <TableHead className="w-16">
-                  <span className="sr-only">操作</span>
-                </TableHead>
-              )}
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {items.map((item) => (
-              <TableRow key={item.host}>
-                <TableCell>
-                  <div className="flex items-center gap-2.5">
-                    <span className="size-1.5 shrink-0 rounded-full bg-primary" />
-                    <code className="font-mono text-xs">{item.host}</code>
-                  </div>
-                </TableCell>
-                <TableCell className="font-mono text-[10px] text-muted-foreground">
-                  {item.updatedAt ? new Date(item.updatedAt).toLocaleString() : '随部署生效'}
-                </TableCell>
-                {onRemove && (
-                  <TableCell>
-                    <ConfirmAction
-                      title={`从白名单移除 ${item.host}?`}
-                      description={<p>指向该 host 的 remote 节点将在下次调用或挂载时被拒绝。</p>}
-                      actionLabel="移除"
-                      onConfirm={() => onRemove(item.host)}
-                      trigger={
-                        <Button variant="ghost" size="icon-sm" aria-label={`移除 ${item.host}`}>
-                          <Trash2 className="text-destructive" />
-                        </Button>
-                      }
-                    />
-                  </TableCell>
-                )}
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      )}
+      {items.length === 0
+        ? (
+            <div className="flex min-h-32 items-center justify-center px-6 py-8 text-center text-xs text-muted-foreground">
+              {empty}
+            </div>
+          )
+        : (
+            <Table className="min-w-[520px]">
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Host suffix</TableHead>
+                  <TableHead className="w-40">更新时间</TableHead>
+                  {onRemove && (
+                    <TableHead className="w-16">
+                      <span className="sr-only">操作</span>
+                    </TableHead>
+                  )}
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {items.map(item => (
+                  <TableRow key={item.host}>
+                    <TableCell>
+                      <div className="flex items-center gap-2.5">
+                        <span className="size-1.5 shrink-0 rounded-full bg-primary" />
+                        <code className="font-mono text-xs">{item.host}</code>
+                      </div>
+                    </TableCell>
+                    <TableCell className="font-mono text-[10px] text-muted-foreground">
+                      {item.updatedAt ? new Date(item.updatedAt).toLocaleString() : '随部署生效'}
+                    </TableCell>
+                    {onRemove && (
+                      <TableCell>
+                        <ConfirmAction
+                          actionLabel="移除"
+                          description={<p>指向该 host 的 remote 节点将在下次调用或挂载时被拒绝。</p>}
+                          onConfirm={() => onRemove(item.host)}
+                          title={`从白名单移除 ${item.host}?`}
+                          trigger={(
+                            <Button aria-label={`移除 ${item.host}`} size="icon-sm" variant="ghost">
+                              <Trash2 className="text-destructive" />
+                            </Button>
+                          )}
+                        />
+                      </TableCell>
+                    )}
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
     </section>
   )
 }
@@ -348,7 +356,7 @@ function AddHostDialog() {
             setErr(null)
             qc.invalidateQueries({ queryKey: ['tb'] })
           },
-          onError: (e) => setErr(e.message),
+          onError: e => setErr(e.message),
         },
       )
       .catch(() => undefined)
@@ -358,7 +366,7 @@ function AddHostDialog() {
   const isIpv6 = preview.normalized.startsWith('[')
 
   return (
-    <Dialog open={open} onOpenChange={changeOpen}>
+    <Dialog onOpenChange={changeOpen} open={open}>
       <DialogTrigger asChild>
         <Button size="sm">
           <Plus />
@@ -374,16 +382,14 @@ function AddHostDialog() {
         </DialogHeader>
 
         <div className="grid gap-2">
-          <Label htmlFor="fed-host" className="text-xs">
+          <Label className="text-xs" htmlFor="fed-host">
             Host suffix
           </Label>
           <Input
-            id="fed-host"
-            className="font-mono text-sm"
-            placeholder="example.com"
-            autoComplete="off"
-            value={host}
             aria-invalid={Boolean(err || preview.error)}
+            autoComplete="off"
+            className="font-mono text-sm"
+            id="fed-host"
             onChange={(event) => {
               setHost(event.target.value)
               setErr(null)
@@ -391,6 +397,8 @@ function AddHostDialog() {
             onKeyDown={(event) => {
               if (event.key === 'Enter' && canSubmit && !invoke.isPending) void submit()
             }}
+            placeholder="example.com"
+            value={host}
           />
           {(err || preview.error) && (
             <p className="text-xs text-destructive" role="alert">
@@ -404,34 +412,39 @@ function AddHostDialog() {
             <Layers3 className="size-3.5" />
             规范化与命中预览
           </div>
-          {preview.normalized && !preview.error ? (
-            <div className="mt-3 grid gap-2 font-mono text-xs">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <span className="text-muted-foreground">保存为</span>
-                <code className="rounded border bg-background px-2 py-1 text-foreground">
-                  {preview.normalized}
-                </code>
-              </div>
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <span className="text-muted-foreground">将允许</span>
-                <code className="text-ok">
-                  {isIpv6
-                    ? preview.normalized
-                    : `${preview.normalized} · api.${preview.normalized}`}
-                </code>
-              </div>
-              {!isIpv6 && (
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <span className="text-muted-foreground">不会允许</span>
-                  <code className="text-muted-foreground">{preview.normalized}.evil.test</code>
+          {preview.normalized && !preview.error
+            ? (
+                <div className="mt-3 grid gap-2 font-mono text-xs">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="text-muted-foreground">保存为</span>
+                    <code className="rounded border bg-background px-2 py-1 text-foreground">
+                      {preview.normalized}
+                    </code>
+                  </div>
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="text-muted-foreground">将允许</span>
+                    <code className="text-ok">
+                      {isIpv6
+                        ? preview.normalized
+                        : `${preview.normalized} · api.${preview.normalized}`}
+                    </code>
+                  </div>
+                  {!isIpv6 && (
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <span className="text-muted-foreground">不会允许</span>
+                      <code className="text-muted-foreground">
+                        {preview.normalized}
+                        .evil.test
+                      </code>
+                    </div>
+                  )}
                 </div>
+              )
+            : (
+                <p className="mt-3 text-xs leading-5 text-muted-foreground">
+                  输入后会转换为小写并去除首尾空白；服务端仍会执行最终校验。
+                </p>
               )}
-            </div>
-          ) : (
-            <p className="mt-3 text-xs leading-5 text-muted-foreground">
-              输入后会转换为小写并去除首尾空白；服务端仍会执行最终校验。
-            </p>
-          )}
         </div>
 
         <DialogFooter className="border-t pt-4">

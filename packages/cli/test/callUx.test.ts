@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { resolveTarget } from '../src/args'
 import { parseCallArgs } from '../src/commands/call'
 import { resetFetch, setFetch } from '../src/http'
+import { resolveTarget } from '../src/args'
 import { runCli } from './cliHarness'
 
 /**
@@ -13,7 +13,7 @@ import { runCli } from './cliHarness'
 
 /** 按调用序应答的 fetch mock(Error 项 → 抛出)。 */
 function sequenceFetch(
-  responses: Array<{ body: unknown; status?: number } | Error>,
+  responses: Array<{ body: unknown, status?: number } | Error>,
 ): ReturnType<typeof vi.fn> {
   let i = 0
   const fn = vi.fn(async () => {
@@ -31,7 +31,7 @@ function sequenceFetch(
 
 function written(stream: NodeJS.WriteStream): string {
   return (stream.write as unknown as ReturnType<typeof vi.fn>).mock.calls
-    .map((c) => String(c[0]))
+    .map(c => String(c[0]))
     .join('')
 }
 
@@ -50,7 +50,7 @@ afterEach(() => {
 })
 
 describe('tb call — positional JSON arguments', () => {
-  it("第二 positional 即 arguments 本体:tb call <tool> '{...}'", async () => {
+  it('第二 positional 即 arguments 本体:tb call <tool> \'{...}\'', async () => {
     const fn = sequenceFetch([{ body: { ok: true } }])
     await runCli(['call', 'docs/ctx7/resolve', '{"libraryName":"react"}', '--json', ...GLOBALS])
     const [url, init] = fn.mock.calls[0] as unknown as [string, RequestInit]
@@ -59,7 +59,7 @@ describe('tb call — positional JSON arguments', () => {
     expect(process.exitCode).toBe(0)
   })
 
-  it("误写形态 `--json '{...}'` 自然工作(--json 是输出开关,JSON 滑为 positional args)", async () => {
+  it('误写形态 `--json \'{...}\'` 自然工作(--json 是输出开关,JSON 滑为 positional args)', async () => {
     const fn = sequenceFetch([{ body: { ok: true } }])
     await runCli(['call', 'docs/ctx7/resolve', '--json', '{"libraryName":"react"}', ...GLOBALS])
     const [, init] = fn.mock.calls[0] as unknown as [string, RequestInit]

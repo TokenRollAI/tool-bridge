@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { renderTree } from '../src/commands/tree'
 import type { TreeJson } from '../src/types'
+import { renderTree } from '../src/commands/tree'
 
 describe('renderTree 缩进树渲染', () => {
   it('渲染层级缩进 + 描述', () => {

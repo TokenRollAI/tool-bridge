@@ -7,8 +7,8 @@ interface HealthzBody {
 }
 
 interface StatusOpts {
-  json?: boolean
   baseUrl?: string
+  json?: boolean
   sk?: string
 }
 

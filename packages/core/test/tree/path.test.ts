@@ -75,11 +75,11 @@ describe('parentPaths', () => {
 })
 
 describe('isPrefixOf(按段,非字符串前缀)', () => {
-  it("'a/b' 是 'a/b/c' 前缀", () => {
+  it('\'a/b\' 是 \'a/b/c\' 前缀', () => {
     expect(isPrefixOf('a/b', 'a/b/c')).toBe(true)
   })
 
-  it("'a/bx' 不是 'a/b/c' 前缀(字符串前缀但非段前缀)", () => {
+  it('\'a/bx\' 不是 \'a/b/c\' 前缀(字符串前缀但非段前缀)', () => {
     expect(isPrefixOf('a/bx', 'a/b/c')).toBe(false)
   })
 

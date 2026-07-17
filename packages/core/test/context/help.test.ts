@@ -7,7 +7,7 @@ describe('contextHelpModel', () => {
   it('六 cmd 首字母大写,scope:List/Get/Search=read,Write/Update/Delete=write', () => {
     const help = contextHelpModel(node)
     expect(help.node).toEqual({ path: 'ctx/main', kind: 'context', description: 'main context' })
-    expect(help.cmds.map((c) => c.name)).toEqual([
+    expect(help.cmds.map(c => c.name)).toEqual([
       'List',
       'Get',
       'Write',
@@ -15,7 +15,7 @@ describe('contextHelpModel', () => {
       'Delete',
       'Search',
     ])
-    const scopeOf = (name: string) => help.cmds.find((c) => c.name === name)?.scope
+    const scopeOf = (name: string) => help.cmds.find(c => c.name === name)?.scope
     for (const name of ['List', 'Get', 'Search']) expect(scopeOf(name)).toBe('read')
     for (const name of ['Write', 'Update', 'Delete']) expect(scopeOf(name)).toBe('write')
     for (const c of help.cmds) {
@@ -27,10 +27,10 @@ describe('contextHelpModel', () => {
   it('inputSchema 为真 JSON Schema(arguments 形状与接口签名一致)', () => {
     const help = contextHelpModel(node)
     const schemaOf = (name: string) =>
-      help.cmds.find((c) => c.name === name)?.inputSchema as {
-        type: string
-        required?: string[]
+      help.cmds.find(c => c.name === name)?.inputSchema as {
         properties: Record<string, unknown>
+        required?: string[]
+        type: string
       }
     expect(Object.keys(schemaOf('List').properties).sort()).toEqual(['opts', 'path'])
     expect(schemaOf('Get').required).toEqual(['path'])
@@ -42,7 +42,7 @@ describe('contextHelpModel', () => {
 
   it('readOnly 隐藏 Write/Update/Delete(决策 D11)', () => {
     const help = contextHelpModel(node, { readOnly: true })
-    expect(help.cmds.map((c) => c.name)).toEqual(['List', 'Get', 'Search'])
+    expect(help.cmds.map(c => c.name)).toEqual(['List', 'Get', 'Search'])
   })
 })
 

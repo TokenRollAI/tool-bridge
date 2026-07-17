@@ -1,10 +1,10 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import { SKRegistryStore } from '../../src/auth/sk'
-import { createSkModule } from '../../src/builtin/sk'
 import type { BuiltinModule } from '../../src/builtin/types'
-import { isTBError } from '../../src/errors'
-import { MemoryStateStore } from '../../src/store'
 import type { CallContext } from '../../src/types'
+import { createSkModule } from '../../src/builtin/sk'
+import { SKRegistryStore } from '../../src/auth/sk'
+import { MemoryStateStore } from '../../src/store'
+import { isTBError } from '../../src/errors'
 
 const NOW = '2026-07-06T00:00:00.000Z'
 
@@ -31,15 +31,15 @@ describe('builtin sk 模块', () => {
       kind: 'builtin',
       description: expect.any(String),
     })
-    expect(help.cmds.map((c) => c.name).sort()).toEqual([
+    expect(help.cmds.map(c => c.name).sort()).toEqual([
       'delete',
       'get',
       'list',
       'update',
       'write',
     ])
-    expect(help.cmds.every((c) => c.scope === 'admin')).toBe(true)
-    expect(help.cmds.every((c) => c.method === 'POST' && c.path === '/system/sk')).toBe(true)
+    expect(help.cmds.every(c => c.scope === 'admin')).toBe(true)
+    expect(help.cmds.every(c => c.method === 'POST' && c.path === '/system/sk')).toBe(true)
   })
 
   it('write → list:签发的 SK 出现在 list 且投影不含 hash;write 返回一次性 secret', async () => {
@@ -47,7 +47,7 @@ describe('builtin sk 模块', () => {
       'write',
       { owner: 'agent:x', scopes: [{ pattern: 'docs/**', actions: ['read'] }] },
       ctx,
-    )) as { key: Record<string, unknown>; secret: string }
+    )) as { key: Record<string, unknown>, secret: string }
     expect(res.secret.startsWith('tbk_')).toBe(true)
     expect(res.key).not.toHaveProperty('hash')
 
@@ -74,16 +74,16 @@ describe('builtin sk 模块', () => {
 
   it('未知 cmd → invalid_argument', async () => {
     await expect(mod.dispatch('frobnicate', {}, ctx)).rejects.toSatisfy(
-      (e) => isTBError(e) && e.code === 'invalid_argument',
+      e => isTBError(e) && e.code === 'invalid_argument',
     )
   })
 
   it('write 缺 owner / scopes 非数组 → invalid_argument', async () => {
     await expect(mod.dispatch('write', { scopes: [] }, ctx)).rejects.toSatisfy(
-      (e) => isTBError(e) && e.code === 'invalid_argument',
+      e => isTBError(e) && e.code === 'invalid_argument',
     )
     await expect(mod.dispatch('write', { owner: 'user:x', scopes: 'nope' }, ctx)).rejects.toSatisfy(
-      (e) => isTBError(e) && e.code === 'invalid_argument',
+      e => isTBError(e) && e.code === 'invalid_argument',
     )
   })
 })

@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest'
+import type { SecretKey, SecretKeyInput } from '../../src/types'
 import {
   adminBootstrapInput,
   generateSecret,
@@ -6,12 +7,11 @@ import {
   isKeyActive,
   mintKey,
   projectKey,
-  SKRegistryStore,
   sha256Hex,
+  SKRegistryStore,
 } from '../../src/auth/sk'
-import { isTBError } from '../../src/errors'
 import { KEY_SK_HASH, KEY_SK_ID, MemoryStateStore } from '../../src/store'
-import type { SecretKey, SecretKeyInput } from '../../src/types'
+import { isTBError } from '../../src/errors'
 
 const NOW = '2026-07-06T00:00:00.000Z'
 const PAST = '2026-07-05T00:00:00.000Z'
@@ -143,7 +143,7 @@ describe('SKRegistryStore(SKRegistry 语义)', () => {
     const got = await reg.get(key.id)
     expect(got.id).toBe(key.id)
     expect('hash' in got).toBe(false)
-    await expect(reg.get('nope')).rejects.toSatisfy((e) => isTBError(e) && e.code === 'not_found')
+    await expect(reg.get('nope')).rejects.toSatisfy(e => isTBError(e) && e.code === 'not_found')
   })
 
   it('list:枚举已签发 key(裁掉 hash)', async () => {
@@ -193,7 +193,7 @@ describe('SKRegistryStore(SKRegistry 语义)', () => {
 
   it('update:不存在 → not_found', async () => {
     await expect(reg.update('nope', { disabled: true })).rejects.toSatisfy(
-      (e) => isTBError(e) && e.code === 'not_found',
+      e => isTBError(e) && e.code === 'not_found',
     )
   })
 

@@ -8,16 +8,16 @@
  */
 
 import type { AnnotationStore } from '../annotation/store'
-import { TBError } from '../errors'
-import type { CmdSpec, HelpModel } from '../htbp/model'
-import { normalizePath } from '../tree/path'
 import type { NodeRegistryStore } from '../tree/registry'
+import type { CmdSpec, HelpModel } from '../htbp/model'
 import type { CallContext, TreePath } from '../types'
 import type { BuiltinModule } from './types'
 import { cmdPath, optString, requireString, VOID_ACK } from './util'
+import { normalizePath } from '../tree/path'
+import { TBError } from '../errors'
 
-const DESCRIPTION =
-  'Path annotations: admin-curated notes shown in ~help of the annotated path (set / get / remove / list)'
+const DESCRIPTION
+  = 'Path annotations: admin-curated notes shown in ~help of the annotated path (set / get / remove / list)'
 
 function annotationCmds(nodePath: TreePath): CmdSpec[] {
   const path = cmdPath(nodePath)
@@ -85,17 +85,17 @@ function annotationCmds(nodePath: TreePath): CmdSpec[] {
 }
 
 export interface AnnotationModuleDeps {
-  store: AnnotationStore
+  now: () => string
   /** set 时校验 path 最长前缀命中真实节点(工具子路径天然通过)。 */
   registry: NodeRegistryStore
-  now: () => string
+  store: AnnotationStore
 }
 
 /** path 必填但允许空串(根 = 全树公告)。 */
 function requireRootablePath(args: Record<string, unknown>): string {
   const v = args.path
   if (typeof v !== 'string') {
-    throw new TBError('invalid_argument', "field 'path' must be a string")
+    throw new TBError('invalid_argument', 'field \'path\' must be a string')
   }
   return v
 }

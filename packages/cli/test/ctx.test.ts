@@ -1,7 +1,7 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { guessContentType, parseMeta } from '../src/commands/ctx'
 import { resetFetch, setFetch } from '../src/http'
 import { runCli } from './cliHarness'
@@ -21,7 +21,7 @@ function captureFetch(body: unknown, status = 200): ReturnType<typeof vi.fn> {
 
 function stdoutText(): string {
   const stdout = process.stdout.write as unknown as ReturnType<typeof vi.fn>
-  return stdout.mock.calls.map((c) => String(c[0])).join('')
+  return stdout.mock.calls.map(c => String(c[0])).join('')
 }
 
 const gw = ['--base-url', 'https://gw', '--sk', 'tbk_x']
@@ -142,7 +142,7 @@ describe('tb ctx cat', () => {
     await runCli(['ctx', 'cat', 'ctx/notes', 'big.bin', ...gw])
     expect(stdoutText()).toBe('https://r2.example/presigned?sig=abc\n')
     const stderr = process.stderr.write as unknown as ReturnType<typeof vi.fn>
-    const err = stderr.mock.calls.map((c) => String(c[0])).join('')
+    const err = stderr.mock.calls.map(c => String(c[0])).join('')
     expect(err).toMatch(/large object, download via URL/)
     expect(process.exitCode).toBe(0)
   })
@@ -518,7 +518,7 @@ describe('tb ctx unmount', () => {
     expect(fn).toHaveBeenCalledTimes(1) // 只有前置 get,没有 delete
     expect(process.exitCode).toBe(1)
     const stderr = process.stderr.write as unknown as ReturnType<typeof vi.fn>
-    const printed = stderr.mock.calls.map((c) => String(c[0])).join('')
+    const printed = stderr.mock.calls.map(c => String(c[0])).join('')
     expect(printed).toMatch(/kind 'mcp'/)
   })
 })

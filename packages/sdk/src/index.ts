@@ -4,6 +4,15 @@
  * (createTbApp),SDK 只做装配——公开面即全部通道,不存在私有通道。
  */
 
+export { createToolBridge } from './toolBridge'
+export type {
+  Connection,
+  ConnectOptions,
+  SdkConnection,
+  ToolBridge,
+  ToolBridgeConfig,
+  ToolProviderLike,
+} from './types'
 // 常用类型与内存宿主实现的再导出(嵌入方实现 Provider / 注入 store 用)。
 export {
   type ContextEntry,
@@ -28,12 +37,3 @@ export {
   type ToolSpec,
   type TreePath,
 } from '@tool-bridge/core'
-export { createToolBridge } from './toolBridge'
-export type {
-  Connection,
-  ConnectOptions,
-  SdkConnection,
-  ToolBridge,
-  ToolBridgeConfig,
-  ToolProviderLike,
-} from './types'

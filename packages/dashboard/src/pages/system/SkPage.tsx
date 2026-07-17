@@ -1,4 +1,3 @@
-import { useQueryClient } from '@tanstack/react-query'
 import {
   Ban,
   Check,
@@ -14,16 +13,9 @@ import {
   Trash2,
   UserRound,
 } from 'lucide-react'
+import { useQueryClient } from '@tanstack/react-query'
 import { type ReactNode, useState } from 'react'
 import { toast } from 'sonner'
-import { ConfirmAction } from '@/components/ConfirmAction'
-import { CopyButton } from '@/components/CopyButton'
-import { EmptyState } from '@/components/EmptyState'
-import { PageHeader } from '@/components/PageHeader'
-import { PaginationFooter } from '@/components/PaginationFooter'
-import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
-import { Checkbox } from '@/components/ui/checkbox'
 import {
   Dialog,
   DialogContent,
@@ -33,9 +25,6 @@ import {
   DialogTitle,
   DialogTrigger,
 } from '@/components/ui/dialog'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { Skeleton } from '@/components/ui/skeleton'
 import {
   Table,
   TableBody,
@@ -44,13 +33,24 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import { type Action, ACTIONS, type Scope, type SecretKeyInfo } from '@/lib/types'
+import { PaginationFooter } from '@/components/PaginationFooter'
+import { ConfirmAction } from '@/components/ConfirmAction'
+import { CopyButton } from '@/components/CopyButton'
+import { EmptyState } from '@/components/EmptyState'
+import { PageHeader } from '@/components/PageHeader'
 import { useInvoke, useSkList } from '@/lib/queries'
-import { ACTIONS, type Action, type Scope, type SecretKeyInfo } from '@/lib/types'
+import { Checkbox } from '@/components/ui/checkbox'
+import { Skeleton } from '@/components/ui/skeleton'
+import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 
 type SkStatus = 'active' | 'disabled' | 'expired'
 type StatusFilter = 'all' | SkStatus
 
-const STATUS_FILTERS: Array<{ value: StatusFilter; label: string }> = [
+const STATUS_FILTERS: Array<{ label: string, value: StatusFilter }> = [
   { value: 'all', label: '全部' },
   { value: 'active', label: '有效' },
   { value: 'disabled', label: '已禁用' },
@@ -62,7 +62,7 @@ export function SkPage() {
   const list = useSkList()
   const invoke = useInvoke()
   const qc = useQueryClient()
-  const [issued, setIssued] = useState<{ id: string; secret: string } | null>(null)
+  const [issued, setIssued] = useState<{ id: string, secret: string } | null>(null)
   const [filter, setFilter] = useState('')
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
 
@@ -77,7 +77,7 @@ export function SkPage() {
             toast.success(`${sk.owner} 的 SK 已${disabled ? '禁用' : '启用'}`)
             refresh()
           },
-          onError: (error) => toast.error(error.message),
+          onError: error => toast.error(error.message),
         },
       )
     } catch {
@@ -107,9 +107,9 @@ export function SkPage() {
   )
   const needle = filter.trim().toLowerCase()
   const items = all.filter((sk) => {
-    const matchesText =
-      needle === '' ||
-      [sk.id, sk.owner, sk.description ?? ''].some((value) => value.toLowerCase().includes(needle))
+    const matchesText
+      = needle === ''
+        || [sk.id, sk.owner, sk.description ?? ''].some(value => value.toLowerCase().includes(needle))
     const matchesStatus = statusFilter === 'all' || getSkStatus(sk, now) === statusFilter
     return matchesText && matchesStatus
   })
@@ -118,51 +118,61 @@ export function SkPage() {
   return (
     <div className="mx-auto max-w-7xl px-4 py-5 sm:px-6 sm:py-6 lg:px-8 lg:py-8">
       <PageHeader
+        actions={<CreateSkDialog onIssued={setIssued} />}
+        description={(
+          <>
+            以身份、路径与动作组合最小权限；签发和吊销能力对等
+            {' '}
+            <code className="font-mono text-xs">tb sk</code>
+            。
+          </>
+        )}
         eyebrow="AUTH / ACCESS CONTROL"
         title="Secret Key"
-        description={
-          <>
-            以身份、路径与动作组合最小权限；签发和吊销能力对等{' '}
-            <code className="font-mono text-xs">tb sk</code>。
-          </>
-        }
-        actions={<CreateSkDialog onIssued={setIssued} />}
       />
 
-      <section className="mt-6 grid gap-3 sm:grid-cols-3" aria-label="Secret Key 状态概览">
+      <section aria-label="Secret Key 状态概览" className="mt-6 grid gap-3 sm:grid-cols-3">
         <StatusMetric
+          description="可通过 scope 授权"
           icon={ShieldCheck}
           label="有效"
-          value={statusCounts.active}
-          description="可通过 scope 授权"
           tone="ok"
+          value={statusCounts.active}
         />
         <StatusMetric
+          description="保留记录但拒绝访问"
           icon={ShieldOff}
           label="已禁用"
-          value={statusCounts.disabled}
-          description="保留记录但拒绝访问"
           tone="danger"
+          value={statusCounts.disabled}
         />
         <StatusMetric
+          description="生命周期已经结束"
           icon={Clock3}
           label="已过期"
-          value={statusCounts.expired}
-          description="生命周期已经结束"
           tone="warn"
+          value={statusCounts.expired}
         />
       </section>
 
-      <section className="mt-6 overflow-hidden rounded-xl border bg-card/70" aria-label="SK 列表">
+      <section aria-label="SK 列表" className="mt-6 overflow-hidden rounded-xl border bg-card/70">
         <div className="flex flex-col gap-3 border-b bg-muted/10 px-4 py-3.5 xl:flex-row xl:items-center xl:justify-between">
           <div className="flex min-w-0 items-center gap-3">
             <div className="grid size-8 shrink-0 place-items-center rounded-md border bg-background text-primary">
-              <KeySquare className="size-4" aria-hidden="true" />
+              <KeySquare aria-hidden="true" className="size-4" />
             </div>
             <div className="min-w-0">
               <h2 className="text-sm font-medium">访问身份</h2>
               <p className="text-xs text-muted-foreground">
-                已加载 {all.length} 把，当前显示 {items.length} 把
+                已加载
+                {' '}
+                {all.length}
+                {' '}
+                把，当前显示
+                {' '}
+                {items.length}
+                {' '}
+                把
               </p>
             </div>
           </div>
@@ -171,11 +181,11 @@ export function SkPage() {
             <div className="relative min-w-0 sm:w-64">
               <Search className="pointer-events-none absolute top-1/2 left-3 size-3.5 -translate-y-1/2 text-muted-foreground" />
               <Input
-                value={filter}
-                onChange={(event) => setFilter(event.target.value)}
-                placeholder="搜索 owner、用途或 id"
                 aria-label="搜索 Secret Key"
                 className="h-9 w-full pl-9 text-sm"
+                onChange={event => setFilter(event.target.value)}
+                placeholder="搜索 owner、用途或 id"
+                value={filter}
               />
             </div>
             <fieldset className="flex min-w-0 overflow-x-auto rounded-md border bg-background p-0.5">
@@ -184,13 +194,13 @@ export function SkPage() {
                 const count = option.value === 'all' ? all.length : statusCounts[option.value]
                 return (
                   <Button
-                    key={option.value}
-                    type="button"
-                    size="xs"
-                    variant={statusFilter === option.value ? 'secondary' : 'ghost'}
                     aria-pressed={statusFilter === option.value}
-                    onClick={() => setStatusFilter(option.value)}
                     className="gap-1.5"
+                    key={option.value}
+                    onClick={() => setStatusFilter(option.value)}
+                    size="xs"
+                    type="button"
+                    variant={statusFilter === option.value ? 'secondary' : 'ghost'}
                   >
                     {option.label}
                     <span className="font-mono text-[10px] text-muted-foreground">{count}</span>
@@ -201,140 +211,148 @@ export function SkPage() {
           </div>
         </div>
 
-        {list.isPending ? (
-          <div className="grid gap-3 p-5">
-            <Skeleton className="h-14 w-full" />
-            <Skeleton className="h-14 w-full" />
-            <Skeleton className="h-14 w-4/5" />
-          </div>
-        ) : list.isError ? (
-          <EmptyState
-            icon={ShieldOff}
-            title="无法加载 Secret Key"
-            tone="danger"
-            className="m-4"
-            action={
-              <Button variant="outline" size="sm" onClick={() => void list.refetch()}>
-                重新加载
-              </Button>
-            }
-          >
-            <p>{list.error.message}</p>
-          </EmptyState>
-        ) : items.length === 0 ? (
-          <EmptyState
-            icon={KeySquare}
-            title={hasFilters ? '没有符合当前条件的 SK' : '还没有签发任何 SK'}
-            className="m-4"
-            action={
-              hasFilters ? (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => {
-                    setFilter('')
-                    setStatusFilter('all')
-                  }}
+        {list.isPending
+          ? (
+              <div className="grid gap-3 p-5">
+                <Skeleton className="h-14 w-full" />
+                <Skeleton className="h-14 w-full" />
+                <Skeleton className="h-14 w-4/5" />
+              </div>
+            )
+          : list.isError
+            ? (
+                <EmptyState
+                  action={(
+                    <Button onClick={() => void list.refetch()} size="sm" variant="outline">
+                      重新加载
+                    </Button>
+                  )}
+                  className="m-4"
+                  icon={ShieldOff}
+                  title="无法加载 Secret Key"
+                  tone="danger"
                 >
-                  清除筛选
-                </Button>
-              ) : undefined
-            }
-          >
-            <p>{hasFilters ? '调整搜索词或状态过滤。' : '从右上角签发一把最小权限 SK。'}</p>
-          </EmptyState>
-        ) : (
-          <div className="overflow-x-auto">
-            <Table className="min-w-[1040px]">
-              <TableHeader>
-                <TableRow className="bg-muted/15">
-                  <TableHead className="w-[270px]">身份与用途</TableHead>
-                  <TableHead>权限边界</TableHead>
-                  <TableHead className="w-[170px]">生命周期</TableHead>
-                  <TableHead className="w-[100px]">状态</TableHead>
-                  <TableHead className="w-[92px]">
-                    <span className="sr-only">操作</span>
-                  </TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {items.map((sk) => {
-                  const status = getSkStatus(sk, now)
-                  return (
-                    <TableRow key={sk.id} className="group align-top">
-                      <TableCell className="py-4">
-                        <div className="flex items-start gap-3">
-                          <div className="mt-0.5 grid size-8 shrink-0 place-items-center rounded-md border bg-muted/20 text-muted-foreground">
-                            <UserRound className="size-3.5" aria-hidden="true" />
-                          </div>
-                          <div className="min-w-0">
-                            <p className="truncate font-mono text-sm font-medium">{sk.owner}</p>
-                            <p className="mt-1 line-clamp-2 text-xs leading-5 text-muted-foreground">
-                              {sk.description || '未填写用途说明'}
-                            </p>
-                            <div className="mt-2 flex items-center gap-1.5 text-[10px] text-muted-foreground">
-                              <span className="uppercase tracking-[0.12em]">id</span>
-                              <code className="max-w-40 truncate font-mono">{sk.id}</code>
-                              <CopyButton value={sk.id} label="复制 id" />
-                            </div>
-                          </div>
-                        </div>
-                      </TableCell>
-                      <TableCell className="py-4">
-                        <ScopeSummary scopes={sk.scopes} registerPaths={sk.registerPaths} />
-                      </TableCell>
-                      <TableCell className="py-4">
-                        <Lifecycle sk={sk} status={status} />
-                      </TableCell>
-                      <TableCell className="py-4">
-                        <StatusBadge status={status} />
-                      </TableCell>
-                      <TableCell className="py-4">
-                        <div className="flex justify-end gap-1">
-                          <Button
-                            variant="ghost"
-                            size="icon-sm"
-                            disabled={invoke.isPending}
-                            aria-label={sk.disabled ? '启用' : '禁用'}
-                            title={sk.disabled ? '启用' : '禁用'}
-                            onClick={() => void setDisabled(sk, !sk.disabled)}
-                          >
-                            {sk.disabled ? <Check /> : <Ban />}
-                          </Button>
-                          <ConfirmAction
-                            title={`吊销并删除 ${sk.id}?`}
-                            description={
-                              <p>删除后该 SK 立即失效（吊销传播上限 60 秒）。此操作不可撤销。</p>
-                            }
-                            actionLabel="吊销并删除"
-                            onConfirm={() => remove(sk)}
-                            trigger={
-                              <Button
-                                variant="ghost"
-                                size="icon-sm"
-                                aria-label="吊销并删除"
-                                title="吊销并删除"
-                              >
-                                <Trash2 className="text-destructive" />
-                              </Button>
-                            }
-                          />
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  )
-                })}
-              </TableBody>
-            </Table>
-          </div>
-        )}
+                  <p>{list.error.message}</p>
+                </EmptyState>
+              )
+            : items.length === 0
+              ? (
+                  <EmptyState
+                    action={
+                      hasFilters
+                        ? (
+                            <Button
+                              onClick={() => {
+                                setFilter('')
+                                setStatusFilter('all')
+                              }}
+                              size="sm"
+                              variant="outline"
+                            >
+                              清除筛选
+                            </Button>
+                          )
+                        : undefined
+                    }
+                    className="m-4"
+                    icon={KeySquare}
+                    title={hasFilters ? '没有符合当前条件的 SK' : '还没有签发任何 SK'}
+                  >
+                    <p>{hasFilters ? '调整搜索词或状态过滤。' : '从右上角签发一把最小权限 SK。'}</p>
+                  </EmptyState>
+                )
+              : (
+                  <div className="overflow-x-auto">
+                    <Table className="min-w-[1040px]">
+                      <TableHeader>
+                        <TableRow className="bg-muted/15">
+                          <TableHead className="w-[270px]">身份与用途</TableHead>
+                          <TableHead>权限边界</TableHead>
+                          <TableHead className="w-[170px]">生命周期</TableHead>
+                          <TableHead className="w-[100px]">状态</TableHead>
+                          <TableHead className="w-[92px]">
+                            <span className="sr-only">操作</span>
+                          </TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {items.map((sk) => {
+                          const status = getSkStatus(sk, now)
+                          return (
+                            <TableRow className="group align-top" key={sk.id}>
+                              <TableCell className="py-4">
+                                <div className="flex items-start gap-3">
+                                  <div className="mt-0.5 grid size-8 shrink-0 place-items-center rounded-md border bg-muted/20 text-muted-foreground">
+                                    <UserRound aria-hidden="true" className="size-3.5" />
+                                  </div>
+                                  <div className="min-w-0">
+                                    <p className="truncate font-mono text-sm font-medium">{sk.owner}</p>
+                                    <p className="mt-1 line-clamp-2 text-xs leading-5 text-muted-foreground">
+                                      {sk.description || '未填写用途说明'}
+                                    </p>
+                                    <div className="mt-2 flex items-center gap-1.5 text-[10px] text-muted-foreground">
+                                      <span className="uppercase tracking-[0.12em]">id</span>
+                                      <code className="max-w-40 truncate font-mono">{sk.id}</code>
+                                      <CopyButton label="复制 id" value={sk.id} />
+                                    </div>
+                                  </div>
+                                </div>
+                              </TableCell>
+                              <TableCell className="py-4">
+                                <ScopeSummary registerPaths={sk.registerPaths} scopes={sk.scopes} />
+                              </TableCell>
+                              <TableCell className="py-4">
+                                <Lifecycle sk={sk} status={status} />
+                              </TableCell>
+                              <TableCell className="py-4">
+                                <StatusBadge status={status} />
+                              </TableCell>
+                              <TableCell className="py-4">
+                                <div className="flex justify-end gap-1">
+                                  <Button
+                                    aria-label={sk.disabled ? '启用' : '禁用'}
+                                    disabled={invoke.isPending}
+                                    onClick={() => void setDisabled(sk, !sk.disabled)}
+                                    size="icon-sm"
+                                    title={sk.disabled ? '启用' : '禁用'}
+                                    variant="ghost"
+                                  >
+                                    {sk.disabled ? <Check /> : <Ban />}
+                                  </Button>
+                                  <ConfirmAction
+                                    actionLabel="吊销并删除"
+                                    description={
+                                      <p>删除后该 SK 立即失效（吊销传播上限 60 秒）。此操作不可撤销。</p>
+                                    }
+                                    onConfirm={() => remove(sk)}
+                                    title={`吊销并删除 ${sk.id}?`}
+                                    trigger={(
+                                      <Button
+                                        aria-label="吊销并删除"
+                                        size="icon-sm"
+                                        title="吊销并删除"
+                                        variant="ghost"
+                                      >
+                                        <Trash2 className="text-destructive" />
+                                      </Button>
+                                    )}
+                                  />
+                                </div>
+                              </TableCell>
+                            </TableRow>
+                          )
+                        })}
+                      </TableBody>
+                    </Table>
+                  </div>
+                )}
         {!list.isPending && !list.isError && (
           <PaginationFooter
             count={all.length}
-            unit="把 SK"
             hasNextPage={Boolean(list.hasNextPage)}
             isFetchingNextPage={list.isFetchingNextPage}
             onLoadMore={() => void list.fetchNextPage()}
+            unit="把 SK"
           />
         )}
       </section>
@@ -343,7 +361,7 @@ export function SkPage() {
         <DialogContent className="p-4 sm:p-6" showCloseButton={false}>
           <DialogHeader>
             <div className="mb-1 grid size-10 place-items-center rounded-lg border border-primary/30 bg-primary/10 text-primary">
-              <KeyRound className="size-5" aria-hidden="true" />
+              <KeyRound aria-hidden="true" className="size-5" />
             </div>
             <DialogTitle className="text-base">SK 已签发，明文仅显示这一次</DialogTitle>
             <DialogDescription>
@@ -357,8 +375,6 @@ export function SkPage() {
                 {issued?.secret}
               </code>
               <Button
-                size="icon-sm"
-                variant="outline"
                 aria-label="复制 SK 明文"
                 onClick={async () => {
                   if (!issued) return
@@ -369,6 +385,8 @@ export function SkPage() {
                     toast.error('复制失败，请手动选择明文')
                   }
                 }}
+                size="icon-sm"
+                variant="outline"
               >
                 <Copy />
               </Button>
@@ -390,11 +408,11 @@ function StatusMetric({
   description,
   tone,
 }: {
+  description: string
   icon: typeof ShieldCheck
   label: string
-  value: number
-  description: string
   tone: 'ok' | 'warn' | 'danger'
+  value: number
 }) {
   const toneClass = {
     ok: 'border-ok/25 bg-ok/[0.045] text-ok',
@@ -404,7 +422,7 @@ function StatusMetric({
   return (
     <div className="flex items-center gap-3 rounded-xl border bg-card/70 px-4 py-3.5">
       <div className={`grid size-9 shrink-0 place-items-center rounded-lg border ${toneClass}`}>
-        <Icon className="size-4" aria-hidden="true" />
+        <Icon aria-hidden="true" className="size-4" />
       </div>
       <div className="min-w-0 flex-1">
         <div className="flex items-baseline justify-between gap-3">
@@ -417,23 +435,23 @@ function StatusMetric({
   )
 }
 
-function ScopeSummary({ scopes, registerPaths }: { scopes: Scope[]; registerPaths?: string[] }) {
-  const allow = scopes.filter((scope) => scope.effect !== 'deny')
-  const deny = scopes.filter((scope) => scope.effect === 'deny')
+function ScopeSummary({ scopes, registerPaths }: { registerPaths?: string[], scopes: Scope[] }) {
+  const allow = scopes.filter(scope => scope.effect !== 'deny')
+  const deny = scopes.filter(scope => scope.effect === 'deny')
   return (
     <div className="grid min-w-[360px] gap-2.5">
       <ScopeGroup label="ALLOW" scopes={allow} />
-      {deny.length > 0 && <ScopeGroup label="DENY" scopes={deny} danger />}
+      {deny.length > 0 && <ScopeGroup danger label="DENY" scopes={deny} />}
       {registerPaths && registerPaths.length > 0 && (
         <div className="flex items-start gap-2">
           <span className="mt-0.5 w-12 shrink-0 font-mono text-[9px] tracking-[0.12em] text-primary">
             REGISTER
           </span>
           <div className="flex flex-wrap gap-1">
-            {registerPaths.map((path) => (
+            {registerPaths.map(path => (
               <code
-                key={path}
                 className="rounded border border-primary/25 bg-primary/[0.06] px-1.5 py-0.5 font-mono text-[10px] text-primary"
+                key={path}
               >
                 {path}
               </code>
@@ -450,9 +468,9 @@ function ScopeGroup({
   scopes,
   danger = false,
 }: {
+  danger?: boolean
   label: string
   scopes: Scope[]
-  danger?: boolean
 }) {
   const occurrences = new Map<string, number>()
   return (
@@ -462,37 +480,39 @@ function ScopeGroup({
       >
         {label}
       </span>
-      {scopes.length === 0 ? (
-        <span className="text-[11px] text-muted-foreground">无规则</span>
-      ) : (
-        <div className="flex flex-wrap gap-1.5">
-          {scopes.map((scope) => {
-            const baseKey = `${scope.pattern}:${scope.actions.join(',')}`
-            const occurrence = (occurrences.get(baseKey) ?? 0) + 1
-            occurrences.set(baseKey, occurrence)
-            return (
-              <span
-                key={`${baseKey}:${occurrence}`}
-                className={`inline-flex items-center overflow-hidden rounded-md border text-[10px] ${
-                  danger
-                    ? 'border-destructive/25 bg-destructive/[0.04]'
-                    : 'border-ok/20 bg-ok/[0.035]'
-                }`}
-              >
-                <code className="border-r px-1.5 py-1 font-mono font-medium">{scope.pattern}</code>
-                <span className="px-1.5 py-1 font-mono text-muted-foreground">
-                  {scope.actions.join(' · ')}
-                </span>
-              </span>
-            )
-          })}
-        </div>
-      )}
+      {scopes.length === 0
+        ? (
+            <span className="text-[11px] text-muted-foreground">无规则</span>
+          )
+        : (
+            <div className="flex flex-wrap gap-1.5">
+              {scopes.map((scope) => {
+                const baseKey = `${scope.pattern}:${scope.actions.join(',')}`
+                const occurrence = (occurrences.get(baseKey) ?? 0) + 1
+                occurrences.set(baseKey, occurrence)
+                return (
+                  <span
+                    className={`inline-flex items-center overflow-hidden rounded-md border text-[10px] ${
+                      danger
+                        ? 'border-destructive/25 bg-destructive/[0.04]'
+                        : 'border-ok/20 bg-ok/[0.035]'
+                    }`}
+                    key={`${baseKey}:${occurrence}`}
+                  >
+                    <code className="border-r px-1.5 py-1 font-mono font-medium">{scope.pattern}</code>
+                    <span className="px-1.5 py-1 font-mono text-muted-foreground">
+                      {scope.actions.join(' · ')}
+                    </span>
+                  </span>
+                )
+              })}
+            </div>
+          )}
     </div>
   )
 }
 
-function Lifecycle({ sk, status }: { sk: SecretKeyInfo; status: SkStatus }) {
+function Lifecycle({ sk, status }: { sk: SecretKeyInfo, status: SkStatus }) {
   return (
     <div className="grid gap-1.5 text-[11px]">
       <div className="flex items-center justify-between gap-2">
@@ -503,17 +523,19 @@ function Lifecycle({ sk, status }: { sk: SecretKeyInfo; status: SkStatus }) {
       </div>
       <div className="flex items-center justify-between gap-2">
         <span className="text-muted-foreground">到期</span>
-        {sk.expiresAt ? (
-          <time
-            className={`font-mono ${status === 'expired' ? 'text-warn' : ''}`}
-            dateTime={sk.expiresAt}
-            title={new Date(sk.expiresAt).toLocaleString()}
-          >
-            {formatDate(sk.expiresAt)}
-          </time>
-        ) : (
-          <span className="text-muted-foreground">永久</span>
-        )}
+        {sk.expiresAt
+          ? (
+              <time
+                className={`font-mono ${status === 'expired' ? 'text-warn' : ''}`}
+                dateTime={sk.expiresAt}
+                title={new Date(sk.expiresAt).toLocaleString()}
+              >
+                {formatDate(sk.expiresAt)}
+              </time>
+            )
+          : (
+              <span className="text-muted-foreground">永久</span>
+            )}
       </div>
     </div>
   )
@@ -523,8 +545,8 @@ function StatusBadge({ status }: { status: SkStatus }) {
   if (status === 'disabled') {
     return (
       <Badge
-        variant="outline"
         className="border-destructive/35 bg-destructive/[0.04] text-destructive"
+        variant="outline"
       >
         <span className="size-1.5 rounded-full bg-current" />
         disabled
@@ -533,14 +555,14 @@ function StatusBadge({ status }: { status: SkStatus }) {
   }
   if (status === 'expired') {
     return (
-      <Badge variant="outline" className="border-warn/35 bg-warn/[0.04] text-warn">
+      <Badge className="border-warn/35 bg-warn/[0.04] text-warn" variant="outline">
         <span className="size-1.5 rounded-full bg-current" />
         expired
       </Badge>
     )
   }
   return (
-    <Badge variant="outline" className="border-ok/35 bg-ok/[0.04] text-ok">
+    <Badge className="border-ok/35 bg-ok/[0.04] text-ok" variant="outline">
       <span className="size-1.5 rounded-full bg-current" />
       active
     </Badge>
@@ -560,9 +582,9 @@ function formatDate(value: string) {
 }
 
 interface ScopeRow {
-  pattern: string
   actions: Action[]
   effect: 'allow' | 'deny'
+  pattern: string
 }
 
 const INITIAL_SCOPES: ScopeRow[] = [{ pattern: '**', actions: ['read', 'call'], effect: 'allow' }]
@@ -570,7 +592,7 @@ const INITIAL_SCOPES: ScopeRow[] = [{ pattern: '**', actions: ['read', 'call'], 
 function CreateSkDialog({
   onIssued,
 }: {
-  onIssued: (value: { id: string; secret: string }) => void
+  onIssued: (value: { id: string, secret: string }) => void
 }) {
   const invoke = useInvoke()
   const qc = useQueryClient()
@@ -593,8 +615,8 @@ function CreateSkDialog({
 
   const submit = () => {
     const cleaned: Scope[] = scopes
-      .filter((scope) => scope.pattern.trim() !== '' && scope.actions.length > 0)
-      .map((scope) => ({
+      .filter(scope => scope.pattern.trim() !== '' && scope.actions.length > 0)
+      .map(scope => ({
         pattern: scope.pattern.trim(),
         actions: scope.actions,
         ...(scope.effect === 'deny' ? { effect: 'deny' as const } : {}),
@@ -609,7 +631,7 @@ function CreateSkDialog({
     }
     const normalizedRegisterPaths = registerPaths
       .split(',')
-      .map((value) => value.trim())
+      .map(value => value.trim())
       .filter(Boolean)
 
     invoke.mutate(
@@ -626,7 +648,7 @@ function CreateSkDialog({
       },
       {
         onSuccess: (response) => {
-          const data = response.json as { key: { id: string }; secret: string }
+          const data = response.json as { key: { id: string }, secret: string }
           setOpen(false)
           onIssued({ id: data.key.id, secret: data.secret })
           resetDraft()
@@ -634,14 +656,13 @@ function CreateSkDialog({
           // 明文已转移到不可意外关闭的一次性结果弹窗，立即清除 mutation data 副本。
           setTimeout(() => invoke.reset(), 0)
         },
-        onError: (error) => setErr(error.message),
+        onError: error => setErr(error.message),
       },
     )
   }
 
   return (
     <Dialog
-      open={open}
       onOpenChange={(next) => {
         if (invoke.isPending) return
         setOpen(next)
@@ -650,6 +671,7 @@ function CreateSkDialog({
           invoke.reset()
         }
       }}
+      open={open}
     >
       <DialogTrigger asChild>
         <Button size="sm">
@@ -659,9 +681,9 @@ function CreateSkDialog({
       </DialogTrigger>
       <DialogContent
         className="max-h-[92vh] grid-rows-[auto_minmax(0,1fr)_auto] gap-0 overflow-hidden p-0 sm:max-w-3xl"
+        onEscapeKeyDown={event => invoke.isPending && event.preventDefault()}
+        onPointerDownOutside={event => invoke.isPending && event.preventDefault()}
         showCloseButton={!invoke.isPending}
-        onEscapeKeyDown={(event) => invoke.isPending && event.preventDefault()}
-        onPointerDownOutside={(event) => invoke.isPending && event.preventDefault()}
       >
         <DialogHeader className="border-b px-5 py-5 sm:px-6">
           <DialogTitle>签发 Secret Key</DialogTitle>
@@ -672,20 +694,20 @@ function CreateSkDialog({
 
         <div className="min-h-0 space-y-5 overflow-y-auto px-5 py-5 sm:px-6">
           <FormSection
+            description="明确谁在使用这把钥匙，以及它承担的具体任务。"
             index="01"
             title="身份"
-            description="明确谁在使用这把钥匙，以及它承担的具体任务。"
           >
             <div className="grid gap-3 sm:grid-cols-2">
               <div className="grid gap-1.5">
                 <Label htmlFor="sk-owner">owner *</Label>
                 <Input
-                  id="sk-owner"
-                  className="font-mono text-sm"
-                  placeholder="agent:researcher"
                   autoComplete="off"
+                  className="font-mono text-sm"
+                  id="sk-owner"
+                  onChange={event => setOwner(event.target.value)}
+                  placeholder="agent:researcher"
                   value={owner}
-                  onChange={(event) => setOwner(event.target.value)}
                 />
                 <p className="text-[11px] text-muted-foreground">
                   建议：user:alice / agent:bot / device:host
@@ -695,9 +717,9 @@ function CreateSkDialog({
                 <Label htmlFor="sk-description">用途说明</Label>
                 <Input
                   id="sk-description"
+                  onChange={event => setDescription(event.target.value)}
                   placeholder="只读知识库检索"
                   value={description}
-                  onChange={(event) => setDescription(event.target.value)}
                 />
                 <p className="text-[11px] text-muted-foreground">用于列表识别和后续权限审计。</p>
               </div>
@@ -705,92 +727,92 @@ function CreateSkDialog({
           </FormSection>
 
           <FormSection
+            description="每条规则由路径、动作和 allow / deny 共同构成。"
             index="02"
             title="权限"
-            description="每条规则由路径、动作和 allow / deny 共同构成。"
           >
             <div className="grid gap-3">
               {scopes.map((row, index) => (
                 <div
-                  // biome-ignore lint/suspicious/noArrayIndexKey: scope 行在提交前没有稳定业务 id
-                  key={index}
                   className={`rounded-lg border p-3 ${
                     row.effect === 'deny'
                       ? 'border-destructive/25 bg-destructive/[0.025]'
                       : 'bg-muted/10'
                   }`}
+                  // biome-ignore lint/suspicious/noArrayIndexKey: scope 行在提交前没有稳定业务 id
+                  key={index}
                 >
                   <div className="flex items-center justify-between gap-3">
                     <div className="flex items-center gap-2">
                       <span className="font-mono text-[10px] text-muted-foreground">
-                        RULE {String(index + 1).padStart(2, '0')}
+                        RULE
+                        {' '}
+                        {String(index + 1).padStart(2, '0')}
                       </span>
                       <Badge
-                        variant="outline"
                         className={
                           row.effect === 'deny'
                             ? 'border-destructive/30 text-destructive'
                             : 'border-ok/30 text-ok'
                         }
+                        variant="outline"
                       >
                         {row.effect}
                       </Badge>
                     </div>
                     <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon-xs"
                       aria-label={`移除第 ${index + 1} 条 scope`}
                       disabled={invoke.isPending}
-                      onClick={() => setScopes((current) => current.filter((_, i) => i !== index))}
+                      onClick={() => setScopes(current => current.filter((_, i) => i !== index))}
+                      size="icon-xs"
+                      type="button"
+                      variant="ghost"
                     >
                       <Trash2 />
                     </Button>
                   </div>
                   <div className="mt-3 grid gap-3 md:grid-cols-[minmax(180px,0.8fr)_1.6fr]">
                     <div className="grid gap-1.5">
-                      <Label htmlFor={`scope-pattern-${index}`} className="text-xs">
+                      <Label className="text-xs" htmlFor={`scope-pattern-${index}`}>
                         path pattern
                       </Label>
                       <Input
-                        id={`scope-pattern-${index}`}
                         className="h-9 font-mono text-xs"
-                        placeholder="docs/**"
-                        value={row.pattern}
-                        onChange={(event) =>
-                          setScopes((current) =>
+                        id={`scope-pattern-${index}`}
+                        onChange={event =>
+                          setScopes(current =>
                             current.map((scope, i) =>
                               i === index ? { ...scope, pattern: event.target.value } : scope,
                             ),
-                          )
-                        }
+                          )}
+                        placeholder="docs/**"
+                        value={row.pattern}
                       />
                     </div>
                     <fieldset className="grid gap-1.5">
                       <legend className="text-xs font-medium">actions</legend>
                       <div className="flex min-h-9 flex-wrap items-center gap-x-3 gap-y-2 rounded-md border bg-background/65 px-3 py-2">
-                        {ACTIONS.map((action) => (
+                        {ACTIONS.map(action => (
                           // biome-ignore lint/a11y/noLabelWithoutControl: Radix Checkbox 在 label 内提供关联
                           <label
-                            key={action}
                             className="flex items-center gap-1.5 font-mono text-xs"
+                            key={action}
                           >
                             <Checkbox
                               checked={row.actions.includes(action)}
-                              onCheckedChange={(checked) =>
-                                setScopes((current) =>
+                              onCheckedChange={checked =>
+                                setScopes(current =>
                                   current.map((scope, i) =>
                                     i === index
                                       ? {
                                           ...scope,
                                           actions: checked
                                             ? [...scope.actions, action]
-                                            : scope.actions.filter((item) => item !== action),
+                                            : scope.actions.filter(item => item !== action),
                                         }
                                       : scope,
                                   ),
-                                )
-                              }
+                                )}
                             />
                             {action}
                           </label>
@@ -803,15 +825,14 @@ function CreateSkDialog({
                     <label className="flex items-center gap-2 text-xs text-muted-foreground">
                       <Checkbox
                         checked={row.effect === 'deny'}
-                        onCheckedChange={(checked) =>
-                          setScopes((current) =>
+                        onCheckedChange={checked =>
+                          setScopes(current =>
                             current.map((scope, i) =>
                               i === index
                                 ? { ...scope, effect: checked ? 'deny' : 'allow' }
                                 : scope,
                             ),
-                          )
-                        }
+                          )}
                       />
                       设为 deny 规则（优先于所有 allow）
                     </label>
@@ -819,17 +840,16 @@ function CreateSkDialog({
                 </div>
               ))}
               <Button
-                type="button"
-                variant="outline"
-                size="sm"
                 className="justify-self-start"
                 disabled={invoke.isPending}
                 onClick={() =>
-                  setScopes((current) => [
+                  setScopes(current => [
                     ...current,
                     { pattern: '', actions: ['read'], effect: 'allow' },
-                  ])
-                }
+                  ])}
+                size="sm"
+                type="button"
+                variant="outline"
               >
                 <Plus />
                 添加 scope 规则
@@ -838,11 +858,11 @@ function CreateSkDialog({
               <div className="grid gap-1.5 border-t pt-4">
                 <Label htmlFor="sk-register-paths">registerPaths（高级，可空）</Label>
                 <Input
-                  id="sk-register-paths"
                   className="font-mono text-xs"
+                  id="sk-register-paths"
+                  onChange={event => setRegisterPaths(event.target.value)}
                   placeholder="device/build-01/**, device/build-02/**"
                   value={registerPaths}
-                  onChange={(event) => setRegisterPaths(event.target.value)}
                 />
                 <p className="text-[11px] text-muted-foreground">
                   逗号分隔；只约束反向注册路径，不会自动授予 register action。
@@ -852,25 +872,25 @@ function CreateSkDialog({
           </FormSection>
 
           <FormSection
+            description="不填表示永久有效；短期自动化任务建议显式设置到期时间。"
             index="03"
             title="生命周期"
-            description="不填表示永久有效；短期自动化任务建议显式设置到期时间。"
           >
             <div className="grid gap-1.5 sm:max-w-sm">
               <Label htmlFor="sk-expiry">过期时间（可空）</Label>
               <Input
                 id="sk-expiry"
+                onChange={event => setExpiresAt(event.target.value)}
                 type="datetime-local"
                 value={expiresAt}
-                onChange={(event) => setExpiresAt(event.target.value)}
               />
             </div>
           </FormSection>
 
           {err && (
             <p
-              role="alert"
               className="rounded-md border border-destructive/30 bg-destructive/[0.04] px-3 py-2 text-xs text-destructive"
+              role="alert"
             >
               {err}
             </p>
@@ -879,10 +899,10 @@ function CreateSkDialog({
 
         <DialogFooter className="border-t bg-background px-5 py-4 sm:px-6">
           <Button
-            type="button"
-            variant="outline"
             disabled={invoke.isPending}
             onClick={() => setOpen(false)}
+            type="button"
+            variant="outline"
           >
             取消
           </Button>
@@ -902,10 +922,10 @@ function FormSection({
   description,
   children,
 }: {
+  children: ReactNode
+  description: string
   index: string
   title: string
-  description: string
-  children: ReactNode
 }) {
   return (
     <section className="grid gap-3 rounded-xl border bg-card/50 p-4">

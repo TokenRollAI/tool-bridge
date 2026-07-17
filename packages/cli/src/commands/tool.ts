@@ -1,29 +1,29 @@
 import { spawn } from 'node:child_process'
 import { Command } from 'commander'
+import type { NodeConfig, NodeInput } from '../types'
+import { buildVirtualize, deleteNode, parseToolsFile, registerNode } from '../registry'
 import { collect, resolveTarget, withGlobalOpts } from '../args'
 import { apiJson, CliError, requireTarget } from '../http'
 import { guard, printJson, printLine } from '../output'
-import { buildVirtualize, deleteNode, parseToolsFile, registerNode } from '../registry'
-import type { NodeConfig, NodeInput } from '../types'
 
 interface ToolMountOpts {
-  json?: boolean
-  baseUrl?: string
-  sk?: string
-  kind: string
-  url?: string
-  endpoint?: string
-  toolsFile?: string
   auth?: string
-  authRef?: string
   authHeader?: string
+  authRef?: string
   authScheme?: string
-  header: string[]
+  baseUrl?: string
+  describe: string[]
   description?: string
+  endpoint?: string
+  header: string[]
+  hide: string[]
+  json?: boolean
+  kind: string
   prefix?: string
   rename: string[]
-  hide: string[]
-  describe: string[]
+  sk?: string
+  toolsFile?: string
+  url?: string
 }
 
 /** 可重复 `--header Name=value` → headers 对象;空数组返回 undefined(不塞空对象)。 */
@@ -57,7 +57,7 @@ export function toolMountCommand(): Command {
     .option('--url <url>', '[mcp] Streamable HTTP URL')
     .option('--endpoint <url>', '[http] base endpoint URL')
     .option('--tools-file <file>', '[http] JSON file of HttpToolDef[]')
-    .option('--auth <mode>', "[mcp] 'oauth': gateway-managed OAuth (then run `tb tool auth`)")
+    .option('--auth <mode>', '[mcp] \'oauth\': gateway-managed OAuth (then run `tb tool auth`)')
     .option('--auth-ref <name>', 'SecretStore ref for upstream credential')
     .option('--auth-header <name>', 'header name for authRef credential')
     .option('--auth-scheme <scheme>', 'auth scheme; empty string sends the secret as-is')
@@ -93,8 +93,8 @@ Examples:
         if (!path) throw new CliError('tree path is required')
         const kind = String(opts.kind ?? '').trim()
         const authRef = opts.authRef ? String(opts.authRef) : undefined
-        const authHeader =
-          opts.authHeader !== undefined ? String(opts.authHeader).trim() : undefined
+        const authHeader
+          = opts.authHeader !== undefined ? String(opts.authHeader).trim() : undefined
         const authScheme = opts.authScheme !== undefined ? String(opts.authScheme) : undefined
 
         let config: NodeConfig
@@ -169,14 +169,14 @@ Examples:
 
 /** `POST /<path>/~authorize` 的响应形状(gateway oauth.ts StartAuthorizationResult)。 */
 interface AuthorizeResult {
-  status: 'authorized' | 'redirect'
   authorizationUrl?: string
+  status: 'authorized' | 'redirect'
 }
 
 /** 尽力打开系统浏览器(失败静默——URL 已打印,用户可手动打开)。 */
 function openBrowser(url: string): void {
-  const cmd =
-    process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'start' : 'xdg-open'
+  const cmd
+    = process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'start' : 'xdg-open'
   try {
     spawn(cmd, [url], { stdio: 'ignore', detached: true })
       .on('error', () => {})
@@ -228,7 +228,7 @@ async function runLocalCallbackFlow(
     printLine('waiting for the browser callback…(Ctrl-C to abort)')
 
     // 等 AS 回跳本地;拿到 code+state 即向浏览器回执并关停。
-    const { code, state } = await new Promise<{ code: string; state: string }>(
+    const { code, state } = await new Promise<{ code: string, state: string }>(
       (resolve, reject) => {
         server.on('request', (req, res) => {
           const u = new URL(req.url ?? '/', redirectUri)
@@ -286,7 +286,7 @@ export function toolAuthCommand(): Command {
     .action(
       async (
         pathArg: string,
-        opts: { json?: boolean; baseUrl?: string; sk?: string; open?: boolean; local?: boolean },
+        opts: { baseUrl?: string, json?: boolean, local?: boolean, open?: boolean, sk?: string },
       ) => {
         const asJson = Boolean(opts.json)
         await guard(asJson, async () => {
@@ -335,7 +335,7 @@ export function toolRmCommand(): Command {
   return withGlobalOpts(new Command('rm'))
     .description('Unmount a tool node')
     .argument('<path>', 'Tree path to remove')
-    .action(async (pathArg: string, opts: { json?: boolean; baseUrl?: string; sk?: string }) => {
+    .action(async (pathArg: string, opts: { baseUrl?: string, json?: boolean, sk?: string }) => {
       const asJson = Boolean(opts.json)
       await guard(asJson, async () => {
         const path = String(pathArg ?? '').trim()

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { CliError } from '../src/http'
 import { parseScope } from '../src/scope'
+import { CliError } from '../src/http'
 
 describe('parseScope("pattern:actions")', () => {
   it('解析单动作', () => {

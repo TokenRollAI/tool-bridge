@@ -42,8 +42,8 @@ describe('buildTree 基本形状', () => {
       { path: 'a', kind: 'directory', description: 'A' },
       { path: 'b', kind: 'mcp', description: 'B' },
     ],
-    a: [{ path: 'a/x', kind: 'mcp', description: 'AX' }],
-    b: [],
+    'a': [{ path: 'a/x', kind: 'mcp', description: 'AX' }],
+    'b': [],
     'a/x': [],
   }
 
@@ -52,14 +52,14 @@ describe('buildTree 基本形状', () => {
     expect(tree.path).toBe('')
     expect(tree.kind).toBe('directory')
     expect(tree.description).toBe('')
-    expect(tree.children?.map((c) => c.path)).toEqual(['a', 'b'])
-    const a = tree.children?.find((c) => c.path === 'a')
-    expect(a?.children?.map((c) => c.path)).toEqual(['a/x'])
+    expect(tree.children?.map(c => c.path)).toEqual(['a', 'b'])
+    const a = tree.children?.find(c => c.path === 'a')
+    expect(a?.children?.map(c => c.path)).toEqual(['a/x'])
   })
 
   it('叶子(无子节点)不设 truncated、不带 children', async () => {
     const tree = await buildTree({ root: '', depth: 3, getChildren: childrenFrom(map) })
-    const b = tree.children?.find((c) => c.path === 'b')
+    const b = tree.children?.find(c => c.path === 'b')
     expect(b?.truncated).toBeUndefined()
     expect(b?.children).toBeUndefined()
   })
@@ -67,7 +67,7 @@ describe('buildTree 基本形状', () => {
   it('携带 online 字段', async () => {
     const withOnline: Record<string, TreeEntry[]> = {
       '': [{ path: 'd', kind: 'device', description: 'D', online: false }],
-      d: [],
+      'd': [],
     }
     const tree = await buildTree({ root: '', depth: 2, getChildren: childrenFrom(withOnline) })
     expect(tree.children?.[0]?.online).toBe(false)
@@ -91,7 +91,7 @@ describe('buildTree 基本形状', () => {
 describe('buildTree 截断:深度 / 节点上限 / 环', () => {
   const deep: Record<string, TreeEntry[]> = {
     '': [{ path: 'a', kind: 'directory', description: 'A' }],
-    a: [{ path: 'a/b', kind: 'directory', description: 'B' }],
+    'a': [{ path: 'a/b', kind: 'directory', description: 'B' }],
     'a/b': [{ path: 'a/b/c', kind: 'mcp', description: 'C' }],
     'a/b/c': [],
   }
@@ -99,15 +99,15 @@ describe('buildTree 截断:深度 / 节点上限 / 环', () => {
   it('深度到底:确有子节点的边界节点标 truncated', async () => {
     const tree = await buildTree({ root: '', depth: 2, getChildren: childrenFrom(deep) })
     // 根(depthLeft2)→ a(1)→ a/b(0):a/b 仍有子节点 → truncated,不再展开
-    const a = tree.children?.find((c) => c.path === 'a')
-    const ab = a?.children?.find((c) => c.path === 'a/b')
+    const a = tree.children?.find(c => c.path === 'a')
+    const ab = a?.children?.find(c => c.path === 'a/b')
     expect(ab?.truncated).toBe(true)
     expect(ab?.children).toBeUndefined()
   })
 
   it('深度足够时,边界叶子不误标 truncated', async () => {
     const tree = await buildTree({ root: '', depth: 3, getChildren: childrenFrom(deep) })
-    const abc = tree.children?.[0]?.children?.[0]?.children?.find((c) => c.path === 'a/b/c')
+    const abc = tree.children?.[0]?.children?.[0]?.children?.find(c => c.path === 'a/b/c')
     expect(abc?.truncated).toBeUndefined()
   })
 
@@ -118,9 +118,9 @@ describe('buildTree 截断:深度 / 节点上限 / 环', () => {
         { path: 'b', kind: 'mcp', description: 'B' },
         { path: 'c', kind: 'mcp', description: 'C' },
       ],
-      a: [],
-      b: [],
-      c: [],
+      'a': [],
+      'b': [],
+      'c': [],
     }
     // maxNodes=2:根计 1,展开 a 后计 2,再遇 b 时达上限
     const tree = await buildTree({
@@ -130,7 +130,7 @@ describe('buildTree 截断:深度 / 节点上限 / 环', () => {
       getChildren: childrenFrom(wide),
     })
     expect(tree.truncated).toBe(true)
-    expect(tree.children?.map((c) => c.path)).toEqual(['a'])
+    expect(tree.children?.map(c => c.path)).toEqual(['a'])
   })
 
   it('环检测:getChildren 构造 a→b→a,重复路径作 truncated 叶子且不递归', async () => {
@@ -140,8 +140,8 @@ describe('buildTree 截断:深度 / 节点上限 / 环', () => {
     }
     const tree = await buildTree({ root: 'a', depth: 5, getChildren: childrenFrom(cyclic) })
     // 注:根 path='a' 被 buildTree 渲染为 directory;其子 b 的子又指回 a
-    const b = tree.children?.find((c) => c.path === 'b')
-    const backToA = b?.children?.find((c) => c.path === 'a')
+    const b = tree.children?.find(c => c.path === 'b')
+    const backToA = b?.children?.find(c => c.path === 'a')
     expect(backToA?.truncated).toBe(true)
     expect(backToA?.children).toBeUndefined()
   })
@@ -150,7 +150,7 @@ describe('buildTree 截断:深度 / 节点上限 / 环', () => {
     const map: Record<string, TreeEntry[]> = {
       '': [{ path: 'r', kind: 'remote', description: 'R' }],
       // r 确有子,但边界探测不应调用 getChildren('r')
-      r: [{ path: 'r/x', kind: 'http', description: 'RX' }],
+      'r': [{ path: 'r/x', kind: 'http', description: 'RX' }],
     }
     const probed: string[] = []
     const getChildren = async (path: string): Promise<TreeEntry[]> => {
@@ -164,7 +164,7 @@ describe('buildTree 截断:深度 / 节点上限 / 环', () => {
       getChildren,
       opaqueKinds: new Set(['remote']),
     })
-    const r = tree.children?.find((c) => c.path === 'r')
+    const r = tree.children?.find(c => c.path === 'r')
     expect(r?.truncated).toBe(true)
     expect(r?.children).toBeUndefined()
     // 关键:边界上没有为探测 r 的子而调用 getChildren('r')(remote 免 fetch)
@@ -174,7 +174,7 @@ describe('buildTree 截断:深度 / 节点上限 / 环', () => {
   it('opaqueKinds:depthLeft>0 时 remote 节点仍正常展开(只影响边界探测)', async () => {
     const map: Record<string, TreeEntry[]> = {
       '': [{ path: 'r', kind: 'remote', description: 'R' }],
-      r: [{ path: 'r/x', kind: 'http', description: 'RX' }],
+      'r': [{ path: 'r/x', kind: 'http', description: 'RX' }],
     }
     // depth=2:r 落在 depthLeft=1,应正常展开其子 r/x
     const tree = await buildTree({
@@ -183,7 +183,7 @@ describe('buildTree 截断:深度 / 节点上限 / 环', () => {
       getChildren: childrenFrom(map),
       opaqueKinds: new Set(['remote']),
     })
-    const r = tree.children?.find((c) => c.path === 'r')
-    expect(r?.children?.map((c) => c.path)).toEqual(['r/x'])
+    const r = tree.children?.find(c => c.path === 'r')
+    expect(r?.children?.map(c => c.path)).toEqual(['r/x'])
   })
 })

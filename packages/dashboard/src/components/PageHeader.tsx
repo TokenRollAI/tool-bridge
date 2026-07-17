@@ -7,11 +7,11 @@ export function PageHeader({
   actions,
   eyebrow,
 }: {
-  title: ReactNode
-  description?: ReactNode
   actions?: ReactNode
+  description?: ReactNode
   /** 可选的页面分区标签；只用于说明所属工作区，不重复页面标题。 */
   eyebrow?: ReactNode
+  title: ReactNode
 }) {
   return (
     <header className="flex flex-col items-stretch gap-4 sm:flex-row sm:flex-wrap sm:items-end sm:gap-x-6">

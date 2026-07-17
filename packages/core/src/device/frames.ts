@@ -14,37 +14,37 @@ import { type DeviceExpose, NODE_KINDS, type NodeKind, type TreePath } from '../
 
 /** 设备 → 网关:连接后第一帧;mountPath 缺省 device/<deviceId>。 */
 export interface HelloFrame {
-  type: 'hello'
   deviceId: string
-  mountPath?: TreePath
   expose: DeviceExpose
+  mountPath?: TreePath
+  type: 'hello'
 }
 
 /** 网关 → 设备:hello 确认(含挂载结果)。 */
 export interface ReadyFrame {
-  type: 'ready'
   mountPath: string
+  type: 'ready'
 }
 
 /** 网关 → 设备:拒绝帧(发送后网关 close(1008));设备侧以此区分权限拒绝与可重试断线。 */
 export interface ErrorFrame {
-  type: 'error'
   error: TBErrorBody
+  type: 'error'
 }
 
 /** 网关 → 设备:调用转发;path 相对 mountPath(如 "shell")。 */
 export interface CallFrame {
-  type: 'call'
+  arguments: Record<string, unknown>
   id: string
   path: string
   tool: string
-  arguments: Record<string, unknown>
+  type: 'call'
 }
 
 /** 设备 → 网关:调用结果(与 call 的 id 对应)。 */
-export type ResultFrame =
-  | { type: 'result'; id: string; ok: true; value: unknown }
-  | { type: 'result'; id: string; ok: false; error: TBErrorBody }
+export type ResultFrame
+  = | { id: string, ok: true, type: 'result', value: unknown }
+    | { error: TBErrorBody, id: string, ok: false, type: 'result' }
 
 /** 双向心跳。 */
 export interface PingFrame {
@@ -56,19 +56,19 @@ export interface PongFrame {
 
 /** 网关 → 设备:超时取消提示。 */
 export interface CancelFrame {
-  type: 'cancel'
   id: string
+  type: 'cancel'
 }
 
-export type DeviceFrame =
-  | HelloFrame
-  | ReadyFrame
-  | ErrorFrame
-  | CallFrame
-  | ResultFrame
-  | PingFrame
-  | PongFrame
-  | CancelFrame
+export type DeviceFrame
+  = | HelloFrame
+    | ReadyFrame
+    | ErrorFrame
+    | CallFrame
+    | ResultFrame
+    | PingFrame
+    | PongFrame
+    | CancelFrame
 
 // ---------- 结构校验(zod;未知字段剥离,nodes 除外) ----------
 

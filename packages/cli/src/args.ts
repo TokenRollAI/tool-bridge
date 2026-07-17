@@ -31,7 +31,7 @@ export function collect(value: string, previous: string[]): string[] {
  *
  * env 高于配置文件是刻意约定(便于 CI/临时覆盖)。
  */
-export function resolveTarget(opts: { baseUrl?: string; sk?: string; timeout?: string }): Target {
+export function resolveTarget(opts: { baseUrl?: string, sk?: string, timeout?: string }): Target {
   const profile = currentProfile(readConfig())
   let timeoutMs: number | undefined
   if (opts.timeout !== undefined) {

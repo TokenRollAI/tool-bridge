@@ -1,5 +1,5 @@
-import { Marked } from 'marked'
 import { markedTerminal } from 'marked-terminal'
+import { Marked } from 'marked'
 import { printLine } from './output'
 
 /**

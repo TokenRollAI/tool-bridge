@@ -1,14 +1,14 @@
 import { describe, expect, it } from 'vitest'
+import { createSkillhubProvider, type SkillhubProvider } from '../../src/skillhub/provider'
 import { MemoryObjectStore } from '../../src/context/objectStore'
 import { isTBError, type TBErrorCode } from '../../src/errors'
-import { createSkillhubProvider, type SkillhubProvider } from '../../src/skillhub/provider'
 
 const NOW = '2026-07-16T00:00:00.000Z'
 const NS = 'skills/team'
 
 function make(opts: Partial<Parameters<typeof createSkillhubProvider>[1]> = {}): {
-  store: MemoryObjectStore
   provider: SkillhubProvider
+  store: MemoryObjectStore
 } {
   const store = new MemoryObjectStore(() => NOW)
   const provider = createSkillhubProvider(store, { nsPath: NS, keyPrefix: NS, ...opts })
@@ -39,14 +39,14 @@ describe('createSkillhubProvider', () => {
     expect(res.fileCount).toBe(2)
 
     const list = await provider.List()
-    const entry = list.items.find((s) => s.id === 'pdf-tools')
+    const entry = list.items.find(s => s.id === 'pdf-tools')
     expect(entry?.name).toBe('pdf-tools')
     expect(entry?.description).toBe('Fill PDF forms')
     expect(entry?.version).toBe('2.0')
 
     const detail = await provider.Get('pdf-tools')
     expect(detail.content).toContain('# PDF')
-    expect(detail.files.map((f) => f.path).sort()).toEqual(['SKILL.md', 'scripts/fill.py'])
+    expect(detail.files.map(f => f.path).sort()).toEqual(['SKILL.md', 'scripts/fill.py'])
 
     const file = await provider.GetFile('pdf-tools', 'scripts/fill.py')
     expect(file.content).toBe('print(1)\n')
@@ -84,14 +84,14 @@ describe('createSkillhubProvider', () => {
       ],
     })
     await provider.Publish({ id: 's', files: [{ path: 'SKILL.md', content: DOC }] })
-    expect((await provider.Get('s')).files.map((f) => f.path)).toEqual(['SKILL.md'])
+    expect((await provider.Get('s')).files.map(f => f.path)).toEqual(['SKILL.md'])
   })
 
   it('Search 命中 description;Remove 后 Get 404;Remove 不存在 404', async () => {
     const { provider } = make()
     await provider.Publish({ id: 'pdf-tools', files: [{ path: 'SKILL.md', content: DOC }] })
     const found = await provider.Search('fill')
-    expect(found.items.some((s) => s.id === 'pdf-tools')).toBe(true)
+    expect(found.items.some(s => s.id === 'pdf-tools')).toBe(true)
 
     await provider.Remove('pdf-tools')
     expect(await codeOf(provider.Get('pdf-tools'))).toBe('not_found')

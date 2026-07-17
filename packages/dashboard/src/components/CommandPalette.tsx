@@ -1,4 +1,3 @@
-import { useQueryClient } from '@tanstack/react-query'
 import {
   Boxes,
   Cpu,
@@ -12,8 +11,9 @@ import {
   ShieldEllipsis,
   Sun,
 } from 'lucide-react'
+import { useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router'
-import { KIND_ICON, KindBadge } from '@/components/KindBadge'
+import type { NodeKind, TreeJson } from '@/lib/types'
 import {
   CommandDialog,
   CommandEmpty,
@@ -23,17 +23,17 @@ import {
   CommandList,
   CommandSeparator,
 } from '@/components/ui/command'
-import { useTree } from '@/lib/queries'
+import { KIND_ICON, KindBadge } from '@/components/KindBadge'
 import { useSession } from '@/lib/session'
+import { useTree } from '@/lib/queries'
 import { useTheme } from '@/lib/theme'
-import type { NodeKind, TreeJson } from '@/lib/types'
 import { cn } from '@/lib/utils'
 
 interface FlatNode {
-  path: string
-  kind: NodeKind
   description: string
+  kind: NodeKind
   online?: boolean
+  path: string
 }
 
 function flatten(node: TreeJson, acc: FlatNode[] = []): FlatNode[] {
@@ -67,8 +67,8 @@ export function CommandPalette({
   open,
   onOpenChange,
 }: {
-  open: boolean
   onOpenChange: (open: boolean) => void
+  open: boolean
 }) {
   // 命令面板关闭时不拉全树,避免首屏绕过 TreeNav 的 remote 懒加载。
   const tree = useTree('', 8, { enabled: open })
@@ -86,12 +86,12 @@ export function CommandPalette({
 
   return (
     <CommandDialog
-      open={open}
-      onOpenChange={onOpenChange}
-      title="全局搜索"
-      description="搜索节点、管理页与动作"
       className="top-[20%] translate-y-0 sm:max-w-xl"
+      description="搜索节点、管理页与动作"
+      onOpenChange={onOpenChange}
+      open={open}
       showCloseButton={false}
+      title="全局搜索"
     >
       <CommandInput placeholder="搜索节点路径、kind、描述…" />
       <CommandList className="max-h-[50vh]">
@@ -104,15 +104,15 @@ export function CommandPalette({
               return (
                 <CommandItem
                   key={n.path}
-                  value={`${n.path} ${n.kind} ${n.description}`}
                   onSelect={() => go(`/nodes/${n.path}`)}
+                  value={`${n.path} ${n.kind} ${n.description}`}
                 >
                   <Icon className={cn('size-3.5', iconClass)} strokeWidth={1.75} />
                   <span className="truncate font-mono text-xs">{n.path}</span>
                   {n.online === false && (
                     <span className="font-mono text-[10px] text-muted-foreground">offline</span>
                   )}
-                  <KindBadge kind={n.kind} className="ml-auto" />
+                  <KindBadge className="ml-auto" kind={n.kind} />
                 </CommandItem>
               )
             })}
@@ -122,7 +122,7 @@ export function CommandPalette({
         <CommandSeparator />
         <CommandGroup heading="页面">
           {PAGES.map(({ to, label, icon: Icon }) => (
-            <CommandItem key={to} value={`page ${label}`} onSelect={() => go(to)}>
+            <CommandItem key={to} onSelect={() => go(to)} value={`page ${label}`}>
               <Icon className="size-3.5" />
               <span className="text-xs">{label}</span>
             </CommandItem>
@@ -132,31 +132,35 @@ export function CommandPalette({
         <CommandSeparator />
         <CommandGroup heading="动作">
           <CommandItem
-            value="action theme 切换主题 dark light"
             onSelect={() => {
               toggleTheme()
               onOpenChange(false)
             }}
+            value="action theme 切换主题 dark light"
           >
             {theme === 'dark' ? <Sun className="size-3.5" /> : <Moon className="size-3.5" />}
-            <span className="text-xs">切换到{theme === 'dark' ? '浅色' : '深色'}主题</span>
+            <span className="text-xs">
+              切换到
+              {theme === 'dark' ? '浅色' : '深色'}
+              主题
+            </span>
           </CommandItem>
           <CommandItem
-            value="action refresh 刷新数据"
             onSelect={() => {
               qc.invalidateQueries({ queryKey: ['tb'] })
               onOpenChange(false)
             }}
+            value="action refresh 刷新数据"
           >
             <RefreshCw className="size-3.5" />
             <span className="text-xs">刷新全部数据</span>
           </CommandItem>
           <CommandItem
-            value="action logout 退出登录"
             onSelect={() => {
               onOpenChange(false)
               logout()
             }}
+            value="action logout 退出登录"
           >
             <LogOut className="size-3.5" />
             <span className="text-xs">退出登录</span>

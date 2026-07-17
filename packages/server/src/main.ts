@@ -5,8 +5,8 @@
  * 与 CF 宿主行为一致);TB_BOOTSTRAP_ADMIN_SK 提供时不打印明文。
  */
 
-import { configFromEnv } from './config'
 import { createTbServer } from './server'
+import { configFromEnv } from './config'
 
 const config = configFromEnv(process.env)
 const server = createTbServer(config)

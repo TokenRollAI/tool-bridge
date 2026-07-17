@@ -5,10 +5,9 @@
  * write 返回 { key, secret },secret(明文)仅此一次;list/get/update 一律无 hash。
  */
 
-import type { SKRegistryStore, SKUpdatePatch } from '../auth/sk'
-import { TBError } from '../errors'
-import type { CmdSpec, HelpModel } from '../htbp/model'
 import type { CallContext, Scope, SecretKeyInput, TreePath } from '../types'
+import type { SKRegistryStore, SKUpdatePatch } from '../auth/sk'
+import type { CmdSpec, HelpModel } from '../htbp/model'
 import type { BuiltinModule } from './types'
 import {
   cmdPath,
@@ -18,9 +17,10 @@ import {
   requireString,
   VOID_ACK,
 } from './util'
+import { TBError } from '../errors'
 
-const DESCRIPTION =
-  'Secret Key registry: issue / list / update / revoke access keys (the only credential form; admin only)'
+const DESCRIPTION
+  = 'Secret Key registry: issue / list / update / revoke access keys (the only credential form; admin only)'
 
 /** write 与 update.patch 共用的 SK 字段 schema(update 全可选,另加 disabled)。 */
 const SK_FIELD_SCHEMAS = {
@@ -139,7 +139,7 @@ function skCmds(nodePath: TreePath): CmdSpec[] {
 function asSecretKeyInput(args: Record<string, unknown>): SecretKeyInput {
   const owner = requireString(args, 'owner')
   if (!Array.isArray(args.scopes)) {
-    throw new TBError('invalid_argument', "field 'scopes' must be an array")
+    throw new TBError('invalid_argument', 'field \'scopes\' must be an array')
   }
   const input: SecretKeyInput = { owner, scopes: args.scopes as Scope[] }
   if (typeof args.description === 'string') input.description = args.description

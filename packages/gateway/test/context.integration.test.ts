@@ -1,5 +1,5 @@
-import { env, SELF } from 'cloudflare:test'
 import { describe, expect, it } from 'vitest'
+import { env, SELF } from 'cloudflare:test'
 import { TEST_ADMIN_SK } from './fixtures'
 
 // Context Layer 集成测试:r2 namespace 四动词 + Search/Delete、readOnly、
@@ -18,7 +18,7 @@ async function postJson(path: string, body: unknown, init: RequestInit = {}): Pr
     ...init,
     headers: {
       'content-type': 'application/json',
-      accept: 'application/json',
+      'accept': 'application/json',
       ...(init.headers ?? {}),
     },
     body: JSON.stringify(body),
@@ -56,12 +56,12 @@ async function ctxCall(
 }
 
 interface EntryMeta {
-  uri: string
   contentType: string
-  size?: number
-  version: string
-  updatedAt: string
   metadata: Record<string, string>
+  size?: number
+  updatedAt: string
+  uri: string
+  version: string
 }
 
 describe('r2 namespace 四动词循环', () => {
@@ -82,7 +82,7 @@ describe('r2 namespace 四动词循环', () => {
     const l = await ctxCall('ctxtest/rw', 'List', {})
     expect(l.status).toBe(200)
     const listed = (await l.json()) as { items: EntryMeta[] }
-    const dir = listed.items.find((i) => i.uri === 'node://ctxtest/rw/notes/')
+    const dir = listed.items.find(i => i.uri === 'node://ctxtest/rw/notes/')
     expect(dir?.contentType).toBe('application/x-directory')
 
     // Get:内联文本内容。
@@ -157,7 +157,7 @@ describe('Search(keyword 基线;semantic 未声明 → 400)', () => {
 
     const s = await ctxCall('ctxtest/search', 'Search', { query: 'alpha' })
     expect(s.status).toBe(200)
-    const found = ((await s.json()) as { items: EntryMeta[] }).items.map((i) => i.uri).sort()
+    const found = ((await s.json()) as { items: EntryMeta[] }).items.map(i => i.uri).sort()
     // alpha.md 命中路径名;beta.md 命中 metadata 值(r2 list 带 customMetadata)。
     expect(found).toEqual([
       'node://ctxtest/search/docs/alpha.md',
@@ -181,7 +181,7 @@ describe('readOnly 挂载(D11)', () => {
     )
     expect(help.status).toBe(200)
     const names = ((await help.json()) as { cmds: Array<{ name: string }> }).cmds
-      .map((c) => c.name)
+      .map(c => c.name)
       .sort()
     expect(names).toEqual(['Get', 'List', 'Search'])
 
@@ -198,7 +198,7 @@ describe('ttl 懒回收(下次访问回收)', () => {
     expect((await mountR2('ctxtest/tmp', { ttl: 1 })).status).toBe(200)
     expect((await ctxCall('ctxtest/tmp', 'List', {})).status).toBe(200)
 
-    await new Promise((r) => setTimeout(r, 1300))
+    await new Promise(r => setTimeout(r, 1300))
 
     expect((await ctxCall('ctxtest/tmp', 'List', {})).status).toBe(404)
     const tree = (await (
@@ -206,9 +206,9 @@ describe('ttl 懒回收(下次访问回收)', () => {
         'https://tb.test/~tree?depth=4',
         admin({ headers: { accept: 'application/json' } }),
       )
-    ).json()) as { children?: Array<{ path: string; children?: Array<{ path: string }> }> }
-    const ctxDir = tree.children?.find((n) => n.path === 'ctxtest')
-    expect(ctxDir?.children?.map((n) => n.path) ?? []).not.toContain('ctxtest/tmp')
+    ).json()) as { children?: Array<{ children?: Array<{ path: string }>, path: string }> }
+    const ctxDir = tree.children?.find(n => n.path === 'ctxtest')
+    expect(ctxDir?.children?.map(n => n.path) ?? []).not.toContain('ctxtest/tmp')
   }, 10000)
 })
 
@@ -313,7 +313,7 @@ describe('权限(read/write scope 分离)', () => {
 })
 
 describe('挂载校验', () => {
-  it("provider:'file' → 400(词表外);s3 缺 authRef → 400", async () => {
+  it('provider:\'file\' → 400(词表外);s3 缺 authRef → 400', async () => {
     const file = await postJson(
       'ctxbad/file/~register',
       {
@@ -347,16 +347,16 @@ describe('挂载校验', () => {
 // opt-in:TB_TEST_S3_* 四变量齐才跑(`pnpm s3-mock` 起本地 s3rver,或指真实端点)。
 // s3rver 不校验 SigV4 签名——签名正确性留真实端点验证。
 const s3Env = env as {
-  TB_TEST_S3_ENDPOINT?: string
   TB_TEST_S3_ACCESS_KEY_ID?: string
-  TB_TEST_S3_SECRET_ACCESS_KEY?: string
   TB_TEST_S3_BUCKET?: string
+  TB_TEST_S3_ENDPOINT?: string
+  TB_TEST_S3_SECRET_ACCESS_KEY?: string
 }
-const s3Ready =
-  s3Env.TB_TEST_S3_ENDPOINT !== undefined &&
-  s3Env.TB_TEST_S3_ACCESS_KEY_ID !== undefined &&
-  s3Env.TB_TEST_S3_SECRET_ACCESS_KEY !== undefined &&
-  s3Env.TB_TEST_S3_BUCKET !== undefined
+const s3Ready
+  = s3Env.TB_TEST_S3_ENDPOINT !== undefined
+    && s3Env.TB_TEST_S3_ACCESS_KEY_ID !== undefined
+    && s3Env.TB_TEST_S3_SECRET_ACCESS_KEY !== undefined
+    && s3Env.TB_TEST_S3_BUCKET !== undefined
 
 describe.skipIf(!s3Ready)('s3 provider E2E(opt-in via TB_TEST_S3_*)', () => {
   async function mountS3(path: string): Promise<Response> {
@@ -412,7 +412,7 @@ describe.skipIf(!s3Ready)('s3 provider E2E(opt-in via TB_TEST_S3_*)', () => {
     const l = await ctxCall('ctxs3/rw', 'List', {})
     expect(l.status).toBe(200)
     const listed = (await l.json()) as { items: EntryMeta[] }
-    expect(listed.items.some((i) => i.uri === 'node://ctxs3/rw/notes/')).toBe(true)
+    expect(listed.items.some(i => i.uri === 'node://ctxs3/rw/notes/')).toBe(true)
 
     const g = await ctxCall('ctxs3/rw', 'Get', { path: 'notes/a.md' })
     expect(g.status).toBe(200)
@@ -461,7 +461,7 @@ describe.skipIf(!s3Ready)('s3 provider E2E(opt-in via TB_TEST_S3_*)', () => {
     const s = await ctxCall('ctxs3/search', 'Search', { query: 'needle' })
     expect(s.status).toBe(200)
     const items = ((await s.json()) as { items: EntryMeta[] }).items
-    expect(items.map((i) => i.uri)).toEqual(['node://ctxs3/search/docs/plain.md'])
+    expect(items.map(i => i.uri)).toEqual(['node://ctxs3/search/docs/plain.md'])
     expect(items[0]?.metadata).toEqual({ tag: 'needle-topic' })
   }, 20000)
 })

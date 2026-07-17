@@ -11,12 +11,12 @@ export function PaginationFooter({
   unit = '项',
   className,
 }: {
+  className?: string
   count: number
   hasNextPage: boolean
   isFetchingNextPage: boolean
   onLoadMore: () => void
   unit?: string
-  className?: string
 }) {
   return (
     <div
@@ -27,25 +27,31 @@ export function PaginationFooter({
       )}
     >
       <div className="flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
-        <span className="size-1.5 shrink-0 rounded-full bg-primary" aria-hidden="true" />
+        <span aria-hidden="true" className="size-1.5 shrink-0 rounded-full bg-primary" />
         <p aria-live="polite">
-          当前已加载 <span className="font-mono tabular-nums text-foreground">{count}</span> {unit}
+          当前已加载
+          {' '}
+          <span className="font-mono tabular-nums text-foreground">{count}</span>
+          {' '}
+          {unit}
         </p>
       </div>
-      {hasNextPage ? (
-        <Button
-          type="button"
-          variant="outline"
-          size="xs"
-          disabled={isFetchingNextPage}
-          onClick={onLoadMore}
-        >
-          {isFetchingNextPage && <Loader2 className="animate-spin" aria-hidden="true" />}
-          {isFetchingNextPage ? '正在追加…' : '加载下一页'}
-        </Button>
-      ) : (
-        count > 0 && <span className="text-[11px] text-muted-foreground">已经到底</span>
-      )}
+      {hasNextPage
+        ? (
+            <Button
+              disabled={isFetchingNextPage}
+              onClick={onLoadMore}
+              size="xs"
+              type="button"
+              variant="outline"
+            >
+              {isFetchingNextPage && <Loader2 aria-hidden="true" className="animate-spin" />}
+              {isFetchingNextPage ? '正在追加…' : '加载下一页'}
+            </Button>
+          )
+        : (
+            count > 0 && <span className="text-[11px] text-muted-foreground">已经到底</span>
+          )}
     </div>
   )
 }

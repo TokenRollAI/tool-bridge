@@ -17,17 +17,10 @@
  * (enabled 等)变更跳过;auth.kind 切换时吊销/换发 pluginToken(新 token 仅本响应一次)。
  */
 
-import type { SKRegistryStore } from '../auth/sk'
-import { TBError } from '../errors'
-import type { CmdSpec, HelpModel } from '../htbp/model'
-import { validatePluginContract } from '../plugin/contract'
-import {
-  type PluginManifest,
-  type PluginRegistration,
-  parsePluginManifest,
-} from '../plugin/manifest'
 import type { SecretStoreImpl } from '../secret/secretStore'
-import { KEY_PLUGIN, KEY_PLUGIN_HEALTH, KEY_PLUGIN_META, type StateStore } from '../store'
+import type { CmdSpec, HelpModel } from '../htbp/model'
+import type { SKRegistryStore } from '../auth/sk'
+import type { BuiltinModule } from './types'
 import {
   type CallContext,
   LIST_LIMIT_DEFAULT,
@@ -35,11 +28,18 @@ import {
   type Timestamp,
   type TreePath,
 } from '../types'
-import type { BuiltinModule } from './types'
+import {
+  parsePluginManifest,
+  type PluginManifest,
+  type PluginRegistration,
+} from '../plugin/manifest'
 import { cmdPath, LIST_OPTS_SCHEMA, optListOptions, requireString, VOID_ACK } from './util'
+import { KEY_PLUGIN, KEY_PLUGIN_HEALTH, KEY_PLUGIN_META, type StateStore } from '../store'
+import { validatePluginContract } from '../plugin/contract'
+import { TBError } from '../errors'
 
-const DESCRIPTION =
-  'Plugin registry: register / probe external tool & context providers, then mount them via system/registry (admin only)'
+const DESCRIPTION
+  = 'Plugin registry: register / probe external tool & context providers, then mount them via system/registry (admin only)'
 
 /** SecretStore 保留名:platform-token 明文的存放处。 */
 export function pluginTokenSecretName(id: string): string {
@@ -48,15 +48,15 @@ export function pluginTokenSecretName(id: string): string {
 
 /** 探活结果(I/O 在宿主回调;detail 进拒绝消息)。 */
 export interface PluginProbeResult {
-  healthy: boolean
   detail?: string
+  healthy: boolean
 }
 
 /** `pluginhealth:<id>` 的落盘形状。 */
 export interface PluginHealthRecord {
-  healthy: boolean
   checkedAt: Timestamp
   consecutiveFailures: number
+  healthy: boolean
 }
 
 /**
@@ -71,18 +71,18 @@ function projectManifest(record: StoredPlugin): PluginManifest {
 }
 
 export interface PluginModuleDeps {
-  store: StateStore
-  /** platform-token 的 SK 签发/吊销(owner `plugin:<id>`,scopes 空)。 */
-  sk: SKRegistryStore
-  /** platform-token 明文的保管处(保留名 `plugin-token:<id>`)。 */
-  secrets: SecretStoreImpl
+  /** 放行 http:// endpoint(仅本地开发;宿主按 env `TB_ALLOW_INSECURE_HTTP=true` 注入)。 */
+  allowInsecureHttp?: boolean
+  /** 抓 `~describe`/`~help`(带 Accept: application/json);失败抛 TBError(原样透传)。 */
+  fetchContract(manifest: PluginManifest): Promise<{ describe: unknown, help: unknown }>
   now: () => string
   /** GET {endpoint}{healthPath} 探活;网络失败按 healthy:false 返回(I/O 在宿主)。 */
   probe(manifest: PluginManifest): Promise<PluginProbeResult>
-  /** 抓 `~describe`/`~help`(带 Accept: application/json);失败抛 TBError(原样透传)。 */
-  fetchContract(manifest: PluginManifest): Promise<{ describe: unknown; help: unknown }>
-  /** 放行 http:// endpoint(仅本地开发;宿主按 env `TB_ALLOW_INSECURE_HTTP=true` 注入)。 */
-  allowInsecureHttp?: boolean
+  /** platform-token 明文的保管处(保留名 `plugin-token:<id>`)。 */
+  secrets: SecretStoreImpl
+  /** platform-token 的 SK 签发/吊销(owner `plugin:<id>`,scopes 空)。 */
+  sk: SKRegistryStore
+  store: StateStore
 }
 
 function pluginCmds(nodePath: TreePath): CmdSpec[] {
@@ -280,11 +280,11 @@ export function createPluginModule(deps: PluginModuleDeps): BuiltinModule {
 
     // 契约相关字段变更 → 与 write 同流程重探活 + 重抓 ~describe/~help,刷新 meta/health;
     // 失败即拒不落库。仅本地字段(enabled 等)变更跳过——禁用一个已挂掉的 plugin 不应被探活挡住。
-    const contractChanged =
-      merged.endpoint !== prev.endpoint ||
-      merged.healthPath !== prev.healthPath ||
-      merged.kind !== prev.kind ||
-      merged.interfaceVersion !== prev.interfaceVersion
+    const contractChanged
+      = merged.endpoint !== prev.endpoint
+        || merged.healthPath !== prev.healthPath
+        || merged.kind !== prev.kind
+        || merged.interfaceVersion !== prev.interfaceVersion
     if (contractChanged) {
       const probed = await deps.probe(merged)
       if (!probed.healthy) {
@@ -358,7 +358,7 @@ export function createPluginModule(deps: PluginModuleDeps): BuiltinModule {
       switch (cmd) {
         case 'list': {
           const opts = optListOptions(args)
-          const listOpts: { limit: number; cursor?: string } = { limit: clampLimit(opts?.limit) }
+          const listOpts: { cursor?: string, limit: number } = { limit: clampLimit(opts?.limit) }
           if (opts?.cursor !== undefined) listOpts.cursor = opts.cursor
           const page = await store.list(KEY_PLUGIN, listOpts)
           const items = page.items.map(({ value }) => projectManifest(value as StoredPlugin))
@@ -372,7 +372,7 @@ export function createPluginModule(deps: PluginModuleDeps): BuiltinModule {
           const id = requireString(args, 'id')
           const patch = args.patch
           if (typeof patch !== 'object' || patch === null) {
-            throw new TBError('invalid_argument', "field 'patch' must be an object")
+            throw new TBError('invalid_argument', 'field \'patch\' must be an object')
           }
           return update(id, patch as Record<string, unknown>)
         }

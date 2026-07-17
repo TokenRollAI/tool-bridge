@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { renderHelpMarkdown } from '../../src/htbp/helpMarkdown'
 import type { HelpModel } from '../../src/htbp/model'
+import { renderHelpMarkdown } from '../../src/htbp/helpMarkdown'
 
 const mcpModel: HelpModel = {
   node: { path: 'docs/context7', kind: 'mcp', description: 'Context7 文档检索' },
@@ -75,7 +75,7 @@ describe('renderHelpMarkdown:使用路径清晰(索引形态与 children)', () =
       node: { path: 'logs', kind: 'mcp', description: 'SLS' },
       cmds: [{ name: 'explore', method: 'POST', path: '/logs', h: '概览', scope: 'call' }],
       index: true,
-      hint: "this is an index; GET /logs/<tool>/~help returns one tool's full spec",
+      hint: 'this is an index; GET /logs/<tool>/~help returns one tool\'s full spec',
     }
     const md = renderHelpMarkdown(m)
     expect(md).toContain('> **Next step**: this is an index')

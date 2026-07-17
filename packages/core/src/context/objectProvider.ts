@@ -6,13 +6,6 @@
  * 只提供 ObjectStore 适配,不各自复刻语义。version = 对象 etag。
  */
 
-import { TBError } from '../errors'
-import { normalizePath } from '../tree/path'
-import type { ListOptions, Page, TreePath } from '../types'
-import { LIST_LIMIT_DEFAULT, LIST_LIMIT_MAX } from '../types'
-import type { ObjectBody, ObjectMeta, ObjectStore } from './objectStore'
-import { readStreamBytes, readStreamText } from './objectStore'
-import { normalizeEntryPath } from './path'
 import type {
   ContextEntry,
   ContextEntryInput,
@@ -21,6 +14,11 @@ import type {
   ContextProvider,
   SearchOptions,
 } from './types'
+import { type ObjectBody, type ObjectMeta, type ObjectStore, readStreamBytes, readStreamText } from './objectStore'
+import { LIST_LIMIT_DEFAULT, LIST_LIMIT_MAX, type ListOptions, type Page, type TreePath } from '../types'
+import { normalizePath } from '../tree/path'
+import { normalizeEntryPath } from './path'
+import { TBError } from '../errors'
 
 /** $ref 内联阈值缺省 1 MiB(只针对"大对象")。 */
 export const REF_THRESHOLD_BYTES_DEFAULT = 1024 * 1024
@@ -39,24 +37,24 @@ export const SEARCH_METADATA_HEAD_MAX = 200
 export const DIRECTORY_CONTENT_TYPE = 'application/x-directory'
 
 export interface ObjectContextProviderOptions {
-  /** namespace 节点树路径,uri 前缀 node://<nsPath>/。 */
-  nsPath: TreePath
   /** 对象 key 前缀(多 namespace 共桶隔离);不参与 uri 与 entry 路径。 */
   keyPrefix?: string
+  /** namespace 节点树路径,uri 前缀 node://<nsPath>/。 */
+  nsPath: TreePath
+  /** presign URL 有效期(秒);缺省 900。 */
+  presignTtlSec?: number
   /** readOnly 挂载:Write/Update/Delete → permission_denied。 */
   readOnly?: boolean
   /** 内联上限(字节):超过或非文本 contentType 走 $ref;缺省 1 MiB。 */
   refThresholdBytes?: number
-  /** presign URL 有效期(秒);缺省 900。 */
-  presignTtlSec?: number
   /** presign 缺失时的中转 URL 工厂(可异步:网关需 HMAC 签 token);两者都缺则大对象 Get → unavailable。 */
   relayRefUrl?: (key: string) => string | Promise<string>
 }
 
 /** 本 provider 实现了可选能力 Search 与 Delete(CONTEXT_CAPABILITIES 声明)。 */
 export type ObjectContextProvider = ContextProvider & {
-  Search: NonNullable<ContextProvider['Search']>
   Delete: NonNullable<ContextProvider['Delete']>
+  Search: NonNullable<ContextProvider['Search']>
 }
 
 /** limit 缺省 50、超上限 200 静默钳制;非正整数拒绝。 */
@@ -83,13 +81,13 @@ function mimeOf(contentType: string | undefined): string {
 }
 
 /** Write 入参 → 落盘 body 与 contentType(非 string content 序列化为 JSON)。 */
-function serializeInput(entry: ContextEntryInput): { body: string; contentType: string } {
+function serializeInput(entry: ContextEntryInput): { body: string, contentType: string } {
   if (entry.content === undefined) {
-    throw new TBError('invalid_argument', "entry 缺少 'content'")
+    throw new TBError('invalid_argument', 'entry 缺少 \'content\'')
   }
   if (typeof entry.content === 'string') {
     if (!entry.contentType) {
-      throw new TBError('invalid_argument', "字符串 content 必须携带 'contentType'")
+      throw new TBError('invalid_argument', '字符串 content 必须携带 \'contentType\'')
     }
     return { body: entry.content, contentType: entry.contentType }
   }
@@ -235,7 +233,7 @@ export function createObjectContextProvider(
     async Search(query: string, searchOpts?: SearchOptions): Promise<Page<ContextEntryMeta>> {
       const mode = searchOpts?.mode ?? 'keyword'
       if (mode === 'semantic') {
-        throw new TBError('invalid_argument', "semantic 检索未声明('search:semantic' capability)")
+        throw new TBError('invalid_argument', 'semantic 检索未声明(\'search:semantic\' capability)')
       }
       if (mode !== 'keyword') {
         throw new TBError('invalid_argument', `未知 search mode:'${mode}'`)
@@ -274,7 +272,7 @@ export function createObjectContextProvider(
                 metadata = head.metadata
               }
             }
-            matched = Object.values(metadata ?? {}).some((v) => v.toLowerCase().includes(q))
+            matched = Object.values(metadata ?? {}).some(v => v.toLowerCase().includes(q))
           }
           if (!matched) continue
           if (items.length < limit) {

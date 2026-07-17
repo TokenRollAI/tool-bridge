@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { parseHelpDsl, renderHelpDsl } from '../../src/htbp/helpDsl'
-import { toolHelpModel, toolsToHelpModel } from '../../src/tool/mcpSchema'
 import type { ToolSpec } from '../../src/tool/types'
+import { toolHelpModel, toolsToHelpModel } from '../../src/tool/mcpSchema'
+import { parseHelpDsl, renderHelpDsl } from '../../src/htbp/helpDsl'
 
 const tools: ToolSpec[] = [
   {
@@ -53,7 +53,7 @@ describe('toolsToHelpModel(上游工具集 → HelpModel)', () => {
     expect(lines).toContain('  h 解析库 id')
     expect(lines).toContain('  scope call')
     // flatBody:body 行是裸 inputSchema,不含 {tool,arguments} 信封
-    const bodyLine = lines.find((l) => l.startsWith('  body '))
+    const bodyLine = lines.find(l => l.startsWith('  body '))
     expect(bodyLine).toBeDefined()
     expect(bodyLine).not.toContain('"tool"')
     expect(JSON.parse((bodyLine ?? '').slice('  body '.length))).toEqual(tools[0]?.inputSchema)

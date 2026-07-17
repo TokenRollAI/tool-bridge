@@ -9,28 +9,28 @@ const DEFAULT_MAX_HOPS = 4
 const DEFAULT_DEVICE_RECLAIM_SEC = 24 * 60 * 60
 
 export interface ServerConfig {
-  port: number
-  host: string
-  /** SQLite 库与 fs 对象根所在目录(state.sqlite3 + objects/)。 */
-  dataDir: string
-  /** Dashboard 静态资源目录覆盖(缺省经 @tool-bridge/dashboard 包解析)。 */
-  uiDir?: string
   /** 首次引导的 Admin SK 明文(缺省随机生成并打印一次)。 */
   adminSk?: string
-  /** SecretStore 主密钥 + $ref 中转 token 签名密钥(base64url 32B)。 */
-  encryptionKey?: string
   allowInsecureHttp: boolean
-  remote: {
-    allowlist: string[]
-    maxHops: number
-    instanceId?: string
-    allowInsecure: boolean
-  }
-  toolCacheTtlSec?: number
-  refThresholdBytes?: number
-  refTtlSec?: number
+  /** SQLite 库与 fs 对象根所在目录(state.sqlite3 + objects/)。 */
+  dataDir: string
   /** 设备断线后未重连的回收秒数(缺省 24h)。 */
   deviceReclaimSec: number
+  /** SecretStore 主密钥 + $ref 中转 token 签名密钥(base64url 32B)。 */
+  encryptionKey?: string
+  host: string
+  port: number
+  refThresholdBytes?: number
+  refTtlSec?: number
+  remote: {
+    allowInsecure: boolean
+    allowlist: string[]
+    instanceId?: string
+    maxHops: number
+  }
+  toolCacheTtlSec?: number
+  /** Dashboard 静态资源目录覆盖(缺省经 @tool-bridge/dashboard 包解析)。 */
+  uiDir?: string
 }
 
 /** 正整数 env 解析;非法/缺省 → undefined。 */
@@ -50,8 +50,8 @@ export function configFromEnv(env: NodeJS.ProcessEnv = process.env): ServerConfi
   const allowInsecure = env.TB_ALLOW_INSECURE_HTTP === 'true'
   const allowlist = (env.TB_REMOTE_ALLOWLIST ?? '')
     .split(',')
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0)
+    .map(s => s.trim())
+    .filter(s => s.length > 0)
   const config: ServerConfig = {
     port: portEnv(env.TB_PORT) ?? DEFAULT_PORT,
     host: env.TB_HOST !== undefined && env.TB_HOST.length > 0 ? env.TB_HOST : '0.0.0.0',

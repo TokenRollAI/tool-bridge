@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { TBError } from '../../src/errors'
+import type { CallContext } from '../../src/types'
 import {
   assertPluginPayloadSize,
   decodeCallContext,
@@ -10,7 +10,7 @@ import {
   HEADER_TB_REQUEST_ID,
   PLUGIN_PAYLOAD_MAX_BYTES,
 } from '../../src/plugin/envelope'
-import type { CallContext } from '../../src/types'
+import { TBError } from '../../src/errors'
 
 const CTX: CallContext = {
   keyId: 'sk_01',

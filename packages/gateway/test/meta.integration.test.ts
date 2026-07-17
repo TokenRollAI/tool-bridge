@@ -1,6 +1,6 @@
-import { SELF } from 'cloudflare:test'
 import { parseHelpDsl } from '@tool-bridge/core'
 import { describe, expect, it } from 'vitest'
+import { SELF } from 'cloudflare:test'
 import { TEST_ADMIN_SK } from './fixtures'
 
 // system/annotation(builtin)+ ~feedback(保留段,per-path 一级协议能力)集成测试:
@@ -21,7 +21,7 @@ async function postJson(path: string, body: unknown, init: RequestInit = {}): Pr
     ...init,
     headers: {
       'content-type': 'application/json',
-      accept: 'application/json',
+      'accept': 'application/json',
       ...(init.headers ?? {}),
     },
     body: JSON.stringify(body),
@@ -80,8 +80,8 @@ async function helpOf(path: string, accept: string, init: RequestInit = admin())
 }
 
 interface HelpJsonLite {
+  feedback?: Array<{ id: string, score: number, title: string }>
   note?: string
-  feedback?: Array<{ id: string; title: string; score: number }>
 }
 
 async function helpJson(path: string): Promise<HelpJsonLite> {
@@ -102,7 +102,7 @@ async function submitFeedback(
 describe('builtin 物化与 ~help 契约', () => {
   it('system/annotation 节点存在且 cmd/scope 符合契约;system/feedback 不存在(走 ~feedback)', async () => {
     const anno = parseHelpDsl(await helpOf('system/annotation', 'text/plain'))
-    expect(Object.fromEntries(anno.cmds.map((c) => [c.name, c.scope]))).toEqual({
+    expect(Object.fromEntries(anno.cmds.map(c => [c.name, c.scope]))).toEqual({
       set: 'admin',
       get: 'read',
       remove: 'admin',
@@ -200,7 +200,7 @@ describe('~feedback 保留段:agent 开箱提交/投票,~help 区块与阈值隐
 
     const got = await getJson(`ext/fb-node/~feedback/${id}`, bearer(agentSk))
     expect(got.status).toBe(200)
-    const detail = (await got.json()) as { detail: string; by: string }
+    const detail = (await got.json()) as { by: string, detail: string }
     expect(detail.detail).toBe('重试一次即可恢复')
     expect(detail.by).toBe('agent:reporter')
   })
@@ -242,7 +242,7 @@ describe('~feedback 保留段:agent 开箱提交/投票,~help 区块与阈值隐
     const dft = await getJson('ext/fb-hide/~feedback', bearer(author))
     expect(((await dft.json()) as { items: unknown[] }).items).toHaveLength(0)
     const full = await getJson('ext/fb-hide/~feedback?hidden=1', bearer(author))
-    const items = ((await full.json()) as { items: Array<{ id: string; score: number }> }).items
+    const items = ((await full.json()) as { items: Array<{ id: string, score: number }> }).items
     expect(items).toEqual([expect.objectContaining({ id, score: -3 })])
   })
 

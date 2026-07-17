@@ -1,9 +1,9 @@
 import { Command } from 'commander'
-import { resolveTarget, withGlobalOpts } from '../args'
-import { apiJson, CliError } from '../http'
-import { guard, printJson, printLine } from '../output'
-import { nodePath } from '../paths'
 import type { TreeJson } from '../types'
+import { resolveTarget, withGlobalOpts } from '../args'
+import { guard, printJson, printLine } from '../output'
+import { apiJson, CliError } from '../http'
+import { nodePath } from '../paths'
 
 /** 把 TreeJson 渲染成缩进树(纯函数,便于单测)。 */
 export function renderTree(node: TreeJson, depth = 0): string {
@@ -20,9 +20,9 @@ export function renderTree(node: TreeJson, depth = 0): string {
 }
 
 interface TreeOpts {
+  baseUrl?: string
   depth?: string
   json?: boolean
-  baseUrl?: string
   sk?: string
 }
 
