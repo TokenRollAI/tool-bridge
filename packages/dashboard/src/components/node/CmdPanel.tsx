@@ -51,8 +51,8 @@ const MUTATING = /^(write|update|delete|set|rm|remove|unmount|mount)$/i
 function parseShellAllow(h: string): { lead: string; allow: string[] | 'all' | 'none' } | null {
   const m = /^(.*?)允许命令:\s*(.+?)(?:;其余拒绝)?$/.exec(h)
   if (!m) return null
-  const lead = m[1].replace(/[;;]\s*$/, '').trim()
-  const body = m[2].trim()
+  const lead = (m[1] ?? '').replace(/[;;]\s*$/, '').trim()
+  const body = (m[2] ?? '').trim()
   if (body === '*') return { lead, allow: 'all' }
   if (body.startsWith('无')) return { lead, allow: 'none' }
   return { lead, allow: body.split(/[,,]\s*/).filter(Boolean) }
