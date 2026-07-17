@@ -41,7 +41,7 @@ export function CommandWorkspace({
 
   useEffect(() => {
     if (invocationPending || visible.length === 0) return
-    if (!visible.some((cmd) => cmd.name === selected)) setSelected(visible[0].name)
+    if (!visible.some((cmd) => cmd.name === selected)) setSelected(visible[0]!.name)
   }, [invocationPending, selected, visible])
 
   const active = cmds.find((cmd) => cmd.name === selected) ?? cmds[0]
@@ -50,7 +50,7 @@ export function CommandWorkspace({
     if (invocationPending) return
     const index = visible.findIndex((cmd) => cmd.name === current)
     if (index < 0 || visible.length === 0) return
-    const next = visible[(index + delta + visible.length) % visible.length]
+    const next = visible[(index + delta + visible.length) % visible.length]!
     setSelected(next.name)
     requestAnimationFrame(() => itemRefs.current.get(next.name)?.focus())
   }

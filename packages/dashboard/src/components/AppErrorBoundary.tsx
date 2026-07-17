@@ -11,17 +11,17 @@ interface State {
  * Suspense 只处理“等待”,不处理 import reject;这里必须给出可恢复的整页刷新入口。
  */
 export class AppErrorBoundary extends Component<{ children: ReactNode }, State> {
-  state: State = { error: null }
+  override state: State = { error: null }
 
   static getDerivedStateFromError(error: Error): State {
     return { error }
   }
 
-  componentDidCatch(error: Error, info: ErrorInfo) {
+  override componentDidCatch(error: Error, info: ErrorInfo) {
     console.error('[dashboard] uncaught render error', error, info.componentStack)
   }
 
-  render() {
+  override render() {
     if (!this.state.error) return this.props.children
     const chunkFailure = /dynamically imported|importing a module|chunk/i.test(
       this.state.error.message,
