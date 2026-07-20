@@ -36,6 +36,7 @@ import { cmdPath, LIST_OPTS_SCHEMA, optListOptions, requireString, VOID_ACK } fr
 import { KEY_PLUGIN, KEY_PLUGIN_HEALTH, KEY_PLUGIN_META, type StateStore } from '../store'
 import { validatePluginContract } from '../plugin/contract'
 import { TBError } from '../errors'
+import { omit } from '../omit'
 
 const DESCRIPTION
   = 'Plugin registry: register / probe external tool & context providers, then mount them via system/registry (admin only)'
@@ -65,9 +66,7 @@ export interface PluginHealthRecord {
 type StoredPlugin = PluginManifest & { tokenSkId?: string }
 
 function projectManifest(record: StoredPlugin): PluginManifest {
-  const manifest = { ...record }
-  delete manifest.tokenSkId
-  return manifest
+  return omit(record, 'tokenSkId')
 }
 
 export interface PluginModuleDeps {

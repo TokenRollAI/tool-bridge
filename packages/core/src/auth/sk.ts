@@ -18,6 +18,7 @@ import {
 } from '../types'
 import { KEY_SK_HASH, KEY_SK_ID, type StateStore } from '../store'
 import { TBError } from '../errors'
+import { omit } from '../omit'
 
 declare const crypto: {
   getRandomValues(array: Uint8Array): Uint8Array
@@ -82,9 +83,7 @@ export async function mintKey(
 
 /** 投影:剥离 hash(hash 永不出网关)。 */
 export function projectKey(key: SecretKey): Omit<SecretKey, 'hash'> {
-  const rest: Omit<SecretKey, 'hash'> & { hash?: string } = { ...key }
-  delete rest.hash
-  return rest
+  return omit(key, 'hash')
 }
 
 /** Admin SK 引导输入(Case 1):owner user:admin,全动作 ** scope。 */
