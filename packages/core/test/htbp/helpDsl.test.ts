@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { HelpModel } from '../../src/htbp/model'
 import { parseHelpDsl, renderHelpDsl } from '../../src/htbp/helpDsl'
+import { omit } from '../../src/omit'
 
 describe('renderHelpDsl 格式', () => {
   const model: HelpModel = {
@@ -224,9 +225,7 @@ describe('note 行与 feedback 块(未知行忽略扩展通道)', () => {
 
   it('note/feedback 对最小 parser 是未知行:解析结果与去掉它们完全一致', () => {
     const parsed = parseHelpDsl(text)
-    const bare = { ...model }
-    delete (bare as { feedback?: unknown, note?: unknown }).note
-    delete (bare as { feedback?: unknown, note?: unknown }).feedback
+    const bare = omit(model, 'note', 'feedback')
     expect(parsed).toEqual(parseHelpDsl(renderHelpDsl(bare)))
     expect(parsed.cmds).toEqual([
       { name: 'create-doc', method: 'POST', path: '/feishu/create-doc', scope: 'call' },

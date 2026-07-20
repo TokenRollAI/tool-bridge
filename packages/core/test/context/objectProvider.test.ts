@@ -7,6 +7,7 @@ import {
 } from '../../src/context/objectProvider'
 import { MemoryObjectStore, type ObjectStore } from '../../src/context/objectStore'
 import { isTBError, type TBErrorCode } from '../../src/errors'
+import { omit } from '../../src/omit'
 
 const NOW = '2026-07-07T00:00:00.000Z'
 const NS = 'ctx/main'
@@ -411,9 +412,7 @@ describe('Search', () => {
           ...res,
           items: res.items.map((i) => {
             if ('prefix' in i) return i
-            const rest = { ...i }
-            delete (rest as { metadata?: unknown }).metadata
-            return rest
+            return omit(i, 'metadata')
           }),
         }
       },

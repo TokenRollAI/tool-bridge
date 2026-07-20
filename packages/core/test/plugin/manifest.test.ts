@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { parsePluginManifest, PLUGIN_KINDS } from '../../src/plugin/manifest'
 import { TBError } from '../../src/errors'
+import { omit } from '../../src/omit'
 
 /** 注册样例(feishu-docs)。 */
 const FEISHU = {
@@ -135,9 +136,7 @@ describe('其余字段', () => {
   })
 
   it('enabled 缺失或非 boolean → 拒', () => {
-    const rest = { ...FEISHU }
-    delete (rest as { enabled?: unknown }).enabled
-    expectInvalid(rest)
+    expectInvalid(omit(FEISHU, 'enabled'))
     expectInvalid({ ...FEISHU, enabled: 'true' })
   })
 
