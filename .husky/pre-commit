@@ -1,4 +1,10 @@
 [ "$CI" = "true" ] && exit 0
 [ "$HUSKY" = "0" ] && exit 0
 
+set -e
+
+# 1) staged 文件快门禁：eslint --fix
 pnpm exec lint-staged
+
+# 2) 全量类型检查（tsc 无法只检单文件，必须整项目）
+pnpm typecheck
