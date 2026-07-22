@@ -5,7 +5,6 @@
  * write 返回 { key, secret },secret(明文)仅此一次;list/get/update 一律无 hash。
  */
 
-import type { SKRegistryStore, SKUpdatePatch } from '../auth/sk'
 import type { Scope, SecretKeyInput, TreePath } from '../types'
 import type { CmdSpec, HelpModel } from '../htbp/model'
 import type { BuiltinModule } from './types'
@@ -17,6 +16,7 @@ import {
   requireString,
   VOID_ACK,
 } from './util'
+import { normalizeExpiresAt, type SKRegistryStore, type SKUpdatePatch } from '../auth/sk'
 import { TBError } from '../errors'
 
 const DESCRIPTION
@@ -53,7 +53,10 @@ const SK_FIELD_SCHEMAS = {
     items: { type: 'string' },
     description: 'path prefixes this key may self-register nodes under (via ~register)',
   },
-  expiresAt: { type: 'string', description: 'expiry, ISO 8601 timestamp; omit = never' },
+  expiresAt: {
+    type: 'string',
+    description: 'expiry, ISO 8601 timestamp with timezone; omit = never',
+  },
 } as const
 
 function skCmds(nodePath: TreePath): CmdSpec[] {
@@ -144,8 +147,14 @@ function asSecretKeyInput(args: Record<string, unknown>): SecretKeyInput {
   const input: SecretKeyInput = { owner, scopes: args.scopes as Scope[] }
   if (typeof args.description === 'string') input.description = args.description
   if (Array.isArray(args.registerPaths)) input.registerPaths = args.registerPaths as TreePath[]
-  if (typeof args.expiresAt === 'string') input.expiresAt = args.expiresAt
+  if ('expiresAt' in args) input.expiresAt = normalizeExpiresAt(args.expiresAt)
   return input
+}
+
+function asSkUpdatePatch(args: Record<string, unknown>): SKUpdatePatch {
+  const patch = { ...args } as SKUpdatePatch
+  if ('expiresAt' in args) patch.expiresAt = normalizeExpiresAt(args.expiresAt)
+  return patch
 }
 
 export function createSkModule(store: SKRegistryStore, now: () => string): BuiltinModule {
@@ -169,7 +178,7 @@ export function createSkModule(store: SKRegistryStore, now: () => string): Built
         case 'update':
           return store.update(
             requireString(args, 'id'),
-            requireObject(args, 'patch') as SKUpdatePatch,
+            asSkUpdatePatch(requireObject(args, 'patch')),
           )
         case 'delete':
           await store.delete(requireString(args, 'id'))

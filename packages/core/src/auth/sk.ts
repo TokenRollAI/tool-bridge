@@ -6,6 +6,7 @@
  * 或 @types/node,故在此声明所需最小子集(仅类型,运行时用真实全局)。
  */
 
+import { z } from 'zod'
 import {
   type CallContext,
   LIST_LIMIT_DEFAULT,
@@ -32,6 +33,7 @@ declare class TextEncoder {
 const SECRET_PREFIX = 'tbk_'
 const BEARER_PREFIX = 'Bearer '
 const B64URL = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_'
+const ISO_TIMESTAMP = z.string().datetime({ offset: true })
 
 /** base64url(无填充)编码——自实现,避免依赖 btoa/Buffer(纯逻辑)。 */
 function base64url(bytes: Uint8Array): string {
@@ -62,6 +64,25 @@ export function generateSecret(): string {
   return `${SECRET_PREFIX}${base64url(bytes)}`
 }
 
+/** 校验并规范化 SK 过期时间；只接受带时区的 ISO 8601 timestamp。 */
+export function normalizeExpiresAt(value: unknown): Timestamp {
+  const parsed = ISO_TIMESTAMP.safeParse(value)
+  if (!parsed.success) {
+    throw new TBError(
+      'invalid_argument',
+      'field \'expiresAt\' must be a valid ISO 8601 timestamp with timezone',
+    )
+  }
+  const timestamp = Date.parse(parsed.data)
+  if (!Number.isFinite(timestamp)) {
+    throw new TBError(
+      'invalid_argument',
+      'field \'expiresAt\' must be a valid ISO 8601 timestamp with timezone',
+    )
+  }
+  return new Date(timestamp).toISOString()
+}
+
 /** 签发一把 SK:hash = sha256(明文);明文 secret 随返回,仅此一次。 */
 export async function mintKey(
   input: SecretKeyInput,
@@ -76,7 +97,7 @@ export async function mintKey(
     createdAt: now,
     ...(input.description !== undefined && { description: input.description }),
     ...(input.registerPaths !== undefined && { registerPaths: input.registerPaths }),
-    ...(input.expiresAt !== undefined && { expiresAt: input.expiresAt }),
+    ...(input.expiresAt !== undefined && { expiresAt: normalizeExpiresAt(input.expiresAt) }),
   }
   return { key, secret }
 }
@@ -97,7 +118,12 @@ export function adminBootstrapInput(): SecretKeyInput {
 /** 认证层有效性:disabled 或 expiresAt 已过 → 视同禁用。 */
 export function isKeyActive(key: SecretKey, now: Timestamp): boolean {
   if (key.disabled) return false
-  if (key.expiresAt !== undefined && Date.parse(key.expiresAt) <= Date.parse(now)) return false
+  const nowTimestamp = Date.parse(now)
+  if (!Number.isFinite(nowTimestamp)) return false
+  if (key.expiresAt !== undefined) {
+    const expiresTimestamp = Date.parse(key.expiresAt)
+    if (!Number.isFinite(expiresTimestamp) || expiresTimestamp <= nowTimestamp) return false
+  }
   return true
 }
 
@@ -163,7 +189,7 @@ export class SKRegistryStore {
     if (patch.description !== undefined) updated.description = patch.description
     if (patch.scopes !== undefined) updated.scopes = patch.scopes
     if (patch.registerPaths !== undefined) updated.registerPaths = patch.registerPaths
-    if (patch.expiresAt !== undefined) updated.expiresAt = patch.expiresAt
+    if (patch.expiresAt !== undefined) updated.expiresAt = normalizeExpiresAt(patch.expiresAt)
     if (patch.disabled !== undefined) updated.disabled = patch.disabled
     await this.store.put(KEY_SK_HASH + rec.hash, updated)
     return projectKey(updated)

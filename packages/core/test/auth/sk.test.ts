@@ -6,6 +6,7 @@ import {
   identify,
   isKeyActive,
   mintKey,
+  normalizeExpiresAt,
   projectKey,
   sha256Hex,
   SKRegistryStore,
@@ -70,6 +71,12 @@ describe('mintKey / projectKey', () => {
     expect(key.expiresAt).toBe(FUTURE)
   })
 
+  it('normalizeExpiresAt:校验 ISO timestamp 并规范为 UTC', () => {
+    expect(normalizeExpiresAt('2026-07-07T08:00:00+08:00')).toBe(FUTURE)
+    expect(() => normalizeExpiresAt('2026-02-30T00:00:00Z')).toThrowError(/with timezone/)
+    expect(() => normalizeExpiresAt('not-a-date')).toThrowError(/with timezone/)
+  })
+
   it('projectKey:剥离 hash,保留其余字段', async () => {
     const { key } = await mintKey(input(), NOW)
     const projected = projectKey(key)
@@ -109,6 +116,11 @@ describe('isKeyActive(disabled / expiresAt 过期视同禁用)', () => {
 
   it('expiresAt 已过 → false', () => {
     expect(isKeyActive({ ...base, expiresAt: PAST }, NOW)).toBe(false)
+  })
+
+  it('expiresAt 是历史脏值或当前时间无效 → fail closed', () => {
+    expect(isKeyActive({ ...base, expiresAt: 'not-a-date' }, NOW)).toBe(false)
+    expect(isKeyActive(base, 'not-a-date')).toBe(false)
   })
 })
 
@@ -169,6 +181,17 @@ describe('SKRegistryStore(SKRegistry 语义)', () => {
     })
     expect(updated.scopes).toEqual([{ pattern: '**', actions: ['admin'] }])
     expect(updated.expiresAt).toBe(FUTURE)
+  })
+
+  it('write/update:无效 expiresAt → invalid_argument 且不污染已有记录', async () => {
+    await expect(reg.write(input({ expiresAt: 'not-a-date' }), NOW)).rejects.toSatisfy(
+      e => isTBError(e) && e.code === 'invalid_argument',
+    )
+    const { key } = await reg.write(input({ expiresAt: FUTURE }), NOW)
+    await expect(reg.update(key.id, { expiresAt: '2026-02-30T00:00:00Z' })).rejects.toSatisfy(
+      e => isTBError(e) && e.code === 'invalid_argument',
+    )
+    expect((await reg.get(key.id)).expiresAt).toBe(FUTURE)
   })
 
   it('update:注入 hash/id/createdAt 被忽略,原 secret 仍可 identify(不可变字段)', async () => {
@@ -241,6 +264,14 @@ describe('identify(mint→identify 往返,CallContext)', () => {
 
   it('过期 SK → null', async () => {
     const { secret } = await reg.write(input({ expiresAt: PAST }), NOW)
+    expect(await identify(store, secret, NOW)).toBeNull()
+  })
+
+  it('历史记录含无效 expiresAt → null(fail closed)', async () => {
+    const { secret } = await reg.write(input(), NOW)
+    const hash = await sha256Hex(secret)
+    const record = (await store.get(KEY_SK_HASH + hash)) as SecretKey
+    await store.put(KEY_SK_HASH + hash, { ...record, expiresAt: 'not-a-date' })
     expect(await identify(store, secret, NOW)).toBeNull()
   })
 })
