@@ -1,9 +1,9 @@
 import { createInterface } from 'node:readline/promises'
 import { Command } from 'commander'
 import { guard, printJson, printLine } from '../output'
+import { resolveTarget, withGlobalOpts } from '../args'
 import { readConfig, writeConfig } from '../config'
 import { apiFetch, CliError } from '../http'
-import { withGlobalOpts } from '../args'
 
 /** 交互式读取一行(仅在缺 flag 且为 TTY 时用;SK 明文回显,见交付说明的偏差项)。 */
 async function prompt(question: string): Promise<string> {
@@ -20,6 +20,7 @@ interface LoginOpts {
   json?: boolean
   profile?: string
   sk?: string
+  timeout?: string
 }
 
 /**
@@ -46,7 +47,11 @@ export function loginCommand(): Command {
         if (!sk) throw new CliError('SK is required (pass --sk or set TB_SK)')
 
         const normalized = baseUrl.replace(/\/+$/, '')
-        const res = await apiFetch({ baseUrl: normalized, sk }, { path: '/~help', accept: 'text' })
+        const { timeoutMs } = resolveTarget({ timeout: opts.timeout })
+        const res = await apiFetch(
+          { baseUrl: normalized, sk, timeoutMs },
+          { path: '/~help', accept: 'text' },
+        )
         if (res.status === 401) {
           throw new CliError('SK rejected by gateway (401): check the key', 'permission_denied')
         }

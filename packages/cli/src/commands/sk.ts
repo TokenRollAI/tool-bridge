@@ -1,13 +1,22 @@
 import { Command } from 'commander'
 import type { Page, SecretKeyCreated, SecretKeyInput, SecretKeyView } from '../types'
-import { collect, resolveTarget, withGlobalOpts } from '../args'
+import {
+  collect,
+  parseIsoTimestamp,
+  parsePageOpts,
+  resolveTarget,
+  withGlobalOpts,
+  withPageOpts,
+} from '../args'
 import { guard, printJson, printLine, table } from '../output'
 import { callTool, CliError } from '../http'
 import { parseScope } from '../scope'
 
 interface SkGlobalOpts {
   baseUrl?: string
+  cursor?: string
   json?: boolean
+  limit?: string
   sk?: string
 }
 
@@ -17,18 +26,29 @@ export function scopeSummary(k: SecretKeyView): string {
     .join(' ')
 }
 
+function printKey(k: SecretKeyView): void {
+  printLine(`id:          ${k.id}`)
+  printLine(`owner:       ${k.owner}`)
+  printLine(`state:       ${k.disabled ? 'disabled' : 'active'}`)
+  printLine(`expires:     ${k.expiresAt ?? 'never'}`)
+  printLine(`description: ${k.description ?? '-'}`)
+  printLine(`scopes:      ${scopeSummary(k) || '-'}`)
+  printLine(`register:    ${(k.registerPaths ?? []).join(', ') || '-'}`)
+}
+
 /** `tb sk list` → SKRegistry.List(system/sk),裁掉 hash。 */
 export function skListCommand(): Command {
-  return withGlobalOpts(new Command('list'))
+  return withPageOpts(withGlobalOpts(new Command('list')))
     .description('List secret keys (hash never returned)')
     .action(async (opts: SkGlobalOpts) => {
       const asJson = Boolean(opts.json)
       await guard(asJson, async () => {
+        const pageOpts = parsePageOpts(opts)
         const page = await callTool<Page<SecretKeyView>>(
           resolveTarget(opts),
           '/system/sk',
           'list',
-          {},
+          Object.keys(pageOpts).length ? { opts: pageOpts } : {},
         )
         if (asJson) {
           printJson(page)
@@ -42,6 +62,24 @@ export function skListCommand(): Command {
           scopeSummary(k),
         ])
         printLine(table(['ID', 'OWNER', 'STATE', 'EXPIRES', 'SCOPES'], rows))
+        if (page.cursor) printLine(`next cursor: ${page.cursor}`)
+      })
+    })
+}
+
+/** `tb sk get <id>` → SKRegistry.Get。 */
+export function skGetCommand(): Command {
+  return withGlobalOpts(new Command('get'))
+    .description('Show one secret key (hash and plaintext secret are never returned)')
+    .argument('<id>', 'Secret key id')
+    .action(async (idArg: string, opts: SkGlobalOpts) => {
+      const asJson = Boolean(opts.json)
+      await guard(asJson, async () => {
+        const id = String(idArg ?? '').trim()
+        if (!id) throw new CliError('secret key id is required')
+        const key = await callTool<SecretKeyView>(resolveTarget(opts), '/system/sk', 'get', { id })
+        if (asJson) printJson(key)
+        else printKey(key)
       })
     })
 }
@@ -70,7 +108,7 @@ export function skCreateCommand(): Command {
       [],
     )
     .option('--register-path <prefix>', 'Allowed register path prefix (repeatable)', collect, [])
-    .option('--expires <ts>', 'Expiry ISO 8601 timestamp')
+    .option('--expires <ts>', 'Expiry ISO 8601 timestamp with timezone')
     .option('--description <text>', 'Human description')
     .addHelpText(
       'after',
@@ -92,7 +130,7 @@ Examples:
           owner,
           scopes,
           ...(registerPaths.length ? { registerPaths } : {}),
-          ...(opts.expires ? { expiresAt: String(opts.expires) } : {}),
+          ...(opts.expires ? { expiresAt: parseIsoTimestamp(String(opts.expires)) } : {}),
           ...(opts.description ? { description: String(opts.description) } : {}),
         }
 
@@ -111,6 +149,84 @@ Examples:
         printLine('')
         printLine('!! SECRET (shown once — store it now, it cannot be retrieved again):')
         printLine(`   ${created.secret}`)
+      })
+    })
+}
+
+function collectOptional(value: string, previous?: string[]): string[] {
+  return [...(previous ?? []), value]
+}
+
+interface SkUpdateOpts extends SkGlobalOpts {
+  description?: string
+  disable?: boolean
+  enable?: boolean
+  expires?: string
+  owner?: string
+  registerPath?: string[]
+  scope?: string[]
+}
+
+/** `tb sk update <id>` → SKRegistry.Update；仅发送显式给出的字段。 */
+export function skUpdateCommand(): Command {
+  return withGlobalOpts(new Command('update'))
+    .description('Patch an issued secret key')
+    .argument('<id>', 'Secret key id')
+    .option('--owner <ref>', 'New owner ref')
+    .option('--scope <scope>', 'Replace scopes; repeatable "pattern:actions"', collectOptional)
+    .option('--register-path <prefix>', 'Replace allowed register paths; repeatable', collectOptional)
+    .option('--expires <ts>', 'Replace expiry with an ISO 8601 timestamp with timezone')
+    .option('--description <text>', 'Replace human description')
+    .option('--disable', 'Disable the key immediately; mutually exclusive with --enable')
+    .option('--enable', 'Re-enable the key immediately; mutually exclusive with --disable')
+    .action(async (idArg: string, opts: SkUpdateOpts) => {
+      const asJson = Boolean(opts.json)
+      await guard(asJson, async () => {
+        const id = String(idArg ?? '').trim()
+        if (!id) throw new CliError('secret key id is required')
+        if (opts.disable && opts.enable) {
+          throw new CliError('--disable and --enable are mutually exclusive')
+        }
+        const patch: Record<string, unknown> = {}
+        if (opts.owner !== undefined) {
+          const owner = String(opts.owner).trim()
+          if (!owner) throw new CliError('--owner must not be empty')
+          patch.owner = owner
+        }
+        if (opts.scope !== undefined) patch.scopes = opts.scope.map(parseScope)
+        if (opts.registerPath !== undefined) patch.registerPaths = opts.registerPath
+        if (opts.expires !== undefined) patch.expiresAt = parseIsoTimestamp(String(opts.expires))
+        if (opts.description !== undefined) patch.description = String(opts.description)
+        if (opts.disable) patch.disabled = true
+        if (opts.enable) patch.disabled = false
+        if (Object.keys(patch).length === 0) {
+          throw new CliError('nothing to update: pass at least one patch option')
+        }
+        const key = await callTool<SecretKeyView>(resolveTarget(opts), '/system/sk', 'update', {
+          id,
+          patch,
+        })
+        if (asJson) printJson(key)
+        else printKey(key)
+      })
+    })
+}
+
+function skStateCommand(name: 'disable' | 'enable', disabled: boolean): Command {
+  return withGlobalOpts(new Command(name))
+    .description(`${disabled ? 'Disable' : 'Re-enable'} a secret key without deleting it`)
+    .argument('<id>', 'Secret key id')
+    .action(async (idArg: string, opts: SkGlobalOpts) => {
+      const asJson = Boolean(opts.json)
+      await guard(asJson, async () => {
+        const id = String(idArg ?? '').trim()
+        if (!id) throw new CliError('secret key id is required')
+        const key = await callTool<SecretKeyView>(resolveTarget(opts), '/system/sk', 'update', {
+          id,
+          patch: { disabled },
+        })
+        if (asJson) printJson(key)
+        else printLine(`${disabled ? 'disabled' : 'enabled'} SK: ${id}`)
       })
     })
 }
@@ -136,6 +252,10 @@ export function skCommand(): Command {
   return new Command('sk')
     .description('Manage secret keys (system/sk; admin scope)')
     .addCommand(skListCommand())
+    .addCommand(skGetCommand())
     .addCommand(skCreateCommand())
+    .addCommand(skUpdateCommand())
+    .addCommand(skStateCommand('disable', true))
+    .addCommand(skStateCommand('enable', false))
     .addCommand(skRmCommand())
 }

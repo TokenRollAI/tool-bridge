@@ -1,60 +1,71 @@
 import { Command } from 'commander'
 import type { Node, NodeInput, Page, TreeJson } from '../types'
+import { parsePageOpts, resolveTarget, withGlobalOpts, withPageOpts } from '../args'
 import { guard, printJson, printLine, table } from '../output'
-import { resolveTarget, withGlobalOpts } from '../args'
 import { deleteNode, registerNode } from '../registry'
 import { apiJson, callTool, CliError } from '../http'
 
 interface ServerAddOpts {
-  baseUrl: string
+  baseUrl?: string
   description?: string
   json?: boolean
+  remoteUrl?: string
   sk?: string
   skRef?: string
+  timeout?: string
 }
 
 interface GlobalOpts {
   baseUrl?: string
+  cursor?: string
   json?: boolean
+  limit?: string
   sk?: string
 }
 
 /**
- * `tb server add <path> --base-url <u>` —— 联邦一个外部 HTBP 服务(kind:'remote')。
- *
- * 注意:此处 `--base-url` 指**远端 HTBP 服务地址**(config.baseUrl),与全局网关 `--base-url`
- * 语义冲突;本命令下网关地址仅取自 $TB_BASE_URL / 当前 profile(不接受网关 --base-url 覆盖)。
- * 该偏差已在交付说明标注。
+ * `tb server add <path> --remote-url <u>` —— 联邦一个外部 HTBP 服务(kind:'remote')。
+ * `--base-url` 始终表示当前 CLI 要访问的网关,不再在此命令复用为远端地址。
  */
 export function serverAddCommand(): Command {
-  return new Command('add')
+  return withGlobalOpts(new Command('add'))
     .description('Federate a remote HTBP server as a subtree')
     .argument('<path>', 'Tree path to mount the remote at')
-    .option('--json', 'Output parseable JSON', false)
-    .option('--sk <sk>', 'Secret Key (default: $TB_SK or config profile)')
-    .requiredOption('--base-url <url>', 'Remote HTBP server base URL')
+    .option(
+      '--remote-url <url>',
+      'Required remote HTBP server URL (--base-url selects the gateway)',
+    )
     .option('--sk-ref <ref>', 'SecretStore ref for outbound SK (skRef)')
-    .option('--description <text>', 'One-line node description')
+    .option('--description <text>', 'One-line node description (default: derived from remote URL)')
+    .addHelpText(
+      'after',
+      '\nMigration: remote URL uses --remote-url; --base-url always selects the gateway.\n',
+    )
     .action(async (pathArg: string, opts: ServerAddOpts) => {
       const asJson = Boolean(opts.json)
       await guard(asJson, async () => {
         const path = String(pathArg ?? '').trim()
         if (!path) throw new CliError('tree path is required')
-        const baseUrl = String(opts.baseUrl ?? '').trim()
-        if (!baseUrl) throw new CliError('--base-url (remote server URL) is required')
+        const remoteUrl = String(opts.remoteUrl ?? '').trim()
+        if (!remoteUrl) {
+          throw new CliError(
+            '--remote-url is required; --base-url now selects the gateway (migrate the old remote URL flag to --remote-url)',
+          )
+        }
         const skRef = opts.skRef ? String(opts.skRef) : undefined
 
         const input: NodeInput = {
           path,
           kind: 'remote',
-          description: opts.description ? String(opts.description) : '',
-          config: { kind: 'remote', baseUrl, ...(skRef ? { skRef } : {}) },
+          description: opts.description
+            ? String(opts.description)
+            : `remote HTBP server at ${remoteUrl}`,
+          config: { kind: 'remote', baseUrl: remoteUrl, ...(skRef ? { skRef } : {}) },
         }
 
-        // 网关地址取自 env/profile(--base-url 已被远端占用);仅透传 --sk。
-        const node = await registerNode(resolveTarget({ sk: opts.sk }), input)
+        const node = await registerNode(resolveTarget(opts), input)
         if (asJson) printJson(node)
-        else printLine(`added remote server at ${path} → ${baseUrl}`)
+        else printLine(`added remote server at ${path} → ${remoteUrl}`)
       })
     })
 }
@@ -71,21 +82,32 @@ function collectRemotes(node: TreeJson, out: TreeJson[]): void {
  * `GET /~tree?depth=8` 过滤 kind==='remote'(此路径 baseUrl 不可见,注明)。
  */
 export function serverLsCommand(): Command {
-  return withGlobalOpts(new Command('ls'))
+  return withPageOpts(withGlobalOpts(new Command('ls')))
     .description('List federated remote servers')
+    .addHelpText(
+      'after',
+      '\nPagination note: --limit/--cursor require system/registry visibility; the ~tree fallback cannot paginate.\n',
+    )
     .action(async (opts: GlobalOpts) => {
       const asJson = Boolean(opts.json)
       await guard(asJson, async () => {
         const target = resolveTarget(opts)
+        const pageOpts = parsePageOpts(opts)
         try {
-          const page = await callTool<Page<Node>>(target, '/system/registry', 'list', {})
+          const page = await callTool<Page<Node>>(
+            target,
+            '/system/registry',
+            'list',
+            Object.keys(pageOpts).length ? { opts: pageOpts } : {},
+          )
           const remotes = (page.items ?? []).filter(n => n.kind === 'remote')
           if (asJson) {
-            printJson(remotes)
+            printJson(page.cursor ? { items: remotes, cursor: page.cursor } : { items: remotes })
             return
           }
           if (remotes.length === 0) {
-            printLine('(no remote servers)')
+            printLine(page.cursor ? '(no remote servers on this page)' : '(no remote servers)')
+            if (page.cursor) printLine(`next cursor: ${page.cursor}`)
             return
           }
           const rows = remotes.map(n => [
@@ -94,16 +116,26 @@ export function serverLsCommand(): Command {
             n.description ?? '',
           ])
           printLine(table(['PATH', 'BASEURL', 'DESCRIPTION'], rows))
+          if (page.cursor) printLine(`next cursor: ${page.cursor}`)
         } catch (err) {
           if (!(err instanceof CliError && err.code === 'not_found')) throw err
+          if (Object.keys(pageOpts).length > 0) {
+            throw new CliError(
+              '--limit/--cursor require system/registry visibility; the ~tree fallback cannot paginate',
+            )
+          }
           // 退化:无 system/registry 可见性 → ~tree 过滤 kind,baseUrl 不可见。
           const tree = await apiJson<TreeJson>(target, { path: '/~tree', query: { depth: 8 } })
           const remotes: TreeJson[] = []
           collectRemotes(tree, remotes)
           if (asJson) {
-            printJson(
-              remotes.map(n => ({ path: n.path, kind: n.kind, description: n.description })),
-            )
+            printJson({
+              items: remotes.map(n => ({
+                path: n.path,
+                kind: n.kind,
+                description: n.description,
+              })),
+            })
             return
           }
           if (remotes.length === 0) {

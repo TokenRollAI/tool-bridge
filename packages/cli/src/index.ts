@@ -1,3 +1,3 @@
-import { buildProgram } from './program'
+import { runMain } from './main'
 
-await buildProgram().parseAsync(process.argv)
+await runMain(process.argv)

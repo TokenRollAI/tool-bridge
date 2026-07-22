@@ -1,5 +1,6 @@
 import { Command } from 'commander'
 import { resolveTarget, withGlobalOpts } from '../args'
+import { apiFetch, type Target } from '../http'
 
 interface HealthzBody {
   healthy?: boolean
@@ -10,6 +11,7 @@ interface StatusOpts {
   baseUrl?: string
   json?: boolean
   sk?: string
+  timeout?: string
 }
 
 /** 统一错误出口:`--json` 时输出可解析对象,否则写 stderr;退出码非 0。 */
@@ -32,7 +34,14 @@ export function statusCommand(): Command {
     .description('Show deployment health summary (GET /healthz)')
     .action(async (opts: StatusOpts) => {
       const asJson = Boolean(opts.json)
-      const { baseUrl, sk } = resolveTarget(opts)
+      let target: Target
+      try {
+        target = resolveTarget(opts)
+      } catch (err) {
+        emitError(asJson, (err as Error).message)
+        return
+      }
+      const { baseUrl } = target
 
       if (!baseUrl) {
         emitError(asJson, 'missing base URL: pass --base-url or set TB_BASE_URL')
@@ -40,17 +49,15 @@ export function statusCommand(): Command {
       }
 
       const url = `${baseUrl.replace(/\/+$/, '')}/healthz`
-      let res: Response
+      let res: Awaited<ReturnType<typeof apiFetch>>
       try {
-        res = await fetch(url, {
-          headers: sk ? { authorization: `Bearer ${sk}` } : {},
-        })
+        res = await apiFetch(target, { path: '/healthz', accept: 'json' })
       } catch (err) {
-        emitError(asJson, `request failed: ${(err as Error).message}`, url)
+        emitError(asJson, (err as Error).message, url)
         return
       }
 
-      const raw = await res.text()
+      const raw = res.text
       let body: unknown = raw
       try {
         body = JSON.parse(raw)

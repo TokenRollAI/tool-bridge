@@ -2,8 +2,14 @@ import { readFileSync } from 'node:fs'
 import { extname } from 'node:path'
 import { Command } from 'commander'
 import type { ContextEntry, ContextEntryMeta, NodeConfig, NodeInput, Page } from '../types'
+import {
+  collect,
+  parsePageOpts,
+  resolveTarget,
+  withGlobalOpts,
+  withPageOpts,
+} from '../args'
 import { asArray, guard, printJson, printLine, table } from '../output'
-import { collect, resolveTarget, withGlobalOpts } from '../args'
 import { deleteNode, registerNode } from '../registry'
 import { callTool, CliError } from '../http'
 
@@ -96,12 +102,10 @@ interface GlobalOpts {
 
 /** `tb ctx ls <ns> [prefix]` —— 浅层列表(ContextProvider.List)。 */
 export function ctxLsCommand(): Command {
-  return withGlobalOpts(new Command('ls'))
+  return withPageOpts(withGlobalOpts(new Command('ls')))
     .description('List entries in a context namespace')
     .argument('<ns>', 'Context namespace tree path')
     .argument('[prefix]', 'Relative prefix inside namespace')
-    .option('--limit <n>', 'Page size')
-    .option('--cursor <cursor>', 'Page cursor from previous call')
     .action(
       async (
         nsArg: string,
@@ -112,10 +116,7 @@ export function ctxLsCommand(): Command {
         await guard(asJson, async () => {
           const ns = String(nsArg ?? '').trim()
           if (!ns) throw new CliError('namespace path is required')
-          const callOpts: Record<string, unknown> = {}
-          const limit = parsePositiveInt(opts.limit, '--limit')
-          if (limit !== undefined) callOpts.limit = limit
-          if (opts.cursor) callOpts.cursor = String(opts.cursor)
+          const callOpts = parsePageOpts(opts)
 
           const page = await callTool<Page<ContextEntryMeta>>(
             resolveTarget(opts),
@@ -175,7 +176,7 @@ export function ctxPutCommand(): Command {
     .argument('<ns>', 'Context namespace tree path')
     .argument('<entry>', 'Entry path inside namespace')
     .option('--file <file>', 'Read content from file')
-    .option('--content <content>', 'Inline content (wins over --file/stdin)')
+    .option('--content <content>', 'Inline content (mutually exclusive with --file)')
     .option('--content-type <type>', 'Content type (default: guessed from --file)')
     .option('--meta <kv>', 'Metadata "key=value" (repeatable)', collect, [])
     .option('--if-version <version>', 'Optimistic concurrency: expected version')
@@ -200,11 +201,16 @@ export function ctxPutCommand(): Command {
 
           const metadata = parseMeta(opts.meta)
           const file = opts.file ? String(opts.file) : undefined
-          // 内容来源优先级:--content > --file > stdin。
+          if (opts.content !== undefined && opts.file !== undefined) {
+            throw new CliError('--content and --file are mutually exclusive')
+          }
           let content: string
           if (opts.content !== undefined) content = String(opts.content)
           else if (file) content = readContentFile(file)
-          else content = readStdin()
+          else {
+            if (process.stdin.isTTY) throw new CliError('pass --content/--file or pipe content via stdin')
+            content = readStdin()
+          }
           const contentType = opts.contentType
             ? String(opts.contentType)
             : guessContentType(opts.content === undefined ? file : undefined)
@@ -232,7 +238,7 @@ export function ctxPatchCommand(): Command {
     .argument('<ns>', 'Context namespace tree path')
     .argument('<entry>', 'Entry path inside namespace')
     .option('--file <file>', 'Read new content from file')
-    .option('--content <content>', 'Inline new content (wins over --file)')
+    .option('--content <content>', 'Inline new content (mutually exclusive with --file)')
     .option('--meta <kv>', 'Metadata "key=value" to merge (repeatable)', collect, [])
     .option('--if-version <version>', 'Optimistic concurrency: expected version')
     .action(
@@ -254,6 +260,9 @@ export function ctxPatchCommand(): Command {
           if (!entryPath) throw new CliError('entry path is required')
 
           const metadata = parseMeta(opts.meta)
+          if (opts.content !== undefined && opts.file !== undefined) {
+            throw new CliError('--content and --file are mutually exclusive')
+          }
           let content: string | undefined
           if (opts.content !== undefined) content = String(opts.content)
           else if (opts.file) content = readContentFile(String(opts.file))
@@ -278,17 +287,16 @@ export function ctxPatchCommand(): Command {
 
 /** `tb ctx search <ns> <query>` —— 检索(ContextProvider.Search,可选能力)。 */
 export function ctxSearchCommand(): Command {
-  return withGlobalOpts(new Command('search'))
+  return withPageOpts(withGlobalOpts(new Command('search')))
     .description('Search entries in a context namespace')
     .argument('<ns>', 'Context namespace tree path')
     .argument('<query>', 'Search query')
     .option('--mode <mode>', 'Search mode: keyword | semantic (default keyword)')
-    .option('--limit <n>', 'Page size')
     .action(
       async (
         nsArg: string,
         queryArg: string,
-        opts: GlobalOpts & { limit?: string, mode?: string },
+        opts: GlobalOpts & { cursor?: string, limit?: string, mode?: string },
       ) => {
         const asJson = Boolean(opts.json)
         await guard(asJson, async () => {
@@ -300,10 +308,8 @@ export function ctxSearchCommand(): Command {
           if (mode !== undefined && mode !== 'keyword' && mode !== 'semantic') {
             throw new CliError(`invalid --mode "${mode}"; valid: keyword, semantic`)
           }
-          const callOpts: Record<string, unknown> = {}
+          const callOpts: Record<string, unknown> = parsePageOpts(opts)
           if (mode) callOpts.mode = mode
-          const limit = parsePositiveInt(opts.limit, '--limit')
-          if (limit !== undefined) callOpts.limit = limit
 
           const page = await callTool<Page<ContextEntryMeta>>(
             resolveTarget(opts),
@@ -318,6 +324,26 @@ export function ctxSearchCommand(): Command {
     )
 }
 
+/** `tb ctx rm <ns> <entry>` —— 删除 context entry(ContextProvider.Delete)。 */
+export function ctxRmCommand(): Command {
+  return withGlobalOpts(new Command('rm'))
+    .description('Delete a context entry')
+    .argument('<ns>', 'Context namespace tree path')
+    .argument('<entry>', 'Entry path inside namespace')
+    .action(async (nsArg: string, entryArg: string, opts: GlobalOpts) => {
+      const asJson = Boolean(opts.json)
+      await guard(asJson, async () => {
+        const ns = String(nsArg ?? '').trim()
+        if (!ns) throw new CliError('namespace path is required')
+        const entryPath = String(entryArg ?? '').trim()
+        if (!entryPath) throw new CliError('entry path is required')
+        await callTool(resolveTarget(opts), nsUri(ns), 'Delete', { path: entryPath })
+        if (asJson) printJson({ ok: true, path: entryPath })
+        else printLine(`deleted ${entryPath}`)
+      })
+    })
+}
+
 /**
  * `tb ctx mount <path> --provider r2|s3` —— 挂载 context namespace
  * (NodeRegistry.Write{kind:'context'} via ~register;tool.ts mount 同通道)。
@@ -325,14 +351,14 @@ export function ctxSearchCommand(): Command {
  */
 export function ctxMountCommand(): Command {
   return withGlobalOpts(new Command('mount'))
-    .description('Mount a context namespace (r2/s3)')
+    .description('Mount a context namespace (r2, s3, or a context-provider plugin)')
     .argument('<path>', 'Tree path to mount at')
-    .requiredOption('--provider <provider>', 'Storage provider: r2 | s3')
-    .option('--description <desc>', 'One-line node description')
-    .option('--auth-ref <ref>', 'SecretStore ref for credentials ([s3] required)')
+    .requiredOption('--provider <provider>', 'Provider: r2 | s3 | <context-provider plugin id>')
+    .option('--description <desc>', 'One-line node description (default: auto-generated)')
+    .option('--auth-ref <ref>', 'SecretStore credential ref ([s3] required; [plugin] optional)')
     .option('--read-only', 'Reject write verbs (Write/Update/Delete)')
     .option('--ttl <seconds>', 'Node TTL in seconds (expired node is reclaimed)')
-    .option('--prefix <prefix>', 'Key prefix inside the bucket')
+    .option('--prefix <prefix>', '[r2/s3] key prefix inside the bucket')
     .option('--endpoint <url>', '[s3] S3-compatible endpoint URL')
     .option('--bucket <bucket>', '[s3] bucket name')
     .option('--region <region>', '[s3] region')
@@ -362,6 +388,9 @@ export function ctxMountCommand(): Command {
 
           let providerConfig: Record<string, unknown> | undefined
           if (provider === 'r2') {
+            if (opts.endpoint || opts.bucket || opts.region || authRef) {
+              throw new CliError('--endpoint/--bucket/--region/--auth-ref only apply to s3')
+            }
             if (prefix) providerConfig = { prefix }
           } else if (provider === 's3') {
             const endpoint = String(opts.endpoint ?? '').trim()
@@ -376,7 +405,11 @@ export function ctxMountCommand(): Command {
               ...(prefix ? { prefix } : {}),
             }
           } else {
-            throw new CliError(`invalid --provider "${provider}"; valid: r2, s3`)
+            if (opts.endpoint || opts.bucket || opts.region || prefix) {
+              throw new CliError(
+                '--endpoint/--bucket/--region/--prefix are not supported for plugin providers',
+              )
+            }
           }
 
           const config: NodeConfig = {
@@ -390,7 +423,7 @@ export function ctxMountCommand(): Command {
           const input: NodeInput = {
             path,
             kind: 'context',
-            description: opts.description ? String(opts.description) : '',
+            description: opts.description ? String(opts.description) : `context at ${path}`,
             config,
           }
 
@@ -435,6 +468,7 @@ Examples:
     .addCommand(ctxCatCommand())
     .addCommand(ctxPutCommand())
     .addCommand(ctxPatchCommand())
+    .addCommand(ctxRmCommand())
     .addCommand(ctxSearchCommand())
     .addCommand(ctxMountCommand())
     .addCommand(ctxUnmountCommand())

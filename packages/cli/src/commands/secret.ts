@@ -1,7 +1,7 @@
 import { Command } from 'commander'
 import type { Page, SecretSummary } from '../types'
+import { parsePageOpts, resolveTarget, withGlobalOpts, withPageOpts } from '../args'
 import { guard, printJson, printLine, table } from '../output'
-import { resolveTarget, withGlobalOpts } from '../args'
 import { callTool, CliError } from '../http'
 
 /** 从 stdin 读取全部内容(去掉尾随换行)——用于 secret set 避免值进 shell history。 */
@@ -13,7 +13,9 @@ async function readStdin(): Promise<string> {
 
 interface SecretGlobalOpts {
   baseUrl?: string
+  cursor?: string
   json?: boolean
+  limit?: string
   sk?: string
 }
 
@@ -47,16 +49,17 @@ export function secretSetCommand(): Command {
 
 /** `tb secret ls` → SecretStore.List:只见 name + updatedAt(明文不回显)。 */
 export function secretLsCommand(): Command {
-  return withGlobalOpts(new Command('ls'))
+  return withPageOpts(withGlobalOpts(new Command('ls')))
     .description('List secrets (name + updatedAt only)')
     .action(async (opts: SecretGlobalOpts) => {
       const asJson = Boolean(opts.json)
       await guard(asJson, async () => {
+        const pageOpts = parsePageOpts(opts)
         const page = await callTool<Page<SecretSummary>>(
           resolveTarget(opts),
           '/system/secret',
           'list',
-          {},
+          Object.keys(pageOpts).length ? { opts: pageOpts } : {},
         )
         if (asJson) {
           printJson(page)
@@ -64,6 +67,7 @@ export function secretLsCommand(): Command {
         }
         const rows = (page.items ?? []).map(s => [s.name, s.updatedAt ?? '-'])
         printLine(table(['NAME', 'UPDATED'], rows))
+        if (page.cursor) printLine(`next cursor: ${page.cursor}`)
       })
     })
 }
