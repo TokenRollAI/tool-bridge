@@ -467,11 +467,26 @@ describe('tb ctx mount', () => {
     expect(process.exitCode).toBe(1)
   })
 
-  it('非法 --provider → 退出码 1,不发请求', async () => {
-    const fn = captureFetch({})
-    await runCli(['ctx', 'mount', 'ctx/x', '--provider', 'gcs', ...gw, '--json'])
-    expect(fn).not.toHaveBeenCalled()
-    expect(process.exitCode).toBe(1)
+  it('自定义 provider id → 按 context-provider plugin 挂载', async () => {
+    const fn = captureFetch({ path: 'ctx/x', kind: 'context' })
+    await runCli([
+      'ctx',
+      'mount',
+      'ctx/x',
+      '--provider',
+      'notion-context',
+      '--auth-ref',
+      'notion-token',
+      ...gw,
+      '--json',
+    ])
+    const [, init] = fn.mock.calls[0] as [string, RequestInit]
+    expect(JSON.parse(init.body as string)).toEqual({
+      path: 'ctx/x',
+      kind: 'context',
+      description: 'context at ctx/x',
+      config: { kind: 'context', provider: 'notion-context', authRef: 'notion-token' },
+    })
   })
 })
 

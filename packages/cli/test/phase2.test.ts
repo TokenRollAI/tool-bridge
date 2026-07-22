@@ -278,8 +278,7 @@ describe('buildVirtualize', () => {
 })
 
 describe('tb server add', () => {
-  it('构造 kind:remote NodeInput,--base-url 指远端,网关取自 env', async () => {
-    process.env.TB_BASE_URL = 'https://gw'
+  it('构造 kind:remote NodeInput,--remote-url 指远端,--base-url 始终指网关', async () => {
     const fn = captureFetch({ path: 'fed/peer', kind: 'remote' })
     await runCli([
       'server',
@@ -289,6 +288,8 @@ describe('tb server add', () => {
       '--sk',
       'tbk_x',
       '--base-url',
+      'https://gw',
+      '--remote-url',
       'https://peer.example',
       '--sk-ref',
       's-out',
@@ -327,14 +328,16 @@ describe('tb server ls / rm', () => {
     expect(JSON.parse(init.body as string)).toEqual({ tool: 'list', arguments: {} })
     const stdout = process.stdout.write as unknown as ReturnType<typeof vi.fn>
     const printed = stdout.mock.calls.map(c => String(c[0])).join('')
-    expect(JSON.parse(printed)).toEqual([
-      {
-        path: 'fed/peer',
-        kind: 'remote',
-        description: 'peer',
-        config: { kind: 'remote', baseUrl: 'https://peer.example' },
-      },
-    ])
+    expect(JSON.parse(printed)).toEqual({
+      items: [
+        {
+          path: 'fed/peer',
+          kind: 'remote',
+          description: 'peer',
+          config: { kind: 'remote', baseUrl: 'https://peer.example' },
+        },
+      ],
+    })
   })
 
   it('server rm 先确认 kind=remote 再 delete', async () => {

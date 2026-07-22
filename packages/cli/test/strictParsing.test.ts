@@ -73,8 +73,9 @@ describe('未知 flag 必须报错(事故回归)', () => {
       ['tree', '--bogus'],
       ['help', '--bogus'],
       ['tool', 'mount', 'p', '--kind', 'mcp', '--url', 'u', '--bogus'],
+      ['tool', 'auth', 'p', '--bogus'],
       ['tool', 'rm', 'p', '--bogus'],
-      ['server', 'add', 'p', '--base-url', 'u', '--bogus'],
+      ['server', 'add', 'p', '--remote-url', 'u', '--bogus'],
       ['server', 'ls', '--bogus'],
       ['server', 'rm', 'p', '--bogus'],
       ['call', 'p', '--tool', 't', '--bogus'],
@@ -82,9 +83,17 @@ describe('未知 flag 必须报错(事故回归)', () => {
       ['ctx', 'cat', 'ns', 'e', '--bogus'],
       ['ctx', 'put', 'ns', 'e', '--content', 'c', '--bogus'],
       ['ctx', 'patch', 'ns', 'e', '--content', 'c', '--bogus'],
+      ['ctx', 'rm', 'ns', 'e', '--bogus'],
       ['ctx', 'search', 'ns', 'q', '--bogus'],
       ['ctx', 'mount', 'p', '--provider', 'r2', '--bogus'],
       ['ctx', 'unmount', 'p', '--bogus'],
+      ['skill', 'ls', 'hub', '--bogus'],
+      ['skill', 'get', 'hub', 'id', '--bogus'],
+      ['skill', 'search', 'hub', 'q', '--bogus'],
+      ['skill', 'publish', 'hub', 'dir', '--bogus'],
+      ['skill', 'rm', 'hub', 'id', '--bogus'],
+      ['skill', 'mount', 'hub', '--bogus'],
+      ['skill', 'unmount', 'hub', '--bogus'],
       ['connect', '--bogus'],
       ['device', 'ls', '--bogus'],
       ['mount', 'fs', '/tmp', '--bogus'],
@@ -94,7 +103,23 @@ describe('未知 flag 必须报错(事故回归)', () => {
       ['plugin', 'update', 'id', '--file', 'f', '--bogus'],
       ['plugin', 'health', 'id', '--bogus'],
       ['plugin', 'rm', 'id', '--bogus'],
+      ['sk', 'get', 'id1', '--bogus'],
+      ['sk', 'update', 'id1', '--disable', '--bogus'],
+      ['sk', 'disable', 'id1', '--bogus'],
+      ['sk', 'enable', 'id1', '--bogus'],
     ]
+    const program = buildProgram()
+    const leafPaths = (command: ReturnType<typeof buildProgram>, prefix: string[] = []): string[] =>
+      command.commands.flatMap(child =>
+        child.commands.length > 0
+          ? leafPaths(child, [...prefix, child.name()])
+          : [[...prefix, child.name()].join(' ')],
+      )
+    const groups = new Set(program.commands.filter(c => c.commands.length > 0).map(c => c.name()))
+    const covered = cases.map(argv =>
+      groups.has(argv[0] ?? '') ? `${argv[0]} ${argv[1]}` : String(argv[0]),
+    )
+    expect(new Set(covered)).toEqual(new Set(leafPaths(program)))
     for (const argv of cases) {
       expect(await parseError(argv), `argv: ${argv.join(' ')}`).toBe('commander.unknownOption')
     }
@@ -106,16 +131,27 @@ describe('缺 required option / positional 必须报错', () => {
     [['sk', 'create'], 'commander.missingMandatoryOptionValue'],
     [['tool', 'mount', 'p'], 'commander.missingMandatoryOptionValue'],
     [['ctx', 'mount', 'p'], 'commander.missingMandatoryOptionValue'],
-    [['server', 'add', 'p'], 'commander.missingMandatoryOptionValue'],
     // call 的 --tool 已非 required(省略 = path 即直连工具路径),不在此表。
     [['plugin', 'register'], 'commander.missingMandatoryOptionValue'],
     [['secret', 'set'], 'commander.missingMandatoryOptionValue'],
     [['sk', 'rm'], 'commander.missingArgument'],
+    [['sk', 'get'], 'commander.missingArgument'],
+    [['sk', 'update'], 'commander.missingArgument'],
+    [['sk', 'disable'], 'commander.missingArgument'],
+    [['sk', 'enable'], 'commander.missingArgument'],
     [['secret', 'rm'], 'commander.missingArgument'],
     [['tool', 'rm'], 'commander.missingArgument'],
+    [['tool', 'auth'], 'commander.missingArgument'],
     [['server', 'rm'], 'commander.missingArgument'],
     [['ctx', 'cat', 'ns'], 'commander.missingArgument'],
+    [['ctx', 'rm', 'ns'], 'commander.missingArgument'],
     [['ctx', 'search', 'ns'], 'commander.missingArgument'],
+    [['skill', 'ls'], 'commander.missingArgument'],
+    [['skill', 'get', 'hub'], 'commander.missingArgument'],
+    [['skill', 'search', 'hub'], 'commander.missingArgument'],
+    [['skill', 'publish', 'hub'], 'commander.missingArgument'],
+    [['skill', 'rm', 'hub'], 'commander.missingArgument'],
+    [['skill', 'unmount'], 'commander.missingArgument'],
     [['mount', 'fs'], 'commander.missingArgument'],
     [['plugin', 'get'], 'commander.missingArgument'],
   ])('%j → %s', async (argv, code) => {

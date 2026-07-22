@@ -163,8 +163,8 @@ describe('--timeout 解析(resolveTarget)', () => {
     expect(resolveTarget({ baseUrl: 'https://gw' }).timeoutMs).toBeUndefined()
   })
 
-  it('非法值(非数字/0/负数)→ CliError', () => {
-    for (const bad of ['abc', '0', '-5']) {
+  it('非法值(非数字/0/负数/超过一天)→ CliError', () => {
+    for (const bad of ['abc', '0', '-5', '86401']) {
       expect(() => resolveTarget({ baseUrl: 'https://gw', timeout: bad })).toThrow(
         /invalid --timeout/,
       )
