@@ -94,7 +94,7 @@ cmd resolve-library-id POST /docs/context7/resolve-library-id  ← cmd 行:<name
 
 - `Node{path,kind,description,config?,virtualize?,registeredBy,online?}`:主键 `path`('/' 分隔,不含保留段);八种 kind(directory/mcp/http/builtin/context/device/remote/tool/skillhub);`registeredBy=keyId`(device 由网关代写;自动物化中间 directory 记 `system:auto`,引导节点记 `system:boot`)。config 存在时其 kind 必须与节点 kind 一致。
 - mcp/http NodeConfig 上游认证(语义两 kind 一致,复用 `authHeaderFor`):`authRef` 指 SecretStore 凭证名,注入头名 `authHeader`(默认 `Authorization`)、前缀 `authScheme`(默认 `Bearer`,**空串 = secret 原样注入**)。mcp 另有 `headers?: Record<string,string>`(静态明文请求头,非机密,如上游要求的工具白名单头),每趟上游请求(initialize/list/call)均携带;凭证头覆盖同名静态头。kind:'tool'(plugin 挂载)NodeConfig 也有 `authRef?`:平台调用时 resolve 后经 `X-TB-Upstream-Auth` 注入 plugin(见第 8 节)。
-- `SecretKey{id,hash,owner,scopes,registerPaths?,disabled?,expiresAt?}`:主键 `id`(可公开,审计用);`hash=sha256(明文)`,明文仅签发响应出现一次;`owner: OwnerRef`(`user:`/`agent:`/`device:` 前缀)。
+- `SecretKey{id,hash,owner,scopes,registerPaths?,disabled?,expiresAt?}`:主键 `id`(可公开,审计用);`hash=sha256(明文)`,明文仅签发响应出现一次;`owner: OwnerRef`(`user:`/`agent:`/`device:` 前缀)。`expiresAt` 只接受带时区的 ISO 8601 timestamp,Write/Update 时规范为 UTC ISO;非法值 → invalid_argument 且不写入。
 - `Scope{pattern,actions,effect?}`:动作 = read/write/call/register/admin;**deny 优先 → allow → 无匹配默认拒**;`*`/`**` glob 语义。
 - `ContextEntry`:主键 `uri = node://<namespace-path>/<entry-path>`;`version` 乐观并发(`ifVersion` 不符 → conflict;r2 落地 etag=version);`contentType` 决定表现;>1 MiB 的 Get 返回 `$ref`。
 - `PluginManifest{id,kind,interfaceVersion,endpoint,auth,healthPath,enabled}`:主键 `id`;`interfaceVersion` 形如 `<kind>/v<major>`,与方法集合不符 → 拒。
@@ -109,7 +109,7 @@ cmd resolve-library-id POST /docs/context7/resolve-library-id  ← cmd 行:<name
 - `Authorizer.Check` 是唯一判定入口;判定次序 read→404(deny==not_found,不泄露存在性)再目标动作→403。
 - **registerPaths 收紧**:SK 声明了 `registerPaths` → 仅允许在这些前缀下注册;未声明(但持 register scope)→ 允许保留根之外的任意路径;同路径已有他人节点 → conflict。
 - Admin SK:部署时生成,scope=`**` 全动作;`TB_BOOTSTRAP_ADMIN_SK` 可预置明文(自动化),否则随机生成仅输出一次。
-- 吊销/禁用经 StateStore 分发:KV 宿主传播窗口上限 60s(生产实测 0.3s,`scripts/verify-revocation.ts` 可重跑);需要即时失效用短 `expiresAt`。
+- 吊销/禁用经 StateStore 分发:KV 宿主传播窗口上限 60s(生产实测 0.3s,`scripts/verify-revocation.ts` 可重跑);需要即时失效用短 `expiresAt`。认证读取对历史非法 `expiresAt` **fail closed**(视同无效 SK),不会因 `Date.parse()` 的 `NaN` 比较而放行。
 
 ## 7. 设备帧协议要点
 
@@ -126,31 +126,33 @@ cmd resolve-library-id POST /docs/context7/resolve-library-id  ← cmd 行:<name
 - `pluginToken`(Plugin 回调平台的令牌)注册时签发仅一次。
 - 生命周期:注册时自动探活(`GET {healthPath}`)+ `~describe`/`~help` 契约校验;未声明的可选方法不会被调用;周期探活反映健康态但不自动注销。
 
-## 9. CLI 命令矩阵(21 命令)
+## 9. CLI 命令族矩阵
 
-CLI 是纯 API 客户端,无专用端点;全局 `--json` / `--timeout <seconds>`(单请求等待上限,默认 120s;超时报 retryable 错误);读 `TB_BASE_URL`/`TB_SK`,配置 `~/.config/tool-bridge/config.json`(XDG,多 profile)。错误呈现:TBError 的 `retryable:true` 在人类模式加 `(retryable — try again)` 尾注,`--json` 错误对象含 `retryable`(及 call 失败时的结构化 `feedback`)。
+CLI 是纯 API 客户端,无专用端点。全局参数为 `--json` / `--base-url` / `--sk` / `--timeout <seconds>`;均可放在根、命令组或叶子命令位置,组级 help 展示 `Global Options`,也读 `TB_BASE_URL`/`TB_SK` 与 `~/.config/tool-bridge/config.json`(XDG,多 profile)。`--timeout` 是单次 HTTP 请求等待上限(默认 120s;超时报 retryable 错误),status、login 与 tool auth 本地回调兑换均走统一超时客户端;长驻 `tb connect` 明确拒绝该参数,避免被误解为进程总寿命。错误呈现:TBError 的 `retryable:true` 在人类模式加 `(retryable — try again)` 尾注,`--json` 错误对象含 `retryable`(及 call 失败时的结构化 `feedback`);Commander 的未知参数、缺值、多余 positional 等解析错误在真正解析到 `--json` option 时也输出 `{ok:false,error,code}` 并非零退出,`--` 后仅作为 positional value 的同名文本不切换输出通道。
+
+所有返回 `Page<T>` 的 CLI list/search 命令统一接受 `--limit 1..200` / `--cursor`;请求参数置于 `arguments.opts`,JSON 保留 page 形状,人类模式打印 `next cursor`。当前覆盖 SK/Secret/Plugin 列表、Context/Skill List+Search,以及基于 Registry 页过滤的 Server/Device 列表;过滤当前页时仍保留原始 cursor,当前页无匹配不等于全集为空。
 
 | 命令 | 对应接口面 |
 |---|---|
-| `tb status` | builtin `system/status` 的 `get`(登录态)/ 树外 `/healthz`(未登录回退) |
+| `tb status` | 树外 `GET /healthz`;遵守 `--timeout` |
 | `tb login` / `whoami` / `use` | 本地凭据管理,无服务端接口(whoami = 本地配置态 + `~help` 探测 + status 摘要) |
-| `tb ls` / `tree` / `help` | `~help` / `GET /~tree?depth=N`;`tb help` 默认 Markdown 表现(TTY 下经 marked-terminal 渲染 ANSI 富文本,管道/非 TTY/NO_COLOR 输出裸 markdown),`--md` 强制裸 markdown,`--dsl` 请求紧凑 DSL(Accept: text/plain),`--json` 结构化 |
+| `tb ls` / `tree` / `help` | `~help` / `GET /~tree?depth=N`;CLI 显式 `--depth` 严格为 1..8(缺省由网关取 2);`tb help` 默认 Markdown 表现(TTY 下经 marked-terminal 渲染 ANSI 富文本,管道/非 TTY/NO_COLOR 输出裸 markdown),`--md` 强制裸 markdown,`--dsl` 请求紧凑 DSL(Accept: text/plain),`--json` 结构化 |
 | `tb call` | 直连 `POST /<path>`(path 即工具路径,body 为 arguments 本体);`--tool` 给出时信封 `POST /<path>` + `{tool,arguments}`(builtin/context 等通用)。arguments 三种给法互斥:第二 positional 裸 JSON(`tb call <path> '{...}'`)/ `--args` / `--args-file`。调用失败(unavailable/internal/invalid_argument/rate_limited)时尽力拉取该 path `~feedback` 注入提示(有条目列 top 3,无条目引导 submit;拉取限时 5s、失败静默) |
-| `tb tool mount` / `rm` | NodeRegistry.Write/Delete(kind=mcp/http;含 virtualize prefix/rename/hide/describe;`--auth-header`/`--auth-scheme` mcp/http 共用;可重复 `--header <Name=value>` 静态头仅 mcp,http 用报错;mcp 另有 `--auth oauth`,与 `--auth-ref` 互斥) |
+| `tb tool mount` / `rm` | NodeRegistry.Write/Delete(kind=mcp/http/tool);`--kind tool --provider <plugin-id> [--auth-ref]` 挂 tool-provider Plugin;mcp/http 含 virtualize prefix/rename/hide/describe,条件 flag 在本地严格拒绝串用;缺 `--description` 时派生非空描述 |
 | `tb tool auth <path>` | mcp 托管 OAuth 发起(POST `/<path>/~authorize`):authorized → 直接完成;redirect → 打印授权 URL 并尝试开浏览器(`--no-open` 只打印)。`--local`:本机 127.0.0.1 临时端口收 AS 回跳,code+state 转交网关 `/~oauth/callback` 兑换(适配 Bytebase 等只放行 loopback 回调的严格上游;默认流程遇 redirect 类报错会提示) |
-| `tb server add` / `ls` / `rm` | NodeRegistry(kind=remote 联邦) |
-| `tb ctx ls/cat/put/patch/search` | Context 四动词 + Search |
-| `tb ctx mount` / `unmount` | NodeRegistry(kind=context,provider=r2/s3) |
+| `tb server add` / `ls` / `rm` | NodeRegistry(kind=remote 联邦);远端地址用 `--remote-url`,`--base-url` 始终表示当前网关(旧脚本须迁移,help 与缺参错误均提示);add 缺描述时派生非空描述,ls 支持分页;无 Registry 可见性时退到 `~tree`,该 fallback 不支持 `--limit/--cursor` 并明确报错 |
+| `tb ctx ls/cat/put/patch/rm/search` | Context List/Get/Write/Update/Delete + Search;内容 `--content`/`--file` 互斥,交互式 stdin 无输入源立即报错,List/Search 支持分页 |
+| `tb ctx mount` / `unmount` | NodeRegistry(kind=context,provider=r2/s3 或 context-provider Plugin id);provider 条件 flag 本地严格校验,缺描述时派生非空描述 |
 | `tb skill ls/get/search/publish/rm` | skillhub 数据面(List/Get/Search/Publish/Remove;`get --out` 落本地目录、`publish <dir>` 递归读文本文件) |
 | `tb skill mount` / `unmount` | NodeRegistry(kind=skillhub,provider 默认 r2 无需凭证 / s3 opt-in) |
 | `tb connect` | 设备长驻(WS 反向注册,partysocket 重连 + 心跳) |
 | `tb device ls` | NodeRegistry `List(prefix="device")` |
 | `tb mount fs` | 设备 fs 挂载 |
-| `tb sk list/create/rm` | SKRegistry(create 可带 register scope + registerPaths) |
-| `tb secret set/ls/rm` | SecretStore(authRef/skRef 来源;ls 只见 name+updatedAt,不回显明文) |
+| `tb sk list/get/create/update/enable/disable/rm` | SKRegistry 全管理面(create/update 可带 scope、registerPaths、带时区 `expiresAt`;CLI 与 core 双层校验,规范为 UTC;list 支持分页) |
+| `tb secret set/ls/rm` | SecretStore(authRef/skRef 来源;ls 只见 name+updatedAt,不回显明文且支持分页) |
 | `tb federation ls/add/rm` | builtin `system/federation`:remote 联邦 host 白名单(list 合并 env 基线 ∪ 运行时;add/rm 只动运行时叠加层,env 基线条目 removable=false 不可删) |
 | `tb note ls/get/set/rm` | builtin `system/annotation`:Path 补充说明(set/rm 需 admin;path `'/'` = 根空串 = 全树公告) |
 | `tb feedback ls/get/submit/vote/rm` | `~feedback` 保留段端点(ls 可 `--hidden`;submit 须 `--title`/`--detail`;rm 走 DELETE 需 admin) |
-| `tb plugin register/list/get/health/rm` | PluginRegistry + 探活 |
+| `tb plugin register/list/get/update/health/rm` | PluginRegistry + 探活;list 支持分页 |
 
 `tool rm`/`server rm` 前有 kind 校验,防止命令名误删其它节点。`tb init`(部署向导)未实现,见 [../must/current-state.md](../must/current-state.md) 未竟事项。

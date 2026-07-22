@@ -11,6 +11,7 @@
 
 - 要动代码、找"X 在哪个文件" → [architecture/code-map.md](architecture/code-map.md)。
 - 要引用接口契约/错误码/CLI 命令 → [reference/protocol-contract.md](reference/protocol-contract.md)。
+- 要新增/修改 CLI 参数、分页命令或 Provider 分支 → [guides/cli-argument-contract-review.md](guides/cli-argument-contract-review.md)。
 - 要确认模块归属/依赖方向/存储分工/网关判定次序 → [architecture/modules-and-boundaries.md](architecture/modules-and-boundaries.md)。
 - 功能收尾验收/真实环境验证/批量改动/提交 → [guides/verification-and-commit-practices.md](guides/verification-and-commit-practices.md)。
 - 涉及 mcp 会话/虚拟化/多租户哈希/tree 环检测的前代经验 → [reference/v1-lessons.md](reference/v1-lessons.md)。

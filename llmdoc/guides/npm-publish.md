@@ -1,6 +1,6 @@
 # Guide:npm 发布(cli / sdk / gateway / dashboard / server)
 
-> 用途:发布 public npm 包的新版本,以及新增可发布包的首发流程。适用:发 cli/sdk/gateway/dashboard/server 新版本、新增可发布包、排查 CI 发布失败。现状:cli 0.6.1 / sdk 0.4.0 / gateway 0.4.0 / dashboard 0.5.0 已发布且 Trusted Publisher 均已配置;server 0.1.0 **待手动首发 + 配 Trusted Publisher**。快照见 [../must/current-state.md](../must/current-state.md)。
+> 用途:发布 public npm 包的新版本,以及新增可发布包的首发流程。适用:发 cli/sdk/gateway/dashboard/server 新版本、新增可发布包、排查 CI 发布失败。现状:npm registry latest 为 cli 0.7.0 / sdk 0.4.0 / gateway 0.4.0 / dashboard 0.6.0,Trusted Publisher 均已配置;cli manifest 0.8.0 已完成本地发布准备但尚未打 tag/发布;server 0.1.0 **待手动首发 + 配 Trusted Publisher**。快照见 [../must/current-state.md](../must/current-state.md)。
 
 ## 包形态(发布模式)
 
@@ -16,7 +16,18 @@
 
 ## 发新版本标准流程(Trusted Publisher 已配置的包)
 
+版本范围先按 **public artifact ownership** 判定:只有自身外部契约、依赖约束或发布内容变化的 public 包才 bump。private 且被 bundle 的 workspace 包不因内部实现变化自动单独 bump,也不能沿源码依赖图传递式提升所有 public 包。
+
 1. 改 `packages/<pkg>/package.json` 的 `version`,提交。
+   发布物验证必须从本轮重建开始,并让 build → 实际入口版本 → dry-run pack **fail fast**。例如在 `packages/cli` 下执行:
+
+   ```sh
+   ./node_modules/.bin/tsup && \
+     node dist/index.js --version && \
+     npm pack --dry-run --json
+   ```
+
+   只读 manifest 或看到 dist 已存在都不算版本证据;多条命令不用 `&&`(或等价严格错误处理)连接时,后序 pack 成功可能掩盖前序 build 失败并把旧 dist 当成新版本。
 2. 打 tag 并推送(tag 前缀区分包):
 
    ```sh
