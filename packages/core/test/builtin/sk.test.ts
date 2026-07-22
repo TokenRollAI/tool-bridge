@@ -86,4 +86,28 @@ describe('builtin sk 模块', () => {
       e => isTBError(e) && e.code === 'invalid_argument',
     )
   })
+
+  it('write/update 校验 expiresAt 并把合法 offset 规范为 UTC', async () => {
+    await expect(mod.dispatch('write', {
+      owner: 'user:x',
+      scopes: [],
+      expiresAt: 'not-a-date',
+    }, ctx)).rejects.toSatisfy(e => isTBError(e) && e.code === 'invalid_argument')
+
+    const created = (await mod.dispatch('write', {
+      owner: 'user:x',
+      scopes: [],
+      expiresAt: '2026-07-07T08:00:00+08:00',
+    }, ctx)) as { key: { expiresAt: string, id: string } }
+    expect(created.key.expiresAt).toBe('2026-07-07T00:00:00.000Z')
+
+    await expect(mod.dispatch('update', {
+      id: created.key.id,
+      patch: { expiresAt: '2026-02-30T00:00:00Z' },
+    }, ctx)).rejects.toSatisfy(e => isTBError(e) && e.code === 'invalid_argument')
+    const unchanged = (await mod.dispatch('get', { id: created.key.id }, ctx)) as {
+      expiresAt: string
+    }
+    expect(unchanged.expiresAt).toBe('2026-07-07T00:00:00.000Z')
+  })
 })
