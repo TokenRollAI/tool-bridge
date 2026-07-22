@@ -7,7 +7,7 @@
 ## must/ — 每轮必读的复发性上下文
 
 - [must/project-brief.md](must/project-brief.md) — 项目定义、知识真源、七个 User Case、工程纪律(含选型表)、术语表精选。
-- [must/current-state.md](must/current-state.md) — 部署资源、代码现状(六包 + 测试数)、常用命令、.env 凭据状态表、工具链、未竟事项路线图(易变,每轮更新)。
+- [must/current-state.md](must/current-state.md) — 部署资源、代码现状(六包 + 测试数)、常用命令、.env 凭据状态表、工具链、未竟事项路线图(易变,每轮更新;含 2026-07-22 CLI 参数契约本地状态)。
 
 ## overview/ — 项目形态与边界
 
@@ -16,11 +16,11 @@
 ## architecture/ — 所有权边界与不变量
 
 - [architecture/modules-and-boundaries.md](architecture/modules-and-boundaries.md) — 全局模式(统一注册面/唯一判定入口/凭证不出网关/宿主注入点)、模块表(职责→代码落点)、依赖方向、存储分工、网关判定次序、注册通道、引导、Provider 边界细则、Dashboard 集成。
-- [architecture/code-map.md](architecture/code-map.md) — 代码检索地图:"要改 X 去哪个文件",按包→目录/文件族→关键符号。**动代码前先查这里。**
+- [architecture/code-map.md](architecture/code-map.md) — 代码检索地图:"要改 X 去哪个文件",按包→目录/文件族→关键符号;含 CLI 全局参数/生产解析入口/分页与参数语义测试落点。**动代码前先查这里。**
 
 ## reference/ — 稳定查表事实
 
-- [reference/protocol-contract.md](reference/protocol-contract.md) — HTBP 契约查表:端点面、内容协商、TBError、Help DSL、数据模型、SK/注册路径规则、设备帧协议、Plugin 传输契约、CLI 命令矩阵。**引用接口契约先查这里。**
+- [reference/protocol-contract.md](reference/protocol-contract.md) — HTBP 契约查表:端点面、内容协商、TBError、Help DSL、数据模型、SK/注册路径规则、设备帧协议、Plugin 传输契约、CLI 全局参数/分页/命令矩阵。**引用接口契约先查这里。**
 - [reference/v1-lessons.md](reference/v1-lessons.md) — v1 前代实现:保留资产、重写动机(现状)、文件级检索地图、踩坑结论。
 
 ## guides/ — 一事一篇的工作流
@@ -32,6 +32,7 @@
 - [guides/docker-host.md](guides/docker-host.md) — Docker/Node 宿主一篇通:env 变量面、`/data` 布局、本地开发与 Docker 验收命令、与 CF 宿主行为差异表、已知限制、`server-v*` 发布。**改 server 包或做 Docker 部署前必读。**
 - [guides/npm-publish.md](guides/npm-publish.md) — cli / sdk / gateway / dashboard / server 五包的 npm 发布:tsup bundle + dts 内联、publishConfig 覆盖、tag 触发 Trusted Publishing、新包两段式及常见坑;明确 Dashboard npm 与生产 `/ui` Static Assets 是两个独立发布面。
 - [guides/verification-and-commit-practices.md](guides/verification-and-commit-practices.md) — 验证与提交纪律:证据矩阵、Dashboard 真实浏览器四面证据、收尾同轮更新 current-state、配置面对等、出站边界测试、opt-in 退出码、长驻进程与跨休眠验证、先取证后改码、批量清理后 lint:fix、pathspec 提交与 hook 自动暂存防污染。
+- [guides/cli-argument-contract-review.md](guides/cli-argument-contract-review.md) — CLI 参数契约审查:Commander 解析/本地语义/服务端安全三层、同名同义、条件 flag、全局参数位置、分页 cursor 与 API↔CLI↔Dashboard 能力矩阵。**新增或修改 CLI 参数前必读。**
 
 ## memory/ — 过程记忆
 
@@ -42,6 +43,8 @@
 - [memory/reflections/2026-07-10-dashboard-0.5.0-release.md](memory/reflections/2026-07-10-dashboard-0.5.0-release.md) — Dashboard 0.5.0 发布(拆分 npm/生产发布面、先读 Cloudflare 状态避免重复部署、静态产物 hash 验收、瞬时网络错误幂等重试)。
 - [memory/reflections/2026-07-10-dashboard-0.6.0-release.md](memory/reflections/2026-07-10-dashboard-0.6.0-release.md) — Dashboard 0.6.0 整站大修与发布(ActivityRail/Explorer/Workspace 信息架构、树查询/ARIA、跨 observer 生命周期的 Promise 结算、npm 与生产静态资产双发布面)。
 - [memory/reflections/2026-07-16-skillhub-kind.md](memory/reflections/2026-07-16-skillhub-kind.md) — skillhub 新 kind(第八个 HTBP kind:Agent Skill 仓库;平台自带 R2 零外部凭证、几乎全复用 context 存储引擎、加 kind 照 tool kind 走一遍、`~skill` 保留段 vs kind 正交)。
+- [memory/reflections/2026-07-22-cli-argument-contract.md](memory/reflections/2026-07-22-cli-argument-contract.md) — CLI 参数契约审查与修复(解析/本地语义/服务端安全三层、SK 历史脏值 fail closed、同名 flag 语义、分页知识边界、三入口能力矩阵)。
+- [memory/reflections/2026-07-22-cli-0.8.0-release-prep.md](memory/reflections/2026-07-22-cli-0.8.0-release-prep.md) — CLI 0.8.0 发布准备(public artifact 版本边界、重建产物版本证据、fail-fast build→version→pack 验证链)。
 
 ## 路由提示
 
@@ -52,6 +55,7 @@
 | 引用接口/错误码/CLI 命令 | reference/protocol-contract.md |
 | 判断代码归属模块/依赖方向/存储选型 | architecture/modules-and-boundaries.md |
 | 功能收尾验收/真实环境验证/批量改动/提交 | guides/verification-and-commit-practices.md |
+| 新增/修改 CLI 参数、分页命令或 Provider 分支 | guides/cli-argument-contract-review.md |
 | 实现 v1 已解决过的机制 | reference/v1-lessons.md |
 | 部署/线上验证/部署排错 | guides/deploy-and-verify.md |
 | 改 server 包/Docker 部署/Node 与 CF 宿主差异 | guides/docker-host.md |

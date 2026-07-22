@@ -1,10 +1,11 @@
 # 当前状态(MUST)
 
-> 用途:每次会话开场必读的易变状态快照(部署、代码现状、凭据配置、工具链、未竟事项)。更新时机:部署/凭据/工具链/能力面变化时,由当轮 Agent 更新本文件。最后核实日期:2026-07-10。
+> 用途:每次会话开场必读的易变状态快照(部署、代码现状、凭据配置、工具链、未竟事项)。更新时机:部署/凭据/工具链/能力面变化时,由当轮 Agent 更新本文件。最后核实日期:2026-07-22。
 
 ## 项目状态
 
 - **初步实现阶段已完成**(2026-07-07 "破壳"):SK 鉴权与作用域、HTBP 核心树与内容协商、Tool 层(mcp/http/remote 联邦 + 虚拟化)、Context 层(r2/s3 四动词 + Search + `$ref` 大对象)、设备反向注册(DO WebSocket hibernation)、SDK、Plugin 系统、Dashboard 均已落地并经生产验证。
+- 2026-07-22:**CLI 参数契约审查与修复已在本地完成,0.8.0 发布物已准备**——①SK `expiresAt` 在 CLI 与 core Write/Update 双层只接受带时区 ISO timestamp并规范为 UTC,认证读取对历史非法值 fail closed;②`--json/--base-url/--sk/--timeout` 可放根/命令组/叶子位置,Commander 解析错误在 `--json` 下也结构化且只认解析后的 option value/source(`--` 后同名文本不误触发),组级 help 展示 Global Options;`server add` 远端地址改为 `--remote-url`(`--base-url` 恒指当前网关,help 与缺参错误均含迁移提示);③status/login/tool auth 一次性 HTTP 接入统一 timeout,长驻 connect 明确拒绝不适用的 `--timeout`;④mcp/http/tool、r2/s3/plugin 等条件 flag 与多输入源本地拒绝冲突,挂载省略描述时派生非空值,tree 显式 depth 严格 1..8,help 同步依赖/互斥/范围/默认值与分页 fallback;⑤返回 Page 的 SK/Secret/Plugin/Context/Skill/Server/Device list/search 统一 `--limit 1..200`/`--cursor` 且过滤列表不丢 cursor;⑥补齐 `ctx rm`、SK get/update/enable/disable、tool/context Plugin Provider 挂载。`pnpm verify` 全绿(见常用命令),CLI 21 文件 **233 passed**;`packages/cli/package.json` manifest 已 bump 到 **0.8.0**,CLI build、实际入口 `--version`(回报 0.8.0)与 `npm pack --dry-run --json` 均通过。**尚未打 `cli-v0.8.0` tag、尚未发布/部署**;npm registry `latest` 仍是 **0.7.0**,发布时须明确 `server add --base-url` → `--remote-url` 迁移。
 - 2026-07-07:修复"挂载 MCP 过一段时间失效"生产故障(不合规上游对过期会话回 200+空列表,见 [../guides/mcp-upstream-pitfalls.md](../guides/mcp-upstream-pitfalls.md))。2026-07-08 同故障复发:初版防御的重试回读 KV 被边缘读缓存击穿(拿回刚删的旧会话),已改为重试强制完整重握手(`forceFresh`,PR #8)并补钉死用例,**已部署上线**且经塞伪 session 复现验证自愈(工具列表恢复、KV 回填新会话)。
 - 2026-07-08:`~help` 可读性重构:新增 `Accept: text/markdown` 可读表现(renderHelpMarkdown)、`hint` 行/字段(下一步指引)、索引形态 h 一句话摘要(此前上游 mcp 整篇多行 description 原样撑爆索引并破坏 DSL 行结构)、DSL 多行值安全化(node 行折叠单行、多行 h 续行缩进)、`tb help --md`;契约见 [../reference/protocol-contract.md](../reference/protocol-contract.md)。**已部署上线**(smoke 通过;生产实测根/mcp 索引/单工具三级 markdown 与索引一句话化均生效)。
 - **Docker/Node 宿主部署路径已落地**(2026-07-08):`@tool-bridge/server` 包(SQLite + FS + ws DeviceHub)+ 根 Dockerfile + GHCR/npm 双发布 workflow;本机与 Docker 验收全过(smoke/verify-device/verify-plugin/重启持久)。见 [../guides/docker-host.md](../guides/docker-host.md)。
@@ -35,9 +36,9 @@
 | R2 | `tb-r2` | 绑定名 `TB_R2` |
 | Worker | `tb-plugin-feishu` @ https://tb-plugin-feishu.shuaiqijianhao.workers.dev | 飞书 MCP tool-provider plugin,secrets 仅 `PLUGIN_TOKEN`(飞书凭证存平台 SecretStore `feishu-app`,经挂载 authRef 注入),生产网关注册 id=feishu、挂载路径 `feishu`(authRef=feishu-app) |
 
-## 代码现状(pnpm monorepo,测试数为 2026-07-10 实跑)
+## 代码现状(pnpm monorepo,测试数为 2026-07-22 实跑)
 
-- `packages/core` — 纯逻辑内核(唯一运行时依赖 zod),**681 个单测**,模块族:
+- `packages/core` — 纯逻辑内核(唯一运行时依赖 zod),**699 个单测**,模块族:
   - `auth/`(scope 判定 / authorizer / 注册路径规则 / sk 签发与哈希)、`tree/`(path 规则 / NodeRegistryStore / visibility 裁剪)、`htbp/`(helpDsl / helpMarkdown / summary / HelpModel / negotiate / tree 构建)、`secret/`(AES-256-GCM 只写不读)
   - `builtin/`(**七模块**:sk / secret / registry / status / plugin / federation / annotation 的 cmd 表 + dispatch)、`annotation/`(AnnotationStore)、`feedback/`(FeedbackStore:排序/阈值/top-5 选条真源)
   - `tool/`(HttpToolDef 拼装、虚拟化、mcp schema→HelpModel、remote 路径/白名单/Via、上游错误归一、**RemoteAllowlistStore** 运行时白名单存储)
@@ -46,8 +47,8 @@
   - `plugin/`(manifest 校验 / envelope 编解码 / RequestDedupe / 契约校验)
   - `node/`(`./node` 子导出:FsObjectStore realpath 防逃逸 + shellExecutor 有界缓冲)
   - 顶层 `errors.ts`(TBError)/ `store.ts`(StateStore 接口 + 内存实现)/ `types.ts`。
-- `packages/gateway` — Workers 胶水(可发布 Worker library:tsup 单文件 ESM bundle core,`src/index.ts` 另 export `createApp` 与 `type Env`;dev exports 指 src(含 `./deviceHello`)、发布形态 publishConfig 覆盖指 dist),**119 个默认集成测试 + 6 个 opt-in skipped**(真实 workerd;含 mcp 过期会话空列表防御、自定义认证头与托管 OAuth 全链路的 mock 上游用例、system/federation 运行时白名单叠加用例、annotation/~feedback 端到端 meta 用例):`app.ts`(Env→deps 适配)/ `tbApp.ts`(**宿主中立 createTbApp**,路由/认证/HTBP/remote 聚合,SDK 复用;remote 白名单经 `resolveRemoteSettings` 取 env 基线 ∪ 运行时条目)/ `bootstrap.ts` / `deviceHello.ts`(宿主中立 processDeviceHello,DO 与 Node DeviceHub 共用)/ `oauth.ts`(mcp 托管 OAuth:加密 state + OAuthClientProvider + 发起/回调编排)/ `kvStateStore.ts` / `refToken.ts`(`$ref` 中转 token)/ `deviceSession.ts`(DeviceSession DO 胶水)/ `providers/`(mcp / http / remote / pluginTool / pluginContext / pluginClient / r2Object / s3Object / s3Sign / toolCache);`wrangler.jsonc` 在此包内。
-- `packages/cli` — commander 框架(严格解析:未知 flag/子命令报错,防权限误配),**178 个单测**(含拼错 flag 事故回归 strictParsing、callUx 的 positional/feedback-hint/timeout 回归),**20 个命令**:status / login / whoami / use / sk / secret / federation / note / feedback / ls / tree / help / call / tool / server / ctx / connect / device / mount / plugin;全局 `--json` / `--timeout`;配置 `~/.config/tool-bridge/config.json`(XDG,多 profile)。
+- `packages/gateway` — Workers 胶水(可发布 Worker library:tsup 单文件 ESM bundle core,`src/index.ts` 另 export `createApp` 与 `type Env`;dev exports 指 src(含 `./deviceHello`)、发布形态 publishConfig 覆盖指 dist),**128 个默认集成测试 + 6 个 opt-in skipped**(真实 workerd;含 mcp 过期会话空列表防御、自定义认证头与托管 OAuth 全链路的 mock 上游用例、system/federation 运行时白名单叠加用例、annotation/~feedback 与 skillhub 端到端用例):`app.ts`(Env→deps 适配)/ `tbApp.ts`(**宿主中立 createTbApp**,路由/认证/HTBP/remote 聚合,SDK 复用;remote 白名单经 `resolveRemoteSettings` 取 env 基线 ∪ 运行时条目)/ `bootstrap.ts` / `deviceHello.ts`(宿主中立 processDeviceHello,DO 与 Node DeviceHub 共用)/ `oauth.ts`(mcp 托管 OAuth:加密 state + OAuthClientProvider + 发起/回调编排)/ `kvStateStore.ts` / `refToken.ts`(`$ref` 中转 token)/ `deviceSession.ts`(DeviceSession DO 胶水)/ `providers/`(mcp / http / remote / pluginTool / pluginContext / pluginClient / r2Object / s3Object / s3Sign / toolCache);`wrangler.jsonc` 在此包内。
+- `packages/cli` — commander 框架(manifest **0.8.0 prepared,未发布**;registry `latest=0.7.0`;严格解析:未知 flag/子命令报错,防权限误配),**233 个单测(21 files)**(含动态叶子命令 strictParsing、callUx、argSemantics 根/组/叶参数化与 `--` 边界、helpContract 的依赖/互斥/范围/默认值/迁移/fallback 回归),**21 个顶层命令族**:status / login / whoami / use / sk / secret / federation / note / feedback / ls / tree / help / call / tool / server / ctx / skill / connect / device / mount / plugin;全局 `--json` / `--base-url` / `--sk` / `--timeout`;配置 `~/.config/tool-bridge/config.json`(XDG,多 profile)。
 - `packages/sdk` — 薄装配层(4 个源文件),**12 个单测 + 1 个 opt-in**;公开面 `createToolBridge(config)` → `{ fetch, registerTool, registerContext, connect }`,复用 core + gateway 的 createTbApp;再导出内存宿主实现(MemoryStateStore 等)。
 - `packages/dashboard` — React 19 + Vite + Tailwind 4 + shadcn/ui + @rjsf + TanStack Query SPA(可发布纯静态产物包:只发 dist,依赖全在 devDependencies):tree-first 工作台由 `AppShell` 组合 `ActivityRail`、可折叠 `ExplorerPanel` 与 Workspace,移动端资源抽屉保持关闭焦点恢复;`TreeNav` 按 root=1/local=1/remote=3/nonempty-filter=8 的查询边界懒取并 localize remote path,受控状态统一 expanded、可见顺序与 ARIA tree roving focus。`NodePage` 是未知节点的通用协议回退,`CommandWorkspace` 只挂当前 `CmdPanel`,`CmdPanel` 的 mutation→invalidate 由独立 `mutateAsync` Promise 链结算;Context 浏览器为 master-detail/dialog,List/Search/cursor/metadata/`$ref` 与正文/version/`$ref` 原子基线同在。SK·Registry·Devices·Secrets·Plugins·Federation 六页对齐 builtin/CLI 的已知工作流、cursor 知识边界和危险/并发操作语义(Registry 全 NodeConfig/OAuth/virtualize,Plugins 六动作,SK scope 全面,Devices 不虚构递归删除,Federation env 只读);调用历史 v2、profile/BaseURL/revision 隔离、路由 lazy 与 `AppErrorBoundary` 安全边界继续保留。无专用后端(同源消费 HTBP),行为由 gateway 的 `ui.integration.test.ts` 覆盖;`pnpm deploy:all` 先 build dashboard 再部署 gateway。
 - `packages/plugin-feishu` — 飞书 tool-provider plugin(private,CF Worker),**8 个集成测试**(真实 workerd,mock 换发接口与 MCP 上游,默认离线):TAT 自动换发与缓存、契约面/envelope、401 强制重换发自愈、凭证头缺失/坏形状、多租户按 app_id 键控不串号;文件职责见 code-map。
@@ -58,7 +59,7 @@
 
 ## 常用命令
 
-- `pnpm verify` — typecheck + lint + 单测 + 集成测试一把过(Dashboard 0.6.0 发布前于 2026-07-10 实跑:681 core + 162 cli + 12 sdk + 119 gateway + 23 server + 8 plugin-feishu = **1005 passed**;SDK 1 + gateway 6 opt-in = **7 skipped**;根 `test:integration` 含 gateway + server + plugin-feishu)。
+- `pnpm verify` — typecheck + lint + 单测 + 集成测试一把过(2026-07-22 实跑:699 core + 233 cli + 12 sdk + 128 gateway + 23 server + 8 plugin-feishu = **1103 passed**;SDK 1 + gateway 6 opt-in = **7 skipped**;退出码 0;根 `test:integration` 含 gateway + server + plugin-feishu)。
 - `pnpm deploy:all` — 幂等 provision + dashboard build + 部署 gateway。
 - `pnpm --filter @tool-bridge/server start` — 本机起 Node 宿主(默认 :8787,数据落 ./data;env 面见 [../guides/docker-host.md](../guides/docker-host.md))。
 - `docker build -t tool-bridge . && docker run -p 8787:8787 -v tbdata:/data …` — Docker 路径,验收命令全套见 [../guides/docker-host.md](../guides/docker-host.md)。

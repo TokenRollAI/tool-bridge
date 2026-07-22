@@ -8,7 +8,7 @@
 
 | 目录/文件 | 管什么 | 关键文件(符号) |
 |---|---|---|
-| `auth/` | SK 与权限判定 | `scope.ts`(Scope 判定,deny 优先→allow→默认拒)、`authorizer.ts`(`Authorizer.Check` 唯一判定入口)、`registerPath.ts`(registerPaths 收紧规则)、`sk.ts`(SK 签发、sha256 哈希) |
+| `auth/` | SK 与权限判定 | `scope.ts`(Scope 判定,deny 优先→allow→默认拒)、`authorizer.ts`(`Authorizer.Check` 唯一判定入口)、`registerPath.ts`(registerPaths 收紧规则)、`sk.ts`(SK 签发、sha256 哈希、`normalizeExpiresAt` 带时区 ISO→UTC 规范化、历史非法过期时间 fail closed) |
 | `tree/` | 树与注册表 | `path.ts`(TreePath 规则/保留段/保留根)、`registry.ts`(`NodeRegistryStore`:Write 幂等 upsert、中间 directory 自动物化、级联回收、Resolve 最长前缀)、`visibility.ts`(可见性裁剪) |
 | `htbp/` | 协议编解码 | `model.ts`(`HelpModel`)、`helpDsl.ts`(DSL 渲染,属性行顺序)、`negotiate.ts`(内容协商)、`tree.ts`(`~tree` 构建,depth/node 预算) |
 | `secret/` | 上游凭证 | `secretStore.ts`(`SecretStoreImpl`,AES-256-GCM 只写不读,`resolve()` 内部专用) |
@@ -37,15 +37,16 @@ exports `.` / `./tbApp` / `./bootstrap` / `./deviceHello`(供 SDK 与 server 复
 | `deviceSession.ts` | `DeviceSession` DO 胶水:WS hibernation、待决表、`setWebSocketAutoResponse`、惰性会话重建(协议行为在 deviceHello.ts) |
 | `refToken.ts` | `$ref` 网关中转的 HMAC token 签发/校验 |
 | `providers/` | 全部上游 I/O:`mcp.ts`(SDK Streamable HTTP,会话复用 + 404 重握手一次;auth:'oauth' 挂 `../oauth.ts` 的 authProvider)、`http.ts`、`remote.ts`、`toolCache.ts`、`r2Object.ts`、`s3Object.ts` + `s3Sign.ts`(aws4fetch)、`pluginClient.ts`(`upstreamAuthRef` → resolve 后经 `X-TB-Upstream-Auth` 注入,失败 → unavailable)+ `pluginTool.ts` + `pluginContext.ts` |
-| `test/` | 9 个集成测试(gateway/tool/context/device/deviceNodes/plugin/ui/oauth/meta `.integration.test.ts`;meta = annotation + ~feedback 端到端),真实 workerd;`scripts/` 有 echo-mcp / s3-mock / stub-provider 兜底上游 |
+| `test/` | 10 个集成测试(gateway/tool/context/skillhub/device/deviceNodes/plugin/ui/oauth/meta `.integration.test.ts`;meta = annotation + ~feedback 端到端),真实 workerd;`scripts/` 有 echo-mcp / s3-mock / stub-provider 兜底上游 |
 | `wrangler.jsonc` | 绑定 TB_KV / TB_R2 / TB_DEVICE(DO)/ ASSETS(dashboard dist,`run_worker_first`)+ `account_id` + custom domain |
 
 ## packages/cli — `tb`(npm 发布物)
 
 - 框架 commander,**严格解析是刻意的**(未知 flag/子命令、flag 缺值、多余 positional 一律报错并带拼写建议——防拼错 flag 被静默吞掉导致 shell 白名单等权限误配)。
-- `index.ts` 薄入口(仅 parseAsync);`program.ts`(`buildProgram()` 装配 21 个命令,`.helpCommand(false)` 保留业务 `tb help [path]`);`commands/` 每命令一文件、导出工厂函数 `xCommand(): Command`(status/login/whoami/use/sk/secret/federation/note/feedback/ls/tree/help/call/tool/server/ctx/skill/connect/device/mount/plugin);`--no-shell` 用 commander 原生否定(`opts.shell === false`)。`skill`(skillhub 命令族)镜像 `ctx`:mount/unmount 走 `~register`/`system/registry`,数据面 ls/get/search/publish/rm 走 `{tool,arguments}` 信封;`publish <dir>` 递归读本地文本文件、`get --out <dir>` 逐文件落盘(遇 `$ref` 提示)。
-- 横切:`config.ts`(XDG 配置、多 profile)、`http.ts`(API 客户端)、`output.ts`(`--json`)、`markdown.ts`(`printMarkdown`:TTY → marked-terminal ANSI 渲染,管道/NO_COLOR → 裸 markdown)、`args.ts`(`withGlobalOpts` 挂全局 --json/--base-url/--sk、`collect` repeatable 收集器、`resolveTarget({baseUrl, sk})` camelCase)、`scope.ts`、`registry.ts`(节点管理助手,rm 前 kind 校验)、`deviceRuntime.ts`(`tb connect` 长驻:partysocket 重连 + 30s 心跳判死链)、`deviceId.ts`。
-- 测试基建:`test/cliHarness.ts`(runCli/parseError;exitOverride 须逐层应用,commander 不向子命令继承)+ `test/strictParsing.test.ts`(拼错 flag 事故回归 + 全部叶子命令的未知 flag 矩阵)。
+- `index.ts` 薄入口(调用 `runMain`);`main.ts`(生产解析入口:递归 `exitOverride`,Commander help/version/解析错误纳入人类/`--json` 统一输出与退出码;JSON 模式按解析后的 option value/source 判断,不扫描裸 argv);`program.ts`(`buildProgram()` 装配命令族、根全局参数与 preAction 合并,递归开启组级 `showGlobalOptions`,`.helpCommand(false)` 保留业务 `tb help [path]`);`commands/` 每命令一文件、导出工厂函数 `xCommand(): Command`(status/login/whoami/use/sk/secret/federation/note/feedback/ls/tree/help/call/tool/server/ctx/skill/connect/device/mount/plugin);`--no-shell` 用 commander 原生否定(`opts.shell === false`)。`skill`(skillhub 命令族)镜像 `ctx`:mount/unmount 走 `~register`/`system/registry`,数据面 ls/get/search/publish/rm 走 `{tool,arguments}` 信封;`publish <dir>` 递归读本地文本文件、`get --out <dir>` 逐文件落盘(遇 `$ref` 提示)。
+- 参数横切:`args.ts`(`configureGlobalOpts` + `withGlobalOpts`:根/组/叶子位置等价且叶子 help 自包含;`parsePageOpts`/`withPageOpts`:limit 1..200 + cursor;`parseIsoTimestamp`:带时区 ISO→UTC;`collect`;`resolveTarget`);`config.ts`(XDG 配置、多 profile);`http.ts`(统一 API 客户端与 AbortSignal timeout,status/login/tool auth 等一次性 HTTP 不再裸 fetch);`output.ts`(`--json`);`markdown.ts`(`printMarkdown`:TTY → marked-terminal ANSI 渲染,管道/NO_COLOR → 裸 markdown);`scope.ts`;`registry.ts`(节点管理助手,rm 前 kind 校验);`deviceRuntime.ts`(`tb connect` 长驻:partysocket 重连 + 30s 心跳判死链);`deviceId.ts`。
+- 管理面对等:`commands/sk.ts` 覆盖 list/get/create/update/enable/disable/rm;`ctx.ts` 覆盖 Delete(`ctx rm`)并支持 context-provider Plugin;`tool.ts` 支持 `kind:'tool'` 的 tool-provider Plugin;`server.ts` 用 `--remote-url` 表达联邦目标(`--base-url` 只指当前网关)。返回 Page 的 SK/Secret/Plugin/Context/Skill/Server/Device list/search 统一暴露分页并保留 cursor。
+- 测试基建:`test/cliHarness.ts`(runCli/parseError;exitOverride 须逐层应用,commander 不向子命令继承)+ `test/strictParsing.test.ts`(拼错 flag 事故回归 + 从 `buildProgram()` 动态枚举全部叶子路径的未知 flag 矩阵,新增命令不会静默漏测)+ `test/argSemantics.test.ts`(根/组/叶参数化、JSON/`--` 边界、条件参数、tree/timeout、分页、默认描述与管理面对等)+ `test/helpContract.test.ts`(组级 Global Options、依赖/互斥/范围/默认值/迁移/fallback;`addHelpText` 追加段用 `outputHelp()` 捕获)+ `test/phase2.test.ts`/`ctx.test.ts`(迁移与 HTTP 负载回归)。
 
 ## packages/sdk — 薄装配层(npm 发布物,4 个源文件)
 
