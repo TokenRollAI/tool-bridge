@@ -1,7 +1,7 @@
 import { Command } from 'commander'
 import type { Node, Page } from '../types'
+import { parsePageOpts, resolveTarget, withGlobalOpts, withPageOpts } from '../args'
 import { guard, printJson, printLine, table } from '../output'
-import { resolveTarget, withGlobalOpts } from '../args'
 import { callTool } from '../http'
 
 function deviceIdFromPath(path: string): string {
@@ -11,19 +11,23 @@ function deviceIdFromPath(path: string): string {
 
 interface DeviceLsOpts {
   baseUrl?: string
+  cursor?: string
   json?: boolean
+  limit?: string
   sk?: string
 }
 
 export function deviceLsCommand(): Command {
-  return withGlobalOpts(new Command('ls'))
+  return withPageOpts(withGlobalOpts(new Command('ls')))
     .description('List registered devices')
     .action(async (opts: DeviceLsOpts) => {
       const asJson = Boolean(opts.json)
       await guard(asJson, async () => {
         const target = resolveTarget(opts)
+        const pageOpts = parsePageOpts(opts)
         const page = await callTool<Page<Node>>(target, '/system/registry', 'list', {
           prefix: 'device',
+          ...(Object.keys(pageOpts).length ? { opts: pageOpts } : {}),
         })
         const devices = (page.items ?? []).filter(
           n => n.kind === 'directory' && n.online !== undefined,
@@ -36,7 +40,8 @@ export function deviceLsCommand(): Command {
           return
         }
         if (devices.length === 0) {
-          printLine('(no devices)')
+          printLine(page.cursor ? '(no devices on this page)' : '(no devices)')
+          if (page.cursor) printLine(`next cursor: ${page.cursor}`)
           return
         }
         printLine(
@@ -50,6 +55,7 @@ export function deviceLsCommand(): Command {
             ]),
           ),
         )
+        if (page.cursor) printLine(`next cursor: ${page.cursor}`)
       })
     })
 }

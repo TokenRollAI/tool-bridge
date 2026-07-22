@@ -2,8 +2,8 @@ import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join, relative, sep } from 'node:path'
 import { Command } from 'commander'
 import type { Node, NodeConfig, NodeInput, Page } from '../types'
+import { parsePageOpts, resolveTarget, withGlobalOpts, withPageOpts } from '../args'
 import { guard, printJson, printLine, table } from '../output'
-import { resolveTarget, withGlobalOpts } from '../args'
 import { deleteNode, registerNode } from '../registry'
 import { callTool, CliError } from '../http'
 
@@ -109,20 +109,15 @@ function readSkillDir(dir: string): { content: string, path: string }[] {
 
 /** `tb skill ls <hub>` —— 列出已发布 skill(目录 name/description)。 */
 export function skillLsCommand(): Command {
-  return withGlobalOpts(new Command('ls'))
+  return withPageOpts(withGlobalOpts(new Command('ls')))
     .description('List published skills in a skillhub')
     .argument('<hub>', 'Skillhub tree path')
-    .option('--limit <n>', 'Page size')
-    .option('--cursor <cursor>', 'Page cursor from previous call')
     .action(async (hubArg: string, opts: GlobalOpts & { cursor?: string, limit?: string }) => {
       const asJson = Boolean(opts.json)
       await guard(asJson, async () => {
         const hub = String(hubArg ?? '').trim()
         if (!hub) throw new CliError('skillhub path is required')
-        const callOpts: Record<string, unknown> = {}
-        const limit = parsePositiveInt(opts.limit, '--limit')
-        if (limit !== undefined) callOpts.limit = limit
-        if (opts.cursor) callOpts.cursor = String(opts.cursor)
+        const callOpts = parsePageOpts(opts)
         const page = await callTool<Page<SkillSummary>>(resolveTarget(opts), hubUri(hub), 'List', {
           ...(Object.keys(callOpts).length ? { opts: callOpts } : {}),
         })
@@ -138,8 +133,8 @@ export function skillGetCommand(): Command {
     .description('Read a skill (SKILL.md + file list); --out to download into a local dir')
     .argument('<hub>', 'Skillhub tree path')
     .argument('<id>', 'Skill id')
-    .option('--file <path>', 'Fetch one bundled file instead of the manifest')
-    .option('--out <dir>', 'Download the whole skill into this local directory')
+    .option('--file <path>', 'Fetch one bundled file; mutually exclusive with --out')
+    .option('--out <dir>', 'Download the whole skill; mutually exclusive with --file')
     .action(
       async (hubArg: string, idArg: string, opts: GlobalOpts & { file?: string, out?: string }) => {
         const asJson = Boolean(opts.json)
@@ -148,6 +143,7 @@ export function skillGetCommand(): Command {
           if (!hub) throw new CliError('skillhub path is required')
           const id = String(idArg ?? '').trim()
           if (!id) throw new CliError('skill id is required')
+          if (opts.file && opts.out) throw new CliError('--file and --out are mutually exclusive')
           const target = resolveTarget(opts)
 
           // --file:取单个 bundled 文件。
@@ -214,34 +210,37 @@ export function skillGetCommand(): Command {
 
 /** `tb skill search <hub> <query>` —— 按 id/name/description 检索 skill。 */
 export function skillSearchCommand(): Command {
-  return withGlobalOpts(new Command('search'))
+  return withPageOpts(withGlobalOpts(new Command('search')))
     .description('Search skills by id / name / description')
     .argument('<hub>', 'Skillhub tree path')
     .argument('<query>', 'Search query')
-    .option('--limit <n>', 'Page size')
-    .action(async (hubArg: string, queryArg: string, opts: GlobalOpts & { limit?: string }) => {
-      const asJson = Boolean(opts.json)
-      await guard(asJson, async () => {
-        const hub = String(hubArg ?? '').trim()
-        if (!hub) throw new CliError('skillhub path is required')
-        const query = String(queryArg ?? '').trim()
-        if (!query) throw new CliError('query is required')
-        const callOpts: Record<string, unknown> = {}
-        const limit = parsePositiveInt(opts.limit, '--limit')
-        if (limit !== undefined) callOpts.limit = limit
-        const page = await callTool<Page<SkillSummary>>(
-          resolveTarget(opts),
-          hubUri(hub),
-          'Search',
-          {
-            query,
-            ...(Object.keys(callOpts).length ? { opts: callOpts } : {}),
-          },
-        )
-        if (asJson) printJson(page)
-        else printSkills(page)
-      })
-    })
+    .action(
+      async (
+        hubArg: string,
+        queryArg: string,
+        opts: GlobalOpts & { cursor?: string, limit?: string },
+      ) => {
+        const asJson = Boolean(opts.json)
+        await guard(asJson, async () => {
+          const hub = String(hubArg ?? '').trim()
+          if (!hub) throw new CliError('skillhub path is required')
+          const query = String(queryArg ?? '').trim()
+          if (!query) throw new CliError('query is required')
+          const callOpts = parsePageOpts(opts)
+          const page = await callTool<Page<SkillSummary>>(
+            resolveTarget(opts),
+            hubUri(hub),
+            'Search',
+            {
+              query,
+              ...(Object.keys(callOpts).length ? { opts: callOpts } : {}),
+            },
+          )
+          if (asJson) printJson(page)
+          else printSkills(page)
+        })
+      },
+    )
 }
 
 /** `tb skill publish <hub> <dir>` —— 从本地目录发布/替换一个 skill(须含 SKILL.md)。 */
@@ -303,7 +302,7 @@ export function skillMountCommand(): Command {
     .description('Mount a skillhub (r2 by default; s3 optional)')
     .argument('<path>', 'Tree path to mount at')
     .option('--provider <provider>', 'Storage provider: r2 | s3 (default r2)')
-    .option('--description <desc>', 'One-line node description')
+    .option('--description <desc>', 'One-line node description (default: auto-generated)')
     .option('--auth-ref <ref>', 'SecretStore ref for credentials ([s3] required)')
     .option('--read-only', 'Reject write verbs (Publish/Remove)')
     .option('--ttl <seconds>', 'Node TTL in seconds (expired node is reclaimed)')
@@ -337,6 +336,9 @@ export function skillMountCommand(): Command {
 
           let providerConfig: Record<string, unknown> | undefined
           if (provider === 'r2') {
+            if (opts.endpoint || opts.bucket || opts.region || authRef) {
+              throw new CliError('--endpoint/--bucket/--region/--auth-ref only apply to s3')
+            }
             if (prefix) providerConfig = { prefix }
           } else if (provider === 's3') {
             const endpoint = String(opts.endpoint ?? '').trim()

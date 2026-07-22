@@ -17,7 +17,18 @@ export interface ConnectArgs {
   /** `--no-shell` → false;缺省(undefined)= 暴露 shell。 */
   shell?: boolean
   sk?: string
+  timeout?: string
   url?: string
+}
+
+/** 长驻设备连接仍展示全局参数，但明确标出其中不适用或互斥的参数。 */
+export function withDeviceConnectionGlobalOpts(command: Command): Command {
+  const configured = withGlobalOpts(command)
+  const baseUrl = configured.options.find(option => option.long === '--base-url')
+  const timeout = configured.options.find(option => option.long === '--timeout')
+  if (baseUrl) baseUrl.description = 'Gateway base URL (mutually exclusive with positional [url])'
+  if (timeout) timeout.description = 'Not supported for this long-running command; rejected if passed'
+  return configured
 }
 
 export function buildExpose(args: ConnectArgs): DeviceExpose {
@@ -36,6 +47,18 @@ export function buildExpose(args: ConnectArgs): DeviceExpose {
 }
 
 export async function runConnect(args: ConnectArgs): Promise<void> {
+  if (args.timeout !== undefined) {
+    throw new CliError('--timeout does not apply to the long-running connect command')
+  }
+  if (args.url && args.baseUrl) {
+    throw new CliError('URL positional argument and --base-url are mutually exclusive')
+  }
+  if (args.shell === false && asArray(args.allow).length > 0) {
+    throw new CliError('--allow cannot be used with --no-shell')
+  }
+  if (args.fsReadonly && asArray(args.fs).length === 0) {
+    throw new CliError('--fs-readonly requires at least one --fs')
+  }
   const target = resolveTarget({
     baseUrl: args.url ? String(args.url) : args.baseUrl,
     sk: args.sk,
@@ -66,17 +89,22 @@ export async function runConnect(args: ConnectArgs): Promise<void> {
 
 /** `tb connect [url]` —— 设备反向注册长驻进程。 */
 export function connectCommand(): Command {
-  return withGlobalOpts(new Command('connect'))
+  return withDeviceConnectionGlobalOpts(new Command('connect'))
     .description(
       'Connect this machine as a device (long-running; exposes shell and/or fs on the tree)',
     )
-    .argument('[url]', 'Gateway base URL')
+    .argument('[url]', 'Gateway base URL (mutually exclusive with --base-url)')
     .option('--device-id <id>', 'Override stable local device id')
     .option('--path <path>', 'Mount path (default: device/<device-id>)')
-    .option('--allow <cmd>', 'Allowed shell command (repeatable, or "*")', collect, [])
+    .option(
+      '--allow <cmd>',
+      'Allowed shell command (repeatable, or "*"); mutually exclusive with --no-shell',
+      collect,
+      [],
+    )
     .option('--fs <root>', 'Expose local filesystem root (repeatable)', collect, [])
-    .option('--fs-readonly', 'Expose fs as read-only', false)
-    .option('--no-shell', 'Do not expose shell')
+    .option('--fs-readonly', 'Expose fs as read-only; requires at least one --fs', false)
+    .option('--no-shell', 'Do not expose shell; mutually exclusive with --allow')
     .addHelpText(
       'after',
       `

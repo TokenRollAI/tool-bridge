@@ -115,6 +115,7 @@ export type NodeConfig
     kind: 'http'
     tools: HttpToolDef[]
   }
+  | { authRef?: string, kind: 'tool', provider: string }
   | { baseUrl: string, kind: 'remote', skRef?: string }
   | {
     authRef?: string

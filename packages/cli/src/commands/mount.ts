@@ -1,13 +1,12 @@
 import { Command } from 'commander'
-import { type ConnectArgs, runConnect } from './connect'
-import { withGlobalOpts } from '../args'
+import { type ConnectArgs, runConnect, withDeviceConnectionGlobalOpts } from './connect'
 import { guard } from '../output'
 
 export function mountFsCommand(): Command {
-  return withGlobalOpts(new Command('fs'))
+  return withDeviceConnectionGlobalOpts(new Command('fs'))
     .description('Expose a local directory as a device fs context')
     .argument('<root>', 'Local directory root')
-    .argument('[url]', 'Gateway base URL')
+    .argument('[url]', 'Gateway base URL (mutually exclusive with --base-url)')
     .option('--device-id <id>', 'Override stable local device id')
     .option('--path <path>', 'Mount path (default: device/<device-id>)')
     .option('--fs-readonly', 'Expose fs as read-only', false)

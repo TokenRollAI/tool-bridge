@@ -34,15 +34,15 @@ export function treeCommand(): Command {
   return withGlobalOpts(new Command('tree'))
     .description('Show the node tree (depth-limited)')
     .argument('[path]', 'Tree path (default: root)')
-    .option('--depth <n>', 'Max depth (gateway default 2, cap 8)')
+    .option('--depth <n>', 'Tree depth, integer 1-8 (default: 2)')
     .action(async (path: string | undefined, opts: TreeOpts) => {
       const asJson = Boolean(opts.json)
       await guard(asJson, async () => {
         let depth: number | undefined
         if (opts.depth !== undefined) {
           depth = Number(opts.depth)
-          if (!Number.isInteger(depth) || depth < 0) {
-            throw new CliError(`invalid --depth "${opts.depth}": expected a non-negative integer`)
+          if (!Number.isInteger(depth) || depth < 1 || depth > 8) {
+            throw new CliError(`invalid --depth "${opts.depth}": expected an integer between 1 and 8`)
           }
         }
         const tree = await apiJson<TreeJson>(resolveTarget(opts), {

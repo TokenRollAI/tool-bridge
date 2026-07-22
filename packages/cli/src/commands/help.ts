@@ -33,6 +33,7 @@ export function helpCommand(): Command {
       await guard(asJson, async () => {
         if (opts.dsl && opts.md) throw new CliError('--dsl and --md are mutually exclusive')
         if (opts.dsl && asJson) throw new CliError('--dsl and --json are mutually exclusive')
+        if (opts.md && asJson) throw new CliError('--md and --json are mutually exclusive')
         const target = resolveTarget(opts)
         const path = nodePath('~help', pathArg)
         if (asJson) {

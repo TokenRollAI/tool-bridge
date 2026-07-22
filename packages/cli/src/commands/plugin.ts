@@ -1,8 +1,8 @@
 import { readFile } from 'node:fs/promises'
 import { Command } from 'commander'
 import type { Page } from '../types'
+import { parsePageOpts, resolveTarget, withGlobalOpts, withPageOpts } from '../args'
 import { guard, printJson, printLine, table } from '../output'
-import { resolveTarget, withGlobalOpts } from '../args'
 import { callTool, CliError } from '../http'
 
 /**
@@ -35,7 +35,9 @@ export interface PluginHealth {
 
 interface PluginOpts {
   baseUrl?: string
+  cursor?: string
   json?: boolean
+  limit?: string
   sk?: string
 }
 
@@ -113,16 +115,17 @@ export function pluginRegisterCommand(): Command {
 
 /** `tb plugin list` → PluginRegistry.List。 */
 export function pluginListCommand(): Command {
-  return withGlobalOpts(new Command('list'))
+  return withPageOpts(withGlobalOpts(new Command('list')))
     .description('List registered plugins')
     .action(async (opts: PluginOpts) => {
       const asJson = Boolean(opts.json)
       await guard(asJson, async () => {
+        const pageOpts = parsePageOpts(opts)
         const page = await callTool<Page<PluginManifest>>(
           resolveTarget(opts),
           '/system/plugin',
           'list',
-          {},
+          Object.keys(pageOpts).length ? { opts: pageOpts } : {},
         )
         if (asJson) {
           printJson(page)
@@ -135,6 +138,7 @@ export function pluginListCommand(): Command {
           p.enabled ? 'enabled' : 'disabled',
         ])
         printLine(table(['ID', 'KIND', 'ENDPOINT', 'STATE'], rows))
+        if (page.cursor) printLine(`next cursor: ${page.cursor}`)
       })
     })
 }
