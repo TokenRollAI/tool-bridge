@@ -16,13 +16,13 @@ The Worker itself is a thin shell over the published [`@tool-bridge/gateway`](ht
 
 ## After deploying
 
-1. **Get your Admin SecretKey.** On the very first request the gateway bootstraps itself and logs the Admin SK **once**. Open your Worker's live logs (Cloudflare dashboard → your Worker → Logs), hit `https://<your-worker>.workers.dev/healthz`, and copy the SK from the log line.
-
-   Prefer a key you choose yourself? Set it as a secret *before* the first request:
+1. **Create and save your Admin SecretKey.** Generate a high-entropy value locally (for example, a `tbk_` prefix plus 32 random bytes), save it in a password manager, then set it through Wrangler's interactive secret prompt **before the first authenticated request**:
 
    ```sh
    npx wrangler secret put TB_BOOTSTRAP_ADMIN_SK
    ```
+
+   New Workers fail closed until this secret is set. The gateway never writes the Admin SK plaintext to Worker logs.
 
 2. **(Recommended) Set an encryption key** for upstream credentials stored in the gateway:
 
@@ -43,11 +43,12 @@ The Worker itself is a thin shell over the published [`@tool-bridge/gateway`](ht
 ## Optional configuration
 
 - **Presigned R2 links** — without them, large payload `$ref` URLs are proxied through the Worker (`/~ref`), which just works. To hand out direct presigned R2 URLs instead, add to `wrangler.jsonc` `vars`:
+
   - `TB_R2_S3_ENDPOINT`: `https://<your-account-id>.r2.cloudflarestorage.com`
   - `TB_R2_BUCKET`: `tool-bridge`
 
   and store an R2 API token via the gateway's secret registry under the reserved name `r2-presign` (or set `TB_R2_ACCESS_KEY_ID` / `TB_R2_SECRET_ACCESS_KEY` secrets).
-- **Custom domain** — add a [`routes`](https://developers.cloudflare.com/workers/configuration/routing/custom-domains/) entry to `wrangler.jsonc`.
+- **Custom domains** — add a [`routes`](https://developers.cloudflare.com/workers/configuration/routing/custom-domains/) entry to `wrangler.jsonc`, set `TB_CANONICAL_ORIGIN` to the one canonical `https://...` origin used for OAuth callbacks, and keep Preview URLs disabled.
 - **Remote gateway federation** — set `TB_REMOTE_ALLOWLIST` (comma-separated host suffixes) to allow proxying to other tool-bridge instances.
 
 ## Local development

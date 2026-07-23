@@ -29,16 +29,16 @@ exports `.` / `./tbApp` / `./bootstrap` / `./deviceHello`(供 SDK 与 server 复
 
 | 文件 | 管什么 |
 |---|---|
-| `app.ts` | Workers Env→deps 适配(入口薄层) |
-| `tbApp.ts` | **宿主中立 `createTbApp(deps)`**:认证中间件、`~help`/`~tree`/`~skill`/`~describe`/`~register`/`~feedback`(splitFeedback + GET/POST/DELETE 三 handler,权限判定落目标 path)/数据面路由、remote 聚合、两级 `~help` 披露、`enrichHelp`(~help 注入 annotation note + feedback 头部条目,失败降级)、`/ui` 转发、`/~ref` |
-| `bootstrap.ts` | 首请求惰性引导:Admin SK + `system` 七 builtin 物化(promise 防重入 + KV 幂等标志;已引导实例升级自动补挂新模块) |
+| `app.ts` | Workers Env→deps 适配(入口薄层;规范化 `TB_CANONICAL_ORIGIN`) |
+| `tbApp.ts` | **宿主中立 `createTbApp(deps)`**:全局安全头、认证中间件、`~help`/`~tree`/`~skill`/`~describe`/`~register`/`~feedback`(splitFeedback + GET/POST/DELETE 三 handler,权限判定落目标 path)/数据面路由、remote 聚合、两级 `~help` 披露、`enrichHelp`(~help 注入 annotation note + feedback 头部条目,失败降级)、`/ui` 转发、`/~ref`(private/no-store) |
+| `bootstrap.ts` | 首请求惰性引导:Workers 缺 `TB_BOOTSTRAP_ADMIN_SK` fail closed + `system` 七 builtin 物化(promise 防重入 + KV 幂等标志;宿主中立 API 保留随机兼容路径,当前 Node server 仍默认使用并写明文日志,待修;已引导实例升级自动补挂新模块) |
 | `deviceHello.ts` | **宿主中立 `processDeviceHello`**:设备 hello 验证 + 落库的单一真源,DO 与 server DeviceHub 共用(防两宿主树形态漂移) |
 | `kvStateStore.ts` | StateStore 的 KV 实现(list 跳 null、子树前缀扫描,头注释有约束说明) |
-| `deviceSession.ts` | `DeviceSession` DO 胶水:WS hibernation、待决表、`setWebSocketAutoResponse`、惰性会话重建(协议行为在 deviceHello.ts) |
-| `refToken.ts` | `$ref` 网关中转的 HMAC token 签发/校验 |
+| `deviceSession.ts` | `DeviceSession` DO 胶水:WS hibernation、待决表、`setWebSocketAutoResponse`、惰性会话重建;休眠恢复与每次 invoke 会重验 SK,但当前跨 KV await 后未复核 activeConnId、`markDisconnected` 可用陈旧 meta 覆盖新连接,属待修 TOCTOU(协议行为在 deviceHello.ts) |
+| `refToken.ts` | `$ref` 网关中转的 HMAC token 签发/校验(HMAC 用途域分离) |
 | `providers/` | 全部上游 I/O:`mcp.ts`(SDK Streamable HTTP,会话复用 + 404 重握手一次;auth:'oauth' 挂 `../oauth.ts` 的 authProvider)、`http.ts`、`remote.ts`、`toolCache.ts`、`r2Object.ts`、`s3Object.ts` + `s3Sign.ts`(aws4fetch)、`pluginClient.ts`(`upstreamAuthRef` → resolve 后经 `X-TB-Upstream-Auth` 注入,失败 → unavailable)+ `pluginTool.ts` + `pluginContext.ts` |
 | `test/` | 10 个集成测试(gateway/tool/context/skillhub/device/deviceNodes/plugin/ui/oauth/meta `.integration.test.ts`;meta = annotation + ~feedback 端到端),真实 workerd;`scripts/` 有 echo-mcp / s3-mock / stub-provider 兜底上游 |
-| `wrangler.jsonc` | 绑定 TB_KV / TB_R2 / TB_DEVICE(DO)/ ASSETS(dashboard dist,`run_worker_first`)+ `account_id` + custom domain |
+| `wrangler.jsonc` | 绑定 TB_KV / TB_R2 / TB_DEVICE(DO)/ ASSETS(dashboard dist,`run_worker_first`)+ `account_id` + custom domain;production 禁 `workers_dev`/Preview URLs,用 `TB_CANONICAL_ORIGIN` 固定 OAuth callback origin |
 
 ## packages/cli — `tb`(npm 发布物)
 
@@ -88,11 +88,11 @@ exports `.` / `./tbApp` / `./bootstrap` / `./deviceHello`(供 SDK 与 server 复
 | `sqliteStateStore.ts` | better-sqlite3 单表 kv(WAL,强一致);list 用 key 范围扫描(不用 LIKE,规避 `_`/`%` 通配符);cursor/排序与 MemoryStateStore 契约对拍 |
 | `config.ts` | `configFromEnv`:TB_* 与 CF 同名同义 + TB_PORT(默认 8787,0=临时)/ TB_HOST / TB_DATA_DIR(默认 /data,本地回退 ./data)/ TB_UI_DIR |
 | `objects.ts` | `createDataObjectStore`:FsObjectStore('r2' provider 落点)前缀适配器,key 出入口加/剥 `objects/` 首段;无 presign → `$ref` 走 `/~ref` 中转 |
-| `deviceHub.ts` | ws `DeviceChannel`:http 'upgrade' + ws handleUpgrade;认证双点(升级前 identify 401 + processDeviceHello 权威判定);复用 core `DeviceGatewaySession`;ws ping 踢半开;断线回收 = `devicemeta:<id>` 持久 meta + 进程内 timer + 启动 `sweepOrphans`;幂等结果表仅内存(有意分叉) |
+| `deviceHub.ts` | ws `DeviceChannel`:http 'upgrade' + ws handleUpgrade;认证双点(升级前 identify 401 + processDeviceHello 权威判定),每次 invoke 再重验连接 SK,但 await 后未复核 active connection 且未重验 scope/registerPaths,属待修竞态/授权缺口;复用 core `DeviceGatewaySession`;ws ping 踢半开;断线回收 = `devicemeta:<id>` 持久 meta + 进程内 timer + 启动 `sweepOrphans`;幂等结果表仅内存(有意分叉) |
 | `assets.ts` | `/ui` 静态托管:TB_UI_DIR 覆盖 → dashboard 包 dist 解析 → 404 降级;contentType 复用 core fsContentTypeOf |
 | `server.ts` | `createTbServer`:构造 TbAppDeps(对位 gateway app.ts),start() 直调 runBootstrap + hub.sweepOrphans |
 | `main.ts` | bin 入口(shebang),SIGINT/SIGTERM 优雅关闭 |
-| `test/` | 5 文件 23 例:sqlite 契约对拍、HTTP 面(重启持久/吊销即时)、device 8 例、ui 5 例、context 3 例 |
+| `test/` | 5 文件 24 例:sqlite 契约对拍、HTTP 面(重启持久/吊销即时)、device 9 例(含连接 SK 吊销后 invoke 拒绝)、ui 5 例、context 3 例 |
 | 发布形态 | tsup bundle core+gateway(`dts.resolve` 须收窄为数组,`true` 会把 node:http 类型降级 undefined);better-sqlite3/ws/hono/@hono/node-server 留 external;publishConfig 覆盖指 dist |
 
 ## scripts/ 与 CI

@@ -108,13 +108,13 @@ cmd resolve-library-id POST /docs/context7/resolve-library-id  ← cmd 行:<name
 
 - `Authorizer.Check` 是唯一判定入口;判定次序 read→404(deny==not_found,不泄露存在性)再目标动作→403。
 - **registerPaths 收紧**:SK 声明了 `registerPaths` → 仅允许在这些前缀下注册;未声明(但持 register scope)→ 允许保留根之外的任意路径;同路径已有他人节点 → conflict。
-- Admin SK:部署时生成,scope=`**` 全动作;`TB_BOOTSTRAP_ADMIN_SK` 可预置明文(自动化),否则随机生成仅输出一次。
-- 吊销/禁用经 StateStore 分发:KV 宿主传播窗口上限 60s(生产实测 0.3s,`scripts/verify-revocation.ts` 可重跑);需要即时失效用短 `expiresAt`。认证读取对历史非法 `expiresAt` **fail closed**(视同无效 SK),不会因 `Date.parse()` 的 `NaN` 比较而放行。
+- Admin SK:scope=`**` 全动作。Workers 首次引导必须预置 `TB_BOOTSTRAP_ADMIN_SK`,缺失时 fail closed 且不得把随机明文写入日志;`runBootstrap` 仍提供本地随机兼容路径。当前 Node/Docker server 默认使用兼容路径并会把随机 Admin SK 写 stdout,生产部署必须预置该变量,代码层 fail-closed 待修。
+- 吊销/禁用经 StateStore 分发:KV 宿主最终一致,跨边缘通常约 60s、也可能更久(生产曾实测 0.3s,只作样本;`scripts/verify-revocation.ts` 可重跑);需要确定性即时失效须改强一致认证真源,短 `expiresAt` 可缩小暴露窗口。认证读取对历史非法 `expiresAt` **fail closed**(视同无效 SK),不会因 `Date.parse()` 的 `NaN` 比较而放行。
 
 ## 7. 设备帧协议要点
 
 - 帧类型:`hello`(声明 `DeviceExpose{shell?,fs?,nodes?}` 与可选 cmds)/ `ready` / `call` / `result` / `cancel` / `ping` / `pong`;未 hello 先 call → 拒;`requestId` 幂等;调用超时 60s → `unavailable` + cancel 帧。
-- ready 后网关代写 NodeRegistry(`device/<id>/shell|fs` 等);断线节点 `online:false`,调用 → 503 retryable;24h 未重连回收。
+- ready 后网关代写 NodeRegistry(`device/<id>/shell|fs` 等);断线节点 `online:false`,调用 → 503 retryable;24h 未重连回收。DO hibernation 恢复及每次 invoke、Node DeviceHub 每次 invoke 当前会调用 `identify`;disabled 回归已有测试,delete/expiry 由同一 active-key 判定处理,但连接替换 TOCTOU 与 scope/registerPaths 收紧尚未处理,因此“活动连接必然立即失效”还不是可靠协议属性。
 - **shell 白名单**:默认拒一切命令;声明 list 精确放行或 `*` 通配;含元字符拒。shell 契约 `cmd exec`(effect destructive + confirm)。
 - fs = file provider(FsObjectStore,realpath 防路径逃逸)。
 - ping/pong 是稳定字面量(网关 `setWebSocketAutoResponse` 精确匹配,不唤醒 DO);客户端 30s 心跳保活,见 [../guides/do-websocket-hibernation.md](../guides/do-websocket-hibernation.md)。

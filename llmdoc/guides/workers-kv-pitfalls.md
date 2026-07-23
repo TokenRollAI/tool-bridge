@@ -1,6 +1,6 @@
 # Workers/KV 生产坑清单
 
-> 用途:Cloudflare Workers + KV 宿主下已实际踩过或实测核实的限制,写码/排错前先对照。更新时机:新增实测踩坑或 CF 限制变化时。来源:实现与生产验证(2026-07-06)。
+> 用途:Cloudflare Workers + KV 宿主下已实际踩过或实测核实的限制,写码/排错前先对照。更新时机:新增实测踩坑或 CF 限制变化时。来源:实现、Cloudflare 官方语义与生产验证(最后核实 2026-07-24)。
 
 ## 1. KV list + get 的最终一致窗口(生产实际踩坑)
 
@@ -14,9 +14,11 @@ KV 的 `list()` 不带值(官方限制),取值须逐 key `get()`,而**每次 get
 
 **修法**:`NodeRegistryStore.children/subtree` 按**子树前缀扫描**,不扫全树(消 O(N²));一次 `~tree` 读入的子树节点数应 ≤ 数百(与 `~tree` 节点上限 500 同量级),给 1000 上限留余量。规模再增须改 KV metadata 承载值(list 不再逐 get)或换 SQLite 宿主。详见 `kvStateStore.ts` 头注释。
 
-## 3. 吊销传播窗口:上限 60s,实测 0.3s
+## 3. 吊销传播窗口:通常约 60s,也可能更久
 
-SK 记录经 KV 分发(最终一致),吊销/禁用在全球边缘的传播窗口**上限 60s**(KV 官方上限,亦是协议承诺的吊销窗口)。生产实测(`scripts/verify-revocation.ts`,可重跑):`tb sk rm` 后 **0.3s** 即开始被拒——上限是承诺,实际通常远快。需要即时失效用短 `expiresAt` 或主动轮换;SQLite 宿主吊销即时生效。
+SK 记录经 KV 分发(最终一致),Cloudflare 的语义是变更在其他位置**可能需要 60 秒或更久**才可见,不是“最长 60 秒”的硬 SLA。生产曾实测(`scripts/verify-revocation.ts`,可重跑) `tb sk rm` 后 **0.3s** 即开始被拒,该样本不能外推为跨区域上限。验证脚本的 timeout 只是可配置观察预算(`TB_REVOCATION_TIMEOUT_MS`,默认 120s),不是平台承诺。
+
+不要在认证读取前叠 isolate 内存缓存——它只会增加另一层陈旧状态。需要确定性即时失效时,应改用 D1/DO 等强一致认证真源或把敏感凭据设为短 `expiresAt`;SQLite 宿主吊销即时生效。
 
 ## 4. @cloudflare/vitest-pool-workers 0.18 的 API 变更
 
