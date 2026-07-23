@@ -22,11 +22,11 @@ async function postJson(path: string, body: unknown, init: RequestInit = {}): Pr
   })
 }
 
-async function issueSk(input: unknown): Promise<string> {
+async function issueSk(input: unknown): Promise<{ id: string, secret: string }> {
   const res = await postJson('system/sk', { tool: 'write', arguments: input }, admin())
   expect(res.status).toBe(200)
-  const body = (await res.json()) as { secret: string }
-  return body.secret
+  const body = (await res.json()) as { key: { id: string }, secret: string }
+  return { id: body.key.id, secret: body.secret }
 }
 
 function nextFrame(ws: WebSocket): Promise<DeviceFrame> {
@@ -262,7 +262,7 @@ describe('DeviceSession DO + /system/device/ws', () => {
 
   it('registerPaths 限定:默认路径被拒,指定允许路径成功', async () => {
     const allowedPath = `device/allowed-${crypto.randomUUID().slice(0, 8)}`
-    const sk = await issueSk({
+    const { secret: sk } = await issueSk({
       owner: 'device:limited',
       scopes: [{ pattern: '**', actions: ['read', 'register', 'call'] }],
       registerPaths: [allowedPath],
@@ -295,5 +295,33 @@ describe('DeviceSession DO + /system/device/ws', () => {
       shell: { allow: ['echo'] },
     })
     allowed.close(1000)
+  })
+
+  it('设备 SK 被禁用后,下一次调用重新认证并关闭现有连接', async () => {
+    const deviceId = `revoked-${crypto.randomUUID().slice(0, 8)}`
+    const issued = await issueSk({
+      owner: `device:${deviceId}`,
+      scopes: [{ pattern: `device/${deviceId}/**`, actions: ['read', 'register', 'call'] }],
+    })
+    const ws = await connectDevice(deviceId, {
+      sk: issued.secret,
+      shell: { allow: ['echo'] },
+    })
+
+    const disabled = await postJson(
+      'system/sk',
+      { tool: 'update', arguments: { id: issued.id, patch: { disabled: true } } },
+      admin(),
+    )
+    expect(disabled.status).toBe(200)
+
+    const rejected = nextFrame(ws)
+    const invoke = await postJson(
+      `device/${deviceId}/shell`,
+      { tool: 'exec', arguments: { command: 'echo should-not-run' } },
+      admin(),
+    )
+    expect(invoke.status).toBe(503)
+    expect(await rejected).toMatchObject({ type: 'error', error: { code: 'permission_denied' } })
   })
 })

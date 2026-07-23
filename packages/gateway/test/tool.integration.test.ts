@@ -558,10 +558,30 @@ describe('remote 节点(白名单、X-TB-Via 环检测)', () => {
       })
     })
     vi.stubGlobal('fetch', fetchMock)
+    const auditLog = vi.spyOn(console, 'log').mockImplementation(() => {})
 
     const res = await postJson('srv/peer-auth', { tool: 'anything', arguments: { x: 1 } }, admin())
     expect(res.status).toBe(200)
     expect(fetchMock).toHaveBeenCalledTimes(1)
+    const event = auditLog.mock.calls
+      .map(([line]) => {
+        try {
+          return JSON.parse(String(line)) as Record<string, unknown>
+        } catch {
+          return null
+        }
+      })
+      .find(item => item?.event === 'remote_skref_proxy')
+    expect(event).toMatchObject({
+      actorOwner: 'user:admin',
+      method: 'POST',
+      nodePath: 'srv/peer-auth',
+      skRef: 'remote-sk',
+      target: 'https://peer.example.com/htbp',
+    })
+    expect(event?.actorKeyId).toEqual(expect.any(String))
+    expect(event?.traceId).toEqual(expect.any(String))
+    auditLog.mockRestore()
   })
 
   it('根 ~tree 聚合 remote 子树并把远端路径映射到本地挂载前缀', async () => {

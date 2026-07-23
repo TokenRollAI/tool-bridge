@@ -8,6 +8,8 @@
   "main": "src/index.ts",
   "compatibility_date": "2025-06-01",
   "compatibility_flags": ["nodejs_compat"],
+  // Keep the account's workers.dev hostname, but do not expose per-version alternate origins.
+  "preview_urls": false,
   "observability": {
     "enabled": true
   },

@@ -261,6 +261,7 @@ describe('大对象 $ref(/~ref 中转)', () => {
     const fetched = await SELF.fetch(refUrl)
     expect(fetched.status).toBe(200)
     expect(fetched.headers.get('content-type')).toContain('text/plain')
+    expect(fetched.headers.get('cache-control')).toBe('private, no-store')
     expect(await fetched.text()).toBe(bigText)
 
     // 篡改 token(签名段尾部翻转)→ 404 不泄露。

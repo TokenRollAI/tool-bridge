@@ -69,6 +69,7 @@ export function assertRemoteAllowed(baseUrl: string, settings: RemoteSettings): 
  * `nodePath` 是 remote 节点挂载前缀。本地 Auth 已在调用点判定,这里只做透传与环检测。
  */
 export async function passthroughRemote(opts: {
+  actor: { keyId: string, owner: string, traceId: string }
   body?: string
   config: RemoteConfig
   headers: Headers
@@ -108,9 +109,27 @@ export async function passthroughRemote(opts: {
   const contentType = opts.headers.get('content-type')
   if (contentType !== null) outHeaders['content-type'] = contentType
   // skRef 换发出站凭证;本地调用者 SK 不外传。
+  // 安全属性:被引用的 skRef 可能拥有远超本地调用者的远端权限——本地只校验调用者对
+  // 该 remote 节点路径的 read+call。这是刻意的"代理凭证"模型(对齐服务账号),但为可审计,
+  // 此处记录一条不含凭证明文的结构化审计行(谁经哪个节点、用哪个 skRef、发往何处)。
   if (opts.config.skRef !== undefined) {
     const cred = await opts.secrets.resolve(opts.config.skRef)
-    if (cred !== undefined) outHeaders.authorization = `Bearer ${cred}`
+    if (cred !== undefined) {
+      outHeaders.authorization = `Bearer ${cred}`
+      console.log(
+        JSON.stringify({
+          event: 'remote_skref_proxy',
+          actorKeyId: opts.actor.keyId,
+          actorOwner: opts.actor.owner,
+          traceId: opts.actor.traceId,
+          nodePath: opts.nodePath,
+          skRef: opts.config.skRef,
+          method: opts.method,
+          target: rewritten,
+          via: self,
+        }),
+      )
+    }
   }
 
   let resp: Response

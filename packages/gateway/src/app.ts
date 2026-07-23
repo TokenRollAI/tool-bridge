@@ -18,6 +18,11 @@ export interface Env {
   /** 放行 http:// 上游(仅本地开发)。 */
   TB_ALLOW_INSECURE_HTTP?: string
   TB_BOOTSTRAP_ADMIN_SK?: string
+  /**
+   * 规范网关 origin(如 https://tool-bridge.example.com)。多域名部署时钉死 OAuth
+   * redirect_uri,防授权 code 跨域互换;缺省用请求期 origin(单域名行为不变)。
+   */
+  TB_CANONICAL_ORIGIN?: string
   /** DeviceSession Durable Object(设备 WS hibernation)。 */
   TB_DEVICE: DurableObjectNamespace<DeviceSession>
   /** 设备断线后未重连的回收秒数(缺省 24h)。 */
@@ -76,6 +81,21 @@ function remoteSettingsFromEnv(env: Env): RemoteSettings {
   }
 }
 
+/**
+ * 规范 origin 解析:取 URL 的 origin 部分(丢弃 path/query),非法/缺省 → undefined。
+ * 只接受 http/https,避免误配把 redirect_uri 钉到非法值。
+ */
+function normalizeOrigin(value: string | undefined): string | undefined {
+  if (value === undefined || value.length === 0) return undefined
+  try {
+    const u = new URL(value)
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') return undefined
+    return u.origin
+  } catch {
+    return undefined
+  }
+}
+
 /** 正整数 env 解析(TB_TOOL_CACHE_TTL / TB_REF_THRESHOLD_BYTES / TB_REF_TTL_SEC);非法/缺省 → undefined。 */
 function positiveIntEnv(value: string | undefined): number | undefined {
   const n = Number(value)
@@ -127,6 +147,8 @@ function depsFromEnv(env: Env): TbAppDeps {
     },
   }
   if (env.TB_SECRET_ENCRYPTION_KEY !== undefined) deps.encryptionKey = env.TB_SECRET_ENCRYPTION_KEY
+  const canonicalOrigin = normalizeOrigin(env.TB_CANONICAL_ORIGIN)
+  if (canonicalOrigin !== undefined) deps.canonicalOrigin = canonicalOrigin
   const assets = env.ASSETS
   if (assets !== undefined) deps.assets = request => assets.fetch(request)
   const ttl = positiveIntEnv(env.TB_TOOL_CACHE_TTL)

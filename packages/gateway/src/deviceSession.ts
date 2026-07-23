@@ -6,6 +6,7 @@ import {
   type DeviceFrame,
   DeviceGatewaySession,
   encodeDeviceFrame,
+  identify,
   NodeRegistryStore,
   PING_FRAME_JSON,
   PONG_FRAME_JSON,
@@ -212,14 +213,28 @@ export class DeviceSession extends DurableObject<DeviceSessionEnv> {
   /** 建会话;若该连接的 hello 已在休眠前完成(meta.activeConnId 匹配)则直接恢复 ready。 */
   private async initSession(ws: WebSocket): Promise<DeviceGatewaySession> {
     const session = this.createSession(ws)
+    let attachment: SocketAttachment
     try {
-      const attachment = attachmentOf(ws)
-      const meta = await this.ctx.storage.get<DeviceMeta>(META_KEY)
-      if (meta !== undefined && meta.activeConnId === attachment.connId) {
-        session.restoreReady()
-      }
+      attachment = attachmentOf(ws)
     } catch {
       // 附件缺失/损坏:按新连接处理,等 hello。
+      return session
+    }
+    const meta = await this.ctx.storage.get<DeviceMeta>(META_KEY)
+    if (meta !== undefined && meta.activeConnId === attachment.connId) {
+      // KV/DO 读取失败必须向上传播,不能伪装成“等 hello”的新连接;只有凭据明确无效时
+      // 才拒绝现有会话并标记离线。
+      const authCtx = await identify(
+        new KvStateStore(this.env.TB_KV),
+        attachment.authorization,
+        new Date().toISOString(),
+      )
+      if (authCtx === null || authCtx.keyId !== meta.keyId) {
+        session.reject(TBError.unauthenticated())
+        await this.markDisconnected(meta)
+        return session
+      }
+      session.restoreReady()
     }
     return session
   }
@@ -345,12 +360,25 @@ export class DeviceSession extends DurableObject<DeviceSessionEnv> {
     const tagged = this.ctx.getWebSockets(`device:${meta.deviceId}`)
     const sockets = tagged.length > 0 ? tagged : this.ctx.getWebSockets()
     for (const ws of sockets) {
+      let attachment: SocketAttachment
       try {
-        const attachment = attachmentOf(ws)
-        if (attachment.connId === meta.activeConnId) return ws
+        attachment = attachmentOf(ws)
       } catch {
         // ignore malformed attachment
+        continue
       }
+      if (attachment.connId !== meta.activeConnId) continue
+      const authCtx = await identify(
+        new KvStateStore(this.env.TB_KV),
+        attachment.authorization,
+        new Date().toISOString(),
+      )
+      if (authCtx !== null && authCtx.keyId === meta.keyId) return ws
+      const session = this.sessions.get(ws)
+      if (session !== undefined) (await session).reject(TBError.unauthenticated())
+      else ws.close(1008, 'credentials revoked')
+      await this.markDisconnected(meta)
+      return null
     }
     await this.markDisconnected(meta)
     return null

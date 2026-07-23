@@ -1,6 +1,8 @@
+import { KEY_BOOTSTRAPPED, MemoryStateStore } from '@tool-bridge/core'
 import { describe, expect, it } from 'vitest'
 import { SELF } from 'cloudflare:test'
 import pkg from '../package.json' with { type: 'json' }
+import { runBootstrap } from '../src/bootstrap'
 import { TEST_ADMIN_SK } from './fixtures'
 
 // 穿透测试:HTTP 进 → Worker 出(认证 + HTBP 核心树 + builtin)。
@@ -41,6 +43,20 @@ describe('GET /healthz(树外免认证)', () => {
     const body = (await res.json()) as { healthy: boolean, version: string }
     expect(body.healthy).toBe(true)
     expect(body.version).toBe(pkg.version)
+    expect(res.headers.get('content-security-policy')).toContain('script-src \'self\'')
+    expect(res.headers.get('x-content-type-options')).toBe('nosniff')
+    expect(res.headers.get('x-frame-options')).toBe('DENY')
+    expect(res.headers.get('referrer-policy')).toBe('no-referrer')
+  })
+})
+
+describe('Worker 首次引导凭证', () => {
+  it('要求预置 Admin SK 时缺省值 fail closed,不写引导标志', async () => {
+    const store = new MemoryStateStore()
+    await expect(runBootstrap(store, { requireAdminSk: true })).rejects.toMatchObject({
+      code: 'unavailable',
+    })
+    expect(await store.get(KEY_BOOTSTRAPPED)).toBeNull()
   })
 })
 
@@ -51,6 +67,8 @@ describe('认证(除 /healthz 外全路由要求 SK)', () => {
     const body = (await res.json()) as { code: string, retryable: boolean }
     expect(body.code).toBe('permission_denied')
     expect(body.retryable).toBe(false)
+    expect(res.headers.get('content-security-policy')).toContain('frame-ancestors \'none\'')
+    expect(res.headers.get('x-content-type-options')).toBe('nosniff')
   })
 
   it('无效 SK → 401', async () => {

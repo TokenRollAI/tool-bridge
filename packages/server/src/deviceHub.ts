@@ -47,6 +47,7 @@ interface Conn {
   authorization: string | undefined
   deviceId: string
   isAlive: boolean
+  keyId?: string
   session: DeviceGatewaySession
   ws: WebSocket
 }
@@ -108,6 +109,12 @@ export class DeviceHub {
   async invoke(deviceId: string, req: DeviceInvokeRequest): Promise<unknown> {
     const conn = this.activeByDevice.get(deviceId)
     if (conn === undefined) {
+      const offline: DeviceCallResult = { ok: false, error: TBError.deviceOffline().toJSON() }
+      return offline
+    }
+    const authCtx = await identify(this.store, conn.authorization, new Date().toISOString())
+    if (authCtx === null || authCtx.keyId !== conn.keyId) {
+      conn.session.reject(TBError.unauthenticated())
       const offline: DeviceCallResult = { ok: false, error: TBError.deviceOffline().toJSON() }
       return offline
     }
@@ -237,6 +244,7 @@ export class DeviceHub {
     })
     const meta: DeviceMeta = { deviceId: conn.deviceId, mountPath, keyId, connectedAt: now }
     await this.store.put(KEY_DEVICE_META + conn.deviceId, meta)
+    conn.keyId = keyId
     this.cancelReclaim(conn.deviceId)
     const prev = this.activeByDevice.get(conn.deviceId)
     if (prev !== undefined && prev !== conn) prev.ws.close(1000, 'replaced')

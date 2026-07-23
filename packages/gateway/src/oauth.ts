@@ -375,17 +375,39 @@ export async function finishMcpAuthorization(
   })
 }
 
+/**
+ * HTML 文本转义:阻断把可控内容(如 AS 回跳的 error、token 兑换错误信息)拼进
+ * 回调结果页时的注入。回调页与 Dashboard 同源(/ui),未转义即为反射型 XSS。
+ */
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+}
+
 /** 回调结果页(浏览器一次性展示;不含任何机密)。 */
 export function renderOAuthCallbackHtml(ok: boolean, detail: string): Response {
   const title = ok ? 'Authorization complete' : 'Authorization failed'
+  const safeDetail = escapeHtml(detail)
   const body = `<!doctype html>
 <html><head><meta charset="utf-8"><title>${title} · tool-bridge</title>
 <style>body{font-family:system-ui,sans-serif;display:grid;place-items:center;min-height:80vh;margin:0}
 main{text-align:center}h1{font-size:1.4rem}p{color:#555}</style></head>
-<body><main><h1>${ok ? '✅' : '❌'} ${title}</h1><p>${detail}</p>
+<body><main><h1>${ok ? '✅' : '❌'} ${title}</h1><p>${safeDetail}</p>
 <p>You can close this tab.</p></main></body></html>`
   return new Response(body, {
     status: ok ? 200 : 400,
-    headers: { 'content-type': 'text/html; charset=utf-8' },
+    headers: {
+      'content-type': 'text/html; charset=utf-8',
+      'cache-control': 'no-store',
+      // 纵深防御:纵使有遗漏的注入点,也不放行脚本/外连;页面仅需内联样式。
+      'content-security-policy': 'default-src \'none\'; style-src \'unsafe-inline\'; base-uri \'none\'; form-action \'none\'',
+      'x-content-type-options': 'nosniff',
+      'x-frame-options': 'DENY',
+      'referrer-policy': 'no-referrer',
+    },
   })
 }

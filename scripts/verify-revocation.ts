@@ -1,6 +1,6 @@
 /**
  * 吊销传播验收:对已部署的 TB_BASE_URL 端到端验证
- * SK 吊销后请求被拒(401),并测量传播耗时(CF KV 最终一致,上限窗口 60s)。
+ * SK 吊销后请求被拒(401),并测量传播耗时(CF KV 最终一致,可能需要 60s 或更久)。
  *
  * 流程:用 admin SK 经 system/sk 签发一把临时 SK(仅 read scope)→ 确认其可用(~help 200)
  *   → 吊销(system/sk delete)→ 轮询 ~help 直到 401(或超时)→ 输出耗时。
@@ -8,7 +8,7 @@
  * 用法:`TB_BASE_URL=https://... TB_ADMIN_SK=tbk_... pnpm tsx scripts/verify-revocation.ts`
  *
  * **消耗生产资源**:签发/吊销真实 SK,故只在显式运行时跑,不进 `pnpm verify`。
- * 轮询上限 60s(KV 官方传播窗口上限);超时视为失败(退出码 1)。
+ * 默认观察预算 120s,可通过 TB_REVOCATION_TIMEOUT_MS 调整;预算内未观察到传播则失败。
  */
 import assert from 'node:assert/strict'
 
@@ -24,7 +24,10 @@ if (!adminSk) {
   process.exit(1)
 }
 
-const POLL_TIMEOUT_MS = 60_000
+const configuredTimeoutMs = Number(process.env.TB_REVOCATION_TIMEOUT_MS ?? '120000')
+const POLL_TIMEOUT_MS = Number.isFinite(configuredTimeoutMs) && configuredTimeoutMs > 0
+  ? Math.floor(configuredTimeoutMs)
+  : 120_000
 const POLL_INTERVAL_MS = 2_000
 
 const sleep = (ms: number): Promise<void> => new Promise(r => setTimeout(r, ms))
@@ -70,7 +73,7 @@ async function main(): Promise<void> {
   assert.equal(del.status, 200, `delete temp SK expected 200, got ${del.status}`)
   console.log(`ok  revoked temp SK id=${tempId}`)
 
-  // 4) 轮询直到 401(或超时 60s)。
+  // 4) 轮询直到 401(或耗尽配置的观察预算)。
   const start = Date.now()
   let status = before
   while (Date.now() - start < POLL_TIMEOUT_MS) {
@@ -84,7 +87,7 @@ async function main(): Promise<void> {
     await sleep(POLL_INTERVAL_MS)
   }
   throw new Error(
-    `revocation did not propagate within ${POLL_TIMEOUT_MS / 1000}s (last status ${status})`,
+    `revocation was not observed within the ${POLL_TIMEOUT_MS / 1000}s budget (last status ${status})`,
   )
 }
 

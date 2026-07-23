@@ -72,6 +72,10 @@ describe('Node 宿主 HTTP 面', () => {
     const healthBody = (await health.json()) as { healthy: boolean, version: string }
     expect(healthBody.healthy).toBe(true)
     expect(healthBody.version).toBe(pkg.version)
+    expect(health.headers.get('content-security-policy')).toContain('script-src \'self\'')
+    expect(health.headers.get('x-content-type-options')).toBe('nosniff')
+    expect(health.headers.get('x-frame-options')).toBe('DENY')
+    expect(health.headers.get('referrer-policy')).toBe('no-referrer')
 
     const anon = await fetch(`${baseUrl}/~help`)
     expect(anon.status).toBe(401)
