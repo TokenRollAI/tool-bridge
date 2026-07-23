@@ -5,7 +5,8 @@ import type { StateStore } from '@tool-bridge/core'
  *
  * 值以 JSON 存取。`list` 用 KV 原生 `list({prefix,cursor,limit})` 枚举键名,再逐 key `get`
  * 取值——KV 的 list 不带值(官方限制)。树规模小(节点/SK 数量有限),逐 key get
- * 可接受;规模变大后可换 KV metadata 或改 SQLite 宿主。KV 最终一致(吊销 60s 窗口)。
+ * 可接受;规模变大后可换 KV metadata 或改 SQLite 宿主。KV 最终一致(其它边缘通常
+ * 约 60s 内看见吊销,但 Cloudflare 明确说明可能更久)。
  *
  * **Workers 子请求上限约束**:`list` 每翻页每个键各发一次 `kv.get`,每次 get 计一个 Workers
  * 子请求(免费套餐 ~50 / 付费 ~1000 每请求)。因此单次 `list` 触碰的键数受此上限约束——

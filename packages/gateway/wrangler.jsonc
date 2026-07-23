@@ -5,6 +5,9 @@
   "main": "src/index.ts",
   "compatibility_date": "2025-06-01",
   "compatibility_flags": ["nodejs_compat"],
+  // 生产只允许规范自定义域;关闭 workers.dev 与版本预览 URL,避免同一状态暴露多 origin。
+  "workers_dev": false,
+  "preview_urls": false,
   // DJJ 账户(.env CLOUDFLARE_ACCOUNT_ID);wrangler OAuth 下有多账户,须显式指定。
   "account_id": "0cb9b897010bc426cd8bf33d8c052d11",
   // 生产入口 = TB_BASE_URL(.env);zone pdjjq.org 在同账户。
@@ -15,6 +18,7 @@
   // r2 presign 的 S3 兼容端点(account_id 派生)与 bucket 名;
   // presign 凭证本体走 SecretStore 'r2-presign' 或 wrangler secret,不入 vars。
   "vars": {
+    "TB_CANONICAL_ORIGIN": "https://tool-bridge.pdjjq.org",
     "TB_R2_BUCKET": "tb-r2",
     "TB_R2_S3_ENDPOINT": "https://0cb9b897010bc426cd8bf33d8c052d11.r2.cloudflarestorage.com"
   },

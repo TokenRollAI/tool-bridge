@@ -67,6 +67,18 @@ async function registryGet(baseUrl: string, path: string): Promise<Response> {
   })
 }
 
+async function postJson(baseUrl: string, path: string, body: unknown): Promise<Response> {
+  return fetch(`${baseUrl}/${path}`, {
+    method: 'POST',
+    headers: {
+      'authorization': `Bearer ${ADMIN_SK}`,
+      'content-type': 'application/json',
+      'accept': 'application/json',
+    },
+    body: JSON.stringify(body),
+  })
+}
+
 /** 建 ws 连接;resolve 于 open,或 reject 于非 101 应答(带 statusCode)。 */
 function wsConnect(wsBase: string, deviceId: string, sk?: string): Promise<WebSocket> {
   const ws = new WebSocket(`${wsBase}/system/device/ws?deviceId=${deviceId}`, {
@@ -97,9 +109,9 @@ function nextFrame(ws: WebSocket, timeoutMs = 5000): Promise<Record<string, unkn
 async function connectDevice(
   wsBase: string,
   deviceId: string,
-  opts: { autoReply?: boolean } = {},
+  opts: { autoReply?: boolean, sk?: string } = {},
 ): Promise<WebSocket> {
-  const ws = await wsConnect(wsBase, deviceId, ADMIN_SK)
+  const ws = await wsConnect(wsBase, deviceId, opts.sk ?? ADMIN_SK)
   const ready = nextFrame(ws)
   ws.send(
     JSON.stringify({
@@ -219,6 +231,35 @@ describe('DeviceHub 全链路', () => {
     })) as { error?: { code: string }, ok: boolean }
     expect(res.ok).toBe(false)
     expect(res.error?.code).toBe('unavailable')
+  })
+
+  it('设备 SK 被禁用后,下一次调用重新认证并关闭现有连接', async () => {
+    const { server, baseUrl, wsBase } = await startServer(tmpDataDir())
+    cleanups.push(() => server.close())
+    const issuedRes = await postJson(baseUrl, 'system/sk', {
+      tool: 'write',
+      arguments: {
+        owner: 'device:revoked-node',
+        scopes: [{ pattern: '**', actions: ['read', 'register', 'call'] }],
+      },
+    })
+    expect(issuedRes.status).toBe(200)
+    const issued = (await issuedRes.json()) as { key: { id: string }, secret: string }
+    const ws = await connectDevice(wsBase, 'revoked-node', { sk: issued.secret })
+
+    const disabled = await postJson(baseUrl, 'system/sk', {
+      tool: 'update',
+      arguments: { id: issued.key.id, patch: { disabled: true } },
+    })
+    expect(disabled.status).toBe(200)
+
+    const rejected = nextFrame(ws)
+    const invoke = await postJson(baseUrl, 'device/revoked-node/shell', {
+      tool: 'exec',
+      arguments: { command: 'echo should-not-run' },
+    })
+    expect(invoke.status).toBe(503)
+    expect(await rejected).toMatchObject({ type: 'error', error: { code: 'permission_denied' } })
   })
 })
 

@@ -15,6 +15,7 @@ import {
   sha256Hex,
   SKRegistryStore,
   type StateStore,
+  TBError,
 } from '@tool-bridge/core'
 import { fetchPluginContract, probePlugin } from './providers/pluginClient'
 
@@ -30,9 +31,9 @@ interface BootstrapEnv {
  * 只跑一次真正的引导逻辑)。幂等标志 KEY_BOOTSTRAPPED 存在即整体跳过(E2E-1③ 重跑不重复
  * 输出 Admin SK 明文)。
  *
- * Admin SK 明文只在首次引导时 console.log 一次:
- * - env.TB_BOOTSTRAP_ADMIN_SK 提供 → 以它为明文(sha256 后入库,便于部署自动化);
- * - 否则由 mintKey 生成随机明文。
+ * Workers 首次引导必须提供 TB_BOOTSTRAP_ADMIN_SK(sha256 后入库),不把最高权限凭证
+ * 写入持久日志。宿主中立 runBootstrap 仍为 Node/SDK 保留随机生成并向本地 stdout
+ * 展示一次的兼容路径。
  */
 
 /** 引导时注册的内置节点(system directory + 七个 builtin,含 annotation;feedback 走 ~feedback 保留段,非 builtin)。 */
@@ -94,18 +95,37 @@ async function ensureBuiltinNodes(registry: NodeRegistryStore, now: string): Pro
   }
 }
 
-async function doBootstrap(store: StateStore, adminSk: string | undefined): Promise<void> {
+async function doBootstrap(
+  store: StateStore,
+  adminSk: string | undefined,
+  requireAdminSk: boolean,
+): Promise<void> {
   const now = new Date().toISOString()
   const bootstrapped = (await store.get(KEY_BOOTSTRAPPED)) !== null
 
-  // 1) Admin SK(仅首次引导):提供明文则用之,否则随机生成;明文只输出一次。
+  // 1) Admin SK(仅首次引导):Workers 要求预置;Node/SDK 兼容路径可随机生成并显示一次。
   if (!bootstrapped) {
     const sk = new SKRegistryStore(store)
     if (adminSk !== undefined && adminSk.length > 0) {
       await mintAdminWithPlaintext(store, adminSk, now)
       console.log('[tool-bridge] bootstrapped: Admin SK = <provided via TB_BOOTSTRAP_ADMIN_SK>')
     } else {
+      if (requireAdminSk) {
+        throw new TBError(
+          'unavailable',
+          'first Worker bootstrap requires TB_BOOTSTRAP_ADMIN_SK; set it with `wrangler secret put TB_BOOTSTRAP_ADMIN_SK`',
+          { retryable: false },
+        )
+      }
       const { secret } = await sk.write(adminBootstrapInput(), now)
+      // 随机路径下明文只能在此处展示一次(不输出即永久丢失);但 console 日志会进
+      // `wrangler tail` 与 Cloudflare Dashboard,任何有账户访问权者可读到。故显式告警,
+      // 引导部署者改用 TB_BOOTSTRAP_ADMIN_SK 预置(该路径不落明文日志)。
+      console.warn(
+        '[tool-bridge] SECURITY: a random Admin SK was generated and printed to the log below. '
+        + 'Worker logs are visible via `wrangler tail` and the Cloudflare dashboard — capture this '
+        + 'value now, then rotate it, or redeploy with TB_BOOTSTRAP_ADMIN_SK set to avoid plaintext logs.',
+      )
       console.log(`[tool-bridge] bootstrapped: Admin SK (shown once) = ${secret}`)
     }
   }
@@ -121,8 +141,12 @@ async function doBootstrap(store: StateStore, adminSk: string | undefined): Prom
  * 宿主中立的一次性引导(SDK 等嵌入宿主直接调用;幂等,但不做并发去重——
  * 嵌入宿主自管 once,Workers 用下方 ensureBootstrapped 的模块级 once)。
  */
-export function runBootstrap(store: StateStore, opts?: { adminSk?: string }): Promise<void> {
-  return doBootstrap(store, opts?.adminSk)
+export function runBootstrap(
+  store: StateStore,
+  opts?: { adminSk?: string, requireAdminSk?: boolean },
+): Promise<void> {
+  // Node/SDK 有部署者可见的本地 stdout,为兼容现有一次性引导流程默认仍允许随机生成。
+  return doBootstrap(store, opts?.adminSk, opts?.requireAdminSk ?? false)
 }
 
 /**
@@ -131,7 +155,9 @@ export function runBootstrap(store: StateStore, opts?: { adminSk?: string }): Pr
  */
 export function ensureBootstrapped(store: StateStore, env: BootstrapEnv): Promise<void> {
   if (bootstrapOnce === undefined) {
-    bootstrapOnce = doBootstrap(store, env.TB_BOOTSTRAP_ADMIN_SK).catch((err) => {
+    // Workers 日志会被账户成员与日志系统读取:新实例必须显式预置 Admin SK,禁止把
+    // 随机生成的最高权限凭证写入 console。已引导实例不再需要保留该 env secret。
+    bootstrapOnce = doBootstrap(store, env.TB_BOOTSTRAP_ADMIN_SK, true).catch((err) => {
       // 引导失败:重置 once 以便下个请求重试(避免永久卡死)。
       bootstrapOnce = undefined
       throw err

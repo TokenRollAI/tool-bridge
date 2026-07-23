@@ -862,7 +862,7 @@ export function SkPage() {
                                   <ConfirmAction
                                     actionLabel="吊销并删除"
                                     description={
-                                      <p>删除后该 SK 立即失效（吊销传播上限 60 秒）。此操作不可撤销。</p>
+                                      <p>删除后当前区域通常很快拒绝该 SK；CF KV 向其它边缘传播常需约 60 秒，且可能更久。此操作不可撤销。</p>
                                     }
                                     onConfirm={() => remove(sk)}
                                     title={`吊销并删除 ${sk.id}?`}

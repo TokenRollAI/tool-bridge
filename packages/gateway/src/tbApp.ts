@@ -122,6 +122,13 @@ export interface TbAppDeps {
   allowInsecureHttp: boolean
   /** Dashboard 静态资源(Workers Static Assets);缺省 → /ui 404。 */
   assets?: (request: Request) => Promise<Response>
+  /**
+   * 规范网关 origin(如 `https://tool-bridge.example.com`)。配置后,OAuth 的
+   * redirect_uri 钉在此规范值上,而非每请求动态取 origin——防止实例经多域名
+   * (自定义域 + *.workers.dev 等)访问时,授权 code 在不同域名间被互换。
+   * 缺省 → 回退到请求期 origin(单域名部署行为不变)。
+   */
+  canonicalOrigin?: string
   /** 设备通道;缺省 → device 能力禁用。 */
   device?: DeviceChannel
   /** $ref 中转 token 签名密钥(TB_SECRET_ENCRYPTION_KEY);缺省 → /~ref 404、大对象走 presign 或 unavailable。 */
@@ -163,6 +170,37 @@ function tbErrorResponse(err: TBError): Response {
     status: err.httpStatus,
     headers: { 'content-type': 'application/json; charset=utf-8' },
   })
+}
+
+/**
+ * 全宿主统一的安全响应头(Workers / Node / SDK 内嵌实例)。OAuth 回调页自带更严格
+ * 的 CSP,此处只在响应未声明 CSP 时补默认策略。WebSocket 101 不重建 Response。
+ */
+function withSecurityHeaders(res: Response): Response {
+  if (res.status === 101 || (res as { webSocket?: unknown }).webSocket != null) return res
+  const apply = (headers: Headers): void => {
+    if (!headers.has('content-security-policy')) {
+      headers.set(
+        'content-security-policy',
+        'default-src \'self\'; script-src \'self\'; style-src \'self\' \'unsafe-inline\'; '
+        + 'img-src \'self\' data:; connect-src \'self\' https: http:; base-uri \'none\'; '
+        + 'form-action \'self\'; frame-ancestors \'none\'; object-src \'none\'',
+      )
+    }
+    headers.set('x-content-type-options', 'nosniff')
+    headers.set('x-frame-options', 'DENY')
+    headers.set('referrer-policy', 'no-referrer')
+  }
+  // 本 app 自建的 Response headers 可变,原地写可保留 Node 宿主的结构化对象流。
+  // fetch/Static Assets 返回的不可变 headers 才克隆 Response(其 body 是原生流)。
+  try {
+    apply(res.headers)
+    return res
+  } catch {
+    const headers = new Headers(res.headers)
+    apply(headers)
+    return new Response(res.body, { status: res.status, statusText: res.statusText, headers })
+  }
 }
 
 /**
@@ -426,6 +464,7 @@ async function remotePassthroughIfMatch(
   // 必须 await(而非裸 return async promise):裸返回时其 reject 会在链接那一 tick 被
   // workerd/miniflare 误报为 unhandled rejection,即便 runHandler 最终 catch(同 GET 通配注释)。
   return await passthroughRemote({
+    actor: { keyId: ctx.keyId, owner: ctx.owner, traceId: ctx.traceId },
     config: node.config,
     nodePath: node.path,
     requestPath,
@@ -1164,6 +1203,14 @@ export function createTbApp(deps: TbAppDeps): Hono<{ Variables: Vars }> {
       }),
     )
 
+  // 放在全部路由之前,确保宿主中立 app 的 API、Dashboard、错误响应都覆盖安全头。
+  app.use('*', async (c, next) => {
+    await next()
+    const response = c.res
+    const secured = withSecurityHeaders(response)
+    if (secured !== response) c.res = secured
+  })
+
   // GET /healthz → 200 JSON,树外免认证。version 单一真源:宿主 package.json。
   app.get('/healthz', c => c.json({ healthy: true, version: deps.version }))
 
@@ -1198,7 +1245,10 @@ export function createTbApp(deps: TbAppDeps): Hono<{ Variables: Vars }> {
       if (got === null) throw TBError.notFound('not found')
       // core 的最小流形状与全局 ReadableStream 结构兼容(Workers/Node 皆然)。
       return new Response(got.body as unknown as ReadableStream, {
-        headers: { 'content-type': got.meta.contentType ?? 'application/octet-stream' },
+        headers: {
+          'content-type': got.meta.contentType ?? 'application/octet-stream',
+          'cache-control': 'private, no-store',
+        },
       })
     }),
   )
@@ -1267,7 +1317,7 @@ export function createTbApp(deps: TbAppDeps): Hono<{ Variables: Vars }> {
           encryptionKey: encKey,
           nodePath: payload.p,
           serverUrl: node.config.url,
-          origin: new URL(c.req.url).origin,
+          origin: deps.canonicalOrigin ?? new URL(c.req.url).origin,
           code,
           codeVerifier: payload.v,
           // 本地回调通道(CLI --local):兑换必须复用授权时的 redirect_uri。
@@ -1971,7 +2021,7 @@ export function createTbApp(deps: TbAppDeps): Hono<{ Variables: Vars }> {
       encryptionKey: encKey,
       nodePath: path,
       serverUrl: node.config.url,
-      origin: new URL(c.req.url).origin,
+      origin: deps.canonicalOrigin ?? new URL(c.req.url).origin,
       ...(redirectUri !== undefined ? { redirectUri } : {}),
     })
     return new Response(JSON.stringify(result), {

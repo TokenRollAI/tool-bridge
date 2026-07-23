@@ -16,14 +16,22 @@ export interface RefTokenPayload {
   p: string
 }
 
+/**
+ * HMAC 密钥:SHA-256(域前缀 + TB_SECRET_ENCRYPTION_KEY)派生 32 字节。
+ * 域前缀做密钥域分离——与 SecretStore 的 AES-GCM 主密钥、OAuth state 密钥各自独立,
+ * 避免同一密钥材料横跨多种密码学用途(与 oauth.ts stateCryptoKey 同构)。
+ * 注意:改动派生方式会使此前签发、仍在有效期内的 ref token 失效;ref token TTL 短且
+ * 可自愈(重新取 relay URL),可接受。
+ */
 async function hmacKey(secret: string): Promise<CryptoKey> {
-  return crypto.subtle.importKey(
-    'raw',
-    new TextEncoder().encode(secret),
-    { name: 'HMAC', hash: 'SHA-256' },
-    false,
-    ['sign', 'verify'],
+  const digest = await crypto.subtle.digest(
+    'SHA-256',
+    new TextEncoder().encode(`tb-ref-token:${secret}`),
   )
+  return crypto.subtle.importKey('raw', digest, { name: 'HMAC', hash: 'SHA-256' }, false, [
+    'sign',
+    'verify',
+  ])
 }
 
 export async function signRefToken(payload: RefTokenPayload, secret: string): Promise<string> {
