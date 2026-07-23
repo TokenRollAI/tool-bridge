@@ -7,7 +7,7 @@
 ## must/ — 每轮必读的复发性上下文
 
 - [must/project-brief.md](must/project-brief.md) — 项目定义、知识真源、七个 User Case、工程纪律(含选型表)、术语表精选。
-- [must/current-state.md](must/current-state.md) — 部署资源、代码现状(六包 + 测试数)、常用命令、.env 凭据状态表、工具链、未竟事项路线图(易变,每轮更新;含 2026-07-22 CLI 参数契约本地状态)。
+- [must/current-state.md](must/current-state.md) — 部署资源、代码现状(六包 + 测试数)、常用命令、.env 凭据状态表、工具链、未竟事项路线图(易变,每轮更新;含 2026-07-24 安全报告复核与本地修复状态)。
 
 ## overview/ — 项目形态与边界
 
@@ -26,7 +26,7 @@
 ## guides/ — 一事一篇的工作流
 
 - [guides/deploy-and-verify.md](guides/deploy-and-verify.md) — 从零到线上验证:`pnpm verify` → 先查 Cloudflare deployments/versions → 必要时 `pnpm deploy:all` → curl/smoke;Dashboard 另做 HTML/chunk hash 与 SPA 深链接验收,含自动部署去重和瞬时网络故障的幂等重试。
-- [guides/workers-kv-pitfalls.md](guides/workers-kv-pitfalls.md) — Workers/KV 生产坑:KV list+get 最终一致窗口(须跳 null)、子请求上限约束逐 key get、吊销传播实测 0.3s、vitest-pool-workers 0.18 API 变更。
+- [guides/workers-kv-pitfalls.md](guides/workers-kv-pitfalls.md) — Workers/KV 生产坑:KV list+get 最终一致窗口(须跳 null)、子请求上限约束逐 key get、吊销通常约 60s 但可能更久(历史实测 0.3s 仅作样本)、vitest-pool-workers 0.18 API 变更。
 - [guides/do-websocket-hibernation.md](guides/do-websocket-hibernation.md) — DO hibernation WS 生产坑:边缘 ~100s 空闲掐断须客户端心跳保活、唤醒后内存状态机须从 storage 恢复(restoreReady)、本地 miniflare 测不出须线上跨休眠窗口验证。**改设备通道前必读。**
 - [guides/mcp-upstream-pitfalls.md](guides/mcp-upstream-pitfalls.md) — MCP 上游生产坑:会话复用机制(mcpsession KV 无 TTL + 400/404 失效信号)、不合规上游对过期会话回 200+空列表(实测 MetaMCP)与空列表防御、需自定义认证头的上游(飞书官方 MCP:X-Lark-MCP-\* 原样注入 + 必带工具白名单头)、生产可重跑排查手法(refresh=1 区分缓存层、幂等 update 强制重握手、塞伪 session 复现)。**挂载/排查 mcp 上游前必读。**
 - [guides/docker-host.md](guides/docker-host.md) — Docker/Node 宿主一篇通:env 变量面、`/data` 布局、本地开发与 Docker 验收命令、与 CF 宿主行为差异表、已知限制、`server-v*` 发布。**改 server 包或做 Docker 部署前必读。**
@@ -45,6 +45,7 @@
 - [memory/reflections/2026-07-16-skillhub-kind.md](memory/reflections/2026-07-16-skillhub-kind.md) — skillhub 新 kind(第八个 HTBP kind:Agent Skill 仓库;平台自带 R2 零外部凭证、几乎全复用 context 存储引擎、加 kind 照 tool kind 走一遍、`~skill` 保留段 vs kind 正交)。
 - [memory/reflections/2026-07-22-cli-argument-contract.md](memory/reflections/2026-07-22-cli-argument-contract.md) — CLI 参数契约审查与修复(解析/本地语义/服务端安全三层、SK 历史脏值 fail closed、同名 flag 语义、分页知识边界、三入口能力矩阵)。
 - [memory/reflections/2026-07-22-cli-0.8.0-release-prep.md](memory/reflections/2026-07-22-cli-0.8.0-release-prep.md) — CLI 0.8.0 发布准备(public artifact 版本边界、重建产物版本证据、fail-fast build→version→pack 验证链)。
+- [memory/reflections/2026-07-24-security-report-remediation.md](memory/reflections/2026-07-24-security-report-remediation.md) — 安全报告复核、纵深修复与提交前纠偏(XSS/CSP、Workers bootstrap、KV 吊销语义、Secret Reference 授权遗漏、长连接重验 TOCTOU 与多宿主差异)。
 
 ## 路由提示
 
