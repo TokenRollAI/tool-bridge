@@ -28,6 +28,7 @@
 | Plugin System | 自定义 Provider 注册与生命周期(探活/契约校验/信封传输) | `plugin/` | gateway `providers/pluginClient|pluginTool|pluginContext` + builtin `system/plugin`;首个 in-repo plugin 参考实现:`packages/plugin-feishu`(CF Worker,飞书 TAT 自动换发) |
 | Dashboard | `~help` 通用渲染器 + 管理表单,**无专用后端** | — | `packages/dashboard`(React SPA)经 gateway Static Assets 挂 `/ui` |
 | 部署 | CF 与 Docker 两条路径产出同一棵树 | — | CF:`scripts/provision.mjs` + wrangler;Docker/Node:`packages/server`(SQLite/FS/ws DeviceHub)+ 根 Dockerfile,见 [../guides/docker-host.md](../guides/docker-host.md) |
+| 设备边车 | pod 部署即反向注册到 `device/`:常驻 `tb connect` 的 tb-agent 镜像(k8s sidecar) | — | `packages/cli/Dockerfile` → `ghcr.io/tokenrollai/tool-bridge/tb-agent`(与 CLI 同源同版本),见 [../guides/k8s-device-sidecar.md](../guides/k8s-device-sidecar.md) |
 
 ## 依赖方向要点
 

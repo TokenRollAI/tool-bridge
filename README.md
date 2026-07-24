@@ -125,6 +125,7 @@ tb ctx rm ctx/docs notes/hello.md
 tb connect --allow 'echo' --allow 'uname' --fs ~/shared   # 长驻;shell 白名单 + fs 暴露
 tb device ls                                              # 另一终端:看设备在线状态
 tb call device/<id>/shell --tool exec --args '{"command":"echo hi"}'
+# k8s pod 部署即注册:用 tb-agent 边车镜像,见 llmdoc/guides/k8s-device-sidecar.md
 
 # ── 联邦另一个 HTBP 服务 ─────────────────────────────
 tb server add fed/team-b --remote-url https://tb.team-b.example.com --sk-ref team-b-sk
@@ -223,6 +224,10 @@ tb login && tb status --json
 ### Docker(自部署,路线图)
 
 同一套核心经 Node 宿主(SQLite + 本地 FS)以单容器运行、`/data` 卷持久化——宿主中立装配面(SDK 同款)已就绪,镜像在路线图中。也可以现在就用 SDK + `@hono/node-server` 自行拉起一个 Node 实例(见上文 SDK 一节)。
+
+### k8s 设备边车
+
+要让 ACK / k8s 里的 pod **部署即被发现**,用 tb-agent 边车镜像(`ghcr.io/tokenrollai/tool-bridge/tb-agent`,与 CLI 同源同版本)常驻 `tb connect`,把 pod 反向挂到 `device/` 下。完整原理、受限 SK 签发与可 apply 的清单见 [k8s-device-sidecar 指南](llmdoc/guides/k8s-device-sidecar.md)。
 
 ## 仓库结构(pnpm monorepo)
 
