@@ -196,7 +196,7 @@ describe('mcp 托管 OAuth:授权全链路(默认离线,上游为 fetch mock)', 
     expect(authUrl.searchParams.get('client_id')).toBe('dcr-client-1')
     expect(authUrl.searchParams.get('code_challenge_method')).toBe('S256')
     expect(authUrl.searchParams.get('redirect_uri')).toBe(
-      'https://tool-bridge.fantacy.live/~oauth/callback',
+      'https://tool-bridge.pdjjq.org/~oauth/callback',
     )
     const state = authUrl.searchParams.get('state')
     expect(state).toBeTruthy()

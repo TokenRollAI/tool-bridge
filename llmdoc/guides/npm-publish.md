@@ -49,7 +49,7 @@
 ### Dashboard 有两个独立发布面
 
 - `dashboard-v<版本>` 触发 `publish-dashboard.yml`,只证明 `@tool-bridge/dashboard` 已发布到 npm;证据是 Actions run 成功 + `npm view @tool-bridge/dashboard dist-tags.latest` 命中目标版本。
-- 生产 `https://tool-bridge.fantacy.live/ui/` 是 Gateway Worker 的 Static Assets,不从 npm dist-tag 自动更新;它随承载 Gateway 的部署流水线生效。当前项目在仓库外配置 Cloudflare Git 集成,`main` 推送后可能已经自动部署,仓库内没有对应 deploy workflow。
+- 生产 `https://tool-bridge.pdjjq.org/ui/` 是 Gateway Worker 的 Static Assets,不从 npm dist-tag 自动更新;它随承载 Gateway 的部署流水线生效。当前项目在仓库外配置 Cloudflare Git 集成,`main` 推送后可能已经自动部署,仓库内没有对应 deploy workflow。
 - 因此 Dashboard 发版必须分别报告「Dashboard npm 版本」与「生产 Worker version + `/ui` 产物身份」。`/healthz.version` 属于 Gateway 运行时,不能用来判断 Dashboard npm/静态资产版本。生产侧的部署去重、HTML/chunk hash 与 smoke 验收见 [deploy-and-verify.md](deploy-and-verify.md)。
 
 ## 新增可发布包首发(两段式)

@@ -40,7 +40,7 @@ R2 bucket 'tb-r2' exists — skip
 provision done.
 …
 Deployed tb-gateway triggers (…)
-  https://tool-bridge.fantacy.live (custom domain)
+  https://tool-bridge.pdjjq.org (custom domain)
 Current Version ID: …
 ```
 
@@ -49,10 +49,10 @@ Current Version ID: …
 ### 3. 手工探活:curl
 
 ```sh
-curl -s https://tool-bridge.fantacy.live/healthz
+curl -s https://tool-bridge.pdjjq.org/healthz
 # → {"healthy":true,"version":"<gateway-version>"}
 curl -s -H "Authorization: Bearer $TB_SK" -H 'Accept: text/plain' \
-  https://tool-bridge.fantacy.live/~help | head -1
+  https://tool-bridge.pdjjq.org/~help | head -1
 # → htbp 0.1
 ```
 
@@ -75,7 +75,7 @@ rg -o 'assets/[A-Za-z0-9._-]+\.(js|css)' packages/dashboard/dist/index.html | so
 ### 5. 冒烟脚本:`TB_BASE_URL=… pnpm smoke`
 
 ```sh
-TB_BASE_URL=https://tool-bridge.fantacy.live pnpm smoke
+TB_BASE_URL=https://tool-bridge.pdjjq.org pnpm smoke
 ```
 
 **注意:smoke 不读 `.env`**,必须显式传 `TB_BASE_URL`(或 `tsx scripts/smoke.ts <baseUrl>`)。脚本只做只读探测(healthz + `~help`)。
@@ -88,7 +88,7 @@ ok  GET /~help (no SK) → 401 TBError permission_denied
 ok  GET /~help (with SK) → 200 text/markdown (default representation)
 ok  GET /~help (Accept: text/plain) → 200 first line "htbp 0.1"
 
-smoke passed against https://tool-bridge.fantacy.live
+smoke passed against https://tool-bridge.pdjjq.org
 ```
 
 ### 6. CLI 验证:`tb status --json`

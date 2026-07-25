@@ -31,7 +31,7 @@
 
 | 资源 | 名称/地址 | 备注 |
 |---|---|---|
-| Worker | `tb-gateway` @ https://tool-bridge.fantacy.live | custom domain(zone fantacy.live);`wrangler.jsonc` 已写死 `account_id`;DO `DeviceSession` 绑定 `TB_DEVICE`(migration v1,sqlite);Dashboard 经 Static Assets 挂 `/ui`(`run_worker_first: true`);Dashboard 0.6.0 的上线证据为 Worker version 44(`eb4e8daf-7b5d-44ff-a91b-5b8074348854`),后续内容等价部署不改变该发布事实;运行时 `/healthz` 版本属 Gateway 0.4.0,Static Assets 中 Dashboard 为 0.6.0(两者版本归属不可混用) |
+| Worker | `tb-gateway` @ https://tool-bridge.pdjjq.org | custom domain(zone pdjjq.org);`wrangler.jsonc` 已写死 `account_id`;DO `DeviceSession` 绑定 `TB_DEVICE`(migration v1,sqlite);Dashboard 经 Static Assets 挂 `/ui`(`run_worker_first: true`);Dashboard 0.6.0 的上线证据为 Worker version 44(`eb4e8daf-7b5d-44ff-a91b-5b8074348854`),后续内容等价部署不改变该发布事实;运行时 `/healthz` 版本属 Gateway 0.4.0,Static Assets 中 Dashboard 为 0.6.0(两者版本归属不可混用) |
 | Worker secrets | `TB_BOOTSTRAP_ADMIN_SK` / `TB_SECRET_ENCRYPTION_KEY` | 已 `wrangler secret put`;前者是 Admin SK 明文(引导时 sha256 入库) |
 | KV | `tb-kv`(id `d18c93de33cf4ba2b1fbf7d26fd742f1`) | 绑定名 `TB_KV`;id 已回填 wrangler.jsonc |
 | R2 | `tb-r2` | 绑定名 `TB_R2` |
@@ -64,7 +64,7 @@
 - `pnpm deploy:all` — 幂等 provision + dashboard build + 部署 gateway。
 - `pnpm --filter @tool-bridge/server start` — 本机起 Node 宿主(默认 :8787,数据落 ./data;env 面见 [../guides/docker-host.md](../guides/docker-host.md))。
 - `docker build -t tool-bridge . && docker run -p 8787:8787 -v tbdata:/data …` — Docker 路径,验收命令全套见 [../guides/docker-host.md](../guides/docker-host.md)。
-- `TB_BASE_URL=https://tool-bridge.fantacy.live pnpm smoke` — 线上冒烟(**smoke 不读 .env,须显式传 TB_BASE_URL 与 TB_SK**)。
+- `TB_BASE_URL=https://tool-bridge.pdjjq.org pnpm smoke` — 线上冒烟(**smoke 不读 .env,须显式传 TB_BASE_URL 与 TB_SK**)。
 - `npx tsx scripts/verify-revocation.ts` / `verify-device.ts` / `verify-plugin.ts` — 可重跑生产验收(需 TB_BASE_URL + TB_SK,消耗真实资源)。
 - `TB_TEST_MCP_URL=http://127.0.0.1:39002/mcp TB_ALLOW_INSECURE_HTTP=true pnpm --filter @tool-bridge/gateway test -- tool.integration.test.ts` — opt-in MCP E2E(先 `ECHO_MCP_PORT=39002 pnpm --filter @tool-bridge/gateway echo-mcp` 起兜底上游)。
 - `TB_TEST_LIVE_HTTP=1 pnpm --filter @tool-bridge/gateway test -- tool.integration.test.ts` — opt-in 真实 HTTP 上游(postman-echo)。
@@ -77,7 +77,7 @@
 |---|---|---|
 | `CLOUDFLARE_ACCOUNT_ID` | 已配置 | DJJ 账户;验证用 `wrangler whoami`,勿用 `/user/tokens/verify` |
 | `CLOUDFLARE_API_TOKEN` | 空缺(注释掉) | 预期内:本地开发靠 wrangler OAuth,CI 时才需要 |
-| `TB_DOMAIN` / `TB_BASE_URL` / `TB_NAME_PREFIX` | 已配置 | zone fantacy.live;生产 BaseURL;资源命名前缀(=tb) |
+| `TB_DOMAIN` / `TB_BASE_URL` / `TB_NAME_PREFIX` | 已配置 | zone pdjjq.org;生产 BaseURL;资源命名前缀(=tb) |
 | `TB_SECRET_ENCRYPTION_KEY` | 已配置(32B base64url) | SecretStore env-only 信任根;已同步 `wrangler secret put` |
 | `TB_SK` | **已配置(= Admin SK)** | CLI/smoke/verify-* 脚本的默认凭证 |
 | `TB_TEST_MCP_URL` / `TB_TEST_MCP_BEARER` | 空缺(注释掉) | opt-in MCP 测试用;见下方兜底 |

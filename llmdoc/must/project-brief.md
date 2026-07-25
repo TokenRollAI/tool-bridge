@@ -6,7 +6,7 @@
 
 tool-bridge 是一个"自描述、可反向注册、协议开放的工具与上下文网关"——任何会 HTTP fetch 的 Agent,凭一个 Secret Key + 一个 BaseURL,就能发现并使用一个组织的全部工具、上下文与设备。产品形态 = 一棵自描述的 HTBP 树 + 围绕它的注册/鉴权/SDK/管理面;Agent、CLI、Dashboard 三类消费者共用同一入口。
 
-本仓库是 v1(私有仓库 TokenRollAI/tool-bridge)的重写。初步实现已完成并上线(生产 https://tool-bridge.fantacy.live);v1 可复用资产与重写动机见 [../reference/v1-lessons.md](../reference/v1-lessons.md)。
+本仓库是 v1(私有仓库 TokenRollAI/tool-bridge)的重写。初步实现已完成并上线(生产 https://tool-bridge.pdjjq.org);v1 可复用资产与重写动机见 [../reference/v1-lessons.md](../reference/v1-lessons.md)。
 
 ## 知识真源
 

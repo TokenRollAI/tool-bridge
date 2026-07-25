@@ -27,17 +27,11 @@ export interface Env {
   TB_DEVICE: DurableObjectNamespace<DeviceSession>
   /** 设备断线后未重连的回收秒数(缺省 24h)。 */
   TB_DEVICE_RECLAIM_SEC?: string
-  /** 飞书登录:签发 key 有效期秒(缺省 90 天)。 */
-  TB_FEISHU_LOGIN_KEY_TTL_SEC?: string
-  /** 飞书登录:SecretStore 中 {app_id,app_secret} 的引用名(缺省复用 feishu plugin 的 "feishu-app")。设置后启用 /login。 */
-  TB_FEISHU_LOGIN_SECRET_REF?: string
   /** 本实例 X-TB-Via 标识(缺省用入站 host 派生)。 */
   TB_INSTANCE_ID?: string
   TB_KV: KVNamespace
   /** X-TB-Via 跳数上限(默认 4)。 */
   TB_MAX_HOPS?: string
-  /** meego 自动绑定用的空间 projectKey(缺省 → 跳过 meego 绑定)。 */
-  TB_MEEGO_PROJECT_KEY?: string
   TB_R2: R2Bucket
   /** r2 presign 凭证链的 env 段(SecretStore 'r2-presign' 优先)。 */
   TB_R2_ACCESS_KEY_ID?: string
@@ -163,15 +157,6 @@ function depsFromEnv(env: Env): TbAppDeps {
   if (refThreshold !== undefined) deps.refThresholdBytes = refThreshold
   const refTtl = positiveIntEnv(env.TB_REF_TTL_SEC)
   if (refTtl !== undefined) deps.refTtlSec = refTtl
-  // 飞书登录:配了 secret ref 才启用(缺省不开)。
-  if (env.TB_FEISHU_LOGIN_SECRET_REF !== undefined && env.TB_FEISHU_LOGIN_SECRET_REF !== '') {
-    deps.feishuLoginSecretRef = env.TB_FEISHU_LOGIN_SECRET_REF
-  }
-  const loginTtl = positiveIntEnv(env.TB_FEISHU_LOGIN_KEY_TTL_SEC)
-  if (loginTtl !== undefined) deps.feishuLoginKeyTtlSec = loginTtl
-  if (env.TB_MEEGO_PROJECT_KEY !== undefined && env.TB_MEEGO_PROJECT_KEY !== '') {
-    deps.meegoProjectKey = env.TB_MEEGO_PROJECT_KEY
-  }
   return deps
 }
 
