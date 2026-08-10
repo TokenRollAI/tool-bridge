@@ -22,11 +22,17 @@
   零差异的干净工作区执行 `pnpm deploy:all`,再以 admin / narrow 两把生产 SK 运行
   `TB_BASE_URL=… TB_SK=… TB_MCP_NARROW_SK=… pnpm verify:mcp`。属外向动作且当前 Phase 3
   代码尚在功能分支,待用户授权及合并;**不构成 Phase 4 编码依赖**。生产证据前项 5 不勾选。
+- **P4-1 · Phase 4 项 1 的「真实 D1 provision + 部署」半边** —— `TB_SEARCH` 绑定、D1
+  幂等 provision 与隔离回归已在 Round 19 完成,Wrangler dry-run 也成功识别 D1 binding;
+  尚需干净主分支上对真实账户连续运行两次 `node scripts/provision.mjs`(确认只创建一次
+  `tb-search`)并执行 `pnpm deploy:all`。属生产资源创建/部署外向动作,待用户授权;**D1 绑定
+  与本地 Miniflare 已就位,不构成后续 Search 编码依赖**。真实证据前项 1 不勾选。
 
 ## 当前状态
 - 当前 Phase:**Phase 4 — C:Search 0+1**(Round 19 起;Phase 3 可做项已清空,部署半边见 P3-1)
 - Phase 3 已勾选:项 1(官方 MCP 测试 client + 本地 initialize,Round 14)、项 2(认证后的动态 tools/list + tools/call,Round 15)、项 3(scope 收窄钉死,Round 16)、项 4(三入口对等审计,Round 17)
 - Phase 3 待办:**仅剩待授权的外向动作** — 项 5 已完成生产脚本与全量回归,真实部署/生产 MCP smoke → P3-1
+- Phase 4 代码进度:项 1 的 binding/provision/test/dry-run 半边已完成(Round 19),真实 provision/deploy → P4-1;项 2 起可继续
 - Phase 2 已勾选:项 1(OperationRegistry)、项 2(Plugin v2 多 export,Round 13 补齐三入口对等后成立)、项 3(Context 按 handler 推导能力)、项 4(`@tool-bridge/plugin-sdk` 可发布)、项 5(样例 plugin 双 export)、项 6(删净 legacy 面)
 - Phase 2 待办(**全部为待授权的外向动作**):项 7 飞书重写复验(代码已完成,只差生产实调 → P2-1)/ 项 8 部署上线
 - Phase 1(代码完成,部署挂起见 PENDING)
@@ -34,7 +40,7 @@
 - 未勾选:项 6(部署解冻 smoke)—— 被 P1-1 / P1-2 卡住,见上
 - 已提交:`4e59750` core 原语 / `3867a30` 宿主接线(四个阻断项)/ `a9fcba4` lockfile / `3b42eda` 规划文档
 - Blockers(从 DOR.md 继承,不阻塞全局开工,只缩小对应 Phase 可推进范围):
-  - **C-1**(Phase 4):D1 绑定与 provision 幂等分支尚未建立(`packages/gateway/wrangler.jsonc` 无 `d1_databases`、`scripts/provision.mjs` 无 D1 分支)。属 Phase 4 第一个 DoD 项,不阻塞 Phase 1/2/3。
+  - ~~**C-1**(Phase 4):D1 绑定与 provision 幂等分支尚未建立。~~ **代码 blocker 已解决**(Round 19):`TB_SEARCH` D1 binding + 幂等 provision + 隔离回归 + Wrangler deploy dry-run 均就位;真实账户 provision/deploy 仅作为流程动作挂 P4-1。
   - ~~**E-1**(Phase 3):缺一个 MCP client 做 tools/list + tools/call 验收。~~ **已解决**(Round 14):官方 `Client` + `StreamableHTTPClientTransport` 已经真实 `SELF.fetch` 连本地 endpoint 完成 initialize;Round 15 为避免与树节点冲突,把最初的 `/mcp` 纠正为保留控制段 `/~mcp`,并复用同一 client 验收 list/call。
 
 ## 开跑提示
@@ -339,3 +345,16 @@
   - `pnpm verify` → 9 个 workspace typecheck + 全仓 lint + **1207 passed / 7 skipped**(core 728 + plugin-sdk 22 + cli 239 + sdk 19 + plugin-feishu 9 + gateway 158 + server 32),退出码 0。
 - 勾选:无。Phase 3 项 5 的本地代码/回归半边已完成,但按证据纪律在 `deploy:all` 与生产 `verify:mcp` 成功前保持未勾。
 - 遗留:P3-1 挂起且不构成代码依赖,按状态机进入 Phase 4。下一轮 = Phase 4 项 1(D1 binding + provision 幂等),先加载 Cloudflare/Wrangler 指南并解决 blocker C-1。
+
+## Round 19 — 2026-08-11
+- 目标:Phase 4 DoD 项 1 — 建立 D1 binding 与 provision 幂等分支,解除代码 blocker C-1;真实资源创建/部署按外向动作纪律判断。
+- 动作:
+  - 先加载 Cloudflare/Wrangler skill,以仓库锁定的 Wrangler `4.107.0` 的 `d1 list/create --help`、本地 config schema 与 CLI 实现核对当前契约:`d1 list --json` 返回含 `name` / `uuid` 的数组;在线文档检索端点返回 404,未据旧知识猜参数。
+  - `wrangler.jsonc` 新增 `TB_SEARCH` / `tb-search` D1 binding 与合法 UUID 占位,Workers `Env` 同步声明 `D1Database`;`provision.mjs` 新增 `${TB_NAME_PREFIX}-search` 的 list→存在则同步 ID/skip→create→重新 list→正则回填 `database_id`。回填保持 JSONC 注释,找不到 binding 时 fail closed。
+  - 增加根 `test:provision`:在临时目录生成假 Wrangler 与临时 config,真实 spawn `node scripts/provision.mjs` 两次,验证 KV/R2/D1 各只 create 一次、D1 list 三次、KV/D1 ID 均回填;纳入 `pnpm verify` 的 unit 阶段。未接触真实 Cloudflare 账户。
+- 验证:
+  - `pnpm test:provision` → **1 passed**,二次运行 D1 create 计数严格为 1。
+  - `pnpm --filter @tool-bridge/gateway test` → **158 passed / 6 skipped**,证明 Miniflare 可从新配置启动本地 D1 binding;gateway typecheck 与目标 eslint、`git diff --check` 均退出码 0。
+  - `pnpm --filter @tool-bridge/dashboard build` → Vite production build 成功;`pnpm --filter @tool-bridge/gateway exec wrangler deploy --dry-run --outdir <tmp>` → bundle 成功且绑定清单明确包含 `env.TB_SEARCH (tb-search) D1 Database`,未上传。
+- 勾选:无。项 1 的代码/隔离幂等/dry-run 半边完成并解除 C-1,但真实账户二次 provision 与生产 deploy 证据前保持未勾。
+- 遗留:P4-1 挂起且不构成代码依赖。下一轮 = Phase 4 项 2(`~search` 协议保留段 + `~describe` capability + mode 拒绝契约),先同步 protocol-contract 与 HTBP Draft,再补 gateway 契约测试。

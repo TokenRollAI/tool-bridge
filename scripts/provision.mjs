@@ -1,16 +1,17 @@
 #!/usr/bin/env node
 import { readFileSync, writeFileSync } from 'node:fs'
 /**
- * 幂等 provision:创建 KV namespace 与 R2 bucket(存在即跳过)。名称从 TB_NAME_PREFIX 派生。
+ * 幂等 provision:创建 KV namespace、R2 bucket 与 D1 search database(存在即跳过)。
+ * 名称从 TB_NAME_PREFIX 派生。
  *
  * 用成熟 CLI(wrangler)完成,不手写 CF API 调用。凭据走 wrangler OAuth
  * 或 CLOUDFLARE_API_TOKEN(见 .env)。**本脚本由主协调者在部署前执行,worker 不运行它。**
  *
- * 完成后需把新建 KV namespace 的 id 回填到 packages/gateway/wrangler.jsonc 的 TB_KV.id。
+ * 完成后把新建 KV / D1 的 id 回填到 packages/gateway/wrangler.jsonc。
  */
 import { execFileSync } from 'node:child_process'
+import { join, resolve } from 'node:path'
 import { parseEnv } from 'node:util'
-import { join } from 'node:path'
 
 const root = join(import.meta.dirname, '..')
 
@@ -27,6 +28,11 @@ const apiToken = env.CLOUDFLARE_API_TOKEN || process.env.CLOUDFLARE_API_TOKEN
 
 const kvTitle = `${prefix}-kv`
 const r2Bucket = `${prefix}-r2`
+const d1Name = `${prefix}-search`
+const wranglerPath = resolve(
+  root,
+  process.env.TB_PROVISION_WRANGLER_CONFIG ?? join('packages', 'gateway', 'wrangler.jsonc'),
+)
 
 const childEnv = { ...process.env }
 if (accountId) childEnv.CLOUDFLARE_ACCOUNT_ID = accountId
@@ -42,17 +48,31 @@ function wrangler(args, { capture = false } = {}) {
   })
 }
 
-/** create 分支专用:重新 list 取新 id,回填 wrangler.jsonc 的 TB_KV.id(保留注释/结构)。 */
-function backfillKvId(id) {
-  const wranglerPath = join(root, 'packages', 'gateway', 'wrangler.jsonc')
+/** 保留 JSONC 注释/结构,只替换目标 binding 的 id。 */
+function backfillId(pattern, id, label) {
   const src = readFileSync(wranglerPath, 'utf8')
-  const next = src.replace(/("binding":\s*"TB_KV",\s*"id":\s*")[^"]*(")/, `$1${id}$2`)
+  if (!pattern.test(src)) {
+    throw new Error(`could not locate ${label} in ${wranglerPath}`)
+  }
+  const next = src.replace(pattern, `$1${id}$2`)
   if (next === src) {
-    console.warn(`warn: could not locate TB_KV.id in ${wranglerPath}; write id=${id} manually`)
+    console.log(`${label} already points to id=${id}`)
     return
   }
   writeFileSync(wranglerPath, next)
-  console.log(`已回填 TB_KV.id=${id} → packages/gateway/wrangler.jsonc`)
+  console.log(`已回填 ${label}=${id} → ${wranglerPath}`)
+}
+
+function backfillKvId(id) {
+  backfillId(/("binding":\s*"TB_KV",\s*"id":\s*")[^"]*(")/, id, 'TB_KV.id')
+}
+
+function backfillD1Id(id) {
+  backfillId(
+    /("binding":\s*"TB_SEARCH"[\s\S]*?"database_id":\s*")[^"]*(")/,
+    id,
+    'TB_SEARCH.database_id',
+  )
 }
 
 function ensureKv() {
@@ -65,6 +85,7 @@ function ensureKv() {
   }
   const existing = list.find(ns => ns.title === kvTitle)
   if (existing) {
+    backfillKvId(existing.id)
     console.log(`KV namespace '${kvTitle}' exists (id=${existing.id}) — skip`)
     return existing.id
   }
@@ -103,7 +124,34 @@ function ensureR2() {
   wrangler(['r2', 'bucket', 'create', r2Bucket])
 }
 
+function listD1() {
+  const out = wrangler(['d1', 'list', '--json'], { capture: true })
+  const parsed = JSON.parse(out)
+  if (!Array.isArray(parsed)) throw new Error('`wrangler d1 list --json` did not return an array')
+  return parsed
+}
+
+function ensureD1() {
+  const list = listD1()
+  const existing = list.find(db => db?.name === d1Name && typeof db?.uuid === 'string')
+  if (existing) {
+    backfillD1Id(existing.uuid)
+    console.log(`D1 database '${d1Name}' exists (id=${existing.uuid}) — skip`)
+    return existing.uuid
+  }
+
+  console.log(`creating D1 database '${d1Name}'...`)
+  wrangler(['d1', 'create', d1Name])
+  const created = listD1().find(db => db?.name === d1Name && typeof db?.uuid === 'string')
+  if (!created) {
+    throw new Error(`created D1 '${d1Name}' but could not read its new id`)
+  }
+  backfillD1Id(created.uuid)
+  return created.uuid
+}
+
 console.log(`provisioning with prefix '${prefix}'${accountId ? ` (account ${accountId})` : ''}`)
 ensureKv()
 ensureR2()
+ensureD1()
 console.log('provision done.')

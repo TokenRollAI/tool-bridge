@@ -45,6 +45,8 @@ export interface Env {
   TB_REF_TTL_SEC?: string
   /** remote baseUrl 的 host 后缀白名单(逗号分隔;空 = 拒一切 remote)。 */
   TB_REMOTE_ALLOWLIST?: string
+  /** FTS5/trigram 工具搜索索引。 */
+  TB_SEARCH: D1Database
   TB_SECRET_ENCRYPTION_KEY?: string
   /** opt-in 集成测试:真实 MCP echo server 的 URL(仅测试注入)。 */
   TB_TEST_MCP_URL?: string

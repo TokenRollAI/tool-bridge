@@ -29,7 +29,7 @@ exports `.` / `./tbApp` / `./bootstrap` / `./deviceHello`(供 SDK 与 server 复
 
 | 文件 | 管什么 |
 |---|---|
-| `app.ts` | Workers Env→deps 适配(入口薄层;规范化 `TB_CANONICAL_ORIGIN`) |
+| `app.ts` | Workers Env→deps 适配(入口薄层;规范化 `TB_CANONICAL_ORIGIN`;声明 `TB_SEARCH: D1Database` binding,搜索数据路径尚未接线) |
 | `tbApp.ts` | **宿主中立 `createTbApp(deps)`**:全局安全头、认证中间件、`~help`/`~tree`/`~skill`/`~describe`/`~register`/`~feedback`(splitFeedback + GET/POST/DELETE 三 handler,权限判定落目标 path)/数据面路由、remote 聚合、两级 `~help` 披露、`enrichHelp`(~help 注入 annotation note + feedback 头部条目,失败降级)、`/ui` 转发、`/~ref`(private/no-store) |
 | `bootstrap.ts` | 首请求惰性引导:Workers 缺 `TB_BOOTSTRAP_ADMIN_SK` fail closed + `system` 七 builtin 物化(promise 防重入 + KV 幂等标志;宿主中立 API 保留随机兼容路径,当前 Node server 仍默认使用并写明文日志,待修;已引导实例升级自动补挂新模块) |
 | `deviceHello.ts` | **宿主中立 `processDeviceHello`**:设备 hello 验证 + 落库的单一真源,DO 与 server DeviceHub 共用(防两宿主树形态漂移) |
@@ -38,7 +38,7 @@ exports `.` / `./tbApp` / `./bootstrap` / `./deviceHello`(供 SDK 与 server 复
 | `refToken.ts` | `$ref` 网关中转的 HMAC token 签发/校验(HMAC 用途域分离) |
 | `providers/` | 全部上游 I/O:`mcp.ts`(SDK Streamable HTTP,会话复用 + 404 重握手一次;auth:'oauth' 挂 `../oauth.ts` 的 authProvider)、`http.ts`、`remote.ts`、`toolCache.ts`、`r2Object.ts`、`s3Object.ts` + `s3Sign.ts`(aws4fetch)、`pluginClient.ts`(`upstreamAuthRef` → resolve 后经 `X-TB-Upstream-Auth` 注入,失败 → unavailable)+ `pluginTool.ts` + `pluginContext.ts` |
 | `test/` | 10 个集成测试(gateway/tool/context/skillhub/device/deviceNodes/plugin/ui/oauth/meta `.integration.test.ts`;meta = annotation + ~feedback 端到端),真实 workerd;`scripts/` 有 echo-mcp / s3-mock / stub-provider 兜底上游 |
-| `wrangler.jsonc` | 绑定 TB_KV / TB_R2 / TB_DEVICE(DO)/ ASSETS(dashboard dist,`run_worker_first`)+ `account_id` + custom domain;production 禁 `workers_dev`/Preview URLs,用 `TB_CANONICAL_ORIGIN` 固定 OAuth callback origin |
+| `wrangler.jsonc` | 绑定 TB_KV / TB_R2 / TB_DEVICE(DO)/ ASSETS(dashboard dist,`run_worker_first`)及 `TB_SEARCH` → `tb-search` D1(`database_id` 占位由 provision 回填)+ `account_id` + custom domain;production 禁 `workers_dev`/Preview URLs,用 `TB_CANONICAL_ORIGIN` 固定 OAuth callback origin |
 
 ## packages/cli — `tb`(npm 发布物)
 
@@ -97,6 +97,6 @@ exports `.` / `./tbApp` / `./bootstrap` / `./deviceHello`(供 SDK 与 server 复
 
 ## scripts/ 与 CI
 
-- `scripts/`:gen-dev-vars.mjs(.env→.dev.vars)、provision.mjs(幂等建 KV/R2)、smoke.ts(只读冒烟)、verify-revocation.ts / verify-device.ts / verify-plugin.ts(可重跑生产验收)。
+- `scripts/`:gen-dev-vars.mjs(.env→.dev.vars)、provision.mjs(幂等建 KV/R2/D1;D1 用 `list --json` 精确 name/uuid,existing 同步 id+skip,create 后 re-list,regex 回填 `TB_SEARCH.database_id`;缺 uuid fail closed)、provision.test.mjs(fake wrangler 连跑两次,根 `test:provision` 验证不重建与 id 回填)、smoke.ts(只读冒烟)、verify-revocation.ts / verify-device.ts / verify-plugin.ts(可重跑生产验收)。
 - `.github/workflows/`:publish-{cli,sdk,gateway,dashboard,server}.yml(tag `<pkg>-v*`,npm Trusted Publishing)+ publish-docker.yml(tag `server-v*`,GHCR 镜像,buildx amd64/arm64)。
 - 仓库根:`Dockerfile`(多阶段 node:22-bookworm→slim,`pnpm --filter @tool-bridge/server --prod deploy --legacy /out`)+ `.dockerignore`。

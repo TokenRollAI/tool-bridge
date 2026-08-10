@@ -27,6 +27,14 @@
   "kv_namespaces": [
     { "binding": "TB_KV", "id": "d18c93de33cf4ba2b1fbf7d26fd742f1" }
   ],
+  // D1:FTS5/trigram 工具搜索索引。database_id 由 scripts/provision.mjs 幂等回填。
+  "d1_databases": [
+    {
+      "binding": "TB_SEARCH",
+      "database_name": "tb-search",
+      "database_id": "00000000-0000-0000-0000-000000000000"
+    }
+  ],
   // R2:context r2 provider 与大对象 $ref。
   "r2_buckets": [
     { "binding": "TB_R2", "bucket_name": "tb-r2" }
