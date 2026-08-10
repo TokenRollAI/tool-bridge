@@ -1,4 +1,10 @@
-import { base64urlEncode, HEADER_TB_UPSTREAM_AUTH } from '@tool-bridge/core'
+import {
+  base64urlEncode,
+  type CallContext,
+  encodeCallContext,
+  HEADER_TB_CONTEXT,
+  HEADER_TB_UPSTREAM_AUTH,
+} from '@tool-bridge/core'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { SELF } from 'cloudflare:test'
 import { clearSessionCache } from '../src/feishuMcp'
@@ -7,10 +13,24 @@ import { clearTatCache } from '../src/tat'
 // plugin-feishu 集成测试:契约面 / envelope 鉴权 / 凭证经 X-TB-Upstream-Auth 传入 /
 // TAT 换发缓存 / 401 强制重换发 / Allowed-Tools 头透传。飞书换发接口与 MCP 上游全部
 // fetch mock,默认离线确定性。测试与 Worker 同 isolate(vitest-pool-workers):可直接清模块级缓存。
+//
+// 协议面(健康检查 / ~describe / ~help / envelope / 鉴权 / 去重 / 凭证解包)现由
+// @tool-bridge/plugin-sdk 提供;这里断言的是**经 wire 的实际行为**,所以重写前后
+// 同一组断言仍然成立 —— 这正是"重写没有偷偷改契约"的证据。
 
 const AUTH_URL = 'https://feishu-auth.mock/tat'
 const MCP_HOST = 'feishu-mcp.mock'
 const PLUGIN_TOKEN = 'tbp_test_token'
+
+/** 平台随每次调用下发的 CallContext(SDK 要求 X-TB-Context 必带)。 */
+const CALLER: CallContext = {
+  keyId: 'k1',
+  owner: 'agent:tester',
+  scopes: [],
+  traceId: 't1',
+  mountPath: 'feishu',
+  exportId: 'actions',
+}
 
 /** 平台注入形态:base64url JSON {app_id,app_secret}。 */
 function upstreamAuth(appId = 'cli_test_app', appSecret = 'test_secret'): string {
@@ -139,6 +159,7 @@ async function envelope(
       'content-type': 'application/json',
       'authorization': `Bearer ${PLUGIN_TOKEN}`,
       'x-tb-request-id': crypto.randomUUID(),
+      [HEADER_TB_CONTEXT]: encodeCallContext(CALLER),
       [HEADER_TB_UPSTREAM_AUTH]: upstreamAuth(),
       ...(init.headers ?? {}),
     },
@@ -169,14 +190,13 @@ describe('契约面(生命周期 GET,不鉴权)', () => {
       ],
     })
 
-    const helpJson = await SELF.fetch('https://plugin.test/~help', {
-      headers: { accept: 'application/json' },
+    // 代理型 export:工具表要凭证才能枚举,`~help` 如实标 dynamic 并给空表,
+    // 不编一份可能过时的清单(真表经 List 取)。
+    const helpJson = await SELF.fetch('https://plugin.test/~help')
+    expect(await helpJson.json()).toEqual({
+      protocolVersion: 'plugin/v2',
+      exports: [{ id: 'actions', dynamic: true, cmds: [] }],
     })
-    const cmds = ((await helpJson.json()) as { cmds: Array<{ name: string }> }).cmds
-    expect(cmds.map(c => c.name).sort()).toEqual(['Call', 'Get', 'List'])
-
-    const helpDsl = await SELF.fetch('https://plugin.test/~help')
-    expect(await helpDsl.text()).toContain('cmd List')
   })
 })
 
@@ -225,16 +245,24 @@ describe('List / Get / Call(TAT 自动换发)', () => {
     expect(upstream.authCalls()).toBe(1) // TAT 缓存余量充足,不再换发
   })
 
-  it('Get:按名取 spec;未知名 → 404', async () => {
+  it('Get 已不是协议动词(平台从不发)→ 400 unknown method,且不打上游', async () => {
     const upstream = feishuMock(TOOLS)
     vi.stubGlobal('fetch', upstream.fetchMock)
 
     const got = await envelope('Get', { name: 'create-doc' })
-    expect(got.status).toBe(200)
-    expect(((await got.json()) as { name: string }).name).toBe('create-doc')
+    expect(got.status).toBe(400)
+    expect(((await got.json()) as { message: string }).message).toContain('unknown method')
+    expect(upstream.fetchMock.mock.calls.length).toBe(0)
+  })
 
-    const missing = await envelope('Get', { name: 'nope' })
-    expect(missing.status).toBe(404)
+  it('Call 缺 name → 400(SDK 统一校验,plugin 不写这段)', async () => {
+    const upstream = feishuMock(TOOLS)
+    vi.stubGlobal('fetch', upstream.fetchMock)
+
+    const bad = await envelope('Call', { args: { title: 'T' } })
+    expect(bad.status).toBe(400)
+    expect(((await bad.json()) as { message: string }).message).toContain('name')
+    expect(upstream.fetchMock.mock.calls.length).toBe(0)
   })
 
   it('Call:结果 ToolResult 原样返回;同 X-TB-Request-Id 重放幂等(不重复打上游)', async () => {

@@ -88,8 +88,12 @@ function invalidArgument(name: string, error: z.ZodError): TBError {
   return new TBError('invalid_argument', `invalid arguments for '${name}': ${detail}`)
 }
 
-/** handler 裸返回值 → ToolResult(已是 ToolResult 形状则原样)。 */
-function toToolResult(value: unknown): ToolResult {
+/**
+ * handler 裸返回值 → ToolResult(已是 ToolResult 形状则原样)。
+ * 导出供代理型工具源复用(如 plugin-sdk 的 proxyTools:上游返回值形状不由我们决定,
+ * 但"裸值要包、已是结果就透传"这条规则必须只有一份)。
+ */
+export function toToolResult(value: unknown): ToolResult {
   if (typeof value === 'object' && value !== null && 'content' in value) {
     return value as ToolResult
   }

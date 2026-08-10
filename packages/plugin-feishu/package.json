@@ -14,7 +14,8 @@
   "dependencies": {
     "@cfworker/json-schema": "^4.1.1",
     "@modelcontextprotocol/sdk": "^1.29.0",
-    "@tool-bridge/core": "workspace:*"
+    "@tool-bridge/core": "workspace:*",
+    "@tool-bridge/plugin-sdk": "workspace:*"
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "^0.18.0",

@@ -267,6 +267,9 @@ importers:
       '@tool-bridge/core':
         specifier: workspace:*
         version: link:../core
+      '@tool-bridge/plugin-sdk':
+        specifier: workspace:*
+        version: link:../plugin-sdk
     devDependencies:
       '@cloudflare/vitest-pool-workers':
         specifier: ^0.18.0

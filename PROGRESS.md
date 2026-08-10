@@ -12,11 +12,16 @@
   属外向不可逆动作,待用户授权。**不构成后续 Phase 的代码依赖。**
 - **P1-2 · Phase 1 遗留的生产验证** —— 跨休眠窗口(≥150s)与真实连接替换竞态须线上验证,
   随 P1-1 部署后一并做(`npx tsx scripts/verify-device.ts`)。
+- **P2-1 · Phase 2 项 7 的「生产复验」半边** —— 飞书 plugin 的**重写已完成并全绿**(Round 12),
+  但 DoD 还要求"重新部署 + 生产 create-doc/fetch-doc/update-doc 实调留证"
+  (`npx tsx scripts/verify-plugin.ts`,需 TB_BASE_URL + TB_SK + 真实飞书凭证)。
+  属外向不可逆动作且依赖生产环境,待用户授权;**不构成后续 Phase 的代码依赖**。
+  按"证据即判据"纪律,项 7 在拿到生产证据前不勾选。
 
 ## 当前状态
 - 当前 Phase:**Phase 2 — B:Plugin SDK / OperationRegistry 地基**(分支 `phase2-plugin-sdk`)
-- Phase 2 已勾选:项 1(OperationRegistry)、项 2(Plugin v2 多 export)、项 3(Context 按 handler 推导能力)、项 4(`@tool-bridge/plugin-sdk` 可发布)
-- Phase 2 待办:项 5 样例双 export / 项 6 删净 legacy 面 / Dashboard export 字段 / `@tool-bridge/plugin-sdk` 可发布 / 项 5 样例 plugin 双 export / 项 6 删净 legacy 面 / 项 7 飞书重写复验(依赖生产,预计 PENDING)/ 项 8 部署(PENDING)
+- Phase 2 已勾选:项 1(OperationRegistry)、项 2(Plugin v2 多 export)、项 3(Context 按 handler 推导能力)、项 4(`@tool-bridge/plugin-sdk` 可发布)、项 5(样例 plugin 双 export)、项 6(删净 legacy 面)
+- Phase 2 待办:项 7 飞书重写复验(**代码已完成**,只差生产实调 → P2-1)/ 项 8 部署上线(外向动作,PENDING)/ Dashboard 挂载表单 `export` 字段(三入口对等缺口)
 - Phase 1(代码完成,部署挂起见 PENDING)
 - 已勾选:项 1(Secret Reference 使用授权,Round 1 → Round 4 补第三写入口后成立)、项 2(DO/Node 连接替换 TOCTOU,Round 2 → Round 4 补 registerPaths 后成立)、项 3(Node/Docker bootstrap fail closed)、项 4(canonical origin 对等)、项 5(`pnpm verify` 全绿)
 - 未勾选:项 6(部署解冻 smoke)—— 被 P1-1 / P1-2 卡住,见上
@@ -211,3 +216,19 @@
 - 判断留痕(不静默):保留 `OperationRegistry.get(name)`。它是**作者侧的查询便利**(与 `has`/`names` 同类),不是强加给实现者的协议方法;DoD 要删的是"强制四方法/三方法接口",不是类上的可选查询 API。
 - 勾选:Phase 2 DoD 项 6。
 - 遗留:Phase 2 只剩项 7(飞书 plugin 用新 SDK 重写并**生产**复验)与项 8(部署上线),两者都依赖外向动作;下一轮先做项 7 里**不依赖生产**的部分(用 plugin-sdk 重写 plugin-feishu 并补测试),生产实调与部署按纪律挂 PENDING。另仍挂账:Dashboard 挂载表单缺 `export` 字段。
+
+## Round 12 — 2026-08-10
+- 目标:Phase 2 DoD 项 7 — 飞书 plugin 用新 SDK 重写(**可做的那半边**;生产复验依赖真实环境,见 P2-1)
+- 先解决一个真问题:飞书 plugin 是**代理**(工具表的真源在飞书上游,只有拿到凭证才能枚举),而 SDK 此前只有静态注册(`.tools().register()`)。照搬静态形态就得由 plugin 复述一份 schema —— 必然与上游漂移。故给 SDK 补第三种 export 形态:
+  - **`plugin.proxyTools(id, { list, call })`**:工具表运行时枚举。`~describe` 与静态 tools export **同形**(profile `tools/v1`)—— 工具表怎么来的是 plugin 内部实现,平台不必知道;`~help` 则如实标 `dynamic: true` 且给空表(枚举需要凭证,而 `~help` 是不鉴权的生命周期端点,宁可说"经 List 才知道"也不编一份会过时的清单)。
+  - 顺带把 `toToolResult` 从 core 的 registry 里导出复用:"裸值要包、已是结果就透传"这条规则只留一份,代理路径与静态路径同规则。
+  - 顺带修 SDK 一处错误归类:`X-TB-Upstream-Auth` 坏 base64url 时 `atob` 抛裸 Error,被归一成 **internal 500** —— 把调用方送来的坏输入说成服务故障。现归 `invalid_argument`(400)。
+- 动作:重写 `packages/plugin-feishu/src/index.ts`,**294 行 → 140 行**。删掉的全是协议样板:手写 `/healthz`、`/~describe`、`/~help`(含 HelpModel 常量与 Accept 协商)、envelope 解码、Bearer 校验、`X-TB-Request-Id` 去重、`X-TB-Upstream-Auth` base64url 解包、`json()`/`errorResponse()`、`invoke` 的方法分发与 `List/Get/Call` 参数校验。留下的全是飞书业务:TAT 换发与缓存、401 强制重换发重试、`annotations → effect` 的 ToolSpec 转换、凭证形状校验。`feishuMcp.ts` / `tat.ts` 未动。
+- 验证:
+  - plugin-feishu 集成测试**基本不改断言**地继续通过 —— 这正是"重写没有偷偷改契约"的证据:同一组经 wire 的断言(healthz / `~describe` v2 exports 逐字相等 / 无·错 Bearer → 401 / 缺 `X-TB-Upstream-Auth` → 503 且消息含 authRef 且不打飞书 / 坏头 → 400 / List 换发一次 TAT 且白名单头透传且 effect 正确 / 二次调用命中缓存 / Call 结果原样 + 同 requestId 重放零上游请求 / TAT 被吊销后强制重换发一次成功 / 多租户缓存不串号)在换了实现之后仍然成立。
+  - 三处**有意**的行为变更,均已改测试并写明理由:① `Get` 不再是协议动词 → 400 unknown method 且不打上游(与 Round 11 一致);② `Call` 缺 name 的校验现由 SDK 统一做(plugin 不写这段);③ `~help` 由 SDK 统一为 JSON(不再有 Help DSL 与 Accept 协商),代理型 export 标 `dynamic`。平台自 Round 8 起不再抓 plugin 的 `~help`,故无消费方受影响。
+  - **SDK 侧要求补齐**:测试 envelope 现必须带 `X-TB-Context`(平台真实调用一直带,旧手写实现漏读了它)。
+  - plugin-sdk 新增 `proxyTools` 用例 **4 例**(describe/help 形状、List 拿到解包凭证 + Call 参数规整 + 已是 ToolResult 则不二次包装、缺 name 与 Get 都 400 且不进 handler、坏 upstream-auth → 400 含 'base64url');plugin-sdk 18 → **22 passed**,plugin-feishu 8 → **9 passed**。
+  - `pnpm verify` 全量 → typecheck 9 包 + lint clean + **1189 passed / 7 skipped**(core 726 + plugin-sdk 22 + cli 237 + sdk 19 + plugin-feishu 9 + gateway 144 + server 32),退出码 **0**。
+- 勾选:**无**。项 7 的 DoD 明确要求"重新部署 + 生产三动词实调留证",代码完成不构成证据 —— 按"DOD 是判据,不许编进度"挂 **P2-1** PENDING。
+- 遗留:Phase 2 剩余全部是外向动作(P2-1 生产复验、项 8 部署)+ Dashboard `export` 字段。下一轮做 Dashboard 挂载表单的 `export` 字段(纯代码,补三入口对等),之后 Phase 2 的可做项即清空,按 LOOP 进 Phase 3。

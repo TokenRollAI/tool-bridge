@@ -53,6 +53,7 @@ import {
   type SearchOptions,
   TBError,
   type ToolSpec,
+  toToolResult,
 } from '@tool-bridge/core'
 
 /**
@@ -82,6 +83,22 @@ export interface PluginCallContext<Env = unknown> {
 
 export type ToolHandler<S extends InputSchemaLike | undefined, Env>
   = (input: InferInput<S>, ctx: PluginCallContext<Env>) => unknown | Promise<unknown>
+
+/**
+ * **代理型** tools export 的 handler:工具表来自上游、只有拿到调用凭证才能枚举
+ * (典型是转发到另一个 MCP/HTTP 服务),因此声明期列不出来,只能给 `list`/`call` 两个函数。
+ *
+ * 静态注册(`plugin.tools().register()`)仍是首选 —— 它能派生 JSON Schema、校验入参。
+ * 代理型放弃这些是因为**上游才是 schema 的真源**,由 plugin 复述一遍只会漂移。
+ */
+export interface ProxyToolsHandlers<Env = unknown> {
+  call: (
+    input: { args: Record<string, unknown>, name: string },
+    ctx: PluginCallContext<Env>,
+  ) => unknown | Promise<unknown>
+  description?: string
+  list: (ctx: PluginCallContext<Env>) => Promise<ToolSpec[]> | ToolSpec[]
+}
 
 /**
  * context 动词的入参形状(SDK 统一维护,作者不必重复声明 schema)。
@@ -146,7 +163,17 @@ interface ContextExportState<Env> {
   kind: 'context'
 }
 
-type ExportState<Env> = ContextExportState<Env> | ToolsExportState<Env>
+interface ProxyToolsExportState<Env> {
+  description: string | undefined
+  handlers: ProxyToolsHandlers<Env>
+  id: string
+  kind: 'proxyTools'
+}
+
+type ExportState<Env>
+  = | ContextExportState<Env>
+    | ProxyToolsExportState<Env>
+    | ToolsExportState<Env>
 
 /** tools export 的注册面(链式)。 */
 export interface ToolsExport<Env> {
@@ -162,6 +189,8 @@ export interface Plugin<Env = unknown> {
   context: (id: string, handlers: ContextHandlers<Env>) => Plugin<Env>
   /** Worker/Deno/Bun 入口。 */
   fetch: (request: Request, env: Env) => Promise<Response>
+  /** 声明一个**代理型** tools export(工具表来自上游,运行时枚举)。 */
+  proxyTools: (id: string, handlers: ProxyToolsHandlers<Env>) => Plugin<Env>
   /** 声明一个 tools export。 */
   tools: (id: string, meta?: { description?: string }) => ToolsExport<Env>
 }
@@ -189,6 +218,16 @@ function contextVerbs<Env>(handlers: ContextHandlers<Env>): string[] {
   return verbs
 }
 
+/**
+ * `~help` 的 cmd 表。代理型 export 返回空表并标 `dynamic` —— 枚举工具需要调用凭证,
+ * 而 `~help` 是不鉴权的生命周期端点;宁可如实说"要经 List 才知道",不编一份可能过时的表。
+ */
+function helpCmds<Env>(state: ExportState<Env>): Array<{ name: string }> {
+  if (state.kind === 'tools') return state.registry.list()
+  if (state.kind === 'proxyTools') return []
+  return contextVerbs(state.handlers).map(name => ({ name }))
+}
+
 export function createPlugin<Env = unknown>(opts: CreatePluginOptions<Env> = {}): Plugin<Env> {
   const healthPath = opts.healthPath ?? '/healthz'
   const exports = new Map<string, ExportState<Env>>()
@@ -205,7 +244,9 @@ export function createPlugin<Env = unknown>(opts: CreatePluginOptions<Env> = {})
     return {
       protocolVersion: PROTOCOL_VERSION,
       exports: [...exports.values()].map((state) => {
-        if (state.kind === 'tools') {
+        // 代理型与静态 tools 对外**同一形状**:export 是什么由 profile 说了算,
+        // 至于工具表是声明期写死还是运行时枚举,是 plugin 的内部实现,平台不必知道。
+        if (state.kind === 'tools' || state.kind === 'proxyTools') {
           return {
             id: state.id,
             profile: 'tools/v1',
@@ -233,10 +274,8 @@ export function createPlugin<Env = unknown>(opts: CreatePluginOptions<Env> = {})
       protocolVersion: PROTOCOL_VERSION,
       exports: [...exports.values()].map(state => ({
         id: state.id,
-        cmds:
-          state.kind === 'tools'
-            ? state.registry.list()
-            : contextVerbs(state.handlers).map(name => ({ name })),
+        ...(state.kind === 'proxyTools' ? { dynamic: true } : {}),
+        cmds: helpCmds(state),
       })),
     }
   }
@@ -259,8 +298,14 @@ export function createPlugin<Env = unknown>(opts: CreatePluginOptions<Env> = {})
     // base64url → 明文(平台侧 base64urlEncode(TextEncoder));Web 标准解码。
     const b64 = raw.replaceAll('-', '+').replaceAll('_', '/')
     const padded = b64.padEnd(b64.length + ((4 - (b64.length % 4)) % 4), '=')
-    const bytes = Uint8Array.from(atob(padded), c => c.charCodeAt(0))
-    return new TextDecoder().decode(bytes)
+    try {
+      const bytes = Uint8Array.from(atob(padded), c => c.charCodeAt(0))
+      return new TextDecoder().decode(bytes)
+    } catch {
+      // 坏头是**调用方**送来的坏输入,不是 plugin 内部故障 —— 归 invalid_argument(400),
+      // 否则 atob 抛裸 Error 会被归一成 internal 500,把配置错误说成服务故障。
+      throw new TBError('invalid_argument', `${HEADER_TB_UPSTREAM_AUTH} is not valid base64url`)
+    }
   }
 
   async function dispatchTools(
@@ -278,6 +323,28 @@ export function createPlugin<Env = unknown>(opts: CreatePluginOptions<Env> = {})
       }
       const callArgs = (args.args ?? {}) as Record<string, unknown>
       return await state.registry.call(name, callArgs, ctx)
+    }
+    throw new TBError('invalid_argument', `unknown method '${method}' on a tools export`)
+  }
+
+  async function dispatchProxyTools(
+    state: ProxyToolsExportState<Env>,
+    method: string,
+    args: Record<string, unknown>,
+    ctx: PluginCallContext<Env>,
+  ): Promise<unknown> {
+    if (method === 'List') return await state.handlers.list(ctx)
+    if (method === 'Call') {
+      const name = args.name
+      if (typeof name !== 'string' || name === '') {
+        throw new TBError('invalid_argument', 'Call requires a non-empty string \'name\'')
+      }
+      const callArgs
+        = typeof args.args === 'object' && args.args !== null
+          ? (args.args as Record<string, unknown>)
+          : {}
+      // 上游返回值形状不由我们决定:裸值包成 ToolResult,已是结果形状则透传(与静态路径同规则)。
+      return toToolResult(await state.handlers.call({ name, args: callArgs }, ctx))
     }
     throw new TBError('invalid_argument', `unknown method '${method}' on a tools export`)
   }
@@ -354,10 +421,13 @@ export function createPlugin<Env = unknown>(opts: CreatePluginOptions<Env> = {})
     }
 
     const requestId = request.headers.get(HEADER_TB_REQUEST_ID)
-    const run = async (): Promise<unknown> =>
-      state.kind === 'tools'
-        ? await dispatchTools(state, call.tool, call.arguments, ctx)
-        : await dispatchContext(state, call.tool, call.arguments, ctx)
+    const run = async (): Promise<unknown> => {
+      if (state.kind === 'tools') return await dispatchTools(state, call.tool, call.arguments, ctx)
+      if (state.kind === 'proxyTools') {
+        return await dispatchProxyTools(state, call.tool, call.arguments, ctx)
+      }
+      return await dispatchContext(state, call.tool, call.arguments, ctx)
+    }
 
     const value = requestId === null ? await run() : await dedupe.run(requestId, run)
     return json(value ?? null)
@@ -380,6 +450,17 @@ export function createPlugin<Env = unknown>(opts: CreatePluginOptions<Env> = {})
         },
       }
       return surface
+    },
+
+    proxyTools(id, handlers) {
+      assertFreshId(id)
+      exports.set(id, {
+        kind: 'proxyTools',
+        id,
+        description: handlers.description,
+        handlers,
+      })
+      return plugin
     },
 
     context(id, handlers) {

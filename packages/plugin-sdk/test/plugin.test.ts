@@ -12,7 +12,7 @@ import {
 } from '@tool-bridge/core'
 import { describe, expect, it } from 'vitest'
 import { z } from 'zod/v4'
-import { createPlugin } from '../src'
+import { createPlugin, TBError } from '../src'
 
 interface Env { PLUGIN_TOKEN: string }
 const ENV: Env = { PLUGIN_TOKEN: 'tok-secret' }
@@ -269,5 +269,98 @@ describe('export 路由', () => {
     const p = createPlugin<Env>()
     p.tools('dup')
     expect(() => p.tools('dup')).toThrow(/already declared/)
+  })
+})
+
+describe('proxyTools:工具表来自上游的代理型 export', () => {
+  /** 上游只有拿到"凭证"才肯报工具表 —— 与飞书 plugin 的真实形状同构。 */
+  function makeProxy(seen: string[] = []) {
+    const plugin = createPlugin<Env>({ token: env => env.PLUGIN_TOKEN })
+    plugin.proxyTools('upstream', {
+      description: '代理上游工具',
+      list: (ctx) => {
+        if (ctx.upstreamAuth === undefined) throw new TBError('unavailable', 'missing credential')
+        seen.push(`list:${ctx.upstreamAuth}`)
+        return [{ name: 'remote_tool', description: '上游的工具', effect: 'write' }]
+      },
+      call: ({ name, args }, ctx) => {
+        seen.push(`call:${name}:${JSON.stringify(args)}:${ctx.exportId}`)
+        return { content: [{ type: 'text', text: name }] }
+      },
+    })
+    return plugin
+  }
+
+  const CALLER_PROXY: CallContext = { ...CALLER, exportId: 'upstream' }
+
+  it('~describe 与静态 tools export 同形(profile tools/v1);~help 标 dynamic 且空表', async () => {
+    const plugin = makeProxy()
+    const desc = await plugin.fetch(new Request('https://plugin.test/~describe'), ENV)
+    expect(await desc.json()).toEqual({
+      protocolVersion: 'plugin/v2',
+      exports: [{ id: 'upstream', profile: 'tools/v1', description: '代理上游工具' }],
+    })
+
+    const help = await plugin.fetch(new Request('https://plugin.test/~help'), ENV)
+    expect(await help.json()).toEqual({
+      protocolVersion: 'plugin/v2',
+      exports: [{ id: 'upstream', dynamic: true, cmds: [] }],
+    })
+  })
+
+  it('List 走 handler 并拿到解包后的上游凭证;Call 的裸参数由 SDK 规整', async () => {
+    const seen: string[] = []
+    const plugin = makeProxy(seen)
+    const list = await plugin.fetch(
+      envelope({ tool: 'List', arguments: {} }, { caller: CALLER_PROXY, upstreamAuth: 'secret-x' }),
+      ENV,
+    )
+    expect(await list.json()).toEqual([
+      { name: 'remote_tool', description: '上游的工具', effect: 'write' },
+    ])
+
+    const call = await plugin.fetch(
+      envelope(
+        { tool: 'Call', arguments: { name: 'remote_tool', args: { a: 1 } } },
+        { caller: CALLER_PROXY, upstreamAuth: 'secret-x' },
+      ),
+      ENV,
+    )
+    // 上游已是 ToolResult 形状 → 原样透传(不二次包装)。
+    expect(await call.json()).toEqual({ content: [{ type: 'text', text: 'remote_tool' }] })
+    expect(seen).toEqual([
+      'list:secret-x',
+      'call:remote_tool:{"a":1}:upstream',
+    ])
+  })
+
+  it('Call 缺 name → 400;Get 不是协议动词 → 400;两者都不进 handler', async () => {
+    const seen: string[] = []
+    const plugin = makeProxy(seen)
+    const noName = await plugin.fetch(
+      envelope({ tool: 'Call', arguments: {} }, { caller: CALLER_PROXY, upstreamAuth: 's' }),
+      ENV,
+    )
+    expect(noName.status).toBe(400)
+
+    const get = await plugin.fetch(
+      envelope({ tool: 'Get', arguments: { name: 'remote_tool' } }, { caller: CALLER_PROXY }),
+      ENV,
+    )
+    expect(get.status).toBe(400)
+    expect(seen).toEqual([])
+  })
+
+  it('坏 X-TB-Upstream-Auth → 400 invalid_argument(不是 500)', async () => {
+    const plugin = makeProxy()
+    const req = envelope({ tool: 'List', arguments: {} }, { caller: CALLER_PROXY })
+    const headers = new Headers(req.headers)
+    headers.set(HEADER_TB_UPSTREAM_AUTH, 'not-base64url!!!')
+    const res = await plugin.fetch(
+      new Request(req.url, { method: 'POST', headers, body: await req.text() }),
+      ENV,
+    )
+    expect(res.status).toBe(400)
+    expect(((await res.json()) as { message: string }).message).toContain('base64url')
   })
 })
