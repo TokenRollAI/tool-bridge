@@ -224,6 +224,9 @@ importers:
       '@tool-bridge/core':
         specifier: workspace:*
         version: link:../core
+      '@tool-bridge/plugin-example':
+        specifier: workspace:*
+        version: link:../plugin-example
       s3rver:
         specifier: ^3.7.1
         version: 3.7.1(supports-color@10.2.2)
@@ -239,6 +242,19 @@ importers:
       zod:
         specifier: ^3.25.76
         version: 3.25.76
+
+  packages/plugin-example:
+    dependencies:
+      '@tool-bridge/plugin-sdk':
+        specifier: workspace:*
+        version: link:../plugin-sdk
+      zod:
+        specifier: ^3.25.76
+        version: 3.25.76
+    devDependencies:
+      wrangler:
+        specifier: ^4.107.0
+        version: 4.107.0(@cloudflare/workers-types@5.20260706.1)
 
   packages/plugin-feishu:
     dependencies:

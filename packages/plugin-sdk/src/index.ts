@@ -36,6 +36,8 @@
 
 import {
   type CallContext,
+  type ContextEntryInput,
+  type ContextPatch,
   decodeCallContext,
   decodePluginCall,
   HEADER_TB_CONTEXT,
@@ -44,12 +46,22 @@ import {
   type InferInput,
   type InputSchemaLike,
   isTBError,
+  type ListOptions,
   OperationRegistry,
   type OperationSpec,
   RequestDedupe,
+  type SearchOptions,
   TBError,
   type ToolSpec,
 } from '@tool-bridge/core'
+
+/**
+ * 作者面必需的错误原语:handler 里 `throw TBError.notFound(...)` 即得到平台归一后的
+ * 404/`not_found`。不导出它,作者就只能抛裸 Error(一律归为 internal 500),
+ * 语义会在传输层丢失 —— 这是写样例 plugin 时暴露出来的缺口。
+ */
+export { TBError }
+export type { ToolResult, ToolSpec } from '@tool-bridge/core'
 
 /** 平台传给 handler 的调用上下文。 */
 export interface PluginCallContext<Env = unknown> {
@@ -71,13 +83,17 @@ export interface PluginCallContext<Env = unknown> {
 export type ToolHandler<S extends InputSchemaLike | undefined, Env>
   = (input: InferInput<S>, ctx: PluginCallContext<Env>) => unknown | Promise<unknown>
 
-/** context 动词的入参形状(SDK 统一维护,作者不必重复声明 schema)。 */
-export interface ContextListInput { opts?: Record<string, unknown>, path: string }
+/**
+ * context 动词的入参形状(SDK 统一维护,作者不必重复声明 schema)。
+ * entry/patch/opts 直接复用平台的 Context 类型 —— 作者拿到的就是定形对象
+ * (`entry.metadata?.title`),不必在每个 handler 里把 `Record<string, unknown>` 断言回去。
+ */
+export interface ContextListInput { opts?: ListOptions, path: string }
 export interface ContextGetInput { path: string }
-export interface ContextWriteInput { entry: Record<string, unknown>, path: string }
-export interface ContextUpdateInput { patch: Record<string, unknown>, path: string }
+export interface ContextWriteInput { entry: ContextEntryInput, path: string }
+export interface ContextUpdateInput { patch: ContextPatch, path: string }
 export interface ContextDeleteInput { path: string }
-export interface ContextSearchInput { opts?: Record<string, unknown>, query: string }
+export interface ContextSearchInput { opts?: SearchOptions, query: string }
 
 /**
  * context export 的 handler 集合。**全部可选** —— 写了哪个就有哪个能力,
@@ -277,7 +293,7 @@ export function createPlugin<Env = unknown>(opts: CreatePluginOptions<Env> = {})
       case 'List':
         if (handlers.list === undefined) break
         return await handlers.list(
-          { path: String(args.path ?? ''), ...(args.opts !== undefined ? { opts: args.opts as Record<string, unknown> } : {}) },
+          { path: String(args.path ?? ''), ...(args.opts !== undefined ? { opts: args.opts as ListOptions } : {}) },
           ctx,
         )
       case 'Get':
@@ -286,13 +302,13 @@ export function createPlugin<Env = unknown>(opts: CreatePluginOptions<Env> = {})
       case 'Write':
         if (handlers.write === undefined) break
         return await handlers.write(
-          { path: String(args.path ?? ''), entry: (args.entry ?? {}) as Record<string, unknown> },
+          { path: String(args.path ?? ''), entry: (args.entry ?? {}) as ContextEntryInput },
           ctx,
         )
       case 'Update':
         if (handlers.update === undefined) break
         return await handlers.update(
-          { path: String(args.path ?? ''), patch: (args.patch ?? {}) as Record<string, unknown> },
+          { path: String(args.path ?? ''), patch: (args.patch ?? {}) as ContextPatch },
           ctx,
         )
       case 'Delete':
@@ -301,7 +317,7 @@ export function createPlugin<Env = unknown>(opts: CreatePluginOptions<Env> = {})
       case 'Search':
         if (handlers.search === undefined) break
         return await handlers.search(
-          { query: String(args.query ?? ''), ...(args.opts !== undefined ? { opts: args.opts as Record<string, unknown> } : {}) },
+          { query: String(args.query ?? ''), ...(args.opts !== undefined ? { opts: args.opts as SearchOptions } : {}) },
           ctx,
         )
       default:

@@ -1,0 +1,10 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    // 与 plugin-sdk 同姿势:Web 标准运行时(Worker / Deno / Bun),刻意不引
+    // @types/node —— 样例若用上 Node 内建就不再是"能贴着跑"的样例。
+    "lib": ["ES2023", "DOM"],
+    "types": []
+  },
+  "include": ["src"]
+}

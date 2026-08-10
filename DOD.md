@@ -35,7 +35,7 @@ Phase 间不可跳:B 改 ToolSpec 派生形态,C 索引 ToolSpec 必须在 B 后
 - [ ] Plugin v2 多 export:`kind` 从 manifest 移出,`/~describe` 返回 exports 数组(profile tools/v1 或 context/v1),挂载配置加 `export` 字段;一个 plugin 能同时导出 tools 和 context。验证:`pnpm --filter @tool-bridge/gateway test` 中多 export 描述/挂载/调用用例全绿。
 - [ ] Context 按 handler 推导能力:handler 全可选,存在性推导 methods/capabilities,无 write/update/delete 自动只读;修掉 Watch 假能力与 connect() 上报丢失 virtualize/readOnly/capabilities。验证:core + gateway 相关用例全绿(含 connect 语义保真回归)。
 - [ ] `@tool-bridge/plugin-sdk` 可发布:Web 标准兼容(不引 Node 运行时依赖污染 Worker),接管 v1/v2 envelope / auth / dedupe / health / describe / help / Zod 校验 / JSON Schema / 错误归一。验证:`pnpm --filter @tool-bridge/plugin-sdk build && npm pack --dry-run` 在该包通过;新增该包单测全绿。
-- [ ] 样例 plugin 双 export 零样板:一个用新 SDK 写的 plugin 同时注册 tools 与 context、不写任何 JSON Schema 与协议样板。验证:该样例的集成测试(注册→describe 两 export→调用工具→读 context)全绿。
+- [x] 样例 plugin 双 export 零样板:一个用新 SDK 写的 plugin 同时注册 tools 与 context、不写任何 JSON Schema 与协议样板。验证:该样例的集成测试(注册→describe 两 export→调用工具→读 context)全绿。
 - [ ] 删净 legacy 面:代码中不再有 legacy provider API / ToolProvider.Get / 强制四方法接口。验证:`grep -rn "ToolProvider" packages/*/src` 无强制 Get 契约残留(或有断言测试);`pnpm verify` 全绿。
 - [ ] 飞书 plugin 重写复验:飞书 plugin 用新 SDK 重写、重新部署,生产 create-doc/fetch-doc/update-doc 全链路通过。验证:`npx tsx scripts/verify-plugin.ts`(TB_BASE_URL+TB_SK)+ 飞书三动词生产实调各一次留证。
 - [ ] 部署上线:`pnpm deploy:all` + `pnpm smoke` 通过。

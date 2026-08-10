@@ -52,6 +52,7 @@
     "@cloudflare/vitest-pool-workers": "^0.18.0",
     "@cloudflare/workers-types": "^5.20260706.1",
     "@tool-bridge/core": "workspace:*",
+    "@tool-bridge/plugin-example": "workspace:*",
     "s3rver": "^3.7.1",
     "tsup": "^8.5.1",
     "tsx": "^4.23.0",

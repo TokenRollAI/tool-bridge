@@ -173,3 +173,21 @@
   - 发布物验证(DoD 要求):`pnpm build` 成功(22.8 KB ESM + 6.8 KB dts);`npm pack --dry-run` 通过(files = dist/index.js + dist/index.d.ts + package.json,33 KB);产物 `grep node:` **零 Node 内建**;dts 内 `@tool-bridge/core` 引用数 **0**(类型已内联)。
 - 勾选:Phase 2 DoD 项 4。提交 `903c569`。
 - 遗留:下一轮 = 项 5(样例 plugin 双 export 零样板 —— 用飞书 plugin 重写来兼做项 7 准备)+ Dashboard export 字段 + 项 6(删净 legacy 面;`ToolProvider.Get` 已确认平台从不调用,可安全移除)。
+
+## Round 10 — 2026-08-10
+- 目标:Phase 2 DoD 项 5 — 样例 plugin 双 export 零样板(一个 plugin 同时注册 tools 与 context,不写任何 JSON Schema 与协议样板)
+- 动作:
+  - 新增 **`packages/plugin-example`**(第 9 个包,private,不发布):`actions`(tools/v1:create_note / count_notes)+ `notes`(context/v1:只实现 list/get/write/search)。148 行里**零协议代码** —— 健康检查、`~describe`、`~help`、envelope、鉴权、去重、上游凭证、校验、错误归一、export 路由全在 SDK。存储用进程内 Map,样例可独立跑,不引 KV/D1 绑定。tsconfig 与 SDK 同姿势(`lib:[ES2023,DOM]`、`types:[]`),样例若用上 Node 内建就不再是"贴着真实运行时"的样例。
+  - **plugin-sdk 改工作区内可直接 import**:`main`/`exports` 指向 `src/index.ts`,发布形态用 `publishConfig` 字段覆盖回 `dist`(仓库既有惯例)。取证确认了配套纪律:**`npm pack/publish` 不应用 publishConfig,只有 `pnpm pack` 会**(`llmdoc/guides/npm-publish.md` 已记),故发布必须 `pnpm pack` + `npm publish <tarball>`;本轮用 `pnpm pack` 复验发布物仍是 dist 形态。
+  - **SDK 补两处作者面缺口**(都是写样例时暴露的,不是臆测):① 未导出 `TBError`,作者只能抛裸 Error → 语义在传输层丢成 internal 500;现导出 `TBError` 与 `ToolResult`/`ToolSpec` 类型。② context handler 入参里 `entry`/`patch`/`opts` 是 `Record<string, unknown>`,作者每个 handler 都要手动断言回去;现直接复用平台的 `ContextEntryInput`/`ContextPatch`/`ListOptions`/`SearchOptions`,样例里 `entry.metadata?.title` 直接可用。
+  - **修一处真契约违反(样例把它逼了出来)**:gateway 的 plugin-backed context provider 无视 export 自报的 `methods`,一律按"四核心动词 + capabilities"构造 —— 于是这个只实现 list/get/write/search 的 plugin 在平台上被宣告成**可 Update**,`~help` 列出 Update,数据面也真的会把 Update 打到 plugin。已在两处按自报 `methods` 裁剪:`pluginContext.ts`(数据面 provider 按声明逐个装配)与 `tbApp.ts` 的 `~help` 分支;未自报 `methods` 的 export(v2 允许省略)退回旧默认,不改变既有 plugin 行为。
+  - gateway 加 devDep `@tool-bridge/plugin-example`(仅测试用)。
+- 验证:
+  - 新增 **`packages/gateway/test/pluginExample.integration.test.ts` 5 例**。关键取舍:**不 stub 协议** —— 把网关的出站 `fetch` 直接接到样例真实的 `fetch(Request, Env)`,于是这条测试是 gateway↔SDK 的**跨包契约回归**,而非网关自说自话。覆盖:注册 → `~describe` 得两 export(`[['actions','tools/v1'],['notes','context/v1']]`,ctx methods `['List','Get','Write','Search']`,capabilities `['search']`)→ 用 `config.export` 双挂载 → 工具级 `~help` 断言 Zod 派生的 schema(properties body/tags/title、required body+title、`title.description === '笔记标题'`、effect write)→ 调 create_note → context Get 拿到内容与 `node://docs/notes/weekly-plan` → Search/List;缺必填参数 → 400 invalid_argument 且消息含 'body';`TBError.notFound` → 404 not_found;Update/Delete 既不出现在 `~help`(`['Get','List','Search','Write']`)也打不到 plugin;context Write 后工具 count_notes === 1(两 export 共享同一后端)。
+  - **回归有效性自证**(沿用 Round 4 的做法):临时回退 `~help` 修复 → 该测试 FAIL(`+ "Update"`);只回退数据面一半 → FAIL(`expected 1 to be +0`,Update 真打到了 plugin)。两次都已还原并复跑。
+  - `pnpm verify` 全量 → typecheck + lint clean + **1182 passed / 7 skipped**(core 726 + plugin-sdk 18 + cli 237 + sdk 17 + plugin-feishu 8 + gateway 144 + server 32),退出码 0;gateway 139 → 144。
+  - 发布物复验:`pnpm --filter @tool-bridge/plugin-sdk build` → ESM 22.82 KB + dts 10.24 KB;`pnpm pack` 产物 = `package/dist/index.js` + `package/dist/index.d.ts` + `package/package.json` + `package/LICENSE`;`grep -c "node:" dist/index.js` = **0**;`grep -c "@tool-bridge/core" dist/index.d.ts` = **0**。
+- 勾选:Phase 2 DoD 项 5。
+- 已知未完成(不静默,继续挂账):**Dashboard 挂载表单仍缺 export 字段**(Round 8 起的三入口对等缺口,CLI/API 已可设)。
+- 遗留:下一轮起点 = Phase 2 项 6(删净 legacy 面:legacy provider API / `ToolProvider.Get` / 强制四方法接口;`ToolProvider.Get` 已取证确认平台从不调用)+ Dashboard export 字段;项 7(飞书 plugin 重写复验)依赖生产、项 8(部署)属外向动作,预计挂 PENDING。
+- 待办(留给 `llmdoc:update`):plugin-sdk 的 publishConfig 覆盖形态 + **必须 `pnpm pack` 发布**这条纪律;新包 `plugin-example` 的定位;gateway 按 export 自报 `methods` 裁剪 context 动词这条契约。

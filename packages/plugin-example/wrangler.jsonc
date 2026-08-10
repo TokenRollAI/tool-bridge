@@ -1,0 +1,11 @@
+{
+  // 样例 plugin Worker:一个部署同时提供 tools 与 context 两个 export。
+  // secrets:PLUGIN_TOKEN(在平台 `tb plugin register` 拿到后 wrangler secret put)。
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "tb-plugin-example",
+  "main": "src/index.ts",
+  "compatibility_date": "2025-06-01",
+  "observability": {
+    "enabled": true
+  }
+}

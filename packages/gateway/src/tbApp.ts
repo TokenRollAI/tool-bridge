@@ -1139,9 +1139,10 @@ async function helpModelFor(
           readOnly: (node.config.readOnly ?? false) || isReadOnlyProvider(local),
         })
       }
-      // plugin-backed 节点:只列四动词 + 注册时声明的可选方法(Q12)。
+      // plugin-backed 节点:动词表 = export 自报的 methods(plugin/v2 契约);未自报则
+      // 退回旧默认(四动词 + 注册时声明的可选方法,Q12)。~help 与可调用集合由此始终吻合
+      // —— providers/pluginContext.ts 按同一集合挂 handler。
       const model = contextHelpModel(node, { readOnly: node.config.readOnly ?? false })
-      const core = new Set(['List', 'Get', 'Write', 'Update'])
       const { export: exported } = await requirePluginExport(
         deps.state,
         node.config.provider,
@@ -1149,8 +1150,17 @@ async function helpModelFor(
         'context',
         node.config.export,
       )
-      const declared = optionalMethodsForCapabilities(exported.capabilities ?? [])
-      return { ...model, cmds: model.cmds.filter(c => core.has(c.name) || declared.has(c.name)) }
+      const declared
+        = exported.methods !== undefined
+          ? new Set(exported.methods)
+          : new Set([
+              'List',
+              'Get',
+              'Write',
+              'Update',
+              ...optionalMethodsForCapabilities(exported.capabilities ?? []),
+            ])
+      return { ...model, cmds: model.cmds.filter(c => declared.has(c.name)) }
     }
     return contextHelpModel(node, { readOnly: node.config.readOnly ?? false })
   }
@@ -1706,6 +1716,7 @@ export function createTbApp(deps: TbAppDeps): Hono<{ Variables: Vars }> {
           secrets: deps.secrets,
           ctx: mountCallContext(ctx, node.path, cfg.providerConfig, exported.id),
           capabilities: exported.capabilities ?? [],
+          ...(exported.methods !== undefined ? { methods: exported.methods } : {}),
           // 挂载 authRef = 上游凭证引用,平台代解析经 X-TB-Upstream-Auth 注入。
           ...(cfg.authRef !== undefined ? { upstreamAuthRef: cfg.authRef } : {}),
         })
