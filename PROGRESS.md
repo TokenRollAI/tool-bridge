@@ -16,8 +16,8 @@
 
 ## 当前状态
 - 当前 Phase:**Phase 2 — B:Plugin SDK / OperationRegistry 地基**(分支 `phase2-plugin-sdk`)
-- Phase 2 已勾选:项 1(OperationRegistry)、项 2(Plugin v2 多 export)、项 3(Context 按 handler 推导能力)
-- Phase 2 待办:项 4 `@tool-bridge/plugin-sdk` 可发布 / 项 5 样例 plugin 双 export / 项 6 删净 legacy 面 / 项 7 飞书重写复验(依赖生产,预计 PENDING)/ 项 8 部署(PENDING)
+- Phase 2 已勾选:项 1(OperationRegistry)、项 2(Plugin v2 多 export)、项 3(Context 按 handler 推导能力)、项 4(`@tool-bridge/plugin-sdk` 可发布)
+- Phase 2 待办:项 5 样例双 export / 项 6 删净 legacy 面 / Dashboard export 字段 / `@tool-bridge/plugin-sdk` 可发布 / 项 5 样例 plugin 双 export / 项 6 删净 legacy 面 / 项 7 飞书重写复验(依赖生产,预计 PENDING)/ 项 8 部署(PENDING)
 - Phase 1(代码完成,部署挂起见 PENDING)
 - 已勾选:项 1(Secret Reference 使用授权,Round 1 → Round 4 补第三写入口后成立)、项 2(DO/Node 连接替换 TOCTOU,Round 2 → Round 4 补 registerPaths 后成立)、项 3(Node/Docker bootstrap fail closed)、项 4(canonical origin 对等)、项 5(`pnpm verify` 全绿)
 - 未勾选:项 6(部署解冻 smoke)—— 被 P1-1 / P1-2 卡住,见上
@@ -158,3 +158,19 @@
 - 勾选:Phase 2 DoD 项 2。
 - 已知未完成(不静默):**Dashboard 挂载表单尚未加 export 字段**。CLI 与 API 已可设,Dashboard 暂只能挂单 export plugin —— 按三入口对等这是缺口,列入下一轮随项 4/5 一并补。
 - 遗留:下一轮起点 = Phase 2 项 4(`@tool-bridge/plugin-sdk` 可发布,Web 标准兼容、接管 envelope/auth/dedupe/health/describe/help/Zod/错误归一)+ 项 5(样例 plugin 双 export 零样板)+ Dashboard export 字段。
+
+## Round 9 — 2026-08-10
+- 目标:Phase 2 DoD 项 4 — `@tool-bridge/plugin-sdk` 可发布(Web 标准兼容,接管 envelope/auth/dedupe/health/describe/help/Zod 校验/JSON Schema/错误归一)
+- 取证:先确认平台真实 wire 契约 —— gateway `pluginTool.ts` **只发 `List` 与 `Call`,从不发 `Get`**,印证评审「ToolProvider.Get 是纯样板」,故新 SDK 不实现 Get。
+- 动作:新增 `packages/plugin-sdk`(第 8 个包):
+  - 作者面:`createPlugin({ token })` → `.tools(id).register(name, spec, handler)` 链式 + `.context(id, handlers)`;`export default plugin` 即 Worker 入口。
+  - SDK 接管:健康检查 / `/~describe`(v2 exports;context 的 methods+capabilities 按 handler 存在性推导,与平台侧 Round 7 同语义)/ `/~help` / envelope 编解码 / Bearer 鉴权 / `X-TB-Request-Id` 去重 / `X-TB-Upstream-Auth` base64url 解包 / Zod 校验与 JSON Schema 派生 / 错误归一 / export 路由(单 export 可省 exportId;多 export 缺失即拒,不猜)。
+  - **构建刻意 Web 标准**:`platform:'neutral'`、`target:es2022`、tsconfig `lib:[ES2023,DOM]` 且 **`types:[]`**(不引 @types/node,防 Node 全局漏进产物);core 经 noExternal bundle,dts 用 paths 内联(core 是 private 包,不内联则发布物类型入口悬空)。
+  - 顺带修一处**真 bug**:`exportId` 此前只加了类型、没加进 envelope 的 zod codec,传输中被剥离 → 多 export 路由根本不可能工作。本轮补进 `callContextSchema`。
+  - 顺带修一处**流程缺口**:根 `test:unit` 未含新包,`pnpm verify` 会静默漏测它;已补进 filter。
+- 验证:
+  - 新增 `test/plugin.test.ts` **18 例**,全部经 `fetch(Request)` 走 wire(与平台真实调用等价):契约三端点、鉴权失败、缺 X-TB-Context、List 的 inputSchema 由 Zod 自动派生(断言 required 与 `.describe()` 派生 description)、Call 校验+裸值包装+上游凭证送达、schema 不合报字段名、Get 属未知方法、同 requestId 重放只执行一次、context 已实现/未实现动词、export 路由四分支、重复 export id 声明期失败。
+  - `pnpm verify` 全量 → typecheck 8 包 + lint clean + **1179 passed / 7 skipped**,退出码 0。
+  - 发布物验证(DoD 要求):`pnpm build` 成功(22.8 KB ESM + 6.8 KB dts);`npm pack --dry-run` 通过(files = dist/index.js + dist/index.d.ts + package.json,33 KB);产物 `grep node:` **零 Node 内建**;dts 内 `@tool-bridge/core` 引用数 **0**(类型已内联)。
+- 勾选:Phase 2 DoD 项 4。提交 `903c569`。
+- 遗留:下一轮 = 项 5(样例 plugin 双 export 零样板 —— 用飞书 plugin 重写来兼做项 7 准备)+ Dashboard export 字段 + 项 6(删净 legacy 面;`ToolProvider.Get` 已确认平台从不调用,可安全移除)。
