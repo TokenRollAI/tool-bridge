@@ -17,10 +17,16 @@
   (`npx tsx scripts/verify-plugin.ts`,需 TB_BASE_URL + TB_SK + 真实飞书凭证)。
   属外向不可逆动作且依赖生产环境,待用户授权;**不构成后续 Phase 的代码依赖**。
   按"证据即判据"纪律,项 7 在拿到生产证据前不勾选。
+- **P3-1 · Phase 3 项 5 的「部署 + 生产 MCP smoke」半边** —— 官方 SDK 生产验收脚本
+  `pnpm verify:mcp` 已在 Round 18 就位,本地 `pnpm verify` 全绿;尚需从与 `origin/main`
+  零差异的干净工作区执行 `pnpm deploy:all`,再以 admin / narrow 两把生产 SK 运行
+  `TB_BASE_URL=… TB_SK=… TB_MCP_NARROW_SK=… pnpm verify:mcp`。属外向动作且当前 Phase 3
+  代码尚在功能分支,待用户授权及合并;**不构成 Phase 4 编码依赖**。生产证据前项 5 不勾选。
 
 ## 当前状态
-- 当前 Phase:**Phase 3 — E:对外 MCP 出口**(Round 13 起;Phase 2 可做项已清空)
+- 当前 Phase:**Phase 4 — C:Search 0+1**(Round 19 起;Phase 3 可做项已清空,部署半边见 P3-1)
 - Phase 3 已勾选:项 1(官方 MCP 测试 client + 本地 initialize,Round 14)、项 2(认证后的动态 tools/list + tools/call,Round 15)、项 3(scope 收窄钉死,Round 16)、项 4(三入口对等审计,Round 17)
+- Phase 3 待办:**仅剩待授权的外向动作** — 项 5 已完成生产脚本与全量回归,真实部署/生产 MCP smoke → P3-1
 - Phase 2 已勾选:项 1(OperationRegistry)、项 2(Plugin v2 多 export,Round 13 补齐三入口对等后成立)、项 3(Context 按 handler 推导能力)、项 4(`@tool-bridge/plugin-sdk` 可发布)、项 5(样例 plugin 双 export)、项 6(删净 legacy 面)
 - Phase 2 待办(**全部为待授权的外向动作**):项 7 飞书重写复验(代码已完成,只差生产实调 → P2-1)/ 项 8 部署上线
 - Phase 1(代码完成,部署挂起见 PENDING)
@@ -320,3 +326,16 @@
   - `rg -n "system/(sk|secret|registry|plugin|federation|annotation)" packages/cli/src packages/dashboard/src` 与源码核对 → 既有管理面均落同一 `system/*`;`rg -n "check\\(ctx|assertRegisterPath|assertSecretRefUse" packages/gateway/src/tbApp.ts` → MCP 投影 scope 与 builtin 附加校验链均存在。
 - 勾选:Phase 3 DoD 项 4(三入口对等审计;无需新增 CLI/Dashboard 动作)。
 - 遗留:下一轮 = Phase 3 项 5 的可做代码半边:新增可对生产运行的官方 SDK MCP smoke(`initialize → tools/list → tools/call`,并支持窄 SK 集合比较),随后跑 `pnpm verify`;真实 `deploy:all` + 生产 smoke 属外向动作,无授权则按纪律挂 PENDING 并进入 Phase 4。
+
+## Round 18 — 2026-08-11
+- 目标:Phase 3 DoD 项 5 — 完成全阶段回归与可复现的生产 MCP smoke;部署和真实生产调用按外向动作纪律判断。
+- 动作:
+  - 新增 `scripts/verify-mcp.ts` 与根命令 `pnpm verify:mcp`,直接使用官方 `Client` + `StreamableHTTPClientTransport` 连接 `POST /~mcp`。Admin 连接断言 initialize 后工具非空,默认选择只读 `system/registry:list` 完成真实 tools/call;可用 `TB_MCP_PATH` / `TB_MCP_COMMAND` / `TB_MCP_ARGS` 改目标。
+  - 同一进程关闭 admin client 后以必填 `TB_MCP_NARROW_SK` 重连,断言窄工具名集合是 admin 的严格子集,并用一个已知 admin-only 旧名称验证 call 返回 `tool not found`。脚本不签发 SK、不创建或修改生产资源,日志不输出凭据。
+  - 根工作区显式声明 `@modelcontextprotocol/sdk` 与 `@types/node`,避免生产验收脚本依赖子包的传递安装布局。真实 `deploy:all` + 生产连接需要生产授权、凭据且部署纪律要求分支先合并到 `origin/main`,故登记 P3-1;Phase 4 只依赖本分支已有代码,继续晋级。
+- 验证:
+  - `pnpm exec eslint scripts/verify-mcp.ts package.json` + 显式 NodeNext `tsc --noEmit … scripts/verify-mcp.ts` → 均退出码 0。
+  - 缺参运行 `pnpm verify:mcp` → 预期退出码 1,仅输出 `MCP smoke FAILED: missing base URL…`,证明入口可执行且 fail closed;真实生产运行留 P3-1。
+  - `pnpm verify` → 9 个 workspace typecheck + 全仓 lint + **1207 passed / 7 skipped**(core 728 + plugin-sdk 22 + cli 239 + sdk 19 + plugin-feishu 9 + gateway 158 + server 32),退出码 0。
+- 勾选:无。Phase 3 项 5 的本地代码/回归半边已完成,但按证据纪律在 `deploy:all` 与生产 `verify:mcp` 成功前保持未勾。
+- 遗留:P3-1 挂起且不构成代码依赖,按状态机进入 Phase 4。下一轮 = Phase 4 项 1(D1 binding + provision 幂等),先加载 Cloudflare/Wrangler 指南并解决 blocker C-1。
