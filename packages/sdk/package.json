@@ -48,7 +48,8 @@
     "@types/node": "^26.1.0",
     "@types/ws": "8.18.1",
     "tsup": "^8.5.1",
-    "vitest": "^4.1.10"
+    "vitest": "^4.1.10",
+    "zod": "^3.25.76"
   },
   "repository": {
     "type": "git",

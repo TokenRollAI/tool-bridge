@@ -10,12 +10,14 @@
 import {
   MemoryObjectStore,
   MemoryStateStore,
+  OperationRegistry,
   TBError,
   type ToolResult,
   type ToolSpec,
 } from '@tool-bridge/core'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { serve } from '@hono/node-server'
+import { z } from 'zod/v4'
 import { createToolBridge, type ToolBridge } from '../src'
 
 const ADMIN_SK = 'tbk_sdk_test_admin_0000000000'
@@ -27,13 +29,25 @@ const echoTool: ToolSpec = {
   inputSchema: { type: 'object', properties: { text: { type: 'string' } }, required: ['text'] },
 }
 
+/**
+ * 零样板路径:直接把 core 的 `OperationRegistry` 交给 registerTool ——
+ * 入参用 Zod 声明,JSON Schema 派生、校验、裸返回值包装都不用嵌入方自己写。
+ */
+function greetRegistry(): OperationRegistry {
+  return new OperationRegistry().register(
+    'greet',
+    {
+      description: '打招呼',
+      inputSchema: z.object({ name: z.string().min(1).describe('被打招呼的人') }),
+      effect: 'read',
+    },
+    ({ name }) => ({ greeting: `hello ${name}` }),
+  )
+}
+
 function echoProvider() {
   return {
     List: (): ToolSpec[] => [echoTool],
-    Get: (name: string): ToolSpec => {
-      if (name !== 'echo') throw TBError.notFound(`no such tool: ${name}`)
-      return echoTool
-    },
     Call: (name: string, args: Record<string, unknown>): ToolResult => {
       if (name !== 'echo') throw TBError.notFound(`no such tool: ${name}`)
       return { content: { echoed: args.text } }
@@ -100,6 +114,7 @@ async function startHarness(config?: { encryptionKey?: string }): Promise<Harnes
     ...(config?.encryptionKey !== undefined ? { encryptionKey: config.encryptionKey } : {}),
   })
   tb.registerTool('tools/echo', echoProvider(), { description: '本地 echo 工具' })
+  tb.registerTool('tools/greet', greetRegistry(), { description: 'Zod 驱动的本地工具' })
   tb.registerContext('notes', memoryContextProvider(), { description: '进程内笔记' })
 
   const server = serve({ fetch: (req: Request) => tb.fetch(req), port: 0 })
@@ -167,6 +182,43 @@ describe('createToolBridge:本地 HTTP(@hono/node-server)', () => {
     })
     expect(res.status).toBe(200)
     expect(await res.json()).toEqual({ echoed: 'hi sdk' })
+  })
+
+  it('registerTool 直接收 OperationRegistry:~help 的 schema 由 Zod 派生', async () => {
+    const help = await call(h, 'tools/greet/greet/~help')
+    expect(help.status).toBe(200)
+    const model = (await help.json()) as {
+      cmds: Array<{
+        effect?: string
+        inputSchema?: {
+          properties?: Record<string, { description?: string }>
+          required?: string[]
+        }
+        name: string
+      }>
+    }
+    expect(model.cmds.map(c => c.name)).toEqual(['greet'])
+    const cmd = model.cmds[0]
+    expect(cmd?.effect).toBe('read')
+    // schema 没有一行是手写的:required / description 都由 Zod 派生。
+    expect(cmd?.inputSchema?.required).toEqual(['name'])
+    expect(cmd?.inputSchema?.properties?.name?.description).toBe('被打招呼的人')
+  })
+
+  it('OperationRegistry 工具经 HTTP 调用:裸返回值被包装,入参不合报字段名', async () => {
+    const ok = await call(h, 'tools/greet', {
+      method: 'POST',
+      body: JSON.stringify({ tool: 'greet', arguments: { name: 'sam' } }),
+    })
+    expect(ok.status).toBe(200)
+    expect(await ok.json()).toEqual({ greeting: 'hello sam' })
+
+    const bad = await call(h, 'tools/greet', {
+      method: 'POST',
+      body: JSON.stringify({ tool: 'greet', arguments: {} }),
+    })
+    expect(bad.status).toBe(400)
+    expect(JSON.stringify(await bad.json())).toContain('name')
   })
 
   it('registerContext 四动词经 HTTP 可用;未实现的可选方法被拒', async () => {

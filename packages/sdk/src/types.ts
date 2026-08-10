@@ -1,28 +1,34 @@
-import type {
-  ContextProvider,
-  DeviceClientState,
-  DeviceExpose,
-  NodeInput,
-  ObjectStore,
-  SecretStoreImpl,
-  StateStore,
-  ToolResult,
-  ToolSpec,
-  TreePath,
-} from '@tool-bridge/core'
+import { type ContextProvider,
+  type DeviceClientState,
+  type DeviceExpose,
+  type NodeInput,
+  type ObjectStore,
+  type OperationRegistry,
+  type SecretStoreImpl,
+  type StateStore,
+  type ToolResult,
+  type ToolSpec,
+  type TreePath } from '@tool-bridge/core'
 
 /** 值或其 Promise(SDK 使用者的 Provider 方法可同步亦可异步)。 */
 export type Awaitable<T> = T | Promise<T>
 
 /**
- * SDK 使用者实现的工具源(ToolProvider 的放宽形态:
- * 方法允许返回 Promise;core 的同步 ToolProvider 天然可赋值)。
+ * SDK 使用者手写的工具源:**只有 List 与 Call 两个动词**。
+ * 此前还强制 `Get`,但平台从不发 Get(`~help` 的数据源是 List 产出的 ToolSpec[]),
+ * 那是纯样板 —— 已随 core 的 `ToolProvider` 一并删除。方法可同步可异步。
  */
 export interface ToolProviderLike {
   Call(name: string, args: Record<string, unknown>): Awaitable<ToolResult>
-  Get(name: string): Awaitable<ToolSpec>
   List(): Awaitable<ToolSpec[]>
 }
+
+/**
+ * `registerTool` 收的工具源:手写 Provider **或**直接交一个 core `OperationRegistry`。
+ * 后者是零样板路径 —— 用 Zod 声明入参,JSON Schema、校验、裸返回值包装都不用自己写,
+ * 与 plugin 作者面(`@tool-bridge/plugin-sdk`)同一套内核。
+ */
+export type ToolSource = OperationRegistry | ToolProviderLike
 
 /**
  * 设备 WS 的网关侧宿主注入点。SDK 未实现其消费,注入将得到 unimplemented。
@@ -109,5 +115,5 @@ export interface ToolBridge {
   fetch(req: Request): Promise<Response>
   registerContext(path: TreePath, provider: ContextProvider, meta?: Partial<NodeInput>): void
   /** 程序化注册:本地实现 Provider 挂上树(等价 NodeRegistry.Write;写入延迟到首次 fetch/connect 前)。 */
-  registerTool(path: TreePath, provider: ToolProviderLike, meta?: Partial<NodeInput>): void
+  registerTool(path: TreePath, source: ToolSource, meta?: Partial<NodeInput>): void
 }

@@ -25,7 +25,6 @@ tb.registerTool(
   'tools/echo',
   {
     List: () => [{ name: 'echo', description: '原样返回 text' }],
-    Get: () => ({ name: 'echo' }),
     Call: (_name, args) => ({ content: { echoed: args.text } }),
   },
   { description: '本地 echo 工具' },

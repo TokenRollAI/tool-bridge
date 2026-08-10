@@ -191,3 +191,23 @@
 - 已知未完成(不静默,继续挂账):**Dashboard 挂载表单仍缺 export 字段**(Round 8 起的三入口对等缺口,CLI/API 已可设)。
 - 遗留:下一轮起点 = Phase 2 项 6(删净 legacy 面:legacy provider API / `ToolProvider.Get` / 强制四方法接口;`ToolProvider.Get` 已取证确认平台从不调用)+ Dashboard export 字段;项 7(飞书 plugin 重写复验)依赖生产、项 8(部署)属外向动作,预计挂 PENDING。
 - 待办(留给 `llmdoc:update`):plugin-sdk 的 publishConfig 覆盖形态 + **必须 `pnpm pack` 发布**这条纪律;新包 `plugin-example` 的定位;gateway 按 export 自报 `methods` 裁剪 context 动词这条契约。
+
+## Round 11 — 2026-08-10
+- 目标:Phase 2 DoD 项 6 — 删净 legacy 面(legacy provider API / `ToolProvider.Get` / 强制四方法接口)
+- 取证(先确认哪些是真死面,不凭印象删):
+  - core `tool/types.ts` 的 `ToolProvider`(List/Get/Call 三动词)**没有任何实现者与消费者** —— 全仓 `grep` 只命中它自己的定义与两处注释;网关侧真正被实现的是异步的 `UpstreamProvider`(list/call 两动词)。它是"看起来像契约、实际没人用"的误导面。
+  - sdk `ToolProviderLike` **强制** `Get`,但 `upstreamOf` 只映射 `List`/`Call`,`Get` 从注册到调用全程无人读 —— 嵌入方每写一个工具源都要多写一个永不执行的方法(README 与三处测试里都有这行样板)。
+  - 「强制四方法接口」指 context 的 List/Get/Write/Update,Round 7 已改全可选;本轮复核无残留(`ObjectContextProvider` 用 `Required<ContextProvider>` 是**实现**收窄,不是对外强制)。
+- 动作:
+  - **删** core `ToolProvider` 接口,原位留一段说明为什么删(平台从不发 Get;`~help` 的数据源是 List 的产物)。sdk 公开面同步去掉 `type ToolProvider` 再导出。
+  - **删** `ToolProviderLike.Get`:手写工具源现在只有 `List` + `Call` 两个动词。
+  - **补上被删面的替代品**:`registerTool` 现在除手写 Provider 外,**直接收一个 core `OperationRegistry`**(新类型 `ToolSource = OperationRegistry | ToolProviderLike`,注册期归一,下游只认一种形状)。于是嵌入式宿主与 plugin 作者共用同一套零样板内核 —— 用 Zod 声明入参,JSON Schema 派生 / 校验 / 裸返回值包装都不必自己写。删掉样板而不给替代路径,只是把成本转嫁给使用者。
+  - 同步清理:root `README.md`、`packages/sdk/README.md` 示例里的 `Get:` 行;gateway `providers/types.ts` 的注释改为陈述唯一契约(list+call,并写明为什么没有 Get)。
+- 验证:
+  - **删除有效性由编译期证明**:去掉 `Get` 后,仍留着 `Get:` 的旧测试直接 `tsc` 失败 —— `test/connect.remote.test.ts(54,9): error TS2353: Object literal may only specify known properties, and 'Get' does not exist in type 'ToolSource'`。这条错误就是"强制契约已消失"的机器证据,随后按此清掉三处测试样板。
+  - DoD 指定的验证命令:`grep -rn "ToolProvider" packages/*/src` → 残留命中全部是**注释、`ToolProviderLike`(两动词)、`ToolSource`、`createPluginToolProvider` 工厂名与 Dashboard 的同名表单变量**,无强制 Get 契约。
+  - 新增 sdk 断言测试 **2 例**(走 HTTP wire,与 curl 等价):`registerTool` 收 `OperationRegistry` 后,`GET /tools/greet/greet/~help` 的 `inputSchema.required` 与 `properties.name.description` **全由 Zod 派生**(测试里没有一行手写 JSON Schema)、effect 透传;`POST` 调用裸返回值被包成结果,缺参数 → 400 且消息含字段名 `name`。sdk 17 → **19 passed**(+1 skipped)。
+  - `pnpm verify` 全量 → typecheck 9 包 + lint clean + **1184 passed / 7 skipped**(core 726 + plugin-sdk 18 + cli 237 + sdk 19 + plugin-feishu 8 + gateway 144 + server 32),退出码 **0**。
+- 判断留痕(不静默):保留 `OperationRegistry.get(name)`。它是**作者侧的查询便利**(与 `has`/`names` 同类),不是强加给实现者的协议方法;DoD 要删的是"强制四方法/三方法接口",不是类上的可选查询 API。
+- 勾选:Phase 2 DoD 项 6。
+- 遗留:Phase 2 只剩项 7(飞书 plugin 用新 SDK 重写并**生产**复验)与项 8(部署上线),两者都依赖外向动作;下一轮先做项 7 里**不依赖生产**的部分(用 plugin-sdk 重写 plugin-feishu 并补测试),生产实调与部署按纪律挂 PENDING。另仍挂账:Dashboard 挂载表单缺 `export` 字段。

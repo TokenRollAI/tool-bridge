@@ -7,6 +7,7 @@ import {
   type NodeInput,
   NodeRegistryStore,
   normalizePath,
+  OperationRegistry,
   SecretStoreImpl,
   TBError,
   type ToolResult,
@@ -27,6 +28,7 @@ import type {
   ToolBridge,
   ToolBridgeConfig,
   ToolProviderLike,
+  ToolSource,
 } from './types'
 import pkg from '../package.json' with { type: 'json' }
 import { openConnection } from './connect'
@@ -77,6 +79,20 @@ function normalizeDeviceId(input: string): string {
     .replace(/^-+|-+$/g, '')
   if (!id) throw new TBError('invalid_argument', 'device id is empty after normalization')
   return id
+}
+
+/**
+ * 工具源归一:`OperationRegistry` → `ToolProviderLike`(registry 的 ctx 对嵌入式宿主无意义,
+ * 传 undefined)。手写 Provider 原样返回。注册期归一,下游只认一种形状。
+ */
+function providerOf(source: ToolSource): ToolProviderLike {
+  if (source instanceof OperationRegistry) {
+    return {
+      List: () => source.list(),
+      Call: async (name, args) => await source.call(name, args, undefined),
+    }
+  }
+  return source
 }
 
 /** ToolProviderLike → gateway UpstreamProvider(list 产出的即对外名;'@local' 不虚拟化)。 */
@@ -211,7 +227,8 @@ export function createToolBridge(config: ToolBridgeConfig): ToolBridge {
   return {
     fetch: async (req: Request): Promise<Response> => await app.fetch(req),
 
-    registerTool(path, provider, meta) {
+    registerTool(path, source, meta) {
+      const provider = providerOf(source)
       register({ kind: 'tool', path, provider, ...(meta !== undefined ? { meta } : {}) })
     },
 

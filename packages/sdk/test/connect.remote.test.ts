@@ -51,7 +51,6 @@ describeRemote('SDK connect 全链路(生产网关,opt-in)', () => {
         List: (): ToolSpec[] => [
           { name: 'echo', description: 'echo back', inputSchema: { type: 'object' } },
         ],
-        Get: (): ToolSpec => ({ name: 'echo' }),
         Call: (_name, args): ToolResult => ({ content: { echoed: args.text, marker } }),
       },
       { description: 'SDK e2e echo' },

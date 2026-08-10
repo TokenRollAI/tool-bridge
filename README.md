@@ -171,7 +171,6 @@ const tb = createToolBridge({ state: new MemoryStateStore() })
 // 把本地函数注册为树上的工具
 tb.registerTool('tools/echo', {
   List: () => [{ name: 'echo', description: '原样返回 text' }],
-  Get: () => ({ name: 'echo' }),
   Call: (_name, args) => ({ content: { echoed: args.text } }),
 })
 

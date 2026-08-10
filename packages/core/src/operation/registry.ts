@@ -99,8 +99,8 @@ function toToolResult(value: unknown): ToolResult {
 /**
  * 操作注册表。`TCtx` 是 handler 的第二参(调用上下文形态由装配方决定)。
  *
- * 注册后自动获得 `list/get/call`,即 v1 `ToolProvider` 三动词的全部行为 ——
- * 作者不再实现协议适配器。
+ * 注册后自动获得 `list/get/call`:平台需要的 `list`/`call` 由此而来(`get` 是作者侧
+ * 查询便利,平台不发 Get)。作者不再实现协议适配器。
  */
 export class OperationRegistry<TCtx = unknown> {
   private readonly ops = new Map<string, RegisteredOp<TCtx>>()
@@ -148,7 +148,7 @@ export class OperationRegistry<TCtx = unknown> {
     return this.ops.has(name)
   }
 
-  /** 全部 ToolSpec(工具源天然小,豁免分页 —— 与 ToolProvider.List 同语义)。 */
+  /** 全部 ToolSpec(工具源天然小,豁免分页)。 */
   list(): ToolSpec[] {
     return [...this.ops.values()].map(op => op.spec)
   }

@@ -26,7 +26,6 @@ const spec: ToolSpec = { name: 'ping', description: 'ping' }
 function pingProvider() {
   return {
     List: (): ToolSpec[] => [spec],
-    Get: (): ToolSpec => spec,
     Call: (): ToolResult => ({ content: 'pong' }),
   }
 }

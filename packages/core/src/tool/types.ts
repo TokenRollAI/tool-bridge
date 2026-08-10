@@ -32,16 +32,11 @@ export interface ToolResult {
   isError?: boolean
 }
 
-/**
- * 工具源契约(List/Get/Call 三动词——工具源天然只读 + 可调用)。
- * mcp/http 内置 Provider 实现它,把上游归一到 `ToolSpec`;`List` 返回全量数组
- * (工具源天然小,豁免分页)。此接口是逻辑契约,I/O 实现(gateway)可返回 Promise。
+/*
+ * 这里曾有一个 `ToolProvider` 接口(List/Get/Call 三动词)。它已删除:
+ * - 平台从不发 `Get`(gateway pluginTool 只发 List/Call,`~help` 的数据源是 List 的产物),
+ *   它是纯样板,却被写成**强制**方法;
+ * - 网关侧真正被实现的是异步的 `UpstreamProvider`(gateway providers/types.ts),
+ *   core 的这份同步声明没有任何实现者与消费者,只剩下"看起来是契约"的误导。
+ * 作者面现在是 `OperationRegistry`(Zod 驱动,operation/registry.ts)。
  */
-export interface ToolProvider {
-  /** 调用。 */
-  Call(name: string, args: Record<string, unknown>): ToolResult
-  /** 单个工具的完整 schema/描述 —— `~help` 的数据源。 */
-  Get(name: string): ToolSpec
-  /** 枚举该源的全部工具(虚拟化前的原始名;网关做映射)。 */
-  List(): ToolSpec[]
-}

@@ -12,6 +12,7 @@ export type {
   ToolBridge,
   ToolBridgeConfig,
   ToolProviderLike,
+  ToolSource,
 } from './types'
 // 常用类型与内存宿主实现的再导出(嵌入方实现 Provider / 注入 store 用)。
 export {
@@ -27,12 +28,12 @@ export {
   MemoryStateStore,
   type NodeInput,
   type ObjectStore,
+  OperationRegistry,
   type Page,
   type SearchOptions,
   SecretStoreImpl,
   type StateStore,
   TBError,
-  type ToolProvider,
   type ToolResult,
   type ToolSpec,
   type TreePath,
