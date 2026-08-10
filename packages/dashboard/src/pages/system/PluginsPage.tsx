@@ -21,7 +21,7 @@ import { type ReactNode, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router'
 import { toast } from 'sonner'
-import type { PluginHealth, PluginKind, PluginManifest, PluginRegistration } from '@/lib/types'
+import type { PluginExport, PluginHealth, PluginManifest, PluginRegistration } from '@/lib/types'
 import {
   Dialog,
   DialogContent,
@@ -59,9 +59,29 @@ import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 
-const REQUIRED_METHODS: Record<PluginKind, readonly string[]> = {
-  'tool-provider': ['List', 'Get', 'Call'],
-  'context-provider': ['List', 'Get', 'Update', 'Write'],
+/** profile → 挂载成哪种树节点（与 core NODE_KIND_BY_PROFILE 同一张表）。 */
+const NODE_KIND_BY_PROFILE = { 'tools/v1': 'tool', 'context/v1': 'context' } as const
+
+/** export 徽标：`<id> · <profile>`；缺 ~describe 缓存的老记录不编造。 */
+function ExportBadges({ exports }: { exports?: PluginExport[] }) {
+  if (exports === undefined || exports.length === 0) {
+    return (
+      <Badge className="text-[10px] text-muted-foreground" variant="outline">
+        无 ~describe 缓存
+      </Badge>
+    )
+  }
+  return (
+    <>
+      {exports.map(e => (
+        <Badge className="font-mono text-[10px]" key={e.id} variant="outline">
+          {e.id}
+          {' · '}
+          {e.profile}
+        </Badge>
+      ))}
+    </>
+  )
 }
 
 type HealthView
@@ -186,7 +206,7 @@ function PluginDetailsDialog({
   onEdit: () => void
   plugin: PluginManifest
 }) {
-  const methods = REQUIRED_METHODS[plugin.kind]
+  const exports = plugin.exports ?? []
   const healthUrl = `${plugin.endpoint.replace(/\/+$/, '')}${plugin.healthPath}`
   return (
     <Dialog onOpenChange={open => !open && onClose()} open>
@@ -204,7 +224,7 @@ function PluginDetailsDialog({
               {plugin.enabled ? 'enabled' : 'disabled'}
             </Badge>
             <Badge className="font-mono text-[10px]" variant="secondary">
-              {plugin.kind}
+              {plugin.protocolVersion}
             </Badge>
             {loading && (
               <span className="inline-flex items-center gap-1.5 text-[10px] text-muted-foreground">
@@ -243,11 +263,13 @@ function PluginDetailsDialog({
             <ManifestFact label="Plugin ID">
               <span className="font-mono">{plugin.id}</span>
             </ManifestFact>
-            <ManifestFact label="Interface">
-              <span className="font-mono">{plugin.interfaceVersion}</span>
+            <ManifestFact label="Protocol">
+              <span className="font-mono">{plugin.protocolVersion}</span>
             </ManifestFact>
-            <ManifestFact label="Kind">
-              <span className="font-mono">{plugin.kind}</span>
+            <ManifestFact label="Exports">
+              <span className="flex flex-wrap gap-1.5">
+                <ExportBadges exports={plugin.exports} />
+              </span>
             </ManifestFact>
             <ManifestFact label="Lifecycle">{plugin.enabled ? 'Enabled' : 'Disabled'}</ManifestFact>
             <ManifestFact label="Endpoint" wide>
@@ -297,27 +319,42 @@ function PluginDetailsDialog({
                 <span className="mt-0.5 block text-[10px] leading-5 text-muted-foreground">
                   <span className="font-mono">~describe</span>
                   {' '}
-                  的 kind 与 interfaceVersion 必须和
-                  manifest 一致。
+                  的 protocolVersion 必须和 manifest 一致，且至少声明一个 export。
                 </span>
               </span>
             </li>
             <li className="flex gap-3 px-4 py-3">
               <span className="font-mono text-[10px] text-primary">03</span>
               <span className="min-w-0">
-                <span className="font-medium">Required methods</span>
-                <span className="mt-1.5 flex flex-wrap gap-1.5">
-                  {methods.map(method => (
-                    <Badge className="font-mono text-[10px]" key={method} variant="outline">
-                      {method}
-                    </Badge>
+                <span className="font-medium">Exports</span>
+                <span className="mt-1.5 grid gap-1.5">
+                  {exports.length === 0 && (
+                    <span className="text-[10px] text-muted-foreground">
+                      无 ~describe 缓存（重新注册可刷新）。
+                    </span>
+                  )}
+                  {exports.map(e => (
+                    <span className="flex flex-wrap items-center gap-1.5" key={e.id}>
+                      <Badge className="font-mono text-[10px]" variant="outline">
+                        {e.id}
+                        {' · '}
+                        {e.profile}
+                      </Badge>
+                      <span className="font-mono text-[10px] text-muted-foreground">
+                        挂载为 kind:
+                        {NODE_KIND_BY_PROFILE[e.profile]}
+                      </span>
+                      {(e.methods ?? []).map(m => (
+                        <Badge className="font-mono text-[10px]" key={m} variant="secondary">
+                          {m}
+                        </Badge>
+                      ))}
+                    </span>
                   ))}
                 </span>
                 <span className="mt-1.5 block text-[10px] leading-5 text-muted-foreground">
-                  <span className="font-mono">~help</span>
-                  {' '}
-                  必须包含全部必需方法；声明的可选
-                  capability 也必须有对应命令。
+                  export 自报的 methods 就是平台会调用的动词集合；声明的可选 capability
+                  必须同时列进 methods。
                 </span>
               </span>
             </li>
@@ -355,16 +392,19 @@ interface ManifestFormState {
   enabled: boolean
   endpoint: string
   healthPath: string
-  kind: PluginKind
   secretRef: string
-  versionMajor: string
 }
 
-/** 表单态 → manifest 字段（id 由调用方补；interfaceVersion 前缀强制与 kind 一致）。 */
+/**
+ * 表单态 → manifest 字段（id 由调用方补）。
+ *
+ * plugin/v2 的 manifest 只描述**部署与生命周期**：在哪、怎么鉴权、健康检查、是否启用。
+ * 「这个 plugin 提供什么」由它自己的 `/~describe` exports 声明，注册时平台抓取并校验 ——
+ * 所以这里没有 kind/interfaceVersion 可填，填了也会被网关按未知字段丢弃。
+ */
 function buildManifestFields(state: ManifestFormState) {
   return {
-    kind: state.kind,
-    interfaceVersion: `${state.kind}/${state.versionMajor.trim() || 'v1'}`,
+    protocolVersion: 'plugin/v2',
     endpoint: state.endpoint.trim(),
     auth:
       state.authKind === 'bearer'
@@ -413,8 +453,6 @@ function ManifestFields({
 }) {
   const endpointId = `${idPrefix}-endpoint`
   const healthId = `${idPrefix}-health`
-  const kindId = `${idPrefix}-kind`
-  const versionId = `${idPrefix}-version`
   const authId = `${idPrefix}-auth`
   const secretId = `${idPrefix}-secret`
   const enabledId = `${idPrefix}-enabled`
@@ -458,62 +496,22 @@ function ManifestFields({
       </FormSection>
 
       <FormSection
-        description="声明 Provider 类型与契约主版本；平台会读取 ~describe 和 ~help 逐项核对。"
+        description="plugin/v2 的 manifest 不声明能力；平台注册时抓取 ~describe，由 plugin 自报 exports。"
         number="02"
         title="Interface"
       >
-        <div className="grid gap-3 sm:grid-cols-2">
-          <div className="grid gap-1.5">
-            <Label className="text-xs" htmlFor={kindId}>
-              Provider kind *
-            </Label>
-            <Select
-              disabled={disabled}
-              onValueChange={value => onChange({ ...state, kind: value as PluginKind })}
-              value={state.kind}
-            >
-              <SelectTrigger className="font-mono text-xs" id={kindId}>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem className="font-mono text-xs" value="tool-provider">
-                  tool-provider — 工具源
-                </SelectItem>
-                <SelectItem className="font-mono text-xs" value="context-provider">
-                  context-provider — 存储源
-                </SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="grid gap-1.5">
-            <Label className="text-xs" htmlFor={versionId}>
-              接口主版本 *
-            </Label>
-            <Input
-              className="font-mono text-xs"
-              disabled={disabled}
-              id={versionId}
-              onChange={event => onChange({ ...state, versionMajor: event.target.value })}
-              placeholder="v1"
-              value={state.versionMajor}
-            />
-          </div>
-        </div>
         <div className="rounded-md border bg-background/55 px-3 py-2.5">
-          <p className="font-mono text-[10px] text-muted-foreground">
-            {state.kind}
-            /
-            {state.versionMajor.trim() || 'v1'}
+          <p className="font-mono text-[10px] text-muted-foreground">plugin/v2</p>
+          <p className="mt-1.5 text-[10px] leading-5 text-muted-foreground">
+            注册时平台会 GET
             {' '}
-            requires
+            <span className="font-mono">~describe</span>
+            ，要求 protocolVersion 一致且至少一个 export；每个 export 自报
+            {' '}
+            <span className="font-mono">profile</span>
+            （tools/v1 或 context/v1）与动词集合。注册成功后回到本页即可看到它们，
+            挂载时在「注册表」里选择要挂哪一个 export。
           </p>
-          <div className="mt-2 flex flex-wrap gap-1.5">
-            {REQUIRED_METHODS[state.kind].map(method => (
-              <Badge className="font-mono text-[10px]" key={method} variant="outline">
-                {method}
-              </Badge>
-            ))}
-          </div>
         </div>
       </FormSection>
 
@@ -608,8 +606,6 @@ function ManifestFields({
 }
 
 const INITIAL_FORM: ManifestFormState = {
-  kind: 'tool-provider',
-  versionMajor: 'v1',
   endpoint: '',
   healthPath: '/healthz',
   authKind: 'platform-token',
@@ -778,8 +774,6 @@ function EditPluginDialog({
   const invoke = useInvoke()
   const qc = useQueryClient()
   const [form, setForm] = useState<ManifestFormState>(() => ({
-    kind: plugin.kind,
-    versionMajor: plugin.interfaceVersion.split('/')[1] ?? 'v1',
     endpoint: plugin.endpoint,
     healthPath: plugin.healthPath,
     authKind: plugin.auth.kind,
@@ -1104,13 +1098,8 @@ export function PluginsPage() {
                                 value={plugin.id}
                               />
                             </div>
-                            <div className="mt-1.5 flex items-center gap-1.5">
-                              <Badge className="font-mono text-[10px]" variant="outline">
-                                {plugin.kind === 'tool-provider' ? 'tool' : 'context'}
-                              </Badge>
-                              <span className="font-mono text-[10px] text-muted-foreground">
-                                {plugin.interfaceVersion}
-                              </span>
+                            <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                              <ExportBadges exports={plugin.exports} />
                             </div>
                           </TableCell>
                           <TableCell className="max-w-80 whitespace-normal">

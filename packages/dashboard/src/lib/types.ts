@@ -121,20 +121,30 @@ export interface FederationHost {
   updatedAt?: string
 }
 
-/** system/plugin 的 manifest(plugin/manifest.ts 契约手抄)。 */
-export type PluginKind = 'tool-provider' | 'context-provider'
+/** system/plugin 的 manifest（plugin/manifest.ts + builtin/plugin.ts 的 PluginView 契约手抄）。 */
+export type PluginProfile = 'tools/v1' | 'context/v1'
+
+/** `~describe` 里的一个 export：plugin/v2 把「提供什么」从部署身份移到了 export 上。 */
+export interface PluginExport {
+  capabilities?: string[]
+  description?: string
+  id: string
+  methods?: string[]
+  profile: PluginProfile
+}
 
 export interface PluginManifest {
   auth: { kind: 'platform-token' } | { kind: 'bearer', secretRef: string }
   enabled: boolean
   /** https:// 或 `binding:<name>`。 */
   endpoint: string
+  /** 注册时缓存的 `~describe.exports`（挂载时 config.export 从中选）；老记录可能缺省。 */
+  exports?: PluginExport[]
   /** 如 "/healthz";必须以 '/' 开头。 */
   healthPath: string
   id: string
-  /** "tool-provider/v1" | "context-provider/v1";前缀必须与 kind 一致。 */
-  interfaceVersion: string
-  kind: PluginKind
+  /** 传输协议版本；当前仅 "plugin/v2"。 */
+  protocolVersion: string
 }
 
 /** write/update 返回:pluginToken 仅该次响应出现一次(auth=platform-token 时)。 */

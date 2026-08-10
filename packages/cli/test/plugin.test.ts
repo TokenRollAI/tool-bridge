@@ -9,14 +9,18 @@ import { runCli } from './cliHarness'
 /** gw 三件套:每条命令都要带的目标与输出开关(经真实 commander 解析)。 */
 const gw = ['--base-url', 'https://gw', '--sk', 'tbk_admin'] as const
 
+/** 线格式 = plugin/v2 的管理面投影:manifest 无 kind,「提供什么」在 exports 上。 */
 const manifest = {
   id: 'notion-ctx',
-  kind: 'context-provider',
-  interfaceVersion: 'context-provider/v1',
+  protocolVersion: 'plugin/v2',
   endpoint: 'https://plugin.example',
   auth: { kind: 'platform-token' },
   healthPath: '/healthz',
   enabled: true,
+  exports: [
+    { id: 'notes', profile: 'context/v1', methods: ['List', 'Get'] },
+    { id: 'actions', profile: 'tools/v1', description: 'Notion actions' },
+  ],
 }
 
 let tmp: string
@@ -128,14 +132,23 @@ describe('tb plugin list', () => {
     expect(process.exitCode).toBe(0)
   })
 
-  it('人类模式:表格含 id/kind/endpoint/enabled', async () => {
+  it('人类模式:表格含 id/exports/endpoint/enabled(EXPORTS 取代了 v1 的 KIND 列)', async () => {
     jsonFetch({ items: [manifest] })
     await runCli(['plugin', 'list', ...gw])
     const out = stdoutText()
     expect(out).toContain('notion-ctx')
-    expect(out).toContain('context-provider')
+    expect(out).toContain('EXPORTS')
+    expect(out).toContain('notes:context/v1, actions:tools/v1')
     expect(out).toContain('https://plugin.example')
     expect(out).toContain('enabled')
+    expect(process.exitCode).toBe(0)
+  })
+
+  it('人类模式:老记录缺 exports 缓存 → 该列显示占位符,不假装没有 export', async () => {
+    const noMeta = { ...manifest, exports: undefined }
+    jsonFetch({ items: [noMeta] })
+    await runCli(['plugin', 'list', ...gw])
+    expect(stdoutText()).toMatch(/notion-ctx\s+-\s+https/)
     expect(process.exitCode).toBe(0)
   })
 })
@@ -149,6 +162,24 @@ describe('tb plugin get', () => {
     expect(payload.tool).toBe('get')
     expect(payload.arguments).toEqual({ id: 'notion-ctx' })
     expect(JSON.parse(stdoutText())).toEqual(manifest)
+    expect(process.exitCode).toBe(0)
+  })
+
+  it('人类模式:逐个列出 export,并给出该 profile 对应的挂载命令', async () => {
+    jsonFetch(manifest)
+    await runCli(['plugin', 'get', 'notion-ctx', ...gw])
+    const out = stdoutText()
+    expect(out).toContain('protocolVersion:  plugin/v2')
+    expect(out).toContain('notes (context/v1)')
+    expect(out).toContain('methods=List|Get')
+    expect(out).toContain('tb ctx mount <path> --provider notion-ctx --export notes')
+    expect(out).toContain('actions (tools/v1)')
+    expect(out).toContain(
+      'tb tool mount <path> --kind tool --provider notion-ctx --export actions',
+    )
+    // v1 的 kind/interfaceVersion 已不存在,不该再出现在输出里(也不该打印 undefined)。
+    expect(out).not.toContain('undefined')
+    expect(out).not.toContain('interfaceVersion')
     expect(process.exitCode).toBe(0)
   })
 })

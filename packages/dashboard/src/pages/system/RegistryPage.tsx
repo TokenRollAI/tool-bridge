@@ -16,7 +16,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { type ReactNode, useState } from 'react'
 import { Link } from 'react-router'
 import { toast } from 'sonner'
-import type { RegistryNode } from '@/lib/types'
+import type { PluginExport, PluginManifest, PluginProfile, RegistryNode } from '@/lib/types'
 import {
   Dialog,
   DialogContent,
@@ -179,7 +179,64 @@ function FormSection({
 }
 
 /**
- * 挂载表单(按 kind 分支出 NodeConfig;tool 与 context 可引用已注册 plugin 为 provider)。
+ * plugin 挂载的 export 选择器(tool 与 context 分支共用)。
+ *
+ * plugin/v2 挂载的是**某一个 export**,不是整个 plugin。单 export 时留空即可
+ * (网关自动选中),多 export 时必须显式指定 —— 与 `tb tool/ctx mount --export` 同语义。
+ * 候选来自注册时缓存的 `~describe`;缓存缺失(老记录)时退回手填,不把人挡在门外。
+ */
+function ExportField({
+  id,
+  options,
+  value,
+  onChange,
+}: {
+  id: string
+  onChange: (next: string) => void
+  options: PluginExport[]
+  value: string
+}) {
+  const required = options.length > 1
+  if (options.length === 0) {
+    return (
+      <div className="grid gap-1.5">
+        <Label className="text-xs" htmlFor={id}>
+          export(可空;该 plugin 无 ~describe 缓存,如有多个 export 请手填 id)
+        </Label>
+        <Input
+          className="font-mono text-xs"
+          id={id}
+          onChange={e => onChange(e.target.value)}
+          value={value}
+        />
+      </div>
+    )
+  }
+  return (
+    <div className="grid gap-1.5">
+      <Label className="text-xs" htmlFor={id}>
+        export
+        {required ? ' *(该 plugin 有多个 export,必须选一个)' : '(可空;单 export 自动选中)'}
+      </Label>
+      <Select onValueChange={onChange} value={value}>
+        <SelectTrigger className="font-mono text-xs" id={id}>
+          <SelectValue placeholder={required ? '选择 export…' : `${options[0]?.id}(默认)`} />
+        </SelectTrigger>
+        <SelectContent>
+          {options.map(e => (
+            <SelectItem className="font-mono text-xs" key={e.id} value={e.id}>
+              {e.id}
+              {e.description ? ` — ${e.description}` : ''}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </div>
+  )
+}
+
+/**
+ * 挂载表单(按 kind 分支出 NodeConfig;tool 与 context 可引用已注册 plugin 的 export 为 provider)。
  * 可复用:`defaultPath` 预填 path(打开时);`trigger` 自定义触发按钮(缺省回退默认)。
  */
 export function MountDialog({
@@ -245,10 +302,45 @@ export function MountDialog({
   // tool(plugin 工具源)
   const [toolProvider, setToolProvider] = useState('')
   const [toolAuthRef, setToolAuthRef] = useState('')
+  // plugin/v2:挂载的是某个 export,不是整个 plugin(单 export 可省略,多 export 必须显式)
+  const [toolExport, setToolExport] = useState('')
+  const [ctxExport, setCtxExport] = useState('')
 
   const pluginItems = plugins.data?.items ?? []
-  const toolPlugins = pluginItems.filter(p => p.kind === 'tool-provider')
-  const ctxPlugins = pluginItems.filter(p => p.kind === 'context-provider')
+  /**
+   * 候选 plugin 按 **export 的 profile** 过滤 —— v1 那个"整包一种 kind"的字段已随 plugin/v2
+   * 从 manifest 移除(一个 plugin 可以同时导出 tools 与 context)。
+   * 缺 `~describe` 缓存的老记录无从判断,不隐藏它:让用户能选中并由网关在挂载时拒绝,
+   * 好过在 UI 里静默消失、让人以为 plugin 没注册成功。
+   */
+  const exportsOf = (p: PluginManifest, profile: PluginProfile): PluginExport[] =>
+    (p.exports ?? []).filter(e => e.profile === profile)
+  const pluginsFor = (profile: PluginProfile): PluginManifest[] =>
+    pluginItems.filter(p => p.exports === undefined || exportsOf(p, profile).length > 0)
+  const toolPlugins = pluginsFor('tools/v1')
+  const ctxPlugins = pluginsFor('context/v1')
+  /** 当前选中 plugin 在该 profile 下的可挂 export(用于下拉与"是否必填"判定)。 */
+  const optionsFor = (id: string, profile: PluginProfile): PluginExport[] => {
+    const plugin = pluginItems.find(p => p.id === id)
+    return plugin === undefined ? [] : exportsOf(plugin, profile)
+  }
+  const toolExportOptions = optionsFor(toolProvider, 'tools/v1')
+  const ctxExportOptions = optionsFor(provider, 'context/v1')
+
+  /**
+   * export 取值:显式选中优先;未选且**恰好一个**候选时省略(网关同规则自动选中),
+   * 多候选时必须显式 —— 与 core resolvePluginExport 和 `tb tool/ctx mount --export` 对齐。
+   */
+  const resolveExport = (chosen: string, options: PluginExport[], pluginId: string): string => {
+    const picked = chosen.trim()
+    if (picked) return picked
+    if (options.length > 1) {
+      throw new Error(
+        `plugin '${pluginId}' 有多个 export(${options.map(e => e.id).join(', ')}),挂载须指定 export`,
+      )
+    }
+    return ''
+  }
 
   /** "from=to" 行 → Record(与 CLI buildVirtualize 同规则;非法行即抛)。 */
   const parsePairs = (spec: string, flag: string): Record<string, string> => {
@@ -365,9 +457,11 @@ export function MountDialog({
           }
         }
         // context-provider plugin:provider = plugin id(存储细节在 plugin 侧)
+        const exportId = resolveExport(ctxExport, ctxExportOptions, provider)
         return {
           kind: 'context',
           provider,
+          ...(exportId ? { export: exportId } : {}),
           ...(ctxAuthRef.trim() ? { authRef: ctxAuthRef.trim() } : {}),
           ...(readOnly ? { readOnly: true } : {}),
           ...(ttlSeconds !== undefined ? { ttl: ttlSeconds } : {}),
@@ -408,14 +502,17 @@ export function MountDialog({
           baseUrl: baseUrl.trim(),
           ...(skRef.trim() ? { skRef: skRef.trim() } : {}),
         }
-      case 'tool':
+      case 'tool': {
         if (!toolProvider)
-          throw new Error('先选择一个 tool-provider plugin(没有则去「Plugin」注册)')
+          throw new Error('先选择一个 plugin(没有则去「Plugin」注册)')
+        const exportId = resolveExport(toolExport, toolExportOptions, toolProvider)
         return {
           kind: 'tool',
           provider: toolProvider,
+          ...(exportId ? { export: exportId } : {}),
           ...(toolAuthRef.trim() ? { authRef: toolAuthRef.trim() } : {}),
         }
+      }
     }
   }
 
@@ -829,7 +926,14 @@ export function MountDialog({
                   <div className="grid gap-3 sm:grid-cols-2">
                     <div className="grid gap-1.5">
                       <Label className="text-xs">provider</Label>
-                      <Select onValueChange={setProvider} value={provider}>
+                      <Select
+                        onValueChange={(next) => {
+                          setProvider(next)
+                          // 换 provider 就清空 export(r2/s3 本就没有 export 概念)。
+                          setCtxExport('')
+                        }}
+                        value={provider}
+                      >
                         <SelectTrigger className="font-mono text-xs">
                           <SelectValue />
                         </SelectTrigger>
@@ -880,17 +984,25 @@ export function MountDialog({
                     </Button>
                   )}
                   {provider !== 'r2' && provider !== 's3' && (
-                    <div className="grid gap-1.5">
-                      <Label className="text-xs" htmlFor="ctx-plugin-auth">
-                        authRef(可空;上游凭证由平台代解析后注入 Plugin)
-                      </Label>
-                      <Input
-                        className="font-mono text-xs"
-                        id="ctx-plugin-auth"
-                        onChange={e => setCtxAuthRef(e.target.value)}
-                        value={ctxAuthRef}
+                    <>
+                      <ExportField
+                        id="ctx-export"
+                        onChange={setCtxExport}
+                        options={ctxExportOptions}
+                        value={ctxExport}
                       />
-                    </div>
+                      <div className="grid gap-1.5">
+                        <Label className="text-xs" htmlFor="ctx-plugin-auth">
+                          authRef(可空;上游凭证由平台代解析后注入 Plugin)
+                        </Label>
+                        <Input
+                          className="font-mono text-xs"
+                          id="ctx-plugin-auth"
+                          onChange={e => setCtxAuthRef(e.target.value)}
+                          value={ctxAuthRef}
+                        />
+                      </div>
+                    </>
                   )}
                   {provider === 's3' && (
                     <>
@@ -1112,8 +1224,15 @@ export function MountDialog({
               {kind === 'tool' && (
                 <>
                   <div className="grid gap-1.5">
-                    <Label className="text-xs">provider *(tool-provider plugin)</Label>
-                    <Select onValueChange={setToolProvider} value={toolProvider}>
+                    <Label className="text-xs">provider *(已注册 plugin)</Label>
+                    <Select
+                      onValueChange={(id) => {
+                        setToolProvider(id)
+                        // 换 plugin 就清空 export:上一个 plugin 的 export id 在新 plugin 上无意义。
+                        setToolExport('')
+                      }}
+                      value={toolProvider}
+                    >
                       <SelectTrigger className="font-mono text-xs">
                         <SelectValue
                           placeholder={
@@ -1136,7 +1255,7 @@ export function MountDialog({
                         <Link className="mx-0.5 underline underline-offset-2" to="/manage/plugins">
                           Plugin
                         </Link>
-                        注册 tool-provider,再回来挂载。
+                        注册一个导出 tools/v1 的 plugin,再回来挂载。
                       </p>
                     )}
                     {plugins.hasNextPage && (
@@ -1156,6 +1275,12 @@ export function MountDialog({
                       </Button>
                     )}
                   </div>
+                  <ExportField
+                    id="tool-export"
+                    onChange={setToolExport}
+                    options={toolExportOptions}
+                    value={toolExport}
+                  />
                   <div className="grid gap-1.5">
                     <Label className="text-xs" htmlFor="tool-auth">
                       authRef(可空;上游凭证引用,调用时平台代解析经 X-TB-Upstream-Auth 注入)

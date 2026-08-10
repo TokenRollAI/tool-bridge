@@ -109,7 +109,9 @@ export {
   type PluginHealthRecord,
   type PluginModuleDeps,
   type PluginProbeResult,
+  type PluginRegistration,
   pluginTokenSecretName,
+  type PluginView,
 } from './plugin'
 export { createRegistryModule, parseNodeInput } from './registry'
 export { createSecretModule } from './secret'

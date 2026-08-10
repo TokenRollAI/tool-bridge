@@ -37,11 +37,6 @@ export interface PluginManifest {
   protocolVersion: string
 }
 
-/** pluginToken 仅注册响应出现一次。 */
-export interface PluginRegistration extends PluginManifest {
-  pluginToken?: string
-}
-
 // id 进 KV key `plugin:<id>` 且经 config.provider 被树节点引用:
 // 限 path-segment 安全字符(不含 '/'、':'、空白、'~' 前缀)。
 const ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/

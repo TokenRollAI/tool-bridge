@@ -19,9 +19,9 @@
   按"证据即判据"纪律,项 7 在拿到生产证据前不勾选。
 
 ## 当前状态
-- 当前 Phase:**Phase 2 — B:Plugin SDK / OperationRegistry 地基**(分支 `phase2-plugin-sdk`)
-- Phase 2 已勾选:项 1(OperationRegistry)、项 2(Plugin v2 多 export)、项 3(Context 按 handler 推导能力)、项 4(`@tool-bridge/plugin-sdk` 可发布)、项 5(样例 plugin 双 export)、项 6(删净 legacy 面)
-- Phase 2 待办:项 7 飞书重写复验(**代码已完成**,只差生产实调 → P2-1)/ 项 8 部署上线(外向动作,PENDING)/ Dashboard 挂载表单 `export` 字段(三入口对等缺口)
+- 当前 Phase:**Phase 3 — E:对外 MCP 出口**(Round 13 起;Phase 2 可做项已清空)
+- Phase 2 已勾选:项 1(OperationRegistry)、项 2(Plugin v2 多 export,Round 13 补齐三入口对等后成立)、项 3(Context 按 handler 推导能力)、项 4(`@tool-bridge/plugin-sdk` 可发布)、项 5(样例 plugin 双 export)、项 6(删净 legacy 面)
+- Phase 2 待办(**全部为待授权的外向动作**):项 7 飞书重写复验(代码已完成,只差生产实调 → P2-1)/ 项 8 部署上线
 - Phase 1(代码完成,部署挂起见 PENDING)
 - 已勾选:项 1(Secret Reference 使用授权,Round 1 → Round 4 补第三写入口后成立)、项 2(DO/Node 连接替换 TOCTOU,Round 2 → Round 4 补 registerPaths 后成立)、项 3(Node/Docker bootstrap fail closed)、项 4(canonical origin 对等)、项 5(`pnpm verify` 全绿)
 - 未勾选:项 6(部署解冻 smoke)—— 被 P1-1 / P1-2 卡住,见上
@@ -232,3 +232,26 @@
   - `pnpm verify` 全量 → typecheck 9 包 + lint clean + **1189 passed / 7 skipped**(core 726 + plugin-sdk 22 + cli 237 + sdk 19 + plugin-feishu 9 + gateway 144 + server 32),退出码 **0**。
 - 勾选:**无**。项 7 的 DoD 明确要求"重新部署 + 生产三动词实调留证",代码完成不构成证据 —— 按"DOD 是判据,不许编进度"挂 **P2-1** PENDING。
 - 遗留:Phase 2 剩余全部是外向动作(P2-1 生产复验、项 8 部署)+ Dashboard `export` 字段。下一轮做 Dashboard 挂载表单的 `export` 字段(纯代码,补三入口对等),之后 Phase 2 的可做项即清空,按 LOOP 进 Phase 3。
+
+## Round 13 — 2026-08-10
+- 目标:Phase 2 DoD 项 2 —— Plugin v2 多 export 的**三入口对等收尾**(挂载配置的 `export` 字段在 Dashboard 上补齐)。开工取证后发现缺口远不止一个字段,见下。
+- 取证(先拉真实状态,再动码):
+  - Dashboard 挂载表单按 `p.kind === 'tool-provider'` / `'context-provider'` 过滤候选 plugin,但 `kind` **已随 Round 8 的 plugin/v2 从 manifest 移除**。也就是说两个下拉恒为空 —— Dashboard 自 Round 8 起**根本挂不了任何 plugin**,不只是"缺 export 字段"。
+  - Dashboard 的 Plugin 页同样停留在 v1:注册表单填 `kind` + `interfaceVersion`(网关按未知字段静默丢弃)、详情页与列表渲染 `plugin.kind` / `plugin.interfaceVersion`(现在都是 `undefined`)、契约门写着"~describe 的 kind 与 interfaceVersion 必须和 manifest 一致"(已不是真规则)。
+  - `tb plugin` 也停留在 v1:`ls` 有 KIND 列、`get` 打印 `kind:`/`interfaceVersion:`、`register`/`update` 回显 `(${reg.kind}, …)` —— v2 下这些全打印 `undefined`。
+  - 根因是同一个:v2 把「这个 plugin 提供什么」从部署身份下沉到了 export,而**管理面拿不到 exports** —— `~describe` 只缓存在 `pluginmeta:<id>`,`system/plugin` 的 get/list 从不返回。于是 CLI 与 Dashboard 既答不出"它是什么",也无从知道挂载时 `config.export` 能填什么(多 export 必须显式指定)。
+- 动作:
+  - **core**:`system/plugin` 的 get/list/write/update 一律返回新的管理面投影 `PluginView = manifest + exports`,exports 直接读 `pluginmeta:<id>` —— 与网关挂载时 `requirePluginExport` 读的是**同一份缓存**,不另起真源。缓存缺失(老记录)时省略该字段而不是编空数组。`PluginRegistration` 从 manifest.ts 移到 builtin/plugin.ts 并改为 `PluginView + pluginToken`(manifest.ts 只描述部署身份,不该知道 exports)。
+  - **CLI**:`plugin ls` 的 KIND 列 → EXPORTS(`notes:context/v1, actions:tools/v1`);`plugin get` 打印 protocolVersion + 逐个 export(含 methods/capabilities/description),**并为每个 export 给出它 profile 对应的挂载命令**(tools/v1 → `tb tool mount … --kind tool --export <id>`;context/v1 → `tb ctx mount … --export <id>`),用户不必自己换算;register/update 回显同步去 kind。
+  - **Dashboard**:类型面 `PluginManifest` 升到 v2(`protocolVersion` + `exports?`,删 `PluginKind`);Plugin 页的 kind/interfaceVersion 表单项与展示全部换成 exports 徽标与 v2 契约门文案;挂载表单改为**按 export 的 profile** 过滤候选 plugin(一个 plugin 可同时出现在 tool 与 context 两处),并新增共用的 `ExportField`:候选来自缓存的 `~describe`,单 export 可留空(网关自动选中)、多 export 必选,缺缓存的老记录退回手填不把人挡在门外;换 provider 即清空 export。校验文案与 core `resolvePluginExport`、`--export` 同语义。
+- 验证:
+  - **缺陷是机器证明的,不是我说的**:Dashboard 类型面升到 v2 后,`pnpm --filter @tool-bridge/dashboard typecheck` 直接报 `src/pages/system/RegistryPage.tsx(250,49): error TS2339: Property 'kind' does not exist on type 'PluginManifest'`(两处)—— 这就是"挂载表单在按一个平台早已不返回的字段过滤"的编译期铁证。改完后 typecheck 干净。
+  - core 新增 3 例:get/list 回 exports(与 `~describe` 逐字相等)、write/update 的返回也带 exports 且仅本地字段变更时**不重抓契约**(`fetchContract` 仍只调 1 次)、meta 缓存缺失 → 省略 exports 而非空数组。core 726 → **728 passed**。
+  - gateway 新增 1 例(走真实 HTTP,与 curl 等价):一个双 export plugin 注册后,write/list/get 三处都回 `[actions:tools/v1, entries:context/v1]`,且响应里**不再有 kind / interfaceVersion**。gateway 144 → **145 passed**。
+  - CLI 新增 2 例并改写 1 例:EXPORTS 列取代 KIND 列、`get` 逐个 export 列出并给出对应挂载命令且**输出中不含 'undefined'**(钉死 v1 字段回归)、缺 exports 缓存时列显示占位符。cli 237 → **239 passed**。
+  - `pnpm --filter @tool-bridge/dashboard build` 通过(RegistryPage 37.47 kB / PluginsPage 29.42 kB)。
+  - `pnpm verify` 全量 → typecheck + lint clean + **1194 passed / 7 skipped**(core 728 + plugin-sdk 22 + cli 239 + sdk 19+1 + plugin-feishu 9 + gateway 145+6 + server 32),退出码 **0**。
+- 勾选:Phase 2 项 2(Plugin v2 多 export)—— 至此代码面与三入口对等都成立。
+- **账本订正(不静默)**:发现 DOD.md 里 Phase 1 项 1–5 与 Phase 2 项 1–4 的复选框**从未被勾上**,尽管 Rounds 1–9 已逐条记了命令与输出(`git log -- DOD.md` 显示只有项 5/6 有过勾选提交,疑似早期某轮的编辑丢失)。本轮按「DOD 是法官、证据即判据」补勾这 9 项——**依据是既有 Round 记录里的证据,不是本轮新跑的**;唯一由本轮重新确认的是「全阶段回归绿:pnpm verify 退出码 0」。
+- 遗留:Phase 2 可做项**已清空** —— 只剩 P2-1(飞书生产复验)与项 8(部署),两者都是待授权的外向动作。按 LOOP「Phase 内只剩 PENDING → 继续下一 Phase」进 **Phase 3(E:对外 MCP 出口)**,起点是 blocker E-1(用官方 `@modelcontextprotocol/sdk` 写测试 client)。跳过的是"部署/生产实调"这类流程动作,Phase 3 的编码依赖的是 Phase 2 的**代码**,而代码已在本分支上,不构成代码依赖。
+- 待办(留给 `llmdoc:update`):`system/plugin` 管理面新增 exports 投影这条契约;plugin/v2 下"管理面如何回答『这个 plugin 提供什么』"的答案已从 manifest.kind 变为 export 列表。

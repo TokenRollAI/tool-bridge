@@ -1,11 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { PluginManifest, PluginRegistration } from '../../src/plugin/manifest'
+import type { PluginManifest } from '../../src/plugin/manifest'
 import type { BuiltinModule } from '../../src/builtin/types'
 import type { CallContext } from '../../src/types'
 import {
   createPluginModule,
   type PluginHealthRecord,
   type PluginProbeResult,
+  type PluginRegistration,
   pluginTokenSecretName,
 } from '../../src/builtin/plugin'
 import { KEY_PLUGIN, KEY_PLUGIN_HEALTH, KEY_PLUGIN_META, MemoryStateStore } from '../../src/store'
@@ -108,12 +109,37 @@ describe('builtin plugin 模块', () => {
     })
   })
 
-  it('get/list 不回显 pluginToken 与 tokenSkId', async () => {
+  it('get/list 不回显 pluginToken 与 tokenSkId,但回 ~describe 的 exports', async () => {
     await h.mod.dispatch('write', { ...MANIFEST }, ctx)
+    // v2 的"这个 plugin 提供什么"在 export 上,管理面(tb plugin / Dashboard)靠它回答,
+    // 也靠它知道挂载时 config.export 能填什么 —— 来源就是网关挂载时读的同一份 meta 缓存。
+    const expected = { ...MANIFEST, exports: DESCRIBE.exports }
+    const got = (await h.mod.dispatch('get', { id: MANIFEST.id }, ctx)) as Record<string, unknown>
+    expect(got).toEqual(expected)
+    const page = (await h.mod.dispatch('list', {}, ctx)) as { items: Record<string, unknown>[] }
+    expect(page.items).toEqual([expected])
+  })
+
+  it('write/update 的返回也带 exports(注册完即可直接挂载,不必再 get 一次)', async () => {
+    const reg = (await h.mod.dispatch('write', { ...MANIFEST }, ctx)) as PluginRegistration
+    expect(reg.exports).toEqual(DESCRIBE.exports)
+    const updated = (await h.mod.dispatch(
+      'update',
+      { id: MANIFEST.id, patch: { enabled: false } },
+      ctx,
+    )) as PluginRegistration
+    // 仅本地字段变更不重抓契约,exports 从缓存回读(与 get 同源)。
+    expect(h.fetchContract).toHaveBeenCalledTimes(1)
+    expect(updated.exports).toEqual(DESCRIBE.exports)
+    expect(updated.enabled).toBe(false)
+  })
+
+  it('meta 缓存缺失(老记录)→ 省略 exports 而不是编一个空数组', async () => {
+    await h.mod.dispatch('write', { ...MANIFEST }, ctx)
+    await h.store.delete(KEY_PLUGIN_META + MANIFEST.id)
     const got = (await h.mod.dispatch('get', { id: MANIFEST.id }, ctx)) as Record<string, unknown>
     expect(got).toEqual(MANIFEST)
-    const page = (await h.mod.dispatch('list', {}, ctx)) as { items: Record<string, unknown>[] }
-    expect(page.items).toEqual([MANIFEST])
+    expect('exports' in got).toBe(false)
   })
 
   it('重注册换发 pluginToken 并吊销上一代 SK', async () => {
@@ -179,7 +205,7 @@ describe('builtin plugin 模块', () => {
       { id: MANIFEST.id, patch: { enabled: false } },
       ctx,
     )) as PluginManifest
-    expect(updated).toEqual({ ...MANIFEST, enabled: false })
+    expect(updated).toEqual({ ...MANIFEST, enabled: false, exports: DESCRIBE.exports })
     await expect(
       h.mod.dispatch('update', { id: MANIFEST.id, patch: { id: 'other' } }, ctx),
     ).rejects.toSatisfy(e => isTBError(e) && e.code === 'invalid_argument')

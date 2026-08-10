@@ -65,6 +65,14 @@ const TOOL_DESCRIBE = {
   protocolVersion: 'plugin/v2',
   exports: [{ id: 'actions', profile: 'tools/v1' }],
 }
+/** 一个部署同时导出 tools 与 context —— 管理面必须能分别看到并分别挂载。 */
+const DUAL_DESCRIBE = {
+  protocolVersion: 'plugin/v2',
+  exports: [
+    { id: 'actions', profile: 'tools/v1', description: 'Demo actions' },
+    { id: 'entries', profile: 'context/v1', methods: ['List', 'Get'] },
+  ],
+}
 
 interface SeenEnvelope {
   body: { arguments: Record<string, unknown>, tool: string }
@@ -163,6 +171,28 @@ describe('system/plugin 注册全流程', () => {
     const gotBody = (await got.json()) as Record<string, unknown>
     expect(gotBody).not.toHaveProperty('pluginToken')
     expect(gotBody).not.toHaveProperty('tokenSkId')
+  })
+
+  it('write/list/get 都回 ~describe 的 exports —— 管理面据此知道能挂哪个 export', async () => {
+    stubProvider({ describe: DUAL_DESCRIBE })
+    // 注册响应即带 exports:注册完不必再 get 一次就能挂载。
+    const reg = (await registerPlugin(manifest('dual-plugin'))) as { exports?: unknown }
+    expect(reg.exports).toEqual(DUAL_DESCRIBE.exports)
+
+    const list = await postJson('system/plugin', { tool: 'list', arguments: {} }, admin())
+    const page = (await list.json()) as { items: Array<Record<string, unknown>> }
+    expect(page.items.find(p => p.id === 'dual-plugin')?.exports).toEqual(DUAL_DESCRIBE.exports)
+
+    const got = await postJson(
+      'system/plugin',
+      { tool: 'get', arguments: { id: 'dual-plugin' } },
+      admin(),
+    )
+    const body = (await got.json()) as Record<string, unknown>
+    expect(body.exports).toEqual(DUAL_DESCRIBE.exports)
+    // v1 的 kind/interfaceVersion 已随 plugin/v2 移出 manifest,管理面不该再看到它们。
+    expect(body).not.toHaveProperty('kind')
+    expect(body).not.toHaveProperty('interfaceVersion')
   })
 
   it('探活失败({healthy:false})→ 503 unavailable 拒注册', async () => {

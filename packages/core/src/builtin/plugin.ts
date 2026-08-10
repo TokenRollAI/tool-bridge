@@ -10,7 +10,7 @@
  * write 流程(注册流程):manifest 校验 → 探活(失败 → unavailable 拒)→
  * 契约校验(validatePluginContract,失败 → invalid_argument 拒)→ platform-token 时
  * mint SK(owner `plugin:<id>`,scopes 空)+ 明文存 SecretStore 保留名 `plugin-token:<id>`
- * → 存 manifest → 返回 PluginRegistration(pluginToken 仅此一次;get/list 永不回显)。
+ * → 存 manifest → 返回 PluginView + pluginToken(仅此一次;get/list 永不回显)。
  *
  * update 流程:patch 合并重校验;endpoint/healthPath/protocolVersion 任一变更时
  * 走 write 同款重探活 + 重契约校验并刷新 meta/health(失败拒更新不落库),仅本地字段
@@ -22,19 +22,18 @@ import type { CmdSpec, HelpModel } from '../htbp/model'
 import type { SKRegistryStore } from '../auth/sk'
 import type { BuiltinModule } from './types'
 import {
-  parsePluginManifest,
-  type PluginManifest,
-  type PluginRegistration,
-} from '../plugin/manifest'
-import {
   LIST_LIMIT_DEFAULT,
   LIST_LIMIT_MAX,
   type Timestamp,
   type TreePath,
 } from '../types'
+import { type PluginDescribe, type PluginExport, validatePluginContract } from '../plugin/contract'
 import { cmdPath, LIST_OPTS_SCHEMA, optListOptions, requireString, VOID_ACK } from './util'
 import { KEY_PLUGIN, KEY_PLUGIN_HEALTH, KEY_PLUGIN_META, type StateStore } from '../store'
-import { validatePluginContract } from '../plugin/contract'
+import {
+  parsePluginManifest,
+  type PluginManifest,
+} from '../plugin/manifest'
 import { TBError } from '../errors'
 import { omit } from '../omit'
 
@@ -69,6 +68,24 @@ function projectManifest(record: StoredPlugin): PluginManifest {
   return omit(record, 'tokenSkId')
 }
 
+/**
+ * 管理面投影:manifest + 注册时缓存的 `~describe.exports`。
+ *
+ * v1 的 manifest 有 `kind`,管理面据此回答"这个 plugin 是什么、能挂成什么";v2 把它下沉到
+ * export 之后,若管理面只回 manifest,`tb plugin ls` 与 Dashboard 就再也答不出这个问题
+ * ——也没法知道挂载时 `config.export` 该填什么(多 export plugin 必须显式指定)。
+ * 故 get/list/write/update 一并回 exports:与网关挂载时读的是**同一份** `pluginmeta:<id>` 缓存,
+ * 不另起真源。缓存缺失(老记录)时省略该字段,而不是编一个空数组。
+ */
+export interface PluginView extends PluginManifest {
+  exports?: PluginExport[]
+}
+
+/** write/update 的返回:PluginView + pluginToken(仅该次响应出现一次)。 */
+export interface PluginRegistration extends PluginView {
+  pluginToken?: string
+}
+
 export interface PluginModuleDeps {
   /** 放行 http:// endpoint(仅本地开发;宿主按 env `TB_ALLOW_INSECURE_HTTP=true` 注入)。 */
   allowInsecureHttp?: boolean
@@ -98,7 +115,7 @@ function pluginCmds(nodePath: TreePath): CmdSpec[] {
       path,
       h: 'list registered plugins (pluginToken never returned)',
       inputSchema: { type: 'object', properties: { opts: LIST_OPTS_SCHEMA } },
-      returns: 'Page<PluginManifest>',
+      returns: 'Page<PluginView> — manifest + the exports declared by its /~describe',
       scope: 'admin',
     },
     {
@@ -107,7 +124,7 @@ function pluginCmds(nodePath: TreePath): CmdSpec[] {
       path,
       h: 'fetch one plugin manifest by id',
       inputSchema: idSchema,
-      returns: 'PluginManifest',
+      returns: 'PluginView — manifest + the exports declared by its /~describe',
       scope: 'admin',
     },
     {
@@ -135,7 +152,7 @@ function pluginCmds(nodePath: TreePath): CmdSpec[] {
         },
         required: ['id', 'endpoint', 'auth', 'healthPath', 'enabled'],
       },
-      returns: 'PluginRegistration — pluginToken shown once (platform-token only)',
+      returns: 'PluginView + pluginToken shown once (platform-token only)',
       scope: 'admin',
     },
     {
@@ -154,7 +171,7 @@ function pluginCmds(nodePath: TreePath): CmdSpec[] {
         },
         required: ['id', 'patch'],
       },
-      returns: 'PluginManifest — pluginToken shown once if auth switched to platform-token',
+      returns: 'PluginView — pluginToken shown once if auth switched to platform-token',
       scope: 'admin',
     },
     {
@@ -194,6 +211,15 @@ export function createPluginModule(deps: PluginModuleDeps): BuiltinModule {
     const record = await read(id)
     if (!record) throw new TBError('not_found', `plugin '${id}' not found`)
     return record
+  }
+
+  /** manifest + `pluginmeta:<id>` 里缓存的 exports(缺失则省略该字段)。 */
+  async function view(record: StoredPlugin): Promise<PluginView> {
+    const describe = (await store.get(KEY_PLUGIN_META + record.id)) as PluginDescribe | null
+    return {
+      ...projectManifest(record),
+      ...(describe?.exports !== undefined ? { exports: describe.exports } : {}),
+    }
   }
 
   /** 吊销上一代 platform-token(换发/注销/切到 bearer 时;SK 删除幂等)。 */
@@ -261,10 +287,17 @@ export function createPluginModule(deps: PluginModuleDeps): BuiltinModule {
     }
     await store.put(KEY_PLUGIN + manifest.id, record)
 
-    return { ...manifest, ...(pluginToken !== undefined ? { pluginToken } : {}) }
+    return {
+      ...manifest,
+      exports: describe.exports,
+      ...(pluginToken !== undefined ? { pluginToken } : {}),
+    }
   }
 
-  async function update(id: string, patch: Record<string, unknown>): Promise<PluginRegistration> {
+  async function update(
+    id: string,
+    patch: Record<string, unknown>,
+  ): Promise<PluginRegistration> {
     const existing = await require(id)
     if (patch.id !== undefined && patch.id !== id) {
       throw new TBError('invalid_argument', 'id 不可通过 update 变更')
@@ -321,11 +354,13 @@ export function createPluginModule(deps: PluginModuleDeps): BuiltinModule {
       }
     }
 
-    await store.put(KEY_PLUGIN + id, {
+    const record: StoredPlugin = {
       ...merged,
       ...(tokenSkId !== undefined ? { tokenSkId } : {}),
-    } satisfies StoredPlugin)
-    return { ...merged, ...(pluginToken !== undefined ? { pluginToken } : {}) }
+    }
+    await store.put(KEY_PLUGIN + id, record)
+    // exports 从刚刷新的(或原有的)meta 缓存回读,与 get/list 同一来源。
+    return { ...(await view(record)), ...(pluginToken !== undefined ? { pluginToken } : {}) }
   }
 
   async function remove(id: string): Promise<void> {
@@ -353,11 +388,13 @@ export function createPluginModule(deps: PluginModuleDeps): BuiltinModule {
           const listOpts: { cursor?: string, limit: number } = { limit: clampLimit(opts?.limit) }
           if (opts?.cursor !== undefined) listOpts.cursor = opts.cursor
           const page = await store.list(KEY_PLUGIN, listOpts)
-          const items = page.items.map(({ value }) => projectManifest(value as StoredPlugin))
+          const items = await Promise.all(
+            page.items.map(({ value }) => view(value as StoredPlugin)),
+          )
           return page.cursor !== undefined ? { items, cursor: page.cursor } : { items }
         }
         case 'get':
-          return projectManifest(await require(requireString(args, 'id')))
+          return await view(await require(requireString(args, 'id')))
         case 'write':
           return write(args)
         case 'update': {

@@ -11,14 +11,24 @@ import { callTool, CliError } from '../http'
  * 线格式类型仅本文件使用,故就地定义(不进 types.ts)。
  */
 
+/** `~describe` 里的一个 export(plugin/v2:「提供什么」在 export 上,不在 manifest 上)。 */
+export interface PluginExport {
+  capabilities?: string[]
+  description?: string
+  id: string
+  methods?: string[]
+  profile: 'tools/v1' | 'context/v1'
+}
+
 export interface PluginManifest {
   auth: { kind: 'platform-token' } | { kind: 'bearer', secretRef: string }
   enabled: boolean
   endpoint: string
+  /** 注册时缓存的 `~describe.exports`(挂载 `--export` 从这里选);老记录可能缺省。 */
+  exports?: PluginExport[]
   healthPath: string
   id: string
-  interfaceVersion: string
-  kind: 'tool-provider' | 'context-provider'
+  protocolVersion: string
 }
 
 /** Write/Update 返回:manifest + pluginToken(auth=platform-token 时仅该次响应出现一次)。 */
@@ -31,6 +41,13 @@ export interface PluginHealth {
   checkedAt?: string
   consecutiveFailures?: number
   healthy: boolean
+}
+
+/** export 摘要:`actions:tools/v1, notes:context/v1`;缺省缓存时给 '-'(不假装没有 export)。 */
+function exportsSummary(m: Pick<PluginManifest, 'exports'>): string {
+  const list = m.exports ?? []
+  if (list.length === 0) return '-'
+  return list.map(e => `${e.id}:${e.profile}`).join(', ')
 }
 
 interface PluginOpts {
@@ -103,7 +120,8 @@ export function pluginRegisterCommand(): Command {
           printJson(reg)
           return
         }
-        printLine(`registered plugin: ${reg.id} (${reg.kind}, ${reg.endpoint})`)
+        printLine(`registered plugin: ${reg.id} (${reg.endpoint})`)
+        printLine(`exports: ${exportsSummary(reg)}`)
         if (reg.pluginToken) {
           printLine('')
           printLine('!! PLUGIN TOKEN (shown once — store it now, it cannot be retrieved again):')
@@ -133,11 +151,11 @@ export function pluginListCommand(): Command {
         }
         const rows = (page.items ?? []).map(p => [
           p.id,
-          p.kind,
+          exportsSummary(p),
           p.endpoint,
           p.enabled ? 'enabled' : 'disabled',
         ])
-        printLine(table(['ID', 'KIND', 'ENDPOINT', 'STATE'], rows))
+        printLine(table(['ID', 'EXPORTS', 'ENDPOINT', 'STATE'], rows))
         if (page.cursor) printLine(`next cursor: ${page.cursor}`)
       })
     })
@@ -161,12 +179,29 @@ export function pluginGetCommand(): Command {
           return
         }
         printLine(`id:               ${m.id}`)
-        printLine(`kind:             ${m.kind}`)
-        printLine(`interfaceVersion: ${m.interfaceVersion}`)
+        printLine(`protocolVersion:  ${m.protocolVersion}`)
         printLine(`endpoint:         ${m.endpoint}`)
         printLine(`auth:             ${m.auth?.kind ?? '-'}`)
         printLine(`healthPath:       ${m.healthPath}`)
         printLine(`state:            ${m.enabled ? 'enabled' : 'disabled'}`)
+        // v2:「提供什么」在 export 上 —— 逐个列出,并给出它对应的挂载命令
+        // (profile 决定挂成哪种节点,用户不必自己换算)。
+        printLine('exports:')
+        const exports = m.exports ?? []
+        if (exports.length === 0) printLine('  - (no ~describe cache; re-register to refresh)')
+        for (const e of exports) {
+          const extra = [
+            e.methods?.length ? `methods=${e.methods.join('|')}` : '',
+            e.capabilities?.length ? `capabilities=${e.capabilities.join('|')}` : '',
+            e.description ?? '',
+          ].filter(Boolean)
+          printLine(`  ${e.id} (${e.profile})${extra.length ? `  ${extra.join('  ')}` : ''}`)
+          printLine(
+            e.profile === 'tools/v1'
+              ? `    mount: tb tool mount <path> --kind tool --provider ${m.id} --export ${e.id}`
+              : `    mount: tb ctx mount <path> --provider ${m.id} --export ${e.id}`,
+          )
+        }
       })
     })
 }
@@ -202,7 +237,8 @@ export function pluginUpdateCommand(): Command {
           printJson(updated)
           return
         }
-        printLine(`updated plugin: ${updated.id} (${updated.kind}, ${updated.endpoint})`)
+        printLine(`updated plugin: ${updated.id} (${updated.endpoint})`)
+        printLine(`exports: ${exportsSummary(updated)}`)
         if (updated.pluginToken) {
           printLine('')
           printLine('!! PLUGIN TOKEN (shown once — store it now, it cannot be retrieved again):')
