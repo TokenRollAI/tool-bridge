@@ -42,7 +42,7 @@ import {
   optionalMethodsForCapabilities,
   parseNodeInput,
   type PluginDescribe,
-  type PluginKind,
+  type PluginExport,
   type PluginManifest,
   PRESIGN_TTL_SEC_DEFAULT,
   RemoteAllowlistStore,
@@ -50,6 +50,7 @@ import {
   renderHelpJson,
   renderHelpMarkdown,
   type Representation,
+  resolvePluginExport,
   resolveUpstreamTool,
   type SearchOptions,
   type SecretStoreImpl,
@@ -605,30 +606,37 @@ function localCapabilities(provider: ContextProvider): string[] {
 // ---------- plugin 挂载消费 ----------
 
 /**
- * 取已注册且启用的 plugin manifest(挂载校验与调用点共用)。
- * 不存在/kind 不符 → invalid_argument(与既有「未知 provider」口径一致,不泄露更多);
- * 禁用 → invalid_argument。落盘记录含平台内部 tokenSkId,网关内部使用无须投影。
+ * 取已注册且启用的 plugin,并选出挂载目标 export(plugin/v2)。
+ *
+ * v1 用 manifest.kind 判「这个 plugin 是不是我要的类型」;v2 的类型属于 **export**,
+ * 故改为:取 manifest(存在 + 启用)→ 取注册时缓存的 `~describe` → 按挂载配置的
+ * `config.export` 与节点 kind 选出唯一 export(单 export 可省略;多 export 必须显式,
+ * 见 core resolvePluginExport)。不存在/禁用 → invalid_argument(不泄露更多)。
  */
-async function requirePlugin(
+async function requirePluginExport(
   store: StateStore,
   id: string,
-  kind: PluginKind,
+  nodeKind: 'tool' | 'context',
   what: 'context' | 'tool',
-): Promise<PluginManifest> {
+  exportId?: string,
+): Promise<{ export: PluginExport, manifest: PluginManifest }> {
   const manifest = (await store.get(KEY_PLUGIN + id)) as PluginManifest | null
-  if (manifest === null || manifest.kind !== kind) {
+  if (manifest === null) {
     throw new TBError('invalid_argument', `未知 ${what} provider:'${id}'`)
   }
   if (manifest.enabled !== true) {
     throw new TBError('invalid_argument', `plugin '${id}' 已禁用`)
   }
-  return manifest
-}
-
-/** 注册时抓取缓存的 `~describe.capabilities`(pluginmeta:<id>;缺失回空表)。 */
-async function pluginCapabilities(store: StateStore, id: string): Promise<readonly string[]> {
-  const meta = (await store.get(KEY_PLUGIN_META + id)) as PluginDescribe | null
-  return meta?.capabilities ?? []
+  const describe = (await store.get(KEY_PLUGIN_META + id)) as PluginDescribe | null
+  if (describe === null) {
+    throw new TBError('invalid_argument', `plugin '${id}' 缺少 ~describe 缓存,请重新注册`)
+  }
+  const chosen = resolvePluginExport(describe, {
+    nodeKind,
+    pluginId: id,
+    ...(exportId !== undefined ? { exportId } : {}),
+  })
+  return { manifest, export: chosen }
 }
 
 /**
@@ -640,11 +648,14 @@ function mountCallContext(
   ctx: CallContext,
   mountPath: TreePath,
   providerConfig: Record<string, unknown> | undefined,
+  exportId?: string,
 ): CallContext {
   return {
     ...ctx,
     mountPath,
     ...(providerConfig !== undefined ? { mountConfig: providerConfig } : {}),
+    // v2 多 export:plugin 据此把调用路由到正确的 export。
+    ...(exportId !== undefined ? { exportId } : {}),
   }
 }
 
@@ -674,11 +685,17 @@ async function providerFor(
     const local = deps.locals?.tool?.(node.path)
     if (local !== undefined) return local
     // plugin 工具源:provider = 已注册 tool-provider plugin 的 id。
-    const manifest = await requirePlugin(deps.state, node.config.provider, 'tool-provider', 'tool')
+    const { manifest, export: exported } = await requirePluginExport(
+      deps.state,
+      node.config.provider,
+      'tool',
+      'tool',
+      node.config.export,
+    )
     return createPluginToolProvider({
       manifest,
       secrets: deps.secrets,
-      ctx: mountCallContext(ctx, node.path, node.config.providerConfig),
+      ctx: mountCallContext(ctx, node.path, node.config.providerConfig, exported.id),
       // 挂载 authRef = 上游凭证引用,平台代解析经 X-TB-Upstream-Auth 注入。
       ...(node.config.authRef !== undefined ? { upstreamAuthRef: node.config.authRef } : {}),
     })
@@ -761,7 +778,14 @@ async function assertToolConfig(config: unknown, store: StateStore): Promise<voi
   if (typeof provider !== 'string' || provider === '') {
     throw new TBError('invalid_argument', 'kind:\'tool\' 节点需要 config.provider(plugin id)')
   }
-  await requirePlugin(store, provider, 'tool-provider', 'tool')
+  const exportId = (config as { export?: unknown }).export
+  await requirePluginExport(
+    store,
+    provider,
+    'tool',
+    'tool',
+    typeof exportId === 'string' ? exportId : undefined,
+  )
 }
 
 // ---------- context 节点 ----------
@@ -1118,9 +1142,14 @@ async function helpModelFor(
       // plugin-backed 节点:只列四动词 + 注册时声明的可选方法(Q12)。
       const model = contextHelpModel(node, { readOnly: node.config.readOnly ?? false })
       const core = new Set(['List', 'Get', 'Write', 'Update'])
-      const declared = optionalMethodsForCapabilities(
-        await pluginCapabilities(deps.state, node.config.provider),
+      const { export: exported } = await requirePluginExport(
+        deps.state,
+        node.config.provider,
+        'context',
+        'context',
+        node.config.export,
       )
+      const declared = optionalMethodsForCapabilities(exported.capabilities ?? [])
       return { ...model, cmds: model.cmds.filter(c => core.has(c.name) || declared.has(c.name)) }
     }
     return contextHelpModel(node, { readOnly: node.config.readOnly ?? false })
@@ -1146,7 +1175,7 @@ async function assertContextConfig(config: unknown, deps: TbAppDeps): Promise<vo
   if (cfg.provider !== 'r2' && cfg.provider !== 's3') {
     // plugin 挂载:不存在/kind 不符/禁用 → invalid_argument(device-fs 由网关代写、
     // SDK '@local' 由 registerContext 内部通道落库,均不经注册面)。
-    await requirePlugin(deps.state, cfg.provider, 'context-provider', 'context')
+    await requirePluginExport(deps.state, cfg.provider, 'context', 'context', cfg.export)
     return
   }
   if (cfg.provider === 's3') {
@@ -1665,12 +1694,18 @@ export function createTbApp(deps: TbAppDeps): Hono<{ Variables: Vars }> {
         }
         // plugin-backed context:provider 非 r2/s3 视为 plugin id,
         // 经 envelope 转发;plugin 不存在/禁用/kind 不符 → invalid_argument。
-        const manifest = await requirePlugin(store, cfg.provider, 'context-provider', 'context')
+        const { manifest, export: exported } = await requirePluginExport(
+          store,
+          cfg.provider,
+          'context',
+          'context',
+          cfg.export,
+        )
         const provider = createPluginContextProvider({
           manifest,
           secrets: deps.secrets,
-          ctx: mountCallContext(ctx, node.path, cfg.providerConfig),
-          capabilities: await pluginCapabilities(store, cfg.provider),
+          ctx: mountCallContext(ctx, node.path, cfg.providerConfig, exported.id),
+          capabilities: exported.capabilities ?? [],
           // 挂载 authRef = 上游凭证引用,平台代解析经 X-TB-Upstream-Auth 注入。
           ...(cfg.authRef !== undefined ? { upstreamAuthRef: cfg.authRef } : {}),
         })
@@ -1826,7 +1861,9 @@ export function createTbApp(deps: TbAppDeps): Hono<{ Variables: Vars }> {
           ? CONTEXT_CAPABILITIES
           : local !== null
             ? localCapabilities(local)
-            : await pluginCapabilities(store, cfg.provider)
+            : (
+                await requirePluginExport(store, cfg.provider, 'context', 'context', cfg.export)
+              ).export.capabilities ?? []
       return new Response(JSON.stringify({ kind: 'context', capabilities }), {
         headers: { 'content-type': contentTypeFor('json') },
       })

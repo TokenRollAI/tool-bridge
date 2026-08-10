@@ -1,248 +1,173 @@
 import { describe, expect, it } from 'vitest'
 import type { PluginManifest } from '../../src/plugin/manifest'
-import type { HelpModel } from '../../src/htbp/model'
-import { validatePluginContract } from '../../src/plugin/contract'
-import { renderHelpDsl } from '../../src/htbp/helpDsl'
-import { TBError } from '../../src/errors'
+import {
+  optionalMethodsForCapabilities,
+  type PluginDescribe,
+  resolvePluginExport,
+  validatePluginContract,
+} from '../../src/plugin/contract'
+import { isTBError } from '../../src/errors'
 
-const CONTEXT_MANIFEST: PluginManifest = {
-  id: 'feishu-docs',
-  kind: 'context-provider',
-  interfaceVersion: 'context-provider/v1',
-  endpoint: 'https://feishu-docs-provider.example.workers.dev',
+const MANIFEST: PluginManifest = {
+  id: 'feishu',
+  protocolVersion: 'plugin/v2',
+  endpoint: 'https://plugin.example.com',
   auth: { kind: 'platform-token' },
   healthPath: '/healthz',
   enabled: true,
 }
 
-const TOOL_MANIFEST: PluginManifest = {
-  ...CONTEXT_MANIFEST,
-  id: 'orders',
-  kind: 'tool-provider',
-  interfaceVersion: 'tool-provider/v1',
+/** 一个 plugin 同时导出 tools 与 context —— v1 表达不了的形态。 */
+const DUAL_EXPORT = {
+  protocolVersion: 'plugin/v2',
+  exports: [
+    { id: 'actions', profile: 'tools/v1', description: 'Feishu actions' },
+    {
+      id: 'documents',
+      profile: 'context/v1',
+      description: 'Feishu documents',
+      methods: ['Get', 'List', 'Search'],
+      capabilities: ['search'],
+    },
+  ],
 }
 
-/** ~help(JSON 表现)最小样例:给定方法名集合。 */
-function helpJson(names: string[]): unknown {
-  return {
-    htbp: '0.1',
-    node: { path: '', kind: 'context', description: 'stub' },
-    cmds: names.map(name => ({ name, method: 'POST', path: '/', scope: 'read' })),
-  }
-}
-
-/** ~help(DSL 表现):经现有渲染器生成,验证退化解析走真实形状。 */
-function helpDsl(names: string[]): string {
-  const model: HelpModel = {
-    node: { path: '', kind: 'context', description: 'stub' },
-    cmds: names.map(name => ({
-      name,
-      method: 'POST' as const,
-      path: '/',
-      scope: 'read' as const,
-    })),
-  }
-  return renderHelpDsl(model)
-}
-
-function describeJson(overrides: Partial<Record<string, unknown>> = {}): unknown {
-  return {
-    kind: 'context-provider',
-    interfaceVersion: 'context-provider/v1',
-    capabilities: [],
-    ...overrides,
-  }
-}
-
-function expectInvalid(fn: () => void): TBError {
+function expectInvalid(describe: unknown): { code: string, message: string } {
+  let caught: unknown
   try {
-    fn()
-  } catch (e) {
-    expect(e).toBeInstanceOf(TBError)
-    expect((e as TBError).code).toBe('invalid_argument')
-    return e as TBError
+    validatePluginContract({ manifest: MANIFEST, describe })
+  } catch (err) {
+    caught = err
   }
-  throw new Error('expected invalid_argument')
+  expect(isTBError(caught)).toBe(true)
+  expect((caught as { code: string }).code).toBe('invalid_argument')
+  return caught as { code: string, message: string }
 }
 
-describe('HelpJson 优先:方法集合校验', () => {
-  it('context-provider 四动词齐全 → 通过', () => {
-    expect(() =>
-      validatePluginContract({
-        manifest: CONTEXT_MANIFEST,
-        describe: describeJson(),
-        help: helpJson(['List', 'Get', 'Update', 'Write']),
-      }),
-    ).not.toThrow()
+describe('validatePluginContract(plugin/v2)', () => {
+  it('单个 plugin 同时导出 tools 与 context → 通过', () => {
+    const parsed = validatePluginContract({ manifest: MANIFEST, describe: DUAL_EXPORT })
+    expect(parsed.exports.map(e => e.id)).toEqual(['actions', 'documents'])
+    expect(parsed.exports.map(e => e.profile)).toEqual(['tools/v1', 'context/v1'])
   })
 
-  it('tool-provider List/Get/Call 齐全 → 通过', () => {
-    expect(() =>
-      validatePluginContract({
-        manifest: TOOL_MANIFEST,
-        describe: describeJson({ kind: 'tool-provider', interfaceVersion: 'tool-provider/v1' }),
-        help: helpJson(['List', 'Get', 'Call']),
-      }),
-    ).not.toThrow()
+  it('tools/v1 无需声明 methods(运行时经 List 发现)', () => {
+    const parsed = validatePluginContract({
+      manifest: MANIFEST,
+      describe: { protocolVersion: 'plugin/v2', exports: [{ id: 'a', profile: 'tools/v1' }] },
+    })
+    expect(parsed.exports[0]?.methods).toBeUndefined()
   })
 
-  it('缺 Update → 拒,message 指出缺哪个方法', () => {
-    const err = expectInvalid(() =>
-      validatePluginContract({
-        manifest: CONTEXT_MANIFEST,
-        describe: describeJson(),
-        help: helpJson(['List', 'Get', 'Write']),
-      }),
-    )
-    expect(err.message).toContain('Update')
+  it('形状非法(缺 exports / 空 exports)→ invalid_argument', () => {
+    expectInvalid({ protocolVersion: 'plugin/v2' })
+    expectInvalid({ protocolVersion: 'plugin/v2', exports: [] })
   })
 
-  it('tool-provider 缺 Call → 拒', () => {
-    const err = expectInvalid(() =>
-      validatePluginContract({
-        manifest: TOOL_MANIFEST,
-        describe: describeJson({ kind: 'tool-provider', interfaceVersion: 'tool-provider/v1' }),
-        help: helpJson(['List', 'Get']),
-      }),
-    )
-    expect(err.message).toContain('Call')
+  it('protocolVersion 与 manifest 不符 → invalid_argument', () => {
+    const err = expectInvalid({ ...DUAL_EXPORT, protocolVersion: 'plugin/v1' })
+    expect(err.message).toContain('protocolVersion')
   })
 
-  it('方法集合是超集(多余 cmd)不拒', () => {
-    expect(() =>
-      validatePluginContract({
-        manifest: CONTEXT_MANIFEST,
-        describe: describeJson(),
-        help: helpJson(['List', 'Get', 'Update', 'Write', 'Extra']),
-      }),
-    ).not.toThrow()
-  })
-})
-
-describe('DSL 退化解析(~help 非 JSON 时)', () => {
-  it('DSL 文本四动词齐全 → 通过', () => {
-    expect(() =>
-      validatePluginContract({
-        manifest: CONTEXT_MANIFEST,
-        describe: describeJson(),
-        help: helpDsl(['List', 'Get', 'Update', 'Write']),
-      }),
-    ).not.toThrow()
+  it('export id 重复 → invalid_argument', () => {
+    const err = expectInvalid({
+      protocolVersion: 'plugin/v2',
+      exports: [
+        { id: 'dup', profile: 'tools/v1' },
+        { id: 'dup', profile: 'context/v1' },
+      ],
+    })
+    expect(err.message).toContain('重复')
   })
 
-  it('DSL 缺方法 → 拒', () => {
-    const err = expectInvalid(() =>
-      validatePluginContract({
-        manifest: CONTEXT_MANIFEST,
-        describe: describeJson(),
-        help: helpDsl(['List', 'Get']),
-      }),
-    )
-    expect(err.message).toContain('Update')
-    expect(err.message).toContain('Write')
+  it('未知 profile → invalid_argument', () => {
+    expectInvalid({
+      protocolVersion: 'plugin/v2',
+      exports: [{ id: 'x', profile: 'widgets/v1' }],
+    })
   })
 
-  it('既非 HelpJson 又无 cmd 行的文本 → 拒(等价于零方法)', () => {
-    expectInvalid(() =>
-      validatePluginContract({
-        manifest: CONTEXT_MANIFEST,
-        describe: describeJson(),
-        help: 'hello world\nnothing here',
-      }),
-    )
-  })
-})
-
-describe('~describe 与 manifest 一致性', () => {
-  it('kind 不符 → 拒', () => {
-    const err = expectInvalid(() =>
-      validatePluginContract({
-        manifest: CONTEXT_MANIFEST,
-        describe: describeJson({ kind: 'tool-provider' }),
-        help: helpJson(['List', 'Get', 'Update', 'Write']),
-      }),
-    )
-    expect(err.message).toContain('kind')
+  it('context/v1 声明未知动词 → invalid_argument', () => {
+    const err = expectInvalid({
+      protocolVersion: 'plugin/v2',
+      exports: [{ id: 'c', profile: 'context/v1', methods: ['Get', 'Frobnicate'] }],
+    })
+    expect(err.message).toContain('Frobnicate')
   })
 
-  it('interfaceVersion 不符 → 拒', () => {
-    expectInvalid(() =>
-      validatePluginContract({
-        manifest: CONTEXT_MANIFEST,
-        describe: describeJson({ interfaceVersion: 'context-provider/v2' }),
-        help: helpJson(['List', 'Get', 'Update', 'Write']),
-      }),
-    )
-  })
-
-  it('~describe 非对象 / 缺字段 → 拒', () => {
-    expectInvalid(() =>
-      validatePluginContract({
-        manifest: CONTEXT_MANIFEST,
-        describe: 'not-json-object',
-        help: helpJson(['List', 'Get', 'Update', 'Write']),
-      }),
-    )
-    expectInvalid(() =>
-      validatePluginContract({
-        manifest: CONTEXT_MANIFEST,
-        describe: { kind: 'context-provider' },
-        help: helpJson(['List', 'Get', 'Update', 'Write']),
-      }),
-    )
-  })
-})
-
-describe('capabilities ↔ 可选方法对齐', () => {
-  it('声明 search 且 ~help 有 Search → 通过', () => {
-    expect(() =>
-      validatePluginContract({
-        manifest: CONTEXT_MANIFEST,
-        describe: describeJson({ capabilities: ['search'] }),
-        help: helpJson(['List', 'Get', 'Update', 'Write', 'Search']),
-      }),
-    ).not.toThrow()
-  })
-
-  it('声明 search 但缺 Search cmd → 拒', () => {
-    const err = expectInvalid(() =>
-      validatePluginContract({
-        manifest: CONTEXT_MANIFEST,
-        describe: describeJson({ capabilities: ['search'] }),
-        help: helpJson(['List', 'Get', 'Update', 'Write']),
-      }),
-    )
+  it('声明 capability 却未把对应动词列进 methods → invalid_argument(自相矛盾)', () => {
+    const err = expectInvalid({
+      protocolVersion: 'plugin/v2',
+      exports: [
+        { id: 'c', profile: 'context/v1', methods: ['Get', 'List'], capabilities: ['search'] },
+      ],
+    })
     expect(err.message).toContain('Search')
   })
+})
 
-  it('声明 delete 但缺 Delete cmd → 拒', () => {
-    const err = expectInvalid(() =>
-      validatePluginContract({
-        manifest: CONTEXT_MANIFEST,
-        describe: describeJson({ capabilities: ['delete'] }),
-        help: helpJson(['List', 'Get', 'Update', 'Write']),
-      }),
-    )
-    expect(err.message).toContain('Delete')
+describe('resolvePluginExport', () => {
+  const describe_ = validatePluginContract({
+    manifest: MANIFEST,
+    describe: DUAL_EXPORT,
+  }) satisfies PluginDescribe
+
+  it('显式 export id + profile 相符 → 命中', () => {
+    const chosen = resolvePluginExport(describe_, {
+      exportId: 'documents',
+      nodeKind: 'context',
+      pluginId: 'feishu',
+    })
+    expect(chosen.id).toBe('documents')
   })
 
-  it('search:semantic 限定词按基名 search → Search 判定', () => {
-    expectInvalid(() =>
-      validatePluginContract({
-        manifest: CONTEXT_MANIFEST,
-        describe: describeJson({ capabilities: ['search:semantic'] }),
-        help: helpJson(['List', 'Get', 'Update', 'Write']),
-      }),
-    )
+  it('省略 export 且恰好一个 → 取它(单 export plugin 挂载不必写 export)', () => {
+    const single = validatePluginContract({
+      manifest: MANIFEST,
+      describe: { protocolVersion: 'plugin/v2', exports: [{ id: 'only', profile: 'tools/v1' }] },
+    })
+    expect(resolvePluginExport(single, { nodeKind: 'tool', pluginId: 'feishu' }).id).toBe('only')
   })
 
-  it('未知 capability 忽略(向前兼容)', () => {
-    expect(() =>
-      validatePluginContract({
-        manifest: CONTEXT_MANIFEST,
-        describe: describeJson({ capabilities: ['telepathy'] }),
-        help: helpJson(['List', 'Get', 'Update', 'Write']),
-      }),
-    ).not.toThrow()
+  it('省略 export 但有多个 → invalid_argument(要求显式指定,不猜)', () => {
+    let caught: unknown
+    try {
+      resolvePluginExport(describe_, { nodeKind: 'tool', pluginId: 'feishu' })
+    } catch (err) {
+      caught = err
+    }
+    expect(isTBError(caught)).toBe(true)
+    expect((caught as { message: string }).message).toContain('config.export')
+  })
+
+  it('未知 export id → invalid_argument 且列出现有 id', () => {
+    let caught: unknown
+    try {
+      resolvePluginExport(describe_, { exportId: 'nope', nodeKind: 'tool', pluginId: 'feishu' })
+    } catch (err) {
+      caught = err
+    }
+    expect((caught as { message: string }).message).toContain('actions')
+  })
+
+  it('profile 与节点 kind 不符 → invalid_argument(context export 不能挂成 tool 节点)', () => {
+    let caught: unknown
+    try {
+      resolvePluginExport(describe_, {
+        exportId: 'documents',
+        nodeKind: 'tool',
+        pluginId: 'feishu',
+      })
+    } catch (err) {
+      caught = err
+    }
+    expect((caught as { message: string }).message).toContain('context/v1')
+  })
+})
+
+describe('optionalMethodsForCapabilities', () => {
+  it('基名映射 + 限定词按 ":" 前判定 + 未知基名忽略', () => {
+    expect([...optionalMethodsForCapabilities(['search:semantic', 'delete', 'future'])].sort())
+      .toEqual(['Delete', 'Search'])
   })
 })

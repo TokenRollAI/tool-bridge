@@ -15,6 +15,7 @@ interface ToolMountOpts {
   describe: string[]
   description?: string
   endpoint?: string
+  export?: string
   header: string[]
   hide: string[]
   json?: boolean
@@ -58,7 +59,11 @@ export function toolMountCommand(): Command {
     .option('--url <url>', '[mcp] Streamable HTTP URL')
     .option('--endpoint <url>', '[http] base endpoint URL')
     .option('--tools-file <file>', '[http] JSON file of HttpToolDef[]')
-    .option('--provider <id>', '[tool] registered tool-provider plugin id')
+    .option('--provider <id>', '[tool] registered plugin id')
+    .option(
+      '--export <id>',
+      '[tool] plugin export to mount (required when the plugin declares more than one)',
+    )
     .option('--auth <mode>', '[mcp] \'oauth\': gateway-managed OAuth (then run `tb tool auth`)')
     .option('--auth-ref <name>', 'SecretStore ref for upstream credential')
     .option('--auth-header <name>', '[mcp/http] auth header name; requires --auth-ref')
@@ -90,7 +95,8 @@ Examples:
   tb tool mount jira --kind mcp --url https://mcp.example.com/mcp --auth-ref jira-token
   tb tool mount gh --kind mcp --url https://api.example.com/mcp --auth oauth   # then: tb tool auth gh
   tb tool mount weather --kind http --endpoint https://api.weather.com --tools-file tools.json
-  tb tool mount notion --kind tool --provider notion-tools --auth-ref notion-token`,
+  tb tool mount notion --kind tool --provider notion-tools --auth-ref notion-token
+  tb tool mount feishu --kind tool --provider feishu --export actions`,
     )
     .action(async (pathArg: string, opts: ToolMountOpts) => {
       const asJson = Boolean(opts.json)
@@ -108,8 +114,15 @@ Examples:
 
         let config: NodeConfig
         if (kind === 'mcp') {
-          if (opts.endpoint !== undefined || opts.toolsFile !== undefined || opts.provider !== undefined) {
-            throw new CliError('--endpoint/--tools-file/--provider do not apply to --kind mcp')
+          if (
+            opts.endpoint !== undefined
+            || opts.toolsFile !== undefined
+            || opts.provider !== undefined
+            || opts.export !== undefined
+          ) {
+            throw new CliError(
+              '--endpoint/--tools-file/--provider/--export do not apply to --kind mcp',
+            )
           }
           const url = String(opts.url ?? '').trim()
           if (!url) throw new CliError('--url is required for --kind mcp')
@@ -133,8 +146,13 @@ Examples:
             })(),
           }
         } else if (kind === 'http') {
-          if (opts.url !== undefined || opts.auth !== undefined || opts.provider !== undefined) {
-            throw new CliError('--url/--auth/--provider do not apply to --kind http')
+          if (
+            opts.url !== undefined
+            || opts.auth !== undefined
+            || opts.provider !== undefined
+            || opts.export !== undefined
+          ) {
+            throw new CliError('--url/--auth/--provider/--export do not apply to --kind http')
           }
           if (opts.header.length > 0) {
             throw new CliError('--header is only supported for --kind mcp')
@@ -168,7 +186,13 @@ Examples:
           }
           const provider = String(opts.provider ?? '').trim()
           if (!provider) throw new CliError('--provider is required for --kind tool')
-          config = { kind: 'tool', provider, ...(authRef ? { authRef } : {}) }
+          const exportId = String(opts.export ?? '').trim()
+          config = {
+            kind: 'tool',
+            provider,
+            ...(exportId ? { export: exportId } : {}),
+            ...(authRef ? { authRef } : {}),
+          }
         } else {
           throw new CliError(`invalid --kind "${kind}"; valid: mcp, http, tool`)
         }

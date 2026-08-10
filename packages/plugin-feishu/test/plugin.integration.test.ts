@@ -152,15 +152,21 @@ beforeEach(() => {
 })
 
 describe('契约面(生命周期 GET,不鉴权)', () => {
-  it('healthz / ~describe / ~help(DSL 与 HelpJson)形状符合 tool-provider/v1', async () => {
+  it('healthz / ~describe(v2 exports)/ ~help(DSL 与 HelpJson)形状正确', async () => {
     const health = await SELF.fetch('https://plugin.test/healthz')
     expect(health.status).toBe(200)
     expect(await health.json()).toEqual({ healthy: true })
 
     const describeRes = await SELF.fetch('https://plugin.test/~describe')
     expect(await describeRes.json()).toEqual({
-      kind: 'tool-provider',
-      interfaceVersion: 'tool-provider/v1',
+      protocolVersion: 'plugin/v2',
+      exports: [
+        {
+          id: 'actions',
+          profile: 'tools/v1',
+          description: 'Feishu actions (docs, wiki, messaging) via the official MCP upstream',
+        },
+      ],
     })
 
     const helpJson = await SELF.fetch('https://plugin.test/~help', {

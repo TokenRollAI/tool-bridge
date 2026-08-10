@@ -9,8 +9,8 @@
  */
 
 import { z } from 'zod'
-import { PLUGIN_KINDS, type PluginKind } from './manifest'
 import { assertSecureUrl } from '../tool/upstreamError'
+import { PLUGIN_PROTOCOL_VERSION } from './manifest'
 import { TBError } from '../errors'
 
 declare const crypto: {
@@ -27,12 +27,15 @@ export interface PluginPackage {
   configSchema?: Record<string, unknown>
   description?: string
   healthPath: string
-  interfaceVersion: string
-  kind: PluginKind
   /** 每挂载配置(JSON Schema);挂载时校验节点 config.providerConfig。 */
   mountConfigSchema?: Record<string, unknown>
   /** 安装后的默认 plugin id;与 manifest id 同字符集约束。 */
   name: string
+  /**
+   * 传输协议版本(plugin/v2)。**不再声明 kind** —— v2 的一个包可以同时导出 tools 与
+   * context,提供什么由部署后的 `/~describe` exports 决定,索引条目不必也不应预先钉死。
+   */
+  protocolVersion: string
   /** bundle 内容的 sha256(hex 小写);安装时逐字节校验。 */
   sha256: string
   version: string
@@ -40,7 +43,6 @@ export interface PluginPackage {
 
 // 与 manifest.ts 的 ID_RE 同一约束(name 直接用作 plugin id 与 Worker script 名成分)。
 const NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/
-const INTERFACE_VERSION_RE = /^(tool-provider|context-provider)\/v\d+$/
 const SHA256_HEX_RE = /^[0-9a-f]{64}$/
 const VERSION_RE = /^\d+\.\d+\.\d+(?:[-+.][A-Za-z0-9.-]+)?$/
 
@@ -49,10 +51,12 @@ const packageSchema = z.object({
   version: z.string().regex(VERSION_RE, 'version 须为 semver(如 1.2.3)'),
   bundleUrl: z.string().min(1),
   sha256: z.string().regex(SHA256_HEX_RE, 'sha256 须为 64 位 hex 小写'),
-  kind: z.enum(PLUGIN_KINDS as [PluginKind, ...PluginKind[]]),
-  interfaceVersion: z
+  protocolVersion: z
     .string()
-    .regex(INTERFACE_VERSION_RE, 'interfaceVersion 须形如 <kind>/v<major>'),
+    .default(PLUGIN_PROTOCOL_VERSION)
+    .refine(v => v === PLUGIN_PROTOCOL_VERSION, {
+      message: `protocolVersion 须为 '${PLUGIN_PROTOCOL_VERSION}'`,
+    }),
   healthPath: z.string().regex(/^\//, 'healthPath 须以 \'/\' 开头'),
   description: z.string().optional(),
   configSchema: z.record(z.unknown()).optional(),
@@ -65,8 +69,7 @@ export interface ParsePluginPackageOptions {
 }
 
 /**
- * 校验并构造 PluginPackage(未知字段剥离 = 忽略):
- * interfaceVersion 前缀必须等于 kind;bundleUrl 过 {@link assertSecureUrl}。
+ * 校验并构造 PluginPackage(未知字段剥离 = 忽略);bundleUrl 过 {@link assertSecureUrl}。
  */
 export function parsePluginPackage(
   value: unknown,
@@ -81,12 +84,6 @@ export function parsePluginPackage(
     )
   }
   const pkg = parsed.data
-  if (!pkg.interfaceVersion.startsWith(`${pkg.kind}/`)) {
-    throw new TBError(
-      'invalid_argument',
-      `interfaceVersion '${pkg.interfaceVersion}' 与 kind '${pkg.kind}' 不一致`,
-    )
-  }
   const err = assertSecureUrl(pkg.bundleUrl, opts.allowInsecureHttp ?? false)
   if (err) throw err
   return pkg

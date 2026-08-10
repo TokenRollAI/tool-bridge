@@ -15,8 +15,7 @@ const ENTRY: Record<string, unknown> = {
   version: '1.2.3',
   bundleUrl: 'https://plugins.example.com/feishu/1.2.3/worker.js',
   sha256: 'a'.repeat(64),
-  kind: 'tool-provider',
-  interfaceVersion: 'tool-provider/v1',
+  protocolVersion: 'plugin/v2',
   healthPath: '/healthz',
   description: '飞书消息与群管理',
   configSchema: {
@@ -67,8 +66,8 @@ describe('parsePluginPackage', () => {
     expectInvalid(() => parsePluginPackage({ ...ENTRY, sha256: 'a'.repeat(63) }))
   })
 
-  it('kind 与 interfaceVersion 前缀不一致 → invalid_argument', () => {
-    expectInvalid(() => parsePluginPackage({ ...ENTRY, interfaceVersion: 'context-provider/v1' }))
+  it('未知 protocolVersion → invalid_argument', () => {
+    expectInvalid(() => parsePluginPackage({ ...ENTRY, protocolVersion: 'plugin/v1' }))
   })
 
   it('bundleUrl http:// 默认拒;allowInsecureHttp 放行', () => {

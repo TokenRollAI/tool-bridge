@@ -95,21 +95,19 @@ async function fetchLifecycle(base: string, seg: string): Promise<Response> {
 }
 
 /**
- * 抓取 `~describe`(JSON)与 `~help`(带 Accept: application/json;plugin 可回 HelpJson
- * 或 Help DSL 文本,契约校验两者都认)。供 core plugin write 流程做契约校验。
+ * 抓取 `/~describe`(JSON)。供 core plugin write 流程做契约校验。
  */
 export async function fetchPluginContract(
   manifest: PluginManifest,
-): Promise<{ describe: unknown, help: unknown }> {
+): Promise<{ describe: unknown }> {
   const base = resolvePluginEndpoint(manifest)
   const describeResp = await fetchLifecycle(base, '~describe')
   const describe = (await describeResp.json().catch(() => null)) as unknown
   if (describe === null) {
     throw new TBError('invalid_argument', `plugin '${manifest.id}' 的 ~describe 非 JSON`)
   }
-  const helpResp = await fetchLifecycle(base, '~help')
-  const help = await helpResp.text()
-  return { describe, help }
+  // v2 起不再抓 ~help:export 在 describe 里自报 methods,少一次上游往返。
+  return { describe }
 }
 
 export interface PluginCallOptions {

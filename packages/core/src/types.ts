@@ -33,6 +33,8 @@ export const LIST_LIMIT_MAX = 200
 export type OwnerRef = string
 
 export interface CallContext {
+  /** 平台→Plugin envelope 专用:本次调用命中该 plugin 的哪个 export(v2 多 export 路由)。 */
+  exportId?: string
   /** 本次调用使用的 SK 的 id(非明文)。 */
   keyId: string
   /** 平台→Plugin envelope 专用:挂载节点 config.providerConfig 透传(每挂载非敏感配置)。 */
@@ -202,6 +204,8 @@ export type NodeConfig
   | { kind: 'builtin', module: string }
   | {
     authRef?: string
+    /** 多 export plugin:挂载的 export id;单 export 可省。 */
+    export?: string
     kind: 'context'
     provider: string
     providerConfig?: Record<string, unknown>
@@ -214,7 +218,14 @@ export type NodeConfig
   /** tool-provider 挂载:provider = plugin id 或 SDK 内部保留 id(如 '@local')。
    *  providerConfig:设备自定义节点的转发标记(deviceId+mountPath+cmds,网关代写)。
    *  authRef:上游凭证引用,调用时平台 resolve 后经 X-TB-Upstream-Auth 注入 plugin。 */
-  | { authRef?: string, kind: 'tool', provider: string, providerConfig?: Record<string, unknown> }
+  | {
+    authRef?: string
+    /** 多 export plugin:挂载的 export id;单 export 可省(见 plugin/contract resolvePluginExport)。 */
+    export?: string
+    kind: 'tool'
+    provider: string
+    providerConfig?: Record<string, unknown>
+  }
   /** skillhub:与 context 同形的内容型 kind,存 Agent Skill(每 skill = <id>/SKILL.md + 若干文本文件)。
    *  底层复用 context 的对象存储(provider r2 用平台自带桶,无需外部凭证;s3 需 authRef)。 */
   | {

@@ -13,7 +13,7 @@
  *
  * 契约面(tool-provider/v1,与 gateway pluginClient/契约校验对齐):
  *   GET  /healthz     → { healthy: true }
- *   GET  /~describe   → { kind, interfaceVersion }
+ *   GET  /~describe   → { protocolVersion, exports[] }(v2:能力属于 export,不属于部署身份)
  *   GET  /~help       → Help DSL / HelpJson(Accept 协商)
  *   POST /            → envelope {"tool":"List|Get|Call","arguments":{...}}
  * envelope 鉴权:`Authorization: Bearer <PLUGIN_TOKEN>`(注册后由平台签发,配进
@@ -89,8 +89,10 @@ function upstreamCredential(req: Request): FeishuCredential {
   return { app_id: cred.app_id, app_secret: cred.app_secret }
 }
 
-const KIND = 'tool-provider'
-const INTERFACE_VERSION = 'tool-provider/v1'
+const PROTOCOL_VERSION = 'plugin/v2'
+/** 本 plugin 目前只导出一组工具;单 export 时挂载可省略 config.export。 */
+const EXPORT_ID = 'actions'
+const EXPORT_PROFILE = 'tools/v1'
 
 const dedupe = new RequestDedupe()
 
@@ -262,7 +264,16 @@ export default {
       if (req.method === 'GET') {
         if (url.pathname === '/healthz') return json({ healthy: true })
         if (url.pathname === '/~describe') {
-          return json({ kind: KIND, interfaceVersion: INTERFACE_VERSION })
+          return json({
+            protocolVersion: PROTOCOL_VERSION,
+            exports: [
+              {
+                id: EXPORT_ID,
+                profile: EXPORT_PROFILE,
+                description: 'Feishu actions (docs, wiki, messaging) via the official MCP upstream',
+              },
+            ],
+          })
         }
         if (url.pathname === '/~help') {
           if (negotiate(req.headers.get('accept') ?? undefined) === 'json') {

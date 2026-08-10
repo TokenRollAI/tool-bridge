@@ -356,6 +356,10 @@ export function ctxMountCommand(): Command {
     .requiredOption('--provider <provider>', 'Provider: r2 | s3 | <context-provider plugin id>')
     .option('--description <desc>', 'One-line node description (default: auto-generated)')
     .option('--auth-ref <ref>', 'SecretStore credential ref ([s3] required; [plugin] optional)')
+    .option(
+      '--export <id>',
+      '[plugin] plugin export to mount (required when the plugin declares more than one)',
+    )
     .option('--read-only', 'Reject write verbs (Write/Update/Delete)')
     .option('--ttl <seconds>', 'Node TTL in seconds (expired node is reclaimed)')
     .option('--prefix <prefix>', '[r2/s3] key prefix inside the bucket')
@@ -370,6 +374,7 @@ export function ctxMountCommand(): Command {
           bucket?: string
           description?: string
           endpoint?: string
+          export?: string
           prefix?: string
           provider: string
           readOnly?: boolean
@@ -412,9 +417,14 @@ export function ctxMountCommand(): Command {
             }
           }
 
+          const exportId = String(opts.export ?? '').trim()
+          if (exportId && (provider === 'r2' || provider === 's3')) {
+            throw new CliError('--export only applies to plugin providers')
+          }
           const config: NodeConfig = {
             kind: 'context',
             provider,
+            ...(exportId ? { export: exportId } : {}),
             ...(providerConfig ? { providerConfig } : {}),
             ...(authRef ? { authRef } : {}),
             ...(opts.readOnly ? { readOnly: true } : {}),

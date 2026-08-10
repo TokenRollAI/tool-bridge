@@ -1,13 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import { parsePluginManifest, PLUGIN_KINDS } from '../../src/plugin/manifest'
+import { parsePluginManifest } from '../../src/plugin/manifest'
 import { TBError } from '../../src/errors'
 import { omit } from '../../src/omit'
 
 /** 注册样例(feishu-docs)。 */
 const FEISHU = {
   id: 'feishu-docs',
-  kind: 'context-provider',
-  interfaceVersion: 'context-provider/v1',
+  protocolVersion: 'plugin/v2',
   endpoint: 'https://feishu-docs-provider.example.workers.dev',
   auth: { kind: 'platform-token' },
   healthPath: '/healthz',
@@ -34,8 +33,6 @@ describe('合法 manifest', () => {
     const m = {
       ...FEISHU,
       id: 'orders',
-      kind: 'tool-provider',
-      interfaceVersion: 'tool-provider/v1',
       endpoint: 'binding:ORDERS_PROVIDER',
       auth: { kind: 'bearer', secretRef: 'orders-token' },
     }
@@ -46,43 +43,6 @@ describe('合法 manifest', () => {
     const parsed = parsePluginManifest({ ...FEISHU, futureField: 42 })
     expect(parsed).toEqual(FEISHU)
     expect('futureField' in parsed).toBe(false)
-  })
-
-  it('PLUGIN_KINDS 词表 = 两种 Provider', () => {
-    expect(PLUGIN_KINDS).toEqual(['tool-provider', 'context-provider'])
-  })
-})
-
-describe('kind ↔ interfaceVersion 一致性', () => {
-  it('kind=tool-provider 配 context-provider/v1 → 拒', () => {
-    const err = expectInvalid({
-      ...FEISHU,
-      kind: 'tool-provider',
-      interfaceVersion: 'context-provider/v1',
-    })
-    expect(err.message).toContain('interfaceVersion')
-  })
-
-  it('kind=context-provider 配 tool-provider/v1 → 拒', () => {
-    expectInvalid({ ...FEISHU, interfaceVersion: 'tool-provider/v1' })
-  })
-
-  it.each([
-    'context-provider',
-    'context-provider/1',
-    'context-provider/v',
-    'context-provider/v1.2',
-  ])('形状不合 <kind>/v<major> 的 interfaceVersion 拒:%s', (bad) => {
-    expectInvalid({ ...FEISHU, interfaceVersion: bad })
-  })
-
-  it('同 kind 的更高 major 合法(v2)', () => {
-    const m = { ...FEISHU, interfaceVersion: 'context-provider/v2' }
-    expect(parsePluginManifest(m).interfaceVersion).toBe('context-provider/v2')
-  })
-
-  it('未知 kind → 拒', () => {
-    expectInvalid({ ...FEISHU, kind: 'widget-provider', interfaceVersion: 'widget-provider/v1' })
   })
 })
 

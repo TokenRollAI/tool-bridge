@@ -20,8 +20,7 @@ declare const crypto: { getRandomValues(array: Uint8Array): Uint8Array }
 
 const MANIFEST: PluginManifest = {
   id: 'feishu-docs',
-  kind: 'context-provider',
-  interfaceVersion: 'context-provider/v1',
+  protocolVersion: 'plugin/v2',
   endpoint: 'https://plugin.example.com',
   auth: { kind: 'platform-token' },
   healthPath: '/healthz',
@@ -29,17 +28,20 @@ const MANIFEST: PluginManifest = {
 }
 
 const DESCRIBE = {
-  kind: 'context-provider',
-  interfaceVersion: 'context-provider/v1',
-  capabilities: ['search'],
+  protocolVersion: 'plugin/v2',
+  exports: [
+    {
+      id: 'documents',
+      profile: 'context/v1',
+      methods: ['List', 'Get', 'Update', 'Write', 'Search'],
+      capabilities: ['search'],
+    },
+  ],
 }
-
-const HELP = { cmds: ['List', 'Get', 'Update', 'Write', 'Search'].map(name => ({ name })) }
 
 function makeHarness(
   overrides: {
     describe?: unknown
-    help?: unknown
     probe?: (m: PluginManifest) => Promise<PluginProbeResult>
   } = {},
 ) {
@@ -50,10 +52,7 @@ function makeHarness(
     base64urlEncode(crypto.getRandomValues(new Uint8Array(32))),
   )
   const probe = vi.fn(overrides.probe ?? (async () => ({ healthy: true })))
-  const fetchContract = vi.fn(async () => ({
-    describe: overrides.describe ?? DESCRIBE,
-    help: overrides.help ?? HELP,
-  }))
+  const fetchContract = vi.fn(async () => ({ describe: overrides.describe ?? DESCRIBE }))
   const mod: BuiltinModule = createPluginModule({
     store,
     sk,
@@ -145,12 +144,25 @@ describe('builtin plugin 模块', () => {
     expect(failing.fetchContract).not.toHaveBeenCalled()
   })
 
-  it('契约缺必需方法 → invalid_argument 拒注册', async () => {
-    const missing = makeHarness({ help: { cmds: [{ name: 'List' }, { name: 'Get' }] } })
-    await expect(missing.mod.dispatch('write', { ...MANIFEST }, ctx)).rejects.toSatisfy(
-      e => isTBError(e) && e.code === 'invalid_argument' && e.message.includes('Update'),
+  it('export 声明与 capability 自相矛盾 → invalid_argument 拒注册', async () => {
+    // 声明了 search 能力却没把 Search 列进 methods:平台永远不会调用它。
+    const bad = makeHarness({
+      describe: {
+        protocolVersion: 'plugin/v2',
+        exports: [
+          {
+            id: 'documents',
+            profile: 'context/v1',
+            methods: ['List', 'Get'],
+            capabilities: ['search'],
+          },
+        ],
+      },
+    })
+    await expect(bad.mod.dispatch('write', { ...MANIFEST }, ctx)).rejects.toSatisfy(
+      e => isTBError(e) && e.code === 'invalid_argument' && e.message.includes('Search'),
     )
-    expect(await missing.store.get(KEY_PLUGIN + MANIFEST.id)).toBeNull()
+    expect(await bad.store.get(KEY_PLUGIN + MANIFEST.id)).toBeNull()
   })
 
   it('manifest 形状非法 → invalid_argument(不探活)', async () => {
@@ -172,8 +184,8 @@ describe('builtin plugin 模块', () => {
       h.mod.dispatch('update', { id: MANIFEST.id, patch: { id: 'other' } }, ctx),
     ).rejects.toSatisfy(e => isTBError(e) && e.code === 'invalid_argument')
     await expect(
-      h.mod.dispatch('update', { id: MANIFEST.id, patch: { kind: 'tool-provider' } }, ctx),
-    ).rejects.toSatisfy(e => isTBError(e) && e.code === 'invalid_argument') // interfaceVersion 前缀不符
+      h.mod.dispatch('update', { id: MANIFEST.id, patch: { protocolVersion: 'plugin/v1' } }, ctx),
+    ).rejects.toSatisfy(e => isTBError(e) && e.code === 'invalid_argument') // 未知协议版本
     await expect(h.mod.dispatch('update', { id: 'nope', patch: {} }, ctx)).rejects.toSatisfy(
       e => isTBError(e) && e.code === 'not_found',
     )

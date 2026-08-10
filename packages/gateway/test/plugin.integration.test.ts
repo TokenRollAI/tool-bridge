@@ -41,8 +41,7 @@ const ENDPOINT = 'https://plugin.example.test'
 function manifest(id: string, overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     id,
-    kind: 'context-provider',
-    interfaceVersion: 'context-provider/v1',
+    protocolVersion: 'plugin/v2',
     endpoint: ENDPOINT,
     auth: { kind: 'platform-token' },
     healthPath: '/healthz',
@@ -51,16 +50,21 @@ function manifest(id: string, overrides: Record<string, unknown> = {}): Record<s
   }
 }
 
-const CONTEXT_HELP = {
-  cmds: ['List', 'Get', 'Update', 'Write', 'Search'].map(name => ({ name })),
-}
 const CONTEXT_DESCRIBE = {
-  kind: 'context-provider',
-  interfaceVersion: 'context-provider/v1',
-  capabilities: ['search'],
+  protocolVersion: 'plugin/v2',
+  exports: [
+    {
+      id: 'entries',
+      profile: 'context/v1',
+      methods: ['List', 'Get', 'Update', 'Write', 'Search'],
+      capabilities: ['search'],
+    },
+  ],
 }
-const TOOL_HELP = { cmds: ['List', 'Get', 'Call'].map(name => ({ name })) }
-const TOOL_DESCRIBE = { kind: 'tool-provider', interfaceVersion: 'tool-provider/v1' }
+const TOOL_DESCRIBE = {
+  protocolVersion: 'plugin/v2',
+  exports: [{ id: 'actions', profile: 'tools/v1' }],
+}
 
 interface SeenEnvelope {
   body: { arguments: Record<string, unknown>, tool: string }
@@ -75,7 +79,6 @@ interface SeenEnvelope {
 function stubProvider(opts: {
   describe?: unknown
   healthy?: unknown
-  help?: unknown
   invoke?: (seen: SeenEnvelope, n: number) => Response
 }): { seen: SeenEnvelope[] } {
   const seen: SeenEnvelope[] = []
@@ -92,7 +95,6 @@ function stubProvider(opts: {
       if (method === 'GET') {
         if (url.endsWith('/healthz')) return json(opts.healthy ?? { healthy: true })
         if (url.endsWith('/~describe')) return json(opts.describe ?? CONTEXT_DESCRIBE)
-        if (url.endsWith('/~help')) return json(opts.help ?? CONTEXT_HELP)
         return json({ code: 'not_found', message: 'no such path', retryable: false }, 404)
       }
       const entry: SeenEnvelope = {
@@ -174,8 +176,20 @@ describe('system/plugin 注册全流程', () => {
     expect(((await res.json()) as { code: string }).code).toBe('unavailable')
   })
 
-  it('契约缺必需方法(~help 无 Update)→ 400 invalid_argument 拒注册', async () => {
-    stubProvider({ help: { cmds: [{ name: 'List' }, { name: 'Get' }, { name: 'Write' }] } })
+  it('export 声明自相矛盾(capability 有 search 但 methods 无 Search)→ 400 拒注册', async () => {
+    stubProvider({
+      describe: {
+        protocolVersion: 'plugin/v2',
+        exports: [
+          {
+            id: 'entries',
+            profile: 'context/v1',
+            methods: ['List', 'Get'],
+            capabilities: ['search'],
+          },
+        ],
+      },
+    })
     const res = await postJson(
       'system/plugin',
       { tool: 'write', arguments: manifest('bad-contract') },
@@ -184,7 +198,7 @@ describe('system/plugin 注册全流程', () => {
     expect(res.status).toBe(400)
     const body = (await res.json()) as { code: string, message: string }
     expect(body.code).toBe('invalid_argument')
-    expect(body.message).toContain('Update')
+    expect(body.message).toContain('Search')
   })
 
   it('health cmd:按需探活,返回 { id, healthy, checkedAt };不健康如实反映', async () => {
@@ -477,7 +491,6 @@ describe('kind:\'tool\' 挂载消费(tool-provider plugin)', () => {
   function stubToolProvider(): { seen: SeenEnvelope[] } {
     return stubProvider({
       describe: TOOL_DESCRIBE,
-      help: TOOL_HELP,
       invoke: (entry) => {
         if (entry.body.tool === 'List') {
           return new Response(JSON.stringify(TOOLS), {
@@ -515,8 +528,6 @@ describe('kind:\'tool\' 挂载消费(tool-provider plugin)', () => {
     const { seen } = stubToolProvider()
     await registerPlugin(
       manifest('orders-plugin', {
-        kind: 'tool-provider',
-        interfaceVersion: 'tool-provider/v1',
       }),
     )
     expect((await mountTool('tools/orders', 'orders-plugin', { region: 'cn' })).status).toBe(200)
@@ -558,7 +569,7 @@ describe('kind:\'tool\' 挂载消费(tool-provider plugin)', () => {
   it('挂载带 authRef:凭证经 X-TB-Upstream-Auth(base64url)注入;不带则无此头', async () => {
     const { seen } = stubToolProvider()
     await registerPlugin(
-      manifest('feishu-like', { kind: 'tool-provider', interfaceVersion: 'tool-provider/v1' }),
+      manifest('feishu-like'),
     )
     const setSecret = await postJson(
       'system/secret',

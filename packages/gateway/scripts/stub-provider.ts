@@ -4,7 +4,7 @@
  * 供真实 E2E 用(echo-mcp 同款模式,devDependency tsx 直跑,不进生产构建):
  * 实现 Plugin 通用契约——
  *   GET  /healthz     → { healthy: true }
- *   GET  /~describe   → { kind, interfaceVersion, capabilities: [search, delete] }
+ *   GET  /~describe   → { protocolVersion, exports:[{ id, profile, methods, capabilities }] }
  *   GET  /~help       → Help DSL(Accept: application/json → HelpJson;复用 core 渲染器)
  *   POST /            → envelope {"tool":"<Method>","arguments":{...}}
  * 数据是内存里的几条 markdown 条目(进程退出即失);List 支持 cursor 分页,
@@ -37,8 +37,8 @@ const HOST = process.env.STUB_PROVIDER_HOST ?? '127.0.0.1'
 /** 平台 mint 的 pluginToken(注册响应仅出现一次,由运维配进来);未配置时仅要求非空。 */
 const EXPECTED_TOKEN = process.env.STUB_PROVIDER_TOKEN
 
-const KIND = 'context-provider'
-const INTERFACE_VERSION = 'context-provider/v1'
+const PROTOCOL_VERSION = 'plugin/v2'
+const EXPORT_ID = 'entries'
 const CAPABILITIES = ['search', 'delete'] as const
 
 // ---------- 内存 stub 数据 ----------
@@ -327,8 +327,15 @@ const server = createServer((req, res) => {
     if (url === '/healthz') return writeJson(res, 200, { healthy: true })
     if (url === '/~describe') {
       return writeJson(res, 200, {
-        kind: KIND,
-        interfaceVersion: INTERFACE_VERSION,
+        protocolVersion: PROTOCOL_VERSION,
+        exports: [
+          {
+            id: EXPORT_ID,
+            profile: 'context/v1',
+            methods: ['List', 'Get', 'Update', 'Write', 'Search', 'Delete'],
+            capabilities: [...CAPABILITIES],
+          },
+        ],
         capabilities: CAPABILITIES,
       })
     }
