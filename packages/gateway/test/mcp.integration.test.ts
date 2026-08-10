@@ -254,6 +254,76 @@ describe('MCP consumer endpoint', () => {
     }
   })
 
+  it('reconnects with a narrow SK to shrink the exact tool set and reject stale names', async () => {
+    await mountHttp('mcp-round16/allowed')
+    await mountHttp('mcp-round16/admin-only')
+    const upstream = vi.fn(async () =>
+      new Response(JSON.stringify({ ok: true }), {
+        headers: { 'content-type': 'application/json' },
+      }))
+    vi.stubGlobal('fetch', upstream)
+
+    const adminClient = await connectTestMcpClient(
+      'https://tb.test/~mcp',
+      TEST_ADMIN_SK,
+      (input, init) => SELF.fetch(input, init),
+    )
+    let adminOnlyName = ''
+    let allowedName = ''
+    try {
+      const listed = await adminClient.listTools()
+      const phasePaths = listed.tools
+        .filter(tool => String(tool._meta?.['io.tool-bridge/path']).startsWith('mcp-round16/'))
+        .map(tool => String(tool._meta?.['io.tool-bridge/path']))
+        .sort()
+      expect(phasePaths).toEqual(['mcp-round16/admin-only', 'mcp-round16/allowed'])
+      adminOnlyName = listed.tools.find(
+        tool => tool._meta?.['io.tool-bridge/path'] === 'mcp-round16/admin-only',
+      )?.name ?? ''
+      allowedName = listed.tools.find(
+        tool => tool._meta?.['io.tool-bridge/path'] === 'mcp-round16/allowed',
+      )?.name ?? ''
+      expect(adminOnlyName).not.toBe('')
+      expect(allowedName).not.toBe('')
+    } finally {
+      await adminClient.close()
+    }
+
+    const narrowSk = await issueSk({
+      owner: 'agent:mcp-round16-narrow',
+      scopes: [{ pattern: 'mcp-round16/allowed', actions: ['read', 'call'] }],
+    })
+    const narrowClient = await connectTestMcpClient(
+      'https://tb.test/~mcp',
+      narrowSk,
+      (input, init) => SELF.fetch(input, init),
+    )
+    try {
+      const listed = await narrowClient.listTools()
+      const phaseTools = listed.tools.filter(
+        tool => String(tool._meta?.['io.tool-bridge/path']).startsWith('mcp-round16/'),
+      )
+      expect(phaseTools.map(tool => tool._meta?.['io.tool-bridge/path'])).toEqual([
+        'mcp-round16/allowed',
+      ])
+      expect(phaseTools[0]?.name).toBe(allowedName)
+
+      await expect(narrowClient.callTool({
+        name: adminOnlyName,
+        arguments: { name: 'forbidden' },
+      })).rejects.toThrow(/tool not found/i)
+      expect(upstream).not.toHaveBeenCalled()
+
+      await expect(narrowClient.callTool({
+        name: allowedName,
+        arguments: { name: 'permitted' },
+      })).resolves.toMatchObject({ structuredContent: { ok: true } })
+      expect(upstream).toHaveBeenCalledTimes(1)
+    } finally {
+      await narrowClient.close()
+    }
+  })
+
   it('invalid provider schemas fail closed before they reach an MCP client', async () => {
     await mountHttpTools('mcp-round15/invalid-schema', [
       {

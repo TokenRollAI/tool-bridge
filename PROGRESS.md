@@ -20,7 +20,7 @@
 
 ## 当前状态
 - 当前 Phase:**Phase 3 — E:对外 MCP 出口**(Round 13 起;Phase 2 可做项已清空)
-- Phase 3 已勾选:项 1(官方 MCP 测试 client + 本地 initialize,Round 14)、项 2(认证后的动态 tools/list + tools/call,Round 15)
+- Phase 3 已勾选:项 1(官方 MCP 测试 client + 本地 initialize,Round 14)、项 2(认证后的动态 tools/list + tools/call,Round 15)、项 3(scope 收窄钉死,Round 16)
 - Phase 2 已勾选:项 1(OperationRegistry)、项 2(Plugin v2 多 export,Round 13 补齐三入口对等后成立)、项 3(Context 按 handler 推导能力)、项 4(`@tool-bridge/plugin-sdk` 可发布)、项 5(样例 plugin 双 export)、项 6(删净 legacy 面)
 - Phase 2 待办(**全部为待授权的外向动作**):项 7 飞书重写复验(代码已完成,只差生产实调 → P2-1)/ 项 8 部署上线
 - Phase 1(代码完成,部署挂起见 PENDING)
@@ -287,3 +287,15 @@
   - 过程证据:初版 direct `/<node>/<tool>` 自调用因精确 node scope 得到 not_found,改回节点信封后通过;严格复核后的首轮反例测试中畸形 schema 如期 fail closed,但同文件持久测试树污染后续列表,加入挂载路径逆序清理后 9/9 全绿。
 - 勾选:Phase 3 DoD 项 2(MCP server endpoint:动态 list scope 裁剪 + call 成功)。
 - 遗留:下一轮 = Phase 3 项 3(scope 收窄钉死):同一树用 admin 与窄 scope SK 分别连接,断言精确工具集差异;再用窄 SK 调 admin-only 工具名,必须不可见、不可调且上游零调用。
+
+## Round 16 — 2026-08-11
+- 目标:Phase 3 DoD 项 3 — 换窄 scope SK 后 `tools/list` 精确收窄,越权工具不可见且已知旧名称也不可调。
+- 动作:
+  - 在官方 SDK client 集成测试中挂同一前缀下 `allowed` / `admin-only` 两个 HTTP 工具节点;先以 admin 连接取得精确两项集合与各自 flat MCP 名称,再签发仅含 `mcp-round16/allowed` read+call 的窄 SK 重新连接。
+  - 窄连接断言目标前缀工具集精确等于 `[allowed]`,且 allowed 名称与 admin 连接一致;随后故意提交 admin-only 的已知旧名称,验证 call 每次先按当前身份重建投影,返回 MCP `tool not found` 且上游调用计数仍为 0;最后 allowed 同连接真实调用成功且计数恰为 1。
+- 验证:
+  - `pnpm --filter @tool-bridge/gateway exec vitest run test/mcp.integration.test.ts` → **13 passed**,退出码 0。
+  - `pnpm --filter @tool-bridge/gateway test` → **158 passed / 6 skipped**,退出码 0。
+  - `pnpm --filter @tool-bridge/gateway typecheck`、目标文件 eslint、`git diff --check` 均退出码 0。
+- 勾选:Phase 3 DoD 项 3(scope 收窄钉死)。
+- 遗留:下一轮 = Phase 3 项 4(三入口对等审计):确认 `/~mcp` 是纯消费面、没有管理开关或持久配置,因此 API 不新增管理动作且 CLI/Dashboard 无对应动作缺口;用能力矩阵与代码搜索证据记入账本。
