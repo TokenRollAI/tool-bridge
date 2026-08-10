@@ -2,20 +2,17 @@
 
 > 每轮结束在末尾追加一条 Round 记录(格式见 LOOP.md)。当前 Phase 与 blocker 在此维护。
 
-## ⛔ 当前停在:Phase 1 卡在最后一项,需人拍板
+## ⏸ PENDING(挂起,不阻塞后续 Phase)
 
-**Phase 1 的代码工作已全部完成并提交(4 个 commit,工作区干净,`pnpm verify` 全绿)。**
-唯一未勾的项 6「部署解冻」被两件需要你决定的事挡住,LOOP 状态机据此终止本轮:
-
-- **P1-1(需人):把本分支合入 main。** LOOP 纪律:「部署必须从与 origin/main 零差异的干净
-  工作区执行」。当前分支 `architecture-planning-pre` 已领先 main 4 个提交,直接从这里部署违纪。
-  需要:开 PR → review → merge。
-- **P1-2(需人):授权生产部署。** `pnpm deploy:all` 会把 Worker 推到生产
-  `tool-bridge.pdjjq.org`(DJJ 账户),属外向且不可逆的动作,不在自动循环的授权范围内。
-
-解除这两项后,项 6 = `pnpm deploy:all` + `TB_BASE_URL=… pnpm smoke`,通过即 Phase 1 完成、
-生产解冻,可进 Phase 2(B:Plugin SDK 地基)。**不得跳过 Phase 1 直接做 Phase 2**(LOOP:
-不跳到后续 Phase 绕过被卡的前置;且 Phase 1 是所有部署的前置)。
+- **P1-1 · Phase 1 项 6「部署解冻」** —— 代码已完成并开 PR
+  [#32](https://github.com/TokenRollAI/tool-bridge/pull/32)(OPEN / MERGEABLE,+1337 −167,29 files),
+  用户表示自行合并。合并后需从与 `origin/main` 零差异的干净工作区执行
+  `pnpm deploy:all` + `TB_BASE_URL=… pnpm smoke` 才能勾选。
+  **不构成后续 Phase 的代码依赖**:Phase 2 依赖的是 Phase 1 的**代码**(Secret Reference ACL
+  与 fail-closed 语义),这些已在本分支历史上;被挂起的只是「合并 + 部署」两个流程动作。
+  故按 LOOP 新策略继续推进 Phase 2。
+- **P1-2 · Phase 1 遗留的生产验证** —— 跨休眠窗口(≥150s)与真实连接替换竞态须线上验证,
+  随 P1-1 部署后一并做(`npx tsx scripts/verify-device.ts`)。
 
 ## 当前状态
 - 当前 Phase:Phase 1 — A:安全阻断项解冻(代码完成,待部署)
