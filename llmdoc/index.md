@@ -47,6 +47,7 @@
 - [memory/reflections/2026-07-22-cli-0.8.0-release-prep.md](memory/reflections/2026-07-22-cli-0.8.0-release-prep.md) — CLI 0.8.0 发布准备(public artifact 版本边界、重建产物版本证据、fail-fast build→version→pack 验证链)。
 - [memory/reflections/2026-07-24-security-report-remediation.md](memory/reflections/2026-07-24-security-report-remediation.md) — 安全报告复核、纵深修复与提交前纠偏(XSS/CSP、Workers bootstrap、KV 吊销语义、Secret Reference 授权遗漏、长连接重验 TOCTOU 与多宿主差异)。
 - [memory/reflections/2026-08-11-search-capability-gating.md](memory/reflections/2026-08-11-search-capability-gating.md) — 全局搜索 capability gating(SearchIndex 必须绑定真实宿主实现;fake 候选仍过 read+call、registry 与 virtualize 边界;外部 Draft 同步与本地实现分账验收)。
+- [memory/reflections/2026-08-11-search-host-adapter-boundaries.md](memory/reflections/2026-08-11-search-host-adapter-boundaries.md) — Search 宿主 adapter 边界(可选 binding→adapter→deps→capability;shared contract + wire 双层证据;窄 opts 与嵌套 FTS grammar 独立校验)。
 
 ## 路由提示
 

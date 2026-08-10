@@ -9,7 +9,7 @@
 - **统一注册面**:一切"挂上树"的动作最终落 `NodeRegistry.Write`——tool/context/remote 直接写,device 由网关代写(`registeredBy` 记 device),Plugin 注册后经 NodeRegistry 引用挂载;context 无独立 Registry。
 - **`Authorizer.Check` 是唯一权限判定入口**:所有调用点都过它,任何模块不得自行判权;PEP 在网关分发前的中间件。
 - **凭证不出网关**:上游凭证经 `tb secret set` 进 SecretStore(AES-256-GCM,只写不读),节点配置只存 `authRef`/`skRef` 引用名;Plugin 上游凭证同此语义——存平台 SecretStore(kind:'tool' config `authRef`),调用时 resolve 后经 `X-TB-Upstream-Auth` 注入,plugin 不自持凭证(泄漏 PLUGIN_TOKEN 拿不到凭证,轮换免重部署)。
-- **五个宿主注入点**收敛 CF 与 Node 差异:`StateStore`(KV/SQLite/内存)、`ObjectStore`(R2/S3/FS/内存,`presign?` 可选,无 presign 统一走网关中转下载兜底)、`SecretStore`、`DeviceTransport`、`SearchIndex`(全局工具候选搜索)。当前 SearchIndex 只有 core 接口、gateway 协议 seam 与 fake contract;Cloudflare D1/Node SQLite 实现均未接线。业务代码零分叉。
+- **五个宿主注入点**收敛 CF 与 Node 差异:`StateStore`(KV/SQLite/内存)、`ObjectStore`(R2/S3/FS/内存,`presign?` 可选,无 presign 统一走网关中转下载兜底)、`SecretStore`、`DeviceTransport`、`SearchIndex`(全局工具候选搜索)。Workers 在可选 `TB_SEARCH` binding 存在时注入 D1 adapter,Node 注入同库独立连接的 SQLite adapter;SDK/内存宿主缺省不注入。业务代码零分叉。
 
 ## 模块表(职责 → 实际代码落点)
 
@@ -18,7 +18,7 @@
 | HTBP Tree(核心枢纽) | 节点注册表、路由、`~help`/`~skill`/`~tree`/`~describe`、内容协商、调用分发 | `tree/` + `htbp/` | gateway `tbApp.ts`(宿主中立 createTbApp)+ `kvStateStore.ts` |
 | Tool Layer | mcp/http/builtin Provider 聚合与调用代理、虚拟化、remote 联邦 | `tool/` | gateway `providers/mcp|http|remote|toolCache` |
 | Context Layer | 多来源上下文统一读写检索面(四动词 + Search + `$ref`) | `context/` | gateway `providers/r2Object|s3Object|s3Sign` + `refToken.ts` |
-| Global Tool Search | root-only `~search`,索引只产候选,网关统一做权限/节点类型/虚拟化后处理 | `search/types.ts`(`SearchIndex`/`ToolSearchHit`/capability) | gateway `tbApp.ts` 协议 seam;当前仅测试注入 fake,CF D1/Node SQLite adapter 均未实现 |
+| Global Tool Search | root-only `~search`,索引只产候选,网关统一做权限/节点类型/虚拟化后处理;写面以 snapshot replace/remove/rebuild 维护 | `search/types.ts`(只读 `SearchIndex`、`MutableSearchIndex`、共享校验/序列化/查询 contract) | gateway `tbApp.ts` 协议面 + `d1SearchIndex.ts`;server `sqliteSearchIndex.ts`;SDK/内存宿主缺省无索引 |
 | Skillhub Layer | Agent Skill 仓库(每 skill = `<id>/SKILL.md` + 文本文件;List/Get/Search/Publish/Remove) | `skillhub/`(frontmatter 解析 + provider,复用 context 的 ObjectStore/objectProvider) | 复用 context 的 gateway providers(r2/s3);网关 `tbApp.ts` 装配 `skillhubProviderFor` 落 `skills/<path>` 前缀 |
 | Device Gateway | 设备 WS 反向注册 + 调用转发 | `device/`(帧/状态机/shell 白名单/设备侧 client) | **协议行为单一真源:gateway `deviceHello.ts`(processDeviceHello,宿主中立)**;两个宿主胶水:gateway `deviceSession.ts`(DO,WS hibernation)与 server `deviceHub.ts`(Node ws);cli `deviceRuntime.ts`;core `node/`(FsObjectStore/shellExecutor) |
 | Auth(横切) | SK 签发/作用域/访问判定/SecretStore | `auth/` + `secret/` | gateway 认证中间件;SK 哈希与密文存 StateStore |
@@ -33,7 +33,7 @@
 ## 依赖方向要点
 
 - **core 是纯逻辑基座**:无宿主依赖(唯一运行时依赖 zod),不直接 fetch;gateway、SDK、CLI、server 都装配它。core 的 `./node` 子导出是唯一含 Node API 的部分(FsObjectStore/shellExecutor,设备侧与 Docker/Node 宿主复用)。
-- **gateway 的 `tbApp.ts` 是宿主中立装配面**:接收 deps(StateStore/ObjectStore/SecretStore/DeviceTransport/SearchIndex/version)产出 Hono app;`app.ts` 只做 Workers Env→deps 适配,server `server.ts` 做 Node env→deps 适配。SDK 直接复用 createTbApp,这就是"网关与 SDK 同一棵树"的机制保证。SearchIndex 当前是可选 seam,三个宿主均未提供真实实现。
+- **gateway 的 `tbApp.ts` 是宿主中立装配面**:接收 deps(StateStore/ObjectStore/SecretStore/DeviceTransport/SearchIndex/version)产出 Hono app;`app.ts` 只做 Workers Env→deps 适配,server `server.ts` 做 Node env→deps 适配。SDK 直接复用 createTbApp,这就是"网关与 SDK 同一棵树"的机制保证。SearchIndex 保持可选:Workers 有 `TB_SEARCH` 才注入 D1 adapter,Node 总是注入 SQLite adapter,SDK/内存宿主缺省不注入。
 - **设备 hello 单一真源**:hello 验证 + 落库统一在 gateway `src/deviceHello.ts`(`processDeviceHello`,宿主中立,dev exports `./deviceHello`);`deviceSession.ts`(DO)与 server `deviceHub.ts` 只是宿主胶水——防两宿主树形态漂移,改协议行为只改 deviceHello。
 - **providers 承担全部 I/O**:core `tool/`、`context/`、`plugin/` 只放纯逻辑(拼装/映射/校验/归一);上游 fetch、MCP SDK、aws4fetch 签名都在 gateway `providers/`。
 
@@ -43,7 +43,7 @@
 |---|---|---|
 | KV `tb-kv` | SK 哈希表(`sha256(sk)→记录`)、树配置、plugin manifest、secret 密文 | 最终一致,1 write/s/key;吊销跨边缘通常约 60s、也可能更久,不得叠认证内存缓存;list+get 一致性坑见 [../guides/workers-kv-pitfalls.md](../guides/workers-kv-pitfalls.md) |
 | R2 `tb-r2` | r2 context provider、大对象 `$ref` | **binding 不支持 presign**——预签名走 S3 兼容端点 + R2 Access Key(aws4fetch);凭证空缺走 `/~ref` 网关中转 |
-| SearchIndex | root `~search` 的工具候选索引 | 只负责召回;网关仍做 read+call、节点 kind/config 与 virtualize 后处理。CF `TB_SEARCH` D1 目前仅配置/provision 占位,未注入;Node SQLite 也无实现 |
+| SearchIndex | root `~search` 的工具候选索引 | 只负责召回;网关仍做 read+call、节点 kind/config 与 virtualize 后处理。D1/SQLite 均用 FTS5 trigram external-content + triggers 和共享 contract,候选上限 40;D1 每批 25 行、单次 mutation 上限 1000。注册表尚不自动同步索引;短于 3 字符、semantic、feedback/weights、pagination 留后续;真实 D1 provision/deploy 仍 PENDING |
 | DO `DeviceSession` | 每设备一个,WS hibernation 空闲零计费 | 唤醒后内存态须从 storage 恢复;见 [../guides/do-websocket-hibernation.md](../guides/do-websocket-hibernation.md) |
 | Static Assets | Dashboard 与 gateway 同 Worker(`../dashboard/dist`,binding `ASSETS`) | `run_worker_first: true`,一切请求先进 Worker;静态资源仅由 `/ui` 路由显式转发,SPA 回退严格限定 `/ui`,不吞根 `~help`/数据面/`system/*`;`/ui` 免认证(登录页须无 SK 可加载)。已有 `ui.integration.test.ts` 覆盖 |
 

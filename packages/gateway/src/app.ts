@@ -5,6 +5,7 @@ import type { DeviceSession } from './deviceSession'
 import { createR2ObjectStore, type R2PresignCredentials } from './providers/r2Object'
 import { createTbApp, parseS3Credentials, type TbAppDeps } from './tbApp'
 import pkg from '../package.json' with { type: 'json' }
+import { D1SearchIndex } from './search/d1SearchIndex'
 import { ensureBootstrapped } from './bootstrap'
 import { KvStateStore } from './kvStateStore'
 
@@ -45,8 +46,8 @@ export interface Env {
   TB_REF_TTL_SEC?: string
   /** remote baseUrl 的 host 后缀白名单(逗号分隔;空 = 拒一切 remote)。 */
   TB_REMOTE_ALLOWLIST?: string
-  /** FTS5/trigram 工具搜索索引。 */
-  TB_SEARCH: D1Database
+  /** FTS5/trigram 工具搜索索引；发布包宿主未配置 binding 时不暴露 search capability。 */
+  TB_SEARCH?: D1Database
   TB_SECRET_ENCRYPTION_KEY?: string
   /** opt-in 集成测试:真实 MCP echo server 的 URL(仅测试注入)。 */
   TB_TEST_MCP_URL?: string
@@ -116,7 +117,7 @@ async function r2PresignCredentials(
   return undefined
 }
 
-/** Env → TbAppDeps(Workers 宿主适配；SearchIndex 第五注入点在 D1 实现落地后接线)。 */
+/** Env → TbAppDeps(Workers 宿主适配；D1 SearchIndex 是第五个宿主注入点)。 */
 function depsFromEnv(env: Env): TbAppDeps {
   const state: StateStore = new KvStateStore(env.TB_KV)
   const secrets = new SecretStoreImpl(state, env.TB_SECRET_ENCRYPTION_KEY)
@@ -133,6 +134,7 @@ function depsFromEnv(env: Env): TbAppDeps {
       ws: async (deviceId, request) => await env.TB_DEVICE.getByName(deviceId).fetch(request),
     },
   }
+  if (env.TB_SEARCH !== undefined) deps.search = new D1SearchIndex(env.TB_SEARCH)
   if (env.TB_SECRET_ENCRYPTION_KEY !== undefined) deps.encryptionKey = env.TB_SECRET_ENCRYPTION_KEY
   const canonicalOrigin = normalizeCanonicalOrigin(env.TB_CANONICAL_ORIGIN)
   if (canonicalOrigin !== undefined) deps.canonicalOrigin = canonicalOrigin

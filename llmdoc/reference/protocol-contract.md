@@ -45,9 +45,11 @@
 
 - 请求固定为 `POST /~search` + JSON `{query,opts?:{mode?:'keyword'|'semantic'}}`;body 只接受 `query`/`opts`,opts 只接受 `mode`,query 须为非空字符串并在传给索引前 trim。当前**不接受** cursor/limit/filter 或其它选项,多余字段与未知 mode 均返回 400 `invalid_argument`。
 - `mode` 缺省为 `keyword`。宿主注入的 `SearchIndex.capabilities` 必须先声明基础 `search`;未注入或未声明时 `/~search` 与根 `/~describe` 都是 404。`semantic` 另须声明 `search:semantic`,否则 400;声明限定 capability 不能替代基础 `search`。
-- 返回 JSON `Page<{path,tool}>`,当前形状只有 `{items:[...]}`、不暴露 cursor。即使底层 SearchIndex 返回 cursor,网关也会丢弃,直到分页契约正式定义。
+- 返回 JSON `Page<{path,tool}>`,当前形状只有 `{items:[...]}`、不暴露 cursor。底层候选硬上限为 40;权限、节点与虚拟化后处理后可少于 40,当前不 over-fetch。即使底层 SearchIndex 返回 cursor,网关也会丢弃,直到分页契约正式定义。
 - SearchIndex 只返回候选,最终披露由网关后处理:每条 hit 必须同时通过节点路径 `read` + `call`,registry 中存在同路径节点且 kind/config 匹配 `mcp`/`http`/`tool`,然后应用该节点的 virtualize prefix/rename/hide/description。隐藏或无权候选静默剔除。
-- 当前只支持**本地** `mcp`/`http`/`tool` 节点候选;`tool` 包括能提供 raw ToolSpec 的 plugin/进程内/device 自定义 tool。remote、device shell、builtin、context、skillhub、directory 均不进入结果。core 仅定义 `SearchIndex`/`ToolSearchHit`/capability seam,gateway 集成测试注入 fake index 验证协议;Cloudflare D1 与 Node SQLite 均尚无 SearchIndex 实现或注入,生产端点不可据此宣称可用。
+- 当前只支持**本地** `mcp`/`http`/`tool` 节点候选;`tool` 包括能提供 raw ToolSpec 的 plugin/进程内/device 自定义 tool。remote、device shell、builtin、context、skillhub、directory 均不进入结果。
+- core 将只读 `SearchIndex` 与写面 `MutableSearchIndex` 分开;`ToolSearchOptions` 当前只有 `mode`,写面通过完整 snapshot 的 `replace(path,tools)`、`remove(path)`、`rebuild(hits)` 更新。注册表/工具变化尚不会自动调用这些写方法。
+- 已内置 keyword adapter:Workers 使用可选 `TB_SEARCH` D1 binding,Node 使用同一 `state.sqlite3` 的独立连接与独立表;两者均为 FTS5 trigram + external-content triggers,逐词按 literal phrase 生成 FTS 查询并复用共享 snapshot/查询 contract。短于 3 字符的可靠召回、semantic、feedback/weights、自动同步与 pagination/filter 均留后续;真实 D1 provision/deploy 仍 PENDING,不可据本地接线宣称生产搜索可用。
 
 ## 1c. skillhub kind 数据面(与 context 同构的内容型 kind)
 

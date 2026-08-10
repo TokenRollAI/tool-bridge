@@ -177,4 +177,52 @@ describe('Node 宿主 HTTP 面', () => {
     const count2 = ((await list2.json()) as { items: unknown[] }).items.length
     expect(count2).toBe(count1)
   })
+
+  it('注入 SQLite SearchIndex，真实 HTTP 搜索并跨重启持久', async () => {
+    const dataDir = tmpDataDir()
+    const first = await startServer(dataDir)
+    const path = 'search/wire/sqlite'
+    const tool = {
+      name: 'lookup_calendar',
+      description: 'Look up calendar appointments',
+      inputSchema: { type: 'object', properties: { day: { type: 'string' } } },
+    }
+    const register = await postJson(
+      first.baseUrl,
+      'system/registry',
+      {
+        tool: 'write',
+        arguments: {
+          path,
+          kind: 'http',
+          description: 'SQLite search wire fixture',
+          config: {
+            kind: 'http',
+            endpoint: 'https://calendar.example.test',
+            tools: [],
+          },
+        },
+      },
+      admin(),
+    )
+    expect(register.status).toBe(200)
+    await first.server.search.rebuild([{ path, tool }])
+
+    const describe = await fetch(`${first.baseUrl}/~describe`, admin())
+    expect(describe.status).toBe(200)
+    await expect(describe.json()).resolves.toEqual({
+      kind: 'directory',
+      capabilities: ['search'],
+    })
+    const initial = await postJson(first.baseUrl, '~search', { query: 'calendar' }, admin())
+    expect(initial.status).toBe(200)
+    await expect(initial.json()).resolves.toEqual({ items: [{ path, tool }] })
+    await first.server.close()
+
+    const second = await startServer(dataDir)
+    cleanups.push(() => second.server.close())
+    const persisted = await postJson(second.baseUrl, '~search', { query: 'calendar' }, admin())
+    expect(persisted.status).toBe(200)
+    await expect(persisted.json()).resolves.toEqual({ items: [{ path, tool }] })
+  })
 })

@@ -16,6 +16,7 @@ import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import type { ServerConfig } from './config'
 import pkg from '../package.json' with { type: 'json' }
+import { SqliteSearchIndex } from './sqliteSearchIndex'
 import { SqliteStateStore } from './sqliteStateStore'
 import { createDataObjectStore } from './objects'
 import { resolveUiAssets } from './assets'
@@ -25,6 +26,7 @@ export interface TbServer {
   app: ReturnType<typeof createTbApp>
   close(): Promise<void>
   deviceHub: DeviceHub
+  search: SqliteSearchIndex
   /** 引导(幂等)+ 孤儿设备回收排程 + 监听;返回实际端口(config.port=0 时由系统分配)。 */
   start(): Promise<{ port: number }>
   state: SqliteStateStore
@@ -32,7 +34,15 @@ export interface TbServer {
 
 export function createTbServer(config: ServerConfig): TbServer {
   mkdirSync(config.dataDir, { recursive: true })
-  const state = new SqliteStateStore(join(config.dataDir, 'state.sqlite3'))
+  const dbPath = join(config.dataDir, 'state.sqlite3')
+  const state = new SqliteStateStore(dbPath)
+  let search: SqliteSearchIndex
+  try {
+    search = new SqliteSearchIndex(dbPath)
+  } catch (error) {
+    state.close()
+    throw error
+  }
   const secrets = new SecretStoreImpl(state, config.encryptionKey)
   const objects = createDataObjectStore(config.dataDir)
   const hub = new DeviceHub({ store: state, reclaimSec: config.deviceReclaimSec })
@@ -42,6 +52,7 @@ export function createTbServer(config: ServerConfig): TbServer {
     secrets,
     version: pkg.version,
     remote: config.remote,
+    search,
     allowInsecureHttp: config.allowInsecureHttp,
     objects: () => objects,
     device: hub,
@@ -60,6 +71,7 @@ export function createTbServer(config: ServerConfig): TbServer {
   let server: ServerType | undefined
   return {
     app,
+    search,
     state,
     deviceHub: hub,
     async start(): Promise<{ port: number }> {
@@ -85,6 +97,7 @@ export function createTbServer(config: ServerConfig): TbServer {
         })
         server = undefined
       }
+      search.close()
       state.close()
     },
   }

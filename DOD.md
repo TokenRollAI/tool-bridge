@@ -56,7 +56,7 @@ Phase 间不可跳:B 改 ToolSpec 派生形态,C 索引 ToolSpec 必须在 B 后
 **DoD**:
 - [ ] D1 绑定与 provision(解 blocker C-1):`packages/gateway/wrangler.jsonc` 加 `d1_databases`;`scripts/provision.mjs` 按 TB_KV 那套(list→存在则 skip→create→重新 list 取 id→正则回填 wrangler.jsonc)补 D1 幂等分支。验证:干净路径 `node scripts/provision.mjs` 幂等(二次运行不重建)且 `pnpm deploy:all` 不断链。
 - [ ] `~search` 协议保留段:进 protocol-contract 契约 + HTBP Draft 同步;`~describe` 声明 search 能力;`mode` 沿用 keyword|semantic(未声明 capability 的 mode 回 invalid_argument)。验证:`pnpm --filter @tool-bridge/gateway test` 中 `~search` 契约用例 + 未声明 capability 拒绝用例全绿。
-- [ ] 第五个宿主注入点 SearchIndex:CF=D1,Node=better-sqlite3(同库不同表);FTS5 + trigram tokenizer。验证:core 接口单测 + gateway(miniflare 本地 D1)与 server(sqlite)双侧集成测试全绿。
+- [x] 第五个宿主注入点 SearchIndex:CF=D1,Node=better-sqlite3(同库不同表);FTS5 + trigram tokenizer。验证:core 接口单测 + gateway(miniflare 本地 D1)与 server(sqlite)双侧集成测试全绿。
 - [ ] trigram 短查询 LIKE 兜底:query 短于 3 字符走 LIKE 子串扫描,中文两字词(如"日程")命中不返回空。验证:双侧集成测试中"日程"/"日历"命中断言 + trigram 3+ 字符命中断言全绿。
 - [ ] 索引内容与加权:索引 tool name/description + `~feedback` title/detail,加权 name>description>feedback;索引原始 ToolSpec,虚拟化/可见性/Authorizer.Check 放返回前后处理管道,over-fetch 填页,cursor 语义进契约。验证:集成测试断言加权顺序 + scope 裁剪 + cursor 分页边界。
 - [ ] 三入口对等:`tb search` + Dashboard 搜索面。验证:`pnpm --filter @tool-bridge/cli test` 中 `tb search` 用例 + gateway `ui.integration.test.ts` 搜索面用例全绿。

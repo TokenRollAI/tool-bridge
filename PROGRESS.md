@@ -38,7 +38,8 @@
 - 当前 Phase:**Phase 4 — C:Search 0+1**(Round 19 起;Phase 3 可做项已清空,部署半边见 P3-1)
 - Phase 3 已勾选:项 1(官方 MCP 测试 client + 本地 initialize,Round 14)、项 2(认证后的动态 tools/list + tools/call,Round 15)、项 3(scope 收窄钉死,Round 16)、项 4(三入口对等审计,Round 17)
 - Phase 3 待办:**仅剩待授权的外向动作** — 项 5 已完成生产脚本与全量回归,真实部署/生产 MCP smoke → P3-1
-- Phase 4 代码进度:项 1 的 binding/provision/test/dry-run 半边已完成(Round 19),真实 provision/deploy → P4-1;项 2 的本地协议/契约/llmdoc 半边已完成(Round 20),外部 HTBP Draft → P4-2;下一项 = CF D1 + Node SQLite SearchIndex
+- Phase 4 已勾选:项 3(CF D1 + Node SQLite SearchIndex,FTS5/trigram,Round 21)
+- Phase 4 代码进度:项 1 的 binding/provision/test/dry-run 半边已完成(Round 19),真实 provision/deploy → P4-1;项 2 的本地协议/契约/llmdoc 半边已完成(Round 20),外部 HTBP Draft → P4-2;下一项 = trigram 短查询 LIKE 兜底
 - Phase 2 已勾选:项 1(OperationRegistry)、项 2(Plugin v2 多 export,Round 13 补齐三入口对等后成立)、项 3(Context 按 handler 推导能力)、项 4(`@tool-bridge/plugin-sdk` 可发布)、项 5(样例 plugin 双 export)、项 6(删净 legacy 面)
 - Phase 2 待办(**全部为待授权的外向动作**):项 7 飞书重写复验(代码已完成,只差生产实调 → P2-1)/ 项 8 部署上线
 - Phase 1(代码完成,部署挂起见 PENDING)
@@ -381,3 +382,20 @@
   - `git diff --check`(代码、测试、PROGRESS、5 份稳定/索引 llmdoc 与 1 份反思)→ 退出码 0。
 - 勾选:无。项 2 的本仓实现/契约/测试已完成,但外部 HTBP Draft 尚未同步(P4-2),按证据纪律保持未勾。
 - 遗留:P4-2 挂起且不构成代码依赖。下一轮 = Phase 4 项 3:实现同一 SearchIndex contract 的 CF D1 与 Node better-sqlite3(FTS5 + trigram tokenizer),分别注入 `app.ts`/`server.ts`,用同 fixture 做 core contract + Miniflare D1 + Node SQLite 双侧集成。
+
+## Round 21 — 2026-08-11
+- 目标:Phase 4 DoD 项 3 — 以同一可变 SearchIndex contract 落地 CF D1 与 Node better-sqlite3 的 FTS5/trigram 索引,并完成第五宿主注入点。
+- 动作:
+  - 先以当前 Wrangler `4.107.0` 的临时本地 D1 与 server 实际 better-sqlite3 探针验证 FTS5/trigram:英文和中文三字符命中、两字符为空;确认 D1 migration 文件不会由现有 provision/deploy 自动应用,故本轮 D1 adapter 用失败可重试的单飞 Promise 惰性执行幂等 schema。
+  - core 保留只读 `SearchIndex`,新增 `MutableSearchIndex.replace(path,tools)/remove(path)/rebuild(hits)` 节点快照写面,防逐条 upsert 遗留旧工具;raw ToolSpec 统一校验/JSON 序列化,重复 path/name fail closed。专用 `ToolSearchOptions` 当前只声明 mode,不提前承诺 item 5 的 limit/cursor/filter。
+  - 新增 `D1SearchIndex`:普通 source table + external-content FTS5 trigram table + insert/delete/update triggers;replace/rebuild 使用事务 batch,4 列多行 INSERT 每 statement 25 tools,单次 mutation 上限 1000 并在写库前拒绝。`TB_SEARCH` binding 存在才注入,发布模板/第三方宿主缺 binding 时 search capability 继续 404。
+  - 新增 `SqliteSearchIndex`:与 `SqliteStateStore` 共用 `state.sqlite3` 文件但独立 connection/表/close ownership,同样使用 external-content FTS5 与事务快照;server 注入并在 state 前关闭 search,重启后索引持久。
+  - 两端查询把 whitespace term 转成 FTS literal phrase并绑定参数;NUL、semantic 与 runtime 未知 mode 均 `invalid_argument`。正式分页前统一内部候选上限 40,给 gateway 每 hit registry/KV 权限后处理预留免费 Workers 50 子请求预算;不返回 cursor。
+  - core 提供无宿主共享 contract fixture,D1/SQLite 对拍 schema 幂等、raw ToolSpec 往返、英文/中文三字符、replace 去旧、跨 path 隔离、remove/rebuild、NUL/mode 拒绝及 65→40 候选上限。gateway 另用真实 `SELF` 覆盖有/无 D1 binding、root describe/search 与 bulk cap;server 用真实 HTTP + close/reopen 覆盖同库持久。
+  - 严格复核先后发现并闭环 capability fail-open、NUL MATCH 500、lint、D1 query budget、候选 KV 子请求预算和 options 过宽六类问题;最终报告 `.llmdoc-tmp/phase4-search-index-review.md` 结论无阻断。数据库 trigger/batch 中途故障注入仍是非阻断测试增强,事务形状与正常/输入失败路径已验证。
+- 验证:
+  - core/gateway/server 定向 typecheck 与共享/宿主测试全绿;Miniflare D1 真实执行 schema、trigger、多行 batch、FTS rebuild 与 1001 条 fail-fast,Node SQLite 同库双连接和重启持久全绿。
+  - `pnpm verify` → 9 workspace typecheck + 全仓 lint + provision **1 passed** + 包测试 **1224 passed / 7 skipped**(core 734 + plugin-sdk 22 + cli 239 + sdk 19 + plugin-feishu 9 + gateway 167 + server 34),合计 **1225 passed / 7 skipped**,退出码 0。
+  - `git diff --check` 与本轮相关 ESLint 均退出码 0;严格 investigator 最终复核无阻断。
+- 勾选:Phase 4 DoD 项 3(第五宿主注入点 SearchIndex:CF D1 + Node better-sqlite3,FTS5/trigram,双侧集成全绿)。
+- 遗留:下一轮 = Phase 4 项 4:对字符长度短于 3 的 query 在 D1/SQLite 两端走 escaped LIKE 子串兜底,用中文两字词“日程”/“日历”与现有三字符 trigram 同 fixture 验收。feedback/权重、自动索引同步、over-fetch/cursor 仍严格留项 5。
