@@ -307,10 +307,15 @@ export function createMcpProvider(
     const h: Record<string, string> = { ...(config.headers ?? {}) }
     if (config.authRef !== undefined) {
       const cred = await secrets.resolve(config.authRef)
-      if (cred !== undefined) {
-        const [hn, hv] = authHeaderFor(config, cred)
-        h[hn] = hv
+      // fail closed:声明了 authRef 却解析不到 → unavailable,不静默以无凭证/仅静态头出站
+      // (上游可能据此当匿名放行或返回误导性结果)。与 pluginClient 同语义:配置错误快速失败。
+      if (cred === undefined) {
+        throw new TBError('unavailable', `mcp authRef '${config.authRef}' 无法解析`, {
+          retryable: false,
+        })
       }
+      const [hn, hv] = authHeaderFor(config, cred)
+      h[hn] = hv
     }
     return Object.keys(h).length > 0 ? { headers: h } : {}
   }

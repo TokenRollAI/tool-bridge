@@ -4,14 +4,27 @@
  * 解析函数镜像 app.ts 的 allowInsecure / remoteSettingsFromEnv / positiveIntEnv。
  */
 
+import { normalizeCanonicalOrigin } from '@tool-bridge/core'
+
 const DEFAULT_PORT = 8787
 const DEFAULT_MAX_HOPS = 4
 const DEFAULT_DEVICE_RECLAIM_SEC = 24 * 60 * 60
 
 export interface ServerConfig {
-  /** 首次引导的 Admin SK 明文(缺省随机生成并打印一次)。 */
+  /** 首次引导的 Admin SK 明文(须经 TB_BOOTSTRAP_ADMIN_SK 预置;缺省且未开 insecure bootstrap 则 fail closed)。 */
   adminSk?: string
+  /**
+   * 逃生阀:显式放行"缺 Admin SK 时随机生成并打印明文"的旧行为(仅本地/一次性开发)。
+   * 默认 false → 生产/Docker 缺 TB_BOOTSTRAP_ADMIN_SK 时拒绝启动,不把最高权限凭证写日志。
+   */
+  allowInsecureBootstrap: boolean
   allowInsecureHttp: boolean
+  /**
+   * 规范网关 origin(TB_CANONICAL_ORIGIN):多域名访问时钉死 OAuth redirect_uri。
+   * 与 Workers 宿主同一解析真源(core normalizeCanonicalOrigin);配置了但非法 →
+   * configFromEnv 抛错,进程拒绝启动(fail closed,不静默回退到请求期 origin)。
+   */
+  canonicalOrigin?: string
   /** SQLite 库与 fs 对象根所在目录(state.sqlite3 + objects/)。 */
   dataDir: string
   /** 设备断线后未重连的回收秒数(缺省 24h)。 */
@@ -58,6 +71,7 @@ export function configFromEnv(env: NodeJS.ProcessEnv = process.env): ServerConfi
     dataDir:
       env.TB_DATA_DIR !== undefined && env.TB_DATA_DIR.length > 0 ? env.TB_DATA_DIR : './data',
     allowInsecureHttp: allowInsecure,
+    allowInsecureBootstrap: env.TB_ALLOW_INSECURE_BOOTSTRAP === 'true',
     remote: {
       allowlist,
       maxHops: positiveIntEnv(env.TB_MAX_HOPS) ?? DEFAULT_MAX_HOPS,
@@ -72,6 +86,9 @@ export function configFromEnv(env: NodeJS.ProcessEnv = process.env): ServerConfi
   if (env.TB_BOOTSTRAP_ADMIN_SK !== undefined && env.TB_BOOTSTRAP_ADMIN_SK.length > 0) {
     config.adminSk = env.TB_BOOTSTRAP_ADMIN_SK
   }
+  // fail closed:配置了但非法直接抛(与 Workers 同一真源),不静默回退。
+  const canonicalOrigin = normalizeCanonicalOrigin(env.TB_CANONICAL_ORIGIN)
+  if (canonicalOrigin !== undefined) config.canonicalOrigin = canonicalOrigin
   if (env.TB_SECRET_ENCRYPTION_KEY !== undefined && env.TB_SECRET_ENCRYPTION_KEY.length > 0) {
     config.encryptionKey = env.TB_SECRET_ENCRYPTION_KEY
   }

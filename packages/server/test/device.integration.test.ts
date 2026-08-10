@@ -261,6 +261,94 @@ describe('DeviceHub 全链路', () => {
     expect(invoke.status).toBe(503)
     expect(await rejected).toMatchObject({ type: 'error', error: { code: 'permission_denied' } })
   })
+
+  it('设备 SK scope 事后收紧(移除 mountPath 的 register)后,调用被拒不下发', async () => {
+    const { server, baseUrl, wsBase } = await startServer(tmpDataDir())
+    cleanups.push(() => server.close())
+    // 初始 SK 能在 device/** 注册;连上后把 scope 改窄到与 mountPath 无关的前缀。
+    const issuedRes = await postJson(baseUrl, 'system/sk', {
+      tool: 'write',
+      arguments: {
+        owner: 'device:narrowed-node',
+        scopes: [{ pattern: 'device/**', actions: ['read', 'register', 'call'] }],
+      },
+    })
+    expect(issuedRes.status).toBe(200)
+    const issued = (await issuedRes.json()) as { key: { id: string }, secret: string }
+    const ws = await connectDevice(wsBase, 'narrowed-node', { sk: issued.secret })
+
+    // SK 仍有效、keyId 不变,但收紧后不再对 device/narrowed-node 持 register。
+    const narrowed = await postJson(baseUrl, 'system/sk', {
+      tool: 'update',
+      arguments: {
+        id: issued.key.id,
+        patch: { scopes: [{ pattern: 'other/**', actions: ['read', 'register', 'call'] }] },
+      },
+    })
+    expect(narrowed.status).toBe(200)
+
+    const rejected = nextFrame(ws)
+    const invoke = await postJson(baseUrl, 'device/narrowed-node/shell', {
+      tool: 'exec',
+      arguments: { command: 'echo should-not-run' },
+    })
+    expect(invoke.status).toBe(503)
+    expect(await rejected).toMatchObject({ type: 'error', error: { code: 'permission_denied' } })
+  })
+
+  it('设备 hello 经 expose.nodes 绑定他人 Secret 引用 → 拒绝挂载(第三条写入口的授权门)', async () => {
+    const { server, baseUrl, wsBase } = await startServer(tmpDataDir())
+    cleanups.push(() => server.close())
+
+    // 平台已有一条 admin 写入的上游凭证。
+    const setSecret = await postJson(baseUrl, 'system/secret', {
+      tool: 'set',
+      arguments: { name: 'victim-s3', value: '{"accessKeyId":"AK","secretAccessKey":"SK"}' },
+    })
+    expect(setSecret.status).toBe(200)
+
+    // 设备 SK:能在 device/** 注册,但没有 system/secret admin。
+    const issuedRes = await postJson(baseUrl, 'system/sk', {
+      tool: 'write',
+      arguments: {
+        owner: 'device:thief',
+        scopes: [{ pattern: 'device/**', actions: ['read', 'register', 'call'] }],
+      },
+    })
+    expect(issuedRes.status).toBe(200)
+    const issued = (await issuedRes.json()) as { secret: string }
+
+    const ws = await wsConnect(wsBase, 'thief', issued.secret)
+    const replied = nextFrame(ws)
+    // expose.nodes 的 config 由设备端提供且帧 schema 是 passthrough:试图挂一个
+    // provider:'s3' + 他人 authRef 的 context 节点,调用时平台会代解析该凭证。
+    ws.send(
+      JSON.stringify({
+        type: 'hello',
+        deviceId: 'thief',
+        expose: {
+          nodes: [
+            {
+              path: 'stolen',
+              kind: 'context',
+              description: 'confused deputy via device hello',
+              config: {
+                kind: 'context',
+                provider: 's3',
+                authRef: 'victim-s3',
+                providerConfig: { endpoint: 'https://s3.example.com', bucket: 'victim' },
+              },
+            },
+          ],
+        },
+      }),
+    )
+    expect(await replied).toMatchObject({ type: 'error', error: { code: 'permission_denied' } })
+
+    // 树上不得留下该节点(挂载被整体拒绝)。
+    const node = await registryGet(baseUrl, 'device/thief/stolen')
+    expect(node.status).toBe(404)
+  })
 })
 
 describe('DeviceHub 断线回收', () => {

@@ -18,6 +18,7 @@ import type { DeviceInvokeRequest } from '@tool-bridge/gateway/tbApp'
 import type { Duplex } from 'node:stream'
 import type * as http from 'node:http'
 import {
+  checkRegisterPath,
   decodeDeviceFrame,
   type DeviceCallResult,
   DeviceGatewaySession,
@@ -48,6 +49,8 @@ interface Conn {
   deviceId: string
   isAlive: boolean
   keyId?: string
+  /** hello 落库后的挂载路径;invoke 热路径复核 register 授权收紧用。 */
+  mountPath?: TreePath
   session: DeviceGatewaySession
   ws: WebSocket
 }
@@ -107,17 +110,35 @@ export class DeviceHub {
 
   /** DeviceChannel.invoke:HTTP→WS 调用转发(无活连接 → deviceOffline)。 */
   async invoke(deviceId: string, req: DeviceInvokeRequest): Promise<unknown> {
+    const offline: DeviceCallResult = { ok: false, error: TBError.deviceOffline().toJSON() }
     const conn = this.activeByDevice.get(deviceId)
-    if (conn === undefined) {
-      const offline: DeviceCallResult = { ok: false, error: TBError.deviceOffline().toJSON() }
-      return offline
-    }
+    if (conn === undefined) return offline
+    // 重验:凭据有效 + keyId 一致 + 用 hello 落库同一个 checkRegisterPath 复核该 SK 现在
+    // 仍能注册 mountPath(scope 与 registerPaths 事后收紧都失效)。mountPath 未设 = hello
+    // 未完成,按未授权拒绝(安全判定默认分支必须是拒)。identify 是异步 I/O,期间可能有新
+    // 连接顶替本设备,故重验后复核 activeByDevice 仍是本连接,避免调用发给已被取代的旧连接。
     const authCtx = await identify(this.store, conn.authorization, new Date().toISOString())
-    if (authCtx === null || authCtx.keyId !== conn.keyId) {
+    const authorized
+      = authCtx !== null
+        && authCtx.keyId === conn.keyId
+        && conn.mountPath !== undefined
+        && checkRegisterPath({
+          sk: {
+            scopes: authCtx.scopes,
+            id: authCtx.keyId,
+            ...(authCtx.registerPaths !== undefined
+              ? { registerPaths: authCtx.registerPaths }
+              : {}),
+          },
+          targetPath: conn.mountPath,
+          action: 'write',
+          existing: null,
+        }).allow
+    if (!authorized) {
       conn.session.reject(TBError.unauthenticated())
-      const offline: DeviceCallResult = { ok: false, error: TBError.deviceOffline().toJSON() }
       return offline
     }
+    if (this.activeByDevice.get(deviceId) !== conn) return offline
     return await new Promise<DeviceCallResult>(resolve => conn.session.call(req, resolve))
   }
 
@@ -245,6 +266,7 @@ export class DeviceHub {
     const meta: DeviceMeta = { deviceId: conn.deviceId, mountPath, keyId, connectedAt: now }
     await this.store.put(KEY_DEVICE_META + conn.deviceId, meta)
     conn.keyId = keyId
+    conn.mountPath = mountPath
     this.cancelReclaim(conn.deviceId)
     const prev = this.activeByDevice.get(conn.deviceId)
     if (prev !== undefined && prev !== conn) prev.ws.close(1000, 'replaced')

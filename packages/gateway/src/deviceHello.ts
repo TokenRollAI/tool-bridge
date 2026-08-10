@@ -1,4 +1,5 @@
 import {
+  assertSecretRefUse,
   type CallContext,
   check,
   checkRegisterPath,
@@ -174,6 +175,12 @@ export async function processDeviceHello(opts: {
   const registry = new NodeRegistryStore(store)
   for (const input of inputs) {
     await assertRegisterPath(registry, authCtx, input.path)
+    // Secret Reference 使用授权:设备 hello 是第三条 NodeConfig 写入口,`expose.nodes` 的
+    // config 由设备端提供且帧 schema 是 passthrough——不设门则持 register 的设备 SK 可挂
+    // 带 authRef/skRef 的节点(如 provider:'s3' + 他人 authRef、kind:'remote' + 他人 skRef),
+    // 调用时平台会代解析该凭证,形成与注册面同样的 confused-deputy。与 `~register` /
+    // system/registry 两条通道同权:绑定引用须持 system/secret admin。
+    assertSecretRefUse(authCtx.scopes, input.config)
   }
 
   const now = opts.now ?? new Date().toISOString()

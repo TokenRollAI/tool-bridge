@@ -59,10 +59,14 @@ export function createHttpProvider(
       const headers: Record<string, string> = { ...req.headers }
       if (config.authRef !== undefined) {
         const cred = await secrets.resolve(config.authRef)
-        if (cred !== undefined) {
-          const [hn, hv] = authHeaderFor(config, cred)
-          headers[hn] = hv
+        // fail closed:声明了 authRef 却解析不到 → unavailable,不静默以无凭证出站。
+        if (cred === undefined) {
+          throw new TBError('unavailable', `http authRef '${config.authRef}' 无法解析`, {
+            retryable: false,
+          })
         }
+        const [hn, hv] = authHeaderFor(config, cred)
+        headers[hn] = hv
       }
 
       let resp: Response

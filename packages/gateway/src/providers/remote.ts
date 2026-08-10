@@ -114,22 +114,27 @@ export async function passthroughRemote(opts: {
   // 此处记录一条不含凭证明文的结构化审计行(谁经哪个节点、用哪个 skRef、发往何处)。
   if (opts.config.skRef !== undefined) {
     const cred = await opts.secrets.resolve(opts.config.skRef)
-    if (cred !== undefined) {
-      outHeaders.authorization = `Bearer ${cred}`
-      console.log(
-        JSON.stringify({
-          event: 'remote_skref_proxy',
-          actorKeyId: opts.actor.keyId,
-          actorOwner: opts.actor.owner,
-          traceId: opts.actor.traceId,
-          nodePath: opts.nodePath,
-          skRef: opts.config.skRef,
-          method: opts.method,
-          target: rewritten,
-          via: self,
-        }),
-      )
+    // fail closed:配置声明了 skRef 却解析不到(Secret 被删/主密钥缺失)→ unavailable,
+    // 不得静默匿名出站(旧行为把凭证降级为无 Authorization,可能以本实例默认身份触达远端)。
+    if (cred === undefined) {
+      throw new TBError('unavailable', `remote skRef '${opts.config.skRef}' 无法解析`, {
+        retryable: false,
+      })
     }
+    outHeaders.authorization = `Bearer ${cred}`
+    console.log(
+      JSON.stringify({
+        event: 'remote_skref_proxy',
+        actorKeyId: opts.actor.keyId,
+        actorOwner: opts.actor.owner,
+        traceId: opts.actor.traceId,
+        nodePath: opts.nodePath,
+        skRef: opts.config.skRef,
+        method: opts.method,
+        target: rewritten,
+        via: self,
+      }),
+    )
   }
 
   let resp: Response

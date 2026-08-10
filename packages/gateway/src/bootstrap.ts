@@ -111,9 +111,12 @@ async function doBootstrap(
       console.log('[tool-bridge] bootstrapped: Admin SK = <provided via TB_BOOTSTRAP_ADMIN_SK>')
     } else {
       if (requireAdminSk) {
+        // 宿主中立文案:两个宿主的修复方式都写清楚(Workers 无 wrapper 补指引,
+        // 此消息会直接作为 HTTP TBError 返回;Node/Docker 另由 server main.ts 追加说明)。
         throw new TBError(
           'unavailable',
-          'first Worker bootstrap requires TB_BOOTSTRAP_ADMIN_SK; set it with `wrangler secret put TB_BOOTSTRAP_ADMIN_SK`',
+          'first bootstrap requires TB_BOOTSTRAP_ADMIN_SK '
+          + '(Workers: `wrangler secret put TB_BOOTSTRAP_ADMIN_SK`; Node/Docker: set the env var)',
           { retryable: false },
         )
       }

@@ -324,4 +324,39 @@ describe('DeviceSession DO + /system/device/ws', () => {
     expect(invoke.status).toBe(503)
     expect(await rejected).toMatchObject({ type: 'error', error: { code: 'permission_denied' } })
   })
+
+  it('设备 SK scope 事后收紧(移除 mountPath 的 register)后,调用被拒不下发', async () => {
+    const deviceId = `narrowed-${crypto.randomUUID().slice(0, 8)}`
+    const issued = await issueSk({
+      owner: `device:${deviceId}`,
+      scopes: [{ pattern: `device/${deviceId}/**`, actions: ['read', 'register', 'call'] }],
+    })
+    const ws = await connectDevice(deviceId, {
+      sk: issued.secret,
+      shell: { allow: ['echo'] },
+    })
+
+    // SK 仍有效、keyId 不变,但收紧后不再对 mountPath 持 register(连接代际重验须复核)。
+    const narrowed = await postJson(
+      'system/sk',
+      {
+        tool: 'update',
+        arguments: {
+          id: issued.id,
+          patch: { scopes: [{ pattern: 'other/**', actions: ['read', 'register', 'call'] }] },
+        },
+      },
+      admin(),
+    )
+    expect(narrowed.status).toBe(200)
+
+    const rejected = nextFrame(ws)
+    const invoke = await postJson(
+      `device/${deviceId}/shell`,
+      { tool: 'exec', arguments: { command: 'echo should-not-run' } },
+      admin(),
+    )
+    expect(invoke.status).toBe(503)
+    expect(await rejected).toMatchObject({ type: 'error', error: { code: 'permission_denied' } })
+  })
 })

@@ -1,5 +1,6 @@
 import {
   AnnotationStore,
+  assertSecretRefUse,
   buildTree,
   type BuiltinModule,
   type CallContext,
@@ -1747,6 +1748,9 @@ export function createTbApp(deps: TbAppDeps): Hono<{ Variables: Vars }> {
         cmd === 'delete' ? 'delete' : 'write',
         deps,
       )
+      // Secret Reference 使用授权:绑定 authRef/skRef 须持 system/secret admin(注册路径
+      // 判定之后、落库之前;delete 无 config 自然放行)。confused-deputy 合入阻断项。
+      assertSecretRefUse(ctx.scopes, cfgPatch)
       // context 配置校验 + s3 连通探测:探测出站网络,须在权限判定之后。
       await assertContextConfig(cfgPatch, deps)
       // skillhub 配置校验(provider r2/s3;s3 连通探测)。
@@ -1969,6 +1973,9 @@ export function createTbApp(deps: TbAppDeps): Hono<{ Variables: Vars }> {
       throw new TBError('permission_denied', `no scope grants 'register' on '${path}'`)
     }
     await assertRegisterPath(registry, ctx, body.path, 'write', deps)
+    // Secret Reference 使用授权:绑定 authRef/skRef 须持 system/secret admin(注册路径
+    // 判定之后、落库之前)。受限注册者不得引用平台已有 Secret(confused-deputy 合入阻断项)。
+    assertSecretRefUse(ctx.scopes, body.config)
     // context 配置校验 + s3 连通探测:探测出站网络,须在权限判定之后。
     await assertContextConfig(body.config, deps)
     // skillhub 配置校验(provider r2/s3;s3 连通探测)。

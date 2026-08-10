@@ -10,7 +10,21 @@ import { configFromEnv } from './config'
 
 const config = configFromEnv(process.env)
 const server = createTbServer(config)
-const { port } = await server.start()
+let port: number
+try {
+  ;({ port } = await server.start())
+} catch (err) {
+  // fail closed:首次引导缺 TB_BOOTSTRAP_ADMIN_SK(且未开 insecure bootstrap)→ 拒绝启动,
+  // 退出非 0,不随机生成并打印最高权限凭证。给出可操作的修复指引(不含任何明文)。
+  const detail = err instanceof Error ? err.message : String(err)
+  console.error(`[tool-bridge] refusing to start: ${detail}`)
+  console.error(
+    '[tool-bridge] set TB_BOOTSTRAP_ADMIN_SK to a secret Admin SK before first boot, '
+    + 'or set TB_ALLOW_INSECURE_BOOTSTRAP=true for local/dev (generates a random Admin SK and prints it once).',
+  )
+  await server.close().catch(() => {})
+  process.exit(1)
+}
 console.log(`[tool-bridge] listening on http://${config.host}:${port} (data: ${config.dataDir})`)
 
 let shuttingDown = false

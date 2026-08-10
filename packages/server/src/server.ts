@@ -47,6 +47,8 @@ export function createTbServer(config: ServerConfig): TbServer {
     device: hub,
   }
   if (config.encryptionKey !== undefined) deps.encryptionKey = config.encryptionKey
+  // 规范 origin(与 Workers app.ts 对等):给出即钉死 OAuth redirect_uri。
+  if (config.canonicalOrigin !== undefined) deps.canonicalOrigin = config.canonicalOrigin
   const assets = resolveUiAssets(config.uiDir)
   if (assets !== undefined) deps.assets = assets
   if (config.toolCacheTtlSec !== undefined) deps.toolCacheTtlSec = config.toolCacheTtlSec
@@ -61,7 +63,12 @@ export function createTbServer(config: ServerConfig): TbServer {
     state,
     deviceHub: hub,
     async start(): Promise<{ port: number }> {
-      await runBootstrap(state, config.adminSk !== undefined ? { adminSk: config.adminSk } : {})
+      // fail closed:缺 TB_BOOTSTRAP_ADMIN_SK 时默认拒绝启动(不随机生成 Admin SK 写 stdout);
+      // 仅 TB_ALLOW_INSECURE_BOOTSTRAP=true 的本地/一次性开发保留旧的随机生成+打印一次路径。
+      await runBootstrap(state, {
+        ...(config.adminSk !== undefined ? { adminSk: config.adminSk } : {}),
+        requireAdminSk: !config.allowInsecureBootstrap,
+      })
       await hub.sweepOrphans()
       return await new Promise((resolve) => {
         server = serve({ fetch: app.fetch, port: config.port, hostname: config.host }, (info) => {

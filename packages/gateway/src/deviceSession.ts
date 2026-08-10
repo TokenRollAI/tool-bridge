@@ -1,4 +1,5 @@
 import {
+  checkRegisterPath,
   decodeDeviceFrame,
   type DeviceCallRequest,
   type DeviceCallResult,
@@ -222,19 +223,14 @@ export class DeviceSession extends DurableObject<DeviceSessionEnv> {
     }
     const meta = await this.ctx.storage.get<DeviceMeta>(META_KEY)
     if (meta !== undefined && meta.activeConnId === attachment.connId) {
-      // KV/DO 读取失败必须向上传播,不能伪装成“等 hello”的新连接;只有凭据明确无效时
-      // 才拒绝现有会话并标记离线。
-      const authCtx = await identify(
-        new KvStateStore(this.env.TB_KV),
-        attachment.authorization,
-        new Date().toISOString(),
-      )
-      if (authCtx === null || authCtx.keyId !== meta.keyId) {
+      // KV/DO 读取失败必须向上传播,不能伪装成“等 hello”的新连接;凭据无效或授权收紧
+      // (scope/registerPaths)时才拒绝现有会话并标记离线(与 invoke 热路径同一重验)。
+      if (await this.reverifyConn(meta, attachment)) {
+        session.restoreReady()
+      } else {
         session.reject(TBError.unauthenticated())
-        await this.markDisconnected(meta)
-        return session
+        await this.markDisconnected(meta.deviceId, attachment.connId)
       }
-      session.restoreReady()
     }
     return session
   }
@@ -321,11 +317,19 @@ export class DeviceSession extends DurableObject<DeviceSessionEnv> {
     }
     const meta = await this.ctx.storage.get<DeviceMeta>(META_KEY)
     if (meta === undefined || meta.activeConnId !== attachment.connId) return
-    await this.markDisconnected(meta)
+    await this.markDisconnected(meta.deviceId, attachment.connId)
   }
 
-  /** 连接失效统一收尾(正常关闭 / activeSocket 发现半开丢失):registry 下线 + 清 activeConnId + 回收 alarm。 */
-  private async markDisconnected(meta: DeviceMeta): Promise<void> {
+  /**
+   * 连接失效统一收尾(正常关闭 / activeSocket 发现半开丢失):registry 下线 + 清 activeConnId
+   * + 回收 alarm。**按 connId 条件执行**:重读 meta,仅当当前 activeConnId 仍是被拆除的这条
+   * 连接时才下线并清空——否则期间已有新连接完成 hello(activeConnId 已换),旧连接的收尾
+   * 不得用陈旧 meta 覆盖新连接、把在线设备误标离线(2026-07-24 反思:陈旧 meta 覆盖新连接)。
+   */
+  private async markDisconnected(deviceId: string, connId: string): Promise<void> {
+    const meta = await this.ctx.storage.get<DeviceMeta>(META_KEY)
+    // 已被新连接顶替(activeConnId 变更)或已回收:本条旧连接的收尾无操作。
+    if (meta === undefined || meta.deviceId !== deviceId || meta.activeConnId !== connId) return
     const now = new Date().toISOString()
     const registry = await this.registry()
     try {
@@ -354,6 +358,34 @@ export class DeviceSession extends DurableObject<DeviceSessionEnv> {
     return await new Promise<DeviceCallResult>(resolve => session.call(req, resolve))
   }
 
+  /**
+   * 连接代际 + 授权重验(invoke/唤醒热路径共用)。跨 KV await(identify)后连接可能被
+   * 替换,故:①identify 前后都以传入的 connId 为准比对;②不仅校验凭据有效与 keyId 一致,
+   * 还用 hello 落库时同一个 `checkRegisterPath` 复核该 SK **现在**仍能注册该 mountPath
+   * ——scope 与 registerPaths 事后收紧都会失效(2026-07-24 反思:重验须同时含凭据/授权/
+   * 连接代际)。existing 传 null:此处判的是"现在还能不能注册",不是占用冲突。
+   * 通过 → true;否则 → false(调用方按失效处理)。
+   */
+  private async reverifyConn(meta: DeviceMeta, attachment: SocketAttachment): Promise<boolean> {
+    if (attachment.connId !== meta.activeConnId) return false
+    const authCtx = await identify(
+      new KvStateStore(this.env.TB_KV),
+      attachment.authorization,
+      new Date().toISOString(),
+    )
+    if (authCtx === null || authCtx.keyId !== meta.keyId) return false
+    return checkRegisterPath({
+      sk: {
+        scopes: authCtx.scopes,
+        id: authCtx.keyId,
+        ...(authCtx.registerPaths !== undefined ? { registerPaths: authCtx.registerPaths } : {}),
+      },
+      targetPath: meta.mountPath,
+      action: 'write',
+      existing: null,
+    }).allow
+  }
+
   private async activeSocket(): Promise<WebSocket | null> {
     const meta = await this.ctx.storage.get<DeviceMeta>(META_KEY)
     if (meta === undefined || meta.activeConnId === undefined) return null
@@ -368,19 +400,20 @@ export class DeviceSession extends DurableObject<DeviceSessionEnv> {
         continue
       }
       if (attachment.connId !== meta.activeConnId) continue
-      const authCtx = await identify(
-        new KvStateStore(this.env.TB_KV),
-        attachment.authorization,
-        new Date().toISOString(),
-      )
-      if (authCtx !== null && authCtx.keyId === meta.keyId) return ws
+      if (await this.reverifyConn(meta, attachment)) {
+        // 重验期间(identify 的 KV 往返)可能有新连接完成 hello 顶替本连接;放行前复核
+        // 当前 activeConnId 仍是本连接,避免把调用发给已被取代的旧连接(TOCTOU)。
+        const fresh = await this.ctx.storage.get<DeviceMeta>(META_KEY)
+        if (fresh !== undefined && fresh.activeConnId === attachment.connId) return ws
+        return null
+      }
       const session = this.sessions.get(ws)
       if (session !== undefined) (await session).reject(TBError.unauthenticated())
       else ws.close(1008, 'credentials revoked')
-      await this.markDisconnected(meta)
+      await this.markDisconnected(meta.deviceId, attachment.connId)
       return null
     }
-    await this.markDisconnected(meta)
+    await this.markDisconnected(meta.deviceId, meta.activeConnId)
     return null
   }
 
