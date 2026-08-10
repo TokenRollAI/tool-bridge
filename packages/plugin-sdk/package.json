@@ -1,0 +1,46 @@
+{
+  "name": "@tool-bridge/plugin-sdk",
+  "version": "0.1.0",
+  "description": "Author tool-bridge plugins: declare Zod-typed operations, the SDK serves the whole HTBP plugin protocol",
+  "type": "module",
+  "license": "MIT",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "keywords": [
+    "tool-bridge",
+    "plugin",
+    "htbp",
+    "workers",
+    "agent-tools"
+  ],
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "tsup",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@tool-bridge/core": "workspace:*",
+    "tsup": "^8.5.1",
+    "vitest": "^4.1.10"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/TokenRollAI/tool-bridge.git",
+    "directory": "packages/plugin-sdk"
+  }
+}

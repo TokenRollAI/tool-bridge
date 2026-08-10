@@ -43,6 +43,8 @@ const callContextSchema = z.object({
   traceId: z.string().min(1),
   mountPath: z.string().min(1).optional(),
   mountConfig: z.record(z.unknown()).optional(),
+  /** v2 多 export 路由:本次调用命中 plugin 的哪个 export。 */
+  exportId: z.string().min(1).optional(),
 })
 
 /** CallContext → base64url(`X-TB-Context` header 值)。 */

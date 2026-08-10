@@ -1,0 +1,11 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    // Web 标准运行时(Cloudflare Worker / Deno / Bun):需要 fetch 家族的 Request /
+    // Response / URL / atob / TextEncoder。刻意**不引 @types/node** —— 这个包的产物
+    // 不得依赖 Node 内建,types 收窄为空可防止 Node 全局悄悄漏进来。
+    "lib": ["ES2023", "DOM"],
+    "types": []
+  },
+  "include": ["src", "test", "tsup.config.ts", "vitest.config.ts"]
+}
