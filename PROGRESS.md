@@ -27,12 +27,18 @@
   尚需干净主分支上对真实账户连续运行两次 `node scripts/provision.mjs`(确认只创建一次
   `tb-search`)并执行 `pnpm deploy:all`。属生产资源创建/部署外向动作,待用户授权;**D1 绑定
   与本地 Miniflare 已就位,不构成后续 Search 编码依赖**。真实证据前项 1 不勾选。
+- **P4-2 · Phase 4 项 2 的「HTBP Draft 外部同步」半边** —— 本仓 core/gateway、
+  `llmdoc/reference/protocol-contract.md` 与契约测试已在 Round 20 完成;真正的 HTBP Draft
+  位于外部 `TokenRollAI/HTBP` 仓库 `docs/rfcs/RFC-0001-htbp-core.md`,当前 Draft 尚未加入
+  `~search`。跨仓提交/PR 属外向动作,待用户授权;本仓 `archive/docs/Proto.md` 已明确是历史
+  资料,不能冒充外部 Draft 同步证据。**不构成 SearchIndex 实现的代码依赖**,外部变更证据前
+  项 2 不勾选。
 
 ## 当前状态
 - 当前 Phase:**Phase 4 — C:Search 0+1**(Round 19 起;Phase 3 可做项已清空,部署半边见 P3-1)
 - Phase 3 已勾选:项 1(官方 MCP 测试 client + 本地 initialize,Round 14)、项 2(认证后的动态 tools/list + tools/call,Round 15)、项 3(scope 收窄钉死,Round 16)、项 4(三入口对等审计,Round 17)
 - Phase 3 待办:**仅剩待授权的外向动作** — 项 5 已完成生产脚本与全量回归,真实部署/生产 MCP smoke → P3-1
-- Phase 4 代码进度:项 1 的 binding/provision/test/dry-run 半边已完成(Round 19),真实 provision/deploy → P4-1;项 2 起可继续
+- Phase 4 代码进度:项 1 的 binding/provision/test/dry-run 半边已完成(Round 19),真实 provision/deploy → P4-1;项 2 的本地协议/契约/llmdoc 半边已完成(Round 20),外部 HTBP Draft → P4-2;下一项 = CF D1 + Node SQLite SearchIndex
 - Phase 2 已勾选:项 1(OperationRegistry)、项 2(Plugin v2 多 export,Round 13 补齐三入口对等后成立)、项 3(Context 按 handler 推导能力)、项 4(`@tool-bridge/plugin-sdk` 可发布)、项 5(样例 plugin 双 export)、项 6(删净 legacy 面)
 - Phase 2 待办(**全部为待授权的外向动作**):项 7 飞书重写复验(代码已完成,只差生产实调 → P2-1)/ 项 8 部署上线
 - Phase 1(代码完成,部署挂起见 PENDING)
@@ -358,3 +364,20 @@
   - `pnpm --filter @tool-bridge/dashboard build` → Vite production build 成功;`pnpm --filter @tool-bridge/gateway exec wrangler deploy --dry-run --outdir <tmp>` → bundle 成功且绑定清单明确包含 `env.TB_SEARCH (tb-search) D1 Database`,未上传。
 - 勾选:无。项 1 的代码/隔离幂等/dry-run 半边完成并解除 C-1,但真实账户二次 provision 与生产 deploy 证据前保持未勾。
 - 遗留:P4-1 挂起且不构成代码依赖。下一轮 = Phase 4 项 2(`~search` 协议保留段 + `~describe` capability + mode 拒绝契约),先同步 protocol-contract 与 HTBP Draft,再补 gateway 契约测试。
+
+## Round 20 — 2026-08-11
+- 目标:Phase 4 DoD 项 2 — 固定 root `~search` 协议、真实 capability gating 与未声明 mode 拒绝;外部 HTBP Draft 同步按跨仓动作纪律判断。
+- 动作:
+  - core 新增公开 `SearchIndex`/`ToolSearchHit`/`SearchCapability` seam,并把 `~search` 显式加入 `RESERVED_SEGMENTS`;该接口只产 raw ToolSpec 候选,不把索引当授权源。
+  - gateway `TbAppDeps` 增加可选第五注入点 `search`;只有真实注入同时声明 `search` 时,认证后的根 `POST /~search` 与根 `GET /~describe` 才存在,否则 404。Workers `TB_SEARCH` D1 与 Node SQLite 均未接线,现有生产面不会虚报能力。
+  - 请求严格为 `{query,opts?:{mode?:'keyword'|'semantic'}}`:query trim 后非空,keyword 缺省;未知字段、提前使用 limit/cursor/filter、未知 mode 均 400。semantic 必须先声明 `search:semantic`,拒绝发生在索引调用前;本项返回只有 `{items:[{path,tool}]}`,主动丢弃底层 cursor。
+  - raw hit 返回前统一过真实 SK 的 `read+call`、registry 同路径回读、本地 mcp/http/tool kind/config 与 `virtualizeTools`(hide/rename/prefix/description)后处理;不可见/隐藏/陈旧候选静默剔除。普通与百分号编码的 path-local `/<path>/~search` 均在数据面分发前 404。
+  - llmdoc-update 同步 protocol-contract、模块边界、代码地图、current-state;新增反思 `llmdoc/memory/reflections/2026-08-11-search-capability-gating.md` 并写入 index。没有修改历史 `archive/docs/Proto.md`。
+  - 复核外部 `TokenRollAI/HTBP` 的 Draft RFC 后确认其仍无 `~search`;未获跨仓提交/PR 授权,登记 P4-2,本地实现不能替代外部同步证据。
+- 验证:
+  - `pnpm --filter @tool-bridge/core test` → **730 passed**;core/gateway typecheck 与目标 eslint 均退出码 0。
+  - `pnpm --filter @tool-bridge/gateway test` → **163 passed / 6 skipped**。新增 5 例覆盖:无注入 404、认证先于索引、root-only page + virtualize/hide、仅 read 无 call 的 SK 结果为空、未声明 semantic/未知 mode/提前分页零索引调用、声明 semantic 后成功。
+  - `pnpm verify` → 9 workspace typecheck + 全仓 lint + provision **1 passed** + 包测试 **1214 passed / 7 skipped**(core 730 + plugin-sdk 22 + cli 239 + sdk 19 + plugin-feishu 9 + gateway 163 + server 32),退出码 0。
+  - `git diff --check`(代码、测试、PROGRESS、5 份稳定/索引 llmdoc 与 1 份反思)→ 退出码 0。
+- 勾选:无。项 2 的本仓实现/契约/测试已完成,但外部 HTBP Draft 尚未同步(P4-2),按证据纪律保持未勾。
+- 遗留:P4-2 挂起且不构成代码依赖。下一轮 = Phase 4 项 3:实现同一 SearchIndex contract 的 CF D1 与 Node better-sqlite3(FTS5 + trigram tokenizer),分别注入 `app.ts`/`server.ts`,用同 fixture 做 core contract + Miniflare D1 + Node SQLite 双侧集成。

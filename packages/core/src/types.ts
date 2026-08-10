@@ -253,6 +253,7 @@ export const RESERVED_SEGMENTS: readonly string[] = [
   '~authorize',
   '~feedback',
   '~mcp',
+  '~search',
 ]
 
 /** 平台保留根路径段(基础集;部署配置可追加)。 */

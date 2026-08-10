@@ -8,10 +8,11 @@
 |---|---|
 | `GET /healthz` | 树外免认证运维端点,200 + `{"healthy":true,"version":"<x.y.z>"}` |
 | `POST /~mcp` | **MCP consumer endpoint**:需 Bearer SK 的无状态 Streamable HTTP(JSON response)端点;支持 MCP `initialize`、`tools/list`、`tools/call`,每次请求均按当前身份重新投影 HTBP 树,不依赖 isolate 内会话状态 |
+| `POST /~search` | **root-only 全局工具搜索**:需 Bearer SK;仅宿主注入声明 `search` capability 的 `SearchIndex` 时存在,请求/返回/权限细则见 1b;`POST /<path>/~search` 一律 404 |
 | `GET /<path>/~help` | 节点自描述;默认 `text/markdown` 可读表现,`Accept: application/json` 得等价 `HelpJson`,`Accept: text/plain` 得紧凑 Help DSL(面向 LLM 省 token)。**两级披露**:节点 `~help` 是索引,`GET /<node>/<tool>/~help` 给单工具全量 spec |
 | `GET /~tree?depth=N` | 受限深度树视图(默认 2,上限 8 钳制;节点上限 500);子树根必须真实存在,非根不存在 → 404 |
 | `GET /<path>/~skill` | 本地 501 占位(`unavailable`,retryable:false);remote 节点透传 |
-| `GET /<path>/~describe` | 有可选能力的节点返回 `{ kind, capabilities }`;其余 404 |
+| `GET /<path>/~describe` | 有可选能力的节点返回 `{ kind, capabilities }`;根 `GET /~describe` 仅在注入全局 SearchIndex 且声明 `search` 时返回 `{kind:'directory',capabilities:['search',...可选 'search:semantic']}`;其余 404 |
 | `GET /<path>/~feedback` | Agent 反馈列表 `{items:[{id,title,by,at,up,down,score}]}`(净分降序、at 降序 tie-break;`?hidden=1` 含净分 ≤ -3 的隐藏条目;不含 detail);`GET /<path>/~feedback/<id>` 单条详情(含 detail)。read 判不过 → 404 不泄露存在性;根路径无此端点 |
 | `POST /<path>/~feedback` | 提交反馈,body `{title(≤80), detail(≤500)}`,需 `call`(权限判定落目标 path,窄 scope SK 对够得着的路径天然可反馈);path 须 registry 最长前缀 resolve 命中(工具子路径合法);每 (path, owner) ≤ 10 条 → 429。`POST /<path>/~feedback/<id>` body `{vote:"up"\|"down"\|"clear"}` 投票(每身份一票、改票覆盖、clear 撤票);`DELETE /<path>/~feedback/<id>` 删除(admin)。头部条目(净分 > -3 前 5)由网关注入该 path 的 `~help` feedback 块 |
 | `POST /<path>` | 数据面调用,body `{"tool","arguments"}`;`opts` 整体传不平铺 |
@@ -23,7 +24,7 @@
 | `WS /system/device/ws?deviceId=<id>` | 设备通道升级(Bearer SK);mountPath 缺省 `device/<deviceId>` |
 | `GET /ui` | Dashboard 静态资源(免认证,SPA 回退严格限定 `/ui`) |
 
-保留段:`~help / ~skill / ~tree / ~register / ~describe / ~authorize / ~feedback / ~mcp`;保留根:`system`、`ui`(部署配置可追加)。注册 `a/b/c` 时 `a`、`a/b`、`a/b/c` 三级 `~help` 都必须可达(中间 directory 自动物化)。**注意 `~skill`(保留段,节点使用指南,当前本地 501 占位)与 `skillhub`(节点 kind)是两个正交概念:前者是任意节点的一个 GET 保留路径段,后者是内容型 kind 的判别值,互不冲突。**
+保留段:`~help / ~skill / ~tree / ~register / ~describe / ~authorize / ~feedback / ~mcp / ~search`;保留根:`system`、`ui`(部署配置可追加)。注册 `a/b/c` 时 `a`、`a/b`、`a/b/c` 三级 `~help` 都必须可达(中间 directory 自动物化)。**注意 `~skill`(保留段,节点使用指南,当前本地 501 占位)与 `skillhub`(节点 kind)是两个正交概念:前者是任意节点的一个 GET 保留路径段,后者是内容型 kind 的判别值,互不冲突。**
 
 ## 1a. MCP consumer endpoint 投影
 
@@ -40,7 +41,15 @@
   - `_meta['io.tool-bridge/path']`:本地源节点路径;`_meta['io.tool-bridge/command']`:原 HTBP 命令/工具名。
 - `tools/call` 在任何 Provider/Hono 调用前以已编译 schema 校验 `arguments`;失败返回 MCP `InvalidParams`,不触发下游。结果再经 MCP `CallToolResultSchema` 校验:typed Provider 的合法 content blocks 原样保留,普通字符串/JSON 转为 text content,显式 `structuredContent` 优先保留(否则顶层对象自动补入),业务错误保留 `isError:true`;非法结果以 internal error fail closed。
 
-## 1b. skillhub kind 数据面(与 context 同构的内容型 kind)
+## 1b. root 全局工具搜索
+
+- 请求固定为 `POST /~search` + JSON `{query,opts?:{mode?:'keyword'|'semantic'}}`;body 只接受 `query`/`opts`,opts 只接受 `mode`,query 须为非空字符串并在传给索引前 trim。当前**不接受** cursor/limit/filter 或其它选项,多余字段与未知 mode 均返回 400 `invalid_argument`。
+- `mode` 缺省为 `keyword`。宿主注入的 `SearchIndex.capabilities` 必须先声明基础 `search`;未注入或未声明时 `/~search` 与根 `/~describe` 都是 404。`semantic` 另须声明 `search:semantic`,否则 400;声明限定 capability 不能替代基础 `search`。
+- 返回 JSON `Page<{path,tool}>`,当前形状只有 `{items:[...]}`、不暴露 cursor。即使底层 SearchIndex 返回 cursor,网关也会丢弃,直到分页契约正式定义。
+- SearchIndex 只返回候选,最终披露由网关后处理:每条 hit 必须同时通过节点路径 `read` + `call`,registry 中存在同路径节点且 kind/config 匹配 `mcp`/`http`/`tool`,然后应用该节点的 virtualize prefix/rename/hide/description。隐藏或无权候选静默剔除。
+- 当前只支持**本地** `mcp`/`http`/`tool` 节点候选;`tool` 包括能提供 raw ToolSpec 的 plugin/进程内/device 自定义 tool。remote、device shell、builtin、context、skillhub、directory 均不进入结果。core 仅定义 `SearchIndex`/`ToolSearchHit`/capability seam,gateway 集成测试注入 fake index 验证协议;Cloudflare D1 与 Node SQLite 均尚无 SearchIndex 实现或注入,生产端点不可据此宣称可用。
+
+## 1c. skillhub kind 数据面(与 context 同构的内容型 kind)
 
 skillhub 存 Agent Skill:每 skill = 对象前缀 `<id>/`,含 `SKILL.md`(Claude 约定 YAML frontmatter,`name`/`description` 必填)+ 若干 UTF-8 文本文件。NodeConfig 与 context 同形(`provider` r2/s3、`providerConfig?`、`authRef?`、`readOnly?`、`ttl?`);底层 ObjectStore/objectProvider 与大对象 `$ref`/`~ref`、etag 版本、`skills/<nodePath>` 前缀隔离全部复用 context。`~describe` capabilities = `['search']`。数据面 `POST /<hub>` `{tool,arguments}`:
 

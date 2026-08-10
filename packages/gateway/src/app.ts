@@ -116,7 +116,7 @@ async function r2PresignCredentials(
   return undefined
 }
 
-/** Env → TbAppDeps(Workers 宿主适配:KV/R2/DO/Static Assets → 四注入点)。 */
+/** Env → TbAppDeps(Workers 宿主适配；SearchIndex 第五注入点在 D1 实现落地后接线)。 */
 function depsFromEnv(env: Env): TbAppDeps {
   const state: StateStore = new KvStateStore(env.TB_KV)
   const secrets = new SecretStoreImpl(state, env.TB_SECRET_ENCRYPTION_KEY)

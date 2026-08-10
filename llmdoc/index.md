@@ -46,6 +46,7 @@
 - [memory/reflections/2026-07-22-cli-argument-contract.md](memory/reflections/2026-07-22-cli-argument-contract.md) — CLI 参数契约审查与修复(解析/本地语义/服务端安全三层、SK 历史脏值 fail closed、同名 flag 语义、分页知识边界、三入口能力矩阵)。
 - [memory/reflections/2026-07-22-cli-0.8.0-release-prep.md](memory/reflections/2026-07-22-cli-0.8.0-release-prep.md) — CLI 0.8.0 发布准备(public artifact 版本边界、重建产物版本证据、fail-fast build→version→pack 验证链)。
 - [memory/reflections/2026-07-24-security-report-remediation.md](memory/reflections/2026-07-24-security-report-remediation.md) — 安全报告复核、纵深修复与提交前纠偏(XSS/CSP、Workers bootstrap、KV 吊销语义、Secret Reference 授权遗漏、长连接重验 TOCTOU 与多宿主差异)。
+- [memory/reflections/2026-08-11-search-capability-gating.md](memory/reflections/2026-08-11-search-capability-gating.md) — 全局搜索 capability gating(SearchIndex 必须绑定真实宿主实现;fake 候选仍过 read+call、registry 与 virtualize 边界;外部 Draft 同步与本地实现分账验收)。
 
 ## 路由提示
 

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { isPrefixOf, normalizePath, parentPaths, segments, validatePath } from '../../src/tree/path'
+import { RESERVED_SEGMENTS } from '../../src/types'
 
 describe('normalizePath', () => {
   it.each([
@@ -54,8 +55,13 @@ describe('validatePath', () => {
     '~tree',
     '~register',
     '~describe',
+    '~search',
   ])('保留段 %s 作段 → invalid_argument', (seg) => {
     expect(validatePath(`a/${seg}/c`)?.code).toBe('invalid_argument')
+  })
+
+  it('协议保留段显式包含 ~search', () => {
+    expect(RESERVED_SEGMENTS).toContain('~search')
   })
 
   it('以 ~ 开头的任意段 → invalid_argument', () => {

@@ -15,6 +15,7 @@
 | `builtin/` | `system/*` 管理面 | sk / secret / registry / status / plugin / federation / annotation 七模块的 cmd 表 + `dispatch`(`types.ts`/`util.ts` 为公共骨架;`federation.ts` = remote host 白名单增删,合并 env 基线 + `tool/allowlist.ts` 的 RemoteAllowlistStore;`annotation.ts` = Path 补充说明 set/get/remove/list,set/remove 需 admin) |
 | `annotation/` | Path 补充说明存储 | `store.ts`(`AnnotationStore`:`annotation:<path>` 每 path 一条覆盖写,text ≤2000;独立于 TreeNode,工具子路径可标注;`~help` 渲染为 `note` 行/字段) |
 | `feedback/` | Agent 反馈存储 | `store.ts`(`FeedbackStore`:`feedback:<path>` 单 key 数组;submit/vote/get/listViews/remove + `helpItems` 排序/阈值/top-5 唯一真源;owner 投票去重、每 path 每 owner ≤10 防刷;消费面是网关 `~feedback` 保留段路由) |
+| `search/` | 全局工具搜索宿主 seam | `types.ts`(`SearchCapability = search|search:semantic`、`ToolSearchHit{path,tool}`、`SearchIndex.capabilities/search`;只定义候选索引接口,CF D1/Node SQLite 尚无实现) |
 | `tool/` | 工具层纯逻辑 | `httpTool.ts`(HttpToolDef 拼装、`{param}` 占位)、`virtualize.ts`(prefix/rename/hide/describe)、`mcpSchema.ts`(mcp schema→HelpModel)、`remote.ts`(路径改写/白名单)、`via.ts`(X-TB-Via 环检测)、`upstreamError.ts`(上游错误归一) |
 | `context/` | Context 层纯逻辑 | `types.ts`(ContextEntry)、`objectStore.ts`(ObjectStore 接口 + Memory 实现)、`objectProvider.ts`(四动词语义)、`path.ts`(穿越防护)、`ttl.ts`(懒回收)、`help.ts`(静态 cmd 表) |
 | `skillhub/` | Skillhub 层纯逻辑(内容型 kind,复用 context 存储) | `frontmatter.ts`(SKILL.md YAML frontmatter 最小解析,无 yaml 依赖)、`provider.ts`(`createSkillhubProvider`:以 `<id>/` 分组 + frontmatter 目录;List/Get/GetFile/Search/Publish/Remove;单文件 inline/`$ref` 复用 objectProvider)、`help.ts`(静态 cmd 表 + `SKILLHUB_CAPABILITIES`) |
@@ -30,14 +31,14 @@ exports `.` / `./tbApp` / `./bootstrap` / `./deviceHello`(供 SDK 与 server 复
 | 文件 | 管什么 |
 |---|---|
 | `app.ts` | Workers Env→deps 适配(入口薄层;规范化 `TB_CANONICAL_ORIGIN`;声明 `TB_SEARCH: D1Database` binding,搜索数据路径尚未接线) |
-| `tbApp.ts` | **宿主中立 `createTbApp(deps)`**:全局安全头、认证中间件、`~help`/`~tree`/`~skill`/`~describe`/`~register`/`~feedback`(splitFeedback + GET/POST/DELETE 三 handler,权限判定落目标 path)/数据面路由、remote 聚合、两级 `~help` 披露、`enrichHelp`(~help 注入 annotation note + feedback 头部条目,失败降级)、`/ui` 转发、`/~ref`(private/no-store) |
+| `tbApp.ts` | **宿主中立 `createTbApp(deps)`**:全局安全头、认证中间件、`~help`/`~tree`/`~skill`/`~describe`/`~register`/`~feedback`/`~mcp` 与 root-only `POST /~search`;可选 `SearchIndex` 声明 search capability 才开放根 describe/search,请求只接受 query+mode,候选按 read+call、mcp/http/tool kind/config、virtualize 后处理;另含数据面路由、remote 聚合、两级 `~help`、`enrichHelp`、`/ui`、`/~ref` |
 | `bootstrap.ts` | 首请求惰性引导:Workers 缺 `TB_BOOTSTRAP_ADMIN_SK` fail closed + `system` 七 builtin 物化(promise 防重入 + KV 幂等标志;宿主中立 API 保留随机兼容路径,当前 Node server 仍默认使用并写明文日志,待修;已引导实例升级自动补挂新模块) |
 | `deviceHello.ts` | **宿主中立 `processDeviceHello`**:设备 hello 验证 + 落库的单一真源,DO 与 server DeviceHub 共用(防两宿主树形态漂移) |
 | `kvStateStore.ts` | StateStore 的 KV 实现(list 跳 null、子树前缀扫描,头注释有约束说明) |
 | `deviceSession.ts` | `DeviceSession` DO 胶水:WS hibernation、待决表、`setWebSocketAutoResponse`、惰性会话重建;休眠恢复与每次 invoke 会重验 SK,但当前跨 KV await 后未复核 activeConnId、`markDisconnected` 可用陈旧 meta 覆盖新连接,属待修 TOCTOU(协议行为在 deviceHello.ts) |
 | `refToken.ts` | `$ref` 网关中转的 HMAC token 签发/校验(HMAC 用途域分离) |
 | `providers/` | 全部上游 I/O:`mcp.ts`(SDK Streamable HTTP,会话复用 + 404 重握手一次;auth:'oauth' 挂 `../oauth.ts` 的 authProvider)、`http.ts`、`remote.ts`、`toolCache.ts`、`r2Object.ts`、`s3Object.ts` + `s3Sign.ts`(aws4fetch)、`pluginClient.ts`(`upstreamAuthRef` → resolve 后经 `X-TB-Upstream-Auth` 注入,失败 → unavailable)+ `pluginTool.ts` + `pluginContext.ts` |
-| `test/` | 10 个集成测试(gateway/tool/context/skillhub/device/deviceNodes/plugin/ui/oauth/meta `.integration.test.ts`;meta = annotation + ~feedback 端到端),真实 workerd;`scripts/` 有 echo-mcp / s3-mock / stub-provider 兜底上游 |
+| `test/` | workerd 集成测试族(gateway/tool/context/skillhub/device/deviceNodes/plugin/ui/oauth/meta/mcp/search;`search.integration.test.ts` 用 fake SearchIndex 钉 root-only、capability、严格请求、权限与 virtualize 契约);`scripts/` 有 echo-mcp / s3-mock / stub-provider 兜底上游 |
 | `wrangler.jsonc` | 绑定 TB_KV / TB_R2 / TB_DEVICE(DO)/ ASSETS(dashboard dist,`run_worker_first`)及 `TB_SEARCH` → `tb-search` D1(`database_id` 占位由 provision 回填)+ `account_id` + custom domain;production 禁 `workers_dev`/Preview URLs,用 `TB_CANONICAL_ORIGIN` 固定 OAuth callback origin |
 
 ## packages/cli — `tb`(npm 发布物)

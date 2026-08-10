@@ -56,6 +56,7 @@ import {
   type Representation,
   resolvePluginExport,
   resolveUpstreamTool,
+  type SearchIndex,
   type SearchOptions,
   type SecretStoreImpl,
   SKILLHUB_CAPABILITIES,
@@ -131,7 +132,7 @@ export interface LocalProviderHooks {
 }
 
 /**
- * tb app 的宿主注入面(四注入点 + 解析后的部署配置)。
+ * tb app 的宿主注入面(五注入点 + 解析后的部署配置)。
  * 核心业务逻辑零分叉:Workers 适配层(app.ts)与 SDK(packages/sdk)都注入此形状。
  */
 export interface TbAppDeps {
@@ -164,6 +165,8 @@ export interface TbAppDeps {
   remote: RemoteSettings
   /** 追加保留根路径(在内置保留根之外额外声明)。 */
   reservedRoots?: string[]
+  /** 全局工具搜索索引；缺省或未声明 search capability 时 /~search 不存在。 */
+  search?: SearchIndex
   secrets: SecretStoreImpl
   state: StateStore
   /** mcp/tool 工具缓存 TTL 秒(缺省 300)。 */
@@ -1329,6 +1332,14 @@ export function createTbApp(deps: TbAppDeps): Hono<{ Variables: Vars }> {
         remoteAllowlistBase: deps.remote.allowlist,
       }),
     )
+  const globalSearchCapabilities = (): Array<'search' | 'search:semantic'> => {
+    const declared = new Set(deps.search?.capabilities ?? [])
+    if (!declared.has('search')) return []
+    return [
+      'search',
+      ...(declared.has('search:semantic') ? ['search:semantic' as const] : []),
+    ]
+  }
 
   // 放在全部路由之前,确保宿主中立 app 的 API、Dashboard、错误响应都覆盖安全头。
   app.use('*', async (c, next) => {
@@ -1763,6 +1774,73 @@ export function createTbApp(deps: TbAppDeps): Hono<{ Variables: Vars }> {
   app.all('/~mcp', c =>
     runHandler(async () => await handleMcpRequest(c.req.raw, deps.version, mcpBridgeFor(c))))
 
+  // POST /~search is a root-only, authenticated protocol endpoint. The route remains absent
+  // until a host injects a real keyword index and declares the matching capability.
+  app.post('/~search', c =>
+    runHandler(async () => {
+      const search = deps.search
+      const capabilities = globalSearchCapabilities()
+      if (search === undefined || !capabilities.includes('search')) {
+        throw TBError.notFound('no such path')
+      }
+
+      const body = (await c.req.json().catch(() => null)) as Record<string, unknown> | null
+      if (body === null || typeof body !== 'object' || Array.isArray(body)) {
+        throw new TBError('invalid_argument', 'body must be a JSON object')
+      }
+      const bodyKeys = Object.keys(body)
+      if (bodyKeys.some(key => key !== 'query' && key !== 'opts')) {
+        throw new TBError('invalid_argument', 'body only accepts query and opts')
+      }
+      if (typeof body.query !== 'string' || body.query.trim().length === 0) {
+        throw new TBError('invalid_argument', 'query must be a non-empty string')
+      }
+
+      const rawOpts = body.opts
+      if (
+        rawOpts !== undefined
+        && (rawOpts === null || typeof rawOpts !== 'object' || Array.isArray(rawOpts))
+      ) {
+        throw new TBError('invalid_argument', 'opts must be a JSON object')
+      }
+      const opts = (rawOpts ?? {}) as Record<string, unknown>
+      if (Object.keys(opts).some(key => key !== 'mode')) {
+        throw new TBError('invalid_argument', 'opts only accepts mode')
+      }
+      const mode = opts.mode ?? 'keyword'
+      if (mode !== 'keyword' && mode !== 'semantic') {
+        throw new TBError('invalid_argument', 'opts.mode must be \'keyword\' or \'semantic\'')
+      }
+      if (mode === 'semantic' && !capabilities.includes('search:semantic')) {
+        throw new TBError(
+          'invalid_argument',
+          'search mode \'semantic\' requires capability \'search:semantic\'',
+        )
+      }
+
+      const page = await search.search(body.query.trim(), { mode })
+      const ctx = c.get('ctx')
+      const registry = new NodeRegistryStore(c.get('store'))
+      const items: Array<{ path: TreePath, tool: ToolSpec }> = []
+      for (const hit of page.items) {
+        if (!check(ctx, hit.path, 'read').allow || !check(ctx, hit.path, 'call').allow) continue
+        const node = await registry.get(hit.path).catch(() => null)
+        if (
+          node === null
+          || (node.kind !== 'mcp' && node.kind !== 'http' && node.kind !== 'tool')
+          || node.config?.kind !== node.kind
+        ) {
+          continue
+        }
+        const tool = virtualizeTools(node.virtualize, [hit.tool]).exposed[0]
+        if (tool !== undefined) items.push({ path: hit.path, tool })
+      }
+      return new Response(JSON.stringify({ items }), {
+        headers: { 'content-type': contentTypeFor('json') },
+      })
+    }),
+  )
+
   // WS /system/device/ws?deviceId=<id> → 设备通道宿主(CF:每 deviceId 一个 DeviceSession DO)。
   // deviceId 同时在 hello 帧中出现;通道侧会校验二者一致,以满足设备帧契约。
   app.get('/system/device/ws', c =>
@@ -1899,10 +1977,9 @@ export function createTbApp(deps: TbAppDeps): Hono<{ Variables: Vars }> {
   // --- POST /<path> 数据面调用 ---
   const handleInvoke = async (c: AppContext): Promise<Response> => {
     const rawEncoded = new URL(c.req.url).pathname.replace(/^\/+|\/+$/g, '')
-    if (rawEncoded === '' || rawEncoded.split('/').some(s => s.startsWith('~'))) {
-      throw TBError.notFound('no such path')
-    }
+    if (rawEncoded === '') throw TBError.notFound('no such path')
     const raw = decodePath(rawEncoded)
+    if (raw.split('/').some(s => s.startsWith('~'))) throw TBError.notFound('no such path')
     const ctx = c.get('ctx')
     const store = c.get('store')
     const registry = new NodeRegistryStore(store)
@@ -2208,7 +2285,14 @@ export function createTbApp(deps: TbAppDeps): Hono<{ Variables: Vars }> {
   // --- ~describe:有可选能力的节点返回 { kind, capabilities };其余 404 ---
   const handleDescribe = async (c: AppContext): Promise<Response> => {
     const path = splitReserved(new URL(c.req.url).pathname, '~describe')
-    if (path === null || path === '') throw TBError.notFound('no such path')
+    if (path === null) throw TBError.notFound('no such path')
+    if (path === '') {
+      const capabilities = globalSearchCapabilities()
+      if (capabilities.length === 0) throw TBError.notFound('no such path')
+      return new Response(JSON.stringify({ kind: 'directory', capabilities }), {
+        headers: { 'content-type': contentTypeFor('json') },
+      })
+    }
     const ctx = c.get('ctx')
     const store = c.get('store')
     const registry = new NodeRegistryStore(store)
