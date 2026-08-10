@@ -29,7 +29,11 @@ export interface ToolSpec {
 export interface ToolResult {
   /** markdown 文本或结构化 JSON(按内容协商输出)。 */
   content: string | unknown
+  /** MCP 等上游的原生多模态 content blocks;HTBP 渲染仍使用归一后的 content。 */
+  contentBlocks?: unknown[]
   isError?: boolean
+  /** MCP 上游返回的结构化结果;consumer endpoint 转发时保留。 */
+  structuredContent?: Record<string, unknown>
 }
 
 /*

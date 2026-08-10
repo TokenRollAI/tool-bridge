@@ -7,6 +7,7 @@
 | 端点 | 语义 |
 |---|---|
 | `GET /healthz` | 树外免认证运维端点,200 + `{"healthy":true,"version":"<x.y.z>"}` |
+| `POST /~mcp` | **MCP consumer endpoint**:需 Bearer SK 的无状态 Streamable HTTP(JSON response)端点;支持 MCP `initialize`、`tools/list`、`tools/call`,每次请求均按当前身份重新投影 HTBP 树,不依赖 isolate 内会话状态 |
 | `GET /<path>/~help` | 节点自描述;默认 `text/markdown` 可读表现,`Accept: application/json` 得等价 `HelpJson`,`Accept: text/plain` 得紧凑 Help DSL(面向 LLM 省 token)。**两级披露**:节点 `~help` 是索引,`GET /<node>/<tool>/~help` 给单工具全量 spec |
 | `GET /~tree?depth=N` | 受限深度树视图(默认 2,上限 8 钳制;节点上限 500);子树根必须真实存在,非根不存在 → 404 |
 | `GET /<path>/~skill` | 本地 501 占位(`unavailable`,retryable:false);remote 节点透传 |
@@ -22,7 +23,22 @@
 | `WS /system/device/ws?deviceId=<id>` | 设备通道升级(Bearer SK);mountPath 缺省 `device/<deviceId>` |
 | `GET /ui` | Dashboard 静态资源(免认证,SPA 回退严格限定 `/ui`) |
 
-保留段:`~help / ~skill / ~tree / ~register / ~describe / ~authorize / ~feedback`;保留根:`system`、`ui`(部署配置可追加)。注册 `a/b/c` 时 `a`、`a/b`、`a/b/c` 三级 `~help` 都必须可达(中间 directory 自动物化)。**注意 `~skill`(保留段,节点使用指南,当前本地 501 占位)与 `skillhub`(节点 kind)是两个正交概念:前者是任意节点的一个 GET 保留路径段,后者是内容型 kind 的判别值,互不冲突。**
+保留段:`~help / ~skill / ~tree / ~register / ~describe / ~authorize / ~feedback / ~mcp`;保留根:`system`、`ui`(部署配置可追加)。注册 `a/b/c` 时 `a`、`a/b`、`a/b/c` 三级 `~help` 都必须可达(中间 directory 自动物化)。**注意 `~skill`(保留段,节点使用指南,当前本地 501 占位)与 `skillhub`(节点 kind)是两个正交概念:前者是任意节点的一个 GET 保留路径段,后者是内容型 kind 的判别值,互不冲突。**
+
+## 1a. MCP consumer endpoint 投影
+
+- `POST /~mcp` 位于统一 Bearer 认证中间件之后。服务端使用 MCP SDK 的 Web-standard Streamable HTTP transport,每个 HTTP 请求创建独立 server/transport 并启用 JSON response;server identity = `tool-bridge` + 当前 gateway 版本,capabilities = `{tools:{}}`。
+- `tools/list` 每次从当前树动态生成,不缓存跨请求授权结果。本地节点先要求路径 `read`,再按命令声明的 `scope`(tool provider/device tool 为 `call`)调用 `Authorizer.Check`;因此只读 SK 看不到不可调用工具,context/builtin 等多命令节点只暴露该身份获准的命令。
+- 覆盖面包括本地注册树中的 tool provider、device tool、builtin/context/skillhub 等 HelpModel 命令,以及 `remote` 挂载下递归发现的子树。本地 registry 最长前缀所有者优先:若 remote 后代路径已有本地节点覆盖,该分支不再从远端发现,而按本地节点投影。
+- remote 路径必须同时通过本地挂载路径的 `read`、`call` 以及命令声明 `scope` 三重检查;路径、命令和详细 schema 重定位到本地挂载前缀,不向消费方泄露远端基址。远端 `~tree`/`~help` 的 node/child/command path 均须为 canonical 相对 TreePath、匹配请求路径和直接父子/节点归属;`.`/`..`、编码点段、空/保留/控制段一律在后续凭证化 fetch 前 fail closed。单次 MCP 请求的 remote discovery 上限为深度 8、节点 500、远端请求 32(包含 `~tree`/`~help`/详细 schema 请求);任一超限均以不可用错误 fail closed,不返回不完整工具集。
+- `tools/call` 会以当前身份重新生成同一投影并按 MCP 工具名查找;不存在或已失权的名称返回 MCP `InvalidParams`。本地 `mcp/http/tool` Provider 重新校验 read+call、解析最新虚拟化映射后直接调用 typed `provider.call`,保留原生 MCP `isError`、content blocks 与 `structuredContent`;其余本地 HTBP 命令按 HelpModel 路径复用既有 Hono 分派,remote tool 重定位后仍走本地节点 `{tool,arguments}` 信封,不另开权限或转发旁路。
+- MCP tool `name` 的 identity 是 `[invokePath,toolName,'envelope'|'flat']` JSON tuple,再做单射 UTF-8 字节编码并加 `tb_` 前缀;下划线双写,其余不在 `[A-Za-z0-9.-]` 的字节编码为 `_xx`。名称最长 128 字符;超长 identity 保留编码前缀并附完整 SHA-256 hex,使名称兼容 MCP 客户端且抵抗路径/转义碰撞;重复 identity 或最终名称碰撞均 fail closed。
+- MCP tool 字段约定:
+  - `description`:原描述 + `HTBP <invokePath>`;缺描述时仅保留 HTBP 路径。
+  - `inputSchema`:缺省为 `{type:'object',properties:{}}`;已有 schema 必须是 object 根,并强制根 `type:'object'`。投影先经 MCP `ToolSchema` 校验,再由 `CfWorkerJsonSchemaValidator` 编译;非法 tool/schema 以 MCP internal error fail closed。
+  - `annotations`:HTBP `effect:read` → `readOnlyHint:true`;`write|destructive` → `readOnlyHint:false`;`destructive` 或 `confirm:true` → `destructiveHint:true`。
+  - `_meta['io.tool-bridge/path']`:本地源节点路径;`_meta['io.tool-bridge/command']`:原 HTBP 命令/工具名。
+- `tools/call` 在任何 Provider/Hono 调用前以已编译 schema 校验 `arguments`;失败返回 MCP `InvalidParams`,不触发下游。结果再经 MCP `CallToolResultSchema` 校验:typed Provider 的合法 content blocks 原样保留,普通字符串/JSON 转为 text content,显式 `structuredContent` 优先保留(否则顶层对象自动补入),业务错误保留 `isError:true`;非法结果以 internal error fail closed。
 
 ## 1b. skillhub kind 数据面(与 context 同构的内容型 kind)
 

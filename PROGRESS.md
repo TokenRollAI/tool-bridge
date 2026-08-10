@@ -20,7 +20,7 @@
 
 ## 当前状态
 - 当前 Phase:**Phase 3 — E:对外 MCP 出口**(Round 13 起;Phase 2 可做项已清空)
-- Phase 3 已勾选:项 1(官方 MCP 测试 client + 本地 initialize,Round 14)
+- Phase 3 已勾选:项 1(官方 MCP 测试 client + 本地 initialize,Round 14)、项 2(认证后的动态 tools/list + tools/call,Round 15)
 - Phase 2 已勾选:项 1(OperationRegistry)、项 2(Plugin v2 多 export,Round 13 补齐三入口对等后成立)、项 3(Context 按 handler 推导能力)、项 4(`@tool-bridge/plugin-sdk` 可发布)、项 5(样例 plugin 双 export)、项 6(删净 legacy 面)
 - Phase 2 待办(**全部为待授权的外向动作**):项 7 飞书重写复验(代码已完成,只差生产实调 → P2-1)/ 项 8 部署上线
 - Phase 1(代码完成,部署挂起见 PENDING)
@@ -29,7 +29,7 @@
 - 已提交:`4e59750` core 原语 / `3867a30` 宿主接线(四个阻断项)/ `a9fcba4` lockfile / `3b42eda` 规划文档
 - Blockers(从 DOR.md 继承,不阻塞全局开工,只缩小对应 Phase 可推进范围):
   - **C-1**(Phase 4):D1 绑定与 provision 幂等分支尚未建立(`packages/gateway/wrangler.jsonc` 无 `d1_databases`、`scripts/provision.mjs` 无 D1 分支)。属 Phase 4 第一个 DoD 项,不阻塞 Phase 1/2/3。
-  - ~~**E-1**(Phase 3):缺一个 MCP client 做 tools/list + tools/call 验收。~~ **已解决**(Round 14):官方 `Client` + `StreamableHTTPClientTransport` 已经真实 `SELF.fetch` 连本地 `/mcp` 完成 initialize;后续复用同一 client 验收 list/call。
+  - ~~**E-1**(Phase 3):缺一个 MCP client 做 tools/list + tools/call 验收。~~ **已解决**(Round 14):官方 `Client` + `StreamableHTTPClientTransport` 已经真实 `SELF.fetch` 连本地 endpoint 完成 initialize;Round 15 为避免与树节点冲突,把最初的 `/mcp` 纠正为保留控制段 `/~mcp`,并复用同一 client 验收 list/call。
 
 ## 开跑提示
 - 执行顺序 A→B→E→C→D,不可跳 Phase(依赖:B 改 ToolSpec 派生形态 → C 索引 ToolSpec 必须在 B 后;E 只读 tool list 亦在 B 后;D 依赖 B/C 接口定稿)。
@@ -270,3 +270,20 @@
   - `pnpm exec eslint packages/gateway/src/mcpServer.ts packages/gateway/src/tbApp.ts packages/gateway/test/mcpClient.ts packages/gateway/test/mcp.integration.test.ts` → 退出码 0(首跑 4 个 import 排序错误已由 `eslint --fix` 修复后复验)。
 - 勾选:Phase 3 DoD 项 1(测试 MCP client 就位 / E-1 已解)。
 - 遗留:下一轮 = Phase 3 项 2(MCP tools/list + tools/call):基于同一个按请求认证的 server factory,把当前 SK 的 `ctx` 注入工具枚举/调用;复用现有 registry/provider/virtualize/Authorizer.Check,不另造分发路径。
+
+## Round 15 — 2026-08-11
+- 目标:Phase 3 DoD 项 2 — gateway MCP server 动态 `tools/list` + `tools/call`,按当前 Bearer SK 裁剪并复用既有 HTBP 调用链。
+- 动作:
+  - endpoint 从 Round 14 的普通 `/mcp` 纠正为保留控制段 `/~mcp`,加入 `RESERVED_SEGMENTS`;仍位于统一 Bearer 中间件之后且每请求新建无状态官方 MCP Server/Streamable HTTP transport,无认证 initialize 在协议分派前 401。
+  - `mcpServer.ts` 改用官方 low-level `Server` 的动态 list/call handler(现有 ToolSpec 持 JSON Schema,不适合高层 Zod `registerTool`):整棵本地 registry 投影 provider/device/builtin/context/skillhub 命令,remote 子树通过 `~tree`/`~help` 本地化;每条先 read、再按工具 call 或命令 action 做 `Authorizer.Check`。
+  - 工具名 identity 改为无歧义 JSON tuple,UTF-8 字节编码成 MCP 安全字符;超长名保留前缀 + 完整 SHA-256,总长 128。重复 identity/name fail closed。schema 经官方 `ToolSchema` + `CfWorkerJsonSchemaValidator` 编译,call 前实际校验 required/type;畸形 provider schema 不进入 client。
+  - 调用复用:本地 mcp/http/tool 在重新读取节点、复判 read+call、重新虚拟名反查后直达 typed `provider.call`,从而保留上游 MCP `isError`、image/content blocks 与 `structuredContent`;其余本地命令和 remote 继续走 Hono/HTBP 信封路径。所有返回再过 `CallToolResultSchema`。
+  - 严格 investigator 两次复核发现并修复 6 类遗漏:①MCP 业务错误/多模态结果被 HTTP 渲染压扁;②low-level handler 未自动校验动态参数;③remote 缺固定 call 可见门;④remote 根下本地长前缀覆盖被误吞;⑤不可信 remote BFS 无预算;⑥恶意 remote child `../admin` 可经 URL 规范化逃出 baseUrl 路径且携带 skRef。remote 现按 registry 最长前缀(本地优先)并同时要求 read+call+command scope,深度 8/节点 500/发现请求 32 任一超限即 fail closed;`~tree`/`~help` path 另做 canonical、请求对应与直接父子/命令归属校验,点段在第二次 fetch 前拒绝。
+  - recorder 同步 `llmdoc/reference/protocol-contract.md` 的 `POST /~mcp`、投影/命名/schema/结果与 remote 预算契约。
+- 验证:
+  - `pnpm --filter @tool-bridge/gateway exec vitest run test/mcp.integration.test.ts` → **12 passed**,退出码 0。覆盖 401、list 权限裁剪、HTTP call、参数拒绝且上游零调用、畸形 schema、MCP 原生错误/图片/structured result、remote 本地化与 no-call 零探测、本地覆盖 remote、32 请求预算、原始/一次编码/三次编码 `..` 逃逸均在首次 fetch 后拒绝、名称碰撞/长度。
+  - `pnpm --filter @tool-bridge/gateway test` → **157 passed / 6 skipped**,退出码 0;`pnpm --filter @tool-bridge/core test` → **728 passed**,退出码 0。
+  - `pnpm --filter @tool-bridge/gateway build` → ESM+DTS success(393.22 kB);gateway/core typecheck、目标文件 eslint、`git diff --check` 均退出码 0。
+  - 过程证据:初版 direct `/<node>/<tool>` 自调用因精确 node scope 得到 not_found,改回节点信封后通过;严格复核后的首轮反例测试中畸形 schema 如期 fail closed,但同文件持久测试树污染后续列表,加入挂载路径逆序清理后 9/9 全绿。
+- 勾选:Phase 3 DoD 项 2(MCP server endpoint:动态 list scope 裁剪 + call 成功)。
+- 遗留:下一轮 = Phase 3 项 3(scope 收窄钉死):同一树用 admin 与窄 scope SK 分别连接,断言精确工具集差异;再用窄 SK 调 admin-only 工具名,必须不可见、不可调且上游零调用。

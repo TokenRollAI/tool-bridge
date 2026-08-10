@@ -1,4 +1,5 @@
 import {
+  type Action,
   AnnotationStore,
   assertSecretRefUse,
   buildTree,
@@ -21,12 +22,14 @@ import {
   createBuiltins,
   createObjectContextProvider,
   createSkillhubProvider,
+  DEFAULT_MAX_NODES,
   type DeviceCallResult,
   deviceDirectoryHelpModel,
   deviceFsHelpModel,
   deviceShellHelpModel,
   FEEDBACK_HIDE_SCORE,
   FeedbackStore,
+  type HelpJson,
   type HelpModel,
   identify,
   isContextExpired,
@@ -35,6 +38,7 @@ import {
   KEY_PLUGIN,
   KEY_PLUGIN_META,
   type ListOptions,
+  MAX_TREE_DEPTH,
   negotiate,
   type NodeConfig,
   NodeRegistryStore,
@@ -63,12 +67,14 @@ import {
   TBError,
   type TBErrorBody,
   toolHelpModel,
+  type ToolResult,
   type ToolSpec,
   toolsToHelpModel,
   type TreeEntry,
   type TreeJson,
   type TreeNode,
   type TreePath,
+  validatePath,
   virtualizeTools,
 } from '@tool-bridge/core'
 import { type Context, Hono } from 'hono'
@@ -81,6 +87,12 @@ import {
   renderOAuthCallbackHtml,
   startMcpAuthorization,
 } from './oauth'
+import {
+  handleMcpRequest,
+  type McpBridgeTool,
+  type McpToolBridge,
+  mcpToolIdentity,
+} from './mcpServer'
 import { assertRemoteAllowed, passthroughRemote, type RemoteSettings } from './providers/remote'
 import { createMcpProvider, invalidateMcpSession, type McpConfig } from './providers/mcp'
 import { createS3ObjectStore, type S3StoreConfig } from './providers/s3Object'
@@ -89,7 +101,6 @@ import { createHttpProvider, type HttpConfig } from './providers/http'
 import { getTools, invalidateToolCache } from './providers/toolCache'
 import { createPluginToolProvider } from './providers/pluginTool'
 import { signRefToken, verifyRefToken } from './refToken'
-import { handleMcpRequest } from './mcpServer'
 import { buildDeps } from './bootstrap'
 
 export type { RemoteSettings } from './providers/remote'
@@ -162,6 +173,7 @@ export interface TbAppDeps {
 }
 
 const TOOL_CACHE_TTL_DEFAULT = 300
+const MCP_REMOTE_MAX_REQUESTS = 32
 
 /** `~tree` 深度边界上免 fetch 探测、直接标 truncated 的 kind:remote 联邦(子树在远端,探测需远端往返)。 */
 const REMOTE_OPAQUE_KINDS = new Set(['remote'])
@@ -380,10 +392,67 @@ function filterListVisible(nodes: TreeNode[], scopes: CallContext['scopes']): Tr
   })
 }
 
-function localizeRemoteEntry(mountPath: TreePath, entry: TreeJson): TreeEntry {
-  const rel = entry.path.replace(/^\/+|\/+$/g, '')
+function remoteProtocolError(message: string): TBError {
+  return new TBError('unavailable', message, { retryable: false })
+}
+
+/** Remote JSON paths are untrusted protocol data; reject URL-normalizable aliases. */
+function canonicalRemotePath(path: string, allowRoot: boolean): TreePath {
+  if (path !== path.replace(/^\/+|\/+$/g, '')) {
+    throw remoteProtocolError(`remote returned non-canonical path '${path}'`)
+  }
+  const invalid = validatePath(path, { allowRoot })
+  if (invalid !== null) throw remoteProtocolError(`remote returned invalid path '${path}'`)
+  for (const segment of path === '' ? [] : path.split('/')) {
+    let decoded = segment
+    for (let pass = 0; pass < 4; pass++) {
+      if (
+        decoded === '.'
+        || decoded === '..'
+        || decoded.startsWith('~')
+        || decoded.includes('/')
+        || decoded.includes('\\')
+        || [...decoded].some((char) => {
+          const code = char.charCodeAt(0)
+          return code <= 31 || code === 127
+        })
+      ) {
+        throw remoteProtocolError(`remote returned unsafe path segment '${segment}'`)
+      }
+      let next: string
+      try {
+        next = decodeURIComponent(decoded)
+      } catch {
+        throw remoteProtocolError(`remote returned malformed encoded path '${path}'`)
+      }
+      if (next === decoded) break
+      if (pass === 3) {
+        throw remoteProtocolError(`remote returned over-encoded path '${path}'`)
+      }
+      decoded = next
+    }
+  }
+  return path
+}
+
+function remotePathWithin(nodePath: TreePath, commandPath: TreePath): boolean {
+  return nodePath === ''
+    || commandPath === nodePath
+    || commandPath.startsWith(`${nodePath}/`)
+}
+
+function localizeRemoteEntry(
+  mountPath: TreePath,
+  remoteParentPath: TreePath,
+  entry: TreeJson,
+): TreeEntry {
+  const rel = canonicalRemotePath(entry.path, false)
+  const parent = rel.split('/').slice(0, -1).join('/')
+  if (parent !== remoteParentPath) {
+    throw remoteProtocolError(`remote ~tree child '${rel}' is not a direct descendant`)
+  }
   const out: TreeEntry = {
-    path: rel === '' ? mountPath : `${mountPath}/${rel}`,
+    path: `${mountPath}/${rel}`,
     kind: entry.kind,
     description: entry.description,
   }
@@ -516,7 +585,12 @@ async function remoteTreeChildren(
   if (remoteTree === null) {
     throw new TBError('unavailable', 'remote ~tree returned invalid JSON', { retryable: false })
   }
-  return (remoteTree.children ?? []).map(child => localizeRemoteEntry(resolved.node.path, child))
+  const remotePath = canonicalRemotePath(remoteTree.path, true)
+  if (remotePath !== resolved.rest) {
+    throw remoteProtocolError(`remote ~tree path '${remotePath}' does not match request`)
+  }
+  return (remoteTree.children ?? []).map(child =>
+    localizeRemoteEntry(resolved.node.path, remotePath, child))
 }
 
 /** 注册 remote 节点时的白名单校验:config.kind==='remote' → baseUrl 必须在白名单内。 */
@@ -1401,9 +1475,293 @@ export function createTbApp(deps: TbAppDeps): Hono<{ Variables: Vars }> {
     await next()
   })
 
-  // Streamable HTTP MCP consumer endpoint. The transport is stateless; the authenticated
-  // gateway request remains the identity boundary for every MCP request.
-  app.all('/mcp', c => runHandler(async () => await handleMcpRequest(c.req.raw, deps.version)))
+  const mcpCommand = (
+    nodePath: TreePath,
+    nodeDescription: string,
+    command: {
+      confirm?: boolean
+      effect?: string
+      h?: string
+      inputSchema?: unknown
+      name: string
+      path: string
+      scope: Action
+    },
+  ): McpBridgeTool => {
+    const modelPath = nodePath.replace(/^\/+|\/+$/g, '')
+    const commandPath = command.path.replace(/^\/+|\/+$/g, '')
+    if (commandPath !== modelPath && !commandPath.startsWith(`${modelPath}/`)) {
+      throw new TBError('internal', `command path '${command.path}' escapes node '${nodePath}'`)
+    }
+    const invokePath = `/${commandPath}`
+    const invokeWithEnvelope = commandPath === modelPath
+    return {
+      identity: mcpToolIdentity(invokePath, command.name, invokeWithEnvelope),
+      sourcePath: nodePath,
+      toolName: command.name,
+      invokePath,
+      invokeWithEnvelope,
+      description: command.h ?? nodeDescription,
+      ...(command.inputSchema !== undefined ? { inputSchema: command.inputSchema } : {}),
+      ...(command.effect !== undefined ? { effect: command.effect } : {}),
+      ...(command.confirm === true ? { confirm: true } : {}),
+    }
+  }
+
+  const toolSpecCommand = (
+    node: TreeNode,
+    tool: ToolSpec,
+    providerBacked = false,
+  ): McpBridgeTool => {
+    const path = `/${node.path}`
+    return {
+      identity: mcpToolIdentity(path, tool.name, true),
+      sourcePath: node.path,
+      toolName: tool.name,
+      invokePath: path,
+      invokeWithEnvelope: true,
+      ...(providerBacked ? { providerBacked: true } : {}),
+      description: tool.description ?? node.description,
+      ...(tool.inputSchema !== undefined ? { inputSchema: tool.inputSchema } : {}),
+      ...(tool.effect !== undefined ? { effect: tool.effect } : {}),
+      ...(tool.confirm === true ? { confirm: true } : {}),
+    }
+  }
+
+  /** Rebase a remote HelpJson command path onto its local federation mount. */
+  const remoteCommand = (
+    localNodePath: TreePath,
+    model: HelpJson,
+    command: HelpJson['cmds'][number],
+  ): McpBridgeTool => {
+    const remoteNodePath = model.node.path.replace(/^\/+|\/+$/g, '')
+    const remoteCommandPath = command.path.replace(/^\/+|\/+$/g, '')
+    if (
+      remoteCommandPath !== remoteNodePath
+      && !remoteCommandPath.startsWith(`${remoteNodePath}/`)
+    ) {
+      throw new TBError('unavailable', 'remote ~help returned a command outside its node')
+    }
+    const suffix = remoteCommandPath.slice(remoteNodePath.length)
+    const directTool = suffix.startsWith('/')
+    return mcpCommand(localNodePath, model.node.description, {
+      ...command,
+      // Tool-layer nodes retain the envelope entrypoint. It keeps authorization on the
+      // node path instead of requiring callers to hold an exact scope for the tool suffix.
+      path: directTool ? `/${localNodePath}` : `/${localNodePath}${suffix}`,
+    })
+  }
+
+  const mcpBridgeFor = (c: AppContext): McpToolBridge => {
+    const ctx = c.get('ctx')
+    const registry = new NodeRegistryStore(c.get('store'))
+    let remoteRequests = 0
+
+    const takeRemoteRequest = (): void => {
+      remoteRequests += 1
+      if (remoteRequests > MCP_REMOTE_MAX_REQUESTS) {
+        throw new TBError('unavailable', 'remote MCP discovery request budget exceeded', {
+          retryable: false,
+        })
+      }
+    }
+
+    const remoteHelp = async (path: TreePath): Promise<HelpJson> => {
+      takeRemoteRequest()
+      const headers = new Headers(c.req.raw.headers)
+      headers.set('accept', 'application/json')
+      const response = await remotePassthroughIfMatch(
+        c,
+        ctx,
+        registry,
+        path,
+        '~help',
+        deps,
+        headers,
+      )
+      if (response === null || !response.ok) {
+        throw new TBError('unavailable', `remote ~help failed for '${path}'`, { retryable: true })
+      }
+      const model = (await response.json().catch(() => null)) as HelpJson | null
+      if (model === null || !Array.isArray(model.cmds) || typeof model.node?.path !== 'string') {
+        throw new TBError('unavailable', `remote ~help returned invalid JSON for '${path}'`)
+      }
+      const owner = await registry.resolve(path).catch(() => null)
+      if (owner?.node.kind !== 'remote') {
+        throw remoteProtocolError(`remote ~help path '${path}' lost its mount owner`)
+      }
+      const modelPath = canonicalRemotePath(model.node.path, true)
+      if (modelPath !== owner.rest) {
+        throw remoteProtocolError(`remote ~help path '${modelPath}' does not match request`)
+      }
+      for (const command of model.cmds) {
+        if (!command.path.startsWith('/') || command.path.startsWith('//')) {
+          throw remoteProtocolError(`remote ~help returned invalid command path '${command.path}'`)
+        }
+        const commandPath = canonicalRemotePath(command.path.slice(1), true)
+        if (!remotePathWithin(modelPath, commandPath)) {
+          throw remoteProtocolError(`remote ~help command '${command.path}' escapes its node`)
+        }
+      }
+      return model
+    }
+
+    const remotePaths = async (root: TreePath): Promise<TreePath[]> => {
+      const found: TreePath[] = []
+      const seen = new Set<TreePath>()
+      const pending: Array<{ depth: number, path: TreePath }> = [{ depth: 0, path: root }]
+      while (pending.length > 0) {
+        const current = pending.shift()
+        if (current === undefined || seen.has(current.path)) continue
+        const { depth, path } = current
+        seen.add(path)
+        if (!check(ctx, path, 'read').allow || !check(ctx, path, 'call').allow) continue
+        const owner = await registry.resolve(path).catch(() => null)
+        if (owner?.node.path !== root || owner.node.kind !== 'remote') continue
+        if (found.length >= DEFAULT_MAX_NODES) {
+          throw new TBError('unavailable', 'remote MCP discovery node budget exceeded', {
+            retryable: false,
+          })
+        }
+        found.push(path)
+        takeRemoteRequest()
+        const children = await remoteTreeChildren(c, ctx, registry, path, deps)
+        if (children.length > 0 && depth >= MAX_TREE_DEPTH) {
+          throw new TBError('unavailable', 'remote MCP discovery depth exceeded', {
+            retryable: false,
+          })
+        }
+        for (const child of children) {
+          if (child.path.startsWith(`${root}/`) && !seen.has(child.path)) {
+            pending.push({ path: child.path, depth: depth + 1 })
+          }
+        }
+      }
+      return found
+    }
+
+    const list = async (): Promise<McpBridgeTool[]> => {
+      const now = new Date().toISOString()
+      const nodes = await pruneExpiredContext(await registry.subtree(''), registry)
+      const result: McpBridgeTool[] = []
+
+      for (const node of nodes) {
+        if (node.kind === 'directory') continue
+        if (!check(ctx, node.path, 'read').allow) continue
+
+        if (node.kind === 'remote') {
+          for (const path of await remotePaths(node.path)) {
+            const model = await remoteHelp(path)
+            for (const command of model.cmds) {
+              if (check(ctx, path, command.scope).allow) {
+                let detailed = command
+                if (command.inputSchema === undefined && command.path !== `/${model.node.path}`) {
+                  const remoteNodePath = model.node.path.replace(/^\/+|\/+$/g, '')
+                  const remoteCommandPath = command.path.replace(/^\/+|\/+$/g, '')
+                  const detailPath = `${path}${remoteCommandPath.slice(remoteNodePath.length)}`
+                  const detail = await remoteHelp(detailPath)
+                  detailed = detail.cmds.find(item => item.name === command.name) ?? command
+                }
+                result.push(remoteCommand(path, model, detailed))
+              }
+            }
+          }
+          continue
+        }
+
+        const marker = deviceToolMarker(node)
+        if (marker !== null) {
+          if (check(ctx, node.path, 'call').allow) {
+            result.push(...(marker.cmds ?? []).map(tool => toolSpecCommand(node, tool)))
+          }
+          continue
+        }
+
+        if (
+          (node.kind === 'mcp' || node.kind === 'http' || node.kind === 'tool')
+          && node.config !== undefined
+        ) {
+          if (!check(ctx, node.path, 'call').allow) continue
+          const provider = await providerFor(node, ctx, deps)
+          const raw = await upstreamTools(node, provider, deps, false, now)
+          const { exposed } = virtualizeTools(node.virtualize, raw)
+          result.push(...exposed.map(tool => toolSpecCommand(node, tool, true)))
+          continue
+        }
+
+        const model = await helpModelFor(node, registry, ctx, builtinsOf(c.get('store')), deps, {
+          refresh: false,
+          now,
+        })
+        for (const command of model.cmds) {
+          if (check(ctx, node.path, command.scope).allow) {
+            result.push(mcpCommand(node.path, node.description, command))
+          }
+        }
+      }
+      return result
+    }
+
+    return {
+      list,
+      call: async (tool, args) => {
+        if (tool.providerBacked === true) {
+          let node: TreeNode
+          try {
+            node = await registry.get(tool.sourcePath)
+          } catch {
+            throw TBError.notFound('not found')
+          }
+          if (!check(ctx, node.path, 'read').allow) throw TBError.notFound('not found')
+          if (!check(ctx, node.path, 'call').allow) {
+            throw new TBError('permission_denied', `no scope grants 'call' on '${node.path}'`)
+          }
+          if (
+            (node.kind !== 'mcp' && node.kind !== 'http' && node.kind !== 'tool')
+            || node.config === undefined
+          ) {
+            throw TBError.notFound('not found')
+          }
+          const provider = await providerFor(node, ctx, deps)
+          const raw = await upstreamTools(node, provider, deps, false, new Date().toISOString())
+          const upstreamName = resolveUpstreamTool(node.virtualize, raw, tool.toolName)
+          const result: ToolResult = await provider.call(upstreamName, args)
+          return {
+            content: result.contentBlocks ?? result.content,
+            ...(result.isError === true ? { isError: true } : {}),
+            ...(result.structuredContent !== undefined
+              ? { structuredContent: result.structuredContent }
+              : {}),
+          }
+        }
+        const url = new URL(tool.invokePath, c.req.url)
+        const headers = new Headers({
+          'accept': 'application/json',
+          'authorization': c.req.header('authorization') ?? '',
+          'content-type': 'application/json',
+        })
+        const body = tool.invokeWithEnvelope
+          ? { tool: tool.toolName, arguments: args }
+          : args
+        const response = await app.request(
+          new Request(url, { method: 'POST', headers, body: JSON.stringify(body) }),
+        )
+        const text = await response.text()
+        let value: unknown = text
+        try {
+          value = JSON.parse(text) as unknown
+        } catch {
+          // Non-JSON remote responses remain readable text content.
+        }
+        return { content: value, ...(response.ok ? {} : { isError: true }) }
+      },
+    }
+  }
+
+  // MCP is an HTBP reserved control segment. Stateless transport keeps every request behind
+  // the gateway's current Bearer identity instead of trusting isolate-local session state.
+  app.all('/~mcp', c =>
+    runHandler(async () => await handleMcpRequest(c.req.raw, deps.version, mcpBridgeFor(c))))
 
   // WS /system/device/ws?deviceId=<id> → 设备通道宿主(CF:每 deviceId 一个 DeviceSession DO)。
   // deviceId 同时在 hello 帧中出现;通道侧会校验二者一致,以满足设备帧契约。

@@ -85,14 +85,20 @@ function toSpec(t: McpTool): ToolSpec {
 }
 
 /** callTool 结果 → ToolResult:全 text 片段拼接;含非 text 片段则结构化原样返回。 */
-function toToolResult(res: { content?: unknown, isError?: boolean }): ToolResult {
+function toToolResult(res: {
+  content?: unknown
+  isError?: boolean
+  structuredContent?: Record<string, unknown>
+}): ToolResult {
   const parts = Array.isArray(res.content)
     ? (res.content as Array<{ text?: string, type: string }>)
     : []
   const allText = parts.length > 0 && parts.every(p => p.type === 'text')
   const content: unknown = allText ? parts.map(p => p.text ?? '').join('') : res.content
   const out: ToolResult = { content }
+  if (Array.isArray(res.content)) out.contentBlocks = res.content
   if (res.isError === true) out.isError = true
+  if (res.structuredContent !== undefined) out.structuredContent = res.structuredContent
   return out
 }
 
@@ -364,7 +370,11 @@ export function createMcpProvider(
           const { value } = await withSession(config.url, auth, opts.session, c =>
             c.callTool({ name, arguments: args }),
           )
-          return toToolResult(value as { content?: unknown, isError?: boolean })
+          return toToolResult(value as {
+            content?: unknown
+            isError?: boolean
+            structuredContent?: Record<string, unknown>
+          })
         }),
       ),
   }
