@@ -11,8 +11,10 @@ import {
   type CmdSpec,
   contentTypeFor,
   CONTEXT_CAPABILITIES,
+  contextCapabilitiesOf,
   type ContextEntryInput,
   contextHelpModel,
+  contextMethodsOf,
   type ContextPatch,
   type ContextProvider,
   contextScopeForCmd,
@@ -28,6 +30,7 @@ import {
   type HelpModel,
   identify,
   isContextExpired,
+  isReadOnlyProvider,
   isTBError,
   KEY_PLUGIN,
   KEY_PLUGIN_META,
@@ -591,12 +594,12 @@ function localContext(deps: TbAppDeps, node: TreeNode): ContextProvider | null {
   return deps.locals?.context?.(node.path) ?? null
 }
 
-/** 进程内 Provider 的 capabilities:按可选方法实现存在性推导(~describe/~help 共用)。 */
+/**
+ * 进程内 Provider 的 capabilities:按 handler 存在性推导(~describe/~help 共用)。
+ * 推导真源在 core `context/capabilities.ts`,与 `~help` 的动词过滤同源,避免两处漂移。
+ */
 function localCapabilities(provider: ContextProvider): string[] {
-  return [
-    ...(provider.Search !== undefined ? ['search'] : []),
-    ...(provider.Delete !== undefined ? ['delete'] : []),
-  ]
+  return contextCapabilitiesOf(provider)
 }
 
 // ---------- plugin 挂载消费 ----------
@@ -956,30 +959,35 @@ export async function dispatchContextCmd(
   tool: string,
   args: Record<string, unknown>,
 ): Promise<unknown> {
+  // 全动词可选:未实现的动词一律按 unknown cmd 拒绝(与"~help 只列真实存在的操作"一致,
+  // 调用方看到的动词表与可调用集合始终吻合)。
+  const unimplemented = (): never => {
+    throw new TBError('invalid_argument', `unknown cmd '${tool}'(provider 未实现)`)
+  }
   switch (tool) {
     case 'List':
+      if (provider.List === undefined) return unimplemented()
       return await provider.List((args.path as string) ?? '', args.opts as ListOptions | undefined)
     case 'Get':
+      if (provider.Get === undefined) return unimplemented()
       return await provider.Get(args.path as string)
     case 'Write':
+      if (provider.Write === undefined) return unimplemented()
       if (typeof args.entry !== 'object' || args.entry === null) {
         throw new TBError('invalid_argument', 'Write 需要对象 \'entry\'')
       }
       return await provider.Write(args.path as string, args.entry as ContextEntryInput)
     case 'Update':
+      if (provider.Update === undefined) return unimplemented()
       if (typeof args.patch !== 'object' || args.patch === null) {
         throw new TBError('invalid_argument', 'Update 需要对象 \'patch\'')
       }
       return await provider.Update(args.path as string, args.patch as ContextPatch)
     case 'Delete':
-      if (provider.Delete === undefined) {
-        throw new TBError('invalid_argument', `unknown cmd '${tool}'(capability 未声明)`)
-      }
+      if (provider.Delete === undefined) return unimplemented()
       return await provider.Delete(args.path as string)
     case 'Search':
-      if (provider.Search === undefined) {
-        throw new TBError('invalid_argument', `unknown cmd '${tool}'(capability 未声明)`)
-      }
+      if (provider.Search === undefined) return unimplemented()
       return await provider.Search(args.query as string, args.opts as SearchOptions | undefined)
     default:
       // contextScopeForCmd 已挡未知 cmd;此处为类型完备性兜底。
@@ -1098,17 +1106,21 @@ async function helpModelFor(
       return contextHelpModel(node, { readOnly: node.config.readOnly ?? false })
     }
     if (node.config.provider !== 'r2' && node.config.provider !== 's3') {
+      const local = localContext(deps, node)
+      if (local !== null) {
+        // SDK 进程内 Provider:动词表 = 真实实现的 handler;无任何写动词即自动只读
+        // (挂载期显式 readOnly 仍可额外收紧)。~help 与可调用集合据此始终吻合。
+        return contextHelpModel(node, {
+          methods: contextMethodsOf(local),
+          readOnly: (node.config.readOnly ?? false) || isReadOnlyProvider(local),
+        })
+      }
+      // plugin-backed 节点:只列四动词 + 注册时声明的可选方法(Q12)。
       const model = contextHelpModel(node, { readOnly: node.config.readOnly ?? false })
       const core = new Set(['List', 'Get', 'Write', 'Update'])
-      // SDK 进程内 Provider:可选方法按实现存在性裁剪(与 ~describe 推导一致);
-      // plugin-backed 节点:只列四动词 + 注册时声明的可选方法(Q12)。
-      const local = localContext(deps, node)
-      const declared
-        = local !== null
-          ? optionalMethodsForCapabilities(localCapabilities(local))
-          : optionalMethodsForCapabilities(
-              await pluginCapabilities(deps.state, node.config.provider),
-            )
+      const declared = optionalMethodsForCapabilities(
+        await pluginCapabilities(deps.state, node.config.provider),
+      )
       return { ...model, cmds: model.cmds.filter(c => core.has(c.name) || declared.has(c.name)) }
     }
     return contextHelpModel(node, { readOnly: node.config.readOnly ?? false })

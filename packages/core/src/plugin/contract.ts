@@ -27,7 +27,6 @@ export const REQUIRED_METHODS: Record<PluginKind, readonly string[]> = {
  */
 const OPTIONAL_METHOD_BY_CAPABILITY: Record<string, string> = {
   search: 'Search',
-  watch: 'Watch',
   delete: 'Delete',
 }
 

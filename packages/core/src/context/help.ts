@@ -178,7 +178,12 @@ function contextCmds(nodePath: TreePath): CmdSpec[] {
 }
 
 export interface ContextHelpOptions {
-  /** readOnly 挂载隐藏 Write/Update/Delete(决策 D11)。 */
+  /**
+   * provider 真实支持的动词集(按 handler 存在性推导,见 context/capabilities.ts)。
+   * 给出时 `~help` 只列这些 cmd —— 作者写多少就展示多少;缺省则列全动词表。
+   */
+  methods?: ReadonlySet<string>
+  /** readOnly 挂载额外隐藏 Write/Update/Delete(决策 D11)。 */
   readOnly?: boolean
 }
 
@@ -186,9 +191,12 @@ export function contextHelpModel(
   node: { description: string, path: TreePath },
   opts: ContextHelpOptions = {},
 ): HelpModel {
-  const cmds = contextCmds(node.path)
+  const all = contextCmds(node.path)
+  // methods 给出时只列真实存在的动词(按 handler 存在性推导);未给出则沿用全动词表
+  // (内置 r2/s3 与 plugin-backed 节点仍按声明的 capabilities 过滤)。
+  const present = opts.methods === undefined ? all : all.filter(c => opts.methods?.has(c.name))
   return {
     node: { path: node.path, kind: 'context', description: node.description },
-    cmds: opts.readOnly ? cmds.filter(c => c.scope === 'read') : cmds,
+    cmds: opts.readOnly ? present.filter(c => c.scope === 'read') : present,
   }
 }

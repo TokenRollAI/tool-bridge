@@ -51,11 +51,13 @@ export interface ObjectContextProviderOptions {
   relayRefUrl?: (key: string) => string | Promise<string>
 }
 
-/** 本 provider 实现了可选能力 Search 与 Delete(CONTEXT_CAPABILITIES 声明)。 */
-export type ObjectContextProvider = ContextProvider & {
-  Delete: NonNullable<ContextProvider['Delete']>
-  Search: NonNullable<ContextProvider['Search']>
-}
+/**
+ * 对象存储 provider 的具体形态:**六个动词全实现**。
+ *
+ * `ContextProvider` 本身是全可选的(作者写多少算多少),但一个具体实现可以把自己
+ * 收紧成完全体 —— 消费方(网关 r2/s3 分支、单测)据此免去逐个判空。
+ */
+export type ObjectContextProvider = Required<ContextProvider>
 
 /** limit 缺省 50、超上限 200 静默钳制;非正整数拒绝。 */
 function clampLimit(limit: number | undefined): number {

@@ -3,6 +3,7 @@ import {
   type DeviceExpose,
   type DeviceNodeCmd,
   type DeviceNodeInput,
+  isReadOnlyProvider,
   type NodeInput,
   NodeRegistryStore,
   normalizePath,
@@ -41,6 +42,31 @@ const DEFAULT_MAX_HOPS = 4
 type Registration
   = | { kind: 'tool', meta?: Partial<NodeInput>, path: TreePath, provider: ToolProviderLike }
     | { kind: 'context', meta?: Partial<NodeInput>, path: TreePath, provider: ContextProvider }
+
+/**
+ * 注册项 → NodeInput。**本地落库与 connect 上报共用同一构造** —— 此前两条路径各写一份,
+ * 上报侧硬编码 config 且丢掉 virtualize / readOnly,导致"本地跑正常、连上远程后 ~help
+ * 与权限变了"。context 的只读性按 handler 存在性推导(无写动词即 readOnly:true),
+ * 让远端看到的能力与本地实现一致。
+ */
+function nodeInputOf(reg: Registration): NodeInput {
+  const meta = reg.meta ?? {}
+  const fallback: NodeInput['config']
+    = reg.kind === 'tool'
+      ? { kind: 'tool', provider: LOCAL_PROVIDER_ID }
+      : {
+          kind: 'context',
+          provider: LOCAL_PROVIDER_ID,
+          ...(isReadOnlyProvider(reg.provider) ? { readOnly: true } : {}),
+        }
+  return {
+    path: reg.path,
+    kind: reg.kind,
+    description: meta.description ?? '',
+    ...(meta.virtualize !== undefined ? { virtualize: meta.virtualize } : {}),
+    config: meta.config ?? fallback,
+  }
+}
 
 /** hostname 小写,非法路径段字符替换为 '-'(与 CLI 同规则,不持久化)。 */
 function normalizeDeviceId(input: string): string {
@@ -109,19 +135,7 @@ export function createToolBridge(config: ToolBridgeConfig): ToolBridge {
     const registry = new NodeRegistryStore(state)
     const now = new Date().toISOString()
     for (const reg of batch) {
-      const meta = reg.meta ?? {}
-      const node: NodeInput = {
-        path: reg.path,
-        kind: reg.kind,
-        description: meta.description ?? '',
-        ...(meta.virtualize !== undefined ? { virtualize: meta.virtualize } : {}),
-        config:
-          meta.config
-          ?? (reg.kind === 'tool'
-            ? { kind: 'tool', provider: LOCAL_PROVIDER_ID }
-            : { kind: 'context', provider: LOCAL_PROVIDER_ID }),
-      }
-      await registry.write(node, REGISTERED_BY_SDK, now)
+      await registry.write(nodeInputOf(reg), REGISTERED_BY_SDK, now)
     }
   }
 
@@ -165,23 +179,9 @@ export function createToolBridge(config: ToolBridgeConfig): ToolBridge {
   const defaultExpose = async (): Promise<DeviceExpose> => {
     const nodes: DeviceNodeInput[] = []
     for (const reg of registrations.values()) {
-      const meta = reg.meta ?? {}
-      if (reg.kind === 'tool') {
-        nodes.push({
-          path: reg.path,
-          kind: 'tool',
-          description: meta.description ?? '',
-          config: { kind: 'tool', provider: LOCAL_PROVIDER_ID },
-          cmds: cmdsOf(await reg.provider.List()),
-        })
-      } else {
-        nodes.push({
-          path: reg.path,
-          kind: 'context',
-          description: meta.description ?? '',
-          config: { kind: 'context', provider: LOCAL_PROVIDER_ID },
-        })
-      }
+      // 与本地落库同一构造:virtualize / readOnly / 自定义 config 一并上报,不再丢失。
+      const node = nodeInputOf(reg)
+      nodes.push(reg.kind === 'tool' ? { ...node, cmds: cmdsOf(await reg.provider.List()) } : node)
     }
     if (nodes.length === 0) {
       throw new TBError(
