@@ -16,8 +16,8 @@
 
 ## 当前状态
 - 当前 Phase:**Phase 2 — B:Plugin SDK / OperationRegistry 地基**(分支 `phase2-plugin-sdk`)
-- Phase 2 已勾选:项 1(OperationRegistry 落地)、项 3(Context 按 handler 推导能力)
-- Phase 2 待办:项 2 Plugin v2 多 export / 项 4 `@tool-bridge/plugin-sdk` 可发布 / 项 5 样例 plugin 双 export / 项 6 删净 legacy 面 / 项 7 飞书重写复验(依赖生产,预计 PENDING)/ 项 8 部署(PENDING)
+- Phase 2 已勾选:项 1(OperationRegistry)、项 2(Plugin v2 多 export)、项 3(Context 按 handler 推导能力)
+- Phase 2 待办:项 4 `@tool-bridge/plugin-sdk` 可发布 / 项 5 样例 plugin 双 export / 项 6 删净 legacy 面 / 项 7 飞书重写复验(依赖生产,预计 PENDING)/ 项 8 部署(PENDING)
 - Phase 1(代码完成,部署挂起见 PENDING)
 - 已勾选:项 1(Secret Reference 使用授权,Round 1 → Round 4 补第三写入口后成立)、项 2(DO/Node 连接替换 TOCTOU,Round 2 → Round 4 补 registerPaths 后成立)、项 3(Node/Docker bootstrap fail closed)、项 4(canonical origin 对等)、项 5(`pnpm verify` 全绿)
 - 未勾选:项 6(部署解冻 smoke)—— 被 P1-1 / P1-2 卡住,见上
@@ -139,3 +139,22 @@
   - 诚实边界:上报侧的保真现在是**结构性保证**(两条路径共用 `nodeInputOf`),而非独立断言;真实远端链路仍由 opt-in 的 `connect.remote.test.ts` 覆盖(需 `TB_TEST_SDK_REMOTE=1` 与生产端点,本轮未跑)。
 - 勾选:Phase 2 DoD 项 3。
 - 遗留:下一轮起点 = Phase 2 项 2(Plugin v2 多 export:`kind` 移出 manifest、`/~describe` 返回 exports 数组、挂载配置加 `export` 字段),跨 core + gateway + CLI/Dashboard 三入口对等。
+
+## Round 8 — 2026-08-10
+- 目标:Phase 2 DoD 项 2 — Plugin v2 多 export(`kind` 移出 manifest、`/~describe` 返回 exports、挂载配置加 `export`)
+- 动作(跨 core / gateway / plugin-feishu / CLI 五包):
+  - **core `plugin/manifest.ts`**:删 `kind` 与 `interfaceVersion`,改 `protocolVersion: 'plugin/v2'`。manifest 只描述**部署与生命周期**。
+  - **core `plugin/contract.ts` 重写**:`~describe` → `{protocolVersion, exports[]}`,每个 export 声明 `id/profile/description?/methods?/capabilities?`;`PluginProfile = tools/v1 | context/v1`;新增 `resolvePluginExport`(显式 id → 校验 profile 与节点 kind 相符;省略且恰一个 → 取它;省略但多个 → **拒绝并要求显式指定,不猜**)。校验含:protocolVersion 一致、export id 唯一、context 动词合法、capability 与 methods 不得自相矛盾。
+  - **不再抓 `~help`**:export 自报 methods,注册少一次上游往返,也不再受 help 表现形态影响(`fetchPluginContract` 同步简化)。
+  - **core `plugin/package.ts`**:市场条目同样删 kind —— 一个包可能同时导出 tools 与 context,索引不该预先钉死。
+  - **core `types.ts`**:tool/context NodeConfig 加 `export?`;`CallContext` 加 `exportId`(v2 路由载体,随 envelope 到达 plugin)。
+  - **gateway**:`requirePlugin` → `requirePluginExport`(manifest + describe 缓存 + 选中 export),六处调用点(providerFor / assertToolConfig / assertContextConfig / context 数据面 / `~help` / `~describe`)全部改为按选中 export 取 capabilities;`mountCallContext` 透传 exportId。
+  - **plugin-feishu**:`/~describe` 改 v2 形态(单 export `actions`,profile tools/v1)。
+  - **CLI(三入口对等)**:`tb tool mount --export` 与 `tb ctx mount --export`;`--export` 对 mcp/http/r2/s3 无意义时本地拒绝不发请求。**若不补此参数,多 export plugin 只能经 `tb call` 裸调 registry 挂载 = 管理旁路,按纪律属缺陷。**
+- 验证:
+  - core 契约测试重写为 v2(单 plugin 同时导出 tools+context 通过、protocolVersion 不符、export id 重复、未知 profile、context 未知动词、capability 与 methods 矛盾;`resolvePluginExport` 五种分支);gateway plugin 集成测试 stub 与断言改 v2;feishu 契约测试改 v2;CLI 新增 4 例 export 参数用例。
+  - `pnpm verify` 全量 → typecheck 7 包 + lint clean + **1155 passed / 7 skipped**(core 726 + cli 237 + sdk 17 + plugin-feishu 8 + gateway 139 + server 32),退出码 0。提交 `3fabf7a`。
+  - 说明:core 测试数 737→726 是**有意减少** —— 删掉的是 v1 专属用例(kind↔interfaceVersion 一致性、`~help` 数方法),换成 v2 的等价校验,不是覆盖退化。
+- 勾选:Phase 2 DoD 项 2。
+- 已知未完成(不静默):**Dashboard 挂载表单尚未加 export 字段**。CLI 与 API 已可设,Dashboard 暂只能挂单 export plugin —— 按三入口对等这是缺口,列入下一轮随项 4/5 一并补。
+- 遗留:下一轮起点 = Phase 2 项 4(`@tool-bridge/plugin-sdk` 可发布,Web 标准兼容、接管 envelope/auth/dedupe/health/describe/help/Zod/错误归一)+ 项 5(样例 plugin 双 export 零样板)+ Dashboard export 字段。
