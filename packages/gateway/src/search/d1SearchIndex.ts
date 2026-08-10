@@ -1,8 +1,8 @@
 import {
   assertKeywordToolSearchMode,
-  literalToolSearchQuery,
   type MutableSearchIndex,
   normalizeToolSearchPath,
+  prepareToolSearchQuery,
   type SerializedToolSearchRecord,
   serializeToolSearchHits,
   serializeToolSearchSnapshot,
@@ -154,16 +154,30 @@ export class D1SearchIndex implements MutableSearchIndex {
 
   async search(query: string, opts?: ToolSearchOptions): Promise<{ items: ToolSearchHit[] }> {
     assertKeywordToolSearchMode(opts)
-    const expression = literalToolSearchQuery(query)
+    const prepared = prepareToolSearchQuery(query)
     await this.ensureSchema()
-    const result = await this.db.prepare(`
-      SELECT tools.path, tools.name, tools.tool_json
-      FROM tb_search_tools_fts
-      JOIN tb_search_tools AS tools ON tools.id = tb_search_tools_fts.rowid
-      WHERE tb_search_tools_fts MATCH ?
-      ORDER BY bm25(tb_search_tools_fts), tools.path, tools.name
-      LIMIT ?
-    `).bind(expression, TOOL_SEARCH_CANDIDATE_LIMIT).all<SearchRow>()
+    const statement = prepared.kind === 'like'
+      ? this.db.prepare(`
+        SELECT path, name, tool_json
+        FROM tb_search_tools
+        WHERE ${prepared.patterns.map(
+          () => '(name LIKE ? ESCAPE \'!\' OR description LIKE ? ESCAPE \'!\')',
+        ).join(' AND ')}
+        ORDER BY path, name
+        LIMIT ?
+      `).bind(
+          ...prepared.patterns.flatMap(pattern => [pattern, pattern]),
+          TOOL_SEARCH_CANDIDATE_LIMIT,
+        )
+      : this.db.prepare(`
+        SELECT tools.path, tools.name, tools.tool_json
+        FROM tb_search_tools_fts
+        JOIN tb_search_tools AS tools ON tools.id = tb_search_tools_fts.rowid
+        WHERE tb_search_tools_fts MATCH ?
+        ORDER BY bm25(tb_search_tools_fts), tools.path, tools.name
+        LIMIT ?
+      `).bind(prepared.expression, TOOL_SEARCH_CANDIDATE_LIMIT)
+    const result = await statement.all<SearchRow>()
     return { items: result.results.map(hitFromRow) }
   }
 }

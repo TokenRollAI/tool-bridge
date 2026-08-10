@@ -38,8 +38,8 @@
 - 当前 Phase:**Phase 4 — C:Search 0+1**(Round 19 起;Phase 3 可做项已清空,部署半边见 P3-1)
 - Phase 3 已勾选:项 1(官方 MCP 测试 client + 本地 initialize,Round 14)、项 2(认证后的动态 tools/list + tools/call,Round 15)、项 3(scope 收窄钉死,Round 16)、项 4(三入口对等审计,Round 17)
 - Phase 3 待办:**仅剩待授权的外向动作** — 项 5 已完成生产脚本与全量回归,真实部署/生产 MCP smoke → P3-1
-- Phase 4 已勾选:项 3(CF D1 + Node SQLite SearchIndex,FTS5/trigram,Round 21)
-- Phase 4 代码进度:项 1 的 binding/provision/test/dry-run 半边已完成(Round 19),真实 provision/deploy → P4-1;项 2 的本地协议/契约/llmdoc 半边已完成(Round 20),外部 HTBP Draft → P4-2;下一项 = trigram 短查询 LIKE 兜底
+- Phase 4 已勾选:项 3(CF D1 + Node SQLite SearchIndex,FTS5/trigram,Round 21)、项 4(trigram 短词 escaped LIKE 兜底,Round 22)
+- Phase 4 代码进度:项 1 的 binding/provision/test/dry-run 半边已完成(Round 19),真实 provision/deploy → P4-1;项 2 的本地协议/契约/llmdoc 半边已完成(Round 20),外部 HTBP Draft → P4-2;下一项 = 索引内容与加权、自动同步及 cursor 分页
 - Phase 2 已勾选:项 1(OperationRegistry)、项 2(Plugin v2 多 export,Round 13 补齐三入口对等后成立)、项 3(Context 按 handler 推导能力)、项 4(`@tool-bridge/plugin-sdk` 可发布)、项 5(样例 plugin 双 export)、项 6(删净 legacy 面)
 - Phase 2 待办(**全部为待授权的外向动作**):项 7 飞书重写复验(代码已完成,只差生产实调 → P2-1)/ 项 8 部署上线
 - Phase 1(代码完成,部署挂起见 PENDING)
@@ -399,3 +399,17 @@
   - `git diff --check` 与本轮相关 ESLint 均退出码 0;严格 investigator 最终复核无阻断。
 - 勾选:Phase 4 DoD 项 3(第五宿主注入点 SearchIndex:CF D1 + Node better-sqlite3,FTS5/trigram,双侧集成全绿)。
 - 遗留:下一轮 = Phase 4 项 4:对字符长度短于 3 的 query 在 D1/SQLite 两端走 escaped LIKE 子串兜底,用中文两字词“日程”/“日历”与现有三字符 trigram 同 fixture 验收。feedback/权重、自动索引同步、over-fetch/cursor 仍严格留项 5。
+
+## Round 22 — 2026-08-11
+- 目标:Phase 4 DoD 项 4 — 为 FTS5 trigram 不产生 token 的短词提供 D1/SQLite 对等的 literal LIKE 召回,同时避免混合查询静默丢词。
+- 动作:
+  - core 新增统一 `prepareToolSearchQuery`:trim 后按 whitespace 拆 term,长度按 Unicode code points 计算;全部 term 均不少于 3 时继续生成参数化 FTS literal phrase,任一 term 短于 3 时则全部 term 改为 escaped LIKE pattern 并按 AND 组合,避免 `AI calendar` 只按长词命中的假阳性。
+  - LIKE 固定使用 `!` escape,依次转义 `!`、`%`、`_`;SQL 结构仅由 term 数量生成,用户文本始终走 bind 参数。短词分支限制 32 terms,连同候选上限最多 65 个 bind,保持在 D1 每 statement 100 参数预算内。
+  - D1 与 SQLite adapter 共享分流语义:LIKE 扫描 source table 的 name/description并按 path/name 稳定排序,FTS 分支继续按 bm25/path/name 排序;两者均保留内部候选上限 40,不提前实现 item 5 的权重、自动同步或 cursor。
+  - core shared contract 覆盖“日程”/“日历”两字、三字 trigram、混合短词 AND、emoji code-point 边界、ASCII 大小写、`!/%/_/\\` literal escape、32 terms 与 LIKE 分支 40 cap;gateway SELF 与 server HTTP/restart 各增加真实中文两字搜索断言。
+  - 严格 investigator 复核曾发现整串长度分流会让 FTS5 静默丢短词;改为逐 term 分流后最终报告 `.llmdoc-tmp/phase4-short-search.md` 结论无阻断。
+- 验证:
+  - core/gateway/server 定向 typecheck、搜索单测与 D1/SQLite/HTTP 集成测试全绿;相关 ESLint 与 `git diff --check` 均退出码 0。
+  - `pnpm verify` → 9 workspace typecheck + 全仓 lint + provision **1 passed** + 包测试 **1225 passed / 7 skipped**(core 735 + plugin-sdk 22 + cli 239 + sdk 19 + plugin-feishu 9 + gateway 167 + server 34),合计 **1226 passed / 7 skipped**,退出码 0。
+- 勾选:Phase 4 DoD 项 4(trigram 短词 escaped LIKE 兜底,D1/SQLite 双侧中文两字 + 三字 trigram 集成全绿)。
+- 遗留:下一轮 = Phase 4 项 5:索引 tool name/description + `~feedback` title/detail,建立 name>description>feedback 权重、registry/tool mutation 自动同步、权限后处理 over-fetch 与 cursor 契约。P4-1/P4-2 外向动作继续挂起且不阻塞本地代码。

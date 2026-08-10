@@ -2,9 +2,11 @@ import { describe, expect, it } from 'vitest'
 import {
   assertKeywordToolSearchMode,
   literalToolSearchQuery,
+  prepareToolSearchQuery,
   serializeToolSearchHits,
   serializeToolSearchSnapshot,
   TBError,
+  TOOL_SEARCH_LIKE_TERM_LIMIT,
   type ToolSearchOptions,
 } from '../../src'
 
@@ -65,6 +67,43 @@ describe('SearchIndex mutation contract', () => {
     )
     expect(() => literalToolSearchQuery('   ')).toThrowError(TBError)
     expect(() => literalToolSearchQuery('calendar\0private')).toThrowError(TBError)
+  })
+
+  it('uses Unicode code points and escapes literal LIKE metacharacters for short queries', () => {
+    expect(prepareToolSearchQuery(' 日程 ')).toEqual({
+      kind: 'like',
+      patterns: ['%日程%'],
+    })
+    expect(prepareToolSearchQuery('管理日')).toEqual({
+      kind: 'fts',
+      expression: '"管理日"',
+    })
+    expect(prepareToolSearchQuery('😀a')).toEqual({
+      kind: 'like',
+      patterns: ['%😀a%'],
+    })
+    expect(prepareToolSearchQuery('😀ab')).toEqual({
+      kind: 'fts',
+      expression: '"😀ab"',
+    })
+    expect(prepareToolSearchQuery('%_')).toEqual({
+      kind: 'like',
+      patterns: ['%!%!_%'],
+    })
+    expect(prepareToolSearchQuery('!')).toEqual({ kind: 'like', patterns: ['%!!%'] })
+    expect(prepareToolSearchQuery('a b')).toEqual({
+      kind: 'like',
+      patterns: ['%a%', '%b%'],
+    })
+    expect(prepareToolSearchQuery('AI calendar')).toEqual({
+      kind: 'like',
+      patterns: ['%AI%', '%calendar%'],
+    })
+    const tooManyShortTerms = Array.from(
+      { length: TOOL_SEARCH_LIKE_TERM_LIMIT + 1 },
+      () => 'a',
+    ).join(' ')
+    expect(() => prepareToolSearchQuery(tooManyShortTerms)).toThrowError(TBError)
   })
 
   it('keeps the adapter mode contract narrow and fails closed at runtime', () => {

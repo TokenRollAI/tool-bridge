@@ -7,6 +7,8 @@ export type SearchCapability = 'search' | 'search:semantic'
 
 /** 正式 cursor/over-fetch 契约落地前，防止候选后处理产生无界宿主 I/O。 */
 export const TOOL_SEARCH_CANDIDATE_LIMIT = 40
+/** LIKE 分支每 term 占两个 bind 参数；32 terms 连同 LIMIT 明显低于 D1 的 100 参数上限。 */
+export const TOOL_SEARCH_LIKE_TERM_LIMIT = 32
 
 /** 全局工具搜索的候选结果；对外返回前仍须由 gateway 做权限与虚拟化后处理。 */
 export interface ToolSearchHit {
@@ -49,6 +51,10 @@ export interface MutableSearchIndex extends SearchIndex {
   remove(path: TreePath): Promise<void>
   replace(path: TreePath, tools: readonly ToolSpec[]): Promise<void>
 }
+
+export type PreparedToolSearchQuery
+  = | { expression: string, kind: 'fts' }
+    | { kind: 'like', patterns: string[] }
 
 function serializedRecord(path: TreePath, tool: ToolSpec): SerializedToolSearchRecord {
   if (typeof tool.name !== 'string' || tool.name.length === 0) {
@@ -124,14 +130,45 @@ export function serializeToolSearchHits(
   })
 }
 
-/** 把用户输入变成只含 literal phrase 的 FTS5 MATCH 表达式，不开放查询语法。 */
-export function literalToolSearchQuery(query: string): string {
+function normalizedToolSearchQuery(query: string): string {
   if (query.includes('\0')) {
     throw new TBError('invalid_argument', '搜索 query 不得包含 NUL 字符')
   }
-  const terms = query.trim().split(/\s+/u).filter(Boolean)
-  if (terms.length === 0) {
+  const normalized = query.trim()
+  if (normalized.length === 0) {
     throw new TBError('invalid_argument', '搜索 query 不能为空')
   }
+  return normalized
+}
+
+/** 把用户输入变成只含 literal phrase 的 FTS5 MATCH 表达式，不开放查询语法。 */
+export function literalToolSearchQuery(query: string): string {
+  const terms = normalizedToolSearchQuery(query).split(/\s+/u)
   return terms.map(term => `"${term.replaceAll('"', '""')}"`).join(' ')
+}
+
+/**
+ * 任一 whitespace term `<3` Unicode code points 时，全部 terms 走 AND LIKE；
+ * 避免 trigram FTS 静默丢掉短 term。`!` 是固定 LIKE escape。
+ */
+export function prepareToolSearchQuery(query: string): PreparedToolSearchQuery {
+  const normalized = normalizedToolSearchQuery(query)
+  const terms = normalized.split(/\s+/u)
+  if (terms.some(term => Array.from(term).length < 3)) {
+    if (terms.length > TOOL_SEARCH_LIKE_TERM_LIMIT) {
+      throw new TBError(
+        'invalid_argument',
+        `含短词的搜索 query 最多 ${TOOL_SEARCH_LIKE_TERM_LIMIT} 个 terms`,
+      )
+    }
+    const patterns = terms.map((term) => {
+      const escaped = term
+        .replaceAll('!', '!!')
+        .replaceAll('%', '!%')
+        .replaceAll('_', '!_')
+      return `%${escaped}%`
+    })
+    return { kind: 'like', patterns }
+  }
+  return { kind: 'fts', expression: literalToolSearchQuery(normalized) }
 }

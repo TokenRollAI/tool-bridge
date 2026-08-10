@@ -184,7 +184,7 @@ describe('Node 宿主 HTTP 面', () => {
     const path = 'search/wire/sqlite'
     const tool = {
       name: 'lookup_calendar',
-      description: 'Look up calendar appointments',
+      description: 'Look up calendar appointments and 查询日程日历',
       inputSchema: { type: 'object', properties: { day: { type: 'string' } } },
     }
     const register = await postJson(
@@ -224,5 +224,8 @@ describe('Node 宿主 HTTP 面', () => {
     const persisted = await postJson(second.baseUrl, '~search', { query: 'calendar' }, admin())
     expect(persisted.status).toBe(200)
     await expect(persisted.json()).resolves.toEqual({ items: [{ path, tool }] })
+    const short = await postJson(second.baseUrl, '~search', { query: '日历' }, admin())
+    expect(short.status).toBe(200)
+    await expect(short.json()).resolves.toEqual({ items: [{ path, tool }] })
   })
 })

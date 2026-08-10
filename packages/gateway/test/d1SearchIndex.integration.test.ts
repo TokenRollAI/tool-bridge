@@ -46,7 +46,7 @@ describe('D1SearchIndex', () => {
     const path = 'search/wire/d1'
     const tool = {
       name: 'lookup_calendar',
-      description: 'Look up calendar appointments',
+      description: 'Look up calendar appointments and 查询日程日历',
       inputSchema: { type: 'object', properties: { day: { type: 'string' } } },
     }
     const register = await SELF.fetch('https://tb.test/system/registry', {
@@ -87,6 +87,14 @@ describe('D1SearchIndex', () => {
     })
     expect(response.status).toBe(200)
     await expect(response.json()).resolves.toEqual({ items: [{ path, tool }] })
+
+    const shortResponse = await SELF.fetch('https://tb.test/~search', {
+      method: 'POST',
+      headers: adminHeaders,
+      body: JSON.stringify({ query: '日程' }),
+    })
+    expect(shortResponse.status).toBe(200)
+    await expect(shortResponse.json()).resolves.toEqual({ items: [{ path, tool }] })
 
     const bulkTools = Array.from({ length: TOOL_SEARCH_CANDIDATE_LIMIT + 25 }, (_, i) => ({
       name: `bulk_${i}`,

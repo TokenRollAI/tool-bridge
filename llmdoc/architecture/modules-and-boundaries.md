@@ -43,7 +43,7 @@
 |---|---|---|
 | KV `tb-kv` | SK 哈希表(`sha256(sk)→记录`)、树配置、plugin manifest、secret 密文 | 最终一致,1 write/s/key;吊销跨边缘通常约 60s、也可能更久,不得叠认证内存缓存;list+get 一致性坑见 [../guides/workers-kv-pitfalls.md](../guides/workers-kv-pitfalls.md) |
 | R2 `tb-r2` | r2 context provider、大对象 `$ref` | **binding 不支持 presign**——预签名走 S3 兼容端点 + R2 Access Key(aws4fetch);凭证空缺走 `/~ref` 网关中转 |
-| SearchIndex | root `~search` 的工具候选索引 | 只负责召回;网关仍做 read+call、节点 kind/config 与 virtualize 后处理。D1/SQLite 均用 FTS5 trigram external-content + triggers 和共享 contract,候选上限 40;D1 每批 25 行、单次 mutation 上限 1000。注册表尚不自动同步索引;短于 3 字符、semantic、feedback/weights、pagination 留后续;真实 D1 provision/deploy 仍 PENDING |
+| SearchIndex | root `~search` 的工具候选索引 | 只负责召回;网关仍做 read+call、节点 kind/config 与 virtualize 后处理。D1/SQLite 均用 external-content + triggers 和共享 contract:全 term ≥3 Unicode code points 走 trigram FTS,任一短 term 时全体走 escaped parameterized LIKE AND;LIKE 最多 32 terms/65 bind,两分支候选上限 40。D1 每批 25 行、单次 mutation 上限 1000。注册表尚不自动同步索引;semantic、feedback/weights、pagination 留后续;真实 D1 provision/deploy 仍 PENDING |
 | DO `DeviceSession` | 每设备一个,WS hibernation 空闲零计费 | 唤醒后内存态须从 storage 恢复;见 [../guides/do-websocket-hibernation.md](../guides/do-websocket-hibernation.md) |
 | Static Assets | Dashboard 与 gateway 同 Worker(`../dashboard/dist`,binding `ASSETS`) | `run_worker_first: true`,一切请求先进 Worker;静态资源仅由 `/ui` 路由显式转发,SPA 回退严格限定 `/ui`,不吞根 `~help`/数据面/`system/*`;`/ui` 免认证(登录页须无 SK 可加载)。已有 `ui.integration.test.ts` 覆盖 |
 

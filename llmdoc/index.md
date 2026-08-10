@@ -48,6 +48,7 @@
 - [memory/reflections/2026-07-24-security-report-remediation.md](memory/reflections/2026-07-24-security-report-remediation.md) — 安全报告复核、纵深修复与提交前纠偏(XSS/CSP、Workers bootstrap、KV 吊销语义、Secret Reference 授权遗漏、长连接重验 TOCTOU 与多宿主差异)。
 - [memory/reflections/2026-08-11-search-capability-gating.md](memory/reflections/2026-08-11-search-capability-gating.md) — 全局搜索 capability gating(SearchIndex 必须绑定真实宿主实现;fake 候选仍过 read+call、registry 与 virtualize 边界;外部 Draft 同步与本地实现分账验收)。
 - [memory/reflections/2026-08-11-search-host-adapter-boundaries.md](memory/reflections/2026-08-11-search-host-adapter-boundaries.md) — Search 宿主 adapter 边界(可选 binding→adapter→deps→capability;shared contract + wire 双层证据;窄 opts 与嵌套 FTS grammar 独立校验)。
+- [memory/reflections/2026-08-11-fts5-short-query-fallback.md](memory/reflections/2026-08-11-fts5-short-query-fallback.md) — FTS5 trigram 短查询 fallback(混合长短词假阳性风险;整句 escaped LIKE AND;Unicode code point 阈值、参数预算与 helper/adapter/wire 三层证据)。
 
 ## 路由提示
 

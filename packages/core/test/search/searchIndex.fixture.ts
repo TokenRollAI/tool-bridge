@@ -34,6 +34,7 @@ export async function verifySearchIndexContract(
   await index.replace(alpha, [
     { name: 'legacy_calendar', description: 'legacy calendar agenda' },
     richTool,
+    { name: 'literal_markers', description: 'literal % _ ! \\ markers' },
   ])
   await index.replace(beta, [
     { name: 'weather', description: 'weather forecast endpoint' },
@@ -45,6 +46,35 @@ export async function verifySearchIndexContract(
   await expect(index.search('管理日')).resolves.toMatchObject({
     items: [{ path: alpha, tool: richTool }],
   })
+  await expect(index.search('日程')).resolves.toMatchObject({
+    items: [{ path: alpha, tool: richTool }],
+  })
+  await expect(index.search('日历')).resolves.toMatchObject({
+    items: [{ path: alpha, tool: richTool }],
+  })
+  await expect(index.search('日程 日历')).resolves.toMatchObject({
+    items: [{ path: alpha, tool: richTool }],
+  })
+  await expect(index.search('日程 calendar')).resolves.toEqual({ items: [] })
+  await expect(index.search('LE')).resolves.toMatchObject({
+    items: [{ path: alpha, tool: { name: 'legacy_calendar' } }],
+  })
+  for (const literal of ['%', '!', '\\']) {
+    await expect(index.search(literal)).resolves.toMatchObject({
+      items: [{ path: alpha, tool: { name: 'literal_markers' } }],
+    })
+  }
+  const underscoreHits = await index.search('_')
+  expect(underscoreHits.items).toEqual([
+    { path: alpha, tool: richTool },
+    { path: alpha, tool: { name: 'legacy_calendar', description: 'legacy calendar agenda' } },
+    {
+      path: alpha,
+      tool: { name: 'literal_markers', description: 'literal % _ ! \\ markers' },
+    },
+  ])
+  const maxLikeTerms = Array.from({ length: 32 }, () => 'a').join(' ')
+  await expect(index.search(maxLikeTerms)).resolves.toHaveProperty('items')
 
   const updatedTool: ToolSpec = {
     ...richTool,
@@ -98,6 +128,8 @@ export async function verifySearchIndexContract(
   const capped = await index.search('catalog')
   expect(capped.items).toHaveLength(TOOL_SEARCH_CANDIDATE_LIMIT)
   expect(capped.items.every(hit => hit.tool.name.startsWith('bulk_'))).toBe(true)
+  const shortCapped = await index.search('a')
+  expect(shortCapped.items).toHaveLength(TOOL_SEARCH_CANDIDATE_LIMIT)
 
   await index.rebuild([
     {

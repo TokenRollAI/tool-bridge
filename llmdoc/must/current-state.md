@@ -1,10 +1,10 @@
 # 当前状态(MUST)
 
-> 用途:每次会话开场必读的易变状态快照(部署、代码现状、凭据配置、工具链、未竟事项)。更新时机:部署/凭据/工具链/能力面变化时,由当轮 Agent 更新本文件。最后增量核实:2026-08-11(root `~search` + D1/SQLite adapters + D1 provision 本地链路;其余历史状态以各条日期为准)。
+> 用途:每次会话开场必读的易变状态快照(部署、代码现状、凭据配置、工具链、未竟事项)。更新时机:部署/凭据/工具链/能力面变化时,由当轮 Agent 更新本文件。最后增量核实:2026-08-11(root `~search` + D1/SQLite adapters + 短查询 fallback + D1 provision 本地链路;其余历史状态以各条日期为准)。
 
 ## 项目状态
 
-- 2026-08-11:**root 全局工具搜索协议与两个真实宿主 adapter 已在本地落地**——core 将只读 `SearchIndex` 与 `MutableSearchIndex` 写面拆开,`ToolSearchOptions` 仅保留 mode,通过完整 snapshot 的 replace/remove/rebuild 维护索引;共享 contract 钉 ToolSpec 保真、重复项/非法 path/FTS query fail closed、幂等/持久化和 40 candidate cap。gateway D1 与 Node SQLite 均实现 keyword FTS5 trigram external-content + triggers:Workers 仅在可选 `TB_SEARCH` binding 存在时注入(缺失时根 describe/search 仍 404),D1 每批 25 行且单次 mutation 上限 1000;Node 在同一 `state.sqlite3` 上用独立连接和独立表。fake 协议测试、D1 SELF/HTTP 测试、Node HTTP/restart 测试均覆盖 root describe/search 与后处理。**注册表/工具变更尚未自动同步索引,短于 3 字符可靠召回、semantic、feedback/weights、pagination/filter 仍未实现;真实 D1 provision/deploy 也仍 PENDING,不可宣称生产搜索可用。**
+- 2026-08-11:**root 全局工具搜索协议与两个真实宿主 adapter 已在本地落地**——core 将只读 `SearchIndex` 与 `MutableSearchIndex` 写面拆开,`ToolSearchOptions` 仅保留 mode,通过完整 snapshot 的 replace/remove/rebuild 维护索引;共享 contract 钉 ToolSpec 保真、重复项/非法 path/查询 fail closed、幂等/持久化和 40 candidate cap。keyword query trim 后按 whitespace terms 与 Unicode code points 分流:全 term ≥3 走 trigram FTS;任一 term <3 时所有 terms 走参数化 escaped LIKE(name/description 内 OR、terms 间 AND),最多 32 terms/65 bind,避免 FTS 静默丢短词。gateway D1 与 Node SQLite 均使用 external-content + triggers 和该共享 contract:Workers 仅在可选 `TB_SEARCH` binding 存在时注入(缺失时根 describe/search 仍 404),D1 每批 25 行且单次 mutation 上限 1000;Node 在同一 `state.sqlite3` 上用独立连接和独立表。fake 协议测试、D1 SELF/HTTP 测试、Node HTTP/restart 及 CJK 两字/混合短词/LIKE 转义/两分支 cap40 均已覆盖。**注册表/工具变更尚未自动同步索引,semantic、feedback/weights、pagination/filter 仍未实现;真实 D1 provision/deploy 也仍 PENDING,不可宣称生产搜索可用。**
 - 2026-08-11:**工具搜索 D1 资源引导已在本地就绪,真实资源仍 PENDING**——`packages/gateway/wrangler.jsonc` 已声明 `TB_SEARCH` → `tb-search` D1 binding(`database_id` 仍为零 UUID 占位),Workers `Env` 同步声明 `D1Database`;`scripts/provision.mjs` 通过 `wrangler d1 list --json` 精确匹配 `{name,uuid}`,已存在时同步回填 id 后 skip,不存在时 create → re-list → regex 定位 `TB_SEARCH.database_id` 回填,取不到新 uuid 则 fail closed。根 `pnpm test:provision` 用 fake wrangler 连跑两次,验证 KV/R2/D1 只创建一次且 KV/D1 id 均回填,并已纳入 `test:unit`。**本轮未对真实账户执行 provision、未取得生产 uuid、未部署该 binding;不能据此声称生产全局搜索可用。**
 - **初步实现阶段已完成**(2026-07-07 "破壳"):SK 鉴权与作用域、HTBP 核心树与内容协商、Tool 层(mcp/http/remote 联邦 + 虚拟化)、Context 层(r2/s3 四动词 + Search + `$ref` 大对象)、设备反向注册(DO WebSocket hibernation)、SDK、Plugin 系统、Dashboard 均已落地并经生产验证。
 - 2026-07-24:**安全报告首轮修复完成、提交前复审发现阻断项,尚未部署**——已正确关闭 OAuth callback 反射型 XSS(实体编码 + callback 严格 CSP/no-store),宿主中立响应层统一 CSP/nosniff/frame/referrer 安全头;Workers bootstrap 缺 `TB_BOOTSTRAP_ADMIN_SK` 时 fail closed;production 禁 `workers.dev`/Preview URLs 并配置 `TB_CANONICAL_ORIGIN`;RefToken HMAC 用途域分离且中转响应 no-store;remote `skRef` 使用增加结构化审计。**尚不能声称安全报告全部修复:**①`~register` 与 registry write/update 未限制 `skRef/authRef`,受限注册者仍可形成 confused-deputy;②DO/Node invoke 重验跨 await 后未复核活动连接,存在旧连接接收调用、DO 陈旧 meta 覆盖新连接的竞态,且未校验 scope/registerPaths 收紧;③Node/Docker 首次启动仍可能随机生成并把 Admin SK 写入日志;④canonical origin 非法配置会静默回退且 Node/SDK 未对等。KV 吊销仍是最终一致(通常约 60s、也可能更久);Dashboard 仍用 JS 可读 profile SK;分布式 rate limit 仍未实现。当前分支只适合作为 Draft PR,阻断项修复前不得部署。详见 [../memory/reflections/2026-07-24-security-report-remediation.md](../memory/reflections/2026-07-24-security-report-remediation.md)。
@@ -41,10 +41,10 @@
 
 ## 代码现状(pnpm monorepo,测试数为 2026-07-22 实跑)
 
-- `packages/core` — 纯逻辑内核(唯一运行时依赖 zod),**734 个单测**,模块族:
+- `packages/core` — 纯逻辑内核(唯一运行时依赖 zod),**735 个单测**,模块族:
   - `auth/`(scope 判定 / authorizer / 注册路径规则 / sk 签发与哈希)、`tree/`(path 规则 / NodeRegistryStore / visibility 裁剪)、`htbp/`(helpDsl / helpMarkdown / summary / HelpModel / negotiate / tree 构建)、`secret/`(AES-256-GCM 只写不读)
   - `builtin/`(**七模块**:sk / secret / registry / status / plugin / federation / annotation 的 cmd 表 + dispatch)、`annotation/`(AnnotationStore)、`feedback/`(FeedbackStore:排序/阈值/top-5 选条真源)
-  - `tool/`(HttpToolDef 拼装、虚拟化、mcp schema→HelpModel、remote 路径/白名单/Via、上游错误归一、**RemoteAllowlistStore** 运行时白名单存储);`search/`(只读 `SearchIndex` + `MutableSearchIndex` snapshot 写面、共享序列化/校验/literal FTS query 与 40 candidate cap)
+  - `tool/`(HttpToolDef 拼装、虚拟化、mcp schema→HelpModel、remote 路径/白名单/Via、上游错误归一、**RemoteAllowlistStore** 运行时白名单存储);`search/`(只读 `SearchIndex` + `MutableSearchIndex` snapshot 写面、共享序列化/校验、FTS/短词 LIKE query 分流与 40 candidate cap)
   - `context/`(四动词 objectProvider / objectStore 接口 / path 穿越防护 / ttl)
   - `device/`(帧编解码 / 会话状态机 / 设备侧 client / shell 白名单 / helpModel)
   - `plugin/`(manifest 校验 / envelope 编解码 / RequestDedupe / 契约校验)
@@ -62,7 +62,7 @@
 
 ## 常用命令
 
-- `pnpm verify` — typecheck + lint + 单测 + 集成测试一把过(2026-08-11 Round 21 实跑:package tests **1224 passed** + provision **1 passed** = **1225 passed / 7 skipped**,退出码 0;根 `test:integration` 含 gateway + server + plugin-feishu)。
+- `pnpm verify` — typecheck + lint + 单测 + 集成测试一把过(2026-08-11 Round 22 实跑:package tests **1225 passed** + provision **1 passed** = **1226 passed / 7 skipped**,退出码 0;根 `test:integration` 含 gateway + server + plugin-feishu)。
 - `pnpm test:provision` — fake wrangler 验证 KV/R2/D1 首次创建、id 回填与二次运行不重建;已纳入 `test:unit`。
 - `pnpm deploy:all` — 幂等 provision(KV/R2/D1) + dashboard build + 部署 gateway;会操作真实 Cloudflare 资源。
 - `pnpm --filter @tool-bridge/server start` — 本机起 Node 宿主(默认 :8787,数据落 ./data;env 面见 [../guides/docker-host.md](../guides/docker-host.md))。
@@ -107,7 +107,7 @@
 
 ## 未竟事项(路线图,非进度账本)
 
-- **工具搜索后续:**把 Registry/工具生命周期自动同步到 MutableSearchIndex,补短于 3 字符的可靠召回、semantic、feedback/weights 与 pagination/filter;再运行真实 provision 创建 `tb-search`,确认 `TB_SEARCH.database_id` 回填并部署 gateway。真实 D1 未完成前保持 PENDING,不得把本地 adapter/占位 binding 视为生产搜索能力。
+- **工具搜索后续:**把 Registry/工具生命周期自动同步到 MutableSearchIndex,补 semantic、feedback/weights 与 pagination/filter;再运行真实 provision 创建 `tb-search`,确认 `TB_SEARCH.database_id` 回填并部署 gateway。真实 D1 未完成前保持 PENDING,不得把本地 adapter/占位 binding 视为生产搜索能力。
 - **安全修复 PR 阻断项:**统一建立 Secret Reference 使用授权;修复 DO/Node 连接替换 TOCTOU 并重验 scope/registerPaths;Node/Docker bootstrap fail closed;canonical origin 配置面对等。完成前保持 Draft、不得部署。
 - **server 首发**:`@tool-bridge/server` 0.1.0 待用户手动 `npm publish` 首发 + npmjs.com 配 Trusted Publisher(workflow `publish-server.yml`);**server 的 npm 安装形态依赖 dashboard 已发布**(regular dependency,dashboard 0.2.0 已在 npm),见 [../guides/npm-publish.md](../guides/npm-publish.md)。
 - **tool-bridge-template 外部模板仓库发布**:仓内 `template/` 已有 Deploy to Cloudflare 骨架与 copy-ui;对外模板仍需同步发布。首次请求前必须交互式设置 `TB_BOOTSTRAP_ADMIN_SK`;自定义域须配置 `TB_CANONICAL_ORIGIN`,Preview URLs 保持禁用。

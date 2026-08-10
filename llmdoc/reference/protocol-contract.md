@@ -49,7 +49,7 @@
 - SearchIndex 只返回候选,最终披露由网关后处理:每条 hit 必须同时通过节点路径 `read` + `call`,registry 中存在同路径节点且 kind/config 匹配 `mcp`/`http`/`tool`,然后应用该节点的 virtualize prefix/rename/hide/description。隐藏或无权候选静默剔除。
 - 当前只支持**本地** `mcp`/`http`/`tool` 节点候选;`tool` 包括能提供 raw ToolSpec 的 plugin/进程内/device 自定义 tool。remote、device shell、builtin、context、skillhub、directory 均不进入结果。
 - core 将只读 `SearchIndex` 与写面 `MutableSearchIndex` 分开;`ToolSearchOptions` 当前只有 `mode`,写面通过完整 snapshot 的 `replace(path,tools)`、`remove(path)`、`rebuild(hits)` 更新。注册表/工具变化尚不会自动调用这些写方法。
-- 已内置 keyword adapter:Workers 使用可选 `TB_SEARCH` D1 binding,Node 使用同一 `state.sqlite3` 的独立连接与独立表;两者均为 FTS5 trigram + external-content triggers,逐词按 literal phrase 生成 FTS 查询并复用共享 snapshot/查询 contract。短于 3 字符的可靠召回、semantic、feedback/weights、自动同步与 pagination/filter 均留后续;真实 D1 provision/deploy 仍 PENDING,不可据本地接线宣称生产搜索可用。
+- 已内置 keyword adapter:Workers 使用可选 `TB_SEARCH` D1 binding,Node 使用同一 `state.sqlite3` 的独立连接与独立表;两者均复用共享 snapshot/查询 contract。query trim 后按 whitespace 切 term,并按 Unicode code point 计数:全 term 均不少于 3 时走 FTS5 trigram literal phrase;任一 term 少于 3 时全部 term 改走参数化 LIKE,每个 term 在 name/description 间 OR、terms 间 AND,以 `!` 为 `ESCAPE` 并转义 `!`/`%`/`_`,避免 FTS 静默丢短词。LIKE 分支最多 32 terms/65 bind,两分支候选上限均为 40。semantic、feedback/weights、自动同步与 pagination/filter 均留后续;真实 D1 provision/deploy 仍 PENDING,不可据本地接线宣称生产搜索可用。
 
 ## 1c. skillhub kind 数据面(与 context 同构的内容型 kind)
 
