@@ -4,13 +4,12 @@
 
 ## ⏸ PENDING(挂起,不阻塞后续 Phase)
 
-- **P1-1 · Phase 1 项 6「部署解冻」** —— 代码已完成并开 PR
-  [#32](https://github.com/TokenRollAI/tool-bridge/pull/32)(OPEN / MERGEABLE,+1337 −167,29 files),
-  用户表示自行合并。合并后需从与 `origin/main` 零差异的干净工作区执行
-  `pnpm deploy:all` + `TB_BASE_URL=… pnpm smoke` 才能勾选。
-  **不构成后续 Phase 的代码依赖**:Phase 2 依赖的是 Phase 1 的**代码**(Secret Reference ACL
-  与 fail-closed 语义),这些已在本分支历史上;被挂起的只是「合并 + 部署」两个流程动作。
-  故按 LOOP 新策略继续推进 Phase 2。
+- ~~**P1-0 · PR #32 合并**~~ —— **已完成**(2026-08-10,rebase 合并进 main:`28f1f57` / `e91680b`
+  / `7095860` / `033ebab` / `d400cd9`)。Phase 2 分支已 rebase 到 main,git 自动跳过 5 个
+  已应用的 Phase 1 提交,零冲突,树内容与 rebase 前一致。
+- **P1-1 · Phase 1 项 6「部署解冻」** —— 仍挂起。代码已在 main,但**尚未部署**:需从与
+  `origin/main` 零差异的干净工作区执行 `pnpm deploy:all` + `TB_BASE_URL=… pnpm smoke`。
+  属外向不可逆动作,待用户授权。**不构成后续 Phase 的代码依赖。**
 - **P1-2 · Phase 1 遗留的生产验证** —— 跨休眠窗口(≥150s)与真实连接替换竞态须线上验证,
   随 P1-1 部署后一并做(`npx tsx scripts/verify-device.ts`)。
 
