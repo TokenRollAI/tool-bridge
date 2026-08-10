@@ -16,8 +16,8 @@
 
 ## 当前状态
 - 当前 Phase:**Phase 2 — B:Plugin SDK / OperationRegistry 地基**(分支 `phase2-plugin-sdk`)
-- Phase 2 已勾选:项 1(OperationRegistry 落地)
-- Phase 2 待办:项 2 Plugin v2 多 export / 项 3 Context 按 handler 推导 / 项 4 `@tool-bridge/plugin-sdk` 可发布 / 项 5 样例 plugin 双 export / 项 6 删净 legacy 面 / 项 7 飞书重写复验(依赖生产,预计 PENDING)/ 项 8 部署(PENDING)
+- Phase 2 已勾选:项 1(OperationRegistry 落地)、项 3(Context 按 handler 推导能力)
+- Phase 2 待办:项 2 Plugin v2 多 export / 项 4 `@tool-bridge/plugin-sdk` 可发布 / 项 5 样例 plugin 双 export / 项 6 删净 legacy 面 / 项 7 飞书重写复验(依赖生产,预计 PENDING)/ 项 8 部署(PENDING)
 - Phase 1(代码完成,部署挂起见 PENDING)
 - 已勾选:项 1(Secret Reference 使用授权,Round 1 → Round 4 补第三写入口后成立)、项 2(DO/Node 连接替换 TOCTOU,Round 2 → Round 4 补 registerPaths 后成立)、项 3(Node/Docker bootstrap fail closed)、项 4(canonical origin 对等)、项 5(`pnpm verify` 全绿)
 - 未勾选:项 6(部署解冻 smoke)—— 被 P1-1 / P1-2 卡住,见上
@@ -124,3 +124,18 @@
   - 过程修正两处:`noUncheckedIndexedAccess` 下属性断言改整对象 `toEqual`;解构剔除 `$schema` 触发 no-unused-vars,改用仓库既有 `omit()` helper(与 `refactor(core): 抽 omit helper` 既定做法一致)。
 - 勾选:Phase 2 DoD 项 1。提交 `d13f799`,pre-commit 全量 typecheck 通过。
 - 遗留:下一轮起点 = Phase 2 项 3(Context 按 handler 推导能力,core 侧自包含)→ 再做项 2(Plugin v2 多 export,跨 core+gateway)。项 7/8 依赖生产,预计挂 PENDING。
+
+## Round 7 — 2026-08-10
+- 目标:Phase 2 DoD 项 3 — Context 按 handler 推导能力(handler 全可选、存在性推导 methods/capabilities、无写动词自动只读、修 Watch 假能力、修 connect() 语义丢失)
+- 动作:
+  - **core**:新增 `context/capabilities.ts`(`contextMethodsOf` / `isReadOnlyProvider` / `contextCapabilitiesOf`);`ContextProvider` 六动词**全改可选**;`contextHelpModel` 新增 `methods` 过滤(只列真实存在的动词,readOnly 在其上再收紧);`ObjectContextProvider` 收紧为 `Required<ContextProvider>`,内置 r2/s3 与其消费方免逐个判空。
+  - **Watch 假能力清除**:此前 `ContextProvider.Watch?` 存在、`OPTIONAL_METHOD_BY_CAPABILITY` 有 `watch→Watch` 映射,但 `grep Watch packages/gateway/src/` **零命中** —— 无 cmd、无 scope、无派发。三处死面一并删除。
+  - **gateway**:`dispatchContextCmd` 六个动词逐个判存在性,未实现即 `unknown cmd`(与"~help 只列真实存在的操作"对齐,宣告动词表与可调用集合始终吻合);`~help`/`~describe` 的本地 provider 分支改用 core 推导真源(`contextMethodsOf`/`isReadOnlyProvider`/`contextCapabilitiesOf`),消除与 `~describe` 两处漂移。
+  - **sdk connect 语义保真**:取证确认本地落库(`ensureReady` flush)保留 `meta.virtualize`/`meta.config`,而 `defaultExpose` 上报时**硬编码 config 且丢掉 virtualize/readOnly** —— 正是"本地正常、连远程后 help 与权限变了"的成因。抽出共用的 `nodeInputOf(reg)`,两条路径同一构造;context 的只读性按 handler 推导后一并上报。
+- 验证:
+  - core 新增 `test/context/capabilities.test.ts` **8 例**(只读单动词 / 纯搜索 / append-only 三种此前表达不出来的形态,各自的 methods、只读判定与 `~help` cmd 表);core 729 → **737 passed**。
+  - sdk 新增 `test/registration.test.ts` **5 例**(wire 层):只读 provider → `config.readOnly` 自动 true、`~help` 只列 Get/List、`~describe` capabilities 为空;`virtualize` 落进节点且对外只暴露前缀名。sdk 12 → **17 passed**。
+  - `pnpm verify` 全量 → typecheck 7 包 + lint clean + **1166 passed / 7 skipped**,退出码 0。提交 `1bde4fc`。
+  - 诚实边界:上报侧的保真现在是**结构性保证**(两条路径共用 `nodeInputOf`),而非独立断言;真实远端链路仍由 opt-in 的 `connect.remote.test.ts` 覆盖(需 `TB_TEST_SDK_REMOTE=1` 与生产端点,本轮未跑)。
+- 勾选:Phase 2 DoD 项 3。
+- 遗留:下一轮起点 = Phase 2 项 2(Plugin v2 多 export:`kind` 移出 manifest、`/~describe` 返回 exports 数组、挂载配置加 `export` 字段),跨 core + gateway + CLI/Dashboard 三入口对等。
