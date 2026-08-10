@@ -15,7 +15,10 @@
   随 P1-1 部署后一并做(`npx tsx scripts/verify-device.ts`)。
 
 ## 当前状态
-- 当前 Phase:Phase 1 — A:安全阻断项解冻(代码完成,待部署)
+- 当前 Phase:**Phase 2 — B:Plugin SDK / OperationRegistry 地基**(分支 `phase2-plugin-sdk`)
+- Phase 2 已勾选:项 1(OperationRegistry 落地)
+- Phase 2 待办:项 2 Plugin v2 多 export / 项 3 Context 按 handler 推导 / 项 4 `@tool-bridge/plugin-sdk` 可发布 / 项 5 样例 plugin 双 export / 项 6 删净 legacy 面 / 项 7 飞书重写复验(依赖生产,预计 PENDING)/ 项 8 部署(PENDING)
+- Phase 1(代码完成,部署挂起见 PENDING)
 - 已勾选:项 1(Secret Reference 使用授权,Round 1 → Round 4 补第三写入口后成立)、项 2(DO/Node 连接替换 TOCTOU,Round 2 → Round 4 补 registerPaths 后成立)、项 3(Node/Docker bootstrap fail closed)、项 4(canonical origin 对等)、项 5(`pnpm verify` 全绿)
 - 未勾选:项 6(部署解冻 smoke)—— 被 P1-1 / P1-2 卡住,见上
 - 已提交:`4e59750` core 原语 / `3867a30` 宿主接线(四个阻断项)/ `a9fcba4` lockfile / `3b42eda` 规划文档
@@ -103,3 +106,21 @@
 - 提交(4 个,工作区已干净):`4e59750` core 原语 → `3867a30` 宿主接线 → `a9fcba4` lockfile → `3b42eda` 规划文档。pre-commit hook 每次跑全量 typecheck 均通过。
 - **未勾选且卡住:项 6(部署解冻)**。两个需人拍板项见本文件顶部 P1-1 / P1-2。按 LOOP「Phase 被卡死(终止)」:停下交人,不跳到 Phase 2 绕过前置。
 - 待办(留给 `llmdoc:update`):新增 env `TB_ALLOW_INSECURE_BOOTSTRAP` 与 Node 侧 `TB_CANONICAL_ORIGIN` 需补进 `guides/docker-host.md` 的 env 面;`modules-and-boundaries.md` 的「两条注册通道」应改为**三条**(设备 hello 是第三条 NodeConfig 写入口)并记录 Secret Reference ACL;`current-state.md` 的安全阻断项状态需更新。
+
+## Round 6 — 2026-08-10(Phase 2 开工)
+- 目标:Phase 2 DoD 项 1 — OperationRegistry 落地(Zod 驱动;自动完成 z.infer 推导 / safeParse / ZodError→invalid_argument / Zod→JSON Schema / List·Get·Call / 裸返回值包装)
+- 前置动作:
+  - 按用户新指令改 LOOP 状态机:「Phase 卡死即停机」→「**PENDING 挂起并继续下一 Phase**」,判据是**代码依赖而非流程依赖**。据此把 Phase 1 项 6(部署)挂起为 P1-1 —— 它是流程动作,Phase 2 依赖的 Phase 1 **代码**已在分支历史上,不构成阻塞。
+  - 新开分支 `phase2-plugin-sdk`(从 Phase 1 分支切出),避免 PR #32 继续增长影响用户合并。
+- 选型(纪律「成熟框架优先」):Zod→JSON Schema **不引新依赖、不手写转换器** —— 实测已锁的 `zod@3.25.76` 自带 `./v4` 子路径,官方 `z.toJSONSchema()` 输出正是所需形状(含 `.describe()` 派生 description、required、additionalProperties)。作者侧约定 `import { z } from 'zod/v4'`。
+- 动作:新增 core `operation/registry.ts`:
+  - `register(name, spec, handler)`;`inputSchema` 收完整 Zod schema **或** MCP 风格 raw shape,另留 `rawInputSchema` 作 JSON Schema 逃生阀(互斥,冲突即 invalid_argument);
+  - 自动派生 ToolSpec,剥掉 `$schema` 顶层键以与既有 mcp/http 的裸 JSON Schema 形状一致(避免 `~help`/表单出现两种形状);
+  - `call()` safeParse,失败转 `invalid_argument` 且消息含字段路径;handler 裸返回值自动包成 ToolResult,已是 ToolResult 形状(含 isError)则原样透传;
+  - `list/get/names/has` 覆盖 v1 `ToolProvider` 三动词的全部行为,作者不再实现协议适配器;重名/空名快速失败。
+- 验证:
+  - 新增 `core/test/operation/registry.test.ts` **12 例**;core 测试 717 → **729 passed**。
+  - **z.infer 推导由编译期保证**:已核实 core `tsconfig.include` 覆盖 `test/`,测试中 `const n: number = input.n`、`input.tags[0]`、`.repeat()` 等在推导退化时无法通过 tsc;`npx tsc --noEmit` 退出 0。
+  - 过程修正两处:`noUncheckedIndexedAccess` 下属性断言改整对象 `toEqual`;解构剔除 `$schema` 触发 no-unused-vars,改用仓库既有 `omit()` helper(与 `refactor(core): 抽 omit helper` 既定做法一致)。
+- 勾选:Phase 2 DoD 项 1。提交 `d13f799`,pre-commit 全量 typecheck 通过。
+- 遗留:下一轮起点 = Phase 2 项 3(Context 按 handler 推导能力,core 侧自包含)→ 再做项 2(Plugin v2 多 export,跨 core+gateway)。项 7/8 依赖生产,预计挂 PENDING。
