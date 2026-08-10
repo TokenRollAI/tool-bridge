@@ -245,8 +245,10 @@ export class SecretStoreImpl {
    *
    * **仅供网关内部 Provider 解析引用名(authRef/skRef/secretRef);不暴露为节点 cmd**
    * (节点面只有 Set/List/Delete,resolve 不是 cmd)。
-   * unavailable 态 → 返回 undefined:主密钥缺失时无从解密,与"引用名不存在"同样处理为不可解析,
-   * 由 Provider 侧降级(避免在数据面抛 unavailable)。
+   * unavailable 态(主密钥缺失)同样返回 undefined——本层不区分"无从解密"与"引用名不存在"。
+   * **消费侧契约:配置声明了引用却拿到 undefined 必须 fail closed**(抛 unavailable),
+   * 不得降级为无凭证/匿名出站——上游可能据此当匿名放行或返回误导性结果。
+   * 各 Provider(remote/mcp/http/pluginClient)均按此实现。
    */
   async resolve(name: string): Promise<string | undefined> {
     if (this.keyBytes === undefined) {
