@@ -20,6 +20,7 @@
 
 ## 当前状态
 - 当前 Phase:**Phase 3 — E:对外 MCP 出口**(Round 13 起;Phase 2 可做项已清空)
+- Phase 3 已勾选:项 1(官方 MCP 测试 client + 本地 initialize,Round 14)
 - Phase 2 已勾选:项 1(OperationRegistry)、项 2(Plugin v2 多 export,Round 13 补齐三入口对等后成立)、项 3(Context 按 handler 推导能力)、项 4(`@tool-bridge/plugin-sdk` 可发布)、项 5(样例 plugin 双 export)、项 6(删净 legacy 面)
 - Phase 2 待办(**全部为待授权的外向动作**):项 7 飞书重写复验(代码已完成,只差生产实调 → P2-1)/ 项 8 部署上线
 - Phase 1(代码完成,部署挂起见 PENDING)
@@ -28,7 +29,7 @@
 - 已提交:`4e59750` core 原语 / `3867a30` 宿主接线(四个阻断项)/ `a9fcba4` lockfile / `3b42eda` 规划文档
 - Blockers(从 DOR.md 继承,不阻塞全局开工,只缩小对应 Phase 可推进范围):
   - **C-1**(Phase 4):D1 绑定与 provision 幂等分支尚未建立(`packages/gateway/wrangler.jsonc` 无 `d1_databases`、`scripts/provision.mjs` 无 D1 分支)。属 Phase 4 第一个 DoD 项,不阻塞 Phase 1/2/3。
-  - **E-1**(Phase 3):缺一个 MCP client 做 tools/list + tools/call 验收。属 Phase 3 第一步(用官方 @modelcontextprotocol/sdk 写测试 client 自足),不阻塞 Phase 1/2。
+  - ~~**E-1**(Phase 3):缺一个 MCP client 做 tools/list + tools/call 验收。~~ **已解决**(Round 14):官方 `Client` + `StreamableHTTPClientTransport` 已经真实 `SELF.fetch` 连本地 `/mcp` 完成 initialize;后续复用同一 client 验收 list/call。
 
 ## 开跑提示
 - 执行顺序 A→B→E→C→D,不可跳 Phase(依赖:B 改 ToolSpec 派生形态 → C 索引 ToolSpec 必须在 B 后;E 只读 tool list 亦在 B 后;D 依赖 B/C 接口定稿)。
@@ -255,3 +256,17 @@
 - **账本订正(不静默)**:发现 DOD.md 里 Phase 1 项 1–5 与 Phase 2 项 1–4 的复选框**从未被勾上**,尽管 Rounds 1–9 已逐条记了命令与输出(`git log -- DOD.md` 显示只有项 5/6 有过勾选提交,疑似早期某轮的编辑丢失)。本轮按「DOD 是法官、证据即判据」补勾这 9 项——**依据是既有 Round 记录里的证据,不是本轮新跑的**;唯一由本轮重新确认的是「全阶段回归绿:pnpm verify 退出码 0」。
 - 遗留:Phase 2 可做项**已清空** —— 只剩 P2-1(飞书生产复验)与项 8(部署),两者都是待授权的外向动作。按 LOOP「Phase 内只剩 PENDING → 继续下一 Phase」进 **Phase 3(E:对外 MCP 出口)**,起点是 blocker E-1(用官方 `@modelcontextprotocol/sdk` 写测试 client)。跳过的是"部署/生产实调"这类流程动作,Phase 3 的编码依赖的是 Phase 2 的**代码**,而代码已在本分支上,不构成代码依赖。
 - 待办(留给 `llmdoc:update`):`system/plugin` 管理面新增 exports 投影这条契约;plugin/v2 下"管理面如何回答『这个 plugin 提供什么』"的答案已从 manifest.kind 变为 export 列表。
+
+## Round 14 — 2026-08-11
+- 目标:Phase 3 DoD 项 1 — 测试 MCP client 就位(解 blocker E-1):用官方 `@modelcontextprotocol/sdk` client 连本地 gateway MCP endpoint 完成 initialize。
+- 动作:
+  - 新增宿主中立 `gateway/src/mcpServer.ts`:使用官方 `McpServer` + `WebStandardStreamableHTTPServerTransport` 提供无状态 `/mcp` Streamable HTTP endpoint;校验器使用 `CfWorkerJsonSchemaValidator`,避免 workerd 禁止动态代码生成的问题。无状态是刻意选择:每个 MCP HTTP 请求都重新经过 gateway Bearer 认证,不让 isolate 内会话替代身份边界。
+  - `createTbApp` 在既有 Bearer 认证中间件之后注册 `/mcp`,因此无/错 SK 仍由现有 `identify` fail closed;本轮只交付 initialize,尚未注册 tools capability。
+  - 新增可复用测试 client `test/mcpClient.ts`:官方 `Client` + `StreamableHTTPClientTransport`,Bearer SK 走 `requestInit`,实际 fetch 注入测试宿主。新增 `mcp.integration.test.ts` 通过 `SELF.fetch` 穿透本地 Worker,断言 serverInfo=`tool-bridge@0.4.0`、capabilities 为空。
+  - 过程修正:首跑 initialize 已成功,但断言错误地要求空 capabilities 含 `tools:undefined`,且断言提前失败使 client 未 close,后台 SSE GET 被 workerd 判悬挂。改为断言 `{}` + `try/finally` 关闭;测试 harness 仅对 initialized 后的可选长驻 GET 返回 405,initialize/initialized POST 都真实穿透 gateway。产品 endpoint 仍完整支持 GET SSE。
+- 验证:
+  - `pnpm --filter @tool-bridge/gateway exec vitest run test/mcp.integration.test.ts` → **1 passed**,退出码 0;官方 SDK client 完成 initialize 并读回 serverInfo。
+  - `pnpm --filter @tool-bridge/gateway typecheck` → 退出码 0。
+  - `pnpm exec eslint packages/gateway/src/mcpServer.ts packages/gateway/src/tbApp.ts packages/gateway/test/mcpClient.ts packages/gateway/test/mcp.integration.test.ts` → 退出码 0(首跑 4 个 import 排序错误已由 `eslint --fix` 修复后复验)。
+- 勾选:Phase 3 DoD 项 1(测试 MCP client 就位 / E-1 已解)。
+- 遗留:下一轮 = Phase 3 项 2(MCP tools/list + tools/call):基于同一个按请求认证的 server factory,把当前 SK 的 `ctx` 注入工具枚举/调用;复用现有 registry/provider/virtualize/Authorizer.Check,不另造分发路径。

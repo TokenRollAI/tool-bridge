@@ -44,7 +44,7 @@ Phase 间不可跳:B 改 ToolSpec 派生形态,C 索引 ToolSpec 必须在 B 后
 
 **目标**:gateway 加 MCP server 端点,整棵树按 SK scope 裁剪后 flat 暴露为 MCP tools。
 **DoD**:
-- [ ] 测试 MCP client 就位(解 blocker E-1):用官方 @modelcontextprotocol/sdk 写一个测试 client。验证:该 client 能连本地 gateway MCP endpoint 完成一次 initialize 握手。
+- [x] 测试 MCP client 就位(解 blocker E-1):用官方 @modelcontextprotocol/sdk 写一个测试 client。验证:该 client 能连本地 gateway MCP endpoint 完成一次 initialize 握手。
 - [ ] MCP server 端点:gateway 暴露 MCP endpoint,复用现有树调用分发 + Authorizer.Check;`tools/list` 返回按连接 SK scope 裁剪的工具(无权节点不出现),`tools/call` 转发到现有调用路径。验证:`pnpm --filter @tool-bridge/gateway test` 中 MCP 出口集成测试(list 裁剪 + call 成功)全绿。
 - [ ] scope 收窄钉死:换窄 scope SK 后 tools/list 相应收窄、越权工具不可见不可调。验证:gateway 集成测试中窄 scope 用例断言工具集差异。
 - [ ] 三入口对等审计:MCP 出口不制造管理旁路(它是消费面非管理面,确认 CLI/Dashboard 无需新增管理动作,或若需开关则同轮补)。验证:能力矩阵审计记入 PROGRESS。
@@ -79,4 +79,3 @@ Phase 间不可跳:B 改 ToolSpec 派生形态,C 索引 ToolSpec 必须在 B 后
 - [ ] **E2E-E**(Case E:存量 MCP 客户端接入):测试 MCP client 连生产 MCP endpoint,`tools/list` 按 SK scope 裁剪、`tools/call` 真实成功;换窄 scope SK 重连工具集收窄(命令 + 输出留证)。
 - [ ] **E2E-C**(Case C:按意图搜工具 + 中文两字词 + 权限裁剪 + 双侧对等):`tb search "日程"` 与 `tb search "create document"` 均命中不空;窄 scope SK 搜结果只含可见节点;CF 生产 `~search` 与 Node 宿主 `~search` 同 query 行为对等;Dashboard 搜索面返回同样结果。
 - [ ] **E2E-D**(Case D:本地一键栈 + Dashboard 可维护):`docker compose up` 起完整栈端到端 smoke 通过;Dashboard 拆分后 `pnpm verify` 全绿 + 真实浏览器四面证据(桌面/移动路由、树请求边界、键盘导航、无 console error/warning)通过。
-

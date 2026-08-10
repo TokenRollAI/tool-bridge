@@ -89,6 +89,7 @@ import { createHttpProvider, type HttpConfig } from './providers/http'
 import { getTools, invalidateToolCache } from './providers/toolCache'
 import { createPluginToolProvider } from './providers/pluginTool'
 import { signRefToken, verifyRefToken } from './refToken'
+import { handleMcpRequest } from './mcpServer'
 import { buildDeps } from './bootstrap'
 
 export type { RemoteSettings } from './providers/remote'
@@ -1399,6 +1400,10 @@ export function createTbApp(deps: TbAppDeps): Hono<{ Variables: Vars }> {
     }
     await next()
   })
+
+  // Streamable HTTP MCP consumer endpoint. The transport is stateless; the authenticated
+  // gateway request remains the identity boundary for every MCP request.
+  app.all('/mcp', c => runHandler(async () => await handleMcpRequest(c.req.raw, deps.version)))
 
   // WS /system/device/ws?deviceId=<id> → 设备通道宿主(CF:每 deviceId 一个 DeviceSession DO)。
   // deviceId 同时在 hello 帧中出现;通道侧会校验二者一致,以满足设备帧契约。
