@@ -20,7 +20,7 @@
 
 ## 当前状态
 - 当前 Phase:**Phase 3 — E:对外 MCP 出口**(Round 13 起;Phase 2 可做项已清空)
-- Phase 3 已勾选:项 1(官方 MCP 测试 client + 本地 initialize,Round 14)、项 2(认证后的动态 tools/list + tools/call,Round 15)、项 3(scope 收窄钉死,Round 16)
+- Phase 3 已勾选:项 1(官方 MCP 测试 client + 本地 initialize,Round 14)、项 2(认证后的动态 tools/list + tools/call,Round 15)、项 3(scope 收窄钉死,Round 16)、项 4(三入口对等审计,Round 17)
 - Phase 2 已勾选:项 1(OperationRegistry)、项 2(Plugin v2 多 export,Round 13 补齐三入口对等后成立)、项 3(Context 按 handler 推导能力)、项 4(`@tool-bridge/plugin-sdk` 可发布)、项 5(样例 plugin 双 export)、项 6(删净 legacy 面)
 - Phase 2 待办(**全部为待授权的外向动作**):项 7 飞书重写复验(代码已完成,只差生产实调 → P2-1)/ 项 8 部署上线
 - Phase 1(代码完成,部署挂起见 PENDING)
@@ -299,3 +299,24 @@
   - `pnpm --filter @tool-bridge/gateway typecheck`、目标文件 eslint、`git diff --check` 均退出码 0。
 - 勾选:Phase 3 DoD 项 3(scope 收窄钉死)。
 - 遗留:下一轮 = Phase 3 项 4(三入口对等审计):确认 `/~mcp` 是纯消费面、没有管理开关或持久配置,因此 API 不新增管理动作且 CLI/Dashboard 无对应动作缺口;用能力矩阵与代码搜索证据记入账本。
+
+## Round 17 — 2026-08-11
+- 目标:Phase 3 DoD 项 4 — 三入口对等审计,确认 MCP 出口不制造管理旁路,CLI/Dashboard 无需新增 MCP 管理动作。
+- 动作:
+  - investigator 与主 agent 独立搜索 Gateway/API、CLI、Dashboard。结论:`/~mcp` 只有一处固定路由,位于统一 Bearer 中间件之后;`mcpServer.ts` 无 StateStore 写删、无 endpoint 启停配置、无跨请求会话。CLI/Dashboard 对 `~mcp` 均无引用,三端一致地不存在“MCP 出口开关/配置”这项管理生命周期。
+  - 能力矩阵:
+
+| 能力 | Gateway API / MCP | CLI | Dashboard | 结论 |
+|---|---|---|---|---|
+| MCP 启停/配置/持久状态 | 固定认证路由,无配置读写 | 无 | 无 | 三端均无;无需新增开关 |
+| 树发现与调用 | `~tree/~help/POST`;MCP list/call | `tb ls/tree/help/call` | TreeNav/NodePage/CmdPanel | 同一树与调用面 |
+| `system/*` 管理命令 | 按当前 SK 的 command action scope 投影 | 专用命令族 + `tb call --tool` | 专用管理页 + 通用 CmdPanel | 能力对等,无旁路 |
+| Registry/SK 管理 | `system/registry`、`system/sk` | tool/server/ctx/skill/sk 命令族 | RegistryPage、SkPage | MCP 只消费同一状态 |
+
+  - 关键限定:“消费面”不等于只读。Admin SK 在 MCP 中能看到 `system/*` 是既有权限的另一协议表现;call 重新进入 HTBP builtin 分发,registerPaths、Secret Reference、remote/config 等附加安全校验仍执行,能力不超过同一 SK 经 API/CLI/Dashboard 已有权限。
+- 验证:
+  - `! rg -n "~mcp|mcpServer|MCP consumer" packages/cli/src packages/dashboard/src` → 无匹配,退出码 0。
+  - `rg -n "app\\.all\\('/~mcp'|handleMcpRequest\\(" packages/gateway/src` → 仅 `tbApp.ts` 路由 + `mcpServer.ts` handler;`! rg -n "StateStore|\\.put\\(|\\.delete\\(|KEY_" packages/gateway/src/mcpServer.ts` → 无持久写面,退出码 0。
+  - `rg -n "system/(sk|secret|registry|plugin|federation|annotation)" packages/cli/src packages/dashboard/src` 与源码核对 → 既有管理面均落同一 `system/*`;`rg -n "check\\(ctx|assertRegisterPath|assertSecretRefUse" packages/gateway/src/tbApp.ts` → MCP 投影 scope 与 builtin 附加校验链均存在。
+- 勾选:Phase 3 DoD 项 4(三入口对等审计;无需新增 CLI/Dashboard 动作)。
+- 遗留:下一轮 = Phase 3 项 5 的可做代码半边:新增可对生产运行的官方 SDK MCP smoke(`initialize → tools/list → tools/call`,并支持窄 SK 集合比较),随后跑 `pnpm verify`;真实 `deploy:all` + 生产 smoke 属外向动作,无授权则按纪律挂 PENDING 并进入 Phase 4。
