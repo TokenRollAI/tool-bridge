@@ -2,10 +2,26 @@
 
 > 每轮结束在末尾追加一条 Round 记录(格式见 LOOP.md)。当前 Phase 与 blocker 在此维护。
 
+## ⛔ 当前停在:Phase 1 卡在最后一项,需人拍板
+
+**Phase 1 的代码工作已全部完成并提交(4 个 commit,工作区干净,`pnpm verify` 全绿)。**
+唯一未勾的项 6「部署解冻」被两件需要你决定的事挡住,LOOP 状态机据此终止本轮:
+
+- **P1-1(需人):把本分支合入 main。** LOOP 纪律:「部署必须从与 origin/main 零差异的干净
+  工作区执行」。当前分支 `architecture-planning-pre` 已领先 main 4 个提交,直接从这里部署违纪。
+  需要:开 PR → review → merge。
+- **P1-2(需人):授权生产部署。** `pnpm deploy:all` 会把 Worker 推到生产
+  `tool-bridge.pdjjq.org`(DJJ 账户),属外向且不可逆的动作,不在自动循环的授权范围内。
+
+解除这两项后,项 6 = `pnpm deploy:all` + `TB_BASE_URL=… pnpm smoke`,通过即 Phase 1 完成、
+生产解冻,可进 Phase 2(B:Plugin SDK 地基)。**不得跳过 Phase 1 直接做 Phase 2**(LOOP:
+不跳到后续 Phase 绕过被卡的前置;且 Phase 1 是所有部署的前置)。
+
 ## 当前状态
-- 当前 Phase:Phase 1 — A:安全阻断项解冻
-- 已勾选:项 1(Secret Reference 使用授权,Round 1 首实现 → Round 4 补第三写入口后成立)、项 2(DO/Node 连接替换 TOCTOU,Round 2 首实现 → Round 4 补 registerPaths 后成立)、项 3(Node/Docker bootstrap fail closed)
-- 未勾选:项 4(canonical origin 对等)、项 5(pnpm verify 全绿)、项 6(部署解冻 smoke)
+- 当前 Phase:Phase 1 — A:安全阻断项解冻(代码完成,待部署)
+- 已勾选:项 1(Secret Reference 使用授权,Round 1 → Round 4 补第三写入口后成立)、项 2(DO/Node 连接替换 TOCTOU,Round 2 → Round 4 补 registerPaths 后成立)、项 3(Node/Docker bootstrap fail closed)、项 4(canonical origin 对等)、项 5(`pnpm verify` 全绿)
+- 未勾选:项 6(部署解冻 smoke)—— 被 P1-1 / P1-2 卡住,见上
+- 已提交:`4e59750` core 原语 / `3867a30` 宿主接线(四个阻断项)/ `a9fcba4` lockfile / `3b42eda` 规划文档
 - Blockers(从 DOR.md 继承,不阻塞全局开工,只缩小对应 Phase 可推进范围):
   - **C-1**(Phase 4):D1 绑定与 provision 幂等分支尚未建立(`packages/gateway/wrangler.jsonc` 无 `d1_databases`、`scripts/provision.mjs` 无 D1 分支)。属 Phase 4 第一个 DoD 项,不阻塞 Phase 1/2/3。
   - **E-1**(Phase 3):缺一个 MCP client 做 tools/list + tools/call 验收。属 Phase 3 第一步(用官方 @modelcontextprotocol/sdk 写测试 client 自足),不阻塞 Phase 1/2。
@@ -75,3 +91,18 @@
 - 勾选:项 1(补齐第三写入口后成立)、项 2(补齐 registerPaths 后成立)。项 3 维持。
 - 教训(供 llmdoc:update):**"堵住某类漏洞"必须先枚举该操作的全部入口再逐个验证**,不能因为改了最显眼的两条通道就宣布完成;设备 hello 是 NodeConfig 的第三个写入口,且其 config 来自不可信端并且帧 schema 是 passthrough。另:安全修复的新增测试必须做"摘掉修复看是否 FAIL"的有效性验证,否则可能是同义反复。
 - 遗留:下一轮起点 = Phase 1 DoD 项 4(canonical origin 对等:非法配置不静默回退,Node/SDK 与 Workers 对齐)。落点 gateway `app.ts` 的 `TB_CANONICAL_ORIGIN` 规范化 + server `config.ts` 对等。改动未 commit。
+
+## Round 5 — 2026-08-10
+- 目标:Phase 1 DoD 项 4(canonical origin 对等)+ 项 5(verify 全绿)+ 项 6(部署解冻)
+- 动作:
+  - 取证发现两处缺陷:①Workers 的 `normalizeOrigin` 在「配置了但非法」时返回 undefined,调用点直接跳过赋值 → **静默回退**到每请求 origin(运维以为钉住了 OAuth redirect,实际没有);②Node/SDK **完全没有** canonical origin 配置面。
+  - 新增 core `origin.ts`(`normalizeCanonicalOrigin`,宿主中立单一真源):未配置 → undefined(显式选择不钉);配置了但非法/非 http(s) → 抛 `invalid_argument`(fail closed)。core tsconfig 不引 DOM/node lib,按 `secretStore.ts` 既定做法用模块作用域最小 `URL` 声明补类型。
+  - Workers `app.ts` 删掉本地 `normalizeOrigin` 改用 core 真源;Node `config.ts` 新增 `canonicalOrigin`(解析期抛 → 进程拒绝启动,比每请求抛更早),`server.ts` 接进 `deps.canonicalOrigin`。
+- 验证:
+  - core `origin.test.ts` 7 例(未配置/合法取 origin 丢 path/带端口/三类非法/非 http(s));server `bootstrap.test.ts` 追加 3 例配置面对等。
+  - `pnpm verify`(全量)→ typecheck 7 包 + lint clean + **1141 passed / 7 skipped**(core 717 + cli 233 + sdk 12 + plugin-feishu 8 + gateway 139 + server 32),退出码 0。
+  - 过程故障:本轮遭遇多次文件系统抖动(Write 报成功但未落盘、`ls <file>` 说不存在而 `ls *.ts` 列得出、Edit 工具间歇报 cwd 错)。`origin.ts` 因此丢失过一次,由 vitest 的 `Cannot find module './origin'` 暴露;改用 heredoc 重建并**立即 `wc -c` 校验**后正常。教训:该环境下写文件后必须立刻验证落盘,不能只信工具回报。
+- 勾选:项 4(canonical origin 对等)、项 5(`pnpm verify` 全绿)。
+- 提交(4 个,工作区已干净):`4e59750` core 原语 → `3867a30` 宿主接线 → `a9fcba4` lockfile → `3b42eda` 规划文档。pre-commit hook 每次跑全量 typecheck 均通过。
+- **未勾选且卡住:项 6(部署解冻)**。两个需人拍板项见本文件顶部 P1-1 / P1-2。按 LOOP「Phase 被卡死(终止)」:停下交人,不跳到 Phase 2 绕过前置。
+- 待办(留给 `llmdoc:update`):新增 env `TB_ALLOW_INSECURE_BOOTSTRAP` 与 Node 侧 `TB_CANONICAL_ORIGIN` 需补进 `guides/docker-host.md` 的 env 面;`modules-and-boundaries.md` 的「两条注册通道」应改为**三条**(设备 hello 是第三条 NodeConfig 写入口)并记录 Secret Reference ACL;`current-state.md` 的安全阻断项状态需更新。
