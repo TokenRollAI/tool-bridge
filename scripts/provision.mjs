@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { applyEdits, findNodeAtLocation, modify, parseTree } from 'jsonc-parser'
 import { readFileSync, writeFileSync } from 'node:fs'
 /**
  * 幂等 provision:创建 KV namespace、R2 bucket 与 D1 search database(存在即跳过)。
@@ -38,41 +39,44 @@ const childEnv = { ...process.env }
 if (accountId) childEnv.CLOUDFLARE_ACCOUNT_ID = accountId
 if (apiToken) childEnv.CLOUDFLARE_API_TOKEN = apiToken
 
-/** 调 wrangler(项目 pin 版本经 npx 解析);capture=true 时返回 stdout。 */
-function wrangler(args, { capture = false } = {}) {
+/** 调 wrangler(项目 pin 版本经 npx 解析);capture=true 时返回 stdout;quiet=true 时吞掉 stderr(用于预期内失败的探测)。 */
+function wrangler(args, { capture = false, quiet = false } = {}) {
   return execFileSync('npx', ['wrangler', ...args], {
     cwd: root,
     env: childEnv,
     encoding: 'utf8',
-    stdio: capture ? ['ignore', 'pipe', 'inherit'] : 'inherit',
+    stdio: capture ? ['ignore', 'pipe', quiet ? 'pipe' : 'inherit'] : 'inherit',
   })
 }
 
-/** 保留 JSONC 注释/结构,只替换目标 binding 的 id。 */
-function backfillId(pattern, id, label) {
+/** 保留 JSONC 注释/结构,只替换目标 binding 的 id(jsonc-parser 精确编辑,不依赖字段顺序/空白)。 */
+function backfillId(arrayKey, binding, idKey, id, label) {
   const src = readFileSync(wranglerPath, 'utf8')
-  if (!pattern.test(src)) {
+  const tree = parseTree(src)
+  const arr = tree ? findNodeAtLocation(tree, [arrayKey]) : undefined
+  const idx = (arr?.children ?? []).findIndex(item =>
+    (item.children ?? []).some(prop =>
+      prop.children?.[0]?.value === 'binding' && prop.children?.[1]?.value === binding))
+  if (idx < 0) {
     throw new Error(`could not locate ${label} in ${wranglerPath}`)
   }
-  const next = src.replace(pattern, `$1${id}$2`)
-  if (next === src) {
+  if (findNodeAtLocation(tree, [arrayKey, idx, idKey])?.value === id) {
     console.log(`${label} already points to id=${id}`)
     return
   }
-  writeFileSync(wranglerPath, next)
+  const edits = modify(src, [arrayKey, idx, idKey], id, {
+    formattingOptions: { insertSpaces: true, tabSize: 2 },
+  })
+  writeFileSync(wranglerPath, applyEdits(src, edits))
   console.log(`已回填 ${label}=${id} → ${wranglerPath}`)
 }
 
 function backfillKvId(id) {
-  backfillId(/("binding":\s*"TB_KV",\s*"id":\s*")[^"]*(")/, id, 'TB_KV.id')
+  backfillId('kv_namespaces', 'TB_KV', 'id', id, 'TB_KV.id')
 }
 
 function backfillD1Id(id) {
-  backfillId(
-    /("binding":\s*"TB_SEARCH"[\s\S]*?"database_id":\s*")[^"]*(")/,
-    id,
-    'TB_SEARCH.database_id',
-  )
+  backfillId('d1_databases', 'TB_SEARCH', 'database_id', id, 'TB_SEARCH.database_id')
 }
 
 function ensureKv() {
@@ -109,16 +113,15 @@ function ensureKv() {
 }
 
 function ensureR2() {
-  const out = wrangler(['r2', 'bucket', 'list'], { capture: true })
-  // list 无 --json,按行解析 `name: <bucket>` 做全等比较(对齐 ensureKv 的精确匹配,消除子串假阳性)。
-  const names = out
-    .split('\n')
-    .map(line => line.match(/^\s*name:\s*(.+?)\s*$/))
-    .filter(m => m !== null)
-    .map(m => m[1])
-  if (names.includes(r2Bucket)) {
+  // `r2 bucket list` 无 --json;改用 `r2 bucket info <name> --json` 做结构化存在性探测:
+  // 存在 → exit 0 + JSON;不存在 → 非零退出(API 10006,2026-08-11 实测),走 create。
+  try {
+    const out = wrangler(['r2', 'bucket', 'info', r2Bucket, '--json'], { capture: true, quiet: true })
+    JSON.parse(out)
     console.log(`R2 bucket '${r2Bucket}' exists — skip`)
     return
+  } catch {
+    // 不存在(或探测失败):尝试创建;真实错误(如认证)会在 create 时以非零退出暴露。
   }
   console.log(`creating R2 bucket '${r2Bucket}'...`)
   wrangler(['r2', 'bucket', 'create', r2Bucket])

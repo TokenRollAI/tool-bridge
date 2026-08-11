@@ -23,8 +23,12 @@ if (command === 'kv namespace list') {
   console.log(JSON.stringify(state.kv ? [{ title: 'tb-kv', id: 'kv-id' }] : []))
 } else if (command === 'kv namespace create tb-kv') {
   state.kv = true
-} else if (command === 'r2 bucket list') {
-  if (state.r2) console.log('name: tb-r2')
+} else if (command === 'r2 bucket info tb-r2 --json') {
+  if (!state.r2) {
+    console.error('The specified bucket does not exist. [code: 10006]')
+    process.exit(1)
+  }
+  console.log(JSON.stringify({ name: 'tb-r2' }))
 } else if (command === 'r2 bucket create tb-r2') {
   state.r2 = true
 } else if (command === 'd1 list --json') {
