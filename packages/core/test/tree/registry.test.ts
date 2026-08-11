@@ -28,9 +28,11 @@ async function grabError(fn: () => Promise<unknown>): Promise<TBError> {
 }
 
 let reg: NodeRegistryStore
+let state: MemoryStateStore
 
 beforeEach(() => {
-  reg = new NodeRegistryStore(new MemoryStateStore())
+  state = new MemoryStateStore()
+  reg = new NodeRegistryStore(state)
 })
 
 describe('自动物化中间 directory', () => {
@@ -66,6 +68,16 @@ describe('write 幂等 upsert', () => {
     expect(first.createdAt).toBe(T1)
     expect(second.createdAt).toBe(T1)
     expect(second.updatedAt).toBe(T2)
+  })
+})
+
+describe('批量读取', () => {
+  it('规范化去重并忽略不存在路径', async () => {
+    await reg.write(mcp('a/b'), 'user:1', T1)
+    await reg.write(mcp('c/d'), 'user:1', T1)
+    const nodes = await reg.getMany(['/a/b/', 'a/b', 'missing', 'c/d'])
+    expect([...nodes.keys()]).toEqual(['a/b', 'c/d'])
+    expect(nodes.get('a/b')?.kind).toBe('mcp')
   })
 })
 
@@ -245,6 +257,18 @@ describe('subtree 一次性取整棵子树', () => {
     expect(all.map(n => n.path)).toEqual(['a', 'a/b', 'm', 'm/n'])
   })
 
+  it('rootSnapshot 报告确定性截断而不改变严格 subtree 语义', async () => {
+    for (const path of ['a', 'b', 'c', 'd']) {
+      await reg.write(mcp(path), 'user:1', T1)
+    }
+    const snapshot = await reg.rootSnapshot(3)
+    expect(snapshot).toMatchObject({ truncated: true })
+    expect(snapshot.items.map(node => node.path)).toEqual(['a', 'b', 'c'])
+    expect(await grabError(() => reg.subtree('', { maxNodes: 3 }))).toMatchObject({
+      code: 'rate_limited',
+    })
+  })
+
   it('不误纳字符串前缀相邻目录(段级)', async () => {
     await reg.write(mcp('bulk/leaf'), 'user:1', T1)
     await reg.write(mcp('bulkx/leaf'), 'user:1', T1)
@@ -254,6 +278,17 @@ describe('subtree 一次性取整棵子树', () => {
 
   it('不存在的根返回空数组', async () => {
     expect(await reg.subtree('ghost')).toEqual([])
+  })
+
+  it('超过显式节点预算时立即 fail closed', async () => {
+    await reg.write(mcp('a/one'), 'user:1', T1)
+    await reg.write(mcp('b/two'), 'user:1', T1)
+    expect(await grabError(() => reg.subtree('', { maxNodes: 3 }))).toMatchObject({
+      code: 'rate_limited',
+    })
+    expect(await grabError(() => reg.subtree('', { maxNodes: 0 }))).toMatchObject({
+      code: 'invalid_argument',
+    })
   })
 })
 

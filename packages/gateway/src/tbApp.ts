@@ -42,6 +42,7 @@ import {
   negotiate,
   type NodeConfig,
   NodeRegistryStore,
+  normalizeToolSearchLimit,
   type ObjectStore,
   optionalMethodsForCapabilities,
   parseNodeInput,
@@ -67,8 +68,11 @@ import {
   type StateStore,
   TBError,
   type TBErrorBody,
+  TOOL_SEARCH_BATCH_LIMIT,
+  TOOL_SEARCH_WORK_LIMIT,
   toolHelpModel,
   type ToolResult,
+  type ToolSearchCandidate,
   type ToolSpec,
   toolsToHelpModel,
   type TreeEntry,
@@ -94,6 +98,11 @@ import {
   type McpToolBridge,
   mcpToolIdentity,
 } from './mcpServer'
+import {
+  isMutableSearchIndex,
+  type SearchDirtyMarker,
+  SearchSynchronizer,
+} from './search/synchronizer'
 import { assertRemoteAllowed, passthroughRemote, type RemoteSettings } from './providers/remote'
 import { createMcpProvider, invalidateMcpSession, type McpConfig } from './providers/mcp'
 import { createS3ObjectStore, type S3StoreConfig } from './providers/s3Object'
@@ -488,10 +497,23 @@ function upstreamTools(
   now: string,
 ): Promise<ToolSpec[]> {
   if (node.kind === 'mcp' || node.kind === 'tool') {
+    const sync = isMutableSearchIndex(deps.search)
+      ? new SearchSynchronizer(deps.state, deps.search)
+      : undefined
+    let marker: SearchDirtyMarker | undefined
     return getTools(deps.state, node.path, () => provider.list(), {
       refresh,
       ttl: deps.toolCacheTtlSec ?? TOOL_CACHE_TTL_DEFAULT,
       now,
+      ...(sync === undefined
+        ? {}
+        : {
+            beforeFresh: async () => {
+              marker = await sync.markNode(node.path)
+            },
+            onFreshError: async () => await sync.abort(marker),
+            onFresh: async tools => await sync.reconcileNodeQuietly(node.path, { marker, tools }),
+          }),
     })
   }
   return provider.list()
@@ -779,6 +801,37 @@ async function providerFor(
     })
   }
   throw TBError.unimplemented(`kind '${node.kind}' has no tool provider`)
+}
+
+/** 注册变更后主动 materialize 动态工具表；失败时保留 dirty marker，由后续 fresh list 修复。 */
+async function refreshDynamicSearchNode(
+  node: TreeNode,
+  ctx: CallContext,
+  deps: TbAppDeps,
+): Promise<boolean> {
+  if ((node.kind !== 'mcp' && node.kind !== 'tool') || deviceToolMarker(node) !== null) return false
+  try {
+    const provider = await providerFor(node, ctx, deps)
+    await upstreamTools(node, provider, deps, true, new Date().toISOString())
+    return true
+  } catch {
+    // Canonical registry mutation remains successful; marker keeps derived search repairable.
+    return false
+  }
+}
+
+async function refreshDynamicToolCache(
+  node: TreeNode,
+  ctx: CallContext,
+  deps: TbAppDeps,
+): Promise<void> {
+  if ((node.kind !== 'mcp' && node.kind !== 'tool') || deviceToolMarker(node) !== null) return
+  const provider = await providerFor(node, ctx, deps)
+  await getTools(deps.state, node.path, () => provider.list(), {
+    refresh: true,
+    ttl: deps.toolCacheTtlSec ?? TOOL_CACHE_TTL_DEFAULT,
+    now: new Date().toISOString(),
+  })
 }
 
 /**
@@ -1322,6 +1375,9 @@ function renderTreeDsl(tree: TreeJson): string {
 }
 export function createTbApp(deps: TbAppDeps): Hono<{ Variables: Vars }> {
   const app = new Hono<{ Variables: Vars }>()
+  const searchSync = isMutableSearchIndex(deps.search)
+    ? new SearchSynchronizer(deps.state, deps.search)
+    : undefined
   const builtinsOf = (store: StateStore): Map<string, BuiltinModule> =>
     createBuiltins(
       buildDeps({
@@ -1804,8 +1860,8 @@ export function createTbApp(deps: TbAppDeps): Hono<{ Variables: Vars }> {
         throw new TBError('invalid_argument', 'opts must be a JSON object')
       }
       const opts = (rawOpts ?? {}) as Record<string, unknown>
-      if (Object.keys(opts).some(key => key !== 'mode')) {
-        throw new TBError('invalid_argument', 'opts only accepts mode')
+      if (Object.keys(opts).some(key => key !== 'mode' && key !== 'limit' && key !== 'cursor')) {
+        throw new TBError('invalid_argument', 'opts only accepts mode, limit and cursor')
       }
       const mode = opts.mode ?? 'keyword'
       if (mode !== 'keyword' && mode !== 'semantic') {
@@ -1817,25 +1873,90 @@ export function createTbApp(deps: TbAppDeps): Hono<{ Variables: Vars }> {
           'search mode \'semantic\' requires capability \'search:semantic\'',
         )
       }
-
-      const page = await search.search(body.query.trim(), { mode })
+      const limit = normalizeToolSearchLimit(opts.limit)
+      if (opts.cursor !== undefined && typeof opts.cursor !== 'string') {
+        throw new TBError('invalid_argument', 'opts.cursor must be a string')
+      }
+      const query = body.query.trim()
+      await searchSync?.ensureReady()
       const ctx = c.get('ctx')
       const registry = new NodeRegistryStore(c.get('store'))
-      const items: Array<{ path: TreePath, tool: ToolSpec }> = []
-      for (const hit of page.items) {
-        if (!check(ctx, hit.path, 'read').allow || !check(ctx, hit.path, 'call').allow) continue
-        const node = await registry.get(hit.path).catch(() => null)
-        if (
-          node === null
-          || (node.kind !== 'mcp' && node.kind !== 'http' && node.kind !== 'tool')
-          || node.config?.kind !== node.kind
-        ) {
-          continue
+      const selected: Array<{ candidate: ToolSearchCandidate, node: TreeNode }> = []
+      const workLimit = Math.min(
+        TOOL_SEARCH_WORK_LIMIT,
+        Math.max(TOOL_SEARCH_BATCH_LIMIT, limit * 2),
+      )
+      let scanCursor = opts.cursor as string | undefined
+      let responseCursor: string | undefined
+      let responseCandidate: ToolSearchCandidate | undefined
+      let scanned = 0
+      let stopped = false
+      while (!stopped && selected.length < limit && scanned < workLimit) {
+        const batchLimit = Math.min(TOOL_SEARCH_BATCH_LIMIT, workLimit - scanned)
+        const page = await search.search(query, {
+          mode,
+          limit: batchLimit,
+          ...(scanCursor === undefined ? {} : { cursor: scanCursor }),
+        })
+        if (page.items.length === 0) {
+          responseCursor = page.cursor
+          break
         }
-        const tool = virtualizeTools(node.virtualize, [hit.tool]).exposed[0]
+        const nodes = await registry.getMany(page.items.map(candidate => candidate.path))
+        for (const [index, candidate] of page.items.entries()) {
+          scanned++
+          if (
+            !check(ctx, candidate.path, 'read').allow
+            || !check(ctx, candidate.path, 'call').allow
+          ) {
+            continue
+          }
+          const node = nodes.get(candidate.path)
+          if (
+            node === undefined
+            || (node.kind !== 'mcp' && node.kind !== 'http' && node.kind !== 'tool')
+            || node.config?.kind !== node.kind
+            || virtualizeTools(node.virtualize, [{ name: candidate.name }]).exposed.length === 0
+          ) {
+            continue
+          }
+          selected.push({ candidate, node })
+          if (selected.length === limit) {
+            const hasUnscanned = index < page.items.length - 1 || page.cursor !== undefined
+            responseCandidate = hasUnscanned ? candidate : undefined
+            responseCursor = undefined
+            stopped = true
+            break
+          }
+        }
+        if (stopped) break
+        responseCursor = page.cursor
+        if (page.cursor === undefined) break
+        scanCursor = page.cursor
+      }
+
+      const hydration = await search.hydrate(selected.map(item => item.candidate))
+      if (selected.length > 0 && hydration.consumed === 0) {
+        throw new TBError('internal', '工具搜索页面字节预算无法容纳首个结果')
+      }
+      if (hydration.consumed < selected.length) {
+        responseCandidate = selected[hydration.consumed - 1]?.candidate
+        responseCursor = undefined
+      }
+      const items: Array<{ path: TreePath, tool: ToolSpec }> = []
+      for (const [index, hit] of hydration.hits.entries()) {
+        const selectedItem = selected[index]
+        if (selectedItem === undefined || hit.path !== selectedItem.candidate.path) continue
+        const tool = virtualizeTools(selectedItem.node.virtualize, [hit.tool]).exposed[0]
         if (tool !== undefined) items.push({ path: hit.path, tool })
       }
-      return new Response(JSON.stringify({ items }), {
+      if (responseCandidate !== undefined) {
+        responseCursor = await search.cursorFor(query, responseCandidate, mode)
+      }
+      // deny==not_found：空可见页不返回 continuation，避免 cursor 存在性泄露隐藏命中量。
+      if (items.length === 0) responseCursor = undefined
+      const result = responseCursor === undefined ? { items } : { items, cursor: responseCursor }
+      return new Response(JSON.stringify(result), {
         headers: { 'content-type': contentTypeFor('json') },
       })
     }),
@@ -2257,13 +2378,80 @@ export function createTbApp(deps: TbAppDeps): Hono<{ Variables: Vars }> {
       await assertToolConfig(cfgPatch, store)
       registryTarget = targetPath
     }
+    if (registryTarget !== undefined && (cmd === 'write' || cmd === 'update')) {
+      await searchSync?.ensureSeeded()
+    }
 
-    const result = await mod.dispatch(cmd, args, ctx)
+    let pluginMounts: Array<{ marker?: SearchDirtyMarker, node: TreeNode }> = []
+    if (node.config.module === 'plugin' && ['write', 'update', 'delete'].includes(cmd)) {
+      const pluginId = typeof args.id === 'string' ? args.id : undefined
+      if (pluginId !== undefined) {
+        const mounts = (await registry.subtree('')).filter(candidate => (
+          candidate.kind === 'tool'
+          && candidate.config?.kind === 'tool'
+          && candidate.config.provider === pluginId
+        ))
+        pluginMounts = await Promise.all(mounts.map(async candidate => ({
+          marker: await searchSync?.markNode(candidate.path),
+          node: candidate,
+        })))
+      }
+    }
+
+    const registryMarker = registryTarget === undefined
+      ? undefined
+      : await searchSync?.markNode(registryTarget)
+    let result: unknown
+    try {
+      result = await mod.dispatch(cmd, args, ctx)
+    } catch (error) {
+      await searchSync?.abort(registryMarker)
+      await Promise.all(pluginMounts.map(async mount => await searchSync?.abort(mount.marker)))
+      if (isTBError(error)) return tbErrorResponse(error)
+      return tbErrorResponse(new TBError('internal', 'internal error'))
+    }
     // 注册变更 → 失效该节点工具缓存 + mcp 会话/OAuth 缓存(Write/Update/Delete 触发失效)。
     if (registryTarget !== undefined) {
       await invalidateToolCache(store, registryTarget)
       await invalidateMcpSession(store, registryTarget)
       await invalidateMcpOAuth(store, registryTarget)
+      await searchSync?.reconcileNodeQuietly(registryTarget, { marker: registryMarker })
+      const current = await registry.get(registryTarget).catch(() => null)
+      if (current !== null && await refreshDynamicSearchNode(current, ctx, deps)) {
+        await searchSync?.abort(registryMarker)
+      }
+    }
+    const pluginEmptyPaths: TreePath[] = []
+    for (const mount of pluginMounts) {
+      await invalidateToolCache(store, mount.node.path)
+      await invalidateMcpSession(store, mount.node.path)
+      await invalidateMcpOAuth(store, mount.node.path)
+      const providerId = mount.node.config?.kind === 'tool'
+        ? mount.node.config.provider
+        : ''
+      const manifest = await store.get(KEY_PLUGIN + providerId)
+      if (
+        manifest !== null
+        && (manifest as PluginManifest).enabled !== false
+      ) {
+        try {
+          await refreshDynamicToolCache(mount.node, ctx, deps)
+        } catch {
+          // Marker remains pending; canonical plugin mutation is already durable.
+        }
+      } else {
+        pluginEmptyPaths.push(mount.node.path)
+        await searchSync?.reconcileNodeQuietly(mount.node.path, {
+          marker: mount.marker,
+          tools: [],
+        })
+      }
+    }
+    if (pluginMounts.length > 0) {
+      await searchSync?.rebuildAll(
+        pluginMounts.flatMap(mount => mount.marker === undefined ? [] : [mount.marker]),
+        { authoritativeEmpty: pluginEmptyPaths },
+      )
     }
     return renderResult(result, negotiate(c.req.header('accept')))
   }
@@ -2387,26 +2575,34 @@ export function createTbApp(deps: TbAppDeps): Hono<{ Variables: Vars }> {
     if (body === null || typeof body !== 'object') {
       throw new TBError('invalid_argument', 'body must be a JSON object')
     }
-    const fb = new FeedbackStore(store)
-    if (target.id !== undefined) {
-      const vote = body.vote
-      if (vote !== 'up' && vote !== 'down' && vote !== 'clear') {
-        throw new TBError('invalid_argument', `body.vote must be 'up' | 'down' | 'clear'`)
+    const marker = await searchSync?.markNode(target.path)
+    try {
+      const fb = new FeedbackStore(store, async (path, entries) => {
+        await searchSync?.reconcileNodeQuietly(path, { feedback: entries, marker })
+      })
+      if (target.id !== undefined) {
+        const vote = body.vote
+        if (vote !== 'up' && vote !== 'down' && vote !== 'clear') {
+          throw new TBError('invalid_argument', `body.vote must be 'up' | 'down' | 'clear'`)
+        }
+        return feedbackJson(await fb.vote(target.path, target.id, ctx.owner, vote))
       }
-      return feedbackJson(await fb.vote(target.path, target.id, ctx.owner, vote))
+      if (typeof body.title !== 'string' || typeof body.detail !== 'string') {
+        throw new TBError('invalid_argument', 'body must be { title: string, detail: string }')
+      }
+      // path 须挂在真实节点(或其工具子路径)下,防悬空路径积垃圾。
+      await new NodeRegistryStore(store).resolve(target.path)
+      const entry = await fb.submit(
+        target.path,
+        { title: body.title, detail: body.detail },
+        ctx.owner,
+        new Date().toISOString(),
+      )
+      return feedbackJson({ id: entry.id, path: target.path, title: entry.title, at: entry.at })
+    } catch (error) {
+      await searchSync?.abort(marker)
+      throw error
     }
-    if (typeof body.title !== 'string' || typeof body.detail !== 'string') {
-      throw new TBError('invalid_argument', 'body must be { title: string, detail: string }')
-    }
-    // path 须挂在真实节点(或其工具子路径)下,防悬空路径积垃圾。
-    await new NodeRegistryStore(store).resolve(target.path)
-    const entry = await fb.submit(
-      target.path,
-      { title: body.title, detail: body.detail },
-      ctx.owner,
-      new Date().toISOString(),
-    )
-    return feedbackJson({ id: entry.id, path: target.path, title: entry.title, at: entry.at })
   }
 
   // DELETE /<path>/~feedback/<id> → 管理面清理(admin)。
@@ -2420,7 +2616,15 @@ export function createTbApp(deps: TbAppDeps): Hono<{ Variables: Vars }> {
     if (!check(ctx, target.path, 'admin').allow) {
       throw new TBError('permission_denied', `no scope grants 'admin' on '${target.path}'`)
     }
-    await new FeedbackStore(c.get('store')).remove(target.path, target.id)
+    const marker = await searchSync?.markNode(target.path)
+    try {
+      await new FeedbackStore(c.get('store'), async (path, entries) => {
+        await searchSync?.reconcileNodeQuietly(path, { feedback: entries, marker })
+      }).remove(target.path, target.id)
+    } catch (error) {
+      await searchSync?.abort(marker)
+      throw error
+    }
     return feedbackJson({ ok: true })
   }
 
@@ -2489,12 +2693,22 @@ export function createTbApp(deps: TbAppDeps): Hono<{ Variables: Vars }> {
     await assertSkillhubConfig(body.config, deps)
     // kind:'tool' 挂载校验:provider 必须是已注册且启用的 tool-provider plugin。
     await assertToolConfig(body.config, store)
+    await searchSync?.ensureSeeded()
     const now = new Date().toISOString()
-    const node = await registry.write(body, ctx.keyId, now)
+    const marker = await searchSync?.markNode(body.path)
+    let node: TreeNode
+    try {
+      node = await registry.write(body, ctx.keyId, now)
+    } catch (error) {
+      await searchSync?.abort(marker)
+      throw error
+    }
     // 注册变更 → 失效该节点工具缓存 + mcp 会话/OAuth 缓存。
     await invalidateToolCache(store, body.path)
     await invalidateMcpSession(store, body.path)
     await invalidateMcpOAuth(store, body.path)
+    await searchSync?.reconcileNodeQuietly(body.path, { marker })
+    if (await refreshDynamicSearchNode(node, ctx, deps)) await searchSync?.abort(marker)
     return new Response(JSON.stringify(node), {
       headers: { 'content-type': contentTypeFor('json') },
     })
@@ -2545,8 +2759,8 @@ export function createTbApp(deps: TbAppDeps): Hono<{ Variables: Vars }> {
 
   // POST 通配分派:末段为 ~register → 反向注册;~authorize → OAuth 发起;~feedback(末段或
   // 倒数第二段)→ 反馈提交/投票;否则数据面调用。
-  app.post('/*', c =>
-    runHandler(async () => {
+  app.post('/*', async c =>
+    await runHandler(async () => {
       const segs = new URL(c.req.url).pathname.replace(/\/+$/, '').split('/')
       const last = segs.pop() ?? ''
       if (last === '~register') return await handleRegister(c)

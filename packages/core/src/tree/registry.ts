@@ -72,15 +72,34 @@ export class NodeRegistryStore {
    * (含中间 directory)应远小于该上限——当前树规模小(节点数十级)可接受;规模变大后
    * 需改 KV metadata 承载值(list 不再逐 get)或换 SQLite 宿主。
    */
-  private async scanPrefix(keyPrefix: string, opts?: { limit?: number }): Promise<TreeNode[]> {
+  private async scanPrefix(
+    keyPrefix: string,
+    opts?: { limit?: number, maxNodes?: number, truncate?: boolean },
+  ): Promise<TreeNode[]> {
     const out: TreeNode[] = []
     let cursor: string | undefined
     do {
+      const limit = opts?.maxNodes === undefined
+        ? opts?.limit ?? LIST_LIMIT_MAX
+        : Math.min(
+            opts.limit ?? LIST_LIMIT_MAX,
+            opts.maxNodes - out.length + (opts.truncate === true ? 0 : 1),
+          )
+      if (limit < 1) return out
       const page = await this.store.list(keyPrefix, {
-        limit: opts?.limit ?? LIST_LIMIT_MAX,
+        limit,
         ...(cursor !== undefined ? { cursor } : {}),
       })
       for (const { value } of page.items) out.push(value as TreeNode)
+      if (opts?.truncate === true && out.length >= (opts.maxNodes ?? Number.POSITIVE_INFINITY)) {
+        return out
+      }
+      if (opts?.maxNodes !== undefined && out.length > opts.maxNodes) {
+        throw new TBError(
+          'rate_limited',
+          `registry scan 最多读取 ${opts.maxNodes} 个节点`,
+        )
+      }
       cursor = page.cursor
     } while (cursor)
     return out
@@ -104,6 +123,18 @@ export class NodeRegistryStore {
     const node = await this.read(norm)
     if (!node) throw new TBError('not_found', `节点不存在:'${norm}'`)
     return node
+  }
+
+  /** 批量取节点；路径先规范化去重，不存在的节点不进入返回 Map。 */
+  async getMany(paths: readonly TreePath[]): Promise<Map<TreePath, TreeNode>> {
+    const canonical = [...new Set(paths.map(path => normalizePath(path)))]
+    const values = await this.store.getMany(canonical.map(path => this.keyOf(path)))
+    const out = new Map<TreePath, TreeNode>()
+    for (const path of canonical) {
+      const value = values.get(this.keyOf(path))
+      if (value !== undefined) out.set(path, value as TreeNode)
+    }
+    return out
   }
 
   /**
@@ -137,13 +168,40 @@ export class NodeRegistryStore {
    * 供 `~tree` 建树一次读入内存(而非每层递归各扫一遍)。根('')= 全树。
    * 不存在的根返回空数组(调用方自行判 not_found)。
    */
-  async subtree(path: TreePath): Promise<TreeNode[]> {
+  async subtree(path: TreePath, opts?: { maxNodes?: number }): Promise<TreeNode[]> {
     const norm = normalizePath(path)
-    const descendants = await this.scanPrefix(this.subtreePrefix(norm))
+    if (
+      opts?.maxNodes !== undefined
+      && (!Number.isInteger(opts.maxNodes) || opts.maxNodes < 1)
+    ) {
+      throw new TBError('invalid_argument', 'maxNodes 必须是正整数')
+    }
+    const descendants = await this.scanPrefix(this.subtreePrefix(norm), opts)
     if (norm === '') return descendants.sort(byPath)
     const self = await this.read(norm)
     const all = self ? [self, ...descendants] : descendants
+    if (opts?.maxNodes !== undefined && all.length > opts.maxNodes) {
+      throw new TBError(
+        'rate_limited',
+        `registry scan 最多读取 ${opts.maxNodes} 个节点`,
+      )
+    }
     return all.sort(byPath)
+  }
+
+  /**
+   * 取按 key 确定排序的有界根快照，并显式报告是否截断。派生索引用 truncated
+   * 选择保留 last-known-good，不把 canonical registry 的规模限制反向施加到主数据面。
+   */
+  async rootSnapshot(maxNodes: number): Promise<{ items: TreeNode[], truncated: boolean }> {
+    if (!Number.isInteger(maxNodes) || maxNodes < 1) {
+      throw new TBError('invalid_argument', 'maxNodes 必须是正整数')
+    }
+    const items = await this.scanPrefix(KEY_NODE, { maxNodes: maxNodes + 1, truncate: true })
+    return {
+      items: items.slice(0, maxNodes).sort(byPath),
+      truncated: items.length > maxNodes,
+    }
   }
 
   /**

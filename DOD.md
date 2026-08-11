@@ -58,7 +58,7 @@ Phase 间不可跳:B 改 ToolSpec 派生形态,C 索引 ToolSpec 必须在 B 后
 - [ ] `~search` 协议保留段:进 protocol-contract 契约 + HTBP Draft 同步;`~describe` 声明 search 能力;`mode` 沿用 keyword|semantic(未声明 capability 的 mode 回 invalid_argument)。验证:`pnpm --filter @tool-bridge/gateway test` 中 `~search` 契约用例 + 未声明 capability 拒绝用例全绿。
 - [x] 第五个宿主注入点 SearchIndex:CF=D1,Node=better-sqlite3(同库不同表);FTS5 + trigram tokenizer。验证:core 接口单测 + gateway(miniflare 本地 D1)与 server(sqlite)双侧集成测试全绿。
 - [x] trigram 短查询 LIKE 兜底:任一 whitespace term 短于 3 个 Unicode code points 时全部 terms 走 escaped LIKE 子串扫描并按 AND 组合,中文两字词(如"日程")命中不返回空。验证:双侧集成测试中"日程"/"日历"命中断言 + trigram 3+ 字符命中断言全绿。
-- [ ] 索引内容与加权:索引 tool name/description + `~feedback` title/detail,加权 name>description>feedback;索引原始 ToolSpec,虚拟化/可见性/Authorizer.Check 放返回前后处理管道,over-fetch 填页,cursor 语义进契约。验证:集成测试断言加权顺序 + scope 裁剪 + cursor 分页边界。
+- [x] 索引内容与加权:索引 tool name/description + `~feedback` title/detail,加权 name>description>feedback;索引原始 ToolSpec,虚拟化/可见性/Authorizer.Check 放返回前后处理管道,over-fetch 填页,cursor 语义进契约。验证:集成测试断言加权顺序 + scope 裁剪 + cursor 分页边界。
 - [ ] 三入口对等:`tb search` + Dashboard 搜索面。验证:`pnpm --filter @tool-bridge/cli test` 中 `tb search` 用例 + gateway `ui.integration.test.ts` 搜索面用例全绿。
 - [ ] 全阶段回归 + 部署:`pnpm verify` 全绿;`pnpm deploy:all` + 生产 `~search` smoke(中文两字词 + 英文词各一次)。
 

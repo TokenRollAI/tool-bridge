@@ -6,6 +6,7 @@ import {
   type DeviceExpose,
   type DeviceNodeInput,
   identify,
+  type MutableSearchIndex,
   type NodeInput,
   NodeRegistryStore,
   normalizePath,
@@ -15,6 +16,9 @@ import {
   type TreePath,
   validatePath,
 } from '@tool-bridge/core'
+import { type SearchDirtyMarker, SearchSynchronizer } from './search/synchronizer'
+
+export { SearchSynchronizer } from './search/synchronizer'
 
 /**
  * 设备 hello 帧的验证与落库(宿主中立):deviceId 一致性 → identify 认证 →
@@ -154,6 +158,7 @@ export async function processDeviceHello(opts: {
   deviceIdHint: string
   hello: DeviceHello
   now?: string
+  search?: MutableSearchIndex
   store: StateStore
 }): Promise<HelloAcceptance> {
   const { store, hello } = opts
@@ -184,13 +189,29 @@ export async function processDeviceHello(opts: {
   }
 
   const now = opts.now ?? new Date().toISOString()
+  const searchSync = opts.search === undefined
+    ? undefined
+    : new SearchSynchronizer(store, opts.search)
+  await searchSync?.ensureSeeded()
+  const searchMarkers: SearchDirtyMarker[] = []
   for (const input of inputs) {
-    await registry.write(
-      input,
-      authCtx.keyId,
-      now,
-      input.path === mountPath ? { online: true } : {},
-    )
+    const marker = await searchSync?.markNode(input.path)
+    if (marker !== undefined) searchMarkers.push(marker)
+    try {
+      await registry.write(
+        input,
+        authCtx.keyId,
+        now,
+        input.path === mountPath ? { online: true } : {},
+      )
+    } catch (error) {
+      await searchSync?.abort(marker)
+      await searchSync?.rebuildAll(
+        searchMarkers.filter(candidate => candidate !== marker),
+      )
+      throw error
+    }
   }
+  await searchSync?.rebuildAll(searchMarkers)
   return { mountPath, keyId: authCtx.keyId }
 }

@@ -18,6 +18,8 @@
 export interface StateStore {
   delete(key: string): Promise<void>
   get(key: string): Promise<unknown | null>
+  /** 批量读取，返回值只包含当前存在的 key；单次最多 100 keys。 */
+  getMany(keys: readonly string[]): Promise<Map<string, unknown>>
   list(
     prefix: string,
     opts?: { cursor?: string, limit?: number },
@@ -48,6 +50,14 @@ export class MemoryStateStore implements StateStore {
 
   async get(key: string): Promise<unknown | null> {
     return this.m.has(key) ? (this.m.get(key) as unknown) : null
+  }
+
+  async getMany(keys: readonly string[]): Promise<Map<string, unknown>> {
+    const out = new Map<string, unknown>()
+    for (const key of keys) {
+      if (this.m.has(key)) out.set(key, this.m.get(key) as unknown)
+    }
+    return out
   }
 
   async put(key: string, value: unknown): Promise<void> {

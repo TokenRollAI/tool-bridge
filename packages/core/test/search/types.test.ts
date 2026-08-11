@@ -1,13 +1,21 @@
 import { describe, expect, it } from 'vitest'
 import {
   assertKeywordToolSearchMode,
+  decodeToolSearchCursor,
+  encodeToolSearchCursor,
   literalToolSearchQuery,
   prepareToolSearchQuery,
   serializeToolSearchHits,
   serializeToolSearchSnapshot,
   TBError,
-  TOOL_SEARCH_LIKE_TERM_LIMIT,
+  TOOL_SEARCH_AUDIT_NODE_LIMIT,
+  TOOL_SEARCH_NODE_JSON_BYTES_MAX,
+  TOOL_SEARCH_QUERY_MAX,
+  TOOL_SEARCH_REBUILD_CHUNKS_MAX,
+  TOOL_SEARCH_ROW_BYTES_MAX,
+  TOOL_SEARCH_TERM_LIMIT,
   type ToolSearchOptions,
+  toolSearchSnapshotDigest,
 } from '../../src'
 
 describe('SearchIndex mutation contract', () => {
@@ -58,6 +66,51 @@ describe('SearchIndex mutation contract', () => {
     expect(() => serializeToolSearchSnapshot('providers/calendar', [
       { name: 'find', inputSchema: { invalid: 1n } },
     ])).toThrowError(TBError)
+    expect(() => serializeToolSearchSnapshot('providers/calendar', [
+      { name: 'huge', description: 'x'.repeat(TOOL_SEARCH_ROW_BYTES_MAX) },
+    ])).toThrowError(TBError)
+    expect(() => serializeToolSearchSnapshot('providers/calendar', [
+      { name: 'escaped', description: '\u0001'.repeat(150_000) },
+    ])).toThrowError(TBError)
+    expect(() => serializeToolSearchSnapshot('providers/calendar', [
+      { name: 'array-boundary', description: `${'\u0001'.repeat(149_992)}xx` },
+    ])).toThrowError(TBError)
+    expect(() => serializeToolSearchSnapshot('providers/calendar', [{
+      name: 'node-capacity',
+      description: 'x'.repeat(TOOL_SEARCH_NODE_JSON_BYTES_MAX),
+    }])).toThrowError(TBError)
+    expect(TOOL_SEARCH_REBUILD_CHUNKS_MAX).toBeLessThanOrEqual(20)
+  })
+
+  it('does not impose an artificial tool-count limit below the JSON budget', () => {
+    const tools = Array.from({ length: 125 }, (_, index) => ({ name: `tool_${index}` }))
+    expect(serializeToolSearchSnapshot('providers/calendar', tools)).toHaveLength(125)
+    expect(serializeToolSearchHits(tools.map(tool => ({
+      path: 'providers/calendar',
+      tool,
+    })))).toHaveLength(125)
+    expect(() => serializeToolSearchHits(Array.from(
+      { length: TOOL_SEARCH_AUDIT_NODE_LIMIT + 1 },
+      (_, index) => ({ path: `providers/${index}`, tool: { name: 'probe' } }),
+    ))).toThrowError(TBError)
+  })
+
+  it('keeps snapshot digest stable across order but changes with searchable material', () => {
+    const a = serializeToolSearchSnapshot('providers/calendar', [
+      { name: 'a', description: 'one' },
+      { name: 'b', description: 'two' },
+    ])
+    const reordered = serializeToolSearchSnapshot('providers/calendar', [
+      { name: 'b', description: 'two' },
+      { name: 'a', description: 'one' },
+    ])
+    const changed = serializeToolSearchSnapshot(
+      'providers/calendar',
+      [{ name: 'a', description: 'one' }, { name: 'b', description: 'two' }],
+      'feedback',
+    )
+    expect(toolSearchSnapshotDigest(a)).toBe(toolSearchSnapshotDigest(reordered))
+    expect(toolSearchSnapshotDigest(changed)).not.toBe(toolSearchSnapshotDigest(a))
   })
 
   it('quotes every keyword term as literal FTS input', () => {
@@ -67,6 +120,8 @@ describe('SearchIndex mutation contract', () => {
     )
     expect(() => literalToolSearchQuery('   ')).toThrowError(TBError)
     expect(() => literalToolSearchQuery('calendar\0private')).toThrowError(TBError)
+    expect(() => literalToolSearchQuery('x'.repeat(TOOL_SEARCH_QUERY_MAX + 1)))
+      .toThrowError(TBError)
   })
 
   it('uses Unicode code points and escapes literal LIKE metacharacters for short queries', () => {
@@ -96,14 +151,34 @@ describe('SearchIndex mutation contract', () => {
       patterns: ['%a%', '%b%'],
     })
     expect(prepareToolSearchQuery('AI calendar')).toEqual({
-      kind: 'like',
-      patterns: ['%AI%', '%calendar%'],
+      kind: 'hybrid',
+      expression: '"calendar"',
+      patterns: ['%AI%'],
     })
     const tooManyShortTerms = Array.from(
-      { length: TOOL_SEARCH_LIKE_TERM_LIMIT + 1 },
+      { length: TOOL_SEARCH_TERM_LIMIT + 1 },
       () => 'a',
     ).join(' ')
     expect(() => prepareToolSearchQuery(tooManyShortTerms)).toThrowError(TBError)
+  })
+
+  it('encrypts cursors and binds them to query, mode, revision and bounded offset', async () => {
+    const secret = '01'.repeat(32)
+    const cursor = await encodeToolSearchCursor(' calendar ', 'keyword', 7, 42, secret)
+    await expect(decodeToolSearchCursor(cursor, 'calendar', 'keyword', 7, secret)).resolves.toBe(42)
+    await expect(decodeToolSearchCursor(cursor, 'weather', 'keyword', 7, secret))
+      .rejects.toBeInstanceOf(TBError)
+    await expect(decodeToolSearchCursor(cursor, 'calendar', 'keyword', 8, secret))
+      .rejects.toBeInstanceOf(TBError)
+    const bytes = [...cursor]
+    bytes[Math.floor(bytes.length / 2)] = bytes[Math.floor(bytes.length / 2)] === 'A' ? 'B' : 'A'
+    await expect(decodeToolSearchCursor(bytes.join(''), 'calendar', 'keyword', 7, secret))
+      .rejects.toBeInstanceOf(TBError)
+
+    const cjkQuery = '日'.repeat(TOOL_SEARCH_QUERY_MAX)
+    const cjkCursor = await encodeToolSearchCursor(cjkQuery, 'keyword', 7, 42, secret)
+    await expect(decodeToolSearchCursor(cjkCursor, cjkQuery, 'keyword', 7, secret))
+      .resolves.toBe(42)
   })
 
   it('keeps the adapter mode contract narrow and fails closed at runtime', () => {

@@ -43,13 +43,14 @@
 
 ## 1b. root 全局工具搜索
 
-- 请求固定为 `POST /~search` + JSON `{query,opts?:{mode?:'keyword'|'semantic'}}`;body 只接受 `query`/`opts`,opts 只接受 `mode`,query 须为非空字符串并在传给索引前 trim。当前**不接受** cursor/limit/filter 或其它选项,多余字段与未知 mode 均返回 400 `invalid_argument`。
+- 请求固定为 `POST /~search` + JSON `{query,opts?:{mode?:'keyword'|'semantic',limit?:number,cursor?:string}}`;body 只接受 `query`/`opts`,opts 只接受 `mode`/`limit`/`cursor`,query 须为非空字符串并在传给索引前 trim。`limit` 与其它 List/Page 契约一致:缺省或 `<1` 为 50,整数上限钳到 200;非整数、非字符串 cursor、多余字段与未知 mode 均返回 400 `invalid_argument`。当前不接受 filter。
 - `mode` 缺省为 `keyword`。宿主注入的 `SearchIndex.capabilities` 必须先声明基础 `search`;未注入或未声明时 `/~search` 与根 `/~describe` 都是 404。`semantic` 另须声明 `search:semantic`,否则 400;声明限定 capability 不能替代基础 `search`。
-- 返回 JSON `Page<{path,tool}>`,当前形状只有 `{items:[...]}`、不暴露 cursor。底层候选硬上限为 40;权限、节点与虚拟化后处理后可少于 40,当前不 over-fetch。即使底层 SearchIndex 返回 cursor,网关也会丢弃,直到分页契约正式定义。
-- SearchIndex 只返回候选,最终披露由网关后处理:每条 hit 必须同时通过节点路径 `read` + `call`,registry 中存在同路径节点且 kind/config 匹配 `mcp`/`http`/`tool`,然后应用该节点的 virtualize prefix/rename/hide/description。隐藏或无权候选静默剔除。
+- 返回 JSON `Page<{path,tool}>` = `{items,cursor?}`。adapter 每批最多取 100 个轻量候选;网关在单请求最多扫描 400 个 raw candidates,批量回读 registry 后逐条做节点路径 `read` + `call`、kind/config=`mcp|http|tool` 与 virtualize hide 判定,再 hydrate 完整 raw `ToolSpec` 并应用 prefix/rename/description。单页 hydrate 的 raw ToolSpec 总量上限 4 MiB,因此结果可少于 limit 并以 cursor 续取。
+- cursor 是宿主 secret 下的 AES-GCM opaque token,绑定 trim 后 query、mode、索引 revision 与 raw offset;篡改、换 query/mode、索引发生 material change 或 offset 越界均返回 400。cursor 在权限/virtualize 后的实际消费边界生成;若本页 raw 命中全部不可见而返回空 items,必须省略 cursor,不泄露隐藏结果仍存在。
 - 当前只支持**本地** `mcp`/`http`/`tool` 节点候选;`tool` 包括能提供 raw ToolSpec 的 plugin/进程内/device 自定义 tool。remote、device shell、builtin、context、skillhub、directory 均不进入结果。
-- core 将只读 `SearchIndex` 与写面 `MutableSearchIndex` 分开;`ToolSearchOptions` 当前只有 `mode`,写面通过完整 snapshot 的 `replace(path,tools)`、`remove(path)`、`rebuild(hits)` 更新。注册表/工具变化尚不会自动调用这些写方法。
-- 已内置 keyword adapter:Workers 使用可选 `TB_SEARCH` D1 binding,Node 使用同一 `state.sqlite3` 的独立连接与独立表;两者均复用共享 snapshot/查询 contract。query trim 后按 whitespace 切 term,并按 Unicode code point 计数:全 term 均不少于 3 时走 FTS5 trigram literal phrase;任一 term 少于 3 时全部 term 改走参数化 LIKE,每个 term 在 name/description 间 OR、terms 间 AND,以 `!` 为 `ESCAPE` 并转义 `!`/`%`/`_`,避免 FTS 静默丢短词。LIKE 分支最多 32 terms/65 bind,两分支候选上限均为 40。semantic、feedback/weights、自动同步与 pagination/filter 均留后续;真实 D1 provision/deploy 仍 PENDING,不可据本地接线宣称生产搜索可用。
+- core 将只读 `SearchIndex` 与 `MutableSearchIndex` 写面分开;后者用完整节点 snapshot 的 `replace`/`remove`、subtree `removePrefix` 与全量 `rebuild`。StateStore/registry/provider cache 是 canonical,SearchIndex 是可重建派生状态:registry write/update/delete、动态 MCP/tool fresh list、device hello/reclaim 与 node-level feedback submit/vote/delete 都触发热同步;每次搜索前仍执行有界 canonical audit,同 digest 不 bump revision。
+- 只有 owning node 的非隐藏 feedback top 5 进入搜索,投影 title+detail,合并文本经控制字符清理并限制为 256 UTF-8 bytes;工具子路径 feedback 不进入 owning node。keyword 排序权重固定为 name/description/feedback = 10/3/1;索引保存完整、未虚拟化的 raw `ToolSpec`,仅在披露前由网关虚拟化。
+- 已内置 keyword adapter:Workers 使用可选 `TB_SEARCH` D1 binding,Node 使用同一 `state.sqlite3` 的独立连接与独立表;两者均使用 v2 source/FTS/meta/snapshot schema 与共享 contract。query trim 后按 whitespace 切 term并按 Unicode code point 计数:长词(≥3)走 trigram FTS literal phrase,短词(<3)走参数化 escaped LIKE;混合查询对两侧 AND,最多 32 terms。当前仅实现 keyword;semantic、filter 及 Phase 4 item 6 的 CLI/Dashboard 消费面留后续。真实 D1 provision/deploy 与 HTBP Draft 仍 PENDING,不可据本地接线宣称生产搜索可用。
 
 ## 1c. skillhub kind 数据面(与 context 同构的内容型 kind)
 

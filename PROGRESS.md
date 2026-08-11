@@ -38,8 +38,8 @@
 - 当前 Phase:**Phase 4 — C:Search 0+1**(Round 19 起;Phase 3 可做项已清空,部署半边见 P3-1)
 - Phase 3 已勾选:项 1(官方 MCP 测试 client + 本地 initialize,Round 14)、项 2(认证后的动态 tools/list + tools/call,Round 15)、项 3(scope 收窄钉死,Round 16)、项 4(三入口对等审计,Round 17)
 - Phase 3 待办:**仅剩待授权的外向动作** — 项 5 已完成生产脚本与全量回归,真实部署/生产 MCP smoke → P3-1
-- Phase 4 已勾选:项 3(CF D1 + Node SQLite SearchIndex,FTS5/trigram,Round 21)、项 4(trigram 短词 escaped LIKE 兜底,Round 22)
-- Phase 4 代码进度:项 1 的 binding/provision/test/dry-run 半边已完成(Round 19),真实 provision/deploy → P4-1;项 2 的本地协议/契约/llmdoc 半边已完成(Round 20),外部 HTBP Draft → P4-2;下一项 = 索引内容与加权、自动同步及 cursor 分页
+- Phase 4 已勾选:项 3(CF D1 + Node SQLite SearchIndex,FTS5/trigram,Round 21)、项 4(trigram 短词 escaped LIKE 兜底,Round 22)、项 5(加权索引、自动同步、权限后处理分页与 opaque cursor,Round 23)
+- Phase 4 代码进度:项 1 的 binding/provision/test/dry-run 半边已完成(Round 19),真实 provision/deploy → P4-1;项 2 的本地协议/契约/llmdoc 半边已完成(Round 20),外部 HTBP Draft → P4-2;下一项 = 三入口对等(`tb search` + Dashboard 搜索面)
 - Phase 2 已勾选:项 1(OperationRegistry)、项 2(Plugin v2 多 export,Round 13 补齐三入口对等后成立)、项 3(Context 按 handler 推导能力)、项 4(`@tool-bridge/plugin-sdk` 可发布)、项 5(样例 plugin 双 export)、项 6(删净 legacy 面)
 - Phase 2 待办(**全部为待授权的外向动作**):项 7 飞书重写复验(代码已完成,只差生产实调 → P2-1)/ 项 8 部署上线
 - Phase 1(代码完成,部署挂起见 PENDING)
@@ -413,3 +413,18 @@
   - `pnpm verify` → 9 workspace typecheck + 全仓 lint + provision **1 passed** + 包测试 **1225 passed / 7 skipped**(core 735 + plugin-sdk 22 + cli 239 + sdk 19 + plugin-feishu 9 + gateway 167 + server 34),合计 **1226 passed / 7 skipped**,退出码 0。
 - 勾选:Phase 4 DoD 项 4(trigram 短词 escaped LIKE 兜底,D1/SQLite 双侧中文两字 + 三字 trigram 集成全绿)。
 - 遗留:下一轮 = Phase 4 项 5:索引 tool name/description + `~feedback` title/detail,建立 name>description>feedback 权重、registry/tool mutation 自动同步、权限后处理 over-fetch 与 cursor 契约。P4-1/P4-2 外向动作继续挂起且不阻塞本地代码。
+
+## Round 23 — 2026-08-11
+- 目标:Phase 4 DoD 项 5 — 完成原始 ToolSpec + feedback 加权索引、canonical 状态自动同步、权限后处理 over-fetch 与可恢复 cursor 分页。
+- 动作:
+  - core 把搜索读面拆为轻量 candidate 与按 id hydrate,新增持久 revision/cursor secret、snapshot digest 与批量 StateStore/registry 读取;公开分页口径为 default 50/max 200,单页 4 MiB,raw 扫描每批 100、单请求最多 400。cursor 用 AES-GCM 绑定 query digest/mode/revision/offset,篡改、跨查询及索引变更后的旧 cursor 均 fail closed。
+  - D1/SQLite 升级为 v2 source + external-content FTS,统一 `bm25(name=10,description=3,feedback=1)`;只聚合 owning node 上现有非隐藏 top5 feedback 的 title/detail,不索引 tool 子路径反馈,原始 ToolSpec 到返回前才做 read+call、kind/config、virtualize 与最终 hydrate。不可见空页不返回 continuation,避免用 cursor 存在性探测隐藏候选规模。
+  - 新增 SearchSynchronizer,覆盖 registry write/update/delete、动态 tool cache fresh list、device hello/reclaim、plugin mutation 与 feedback submit/vote/remove;每次 search 先做 501 节点有界 canonical audit。派生索引预算固定为最多 500 paths、每节点 20 KiB,不反向限制 canonical registry/provider:已 seed 后 overflow 保留 last-known-good,回落后自动全量恢复;未 seed overflow 明确 rate_limited。
+  - Workers 侧用固定 node/subtree dirty keys、防重复 marker 放大,并在读取 marker 前先做 root capacity probe;D1 snapshot membership trigger 在并发 replace 下保证正式索引不超过 500 且失败事务无 source/FTS 残留。schema 12 statements 后冷路径最坏预算 48/50 queries,全量 rebuild JSON1 chunks 12/20。Node SQLite 保持同 contract、事务和重启持久。
+  - 严格 investigator 多轮负例复核推动闭环:短/长词混合的 D1 LIKE 50-byte 限制、feedback 权限 oracle、跨 KV marker 乱序、legacy seed/no-op digest、cursor 自拒绝/offset 资源放大、D1 row/query/chunk 上限、overflow 热写穿透 LKG、并发索引容量和可选 Search 反向限制 canonical 等问题均已修复。最终顺序 501 与 D1 `499+2` 并发探针通过,无剩余阻断。
+  - llmdoc-update 新增 `2026-08-11-search-derived-state-lkg.md`,并同步 current-state、protocol contract、模块边界、代码地图与索引;明确 SearchIndex 是有界可重建派生视图而非授权源或 canonical 容量门。
+- 验证:
+  - 定向 core 40、gateway 25、server 8 tests 与三包 typecheck、目标 lint、`git diff --check` 全绿;额外 D1 并发 trigger rollback 与 501→500 LKG 恢复探针通过。
+  - `pnpm verify` → 9 workspace typecheck + 全仓 lint + provision **1 passed** + 包测试 **1255 passed / 7 skipped**(core 744 + plugin-sdk 22 + cli 239 + sdk 19 + plugin-feishu 9 + gateway 185 + server 37),合计 **1256 passed / 7 skipped**,退出码 0。
+- 勾选:Phase 4 DoD 项 5(加权索引、自动同步、权限裁剪 over-fetch 与 opaque cursor 分页)。
+- 遗留:下一轮 = Phase 4 项 6:补 `tb search` 与 Dashboard 搜索面,用 CLI command tests + gateway `ui.integration.test.ts` 钉三入口对等。P4-1/P4-2 外向动作继续挂起且不阻塞本地代码。

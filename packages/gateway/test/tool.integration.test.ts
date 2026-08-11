@@ -2,6 +2,7 @@ import { MemoryStateStore, parseHelpDsl, SecretStoreImpl, type StateStore } from
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { env, SELF } from 'cloudflare:test'
 import { createMcpProvider } from '../src/providers/mcp'
+import { KvStateStore } from '../src/kvStateStore'
 import { TEST_ADMIN_SK } from './fixtures'
 
 // Tool Layer 集成测试:mcp/http Provider、工具虚拟化、调用点 call 判定、
@@ -216,6 +217,41 @@ async function mountMcp(path: string): Promise<void> {
   )
   expect(res.status).toBe(200)
 }
+
+describe('tool cache → SearchIndex 自动同步', () => {
+  it('MCP 注册成功即 materialize tools/list，无需先访问 ~help 即可根搜索', async () => {
+    const upstream = mcpUpstreamMock([
+      { name: 'cache_search_probe', description: 'uniquecacheprobe tool' },
+    ])
+    vi.stubGlobal('fetch', upstream.fetchMock)
+    await mountMcp('ext/search-cache-sync')
+
+    const response = await SELF.fetch('https://tb.test/~search', {
+      method: 'POST',
+      headers: {
+        'authorization': `Bearer ${TEST_ADMIN_SK}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({ query: 'uniquecacheprobe' }),
+    })
+    expect(response.status).toBe(200)
+    await expect(response.json()).resolves.toMatchObject({
+      items: [{
+        path: 'ext/search-cache-sync',
+        tool: {
+          name: 'cache_search_probe',
+          description: 'uniquecacheprobe tool',
+          inputSchema: { type: 'object' },
+        },
+      }],
+    })
+    const dirty = await new KvStateStore((env as { TB_KV: KVNamespace }).TB_KV)
+      .list('searchdirty:')
+    expect(dirty.items.filter(item => (
+      (item.value as { path?: unknown }).path === 'ext/search-cache-sync'
+    ))).toEqual([])
+  })
+})
 
 describe('直连工具调用(POST /<node>/<tool>,body 即 arguments)', () => {
   it('mcp 节点:直连调用命中工具,body 扁平传参;空 body 视为无参', async () => {
@@ -701,6 +737,7 @@ describe('mcp 会话复用:过期会话空列表防御(默认离线,上游为 fe
     const backing = new MemoryStateStore()
     const staleStore: StateStore = {
       get: key => backing.get(key),
+      getMany: keys => backing.getMany(keys),
       put: (key, value) => backing.put(key, value),
       delete: async () => {},
       list: (prefix, opts) => backing.list(prefix, opts),

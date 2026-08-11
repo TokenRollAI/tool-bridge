@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { isPrefixOf, normalizePath, parentPaths, segments, validatePath } from '../../src/tree/path'
+import {
+  isPrefixOf,
+  normalizePath,
+  parentPaths,
+  segments,
+  validatePath,
+} from '../../src/tree/path'
 import { RESERVED_SEGMENTS } from '../../src/types'
 
 describe('normalizePath', () => {

@@ -20,6 +20,7 @@ import { TBError } from '../errors'
 declare const crypto: {
   getRandomValues<T extends Uint8Array>(array: T): T
 }
+declare const TextEncoder: { new (): { encode(input: string): Uint8Array } }
 
 /** 一条反馈。up/down 是投票人集合(每身份一票、可改票的真源);净分为派生值不落库。 */
 export interface FeedbackEntry {
@@ -59,6 +60,8 @@ export const FEEDBACK_HIDE_SCORE = -3
 export const FEEDBACK_HELP_LIMIT = 5
 /** 每 (path, owner) 活跃条数上限(防刷)。 */
 export const FEEDBACK_PER_OWNER_MAX = 10
+/** Search 投影的 UTF-8 上限；限制每工具重复 feedback 列的全树 D1 载荷。 */
+export const FEEDBACK_SEARCH_TEXT_BYTES_MAX = 256
 
 export type FeedbackVote = 'up' | 'down' | 'clear'
 
@@ -75,16 +78,58 @@ export function scoreOf(entry: Pick<FeedbackEntry, 'up' | 'down'>): number {
 }
 
 /** score 降序,at 降序 tie-break(新的在前)。返回新数组。 */
-export function sortFeedback(entries: FeedbackEntry[]): FeedbackEntry[] {
+export function sortFeedback(entries: readonly FeedbackEntry[]): FeedbackEntry[] {
   return [...entries].sort((a, b) => scoreOf(b) - scoreOf(a) || b.at.localeCompare(a.at))
 }
 
 /** ~help 默认区块选条:排序 → 过滤隐藏阈值 → 截前 N。 */
-export function selectHelpItems(entries: FeedbackEntry[]): FeedbackHelpItem[] {
+export function selectHelpItems(entries: readonly FeedbackEntry[]): FeedbackHelpItem[] {
   return sortFeedback(entries)
     .filter(e => scoreOf(e) > FEEDBACK_HIDE_SCORE)
     .slice(0, FEEDBACK_HELP_LIMIT)
     .map(e => ({ id: e.id, title: e.title, score: scoreOf(e) }))
+}
+
+/** Search 只物化与 ~help 相同的可见 top 5，并同时包含 title/detail。 */
+export function selectFeedbackSearchText(entries: readonly FeedbackEntry[]): string {
+  const raw = sortFeedback(entries)
+    .filter(e => scoreOf(e) > FEEDBACK_HIDE_SCORE)
+    .slice(0, FEEDBACK_HELP_LIMIT)
+    .map(e => e.detail === '' ? e.title : `${e.title}\n${e.detail}`)
+    .join('\n')
+  const text = [...raw].map((char) => {
+    const code = char.codePointAt(0) ?? 0
+    return (code <= 0x1f && char !== '\n' && char !== '\t') || code === 0x7f ? ' ' : char
+  }).join('')
+  const encoder = new TextEncoder()
+  if (encoder.encode(text).length <= FEEDBACK_SEARCH_TEXT_BYTES_MAX) return text
+  let truncated = ''
+  for (const char of text) {
+    if (encoder.encode(truncated + char).length > FEEDBACK_SEARCH_TEXT_BYTES_MAX) break
+    truncated += char
+  }
+  return truncated.trimEnd()
+}
+
+/** 从 StateStore 脏值中提取可用条目；供 bulk seed 与 FeedbackStore 共用。 */
+export function parseFeedbackEntries(raw: unknown): FeedbackEntry[] {
+  if (!Array.isArray(raw)) return []
+  const out: FeedbackEntry[] = []
+  for (const item of raw) {
+    if (item === null || typeof item !== 'object') continue
+    const e = item as FeedbackEntry
+    if (typeof e.id !== 'string' || typeof e.title !== 'string') continue
+    out.push({
+      id: e.id,
+      title: e.title,
+      detail: typeof e.detail === 'string' ? e.detail : '',
+      by: typeof e.by === 'string' ? e.by : '',
+      at: typeof e.at === 'string' ? e.at : '',
+      up: Array.isArray(e.up) ? e.up.filter((v): v is string => typeof v === 'string') : [],
+      down: Array.isArray(e.down) ? e.down.filter((v): v is string => typeof v === 'string') : [],
+    })
+  }
+  return out
 }
 
 function toView(entry: FeedbackEntry): FeedbackView {
@@ -122,7 +167,13 @@ function requireShort(value: string, field: string, max: number): string {
 }
 
 export class FeedbackStore {
-  constructor(private readonly store: StateStore) {}
+  constructor(
+    private readonly store: StateStore,
+    private readonly onMutation?: (
+      path: TreePath,
+      entries: readonly FeedbackEntry[],
+    ) => Promise<void>,
+  ) {}
 
   private keyOf(path: TreePath): string {
     return KEY_FEEDBACK + path
@@ -132,23 +183,7 @@ export class FeedbackStore {
   async listFor(path: TreePath): Promise<FeedbackEntry[]> {
     const norm = normalizeFeedbackPath(path)
     const raw = await this.store.get(this.keyOf(norm))
-    if (!Array.isArray(raw)) return []
-    const out: FeedbackEntry[] = []
-    for (const item of raw) {
-      if (item === null || typeof item !== 'object') continue
-      const e = item as FeedbackEntry
-      if (typeof e.id !== 'string' || typeof e.title !== 'string') continue
-      out.push({
-        id: e.id,
-        title: e.title,
-        detail: typeof e.detail === 'string' ? e.detail : '',
-        by: typeof e.by === 'string' ? e.by : '',
-        at: typeof e.at === 'string' ? e.at : '',
-        up: Array.isArray(e.up) ? e.up.filter((v): v is string => typeof v === 'string') : [],
-        down: Array.isArray(e.down) ? e.down.filter((v): v is string => typeof v === 'string') : [],
-      })
-    }
-    return out
+    return parseFeedbackEntries(raw)
   }
 
   /** list 视图:全部条目(含隐藏阈值以下)按 score/at 排序,不含 detail。 */
@@ -159,6 +194,11 @@ export class FeedbackStore {
   /** ~help 默认区块选条(网关注入用;1 次 get)。 */
   async helpItems(path: TreePath): Promise<FeedbackHelpItem[]> {
     return selectHelpItems(await this.listFor(path))
+  }
+
+  /** owning node 的搜索反馈投影。 */
+  async searchText(path: TreePath): Promise<string> {
+    return selectFeedbackSearchText(await this.listFor(path))
   }
 
   /** 取单条完整条目(含 detail);不存在 → not_found。 */
@@ -196,6 +236,7 @@ export class FeedbackStore {
     const entry: FeedbackEntry = { id, title, detail, by, at: now, up: [], down: [] }
     entries.push(entry)
     await this.store.put(this.keyOf(norm), entries)
+    await this.onMutation?.(norm, entries)
     return entry
   }
 
@@ -215,6 +256,7 @@ export class FeedbackStore {
     if (value === 'up') entry.up.push(voter)
     if (value === 'down') entry.down.push(voter)
     await this.store.put(this.keyOf(norm), entries)
+    await this.onMutation?.(norm, entries)
     return toView(entry)
   }
 
@@ -231,5 +273,6 @@ export class FeedbackStore {
     } else {
       await this.store.put(this.keyOf(norm), next)
     }
+    await this.onMutation?.(norm, next)
   }
 }

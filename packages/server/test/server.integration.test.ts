@@ -186,6 +186,7 @@ describe('Node 宿主 HTTP 面', () => {
       name: 'lookup_calendar',
       description: 'Look up calendar appointments and 查询日程日历',
       inputSchema: { type: 'object', properties: { day: { type: 'string' } } },
+      effect: 'read',
     }
     const register = await postJson(
       first.baseUrl,
@@ -199,15 +200,19 @@ describe('Node 宿主 HTTP 面', () => {
           config: {
             kind: 'http',
             endpoint: 'https://calendar.example.test',
-            tools: [],
+            tools: [{
+              name: tool.name,
+              description: tool.description,
+              inputSchema: tool.inputSchema,
+              method: 'GET',
+              pathTemplate: '/calendar',
+            }],
           },
         },
       },
       admin(),
     )
     expect(register.status).toBe(200)
-    await first.server.search.rebuild([{ path, tool }])
-
     const describe = await fetch(`${first.baseUrl}/~describe`, admin())
     expect(describe.status).toBe(200)
     await expect(describe.json()).resolves.toEqual({

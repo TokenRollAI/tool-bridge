@@ -56,6 +56,20 @@ export class SqliteStateStore implements StateStore {
     return row === undefined ? null : JSON.parse(row.value)
   }
 
+  async getMany(keys: readonly string[]): Promise<Map<string, unknown>> {
+    const out = new Map<string, unknown>()
+    for (let offset = 0; offset < keys.length; offset += 100) {
+      const chunk = [...new Set(keys.slice(offset, offset + 100))]
+      if (chunk.length === 0) continue
+      const placeholders = chunk.map(() => '?').join(', ')
+      const rows = this.db.prepare(
+        `SELECT key, value FROM kv WHERE key IN (${placeholders})`,
+      ).all(...chunk) as Array<{ key: string, value: string }>
+      for (const row of rows) out.set(row.key, JSON.parse(row.value) as unknown)
+    }
+    return out
+  }
+
   async put(key: string, value: unknown): Promise<void> {
     this.stmtPut.run(key, JSON.stringify(value))
   }

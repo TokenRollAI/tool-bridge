@@ -196,9 +196,9 @@ export function createRegistryModule(
           return store.get(path)
         }
         case 'write':
-          return store.write(parseNodeInput(args), ctx.keyId, now())
+          return await store.write(parseNodeInput(args), ctx.keyId, now())
         case 'update':
-          return store.update(
+          return await store.update(
             requireString(args, 'path'),
             requireObject(args, 'patch') as Partial<NodeInput>,
             now(),

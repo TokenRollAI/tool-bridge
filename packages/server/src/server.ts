@@ -45,7 +45,11 @@ export function createTbServer(config: ServerConfig): TbServer {
   }
   const secrets = new SecretStoreImpl(state, config.encryptionKey)
   const objects = createDataObjectStore(config.dataDir)
-  const hub = new DeviceHub({ store: state, reclaimSec: config.deviceReclaimSec })
+  const hub = new DeviceHub({
+    store: state,
+    search,
+    reclaimSec: config.deviceReclaimSec,
+  })
 
   const deps: TbAppDeps = {
     state,

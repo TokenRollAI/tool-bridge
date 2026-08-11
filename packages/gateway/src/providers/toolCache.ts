@@ -19,7 +19,7 @@ interface CachedTools {
   tools: ToolSpec[]
 }
 
-function keyOf(path: string): string {
+export function toolCacheKey(path: string): string {
   return `${KEY_PREFIX}${path}`
 }
 
@@ -46,7 +46,16 @@ function isFresh(fetchedAt: string, ttl: number, now: string): boolean {
 
 /** 删除某节点的工具缓存(注册变更时调用)。 */
 export async function invalidateToolCache(store: StateStore, path: string): Promise<void> {
-  await store.delete(keyOf(path))
+  await store.delete(toolCacheKey(path))
+}
+
+/** bulk seed/reconcile 复用的缓存形状解析；返回 raw ToolSpec 快照。 */
+export function cachedTools(value: unknown): ToolSpec[] | null {
+  return isCached(value) ? value.tools : null
+}
+
+export async function peekToolCache(store: StateStore, path: string): Promise<ToolSpec[] | null> {
+  return cachedTools(await store.get(toolCacheKey(path)))
 }
 
 /**
@@ -57,16 +66,30 @@ export async function getTools(
   store: StateStore,
   path: string,
   fetchList: () => Promise<ToolSpec[]>,
-  opts: { now: string, refresh: boolean, ttl: number },
+  opts: {
+    beforeFresh?: () => Promise<void>
+    now: string
+    onFresh?: (tools: readonly ToolSpec[]) => Promise<void>
+    onFreshError?: () => Promise<void>
+    refresh: boolean
+    ttl: number
+  },
 ): Promise<ToolSpec[]> {
   if (!opts.refresh) {
-    const raw = await store.get(keyOf(path))
+    const raw = await store.get(toolCacheKey(path))
     if (isCached(raw) && isFresh(raw.fetchedAt, opts.ttl, opts.now)) {
       return raw.tools
     }
   }
-  const tools = await fetchList()
-  const record: CachedTools = { tools, fetchedAt: opts.now }
-  await store.put(keyOf(path), record)
-  return tools
+  await opts.beforeFresh?.()
+  try {
+    const tools = await fetchList()
+    const record: CachedTools = { tools, fetchedAt: opts.now }
+    await store.put(toolCacheKey(path), record)
+    await opts.onFresh?.(tools)
+    return tools
+  } catch (error) {
+    await opts.onFreshError?.()
+    throw error
+  }
 }

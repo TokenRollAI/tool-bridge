@@ -16,6 +16,17 @@ const adminHeaders = {
   'content-type': 'application/json',
 }
 
+function emptySearchIndex(
+  capabilities: SearchIndex['capabilities'] = ['search'],
+): SearchIndex & { search: ReturnType<typeof vi.fn> } {
+  return {
+    capabilities,
+    cursorFor: async (_query, candidate) => `c${candidate.resumeOffset}`,
+    hydrate: async candidates => ({ consumed: candidates.length, hits: [] }),
+    search: vi.fn(async () => ({ items: [] })),
+  }
+}
+
 async function appWith(search?: SearchIndex): Promise<{
   app: ReturnType<typeof createTbApp>
   state: MemoryStateStore
@@ -54,7 +65,41 @@ async function postSearch(
   )
 }
 
+async function postRegistry(
+  app: ReturnType<typeof createTbApp>,
+  args: Record<string, unknown>,
+): Promise<Response> {
+  return await app.request(new Request('https://tb.test/system/registry', {
+    method: 'POST',
+    headers: adminHeaders,
+    body: new Blob([JSON.stringify({ tool: 'write', arguments: args })], {
+      type: 'application/json',
+    }),
+  }))
+}
+
 describe('global ~search protocol', () => {
+  it('does not impose search-only capacity limits when no index is injected', async () => {
+    const { app, state } = await appWith()
+    const path = `${Array.from({ length: 40 }, () => 'deep').join('/')}/provider`
+    const response = await postRegistry(app, {
+      path,
+      kind: 'http',
+      description: 'Canonical capacity remains independent from optional search',
+      config: {
+        kind: 'http',
+        endpoint: 'https://capacity.example.test',
+        tools: Array.from({ length: 21 }, (_, index) => ({
+          name: `tool_${index}`,
+          method: 'GET',
+          pathTemplate: `/tool/${index}`,
+        })),
+      },
+    })
+    expect(response.status).toBe(200)
+    expect(await state.get(`node:${path}`)).not.toBeNull()
+  })
+
   it('keeps root describe and search absent without a declared implementation', async () => {
     const { app } = await appWith()
 
@@ -66,34 +111,55 @@ describe('global ~search protocol', () => {
   })
 
   it('authenticates before dispatching to the injected index', async () => {
-    const search = vi.fn(async () => ({ items: [] }))
-    const { app } = await appWith({ capabilities: ['search'], search })
+    const index = emptySearchIndex()
+    const { app } = await appWith(index)
 
     const response = await postSearch(app, { query: 'weather' }, null)
 
     expect(response.status).toBe(401)
-    expect(search).not.toHaveBeenCalled()
+    expect(index.search).not.toHaveBeenCalled()
   })
 
   it('describes keyword search and returns the root-only page contract', async () => {
+    const tools = new Map([
+      ['visible', {
+        name: 'forecast',
+        description: 'Get a weather forecast',
+        inputSchema: { type: 'object' },
+      }],
+      ['hidden', { name: 'internal_forecast', description: 'Hidden upstream tool' }],
+    ])
     const search = vi.fn(async () => ({
       items: [
         {
+          name: 'forecast',
           path: 'providers/weather',
-          tool: {
-            name: 'forecast',
-            description: 'Get a weather forecast',
-            inputSchema: { type: 'object' },
-          },
+          ref: 'visible',
+          resumeOffset: 1,
+          revision: 1,
         },
         {
+          name: 'internal_forecast',
           path: 'providers/weather',
-          tool: { name: 'internal_forecast', description: 'Hidden upstream tool' },
+          ref: 'hidden',
+          resumeOffset: 2,
+          revision: 1,
         },
       ],
-      cursor: 'not-exposed-before-pagination-contract',
     }))
-    const { app, state } = await appWith({ capabilities: ['search'], search })
+    const hydrate = vi.fn(async (candidates: readonly { path: string, ref: string }[]) => ({
+      consumed: candidates.length,
+      hits: candidates.map(candidate => ({
+        path: candidate.path,
+        tool: tools.get(candidate.ref) ?? { name: 'missing' },
+      })),
+    }))
+    const { app, state } = await appWith({
+      capabilities: ['search'],
+      cursorFor: async (_query, candidate) => `c${candidate.resumeOffset}`,
+      hydrate,
+      search,
+    })
     await new NodeRegistryStore(state).write(
       {
         path: 'providers/weather',
@@ -137,7 +203,8 @@ describe('global ~search protocol', () => {
       ],
     })
     expect(search).toHaveBeenCalledOnce()
-    expect(search).toHaveBeenCalledWith('weather', { mode: 'keyword' })
+    expect(search).toHaveBeenCalledWith('weather', { limit: 100, mode: 'keyword' })
+    expect(hydrate).toHaveBeenCalledOnce()
 
     const { secret: readOnlySk } = await new SKRegistryStore(state).write(
       {
@@ -170,8 +237,8 @@ describe('global ~search protocol', () => {
   })
 
   it('rejects unavailable and unknown modes before querying the index', async () => {
-    const search = vi.fn(async () => ({ items: [] }))
-    const { app } = await appWith({ capabilities: ['search'], search })
+    const index = emptySearchIndex()
+    const { app } = await appWith(index)
 
     const semantic = await postSearch(app, {
       query: 'weather',
@@ -189,20 +256,22 @@ describe('global ~search protocol', () => {
     })
     expect(unknown.status).toBe(400)
 
-    const prematurePagination = await postSearch(app, {
+    const invalidLimit = await postSearch(app, {
       query: 'weather',
-      opts: { limit: 10 },
+      opts: { limit: '10' },
     })
-    expect(prematurePagination.status).toBe(400)
+    expect(invalidLimit.status).toBe(400)
+    expect((await postSearch(app, { query: 'weather', opts: { cursor: 3 } })).status).toBe(400)
+    expect((await postSearch(app, { query: 'weather', opts: { filter: {} } })).status).toBe(400)
 
     expect((await postSearch(app, { query: '   ' })).status).toBe(400)
     expect((await postSearch(app, [])).status).toBe(400)
-    expect(search).not.toHaveBeenCalled()
+    expect(index.search).not.toHaveBeenCalled()
   })
 
   it('accepts semantic mode only when the implementation declares it', async () => {
-    const search = vi.fn(async () => ({ items: [] }))
-    const { app } = await appWith({ capabilities: ['search', 'search:semantic'], search })
+    const index = emptySearchIndex(['search', 'search:semantic'])
+    const { app } = await appWith(index)
 
     const response = await postSearch(app, {
       query: 'weather',
@@ -210,6 +279,120 @@ describe('global ~search protocol', () => {
     })
 
     expect(response.status).toBe(200)
-    expect(search).toHaveBeenCalledWith('weather', { mode: 'semantic' })
+    expect(index.search).toHaveBeenCalledWith('weather', { limit: 100, mode: 'semantic' })
+  })
+
+  it('over-fetches with bulk registry reads, fills the scoped page and resumes raw cursor', async () => {
+    const candidates = [
+      ...Array.from({ length: 125 }, (_, i) => ({ path: `denied/${i}`, name: `denied_${i}` })),
+      ...Array.from({ length: 175 }, (_, i) => ({ path: `allowed/${i}`, name: `allowed_${i}` })),
+    ].map((candidate, index) => ({
+      ...candidate,
+      ref: String(index),
+      resumeOffset: index + 1,
+      revision: 1,
+    }))
+    const search = vi.fn(async (_query: string, opts?: { cursor?: string, limit?: number }) => {
+      const offset = opts?.cursor === undefined ? 0 : Number(opts.cursor.slice(1))
+      const limit = opts?.limit ?? 50
+      const items = candidates.slice(offset, offset + limit)
+      const end = offset + items.length
+      return end < candidates.length ? { items, cursor: `c${end}` } : { items }
+    })
+    const hydrate = vi.fn(async (items: readonly typeof candidates[number][]) => ({
+      consumed: items.length,
+      hits: items.map(item => ({
+        path: item.path,
+        tool: { name: item.name, description: 'scoped candidate' },
+      })),
+    }))
+    const { app, state } = await appWith({
+      capabilities: ['search'],
+      cursorFor: async (_query, candidate) => `c${candidate.resumeOffset}`,
+      hydrate,
+      search,
+    })
+    const registry = new NodeRegistryStore(state)
+    for (const candidate of candidates) {
+      await registry.write(
+        {
+          path: candidate.path,
+          kind: 'http',
+          description: 'Search scope fixture',
+          config: {
+            kind: 'http',
+            endpoint: 'https://scope.example.test',
+            tools: [],
+          },
+        },
+        'system:test',
+        new Date().toISOString(),
+      )
+    }
+    const { secret } = await new SKRegistryStore(state).write(
+      {
+        owner: 'agent:scoped-search',
+        scopes: [{ pattern: 'allowed/**', actions: ['read', 'call'] }],
+      },
+      new Date().toISOString(),
+    )
+    const getMany = vi.spyOn(state, 'getMany')
+
+    const first = await postSearch(app, { query: 'candidate', opts: { limit: 150 } }, secret)
+    expect(first.status).toBe(200)
+    const firstPage = (await first.json()) as { cursor?: string, items: Array<{ path: string }> }
+    expect(firstPage.items).toHaveLength(150)
+    expect(firstPage.items[0]?.path).toBe('allowed/0')
+    expect(firstPage.items[149]?.path).toBe('allowed/149')
+    expect(firstPage.cursor).toBe('c275')
+    expect(getMany).toHaveBeenCalledTimes(3)
+
+    const second = await postSearch(
+      app,
+      { query: 'candidate', opts: { limit: 150, cursor: firstPage.cursor } },
+      secret,
+    )
+    expect(second.status).toBe(200)
+    const secondPage = (await second.json()) as { cursor?: string, items: Array<{ path: string }> }
+    expect(secondPage.items).toHaveLength(25)
+    expect(secondPage.items[0]?.path).toBe('allowed/150')
+    expect(secondPage.items[24]?.path).toBe('allowed/174')
+    expect(secondPage.cursor).toBeUndefined()
+    expect(getMany).toHaveBeenCalledTimes(4)
+    expect(hydrate).toHaveBeenCalledTimes(2)
+  })
+
+  it('does not expose a continuation cursor when every raw match is denied', async () => {
+    const candidates = Array.from({ length: 500 }, (_, index) => ({
+      name: `private_${index}`,
+      path: `private/${index}`,
+      ref: String(index),
+      resumeOffset: index + 1,
+      revision: 1,
+    }))
+    const search = vi.fn(async (_query: string, opts?: { cursor?: string, limit?: number }) => {
+      const offset = opts?.cursor === undefined ? 0 : Number(opts.cursor.slice(1))
+      const items = candidates.slice(offset, offset + (opts?.limit ?? 50))
+      const end = offset + items.length
+      return end < candidates.length ? { items, cursor: `c${end}` } : { items }
+    })
+    const { app, state } = await appWith({
+      capabilities: ['search'],
+      cursorFor: async (_query, candidate) => `c${candidate.resumeOffset}`,
+      hydrate: async () => ({ consumed: 0, hits: [] }),
+      search,
+    })
+    const { secret } = await new SKRegistryStore(state).write(
+      {
+        owner: 'agent:no-search-access',
+        scopes: [{ pattern: 'public/**', actions: ['read', 'call'] }],
+      },
+      new Date().toISOString(),
+    )
+
+    const response = await postSearch(app, { query: 'private', opts: { limit: 200 } }, secret)
+    expect(response.status).toBe(200)
+    await expect(response.json()).resolves.toEqual({ items: [] })
+    expect(search).toHaveBeenCalledTimes(4)
   })
 })

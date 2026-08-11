@@ -596,6 +596,37 @@ describe('kind:\'tool\' 挂载消费(tool-provider plugin)', () => {
     expect(res.status).toBe(400)
   })
 
+  it('tool-provider 挂载直接可搜，禁用 plugin 后旧 cache 不再进入索引', async () => {
+    stubToolProvider()
+    await registerPlugin(manifest('search-lifecycle-plugin'))
+    expect((await mountTool('tools/search-lifecycle', 'search-lifecycle-plugin')).status).toBe(200)
+
+    const search = async (): Promise<{ items: Array<{ path: string }> }> => {
+      const response = await SELF.fetch('https://tb.test/~search', {
+        method: 'POST',
+        headers: {
+          'authorization': `Bearer ${TEST_ADMIN_SK}`,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({ query: 'create_order' }),
+      })
+      expect(response.status).toBe(200)
+      return await response.json() as { items: Array<{ path: string }> }
+    }
+    expect((await search()).items.map(item => item.path)).toContain('tools/search-lifecycle')
+
+    const disabled = await postJson(
+      'system/plugin',
+      {
+        tool: 'update',
+        arguments: { id: 'search-lifecycle-plugin', patch: { enabled: false } },
+      },
+      admin(),
+    )
+    expect(disabled.status).toBe(200)
+    expect((await search()).items.map(item => item.path)).not.toContain('tools/search-lifecycle')
+  })
+
   it('挂载带 authRef:凭证经 X-TB-Upstream-Auth(base64url)注入;不带则无此头', async () => {
     const { seen } = stubToolProvider()
     await registerPlugin(

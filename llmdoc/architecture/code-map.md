@@ -14,8 +14,8 @@
 | `secret/` | 上游凭证 | `secretStore.ts`(`SecretStoreImpl`,AES-256-GCM 只写不读,`resolve()` 内部专用) |
 | `builtin/` | `system/*` 管理面 | sk / secret / registry / status / plugin / federation / annotation 七模块的 cmd 表 + `dispatch`(`types.ts`/`util.ts` 为公共骨架;`federation.ts` = remote host 白名单增删,合并 env 基线 + `tool/allowlist.ts` 的 RemoteAllowlistStore;`annotation.ts` = Path 补充说明 set/get/remove/list,set/remove 需 admin) |
 | `annotation/` | Path 补充说明存储 | `store.ts`(`AnnotationStore`:`annotation:<path>` 每 path 一条覆盖写,text ≤2000;独立于 TreeNode,工具子路径可标注;`~help` 渲染为 `note` 行/字段) |
-| `feedback/` | Agent 反馈存储 | `store.ts`(`FeedbackStore`:`feedback:<path>` 单 key 数组;submit/vote/get/listViews/remove + `helpItems` 排序/阈值/top-5 唯一真源;owner 投票去重、每 path 每 owner ≤10 防刷;消费面是网关 `~feedback` 保留段路由) |
-| `search/` | 全局工具搜索共享 contract | `types.ts`(`SearchCapability = search|search:semantic`、`ToolSearchOptions` 仅 mode、`ToolSearchHit{path,tool}`、只读 `SearchIndex` + `MutableSearchIndex.replace/remove/rebuild`;`prepareToolSearchQuery` 按 Unicode code point 将全长 term 分到 FTS literal phrase、任一短 term 分到 escaped LIKE AND,LIKE 上限 32 terms;另含完整 ToolSpec snapshot/路径/重复项校验与 40 candidate cap);`test/search/searchIndex.fixture.ts` 为 D1/SQLite 共用 adapter contract,覆盖 CJK 两字/混合短词/转义/两分支 cap |
+| `feedback/` | Agent 反馈存储 | `store.ts`(`FeedbackStore`:`feedback:<path>` 单 key 数组;submit/vote/get/listViews/remove + `helpItems` 排序/阈值/top-5 唯一真源;`selectFeedbackSearchText` 仅投影 owning node 的非隐藏 top 5 title/detail并清理/截到 256 UTF-8 bytes;owner 投票去重、每 path 每 owner ≤10 防刷) |
+| `search/` | 全局工具搜索共享 contract | `types.ts`(`ToolSearchOptions{mode,limit,cursor}`、轻量 candidate→4 MiB hydrate、只读 `SearchIndex` + `MutableSearchIndex.replace/remove/removePrefix/rebuild`;default50/max200、batch100/work400、500-node audit/20 KiB node snapshot、AES-GCM cursor 绑定 query/mode/revision/offset;长词 FTS+短词 LIKE 的 hybrid AND,raw ToolSpec snapshot/digest/JSON1 budgets);`test/search/searchIndex.fixture.ts` 为 D1/SQLite v2 共用 contract |
 | `tool/` | 工具层纯逻辑 | `httpTool.ts`(HttpToolDef 拼装、`{param}` 占位)、`virtualize.ts`(prefix/rename/hide/describe)、`mcpSchema.ts`(mcp schema→HelpModel)、`remote.ts`(路径改写/白名单)、`via.ts`(X-TB-Via 环检测)、`upstreamError.ts`(上游错误归一) |
 | `context/` | Context 层纯逻辑 | `types.ts`(ContextEntry)、`objectStore.ts`(ObjectStore 接口 + Memory 实现)、`objectProvider.ts`(四动词语义)、`path.ts`(穿越防护)、`ttl.ts`(懒回收)、`help.ts`(静态 cmd 表) |
 | `skillhub/` | Skillhub 层纯逻辑(内容型 kind,复用 context 存储) | `frontmatter.ts`(SKILL.md YAML frontmatter 最小解析,无 yaml 依赖)、`provider.ts`(`createSkillhubProvider`:以 `<id>/` 分组 + frontmatter 目录;List/Get/GetFile/Search/Publish/Remove;单文件 inline/`$ref` 复用 objectProvider)、`help.ts`(静态 cmd 表 + `SKILLHUB_CAPABILITIES`) |
@@ -31,15 +31,16 @@ exports `.` / `./tbApp` / `./bootstrap` / `./deviceHello`(供 SDK 与 server 复
 | 文件 | 管什么 |
 |---|---|
 | `app.ts` | Workers Env→deps 适配(入口薄层;规范化 `TB_CANONICAL_ORIGIN`;可选 `TB_SEARCH: D1Database` 存在时注入 `D1SearchIndex`,缺 binding 不注入 search capability) |
-| `tbApp.ts` | **宿主中立 `createTbApp(deps)`**:全局安全头、认证中间件、`~help`/`~tree`/`~skill`/`~describe`/`~register`/`~feedback`/`~mcp` 与 root-only `POST /~search`;可选 `SearchIndex` 声明 search capability 才开放根 describe/search,请求只接受 query+mode,候选按 read+call、mcp/http/tool kind/config、virtualize 后处理;另含数据面路由、remote 聚合、两级 `~help`、`enrichHelp`、`/ui`、`/~ref` |
+| `tbApp.ts` | **宿主中立 `createTbApp(deps)`**:全局安全头、认证中间件、`~help`/`~tree`/`~skill`/`~describe`/`~register`/`~feedback`/`~mcp` 与 root-only `POST /~search`;Search 请求 query+mode/limit/cursor,每次 canonical audit 后 over-fetch,按 read+call、kind/config、virtualize 后处理,空不可见页不发 cursor;registry/plugin/fresh tool list/feedback mutation 接 SearchSynchronizer;另含数据面、remote、两级 `~help`、`/ui`、`/~ref` |
 | `bootstrap.ts` | 首请求惰性引导:Workers 缺 `TB_BOOTSTRAP_ADMIN_SK` fail closed + `system` 七 builtin 物化(promise 防重入 + KV 幂等标志;宿主中立 API 保留随机兼容路径,当前 Node server 仍默认使用并写明文日志,待修;已引导实例升级自动补挂新模块) |
-| `deviceHello.ts` | **宿主中立 `processDeviceHello`**:设备 hello 验证 + 落库的单一真源,DO 与 server DeviceHub 共用(防两宿主树形态漂移) |
+| `deviceHello.ts` | **宿主中立 `processDeviceHello`**:设备 hello 验证 + 落库的单一真源,DO 与 server DeviceHub 共用;有 MutableSearchIndex 时 seed/mark 后批量 rebuild 派生索引 |
 | `kvStateStore.ts` | StateStore 的 KV 实现(list 跳 null、子树前缀扫描,头注释有约束说明) |
-| `deviceSession.ts` | `DeviceSession` DO 胶水:WS hibernation、待决表、`setWebSocketAutoResponse`、惰性会话重建;休眠恢复与每次 invoke 会重验 SK,但当前跨 KV await 后未复核 activeConnId、`markDisconnected` 可用陈旧 meta 覆盖新连接,属待修 TOCTOU(协议行为在 deviceHello.ts) |
+| `deviceSession.ts` | `DeviceSession` DO 胶水:WS hibernation、待决表、`setWebSocketAutoResponse`、惰性会话重建;设备子树回收同步 SearchIndex;休眠恢复与每次 invoke 会重验 SK,但当前跨 KV await 后未复核 activeConnId、`markDisconnected` 可用陈旧 meta 覆盖新连接,属待修 TOCTOU(协议行为在 deviceHello.ts) |
 | `refToken.ts` | `$ref` 网关中转的 HMAC token 签发/校验(HMAC 用途域分离) |
-| `search/d1SearchIndex.ts` | D1 keyword adapter:惰性建 external-content FTS5 trigram + insert/delete/update triggers;replace/remove/rebuild snapshot 写面;每批 25 行、单次 mutation 上限 1000、候选上限 40 |
+| `search/synchronizer.ts` | `SearchSynchronizer`:StateStore/registry/tool cache/feedback → SearchIndex 派生投影;固定 node/subtree pending markers,hot reconcile + 每次搜索 500-node canonical audit;overflow seed/LKG/fail-closed/回落恢复与超额节点排除 |
+| `search/d1SearchIndex.ts` | D1 keyword v2 adapter:raw ToolSpec source + feedback FTS(10/3/1)+ meta revision/cursor secret + snapshot digest/path capacity trigger;JSON1 byte chunks、candidate/hydrate/cursor、same-digest no-op;并发 500-path cap,cold query formula 48≤50 |
 | `providers/` | 全部上游 I/O:`mcp.ts`(SDK Streamable HTTP,会话复用 + 404 重握手一次;auth:'oauth' 挂 `../oauth.ts` 的 authProvider)、`http.ts`、`remote.ts`、`toolCache.ts`、`r2Object.ts`、`s3Object.ts` + `s3Sign.ts`(aws4fetch)、`pluginClient.ts`(`upstreamAuthRef` → resolve 后经 `X-TB-Upstream-Auth` 注入,失败 → unavailable)+ `pluginTool.ts` + `pluginContext.ts` |
-| `test/` | workerd 集成测试族(gateway/tool/context/skillhub/device/deviceNodes/plugin/ui/oauth/meta/mcp/search);`search.integration.test.ts` 用 fake SearchIndex 钉协议/后处理,`d1SearchIndex.integration.test.ts` 复用 shared contract 并覆盖缺 binding 404、1000 mutation cap、SELF 真实 Worker 与 40 candidate cap;`scripts/` 有 echo-mcp / s3-mock / stub-provider 兜底上游 |
+| `test/` | workerd 集成测试族;`search.integration.test.ts` 钉 limit/cursor、权限后 over-fetch、4 MiB hydrate 与空不可见页无 cursor;`searchSynchronizer.test.ts` 钉 canonical 独立、dirty audit、hot/full LKG/恢复;`d1SearchIndex.integration.test.ts` 复用 v2 contract并覆盖自动同步、feedback、125 tools、500-path并发 trigger与 48-query预算;`scripts/` 有 echo-mcp / s3-mock / stub-provider |
 | `wrangler.jsonc` | 绑定 TB_KV / TB_R2 / TB_DEVICE(DO)/ ASSETS(dashboard dist,`run_worker_first`)及 `TB_SEARCH` → `tb-search` D1(`database_id` 占位由 provision 回填)+ `account_id` + custom domain;production 禁 `workers_dev`/Preview URLs,用 `TB_CANONICAL_ORIGIN` 固定 OAuth callback origin |
 
 ## packages/cli — `tb`(npm 发布物)
@@ -88,14 +89,14 @@ exports `.` / `./tbApp` / `./bootstrap` / `./deviceHello`(供 SDK 与 server 复
 | 文件 | 管什么 |
 |---|---|
 | `sqliteStateStore.ts` | better-sqlite3 单表 kv(WAL,强一致);list 用 key 范围扫描(不用 LIKE,规避 `_`/`%` 通配符);cursor/排序与 MemoryStateStore 契约对拍 |
-| `sqliteSearchIndex.ts` | Node keyword adapter:与 StateStore 共用 `state.sqlite3` 文件但用独立连接/独立表;external-content FTS5 trigram + triggers,事务化 replace/rebuild,复用 shared adapter contract,候选上限 40 |
+| `sqliteSearchIndex.ts` | Node keyword v2 adapter:与 StateStore 共用 `state.sqlite3` 文件但用独立连接/独立表;raw ToolSpec/feedback FTS/meta/snapshot schema,事务化 replace/rebuild + 500-path trigger,candidate/hydrate/AES-GCM cursor,复用 shared contract |
 | `config.ts` | `configFromEnv`:TB_* 与 CF 同名同义 + TB_PORT(默认 8787,0=临时)/ TB_HOST / TB_DATA_DIR(默认 /data,本地回退 ./data)/ TB_UI_DIR |
 | `objects.ts` | `createDataObjectStore`:FsObjectStore('r2' provider 落点)前缀适配器,key 出入口加/剥 `objects/` 首段;无 presign → `$ref` 走 `/~ref` 中转 |
 | `deviceHub.ts` | ws `DeviceChannel`:http 'upgrade' + ws handleUpgrade;认证双点(升级前 identify 401 + processDeviceHello 权威判定),每次 invoke 再重验连接 SK,但 await 后未复核 active connection 且未重验 scope/registerPaths,属待修竞态/授权缺口;复用 core `DeviceGatewaySession`;ws ping 踢半开;断线回收 = `devicemeta:<id>` 持久 meta + 进程内 timer + 启动 `sweepOrphans`;幂等结果表仅内存(有意分叉) |
 | `assets.ts` | `/ui` 静态托管:TB_UI_DIR 覆盖 → dashboard 包 dist 解析 → 404 降级;contentType 复用 core fsContentTypeOf |
 | `server.ts` | `createTbServer`:构造 TbAppDeps(对位 gateway app.ts),注入 `SqliteSearchIndex`;start() 直调 runBootstrap + hub.sweepOrphans,close() 关闭 search/state 的独立 SQLite 连接 |
 | `main.ts` | bin 入口(shebang),SIGINT/SIGTERM 优雅关闭 |
-| `test/` | `sqliteSearchIndex.test.ts` 复用 shared contract 并覆盖同库异表/重开持久化;`server.integration.test.ts` 覆盖真实 HTTP root describe/search 与重启持久化;另含 StateStore、device、ui、context 宿主测试 |
+| `test/` | `sqliteSearchIndex.test.ts` 复用 v2 shared contract(权重/分页/cursor)并覆盖同库异表、500-path cap、重开持久化;`server.integration.test.ts` 覆盖 registry 自动同步后的真实 HTTP root search 与重启;另含 StateStore、device、ui、context 宿主测试 |
 | 发布形态 | tsup bundle core+gateway(`dts.resolve` 须收窄为数组,`true` 会把 node:http 类型降级 undefined);better-sqlite3/ws/hono/@hono/node-server 留 external;publishConfig 覆盖指 dist |
 
 ## scripts/ 与 CI

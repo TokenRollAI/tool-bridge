@@ -3,14 +3,18 @@ import {
   FEEDBACK_DETAIL_MAX,
   FEEDBACK_HELP_LIMIT,
   FEEDBACK_PER_OWNER_MAX,
+  FEEDBACK_SEARCH_TEXT_BYTES_MAX,
   FEEDBACK_TITLE_MAX,
   type FeedbackEntry,
   FeedbackStore,
+  selectFeedbackSearchText,
   selectHelpItems,
   sortFeedback,
 } from '../../src/feedback/store'
 import { MemoryStateStore } from '../../src/store'
 import { isTBError } from '../../src/errors'
+
+declare const TextEncoder: { new (): { encode(input: string): Uint8Array } }
 
 const NOW = '2026-07-08T00:00:00.000Z'
 const AGENT_A = 'agent:a'
@@ -49,6 +53,27 @@ describe('排序与 ~help 选条(纯函数)', () => {
     expect(items).toHaveLength(FEEDBACK_HELP_LIMIT)
     expect(items.map(e => e.id)).not.toContain('hidden')
     expect(items[0]).toEqual({ id: 'fb_000005', title: 't', score: 1 })
+  })
+
+  it('search 投影复用可见 top 5，并同时包含 title/detail', () => {
+    const hidden = entry({
+      id: 'hidden',
+      title: 'hidden title',
+      detail: 'hidden detail',
+      down: ['agent:1', 'agent:2', 'agent:3'],
+    })
+    const visible = entry({ id: 'visible', title: 'use append', detail: 'mode is required' })
+    expect(selectFeedbackSearchText([hidden, visible])).toBe('use append\nmode is required')
+  })
+
+  it('search 投影去控制字符并按 UTF-8 bytes 截断', () => {
+    const projected = selectFeedbackSearchText([
+      entry({ id: 'large', title: '\u0001'.repeat(80), detail: '日'.repeat(500) }),
+    ])
+    expect(projected).not.toContain('\u0001')
+    expect(new TextEncoder().encode(projected).byteLength).toBeLessThanOrEqual(
+      FEEDBACK_SEARCH_TEXT_BYTES_MAX,
+    )
   })
 })
 
@@ -153,6 +178,17 @@ describe('FeedbackStore', () => {
     expect((await fb.listFor('a')).map(e => e.id)).toEqual([e2.id])
     await fb.remove('a', e2.id)
     expect(await store.get('feedback:a')).toBeNull()
+  })
+
+  it('mutation listener receives the in-memory snapshot after submit/vote/remove', async () => {
+    const snapshots: string[][] = []
+    const watched = new FeedbackStore(store, async (_path, entries) => {
+      snapshots.push(entries.map(item => `${item.title}:${item.up.length - item.down.length}`))
+    })
+    const created = await watched.submit('a', { title: 'probe', detail: 'detail' }, AGENT_A, NOW)
+    await watched.vote('a', created.id, AGENT_B, 'up')
+    await watched.remove('a', created.id)
+    expect(snapshots).toEqual([['probe:0'], ['probe:1'], []])
   })
 
   it('脏值容错:非数组/坏条目 → 跳过', async () => {

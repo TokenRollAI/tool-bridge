@@ -63,6 +63,18 @@ describe('SqliteStateStore 契约(vs MemoryStateStore)', () => {
     })
   })
 
+  it('getMany 批量读取去重并忽略不存在 key', async () => {
+    await contract(async (store) => {
+      await seed(store)
+      return [...(await store.getMany([
+        'node:a/b',
+        'missing',
+        'node:a/b',
+        'sk:h:bbb',
+      ])).entries()]
+    })
+  })
+
   it('list 前缀过滤 + 字典序排序(含 _ % [ 与中文 key)', async () => {
     await contract(async (store) => {
       await seed(store)

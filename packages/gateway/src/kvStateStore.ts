@@ -3,23 +3,30 @@ import type { StateStore } from '@tool-bridge/core'
 /**
  * StateStore 的 Cloudflare KV 实现(绑定 TB_KV;store.ts key 布局)。
  *
- * 值以 JSON 存取。`list` 用 KV 原生 `list({prefix,cursor,limit})` 枚举键名,再逐 key `get`
- * 取值——KV 的 list 不带值(官方限制)。树规模小(节点/SK 数量有限),逐 key get
- * 可接受;规模变大后可换 KV metadata 或改 SQLite 宿主。KV 最终一致(其它边缘通常
- * 约 60s 内看见吊销,但 Cloudflare 明确说明可能更久)。
+ * 值以 JSON 存取。`list` 用 KV 原生 `list({prefix,cursor,limit})` 枚举键名，再用
+ * `get(keys, 'json')` 批量取值；KV 最终一致(其它边缘通常约 60s 内看见吊销，
+ * 但 Cloudflare 明确说明可能更久)。
  *
- * **Workers 子请求上限约束**:`list` 每翻页每个键各发一次 `kv.get`,每次 get 计一个 Workers
- * 子请求(免费套餐 ~50 / 付费 ~1000 每请求)。因此单次 `list` 触碰的键数受此上限约束——
- * NodeRegistryStore.children/subtree 已改为按子树前缀扫描(不再扫全树),把每次调用的键数
- * 收敛到子树规模;当前规模上限估算:一次 `~tree` 建树读入的子树节点数应 ≤ 数百(节点
- * 上限 500 亦是同量级),留足与 1000 子请求上限的余量。规模再增须改 KV metadata 承载值
- * (list 不再逐 get)或换 SQLite 宿主。
+ * KV bulk get 每次最多 100 keys；`StateStore.getMany` 与 `list` 都按这一硬限制分块。
  */
 export class KvStateStore implements StateStore {
   constructor(private readonly kv: KVNamespace) {}
 
   async get(key: string): Promise<unknown | null> {
     return await this.kv.get(key, 'json')
+  }
+
+  async getMany(keys: readonly string[]): Promise<Map<string, unknown>> {
+    const out = new Map<string, unknown>()
+    for (let offset = 0; offset < keys.length; offset += 100) {
+      const chunk = [...new Set(keys.slice(offset, offset + 100))]
+      if (chunk.length === 0) continue
+      const values = await this.kv.get(chunk, 'json') as Map<string, unknown>
+      for (const [key, value] of values) {
+        if (value !== null) out.set(key, value)
+      }
+    }
+    return out
   }
 
   async put(key: string, value: unknown): Promise<void> {
@@ -39,11 +46,12 @@ export class KvStateStore implements StateStore {
     if (opts?.limit !== undefined) listOpts.limit = opts.limit
     const result = await this.kv.list(listOpts)
     const items: Array<{ key: string, value: unknown }> = []
+    const values = await this.getMany(result.keys.map(entry => entry.name))
     for (const entry of result.keys) {
-      const value = await this.kv.get(entry.name, 'json')
+      const value = values.get(entry.name)
       // KV 最终一致:刚删除的 key 可能仍出现在 list 里而 get 已是 null——跳过,
       // 否则 null 流入 TreeNode 等消费方(读 .path)抛 internal。
-      if (value !== null) items.push({ key: entry.name, value })
+      if (value !== undefined) items.push({ key: entry.name, value })
     }
     return result.list_complete ? { items } : { items, cursor: result.cursor }
   }

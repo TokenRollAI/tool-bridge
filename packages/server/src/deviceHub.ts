@@ -24,12 +24,17 @@ import {
   DeviceGatewaySession,
   encodeDeviceFrame,
   identify,
+  type MutableSearchIndex,
   NodeRegistryStore,
   type StateStore,
   TBError,
   type TreePath,
 } from '@tool-bridge/core'
-import { assertDeviceId, processDeviceHello } from '@tool-bridge/gateway/deviceHello'
+import {
+  assertDeviceId,
+  processDeviceHello,
+  SearchSynchronizer,
+} from '@tool-bridge/gateway/deviceHello'
 import { type WebSocket, WebSocketServer } from 'ws'
 
 export const DEVICE_WS_PATH = '/system/device/ws'
@@ -81,6 +86,7 @@ function rejectUpgrade(socket: Duplex, error: TBError): void {
 
 export class DeviceHub {
   private readonly store: StateStore
+  private readonly search: MutableSearchIndex | undefined
   private readonly reclaimSec: number
   private readonly wss = new WebSocketServer({ noServer: true })
   private readonly activeByDevice = new Map<string, Conn>()
@@ -88,8 +94,14 @@ export class DeviceHub {
   private readonly reclaimTimers = new Map<string, NodeJS.Timeout>()
   private heartbeat: NodeJS.Timeout | undefined
 
-  constructor(opts: { heartbeatMs?: number, reclaimSec: number, store: StateStore }) {
+  constructor(opts: {
+    heartbeatMs?: number
+    reclaimSec: number
+    search?: MutableSearchIndex
+    store: StateStore
+  }) {
     this.store = opts.store
+    this.search = opts.search
     this.reclaimSec = opts.reclaimSec
     const heartbeatMs = opts.heartbeatMs ?? DEFAULT_HEARTBEAT_MS
     this.heartbeat = setInterval(() => this.pingConnections(), heartbeatMs)
@@ -262,6 +274,7 @@ export class DeviceHub {
       deviceIdHint: conn.deviceId,
       hello,
       now,
+      ...(this.search === undefined ? {} : { search: this.search }),
     })
     const meta: DeviceMeta = { deviceId: conn.deviceId, mountPath, keyId, connectedAt: now }
     await this.store.put(KEY_DEVICE_META + conn.deviceId, meta)
@@ -316,11 +329,16 @@ export class DeviceHub {
     if (this.activeByDevice.has(deviceId)) return
     const raw = await this.store.get(KEY_DEVICE_META + deviceId)
     if (!isDeviceMeta(raw)) return
+    const searchSync = this.search === undefined
+      ? undefined
+      : new SearchSynchronizer(this.store, this.search)
+    const marker = await searchSync?.markSubtree(raw.mountPath)
     try {
       await new NodeRegistryStore(this.store).deleteSubtree(raw.mountPath)
     } catch {
       // 已被外部清理时,meta 仍要删。
     }
+    await searchSync?.removeSubtreeQuietly(raw.mountPath, marker)
     await this.store.delete(KEY_DEVICE_META + deviceId)
   }
 

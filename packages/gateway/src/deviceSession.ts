@@ -17,6 +17,8 @@ import {
 } from '@tool-bridge/core'
 import { DurableObject } from 'cloudflare:workers'
 import { assertDeviceId, processDeviceHello } from './deviceHello'
+import { SearchSynchronizer } from './search/synchronizer'
+import { D1SearchIndex } from './search/d1SearchIndex'
 import { ensureBootstrapped } from './bootstrap'
 import { KvStateStore } from './kvStateStore'
 
@@ -24,6 +26,7 @@ interface DeviceSessionEnv {
   TB_BOOTSTRAP_ADMIN_SK?: string
   TB_DEVICE_RECLAIM_SEC?: string
   TB_KV: KVNamespace
+  TB_SEARCH?: D1Database
   TB_SECRET_ENCRYPTION_KEY?: string
 }
 
@@ -175,11 +178,17 @@ export class DeviceSession extends DurableObject<DeviceSessionEnv> {
       return
     }
     const registry = await this.registry()
+    const state = new KvStateStore(this.env.TB_KV)
+    const searchSync = this.env.TB_SEARCH === undefined
+      ? undefined
+      : new SearchSynchronizer(state, new D1SearchIndex(this.env.TB_SEARCH))
+    const marker = await searchSync?.markSubtree(meta.mountPath)
     try {
       await registry.deleteSubtree(meta.mountPath)
     } catch {
       // 已被外部清理时,DO 本地状态仍可回收。
     }
+    await searchSync?.removeSubtreeQuietly(meta.mountPath, marker)
     await this.ctx.storage.deleteAll()
   }
 
@@ -278,6 +287,9 @@ export class DeviceSession extends DurableObject<DeviceSessionEnv> {
       deviceIdHint: attachment.deviceIdHint,
       hello,
       now,
+      ...(this.env.TB_SEARCH === undefined
+        ? {}
+        : { search: new D1SearchIndex(this.env.TB_SEARCH) }),
     })
     await this.ctx.storage.put<DeviceMeta>(META_KEY, {
       deviceId: hello.deviceId,
