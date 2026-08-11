@@ -72,7 +72,7 @@ exports `.` / `./tbApp` / `./bootstrap` / `./deviceHello`(供 SDK 与 server 复
 - `lib/`:api.ts(同源 `baseUrl:''`,含直连 root `searchTools` 且节点 API 统一调用 `encodeTreePath`)、queries.ts(`usePagedBuiltin` + `useToolSearch`,query key 隔离 profile/BaseURL/revision/query/mode/limit,cursor 仅作 pageParam)、path.ts(`encodeTreePath`:逐 raw segment 编码但保留 `/`)、schemaForm.ts、session.tsx(SK 多 profile;换凭据/删档案清 Query/Mutation cache)、history.ts(v2 metadata allowlist,不持久化调用参数)。
 - `vitest.config.ts` 使用 Node environment;`test/systemForms.test.ts` 10 cases 直接断言 Registry/Plugin/SK builder 的 wire shape与 fail-closed 分支。Dashboard `test` script 已加入根 `test:unit`;不含 DOM/React render,不能替代 dialog 生命周期、分页、草稿保留与一次性敏感值的组件/浏览器证据。协议/静态接线另由 gateway fresh-source `ui.integration.test.ts` 覆盖。产品级可重跑浏览器回归仍缺;Round 25 真实浏览器核对 desktop/mobile 无横向溢出且 console 0。验收矩阵见 [../guides/verification-and-commit-practices.md](../guides/verification-and-commit-practices.md)。
 
-## packages/plugin-feishu — 飞书 tool-provider Plugin(private,CF Worker)
+## plugins/feishu — 飞书 tool-provider Plugin(private,CF Worker)
 
 飞书官方远程 MCP(`https://mcp.feishu.cn/mcp`)的 tool-provider/v1 plugin,解决 TAT(tenant_access_token,约 2h 过期)人工续期问题:自部署进用户 CF 账户,经 `tb plugin register` 注册后 `kind:'tool'` 挂载。首个 in-repo plugin 参考实现;背景见 [../guides/mcp-upstream-pitfalls.md](../guides/mcp-upstream-pitfalls.md) 飞书小节。
 

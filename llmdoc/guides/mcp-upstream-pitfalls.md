@@ -20,7 +20,7 @@
 
 - 端点 `https://mcp.feishu.cn/mcp`,认证不走 `Authorization: Bearer`:自定义头 `X-Lark-MCP-UAT`(用户凭证)或 `X-Lark-MCP-TAT`(应用凭证),token **原样注入**——挂载时 `--auth-header X-Lark-MCP-TAT --auth-scheme ''`(空串 scheme = 无前缀),config 即 `authHeader`/`authScheme`(与 http kind 同语义)。
 - **必须带静态头 `X-Lark-MCP-Allowed-Tools`**(逗号分隔工具白名单,`--header` / config `headers`):缺失或写错时上游 `tools/list` **恒回空列表**——会触发上文的空列表防御(多付一趟完整重握手)后如实展示空。症状与"过期会话空列表"同貌,**排查时先查该头再怀疑会话层**(该头错时重握手也救不回来,这是与会话层故障的区分点)。
-- 飞书 UAT/TAT 有效期约 2h;SecretStore 是静态存储,过期后上游回 401,须 `tb secret set` 手动续期,无自动刷新。**免人工续期的推荐路径是 `packages/plugin-feishu`**(tool-provider plugin,plugin 内 TAT 自动换发 + 上游 401 强制重换发自愈);其凭证不落 plugin:`tb secret set --name feishu-app`(值为 JSON `{"app_id","app_secret"}`)+ 挂载节点配 `authRef:"feishu-app"`,平台调用时经 `X-TB-Upstream-Auth` 注入。直挂 kind:mcp + 静态 TAT 适合一次性验证。
+- 飞书 UAT/TAT 有效期约 2h;SecretStore 是静态存储,过期后上游回 401,须 `tb secret set` 手动续期,无自动刷新。**免人工续期的推荐路径是 `plugins/feishu`**(tool-provider plugin,plugin 内 TAT 自动换发 + 上游 401 强制重换发自愈);其凭证不落 plugin:`tb secret set --name feishu-app`(值为 JSON `{"app_id","app_secret"}`)+ 挂载节点配 `authRef:"feishu-app"`,平台调用时经 `X-TB-Upstream-Auth` 注入。直挂 kind:mcp + 静态 TAT 适合一次性验证。
 - 网关侧实现:每趟上游请求(initialize/notifications/tools list/call)合并 `headers` + 凭证头(凭证头覆盖同名静态头),见 gateway `providers/mcp.ts`;mock 上游断言用例在 gateway `tool.integration.test.ts`。
 
 ## 排查手法(生产可重跑)
