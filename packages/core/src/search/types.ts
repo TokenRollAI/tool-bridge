@@ -5,6 +5,7 @@ import {
   type Page,
   type TreePath,
 } from '../types'
+import { base64urlDecode, base64urlEncode } from '../encoding/base64url'
 import { normalizePath, validatePath } from '../tree/path'
 import { TBError } from '../errors'
 
@@ -386,47 +387,18 @@ interface CursorPayload {
   v: 1
 }
 
-const BASE64_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_'
+// base64url 编解码用 encoding/base64url 统一实现;这里只保留 cursor 语义级校验
+// (空串/长度上限),解码失败一律归一为 invalid_argument。
 
-function base64UrlEncode(bytes: Uint8Array): string {
-  let out = ''
-  for (let i = 0; i < bytes.length; i += 3) {
-    const a = bytes[i] ?? 0
-    const b = bytes[i + 1] ?? 0
-    const c = bytes[i + 2] ?? 0
-    const n = (a << 16) | (b << 8) | c
-    out += BASE64_ALPHABET[(n >>> 18) & 63]
-    out += BASE64_ALPHABET[(n >>> 12) & 63]
-    if (i + 1 < bytes.length) out += BASE64_ALPHABET[(n >>> 6) & 63]
-    if (i + 2 < bytes.length) out += BASE64_ALPHABET[n & 63]
-  }
-  return out
-}
-
-function base64UrlDecode(value: string): Uint8Array {
-  if (
-    value.length === 0
-    || value.length > 4096
-    || value.length % 4 === 1
-    || !/^[A-Za-z0-9_-]+$/.test(value)
-  ) {
+function cursorBase64UrlDecode(value: string): Uint8Array {
+  if (value.length === 0 || value.length > 4096) {
     throw new TBError('invalid_argument', '搜索 cursor 格式非法')
   }
-  const bytes: number[] = []
-  for (let i = 0; i < value.length; i += 4) {
-    const chars = value.slice(i, i + 4)
-    const values = [...chars].map(char => BASE64_ALPHABET.indexOf(char))
-    if (values.some(n => n < 0)) throw new TBError('invalid_argument', '搜索 cursor 格式非法')
-    const a = values[0] ?? 0
-    const b = values[1] ?? 0
-    const c = values[2] ?? 0
-    const d = values[3] ?? 0
-    const n = (a << 18) | (b << 12) | (c << 6) | d
-    bytes.push((n >>> 16) & 255)
-    if (chars.length >= 3) bytes.push((n >>> 8) & 255)
-    if (chars.length >= 4) bytes.push(n & 255)
+  try {
+    return base64urlDecode(value)
+  } catch {
+    throw new TBError('invalid_argument', '搜索 cursor 格式非法')
   }
-  return new Uint8Array(bytes)
 }
 
 function cursorSecretBytes(secret: string): Uint8Array {
@@ -469,7 +441,7 @@ export async function encodeToolSearchCursor(
   const sealed = new Uint8Array(iv.length + ciphertext.length)
   sealed.set(iv)
   sealed.set(ciphertext, iv.length)
-  return base64UrlEncode(sealed)
+  return base64urlEncode(sealed)
 }
 
 /** 解析并校验 cursor 与本次 query/mode/index revision 的绑定，返回 raw offset。 */
@@ -483,7 +455,7 @@ export async function decodeToolSearchCursor(
   if (cursor === undefined) return 0
   let value: unknown
   try {
-    const sealed = base64UrlDecode(cursor)
+    const sealed = cursorBase64UrlDecode(cursor)
     if (sealed.length <= 12) throw new Error('truncated cursor')
     const plaintext = await crypto.subtle.decrypt(
       { iv: sealed.slice(0, 12), name: 'AES-GCM' },

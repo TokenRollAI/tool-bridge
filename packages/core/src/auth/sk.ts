@@ -18,6 +18,7 @@ import {
   type Timestamp,
 } from '../types'
 import { KEY_SK_HASH, KEY_SK_ID, type StateStore } from '../store'
+import { base64urlEncode } from '../encoding/base64url'
 import { TBError } from '../errors'
 import { omit } from '../omit'
 
@@ -32,25 +33,7 @@ declare class TextEncoder {
 
 const SECRET_PREFIX = 'tbk_'
 const BEARER_PREFIX = 'Bearer '
-const B64URL = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_'
 const ISO_TIMESTAMP = z.string().datetime({ offset: true })
-
-/** base64url(无填充)编码——自实现,避免依赖 btoa/Buffer(纯逻辑)。 */
-function base64url(bytes: Uint8Array): string {
-  let out = ''
-  for (let i = 0; i < bytes.length; i += 3) {
-    const b0 = bytes[i] as number
-    const b1 = i + 1 < bytes.length ? (bytes[i + 1] as number) : -1
-    const b2 = i + 2 < bytes.length ? (bytes[i + 2] as number) : -1
-    out += B64URL[b0 >> 2]
-    out += B64URL[((b0 & 0x03) << 4) | (b1 < 0 ? 0 : b1 >> 4)]
-    if (b1 < 0) break
-    out += B64URL[((b1 & 0x0f) << 2) | (b2 < 0 ? 0 : b2 >> 6)]
-    if (b2 < 0) break
-    out += B64URL[b2 & 0x3f]
-  }
-  return out
-}
 
 /** sha256 十六进制摘要(WebCrypto)。 */
 export async function sha256Hex(text: string): Promise<string> {
@@ -61,7 +44,7 @@ export async function sha256Hex(text: string): Promise<string> {
 /** 生成明文 secret:`tbk_` 前缀 + 128 位熵 base64url。 */
 export function generateSecret(): string {
   const bytes = crypto.getRandomValues(new Uint8Array(16))
-  return `${SECRET_PREFIX}${base64url(bytes)}`
+  return `${SECRET_PREFIX}${base64urlEncode(bytes)}`
 }
 
 /** 校验并规范化 SK 过期时间；只接受带时区的 ISO 8601 timestamp。 */

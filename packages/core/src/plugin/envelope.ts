@@ -9,7 +9,7 @@
  */
 
 import { z } from 'zod'
-import { base64urlDecode, base64urlEncode } from '../secret/secretStore'
+import { base64urlDecode, base64urlEncode } from '../encoding/base64url'
 import { type Action, ACTIONS, type CallContext } from '../types'
 import { TBError } from '../errors'
 
