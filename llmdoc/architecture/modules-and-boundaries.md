@@ -45,7 +45,7 @@
 |---|---|---|
 | KV `tb-kv` | SK 哈希表(`sha256(sk)→记录`)、树配置、plugin manifest、secret 密文 | 最终一致,1 write/s/key;吊销跨边缘通常约 60s、也可能更久,不得叠认证内存缓存;list+get 一致性坑见 [../guides/workers-kv-pitfalls.md](../guides/workers-kv-pitfalls.md) |
 | R2 `tb-r2` | r2 context provider、大对象 `$ref` | **binding 不支持 presign**——预签名走 S3 兼容端点 + R2 Access Key(aws4fetch);凭证空缺走 `/~ref` 网关中转 |
-| SearchIndex | root `~search` 的工具候选派生索引 | D1/SQLite v2 都存 raw ToolSpec + name/description/feedback(权重 10/3/1),长词 trigram FTS、短词 escaped LIKE、混合 AND;同 snapshot digest 不 bump revision。canonical audit 上限 500 nodes,正式索引以 DB trigger/事务封顶 500 paths,单节点投影 20 KiB。canonical overflow 且已 seed 时保留 bounded LKG,回落到预算内后下次 audit 自动恢复;无 seed 时 fail closed。D1 并发 capacity trigger 封竞态,cold changed-snapshot + 四批查询/hydrate/cursor 最坏 48 queries ≤ Free 50。真实 D1 provision/deploy 仍 PENDING |
+| SearchIndex | root `~search` 的工具候选派生索引 | D1/SQLite v2 都存 raw ToolSpec + name/description/feedback(权重 10/3/1),长词 trigram FTS、短词 escaped LIKE、混合 AND;同 snapshot digest 不 bump revision。canonical audit 上限 500 nodes,正式索引以 DB trigger/事务封顶 500 paths,单节点投影 20 KiB。canonical overflow 且已 seed 时保留 bounded LKG,回落到预算内后下次 audit 自动恢复;无 seed 时 fail closed。D1 并发 capacity trigger 封竞态,cold changed-snapshot + 四批查询/hydrate/cursor 最坏 48 queries ≤ Free 50。共享开发环境真实 D1 已 provision/deploy并完成 admin/narrow smoke |
 | DO `DeviceSession` | 每设备一个,WS hibernation 空闲零计费 | 唤醒后内存态须从 storage 恢复;见 [../guides/do-websocket-hibernation.md](../guides/do-websocket-hibernation.md) |
 | Static Assets | Dashboard 与 gateway 同 Worker(`../dashboard/dist`,binding `ASSETS`) | `run_worker_first: true`,一切请求先进 Worker;静态资源仅由 `/ui` 路由显式转发,SPA 回退严格限定 `/ui`,不吞根 `~help`/数据面/`system/*`;`/ui` 免认证(登录页须无 SK 可加载)。已有 `ui.integration.test.ts` 覆盖 |
 
@@ -60,12 +60,13 @@
 - workerd 坑:handler 里必须 `await`,裸 `return asyncFn()` 的 reject 会被误报 unhandled rejection。
 - 安全响应头在宿主中立 `createTbApp` 统一注入,覆盖 Workers/Node/SDK;OAuth callback 另用 HTML 实体编码 + `default-src 'none'` CSP + `no-store`。中间件须保留 Node adapter 的流对象与 101/WebSocket 语义,优先原位改 header,不可变时才克隆普通 Response。
 
-## 两条注册通道
+## 三条 NodeConfig 写通道
 
 - `POST <path>/~register` 是**受限 SK 通道**:只判 URL path 上的 (path,'register') + 注册路径收紧规则,不要求 `system/registry` 可见,body.path 必须等于 URL path。
 - `system/registry` 数据面是**管理通道**:须对 registry 可见且持 register/admin。
-- 两者最终都落 `NodeRegistry.Write`;中间 directory 自动物化(`registeredBy: system:auto`),卸载后空中间节点级联回收。
-- **当前安全缺口:**两条入口都没有对 NodeConfig 中的 `skRef/authRef` 做独立使用授权;“Secret 由管理员创建”不等于“引用只能由管理员写入”。建立统一 Secret Reference ACL 前,不得把 remote/plugin/mcp/http/context 的代理凭证视为受信 capability 边界。
+- Device hello 的 `expose.nodes` 是第三条不可信写入口,由宿主中立 `processDeviceHello` 校验后落库;bootstrap 只物化平台固定 builtin,不接受外部 NodeConfig。
+- 三条外部写入口最终都落 `NodeRegistry.Write`;中间 directory 自动物化(`registeredBy: system:auto`),卸载后空中间节点级联回收。
+- `assertSecretRefUse` 是三条入口共用的 Secret Reference 使用授权门:`authRef`/`skRef` 指向的 secret 存在且当前 actor 对 `system/secret` 持 admin 才能写入;缺失、越权或运行时 resolve 失败都 fail closed。创建 secret 与授权引用是两个独立判定,不得只凭“引用名可猜”放行。
 
 ## 引导(bootstrap.ts)
 
@@ -81,9 +82,9 @@ Workers 无启动钩子,首请求惰性引导(模块级 promise 防重入 + KV �
 
 - **mcp**(`providers/mcp.ts`):官方 SDK Streamable HTTP;`Mcp-Session-Id` 会话复用(入 StateStore,失效 404 重握手一次);`authRef` 经 SecretStore.resolve 注入 Bearer;禁用 standalone SSE GET(fetch wrapper 返 405);schema 校验用 `@cfworker/json-schema`(workerd 禁 eval)。
 - **http**(`providers/http.ts`):`buildHttpRequest` 处理 `{param}` 占位与 GET/DELETE query、POST/PUT JSON body;`authHeader/authScheme` 控制上游凭证注入;非 2xx 与网络错误经 `normalizeUpstreamError` 收敛为 TBError。
-- **remote**(`providers/remote.ts`):注册时与调用时都校验 https 强制 + host allowlist(生效白名单 = env 基线 `TB_REMOTE_ALLOWLIST` ∪ 运行时条目,后者经 builtin `system/federation` 增删、存 `tool/allowlist.ts` 的 RemoteAllowlistStore,gateway `tbApp.ts` 请求期 `resolveRemoteSettings` 合并);本地调用者 SK 不外传,出站 Authorization 来自节点配置的 `skRef` 换发,每次成功使用记录 actor keyId/owner、traceId、节点、skRef、方法与去 query 的目标且不得记录明文凭据。当前注册入口未验证写入者是否有权使用该引用,审计不能替代授权;resolve 不到 Secret 时还会静默匿名降级,两者均须 fail closed 收口。`X-TB-Via` 入站先判环/跳数再追加自身。
+- **remote**(`providers/remote.ts`):注册时与调用时都校验 https 强制 + host allowlist(生效白名单 = env 基线 `TB_REMOTE_ALLOWLIST` ∪ 运行时条目,后者经 builtin `system/federation` 增删、存 `tool/allowlist.ts` 的 RemoteAllowlistStore,gateway `tbApp.ts` 请求期 `resolveRemoteSettings` 合并);本地调用者 SK 不外传,出站 Authorization 来自节点配置的 `skRef` 换发,写入时先过 `assertSecretRefUse`,调用时 resolve 不到 Secret 则 unavailable fail closed。每次成功使用记录 actor keyId/owner、traceId、节点、skRef、方法与去 query 的目标且不得记录明文凭据。`X-TB-Via` 入站先判环/跳数再追加自身。
 - **r2/s3 object**(`r2Object.ts`/`s3Object.ts`):etag=version 乐观并发;s3 用 aws4fetch(`s3Sign.ts`);挂载时做连通探测;ttl 懒回收;readOnly 拒写并在 help 隐藏写动词。
-- **plugin**(`pluginClient/pluginTool/pluginContext`):平台→Plugin 传输用 `X-TB-Context`(base64url 信封,唯一上下文载体)+ `X-TB-Request-Id`(重试去重);挂载 `authRef` 给出时 resolve 上游凭证经 `X-TB-Upstream-Auth`(base64url)注入,resolve 失败 → unavailable 快速失败;注册时探活 + `~describe`/`~help` 契约校验;周期探活不自动注销。
+- **plugin**(`pluginClient/pluginTool/pluginContext`):平台→Plugin 传输用 `X-TB-Context`(base64url 信封,唯一上下文载体)+ `X-TB-Request-Id`(重试去重);挂载 `authRef` 给出时 resolve 上游凭证经 `X-TB-Upstream-Auth`(base64url)注入,resolve 失败 → unavailable 快速失败;plugin/v2 注册时探活并只抓 `~describe` 验证 exports/profiles,挂载后由具体 export 的 provider 接口提供工具或 context 面;周期探活不自动注销。
 - **工具级两级披露**:节点 `~help` 是索引(cmd 行 + `h` 一句话),`GET /<node>/<tool>/~help` 给全量 spec;Dashboard schema 懒补水同源。
 - **可见性细则**:父目录/`~tree` 对 mcp/http/remote 调用节点按 read+call 裁剪(无 call 的 SK 看不到);直接访问仍按 read→404 / call→403。
 

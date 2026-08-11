@@ -269,7 +269,7 @@ pnpm lint:fix            # biome 自动修复
 
 ## 项目状态
 
-积极开发中(pre-release)。核心能力已全部落地并在 Cloudflare 生产环境验证:SK 鉴权与作用域、HTBP 树与内容协商、工具层(mcp / http / remote 联邦 + 虚拟化)、Context 四动词 + `$ref` 大对象、设备反向注册(WebSocket hibernation)、SDK 与 Plugin 系统、Dashboard;`@tool-bridge/cli` 与 `@tool-bridge/sdk` 已发布 npm。Node/Docker 单容器自部署与本地 Compose 三跳开发栈已落地。路线图:`tb init` 一键部署向导与七个 User Case 的端到端验收系统化。
+积极开发中(pre-release),当前没有正式生产环境。核心能力已全部落地,并在 Cloudflare 共享开发环境完成鉴权、MCP、Search、飞书 Plugin、WebSocket hibernation 与 Dashboard 的端到端验证;这类在线证据不等同于 production release。`@tool-bridge/cli` 与 `@tool-bridge/sdk` 已发布 npm,Node/Docker 单容器自部署与本地 Compose 三跳开发栈也已落地。当前收尾项是功能 PR 合入、外部 HTBP Draft 同步与 `tb init` 一键部署向导。
 
 ## License
 

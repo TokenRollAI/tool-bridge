@@ -7,61 +7,50 @@
 - ~~**P1-0 · PR #32 合并**~~ —— **已完成**(2026-08-10,rebase 合并进 main:`28f1f57` / `e91680b`
   / `7095860` / `033ebab` / `d400cd9`)。Phase 2 分支已 rebase 到 main,git 自动跳过 5 个
   已应用的 Phase 1 提交,零冲突,树内容与 rebase 前一致。
-- **P1-1 · Phase 1 项 6「部署解冻」** —— 仍挂起。代码已在 main,但**尚未部署**:需从与
-  `origin/main` 零差异的干净工作区执行 `pnpm deploy:all` + `TB_BASE_URL=… pnpm smoke`。
-  属外向不可逆动作,待用户授权。**不构成后续 Phase 的代码依赖。**
-- **P1-2 · Phase 1 遗留的生产验证** —— Round 27 已补 Node `identify await × 同 deviceId
-  替换`的确定性 barrier 回归,且 `verify-device.ts` 已加入真实连接替换 steady-state 用例;
-  仍须在线执行跨休眠窗口(≥155s)、DO hibernation/stale-meta 与真实连接替换,随 P1-1
-  部署后一并做(`TB_VERIFY_HIBERNATION=1 npx tsx scripts/verify-device.ts`)。
-- **P2-1 · Phase 2 项 7 的「生产复验」半边** —— 飞书 plugin 的**重写已完成并全绿**(Round 12),
-  但 DoD 还要求"重新部署 + 生产 create-doc/fetch-doc/update-doc 实调留证"
-  (`npx tsx scripts/verify-plugin.ts`,需 TB_BASE_URL + TB_SK + 真实飞书凭证)。
-  属外向不可逆动作且依赖生产环境,待用户授权;**不构成后续 Phase 的代码依赖**。
-  按"证据即判据"纪律,项 7 在拿到生产证据前不勾选。
-- **P3-1 · Phase 3 项 5 的「部署 + 生产 MCP smoke」半边** —— 官方 SDK 生产验收脚本
-  `pnpm verify:mcp` 已在 Round 29 加固为 admin 与 narrow 两侧都真实 call,本地 `pnpm verify` 全绿;尚需从与 `origin/main`
-  零差异的干净工作区执行 `pnpm deploy:all`,再以 admin / narrow 两把生产 SK 运行
-  `TB_BASE_URL=… TB_SK=… TB_MCP_NARROW_SK=… pnpm verify:mcp`(窄 SK 默认须能读 `system/status:get`,或显式设 `TB_MCP_NARROW_PATH/COMMAND/ARGS`)。属外向动作且当前 Phase 3
-  代码尚在功能分支,待用户授权及合并;**不构成 Phase 4 编码依赖**。生产证据前项 5 不勾选。
-- **P4-1 · Phase 4 项 1 的「真实 D1 provision + 部署」半边** —— `TB_SEARCH` 绑定、D1
-  幂等 provision 与隔离回归已在 Round 19 完成,Wrangler dry-run 也成功识别 D1 binding;
-  尚需干净主分支上对真实账户连续运行两次 `node scripts/provision.mjs`(确认只创建一次
-  `tb-search`)并执行 `pnpm deploy:all`。属生产资源创建/部署外向动作,待用户授权;**D1 绑定
-  与本地 Miniflare 已就位,不构成后续 Search 编码依赖**。真实证据前项 1 不勾选。
+- ~~**P1-1 / P1-2 · Phase 1 部署与 DO 在线验证**~~ —— **已完成**(Round 32):用户明确
+  该项目尚处开发期并授权立即部署;从提交真实 D1 binding 后的干净功能分支部署到既有共享
+  开发环境,authenticated smoke 通过,`verify-device` 标准路径与 opt-in ≥155s hibernation
+  均通过。该次是有意覆盖开发实例,不冒充 production release 或 clean-main 发布纪律。
+- ~~**P2-1 · Phase 2 飞书在线复验**~~ —— **已完成**(Round 32):plugin Worker 重部署,
+  线上注册从 v1 迁移到 plugin/v2 并重新挂载 `actions`;真实 create-doc→fetch-doc→
+  update-doc append→fetch-doc 标记对拍通过。
+- ~~**P3-1 · Phase 3 MCP 在线 smoke**~~ —— **已完成**(Round 32):官方 SDK 对线上 `/~mcp`
+  以 admin/narrow 两身份 list+call;工具集 29→2,允许的 `system/status:get` 成功且旧
+  admin-only flat name 被拒。
+- ~~**P4-1 · Phase 4 真实 D1 provision + 部署**~~ —— **已完成**(Round 32):创建 APAC
+  D1 `tb-search`(`f788b779-ec1c-4fba-ac1f-b780fab990fc`),回填 binding,连续第二次 provision
+  精确 skip,随后部署与真实 D1 查询通过。
 - **P4-2 · Phase 4 项 2 的「HTBP Draft 外部同步」半边** —— 本仓 core/gateway、
   `llmdoc/reference/protocol-contract.md` 与契约测试已在 Round 20 完成;真正的 HTBP Draft
   位于外部 `TokenRollAI/HTBP` 仓库 `docs/rfcs/RFC-0001-htbp-core.md`,当前 Draft 尚未加入
   `~search`。跨仓提交/PR 属外向动作,待用户授权;本仓 `archive/docs/Proto.md` 已明确是历史
   资料,不能冒充外部 Draft 同步证据。**不构成 SearchIndex 实现的代码依赖**,外部变更证据前
   项 2 不勾选。
-- **P4-3 · Phase 4 项 7 的「部署 + 生产 Search smoke」半边** —— Round 24 已完成
-  `pnpm verify` 全阶段回归;`tb search` 与 Dashboard `/ui/search` 本地消费面也已闭环。
-  尚需在 P4-1 真实 D1 provision 后从干净主分支执行 `pnpm deploy:all`,再对生产
-  `/~search` 各跑一次中文两字词与英文词 smoke。属外向生产动作,待用户授权;
-  **不构成 Phase 4.5 编码依赖**,生产证据前项 7 不勾选。
+- ~~**P4-3 · Phase 4 Search 在线 smoke**~~ —— **已完成**(Round 32):真实 D1 上以临时
+  visible/hidden fixture 与窄 SK 跑全 cursor `verify:search`,`日程` / `create document`
+  均为 admin 2→narrow 1;线上 Dashboard 两个 query 的 DOM 也仅返回 allowed path。
 
-## ⏹ LOOP 停机状态
+## ▶ 当前收尾状态
 
-- Round 31 已完成唯一不依赖生产外向动作的 E2E-D。Phase 5 其余未勾项 E2E-A/B/E/C
-  分别由 P1-1/P1-2、P2-1、P3-1、P4-1/P4-3 卡住;它们都要求用户授权的生产部署、
-  真实外部服务或线上复验。
-- 当前没有可继续推进的未勾项,命中 LOOP 的唯一真正停机条件「所有 Phase 的全部未勾项
-  都被 PENDING 卡住」。这不是“全部完成”:全局 Done 仍须完成上述生产证据、PR/合并与部署。
+- Round 32 已在用户授权下完成共享开发环境部署与 E2E-A/B/E/C 在线证据;Phase 5 五项
+  现已全部勾选。
+- 全局 Done **仍未成立**:Phase 4 项 2 的外部 `TokenRollAI/HTBP` Draft `~search` 同步
+  仍挂 P4-2;本功能分支正在创建 PR,尚未合入 main。用户明确当前无 production,因此本轮
+  证据只称共享开发环境,不改写为正式生产发布。
 
 ## 当前状态
-- 当前 Phase:**Phase 5 — E2E 验收 / PENDING 停机**(Round 31 已勾 E2E-D;E2E-A/B/E/C 只剩生产外向证据,见上方 LOOP 停机状态与 PENDING)
+- 当前 Phase:**Phase 5 — E2E 已闭环 / PR 收尾**(Round 32 已完成共享开发环境 A/B/E/C 在线证据;D 已于 Round 31 完成)
 - Phase 3 已勾选:项 1(官方 MCP 测试 client + 本地 initialize,Round 14)、项 2(认证后的动态 tools/list + tools/call,Round 15)、项 3(scope 收窄钉死,Round 16)、项 4(三入口对等审计,Round 17)
-- Phase 3 待办:**仅剩待授权的外向动作** — 项 5 已完成生产脚本与全量回归,真实部署/生产 MCP smoke → P3-1
+- Phase 3 已全部勾选:项 5 的部署与线上 MCP smoke 已在 Round 32 完成。
 - Phase 4 已勾选:项 3(CF D1 + Node SQLite SearchIndex,FTS5/trigram,Round 21)、项 4(trigram 短词 escaped LIKE 兜底,Round 22)、项 5(加权索引、自动同步、权限后处理分页与 opaque cursor,Round 23)、项 6(`tb search` + Dashboard `/search`,Round 24)
-- Phase 4 遗留:项 1 真实 provision/deploy → P4-1;项 2 外部 HTBP Draft → P4-2;项 7 已完成 `pnpm verify` 半边,生产 deploy + 中英文 search smoke → P4-3。三者均为外向流程动作,不构成 Phase 4.5 编码依赖。
+- Phase 4 已勾选项 1、3–7;唯一遗留为项 2 的外部 HTBP Draft 同步 → P4-2。
 - Phase 4.5 已勾选:项 1(Dashboard Registry/Plugins/SK 大页拆分、纯 builder 契约测试与 fresh-source UI 集成,Round 25)、项 2(gateway→plugin-feishu Worker→mock TAT/MCP 上游 Compose 三跳开发栈,Round 26)、项 3(`pnpm verify` 全绿,Round 26)
-- Phase 5 本地进度:E2E-D 已完整勾选(Round 31);E2E-A 的 SecretRef 越权拒绝、Node bootstrap fail closed、Node invoke×连接替换 barrier 与 `pnpm verify` 已闭环(Round 27),但生产 deploy/smoke 与 DO 休眠/stale-meta 仍映射 P1-1/P1-2;E2E-B/E/C 的本地半边同样已闭环,生产证据分别映射 P2-1/P3-1/P4-1/P4-3。
+- Phase 5 五项 E2E-A/B/E/C/D 均已勾选;Round 32 的外向证据来自共享开发环境,不是正式 production release。
 - Phase 2 已勾选:项 1(OperationRegistry)、项 2(Plugin v2 多 export,Round 13 补齐三入口对等后成立)、项 3(Context 按 handler 推导能力)、项 4(`@tool-bridge/plugin-sdk` 可发布)、项 5(样例 plugin 双 export)、项 6(删净 legacy 面)
-- Phase 2 待办(**全部为待授权的外向动作**):项 7 飞书重写复验(代码已完成,只差生产实调 → P2-1)/ 项 8 部署上线
-- Phase 1(代码完成,部署挂起见 PENDING)
+- Phase 2 已全部勾选:飞书重写在线复验与部署在 Round 32 完成。
+- Phase 1 已全部勾选:部署与在线 DO 休眠/替换证据在 Round 32 完成。
 - 已勾选:项 1(Secret Reference 使用授权,Round 1 → Round 4 补第三写入口后成立)、项 2(DO/Node 连接替换 TOCTOU,Round 2 → Round 4 补 registerPaths 后成立)、项 3(Node/Docker bootstrap fail closed)、项 4(canonical origin 对等)、项 5(`pnpm verify` 全绿)
-- 未勾选:项 6(部署解冻 smoke)—— 被 P1-1 / P1-2 卡住,见上
+- 项 6 部署解冻 smoke 已于 Round 32 勾选。
 - 已提交:`4e59750` core 原语 / `3867a30` 宿主接线(四个阻断项)/ `a9fcba4` lockfile / `3b42eda` 规划文档
 - Blockers(从 DOR.md 继承,不阻塞全局开工,只缩小对应 Phase 可推进范围):
   - ~~**C-1**(Phase 4):D1 绑定与 provision 幂等分支尚未建立。~~ **代码 blocker 已解决**(Round 19):`TB_SEARCH` D1 binding + 幂等 provision + 隔离回归 + Wrangler deploy dry-run 均就位;真实账户 provision/deploy 仅作为流程动作挂 P4-1。
@@ -565,3 +554,39 @@
   - `pnpm compose:reset` 后 Compose 容器/网络与 `tool-bridge-dev_gateway-data` 卷均不存在;临时 peer 与 Playwright session 同步清理。
 - 勾选:Phase 5 **E2E-D**。
 - 遗留:Phase 5 其余 E2E-A/B/E/C 均只剩生产部署或真实外部环境证据,分别映射 P1-1/P1-2、P2-1、P3-1、P4-1/P4-3。所有未勾项均为 PENDING,命中 LOOP 真正停机条件;等待用户授权外向动作后再恢复。
+
+## Round 32 — 2026-08-11
+- 目标:在用户明确“当前无 production、项目仍在开发中”并授权立即部署与创建 PR 后,
+  覆盖既有共享开发实例,补齐 Phase 1/2/3/4 与 E2E-A/B/C/E 的在线证据。
+- 部署:
+  - 真实账户首次创建 APAC D1 `tb-search`(`f788b779-ec1c-4fba-ac1f-b780fab990fc`),
+    回填 `TB_SEARCH.database_id`;连续第二次 `node scripts/provision.mjs` 对 KV/R2/D1 全部
+    exact skip。binding 以提交 `1cacec8` 固化后工作树干净。
+  - 单独部署 `tb-plugin-feishu` version `140c2a97-3fbe-4faf-8e8a-7a7045606e67`;
+    `pnpm deploy:all` 重建 Dashboard 97 个 assets 并部署 gateway version
+    `ce61da86-fb00-4550-915d-08eb4c7a7c94` 到 `tool-bridge.pdjjq.org`。
+  - 这是用户授权的 feature-branch 开发部署,有意覆盖 2026-08-10 的旧开发 Worker/同名
+    KV/R2 状态;不是正式 production release,也不把它描述成遵循 merge→clean-main 的发布流程。
+- 在线验收:
+  - `pnpm smoke` 全 PASS:health 200、匿名 help 401、admin Markdown/DSL help 200。
+  - 官方 MCP SDK `verify:mcp`:admin list/call 成功,narrow 工具集 **29→2**,
+    `system/status:get` 成功,旧 admin-only 名 `tool not found`;临时 SK 已撤销。
+  - 真实 D1 `verify:search`:对临时 allowed/hidden fixture 的 `日程` 与
+    `create document` 均 **admin 2/1p→narrow 1/1p**,全 cursor、prefix 与子集断言通过;
+    KV 跨请求可见窗口实测约 35–60s 后审计收敛,临时 fixture/SK 已删除。
+  - `verify-device` 标准路径与 `TB_VERIFY_HIBERNATION=1` 均 PASS:真实 shell/fs、同 ID
+    replacement、registerPaths allow/deny;空闲 **155s** 后 shell 仍成功,临时设备与 SK 清理。
+  - 线上旧 `feishu` 注册从 tool-provider/v1 原位迁移到 plugin/v2,探活并缓存
+    `actions:tools/v1`;重新挂载 `feishu` + `authRef:feishu-app`,真实发现 8 工具。随后
+    create-doc→fetch-doc(create marker)→update-doc append→fetch-doc(create+update markers)
+    全 PASS;只记录脱敏结果,不在账本保存 doc token/URL 或凭据。
+  - 真实 Playwright + narrow SK 的线上 Dashboard 对两个 exact query 均只渲染 allowed
+    path,与 CLI 一致。功能断言通过;console 另见 Cloudflare 响应阶段自动注入的
+    `static.cloudflareinsights.com` beacon 被项目 `script-src 'self'` CSP 正确拦截,以及首次
+    未给窄 SK `system/status` 时壳层 404。没有为消除平台 beacon 而放宽 CSP。
+- 回归:`pnpm verify` → package **1273 passed / 7 skipped** + provision **1 passed**,
+  合计 **1274 passed / 7 skipped**;Wrangler gateway dry-run 明确列出 D1/KV/R2/DO/assets。
+- 勾选:Phase 1 项 6;Phase 2 项 7/8;Phase 3 项 5;Phase 4 项 1/7;
+  Phase 5 E2E-A/B/C/E。连同 Round 31 的 E2E-D,Phase 5 全部完成。
+- 遗留:Phase 4 项 2 的外部 `TokenRollAI/HTBP` Draft `~search` 同步仍为 P4-2;
+  当前功能分支尚待 push/PR/CI/合入,全局 Done 不成立。

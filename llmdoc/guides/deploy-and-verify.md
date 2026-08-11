@@ -8,7 +8,7 @@
 
 typecheck + biome lint + 单测(core/cli/sdk)+ 集成测试(gateway 真实 workerd + server 纯 Node + plugin-feishu 真实 workerd)一把过。
 
-2026-07-10 快照:core `681 passed`、cli `162 passed`、sdk `12 passed | 1 skipped`、gateway `119 passed | 6 skipped`、server `23 passed`、plugin-feishu `8 passed`,合计 **1005 passed / 7 skipped**。数字随开发增长,以全 pass 和退出码 0 为准;任一段红即停,先修再继续。
+2026-08-11 Round 32 快照:package **1273 passed / 7 skipped** + provision **1 passed**,合计 **1274 passed / 7 skipped**。数字随开发增长,以全 pass 和退出码 0 为准;任一段红即停,先修再继续。
 
 ### 2. 先确认部署状态,再决定是否手工部署
 
@@ -27,9 +27,11 @@ pnpm --filter @tool-bridge/gateway exec wrangler versions list --json
 pnpm deploy:all
 ```
 
-= `node scripts/provision.mjs`(幂等建 KV/R2,存在即跳过)+ `pnpm --filter @tool-bridge/dashboard build`(gateway 部署前须先产出 dashboard dist)+ `pnpm --filter @tool-bridge/gateway run deploy`(wrangler deploy)。
+= `node scripts/provision.mjs`(幂等建 KV/R2/D1,存在即跳过)+ `pnpm --filter @tool-bridge/dashboard build`(gateway 部署前须先产出 dashboard dist)+ `pnpm --filter @tool-bridge/gateway run deploy`(wrangler deploy)。plugin-feishu 不在根命令内,变更插件时须另跑 `pnpm --filter @tool-bridge/plugin-feishu deploy`。
 
 **部署前置检查**:部署工作区必须与 `origin/main` 零差异(`git fetch && git diff origin/main --stat` 为空、`git status` 干净)——主 checkout 可能残留他人/往轮 WIP,直接部署会把未提交改动带上线。从干净 worktree 部署时把主 checkout 的 `.env` 拷过去即可(gitignored;provision/deploy 脚本读仓库根 `.env`)。
+
+Round 32 是显式例外:用户确认当前无 production 并要求“先部署、再发 PR”,因此从已提交且工作树干净的 feature branch 覆盖既有共享开发实例。例外必须在 PROGRESS/PR 记录目标版本与验证证据,不得外推为正式 release 流程;后续发布仍遵守 merge→clean main。
 
 预期(资源已存在时):
 
@@ -123,7 +125,7 @@ TB_SEARCH_ALLOWED_PREFIX='search/visible' \
 pnpm verify:search
 ```
 
-脚本对两个 exact query分别用真实 CLI拉完所有 cursor页,再要求窄结果非空、属于admin集合、严格缩小且全部落在完整TreePath段前缀内。重复item/cursor或20页预算后仍有cursor均fail closed。当前只有本地Miniflare D1、Node SQLite/CLI/Dashboard证据;须在真实D1 provision与干净部署后运行此命令并以同一窄身份复核生产Dashboard,才能关闭P4-1/P4-3。
+脚本对两个 exact query分别用真实 CLI拉完所有 cursor页,再要求窄结果非空、属于admin集合、严格缩小且全部落在完整TreePath段前缀内。重复item/cursor或20页预算后仍有cursor均fail closed。Round 32 已在共享开发 D1 上以临时 visible/hidden fixture 跑通 admin 2→narrow 1,并用同一窄身份复核 Dashboard DOM;临时 SK、registry fixture与D1行均已清理。正式 release 仍须从 clean main 重跑。
 
 ## 排错
 
@@ -131,4 +133,5 @@ pnpm verify:search
 - **custom domain 刚部署后 curl 404/522**:custom domain 首次绑定或 DNS 变更有分钟级生效延迟,等 1-2 分钟重试;也可先用 wrangler deploy 输出里的 workers.dev 地址确认 Worker 本身健康,再等域名。
 - **smoke 报缺少配置**:确认命令行同时显式传入 `TB_BASE_URL` 与 `TB_SK`(脚本不读 `.env`),见第 5 步;不要把缺 SK 当作可跳过项。
 - **verify 里集成测试起不来 workerd**:确认 `pnpm install` 后再跑;`@cloudflare/vitest-pool-workers` 用 miniflare 本地实例,不需要真实 KV id。
+- **线上 Dashboard 出现 `static.cloudflareinsights.com` CSP console error**:Cloudflare 可能在 HTML 响应阶段自动注入 Analytics beacon,而本项目故意使用 `script-src 'self'`。先在平台侧决定是否关闭自动注入;不要为了消除 console 文本直接放宽 CSP。该错误须与应用自身请求错误分开记录。
 - **`SSL_ERROR_SYSCALL` / `Network connection lost` 等瞬时网络错误**:只对原来的只读查询或幂等 push 重试,随后重新读取远端 refs、Actions、npm dist-tag、Cloudflare deployment/version 与产物 hash;不要未经证据改认证、重打 tag 或重复 deploy。

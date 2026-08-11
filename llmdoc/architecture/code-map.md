@@ -35,14 +35,14 @@ exports `.` / `./tbApp` / `./bootstrap` / `./deviceHello`(供 SDK 与 server 复
 | `bootstrap.ts` | 首请求惰性引导:Workers 缺 `TB_BOOTSTRAP_ADMIN_SK` fail closed + `system` 七 builtin 物化(promise 防重入 + KV 幂等标志);宿主中立 `runBootstrap` 默认保留随机生成并向本地 stdout 展示一次的 SDK兼容路径,Node server 另以 `requireAdminSk` 默认收紧;已引导实例升级自动补挂新模块 |
 | `deviceHello.ts` | **宿主中立 `processDeviceHello`**:设备 hello 验证 + 落库的单一真源,DO 与 server DeviceHub 共用;有 MutableSearchIndex 时 seed/mark 后批量 rebuild 派生索引 |
 | `kvStateStore.ts` | StateStore 的 KV 实现(list 跳 null、子树前缀扫描,头注释有约束说明) |
-| `deviceSession.ts` | `DeviceSession` DO 胶水:WS hibernation、待决表、`setWebSocketAutoResponse`、惰性会话重建;设备子树回收同步 SearchIndex;休眠恢复与每次 invoke 重验 SK/keyId/scope/registerPaths,跨 KV await 后重读 activeConnId,`markDisconnected` 按 connId 条件清理避免旧连接覆盖新 meta。实现已闭合,但 DO 驱逐/hibernation/stale-meta 仍须授权生产验证(协议行为在 deviceHello.ts) |
+| `deviceSession.ts` | `DeviceSession` DO 胶水:WS hibernation、待决表、`setWebSocketAutoResponse`、惰性会话重建;设备子树回收同步 SearchIndex;休眠恢复与每次 invoke 重验 SK/keyId/scope/registerPaths,跨 KV await 后重读 activeConnId,`markDisconnected` 按 connId 条件清理避免旧连接覆盖新 meta。共享开发环境已通过 155s hibernation、同 ID replacement 与 allow/deny registerPaths(协议行为在 deviceHello.ts) |
 | `refToken.ts` | `$ref` 网关中转的 HMAC token 签发/校验(HMAC 用途域分离) |
 | `search/synchronizer.ts` | `SearchSynchronizer`:StateStore/registry/tool cache/feedback → SearchIndex 派生投影;固定 node/subtree pending markers,hot reconcile + 每次搜索 500-node canonical audit;overflow seed/LKG/fail-closed/回落恢复与超额节点排除 |
 | `search/d1SearchIndex.ts` | D1 keyword v2 adapter:raw ToolSpec source + feedback FTS(10/3/1)+ meta revision/cursor secret + snapshot digest/path capacity trigger;JSON1 byte chunks、candidate/hydrate/cursor、same-digest no-op;并发 500-path cap,cold query formula 48≤50 |
 | `providers/` | 全部上游 I/O:`mcp.ts`(SDK Streamable HTTP,会话复用 + 404 重握手一次;auth:'oauth' 挂 `../oauth.ts` 的 authProvider)、`http.ts`、`remote.ts`、`toolCache.ts`、`r2Object.ts`、`s3Object.ts` + `s3Sign.ts`(aws4fetch)、`pluginClient.ts`(`upstreamAuthRef` → resolve 后经 `X-TB-Upstream-Auth` 注入,失败 → unavailable)+ `pluginTool.ts` + `pluginContext.ts` |
 | `test/` / `scripts/` | workerd 集成测试族;`search.integration.test.ts` 钉权限后分页/预算;`searchSynchronizer.test.ts` 钉 canonical/LKG;`d1SearchIndex.integration.test.ts` 复用 v2 contract并经真实 D1 + `SELF.fetch` 执行 `日程`/`create document` exact query、容量并发与 48-query预算;`ui.integration.test.ts` 每次fresh build并钉 `/ui/search` 接线。`scripts/echo-mcp.ts` 兼作 Compose authenticated mock,`compose-smoke.ts` 走 gateway→plugin-feishu→mock;另有 s3-mock/stub-provider |
 | `vitest.config.ts` | 在 gateway 测试启动前无条件从当前 Dashboard source 执行 build,避免 `ui.integration.test.ts` 误验陈旧 `dist` |
-| `wrangler.jsonc` | 绑定 TB_KV / TB_R2 / TB_DEVICE(DO)/ ASSETS(dashboard dist,`run_worker_first`)及 `TB_SEARCH` → `tb-search` D1(`database_id` 占位由 provision 回填)+ `account_id` + custom domain;production 禁 `workers_dev`/Preview URLs,用 `TB_CANONICAL_ORIGIN` 固定 OAuth callback origin |
+| `wrangler.jsonc` | 绑定 TB_KV / TB_R2 / TB_DEVICE(DO)/ ASSETS(dashboard dist,`run_worker_first`)及 `TB_SEARCH` → `tb-search` D1(当前真实 UUID `f788b779-ec1c-4fba-ac1f-b780fab990fc`,由 provision 幂等回填)+ `account_id` + custom domain;禁 `workers_dev`/Preview URLs,用 `TB_CANONICAL_ORIGIN` 固定 OAuth callback origin |
 
 ## packages/cli — `tb`(npm 发布物)
 
@@ -103,6 +103,6 @@ exports `.` / `./tbApp` / `./bootstrap` / `./deviceHello`(供 SDK 与 server 复
 
 ## scripts/ 与 CI
 
-- `scripts/`:gen-dev-vars/provision/smoke及可重跑验收脚本。`verify-mcp.ts` 用官方 SDK做admin/narrow双连接与双call;`verify-search.ts` 是根 `verify:search` 入口,构建CLI后只读执行 `日程`/`create document`,admin/narrow各沿opaque cursor拉全(200/页,最多20页),拒绝重复项/cursor,再验证窄结果非空、TreePath段前缀、admin子集和严格缩小;必填 `TB_BASE_URL`/admin SK/`TB_SEARCH_NARROW_SK`/`TB_SEARCH_ALLOWED_PREFIX`,不创建fixture或修改生产状态。
+- `scripts/`:gen-dev-vars/provision/smoke及可重跑验收脚本。`verify-mcp.ts` 用官方 SDK做admin/narrow双连接与双call;`verify-search.ts` 是根 `verify:search` 入口,构建CLI后只读执行 `日程`/`create document`,admin/narrow各沿opaque cursor拉全(200/页,最多20页),拒绝重复项/cursor,再验证窄结果非空、TreePath段前缀、admin子集和严格缩小;必填 `TB_BASE_URL`/admin SK/`TB_SEARCH_NARROW_SK`/`TB_SEARCH_ALLOWED_PREFIX`,不创建fixture或修改目标环境状态。Round 32 已在共享开发环境以临时 fixture/SK 验证并清理。
 - `.github/workflows/`:publish-{cli,sdk,gateway,dashboard,server}.yml(tag `<pkg>-v*`,npm Trusted Publishing)+ publish-docker.yml(tag `server-v*`,GHCR 镜像,buildx amd64/arm64)。
 - 仓库根:`Dockerfile`(production多阶段node:22-bookworm→slim;legacy deploy的Dashboard workspace symlink在final会悬空,故显式COPY fresh `dashboard/dist`→`/app/dashboard`并设`TB_UI_DIR`;单容器CMD仍为`node /app/dist/main.js`)+`.dockerignore`;`docker-compose.yml`另组localhost gateway+内网plugin/upstream+profile smoke。`compose-smoke.ts`先断言`/ui/`与`/ui/manage/registry`为Dashboard HTML,再跑三跳业务链。

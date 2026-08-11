@@ -58,6 +58,7 @@
 - [memory/reflections/2026-08-11-mcp-consumer-e2e-evidence-layers.md](memory/reflections/2026-08-11-mcp-consumer-e2e-evidence-layers.md) — MCP consumer E2E 证据分层(官方 SDK workerd、Node TCP、生产复跑三层;窄 SK 新连接精确集合;stale 负例+允许工具真实 call;零工具集不得冒充 scope 收窄)。
 - [memory/reflections/2026-08-11-search-e2e-evidence.md](memory/reflections/2026-08-11-search-e2e-evidence.md) — Search E2E 精确查询与证据分层(shared adapter+D1/SQLite wire+真实CLI全分页+浏览器DOM+生产复跑;hidden admin control;后页越权、前缀混淆与空集假绿防线)。
 - [memory/reflections/2026-08-11-compose-final-image-ui-evidence.md](memory/reflections/2026-08-11-compose-final-image-ui-evidence.md) — Compose final-image UI证据(workspace symlink跨stage悬空;显式复制`/app/dashboard`+`TB_UI_DIR`;root/deep-link smoke与final容器浏览器分层;九路由/tree depth/ARIA/console边界)。
+- [memory/reflections/2026-08-11-shared-development-deploy-evidence.md](memory/reflections/2026-08-11-shared-development-deploy-evidence.md) — 共享开发环境部署例外与在线证据分账(feature-branch覆盖须显式授权且不冒充production;真实D1幂等与KV收敛窗口;MCP/Search/Device/Feishu在线证据;Web Analytics beacon/CSP冲突;临时资源清理)。
 
 ## 路由提示
 

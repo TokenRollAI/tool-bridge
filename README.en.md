@@ -260,7 +260,7 @@ Engineering rule: **the code is the source of truth for behavior**; the lookup d
 
 ## Status
 
-Under active development (pre-release). All core capabilities have landed and are verified in production on Cloudflare: SK auth with scopes, the HTBP tree with content negotiation, the tool layer (mcp / http / remote federation + virtualization), the four context verbs plus `$ref` large objects, device reverse registration (WebSocket hibernation), the SDK and plugin system, and the Dashboard. `@tool-bridge/cli` and `@tool-bridge/sdk` are published to npm. Node/Docker single-container self-hosting and the local three-hop Compose stack are implemented. Roadmap: a `tb init` one-shot deployment wizard and systematic end-to-end acceptance across the seven user cases.
+Under active development (pre-release), with no formal production environment yet. The core capabilities have landed and have been exercised end to end in a shared Cloudflare development environment, including auth, MCP, Search, the Feishu plugin, WebSocket hibernation, and the Dashboard; this online evidence is not a production release. `@tool-bridge/cli` and `@tool-bridge/sdk` are published to npm, and Node/Docker single-container self-hosting plus the local three-hop Compose stack are implemented. Remaining release work includes merging the feature PR, synchronizing the external HTBP Draft, and building the `tb init` one-shot deployment wizard.
 
 ## License
 
