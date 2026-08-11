@@ -34,7 +34,7 @@ Phase 间不可跳:B 改 ToolSpec 派生形态,C 索引 ToolSpec 必须在 B 后
 - [x] OperationRegistry 落地:core 统一 Zod 驱动 registry,SDK 自动完成 z.infer 参数推导 / safeParse / ZodError→invalid_argument / Zod→JSON Schema / List·Get·Call / 裸返回值包装。验证:`pnpm --filter @tool-bridge/core test` 覆盖 registry 与派生全绿。
 - [x] Plugin v2 多 export:`kind` 从 manifest 移出,`/~describe` 返回 exports 数组(profile tools/v1 或 context/v1),挂载配置加 `export` 字段;一个 plugin 能同时导出 tools 和 context。验证:`pnpm --filter @tool-bridge/gateway test` 中多 export 描述/挂载/调用用例全绿。
 - [x] Context 按 handler 推导能力:handler 全可选,存在性推导 methods/capabilities,无 write/update/delete 自动只读;修掉 Watch 假能力与 connect() 上报丢失 virtualize/readOnly/capabilities。验证:core + gateway 相关用例全绿(含 connect 语义保真回归)。
-- [x] `@tool-bridge/plugin-sdk` 可发布:Web 标准兼容(不引 Node 运行时依赖污染 Worker),接管 v1/v2 envelope / auth / dedupe / health / describe / help / Zod 校验 / JSON Schema / 错误归一。验证:`pnpm --filter @tool-bridge/plugin-sdk build && npm pack --dry-run` 在该包通过;新增该包单测全绿。
+- [x] `@tool-bridge/plugin-sdk` 可发布:Web 标准兼容(不引 Node 运行时依赖污染 Worker),接管 v1/v2 envelope / auth / dedupe / health / describe / help / Zod 校验 / JSON Schema / 错误归一。验证:`pnpm --filter @tool-bridge/plugin-sdk build && pnpm --filter @tool-bridge/plugin-sdk pack --dry-run --json` 通过;真实 `pnpm pack` tarball 的 main/types/exports 指向 dist,且新增该包单测全绿。
 - [x] 样例 plugin 双 export 零样板:一个用新 SDK 写的 plugin 同时注册 tools 与 context、不写任何 JSON Schema 与协议样板。验证:该样例的集成测试(注册→describe 两 export→调用工具→读 context)全绿。
 - [x] 删净 legacy 面:代码中不再有 legacy provider API / ToolProvider.Get / 强制四方法接口。验证:`grep -rn "ToolProvider" packages/*/src` 无强制 Get 契约残留(或有断言测试);`pnpm verify` 全绿。
 - [ ] 飞书 plugin 重写复验:飞书 plugin 用新 SDK 重写、重新部署,生产 create-doc/fetch-doc/update-doc 全链路通过。验证:`npx tsx scripts/verify-plugin.ts`(TB_BASE_URL+TB_SK)+ 飞书三动词生产实调各一次留证。
@@ -75,7 +75,7 @@ Phase 间不可跳:B 改 ToolSpec 派生形态,C 索引 ToolSpec 必须在 B 后
 > 每条 E2E 对应 VISION 的一个 User Case,脚本化、可重跑。用复选框承载状态,遵守顶部的勾选纪律。
 
 - [ ] **E2E-A**(Case A:解冻 + 越权引用拒绝):`pnpm verify` 全绿含竞态/fail-closed 回归;窄 register scope SK 经 `~register` 写越权 skRef 被拒(用例证据);`TB_BOOTSTRAP_ADMIN_SK= pnpm --filter @tool-bridge/server start` 退出非 0 且无 SK 明文;干净工作区 `pnpm deploy:all` + `pnpm smoke` 通过。
-- [ ] **E2E-B**(Case B:新 SDK 双 export 零样板 + 飞书复验):样例 plugin 集成测试(describe 两 export→调工具→读 context)通过;`npm pack --dry-run` 在 plugin-sdk 包通过;飞书 plugin 重写后 `npx tsx scripts/verify-plugin.ts` + 生产 create-doc/fetch-doc/update-doc 各一次通过。
+- [ ] **E2E-B**(Case B:新 SDK 双 export 零样板 + 飞书复验):样例 plugin 集成测试(describe 两 export→调工具→读 context)通过;`pnpm --filter @tool-bridge/plugin-sdk pack --dry-run --json` 通过且真实 tarball 入口指向 dist;飞书 plugin 重写后 `npx tsx scripts/verify-plugin.ts` + 生产 create-doc/fetch-doc/update-doc 各一次通过。
 - [ ] **E2E-E**(Case E:存量 MCP 客户端接入):测试 MCP client 连生产 MCP endpoint,`tools/list` 按 SK scope 裁剪、`tools/call` 真实成功;换窄 scope SK 重连工具集收窄(命令 + 输出留证)。
 - [ ] **E2E-C**(Case C:按意图搜工具 + 中文两字词 + 权限裁剪 + 双侧对等):`tb search "日程"` 与 `tb search "create document"` 均命中不空;窄 scope SK 搜结果只含可见节点;CF 生产 `~search` 与 Node 宿主 `~search` 同 query 行为对等;Dashboard 搜索面返回同样结果。
 - [ ] **E2E-D**(Case D:本地一键栈 + Dashboard 可维护):`docker compose up` 起完整栈端到端 smoke 通过;Dashboard 拆分后 `pnpm verify` 全绿 + 真实浏览器四面证据(桌面/移动路由、树请求边界、键盘导航、无 console error/warning)通过。

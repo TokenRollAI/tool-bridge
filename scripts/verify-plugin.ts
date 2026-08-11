@@ -198,7 +198,6 @@ function assertTBErrorShape(body: unknown, what: string): { code: string } {
 interface PluginRegistration {
   enabled: boolean
   id: string
-  kind: string
   pluginToken?: string
 }
 
@@ -238,8 +237,7 @@ async function main(): Promise<void> {
       manifestFile,
       JSON.stringify({
         id: pluginId,
-        kind: 'context-provider',
-        interfaceVersion: 'context-provider/v1',
+        protocolVersion: 'plugin/v2',
         endpoint: stubUrl,
         auth: { kind: 'platform-token' },
         healthPath: '/healthz',
@@ -285,7 +283,7 @@ async function main(): Promise<void> {
       assert.equal(h.healthy, true, `health 预期 healthy,实际 ${JSON.stringify(h)}`)
     })
 
-    // 5) 挂载:NodeRegistry.Write{kind:'context', provider:<plugin-id>}。
+    // 5) 挂载:NodeRegistry.Write{kind:'context', provider:<plugin-id>, export:'entries'}。
     //    tb ctx mount 只收 r2|s3(内置 provider),plugin 挂载走管理面 system/registry。
     await step('挂载 plugin-backed context 节点', async () => {
       await cliJson([
@@ -298,7 +296,7 @@ async function main(): Promise<void> {
           path: mountPath,
           kind: 'context',
           description: 'verify-plugin stub mount',
-          config: { kind: 'context', provider: pluginId },
+          config: { kind: 'context', provider: pluginId, export: 'entries' },
         }),
       ])
       mounted = true
@@ -387,13 +385,20 @@ async function main(): Promise<void> {
 
     await step('清单② ~describe 与 manifest/实现一致', async () => {
       const describe = (await (await fetch(`${stubUrl}/~describe`)).json()) as {
-        capabilities: string[]
-        interfaceVersion: string
-        kind: string
+        exports: Array<{
+          capabilities?: string[]
+          id: string
+          methods?: string[]
+          profile: string
+        }>
+        protocolVersion: string
       }
-      assert.equal(describe.kind, 'context-provider')
-      assert.equal(describe.interfaceVersion, 'context-provider/v1')
-      assert.deepEqual([...describe.capabilities].sort(), ['delete', 'search'])
+      assert.equal(describe.protocolVersion, 'plugin/v2')
+      const exported = describe.exports.find(item => item.id === 'entries')
+      assert.ok(exported !== undefined, '~describe 须声明 entries export')
+      assert.equal(exported.profile, 'context/v1')
+      assert.deepEqual([...(exported.methods ?? [])].sort(), [...allMethods].sort())
+      assert.deepEqual([...(exported.capabilities ?? [])].sort(), ['delete', 'search'])
       // 网关侧一致性:挂载节点 ~describe 回注册时缓存的 capabilities。
       const nodeDescribe = await fetch(`${baseUrl}/${mountPath}/~describe`, {
         headers: { authorization: `Bearer ${adminSk}`, accept: 'application/json' },

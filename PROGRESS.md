@@ -499,3 +499,17 @@
   - `pnpm verify` → 9 workspace typecheck + 全仓 lint + provision **1 passed** + 包测试 **1273 passed / 7 skipped**(core 744 + dashboard 10 + plugin-sdk 22 + cli 242 + sdk 19 + plugin-feishu 9 + gateway 189 + server 38),合计 **1274 passed / 7 skipped**,退出码 0。
 - 勾选:无。E2E-A 的本地 fail-closed/越权/竞态/全量回归半边已闭环,但 DoD 同项还要求生产 deploy + authenticated smoke,证据未取得前保持未勾。
 - 遗留:P1-1/P1-2 继续 PENDING:当前非干净 `origin/main`,`TB_SEARCH` D1 id 仍为占位且无外向授权,不得运行 `deploy:all`/生产 smoke/DO hibernation。下一轮 = E2E-B 本地可推进半边:样例 plugin 双 export 集成 + plugin-sdk pack dry-run + 飞书本地重写验证;生产三动词继续映射 P2-1。
+
+## Round 28 — 2026-08-11
+- 目标:Phase 5 E2E-B 本地半边 —— 重跑样例 plugin 双 export、plugin-sdk 发布物与飞书 SDK 重写证据,并修复通用 plugin 验收脚本的 v1 协议漂移。
+- 动作:
+  - 样例验收复用真实 workerd gateway 与 `createNotesPlugin().fetch` 标准 Request/Response wire,覆盖注册两个 export、双挂载、`create_note` 调用与 context Get/List/Search 共享后端;没有用纯 builder 或伪 describe 替代。
+  - `verify-plugin.ts` 首次隔离 Node 实跑在旧 `~describe.kind/interfaceVersion` 断言处失败;将 manifest 改为显式 `plugin/v2`,挂载显式选择 `entries` export,并改为断言 export 的 id/profile/methods/capabilities。修后注册、token 不回显、挂载、四动词、幂等、错误形状、分页、鉴权与 teardown 全 PASS。
+  - 发布门订正为 `pnpm pack`:npm dry-run 虽 exit 0,但不应用 `publishConfig`,清单含 source 且入口仍指向 `src`;它不能证明可发布。真实 pnpm tarball 只含 dist/LICENSE/manifest,main/types/exports 均指向 dist,JS 无 `node:` 引用,d.ts 无 `@tool-bridge/core` 引用。DOD 的 Phase 2 与 E2E-B 两处判据同步修正。
+- 验证:
+  - `pnpm --filter @tool-bridge/gateway exec vitest run test/pluginExample.integration.test.ts` → **5/5 passed**;`pnpm --filter @tool-bridge/plugin-sdk test` → **22/22 passed**;`pnpm --filter @tool-bridge/plugin-feishu test` → 真实 workerd + mock TAT/MCP **9/9 passed**。
+  - `pnpm --filter @tool-bridge/plugin-sdk build` + `pnpm --filter @tool-bridge/plugin-sdk pack --dry-run --json` 通过;额外审查真实 pnpm tarball 文件清单和 packed manifest 均符合 dist 发布形状,然后删除临时产物。字面 `npm pack --dry-run --json` 也已执行并 exit 0,但因 source 入口不被计为发布证据。
+  - 隔离 Node gateway 首跑 `verify-plugin.ts` 暴露 v1 断言失败;修复后重跑全 **PASS**,严格复核另验 plugin list 为空、随机 mount 返回 404。目标 ESLint、`git diff --check` 通过。
+  - `pnpm verify` → 9 workspace typecheck + 全仓 lint + provision **1 passed** + 包测试 **1273 passed / 7 skipped**,合计 **1274 passed / 7 skipped**,退出码 0。严格 investigator 报告 `.llmdoc-tmp/phase5-e2e-b.md` 结论无本地代码阻断。
+- 勾选:无。E2E-B 的样例、SDK 发布物、飞书本地 workerd 与通用 plugin 验收半边已闭环,但同项还要求重新部署后的生产飞书三动词,不得误勾。
+- 遗留:P2-1 继续 PENDING:需从符合部署纪律的干净 `origin/main` 重部署,并经用户指定真实目标后对飞书 create-doc/fetch-doc/update-doc 各做一次脱敏留证。下一轮 = E2E-E 本地半边:用官方 MCP client 连本地端点重跑 list/call/scope 收窄;生产 MCP 继续映射 P3-1。
