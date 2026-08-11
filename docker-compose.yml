@@ -73,7 +73,7 @@ services:
       - /repo/node_modules/.bin/wrangler
       - dev
       - --config
-      - /repo/packages/plugin-feishu/wrangler.jsonc
+      - /repo/plugins/feishu/wrangler.jsonc
       - --local
       - --ip
       - 0.0.0.0

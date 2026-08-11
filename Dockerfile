@@ -16,6 +16,7 @@ WORKDIR /repo
 RUN corepack enable
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json ./
 COPY packages ./packages
+COPY plugins ./plugins
 RUN pnpm install --frozen-lockfile
 RUN pnpm --filter @tool-bridge/dashboard build
 RUN pnpm --filter @tool-bridge/server build

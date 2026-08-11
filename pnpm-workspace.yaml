@@ -1,5 +1,6 @@
 packages:
   - packages/*
+  - plugins/*
 
 allowBuilds:
   better-sqlite3: true
