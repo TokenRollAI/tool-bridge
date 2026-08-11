@@ -17,7 +17,7 @@ import {
   type StateStore,
   TBError,
 } from '@tool-bridge/core'
-import { fetchPluginContract, probePlugin } from './providers/pluginClient'
+import { fetchPluginContract, type PluginBindings, probePlugin } from './providers/pluginClient'
 
 interface BootstrapEnv {
   TB_BOOTSTRAP_ADMIN_SK?: string
@@ -173,6 +173,8 @@ export function ensureBootstrapped(store: StateStore, env: BootstrapEnv): Promis
 export interface BuiltinAssemblyOpts {
   /** 放行 http:// plugin endpoint(仅本地开发)。 */
   allowInsecureHttp: boolean
+  /** 进程内插件装配表;binding: endpoint 的探活/契约抓取经此直调。 */
+  pluginBindings?: PluginBindings
   /** remote 联邦白名单的 env 基线(TB_REMOTE_ALLOWLIST 解析后;供 system/federation list 标注不可删)。 */
   remoteAllowlistBase: string[]
   secrets: SecretStoreImpl
@@ -193,8 +195,8 @@ export function buildDeps(opts: BuiltinAssemblyOpts): BuiltinDeps {
     // plugin 模块:探活/契约抓取的 I/O 回调在此注入,core 保持无 I/O。
     plugin: {
       store: opts.store,
-      probe: probePlugin,
-      fetchContract: fetchPluginContract,
+      probe: manifest => probePlugin(manifest, opts.pluginBindings),
+      fetchContract: manifest => fetchPluginContract(manifest, opts.pluginBindings),
       allowInsecureHttp: opts.allowInsecureHttp,
     },
     // federation 模块:remote host 白名单运行时存储 + env 基线。

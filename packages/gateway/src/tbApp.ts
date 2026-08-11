@@ -84,6 +84,7 @@ import {
   virtualizeTools,
 } from '@tool-bridge/core'
 import { type Context, Hono } from 'hono'
+import type { PluginBindings } from './providers/pluginClient'
 import type { UpstreamProvider } from './providers/types'
 import {
   finishMcpAuthorization,
@@ -168,6 +169,11 @@ export interface TbAppDeps {
   locals?: LocalProviderHooks
   /** context 平台对象存储('r2' provider 的落点);缺省 → 该 provider unavailable。 */
   objects?: () => Promise<ObjectStore> | ObjectStore
+  /**
+   * 进程内插件装配表(binding 名 → fetch handler)。manifest.endpoint 为
+   * `binding:<name>` 的插件经此直调,零网络跳;未装配的 binding 注册/调用报 unavailable。
+   */
+  pluginBindings?: PluginBindings
   /** context Get 的 $ref 内联阈值(字节,缺省 1 MiB)。 */
   refThresholdBytes?: number
   /** $ref URL(presign 与 /~ref 中转)有效期秒(缺省 900)。 */
@@ -800,6 +806,7 @@ async function providerFor(
       ctx: mountCallContext(ctx, node.path, node.config.providerConfig, exported.id),
       // 挂载 authRef = 上游凭证引用,平台代解析经 X-TB-Upstream-Auth 注入。
       ...(node.config.authRef !== undefined ? { upstreamAuthRef: node.config.authRef } : {}),
+      ...(deps.pluginBindings !== undefined ? { bindings: deps.pluginBindings } : {}),
     })
   }
   throw TBError.unimplemented(`kind '${node.kind}' has no tool provider`)
@@ -1388,6 +1395,7 @@ export function createTbApp(deps: TbAppDeps): Hono<{ Variables: Vars }> {
         version: deps.version,
         allowInsecureHttp: deps.allowInsecureHttp,
         remoteAllowlistBase: deps.remote.allowlist,
+        ...(deps.pluginBindings !== undefined ? { pluginBindings: deps.pluginBindings } : {}),
       }),
     )
   const globalSearchCapabilities = (): Array<'search' | 'search:semantic'> => {
@@ -2432,6 +2440,7 @@ export function createTbApp(deps: TbAppDeps): Hono<{ Variables: Vars }> {
           ...(exported.methods !== undefined ? { methods: exported.methods } : {}),
           // 挂载 authRef = 上游凭证引用,平台代解析经 X-TB-Upstream-Auth 注入。
           ...(cfg.authRef !== undefined ? { upstreamAuthRef: cfg.authRef } : {}),
+          ...(deps.pluginBindings !== undefined ? { bindings: deps.pluginBindings } : {}),
         })
         const result = await dispatchContextCmd(provider, body.tool, args)
         return renderResult(result, negotiate(c.req.header('accept')))

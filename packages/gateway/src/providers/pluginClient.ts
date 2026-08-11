@@ -40,27 +40,71 @@ const RETRYABLE_CODES: ReadonlySet<TBErrorCode> = new Set<TBErrorCode>([
 ])
 
 /**
- * endpoint 解析(尾斜杠归一)。`binding:<name>`(平台内 service binding)的转发
- * 尚未接线 → 501(注册/调用一律拒,待 service binding 装配)。
+ * 进程内插件装配表:binding 名 → fetch handler(宿主注入,见 TbAppDeps.pluginBindings)。
+ * handler 通常闭包持有插件模块与其 env(如 `req => plugin.fetch(req, env)`);
+ * 懒加载放进闭包即可(首调时 import()),未挂载/未调用的插件零运行成本。
+ */
+export type PluginBindingHandler = (request: Request) => Response | Promise<Response>
+export type PluginBindings = ReadonlyMap<string, PluginBindingHandler>
+
+const BINDING_PREFIX = 'binding:'
+/** binding 请求的合成 origin(进程内直调,不产生网络流量,仅用于构造合法 Request)。 */
+const BINDING_ORIGIN = 'https://tb-plugin.internal'
+
+function bindingNameOf(manifest: PluginManifest): string | undefined {
+  return manifest.endpoint.startsWith(BINDING_PREFIX)
+    ? manifest.endpoint.slice(BINDING_PREFIX.length)
+    : undefined
+}
+
+/**
+ * http(s) endpoint 解析(尾斜杠归一)。`binding:<name>` 不走 URL——传输在
+ * {@link pluginFetch} 内直调宿主装配的 handler;直接对 binding manifest 取 URL 是编程错误。
  */
 export function resolvePluginEndpoint(manifest: PluginManifest): string {
-  if (manifest.endpoint.startsWith('binding:')) {
-    throw TBError.unimplemented(
-      `plugin '${manifest.id}' endpoint '${manifest.endpoint}':service binding 转发未实现`,
-    )
+  if (manifest.endpoint.startsWith(BINDING_PREFIX)) {
+    throw new TBError('internal', `plugin '${manifest.id}' 是 binding endpoint,无 URL 可解析`)
   }
   return manifest.endpoint.replace(/\/+$/, '')
 }
 
-/** GET {endpoint}{healthPath} → { healthy: true };网络失败按 unhealthy 报告。 */
-export async function probePlugin(manifest: PluginManifest): Promise<PluginProbeResult> {
-  const url = resolvePluginEndpoint(manifest) + manifest.healthPath
+/**
+ * 传输分派:`binding:<name>` → 进程内 handler 直调(envelope 契约不变,无网络跳、
+ * 无子请求);https:// → 全局 fetch。binding 未装配 → unavailable(配置错误,不重试);
+ * handler 抛错与网络失败同语义(由 attempt 归一为 retryable unavailable)。
+ */
+async function pluginFetch(
+  manifest: PluginManifest,
+  bindings: PluginBindings | undefined,
+  path: string,
+  init: RequestInit,
+): Promise<Response> {
+  const name = bindingNameOf(manifest)
+  if (name === undefined) {
+    return await fetch(resolvePluginEndpoint(manifest) + path, {
+      ...init,
+      signal: AbortSignal.timeout(PLUGIN_TIMEOUT_MS),
+    })
+  }
+  const handler = bindings?.get(name)
+  if (handler === undefined) {
+    throw new TBError('unavailable', `plugin '${manifest.id}' binding '${name}' 未在本宿主装配`, {
+      retryable: false,
+    })
+  }
+  return await handler(new Request(BINDING_ORIGIN + path, init))
+}
+
+/** GET {endpoint}{healthPath} → { healthy: true };网络失败/binding 未装配按 unhealthy 报告。 */
+export async function probePlugin(
+  manifest: PluginManifest,
+  bindings?: PluginBindings,
+): Promise<PluginProbeResult> {
   let resp: Response
   try {
-    resp = await fetch(url, {
+    resp = await pluginFetch(manifest, bindings, manifest.healthPath, {
       method: 'GET',
       headers: { accept: 'application/json' },
-      signal: AbortSignal.timeout(PLUGIN_TIMEOUT_MS),
     })
   } catch (err) {
     return { healthy: false, detail: err instanceof Error ? err.message : String(err) }
@@ -71,15 +115,19 @@ export async function probePlugin(manifest: PluginManifest): Promise<PluginProbe
   return { healthy: true }
 }
 
-async function fetchLifecycle(base: string, seg: string): Promise<Response> {
+async function fetchLifecycle(
+  manifest: PluginManifest,
+  bindings: PluginBindings | undefined,
+  seg: string,
+): Promise<Response> {
   let resp: Response
   try {
-    resp = await fetch(`${base}/${seg}`, {
+    resp = await pluginFetch(manifest, bindings, `/${seg}`, {
       method: 'GET',
       headers: { accept: 'application/json' },
-      signal: AbortSignal.timeout(PLUGIN_TIMEOUT_MS),
     })
   } catch (err) {
+    if (isTBError(err)) throw err
     throw new TBError(
       'unavailable',
       `plugin ${seg} 抓取失败:${err instanceof Error ? err.message : String(err)}`,
@@ -99,9 +147,9 @@ async function fetchLifecycle(base: string, seg: string): Promise<Response> {
  */
 export async function fetchPluginContract(
   manifest: PluginManifest,
+  bindings?: PluginBindings,
 ): Promise<{ describe: unknown }> {
-  const base = resolvePluginEndpoint(manifest)
-  const describeResp = await fetchLifecycle(base, '~describe')
+  const describeResp = await fetchLifecycle(manifest, bindings, '~describe')
   const describe = (await describeResp.json().catch(() => null)) as unknown
   if (describe === null) {
     throw new TBError('invalid_argument', `plugin '${manifest.id}' 的 ~describe 非 JSON`)
@@ -111,6 +159,8 @@ export async function fetchPluginContract(
 }
 
 export interface PluginCallOptions {
+  /** 进程内插件装配表;manifest.endpoint 为 binding: 时按名直调。 */
+  bindings?: PluginBindings
   /** 调用上下文,经 X-TB-Context 透传。 */
   ctx: CallContext
   manifest: PluginManifest
@@ -167,20 +217,13 @@ function tbErrorFromPluginResponse(status: number, text: string): TBError {
   })
 }
 
-async function attempt(
-  url: string,
-  headers: Record<string, string>,
-  body: string,
-): Promise<unknown> {
+async function attempt(doFetch: () => Promise<Response>): Promise<unknown> {
   let resp: Response
   try {
-    resp = await fetch(url, {
-      method: 'POST',
-      headers,
-      body,
-      signal: AbortSignal.timeout(PLUGIN_TIMEOUT_MS),
-    })
+    resp = await doFetch()
   } catch (err) {
+    // binding 未装配等 TBError 原样透传(非重试语义);其余按网络失败归一。
+    if (isTBError(err)) throw err
     throw new TBError(
       'unavailable',
       `plugin 调用网络失败:${err instanceof Error ? err.message : String(err)}`,
@@ -216,7 +259,6 @@ export async function callPlugin(
   method: string,
   args: Record<string, unknown>,
 ): Promise<unknown> {
-  const url = resolvePluginEndpoint(opts.manifest)
   const body = encodePluginCall({ tool: method, arguments: args })
   const headers: Record<string, string> = {
     'content-type': 'application/json',
@@ -236,10 +278,12 @@ export async function callPlugin(
     }
     headers[HEADER_TB_UPSTREAM_AUTH] = base64urlEncode(new TextEncoder().encode(cred))
   }
+  const doFetch = (): Promise<Response> =>
+    pluginFetch(opts.manifest, opts.bindings, '', { method: 'POST', headers, body })
   try {
-    return await attempt(url, headers, body)
+    return await attempt(doFetch)
   } catch (err) {
-    if (isTBError(err) && err.retryable) return await attempt(url, headers, body)
+    if (isTBError(err) && err.retryable) return await attempt(doFetch)
     throw err
   }
 }
