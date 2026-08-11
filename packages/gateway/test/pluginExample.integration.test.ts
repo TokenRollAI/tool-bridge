@@ -1,4 +1,4 @@
-import { createNotesPlugin, type Env } from '@tool-bridge/plugin-example'
+import { createNotesPlugin, type Env } from '@tool-bridge/plugins/notes'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { parseHelpDsl } from '@tool-bridge/core'
 import { SELF } from 'cloudflare:test'

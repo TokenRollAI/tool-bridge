@@ -3,7 +3,7 @@
   // PLUGIN_TOKEN(注册后 wrangler secret put);白名单等非敏感配置走 vars。
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "tb-plugin-feishu",
-  "main": "src/index.ts",
+  "main": "src/feishu/index.ts",
   "compatibility_date": "2025-06-01",
   "compatibility_flags": ["nodejs_compat"],
   // DJJ 账户(与 gateway 同;wrangler OAuth 多账户须显式指定)。

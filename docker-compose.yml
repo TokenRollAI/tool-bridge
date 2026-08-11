@@ -69,27 +69,18 @@ services:
     depends_on:
       upstream:
         condition: service_healthy
+    # 内置插件按"外挂 HTTP plugin"形态起本地服务(packages/plugins/scripts/serve.ts),
+    # 三跳链路继续验证外挂通道;进程内 binding 通道由 gateway 测试覆盖。
     command:
-      - /repo/node_modules/.bin/wrangler
-      - dev
-      - --config
-      - /repo/plugins/feishu/wrangler.jsonc
-      - --local
-      - --ip
-      - 0.0.0.0
-      - --port
-      - '8788'
-      - --show-interactive-dev-session=false
-      - --var
-      - PLUGIN_TOKEN:${TB_COMPOSE_PLUGIN_TOKEN:-tbp_compose_dev_token}
-      - --var
-      - FEISHU_ALLOWED_TOOLS:echo
-      - --var
-      - FEISHU_AUTH_URL:http://upstream:39001/auth
-      - --var
-      - FEISHU_MCP_URL:http://upstream:39001/mcp
+      - /repo/node_modules/.bin/tsx
+      - /repo/packages/plugins/scripts/serve.ts
     environment:
-      WRANGLER_SEND_METRICS: 'false'
+      TB_PLUGIN_NAME: feishu
+      PORT: '8788'
+      PLUGIN_TOKEN: ${TB_COMPOSE_PLUGIN_TOKEN:-tbp_compose_dev_token}
+      FEISHU_ALLOWED_TOOLS: echo
+      FEISHU_AUTH_URL: http://upstream:39001/auth
+      FEISHU_MCP_URL: http://upstream:39001/mcp
     expose:
       - '8788'
     healthcheck:

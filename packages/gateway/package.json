@@ -56,7 +56,7 @@
     "@modelcontextprotocol/sdk": "catalog:",
     "@tool-bridge/core": "workspace:*",
     "@tool-bridge/dashboard": "workspace:*",
-    "@tool-bridge/plugin-example": "workspace:*",
+    "@tool-bridge/plugins": "workspace:*",
     "s3rver": "^3.7.1",
     "tsup": "catalog:",
     "tsx": "catalog:",

@@ -1,6 +1,5 @@
 packages:
   - packages/*
-  - plugins/*
 
 # 依赖版本唯一真源:被 ≥2 个 workspace 包共享的依赖一律进 catalog,
 # 包内写 "catalog:"。升级只改这里一处,插件数量增长不再放大版本漂移。

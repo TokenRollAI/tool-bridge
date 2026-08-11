@@ -26,7 +26,7 @@
 | Agent 反馈 | `~feedback` 保留段(per-path 一级协议能力,非 builtin):提交/投票/下钻,头部条目注入 ~help;owning node 的可见 top 5 title/detail 同步进工具搜索 | core `feedback/` 存储、`selectFeedbackSearchText`(256 UTF-8 bytes) + gateway `tbApp.ts` 路由 | 权限判定落目标 path;工具子路径 feedback 不提升到 owning node 搜索投影 |
 | SDK | 内嵌 TB 实例 / 程序化注册 / 反向连接 | —(装配层) | `packages/sdk`:createToolBridge = core + gateway 的 createTbApp + 内存宿主缺省 |
 | CLI | 纯 API 客户端 `tb`,22 个顶层命令族一一映射接口面;`tb search` 直连 root `/~search`,**无专用端点** | — | `packages/cli`(commander;npm 发布物) |
-| Plugin System | 自定义 Provider 注册与生命周期(探活/契约校验/信封传输) | `plugin/` | gateway `providers/pluginClient|pluginTool|pluginContext` + builtin `system/plugin`;首个 in-repo plugin 参考实现:`plugins/feishu`(CF Worker,飞书 TAT 自动换发) |
+| Plugin System | 自定义 Provider 注册与生命周期(探活/契约校验/信封传输) | `plugin/` | gateway `providers/pluginClient|pluginTool|pluginContext` + builtin `system/plugin`;首个 in-repo plugin 参考实现:`packages/plugins/src/feishu`(CF Worker,飞书 TAT 自动换发) |
 | Dashboard | `~help` 通用渲染器 + 管理表单 + 独立 `/search` root 搜索消费页,**无专用后端**;系统表单按 pure builder → 抽出的 fields/dialog → route coordinator/剩余视图所有权分层 | — | `packages/dashboard`(React SPA)经 gateway Static Assets 挂 `/ui` |
 | 部署 | CF 与 Docker 两条生产路径产出同一棵树;Compose 只编排 localhost 开发验收栈 | — | CF:`scripts/provision.mjs` + wrangler;Docker/Node:`packages/server` + 根 production Dockerfile;开发:`docker-compose.yml`(gateway final image + plugin-feishu Wrangler + authenticated mock upstream + profile smoke),见 [../guides/docker-host.md](../guides/docker-host.md) |
 

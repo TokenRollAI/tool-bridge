@@ -6,9 +6,27 @@ import {
   HEADER_TB_UPSTREAM_AUTH,
 } from '@tool-bridge/core'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { SELF } from 'cloudflare:test'
-import { clearSessionCache } from '../src/feishuMcp'
-import { clearTatCache } from '../src/tat'
+import { clearSessionCache } from '../src/feishu/feishuMcp'
+import { createFeishuPlugin } from '../src/feishu/index'
+import { clearTatCache } from '../src/feishu/tat'
+
+/**
+ * 原 plugins/feishu 的 workerd(vitest-pool-workers)集成测试,随"内置插件 =
+ * 单包源码文件夹"重构移植为纯 Node vitest:SELF.fetch 换成直调 plugin.fetch
+ * (同一 fetch 契约),miniflare bindings 换成显式 ENV 对象。断言原样保留——
+ * 这正是"重构没有偷偷改契约"的证据。
+ */
+const ENV = {
+  FEISHU_ALLOWED_TOOLS: 'create-doc,fetch-doc',
+  PLUGIN_TOKEN: 'tbp_test_token',
+  FEISHU_MCP_URL: 'https://feishu-mcp.mock/mcp',
+  FEISHU_AUTH_URL: 'https://feishu-auth.mock/tat',
+}
+const plugin = createFeishuPlugin()
+const SELF = {
+  fetch: (url: string, init?: RequestInit): Promise<Response> =>
+    Promise.resolve(plugin.fetch(new Request(url, init), ENV as never)),
+}
 
 // plugin-feishu 集成测试:契约面 / envelope 鉴权 / 凭证经 X-TB-Upstream-Auth 传入 /
 // TAT 换发缓存 / 401 强制重换发 / Allowed-Tools 头透传。飞书换发接口与 MCP 上游全部

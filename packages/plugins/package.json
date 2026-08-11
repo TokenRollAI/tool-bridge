@@ -1,0 +1,30 @@
+{
+  "name": "@tool-bridge/plugins",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Built-in plugin catalog: every folder under src/ is one in-process plugin (available code, activated only when registered & mounted)",
+  "type": "module",
+  "exports": {
+    ".": "./src/registry.ts",
+    "./feishu": "./src/feishu/index.ts",
+    "./notes": "./src/notes/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "deploy:feishu": "wrangler deploy --config wrangler.feishu.jsonc"
+  },
+  "dependencies": {
+    "@cfworker/json-schema": "catalog:",
+    "@modelcontextprotocol/sdk": "catalog:",
+    "@tool-bridge/plugin-sdk": "workspace:*",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@hono/node-server": "catalog:",
+    "@tool-bridge/core": "workspace:*",
+    "tsx": "catalog:",
+    "vitest": "catalog:",
+    "wrangler": "catalog:"
+  }
+}
