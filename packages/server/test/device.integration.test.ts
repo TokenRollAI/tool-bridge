@@ -5,7 +5,7 @@
  * 回收窗口内重连不误删。
  */
 
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -231,6 +231,76 @@ describe('DeviceHub 全链路', () => {
     })) as { error?: { code: string }, ok: boolean }
     expect(res.ok).toBe(false)
     expect(res.error?.code).toBe('unavailable')
+  })
+
+  it('invoke 认证 await 期间同 deviceId 被新连接顶替 → 不向旧连接下发', async () => {
+    const { server, wsBase } = await startServer(tmpDataDir())
+    cleanups.push(() => server.close())
+    const deviceId = 'replaced-during-identify'
+    const oldWs = await connectDevice(wsBase, deviceId, { autoReply: false })
+
+    let staleCalls = 0
+    oldWs.on('message', (data) => {
+      const frame = JSON.parse(data.toString()) as { id?: string, type: string }
+      if (frame.type !== 'call' || frame.id === undefined) return
+      staleCalls++
+      oldWs.send(
+        JSON.stringify({ type: 'result', id: frame.id, ok: true, value: { source: 'stale' } }),
+      )
+    })
+
+    // 暂不让旧 server-side socket 真正关闭:这样删掉 invoke 的 post-await generation guard
+    // 时,旧 session 仍会收到 call 并响应,测试能确定性失败而非被 dispose() 偶然兜底。
+    const internals = server.deviceHub as unknown as {
+      activeByDevice: Map<string, { ws: WebSocket }>
+    }
+    const oldConn = internals.activeByDevice.get(deviceId)
+    expect(oldConn).toBeDefined()
+    const closeSpy = vi.spyOn(oldConn?.ws as WebSocket, 'close').mockImplementation(() => {})
+
+    const originalGet = server.state.get.bind(server.state)
+    let releaseIdentify: () => void = () => {}
+    const identifyReleased = new Promise<void>((resolve) => {
+      releaseIdentify = resolve
+    })
+    let identifyEntered: () => void = () => {}
+    const identifyBlocked = new Promise<void>((resolve) => {
+      identifyEntered = resolve
+    })
+    let blockNextSkRead = true
+    const getSpy = vi.spyOn(server.state, 'get').mockImplementation(async (key) => {
+      if (blockNextSkRead && key.startsWith('sk:h:')) {
+        blockNextSkRead = false
+        identifyEntered()
+        await identifyReleased
+      }
+      return originalGet(key)
+    })
+
+    const invoke = server.deviceHub.invoke(deviceId, {
+      id: 'replace-race',
+      path: 'shell',
+      tool: 'exec',
+      arguments: { command: 'echo should-not-reach-stale' },
+    }) as Promise<{ error?: { code: string }, ok: boolean }>
+    await identifyBlocked
+
+    const replacement = await connectDevice(wsBase, deviceId, { autoReply: false })
+    let replacementCalls = 0
+    replacement.on('message', (data) => {
+      const frame = JSON.parse(data.toString()) as { type: string }
+      if (frame.type === 'call') replacementCalls++
+    })
+    expect(closeSpy).toHaveBeenCalledWith(1000, 'replaced')
+
+    releaseIdentify()
+    const result = await invoke
+    expect(result).toMatchObject({ ok: false, error: { code: 'unavailable' } })
+    expect(staleCalls).toBe(0)
+    expect(replacementCalls).toBe(0)
+
+    getSpy.mockRestore()
+    closeSpy.mockRestore()
   })
 
   it('设备 SK 被禁用后,下一次调用重新认证并关闭现有连接', async () => {

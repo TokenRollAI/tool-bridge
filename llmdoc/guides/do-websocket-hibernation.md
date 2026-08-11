@@ -20,7 +20,13 @@
 
 - miniflare/workerd 测试里 DO 不驱逐、无边缘代理超时 ⇒ hibernation 唤醒路径与空闲掐断只能**线上验证**。
 - 排查手法:`npx wrangler tail tb-gateway --format pretty`(observability 已开)+ 临时 `console.log`(验证完删除);对照实验"连上立即调用(t0)vs 空闲 150s 后调用",一次区分路由/attachment 问题与休眠状态问题。
-- 验收要求:设备通道改动的真实环境验证必须含**跨休眠窗口用例**(≥150s 空闲后 call 成功)。
+- 验收要求:设备通道改动的真实环境验证必须含**跨休眠窗口用例**(当前脚本等待 ≥155s 后 call 成功)。
+
+## 连接替换的三层证据边界
+
+- **Node 确定性竞态回归:**`packages/server/test/device.integration.test.ts` 用 barrier 让 invoke 捕获旧连接并停在异步 `identify`,再让同 ID 新连接完成接管;旧 session 被刻意保持可调用。释放 barrier 后必须返回 unavailable且新旧连接都零下发。临时删除 post-await generation guard会真实变红,因此该测试能证明 Node `DeviceHub` 的目标防线。
+- **真实进程 replacement steady-state:**`scripts/verify-device.ts` 让旧 generation 仅暴露 `echo`、新 generation 仅暴露 `printf`,同 ID 替换后以 `printf` 调用确认最终路由,并覆盖合法 `registerPaths`、越界 `tb connect` 必须非零以及旧连接迟到 close不把新连接标离线。它不固定 invoke 的 await 交叉点,不能替代上面的 barrier 测试。
+- **生产 DO:**只有对已授权生产部署实际运行 `TB_BASE_URL='…' TB_SK='…' TB_VERIFY_HIBERNATION=1 npx tsx scripts/verify-device.ts`,才能为 Workers DO 的 replacement steady-state、≥155s hibernation/驱逐与 stale-meta 行为提供证据。本地 Node barrier、Node 真实进程和 miniflare都不能冒充这层证据;Round 27 尚未执行该生产验收。
 
 ## 相关既定事实
 

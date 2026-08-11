@@ -72,13 +72,13 @@ rg -o 'assets/[A-Za-z0-9._-]+\.(js|css)' packages/dashboard/dist/index.html | so
 
 前两个线上 HTML hash 应与本地入口一致;随后逐个请求列出的 `/ui/assets/<hash-name>` 并确认 200。Dashboard npm 发布与生产 `/ui` 上线是两个独立发布面:前者查 Actions + npm dist-tag,后者查 Worker deployment/version + 本步骤的产物证据。详见 [npm-publish.md](npm-publish.md)。
 
-### 5. 冒烟脚本:`TB_BASE_URL=… pnpm smoke`
+### 5. 冒烟脚本:`TB_BASE_URL=… TB_SK=… pnpm smoke`
 
 ```sh
-TB_BASE_URL=https://tool-bridge.pdjjq.org pnpm smoke
+TB_BASE_URL=https://tool-bridge.pdjjq.org TB_SK='…' pnpm smoke
 ```
 
-**注意:smoke 不读 `.env`**,必须显式传 `TB_BASE_URL`(或 `tsx scripts/smoke.ts <baseUrl>`)。脚本只做只读探测(healthz + `~help`)。
+**注意:smoke 不读 `.env`**,调用时必须同时显式传 `TB_BASE_URL` 与 `TB_SK`。缺任一项都会在发出网络请求前退出 1,不会跳过认证检查;输出只给配置指引,不回显凭据。脚本做只读探测(healthz + 匿名 `~help` 401 + 认证 markdown/DSL `~help` 200)。
 
 预期:
 
@@ -104,6 +104,6 @@ node packages/cli/dist/index.js status --json
 
 - **wrangler 报多账户歧义**(`More than one account available`):wrangler OAuth 下有 DJJ 与 Lightspeed 两账户,必须显式指定——`wrangler.jsonc` 已写死 `account_id`,脚本走 `CLOUDFLARE_ACCOUNT_ID`;若单独手敲 wrangler 命令,补 `CLOUDFLARE_ACCOUNT_ID=… npx wrangler …`。
 - **custom domain 刚部署后 curl 404/522**:custom domain 首次绑定或 DNS 变更有分钟级生效延迟,等 1-2 分钟重试;也可先用 wrangler deploy 输出里的 workers.dev 地址确认 Worker 本身健康,再等域名。
-- **smoke 报 `missing base URL`**:忘了传 `TB_BASE_URL`(它不读 .env),见第 5 步。
+- **smoke 报缺少配置**:确认命令行同时显式传入 `TB_BASE_URL` 与 `TB_SK`(脚本不读 `.env`),见第 5 步;不要把缺 SK 当作可跳过项。
 - **verify 里集成测试起不来 workerd**:确认 `pnpm install` 后再跑;`@cloudflare/vitest-pool-workers` 用 miniflare 本地实例,不需要真实 KV id。
 - **`SSL_ERROR_SYSCALL` / `Network connection lost` 等瞬时网络错误**:只对原来的只读查询或幂等 push 重试,随后重新读取远端 refs、Actions、npm dist-tag、Cloudflare deployment/version 与产物 hash;不要未经证据改认证、重打 tag 或重复 deploy。

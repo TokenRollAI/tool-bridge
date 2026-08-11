@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 /**
  * bin 入口:env 配置 → 引导 → 监听 → SIGINT/SIGTERM 优雅关闭。
- * 首次引导的 Admin SK 明文由 runBootstrap console.log 一次(docker logs 可见,
- * 与 CF 宿主行为一致);TB_BOOTSTRAP_ADMIN_SK 提供时不打印明文。
+ * 首次引导默认要求预置 TB_BOOTSTRAP_ADMIN_SK;缺失时在监听前 fail closed。
+ * 仅显式 TB_ALLOW_INSECURE_BOOTSTRAP=true 的本地开发模式会随机生成并打印一次。
  */
 
 import { createTbServer } from './server'

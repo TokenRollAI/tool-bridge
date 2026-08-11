@@ -144,7 +144,7 @@ cmd resolve-library-id POST /docs/context7/resolve-library-id  ← cmd 行:<name
 ## 7. 设备帧协议要点
 
 - 帧类型:`hello`(声明 `DeviceExpose{shell?,fs?,nodes?}` 与可选 cmds)/ `ready` / `call` / `result` / `cancel` / `ping` / `pong`;未 hello 先 call → 拒;`requestId` 幂等;调用超时 60s → `unavailable` + cancel 帧。
-- ready 后网关代写 NodeRegistry(`device/<id>/shell|fs` 等);断线节点 `online:false`,调用 → 503 retryable;24h 未重连回收。DO hibernation 恢复及每次 invoke、Node DeviceHub 每次 invoke 当前会调用 `identify`;disabled 回归已有测试,delete/expiry 由同一 active-key 判定处理,但连接替换 TOCTOU 与 scope/registerPaths 收紧尚未处理,因此“活动连接必然立即失效”还不是可靠协议属性。
+- ready 后网关代写 NodeRegistry(`device/<id>/shell|fs` 等);断线节点 `online:false`,调用 → 503 retryable;24h 未重连回收。DO hibernation 恢复及每次 invoke、Node DeviceHub 每次 invoke都会调用 `identify`,复核 keyId与当前 scope/registerPaths,并在异步认证后再次比较 active connection generation;disabled/delete/expiry、权限收紧和同 ID 替换均按失效处理。Node 的 replacement TOCTOU已有 barrier + mutation回归;Workers DO 的生产 hibernation/驱逐/stale-meta仍须真实环境验证。
 - **shell 白名单**:默认拒一切命令;声明 list 精确放行或 `*` 通配;含元字符拒。shell 契约 `cmd exec`(effect destructive + confirm)。
 - fs = file provider(FsObjectStore,realpath 防路径逃逸)。
 - ping/pong 是稳定字面量(网关 `setWebSocketAutoResponse` 精确匹配,不唤醒 DO);客户端 30s 心跳保活,见 [../guides/do-websocket-hibernation.md](../guides/do-websocket-hibernation.md)。

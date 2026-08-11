@@ -10,8 +10,10 @@
 - **P1-1 · Phase 1 项 6「部署解冻」** —— 仍挂起。代码已在 main,但**尚未部署**:需从与
   `origin/main` 零差异的干净工作区执行 `pnpm deploy:all` + `TB_BASE_URL=… pnpm smoke`。
   属外向不可逆动作,待用户授权。**不构成后续 Phase 的代码依赖。**
-- **P1-2 · Phase 1 遗留的生产验证** —— 跨休眠窗口(≥150s)与真实连接替换竞态须线上验证,
-  随 P1-1 部署后一并做(`npx tsx scripts/verify-device.ts`)。
+- **P1-2 · Phase 1 遗留的生产验证** —— Round 27 已补 Node `identify await × 同 deviceId
+  替换`的确定性 barrier 回归,且 `verify-device.ts` 已加入真实连接替换 steady-state 用例;
+  仍须在线执行跨休眠窗口(≥155s)、DO hibernation/stale-meta 与真实连接替换,随 P1-1
+  部署后一并做(`TB_VERIFY_HIBERNATION=1 npx tsx scripts/verify-device.ts`)。
 - **P2-1 · Phase 2 项 7 的「生产复验」半边** —— 飞书 plugin 的**重写已完成并全绿**(Round 12),
   但 DoD 还要求"重新部署 + 生产 create-doc/fetch-doc/update-doc 实调留证"
   (`npx tsx scripts/verify-plugin.ts`,需 TB_BASE_URL + TB_SK + 真实飞书凭证)。
@@ -46,6 +48,7 @@
 - Phase 4 已勾选:项 3(CF D1 + Node SQLite SearchIndex,FTS5/trigram,Round 21)、项 4(trigram 短词 escaped LIKE 兜底,Round 22)、项 5(加权索引、自动同步、权限后处理分页与 opaque cursor,Round 23)、项 6(`tb search` + Dashboard `/search`,Round 24)
 - Phase 4 遗留:项 1 真实 provision/deploy → P4-1;项 2 外部 HTBP Draft → P4-2;项 7 已完成 `pnpm verify` 半边,生产 deploy + 中英文 search smoke → P4-3。三者均为外向流程动作,不构成 Phase 4.5 编码依赖。
 - Phase 4.5 已勾选:项 1(Dashboard Registry/Plugins/SK 大页拆分、纯 builder 契约测试与 fresh-source UI 集成,Round 25)、项 2(gateway→plugin-feishu Worker→mock TAT/MCP 上游 Compose 三跳开发栈,Round 26)、项 3(`pnpm verify` 全绿,Round 26)
+- Phase 5 本地进度:E2E-A 的 SecretRef 越权拒绝、Node bootstrap fail closed、Node invoke×连接替换 barrier 与 `pnpm verify` 已闭环(Round 27);生产 deploy/smoke 与 DO 休眠/stale-meta 证据仍映射 P1-1/P1-2,故 E2E-A 保持未勾。
 - Phase 2 已勾选:项 1(OperationRegistry)、项 2(Plugin v2 多 export,Round 13 补齐三入口对等后成立)、项 3(Context 按 handler 推导能力)、项 4(`@tool-bridge/plugin-sdk` 可发布)、项 5(样例 plugin 双 export)、项 6(删净 legacy 面)
 - Phase 2 待办(**全部为待授权的外向动作**):项 7 飞书重写复验(代码已完成,只差生产实调 → P2-1)/ 项 8 部署上线
 - Phase 1(代码完成,部署挂起见 PENDING)
@@ -481,3 +484,18 @@
   - `pnpm compose:reset` 后 `docker compose ps --all --quiet` 为空,`tool-bridge-dev_gateway-data` 卷不存在,容器/网络/fixture 数据清理完成。
 - 勾选:Phase 4.5 DoD 项 2(Docker Compose 本地三跳开发栈)与项 3(全阶段回归)。
 - 遗留:Phase 4.5 已完成,进入 Phase 5。下一轮 = E2E-A:汇总安全解冻可重跑证据并执行无需生产授权的 fail-closed/越权回归;`deploy:all`/生产 smoke 半边继续遵守 P1-1 等 PENDING 外向动作纪律。
+
+## Round 27 — 2026-08-11
+- 目标:Phase 5 E2E-A 本地半边 —— 重跑越权 SecretRef/连接授权/Node bootstrap fail-closed 证据,补齐 invoke×连接替换竞态的确定性回归,并加固未来生产 smoke/verify-device 脚本。
+- 动作:
+  - 复用 gateway `secretRef.integration` 的同形用例:仅持 `team/**` register 且 `registerPaths=[team]` 的窄 SK,经合法 `team/evil-http/~register` 绑定他人 `authRef`,精确返回 403 `permission_denied`;不是被 path gate 提前误拒。两宿主 device 集成继续覆盖 SK disabled/scope 收紧后的逐调用重验。
+  - 新增 Node `DeviceHub` barrier 回归:旧连接 active 后把 invoke 的 `sk:h:` identify 读取卡住,在栅栏期间让同 deviceId 新连接完成 ready/active;server-side 旧 socket close 暂时 no-op,确保 stale session 仍可调用。释放后必须返回 unavailable,旧/新连接均收到 0 个 call。mutation probe 临时删除 post-await active-generation guard 后测试实际返回 stale `ok:true` 并失败,恢复 guard 后转绿,证明回归对目标竞态敏感。
+  - `verify-device.ts` 增加生产 steady-state 替换步骤:第二连接使用仅新代际允许的 `printf`,并行等待 new ready 与 old reconnecting→stop,随后精确断言调用由新连接处理;保留 shell/fs/registerPaths、幂等 teardown 与 opt-in ≥155s hibernation。该 smoke 不冒充 DO stale-meta/休眠 barrier。
+  - `smoke.ts` 改为 `TB_SK` 必填,缺失在任何网络请求前非 0,不再以 skip authenticated `~help` 后仍成功制造生产假绿。同步修正 Node main 入口的陈旧 bootstrap 注释。
+- 验证:
+  - gateway SecretRef+device **13/13**、server bootstrap+device 初始 **17/17** 全绿。隔离真实进程 `TB_BOOTSTRAP_ADMIN_SK=` 启动退出 **1**,捕获 stdout/stderr 无 `tbk_` 明文且错误指向缺失配置;输出只做 pattern 判定,未回显原文。
+  - 本地真实 Node gateway + CLI `verify-device.ts` 连续两版均全 PASS:主连接 shell/fs、同 ID 替换+新代际 `printf`、越界 registerPaths 拒绝、允许前缀 ready 与 teardown 成功。有效 `TB_SK` 的 `pnpm smoke` 全 PASS;缺 SK probe 退出 **1** 且未发网络请求。
+  - 新 barrier 定向 server device **12/12**;mutation 删除 guard 时目标用例 **1 failed**(收到 stale `ok:true`),恢复后 **1/1 passed**。严格复核报告 `.llmdoc-tmp/phase5-e2e-a-review.md` 结论无本地阻断。
+  - `pnpm verify` → 9 workspace typecheck + 全仓 lint + provision **1 passed** + 包测试 **1273 passed / 7 skipped**(core 744 + dashboard 10 + plugin-sdk 22 + cli 242 + sdk 19 + plugin-feishu 9 + gateway 189 + server 38),合计 **1274 passed / 7 skipped**,退出码 0。
+- 勾选:无。E2E-A 的本地 fail-closed/越权/竞态/全量回归半边已闭环,但 DoD 同项还要求生产 deploy + authenticated smoke,证据未取得前保持未勾。
+- 遗留:P1-1/P1-2 继续 PENDING:当前非干净 `origin/main`,`TB_SEARCH` D1 id 仍为占位且无外向授权,不得运行 `deploy:all`/生产 smoke/DO hibernation。下一轮 = E2E-B 本地可推进半边:样例 plugin 双 export 集成 + plugin-sdk pack dry-run + 飞书本地重写验证;生产三动词继续映射 P2-1。

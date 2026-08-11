@@ -39,7 +39,7 @@ pnpm --filter @tool-bridge/server test         # 纯 Node vitest(不需要 worke
 docker build -t tool-bridge .                                  # 根 Dockerfile,多阶段
 docker run -d --name tb -p 8787:8787 -v tbdata:/data \
   -e TB_BOOTSTRAP_ADMIN_SK=… -e TB_SECRET_ENCRYPTION_KEY=… tool-bridge
-TB_BASE_URL=http://127.0.0.1:8787 pnpm smoke                   # 冒烟
+TB_BASE_URL=http://127.0.0.1:8787 TB_SK="$TB_BOOTSTRAP_ADMIN_SK" pnpm smoke  # 冒烟
 docker restart tb                                              # 重启后:已注册节点仍在 + 引导幂等(bootstrapped 日志仅一条)
 ```
 
@@ -76,12 +76,12 @@ smoke 从 gateway 公共入口 set 两个 secret,注册 plugin/v2并校验 `acti
 | `$ref` 大对象 | R2 presign 或 `/~ref` 中转 | FS 无 presign,固定走 `/~ref` 中转 |
 | 首次 bootstrap | 缺 `TB_BOOTSTRAP_ADMIN_SK` fail closed | 缺 Admin SK 默认 fail closed;仅显式 insecure bootstrap逃生阀随机打印 |
 
-设备协议行为不分叉:hello 验证+落库统一走 gateway `src/deviceHello.ts`(`processDeviceHello`),DO 与 DeviceHub 只是宿主胶水。当前两宿主都在每次 invoke 前调用 `identify`;disabled 回归已有测试,delete/expiry 由同一 active-key 判定处理。但重验跨 await 后尚未复核 active connection,也未校验 scope/registerPaths 收紧,提交前复审已把它列为待修安全缺口,不能据此承诺所有既有连接都可靠失效。
+设备协议行为不分叉:hello 验证+落库统一走 gateway `src/deviceHello.ts`(`processDeviceHello`),DO 与 DeviceHub 只是宿主胶水。两宿主都在每次 invoke 前调用 `identify`,复核 keyId 与当前 scope/registerPaths,并在异步认证后再次比较 active connection generation;disabled/delete/expiry和权限收紧都按失效处理。Node `DeviceHub` 的同 ID 替换窗口已有 barrier + mutation 证据;这不等于 Workers DO 已经过生产 hibernation/驱逐/stale-meta 验收。
 
 ## 已知限制
 
 - **bootstrap 兼容边界:**Node/Docker 默认已 fail closed;生产必须显式预置 `TB_BOOTSTRAP_ADMIN_SK`,不得开启 `TB_ALLOW_INSECURE_BOOTSTRAP`。宿主中立 `runBootstrap` 与 SDK 未传 `adminSk` 时仍可随机生成并写本地 stdout,嵌入方须自行决定是否接受该兼容行为。
-- **设备重验缺口:**`DeviceHub.invoke` 在等待 StateStore 认证期间可被新连接替换,恢复后可能向旧连接发送一次调用;需在 await 后复核 active connection,并补 barrier 并发测试。
+- **设备证据边界:**`DeviceHub.invoke` 的 post-await generation guard与 barrier并发测试已落地;生产 DO 的同 ID replacement steady-state、≥155s hibernation/驱逐和 stale-meta 验收仍 PENDING,不得用 Node 证据代替。
 - 反向代理后 `/~ref` 中转 URL 的 origin 取自请求 URL,代理须透传 `Host` / `X-Forwarded-Proto`(未来可加 `TB_PUBLIC_ORIGIN`)。
 - 设备幂等结果表不跨进程重启(见上表,有意分叉)。
 

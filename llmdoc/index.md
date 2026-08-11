@@ -53,6 +53,7 @@
 - [memory/reflections/2026-08-11-search-consumer-parity-ui-evidence.md](memory/reflections/2026-08-11-search-consumer-parity-ui-evidence.md) — 全局搜索消费面对等与 UI 证据链(API/CLI/Dashboard 共用 wire contract;全局搜索与本地树导航分义;TreePath 逐段编码;gateway 测试从当前 Dashboard source build;浏览器与静态证据边界)。
 - [memory/reflections/2026-08-11-dashboard-system-forms-split.md](memory/reflections/2026-08-11-dashboard-system-forms-split.md) — Dashboard 系统表单拆分与证据边界(先抽 pure builder再拆 fields/dialog/route;CLI/builtin 对等用 wire fixture执行;route-component 依赖解耦;包级测试纳入 root verify;Node Vitest、fresh-build integration与浏览器证据分层)。
 - [memory/reflections/2026-08-11-compose-three-hop-dev-stack.md](memory/reflections/2026-08-11-compose-three-hop-dev-stack.md) — Docker Compose 三跳开发栈的可验证性(loopback固定凭据边界;gateway→真实 plugin→mock upstream链路证据;profile smoke同步退出码;唯一 dev-image builder;幂等卷、负例绕缓存与restart证据)。
+- [memory/reflections/2026-08-11-e2e-security-evidence-sensitivity.md](memory/reflections/2026-08-11-e2e-security-evidence-sensitivity.md) — E2E 安全证据敏感性(barrier固定 happens-before、保持 stale session可调用、mutation probe检验防线;认证 smoke网络前 fail closed;Node、本地进程与生产 DO证据分账)。
 
 ## 路由提示
 

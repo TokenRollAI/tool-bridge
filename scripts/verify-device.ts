@@ -12,10 +12,12 @@ import { fileURLToPath } from 'node:url'
  *   1. spawn `tb connect --device-id verify-dev-<rand> --allow echo --fs <tmp>`,等 ready 事件;
  *   2. 断言①:`tb call device/<id>/shell --tool exec` → stdout 含 hi-p4;
  *   3. 断言②:`tb ctx cat device/<id>/fs <root>/hello.txt` → 读到临时文件真实内容;
- *   4. 断言③:admin SK 签发 registerPaths=[device/allowed-<rand>] 的受限 SK →
+ *   4. 断言③:同 deviceId 第二连接顶替第一连接,旧连接进入 reconnecting 后立即停止,
+ *      仅新连接允许的命令仍能调用成功;
+ *   5. 断言④:admin SK 签发 registerPaths=[device/allowed-<rand>] 的受限 SK →
  *      越界 `--device-id outside-<rand>` 被拒(网关发 error 帧关连接:进程退出不重连、
  *      从未 ready、registry 无该节点)→ 前缀内 `--device-id allowed-<rand>` 连接 ready;
- *   5. teardown(幂等可重跑):杀 connect 子进程、registry delete 注册节点(各设备用
+ *   6. teardown(幂等可重跑):杀 connect 子进程、registry delete 注册节点(各设备用
  *      注册它的 SK 删;回收 alarm 默认 24h 不等它)、吊销受限 SK、删临时目录。
  *
  * 用法:`TB_BASE_URL=https://... TB_SK=tbk_... pnpm tsx scripts/verify-device.ts`
@@ -116,6 +118,8 @@ interface ConnectHandle {
   exit: Promise<CliResult>
   /** ready 事件(resolve 为 mountPath);被拒的连接永不 resolve。 */
   ready: Promise<string>
+  /** 服务端关闭本连接后 CLI 进入 reconnecting;替换用例据此在重连前停止旧进程。 */
+  reconnecting: Promise<void>
   stop(): Promise<CliResult>
 }
 
@@ -135,6 +139,10 @@ function startConnect(deviceId: string, extraArgs: string[], sk: string): Connec
   const ready = new Promise<string>((resolve) => {
     resolveReady = resolve
   })
+  let resolveReconnecting: () => void = () => {}
+  const reconnecting = new Promise<void>((resolve) => {
+    resolveReconnecting = resolve
+  })
   // printJson 输出多行缩进 JSON:按顶层 `}` 行分块解析事件流。
   let chunk = ''
   const rl = createInterface({ input: child.stdout })
@@ -145,8 +153,9 @@ function startConnect(deviceId: string, extraArgs: string[], sk: string): Connec
     const text = chunk
     chunk = ''
     try {
-      const evt = JSON.parse(text) as { event?: string, mountPath?: string }
+      const evt = JSON.parse(text) as { event?: string, mountPath?: string, state?: string }
       if (evt.event === 'ready') resolveReady(String(evt.mountPath))
+      if (evt.event === 'state' && evt.state === 'reconnecting') resolveReconnecting()
     } catch {
       // 未闭合/非 JSON 块:继续累积由后续行闭合;最终原文都在 stdout 供失败诊断。
       chunk = text
@@ -161,6 +170,7 @@ function startConnect(deviceId: string, extraArgs: string[], sk: string): Connec
   return {
     deviceId,
     ready,
+    reconnecting,
     exit,
     async stop() {
       if (child.exitCode === null && !child.killed) child.kill('SIGTERM')
@@ -321,8 +331,28 @@ async function main(): Promise<void> {
       })
     }
 
-    // 4) 断言③:registerPaths 收紧(段级前缀,scope 给足以隔离变量)。
-    const issued = await step('③ 签发受限 SK', async () => {
+    // 4) 断言③:同 deviceId 新连接顶替旧连接;新连接使用不同 shell allow 作为路由标记。
+    await step('③ 同 deviceId 连接替换', async () => {
+      const replacement = startConnect(
+        deviceId,
+        ['--allow', 'printf', '--fs', tmpRoot],
+        adminSk,
+      )
+      handles.push(replacement)
+      await Promise.all([
+        waitReady(replacement, READY_TIMEOUT_MS),
+        withTimeout(dev.reconnecting, READY_TIMEOUT_MS, `旧连接(${deviceId}) 被替换`).then(
+          () => dev.stop(),
+        ),
+      ])
+      const exec = await callShell(deviceId, 'printf hi-p4-replaced')
+      assert.equal(exec.exitCode, 0, `替换后 shell exec 预期 exitCode 0,实际 ${exec.exitCode}`)
+      assert.equal(exec.stdout, 'hi-p4-replaced', '调用必须由仅允许 printf 的新连接处理')
+      console.log('ok  ③ 同 deviceId 新连接顶替旧连接,调用路由到新代际')
+    })
+
+    // 5) 断言④:registerPaths 收紧(段级前缀,scope 给足以隔离变量)。
+    const issued = await step('④ 签发受限 SK', async () => {
       const created = await cliJson<{ key: { id: string }, secret: string }>(
         [
           'sk',
@@ -346,12 +376,9 @@ async function main(): Promise<void> {
       )
       await waitSkUsable(created.secret)
 
-      // 4a) 越界 deviceId → 网关 error 帧关连接:进程自行退出(不重连)、从未 ready、
+      // 5a) 越界 deviceId → 网关 error 帧关连接:进程自行退出(不重连)、从未 ready、
       //     registry 不出现该节点。
-      //     注:已知 CLI bug——onRejected 里 socket.close(1008) 同步派发 close 事件,
-      //     resolveClosed 抢先于 rejectClosed,拒绝被吞、退出码 0 且无错误输出;
-      //     故此处不断言退出码/错误文案,以"未 ready + 节点不存在"为拒绝证据。
-      await step('③a 越界注册被拒', async () => {
+      await step('④a 越界注册被拒', async () => {
         const outsideId = `outside-${rand}`
         cleanups.push({ deviceId: outsideId, sk: created.secret })
         const outside = startConnect(outsideId, ['--allow', 'echo'], created.secret)
@@ -360,7 +387,12 @@ async function main(): Promise<void> {
         outside.ready.then(() => {
           outsideReady = true
         })
-        await withTimeout(outside.exit, REJECT_TIMEOUT_MS, `tb connect(${outsideId}) 被拒退出`)
+        const rejected = await withTimeout(
+          outside.exit,
+          REJECT_TIMEOUT_MS,
+          `tb connect(${outsideId}) 被拒退出`,
+        )
+        assert.notEqual(rejected.code, 0, '越界注册被拒时 tb connect 必须非零退出')
         assert.equal(outsideReady, false, '越界注册不应达到 ready')
         const got = await runCli(
           [
@@ -376,20 +408,20 @@ async function main(): Promise<void> {
         )
         assert.notEqual(got.code, 0, `越界节点不应注册成功,registry get 输出:${got.stdout}`)
         assert.match(got.stdout, /not_found/, `registry get 预期 not_found,实际:${got.stdout}`)
-        console.log('ok  ③a 越界 deviceId 注册被拒(未 ready + 节点未出现)')
+        console.log('ok  ④a 越界 deviceId 注册被拒(未 ready + 节点未出现)')
       })
 
-      // 4b) 前缀内 deviceId → 正常 ready。
-      await step('③b 前缀内注册成功', async () => {
+      // 5b) 前缀内 deviceId → 正常 ready。
+      await step('④b 前缀内注册成功', async () => {
         const allowedId = `allowed-${rand}`
         cleanups.push({ deviceId: allowedId, sk: created.secret })
         const allowed = startConnect(allowedId, ['--allow', 'echo'], created.secret)
         handles.push(allowed)
         await waitReady(allowed, READY_TIMEOUT_MS)
-        console.log('ok  ③b 前缀内 deviceId 注册成功(ready)')
+        console.log('ok  ④b 前缀内 deviceId 注册成功(ready)')
       })
     })
-    if (!issued) failures.push('③a 越界注册被拒(未执行)', '③b 前缀内注册成功(未执行)')
+    if (!issued) failures.push('④a 越界注册被拒(未执行)', '④b 前缀内注册成功(未执行)')
 
     if (failures.length > 0) {
       throw new Error(`断言未全过:${failures.join(' / ')}`)
