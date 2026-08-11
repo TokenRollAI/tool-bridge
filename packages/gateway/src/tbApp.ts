@@ -85,6 +85,7 @@ import {
 } from '@tool-bridge/core'
 import { type Context, Hono } from 'hono'
 import type { PluginBindings } from './providers/pluginClient'
+export type { PluginBindings } from './providers/pluginClient'
 import type { UpstreamProvider } from './providers/types'
 import {
   finishMcpAuthorization,

@@ -179,6 +179,7 @@ export function createToolBridge(config: ToolBridgeConfig): ToolBridge {
     },
   }
   if (config.reservedRoots !== undefined) deps.reservedRoots = config.reservedRoots
+  if (config.pluginBindings !== undefined) deps.pluginBindings = config.pluginBindings
   if (config.objects !== undefined) {
     const objects = config.objects
     deps.objects = () => objects

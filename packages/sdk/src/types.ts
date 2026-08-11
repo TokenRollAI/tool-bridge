@@ -1,3 +1,4 @@
+import type { PluginBindings } from '@tool-bridge/gateway/tbApp'
 import { type ContextProvider,
   type DeviceClientState,
   type DeviceExpose,
@@ -64,6 +65,8 @@ export interface ToolBridgeConfig {
   maxHops?: number
   /** context 对象('r2' 平台 provider 的落点);缺省 → 该 provider unavailable。 */
   objects?: ObjectStore
+  /** 进程内插件装配表(binding 名 → fetch handler);`binding:<name>` 插件经此直调。 */
+  pluginBindings?: PluginBindings
 
   // ---- 以下为 SDK 引导扩展(标准签名未列) ----
 

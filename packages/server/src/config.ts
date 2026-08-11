@@ -4,6 +4,7 @@
  * 解析函数镜像 app.ts 的 allowInsecure / remoteSettingsFromEnv / positiveIntEnv。
  */
 
+import type { PluginBindings } from '@tool-bridge/gateway/tbApp'
 import { normalizeCanonicalOrigin } from '@tool-bridge/core'
 
 const DEFAULT_PORT = 8787
@@ -32,6 +33,11 @@ export interface ServerConfig {
   /** SecretStore 主密钥 + $ref 中转 token 签名密钥(base64url 32B)。 */
   encryptionKey?: string
   host: string
+  /**
+   * 进程内插件装配表(binding 名 → fetch handler),供程序化嵌入方注入;
+   * `binding:<name>` 的插件经此直调,零网络跳。bin 入口暂不从 env 装配。
+   */
+  pluginBindings?: PluginBindings
   port: number
   refThresholdBytes?: number
   refTtlSec?: number

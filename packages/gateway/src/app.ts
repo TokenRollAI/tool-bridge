@@ -2,8 +2,8 @@ import { normalizeCanonicalOrigin, SecretStoreImpl, type StateStore } from '@too
 import { Hono } from 'hono'
 import type { RemoteSettings } from './providers/remote'
 import type { DeviceSession } from './deviceSession'
+import { createTbApp, parseS3Credentials, type PluginBindings, type TbAppDeps } from './tbApp'
 import { createR2ObjectStore, type R2PresignCredentials } from './providers/r2Object'
-import { createTbApp, parseS3Credentials, type TbAppDeps } from './tbApp'
 import pkg from '../package.json' with { type: 'json' }
 import { D1SearchIndex } from './search/d1SearchIndex'
 import { ensureBootstrapped } from './bootstrap'
@@ -152,13 +152,17 @@ function depsFromEnv(env: Env): TbAppDeps {
 /**
  * Workers 入口的 Hono app。Workers 的 env 只在请求期可得,故每 isolate 按 env 惰性
  * 装配一次 tb app(env 对象在同一 isolate 内稳定,WeakMap 命中;跨 isolate 各自装配)。
+ * opts.pluginBindings:进程内插件装配表(构建期打包进 Worker 的插件集合按名直调)。
  */
-export function createApp(): Hono<{ Bindings: Env }> {
+export function createApp(opts: { pluginBindings?: PluginBindings } = {}): Hono<{ Bindings: Env }> {
   const apps = new WeakMap<Env, ReturnType<typeof createTbApp>>()
   const appFor = (env: Env): ReturnType<typeof createTbApp> => {
     let app = apps.get(env)
     if (app === undefined) {
-      app = createTbApp(depsFromEnv(env))
+      app = createTbApp({
+        ...depsFromEnv(env),
+        ...(opts.pluginBindings !== undefined ? { pluginBindings: opts.pluginBindings } : {}),
+      })
       apps.set(env, app)
     }
     return app
