@@ -15,7 +15,7 @@ TB_* 变量与 CF 宿主同名同义(`TB_BOOTSTRAP_ADMIN_SK` / `TB_SECRET_ENCRYP
 | `TB_PORT` | 8787 | 0 = 临时端口(测试用) |
 | `TB_HOST` | — | 监听地址 |
 | `TB_DATA_DIR` | `/data`(容器);本地回退 `./data` | 数据根目录 |
-| `TB_UI_DIR` | — | 覆盖 Dashboard 静态目录;不设则解析 `@tool-bridge/dashboard` 包 dist,再无则 `/ui` 404 降级 |
+| `TB_UI_DIR` | Docker final=`/app/dashboard`;其它宿主未设 | 覆盖 Dashboard 静态目录且须含`index.html`;无效override fail closed。非Docker宿主未设时才解析`@tool-bridge/dashboard`包dist |
 | `TB_ALLOW_INSECURE_BOOTSTRAP` | `false` | 默认缺 `TB_BOOTSTRAP_ADMIN_SK` 时拒绝首次启动;仅设为 `true` 才随机生成并打印一次 Admin SK,只限本地/一次性开发 |
 
 ## `/data` 布局
@@ -60,7 +60,9 @@ pnpm compose:reset    # down -v,删除 gateway-data 与固定 fixture
 
 只有 gateway 发布 `127.0.0.1:${TB_COMPOSE_GATEWAY_PORT:-8787}`;plugin/upstream 只 `expose` 到 Compose 内网。默认 Admin SK、plugin token、app credential与 TAT 是可提交的确定性 fixture,**仅允许隔离 localhost 开发**,不得复制到生产、绑定 `0.0.0.0`、接反向代理或共享到其它网络。修改 Admin SK 或 encryption key不会迁移既有卷;改值后出现 401/密文解不开时用 `compose:reset`,或走管理面显式轮换。
 
-smoke 从 gateway 公共入口 set 两个 secret,注册 plugin/v2并校验 `actions/tools/v1`,挂载 `compose/tools`,最后断言 mock upstream 生成的精确 `compose-roundtrip`。验收已覆盖 fresh volume、同卷重复、gateway restart、用全新错误 app id绕过 TAT cache后的 upstream 401 → gateway 503/nonzero、恢复后再通过,以及 `HostIp=127.0.0.1`、final image CMD与 teardown。三个 healthcheck 只负责等待,不能替代这条调用证据。
+smoke先检查Dashboard `/ui/`与`/ui/manage/registry`均返回200、`text/html`和当前title,再从gateway公共入口set两个secret、注册plugin/v2并校验`actions/tools/v1`、挂载`compose/tools`,最后断言mock upstream生成精确`compose-roundtrip`。root+deep link证明入口与SPA fallback,但完整assets/React行为仍由final-image真实浏览器补证。验收同时覆盖fresh volume、同卷重复、gateway restart、用全新错误app id绕过TAT cache后的upstream 401→gateway 503/nonzero、恢复后再通过,以及`HostIp=127.0.0.1`、final image CMD与teardown。三个healthcheck只负责等待,不能替代UI或三跳调用证据。
+
+`pnpm --filter @tool-bridge/server --prod deploy --legacy /out`对workspace Dashboard保留的是指向build目录的symlink;多阶段final不含该目标,API/health仍可绿而`/ui`会404。production Dockerfile因此显式复制当前构建的`packages/dashboard/dist`到`/app/dashboard`并设置`TB_UI_DIR`,不要改回依赖`node_modules`布局。验收时应在final容器内确认该路径是普通可读目录、`index.html`和其引用assets存在,浏览器必须连接final容器而非Vite dev或宿主workspace。
 
 当前边界:echo mock新增 route 尚无独立单测;compose smoke的 fetch尚无逐请求 AbortSignal;固定 dev image tag在并行 worktree并发 build/run时可能串 source,即使 `COMPOSE_PROJECT_NAME` 与宿主端口不同也不能完全隔离。这些是后续增强,当前本地证据不代表生产凭据、真实飞书、跨主机网络或生产部署已验证。
 
@@ -72,7 +74,7 @@ smoke 从 gateway 公共入口 set 两个 secret,注册 plugin/v2并校验 `acti
 | 设备幂等结果表 | DO storage,跨休眠可回放 | 进程内存,**不跨进程重启**(有意分叉) |
 | 设备断线回收 | DO alarm | `devicemeta:<id>` 持久 meta + 进程内 timer + 启动 `sweepOrphans`(崩溃孤儿按启动时刻起算) |
 | 设备探活 | DO autoResponse(hibernation) | ws 协议层 ping 踢半开连接 |
-| `/ui` 静态托管 | Static Assets binding | TB_UI_DIR → dashboard 包 dist 解析 → 404 降级 |
+| `/ui` 静态托管 | Static Assets binding | production image显式`/app/dashboard`+`TB_UI_DIR`;其它Node宿主未设override时才解析包dist |
 | `$ref` 大对象 | R2 presign 或 `/~ref` 中转 | FS 无 presign,固定走 `/~ref` 中转 |
 | 首次 bootstrap | 缺 `TB_BOOTSTRAP_ADMIN_SK` fail closed | 缺 Admin SK 默认 fail closed;仅显式 insecure bootstrap逃生阀随机打印 |
 

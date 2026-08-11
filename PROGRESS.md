@@ -41,14 +41,22 @@
   `/~search` 各跑一次中文两字词与英文词 smoke。属外向生产动作,待用户授权;
   **不构成 Phase 4.5 编码依赖**,生产证据前项 7 不勾选。
 
+## ⏹ LOOP 停机状态
+
+- Round 31 已完成唯一不依赖生产外向动作的 E2E-D。Phase 5 其余未勾项 E2E-A/B/E/C
+  分别由 P1-1/P1-2、P2-1、P3-1、P4-1/P4-3 卡住;它们都要求用户授权的生产部署、
+  真实外部服务或线上复验。
+- 当前没有可继续推进的未勾项,命中 LOOP 的唯一真正停机条件「所有 Phase 的全部未勾项
+  都被 PENDING 卡住」。这不是“全部完成”:全局 Done 仍须完成上述生产证据、PR/合并与部署。
+
 ## 当前状态
-- 当前 Phase:**Phase 5 — E2E 验收**(Round 26 已完成 Phase 4.5:Dashboard 大页拆分 + Docker Compose 三跳开发栈 + 全阶段回归;Phase 1—4 待授权外向动作继续见 PENDING)
+- 当前 Phase:**Phase 5 — E2E 验收 / PENDING 停机**(Round 31 已勾 E2E-D;E2E-A/B/E/C 只剩生产外向证据,见上方 LOOP 停机状态与 PENDING)
 - Phase 3 已勾选:项 1(官方 MCP 测试 client + 本地 initialize,Round 14)、项 2(认证后的动态 tools/list + tools/call,Round 15)、项 3(scope 收窄钉死,Round 16)、项 4(三入口对等审计,Round 17)
 - Phase 3 待办:**仅剩待授权的外向动作** — 项 5 已完成生产脚本与全量回归,真实部署/生产 MCP smoke → P3-1
 - Phase 4 已勾选:项 3(CF D1 + Node SQLite SearchIndex,FTS5/trigram,Round 21)、项 4(trigram 短词 escaped LIKE 兜底,Round 22)、项 5(加权索引、自动同步、权限后处理分页与 opaque cursor,Round 23)、项 6(`tb search` + Dashboard `/search`,Round 24)
 - Phase 4 遗留:项 1 真实 provision/deploy → P4-1;项 2 外部 HTBP Draft → P4-2;项 7 已完成 `pnpm verify` 半边,生产 deploy + 中英文 search smoke → P4-3。三者均为外向流程动作,不构成 Phase 4.5 编码依赖。
 - Phase 4.5 已勾选:项 1(Dashboard Registry/Plugins/SK 大页拆分、纯 builder 契约测试与 fresh-source UI 集成,Round 25)、项 2(gateway→plugin-feishu Worker→mock TAT/MCP 上游 Compose 三跳开发栈,Round 26)、项 3(`pnpm verify` 全绿,Round 26)
-- Phase 5 本地进度:E2E-A 的 SecretRef 越权拒绝、Node bootstrap fail closed、Node invoke×连接替换 barrier 与 `pnpm verify` 已闭环(Round 27);生产 deploy/smoke 与 DO 休眠/stale-meta 证据仍映射 P1-1/P1-2,故 E2E-A 保持未勾。
+- Phase 5 本地进度:E2E-D 已完整勾选(Round 31);E2E-A 的 SecretRef 越权拒绝、Node bootstrap fail closed、Node invoke×连接替换 barrier 与 `pnpm verify` 已闭环(Round 27),但生产 deploy/smoke 与 DO 休眠/stale-meta 仍映射 P1-1/P1-2;E2E-B/E/C 的本地半边同样已闭环,生产证据分别映射 P2-1/P3-1/P4-1/P4-3。
 - Phase 2 已勾选:项 1(OperationRegistry)、项 2(Plugin v2 多 export,Round 13 补齐三入口对等后成立)、项 3(Context 按 handler 推导能力)、项 4(`@tool-bridge/plugin-sdk` 可发布)、项 5(样例 plugin 双 export)、项 6(删净 legacy 面)
 - Phase 2 待办(**全部为待授权的外向动作**):项 7 飞书重写复验(代码已完成,只差生产实调 → P2-1)/ 项 8 部署上线
 - Phase 1(代码完成,部署挂起见 PENDING)
@@ -542,3 +550,18 @@
   - `pnpm verify` → 9 workspace typecheck + 全仓 lint + provision **1 passed** + 包测试 **1273 passed / 7 skipped**(core 744 + dashboard 10 + plugin-sdk 22 + cli 242 + sdk 19 + plugin-feishu 9 + gateway 189 + server 38),合计 **1274 passed / 7 skipped**,退出码 0;严格复核 `.llmdoc-tmp/phase5-e2e-c-review.md` 最终无代码阻断。
 - 勾选:无。E2E-C 的本地两宿主、真实 CLI、全 cursor 权限与 Dashboard exact-query 半边已闭环;同项仍明确要求 CF 生产 `~search` 与线上 Dashboard,不得在本地证据下误勾。
 - 遗留:P4-1/P4-3 继续 PENDING:需在干净 `origin/main` 与获得外向授权后创建真实 `tb-search` D1、回填 UUID、部署,再为生产已知 visible/hidden fixture 签窄 SK,运行同一 `pnpm verify:search` 并以线上 Dashboard 对拍。下一轮 = E2E-D:汇总 Compose 三跳、Dashboard 拆分与真实浏览器四面本地证据,判断该项是否可独立勾选。
+
+## Round 31 — 2026-08-11
+- 目标:Phase 5 E2E-D —— 用当前 Dashboard 拆分后的 production-final Compose 镜像完成三跳 smoke、全量回归与真实浏览器四面验收。
+- 动作:
+  - `pnpm compose:up` 冷构建并启动 gateway/plugin/upstream 后,真实访问 final gateway 的 `/ui/` 首次返回 404。取证确认 `pnpm deploy --legacy` 留下的 `@tool-bridge/dashboard` workspace symlink 指向 final 镜像不存在的 `/repo/packages/dashboard`;API health 与既有三跳 smoke 因未访问 UI 而仍可假绿。
+  - Docker final stage 现把 Dashboard `dist` 显式复制到 `/app/dashboard`,并设 `TB_UI_DIR=/app/dashboard`;server 入口、单容器形态、`/data` 唯一持久卷与 localhost-only Compose 端口均不变。`compose-smoke.ts` 增加 `/ui/` 与 `/ui/manage/registry` 的 200、HTML content-type 和当前 title 断言。
+  - 浏览器树夹具使用 Compose 网络内不发布宿主端口的临时 peer gateway,避免自指 remote 环;验收后关闭 Playwright、删除 peer,并 `compose:reset` 清容器、网络和数据卷。
+- 验证:
+  - 当前源码重建后 `pnpm compose:smoke` 明确打印 `PASS dashboard root and SPA deep link`,随后 secret upsert、plugin/v2 注册、export 挂载与 gateway→plugin→mock MCP `echo` 三跳全部 PASS。`docker inspect` 证明 HostIp=`127.0.0.1`、CMD=`node /app/dist/main.js`、`TB_UI_DIR=/app/dashboard`;final 内 index/assets 真实存在。
+  - final-image 真实 Playwright:桌面 1440×900 与移动 390×844 的总览、搜索、Registry、SK、Secret、Device、Plugin、Federation、Node 九类路由均 HTTP 200 且 `scrollWidth===innerWidth`;单次 18 路由监听为 console warning/error **0**、pageerror **0**。
+  - 资源树网络边界精确为 root `/~tree?depth=1`、local `/docs/~tree?depth=1`、remote `/federated/~tree?depth=3`、filter `/~tree?depth=8`,均 200。ArrowDown/Up、Home/End、ArrowRight 两步与 ArrowLeft 两步的焦点/展开状态逐项符合 ARIA tree;移动抽屉 Escape 后 dialog 数为 0,焦点回到“打开资源与管理导航”。
+  - `pnpm verify` → 9 workspace typecheck + 全仓 lint + provision **1 passed** + 包测试 **1273 passed / 7 skipped**(core 744 + dashboard 10 + plugin-sdk 22 + cli 242 + sdk 19 + plugin-feishu 9 + gateway 189 + server 38),合计 **1274 passed / 7 skipped**,退出码 0。gateway typecheck、目标 ESLint、两种 Compose config、`git diff --check` 均通过;严格复核 `.llmdoc-tmp/phase5-e2e-d-review.md` 结论无阻断。
+  - `pnpm compose:reset` 后 Compose 容器/网络与 `tool-bridge-dev_gateway-data` 卷均不存在;临时 peer 与 Playwright session 同步清理。
+- 勾选:Phase 5 **E2E-D**。
+- 遗留:Phase 5 其余 E2E-A/B/E/C 均只剩生产部署或真实外部环境证据,分别映射 P1-1/P1-2、P2-1、P3-1、P4-1/P4-3。所有未勾项均为 PENDING,命中 LOOP 真正停机条件;等待用户授权外向动作后再恢复。

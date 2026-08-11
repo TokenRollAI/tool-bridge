@@ -57,6 +57,7 @@
 - [memory/reflections/2026-08-11-artifact-and-e2e-semantic-validation.md](memory/reflections/2026-08-11-artifact-and-e2e-semantic-validation.md) — 发布物与 E2E 语义验收(`npm pack` 退出 0 不代表 `publishConfig` 生效;真实 pnpm tarball 才是消费者对象;plugin/v2 升级同步迁移验收脚本;本地 wire 与生产飞书证据分账)。
 - [memory/reflections/2026-08-11-mcp-consumer-e2e-evidence-layers.md](memory/reflections/2026-08-11-mcp-consumer-e2e-evidence-layers.md) — MCP consumer E2E 证据分层(官方 SDK workerd、Node TCP、生产复跑三层;窄 SK 新连接精确集合;stale 负例+允许工具真实 call;零工具集不得冒充 scope 收窄)。
 - [memory/reflections/2026-08-11-search-e2e-evidence.md](memory/reflections/2026-08-11-search-e2e-evidence.md) — Search E2E 精确查询与证据分层(shared adapter+D1/SQLite wire+真实CLI全分页+浏览器DOM+生产复跑;hidden admin control;后页越权、前缀混淆与空集假绿防线)。
+- [memory/reflections/2026-08-11-compose-final-image-ui-evidence.md](memory/reflections/2026-08-11-compose-final-image-ui-evidence.md) — Compose final-image UI证据(workspace symlink跨stage悬空;显式复制`/app/dashboard`+`TB_UI_DIR`;root/deep-link smoke与final容器浏览器分层;九路由/tree depth/ARIA/console边界)。
 
 ## 路由提示
 

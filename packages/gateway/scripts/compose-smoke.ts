@@ -37,6 +37,21 @@ async function waitHealthy(name: string, url: string): Promise<void> {
   throw new Error(`${name} did not become healthy: ${url}/healthz`)
 }
 
+async function assertDashboard(): Promise<void> {
+  for (const path of ['/ui/', '/ui/manage/registry']) {
+    const response = await fetch(`${gatewayUrl}${path}`)
+    const html = await response.text()
+    assert.equal(response.status, 200, `${path} expected HTTP 200, got ${response.status}`)
+    assert.match(
+      response.headers.get('content-type') ?? '',
+      /^text\/html\b/,
+      `${path} did not return HTML`,
+    )
+    assert.match(html, /<title>tool-bridge · control plane<\/title>/, `${path} returned stale HTML`)
+  }
+  console.log('PASS dashboard root and SPA deep link')
+}
+
 async function call(path: string, tool: string, arguments_: JsonObject): Promise<unknown> {
   const response = await fetch(`${gatewayUrl}/${path}`, {
     method: 'POST',
@@ -68,6 +83,7 @@ async function main(): Promise<void> {
     waitHealthy('plugin', pluginUrl),
     waitHealthy('upstream', upstreamUrl),
   ])
+  await assertDashboard()
 
   await call('system/secret', 'set', { name: 'compose-plugin-token', value: pluginToken })
   await call('system/secret', 'set', {

@@ -95,7 +95,7 @@ exports `.` / `./tbApp` / `./bootstrap` / `./deviceHello`(供 SDK 与 server 复
 | `config.ts` | `configFromEnv`:TB_* 与 CF 同名同义 + TB_PORT(默认 8787,0=临时)/ TB_HOST / TB_DATA_DIR(默认 /data,本地回退 ./data)/ TB_UI_DIR;`TB_ALLOW_INSECURE_BOOTSTRAP` 仅显式放行随机 Admin SK兼容路径,默认 false |
 | `objects.ts` | `createDataObjectStore`:FsObjectStore('r2' provider 落点)前缀适配器,key 出入口加/剥 `objects/` 首段;无 presign → `$ref` 走 `/~ref` 中转 |
 | `deviceHub.ts` | ws `DeviceChannel`:http 'upgrade' + ws handleUpgrade;认证双点(升级前 identify 401 + processDeviceHello 权威判定),每次 invoke 重验 SK/keyId/scope/registerPaths并在 await 后复核 `activeByDevice` generation;复用 core `DeviceGatewaySession`;ws ping 踢半开;断线回收 = `devicemeta:<id>` 持久 meta + 进程内 timer + 启动 `sweepOrphans`;幂等结果表仅内存(有意分叉) |
-| `assets.ts` | `/ui` 静态托管:TB_UI_DIR 覆盖 → dashboard 包 dist 解析 → 404 降级;contentType 复用 core fsContentTypeOf |
+| `assets.ts` | `/ui` 静态托管:`TB_UI_DIR` override优先且须含index.html,否则fail closed;未设时才解析dashboard包dist;contentType复用core fsContentTypeOf。production Docker final固定指向真实目录 `/app/dashboard` |
 | `server.ts` | `createTbServer`:构造 TbAppDeps(对位 gateway app.ts),注入 `SqliteSearchIndex`;start() 默认以 `requireAdminSk:true` 直调 runBootstrap后再 hub.sweepOrphans,显式 insecure escape才放宽;close() 关闭 search/state 的独立 SQLite 连接 |
 | `main.ts` | bin 入口(shebang);bootstrap 失败在监听前退出非 0并给出安全指引;SIGINT/SIGTERM 优雅关闭 |
 | `test/` | `bootstrap.test.ts` 钉 Node bootstrap;`device.integration.test.ts` 用 barrier+mutation钉连接代际;`sqliteSearchIndex.test.ts` 复用 v2 shared contract;`server.integration.test.ts` 在重启后真实 TCP/SQLite执行两个 exact query,先用 admin证明 visible+hidden入索引,再用窄 `read+call` SK精确裁剪;server 全包当前 38 passed |
@@ -105,4 +105,4 @@ exports `.` / `./tbApp` / `./bootstrap` / `./deviceHello`(供 SDK 与 server 复
 
 - `scripts/`:gen-dev-vars/provision/smoke及可重跑验收脚本。`verify-mcp.ts` 用官方 SDK做admin/narrow双连接与双call;`verify-search.ts` 是根 `verify:search` 入口,构建CLI后只读执行 `日程`/`create document`,admin/narrow各沿opaque cursor拉全(200/页,最多20页),拒绝重复项/cursor,再验证窄结果非空、TreePath段前缀、admin子集和严格缩小;必填 `TB_BASE_URL`/admin SK/`TB_SEARCH_NARROW_SK`/`TB_SEARCH_ALLOWED_PREFIX`,不创建fixture或修改生产状态。
 - `.github/workflows/`:publish-{cli,sdk,gateway,dashboard,server}.yml(tag `<pkg>-v*`,npm Trusted Publishing)+ publish-docker.yml(tag `server-v*`,GHCR 镜像,buildx amd64/arm64)。
-- 仓库根:`Dockerfile`(production 多阶段 node:22-bookworm→slim,final 单容器 `CMD node /app/dist/main.js`,`pnpm --filter @tool-bridge/server --prod deploy --legacy /out`)+ `.dockerignore`;`docker-compose.yml` 另组 localhost gateway + 内网 plugin-feishu/upstream + profile smoke,根 package scripts 暴露 `compose:up|smoke|down|reset`。
+- 仓库根:`Dockerfile`(production多阶段node:22-bookworm→slim;legacy deploy的Dashboard workspace symlink在final会悬空,故显式COPY fresh `dashboard/dist`→`/app/dashboard`并设`TB_UI_DIR`;单容器CMD仍为`node /app/dist/main.js`)+`.dockerignore`;`docker-compose.yml`另组localhost gateway+内网plugin/upstream+profile smoke。`compose-smoke.ts`先断言`/ui/`与`/ui/manage/registry`为Dashboard HTML,再跑三跳业务链。

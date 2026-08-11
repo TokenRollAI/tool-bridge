@@ -78,4 +78,4 @@ Phase 间不可跳:B 改 ToolSpec 派生形态,C 索引 ToolSpec 必须在 B 后
 - [ ] **E2E-B**(Case B:新 SDK 双 export 零样板 + 飞书复验):样例 plugin 集成测试(describe 两 export→调工具→读 context)通过;`pnpm --filter @tool-bridge/plugin-sdk pack --dry-run --json` 通过且真实 tarball 入口指向 dist;飞书 plugin 重写后 `npx tsx scripts/verify-plugin.ts` + 生产 create-doc/fetch-doc/update-doc 各一次通过。
 - [ ] **E2E-E**(Case E:存量 MCP 客户端接入):测试 MCP client 连生产 MCP endpoint,`tools/list` 按 SK scope 裁剪、`tools/call` 真实成功;换窄 scope SK 重连工具集收窄(命令 + 输出留证)。
 - [ ] **E2E-C**(Case C:按意图搜工具 + 中文两字词 + 权限裁剪 + 双侧对等):`tb search "日程"` 与 `tb search "create document"` 均命中不空;窄 scope SK 搜结果只含可见节点;CF 生产 `~search` 与 Node 宿主 `~search` 同 query 行为对等;Dashboard 搜索面返回同样结果。
-- [ ] **E2E-D**(Case D:本地一键栈 + Dashboard 可维护):`docker compose up` 起完整栈端到端 smoke 通过;Dashboard 拆分后 `pnpm verify` 全绿 + 真实浏览器四面证据(桌面/移动路由、树请求边界、键盘导航、无 console error/warning)通过。
+- [x] **E2E-D**(Case D:本地一键栈 + Dashboard 可维护):`docker compose up` 起完整栈端到端 smoke 通过;Dashboard 拆分后 `pnpm verify` 全绿 + 真实浏览器四面证据(桌面/移动路由、树请求边界、键盘导航、无 console error/warning)通过。

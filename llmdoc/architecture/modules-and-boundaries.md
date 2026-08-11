@@ -73,9 +73,9 @@ Workers 无启动钩子,首请求惰性引导(模块级 promise 防重入 + KV �
 
 ## Compose 开发栈边界
 
-- production 根 Dockerfile final stage仍是单个 Node server容器;Compose 未新增第三条生产部署形态。
+- production根Dockerfile final stage仍是单个Node server容器;Dashboard fresh build须显式复制到真实目录`/app/dashboard`并由`TB_UI_DIR`寻址,不能依赖legacy deploy留下的build-workspace symlink。Compose未新增第三条生产部署形态。
 - Compose 只把 gateway发布到 `127.0.0.1`;真实 plugin-feishu Wrangler Worker和 authenticated mock TAT/MCP upstream只在项目网络内 `expose`。固定开发凭据与 `TB_ALLOW_INSECURE_HTTP=true` 必须和该 loopback边界一起审计。
-- one-shot smoke必须从 gateway入口完成 secret set → plugin/v2 register → export mount → upstream echo,用 `run --rm` 同步传递退出码;health仅作为依赖等待。`down`保留 `/data` 命名卷,`reset`才删卷,所以 fixture write必须可重复 upsert。
+- one-shot smoke必须先从gateway入口证明Dashboard `/ui/`与SPA deep link可用,再完成secret set→plugin/v2 register→export mount→upstream echo,用`run --rm`同步传递退出码;health仅作为依赖等待。`down`保留`/data`命名卷,`reset`才删卷,所以fixture write必须可重复upsert。
 
 ## Provider 边界细则
 
