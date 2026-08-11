@@ -1,5 +1,5 @@
 import { ArrowUpRight, GitBranch, Plus, TerminalSquare, Trash2 } from 'lucide-react'
-import { Link, useNavigate, useParams } from 'react-router'
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router'
 import { useQueryClient } from '@tanstack/react-query'
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -18,6 +18,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { KindBadge } from '@/components/KindBadge'
 import { KIND_ICON } from '@/components/kind-icon'
 import { Button } from '@/components/ui/button'
+import { encodeTreePath } from '@/lib/path'
 import { MountDialog } from './system/RegistryPage'
 
 function NodeMetric({
@@ -76,7 +77,7 @@ function Crumbs({ path }: { path: string }) {
               : (
                   <Link
                     className="rounded-md px-1.5 py-1 text-muted-foreground hover:bg-secondary hover:text-foreground"
-                    to={`/nodes/${prefix}`}
+                    to={`/nodes/${encodeTreePath(prefix)}`}
                   >
                     {seg}
                   </Link>
@@ -95,7 +96,9 @@ function Crumbs({ path }: { path: string }) {
  */
 export function NodePage() {
   const { '*': splat } = useParams()
+  const [searchParams] = useSearchParams()
   const path = (splat ?? '').replace(/\/+$/, '')
+  const initialTool = searchParams.get('tool') ?? undefined
   const help = useHelp(path)
   const invoke = useInvoke()
   const qc = useQueryClient()
@@ -117,7 +120,7 @@ export function NodePage() {
   const unmountSelf = async () => {
     await unmount(path)
     const parent = path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : ''
-    navigate(parent === '' ? '/' : `/nodes/${parent}`)
+    navigate(parent === '' ? '/' : `/nodes/${encodeTreePath(parent)}`)
   }
 
   if (help.isPending) {
@@ -298,7 +301,7 @@ export function NodePage() {
                     <div className="group flex items-stretch gap-1" key={ch.path}>
                       <Link
                         className="flex min-w-0 flex-1 items-center gap-3 rounded-lg border bg-background/50 px-3 py-3 transition-colors hover:border-primary/35 hover:bg-secondary/45"
-                        to={`/nodes/${target}`}
+                        to={`/nodes/${encodeTreePath(target)}`}
                       >
                         <span className="min-w-0 flex-1">
                           <span className="flex items-center gap-2">
@@ -341,6 +344,7 @@ export function NodePage() {
             ? (
                 <CommandWorkspace
                   cmds={cmds}
+                  initialTool={initialTool}
                   // mcp/http 节点级 ~help 是索引形态:仅为当前选中工具懒取 schema
                   lazySchema={node.kind === 'mcp' || node.kind === 'http'}
                   path={path}

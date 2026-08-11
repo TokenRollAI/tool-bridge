@@ -1,6 +1,6 @@
 import { type RefObject, useEffect, useRef, useState } from 'react'
 import { NavLink, Outlet, useLocation } from 'react-router'
-import { Menu, Search } from 'lucide-react'
+import { Command, Menu, Search } from 'lucide-react'
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog'
 import { ExplorerPanel } from '@/components/layout/ExplorerPanel'
 import { ActivityRail } from '@/components/layout/ActivityRail'
@@ -66,8 +66,13 @@ function MobileHeader({
         role="img"
         title={healthLabel(health)}
       />
+      <Button aria-label="前往工具搜索" asChild size="icon-sm" variant="ghost">
+        <NavLink to="/search">
+          <Search />
+        </NavLink>
+      </Button>
       <Button aria-label="打开全局跳转" onClick={onOpenPalette} size="icon-sm" variant="ghost">
-        <Search />
+        <Command />
         <span className="sr-only">{isMac ? '快捷键 Command K' : '快捷键 Control K'}</span>
       </Button>
     </header>

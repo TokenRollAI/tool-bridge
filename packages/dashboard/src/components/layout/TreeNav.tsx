@@ -11,6 +11,7 @@ import type { NodeKind, TreeJson } from '@/lib/types'
 import { Skeleton } from '@/components/ui/skeleton'
 import { KIND_ICON } from '@/components/kind-icon'
 import { useSession } from '@/lib/session-context'
+import { encodeTreePath } from '@/lib/path'
 import { useTree } from '@/lib/queries'
 import { cn } from '@/lib/utils'
 
@@ -368,7 +369,7 @@ function TreeBranch({
           role="treeitem"
           tabIndex={node.path === tabStopPath ? 0 : -1}
           title={`${node.path} · ${node.description}`}
-          to={`/nodes/${node.path}`}
+          to={`/nodes/${encodeTreePath(node.path)}`}
         >
           <span
             className={cn(

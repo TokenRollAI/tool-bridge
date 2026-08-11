@@ -8,6 +8,7 @@ import { deviceCommand } from './commands/device'
 import { pluginCommand } from './commands/plugin'
 import { secretCommand } from './commands/secret'
 import { serverCommand } from './commands/server'
+import { searchCommand } from './commands/search'
 import { statusCommand } from './commands/status'
 import { whoamiCommand } from './commands/whoami'
 import { loginCommand } from './commands/login'
@@ -38,7 +39,7 @@ function showGlobalOptionsInHelp(command: Command): void {
 /**
  * `tb` —— tool-bridge CLI(纯 API 客户端)。命令族:
  * - status:部署健康摘要。
- * - login/whoami/use/sk/secret/ls/tree/help:档案、SK、密钥与工具树浏览/管理。
+ * - login/whoami/use/sk/secret/ls/tree/help/search:档案、SK、密钥与工具树浏览/管理。
  * - federation ls/add/rm:remote 联邦 host 白名单(运行时叠加 env 基线)。
  * - note ls/get/set/rm:Path 补充说明(展示在 ~help;set/rm 需 admin)。
  * - feedback ls/get/submit/vote/rm:Agent 使用反馈(头部条目进 ~help)。
@@ -77,6 +78,7 @@ Agent feedback — every path carries experience from other agents:
   program.addCommand(federationCommand())
   program.addCommand(noteCommand())
   program.addCommand(feedbackCommand())
+  program.addCommand(searchCommand())
   program.addCommand(lsCommand())
   program.addCommand(treeCommand())
   program.addCommand(helpCommand())

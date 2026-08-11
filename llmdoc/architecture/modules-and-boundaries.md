@@ -25,9 +25,9 @@
 | builtin 管理面 | `system/*` 七模块:sk / secret / registry / status / plugin / federation / annotation | `builtin/` | 经 gateway dispatch |
 | Agent 反馈 | `~feedback` 保留段(per-path 一级协议能力,非 builtin):提交/投票/下钻,头部条目注入 ~help;owning node 的可见 top 5 title/detail 同步进工具搜索 | core `feedback/` 存储、`selectFeedbackSearchText`(256 UTF-8 bytes) + gateway `tbApp.ts` 路由 | 权限判定落目标 path;工具子路径 feedback 不提升到 owning node 搜索投影 |
 | SDK | 内嵌 TB 实例 / 程序化注册 / 反向连接 | —(装配层) | `packages/sdk`:createToolBridge = core + gateway 的 createTbApp + 内存宿主缺省 |
-| CLI | 纯 API 客户端 `tb`,18 个子命令一一映射接口面,**无专用端点** | — | `packages/cli`(commander;npm 发布物) |
+| CLI | 纯 API 客户端 `tb`,22 个顶层命令族一一映射接口面;`tb search` 直连 root `/~search`,**无专用端点** | — | `packages/cli`(commander;npm 发布物) |
 | Plugin System | 自定义 Provider 注册与生命周期(探活/契约校验/信封传输) | `plugin/` | gateway `providers/pluginClient|pluginTool|pluginContext` + builtin `system/plugin`;首个 in-repo plugin 参考实现:`packages/plugin-feishu`(CF Worker,飞书 TAT 自动换发) |
-| Dashboard | `~help` 通用渲染器 + 管理表单,**无专用后端** | — | `packages/dashboard`(React SPA)经 gateway Static Assets 挂 `/ui` |
+| Dashboard | `~help` 通用渲染器 + 管理表单 + 独立 `/search` root 搜索消费页,**无专用后端** | — | `packages/dashboard`(React SPA)经 gateway Static Assets 挂 `/ui` |
 | 部署 | CF 与 Docker 两条路径产出同一棵树 | — | CF:`scripts/provision.mjs` + wrangler;Docker/Node:`packages/server`(SQLite/FS/ws DeviceHub)+ 根 Dockerfile,见 [../guides/docker-host.md](../guides/docker-host.md) |
 
 ## 依赖方向要点
@@ -37,6 +37,7 @@
 - **设备 hello 单一真源**:hello 验证 + 落库统一在 gateway `src/deviceHello.ts`(`processDeviceHello`,宿主中立,dev exports `./deviceHello`);`deviceSession.ts`(DO)与 server `deviceHub.ts` 只是宿主胶水——防两宿主树形态漂移,改协议行为只改 deviceHello。
 - **providers 承担全部 I/O**:core `tool/`、`context/`、`plugin/` 只放纯逻辑(拼装/映射/校验/归一);上游 fetch、MCP SDK、aws4fetch 签名都在 gateway `providers/`。
 - **SearchIndex 是派生状态,不得反向收窄 canonical**:`NodeRegistryStore` 与 provider/tool cache 继续接受自身契约允许的数据;500 indexed paths/每节点 20 KiB 是 `SearchSynchronizer`/adapter 的投影预算。超额节点可从 search 排除,registry/help/call 仍可用。
+- **搜索三入口共用一个 wire contract**:API `POST /~search` 是权限/排序/分页真源;CLI `tb search` 与 Dashboard `/ui/search` 都直接消费 `{query,opts}`/`Page<{path,tool}>`,不在客户端重排或重做权限判断。Dashboard CommandPalette/Explorer 只过滤已加载树用于导航,不等价于全局搜索。
 
 ## 存储与宿主原语分工
 
@@ -82,7 +83,7 @@ Workers 无启动钩子,首请求惰性引导(模块级 promise 防重入 + KV �
 
 ## Dashboard 集成
 
-无专用后端:`api.ts` `baseUrl:''` 同源直接消费 HTBP 数据面与 `~help`;SK 只存浏览器(localStorage 多 profile),因此任何同源脚本执行都属于凭据边界。`sessionStorage` 或浏览器端加密不能隔离同源 XSS;若迁移 HttpOnly cookie,须同步设计服务端 session、CSRF 与多网关连接模型。表单由 `~help` JSON 的 `inputSchema`(真 JSON Schema)经 @rjsf 渲染。部署编排:`pnpm deploy:all` 先 `dashboard build` 再 `gateway deploy`。
+无专用后端:`api.ts` `baseUrl:''` 同源直接消费 HTBP 数据面、`~help` 与 root `/~search`;SearchPage 当前只请求 keyword并按 opaque cursor 续页,结果以 `?tool` 导航 NodePage预选命令。TreePath 必须按 raw segment 编码:导航 URL 用同一 helper,所有节点 API 请求也在 Router 解码后重新逐段编码。SK 只存浏览器(localStorage 多 profile),因此任何同源脚本执行都属于凭据边界。`sessionStorage` 或浏览器端加密不能隔离同源 XSS;若迁移 HttpOnly cookie,须同步设计服务端 session、CSRF 与多网关连接模型。表单由 `~help` JSON 的 `inputSchema`(真 JSON Schema)经 @rjsf 渲染。部署编排:`pnpm deploy:all` 先 `dashboard build` 再 `gateway deploy`;gateway Vitest 也无条件从当前 Dashboard source build,避免静态集成误验旧 `dist`。
 
 ## 命名注意
 

@@ -42,6 +42,20 @@ export interface Page<T> {
   items: T[]
 }
 
+/** root `~search` 返回的虚拟化后 ToolSpec。 */
+export interface ToolSpec {
+  confirm?: boolean
+  description?: string
+  effect?: string
+  inputSchema?: unknown
+  name: string
+}
+
+export interface ToolSearchItem {
+  path: string
+  tool: ToolSpec
+}
+
 /** SecretKey 投影(hash 永不出网关)。 */
 export interface SecretKeyView {
   createdAt?: string

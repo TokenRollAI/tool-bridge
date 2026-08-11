@@ -111,6 +111,7 @@ export function ExplorerPanel({
   const location = useLocation()
   const qc = useQueryClient()
   const currentPath = nodePathFromLocation(location.pathname)
+  const nonNodeLabel = location.pathname === '/search' ? '工具搜索' : '管理控制面'
   const healthLabel = healthError
     ? 'unreachable'
     : health?.healthy
@@ -214,11 +215,11 @@ export function ExplorerPanel({
             </p>
             <div
               className="flex min-h-8 min-w-0 items-center rounded-md border bg-background/45 px-2.5"
-              title={currentPath === null ? '当前位于管理页面' : currentPath || '~'}
+              title={currentPath === null ? nonNodeLabel : currentPath || '~'}
             >
               <span className="mr-1.5 font-mono text-xs text-primary">~</span>
               <span className="min-w-0 truncate font-mono text-[11px] text-foreground/90">
-                {currentPath === null ? '管理控制面' : currentPath ? `/ ${currentPath}` : '/'}
+                {currentPath === null ? nonNodeLabel : currentPath ? `/ ${currentPath}` : '/'}
               </span>
             </div>
           </div>

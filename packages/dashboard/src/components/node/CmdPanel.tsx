@@ -29,6 +29,7 @@ import { CliHint } from '@/components/node/CliHint'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Textarea } from '@/components/ui/textarea'
 import { Button } from '@/components/ui/button'
+import { isPathSegmentSafe } from '@/lib/path'
 import { cn } from '@/lib/utils'
 
 const SchemaFormRenderer = lazy(() => import('@/components/node/SchemaFormRenderer'))
@@ -125,8 +126,10 @@ export function CmdPanel({
   const effectiveOpen = workbench || open
   // 直连工具 cmd(mcp/http/tool):~help 宣告的 path 含工具段(协议判别规则)
   // → POST /<path>/<tool>,body 即 arguments;否则信封 POST /<path>。
-  const direct = cmd.path === `/${path}/${cmd.name}`
-  const lazyNeeded = lazySchema && cmd.inputSchema === undefined
+  // '/' 工具名不是单个 URL path segment；保留 ToolSpec 兼容性，改走节点信封调用。
+  const segmentSafe = isPathSegmentSafe(cmd.name)
+  const direct = segmentSafe && cmd.path === `/${path}/${cmd.name}`
+  const lazyNeeded = segmentSafe && lazySchema && cmd.inputSchema === undefined
   const toolHelp = useToolHelp(path, cmd.name, lazyNeeded && effectiveOpen)
   const inputSchema = cmd.inputSchema ?? toolHelp.data?.cmds[0]?.inputSchema
   const hasSchema = inputSchema !== undefined && typeof inputSchema === 'object'

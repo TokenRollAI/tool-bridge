@@ -11,6 +11,7 @@ import type {
   SkillDetail,
   SkillFile,
   SkillSummary,
+  ToolSearchItem,
 } from './types'
 import {
   type ApiError,
@@ -22,6 +23,7 @@ import {
   getTree,
   invoke,
   type InvokeResult,
+  searchTools,
   startOAuthAuthorize,
 } from './api'
 import {
@@ -46,6 +48,28 @@ export function useTree(path = '', depth = 8, options?: { enabled?: boolean }) {
     queryKey: [...base, 'tree', path, depth],
     queryFn: ({ signal }) => getTree(conn, path, depth, signal),
     enabled: options?.enabled ?? true,
+  })
+}
+
+/** root 全局工具搜索；cursor 只作为 pageParam，不混入首屏请求。 */
+export function useToolSearch(
+  query: string,
+  mode: 'keyword' | 'semantic' = 'keyword',
+  limit = 50,
+) {
+  const conn = useConn()
+  const base = useKeyBase()
+  const normalized = query.trim()
+  return useInfiniteQuery<Page<ToolSearchItem>>({
+    queryKey: [...base, 'tool-search', normalized, mode, limit],
+    queryFn: ({ pageParam, signal }) => searchTools(conn, normalized, {
+      mode,
+      limit,
+      ...(typeof pageParam === 'string' ? { cursor: pageParam } : {}),
+    }, signal),
+    enabled: normalized.length > 0,
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: last => last.cursor,
   })
 }
 

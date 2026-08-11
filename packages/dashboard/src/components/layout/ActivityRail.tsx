@@ -1,5 +1,5 @@
+import { Command, Files, LogOut, Moon, Search, Sun } from 'lucide-react'
 import { NavLink, useLocation, useNavigate } from 'react-router'
-import { Files, LogOut, Moon, Search, Sun } from 'lucide-react'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -48,7 +48,10 @@ export function ActivityRail({
   const navigate = useNavigate()
   const { active, profiles, switchTo, logout } = useSession()
   const [theme, toggleTheme] = useTheme()
-  const resourceRoute = location.pathname === '/' || location.pathname.startsWith('/nodes/')
+  const resourceRoute
+    = location.pathname === '/'
+      || location.pathname === '/search'
+      || location.pathname.startsWith('/nodes/')
   const healthText = healthError ? '网关不可达' : health?.healthy ? '运行正常' : '正在检查'
 
   const switchProfile = (name: string) => {
@@ -96,6 +99,27 @@ export function ActivityRail({
           </button>
         </RailTip>
 
+        <RailTip label="工具搜索">
+          <NavLink
+            aria-label="前往工具搜索"
+            className={({ isActive }) => cn(
+              'relative grid size-10 place-items-center rounded-lg text-muted-foreground',
+              'hover:bg-white/5 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none',
+              isActive && 'bg-primary/12 text-primary',
+            )}
+            to="/search"
+          >
+            {({ isActive }) => (
+              <>
+                <Search className="size-[18px]" />
+                {isActive && (
+                  <span className="absolute top-2 bottom-2 left-0 w-0.5 rounded-full bg-primary" />
+                )}
+              </>
+            )}
+          </NavLink>
+        </RailTip>
+
         <RailTip label="全局跳转（⌘/Ctrl K）">
           <button
             aria-label="打开全局跳转"
@@ -103,7 +127,7 @@ export function ActivityRail({
             onClick={onOpenPalette}
             type="button"
           >
-            <Search className="size-[18px]" />
+            <Command className="size-[18px]" />
           </button>
         </RailTip>
 

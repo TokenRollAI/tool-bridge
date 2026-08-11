@@ -69,6 +69,7 @@ describe('未知 flag 必须报错(事故回归)', () => {
       ['feedback', 'submit', 'p', '--title', 't', '--detail', 'd', '--bogus'],
       ['feedback', 'vote', 'p', 'fb_x', 'up', '--bogus'],
       ['feedback', 'rm', 'p', 'fb_x', '--bogus'],
+      ['search', 'query', '--bogus'],
       ['ls', '--bogus'],
       ['tree', '--bogus'],
       ['help', '--bogus'],

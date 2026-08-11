@@ -55,6 +55,7 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { encodeTreePath } from '@/lib/path'
 import { cn } from '@/lib/utils'
 
 const KIND_FILTERS = [
@@ -1672,7 +1673,7 @@ export function RegistryPage() {
                                   size="icon-sm"
                                   variant="ghost"
                                 >
-                                  <Link to={`/nodes/${node.path}`}>
+                                  <Link to={`/nodes/${encodeTreePath(node.path)}`}>
                                     <ExternalLink />
                                   </Link>
                                 </Button>

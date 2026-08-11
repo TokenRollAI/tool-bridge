@@ -113,6 +113,20 @@ export interface Page<T> {
   items: T[]
 }
 
+/** root `~search` 返回的虚拟化后 ToolSpec。 */
+export interface ToolSpec {
+  confirm?: boolean
+  description?: string
+  effect?: string
+  inputSchema?: unknown
+  name: string
+}
+
+export interface ToolSearchItem {
+  path: string
+  tool: ToolSpec
+}
+
 /** system/federation list 的一行:remote 联邦 host 白名单合并视图。 */
 export interface FederationHost {
   host: string

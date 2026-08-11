@@ -8,6 +8,7 @@ import {
   Moon,
   Plug2,
   RefreshCw,
+  Search,
   ShieldEllipsis,
   Sun,
 } from 'lucide-react'
@@ -26,6 +27,7 @@ import {
 import { KindBadge } from '@/components/KindBadge'
 import { KIND_ICON } from '@/components/kind-icon'
 import { useSession } from '@/lib/session-context'
+import { encodeTreePath } from '@/lib/path'
 import { useTree } from '@/lib/queries'
 import { useTheme } from '@/lib/theme'
 import { cn } from '@/lib/utils'
@@ -52,6 +54,7 @@ function flatten(node: TreeJson, acc: FlatNode[] = []): FlatNode[] {
 
 const PAGES = [
   { to: '/', label: '控制台', icon: Home },
+  { to: '/search', label: '工具搜索', icon: Search },
   { to: '/manage/registry', label: '节点注册', icon: Boxes },
   { to: '/manage/sk', label: 'Secret Key', icon: KeySquare },
   { to: '/manage/secrets', label: '凭证保管', icon: ShieldEllipsis },
@@ -88,11 +91,11 @@ export function CommandPalette({
   return (
     <CommandDialog
       className="top-[20%] translate-y-0 sm:max-w-xl"
-      description="搜索节点、管理页与动作"
+      description="跳转节点、页面与动作"
       onOpenChange={onOpenChange}
       open={open}
       showCloseButton={false}
-      title="全局搜索"
+      title="全局跳转"
     >
       <CommandInput placeholder="搜索节点路径、kind、描述…" />
       <CommandList className="max-h-[50vh]">
@@ -105,7 +108,7 @@ export function CommandPalette({
               return (
                 <CommandItem
                   key={n.path}
-                  onSelect={() => go(`/nodes/${n.path}`)}
+                  onSelect={() => go(`/nodes/${encodeTreePath(n.path)}`)}
                   value={`${n.path} ${n.kind} ${n.description}`}
                 >
                   <Icon className={cn('size-3.5', iconClass)} strokeWidth={1.75} />

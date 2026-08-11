@@ -28,6 +28,7 @@ import { useSession } from '@/lib/session-context'
 import { Button } from '@/components/ui/button'
 import { useRegistryList } from '@/lib/queries'
 import { Badge } from '@/components/ui/badge'
+import { encodeTreePath } from '@/lib/path'
 import { cn } from '@/lib/utils'
 
 function formatActivity(value?: string): string {
@@ -275,7 +276,7 @@ export function DevicesPage() {
                               size="icon-sm"
                               variant="ghost"
                             >
-                              <Link to={`/nodes/${device.path}`}>
+                              <Link to={`/nodes/${encodeTreePath(device.path)}`}>
                                 <ExternalLink />
                               </Link>
                             </Button>

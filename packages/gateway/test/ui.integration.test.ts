@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { SELF } from 'cloudflare:test'
+import { encodeTreePath, isPathSegmentSafe } from '../../dashboard/src/lib/path'
 import { TEST_ADMIN_SK } from './fixtures'
 
 // Dashboard 集成测试:/ui 静态资源托管与路由次序。
@@ -13,6 +14,11 @@ const admin = (extra: RequestInit = {}): RequestInit => ({
 })
 
 describe('/ui 静态资源(免认证)', () => {
+  it('搜索结果节点路径逐段编码且保留树层级', () => {
+    expect(encodeTreePath('providers/a?b/c#d/e%f')).toBe('providers/a%3Fb/c%23d/e%25f')
+    expect(isPathSegmentSafe('calendar/open')).toBe(false)
+  })
+
   it('GET /ui/ 无 SK 返回 200 HTML(登录页可加载)', async () => {
     const res = await SELF.fetch('https://tb.test/ui/', { redirect: 'manual' })
     expect(res.status).toBe(200)
@@ -35,11 +41,29 @@ describe('/ui 静态资源(免认证)', () => {
     expect(res.headers.get('content-type')).toContain('javascript')
   })
 
-  it('SPA 深链(/ui/nodes/a/b)回退 index.html', async () => {
-    const res = await SELF.fetch('https://tb.test/ui/nodes/a/b')
+  it.each(['/ui/nodes/a/b', '/ui/search?q=calendar'])('SPA 深链(%s)回退 index.html', async (path) => {
+    const res = await SELF.fetch(`https://tb.test${path}`)
     expect(res.status).toBe(200)
     expect(res.headers.get('content-type')).toContain('text/html')
     expect(await res.text()).toContain('<div id="root">')
+  })
+
+  it('构建产物包含独立 SearchPage 与 root ~search API 接线', async () => {
+    const html = await (await SELF.fetch('https://tb.test/ui/')).text()
+    const entryPath = html.match(/src="\/ui\/(assets\/[^"']+\.js)"/)?.[1]
+    expect(entryPath).toBeDefined()
+    const entry = await (await SELF.fetch(`https://tb.test/ui/${entryPath}`)).text()
+    const searchChunkPath = entry.match(/assets\/SearchPage-[A-Za-z0-9_-]+\.js/)?.[0]
+    const apiChunkPath = entry.match(/assets\/api-[A-Za-z0-9_-]+\.js/)?.[0]
+    expect(searchChunkPath).toBeDefined()
+    expect(apiChunkPath).toBeDefined()
+
+    const [searchChunk, apiChunk] = await Promise.all([
+      SELF.fetch(`https://tb.test/ui/${searchChunkPath}`).then(res => res.text()),
+      SELF.fetch(`https://tb.test/ui/${apiChunkPath}`).then(res => res.text()),
+    ])
+    expect(searchChunk).toContain('工具搜索')
+    expect(apiChunk).toContain('/~search')
   })
 })
 
@@ -75,6 +99,22 @@ describe('路由次序:Worker 逻辑不被 assets 吞', () => {
     expect(res.status).toBe(200)
     const body = (await res.json()) as { healthy: boolean }
     expect(body.healthy).toBe(true)
+  })
+
+  it('POST /~search 数据面正常(不被 /ui/search 深链吞掉)', async () => {
+    const res = await SELF.fetch('https://tb.test/~search', {
+      method: 'POST',
+      ...admin(),
+      headers: {
+        'authorization': `Bearer ${TEST_ADMIN_SK}`,
+        'content-type': 'application/json',
+        'accept': 'application/json',
+      },
+      body: JSON.stringify({ query: 'ui-route-probe', opts: { limit: 1 } }),
+    })
+    expect(res.status).toBe(200)
+    expect(res.headers.get('content-type')).toContain('application/json')
+    expect((await res.json()) as { items: unknown[] }).toHaveProperty('items')
   })
 
   it('无 SK 的 API 请求仍 401(认证面未被 /ui 例外扩大)', async () => {

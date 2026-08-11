@@ -50,7 +50,9 @@
 - 当前只支持**本地** `mcp`/`http`/`tool` 节点候选;`tool` 包括能提供 raw ToolSpec 的 plugin/进程内/device 自定义 tool。remote、device shell、builtin、context、skillhub、directory 均不进入结果。
 - core 将只读 `SearchIndex` 与 `MutableSearchIndex` 写面分开;后者用完整节点 snapshot 的 `replace`/`remove`、subtree `removePrefix` 与全量 `rebuild`。StateStore/registry/provider cache 是 canonical,SearchIndex 是可重建派生状态:registry write/update/delete、动态 MCP/tool fresh list、device hello/reclaim 与 node-level feedback submit/vote/delete 都触发热同步;每次搜索前仍执行有界 canonical audit,同 digest 不 bump revision。
 - 只有 owning node 的非隐藏 feedback top 5 进入搜索,投影 title+detail,合并文本经控制字符清理并限制为 256 UTF-8 bytes;工具子路径 feedback 不进入 owning node。keyword 排序权重固定为 name/description/feedback = 10/3/1;索引保存完整、未虚拟化的 raw `ToolSpec`,仅在披露前由网关虚拟化。
-- 已内置 keyword adapter:Workers 使用可选 `TB_SEARCH` D1 binding,Node 使用同一 `state.sqlite3` 的独立连接与独立表;两者均使用 v2 source/FTS/meta/snapshot schema 与共享 contract。query trim 后按 whitespace 切 term并按 Unicode code point 计数:长词(≥3)走 trigram FTS literal phrase,短词(<3)走参数化 escaped LIKE;混合查询对两侧 AND,最多 32 terms。当前仅实现 keyword;semantic、filter 及 Phase 4 item 6 的 CLI/Dashboard 消费面留后续。真实 D1 provision/deploy 与 HTBP Draft 仍 PENDING,不可据本地接线宣称生产搜索可用。
+- 已内置 keyword adapter:Workers 使用可选 `TB_SEARCH` D1 binding,Node 使用同一 `state.sqlite3` 的独立连接与独立表;两者均使用 v2 source/FTS/meta/snapshot schema 与共享 contract。query trim 后按 whitespace 切 term并按 Unicode code point 计数:长词(≥3)走 trigram FTS literal phrase,短词(<3)走参数化 escaped LIKE;混合查询对两侧 AND,最多 32 terms。当前仅实现 keyword;semantic 与 filter 留后续。真实 D1 provision/deploy 与 HTBP Draft 仍 PENDING,不可据本地接线宣称生产搜索可用。
+- CLI `tb search <query> [--mode keyword|semantic] [--limit 1..200] [--cursor <opaque>]` 直接 `POST /~search`,请求体是上述 `{query,opts}` 而非 HTBP `{tool,arguments}` 信封。`--json` 原样输出完整 `Page<{path,tool}>`(含 cursor);人类模式分列输出 `NODE`/`TOOL`/效果/确认/描述,避免工具名含 `/` 时与节点路径混淆,有后页时打印 `next cursor`。CLI 可转发 semantic mode,但可用性仍由服务端 `search:semantic` capability 判定。
+- Dashboard `/ui/search` 是独立消费页,当前只发 keyword 请求;按服务端 opaque cursor 续页,区分权限/未启用/空结果状态。结果链接到 `/ui/nodes/<TreePath>?tool=<tool-name>`,NodePage 预选该工具;TreePath 的每个 raw segment 在导航 URL 与所有节点 HTBP API 请求前分别编码。CommandPalette/Explorer 的本地已加载树过滤只用于导航,不替代 root 全局搜索。
 
 ## 1c. skillhub kind 数据面(与 context 同构的内容型 kind)
 
@@ -158,13 +160,14 @@ cmd resolve-library-id POST /docs/context7/resolve-library-id  ← cmd 行:<name
 
 CLI 是纯 API 客户端,无专用端点。全局参数为 `--json` / `--base-url` / `--sk` / `--timeout <seconds>`;均可放在根、命令组或叶子命令位置,组级 help 展示 `Global Options`,也读 `TB_BASE_URL`/`TB_SK` 与 `~/.config/tool-bridge/config.json`(XDG,多 profile)。`--timeout` 是单次 HTTP 请求等待上限(默认 120s;超时报 retryable 错误),status、login 与 tool auth 本地回调兑换均走统一超时客户端;长驻 `tb connect` 明确拒绝该参数,避免被误解为进程总寿命。错误呈现:TBError 的 `retryable:true` 在人类模式加 `(retryable — try again)` 尾注,`--json` 错误对象含 `retryable`(及 call 失败时的结构化 `feedback`);Commander 的未知参数、缺值、多余 positional 等解析错误在真正解析到 `--json` option 时也输出 `{ok:false,error,code}` 并非零退出,`--` 后仅作为 positional value 的同名文本不切换输出通道。
 
-所有返回 `Page<T>` 的 CLI list/search 命令统一接受 `--limit 1..200` / `--cursor`;请求参数置于 `arguments.opts`,JSON 保留 page 形状,人类模式打印 `next cursor`。当前覆盖 SK/Secret/Plugin 列表、Context/Skill List+Search,以及基于 Registry 页过滤的 Server/Device 列表;过滤当前页时仍保留原始 cursor,当前页无匹配不等于全集为空。
+所有返回 `Page<T>` 的 CLI list/search 命令统一接受 `--limit 1..200` / `--cursor`;HTBP 数据面请求把分页参数置于 `arguments.opts`,root `tb search` 则按自身契约置于 body `opts`。JSON 保留 page 形状,人类模式打印 `next cursor`。当前覆盖 root Tool Search、SK/Secret/Plugin 列表、Context/Skill List+Search,以及基于 Registry 页过滤的 Server/Device 列表;过滤当前页时仍保留原始 cursor,当前页无匹配不等于全集为空。
 
 | 命令 | 对应接口面 |
 |---|---|
 | `tb status` | 树外 `GET /healthz`;遵守 `--timeout` |
 | `tb login` / `whoami` / `use` | 本地凭据管理,无服务端接口(whoami = 本地配置态 + `~help` 探测 + status 摘要) |
 | `tb ls` / `tree` / `help` | `~help` / `GET /~tree?depth=N`;CLI 显式 `--depth` 严格为 1..8(缺省由网关取 2);`tb help` 默认 Markdown 表现(TTY 下经 marked-terminal 渲染 ANSI 富文本,管道/非 TTY/NO_COLOR 输出裸 markdown),`--md` 强制裸 markdown,`--dsl` 请求紧凑 DSL(Accept: text/plain),`--json` 结构化 |
+| `tb search <query>` | 直连 root-only `POST /~search` + `{query,opts:{mode?,limit?,cursor?}}`;`--json` 保留完整 Page/cursor,人类模式打印工具表与 `next cursor` |
 | `tb call` | 直连 `POST /<path>`(path 即工具路径,body 为 arguments 本体);`--tool` 给出时信封 `POST /<path>` + `{tool,arguments}`(builtin/context 等通用)。arguments 三种给法互斥:第二 positional 裸 JSON(`tb call <path> '{...}'`)/ `--args` / `--args-file`。调用失败(unavailable/internal/invalid_argument/rate_limited)时尽力拉取该 path `~feedback` 注入提示(有条目列 top 3,无条目引导 submit;拉取限时 5s、失败静默) |
 | `tb tool mount` / `rm` | NodeRegistry.Write/Delete(kind=mcp/http/tool);`--kind tool --provider <plugin-id> [--auth-ref]` 挂 tool-provider Plugin;mcp/http 含 virtualize prefix/rename/hide/describe,条件 flag 在本地严格拒绝串用;缺 `--description` 时派生非空描述 |
 | `tb tool auth <path>` | mcp 托管 OAuth 发起(POST `/<path>/~authorize`):authorized → 直接完成;redirect → 打印授权 URL 并尝试开浏览器(`--no-open` 只打印)。`--local`:本机 127.0.0.1 临时端口收 AS 回跳,code+state 转交网关 `/~oauth/callback` 兑换(适配 Bytebase 等只放行 loopback 回调的严格上游;默认流程遇 redirect 类报错会提示) |

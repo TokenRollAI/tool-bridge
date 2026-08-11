@@ -22,6 +22,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { KindBadge } from '@/components/KindBadge'
 import { useSession } from '@/lib/session-context'
 import { Button } from '@/components/ui/button'
+import { encodeTreePath } from '@/lib/path'
 import { cn } from '@/lib/utils'
 
 const QUICK_LINKS = [
@@ -193,7 +194,7 @@ export function OverviewPage() {
                   : firstRoot
                     ? (
                         <Button asChild>
-                          <Link to={`/nodes/${firstRoot.path}`}>
+                          <Link to={`/nodes/${encodeTreePath(firstRoot.path)}`}>
                             继续探索能力树
                             <ArrowRight />
                           </Link>
@@ -340,7 +341,7 @@ export function OverviewPage() {
                             className="group flex min-w-0 items-center gap-3 px-4 py-3.5 transition-colors hover:bg-secondary/45 sm:px-5"
                             key={node.path}
                             title={`打开根节点 ${node.path}`}
-                            to={`/nodes/${node.path}`}
+                            to={`/nodes/${encodeTreePath(node.path)}`}
                           >
                             <span className="grid size-9 shrink-0 place-items-center rounded-md border bg-background/60 font-mono text-xs text-primary">
                               {node.path.slice(0, 2).toUpperCase()}
@@ -395,7 +396,7 @@ export function OverviewPage() {
                       firstRoot
                         ? (
                             <Button asChild size="sm" variant="outline">
-                              <Link to={`/nodes/${firstRoot.path}`}>打开一个节点</Link>
+                              <Link to={`/nodes/${encodeTreePath(firstRoot.path)}`}>打开一个节点</Link>
                             </Button>
                           )
                         : undefined
@@ -413,7 +414,7 @@ export function OverviewPage() {
                       <Link
                         className="flex min-w-0 items-center gap-3 px-4 py-3 hover:bg-secondary/45"
                         key={`${record.at}:${record.path}:${record.tool}`}
-                        to={`/nodes/${record.path}`}
+                        to={`/nodes/${encodeTreePath(record.path)}`}
                       >
                         <span
                           className={cn(

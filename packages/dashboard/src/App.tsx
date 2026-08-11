@@ -15,6 +15,9 @@ const OverviewPage = lazy(() =>
 const NodePage = lazy(() =>
   import('@/pages/NodePage').then(module => ({ default: module.NodePage })),
 )
+const SearchPage = lazy(() =>
+  import('@/pages/SearchPage').then(module => ({ default: module.SearchPage })),
+)
 const DevicesPage = lazy(() =>
   import('@/pages/system/DevicesPage').then(module => ({ default: module.DevicesPage })),
 )
@@ -75,6 +78,14 @@ export default function App() {
     <Suspense fallback={<AppBooting />}>
       <Routes>
         <Route element={<AppShell />}>
+          <Route
+            element={(
+              <DeferredPage>
+                <SearchPage />
+              </DeferredPage>
+            )}
+            path="search"
+          />
           <Route
             element={(
               <DeferredPage>

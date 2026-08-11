@@ -33,13 +33,18 @@
   `~search`。跨仓提交/PR 属外向动作,待用户授权;本仓 `archive/docs/Proto.md` 已明确是历史
   资料,不能冒充外部 Draft 同步证据。**不构成 SearchIndex 实现的代码依赖**,外部变更证据前
   项 2 不勾选。
+- **P4-3 · Phase 4 项 7 的「部署 + 生产 Search smoke」半边** —— Round 24 已完成
+  `pnpm verify` 全阶段回归;`tb search` 与 Dashboard `/ui/search` 本地消费面也已闭环。
+  尚需在 P4-1 真实 D1 provision 后从干净主分支执行 `pnpm deploy:all`,再对生产
+  `/~search` 各跑一次中文两字词与英文词 smoke。属外向生产动作,待用户授权;
+  **不构成 Phase 4.5 编码依赖**,生产证据前项 7 不勾选。
 
 ## 当前状态
-- 当前 Phase:**Phase 4 — C:Search 0+1**(Round 19 起;Phase 3 可做项已清空,部署半边见 P3-1)
+- 当前 Phase:**Phase 4.5 — D:组件抽象收尾**(Round 25 起;Phase 4 可做项已清空,外向半边见 P4-1/P4-2/P4-3)
 - Phase 3 已勾选:项 1(官方 MCP 测试 client + 本地 initialize,Round 14)、项 2(认证后的动态 tools/list + tools/call,Round 15)、项 3(scope 收窄钉死,Round 16)、项 4(三入口对等审计,Round 17)
 - Phase 3 待办:**仅剩待授权的外向动作** — 项 5 已完成生产脚本与全量回归,真实部署/生产 MCP smoke → P3-1
-- Phase 4 已勾选:项 3(CF D1 + Node SQLite SearchIndex,FTS5/trigram,Round 21)、项 4(trigram 短词 escaped LIKE 兜底,Round 22)、项 5(加权索引、自动同步、权限后处理分页与 opaque cursor,Round 23)
-- Phase 4 代码进度:项 1 的 binding/provision/test/dry-run 半边已完成(Round 19),真实 provision/deploy → P4-1;项 2 的本地协议/契约/llmdoc 半边已完成(Round 20),外部 HTBP Draft → P4-2;下一项 = 三入口对等(`tb search` + Dashboard 搜索面)
+- Phase 4 已勾选:项 3(CF D1 + Node SQLite SearchIndex,FTS5/trigram,Round 21)、项 4(trigram 短词 escaped LIKE 兜底,Round 22)、项 5(加权索引、自动同步、权限后处理分页与 opaque cursor,Round 23)、项 6(`tb search` + Dashboard `/search`,Round 24)
+- Phase 4 遗留:项 1 真实 provision/deploy → P4-1;项 2 外部 HTBP Draft → P4-2;项 7 已完成 `pnpm verify` 半边,生产 deploy + 中英文 search smoke → P4-3。三者均为外向流程动作,不构成 Phase 4.5 编码依赖。
 - Phase 2 已勾选:项 1(OperationRegistry)、项 2(Plugin v2 多 export,Round 13 补齐三入口对等后成立)、项 3(Context 按 handler 推导能力)、项 4(`@tool-bridge/plugin-sdk` 可发布)、项 5(样例 plugin 双 export)、项 6(删净 legacy 面)
 - Phase 2 待办(**全部为待授权的外向动作**):项 7 飞书重写复验(代码已完成,只差生产实调 → P2-1)/ 项 8 部署上线
 - Phase 1(代码完成,部署挂起见 PENDING)
@@ -428,3 +433,19 @@
   - `pnpm verify` → 9 workspace typecheck + 全仓 lint + provision **1 passed** + 包测试 **1255 passed / 7 skipped**(core 744 + plugin-sdk 22 + cli 239 + sdk 19 + plugin-feishu 9 + gateway 185 + server 37),合计 **1256 passed / 7 skipped**,退出码 0。
 - 勾选:Phase 4 DoD 项 5(加权索引、自动同步、权限裁剪 over-fetch 与 opaque cursor 分页)。
 - 遗留:下一轮 = Phase 4 项 6:补 `tb search` 与 Dashboard 搜索面,用 CLI command tests + gateway `ui.integration.test.ts` 钉三入口对等。P4-1/P4-2 外向动作继续挂起且不阻塞本地代码。
+
+## Round 24 — 2026-08-11
+- 目标:Phase 4 DoD 项 6 —— 补齐 `tb search` 与 Dashboard root 工具搜索面,使 API/CLI/UI 共用同一 `POST /~search` 契约。
+- 动作:
+  - CLI 新增顶层 `tb search <query>`:`--mode keyword|semantic` + 通用 `--limit 1..200`/`--cursor`,直接发 `{query,opts}` 到 root endpoint,不套 HTBP 数据面信封。`--json` 原样保留 Page/cursor;人类模式分列打印 NODE/TOOL/effect/confirm/description 与 next cursor,避免含 `/` 工具名与节点路径混淆。
+  - Dashboard 新增独立 `/ui/search` route/SearchPage、`searchTools` API 与 `useToolSearch` infinite query;query/mode/limit 入 query key,cursor 只作 pageParam。页面区分未搜索/loading/401·403/404 未启用/200 空结果,结果点击进 NodePage 并用 `?tool` 预选命令;ActivityRail/移动导航将「工具搜索」与原 CommandPalette「全局跳转」明确分开。
+  - 严格复核发现并闭环两个 HIGH:①合法 TreePath 可含 `?/#/%`,搜索结果只编码 tool 会破坏 URL;最终新增 `encodeTreePath`,全部 `/nodes/` 导航入口与 Dashboard 节点 API 均逐 segment 编码。②gateway UI test 仅在 dist 不存在时 build 可复用旧 chunk 假绿;现每次从当前 Dashboard source 无条件 build 后再启 workerd。
+  - 追加边界:`ToolSpec.name` 可含 `/`,但不是单个 URL segment;CmdPanel 对该分支停用错误的 lazy tool-help/direct URL,自动回退 JSON 编辑器 + `POST /<node>` `{tool,arguments}` 信封,与 CLI `tb call <node> --tool <name>` 保持执行对等。
+  - llmdoc-update 新增反思 `2026-08-11-search-consumer-parity-ui-evidence.md`,并同步 current-state、protocol contract、模块边界、代码地图与索引。
+- 验证:
+  - `pnpm --filter @tool-bridge/cli test` → **242 passed / 22 files**;新增 3 例精确断言 root URL/POST/body、JSON Page、人类 cursor 与 mode/limit 请求前拒绝。
+  - `pnpm --filter @tool-bridge/gateway exec vitest run test/ui.integration.test.ts` → 启动前真实 Vite build,**15 passed**;gateway 全包为 **189 passed / 6 skipped**。断言 `/ui/search` SPA deep link、SearchPage/API chunk、root POST 路由次序、TreePath helper 与 `/` 工具名 fallback 判别。
+  - 真实浏览器(Node server + Playwright)→桌面 1440×900 与移动 390×844 无横向溢出;`calendar` 首页 50 → 下一页累计 57,第二请求携 opaque cursor;ActivityRail/移动面同时暴露工具搜索与全局跳转且语义分开。追加 `providers/a?b/c#d/e%f` + `calendar?open#special%tool` fixture,点击后 URL 为逐段编码形态、NodePage 成功且工具已预选,`not_found=false`。
+  - `pnpm verify` → 9 workspace typecheck + 全仓 lint + provision **1 passed** + 包测试 **1262 passed / 7 skipped**(core 744 + plugin-sdk 22 + cli 242 + sdk 19 + plugin-feishu 9 + gateway 189 + server 37),合计 **1263 passed / 7 skipped**,退出码 0。`git diff --check` 退出码 0;严格 investigator 最终复核无阻断。
+- 勾选:Phase 4 DoD 项 6(三入口对等:`tb search` + Dashboard 搜索面)。
+- 遗留:Phase 4 仅剩外向动作 P4-1(真实 D1 provision/deploy)、P4-2(外部 HTBP Draft)、P4-3(生产中英文 search smoke),不构成组件抽象的代码依赖。按 LOOP「Phase 内只剩 PENDING 则继续」进入 Phase 4.5;下一轮 = Dashboard Registry/Plugins/SK 大页拆分。

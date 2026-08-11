@@ -1,4 +1,16 @@
-import type { FeedbackView, HelpJson, TBErrorBody, TreeJson } from './types'
+import type {
+  FeedbackView,
+  HelpJson,
+  Page,
+  TBErrorBody,
+  ToolSearchItem,
+  TreeJson,
+} from './types'
+import { encodeTreePath } from './path'
+
+function nodeUrl(path: string): string {
+  return path === '' ? '' : `/${encodeTreePath(path)}`
+}
 
 /** TBError 线上形状的客户端异常({code,message,retryable} + HTTP 状态)。 */
 export class ApiError extends Error {
@@ -63,20 +75,32 @@ async function request(conn: Connection, path: string, opts: RequestOpts = {}): 
 
 /** GET <path>/~help(JSON 表现)。path '' = 根。 */
 export async function getHelp(conn: Connection, path: string, signal?: AbortSignal) {
-  const p = path === '' ? '/~help' : `/${path}/~help`
+  const p = `${nodeUrl(path)}/~help`
   return (await (await request(conn, p, { signal })).json()) as HelpJson
 }
 
 /** GET <path>/~help(可读 Markdown 表现,text/markdown = 协议默认)。 */
 export async function getHelpMarkdown(conn: Connection, path: string, signal?: AbortSignal) {
-  const p = path === '' ? '/~help' : `/${path}/~help`
+  const p = `${nodeUrl(path)}/~help`
   return await (await request(conn, p, { accept: 'text/markdown', signal })).text()
 }
 
 /** GET <path>/~tree?depth=N。 */
 export async function getTree(conn: Connection, path: string, depth: number, signal?: AbortSignal) {
-  const p = path === '' ? '/~tree' : `/${path}/~tree`
+  const p = `${nodeUrl(path)}/~tree`
   return (await (await request(conn, `${p}?depth=${depth}`, { signal })).json()) as TreeJson
+}
+
+/** POST /~search：全局工具检索；权限裁剪与虚拟化由网关完成。 */
+export async function searchTools(
+  conn: Connection,
+  query: string,
+  opts: { cursor?: string, limit: number, mode: 'keyword' | 'semantic' },
+  signal?: AbortSignal,
+): Promise<Page<ToolSearchItem>> {
+  return (await (
+    await request(conn, '/~search', { method: 'POST', body: { query, opts }, signal })
+  ).json()) as Page<ToolSearchItem>
 }
 
 export interface InvokeResult {
@@ -103,11 +127,15 @@ export async function invoke(
   direct = false,
 ): Promise<InvokeResult> {
   const started = performance.now()
-  const res = await request(conn, direct ? `/${path}/${tool}` : `/${path}`, {
-    method: 'POST',
-    body: direct ? (args ?? {}) : { tool, arguments: args ?? {} },
-    accept: accept === 'json' ? 'application/json' : 'text/markdown',
-  })
+  const res = await request(
+    conn,
+    direct ? `${nodeUrl(path)}/${encodeURIComponent(tool)}` : nodeUrl(path),
+    {
+      method: 'POST',
+      body: direct ? (args ?? {}) : { tool, arguments: args ?? {} },
+      accept: accept === 'json' ? 'application/json' : 'text/markdown',
+    },
+  )
   const contentType = res.headers.get('content-type') ?? ''
   const text = await res.text()
   const ms = Math.round(performance.now() - started)
@@ -131,7 +159,7 @@ export async function startOAuthAuthorize(
   conn: Connection,
   path: string,
 ): Promise<{ authorizationUrl?: string, status: 'authorized' | 'redirect' }> {
-  const res = await request(conn, `/${path}/~authorize`, { method: 'POST' })
+  const res = await request(conn, `${nodeUrl(path)}/~authorize`, { method: 'POST' })
   return (await res.json()) as { authorizationUrl?: string, status: 'authorized' | 'redirect' }
 }
 
@@ -151,7 +179,7 @@ export async function feedbackList(
   hidden: boolean,
   signal?: AbortSignal,
 ) {
-  const p = `/${path}/~feedback${hidden ? '?hidden=1' : ''}`
+  const p = `${nodeUrl(path)}/~feedback${hidden ? '?hidden=1' : ''}`
   return (await (await request(conn, p, { signal })).json()) as { items: FeedbackView[] }
 }
 
@@ -163,7 +191,7 @@ export async function feedbackGet(
   signal?: AbortSignal,
 ) {
   return (await (
-    await request(conn, `/${path}/~feedback/${id}`, { signal })
+    await request(conn, `${nodeUrl(path)}/~feedback/${encodeURIComponent(id)}`, { signal })
   ).json()) as FeedbackView
 }
 
@@ -174,7 +202,7 @@ export async function feedbackSubmit(
   input: { detail: string, title: string },
 ) {
   return (await (
-    await request(conn, `/${path}/~feedback`, { method: 'POST', body: input })
+    await request(conn, `${nodeUrl(path)}/~feedback`, { method: 'POST', body: input })
   ).json()) as { id: string, path: string, title: string }
 }
 
@@ -186,11 +214,14 @@ export async function feedbackVote(
   vote: 'up' | 'down' | 'clear',
 ) {
   return (await (
-    await request(conn, `/${path}/~feedback/${id}`, { method: 'POST', body: { vote } })
+    await request(conn, `${nodeUrl(path)}/~feedback/${encodeURIComponent(id)}`, {
+      method: 'POST',
+      body: { vote },
+    })
   ).json()) as FeedbackView
 }
 
 /** DELETE /<path>/~feedback/<id>(admin)。 */
 export async function feedbackRemove(conn: Connection, path: string, id: string) {
-  await request(conn, `/${path}/~feedback/${id}`, { method: 'DELETE' })
+  await request(conn, `${nodeUrl(path)}/~feedback/${encodeURIComponent(id)}`, { method: 'DELETE' })
 }

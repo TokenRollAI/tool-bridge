@@ -20,13 +20,17 @@ export function CommandWorkspace({
   path,
   cmds,
   lazySchema,
+  initialTool,
 }: {
   cmds: HelpCmd[]
+  initialTool?: string
   lazySchema: boolean
   path: string
 }) {
   const [query, setQuery] = useState('')
-  const [selected, setSelected] = useState(() => cmds[0]?.name ?? '')
+  const [selected, setSelected] = useState(() =>
+    cmds.some(cmd => cmd.name === initialTool) ? initialTool ?? '' : cmds[0]?.name ?? '',
+  )
   const [invocationPending, setInvocationPending] = useState(false)
   const itemRefs = useRef(new Map<string, HTMLButtonElement>())
   const busyStatusId = useId()
@@ -43,6 +47,12 @@ export function CommandWorkspace({
     if (invocationPending || visible.length === 0) return
     if (!visible.some(cmd => cmd.name === selected)) setSelected(visible[0]!.name)
   }, [invocationPending, selected, visible])
+
+  useEffect(() => {
+    if (!invocationPending && initialTool && cmds.some(cmd => cmd.name === initialTool)) {
+      setSelected(initialTool)
+    }
+  }, [cmds, initialTool, invocationPending])
 
   const active = cmds.find(cmd => cmd.name === selected) ?? cmds[0]
 

@@ -50,6 +50,7 @@
 - [memory/reflections/2026-08-11-search-host-adapter-boundaries.md](memory/reflections/2026-08-11-search-host-adapter-boundaries.md) — Search 宿主 adapter 边界(可选 binding→adapter→deps→capability;shared contract + wire 双层证据;窄 opts 与嵌套 FTS grammar 独立校验)。
 - [memory/reflections/2026-08-11-fts5-short-query-fallback.md](memory/reflections/2026-08-11-fts5-short-query-fallback.md) — FTS5 trigram 短查询 fallback(混合长短词假阳性风险;整句 escaped LIKE AND;Unicode code point 阈值、参数预算与 helper/adapter/wire 三层证据)。
 - [memory/reflections/2026-08-11-search-derived-state-lkg.md](memory/reflections/2026-08-11-search-derived-state-lkg.md) — Search 派生状态的 LKG/cursor/最终一致边界(canonical 不受 search-only 容量反向限制;full/hot/concurrent 三路有界 LKG;权限后 cursor 与真实宿主预算探针)。
+- [memory/reflections/2026-08-11-search-consumer-parity-ui-evidence.md](memory/reflections/2026-08-11-search-consumer-parity-ui-evidence.md) — 全局搜索消费面对等与 UI 证据链(API/CLI/Dashboard 共用 wire contract;全局搜索与本地树导航分义;TreePath 逐段编码;gateway 测试从当前 Dashboard source build;浏览器与静态证据边界)。
 
 ## 路由提示
 
