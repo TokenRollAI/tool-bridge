@@ -35,7 +35,8 @@
 - Round 32 已在用户授权下完成共享开发环境部署与 E2E-A/B/E/C 在线证据;Phase 5 五项
   现已全部勾选。
 - 全局 Done **仍未成立**:Phase 4 项 2 的外部 `TokenRollAI/HTBP` Draft `~search` 同步
-  仍挂 P4-2;本功能分支正在创建 PR,尚未合入 main。用户明确当前无 production,因此本轮
+  仍挂 P4-2;本功能分支已提交 [PR #35](https://github.com/TokenRollAI/tool-bridge/pull/35),
+  尚未合入 main。用户明确当前无 production,因此本轮
   证据只称共享开发环境,不改写为正式生产发布。
 
 ## 当前状态
@@ -589,4 +590,5 @@
 - 勾选:Phase 1 项 6;Phase 2 项 7/8;Phase 3 项 5;Phase 4 项 1/7;
   Phase 5 E2E-A/B/C/E。连同 Round 31 的 E2E-D,Phase 5 全部完成。
 - 遗留:Phase 4 项 2 的外部 `TokenRollAI/HTBP` Draft `~search` 同步仍为 P4-2;
-  当前功能分支尚待 push/PR/CI/合入,全局 Done 不成立。
+  当前功能分支已 push 并创建 [PR #35](https://github.com/TokenRollAI/tool-bridge/pull/35),
+  尚待 review/CI/合入,全局 Done 不成立。
