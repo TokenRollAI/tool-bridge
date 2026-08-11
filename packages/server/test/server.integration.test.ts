@@ -184,7 +184,7 @@ describe('Node 宿主 HTTP 面', () => {
     const path = 'search/wire/sqlite'
     const tool = {
       name: 'lookup_calendar',
-      description: 'Look up calendar appointments and 查询日程日历',
+      description: 'Create document for calendar appointments and 查询日程日历',
       inputSchema: { type: 'object', properties: { day: { type: 'string' } } },
       effect: 'read',
     }
@@ -229,8 +229,85 @@ describe('Node 宿主 HTTP 面', () => {
     const persisted = await postJson(second.baseUrl, '~search', { query: 'calendar' }, admin())
     expect(persisted.status).toBe(200)
     await expect(persisted.json()).resolves.toEqual({ items: [{ path, tool }] })
-    const short = await postJson(second.baseUrl, '~search', { query: '日历' }, admin())
+    const short = await postJson(second.baseUrl, '~search', { query: '日程' }, admin())
     expect(short.status).toBe(200)
     await expect(short.json()).resolves.toEqual({ items: [{ path, tool }] })
+
+    const intent = await postJson(
+      second.baseUrl,
+      '~search',
+      { query: 'create document' },
+      admin(),
+    )
+    expect(intent.status).toBe(200)
+    await expect(intent.json()).resolves.toEqual({ items: [{ path, tool }] })
+
+    const hiddenPath = 'search/wire/sqlite-hidden'
+    const hiddenTool = {
+      ...tool,
+      name: 'hidden_document',
+    }
+    const hiddenRegister = await postJson(
+      second.baseUrl,
+      'system/registry',
+      {
+        tool: 'write',
+        arguments: {
+          path: hiddenPath,
+          kind: 'http',
+          description: 'Hidden SQLite search wire fixture',
+          config: {
+            kind: 'http',
+            endpoint: 'https://hidden-calendar.example.test',
+            tools: [{
+              name: hiddenTool.name,
+              description: hiddenTool.description,
+              inputSchema: hiddenTool.inputSchema,
+              method: 'GET',
+              pathTemplate: '/calendar',
+            }],
+          },
+        },
+      },
+      admin(),
+    )
+    expect(hiddenRegister.status).toBe(200)
+
+    const adminControl = await postJson(
+      second.baseUrl,
+      '~search',
+      { query: 'create document' },
+      admin(),
+    )
+    expect(adminControl.status).toBe(200)
+    const adminControlBody = (await adminControl.json()) as { items: unknown[] }
+    expect(adminControlBody.items).toHaveLength(2)
+    expect(adminControlBody.items).toEqual(expect.arrayContaining([
+      { path, tool },
+      { path: hiddenPath, tool: hiddenTool },
+    ]))
+
+    const mint = await postJson(
+      second.baseUrl,
+      'system/sk',
+      {
+        tool: 'write',
+        arguments: {
+          owner: 'agent:search-e2e-c',
+          scopes: [{ pattern: path, actions: ['read', 'call'] }],
+        },
+      },
+      admin(),
+    )
+    expect(mint.status).toBe(200)
+    const narrowSk = (await mint.json()) as { secret: string }
+    const narrowed = await postJson(
+      second.baseUrl,
+      '~search',
+      { query: 'create document' },
+      { headers: { authorization: `Bearer ${narrowSk.secret}` } },
+    )
+    expect(narrowed.status).toBe(200)
+    await expect(narrowed.json()).resolves.toEqual({ items: [{ path, tool }] })
   })
 })

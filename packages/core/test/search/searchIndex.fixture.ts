@@ -20,6 +20,12 @@ const richTool: ToolSpec = {
   },
 }
 
+const documentTool: ToolSpec = {
+  name: 'create_document',
+  description: 'Create document from a workspace template',
+  effect: 'write',
+}
+
 async function hydratedPage(
   index: MutableSearchIndex,
   query: string,
@@ -49,6 +55,7 @@ export async function verifySearchIndexContract(
   await index.replace(alpha, [
     { name: 'legacy_calendar', description: 'legacy calendar agenda' },
     richTool,
+    documentTool,
     { name: 'literal_markers', description: 'literal % _ ! \\ markers' },
   ])
   await index.replace(beta, [
@@ -66,6 +73,9 @@ export async function verifySearchIndexContract(
   })
   await expect(hydratedPage(index, '日程 日历')).resolves.toMatchObject({
     items: [{ path: alpha, tool: richTool }],
+  })
+  await expect(hydratedPage(index, 'create document')).resolves.toMatchObject({
+    items: [{ path: alpha, tool: documentTool }],
   })
   await expect(hydratedPage(index, '日程 calendar')).resolves.toEqual({ items: [] })
   await expect(hydratedPage(index, 'AI calendar')).resolves.toEqual({ items: [] })

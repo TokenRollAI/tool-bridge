@@ -152,7 +152,7 @@ describe('D1SearchIndex', () => {
     const path = 'search/wire/d1'
     const tool = {
       name: 'lookup_calendar',
-      description: 'Look up calendar appointments and 查询日程日历',
+      description: 'Create document for calendar appointments and 查询日程日历',
       inputSchema: { type: 'object', properties: { day: { type: 'string' } } },
       effect: 'read',
     }
@@ -205,6 +205,14 @@ describe('D1SearchIndex', () => {
     })
     expect(shortResponse.status).toBe(200)
     await expect(shortResponse.json()).resolves.toEqual({ items: [{ path, tool }] })
+
+    const intentResponse = await SELF.fetch('https://tb.test/~search', {
+      method: 'POST',
+      headers: adminHeaders,
+      body: JSON.stringify({ query: 'create document' }),
+    })
+    expect(intentResponse.status).toBe(200)
+    await expect(intentResponse.json()).resolves.toEqual({ items: [{ path, tool }] })
 
     const feedback = await SELF.fetch(`https://tb.test/${path}/~feedback`, {
       method: 'POST',

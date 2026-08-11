@@ -527,3 +527,18 @@
   - `pnpm verify` → 9 workspace typecheck + 全仓 lint + provision **1 passed** + 包测试 **1273 passed / 7 skipped**,合计 **1274 passed / 7 skipped**,退出码 0。严格复核 `.llmdoc-tmp/phase5-e2e-e.md` 结论无本地阻断。
 - 勾选:无。E2E-E 的 workerd 精确权限投影与 Node 官方 SDK 真实 TCP 半边已闭环,但同项明确要求生产 MCP endpoint,未部署/未连生产前不得勾选。
 - 遗留:P3-1 继续 PENDING:干净 `origin/main` 部署后,准备一把至少可读某个无副作用工具(默认 `system/status:get`)的生产窄 SK,对生产 URL 运行同一 `pnpm verify:mcp` 留证。下一轮 = E2E-C 本地半边:实跑中英文 search、窄 scope、CF D1/Node SQLite 对等与 Dashboard 证据;生产 search 继续映射 P4-1/P4-3。
+
+## Round 30 — 2026-08-11
+- 目标:Phase 5 E2E-C 本地半边 —— 以精确 `日程` / `create document` 查询对拍 D1、SQLite、真实 CLI、窄 scope 与 Dashboard,并把生产验收收敛为只读脚本。
+- 动作:
+  - 共享 SearchIndex contract 新增独立 `create_document` fixture,对 D1/SQLite 同时执行双 term 英文意图查询;D1 `SELF` 与重启后 Node 真实 HTTP wire 使同一 tool 同时命中 `日程` / `create document`。
+  - Node wire 额外注册同查询 hidden tool:管理员必须先见 visible+hidden 两项,再签发仅允许 visible path 的 read+call SK,窄查询必须只剩 visible;避免 hidden 未入索引时权限用例假绿。
+  - 新增只读 `pnpm verify:search`:spawn 真实 `tb search`,对两个 exact query 分别执行 admin/narrow,逐 cursor 拉取最多 20×200 项;重复 cursor/item、空结果、非 admin 子集、越 allowed TreePath 前缀或未严格收窄均 fail closed。脚本不创建/修改/删除生产资源。
+  - llmdoc-update 新增 `2026-08-11-search-e2e-evidence.md`,并同步 current-state、code-map、deploy-and-verify 与 index;明确本地 Miniflare D1/SQLite 不冒充生产 D1。
+- 验证:
+  - D1 Worker 定向 **10/10**、SQLite contract + Node HTTP **8/8**、CLI 包测试 **3/3** 通过;Node admin control 精确命中 visible+hidden,窄 SK 只命中 visible。
+  - 隔离 Node/SQLite + 真实 CLI:单页 fixture 下两 query 均 `admin 2 → narrow 1`;再注册 201 个 allowed 跨页 fixture,两 query 均 `admin 203/2p → narrow 201/2p` 并 PASS。admin 凭据冒充 narrow 以及第二页越权反例均退出 **1**,证明脚本不只看首页。临时进程、SK 与数据目录均已清理。
+  - 真实 Playwright 浏览器以窄 SK 登录 Dashboard:`日程` 与 `create document` 两次 DOM 都只有 `search/e2ec/visible:lookup_calendar`,与 CLI 窄结果一致;clean session console **0 errors / 0 warnings**。
+  - `pnpm verify` → 9 workspace typecheck + 全仓 lint + provision **1 passed** + 包测试 **1273 passed / 7 skipped**(core 744 + dashboard 10 + plugin-sdk 22 + cli 242 + sdk 19 + plugin-feishu 9 + gateway 189 + server 38),合计 **1274 passed / 7 skipped**,退出码 0;严格复核 `.llmdoc-tmp/phase5-e2e-c-review.md` 最终无代码阻断。
+- 勾选:无。E2E-C 的本地两宿主、真实 CLI、全 cursor 权限与 Dashboard exact-query 半边已闭环;同项仍明确要求 CF 生产 `~search` 与线上 Dashboard,不得在本地证据下误勾。
+- 遗留:P4-1/P4-3 继续 PENDING:需在干净 `origin/main` 与获得外向授权后创建真实 `tb-search` D1、回填 UUID、部署,再为生产已知 visible/hidden fixture 签窄 SK,运行同一 `pnpm verify:search` 并以线上 Dashboard 对拍。下一轮 = E2E-D:汇总 Compose 三跳、Dashboard 拆分与真实浏览器四面本地证据,判断该项是否可独立勾选。

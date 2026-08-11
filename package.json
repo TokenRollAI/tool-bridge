@@ -23,6 +23,7 @@
     "provision": "node scripts/provision.mjs",
     "smoke": "tsx scripts/smoke.ts",
     "verify:mcp": "tsx scripts/verify-mcp.ts",
+    "verify:search": "pnpm --filter @tool-bridge/cli build && tsx scripts/verify-search.ts",
     "deploy:all": "node scripts/provision.mjs && pnpm --filter @tool-bridge/dashboard build && pnpm --filter @tool-bridge/gateway run deploy",
     "prepare": "husky"
   },

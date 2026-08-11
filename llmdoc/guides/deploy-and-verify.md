@@ -111,6 +111,20 @@ TB_SK='...' TB_MCP_NARROW_SK='...' pnpm verify:mcp
 
 脚本使用官方 MCP SDK 建立两条独立连接:admin 必须 list 非空并真实 call 默认只读 `system/registry:list`;窄工具集必须非空、为 admin 严格子集,且预期允许工具必须真实 call 成功;最后用 admin-only 旧 flat name 验证窄连接返回 `tool not found`。不要用 `scopes=[]` 的空工具集 SK 做“收窄”证据;脚本会对此 fail closed。
 
+### 8. Search只读验收:`pnpm verify:search`
+
+目标环境须先有同时命中 `日程` 与 `create document` 的 control fixtures:允许前缀内至少一项、前缀外至少一项;窄 SK须对允许前缀同时持 `read + call`。脚本不创建/修改fixture,四个环境变量都必填:
+
+```sh
+TB_BASE_URL=https://tool-bridge.pdjjq.org \
+TB_SK='...' \
+TB_SEARCH_NARROW_SK='...' \
+TB_SEARCH_ALLOWED_PREFIX='search/visible' \
+pnpm verify:search
+```
+
+脚本对两个 exact query分别用真实 CLI拉完所有 cursor页,再要求窄结果非空、属于admin集合、严格缩小且全部落在完整TreePath段前缀内。重复item/cursor或20页预算后仍有cursor均fail closed。当前只有本地Miniflare D1、Node SQLite/CLI/Dashboard证据;须在真实D1 provision与干净部署后运行此命令并以同一窄身份复核生产Dashboard,才能关闭P4-1/P4-3。
+
 ## 排错
 
 - **wrangler 报多账户歧义**(`More than one account available`):wrangler OAuth 下有 DJJ 与 Lightspeed 两账户,必须显式指定——`wrangler.jsonc` 已写死 `account_id`,脚本走 `CLOUDFLARE_ACCOUNT_ID`;若单独手敲 wrangler 命令,补 `CLOUDFLARE_ACCOUNT_ID=… npx wrangler …`。
