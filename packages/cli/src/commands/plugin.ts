@@ -286,6 +286,50 @@ export function pluginRmCommand(): Command {
     })
 }
 
+/** catalog cmd 目录项(宿主装配的进程内插件;registered=false 即"可用未激活")。 */
+export interface PluginCatalogItem {
+  endpoint: string
+  name: string
+  pluginId?: string
+  registered: boolean
+}
+
+/** `tb plugin catalog` → PluginRegistry.Catalog(宿主装配的进程内插件目录)。 */
+export function pluginCatalogCommand(): Command {
+  return withGlobalOpts(new Command('catalog'))
+    .description('List in-process plugins assembled by this host (available code, not yet activated)')
+    .addHelpText('after', `
+Examples:
+  tb plugin catalog                 # what this host bundles in-process
+  tb plugin register --file m.json  # activate one: manifest endpoint = "binding:<name>"`)
+    .action(async (opts: PluginOpts) => {
+      const asJson = Boolean(opts.json)
+      await guard(asJson, async () => {
+        const result = await callTool<{ items: PluginCatalogItem[] }>(
+          resolveTarget(opts),
+          '/system/plugin',
+          'catalog',
+          {},
+        )
+        if (asJson) {
+          printJson(result)
+          return
+        }
+        const items = result.items ?? []
+        if (items.length === 0) {
+          printLine('(no in-process plugins assembled on this host)')
+          return
+        }
+        const rows = items.map(i => [
+          i.name,
+          i.endpoint,
+          i.registered ? `registered (${i.pluginId ?? '?'})` : 'available',
+        ])
+        printLine(table(['NAME', 'ENDPOINT', 'STATE'], rows))
+      })
+    })
+}
+
 export function pluginCommand(): Command {
   return new Command('plugin')
     .description('Manage plugins (system/plugin; admin scope)')
@@ -294,5 +338,6 @@ export function pluginCommand(): Command {
     .addCommand(pluginGetCommand())
     .addCommand(pluginUpdateCommand())
     .addCommand(pluginHealthCommand())
+    .addCommand(pluginCatalogCommand())
     .addCommand(pluginRmCommand())
 }

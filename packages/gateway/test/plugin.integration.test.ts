@@ -289,6 +289,7 @@ describe('system/plugin 注册全流程', () => {
     expect(res.status).toBe(200)
     const json = (await res.json()) as { cmds: Array<{ name: string, scope: string }> }
     expect(json.cmds.map(c => c.name).sort()).toEqual([
+      'catalog',
       'delete',
       'get',
       'health',

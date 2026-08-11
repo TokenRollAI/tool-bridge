@@ -91,6 +91,13 @@ describe('binding: 进程内插件传输', () => {
   it('注册(探活+契约)→ 挂载 → 工具调用全链路零网络出站', async () => {
     const app = await appWithBindings()
 
+    // catalog:注册前 notes 是"可用未激活"。
+    const before = await postJson(app, 'system/plugin', { tool: 'catalog', arguments: {} })
+    expect(before.status).toBe(200)
+    expect(((await before.json()) as { items: unknown[] }).items).toEqual([
+      { name: 'notes', endpoint: 'binding:notes', registered: false },
+    ])
+
     const registered = await registerBindingPlugin(app, 'binding:notes')
     expect(registered.status).toBe(200)
     pluginToken = ((await registered.json()) as { pluginToken?: string }).pluginToken
@@ -123,6 +130,12 @@ describe('binding: 进程内插件传输', () => {
     })
     expect(created.status).toBe(200)
     expect(await created.json()).toEqual({ path: 'in-process', version: 1 })
+
+    // catalog:注册后状态翻为 registered 并带 pluginId。
+    const after = await postJson(app, 'system/plugin', { tool: 'catalog', arguments: {} })
+    expect(((await after.json()) as { items: unknown[] }).items).toEqual([
+      { name: 'notes', endpoint: 'binding:notes', registered: true, pluginId: 'notes' },
+    ])
 
     // 全局 fetch 从未被触达。
     expect(vi.mocked(fetch)).not.toHaveBeenCalled()

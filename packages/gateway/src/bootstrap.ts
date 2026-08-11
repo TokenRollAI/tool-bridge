@@ -198,6 +198,9 @@ export function buildDeps(opts: BuiltinAssemblyOpts): BuiltinDeps {
       probe: manifest => probePlugin(manifest, opts.pluginBindings),
       fetchContract: manifest => fetchPluginContract(manifest, opts.pluginBindings),
       allowInsecureHttp: opts.allowInsecureHttp,
+      ...(opts.pluginBindings !== undefined
+        ? { bindings: () => [...(opts.pluginBindings ?? new Map<string, never>()).keys()] }
+        : {}),
     },
     // federation 模块:remote host 白名单运行时存储 + env 基线。
     federation: { store: new RemoteAllowlistStore(opts.store), base: opts.remoteAllowlistBase },

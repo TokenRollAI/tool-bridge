@@ -89,6 +89,11 @@ export interface PluginRegistration extends PluginView {
 export interface PluginModuleDeps {
   /** 放行 http:// endpoint(仅本地开发;宿主按 env `TB_ALLOW_INSECURE_HTTP=true` 注入)。 */
   allowInsecureHttp?: boolean
+  /**
+   * 宿主装配的进程内 binding 名清单(可用插件目录,见 plugin-in-process-catalog 决策)。
+   * 缺省 = 宿主未装配任何进程内插件;目录项仅是"可用代码",注册/挂载后才被激活。
+   */
+  bindings?: () => string[]
   /** 抓 `/~describe`(带 Accept: application/json);失败抛 TBError(原样透传)。 */
   fetchContract(manifest: PluginManifest): Promise<{ describe: unknown }>
   now: () => string
@@ -99,6 +104,17 @@ export interface PluginModuleDeps {
   /** platform-token 的 SK 签发/吊销(owner `plugin:<id>`,scopes 空)。 */
   sk: SKRegistryStore
   store: StateStore
+}
+
+/** catalog 目录项:宿主装配的一个进程内插件与它的注册状态。 */
+export interface PluginCatalogItem {
+  /** 注册用 endpoint(`binding:<name>`)。 */
+  endpoint: string
+  /** binding 名(宿主装配表的 key)。 */
+  name: string
+  /** 已有注册记录时给出其 plugin id。 */
+  pluginId?: string
+  registered: boolean
 }
 
 function pluginCmds(nodePath: TreePath): CmdSpec[] {
@@ -190,6 +206,15 @@ function pluginCmds(nodePath: TreePath): CmdSpec[] {
       h: 'probe the plugin health endpoint now',
       inputSchema: idSchema,
       returns: '{ id, healthy, checkedAt }',
+      scope: 'admin',
+    },
+    {
+      name: 'catalog',
+      method: 'POST',
+      path,
+      h: 'list in-process plugins assembled by this host (available, not yet activated); register one via write with its endpoint value',
+      inputSchema: { type: 'object', properties: {} },
+      returns: '{ items: Array<{ name, endpoint, registered, pluginId? }> }',
       scope: 'admin',
     },
   ]
@@ -413,6 +438,34 @@ export function createPluginModule(deps: PluginModuleDeps): BuiltinModule {
           const manifest = projectManifest(await require(id))
           const record = await probeAndRecord(manifest)
           return { id, healthy: record.healthy, checkedAt: record.checkedAt }
+        }
+        case 'catalog': {
+          const names = deps.bindings?.() ?? []
+          // 全量扫注册表把 binding: endpoint 映射回 plugin id(目录规模 = 宿主装配数,有界)。
+          const byEndpoint = new Map<string, string>()
+          let cursor: string | undefined
+          do {
+            const page = await store.list(KEY_PLUGIN, {
+              limit: LIST_LIMIT_MAX,
+              ...(cursor !== undefined ? { cursor } : {}),
+            })
+            for (const { value } of page.items) {
+              const record = value as StoredPlugin
+              byEndpoint.set(record.endpoint, record.id)
+            }
+            cursor = page.cursor
+          } while (cursor !== undefined)
+          const items: PluginCatalogItem[] = [...names].sort().map((name) => {
+            const endpoint = `binding:${name}`
+            const pluginId = byEndpoint.get(endpoint)
+            return {
+              name,
+              endpoint,
+              registered: pluginId !== undefined,
+              ...(pluginId !== undefined ? { pluginId } : {}),
+            }
+          })
+          return { items }
         }
         default:
           throw new TBError('invalid_argument', `unknown cmd '${cmd}' on system/plugin`)

@@ -266,3 +266,32 @@ describe('TBError 透出', () => {
     expect(process.exitCode).toBe(1)
   })
 })
+
+describe('tb plugin catalog', () => {
+  it('人类模式:列出宿主装配的进程内插件与注册状态', async () => {
+    const fn = jsonFetch({ items: [
+      { name: 'feishu', endpoint: 'binding:feishu', registered: true, pluginId: 'feishu' },
+      { name: 'notes', endpoint: 'binding:notes', registered: false },
+    ] })
+    await runCli(['plugin', 'catalog', ...gw])
+    expect(process.exitCode).toBe(0)
+    const call = fn.mock.calls[0] as unknown as [string, RequestInit]
+    expect(call[0]).toBe('https://gw/system/plugin')
+    expect(JSON.parse(String(call[1].body))).toEqual({ tool: 'catalog', arguments: {} })
+    const out = stdoutText()
+    expect(out).toContain('binding:feishu')
+    expect(out).toContain('registered (feishu)')
+    expect(out).toContain('available')
+  })
+
+  it('--json:原样输出;空目录人类模式给提示行', async () => {
+    jsonFetch({ items: [] })
+    await runCli(['plugin', 'catalog', ...gw, '--json'])
+    expect(JSON.parse(stdoutText())).toEqual({ items: [] })
+
+    stdoutSpy.mockClear()
+    jsonFetch({ items: [] })
+    await runCli(['plugin', 'catalog', ...gw])
+    expect(stdoutText()).toContain('no in-process plugins assembled')
+  })
+})

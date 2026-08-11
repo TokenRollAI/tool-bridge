@@ -159,7 +159,7 @@ cmd resolve-library-id POST /docs/context7/resolve-library-id  ← cmd 行:<name
 - `POST {endpoint}`,上下文唯一载体 `X-TB-Context`(base64url 信封);`X-TB-Request-Id` 重试去重;载荷 ≤1 MiB(超限走 `$ref`);超时 30s。
 - `X-TB-Upstream-Auth`(可选):挂载节点配置 `authRef` 时,平台每次调用经 SecretStore resolve 后以 base64url 编码注入该头(明文形状由 plugin 约定,如 JSON);plugin 不自持上游凭证,轮换只需 `tb secret set`。resolve 失败 → unavailable 快速失败;无 authRef 则不发该头。常量:core `plugin/envelope.ts`(`HEADER_TB_UPSTREAM_AUTH`)。
 - `pluginToken`(Plugin 回调平台的令牌)注册时签发仅一次。
-- 生命周期:注册时自动探活(`GET {healthPath}`)+ 抓取 `~describe` 并校验 plugin/v2 exports;不再抓 `~help`。endpoint/healthPath/protocolVersion 更新时重探活并刷新 contract,auth/enabled 等本地字段变化不触发 contract refresh;未声明的可选方法不会被调用;周期探活反映健康态但不自动注销。
+- 生命周期:注册时自动探活(`GET {healthPath}`)+ 抓取 `~describe` 并校验 plugin/v2 exports;不再抓 `~help`。endpoint 可为 `binding:<name>`(宿主装配的进程内插件,探活/契约/调用直调 handler,零网络;`system/plugin` 的 `catalog` cmd 列目录)。endpoint/healthPath/protocolVersion 更新时重探活并刷新 contract,auth/enabled 等本地字段变化不触发 contract refresh;未声明的可选方法不会被调用;周期探活反映健康态但不自动注销。
 
 ## 9. CLI 命令族矩阵
 
@@ -189,6 +189,6 @@ CLI 是纯 API 客户端,无专用端点。全局参数为 `--json` / `--base-ur
 | `tb federation ls/add/rm` | builtin `system/federation`:remote 联邦 host 白名单(list 合并 env 基线 ∪ 运行时;add/rm 只动运行时叠加层,env 基线条目 removable=false 不可删) |
 | `tb note ls/get/set/rm` | builtin `system/annotation`:Path 补充说明(set/rm 需 admin;path `'/'` = 根空串 = 全树公告) |
 | `tb feedback ls/get/submit/vote/rm` | `~feedback` 保留段端点(ls 可 `--hidden`;submit 须 `--title`/`--detail`;rm 走 DELETE 需 admin) |
-| `tb plugin register/list/get/update/health/rm` | PluginRegistry + 探活;list 支持分页 |
+| `tb plugin register/list/get/update/health/catalog/rm` | PluginRegistry + 探活;list 支持分页;catalog 列宿主装配的进程内插件目录(`binding:<name>`,可用≠已激活) |
 
 `tool rm`/`server rm` 前有 kind 校验,防止命令名误删其它节点。`tb init`(部署向导)未实现,见 [../must/current-state.md](../must/current-state.md) 未竟事项。
