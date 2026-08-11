@@ -208,13 +208,32 @@ TB_BASE_URL=https://your-tb.example.com TB_SK=... pnpm smoke
 tb login && tb status --json
 ```
 
-On first request the gateway bootstraps itself: it materializes the `system/*` management subtree (sk / secret / registry / status / plugin) and generates the Admin SK (full-tree, all-action scope, used to issue finer-grained SKs; plaintext printed exactly once).
+On first request the gateway bootstraps itself from the preconfigured `TB_BOOTSTRAP_ADMIN_SK` and materializes the `system/*` management subtree (sk / secret / registry / status / plugin). A new Workers instance without that secret fails closed and never prints an Admin SK in plaintext.
 
 Local development: `pnpm gen-dev-vars` (generates .dev.vars from .env), then `npx wrangler dev`.
 
-### Docker (self-hosting, on the roadmap)
+### Docker (self-hosting and local development stack)
 
-The same core runs on a Node host (SQLite + local FS) as a single container with a `/data` volume. The host-neutral assembly surface (the same one the SDK uses) is already in place; the image is on the roadmap. You can also spin up a Node instance today with the SDK + `@hono/node-server` (see the SDK section above).
+Production self-hosting remains one Node container (SQLite + local FS) with a persistent `/data` volume:
+
+```sh
+docker build -t tool-bridge .
+docker run -d --name tool-bridge -p 8787:8787 -v tool-bridge-data:/data \
+  -e TB_BOOTSTRAP_ADMIN_SK=... \
+  -e TB_SECRET_ENCRYPTION_KEY=... \
+  tool-bridge
+```
+
+For repository development, Compose starts the gateway, a real Wrangler plugin Worker, and an authenticated mock MCP upstream. The synchronous smoke registers the plugin, mounts its export, and calls `echo` across all three hops:
+
+```sh
+pnpm compose:up
+pnpm compose:smoke
+pnpm compose:down       # remove containers and network; keep gateway-data
+pnpm compose:reset      # also delete the development data volume
+```
+
+Compose defaults are local-only fixtures, and gateway port 8787 is bound to `127.0.0.1` only. Do not reuse those credentials in production. The production root `Dockerfile` remains independent of Compose.
 
 ## Repository layout (pnpm monorepo)
 
@@ -241,7 +260,7 @@ Engineering rule: **the code is the source of truth for behavior**; the lookup d
 
 ## Status
 
-Under active development (pre-release). All core capabilities have landed and are verified in production on Cloudflare: SK auth with scopes, the HTBP tree with content negotiation, the tool layer (mcp / http / remote federation + virtualization), the four context verbs plus `$ref` large objects, device reverse registration (WebSocket hibernation), the SDK and plugin system, and the Dashboard. `@tool-bridge/cli` and `@tool-bridge/sdk` are published to npm. Roadmap: a `tb init` one-shot deployment wizard, the Docker self-hosting path, and systematic end-to-end acceptance across the seven user cases.
+Under active development (pre-release). All core capabilities have landed and are verified in production on Cloudflare: SK auth with scopes, the HTBP tree with content negotiation, the tool layer (mcp / http / remote federation + virtualization), the four context verbs plus `$ref` large objects, device reverse registration (WebSocket hibernation), the SDK and plugin system, and the Dashboard. `@tool-bridge/cli` and `@tool-bridge/sdk` are published to npm. Node/Docker single-container self-hosting and the local three-hop Compose stack are implemented. Roadmap: a `tb init` one-shot deployment wizard and systematic end-to-end acceptance across the seven user cases.
 
 ## License
 

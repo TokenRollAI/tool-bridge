@@ -28,7 +28,7 @@
 | CLI | 纯 API 客户端 `tb`,22 个顶层命令族一一映射接口面;`tb search` 直连 root `/~search`,**无专用端点** | — | `packages/cli`(commander;npm 发布物) |
 | Plugin System | 自定义 Provider 注册与生命周期(探活/契约校验/信封传输) | `plugin/` | gateway `providers/pluginClient|pluginTool|pluginContext` + builtin `system/plugin`;首个 in-repo plugin 参考实现:`packages/plugin-feishu`(CF Worker,飞书 TAT 自动换发) |
 | Dashboard | `~help` 通用渲染器 + 管理表单 + 独立 `/search` root 搜索消费页,**无专用后端**;系统表单按 pure builder → 抽出的 fields/dialog → route coordinator/剩余视图所有权分层 | — | `packages/dashboard`(React SPA)经 gateway Static Assets 挂 `/ui` |
-| 部署 | CF 与 Docker 两条路径产出同一棵树 | — | CF:`scripts/provision.mjs` + wrangler;Docker/Node:`packages/server`(SQLite/FS/ws DeviceHub)+ 根 Dockerfile,见 [../guides/docker-host.md](../guides/docker-host.md) |
+| 部署 | CF 与 Docker 两条生产路径产出同一棵树;Compose 只编排 localhost 开发验收栈 | — | CF:`scripts/provision.mjs` + wrangler;Docker/Node:`packages/server` + 根 production Dockerfile;开发:`docker-compose.yml`(gateway final image + plugin-feishu Wrangler + authenticated mock upstream + profile smoke),见 [../guides/docker-host.md](../guides/docker-host.md) |
 
 ## 依赖方向要点
 
@@ -69,7 +69,13 @@
 
 ## 引导(bootstrap.ts)
 
-Workers 无启动钩子,首请求惰性引导(模块级 promise 防重入 + KV 幂等标志);Workers 必须预置 `TB_BOOTSTRAP_ADMIN_SK`,缺失时 fail closed,不随机生成或写日志。宿主中立 `runBootstrap` 为 SDK/开发兼容保留可选随机生成;**当前 Node/Docker server 也默认走该兼容路径并把随机 Admin SK 写入 stdout,这是待修安全缺口,生产必须显式配置 bootstrap secret**。引导物化 `system` directory + sk/secret/registry/status/plugin/federation/annotation 七个 builtin(`registeredBy: system:boot`);Plugin 引导节点幂等 ensure。
+Workers 无启动钩子,首请求惰性引导(模块级 promise 防重入 + KV 幂等标志);Workers 必须预置 `TB_BOOTSTRAP_ADMIN_SK`,缺失时 fail closed,不随机生成或写日志。Node/Docker 有启动钩子,默认也要求预置并在监听前 fail closed;仅显式 `TB_ALLOW_INSECURE_BOOTSTRAP=true` 才调用宿主中立 `runBootstrap` 的随机生成+本地 stdout兼容路径。宿主中立 API 本身与未传 `adminSk` 的 SDK仍保留该兼容行为,嵌入方负责收紧。引导物化 `system` directory + sk/secret/registry/status/plugin/federation/annotation 七个 builtin(`registeredBy: system:boot`);Plugin 引导节点幂等 ensure。
+
+## Compose 开发栈边界
+
+- production 根 Dockerfile final stage仍是单个 Node server容器;Compose 未新增第三条生产部署形态。
+- Compose 只把 gateway发布到 `127.0.0.1`;真实 plugin-feishu Wrangler Worker和 authenticated mock TAT/MCP upstream只在项目网络内 `expose`。固定开发凭据与 `TB_ALLOW_INSECURE_HTTP=true` 必须和该 loopback边界一起审计。
+- one-shot smoke必须从 gateway入口完成 secret set → plugin/v2 register → export mount → upstream echo,用 `run --rm` 同步传递退出码;health仅作为依赖等待。`down`保留 `/data` 命名卷,`reset`才删卷,所以 fixture write必须可重复 upsert。
 
 ## Provider 边界细则
 

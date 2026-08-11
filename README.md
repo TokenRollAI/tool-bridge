@@ -219,9 +219,30 @@ tb login && tb status --json
 
 本地开发:`pnpm gen-dev-vars`(从 .env 生成 .dev.vars)后 `npx wrangler dev`。
 
-### Docker(自部署,路线图)
+### Docker(自部署与本地开发栈)
 
-同一套核心经 Node 宿主(SQLite + 本地 FS)以单容器运行、`/data` 卷持久化——宿主中立装配面(SDK 同款)已就绪,镜像在路线图中。也可以现在就用 SDK + `@hono/node-server` 自行拉起一个 Node 实例(见上文 SDK 一节)。
+生产自部署仍是一个 Node 容器(SQLite + 本地 FS),`/data` 卷持久化:
+
+```sh
+docker build -t tool-bridge .
+docker run -d --name tool-bridge -p 8787:8787 -v tool-bridge-data:/data \
+  -e TB_BOOTSTRAP_ADMIN_SK=... \
+  -e TB_SECRET_ENCRYPTION_KEY=... \
+  tool-bridge
+```
+
+仓库开发可用 Compose 一次启动 gateway、真实 Wrangler plugin Worker 与受认证的 mock MCP 上游,
+再同步执行“注册 plugin → 挂载 export → 调用 echo”的三跳 smoke:
+
+```sh
+pnpm compose:up
+pnpm compose:smoke
+pnpm compose:down       # 删除容器与网络,保留 gateway-data
+pnpm compose:reset      # 同时删除开发数据卷,恢复固定本地 fixture
+```
+
+Compose 默认凭据只用于本机开发,gateway 8787 也只绑定 `127.0.0.1`;不要复制到生产配置。生产根
+`Dockerfile` 的单容器入口不依赖 Compose。
 
 ## 仓库结构(pnpm monorepo)
 
@@ -248,7 +269,7 @@ pnpm lint:fix            # biome 自动修复
 
 ## 项目状态
 
-积极开发中(pre-release)。核心能力已全部落地并在 Cloudflare 生产环境验证:SK 鉴权与作用域、HTBP 树与内容协商、工具层(mcp / http / remote 联邦 + 虚拟化)、Context 四动词 + `$ref` 大对象、设备反向注册(WebSocket hibernation)、SDK 与 Plugin 系统、Dashboard;`@tool-bridge/cli` 与 `@tool-bridge/sdk` 已发布 npm。路线图:`tb init` 一键部署向导、Docker 自部署路径、七个 User Case 的端到端验收系统化。
+积极开发中(pre-release)。核心能力已全部落地并在 Cloudflare 生产环境验证:SK 鉴权与作用域、HTBP 树与内容协商、工具层(mcp / http / remote 联邦 + 虚拟化)、Context 四动词 + `$ref` 大对象、设备反向注册(WebSocket hibernation)、SDK 与 Plugin 系统、Dashboard;`@tool-bridge/cli` 与 `@tool-bridge/sdk` 已发布 npm。Node/Docker 单容器自部署与本地 Compose 三跳开发栈已落地。路线图:`tb init` 一键部署向导与七个 User Case 的端到端验收系统化。
 
 ## License
 

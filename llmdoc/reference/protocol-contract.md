@@ -138,7 +138,7 @@ cmd resolve-library-id POST /docs/context7/resolve-library-id  ← cmd 行:<name
 
 - `Authorizer.Check` 是唯一判定入口;判定次序 read→404(deny==not_found,不泄露存在性)再目标动作→403。
 - **registerPaths 收紧**:SK 声明了 `registerPaths` → 仅允许在这些前缀下注册;未声明(但持 register scope)→ 允许保留根之外的任意路径;同路径已有他人节点 → conflict。每项是独立 TreePath pattern,逗号可作为合法路径字符,不能把字段内部的逗号误作列表分隔符;CLI 用可重复 `--register-path`,Dashboard 用每行一项并对 owner 与每条半填 scope fail closed。
-- Admin SK:scope=`**` 全动作。Workers 首次引导必须预置 `TB_BOOTSTRAP_ADMIN_SK`,缺失时 fail closed 且不得把随机明文写入日志;`runBootstrap` 仍提供本地随机兼容路径。当前 Node/Docker server 默认使用兼容路径并会把随机 Admin SK 写 stdout,生产部署必须预置该变量,代码层 fail-closed 待修。
+- Admin SK:scope=`**` 全动作。Workers 首次引导必须预置 `TB_BOOTSTRAP_ADMIN_SK`,缺失时 fail closed且不得把随机明文写入日志。Node/Docker server默认同样在监听前 fail closed;仅显式 `TB_ALLOW_INSECURE_BOOTSTRAP=true` 才启用随机生成并打印一次的本地逃生阀。宿主中立 `runBootstrap` 与未传 `adminSk` 的 SDK仍提供随机兼容路径。
 - 吊销/禁用经 StateStore 分发:KV 宿主最终一致,跨边缘通常约 60s、也可能更久(生产曾实测 0.3s,只作样本;`scripts/verify-revocation.ts` 可重跑);需要确定性即时失效须改强一致认证真源,短 `expiresAt` 可缩小暴露窗口。认证读取对历史非法 `expiresAt` **fail closed**(视同无效 SK),不会因 `Date.parse()` 的 `NaN` 比较而放行。
 
 ## 7. 设备帧协议要点

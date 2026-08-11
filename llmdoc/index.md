@@ -29,7 +29,7 @@
 - [guides/workers-kv-pitfalls.md](guides/workers-kv-pitfalls.md) — Workers/KV 生产坑:KV list+get 最终一致窗口(须跳 null)、子请求上限约束逐 key get、吊销通常约 60s 但可能更久(历史实测 0.3s 仅作样本)、vitest-pool-workers 0.18 API 变更。
 - [guides/do-websocket-hibernation.md](guides/do-websocket-hibernation.md) — DO hibernation WS 生产坑:边缘 ~100s 空闲掐断须客户端心跳保活、唤醒后内存状态机须从 storage 恢复(restoreReady)、本地 miniflare 测不出须线上跨休眠窗口验证。**改设备通道前必读。**
 - [guides/mcp-upstream-pitfalls.md](guides/mcp-upstream-pitfalls.md) — MCP 上游生产坑:会话复用机制(mcpsession KV 无 TTL + 400/404 失效信号)、不合规上游对过期会话回 200+空列表(实测 MetaMCP)与空列表防御、需自定义认证头的上游(飞书官方 MCP:X-Lark-MCP-\* 原样注入 + 必带工具白名单头)、生产可重跑排查手法(refresh=1 区分缓存层、幂等 update 强制重握手、塞伪 session 复现)。**挂载/排查 mcp 上游前必读。**
-- [guides/docker-host.md](guides/docker-host.md) — Docker/Node 宿主一篇通:env 变量面、`/data` 布局、本地开发与 Docker 验收命令、与 CF 宿主行为差异表、已知限制、`server-v*` 发布。**改 server 包或做 Docker 部署前必读。**
+- [guides/docker-host.md](guides/docker-host.md) — Docker/Node 宿主一篇通:env/bootstrap、`/data` 布局、production 单容器验收、localhost Compose 三跳开发栈与卷/凭据边界、CF 差异、`server-v*` 发布。**改 server 包或做 Docker/Compose 前必读。**
 - [guides/npm-publish.md](guides/npm-publish.md) — cli / sdk / gateway / dashboard / server 五包的 npm 发布:tsup bundle + dts 内联、publishConfig 覆盖、tag 触发 Trusted Publishing、新包两段式及常见坑;明确 Dashboard npm 与生产 `/ui` Static Assets 是两个独立发布面。
 - [guides/verification-and-commit-practices.md](guides/verification-and-commit-practices.md) — 验证与提交纪律:证据矩阵、Dashboard 真实浏览器四面证据、收尾同轮更新 current-state、配置面对等、出站边界测试、opt-in 退出码、长驻进程与跨休眠验证、先取证后改码、批量清理后 lint:fix、pathspec 提交与 hook 自动暂存防污染。
 - [guides/cli-argument-contract-review.md](guides/cli-argument-contract-review.md) — CLI 参数契约审查:Commander 解析/本地语义/服务端安全三层、同名同义、条件 flag、全局参数位置、分页 cursor 与 API↔CLI↔Dashboard 能力矩阵。**新增或修改 CLI 参数前必读。**
@@ -52,6 +52,7 @@
 - [memory/reflections/2026-08-11-search-derived-state-lkg.md](memory/reflections/2026-08-11-search-derived-state-lkg.md) — Search 派生状态的 LKG/cursor/最终一致边界(canonical 不受 search-only 容量反向限制;full/hot/concurrent 三路有界 LKG;权限后 cursor 与真实宿主预算探针)。
 - [memory/reflections/2026-08-11-search-consumer-parity-ui-evidence.md](memory/reflections/2026-08-11-search-consumer-parity-ui-evidence.md) — 全局搜索消费面对等与 UI 证据链(API/CLI/Dashboard 共用 wire contract;全局搜索与本地树导航分义;TreePath 逐段编码;gateway 测试从当前 Dashboard source build;浏览器与静态证据边界)。
 - [memory/reflections/2026-08-11-dashboard-system-forms-split.md](memory/reflections/2026-08-11-dashboard-system-forms-split.md) — Dashboard 系统表单拆分与证据边界(先抽 pure builder再拆 fields/dialog/route;CLI/builtin 对等用 wire fixture执行;route-component 依赖解耦;包级测试纳入 root verify;Node Vitest、fresh-build integration与浏览器证据分层)。
+- [memory/reflections/2026-08-11-compose-three-hop-dev-stack.md](memory/reflections/2026-08-11-compose-three-hop-dev-stack.md) — Docker Compose 三跳开发栈的可验证性(loopback固定凭据边界;gateway→真实 plugin→mock upstream链路证据;profile smoke同步退出码;唯一 dev-image builder;幂等卷、负例绕缓存与restart证据)。
 
 ## 路由提示
 

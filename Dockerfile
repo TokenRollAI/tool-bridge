@@ -7,8 +7,9 @@
 # 用法:
 #   docker build -t tool-bridge .
 #   docker run -d -p 8787:8787 -v tbdata:/data \
+#     -e TB_BOOTSTRAP_ADMIN_SK=<admin-sk> \
 #     -e TB_SECRET_ENCRYPTION_KEY=<base64url 32B> tool-bridge
-#   （首次启动日志打印 Admin SK 明文一次;或以 TB_BOOTSTRAP_ADMIN_SK 指定。）
+#   （缺少 Admin SK 时默认 fail closed;仅显式不安全开发模式允许随机生成。）
 
 FROM node:22-bookworm AS build
 WORKDIR /repo

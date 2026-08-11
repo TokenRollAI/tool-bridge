@@ -32,7 +32,7 @@ exports `.` / `./tbApp` / `./bootstrap` / `./deviceHello`(供 SDK 与 server 复
 |---|---|
 | `app.ts` | Workers Env→deps 适配(入口薄层;规范化 `TB_CANONICAL_ORIGIN`;可选 `TB_SEARCH: D1Database` 存在时注入 `D1SearchIndex`,缺 binding 不注入 search capability) |
 | `tbApp.ts` | **宿主中立 `createTbApp(deps)`**:全局安全头、认证中间件、`~help`/`~tree`/`~skill`/`~describe`/`~register`/`~feedback`/`~mcp` 与 root-only `POST /~search`;Search 请求 query+mode/limit/cursor,每次 canonical audit 后 over-fetch,按 read+call、kind/config、virtualize 后处理,空不可见页不发 cursor;registry/plugin/fresh tool list/feedback mutation 接 SearchSynchronizer;另含数据面、remote、两级 `~help`、`/ui`、`/~ref` |
-| `bootstrap.ts` | 首请求惰性引导:Workers 缺 `TB_BOOTSTRAP_ADMIN_SK` fail closed + `system` 七 builtin 物化(promise 防重入 + KV 幂等标志;宿主中立 API 保留随机兼容路径,当前 Node server 仍默认使用并写明文日志,待修;已引导实例升级自动补挂新模块) |
+| `bootstrap.ts` | 首请求惰性引导:Workers 缺 `TB_BOOTSTRAP_ADMIN_SK` fail closed + `system` 七 builtin 物化(promise 防重入 + KV 幂等标志);宿主中立 `runBootstrap` 默认保留随机生成并向本地 stdout 展示一次的 SDK兼容路径,Node server 另以 `requireAdminSk` 默认收紧;已引导实例升级自动补挂新模块 |
 | `deviceHello.ts` | **宿主中立 `processDeviceHello`**:设备 hello 验证 + 落库的单一真源,DO 与 server DeviceHub 共用;有 MutableSearchIndex 时 seed/mark 后批量 rebuild 派生索引 |
 | `kvStateStore.ts` | StateStore 的 KV 实现(list 跳 null、子树前缀扫描,头注释有约束说明) |
 | `deviceSession.ts` | `DeviceSession` DO 胶水:WS hibernation、待决表、`setWebSocketAutoResponse`、惰性会话重建;设备子树回收同步 SearchIndex;休眠恢复与每次 invoke 会重验 SK,但当前跨 KV await 后未复核 activeConnId、`markDisconnected` 可用陈旧 meta 覆盖新连接,属待修 TOCTOU(协议行为在 deviceHello.ts) |
@@ -40,7 +40,7 @@ exports `.` / `./tbApp` / `./bootstrap` / `./deviceHello`(供 SDK 与 server 复
 | `search/synchronizer.ts` | `SearchSynchronizer`:StateStore/registry/tool cache/feedback → SearchIndex 派生投影;固定 node/subtree pending markers,hot reconcile + 每次搜索 500-node canonical audit;overflow seed/LKG/fail-closed/回落恢复与超额节点排除 |
 | `search/d1SearchIndex.ts` | D1 keyword v2 adapter:raw ToolSpec source + feedback FTS(10/3/1)+ meta revision/cursor secret + snapshot digest/path capacity trigger;JSON1 byte chunks、candidate/hydrate/cursor、same-digest no-op;并发 500-path cap,cold query formula 48≤50 |
 | `providers/` | 全部上游 I/O:`mcp.ts`(SDK Streamable HTTP,会话复用 + 404 重握手一次;auth:'oauth' 挂 `../oauth.ts` 的 authProvider)、`http.ts`、`remote.ts`、`toolCache.ts`、`r2Object.ts`、`s3Object.ts` + `s3Sign.ts`(aws4fetch)、`pluginClient.ts`(`upstreamAuthRef` → resolve 后经 `X-TB-Upstream-Auth` 注入,失败 → unavailable)+ `pluginTool.ts` + `pluginContext.ts` |
-| `test/` | workerd 集成测试族;`search.integration.test.ts` 钉 limit/cursor、权限后 over-fetch、4 MiB hydrate 与空不可见页无 cursor;`searchSynchronizer.test.ts` 钉 canonical 独立、dirty audit、hot/full LKG/恢复;`d1SearchIndex.integration.test.ts` 复用 v2 contract并覆盖自动同步、feedback、125 tools、500-path并发 trigger与 48-query预算;`ui.integration.test.ts` 当前 15 cases,钉 `/ui`/node/search deep link、当前构建 chunk 内的 `/~search`、root POST 不被 assets 吞掉及特殊字符 TreePath helper;`scripts/` 有 echo-mcp / s3-mock / stub-provider |
+| `test/` / `scripts/` | workerd 集成测试族;`search.integration.test.ts` 钉 limit/cursor、权限后 over-fetch、4 MiB hydrate 与空不可见页无 cursor;`searchSynchronizer.test.ts` 钉 canonical 独立、dirty audit、hot/full LKG/恢复;`d1SearchIndex.integration.test.ts` 复用 v2 contract并覆盖自动同步、feedback、125 tools、500-path并发 trigger与 48-query预算;`ui.integration.test.ts` 当前 15 cases,钉 `/ui`/node/search deep link、当前构建 chunk 内的 `/~search`、root POST 不被 assets 吞掉及特殊字符 TreePath helper。`scripts/echo-mcp.ts` 兼作 Compose opt-in authenticated TAT/MCP mock(默认 MCP E2E 行为不变),`compose-smoke.ts` 走 gateway → plugin-feishu → mock 的注册/挂载/调用;另有 s3-mock / stub-provider |
 | `vitest.config.ts` | 在 gateway 测试启动前无条件从当前 Dashboard source 执行 build,避免 `ui.integration.test.ts` 误验陈旧 `dist` |
 | `wrangler.jsonc` | 绑定 TB_KV / TB_R2 / TB_DEVICE(DO)/ ASSETS(dashboard dist,`run_worker_first`)及 `TB_SEARCH` → `tb-search` D1(`database_id` 占位由 provision 回填)+ `account_id` + custom domain;production 禁 `workers_dev`/Preview URLs,用 `TB_CANONICAL_ORIGIN` 固定 OAuth callback origin |
 
@@ -92,17 +92,17 @@ exports `.` / `./tbApp` / `./bootstrap` / `./deviceHello`(供 SDK 与 server 复
 |---|---|
 | `sqliteStateStore.ts` | better-sqlite3 单表 kv(WAL,强一致);list 用 key 范围扫描(不用 LIKE,规避 `_`/`%` 通配符);cursor/排序与 MemoryStateStore 契约对拍 |
 | `sqliteSearchIndex.ts` | Node keyword v2 adapter:与 StateStore 共用 `state.sqlite3` 文件但用独立连接/独立表;raw ToolSpec/feedback FTS/meta/snapshot schema,事务化 replace/rebuild + 500-path trigger,candidate/hydrate/AES-GCM cursor,复用 shared contract |
-| `config.ts` | `configFromEnv`:TB_* 与 CF 同名同义 + TB_PORT(默认 8787,0=临时)/ TB_HOST / TB_DATA_DIR(默认 /data,本地回退 ./data)/ TB_UI_DIR |
+| `config.ts` | `configFromEnv`:TB_* 与 CF 同名同义 + TB_PORT(默认 8787,0=临时)/ TB_HOST / TB_DATA_DIR(默认 /data,本地回退 ./data)/ TB_UI_DIR;`TB_ALLOW_INSECURE_BOOTSTRAP` 仅显式放行随机 Admin SK兼容路径,默认 false |
 | `objects.ts` | `createDataObjectStore`:FsObjectStore('r2' provider 落点)前缀适配器,key 出入口加/剥 `objects/` 首段;无 presign → `$ref` 走 `/~ref` 中转 |
 | `deviceHub.ts` | ws `DeviceChannel`:http 'upgrade' + ws handleUpgrade;认证双点(升级前 identify 401 + processDeviceHello 权威判定),每次 invoke 再重验连接 SK,但 await 后未复核 active connection 且未重验 scope/registerPaths,属待修竞态/授权缺口;复用 core `DeviceGatewaySession`;ws ping 踢半开;断线回收 = `devicemeta:<id>` 持久 meta + 进程内 timer + 启动 `sweepOrphans`;幂等结果表仅内存(有意分叉) |
 | `assets.ts` | `/ui` 静态托管:TB_UI_DIR 覆盖 → dashboard 包 dist 解析 → 404 降级;contentType 复用 core fsContentTypeOf |
-| `server.ts` | `createTbServer`:构造 TbAppDeps(对位 gateway app.ts),注入 `SqliteSearchIndex`;start() 直调 runBootstrap + hub.sweepOrphans,close() 关闭 search/state 的独立 SQLite 连接 |
-| `main.ts` | bin 入口(shebang),SIGINT/SIGTERM 优雅关闭 |
-| `test/` | `sqliteSearchIndex.test.ts` 复用 v2 shared contract(权重/分页/cursor)并覆盖同库异表、500-path cap、重开持久化;`server.integration.test.ts` 覆盖 registry 自动同步后的真实 HTTP root search 与重启;另含 StateStore、device、ui、context 宿主测试 |
+| `server.ts` | `createTbServer`:构造 TbAppDeps(对位 gateway app.ts),注入 `SqliteSearchIndex`;start() 默认以 `requireAdminSk:true` 直调 runBootstrap后再 hub.sweepOrphans,显式 insecure escape才放宽;close() 关闭 search/state 的独立 SQLite 连接 |
+| `main.ts` | bin 入口(shebang);bootstrap 失败在监听前退出非 0并给出安全指引;SIGINT/SIGTERM 优雅关闭 |
+| `test/` | `bootstrap.test.ts` 钉 Node缺 Admin SK fail closed/显式逃生阀/预置密钥及 canonical origin;`sqliteSearchIndex.test.ts` 复用 v2 shared contract(权重/分页/cursor)并覆盖同库异表、500-path cap、重开持久化;`server.integration.test.ts` 覆盖 registry 自动同步后的真实 HTTP root search 与重启;另含 StateStore、device、ui、context 宿主测试 |
 | 发布形态 | tsup bundle core+gateway(`dts.resolve` 须收窄为数组,`true` 会把 node:http 类型降级 undefined);better-sqlite3/ws/hono/@hono/node-server 留 external;publishConfig 覆盖指 dist |
 
 ## scripts/ 与 CI
 
 - `scripts/`:gen-dev-vars.mjs(.env→.dev.vars)、provision.mjs(幂等建 KV/R2/D1;D1 用 `list --json` 精确 name/uuid,existing 同步 id+skip,create 后 re-list,regex 回填 `TB_SEARCH.database_id`;缺 uuid fail closed)、provision.test.mjs(fake wrangler 连跑两次,根 `test:provision` 验证不重建与 id 回填)、smoke.ts(只读冒烟)、verify-revocation.ts / verify-device.ts / verify-plugin.ts(可重跑生产验收)。
 - `.github/workflows/`:publish-{cli,sdk,gateway,dashboard,server}.yml(tag `<pkg>-v*`,npm Trusted Publishing)+ publish-docker.yml(tag `server-v*`,GHCR 镜像,buildx amd64/arm64)。
-- 仓库根:`Dockerfile`(多阶段 node:22-bookworm→slim,`pnpm --filter @tool-bridge/server --prod deploy --legacy /out`)+ `.dockerignore`。
+- 仓库根:`Dockerfile`(production 多阶段 node:22-bookworm→slim,final 单容器 `CMD node /app/dist/main.js`,`pnpm --filter @tool-bridge/server --prod deploy --legacy /out`)+ `.dockerignore`;`docker-compose.yml` 另组 localhost gateway + 内网 plugin-feishu/upstream + profile smoke,根 package scripts 暴露 `compose:up|smoke|down|reset`。

@@ -40,12 +40,12 @@
   **不构成 Phase 4.5 编码依赖**,生产证据前项 7 不勾选。
 
 ## 当前状态
-- 当前 Phase:**Phase 4.5 — D:组件抽象收尾**(Round 25 已完成 Dashboard 大页拆分;Round 26 进入 Docker Compose 开发栈;Phase 4 外向半边见 P4-1/P4-2/P4-3)
+- 当前 Phase:**Phase 5 — E2E 验收**(Round 26 已完成 Phase 4.5:Dashboard 大页拆分 + Docker Compose 三跳开发栈 + 全阶段回归;Phase 1—4 待授权外向动作继续见 PENDING)
 - Phase 3 已勾选:项 1(官方 MCP 测试 client + 本地 initialize,Round 14)、项 2(认证后的动态 tools/list + tools/call,Round 15)、项 3(scope 收窄钉死,Round 16)、项 4(三入口对等审计,Round 17)
 - Phase 3 待办:**仅剩待授权的外向动作** — 项 5 已完成生产脚本与全量回归,真实部署/生产 MCP smoke → P3-1
 - Phase 4 已勾选:项 3(CF D1 + Node SQLite SearchIndex,FTS5/trigram,Round 21)、项 4(trigram 短词 escaped LIKE 兜底,Round 22)、项 5(加权索引、自动同步、权限后处理分页与 opaque cursor,Round 23)、项 6(`tb search` + Dashboard `/search`,Round 24)
 - Phase 4 遗留:项 1 真实 provision/deploy → P4-1;项 2 外部 HTBP Draft → P4-2;项 7 已完成 `pnpm verify` 半边,生产 deploy + 中英文 search smoke → P4-3。三者均为外向流程动作,不构成 Phase 4.5 编码依赖。
-- Phase 4.5 已勾选:项 1(Dashboard Registry/Plugins/SK 大页拆分、纯 builder 契约测试与 fresh-source UI 集成,Round 25)
+- Phase 4.5 已勾选:项 1(Dashboard Registry/Plugins/SK 大页拆分、纯 builder 契约测试与 fresh-source UI 集成,Round 25)、项 2(gateway→plugin-feishu Worker→mock TAT/MCP 上游 Compose 三跳开发栈,Round 26)、项 3(`pnpm verify` 全绿,Round 26)
 - Phase 2 已勾选:项 1(OperationRegistry)、项 2(Plugin v2 多 export,Round 13 补齐三入口对等后成立)、项 3(Context 按 handler 推导能力)、项 4(`@tool-bridge/plugin-sdk` 可发布)、项 5(样例 plugin 双 export)、项 6(删净 legacy 面)
 - Phase 2 待办(**全部为待授权的外向动作**):项 7 飞书重写复验(代码已完成,只差生产实调 → P2-1)/ 项 8 部署上线
 - Phase 1(代码完成,部署挂起见 PENDING)
@@ -465,3 +465,19 @@
   - `pnpm verify` → 9 workspace typecheck + 全仓 lint + provision **1 passed** + 包测试 **1272 passed / 7 skipped**(core 744 + dashboard 10 + plugin-sdk 22 + cli 242 + sdk 19 + plugin-feishu 9 + gateway 189 + server 37),合计 **1273 passed / 7 skipped**,退出码 0。`git diff --check` 退出码 0;严格 investigator 最终复核无阻断。
 - 勾选:Phase 4.5 DoD 项 1(Dashboard 大页拆分与 CLI/builtin 对等)。
 - 遗留:Node Vitest 不覆盖 React dialog 生命周期与部分正向子分支,属后续测试增强。下一轮 = Phase 4.5 项 2:一键 Docker Compose gateway + plugin worker + mock upstream 开发栈,保持生产单容器形态不变。
+
+## Round 26 — 2026-08-11
+- 目标:Phase 4.5 DoD 项 2/3 —— 建立一键 Docker Compose 本地开发栈,用真实 gateway→plugin Worker→mock 上游三跳 smoke 验收,并完成全阶段回归。
+- 动作:
+  - 新增根 `docker-compose.yml`:生产根 `Dockerfile` final stage 继续提供单容器 gateway;开发 build stage 复用给真实 `plugin-feishu` Wrangler Worker、受认证的 mock TAT/MCP upstream 与 profile 隔离的一次性 smoke。仅 gateway 发布宿主端口,固定开发 Admin SK 下强制绑定 `127.0.0.1`;plugin/upstream 仅在 Compose 内网暴露。
+  - 扩展既有 `echo-mcp.ts` 的 opt-in Compose 模式,新增健康检查、确定性 `/auth` TAT 换发和 MCP TAT/allowed-tools 头校验;默认模式保持既有 stateful/stateless MCP E2E 行为。新增幂等 smoke:upsert plugin token/上游凭据→注册 plugin/v2→挂载 `actions` export→调用 `echo`,并精确断言上游返回的 ToolResult。
+  - 根脚本新增 `compose:up/smoke/down/reset`;smoke 使用 profile + `docker compose run --rm` 同步传播退出码。`down` 保留 gateway 数据卷,`reset` 才删除卷;中英文 README 同步生产单容器与本地三跳用法。
+  - 实机调试闭环三类编排问题:相同 build target/tag 并发导出改为单服务 build 后复用 local image;容器内 `pnpm exec` 可能无 TTY 触发依赖修复,改为直接调用 `node_modules/.bin`;固定 fixture 曾默认发布到所有网卡,改为 localhost-only 并重建容器验证实际 HostIp。
+- 验证:
+  - `docker compose --profile smoke config --quiet` 与默认 config 均通过;`pnpm compose:up` 冷构建两镜像并使 gateway/plugin/upstream 全部 healthy。`docker inspect` 证明 gateway 使用 production final CMD `node /app/dist/main.js`,端口绑定为 `127.0.0.1:8787`。
+  - `pnpm compose:smoke` 首次、重复执行及 gateway restart 后均全 PASS:健康检查、secret upsert、plugin 注册、export 挂载和 `compose-roundtrip` 三跳调用成功。错误 app credential 负向 smoke 在最终调用处以 mock `/auth` 401→gateway 503 失败,证明调用未在 plugin/gateway 本地短路;随后正常 smoke 恢复通过。
+  - 既有 echo-mcp 默认模式 opt-in MCP E2E **2/2**、plugin-feishu **9/9**、gateway typecheck、目标 ESLint、`git diff --check` 均通过;严格 investigator 报告 `.llmdoc-tmp/phase45-compose-review.md` 结论无阻断。
+  - `pnpm verify` → 9 workspace typecheck + 全仓 lint + provision **1 passed** + 包测试 **1272 passed / 7 skipped**,合计 **1273 passed / 7 skipped**,退出码 0。
+  - `pnpm compose:reset` 后 `docker compose ps --all --quiet` 为空,`tool-bridge-dev_gateway-data` 卷不存在,容器/网络/fixture 数据清理完成。
+- 勾选:Phase 4.5 DoD 项 2(Docker Compose 本地三跳开发栈)与项 3(全阶段回归)。
+- 遗留:Phase 4.5 已完成,进入 Phase 5。下一轮 = E2E-A:汇总安全解冻可重跑证据并执行无需生产授权的 fail-closed/越权回归;`deploy:all`/生产 smoke 半边继续遵守 P1-1 等 PENDING 外向动作纪律。

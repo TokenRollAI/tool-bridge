@@ -4,7 +4,7 @@
 
 ## 形态一句话
 
-`@tool-bridge/server` = Node 宿主胶水:复用 gateway 宿主中立 `createTbApp` + `runBootstrap`,注入 SQLite StateStore + FS ObjectStore + ws DeviceHub,产出单进程 HTTP 服务(bin `tool-bridge-server`)与官方镜像 `ghcr.io/tokenrollai/tool-bridge`。与 CF 宿主产出同一棵树。
+`@tool-bridge/server` = Node 宿主胶水:复用 gateway 宿主中立 `createTbApp` + `runBootstrap`,注入 SQLite StateStore + FS ObjectStore + ws DeviceHub,产出单进程 HTTP 服务(bin `tool-bridge-server`)与官方镜像 `ghcr.io/tokenrollai/tool-bridge`。与 CF 宿主产出同一棵树。根 `docker-compose.yml` 是另行编排的 localhost 开发栈,不改变生产单容器镜像。
 
 ## 环境变量面(configFromEnv,`src/config.ts`)
 
@@ -16,6 +16,7 @@ TB_* 变量与 CF 宿主同名同义(`TB_BOOTSTRAP_ADMIN_SK` / `TB_SECRET_ENCRYP
 | `TB_HOST` | — | 监听地址 |
 | `TB_DATA_DIR` | `/data`(容器);本地回退 `./data` | 数据根目录 |
 | `TB_UI_DIR` | — | 覆盖 Dashboard 静态目录;不设则解析 `@tool-bridge/dashboard` 包 dist,再无则 `/ui` 404 降级 |
+| `TB_ALLOW_INSECURE_BOOTSTRAP` | `false` | 默认缺 `TB_BOOTSTRAP_ADMIN_SK` 时拒绝首次启动;仅设为 `true` 才随机生成并打印一次 Admin SK,只限本地/一次性开发 |
 
 ## `/data` 布局
 
@@ -25,8 +26,9 @@ TB_* 变量与 CF 宿主同名同义(`TB_BOOTSTRAP_ADMIN_SK` / `TB_SECRET_ENCRYP
 ## 本地开发与测试
 
 ```sh
-pnpm --filter @tool-bridge/server start        # 本机起服(默认 :8787,数据落 ./data)
-pnpm --filter @tool-bridge/server test         # 5 文件 24 例,纯 Node vitest(不需要 workerd)
+TB_BOOTSTRAP_ADMIN_SK=… TB_SECRET_ENCRYPTION_KEY=… \
+  pnpm --filter @tool-bridge/server start      # 本机起服(默认 :8787,数据落 ./data)
+pnpm --filter @tool-bridge/server test         # 纯 Node vitest(不需要 workerd)
 ```
 
 线上/本机验收沿用 `pnpm smoke` / `verify-device.ts` / `verify-plugin.ts`(传 `TB_BASE_URL=http://127.0.0.1:<port>` + `TB_SK`)。
@@ -43,6 +45,25 @@ docker restart tb                                              # 重启后:已�
 
 Dockerfile 要点:node:22-bookworm 构建 → slim 运行时(**不用 alpine**——better-sqlite3 musl 无官方 prebuild);`pnpm --filter @tool-bridge/server --prod deploy --legacy /out` 产出运行时;USER node / VOLUME /data / HEALTHCHECK / EXPOSE 8787。
 
+首次引导缺 `TB_BOOTSTRAP_ADMIN_SK` 时 server 在监听前退出非 0,不生成或打印最高权限凭证。显式预置会只存 hash;`TB_ALLOW_INSECURE_BOOTSTRAP=true` 是本地逃生阀,会恢复随机生成并打印一次的旧行为,生产禁用。宿主中立 `runBootstrap` 和未传 `adminSk` 的 SDK 仍保留随机兼容路径,这不改变 Node/Docker 默认 fail closed。
+
+## Compose 三跳开发栈(2026-08-11 实跑通过)
+
+根 `docker-compose.yml` 的常驻链路是 gateway → 真实 plugin-feishu Wrangler Worker → 受认证 mock TAT/MCP upstream;`smoke` 是独立 profile 的 one-shot 消费者。gateway 构建根 Dockerfile final stage,plugin/upstream/smoke 复用 workspace build-stage dev image;生产 Dockerfile final stage和 `CMD ["node","/app/dist/main.js"]` 不变。
+
+```sh
+pnpm compose:up       # build + 后台启动 gateway/upstream/plugin
+pnpm compose:smoke    # docker compose run --rm smoke,同步返回三跳结果
+pnpm compose:down     # 清容器/网络,保留 gateway-data
+pnpm compose:reset    # down -v,删除 gateway-data 与固定 fixture
+```
+
+只有 gateway 发布 `127.0.0.1:${TB_COMPOSE_GATEWAY_PORT:-8787}`;plugin/upstream 只 `expose` 到 Compose 内网。默认 Admin SK、plugin token、app credential与 TAT 是可提交的确定性 fixture,**仅允许隔离 localhost 开发**,不得复制到生产、绑定 `0.0.0.0`、接反向代理或共享到其它网络。修改 Admin SK 或 encryption key不会迁移既有卷;改值后出现 401/密文解不开时用 `compose:reset`,或走管理面显式轮换。
+
+smoke 从 gateway 公共入口 set 两个 secret,注册 plugin/v2并校验 `actions/tools/v1`,挂载 `compose/tools`,最后断言 mock upstream 生成的精确 `compose-roundtrip`。验收已覆盖 fresh volume、同卷重复、gateway restart、用全新错误 app id绕过 TAT cache后的 upstream 401 → gateway 503/nonzero、恢复后再通过,以及 `HostIp=127.0.0.1`、final image CMD与 teardown。三个 healthcheck 只负责等待,不能替代这条调用证据。
+
+当前边界:echo mock新增 route 尚无独立单测;compose smoke的 fetch尚无逐请求 AbortSignal;固定 dev image tag在并行 worktree并发 build/run时可能串 source,即使 `COMPOSE_PROJECT_NAME` 与宿主端口不同也不能完全隔离。这些是后续增强,当前本地证据不代表生产凭据、真实飞书、跨主机网络或生产部署已验证。
+
 ## 与 CF 宿主的行为差异
 
 | 维度 | CF(Workers) | Node(server 包) |
@@ -53,12 +74,13 @@ Dockerfile 要点:node:22-bookworm 构建 → slim 运行时(**不用 alpine**�
 | 设备探活 | DO autoResponse(hibernation) | ws 协议层 ping 踢半开连接 |
 | `/ui` 静态托管 | Static Assets binding | TB_UI_DIR → dashboard 包 dist 解析 → 404 降级 |
 | `$ref` 大对象 | R2 presign 或 `/~ref` 中转 | FS 无 presign,固定走 `/~ref` 中转 |
+| 首次 bootstrap | 缺 `TB_BOOTSTRAP_ADMIN_SK` fail closed | 缺 Admin SK 默认 fail closed;仅显式 insecure bootstrap逃生阀随机打印 |
 
 设备协议行为不分叉:hello 验证+落库统一走 gateway `src/deviceHello.ts`(`processDeviceHello`),DO 与 DeviceHub 只是宿主胶水。当前两宿主都在每次 invoke 前调用 `identify`;disabled 回归已有测试,delete/expiry 由同一 active-key 判定处理。但重验跨 await 后尚未复核 active connection,也未校验 scope/registerPaths 收紧,提交前复审已把它列为待修安全缺口,不能据此承诺所有既有连接都可靠失效。
 
 ## 已知限制
 
-- **生产 bootstrap 缺口:**Node/Docker 未配置 `TB_BOOTSTRAP_ADMIN_SK` 时仍默认随机生成 Admin SK 并写 stdout。部署时必须显式配置;代码层 fail-closed 尚待补齐,只有 SDK/显式开发模式适合保留随机兼容路径。
+- **bootstrap 兼容边界:**Node/Docker 默认已 fail closed;生产必须显式预置 `TB_BOOTSTRAP_ADMIN_SK`,不得开启 `TB_ALLOW_INSECURE_BOOTSTRAP`。宿主中立 `runBootstrap` 与 SDK 未传 `adminSk` 时仍可随机生成并写本地 stdout,嵌入方须自行决定是否接受该兼容行为。
 - **设备重验缺口:**`DeviceHub.invoke` 在等待 StateStore 认证期间可被新连接替换,恢复后可能向旧连接发送一次调用;需在 await 后复核 active connection,并补 barrier 并发测试。
 - 反向代理后 `/~ref` 中转 URL 的 origin 取自请求 URL,代理须透传 `Host` / `X-Forwarded-Proto`(未来可加 `TB_PUBLIC_ORIGIN`)。
 - 设备幂等结果表不跨进程重启(见上表,有意分叉)。

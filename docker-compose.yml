@@ -1,0 +1,130 @@
+# Local development only. Defaults below are deterministic test fixtures, not production secrets.
+# The production image remains the root Dockerfile's final single-container stage.
+
+name: ${COMPOSE_PROJECT_NAME:-tool-bridge-dev}
+
+x-dev-image: &dev-image
+  image: tool-bridge-compose-dev:local
+  pull_policy: never
+
+x-healthcheck: &healthcheck
+  interval: 2s
+  timeout: 2s
+  retries: 30
+  start_period: 5s
+
+services:
+  gateway:
+    image: tool-bridge-compose-gateway:local
+    build:
+      context: .
+      dockerfile: Dockerfile
+    init: true
+    environment:
+      TB_ALLOW_INSECURE_HTTP: 'true'
+      TB_BOOTSTRAP_ADMIN_SK: ${TB_COMPOSE_ADMIN_SK:-tbk_compose_admin_000000000000}
+      TB_SECRET_ENCRYPTION_KEY: ${TB_COMPOSE_ENCRYPTION_KEY:-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA}
+    ports:
+      - '127.0.0.1:${TB_COMPOSE_GATEWAY_PORT:-8787}:8787'
+    volumes:
+      - gateway-data:/data
+    healthcheck:
+      <<: *healthcheck
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:8787/healthz').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"
+
+  upstream:
+    <<: *dev-image
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: build
+    init: true
+    command:
+      - /repo/node_modules/.bin/tsx
+      - /repo/packages/gateway/scripts/echo-mcp.ts
+    environment:
+      ECHO_MCP_APP_ID: ${TB_COMPOSE_APP_ID:-compose-app}
+      ECHO_MCP_APP_SECRET: ${TB_COMPOSE_APP_SECRET:-compose-secret}
+      ECHO_MCP_HOST: 0.0.0.0
+      ECHO_MCP_PORT: '39001'
+      ECHO_MCP_REQUIRE_FEISHU_AUTH: '1'
+      ECHO_MCP_TAT: ${TB_COMPOSE_TAT:-compose-tat}
+    expose:
+      - '39001'
+    healthcheck:
+      <<: *healthcheck
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:39001/healthz').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"
+
+  plugin:
+    <<: *dev-image
+    init: true
+    depends_on:
+      upstream:
+        condition: service_healthy
+    command:
+      - /repo/node_modules/.bin/wrangler
+      - dev
+      - --config
+      - /repo/packages/plugin-feishu/wrangler.jsonc
+      - --local
+      - --ip
+      - 0.0.0.0
+      - --port
+      - '8788'
+      - --show-interactive-dev-session=false
+      - --var
+      - PLUGIN_TOKEN:${TB_COMPOSE_PLUGIN_TOKEN:-tbp_compose_dev_token}
+      - --var
+      - FEISHU_ALLOWED_TOOLS:echo
+      - --var
+      - FEISHU_AUTH_URL:http://upstream:39001/auth
+      - --var
+      - FEISHU_MCP_URL:http://upstream:39001/mcp
+    environment:
+      WRANGLER_SEND_METRICS: 'false'
+    expose:
+      - '8788'
+    healthcheck:
+      <<: *healthcheck
+      start_period: 10s
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:8788/healthz').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"
+
+  smoke:
+    <<: *dev-image
+    init: true
+    restart: 'no'
+    profiles:
+      - smoke
+    depends_on:
+      gateway:
+        condition: service_healthy
+      plugin:
+        condition: service_healthy
+      upstream:
+        condition: service_healthy
+    command:
+      - /repo/node_modules/.bin/tsx
+      - /repo/packages/gateway/scripts/compose-smoke.ts
+    environment:
+      TB_COMPOSE_ADMIN_SK: ${TB_COMPOSE_ADMIN_SK:-tbk_compose_admin_000000000000}
+      TB_COMPOSE_APP_ID: ${TB_COMPOSE_APP_ID:-compose-app}
+      TB_COMPOSE_APP_SECRET: ${TB_COMPOSE_APP_SECRET:-compose-secret}
+      TB_COMPOSE_GATEWAY_URL: http://gateway:8787
+      TB_COMPOSE_PLUGIN_TOKEN: ${TB_COMPOSE_PLUGIN_TOKEN:-tbp_compose_dev_token}
+      TB_COMPOSE_PLUGIN_URL: http://plugin:8788
+      TB_COMPOSE_UPSTREAM_URL: http://upstream:39001
+
+volumes:
+  gateway-data:

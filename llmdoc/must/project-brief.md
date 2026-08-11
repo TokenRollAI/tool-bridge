@@ -58,7 +58,7 @@ tool-bridge 是一个"自描述、可反向注册、协议开放的工具与上�
 - **NodeRegistry**:builtin `system/registry`,List/Get/Write/Update/Delete/Resolve;**一切"挂上树"的动作最终落 `NodeRegistry.Write`**(统一注册面)。
 - **SK(Secret Key)**:唯一凭证形态,opaque token,sha256 哈希存查;记录 owner(`user:`/`agent:`/`device:`)与 scopes。
 - **Scope**:`(路径 glob 模式, 动作集, effect?)`;动作 = read/write/call/register/admin;deny 优先、无匹配默认拒。
-- **Admin SK**:scope=`**` 全动作,用于签发更细 SK;Workers 必须通过 secret 预置,不得把随机明文写入日志。SDK/显式开发宿主可选择兼容的随机生成流程;当前 Node/Docker server 尚未默认 fail closed,生产必须预置 `TB_BOOTSTRAP_ADMIN_SK`。
+- **Admin SK**:scope=`**` 全动作,用于签发更细 SK;Workers 必须通过 secret 预置,不得把随机明文写入日志。Node/Docker server默认同样要求 `TB_BOOTSTRAP_ADMIN_SK` 并在监听前 fail closed;仅显式 `TB_ALLOW_INSECURE_BOOTSTRAP=true` 才放行随机生成并打印一次。宿主中立 `runBootstrap` 与未传 `adminSk` 的 SDK仍保留兼容随机流程,嵌入方负责收紧。
 - **Authorizer.Check**:唯一权限判定入口,所有模块只依赖它。
 - **SecretStore**:builtin `system/secret`,上游凭证 AES-256-GCM 加密只写不读,主密钥 `TB_SECRET_ENCRYPTION_KEY` env-only。
 - **authRef / skRef**:节点配置中对 SecretStore 凭证的引用名(凭证本体不出网关);**pluginToken**:Plugin 回调平台的令牌,签发仅一次。
