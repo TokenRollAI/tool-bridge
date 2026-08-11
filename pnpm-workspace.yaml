@@ -2,6 +2,36 @@ packages:
   - packages/*
   - plugins/*
 
+# 依赖版本唯一真源:被 ≥2 个 workspace 包共享的依赖一律进 catalog,
+# 包内写 "catalog:"。升级只改这里一处,插件数量增长不再放大版本漂移。
+catalog:
+  '@cfworker/json-schema': ^4.1.1
+  '@cloudflare/vitest-pool-workers': ^0.18.0
+  '@cloudflare/workers-types': ^5.20260706.1
+  '@hono/node-server': ^1.19.7
+  '@modelcontextprotocol/client': ^2.0.0
+  '@modelcontextprotocol/core': ^2.0.0
+  '@modelcontextprotocol/sdk': ^1.29.0
+  '@modelcontextprotocol/server': ^2.0.0
+  '@types/node': ^26.1.0
+  '@types/ws': 8.18.1
+  aws4fetch: ^1.0.20
+  hono: ^4.12.28
+  partysocket: 1.3.0
+  tsup: ^8.5.1
+  tsx: ^4.23.0
+  typescript: ^5.9.3
+  vitest: ^4.1.10
+  wrangler: 4.107.0
+  ws: 8.21.0
+  zod: ^3.25.76
+
+# gateway 的测试面用 zod 4(经 @modelcontextprotocol v2 的 peer);
+# 与 core 系的 zod 3 语义统一是独立事项,catalog 先各表各的。
+catalogs:
+  zod4:
+    zod: ^4.2.0
+
 allowBuilds:
   better-sqlite3: true
   esbuild: true

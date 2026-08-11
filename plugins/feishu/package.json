@@ -12,16 +12,16 @@
     "deploy": "wrangler deploy"
   },
   "dependencies": {
-    "@cfworker/json-schema": "^4.1.1",
-    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@cfworker/json-schema": "catalog:",
+    "@modelcontextprotocol/sdk": "catalog:",
     "@tool-bridge/core": "workspace:*",
     "@tool-bridge/plugin-sdk": "workspace:*"
   },
   "devDependencies": {
-    "@cloudflare/vitest-pool-workers": "^0.18.0",
-    "@cloudflare/workers-types": "^5.20260706.1",
-    "vitest": "^4.1.10",
-    "wrangler": "^4.107.0",
-    "zod": "^3.25.76"
+    "@cloudflare/vitest-pool-workers": "catalog:",
+    "@cloudflare/workers-types": "catalog:",
+    "vitest": "catalog:",
+    "wrangler": "catalog:",
+    "zod": "catalog:"
   }
 }

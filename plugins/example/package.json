@@ -15,9 +15,9 @@
   },
   "dependencies": {
     "@tool-bridge/plugin-sdk": "workspace:*",
-    "zod": "^3.25.76"
+    "zod": "catalog:"
   },
   "devDependencies": {
-    "wrangler": "^4.107.0"
+    "wrangler": "catalog:"
   }
 }

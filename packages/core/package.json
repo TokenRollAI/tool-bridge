@@ -12,10 +12,10 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "zod": "^3.25.76"
+    "zod": "catalog:"
   },
   "devDependencies": {
-    "@types/node": "^26.1.0",
-    "vitest": "^4.1.10"
+    "@types/node": "catalog:",
+    "vitest": "catalog:"
   }
 }

@@ -34,9 +34,9 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.39.5",
-    "@modelcontextprotocol/client": "^2.0.0",
+    "@modelcontextprotocol/client": "catalog:",
     "@stylistic/eslint-plugin": "^5.10.0",
-    "@types/node": "^26.1.0",
+    "@types/node": "catalog:",
     "eslint": "^9.39.5",
     "eslint-plugin-import": "^2.32.0",
     "eslint-plugin-jsonc": "^2.21.1",
@@ -47,9 +47,9 @@
     "globals": "^16.5.0",
     "husky": "^9.1.7",
     "lint-staged": "^16.4.0",
-    "tsx": "^4.23.0",
-    "typescript": "^5.9.3",
+    "tsx": "catalog:",
+    "typescript": "catalog:",
     "typescript-eslint": "^8.64.0",
-    "wrangler": "4.107.0"
+    "wrangler": "catalog:"
   }
 }

@@ -35,12 +35,12 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "zod": "^3.25.76"
+    "zod": "catalog:"
   },
   "devDependencies": {
     "@tool-bridge/core": "workspace:*",
-    "tsup": "^8.5.1",
-    "vitest": "^4.1.10"
+    "tsup": "catalog:",
+    "vitest": "catalog:"
   },
   "repository": {
     "type": "git",

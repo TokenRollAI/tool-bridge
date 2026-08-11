@@ -43,24 +43,24 @@
     "stub-provider": "tsx scripts/stub-provider.ts"
   },
   "dependencies": {
-    "@cfworker/json-schema": "^4.1.1",
-    "@modelcontextprotocol/client": "^2.0.0",
-    "@modelcontextprotocol/core": "^2.0.0",
-    "@modelcontextprotocol/server": "^2.0.0",
-    "aws4fetch": "^1.0.20",
-    "hono": "^4.12.28"
+    "@cfworker/json-schema": "catalog:",
+    "@modelcontextprotocol/client": "catalog:",
+    "@modelcontextprotocol/core": "catalog:",
+    "@modelcontextprotocol/server": "catalog:",
+    "aws4fetch": "catalog:",
+    "hono": "catalog:"
   },
   "devDependencies": {
-    "@cloudflare/vitest-pool-workers": "^0.18.0",
-    "@cloudflare/workers-types": "^5.20260706.1",
-    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@cloudflare/vitest-pool-workers": "catalog:",
+    "@cloudflare/workers-types": "catalog:",
+    "@modelcontextprotocol/sdk": "catalog:",
     "@tool-bridge/core": "workspace:*",
     "@tool-bridge/plugin-example": "workspace:*",
     "s3rver": "^3.7.1",
-    "tsup": "^8.5.1",
-    "tsx": "^4.23.0",
-    "vitest": "^4.1.10",
-    "zod": "^4.2.0"
+    "tsup": "catalog:",
+    "tsx": "catalog:",
+    "vitest": "catalog:",
+    "zod": "catalog:zod4"
   },
   "repository": {
     "type": "git",
