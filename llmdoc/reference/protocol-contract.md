@@ -7,7 +7,7 @@
 | 端点 | 语义 |
 |---|---|
 | `GET /healthz` | 树外免认证运维端点,200 + `{"healthy":true,"version":"<x.y.z>"}` |
-| `POST /~mcp` | **MCP consumer endpoint**:需 Bearer SK 的无状态 Streamable HTTP(JSON response)端点;支持 MCP `initialize`、`tools/list`、`tools/call`,每次请求均按当前身份重新投影 HTBP 树,不依赖 isolate 内会话状态 |
+| `POST /~mcp` | **MCP consumer endpoint**:需 Bearer SK 的无状态 Streamable HTTP(JSON response)端点;支持 MCP `initialize`、`tools/list`、`tools/call`,并以稳定合成 tools 暴露 Search/Help/List;每次请求均按当前身份重新投影 HTBP 树,不依赖 isolate 内会话状态 |
 | `POST /~search` | **root-only 全局工具搜索**:需 Bearer SK;仅宿主注入声明 `search` capability 的 `SearchIndex` 时存在,请求/返回/权限细则见 1b;`POST /<path>/~search` 一律 404 |
 | `GET /<path>/~help` | 节点自描述;默认 `text/markdown` 可读表现,`Accept: application/json` 得等价 `HelpJson`,`Accept: text/plain` 得紧凑 Help DSL(面向 LLM 省 token)。**两级披露**:节点 `~help` 是索引,`GET /<node>/<tool>/~help` 给单工具全量 spec |
 | `GET /~tree?depth=N` | 受限深度树视图(默认 2,上限 8 钳制;节点上限 500);子树根必须真实存在,非根不存在 → 404 |
@@ -29,11 +29,16 @@
 ## 1a. MCP consumer endpoint 投影
 
 - `POST /~mcp` 位于统一 Bearer 认证中间件之后。服务端使用 MCP SDK 的 Web-standard Streamable HTTP transport,每个 HTTP 请求创建独立 server/transport 并启用 JSON response;server identity = `tool-bridge` + 当前 gateway 版本,capabilities = `{tools:{}}`。
+- MCP 仍只声明标准 `tools` capability;HTBP 发现面以三个稳定、只读的合成工具加入同一次 `tools/list`:
+  - `tb_search`(仅 SearchIndex 声明 `search` 时存在):`{query,mode?,limit?,cursor?}` → 内部 `POST /~search`。
+  - `tb_help`:`{path?,tool?,format?:'json'|'markdown'|'dsl'}` → 内部 `GET /<path>[/<tool>]/~help`;tool detail 要求 path 非根且 tool 为单路径段。
+  - `tb_list_nodes`:`{path?,depth?:0..8}` → 内部 JSON `GET /<path>/~tree?depth=N`。
+  三者携原请求 Bearer 重新进入 Hono 认证/授权路由;JSON 结果同时进入 MCP `structuredContent`,markdown/DSL 保持 text content,HTTP 业务错误映射为 `isError:true`。它们不是新的权限或存储实现。
 - `tools/list` 每次从当前树动态生成,不缓存跨请求授权结果。本地节点先要求路径 `read`,再按命令声明的 `scope`(tool provider/device tool 为 `call`)调用 `Authorizer.Check`;因此只读 SK 看不到不可调用工具,context/builtin 等多命令节点只暴露该身份获准的命令。
 - 覆盖面包括本地注册树中的 tool provider、device tool、builtin/context/skillhub 等 HelpModel 命令,以及 `remote` 挂载下递归发现的子树。本地 registry 最长前缀所有者优先:若 remote 后代路径已有本地节点覆盖,该分支不再从远端发现,而按本地节点投影。
 - remote 路径必须同时通过本地挂载路径的 `read`、`call` 以及命令声明 `scope` 三重检查;路径、命令和详细 schema 重定位到本地挂载前缀,不向消费方泄露远端基址。远端 `~tree`/`~help` 的 node/child/command path 均须为 canonical 相对 TreePath、匹配请求路径和直接父子/节点归属;`.`/`..`、编码点段、空/保留/控制段一律在后续凭证化 fetch 前 fail closed。单次 MCP 请求的 remote discovery 上限为深度 8、节点 500、远端请求 32(包含 `~tree`/`~help`/详细 schema 请求);任一超限均以不可用错误 fail closed,不返回不完整工具集。
 - `tools/call` 会以当前身份重新生成同一投影并按 MCP 工具名查找;不存在或已失权的名称返回 MCP `InvalidParams`。本地 `mcp/http/tool` Provider 重新校验 read+call、解析最新虚拟化映射后直接调用 typed `provider.call`,保留原生 MCP `isError`、content blocks 与 `structuredContent`;其余本地 HTBP 命令按 HelpModel 路径复用既有 Hono 分派,remote tool 重定位后仍走本地节点 `{tool,arguments}` 信封,不另开权限或转发旁路。
-- MCP tool `name` 的 identity 是 `[invokePath,toolName,'envelope'|'flat']` JSON tuple,再做单射 UTF-8 字节编码并加 `tb_` 前缀;下划线双写,其余不在 `[A-Za-z0-9.-]` 的字节编码为 `_xx`。名称最长 128 字符;超长 identity 保留编码前缀并附完整 SHA-256 hex,使名称兼容 MCP 客户端且抵抗路径/转义碰撞;重复 identity 或最终名称碰撞均 fail closed。
+- 普通 HTBP MCP tool `name` 的 identity 是 `[invokePath,toolName,'envelope'|'flat']` JSON tuple,再做单射 UTF-8 字节编码并加 `tb_` 前缀;下划线双写,其余不在 `[A-Za-z0-9.-]` 的字节编码为 `_xx`。名称最长 128 字符;超长 identity 保留编码前缀并附完整 SHA-256 hex。三个控制工具例外使用保留稳定名 `tb_search`/`tb_help`/`tb_list_nodes`;重复 identity 或任何最终名称碰撞均 fail closed。
 - MCP tool 字段约定:
   - `description`:原描述 + `HTBP <invokePath>`;缺描述时仅保留 HTBP 路径。
   - `inputSchema`:缺省为 `{type:'object',properties:{}}`;已有 schema 必须是 object 根,并强制根 `type:'object'`。投影先经 MCP `ToolSchema` 校验,再由 `CfWorkerJsonSchemaValidator` 编译;非法 tool/schema 以 MCP internal error fail closed。
@@ -45,12 +50,12 @@
 
 - 请求固定为 `POST /~search` + JSON `{query,opts?:{mode?:'keyword'|'semantic',limit?:number,cursor?:string}}`;body 只接受 `query`/`opts`,opts 只接受 `mode`/`limit`/`cursor`,query 须为非空字符串并在传给索引前 trim。`limit` 与其它 List/Page 契约一致:缺省或 `<1` 为 50,整数上限钳到 200;非整数、非字符串 cursor、多余字段与未知 mode 均返回 400 `invalid_argument`。当前不接受 filter。
 - `mode` 缺省为 `keyword`。宿主注入的 `SearchIndex.capabilities` 必须先声明基础 `search`;未注入或未声明时 `/~search` 与根 `/~describe` 都是 404。`semantic` 另须声明 `search:semantic`,否则 400;声明限定 capability 不能替代基础 `search`。
-- 返回 JSON `Page<{path,tool}>` = `{items,cursor?}`。adapter 每批最多取 100 个轻量候选;网关在单请求最多扫描 400 个 raw candidates,批量回读 registry 后逐条做节点路径 `read` + `call`、kind/config=`mcp|http|tool` 与 virtualize hide 判定,再 hydrate 完整 raw `ToolSpec` 并应用 prefix/rename/description。单页 hydrate 的 raw ToolSpec 总量上限 4 MiB,因此结果可少于 limit 并以 cursor 续取。
+- 返回 JSON `Page<{path,tool}>` = `{items,cursor?}`。adapter 每批最多取 100 个轻量候选;网关在单请求最多扫描 400 个 raw candidates,批量回读 registry 后逐条做节点路径 `read` + `call`、kind/config=`mcp|http|tool` 与 virtualize hide 判定。通过后从 canonical HTTP/device config 或批量 tool cache 按 raw name 水合完整 `ToolSpec`,再应用 prefix/rename/description。单页完整 ToolSpec JSON 总量上限 4 MiB,因此结果可少于 limit 并以 cursor 续取;索引漂移候选直接丢弃,不会返回旧工具定义。
 - cursor 是宿主 secret 下的 AES-GCM opaque token,绑定 trim 后 query、mode、索引 revision 与 raw offset;篡改、换 query/mode、索引发生 material change 或 offset 越界均返回 400。cursor 在权限/virtualize 后的实际消费边界生成;若本页 raw 命中全部不可见而返回空 items,必须省略 cursor,不泄露隐藏结果仍存在。
 - 当前只支持**本地** `mcp`/`http`/`tool` 节点候选;`tool` 包括能提供 raw ToolSpec 的 plugin/进程内/device 自定义 tool。remote、device shell、builtin、context、skillhub、directory 均不进入结果。
 - core 将只读 `SearchIndex` 与 `MutableSearchIndex` 写面分开;后者用完整节点 snapshot 的 `replace`/`remove`、subtree `removePrefix` 与全量 `rebuild`。StateStore/registry/provider cache 是 canonical,SearchIndex 是可重建派生状态:registry write/update/delete、动态 MCP/tool fresh list、device hello/reclaim 与 node-level feedback submit/vote/delete 都触发热同步;每次搜索前仍执行有界 canonical audit,同 digest 不 bump revision。
-- 只有 owning node 的非隐藏 feedback top 5 进入搜索,投影 title+detail,合并文本经控制字符清理并限制为 256 UTF-8 bytes;工具子路径 feedback 不进入 owning node。keyword 排序权重固定为 name/description/feedback = 10/3/1;索引保存完整、未虚拟化的 raw `ToolSpec`,仅在披露前由网关虚拟化。
-- 已内置 keyword adapter:Workers 使用可选 `TB_SEARCH` D1 binding,Node 使用同一 `state.sqlite3` 的独立连接与独立表;两者均使用 v2 source/FTS/meta/snapshot schema 与共享 contract。query trim 后按 whitespace 切 term并按 Unicode code point 计数:长词(≥3)走 trigram FTS literal phrase,短词(<3)走参数化 escaped LIKE;混合查询对两侧 AND,最多 32 terms。当前仅实现 keyword;semantic 与 filter 留后续。共享开发环境真实 D1 已 provision/deploy并完成双 query/admin-narrow验收;外部 HTBP Draft 同步仍 PENDING,该证据不等于 production release。
+- 只有 owning node 的非隐藏 feedback top 5 进入搜索,投影 title+detail,合并文本经控制字符清理并限制为 256 UTF-8 bytes;工具子路径 feedback 不进入 owning node。keyword 排序权重固定为 name/description/feedback = 10/3/1。v3 source 只存 path、raw name、feedback 与最多 1024 UTF-8 bytes 的 description;完整、未虚拟化 `ToolSpec` 只参与 snapshot digest并留在 canonical state。
+- 已内置 keyword adapter:Workers 使用可选 `TB_SEARCH` D1 binding,Node 使用同一 `state.sqlite3` 的独立连接与独立表;两者均使用 v3 lightweight source/FTS/meta/snapshot schema 与共享 contract。v2 full-row 表不迁入 v3,新 meta 初始 unseeded并由首次 canonical audit重建,旧 cursor 自然失效。query trim 后按 whitespace 切 term并按 Unicode code point 计数:长词(≥3)走 trigram FTS literal phrase,短词(<3)走参数化 escaped LIKE;混合查询对两侧 AND,最多 32 terms。当前仅实现 keyword;semantic 与 filter 留后续。共享开发环境已完成 v3 canonical 重建、飞书长描述目录与 CLI/Dashboard/MCP 对拍;外部 HTBP Draft 同步仍 PENDING。
 - CLI `tb search <query> [--mode keyword|semantic] [--limit 1..200] [--cursor <opaque>]` 直接 `POST /~search`,请求体是上述 `{query,opts}` 而非 HTBP `{tool,arguments}` 信封。`--json` 原样输出完整 `Page<{path,tool}>`(含 cursor);人类模式分列输出 `NODE`/`TOOL`/效果/确认/描述,避免工具名含 `/` 时与节点路径混淆,有后页时打印 `next cursor`。CLI 可转发 semantic mode,但可用性仍由服务端 `search:semantic` capability 判定。
 - Dashboard `/ui/search` 是独立消费页,当前只发 keyword 请求;按服务端 opaque cursor 续页,区分权限/未启用/空结果状态。结果链接到 `/ui/nodes/<TreePath>?tool=<tool-name>`,NodePage 预选该工具;TreePath 的每个 raw segment 在导航 URL 与所有节点 HTBP API 请求前分别编码。CommandPalette/Explorer 的本地已加载树过滤只用于导航,不替代 root 全局搜索。
 

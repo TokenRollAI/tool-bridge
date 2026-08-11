@@ -13,11 +13,8 @@ import {
   TBError,
   TOOL_SEARCH_AUDIT_NODE_LIMIT,
   TOOL_SEARCH_BATCH_LIMIT,
-  TOOL_SEARCH_PAGE_BYTES,
   type ToolSearchCandidate,
   type ToolSearchDocument,
-  type ToolSearchHit,
-  type ToolSearchHydration,
   type ToolSearchOptions,
   toolSearchSnapshotDigest,
   toolSearchSnapshotDigests,
@@ -28,89 +25,71 @@ import {
 import Database from 'better-sqlite3'
 
 const SCHEMA_SQL = `
-CREATE TABLE IF NOT EXISTS tb_search_tools (
-  id INTEGER PRIMARY KEY,
-  path TEXT NOT NULL,
-  name TEXT NOT NULL,
-  description TEXT NOT NULL DEFAULT '',
-  tool_json TEXT NOT NULL,
-  UNIQUE(path, name)
-);
-CREATE TABLE IF NOT EXISTS tb_search_tools_v2 (
+CREATE TABLE IF NOT EXISTS tb_search_tools_v3 (
   id INTEGER PRIMARY KEY,
   path TEXT NOT NULL,
   name TEXT NOT NULL,
   description TEXT NOT NULL DEFAULT '',
   feedback TEXT NOT NULL DEFAULT '',
-  tool_json TEXT NOT NULL,
   UNIQUE(path, name)
 );
-CREATE VIRTUAL TABLE IF NOT EXISTS tb_search_tools_fts_v2 USING fts5(
+CREATE VIRTUAL TABLE IF NOT EXISTS tb_search_tools_fts_v3 USING fts5(
   name,
   description,
   feedback,
-  content='tb_search_tools_v2',
+  content='tb_search_tools_v3',
   content_rowid='id',
   tokenize='trigram'
 );
-CREATE TRIGGER IF NOT EXISTS tb_search_tools_v2_ai AFTER INSERT ON tb_search_tools_v2 BEGIN
-  INSERT INTO tb_search_tools_fts_v2(rowid, name, description, feedback)
+CREATE TRIGGER IF NOT EXISTS tb_search_tools_v3_ai AFTER INSERT ON tb_search_tools_v3 BEGIN
+  INSERT INTO tb_search_tools_fts_v3(rowid, name, description, feedback)
   VALUES (new.id, new.name, new.description, new.feedback);
 END;
-CREATE TRIGGER IF NOT EXISTS tb_search_tools_v2_ad AFTER DELETE ON tb_search_tools_v2 BEGIN
-  INSERT INTO tb_search_tools_fts_v2(tb_search_tools_fts_v2, rowid, name, description, feedback)
+CREATE TRIGGER IF NOT EXISTS tb_search_tools_v3_ad AFTER DELETE ON tb_search_tools_v3 BEGIN
+  INSERT INTO tb_search_tools_fts_v3(tb_search_tools_fts_v3, rowid, name, description, feedback)
   VALUES ('delete', old.id, old.name, old.description, old.feedback);
 END;
-CREATE TRIGGER IF NOT EXISTS tb_search_tools_v2_au
-AFTER UPDATE OF name, description, feedback ON tb_search_tools_v2 BEGIN
-  INSERT INTO tb_search_tools_fts_v2(tb_search_tools_fts_v2, rowid, name, description, feedback)
+CREATE TRIGGER IF NOT EXISTS tb_search_tools_v3_au
+AFTER UPDATE OF name, description, feedback ON tb_search_tools_v3 BEGIN
+  INSERT INTO tb_search_tools_fts_v3(tb_search_tools_fts_v3, rowid, name, description, feedback)
   VALUES ('delete', old.id, old.name, old.description, old.feedback);
-  INSERT INTO tb_search_tools_fts_v2(rowid, name, description, feedback)
+  INSERT INTO tb_search_tools_fts_v3(rowid, name, description, feedback)
   VALUES (new.id, new.name, new.description, new.feedback);
 END;
-CREATE TABLE IF NOT EXISTS tb_search_meta_v2 (
+CREATE TABLE IF NOT EXISTS tb_search_meta_v3 (
   singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
   revision INTEGER NOT NULL DEFAULT 0,
   seeded INTEGER NOT NULL DEFAULT 0,
-  legacy_migrated INTEGER NOT NULL DEFAULT 0,
   cursor_secret TEXT NOT NULL
 );
-INSERT OR IGNORE INTO tb_search_meta_v2(
-  singleton, revision, seeded, legacy_migrated, cursor_secret
-) VALUES (1, 0, 0, 0, lower(hex(randomblob(32))));
-CREATE TABLE IF NOT EXISTS tb_search_snapshots_v2 (
+INSERT OR IGNORE INTO tb_search_meta_v3(
+  singleton, revision, seeded, cursor_secret
+) VALUES (1, 0, 0, lower(hex(randomblob(32))));
+CREATE TABLE IF NOT EXISTS tb_search_snapshots_v3 (
   path TEXT PRIMARY KEY,
   digest TEXT NOT NULL
 );
-CREATE TRIGGER IF NOT EXISTS tb_search_snapshots_v2_capacity
-BEFORE INSERT ON tb_search_snapshots_v2
+CREATE TRIGGER IF NOT EXISTS tb_search_snapshots_v3_capacity
+BEFORE INSERT ON tb_search_snapshots_v3
 WHEN NOT EXISTS (
-  SELECT 1 FROM tb_search_snapshots_v2 WHERE path = new.path
-) AND (SELECT COUNT(*) FROM tb_search_snapshots_v2) >= ${TOOL_SEARCH_AUDIT_NODE_LIMIT}
+  SELECT 1 FROM tb_search_snapshots_v3 WHERE path = new.path
+) AND (SELECT COUNT(*) FROM tb_search_snapshots_v3) >= ${TOOL_SEARCH_AUDIT_NODE_LIMIT}
 BEGIN
   SELECT RAISE(ABORT, 'tb_search_path_capacity');
 END;
-INSERT OR IGNORE INTO tb_search_tools_v2(path, name, description, feedback, tool_json)
-SELECT path, name, description, '', tool_json FROM tb_search_tools
-WHERE (SELECT legacy_migrated FROM tb_search_meta_v2 WHERE singleton = 1) = 0;
-UPDATE tb_search_meta_v2
-SET
-  revision = revision + CASE WHEN EXISTS (SELECT 1 FROM tb_search_tools_v2) THEN 1 ELSE 0 END,
-  legacy_migrated = 1
-WHERE singleton = 1 AND legacy_migrated = 0;
 `
 
 const INSERT_SQL = `
-INSERT INTO tb_search_tools_v2 (path, name, description, feedback, tool_json)
-VALUES (@path, @name, @description, @feedback, @toolJson)
+INSERT INTO tb_search_tools_v3 (path, name, description, feedback)
+VALUES (@path, @name, @description, @feedback)
 `
 
 const BUMP_REVISION_SQL = `
-UPDATE tb_search_meta_v2 SET revision = revision + 1 WHERE singleton = 1
+UPDATE tb_search_meta_v3 SET revision = revision + 1 WHERE singleton = 1
 `
 
 const COMPLETE_REBUILD_SQL = `
-UPDATE tb_search_meta_v2 SET seeded = 1, revision = revision + 1 WHERE singleton = 1
+UPDATE tb_search_meta_v3 SET seeded = 1, revision = revision + 1 WHERE singleton = 1
 `
 
 interface CandidateRow {
@@ -119,36 +98,10 @@ interface CandidateRow {
   path: string
 }
 
-interface HydratedRow {
-  name: string
-  ord: number
-  path: string
-  tool_json: string
-}
-
 interface MetaRow {
   cursor_secret: string
   revision: number
   seeded: number
-}
-
-function hitFromRow(row: HydratedRow): ToolSearchHit {
-  try {
-    const tool = JSON.parse(row.tool_json) as ToolSpec
-    if (
-      typeof row.path !== 'string'
-      || typeof row.name !== 'string'
-      || tool === null
-      || typeof tool !== 'object'
-      || typeof tool.name !== 'string'
-      || tool.name !== row.name
-    ) {
-      throw new Error('invalid indexed row')
-    }
-    return { path: row.path, tool }
-  } catch {
-    throw new TBError('internal', `工具搜索索引记录损坏:'${String(row.path)}/${String(row.name)}'`)
-  }
 }
 
 function shortTermsSql(patterns: readonly string[]): string {
@@ -204,21 +157,21 @@ export class SqliteSearchIndex implements MutableSearchIndex {
 
   private meta(): MetaRow {
     const row = this.db.prepare(
-      'SELECT revision, seeded, cursor_secret FROM tb_search_meta_v2 WHERE singleton = 1',
+      'SELECT revision, seeded, cursor_secret FROM tb_search_meta_v3 WHERE singleton = 1',
     ).get() as MetaRow
     return row
   }
 
   private snapshotDigests(): Map<TreePath, string> {
     const rows = this.db.prepare(
-      'SELECT path, digest FROM tb_search_snapshots_v2 ORDER BY path',
+      'SELECT path, digest FROM tb_search_snapshots_v3 ORDER BY path',
     ).all() as Array<{ digest: string, path: string }>
     return new Map(rows.map(row => [row.path, row.digest]))
   }
 
   private insertSnapshotDigests(digests: ReadonlyMap<TreePath, string>): void {
     const insert = this.db.prepare(
-      'INSERT INTO tb_search_snapshots_v2(path, digest) VALUES (?, ?)',
+      'INSERT INTO tb_search_snapshots_v3(path, digest) VALUES (?, ?)',
     )
     for (const [path, digest] of digests) insert.run(path, digest)
   }
@@ -236,10 +189,10 @@ export class SqliteSearchIndex implements MutableSearchIndex {
     const records = serializeToolSearchSnapshot(canonical, tools, opts.feedback ?? '')
     const current = this.db.prepare(`
       SELECT snapshots.digest,
-        EXISTS(SELECT 1 FROM tb_search_tools_v2 WHERE path = ?) AS has_tools,
-        (SELECT COUNT(*) FROM tb_search_snapshots_v2) AS path_count
+        EXISTS(SELECT 1 FROM tb_search_tools_v3 WHERE path = ?) AS has_tools,
+        (SELECT COUNT(*) FROM tb_search_snapshots_v3) AS path_count
       FROM (SELECT 1) AS singleton
-      LEFT JOIN tb_search_snapshots_v2 AS snapshots ON snapshots.path = ?
+      LEFT JOIN tb_search_snapshots_v3 AS snapshots ON snapshots.path = ?
     `).get(canonical, canonical) as {
       digest: string | null
       has_tools: number
@@ -259,12 +212,12 @@ export class SqliteSearchIndex implements MutableSearchIndex {
     }
     try {
       this.db.transaction(() => {
-        this.db.prepare('DELETE FROM tb_search_tools_v2 WHERE path = ?').run(canonical)
+        this.db.prepare('DELETE FROM tb_search_tools_v3 WHERE path = ?').run(canonical)
         this.insertRecords(records)
-        this.db.prepare('DELETE FROM tb_search_snapshots_v2 WHERE path = ?').run(canonical)
+        this.db.prepare('DELETE FROM tb_search_snapshots_v3 WHERE path = ?').run(canonical)
         if (digest !== null) {
           this.db.prepare(
-            'INSERT INTO tb_search_snapshots_v2(path, digest) VALUES (?, ?)',
+            'INSERT INTO tb_search_snapshots_v3(path, digest) VALUES (?, ?)',
           ).run(canonical, digest)
         }
         this.db.prepare(BUMP_REVISION_SQL).run()
@@ -280,12 +233,12 @@ export class SqliteSearchIndex implements MutableSearchIndex {
   async remove(path: TreePath): Promise<void> {
     const canonical = normalizeToolSearchPath(path)
     const current = this.db.prepare(
-      'SELECT 1 AS present FROM tb_search_tools_v2 WHERE path = ? LIMIT 1',
+      'SELECT 1 AS present FROM tb_search_tools_v3 WHERE path = ? LIMIT 1',
     ).get(canonical) as { present: number } | undefined
     if (current === undefined) return
     this.db.transaction(() => {
-      this.db.prepare('DELETE FROM tb_search_tools_v2 WHERE path = ?').run(canonical)
-      this.db.prepare('DELETE FROM tb_search_snapshots_v2 WHERE path = ?').run(canonical)
+      this.db.prepare('DELETE FROM tb_search_tools_v3 WHERE path = ?').run(canonical)
+      this.db.prepare('DELETE FROM tb_search_snapshots_v3 WHERE path = ?').run(canonical)
       this.db.prepare(BUMP_REVISION_SQL).run()
     })()
   }
@@ -293,18 +246,18 @@ export class SqliteSearchIndex implements MutableSearchIndex {
   async removePrefix(path: TreePath): Promise<void> {
     const canonical = normalizeToolSearchPath(path)
     const current = this.db.prepare(`
-      SELECT 1 AS present FROM tb_search_tools_v2
+      SELECT 1 AS present FROM tb_search_tools_v3
       WHERE path = ? OR substr(path, 1, length(?) + 1) = ? || '/'
       LIMIT 1
     `).get(canonical, canonical, canonical) as { present: number } | undefined
     if (current === undefined) return
     this.db.transaction(() => {
       this.db.prepare(`
-        DELETE FROM tb_search_tools_v2
+        DELETE FROM tb_search_tools_v3
         WHERE path = ? OR substr(path, 1, length(?) + 1) = ? || '/'
       `).run(canonical, canonical, canonical)
       this.db.prepare(`
-        DELETE FROM tb_search_snapshots_v2
+        DELETE FROM tb_search_snapshots_v3
         WHERE path = ? OR substr(path, 1, length(?) + 1) = ? || '/'
       `).run(canonical, canonical, canonical)
       this.db.prepare(BUMP_REVISION_SQL).run()
@@ -319,8 +272,8 @@ export class SqliteSearchIndex implements MutableSearchIndex {
       return
     }
     this.db.transaction(() => {
-      this.db.prepare('DELETE FROM tb_search_tools_v2').run()
-      this.db.prepare('DELETE FROM tb_search_snapshots_v2').run()
+      this.db.prepare('DELETE FROM tb_search_tools_v3').run()
+      this.db.prepare('DELETE FROM tb_search_snapshots_v3').run()
       this.insertRecords(records)
       this.insertSnapshotDigests(desired)
       this.db.prepare(COMPLETE_REBUILD_SQL).run()
@@ -350,7 +303,7 @@ export class SqliteSearchIndex implements MutableSearchIndex {
       rows = this.db.prepare(`
         WITH ${shortTermsSql(prepared.patterns)}
         SELECT tools.id, tools.path, tools.name, ${SHORT_SCORE_SQL} AS short_score
-        FROM tb_search_tools_v2 AS tools
+        FROM tb_search_tools_v3 AS tools
         WHERE ${SHORT_MATCH_SQL}
         ORDER BY short_score DESC, tools.path, tools.name
         LIMIT ? OFFSET ?
@@ -359,15 +312,15 @@ export class SqliteSearchIndex implements MutableSearchIndex {
       rows = this.db.prepare(`
         WITH ${shortTermsSql(prepared.patterns)},
         long_hits AS (
-          SELECT tools.id, bm25(tb_search_tools_fts_v2, 10.0, 3.0, 1.0) AS fts_rank
-          FROM tb_search_tools_fts_v2
-          JOIN tb_search_tools_v2 AS tools ON tools.id = tb_search_tools_fts_v2.rowid
-          WHERE tb_search_tools_fts_v2 MATCH ?
+          SELECT tools.id, bm25(tb_search_tools_fts_v3, 10.0, 3.0, 1.0) AS fts_rank
+          FROM tb_search_tools_fts_v3
+          JOIN tb_search_tools_v3 AS tools ON tools.id = tb_search_tools_fts_v3.rowid
+          WHERE tb_search_tools_fts_v3 MATCH ?
         )
         SELECT tools.id, tools.path, tools.name, long_hits.fts_rank,
           ${SHORT_SCORE_SQL} AS short_score
         FROM long_hits
-        JOIN tb_search_tools_v2 AS tools ON tools.id = long_hits.id
+        JOIN tb_search_tools_v3 AS tools ON tools.id = long_hits.id
         WHERE ${SHORT_MATCH_SQL}
         ORDER BY long_hits.fts_rank, short_score DESC, tools.path, tools.name
         LIMIT ? OFFSET ?
@@ -375,10 +328,10 @@ export class SqliteSearchIndex implements MutableSearchIndex {
     } else {
       rows = this.db.prepare(`
         SELECT tools.id, tools.path, tools.name
-        FROM tb_search_tools_fts_v2
-        JOIN tb_search_tools_v2 AS tools ON tools.id = tb_search_tools_fts_v2.rowid
-        WHERE tb_search_tools_fts_v2 MATCH ?
-        ORDER BY bm25(tb_search_tools_fts_v2, 10.0, 3.0, 1.0), tools.path, tools.name
+        FROM tb_search_tools_fts_v3
+        JOIN tb_search_tools_v3 AS tools ON tools.id = tb_search_tools_fts_v3.rowid
+        WHERE tb_search_tools_fts_v3 MATCH ?
+        ORDER BY bm25(tb_search_tools_fts_v3, 10.0, 3.0, 1.0), tools.path, tools.name
         LIMIT ? OFFSET ?
       `).all(prepared.expression, limit + 1, offset) as CandidateRow[]
     }
@@ -422,49 +375,6 @@ export class SqliteSearchIndex implements MutableSearchIndex {
       candidate.resumeOffset,
       meta.cursor_secret,
     )
-  }
-
-  async hydrate(candidates: readonly ToolSearchCandidate[]): Promise<ToolSearchHydration> {
-    if (candidates.length === 0) return { consumed: 0, hits: [] }
-    if (candidates.length > 200) {
-      throw new TBError('invalid_argument', '单次 hydrate 最多 200 个工具候选')
-    }
-    const meta = this.meta()
-    if (candidates.some(candidate => candidate.revision !== meta.revision || !/^\d+$/.test(candidate.ref))) {
-      throw new TBError('invalid_argument', '搜索 cursor 已失效')
-    }
-    const refs = candidates.map(candidate => Number(candidate.ref))
-    const rows = this.db.prepare(`
-      WITH requested AS (
-        SELECT CAST(key AS INTEGER) AS ord, CAST(value AS INTEGER) AS id
-        FROM json_each(?)
-      ), sized AS (
-        SELECT requested.ord, tools.path, tools.name, tools.tool_json,
-          length(CAST(tools.tool_json AS BLOB)) AS byte_len
-        FROM requested
-        JOIN tb_search_tools_v2 AS tools ON tools.id = requested.id
-      ), accumulated AS (
-        SELECT *, SUM(byte_len) OVER (ORDER BY ord ROWS UNBOUNDED PRECEDING) AS total_bytes
-        FROM sized
-      )
-      SELECT ord, path, name, tool_json
-      FROM accumulated
-      WHERE total_bytes <= ?
-      ORDER BY ord
-    `).all(JSON.stringify(refs), TOOL_SEARCH_PAGE_BYTES) as HydratedRow[]
-    const hits = rows.map((row, index) => {
-      const candidate = candidates[index]
-      if (
-        row.ord !== index
-        || candidate === undefined
-        || row.path !== candidate.path
-        || row.name !== candidate.name
-      ) {
-        throw new TBError('internal', '工具搜索候选在 hydrate 前发生漂移')
-      }
-      return hitFromRow(row)
-    })
-    return { consumed: hits.length, hits }
   }
 
   close(): void {

@@ -69,6 +69,28 @@ function deviceTools(node: TreeNode): ToolSpec[] | null {
   return cmds as ToolSpec[]
 }
 
+/** Resolve complete raw ToolSpecs from canonical registry/config/cache state in one bulk read. */
+export async function canonicalSearchTools(
+  state: StateStore,
+  nodes: readonly TreeNode[],
+): Promise<Map<TreePath, ToolSpec[]>> {
+  const unique = new Map(nodes.map(node => [node.path, node]))
+  const dynamicPaths = [...unique.values()]
+    .filter(node => node.kind !== 'http' && deviceTools(node) === null)
+    .map(node => node.path)
+  const cached = dynamicPaths.length === 0
+    ? new Map<string, unknown>()
+    : await state.getMany(dynamicPaths.map(toolCacheKey))
+  const result = new Map<TreePath, ToolSpec[]>()
+  for (const node of unique.values()) {
+    const tools = node.kind === 'http'
+      ? httpTools(node)
+      : deviceTools(node) ?? cachedTools(cached.get(toolCacheKey(node.path)))
+    if (tools !== null) result.set(node.path, tools)
+  }
+  return result
+}
+
 function documentsFor(path: TreePath, tools: readonly ToolSpec[], feedback: string): ToolSearchDocument[] {
   return tools.map(tool => ({ path, tool, ...(feedback === '' ? {} : { feedback }) }))
 }

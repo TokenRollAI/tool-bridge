@@ -9,17 +9,17 @@ import {
   serializeToolSearchSnapshot,
   TBError,
   TOOL_SEARCH_AUDIT_NODE_LIMIT,
+  TOOL_SEARCH_DESCRIPTION_BYTES_MAX,
   TOOL_SEARCH_NODE_JSON_BYTES_MAX,
   TOOL_SEARCH_QUERY_MAX,
   TOOL_SEARCH_REBUILD_CHUNKS_MAX,
-  TOOL_SEARCH_ROW_BYTES_MAX,
   TOOL_SEARCH_TERM_LIMIT,
   type ToolSearchOptions,
   toolSearchSnapshotDigest,
 } from '../../src'
 
 describe('SearchIndex mutation contract', () => {
-  it('normalizes path and preserves the complete raw ToolSpec JSON', () => {
+  it('normalizes path and stores only lightweight searchable material plus a digest', () => {
     const [record] = serializeToolSearchSnapshot('/providers/calendar/', [
       {
         name: 'find_events',
@@ -38,17 +38,7 @@ describe('SearchIndex mutation contract', () => {
       path: 'providers/calendar',
       name: 'find_events',
       description: 'Find calendar events',
-    })
-    expect(JSON.parse(record?.toolJson ?? '{}')).toEqual({
-      name: 'find_events',
-      description: 'Find calendar events',
-      effect: 'read',
-      confirm: true,
-      inputSchema: {
-        type: 'object',
-        properties: { query: { type: 'string' } },
-        required: ['query'],
-      },
+      toolDigest: expect.stringMatching(/^[a-f0-9]{16}$/),
     })
   })
 
@@ -66,20 +56,25 @@ describe('SearchIndex mutation contract', () => {
     expect(() => serializeToolSearchSnapshot('providers/calendar', [
       { name: 'find', inputSchema: { invalid: 1n } },
     ])).toThrowError(TBError)
-    expect(() => serializeToolSearchSnapshot('providers/calendar', [
-      { name: 'huge', description: 'x'.repeat(TOOL_SEARCH_ROW_BYTES_MAX) },
-    ])).toThrowError(TBError)
-    expect(() => serializeToolSearchSnapshot('providers/calendar', [
-      { name: 'escaped', description: '\u0001'.repeat(150_000) },
-    ])).toThrowError(TBError)
-    expect(() => serializeToolSearchSnapshot('providers/calendar', [
-      { name: 'array-boundary', description: `${'\u0001'.repeat(149_992)}xx` },
-    ])).toThrowError(TBError)
-    expect(() => serializeToolSearchSnapshot('providers/calendar', [{
-      name: 'node-capacity',
-      description: 'x'.repeat(TOOL_SEARCH_NODE_JSON_BYTES_MAX),
-    }])).toThrowError(TBError)
+    expect(() => serializeToolSearchSnapshot('providers/calendar', Array.from(
+      { length: 500 },
+      (_, index) => ({ name: `node_capacity_${index}_${'x'.repeat(64)}` }),
+    ))).toThrowError(TBError)
     expect(TOOL_SEARCH_REBUILD_CHUNKS_MAX).toBeLessThanOrEqual(20)
+  })
+
+  it('truncates long descriptions without rejecting the complete canonical ToolSpec', () => {
+    const description = '飞'.repeat(10_000)
+    const [record] = serializeToolSearchSnapshot('providers/feishu', [{
+      name: 'create-doc',
+      description,
+      inputSchema: { type: 'object', properties: { markdown: { type: 'string' } } },
+    }])
+    expect(Array.from(record?.description ?? '')).toHaveLength(
+      Math.floor(TOOL_SEARCH_DESCRIPTION_BYTES_MAX / 3),
+    )
+    expect(record?.description).not.toBe(description)
+    expect(TOOL_SEARCH_NODE_JSON_BYTES_MAX).toBeGreaterThan(TOOL_SEARCH_DESCRIPTION_BYTES_MAX)
   })
 
   it('does not impose an artificial tool-count limit below the JSON budget', () => {

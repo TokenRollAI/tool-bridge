@@ -59,6 +59,7 @@
 - [memory/reflections/2026-08-11-search-e2e-evidence.md](memory/reflections/2026-08-11-search-e2e-evidence.md) — Search E2E 精确查询与证据分层(shared adapter+D1/SQLite wire+真实CLI全分页+浏览器DOM+生产复跑;hidden admin control;后页越权、前缀混淆与空集假绿防线)。
 - [memory/reflections/2026-08-11-compose-final-image-ui-evidence.md](memory/reflections/2026-08-11-compose-final-image-ui-evidence.md) — Compose final-image UI证据(workspace symlink跨stage悬空;显式复制`/app/dashboard`+`TB_UI_DIR`;root/deep-link smoke与final容器浏览器分层;九路由/tree depth/ARIA/console边界)。
 - [memory/reflections/2026-08-11-shared-development-deploy-evidence.md](memory/reflections/2026-08-11-shared-development-deploy-evidence.md) — 共享开发环境部署例外与在线证据分账(feature-branch覆盖须显式授权且不冒充production;真实D1幂等与KV收敛窗口;MCP/Search/Device/Feishu在线证据;Web Analytics beacon/CSP冲突;临时资源清理)。
+- [memory/reflections/2026-08-11-lightweight-search-mcp-discovery-parity.md](memory/reflections/2026-08-11-lightweight-search-mcp-discovery-parity.md) — 轻量搜索索引与MCP发现面对等(召回文档不存完整ToolSpec;canonical批量水合;MCP合成Search/Help/List复用HTBP权限;v3从真源重建)。
 
 ## 路由提示
 

@@ -75,17 +75,16 @@ describe('D1SearchIndex', () => {
     const index = new D1SearchIndex(searchDb)
     await index.initialized()
     await searchDb.batch([
-      searchDb.prepare('DELETE FROM tb_search_tools_v2'),
-      searchDb.prepare('DELETE FROM tb_search_snapshots_v2'),
-      searchDb.prepare('UPDATE tb_search_meta_v2 SET seeded = 0 WHERE singleton = 1'),
+      searchDb.prepare('DELETE FROM tb_search_tools_v3'),
+      searchDb.prepare('DELETE FROM tb_search_snapshots_v3'),
+      searchDb.prepare('UPDATE tb_search_meta_v3 SET seeded = 0 WHERE singleton = 1'),
       searchDb.prepare(`
-        INSERT INTO tb_search_tools_v2(path, name, description, feedback, tool_json)
-        VALUES (?, ?, ?, '', ?)
+        INSERT INTO tb_search_tools_v3(path, name, description, feedback)
+        VALUES (?, ?, ?, '')
       `).bind(
         'contract/d1/source-only',
         'legacy_source_probe',
         'legacysourceonly',
-        JSON.stringify({ name: 'legacy_source_probe', description: 'legacysourceonly' }),
       ),
     ])
     await expect(index.initialized()).resolves.toBe(false)
@@ -94,13 +93,12 @@ describe('D1SearchIndex', () => {
     await expect(index.search('legacysourceonly')).resolves.toMatchObject({ items: [] })
 
     await searchDb.prepare(`
-      INSERT INTO tb_search_tools_v2(path, name, description, feedback, tool_json)
-      VALUES (?, ?, ?, '', ?)
+      INSERT INTO tb_search_tools_v3(path, name, description, feedback)
+      VALUES (?, ?, ?, '')
     `).bind(
       'contract/d1/source-only',
       'legacy_source_probe',
       'legacysourceonly',
-      JSON.stringify({ name: 'legacy_source_probe', description: 'legacysourceonly' }),
     ).run()
     await index.rebuild([])
     await expect(index.initialized()).resolves.toBe(true)
@@ -131,9 +129,9 @@ describe('D1SearchIndex', () => {
     await registry.write(makeNode(alpha, 'partial_alpha'), 'system:test', now)
     await registry.write(makeNode(beta, 'partial_beta'), 'system:test', now)
     await searchDb.batch([
-      searchDb.prepare('DELETE FROM tb_search_tools_v2'),
-      searchDb.prepare('DELETE FROM tb_search_snapshots_v2'),
-      searchDb.prepare('UPDATE tb_search_meta_v2 SET seeded = 0 WHERE singleton = 1'),
+      searchDb.prepare('DELETE FROM tb_search_tools_v3'),
+      searchDb.prepare('DELETE FROM tb_search_snapshots_v3'),
+      searchDb.prepare('UPDATE tb_search_meta_v3 SET seeded = 0 WHERE singleton = 1'),
     ])
 
     const index = new D1SearchIndex(searchDb)

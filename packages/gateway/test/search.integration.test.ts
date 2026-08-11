@@ -22,7 +22,6 @@ function emptySearchIndex(
   return {
     capabilities,
     cursorFor: async (_query, candidate) => `c${candidate.resumeOffset}`,
-    hydrate: async candidates => ({ consumed: candidates.length, hits: [] }),
     search: vi.fn(async () => ({ items: [] })),
   }
 }
@@ -121,14 +120,6 @@ describe('global ~search protocol', () => {
   })
 
   it('describes keyword search and returns the root-only page contract', async () => {
-    const tools = new Map([
-      ['visible', {
-        name: 'forecast',
-        description: 'Get a weather forecast',
-        inputSchema: { type: 'object' },
-      }],
-      ['hidden', { name: 'internal_forecast', description: 'Hidden upstream tool' }],
-    ])
     const search = vi.fn(async () => ({
       items: [
         {
@@ -147,17 +138,9 @@ describe('global ~search protocol', () => {
         },
       ],
     }))
-    const hydrate = vi.fn(async (candidates: readonly { path: string, ref: string }[]) => ({
-      consumed: candidates.length,
-      hits: candidates.map(candidate => ({
-        path: candidate.path,
-        tool: tools.get(candidate.ref) ?? { name: 'missing' },
-      })),
-    }))
     const { app, state } = await appWith({
       capabilities: ['search'],
       cursorFor: async (_query, candidate) => `c${candidate.resumeOffset}`,
-      hydrate,
       search,
     })
     await new NodeRegistryStore(state).write(
@@ -168,7 +151,21 @@ describe('global ~search protocol', () => {
         config: {
           kind: 'http',
           endpoint: 'https://weather.example.test',
-          tools: [],
+          tools: [
+            {
+              name: 'forecast',
+              description: 'Get a weather forecast',
+              inputSchema: { type: 'object' },
+              method: 'GET',
+              pathTemplate: '/forecast',
+            },
+            {
+              name: 'internal_forecast',
+              description: 'Hidden upstream tool',
+              method: 'GET',
+              pathTemplate: '/internal',
+            },
+          ],
         },
         virtualize: { hide: ['internal_forecast'], prefix: 'weather__' },
       },
@@ -197,6 +194,7 @@ describe('global ~search protocol', () => {
           tool: {
             name: 'weather__forecast',
             description: 'Get a weather forecast',
+            effect: 'read',
             inputSchema: { type: 'object' },
           },
         },
@@ -204,7 +202,6 @@ describe('global ~search protocol', () => {
     })
     expect(search).toHaveBeenCalledOnce()
     expect(search).toHaveBeenCalledWith('weather', { limit: 100, mode: 'keyword' })
-    expect(hydrate).toHaveBeenCalledOnce()
 
     const { secret: readOnlySk } = await new SKRegistryStore(state).write(
       {
@@ -299,17 +296,9 @@ describe('global ~search protocol', () => {
       const end = offset + items.length
       return end < candidates.length ? { items, cursor: `c${end}` } : { items }
     })
-    const hydrate = vi.fn(async (items: readonly typeof candidates[number][]) => ({
-      consumed: items.length,
-      hits: items.map(item => ({
-        path: item.path,
-        tool: { name: item.name, description: 'scoped candidate' },
-      })),
-    }))
     const { app, state } = await appWith({
       capabilities: ['search'],
       cursorFor: async (_query, candidate) => `c${candidate.resumeOffset}`,
-      hydrate,
       search,
     })
     const registry = new NodeRegistryStore(state)
@@ -322,7 +311,12 @@ describe('global ~search protocol', () => {
           config: {
             kind: 'http',
             endpoint: 'https://scope.example.test',
-            tools: [],
+            tools: [{
+              name: candidate.name,
+              description: 'scoped candidate',
+              method: 'GET',
+              pathTemplate: '/candidate',
+            }],
           },
         },
         'system:test',
@@ -359,7 +353,6 @@ describe('global ~search protocol', () => {
     expect(secondPage.items[24]?.path).toBe('allowed/174')
     expect(secondPage.cursor).toBeUndefined()
     expect(getMany).toHaveBeenCalledTimes(4)
-    expect(hydrate).toHaveBeenCalledTimes(2)
   })
 
   it('does not expose a continuation cursor when every raw match is denied', async () => {
@@ -379,7 +372,6 @@ describe('global ~search protocol', () => {
     const { app, state } = await appWith({
       capabilities: ['search'],
       cursorFor: async (_query, candidate) => `c${candidate.resumeOffset}`,
-      hydrate: async () => ({ consumed: 0, hits: [] }),
       search,
     })
     const { secret } = await new SKRegistryStore(state).write(

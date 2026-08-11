@@ -19,7 +19,6 @@ class RecordingSearchIndex implements MutableSearchIndex {
   seeded = true
 
   async cursorFor(): Promise<string> { return 'cursor' }
-  async hydrate(): Promise<{ consumed: number, hits: [] }> { return { consumed: 0, hits: [] } }
   async initialized(): Promise<boolean> { return this.seeded }
   async rebuild(documents: readonly ToolSearchDocument[]): Promise<void> {
     this.rebuildCalls++
@@ -242,7 +241,7 @@ describe('SearchSynchronizer durable repair', () => {
     expect(overflowIndex.rebuildCalls).toBe(0)
   })
 
-  it('excludes an oversized node from search without mutating canonical state', async () => {
+  it('indexes a long canonical ToolSpec without mutating or duplicating it', async () => {
     const store = new MemoryStateStore()
     const registry = new NodeRegistryStore(store)
     const path = 'search/sync/oversized'
@@ -251,7 +250,11 @@ describe('SearchSynchronizer durable repair', () => {
     const sync = new SearchSynchronizer(store, index)
 
     await expect(sync.ensureReady()).resolves.toBeUndefined()
-    expect(index.documents).toEqual([])
+    expect(index.documents).toHaveLength(1)
+    expect(index.documents[0]).toMatchObject({
+      path,
+      tool: { name: 'probe', description: 'x'.repeat(25_000) },
+    })
     expect(await registry.get(path)).toMatchObject({ path })
   })
 })

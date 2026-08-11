@@ -47,13 +47,13 @@ describe('SqliteSearchIndex', () => {
     const reopenedSearch = new SqliteSearchIndex(dbPath)
     cleanups.push(() => reopenedSearch.close(), () => reopenedState.close())
     const reopenedCandidates = await reopenedSearch.search('rebuilt')
-    await expect(reopenedSearch.hydrate(reopenedCandidates.items)).resolves.toMatchObject({
-      hits: [{ path: 'contract/sqlite/alpha', tool: { name: 'rebuilt_tool' } }],
+    expect(reopenedCandidates).toMatchObject({
+      items: [{ path: 'contract/sqlite/alpha', name: 'rebuilt_tool' }],
     })
     expect(await reopenedState.get('probe:key')).toEqual({ alive: true })
   })
 
-  it('migrates legacy v1 rows once and does not resurrect a removed row on reopen', async () => {
+  it('ignores legacy full rows and seeds v3 only from canonical rebuild input', async () => {
     const dbPath = tmpDbPath()
     const legacy = new Database(dbPath)
     legacy.exec(`
@@ -78,8 +78,14 @@ describe('SqliteSearchIndex', () => {
 
     const migrated = new SqliteSearchIndex(dbPath)
     await expect(migrated.initialized()).resolves.toBe(false)
-    const candidates = await migrated.search('legacymigrationprobe')
-    expect((await migrated.hydrate(candidates.items)).hits).toHaveLength(1)
+    await expect(migrated.search('legacymigrationprobe')).resolves.toMatchObject({ items: [] })
+    await migrated.rebuild([{
+      path: 'legacy/search',
+      tool: { name: 'legacy_probe', description: 'legacymigrationprobe' },
+    }])
+    await expect(migrated.search('legacymigrationprobe')).resolves.toMatchObject({
+      items: [{ path: 'legacy/search', name: 'legacy_probe' }],
+    })
     await migrated.remove('legacy/search')
     migrated.close()
 

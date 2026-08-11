@@ -18,7 +18,7 @@
 | HTBP Tree(核心枢纽) | 节点注册表、路由、`~help`/`~skill`/`~tree`/`~describe`、内容协商、调用分发 | `tree/` + `htbp/` | gateway `tbApp.ts`(宿主中立 createTbApp)+ `kvStateStore.ts` |
 | Tool Layer | mcp/http/builtin Provider 聚合与调用代理、虚拟化、remote 联邦 | `tool/` | gateway `providers/mcp|http|remote|toolCache` |
 | Context Layer | 多来源上下文统一读写检索面(四动词 + Search + `$ref`) | `context/` | gateway `providers/r2Object|s3Object|s3Sign` + `refToken.ts` |
-| Global Tool Search | root-only `~search`;SearchIndex 是从 registry/tool cache/feedback 派生的可重建视图,候选经权限/节点/虚拟化后分页披露 | `search/types.ts`(只读 `SearchIndex`、`MutableSearchIndex`、candidate/hydrate/cursor、共享 snapshot/query/budget contract) | gateway `SearchSynchronizer` 自动同步 + `tbApp.ts` 审计/后处理;D1 v2 `d1SearchIndex.ts`;server SQLite v2 `sqliteSearchIndex.ts`;SDK/内存宿主缺省无索引 |
+| Global Tool Search | root-only `~search`;SearchIndex 是从 registry/tool cache/feedback 派生的可重建轻量视图,候选经权限/节点/虚拟化后由canonical state水合 | `search/types.ts`(只读 `SearchIndex`、`MutableSearchIndex`、candidate/cursor、lightweight snapshot/full-spec digest/query/budget contract) | gateway `SearchSynchronizer` 自动同步 + `tbApp.ts` 审计/批量水合;D1 v3 `d1SearchIndex.ts`;server SQLite v3 `sqliteSearchIndex.ts`;SDK/内存宿主缺省无索引 |
 | Skillhub Layer | Agent Skill 仓库(每 skill = `<id>/SKILL.md` + 文本文件;List/Get/Search/Publish/Remove) | `skillhub/`(frontmatter 解析 + provider,复用 context 的 ObjectStore/objectProvider) | 复用 context 的 gateway providers(r2/s3);网关 `tbApp.ts` 装配 `skillhubProviderFor` 落 `skills/<path>` 前缀 |
 | Device Gateway | 设备 WS 反向注册 + 调用转发 | `device/`(帧/状态机/shell 白名单/设备侧 client) | **协议行为单一真源:gateway `deviceHello.ts`(processDeviceHello,宿主中立)**;两个宿主胶水:gateway `deviceSession.ts`(DO,WS hibernation)与 server `deviceHub.ts`(Node ws);cli `deviceRuntime.ts`;core `node/`(FsObjectStore/shellExecutor) |
 | Auth(横切) | SK 签发/作用域/访问判定/SecretStore | `auth/` + `secret/` | gateway 认证中间件;SK 哈希与密文存 StateStore |
@@ -36,7 +36,7 @@
 - **gateway 的 `tbApp.ts` 是宿主中立装配面**:接收 deps(StateStore/ObjectStore/SecretStore/DeviceTransport/SearchIndex/version)产出 Hono app;`app.ts` 只做 Workers Env→deps 适配,server `server.ts` 做 Node env→deps 适配。SDK 直接复用 createTbApp,这就是"网关与 SDK 同一棵树"的机制保证。SearchIndex 保持可选:Workers 有 `TB_SEARCH` 才注入 D1 adapter,Node 总是注入 SQLite adapter,SDK/内存宿主缺省不注入。
 - **设备 hello 单一真源**:hello 验证 + 落库统一在 gateway `src/deviceHello.ts`(`processDeviceHello`,宿主中立,dev exports `./deviceHello`);`deviceSession.ts`(DO)与 server `deviceHub.ts` 只是宿主胶水——防两宿主树形态漂移,改协议行为只改 deviceHello。
 - **providers 承担全部 I/O**:core `tool/`、`context/`、`plugin/` 只放纯逻辑(拼装/映射/校验/归一);上游 fetch、MCP SDK、aws4fetch 签名都在 gateway `providers/`。
-- **SearchIndex 是派生状态,不得反向收窄 canonical**:`NodeRegistryStore` 与 provider/tool cache 继续接受自身契约允许的数据;500 indexed paths/每节点 20 KiB 是 `SearchSynchronizer`/adapter 的投影预算。超额节点可从 search 排除,registry/help/call 仍可用。
+- **SearchIndex 是派生状态,不得反向收窄 canonical**:`NodeRegistryStore` 与 provider/tool cache 继续接受自身契约允许的数据;500 indexed paths/每节点 20 KiB 是轻量投影预算,每工具 description 最多1024 UTF-8 bytes。完整ToolSpec不落搜索库,只参与digest并在披露时从canonical config/cache水合;真正超额节点可从search排除,registry/help/call仍可用。
 - **搜索三入口共用一个 wire contract**:API `POST /~search` 是权限/排序/分页真源;CLI `tb search` 与 Dashboard `/ui/search` 都直接消费 `{query,opts}`/`Page<{path,tool}>`,不在客户端重排或重做权限判断。Dashboard CommandPalette/Explorer 只过滤已加载树用于导航,不等价于全局搜索。
 
 ## 存储与宿主原语分工
@@ -45,7 +45,7 @@
 |---|---|---|
 | KV `tb-kv` | SK 哈希表(`sha256(sk)→记录`)、树配置、plugin manifest、secret 密文 | 最终一致,1 write/s/key;吊销跨边缘通常约 60s、也可能更久,不得叠认证内存缓存;list+get 一致性坑见 [../guides/workers-kv-pitfalls.md](../guides/workers-kv-pitfalls.md) |
 | R2 `tb-r2` | r2 context provider、大对象 `$ref` | **binding 不支持 presign**——预签名走 S3 兼容端点 + R2 Access Key(aws4fetch);凭证空缺走 `/~ref` 网关中转 |
-| SearchIndex | root `~search` 的工具候选派生索引 | D1/SQLite v2 都存 raw ToolSpec + name/description/feedback(权重 10/3/1),长词 trigram FTS、短词 escaped LIKE、混合 AND;同 snapshot digest 不 bump revision。canonical audit 上限 500 nodes,正式索引以 DB trigger/事务封顶 500 paths,单节点投影 20 KiB。canonical overflow 且已 seed 时保留 bounded LKG,回落到预算内后下次 audit 自动恢复;无 seed 时 fail closed。D1 并发 capacity trigger 封竞态,cold changed-snapshot + 四批查询/hydrate/cursor 最坏 48 queries ≤ Free 50。共享开发环境真实 D1 已 provision/deploy并完成 admin/narrow smoke |
+| SearchIndex | root `~search` 的工具候选派生索引 | D1/SQLite v3只存path/raw name/1024-byte description/feedback(10/3/1),长词trigram FTS、短词escaped LIKE、混合AND;完整ToolSpec digest判material change。权限后从HTTP/device config或批量tool cache水合,4MiB页预算。audit上限500 nodes,DB trigger/事务封顶500 paths,单节点轻量投影20KiB;overflow LKG规则不变。v2表不迁入,首次audit从canonical重建。D1并发capacity trigger封竞态,cold changed-snapshot+四批查询/cursor最坏43 queries≤Free50;共享开发环境待本分支部署后复验 |
 | DO `DeviceSession` | 每设备一个,WS hibernation 空闲零计费 | 唤醒后内存态须从 storage 恢复;见 [../guides/do-websocket-hibernation.md](../guides/do-websocket-hibernation.md) |
 | Static Assets | Dashboard 与 gateway 同 Worker(`../dashboard/dist`,binding `ASSETS`) | `run_worker_first: true`,一切请求先进 Worker;静态资源仅由 `/ui` 路由显式转发,SPA 回退严格限定 `/ui`,不吞根 `~help`/数据面/`system/*`;`/ui` 免认证(登录页须无 SK 可加载)。已有 `ui.integration.test.ts` 覆盖 |
 
@@ -55,7 +55,7 @@
 - 其余全路由过认证中间件:Bearer → `identify`,失败 401 裸 TBError(缺失/无法识别/disabled/过期一视同仁)。
 - 通配路由按 pathname 末段分派(`~help`/`~tree`/`~skill`/`~describe`/`~register`/数据面 POST);每个 handler 先 `check(ctx, path, 'read')` 可见性判定,再按 cmd 声明的 scope 过 `Check`。
 - **deny == not_found**:对 (path,'read') 判 deny 的节点,`~help`/`~tree`/数据面一律 404,不泄露存在性;可见但目标动作被 deny 才 403。judgment 次序:read→404,再 scope→403。
-- root `~search` 每次先做 bounded canonical audit,再按 batch≤100/raw work≤400 拉轻量候选,批量 hydrate registry 后做 read+call/kind/virtualize 裁剪,最后在 4 MiB raw ToolSpec 页预算内 hydrate 并生成 AES-GCM cursor;空不可见页不返回 cursor。
+- root `~search` 每次先做 bounded canonical audit,再按 batch≤100/raw work≤400 拉轻量候选,批量读registry后做read+call/kind/virtualize裁剪,最后从canonical config/toolcache水合并在4MiB页预算内生成AES-GCM cursor;空不可见页不返回cursor。
 - remote 透传:`~help`/`~tree`/`~skill`/调用命中 remote 节点(或其后代)→ 改写路径打到 baseUrl;`~tree` 聚合远端子树并把路径映射回本地挂载前缀,计入本地 depth/node 预算。
 - workerd 坑:handler 里必须 `await`,裸 `return asyncFn()` 的 reject 会被误报 unhandled rejection。
 - 安全响应头在宿主中立 `createTbApp` 统一注入,覆盖 Workers/Node/SDK;OAuth callback 另用 HTML 实体编码 + `default-src 'none'` CSP + `no-store`。中间件须保留 Node adapter 的流对象与 101/WebSocket 语义,优先原位改 header,不可变时才克隆普通 Response。

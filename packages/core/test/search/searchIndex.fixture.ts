@@ -3,7 +3,7 @@ import {
   type MutableSearchIndex,
   TBError,
   TOOL_SEARCH_BATCH_LIMIT,
-  type ToolSearchHit,
+  type ToolSearchCandidate,
   type ToolSearchOptions,
   type ToolSpec,
 } from '../../src'
@@ -26,17 +26,12 @@ const documentTool: ToolSpec = {
   effect: 'write',
 }
 
-async function hydratedPage(
+async function candidatePage(
   index: MutableSearchIndex,
   query: string,
   opts?: ToolSearchOptions,
-): Promise<{ cursor?: string, items: ToolSearchHit[] }> {
-  const candidates = await index.search(query, opts)
-  const hydrated = await index.hydrate(candidates.items)
-  expect(hydrated.consumed).toBe(candidates.items.length)
-  return candidates.cursor === undefined
-    ? { items: hydrated.hits }
-    : { items: hydrated.hits, cursor: candidates.cursor }
+): Promise<{ cursor?: string, items: ToolSearchCandidate[] }> {
+  return await index.search(query, opts)
 }
 
 /** D1 与 better-sqlite3 共用的 MutableSearchIndex 一致性断言。 */
@@ -62,33 +57,48 @@ export async function verifySearchIndexContract(
     { name: 'weather', description: 'weather forecast endpoint' },
   ])
 
-  await expect(hydratedPage(index, 'legacy')).resolves.toMatchObject({
-    items: [{ path: alpha, tool: { name: 'legacy_calendar' } }],
+  await expect(candidatePage(index, 'legacy')).resolves.toMatchObject({
+    items: [{ path: alpha, name: 'legacy_calendar' }],
   })
-  await expect(hydratedPage(index, '管理日')).resolves.toMatchObject({
-    items: [{ path: alpha, tool: richTool }],
+  await expect(candidatePage(index, '管理日')).resolves.toMatchObject({
+    items: [{ path: alpha, name: richTool.name }],
   })
-  await expect(hydratedPage(index, '日程')).resolves.toMatchObject({
-    items: [{ path: alpha, tool: richTool }],
+  await expect(candidatePage(index, '日程')).resolves.toMatchObject({
+    items: [{ path: alpha, name: richTool.name }],
   })
-  await expect(hydratedPage(index, '日程 日历')).resolves.toMatchObject({
-    items: [{ path: alpha, tool: richTool }],
+  await expect(candidatePage(index, '日程 日历')).resolves.toMatchObject({
+    items: [{ path: alpha, name: richTool.name }],
   })
-  await expect(hydratedPage(index, 'create document')).resolves.toMatchObject({
-    items: [{ path: alpha, tool: documentTool }],
+  await expect(candidatePage(index, 'create document')).resolves.toMatchObject({
+    items: [{ path: alpha, name: documentTool.name }],
   })
-  await expect(hydratedPage(index, '日程 calendar')).resolves.toEqual({ items: [] })
-  await expect(hydratedPage(index, 'AI calendar')).resolves.toEqual({ items: [] })
+  await expect(candidatePage(index, '日程 calendar')).resolves.toEqual({ items: [] })
+  await expect(candidatePage(index, 'AI calendar')).resolves.toEqual({ items: [] })
   const longMixedTerm = `AI ${'calendar'.repeat(12)}`
-  await expect(hydratedPage(index, longMixedTerm)).resolves.toEqual({ items: [] })
-  await expect(hydratedPage(index, 'LE')).resolves.toMatchObject({
-    items: [{ path: alpha, tool: { name: 'legacy_calendar' } }],
+  await expect(candidatePage(index, longMixedTerm)).resolves.toEqual({ items: [] })
+  await expect(candidatePage(index, 'LE')).resolves.toMatchObject({
+    items: [{ path: alpha, name: 'legacy_calendar' }],
   })
   for (const literal of ['%', '!', '\\']) {
-    await expect(hydratedPage(index, literal)).resolves.toMatchObject({
-      items: [{ path: alpha, tool: { name: 'literal_markers' } }],
+    await expect(candidatePage(index, literal)).resolves.toMatchObject({
+      items: [{ path: alpha, name: 'literal_markers' }],
     })
   }
+
+  const largePath = `${prefix}/large-catalog`
+  const largeDescription = `largecatalogdescription ${'长描述'.repeat(2_000)}`
+  await index.replace(largePath, Array.from({ length: 8 }, (_, index) => ({
+    name: `large_catalog_${index}`,
+    description: largeDescription,
+    inputSchema: { type: 'object', properties: { value: { type: 'string' } } },
+  })))
+  await expect(candidatePage(index, 'largecatalogdescription')).resolves.toMatchObject({
+    items: Array.from({ length: 8 }, (_, index) => ({
+      path: largePath,
+      name: `large_catalog_${index}`,
+    })),
+  })
+  await index.remove(largePath)
 
   const updatedTool: ToolSpec = {
     ...richTool,
@@ -96,23 +106,23 @@ export async function verifySearchIndexContract(
     confirm: false,
   }
   await index.replace(alpha, [updatedTool])
-  await expect(hydratedPage(index, 'legacy')).resolves.toEqual({ items: [] })
-  await expect(hydratedPage(index, 'weather')).resolves.toMatchObject({
-    items: [{ path: beta, tool: { name: 'weather' } }],
+  await expect(candidatePage(index, 'legacy')).resolves.toEqual({ items: [] })
+  await expect(candidatePage(index, 'weather')).resolves.toMatchObject({
+    items: [{ path: beta, name: 'weather' }],
   })
-  await expect(hydratedPage(index, 'updated')).resolves.toEqual({
-    items: [{ path: alpha, tool: updatedTool }],
+  await expect(candidatePage(index, 'updated')).resolves.toMatchObject({
+    items: [{ path: alpha, name: updatedTool.name }],
   })
 
   await expect(index.replace(alpha, [updatedTool, updatedTool])).rejects.toBeInstanceOf(TBError)
-  await expect(hydratedPage(index, 'updated')).resolves.toMatchObject({
-    items: [{ path: alpha, tool: { name: 'find_events' } }],
+  await expect(candidatePage(index, 'updated')).resolves.toMatchObject({
+    items: [{ path: alpha, name: 'find_events' }],
   })
 
   await index.remove(`${prefix}/missing`)
   await index.remove(alpha)
-  await expect(hydratedPage(index, 'updated')).resolves.toEqual({ items: [] })
-  await expect(hydratedPage(index, 'weather')).resolves.toHaveProperty('items.0.path', beta)
+  await expect(candidatePage(index, 'updated')).resolves.toEqual({ items: [] })
+  await expect(candidatePage(index, 'weather')).resolves.toHaveProperty('items.0.path', beta)
 
   await index.rebuild([
     {
@@ -120,9 +130,9 @@ export async function verifySearchIndexContract(
       tool: { name: 'rebuilt_tool', description: 'rebuilt catalog entry' },
     },
   ])
-  await expect(hydratedPage(index, 'weather')).resolves.toEqual({ items: [] })
-  await expect(hydratedPage(index, 'rebuilt')).resolves.toMatchObject({
-    items: [{ path: alpha, tool: { name: 'rebuilt_tool' } }],
+  await expect(candidatePage(index, 'weather')).resolves.toEqual({ items: [] })
+  await expect(candidatePage(index, 'rebuilt')).resolves.toMatchObject({
+    items: [{ path: alpha, name: 'rebuilt_tool' }],
   })
   await expect(index.search('rebuilt', { mode: 'semantic' })).rejects.toMatchObject({
     code: 'invalid_argument',
@@ -148,7 +158,7 @@ export async function verifySearchIndexContract(
       feedback: 'calendar feedback fixture',
     },
   ])
-  const weighted = await hydratedPage(index, 'calendar')
+  const weighted = await candidatePage(index, 'calendar')
   expect(weighted.items.map(item => item.path)).toEqual([
     `${prefix}/rank/name`,
     `${prefix}/rank/description`,
@@ -170,7 +180,7 @@ export async function verifySearchIndexContract(
       feedback: '日程反馈样例',
     },
   ])
-  const shortWeighted = await hydratedPage(index, '日程')
+  const shortWeighted = await candidatePage(index, '日程')
   expect(shortWeighted.items.map(item => item.path)).toEqual([
     `${prefix}/short/name`,
     `${prefix}/short/description`,
@@ -190,10 +200,7 @@ export async function verifySearchIndexContract(
   const second = await index.search('catalog', { cursor: first.cursor, limit: 200 })
   expect(second.items).toHaveLength(25)
   expect(second.cursor).toBeUndefined()
-  const names = [
-    ...(await index.hydrate(first.items)).hits,
-    ...(await index.hydrate(second.items)).hits,
-  ].map(hit => hit.tool.name)
+  const names = [...first.items, ...second.items].map(candidate => candidate.name)
   expect(new Set(names).size).toBe(bulk.length)
 
   const stale = first.cursor
@@ -202,7 +209,7 @@ export async function verifySearchIndexContract(
     code: 'invalid_argument',
   })
   await index.removePrefix(`${prefix}/bulk`)
-  await expect(hydratedPage(index, 'catalog')).resolves.toMatchObject({
+  await expect(candidatePage(index, 'catalog')).resolves.toMatchObject({
     items: [{ path: `${prefix}/fresh` }],
   })
 

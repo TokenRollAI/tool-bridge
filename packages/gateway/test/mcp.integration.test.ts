@@ -180,6 +180,83 @@ describe('MCP consumer endpoint', () => {
     }
   })
 
+  it('exposes scoped search, help and node listing as stable MCP tools', async () => {
+    await mountHttpTools('mcp-controls-visible', [{
+      name: 'discover_calendar',
+      description: 'controlcatalogunique visible calendar discovery',
+      method: 'GET',
+      pathTemplate: '/calendar',
+      inputSchema: { type: 'object', properties: {} },
+    }])
+    await mountHttpTools('mcp-controls-hidden', [{
+      name: 'discover_private',
+      description: 'controlcatalogunique hidden discovery',
+      method: 'GET',
+      pathTemplate: '/private',
+    }])
+    const sk = await issueSk({
+      owner: 'agent:mcp-controls',
+      scopes: [{ pattern: 'mcp-controls-visible', actions: ['read', 'call'] }],
+    })
+    const client = await connectTestMcpClient(
+      'https://tb.test/~mcp',
+      sk,
+      (input, init) => SELF.fetch(input, init),
+    )
+
+    try {
+      const listed = await client.listTools()
+      expect(listed.tools.map(tool => tool.name)).toEqual(expect.arrayContaining([
+        'tb_search',
+        'tb_help',
+        'tb_list_nodes',
+      ]))
+
+      await expect(client.callTool({
+        name: 'tb_search',
+        arguments: { query: 'controlcatalogunique', limit: 20 },
+      })).resolves.toMatchObject({
+        structuredContent: {
+          items: [{
+            path: 'mcp-controls-visible',
+            tool: { name: 'discover_calendar' },
+          }],
+        },
+      })
+
+      await expect(client.callTool({
+        name: 'tb_help',
+        arguments: { path: 'mcp-controls-visible', format: 'json' },
+      })).resolves.toMatchObject({
+        structuredContent: {
+          node: { path: 'mcp-controls-visible', kind: 'http' },
+        },
+      })
+
+      const tree = await client.callTool({
+        name: 'tb_list_nodes',
+        arguments: { depth: 1 },
+      })
+      expect(tree).toMatchObject({
+        structuredContent: {
+          children: [{ path: 'mcp-controls-visible' }],
+        },
+      })
+      expect(JSON.stringify(tree)).not.toContain('mcp-controls-hidden')
+
+      await expect(client.callTool({
+        name: 'tb_help',
+        arguments: { path: 'mcp-controls-hidden' },
+      })).resolves.toMatchObject({ isError: true })
+      await expect(client.callTool({
+        name: 'tb_search',
+        arguments: { query: 'controlcatalogunique', unexpected: true },
+      })).rejects.toThrow(/unexpected|additional/i)
+    } finally {
+      await client.close()
+    }
+  })
+
   it('tools/list clips by command scope and tools/call reuses the HTBP provider path', async () => {
     await mountHttp('mcp-round15/allowed')
     await mountHttp('mcp-round15/read-only')

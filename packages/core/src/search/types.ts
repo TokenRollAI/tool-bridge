@@ -46,10 +46,10 @@ export const TOOL_SEARCH_WORK_LIMIT = 400
 export const TOOL_SEARCH_AUDIT_NODE_LIMIT = 500
 /** 单节点可索引 JSON1 快照上限；超额节点不影响 canonical 工具调用，只从派生索引排除。 */
 export const TOOL_SEARCH_NODE_JSON_BYTES_MAX = 20_000
-/** 单页 hydrate 的 raw ToolSpec JSON 上限，避免大 schema 放大 Worker 内存。 */
+/** 单个工具进入全文索引的 description 上限；完整 ToolSpec 仍由 canonical state 返回。 */
+export const TOOL_SEARCH_DESCRIPTION_BYTES_MAX = 1_024
+/** 单页 canonical ToolSpec JSON 上限，避免大 schema 放大 Worker 内存。 */
 export const TOOL_SEARCH_PAGE_BYTES = 4 * 1024 * 1024
-/** 所有 source columns 的 UTF-8 总量上限；同时适配 D1 JSON1 绑定与 2 MiB row 上限。 */
-export const TOOL_SEARCH_ROW_BYTES_MAX = 1_300_000
 /** D1 adapter 的单参数 JSON1 array 上限；core 统一校验以保持 SQLite 对等。 */
 export const TOOL_SEARCH_RECORD_JSON_BYTES_MAX = 1_800_000
 /** 500 节点最坏 source + path/digest snapshot 所需 JSON1 块数上界。 */
@@ -87,13 +87,6 @@ export interface ToolSearchCandidate {
   revision: number
 }
 
-export interface ToolSearchHydration {
-  /** 因页面字节上限可能只消费输入候选的前缀。 */
-  consumed: number
-  /** 与输入候选同序的完整 raw ToolSpec。 */
-  hits: ToolSearchHit[]
-}
-
 export interface ToolSearchOptions {
   cursor?: string
   limit?: number
@@ -108,7 +101,6 @@ export interface SearchIndex {
     candidate: ToolSearchCandidate,
     mode?: 'keyword' | 'semantic',
   ): Promise<string>
-  hydrate(candidates: readonly ToolSearchCandidate[]): Promise<ToolSearchHydration>
   search(query: string, opts?: ToolSearchOptions): Promise<Page<ToolSearchCandidate>>
 }
 
@@ -129,13 +121,13 @@ export function normalizeToolSearchLimit(limit: unknown): number {
   return Math.min(limit, LIST_LIMIT_MAX)
 }
 
-/** 索引持久层使用的规范化工具记录；JSON 是 raw ToolSpec 的完整存储形态。 */
+/** 索引持久层使用的轻量记录；完整 ToolSpec 只保留摘要，不进入派生数据库。 */
 export interface SerializedToolSearchRecord {
   description: string
   feedback: string
   name: string
   path: TreePath
-  toolJson: string
+  toolDigest: string
 }
 
 /** rebuild 使用的物化文档；feedback 只来自 owning node 的可见反馈投影。 */
@@ -164,6 +156,30 @@ export type PreparedToolSearchQuery
     | { kind: 'like', patterns: string[] }
     | { expression: string, kind: 'hybrid', patterns: string[] }
 
+function stableDigest(value: unknown): string {
+  const bytes = new TextEncoder().encode(JSON.stringify(value))
+  let hash = 0xcbf29ce484222325n
+  for (const byte of bytes) {
+    hash ^= BigInt(byte)
+    hash = BigInt.asUintN(64, hash * 0x100000001b3n)
+  }
+  return hash.toString(16).padStart(16, '0')
+}
+
+function truncateUtf8(value: string, maxBytes: number): string {
+  const encoder = new TextEncoder()
+  if (encoder.encode(value).length <= maxBytes) return value
+  let result = ''
+  let bytes = 0
+  for (const char of value) {
+    const size = encoder.encode(char).length
+    if (bytes + size > maxBytes) break
+    result += char
+    bytes += size
+  }
+  return result
+}
+
 function serializedRecord(
   path: TreePath,
   tool: ToolSpec,
@@ -187,38 +203,12 @@ function serializedRecord(
   if (toolJson === undefined) {
     throw new TBError('invalid_argument', `工具 '${tool.name}' 不能序列化为 JSON`)
   }
-  const values = [path, tool.name, tool.description ?? '', feedback, toolJson]
-  const rowBytes = values.reduce(
-    (total, value) => total + new TextEncoder().encode(value).length,
-    0,
-  )
-  if (rowBytes > TOOL_SEARCH_ROW_BYTES_MAX) {
-    throw new TBError(
-      'invalid_argument',
-      `工具 '${tool.name}' 的索引记录过大(${rowBytes} > ${TOOL_SEARCH_ROW_BYTES_MAX} bytes)`,
-    )
-  }
   const record = {
-    description: tool.description ?? '',
+    description: truncateUtf8(tool.description ?? '', TOOL_SEARCH_DESCRIPTION_BYTES_MAX),
     feedback,
     name: tool.name,
     path,
-    toolJson,
-  }
-  // D1 通过 json_each(?) 接收数组；即使只有一条，也必须计入外层 `[]`。
-  const envelope = JSON.stringify([{
-    description: record.description,
-    feedback: record.feedback,
-    name: record.name,
-    path: record.path,
-    tool: JSON.parse(record.toolJson) as unknown,
-  }])
-  const envelopeBytes = new TextEncoder().encode(envelope).length
-  if (envelopeBytes > TOOL_SEARCH_RECORD_JSON_BYTES_MAX) {
-    throw new TBError(
-      'invalid_argument',
-      `工具 '${tool.name}' 的索引传输记录过大(${envelopeBytes} > ${TOOL_SEARCH_RECORD_JSON_BYTES_MAX} bytes)`,
-    )
+    toolDigest: stableDigest(toolJson),
   }
   return record
 }
@@ -229,7 +219,6 @@ function jsonPayload(record: SerializedToolSearchRecord): Record<string, unknown
     feedback: record.feedback,
     name: record.name,
     path: record.path,
-    tool: JSON.parse(record.toolJson) as unknown,
   }
 }
 
@@ -306,16 +295,6 @@ export function serializeToolSearchDocuments(
 export const serializeToolSearchHits = serializeToolSearchDocuments
 
 /** 节点快照摘要；用于 material-change 判定，避免相同快照无谓失效全部 cursor。 */
-function stableDigest(value: unknown): string {
-  const bytes = new TextEncoder().encode(JSON.stringify(value))
-  let hash = 0xcbf29ce484222325n
-  for (const byte of bytes) {
-    hash ^= BigInt(byte)
-    hash = BigInt.asUintN(64, hash * 0x100000001b3n)
-  }
-  return hash.toString(16).padStart(16, '0')
-}
-
 export function toolSearchSnapshotDigest(
   records: readonly SerializedToolSearchRecord[],
 ): string {
@@ -326,7 +305,7 @@ export function toolSearchSnapshotDigest(
       record.name,
       record.description,
       record.feedback,
-      record.toolJson,
+      record.toolDigest,
     ]))
 }
 

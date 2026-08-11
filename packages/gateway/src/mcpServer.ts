@@ -21,6 +21,8 @@ export interface McpBridgeTool {
   inputSchema?: unknown
   invokePath: string
   invokeWithEnvelope: boolean
+  mcpName?: string
+  operation?: 'help' | 'listNodes' | 'search'
   providerBacked?: boolean
   sourcePath: string
   toolName: string
@@ -104,7 +106,7 @@ async function projectTools(
   }
   const projected = await Promise.all(
     [...unique.values()].map(async (bridge) => {
-      const name = await mcpToolName(bridge.identity)
+      const name = bridge.mcpName ?? await mcpToolName(bridge.identity)
       const annotations = annotationsOf(bridge)
       const description = bridge.description === undefined
         ? `HTBP ${bridge.invokePath}`

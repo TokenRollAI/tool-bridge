@@ -251,6 +251,35 @@ describe('tool cache → SearchIndex 自动同步', () => {
       (item.value as { path?: unknown }).path === 'ext/search-cache-sync'
     ))).toEqual([])
   })
+
+  it('indexes a Feishu-sized MCP catalog while returning complete canonical ToolSpecs', async () => {
+    const description = `feishucatalogunique ${'长描述'.repeat(2_000)}`
+    const tools = Array.from({ length: 8 }, (_, index) => ({
+      name: `feishu_large_probe_${index}`,
+      description,
+    }))
+    const upstream = mcpUpstreamMock(tools)
+    vi.stubGlobal('fetch', upstream.fetchMock)
+    await mountMcp('ext/search-large-cache')
+
+    const response = await SELF.fetch('https://tb.test/~search', {
+      method: 'POST',
+      headers: {
+        'authorization': `Bearer ${TEST_ADMIN_SK}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({ query: 'feishucatalogunique', opts: { limit: 20 } }),
+    })
+    expect(response.status).toBe(200)
+    const page = await response.json() as {
+      items: Array<{ path: string, tool: { description?: string, name: string } }>
+    }
+    expect(page.items).toHaveLength(8)
+    expect(page.items[0]).toMatchObject({
+      path: 'ext/search-large-cache',
+      tool: { description, name: 'feishu_large_probe_0' },
+    })
+  })
 })
 
 describe('直连工具调用(POST /<node>/<tool>,body 即 arguments)', () => {

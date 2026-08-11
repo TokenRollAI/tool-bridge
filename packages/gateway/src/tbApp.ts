@@ -69,6 +69,7 @@ import {
   TBError,
   type TBErrorBody,
   TOOL_SEARCH_BATCH_LIMIT,
+  TOOL_SEARCH_PAGE_BYTES,
   TOOL_SEARCH_WORK_LIMIT,
   toolHelpModel,
   type ToolResult,
@@ -93,16 +94,17 @@ import {
   startMcpAuthorization,
 } from './oauth'
 import {
+  canonicalSearchTools,
+  isMutableSearchIndex,
+  type SearchDirtyMarker,
+  SearchSynchronizer,
+} from './search/synchronizer'
+import {
   handleMcpRequest,
   type McpBridgeTool,
   type McpToolBridge,
   mcpToolIdentity,
 } from './mcpServer'
-import {
-  isMutableSearchIndex,
-  type SearchDirtyMarker,
-  SearchSynchronizer,
-} from './search/synchronizer'
 import { assertRemoteAllowed, passthroughRemote, type RemoteSettings } from './providers/remote'
 import { createMcpProvider, invalidateMcpSession, type McpConfig } from './providers/mcp'
 import { createS3ObjectStore, type S3StoreConfig } from './providers/s3Object'
@@ -1624,6 +1626,72 @@ export function createTbApp(deps: TbAppDeps): Hono<{ Variables: Vars }> {
     const registry = new NodeRegistryStore(c.get('store'))
     let remoteRequests = 0
 
+    const controlTools = (): McpBridgeTool[] => [
+      ...(globalSearchCapabilities().includes('search')
+        ? [{
+            identity: JSON.stringify(['control', 'search']),
+            sourcePath: '',
+            toolName: 'Search',
+            invokePath: '/~search',
+            invokeWithEnvelope: false,
+            mcpName: 'tb_search',
+            operation: 'search' as const,
+            description: 'Search visible tools across the Tool Bridge tree.',
+            effect: 'read',
+            inputSchema: {
+              type: 'object',
+              additionalProperties: false,
+              properties: {
+                query: { type: 'string', minLength: 1 },
+                mode: { type: 'string', enum: ['keyword', 'semantic'] },
+                limit: { type: 'integer', minimum: 1, maximum: 200 },
+                cursor: { type: 'string', minLength: 1 },
+              },
+              required: ['query'],
+            },
+          }]
+        : []),
+      {
+        identity: JSON.stringify(['control', 'help']),
+        sourcePath: '',
+        toolName: 'Help',
+        invokePath: '/~help',
+        invokeWithEnvelope: false,
+        mcpName: 'tb_help',
+        operation: 'help',
+        description: 'Describe a visible Tool Bridge node or one of its tools.',
+        effect: 'read',
+        inputSchema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            path: { type: 'string' },
+            tool: { type: 'string', minLength: 1, pattern: '^[^/]+$' },
+            format: { type: 'string', enum: ['json', 'markdown', 'dsl'] },
+          },
+        },
+      },
+      {
+        identity: JSON.stringify(['control', 'list-nodes']),
+        sourcePath: '',
+        toolName: 'List',
+        invokePath: '/~tree',
+        invokeWithEnvelope: false,
+        mcpName: 'tb_list_nodes',
+        operation: 'listNodes',
+        description: 'List the visible Tool Bridge node tree from a path.',
+        effect: 'read',
+        inputSchema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            path: { type: 'string' },
+            depth: { type: 'integer', minimum: 0, maximum: MAX_TREE_DEPTH },
+          },
+        },
+      },
+    ]
+
     const takeRemoteRequest = (): void => {
       remoteRequests += 1
       if (remoteRequests > MCP_REMOTE_MAX_REQUESTS) {
@@ -1710,7 +1778,7 @@ export function createTbApp(deps: TbAppDeps): Hono<{ Variables: Vars }> {
     const list = async (): Promise<McpBridgeTool[]> => {
       const now = new Date().toISOString()
       const nodes = await pruneExpiredContext(await registry.subtree(''), registry)
-      const result: McpBridgeTool[] = []
+      const result: McpBridgeTool[] = controlTools()
 
       for (const node of nodes) {
         if (node.kind === 'directory') continue
@@ -1772,6 +1840,80 @@ export function createTbApp(deps: TbAppDeps): Hono<{ Variables: Vars }> {
     return {
       list,
       call: async (tool, args) => {
+        const resultFromResponse = async (response: Response): Promise<{
+          content: unknown
+          isError?: boolean
+        }> => {
+          const text = await response.text()
+          let value: unknown = text
+          try {
+            value = JSON.parse(text) as unknown
+          } catch {
+            // Text help/DSL results remain MCP text content.
+          }
+          return { content: value, ...(response.ok ? {} : { isError: true }) }
+        }
+        if (tool.operation !== undefined) {
+          const rawPath = args.path ?? ''
+          if (typeof rawPath !== 'string') {
+            throw new TBError('invalid_argument', 'path must be a string')
+          }
+          const path = rawPath.replace(/^\/+|\/+$/g, '')
+          const pathError = validatePath(path, { allowRoot: true })
+          if (pathError !== null) throw pathError
+          const segments = path === '' ? [] : path.split('/')
+          if (segments.some(segment => segment === '.' || segment === '..')) {
+            throw new TBError('invalid_argument', 'path contains a dot segment')
+          }
+          const encoded = segments.map(segment => encodeURIComponent(segment))
+          const headers = new Headers({
+            authorization: c.req.header('authorization') ?? '',
+          })
+
+          if (tool.operation === 'search') {
+            headers.set('accept', 'application/json')
+            headers.set('content-type', 'application/json')
+            const opts = Object.fromEntries(
+              ['mode', 'limit', 'cursor']
+                .filter(key => args[key] !== undefined)
+                .map(key => [key, args[key]]),
+            )
+            const response = await app.request(new Request(new URL('/~search', c.req.url), {
+              method: 'POST',
+              headers,
+              body: JSON.stringify({
+                query: args.query,
+                ...(Object.keys(opts).length === 0 ? {} : { opts }),
+              }),
+            }))
+            return await resultFromResponse(response)
+          }
+
+          if (tool.operation === 'help') {
+            const detail = args.tool
+            if (detail !== undefined) {
+              if (path === '' || typeof detail !== 'string' || detail.includes('/')) {
+                throw new TBError('invalid_argument', 'tool detail requires a node path and one segment')
+              }
+              encoded.push(encodeURIComponent(detail))
+            }
+            const format = args.format ?? 'json'
+            headers.set('accept', format === 'json'
+              ? 'application/json'
+              : format === 'dsl' ? 'text/plain' : 'text/markdown')
+            const prefix = encoded.length === 0 ? '' : `/${encoded.join('/')}`
+            return await resultFromResponse(await app.request(new Request(
+              new URL(`${prefix}/~help`, c.req.url),
+              { headers },
+            )))
+          }
+
+          headers.set('accept', 'application/json')
+          const prefix = encoded.length === 0 ? '' : `/${encoded.join('/')}`
+          const url = new URL(`${prefix}/~tree`, c.req.url)
+          if (args.depth !== undefined) url.searchParams.set('depth', String(args.depth))
+          return await resultFromResponse(await app.request(new Request(url, { headers })))
+        }
         if (tool.providerBacked === true) {
           let node: TreeNode
           try {
@@ -1813,14 +1955,7 @@ export function createTbApp(deps: TbAppDeps): Hono<{ Variables: Vars }> {
         const response = await app.request(
           new Request(url, { method: 'POST', headers, body: JSON.stringify(body) }),
         )
-        const text = await response.text()
-        let value: unknown = text
-        try {
-          value = JSON.parse(text) as unknown
-        } catch {
-          // Non-JSON remote responses remain readable text content.
-        }
-        return { content: value, ...(response.ok ? {} : { isError: true }) }
+        return await resultFromResponse(response)
       },
     }
   }
@@ -1935,20 +2070,30 @@ export function createTbApp(deps: TbAppDeps): Hono<{ Variables: Vars }> {
         scanCursor = page.cursor
       }
 
-      const hydration = await search.hydrate(selected.map(item => item.candidate))
-      if (selected.length > 0 && hydration.consumed === 0) {
-        throw new TBError('internal', '工具搜索页面字节预算无法容纳首个结果')
-      }
-      if (hydration.consumed < selected.length) {
-        responseCandidate = selected[hydration.consumed - 1]?.candidate
-        responseCursor = undefined
-      }
+      const canonicalTools = await canonicalSearchTools(
+        c.get('store'),
+        selected.map(item => item.node),
+      )
       const items: Array<{ path: TreePath, tool: ToolSpec }> = []
-      for (const [index, hit] of hydration.hits.entries()) {
-        const selectedItem = selected[index]
-        if (selectedItem === undefined || hit.path !== selectedItem.candidate.path) continue
-        const tool = virtualizeTools(selectedItem.node.virtualize, [hit.tool]).exposed[0]
-        if (tool !== undefined) items.push({ path: hit.path, tool })
+      let pageBytes = 0
+      for (const [index, selectedItem] of selected.entries()) {
+        const raw = canonicalTools.get(selectedItem.candidate.path)
+          ?.find(tool => tool.name === selectedItem.candidate.name)
+        if (raw === undefined) continue
+        const tool = virtualizeTools(selectedItem.node.virtualize, [raw]).exposed[0]
+        if (tool === undefined) continue
+        const item = { path: selectedItem.candidate.path, tool }
+        const itemBytes = new TextEncoder().encode(JSON.stringify(item)).length
+        if (pageBytes + itemBytes > TOOL_SEARCH_PAGE_BYTES) {
+          if (items.length === 0) {
+            throw new TBError('internal', '工具搜索页面字节预算无法容纳首个结果')
+          }
+          responseCandidate = selected[index - 1]?.candidate
+          responseCursor = undefined
+          break
+        }
+        items.push(item)
+        pageBytes += itemBytes
       }
       if (responseCandidate !== undefined) {
         responseCursor = await search.cursorFor(query, responseCandidate, mode)
