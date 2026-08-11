@@ -1,0 +1,11 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  // 插件共享 preset:Web 标准运行时(Worker / Deno / Bun / Node 22+ fetch),
+  // 与 plugin-sdk 同姿势 —— 刻意不引 @types/node,插件只依赖 fetch 家族全局,
+  // 保证同一份代码能被任意宿主装载。各插件自带 tsconfig.json 只声明 extends 与 include。
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2023", "DOM"],
+    "types": []
+  }
+}
