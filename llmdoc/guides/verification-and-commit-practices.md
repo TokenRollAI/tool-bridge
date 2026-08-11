@@ -8,8 +8,9 @@
 - **多阶段验证必须 fail fast**:build、执行产物、pack 等相互依赖的命令用 `&&` 或脚本级严格错误处理连接;不能只看整段 shell 的最终退出码,因为末尾成功会掩盖前序失败并继续消费陈旧产物。
 - **收尾同轮更新 current-state**:大功能收尾时同步更新 [../must/current-state.md](../must/current-state.md),不要攒——曾因积攒导致文档落后实现两个大阶段。文档同步类任务动笔前先做一轮"实现 vs 文档"审计(实跑测试取数、实查代码取证,以实现为准列差距清单)。
 - **三入口能力对等**:每新增 builtin/API 动词、NodeConfig/ProviderConfig 字段或 Provider 分支,同轮按「动词 × 字段 × 分支」核对 API/builtin ↔ CLI ↔ Dashboard;刻意不暴露必须写明理由(防管理旁路)。涉及 CLI 参数时按 [cli-argument-contract-review.md](cli-argument-contract-review.md) 同时审 Commander 解析、本地语义和服务端安全边界。
+- **包级测试必须进入根验收链**:新增 package `test` script 与专门命令不等于 `pnpm verify` 会执行它;同步把 package 加入根 `test:unit`/`test:integration` 选择器,再从根命令输出确认确实被选中。UI 纯 builder 可用 Node Vitest 断言最终 wire object与 fail-closed 分支,但不得把它宣称为 React dialog 生命周期、分页、焦点或一次性敏感值的交互证据。
 - **代理/存储边界要测出站形状**:白名单/环检测之外,必须有测试直接断言出站请求或存储层的真实形状(调用者 SK 不外传、skRef 换发、路径改写、版本/内容),不能只断言入口返回 200。
-- **Dashboard 真实浏览器四面证据**:前端功能收尾除 build/typecheck 外,至少核对①desktop/mobile/矮屏的滚动、横向溢出、键盘焦点与 Escape 恢复,②首屏请求与显式交互后请求的形状,③localStorage 等浏览器存储不含敏感参数,④测试数据超过服务端默认 limit 后可继续分页且派生计数/筛选正确。静态 class 审查和单页截图不能替代这些证据;lazy 分包还须覆盖动态 import 失败的恢复路径。
+- **Dashboard 真实浏览器四面证据**:前端功能收尾除 build/typecheck 外,至少核对①desktop/mobile/矮屏的滚动、横向溢出、键盘焦点与 Escape 恢复,②首屏请求与显式交互后请求的形状,③localStorage 等浏览器存储不含敏感参数,④测试数据超过服务端默认 limit 后可继续分页且派生计数/筛选正确。静态 class 审查和单页截图不能替代这些证据;lazy 分包还须检查调用方是否反向 import route module,并让 gateway 静态集成每次从当前 Dashboard source build,再覆盖动态 import 失败的恢复路径。chunk 字符串只证明打包接线,不证明组件交互。
 
 ## opt-in 与真实环境验证
 

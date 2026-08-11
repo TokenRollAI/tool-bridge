@@ -145,7 +145,7 @@ function pluginCmds(nodePath: TreePath): CmdSpec[] {
           auth: {
             type: 'object',
             description:
-              '{ kind: "platform-token" } — gateway mints the token (shown once in the response); or { kind: "bearer", token }',
+              '{ kind: "platform-token" } — gateway mints the token (shown once in the response); or { kind: "bearer", secretRef }',
           },
           healthPath: { type: 'string', description: 'GET probe path, e.g. "/healthz"' },
           enabled: { type: 'boolean' },
@@ -309,7 +309,7 @@ export function createPluginModule(deps: PluginModuleDeps): BuiltinModule {
       { allowInsecureHttp: deps.allowInsecureHttp ?? false },
     )
 
-    // 契约相关字段变更 → 与 write 同流程重探活 + 重抓 ~describe/~help,刷新 meta/health;
+    // 契约相关字段变更 → 与 write 同流程重探活 + 重抓 ~describe,刷新 meta/health;
     // 失败即拒不落库。仅本地字段(enabled 等)变更跳过——禁用一个已挂掉的 plugin 不应被探活挡住。
     const contractChanged
       = merged.endpoint !== prev.endpoint

@@ -40,11 +40,12 @@
   **不构成 Phase 4.5 编码依赖**,生产证据前项 7 不勾选。
 
 ## 当前状态
-- 当前 Phase:**Phase 4.5 — D:组件抽象收尾**(Round 25 起;Phase 4 可做项已清空,外向半边见 P4-1/P4-2/P4-3)
+- 当前 Phase:**Phase 4.5 — D:组件抽象收尾**(Round 25 已完成 Dashboard 大页拆分;Round 26 进入 Docker Compose 开发栈;Phase 4 外向半边见 P4-1/P4-2/P4-3)
 - Phase 3 已勾选:项 1(官方 MCP 测试 client + 本地 initialize,Round 14)、项 2(认证后的动态 tools/list + tools/call,Round 15)、项 3(scope 收窄钉死,Round 16)、项 4(三入口对等审计,Round 17)
 - Phase 3 待办:**仅剩待授权的外向动作** — 项 5 已完成生产脚本与全量回归,真实部署/生产 MCP smoke → P3-1
 - Phase 4 已勾选:项 3(CF D1 + Node SQLite SearchIndex,FTS5/trigram,Round 21)、项 4(trigram 短词 escaped LIKE 兜底,Round 22)、项 5(加权索引、自动同步、权限后处理分页与 opaque cursor,Round 23)、项 6(`tb search` + Dashboard `/search`,Round 24)
 - Phase 4 遗留:项 1 真实 provision/deploy → P4-1;项 2 外部 HTBP Draft → P4-2;项 7 已完成 `pnpm verify` 半边,生产 deploy + 中英文 search smoke → P4-3。三者均为外向流程动作,不构成 Phase 4.5 编码依赖。
+- Phase 4.5 已勾选:项 1(Dashboard Registry/Plugins/SK 大页拆分、纯 builder 契约测试与 fresh-source UI 集成,Round 25)
 - Phase 2 已勾选:项 1(OperationRegistry)、项 2(Plugin v2 多 export,Round 13 补齐三入口对等后成立)、项 3(Context 按 handler 推导能力)、项 4(`@tool-bridge/plugin-sdk` 可发布)、项 5(样例 plugin 双 export)、项 6(删净 legacy 面)
 - Phase 2 待办(**全部为待授权的外向动作**):项 7 飞书重写复验(代码已完成,只差生产实调 → P2-1)/ 项 8 部署上线
 - Phase 1(代码完成,部署挂起见 PENDING)
@@ -449,3 +450,18 @@
   - `pnpm verify` → 9 workspace typecheck + 全仓 lint + provision **1 passed** + 包测试 **1262 passed / 7 skipped**(core 744 + plugin-sdk 22 + cli 242 + sdk 19 + plugin-feishu 9 + gateway 189 + server 37),合计 **1263 passed / 7 skipped**,退出码 0。`git diff --check` 退出码 0;严格 investigator 最终复核无阻断。
 - 勾选:Phase 4 DoD 项 6(三入口对等:`tb search` + Dashboard 搜索面)。
 - 遗留:Phase 4 仅剩外向动作 P4-1(真实 D1 provision/deploy)、P4-2(外部 HTBP Draft)、P4-3(生产中英文 search smoke),不构成组件抽象的代码依赖。按 LOOP「Phase 内只剩 PENDING 则继续」进入 Phase 4.5;下一轮 = Dashboard Registry/Plugins/SK 大页拆分。
+
+## Round 25 — 2026-08-11
+- 目标:Phase 4.5 DoD 项 1 —— 拆分 Dashboard Registry/Plugins/SK 大页,建立可执行的表单 payload 对等边界与包级测试。
+- 动作:
+  - 新增共享 `FormSection`、三组纯 config builder 和独立 kind/field/dialog 组件;RegistryPage 从 1760 行降至 510 行,PluginsPage 1318→823,SkPage 942→694。`MountDialog` 成为独立组件,NodePage 不再从 Registry route module 反向导入。
+  - 纯 builder 测试推动 CLI/builtin 对等修正:HTTP authHeader/authScheme 必须与 authRef 同时出现;HTTP ToolDef 逐项验证必填字段与 method;MCP/HTTP custom authScheme 空前缀 fail closed;SK 半填 scope 不再静默丢弃;`registerPaths` 改为每行一条,完整保留合法逗号 TreePath;plugin/v2 文案只声明 `~describe`,bearer schema 使用真实 `secretRef`。
+  - Dashboard 包新增 Node Vitest 配置、`test` script 和 10 个纯 builder 用例,并加入根 `test:unit`;不引入 jsdom,明确不把纯函数测试冒充 React dialog 生命周期证据。gateway UI integration 继续在每次运行前从当前 Dashboard source fresh build。
+  - llmdoc-update 新增 `2026-08-11-dashboard-system-forms-split.md`,并同步 current-state、模块边界、代码地图与索引。
+- 验证:
+  - `pnpm --filter @tool-bridge/dashboard test` → **10 passed**;Dashboard typecheck、目标 ESLint 均退出码 0。
+  - `pnpm --filter @tool-bridge/gateway exec vitest run test/ui.integration.test.ts` → 先 fresh Vite build,再 **15 passed**。
+  - 真实浏览器覆盖 Registry 桌面与移动 dialog、Plugin/SK 移动 dialog,无横向溢出、无控件重叠,console **0 errors**。
+  - `pnpm verify` → 9 workspace typecheck + 全仓 lint + provision **1 passed** + 包测试 **1272 passed / 7 skipped**(core 744 + dashboard 10 + plugin-sdk 22 + cli 242 + sdk 19 + plugin-feishu 9 + gateway 189 + server 37),合计 **1273 passed / 7 skipped**,退出码 0。`git diff --check` 退出码 0;严格 investigator 最终复核无阻断。
+- 勾选:Phase 4.5 DoD 项 1(Dashboard 大页拆分与 CLI/builtin 对等)。
+- 遗留:Node Vitest 不覆盖 React dialog 生命周期与部分正向子分支,属后续测试增强。下一轮 = Phase 4.5 项 2:一键 Docker Compose gateway + plugin worker + mock upstream 开发栈,保持生产单容器形态不变。

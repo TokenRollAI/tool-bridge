@@ -123,11 +123,11 @@ cmd resolve-library-id POST /docs/context7/resolve-library-id  ← cmd 行:<name
 ## 5. 核心数据模型
 
 - `Node{path,kind,description,config?,virtualize?,registeredBy,online?}`:主键 `path`('/' 分隔,不含保留段);八种 kind(directory/mcp/http/builtin/context/device/remote/tool/skillhub);`registeredBy=keyId`(device 由网关代写;自动物化中间 directory 记 `system:auto`,引导节点记 `system:boot`)。config 存在时其 kind 必须与节点 kind 一致。
-- mcp/http NodeConfig 上游认证(语义两 kind 一致,复用 `authHeaderFor`):`authRef` 指 SecretStore 凭证名,注入头名 `authHeader`(默认 `Authorization`)、前缀 `authScheme`(默认 `Bearer`,**空串 = secret 原样注入**)。mcp 另有 `headers?: Record<string,string>`(静态明文请求头,非机密,如上游要求的工具白名单头),每趟上游请求(initialize/list/call)均携带;凭证头覆盖同名静态头。kind:'tool'(plugin 挂载)NodeConfig 也有 `authRef?`:平台调用时 resolve 后经 `X-TB-Upstream-Auth` 注入 plugin(见第 8 节)。
+- mcp/http NodeConfig 上游认证(语义两 kind 一致,复用 `authHeaderFor`):`authRef` 指 SecretStore 凭证名,注入头名 `authHeader`(默认 `Authorization`)、前缀 `authScheme`(默认 `Bearer`,**空串 = secret 原样注入**)。管理客户端若暴露“自定义 scheme”模式,空前缀必须 fail closed,不能通过省略字段静默回退 Bearer;HTTP 的 `authHeader`/`authScheme` 必须与 `authRef` 同时使用。mcp 另有 `headers?: Record<string,string>`(静态明文请求头,非机密,如上游要求的工具白名单头),每趟上游请求(initialize/list/call)均携带;凭证头覆盖同名静态头。http `tools[]` 每项至少有非空 `name`/`description`/`method`/`pathTemplate`,method 仅 GET/POST/PUT/DELETE。kind:'tool'(plugin 挂载)NodeConfig 也有 `authRef?`:平台调用时 resolve 后经 `X-TB-Upstream-Auth` 注入 plugin(见第 8 节)。
 - `SecretKey{id,hash,owner,scopes,registerPaths?,disabled?,expiresAt?}`:主键 `id`(可公开,审计用);`hash=sha256(明文)`,明文仅签发响应出现一次;`owner: OwnerRef`(`user:`/`agent:`/`device:` 前缀)。`expiresAt` 只接受带时区的 ISO 8601 timestamp,Write/Update 时规范为 UTC ISO;非法值 → invalid_argument 且不写入。
 - `Scope{pattern,actions,effect?}`:动作 = read/write/call/register/admin;**deny 优先 → allow → 无匹配默认拒**;`*`/`**` glob 语义。
 - `ContextEntry`:主键 `uri = node://<namespace-path>/<entry-path>`;`version` 乐观并发(`ifVersion` 不符 → conflict;r2 落地 etag=version);`contentType` 决定表现;>1 MiB 的 Get 返回 `$ref`。
-- `PluginManifest{id,kind,interfaceVersion,endpoint,auth,healthPath,enabled}`:主键 `id`;`interfaceVersion` 形如 `<kind>/v<major>`,与方法集合不符 → 拒。
+- `PluginManifest{id,protocolVersion:'plugin/v2',endpoint,auth,healthPath,enabled}`:manifest 只描述部署与生命周期,不含 v1 的 `kind`/`interfaceVersion`;能力由 `~describe.exports[]` 的 `profile`/`methods` 声明。auth = `{kind:'platform-token'}` 或 `{kind:'bearer',secretRef}`。
 - builtin 模块名集合:`sk | secret | registry | status | plugin | federation | annotation`(引导时全部物化)。
 - `Annotation{path,text,updatedAt,updatedBy}`:key `annotation:<path>`,每 path 一条覆盖写;text trim 后 1..2000;path 须 resolve 命中(根 `''` 放行 = 全树公告);独立于 TreeNode,工具子路径可标注。
 - `FeedbackEntry{id,title,detail,by,at,up[],down[]}`:key `feedback:<path>` 单 key 数组(KV last-write-wins,低频非关键数据接受并发窗口);`id = fb_ + 6 位 base36`;`by`/投票人 = `ctx.owner`;净分 = up-down(派生不落库);title ≤ 80、detail ≤ 500(trim 后)。
@@ -137,7 +137,7 @@ cmd resolve-library-id POST /docs/context7/resolve-library-id  ← cmd 行:<name
 ## 6. SK 与注册路径规则
 
 - `Authorizer.Check` 是唯一判定入口;判定次序 read→404(deny==not_found,不泄露存在性)再目标动作→403。
-- **registerPaths 收紧**:SK 声明了 `registerPaths` → 仅允许在这些前缀下注册;未声明(但持 register scope)→ 允许保留根之外的任意路径;同路径已有他人节点 → conflict。
+- **registerPaths 收紧**:SK 声明了 `registerPaths` → 仅允许在这些前缀下注册;未声明(但持 register scope)→ 允许保留根之外的任意路径;同路径已有他人节点 → conflict。每项是独立 TreePath pattern,逗号可作为合法路径字符,不能把字段内部的逗号误作列表分隔符;CLI 用可重复 `--register-path`,Dashboard 用每行一项并对 owner 与每条半填 scope fail closed。
 - Admin SK:scope=`**` 全动作。Workers 首次引导必须预置 `TB_BOOTSTRAP_ADMIN_SK`,缺失时 fail closed 且不得把随机明文写入日志;`runBootstrap` 仍提供本地随机兼容路径。当前 Node/Docker server 默认使用兼容路径并会把随机 Admin SK 写 stdout,生产部署必须预置该变量,代码层 fail-closed 待修。
 - 吊销/禁用经 StateStore 分发:KV 宿主最终一致,跨边缘通常约 60s、也可能更久(生产曾实测 0.3s,只作样本;`scripts/verify-revocation.ts` 可重跑);需要确定性即时失效须改强一致认证真源,短 `expiresAt` 可缩小暴露窗口。认证读取对历史非法 `expiresAt` **fail closed**(视同无效 SK),不会因 `Date.parse()` 的 `NaN` 比较而放行。
 
@@ -154,7 +154,7 @@ cmd resolve-library-id POST /docs/context7/resolve-library-id  ← cmd 行:<name
 - `POST {endpoint}`,上下文唯一载体 `X-TB-Context`(base64url 信封);`X-TB-Request-Id` 重试去重;载荷 ≤1 MiB(超限走 `$ref`);超时 30s。
 - `X-TB-Upstream-Auth`(可选):挂载节点配置 `authRef` 时,平台每次调用经 SecretStore resolve 后以 base64url 编码注入该头(明文形状由 plugin 约定,如 JSON);plugin 不自持上游凭证,轮换只需 `tb secret set`。resolve 失败 → unavailable 快速失败;无 authRef 则不发该头。常量:core `plugin/envelope.ts`(`HEADER_TB_UPSTREAM_AUTH`)。
 - `pluginToken`(Plugin 回调平台的令牌)注册时签发仅一次。
-- 生命周期:注册时自动探活(`GET {healthPath}`)+ `~describe`/`~help` 契约校验;未声明的可选方法不会被调用;周期探活反映健康态但不自动注销。
+- 生命周期:注册时自动探活(`GET {healthPath}`)+ 抓取 `~describe` 并校验 plugin/v2 exports;不再抓 `~help`。endpoint/healthPath/protocolVersion 更新时重探活并刷新 contract,auth/enabled 等本地字段变化不触发 contract refresh;未声明的可选方法不会被调用;周期探活反映健康态但不自动注销。
 
 ## 9. CLI 命令族矩阵
 

@@ -12,7 +12,6 @@ import {
   Loader2,
   Pencil,
   Plug2,
-  Plus,
   RefreshCw,
   ShieldCheck,
   Trash2,
@@ -21,7 +20,7 @@ import { type ReactNode, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router'
 import { toast } from 'sonner'
-import type { PluginExport, PluginHealth, PluginManifest, PluginRegistration } from '@/lib/types'
+import type { PluginExport, PluginHealth, PluginManifest } from '@/lib/types'
 import {
   Dialog,
   DialogContent,
@@ -29,7 +28,6 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
 } from '@/components/ui/dialog'
 import {
   Table,
@@ -39,25 +37,16 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
 import { PaginationFooter } from '@/components/PaginationFooter'
 import { ConfirmAction } from '@/components/ConfirmAction'
 import { useInvoke, usePluginList } from '@/lib/queries'
 import { CopyButton } from '@/components/CopyButton'
 import { EmptyState } from '@/components/EmptyState'
 import { PageHeader } from '@/components/PageHeader'
-import { Checkbox } from '@/components/ui/checkbox'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
+import { EditPluginDialog, RegisterPluginDialog } from './forms/PluginFormDialogs'
 
 /** profile → 挂载成哪种树节点（与 core NODE_KIND_BY_PROFILE 同一张表）。 */
 const NODE_KIND_BY_PROFILE = { 'tools/v1': 'tool', 'context/v1': 'context' } as const
@@ -387,493 +376,8 @@ function PluginDetailsDialog({
   )
 }
 
-interface ManifestFormState {
-  authKind: 'platform-token' | 'bearer'
-  enabled: boolean
-  endpoint: string
-  healthPath: string
-  secretRef: string
-}
-
 /**
- * 表单态 → manifest 字段（id 由调用方补）。
- *
- * plugin/v2 的 manifest 只描述**部署与生命周期**：在哪、怎么鉴权、健康检查、是否启用。
- * 「这个 plugin 提供什么」由它自己的 `/~describe` exports 声明，注册时平台抓取并校验 ——
- * 所以这里没有 kind/interfaceVersion 可填，填了也会被网关按未知字段丢弃。
- */
-function buildManifestFields(state: ManifestFormState) {
-  return {
-    protocolVersion: 'plugin/v2',
-    endpoint: state.endpoint.trim(),
-    auth:
-      state.authKind === 'bearer'
-        ? { kind: 'bearer' as const, secretRef: state.secretRef.trim() }
-        : { kind: 'platform-token' as const },
-    healthPath: state.healthPath.trim() || '/healthz',
-    enabled: state.enabled,
-  }
-}
-
-function FormSection({
-  number,
-  title,
-  description,
-  children,
-}: {
-  children: ReactNode
-  description: string
-  number: string
-  title: string
-}) {
-  return (
-    <section className="rounded-lg border bg-card/30">
-      <div className="flex items-start gap-3 border-b px-4 py-3">
-        <span className="mt-0.5 font-mono text-[10px] text-primary">{number}</span>
-        <div>
-          <h3 className="text-xs font-medium">{title}</h3>
-          <p className="mt-0.5 text-[10px] leading-5 text-muted-foreground">{description}</p>
-        </div>
-      </div>
-      <div className="grid gap-3 p-4">{children}</div>
-    </section>
-  )
-}
-
-function ManifestFields({
-  state,
-  onChange,
-  idPrefix,
-  disabled = false,
-}: {
-  disabled?: boolean
-  idPrefix: string
-  onChange: (next: ManifestFormState) => void
-  state: ManifestFormState
-}) {
-  const endpointId = `${idPrefix}-endpoint`
-  const healthId = `${idPrefix}-health`
-  const authId = `${idPrefix}-auth`
-  const secretId = `${idPrefix}-secret`
-  const enabledId = `${idPrefix}-enabled`
-
-  return (
-    <div className="grid gap-3">
-      <FormSection
-        description="平台访问 Plugin 与健康端点的位置；生产环境使用 HTTPS，或填写平台 service binding。"
-        number="01"
-        title="Endpoint"
-      >
-        <div className="grid gap-1.5">
-          <Label className="text-xs" htmlFor={endpointId}>
-            Plugin endpoint *
-          </Label>
-          <Input
-            className="font-mono text-xs"
-            disabled={disabled}
-            id={endpointId}
-            onChange={event => onChange({ ...state, endpoint: event.target.value })}
-            placeholder="https://plugin.example.com 或 binding:MY_PLUGIN"
-            value={state.endpoint}
-          />
-        </div>
-        <div className="grid gap-1.5 sm:max-w-xs">
-          <Label className="text-xs" htmlFor={healthId}>
-            Health path *
-          </Label>
-          <Input
-            className="font-mono text-xs"
-            disabled={disabled}
-            id={healthId}
-            onChange={event => onChange({ ...state, healthPath: event.target.value })}
-            placeholder="/healthz"
-            value={state.healthPath}
-          />
-          <p className="text-[10px] leading-5 text-muted-foreground">
-            必须以 / 开头；注册时和手动检查都会请求它。
-          </p>
-        </div>
-      </FormSection>
-
-      <FormSection
-        description="plugin/v2 的 manifest 不声明能力；平台注册时抓取 ~describe，由 plugin 自报 exports。"
-        number="02"
-        title="Interface"
-      >
-        <div className="rounded-md border bg-background/55 px-3 py-2.5">
-          <p className="font-mono text-[10px] text-muted-foreground">plugin/v2</p>
-          <p className="mt-1.5 text-[10px] leading-5 text-muted-foreground">
-            注册时平台会 GET
-            {' '}
-            <span className="font-mono">~describe</span>
-            ，要求 protocolVersion 一致且至少一个 export；每个 export 自报
-            {' '}
-            <span className="font-mono">profile</span>
-            （tools/v1 或 context/v1）与动词集合。注册成功后回到本页即可看到它们，
-            挂载时在「注册表」里选择要挂哪一个 export。
-          </p>
-        </div>
-      </FormSection>
-
-      <FormSection
-        description="选择平台签发的一次性 Token，或引用凭证保管中的 bearer secret。"
-        number="03"
-        title="Authentication"
-      >
-        <div className="grid gap-1.5 sm:max-w-sm">
-          <Label className="text-xs" htmlFor={authId}>
-            Auth mode *
-          </Label>
-          <Select
-            disabled={disabled}
-            onValueChange={value =>
-              onChange({ ...state, authKind: value as 'platform-token' | 'bearer' })}
-            value={state.authKind}
-          >
-            <SelectTrigger className="font-mono text-xs" id={authId}>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem className="font-mono text-xs" value="platform-token">
-                platform-token — 平台签发
-              </SelectItem>
-              <SelectItem className="font-mono text-xs" value="bearer">
-                bearer — 引用已存凭证
-              </SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-
-        {state.authKind === 'bearer'
-          ? (
-              <div className="grid gap-1.5">
-                <Label className="text-xs" htmlFor={secretId}>
-                  Secret reference *
-                </Label>
-                <Input
-                  className="font-mono text-xs"
-                  disabled={disabled}
-                  id={secretId}
-                  onChange={event => onChange({ ...state, secretRef: event.target.value })}
-                  placeholder="my-plugin-token"
-                  value={state.secretRef}
-                />
-                <p className="text-[10px] leading-5 text-muted-foreground">
-                  这里只填写
-                  <Link
-                    className="mx-1 text-foreground underline underline-offset-2"
-                    to="/manage/secrets"
-                  >
-                    凭证保管
-                  </Link>
-                  中的名字，明文不会进入 manifest。
-                </p>
-              </div>
-            )
-          : (
-              <div className="flex items-start gap-2.5 rounded-md border border-primary/20 bg-primary/[0.045] px-3 py-2.5">
-                <KeyRound className="mt-0.5 size-3.5 shrink-0 text-primary" />
-                <p className="text-[10px] leading-5 text-muted-foreground">
-                  注册成功，或从 bearer 切换到 platform-token 后，Token
-                  只在该次响应显示。页面会阻止关闭，直到你明确确认已保存。
-                </p>
-              </div>
-            )}
-      </FormSection>
-
-      <FormSection
-        description="决定注册完成后是否立即允许挂载节点调用；它不代表远端当前健康。"
-        number="04"
-        title="Lifecycle"
-      >
-        <div className="flex items-start gap-3 rounded-md border bg-background/55 px-3 py-3">
-          <Checkbox
-            checked={state.enabled}
-            disabled={disabled}
-            id={enabledId}
-            onCheckedChange={value => onChange({ ...state, enabled: value === true })}
-          />
-          <Label className="grid cursor-pointer gap-1 text-xs leading-5" htmlFor={enabledId}>
-            <span>注册后启用调用</span>
-            <span className="font-normal text-[10px] text-muted-foreground">
-              关闭后 manifest 仍保留，但挂载节点调用会返回 unavailable，可随时重新启用。
-            </span>
-          </Label>
-        </div>
-      </FormSection>
-    </div>
-  )
-}
-
-const INITIAL_FORM: ManifestFormState = {
-  endpoint: '',
-  healthPath: '/healthz',
-  authKind: 'platform-token',
-  secretRef: '',
-  enabled: true,
-}
-
-function RegisterPluginDialog({
-  onToken,
-  onRegistered,
-}: {
-  onRegistered: (id: string) => void
-  onToken: (value: { id: string, token: string }) => void
-}) {
-  const invoke = useInvoke()
-  const qc = useQueryClient()
-  const [open, setOpen] = useState(false)
-  const [id, setId] = useState('')
-  const [form, setForm] = useState<ManifestFormState>(INITIAL_FORM)
-  const [error, setError] = useState<string | null>(null)
-
-  const changeOpen = (next: boolean) => {
-    if (invoke.isPending) return
-    setOpen(next)
-    if (!next) {
-      setError(null)
-      invoke.reset()
-    }
-  }
-
-  const submit = () => {
-    if (id.trim() === '' || form.endpoint.trim() === '') {
-      setError('Plugin id 与 endpoint 必填。')
-      return
-    }
-    if (form.authKind === 'bearer' && form.secretRef.trim() === '') {
-      setError('Bearer 认证需要 secretRef；请先把值写入凭证保管。')
-      return
-    }
-    invoke.mutate(
-      {
-        path: 'system/plugin',
-        tool: 'write',
-        args: { id: id.trim(), ...buildManifestFields(form) },
-      },
-      {
-        onSuccess: (response) => {
-          const registration = response.json as PluginRegistration
-          toast.success(`Plugin ${registration.id} 已通过探活与契约校验`)
-          setOpen(false)
-          setError(null)
-          setId('')
-          setForm(INITIAL_FORM)
-          onRegistered(registration.id)
-          if (registration.pluginToken) {
-            onToken({ id: registration.id, token: registration.pluginToken })
-            setTimeout(() => invoke.reset(), 0)
-          }
-          qc.invalidateQueries({ queryKey: ['tb'] })
-        },
-        onError: submitError => setError(submitError.message),
-      },
-    )
-  }
-
-  return (
-    <Dialog onOpenChange={changeOpen} open={open}>
-      <DialogTrigger asChild>
-        <Button size="sm">
-          <Plus />
-          注册 Plugin
-        </Button>
-      </DialogTrigger>
-      <DialogContent
-        className="max-h-[90svh] overflow-y-auto p-4 sm:max-w-2xl sm:p-6"
-        onEscapeKeyDown={event => invoke.isPending && event.preventDefault()}
-        onPointerDownOutside={event => invoke.isPending && event.preventDefault()}
-        showCloseButton={!invoke.isPending}
-      >
-        <DialogHeader>
-          <DialogTitle className="text-base">注册 Plugin</DialogTitle>
-          <DialogDescription>
-            Write 会先探活，再验证 ~describe / ~help；任一步失败都不会写入注册表。同 id
-            重注册会换发并吊销上一代 platform-token。
-          </DialogDescription>
-        </DialogHeader>
-        <div className="grid gap-3">
-          <section className="rounded-lg border bg-card/30">
-            <div className="flex items-start gap-3 border-b px-4 py-3">
-              <span className="mt-0.5 font-mono text-[10px] text-primary">00</span>
-              <div>
-                <h3 className="text-xs font-medium">Identity</h3>
-                <p className="mt-0.5 text-[10px] leading-5 text-muted-foreground">
-                  稳定的注册表主键，也会被节点配置以 plugin:&lt;id&gt; 引用。
-                </p>
-              </div>
-            </div>
-            <div className="grid gap-1.5 p-4">
-              <Label className="text-xs" htmlFor="register-plugin-id">
-                Plugin id *
-              </Label>
-              <Input
-                aria-describedby={error ? 'register-plugin-error' : undefined}
-                className="font-mono text-sm"
-                disabled={invoke.isPending}
-                id="register-plugin-id"
-                onChange={(event) => {
-                  setId(event.target.value)
-                  setError(null)
-                }}
-                placeholder="my-provider"
-                value={id}
-              />
-              <p className="text-[10px] text-muted-foreground">
-                允许 A–Z、a–z、0–9、点、下划线和短横线，且不能以标点开头。
-              </p>
-            </div>
-          </section>
-
-          <ManifestFields
-            disabled={invoke.isPending}
-            idPrefix="register-plugin"
-            onChange={(next) => {
-              setForm(next)
-              setError(null)
-            }}
-            state={form}
-          />
-
-          {error && (
-            <p
-              className="rounded-md border border-destructive/35 bg-destructive/[0.05] px-3 py-2.5 text-xs leading-5 text-destructive"
-              id="register-plugin-error"
-              role="alert"
-            >
-              {error}
-            </p>
-          )}
-        </div>
-        <DialogFooter className="border-t pt-4">
-          <Button disabled={invoke.isPending} onClick={() => changeOpen(false)} variant="outline">
-            取消
-          </Button>
-          <Button disabled={invoke.isPending} onClick={submit}>
-            {invoke.isPending ? <Loader2 className="animate-spin" /> : <FileCheck2 />}
-            {invoke.isPending ? '正在探活并校验…' : '验证并注册'}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  )
-}
-
-/** update 会整体重校验；认证切到 platform-token 时，响应含一次性 token。 */
-function EditPluginDialog({
-  plugin,
-  onClose,
-  onToken,
-  onUpdated,
-}: {
-  onClose: () => void
-  onToken: (value: { id: string, token: string }) => void
-  onUpdated: (id: string) => void
-  plugin: PluginManifest
-}) {
-  const invoke = useInvoke()
-  const qc = useQueryClient()
-  const [form, setForm] = useState<ManifestFormState>(() => ({
-    endpoint: plugin.endpoint,
-    healthPath: plugin.healthPath,
-    authKind: plugin.auth.kind,
-    secretRef: plugin.auth.kind === 'bearer' ? plugin.auth.secretRef : '',
-    enabled: plugin.enabled,
-  }))
-  const [error, setError] = useState<string | null>(null)
-
-  const close = () => {
-    if (invoke.isPending) return
-    invoke.reset()
-    onClose()
-  }
-
-  const submit = () => {
-    if (form.endpoint.trim() === '') {
-      setError('Endpoint 必填。')
-      return
-    }
-    if (form.authKind === 'bearer' && form.secretRef.trim() === '') {
-      setError('Bearer 认证需要 secretRef。')
-      return
-    }
-    invoke.mutate(
-      {
-        path: 'system/plugin',
-        tool: 'update',
-        args: { id: plugin.id, patch: buildManifestFields(form) },
-      },
-      {
-        onSuccess: (response) => {
-          const registration = response.json as PluginRegistration
-          toast.success(`Plugin ${plugin.id} 已更新`)
-          onUpdated(plugin.id)
-          onClose()
-          if (registration.pluginToken) {
-            onToken({ id: plugin.id, token: registration.pluginToken })
-            setTimeout(() => invoke.reset(), 0)
-          }
-          qc.invalidateQueries({ queryKey: ['tb'] })
-        },
-        onError: submitError => setError(submitError.message),
-      },
-    )
-  }
-
-  return (
-    <Dialog onOpenChange={open => !open && close()} open>
-      <DialogContent
-        className="max-h-[90svh] overflow-y-auto p-4 sm:max-w-2xl sm:p-6"
-        onEscapeKeyDown={event => invoke.isPending && event.preventDefault()}
-        onPointerDownOutside={event => invoke.isPending && event.preventDefault()}
-        showCloseButton={!invoke.isPending}
-      >
-        <DialogHeader>
-          <DialogTitle className="font-mono text-base">
-            编辑
-            {plugin.id}
-          </DialogTitle>
-          <DialogDescription>
-            Endpoint、healthPath、kind 或接口版本变化时会重新探活并校验契约；失败不会覆盖当前
-            manifest。
-          </DialogDescription>
-        </DialogHeader>
-
-        <ManifestFields
-          disabled={invoke.isPending}
-          idPrefix={`edit-plugin-${plugin.id}`}
-          onChange={(next) => {
-            setForm(next)
-            setError(null)
-          }}
-          state={form}
-        />
-
-        {error && (
-          <p
-            className="rounded-md border border-destructive/35 bg-destructive/[0.05] px-3 py-2.5 text-xs leading-5 text-destructive"
-            role="alert"
-          >
-            {error}
-          </p>
-        )}
-
-        <DialogFooter className="border-t pt-4">
-          <Button disabled={invoke.isPending} onClick={close} variant="outline">
-            取消
-          </Button>
-          <Button disabled={invoke.isPending} onClick={submit}>
-            {invoke.isPending ? <Loader2 className="animate-spin" /> : <Check />}
-            {invoke.isPending ? '正在验证变更…' : '保存 Manifest'}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  )
-}
-
-/**
- * Plugin 管理（对等 `tb plugin register|list|get|update|health|rm`）。
+* Plugin 管理（对等 `tb plugin register|list|get|update|health|rm`）。
  * enabled 是本地生命周期开关；health 只在用户明确触发时向远端探测。
  */
 export function PluginsPage() {
@@ -1010,10 +514,11 @@ export function PluginsPage() {
         <div className="min-w-0 flex-1">
           <p className="text-sm font-medium">生命周期与健康状态彼此独立</p>
           <p className="mt-1 text-xs leading-5 text-muted-foreground">
-            Enabled 只决定平台是否允许调用；注册或契约字段更新时会自动探活并校验
+            Enabled 只决定平台是否允许调用；注册或连接契约字段更新时会自动探活并校验
             {' '}
-            <span className="font-mono">~describe / ~help</span>
-            。列表健康状态只在点击检查后刷新，不做后台轮询。
+            <span className="font-mono">~describe</span>
+            。列表健康状态只在点击检查后刷新，
+            不做后台轮询。
           </p>
         </div>
         {!list.isPending && !list.isError && (

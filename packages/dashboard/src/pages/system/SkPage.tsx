@@ -14,7 +14,7 @@ import {
   UserRound,
 } from 'lucide-react'
 import { useQueryClient } from '@tanstack/react-query'
-import { type ReactNode, useState } from 'react'
+import { useState } from 'react'
 import { toast } from 'sonner'
 import {
   Dialog,
@@ -33,19 +33,23 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import { type Action, ACTIONS, type Scope, type SecretKeyInfo } from '@/lib/types'
 import { PaginationFooter } from '@/components/PaginationFooter'
+import { type Scope, type SecretKeyInfo } from '@/lib/types'
 import { ConfirmAction } from '@/components/ConfirmAction'
 import { CopyButton } from '@/components/CopyButton'
 import { EmptyState } from '@/components/EmptyState'
 import { PageHeader } from '@/components/PageHeader'
 import { useInvoke, useSkList } from '@/lib/queries'
-import { Checkbox } from '@/components/ui/checkbox'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
+import {
+  buildSkWriteArgs,
+  INITIAL_SK_FORM,
+  type SkFormState,
+} from './forms/skConfig'
+import { SkFormFields } from './forms/SkFormFields'
 
 type SkStatus = 'active' | 'disabled' | 'expired'
 type StatusFilter = 'all' | SkStatus
@@ -237,39 +241,6 @@ function StatusBadge({ status }: { status: SkStatus }) {
   )
 }
 
-interface ScopeRow {
-  actions: Action[]
-  effect: 'allow' | 'deny'
-  pattern: string
-}
-
-const INITIAL_SCOPES: ScopeRow[] = [{ pattern: '**', actions: ['read', 'call'], effect: 'allow' }]
-
-function FormSection({
-  index,
-  title,
-  description,
-  children,
-}: {
-  children: ReactNode
-  description: string
-  index: string
-  title: string
-}) {
-  return (
-    <section className="grid gap-3 rounded-xl border bg-card/50 p-4">
-      <div className="flex items-start gap-3 border-b pb-3">
-        <span className="mt-0.5 font-mono text-[10px] tracking-[0.16em] text-primary">{index}</span>
-        <div>
-          <h3 className="text-sm font-medium">{title}</h3>
-          <p className="mt-0.5 text-xs leading-5 text-muted-foreground">{description}</p>
-        </div>
-      </div>
-      {children}
-    </section>
-  )
-}
-
 function CreateSkDialog({
   onIssued,
 }: {
@@ -278,54 +249,28 @@ function CreateSkDialog({
   const invoke = useInvoke()
   const qc = useQueryClient()
   const [open, setOpen] = useState(false)
-  const [owner, setOwner] = useState('')
-  const [description, setDescription] = useState('')
-  const [scopes, setScopes] = useState<ScopeRow[]>(INITIAL_SCOPES)
-  const [registerPaths, setRegisterPaths] = useState('')
-  const [expiresAt, setExpiresAt] = useState('')
+  const [form, setForm] = useState<SkFormState>(INITIAL_SK_FORM)
   const [err, setErr] = useState<string | null>(null)
 
   const resetDraft = () => {
-    setOwner('')
-    setDescription('')
-    setScopes(INITIAL_SCOPES)
-    setRegisterPaths('')
-    setExpiresAt('')
+    setForm(INITIAL_SK_FORM)
     setErr(null)
   }
 
   const submit = () => {
-    const cleaned: Scope[] = scopes
-      .filter(scope => scope.pattern.trim() !== '' && scope.actions.length > 0)
-      .map(scope => ({
-        pattern: scope.pattern.trim(),
-        actions: scope.actions,
-        ...(scope.effect === 'deny' ? { effect: 'deny' as const } : {}),
-      }))
-    if (owner.trim() === '') {
-      setErr('请填写 owner，建议使用 user:、agent: 或 device: 前缀。')
+    let args: ReturnType<typeof buildSkWriteArgs>
+    try {
+      args = buildSkWriteArgs(form)
+    } catch (buildError) {
+      setErr((buildError as Error).message)
       return
     }
-    if (cleaned.length === 0) {
-      setErr('至少需要一条包含 path pattern 与 action 的 scope。')
-      return
-    }
-    const normalizedRegisterPaths = registerPaths
-      .split(',')
-      .map(value => value.trim())
-      .filter(Boolean)
 
     invoke.mutate(
       {
         path: 'system/sk',
         tool: 'write',
-        args: {
-          owner: owner.trim(),
-          scopes: cleaned,
-          ...(description.trim() ? { description: description.trim() } : {}),
-          ...(normalizedRegisterPaths.length > 0 ? { registerPaths: normalizedRegisterPaths } : {}),
-          ...(expiresAt ? { expiresAt: new Date(expiresAt).toISOString() } : {}),
-        },
+        args,
       },
       {
         onSuccess: (response) => {
@@ -374,200 +319,7 @@ function CreateSkDialog({
         </DialogHeader>
 
         <div className="min-h-0 space-y-5 overflow-y-auto px-5 py-5 sm:px-6">
-          <FormSection
-            description="明确谁在使用这把钥匙，以及它承担的具体任务。"
-            index="01"
-            title="身份"
-          >
-            <div className="grid gap-3 sm:grid-cols-2">
-              <div className="grid gap-1.5">
-                <Label htmlFor="sk-owner">owner *</Label>
-                <Input
-                  autoComplete="off"
-                  className="font-mono text-sm"
-                  id="sk-owner"
-                  onChange={event => setOwner(event.target.value)}
-                  placeholder="agent:researcher"
-                  value={owner}
-                />
-                <p className="text-[11px] text-muted-foreground">
-                  建议：user:alice / agent:bot / device:host
-                </p>
-              </div>
-              <div className="grid gap-1.5">
-                <Label htmlFor="sk-description">用途说明</Label>
-                <Input
-                  id="sk-description"
-                  onChange={event => setDescription(event.target.value)}
-                  placeholder="只读知识库检索"
-                  value={description}
-                />
-                <p className="text-[11px] text-muted-foreground">用于列表识别和后续权限审计。</p>
-              </div>
-            </div>
-          </FormSection>
-
-          <FormSection
-            description="每条规则由路径、动作和 allow / deny 共同构成。"
-            index="02"
-            title="权限"
-          >
-            <div className="grid gap-3">
-              {scopes.map((row, index) => (
-                <div
-                  className={`rounded-lg border p-3 ${
-                    row.effect === 'deny'
-                      ? 'border-destructive/25 bg-destructive/[0.025]'
-                      : 'bg-muted/10'
-                  }`}
-                  // biome-ignore lint/suspicious/noArrayIndexKey: scope 行在提交前没有稳定业务 id
-                  key={index}
-                >
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="flex items-center gap-2">
-                      <span className="font-mono text-[10px] text-muted-foreground">
-                        RULE
-                        {' '}
-                        {String(index + 1).padStart(2, '0')}
-                      </span>
-                      <Badge
-                        className={
-                          row.effect === 'deny'
-                            ? 'border-destructive/30 text-destructive'
-                            : 'border-ok/30 text-ok'
-                        }
-                        variant="outline"
-                      >
-                        {row.effect}
-                      </Badge>
-                    </div>
-                    <Button
-                      aria-label={`移除第 ${index + 1} 条 scope`}
-                      disabled={invoke.isPending}
-                      onClick={() => setScopes(current => current.filter((_, i) => i !== index))}
-                      size="icon-xs"
-                      type="button"
-                      variant="ghost"
-                    >
-                      <Trash2 />
-                    </Button>
-                  </div>
-                  <div className="mt-3 grid gap-3 md:grid-cols-[minmax(180px,0.8fr)_1.6fr]">
-                    <div className="grid gap-1.5">
-                      <Label className="text-xs" htmlFor={`scope-pattern-${index}`}>
-                        path pattern
-                      </Label>
-                      <Input
-                        className="h-9 font-mono text-xs"
-                        id={`scope-pattern-${index}`}
-                        onChange={event =>
-                          setScopes(current =>
-                            current.map((scope, i) =>
-                              i === index ? { ...scope, pattern: event.target.value } : scope,
-                            ),
-                          )}
-                        placeholder="docs/**"
-                        value={row.pattern}
-                      />
-                    </div>
-                    <fieldset className="grid gap-1.5">
-                      <legend className="text-xs font-medium">actions</legend>
-                      <div className="flex min-h-9 flex-wrap items-center gap-x-3 gap-y-2 rounded-md border bg-background/65 px-3 py-2">
-                        {ACTIONS.map(action => (
-                          // biome-ignore lint/a11y/noLabelWithoutControl: Radix Checkbox 在 label 内提供关联
-                          <label
-                            className="flex items-center gap-1.5 font-mono text-xs"
-                            key={action}
-                          >
-                            <Checkbox
-                              checked={row.actions.includes(action)}
-                              onCheckedChange={checked =>
-                                setScopes(current =>
-                                  current.map((scope, i) =>
-                                    i === index
-                                      ? {
-                                          ...scope,
-                                          actions: checked
-                                            ? [...scope.actions, action]
-                                            : scope.actions.filter(item => item !== action),
-                                        }
-                                      : scope,
-                                  ),
-                                )}
-                            />
-                            {action}
-                          </label>
-                        ))}
-                      </div>
-                    </fieldset>
-                  </div>
-                  <div className="mt-3 flex justify-end">
-                    {/* biome-ignore lint/a11y/noLabelWithoutControl: Radix Checkbox 在 label 内提供关联 */}
-                    <label className="flex items-center gap-2 text-xs text-muted-foreground">
-                      <Checkbox
-                        checked={row.effect === 'deny'}
-                        onCheckedChange={checked =>
-                          setScopes(current =>
-                            current.map((scope, i) =>
-                              i === index
-                                ? { ...scope, effect: checked ? 'deny' : 'allow' }
-                                : scope,
-                            ),
-                          )}
-                      />
-                      设为 deny 规则（优先于所有 allow）
-                    </label>
-                  </div>
-                </div>
-              ))}
-              <Button
-                className="justify-self-start"
-                disabled={invoke.isPending}
-                onClick={() =>
-                  setScopes(current => [
-                    ...current,
-                    { pattern: '', actions: ['read'], effect: 'allow' },
-                  ])}
-                size="sm"
-                type="button"
-                variant="outline"
-              >
-                <Plus />
-                添加 scope 规则
-              </Button>
-
-              <div className="grid gap-1.5 border-t pt-4">
-                <Label htmlFor="sk-register-paths">registerPaths（高级，可空）</Label>
-                <Input
-                  className="font-mono text-xs"
-                  id="sk-register-paths"
-                  onChange={event => setRegisterPaths(event.target.value)}
-                  placeholder="device/build-01/**, device/build-02/**"
-                  value={registerPaths}
-                />
-                <p className="text-[11px] text-muted-foreground">
-                  逗号分隔；只约束反向注册路径，不会自动授予 register action。
-                </p>
-              </div>
-            </div>
-          </FormSection>
-
-          <FormSection
-            description="不填表示永久有效；短期自动化任务建议显式设置到期时间。"
-            index="03"
-            title="生命周期"
-          >
-            <div className="grid gap-1.5 sm:max-w-sm">
-              <Label htmlFor="sk-expiry">过期时间（可空）</Label>
-              <Input
-                id="sk-expiry"
-                onChange={event => setExpiresAt(event.target.value)}
-                type="datetime-local"
-                value={expiresAt}
-              />
-            </div>
-          </FormSection>
-
+          <SkFormFields disabled={invoke.isPending} onChange={setForm} state={form} />
           {err && (
             <p
               className="rounded-md border border-destructive/30 bg-destructive/[0.04] px-3 py-2 text-xs text-destructive"

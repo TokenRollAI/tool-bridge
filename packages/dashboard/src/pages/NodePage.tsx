@@ -19,7 +19,7 @@ import { KindBadge } from '@/components/KindBadge'
 import { KIND_ICON } from '@/components/kind-icon'
 import { Button } from '@/components/ui/button'
 import { encodeTreePath } from '@/lib/path'
-import { MountDialog } from './system/RegistryPage'
+import { MountDialog } from './system/forms/MountDialog'
 
 function NodeMetric({
   icon: Icon,

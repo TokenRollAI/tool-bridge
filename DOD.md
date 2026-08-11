@@ -66,7 +66,7 @@ Phase 间不可跳:B 改 ToolSpec 派生形态,C 索引 ToolSpec 必须在 B 后
 
 **目标**:Dashboard 大页拆分(层 2)+ Docker Compose 本地开发栈(层 3)。
 **DoD**:
-- [ ] Dashboard 大页拆分:Registry/Plugins/SK 页拆出独立纯 config builder / kind 子表单 / 共用 section,表单行为与 CLI/builtin 对齐。验证:`pnpm --filter @tool-bridge/dashboard test` + gateway `ui.integration.test.ts` 全绿;`pnpm verify` 退出码 0。
+- [x] Dashboard 大页拆分:Registry/Plugins/SK 页拆出独立纯 config builder / kind 子表单 / 共用 section,表单行为与 CLI/builtin 对齐。验证:`pnpm --filter @tool-bridge/dashboard test` + gateway `ui.integration.test.ts` 全绿;`pnpm verify` 退出码 0。
 - [ ] Docker Compose 本地开发栈:`docker-compose.yml` 一键起 gateway + 一个 plugin worker + mock 上游;生产单容器形态不动。验证:`docker compose up -d` 后端到端 smoke(注册 plugin→挂载→调用)通过,`docker compose down` 清理。
 - [ ] 全阶段回归:`pnpm verify` 全绿。
 

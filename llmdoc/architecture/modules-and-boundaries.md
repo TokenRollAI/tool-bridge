@@ -27,7 +27,7 @@
 | SDK | 内嵌 TB 实例 / 程序化注册 / 反向连接 | —(装配层) | `packages/sdk`:createToolBridge = core + gateway 的 createTbApp + 内存宿主缺省 |
 | CLI | 纯 API 客户端 `tb`,22 个顶层命令族一一映射接口面;`tb search` 直连 root `/~search`,**无专用端点** | — | `packages/cli`(commander;npm 发布物) |
 | Plugin System | 自定义 Provider 注册与生命周期(探活/契约校验/信封传输) | `plugin/` | gateway `providers/pluginClient|pluginTool|pluginContext` + builtin `system/plugin`;首个 in-repo plugin 参考实现:`packages/plugin-feishu`(CF Worker,飞书 TAT 自动换发) |
-| Dashboard | `~help` 通用渲染器 + 管理表单 + 独立 `/search` root 搜索消费页,**无专用后端** | — | `packages/dashboard`(React SPA)经 gateway Static Assets 挂 `/ui` |
+| Dashboard | `~help` 通用渲染器 + 管理表单 + 独立 `/search` root 搜索消费页,**无专用后端**;系统表单按 pure builder → 抽出的 fields/dialog → route coordinator/剩余视图所有权分层 | — | `packages/dashboard`(React SPA)经 gateway Static Assets 挂 `/ui` |
 | 部署 | CF 与 Docker 两条路径产出同一棵树 | — | CF:`scripts/provision.mjs` + wrangler;Docker/Node:`packages/server`(SQLite/FS/ws DeviceHub)+ 根 Dockerfile,见 [../guides/docker-host.md](../guides/docker-host.md) |
 
 ## 依赖方向要点
@@ -83,7 +83,7 @@ Workers 无启动钩子,首请求惰性引导(模块级 promise 防重入 + KV �
 
 ## Dashboard 集成
 
-无专用后端:`api.ts` `baseUrl:''` 同源直接消费 HTBP 数据面、`~help` 与 root `/~search`;SearchPage 当前只请求 keyword并按 opaque cursor 续页,结果以 `?tool` 导航 NodePage预选命令。TreePath 必须按 raw segment 编码:导航 URL 用同一 helper,所有节点 API 请求也在 Router 解码后重新逐段编码。SK 只存浏览器(localStorage 多 profile),因此任何同源脚本执行都属于凭据边界。`sessionStorage` 或浏览器端加密不能隔离同源 XSS;若迁移 HttpOnly cookie,须同步设计服务端 session、CSRF 与多网关连接模型。表单由 `~help` JSON 的 `inputSchema`(真 JSON Schema)经 @rjsf 渲染。部署编排:`pnpm deploy:all` 先 `dashboard build` 再 `gateway deploy`;gateway Vitest 也无条件从当前 Dashboard source build,避免静态集成误验旧 `dist`。
+无专用后端:`api.ts` `baseUrl:''` 同源直接消费 HTBP 数据面、`~help` 与 root `/~search`;SearchPage 当前只请求 keyword并按 opaque cursor 续页,结果以 `?tool` 导航 NodePage预选命令。TreePath 必须按 raw segment 编码:导航 URL 用同一 helper,所有节点 API 请求也在 Router 解码后重新逐段编码。Registry/Plugin/SK 管理表单的纯 builder 只负责确定的本地组合校验与最终 wire object;抽出的 fields/dialog 负责相应受控状态、敏感结果与生命周期;route page 协调 query/mutation并继续拥有未拆出的展示/dialog。HTTPS、SecretRef 使用授权、远端 contract/provider probe 仍由 gateway 判定。`MountDialog` 是独立共享组件,NodePage 与 Registry route 直接依赖它,不得经 route page re-export。SK 只存浏览器(localStorage 多 profile),因此任何同源脚本执行都属于凭据边界。`sessionStorage` 或浏览器端加密不能隔离同源 XSS;若迁移 HttpOnly cookie,须同步设计服务端 session、CSRF 与多网关连接模型。通用命令表单仍由 `~help` JSON 的 `inputSchema`(真 JSON Schema)经 @rjsf 渲染。部署编排:`pnpm deploy:all` 先 `dashboard build` 再 `gateway deploy`;gateway Vitest 也无条件从当前 Dashboard source build,避免静态集成误验旧 `dist`。
 
 ## 命名注意
 

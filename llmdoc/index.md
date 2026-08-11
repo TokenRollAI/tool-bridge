@@ -51,6 +51,7 @@
 - [memory/reflections/2026-08-11-fts5-short-query-fallback.md](memory/reflections/2026-08-11-fts5-short-query-fallback.md) — FTS5 trigram 短查询 fallback(混合长短词假阳性风险;整句 escaped LIKE AND;Unicode code point 阈值、参数预算与 helper/adapter/wire 三层证据)。
 - [memory/reflections/2026-08-11-search-derived-state-lkg.md](memory/reflections/2026-08-11-search-derived-state-lkg.md) — Search 派生状态的 LKG/cursor/最终一致边界(canonical 不受 search-only 容量反向限制;full/hot/concurrent 三路有界 LKG;权限后 cursor 与真实宿主预算探针)。
 - [memory/reflections/2026-08-11-search-consumer-parity-ui-evidence.md](memory/reflections/2026-08-11-search-consumer-parity-ui-evidence.md) — 全局搜索消费面对等与 UI 证据链(API/CLI/Dashboard 共用 wire contract;全局搜索与本地树导航分义;TreePath 逐段编码;gateway 测试从当前 Dashboard source build;浏览器与静态证据边界)。
+- [memory/reflections/2026-08-11-dashboard-system-forms-split.md](memory/reflections/2026-08-11-dashboard-system-forms-split.md) — Dashboard 系统表单拆分与证据边界(先抽 pure builder再拆 fields/dialog/route;CLI/builtin 对等用 wire fixture执行;route-component 依赖解耦;包级测试纳入 root verify;Node Vitest、fresh-build integration与浏览器证据分层)。
 
 ## 路由提示
 
