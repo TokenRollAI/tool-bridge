@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { SELF } from 'cloudflare:test'
+import { connectModernMcpClient, connectTestMcpClient } from './mcpClient'
 import { mcpToolIdentity, mcpToolName } from '../src/mcpServer'
 import pkg from '../package.json' with { type: 'json' }
-import { connectTestMcpClient } from './mcpClient'
 import { TEST_ADMIN_SK } from './fixtures'
 
 const admin = (extra: RequestInit = {}): RequestInit => ({
@@ -252,6 +252,44 @@ describe('MCP consumer endpoint', () => {
         name: 'tb_search',
         arguments: { query: 'controlcatalogunique', unexpected: true },
       })).rejects.toThrow(/unexpected|additional/i)
+    } finally {
+      await client.close()
+    }
+  })
+
+  it('serves the 2026-07-28 era without a handshake and caches tools/list privately', async () => {
+    await mountHttp('mcp-modern/basic')
+    const client = await connectModernMcpClient(
+      'https://tb.test/~mcp',
+      TEST_ADMIN_SK,
+      (input, init) => SELF.fetch(input, init),
+    )
+
+    try {
+      const listed = await client.listTools()
+      expect(listed.tools.length).toBeGreaterThan(0)
+      // SEP-2549:modern 结果必带缓存字段。scope 必须是 private——工具清单按调用方
+      // scope 裁剪过,public 等于允许共享中间层跨身份复用目录。
+      const cacheable = listed as unknown as { cacheScope?: string, ttlMs?: number }
+      expect(cacheable.cacheScope).toBe('private')
+      expect(cacheable.ttlMs).toBe(300_000)
+    } finally {
+      await client.close()
+    }
+  })
+
+  it('keeps cache fields off the 2025-era wire', async () => {
+    await mountHttp('mcp-modern/legacy-clean')
+    const client = await connectTestMcpClient(
+      'https://tb.test/~mcp',
+      TEST_ADMIN_SK,
+      (input, init) => SELF.fetch(input, init),
+    )
+
+    try {
+      const listed = await client.listTools() as Record<string, unknown>
+      expect(listed).not.toHaveProperty('ttlMs')
+      expect(listed).not.toHaveProperty('cacheScope')
     } finally {
       await client.close()
     }

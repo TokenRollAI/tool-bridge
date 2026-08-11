@@ -21,17 +21,15 @@
  * 失败落回「重新授权」指引,可自救。多域名网关:redirect_uri 钉在发起授权时的 origin。
  */
 
-import type {
-  OAuthClientInformationFull,
-  OAuthClientInformationMixed,
-  OAuthClientMetadata,
-  OAuthTokens,
-} from '@modelcontextprotocol/sdk/shared/auth.js'
 import {
   auth,
+  type OAuthClientInformationFull,
+  type OAuthClientInformationMixed,
+  type OAuthClientMetadata,
   type OAuthClientProvider,
   type OAuthDiscoveryState,
-} from '@modelcontextprotocol/sdk/client/auth.js'
+  type OAuthTokens,
+} from '@modelcontextprotocol/client'
 import { base64urlDecode, base64urlEncode, type StateStore, TBError } from '@tool-bridge/core'
 
 /** 回调路径(固定值:DCR 注册的 redirect_uri 尾段;树外免认证,state 即凭证)。 */

@@ -106,7 +106,7 @@ import {
   mcpToolIdentity,
 } from './mcpServer'
 import { assertRemoteAllowed, passthroughRemote, type RemoteSettings } from './providers/remote'
-import { createMcpProvider, invalidateMcpSession, type McpConfig } from './providers/mcp'
+import { createMcpProvider, invalidateMcpEra, type McpConfig } from './providers/mcp'
 import { createS3ObjectStore, type S3StoreConfig } from './providers/s3Object'
 import { createPluginContextProvider } from './providers/pluginContext'
 import { createHttpProvider, type HttpConfig } from './providers/http'
@@ -1960,10 +1960,17 @@ export function createTbApp(deps: TbAppDeps): Hono<{ Variables: Vars }> {
     }
   }
 
-  // MCP is an HTBP reserved control segment. Stateless transport keeps every request behind
+  // MCP is an HTBP reserved control segment. Stateless serving keeps every request behind
   // the gateway's current Bearer identity instead of trusting isolate-local session state.
+  // tools/list advertises the same freshness window the gateway's own upstream tool cache
+  // already serves from, so client-side caching adds no staleness class we don't already have.
   app.all('/~mcp', c =>
-    runHandler(async () => await handleMcpRequest(c.req.raw, deps.version, mcpBridgeFor(c))))
+    runHandler(async () => await handleMcpRequest(
+      c.req.raw,
+      deps.version,
+      mcpBridgeFor(c),
+      (deps.toolCacheTtlSec ?? TOOL_CACHE_TTL_DEFAULT) * 1000,
+    )))
 
   // POST /~search is a root-only, authenticated protocol endpoint. The route remains absent
   // until a host injects a real keyword index and declares the matching capability.
@@ -2558,7 +2565,7 @@ export function createTbApp(deps: TbAppDeps): Hono<{ Variables: Vars }> {
     // 注册变更 → 失效该节点工具缓存 + mcp 会话/OAuth 缓存(Write/Update/Delete 触发失效)。
     if (registryTarget !== undefined) {
       await invalidateToolCache(store, registryTarget)
-      await invalidateMcpSession(store, registryTarget)
+      await invalidateMcpEra(store, registryTarget)
       await invalidateMcpOAuth(store, registryTarget)
       await searchSync?.reconcileNodeQuietly(registryTarget, { marker: registryMarker })
       const current = await registry.get(registryTarget).catch(() => null)
@@ -2569,7 +2576,7 @@ export function createTbApp(deps: TbAppDeps): Hono<{ Variables: Vars }> {
     const pluginEmptyPaths: TreePath[] = []
     for (const mount of pluginMounts) {
       await invalidateToolCache(store, mount.node.path)
-      await invalidateMcpSession(store, mount.node.path)
+      await invalidateMcpEra(store, mount.node.path)
       await invalidateMcpOAuth(store, mount.node.path)
       const providerId = mount.node.config?.kind === 'tool'
         ? mount.node.config.provider
@@ -2850,7 +2857,7 @@ export function createTbApp(deps: TbAppDeps): Hono<{ Variables: Vars }> {
     }
     // 注册变更 → 失效该节点工具缓存 + mcp 会话/OAuth 缓存。
     await invalidateToolCache(store, body.path)
-    await invalidateMcpSession(store, body.path)
+    await invalidateMcpEra(store, body.path)
     await invalidateMcpOAuth(store, body.path)
     await searchSync?.reconcileNodeQuietly(body.path, { marker })
     if (await refreshDynamicSearchNode(node, ctx, deps)) await searchSync?.abort(marker)

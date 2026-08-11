@@ -131,15 +131,20 @@ describe('工具虚拟化(hide 不可见、rename 后原名不可调)', () => {
 })
 
 /**
- * 极简 Streamable HTTP MCP 上游 mock(有状态会话,JSON 应答面覆盖 SDK client 所需的
- * initialize / notifications/initialized / tools/list)。`expireAll()` 模拟上游空闲回收
- * 会话后的**不合规行为**(实测 MetaMCP):对过期会话不按 spec 回 404,而是当作空会话
- * 正常返回 200 + 空 tools。GET(standalone SSE)不会到达这里——provider 侧已拦成 405。
+ * 极简 Streamable HTTP MCP 上游 mock(2025 系有状态会话,JSON 应答面覆盖 SDK client 所需的
+ * server/discover 探测 / initialize / notifications/initialized / tools/list)。未知方法回
+ * JSON-RPC `-32601`,这也正是 2025 系上游对 modern 探测的合规回应,客户端据此保守回落。
+ *
+ * `expireAll()` 模拟上游空闲回收会话后的**不合规行为**(实测 MetaMCP):对过期会话不按
+ * spec 回 404,而是当作空会话正常返回 200 + 空 tools。网关自 v2 起不再复用上游会话
+ * (见 providers/mcp.ts 文件头),故这里用它验证的是"该情形已污染不到我们",而不再是
+ * 迁移前那套失效重试防御。GET(standalone SSE)不会到达这里——provider 侧已拦成 405。
  */
 function mcpUpstreamMock(tools: Array<{ description: string, name: string }>) {
   const sessions = new Set<string>()
   let issued = 0
   let initializeCount = 0
+  let discoverCount = 0
   const headersSeen: Headers[] = []
   const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
     headersSeen.push(new Headers(init?.headers))
@@ -169,6 +174,9 @@ function mcpUpstreamMock(tools: Array<{ description: string, name: string }>) {
       )
     }
     if (body.method === 'notifications/initialized') return new Response(null, { status: 202 })
+    // 2025 系上游对 2026-07-28 的 server/discover 探测的合规回应:JSON-RPC -32601。
+    // 客户端据此保守回落 initialize(实测 -32601 与 HTTP 400/404/405 都能正确回落)。
+    if (body.method === 'server/discover') discoverCount += 1
     if (body.method === 'tools/list') {
       const sid = new Headers(init?.headers).get('mcp-session-id')
       const live = sid !== null && sessions.has(sid)
@@ -197,6 +205,7 @@ function mcpUpstreamMock(tools: Array<{ description: string, name: string }>) {
     fetchMock,
     expireAll: () => sessions.clear(),
     initializeCalls: () => initializeCount,
+    discoverCalls: () => discoverCount,
     headersSeen: () => headersSeen,
   }
 }
@@ -704,13 +713,18 @@ describe('remote 节点(白名单、X-TB-Via 环检测)', () => {
   })
 })
 
-describe('mcp 会话复用:过期会话空列表防御(默认离线,上游为 fetch mock)', () => {
-  it('上游回收会话后回 200+空列表(不合规)→ 清会话重握手一次,工具列表恢复', async () => {
+/**
+ * v2 起网关**不再复用上游会话**(providers/mcp.ts 文件头有取证:跳过握手会让客户端
+ * 不知道服务端能力,`listTools()` 被能力门挡下静默回空且零网络请求)。因此原先那组
+ * "过期会话空列表防御"用例的前提已不存在——它们会因为"每请求都完整握手"而恰好通过,
+ * 变成空过的绿灯。这里改成断言**新契约**。
+ */
+describe('mcp era 判定与无会话复用(默认离线,上游为 fetch mock)', () => {
+  it('不复用会话:上游回收全部会话也污染不到工具列表(每趟都重新握手)', async () => {
     const upstream = mcpUpstreamMock([{ name: 'echo', description: 'echo back' }])
     vi.stubGlobal('fetch', upstream.fetchMock)
     await mountMcp('ext/mcp-expiry')
 
-    // 首次 ~help:完整握手 + tools/list,见 echo;会话回填 mcpsession:<path>。
     const first = await SELF.fetch(
       'https://tb.test/ext/mcp-expiry/~help',
       admin({ headers: { accept: 'text/plain' } }),
@@ -719,34 +733,34 @@ describe('mcp 会话复用:过期会话空列表防御(默认离线,上游为 fe
     expect(parseHelpDsl(await first.text()).cmds.map(c => c.name)).toContain('echo')
     expect(upstream.initializeCalls()).toBe(1)
 
+    // 上游回收全部会话。迁移前这会让复用旧会话的下一趟拿到 200+空列表(不合规上游的
+    // 无信号失效),需要专门的防御;现在我们压根不带旧会话,该情形结构上不可能发生。
     upstream.expireAll()
 
-    // refresh=1 跳过 toolCache 强制打上游:复用的缓存会话拿到空列表 → 防御生效,
-    // 清会话完整重握手(第二次 initialize)后恢复工具列表,而不是把空列表当真。
     const second = await SELF.fetch(
       'https://tb.test/ext/mcp-expiry/~help?refresh=1',
       admin({ headers: { accept: 'text/plain' } }),
     )
     expect(second.status).toBe(200)
     expect(parseHelpDsl(await second.text()).cmds.map(c => c.name)).toContain('echo')
+    // 第二趟是又一次完整握手(而非复用会话 + 失效重试),故恰好 2 次。
     expect(upstream.initializeCalls()).toBe(2)
   })
 
-  it('真空列表上游:完整握手拿到的空列表原样相信;缓存会话空列表只重试一次不循环', async () => {
+  it('真空列表上游:空列表原样相信,不触发重试', async () => {
     const upstream = mcpUpstreamMock([])
     vi.stubGlobal('fetch', upstream.fetchMock)
     await mountMcp('ext/mcp-empty')
 
-    // 首次:完整握手(非缓存会话)拿到空列表 → 直接相信,不触发重试。
     const first = await SELF.fetch(
       'https://tb.test/ext/mcp-empty/~help',
       admin({ headers: { accept: 'text/plain' } }),
     )
     expect(first.status).toBe(200)
     expect(parseHelpDsl(await first.text()).cmds).toHaveLength(0)
+    // 每次请求恰好一次握手:没有"空列表 → 再试一次"的额外往返了。
     expect(upstream.initializeCalls()).toBe(1)
 
-    // 再次(会话未过期):缓存会话拿到空列表 → 恰好一次重握手复核,仍空则相信。
     const second = await SELF.fetch(
       'https://tb.test/ext/mcp-empty/~help?refresh=1',
       admin({ headers: { accept: 'text/plain' } }),
@@ -756,13 +770,34 @@ describe('mcp 会话复用:过期会话空列表防御(默认离线,上游为 fe
     expect(upstream.initializeCalls()).toBe(2)
   })
 
-  it('KV 边缘读缓存吞掉 delete(删后 get 仍回旧值)时:重试强制重握手,工具列表仍恢复', async () => {
+  it('era 判定按节点缓存:只在首趟探测 server/discover,时限内后续请求不再重探', async () => {
     const upstream = mcpUpstreamMock([{ name: 'echo', description: 'echo back' }])
     vi.stubGlobal('fetch', upstream.fetchMock)
 
-    // 模拟 Cloudflare KV 边缘读缓存的最坏情况:同请求内刚读过的 key,delete 后 get
-    // 在 ≥60s 窗口内仍返回旧值。防御若靠"清缓存后回读"取新会话,必被这层缓存击穿
-    // (2026-07-08 生产复发根因)。
+    const backing = new MemoryStateStore()
+    const provider = createMcpProvider(
+      { url: 'https://mcp-mock.test/mcp' },
+      new SecretStoreImpl(backing, undefined),
+      { allowInsecure: false, session: { store: backing, nodePath: 'ext/mcp-era' } },
+    )
+
+    // 首趟:mode:'auto' 探测 server/discover,上游回 -32601 → 保守回落 legacy 并记住判定。
+    expect((await provider.list()).map(t => t.name)).toContain('echo')
+    expect(upstream.discoverCalls()).toBe(1)
+    expect(upstream.initializeCalls()).toBe(1)
+
+    // 第二趟:命中缓存的 legacy 判定 → 跳过探测(prior:legacy),但仍完整握手。
+    expect((await provider.list()).map(t => t.name)).toContain('echo')
+    expect(upstream.discoverCalls()).toBe(1)
+    expect(upstream.initializeCalls()).toBe(2)
+  })
+
+  it('era 判定缓存不可用(store 的 delete 被吞)时仍不影响正确性', async () => {
+    const upstream = mcpUpstreamMock([{ name: 'echo', description: 'echo back' }])
+    vi.stubGlobal('fetch', upstream.fetchMock)
+
+    // Cloudflare KV 边缘读缓存的最坏情况:delete 无效、刚删的 key 仍回旧值
+    // (2026-07-08 生产复发根因)。判定作废后的重探路径**不回读缓存**,故不受影响。
     const backing = new MemoryStateStore()
     const staleStore: StateStore = {
       get: key => backing.get(key),
@@ -777,14 +812,8 @@ describe('mcp 会话复用:过期会话空列表防御(默认离线,上游为 fe
       { allowInsecure: false, session: { store: staleStore, nodePath: 'ext/mcp-stale' } },
     )
 
-    // 首次:完整握手,会话回填 staleStore。
     expect((await provider.list()).map(t => t.name)).toContain('echo')
-    expect(upstream.initializeCalls()).toBe(1)
-
     upstream.expireAll()
-
-    // 复用的死会话拿到空列表 → 防御必须强制重握手恢复;若重试回读会话缓存,
-    // 拿回的是删不掉的旧会话,这里将得到空列表。
     expect((await provider.list()).map(t => t.name)).toContain('echo')
     expect(upstream.initializeCalls()).toBe(2)
   })
@@ -901,7 +930,7 @@ describe('mcp 真实上游 E2E(opt-in via TB_TEST_MCP_URL)', () => {
     expect(JSON.stringify(await call.json())).toContain('hello-tb')
   })
 
-  mcpIt('会话复用:两次调用落在同一上游会话(第二次跳过 initialize 握手)', async () => {
+  mcpIt('era 协商:连真实 echo-mcp 上游,whoami 回报协商到的 era 且两次一致', async () => {
     const mk = await postJson(
       'system/registry',
       {
@@ -909,7 +938,7 @@ describe('mcp 真实上游 E2E(opt-in via TB_TEST_MCP_URL)', () => {
         arguments: {
           path: 'ext/mcp-session',
           kind: 'mcp',
-          description: 'echo mcp(session reuse)',
+          description: 'echo mcp(era negotiation)',
           config: { kind: 'mcp', url: mcpUrl },
         },
       },
@@ -917,15 +946,17 @@ describe('mcp 真实上游 E2E(opt-in via TB_TEST_MCP_URL)', () => {
     )
     expect(mk.status).toBe(200)
 
-    // echo-mcp 默认有状态:whoami 回显当前会话 id。两次调用同一 id ⇔ 网关复用了
-    // mcpsession:<path> 缓存的会话,而不是每次重新握手。
+    // echo-mcp 的 whoami 回显本次连接的协议 era。迁移前这里断言的是「两次调用落在同一
+    // 上游会话」——v2 起网关不再复用会话(见 providers/mcp.ts 文件头),该契约已不存在。
+    // 现在断言的是 era 协商结果稳定:同一节点两次调用协商到同一个 era(第二次走
+    // mcpera:<path> 缓存的判定,不重探 server/discover)。
     const whoami = async (): Promise<string> => {
       const res = await postJson('ext/mcp-session', { tool: 'whoami', arguments: {} }, admin())
       expect(res.status).toBe(200)
       return JSON.stringify(await res.json())
     }
     const first = await whoami()
-    expect(first).not.toContain('stateless') // 上游确实签发了会话(有状态模式)
+    expect(first).toMatch(/modern|legacy/)
     const second = await whoami()
     expect(second).toBe(first)
   })

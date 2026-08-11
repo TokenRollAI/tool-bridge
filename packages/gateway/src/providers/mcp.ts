@@ -4,17 +4,31 @@
  * - `List` ← `tools/list`,`Call` ← `tools/call`;上游 `tools[].inputSchema` 已是 JSON Schema,
  *   直接进 `ToolSpec.inputSchema`;annotations 派生 effect(readOnlyHint→read、
  *   destructiveHint→destructive;无提示则不标注,避免过度声明)。
- * - **会话复用**:上游签发 `Mcp-Session-Id` 时存 StateStore
- *   `mcpsession:<nodePath>`(连同协商的 protocolVersion),后续请求带 sessionId 重建
- *   transport——SDK 对已有 sessionId 跳过 initialize,单次调用只剩一趟上游往返。
- *   会话失效(上游 400/404)→ 清缓存、完整握手重试一次并回填新会话。
- *   缓存的只有会话凭证与 tools/list(toolCache);**调用结果永不缓存**。
- * - **空列表防御**:不合规上游(实测 MetaMCP)对过期会话不按 spec 回 404,而是当作
- *   空会话正常返回 200 + 空 tools——网关侧毫无失效信号。故 `list` 在"复用缓存会话且
- *   拿到空列表"时视为可疑:清会话、**强制完整重握手**再取一次,仍空才相信(只重试
- *   一次,真空列表上游至多多付一趟握手)。重试不得回读会话缓存:KV 边缘读缓存
- *   (≥60s)会把刚删的旧会话又还回来,重试再次复用死会话,防御被击穿
- *   (2026-07-08 生产复发取证)。
+ *
+ * - **era 判定与缓存**(`mcpera:<nodePath>`):SDK v2 的 `versionNegotiation` 默认 `'legacy'`,
+ *   不显式开启就永远说 2025 系。故冷路径用 `mode:'auto'`——先探 `server/discover`,拿到
+ *   确定性 modern 证据才走 2026-07-28,否则保守回落 `initialize`。判定结果按节点缓存:
+ *   - modern:连同 `DiscoverResult` 一起存,后续经 `prior:{kind:'modern',discover}`
+ *     **零协商往返**复连(实测:每次调用只剩 1 趟上游请求)。`DiscoverResult` 自带
+ *     `capabilities`,所以能力已播种,不会踩到下面那条空列表陷阱。
+ *     缓存时限取上游自己在 discover 上给的 `ttlMs`(SEP-2549);为 0 则不缓存。
+ *   - legacy:只存判定本身,并**必须带时限**。SDK 明确警告:陈旧的 modern 判定会在首个
+ *     请求响亮失败,而陈旧的 legacy 判定会永久静默成功(升级后的服务器照样应答
+ *     `initialize`),即上游升级到 modern 我们永远发现不了。故按 `LEGACY_ERA_HORIZON_SEC`
+ *     到期重探。
+ *
+ * - **不做会话复用**(v2 起)。迁移前我们缓存上游 `Mcp-Session-Id` 跳过 initialize 换取
+ *   单趟往返;v2 下这条路会**静默返回空工具列表且零网络请求**:跳过握手 ⇒ 客户端不知道
+ *   服务端能力 ⇒ `listTools()` 被能力门挡下直接回空(实测 era=undefined、tools=0、请求数=0)。
+ *   这正是 2026-07-08 生产事故的形态,只会变成确定性复发。SDK 未提供播种能力的入口,
+ *   故 `mcpsession:` 缓存、`forceFresh` KV 边缘缓存绕行、过期会话空列表防御一并移除——
+ *   它们本就只为让会话复用安全存在。代价:legacy 上游每次调用 3 趟请求(initialize +
+ *   notifications/initialized + 业务),modern 上游 1 趟(与迁移前最优持平)。
+ *   `~help` 的 `toolcache` 仍在,承担跨请求的工具清单复用;**调用结果永不缓存**。
+ *
+ * - `enforceStrictCapabilities: true`:能力门一旦落空就抛错,不返回空列表。空工具清单是
+ *   我们踩过的事故类型,宁可响亮失败也不静默交付一个空目录。
+ *
  * - 上游请求头 = `headers`(静态明文,如上游要求的工具白名单头)+ `authRef` 凭证头
  *   (`authHeaderFor` 语义:默认 `Authorization: Bearer`,可经 `authHeader`/`authScheme`
  *   改头名/前缀,空 scheme 原样注入;凭证头覆盖同名静态头)。
@@ -37,12 +51,16 @@ import {
   type TreePath,
 } from '@tool-bridge/core'
 import {
+  Client,
+  type DiscoverResult,
+  type ProtocolEra,
+  SdkError,
+  SdkErrorCode,
+  SdkHttpError,
   StreamableHTTPClientTransport,
-  StreamableHTTPError,
-} from '@modelcontextprotocol/sdk/client/streamableHttp.js'
-import { CfWorkerJsonSchemaValidator } from '@modelcontextprotocol/sdk/validation/cfworker'
-import { UnauthorizedError } from '@modelcontextprotocol/sdk/client/auth.js'
-import { Client } from '@modelcontextprotocol/sdk/client/index.js'
+  UnauthorizedError,
+} from '@modelcontextprotocol/client'
+import { CfWorkerJsonSchemaValidator } from '@modelcontextprotocol/client/validators/cf-worker'
 import type { UpstreamProvider } from './types'
 import { GatewayMcpOAuthProvider, reauthorizeRequired } from '../oauth'
 
@@ -103,10 +121,10 @@ function toToolResult(res: {
 }
 
 /**
- * 我们只使用 Streamable HTTP 的 request/response 能力(listTools/callTool),不消费服务端主动
- * 消息流。MCP SDK 在 initialize 后会自动尝试 GET 打开可选 standalone SSE;这里对 SSE GET
- * (Accept: text/event-stream)直接返回 405(协议允许:服务器不提供 SSE),避免关闭会话时
- * 中止一条无用网络连接。只拦 SSE:authProvider 的 OAuth discovery/token 刷新也复用本 fetch,
+ * 我们只使用 request/response 能力(listTools/callTool),不消费服务端主动消息流。
+ * legacy era 的 SDK 在 initialize 后会自动尝试 GET 打开可选 standalone SSE;这里对 SSE GET
+ * (Accept: text/event-stream)直接返回 405(协议允许:服务器不提供 SSE),避免关闭时中止一条
+ * 无用网络连接。只拦 SSE:authProvider 的 OAuth discovery/token 刷新也复用本 fetch,
  * 其 GET(.well-known)必须放行。
  */
 const noStandaloneSseFetch: typeof fetch = (input, init) => {
@@ -127,135 +145,199 @@ const noStandaloneSseFetch: typeof fetch = (input, init) => {
   return fetch(input, init)
 }
 
-/**
- * 会话复用的存取(key `mcpsession:<nodePath>`)。缓存的是上游会话凭证,不是任何调用结果;
- * 不设 TTL——有效性由上游裁决(400/404 即失效,届时清缓存重握手)。
- */
+/** era 判定缓存的存取(key `mcpera:<nodePath>`)。缓存的是协议 era 判定,不是任何调用结果。 */
 export interface McpSessionStore {
   nodePath: TreePath
   store: StateStore
 }
 
-interface CachedSession {
-  protocolVersion?: string
-  sessionId: string
+interface CachedEra {
+  /** modern 判定必带:replay 给 `prior` 用(自带 capabilities,省一趟且播种能力)。 */
+  discover?: DiscoverResult
+  era: ProtocolEra
+  /** 到期时刻(epoch 秒)。到期即重探,不做过期供给。 */
+  expiresAt: number
   updatedAt: string
 }
 
-const SESSION_KEY_PREFIX = 'mcpsession:'
+const ERA_KEY_PREFIX = 'mcpera:'
 
-function sessionKey(nodePath: TreePath): string {
-  return `${SESSION_KEY_PREFIX}${nodePath}`
+/**
+ * legacy 判定的策略时限:上游从 2025 系升级到 2026-07-28 时,陈旧的 legacy 判定不会报错、
+ * 只会让我们一直用老 era 说话。5 分钟重探一次即可发现升级,代价是每节点每 5 分钟多一趟探测。
+ */
+const LEGACY_ERA_HORIZON_SEC = 300
+
+function eraKey(nodePath: TreePath): string {
+  return `${ERA_KEY_PREFIX}${nodePath}`
 }
 
-function isCachedSession(v: unknown): v is CachedSession {
-  return typeof v === 'object' && v !== null && typeof (v as CachedSession).sessionId === 'string'
+function isCachedEra(v: unknown): v is CachedEra {
+  if (typeof v !== 'object' || v === null) return false
+  const c = v as CachedEra
+  return (c.era === 'modern' || c.era === 'legacy') && typeof c.expiresAt === 'number'
 }
 
-async function loadSession(s: McpSessionStore | undefined): Promise<CachedSession | null> {
+function nowSec(): number {
+  return Math.floor(Date.now() / 1000)
+}
+
+async function loadEra(s: McpSessionStore | undefined): Promise<CachedEra | null> {
   if (s === undefined) return null
-  const raw = await s.store.get(sessionKey(s.nodePath))
-  return isCachedSession(raw) ? raw : null
+  const raw = await s.store.get(eraKey(s.nodePath))
+  if (!isCachedEra(raw)) return null
+  if (raw.expiresAt <= nowSec()) return null
+  // modern 判定没带 discover 就无法零往返复连,当作未缓存重探。
+  if (raw.era === 'modern' && raw.discover === undefined) return null
+  return raw
 }
 
-async function saveSession(
+async function saveEra(
   s: McpSessionStore | undefined,
-  transport: StreamableHTTPClientTransport,
+  era: ProtocolEra,
+  discover: DiscoverResult | undefined,
 ): Promise<void> {
-  if (s === undefined || transport.sessionId === undefined) return
-  const record: CachedSession = {
-    sessionId: transport.sessionId,
-    ...(transport.protocolVersion !== undefined
-      ? { protocolVersion: transport.protocolVersion }
-      : {}),
-    updatedAt: new Date().toISOString(),
-  }
-  await s.store.put(sessionKey(s.nodePath), record)
-}
-
-async function clearSession(s: McpSessionStore | undefined): Promise<void> {
   if (s === undefined) return
-  await s.store.delete(sessionKey(s.nodePath))
+  if (era === 'modern') {
+    // 时限取上游自己在 server/discover 上给的 ttlMs(SEP-2549;公开类型上没有这两个字段,
+    // 但运行时确实携带)。上游给 0(最保守默认)就不缓存,老老实实每次重探。
+    const ttlMs = (discover as { ttlMs?: number } | undefined)?.ttlMs ?? 0
+    if (discover === undefined || !Number.isFinite(ttlMs) || ttlMs <= 0) return
+    await s.store.put(eraKey(s.nodePath), {
+      era,
+      discover,
+      expiresAt: nowSec() + Math.floor(ttlMs / 1000),
+      updatedAt: new Date().toISOString(),
+    } satisfies CachedEra)
+    return
+  }
+  await s.store.put(eraKey(s.nodePath), {
+    era,
+    expiresAt: nowSec() + LEGACY_ERA_HORIZON_SEC,
+    updatedAt: new Date().toISOString(),
+  } satisfies CachedEra)
 }
 
-/** 删除某节点的会话缓存(注册面 Write/Update/Delete 时调用:URL/authRef 变更后旧凭证作废)。 */
-export async function invalidateMcpSession(store: StateStore, nodePath: string): Promise<void> {
-  await store.delete(`${SESSION_KEY_PREFIX}${nodePath}`)
+async function clearEra(s: McpSessionStore | undefined): Promise<void> {
+  if (s === undefined) return
+  await s.store.delete(eraKey(s.nodePath))
 }
 
-/** 上游宣告会话失效的状态码(spec 规定 404;部分实现回 400)。 */
-function isSessionInvalid(err: unknown): boolean {
-  return err instanceof StreamableHTTPError && (err.code === 404 || err.code === 400)
+/** 删除某节点的 era 判定缓存(注册面 Write/Update/Delete 时调用:URL 变更后旧判定作废)。 */
+export async function invalidateMcpEra(store: StateStore, nodePath: string): Promise<void> {
+  await store.delete(`${ERA_KEY_PREFIX}${nodePath}`)
 }
 
-/** `withSession` 的返回:结果值 + 本次是否复用了缓存会话(未经历完整 initialize)。 */
-interface SessionOutcome<T> {
-  value: T
-  viaCachedSession: boolean
+/**
+ * era 协商失败:缓存的 modern 判定对不上上游实际支持的版本,或探测本身被上游用不合规的
+ * 方式打断(HTTP 5xx / HTTP 200 + 非 JSON content-type)。
+ *
+ * 实测 SDK 的 `mode:'auto'` 只对「像老服务端」的反应回落——JSON-RPC `-32601` 与
+ * HTTP 400/404/405 都能正确落到 `initialize`;5xx 与 content-type 异常则一律硬失败。
+ */
+function isEraNegotiationFailure(err: unknown): boolean {
+  return err instanceof SdkError && err.code === SdkErrorCode.EraNegotiationFailed
 }
 
-/** withSession 的上游认证形态:静态请求头(headers+authRef 拼装)或网关托管 OAuth provider(二选一)。 */
+/**
+ * 从已连接的 modern client 复原一份可 replay 的 `DiscoverResult`。
+ *
+ * SDK 不直接把探测结果交还给调用方,但 `prior` 只消费 `supportedVersions` /
+ * `capabilities` / `instructions`,而这三者都能从 client 的读取面拿到;协商版本即本次
+ * 确定可用的那个 modern 版本。
+ */
+function discoverOf(client: Client): DiscoverResult | undefined {
+  const version = client.getNegotiatedProtocolVersion()
+  const capabilities = client.getServerCapabilities()
+  if (version === undefined || capabilities === undefined) return undefined
+  const instructions = client.getInstructions()
+  return {
+    supportedVersions: [version],
+    capabilities,
+    ...(instructions !== undefined ? { instructions } : {}),
+  } as DiscoverResult
+}
+
+/** withUpstream 的上游认证形态:静态请求头(headers+authRef 拼装)或网关托管 OAuth provider(二选一)。 */
 interface UpstreamAuth {
   headers?: Record<string, string>
   oauth?: GatewayMcpOAuthProvider
 }
 
 /**
- * 会话内执行 `fn`:有缓存会话则带 sessionId 重建 transport(SDK 跳过 initialize,单趟往返);
- * 无缓存/会话失效则完整握手并回填缓存。**不再主动 terminateSession**——会话跨请求存续,
- * 由上游按空闲策略回收;失效信号(400/404)驱动重握手。
- * `forceFresh` 跳过缓存会话直接完整握手——供空列表防御的重试使用(不得回读 KV,
- * 边缘读缓存会把刚删的旧会话还回来)。
+ * 连上上游执行 `fn`。有可用 era 判定就按判定直连(modern 零协商往返 / legacy 直接握手);
+ * 没有则 `mode:'auto'` 探测并回填判定。
+ *
+ * 缓存的 modern 判定过期失配时(上游降级/换实现)SDK 抛 `EraNegotiationFailed`——清判定、
+ * 完整重探一次。legacy 判定不会失配报错,由 `LEGACY_ERA_HORIZON_SEC` 时限兜住。
  */
-async function withSession<T>(
+async function withUpstream<T>(
   url: string,
   auth: UpstreamAuth,
   session: McpSessionStore | undefined,
   fn: (client: Client) => Promise<T>,
-  forceFresh = false,
-): Promise<SessionOutcome<T>> {
-  const makeTransport = (sessionId: string | undefined): StreamableHTTPClientTransport =>
+): Promise<T> {
+  const makeTransport = (): StreamableHTTPClientTransport =>
     new StreamableHTTPClientTransport(new URL(url), {
       fetch: noStandaloneSseFetch,
       ...(auth.oauth !== undefined ? { authProvider: auth.oauth } : {}),
       ...(auth.headers !== undefined ? { requestInit: { headers: auth.headers } } : {}),
-      ...(sessionId !== undefined ? { sessionId } : {}),
     })
 
   // SDK 默认的 Ajv 校验器经 new Function 编译 schema,workerd 禁 eval——上游工具一旦声明
   // outputSchema,tools/list 阶段就会抛 "Code generation from strings disallowed"。
   // 换 SDK 自带的 @cfworker/json-schema 解释执行实现。
-  const makeClient = (): Client =>
+  const makeClient = (probing: boolean): Client =>
     new Client(
       { name: 'tool-bridge', version: '0.0.0' },
-      { jsonSchemaValidator: new CfWorkerJsonSchemaValidator() },
+      {
+        jsonSchemaValidator: new CfWorkerJsonSchemaValidator(),
+        // 空工具列表是我们踩过的事故;能力门落空要响亮失败,不要静默回空。
+        enforceStrictCapabilities: true,
+        ...(probing ? { versionNegotiation: { mode: 'auto' as const } } : {}),
+      },
     )
 
-  const runFresh = async (): Promise<SessionOutcome<T>> => {
-    const transport = makeTransport(undefined)
-    const client = makeClient()
-    await client.connect(transport) // initialize 握手;成功后 transport 持有新 sessionId(如有)
-    await saveSession(session, transport)
-    return { value: await fn(client), viaCachedSession: false }
+  const cached = await loadEra(session)
+  if (cached !== null) {
+    const client = makeClient(false)
+    await client.connect(makeTransport(), {
+      prior: cached.era === 'modern'
+        ? { kind: 'modern', discover: cached.discover as DiscoverResult }
+        : { kind: 'legacy' },
+    })
+    try {
+      return await fn(client)
+    } catch (err) {
+      if (!isEraNegotiationFailure(err)) throw err
+      await clearEra(session)
+      // 落回下面的完整重探
+    }
   }
 
-  const cached = forceFresh ? null : await loadSession(session)
-  if (cached !== null) {
-    const transport = makeTransport(cached.sessionId)
-    const client = makeClient()
-    await client.connect(transport) // sessionId 已设 → SDK 跳过 initialize
-    if (cached.protocolVersion !== undefined) {
-      transport.setProtocolVersion(cached.protocolVersion)
-    }
-    try {
-      return { value: await fn(client), viaCachedSession: true }
-    } catch (err) {
-      if (!isSessionInvalid(err)) throw err
-      await clearSession(session)
-      // 落回完整握手重试一次
-    }
+  /** 跳过探测,直接按 legacy 连——不合规上游的兜底,也是迁移前的等价行为。 */
+  const runLegacy = async (): Promise<T> => {
+    const client = makeClient(false)
+    await client.connect(makeTransport(), { prior: { kind: 'legacy' } })
+    await saveEra(session, 'legacy', undefined)
+    return await fn(client)
   }
-  return await runFresh()
+
+  const client = makeClient(true)
+  try {
+    await client.connect(makeTransport())
+  } catch (err) {
+    if (!isEraNegotiationFailure(err)) throw err
+    // 上游用不合规的方式回绝了探测(见 isEraNegotiationFailure)。迁移前我们根本不探测,
+    // 不该因为新增了一趟探测就连不上原本能用的老上游——保守当 legacy,并记住判定,
+    // 使这趟失败的探测在时限内只发生一次。
+    return await runLegacy()
+  }
+  const era = client.getProtocolEra()
+  if (era !== undefined) {
+    await saveEra(session, era, era === 'modern' ? discoverOf(client) : undefined)
+  }
+  return await fn(client)
 }
 
 /** 单一 choke point:把传输/协议错误归一为 TBError(已是 TBError 的原样抛出)。 */
@@ -264,9 +346,11 @@ async function guard<T>(fn: () => Promise<T>): Promise<T> {
     return await fn()
   } catch (err) {
     if (isTBError(err)) throw err
-    if (err instanceof StreamableHTTPError && err.code !== undefined) {
-      throw normalizeUpstreamError({ kind: 'http', status: err.code, message: err.message })
+    if (err instanceof SdkHttpError) {
+      throw normalizeUpstreamError({ kind: 'http', status: err.status, message: err.message })
     }
+    // SdkHttpError 之外还有一类:HTTP 200 但 content-type 不对(不合规上游),SDK 抛的是
+    // 基类 SdkError 而非 SdkHttpError。归到 network 而不是漏成裸错误。
     throw normalizeUpstreamError({
       kind: 'network',
       message: err instanceof Error ? err.message : String(err),
@@ -344,30 +428,20 @@ export function createMcpProvider(
       guard(() =>
         mapUnauthorized(async () => {
           const auth = await makeAuth()
-          const listOnce = (forceFresh = false): Promise<SessionOutcome<{ tools: McpTool[] }>> =>
-            withSession(
-              config.url,
-              auth,
-              opts.session,
-              c => c.listTools(),
-              forceFresh,
-            ) as Promise<SessionOutcome<{ tools: McpTool[] }>>
-          let res = await listOnce()
-          // 空列表防御(见文件头):复用缓存会话拿到空列表 → 清会话、强制完整重握手再取
-          // 一次。重试必须 forceFresh:清会话后回读 KV 会命中边缘读缓存拿回旧会话,
-          // 重试再次复用死会话,防御被击穿。
-          if (res.viaCachedSession && res.value.tools.length === 0) {
-            await clearSession(opts.session)
-            res = await listOnce(true)
-          }
-          return res.value.tools.map(toSpec)
+          const res = await withUpstream(
+            config.url,
+            auth,
+            opts.session,
+            c => c.listTools(),
+          ) as { tools: McpTool[] }
+          return res.tools.map(toSpec)
         }),
       ),
     call: (name, args) =>
       guard(() =>
         mapUnauthorized(async () => {
           const auth = await makeAuth()
-          const { value } = await withSession(config.url, auth, opts.session, c =>
+          const value = await withUpstream(config.url, auth, opts.session, c =>
             c.callTool({ name, arguments: args }),
           )
           return toToolResult(value as {

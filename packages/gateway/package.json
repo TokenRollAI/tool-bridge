@@ -44,20 +44,23 @@
   },
   "dependencies": {
     "@cfworker/json-schema": "^4.1.1",
-    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@modelcontextprotocol/client": "^2.0.0",
+    "@modelcontextprotocol/core": "^2.0.0",
+    "@modelcontextprotocol/server": "^2.0.0",
     "aws4fetch": "^1.0.20",
     "hono": "^4.12.28"
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "^0.18.0",
     "@cloudflare/workers-types": "^5.20260706.1",
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "@tool-bridge/core": "workspace:*",
     "@tool-bridge/plugin-example": "workspace:*",
     "s3rver": "^3.7.1",
     "tsup": "^8.5.1",
     "tsx": "^4.23.0",
     "vitest": "^4.1.10",
-    "zod": "^3.25.76"
+    "zod": "^4.2.0"
   },
   "repository": {
     "type": "git",

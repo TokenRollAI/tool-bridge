@@ -1,5 +1,4 @@
-import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
-import { Client } from '@modelcontextprotocol/sdk/client/index.js'
+import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client'
 import assert from 'node:assert/strict'
 
 /**
@@ -8,6 +7,10 @@ import assert from 'node:assert/strict'
  *
  * 用法:
  * `TB_BASE_URL=https://... TB_SK=tbk_... TB_MCP_NARROW_SK=tbk_... pnpm verify:mcp`
+ *
+ * era:客户端用 `versionNegotiation: { mode: 'auto' }` 走真实协商(SDK 默认是 `'legacy'`,
+ * 不显式开启就永远只验 2025 系),并打印生产实际服务的 era。`TB_MCP_ERA=modern` 可改为
+ * 钉住 2026-07-28——拿不到就响亮失败,用于确认新协议确实已上线。
  *
  * 默认调用只读的 system/registry:list。可用 TB_MCP_PATH、TB_MCP_COMMAND 与
  * TB_MCP_ARGS(JSON object)选择另一项无副作用工具。窄 SK 默认须允许
@@ -28,8 +31,17 @@ function parseArguments(raw: string, variable = 'TB_MCP_ARGS'): Record<string, u
   return parsed as Record<string, unknown>
 }
 
+const PIN_MODERN = process.env.TB_MCP_ERA === 'modern'
+
 async function connect(endpoint: URL, sk: string): Promise<Client> {
-  const client = new Client({ name: 'tool-bridge-production-smoke', version: '0.1.0' })
+  const client = new Client(
+    { name: 'tool-bridge-production-smoke', version: '0.1.0' },
+    {
+      versionNegotiation: {
+        mode: PIN_MODERN ? { pin: '2026-07-28' } : 'auto',
+      },
+    },
+  )
   const transport = new StreamableHTTPClientTransport(endpoint, {
     requestInit: { headers: { authorization: `Bearer ${sk}` } },
   })
@@ -83,7 +95,9 @@ async function main(): Promise<void> {
       `${callPath}:${callCommand} returned empty content`,
     )
     console.log(
-      `ok  admin initialize → tools/list (${listed.tools.length}) → tools/call ${callPath}:${callCommand}`,
+      `ok  admin ${adminClient.getProtocolEra() ?? 'unknown'} era`
+      + ` (${adminClient.getNegotiatedProtocolVersion() ?? 'unknown'})`
+      + ` → tools/list (${listed.tools.length}) → tools/call ${callPath}:${callCommand}`,
     )
   } finally {
     await adminClient.close()
