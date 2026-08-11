@@ -126,4 +126,18 @@ describe('checkScopes(判定序)', () => {
     expect(checkScopes(scopes, 'x', 'read')).toBe(true)
     expect(checkScopes(scopes, 'x', 'write')).toBe(false)
   })
+
+  it('病态多 ** pattern 不指数回溯:相邻 ** 合并后语义等价且快速完成', () => {
+    const pathological = `${'**/'.repeat(200)}x`
+    const start = Date.now()
+    expect(matchGlob(pathological, 'a/b/c/x')).toBe(true)
+    expect(matchGlob(pathological, 'a/b/c/y')).toBe(false)
+    expect(Date.now() - start).toBeLessThan(1000)
+  })
+
+  it('合并后仍超过段数上限的 pattern fail closed(不匹配任何路径)', () => {
+    const overlong = Array.from({ length: 65 }, (_, i) => `seg${i}`).join('/')
+    expect(matchGlob(overlong, overlong)).toBe(false)
+    expect(checkScopes([rule(overlong, ['read'])], overlong, 'read')).toBe(false)
+  })
 })

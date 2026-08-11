@@ -36,9 +36,21 @@ function matchFrom(pat: string[], pi: number, seg: string[], si: number): boolea
 /**
  * 段级 glob 匹配。`*` 恰好匹配一段,`**` 匹配零或多段,其余段字面比较。
  * pattern 与 path 都按 '/' 归一为段序列;空 path(根)以零段参与匹配。
+ *
+ * 防回溯加固:相邻 `**` 合并(语义等价——都是"零或多段"),消除
+ * `**\/**\/**\/…` 病态 pattern 的指数回溯面;合并后仍超长的 pattern
+ * 按默认拒绝语义直接不匹配(fail closed)。
  */
+const MAX_PATTERN_SEGMENTS = 64
+
 export function matchGlob(pattern: string, path: TreePath): boolean {
-  return matchFrom(segments(pattern), 0, segments(path), 0)
+  const pat: string[] = []
+  for (const token of segments(pattern)) {
+    if (token === '**' && pat[pat.length - 1] === '**') continue
+    pat.push(token)
+  }
+  if (pat.length > MAX_PATTERN_SEGMENTS) return false
+  return matchFrom(pat, 0, segments(path), 0)
 }
 
 const effectOf = (scope: Scope): 'allow' | 'deny' => scope.effect ?? 'allow'

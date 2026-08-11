@@ -1,4 +1,5 @@
 import type { Command } from 'commander'
+import { normalizeExpiresAt } from '@tool-bridge/core'
 import { currentProfile, readConfig } from './config'
 import { CliError, type Target } from './http'
 
@@ -71,34 +72,13 @@ export function withPageOpts(cmd: Command): Command {
 
 /** CLI 侧尽早校验过期时间；服务端仍会重复校验作为安全边界。 */
 export function parseIsoTimestamp(value: string, flag = '--expires'): string {
-  const input = value.trim()
-  const match
-    = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$/.exec(
-      input,
-    )
-  if (!match) {
+  // 委托 core 的 normalizeExpiresAt(zod 日历感知校验 + UTC 规范化),
+  // 保证 CLI 本地语义与服务端 Write/Update 完全一致;这里只补 flag 级错误措辞。
+  try {
+    return normalizeExpiresAt(value.trim())
+  } catch {
     throw new CliError(`invalid ${flag} "${value}": expected an ISO 8601 timestamp with timezone`)
   }
-  const [, year, month, day, hour, minute, second] = match
-  const parts = [year, month, day, hour, minute, second].map(Number)
-  const [y, mo, d, h, mi, s] = parts
-  const calendar = new Date(Date.UTC(y!, mo! - 1, d!, h!, mi!, s!))
-  if (
-    mo! < 1
-    || mo! > 12
-    || d! < 1
-    || h! > 23
-    || mi! > 59
-    || s! > 59
-    || calendar.getUTCFullYear() !== y
-    || calendar.getUTCMonth() !== mo! - 1
-    || calendar.getUTCDate() !== d
-  ) {
-    throw new CliError(`invalid ${flag} "${value}": expected a real calendar date and time`)
-  }
-  const timestamp = Date.parse(input)
-  if (!Number.isFinite(timestamp)) throw new CliError(`invalid ${flag} "${value}"`)
-  return new Date(timestamp).toISOString()
 }
 
 /** repeatable string option 的收集器(`--allow a --allow b` → ['a','b'])。 */

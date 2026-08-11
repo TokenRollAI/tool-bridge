@@ -10,6 +10,9 @@ import {
   type SerializedToolSearchRecord,
   serializeToolSearchDocuments,
   serializeToolSearchSnapshot,
+  SHORT_MATCH_SQL,
+  SHORT_SCORE_SQL,
+  shortTermsSql,
   TBError,
   TOOL_SEARCH_AUDIT_NODE_LIMIT,
   TOOL_SEARCH_BATCH_LIMIT,
@@ -103,33 +106,6 @@ interface MetaRow {
   revision: number
   seeded: number
 }
-
-function shortTermsSql(patterns: readonly string[]): string {
-  return `short_terms(pattern) AS (VALUES ${patterns.map(() => '(?)').join(', ')})`
-}
-
-const SHORT_MATCH_SQL = `
-NOT EXISTS (
-  SELECT 1 FROM short_terms
-  WHERE tools.name NOT LIKE pattern ESCAPE '!'
-    AND tools.description NOT LIKE pattern ESCAPE '!'
-    AND tools.feedback NOT LIKE pattern ESCAPE '!'
-)
-`
-
-const SHORT_SCORE_SQL = `
-(
-  SELECT COALESCE(SUM(
-    CASE
-      WHEN tools.name LIKE pattern ESCAPE '!' THEN 10
-      WHEN tools.description LIKE pattern ESCAPE '!' THEN 3
-      WHEN tools.feedback LIKE pattern ESCAPE '!' THEN 1
-      ELSE 0
-    END
-  ), 0)
-  FROM short_terms
-)
-`
 
 /** Node 宿主的 better-sqlite3 FTS5/trigram SearchIndex。 */
 export class SqliteSearchIndex implements MutableSearchIndex {
