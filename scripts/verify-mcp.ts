@@ -10,7 +10,9 @@ import assert from 'node:assert/strict'
  * `TB_BASE_URL=https://... TB_SK=tbk_... TB_MCP_NARROW_SK=tbk_... pnpm verify:mcp`
  *
  * 默认调用只读的 system/registry:list。可用 TB_MCP_PATH、TB_MCP_COMMAND 与
- * TB_MCP_ARGS(JSON object)选择另一项无副作用工具。本脚本不创建或修改生产资源。
+ * TB_MCP_ARGS(JSON object)选择另一项无副作用工具。窄 SK 默认须允许
+ * system/status:get,也可用 TB_MCP_NARROW_PATH / _COMMAND / _ARGS 改写。
+ * 本脚本不创建或修改生产资源。
  */
 
 function requireValue(value: string | undefined, message: string): string {
@@ -18,10 +20,10 @@ function requireValue(value: string | undefined, message: string): string {
   return value
 }
 
-function parseArguments(raw: string): Record<string, unknown> {
+function parseArguments(raw: string, variable = 'TB_MCP_ARGS'): Record<string, unknown> {
   const parsed = JSON.parse(raw) as unknown
   if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new Error('TB_MCP_ARGS must be a JSON object')
+    throw new Error(`${variable} must be a JSON object`)
   }
   return parsed as Record<string, unknown>
 }
@@ -55,6 +57,12 @@ async function main(): Promise<void> {
   const callPath = process.env.TB_MCP_PATH ?? 'system/registry'
   const callCommand = process.env.TB_MCP_COMMAND ?? 'list'
   const callArguments = parseArguments(process.env.TB_MCP_ARGS ?? '{}')
+  const narrowCallPath = process.env.TB_MCP_NARROW_PATH ?? 'system/status'
+  const narrowCallCommand = process.env.TB_MCP_NARROW_COMMAND ?? 'get'
+  const narrowCallArguments = parseArguments(
+    process.env.TB_MCP_NARROW_ARGS ?? '{}',
+    'TB_MCP_NARROW_ARGS',
+  )
   const endpoint = new URL(`${baseUrl}/~mcp`)
   const adminClient = await connect(endpoint, adminSk)
   let adminNames = new Set<string>()
@@ -85,6 +93,7 @@ async function main(): Promise<void> {
   try {
     const listed = await narrowClient.listTools()
     const narrowNames = new Set(listed.tools.map(tool => tool.name))
+    assert.ok(narrowNames.size > 0, 'narrow tools/list must expose at least one allowed tool')
     assert.ok(
       narrowNames.size < adminNames.size,
       `narrow tools/list must shrink: admin=${adminNames.size}, narrow=${narrowNames.size}`,
@@ -92,6 +101,27 @@ async function main(): Promise<void> {
     for (const name of narrowNames) {
       assert.ok(adminNames.has(name), `narrow tools/list exposed non-admin tool '${name}'`)
     }
+    const narrowSelected = listed.tools.find(tool =>
+      toolMeta(tool, 'io.tool-bridge/path') === narrowCallPath
+      && toolMeta(tool, 'io.tool-bridge/command') === narrowCallCommand,
+    )
+    assert.ok(
+      narrowSelected,
+      `narrow tools/list did not expose ${narrowCallPath}:${narrowCallCommand}`,
+    )
+    const narrowCalled = await narrowClient.callTool({
+      name: narrowSelected.name,
+      arguments: narrowCallArguments,
+    })
+    assert.notEqual(
+      narrowCalled.isError,
+      true,
+      `${narrowCallPath}:${narrowCallCommand} returned isError=true`,
+    )
+    assert.ok(
+      Array.isArray(narrowCalled.content) && narrowCalled.content.length > 0,
+      `${narrowCallPath}:${narrowCallCommand} returned empty content`,
+    )
     const adminOnlyCallCandidate = [...adminNames].find(name => !narrowNames.has(name)) ?? ''
     assert.notEqual(adminOnlyCallCandidate, '', 'expected at least one admin-only tool')
     await assert.rejects(
@@ -99,7 +129,8 @@ async function main(): Promise<void> {
       /tool not found/i,
     )
     console.log(
-      `ok  narrow reconnect → tools/list shrank ${adminNames.size} → ${narrowNames.size}; stale call rejected`,
+      `ok  narrow reconnect → tools/list shrank ${adminNames.size} → ${narrowNames.size}`
+      + ` → tools/call ${narrowCallPath}:${narrowCallCommand}; stale call rejected`,
     )
   } finally {
     await narrowClient.close()

@@ -100,6 +100,17 @@ node packages/cli/dist/index.js status --json
 
 预期:输出可解析 JSON,含 healthy/version(`TB_BASE_URL` 从环境读取)。
 
+### 7. MCP consumer 出口:`pnpm verify:mcp`
+
+先准备 admin SK 和一把窄 SK。窄 SK 默认至少须能读 `system/status:get`;如生产策略不允许该路径,用 `TB_MCP_NARROW_PATH` / `TB_MCP_NARROW_COMMAND` / `TB_MCP_NARROW_ARGS` 选择另一项无副作用工具:
+
+```sh
+TB_BASE_URL=https://tool-bridge.pdjjq.org \
+TB_SK='...' TB_MCP_NARROW_SK='...' pnpm verify:mcp
+```
+
+脚本使用官方 MCP SDK 建立两条独立连接:admin 必须 list 非空并真实 call 默认只读 `system/registry:list`;窄工具集必须非空、为 admin 严格子集,且预期允许工具必须真实 call 成功;最后用 admin-only 旧 flat name 验证窄连接返回 `tool not found`。不要用 `scopes=[]` 的空工具集 SK 做“收窄”证据;脚本会对此 fail closed。
+
 ## 排错
 
 - **wrangler 报多账户歧义**(`More than one account available`):wrangler OAuth 下有 DJJ 与 Lightspeed 两账户,必须显式指定——`wrangler.jsonc` 已写死 `account_id`,脚本走 `CLOUDFLARE_ACCOUNT_ID`;若单独手敲 wrangler 命令,补 `CLOUDFLARE_ACCOUNT_ID=… npx wrangler …`。

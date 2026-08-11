@@ -20,9 +20,9 @@
   属外向不可逆动作且依赖生产环境,待用户授权;**不构成后续 Phase 的代码依赖**。
   按"证据即判据"纪律,项 7 在拿到生产证据前不勾选。
 - **P3-1 · Phase 3 项 5 的「部署 + 生产 MCP smoke」半边** —— 官方 SDK 生产验收脚本
-  `pnpm verify:mcp` 已在 Round 18 就位,本地 `pnpm verify` 全绿;尚需从与 `origin/main`
+  `pnpm verify:mcp` 已在 Round 29 加固为 admin 与 narrow 两侧都真实 call,本地 `pnpm verify` 全绿;尚需从与 `origin/main`
   零差异的干净工作区执行 `pnpm deploy:all`,再以 admin / narrow 两把生产 SK 运行
-  `TB_BASE_URL=… TB_SK=… TB_MCP_NARROW_SK=… pnpm verify:mcp`。属外向动作且当前 Phase 3
+  `TB_BASE_URL=… TB_SK=… TB_MCP_NARROW_SK=… pnpm verify:mcp`(窄 SK 默认须能读 `system/status:get`,或显式设 `TB_MCP_NARROW_PATH/COMMAND/ARGS`)。属外向动作且当前 Phase 3
   代码尚在功能分支,待用户授权及合并;**不构成 Phase 4 编码依赖**。生产证据前项 5 不勾选。
 - **P4-1 · Phase 4 项 1 的「真实 D1 provision + 部署」半边** —— `TB_SEARCH` 绑定、D1
   幂等 provision 与隔离回归已在 Round 19 完成,Wrangler dry-run 也成功识别 D1 binding;
@@ -513,3 +513,17 @@
   - `pnpm verify` → 9 workspace typecheck + 全仓 lint + provision **1 passed** + 包测试 **1273 passed / 7 skipped**,合计 **1274 passed / 7 skipped**,退出码 0。严格 investigator 报告 `.llmdoc-tmp/phase5-e2e-b.md` 结论无本地代码阻断。
 - 勾选:无。E2E-B 的样例、SDK 发布物、飞书本地 workerd 与通用 plugin 验收半边已闭环,但同项还要求重新部署后的生产飞书三动词,不得误勾。
 - 遗留:P2-1 继续 PENDING:需从符合部署纪律的干净 `origin/main` 重部署,并经用户指定真实目标后对飞书 create-doc/fetch-doc/update-doc 各做一次脱敏留证。下一轮 = E2E-E 本地半边:用官方 MCP client 连本地端点重跑 list/call/scope 收窄;生产 MCP 继续映射 P3-1。
+
+## Round 29 — 2026-08-11
+- 目标:Phase 5 E2E-E 本地半边 —— 用官方 MCP SDK 重跑 initialize/tools/list/tools/call 与 admin→narrow 重连收窄,并证明可对生产运行的 `verify:mcp` 不会被零权限 SK 假绿。
+- 动作:
+  - 复用 gateway MCP 专项中的官方 `Client + StreamableHTTPClientTransport`:initialize/list/call 的 POST 真实进 workerd `SELF.fetch`;测试以 `_meta` path/command 定位工具,不自行猜 flat name。Admin 列 allowed/admin-only,窄 SK 新建连接后只剩 allowed,调用旧 admin-only name 在出站前 `tool not found`,再正向调 allowed 使上游计数精确从 0→1。
+  - 实跑既有生产验收脚本时做 mutation probe:一把 `scopes=[]` 的 SK 使 narrow list 为 0,原脚本仍 exit 0,证明「仅严格子集」不足以验收收窄后的可用能力。
+  - `verify-mcp.ts` 加固为:narrow list 必须非空且是 admin 严格子集;再按可配 `TB_MCP_NARROW_PATH/COMMAND/ARGS`(默认 `system/status:get`)找到预期允许工具,真实 call 且拒绝 isError/空 content;最后才用 admin-only 旧名验 stale 拒绝。脚本仍不签发 SK、不修改生产资源。
+- 验证:
+  - `pnpm --filter @tool-bridge/gateway exec vitest run test/mcp.integration.test.ts` → 先 fresh Dashboard build,再 **13/13 passed**;官方 SDK 完成初始化、scope 裁剪、schema 校验、真实 provider call、窄 SK 重连与 stale 名拒绝。
+  - 隔离 Node/SQLite 真实 TCP:`pnpm verify:mcp` 以 admin 列出 **27** 工具并真实调 `system/registry:list`;窄 SK 仅持 `system/status` read,重连后列 **1** 个工具并真实调 `system/status:get`,旧 admin-only 名拒绝,全 PASS。进程停止且临时数据删除。
+  - 零 scope 反例在修正后精确报 `narrow tools/list must expose at least one allowed tool`,退出 **1**;目标 ESLint、显式 NodeNext `tsc`、`git diff --check` 均退出 0。
+  - `pnpm verify` → 9 workspace typecheck + 全仓 lint + provision **1 passed** + 包测试 **1273 passed / 7 skipped**,合计 **1274 passed / 7 skipped**,退出码 0。严格复核 `.llmdoc-tmp/phase5-e2e-e.md` 结论无本地阻断。
+- 勾选:无。E2E-E 的 workerd 精确权限投影与 Node 官方 SDK 真实 TCP 半边已闭环,但同项明确要求生产 MCP endpoint,未部署/未连生产前不得勾选。
+- 遗留:P3-1 继续 PENDING:干净 `origin/main` 部署后,准备一把至少可读某个无副作用工具(默认 `system/status:get`)的生产窄 SK,对生产 URL 运行同一 `pnpm verify:mcp` 留证。下一轮 = E2E-C 本地半边:实跑中英文 search、窄 scope、CF D1/Node SQLite 对等与 Dashboard 证据;生产 search 继续映射 P4-1/P4-3。

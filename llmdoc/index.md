@@ -55,6 +55,7 @@
 - [memory/reflections/2026-08-11-compose-three-hop-dev-stack.md](memory/reflections/2026-08-11-compose-three-hop-dev-stack.md) — Docker Compose 三跳开发栈的可验证性(loopback固定凭据边界;gateway→真实 plugin→mock upstream链路证据;profile smoke同步退出码;唯一 dev-image builder;幂等卷、负例绕缓存与restart证据)。
 - [memory/reflections/2026-08-11-e2e-security-evidence-sensitivity.md](memory/reflections/2026-08-11-e2e-security-evidence-sensitivity.md) — E2E 安全证据敏感性(barrier固定 happens-before、保持 stale session可调用、mutation probe检验防线;认证 smoke网络前 fail closed;Node、本地进程与生产 DO证据分账)。
 - [memory/reflections/2026-08-11-artifact-and-e2e-semantic-validation.md](memory/reflections/2026-08-11-artifact-and-e2e-semantic-validation.md) — 发布物与 E2E 语义验收(`npm pack` 退出 0 不代表 `publishConfig` 生效;真实 pnpm tarball 才是消费者对象;plugin/v2 升级同步迁移验收脚本;本地 wire 与生产飞书证据分账)。
+- [memory/reflections/2026-08-11-mcp-consumer-e2e-evidence-layers.md](memory/reflections/2026-08-11-mcp-consumer-e2e-evidence-layers.md) — MCP consumer E2E 证据分层(官方 SDK workerd、Node TCP、生产复跑三层;窄 SK 新连接精确集合;stale 负例+允许工具真实 call;零工具集不得冒充 scope 收窄)。
 
 ## 路由提示
 
