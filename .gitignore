@@ -8,3 +8,4 @@ dist/
 .playwright-mcp/
 .playwright-cli/
 output/playwright/
+.turbo/

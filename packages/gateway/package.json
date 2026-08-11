@@ -55,6 +55,7 @@
     "@cloudflare/workers-types": "catalog:",
     "@modelcontextprotocol/sdk": "catalog:",
     "@tool-bridge/core": "workspace:*",
+    "@tool-bridge/dashboard": "workspace:*",
     "@tool-bridge/plugin-example": "workspace:*",
     "s3rver": "^3.7.1",
     "tsup": "catalog:",

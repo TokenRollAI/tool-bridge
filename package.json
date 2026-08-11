@@ -8,14 +8,14 @@
     "node": ">=22"
   },
   "scripts": {
-    "typecheck": "pnpm -r --if-present typecheck",
+    "typecheck": "turbo run typecheck",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "test:unit": "pnpm --filter @tool-bridge/core --filter @tool-bridge/cli --filter @tool-bridge/sdk --filter @tool-bridge/plugin-sdk --filter @tool-bridge/dashboard test && pnpm test:provision",
     "test:provision": "node --test scripts/provision.test.mjs",
     "test:integration": "pnpm --filter @tool-bridge/gateway --filter @tool-bridge/server --filter './plugins/*' --if-present test",
-    "test": "pnpm -r --if-present test",
-    "verify": "pnpm typecheck && pnpm lint && pnpm test:unit && pnpm test:integration",
+    "test": "turbo run test && pnpm test:provision",
+    "verify": "pnpm typecheck && pnpm lint && pnpm test",
     "compose:up": "docker compose up -d --build",
     "compose:smoke": "docker compose run --rm smoke",
     "compose:down": "docker compose down --remove-orphans",
@@ -49,6 +49,7 @@
     "husky": "^9.1.7",
     "lint-staged": "^16.4.0",
     "tsx": "catalog:",
+    "turbo": "^2.10.9",
     "typescript": "catalog:",
     "typescript-eslint": "^8.64.0",
     "wrangler": "catalog:"

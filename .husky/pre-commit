@@ -6,5 +6,5 @@ set -e
 # 1) staged 文件快门禁：eslint --fix
 pnpm exec lint-staged
 
-# 2) 全量类型检查（tsc 无法只检单文件，必须整项目）
+# 2) 全量类型检查（tsc 无法只检单文件;经 turbo 缓存,未变更的包直接命中）
 pnpm typecheck
