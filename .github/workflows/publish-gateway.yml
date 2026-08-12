@@ -44,8 +44,8 @@ jobs:
             exit 1
           fi
 
-      # gateway 把 core bundle 进产物,两包 typecheck 一起过
-      - run: pnpm --filter @tool-bridge/core --filter @tool-bridge/gateway typecheck
+      # gateway 把 core 与宿主中立层 app 一并 bundle 进产物,三包 typecheck 一起过
+      - run: pnpm --filter @tool-bridge/core --filter @tool-bridge/app --filter @tool-bridge/gateway typecheck
       - run: pnpm --filter @tool-bridge/core --filter @tool-bridge/gateway test
       - run: pnpm --filter @tool-bridge/gateway build
 

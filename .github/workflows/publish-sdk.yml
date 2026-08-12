@@ -44,8 +44,8 @@ jobs:
             exit 1
           fi
 
-      # sdk 把 core/gateway 宿主中立模块 bundle 进产物,三包 typecheck 一起过
-      - run: pnpm --filter @tool-bridge/core --filter @tool-bridge/gateway --filter @tool-bridge/sdk typecheck
+      # sdk 把 core 与宿主中立层 app bundle 进产物,三包 typecheck 一起过
+      - run: pnpm --filter @tool-bridge/core --filter @tool-bridge/app --filter @tool-bridge/sdk typecheck
       - run: pnpm --filter @tool-bridge/core --filter @tool-bridge/sdk test
       - run: pnpm --filter @tool-bridge/sdk build
 
