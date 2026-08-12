@@ -50,6 +50,35 @@ OAuth 的凭证可用性由授权流程本身证明,拿 client 凭证去调用�
 判"某能力可不可用"要看**声明面到消费面这条链是否闭合**,不能只看流程实现与测试数;
 "零产物用过"本身就是最强的信号。
 
+## 二之二、出参形状:业务字段与信封键的碰撞
+
+`toToolResult`(core `operation/registry.ts`)把 handler 的裸返回值包成 `ToolResult`。
+它曾用"对象里有没有 `content` 键"当判据 —— 而 `content` 在业务出参里是**极常见的字段名**
+(GitHub 的 reaction `{id, content:'+1', user}`、文件内容、标注正文)。后果:这些对象被
+当成信封透传,顶层其余字段全部降级成 `ToolResult` 上的野键。
+
+**这类缺陷的危险在于它不报错、不掉测试** —— 调用方只是静默少字段。实测 11 处出参声明
+踩到(6 个 provider),全部靠读代码发现,没有任何一条测试红过。
+
+判据现在是**键集合不含外来键**:`ToolResult` 是封闭形状(`content`/`contentBlocks`/
+`isError`/`structuredContent`),所以 `{content, isError}` 是信封、`{content, id, user}`
+是业务对象。筛查命令(新增产物后可复跑):
+
+```bash
+cd packages/plugins && node -e '
+const fs=require("fs");
+for (const d of fs.readdirSync("src",{withFileTypes:true}).filter(x=>x.isDirectory())) {
+  const f=`src/${d.name}/schema.ts`; if(!fs.existsSync(f))continue;
+  const s=fs.readFileSync(f,"utf8");
+  for(const m of s.matchAll(/export const (\w+Output) = z\.(strict|loose)Object\(\{([\s\S]*?)\n\}\)/g))
+    if(/^  content: /m.test(m[3])) console.log(d.name, m[1]);
+}'
+```
+
+**推广的判据**:凡是"平台按某个键的存在与否推断值的语义"的地方,都要问一句"这个键名
+在业务数据里常见吗"。常见就不能只看存在性 —— 要么看完整形状,要么换一个不可能碰撞的
+承载方式。
+
 ## 三、错误语义:三个反复踩的错位
 
 1. **缺配置 ≠ 服务故障**。漏配 `authRef`、探针形状不合规、出站目标是内网 —— 都是

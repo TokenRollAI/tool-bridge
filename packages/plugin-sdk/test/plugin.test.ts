@@ -423,7 +423,7 @@ describe('鉴权 fail closed(未配置 PLUGIN_TOKEN)', () => {
 
 describe('oauth:平台托管的 provider 型 OAuth2 声明', () => {
   const OAUTH = {
-    authorizationUrl: 'https://sentry.io/oauth/authorize',
+    authorizationUrl: 'https://sentry.io/oauth/authorize/',
     tokenUrl: 'https://sentry.io/oauth/token/',
     scopes: ['project:read', 'event:read'],
   }
