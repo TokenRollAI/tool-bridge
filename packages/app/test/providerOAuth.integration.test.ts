@@ -337,12 +337,12 @@ describe('免交互复用', () => {
 
 describe('OAuth 与 credentialProbe 叠加', () => {
   /**
-   * 回归:OAuth 挂载的 `authRef` 指向的 secret 存的是 **client 凭证**(clientId/clientSecret),
-   * 不是上游凭证。挂载期的凭证探针若照常把它当 upstreamAuthRef 传下去,插件就会收到
-   * clientSecret 明文 —— 那是凭证泄漏。
+   * 这个组合的历史:最初它能挂载成功,而挂载期的探针把 `authRef` 指向的 **client 凭证**
+   * (clientId/clientSecret)当上游凭证发给了插件 —— 凭证泄漏。
    *
-   * 正确行为:OAuth 挂载**不跑探针**。凭证可用性由 `~authorize` 流程本身证明
-   * (client 凭证不对就换不到 token,走不完流程)。
+   * 第一版修法是"OAuth 挂载不跑探针",堵住了泄漏但**留下了矛盾的声明**:作者会以为挂载时
+   * 验了凭证,实际什么都没发生。最终修法是在契约层当场拒这个组合(与"oauth + credentialFields"
+   * 同一个理由),所以现在连注册都过不去 —— 下面两条分别钉住这两层。
    */
   function probeBinding(seen: { auth?: string }): (request: Request) => Promise<Response> {
     const json = (value: unknown): Response => new Response(JSON.stringify(value), {
@@ -377,7 +377,7 @@ describe('OAuth 与 credentialProbe 叠加', () => {
     }
   }
 
-  it('**挂载时不把 client secret 发给插件**', async () => {
+  it('**契约层拒绝这个组合**(注册就失败,不留矛盾的声明)', async () => {
     const seen: { auth?: string } = {}
     const state = new MemoryStateStore()
     await runBootstrap(state, { adminSk: TEST_ADMIN_SK, requireAdminSk: true })
@@ -386,6 +386,39 @@ describe('OAuth 与 credentialProbe 叠加', () => {
       canonicalOrigin: 'https://tb.test',
       encryptionKey: TEST_ENCRYPTION_KEY,
       pluginBindings: new Map([['probep', probeBinding(seen)]]),
+      remote: { allowlist: [], maxHops: 4, allowInsecure: false },
+      secrets: new SecretStoreImpl(state, TEST_ENCRYPTION_KEY),
+      state,
+      version: 'test',
+    })
+    const res = await postJson(app, 'system/plugin', {
+      tool: 'write',
+      arguments: {
+        id: 'probep',
+        protocolVersion: 'plugin/v2',
+        endpoint: 'binding:probep',
+        auth: { kind: 'platform-token' },
+        healthPath: '/healthz',
+        enabled: true,
+      },
+    })
+    expect(res.status).toBe(400)
+    const body = (await res.json()) as { message: string }
+    expect(body.message).toContain('credentialProbe')
+    // 注册就没过,插件自然也没机会收到任何凭证。
+    expect(seen.auth).toBeUndefined()
+  })
+
+  it('**即便注册通过,挂载也不把 client secret 发给插件**(纵深防线)', async () => {
+    const seen: { auth?: string } = {}
+    const state = new MemoryStateStore()
+    await runBootstrap(state, { adminSk: TEST_ADMIN_SK, requireAdminSk: true })
+    const app = createTbApp({
+      allowInsecureHttp: false,
+      canonicalOrigin: 'https://tb.test',
+      encryptionKey: TEST_ENCRYPTION_KEY,
+      // 只声明 oauth(不带 credentialProbe):这样注册能过,才测得到挂载期的行为。
+      pluginBindings: new Map([['probep', oauthBinding()]]),
       remote: { allowlist: [], maxHops: 4, allowInsecure: false },
       secrets: new SecretStoreImpl(state, TEST_ENCRYPTION_KEY),
       state,

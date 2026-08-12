@@ -216,6 +216,16 @@ export function validatePluginContract(input: PluginContractInput): PluginDescri
           + '该字段仅 tools/v1 支持',
         )
       }
+      // 挂载期的探针会拿 authRef 去调用,而 oauth 模式下那个 secret 存的是 client 凭证 ——
+      // 平台已改为"oauth 挂载不跑探针",但**声明本身仍是矛盾的**:作者会以为挂载时验了
+      // 凭证,实际什么都没发生。与下面 credentialFields 那条同一个理由,当场拒。
+      if (exported.credentialProbe !== undefined) {
+        throw new TBError(
+          'invalid_argument',
+          `plugin '${manifest.id}' export '${exported.id}' 不能同时声明 oauth 与 credentialProbe:`
+          + 'oauth 的凭证可用性由授权流程本身证明,挂载期不会跑探针',
+        )
+      }
       // 两者都在描述"authRef 指向的 secret 里存什么",同时声明会矛盾:oauth 模式下那个
       // secret 固定存 clientId/clientSecret(OAUTH_CLIENT_FIELDS),不由 plugin 自定义。
       if (exported.credentialFields !== undefined) {
