@@ -49,7 +49,7 @@
     "tsup": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:",
-    "zod": "catalog:zod4"
+    "zod": "catalog:"
   },
   "repository": {
     "type": "git",

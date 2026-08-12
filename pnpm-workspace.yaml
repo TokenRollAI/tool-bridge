@@ -23,13 +23,7 @@ catalog:
   vitest: ^4.1.10
   wrangler: 4.107.0
   ws: 8.21.0
-  zod: ^3.25.76
-
-# gateway 的测试面用 zod 4(经 @modelcontextprotocol v2 的 peer);
-# 与 core 系的 zod 3 语义统一是独立事项,catalog 先各表各的。
-catalogs:
-  zod4:
-    zod: ^4.2.0
+  zod: ^4.2.0
 
 allowBuilds:
   better-sqlite3: true

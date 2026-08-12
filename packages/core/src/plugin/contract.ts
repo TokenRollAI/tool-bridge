@@ -64,7 +64,7 @@ const EXPORT_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/
 
 const exportSchema = z.object({
   id: z.string().regex(EXPORT_ID_RE, 'export id 须为 [A-Za-z0-9._-] 且不以标点开头'),
-  profile: z.enum(PLUGIN_PROFILES as [PluginProfile, ...PluginProfile[]]),
+  profile: z.enum(PLUGIN_PROFILES),
   description: z.string().optional(),
   /** context/v1:实际提供的动词;tools/v1 由运行时 List 发现,可省。 */
   methods: z.array(z.string()).optional(),

@@ -33,7 +33,7 @@ declare class TextEncoder {
 
 const SECRET_PREFIX = 'tbk_'
 const BEARER_PREFIX = 'Bearer '
-const ISO_TIMESTAMP = z.string().datetime({ offset: true })
+const ISO_TIMESTAMP = z.iso.datetime({ offset: true })
 
 /** sha256 十六进制摘要(WebCrypto)。 */
 export async function sha256Hex(text: string): Promise<string> {

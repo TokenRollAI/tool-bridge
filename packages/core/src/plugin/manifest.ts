@@ -53,7 +53,7 @@ const manifestSchema = z.object({
     .string()
     .default(PLUGIN_PROTOCOL_VERSION)
     .refine(v => v === PLUGIN_PROTOCOL_VERSION, {
-      message: `protocolVersion 须为 '${PLUGIN_PROTOCOL_VERSION}'`,
+      error: `protocolVersion 须为 '${PLUGIN_PROTOCOL_VERSION}'`,
     }),
   endpoint: z.string().min(1),
   auth: authSchema,

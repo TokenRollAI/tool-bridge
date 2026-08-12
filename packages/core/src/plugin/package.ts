@@ -55,12 +55,12 @@ const packageSchema = z.object({
     .string()
     .default(PLUGIN_PROTOCOL_VERSION)
     .refine(v => v === PLUGIN_PROTOCOL_VERSION, {
-      message: `protocolVersion 须为 '${PLUGIN_PROTOCOL_VERSION}'`,
+      error: `protocolVersion 须为 '${PLUGIN_PROTOCOL_VERSION}'`,
     }),
   healthPath: z.string().regex(/^\//, 'healthPath 须以 \'/\' 开头'),
   description: z.string().optional(),
-  configSchema: z.record(z.unknown()).optional(),
-  mountConfigSchema: z.record(z.unknown()).optional(),
+  configSchema: z.record(z.string(), z.unknown()).optional(),
+  mountConfigSchema: z.record(z.string(), z.unknown()).optional(),
 })
 
 export interface ParsePluginPackageOptions {

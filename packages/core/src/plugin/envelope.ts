@@ -10,7 +10,7 @@
 
 import { z } from 'zod'
 import { base64urlDecode, base64urlEncode } from '../encoding/base64url'
-import { type Action, ACTIONS, type CallContext } from '../types'
+import { ACTIONS, type CallContext } from '../types'
 import { TBError } from '../errors'
 
 declare const TextEncoder: { new (): { encode(input: string): Uint8Array } }
@@ -35,14 +35,14 @@ const callContextSchema = z.object({
   scopes: z.array(
     z.object({
       pattern: z.string().min(1),
-      actions: z.array(z.enum(ACTIONS as [Action, ...Action[]])),
+      actions: z.array(z.enum(ACTIONS)),
       effect: z.enum(['allow', 'deny']).optional(),
     }),
   ),
   registerPaths: z.array(z.string()).optional(),
   traceId: z.string().min(1),
   mountPath: z.string().min(1).optional(),
-  mountConfig: z.record(z.unknown()).optional(),
+  mountConfig: z.record(z.string(), z.unknown()).optional(),
   /** v2 多 export 路由:本次调用命中 plugin 的哪个 export。 */
   exportId: z.string().min(1).optional(),
 })
@@ -88,7 +88,7 @@ export interface PluginCall {
 
 const pluginCallSchema = z.object({
   tool: z.string().min(1),
-  arguments: z.record(z.unknown()),
+  arguments: z.record(z.string(), z.unknown()),
 })
 
 /** payload(UTF-8 字节数)超 1 MiB → invalid_argument。 */

@@ -53,7 +53,9 @@ export default [
       '@stylistic/curly-newline': ['error', { consistent: true }],
       '@stylistic/jsx-self-closing-comp': 'error',
       '@stylistic/object-curly-newline': ['error', { consistent: true }],
-      '@typescript-eslint/no-explicit-any': 'warn',
+      // 当前全仓零 `any`;提到 error 是为了守住这个状态——warn 会被顺手忽略,
+      // 真要用 `any` 时写一行 eslint-disable 并说明理由,比默默混进来强。
+      '@typescript-eslint/no-explicit-any': 'error',
       '@typescript-eslint/no-extraneous-class': 'off',
       '@typescript-eslint/no-use-before-define': 'error',
       '@typescript-eslint/unified-signatures': 'off',

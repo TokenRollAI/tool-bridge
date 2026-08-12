@@ -7,8 +7,8 @@
  */
 
 import { z } from 'zod'
-import { TB_ERROR_CODES, TBError, type TBErrorBody, type TBErrorCode } from '../errors'
-import { type DeviceExpose, NODE_KINDS, type NodeKind, type TreePath } from '../types'
+import { type DeviceExpose, NODE_KINDS, type TreePath } from '../types'
+import { TB_ERROR_CODES, TBError, type TBErrorBody } from '../errors'
 
 // ---------- 帧类型(TS 定义为真源) ----------
 
@@ -73,7 +73,7 @@ export type DeviceFrame
 // ---------- 结构校验(zod;未知字段剥离,nodes 除外) ----------
 
 const tbErrorBodySchema = z.object({
-  code: z.enum(TB_ERROR_CODES as [TBErrorCode, ...TBErrorCode[]]),
+  code: z.enum(TB_ERROR_CODES),
   message: z.string(),
   retryable: z.boolean(),
 })
@@ -96,7 +96,7 @@ const deviceNodeCmdSchema = z
 const nodeInputSchema = z
   .object({
     path: z.string().min(1),
-    kind: z.enum(NODE_KINDS as [NodeKind, ...NodeKind[]]),
+    kind: z.enum(NODE_KINDS),
     description: z.string(),
     cmds: z.array(deviceNodeCmdSchema).optional(),
   })
@@ -134,7 +134,7 @@ const schemaByType = {
     id: idSchema,
     path: z.string(),
     tool: z.string().min(1),
-    arguments: z.record(z.unknown()),
+    arguments: z.record(z.string(), z.unknown()),
   }),
   result: z.discriminatedUnion('ok', [
     z.object({ type: z.literal('result'), id: idSchema, ok: z.literal(true), value: z.unknown() }),
