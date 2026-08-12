@@ -158,6 +158,23 @@ ipqualityscore / brave_search / lightfield / opensea / fathom
 - agent 产出质量好于预期:注释解释与上游的**有意偏离**及理由。例如 clerk 指出上游
   `createClerkError` 把 403 压成 401、404 压成 400,迁移后交回 `upstreamError` 统一归一。
 
+### 已知缺口:`credentialValidators` 整体没有落点
+
+上游每个 provider 都带一个 `credentialValidators`,在**存凭证时**打一个最便宜的接口验证
+key 可用,并回填 `profile`(账号身份)与 `grantedScopes`。迁移产物**一个都没迁**——不是遗漏,
+是 tool-bridge 的插件契约里没有对应的生命周期钩子:凭证由平台 `tb secret set` 存入
+SecretStore,挂载时只写 `authRef`,插件侧要到**第一次调用**才拿得到它。
+
+后果:配错的 key 不会在 `secret set` 或挂载时报错,而是等到第一次调用才 401。这对 agent
+消费者不算致命(错误消息说得清),但比上游体验差一档。
+
+要补的话是平台侧工作,不是流水线能解决的,大致两条路:
+- plugin 协议加一个可选的 `Validate` 动词,`system/secret` 或挂载时调用;
+- 或挂载时按 `~describe` 里声明的某个 read 动作做一次真实探活。
+
+在此之前,迁移产物里凡是上游有 `phase: 'validate'` 分支的(把 4xx 压成 400 之类),
+一律**不迁那条分支** —— 它只服务于 validator 路径,execute 路径本来就走不到。
+
 ### 下一批的建议
 
 剩余 ~170 个"codegen 全干净 + 纯 api_key + 单文件"的候选可以直接照这个流程跑。
