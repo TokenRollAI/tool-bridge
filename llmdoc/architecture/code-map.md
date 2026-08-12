@@ -28,9 +28,29 @@
 
 **这一层是"改协议行为"的默认落点**:tbApp / bootstrap / deviceHello / providers 都在这里,gateway、server、SDK 三个宿主包只做 env→deps 适配。tsconfig 刻意 `types: []`(不引 workers-types,也不引 @types/node)——写出 `KVNamespace`/`process` 会直接编译失败,中立性由类型系统兜底而非人工纪律。公开面 = `src/index.ts`(分组 barrel)。
 
+**协议行为按关注点分文件**(2026-08-12 从 2948 行的 `tbApp.ts` 拆出,纯移动):`tbApp.ts` 只剩装配,handler 在 `routes/*`,跨路由纯函数在 `paths`/`federation`/`deviceNodes`/`toolNodes`/`contextNodes`/`helpModel`/`responses`,注入面形状在 `deps.ts`。找 handler 先看 `tbApp.ts` 的分派表定位到 `routes/` 的哪个文件。
+
 | 文件 | 管什么 |
 |---|---|
-| `tbApp.ts` | **`createTbApp(deps)`**:全局安全头、认证中间件、`~help`/`~tree`/`~skill`/`~describe`/`~register`/`~feedback`/`~mcp` 与 root-only `POST /~search`;Search audit/over-fetch 后按 read+call/kind/virtualize裁剪,再从HTTP/device config或批量tool cache水合完整ToolSpec;registry/plugin/fresh list/feedback mutation 接 SearchSynchronizer;另含数据面、remote、两级 `~help`、`/ui`、`/~ref`。**约 2900 行,全仓最大单文件**(拆分是已识别未做的改进项) |
+| `tbApp.ts` | **`createTbApp(deps)`——只剩装配,144 行**:构造 Hono、建 `RouteEnv`,按顺序挂安全头中间件 → 树外免认证路由 → 认证中间件 → `/~mcp`、`/~search`、设备 WS → GET/DELETE/POST 三个通配分派 → notFound/onError。**路由顺序即安全语义**(免认证路由必须在认证中间件之前),改路由先读这里的顺序注释 |
+| `deps.ts` | 宿主注入面形状 + 请求期公共类型:`TbAppDeps`(五注入点 + pluginBindings/assets/encryptionKey/… )、`DeviceChannel`、`LocalProviderHooks`、`Vars`/`AppContext`/`TbHono`、`TOOL_CACHE_TTL_DEFAULT`。**只放形状,不放行为** |
+| `responses.ts` | 表现层:`tbErrorResponse`、`withSecurityHeaders`、`runHandler`、`renderHelp`/`enrichHelp`/`renderResult`/`renderTreeDsl` |
+| `paths.ts` | 路径与可见性纯函数:保留段切分(`splitReserved`/`splitFeedback`)、`decodePath`、`assertRegisterPath`(注册路径规则)、`toEntry`、`filterListVisible`、`indexByParent` |
+| `federation.ts` | remote 联邦:`remotePassthroughIfMatch`(命中 remote 节点或其后代即改写透传)、`remoteTreeChildren`、路径规范化/本地化、`resolveRemoteSettings`(env 基线 ∪ 运行时白名单)、`assertRemoteConfigAllowed` |
+| `deviceNodes.ts` | 设备通道转发(`requireDevice`/`invokeDevice`)与 device 节点标记(`deviceMarkerOf`/`deviceToolMarker`/`relativeDevicePath`/`assertNoDeviceMarker`) |
+| `toolNodes.ts` | mcp/http/tool 节点:`providerFor` 装配、`upstreamTools`(走 toolCache)、`requirePluginExport`、`mountCallContext`、工具级两级披露 `toolHelpModelFor`、动态搜索/工具缓存刷新、`assertToolConfig` |
+| `contextNodes.ts` | context/skillhub:配置校验与 s3 连通探测、对象存储装配与 key 前缀、四动词/skillhub 动词分发、ttl 懒回收(`assertContextAlive`/`pruneExpiredContext`)、`parseS3Credentials` |
+| `helpModel.ts` | `helpModelFor`:一个出口覆盖全 kind 的 HelpModel 组装(builtin/directory/device tool/mcp·http·tool/device/context/skillhub);remote 在调用点已透传,不进此函数 |
+| `routes/env.ts` | `RouteEnv`:一次构造、全路由复用的请求外状态(`deps`/`builtinsOf`/`globalSearchCapabilities`/`searchSync`)。**handler 签名统一为 `(c, env)`**,不再靠闭包捕获 |
+| `routes/publicRoutes.ts` | 树外免认证路由:`/healthz`、`/~ref/:token` 大对象中转、`/ui` Dashboard 静态资源与 SPA 回退、根路径浏览器跳转、`/~oauth/callback` |
+| `routes/mcp.ts` | `/~mcp` 无状态投影桥:控制面三工具 + 树上可见节点命令/工具现算清单;调用回灌 `app.request` 复用认证链;远端发现有请求/节点/深度预算 |
+| `routes/search.ts` | root-only `POST /~search`:索引命中后按 read+call 复判、kind/virtualize 裁剪,再从 canonical 工具表水合;空可见页不回 cursor |
+| `routes/tree.ts` | `~tree`:一次读整棵子树后内存建 parent→子 索引;子树根须真实存在;remote 在深度边界直接标 truncated 免探测 |
+| `routes/help.ts` | `~help`:根级虚拟 directory、节点级 HelpModel、非注册路径的工具级两级披露;不可见一律 404 |
+| `routes/describe.ts` | `~skill`(remote 透传 / 本地 501)与 `~describe`(根回全局搜索能力,context/skillhub 回 provider 自报能力,其余 404) |
+| `routes/feedback.ts` | `~feedback` GET/POST/DELETE:权限判定落目标 path 本身;写路径经 dirty marker 喂搜索派生态 |
+| `routes/register.ts` | `POST ~register`(等价 NodeRegistry.Write)与 `POST ~authorize`(mcp 托管 OAuth 发起)。**顺序是硬约束**:权限判定 → Secret Reference 授权 → 出站探测 → 落库 → 失效缓存 |
+| `routes/invoke.ts` | `POST /<path>` 数据面总入口(信封 `{tool,arguments}` 与直连工具路径)。**分支顺序即语义优先级**:remote 透传 → device 自定义 tool 标记 → mcp/http/tool 上游 → device shell → context/skillhub 动词 → builtin |
 | `bootstrap.ts` | 首请求惰性引导:Workers 缺 `TB_BOOTSTRAP_ADMIN_SK` fail closed + `system` 七 builtin 物化(promise 防重入 + KV 幂等标志);`runBootstrap` 默认保留随机生成并向本地 stdout 展示一次的 SDK兼容路径,Node server 另以 `requireAdminSk` 默认收紧;已引导实例升级自动补挂新模块 |
 | `deviceHello.ts` | **`processDeviceHello`**:设备 hello 验证 + 落库的单一真源,DO 与 server DeviceHub 共用;有 MutableSearchIndex 时 seed/mark 后批量 rebuild 派生索引 |
 | `mcpServer.ts` | 无状态 `/~mcp` 桥:官方 MCP SDK server,投影 `tb_search`/`tb_help`/`tb_list_nodes` 三个稳定工具并回入同一 Hono 路由,复用既有认证/权限链 |

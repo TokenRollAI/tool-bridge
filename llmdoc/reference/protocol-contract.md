@@ -1,6 +1,6 @@
 # 协议契约参考(HTBP as implemented)
 
-> 用途:引用接口契约、错误码、数据模型、CLI 命令矩阵时的查表文档。真源是代码(core `htbp/`/`types.ts` 与 gateway `tbApp.ts`);bootstrap 期规范原文见 `archive/docs/Proto.md`(历史,不再维护)。更新时机:契约变化时。
+> 用途:引用接口契约、错误码、数据模型、CLI 命令矩阵时的查表文档。真源是代码(core `htbp/`/`types.ts` 与 app `tbApp.ts` 装配 + `routes/*` handler);bootstrap 期规范原文见 `archive/docs/Proto.md`(历史,不再维护)。更新时机:契约变化时。
 
 ## 1. 端点面
 

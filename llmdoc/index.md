@@ -63,6 +63,7 @@
 - [memory/reflections/2026-08-11-lightweight-search-mcp-discovery-parity.md](memory/reflections/2026-08-11-lightweight-search-mcp-discovery-parity.md) — 轻量搜索索引与MCP发现面对等(召回文档不存完整ToolSpec;canonical批量水合;MCP合成Search/Help/List复用HTBP权限;v3从真源重建)。
 - [memory/reflections/2026-08-11-host-neutral-layer-extraction.md](memory/reflections/2026-08-11-host-neutral-layer-extraction.md) — 抽宿主中立层 `@tool-bridge/app`(可被静默违反的约束才值得付搬迁成本;收紧类型面是廉价找 bug 手段;bundle 图正确性在 workspace 内不可测;体积结论必须实测基线;dts.resolve↔paths 两份清单不一致静默通过;搬迁与验证面迁移分两刀)。
 - [memory/reflections/2026-08-11-neutral-layer-verification-surface.md](memory/reflections/2026-08-11-neutral-layer-verification-surface.md) — 中立层验证面迁到中立宿主(先数这套测试实际用到多少宿主能力再决定它跑在哪;静态约束管写不出、执行验证管跑得动;换宿主重跑是廉价的存量问题探针;补内存实现优于把用例留在旧宿主、共享逻辑下沉 core;包边界一变要逐个重算 publish 闸门;worktree 写文件后确认写进了哪份工作树)。
+- [memory/reflections/2026-08-12-infra-lock-backlog-and-tbapp-split.md](memory/reflections/2026-08-12-infra-lock-backlog-and-tbapp-split.md) — infra-lock 待办清仓与 tbApp 拆分(纯移动要拿行集合 diff 当证据;先显式化闭包成 RouteEnv 再搬、别 sed 改写函数体;平台语义降级成显式下界而非删除;逻辑 vs 驱动的收敛判据;lint 反向约束签名;一次性授权仍按项切提交)。
 
 ## 路由提示
 

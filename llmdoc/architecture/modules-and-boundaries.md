@@ -16,15 +16,15 @@
 
 | 模块 | 职责 | core 落点 | 宿主落点 |
 |---|---|---|---|
-| HTBP Tree(核心枢纽) | 节点注册表、路由、`~help`/`~skill`/`~tree`/`~describe`、内容协商、调用分发 | `tree/` + `htbp/` | **app `tbApp.ts`(宿主中立 createTbApp)** + gateway `kvStateStore.ts` |
+| HTBP Tree(核心枢纽) | 节点注册表、路由、`~help`/`~skill`/`~tree`/`~describe`、内容协商、调用分发 | `tree/` + `htbp/` | **app `tbApp.ts`(宿主中立 createTbApp,只做装配/次序)**,handler 在 `routes/help|tree|describe|invoke.ts` + gateway `kvStateStore.ts` |
 | Tool Layer | mcp/http/builtin Provider 聚合与调用代理、虚拟化、remote 联邦 | `tool/` | app `providers/mcp|http|remote|toolCache` |
 | Context Layer | 多来源上下文统一读写检索面(四动词 + Search + `$ref`) | `context/` | app `providers/s3Object|s3Sign` + `refToken.ts`;gateway `providers/r2Object.ts`(CF binding) |
-| Global Tool Search | root-only `~search`;SearchIndex 是从 registry/tool cache/feedback 派生的可重建轻量视图,候选经权限/节点/虚拟化后由canonical state水合 | `search/types.ts`(只读 `SearchIndex`、`MutableSearchIndex`、candidate/cursor、lightweight snapshot/full-spec digest/query/budget contract) | app `SearchSynchronizer` 自动同步 + `tbApp.ts` 审计/批量水合;D1 v3 gateway `d1SearchIndex.ts`;server SQLite v3 `sqliteSearchIndex.ts`;SDK/内存宿主缺省无索引 |
-| Skillhub Layer | Agent Skill 仓库(每 skill = `<id>/SKILL.md` + 文本文件;List/Get/Search/Publish/Remove) | `skillhub/`(frontmatter 解析 + provider,复用 context 的 ObjectStore/objectProvider) | 复用 context 的 object providers(app s3 / gateway r2);`tbApp.ts` 装配 `skillhubProviderFor` 落 `skills/<path>` 前缀 |
+| Global Tool Search | root-only `~search`;SearchIndex 是从 registry/tool cache/feedback 派生的可重建轻量视图,候选经权限/节点/虚拟化后由canonical state水合 | `search/types.ts`(只读 `SearchIndex`、`MutableSearchIndex`、candidate/cursor、lightweight snapshot/full-spec digest/query/budget contract) | app `SearchSynchronizer` 自动同步 + `routes/search.ts` 审计/批量水合;v3 SQL 逻辑单一真源在 core `search/sqlSearchIndex.ts`,gateway `d1SearchIndex.ts` 与 server `sqliteSearchIndex.ts` 只剩 `SqlSearchDriver`;SDK/内存宿主缺省无索引 |
+| Skillhub Layer | Agent Skill 仓库(每 skill = `<id>/SKILL.md` + 文本文件;List/Get/Search/Publish/Remove) | `skillhub/`(frontmatter 解析 + provider,复用 context 的 ObjectStore/objectProvider) | 复用 context 的 object providers(app s3 / gateway r2);app `contextNodes.ts` 装配 `skillhubProviderFor` 落 `skills/<path>` 前缀 |
 | Device Gateway | 设备 WS 反向注册 + 调用转发 | `device/`(帧/状态机/shell 白名单/设备侧 client) | **协议行为单一真源:app `deviceHello.ts`(processDeviceHello,宿主中立)**;两个宿主胶水:gateway `deviceSession.ts`(DO,WS hibernation)与 server `deviceHub.ts`(Node ws);cli `deviceRuntime.ts`;core `node/`(FsObjectStore/shellExecutor) |
 | Auth(横切) | SK 签发/作用域/访问判定/SecretStore | `auth/` + `secret/` | app 认证中间件;SK 哈希与密文存 StateStore |
-| builtin 管理面 | `system/*` 七模块:sk / secret / registry / status / plugin / federation / annotation | `builtin/` | 经 `tbApp.ts` dispatch |
-| Agent 反馈 | `~feedback` 保留段(per-path 一级协议能力,非 builtin):提交/投票/下钻,头部条目注入 ~help;owning node 的可见 top 5 title/detail 同步进工具搜索 | core `feedback/` 存储、`selectFeedbackSearchText`(256 UTF-8 bytes) + app `tbApp.ts` 路由 | 权限判定落目标 path;工具子路径 feedback 不提升到 owning node 搜索投影 |
+| builtin 管理面 | `system/*` 七模块:sk / secret / registry / status / plugin / federation / annotation | `builtin/` | 经 app `routes/invoke.ts` dispatch(builtin 表由 `routes/env.ts` 的 `builtinsOf` 装配) |
+| Agent 反馈 | `~feedback` 保留段(per-path 一级协议能力,非 builtin):提交/投票/下钻,头部条目注入 ~help;owning node 的可见 top 5 title/detail 同步进工具搜索 | core `feedback/` 存储、`selectFeedbackSearchText`(256 UTF-8 bytes) + app `routes/feedback.ts` 路由 | 权限判定落目标 path;工具子路径 feedback 不提升到 owning node 搜索投影 |
 | SDK | 内嵌 TB 实例 / 程序化注册 / 反向连接 | —(装配层) | `packages/sdk`:createToolBridge = core + app 的 createTbApp + 内存宿主缺省 |
 | CLI | 纯 API 客户端 `tb`,22 个顶层命令族一一映射接口面;`tb search` 直连 root `/~search`,**无专用端点** | — | `packages/cli`(commander;npm 发布物) |
 | Plugin System | 自定义 Provider 注册与生命周期(探活/契约校验/信封传输) | `plugin/` | app `providers/pluginClient|pluginTool|pluginContext` + builtin `system/plugin`;首个 in-repo plugin 参考实现:`packages/plugins/src/feishu`(CF Worker,飞书 TAT 自动换发) |
@@ -51,9 +51,10 @@
 | DO `DeviceSession` | 每设备一个,WS hibernation 空闲零计费 | 唤醒后内存态须从 storage 恢复;见 [../guides/do-websocket-hibernation.md](../guides/do-websocket-hibernation.md) |
 | Static Assets | Dashboard 与 gateway 同 Worker(`../dashboard/dist`,binding `ASSETS`) | `run_worker_first: true`,一切请求先进 Worker;静态资源仅由 `/ui` 路由显式转发,SPA 回退严格限定 `/ui`,不吞根 `~help`/数据面/`system/*`;`/ui` 免认证(登录页须无 SK 可加载)。已有 `ui.integration.test.ts` 覆盖 |
 
-## 网关请求处理与判定次序(tbApp.ts)
+## 网关请求处理与判定次序(tbApp.ts 装配 + routes/*)
 
-- 树外免认证端点:`/healthz`、`/~ref/<token>`(HMAC token 即授权)、`/ui` 静态资源。
+- **次序在 `tbApp.ts`,行为在 `routes/*`**:`createTbApp` 只声明"挂什么、什么顺序",144 行读完即知全貌;改 handler 行为先看它的分派表定位到 `routes/` 哪个文件。跨路由纯函数在 `paths`/`federation`/`deviceNodes`/`toolNodes`/`contextNodes`/`helpModel`/`responses`,注入面形状在 `deps.ts`,闭包依赖显式化成 `routes/env.ts` 的 `RouteEnv`(`builtinsOf`/`deps`/`globalSearchCapabilities`/`searchSync`)。
+- 树外免认证端点:`/healthz`、`/~ref/<token>`(HMAC token 即授权)、`/ui` 静态资源、OAuth 回调——统一在 `routes/publicRoutes.ts` 注册,**必须在认证中间件之前**。
 - 其余全路由过认证中间件:Bearer → `identify`,失败 401 裸 TBError(缺失/无法识别/disabled/过期一视同仁)。
 - 通配路由按 pathname 末段分派(`~help`/`~tree`/`~skill`/`~describe`/`~register`/数据面 POST);每个 handler 先 `check(ctx, path, 'read')` 可见性判定,再按 cmd 声明的 scope 过 `Check`。
 - **deny == not_found**:对 (path,'read') 判 deny 的节点,`~help`/`~tree`/数据面一律 404,不泄露存在性;可见但目标动作被 deny 才 403。judgment 次序:read→404,再 scope→403。
@@ -84,7 +85,7 @@ Workers 无启动钩子,首请求惰性引导(模块级 promise 防重入 + KV �
 
 - **mcp**(`providers/mcp.ts`):官方 SDK Streamable HTTP;`Mcp-Session-Id` 会话复用(入 StateStore,失效 404 重握手一次);`authRef` 经 SecretStore.resolve 注入 Bearer;禁用 standalone SSE GET(fetch wrapper 返 405);schema 校验用 `@cfworker/json-schema`(workerd 禁 eval)。
 - **http**(`providers/http.ts`):`buildHttpRequest` 处理 `{param}` 占位与 GET/DELETE query、POST/PUT JSON body;`authHeader/authScheme` 控制上游凭证注入;非 2xx 与网络错误经 `normalizeUpstreamError` 收敛为 TBError。
-- **remote**(`providers/remote.ts`):注册时与调用时都校验 https 强制 + host allowlist(生效白名单 = env 基线 `TB_REMOTE_ALLOWLIST` ∪ 运行时条目,后者经 builtin `system/federation` 增删、存 `tool/allowlist.ts` 的 RemoteAllowlistStore,app `tbApp.ts` 请求期 `resolveRemoteSettings` 合并);本地调用者 SK 不外传,出站 Authorization 来自节点配置的 `skRef` 换发,写入时先过 `assertSecretRefUse`,调用时 resolve 不到 Secret 则 unavailable fail closed。每次成功使用记录 actor keyId/owner、traceId、节点、skRef、方法与去 query 的目标且不得记录明文凭据。`X-TB-Via` 入站先判环/跳数再追加自身。
+- **remote**(`providers/remote.ts`):注册时与调用时都校验 https 强制 + host allowlist(生效白名单 = env 基线 `TB_REMOTE_ALLOWLIST` ∪ 运行时条目,后者经 builtin `system/federation` 增删、存 `tool/allowlist.ts` 的 RemoteAllowlistStore,app `federation.ts` 的 `resolveRemoteSettings` 请求期合并);本地调用者 SK 不外传,出站 Authorization 来自节点配置的 `skRef` 换发,写入时先过 `assertSecretRefUse`,调用时 resolve 不到 Secret 则 unavailable fail closed。每次成功使用记录 actor keyId/owner、traceId、节点、skRef、方法与去 query 的目标且不得记录明文凭据。`X-TB-Via` 入站先判环/跳数再追加自身。
 - **r2/s3 object**(`r2Object.ts`/`s3Object.ts`):etag=version 乐观并发;s3 用 aws4fetch(`s3Sign.ts`);挂载时做连通探测;ttl 懒回收;readOnly 拒写并在 help 隐藏写动词。
 - **plugin**(`pluginClient/pluginTool/pluginContext`):平台→Plugin 传输用 `X-TB-Context`(base64url 信封,唯一上下文载体)+ `X-TB-Request-Id`(重试去重);挂载 `authRef` 给出时 resolve 上游凭证经 `X-TB-Upstream-Auth`(base64url)注入,resolve 失败 → unavailable 快速失败;plugin/v2 注册时探活并只抓 `~describe` 验证 exports/profiles,挂载后由具体 export 的 provider 接口提供工具或 context 面;周期探活不自动注销。
 - **工具级两级披露**:节点 `~help` 是索引(cmd 行 + `h` 一句话),`GET /<node>/<tool>/~help` 给全量 spec;Dashboard schema 懒补水同源。
