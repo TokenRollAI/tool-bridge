@@ -10,5 +10,5 @@
     "lib": ["ES2023", "DOM"],
     "types": []
   },
-  "include": ["src", "tsup.config.ts"]
+  "include": ["src", "test", "tsup.config.ts", "vitest.config.ts"]
 }

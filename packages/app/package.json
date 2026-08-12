@@ -31,6 +31,7 @@
   ],
   "scripts": {
     "typecheck": "tsc --noEmit",
+    "test": "vitest run",
     "build": "tsup"
   },
   "dependencies": {
@@ -42,9 +43,13 @@
     "hono": "catalog:"
   },
   "devDependencies": {
+    "@modelcontextprotocol/sdk": "catalog:",
     "@tool-bridge/core": "workspace:*",
+    "@tool-bridge/plugins": "workspace:*",
     "tsup": "catalog:",
-    "typescript": "catalog:"
+    "typescript": "catalog:",
+    "vitest": "catalog:",
+    "zod": "catalog:zod4"
   },
   "repository": {
     "type": "git",

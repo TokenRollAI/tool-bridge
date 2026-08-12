@@ -1,7 +1,7 @@
 import { MemoryStateStore, parseHelpDsl, SecretStoreImpl } from '@tool-bridge/core'
-import { createTbApp, type PluginBindings, runBootstrap } from '@tool-bridge/app'
 import { createNotesPlugin, type Env } from '@tool-bridge/plugins/notes'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { createTbApp, type PluginBindings, runBootstrap } from '../src/index'
 import { TEST_ADMIN_SK, TEST_ENCRYPTION_KEY } from './fixtures'
 
 /**
