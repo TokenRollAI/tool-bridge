@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { BUILTIN_PLUGIN_ENV_KEYS, builtinPluginBindings, narrowPluginEnv } from '../../src/registry'
+import { BUILTIN_PLUGIN_ENV_KEYS, BUILTIN_PLUGIN_LOADERS, builtinPluginBindings, narrowPluginEnv } from '../../src/registry'
 
 /**
  * 插件拿到的 env 必须是白名单收窄后的,不是宿主全环境。
@@ -63,6 +63,9 @@ describe('builtinPluginBindings', () => {
       TB_SECRET_ENCRYPTION_KEY: 'MASTER_KEY',
       PATH: '/usr/bin',
     })
-    expect(bindings.size).toBeGreaterThan(100)
+    // 不给 include 时装配整个目录 —— 断言对着 loader 表本身,而不是某个写死的数量:
+    // 目录会随策展增删,而"装配面 === 可用面"这条不变。
+    expect(bindings.size).toBe(Object.keys(BUILTIN_PLUGIN_LOADERS).length)
+    expect(bindings.size).toBeGreaterThan(0)
   })
 })

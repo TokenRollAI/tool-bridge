@@ -1,11 +1,49 @@
 # 从 open-connector 迁移 provider
 
-open-connector 有 1329 个 provider、约 104 万行,且基本是逐个写出来的(全仓只有 1 个带
+open-connector 有 1337 个 provider、约 104 万行,且基本是逐个写出来的(全仓只有 1 个带
 `generate.ts`),没有"改生成器重跑"这条捷径。
 
 本流程的产物是**我们自己的 tool-bridge 插件源码** —— Zod schema、`plugin.tools().register()`、
 `TBError`、自有的出站防线。不是运行时包一层适配器:那样 vendored 代码永远是外来的,
 风格、校验、错误语义全靠适配层临时翻译,欠债只会越滚越大。
+
+## 策展(2026-08-12):114 → 40 个产物
+
+前三批按"流程能否规模化"选批 —— 判据是 codegen 干净、单文件 executors、纯 api_key,
+**刻意不看这个 provider 有没有人用**。那批产物证明了流水线成立(114 个 / 806 action),
+但目录里塞进了大量没有使用场景的冷门 SaaS(`accredible_certificates`、`bookingmood`、
+`loyverse`、`jobnimbus` 这类)。
+
+这一轮反过来按**价值**筛,删掉 74 个,保留 40 个迁移产物 + 2 个手写插件(`feishu`/`notes`)。
+
+保留判据(满足其一):
+
+- **一线工具**,自己或团队想得出使用场景:`openai`/`stripe`/`resend`/`clerk`/`workos`/
+  `paddle`/`apify`/`brave_search`/`render`/`ngrok`/`readwise`/`front`/`dub`/`mistral_ai`/
+  `cohere`/`convertapi`/`mother_duck`/`prerender`/`opengraph_io`
+- **Agent 常用的基础设施类**:抓取与截图(`scrapfly`/`scrapingbee`/`screenshot_fyi`)、
+  IP 与地理(`ip2proxy`/`ipgeolocation_io`/`ipqualityscore`/`shodan`/`geocodio`/`graphhopper`)、
+  汇率(`currencyapi`/`fixer`/`open_exchange_rates`)、监控与事故
+  (`uptimerobot`/`logsnag`/`rootly`/`firehydrant`)、通讯(`telnyx`/`lemlist`)
+- **被本文记为特殊案例、删掉会丢证据**:`alt_text_generator_ai`(最小闭环)、
+  `resend`(手写豁免路径)、`stripe`(form-encoded/分页/互斥)、`feishu_custom_bot`
+  (多字段凭证 + 加签 + 信封错误)、`ipqualityscore`(凭证在路径段)、`zhihu`(中文社区面)
+
+被删的都是"流程验证用完即可弃"的样本。**流程本身的证据不在产物数量里**,在三道闸门和
+本文记录的根因分析里 —— 删掉 74 个产物,`schemaParity`/`producedShape` 照常运行。
+
+删除同时要清的四处(漏一处会静默失败或闸门红):
+
+| 位置 | 清什么 |
+|---|---|
+| `src/<service>/` | 整个目录 |
+| `src/registry.ts` | `BUILTIN_PLUGIN_LOADERS` 的那一行 loader |
+| `test/providers/<camelCase>.test.ts` | 对应的 wire 测试 |
+| `migration-fingerprints.json` | `providers` 下的那个 key(否则形状闸门报"缺 index.ts") |
+
+一个坑:`test/runtime/envNarrowing.test.ts` 曾断言 `bindings.size > 100` —— 那个数字是
+当时目录规模的副产物,不是它要证明的东西。已改成对着 `BUILTIN_PLUGIN_LOADERS` 的长度断言,
+策展增删目录不再需要改测试。**凡是写死了目录规模的断言都属于这类**。
 
 ## 一个迁移产物长什么样
 
@@ -298,6 +336,9 @@ function requireId(value: unknown, field: string): string {
 `feishu_app_bot` 后替掉它 —— 自实现的 330 个 action 能力面远大于代理的默认 8 个工具。
 
 ## 规模实测(116 个内置插件)
+
+> 这组数字实测于策展前的 116 个插件目录。策展后目录是 42 个,但**结论不变** ——
+> 有意义的是每插件均摊 8.3 ms 这个斜率,而不是当时的总数。
 
 "可用 ≠ 实例化"这条决策的实际数字:
 

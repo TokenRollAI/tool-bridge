@@ -3,7 +3,9 @@
 内置插件目录。`src/<name>/` 一个文件夹 = 一个插件(纯源码,不是 workspace 包),
 用 [`@tool-bridge/plugin-sdk`](../plugin-sdk) 写成 `{ fetch(request, env) }` 形状。
 
-当前目录:`feishu`(飞书 MCP 工具 provider)、`notes`(context provider 示例)。
+当前目录:40 个 open-connector 迁移产物(见 [MIGRATION.md](MIGRATION.md))+ 两个手写插件
+`feishu`(飞书 MCP 工具 provider)、`notes`(context provider 示例)。
+目录是**策展过的**:选取判据与被剔除的类别记在 MIGRATION.md 的「策展」一节。
 
 ## 三种托管形态,树上行为一致
 
