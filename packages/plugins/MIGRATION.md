@@ -182,22 +182,37 @@ ipqualityscore / brave_search / lightfield / opensea / fathom
 
 `guardedFetch` 的错误消息不回显 URL,这一点上没有额外泄漏;但常规的请求日志会。
 
-### 已知缺口:`credentialValidators` 整体没有落点
+### 凭证探针:`credentialValidators` 的落点(已实现)
 
-上游每个 provider 都带一个 `credentialValidators`,在**存凭证时**打一个最便宜的接口验证
-key 可用,并回填 `profile`(账号身份)与 `grantedScopes`。迁移产物**一个都没迁**——不是遗漏,
-是 tool-bridge 的插件契约里没有对应的生命周期钩子:凭证由平台 `tb secret set` 存入
-SecretStore,挂载时只写 `authRef`,插件侧要到**第一次调用**才拿得到它。
+上游每个 provider 都带 `credentialValidators`,在存凭证时打一个最便宜的接口验证 key 可用。
+tool-bridge 此前没有对应钩子 —— 凭证经 `tb secret set` 存进 SecretStore、挂载只写 `authRef`,
+插件要到**第一次业务调用**才拿得到它,配错的 key 要等 agent 真去用时才 401。
 
-后果:配错的 key 不会在 `secret set` 或挂载时报错,而是等到第一次调用才 401。这对 agent
-消费者不算致命(错误消息说得清),但比上游体验差一档。
+现在 tools/v1 的 export 可以声明一个探针,挂载时平台用注入的凭证真实调它一次:
 
-要补的话是平台侧工作,不是流水线能解决的,大致两条路:
-- plugin 协议加一个可选的 `Validate` 动词,`system/secret` 或挂载时调用;
-- 或挂载时按 `~describe` 里声明的某个 read 动作做一次真实探活。
+```ts
+createProviderPlugin({
+  description: 'Clerk',
+  actions: clerkActions,
+  credentialProbe: 'count_users',   // 只读、零副作用、无必填入参
+  handlers: { ... },
+})
+```
 
-在此之前,迁移产物里凡是上游有 `phase: 'validate'` 分支的(把 4xx 压成 400 之类),
-一律**不迁那条分支** —— 它只服务于 validator 路径,execute 路径本来就走不到。
+选探针的三个条件(前两个有代码校验,第三个靠人判断):
+- **已注册的工具** —— `probeCredentialWith` 在注册期就查,拼错名字当场炸;
+- **`effect: 'read'`** —— 挂载不该产生业务副作用,`_runtime/plugin.ts` 装配期校验;
+- **无必填入参** —— 平台空参调它,有必填字段会被 Zod 拦成 invalid_argument,
+  那个错误看起来像凭证问题,实际是探针选错了。
+
+选不出合适的 action 就**不写**(例如全部 action 都要必填业务 id,拿不到一个"空转"调用)。
+迁移时顺手看一眼上游 `credentialValidators` 打的是哪个接口,通常就对应到某个 list/count action。
+
+错误分账:401/403 → `invalid_argument`(这次挂载的错,当场拒,消息点名是哪个 secret);
+上游 5xx 或网络故障 → `unavailable` + retryable(不因上游抖动永久拒绝挂载)。
+
+**首批 15 个产物里只有 clerk 声明了探针**,其余待逐个补 —— 补的时候对着上游的
+`credentialValidators` 看它打哪个接口即可。
 
 ### 下一批的建议
 
