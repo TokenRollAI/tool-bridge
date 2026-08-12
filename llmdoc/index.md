@@ -30,6 +30,7 @@
 - [guides/do-websocket-hibernation.md](guides/do-websocket-hibernation.md) — DO hibernation WS 生产坑:边缘 ~100s 空闲掐断须客户端心跳保活、唤醒后内存状态机须从 storage 恢复(restoreReady)、本地 miniflare 测不出须线上跨休眠窗口验证。**改设备通道前必读。**
 - [guides/mcp-upstream-pitfalls.md](guides/mcp-upstream-pitfalls.md) — MCP 上游生产坑:会话复用机制(mcpsession KV 无 TTL + 400/404 失效信号)、不合规上游对过期会话回 200+空列表(实测 MetaMCP)与空列表防御、需自定义认证头的上游(飞书官方 MCP:X-Lark-MCP-\* 原样注入 + 必带工具白名单头)、生产可重跑排查手法(refresh=1 区分缓存层、幂等 update 强制重握手、塞伪 session 复现)。**挂载/排查 mcp 上游前必读。**
 - [guides/docker-host.md](guides/docker-host.md) — Docker/Node 宿主一篇通:env/bootstrap、`/data` 布局、production 单容器验收、localhost Compose 三跳开发栈与卷/凭据边界、CF 差异、`server-v*` 发布。**改 server 包或做 Docker/Compose 前必读。**
+- [guides/plugin-design-and-migration.md](guides/plugin-design-and-migration.md) — Plugin 设计取舍与 open-connector 迁移:plugin 是特权代码(同进程同权)故各边界须机器保证、四条凭证通道的分工与互斥、三个反复踩的错误语义错位、有状态 plugin 的分区键不是 mountPath、迁移流水线四阶段与三道回归闸门(等价/形状/wire)、批量 fan-out 的操作纪律、不该走迁移的 provider、规模实测数字。**写或审 plugin、跑迁移前必读。**
 - [guides/npm-publish.md](guides/npm-publish.md) — cli / sdk / gateway / dashboard / server 五包的 npm 发布:tsup bundle + dts 内联、publishConfig 覆盖、tag 触发 Trusted Publishing、新包两段式及常见坑;明确 Dashboard npm 与生产 `/ui` Static Assets 是两个独立发布面。
 - [guides/verification-and-commit-practices.md](guides/verification-and-commit-practices.md) — 验证与提交纪律:证据矩阵、Dashboard 真实浏览器四面证据、收尾同轮更新 current-state、配置面对等、出站边界测试、opt-in 退出码、长驻进程与跨休眠验证、先取证后改码、批量清理后 lint:fix、pathspec 提交与 hook 自动暂存防污染。
 - [guides/cli-argument-contract-review.md](guides/cli-argument-contract-review.md) — CLI 参数契约审查:Commander 解析/本地语义/服务端安全三层、同名同义、条件 flag、全局参数位置、分页 cursor 与 API↔CLI↔Dashboard 能力矩阵。**新增或修改 CLI 参数前必读。**
@@ -81,6 +82,7 @@
 | 写 KV 消费代码/排查 KV 一致性/vitest-pool-workers 配置 | guides/workers-kv-pitfalls.md |
 | 改设备 WS 通道/排查设备离线/DO hibernation 行为 | guides/do-websocket-hibernation.md |
 | 挂载 mcp 上游/排查 mcp 节点工具消失或会话异常 | guides/mcp-upstream-pitfalls.md |
+| 写/审 plugin、加 plugin 契约能力、跑 open-connector 迁移 | guides/plugin-design-and-migration.md |
 | 发 npm 新版本/新增可发布包/排查 CI 发布失败 | guides/npm-publish.md |
 | 了解产品定位/非目标/模块落地状态 | overview/project-overview.md |
 | 追溯 bootstrap 期规范原文/验收证据 | 仓库根 `archive/`(历史) |

@@ -107,17 +107,37 @@
 - `lib/`:api.ts(同源 `baseUrl:''`,含直连 root `searchTools` 且节点 API 统一调用 `encodeTreePath`)、queries.ts(`usePagedBuiltin` + `useToolSearch`,query key 隔离 profile/BaseURL/revision/query/mode/limit,cursor 仅作 pageParam)、path.ts(`encodeTreePath`:逐 raw segment 编码但保留 `/`)、schemaForm.ts、session.tsx(SK 多 profile;换凭据/删档案清 Query/Mutation cache)、history.ts(v2 metadata allowlist,不持久化调用参数)。
 - `vitest.config.ts` 使用 Node environment;`test/systemForms.test.ts` 10 cases 直接断言 Registry/Plugin/SK builder 的 wire shape与 fail-closed 分支。Dashboard `test` script 已加入根 `test:unit`;不含 DOM/React render,不能替代 dialog 生命周期、分页、草稿保留与一次性敏感值的组件/浏览器证据。协议/静态接线另由 gateway fresh-source `ui.integration.test.ts` 覆盖。产品级可重跑浏览器回归仍缺;Round 25 真实浏览器核对 desktop/mobile 无横向溢出且 console 0。验收矩阵见 [../guides/verification-and-commit-practices.md](../guides/verification-and-commit-practices.md)。
 
-## packages/plugins/src/feishu — 飞书 tool-provider Plugin(private,CF Worker)
+## packages/plugins — 内置插件目录(private)
 
-飞书官方远程 MCP(`https://mcp.feishu.cn/mcp`)的 tool-provider/v1 plugin,解决 TAT(tenant_access_token,约 2h 过期)人工续期问题:自部署进用户 CF 账户,经 `tb plugin register` 注册后 `kind:'tool'` 挂载。首个 in-repo plugin 参考实现;背景见 [../guides/mcp-upstream-pitfalls.md](../guides/mcp-upstream-pitfalls.md) 飞书小节。
+`src/<name>/` 每个文件夹 = 一个插件(纯源码,不是 workspace 包);`registry.ts` 的 loader 表懒加载
+——"可用 ≠ 实例化"。两类条目:**手写插件**(feishu / notes)与**迁移产物**(从 open-connector 机器
+迁移的 provider,形状统一)。设计取舍、迁移流程与回归闸门见
+[../guides/plugin-design-and-migration.md](../guides/plugin-design-and-migration.md);产物级清单
+(已迁哪些、各自取舍)在包内 `MIGRATION.md`,随产物变,不进 llmdoc。
 
-| 文件 | 管什么 |
+| 位置 | 管什么 |
 |---|---|
-| `src/index.ts` | 契约面 GET `/healthz` / `/~describe` / `/~help`(negotiate DSL/JSON,复用 core 渲染器)+ POST `/` envelope(List/Get/Call;Get 由 List 过滤实现);`PLUGIN_TOKEN` Bearer 鉴权(未配置时仅要求非空);`RequestDedupe` 幂等;**上游凭证不自持**:从 `X-TB-Upstream-Auth` 读(base64url JSON `{"app_id","app_secret"}`,缺头 → unavailable 503 报"挂载须配 authRef",坏形状 → invalid_argument 400);**上游 401 → 强制重换发 TAT 重试一次**(`withTatRetry`) |
-| `src/tat.ts` | TAT 换发(app_id/app_secret → token+expire)+ isolate 内存缓存(**按 app_id 键控**,同一部署可服务多凭证挂载不串号;刷新余量 5min);`force` 绕过缓存(纠错路径不回读缓存,教训同 mcp 空列表防御) |
-| `src/feishuMcp.ts` | MCP SDK Streamable HTTP client:每趟请求带 `X-Lark-MCP-TAT`(原样)+ `X-Lark-MCP-Allowed-Tools`;isolate 内存会话复用(**按 app_id 键控**;400/404 清会话重握手一次);401 原样抛出;`CfWorkerJsonSchemaValidator`(workerd 禁 eval,同 gateway 坑) |
-| `test/plugin.integration.test.ts` | 8 例集成测试(vitest-pool-workers 真实 workerd;mock 换发接口与 MCP 上游,默认离线),含吊销 token 后 401 强制重换发自愈、凭证头缺失/坏形状、多租户不串号 |
-| env(`wrangler.jsonc`) | secrets:仅 `PLUGIN_TOKEN`(飞书凭证不落 plugin,由挂载 authRef 经 `X-TB-Upstream-Auth` 注入);vars:`FEISHU_ALLOWED_TOOLS`(默认白名单 8 工具;search-user/search-doc 仅 UAT 不列)、`FEISHU_MCP_URL` / `FEISHU_AUTH_URL`(测试 override) |
+| `src/registry.ts` | loader 表 + `builtinPluginBindings`(装配 binding 名 → fetch handler);`narrowPluginEnv` 把宿主环境按**白名单**收窄(`PLUGIN_TOKEN` + `BUILTIN_PLUGIN_ENV_KEYS`)——插件与网关同权,整份 `process.env` 递下去等于交出 SecretStore 主密钥 |
+| `src/_runtime/guardedFetch.ts` | 插件出站唯一入口:逐跳校验(初始 URL + 每次重定向)、跨 origin 剥凭证头、跳数上限;`EgressBlockedError` 继承 TBError 归 `invalid_argument`(裸 Error 会变成 internal 500,把"拦下 SSRF"说成"插件崩了") |
+| `src/_runtime/ipPolicy.ts` | IANA 保留网段判定(v4/v6 含 v4-mapped);拒前导零写法;认不出的输入 fail closed |
+| `src/_runtime/upstreamError.ts` | 上游 HTTP 状态 → TBError 七码,一份实现(迁移前每个 provider 各有一套口径) |
+| `src/_runtime/plugin.ts` | 迁移产物共用装配骨架:规格表与 handler 表键集合须**完全吻合**(装配期炸,不留幽灵工具/死代码);`requireApiKey`/`requireCredential` 取凭证;`credentialProbe` 的 effect 校验 |
+| `src/<service>/{schema,api,index}.ts` | 迁移产物三件套:生成的 Zod 声明 / 人工机械改写的业务逻辑 / 装配。可选 `handwritten.json` + `schema.handwritten.ts`(手写豁免) |
+| `migration-fingerprints.json` | 全部已迁 provider 的上游 schema 指纹(sha256),等价闸门比对它;`providers` 的 key 列表同时是"哪些目录是迁移产物"的判据 |
+| `scripts/migrate/` | 迁移流水线:`index.mjs`(CLI)、`jsonSchemaToZod.mjs`(唯一"聪明"的一步)、`parity.mjs`(normalize)、`fingerprint.mjs`、`emit.mjs` |
+| `test/migration/` | 两道闸门:`schemaParity`(契约没漂)、`producedShape`(拼得起来、接线没漏) |
+| `test/providers/` | 每个产物一份 wire 测试(经真实 envelope) |
+| `test/runtime/` | 出站防线与多字段凭证的行为测试 |
+
+**手写插件 `src/feishu`**:飞书官方远程 MCP 的代理型 plugin(`proxyTools`),解决 TAT 约 2h 过期的
+人工续期问题 —— plugin 内自动换发 + 上游 401 强制重换发自愈,凭证经 `credentialFields`
+(`app_id`/`app_secret`)由平台注入,不落 plugin。TAT 与 MCP 会话都**按 app_id 键控**(同一部署
+服务多凭证挂载不串号);纠错路径 `force` 绕过缓存(教训同 mcp 空列表防御)。背景见
+[../guides/mcp-upstream-pitfalls.md](../guides/mcp-upstream-pitfalls.md) 飞书小节。
+
+**样例插件 `src/notes`**:一个部署同时导出 tools 与 context 两个 export。它是别人抄的模板,故
+存储按 `providerConfig.workspace` 分区而**不是按 mountPath** —— 两个 export 挂在不同路径却本该
+共享数据(见 guide 第四节)。
 
 ## packages/server — Node/Docker 宿主胶水(npm 发布物,bin `tool-bridge-server`)
 

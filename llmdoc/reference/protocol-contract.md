@@ -156,8 +156,15 @@ cmd resolve-library-id POST /docs/context7/resolve-library-id  ← cmd 行:<name
 
 ## 8. Plugin 传输契约(平台 → Plugin)
 
-- `POST {endpoint}`,上下文唯一载体 `X-TB-Context`(base64url 信封);`X-TB-Request-Id` 重试去重;载荷 ≤1 MiB(超限走 `$ref`);超时 30s。
-- `X-TB-Upstream-Auth`(可选):挂载节点配置 `authRef` 时,平台每次调用经 SecretStore resolve 后以 base64url 编码注入该头(明文形状由 plugin 约定,如 JSON);plugin 不自持上游凭证,轮换只需 `tb secret set`。resolve 失败 → unavailable 快速失败;无 authRef 则不发该头。常量:core `plugin/envelope.ts`(`HEADER_TB_UPSTREAM_AUTH`)。
+- `POST {endpoint}`,上下文唯一载体 `X-TB-Context`(base64url 信封);`X-TB-Request-Id` 重试去重;载荷 ≤1 MiB(超限走 `$ref`);超时 30s(网络与 `binding:` 进程内直调**同一常量**)。
+- `X-TB-Upstream-Auth`(可选):挂载节点配置 `authRef` 时,平台每次调用经 SecretStore resolve 后以 base64url 编码注入该头;plugin 不自持上游凭证,轮换只需 `tb secret set`。resolve 失败 → unavailable 快速失败;无 authRef 则不发该头。常量:core `plugin/envelope.ts`(`HEADER_TB_UPSTREAM_AUTH`)。头里的明文形状由 export 的**声明**决定,三态:
+  - 缺省 = 单值(一个 API key,secret 原样);
+  - 声明 `credentialFields` = JSON 对象,SDK 按声明解析并校验必填后给 `ctx.credentials`,挂载时平台也校验字段齐全(缺了当场拒并点名);
+  - 声明 `oauth` = 平台换来并按需刷新的 **access token**(此时 authRef 指向的 secret 存的是 clientId/clientSecret,不出网关)。
+  `oauth` 与 `credentialFields`、`oauth` 与 `credentialProbe` 均**互斥**(契约当场拒:三者都在描述"那个 secret 存什么"或"怎么验它")。
+- `X-TB-Context` 的 `mountConfig`(= 挂载节点 `providerConfig`)只发给该节点对应的 plugin,插件之间不共享;但它**不是密钥通道** —— 明文进节点记录,`system/registry get` 对任何有该节点 `read` 的 SK 都原样回显。密钥一律走 authRef。
+- 可选声明 `credentialProbe`(仅 tools/v1):一个只读、零副作用、无必填入参的工具名。挂载时平台用注入的凭证真调一次它,凭证不可用当场拒绝挂载 —— 否则配错的 key 要等第一次业务调用才 401。平台从 `List` 核验探针形状(在工具表里、`effect==='read'`、`required` 为空),不合规按 `invalid_argument` 拒。
+- 托管 OAuth 有**两套**、共用 `/~oauth/callback` 与 state 密封,流程分开:mcp 上游那条靠 MCP SDK 的 discovery + 动态客户端注册;provider 型(`kind:'tool'` 且 export 声明 `oauth`)的端点是声明的已知值、client 由用户自己在 provider 后台注册。回调按目标节点 kind 分派。调用期令牌过期自动刷新,上游 401 触发一次强制刷新重试(不返回 `expires_in` 的 provider 只有这条路能自愈)。
 - `pluginToken`(Plugin 回调平台的令牌)注册时签发仅一次。
 - 生命周期:注册时自动探活(`GET {healthPath}`)+ 抓取 `~describe` 并校验 plugin/v2 exports;不再抓 `~help`。endpoint 可为 `binding:<name>`(宿主装配的进程内插件,探活/契约/调用直调 handler,零网络;`system/plugin` 的 `catalog` cmd 列目录)。endpoint/healthPath/protocolVersion 更新时重探活并刷新 contract,auth/enabled 等本地字段变化不触发 contract refresh;未声明的可选方法不会被调用;周期探活反映健康态但不自动注销。
 
