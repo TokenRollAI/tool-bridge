@@ -45,7 +45,7 @@ open-connector 有 1337 个 provider、约 104 万行,且基本是逐个写出�
 当时目录规模的副产物,不是它要证明的东西。已改成对着 `BUILTIN_PLUGIN_LOADERS` 的长度断言,
 策展增删目录不再需要改测试。**凡是写死了目录规模的断言都属于这类**。
 
-## 第四批(部分完成):按价值选的 57 个,交付 26 个
+## 第四批(已完成):按价值选的 57 个,97 个产物 / 1275 action
 
 策展腾出空间后,反过来从上游按**价值**选批(前三批选的是"流程能否规模化",这批选的是
 "这个 provider 有没有人用")。
@@ -56,26 +56,42 @@ open-connector 有 1337 个 provider、约 104 万行,且基本是逐个写出�
 googlesheets 7/40),以及与保留项能力重复(gitea↔github、serpapi/linkup↔tavily、
 mailgun/sendgrid↔resend)。
 
-**已交付 26 个**(四件套齐全 + 过三道闸门):airtable / anthropic / circleci /
-cloudflare_dns / confluence / deepseek / docker_hub / e2b / exa / figma / fly / jira /
-mem0 / outline / perplexity / pinecone / pipedrive / posthog / postmark / railway /
-telegram / trello / umami / unsplash / upstash_redis / wolfram_alpha_api
+**分两轮交付**(第一轮 26 个,余下 30 个因 subagent 批量中断顺延到第二轮补完)。
+最终 97 个产物、1275 action、内置目录 99 个 loader。凭证形态分布(经 `~describe` 实测,
+不是静态 grep —— grep 会把注释里"不能声明 X"的说明文字当成声明):
 
-**未完成的 30 个在 `.pending-migration/`**(schema 已生成并过等价校验,api.ts/测试待补;
-指纹登记也一并撤到那里的 `fingerprints.json`)。撤出而不是留在 `src/` 的理由:形状闸门
-按指纹清单判"这个 provider 拼得起来吗",半成品留在清单里会让闸门长红,反而看不出真问题。
-补完时把目录移回 `src/`、指纹条目并回主清单即可,codegen 不用重跑。
+| 形态 | 个数 | 产物 |
+|---|---:|---|
+| 单值 api_key | 82 | 多数 |
+| `credentialFields` 多字段 | 10 | confluence / ghost / jira / mattermost / shopify / trello / twilio / upstash_redis / wordpress / feishu_custom_bot |
+| `oauth` 托管授权码 | 5 | sentry / gmail / googlecalendar / googledocs / dropbox |
+| `credentialProbe` | 66 | —— |
+
+互斥零违反(`oauth` 与另两者不共存)。
+
+规模最大的三个:github(145 action,api.ts 按上游 runtime-* 拆 6 文件)、
+gmail(46)、googlecalendar(37)。
+
+### oauth2 产物要盯的一处
+
+Google 系必须带 `authorizationParams: {access_type:'offline', prompt:'consent'}`,
+Dropbox 必须带 `{token_access_type:'offline'}` —— **漏了它们上游不下发 refresh_token**,
+access token 一过期用户就得手工重新授权,而这个故障要等几十分钟后才显现。
+这几个值抄上游 `definition.ts`,不要凭印象写。
 
 ### 这一轮学到的
 
-- **agent 批量中断是常态,要设计成可断点续跑**。这轮 13 个 subagent 先后因 API 连接中断
-  与**周额度耗尽**全部退出。前三批也挂过三个 —— 区别是这次挂在半途的比例高得多。
-  形状闸门照例把半成品精确报了出来(缺 index.ts / 缺测试),但真正省事的是
-  `.pending-migration/` 这个撤出机制:**未完成 ≠ 要删掉重来**,schema 是确定性产物,
-  值钱且可复用。
-- **wire 测试绿 ≠ 类型是对的**。vitest 不做 typecheck,7 个产物的 `compact()` helper
-  各自独立写出了同一个类型缺陷(返回 `Json` 但下游要 `Record<string, QueryValue>`),
-  测试全绿而 `tsc` 红。批量收尾**必须**单独跑一次 typecheck。
+- **agent 批量中断是常态,要设计成可断点续跑**。第一轮 13 个 subagent 先后因 API 连接
+  中断与**周额度耗尽**全部退出。形状闸门照例把半成品精确报了出来(缺 index.ts / 缺测试),
+  但真正省事的是把未完成产物连同指纹登记撤到 `.pending-migration/`:**未完成 ≠ 要删掉
+  重来**,schema 是确定性产物,值钱且可复用;补完时目录移回、指纹并回即可,codegen 不用
+  重跑。第二轮正是这么做的,零重复劳动。
+- **半成品不要提前接进 registry**。形状闸门按指纹清单判"这个 provider 拼得起来吗",
+  半成品留在清单里(或提前加了 loader 行)会让闸门在**假问题**上长红,反而盖住真问题。
+- **wire 测试绿 ≠ 类型是对的**。vitest 不做 typecheck。`compact()` 那个类型缺陷累计
+  出现四次(7 + grafana + memos),都是不同 agent 独立写出的同一个错 —— 说明它是这类
+  改写的天然陷阱,不是个别疏忽。31 个产物用了同款 helper,但只有 2 处真触发 tsc
+  (取决于返回值有没有流进窄类型参数):**grep 会误判 29 处,tsc 才是判据**。
 - **`new Response('', {status: 204})` 在 undici 下直接 TypeError**(204/205/304 是
   null body status),而那个异常冒到 plugin-sdk 会被归一成 `internal` 500 ——
   呈现出来是"插件崩了",实际是测试构造响应的那一行写错了。两个产物的测试 helper 同时
@@ -85,6 +101,9 @@ telegram / trello / umami / unsplash / upstash_redis / wolfram_alpha_api
   (content/data 二选一、至少改一个字段),与记录类型无关。执行的 agent 读了源码后指出
   不符并按源码写了 refine 版本 —— 这是对的:按错误 reason 写判别联合会把契约收得比
   上游窄(TXT 记录用 `data` 给结构化内容,上游接受、判别式会拒),那是行为变更不是迁移。
+- **修完缺陷要回头改那些"因它而写"的注释**。core 的 `toToolResult` 修好后,github 里
+  一条"删掉 content 键以免被当成信封"的注释理由就失效了;留着它下一个人会照它推断出
+  错误结论,甚至去"修"一个不存在的问题。
 
 ### oauth2 通道:平台侧早就通了,缺的是 SDK 声明面
 
@@ -95,13 +114,16 @@ telegram / trello / umami / unsplash / upstash_redis / wolfram_alpha_api
 (`credentials`/`credentialProbe` 双向)—— 平台契约层本就会拒,但那要等注册时才 400,
 作者看到的是个远端错误。
 
-C 层 5 个 oauth2 provider(sentry / gmail / googlecalendar / googledocs / dropbox)的
-schema 已生成,api.ts 待补,同样在 `.pending-migration/`。迁的时候注意:
+C 层 5 个 oauth2 provider(sentry / gmail / googlecalendar / googledocs / dropbox)
+**已全部迁完**,是这条声明面的首批消费者。写这类产物时注意:
 - **Google 系必须带 `authorizationParams: {access_type:'offline', prompt:'consent'}`**,
   否则拿不到 refresh_token,令牌一过期用户就得手工重授权;Dropbox 同理需要
   `token_access_type: 'offline'`。这几个值抄上游 `definition.ts`,不要自己发挥。
 - handler 里照常 `requireApiKey(ctx, SERVICE)` —— 拿到的就是平台换来并按需刷新的
   access token,插件不需要知道它是 OAuth 来的。
+- 这 5 个产物的 wire 测试都额外钉了一条:`~describe` 报出的 oauth 与上游端点/scope/
+  授权参数逐字一致。端点错一个字符(比如 sentry 的尾斜杠)授权就会失败,而那种失败要到
+  用户点授权按钮时才显现。
 
 ## 一个迁移产物长什么样
 
