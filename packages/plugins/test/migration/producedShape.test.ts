@@ -11,7 +11,8 @@ import { BUILTIN_PLUGIN_LOADERS } from '../../src/registry'
  * 都要在这里当场炸,而不是等到挂载时才发现。
  */
 
-interface Snapshot { actions: Array<{ name: string }>, service: string }
+/** upstream.snapshot.json 现在存的是**指纹清单**(action 名 → 各字段的 sha256)。 */
+interface Snapshot { actions: Record<string, unknown>, service: string }
 
 const SNAPSHOTS = import.meta.glob<Snapshot>('../../src/*/upstream.snapshot.json', { eager: true })
 const INDEXES = import.meta.glob<{ default?: Plugin<unknown> }>('../../src/*/index.ts', { eager: true })
@@ -26,7 +27,7 @@ it('每个迁移产物都接进了内置目录(漏接线的插件挂不上树,�
 
 describe.each(migrated)('%s', (service: string) => {
   const snapshot = SNAPSHOTS[`../../src/${service}/upstream.snapshot.json`]!
-  const names = snapshot.actions.map(action => action.name).sort()
+  const names = Object.keys(snapshot.actions).sort()
 
   it('导出了 default plugin(可被内置目录懒加载)', () => {
     const mod = INDEXES[`../../src/${service}/index.ts`]

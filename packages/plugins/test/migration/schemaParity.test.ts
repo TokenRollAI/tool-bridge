@@ -2,12 +2,16 @@ import { describe, expect, it } from 'vitest'
 import { z } from 'zod/v4'
 
 /**
- * 等价闸门:每个迁移产物的 Zod schema 反推回 JSON Schema 后,必须与迁移时的**上游快照**
- * 逐 action 等价。
+ * 等价闸门:每个迁移产物的 Zod schema 反推回 JSON Schema、归一、取指纹后,必须与迁移时
+ * 记下的**上游指纹**逐 action 相等。
  *
  * 这是让批量迁移可信的东西。1329 个 provider 不可能靠人肉 review 保证契约没漂;这条测试
  * 把"翻译有没有改变接受集合"变成 CI 里的机器判定。有人手改了生成的 schema 想收紧或放宽,
  * 就必须在 handwritten.json 里显式登记 —— **漂移只能是声明过的,不能是意外的**。
+ *
+ * 比对前过 normalize,每条规则都是可论证保语义的(理由见各自位置)。normalize 与
+ * `scripts/migrate/parity.mjs` 必须保持一致 —— 生成指纹与校验指纹用的是同一套规则,
+ * 两边漂了会让全部指纹无故失配(此时 `normalizeVersion` 该 +1 并重新生成)。
  *
  * 收集用 `import.meta.glob` 而非 fs 遍历:本包 tsconfig 刻意不引 Node 类型(插件产物要能
  * 被任意宿主装载),测试也守同一条线。
@@ -19,29 +23,25 @@ interface ActionSpec {
   outputSchema: unknown
 }
 
-interface Snapshot {
-  actions: Array<{
-    description: string
-    inputSchema: unknown
-    name: string
-    outputSchema: unknown
-  }>
+interface Fingerprints {
+  actions: Record<string, { description: string, inputSchema?: string, outputSchema?: string }>
+  normalizeVersion: number
   service: string
 }
 
 const SAFE_INT_MAX = 9007199254740991
 const SAFE_INT_MIN = -9007199254740991
 
+/** 与 scripts/migrate/fingerprint.mjs 生成指纹时的 normalize 规则版本对齐。 */
+const NORMALIZE_VERSION = 1
+
 const SCHEMAS = import.meta.glob<Record<string, unknown>>('../../src/*/schema.ts', { eager: true })
-const SNAPSHOTS = import.meta.glob<Snapshot>('../../src/*/upstream.snapshot.json', { eager: true })
+const SNAPSHOTS = import.meta.glob<Fingerprints>('../../src/*/upstream.snapshot.json', { eager: true })
 const HANDWRITTEN = import.meta.glob<{ actions: string[] }>('../../src/*/handwritten.json', { eager: true })
 
-/** 有 upstream.snapshot.json 的目录 = 迁移产物。 */
-const migrated = Object.keys(SNAPSHOTS)
-  .map(path => path.split('/').at(-2)!)
-  .sort()
+const migrated = Object.keys(SNAPSHOTS).map(path => path.split('/').at(-2)!).sort()
 
-function snapshotOf(service: string): Snapshot {
+function snapshotOf(service: string): Fingerprints {
   return SNAPSHOTS[`../../src/${service}/upstream.snapshot.json`]!
 }
 
@@ -49,7 +49,6 @@ function handwrittenOf(service: string): string[] {
   return HANDWRITTEN[`../../src/${service}/handwritten.json`]?.actions ?? []
 }
 
-/** service → 该模块导出的 `<service>Actions` 规格表。 */
 function actionsOf(service: string): Record<string, ActionSpec> {
   const mod = SCHEMAS[`../../src/${service}/schema.ts`]
   if (mod === undefined) throw new Error(`${service}: 没有 schema.ts`)
@@ -81,8 +80,7 @@ function normalize(schema: unknown): unknown {
     }
     // 上游写 additionalProperties:true,Zod 的 looseObject 写 {} —— 同义。
     if (name === 'additionalProperties' && isAnySchema(value)) continue
-    // 空 `properties: {}` 不构成任何约束(一个属性都没声明),是 Zod 反推 record 型
-    // schema 时的固定产物;上游对同一形状不写这个键。
+    // 空 `properties: {}` 一个属性都没声明,不构成约束;是 Zod 反推 record 型的固定产物。
     if (name === 'properties' && typeof value === 'object' && value !== null
       && Object.keys(value).length === 0) continue
     // z.record 会显式写 propertyNames:{type:'string'};JSON 对象的键本来只能是字符串。
@@ -98,6 +96,15 @@ function normalize(schema: unknown): unknown {
   return out
 }
 
+async function sha256(text: string): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text))
+  return [...new Uint8Array(digest)].map(byte => byte.toString(16).padStart(2, '0')).join('')
+}
+
+function fingerprint(schema: unknown): Promise<string> {
+  return sha256(JSON.stringify(normalize(schema)))
+}
+
 it('至少有一个迁移产物(否则本闸门是空转的绿灯)', () => {
   expect(migrated.length).toBeGreaterThan(0)
 })
@@ -105,24 +112,29 @@ it('至少有一个迁移产物(否则本闸门是空转的绿灯)', () => {
 describe.each(migrated)('%s', (service: string) => {
   const snapshot = snapshotOf(service)
   const handwritten = handwrittenOf(service)
+  const names = Object.keys(snapshot.actions).sort()
 
-  it('action 集合与上游一致(不多不少)', () => {
-    expect(Object.keys(actionsOf(service)).sort())
-      .toEqual(snapshot.actions.map(action => action.name).sort())
+  it('指纹的归一化规则版本与本测试一致(改了 normalize 须重新生成指纹)', () => {
+    expect(snapshot.normalizeVersion).toBe(NORMALIZE_VERSION)
   })
 
-  for (const action of snapshot.actions) {
-    const exempt = handwritten.includes(action.name)
-    it(exempt ? `${action.name}(手写豁免,只查存在性与 description)` : action.name, () => {
-      const spec = actionsOf(service)[action.name]
-      expect(spec, `${service}.${action.name} 不在 schema.ts 的规格表里`).toBeDefined()
+  it('action 集合与上游一致(不多不少)', () => {
+    expect(Object.keys(actionsOf(service)).sort()).toEqual(names)
+  })
+
+  for (const name of names) {
+    const expected = snapshot.actions[name]!
+    const exempt = handwritten.includes(name)
+    it(exempt ? `${name}(手写豁免,只查存在性与 description)` : name, async () => {
+      const spec = actionsOf(service)[name]
+      expect(spec, `${service}.${name} 不在 schema.ts 的规格表里`).toBeDefined()
       // description 是给 agent 看的,迁移不得悄悄改写。
-      expect(spec!.description).toBe(action.description)
+      await expect(sha256(spec!.description)).resolves.toBe(expected.description)
       if (exempt) return
 
-      expect(normalize(z.toJSONSchema(spec!.inputSchema, { io: 'input', unrepresentable: 'any' })))
-        .toEqual(normalize(action.inputSchema))
-      expect(normalize(spec!.outputSchema)).toEqual(normalize(action.outputSchema))
+      await expect(fingerprint(z.toJSONSchema(spec!.inputSchema, { io: 'input', unrepresentable: 'any' })))
+        .resolves.toBe(expected.inputSchema)
+      await expect(fingerprint(spec!.outputSchema)).resolves.toBe(expected.outputSchema)
     })
   }
 })

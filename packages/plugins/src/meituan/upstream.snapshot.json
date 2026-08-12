@@ -4,50 +4,13 @@
   "authTypes": [
     "api_key"
   ],
-  "actions": [
-    {
-      "name": "query_travel",
-      "description": "Query Meituan Travel for flights, trains, hotels, attractions, itineraries, local transportation, and other travel information using natural language. Requests may take up to two minutes, so use a caller timeout longer than 120 seconds.",
-      "inputSchema": {
-        "type": "object",
-        "properties": {
-          "query": {
-            "type": "string",
-            "minLength": 1,
-            "description": "The user's travel question or request, including useful details such as dates, origin, destination, budget, and number of travelers."
-          },
-          "city": {
-            "type": "string",
-            "minLength": 1,
-            "description": "The user's current city or the city used as context for the travel query. Defaults to Beijing when omitted."
-          },
-          "originQuery": {
-            "type": "string",
-            "minLength": 1,
-            "description": "The complete original user request used for Meituan attribution and analytics. Defaults to query when omitted."
-          }
-        },
-        "additionalProperties": false,
-        "required": [
-          "query"
-        ],
-        "description": "The input payload for a Meituan Travel natural-language query."
-      },
-      "outputSchema": {
-        "type": "object",
-        "properties": {
-          "content": {
-            "type": "string",
-            "minLength": 1,
-            "description": "The Meituan Travel result as Markdown text, which may include recommendations, prices, images, and booking links."
-          }
-        },
-        "additionalProperties": false,
-        "required": [
-          "content"
-        ],
-        "description": "The normalized result returned by Meituan Travel."
-      }
+  "migratedFrom": "open-connector",
+  "normalizeVersion": 1,
+  "actions": {
+    "query_travel": {
+      "description": "2b082132d51e92e06744f56a2ddf5ba859976e4c65319edc044503135d3c7821",
+      "inputSchema": "344a83c687416ea60e234cdd127ef63e7d767e1d64bbacde9d704f287554e4eb",
+      "outputSchema": "828ef569e4c80fbff73ea1da63d3030c5d97dc2a3d5489ff9c18a3c3409e6caf"
     }
-  ]
+  }
 }

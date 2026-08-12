@@ -12,7 +12,9 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { execFileSync } from 'node:child_process'
 import process from 'node:process'
 import { join } from 'node:path'
+import { fingerprintProvider } from './fingerprint.mjs'
 import { emitSchemaModule } from './emit.mjs'
+import { normalize } from './parity.mjs'
 
 const [sourceRoot, ...services] = process.argv.slice(2)
 if (!sourceRoot || services.length === 0) {
@@ -37,22 +39,13 @@ for (const service of services) {
   await writeFile(target, source)
   written.push(target)
 
-  // 同时落一份上游 schema 快照:等价闸门(test/migration/schemaParity.test.ts)比对它而不是
-  // 外部仓库,于是 CI 里也能跑,且仓库里留有"我们是从什么形状迁过来的"的凭据。
+  // 同时落一份上游 schema **指纹**:等价闸门(test/migration/schemaParity.test.ts)比对它而
+  // 不是外部仓库,于是 CI 里也能跑。存指纹而非完整 schema —— 见 fingerprint.mjs 的理由。
   await writeFile(
     join(targetDir, 'upstream.snapshot.json'),
-    `${JSON.stringify({
-      service: mod.provider.service,
-      displayName: mod.provider.displayName,
-      authTypes: mod.provider.authTypes,
-      actions: mod.provider.actions.map(a => ({
-        name: a.name,
-        description: a.description,
-        inputSchema: a.inputSchema,
-        outputSchema: a.outputSchema,
-      })),
-    }, null, 2)}\n`,
+    `${JSON.stringify(await fingerprintProvider(mod.provider, normalize), null, 2)}\n`,
   )
+
   console.log(
     `${service}: ${mod.provider.actions.length} actions`
     + `${handwritten.size > 0 ? `(${handwritten.size} 手写豁免)` : ''} → src/${service}/schema.ts`,

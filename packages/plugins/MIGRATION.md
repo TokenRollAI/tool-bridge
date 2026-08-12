@@ -14,7 +14,7 @@ src/<service>/
   schema.ts               # Zod 声明 + 语义标注 —— 由流水线生成,之后归本仓库所有
   api.ts                  # 业务逻辑 —— 人工机械改写
   index.ts                # 装配 —— 把两张表对起来
-  upstream.snapshot.json  # 迁移时的上游 schema 快照 —— 等价闸门比对它
+  upstream.snapshot.json  # 上游 schema 的**指纹**(sha256)—— 等价闸门比对它
   handwritten.json        # 可选:手写豁免清单
 ```
 
@@ -56,8 +56,17 @@ JSON Schema → Zod 源码。覆盖面不是猜的:上游 `core/json-schema.ts` 
 ### 4. 两道闸门
 
 - **`test/migration/schemaParity.test.ts`** —— 契约有没有在翻译中漂移。生成的 Zod 反推回
-  JSON Schema,与 `upstream.snapshot.json` 逐 action 比对。这是让批量迁移可信的东西:
-  1329 个 provider 不可能靠人肉 review,这条测试把它变成 CI 里的机器判定。
+  JSON Schema、归一、取 sha256,与 `upstream.snapshot.json` 里的指纹逐 action 比对。这是让
+  批量迁移可信的东西:1329 个 provider 不可能靠人肉 review,这条测试把它变成 CI 里的机器判定。
+
+  存**指纹**而非完整 schema:最初落盘上游 schema 原样拷贝,clerk 一个 197 KB、15 个产物
+  446 KB —— 1329 个全迁完是 ~40 MB 的仓库重量,而它与 `schema.ts` 本就是同一份信息的两种
+  表示。指纹留住闸门的全部作用,体积降到 1/15(30 KB)。实证:把某个字段的 `.min(1)` 去掉
+  (放宽契约),闸门精确红在那一个 action 上。
+
+  指纹取在 **normalize 之后** —— 那些可论证保语义的等价写法不该让指纹白白失配。代价是
+  改动 normalize 规则会让全部指纹失效,故用 `normalizeVersion` 显式标记:改规则就 +1 并
+  重新生成,闸门会先检查版本一致。
 - **`test/providers/<service>.test.ts`** —— 迁完还能不能用。经真实 envelope 断言
   `~describe`/`List`/`Call`/入参校验/错误码/凭证缺失。
 
