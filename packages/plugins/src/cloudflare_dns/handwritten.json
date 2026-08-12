@@ -1,4 +1,4 @@
 {
   "actions": ["create_dns_record", "update_dns_record"],
-  "reason": "上游用 `oneOf` 按记录类型(A/AAAA/MX/SRV/CAA/…)区分 `data`/`content`/`priority` 的形状,与 type/properties/required 同级共存。Zod 侧要写成 discriminated union + refine,而 refine 与判别式无法完整反推进 JSON Schema —— 自动生成的话等价闸门判不了,契约会悄悄变宽。"
+  "reason": "两条顶层 `anyOf` 与 type/properties/required 同级共存(上游 actions.ts:183,197):create_dns_record 是 `[{required:['content']},{required:['data']}]`(记录内容二选一),update_dns_record 是 `dnsRecordMutationFields` 的 10 个可变字段各一条(至少改一个)。两者都是跨字段存在性约束,Zod 侧只能写 .refine(),而 refine 无法反推进 JSON Schema。**不要按记录类型写判别联合** —— 上游的 `dnsRecordMutationFields` 对所有记录类型是同一份,priority 也不按类型区分,判别式版本会把契约收得比上游窄(例如 TXT 记录用 data 给结构化内容,上游接受、判别式会拒),那是行为变更不是迁移。"
 }

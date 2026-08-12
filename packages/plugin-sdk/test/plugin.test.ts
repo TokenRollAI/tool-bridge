@@ -420,3 +420,61 @@ describe('鉴权 fail closed(未配置 PLUGIN_TOKEN)', () => {
     expect(res.status).toBe(401)
   })
 })
+
+describe('oauth:平台托管的 provider 型 OAuth2 声明', () => {
+  const OAUTH = {
+    authorizationUrl: 'https://sentry.io/oauth/authorize',
+    tokenUrl: 'https://sentry.io/oauth/token/',
+    scopes: ['project:read', 'event:read'],
+  }
+
+  function oauthPlugin(): ReturnType<typeof createPlugin<Env>> {
+    const plugin = createPlugin<Env>({ token: env => env.PLUGIN_TOKEN })
+    plugin.tools('actions', { description: 'Sentry' })
+      .oauth(OAUTH)
+      .register('list_projects', { description: 'List projects', effect: 'read' }, () => ({ projects: [] }))
+    return plugin
+  }
+
+  it('~describe 把 oauth 原样报给平台(平台据此发起授权码流程)', async () => {
+    const res = await oauthPlugin().fetch(new Request('https://plugin.test/~describe'), ENV)
+    const body = (await res.json()) as { exports: Array<{ oauth?: unknown, profile: string }> }
+    expect(body.exports[0]?.profile).toBe('tools/v1')
+    expect(body.exports[0]?.oauth).toEqual(OAUTH)
+  })
+
+  it('没声明 oauth 的 export 不带这个字段(不是 undefined 占位)', async () => {
+    const res = await makePlugin().fetch(new Request('https://plugin.test/~describe'), ENV)
+    const body = (await res.json()) as { exports: Array<Record<string, unknown>> }
+    expect('oauth' in body.exports[0]!).toBe(false)
+  })
+
+  // 下面三条是互斥约束。平台侧契约也会拒(core/plugin/contract.ts),但那要等注册时才
+  // 400 —— 作者看到的是一个远端错误。在 SDK 当场炸,错误发生在写代码的地方。
+  it('已声明 oauth 再声明 credentials() → 当场拒', () => {
+    const plugin = createPlugin<Env>({ token: env => env.PLUGIN_TOKEN })
+    const tools = plugin.tools('actions').oauth(OAUTH)
+    expect(() => tools.credentials([{ key: 'appId', label: 'App ID', required: true }]))
+      .toThrow(/已声明 oauth/)
+  })
+
+  it('已声明 credentials() 再声明 oauth → 当场拒(两个方向都拦,声明顺序不影响)', () => {
+    const plugin = createPlugin<Env>({ token: env => env.PLUGIN_TOKEN })
+    const tools = plugin.tools('actions').credentials([{ key: 'appId', label: 'App ID', required: true }])
+    expect(() => tools.oauth(OAUTH)).toThrow(/已声明 credentials/)
+  })
+
+  it('oauth 与 credentialProbe 互斥:拿 client 凭证去调探针会把 clientSecret 送进插件', () => {
+    const plugin = createPlugin<Env>({ token: env => env.PLUGIN_TOKEN })
+    const tools = plugin.tools('actions')
+      .register('list_projects', { description: 'List', effect: 'read' }, () => ({}))
+    tools.oauth(OAUTH)
+    expect(() => tools.probeCredentialWith('list_projects')).toThrow(/已声明 oauth/)
+
+    const other = createPlugin<Env>({ token: env => env.PLUGIN_TOKEN })
+    const t2 = other.tools('actions')
+      .register('list_projects', { description: 'List', effect: 'read' }, () => ({}))
+    t2.probeCredentialWith('list_projects')
+    expect(() => t2.oauth(OAUTH)).toThrow(/已声明 credentialProbe/)
+  })
+})

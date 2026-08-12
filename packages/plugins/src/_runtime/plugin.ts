@@ -7,7 +7,7 @@
  * `index.ts` 只剩它自己的东西。
  */
 
-import type { InputSchemaLike, OperationSpec, PluginCredentialField } from '@tool-bridge/core'
+import type { InputSchemaLike, OperationSpec, PluginCredentialField, PluginOAuth } from '@tool-bridge/core'
 import { createPlugin, type Plugin, type PluginCallContext, TBError } from '@tool-bridge/plugin-sdk'
 
 /** 迁移产物统一的 env(平台注册时 mint 的回调令牌)。 */
@@ -88,6 +88,17 @@ export interface ProviderPluginInput {
   exportId?: string
   /** handler 表:键必须与 actions 完全一致。 */
   handlers: Record<string, Handler>
+  /**
+   * 本 provider 走**平台托管的 OAuth2**(授权码 + PKCE)时声明端点与 scope。
+   * 对应上游 open-connector 的 `OAuth2AuthDefinition`。
+   *
+   * handler 里照常 `requireApiKey(ctx, SERVICE)` —— 拿到的是平台换来并按需刷新的
+   * access token,插件不需要知道它是 OAuth 来的。client_id/secret 不在这里:
+   * 它们是每个部署自己去 provider 后台注册的,走 authRef 指向的 secret。
+   *
+   * 与 `credentialFields`/`credentialProbe` 互斥(SDK 侧当场拒)。
+   */
+  oauth?: PluginOAuth
 }
 
 /**
@@ -107,6 +118,7 @@ export function createProviderPlugin(input: ProviderPluginInput): Plugin<Provide
 
   const plugin = createPlugin<ProviderEnv>({ token: env => env.PLUGIN_TOKEN })
   const tools = plugin.tools(input.exportId ?? 'actions', { description: input.description })
+  if (input.oauth !== undefined) tools.oauth(input.oauth)
   if (input.credentialFields !== undefined) tools.credentials(input.credentialFields)
   for (const name of names) {
     tools.register(name, input.actions[name]!, (args, ctx: PluginCallContext<ProviderEnv>) =>

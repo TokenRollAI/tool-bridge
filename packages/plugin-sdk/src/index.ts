@@ -52,6 +52,7 @@ import {
   parseCredentialValues,
   type PluginCredentialField,
   type PluginCredentialValues,
+  type PluginOAuth,
   RequestDedupe,
   type SearchOptions,
   TBError,
@@ -175,6 +176,7 @@ interface ToolsExportState<Env> {
   description: string | undefined
   id: string
   kind: 'tools'
+  oauth: PluginOAuth | undefined
   registry: OperationRegistry<PluginCallContext<Env>>
 }
 
@@ -208,6 +210,22 @@ export interface ToolsExport<Env> {
    * handler 里用 `ctx.credentials` 取字段表。
    */
   credentials: (fields: PluginCredentialField[]) => ToolsExport<Env>
+  /**
+   * 声明本 export 走**平台托管的 provider 型 OAuth2**(授权码 + PKCE)。
+   *
+   * 与 `credentials()` 的分工:那条是"authRef 指向的 secret 里存什么字段",这条下
+   * 那个 secret 固定存 client 凭证(`clientId`/`clientSecret`),由**平台**读取并去换令牌;
+   * 插件拿到的是平台换来、按需刷新的 **access token**(仍走 `ctx.upstreamAuth`,
+   * 与单值 API key 同一通道 —— 插件不需要知道它是 OAuth 换来的)。
+   *
+   * 故三者**互斥**,这里当场拒而不是等平台注册时才 400:
+   * - `credentials()`:oauth 模式下 secret 存什么已经定死了
+   * - `probeCredentialWith()`:凭证可用性由授权流程本身证明,拿 client 凭证去调用既
+   *   证明不了什么、又会把 clientSecret 送进插件
+   *
+   * client_id/secret **不写在这里** —— 它们是每个部署自己去 provider 后台注册的应用凭证。
+   */
+  oauth: (config: PluginOAuth) => ToolsExport<Env>
   /**
    * 指定**凭证探针**:一个只读、零副作用、无必填入参的工具名。
    *
@@ -297,6 +315,9 @@ export function createPlugin<Env = unknown>(opts: CreatePluginOptions<Env> = {})
               : {}),
             ...(state.credentialFields !== undefined
               ? { credentialFields: state.credentialFields }
+              : {}),
+            ...(state.kind === 'tools' && state.oauth !== undefined
+              ? { oauth: state.oauth }
               : {}),
           }
         }
@@ -510,6 +531,7 @@ export function createPlugin<Env = unknown>(opts: CreatePluginOptions<Env> = {})
         description: meta?.description,
         credentialProbe: undefined,
         credentialFields: undefined,
+        oauth: undefined,
         registry: new OperationRegistry<PluginCallContext<Env>>(),
       }
       exports.set(id, state)
@@ -522,7 +544,35 @@ export function createPlugin<Env = unknown>(opts: CreatePluginOptions<Env> = {})
           if (fields.length === 0) {
             throw new TBError('invalid_argument', 'credentials() 至少要声明一个字段')
           }
+          // 互斥双向拒:oauth 模式下 authRef 那个 secret 固定存 client 凭证,
+          // 再声明字段表是矛盾的。两个方向都拦,声明顺序不影响。
+          if (state.oauth !== undefined) {
+            throw new TBError(
+              'invalid_argument',
+              `export '${id}' 已声明 oauth,不能再声明 credentials()`
+              + '(oauth 模式下 authRef 指向的 secret 固定存 clientId/clientSecret)',
+            )
+          }
           state.credentialFields = fields
+          return surface
+        },
+        oauth(config) {
+          if (state.credentialFields !== undefined) {
+            throw new TBError(
+              'invalid_argument',
+              `export '${id}' 已声明 credentials(),不能再声明 oauth`
+              + '(oauth 模式下 authRef 指向的 secret 固定存 clientId/clientSecret)',
+            )
+          }
+          if (state.credentialProbe !== undefined) {
+            throw new TBError(
+              'invalid_argument',
+              `export '${id}' 已声明 credentialProbe,不能再声明 oauth`
+              + '(凭证可用性由授权流程本身证明;拿 client 凭证去调探针既证明不了什么,'
+              + '又会把 clientSecret 送进插件)',
+            )
+          }
+          state.oauth = config
           return surface
         },
         probeCredentialWith(name) {
@@ -532,6 +582,14 @@ export function createPlugin<Env = unknown>(opts: CreatePluginOptions<Env> = {})
             throw new TBError(
               'invalid_argument',
               `credentialProbe '${name}' 不是 export '${id}' 已注册的工具`,
+            )
+          }
+          if (state.oauth !== undefined) {
+            throw new TBError(
+              'invalid_argument',
+              `export '${id}' 已声明 oauth,不能再声明 credentialProbe`
+              + '(凭证可用性由授权流程本身证明;拿 client 凭证去调探针既证明不了什么,'
+              + '又会把 clientSecret 送进插件)',
             )
           }
           state.credentialProbe = name
