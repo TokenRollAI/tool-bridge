@@ -42,6 +42,15 @@ type Handler = (input: never, ctx: ProviderContext) => unknown | Promise<unknown
 export interface ProviderPluginInput {
   /** 规格表:action 名 → OperationSpec(来自生成的 schema.ts)。 */
   actions: Record<string, Spec>
+  /**
+   * 凭证探针:一个**只读、零副作用、无必填入参**的 action 名。挂载时平台会用配置的
+   * authRef 真实调它一次,验证凭证可用 —— 否则配错的 key 要等第一次业务调用才 401。
+   *
+   * 上游 open-connector 每个 provider 都带 `credentialValidators`("打最便宜的接口试凭证"),
+   * 这是它在 tool-bridge 侧的落点。选不出合适的 action 就不写(例如全部 action 都要必填
+   * 业务 id,拿不到一个"空转"调用)。
+   */
+  credentialProbe?: string
   description: string
   /** tools export id;缺省 'actions'(与其他 in-repo plugin 一致)。 */
   exportId?: string
@@ -69,6 +78,18 @@ export function createProviderPlugin(input: ProviderPluginInput): Plugin<Provide
   for (const name of names) {
     tools.register(name, input.actions[name]!, (args, ctx: PluginCallContext<ProviderEnv>) =>
       input.handlers[name]!(args as never, { upstreamAuth: ctx.upstreamAuth, config: ctx.mountConfig }))
+  }
+  if (input.credentialProbe !== undefined) {
+    // 探针必须是只读的:平台会在**挂载**时调它,而挂载不该产生业务副作用。
+    // (工具名是否存在由 SDK 的 probeCredentialWith 校验。)
+    const effect = input.actions[input.credentialProbe]?.effect
+    if (effect !== 'read') {
+      throw new Error(
+        `credentialProbe '${input.credentialProbe}' 的 effect 是 '${effect ?? '未声明'}',`
+        + ' 探针必须是 read —— 挂载时会真实调用它',
+      )
+    }
+    tools.probeCredentialWith(input.credentialProbe)
   }
   return plugin
 }

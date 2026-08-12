@@ -69,6 +69,11 @@ const exportSchema = z.object({
   /** context/v1:实际提供的动词;tools/v1 由运行时 List 发现,可省。 */
   methods: z.array(z.string()).optional(),
   capabilities: z.array(z.string()).optional(),
+  /**
+   * tools/v1 可选:一个**只读、零副作用、无必填入参**的工具名,平台在挂载时拿它做一次
+   * 真实调用来验证 `authRef` 指向的凭证可用(见 `credentialProbe` 的类型注释)。
+   */
+  credentialProbe: z.string().optional(),
 })
 
 const describeSchema = z.object({
@@ -79,6 +84,18 @@ const describeSchema = z.object({
 /** 单个 export 的声明。 */
 export interface PluginExport {
   capabilities?: string[]
+  /**
+   * 凭证探针:一个只读、零副作用、无必填入参的工具名(仅 tools/v1)。
+   *
+   * 存在的问题:平台的凭证是 `tb secret set` 存进 SecretStore、挂载只写 `authRef`,
+   * 插件要到**第一次业务调用**才拿得到它 —— 配错的 key 不会在存入或挂载时报错,
+   * 而是等到某个 agent 真去调用时才 401。
+   *
+   * 声明了它,挂载时平台就用注入的凭证真实调一次这个工具:通则凭证可用,401/403 则
+   * 当场拒绝挂载并说清是凭证问题。用现有的 Call 通道,不新增协议动词 —— 上游
+   * open-connector 的 `credentialValidators`("打最便宜的接口试凭证")正是这个语义。
+   */
+  credentialProbe?: string
   description?: string
   id: string
   methods?: string[]
@@ -126,6 +143,17 @@ export function validatePluginContract(input: PluginContractInput): PluginDescri
       throw new TBError('invalid_argument', `plugin '${manifest.id}' 的 export id 重复:'${exported.id}'`)
     }
     seen.add(exported.id)
+
+    // credentialProbe 只对 tools/v1 有意义(context/v1 的动词表本身就够平台探活)。
+    // 声明在错的 profile 上是配置错误,不是"忽略即可"的多余字段 —— 否则作者会以为
+    // 挂载时验了凭证,实际上什么都没发生。
+    if (exported.credentialProbe !== undefined && exported.profile !== 'tools/v1') {
+      throw new TBError(
+        'invalid_argument',
+        `plugin '${manifest.id}' export '${exported.id}' 在 ${exported.profile} 上声明了 `
+        + 'credentialProbe,该字段仅 tools/v1 支持',
+      )
+    }
 
     if (exported.profile === 'context/v1') {
       const known = new Set<string>(CONTEXT_METHODS)

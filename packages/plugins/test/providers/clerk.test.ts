@@ -6,6 +6,7 @@ import {
   HEADER_TB_UPSTREAM_AUTH,
 } from '@tool-bridge/core'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { z } from 'zod/v4'
 import { createClerkPlugin } from '../../src/clerk/index'
 import { clerkActions } from '../../src/clerk/schema'
 
@@ -305,5 +306,26 @@ describe('校验与错误', () => {
     expect(res.status).toBe(503)
     expect(((await res.json()) as { message: string }).message).toContain('authRef')
     expect(mock).not.toHaveBeenCalled()
+  })
+})
+
+describe('凭证探针(credentialProbe)', () => {
+  it('~describe 报出探针工具名,平台据此在挂载时验凭证', async () => {
+    const res = await createClerkPlugin().fetch(
+      new Request('https://p.test/~describe'),
+      {} as never,
+    )
+    const body = (await res.json()) as {
+      exports: Array<{ credentialProbe?: string, id: string }>
+    }
+    expect(body.exports[0]?.credentialProbe).toBe('count_users')
+  })
+
+  it('探针指向的工具确实存在、只读、且无必填入参(平台挂载时会空参调它)', async () => {
+    const spec = clerkActions.count_users
+    expect(spec).toBeDefined()
+    expect(spec.effect).toBe('read')
+    const schema = z.toJSONSchema(spec.inputSchema, { io: 'input' }) as { required?: string[] }
+    expect(schema.required ?? []).toEqual([])
   })
 })

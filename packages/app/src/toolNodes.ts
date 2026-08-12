@@ -9,6 +9,7 @@ import {
   type CallContext,
   check,
   type HelpModel,
+  isTBError,
   KEY_PLUGIN,
   KEY_PLUGIN_META,
   NodeRegistryStore,
@@ -243,11 +244,62 @@ export async function toolHelpModelFor(
   return toolHelpModel(node.path, { kind: node.kind, description: node.description }, tool)
 }
 /**
+ * 用挂载配置的 authRef 真实调一次探针工具,验证凭证可用。
+ *
+ * 为什么值得在挂载时多跑一次调用:平台的凭证是 `tb secret set` 存进 SecretStore、挂载只写
+ * authRef,插件要到**第一次业务调用**才拿得到它 —— 配错的 key 不会在存入或挂载时报错,
+ * 而是等某个 agent 真去用的时候才 401。上游 open-connector 每个 provider 都带
+ * `credentialValidators` 正是为此。
+ *
+ * 错误分账很重要:凭证类错误(401/403)→ invalid_argument,是**这次挂载**的错,当场拒;
+ * 其余(上游临时故障、网络)→ unavailable + retryable,不该因为上游抖动就永久拒绝挂载。
+ */
+async function probePluginCredential(opts: {
+  authRef: string
+  ctx: CallContext
+  deps: TbAppDeps
+  export: PluginExport
+  manifest: PluginManifest
+  mountPath: TreePath
+  providerConfig: Record<string, unknown> | undefined
+}): Promise<void> {
+  const probe = opts.export.credentialProbe
+  if (probe === undefined) return
+  const provider = createPluginToolProvider({
+    manifest: opts.manifest,
+    secrets: opts.deps.secrets,
+    ctx: mountCallContext(opts.ctx, opts.mountPath, opts.providerConfig, opts.export.id),
+    upstreamAuthRef: opts.authRef,
+    ...(opts.deps.pluginBindings !== undefined ? { bindings: opts.deps.pluginBindings } : {}),
+  })
+  try {
+    await provider.call(probe, {})
+  } catch (err) {
+    if (isTBError(err) && (err.code === 'permission_denied' || err.httpStatus === 401)) {
+      throw new TBError(
+        'invalid_argument',
+        `凭证探测失败:secret '${opts.authRef}' 对 plugin '${opts.manifest.id}' 不可用(${err.message})`,
+      )
+    }
+    const detail = isTBError(err) ? err.message : String(err)
+    throw new TBError('unavailable', `凭证探测未能完成:${detail}`, { retryable: true })
+  }
+}
+
+/**
  * 注册/更新 kind:'tool' 节点时的配置校验(注册时即拒):
  * provider 必须是已注册且启用的 tool-provider plugin(SDK 保留 id '@local' 由
  * SDK 内部注册通道落库,不经注册面)。
+ *
+ * export 声明了 `credentialProbe` 且挂载配了 `authRef` 时,额外用该凭证真实调一次探针工具
+ * (见 credentialProbe 的语义)。这是 context 侧 s3 浅 list 连通探测在 tool 侧的对应物。
  */
-export async function assertToolConfig(config: unknown, store: StateStore): Promise<void> {
+export async function assertToolConfig(
+  config: unknown,
+  deps: TbAppDeps,
+  ctx?: CallContext,
+  mountPath?: TreePath,
+): Promise<void> {
   if (config === null || typeof config !== 'object') return
   if ((config as { kind?: unknown }).kind !== 'tool') return
   assertNoDeviceMarker(config)
@@ -256,11 +308,32 @@ export async function assertToolConfig(config: unknown, store: StateStore): Prom
     throw new TBError('invalid_argument', 'kind:\'tool\' 节点需要 config.provider(plugin id)')
   }
   const exportId = (config as { export?: unknown }).export
-  await requirePluginExport(
-    store,
+  const { manifest, export: exported } = await requirePluginExport(
+    deps.state,
     provider,
     'tool',
     'tool',
     typeof exportId === 'string' ? exportId : undefined,
   )
+
+  const authRef = (config as { authRef?: unknown }).authRef
+  if (
+    exported.credentialProbe === undefined
+    || typeof authRef !== 'string'
+    || ctx === undefined
+    || mountPath === undefined
+  ) {
+    return
+  }
+  await probePluginCredential({
+    authRef,
+    ctx,
+    deps,
+    export: exported,
+    manifest,
+    // 用**目标挂载路径**而非空串:节点此刻还没落库,但探针在语义上就属于这次挂载,
+    // 插件侧据此区分挂载来源(ctx.mountPath);空串还会被 CallContext 的非空校验拒掉。
+    mountPath,
+    providerConfig: (config as { providerConfig?: Record<string, unknown> }).providerConfig,
+  })
 }

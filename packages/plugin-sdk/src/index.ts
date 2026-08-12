@@ -150,6 +150,7 @@ export interface CreatePluginOptions<Env = unknown> {
 }
 
 interface ToolsExportState<Env> {
+  credentialProbe: string | undefined
   description: string | undefined
   id: string
   kind: 'tools'
@@ -177,6 +178,16 @@ type ExportState<Env>
 
 /** tools export 的注册面(链式)。 */
 export interface ToolsExport<Env> {
+  /**
+   * 指定**凭证探针**:一个只读、零副作用、无必填入参的工具名。
+   *
+   * 平台的凭证是 `tb secret set` 存进 SecretStore、挂载只写 `authRef`,插件要到第一次
+   * 业务调用才拿得到它 —— 配错的 key 不会在存入或挂载时报错,而是等某个 agent 真去调用
+   * 时才 401。声明探针后,挂载时平台会用注入的凭证真实调一次它,当场判定凭证是否可用。
+   *
+   * 名字必须是已注册的工具(在 `~describe` 里报出去之前就校验,免得平台挂载时才发现)。
+   */
+  probeCredentialWith: (name: string) => ToolsExport<Env>
   register: <S extends InputSchemaLike | undefined = undefined>(
     name: string,
     spec: OperationSpec<S>,
@@ -251,6 +262,9 @@ export function createPlugin<Env = unknown>(opts: CreatePluginOptions<Env> = {})
             id: state.id,
             profile: 'tools/v1',
             ...(state.description !== undefined ? { description: state.description } : {}),
+            ...(state.kind === 'tools' && state.credentialProbe !== undefined
+              ? { credentialProbe: state.credentialProbe }
+              : {}),
           }
         }
         const methods = contextVerbs(state.handlers)
@@ -440,12 +454,25 @@ export function createPlugin<Env = unknown>(opts: CreatePluginOptions<Env> = {})
         kind: 'tools',
         id,
         description: meta?.description,
+        credentialProbe: undefined,
         registry: new OperationRegistry<PluginCallContext<Env>>(),
       }
       exports.set(id, state)
       const surface: ToolsExport<Env> = {
         register(name, spec, handler) {
           state.registry.register(name, spec, handler)
+          return surface
+        },
+        probeCredentialWith(name) {
+          // 立刻校验而不是等 ~describe:声明一个不存在的探针,平台挂载时会拿它去 Call
+          // 然后收到 invalid_argument —— 那个错误看起来像"凭证有问题",实际是拼错了工具名。
+          if (!state.registry.list().some(tool => tool.name === name)) {
+            throw new TBError(
+              'invalid_argument',
+              `credentialProbe '${name}' 不是 export '${id}' 已注册的工具`,
+            )
+          }
+          state.credentialProbe = name
           return surface
         },
       }

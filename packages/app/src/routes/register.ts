@@ -59,8 +59,9 @@ export async function handleRegister(c: AppContext, env: RouteEnv): Promise<Resp
   await assertContextConfig(body.config, deps)
   // skillhub 配置校验(provider r2/s3;s3 连通探测)。
   await assertSkillhubConfig(body.config, deps)
-  // kind:'tool' 挂载校验:provider 必须是已注册且启用的 tool-provider plugin。
-  await assertToolConfig(body.config, store)
+  // kind:'tool' 挂载校验:provider 必须是已注册且启用的 tool-provider plugin;
+  // export 声明了 credentialProbe 且配了 authRef 时,再用该凭证真实探一次(出站,故在权限判定之后)。
+  await assertToolConfig(body.config, deps, ctx, body.path)
   await searchSync?.ensureSeeded()
   const now = new Date().toISOString()
   const marker = await searchSync?.markNode(body.path)

@@ -27,6 +27,8 @@ export function createClerkPlugin(): ReturnType<typeof createProviderPlugin> {
   return createProviderPlugin({
     description: 'Clerk',
     actions: clerkActions,
+    // count_users 是只读、无必填入参的最便宜调用,适合当挂载时的凭证探针。
+    credentialProbe: 'count_users',
     handlers: {
       list_users: listUsers,
       count_users: countUsers,
