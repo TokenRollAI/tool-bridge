@@ -136,3 +136,30 @@ JSON Schema → Zod 源码。覆盖面不是猜的:上游 `core/json-schema.ts` 
 | `resend` | api_key,1 action | **手写豁免路径**:Zod 无法反推的 anyOf 组合约束 |
 
 三个产物合计 21 例 wire 测试 + 21 个 action 过等价闸门。
+
+## 第二批(已完成):12 provider / 73 action
+
+验证流程能规模化。做法:**先跑确定性的 schema codegen,再 fan-out subagent 只做业务
+逻辑改写**。schema 是机器活、有闸门兜底,不该占 agent 的预算;业务改写才是判断密集的部分。
+
+选批用脚本从 1329 个里筛(纯 api_key + codegen 全干净 + 单文件 executors + 非 MCP 代理
++ 非 proxy),得 182 个合格候选,再跨规模均匀取 12 个(133~419 行 executors、1~15 action)。
+
+logsnag / meituan / screenshot_fyi / coinranking / telnyx / langbase / clerk /
+ipqualityscore / brave_search / lightfield / opensea / fathom
+
+### 这一轮学到的
+
+- **批量核查不能只看测试绿**。收尾要 grep 一遍:有没有人 import 上游 helper、有没有裸
+  `fetch(`、是不是都走了 `guardedFetch`/`requireApiKey`、有没有人改了不该改的文件
+  (`git status` 里不该出现 ` M`,agent 只该新增)。
+- **形状闸门是必需的**。这轮有一个 agent 只产出了 `api.ts`,漏了 `index.ts` 与 wire 测试。
+  测试全绿(因为它的测试压根不存在),是形状闸门把它抓出来的。
+- agent 产出质量好于预期:注释解释与上游的**有意偏离**及理由。例如 clerk 指出上游
+  `createClerkError` 把 403 压成 401、404 压成 400,迁移后交回 `upstreamError` 统一归一。
+
+### 下一批的建议
+
+剩余 ~170 个"codegen 全干净 + 纯 api_key + 单文件"的候选可以直接照这个流程跑。
+再往后要先在 codegen 里支持 `allOf`/`not`/顶层 `$schema`,或接受它们走手写豁免。
+`oauth2`(42 个)与 `custom_credential`(54 个)需要平台侧先补凭证通道,不在流水线射程内。
