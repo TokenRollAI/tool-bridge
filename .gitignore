@@ -9,3 +9,4 @@ dist/
 .playwright-cli/
 output/playwright/
 .turbo/
+*.tgz
