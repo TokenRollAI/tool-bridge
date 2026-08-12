@@ -1,0 +1,4 @@
+{
+  "actions": ["update_memo"],
+  "reason": "上游用顶层 `anyOf: [{required:['content']},{required:['visibility']},{required:['pinned']},…]` 表达\"至少要改一个字段\",与 type/properties/required 同级共存。Zod 侧只能写 .refine(),refine 无法反推进 JSON Schema。"
+}

@@ -1,0 +1,4 @@
+{
+  "actions": ["update_dev_resources"],
+  "reason": "上游在数组元素上用 `anyOf: [{required:['name']},{required:['url']}]` 表达\"每个 dev resource 至少改 name 或 url 之一\",与元素的 type/properties/required 同级共存。Zod 侧只能写 .refine(),refine 无法反推进 JSON Schema。"
+}

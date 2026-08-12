@@ -1,0 +1,4 @@
+{
+  "actions": ["create_coinbase_charge"],
+  "reason": "上游用 `oneOf: [{const:1},{const:137},{const:8453}]` 表达链 ID 枚举,每个分支各带自己的 description。Zod 侧写 z.union([z.literal(1),…]) 反推回去会丢掉分支级 description,等价闸门红。手写成带完整语义标注的字面量联合。"
+}

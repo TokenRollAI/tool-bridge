@@ -1,0 +1,4 @@
+{
+  "actions": ["create_dns_record", "update_dns_record"],
+  "reason": "上游用 `oneOf` 按记录类型(A/AAAA/MX/SRV/CAA/…)区分 `data`/`content`/`priority` 的形状,与 type/properties/required 同级共存。Zod 侧要写成 discriminated union + refine,而 refine 与判别式无法完整反推进 JSON Schema —— 自动生成的话等价闸门判不了,契约会悄悄变宽。"
+}

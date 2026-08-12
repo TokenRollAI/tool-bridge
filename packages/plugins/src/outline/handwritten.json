@@ -1,0 +1,4 @@
+{
+  "actions": ["get_document"],
+  "reason": "上游用 `anyOf: [{required:['id']},{required:['shareId']}]` 表达\"文档 id 与分享 id 至少给一个\",与 type/properties 同级共存。Zod 侧只能写 .refine(),refine 无法反推进 JSON Schema。"
+}

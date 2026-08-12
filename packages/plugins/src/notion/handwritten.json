@@ -1,0 +1,4 @@
+{
+  "actions": ["create_page", "move_page"],
+  "reason": "上游用 `oneOf` 区分 page 父级与 database 父级(各带 `type` 判别常量与不同的 id 字段)。Zod 侧写 discriminated union 反推回 JSON Schema 会丢掉分支级 description 与判别式形状,等价闸门红。手写成带完整语义标注的判别联合。"
+}
