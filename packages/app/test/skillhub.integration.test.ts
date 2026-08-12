@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { SELF } from 'cloudflare:test'
 import { TEST_ADMIN_SK } from './fixtures'
+import { createTestApp } from './harness'
+
+// 文件级单实例(对齐原 SELF.fetch 语义:一个文件共享一份持久状态)。
+// skillhub 的 `provider: 'r2'` 是协议层的"平台对象存储"名,实现由宿主注入 ——
+// 这里注入 MemoryObjectStore 即可,R2 binding 本身的行为不在这一层。
+const tb = await createTestApp()
 
 // skillhub 集成测试(默认套件只依赖 miniflare 本地 R2 binding,无外部网络):
 // ~register 挂载 → Publish(多文件)→ List(目录来自 frontmatter)→ Get(SKILL.md 内联 + 清单)
@@ -18,7 +23,7 @@ const bearer = (sk: string, extra: RequestInit = {}): RequestInit => ({
 })
 
 async function postJson(path: string, body: unknown, init: RequestInit = {}): Promise<Response> {
-  return SELF.fetch(`https://tb.test/${path}`, {
+  return tb.request(`https://tb.test/${path}`, {
     method: 'POST',
     ...init,
     headers: {
@@ -219,7 +224,7 @@ describe('skillhub 校验与权限', () => {
 describe('skillhub ~help / ~describe', () => {
   it('~help(JSON)列出 skillhub 动词', async () => {
     expect((await mountHub('hubtest/help')).status).toBe(200)
-    const res = await SELF.fetch(
+    const res = await tb.request(
       'https://tb.test/hubtest/help/~help',
       admin({ headers: { accept: 'application/json' } }),
     )
@@ -232,7 +237,7 @@ describe('skillhub ~help / ~describe', () => {
 
   it('~describe 返回 skillhub capabilities', async () => {
     expect((await mountHub('hubtest/desc')).status).toBe(200)
-    const res = await SELF.fetch('https://tb.test/hubtest/desc/~describe', admin())
+    const res = await tb.request('https://tb.test/hubtest/desc/~describe', admin())
     expect(res.status).toBe(200)
     const d = (await res.json()) as { capabilities: string[], kind: string }
     expect(d.kind).toBe('skillhub')
@@ -241,7 +246,7 @@ describe('skillhub ~help / ~describe', () => {
 
   it('readOnly 节点 ~help 隐藏写动词', async () => {
     expect((await mountHub('hubtest/rohelp', { readOnly: true })).status).toBe(200)
-    const res = await SELF.fetch(
+    const res = await tb.request(
       'https://tb.test/hubtest/rohelp/~help',
       admin({ headers: { accept: 'application/json' } }),
     )

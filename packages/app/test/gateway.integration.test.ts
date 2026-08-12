@@ -1,9 +1,11 @@
 import { KEY_BOOTSTRAPPED, MemoryStateStore } from '@tool-bridge/core'
-import { runBootstrap } from '@tool-bridge/app'
 import { describe, expect, it } from 'vitest'
-import { SELF } from 'cloudflare:test'
-import pkg from '../package.json' with { type: 'json' }
+import { createTestApp, TEST_VERSION } from './harness'
+import { runBootstrap } from '../src/index'
 import { TEST_ADMIN_SK } from './fixtures'
+
+// 文件级单实例(对齐原 SELF.fetch 语义:一个文件共享一份持久状态)。
+const tb = await createTestApp()
 
 // 穿透测试:HTTP 进 → Worker 出(认证 + HTBP 核心树 + builtin)。
 // 认证策略:除 /healthz 外全部要求 SK(缺 SK → 401)。测试 Admin SK 经
@@ -15,7 +17,7 @@ const admin = (extra: RequestInit = {}): RequestInit => ({
 })
 
 async function postJson(path: string, body: unknown, init: RequestInit = {}): Promise<Response> {
-  return SELF.fetch(`https://tb.test/${path}`, {
+  return tb.request(`https://tb.test/${path}`, {
     method: 'POST',
     ...init,
     headers: {
@@ -38,11 +40,11 @@ async function issueSk(input: unknown): Promise<string> {
 
 describe('GET /healthz(树外免认证)', () => {
   it('200 + JSON {healthy, version},无需 SK', async () => {
-    const res = await SELF.fetch('https://tb.test/healthz')
+    const res = await tb.request('https://tb.test/healthz')
     expect(res.status).toBe(200)
     const body = (await res.json()) as { healthy: boolean, version: string }
     expect(body.healthy).toBe(true)
-    expect(body.version).toBe(pkg.version)
+    expect(body.version).toBe(TEST_VERSION)
     expect(res.headers.get('content-security-policy')).toContain('script-src \'self\'')
     expect(res.headers.get('x-content-type-options')).toBe('nosniff')
     expect(res.headers.get('x-frame-options')).toBe('DENY')
@@ -62,7 +64,7 @@ describe('Worker 首次引导凭证', () => {
 
 describe('认证(除 /healthz 外全路由要求 SK)', () => {
   it('无 SK → 401 裸 TBError(permission_denied, retryable false)', async () => {
-    const res = await SELF.fetch('https://tb.test/~help')
+    const res = await tb.request('https://tb.test/~help')
     expect(res.status).toBe(401)
     const body = (await res.json()) as { code: string, retryable: boolean }
     expect(body.code).toBe('permission_denied')
@@ -72,26 +74,26 @@ describe('认证(除 /healthz 外全路由要求 SK)', () => {
   })
 
   it('无效 SK → 401', async () => {
-    const res = await SELF.fetch('https://tb.test/~help', {
+    const res = await tb.request('https://tb.test/~help', {
       headers: { authorization: 'Bearer tbk_bogus' },
     })
     expect(res.status).toBe(401)
   })
 
   it('Admin SK → 根 ~help 200', async () => {
-    const res = await SELF.fetch('https://tb.test/~help', admin())
+    const res = await tb.request('https://tb.test/~help', admin())
     expect(res.status).toBe(200)
   })
 })
 
 describe('根 ~help / ~tree(Admin 视角)', () => {
   it('根 ~help 默认 markdown;显式 text/plain 得 DSL(首行 htbp 0.1)', async () => {
-    const res = await SELF.fetch('https://tb.test/~help', admin())
+    const res = await tb.request('https://tb.test/~help', admin())
     expect(res.status).toBe(200)
     expect(res.headers.get('content-type')).toContain('text/markdown')
     expect(await res.text()).toContain('system')
 
-    const dslRes = await SELF.fetch(
+    const dslRes = await tb.request(
       'https://tb.test/~help',
       admin({ headers: { accept: 'text/plain' } }),
     )
@@ -103,11 +105,11 @@ describe('根 ~help / ~tree(Admin 视角)', () => {
   })
 
   it('system/sk ~help:DSL 与 JSON 语义等价(抽查 cmd 名集合)', async () => {
-    const dslRes = await SELF.fetch(
+    const dslRes = await tb.request(
       'https://tb.test/system/sk/~help',
       admin({ headers: { accept: 'text/plain' } }),
     )
-    const jsonRes = await SELF.fetch(
+    const jsonRes = await tb.request(
       'https://tb.test/system/sk/~help',
       admin({ headers: { accept: 'application/json' } }),
     )
@@ -123,7 +125,7 @@ describe('根 ~help / ~tree(Admin 视角)', () => {
   })
 
   it('~help Accept: text/markdown → 可读 Markdown 表现(text/markdown)', async () => {
-    const res = await SELF.fetch(
+    const res = await tb.request(
       'https://tb.test/system/sk/~help',
       admin({ headers: { accept: 'text/markdown' } }),
     )
@@ -137,7 +139,7 @@ describe('根 ~help / ~tree(Admin 视角)', () => {
   })
 
   it('根 ~help markdown:children 表格 + 下钻 hint', async () => {
-    const res = await SELF.fetch(
+    const res = await tb.request(
       'https://tb.test/~help',
       admin({ headers: { accept: 'text/markdown' } }),
     )
@@ -149,7 +151,7 @@ describe('根 ~help / ~tree(Admin 视角)', () => {
   })
 
   it('root ~tree json 含 system 子树', async () => {
-    const res = await SELF.fetch(
+    const res = await tb.request(
       'https://tb.test/~tree',
       admin({ headers: { accept: 'application/json' } }),
     )
@@ -159,7 +161,7 @@ describe('根 ~help / ~tree(Admin 视角)', () => {
   })
 
   it('root ~tree 默认 markdown(code fence 包缩进树);显式 text/plain 得裸文本', async () => {
-    const res = await SELF.fetch('https://tb.test/~tree', admin())
+    const res = await tb.request('https://tb.test/~tree', admin())
     expect(res.status).toBe(200)
     expect(res.headers.get('content-type')).toContain('text/markdown')
     const md = await res.text()
@@ -167,7 +169,7 @@ describe('根 ~help / ~tree(Admin 视角)', () => {
     expect(md.endsWith('```\n')).toBe(true)
     expect(md).toContain('system [directory]')
 
-    const plain = await SELF.fetch(
+    const plain = await tb.request(
       'https://tb.test/~tree',
       admin({ headers: { accept: 'text/plain' } }),
     )
@@ -199,7 +201,7 @@ describe('受限 SK 的可见性裁剪', () => {
 
     // 受限 SK 的根 ~tree:只见 docs 子树,不见 system。
     const tree = (await (
-      await SELF.fetch('https://tb.test/~tree', {
+      await tb.request('https://tb.test/~tree', {
         headers: { ...authDocs, accept: 'application/json' },
       })
     ).json()) as { children?: Array<{ path: string }> }
@@ -215,7 +217,7 @@ describe('受限 SK 的可见性裁剪', () => {
       { headers: authDocs },
     )
     expect(skList.status).toBe(404)
-    const skHelp = await SELF.fetch('https://tb.test/system/sk/~help', { headers: authDocs })
+    const skHelp = await tb.request('https://tb.test/system/sk/~help', { headers: authDocs })
     expect(skHelp.status).toBe(404)
   })
 })
@@ -234,7 +236,7 @@ describe('注册与三级 ~help(集成面)', () => {
     )
     expect(mk.status).toBe(200)
     for (const p of ['a', 'a/b', 'a/b/c']) {
-      const res = await SELF.fetch(`https://tb.test/${p}/~help`, { headers: authReg })
+      const res = await tb.request(`https://tb.test/${p}/~help`, { headers: authReg })
       expect(res.status, `~help ${p}`).toBe(200)
     }
   })
@@ -281,14 +283,14 @@ describe('status get', () => {
     expect(res.status).toBe(200)
     const body = (await res.json()) as { healthy: boolean, nodeCount: number, version: string }
     expect(body.healthy).toBe(true)
-    expect(body.version).toBe(pkg.version)
+    expect(body.version).toBe(TEST_VERSION)
     expect(typeof body.nodeCount).toBe('number')
   })
 })
 
 describe('~skill 占位 501', () => {
   it('认证后 GET system/sk/~skill → 501', async () => {
-    const res = await SELF.fetch('https://tb.test/system/sk/~skill', admin())
+    const res = await tb.request('https://tb.test/system/sk/~skill', admin())
     expect(res.status).toBe(501)
   })
 })
@@ -339,12 +341,12 @@ describe('system/registry 管理通道也遵守可见性裁剪(修复 5)', () =>
 
 describe('~tree 子树根真实性(修复 6)', () => {
   it('GET /ghost/~tree → 404(不存在的子树根)', async () => {
-    const res = await SELF.fetch('https://tb.test/ghost/~tree', admin())
+    const res = await tb.request('https://tb.test/ghost/~tree', admin())
     expect(res.status).toBe(404)
   })
 
   it('GET /system/sk/~tree 根 kind === builtin(用真实节点元数据,不伪造 directory)', async () => {
-    const res = await SELF.fetch(
+    const res = await tb.request(
       'https://tb.test/system/sk/~tree',
       admin({ headers: { accept: 'application/json' } }),
     )
@@ -371,7 +373,7 @@ describe('URL 路径解码(修复 7)', () => {
       { headers: auth },
     )
     expect(mk.status).toBe(200)
-    const res = await SELF.fetch('https://tb.test/docs/hello%20world/~help', { headers: auth })
+    const res = await tb.request('https://tb.test/docs/hello%20world/~help', { headers: auth })
     expect(res.status).toBe(200)
   })
 })
@@ -425,7 +427,7 @@ describe('mcp 节点 ~help(上游 https 强制)', () => {
       admin(),
     )
     expect(mk.status).toBe(200)
-    const res = await SELF.fetch('https://tb.test/ext/ctx7/~help', { headers: auth })
+    const res = await tb.request('https://tb.test/ext/ctx7/~help', { headers: auth })
     // 未设 TB_ALLOW_INSECURE_HTTP → 400 invalid_argument;若 opt-in 运行放行了 http,
     // 则转为上游不可达的归一错误(5xx)。两种都不是 501。
     expect([400, 500, 503]).toContain(res.status)
@@ -441,7 +443,7 @@ describe('SK 吊销 / 认证失效(修复 9)', () => {
     })
     const auth = { authorization: `Bearer ${secret}` }
     // 吊销前可用(root ~help 200,免 read 判定)。
-    expect((await SELF.fetch('https://tb.test/~help', { headers: auth })).status).toBe(200)
+    expect((await tb.request('https://tb.test/~help', { headers: auth })).status).toBe(200)
     // 取该 SK 的 id 以 delete。
     const list = (await (
       await postJson('system/sk', { tool: 'list', arguments: {} }, admin())
@@ -451,7 +453,7 @@ describe('SK 吊销 / 认证失效(修复 9)', () => {
     const del = await postJson('system/sk', { tool: 'delete', arguments: { id } }, admin())
     expect(del.status).toBe(200)
     // 吊销后 → 401。
-    expect((await SELF.fetch('https://tb.test/~help', { headers: auth })).status).toBe(401)
+    expect((await tb.request('https://tb.test/~help', { headers: auth })).status).toBe(401)
   })
 
   it('update{disabled:true} → 401', async () => {
@@ -460,7 +462,7 @@ describe('SK 吊销 / 认证失效(修复 9)', () => {
       scopes: [{ pattern: 'docs/**', actions: ['read'] }],
     })
     const auth = { authorization: `Bearer ${secret}` }
-    expect((await SELF.fetch('https://tb.test/~help', { headers: auth })).status).toBe(200)
+    expect((await tb.request('https://tb.test/~help', { headers: auth })).status).toBe(200)
     const list = (await (
       await postJson('system/sk', { tool: 'list', arguments: {} }, admin())
     ).json()) as { items: Array<{ id: string, owner: string }> }
@@ -471,7 +473,7 @@ describe('SK 吊销 / 认证失效(修复 9)', () => {
       admin(),
     )
     expect(upd.status).toBe(200)
-    expect((await SELF.fetch('https://tb.test/~help', { headers: auth })).status).toBe(401)
+    expect((await tb.request('https://tb.test/~help', { headers: auth })).status).toBe(401)
   })
 
   it('expiresAt 为过去 → 401(过期视同禁用)', async () => {
@@ -480,7 +482,7 @@ describe('SK 吊销 / 认证失效(修复 9)', () => {
       scopes: [{ pattern: 'docs/**', actions: ['read'] }],
       expiresAt: '2000-01-01T00:00:00.000Z',
     })
-    const res = await SELF.fetch('https://tb.test/~help', {
+    const res = await tb.request('https://tb.test/~help', {
       headers: { authorization: `Bearer ${secret}` },
     })
     expect(res.status).toBe(401)

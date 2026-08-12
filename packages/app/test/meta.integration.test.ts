@@ -1,7 +1,10 @@
 import { parseHelpDsl } from '@tool-bridge/core'
 import { describe, expect, it } from 'vitest'
-import { SELF } from 'cloudflare:test'
 import { TEST_ADMIN_SK } from './fixtures'
+import { createTestApp } from './harness'
+
+// 文件级单实例(对齐原 SELF.fetch 语义:一个文件共享一份持久状态)。
+const tb = await createTestApp()
 
 // system/annotation(builtin)+ ~feedback(保留段,per-path 一级协议能力)集成测试:
 // builtin 物化、权限面(agent SK 开箱 submit/vote 但写不了 annotation;权限判定落目标
@@ -16,7 +19,7 @@ const admin = (extra: RequestInit = {}): RequestInit => ({
 const bearer = (sk: string): RequestInit => ({ headers: { authorization: `Bearer ${sk}` } })
 
 async function postJson(path: string, body: unknown, init: RequestInit = {}): Promise<Response> {
-  return SELF.fetch(`https://tb.test/${path}`, {
+  return tb.request(`https://tb.test/${path}`, {
     method: 'POST',
     ...init,
     headers: {
@@ -29,7 +32,7 @@ async function postJson(path: string, body: unknown, init: RequestInit = {}): Pr
 }
 
 async function getJson(path: string, init: RequestInit = {}): Promise<Response> {
-  return SELF.fetch(`https://tb.test/${path}`, {
+  return tb.request(`https://tb.test/${path}`, {
     ...init,
     headers: { accept: 'application/json', ...(init.headers ?? {}) },
   })
@@ -74,7 +77,7 @@ async function mountEcho(path: string): Promise<void> {
 
 async function helpOf(path: string, accept: string, init: RequestInit = admin()): Promise<string> {
   const url = path === '' ? 'https://tb.test/~help' : `https://tb.test/${path}/~help`
-  const res = await SELF.fetch(url, { ...init, headers: { accept, ...(init.headers ?? {}) } })
+  const res = await tb.request(url, { ...init, headers: { accept, ...(init.headers ?? {}) } })
   expect(res.status).toBe(200)
   return res.text()
 }
@@ -108,7 +111,7 @@ describe('builtin 物化与 ~help 契约', () => {
       remove: 'admin',
       list: 'read',
     })
-    const fb = await SELF.fetch('https://tb.test/system/feedback/~help', admin())
+    const fb = await tb.request('https://tb.test/system/feedback/~help', admin())
     expect(fb.status).toBe(404)
   })
 })
@@ -268,12 +271,12 @@ describe('~feedback 保留段:agent 开箱提交/投票,~help 区块与阈值隐
     )
     expect(badVote.status).toBe(400)
 
-    const denied = await SELF.fetch(`https://tb.test/ext/fb-guard/~feedback/${id}`, {
+    const denied = await tb.request(`https://tb.test/ext/fb-guard/~feedback/${id}`, {
       method: 'DELETE',
       ...bearer(agentSk),
     })
     expect(denied.status).toBe(403)
-    const removed = await SELF.fetch(`https://tb.test/ext/fb-guard/~feedback/${id}`, {
+    const removed = await tb.request(`https://tb.test/ext/fb-guard/~feedback/${id}`, {
       method: 'DELETE',
       ...admin(),
     })

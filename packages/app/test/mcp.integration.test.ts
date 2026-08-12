@@ -1,9 +1,14 @@
-import { mcpToolIdentity, mcpToolName } from '@tool-bridge/app'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { SELF } from 'cloudflare:test'
 import { connectModernMcpClient, connectTestMcpClient } from './mcpClient'
-import pkg from '../package.json' with { type: 'json' }
+import { mcpToolIdentity, mcpToolName } from '../src/index'
+import { createTestApp, TEST_VERSION } from './harness'
+import { MemorySearchIndex } from './memorySearchIndex'
 import { TEST_ADMIN_SK } from './fixtures'
+
+// 文件级单实例(对齐原 SELF.fetch 语义:一个文件共享一份持久状态)。
+// 注入索引:/~mcp 只在宿主提供 SearchIndex 时投影 tb_search(gateway 侧对应
+// 可选的 TB_SEARCH binding),缺省不注入就只有 tb_help / tb_list_nodes。
+const tb = await createTestApp({ search: new MemorySearchIndex() })
 
 const admin = (extra: RequestInit = {}): RequestInit => ({
   ...extra,
@@ -13,7 +18,7 @@ const admin = (extra: RequestInit = {}): RequestInit => ({
 let mountedPaths: string[] = []
 
 async function postJson(path: string, body: unknown, init: RequestInit = {}): Promise<Response> {
-  return SELF.fetch(`https://tb.test/${path}`, {
+  return tb.request(`https://tb.test/${path}`, {
     method: 'POST',
     ...init,
     headers: {
@@ -141,7 +146,7 @@ afterEach(async () => {
 
 describe('MCP consumer endpoint', () => {
   it('rejects unauthenticated MCP requests before protocol dispatch', async () => {
-    const response = await SELF.fetch('https://tb.test/~mcp', {
+    const response = await tb.request('https://tb.test/~mcp', {
       method: 'POST',
       headers: {
         'accept': 'application/json, text/event-stream',
@@ -169,11 +174,11 @@ describe('MCP consumer endpoint', () => {
     const client = await connectTestMcpClient(
       'https://tb.test/~mcp',
       TEST_ADMIN_SK,
-      (input, init) => SELF.fetch(input, init),
+      (input, init) => tb.request(input, init),
     )
 
     try {
-      expect(client.getServerVersion()).toEqual({ name: 'tool-bridge', version: pkg.version })
+      expect(client.getServerVersion()).toEqual({ name: 'tool-bridge', version: TEST_VERSION })
       expect(client.getServerCapabilities()).toEqual({ tools: {} })
     } finally {
       await client.close()
@@ -201,7 +206,7 @@ describe('MCP consumer endpoint', () => {
     const client = await connectTestMcpClient(
       'https://tb.test/~mcp',
       sk,
-      (input, init) => SELF.fetch(input, init),
+      (input, init) => tb.request(input, init),
     )
 
     try {
@@ -262,7 +267,7 @@ describe('MCP consumer endpoint', () => {
     const client = await connectModernMcpClient(
       'https://tb.test/~mcp',
       TEST_ADMIN_SK,
-      (input, init) => SELF.fetch(input, init),
+      (input, init) => tb.request(input, init),
     )
 
     try {
@@ -283,7 +288,7 @@ describe('MCP consumer endpoint', () => {
     const client = await connectTestMcpClient(
       'https://tb.test/~mcp',
       TEST_ADMIN_SK,
-      (input, init) => SELF.fetch(input, init),
+      (input, init) => tb.request(input, init),
     )
 
     try {
@@ -318,7 +323,7 @@ describe('MCP consumer endpoint', () => {
     const client = await connectTestMcpClient(
       'https://tb.test/~mcp',
       sk,
-      (input, init) => SELF.fetch(input, init),
+      (input, init) => tb.request(input, init),
     )
     try {
       const listed = await client.listTools()
@@ -381,7 +386,7 @@ describe('MCP consumer endpoint', () => {
     const adminClient = await connectTestMcpClient(
       'https://tb.test/~mcp',
       TEST_ADMIN_SK,
-      (input, init) => SELF.fetch(input, init),
+      (input, init) => tb.request(input, init),
     )
     let adminOnlyName = ''
     let allowedName = ''
@@ -411,7 +416,7 @@ describe('MCP consumer endpoint', () => {
     const narrowClient = await connectTestMcpClient(
       'https://tb.test/~mcp',
       narrowSk,
-      (input, init) => SELF.fetch(input, init),
+      (input, init) => tb.request(input, init),
     )
     try {
       const listed = await narrowClient.listTools()
@@ -451,7 +456,7 @@ describe('MCP consumer endpoint', () => {
     const client = await connectTestMcpClient(
       'https://tb.test/~mcp',
       TEST_ADMIN_SK,
-      (input, init) => SELF.fetch(input, init),
+      (input, init) => tb.request(input, init),
     )
     try {
       await expect(client.listTools()).rejects.toThrow(/invalid tool metadata|invalid input schema/i)
@@ -507,7 +512,7 @@ describe('MCP consumer endpoint', () => {
     const client = await connectTestMcpClient(
       'https://tb.test/~mcp',
       TEST_ADMIN_SK,
-      (input, init) => SELF.fetch(input, init),
+      (input, init) => tb.request(input, init),
     )
     try {
       const listed = await client.listTools()
@@ -605,7 +610,7 @@ describe('MCP consumer endpoint', () => {
     const client = await connectTestMcpClient(
       'https://tb.test/~mcp',
       TEST_ADMIN_SK,
-      (input, init) => SELF.fetch(input, init),
+      (input, init) => tb.request(input, init),
     )
     try {
       const listed = await client.listTools()
@@ -641,7 +646,7 @@ describe('MCP consumer endpoint', () => {
     const noCallClient = await connectTestMcpClient(
       'https://tb.test/~mcp',
       noCallSk,
-      (input, init) => SELF.fetch(input, init),
+      (input, init) => tb.request(input, init),
     )
     try {
       const listed = await noCallClient.listTools()
@@ -687,7 +692,7 @@ describe('MCP consumer endpoint', () => {
     const client = await connectTestMcpClient(
       'https://tb.test/~mcp',
       TEST_ADMIN_SK,
-      (input, init) => SELF.fetch(input, init),
+      (input, init) => tb.request(input, init),
     )
     try {
       const listed = await client.listTools()
@@ -722,7 +727,7 @@ describe('MCP consumer endpoint', () => {
     const client = await connectTestMcpClient(
       'https://tb.test/~mcp',
       TEST_ADMIN_SK,
-      (input, init) => SELF.fetch(input, init),
+      (input, init) => tb.request(input, init),
     )
     try {
       await expect(client.listTools()).rejects.toThrow()
@@ -748,7 +753,7 @@ describe('MCP consumer endpoint', () => {
       const client = await connectTestMcpClient(
         'https://tb.test/~mcp',
         TEST_ADMIN_SK,
-        (input, init) => SELF.fetch(input, init),
+        (input, init) => tb.request(input, init),
       )
       try {
         await expect(client.listTools()).rejects.toThrow()

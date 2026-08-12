@@ -1,8 +1,11 @@
 import { isTBError, MemoryStateStore, SecretStoreImpl } from '@tool-bridge/core'
-import { createHttpProvider, createMcpProvider } from '@tool-bridge/app'
 import { describe, expect, it } from 'vitest'
-import { SELF } from 'cloudflare:test'
+import { createHttpProvider, createMcpProvider } from '../src/index'
 import { TEST_ADMIN_SK, TEST_ENCRYPTION_KEY } from './fixtures'
+import { createTestApp } from './harness'
+
+// 文件级单实例(对齐原 SELF.fetch 语义:一个文件共享一份持久状态)。
+const tb = await createTestApp()
 
 // Secret Reference 使用授权(confused-deputy 合入阻断项)集成测试:
 // 两条注册通道(system/registry write/update + ~register)在权限判定后、落库前统一
@@ -15,7 +18,7 @@ const admin = (extra: RequestInit = {}): RequestInit => ({
 })
 
 async function postJson(path: string, body: unknown, init: RequestInit = {}): Promise<Response> {
-  return SELF.fetch(`https://tb.test/${path}`, {
+  return tb.request(`https://tb.test/${path}`, {
     method: 'POST',
     ...init,
     headers: {

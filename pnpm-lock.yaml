@@ -352,9 +352,6 @@ importers:
       '@cloudflare/workers-types':
         specifier: 'catalog:'
         version: 5.20260706.1
-      '@modelcontextprotocol/sdk':
-        specifier: 'catalog:'
-        version: 1.29.0(@cfworker/json-schema@4.1.1)(supports-color@10.2.2)(zod@4.4.3)
       '@tool-bridge/app':
         specifier: workspace:*
         version: link:../app
@@ -364,9 +361,6 @@ importers:
       '@tool-bridge/dashboard':
         specifier: workspace:*
         version: link:../dashboard
-      '@tool-bridge/plugins':
-        specifier: workspace:*
-        version: link:../plugins
       s3rver:
         specifier: ^3.7.1
         version: 3.7.1(supports-color@10.2.2)

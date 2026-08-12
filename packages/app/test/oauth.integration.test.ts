@@ -1,7 +1,13 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { parseHelpDsl } from '@tool-bridge/core'
-import { SELF } from 'cloudflare:test'
 import { TEST_ADMIN_SK } from './fixtures'
+import { createTestApp } from './harness'
+
+// 文件级单实例(对齐原 SELF.fetch 语义:一个文件共享一份持久状态)。
+// canonicalOrigin 钉死 OAuth redirect_uri(gateway 侧对应 TB_CANONICAL_ORIGIN)。
+// 用 fixture 域名而非真实部署域名:断言不该依赖 wrangler.jsonc 里的生产配置。
+const CANONICAL_ORIGIN = 'https://tb-canonical.test'
+const tb = await createTestApp({ canonicalOrigin: CANONICAL_ORIGIN })
 
 // mcp 托管 OAuth 全链路(默认离线,上游为 fetch mock):
 // ~authorize 发起(discovery + DCR + PKCE,授权 URL 带加密 state)→ /~oauth/callback
@@ -14,7 +20,7 @@ const admin = (extra: RequestInit = {}): RequestInit => ({
 })
 
 async function postJson(path: string, body: unknown, init: RequestInit = {}): Promise<Response> {
-  return SELF.fetch(`https://tb.test/${path}`, {
+  return tb.request(`https://tb.test/${path}`, {
     method: 'POST',
     ...init,
     headers: {
@@ -177,7 +183,7 @@ async function startAuthorize(path: string): Promise<URL> {
 /** 模拟浏览器回跳网关 callback。 */
 async function callback(query: Record<string, string>): Promise<Response> {
   const q = new URLSearchParams(query).toString()
-  return SELF.fetch(`https://tb.test/~oauth/callback?${q}`)
+  return tb.request(`https://tb.test/~oauth/callback?${q}`)
 }
 
 afterEach(() => {
@@ -196,7 +202,7 @@ describe('mcp 托管 OAuth:授权全链路(默认离线,上游为 fetch mock)', 
     expect(authUrl.searchParams.get('client_id')).toBe('dcr-client-1')
     expect(authUrl.searchParams.get('code_challenge_method')).toBe('S256')
     expect(authUrl.searchParams.get('redirect_uri')).toBe(
-      'https://tool-bridge.pdjjq.org/~oauth/callback',
+      `${CANONICAL_ORIGIN}/~oauth/callback`,
     )
     const state = authUrl.searchParams.get('state')
     expect(state).toBeTruthy()
@@ -208,7 +214,7 @@ describe('mcp 托管 OAuth:授权全链路(默认离线,上游为 fetch mock)', 
     expect(upstream.grants).toContain('authorization_code')
 
     // 数据面:~help 触发 tools/list,SDK 自动带 Bearer。
-    const help = await SELF.fetch(
+    const help = await tb.request(
       'https://tb.test/db/bb/~help',
       admin({ headers: { accept: 'text/plain' } }),
     )
@@ -230,7 +236,7 @@ describe('mcp 托管 OAuth:授权全链路(默认离线,上游为 fetch mock)', 
 
     upstream.revokeAccessTokens()
 
-    const help = await SELF.fetch(
+    const help = await tb.request(
       'https://tb.test/db/bb-refresh/~help?refresh=1',
       admin({ headers: { accept: 'text/plain' } }),
     )
@@ -273,7 +279,7 @@ describe('mcp 托管 OAuth:授权全链路(默认离线,上游为 fetch mock)', 
     )
     expect(tokenReq?.get('redirect_uri')).toBe(localUri)
 
-    const help = await SELF.fetch(
+    const help = await tb.request(
       'https://tb.test/db/bb-local/~help',
       admin({ headers: { accept: 'text/plain' } }),
     )
@@ -300,7 +306,7 @@ describe('mcp 托管 OAuth:拒绝路径', () => {
     const upstream = oauthUpstreamMock([{ name: 'query', description: 'run query' }])
     vi.stubGlobal('fetch', upstream.fetchMock)
     await mountOAuthMcp('db/bb-cold')
-    const help = await SELF.fetch('https://tb.test/db/bb-cold/~help', admin())
+    const help = await tb.request('https://tb.test/db/bb-cold/~help', admin())
     expect(help.status).toBe(403)
     const body = (await help.json()) as { code: string, message: string }
     expect(body.code).toBe('permission_denied')
@@ -373,7 +379,7 @@ describe('mcp 托管 OAuth:拒绝路径', () => {
 
     // 重挂载(URL 变更场景)→ mcpoauth:* 全部清除。
     await mountOAuthMcp('db/bb-rewrite')
-    const help = await SELF.fetch('https://tb.test/db/bb-rewrite/~help', admin())
+    const help = await tb.request('https://tb.test/db/bb-rewrite/~help', admin())
     expect(help.status).toBe(403)
     expect(((await help.json()) as { message: string }).message).toContain('tb tool auth')
   })

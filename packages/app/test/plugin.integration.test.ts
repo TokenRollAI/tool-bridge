@@ -5,8 +5,13 @@ import {
   parseHelpDsl,
 } from '@tool-bridge/core'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { SELF } from 'cloudflare:test'
+import { MemorySearchIndex } from './memorySearchIndex'
 import { TEST_ADMIN_SK } from './fixtures'
+import { createTestApp } from './harness'
+
+// 文件级单实例(对齐原 SELF.fetch 语义:一个文件共享一份持久状态)。
+// 注入索引:有用例要断言 plugin 工具进/出全局搜索,缺 SearchIndex 时 /~search 不存在。
+const tb = await createTestApp({ search: new MemorySearchIndex() })
 
 // Plugin 面集成测试:system/plugin 注册全流程、envelope 挂载消费、
 // Request-Id 重试、health cmd、admin-only。外部 Provider 用 vi.stubGlobal('fetch')
@@ -18,7 +23,7 @@ const admin = (extra: RequestInit = {}): RequestInit => ({
 })
 
 async function postJson(path: string, body: unknown, init: RequestInit = {}): Promise<Response> {
-  return SELF.fetch(`https://tb.test/${path}`, {
+  return tb.request(`https://tb.test/${path}`, {
     method: 'POST',
     ...init,
     headers: {
@@ -282,7 +287,7 @@ describe('system/plugin 注册全流程', () => {
   })
 
   it('Q15:已引导实例的 system/plugin 节点存在(~help 200 列全 cmd)', async () => {
-    const res = await SELF.fetch(
+    const res = await tb.request(
       'https://tb.test/system/plugin/~help',
       admin({ headers: { accept: 'application/json' } }),
     )
@@ -440,11 +445,11 @@ describe('plugin-backed context 挂载消费(envelope)', () => {
     await registerPlugin(manifest('feishu-caps'))
     expect((await mountContext('docs/caps', 'feishu-caps')).status).toBe(200)
 
-    const describe = await SELF.fetch('https://tb.test/docs/caps/~describe', admin())
+    const describe = await tb.request('https://tb.test/docs/caps/~describe', admin())
     expect(describe.status).toBe(200)
     expect(await describe.json()).toEqual({ kind: 'context', capabilities: ['search'] })
 
-    const help = await SELF.fetch(
+    const help = await tb.request(
       'https://tb.test/docs/caps/~help',
       admin({ headers: { accept: 'text/plain' } }),
     )
@@ -563,7 +568,7 @@ describe('kind:\'tool\' 挂载消费(tool-provider plugin)', () => {
     )
     expect((await mountTool('tools/orders', 'orders-plugin', { region: 'cn' })).status).toBe(200)
 
-    const help = await SELF.fetch(
+    const help = await tb.request(
       'https://tb.test/tools/orders/~help',
       admin({ headers: { accept: 'text/plain' } }),
     )
@@ -603,7 +608,7 @@ describe('kind:\'tool\' 挂载消费(tool-provider plugin)', () => {
     expect((await mountTool('tools/search-lifecycle', 'search-lifecycle-plugin')).status).toBe(200)
 
     const search = async (): Promise<{ items: Array<{ path: string }> }> => {
-      const response = await SELF.fetch('https://tb.test/~search', {
+      const response = await tb.request('https://tb.test/~search', {
         method: 'POST',
         headers: {
           'authorization': `Bearer ${TEST_ADMIN_SK}`,

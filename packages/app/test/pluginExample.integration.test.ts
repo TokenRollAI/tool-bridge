@@ -1,8 +1,11 @@
 import { createNotesPlugin, type Env } from '@tool-bridge/plugins/notes'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { parseHelpDsl } from '@tool-bridge/core'
-import { SELF } from 'cloudflare:test'
 import { TEST_ADMIN_SK } from './fixtures'
+import { createTestApp } from './harness'
+
+// 文件级单实例(对齐原 SELF.fetch 语义:一个文件共享一份持久状态)。
+const tb = await createTestApp()
 
 /**
  * Phase 2 项 5 的验收:**样例 plugin 双 export 零样板**。
@@ -22,7 +25,7 @@ const admin = (extra: RequestInit = {}): RequestInit => ({
 })
 
 async function postJson(path: string, body: unknown, init: RequestInit = {}): Promise<Response> {
-  return SELF.fetch(`https://tb.test/${path}`, {
+  return tb.request(`https://tb.test/${path}`, {
     method: 'POST',
     ...init,
     headers: {
@@ -133,7 +136,7 @@ describe('样例 plugin(SDK 写的双 export)端到端', () => {
     expect((await mount('docs/notes', 'context', 'notes')).status).toBe(200)
 
     // 3. 工具面:~help 的 schema 由 Zod 自动派生(作者没写一行 JSON Schema)。
-    const help = await SELF.fetch(
+    const help = await tb.request(
       'https://tb.test/tools/notes/~help',
       admin({ headers: { accept: 'application/json' } }),
     )
@@ -142,7 +145,7 @@ describe('样例 plugin(SDK 写的双 export)端到端', () => {
     expect(helpJson.cmds.map(c => c.name).sort()).toEqual(['count_notes', 'create_note'])
     // 工具级 ~help(两级披露的细节级)带全量 inputSchema —— 由 Zod 自动派生,
     // 作者没写一行 JSON Schema;`.describe()` 也一路带到 schema 的 description。
-    const toolHelp = await SELF.fetch(
+    const toolHelp = await tb.request(
       'https://tb.test/tools/notes/create_note/~help',
       admin({ headers: { accept: 'application/json' } }),
     )
@@ -237,7 +240,7 @@ describe('样例 plugin(SDK 写的双 export)端到端', () => {
     await registerNotesPlugin()
     expect((await mount('docs/notes', 'context', 'notes')).status).toBe(200)
 
-    const help = await SELF.fetch(
+    const help = await tb.request(
       'https://tb.test/docs/notes/~help',
       admin({ headers: { accept: 'text/plain' } }),
     )
