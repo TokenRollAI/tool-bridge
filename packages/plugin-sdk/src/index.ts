@@ -325,7 +325,21 @@ export function createPlugin<Env = unknown>(opts: CreatePluginOptions<Env> = {})
     const presented = header.startsWith('Bearer ') ? header.slice('Bearer '.length) : ''
     const expected = opts.token?.(env)
     if (expected === undefined) {
-      // 未配置期望 token(本地开发):只要求非空,避免完全裸奔。
+      // **fail closed**。此前这里只要求 Bearer 非空("避免完全裸奔"),但那让一个部署错误
+      // (忘了 `wrangler secret put PLUGIN_TOKEN`)变成:公网任何人自造一个 X-TB-Context
+      // 就能调这个插件的全部 action,拿它当匿名出站中转、烧 quota —— 而且毫无征兆。
+      //
+      // 本地开发的便利该由**显式**开关表达(`TB_PLUGIN_ALLOW_ANY_TOKEN=true`),而不是让
+      // 缺配置这条路默认放行。
+      const devBypass = (env as { TB_PLUGIN_ALLOW_ANY_TOKEN?: unknown } | undefined)
+        ?.TB_PLUGIN_ALLOW_ANY_TOKEN
+      if (devBypass !== 'true') {
+        throw new TBError(
+          'unavailable',
+          'plugin 未配置 PLUGIN_TOKEN:生产部署必须配置;本地开发可设 TB_PLUGIN_ALLOW_ANY_TOKEN=true',
+          { retryable: false },
+        )
+      }
       if (presented.length === 0) throw TBError.unauthenticated()
       return
     }

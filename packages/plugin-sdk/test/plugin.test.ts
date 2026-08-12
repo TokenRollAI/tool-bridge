@@ -364,3 +364,59 @@ describe('proxyTools:工具表来自上游的代理型 export', () => {
     expect(((await res.json()) as { message: string }).message).toContain('base64url')
   })
 })
+
+describe('鉴权 fail closed(未配置 PLUGIN_TOKEN)', () => {
+  /**
+   * 此前这里只要求 Bearer 非空,理由是"避免完全裸奔"。但那让一个部署错误
+   * (忘了 `wrangler secret put PLUGIN_TOKEN`)变成:公网任何人自造 X-TB-Context 就能调
+   * 全部 action,把插件当匿名出站中转 —— 而且毫无征兆。
+   *
+   * 本地开发的便利该由显式开关表达,不该让"缺配置"这条路默认放行。
+   */
+  function bareplugin(): ReturnType<typeof createPlugin> {
+    const plugin = createPlugin<{ PLUGIN_TOKEN?: string, TB_PLUGIN_ALLOW_ANY_TOKEN?: string }>({
+      token: env => env.PLUGIN_TOKEN,
+    })
+    plugin.tools('actions', { description: 'x' })
+      .register('ping', { description: 'p', effect: 'read' }, () => ({ ok: true }))
+    return plugin as ReturnType<typeof createPlugin>
+  }
+
+  function call(env: Record<string, string | undefined>): Promise<Response> {
+    return Promise.resolve(bareplugin().fetch(
+      new Request('https://p.test/', {
+        method: 'POST',
+        headers: {
+          authorization: 'Bearer anything',
+          [HEADER_TB_CONTEXT]: encodeCallContext({
+            keyId: 'k', owner: 'agent:x', scopes: [], traceId: 't',
+            mountPath: 'p', exportId: 'actions',
+          }),
+        },
+        body: JSON.stringify({ tool: 'Call', arguments: { name: 'ping', args: {} } }),
+      }),
+      env as never,
+    ))
+  }
+
+  it('**没配 PLUGIN_TOKEN 时拒绝调用**,消息说清该配什么', async () => {
+    const res = await call({})
+    expect(res.status).toBe(503)
+    const body = (await res.json()) as { message: string }
+    expect(body.message).toContain('PLUGIN_TOKEN')
+    expect(body.message).toContain('TB_PLUGIN_ALLOW_ANY_TOKEN')
+  })
+
+  it('显式开发开关才放行(而且仍要求 Bearer 非空)', async () => {
+    expect((await call({ TB_PLUGIN_ALLOW_ANY_TOKEN: 'true' })).status).toBe(200)
+    // 非 'true' 的任意值不算开启 —— 免得 =0 / =false 被当成打开。
+    expect((await call({ TB_PLUGIN_ALLOW_ANY_TOKEN: '1' })).status).toBe(503)
+    expect((await call({ TB_PLUGIN_ALLOW_ANY_TOKEN: 'false' })).status).toBe(503)
+  })
+
+  it('配了 token 就按 token 校验(开发开关无关)', async () => {
+    const res = await call({ PLUGIN_TOKEN: 'tbk_real', TB_PLUGIN_ALLOW_ANY_TOKEN: 'true' })
+    // 送的是 'Bearer anything',与真 token 不符 → 401。
+    expect(res.status).toBe(401)
+  })
+})
