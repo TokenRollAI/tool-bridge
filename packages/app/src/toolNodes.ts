@@ -314,7 +314,10 @@ async function probePluginCredential(opts: {
     manifest: opts.manifest,
     secrets: opts.deps.secrets,
     ctx: mountCallContext(opts.ctx, opts.mountPath, opts.providerConfig, opts.export.id),
-    upstreamAuthRef: opts.authRef,
+    // OAuth 挂载:authRef 指向的 secret 存的是 **client 凭证**,不是上游凭证。直接把它当
+    // upstreamAuthRef 传下去,插件就会收到 clientSecret 明文 —— 那是凭证泄漏,不是探测。
+    // OAuth 的凭证可用性由授权流程本身证明(拿不到 token 就走不完),不需要也不能在这里探。
+    ...(opts.export.oauth === undefined ? { upstreamAuthRef: opts.authRef } : {}),
     ...(opts.deps.pluginBindings !== undefined ? { bindings: opts.deps.pluginBindings } : {}),
   })
   try {
@@ -379,6 +382,9 @@ export async function assertToolConfig(
     || typeof authRef !== 'string'
     || ctx === undefined
     || mountPath === undefined
+    // OAuth 挂载不探针:那个 secret 存的是 client 凭证而非上游凭证,拿它去调用既证明不了
+    // 什么、又会把 clientSecret 送进插件。凭证可用性由 `~authorize` 流程本身证明。
+    || exported.oauth !== undefined
   ) {
     return
   }

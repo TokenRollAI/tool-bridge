@@ -334,3 +334,94 @@ describe('免交互复用', () => {
     expect(((await again.json()) as { status: string }).status).toBe('authorized')
   })
 })
+
+describe('OAuth 与 credentialProbe 叠加', () => {
+  /**
+   * 回归:OAuth 挂载的 `authRef` 指向的 secret 存的是 **client 凭证**(clientId/clientSecret),
+   * 不是上游凭证。挂载期的凭证探针若照常把它当 upstreamAuthRef 传下去,插件就会收到
+   * clientSecret 明文 —— 那是凭证泄漏。
+   *
+   * 正确行为:OAuth 挂载**不跑探针**。凭证可用性由 `~authorize` 流程本身证明
+   * (client 凭证不对就换不到 token,走不完流程)。
+   */
+  function probeBinding(seen: { auth?: string }): (request: Request) => Promise<Response> {
+    const json = (value: unknown): Response => new Response(JSON.stringify(value), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    })
+    return async (request: Request) => {
+      const url = new URL(request.url)
+      if (url.pathname === '/healthz') return json({ healthy: true })
+      if (url.pathname === '/~describe') {
+        return json({
+          protocolVersion: 'plugin/v2',
+          exports: [{
+            id: 'actions',
+            profile: 'tools/v1',
+            // 两个能力同时声明:这正是出问题的组合。
+            credentialProbe: 'ping',
+            oauth: { authorizationUrl: AUTHORIZE_URL, tokenUrl: TOKEN_URL },
+          }],
+        })
+      }
+      const raw = request.headers.get('x-tb-upstream-auth')
+      if (raw !== null) {
+        const b64 = raw.replaceAll('-', '+').replaceAll('_', '/')
+        seen.auth = new TextDecoder().decode(Uint8Array.from(
+          atob(b64.padEnd(b64.length + ((4 - (b64.length % 4)) % 4), '=')),
+          c => c.charCodeAt(0),
+        ))
+      }
+      const body = (await request.json()) as { tool: string }
+      return json(body.tool === 'List' ? [{ name: 'ping' }] : { content: {} })
+    }
+  }
+
+  it('**挂载时不把 client secret 发给插件**', async () => {
+    const seen: { auth?: string } = {}
+    const state = new MemoryStateStore()
+    await runBootstrap(state, { adminSk: TEST_ADMIN_SK, requireAdminSk: true })
+    const app = createTbApp({
+      allowInsecureHttp: false,
+      canonicalOrigin: 'https://tb.test',
+      encryptionKey: TEST_ENCRYPTION_KEY,
+      pluginBindings: new Map([['probep', probeBinding(seen)]]),
+      remote: { allowlist: [], maxHops: 4, allowInsecure: false },
+      secrets: new SecretStoreImpl(state, TEST_ENCRYPTION_KEY),
+      state,
+      version: 'test',
+    })
+
+    await postJson(app, 'system/secret', {
+      tool: 'set',
+      arguments: {
+        name: 'cli-cred',
+        value: encodeCredentialValues({ clientId: 'cid', clientSecret: 'MUST_NOT_LEAK' }),
+      },
+    })
+    await postJson(app, 'system/plugin', {
+      tool: 'write',
+      arguments: {
+        id: 'probep',
+        protocolVersion: 'plugin/v2',
+        endpoint: 'binding:probep',
+        auth: { kind: 'platform-token' },
+        healthPath: '/healthz',
+        enabled: true,
+      },
+    })
+    const mounted = await postJson(app, 'system/registry', {
+      tool: 'write',
+      arguments: {
+        path: 'svc/probep',
+        kind: 'tool',
+        description: 'oauth + probe',
+        config: { kind: 'tool', provider: 'probep', export: 'actions', authRef: 'cli-cred' },
+      },
+    })
+    expect(mounted.status).toBe(200)
+    // 探针根本不该跑;即便跑了也绝不能把 client 凭证送出去。
+    expect(seen.auth ?? '').not.toContain('MUST_NOT_LEAK')
+    expect(seen.auth).toBeUndefined()
+  })
+})
