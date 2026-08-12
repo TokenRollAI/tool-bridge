@@ -1,6 +1,6 @@
 # Guide:npm 发布(cli / sdk / app / gateway / dashboard / server)
 
-> 用途:发布 public npm 包的新版本,以及新增可发布包的首发流程。适用:发 cli/sdk/gateway/dashboard/server 新版本、新增可发布包、排查 CI 发布失败。现状(2026-08-12 `npm view` 实测):registry latest 为 cli 0.7.0 / sdk 0.4.0 / gateway 0.4.0 / dashboard 0.6.0 / **app 0.1.0**,Trusted Publisher 均已配置;cli manifest 0.8.0 已完成本地发布准备但尚未打 tag/发布;**app 的 CI 通路尚未验证**(`publish-app.yml` 未进 main);server 0.1.0 **仍待手动首发 + 配 Trusted Publisher**。快照见 [../must/current-state.md](../must/current-state.md)。
+> 用途:发布 public npm 包的新版本,以及新增可发布包的首发流程。适用:发 cli/sdk/gateway/dashboard/server 新版本、新增可发布包、排查 CI 发布失败。现状(2026-08-12):**六包首发全部完成**,registry latest 为 cli 0.7.0 / sdk 0.4.0 / gateway 0.4.0 / dashboard 0.6.0 / app 0.1.0 / server 0.1.0,Trusted Publisher 均已配置。**但四包的 registry latest 落后于 main 代码**,正在做一轮版本对齐(cli 0.8.0、gateway 0.5.0、sdk 0.5.0、dashboard 0.7.0、app 0.1.1、server 0.1.1);app/server 的 CI 发布通路尚未实证。快照见 [../must/current-state.md](../must/current-state.md)。
 
 ## 包形态(发布模式)
 
@@ -64,10 +64,12 @@ Trusted Publisher 必须在包已存在后才能配置,所以新包固定走两�
 2. **配置 Trusted Publisher**:用户在 npmjs.com 该包设置页 → Trusted Publisher → GitHub Actions,填 repo `TokenRollAI/tool-bridge` + 对应 workflow 文件名(如 `publish-sdk.yml`)。
 3. 之后按上节 tag 触发 CI 发布。
 
-当前待走此流程:**server 0.1.0**(workflow `publish-server.yml`)。app 0.1.0 已于 2026-08-12 走完第 1、2 段(首发物核对:main/types/exports 全指 dist、4 文件 482.4 KB、`repository.url` 正确),**第 3 段未走**——`publish-app.yml` 还只在 feature 分支,合入 main 前打 `app-v*` tag 不触发任何 run(**tag 触发读的是 tag 所指 commit 里的 workflow 文件**,这是新增 workflow 的包首次 CI 发布的常见卡点)。其余四包均已走完。**顺序约束:dashboard 须先于 server 存在于 registry**——dashboard 是 server 的 regular dependency(dashboard 0.6.0 已发布,约束已满足)。
+六包均已走完第 1、2 段。app/server 于 2026-08-12 手动首发(app 首发物核对:main/types/exports 全指 dist、4 文件 482.4 KB、`repository.url` 正确),**第 3 段仍未走**——首次 CI 发布要等 `publish-app.yml` 进 main 之后,因为 **tag 触发读的是 tag 所指 commit 里的 workflow 文件**,workflow 只在 feature 分支时打 tag 不触发任何 run(新增 workflow 的包首次 CI 发布的常见卡点)。**顺序约束:dashboard 须先于 server 发布**——dashboard 是 server 的 regular dependency,`workspace:*` 在 `pnpm pack` 时解析成具体版本,dashboard 那一版没进 registry 的话 server 的 tarball 装不上。每轮版本对齐都要重新满足这条,不是一次性约束。
 
 ## 坑
 
+- **发布后立刻 `npm view` 可能仍报 E404**:registry 有 CDN 传播延迟。2026-08-12 实测 `@tool-bridge/server` 创建时间 `08:11:52Z`,`08:13:23Z`(91 秒后)查询仍返回 `E404 Not Found`,据此误报「未发布」。判定发布结果:等一两分钟复查,或直接看 `npm view <pkg> time.created` / npmjs.com 页面。**registry 的 404 不是「未发布」的可靠证据。**
+- **每轮版本对齐都要重算发布顺序**:`@tool-bridge/dashboard` 是 server 的 regular dependency(`workspace:*`),`pnpm pack` 会把它解析成具体版本。dashboard 新版没进 registry 就发 server,tarball 引用的 dashboard 版本不存在,消费者 `npm i` 直接失败。这是每轮都要满足的约束,不是首发时的一次性检查。
 - **agent 跑 `npm publish` 会卡死在 2FA/EOTP**:npm 触发浏览器一次性认证,认证 URL 在 agent 命令输出中被脱敏(显示 `***`),放后台等也没用。二选一:让用户在会话里 `! cd packages/xxx && npm publish` 自己跑(URL 直接显示给用户);或用户提供 TOTP,agent 走 `npm publish --otp=<code>`。
 - **CI 发布 E422:provenance 校验要求 `repository.url`**:Trusted Publishing 会签 provenance,npm registry 校验 package.json 的 `repository.url` 必须匹配 `https://github.com/TokenRollAI/tool-bridge`,缺失或不匹配直接拒绝(`cli-v0.1.1` 实测被拒:`"repository.url" is ""`;补 `repository` 字段后同 tag 重跑成功)。可发布包的 package.json 必须带 `repository` 字段(含 `directory` 指向包目录)。手动发布无 provenance,不受影响——所以首发成功不代表 CI 能发。
 - **发布前按真实发布器验收**:不依赖 manifest 覆盖的简单包可用 `npm publish --dry-run`;依赖 `publishConfig` 改写入口/workspace 依赖的包必须用 `pnpm pack`,核对 tarball 只含 dist/LICENSE/README/package.json,入口指 dist,且 unpacked size 合理(bundle 漏配 noExternal 时体积会异常)。
