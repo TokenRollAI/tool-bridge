@@ -170,3 +170,57 @@ describe('binding: 进程内插件传输', () => {
     expect(((await bad.json()) as { code: string }).code).toBe('invalid_argument')
   })
 })
+
+describe('binding 传输的超时', () => {
+  /**
+   * 进程内直调也必须有超时。此前只有网络分支带 `AbortSignal.timeout`,binding 分支裸调 ——
+   * 而 114 个迁移产物走的正是 binding。某个产物忘了给自己的出站加超时,上游挂住就会无上界
+   * 占着这个请求:CF 侧撞 30s CPU/墙钟限制,Node 侧无限等,而 callPlugin 的重试还会再来一轮。
+   */
+  it('**binding handler 收到的 Request 带 signal**', async () => {
+    let seenSignal: AbortSignal | null | undefined
+    const state = new MemoryStateStore()
+    await runBootstrap(state, { adminSk: TEST_ADMIN_SK, requireAdminSk: true })
+    const app = createTbApp({
+      allowInsecureHttp: false,
+      pluginBindings: new Map([['probe', (request: Request) => {
+        seenSignal = request.signal
+        const url = new URL(request.url)
+        const json = (value: unknown): Response => new Response(JSON.stringify(value), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        })
+        if (url.pathname === '/healthz') return Promise.resolve(json({ healthy: true }))
+        if (url.pathname === '/~describe') {
+          return Promise.resolve(json({
+            protocolVersion: 'plugin/v2',
+            exports: [{ id: 'actions', profile: 'tools/v1' }],
+          }))
+        }
+        return Promise.resolve(json([]))
+      }]]),
+      remote: { allowlist: [], maxHops: 4, allowInsecure: false },
+      secrets: new SecretStoreImpl(state, TEST_ENCRYPTION_KEY),
+      state,
+      version: 'test',
+    })
+
+    const registered = await postJson(app, 'system/plugin', {
+      tool: 'write',
+      arguments: {
+        id: 'probe',
+        protocolVersion: 'plugin/v2',
+        endpoint: 'binding:probe',
+        auth: { kind: 'platform-token' },
+        healthPath: '/healthz',
+        enabled: true,
+      },
+    })
+    expect(registered.status).toBe(200)
+
+    // 注册时的 ~describe 抓取已经走过一次 binding。
+    expect(seenSignal, 'binding 收到的 Request 没有 signal —— 上游挂住就无上界').toBeDefined()
+    expect(seenSignal).not.toBeNull()
+    expect(seenSignal?.aborted).toBe(false)
+  })
+})

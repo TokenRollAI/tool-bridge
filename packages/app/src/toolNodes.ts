@@ -289,6 +289,41 @@ export async function toolHelpModelFor(
   return toolHelpModel(node.path, { kind: node.kind, description: node.description }, tool)
 }
 /**
+ * 核验探针工具的形状:必须存在、只读、且无必填入参。
+ *
+ * 这三条是 `credentialProbe` 的语义前提(见 core 契约里的注释),但契约层只校验了"是个
+ * 字符串" —— 声明与实际不符时,后果分别是:不存在 → 调用被拒却报成凭证问题;
+ * 非只读 → 每次挂载都产生业务副作用;有必填入参 → 被 Zod 拒且错误说"稍后重试"。
+ *
+ * 违规一律 `invalid_argument`:这是**插件的声明错误**,不是这次挂载的凭证有问题,
+ * 消息要指向 plugin 作者而非运维。
+ */
+function assertProbeShape(tools: readonly ToolSpec[], probe: string, exportId: string): void {
+  const spec = tools.find(tool => tool.name === probe)
+  if (spec === undefined) {
+    throw new TBError(
+      'invalid_argument',
+      `plugin export '${exportId}' 声明的 credentialProbe '${probe}' 不在其工具表里`,
+    )
+  }
+  if (spec.effect !== 'read') {
+    throw new TBError(
+      'invalid_argument',
+      `credentialProbe '${probe}' 的 effect 是 '${spec.effect ?? '未声明'}';`
+      + '探针必须是 read —— 平台会在每次挂载时真实调用它',
+    )
+  }
+  const required = (spec.inputSchema as { required?: unknown } | undefined)?.required
+  if (Array.isArray(required) && required.length > 0) {
+    throw new TBError(
+      'invalid_argument',
+      `credentialProbe '${probe}' 有必填入参(${required.join('、')});`
+      + '探针会被空参调用,必须无必填字段',
+    )
+  }
+}
+
+/**
  * 用挂载配置的 authRef 真实调一次探针工具,验证凭证可用。
  *
  * 为什么值得在挂载时多跑一次调用:平台的凭证是 `tb secret set` 存进 SecretStore、挂载只写
@@ -320,6 +355,19 @@ async function probePluginCredential(opts: {
     ...(opts.export.oauth === undefined ? { upstreamAuthRef: opts.authRef } : {}),
     ...(opts.deps.pluginBindings !== undefined ? { bindings: opts.deps.pluginBindings } : {}),
   })
+  // 先从 List 核验探针的两个前提。契约只校验了"是个字符串",而挂载会**真调它** ——
+  // 声明成 `send_message` / `delete_index` 就是每次挂载都产生业务副作用;带必填入参则会被
+  // Zod 拒,而下面的 catch 把非 permission 类一律归成 retryable,于是"永久拒绝挂载"却说
+  // "稍后重试"。114 个产物靠迁移期人工评审还看得住,1000 个看不住 —— 平台反正要 List。
+  let tools: ToolSpec[]
+  try {
+    tools = await provider.list()
+  } catch (err) {
+    const detail = isTBError(err) ? err.message : String(err)
+    throw new TBError('unavailable', `凭证探测未能列出工具:${detail}`, { retryable: true })
+  }
+  assertProbeShape(tools, probe, opts.export.id)
+
   try {
     await provider.call(probe, {})
   } catch (err) {

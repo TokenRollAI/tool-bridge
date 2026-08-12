@@ -92,7 +92,14 @@ async function pluginFetch(
       retryable: false,
     })
   }
-  return await handler(new Request(BINDING_ORIGIN + path, init))
+  // 进程内直调同样要超时。此前这里裸调:114 个迁移产物走的正是这条传输,某个产物忘了给
+  // 出站加 AbortSignal.timeout,上游挂住就无上界地占着这个请求 —— CF 侧撞 30s CPU/墙钟
+  // 限制、Node 侧无限等,而 callPlugin 的一次重试还会再来一轮。
+  // 超时常量与网络分支同一个(protocol-contract 记为契约常量:平台→Plugin 30s)。
+  return await handler(new Request(BINDING_ORIGIN + path, {
+    ...init,
+    signal: AbortSignal.timeout(PLUGIN_TIMEOUT_MS),
+  }))
 }
 
 /** GET {endpoint}{healthPath} → { healthy: true };网络失败/binding 未装配按 unhealthy 报告。 */

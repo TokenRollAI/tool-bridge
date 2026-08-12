@@ -288,3 +288,104 @@ describe('多字段凭证的挂载校验', () => {
     expect(((await res.json()) as { message: string }).message).toContain('no-such-secret')
   })
 })
+
+describe('平台核验探针形状', () => {
+  /**
+   * `credentialProbe` 的语义前提是"只读、零副作用、无必填入参",但契约层只校验了它是个
+   * 字符串 —— 而平台会在**每次挂载**时真调它。114 个产物靠迁移期人工评审还看得住,
+   * 1000 个看不住;平台反正要 List,正好用它核验。
+   */
+  function shapeBinding(tool: Record<string, unknown>): (request: Request) => Promise<Response> {
+    const json = (value: unknown): Response => new Response(JSON.stringify(value), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    })
+    return async (request: Request) => {
+      const url = new URL(request.url)
+      if (url.pathname === '/healthz') return json({ healthy: true })
+      if (url.pathname === '/~describe') {
+        return json({
+          protocolVersion: 'plugin/v2',
+          exports: [{ id: 'actions', profile: 'tools/v1', credentialProbe: 'probe' }],
+        })
+      }
+      const body = (await request.json()) as { tool: string }
+      return json(body.tool === 'List' ? [tool] : { content: { ok: true } })
+    }
+  }
+
+  async function mountWith(tool: Record<string, unknown>): Promise<Response> {
+    const state = new MemoryStateStore()
+    await runBootstrap(state, { adminSk: TEST_ADMIN_SK, requireAdminSk: true })
+    const app = createTbApp({
+      allowInsecureHttp: false,
+      pluginBindings: new Map([['shape', shapeBinding(tool)]]),
+      remote: { allowlist: [], maxHops: 4, allowInsecure: false },
+      secrets: new SecretStoreImpl(state, TEST_ENCRYPTION_KEY),
+      state,
+      version: 'test',
+    })
+    await postJson(app, 'system/secret', {
+      tool: 'set',
+      arguments: { name: 'k', value: 'sk_x' },
+    })
+    expect((await postJson(app, 'system/plugin', {
+      tool: 'write',
+      arguments: {
+        id: 'shape',
+        protocolVersion: 'plugin/v2',
+        endpoint: 'binding:shape',
+        auth: { kind: 'platform-token' },
+        healthPath: '/healthz',
+        enabled: true,
+      },
+    })).status).toBe(200)
+    return postJson(app, 'system/registry', {
+      tool: 'write',
+      arguments: {
+        path: 'svc/shape',
+        kind: 'tool',
+        description: 'shape',
+        config: { kind: 'tool', provider: 'shape', export: 'actions', authRef: 'k' },
+      },
+    })
+  }
+
+  it('形状合规 → 挂载成功', async () => {
+    expect((await mountWith({
+      name: 'probe',
+      effect: 'read',
+      inputSchema: { type: 'object', properties: {} },
+    })).status).toBe(200)
+  })
+
+  it('**探针非只读 → 拒绝挂载**(否则每次挂载都产生业务副作用)', async () => {
+    const res = await mountWith({ name: 'probe', effect: 'write' })
+    expect(res.status).toBe(400)
+    const body = (await res.json()) as { code: string, message: string }
+    expect(body.code).toBe('invalid_argument')
+    expect(body.message).toContain('必须是 read')
+  })
+
+  it('**探针有必填入参 → 拒绝挂载**(会被空参调用,且旧行为错报成可重试)', async () => {
+    const res = await mountWith({
+      name: 'probe',
+      effect: 'read',
+      inputSchema: { type: 'object', properties: { id: { type: 'string' } }, required: ['id'] },
+    })
+    expect(res.status).toBe(400)
+    expect(((await res.json()) as { message: string }).message).toContain('必填入参')
+  })
+
+  it('探针不在工具表里 → 拒绝挂载,消息指向 plugin 作者', async () => {
+    const res = await mountWith({ name: 'other', effect: 'read' })
+    expect(res.status).toBe(400)
+    expect(((await res.json()) as { message: string }).message).toContain('不在其工具表里')
+  })
+
+  it('effect 未声明也算违规(缺省不等于只读)', async () => {
+    const res = await mountWith({ name: 'probe' })
+    expect(res.status).toBe(400)
+    expect(((await res.json()) as { message: string }).message).toContain('未声明')
+  })
+})
