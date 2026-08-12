@@ -50,6 +50,7 @@ import { createPluginContextProvider } from '../providers/pluginContext'
 import { assertRegisterPath, decodePath, scopeForCmd } from '../paths'
 import { invalidateToolCache } from '../providers/toolCache'
 import { renderResult, tbErrorResponse } from '../responses'
+import { invalidateProviderOAuth } from '../providerOAuth'
 import { invalidateMcpEra } from '../providers/mcp'
 import { invalidateMcpOAuth } from '../oauth'
 
@@ -371,11 +372,12 @@ export async function handleInvoke(c: AppContext, env: RouteEnv): Promise<Respon
     if (isTBError(error)) return tbErrorResponse(error)
     return tbErrorResponse(new TBError('internal', 'internal error'))
   }
-  // 注册变更 → 失效该节点工具缓存 + mcp 会话/OAuth 缓存(Write/Update/Delete 触发失效)。
+  // 注册变更 → 失效该节点工具缓存 + mcp 会话/两套 OAuth 令牌(Write/Update/Delete 触发失效)。
   if (registryTarget !== undefined) {
     await invalidateToolCache(store, registryTarget)
     await invalidateMcpEra(store, registryTarget)
     await invalidateMcpOAuth(store, registryTarget)
+    await invalidateProviderOAuth(store, registryTarget)
     await searchSync?.reconcileNodeQuietly(registryTarget, { marker: registryMarker })
     const current = await registry.get(registryTarget).catch(() => null)
     if (current !== null && await refreshDynamicSearchNode(current, ctx, deps)) {
@@ -387,6 +389,7 @@ export async function handleInvoke(c: AppContext, env: RouteEnv): Promise<Respon
     await invalidateToolCache(store, mount.node.path)
     await invalidateMcpEra(store, mount.node.path)
     await invalidateMcpOAuth(store, mount.node.path)
+    await invalidateProviderOAuth(store, mount.node.path)
     const providerId = mount.node.config?.kind === 'tool'
       ? mount.node.config.provider
       : ''

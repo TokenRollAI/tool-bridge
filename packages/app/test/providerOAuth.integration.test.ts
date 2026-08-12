@@ -425,3 +425,36 @@ describe('OAuth 与 credentialProbe 叠加', () => {
     expect(seen.auth).toBeUndefined()
   })
 })
+
+describe('令牌生命周期', () => {
+  /**
+   * 回归:节点卸载/重写时必须清掉该路径的 OAuth 令牌。不清不只是垃圾残留 ——
+   * 同一路径**重新挂载另一个 provider** 时会继承旧令牌,那是跨挂载的凭证串用。
+   */
+  it('**卸载后重新挂载不继承旧令牌**', async () => {
+    const app = await mountedApp()
+    const started = (await (await authorize(app)).json()) as { authorizationUrl: string }
+    await callback(app, stateOf(started.authorizationUrl))
+    // 授权过了:此刻 ~authorize 应当免交互。
+    expect(((await (await authorize(app)).json()) as { status: string }).status).toBe('authorized')
+
+    // 卸载,再用同一路径重挂。
+    expect((await postJson(app, 'system/registry', {
+      tool: 'delete',
+      arguments: { path: 'svc/oauthp' },
+    })).status).toBe(200)
+    expect((await postJson(app, 'system/registry', {
+      tool: 'write',
+      arguments: {
+        path: 'svc/oauthp',
+        kind: 'tool',
+        description: 'remounted',
+        config: { kind: 'tool', provider: 'oauthp', export: 'actions', authRef: 'oauth-client' },
+      },
+    })).status).toBe(200)
+
+    // 新挂载不该继承上一次的授权 —— 否则换 provider 重挂就等于白拿别人的令牌。
+    const after = await authorize(app)
+    expect(((await after.json()) as { status: string }).status).toBe('redirect')
+  })
+})

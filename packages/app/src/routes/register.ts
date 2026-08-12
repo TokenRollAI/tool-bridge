@@ -17,10 +17,10 @@ import {
 import type { AppContext } from '../deps'
 import type { RouteEnv } from './env'
 import { assertToolConfig, refreshDynamicSearchNode, requirePluginExport } from '../toolNodes'
+import { invalidateProviderOAuth, startProviderAuthorization } from '../providerOAuth'
 import { assertRemoteConfigAllowed, resolveRemoteSettings } from '../federation'
 import { assertContextConfig, assertSkillhubConfig } from '../contextNodes'
 import { invalidateMcpOAuth, startMcpAuthorization } from '../oauth'
-import { startProviderAuthorization } from '../providerOAuth'
 import { assertRegisterPath, splitReserved } from '../paths'
 import { invalidateToolCache } from '../providers/toolCache'
 import { invalidateMcpEra } from '../providers/mcp'
@@ -122,10 +122,11 @@ export async function handleRegister(c: AppContext, env: RouteEnv): Promise<Resp
     await searchSync?.abort(marker)
     throw error
   }
-  // 注册变更 → 失效该节点工具缓存 + mcp 会话/OAuth 缓存。
+  // 注册变更 → 失效该节点工具缓存 + mcp 会话/两套 OAuth 令牌。
   await invalidateToolCache(store, body.path)
   await invalidateMcpEra(store, body.path)
   await invalidateMcpOAuth(store, body.path)
+  await invalidateProviderOAuth(store, body.path)
   await searchSync?.reconcileNodeQuietly(body.path, { marker })
   if (await refreshDynamicSearchNode(node, ctx, deps)) await searchSync?.abort(marker)
   return new Response(JSON.stringify(node), {
