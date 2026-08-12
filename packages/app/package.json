@@ -1,6 +1,6 @@
 {
   "name": "@tool-bridge/app",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Host-neutral HTBP application: assemble the tool-bridge tree on any runtime (Workers / Node / Deno / Bun) by injecting StateStore, ObjectStore, SecretStore, DeviceTransport and SearchIndex",
   "type": "module",
   "license": "MIT",

@@ -1,8 +1,29 @@
-# CLAUDE.md
+# AGENTS.md
 
-## 会话启动必做
+面向在本仓库工作的编码 agent。Claude Code 另见 `CLAUDE.md`(内容有重叠,发版规则以本文件与
+`CLAUDE.md` 一致为准)。
 
-- 每次会话开始时，先执行一次 `pwd` 确认当前工作目录。本项目经常在 git worktree（如 `~/.superset/worktrees/...`）中工作，**所有绝对路径必须基于 `pwd` 的结果来拼**，不要根据提示词中出现的主仓库路径去猜测文件位置。
+## 会话启动
+
+1. `pwd` 确认工作目录 —— 本项目常在 git worktree(`~/.superset/worktrees/...`)里工作,
+   **所有绝对路径基于 `pwd` 的结果拼**,不要照提示词里出现的主仓库路径去猜。
+2. 读 `llmdoc/startup.md`,按它的顺序读 MUST 文件,再按任务读升级提示里的 guide。
+   **知识真源 = 代码 + llmdoc**;两者冲突以代码为准并回改 llmdoc。
+
+## 验证是验收的唯一依据
+
+- `pnpm verify`(typecheck + lint + test)全绿是底线。
+- **`verify` 不跑 build**。改了可发布包、或动了打包配置/依赖,还要跑 `pnpm turbo run build` ——
+  它是发布 workflow 的第一道闸门,这类断裂只在打 tag 后暴露。
+- 不伪造进度:测试失败就报失败,跳过明说。消耗真实外部资源的验证(生产网关、真实上游、
+  真实 S3)每轮最多跑一次并留证据。
+
+## 提交
+
+- 少量多次,不要一股脑提交。
+- pre-commit hook 会跑 lint-staged + 全仓 typecheck。**批量作业(尤其多 agent 并行)期间不要
+  中途提交** —— 别人的在途文件会让 typecheck 挂,那不是你的错但会挡住你。
+- 提交信息写**为什么**这么改、以及取舍的理由;不要复述 diff。
 
 ## 改了可发布包就要发版本
 
@@ -52,3 +73,24 @@ done
    实测 91 秒后仍 404),等一两分钟再查,或直接看 `npm view <pkg> time.created`
 
 细节与踩过的坑见 `llmdoc/guides/npm-publish.md`。
+
+## 依赖与选型
+
+新增基础设施前先查 `llmdoc/must/project-brief.md` 的选型表(HTTP 路由用 Hono、校验用 zod、
+S3 签名用 aws4fetch、CLI 用 commander…)。手写路由、协议、签名、argv 解析、重试/持久化都是违例;
+表外需求要先调研现成库,确认无合适方案并写明理由才允许手写。
+
+## 三入口对等
+
+动了接口面就同轮交付/更新对应的 `tb` 子命令。某能力 CLI 做不到而 Dashboard 或直接 API 做得到,
+即视为"管理旁路",算缺陷。
+
+## 写 plugin / 跑 open-connector 迁移
+
+先读 `llmdoc/guides/plugin-design-and-migration.md`。要点:
+
+- **plugin 与网关同进程同权**,所以 env 白名单、出站经 `guardedFetch`、未配 `PLUGIN_TOKEN`
+  fail closed 这些边界都必须由代码保证,不能靠作者纪律。
+- 密钥走 `authRef` 指向的 secret,**不要放 `providerConfig`** —— 后者明文进节点记录,
+  `system/registry get` 对任何有该节点 `read` 的 SK 都回显。
+- 迁移产物要过三道闸门(等价 / 形状 / wire),缺一不可。
