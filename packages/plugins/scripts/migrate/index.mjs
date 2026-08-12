@@ -12,7 +12,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { execFileSync } from 'node:child_process'
 import process from 'node:process'
 import { join } from 'node:path'
-import { fingerprintProvider } from './fingerprint.mjs'
+import { fingerprintProvider, NORMALIZE_VERSION } from './fingerprint.mjs'
 import { emitSchemaModule } from './emit.mjs'
 import { normalize } from './parity.mjs'
 
@@ -23,6 +23,22 @@ if (!sourceRoot || services.length === 0) {
 
 const srcRoot = join(import.meta.dirname, '..', '..', 'src')
 const written = []
+/** 全局指纹清单的路径(等价闸门读它;见 fingerprint.mjs 为何不按 provider 分散存)。 */
+const fingerprintPath = join(import.meta.dirname, '..', '..', 'migration-fingerprints.json')
+
+/** 已有清单:本次只更新涉及的 provider,不动其余(增量迁移不该重写全表)。 */
+let fingerprints = { normalizeVersion: NORMALIZE_VERSION, providers: {} }
+try {
+  fingerprints = JSON.parse(await readFile(fingerprintPath, 'utf8'))
+  if (fingerprints.normalizeVersion !== NORMALIZE_VERSION) {
+    // 规则变了,旧指纹全部作废 —— 与其留半新半旧的混合表,不如显式重建。
+    console.warn(
+      `normalizeVersion ${fingerprints.normalizeVersion} → ${NORMALIZE_VERSION}:`
+      + ' 归一化规则已变,须对全部已迁 provider 重跑本脚本以重建指纹',
+    )
+    fingerprints.normalizeVersion = NORMALIZE_VERSION
+  }
+} catch { /* 首次运行 */ }
 
 for (const service of services) {
   const mod = await import(`${sourceRoot}/src/providers/${service}/definition.ts`)
@@ -39,18 +55,24 @@ for (const service of services) {
   await writeFile(target, source)
   written.push(target)
 
-  // 同时落一份上游 schema **指纹**:等价闸门(test/migration/schemaParity.test.ts)比对它而
-  // 不是外部仓库,于是 CI 里也能跑。存指纹而非完整 schema —— 见 fingerprint.mjs 的理由。
-  await writeFile(
-    join(targetDir, 'upstream.snapshot.json'),
-    `${JSON.stringify(await fingerprintProvider(mod.provider, normalize), null, 2)}\n`,
-  )
+  fingerprints.providers[service] = await fingerprintProvider(mod.provider, normalize)
 
   console.log(
     `${service}: ${mod.provider.actions.length} actions`
     + `${handwritten.size > 0 ? `(${handwritten.size} 手写豁免)` : ''} → src/${service}/schema.ts`,
   )
 }
+
+// 全局指纹清单:一次写完(providers 按名排序,免得 diff 里出现无意义的顺序变动)。
+const sortedProviders = {}
+for (const key of Object.keys(fingerprints.providers).sort()) {
+  sortedProviders[key] = fingerprints.providers[key]
+}
+await writeFile(
+  fingerprintPath,
+  `${JSON.stringify({ normalizeVersion: NORMALIZE_VERSION, providers: sortedProviders }, null, 2)}\n`,
+)
+console.log(`指纹清单:${Object.keys(sortedProviders).length} 个 provider → migration-fingerprints.json`)
 
 // 生成物直接过仓库自己的 linter:产物要与手写代码同一风格,不是"生成的代码可以将就"。
 // 这也是产物归本仓库所有的实际含义 —— 它得能通过和其他源码一样的闸门。

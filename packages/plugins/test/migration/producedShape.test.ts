@@ -1,24 +1,29 @@
 import type { Plugin } from '@tool-bridge/plugin-sdk'
 import { describe, expect, it } from 'vitest'
+import RAW_FINGERPRINTS from '../../migration-fingerprints.json'
 import { BUILTIN_PLUGIN_LOADERS } from '../../src/registry'
 
 /**
- * 迁移产物的形状闸门:凡是有 `upstream.snapshot.json` 的目录,都必须是一个**装得起来的
- * tool-bridge 插件**,且它自报的工具集与规格表一致。
+ * 迁移产物的形状闸门:凡是在 `migration-fingerprints.json` 里登记过的 provider,都必须是一个
+ * **装得起来的 tool-bridge 插件**,且它自报的工具集与规格表一致。
  *
  * 与 schemaParity 的分工:那条管"schema 迁得对",这条管"整个产物拼得起来"。批量迁移时
  * 人工逐个核对不现实 —— 少写一个 handler、export id 拼错、忘了 default export,
  * 都要在这里当场炸,而不是等到挂载时才发现。
  */
 
-/** upstream.snapshot.json 现在存的是**指纹清单**(action 名 → 各字段的 sha256)。 */
-interface Snapshot { actions: Record<string, unknown>, service: string }
-
-const SNAPSHOTS = import.meta.glob<Snapshot>('../../src/*/upstream.snapshot.json', { eager: true })
 const INDEXES = import.meta.glob<{ default?: Plugin<unknown> }>('../../src/*/index.ts', { eager: true })
 const SCHEMAS = import.meta.glob<Record<string, unknown>>('../../src/*/schema.ts', { eager: true })
 
-const migrated = Object.keys(SNAPSHOTS).map(path => path.split('/').at(-2)!).sort()
+/**
+ * 显式标注而不是直接吃 JSON 的推断类型:推断出来的 `providers` 是每个 provider 名的**字面量
+ * 联合**,用 `string` 索引它会 TS7053。契约本来就是"任意 service 名 → 指纹",标出来即可。
+ */
+const FINGERPRINTS: { providers: Record<string, { actions: Record<string, unknown> }> }
+  = RAW_FINGERPRINTS
+
+/** 迁移产物 = 在全局指纹清单里登记过的 provider。 */
+const migrated = Object.keys(FINGERPRINTS.providers).sort()
 
 it('每个迁移产物都接进了内置目录(漏接线的插件挂不上树,却不会有任何报错)', () => {
   const registered = Object.keys(BUILTIN_PLUGIN_LOADERS).sort()
@@ -26,8 +31,7 @@ it('每个迁移产物都接进了内置目录(漏接线的插件挂不上树,�
 })
 
 describe.each(migrated)('%s', (service: string) => {
-  const snapshot = SNAPSHOTS[`../../src/${service}/upstream.snapshot.json`]!
-  const names = Object.keys(snapshot.actions).sort()
+  const names = Object.keys(FINGERPRINTS.providers[service]!.actions).sort()
 
   it('导出了 default plugin(可被内置目录懒加载)', () => {
     const mod = INDEXES[`../../src/${service}/index.ts`]

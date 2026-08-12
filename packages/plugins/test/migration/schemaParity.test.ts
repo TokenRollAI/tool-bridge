@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { z } from 'zod/v4'
+import RAW_FINGERPRINTS from '../../migration-fingerprints.json'
 
 /**
  * 等价闸门:每个迁移产物的 Zod schema 反推回 JSON Schema、归一、取指纹后,必须与迁移时
@@ -13,8 +14,12 @@ import { z } from 'zod/v4'
  * `scripts/migrate/parity.mjs` 必须保持一致 —— 生成指纹与校验指纹用的是同一套规则,
  * 两边漂了会让全部指纹无故失配(此时 `normalizeVersion` 该 +1 并重新生成)。
  *
- * 收集用 `import.meta.glob` 而非 fs 遍历:本包 tsconfig 刻意不引 Node 类型(插件产物要能
- * 被任意宿主装载),测试也守同一条线。
+ * 指纹存在**一份** `migration-fingerprints.json`(不是每个 provider 目录各一个):后者会让
+ * 每次迁移都在 `src/<service>/` 里多出一个与业务代码无关的文件。"哪些 provider 是迁移产物"
+ * 现在由这份清单的 key 列表判定。
+ *
+ * schema 模块用 `import.meta.glob` 而非 fs 遍历:本包 tsconfig 刻意不引 Node 类型
+ * (插件产物要能被任意宿主装载),测试也守同一条线。
  */
 
 interface ActionSpec {
@@ -23,11 +28,21 @@ interface ActionSpec {
   outputSchema: unknown
 }
 
-interface Fingerprints {
-  actions: Record<string, { description: string, inputSchema?: string, outputSchema?: string }>
-  normalizeVersion: number
-  service: string
+interface ActionFingerprint {
+  description: string
+  inputSchema?: string
+  outputSchema?: string
 }
+
+/**
+ * `migration-fingerprints.json` 的形状:全部已迁 provider 的指纹存在一份文件里。
+ * 显式标注而不是直接吃 JSON 的推断类型 —— 推断出来的是每个 key 的字面量联合,
+ * 加一个 provider 就会让下面的索引访问在类型上变化,读代码时看不出契约是什么。
+ */
+const FINGERPRINTS: {
+  normalizeVersion: number
+  providers: Record<string, { actions: Record<string, ActionFingerprint> }>
+} = RAW_FINGERPRINTS
 
 const SAFE_INT_MAX = 9007199254740991
 const SAFE_INT_MIN = -9007199254740991
@@ -36,13 +51,12 @@ const SAFE_INT_MIN = -9007199254740991
 const NORMALIZE_VERSION = 1
 
 const SCHEMAS = import.meta.glob<Record<string, unknown>>('../../src/*/schema.ts', { eager: true })
-const SNAPSHOTS = import.meta.glob<Fingerprints>('../../src/*/upstream.snapshot.json', { eager: true })
 const HANDWRITTEN = import.meta.glob<{ actions: string[] }>('../../src/*/handwritten.json', { eager: true })
 
-const migrated = Object.keys(SNAPSHOTS).map(path => path.split('/').at(-2)!).sort()
+const migrated = Object.keys(FINGERPRINTS.providers).sort()
 
-function snapshotOf(service: string): Fingerprints {
-  return SNAPSHOTS[`../../src/${service}/upstream.snapshot.json`]!
+function actionFingerprintsOf(service: string): Record<string, ActionFingerprint> {
+  return FINGERPRINTS.providers[service]!.actions
 }
 
 function handwrittenOf(service: string): string[] {
@@ -109,21 +123,21 @@ it('至少有一个迁移产物(否则本闸门是空转的绿灯)', () => {
   expect(migrated.length).toBeGreaterThan(0)
 })
 
-describe.each(migrated)('%s', (service: string) => {
-  const snapshot = snapshotOf(service)
-  const handwritten = handwrittenOf(service)
-  const names = Object.keys(snapshot.actions).sort()
+it('指纹清单的归一化规则版本与本测试一致(改了 normalize 须重新生成全部指纹)', () => {
+  expect(FINGERPRINTS.normalizeVersion).toBe(NORMALIZE_VERSION)
+})
 
-  it('指纹的归一化规则版本与本测试一致(改了 normalize 须重新生成指纹)', () => {
-    expect(snapshot.normalizeVersion).toBe(NORMALIZE_VERSION)
-  })
+describe.each(migrated)('%s', (service: string) => {
+  const fingerprints = actionFingerprintsOf(service)
+  const handwritten = handwrittenOf(service)
+  const names = Object.keys(fingerprints).sort()
 
   it('action 集合与上游一致(不多不少)', () => {
     expect(Object.keys(actionsOf(service)).sort()).toEqual(names)
   })
 
   for (const name of names) {
-    const expected = snapshot.actions[name]!
+    const expected = fingerprints[name]!
     const exempt = handwritten.includes(name)
     it(exempt ? `${name}(手写豁免,只查存在性与 description)` : name, async () => {
       const spec = actionsOf(service)[name]

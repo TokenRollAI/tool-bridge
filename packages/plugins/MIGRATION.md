@@ -14,9 +14,13 @@ src/<service>/
   schema.ts               # Zod 声明 + 语义标注 —— 由流水线生成,之后归本仓库所有
   api.ts                  # 业务逻辑 —— 人工机械改写
   index.ts                # 装配 —— 把两张表对起来
-  upstream.snapshot.json  # 上游 schema 的**指纹**(sha256)—— 等价闸门比对它
   handwritten.json        # 可选:手写豁免清单
+  schema.handwritten.ts   # 可选:手写的 schema
 ```
+
+上游 schema 的**指纹**统一存在 `packages/plugins/migration-fingerprints.json`(一份,不按
+provider 分散)—— 等价闸门比对它,`providers` 的 key 列表同时充当"哪些目录是迁移产物"的判据。
+之前每个产物目录里各放一个 `upstream.snapshot.json`,读目录时分不清哪些是要维护的源码。
 
 ## 四个阶段
 
@@ -56,7 +60,7 @@ JSON Schema → Zod 源码。覆盖面不是猜的:上游 `core/json-schema.ts` 
 ### 4. 两道闸门
 
 - **`test/migration/schemaParity.test.ts`** —— 契约有没有在翻译中漂移。生成的 Zod 反推回
-  JSON Schema、归一、取 sha256,与 `upstream.snapshot.json` 里的指纹逐 action 比对。这是让
+  JSON Schema、归一、取 sha256,与 `migration-fingerprints.json` 里的指纹逐 action 比对。这是让
   批量迁移可信的东西:1329 个 provider 不可能靠人肉 review,这条测试把它变成 CI 里的机器判定。
 
   存**指纹**而非完整 schema:最初落盘上游 schema 原样拷贝,clerk 一个 197 KB、15 个产物
