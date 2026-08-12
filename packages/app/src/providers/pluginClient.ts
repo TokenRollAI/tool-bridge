@@ -174,14 +174,26 @@ export interface PluginCallOptions {
   /**
    * 覆盖上游凭证的取法(OAuth 托管:返回平台换来并按需刷新的 access token)。
    * 给出时**取代** upstreamAuthRef 的 secret 解析 —— 两条路的产物都是那个 header 的明文。
+   *
+   * `force` 为真时必须绕过"还没到期就直接用"的判断、强制刷新一次:上游可能在过期时刻前
+   * 就作废了令牌(密钥轮换),而**不返回 `expires_in` 的 provider 根本没有过期时刻** ——
+   * 那种情况只有 401 能告诉我们该刷新了(见下面 callPlugin 的 401 重试)。
    */
-  resolveUpstreamAuth?: () => Promise<string>
+  resolveUpstreamAuth?: (opts?: { force?: boolean }) => Promise<string>
   secrets: SecretStoreImpl
   /**
    * 挂载 config.authRef:上游凭证引用。给出时每次调用 resolve 并经
    * X-TB-Upstream-Auth(base64url)注入——plugin 无须自持上游凭证。
    */
   upstreamAuthRef?: string
+}
+
+/**
+ * 这个错误是否表示"上游认为凭证无效"。401 与 403 都收:各 provider 对失效令牌回哪个
+ * 并不一致(有的 401、有的 403),而 `_runtime/upstreamError` 把两者都归成 permission_denied。
+ */
+function isOAuthUnauthorized(err: unknown): boolean {
+  return isTBError(err) && err.code === 'permission_denied'
 }
 
 /** 从 SecretStore 解出上游凭证明文(非 OAuth 的常规路径)。 */
@@ -308,6 +320,23 @@ export async function callPlugin(
     return await attempt(doFetch)
   } catch (err) {
     if (isTBError(err) && err.retryable) return await attempt(doFetch)
+    // OAuth 托管:401 是"该刷新了"的唯一信号。核心 `shouldRefresh` 对没有 expiresAt 的
+    // 令牌(上游不返回 expires_in,规范里那是 RECOMMENDED 而非 REQUIRED)不主动刷新,
+    // 全靠这里 —— 没有这一段,那类 provider 的令牌一失效就永久 403,refresh token 明明
+    // 就在库里却永不使用,必须人工重新授权。
+    //
+    // 只重试一次、且只在 force 刷新真拿到新令牌时:刷新本身失败(refresh token 也废了)
+    // 就把原始的 permission_denied 抛出去 —— 那确实需要人重新授权。
+    if (isOAuthUnauthorized(err) && opts.resolveUpstreamAuth !== undefined) {
+      let refreshed: string
+      try {
+        refreshed = await opts.resolveUpstreamAuth({ force: true })
+      } catch {
+        throw err
+      }
+      headers[HEADER_TB_UPSTREAM_AUTH] = base64urlEncode(new TextEncoder().encode(refreshed))
+      return await attempt(doFetch)
+    }
     throw err
   }
 }

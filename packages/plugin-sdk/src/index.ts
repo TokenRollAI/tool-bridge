@@ -79,7 +79,14 @@ export interface PluginCallContext<Env = unknown> {
   readonly env: Env
   /** 命中的 export id(多 export 时用得上)。 */
   readonly exportId: string
-  /** 挂载节点的 providerConfig(每挂载非敏感配置)。 */
+  /**
+   * 挂载节点的 `providerConfig`(每挂载**非敏感**配置)。只有该节点对应的 plugin 会收到
+   * 自己那份,插件之间不共享。
+   *
+   * **别往这里放密钥**:它明文进节点记录,`system/registry get` 会回显给任何对该节点有
+   * `read` 的 SK。密钥走 `credentials`(即 `authRef` 指向的 secret)—— 加密、只写不读、
+   * 绑定时要 `system/secret` admin。
+   */
   readonly mountConfig: Record<string, unknown> | undefined
   readonly mountPath: string | undefined
   /**

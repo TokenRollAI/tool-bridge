@@ -491,3 +491,206 @@ describe('令牌生命周期', () => {
     expect(((await after.json()) as { status: string }).status).toBe('redirect')
   })
 })
+
+describe('401 触发的自愈(不返回 expires_in 的 provider)', () => {
+  /**
+   * `shouldRefresh` 对没有 `expiresAt` 的令牌不主动刷新,注释写的是"靠 401 触发" ——
+   * 但那个机制一度**不存在**:`pluginClient` 的重试只在 `err.retryable` 时发生,而 401 归一成
+   * `permission_denied`(不可重试)。于是令牌响应不带 `expires_in` 的 provider(规范里它是
+   * RECOMMENDED 而非 REQUIRED)一旦令牌失效就永久 403,refresh token 明明在库里却永不使用。
+   *
+   * 同一句注释在 mcp 那条路上是成立的(MCP SDK 的 auth() 内部会刷新),搬到 provider 这条
+   * 就成了空头承诺。
+   */
+  it('**令牌失效后自动刷新并重试,调用方无感**', async () => {
+    let valid = true
+    let tokenCalls = 0
+    let seen: string | undefined
+
+    const json = (value: unknown, status = 200): Response => new Response(JSON.stringify(value), {
+      status,
+      headers: { 'content-type': 'application/json' },
+    })
+    const binding = async (request: Request): Promise<Response> => {
+      const url = new URL(request.url)
+      if (url.pathname === '/healthz') return json({ healthy: true })
+      if (url.pathname === '/~describe') {
+        return json({
+          protocolVersion: 'plugin/v2',
+          exports: [{
+            id: 'actions',
+            profile: 'tools/v1',
+            oauth: { authorizationUrl: AUTHORIZE_URL, tokenUrl: TOKEN_URL },
+          }],
+        })
+      }
+      const raw = request.headers.get('x-tb-upstream-auth')
+      if (raw !== null) {
+        const b64 = raw.replaceAll('-', '+').replaceAll('_', '/')
+        seen = new TextDecoder().decode(Uint8Array.from(
+          atob(b64.padEnd(b64.length + ((4 - (b64.length % 4)) % 4), '=')),
+          c => c.charCodeAt(0),
+        ))
+      }
+      const body = (await request.json()) as { tool: string }
+      if (body.tool === 'List') return json([{ name: 'ping', effect: 'read' }])
+      // 真实上游:只拒那个已失效的 token,刷新拿到的新 token 有效。
+      if (!valid && seen === 'at-1') {
+        return json({ code: 'permission_denied', message: 'token expired' }, 401)
+      }
+      return json({ content: { ok: true } })
+    }
+
+    vi.stubGlobal('fetch', vi.fn((input: Request | string, init?: RequestInit) => {
+      const request = input instanceof Request ? input : new Request(input, init)
+      if (request.url === TOKEN_URL) {
+        tokenCalls += 1
+        // **不返回 expires_in** —— 这正是触发这个 bug 的形状。
+        return Promise.resolve(json({ access_token: `at-${tokenCalls}`, refresh_token: 'rt-1' }))
+      }
+      return Promise.resolve(json({}))
+    }) as unknown as typeof fetch)
+
+    const state = new MemoryStateStore()
+    await runBootstrap(state, { adminSk: TEST_ADMIN_SK, requireAdminSk: true })
+    const app = createTbApp({
+      allowInsecureHttp: false,
+      canonicalOrigin: 'https://tb.test',
+      encryptionKey: TEST_ENCRYPTION_KEY,
+      pluginBindings: new Map([['selfheal', binding]]),
+      remote: { allowlist: [], maxHops: 4, allowInsecure: false },
+      secrets: new SecretStoreImpl(state, TEST_ENCRYPTION_KEY),
+      state,
+      version: 'test',
+    })
+
+    await postJson(app, 'system/secret', {
+      tool: 'set',
+      arguments: {
+        name: 'cli',
+        value: encodeCredentialValues({ clientId: 'cid', clientSecret: 'cs' }),
+      },
+    })
+    await postJson(app, 'system/plugin', {
+      tool: 'write',
+      arguments: {
+        id: 'selfheal',
+        protocolVersion: 'plugin/v2',
+        endpoint: 'binding:selfheal',
+        auth: { kind: 'platform-token' },
+        healthPath: '/healthz',
+        enabled: true,
+      },
+    })
+    await postJson(app, 'system/registry', {
+      tool: 'write',
+      arguments: {
+        path: 'svc/selfheal',
+        kind: 'tool',
+        description: 'x',
+        config: { kind: 'tool', provider: 'selfheal', export: 'actions', authRef: 'cli' },
+      },
+    })
+
+    const started = (await (await postJson(app, 'svc/selfheal/~authorize', {})).json()) as {
+      authorizationUrl: string
+    }
+    await callback(app, stateOf(started.authorizationUrl))
+
+    // 正常调用一次。
+    expect((await postJson(app, 'svc/selfheal', { tool: 'ping', arguments: {} })).status).toBe(200)
+    expect(seen).toBe('at-1')
+    const callsBefore = tokenCalls
+
+    // 上游作废了这个令牌(密钥轮换 / 自然过期,而我们没有 expiresAt 所以无从预知)。
+    valid = false
+    const res = await postJson(app, 'svc/selfheal', { tool: 'ping', arguments: {} })
+    expect(res.status, '401 之后没有用 refresh token 自愈').toBe(200)
+    expect(tokenCalls, '没有触发刷新').toBe(callsBefore + 1)
+    expect(seen, '重试时没换成新令牌').toBe('at-2')
+  })
+
+  it('刷新也失败时抛原始的 permission_denied(那确实需要人重新授权)', async () => {
+    let tokenCalls = 0
+    const json = (value: unknown, status = 200): Response => new Response(JSON.stringify(value), {
+      status,
+      headers: { 'content-type': 'application/json' },
+    })
+    // 上游对**任何**令牌都回 401(等价于 refresh token 也已作废)。
+    const binding = async (request: Request): Promise<Response> => {
+      const url = new URL(request.url)
+      if (url.pathname === '/healthz') return json({ healthy: true })
+      if (url.pathname === '/~describe') {
+        return json({
+          protocolVersion: 'plugin/v2',
+          exports: [{
+            id: 'actions',
+            profile: 'tools/v1',
+            oauth: { authorizationUrl: AUTHORIZE_URL, tokenUrl: TOKEN_URL },
+          }],
+        })
+      }
+      const body = (await request.json()) as { tool: string }
+      if (body.tool === 'List') return json([{ name: 'ping', effect: 'read' }])
+      return json({ code: 'permission_denied', message: 'token rejected' }, 401)
+    }
+
+    vi.stubGlobal('fetch', vi.fn((input: Request | string, init?: RequestInit) => {
+      const request = input instanceof Request ? input : new Request(input, init)
+      if (request.url === TOKEN_URL) {
+        tokenCalls += 1
+        // 首次兑换成功;之后的刷新一律被拒。
+        return Promise.resolve(tokenCalls === 1
+          ? json({ access_token: 'at-1', refresh_token: 'rt-1' })
+          : json({ error: 'invalid_grant' }, 400))
+      }
+      return Promise.resolve(json({}))
+    }) as unknown as typeof fetch)
+
+    const state = new MemoryStateStore()
+    await runBootstrap(state, { adminSk: TEST_ADMIN_SK, requireAdminSk: true })
+    const app = createTbApp({
+      allowInsecureHttp: false,
+      canonicalOrigin: 'https://tb.test',
+      encryptionKey: TEST_ENCRYPTION_KEY,
+      pluginBindings: new Map([['deadend', binding]]),
+      remote: { allowlist: [], maxHops: 4, allowInsecure: false },
+      secrets: new SecretStoreImpl(state, TEST_ENCRYPTION_KEY),
+      state,
+      version: 'test',
+    })
+    await postJson(app, 'system/secret', {
+      tool: 'set',
+      arguments: { name: 'cli', value: encodeCredentialValues({ clientId: 'c', clientSecret: 's' }) },
+    })
+    await postJson(app, 'system/plugin', {
+      tool: 'write',
+      arguments: {
+        id: 'deadend',
+        protocolVersion: 'plugin/v2',
+        endpoint: 'binding:deadend',
+        auth: { kind: 'platform-token' },
+        healthPath: '/healthz',
+        enabled: true,
+      },
+    })
+    await postJson(app, 'system/registry', {
+      tool: 'write',
+      arguments: {
+        path: 'svc/deadend',
+        kind: 'tool',
+        description: 'x',
+        config: { kind: 'tool', provider: 'deadend', export: 'actions', authRef: 'cli' },
+      },
+    })
+    const started = (await (await postJson(app, 'svc/deadend/~authorize', {})).json()) as {
+      authorizationUrl: string
+    }
+    await callback(app, stateOf(started.authorizationUrl))
+
+    const res = await postJson(app, 'svc/deadend', { tool: 'ping', arguments: {} })
+    expect(res.status, '刷新失败后应抛原始的 permission_denied').toBe(403)
+    // 试过刷新(不是直接放弃),但没成功。
+    expect(tokenCalls).toBeGreaterThan(1)
+  })
+})

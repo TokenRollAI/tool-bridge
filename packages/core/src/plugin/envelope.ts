@@ -42,6 +42,17 @@ const callContextSchema = z.object({
   registerPaths: z.array(z.string()).optional(),
   traceId: z.string().min(1),
   mountPath: z.string().min(1).optional(),
+  /**
+   * 挂载节点的 `providerConfig`。**只发给该节点对应的那个 plugin**(随本次调用的信封),
+   * 插件之间不共享 —— 同一 plugin 部署的不同挂载各自收到自己那份。
+   *
+   * 但它**不是密钥通道**:`providerConfig` 明文进节点记录,`system/registry get` 会原样
+   * 回显给任何对该节点有 `read` 的 SK。密钥要走 `authRef` 指向的 secret
+   * (多字段用 `credentialFields`)—— 那条路是 AES-GCM 加密、只写不读、且绑定时要
+   * `system/secret` admin。
+   *
+   * 放这里的应当是:region / baseUrl override / 功能开关 / workspace 归属之类的**非敏感**配置。
+   */
   mountConfig: z.record(z.string(), z.unknown()).optional(),
   /** v2 多 export 路由:本次调用命中 plugin 的哪个 export。 */
   exportId: z.string().min(1).optional(),

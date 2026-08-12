@@ -135,6 +135,8 @@ async function providerAccessTokenFor(opts: {
   authRef: string
   config: PluginOAuth
   deps: TbAppDeps
+  /** 调用方收到上游 401:不看过期时刻,强制刷新一次。 */
+  force?: boolean
   nodePath: TreePath
 }): Promise<string> {
   const encryptionKey = opts.deps.encryptionKey
@@ -145,6 +147,7 @@ async function providerAccessTokenFor(opts: {
     authRef: opts.authRef,
     config: opts.config,
     encryptionKey,
+    ...(opts.force === true ? { force: true } : {}),
     fetcher: fetch,
     nodePath: opts.nodePath,
     now: new Date(),
@@ -200,11 +203,12 @@ export async function providerFor(
       // (那里存 client 凭证)。取代上面的 secret 解析。
       ...(exported.oauth !== undefined && oauthAuthRef !== undefined
         ? {
-            resolveUpstreamAuth: () => providerAccessTokenFor({
+            resolveUpstreamAuth: callOpts => providerAccessTokenFor({
               authRef: oauthAuthRef,
               config: exported.oauth!,
               deps,
               nodePath: node.path,
+              ...(callOpts?.force === true ? { force: true } : {}),
             }),
           }
         : {}),

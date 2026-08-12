@@ -259,11 +259,19 @@ export async function finishProviderAuthorization(opts: ProviderAuthorizeOpts & 
  *
  * 拿不到(从未授权 / refresh 失败)→ `permission_denied` 并指引重新授权,而不是笼统的
  * unavailable:这不是上游故障,是这个挂载缺一次人工授权。
+ *
+ * `force` 由调用方在收到上游 401 时给出:此时不看过期时刻、直接刷新一次(见
+ * pluginClient 的 401 重试)。
  */
-export async function resolveProviderAccessToken(opts: ProviderAuthorizeOpts): Promise<string> {
+export async function resolveProviderAccessToken(
+  opts: ProviderAuthorizeOpts & { force?: boolean },
+): Promise<string> {
   const tokens = await readTokens(opts.store, opts.nodePath)
   if (tokens === undefined) throw providerReauthorizeRequired(opts.nodePath)
-  if (!shouldRefresh(tokens, opts.now)) return tokens.accessToken
+  // force:调用方收到 401 了。上游可能在过期时刻前就作废了令牌(密钥轮换),而不返回
+  // expires_in 的 provider 压根没有过期时刻 —— 那种情况 shouldRefresh 恒为 false,
+  // 只有这条路径能让它自愈。
+  if (opts.force !== true && !shouldRefresh(tokens, opts.now)) return tokens.accessToken
   if (tokens.refreshToken === undefined) throw providerReauthorizeRequired(opts.nodePath)
 
   const client = await clientCredential(opts.secrets, opts.authRef)

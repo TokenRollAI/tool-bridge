@@ -6,6 +6,9 @@
  *
  * 没有 credentialProbe:五个 action 全是发消息(effect: write),挂载时探一次会真往群里
  * 发一条 —— 探针必须零副作用,这里选不出合适的。
+ *
+ * 凭证是**两个字段**:webhook(地址或 token)与可选的 signingSecret(加签密钥)。后者曾走
+ * `providerConfig`,但那会明文进节点记录、被任何有 read 的 SK 读走;现在两个都在 secret 里。
  */
 
 import {
@@ -23,6 +26,22 @@ export type { ProviderEnv as Env }
 export function createFeishuCustomBotPlugin(): ReturnType<typeof createProviderPlugin> {
   return createProviderPlugin({
     description: 'Feishu Custom Bot',
+    credentialFields: [
+      {
+        key: 'webhook',
+        label: 'Webhook',
+        required: true,
+        secret: true,
+        description: '群机器人的 webhook 地址(https://open.feishu.cn/open-apis/bot/v2/hook/<token>)或其 token',
+      },
+      {
+        key: 'signingSecret',
+        label: 'Signing Secret',
+        required: false,
+        secret: true,
+        description: '群机器人开启「签名校验」时的密钥;未开启则留空',
+      },
+    ],
     actions: feishuCustomBotActions,
     handlers: {
       send_text_message: sendTextMessage,

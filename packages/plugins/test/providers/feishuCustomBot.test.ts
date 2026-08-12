@@ -2,6 +2,7 @@ import {
   base64urlEncode,
   type CallContext,
   encodeCallContext,
+  encodeCredentialValues,
   HEADER_TB_CONTEXT,
   HEADER_TB_UPSTREAM_AUTH,
 } from '@tool-bridge/core'
@@ -11,6 +12,9 @@ import { createFeishuCustomBotPlugin } from '../../src/feishu_custom_bot/index'
 /**
  * 飞书自定义机器人的 wire 级验收。重点在三处迁移最容易迁丢的地方:
  * 凭证的两种形态(整条 URL / 裸 token)、可选加签的算法、以及"HTTP 200 但业务码非 0"。
+ *
+ * 凭证是**两字段**(webhook + 可选 signingSecret),都在 secret 里 —— 加签密钥曾走
+ * `providerConfig`,那会明文进节点记录被任何有 read 的 SK 读走。
  */
 
 const PLUGIN_TOKEN = 'tbp_test'
@@ -19,7 +23,7 @@ const TOKEN = 'abc-123-def'
 const WEBHOOK = `https://open.feishu.cn/open-apis/bot/v2/hook/${TOKEN}`
 const plugin = createFeishuCustomBotPlugin()
 
-function caller(mountConfig?: Record<string, unknown>): CallContext {
+function caller(): CallContext {
   return {
     keyId: 'k1',
     owner: 'agent:tester',
@@ -27,21 +31,26 @@ function caller(mountConfig?: Record<string, unknown>): CallContext {
     traceId: 't1',
     mountPath: 'chat/feishu-bot',
     exportId: 'actions',
-    ...(mountConfig === undefined ? {} : { mountConfig }),
   }
 }
 
 function call(
   name: string,
   args: unknown,
-  opts: { auth?: string | null, config?: Record<string, unknown> } = {},
+  opts: { raw?: string | null, signingSecret?: string, webhook?: string } = {},
 ): Promise<Response> {
   const headers: Record<string, string> = {
     'authorization': `Bearer ${PLUGIN_TOKEN}`,
     'content-type': 'application/json',
-    [HEADER_TB_CONTEXT]: encodeCallContext(caller(opts.config)),
+    [HEADER_TB_CONTEXT]: encodeCallContext(caller()),
   }
-  const auth = opts.auth === undefined ? WEBHOOK : opts.auth
+  // opts.raw 给出时原样注入(测"凭证不是 JSON"这类负例);否则按字段表编码。
+  const auth = opts.raw !== undefined
+    ? opts.raw
+    : encodeCredentialValues({
+        webhook: opts.webhook ?? WEBHOOK,
+        ...(opts.signingSecret === undefined ? {} : { signingSecret: opts.signingSecret }),
+      })
   if (auth !== null) {
     headers[HEADER_TB_UPSTREAM_AUTH] = base64urlEncode(new TextEncoder().encode(auth))
   }
@@ -107,14 +116,14 @@ describe('凭证的两种形态', () => {
 
   it('裸 token 也收(用户从飞书后台复制到的常是整条 URL,两种都该能用)', async () => {
     const mock = mockFeishu(200, OK)
-    await call('send_text_message', { text: 'hi' }, { auth: TOKEN })
+    await call('send_text_message', { text: 'hi' }, { webhook: TOKEN })
     expect((mock.mock.calls[0] as [Request])[0].url).toBe(WEBHOOK)
   })
 
   it('**指向别处的 URL 被拒**,且不出站(否则 webhook token 会被发给第三方)', async () => {
     const mock = mockFeishu(200, OK)
     const res = await call('send_text_message', { text: 'hi' }, {
-      auth: 'https://evil.example.com/open-apis/bot/v2/hook/x',
+      webhook: 'https://evil.example.com/open-apis/bot/v2/hook/x',
     })
     expect(res.status).toBe(400)
     expect(mock).not.toHaveBeenCalled()
@@ -122,7 +131,7 @@ describe('凭证的两种形态', () => {
 
   it('没配 authRef → unavailable 且不出站', async () => {
     const mock = mockFeishu(200, OK)
-    expect((await call('send_text_message', { text: 'hi' }, { auth: null })).status).toBe(503)
+    expect((await call('send_text_message', { text: 'hi' }, { raw: null })).status).toBe(503)
     expect(mock).not.toHaveBeenCalled()
   })
 })
@@ -169,7 +178,7 @@ describe('消息类型', () => {
 describe('加签(可选的群机器人安全设置)', () => {
   it('配了 signingSecret 就带 timestamp + sign,算法与飞书一致', async () => {
     const mock = mockFeishu(200, OK)
-    await call('send_text_message', { text: 'hi' }, { config: { signingSecret: 's3cret' } })
+    await call('send_text_message', { text: 'hi' }, { signingSecret: 's3cret' })
 
     const body = (await (mock.mock.calls[0] as [Request])[0].json()) as {
       sign: string
@@ -235,5 +244,44 @@ describe('错误归一', () => {
     await expect((await call('send_text_message', { text: 'hi' })).json()).resolves.toEqual({
       content: { code: 0, msg: 'success', data: { message_id: 'om_x' } },
     })
+  })
+})
+
+describe('加签密钥的存放位置', () => {
+  it('**密钥来自 secret 而不是 providerConfig**(后者会明文进节点记录)', async () => {
+    const mock = mockFeishu(200, OK)
+    // 只在 mountConfig 里给 signingSecret,secret 里不给 —— 不该被当成加签密钥用。
+    const headers: Record<string, string> = {
+      'authorization': `Bearer ${PLUGIN_TOKEN}`,
+      'content-type': 'application/json',
+      [HEADER_TB_CONTEXT]: encodeCallContext({
+        keyId: 'k1',
+        owner: 'agent:tester',
+        scopes: [],
+        traceId: 't1',
+        mountPath: 'chat/feishu-bot',
+        exportId: 'actions',
+        mountConfig: { signingSecret: 'FROM_PROVIDER_CONFIG' },
+      }),
+      [HEADER_TB_UPSTREAM_AUTH]: base64urlEncode(
+        new TextEncoder().encode(encodeCredentialValues({ webhook: WEBHOOK })),
+      ),
+    }
+    await plugin.fetch(
+      new Request('https://plugin.test/', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          tool: 'Call',
+          arguments: { name: 'send_text_message', args: { text: 'hi' } },
+        }),
+      }),
+      ENV as never,
+    )
+
+    const body = (await (mock.mock.calls[0] as [Request])[0].json()) as Record<string, unknown>
+    // 没有从 providerConfig 取密钥 → 不带加签字段。
+    expect(body, 'providerConfig 里的 signingSecret 仍被当成密钥使用').not.toHaveProperty('sign')
+    expect(JSON.stringify(body)).not.toContain('FROM_PROVIDER_CONFIG')
   })
 })
