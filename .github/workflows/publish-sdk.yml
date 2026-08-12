@@ -46,7 +46,8 @@ jobs:
 
       # sdk 把 core 与宿主中立层 app bundle 进产物,三包 typecheck 一起过
       - run: pnpm --filter @tool-bridge/core --filter @tool-bridge/app --filter @tool-bridge/sdk typecheck
-      - run: pnpm --filter @tool-bridge/core --filter @tool-bridge/sdk test
+      # sdk 产物含中立层,故 app 的套件也是发布闸门。
+      - run: pnpm --filter @tool-bridge/core --filter @tool-bridge/app --filter @tool-bridge/sdk test
       - run: pnpm --filter @tool-bridge/sdk build
 
       - name: Publish to npm

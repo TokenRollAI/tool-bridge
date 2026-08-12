@@ -1,13 +1,14 @@
 # 备注:发布走 npm Trusted Publishing(OIDC,免 token)。前置一次性配置见 npmjs.com 包设置页:
 # Package Settings → Trusted Publisher → GitHub Actions,
-# repo `TokenRollAI/tool-bridge`,workflow `publish-gateway.yml`。
+# repo `TokenRollAI/tool-bridge`,workflow `publish-app.yml`。
+# 首次发布前该包在 npm 上尚不存在,需先手工 publish 一次再配置 Trusted Publisher。
 
-name: publish-gateway
+name: publish-app
 
 on:
   push:
     tags:
-      - 'gateway-v*' # 打 tag 即发布:git tag gateway-v0.1.0 && git push origin gateway-v0.1.0
+      - 'app-v*' # 打 tag 即发布:git tag app-v0.1.0 && git push origin app-v0.1.0
   workflow_dispatch:
 
 permissions:
@@ -37,24 +38,23 @@ jobs:
       - name: Check tag matches package version
         if: github.ref_type == 'tag'
         run: |
-          TAG_VERSION="${GITHUB_REF_NAME#gateway-v}"
-          PKG_VERSION="$(node -p "require('./packages/gateway/package.json').version")"
+          TAG_VERSION="${GITHUB_REF_NAME#app-v}"
+          PKG_VERSION="$(node -p "require('./packages/app/package.json').version")"
           if [ "$TAG_VERSION" != "$PKG_VERSION" ]; then
-            echo "tag gateway-v$TAG_VERSION != package.json $PKG_VERSION" >&2
+            echo "tag app-v$TAG_VERSION != package.json $PKG_VERSION" >&2
             exit 1
           fi
 
-      # gateway 把 core 与宿主中立层 app 一并 bundle 进产物,三包 typecheck 一起过
-      - run: pnpm --filter @tool-bridge/core --filter @tool-bridge/app --filter @tool-bridge/gateway typecheck
-      # gateway 套件只覆盖 CF 宿主那一层(DO/D1/R2/Assets),树本身的行为在 app 的
-      # Node 套件里;产物含两者,故两套都是发布闸门。
-      - run: pnpm --filter @tool-bridge/core --filter @tool-bridge/app --filter @tool-bridge/gateway test
-      - run: pnpm --filter @tool-bridge/gateway build
+      # app 把 core bundle 进产物,两包 typecheck 一起过。
+      # test 是这一层自己的 Node 套件(直打 createTbApp,不经任何宿主适配器)。
+      - run: pnpm --filter @tool-bridge/core --filter @tool-bridge/app typecheck
+      - run: pnpm --filter @tool-bridge/core --filter @tool-bridge/app test
+      - run: pnpm --filter @tool-bridge/app build
 
-      # 开发态 exports 指 src(sdk 按包名消费),发布形态由 publishConfig 覆盖到 dist;
+      # 开发态 exports 指 src(同 workspace 按包名消费),发布形态由 publishConfig 覆盖到 dist;
       # 覆盖只在 pnpm pack 时应用,故先 pack 再 npm publish tarball(npm publish 不认字段覆盖)。
       - name: Publish to npm
-        working-directory: packages/gateway
+        working-directory: packages/app
         run: |
           pnpm pack
-          npm publish tool-bridge-gateway-*.tgz
+          npm publish tool-bridge-app-*.tgz

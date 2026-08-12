@@ -11,6 +11,12 @@ execSync('pnpm --filter @tool-bridge/dashboard build', { stdio: 'inherit' })
 // Vite 插件形态:cloudflareTest(...) 取代旧的 test.poolOptions.workers。
 // 从 wrangler.jsonc 读取 main 与 KV/R2 绑定,由 miniflare 起本地实例,SELF.fetch 打进 Worker。
 //
+// **这套只覆盖 CF 宿主适配那一层**:DeviceSession DO 与 WS hibernation、真实 D1、
+// R2/KV binding、Static Assets,以及靠 env binding 开关的 opt-in 路径。HTBP 树本身
+// 的行为(路由/权限/内容协商/plugin/OAuth/搜索联动)在 `packages/app` 的 Node 套件里,
+// 直打 createTbApp 不经宿主适配器——那批用例过去在这里跑,workerd 并没给它们买到
+// 任何保真度,只买到了启动开销。
+//
 // 测试用 vars 经 miniflare.bindings 注入(不依赖 .dev.vars,保证测试确定性):
 // - TB_SECRET_ENCRYPTION_KEY:32 字节 base64url,secret 能力可用;
 // - TB_BOOTSTRAP_ADMIN_SK:固定 Admin SK 明文,测试用它认证并签发受限 SK(E2E-1 本地版)。
