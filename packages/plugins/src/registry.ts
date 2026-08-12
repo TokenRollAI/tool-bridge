@@ -132,19 +132,65 @@ export const BUILTIN_PLUGIN_LOADERS: Record<string, () => Promise<BuiltinPluginM
   zorus: () => import('./zorus/index') as Promise<BuiltinPluginModule>,
 }
 
-/** 宿主传给插件的 env(Node 宿主常用 process.env;CF 宿主用 Worker env)。 */
-export type BuiltinPluginEnv = Record<string, string | undefined>
+/**
+ * 宿主传给插件的 env。
+ *
+ * **不是宿主的全环境**。进程内插件与网关同权(plugin-in-process-catalog 决策),把
+ * `process.env` 整份递给它们,任一 handler 一行 `ctx.env.TB_SECRET_ENCRYPTION_KEY` 就拿到
+ * SecretStore 主密钥,`TB_BOOTSTRAP_ADMIN_SK`、KV 凭据同理 —— "凭证不出网关"整条防线归零,
+ * 而且没有任何隔离层能拦。这正是那份决策留的未决项「binding 插件的 env(secrets)注入形态」。
+ *
+ * 所以这里定成**白名单**:平台统一的 `PLUGIN_TOKEN`,加上各插件自己声明的配置项
+ * (`BUILTIN_PLUGIN_ENV_KEYS`)。`builtinPluginBindings` 只把白名单内的键递下去,宿主传进来
+ * 什么都不影响 —— 这条约束由代码保证,不靠接线的人记得。
+ */
+export interface BuiltinPluginEnv {
+  [key: string]: string | undefined
+  /** 平台调用插件时携带的 Bearer token(注册时由平台 mint)。 */
+  PLUGIN_TOKEN?: string
+}
+
+/**
+ * 各内置插件声明的**非机密**配置键(除 PLUGIN_TOKEN 之外)。
+ *
+ * 加插件时若需要新的配置项,在这里登记 —— 没登记的键不会被递进插件,即便宿主环境里有。
+ * 机器迁移的 provider 一个都不需要(它们的配置走挂载的 providerConfig 与 authRef)。
+ */
+export const BUILTIN_PLUGIN_ENV_KEYS: readonly string[] = [
+  // feishu:官方 MCP / 换发端点的 override(测试用)与工具白名单。
+  'FEISHU_ALLOWED_TOOLS',
+  'FEISHU_AUTH_URL',
+  'FEISHU_MCP_URL',
+]
+
+/**
+ * 从宿主环境里挑出允许递给插件的键。导出供测试直接断言 —— 这条约束是安全边界,
+ * 得能被直接钉住,而不是只能从行为侧间接推断。
+ */
+export function narrowPluginEnv(env: BuiltinPluginEnv): BuiltinPluginEnv {
+  const narrowed: BuiltinPluginEnv = {}
+  if (env.PLUGIN_TOKEN !== undefined) narrowed.PLUGIN_TOKEN = env.PLUGIN_TOKEN
+  for (const key of BUILTIN_PLUGIN_ENV_KEYS) {
+    const value = env[key]
+    if (value !== undefined) narrowed[key] = value
+  }
+  return narrowed
+}
 
 /**
  * 组装 pluginBindings(binding 名 → fetch handler)。返回 Map 与 gateway 的
  * `PluginBindings` 结构兼容(此包不依赖 gateway,靠结构类型对接)。
  * opts.include 给出时只装配指定子集(CF 宿主按构建体积裁剪集合)。
+ *
+ * `env` 会先经白名单收窄(见 `BuiltinPluginEnv`):宿主可以放心把整份 `process.env` 传进来。
  */
 export function builtinPluginBindings(
   env: BuiltinPluginEnv,
   opts: { include?: readonly string[] } = {},
 ): Map<string, (request: Request) => Promise<Response>> {
   const names = opts.include ?? Object.keys(BUILTIN_PLUGIN_LOADERS)
+  // 收窄一次,之后每个插件拿到的都是这份 —— 而不是宿主原始环境。
+  const pluginEnv = narrowPluginEnv(env)
   const bindings = new Map<string, (request: Request) => Promise<Response>>()
   for (const name of names) {
     const loader = BUILTIN_PLUGIN_LOADERS[name]
@@ -153,7 +199,7 @@ export function builtinPluginBindings(
     bindings.set(name, async (request) => {
       loaded ??= loader()
       const mod = await loaded
-      return await mod.default.fetch(request, env as never)
+      return await mod.default.fetch(request, pluginEnv as never)
     })
   }
   return bindings
