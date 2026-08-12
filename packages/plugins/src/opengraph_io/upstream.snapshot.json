@@ -1,0 +1,31 @@
+{
+  "service": "opengraph_io",
+  "displayName": "OpenGraph.io",
+  "authTypes": [
+    "api_key"
+  ],
+  "migratedFrom": "open-connector",
+  "normalizeVersion": 1,
+  "actions": {
+    "extract_site": {
+      "description": "5c90e269983a0cb147312b3b44503a14d60f67936eda44c13ace5b5770a91c4c",
+      "inputSchema": "4448c5b8ccbcf7e49ab7b1419829ee5756e653374a76f2453e542529396b1bb2",
+      "outputSchema": "55f3b3d9fcb09e51984f2d5f2caae863ccc8abc9811073f870d923d554f3dd12"
+    },
+    "scrape_site": {
+      "description": "7c0e0210229edcd0416af5a4a21fd9987927951facfe557f287e686bfdc6f779",
+      "inputSchema": "4b9b24732ecf1962959f3bd9b2f514a361d0752814c118fd0885b779989bae6d",
+      "outputSchema": "55f3b3d9fcb09e51984f2d5f2caae863ccc8abc9811073f870d923d554f3dd12"
+    },
+    "scrape_url": {
+      "description": "7217f3e9e040be02c71ebfbdc37d86218008de8a9a81ff2d6835e689cec5e57e",
+      "inputSchema": "150cf5dd98e673551c07221828a1086f503a46cfa1a47ea6d089948337a0a4da",
+      "outputSchema": "9eace479b8ea844b020ed7c2b9cccda2e909816188934006bcacb704e38e2b23"
+    },
+    "capture_screenshot": {
+      "description": "5ed69d1e66c9a2f46cc28122129d636111dab78fe5c8a994e27f95b68bc7ef16",
+      "inputSchema": "9c34aa8917a926fb9b1662a1a9053790bda5ae719070e91f4fc585ffb4250112",
+      "outputSchema": "d3e2b39af186df37e81270eb155238922fe7a9706717d975f4880cc3405860a5"
+    }
+  }
+}

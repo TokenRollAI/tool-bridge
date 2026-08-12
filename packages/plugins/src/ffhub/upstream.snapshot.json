@@ -1,0 +1,26 @@
+{
+  "service": "ffhub",
+  "displayName": "FFHub",
+  "authTypes": [
+    "api_key"
+  ],
+  "migratedFrom": "open-connector",
+  "normalizeVersion": 1,
+  "actions": {
+    "create_ffmpeg_task": {
+      "description": "6ab187e29e54cabcc6d917f651eb91d9b7f9a9928d10a7537d392dd44ba4667b",
+      "inputSchema": "3e78fbeeba34cd75cf57d488213c2ee577ab3c8ff47a234ffd6de74a70949221",
+      "outputSchema": "b932480281d4ea6a4bc2fe0a540fa1a7e9857b47bc4787b255cfafbee587a973"
+    },
+    "get_ffmpeg_task": {
+      "description": "705c458e616f44e95bfd32ec24a0860ae7567527f94c8400f3a381d377102a16",
+      "inputSchema": "ddccaf457157dc1d336f08c6c0e04a66e2ff1536c0730993647015dac3bde8a5",
+      "outputSchema": "e8871e89acaa456bede813d1e66511d4a7cd65c3c65d35fe087ad11153fdbf5e"
+    },
+    "list_ffmpeg_tasks": {
+      "description": "cae8608f1b9440a6304822b194b34d00784f5d0b781f3da82b33550b74ea47ad",
+      "inputSchema": "0e52ddfc6b494e7ae5ebfda475c6822a015788bca4eddccede9422b92c51f0c1",
+      "outputSchema": "925996fb4140dde8e2a3f39054b69dd93dcd6ee05f1560800b1f9fe8a839f1d0"
+    }
+  }
+}

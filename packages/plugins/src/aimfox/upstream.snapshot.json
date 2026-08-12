@@ -1,0 +1,66 @@
+{
+  "service": "aimfox",
+  "displayName": "Aimfox",
+  "authTypes": [
+    "api_key"
+  ],
+  "migratedFrom": "open-connector",
+  "normalizeVersion": 1,
+  "actions": {
+    "list_campaigns": {
+      "description": "53cccb56bb075734c8f2ff60f8a484e051190af83f81683f5ad0086ff4a5a269",
+      "inputSchema": "2fff4fc90bfb6477ceda13fa974daf88e428787b89e6f5057c563ad0304d63a2",
+      "outputSchema": "535dca90e845b7a78632f242292aa6745e4369cb2875b4d034caed5e91f20ca0"
+    },
+    "get_campaign": {
+      "description": "6e7ca8bedb7557baf19061398795fd46709f8f2a5596f015431a3e5bf4bcc800",
+      "inputSchema": "ee2413ff29d036d0127276c6cad1241ca15da8fdb80ddcf7575d0ff020b57167",
+      "outputSchema": "94a0a063b6762c64d7c379d9caffc379e4d34946ef919e9fadabd1f2218a18e7"
+    },
+    "get_campaign_metrics": {
+      "description": "f1e979a458cffd9d19d6c9c537843cdc3c7c61b1b101ec23e8b01c9c448bdd1c",
+      "inputSchema": "e85211b6c66ae332f9d224219c050348a3784c538a81b5cf1851ba4d4944778c",
+      "outputSchema": "d07ea360aa4a9202134aed4e849d1dc54aa32b2391d833a8171db1fd9932cbb3"
+    },
+    "add_profile_to_campaign": {
+      "description": "bdf60c9759ce62bb30c4ee98ce459c7e65debd4c5c4691133c67b607549e07e1",
+      "inputSchema": "f9326c225462ca50a23452c86f4a93874d432db119026e519dc0a5348116eb24",
+      "outputSchema": "484f6302880bc593a7d93b99fb2e39177b4652fd47dc4616a48d5a576acb944c"
+    },
+    "remove_profile_from_campaign": {
+      "description": "100970b54e639e7bc389c6f7a3fa56a133c896fe64fa89fcd3ee9a0c1f2314d0",
+      "inputSchema": "6746e69e935b0bb30a7c592de13bd525ad5d3f9ce7186189dddf2f8d4295a367",
+      "outputSchema": "5765178cfd41043dde7d655c5bc0e25802c2242970826c34d51219c6438cb08f"
+    },
+    "get_lead": {
+      "description": "b5f0c5b476e1ba06409a9b01cf222604606675c138c4cb3538243cb356dfbf21",
+      "inputSchema": "c3047e7c575e96e2ed8fbc3fb66ac95a74fd8e94b6e65e0d9102e312f8d62203",
+      "outputSchema": "00d00f217c76a1fbeef057591b45ec9fd26684fd376aa6fdfec0a2290c98585d"
+    },
+    "search_leads": {
+      "description": "f1e3d9e110c286bbf1af9c66febcfa8260120ccf612e3e91eb86771584170a46",
+      "inputSchema": "71e93976a2a6374dfed57a343444c74a9f77d0498b4f09e2e7c24f16cdc3e514",
+      "outputSchema": "69fab8ff2fd1a9630116d85de74dab2c0199d6d14649a2219258068db72b9f26"
+    },
+    "get_total_leads_count": {
+      "description": "f78b4ce1d3fe782fc795c18fca10c463a2312deba45bd2fddb8dfd92afc86ec7",
+      "inputSchema": "293e311c3246bb9b5f60547d14c8d51761a463cd624a7b0fed536072c3f0182b",
+      "outputSchema": "057499b61e239e393dc19c6dbce2d4ed3ff322a1369588f078c86f958e0ca287"
+    },
+    "list_recent_leads": {
+      "description": "9b98b4e803e5b8af1ae4c201d72a258396aba868c1cd7f92917a472bee57e839",
+      "inputSchema": "766ca6f95ed3e75df8066d76c927270f873f65c08a7da4b79f1db236c26fecfa",
+      "outputSchema": "29b19e8e82757f8af2edc9c300343688b48443d7b7cd0aaf48bbb50b3a1d51ee"
+    },
+    "list_interactions": {
+      "description": "34378b46985fcb118832c0050f20f767109d6705b7282d4c624dca89298bcef0",
+      "inputSchema": "900781450d91b7c1780e12a02b231b6e544f576709fc84e38de8a5b659a1d7b8",
+      "outputSchema": "0c4b1e87d32df9fd469c89087e6a0b24feec4212096433e07680f045ef6055cc"
+    },
+    "list_workspace_labels": {
+      "description": "74a13de2590e9043be3aba5f61ce0a7a5837086b332eb23b02fe8acfdb191dd2",
+      "inputSchema": "d6b7fb5422cd5dcbb096bce563bf5b2ff6e692f6933450a821aabb68901910cf",
+      "outputSchema": "ee962b0e1a48d643f8c4e1330533f5b89b9d1695f8cc382c1b458c92facf6326"
+    }
+  }
+}

@@ -1,0 +1,51 @@
+{
+  "service": "circle",
+  "displayName": "Circle",
+  "authTypes": [
+    "api_key"
+  ],
+  "migratedFrom": "open-connector",
+  "normalizeVersion": 1,
+  "actions": {
+    "get_community": {
+      "description": "2e70849f7b36d945658c3bb489a39b8d0910e32ce00f132df849a681ca4b37e7",
+      "inputSchema": "575921890330d326432ff6f608170cf2b25adb9e928599d91616d97edbe9d1a1",
+      "outputSchema": "42fa8c21abca16fa98a0d5cea14927ec31044bf1ca4170a3786179057a3ac1e6"
+    },
+    "list_community_members": {
+      "description": "0fe6b56655c813e1b16efb24d8ac0bf30635820735582954683095ed9360b511",
+      "inputSchema": "04664fa50cc04a3caf5da783e2385af5f694dabe84717b364f72e2e21ff86f54",
+      "outputSchema": "e1e6a54f940004843c1d591a104425e76346279ec6439b3f151b729667d59c23"
+    },
+    "get_community_member": {
+      "description": "b10cbb25adaca3cb2dcd68b01983ec161c36f29e5b6e8cfb1d9ecef4569fb786",
+      "inputSchema": "c43add53fc48f3453ce9409774a0a33e884c8aa7744141d0fded7a11c0590af7",
+      "outputSchema": "bbd91d99082ba9f9a93386fb4dbefaf80a3cd9f5aa26f47b7a3513bd204f03c6"
+    },
+    "list_posts": {
+      "description": "401defcb3792875ef728640b9ae08f98f2bea67ce101f90e257ec3598309d561",
+      "inputSchema": "8e80f6b8390d8cccdf9ac0c8c34ce880a6d76a1447171718e1add45c25f2794c",
+      "outputSchema": "53c8149284dc261a9d2c74207b8f65a732fa6e60488f80d1b786da19b84aa566"
+    },
+    "get_post": {
+      "description": "ad4c876f27195885d4f4e4fc6bdbb5b4ba08587a8de2bef886ebe5f7589dce93",
+      "inputSchema": "2441e993f4220f32281fa17af21199e9ad0daa52b88bf8357944ef7c6bec6d68",
+      "outputSchema": "61d93c5ca947a9395888958bbda4bf54c93dfe6efa2861b9dd67d701f9e35d56"
+    },
+    "list_space_groups": {
+      "description": "e37e4d326d90b004ca57bf1392ba626fb4e315ff86173e97d76a86643f3d4cef",
+      "inputSchema": "86e1b7db23440c4343bc0d1126a86a6d9ccd8a1ebff9993e36949e80fb9e6a48",
+      "outputSchema": "a127dbef6a929a9a032cf1f6efd4f167bf5adbb390dd78d124c75535da1945cd"
+    },
+    "get_space_group": {
+      "description": "af58eb82a17ccb8b03755000eb85469d4cdd30f0a7bd0934f20c59adfd6b54fa",
+      "inputSchema": "08990bc0deae927292c57f32bd8eef9359b6310c26f539e757e43ddd82e55207",
+      "outputSchema": "a262d5ca58addf9bc437cf08760638b338320bebe460b72e2fe08677be16881f"
+    },
+    "list_space_members": {
+      "description": "e96a96520dea64696f3796aa5a32587a94ea0780e9b1bce4f61bdbe8208a673f",
+      "inputSchema": "2da9ee66ccbeb214bec0962cea6511d465c950685e26bfb2de8b0102797cbba1",
+      "outputSchema": "b65342721d6abb7783ab4a4c361351ec6368c546926cdfeb5c143b737c03fcad"
+    }
+  }
+}

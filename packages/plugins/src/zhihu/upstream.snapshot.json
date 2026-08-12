@@ -1,0 +1,31 @@
+{
+  "service": "zhihu",
+  "displayName": "Zhihu",
+  "authTypes": [
+    "api_key"
+  ],
+  "migratedFrom": "open-connector",
+  "normalizeVersion": 1,
+  "actions": {
+    "zhihu_search": {
+      "description": "1aa08a1a5b180c09ea6fbe35f2c34d72fea086aa82593901b84e1e15ac4400c5",
+      "inputSchema": "38c8d687f4ced144baa2bf9cfc1771eca101f290c85d488f644c6f145471fd4e",
+      "outputSchema": "fadb4100447e78e7a047e91abc7f45161b492fc1a05fa2acd68782e4d92fc8f2"
+    },
+    "global_search": {
+      "description": "a15371feeeb049de445179d7a8f0862a826834b37e1e26a19b46a55f7b20a9f8",
+      "inputSchema": "fdaea196dc59bfea59b4cf314f8c43edc196b71db4cc99024690ece339b97b12",
+      "outputSchema": "5473d5621082ac9ae4328b1d00df4e05929cb71ce2af9b93625d357de42efdf9"
+    },
+    "hot_list": {
+      "description": "e6cd4157dd596c3f539a7fc04c2026b4734f6d9725f3badfb24845c465f52d3c",
+      "inputSchema": "80c6336b6d1921ace0a6953f11fa7ae373a291f7779a139e489e4960cdec729c",
+      "outputSchema": "208d91dc7bb0e79c8fe7870798879047991bcca58e61f617a42351685f6646b7"
+    },
+    "zhida": {
+      "description": "386b05bd927daa753793943078ec8cdd228f0d243a70fbc4b1686c8bbafaef44",
+      "inputSchema": "36d5e7ccf939fb81149383cda153d10bab7dbd9522ec539d9cfa81daa93e34d5",
+      "outputSchema": "9bc2640e5f1888d4275986291ed1e1571785c245377c37871497ba2ccb4c7763"
+    }
+  }
+}

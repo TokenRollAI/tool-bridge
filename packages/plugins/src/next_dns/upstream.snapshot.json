@@ -1,0 +1,46 @@
+{
+  "service": "next_dns",
+  "displayName": "NextDNS",
+  "authTypes": [
+    "api_key"
+  ],
+  "migratedFrom": "open-connector",
+  "normalizeVersion": 1,
+  "actions": {
+    "list_profiles": {
+      "description": "6016b821c7fd10102e49170bd8ba479d4515516d85991c92c333fa9a7bf79142",
+      "inputSchema": "4ba79700b362693ec5cf40bf89d565d783ea8118bc8a8f8e7e438a3aff73b0e5",
+      "outputSchema": "5b8971c306cca25087aaedaec6f9769037e07e49d0cf7d249fcdecd8dcb9e076"
+    },
+    "get_profile": {
+      "description": "c16efcc6116445e1975147e0f85d67dbc0f73a60db63e847f8c77d05cbed68cf",
+      "inputSchema": "36e3f6ed320a702a728b32bded2b72e836880d127eb59fc4c2d81454ab6f5db8",
+      "outputSchema": "604224aa4c23610e3f0837a1a8a7abeccc90d7442057efa32b7fec70a5881651"
+    },
+    "get_logs": {
+      "description": "b58507eb08b50c2369f719affc5730bd81d04fe10890f96fe199975495f5c207",
+      "inputSchema": "65ea49be58448f085bd1dcaebc1c7d997a9fc7902b3f36d7718a910091cb671c",
+      "outputSchema": "0b93b2921ca55b66ebd9cca1434215d946e4ed534a5b80f867862dbd8dbecde0"
+    },
+    "get_analytics_domains": {
+      "description": "a2e43f1b70d36a308f4709071971934b8be11e1bb75b7cbceb602ff922a471da",
+      "inputSchema": "ca333bae01efd53af55926283ffdd5625075172efa880e3ade0d78f2b2950b90",
+      "outputSchema": "66e2a99d3aa9b993c9d79e6caab6f3c6afcf806f65ffc976137b35f7626badcb"
+    },
+    "get_analytics_devices": {
+      "description": "db1c152215298c46d3e9338e21f395234aa7ae08cb11058cada895e0bd10b642",
+      "inputSchema": "a3b18a6ebc12a25ea3ce1b294f58ce7a919f39579ea25da875b4a93d90aeb0e3",
+      "outputSchema": "047cdd8e4f471337a804be39c30483aa8b39dd71415b0987c87ba0a533371289"
+    },
+    "get_analytics_status": {
+      "description": "07682feac6bea3d5c7d17d04e41a81974b88f9d20812b069f231c32c5cdd82af",
+      "inputSchema": "a0971c80dff94abda39564879f93a9aa7b237e6b641c91d31d25b91cfc7fb268",
+      "outputSchema": "1cf4c1dc326bcbf14bded0ef3e146af677c0a507860dcc9874debe922dd9edc6"
+    },
+    "get_analytics_reasons": {
+      "description": "3e45293402660381a959592a62966cbe69c4daa1414f8a2f74eb4394b6a12742",
+      "inputSchema": "6fbf81b55c4ab6b5c2f0ff676d4be357262b0511868b46b25feb93e772e64c2e",
+      "outputSchema": "4491aee150cf7346a3627d9a15338d09632e0ad3b4db815faaecf611eb24f840"
+    }
+  }
+}

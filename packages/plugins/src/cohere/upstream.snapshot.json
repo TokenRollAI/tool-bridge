@@ -1,0 +1,26 @@
+{
+  "service": "cohere",
+  "displayName": "Cohere",
+  "authTypes": [
+    "api_key"
+  ],
+  "migratedFrom": "open-connector",
+  "normalizeVersion": 1,
+  "actions": {
+    "chat": {
+      "description": "473e96064d7bb329cacf152d24041e1039164d801a220b42e7d9dd237b9aca51",
+      "inputSchema": "d36a54f959e64adc85aa14ef211d753cc40379ef108bef446c84a747c06bac37",
+      "outputSchema": "c137f9f6cc43fb0494902741c717656e28ca00f30365b4c9c93cd0993f05d1d7"
+    },
+    "embed_texts": {
+      "description": "ba15cce31ccb5b9f3d8e6ceaa557704db2118ee1ee317f619418306493fa95da",
+      "inputSchema": "14989c81c7e443eacd485d90ba020b19b6eb51b28a90ebb88339edb7904c34fc",
+      "outputSchema": "f7e5d6eaa4ffec65f239a0e972b1c247707c177eb4e14fe603476eef6632852e"
+    },
+    "rerank_documents": {
+      "description": "63e689c66b6563e5861b3c86313d8ff1fb1ba9ccd075e211289f43d06b57e739",
+      "inputSchema": "9ddd3177aaba157360ef133dd5e4b2e0edbb1f779a13bca8f4a296375e6e63ed",
+      "outputSchema": "7f6bf5e2e8d7c36d8f69efa4d07047fbd4517da880c24eb3829f3643586fa30f"
+    }
+  }
+}

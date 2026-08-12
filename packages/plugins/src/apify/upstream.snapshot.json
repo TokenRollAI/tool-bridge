@@ -1,0 +1,36 @@
+{
+  "service": "apify",
+  "displayName": "Apify",
+  "authTypes": [
+    "api_key"
+  ],
+  "migratedFrom": "open-connector",
+  "normalizeVersion": 1,
+  "actions": {
+    "get_current_user": {
+      "description": "410e6d97585033528aa0d8c5f9fac6adc3697d44ae1dad5e1d34c45737c32a31",
+      "inputSchema": "ad92dca474a97e4c9d10896acee233de6636240842ab10c156d29a9e40d7f325",
+      "outputSchema": "fd54e8ade504d9e4ca91b89c9e79574f45733de883692860304c5548a19f7bd1"
+    },
+    "get_actor": {
+      "description": "d01376f399a02ff4c1cc8084acb2c5c6a2893278613d645dbcc29d9a424e94f7",
+      "inputSchema": "a0740366ab386d96fc010d3dfe57bc308b832badb8a16892bb87651e2274967b",
+      "outputSchema": "6e67fc06d4571d5fc6a72f0ae13790636b2d26190ca87cc18f1573c07e8d5839"
+    },
+    "run_actor": {
+      "description": "993bc137d1b0ef02375e7d4e7174b082c1f4b7253c58b5f03c39557d6a750af0",
+      "inputSchema": "b53b002b0715ad8f899847b37a5468fea54de5439e7613d3e78f4463af32b772",
+      "outputSchema": "d38cf4ebf158292fcfdcba6e9dcf95174a917db0e139d63ed868fc7a322fff93"
+    },
+    "get_run": {
+      "description": "0813783ae0fa31cec6babb7bdceef7c992e7b48955ac65754607e3a890003ff1",
+      "inputSchema": "e9d91729f19e0fc43d41a9ac03a5b8f22b0876e404d6777479599c10ff157c89",
+      "outputSchema": "fde0beb520a4d4d37644eb32078914187f1d6d51d6e3dccbee8c14f3b1df30ed"
+    },
+    "get_dataset_items": {
+      "description": "b58dac5b965d1cdc597c44ffc4b872dc474cf6b2bc2fda79e8d062a2d6415fd7",
+      "inputSchema": "16ccb69385f62b71baae198070bc66a1a18c5151328821658cde6aa37974ddf8",
+      "outputSchema": "2273e152c448c5fc7a01caf0cdf7e8dc772fbf9ac567014dfb599d49b5813ae4"
+    }
+  }
+}

@@ -1,0 +1,41 @@
+{
+  "service": "leiga",
+  "displayName": "Leiga",
+  "authTypes": [
+    "api_key"
+  ],
+  "migratedFrom": "open-connector",
+  "normalizeVersion": 1,
+  "actions": {
+    "list_projects": {
+      "description": "18d03ea6442c43cb65f0b5b29a7485e7fb7021d952f0d7ffd99f72e03cea5f54",
+      "inputSchema": "39d876eaa7a05c734340dd884eb8a3c715766ca42e5d4dab0418a37bc60732a1",
+      "outputSchema": "4c2f8ffc174b45d346baca712d75a76be970ad05bdf9e2ef2900fe7ba7a4c308"
+    },
+    "get_project": {
+      "description": "c7c15230ea86dfe2cd68d680511a1af755843b8aee9fc58488d7754413a79e54",
+      "inputSchema": "3af77861126404faaa0b82cf58887646ca1ecea22c52bfa1861f1c8c1f65f3b0",
+      "outputSchema": "a719d09a7e59bbb9e2c8a7a68c77d79cca7b6badfd19d17b97c4a56a4ddfa43e"
+    },
+    "get_project_by_key": {
+      "description": "300ab53d800c82ff6e8a343ceaf3ba12f85377938148624d91d56e2a74bd6029",
+      "inputSchema": "ab90849a692627875b20aa6c6f19ae96c020c01b9107b1d79a781ea0404b4809",
+      "outputSchema": "59e943d514140fb38bac163da7eccdaf265729c8cc3181a811621e0f586e6f17"
+    },
+    "list_issues": {
+      "description": "cace31e7ff31b01cd4a5eb5127787f0eb4e818a051c6eb120209ae9e37d1aacd",
+      "inputSchema": "7cd7202e695eea60dbfc640e8264a0f4874fd1c8b2add462b370891ba068b61d",
+      "outputSchema": "edfdd899d2510962d3dbd1e47d6054d58c2d7f6c788ec0490d5ddb25287c75aa"
+    },
+    "get_issue_by_number": {
+      "description": "574d9fd9f81dbf28b00f9b91478d1908de4ee7a3207e84ed02854caee19ec549",
+      "inputSchema": "6785d8ebd32d8ec4cecfc341c545f3abade73e9d575e21e90bf84e03c19ff3f6",
+      "outputSchema": "9c57c862da656c7f298395f2bb47a23cf3e93bed9e09dddca15b0fc8abe55d41"
+    },
+    "get_issue_schema": {
+      "description": "e95a4cb0ff0e46108bc07f619f433f3cfc83630ab1cc41c2a2f255e705746531",
+      "inputSchema": "198140f3e61083481c774143d986db13102a0087f00f5b55180d8daa867cdb83",
+      "outputSchema": "74b277c2b306d8582a98924cd34b24f57f4165543536aea590fd0f1c561e7be3"
+    }
+  }
+}

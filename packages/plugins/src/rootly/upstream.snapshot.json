@@ -1,0 +1,36 @@
+{
+  "service": "rootly",
+  "displayName": "Rootly",
+  "authTypes": [
+    "api_key"
+  ],
+  "migratedFrom": "open-connector",
+  "normalizeVersion": 1,
+  "actions": {
+    "get_current_user": {
+      "description": "18ff916797777a5fe9541209341d55b5ca7ca3a6997d1bb8bc1bf8632489a156",
+      "inputSchema": "9fdfabae1c62f2f17d00763afe3b88cad7df5b7f1defbd32555f61c02fd83e2f",
+      "outputSchema": "fffacad32349d1560d91891badd211f6f29c273fcc2e939df145c277fb3a0fa8"
+    },
+    "list_incidents": {
+      "description": "0dd35c482630fbe3ad42c995152d9bfac97b73a2b389f223da0722a54dfba7ba",
+      "inputSchema": "bb7a15e071e5f525a8d5d295fa7948bfabd94ad3b26f7e247325727a6c1273df",
+      "outputSchema": "6d4d143a1c2b0d2a42fc770f0d6266d9ce19043daa84cc70a1567a62f2594b8a"
+    },
+    "get_incident": {
+      "description": "d93a736d4423b4f1580590127aa743ae6a60bd4084a1aab4a6e20f43a914a6c7",
+      "inputSchema": "df17cddbf8ed7669b2963121404c4dfb911f879ca02ff3c8d4e3f110e0d3abbe",
+      "outputSchema": "fffacad32349d1560d91891badd211f6f29c273fcc2e939df145c277fb3a0fa8"
+    },
+    "list_services": {
+      "description": "9111b7376397084d7e16addb60f4f11a6247f3677135cf73ada3b50620288f79",
+      "inputSchema": "57598a03b244dab54fc76e9982f1580fdd5a6225949fc9994b1d71a36e44c145",
+      "outputSchema": "6d4d143a1c2b0d2a42fc770f0d6266d9ce19043daa84cc70a1567a62f2594b8a"
+    },
+    "list_teams": {
+      "description": "898d96dafeaa4db2822930d3952927d915ab65f1600ce6492399bcfa1430d386",
+      "inputSchema": "b5bef3bbf8a0758267dc509edaedb7ee013e459976508f78d474d31f9f3b4e4d",
+      "outputSchema": "6d4d143a1c2b0d2a42fc770f0d6266d9ce19043daa84cc70a1567a62f2594b8a"
+    }
+  }
+}

@@ -1,0 +1,31 @@
+{
+  "service": "prerender",
+  "displayName": "Prerender",
+  "authTypes": [
+    "api_key"
+  ],
+  "migratedFrom": "open-connector",
+  "normalizeVersion": 1,
+  "actions": {
+    "recache_urls": {
+      "description": "92e0b0f788dabada7a590e125bcb426769c784c03d2925a59fb8c82c49604930",
+      "inputSchema": "e96f591b255653badd80eb8e1089c1504c35fddd4560cc52390a374e412c14dc",
+      "outputSchema": "f83005e39b8ea7ad4d4992ec4b02edefa1b52959841ae67bc85cf5d2c3dadd24"
+    },
+    "add_sitemap": {
+      "description": "b8ef267afc5e533af3a835552f608195b3c4cdc607ec9cf2576b238dad9bc4ab",
+      "inputSchema": "d7a185e9a533e6a79f32eda8351dcb3e90d1e75377db1bf7970c009dd00345ee",
+      "outputSchema": "f83005e39b8ea7ad4d4992ec4b02edefa1b52959841ae67bc85cf5d2c3dadd24"
+    },
+    "clear_cache": {
+      "description": "eaafc3bd6f0cf997fa03e538b0db083a7c509ea49dd01f93013cec4231607bd1",
+      "inputSchema": "ad45b94afc01a2a27bd033ef1a615e41c0fa2e88de48ca4b2a4211c0b4fedb2d",
+      "outputSchema": "9733d1e4542eabb5449f75d7ecfb595440037099e70e54b8f2b292e6de97a12d"
+    },
+    "get_cache_clear_status": {
+      "description": "70084039abc4366c744d4b348bc9bd8b3caf203d560d4e05fc0d1ea4396091c0",
+      "inputSchema": "f23660e95c6a9b067778d3849b69cc47d923ce82190fea0e398ea061b547f655",
+      "outputSchema": "64e03c962e16df0d998488ebb20b99221882d3700bf7d88250fc5f8957bd26df"
+    }
+  }
+}

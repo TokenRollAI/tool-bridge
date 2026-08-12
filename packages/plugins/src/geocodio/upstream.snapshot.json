@@ -1,0 +1,31 @@
+{
+  "service": "geocodio",
+  "displayName": "Geocodio",
+  "authTypes": [
+    "api_key"
+  ],
+  "migratedFrom": "open-connector",
+  "normalizeVersion": 1,
+  "actions": {
+    "single_geocode": {
+      "description": "f53ec0496f2a5d226face1fdefc6648dd7a400a9d9fc8fe2d300c9cbb2b2eefc",
+      "inputSchema": "daddbba4584ce0669d3d4de459a6bf9a59d94a9cf92659348b5bc1c17f63648f",
+      "outputSchema": "48d12a586148a887a99107cdf42a9c57777d24289d8ce8737e218b8a1b24b83a"
+    },
+    "geocode_batch": {
+      "description": "d7c4ef2ff5b67f41d482b2374c9f8d571f3a8c7e0c73f3090b7661770ad03807",
+      "inputSchema": "35e83b63ab9714cf01fc647cdbb601083bd1ef2ef560b5d8fcda79d63419a339",
+      "outputSchema": "c37af23b8eaf7d4b61b5be0ae0be2b589c4cde76163228b58c9f124eb42b7995"
+    },
+    "single_reverse_geocode": {
+      "description": "85b032264303668d13f05d148e3e4be3c16f5568136fd822246f63ae9714fd1f",
+      "inputSchema": "a0f54182f0529a19ec6855d9b03b7c3671b7d6d69813ac7e028035b9bf8bdab1",
+      "outputSchema": "48d12a586148a887a99107cdf42a9c57777d24289d8ce8737e218b8a1b24b83a"
+    },
+    "batch_reverse_geocode": {
+      "description": "7552a2460ddc359b72360412df474c7a53e6ef54d0c502e0ea6f8fe027b59b81",
+      "inputSchema": "7aa840a5f6fa3e6de62941e47718a19f1354c09771f2aa47e99c30f072eb5e49",
+      "outputSchema": "c37af23b8eaf7d4b61b5be0ae0be2b589c4cde76163228b58c9f124eb42b7995"
+    }
+  }
+}

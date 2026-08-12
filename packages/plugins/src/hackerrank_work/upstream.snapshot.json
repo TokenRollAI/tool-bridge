@@ -1,0 +1,36 @@
+{
+  "service": "hackerrank_work",
+  "displayName": "HackerRank Work",
+  "authTypes": [
+    "api_key"
+  ],
+  "migratedFrom": "open-connector",
+  "normalizeVersion": 1,
+  "actions": {
+    "list_tests": {
+      "description": "de8e337f2e76b2c568429798cd1c8a5bdea3821d88ececec1e8b4db618775b6f",
+      "inputSchema": "6fe71da96c0228cd53ddbe0b915f944cdda5f2988c39c9ec6977ca8c1cf00e04",
+      "outputSchema": "64354108d6db0e5d996ebe7ce7214e66a1be5d3072b3aa2538cc7c54fd6eaae6"
+    },
+    "get_test": {
+      "description": "2f163395e24c4f30e5d8e0bf5cb1d1e4506922ee83b06746d38524c98412fdb4",
+      "inputSchema": "0afcc0df2735d0b2ba4c2cd00a3ca4b8fe21e0eb14f71a8d60b192663cf9cea4",
+      "outputSchema": "0e457209152bcbb63b665e88dc90219c57b644b53e988ea05659e26d90709fdc"
+    },
+    "list_test_candidates": {
+      "description": "3ed4f24673a0377e3d1890b841614b6af45878318ae5907690d692e741486e5b",
+      "inputSchema": "e321d0ee6a24662a35bca334c998dc6566ce41e70384a211cb6237ae362588f0",
+      "outputSchema": "e0393842762ecc880917a83648f76e871df6b3cd46c7d0f33b33f264edf41e4b"
+    },
+    "search_test_candidates": {
+      "description": "20d15a05fad6299c724cc142eaaf5e91fc81a92d96df76cf39c6cfd95056f6b3",
+      "inputSchema": "dd423093d8246a76547884a2a7e47d520723ea8c10777fb97bf487eb29429018",
+      "outputSchema": "6839bc3a8e70e2c2ec4994f3a103881d2905d6fbc7391d6879f15c9944fb4b4e"
+    },
+    "get_test_candidate": {
+      "description": "dec15cf0f49c7acf00c7a73a93e2f97f2e9e6a93507873922649c6976ab2a4e3",
+      "inputSchema": "c158ef40b32cf1196b0d0abc5a062d64955a2f72b139574c0debc1ec615c101c",
+      "outputSchema": "8608acc718559b03d5ed64088a36f9f8668b389b2bbd6648fb7dd41f615ca68d"
+    }
+  }
+}

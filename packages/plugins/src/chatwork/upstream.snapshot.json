@@ -1,0 +1,86 @@
+{
+  "service": "chatwork",
+  "displayName": "Chatwork",
+  "authTypes": [
+    "api_key"
+  ],
+  "migratedFrom": "open-connector",
+  "normalizeVersion": 1,
+  "actions": {
+    "get_me": {
+      "description": "15794c4ece0d2abd5f5e787c5cb53ca436c9a0901d4cc080c2b99e12add9a352",
+      "inputSchema": "60a08e7d67d89fe13b6d0cf6d3b2ff33b748ff1ed0c44589e3545d5e4542898b",
+      "outputSchema": "1e3e1201252759a7ec725eac2a804314291c00d487cf44b660a276341360d1b4"
+    },
+    "get_contacts": {
+      "description": "914c06e58f5cdd13d1c60e047cb0808db5c77a83cc8d8a0145b27f60deee40fa",
+      "inputSchema": "60a08e7d67d89fe13b6d0cf6d3b2ff33b748ff1ed0c44589e3545d5e4542898b",
+      "outputSchema": "2d0a0db0fe786cc37c02a4e6c64725e939ee3f3b5367130a45232d17567ea4b2"
+    },
+    "list_rooms": {
+      "description": "0fac126374e452f7feae30aa5c24176a078d038ecae0ffe75ebe55b8a2defada",
+      "inputSchema": "60a08e7d67d89fe13b6d0cf6d3b2ff33b748ff1ed0c44589e3545d5e4542898b",
+      "outputSchema": "4df0db2062ff0e5ef019e116607a758e033d0dde7f7ceb3852021ea3798be088"
+    },
+    "get_room": {
+      "description": "9a855620339b9c19f86669a6f2cf4f92242e6c4e7fb21a92e2937e34a0828fbe",
+      "inputSchema": "00e9a6300aa9af2fb44f8423d3e79603196cc45acf4160ca8a384e44f533bf92",
+      "outputSchema": "1d080bce575cf15a9b7140a93c82e95708b61f9c6486c679611926c90d0114e8"
+    },
+    "list_room_members": {
+      "description": "597c9cbde6a7bb6dc8265820410e8fa98bb9340979d864f709ed4e81f5af4cbf",
+      "inputSchema": "00e9a6300aa9af2fb44f8423d3e79603196cc45acf4160ca8a384e44f533bf92",
+      "outputSchema": "b40c2d792ba3e474e59c97d615aab58eb4cb4909a6248e32f0ade858218cf355"
+    },
+    "list_room_messages": {
+      "description": "86e7408aafa550a440279ab944c5948b2cf0587f9826ad29092aeba82eb9ce52",
+      "inputSchema": "2f547ac544b960a4d7ab5d3d080eca4053a405a8cb16772eb497f4f33f66b734",
+      "outputSchema": "166c81a72d1882b231856f28ca70d6248338128ac8e8eb4cb166e4172959aeaa"
+    },
+    "get_message": {
+      "description": "089449217a7417d8b85646c5be9bfd8019adcac840c0ece737640f025884c78e",
+      "inputSchema": "1bdfcf80ac5ab545fd2d62704275ebf4712e38fb15e56e55e40c41501d83e5f8",
+      "outputSchema": "86cfb03b534561fe31283d959d0222e3b101883599944eb0cfdec0839fb7581f"
+    },
+    "post_message": {
+      "description": "b7e640ec74e9bbe0e14a582f543ecd612a7353f0866b448f58e6f12ebf42f1ce",
+      "inputSchema": "87276f9b1c23758be269c7729db07eee75a96063914b47d16a0bf34f731dbfe6",
+      "outputSchema": "90b23e0630526d1dad89e35c487ef00868b91b7b45375df4ee3f81e15f448a8a"
+    },
+    "update_message": {
+      "description": "0e7c312d94cd433f30874d1310744e0d6b7dc929da8c99bb518fb22da4c4910a",
+      "inputSchema": "976be699d39cc6372625370bd673660ed50fa66c8a2867e6799510f6efec419b",
+      "outputSchema": "90b23e0630526d1dad89e35c487ef00868b91b7b45375df4ee3f81e15f448a8a"
+    },
+    "delete_message": {
+      "description": "be9e6970ddce369b3db19784cea8dceed38f2a2b6a10a319330fb2759b275acd",
+      "inputSchema": "1bdfcf80ac5ab545fd2d62704275ebf4712e38fb15e56e55e40c41501d83e5f8",
+      "outputSchema": "90b23e0630526d1dad89e35c487ef00868b91b7b45375df4ee3f81e15f448a8a"
+    },
+    "list_my_tasks": {
+      "description": "f5b365a907cfe88972e43c0b415d56a560c56585c51867d3c28000de90a2e41d",
+      "inputSchema": "fe08e487153274ac703aa1c010f9ffc667662853c9b8ba19d3e613ae1b401d16",
+      "outputSchema": "0d7af283b01764b71b9f69a982958888956faadb1ec7251a68436f5e873c5451"
+    },
+    "list_room_tasks": {
+      "description": "8e46fca060d6f42eb0da921d115b8c641e8fbd7963d2eb16f32158ca33bf77e8",
+      "inputSchema": "2091e1c8f0c9dd1313f3ee0131ff5c61d575ec15338d860f2fb7427ef2062ffb",
+      "outputSchema": "517585cfdf28042ce5a2fb84fb4642527b99dccd78eec75abf078bff64350030"
+    },
+    "get_task": {
+      "description": "e7580cee2f1e997c191899d31089f7f2ac46e7d84baa73752e26dbe47ec60de7",
+      "inputSchema": "6fca319853719003b3902a5baef44448528dd5bc58588d4f861507667f713648",
+      "outputSchema": "affad5556e8c708e501472dfcae4d0b22ba5c0e5e253e22349c95f1ab325743d"
+    },
+    "create_task": {
+      "description": "030b7cb556b0d4512f17855621841ebab93e705e08eef32b564c84c0c5131471",
+      "inputSchema": "dfc401ed45949292db438095ecda3a147db5e9b1a4754c36ce283f9b6e93432a",
+      "outputSchema": "a2731aea17ca9a4cf023014414af234843c719009abd66a905a31968fa7e5e05"
+    },
+    "update_task_status": {
+      "description": "bbab97fa2bd60d7f33f698cdd4a98ff004c1327a90c8dc15c24dddf70f367b0d",
+      "inputSchema": "90be9f01999db36a991991a3ec4700714a380b715979fe3d40dbceedb2ecd41b",
+      "outputSchema": "b99048f213bfa553ed2667477aacad72fc7925b932230b292d24ebfc675e8166"
+    }
+  }
+}

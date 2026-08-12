@@ -1,0 +1,41 @@
+{
+  "service": "ngrok",
+  "displayName": "ngrok",
+  "authTypes": [
+    "api_key"
+  ],
+  "migratedFrom": "open-connector",
+  "normalizeVersion": 1,
+  "actions": {
+    "list_endpoints": {
+      "description": "d41bb835605f2d6b3bc733a197500cd8a5f19bd18e4e3dea8c82d22c7569cecd",
+      "inputSchema": "145e884cb531a472e6cf6691184e3c68e60492262e2e69f4304d0491ba6663cd",
+      "outputSchema": "23814c163c601670be63300b98c103200f2e94b80cb196db8be688acf29a5a35"
+    },
+    "get_endpoint": {
+      "description": "a44c7358cc0583e81187badb1f0fbe2fcbe833681574aa8f7ac36b329a35a317",
+      "inputSchema": "873276bd7871386c86ff227e0b51a29fddb53a1bbf84536a85b5aecac37ac260",
+      "outputSchema": "a49d02acd9b5789780b03d1c0a289f189d86101d34c9302379ea151e8c163c77"
+    },
+    "list_tunnels": {
+      "description": "2f014933d8646a790f9b7ae74641817ca009014ed7caedd681a900c200630f28",
+      "inputSchema": "3371a7a24568b8367c5dabf1fe621da4bdc77e396e3b85d6ea253a2d341522b2",
+      "outputSchema": "86684051320bf879501c88be6968034c2f9b82bb95bb86b91e8495374f528c26"
+    },
+    "list_tunnel_sessions": {
+      "description": "19daeb34ae70138cf8698824644a551a4ce51779d73926e49a8f939049517669",
+      "inputSchema": "be1f1e91ac63cae7ac5480f4f3bd8d403de82f713e43a351d698de2adfaad1a1",
+      "outputSchema": "f2da04a143da06ee9ea2b8f238ee42f8117d03d60b5ef597a04ad69c9085c911"
+    },
+    "list_reserved_domains": {
+      "description": "6e19d654665000b50fc28648de5a2a87c91eca67777e77d175503fa1fd2dddfe",
+      "inputSchema": "10ef49eda38f5ea1afe94fe1fb41b54e1d44ccf10b0dc8619ac2bcad439c320f",
+      "outputSchema": "104ec1aae0c831c503a6ef17c66f5cded67ab7ea0fdd4d40aed954b1678c8dc9"
+    },
+    "get_reserved_domain": {
+      "description": "0b7960b3de86f727bb22b1a90791075e85952a552dfcac69b134f509b240be6f",
+      "inputSchema": "3ffcacdc93e7089dd6bda6d02c17660a7da4966e9b02a6245e43b10ebbabe169",
+      "outputSchema": "c5cf951daa2e7abb7640183ff28d9a1753be2d20d6671807dd5d160a34ed8758"
+    }
+  }
+}

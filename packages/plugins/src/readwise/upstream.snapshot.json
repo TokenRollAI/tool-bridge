@@ -1,0 +1,41 @@
+{
+  "service": "readwise",
+  "displayName": "Readwise",
+  "authTypes": [
+    "api_key"
+  ],
+  "migratedFrom": "open-connector",
+  "normalizeVersion": 1,
+  "actions": {
+    "create_highlights": {
+      "description": "607dd1a8dab84ccd3528e0b7f337e4e3e78cc62d7098e3dd44b49c2861fca025",
+      "inputSchema": "6761194976a3168bc872691bfba4675876ddde11230f08de5917cf3dfd0e8764",
+      "outputSchema": "1c69444576439b2cc6ae582608cc3a84be63fcf5f54b0235c4f965e6204fca42"
+    },
+    "export_highlights": {
+      "description": "98cacd67553e40335d80d1e600c80fc7adf21e5de6a7465dbbe47d0720df44a2",
+      "inputSchema": "56c1d825fe37b6dadf99743a89cf51b22e715967a5d74df1cf14db6e4527ca45",
+      "outputSchema": "320a4c089134b1e0b108e077d1c7cb31c91a34f5eef1ea99a474dd7d6405ba93"
+    },
+    "list_books": {
+      "description": "22f12e7c5b7cb9424e311a3fafe27d7a3383ac813d6906a33ffeedac83f369b9",
+      "inputSchema": "be6c18498554edcd580a125b0611bf0893ccb1a1ab5ebfc70d5c75877074a61b",
+      "outputSchema": "ffc432846fbccf49bcc1ff661a46dd1a371e2b62d69969299a0e25ad5dbd6309"
+    },
+    "list_documents": {
+      "description": "15c4997e06a10a1780fe34595be7c7a72c5fdd25a6a8022d10a1e46df5f66309",
+      "inputSchema": "d2e94167bafea5a8793fee13d944d23e231f56be158fc00c11ce829b2439cdf0",
+      "outputSchema": "3f53701cb48876d96e30a31c6da76c160b708bc139f23bdf1411173a9412cd67"
+    },
+    "save_document": {
+      "description": "ef2cd9602673948eb30af49d32c6b0b08dd4b614ff35ebd206df8080b54d1f26",
+      "inputSchema": "2740b7bc19a64a1bd38fa8689ecd131193197438477991452e8c998fb649e85a",
+      "outputSchema": "068dbbf4aa7c2c1a950f315257d5f0afdc8cb1bfc29f8912afaea30e2fbe8bc3"
+    },
+    "update_document": {
+      "description": "2cc87f7bd0160c5531d6a05e0bacb42f44731dd71262ec7928b93a854b8cf890",
+      "inputSchema": "39e3ca0f89800703f8805d15cbb1072e5881cb4a942ea9768e2f1418f9aad025",
+      "outputSchema": "2a5b4e70f875da381bf0b7ce1c1db87feb11af69619ff8e8926a3fb039cd4fef"
+    }
+  }
+}

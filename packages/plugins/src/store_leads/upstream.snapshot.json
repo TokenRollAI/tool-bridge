@@ -1,0 +1,41 @@
+{
+  "service": "store_leads",
+  "displayName": "Store Leads",
+  "authTypes": [
+    "api_key"
+  ],
+  "migratedFrom": "open-connector",
+  "normalizeVersion": 1,
+  "actions": {
+    "get_domain": {
+      "description": "fb27b083e60db18403eb842c4b80cad9299956ef9caa521c4fa690e65eaff161",
+      "inputSchema": "b6d674cbc1b0ac2f6a4ac60e09e1a787387a953b5194b82e7494c53024081830",
+      "outputSchema": "bd083ceaad2ca9a6d1c2a11d288cf57e79466bf78effc79fa6058edb0d2a31a4"
+    },
+    "list_domains": {
+      "description": "b1d6645adc6aaa70397c7421f2faba17a0693ddc019faf32f675fd2a5cd2c492",
+      "inputSchema": "8ba4a75b707edaf820d8fcd122fed5592da28234a375b128e226fe4d234b7816",
+      "outputSchema": "45a38544a00f1eb5acf934fd822797f6d8f8abb00b84d656cae1e9ff0487c571"
+    },
+    "get_app": {
+      "description": "b66b3a631b709b3af35b98c58451284092002f5112209304cae666ddf58db209",
+      "inputSchema": "ef0f46f12ed6342d4511e7bba68dbeea66585c261a536d6625c8909d09f87848",
+      "outputSchema": "15c5b07bc4033829d1a05caf1ef767c03d7b457c78628075b32f3b2c6a6c04bf"
+    },
+    "list_apps": {
+      "description": "bfb142caab58facee65f65f658303e938b56507cd83241ba52577bce0f0eb947",
+      "inputSchema": "97130745b5e785f590f9b02c77b3adb7b44bb1e6a6a2c06e9c17e7028dded888",
+      "outputSchema": "87bf9da90884419f5a1ab89590083947f0df6c3bc1c0ec0463698fbc37b341f4"
+    },
+    "get_technology": {
+      "description": "db5261540d8ca2bf0483a69a061b82e4a970e157a062aeb9c2ae4c64c0c0d8af",
+      "inputSchema": "d79a0cffe2bc710c4f6f7bb911a763dde89bb2d52656119330b44b6f8b3089da",
+      "outputSchema": "04e9954e2618eae4304f8756c3a0c2aadc1f2a4c488911cac934fd74c292e89f"
+    },
+    "list_technologies": {
+      "description": "b2f4ca9f9336f74736c1e3c5c00ab8f0ed53efe885e7f42350dced14f86112dd",
+      "inputSchema": "02c465f7d884b423d941392eb020667594628c643a039d38cd3c92015cf4c11c",
+      "outputSchema": "a9aed6018963d3e087e1614cdf10a579ea8b210d7adf70c24d7eb718610df768"
+    }
+  }
+}

@@ -1,0 +1,41 @@
+{
+  "service": "satismeter",
+  "displayName": "SatisMeter",
+  "authTypes": [
+    "api_key"
+  ],
+  "migratedFrom": "open-connector",
+  "normalizeVersion": 1,
+  "actions": {
+    "get_project": {
+      "description": "f0ff150db83b32265b6d41f56d36a631072ac3b73d8206a680c32067e668dc61",
+      "inputSchema": "c69a4a125a77eaaee23d29a27a6092681b933bd0746fb55a48a365ddcff93fb4",
+      "outputSchema": "bea68cef374712344b709aea5fc9b94fa3bfb1e7dec44db978f6e33e6f4b187f"
+    },
+    "list_surveys": {
+      "description": "cb0192cdae4cc87dc14a1ead82f68fc365d8fa032cc6702fca6d52ce888a4802",
+      "inputSchema": "a0505affca76b696bc980dd1fc25ec1e82c29699f516d38ce6c8772f1daadf13",
+      "outputSchema": "34721d74ec456221f7c9a03a777ec7045f22886653518ad20bb603d38bf71c7a"
+    },
+    "get_survey": {
+      "description": "60980626dc9464476985bf29cbd398c2a0d27d60e002f45bc3ade7f9f0dd96a1",
+      "inputSchema": "d7e64e889d5b8324f1d78161206f957659570d7d4223e60d2bb84c976ec04794",
+      "outputSchema": "32ff3c5a7cf66ab1f68d3f753cdb49845476df2e295c100cbdffa3dbe6c6c1ae"
+    },
+    "list_project_responses": {
+      "description": "a6c1b7700fc603514871aa7ab12d895b0f2c8b7a230ad7171918f17c86cf97a0",
+      "inputSchema": "8ae67b995734008335d0cd3dd4679a0db3b03d47e0ac60e3b63be6fbf2d371ec",
+      "outputSchema": "eb4e7b9578d39c07806396b8a4a989c6c2ccc79265acedca9b0364fc8dcfa2f8"
+    },
+    "list_survey_responses": {
+      "description": "9bfdcd441866bb84354058befd82d2fc698a307902d8f2d75b2a6522086b3ec7",
+      "inputSchema": "8bfa7ab21b1f0f6e5edd052daedacae2c3dd3fadb5f97e1fde0703bdc22273f9",
+      "outputSchema": "5b6848688b97252e17c503beded96d633b9cd460f71e5ea86dacf61ecd6a92e1"
+    },
+    "get_survey_statistics": {
+      "description": "c75815a1f7d5d1edd2ec61afae939dc19bda8ebd968a94a4e6496bf755f6f365",
+      "inputSchema": "3293c14452d10d8d3639fe45691d7d8075cb4da740a9f7fe3c0ba41a61fcd924",
+      "outputSchema": "4528e4f305abd9d30ca1929c00ad4f030574b8d4c773a3ed205e0c99d1b09a45"
+    }
+  }
+}

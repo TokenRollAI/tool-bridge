@@ -1,0 +1,71 @@
+{
+  "service": "paddle",
+  "displayName": "Paddle",
+  "authTypes": [
+    "api_key"
+  ],
+  "migratedFrom": "open-connector",
+  "normalizeVersion": 1,
+  "actions": {
+    "list_products": {
+      "description": "0df6e2e6af35ab470abc4dccfa7698c84ff04b7a1d883ba25c8488d1d2f7b918",
+      "inputSchema": "d62871b5de4350a567f094fce9167f244e95ffe4aa4fa359ba04fcda8a9bfadc",
+      "outputSchema": "f9b9398bd5b56a4940c4a98d73de6085edf757eebb12876fe319309735ec2271"
+    },
+    "get_product": {
+      "description": "cb3881d23aa0e4061afcaa72162d8b80a1a7e09e1b11e06486de823e9ecb1bf1",
+      "inputSchema": "018fbcdea65e4c11ca7bc552e762e366b71b9aa500578da1d59ecbae4c7f8fbe",
+      "outputSchema": "8113945b753c77a18eca74aec5ac7f174cdbeadc1bc92ac43fc83227fea1b5ab"
+    },
+    "create_product": {
+      "description": "655323f255307f6ff8c82cab0f3144c634dbb983515e69797cf25be8cca3ba9e",
+      "inputSchema": "9e482a7c9856c783c352d547720cd2c53a38703ad5b0b062d9ec035c52ea28cc",
+      "outputSchema": "82816fcbd6825e2c9cecf85e3cf900f5b7ee1332a964a4453db65ae4808e5083"
+    },
+    "update_product": {
+      "description": "3cff5e01f428f9e73423e57e9e675003989591f0cb1443ea23f61257ec47397c",
+      "inputSchema": "5ae6665e28af4f1a76cd6705c36a91dc4e545846041e865f960e66589c51d660",
+      "outputSchema": "54fefaf3959b452f52d966b510ea6969cf60978a3f1a81fb6585f012bc585fa3"
+    },
+    "list_prices": {
+      "description": "579485e1ead52f90f5e3bf7e9a7c41305aaa7afd467d0bb32df5ac9eda0a14ca",
+      "inputSchema": "a29d23ef2743c693a2349148ff916ae1afafe6c22c0b269547e5a55958f3d4db",
+      "outputSchema": "105540b0de4e9cc5e82cb1443d94187455ddf3ce1be772a1434ae2decc9b690f"
+    },
+    "get_price": {
+      "description": "af1a78776456ea2f951a259ab8444c5d9fc9fed636428b22af833ee9f298ae5d",
+      "inputSchema": "6e4ca3f49dd17582c3436c900cfad39af9666ff498146eb6353f2e1ec5d16f46",
+      "outputSchema": "4877d88e58010b6f85aae60166d765d88b1bf5769554b0fb53183fa84bfa8f93"
+    },
+    "create_price": {
+      "description": "e342d45e0fabc69890c7cfc1236dfb2e326a4567f851786b6cf84ddae5e81095",
+      "inputSchema": "78ba6a1885d63087bd0030f8ff50079537783db52269c50bf817249c68836c64",
+      "outputSchema": "1b59743c1be84f1e53beede62bdcf19839e6b625f796d1289b651e77be03c1f0"
+    },
+    "update_price": {
+      "description": "7898cb1399aaff82520e9e6c274d5b61c5a890da2cab5249fe2b06063feca8e0",
+      "inputSchema": "aa0f3d78af9853d49db04ff10d35cbf7d8097e5a4b8a33d0a48a0a4734aeb4ae",
+      "outputSchema": "22942a6c02f7864b2aa737bb7a3be3654f7b1dcc30448a4e16e68caf2dfc895e"
+    },
+    "list_customers": {
+      "description": "32a322ab33176b01e4275dbda7298771398201134bd65d28a4c60125a5bb2e13",
+      "inputSchema": "6b1348dc74fc0a047e6d0c49dba3966c94aefe55fcb3d09397308bc94d1a67cb",
+      "outputSchema": "664e3334b9f0c41302f933efeae9542c59a9d44e8da7995141329b8bce560497"
+    },
+    "get_customer": {
+      "description": "50471b2540a61de8420d56deecdbbe96b30abcabcb5f0c67d2dadaf085cd741c",
+      "inputSchema": "9a264d7f39a273abbd5d4ff5e723a7579cdf5e9988b1610f61f2651de567a86d",
+      "outputSchema": "f9506437106bb312cbf61a865c5336965067a53ec04f68d6ae0cae933711192f"
+    },
+    "create_customer": {
+      "description": "1a00ae18b3a21bba6a6f606a592775d6cc7e472b66d6f95c8ad5cb40859268b3",
+      "inputSchema": "f3add3434d01d0248f7bf4f0a1048593808b636d1c9c4c1bc0556fcb91a69178",
+      "outputSchema": "4af2cac3dd03ecf2c3216386245fd41a8f2104a5460ed77ff41d47ce81ac7f79"
+    },
+    "update_customer": {
+      "description": "dfe1f691e776a9d4297af99ae73d1ebe5551160e44d1c4c62fde4ece1d13bf1a",
+      "inputSchema": "0f57c4252d7eeef4efca6f25b22073c65039598f22d61340c6f451211d56dc8c",
+      "outputSchema": "4aff4dcf9ebeab6e1a64a11d22e6c7d957d1f842c54687af026a21e1d6443aff"
+    }
+  }
+}

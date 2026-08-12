@@ -214,6 +214,39 @@ createProviderPlugin({
 **首批 15 个产物里只有 clerk 声明了探针**,其余待逐个补 —— 补的时候对着上游的
 `credentialValidators` 看它打哪个接口即可。
 
+### 两个上游状况(迁移改不了,但要知道)
+
+**1. 34.3% 的 action 没有 `required` 声明**
+
+实测:上游 12474 个带入参属性的 action 里,4278 个(涉及 1049 个 provider)的 inputSchema
+完全没有 `required` —— 但它们的 executor 里常有 `requiredString(input.xxx)` 之类的断言。
+也就是**上游的 schema 与其实现本来就不一致**。
+
+codegen 忠实反映 schema(全部生成 `.optional()`),这是对的:等价闸门的前提是"不改变契约"。
+处置是在 `api.ts` 里保留上游的必填断言,抛 `invalid_argument`:
+
+```ts
+function requireId(value: unknown, field: string): string {
+  if (typeof value !== 'string' || value.trim() === '') {
+    throw new TBError('invalid_argument', `${field} 不能为空`)
+  }
+  return value
+}
+```
+
+代价:`~help` 露出的 schema 说这个字段可选,实际调用会被拒。想修就得收紧 schema 并在
+`handwritten.json` 登记 —— 那是**声明过的**契约变更,闸门会照常放行。**不要**在 codegen 里
+按 executor 推断必填:那是猜,而且会让"schema 是唯一真源"这条失效。
+
+**2. 66 个 provider 依赖 `transitFiles`(二进制文件中转)**
+
+上游有一套本地中转文件存储:action 产出二进制(音频、PDF、截图)时存进去,返回
+`{fileId, downloadUrl, sizeBytes, ...}`。tool-bridge 有 ObjectStore 与 `$ref` 大对象通道,
+但**没有接到 plugin 面** —— `ProviderContext` 只有 `config` 与 `upstreamAuth`。
+
+这类 provider 现在**跳过不迁**,不要写成"调用即抛 unavailable"的幽灵工具(与
+`_runtime/plugin.ts` 装配期校验的原则相反)。要迁得先在插件契约里开一个文件中转出口。
+
 ### 下一批的建议
 
 剩余 ~170 个"codegen 全干净 + 纯 api_key + 单文件"的候选可以直接照这个流程跑。

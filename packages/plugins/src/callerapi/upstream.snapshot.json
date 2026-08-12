@@ -1,0 +1,21 @@
+{
+  "service": "callerapi",
+  "displayName": "CallerAPI",
+  "authTypes": [
+    "api_key"
+  ],
+  "migratedFrom": "open-connector",
+  "normalizeVersion": 1,
+  "actions": {
+    "get_user_information": {
+      "description": "7161d8a7cad0e8f7f2c49d95d277213d06174878c317144d92af21370a78de51",
+      "inputSchema": "34d69b3669e50980b576e8cf462317a4edcad2bbc2498482b292315fa59e9a97",
+      "outputSchema": "d351a1e45c09c99ea71e7f928727620f0c70872d96d334c427fb39780e232089"
+    },
+    "get_phone_number_information": {
+      "description": "bd3a5c908e1d12c33f7e6ced0d94162b84ef56c000b6459936b47dbc77006c3d",
+      "inputSchema": "5c0f0f6ae03852b4105c5aa2aca8e1e480d4299749fdaf8146385d9399bb585b",
+      "outputSchema": "1318af7a1fe77332aeb2ae1496a3fe941886c6029d7e022816d49ed522b75e33"
+    }
+  }
+}

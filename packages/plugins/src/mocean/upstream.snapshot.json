@@ -1,0 +1,36 @@
+{
+  "service": "mocean",
+  "displayName": "Mocean",
+  "authTypes": [
+    "api_key"
+  ],
+  "migratedFrom": "open-connector",
+  "normalizeVersion": 1,
+  "actions": {
+    "get_balance": {
+      "description": "5b76c2043889e4cccf88914379bfd39c72935fb1274fd5753747767aad36a4fc",
+      "inputSchema": "d9ee3be98c7d8e0df5195ac8c856209452bc07173f1925d7f0a11a47a49b98bf",
+      "outputSchema": "88112bf68318beb2a58fbec7af9cd1756b579bcaf4b40105d1e87953feb24e1a"
+    },
+    "list_pricing": {
+      "description": "f89a24862960a262eb23eae0c91856327611440d228947683ba809e3d5fc90fb",
+      "inputSchema": "af5b232ae8cbcec85725fa7768ed4895766ffe9c02610b22378702da0c4e3fe9",
+      "outputSchema": "9f3a1c9f5a53b8046eed272ef8b1ab26bc0e7291e483454ba31c42fc6effbcb5"
+    },
+    "get_message_status": {
+      "description": "a1dd7b2fb4234cad7ae1e5af53d1cb52f79844324409050f438d56f64f8c28a7",
+      "inputSchema": "d27d834dfbde7ede83be3de79f88cff72ed8bc68b964973c42691a6562ca02f4",
+      "outputSchema": "8c47accd65e27772d7b84ae39d7046d7e76a98de7dcb7853b9853bda8be2c325"
+    },
+    "lookup_number": {
+      "description": "4c168651b16ce91f57913b15511ec0e5563204102fe8019c638a6b44e6aefe97",
+      "inputSchema": "30376ee06127c9f76757bd6d487dc8b5a6b68ac7e5b814da559b535a1e61fd36",
+      "outputSchema": "3fd9013feead53f05bffda41b755a2f21c31d61b53ff24b293cd08cd4061fa5d"
+    },
+    "send_sms": {
+      "description": "5e06da273976d3e8efff9049038f64e6d9c45d9a6db55e270fe721b0faeb7440",
+      "inputSchema": "ac26a6a210bd3487bc4e95f9088cb3bcbe9e74586065438fe80795002dfdf694",
+      "outputSchema": "373f67efba88ad835b334911bbf9eae858cff538efe390ca7ad2e783b4d1f34d"
+    }
+  }
+}

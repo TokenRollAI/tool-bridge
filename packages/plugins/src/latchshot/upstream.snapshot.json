@@ -1,0 +1,21 @@
+{
+  "service": "latchshot",
+  "displayName": "Latchshot",
+  "authTypes": [
+    "api_key"
+  ],
+  "migratedFrom": "open-connector",
+  "normalizeVersion": 1,
+  "actions": {
+    "capture_page": {
+      "description": "643cdbd77c17335772136f8db2b402ea818d2096a8068fd367012ff63de0ed3e",
+      "inputSchema": "25c69d8ee590e03c122774f75c1435262726f2d75ee65fe46d9ae6ac8c98e7a8",
+      "outputSchema": "e3271ed7c802cdc50576799f095190c1aeca2aa0068ce254534c79be6986e1ad"
+    },
+    "get_usage": {
+      "description": "046ff5d3652bfda628be6ba269109995a74a72f58921f2acb2d78a6bab876a45",
+      "inputSchema": "2ec53d8789ec61b9665e21d88e60daebd62dffdfdbe0038448ed6532308827be",
+      "outputSchema": "33e4ffd988a8bdbdb90f52e1d1b27b69726c0fe7a03806f28598c345fa48e1dd"
+    }
+  }
+}

@@ -1,0 +1,46 @@
+{
+  "service": "shodan",
+  "displayName": "Shodan",
+  "authTypes": [
+    "api_key"
+  ],
+  "migratedFrom": "open-connector",
+  "normalizeVersion": 1,
+  "actions": {
+    "get_api_info": {
+      "description": "41df2e95f3e13717921b5b649de7f76feb03603afb5d8c3c45e7aa5b09349fc6",
+      "inputSchema": "b750aef08960bd13ce6a7029f4749dcbc9a59b0f8f5ad9747dd4e3076a6cc9a0",
+      "outputSchema": "664ebb15a14e98acfb17f6cef7d078c0c65325c865068110cf7a04f89d44320d"
+    },
+    "search_hosts": {
+      "description": "8bfbe73aede52fbc604b67fe5d39d319332f6a6ed2650417b796438cf69c0b2d",
+      "inputSchema": "9001150792162a23f2085e18bf5afa69912b582c00e55d80d42ed1856e307668",
+      "outputSchema": "aac83bf07482cbb33466de5975ad2c6ccd2d6f28a2b740d7701c0f9c1e0da9db"
+    },
+    "count_search_results": {
+      "description": "9f67b79fd0fdb70bf4ed0e47c9488c1590c9977028326c78170a4a15f7318a29",
+      "inputSchema": "3634b03eaec2b5fa07c995a0acaa1e688fc8e29a5eae63b74c76f2aa5345741b",
+      "outputSchema": "a4b3d6c29d59e4177d9fbfb2675e5bd56181e50f6f53259ff2c57a4fa7dcb7b3"
+    },
+    "get_host": {
+      "description": "b6bb61659b1a474ac19147262640e996550f8bc308c35f96f9d923132f9c9129",
+      "inputSchema": "edf81f54fe22ebc8e3892c39629a737103abe5ee6e50206693c3cf6ee2fa2776",
+      "outputSchema": "a2018cdf17f06bbbdda965c80264334a1205ac20f12c2b566ba8fb1e15f0a71a"
+    },
+    "get_domain_info": {
+      "description": "7c07b51f58e93a7433479f724715f47ea58340708bc8b8dd2f9a222556704684",
+      "inputSchema": "a5ac1e449cdb5afd906cb0211afa14b129fe0e061023cb3a9551da3d9693c88c",
+      "outputSchema": "7a70fe1f6992d7ebbd93c4c9e7ca57880cd6b40f7800621432b2d138e8e043a7"
+    },
+    "resolve_hostnames": {
+      "description": "f02f01691c3b26dd4d3879ef5c5fa4480b8564dcaf03c65998b2016383a7df9d",
+      "inputSchema": "af6e1eba93a993e1a5a78df10aea79ddf37444d6d4e794c5baca40c663db3957",
+      "outputSchema": "6ebf10a84e2fb4ec4db7269f80b4ee5563d5c14d7b93cac97333308067630217"
+    },
+    "reverse_dns_lookup": {
+      "description": "6ad079e02ed841d8dab67b884fe8e8ff2aebd12d6aa8b5d30c2b4cd6104e7c0a",
+      "inputSchema": "f48b788c483d32eabe31882c33f445735a52d2f1c41713bfff423cde61ec42b4",
+      "outputSchema": "7b131d265a79bce17f74243f062d44e8ef0ae902d9ecb14cd323f49c8bafbd41"
+    }
+  }
+}

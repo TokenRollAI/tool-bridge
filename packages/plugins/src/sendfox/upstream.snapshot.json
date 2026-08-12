@@ -1,0 +1,81 @@
+{
+  "service": "sendfox",
+  "displayName": "SendFox",
+  "authTypes": [
+    "api_key"
+  ],
+  "migratedFrom": "open-connector",
+  "normalizeVersion": 1,
+  "actions": {
+    "list_contacts": {
+      "description": "14939e556b12f1427420e3b685f1b4311383f905415e6d11efd8d396f7837954",
+      "inputSchema": "958214e7d2ac37e07c183f64924a387c42ced1712e5069692f3656455e4ab29b",
+      "outputSchema": "f9e71b86d6dd9e0ae4401e0e80728ee5b14bd3db32797e1a1bacd8e96fa01527"
+    },
+    "create_contact": {
+      "description": "98a49b070cc36532cbf07337953110651ef4cab11a36ec9919a928c90446f28a",
+      "inputSchema": "e5a273f91704567efe5599b25b1137c75e1c55b8fb2574dd0b3969c2493b88ce",
+      "outputSchema": "8700282b5aba20c9d005623d57a316dba740850098b6293fdd204cacc7a67eea"
+    },
+    "get_contact": {
+      "description": "b1876cbaf8b7477446351a6d171b4857a3afc312636bd0cfedcccdd35dab63b1",
+      "inputSchema": "c29e2999666af2779546ee287b5ac9c714659d4158738cb20b86a0fda544aeac",
+      "outputSchema": "8700282b5aba20c9d005623d57a316dba740850098b6293fdd204cacc7a67eea"
+    },
+    "update_contact": {
+      "description": "89b29eaaa0c215641b0b76f192bfea081b6fcf8cbf11f7bfd35fe507d1ba2b4b",
+      "inputSchema": "e62625b9ab8e93044b42c4ea0bd0ac54b3f402f0c24803cbafca03ce06ed4099",
+      "outputSchema": "8700282b5aba20c9d005623d57a316dba740850098b6293fdd204cacc7a67eea"
+    },
+    "delete_contact": {
+      "description": "754491b35aa47625abaac26061a4e76c8c29465b4d0d9c76476bb86bce168a84",
+      "inputSchema": "c29e2999666af2779546ee287b5ac9c714659d4158738cb20b86a0fda544aeac",
+      "outputSchema": "64d44e7ee352ab3753ba8d814d6cac9821d49cffc0631bde9a7812d4db6a0bf8"
+    },
+    "unsubscribe_contact": {
+      "description": "836a9f0ed08eeb0b4d5952f6bef854b9b12c1d5238e5df48c5103f35a56bb9c3",
+      "inputSchema": "2d752a3ed4e91a8798e0859d00e884c8b791be5396effe747e5797fdf7834d2e",
+      "outputSchema": "8700282b5aba20c9d005623d57a316dba740850098b6293fdd204cacc7a67eea"
+    },
+    "list_contact_lists": {
+      "description": "fca304055b9f19cca0834bb945877b795756816d7bbb861208a8cf77378af430",
+      "inputSchema": "b8a9905a9ea309bd1c329a3f4f6dbe9139bd616d3c9eaaa11468888c847e1db7",
+      "outputSchema": "6075e7d7ab9a299baa5da3eb31c398e9a6069a18336bd959cd7b4297ee621f42"
+    },
+    "create_contact_list": {
+      "description": "7e5d6d0f3603f5d09af67eb4993e134a64e137c001839f146a0fd0ec9db06ada",
+      "inputSchema": "20c516dcd71c6330f9f8382ffc53e444e67899cd16bd4a2fcdc64a60f9173215",
+      "outputSchema": "1242603afd8013ec3ca8cd4e333604f4949bf6035955dead6b38b4f8732a299d"
+    },
+    "get_contact_list": {
+      "description": "03aa6a36023f920f0fb39936747b6735cdb7ed1bcf571be0289f4f261cdce4c5",
+      "inputSchema": "2202a74f8af352694e7828663c420c879c699a54945a98471d7695f605e421bd",
+      "outputSchema": "1242603afd8013ec3ca8cd4e333604f4949bf6035955dead6b38b4f8732a299d"
+    },
+    "update_contact_list": {
+      "description": "a3e251c8b3a71411173d1092b51743621cebeded8dd505b475f0c173e583c9a9",
+      "inputSchema": "8339388b8429a72823e43c347a36a395539c1f96b7e25b7591c8a71f2873b4fb",
+      "outputSchema": "1242603afd8013ec3ca8cd4e333604f4949bf6035955dead6b38b4f8732a299d"
+    },
+    "delete_contact_list": {
+      "description": "654801fb0fa83c3b25ac0d3dbf227fa27e8cb3ea0397bb5cfd2b72ee2ef0e347",
+      "inputSchema": "2202a74f8af352694e7828663c420c879c699a54945a98471d7695f605e421bd",
+      "outputSchema": "64d44e7ee352ab3753ba8d814d6cac9821d49cffc0631bde9a7812d4db6a0bf8"
+    },
+    "list_contacts_in_list": {
+      "description": "245c90074dcdf304dda5ce4d94812c6eb7d992d09a8a990ddaa552c05e72b5dc",
+      "inputSchema": "4dd251fad55b41c181229f4778e5808b6d2bb65d5f972e1bc14d3a16606ffc55",
+      "outputSchema": "f9e71b86d6dd9e0ae4401e0e80728ee5b14bd3db32797e1a1bacd8e96fa01527"
+    },
+    "add_contact_to_list": {
+      "description": "d4178848631da2a6cbf6d20df79ff4f757aaa9cbdd3973159acdea0ffd1c7b21",
+      "inputSchema": "d92d5445fbe721ef4cddc19f9e08dda7e3cc80da9ad3087c79c73b4caff8f40d",
+      "outputSchema": "8700282b5aba20c9d005623d57a316dba740850098b6293fdd204cacc7a67eea"
+    },
+    "remove_contact_from_list": {
+      "description": "d501ca57252b6c973e42cd9b2dcbe162df31a2166a8ee4ec9d5349e092aee37a",
+      "inputSchema": "d92d5445fbe721ef4cddc19f9e08dda7e3cc80da9ad3087c79c73b4caff8f40d",
+      "outputSchema": "8700282b5aba20c9d005623d57a316dba740850098b6293fdd204cacc7a67eea"
+    }
+  }
+}

@@ -1,0 +1,31 @@
+{
+  "service": "storecensus",
+  "displayName": "StoreCensus",
+  "authTypes": [
+    "api_key"
+  ],
+  "migratedFrom": "open-connector",
+  "normalizeVersion": 1,
+  "actions": {
+    "get_website": {
+      "description": "b59f41812eb9a8032a3b19dafab8ed3aa4b1fbfbcf52875275303d0ffd167f0b",
+      "inputSchema": "5943469ca0fbfa058ad753764e2f54678debc5a8838230ae102bed3318f7b16b",
+      "outputSchema": "cb74c79228e550f8be39ff5408021b1101b919bd2000978177d09ad847dd5a01"
+    },
+    "search_stores": {
+      "description": "d63b7dd792b646dd932887904928522ce7dff6eec7eb01740e4a15bb3bc85469",
+      "inputSchema": "389cef729bd69f0f36ce1142bfc555499d10a5e0f9628d4aa1be0a00b10cd1ec",
+      "outputSchema": "632f68235a99a894c2051a4d6f05c9630c3b20427b0a0ccccdc441f361b3c9e3"
+    },
+    "list_apps": {
+      "description": "80a14b72c0c6475143cdc92a7e902acecb0be41cdecdb2fe8ff8cf97248c9671",
+      "inputSchema": "033294a12bb39146cc7f0ac835482988ba4674ef852e8404216ca4fa24e3b07a",
+      "outputSchema": "d3ea971032787566899c52f47f1aec86c12bb1f235a3e1806f8341f48d5b69af"
+    },
+    "list_app_categories": {
+      "description": "ef67151dd2c40ff30584f446f07be8682ac9cad73a7b48f5f02d9c3165d975f7",
+      "inputSchema": "ce712afd9e7750b4f6e5c3754032682cfd601b13ae59ed46ab72f2d8f8742910",
+      "outputSchema": "41300408577869b05a5668c1877e2d8baa03a9b2dedf23b8dd0c22186202a04d"
+    }
+  }
+}

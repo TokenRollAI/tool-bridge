@@ -1,0 +1,31 @@
+{
+  "service": "crustdata",
+  "displayName": "Crustdata",
+  "authTypes": [
+    "api_key"
+  ],
+  "migratedFrom": "open-connector",
+  "normalizeVersion": 1,
+  "actions": {
+    "identify_companies": {
+      "description": "7e51b130b91e4ed22ca3159e4e2671646ecf3cf8fd2c358954cdd39568bf0a6d",
+      "inputSchema": "3e33b33ccbf2e3a8ce8a088497f463340ff6fb17aba2fb22246ea3727b305f42",
+      "outputSchema": "68c33f20ec5829df69d12b45c7e4968eee24996f09b0b0eeaff882c8ae62ec2c"
+    },
+    "enrich_companies": {
+      "description": "d8ccfe7e1243942fa88f81ddee325d2d2529a05274c9f822b7bb320df25b1469",
+      "inputSchema": "3e33b33ccbf2e3a8ce8a088497f463340ff6fb17aba2fb22246ea3727b305f42",
+      "outputSchema": "3234e0df7bcb852ee02a07411a7869bc97eea40824d871bd257441cf3c24c945"
+    },
+    "search_companies": {
+      "description": "9a76ed790f41273bc6049874d5baf2ca31cdfbf7b6a5c4d7c3279ad13f6dcc67",
+      "inputSchema": "b6ab7b1291b381bc95b4766fdd7e01eec33b840c3ca983cb4fe2022a03512856",
+      "outputSchema": "439a930021b6998d51b347a6f8539f9d8f239b0cadeb09943842a3bd2bb6b0f4"
+    },
+    "autocomplete_companies": {
+      "description": "c2faba69fd51e8f856bb32c4345c14f5d980f15429bbf4133dd2c41d1d364933",
+      "inputSchema": "7bbd8f26b66007e2aacb0b1c3590d6fe73e44f31eb0782fa2f1eca8b86064456",
+      "outputSchema": "0a7eebbcfdafc7544bedee44d7bf2512bf712863cc00a8b23fb2e5b435df3188"
+    }
+  }
+}

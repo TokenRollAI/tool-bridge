@@ -1,0 +1,46 @@
+{
+  "service": "woodpecker_co",
+  "displayName": "Woodpecker.co",
+  "authTypes": [
+    "api_key"
+  ],
+  "migratedFrom": "open-connector",
+  "normalizeVersion": 1,
+  "actions": {
+    "list_users": {
+      "description": "c800acd8c2587d31fe7758a2e78b8a28d0d4bc5a82ed81aa9a83b08b31078d9f",
+      "inputSchema": "20061a54b02e88a8f53dc52089d30617f64207240b89c5bbe7413fc105415b6d",
+      "outputSchema": "f9a368975e714e77ea6c41494b6a644917f50069d88282d5a536b4787de9f14d"
+    },
+    "list_campaigns": {
+      "description": "2ddb50fada4b52237ba218b2180f3c83256923c12feae6c4170a896646402eb5",
+      "inputSchema": "5b7aacc94a5f1570c756222e0179152ee967309fe633192e74b36c995faef9fc",
+      "outputSchema": "c1a289490279a8f75b986558237c62ddb7edf60fd80aa260d5ef206addc08a99"
+    },
+    "get_campaign": {
+      "description": "bc901f0ca1d5424f072e8a7cb5784fb137e4d1ae0c86f03c14ac5d304b4c71da",
+      "inputSchema": "2146519dda099d6426d6c8758707643a4fd66291e7b1691fa942a8965138e01a",
+      "outputSchema": "413effd2dc51ff88b2b4bd4d993fea71427d961b1a897c91f93d8734bdcbd0f9"
+    },
+    "get_campaign_statistics": {
+      "description": "86143c3e7b2637b111dad8dc075f6c0fb5890966a1b0f33b9aa17ed13de036fb",
+      "inputSchema": "41fb95591025188f5b95e2c1fba6b335b02867877600c1a97ae187b556c7f3c1",
+      "outputSchema": "8e429a41901e60c866507dc7c9d411fec740c76c8ff695368e8ce2612d804990"
+    },
+    "list_prospects": {
+      "description": "5d80893c55328cc07f41686955151b25b782e69ffe85d95d7e7cbf33bae81373",
+      "inputSchema": "43d7bb2f9f529e4bdabf2df94fd4e79a22f9818b6231b75e14798e55982e0960",
+      "outputSchema": "6010f0a558d97187af06d931f43e0dd62f92d6e6d352039c58ea4e2ec3c1824f"
+    },
+    "list_mailboxes": {
+      "description": "78b3cf8ac838434fdf5c7e8ae4ea3dd11fe4ce4a8ecb7108f58320bc369f1f1b",
+      "inputSchema": "31ba4ce352f8c12f648ebedce9acd357153047c2dbcc709ae3e367fcb47d793a",
+      "outputSchema": "807d94d607e73e48fda8e2cb52f201a513f875a123e743c828b59f73782334ee"
+    },
+    "get_mailbox": {
+      "description": "b70065a3aeca9561bb8fa801806c378e04147c848d25fb53a25e82ee7b220056",
+      "inputSchema": "76edcef191122ca8f1909ac6e63622a64c1d4adda8f38288d223367f1c63064e",
+      "outputSchema": "6573083030369b44c68939b9c06e71d65d5df25e089fe6224feca5611a52d752"
+    }
+  }
+}

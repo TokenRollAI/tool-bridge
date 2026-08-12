@@ -1,0 +1,26 @@
+{
+  "service": "stormglass_io",
+  "displayName": "Stormglass",
+  "authTypes": [
+    "api_key"
+  ],
+  "migratedFrom": "open-connector",
+  "normalizeVersion": 1,
+  "actions": {
+    "get_weather_point": {
+      "description": "dc0536dca2f00789c63bd27efa951c66aaf4666ebb7d40354f8d8c0d14d4c07f",
+      "inputSchema": "0091b7f9c4ada6d798996937f683e6fbf1fba735a0a54b819ac1330076fccb6b",
+      "outputSchema": "3ff3f42480f57adb5cc7d15fdac8249604d864739eb9b9d5d04b09fd7f1b2b6a"
+    },
+    "get_tide_extremes": {
+      "description": "6850166c23ac4d0d20153f55030746181c2f52aa0725f6865df356ca7ba68434",
+      "inputSchema": "571ac33949d006aa55827669a57d3b03430c081cec4613379e809375378fd5f8",
+      "outputSchema": "58be277a44935800fa76222a56a0ff1ca90283c8e0496711b45a6b0d5280d18e"
+    },
+    "get_tide_sea_level": {
+      "description": "1506a6add6a103e43735af7516fc8b647c74038fda657353e160359d28d93dde",
+      "inputSchema": "571ac33949d006aa55827669a57d3b03430c081cec4613379e809375378fd5f8",
+      "outputSchema": "88a8a36d6349b3be3cfbfc7fba9e6915325ddf88342cb5bf532bef0d0973fed5"
+    }
+  }
+}

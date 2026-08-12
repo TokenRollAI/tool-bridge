@@ -1,0 +1,56 @@
+{
+  "service": "gumroad",
+  "displayName": "Gumroad",
+  "authTypes": [
+    "api_key"
+  ],
+  "migratedFrom": "open-connector",
+  "normalizeVersion": 1,
+  "actions": {
+    "get_current_user": {
+      "description": "ebb882150915fc165c904dd1a0019f71c80b0b0db90c0cb43e7ab751a3bff4ca",
+      "inputSchema": "432d14147d78cc19cd5a43a9f9791922af8e69129d50e6a4e414496a4abf4422",
+      "outputSchema": "ea91c9fc0d4a43586b92e3e2fd3a00b742b4021057ebf56598fc68f95bf93277"
+    },
+    "list_products": {
+      "description": "0ab3d3463c42a1e3a4034f20c0b675e822d7ae402946382b4703d2372839b407",
+      "inputSchema": "abe2c1b1455ac1f2d88b4cc2335bf5eb6f7fd932ea6ead0a75ce53c68df60434",
+      "outputSchema": "e77516a8a267e17e500d86b5de5505dd0a74e9df70628bcd3eead74315908155"
+    },
+    "get_product": {
+      "description": "5f23cbbb34b1764194538fa8f4e98c46a5cea3f89c40a85a27c22524b279face",
+      "inputSchema": "ecf30f64dcb884401a7b93297e760eb2238246434766b8078a8a747ce66ea03f",
+      "outputSchema": "fad935b2a93806faa9932d2dee364adb6a2e8951010607547a11573a22d89561"
+    },
+    "list_sales": {
+      "description": "19f484533f0cc262fba9bcc6ca12954d6a9c2dd9587c6c897f0fe68da929f859",
+      "inputSchema": "901f7676d9af6fb012b7b70fa1389dd3de976f38c4e1d5f244e5545343a8aee8",
+      "outputSchema": "7d3f882343d8473eccc6db992194e573ce583f11013f9ca8f5fec9e183e5f47a"
+    },
+    "get_sale": {
+      "description": "3d539d62e98c985a6a45cd03bfb399b1a92d78c959b9c6083b7ce3c0182978c1",
+      "inputSchema": "9ccf9dcebedffec5e52a5e84dfd768ee4e78848ac58ceef6cc274b9bd223c614",
+      "outputSchema": "a03c60ade7cca14c7626964bdd60635f54f1162827cfb16342d2fc55abfc360b"
+    },
+    "list_product_subscribers": {
+      "description": "0a128bfbcec5cf62e5563043f4bfbeee71e0d92531af0560a39301c1a2723fbe",
+      "inputSchema": "5f3aa9119b27ef64d911359d423b5b1eb63de8b44b2a501b8cd912191c362273",
+      "outputSchema": "52bf5eab65fa0e68652a2acffed49f634f39cf3ed14a6e104be998a6ee67ba20"
+    },
+    "mark_sale_as_shipped": {
+      "description": "cb9025236f22ed8052430cda772ca1f3b73500f1be904977a4fec9a3322e4b5a",
+      "inputSchema": "1589ae05fa09f8e1f6c232d2534a9f010691952787f3209a774975b268b9c3a4",
+      "outputSchema": "a03c60ade7cca14c7626964bdd60635f54f1162827cfb16342d2fc55abfc360b"
+    },
+    "refund_sale": {
+      "description": "bc43952b22ffce7518233270fe60efc6c6bd57420a06d7569adde83cb03cc0d0",
+      "inputSchema": "dcb3ce74997091e785bc594c4a5f9db675baadacb64a6888fd637b59a340abe1",
+      "outputSchema": "a03c60ade7cca14c7626964bdd60635f54f1162827cfb16342d2fc55abfc360b"
+    },
+    "resend_sale_receipt": {
+      "description": "8d6cc423d58f1dc6edbf31a0a89e7c85ea78a6910cb5ed08538bef31af167269",
+      "inputSchema": "0d61b35b5125185072f304fe85ff42bc3609b95bb9e7d8d71069412ededc2a7c",
+      "outputSchema": "f78967fc8785ea507fa8f444aa213fae6f774fe2569c0408b2d0191b5f337db0"
+    }
+  }
+}

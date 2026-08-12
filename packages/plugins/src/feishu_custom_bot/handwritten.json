@@ -1,0 +1,4 @@
+{
+  "actions": ["send_post_message"],
+  "reason": "上游 inputSchema 在 `post` 上用 `anyOf: [{required:['zh_cn']},{required:['en_us']}]` 表达“中英文语言块至少给一个”,与 type/properties 同级共存。Zod 侧只能写 .refine(),而 refine 无法反推进 JSON Schema —— 自动生成的话等价闸门判不了它,契约会悄悄变宽。故手写这一个 schema,并在 schema.handwritten.ts 里把该约束显式写出来。"
+}

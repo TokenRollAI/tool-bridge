@@ -1,0 +1,71 @@
+{
+  "service": "faraday",
+  "displayName": "Faraday",
+  "authTypes": [
+    "api_key"
+  ],
+  "migratedFrom": "open-connector",
+  "normalizeVersion": 1,
+  "actions": {
+    "get_current_account": {
+      "description": "ae2e1b6d80f1f4004040ebb47638bb686552d6a1f263429ffb160b181dc9b5b5",
+      "inputSchema": "17a8d026858b085b6848cef50fd85cb5cb3a8151336271e84b3373c5196c65d8",
+      "outputSchema": "77a98de0c63a2f4391c079deb0bd21599fab2b29313d54827c92115fb9d99a20"
+    },
+    "list_accounts": {
+      "description": "26adacd887af605ba777b4f282d2ecaab43e54103a276f37e1e94655df0e70a0",
+      "inputSchema": "17a8d026858b085b6848cef50fd85cb5cb3a8151336271e84b3373c5196c65d8",
+      "outputSchema": "0700311c797bafaa2a50c186d048a9a1188541de7df1d9223c33349239f21bdc"
+    },
+    "get_account": {
+      "description": "8f51150d795d78de55702e61622f04af3baf829c99108d78b80402f8af3c1607",
+      "inputSchema": "177087c623c54e0b7bb7bc039b5e0085f88de87db7cea7fea30f54f869689029",
+      "outputSchema": "dd9d6e18810d85b1e6b6d2750d64e0cc5d067e9d22368e1e4f816fd42784ae24"
+    },
+    "list_scopes": {
+      "description": "9c90d28ec1ab84ab7ec242985cbba4d5de405e42d9c1379c4a341bbba430ef2f",
+      "inputSchema": "17a8d026858b085b6848cef50fd85cb5cb3a8151336271e84b3373c5196c65d8",
+      "outputSchema": "755e98690764cc221187c9a853a676f70323cef2b610bd8187208c854052c42e"
+    },
+    "get_scope": {
+      "description": "50424716a0e7a852e03d2649983e6fc0b442b8e4282d7f9d86f157f7b1025f72",
+      "inputSchema": "70ec2c1ac1d434237d57be233249df8e9f2086f75fe260d0a7a7b22416c46286",
+      "outputSchema": "44b02e2365424cd03892d4e7eaba920747235e4e1c412e6e8135dbd0a5ed629c"
+    },
+    "list_datasets": {
+      "description": "afb8f5b0ac8251708b76ac272615486519fac70f5b575f5bc14394f45937add0",
+      "inputSchema": "17a8d026858b085b6848cef50fd85cb5cb3a8151336271e84b3373c5196c65d8",
+      "outputSchema": "31f3ca7c603f214bf5ec1ab190c083c9630b63919dd4e40d4159389da4a0b75b"
+    },
+    "get_dataset": {
+      "description": "b5650031c995387343870e2ff8e2ebd257772b7874c28d4690c6eb96c0eb7d86",
+      "inputSchema": "4af1244e4c76feb28f52afdc998ea2c2f56937466657ca962720cd9a557368d8",
+      "outputSchema": "4c66201d4832f9394b0f43e5400539b796c7daa09d7f1309e48460d94454a8bb"
+    },
+    "list_traits": {
+      "description": "a5e90ecc957c008e0069d42bb2b8aa18a404cf59df2d10b8b2680896fcc71da7",
+      "inputSchema": "17a8d026858b085b6848cef50fd85cb5cb3a8151336271e84b3373c5196c65d8",
+      "outputSchema": "31fdfbc7b99b1c780f755b8d207208008a3baee9d77be14c376e7464caca123b"
+    },
+    "get_trait": {
+      "description": "42d5052af6d21cfee87016480150a56609ad86943484239c4654cacb9d67ef55",
+      "inputSchema": "1b6a791573ac1420a4913b5d5d9f8b4b452575dc4b83068c10a36a4f67b2e6af",
+      "outputSchema": "dd2cffa82e20ee2ab7893a5c625631e173a4ed11aff20032a1e96c3bbdecf91e"
+    },
+    "list_targets": {
+      "description": "94dfb849729dc1ce68d7abbc900f695f7638ef689ebfbff482f14e815cef4061",
+      "inputSchema": "17a8d026858b085b6848cef50fd85cb5cb3a8151336271e84b3373c5196c65d8",
+      "outputSchema": "1418d5d635a00be9e2db00dc1afb8dd2630e8833dcc695496d55acfd19325706"
+    },
+    "get_target": {
+      "description": "b60b0f34e0015f130aab1ad8f13ffbf6ef5f7df91afa6aa9423f441ddc493606",
+      "inputSchema": "ecb449c1e9994bcee6db992ebee129c1954f36e581e7222977626189d9289533",
+      "outputSchema": "cc34e18a82495cd300e966ffad9091d4b8b51994fe07ba746c71d67e7b945d9b"
+    },
+    "list_usages": {
+      "description": "f97cf3d3d2cea8f43479d0aa851f2804cd1b79ed76f90c7357c71140b7b32efe",
+      "inputSchema": "17a8d026858b085b6848cef50fd85cb5cb3a8151336271e84b3373c5196c65d8",
+      "outputSchema": "da294a3c80c86048525668c3625268398565cad7586b2f791ec36d78833fdcaa"
+    }
+  }
+}

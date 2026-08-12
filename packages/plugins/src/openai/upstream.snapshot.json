@@ -1,0 +1,86 @@
+{
+  "service": "openai",
+  "displayName": "OpenAI",
+  "authTypes": [
+    "api_key"
+  ],
+  "migratedFrom": "open-connector",
+  "normalizeVersion": 1,
+  "actions": {
+    "list_models": {
+      "description": "8e565850177ec5c4d72ee5cfb86e5e5567e449509fa2aeb5ca1170a1d1c72985",
+      "inputSchema": "03d52f92239649ab59b1bbf15c96249920d05a0fbc749bbdfa4e1002b2e6fa55",
+      "outputSchema": "5a86e56c3fcd4cc0f0286ea788cfd626cb3d249bb2732356ce65e2dd16223c4a"
+    },
+    "get_model": {
+      "description": "d82dd7e809662b8a6a5252f4464dfcd36d8b6822632e11dc9f626e3f73f6d053",
+      "inputSchema": "c167bd0c4d79603dddf8aba42e1e736a92a83b93949c4822a9de5561fd7df21c",
+      "outputSchema": "ef5f5a5729bfd76611775227a341a17cd808145cdfc1ff20b1dc56744bea9215"
+    },
+    "create_response": {
+      "description": "08eb582bc3354578af11b79ece9d9f94f6b5b7ff66f2f21fae36b449cf7e7ec0",
+      "inputSchema": "452e096a91a94f1a5ed97b5f94e9feb98c6b88ebba97f9c4a3cdfc86c563a38f",
+      "outputSchema": "e0483086fe15abae466c86d666512d3ef1c74e27c474ce7bd73a99fc455522f0"
+    },
+    "get_response": {
+      "description": "457afc12edee02df529479b2f3a5d362655cec7a26ec7560667aa29bdc5b5f98",
+      "inputSchema": "4ca175bfb8f139aed1397db3677c2d56214ba57c2c86cdae3413efb7e064a04d",
+      "outputSchema": "e0483086fe15abae466c86d666512d3ef1c74e27c474ce7bd73a99fc455522f0"
+    },
+    "list_input_items": {
+      "description": "1983c462199bc2564e76360e36d174ee66dbbcd50cd5605023d0b537a7c10828",
+      "inputSchema": "06d42562b864546682c88b7be61fe91468d7df131095642b8b696742ef5f1182",
+      "outputSchema": "7eb4650d067de11cb2a03cb34c38a6f3e8446df817b92430e2fe2a8e1657b5a3"
+    },
+    "get_input_token_counts": {
+      "description": "8b600a0b2f5fd7ece882f1a8226c7e4438d6d89b8288a06e2b2ed87870ffd075",
+      "inputSchema": "f2c6f6d519c5b398d000242b87a576f737d3b43e55dd05825e3bd0da22b507a5",
+      "outputSchema": "fe1143c19dccbbc516f0e086f0a4ca7eb46b62873e3b06abc9a4bcf75e08d9c9"
+    },
+    "create_embeddings": {
+      "description": "2cb41b288f54ad5d28cbca643439c6ee8fdeabd657a1d3b321c738dba6f05cc4",
+      "inputSchema": "9c157e2a7047bd6974f4ae88cd848c8fb6f6bf18c212c4e1b2c1f4566bbd7bd4",
+      "outputSchema": "7f0299798ab70d19e3c4c28de9632b85dfe819a8ffb00fc5888f2a988d546147"
+    },
+    "create_moderation": {
+      "description": "dbc215a04bf47840207e7db23df0edb29d9968ef22dfafced9ca7b357f09983c",
+      "inputSchema": "c3769d2623f026a9581aa91e9443535a158767554c44bdf17e7ec3ca714a89b8",
+      "outputSchema": "c151dc918812a724fd939dc5c96296c7dba885d527597a9c729e25f405832828"
+    },
+    "create_image": {
+      "description": "409aaa65020cfe5c2dd5b66621bbdccadd68787912f64e8002f2eae319ddf4f6",
+      "inputSchema": "d11f197f21d7d4d80ab40f5b5c5732eb37f340831e0c8721a0e845c6092d5b0e",
+      "outputSchema": "f8b1daf79b26a09d47bf38a77796ba0a89e308fecdf848ee66883f71abc5ae55"
+    },
+    "create_speech": {
+      "description": "d30d0dd6feff9617d83b236fe838e1e022dd693a8c02e1119d9dd90fb0d318d5",
+      "inputSchema": "59d528ddc11803bb575901058ed0039f27cb9d6f1284f46614d81d208f92ca17",
+      "outputSchema": "9871b1bb2f40fe0059b7fc4b132a7598b6bb122b65394bc6b3d763c5d549fc42"
+    },
+    "create_audio_transcription": {
+      "description": "4ddcb5d90d067480b45ad14d1988f74297efda42b20e1430d7272927db4d84d7",
+      "inputSchema": "02521c54ee21c85077dda02062b9dfa5491b0fae95fc3d60cf17171f7127eaba",
+      "outputSchema": "48ab82792dad0b8f922f83b9b693ad7b26612872d64194102f4cec36405b5a88"
+    },
+    "create_audio_translation": {
+      "description": "9cf61c45ff9a711d8df01276c4c806cd3c2e6c2986201cec80a982231e288bf7",
+      "inputSchema": "f9aaf25bbd0922ab55048e47afe60da74df27978a334be14988f340154be32fc",
+      "outputSchema": "48ab82792dad0b8f922f83b9b693ad7b26612872d64194102f4cec36405b5a88"
+    },
+    "create_batch": {
+      "description": "5de2d19ee5f7816ceee4e10ea47d5e27ca278924fe8e1275c125b86b237f1426",
+      "inputSchema": "497e0bdd9a5cf5bdf22353128fbb768521b52e337cc7adb93cdaa7c5fdffd4bb",
+      "outputSchema": "bcc22d630984d01819bdeed81bd52d0c5f624c8249fb8b0ed9309b9a0d3c8e10"
+    },
+    "get_batch": {
+      "description": "33df816a230d6b8ae6fd1108914b32c67de2075d554542d7c151453cc6c41ed7",
+      "inputSchema": "55f034d2630f3ba465988f35ae3327bd30a95bed713773720339b04586f9f1be",
+      "outputSchema": "bcc22d630984d01819bdeed81bd52d0c5f624c8249fb8b0ed9309b9a0d3c8e10"
+    },
+    "cancel_batch": {
+      "description": "6622b584b32ac1b14e3a03966cc33191addfe4320ab4a9042e1d8bd4b3b200a2",
+      "inputSchema": "55f034d2630f3ba465988f35ae3327bd30a95bed713773720339b04586f9f1be",
+      "outputSchema": "bcc22d630984d01819bdeed81bd52d0c5f624c8249fb8b0ed9309b9a0d3c8e10"
+    }
+  }
+}

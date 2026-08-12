@@ -1,0 +1,36 @@
+{
+  "service": "open_exchange_rates",
+  "displayName": "Open Exchange Rates",
+  "authTypes": [
+    "api_key"
+  ],
+  "migratedFrom": "open-connector",
+  "normalizeVersion": 1,
+  "actions": {
+    "get_currencies": {
+      "description": "e6ca3596c6625c58f396555ce77f9239c6897eff734b31e020e71f8e52d161d3",
+      "inputSchema": "64fc965b89aeea757acc40d1db2ad7c9dbe7e33b2afda8d0455c605bce078c98",
+      "outputSchema": "b32ef4f560633d8e8e63f0da95d817c0bae4a51ae44f9173e99cbabab9efd651"
+    },
+    "get_latest_rates": {
+      "description": "525c998e1229c8bafe4759a91cca65ee6ab6212aeb7d239b3df896fee7b573e5",
+      "inputSchema": "be0383da2111c12105af448bf2f591bfb2e41c9fd02a8a1046255072faa8d7dd",
+      "outputSchema": "1a9856dfedb89d77b933e8e56af385e5d81d2078ed0396d55a2df45ac021d9d3"
+    },
+    "get_historical_rates": {
+      "description": "ae53e5f3b17fcb136029ee18d7a020b273234e5bd04154ea7f1e98121370917d",
+      "inputSchema": "903183896f9e2712152c85313da3b0ddbba9e68c2b954338a07d46eec5fa65e4",
+      "outputSchema": "e083275580c70e82a17f6c78ee909cecbb7f0fc274da94a038895a77386877a3"
+    },
+    "get_timeseries_rates": {
+      "description": "5b81d2dc31a700afd74000e2053cc84a33fe4eb7ac4428bb1aceec107b833f4c",
+      "inputSchema": "74ee5380dcb79392944fbef38bb254cbdd537bc672c8963d6c8b30d044fd9835",
+      "outputSchema": "c6169dbb85c73ad5796fc578e7fd52eb1a027ea1ff289ca5089e6944abe1061c"
+    },
+    "convert_currency": {
+      "description": "6d186b12bd3f638edbb3de691831d6b5dc92b61816c32b19ee293428061410e0",
+      "inputSchema": "39eb0393f2c64a2b1e6946291d05b0b7ab416709b81c1316fd88a83ffc49291d",
+      "outputSchema": "7e016d102208de796813c8fdbdbfb10649e759e1d6c5b9a92bf8bbf56257a678"
+    }
+  }
+}

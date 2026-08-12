@@ -1,0 +1,31 @@
+{
+  "service": "cincopa",
+  "displayName": "Cincopa",
+  "authTypes": [
+    "api_key"
+  ],
+  "migratedFrom": "open-connector",
+  "normalizeVersion": 1,
+  "actions": {
+    "list_galleries": {
+      "description": "10e2297ba7a4f223235580b26570875bf88285f4f719a5966fb1857e5258056f",
+      "inputSchema": "6ca386aafa627dca54b03fa431aa560578bf735fe5585bcd85a562bb2822691a",
+      "outputSchema": "6a64bbb11a45e677cd6da55f771a903dd2fb0b863f26fec18f2ec3f69ecc9901"
+    },
+    "list_gallery_items": {
+      "description": "f2270845d8fd437b085eb878ec8ce211b82c80f8517ddc2a9b8aa5f84f850c89",
+      "inputSchema": "63b8e7dcaf82d801d9404a3be54459bdf3ea20ef31cb25a5fb82e688ceb4699c",
+      "outputSchema": "d0720ed788a9dc03b962b3027216c7986aa6f4b4b33c935e0881b38ff27ee24b"
+    },
+    "list_assets": {
+      "description": "b8f778cdbd173cea5274934e416c2d99510be52b2dbc37e600b097909a105193",
+      "inputSchema": "933e131206eeec3c0809930bc4fd8b8cad99d33485883c8425397da1de5e8b87",
+      "outputSchema": "c782d807ace03159f39aac9f51c95459da82edb917a24614e77c731ea209ecdf"
+    },
+    "list_asset_tags": {
+      "description": "fca3aba8fae8500ff141712ba6da5827a178f11744e6c0a6b884e86d29ae6e3b",
+      "inputSchema": "fff9ea82409b91fc3495c8714df3bfa20d0f4d45152505123380811bab7d33fd",
+      "outputSchema": "ba7f49d1e2f071912d2f0ffec2927ad33790a463b17d6c8613269c7f638af297"
+    }
+  }
+}

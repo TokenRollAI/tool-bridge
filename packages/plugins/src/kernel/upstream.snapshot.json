@@ -1,0 +1,36 @@
+{
+  "service": "kernel",
+  "displayName": "Kernel",
+  "authTypes": [
+    "api_key"
+  ],
+  "migratedFrom": "open-connector",
+  "normalizeVersion": 1,
+  "actions": {
+    "list_browser_sessions": {
+      "description": "bcc9ea0d42bd394b2d5619a1b25c989dd80a0c4227b97a22ed1c84ce0d77ce9d",
+      "inputSchema": "68df923f70bca9e1e8fb1de1a4275cc6ae2b92298f11649fb3f8aa64d8acd77a",
+      "outputSchema": "332ff2790c7238b43ea07b494c38918ca2b0c15ab3cb4859ca98815b53bba753"
+    },
+    "create_browser_session": {
+      "description": "7bb0c3f329b04c60c2e26a61b2ae9bf27321ab23af190d7338b8f97f9129f7aa",
+      "inputSchema": "8d33f264f3b7bd812bb195cd67d7e4e69c6c9288f6cfe773e948b2427bbbd51d",
+      "outputSchema": "241d2945ab1e2e4b973ac6cab13db9d9348be232f288573a6a6601102d0c4ae9"
+    },
+    "get_browser_session": {
+      "description": "67278e51e046a124831cac1acdee1faa6df2e68603c3e8e442f6ae528ea87f53",
+      "inputSchema": "cf28f9f0010254ff513486e8686998024ebc75af6c4331af31266293b333f9e4",
+      "outputSchema": "f0016073d4bade9ab41e36b2d2a7bc8302460e6dc1ba71340dbc90b1b9a5290f"
+    },
+    "update_browser_session": {
+      "description": "6641b8a92fd67bcc05bc4a588cde81638d375c49cc4efa76f671ef0196492e70",
+      "inputSchema": "adb0e2973c4b11fbd273bccc6783124d4031175c76146f3c2e20b6837eb61afd",
+      "outputSchema": "9930a0df9541fdd3e5028698290c7ec278e8d00b8929e8016f9fe17c408bd2df"
+    },
+    "delete_browser_session": {
+      "description": "f5e7fd1c100c2916c24d42b34083c4790ab0ab86589a6b947432b6d063cb28e6",
+      "inputSchema": "f91499caa5af5df2e3fe5eb55c192986d55fba09b2501e4e613f3353e581431d",
+      "outputSchema": "487abc13fe44f53bb6545bde945f3fcba44537e0bb2db1cf32f1dcc689a42831"
+    }
+  }
+}

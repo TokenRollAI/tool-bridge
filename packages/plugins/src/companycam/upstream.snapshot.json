@@ -1,0 +1,86 @@
+{
+  "service": "companycam",
+  "displayName": "CompanyCam",
+  "authTypes": [
+    "api_key"
+  ],
+  "migratedFrom": "open-connector",
+  "normalizeVersion": 1,
+  "actions": {
+    "get_company": {
+      "description": "2a53e329bbb22d2049deabde2dcd1d98f1809b408db1d80ac0e4cf876451d35e",
+      "inputSchema": "efdd2c921e669424c11adb3c2f0bed8c7620d1700e9a417174903e81c8a2052e",
+      "outputSchema": "d22d0343abf2db73b7ada035459c88b1b1d9c706cde312594df593d4437bd586"
+    },
+    "get_current_user": {
+      "description": "0e66443607d5184ca57de18a3feccad2429343081c3e19018e85b6f769f89baf",
+      "inputSchema": "d471cc625a73d13ce6e8a07fc35059efb3521c5b70cd160a0537576319bccf76",
+      "outputSchema": "d2c0b885c92a020cd7205caec0f575f18e8a1bb001752895b15b3f251267392f"
+    },
+    "list_projects": {
+      "description": "c884e0e6e6e2d2bc77f307d21370adc8a3c91b0dd939aa7a0147dc6159d88ce9",
+      "inputSchema": "3238e7399c2ccc5b1b521f6df652588d6e974f76842617168cfd63560abc9e15",
+      "outputSchema": "0338f80a4e61cf86edb135104ff2e59a8b00933bf10e2e37272a811d2759d808"
+    },
+    "get_project": {
+      "description": "986f22be489fd319420d6dc7cddcecccfbaa91a53fa923cbaf594c1ce38752d6",
+      "inputSchema": "2c8d7b7878f42220a50a7b344cf7dc1a2fb7b41d1054b90f7908d4a41a9df2e7",
+      "outputSchema": "8646e0ff5c5a2ff573d5d30d3e9b9acc8d2e8057983cfc9531c691960944f27f"
+    },
+    "create_project": {
+      "description": "3d5ebcc9d47cbb020fb617560e5866845c0fb716eb475888fd10b4cc4c506eb0",
+      "inputSchema": "cf1d0918dd507d83f720054b30a73c517c8596038fdbbbc4572f3e3af01a7278",
+      "outputSchema": "d5748907403c5848c22a647065762064b59dea480316de142c5040b8f2d11c91"
+    },
+    "update_project": {
+      "description": "a11bc75c77c353546011d3c86f759878a339ec4ccee47ff2752edbfa7601edde",
+      "inputSchema": "19c5816305cbbac81bcf6e334326af2efa06b0b5aa6da9633649d552d3a4896f",
+      "outputSchema": "cd78b211104f79b3383790306b801154774ef4b5b246bc2e0dadafe34e35cd65"
+    },
+    "archive_project": {
+      "description": "26685a1d5f3d9d35c59c025680a4c3e58e9819001b39e6d75ff4a665c5697fc6",
+      "inputSchema": "28a4f06b6540c86403979d56b2230713fa52fe5a6a2eed19caee08b86da2d308",
+      "outputSchema": "3875d2b9e5b4acceb5412102ec9de1cbefaf45e5360f2786f1fc98577f7ba86b"
+    },
+    "restore_project": {
+      "description": "d283bda3b0316f24d513d150434a9471f3337ef6b777469273bd8cf2ce71ec41",
+      "inputSchema": "6b5001f1473e4316dc5d51a1fe70548bcb3815c0d17b115fe3bfea3df519c345",
+      "outputSchema": "5247d943f8cba9c7657183ef929c10b5757c33324a86f92d5c0b4e2a748648d2"
+    },
+    "list_users": {
+      "description": "50d56c6f6a4636104fd73a74e16a7b1059965ebaf8fa47e616db58f189652cb7",
+      "inputSchema": "239ebf835504dcff337b036f584b97fb13ee41b0c855cb3ec49bd8fb253e1845",
+      "outputSchema": "1062901cdebff1b383abf1c4205a886f48b35c468b02d2ac138b4ac02f6cf8b0"
+    },
+    "get_user": {
+      "description": "427fa981ed2d5997f82f49bf63b7a86d305dc3a69ea2854a1aed08789de15c48",
+      "inputSchema": "19e8597e7862272fb752d0820c6752fb84504b945d2969213f57364a5780d4ee",
+      "outputSchema": "f31448f6179211e10ad4420d70243023c263c4138672aea29494bbaa370b2d79"
+    },
+    "list_tags": {
+      "description": "facf29131f04bf4cf7b8fb3435760cf5c8eb0c0becb8a62b305d76d51a0a4b00",
+      "inputSchema": "36d77d47ffd0f1de8d459372671df7a505ebcb1f732e341ae0b54dd8a95ffee1",
+      "outputSchema": "959576d32a602df94b6fad5159109ecbb0c725fce7f2707bb6390f2b9dccdf05"
+    },
+    "get_tag": {
+      "description": "a62c934c4880cfcbece5270904787e9fd5f35e22d67a3ba96ecfeab49f2a27ff",
+      "inputSchema": "a2956f9470361e19e97aba6d19afffbc64272c6ad81c3c524b26226021614a51",
+      "outputSchema": "ccb77b9d6a0cab075313a7e4a246e02bafffda0cef14b10b77a320bd4a501d61"
+    },
+    "create_tag": {
+      "description": "eee78de710a9f4452b64f7494b60adaa743ca6a037b40772f62e5cb4bf2018a2",
+      "inputSchema": "463c3332f9e443e28d2bde1ba4fbb5ec0ece75afbaf6ae5100a6536c942b991e",
+      "outputSchema": "87ac8dc30d8c3ef5383574ff3c25b3ad7d18358941bac461281b8961b2393af7"
+    },
+    "update_tag": {
+      "description": "bf4f87264ed6e02bbbf149d780a1bc2d3b70c79638d8d55585400de5dc02d880",
+      "inputSchema": "f88277b1e3fb6bff3a31abc6b8fac5e4d5fee5f130ef97b5777b53db15ed8a6d",
+      "outputSchema": "00ca2594a3d35aab5d81198a40e460446945a23a81baabb659691697c3a46f1b"
+    },
+    "delete_tag": {
+      "description": "6b8ddfc4d692de5c5a6cf5bef71c77f211c4ef7aff4a0b43262a38271265926e",
+      "inputSchema": "c9bea4ad1af370d8e241f926c808cc2179d53ab59bf296258b75e130c4492b86",
+      "outputSchema": "6d31328a823dba9b31eef362e5635eb6348880a29dca3d1dfe9ea1a05b79ca30"
+    }
+  }
+}

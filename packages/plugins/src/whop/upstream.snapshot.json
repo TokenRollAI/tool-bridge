@@ -1,0 +1,51 @@
+{
+  "service": "whop",
+  "displayName": "Whop",
+  "authTypes": [
+    "api_key"
+  ],
+  "migratedFrom": "open-connector",
+  "normalizeVersion": 1,
+  "actions": {
+    "list_companies": {
+      "description": "e01e8f79e133c08cac95bfe0c6efda6b67c7381f3f6da0ab8752306e9f6dc2d6",
+      "inputSchema": "c37295771da4e4c6b658fc1ff958443347a627e5c83c5cd5b3c38ba9dc82691e",
+      "outputSchema": "38a998f4059638a64a1b636eb9f3601465dfdbd32ff4fccf9cad3368756b7768"
+    },
+    "get_company": {
+      "description": "d2cfaf28c06c0c5276ab9d59b63f83b607db650d80ee541ef293a8b7a79a997f",
+      "inputSchema": "766bf2eb57ec8c7c39d3acbfb8856c44479199d2fedfab473add9a6b87c34bd4",
+      "outputSchema": "7dc96778bbe40414a33a63957b352d0c66fa637fe5694d20348b7acbb036d1e4"
+    },
+    "list_products": {
+      "description": "b14cbbe3d36c6897e9d21503eabd90851f172054a5a32c678ca65a92b7532cc6",
+      "inputSchema": "f00a85a5b425e962d8a11581b879f3aebb53fb2a440c95532a5ec562c4a5be54",
+      "outputSchema": "58113738e96081eeffd363ff978262ef77cfd1cd8387ba96d31a2cd2a7ea4d17"
+    },
+    "get_product": {
+      "description": "4b5346b1d92b5fe958b29dbe451b70b1e88c3a9508aa261d60ee5c37d8ed45db",
+      "inputSchema": "c0985a83f419b817029c7a03c42865aa324fd8c51dab734978dec30b9875c606",
+      "outputSchema": "d9c2532fc7b1a7f764e37cb2d582309707c6090d73b4eddb046372e8b53f206e"
+    },
+    "list_memberships": {
+      "description": "94311e86ed6b9488f00c3e30ae189c57c621dd99b156e5e520b59e7d6634376b",
+      "inputSchema": "f0e1569e9db8b36b0bf3a5be0f719a7ac3f68b5714473c636179a40e6ec2f64c",
+      "outputSchema": "49d0f4a251283984cab3312fe44dd34cd867594b240e4e8ccbb97d744adcb728"
+    },
+    "get_membership": {
+      "description": "f3d40bbe6105fa42b4533c311bf632698699f9135997d8d8a168ce113cac47dc",
+      "inputSchema": "692115993422139dc6a6ea45eea45508b78ca2b14ba3bce5fb8589f605e911c1",
+      "outputSchema": "63ec97f7e831d3338774091bbd1b3536209f24ab6a552cf7ba09749122f0577c"
+    },
+    "list_authorized_users": {
+      "description": "d2696e7f4b4f16ecfb0f83c349be4b23d1717ed3d08bdcacc1900f7dd68a7bba",
+      "inputSchema": "554048a5ac4194734af8dc3b884163b453d8b6ccf5f1168868f320bf7cfcacaf",
+      "outputSchema": "36a4921b48ebb6e0a13d1185b3583283f83b9553f36e6c9a63e2edf435405b95"
+    },
+    "get_authorized_user": {
+      "description": "374652e63dbc275462120f12f301cc1f56880612226bd4003333a3f9e4bd25db",
+      "inputSchema": "b3ac7f18e258cf2ba2ad65897a8c6bded8f57f8a7cae51650c58f83e2f1f4c08",
+      "outputSchema": "77873fa8f003a96512af66e43623e0510ca6744fa3e5cac03c8834236382d75a"
+    }
+  }
+}

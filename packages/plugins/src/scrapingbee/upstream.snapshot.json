@@ -1,0 +1,26 @@
+{
+  "service": "scrapingbee",
+  "displayName": "ScrapingBee",
+  "authTypes": [
+    "api_key"
+  ],
+  "migratedFrom": "open-connector",
+  "normalizeVersion": 1,
+  "actions": {
+    "fetch_html": {
+      "description": "3cf682ae35826a16224844e172af97c11742fb0723ff2059abdfde456ea0c1ce",
+      "inputSchema": "596d5b5b9f963d86f068054821656b12684b94e3e8d8c0b17994c26684dfb318",
+      "outputSchema": "15a85f60b43bfb93f15bce2e5ab6a40dd0acb0af25f9b5402d07b5147a765699"
+    },
+    "extract_data": {
+      "description": "622388a035a3b15d1ecedf8af83f87a43a2405c5c9b327a46535100dcbfc7435",
+      "inputSchema": "31d8b08a4d3ba6630b6b32cd95179a4cc13efb07d4dbd547e264cbf95612d56a",
+      "outputSchema": "9c701e58c3c22e16179df3f81994aec02c1b185a256eaf08672e40023be8019c"
+    },
+    "get_usage_stats": {
+      "description": "825b54a0c3f9e153c943a050f9111aadbc010b9db3154fc440ef61d262ccaf7f",
+      "inputSchema": "8f900bc240ab1370d7d46b76da611a6c3d232460cfef04f1331af3b9657b1d90",
+      "outputSchema": "1265ad94c274eed8e90003c372d0d2238cfa7bb9c621abd54f17f410204a4cec"
+    }
+  }
+}

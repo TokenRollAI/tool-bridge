@@ -1,0 +1,16 @@
+{
+  "service": "livesession",
+  "displayName": "LiveSession",
+  "authTypes": [
+    "api_key"
+  ],
+  "migratedFrom": "open-connector",
+  "normalizeVersion": 1,
+  "actions": {
+    "list_sessions": {
+      "description": "4f6526772df0f7130b8a8e4056bbbf87c31bc799cf548bb72004d6d98ec3915c",
+      "inputSchema": "2ef30d402015dfafd6072e16a3d0d43e02420f8619086eac8993ecb88d1f401d",
+      "outputSchema": "cd483b2457744022b30f3db2805ad4ae80ce7dfa28b63851fa177b587565929b"
+    }
+  }
+}

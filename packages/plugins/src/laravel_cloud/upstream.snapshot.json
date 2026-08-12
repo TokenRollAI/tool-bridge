@@ -1,0 +1,51 @@
+{
+  "service": "laravel_cloud",
+  "displayName": "Laravel Cloud",
+  "authTypes": [
+    "api_key"
+  ],
+  "migratedFrom": "open-connector",
+  "normalizeVersion": 1,
+  "actions": {
+    "get_organization": {
+      "description": "729658741c212908a6c794c10db043423d79952d72e6544ac20d45800a36079b",
+      "inputSchema": "0b5f6195038d0d49df035b9cbf97ada7d55269d8d87668043ba67cdf08928e18",
+      "outputSchema": "f06493da8cd73a7273489fdd9f2f4ebd62951f511bd0e32ee9419fa6c56aad08"
+    },
+    "list_regions": {
+      "description": "d5e97ed6f8f5aa84819a07571f308e317e1dcde09140c3d9121c7d7b2784a638",
+      "inputSchema": "7b432fbfd2987189c17ed588876aeba4fe83c8787f24dad24c02ff6dfad51b60",
+      "outputSchema": "ce62d99e7dc40674c818f76f636005007b9820b92f42d49243b27291c2e36124"
+    },
+    "list_applications": {
+      "description": "48889dbd7b843b9e6e92e2ea26f2c8beaacae0825ce9a0802592ba9b933c13b9",
+      "inputSchema": "e0a88205d1c801ee5c34d6235ac41d4386627d7bddf9dd164cb187b5b583661d",
+      "outputSchema": "0fa207ba15a52a9861fdd5a785e8211dcd7a4a2aadc3249b3355696bacb63e3b"
+    },
+    "get_application": {
+      "description": "4f61082d60a9a0f08877f6fa2580de12363ef0a0a3d049500be663a57ec86c63",
+      "inputSchema": "30439e03cce64d7649fbfac270b50bf8962ef10d8fe3b27c67c315551760084b",
+      "outputSchema": "bc1b566984c3e3a49e83d2d92de52360317e429751ce926215f0bd18eefb1f61"
+    },
+    "list_environments": {
+      "description": "902ad812e15d0f0218bbbb9b39437dfa14ae11fcfadc9ad814fbc9e1e3d495fd",
+      "inputSchema": "cb7d8e475018b28c5376ce9cb3446df9ce2e0dca4645f72b577bceebd7f1dc96",
+      "outputSchema": "3d232af21690ad1443de10dbedff26b37df13f2fa9c7cab8dae5ee673613b11e"
+    },
+    "get_environment": {
+      "description": "66c6639f4c08662c163cfa24d007432fd267c86896823ffeb726302430e1c5d9",
+      "inputSchema": "93a992dda91cb8b1f991e64daad03cde62206da47e017acc34e35b772f5fdad4",
+      "outputSchema": "c11fe911bc426246992694950d79017bcceee291377f2ac5b6dcf04ebf673b86"
+    },
+    "list_deployments": {
+      "description": "ace6f03402b111744d2b1defbefa1f6a0705f1a85bd50dfb6ee2755fb8f33301",
+      "inputSchema": "190814be67f564c01c04e2c5ca2eec4d85197248a9c79aea9e99cc213e29170b",
+      "outputSchema": "de9f23df6e1c3a041f40781a4ed86549f7d3ae1129a36cfc15f444cf4b740e81"
+    },
+    "get_deployment": {
+      "description": "b286d640722327fcb1db1f47d0883149b074c13543d634fad4dc47154d22c0d7",
+      "inputSchema": "0709efa4d4ea5b4bca982d469ccee752e1ca391503e56d14b9a26ddc45940251",
+      "outputSchema": "525a72f54602fcdf42f7db32376bc01e974ca888254b29fba5df5dc649bc1e11"
+    }
+  }
+}

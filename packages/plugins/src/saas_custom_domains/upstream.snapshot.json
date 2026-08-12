@@ -1,0 +1,66 @@
+{
+  "service": "saas_custom_domains",
+  "displayName": "SaaS Custom Domains",
+  "authTypes": [
+    "api_key"
+  ],
+  "migratedFrom": "open-connector",
+  "normalizeVersion": 1,
+  "actions": {
+    "list_accounts": {
+      "description": "b17b281ebcd470b59877dfe0c5b70c4e9a2a5a62c1501395760713d17477ec47",
+      "inputSchema": "473ce638878f029793142dae6b9c5dcafa7c4820af08be0a60d1c118152e4ad9",
+      "outputSchema": "bec6c60f6c84b09428a6ce0a1bcb8d648466ae5f25b0fba068a4ed4abf041645"
+    },
+    "list_upstreams": {
+      "description": "6e941a456184ff4eb98c6a89f17865a78194fb78e25e35a4f606905991900d11",
+      "inputSchema": "b620f43ab5a70627027c18d3018ed8210aa39e7c44be00cbbb681c51efad05a7",
+      "outputSchema": "4f90350b6fdab314f2bc8ab2c356db908822e3f03faeaa021d2cb2c49b40d8d8"
+    },
+    "create_upstream": {
+      "description": "8cdf8ef10670407409183fb7cf030a5c6e9757157c3c35b5e48d4502b22bf748",
+      "inputSchema": "817275092944b79512ec93016112cd2a59a7f60824b5e77f8459a31e9e500af3",
+      "outputSchema": "cf75df27d12f349ec6b8bd4768cbd10ec5482d79836bf1b14ed649579881f21a"
+    },
+    "get_upstream": {
+      "description": "c76fc4c1c3c7d8ec3f1d9e1b41ecb66d90eb093a0eee5b9e1c704ee8ed9e5665",
+      "inputSchema": "f79ef64d1f7b0f3ef1489323e71bc6895e9e3f967cb66f4c215992a4aab63f4d",
+      "outputSchema": "701f96d05e748048d14a05631dfc1ad84e2a16766e5d30c418f886810fb4ba15"
+    },
+    "delete_upstream": {
+      "description": "e9f33ec46bb86acdea5f8d2aa3954d54df08fae9cae52638aa3ead8512f2ca7a",
+      "inputSchema": "b5ebf1b40da4f8639b1bd8c136b4413a06b8db5dcd7726b3a4f9e253ee4dbaad",
+      "outputSchema": "d53c62df11accbd9142d82407a7ad1ef3b0dba2797ca49e544a35c31a2b2ab5c"
+    },
+    "list_custom_domains": {
+      "description": "85458480b65536cdc303c693fb9b47f5c53187e985202765b18a0b48329b71c5",
+      "inputSchema": "94e8e55f3b50efc2dd55ea88bb77b9b1bcd3cee663dda00d2031910c21c81ae9",
+      "outputSchema": "980230393ec9310e85e125edcf07808ac8c4a594c594e166cfe7af8b5a1fc645"
+    },
+    "create_custom_domain": {
+      "description": "71f1c3b3b4818b5af4427cf8121c37aa867970029c6ff17a46c7faaa556f77ff",
+      "inputSchema": "1c39aabc3dbf43cfb290b05bdb9bd8b98aeab001337dbbf9105af5237e72f6b9",
+      "outputSchema": "caac8d3499c3b6d8ecfd5658ffa2cba61dc1ab6c6d6ae75434e1a9e3eac50506"
+    },
+    "get_custom_domain": {
+      "description": "37b384f66f6ee7fbb5732c1723cffdc9d8e7fa4e943c7f499064c8bbf899fdb4",
+      "inputSchema": "4feb203c0fc3c2481cbee19834ebbf108e101d1c2e6342e99ab196a84443112f",
+      "outputSchema": "07ecee2ce94134cb06e7d1df2eac75c0e9b0674f30a11d6eabffffb787715e9d"
+    },
+    "delete_custom_domain": {
+      "description": "1194ad15e5b88ae19af4fa70d33027342e763632aadb0a019171af00f1efb6d0",
+      "inputSchema": "4feb203c0fc3c2481cbee19834ebbf108e101d1c2e6342e99ab196a84443112f",
+      "outputSchema": "559c30f3a5e939153d3473629e046ef45f9bf3fbc080173f8d18c80a09e676f6"
+    },
+    "verify_custom_domain_dns_records": {
+      "description": "064b51e274a0ef045a27f146612304502298990d7d69c9baa067da5a73bb287b",
+      "inputSchema": "4feb203c0fc3c2481cbee19834ebbf108e101d1c2e6342e99ab196a84443112f",
+      "outputSchema": "62199764d44be9beb7ecde287d066c1fbe20a7b1cffca58f680d60895e63c9e6"
+    },
+    "purge_custom_domain_http_cache": {
+      "description": "f816a0975540893439119ba449a77ca8be658bbba41b21953c3f96a8da1c127c",
+      "inputSchema": "4feb203c0fc3c2481cbee19834ebbf108e101d1c2e6342e99ab196a84443112f",
+      "outputSchema": "c112cde426660ebe650e901020314abde66070f9efc54718efd03ba3184f46bd"
+    }
+  }
+}

@@ -1,0 +1,41 @@
+{
+  "service": "chorus",
+  "displayName": "Chorus",
+  "authTypes": [
+    "api_key"
+  ],
+  "migratedFrom": "open-connector",
+  "normalizeVersion": 1,
+  "actions": {
+    "get_current_user": {
+      "description": "e540c9159596b32e1d0ea278417e6b30209bcd77cb99f8f92892c1a3517a9212",
+      "inputSchema": "cec0c108a4b947f3ad745384c6da062ce3e62b0f5ffe8ccd9f2088e5c650f666",
+      "outputSchema": "d9463c7b21e1035399565de3cd9c2b65ba9ce0d410b00930c095b12ccd6ef0ab"
+    },
+    "list_teams": {
+      "description": "f1c75f6e6ca7afbbd8aae9e1161023a8b560ece3f1bb2e5379ff3f1ac445a70c",
+      "inputSchema": "cec0c108a4b947f3ad745384c6da062ce3e62b0f5ffe8ccd9f2088e5c650f666",
+      "outputSchema": "aa62255fad9c9f8a2bc66775fd7001f15d12fbf2767048768decb272cac24c28"
+    },
+    "get_team": {
+      "description": "daa1b4705183df28237b6106b6695cb74b8c1769b5313df744902c9c03b0bc17",
+      "inputSchema": "695c4d76cbfb12aa2bed8f1d36b4ba9cba2244b08886d4a7987b85281bb3e221",
+      "outputSchema": "0a5657c0849ff7ca73aa68d3423260af8647063a2da6b89eaad00da7185d198d"
+    },
+    "list_engagements": {
+      "description": "cd5faf2e851cd3f829238171d307b6edc7f67cb5f08b8ddd0415e23d2c6abaec",
+      "inputSchema": "c5abd64cc85ef2106b3351c7df5407f10c612c861058c4bbb62734353aeded1f",
+      "outputSchema": "a3e8358ac575b631b0f327d1fa40c091986ae8f5f20d7fbbc21625af78725f4c"
+    },
+    "get_conversation": {
+      "description": "d5719d4830136e4d6aee40493624c7f65e9f3c66af354b11456f0f188d55c19e",
+      "inputSchema": "9e237d2be7e18f325ae7d03437044282c9f7f5030d520db8cc137fda29a13446",
+      "outputSchema": "56454356369bee284474d81286efc8c9270fac454739485fc11fc57a135df59a"
+    },
+    "list_scorecards": {
+      "description": "d83d305f3e7c13a7833008bbfb8435ffda37106d0dadc4d096696e61f38e929b",
+      "inputSchema": "ff11d14eb78b1b9a03f21bb393f3a51b1dc794d92b5442615df43d229adc3978",
+      "outputSchema": "7254f324f8d807bc04da31e110c8733e34db80b5564b686f018298344fd7644e"
+    }
+  }
+}

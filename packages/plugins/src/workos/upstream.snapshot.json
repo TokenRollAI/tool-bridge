@@ -1,0 +1,81 @@
+{
+  "service": "workos",
+  "displayName": "WorkOS",
+  "authTypes": [
+    "api_key"
+  ],
+  "migratedFrom": "open-connector",
+  "normalizeVersion": 1,
+  "actions": {
+    "list_users": {
+      "description": "dfdd5ea30ca2a863952760b7071e283ac862d16025fd0adb61a5f3db20099f8c",
+      "inputSchema": "20bafe090e4b0008c9fbe5481ff391f5944e5ed48291eedf42a61072a9be4ba7",
+      "outputSchema": "6cd25c67214c5094d63fa88e9d417f7edd676c9969ff7e1d0ae4466afaeb77da"
+    },
+    "get_user": {
+      "description": "b730cb889953bf0dac1d306e8ab6ac3cdecde6e7f01c3058cbac982472c427dc",
+      "inputSchema": "e72cb9f23c28148acc3e26cd752329a2bcb93d4751c78a25f6f01b1bd56cfc2e",
+      "outputSchema": "4b40e1a8f1329f6b2d31a79553cef927d5214a91a25b40dbd99c56c6973f5b20"
+    },
+    "create_user": {
+      "description": "18abe55050cd8c95a3b7605b1fc10d75f0cf8c2c4949ebed96031706d72f9f3c",
+      "inputSchema": "a9d1e0b914efbf43d2841f8b43ce0a46d42602737bfa21d66d841c538bb4115e",
+      "outputSchema": "4b40e1a8f1329f6b2d31a79553cef927d5214a91a25b40dbd99c56c6973f5b20"
+    },
+    "update_user": {
+      "description": "c4d16a9369fd0f20f2e20cd945e05501c93bfbbbcd590fad5a98323b1bf2c47a",
+      "inputSchema": "438b897ef11ad441e1790fe46581cad0c0fb4f156631fbecbc3c24c5f45df7a2",
+      "outputSchema": "4b40e1a8f1329f6b2d31a79553cef927d5214a91a25b40dbd99c56c6973f5b20"
+    },
+    "list_organizations": {
+      "description": "e905a1af2e5d8356ca13cd34aa23f8d263e3ca732cebdb80c1aec5d4c25fc67e",
+      "inputSchema": "c3bb4c7c98b188c93e843251530fe9bc9bb69391a482485d13574d4ffad13845",
+      "outputSchema": "009a69bda675ca700a7e8ea5d44130fd1d94ee7be24a92a258daa4bbdc10bf10"
+    },
+    "get_organization": {
+      "description": "84a69d251c23d8fc92582693414d341de3cbe1d1b9f2d7a00c9d8ba7cbdf82f2",
+      "inputSchema": "446cbcee8fead6d12c612e17a7f9ce45d745fad966f9e09a5f1c2a58324f0b27",
+      "outputSchema": "c5f4b842d0f0b19f2032e4cb9ac278f7a44a59ca9663e3769411557bbc6d9e46"
+    },
+    "create_organization": {
+      "description": "8175ac5e6d97f67091a0af10de50559202be5748a4096cd0375a882aedf79ebb",
+      "inputSchema": "34f471fb12592aca387a33da5daa6af63b02394ce62584f40b7a9c25b6cf8e6a",
+      "outputSchema": "c5f4b842d0f0b19f2032e4cb9ac278f7a44a59ca9663e3769411557bbc6d9e46"
+    },
+    "update_organization": {
+      "description": "9a90eda06614d27a67bf3d08acaa76b018b837ee2423c990c63232d24163e31d",
+      "inputSchema": "ab20b3b3b0cc961d6df934dbc5c3f62e5e4835c32e1d8eae9ff268e79bbcceac",
+      "outputSchema": "c5f4b842d0f0b19f2032e4cb9ac278f7a44a59ca9663e3769411557bbc6d9e46"
+    },
+    "list_organization_memberships": {
+      "description": "48f6c3593a69b138ba40c4112f6937cb96c6c28fd482f61cf15d2b51baf05ee4",
+      "inputSchema": "098d80364f038c0e5bf0a98a1ba52077e0f87361c8bc81670e049e2d9999d9c1",
+      "outputSchema": "ecce356ae901a32dbf1bd340aee625b303ece37a4cbb2d78e1b77b0afebf0ebe"
+    },
+    "get_organization_membership": {
+      "description": "a5a95615d1cf85169c4a51449113f3987bbf7855f0eea9018eeec4f5eed3ee8c",
+      "inputSchema": "98f9a8f5713a3ab0c307e5b9569cc7943f24888e169ab8ebc79fc71fd4dea7ed",
+      "outputSchema": "ce815bfe33e649690629659df37740554876cce5e9ffbe946e5b91762e4a7b90"
+    },
+    "create_organization_membership": {
+      "description": "c613fcbbb33ae1546d853f03b4948f2e782736af701df596a2684531ac105089",
+      "inputSchema": "85984f96d29627da17ae39c27c20287c870c87bb6709c15c6483476b436406ff",
+      "outputSchema": "ce815bfe33e649690629659df37740554876cce5e9ffbe946e5b91762e4a7b90"
+    },
+    "update_organization_membership": {
+      "description": "1cda4671e96a96f30965369dd16f140868220f7b2da06802c62cfc025caab891",
+      "inputSchema": "937cb480c466de8011be835fc5385ebf38c8585807c6b51255b4c8c964eb8182",
+      "outputSchema": "ce815bfe33e649690629659df37740554876cce5e9ffbe946e5b91762e4a7b90"
+    },
+    "deactivate_organization_membership": {
+      "description": "14173eff87e07df84042c3e596d460eba6a593c92c7db10a3d6790080303889c",
+      "inputSchema": "72166aac12f331c24997d291ed3e84533fcaf4397fc118210067c065b44fa8df",
+      "outputSchema": "ce815bfe33e649690629659df37740554876cce5e9ffbe946e5b91762e4a7b90"
+    },
+    "reactivate_organization_membership": {
+      "description": "93edf8a96e1a6b9c50725e35ed13503a0666b70a10a266e705a6619f7c3e1146",
+      "inputSchema": "b9074132f6b5a2d711d4bfc4e1ee17387a4980d59e17e17dd213195a9ed41222",
+      "outputSchema": "ce815bfe33e649690629659df37740554876cce5e9ffbe946e5b91762e4a7b90"
+    }
+  }
+}

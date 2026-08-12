@@ -1,0 +1,36 @@
+{
+  "service": "feishu_custom_bot",
+  "displayName": "Feishu Custom Bot",
+  "authTypes": [
+    "api_key"
+  ],
+  "migratedFrom": "open-connector",
+  "normalizeVersion": 1,
+  "actions": {
+    "send_text_message": {
+      "description": "aa1a65243be800e50fce0bec965618a3f83620e638d3ac10577dc618f3dafdb2",
+      "inputSchema": "19a497c26a62f8edef9aeedb0c13e8cc140834c8880059d791642417cdacdb4e",
+      "outputSchema": "7ea7b12048837a9aa21793b9ce352cf4e09bbd70b3188e7cc4cf319942f5066d"
+    },
+    "send_post_message": {
+      "description": "c397bd813820bfe81244abf18bcfef4bf9f112a50662d8e3f4668c7654358b77",
+      "inputSchema": "490be714841a5e5f516d4873e84a29d7186e1f34297dc1f2cf340455970fe110",
+      "outputSchema": "7ea7b12048837a9aa21793b9ce352cf4e09bbd70b3188e7cc4cf319942f5066d"
+    },
+    "send_image_message": {
+      "description": "8ee8417fb4e909b079c1ca1a278e756d37d633cbfa5fec9269ff894c1040125f",
+      "inputSchema": "70e99bac02b63c03fa6f2421be15a4230ca9a03d8616d1ea07a8a3fd47a346a1",
+      "outputSchema": "7ea7b12048837a9aa21793b9ce352cf4e09bbd70b3188e7cc4cf319942f5066d"
+    },
+    "send_share_chat_message": {
+      "description": "f8763496953496a496bc214ada323ffa69527a58d071a019eb398e3e09866c34",
+      "inputSchema": "c7f6cd54f2b933f72810c81a2cbfc1878b959cfa8bd03607f4a43b7e3004b567",
+      "outputSchema": "7ea7b12048837a9aa21793b9ce352cf4e09bbd70b3188e7cc4cf319942f5066d"
+    },
+    "send_interactive_message": {
+      "description": "287be29c26fef900111ca3300ee3b85b7344d7c47a0bea0a4b6ed2a81e556e8c",
+      "inputSchema": "fd5b0af646d13f6634f1a165d853b693bf5c03d4ccacf8a2283ec50be6d8fe54",
+      "outputSchema": "7ea7b12048837a9aa21793b9ce352cf4e09bbd70b3188e7cc4cf319942f5066d"
+    }
+  }
+}
