@@ -70,7 +70,7 @@ export interface ObjectStore {
 }
 
 /** 读尽流并拼接为单个 Uint8Array(二进制安全)。 */
-export async function readStreamBytes(stream: ObjectBodyStream): Promise<Uint8Array> {
+export async function readStreamBytes(stream: ObjectBodyStream): Promise<Uint8Array<ArrayBuffer>> {
   const reader = stream.getReader()
   const chunks: Uint8Array[] = []
   let total = 0
@@ -97,10 +97,25 @@ export async function readStreamText(stream: ObjectBodyStream): Promise<string> 
   return new TextDecoder().decode(await readStreamBytes(stream))
 }
 
-/** 任意 ObjectBody → 字节(put 落盘前归一)。 */
-export async function objectBodyToBytes(body: ObjectBody): Promise<Uint8Array> {
-  if (typeof body === 'string') return new TextEncoder().encode(body)
-  if (body instanceof Uint8Array) return body
+/**
+ * 收敛成**独立 ArrayBuffer 支撑**的视图。
+ *
+ * TS 5.7 起 Uint8Array 按后备 buffer 泛型化,而标准 `BodyInit`(fetch)拒收
+ * SharedArrayBuffer 支撑的视图——其内容可能在传输途中被并发改写。s3/r2 这类
+ * 把字节直接交给 fetch 的 ObjectStore 因此需要这条更强的保证(Workers 类型
+ * 恰好宽松放过,宿主中立层按标准 DOM 类型编译时才报出来)。
+ * 常规输入零拷贝(只重建视图),仅 shared 输入拷贝一份。
+ */
+function ownedBytes(view: Uint8Array): Uint8Array<ArrayBuffer> {
+  return view.buffer instanceof ArrayBuffer
+    ? new Uint8Array(view.buffer, view.byteOffset, view.byteLength)
+    : new Uint8Array(view)
+}
+
+/** 任意 ObjectBody → 字节(put 落盘前归一;后备 buffer 保证见 {@link ownedBytes})。 */
+export async function objectBodyToBytes(body: ObjectBody): Promise<Uint8Array<ArrayBuffer>> {
+  if (typeof body === 'string') return ownedBytes(new TextEncoder().encode(body))
+  if (body instanceof Uint8Array) return ownedBytes(body)
   if (body instanceof ArrayBuffer) return new Uint8Array(body)
   return readStreamBytes(body)
 }
