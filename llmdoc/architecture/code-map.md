@@ -40,7 +40,9 @@
 | `providers/` | 除 CF binding 外的全部上游 I/O:`mcp.ts`(SDK Streamable HTTP,会话复用 + 404 重握手一次;auth:'oauth' 挂 `../oauth.ts` 的 authProvider)、`http.ts`、`remote.ts`、`toolCache.ts`、`s3Object.ts` + `s3Sign.ts`(aws4fetch)、`pluginClient.ts`(`upstreamAuthRef` → resolve 后经 `X-TB-Upstream-Auth` 注入,失败 → unavailable;`binding:<name>` 走进程内 fetch handler)+ `pluginTool.ts` + `pluginContext.ts` + `types.ts` |
 | 发布形态 | tsup `platform: 'neutral'`,bundle core;**下游三个宿主包一律 `noExternal` 这个包**,理由见 [modules-and-boundaries.md](modules-and-boundaries.md) 依赖方向要点 |
 
-**测试落点在别处**:app 没有自己的测试目录,其行为由 gateway 的 workerd 集成套件经 `SELF.fetch` 覆盖——把中立层的验证面迁到中立宿主是已识别未做的改进项。
+| `test/` | **中立层自己的验证面**(普通 Node vitest,12 文件 121 例约 1.2s):经 `app.request()` 直打 createTbApp,不经任何宿主适配器——中立性因此是被执行验证的,不只是被 `types: []` 静态约束的。`harness.ts` 的 `createTestApp()` 复刻文件级单实例语义(对齐原 `SELF.fetch`),deps 取值与 gateway miniflare bindings 一致以便两宿主对照;`memorySearchIndex.ts` 是 `MutableSearchIndex` 的内存实现(复用 core 的序列化/digest/query 预处理/cursor 加解密,只把全文匹配换成子串),`/~search` 与 `/~mcp` 的 `tb_search` 投影靠它。**test/ 也在 `types: []` 约束内**:测试跑 Node 但不得用 Node 专属 API |
+
+**哪些用例不在这里**:真吃 CF 语义的(DO WS hibernation、真实 D1、R2/KV binding、Static Assets)与靠 env binding 开关的 opt-in 路径留在 gateway 的 workerd 套件。
 
 ## packages/gateway — Workers 宿主适配器(可发布 Worker library)
 
@@ -53,7 +55,7 @@
 | `deviceSession.ts` | `DeviceSession` DO 胶水:WS hibernation、待决表、`setWebSocketAutoResponse`、惰性会话重建;设备子树回收同步 SearchIndex;休眠恢复与每次 invoke 重验 SK/keyId/scope/registerPaths,跨 KV await 后重读 activeConnId,`markDisconnected` 按 connId 条件清理避免旧连接覆盖新 meta。共享开发环境已通过 155s hibernation、同 ID replacement 与 allow/deny registerPaths(协议行为在 app `deviceHello.ts`) |
 | `providers/r2Object.ts` | R2 binding 的 ObjectStore 实现(binding 不支持 presign,`$ref` 走 `/~ref` 中转) |
 | `search/d1SearchIndex.ts` | D1 keyword v3 adapter:lightweight path/name/description/feedback FTS(10/3/1)+ meta revision/cursor secret + full ToolSpec digest/path capacity trigger;JSON1 chunks、candidate/cursor、same-digest no-op;并发500-path cap,cold query formula43≤50;v2表不迁入v3 |
-| `test/` / `scripts/` | workerd 集成测试族,**同时是 app 中立层的事实验证面**:`search.integration.test.ts` 钉权限后分页/canonical水合;`tool.integration.test.ts` 钉8项长描述MCP目录召回且返回完整ToolSpec;`mcp.integration.test.ts` 用官方SDK钉三个稳定合成工具与窄SK;`d1SearchIndex.integration.test.ts` 复用v3 contract并经真实D1执行exact query、容量并发与43-query预算;`ui.integration.test.ts` 每次fresh build。`scripts/echo-mcp.ts`兼Compose mock,`compose-smoke.ts`走三跳 |
+| `test/` / `scripts/` | workerd 集成测试族(6 文件 76 例),**只覆盖 CF 宿主这一层**——树本身的行为在 app 的 Node 套件里:`device`/`deviceNodes` 钉 DO WS hibernation 与设备注册;`d1SearchIndex.integration.test.ts` 复用 v3 contract 并经真实 D1 执行 exact query、容量并发与 43-query 预算;`ui.integration.test.ts` 每次 fresh build;`tool.integration.test.ts` 用 `env.TB_KV` 造脏数据并挂 opt-in 真实 MCP/HTTP E2E;`context.integration.test.ts` 挂 opt-in 真实 S3 端点。`scripts/echo-mcp.ts` 兼 Compose mock,`compose-smoke.ts` 走三跳 |
 | `vitest.config.ts` | 在 gateway 测试启动前无条件从当前 Dashboard source 执行 build,避免 `ui.integration.test.ts` 误验陈旧 `dist` |
 | `wrangler.jsonc` | 绑定 TB_KV / TB_R2 / TB_DEVICE(DO)/ ASSETS(dashboard dist,`run_worker_first`)及 `TB_SEARCH` → `tb-search` D1(当前真实 UUID `f788b779-ec1c-4fba-ac1f-b780fab990fc`,由 provision 幂等回填)+ `account_id` + custom domain;禁 `workers_dev`/Preview URLs,用 `TB_CANONICAL_ORIGIN` 固定 OAuth callback origin |
 

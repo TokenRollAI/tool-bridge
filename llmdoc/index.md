@@ -62,6 +62,7 @@
 - [memory/reflections/2026-08-11-shared-development-deploy-evidence.md](memory/reflections/2026-08-11-shared-development-deploy-evidence.md) — 共享开发环境部署例外与在线证据分账(feature-branch覆盖须显式授权且不冒充production;真实D1幂等与KV收敛窗口;MCP/Search/Device/Feishu在线证据;Web Analytics beacon/CSP冲突;临时资源清理)。
 - [memory/reflections/2026-08-11-lightweight-search-mcp-discovery-parity.md](memory/reflections/2026-08-11-lightweight-search-mcp-discovery-parity.md) — 轻量搜索索引与MCP发现面对等(召回文档不存完整ToolSpec;canonical批量水合;MCP合成Search/Help/List复用HTBP权限;v3从真源重建)。
 - [memory/reflections/2026-08-11-host-neutral-layer-extraction.md](memory/reflections/2026-08-11-host-neutral-layer-extraction.md) — 抽宿主中立层 `@tool-bridge/app`(可被静默违反的约束才值得付搬迁成本;收紧类型面是廉价找 bug 手段;bundle 图正确性在 workspace 内不可测;体积结论必须实测基线;dts.resolve↔paths 两份清单不一致静默通过;搬迁与验证面迁移分两刀)。
+- [memory/reflections/2026-08-11-neutral-layer-verification-surface.md](memory/reflections/2026-08-11-neutral-layer-verification-surface.md) — 中立层验证面迁到中立宿主(先数这套测试实际用到多少宿主能力再决定它跑在哪;静态约束管写不出、执行验证管跑得动;换宿主重跑是廉价的存量问题探针;补内存实现优于把用例留在旧宿主、共享逻辑下沉 core;包边界一变要逐个重算 publish 闸门;worktree 写文件后确认写进了哪份工作树)。
 
 ## 路由提示
 
