@@ -297,6 +297,35 @@ function requireId(value: unknown, field: string): string {
 本仓另有一个 `feishu` 插件是**代理型**(转发到飞书官方 MCP,140 行)。按决定:迁完
 `feishu_app_bot` 后替掉它 —— 自实现的 330 个 action 能力面远大于代理的默认 8 个工具。
 
+## 规模实测(116 个内置插件)
+
+"可用 ≠ 实例化"这条决策的实际数字:
+
+| 操作 | 耗时 |
+|---|---|
+| `builtinPluginBindings()` 装配 116 个 binding | **0 ms**(只建 Map + 闭包,不 import) |
+| 首次调用一个 binding(加载 + 实例化) | ~216 ms |
+| 全量加载 116 个 | ~964 ms(均 8.3 ms) |
+
+懒加载确实生效 —— 装配零成本,只有被真正调用的插件才付加载代价。但**全量数字外推到
+1000 个是 ~8 秒**,这对 Workers 的启动预算是硬约束:CF 侧必须靠构建期的 `include` 裁剪
+集合(决策文档已记),不能指望运行时懒加载兜住。
+
+## 有状态插件的分区键
+
+`export default createXxxPlugin()` 是**模块级单例**,同一部署会服务多个挂载。有状态的插件
+必须自己分区,否则跨挂载串号。
+
+**分区键不是 `mountPath`**。这一点我们踩过:notes 的两个 export(tools 写、context 读)
+刻意挂在不同路径,它们本该看到同一份数据 —— 那正是"一个部署同时导出动作面与内容面"的
+意义。按 mountPath 分会把这条能力切断(pluginExample 集成测试抓到了)。
+
+正确做法是让**挂载方声明归属**:`providerConfig: { workspace: 'team-a' }`。同 workspace
+共享,不同的互不可见,没声明的落默认区(单团队零配置)。KV/D1 的 key 带这个前缀。
+
+114 个迁移产物**全部无状态**(已核:`api.ts` 里没有模块级可变状态),所以这条只对手写的
+有状态插件成立。
+
 ### 下一批的建议
 
 剩余 ~170 个"codegen 全干净 + 纯 api_key + 单文件"的候选可以直接照这个流程跑。
