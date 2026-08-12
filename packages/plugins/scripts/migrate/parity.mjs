@@ -40,6 +40,10 @@ export function normalize(schema) {
     // 上游写 `additionalProperties: true`,Zod 的 looseObject 写 `{}` —— 同义。
     if (name === 'additionalProperties' && isAnySchema(value)) continue
 
+    // 空 `properties: {}` 不构成任何约束(一个属性都没声明),是 Zod 反推 record 型
+    // schema 时的固定产物;上游对同一形状不写这个键。
+    if (name === 'properties' && typeof value === 'object' && value !== null
+      && Object.keys(value).length === 0) continue
     // Zod 的 z.record(z.string(), X) 会显式写出 `propertyNames: {type:'string'}`;
     // JSON 对象的键**本来就**只能是字符串,这是同义反复,不构成约束差异。
     if (name === 'propertyNames' && JSON.stringify(value) === '{"type":"string"}') continue

@@ -35,7 +35,7 @@ const STRING_FORMATS = {
 const HANDLED = new Set([
   '$defs', '$ref', 'additionalProperties', 'anyOf', 'const', 'default', 'description',
   'enum', 'exclusiveMinimum', 'format', 'items', 'maxItems', 'maxLength', 'maximum',
-  'minItems', 'minLength', 'minimum', 'oneOf', 'prefixItems', 'properties', 'required',
+  'minItems', 'minLength', 'minimum', 'oneOf', 'pattern', 'prefixItems', 'properties', 'required',
   'type', 'uniqueItems',
 ])
 
@@ -90,8 +90,8 @@ function objectExpr(schema, path, depth) {
   if (names.length === 0 && additional !== undefined && typeof additional === 'object') {
     return `z.record(z.string(), ${toZod(additional, `${path}.additionalProperties`, depth)})`
   }
-  if (names.length === 0 && additional === true) return 'z.looseObject({})'
-  if (names.length === 0) return 'z.strictObject({})'
+  if (names.length === 0 && additional === false) return 'z.strictObject({})'
+  if (names.length === 0) return 'z.looseObject({})'
 
   const entries = names.map((name) => {
     const expr = toZod(properties[name], `${path}.${name}`, depth + 1)
@@ -99,13 +99,16 @@ function objectExpr(schema, path, depth) {
   })
   const body = `{\n${indent(entries.join('\n'), 1)}\n}`
 
-  // additionalProperties 三态直译:true=loose、schema=catchall、false 或缺省=strict
-  // (上游 object() 的缺省就是 false)。三者经 z.toJSONSchema 分别还原,等价闸门能判。
+  // additionalProperties 四态直译。**缺省不等于 false**:上游多数 schema 由 `s.object()`
+  // 生成、显式写了 `false`,但也有一批是手写的裸 JSON Schema 不带这个键 —— 按 JSON Schema
+  // 语义那是"放行额外属性"。一律当 strict 会**收紧契约**(调用方原本能传的字段开始被拒),
+  // 是真漂移。缺省 → looseObject。
   if (additional === true) return `z.looseObject(${body})`
+  if (additional === false) return `z.strictObject(${body})`
   if (typeof additional === 'object' && additional !== null) {
     return `z.object(${body}).catchall(${toZod(additional, `${path}.additionalProperties`, depth)})`
   }
-  return `z.strictObject(${body})`
+  return `z.looseObject(${body})`
 }
 
 function stringExpr(schema, path) {

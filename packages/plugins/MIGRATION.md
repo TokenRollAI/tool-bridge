@@ -77,12 +77,46 @@ JSON Schema → Zod 源码。覆盖面不是猜的:上游 `core/json-schema.ts` 
 其余任何差异都会让闸门红。想收紧/放宽某个 schema,手改后登记进 `handwritten.json` ——
 **漂移只能是声明过的,不能是意外的**。
 
+## 全量长尾实测(1329 provider / 13956 action)
+
+`scripts/migrate` 对全部上游 provider 跑过一遍 codegen + 等价比对,结果:
+
+| 指标 | 数值 |
+|---|---|
+| provider 完全干净 | 1029 / 1329(77.4%) |
+| action 完全等价 | 12962 / 13956(92.9%) |
+
+剩余 ~1000 处按根因分布(前几名):
+
+| 次数 | 影响 provider | 根因 | 处置 |
+|---:|---:|---|---|
+| 437 | 150 | `anyOf`/`oneOf` 与兄弟键共存 | 手写豁免(见下) |
+| 93 | 28 | `allOf` | 待支持 |
+| 86 | 1 | 顶层 `$schema`(全在 googledrive) | 待支持 |
+| 44 | 25 | `not` | 待支持 |
+| ~150 | 分散 | `anyOf` 顶层联合(整个 action 二选一入参形状) | 待评估 |
+
+这份数据的用途:**先把根因修在 codegen 里,再 fan-out**。首轮实测时干净率只有 62.9%,
+其中前两名(`pattern` 漏进 HANDLED 集合、空 `properties: {}` 噪声)都是流水线自身的疏漏,
+修完直接涨到 77.4%。批量迁移前跑一遍全量探针、按根因排序处理,比逐个 provider 试错快得多。
+
 ## 已知需要手写的形状
 
 - `anyOf`/`oneOf` 与 `type`/`properties` **同级共存**(如 resend 的"html/text 二选一必填"):
   Zod 侧要写 `.refine()`,而 refine 无法反推进 JSON Schema,闸门判不了。codegen 在这里
   **硬失败**,交由人工写这一个 schema 并登记豁免。
-- `$ref` / `$defs`:需要先决定 Zod 侧的复用形态(提取成共享常量)。当前批次没有,不臆造实现。
+- `$ref` / `$defs`(10 处 / 2 provider):需要先决定 Zod 侧的复用形态(提取成共享常量)。
+- `allOf`(93 处 / 28 provider)、`not`(44 处 / 25 provider):同理,组合子在 Zod 侧要么
+  没有直接对应物、要么反推不回去。
+
+## 一条踩过的坑:`additionalProperties` 缺省不等于 `false`
+
+上游多数 schema 由 `s.object()` 生成、显式写了 `additionalProperties: false`,但有一批是
+**手写的裸 JSON Schema** 不带这个键 —— 按 JSON Schema 语义那是"放行额外属性"。最初一律
+生成 `z.strictObject` 会**收紧契约**:调用方原本能传的字段开始被 400 拒掉。等价闸门抓到了
+这 278 处(集中在 dokploy/postman/unifapi 三个 provider),现在缺省生成 `looseObject`。
+
+这正是闸门存在的意义 —— 这类漂移人眼扫代码是看不出来的。
 
 ## 不该走这条路的 provider
 
