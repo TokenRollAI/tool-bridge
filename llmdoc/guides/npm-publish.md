@@ -1,6 +1,6 @@
 # Guide:npm 发布(cli / sdk / app / gateway / dashboard / server)
 
-> 用途:发布 public npm 包的新版本,以及新增可发布包的首发流程。适用:发 cli/sdk/gateway/dashboard/server 新版本、新增可发布包、排查 CI 发布失败。现状:npm registry latest 为 cli 0.7.0 / sdk 0.4.0 / gateway 0.4.0 / dashboard 0.6.0,Trusted Publisher 均已配置;cli manifest 0.8.0 已完成本地发布准备但尚未打 tag/发布;server 0.1.0 与 app 0.1.0 **待手动首发 + 配 Trusted Publisher**。快照见 [../must/current-state.md](../must/current-state.md)。
+> 用途:发布 public npm 包的新版本,以及新增可发布包的首发流程。适用:发 cli/sdk/gateway/dashboard/server 新版本、新增可发布包、排查 CI 发布失败。现状(2026-08-12 `npm view` 实测):registry latest 为 cli 0.7.0 / sdk 0.4.0 / gateway 0.4.0 / dashboard 0.6.0 / **app 0.1.0**,Trusted Publisher 均已配置;cli manifest 0.8.0 已完成本地发布准备但尚未打 tag/发布;**app 的 CI 通路尚未验证**(`publish-app.yml` 未进 main);server 0.1.0 **仍待手动首发 + 配 Trusted Publisher**。快照见 [../must/current-state.md](../must/current-state.md)。
 
 ## 包形态(发布模式)
 
@@ -64,7 +64,7 @@ Trusted Publisher 必须在包已存在后才能配置,所以新包固定走两�
 2. **配置 Trusted Publisher**:用户在 npmjs.com 该包设置页 → Trusted Publisher → GitHub Actions,填 repo `TokenRollAI/tool-bridge` + 对应 workflow 文件名(如 `publish-sdk.yml`)。
 3. 之后按上节 tag 触发 CI 发布。
 
-当前待走此流程:server 0.1.0(workflow `publish-server.yml`)与 app 0.1.0(workflow `publish-app.yml`)。其余四包均已走完。**顺序约束:dashboard 须先于 server 存在于 registry**——dashboard 是 server 的 regular dependency(dashboard 0.2.0 已发布,约束已满足)。
+当前待走此流程:**server 0.1.0**(workflow `publish-server.yml`)。app 0.1.0 已于 2026-08-12 走完第 1、2 段(首发物核对:main/types/exports 全指 dist、4 文件 482.4 KB、`repository.url` 正确),**第 3 段未走**——`publish-app.yml` 还只在 feature 分支,合入 main 前打 `app-v*` tag 不触发任何 run(**tag 触发读的是 tag 所指 commit 里的 workflow 文件**,这是新增 workflow 的包首次 CI 发布的常见卡点)。其余四包均已走完。**顺序约束:dashboard 须先于 server 存在于 registry**——dashboard 是 server 的 regular dependency(dashboard 0.6.0 已发布,约束已满足)。
 
 ## 坑
 
