@@ -36,6 +36,16 @@ export {
   runBootstrap,
 } from './bootstrap'
 
+// --- 应用装配面(宿主接线的主入口)---
+export { dispatchContextCmd, parseS3Credentials } from './contextNodes'
+
+export {
+  type DeviceChannel,
+  type DeviceInvokeRequest,
+  type LocalProviderHooks,
+  type TbAppDeps,
+} from './deps'
+
 // --- 设备反向注册:hello 校验与落库的单一真源 ---
 // 宿主胶水(DO / Node ws)只负责传输,协议行为改这里,防两宿主树形态漂移。
 export {
@@ -54,7 +64,6 @@ export {
   mcpToolIdentity,
   mcpToolName,
 } from './mcpServer'
-
 // --- mcp 上游的托管 OAuth 授权码流程 ---
 export {
   assertLocalRedirectUri,
@@ -72,7 +81,6 @@ export {
   type StartAuthorizationResult,
   startMcpAuthorization,
 } from './oauth'
-
 // --- Provider 接线零件(自建宿主按需装配)---
 export { createHttpProvider, type HttpConfig } from './providers/http'
 export { createMcpProvider, invalidateMcpEra, type McpConfig } from './providers/mcp'
@@ -85,14 +93,18 @@ export {
   probePlugin,
   resolvePluginEndpoint,
 } from './providers/pluginClient'
+
+export type { PluginBindings } from './providers/pluginClient'
 export { createPluginContextProvider, type PluginContextOptions } from './providers/pluginContext'
 export { createPluginToolProvider } from './providers/pluginTool'
 
 export { assertRemoteAllowed, passthroughRemote, type RemoteConfig } from './providers/remote'
+export type { RemoteSettings } from './providers/remote'
+
 export { createS3ObjectStore, type S3StoreConfig } from './providers/s3Object'
+
 // --- 大对象 $ref:预签名与网关中转 token ---
 export { encodeObjectKey, presignS3Url } from './providers/s3Sign'
-
 export {
   cachedTools,
   getTools,
@@ -101,8 +113,8 @@ export {
   toolCacheKey,
   toolCacheTtl,
 } from './providers/toolCache'
+export type { UpstreamProvider } from './providers/types'
 export { type RefTokenPayload, signRefToken, verifyRefToken } from './refToken'
-
 // --- 全局工具搜索的派生状态同步 ---
 export {
   canonicalSearchTools,
@@ -110,17 +122,4 @@ export {
   type SearchDirtyMarker,
   SearchSynchronizer,
 } from './search/synchronizer'
-
-// --- 应用装配面(宿主接线的主入口)---
-export {
-  createTbApp,
-  type DeviceChannel,
-  type DeviceInvokeRequest,
-  dispatchContextCmd,
-  type LocalProviderHooks,
-  parseS3Credentials,
-  type PluginBindings,
-  type RemoteSettings,
-  type TbAppDeps,
-  type UpstreamProvider,
-} from './tbApp'
+export { createTbApp } from './tbApp'
