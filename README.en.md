@@ -16,6 +16,8 @@ Any agent that can do an HTTP fetch can discover and use all of an organization'
 
 [![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/TokenRollAI/tool-bridge/tree/main/template)
 
+One-click deploy to Cloudflare Workers, or `docker run` a self-hosted Node container — see [Deployment](#deployment)
+
 </div>
 
 ---
@@ -179,9 +181,61 @@ See [packages/sdk/README.md](packages/sdk/README.md) for details.
 
 ## Deployment
 
-### Cloudflare (default path, near-zero idle cost)
+The gateway itself is host-neutral `@tool-bridge/app` (a Hono app plus five injection
+points: state / objects / secrets / device channel / search). A host adapter only wires
+those five points to a concrete platform. The two first-class adapters expose the same
+capability surface — pick the one that puts your data where you want it:
 
-Runtime shape: a single Worker (API + Dashboard together) + KV (tree config / SKs) + R2 (contexts / large objects) + one Durable Object per device (WS hibernation).
+| | Node / Docker (`@tool-bridge/server`) | Cloudflare Workers (`@tool-bridge/gateway`) |
+|---|---|---|
+| State (tree config / SKs) | SQLite | Workers KV |
+| Objects (contexts / large payloads) | Local filesystem | R2 |
+| Tool search | better-sqlite3 FTS5/trigram | D1 FTS5/trigram |
+| Device channel | In-process WebSocket | Durable Object (WS hibernation) |
+| Runtime shape | One container + one `/data` volume | A single Worker (API + Dashboard), near-zero idle cost |
+
+Protocol behavior (routing / permissions / content negotiation / plugins / OAuth / search)
+is verified once at the host-neutral layer with a Node suite; each adapter has its own
+integration tests on top (gateway on real workerd, server on Node). A third shape is
+embedding TB directly into your own process — see [SDK](#sdk-embed-a-tb-instance) above.
+
+### Node / Docker (self-hosting, no cloud vendor required)
+
+One container: SQLite + local FS, persisted through the `/data` volume, fails closed
+without an Admin SK:
+
+```sh
+docker build -t tool-bridge .
+docker run -d --name tool-bridge -p 8787:8787 -v tool-bridge-data:/data \
+  -e TB_BOOTSTRAP_ADMIN_SK=... \
+  -e TB_SECRET_ENCRYPTION_KEY=... \
+  tool-bridge
+
+# Smoke-test
+TB_BASE_URL=http://127.0.0.1:8787 TB_SK=... pnpm smoke
+```
+
+Prefer a plain process? `pnpm --filter @tool-bridge/server start`
+(`TB_DATA_DIR` / `TB_PORT` / `TB_HOST` are documented in [.env.example](.env.example)).
+When exposing it publicly, terminate TLS yourself and set `TB_CANONICAL_ORIGIN` to the
+canonical public origin.
+
+For repository development, Compose starts the gateway, a real Wrangler plugin Worker, and an authenticated mock MCP upstream. The synchronous smoke registers the plugin, mounts its export, and calls `echo` across all three hops:
+
+```sh
+pnpm compose:up
+pnpm compose:smoke
+pnpm compose:down       # remove containers and network; keep gateway-data
+pnpm compose:reset      # also delete the development data volume
+```
+
+Compose defaults are local-only fixtures, and gateway port 8787 is bound to `127.0.0.1` only. Do not reuse those credentials in production. The production root `Dockerfile` remains independent of Compose.
+
+### Cloudflare Workers
+
+For one-click deploys see [template/](template/) (the Deploy button above): it provisions
+KV/R2/DO in **your** account and deploys a thin shell Worker. To deploy the full shape
+from this repository:
 
 ```sh
 git clone https://github.com/TokenRollAI/tool-bridge && cd tool-bridge
@@ -200,7 +254,7 @@ npx wrangler secret put TB_BOOTSTRAP_ADMIN_SK
 npx wrangler secret put TB_SECRET_ENCRYPTION_KEY
 cd ../..
 
-# 4. Deploy: idempotently create KV/R2 → build the Dashboard → deploy the gateway
+# 4. Deploy: idempotently create KV/R2/D1 → build the Dashboard → deploy the gateway
 pnpm deploy:all
 
 # 5. Smoke-test
@@ -208,41 +262,31 @@ TB_BASE_URL=https://your-tb.example.com TB_SK=... pnpm smoke
 tb login && tb status --json
 ```
 
+`pnpm provision` (orchestrated by `deploy:all`) is a **Cloudflare-only optional step**, not
+the generic deployment entry point: it idempotently creates KV/R2/D1 and backfills the
+account-specific values from `.env` into `packages/gateway/wrangler.jsonc` (`account_id`,
+the custom-domain route, `TB_CANONICAL_ORIGIN`, the R2 S3 endpoint, and the prefix-derived
+resource names/ids). The committed wrangler.jsonc therefore carries no account id and no
+domain — what provision writes is *your* deployment config, so keep it out of public forks.
+Without a custom domain, leave `TB_DOMAIN` empty and flip `workers_dev` to `true`. The
+Node/Docker path does not need this step at all.
+
 On first request the gateway bootstraps itself from the preconfigured `TB_BOOTSTRAP_ADMIN_SK` and materializes the `system/*` management subtree (sk / secret / registry / status / plugin). A new Workers instance without that secret fails closed and never prints an Admin SK in plaintext.
 
 Local development: `pnpm gen-dev-vars` (generates .dev.vars from .env), then `npx wrangler dev`.
-
-### Docker (self-hosting and local development stack)
-
-Production self-hosting remains one Node container (SQLite + local FS) with a persistent `/data` volume:
-
-```sh
-docker build -t tool-bridge .
-docker run -d --name tool-bridge -p 8787:8787 -v tool-bridge-data:/data \
-  -e TB_BOOTSTRAP_ADMIN_SK=... \
-  -e TB_SECRET_ENCRYPTION_KEY=... \
-  tool-bridge
-```
-
-For repository development, Compose starts the gateway, a real Wrangler plugin Worker, and an authenticated mock MCP upstream. The synchronous smoke registers the plugin, mounts its export, and calls `echo` across all three hops:
-
-```sh
-pnpm compose:up
-pnpm compose:smoke
-pnpm compose:down       # remove containers and network; keep gateway-data
-pnpm compose:reset      # also delete the development data volume
-```
-
-Compose defaults are local-only fixtures, and gateway port 8787 is bound to `127.0.0.1` only. Do not reuse those credentials in production. The production root `Dockerfile` remains independent of Compose.
 
 ## Repository layout (pnpm monorepo)
 
 | Package | Responsibility |
 |---|---|
 | `packages/core` | Pure-logic kernel: tree / auth (SK scope checks) / HTBP encoding / context·device·plugin pure logic / SecretStore / builtin modules; zero host dependencies |
-| `packages/gateway` | Cloudflare Workers gateway: Hono routing + mcp/http/remote/plugin/r2/s3 providers + Durable Object device channel + Dashboard static hosting |
+| `packages/app` | The host-neutral gateway itself: routing and behavior for the whole HTBP tree, assembled through five injection points (state / objects / secrets / device channel / search); knows no concrete platform |
+| `packages/server` | Node host adapter: SQLite + local FS + in-process WebSocket; the single-container self-hosting entry point |
+| `packages/gateway` | Cloudflare Workers host adapter: KV / R2 / D1 / Durable Object / Static Assets bindings |
 | `packages/cli` | The `tb` command line (citty), a pure API client — npm package [`@tool-bridge/cli`](https://www.npmjs.com/package/@tool-bridge/cli) |
 | `packages/sdk` | npm package [`@tool-bridge/sdk`](https://www.npmjs.com/package/@tool-bridge/sdk): embedded TB instance, programmatic registration, reverse connect |
+| `packages/plugin-sdk` | Minimal SDK and contract for writing third-party plugins (tool/context providers) |
+| `packages/plugins` | Built-in plugin sources (e.g. Feishu); host them on Workers, or run them as a Node process via `scripts/serve.ts` |
 | `packages/dashboard` | Web management UI: a generic `~help` renderer + admin forms, no dedicated backend |
 | `llmdoc/` | Project knowledge base (architecture boundaries, protocol contract, production pitfalls, workflows) |
 | `archive/` | Archived bootstrap-era spec & process docs (historical reference only) |
@@ -251,16 +295,16 @@ Compose defaults are local-only fixtures, and gateway port 8787 is bound to `127
 
 ```sh
 pnpm verify              # one-shot: typecheck + lint + all tests
-pnpm test:unit           # core / cli / sdk unit tests
-pnpm test:integration    # gateway integration tests (real workerd)
-pnpm lint:fix            # biome auto-fix
+pnpm test:unit           # core / cli / sdk / plugin unit tests
+pnpm test:integration    # host-adapter integration tests (gateway on real workerd, server on Node)
+pnpm lint:fix            # eslint auto-fix
 ```
 
 Engineering rule: **the code is the source of truth for behavior**; the lookup docs for the interface contract, module boundaries, and production pitfalls live in [llmdoc/](llmdoc/index.md) (contract entry point: `llmdoc/reference/protocol-contract.md`).
 
 ## Status
 
-Under active development (pre-release), with no formal production environment yet. The core capabilities have landed and have been exercised end to end in a shared Cloudflare development environment, including auth, MCP, Search, the Feishu plugin, WebSocket hibernation, and the Dashboard; this online evidence is not a production release. `@tool-bridge/cli` and `@tool-bridge/sdk` are published to npm, and Node/Docker single-container self-hosting plus the local three-hop Compose stack are implemented. Remaining release work includes merging the feature PR, synchronizing the external HTBP Draft, and building the `tb init` one-shot deployment wizard.
+Under active development (pre-release), with no formal production environment yet. The core capabilities have landed and have been exercised end to end in a shared Cloudflare development environment, including auth, MCP, Search, the Feishu plugin, WebSocket hibernation, and the Dashboard; this online evidence is not a production release. The gateway itself has been extracted into the host-neutral `@tool-bridge/app`, so the Cloudflare and Node adapters are both just assembly layers over it. `@tool-bridge/cli` and `@tool-bridge/sdk` are published to npm, and Node/Docker single-container self-hosting plus the local three-hop Compose stack are implemented. Remaining release work includes merging the feature PR, synchronizing the external HTBP Draft, and building the `tb init` one-shot deployment wizard.
 
 ## License
 

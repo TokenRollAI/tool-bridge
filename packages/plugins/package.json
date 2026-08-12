@@ -12,7 +12,8 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "deploy:feishu": "wrangler deploy --config wrangler.feishu.jsonc"
+    "serve": "tsx scripts/serve.ts",
+    "deploy:feishu:cf": "wrangler deploy --config wrangler.feishu.jsonc"
   },
   "dependencies": {
     "@cfworker/json-schema": "catalog:",

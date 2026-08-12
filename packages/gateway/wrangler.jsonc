@@ -1,38 +1,43 @@
 {
-  // tb-gateway Worker。资源名从 TB_NAME_PREFIX(=tb)派生。
+  // tb-gateway Worker(Cloudflare 宿主适配器)。资源名从 TB_NAME_PREFIX(=tb)派生。
+  //
+  // **本文件不含任何账户特定值**:account_id / routes / TB_CANONICAL_ORIGIN /
+  // TB_R2_S3_ENDPOINT 与 KV/D1 的 id 全部由 `pnpm provision` 从 .env
+  // (CLOUDFLARE_ACCOUNT_ID / TB_DOMAIN / TB_BASE_URL / TB_NAME_PREFIX)幂等回填——
+  // 回填结果是**你自己那份部署配置**,fork 后请勿把它推回公共仓库。
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "tb-gateway",
   "main": "src/index.ts",
   "compatibility_date": "2025-06-01",
   "compatibility_flags": ["nodejs_compat"],
   // 生产只允许规范自定义域;关闭 workers.dev 与版本预览 URL,避免同一状态暴露多 origin。
+  // 没有自定义域(routes 为空)时把 workers_dev 改成 true,否则部署出来的 Worker 无入口。
   "workers_dev": false,
   "preview_urls": false,
-  // DJJ 账户(.env CLOUDFLARE_ACCOUNT_ID);wrangler OAuth 下有多账户,须显式指定。
-  "account_id": "0cb9b897010bc426cd8bf33d8c052d11",
-  // 生产入口 = TB_BASE_URL(.env);zone pdjjq.org 在同账户。
-  "routes": [{ "pattern": "tool-bridge.pdjjq.org", "custom_domain": true }],
+  // 生产入口 = TB_DOMAIN(.env),由 provision 写成 custom domain 路由。
+  "routes": [],
   "observability": {
     "enabled": true
   },
-  // r2 presign 的 S3 兼容端点(account_id 派生)与 bucket 名;
-  // presign 凭证本体走 SecretStore 'r2-presign' 或 wrangler secret,不入 vars。
   "vars": {
-    "TB_CANONICAL_ORIGIN": "https://tool-bridge.pdjjq.org",
-    "TB_R2_BUCKET": "tb-r2",
-    "TB_R2_S3_ENDPOINT": "https://0cb9b897010bc426cd8bf33d8c052d11.r2.cloudflarestorage.com"
+    // 规范 origin(钉死 OAuth redirect_uri);空串 = 本部署不钉,由 provision 从 TB_BASE_URL 回填。
+    "TB_CANONICAL_ORIGIN": "",
+    // r2 presign 的 bucket 名;S3 兼容端点 TB_R2_S3_ENDPOINT 由 provision 从
+    // CLOUDFLARE_ACCOUNT_ID 派生写入(缺省则大对象 $ref 走网关 /~ref 中转)。
+    // presign 凭证本体走 SecretStore 'r2-presign' 或 wrangler secret,不入 vars。
+    "TB_R2_BUCKET": "tb-r2"
   },
   // KV:树配置 / SK 哈希表 / manifest。id 为占位,由 scripts/provision.mjs
   // 幂等创建后回填;本地 wrangler dev / vitest-pool-workers 用 miniflare 本地实例,不校验该 id。
   "kv_namespaces": [
-    { "binding": "TB_KV", "id": "d18c93de33cf4ba2b1fbf7d26fd742f1" }
+    { "binding": "TB_KV", "id": "00000000000000000000000000000000" }
   ],
   // D1:FTS5/trigram 工具搜索索引。database_id 由 scripts/provision.mjs 幂等回填。
   "d1_databases": [
     {
       "binding": "TB_SEARCH",
       "database_name": "tb-search",
-      "database_id": "f788b779-ec1c-4fba-ac1f-b780fab990fc"
+      "database_id": "00000000-0000-0000-0000-000000000000"
     }
   ],
   // R2:context r2 provider 与大对象 $ref。

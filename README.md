@@ -16,6 +16,8 @@
 
 [![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/TokenRollAI/tool-bridge/tree/main/template)
 
+一键部署到 Cloudflare Workers,或 `docker run` 自部署一个 Node 容器 —— 见[部署](#部署)
+
 </div>
 
 ---
@@ -186,9 +188,58 @@ await conn.ready
 
 ## 部署
 
-### Cloudflare(默认路径,空闲近零成本)
+网关本体是宿主中立的 `@tool-bridge/app`(Hono app + 五个注入点:状态 / 对象 / 密钥 /
+设备通道 / 搜索),宿主适配器只把这五个口接到具体平台上。两个一等适配器能力面一致,
+选哪个取决于你想把数据放在哪:
 
-运行形态:单 Worker(API + Dashboard 一体)+ KV(树配置/SK)+ R2(context/大对象)+ 每设备一个 Durable Object(WS hibernation)。
+| | Node / Docker(`@tool-bridge/server`) | Cloudflare Workers(`@tool-bridge/gateway`) |
+|---|---|---|
+| 状态(树配置 / SK) | SQLite | Workers KV |
+| 对象(context / 大对象) | 本地文件系统 | R2 |
+| 工具搜索 | better-sqlite3 FTS5/trigram | D1 FTS5/trigram |
+| 设备通道 | 进程内 WebSocket | Durable Object(WS hibernation) |
+| 运行形态 | 一个容器 + 一个 `/data` 卷 | 单 Worker(API + Dashboard 一体),空闲近零成本 |
+
+协议行为(路由 / 权限 / 内容协商 / plugin / OAuth / 搜索联动)在宿主中立层用 Node 套件
+统一验证,两个适配器各自另有集成测试(gateway 跑真实 workerd,server 跑 Node)。
+第三种形态是把 TB 直接嵌进你自己的进程,见上文 [SDK](#sdk内嵌一个-tb-实例)。
+
+### Node / Docker(自部署,不依赖任何云厂商)
+
+单容器:SQLite + 本地 FS,`/data` 卷持久化,缺 Admin SK 时 fail closed:
+
+```sh
+docker build -t tool-bridge .
+docker run -d --name tool-bridge -p 8787:8787 -v tool-bridge-data:/data \
+  -e TB_BOOTSTRAP_ADMIN_SK=... \
+  -e TB_SECRET_ENCRYPTION_KEY=... \
+  tool-bridge
+
+# 冒烟验证
+TB_BASE_URL=http://127.0.0.1:8787 TB_SK=... pnpm smoke
+```
+
+不想要容器就直接跑进程:`pnpm --filter @tool-bridge/server start`
+(`TB_DATA_DIR` / `TB_PORT` / `TB_HOST` 见 [.env.example](.env.example))。放到公网时
+自备 TLS 终结,并把 `TB_CANONICAL_ORIGIN` 设成对外的规范 origin。
+
+仓库开发可用 Compose 一次启动 gateway、真实 Wrangler plugin Worker 与受认证的 mock MCP 上游,
+再同步执行“注册 plugin → 挂载 export → 调用 echo”的三跳 smoke:
+
+```sh
+pnpm compose:up
+pnpm compose:smoke
+pnpm compose:down       # 删除容器与网络,保留 gateway-data
+pnpm compose:reset      # 同时删除开发数据卷,恢复固定本地 fixture
+```
+
+Compose 默认凭据只用于本机开发,gateway 8787 也只绑定 `127.0.0.1`;不要复制到生产配置。生产根
+`Dockerfile` 的单容器入口不依赖 Compose。
+
+### Cloudflare Workers
+
+一键部署见 [template/](template/)(上方 Deploy 按钮),它在**你的**账户里建 KV/R2/DO 并部署
+一个薄壳 Worker。从本仓库部署完整形态:
 
 ```sh
 git clone https://github.com/TokenRollAI/tool-bridge && cd tool-bridge
@@ -207,7 +258,7 @@ npx wrangler secret put TB_BOOTSTRAP_ADMIN_SK
 npx wrangler secret put TB_SECRET_ENCRYPTION_KEY
 cd ../..
 
-# 4. 部署:幂等创建 KV/R2 → 构建 Dashboard → 部署 gateway
+# 4. 部署:幂等创建 KV/R2/D1 → 构建 Dashboard → 部署 gateway
 pnpm deploy:all
 
 # 5. 冒烟验证
@@ -215,43 +266,28 @@ TB_BASE_URL=https://your-tb.example.com TB_SK=... pnpm smoke
 tb login && tb status --json
 ```
 
+`pnpm provision`(被 `deploy:all` 编排)是 **Cloudflare 专用的可选步骤**,不是通用部署入口:
+它幂等创建 KV/R2/D1,并把 `.env` 里的账户特定值回填进 `packages/gateway/wrangler.jsonc`
+(`account_id`、custom domain 路由、`TB_CANONICAL_ORIGIN`、R2 S3 端点与前缀派生的资源名/id)。
+仓库里那份 wrangler.jsonc 因此不含任何账户 id 或域名——回填结果是你自己的部署配置,别推回公共仓库。
+没有自定义域就留空 `TB_DOMAIN` 并把 `workers_dev` 改成 `true`。Node/Docker 路径不需要这一步。
+
 首次运行时网关自动完成引导:用预置的 `TB_BOOTSTRAP_ADMIN_SK` 物化 `system/*` 管理子树(sk / secret / registry / status / plugin)。Workers 新实例未预置该 secret 会拒绝引导,不会把 Admin SK 明文写入日志。
 
 本地开发:`pnpm gen-dev-vars`(从 .env 生成 .dev.vars)后 `npx wrangler dev`。
-
-### Docker(自部署与本地开发栈)
-
-生产自部署仍是一个 Node 容器(SQLite + 本地 FS),`/data` 卷持久化:
-
-```sh
-docker build -t tool-bridge .
-docker run -d --name tool-bridge -p 8787:8787 -v tool-bridge-data:/data \
-  -e TB_BOOTSTRAP_ADMIN_SK=... \
-  -e TB_SECRET_ENCRYPTION_KEY=... \
-  tool-bridge
-```
-
-仓库开发可用 Compose 一次启动 gateway、真实 Wrangler plugin Worker 与受认证的 mock MCP 上游,
-再同步执行“注册 plugin → 挂载 export → 调用 echo”的三跳 smoke:
-
-```sh
-pnpm compose:up
-pnpm compose:smoke
-pnpm compose:down       # 删除容器与网络,保留 gateway-data
-pnpm compose:reset      # 同时删除开发数据卷,恢复固定本地 fixture
-```
-
-Compose 默认凭据只用于本机开发,gateway 8787 也只绑定 `127.0.0.1`;不要复制到生产配置。生产根
-`Dockerfile` 的单容器入口不依赖 Compose。
 
 ## 仓库结构(pnpm monorepo)
 
 | 包 | 职责 |
 |---|---|
 | `packages/core` | 纯逻辑内核:树 / Auth(SK 作用域判定)/ HTBP 编解码 / Context·Device·Plugin 纯逻辑 / SecretStore / builtin 模块,无宿主依赖 |
-| `packages/gateway` | Cloudflare Workers 网关:Hono 路由 + mcp/http/remote/plugin/r2/s3 Provider + Durable Object 设备通道 + Dashboard 静态托管 |
+| `packages/app` | 宿主中立的网关本体:整棵 HTBP 树的路由与行为,经五个注入点(状态 / 对象 / 密钥 / 设备通道 / 搜索)装配,不认识任何具体平台 |
+| `packages/server` | Node 宿主适配器:SQLite + 本地 FS + 进程内 WebSocket,单容器自部署入口 |
+| `packages/gateway` | Cloudflare Workers 宿主适配器:KV / R2 / D1 / Durable Object / Static Assets 绑定 |
 | `packages/cli` | `tb` 命令行(citty),纯 API 客户端 — npm 包 [`@tool-bridge/cli`](https://www.npmjs.com/package/@tool-bridge/cli) |
 | `packages/sdk` | npm 包 [`@tool-bridge/sdk`](https://www.npmjs.com/package/@tool-bridge/sdk):内嵌 TB 实例、程序化注册、反向连接 |
+| `packages/plugin-sdk` | 写第三方 Plugin(Tool/Context Provider)的最小 SDK 与契约 |
+| `packages/plugins` | 内置 Plugin 源(如飞书),可托管在 Workers 上,也可用 `scripts/serve.ts` 跑成 Node 进程 |
 | `packages/dashboard` | Web 管理面:`~help` 通用渲染器 + 管理表单,无专用后端 |
 | `llmdoc/` | 项目知识库(架构边界、协议契约、生产坑、工作流) |
 | `archive/` | bootstrap 期规范与过程文档归档(仅历史追溯) |
@@ -260,16 +296,16 @@ Compose 默认凭据只用于本机开发,gateway 8787 也只绑定 `127.0.0.1`;
 
 ```sh
 pnpm verify              # 一把过:typecheck + lint + 全部测试
-pnpm test:unit           # core / cli / sdk 单测
-pnpm test:integration    # gateway 集成测试(真实 workerd)
-pnpm lint:fix            # biome 自动修复
+pnpm test:unit           # core / cli / sdk / plugin 单测
+pnpm test:integration    # 宿主适配层集成测试(gateway 跑真实 workerd,server 跑 Node)
+pnpm lint:fix            # eslint 自动修复
 ```
 
 工程约定:**代码是行为真源**;接口契约、模块边界与生产坑的查表文档在 [llmdoc/](llmdoc/index.md)(契约入口:`llmdoc/reference/protocol-contract.md`)。
 
 ## 项目状态
 
-积极开发中(pre-release),当前没有正式生产环境。核心能力已全部落地,并在 Cloudflare 共享开发环境完成鉴权、MCP、Search、飞书 Plugin、WebSocket hibernation 与 Dashboard 的端到端验证;这类在线证据不等同于 production release。`@tool-bridge/cli` 与 `@tool-bridge/sdk` 已发布 npm,Node/Docker 单容器自部署与本地 Compose 三跳开发栈也已落地。当前收尾项是功能 PR 合入、外部 HTBP Draft 同步与 `tb init` 一键部署向导。
+积极开发中(pre-release),当前没有正式生产环境。核心能力已全部落地,并在 Cloudflare 共享开发环境完成鉴权、MCP、Search、飞书 Plugin、WebSocket hibernation 与 Dashboard 的端到端验证;这类在线证据不等同于 production release。网关本体已抽成宿主中立的 `@tool-bridge/app`,Cloudflare 与 Node 两个适配器都只是它的装配层。`@tool-bridge/cli` 与 `@tool-bridge/sdk` 已发布 npm,Node/Docker 单容器自部署与本地 Compose 三跳开发栈也已落地。当前收尾项是功能 PR 合入、外部 HTBP Draft 同步与 `tb init` 一键部署向导。
 
 ## License
 

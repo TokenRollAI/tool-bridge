@@ -1,13 +1,15 @@
 {
-  // 飞书 MCP tool-provider plugin Worker。secrets:FEISHU_APP_ID / FEISHU_APP_SECRET /
-  // PLUGIN_TOKEN(注册后 wrangler secret put);白名单等非敏感配置走 vars。
+  // 飞书 MCP tool-provider plugin Worker——插件的三种托管形态之一(另两种:进程内
+  // binding、独立 Node 进程 `pnpm serve`,见 README)。secrets:FEISHU_APP_ID /
+  // FEISHU_APP_SECRET / PLUGIN_TOKEN(注册后 wrangler secret put);白名单等非敏感配置走 vars。
+  //
+  // 不写 account_id:wrangler 从环境变量 CLOUDFLARE_ACCOUNT_ID 读(多账户 OAuth 下必须给),
+  // 配置文件因此不绑定任何账户。
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "tb-plugin-feishu",
   "main": "src/feishu/index.ts",
   "compatibility_date": "2025-06-01",
   "compatibility_flags": ["nodejs_compat"],
-  // DJJ 账户(与 gateway 同;wrangler OAuth 多账户须显式指定)。
-  "account_id": "0cb9b897010bc426cd8bf33d8c052d11",
   "observability": {
     "enabled": true
   },
