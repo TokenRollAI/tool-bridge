@@ -56,9 +56,32 @@ function metaOf(mountPath: string | undefined, path: string, note: Note): {
   }
 }
 
-/** 工厂形态:每个实例自带存储,便于测试起多份;部署只用下面的默认实例。 */
+/**
+ * 工厂形态:每个实例自带存储,便于测试起多份;部署只用下面的默认实例。
+ *
+ * **存储按 `providerConfig.workspace` 分区**,不是按 mountPath。
+ *
+ * 为什么不是 mountPath:这个 plugin 的两个 export(tools 与 context)会被挂在**不同路径**
+ * (`tools/notes` 写、`docs/notes` 读),而它们本该看到同一份数据 —— 那正是"一个部署同时
+ * 导出动作面与内容面"的意义。按 mountPath 分区会把这条能力切断。
+ *
+ * 而 `export default` 是单例,多个团队挂同一部署时又确实需要隔离。归属只能由**挂载方**声明:
+ * `providerConfig: { workspace: 'team-a' }`。同 workspace 的挂载共享数据,不同的互不可见;
+ * 没声明的落到默认区(单团队用法零配置)。真实 plugin 用 KV/D1 时同理:key 带这个前缀。
+ */
 export function createNotesPlugin(): Plugin<Env> {
-  const notes = new Map<string, Note>()
+  /** workspace → 该工作区的笔记表。 */
+  const byWorkspace = new Map<string, Map<string, Note>>()
+  const notesOf = (config: Record<string, unknown> | undefined): Map<string, Note> => {
+    const raw = config?.workspace
+    const key = typeof raw === 'string' && raw !== '' ? raw : ''
+    let store = byWorkspace.get(key)
+    if (store === undefined) {
+      store = new Map<string, Note>()
+      byWorkspace.set(key, store)
+    }
+    return store
+  }
   const plugin = createPlugin<Env>({ token: env => env.PLUGIN_TOKEN })
 
   plugin
@@ -74,7 +97,8 @@ export function createNotesPlugin(): Plugin<Env> {
         }),
         effect: 'write',
       },
-      ({ title, body, tags }) => {
+      ({ title, body, tags }, ctx) => {
+        const notes = notesOf(ctx.mountConfig)
         const path = title.toLowerCase().replaceAll(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
         const existing = notes.get(path)
         const note: Note = {
@@ -96,8 +120,9 @@ export function createNotesPlugin(): Plugin<Env> {
         inputSchema: z.object({ tag: z.string().optional().describe('只数带此标签的') }),
         effect: 'read',
       },
-      ({ tag }) => ({
-        count: [...notes.values()].filter(n => tag === undefined || n.tags.includes(tag)).length,
+      ({ tag }, ctx) => ({
+        count: [...notesOf(ctx.mountConfig).values()]
+          .filter(n => tag === undefined || n.tags.includes(tag)).length,
       }),
     )
 
@@ -105,18 +130,19 @@ export function createNotesPlugin(): Plugin<Env> {
     description: '笔记内容面(append-only:可读可写,不可改不可删)',
 
     list: ({ path }, ctx) => ({
-      items: [...notes.entries()]
+      items: [...notesOf(ctx.mountConfig).entries()]
         .filter(([key]) => key.startsWith(path))
         .map(([key, note]) => metaOf(ctx.mountPath, key, note)),
     }),
 
     get: ({ path }, ctx) => {
-      const note = notes.get(path)
+      const note = notesOf(ctx.mountConfig).get(path)
       if (note === undefined) throw TBError.notFound(`no such note: '${path}'`)
       return { ...metaOf(ctx.mountPath, path, note), content: note.body }
     },
 
     write: ({ path, entry }, ctx) => {
+      const notes = notesOf(ctx.mountConfig)
       const existing = notes.get(path)
       const note: Note = {
         title: entry.metadata?.title ?? existing?.title ?? path,
@@ -132,7 +158,7 @@ export function createNotesPlugin(): Plugin<Env> {
     search: ({ query }, ctx) => {
       const needle = query.toLowerCase()
       return {
-        items: [...notes.entries()]
+        items: [...notesOf(ctx.mountConfig).entries()]
           .filter(([, note]) =>
             note.title.toLowerCase().includes(needle) || note.body.toLowerCase().includes(needle))
           .map(([key, note]) => metaOf(ctx.mountPath, key, note)),
