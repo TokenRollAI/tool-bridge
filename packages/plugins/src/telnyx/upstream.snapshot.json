@@ -1,0 +1,335 @@
+{
+  "service": "telnyx",
+  "displayName": "Telnyx",
+  "authTypes": [
+    "api_key"
+  ],
+  "actions": [
+    {
+      "name": "send_message",
+      "description": "Send an SMS or MMS message through Telnyx Messaging.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "to": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The sending or receiving address, such as an E.164 phone number, alphanumeric sender ID, short code, or number pool.",
+            "pattern": "\\S"
+          },
+          "from": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The sending or receiving address, such as an E.164 phone number, alphanumeric sender ID, short code, or number pool.",
+            "pattern": "\\S"
+          },
+          "messagingProfileId": {
+            "type": "string",
+            "description": "The Telnyx messaging profile ID.",
+            "format": "uuid"
+          },
+          "text": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The SMS message body.",
+            "pattern": "\\S"
+          },
+          "subject": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The MMS message subject.",
+            "pattern": "\\S"
+          },
+          "mediaUrls": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "description": "One media URL for the MMS message.",
+              "format": "uri"
+            },
+            "description": "The media URLs Telnyx should attach to an MMS message.",
+            "minItems": 1
+          },
+          "webhookUrl": {
+            "type": "string",
+            "description": "The URL where Telnyx should send message webhooks.",
+            "format": "uri"
+          },
+          "webhookFailoverUrl": {
+            "type": "string",
+            "description": "The failover URL Telnyx should use if the primary message webhook URL fails.",
+            "format": "uri"
+          },
+          "useProfileWebhooks": {
+            "type": "boolean",
+            "description": "Whether Telnyx should use webhooks configured on the messaging profile."
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "SMS",
+              "MMS"
+            ],
+            "description": "The protocol Telnyx should use for the message."
+          },
+          "autoDetect": {
+            "type": "boolean",
+            "description": "Whether Telnyx should detect SMS messages that exceed a recommended part limit."
+          },
+          "sendAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "description": "The ISO 8601 timestamp when Telnyx should send the message.",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "encoding": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "gsm7",
+              "ucs2"
+            ],
+            "description": "The encoding Telnyx should use for the message."
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "to"
+        ],
+        "description": "The input payload for sending a Telnyx message."
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "description": "The Telnyx resource ID.",
+                "format": "uuid"
+              },
+              "record_type": {
+                "type": "string",
+                "description": "The Telnyx resource type."
+              }
+            },
+            "additionalProperties": true,
+            "required": [
+              "id",
+              "record_type"
+            ],
+            "description": "The Telnyx resource object returned by the API."
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "data"
+        ],
+        "description": "The response returned when Telnyx sends a message."
+      }
+    },
+    {
+      "name": "retrieve_message",
+      "description": "Retrieve a Telnyx message by ID.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "The Telnyx message ID.",
+            "format": "uuid"
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "id"
+        ],
+        "description": "The input payload for retrieving a Telnyx message."
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "description": "The Telnyx resource ID.",
+                "format": "uuid"
+              },
+              "record_type": {
+                "type": "string",
+                "description": "The Telnyx resource type."
+              }
+            },
+            "additionalProperties": true,
+            "required": [
+              "id",
+              "record_type"
+            ],
+            "description": "The Telnyx resource object returned by the API."
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "data"
+        ],
+        "description": "The response returned when retrieving a Telnyx message."
+      }
+    },
+    {
+      "name": "list_messaging_profiles",
+      "description": "List Telnyx messaging profiles with optional name filters and pagination.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "filterName": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The profile name filter passed as filter[name].",
+            "pattern": "\\S"
+          },
+          "filterNameEq": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The exact profile name filter.",
+            "pattern": "\\S"
+          },
+          "filterNameContains": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The partial profile name filter.",
+            "pattern": "\\S"
+          },
+          "pageNumber": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "The Telnyx page number to load."
+          },
+          "pageSize": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 250,
+            "description": "The number of Telnyx profiles to load per page."
+          }
+        },
+        "additionalProperties": false,
+        "description": "The input payload for listing Telnyx messaging profiles."
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "description": "The Telnyx resource ID.",
+                  "format": "uuid"
+                },
+                "record_type": {
+                  "type": "string",
+                  "description": "The Telnyx resource type."
+                }
+              },
+              "additionalProperties": true,
+              "required": [
+                "id",
+                "record_type"
+              ],
+              "description": "The Telnyx resource object returned by the API."
+            },
+            "description": "The Telnyx messaging profiles returned by the API."
+          },
+          "meta": {
+            "type": "object",
+            "properties": {
+              "page_number": {
+                "type": "integer",
+                "description": "The current Telnyx page number."
+              },
+              "page_size": {
+                "type": "integer",
+                "description": "The current Telnyx page size."
+              },
+              "total_pages": {
+                "type": "integer",
+                "description": "The total number of pages available from Telnyx."
+              },
+              "total_results": {
+                "type": "integer",
+                "description": "The total number of matching Telnyx resources."
+              }
+            },
+            "additionalProperties": true,
+            "description": "The pagination metadata returned by Telnyx."
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "data",
+          "meta"
+        ],
+        "description": "The response returned when listing Telnyx messaging profiles."
+      }
+    },
+    {
+      "name": "retrieve_messaging_profile",
+      "description": "Retrieve a Telnyx messaging profile by ID.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "The Telnyx messaging profile ID.",
+            "format": "uuid"
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "id"
+        ],
+        "description": "The input payload for retrieving a Telnyx messaging profile."
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "description": "The Telnyx resource ID.",
+                "format": "uuid"
+              },
+              "record_type": {
+                "type": "string",
+                "description": "The Telnyx resource type."
+              }
+            },
+            "additionalProperties": true,
+            "required": [
+              "id",
+              "record_type"
+            ],
+            "description": "The Telnyx resource object returned by the API."
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "data"
+        ],
+        "description": "The response returned when retrieving a Telnyx messaging profile."
+      }
+    }
+  ]
+}

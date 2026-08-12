@@ -1,0 +1,62 @@
+{
+  "service": "screenshot_fyi",
+  "displayName": "screenshot.fyi",
+  "authTypes": [
+    "api_key"
+  ],
+  "actions": [
+    {
+      "name": "take_screenshot",
+      "description": "Capture a website screenshot with screenshot.fyi and return the generated URL.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "description": "The complete website URL to capture, including the protocol.",
+            "format": "uri"
+          },
+          "width": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "The viewport width in pixels."
+          },
+          "height": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "The viewport height in pixels."
+          },
+          "fullPage": {
+            "type": "boolean",
+            "description": "Whether to capture the full scrollable page instead of only the viewport."
+          },
+          "darkMode": {
+            "type": "boolean",
+            "description": "Whether to render the target page with dark mode enabled."
+          },
+          "disableCookieBanners": {
+            "type": "boolean",
+            "description": "Whether screenshot.fyi should hide cookie banners before capture."
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "url"
+        ],
+        "description": "The input payload for capturing a website screenshot with screenshot.fyi."
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "description": "The generated screenshot URL returned by screenshot.fyi.",
+            "format": "uri"
+          }
+        },
+        "additionalProperties": false,
+        "description": "The output payload for a screenshot.fyi screenshot capture."
+      }
+    }
+  ]
+}

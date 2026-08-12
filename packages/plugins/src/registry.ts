@@ -14,12 +14,23 @@ export interface BuiltinPluginModule {
 }
 
 export const BUILTIN_PLUGIN_LOADERS: Record<string, () => Promise<BuiltinPluginModule>> = {
-  alt_text_generator_ai: () =>
-    import('./alt_text_generator_ai/index') as Promise<BuiltinPluginModule>,
+  alt_text_generator_ai: () => import('./alt_text_generator_ai/index') as Promise<BuiltinPluginModule>,
+  brave_search: () => import('./brave_search/index') as Promise<BuiltinPluginModule>,
+  clerk: () => import('./clerk/index') as Promise<BuiltinPluginModule>,
+  coinranking: () => import('./coinranking/index') as Promise<BuiltinPluginModule>,
+  fathom: () => import('./fathom/index') as Promise<BuiltinPluginModule>,
   feishu: () => import('./feishu/index') as Promise<BuiltinPluginModule>,
+  ipqualityscore: () => import('./ipqualityscore/index') as Promise<BuiltinPluginModule>,
+  langbase: () => import('./langbase/index') as Promise<BuiltinPluginModule>,
+  lightfield: () => import('./lightfield/index') as Promise<BuiltinPluginModule>,
+  logsnag: () => import('./logsnag/index') as Promise<BuiltinPluginModule>,
+  meituan: () => import('./meituan/index') as Promise<BuiltinPluginModule>,
   notes: () => import('./notes/index') as Promise<BuiltinPluginModule>,
+  opensea: () => import('./opensea/index') as Promise<BuiltinPluginModule>,
   resend: () => import('./resend/index') as Promise<BuiltinPluginModule>,
+  screenshot_fyi: () => import('./screenshot_fyi/index') as Promise<BuiltinPluginModule>,
   stripe: () => import('./stripe/index') as Promise<BuiltinPluginModule>,
+  telnyx: () => import('./telnyx/index') as Promise<BuiltinPluginModule>,
 }
 
 /** 宿主传给插件的 env(Node 宿主常用 process.env;CF 宿主用 Worker env)。 */

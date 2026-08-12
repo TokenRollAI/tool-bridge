@@ -1,0 +1,1193 @@
+{
+  "service": "fathom",
+  "displayName": "Fathom Analytics",
+  "authTypes": [
+    "api_key"
+  ],
+  "actions": [
+    {
+      "name": "get_account",
+      "description": "Retrieve the Fathom account that owns the API key.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false,
+        "description": "No input is required to fetch the Fathom account."
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer",
+            "description": "The numeric Fathom account ID."
+          },
+          "object": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The Fathom object type, usually account."
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The account owner's display name."
+          },
+          "email": {
+            "type": "string",
+            "description": "The account owner's email address.",
+            "format": "email"
+          }
+        },
+        "additionalProperties": true,
+        "description": "The Fathom account that owns the API key."
+      }
+    },
+    {
+      "name": "list_sites",
+      "description": "List Fathom sites available to the API key.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "description": "The maximum number of objects to return, from 1 to 100."
+          },
+          "starting_after": {
+            "type": "string",
+            "minLength": 1,
+            "description": "A cursor object ID used to page forward chronologically."
+          },
+          "ending_before": {
+            "type": "string",
+            "minLength": 1,
+            "description": "A cursor object ID used to page backward in reverse chronology."
+          }
+        },
+        "additionalProperties": false,
+        "description": "The input payload for listing Fathom sites."
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "object": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The Fathom collection object type, usually list."
+          },
+          "url": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The Fathom API path used for this list response."
+          },
+          "has_more": {
+            "type": "boolean",
+            "description": "Whether more results are available after this page."
+          },
+          "data": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "The Fathom site ID."
+                },
+                "object": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "The Fathom object type, usually site."
+                },
+                "name": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "The site display name."
+                },
+                "sharing": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "The site's dashboard sharing configuration."
+                },
+                "created_at": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "A Fathom timestamp string, such as 2024-01-15 00:00:00."
+                },
+                "timezone": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "The site's reporting timezone as a TZ database name."
+                }
+              },
+              "additionalProperties": true,
+              "description": "A Fathom site object."
+            },
+            "description": "The Fathom sites returned for this page."
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "object",
+          "url",
+          "has_more",
+          "data"
+        ],
+        "description": "A paginated Fathom site list."
+      }
+    },
+    {
+      "name": "get_site",
+      "description": "Retrieve a single Fathom site by site ID.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "site_id": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The Fathom site ID used in the tracking code, such as CDBUGS."
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "site_id"
+        ],
+        "description": "The input payload for fetching a Fathom site."
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The Fathom site ID."
+          },
+          "object": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The Fathom object type, usually site."
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The site display name."
+          },
+          "sharing": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The site's dashboard sharing configuration."
+          },
+          "created_at": {
+            "type": "string",
+            "minLength": 1,
+            "description": "A Fathom timestamp string, such as 2024-01-15 00:00:00."
+          },
+          "timezone": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The site's reporting timezone as a TZ database name."
+          }
+        },
+        "additionalProperties": true,
+        "description": "A Fathom site object."
+      }
+    },
+    {
+      "name": "create_site",
+      "description": "Create a Fathom site.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 255,
+            "description": "The website display name, up to 255 characters."
+          },
+          "sharing": {
+            "type": "string",
+            "enum": [
+              "none",
+              "private",
+              "public"
+            ],
+            "description": "The dashboard sharing configuration for the site."
+          },
+          "share_password": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The password required when sharing is set to private."
+          },
+          "timezone": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The site's reporting timezone as a TZ database name."
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "name"
+        ],
+        "description": "The input payload for creating a Fathom site."
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The Fathom site ID."
+          },
+          "object": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The Fathom object type, usually site."
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The site display name."
+          },
+          "sharing": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The site's dashboard sharing configuration."
+          },
+          "created_at": {
+            "type": "string",
+            "minLength": 1,
+            "description": "A Fathom timestamp string, such as 2024-01-15 00:00:00."
+          },
+          "timezone": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The site's reporting timezone as a TZ database name."
+          }
+        },
+        "additionalProperties": true,
+        "description": "A Fathom site object."
+      }
+    },
+    {
+      "name": "update_site",
+      "description": "Update a Fathom site.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "site_id": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The Fathom site ID used in the tracking code, such as CDBUGS."
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 255,
+            "description": "The website display name, up to 255 characters."
+          },
+          "sharing": {
+            "type": "string",
+            "enum": [
+              "none",
+              "private",
+              "public"
+            ],
+            "description": "The dashboard sharing configuration for the site."
+          },
+          "share_password": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The password required when sharing is set to private."
+          },
+          "timezone": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The site's reporting timezone as a TZ database name."
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "site_id"
+        ],
+        "description": "The input payload for updating a Fathom site."
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The Fathom site ID."
+          },
+          "object": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The Fathom object type, usually site."
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The site display name."
+          },
+          "sharing": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The site's dashboard sharing configuration."
+          },
+          "created_at": {
+            "type": "string",
+            "minLength": 1,
+            "description": "A Fathom timestamp string, such as 2024-01-15 00:00:00."
+          },
+          "timezone": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The site's reporting timezone as a TZ database name."
+          }
+        },
+        "additionalProperties": true,
+        "description": "A Fathom site object."
+      }
+    },
+    {
+      "name": "list_events",
+      "description": "List events for a Fathom site.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "site_id": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The Fathom site ID used in the tracking code, such as CDBUGS."
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "description": "The maximum number of objects to return, from 1 to 100."
+          },
+          "starting_after": {
+            "type": "string",
+            "minLength": 1,
+            "description": "A cursor object ID used to page forward chronologically."
+          },
+          "ending_before": {
+            "type": "string",
+            "minLength": 1,
+            "description": "A cursor object ID used to page backward in reverse chronology."
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "site_id"
+        ],
+        "description": "The input payload for listing Fathom events."
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "object": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The Fathom collection object type, usually list."
+          },
+          "url": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The Fathom API path used for this list response."
+          },
+          "has_more": {
+            "type": "boolean",
+            "description": "Whether more results are available after this page."
+          },
+          "data": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "The Fathom event ID."
+                },
+                "object": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "The Fathom object type, usually event."
+                },
+                "name": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "The event display name."
+                },
+                "site_id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "The Fathom site ID that owns this event."
+                },
+                "created_at": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "A Fathom timestamp string, such as 2024-01-15 00:00:00."
+                }
+              },
+              "additionalProperties": true,
+              "description": "A Fathom event object."
+            },
+            "description": "The Fathom events returned for this page."
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "object",
+          "url",
+          "has_more",
+          "data"
+        ],
+        "description": "A paginated Fathom event list."
+      }
+    },
+    {
+      "name": "get_event",
+      "description": "Retrieve a single Fathom event by site ID and event ID.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "site_id": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The Fathom site ID used in the tracking code, such as CDBUGS."
+          },
+          "event_id": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The Fathom event ID, such as signed-up-to-newsletter."
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "site_id",
+          "event_id"
+        ],
+        "description": "The input payload for fetching a Fathom event."
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The Fathom event ID."
+          },
+          "object": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The Fathom object type, usually event."
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The event display name."
+          },
+          "site_id": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The Fathom site ID that owns this event."
+          },
+          "created_at": {
+            "type": "string",
+            "minLength": 1,
+            "description": "A Fathom timestamp string, such as 2024-01-15 00:00:00."
+          }
+        },
+        "additionalProperties": true,
+        "description": "A Fathom event object."
+      }
+    },
+    {
+      "name": "create_event",
+      "description": "Create a Fathom event for a site.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "site_id": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The Fathom site ID used in the tracking code, such as CDBUGS."
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 255,
+            "description": "The event display name, up to 255 characters."
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "site_id",
+          "name"
+        ],
+        "description": "The input payload for creating a Fathom event."
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The Fathom event ID."
+          },
+          "object": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The Fathom object type, usually event."
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The event display name."
+          },
+          "site_id": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The Fathom site ID that owns this event."
+          },
+          "created_at": {
+            "type": "string",
+            "minLength": 1,
+            "description": "A Fathom timestamp string, such as 2024-01-15 00:00:00."
+          }
+        },
+        "additionalProperties": true,
+        "description": "A Fathom event object."
+      }
+    },
+    {
+      "name": "update_event",
+      "description": "Update a Fathom event.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "site_id": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The Fathom site ID used in the tracking code, such as CDBUGS."
+          },
+          "event_id": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The Fathom event ID, such as signed-up-to-newsletter."
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 255,
+            "description": "The event display name, up to 255 characters."
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "site_id",
+          "event_id"
+        ],
+        "description": "The input payload for updating a Fathom event."
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The Fathom event ID."
+          },
+          "object": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The Fathom object type, usually event."
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The event display name."
+          },
+          "site_id": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The Fathom site ID that owns this event."
+          },
+          "created_at": {
+            "type": "string",
+            "minLength": 1,
+            "description": "A Fathom timestamp string, such as 2024-01-15 00:00:00."
+          }
+        },
+        "additionalProperties": true,
+        "description": "A Fathom event object."
+      }
+    },
+    {
+      "name": "list_milestones",
+      "description": "List milestones for a Fathom site.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "site_id": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The Fathom site ID used in the tracking code, such as CDBUGS."
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "description": "The maximum number of objects to return, from 1 to 100."
+          },
+          "starting_after": {
+            "type": "string",
+            "minLength": 1,
+            "description": "A cursor object ID used to page forward chronologically."
+          },
+          "ending_before": {
+            "type": "string",
+            "minLength": 1,
+            "description": "A cursor object ID used to page backward in reverse chronology."
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "site_id"
+        ],
+        "description": "The input payload for listing Fathom milestones."
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "object": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The Fathom collection object type, usually list."
+          },
+          "url": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The Fathom API path used for this list response."
+          },
+          "has_more": {
+            "type": "boolean",
+            "description": "Whether more results are available after this page."
+          },
+          "data": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "The Fathom milestone ID."
+                },
+                "object": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "The Fathom object type, usually milestone."
+                },
+                "name": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "The milestone display name."
+                },
+                "milestone_date": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "A Fathom timestamp string, such as 2024-01-15 00:00:00."
+                },
+                "created_at": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "A Fathom timestamp string, such as 2024-01-15 00:00:00."
+                },
+                "updated_at": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "A Fathom timestamp string, such as 2024-01-15 00:00:00."
+                }
+              },
+              "additionalProperties": true,
+              "description": "A Fathom milestone object."
+            },
+            "description": "The Fathom milestones returned for this page."
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "object",
+          "url",
+          "has_more",
+          "data"
+        ],
+        "description": "A paginated Fathom milestone list."
+      }
+    },
+    {
+      "name": "get_milestone",
+      "description": "Retrieve a single Fathom milestone by site ID and milestone ID.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "site_id": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The Fathom site ID used in the tracking code, such as CDBUGS."
+          },
+          "milestone_id": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The Fathom milestone ID."
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "site_id",
+          "milestone_id"
+        ],
+        "description": "The input payload for fetching a Fathom milestone."
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The Fathom milestone ID."
+          },
+          "object": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The Fathom object type, usually milestone."
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The milestone display name."
+          },
+          "milestone_date": {
+            "type": "string",
+            "minLength": 1,
+            "description": "A Fathom timestamp string, such as 2024-01-15 00:00:00."
+          },
+          "created_at": {
+            "type": "string",
+            "minLength": 1,
+            "description": "A Fathom timestamp string, such as 2024-01-15 00:00:00."
+          },
+          "updated_at": {
+            "type": "string",
+            "minLength": 1,
+            "description": "A Fathom timestamp string, such as 2024-01-15 00:00:00."
+          }
+        },
+        "additionalProperties": true,
+        "description": "A Fathom milestone object."
+      }
+    },
+    {
+      "name": "create_milestone",
+      "description": "Create a Fathom milestone for a site.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "site_id": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The Fathom site ID used in the tracking code, such as CDBUGS."
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 255,
+            "description": "The milestone display name, up to 255 characters."
+          },
+          "milestone_date": {
+            "type": "string",
+            "description": "The milestone date in YYYY-MM-DD format. It must be before today.",
+            "format": "date"
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "site_id",
+          "name",
+          "milestone_date"
+        ],
+        "description": "The input payload for creating a Fathom milestone."
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The Fathom milestone ID."
+          },
+          "object": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The Fathom object type, usually milestone."
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The milestone display name."
+          },
+          "milestone_date": {
+            "type": "string",
+            "minLength": 1,
+            "description": "A Fathom timestamp string, such as 2024-01-15 00:00:00."
+          },
+          "created_at": {
+            "type": "string",
+            "minLength": 1,
+            "description": "A Fathom timestamp string, such as 2024-01-15 00:00:00."
+          },
+          "updated_at": {
+            "type": "string",
+            "minLength": 1,
+            "description": "A Fathom timestamp string, such as 2024-01-15 00:00:00."
+          }
+        },
+        "additionalProperties": true,
+        "description": "A Fathom milestone object."
+      }
+    },
+    {
+      "name": "update_milestone",
+      "description": "Update a Fathom milestone.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "site_id": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The Fathom site ID used in the tracking code, such as CDBUGS."
+          },
+          "milestone_id": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The Fathom milestone ID."
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 255,
+            "description": "The milestone display name, up to 255 characters."
+          },
+          "milestone_date": {
+            "type": "string",
+            "description": "The milestone date in YYYY-MM-DD format. It must be before today.",
+            "format": "date"
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "site_id",
+          "milestone_id"
+        ],
+        "description": "The input payload for updating a Fathom milestone."
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The Fathom milestone ID."
+          },
+          "object": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The Fathom object type, usually milestone."
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The milestone display name."
+          },
+          "milestone_date": {
+            "type": "string",
+            "minLength": 1,
+            "description": "A Fathom timestamp string, such as 2024-01-15 00:00:00."
+          },
+          "created_at": {
+            "type": "string",
+            "minLength": 1,
+            "description": "A Fathom timestamp string, such as 2024-01-15 00:00:00."
+          },
+          "updated_at": {
+            "type": "string",
+            "minLength": 1,
+            "description": "A Fathom timestamp string, such as 2024-01-15 00:00:00."
+          }
+        },
+        "additionalProperties": true,
+        "description": "A Fathom milestone object."
+      }
+    },
+    {
+      "name": "run_aggregation",
+      "description": "Generate a Fathom analytics aggregation report.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "entity": {
+            "type": "string",
+            "enum": [
+              "pageview",
+              "event"
+            ],
+            "description": "The Fathom entity to report on."
+          },
+          "entity_id": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The site ID for pageview aggregations."
+          },
+          "site_id": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The Fathom site ID used in the tracking code, such as CDBUGS."
+          },
+          "entity_name": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The event name for event aggregations."
+          },
+          "aggregates": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "visits",
+                "uniques",
+                "pageviews",
+                "avg_duration",
+                "bounce_rate",
+                "conversions",
+                "unique_conversions",
+                "value"
+              ],
+              "description": "A Fathom aggregate field."
+            },
+            "description": "The SUM aggregate fields to include in the report.",
+            "minItems": 1
+          },
+          "date_grouping": {
+            "type": "string",
+            "enum": [
+              "hour",
+              "day",
+              "month",
+              "year"
+            ],
+            "description": "The date grouping granularity for the report."
+          },
+          "field_grouping": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "hostname",
+                "pathname",
+                "referrer_hostname",
+                "referrer_pathname",
+                "referrer_source",
+                "browser",
+                "country_code",
+                "city",
+                "region",
+                "device_type",
+                "operating_system",
+                "utm_campaign",
+                "utm_content",
+                "utm_medium",
+                "utm_source",
+                "utm_term",
+                "keyword",
+                "q",
+                "ref",
+                "s"
+              ],
+              "description": "A Fathom grouping field."
+            },
+            "description": "The Fathom fields to group report rows by.",
+            "minItems": 1
+          },
+          "sort_by": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The sort expression in field:asc or field:desc form."
+          },
+          "timezone": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Deprecated Fathom timezone override as a TZ database name."
+          },
+          "date_from": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The report start timestamp, such as 2022-04-01 15:31:00."
+          },
+          "date_to": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The report end timestamp, such as 2022-04-30 23:59:59."
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "The maximum number of aggregation rows to return."
+          },
+          "filters": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "property": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "The Fathom field to filter on, such as pathname or device_type."
+                },
+                "operator": {
+                  "type": "string",
+                  "enum": [
+                    "is",
+                    "is not",
+                    "is like",
+                    "is not like",
+                    "matching",
+                    "not matching"
+                  ],
+                  "description": "The filter operator to apply."
+                },
+                "value": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "The value to compare against the selected property."
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "property",
+                "operator",
+                "value"
+              ],
+              "description": "A Fathom aggregation filter."
+            },
+            "description": "Structured Fathom filters to JSON-encode for the filters query parameter.",
+            "minItems": 1
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "entity",
+          "aggregates"
+        ],
+        "description": "The input payload for generating a Fathom aggregation report."
+      },
+      "outputSchema": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "additionalProperties": {
+            "description": "A Fathom aggregation row value."
+          },
+          "description": "A Fathom aggregation row. Keys vary based on requested aggregates and groupings."
+        },
+        "description": "Rows returned by the Fathom aggregation report."
+      }
+    },
+    {
+      "name": "get_current_visitors",
+      "description": "Fetch the current visitor count and optional detailed breakdown for a Fathom site.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "site_id": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The Fathom site ID used in the tracking code, such as CDBUGS."
+          },
+          "detailed": {
+            "type": "boolean",
+            "description": "Whether to include top content and referrer breakdowns."
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "site_id"
+        ],
+        "description": "The input payload for fetching current Fathom visitors."
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "total": {
+            "type": "integer",
+            "description": "The number of current visitors on the site."
+          },
+          "content": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "pathname": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "The content pathname."
+                },
+                "hostname": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "The content hostname."
+                },
+                "total": {
+                  "type": "integer",
+                  "description": "The number of current visitors for this content row."
+                }
+              },
+              "additionalProperties": true,
+              "description": "A current visitor content row."
+            },
+            "description": "The top content rows when detailed mode is enabled."
+          },
+          "referrers": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "referrer_hostname": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "The referrer hostname."
+                },
+                "referrer_pathname": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "The referrer pathname."
+                },
+                "total": {
+                  "type": "integer",
+                  "description": "The number of current visitors for this referrer row."
+                }
+              },
+              "additionalProperties": true,
+              "description": "A current visitor referrer row."
+            },
+            "description": "The top referrer rows when detailed mode is enabled."
+          }
+        },
+        "additionalProperties": true,
+        "description": "The current visitor response from Fathom."
+      }
+    }
+  ]
+}

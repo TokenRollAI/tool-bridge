@@ -1,0 +1,1244 @@
+{
+  "service": "lightfield",
+  "displayName": "Lightfield",
+  "authTypes": [
+    "api_key"
+  ],
+  "actions": [
+    {
+      "name": "get_api_key_metadata",
+      "description": "Validate the current Lightfield API key and return its subject and scopes.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false,
+        "description": "Input parameters for validating the current API key."
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "active": {
+            "type": "boolean",
+            "description": "Whether Lightfield reported the API key as active."
+          },
+          "scopes": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "description": "A granted scope."
+            },
+            "description": "Granted public scopes for the API key."
+          },
+          "subjectType": {
+            "type": "string",
+            "enum": [
+              "user",
+              "workspace"
+            ],
+            "description": "Whether the API key belongs to a user or workspace."
+          },
+          "tokenType": {
+            "type": "string",
+            "enum": [
+              "api_key"
+            ],
+            "description": "Credential family reported by Lightfield."
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "active",
+          "scopes",
+          "subjectType",
+          "tokenType"
+        ],
+        "description": "Metadata for the current Lightfield API key."
+      }
+    },
+    {
+      "name": "list_object_definitions",
+      "description": "List custom object types available to the current Lightfield API key.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false,
+        "description": "Input parameters for listing Lightfield custom object types."
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "definitions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "label": {
+                  "type": "string",
+                  "description": "Human-readable custom object label."
+                },
+                "objectType": {
+                  "type": "string",
+                  "description": "Slug used to reference the custom object type in the API."
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "label",
+                "objectType"
+              ],
+              "description": "A Lightfield custom object definition."
+            },
+            "description": "Custom object definitions returned by Lightfield."
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "definitions"
+        ],
+        "description": "Lightfield custom object definitions response."
+      }
+    },
+    {
+      "name": "list_custom_object_records",
+      "description": "List records for a Lightfield custom object type with optional filters.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "entitySlug": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The custom object type slug."
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 25,
+            "description": "Maximum number of records to return. Lightfield allows 1 to 25."
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Number of records to skip for offset pagination."
+          },
+          "filters": {
+            "type": "object",
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "description": "A string filter value."
+                },
+                {
+                  "type": "number",
+                  "description": "A numeric filter value."
+                },
+                {
+                  "type": "boolean",
+                  "description": "A boolean filter value."
+                }
+              ],
+              "description": "A Lightfield list filter value."
+            },
+            "description": "Lightfield filter query parameters keyed by raw field expression, such as $email[contains]."
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "entitySlug"
+        ],
+        "description": "Pagination and filtering parameters for listing a custom object type."
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "records": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "description": "Unique Lightfield record ID."
+                },
+                "createdAt": {
+                  "type": "string",
+                  "description": "ISO 8601 timestamp when the record was created."
+                },
+                "updatedAt": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "description": "ISO 8601 timestamp when the record was last updated."
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "externalId": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "description": "External identifier for the record."
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "httpLink": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "description": "URL for viewing the record in the Lightfield web app."
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "fields": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "object",
+                    "properties": {
+                      "value": {
+                        "description": "The field value returned by Lightfield."
+                      },
+                      "valueType": {
+                        "type": "string",
+                        "description": "The Lightfield field value type."
+                      }
+                    },
+                    "additionalProperties": true,
+                    "description": "A typed Lightfield field value."
+                  },
+                  "description": "Dynamic Lightfield fields keyed by field slug."
+                },
+                "relationships": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "object",
+                    "properties": {
+                      "cardinality": {
+                        "type": "string",
+                        "description": "Whether the relationship is has_one or has_many."
+                      },
+                      "objectType": {
+                        "type": "string",
+                        "description": "The related object type."
+                      },
+                      "values": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "description": "A related record ID."
+                        },
+                        "description": "Related record IDs."
+                      }
+                    },
+                    "additionalProperties": true,
+                    "description": "A Lightfield relationship value."
+                  },
+                  "description": "Dynamic Lightfield relationships keyed by relationship slug."
+                }
+              },
+              "additionalProperties": true,
+              "description": "A Lightfield CRM record with dynamic fields and relationships."
+            },
+            "description": "Records returned by Lightfield."
+          },
+          "object": {
+            "type": "string",
+            "description": "The upstream response object type."
+          },
+          "totalCount": {
+            "type": "number",
+            "description": "Total number of records matching the query."
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "records",
+          "object",
+          "totalCount"
+        ],
+        "description": "A normalized Lightfield list response."
+      }
+    },
+    {
+      "name": "get_custom_object_record",
+      "description": "Get one Lightfield custom object record by object type and record ID.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "entitySlug": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The custom object type slug."
+          },
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The Lightfield record ID to retrieve."
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "entitySlug",
+          "id"
+        ],
+        "description": "Identifier for retrieving a custom object record."
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "record": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "description": "Unique Lightfield record ID."
+              },
+              "createdAt": {
+                "type": "string",
+                "description": "ISO 8601 timestamp when the record was created."
+              },
+              "updatedAt": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "description": "ISO 8601 timestamp when the record was last updated."
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "externalId": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "description": "External identifier for the record."
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "httpLink": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "description": "URL for viewing the record in the Lightfield web app."
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "fields": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "object",
+                  "properties": {
+                    "value": {
+                      "description": "The field value returned by Lightfield."
+                    },
+                    "valueType": {
+                      "type": "string",
+                      "description": "The Lightfield field value type."
+                    }
+                  },
+                  "additionalProperties": true,
+                  "description": "A typed Lightfield field value."
+                },
+                "description": "Dynamic Lightfield fields keyed by field slug."
+              },
+              "relationships": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "object",
+                  "properties": {
+                    "cardinality": {
+                      "type": "string",
+                      "description": "Whether the relationship is has_one or has_many."
+                    },
+                    "objectType": {
+                      "type": "string",
+                      "description": "The related object type."
+                    },
+                    "values": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "description": "A related record ID."
+                      },
+                      "description": "Related record IDs."
+                    }
+                  },
+                  "additionalProperties": true,
+                  "description": "A Lightfield relationship value."
+                },
+                "description": "Dynamic Lightfield relationships keyed by relationship slug."
+              }
+            },
+            "additionalProperties": true,
+            "description": "A Lightfield CRM record with dynamic fields and relationships."
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "record"
+        ],
+        "description": "A normalized Lightfield retrieve response."
+      }
+    },
+    {
+      "name": "list_accounts",
+      "description": "List Lightfield accounts with optional pagination and filters.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 25,
+            "description": "Maximum number of records to return. Lightfield allows 1 to 25."
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Number of records to skip for offset pagination."
+          },
+          "filters": {
+            "type": "object",
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "description": "A string filter value."
+                },
+                {
+                  "type": "number",
+                  "description": "A numeric filter value."
+                },
+                {
+                  "type": "boolean",
+                  "description": "A boolean filter value."
+                }
+              ],
+              "description": "A Lightfield list filter value."
+            },
+            "description": "Lightfield filter query parameters keyed by raw field expression, such as $email[contains]."
+          }
+        },
+        "additionalProperties": false,
+        "description": "Pagination and filtering parameters for a Lightfield list endpoint."
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "records": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "description": "Unique Lightfield record ID."
+                },
+                "createdAt": {
+                  "type": "string",
+                  "description": "ISO 8601 timestamp when the record was created."
+                },
+                "updatedAt": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "description": "ISO 8601 timestamp when the record was last updated."
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "externalId": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "description": "External identifier for the record."
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "httpLink": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "description": "URL for viewing the record in the Lightfield web app."
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "fields": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "object",
+                    "properties": {
+                      "value": {
+                        "description": "The field value returned by Lightfield."
+                      },
+                      "valueType": {
+                        "type": "string",
+                        "description": "The Lightfield field value type."
+                      }
+                    },
+                    "additionalProperties": true,
+                    "description": "A typed Lightfield field value."
+                  },
+                  "description": "Dynamic Lightfield fields keyed by field slug."
+                },
+                "relationships": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "object",
+                    "properties": {
+                      "cardinality": {
+                        "type": "string",
+                        "description": "Whether the relationship is has_one or has_many."
+                      },
+                      "objectType": {
+                        "type": "string",
+                        "description": "The related object type."
+                      },
+                      "values": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "description": "A related record ID."
+                        },
+                        "description": "Related record IDs."
+                      }
+                    },
+                    "additionalProperties": true,
+                    "description": "A Lightfield relationship value."
+                  },
+                  "description": "Dynamic Lightfield relationships keyed by relationship slug."
+                }
+              },
+              "additionalProperties": true,
+              "description": "A Lightfield CRM record with dynamic fields and relationships."
+            },
+            "description": "Records returned by Lightfield."
+          },
+          "object": {
+            "type": "string",
+            "description": "The upstream response object type."
+          },
+          "totalCount": {
+            "type": "number",
+            "description": "Total number of records matching the query."
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "records",
+          "object",
+          "totalCount"
+        ],
+        "description": "A normalized Lightfield list response."
+      }
+    },
+    {
+      "name": "get_account",
+      "description": "Get one Lightfield account by ID.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The Lightfield record ID to retrieve."
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "id"
+        ],
+        "description": "Identifier for retrieving a Lightfield record."
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "record": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "description": "Unique Lightfield record ID."
+              },
+              "createdAt": {
+                "type": "string",
+                "description": "ISO 8601 timestamp when the record was created."
+              },
+              "updatedAt": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "description": "ISO 8601 timestamp when the record was last updated."
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "externalId": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "description": "External identifier for the record."
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "httpLink": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "description": "URL for viewing the record in the Lightfield web app."
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "fields": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "object",
+                  "properties": {
+                    "value": {
+                      "description": "The field value returned by Lightfield."
+                    },
+                    "valueType": {
+                      "type": "string",
+                      "description": "The Lightfield field value type."
+                    }
+                  },
+                  "additionalProperties": true,
+                  "description": "A typed Lightfield field value."
+                },
+                "description": "Dynamic Lightfield fields keyed by field slug."
+              },
+              "relationships": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "object",
+                  "properties": {
+                    "cardinality": {
+                      "type": "string",
+                      "description": "Whether the relationship is has_one or has_many."
+                    },
+                    "objectType": {
+                      "type": "string",
+                      "description": "The related object type."
+                    },
+                    "values": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "description": "A related record ID."
+                      },
+                      "description": "Related record IDs."
+                    }
+                  },
+                  "additionalProperties": true,
+                  "description": "A Lightfield relationship value."
+                },
+                "description": "Dynamic Lightfield relationships keyed by relationship slug."
+              }
+            },
+            "additionalProperties": true,
+            "description": "A Lightfield CRM record with dynamic fields and relationships."
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "record"
+        ],
+        "description": "A normalized Lightfield retrieve response."
+      }
+    },
+    {
+      "name": "list_contacts",
+      "description": "List Lightfield contacts with optional pagination and filters.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 25,
+            "description": "Maximum number of records to return. Lightfield allows 1 to 25."
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Number of records to skip for offset pagination."
+          },
+          "filters": {
+            "type": "object",
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "description": "A string filter value."
+                },
+                {
+                  "type": "number",
+                  "description": "A numeric filter value."
+                },
+                {
+                  "type": "boolean",
+                  "description": "A boolean filter value."
+                }
+              ],
+              "description": "A Lightfield list filter value."
+            },
+            "description": "Lightfield filter query parameters keyed by raw field expression, such as $email[contains]."
+          }
+        },
+        "additionalProperties": false,
+        "description": "Pagination and filtering parameters for a Lightfield list endpoint."
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "records": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "description": "Unique Lightfield record ID."
+                },
+                "createdAt": {
+                  "type": "string",
+                  "description": "ISO 8601 timestamp when the record was created."
+                },
+                "updatedAt": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "description": "ISO 8601 timestamp when the record was last updated."
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "externalId": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "description": "External identifier for the record."
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "httpLink": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "description": "URL for viewing the record in the Lightfield web app."
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "fields": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "object",
+                    "properties": {
+                      "value": {
+                        "description": "The field value returned by Lightfield."
+                      },
+                      "valueType": {
+                        "type": "string",
+                        "description": "The Lightfield field value type."
+                      }
+                    },
+                    "additionalProperties": true,
+                    "description": "A typed Lightfield field value."
+                  },
+                  "description": "Dynamic Lightfield fields keyed by field slug."
+                },
+                "relationships": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "object",
+                    "properties": {
+                      "cardinality": {
+                        "type": "string",
+                        "description": "Whether the relationship is has_one or has_many."
+                      },
+                      "objectType": {
+                        "type": "string",
+                        "description": "The related object type."
+                      },
+                      "values": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "description": "A related record ID."
+                        },
+                        "description": "Related record IDs."
+                      }
+                    },
+                    "additionalProperties": true,
+                    "description": "A Lightfield relationship value."
+                  },
+                  "description": "Dynamic Lightfield relationships keyed by relationship slug."
+                }
+              },
+              "additionalProperties": true,
+              "description": "A Lightfield CRM record with dynamic fields and relationships."
+            },
+            "description": "Records returned by Lightfield."
+          },
+          "object": {
+            "type": "string",
+            "description": "The upstream response object type."
+          },
+          "totalCount": {
+            "type": "number",
+            "description": "Total number of records matching the query."
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "records",
+          "object",
+          "totalCount"
+        ],
+        "description": "A normalized Lightfield list response."
+      }
+    },
+    {
+      "name": "get_contact",
+      "description": "Get one Lightfield contact by ID.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The Lightfield record ID to retrieve."
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "id"
+        ],
+        "description": "Identifier for retrieving a Lightfield record."
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "record": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "description": "Unique Lightfield record ID."
+              },
+              "createdAt": {
+                "type": "string",
+                "description": "ISO 8601 timestamp when the record was created."
+              },
+              "updatedAt": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "description": "ISO 8601 timestamp when the record was last updated."
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "externalId": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "description": "External identifier for the record."
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "httpLink": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "description": "URL for viewing the record in the Lightfield web app."
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "fields": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "object",
+                  "properties": {
+                    "value": {
+                      "description": "The field value returned by Lightfield."
+                    },
+                    "valueType": {
+                      "type": "string",
+                      "description": "The Lightfield field value type."
+                    }
+                  },
+                  "additionalProperties": true,
+                  "description": "A typed Lightfield field value."
+                },
+                "description": "Dynamic Lightfield fields keyed by field slug."
+              },
+              "relationships": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "object",
+                  "properties": {
+                    "cardinality": {
+                      "type": "string",
+                      "description": "Whether the relationship is has_one or has_many."
+                    },
+                    "objectType": {
+                      "type": "string",
+                      "description": "The related object type."
+                    },
+                    "values": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "description": "A related record ID."
+                      },
+                      "description": "Related record IDs."
+                    }
+                  },
+                  "additionalProperties": true,
+                  "description": "A Lightfield relationship value."
+                },
+                "description": "Dynamic Lightfield relationships keyed by relationship slug."
+              }
+            },
+            "additionalProperties": true,
+            "description": "A Lightfield CRM record with dynamic fields and relationships."
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "record"
+        ],
+        "description": "A normalized Lightfield retrieve response."
+      }
+    },
+    {
+      "name": "list_opportunities",
+      "description": "List Lightfield opportunities with optional pagination and filters.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 25,
+            "description": "Maximum number of records to return. Lightfield allows 1 to 25."
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Number of records to skip for offset pagination."
+          },
+          "filters": {
+            "type": "object",
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "description": "A string filter value."
+                },
+                {
+                  "type": "number",
+                  "description": "A numeric filter value."
+                },
+                {
+                  "type": "boolean",
+                  "description": "A boolean filter value."
+                }
+              ],
+              "description": "A Lightfield list filter value."
+            },
+            "description": "Lightfield filter query parameters keyed by raw field expression, such as $email[contains]."
+          }
+        },
+        "additionalProperties": false,
+        "description": "Pagination and filtering parameters for a Lightfield list endpoint."
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "records": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "description": "Unique Lightfield record ID."
+                },
+                "createdAt": {
+                  "type": "string",
+                  "description": "ISO 8601 timestamp when the record was created."
+                },
+                "updatedAt": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "description": "ISO 8601 timestamp when the record was last updated."
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "externalId": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "description": "External identifier for the record."
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "httpLink": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "description": "URL for viewing the record in the Lightfield web app."
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "fields": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "object",
+                    "properties": {
+                      "value": {
+                        "description": "The field value returned by Lightfield."
+                      },
+                      "valueType": {
+                        "type": "string",
+                        "description": "The Lightfield field value type."
+                      }
+                    },
+                    "additionalProperties": true,
+                    "description": "A typed Lightfield field value."
+                  },
+                  "description": "Dynamic Lightfield fields keyed by field slug."
+                },
+                "relationships": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "object",
+                    "properties": {
+                      "cardinality": {
+                        "type": "string",
+                        "description": "Whether the relationship is has_one or has_many."
+                      },
+                      "objectType": {
+                        "type": "string",
+                        "description": "The related object type."
+                      },
+                      "values": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "description": "A related record ID."
+                        },
+                        "description": "Related record IDs."
+                      }
+                    },
+                    "additionalProperties": true,
+                    "description": "A Lightfield relationship value."
+                  },
+                  "description": "Dynamic Lightfield relationships keyed by relationship slug."
+                }
+              },
+              "additionalProperties": true,
+              "description": "A Lightfield CRM record with dynamic fields and relationships."
+            },
+            "description": "Records returned by Lightfield."
+          },
+          "object": {
+            "type": "string",
+            "description": "The upstream response object type."
+          },
+          "totalCount": {
+            "type": "number",
+            "description": "Total number of records matching the query."
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "records",
+          "object",
+          "totalCount"
+        ],
+        "description": "A normalized Lightfield list response."
+      }
+    },
+    {
+      "name": "get_opportunity",
+      "description": "Get one Lightfield opportunity by ID.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The Lightfield record ID to retrieve."
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "id"
+        ],
+        "description": "Identifier for retrieving a Lightfield record."
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "record": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "description": "Unique Lightfield record ID."
+              },
+              "createdAt": {
+                "type": "string",
+                "description": "ISO 8601 timestamp when the record was created."
+              },
+              "updatedAt": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "description": "ISO 8601 timestamp when the record was last updated."
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "externalId": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "description": "External identifier for the record."
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "httpLink": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "description": "URL for viewing the record in the Lightfield web app."
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "fields": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "object",
+                  "properties": {
+                    "value": {
+                      "description": "The field value returned by Lightfield."
+                    },
+                    "valueType": {
+                      "type": "string",
+                      "description": "The Lightfield field value type."
+                    }
+                  },
+                  "additionalProperties": true,
+                  "description": "A typed Lightfield field value."
+                },
+                "description": "Dynamic Lightfield fields keyed by field slug."
+              },
+              "relationships": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "object",
+                  "properties": {
+                    "cardinality": {
+                      "type": "string",
+                      "description": "Whether the relationship is has_one or has_many."
+                    },
+                    "objectType": {
+                      "type": "string",
+                      "description": "The related object type."
+                    },
+                    "values": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "description": "A related record ID."
+                      },
+                      "description": "Related record IDs."
+                    }
+                  },
+                  "additionalProperties": true,
+                  "description": "A Lightfield relationship value."
+                },
+                "description": "Dynamic Lightfield relationships keyed by relationship slug."
+              }
+            },
+            "additionalProperties": true,
+            "description": "A Lightfield CRM record with dynamic fields and relationships."
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "record"
+        ],
+        "description": "A normalized Lightfield retrieve response."
+      }
+    }
+  ]
+}

@@ -1,0 +1,1022 @@
+{
+  "service": "opensea",
+  "displayName": "OpenSea",
+  "authTypes": [
+    "api_key"
+  ],
+  "actions": [
+    {
+      "name": "search",
+      "description": "Search OpenSea collections, tokens, NFTs, and accounts by relevance.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Search query text."
+          },
+          "chains": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "description": "The blockchain identifier used by OpenSea, such as ethereum, polygon, or base."
+            },
+            "description": "Blockchain identifiers used to filter search results.",
+            "minItems": 1
+          },
+          "assetTypes": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "collection",
+                "nft",
+                "token",
+                "account"
+              ],
+              "description": "OpenSea asset type filter for search results."
+            },
+            "description": "Asset type filters. OpenSea defaults to collection and token when omitted.",
+            "minItems": 1
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50,
+            "description": "Number of search results to return."
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "query"
+        ],
+        "description": "Input parameters for searching OpenSea."
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "results": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {},
+              "additionalProperties": true,
+              "description": "The raw object returned by OpenSea."
+            },
+            "description": "Raw ranked search results returned by OpenSea."
+          },
+          "raw": {
+            "type": "object",
+            "properties": {},
+            "additionalProperties": true,
+            "description": "The raw object returned by OpenSea."
+          }
+        },
+        "additionalProperties": false,
+        "description": "Search results returned by OpenSea."
+      }
+    },
+    {
+      "name": "get_collection",
+      "description": "Get one OpenSea collection including details, links, fees, and traits.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "slug": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The unique OpenSea collection slug."
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "slug"
+        ],
+        "description": "Input parameters for retrieving one OpenSea collection."
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "collection": {
+            "type": "object",
+            "properties": {
+              "slug": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "description": "The OpenSea collection slug."
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "name": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "description": "The collection display name."
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "description": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "description": "The collection description."
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "imageUrl": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "description": "The collection image URL."
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "bannerImageUrl": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "description": "The collection banner image URL."
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "owner": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "description": "The collection owner address when returned by OpenSea."
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "raw": {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": true,
+                "description": "The raw object returned by OpenSea."
+              }
+            },
+            "additionalProperties": false,
+            "description": "A normalized OpenSea collection summary."
+          }
+        },
+        "additionalProperties": false,
+        "description": "Collection details returned by OpenSea."
+      }
+    },
+    {
+      "name": "get_collection_stats",
+      "description": "Get comprehensive OpenSea statistics for one collection.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "slug": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The unique OpenSea collection slug."
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "slug"
+        ],
+        "description": "Input parameters for retrieving OpenSea collection statistics."
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "stats": {
+            "type": "object",
+            "properties": {
+              "total": {
+                "type": "object",
+                "properties": {
+                  "volume": {
+                    "type": "number",
+                    "description": "Total trading volume."
+                  },
+                  "sales": {
+                    "type": "integer",
+                    "description": "Total sales count."
+                  },
+                  "num_owners": {
+                    "type": "integer",
+                    "description": "Total number of owners."
+                  },
+                  "floor_price": {
+                    "type": "number",
+                    "description": "Current floor price."
+                  },
+                  "floor_price_symbol": {
+                    "type": "string",
+                    "description": "Symbol for the floor price currency."
+                  }
+                },
+                "additionalProperties": true,
+                "description": "Total collection statistics returned by OpenSea."
+              },
+              "intervals": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "interval": {
+                      "type": "string",
+                      "description": "The interval label returned by OpenSea."
+                    },
+                    "volume": {
+                      "type": "number",
+                      "description": "The trading volume for the interval."
+                    },
+                    "sales": {
+                      "type": "integer",
+                      "description": "The sales count for the interval."
+                    }
+                  },
+                  "additionalProperties": true,
+                  "description": "One interval statistic returned for an OpenSea collection."
+                },
+                "description": "Interval statistics for the collection."
+              }
+            },
+            "additionalProperties": true,
+            "description": "Collection statistics returned by OpenSea."
+          }
+        },
+        "additionalProperties": false,
+        "description": "Collection statistics returned by OpenSea."
+      }
+    },
+    {
+      "name": "list_collection_nfts",
+      "description": "List NFTs in one OpenSea collection with optional trait filtering.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "slug": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The unique OpenSea collection slug."
+          },
+          "traits": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "traitType": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "The trait category name."
+                },
+                "value": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "The trait value to match."
+                }
+              },
+              "additionalProperties": false,
+              "description": "One OpenSea trait filter for collection NFT searches."
+            },
+            "description": "Trait filters to AND-combine for returned NFTs.",
+            "minItems": 1
+          },
+          "hasAgentBinding": {
+            "type": "boolean",
+            "description": "Filter to NFTs that have an ERC-8217 agent binding."
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 200,
+            "description": "Number of items to return per page."
+          },
+          "next": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The OpenSea pagination cursor from the previous response."
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "slug"
+        ],
+        "description": "Input parameters for listing NFTs in an OpenSea collection."
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "nfts": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "identifier": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "description": "The NFT token identifier."
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "name": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "description": "The NFT display name."
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "description": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "description": "The NFT description."
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "imageUrl": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "description": "The NFT image URL."
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "collection": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "description": "The collection slug associated with the NFT."
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "contract": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "description": "The NFT contract address."
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "chain": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "description": "The blockchain identifier associated with the NFT."
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "raw": {
+                  "type": "object",
+                  "properties": {},
+                  "additionalProperties": true,
+                  "description": "The raw object returned by OpenSea."
+                }
+              },
+              "additionalProperties": false,
+              "description": "A normalized OpenSea NFT summary."
+            },
+            "description": "Normalized OpenSea NFT summaries."
+          },
+          "pagination": {
+            "type": "object",
+            "properties": {
+              "next": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "description": "The cursor for the next page when one is available."
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "previous": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "description": "The cursor for the previous page when one is available."
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "additionalProperties": false,
+            "description": "Pagination cursors returned by OpenSea."
+          },
+          "raw": {
+            "type": "object",
+            "properties": {},
+            "additionalProperties": true,
+            "description": "The raw object returned by OpenSea."
+          }
+        },
+        "additionalProperties": false,
+        "description": "NFTs returned for an OpenSea collection."
+      }
+    },
+    {
+      "name": "list_collection_traits",
+      "description": "List all available traits for an OpenSea collection.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "slug": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The unique OpenSea collection slug."
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "slug"
+        ],
+        "description": "Input parameters for listing OpenSea collection traits."
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "traits": {
+            "type": "object",
+            "properties": {
+              "categories": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string",
+                  "description": "The OpenSea trait data type."
+                },
+                "description": "Trait category names mapped to their OpenSea data type."
+              },
+              "counts": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "object",
+                  "properties": {},
+                  "additionalProperties": true,
+                  "description": "The raw object returned by OpenSea."
+                },
+                "description": "Trait category names mapped to value counts or numeric range metadata."
+              }
+            },
+            "additionalProperties": true,
+            "description": "Collection trait metadata returned by OpenSea."
+          }
+        },
+        "additionalProperties": false,
+        "description": "Collection trait metadata returned by OpenSea."
+      }
+    },
+    {
+      "name": "list_collection_offers",
+      "description": "List collection-level offers for an OpenSea collection.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "slug": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The unique OpenSea collection slug."
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 200,
+            "description": "Number of items to return per page."
+          },
+          "next": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The OpenSea pagination cursor from the previous response."
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "slug"
+        ],
+        "description": "Input parameters for listing OpenSea collection offers."
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "offers": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "orderHash": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "description": "The OpenSea order hash."
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "type": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "description": "The order type returned by OpenSea."
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "price": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "description": "The current order price when returned by OpenSea."
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "currency": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "description": "The order currency symbol when returned by OpenSea."
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "maker": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "description": "The maker address when returned by OpenSea."
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "taker": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "description": "The taker address when returned by OpenSea."
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "raw": {
+                  "type": "object",
+                  "properties": {},
+                  "additionalProperties": true,
+                  "description": "The raw object returned by OpenSea."
+                }
+              },
+              "additionalProperties": false,
+              "description": "A normalized OpenSea marketplace order."
+            },
+            "description": "Normalized OpenSea offers."
+          },
+          "pagination": {
+            "type": "object",
+            "properties": {
+              "next": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "description": "The cursor for the next page when one is available."
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "previous": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "description": "The cursor for the previous page when one is available."
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "additionalProperties": false,
+            "description": "Pagination cursors returned by OpenSea."
+          },
+          "raw": {
+            "type": "object",
+            "properties": {},
+            "additionalProperties": true,
+            "description": "The raw object returned by OpenSea."
+          }
+        },
+        "additionalProperties": false,
+        "description": "Collection offers returned by OpenSea."
+      }
+    },
+    {
+      "name": "get_best_nft_listing",
+      "description": "Get the best current OpenSea listing for a single NFT.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "slug": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The unique OpenSea collection slug."
+          },
+          "identifier": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The NFT token identifier."
+          },
+          "includePrivateListings": {
+            "type": "boolean",
+            "description": "Whether OpenSea should include private listings."
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "slug",
+          "identifier"
+        ],
+        "description": "Input parameters for retrieving the best listing for an NFT."
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "listing": {
+            "type": "object",
+            "properties": {
+              "orderHash": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "description": "The OpenSea order hash."
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "type": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "description": "The order type returned by OpenSea."
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "price": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "description": "The current order price when returned by OpenSea."
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "currency": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "description": "The order currency symbol when returned by OpenSea."
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "maker": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "description": "The maker address when returned by OpenSea."
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "taker": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "description": "The taker address when returned by OpenSea."
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "raw": {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": true,
+                "description": "The raw object returned by OpenSea."
+              }
+            },
+            "additionalProperties": false,
+            "description": "A normalized OpenSea marketplace order."
+          }
+        },
+        "additionalProperties": false,
+        "description": "Best NFT listing returned by OpenSea."
+      }
+    },
+    {
+      "name": "get_best_nft_offer",
+      "description": "Get the best current OpenSea offer for a single NFT.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "slug": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The unique OpenSea collection slug."
+          },
+          "identifier": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The NFT token identifier."
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "slug",
+          "identifier"
+        ],
+        "description": "Input parameters for retrieving the best offer for an NFT."
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "offer": {
+            "type": "object",
+            "properties": {
+              "orderHash": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "description": "The OpenSea order hash."
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "type": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "description": "The order type returned by OpenSea."
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "price": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "description": "The current order price when returned by OpenSea."
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "currency": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "description": "The order currency symbol when returned by OpenSea."
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "maker": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "description": "The maker address when returned by OpenSea."
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "taker": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "description": "The taker address when returned by OpenSea."
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "raw": {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": true,
+                "description": "The raw object returned by OpenSea."
+              }
+            },
+            "additionalProperties": false,
+            "description": "A normalized OpenSea marketplace order."
+          }
+        },
+        "additionalProperties": false,
+        "description": "Best NFT offer returned by OpenSea."
+      }
+    },
+    {
+      "name": "get_nft",
+      "description": "Get metadata, traits, ownership, and rarity for a single OpenSea NFT.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "chain": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The blockchain identifier used by OpenSea, such as ethereum, polygon, or base."
+          },
+          "address": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The NFT contract address."
+          },
+          "identifier": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The NFT token identifier."
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "chain",
+          "address",
+          "identifier"
+        ],
+        "description": "Input parameters for retrieving a single OpenSea NFT."
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "nft": {
+            "type": "object",
+            "properties": {
+              "identifier": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "description": "The NFT token identifier."
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "name": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "description": "The NFT display name."
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "description": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "description": "The NFT description."
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "imageUrl": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "description": "The NFT image URL."
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "collection": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "description": "The collection slug associated with the NFT."
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "contract": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "description": "The NFT contract address."
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "chain": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "description": "The blockchain identifier associated with the NFT."
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "raw": {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": true,
+                "description": "The raw object returned by OpenSea."
+              }
+            },
+            "additionalProperties": false,
+            "description": "A normalized OpenSea NFT summary."
+          }
+        },
+        "additionalProperties": false,
+        "description": "NFT details returned by OpenSea."
+      }
+    }
+  ]
+}

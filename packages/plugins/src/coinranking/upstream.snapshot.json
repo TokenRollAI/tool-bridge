@@ -1,0 +1,428 @@
+{
+  "service": "coinranking",
+  "displayName": "Coinranking",
+  "authTypes": [
+    "api_key"
+  ],
+  "actions": [
+    {
+      "name": "search_suggestions",
+      "description": "Search Coinranking suggestions by keyword and return grouped entity matches.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Search query used for Coinranking suggestions."
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "query"
+        ],
+        "description": "Input parameters for searching Coinranking suggestions."
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "results": {
+            "type": "object",
+            "properties": {
+              "coins": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "uuid": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "Unique identifier returned by Coinranking."
+                    },
+                    "name": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "Display name returned by Coinranking."
+                    },
+                    "symbol": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "Ticker or short symbol returned by Coinranking."
+                    },
+                    "price": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "String price returned by Coinranking when present."
+                    },
+                    "iconUrl": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "Icon URL returned by Coinranking when present."
+                    }
+                  },
+                  "additionalProperties": true,
+                  "description": "One suggestion item returned by Coinranking."
+                },
+                "description": "Coin suggestions matched by the query."
+              },
+              "exchanges": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {},
+                  "additionalProperties": true,
+                  "description": "One exchange suggestion."
+                },
+                "description": "Exchange suggestions matched by the query."
+              },
+              "markets": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {},
+                  "additionalProperties": true,
+                  "description": "One market suggestion."
+                },
+                "description": "Market suggestions matched by the query."
+              },
+              "fiat": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {},
+                  "additionalProperties": true,
+                  "description": "One fiat suggestion."
+                },
+                "description": "Fiat currency suggestions matched by the query."
+              }
+            },
+            "additionalProperties": false,
+            "description": "Grouped search suggestion payload returned by Coinranking."
+          }
+        },
+        "additionalProperties": false,
+        "description": "Search suggestion results returned by Coinranking."
+      }
+    },
+    {
+      "name": "list_coins",
+      "description": "List coins from Coinranking with optional filtering, sorting, and pagination.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "description": "Maximum number of coins to return."
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Number of leading results to skip."
+          },
+          "search": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Search string used to filter the returned coins."
+          },
+          "orderBy": {
+            "type": "string",
+            "enum": [
+              "marketCap",
+              "price",
+              "change",
+              "24hVolume",
+              "listedAt"
+            ],
+            "description": "Field used to sort the returned coins."
+          },
+          "orderDirection": {
+            "type": "string",
+            "enum": [
+              "asc",
+              "desc"
+            ],
+            "description": "Sort direction applied to the ordered result set."
+          },
+          "referenceCurrencyUuid": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Reference currency UUID used to price the returned coins."
+          },
+          "timePeriod": {
+            "type": "string",
+            "enum": [
+              "1h",
+              "3h",
+              "12h",
+              "24h",
+              "7d",
+              "30d",
+              "3m",
+              "1y",
+              "3y",
+              "5y"
+            ],
+            "description": "Time period used for change and historical market data."
+          }
+        },
+        "additionalProperties": false,
+        "description": "Input parameters for listing coins from Coinranking."
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "stats": {
+            "type": "object",
+            "properties": {
+              "total": {
+                "type": "integer",
+                "description": "Total number of matching coins when present."
+              }
+            },
+            "additionalProperties": true,
+            "description": "List statistics returned by Coinranking."
+          },
+          "coins": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "uuid": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "Unique identifier of the coin."
+                },
+                "symbol": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "Ticker symbol of the coin."
+                },
+                "name": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "Name of the coin."
+                },
+                "price": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "Current price returned by Coinranking."
+                },
+                "marketCap": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "Market capitalization returned by Coinranking."
+                }
+              },
+              "additionalProperties": true,
+              "description": "One coin summary returned by Coinranking."
+            },
+            "description": "Ordered list of coins returned by Coinranking."
+          }
+        },
+        "additionalProperties": false,
+        "description": "Coin list payload returned by Coinranking."
+      }
+    },
+    {
+      "name": "get_coin_details",
+      "description": "Get detailed information for a single coin from Coinranking.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "uuid": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Coin UUID returned by Coinranking."
+          },
+          "referenceCurrencyUuid": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Reference currency UUID used to price the returned coin."
+          },
+          "timePeriod": {
+            "type": "string",
+            "enum": [
+              "1h",
+              "3h",
+              "12h",
+              "24h",
+              "7d",
+              "30d",
+              "3m",
+              "1y",
+              "3y",
+              "5y"
+            ],
+            "description": "Time period used for change and historical market data."
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "uuid"
+        ],
+        "description": "Input parameters for retrieving coin details from Coinranking."
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "coin": {
+            "type": "object",
+            "properties": {},
+            "additionalProperties": true,
+            "description": "Detailed coin payload returned by Coinranking."
+          }
+        },
+        "additionalProperties": false,
+        "description": "Detailed coin response returned by Coinranking."
+      }
+    },
+    {
+      "name": "get_coin_price_history",
+      "description": "Get historical price points for a single coin from Coinranking.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "uuid": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Coin UUID returned by Coinranking."
+          },
+          "referenceCurrencyUuid": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Reference currency UUID used to price the historical points."
+          },
+          "timePeriod": {
+            "type": "string",
+            "enum": [
+              "1h",
+              "3h",
+              "12h",
+              "24h",
+              "7d",
+              "30d",
+              "3m",
+              "1y",
+              "3y",
+              "5y"
+            ],
+            "description": "Time period used for change and historical market data."
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "uuid"
+        ],
+        "description": "Input parameters for retrieving historical prices from Coinranking."
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "change": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Price change percentage over the requested time period."
+          },
+          "history": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "price": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "Historical price returned by Coinranking."
+                },
+                "timestamp": {
+                  "type": "integer",
+                  "description": "Unix timestamp for the historical price point."
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "timestamp"
+              ],
+              "description": "One historical price point returned by Coinranking."
+            },
+            "description": "Historical price points for the coin."
+          }
+        },
+        "additionalProperties": false,
+        "description": "Price history response returned by Coinranking."
+      }
+    },
+    {
+      "name": "get_reference_currencies",
+      "description": "List reference currencies supported by Coinranking.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false,
+        "description": "Input parameters for listing Coinranking reference currencies."
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "currencies": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "uuid": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "Unique identifier of the reference currency."
+                },
+                "type": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "Reference currency type returned by Coinranking."
+                },
+                "symbol": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "Reference currency symbol."
+                },
+                "name": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "Reference currency display name."
+                }
+              },
+              "additionalProperties": true,
+              "description": "One reference currency returned by Coinranking."
+            },
+            "description": "Reference currencies returned by Coinranking."
+          }
+        },
+        "additionalProperties": false,
+        "description": "Reference currency list returned by Coinranking."
+      }
+    },
+    {
+      "name": "get_global_stats",
+      "description": "Get global cryptocurrency market statistics from Coinranking.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false,
+        "description": "Input parameters for retrieving Coinranking global stats."
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "stats": {
+            "type": "object",
+            "properties": {},
+            "additionalProperties": true,
+            "description": "Global market statistics returned by Coinranking."
+          }
+        },
+        "additionalProperties": false,
+        "description": "Global market statistics returned by Coinranking."
+      }
+    }
+  ]
+}

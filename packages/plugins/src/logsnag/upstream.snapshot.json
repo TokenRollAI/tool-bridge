@@ -1,0 +1,311 @@
+{
+  "service": "logsnag",
+  "displayName": "LogSnag",
+  "authTypes": [
+    "api_key"
+  ],
+  "actions": [
+    {
+      "name": "publish_event",
+      "description": "Publish an event to a LogSnag project channel.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The LogSnag project name."
+          },
+          "channel": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The LogSnag channel name."
+          },
+          "event": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The event name."
+          },
+          "description": {
+            "type": "string",
+            "description": "The optional event description."
+          },
+          "icon": {
+            "type": "string",
+            "description": "The optional emoji or emoji shortcode shown with the event."
+          },
+          "notify": {
+            "type": "boolean",
+            "description": "Whether LogSnag should send a push notification."
+          },
+          "tags": {
+            "type": "object",
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "description": "A string value."
+                },
+                {
+                  "type": "number",
+                  "description": "A numeric value."
+                },
+                {
+                  "type": "boolean",
+                  "description": "A boolean value."
+                }
+              ],
+              "description": "A string, number, or boolean value accepted by LogSnag."
+            },
+            "description": "A LogSnag key-value object."
+          },
+          "parser": {
+            "type": "string",
+            "enum": [
+              "markdown",
+              "text"
+            ],
+            "description": "The parser LogSnag should apply to the description."
+          },
+          "user_id": {
+            "type": "string",
+            "description": "The optional user identifier associated with the event."
+          },
+          "timestamp": {
+            "type": "number",
+            "description": "The optional Unix timestamp in seconds for historical events."
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "project",
+          "channel",
+          "event"
+        ],
+        "description": "The payload for publishing a LogSnag event."
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "description": "Whether LogSnag accepted the request."
+          },
+          "status": {
+            "type": "integer",
+            "description": "The upstream HTTP status code returned by LogSnag."
+          },
+          "payload": {
+            "description": "The parsed JSON response body returned by LogSnag, when present."
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "ok",
+          "status"
+        ],
+        "description": "The result returned after LogSnag accepts the request."
+      }
+    },
+    {
+      "name": "identify_user",
+      "description": "Add or update key-value properties on a LogSnag user profile.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The LogSnag project name."
+          },
+          "user_id": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The user identifier to update."
+          },
+          "properties": {
+            "type": "object",
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "description": "A string value."
+                },
+                {
+                  "type": "number",
+                  "description": "A numeric value."
+                },
+                {
+                  "type": "boolean",
+                  "description": "A boolean value."
+                }
+              ],
+              "description": "A string, number, or boolean value accepted by LogSnag."
+            },
+            "description": "A LogSnag key-value object."
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "project",
+          "user_id",
+          "properties"
+        ],
+        "description": "The payload for updating a LogSnag user profile."
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "description": "Whether LogSnag accepted the request."
+          },
+          "status": {
+            "type": "integer",
+            "description": "The upstream HTTP status code returned by LogSnag."
+          },
+          "payload": {
+            "description": "The parsed JSON response body returned by LogSnag, when present."
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "ok",
+          "status"
+        ],
+        "description": "The result returned after LogSnag accepts the request."
+      }
+    },
+    {
+      "name": "publish_insight",
+      "description": "Publish the latest value for a LogSnag real-time insight.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The LogSnag project name."
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The insight title."
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "string",
+                "description": "A string insight value."
+              },
+              {
+                "type": "number",
+                "description": "A numeric insight value."
+              }
+            ],
+            "description": "The insight value."
+          },
+          "icon": {
+            "type": "string",
+            "description": "The optional emoji or emoji shortcode shown with the insight."
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "project",
+          "title",
+          "value"
+        ],
+        "description": "The payload for publishing a LogSnag insight value."
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "description": "Whether LogSnag accepted the request."
+          },
+          "status": {
+            "type": "integer",
+            "description": "The upstream HTTP status code returned by LogSnag."
+          },
+          "payload": {
+            "description": "The parsed JSON response body returned by LogSnag, when present."
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "ok",
+          "status"
+        ],
+        "description": "The result returned after LogSnag accepts the request."
+      }
+    },
+    {
+      "name": "mutate_insight",
+      "description": "Increment or decrement an existing numeric LogSnag insight.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The LogSnag project name."
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The insight title."
+          },
+          "value": {
+            "type": "object",
+            "properties": {
+              "$inc": {
+                "type": "number",
+                "description": "The numeric amount to increment or decrement the insight value by."
+              }
+            },
+            "additionalProperties": false,
+            "required": [
+              "$inc"
+            ],
+            "description": "The LogSnag mutation object."
+          },
+          "icon": {
+            "type": "string",
+            "description": "The optional emoji or emoji shortcode shown with the insight."
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "project",
+          "title",
+          "value"
+        ],
+        "description": "The payload for mutating a numeric LogSnag insight."
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "description": "Whether LogSnag accepted the request."
+          },
+          "status": {
+            "type": "integer",
+            "description": "The upstream HTTP status code returned by LogSnag."
+          },
+          "payload": {
+            "description": "The parsed JSON response body returned by LogSnag, when present."
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "ok",
+          "status"
+        ],
+        "description": "The result returned after LogSnag accepts the request."
+      }
+    }
+  ]
+}
