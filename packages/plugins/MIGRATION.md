@@ -125,6 +125,41 @@ C 层 5 个 oauth2 provider(sentry / gmail / googlecalendar / googledocs / dropb
   授权参数逐字一致。端点错一个字符(比如 sentry 的尾斜杠)授权就会失败,而那种失败要到
   用户点授权按钮时才显现。
 
+### 自建实例类 provider:baseUrl 走 providerConfig,不是 credentialFields
+
+`grafana` / `memos` / `metabase` / `outline` / `wordpress` 这类"用户自己部署一份"的
+provider,上游的形态是 **`api_key` + `extraFields`(`secret: false`)**,不是
+`custom_credential.fields`。两者在 tool-bridge 侧的落点不同:
+
+| 上游 | 落点 | 理由 |
+|---|---|---|
+| `auth[0].type === 'custom_credential'` 的 `fields` | `credentialFields` → authRef 指向的 secret | 都是凭证,泄漏有后果 |
+| `auth[0].extraFields` 且 `secret: false`(baseUrl / instanceUrl / region) | `providerConfig`(`ctx.mountConfig`) | **不是密钥**;塞进 secret 通道是滥用那条通道 |
+
+判据就一条:看 `secret` 标志。`baseUrl` 泄漏无后果,但它**必配** —— 缺了插件不知道该
+打哪个实例,报 `invalid_argument` 点名要配什么。
+
+顺带:这类 provider 的 baseUrl 由租户填写,是**现成的 SSRF 入口**。`guardedFetch` 会拦
+内网地址(那是对的),但错误消息要让用户看懂是"你填的地址指向内网"而不是一句 fetch failed。
+metabase 的 instanceUrl 规范化(补 https、拒非 https、去 userinfo、剥重复 `/api`)是个好样板。
+
+### 与上游行为不一致的两处(schema 未动,故不进 handwritten.json)
+
+`handwritten.json` 登记的是 **schema 豁免**;下面这两处 schema 没动、改的是**行为**,
+故记在这里。判据是"上游的实现与它自己的声明矛盾,且同 provider 内有反例证明是漏改":
+
+| 产物 | 偏离 | 依据 |
+|---|---|---|
+| `googledocs.insert_table_action` | 上游 `insertAtEndOfSegment` **声明了但零引用**(只在 `actions.ts:371` 出现,executors 里完全不读),给了它也仍按 `index` 定点插;这里按声明处理 —— 显式为 true 就追加到段尾 | 同 provider 的 `insert_text_action.append_to_end` **是生效的**(`executors.ts:615`),两个 action 同期加入、语义同构,上游那处是漏改 |
+| `googledocs` 403 归码 | 配额类 reason 归 `rate_limited`(可重试)而非 `unavailable` | 与 googlecalendar 同批口径一致;语义更准 —— 配额是"等一会儿就好",不是"服务不可用" |
+
+**不这么做的反面**:照抄一个连上游自己都没实现的声明,`~help` 会向 agent 承诺一个不存在
+的能力 —— 那比行为偏离更糟,因为它不可发现。
+
+`memos.get_current_user` 是相反的选择:上游读 `{user:{...}}` 信封,若某个 Memos 版本把
+user 放顶层这里会报 `unavailable`。**照抄未加兜底** —— 没有实证支撑的兼容分支只是猜测,
+猜错了反而掩盖真实的上游变更。
+
 ## 一个迁移产物长什么样
 
 ```
