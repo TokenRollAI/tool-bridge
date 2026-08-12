@@ -104,6 +104,11 @@ export interface ProxyToolsHandlers<Env = unknown> {
     input: { args: Record<string, unknown>, name: string },
     ctx: PluginCallContext<Env>,
   ) => unknown | Promise<unknown>
+  /**
+   * 需要**多字段凭证**时声明字段(缺省单值)。与静态 tools 的 `.credentials([...])` 同义 ——
+   * 两种 export 对外都是 `tools/v1`,凭证形态不该因"工具表是声明期写死还是运行时枚举"而异。
+   */
+  credentialFields?: PluginCredentialField[]
   description?: string
   list: (ctx: PluginCallContext<Env>) => Promise<ToolSpec[]> | ToolSpec[]
 }
@@ -174,6 +179,7 @@ interface ContextExportState<Env> {
 }
 
 interface ProxyToolsExportState<Env> {
+  credentialFields: PluginCredentialField[] | undefined
   description: string | undefined
   handlers: ProxyToolsHandlers<Env>
   id: string
@@ -282,7 +288,7 @@ export function createPlugin<Env = unknown>(opts: CreatePluginOptions<Env> = {})
             ...(state.kind === 'tools' && state.credentialProbe !== undefined
               ? { credentialProbe: state.credentialProbe }
               : {}),
-            ...(state.kind === 'tools' && state.credentialFields !== undefined
+            ...(state.credentialFields !== undefined
               ? { credentialFields: state.credentialFields }
               : {}),
           }
@@ -448,7 +454,7 @@ export function createPlugin<Env = unknown>(opts: CreatePluginOptions<Env> = {})
     const upstreamAuth = decodeUpstreamAuth(request)
     // 声明了多字段凭证就在这里解析一次:每个 handler 各自 JSON.parse 一遍是重复劳动,
     // 且各写各的校验会让"缺字段"的报错措辞不一致。解析失败 → invalid_argument(配置错)。
-    const credentialFields = state.kind === 'tools' ? state.credentialFields : undefined
+    const credentialFields = state.kind === 'context' ? undefined : state.credentialFields
     const ctx: PluginCallContext<Env> = {
       env,
       caller,
@@ -520,6 +526,7 @@ export function createPlugin<Env = unknown>(opts: CreatePluginOptions<Env> = {})
         kind: 'proxyTools',
         id,
         description: handlers.description,
+        credentialFields: handlers.credentialFields,
         handlers,
       })
       return plugin

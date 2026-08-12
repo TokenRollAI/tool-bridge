@@ -301,4 +301,31 @@ function requireId(value: unknown, field: string): string {
 
 剩余 ~170 个"codegen 全干净 + 纯 api_key + 单文件"的候选可以直接照这个流程跑。
 再往后要先在 codegen 里支持 `allOf`/`not`/顶层 `$schema`,或接受它们走手写豁免。
-`oauth2`(42 个)与 `custom_credential`(54 个)需要平台侧先补凭证通道,不在流水线射程内。
+`custom_credential`(54 个)**通道已通**(见下),可以开始迁;`oauth2`(42 个)仍需平台侧
+先补托管授权码流程。
+
+## 多字段凭证(custom_credential)
+
+上游的 `custom_credential` 形态(多个凭证字段)现在有落点。产物侧只需在装配时声明字段:
+
+```ts
+createProviderPlugin({
+  description: 'Feishu App Bot',
+  credentialFields: [
+    { key: 'appId', label: 'App ID', required: true },
+    { key: 'appSecret', label: 'App Secret', required: true, secret: true },
+  ],
+  actions: ...,
+  handlers: ...,
+})
+```
+
+handler 里用 `requireCredential(ctx, SERVICE, 'appId')` 取字段(单值 provider 继续用
+`requireApiKey`)。字段缺失由 SDK 在解析时按声明拦下,`requireCredential` 只处理"整份凭证
+没配"。
+
+写入:`tb secret set --name x --field appId=a --field appSecret=b`,落库是一个 JSON 对象。
+平台在**挂载时**校验字段齐全,缺了当场拒并点名缺哪个 —— 不等到第一次调用。
+
+迁移时对着上游 `definition.ts` 的 `auth[0].fields` 抄字段名与 required/secret 即可。
+**字段名要与上游一致**:handler 里取的键就是上游 executor 从 `credential.values` 里取的那些。

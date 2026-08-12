@@ -204,6 +204,23 @@ describe('契约面(生命周期 GET,不鉴权)', () => {
           id: 'actions',
           profile: 'tools/v1',
           description: 'Feishu actions (docs, wiki, messaging) via the official MCP upstream',
+          // 多字段凭证的声明:平台据此在挂载时校验 app_id/app_secret 齐全,
+          // 而不是等第一次调用才发现少配了字段。
+          credentialFields: [
+            {
+              key: 'app_id',
+              label: 'App ID',
+              required: true,
+              description: '飞书自建应用的 app_id(开放平台「凭证与基础信息」页)',
+            },
+            {
+              key: 'app_secret',
+              label: 'App Secret',
+              required: true,
+              secret: true,
+              description: '飞书自建应用的 app_secret,用于换发 tenant_access_token',
+            },
+          ],
         },
       ],
     })

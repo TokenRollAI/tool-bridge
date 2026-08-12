@@ -49,32 +49,23 @@ interface FeishuCredential {
 }
 
 /**
- * 取飞书凭证(SDK 已把 base64url 解成明文 JSON)。
- * 缺失 → unavailable(挂载少配了 authRef,是配置错误不是调用方参数错);坏形状 → invalid_argument。
+ * 取飞书凭证。字段由本 export 的 `credentialFields` 声明,SDK 已按声明解析并校验必填 ——
+ * 这里只处理"整份凭证没配"(挂载少配 authRef,是配置错误不是调用方参数错)。
+ *
+ * 从前这里手写 JSON.parse + 逐字段校验:那时平台不知道凭证里有什么,只能靠"把 JSON 塞进
+ * 单值通道"的约定。现在字段是声明的,平台在**挂载时**就会校验齐全并点名缺哪个。
  */
 function credentialOf(ctx: PluginCallContext<Env>): FeishuCredential {
-  const raw = ctx.upstreamAuth
-  if (raw === undefined || raw === '') {
+  const values = ctx.credentials
+  if (values === undefined) {
     throw new TBError(
       'unavailable',
-      '缺 X-TB-Upstream-Auth:挂载节点须配置 authRef(飞书凭证 JSON {"app_id","app_secret"} 存平台凭证保管)',
+      '缺上游凭证:挂载节点须配置 authRef,凭证用 `tb secret set <name>'
+      + ' --field app_id=... --field app_secret=...` 写入',
       { retryable: false },
     )
   }
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(raw)
-  } catch {
-    throw new TBError('invalid_argument', 'X-TB-Upstream-Auth 非法(须 base64url JSON)')
-  }
-  const cred = parsed as Partial<FeishuCredential>
-  if (typeof cred.app_id !== 'string' || cred.app_id === '') {
-    throw new TBError('invalid_argument', 'X-TB-Upstream-Auth 缺 app_id')
-  }
-  if (typeof cred.app_secret !== 'string' || cred.app_secret === '') {
-    throw new TBError('invalid_argument', 'X-TB-Upstream-Auth 缺 app_secret')
-  }
-  return { app_id: cred.app_id, app_secret: cred.app_secret }
+  return { app_id: values.app_id!, app_secret: values.app_secret! }
 }
 
 /** 飞书 annotations → ToolSpec.effect(与 gateway providers/mcp.ts 同规则)。 */
@@ -130,6 +121,22 @@ export function createFeishuPlugin() {
   const plugin = createPlugin<Env>({ token: env => env.PLUGIN_TOKEN })
   plugin.proxyTools('actions', {
     description: 'Feishu actions (docs, wiki, messaging) via the official MCP upstream',
+    // 飞书自建应用凭证:两个字段,由平台在挂载时校验齐全(见 core PluginExport.credentialFields)。
+    credentialFields: [
+      {
+        key: 'app_id',
+        label: 'App ID',
+        required: true,
+        description: '飞书自建应用的 app_id(开放平台「凭证与基础信息」页)',
+      },
+      {
+        key: 'app_secret',
+        label: 'App Secret',
+        required: true,
+        secret: true,
+        description: '飞书自建应用的 app_secret,用于换发 tenant_access_token',
+      },
+    ],
     list: async ctx => (await withTatRetry(ctx, listTools)).map(toSpec),
     // MCP RPC 业务错误(isError)是正常返回值,原样进 ToolResult。
     call: async ({ name, args }, ctx) => await withTatRetry(ctx, cfg => callTool(cfg, name, args)),
