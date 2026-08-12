@@ -158,6 +158,21 @@ ipqualityscore / brave_search / lightfield / opensea / fathom
 - agent 产出质量好于预期:注释解释与上游的**有意偏离**及理由。例如 clerk 指出上游
   `createClerkError` 把 403 压成 401、404 压成 400,迁移后交回 `upstreamError` 统一归一。
 
+### 凭证进 URL 的 provider(部署侧需知)
+
+多数上游把 API key 放请求头,但有两个放在 URL 里 —— 这是**上游 API 的设计**,换成 header
+会直接 401,迁移没有选择余地:
+
+| provider | 位置 |
+|---|---|
+| `screenshot_fyi` | query 参数 `?accessKey=` |
+| `ipqualityscore` | **路径段** `/api/json/<family>/<apiKey>/<value>` |
+
+后果:凭证会出现在出站 URL 里,可能落进网关访问日志、上游的日志、以及任何中间代理。
+挂载这两个 provider 前应确认部署侧的日志策略(URL 是否脱敏、是否外发)。
+
+`guardedFetch` 的错误消息不回显 URL,这一点上没有额外泄漏;但常规的请求日志会。
+
 ### 已知缺口:`credentialValidators` 整体没有落点
 
 上游每个 provider 都带一个 `credentialValidators`,在**存凭证时**打一个最便宜的接口验证
