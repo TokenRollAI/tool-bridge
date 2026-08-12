@@ -1,12 +1,12 @@
 # Guide:npm 发布(cli / sdk / app / gateway / dashboard / server)
 
-> 用途:发布 public npm 包的新版本,以及新增可发布包的首发流程。适用:发 cli/sdk/gateway/dashboard/server 新版本、新增可发布包、排查 CI 发布失败。现状(2026-08-12):**六包首发全部完成**,registry latest 为 cli 0.7.0 / sdk 0.4.0 / gateway 0.4.0 / dashboard 0.6.0 / app 0.1.0 / server 0.1.0,Trusted Publisher 均已配置。**但四包的 registry latest 落后于 main 代码**,正在做一轮版本对齐(cli 0.8.0、gateway 0.5.0、sdk 0.5.0、dashboard 0.7.0、app 0.1.1、server 0.1.1);app/server 的 CI 发布通路尚未实证。快照见 [../must/current-state.md](../must/current-state.md)。
+> 用途:发布 public npm 包的新版本,以及新增可发布包的首发流程。适用:发 cli/sdk/gateway/dashboard/server 新版本、新增可发布包、排查 CI 发布失败。现状(2026-08-12):**六包首发全部完成**,Trusted Publisher 均已配置。本轮版本对齐 **cli 0.8.0 / sdk 0.5.0 / gateway 0.5.0 / dashboard 0.7.0 四包 CI 发布成功**;**app 0.1.1 与 server 0.1.1 两个 run 失败**,registry latest 仍停在 0.1.0——两者都挂在发布前的构建/冒烟步骤,**与 Trusted Publishing / OIDC 无关**(app:`dts.resolve: true` 撞 zod 的 `.d.cts`;server:冒烟没跟上 bootstrap fail-closed),修复见坑段前三条。故 **app/server 的 CI 发布通路至今仍未实证**。快照见 [../must/current-state.md](../must/current-state.md)。
 
 ## 包形态(发布模式)
 
 - **core 是 private workspace 包,不发布**(被 cli/sdk/app/gateway/server 各自 bundle 一份)。可发布包共六个:cli / sdk / app / gateway / dashboard / server。
 - cli/sdk/app/gateway/server 用 tsup `noExternal` 把 workspace 依赖 bundle 成**单文件 ESM**(workspace 包放 devDependencies,运行时 dependencies 只留真正的外部包)。配置见 `packages/sdk/tsup.config.ts`、`packages/cli/package.json`。
-- **app 是宿主中立应用层包**:tsup `platform: 'neutral'`,只 bundle core;gateway/sdk/server 三个宿主包把它当 devDependency 并 `noExternal`(理由见下条不变量)。自建宿主(Deno/Bun/自托管 Node)的消费者装这一个包即可拿到 `createTbApp`。
+- **app 是宿主中立应用层包**:tsup `platform: 'neutral'`,只 bundle core;`dts: { resolve: ['@tool-bridge/core'] }`(**不能写 `true`**,见坑);gateway/sdk/server 三个宿主包把它当 devDependency 并 `noExternal`(理由见下条不变量)。自建宿主(Deno/Bun/自托管 Node)的消费者装这一个包即可拿到 `createTbApp`。
 - **单份 core 是硬不变量**:core 是 private 包不随发布走,每个发布产物各自 bundle 一份。因此**任何同时发布 app 与宿主层的包都不能把 app 留 external**——否则运行时并存两份 core 副本,`err instanceof TBError` 跨副本恒为 false,TBError 被静默降级成 internal(错误码、状态码、retryable 全丢)。workspace 内测试跑的是源码单副本,**测不出这个问题**,只能靠配置纪律 + 产物检查。
 - **gateway 是 Worker library 包**(默认导出 app + `DeviceSession`,另 export `createApp` 与 `type Env`):tsup entry `src/index.ts`,`external: ['cloudflare:workers']`,target es2022 / platform neutral,core 被 bundle(从 dependencies 移到 devDependencies)。发布形态见下条 publishConfig 覆盖模式。
 - **dashboard 是纯静态产物包**:只发 `files: ["dist"]`(Vite 全量打包产物),全部依赖在 devDependencies——消费者不装 react,拷 `node_modules/@tool-bridge/dashboard/dist` 即用。
@@ -68,6 +68,9 @@ Trusted Publisher 必须在包已存在后才能配置,所以新包固定走两�
 
 ## 坑
 
+- **`pnpm verify` 不含 build,发布 workflow 才是 build 的第一道闸门**:verify = typecheck + lint + test,`tsup` 从不在其中跑。所以 dts 配置错误、external 清单漂移这类断裂在本地和 PR CI 全绿,直到打 tag 才在发布 workflow 里炸——那时 tag 已推、版本号已定,返工要删 tag 重打。2026-08-12 `app-v0.1.1` 即挂在 `pnpm --filter @tool-bridge/app build`。已在 `.github/workflows/ci.yml` 补 `pnpm turbo run build`(七包约 6s)。**改任何 tsup 配置后,本地至少跑一次该包的 `build`,typecheck 过不算数。**
+- **`dts.resolve` 必须是数组,不能是 `true`**:`true` 表示内联所有外部类型,dts rollup 会去啃 `zod/v4/index.d.cts`,而它的 default 导出实体在 `index.cjs` 里,rollup 报 `"default" is not exported by ... zod/v4/classic/index.cjs` 直接 build error(server 那条注释记的是另一个表现:`node:http` 类型被降级成 undefined)。正确写法是只列真正要内联的 workspace 包,如 `resolve: ['@tool-bridge/core']`。**新增可发布包时照抄既有包的 tsup 配置**——2026-08-11 新抽的 app 包没沿用,一个月后才在发布时暴露。
+- **CI 冒烟步骤会被 fail-closed 语义变更悄悄打断**:`publish-server.yml` 的 `Smoke dist` 直接 `node dist/main.js`,但安全修复后 Node 宿主首次引导缺 `TB_BOOTSTRAP_ADMIN_SK` 即拒绝启动,冒烟遂 exit 7(curl 连不上),`server-v0.1.1` 因此发布失败。冒烟已改为预置固定的 CI 假 SK 走**生产引导路径**,而非开 `TB_ALLOW_INSECURE_BOOTSTRAP` 走 dev 兼容路径。**改启动前置条件时,要连带检查所有 workflow 里裸起进程的步骤。**
 - **发布后立刻 `npm view` 可能仍报 E404**:registry 有 CDN 传播延迟。2026-08-12 实测 `@tool-bridge/server` 创建时间 `08:11:52Z`,`08:13:23Z`(91 秒后)查询仍返回 `E404 Not Found`,据此误报「未发布」。判定发布结果:等一两分钟复查,或直接看 `npm view <pkg> time.created` / npmjs.com 页面。**registry 的 404 不是「未发布」的可靠证据。**
 - **每轮版本对齐都要重算发布顺序**:`@tool-bridge/dashboard` 是 server 的 regular dependency(`workspace:*`),`pnpm pack` 会把它解析成具体版本。dashboard 新版没进 registry 就发 server,tarball 引用的 dashboard 版本不存在,消费者 `npm i` 直接失败。这是每轮都要满足的约束,不是首发时的一次性检查。
 - **agent 跑 `npm publish` 会卡死在 2FA/EOTP**:npm 触发浏览器一次性认证,认证 URL 在 agent 命令输出中被脱敏(显示 `***`),放后台等也没用。二选一:让用户在会话里 `! cd packages/xxx && npm publish` 自己跑(URL 直接显示给用户);或用户提供 TOTP,agent 走 `npm publish --otp=<code>`。
