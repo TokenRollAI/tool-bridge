@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { z } from 'zod/v4'
-import { OperationRegistry } from '../../src/operation/registry'
+import { OperationRegistry, toToolResult } from '../../src/operation/registry'
 import { isTBError } from '../../src/errors'
 
 const ctx = { who: 'tester' }
@@ -142,5 +142,29 @@ describe('OperationRegistry 调用', () => {
       return 'done'
     })
     expect((await reg.call('slow', {}, undefined)).content).toBe('done')
+  })
+})
+
+describe('toToolResult:信封与业务对象的分辨', () => {
+  it('业务出参顶层带 content 也要被包进信封(键集合含外来键)', () => {
+    // GitHub 的 reaction:content 是业务字段(表情名),不是信封载荷。
+    // 只按"有没有 content 键"判会把它当信封透传,id/user 降级成 ToolResult 上的野键 ——
+    // 不报错、不掉测试,调用方静默少字段。实测 11 处出参声明是这个形状。
+    const reaction = { id: 99, content: '+1', user: { login: 'octocat' } }
+    expect(toToolResult(reaction)).toEqual({ content: reaction })
+  })
+
+  it('真信封原样透传(键集合只有 ToolResult 的已知键)', () => {
+    expect(toToolResult({ content: 'hi' })).toEqual({ content: 'hi' })
+    expect(toToolResult({ content: 'x', isError: true })).toEqual({ content: 'x', isError: true })
+    // MCP 上游透传的多模态结果:proxyTools 复用这条规则,不能被误包一层。
+    const mcp = { content: 'text', contentBlocks: [{ type: 'text', text: 'x' }], structuredContent: { a: 1 } }
+    expect(toToolResult(mcp)).toEqual(mcp)
+  })
+
+  it('裸值照常包', () => {
+    expect(toToolResult('done')).toEqual({ content: 'done' })
+    expect(toToolResult({ n: 1 })).toEqual({ content: { n: 1 } })
+    expect(toToolResult(null)).toEqual({ content: null })
   })
 })

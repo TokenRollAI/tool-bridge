@@ -98,10 +98,21 @@ function invalidArgument(name: string, error: z.ZodError): TBError {
  * handler 裸返回值 → ToolResult(已是 ToolResult 形状则原样)。
  * 导出供代理型工具源复用(如 plugin-sdk 的 proxyTools:上游返回值形状不由我们决定,
  * 但"裸值要包、已是结果就透传"这条规则必须只有一份)。
+ *
+ * **判据不能只看有没有 `content` 键**:业务出参里 `content` 是个很常见的字段名
+ * (GitHub 的 reaction `{id, content:'+1', user}`、文件内容、标注正文…),只看这一个键
+ * 会把业务对象当成信封透传 —— 顶层其他字段全部降级成 ToolResult 上的野键,而且
+ * **不报错、不掉测试**,只是调用方静默少字段。实测 11 处出参声明踩到这个形状。
+ *
+ * ToolResult 是封闭形状(content + 三个可选键),所以判据是**键集合不含外来键**:
+ * `{content, isError}` 是信封,`{content, id, user}` 是业务对象。
  */
+const TOOL_RESULT_KEYS = new Set(['content', 'contentBlocks', 'isError', 'structuredContent'])
+
 export function toToolResult(value: unknown): ToolResult {
   if (typeof value === 'object' && value !== null && 'content' in value) {
-    return value as ToolResult
+    const keys = Object.keys(value)
+    if (keys.every(key => TOOL_RESULT_KEYS.has(key))) return value as ToolResult
   }
   return { content: value }
 }
