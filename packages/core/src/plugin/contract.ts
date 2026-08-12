@@ -23,6 +23,7 @@
 import { z } from 'zod'
 import type { PluginManifest } from './manifest'
 import { CONTEXT_METHODS } from '../context/capabilities'
+import { pluginOAuthSchema } from './oauth'
 import { TBError } from '../errors'
 
 /** export 的语义档位。 */
@@ -78,6 +79,11 @@ const exportSchema = z.object({
    * 多字段凭证的字段声明(仅 tools/v1)。声明了它,平台就知道该 secret 存的是一个 JSON
    * 对象而非单值,并在挂载时校验字段齐全 —— 见 `credentialFields` 的类型注释。
    */
+  /**
+   * provider 型 OAuth2 的声明(仅 tools/v1)。声明了它,平台就托管授权码流程:
+   * `POST /<path>/~authorize` 发起、回调兑换、调用时自动刷新,插件只拿到 access token。
+   */
+  oauth: pluginOAuthSchema.optional(),
   credentialFields: z.array(z.object({
     key: z.string().regex(/^[A-Za-z_][\w]*$/, '字段名须为合法标识符'),
     label: z.string().optional(),
@@ -189,6 +195,24 @@ export function validatePluginContract(input: PluginContractInput): PluginDescri
         `plugin '${manifest.id}' export '${exported.id}' 在 ${exported.profile} 上声明了 `
         + 'credentialProbe,该字段仅 tools/v1 支持',
       )
+    }
+    if (exported.oauth !== undefined) {
+      if (exported.profile !== 'tools/v1') {
+        throw new TBError(
+          'invalid_argument',
+          `plugin '${manifest.id}' export '${exported.id}' 在 ${exported.profile} 上声明了 oauth,`
+          + '该字段仅 tools/v1 支持',
+        )
+      }
+      // 两者都在描述"authRef 指向的 secret 里存什么",同时声明会矛盾:oauth 模式下那个
+      // secret 固定存 clientId/clientSecret(OAUTH_CLIENT_FIELDS),不由 plugin 自定义。
+      if (exported.credentialFields !== undefined) {
+        throw new TBError(
+          'invalid_argument',
+          `plugin '${manifest.id}' export '${exported.id}' 不能同时声明 oauth 与 credentialFields:`
+          + 'oauth 模式下 authRef 指向的 secret 固定存 clientId/clientSecret',
+        )
+      }
     }
     if (exported.credentialFields !== undefined) {
       if (exported.profile !== 'tools/v1') {
