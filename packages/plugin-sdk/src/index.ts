@@ -49,6 +49,9 @@ import {
   type ListOptions,
   OperationRegistry,
   type OperationSpec,
+  parseCredentialValues,
+  type PluginCredentialField,
+  type PluginCredentialValues,
   RequestDedupe,
   type SearchOptions,
   TBError,
@@ -68,6 +71,11 @@ export type { ToolResult, ToolSpec } from '@tool-bridge/core'
 export interface PluginCallContext<Env = unknown> {
   /** 平台透传的完整 CallContext(keyId/owner/scopes/traceId/mountPath/mountConfig/exportId)。 */
   readonly caller: CallContext
+  /**
+   * 多字段凭证的字段表(仅在本 export 声明了 `credentials([...])` 时有值)。
+   * 平台注入的凭证已按声明解析并校验过必填项,handler 直接取用即可。
+   */
+  readonly credentials: PluginCredentialValues | undefined
   readonly env: Env
   /** 命中的 export id(多 export 时用得上)。 */
   readonly exportId: string
@@ -150,6 +158,7 @@ export interface CreatePluginOptions<Env = unknown> {
 }
 
 interface ToolsExportState<Env> {
+  credentialFields: PluginCredentialField[] | undefined
   credentialProbe: string | undefined
   description: string | undefined
   id: string
@@ -178,6 +187,14 @@ type ExportState<Env>
 
 /** tools export 的注册面(链式)。 */
 export interface ToolsExport<Env> {
+  /**
+   * 声明本 export 需要**多字段凭证**(默认单值:一个 API key)。
+   *
+   * 平台据此:把 secret 当 JSON 对象存、挂载时校验必填字段齐全、管理面提示该填哪些字段。
+   * 传输契约不变(仍是 `X-TB-Upstream-Auth` 那个字符串,内容变成 JSON),
+   * handler 里用 `ctx.credentials` 取字段表。
+   */
+  credentials: (fields: PluginCredentialField[]) => ToolsExport<Env>
   /**
    * 指定**凭证探针**:一个只读、零副作用、无必填入参的工具名。
    *
@@ -264,6 +281,9 @@ export function createPlugin<Env = unknown>(opts: CreatePluginOptions<Env> = {})
             ...(state.description !== undefined ? { description: state.description } : {}),
             ...(state.kind === 'tools' && state.credentialProbe !== undefined
               ? { credentialProbe: state.credentialProbe }
+              : {}),
+            ...(state.kind === 'tools' && state.credentialFields !== undefined
+              ? { credentialFields: state.credentialFields }
               : {}),
           }
         }
@@ -425,13 +445,20 @@ export function createPlugin<Env = unknown>(opts: CreatePluginOptions<Env> = {})
     const state = exports.get(exportId)
     if (state === undefined) throw new TBError('invalid_argument', `unknown export '${exportId}'`)
 
+    const upstreamAuth = decodeUpstreamAuth(request)
+    // 声明了多字段凭证就在这里解析一次:每个 handler 各自 JSON.parse 一遍是重复劳动,
+    // 且各写各的校验会让"缺字段"的报错措辞不一致。解析失败 → invalid_argument(配置错)。
+    const credentialFields = state.kind === 'tools' ? state.credentialFields : undefined
     const ctx: PluginCallContext<Env> = {
       env,
       caller,
       exportId,
       mountPath: caller.mountPath,
       mountConfig: caller.mountConfig,
-      upstreamAuth: decodeUpstreamAuth(request),
+      upstreamAuth,
+      credentials: credentialFields !== undefined && upstreamAuth !== undefined
+        ? parseCredentialValues(upstreamAuth, credentialFields)
+        : undefined,
     }
 
     const requestId = request.headers.get(HEADER_TB_REQUEST_ID)
@@ -455,12 +482,20 @@ export function createPlugin<Env = unknown>(opts: CreatePluginOptions<Env> = {})
         id,
         description: meta?.description,
         credentialProbe: undefined,
+        credentialFields: undefined,
         registry: new OperationRegistry<PluginCallContext<Env>>(),
       }
       exports.set(id, state)
       const surface: ToolsExport<Env> = {
         register(name, spec, handler) {
           state.registry.register(name, spec, handler)
+          return surface
+        },
+        credentials(fields) {
+          if (fields.length === 0) {
+            throw new TBError('invalid_argument', 'credentials() 至少要声明一个字段')
+          }
+          state.credentialFields = fields
           return surface
         },
         probeCredentialWith(name) {

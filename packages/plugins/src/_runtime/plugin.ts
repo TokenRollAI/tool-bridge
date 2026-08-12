@@ -7,7 +7,7 @@
  * `index.ts` 只剩它自己的东西。
  */
 
-import type { InputSchemaLike, OperationSpec } from '@tool-bridge/core'
+import type { InputSchemaLike, OperationSpec, PluginCredentialField } from '@tool-bridge/core'
 import { createPlugin, type Plugin, type PluginCallContext, TBError } from '@tool-bridge/plugin-sdk'
 
 /** 迁移产物统一的 env(平台注册时 mint 的回调令牌)。 */
@@ -19,6 +19,11 @@ export interface ProviderEnv {
 export interface ProviderContext {
   /** 挂载 providerConfig 里的非敏感配置(region / domain / accountId 之类)。 */
   readonly config: Record<string, unknown> | undefined
+  /**
+   * 多字段凭证的字段表(仅在 provider 声明了 `credentialFields` 时有值)。
+   * `requireCredential()` 是取它的正规入口。
+   */
+  readonly credentials: Record<string, string> | undefined
   /** 平台解出的上游凭证明文;`requireApiKey()` 是取它的正规入口。 */
   readonly upstreamAuth: string | undefined
 }
@@ -36,12 +41,39 @@ export function requireApiKey(ctx: ProviderContext, service: string): string {
   return key
 }
 
+/**
+ * 取多字段凭证里的一个字段。字段缺失由 SDK 在解析时就拦下了(按 `credentialFields` 的
+ * required 校验),这里只处理"整份凭证都没配"和"provider 没声明多字段"两种配置错误。
+ */
+export function requireCredential(ctx: ProviderContext, service: string, field: string): string {
+  const values = ctx.credentials
+  if (values === undefined) {
+    throw new TBError(
+      'unavailable',
+      `${service} 需要多字段凭证:给挂载节点配 config.authRef 指向已存入 system/secret 的凭证`
+      + `(用 \`tb secret set <name> --field ...\` 写入)`,
+    )
+  }
+  const value = values[field]
+  if (value === undefined || value === '') {
+    // 走到这里说明 provider 声明的字段表与 handler 实际取的字段不一致 —— 是 provider
+    // 自身的 bug,不是用户配错。
+    throw new TBError('internal', `${service} 的凭证字段 '${field}' 未在 credentialFields 里声明`)
+  }
+  return value
+}
+
 type Spec = OperationSpec<InputSchemaLike>
 type Handler = (input: never, ctx: ProviderContext) => unknown | Promise<unknown>
 
 export interface ProviderPluginInput {
   /** 规格表:action 名 → OperationSpec(来自生成的 schema.ts)。 */
   actions: Record<string, Spec>
+  /**
+   * 本 provider 需要**多字段凭证**时声明字段(缺省单值:一个 API key)。
+   * 对应上游 open-connector 的 `custom_credential` auth 形态。
+   */
+  credentialFields?: PluginCredentialField[]
   /**
    * 凭证探针:一个**只读、零副作用、无必填入参**的 action 名。挂载时平台会用配置的
    * authRef 真实调它一次,验证凭证可用 —— 否则配错的 key 要等第一次业务调用才 401。
@@ -75,9 +107,14 @@ export function createProviderPlugin(input: ProviderPluginInput): Plugin<Provide
 
   const plugin = createPlugin<ProviderEnv>({ token: env => env.PLUGIN_TOKEN })
   const tools = plugin.tools(input.exportId ?? 'actions', { description: input.description })
+  if (input.credentialFields !== undefined) tools.credentials(input.credentialFields)
   for (const name of names) {
     tools.register(name, input.actions[name]!, (args, ctx: PluginCallContext<ProviderEnv>) =>
-      input.handlers[name]!(args as never, { upstreamAuth: ctx.upstreamAuth, config: ctx.mountConfig }))
+      input.handlers[name]!(args as never, {
+        upstreamAuth: ctx.upstreamAuth,
+        credentials: ctx.credentials,
+        config: ctx.mountConfig,
+      }))
   }
   if (input.credentialProbe !== undefined) {
     // 探针必须是只读的:平台会在**挂载**时调它,而挂载不该产生业务副作用。

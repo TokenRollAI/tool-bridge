@@ -169,3 +169,122 @@ describe('挂载时的凭证探针', () => {
     expect(upstream).not.toHaveBeenCalled()
   })
 })
+
+describe('多字段凭证的挂载校验', () => {
+  /**
+   * 一个手写的最小 binding,不经 plugin-sdk —— `app` 是宿主中立层,不依赖 SDK。
+   * 它只需吐出符合 plugin/v2 契约的 `~describe`(带 credentialFields)与一个能调的工具,
+   * 平台侧的字段校验就能被完整驱动。
+   */
+  function multiFieldBinding(): (request: Request) => Promise<Response> {
+    const json = (value: unknown): Response => new Response(JSON.stringify(value), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    })
+    return (request: Request) => {
+      const url = new URL(request.url)
+      if (url.pathname === '/healthz') return Promise.resolve(json({ healthy: true }))
+      if (url.pathname === '/~describe') {
+        return Promise.resolve(json({
+          protocolVersion: 'plugin/v2',
+          exports: [{
+            id: 'actions',
+            profile: 'tools/v1',
+            description: 'Multi-field',
+            credentialFields: [
+              { key: 'appId', required: true },
+              { key: 'appSecret', required: true, secret: true },
+            ],
+          }],
+        }))
+      }
+      // List/Call 一律回空成功:本组测试只关心挂载期的字段校验。
+      return Promise.resolve(json([]))
+    }
+  }
+
+  async function appWithMultiField(): Promise<{
+    app: ReturnType<typeof createTbApp>
+    mount: (authRef: string) => Promise<Response>
+    setSecret: (value: string) => Promise<Response>
+  }> {
+    const state = new MemoryStateStore()
+    await runBootstrap(state, { adminSk: TEST_ADMIN_SK, requireAdminSk: true })
+    const app = createTbApp({
+      allowInsecureHttp: false,
+      pluginBindings: new Map([['mf', multiFieldBinding()]]),
+      remote: { allowlist: [], maxHops: 4, allowInsecure: false },
+      secrets: new SecretStoreImpl(state, TEST_ENCRYPTION_KEY),
+      state,
+      version: 'test',
+    })
+
+    expect((await postJson(app, 'system/plugin', {
+      tool: 'write',
+      arguments: {
+        id: 'mf',
+        protocolVersion: 'plugin/v2',
+        endpoint: 'binding:mf',
+        auth: { kind: 'platform-token' },
+        healthPath: '/healthz',
+        enabled: true,
+      },
+    })).status).toBe(200)
+
+    return {
+      app,
+      setSecret: (value: string) =>
+        postJson(app, 'system/secret', { tool: 'set', arguments: { name: 'mf-cred', value } }),
+      mount: (authRef: string) => postJson(app, 'system/registry', {
+        tool: 'write',
+        arguments: {
+          path: 'svc/mf',
+          kind: 'tool',
+          description: 'multi-field',
+          config: { kind: 'tool', provider: 'mf', export: 'actions', authRef },
+        },
+      }),
+    }
+  }
+
+  it('字段齐全 → 挂载成功', async () => {
+    const { mount, setSecret } = await appWithMultiField()
+    await setSecret(JSON.stringify({ appId: 'cli_x', appSecret: 's3cret' }))
+    expect((await mount('mf-cred')).status).toBe(200)
+  })
+
+  it('**缺必填字段 → 挂载当场被拒,并点名缺哪个**', async () => {
+    const { mount, setSecret } = await appWithMultiField()
+    await setSecret(JSON.stringify({ appId: 'cli_x' }))
+    const res = await mount('mf-cred')
+    expect(res.status).toBe(400)
+    const body = (await res.json()) as { code: string, message: string }
+    expect(body.code).toBe('invalid_argument')
+    expect(body.message).toContain('appSecret')
+  })
+
+  it('secret 存的是单值而非 JSON → 挂载被拒,消息指出该怎么写入', async () => {
+    const { mount, setSecret } = await appWithMultiField()
+    await setSecret('sk_plain_key')
+    const res = await mount('mf-cred')
+    expect(res.status).toBe(400)
+    expect(((await res.json()) as { message: string }).message).toContain('--field')
+  })
+
+  it('被拒的挂载没有落库', async () => {
+    const { app, mount, setSecret } = await appWithMultiField()
+    await setSecret(JSON.stringify({ appId: 'only' }))
+    await mount('mf-cred')
+    const help = await app.request(new Request('https://tb.test/svc/mf/~help', {
+      headers: { authorization: `Bearer ${TEST_ADMIN_SK}`, accept: 'application/json' },
+    }))
+    expect(help.status).toBe(404)
+  })
+
+  it('authRef 指向不存在的 secret → 挂载被拒', async () => {
+    const { mount } = await appWithMultiField()
+    const res = await mount('no-such-secret')
+    expect(res.status).toBe(400)
+    expect(((await res.json()) as { message: string }).message).toContain('no-such-secret')
+  })
+})

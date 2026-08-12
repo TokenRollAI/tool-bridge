@@ -74,6 +74,18 @@ const exportSchema = z.object({
    * 真实调用来验证 `authRef` 指向的凭证可用(见 `credentialProbe` 的类型注释)。
    */
   credentialProbe: z.string().optional(),
+  /**
+   * 多字段凭证的字段声明(仅 tools/v1)。声明了它,平台就知道该 secret 存的是一个 JSON
+   * 对象而非单值,并在挂载时校验字段齐全 —— 见 `credentialFields` 的类型注释。
+   */
+  credentialFields: z.array(z.object({
+    key: z.string().regex(/^[A-Za-z_][\w]*$/, '字段名须为合法标识符'),
+    label: z.string().optional(),
+    description: z.string().optional(),
+    required: z.boolean().optional(),
+    /** 敏感字段:管理面不回显、日志不打印。缺省按敏感处理(fail safe)。 */
+    secret: z.boolean().optional(),
+  })).min(1).optional(),
 })
 
 const describeSchema = z.object({
@@ -84,6 +96,20 @@ const describeSchema = z.object({
 /** 单个 export 的声明。 */
 export interface PluginExport {
   capabilities?: string[]
+  /**
+   * 多字段凭证的字段声明(仅 tools/v1)。
+   *
+   * 平台的凭证通道 `X-TB-Upstream-Auth` 传的是**一个字符串**:多数 provider 只要一个
+   * API key,够用。但一批 provider 需要多个字段(飞书要 app_id + app_secret、S3 要
+   * access key + secret + region…),此前只能靠"把 JSON 塞进那个单值"的**约定**——
+   * 平台不知道里面是什么,配错了要到第一次调用才发现,管理面也没法提示该填哪些字段。
+   *
+   * 声明了它:
+   * - `tb secret set <name> --field appId=x --field appSecret=y` 存成 JSON 对象;
+   * - 挂载时平台校验必填字段齐全,缺了当场拒并说清缺哪个;
+   * - 传输契约**不变**(仍是那个 base64url 字符串,内容是 JSON),故已有 plugin 零影响。
+   */
+  credentialFields?: PluginCredentialField[]
   /**
    * 凭证探针:一个只读、零副作用、无必填入参的工具名(仅 tools/v1)。
    *
@@ -100,6 +126,16 @@ export interface PluginExport {
   id: string
   methods?: string[]
   profile: PluginProfile
+}
+
+/** 多字段凭证的单个字段声明。 */
+export interface PluginCredentialField {
+  description?: string
+  key: string
+  label?: string
+  required?: boolean
+  /** 敏感字段:管理面不回显、日志不打印。缺省按敏感处理。 */
+  secret?: boolean
 }
 
 /** `/~describe` 响应形状(v2)。 */
@@ -153,6 +189,25 @@ export function validatePluginContract(input: PluginContractInput): PluginDescri
         `plugin '${manifest.id}' export '${exported.id}' 在 ${exported.profile} 上声明了 `
         + 'credentialProbe,该字段仅 tools/v1 支持',
       )
+    }
+    if (exported.credentialFields !== undefined) {
+      if (exported.profile !== 'tools/v1') {
+        throw new TBError(
+          'invalid_argument',
+          `plugin '${manifest.id}' export '${exported.id}' 在 ${exported.profile} 上声明了 `
+          + 'credentialFields,该字段仅 tools/v1 支持',
+        )
+      }
+      const keys = new Set<string>()
+      for (const field of exported.credentialFields) {
+        if (keys.has(field.key)) {
+          throw new TBError(
+            'invalid_argument',
+            `plugin '${manifest.id}' export '${exported.id}' 的 credentialFields 有重复字段 '${field.key}'`,
+          )
+        }
+        keys.add(field.key)
+      }
     }
 
     if (exported.profile === 'context/v1') {

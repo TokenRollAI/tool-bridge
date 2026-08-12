@@ -13,6 +13,7 @@ import {
   KEY_PLUGIN,
   KEY_PLUGIN_META,
   NodeRegistryStore,
+  parseCredentialValues,
   type PluginDescribe,
   type PluginExport,
   type PluginManifest,
@@ -317,6 +318,18 @@ export async function assertToolConfig(
   )
 
   const authRef = (config as { authRef?: unknown }).authRef
+
+  // 多字段凭证:挂载时就校验字段齐全,不等到第一次调用。缺字段是**配置**错误,
+  // 越早报越好 —— 而且这里能说清缺哪个字段,运行时报错只能说"凭证不可用"。
+  if (exported.credentialFields !== undefined && typeof authRef === 'string') {
+    const raw = await deps.secrets.resolve(authRef)
+    if (raw === undefined) {
+      throw new TBError('invalid_argument', `secret '${authRef}' 不存在或无法解密`)
+    }
+    // 抛的就是 invalid_argument,消息点名缺哪个字段且不回显值(见 core parseCredentialValues)。
+    parseCredentialValues(raw, exported.credentialFields)
+  }
+
   if (
     exported.credentialProbe === undefined
     || typeof authRef !== 'string'
