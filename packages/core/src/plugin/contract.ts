@@ -22,8 +22,8 @@
 
 import { z } from 'zod'
 import type { PluginManifest } from './manifest'
+import { type PluginOAuth, pluginOAuthSchema } from './oauth'
 import { CONTEXT_METHODS } from '../context/capabilities'
-import { pluginOAuthSchema } from './oauth'
 import { TBError } from '../errors'
 
 /** export 的语义档位。 */
@@ -131,6 +131,18 @@ export interface PluginExport {
   description?: string
   id: string
   methods?: string[]
+  /**
+   * provider 型 OAuth2 的声明(仅 tools/v1)。
+   *
+   * 与 mcp 上游的托管 OAuth 是两套机制:那条从资源服务器 discovery + 动态注册客户端(DCR),
+   * 这条的端点是写死的已知值、client 由用户自己在 provider 后台注册。共用"授权码 + PKCE"
+   * 骨架与 state 密封,但配置来源不同,合并会让两边都变形。
+   *
+   * 声明了它,挂载配的 `authRef` 指向的 secret 存的是 **client 凭证**
+   * (`clientId` + `clientSecret`,见 `OAUTH_CLIENT_FIELDS`),而不是直接的 access token ——
+   * 后者由平台跑完授权流程后自己保管并按需刷新。
+   */
+  oauth?: PluginOAuth
   profile: PluginProfile
 }
 

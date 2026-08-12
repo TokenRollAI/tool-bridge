@@ -15,8 +15,53 @@ import {
   renderOAuthCallbackHtml,
 } from '../oauth'
 import { assertContextAlive, contextObjectStoreFor } from '../contextNodes'
+import { finishProviderAuthorization } from '../providerOAuth'
 import { runHandler, tbErrorResponse } from '../responses'
+import { requirePluginExport } from '../toolNodes'
 import { verifyRefToken } from '../refToken'
+
+/**
+ * provider 型 OAuth 的回调段(kind:'tool')。失败一律渲染失败页而非抛错:这是浏览器
+ * 直达的端点,用户该看到一句人话,而不是 JSON 错误体。
+ */
+async function finishToolAuthorization(opts: {
+  code: string
+  deps: RouteEnv['deps']
+  encryptionKey: string
+  node: TreeNode
+  origin: string
+  verifier: string
+}): Promise<Response> {
+  const config = opts.node.config as { authRef?: string, export?: string, provider: string }
+  try {
+    const { export: exported } = await requirePluginExport(
+      opts.deps.state,
+      config.provider,
+      'tool',
+      'tool',
+      config.export,
+    )
+    if (exported.oauth === undefined || config.authRef === undefined) {
+      return renderOAuthCallbackHtml(false, 'target node is not an OAuth-backed tool mount')
+    }
+    await finishProviderAuthorization({
+      authRef: config.authRef,
+      code: opts.code,
+      codeVerifier: opts.verifier,
+      config: exported.oauth,
+      encryptionKey: opts.encryptionKey,
+      fetcher: fetch,
+      nodePath: opts.node.path,
+      now: new Date(),
+      origin: opts.origin,
+      secrets: opts.deps.secrets,
+      store: opts.deps.state,
+    })
+  } catch (err) {
+    return renderOAuthCallbackHtml(false, isTBError(err) ? err.message : 'token exchange failed')
+  }
+  return renderOAuthCallbackHtml(true, `挂载 '${opts.node.path}' 已完成授权`)
+}
 
 export function registerPublicRoutes(app: TbHono, env: RouteEnv): void {
   const { deps } = env
@@ -118,8 +163,20 @@ export function registerPublicRoutes(app: TbHono, env: RouteEnv): void {
       } catch {
         return renderOAuthCallbackHtml(false, 'target node no longer exists')
       }
+      // 两套 OAuth 流程共用这一个回调端点,按目标节点的 kind 分派:state 里的 `p` 已经是
+      // 节点路径,不需要在 state 里再塞一个流程标记(那会多一处可被篡改的输入)。
+      if (node.kind === 'tool' && node.config?.kind === 'tool') {
+        return await finishToolAuthorization({
+          code,
+          deps,
+          encryptionKey: encKey,
+          node,
+          origin: deps.canonicalOrigin ?? new URL(c.req.url).origin,
+          verifier: payload.v,
+        })
+      }
       if (node.kind !== 'mcp' || node.config?.kind !== 'mcp' || node.config.auth !== 'oauth') {
-        return renderOAuthCallbackHtml(false, 'target node is not an OAuth-backed mcp mount')
+        return renderOAuthCallbackHtml(false, 'target node is not an OAuth-backed mount')
       }
       try {
         await finishMcpAuthorization({

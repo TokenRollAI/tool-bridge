@@ -17,6 +17,7 @@ import {
   type PluginDescribe,
   type PluginExport,
   type PluginManifest,
+  type PluginOAuth,
   resolvePluginExport,
   type StateStore,
   TBError,
@@ -37,6 +38,7 @@ import { assertNoDeviceMarker, deviceToolMarker } from './deviceNodes'
 import { createHttpProvider, type HttpConfig } from './providers/http'
 import { createMcpProvider, type McpConfig } from './providers/mcp'
 import { createPluginToolProvider } from './providers/pluginTool'
+import { resolveProviderAccessToken } from './providerOAuth'
 import { getTools } from './providers/toolCache'
 
 /** 取上游工具集:mcp/tool 走 `toolcache:<path>` 缓存(TTL + refresh);http 从 config 直接生成。 */
@@ -125,6 +127,35 @@ export function mountCallContext(
   }
 }
 
+/**
+ * OAuth 托管挂载的 access token 取法(调用期)。过期由 resolveProviderAccessToken 内部刷新;
+ * 缺 encryptionKey 时 fail closed —— state 密封与令牌保管都要它。
+ */
+async function providerAccessTokenFor(opts: {
+  authRef: string
+  config: PluginOAuth
+  deps: TbAppDeps
+  nodePath: TreePath
+}): Promise<string> {
+  const encryptionKey = opts.deps.encryptionKey
+  if (encryptionKey === undefined) {
+    throw new TBError('unavailable', 'OAuth 托管需要 TB_SECRET_ENCRYPTION_KEY', { retryable: false })
+  }
+  return await resolveProviderAccessToken({
+    authRef: opts.authRef,
+    config: opts.config,
+    encryptionKey,
+    fetcher: fetch,
+    nodePath: opts.nodePath,
+    now: new Date(),
+    // 调用期不需要 origin(只在构造授权 URL 时用);传空串会被 buildAuthorizationUrl 用到,
+    // 而这条路径只走刷新,不构造授权 URL。
+    origin: opts.deps.canonicalOrigin ?? '',
+    secrets: opts.deps.secrets,
+    store: opts.deps.state,
+  })
+}
+
 /** 为 mcp/http/tool 节点构造对应 Provider(其余 kind 无 Provider → unimplemented)。 */
 export async function providerFor(
   node: TreeNode,
@@ -158,12 +189,25 @@ export async function providerFor(
       'tool',
       node.config.export,
     )
+    const oauthAuthRef = node.config.authRef
     return createPluginToolProvider({
       manifest,
       secrets: deps.secrets,
       ctx: mountCallContext(ctx, node.path, node.config.providerConfig, exported.id),
       // 挂载 authRef = 上游凭证引用,平台代解析经 X-TB-Upstream-Auth 注入。
       ...(node.config.authRef !== undefined ? { upstreamAuthRef: node.config.authRef } : {}),
+      // export 声明了 oauth:注入的是平台换来并按需刷新的 access token,而不是 secret
+      // (那里存 client 凭证)。取代上面的 secret 解析。
+      ...(exported.oauth !== undefined && oauthAuthRef !== undefined
+        ? {
+            resolveUpstreamAuth: () => providerAccessTokenFor({
+              authRef: oauthAuthRef,
+              config: exported.oauth!,
+              deps,
+              nodePath: node.path,
+            }),
+          }
+        : {}),
       ...(deps.pluginBindings !== undefined ? { bindings: deps.pluginBindings } : {}),
     })
   }

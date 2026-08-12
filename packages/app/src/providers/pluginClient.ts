@@ -164,12 +164,30 @@ export interface PluginCallOptions {
   /** 调用上下文,经 X-TB-Context 透传。 */
   ctx: CallContext
   manifest: PluginManifest
+  /**
+   * 覆盖上游凭证的取法(OAuth 托管:返回平台换来并按需刷新的 access token)。
+   * 给出时**取代** upstreamAuthRef 的 secret 解析 —— 两条路的产物都是那个 header 的明文。
+   */
+  resolveUpstreamAuth?: () => Promise<string>
   secrets: SecretStoreImpl
   /**
    * 挂载 config.authRef:上游凭证引用。给出时每次调用 resolve 并经
    * X-TB-Upstream-Auth(base64url)注入——plugin 无须自持上游凭证。
    */
   upstreamAuthRef?: string
+}
+
+/** 从 SecretStore 解出上游凭证明文(非 OAuth 的常规路径)。 */
+async function resolveSecretCredential(opts: PluginCallOptions): Promise<string> {
+  const cred = await opts.secrets.resolve(opts.upstreamAuthRef!)
+  if (cred === undefined) {
+    throw new TBError(
+      'unavailable',
+      `plugin '${opts.manifest.id}' 上游凭证 '${opts.upstreamAuthRef!}' 无法解析`,
+      { retryable: false },
+    )
+  }
+  return cred
 }
 
 /** Authorization 按 manifest.auth 从 SecretStore 解析;无法解析 → unavailable。 */
@@ -267,16 +285,15 @@ export async function callPlugin(
     [HEADER_TB_CONTEXT]: encodeCallContext(opts.ctx),
     [HEADER_TB_REQUEST_ID]: crypto.randomUUID(),
   }
-  if (opts.upstreamAuthRef !== undefined) {
-    const cred = await opts.secrets.resolve(opts.upstreamAuthRef)
-    if (cred === undefined) {
-      throw new TBError(
-        'unavailable',
-        `plugin '${opts.manifest.id}' 上游凭证 '${opts.upstreamAuthRef}' 无法解析`,
-        { retryable: false },
-      )
-    }
-    headers[HEADER_TB_UPSTREAM_AUTH] = base64urlEncode(new TextEncoder().encode(cred))
+  // OAuth 托管的挂载:注入的是平台换来并按需刷新的 access token,而不是 secret 本身
+  // (那里存的是 client 凭证)。插件侧看到的仍是同一个 header,不知道也不需要知道来源。
+  const upstream = opts.resolveUpstreamAuth !== undefined
+    ? await opts.resolveUpstreamAuth()
+    : opts.upstreamAuthRef === undefined
+      ? undefined
+      : await resolveSecretCredential(opts)
+  if (upstream !== undefined) {
+    headers[HEADER_TB_UPSTREAM_AUTH] = base64urlEncode(new TextEncoder().encode(upstream))
   }
   const doFetch = (): Promise<Response> =>
     pluginFetch(opts.manifest, opts.bindings, '', { method: 'POST', headers, body })

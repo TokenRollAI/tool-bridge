@@ -16,13 +16,63 @@ import {
 } from '@tool-bridge/core'
 import type { AppContext } from '../deps'
 import type { RouteEnv } from './env'
+import { assertToolConfig, refreshDynamicSearchNode, requirePluginExport } from '../toolNodes'
 import { assertRemoteConfigAllowed, resolveRemoteSettings } from '../federation'
 import { assertContextConfig, assertSkillhubConfig } from '../contextNodes'
-import { assertToolConfig, refreshDynamicSearchNode } from '../toolNodes'
 import { invalidateMcpOAuth, startMcpAuthorization } from '../oauth'
+import { startProviderAuthorization } from '../providerOAuth'
 import { assertRegisterPath, splitReserved } from '../paths'
 import { invalidateToolCache } from '../providers/toolCache'
 import { invalidateMcpEra } from '../providers/mcp'
+
+/**
+ * provider 型 OAuth 的发起段(kind:'tool' 且 export 声明了 `oauth`)。
+ *
+ * 与 mcp 那条的差别都在"配置从哪来":端点取自 plugin 的 `~describe`,client 凭证取自挂载
+ * `authRef` 指向的 secret(固定 clientId/clientSecret 两字段)。
+ */
+async function authorizeToolNode(
+  c: AppContext,
+  env: RouteEnv,
+  node: TreeNode,
+  encryptionKey: string,
+): Promise<Response> {
+  const { deps } = env
+  const config = node.config as { authRef?: string, export?: string, provider: string }
+  const { export: exported } = await requirePluginExport(
+    deps.state,
+    config.provider,
+    'tool',
+    'tool',
+    config.export,
+  )
+  if (exported.oauth === undefined) {
+    throw new TBError(
+      'invalid_argument',
+      `plugin '${config.provider}' 的 export '${exported.id}' 未声明 oauth,无需授权`,
+    )
+  }
+  if (config.authRef === undefined) {
+    throw new TBError(
+      'invalid_argument',
+      'OAuth 挂载须配 config.authRef 指向存有 clientId/clientSecret 的 secret',
+    )
+  }
+  const result = await startProviderAuthorization({
+    authRef: config.authRef,
+    config: exported.oauth,
+    encryptionKey,
+    fetcher: fetch,
+    nodePath: node.path,
+    now: new Date(),
+    origin: deps.canonicalOrigin ?? new URL(c.req.url).origin,
+    secrets: deps.secrets,
+    store: deps.state,
+  })
+  return new Response(JSON.stringify(result), {
+    headers: { 'content-type': contentTypeFor('json') },
+  })
+}
 
 // --- POST ~register(HTTP 反向注册入口,等价 NodeRegistry.Write)---
 export async function handleRegister(c: AppContext, env: RouteEnv): Promise<Response> {
@@ -107,8 +157,16 @@ export async function handleAuthorize(c: AppContext, env: RouteEnv): Promise<Res
   } catch {
     throw TBError.notFound('not found')
   }
+  // kind:'tool' 且 export 声明了 oauth → provider 型托管流程(与 mcp 那条是两套机制,
+  // 见 providerOAuth.ts 头注)。
+  if (node.kind === 'tool' && node.config?.kind === 'tool') {
+    return await authorizeToolNode(c, env, node, encKey)
+  }
   if (node.kind !== 'mcp' || node.config?.kind !== 'mcp' || node.config.auth !== 'oauth') {
-    throw new TBError('invalid_argument', `'${path}' 不是 auth:'oauth' 的 mcp 挂载`)
+    throw new TBError(
+      'invalid_argument',
+      `'${path}' 既不是 auth:'oauth' 的 mcp 挂载,也不是声明了 oauth 的 tool 挂载`,
+    )
   }
   // 可选 body {redirectUri}:CLI 本地回调通道(严格上游只放行 loopback 回调时)。
   const body = (await c.req.json().catch(() => null)) as { redirectUri?: unknown } | null
