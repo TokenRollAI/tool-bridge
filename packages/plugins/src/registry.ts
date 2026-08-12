@@ -1,6 +1,6 @@
 /**
  * 内置插件目录的装配表(参考 open-connector 的 generated registry 形态;
- * 目录规模大了以后由 codegen 从 src/<name>/ 目录生成,现在两个条目先手写)。
+ * 目录规模大了以后由 codegen 从 src/<name>/ 目录生成,现在先手写)。
  *
  * 每个 src/<name>/ 文件夹 = 一个插件(纯源码,不是 workspace 包);loader 用动态
  * import 懒加载——"可用 ≠ 实例化":未被注册/调用的插件连模块都不会加载。
@@ -14,8 +14,12 @@ export interface BuiltinPluginModule {
 }
 
 export const BUILTIN_PLUGIN_LOADERS: Record<string, () => Promise<BuiltinPluginModule>> = {
+  alt_text_generator_ai: () =>
+    import('./alt_text_generator_ai/index') as Promise<BuiltinPluginModule>,
   feishu: () => import('./feishu/index') as Promise<BuiltinPluginModule>,
   notes: () => import('./notes/index') as Promise<BuiltinPluginModule>,
+  resend: () => import('./resend/index') as Promise<BuiltinPluginModule>,
+  stripe: () => import('./stripe/index') as Promise<BuiltinPluginModule>,
 }
 
 /** 宿主传给插件的 env(Node 宿主常用 process.env;CF 宿主用 Worker env)。 */

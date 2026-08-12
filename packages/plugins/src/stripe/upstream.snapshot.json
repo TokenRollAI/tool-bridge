@@ -1,0 +1,1591 @@
+{
+  "service": "stripe",
+  "displayName": "Stripe",
+  "authTypes": [
+    "api_key"
+  ],
+  "actions": [
+    {
+      "name": "identify_account",
+      "description": "Retrieve the Stripe account associated with the current secret API key.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false,
+        "description": "No input is required to identify a Stripe account."
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "account": {
+            "type": "object",
+            "properties": {},
+            "additionalProperties": true,
+            "description": "A raw Stripe object returned by the API."
+          },
+          "accountId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "description": "The Stripe account ID."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "email": {
+            "anyOf": [
+              {
+                "type": "string",
+                "description": "The Stripe account email address."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "country": {
+            "anyOf": [
+              {
+                "type": "string",
+                "description": "The Stripe account country."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "defaultCurrency": {
+            "anyOf": [
+              {
+                "type": "string",
+                "description": "The Stripe account default currency."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "account",
+          "accountId",
+          "email",
+          "country",
+          "defaultCurrency"
+        ],
+        "description": "Stripe account metadata."
+      }
+    },
+    {
+      "name": "create_customer",
+      "description": "Create a Stripe customer with common profile and metadata fields.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 256,
+            "description": "The customer's full name or business name."
+          },
+          "email": {
+            "type": "string",
+            "description": "The customer's email address.",
+            "format": "email"
+          },
+          "description": {
+            "type": "string",
+            "description": "An arbitrary customer description displayed in the Stripe Dashboard."
+          },
+          "phone": {
+            "type": "string",
+            "maxLength": 20,
+            "description": "The customer's phone number."
+          },
+          "balance": {
+            "type": "integer",
+            "description": "The customer balance in the smallest currency unit."
+          },
+          "address": {
+            "type": "object",
+            "properties": {
+              "city": {
+                "type": "string",
+                "description": "City, district, suburb, town, or village."
+              },
+              "country": {
+                "type": "string",
+                "description": "Two-letter country code, or a freeform country value where Stripe allows it."
+              },
+              "line1": {
+                "type": "string",
+                "description": "Address line 1, such as the street, PO Box, or company name."
+              },
+              "line2": {
+                "type": "string",
+                "description": "Address line 2, such as the apartment, suite, unit, or building."
+              },
+              "postal_code": {
+                "type": "string",
+                "description": "ZIP or postal code."
+              },
+              "state": {
+                "type": "string",
+                "description": "State, county, province, or region."
+              }
+            },
+            "additionalProperties": false,
+            "description": "A Stripe address object."
+          },
+          "metadata": {
+            "type": "object",
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "boolean"
+                }
+              ]
+            },
+            "description": "Stripe metadata key-value pairs. Values are forwarded as strings, numbers, booleans, or empty strings."
+          },
+          "tax_exempt": {
+            "type": "string",
+            "enum": [
+              "none",
+              "exempt",
+              "reverse"
+            ],
+            "description": "The customer's tax exemption status."
+          }
+        },
+        "additionalProperties": false,
+        "description": "Input for creating a Stripe customer."
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "customer": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": true,
+                "description": "A raw Stripe object returned by the API."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "customer"
+        ],
+        "description": "A Stripe customer result."
+      }
+    },
+    {
+      "name": "update_customer",
+      "description": "Update a Stripe customer with common profile and metadata fields.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "customerId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The Stripe customer ID to update."
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 256,
+            "description": "The customer's full name or business name."
+          },
+          "email": {
+            "type": "string",
+            "description": "The customer's email address.",
+            "format": "email"
+          },
+          "description": {
+            "type": "string",
+            "description": "An arbitrary customer description displayed in the Stripe Dashboard."
+          },
+          "phone": {
+            "type": "string",
+            "maxLength": 20,
+            "description": "The customer's phone number."
+          },
+          "balance": {
+            "type": "integer",
+            "description": "The customer balance in the smallest currency unit."
+          },
+          "address": {
+            "type": "object",
+            "properties": {
+              "city": {
+                "type": "string",
+                "description": "City, district, suburb, town, or village."
+              },
+              "country": {
+                "type": "string",
+                "description": "Two-letter country code, or a freeform country value where Stripe allows it."
+              },
+              "line1": {
+                "type": "string",
+                "description": "Address line 1, such as the street, PO Box, or company name."
+              },
+              "line2": {
+                "type": "string",
+                "description": "Address line 2, such as the apartment, suite, unit, or building."
+              },
+              "postal_code": {
+                "type": "string",
+                "description": "ZIP or postal code."
+              },
+              "state": {
+                "type": "string",
+                "description": "State, county, province, or region."
+              }
+            },
+            "additionalProperties": false,
+            "description": "A Stripe address object."
+          },
+          "metadata": {
+            "type": "object",
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "boolean"
+                }
+              ]
+            },
+            "description": "Stripe metadata key-value pairs. Values are forwarded as strings, numbers, booleans, or empty strings."
+          },
+          "tax_exempt": {
+            "type": "string",
+            "enum": [
+              "none",
+              "exempt",
+              "reverse"
+            ],
+            "description": "The customer's tax exemption status."
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "customerId"
+        ],
+        "description": "Input for updating a Stripe customer."
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "customer": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": true,
+                "description": "A raw Stripe object returned by the API."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "customer"
+        ],
+        "description": "A Stripe customer result."
+      }
+    },
+    {
+      "name": "get_customer",
+      "description": "Retrieve a Stripe customer by ID.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "customerId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The Stripe customer ID to retrieve."
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "customerId"
+        ],
+        "description": "Input for retrieving a Stripe customer."
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "customer": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": true,
+                "description": "A raw Stripe object returned by the API."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "customer"
+        ],
+        "description": "A Stripe customer result."
+      }
+    },
+    {
+      "name": "list_customers",
+      "description": "List Stripe customers with optional email, created timestamp, and cursor filters.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "description": "The maximum number of objects to return. Stripe accepts values from 1 to 100."
+          },
+          "starting_after": {
+            "type": "string",
+            "minLength": 1,
+            "description": "A cursor object ID that fetches the next page after that object."
+          },
+          "ending_before": {
+            "type": "string",
+            "minLength": 1,
+            "description": "A cursor object ID that fetches the previous page before that object."
+          },
+          "email": {
+            "type": "string",
+            "description": "Filter customers by an exact, case-sensitive email address.",
+            "format": "email"
+          },
+          "created": {
+            "type": "object",
+            "properties": {
+              "gt": {
+                "type": "integer",
+                "description": "Return objects created after this Unix timestamp, exclusive."
+              },
+              "gte": {
+                "type": "integer",
+                "description": "Return objects created after or at this Unix timestamp."
+              },
+              "lt": {
+                "type": "integer",
+                "description": "Return objects created before this Unix timestamp, exclusive."
+              },
+              "lte": {
+                "type": "integer",
+                "description": "Return objects created before or at this Unix timestamp."
+              }
+            },
+            "additionalProperties": false,
+            "description": "A Stripe created timestamp interval filter."
+          }
+        },
+        "additionalProperties": false,
+        "description": "Input for listing Stripe customers."
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "customers": {
+            "type": "object",
+            "properties": {
+              "object": {
+                "type": "string",
+                "description": "The Stripe response object type."
+              },
+              "url": {
+                "type": "string",
+                "description": "The Stripe API URL for this list."
+              },
+              "has_more": {
+                "type": "boolean",
+                "description": "Whether more objects are available after this page."
+              },
+              "data": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {},
+                  "additionalProperties": true,
+                  "description": "A raw Stripe object returned by the API."
+                },
+                "description": "Stripe objects returned on this page."
+              }
+            },
+            "additionalProperties": false,
+            "required": [
+              "object",
+              "url",
+              "has_more",
+              "data"
+            ],
+            "description": "A Stripe list response."
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "customers"
+        ],
+        "description": "Stripe customers page."
+      }
+    },
+    {
+      "name": "search_customers",
+      "description": "Search Stripe customers with Stripe's search query syntax.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "minLength": 1,
+            "description": "A Stripe customer search query, such as email:'jenny@example.com'."
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "description": "The maximum number of objects to return. Stripe accepts values from 1 to 100."
+          },
+          "page": {
+            "type": "string",
+            "description": "A Stripe search pagination token returned by a previous search response."
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "query"
+        ],
+        "description": "Input for searching Stripe customers."
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "customers": {
+            "type": "object",
+            "properties": {
+              "object": {
+                "type": "string",
+                "description": "The Stripe response object type."
+              },
+              "url": {
+                "type": "string",
+                "description": "The Stripe API URL for this list."
+              },
+              "has_more": {
+                "type": "boolean",
+                "description": "Whether more objects are available after this page."
+              },
+              "data": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {},
+                  "additionalProperties": true,
+                  "description": "A raw Stripe object returned by the API."
+                },
+                "description": "Stripe objects returned on this page."
+              }
+            },
+            "additionalProperties": false,
+            "required": [
+              "object",
+              "url",
+              "has_more",
+              "data"
+            ],
+            "description": "A Stripe list response."
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "customers"
+        ],
+        "description": "Stripe customer search results."
+      }
+    },
+    {
+      "name": "delete_customer",
+      "description": "Delete a Stripe customer by ID.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "customerId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The Stripe customer ID to delete."
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "customerId"
+        ],
+        "description": "Input for deleting a Stripe customer."
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "deleted": {
+            "type": "boolean",
+            "description": "Whether Stripe deleted the object."
+          },
+          "object": {
+            "type": "string",
+            "description": "The deleted Stripe object type."
+          },
+          "id": {
+            "type": "string",
+            "description": "The deleted Stripe object ID."
+          },
+          "raw": {
+            "type": "object",
+            "properties": {},
+            "additionalProperties": true,
+            "description": "A raw Stripe object returned by the API."
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "deleted",
+          "object",
+          "id",
+          "raw"
+        ],
+        "description": "A Stripe delete result."
+      }
+    },
+    {
+      "name": "create_product",
+      "description": "Create a Stripe product with common catalog fields.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The product's display name."
+          },
+          "active": {
+            "type": "boolean",
+            "description": "Whether the product is available for purchase."
+          },
+          "description": {
+            "type": "string",
+            "description": "The product description."
+          },
+          "id": {
+            "type": "string",
+            "description": "A caller-supplied product ID. Stripe normally generates this when omitted."
+          },
+          "images": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "description": "One public product image URL.",
+              "format": "uri"
+            },
+            "description": "Public image URLs for the product.",
+            "maxItems": 8
+          },
+          "metadata": {
+            "type": "object",
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "boolean"
+                }
+              ]
+            },
+            "description": "Stripe metadata key-value pairs. Values are forwarded as strings, numbers, booleans, or empty strings."
+          },
+          "shippable": {
+            "type": "boolean",
+            "description": "Whether this product is shipped as a physical good."
+          },
+          "statement_descriptor": {
+            "type": "string",
+            "maxLength": 22,
+            "description": "Statement descriptor for subscription payments."
+          },
+          "tax_code": {
+            "type": "string",
+            "description": "Stripe tax code ID for this product."
+          },
+          "unit_label": {
+            "type": "string",
+            "maxLength": 12,
+            "description": "A label that represents units of this product."
+          },
+          "url": {
+            "type": "string",
+            "description": "A publicly accessible product webpage URL.",
+            "format": "uri"
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "name"
+        ],
+        "description": "Input for creating a Stripe product."
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "product": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": true,
+                "description": "A raw Stripe object returned by the API."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "product"
+        ],
+        "description": "A Stripe product result."
+      }
+    },
+    {
+      "name": "update_product",
+      "description": "Update a Stripe product with common catalog fields.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "productId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The Stripe product ID to update."
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The product's display name."
+          },
+          "active": {
+            "type": "boolean",
+            "description": "Whether the product is available for purchase."
+          },
+          "description": {
+            "type": "string",
+            "description": "The product description."
+          },
+          "id": {
+            "type": "string",
+            "description": "A caller-supplied product ID. Stripe normally generates this when omitted."
+          },
+          "images": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "description": "One public product image URL.",
+              "format": "uri"
+            },
+            "description": "Public image URLs for the product.",
+            "maxItems": 8
+          },
+          "metadata": {
+            "type": "object",
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "boolean"
+                }
+              ]
+            },
+            "description": "Stripe metadata key-value pairs. Values are forwarded as strings, numbers, booleans, or empty strings."
+          },
+          "shippable": {
+            "type": "boolean",
+            "description": "Whether this product is shipped as a physical good."
+          },
+          "statement_descriptor": {
+            "type": "string",
+            "maxLength": 22,
+            "description": "Statement descriptor for subscription payments."
+          },
+          "tax_code": {
+            "type": "string",
+            "description": "Stripe tax code ID for this product."
+          },
+          "unit_label": {
+            "type": "string",
+            "maxLength": 12,
+            "description": "A label that represents units of this product."
+          },
+          "url": {
+            "type": "string",
+            "description": "A publicly accessible product webpage URL.",
+            "format": "uri"
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "productId"
+        ],
+        "description": "Input for updating a Stripe product."
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "product": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": true,
+                "description": "A raw Stripe object returned by the API."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "product"
+        ],
+        "description": "A Stripe product result."
+      }
+    },
+    {
+      "name": "get_product",
+      "description": "Retrieve a Stripe product by ID.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "productId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The Stripe product ID to retrieve."
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "productId"
+        ],
+        "description": "Input for retrieving a Stripe product."
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "product": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": true,
+                "description": "A raw Stripe object returned by the API."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "product"
+        ],
+        "description": "A Stripe product result."
+      }
+    },
+    {
+      "name": "list_products",
+      "description": "List Stripe products with optional active and cursor filters.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "description": "The maximum number of objects to return. Stripe accepts values from 1 to 100."
+          },
+          "starting_after": {
+            "type": "string",
+            "minLength": 1,
+            "description": "A cursor object ID that fetches the next page after that object."
+          },
+          "ending_before": {
+            "type": "string",
+            "minLength": 1,
+            "description": "A cursor object ID that fetches the previous page before that object."
+          },
+          "active": {
+            "type": "boolean",
+            "description": "Filter products by active status."
+          },
+          "ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "description": "A Stripe product ID."
+            },
+            "description": "Filter products by Stripe product IDs."
+          },
+          "created": {
+            "type": "object",
+            "properties": {
+              "gt": {
+                "type": "integer",
+                "description": "Return objects created after this Unix timestamp, exclusive."
+              },
+              "gte": {
+                "type": "integer",
+                "description": "Return objects created after or at this Unix timestamp."
+              },
+              "lt": {
+                "type": "integer",
+                "description": "Return objects created before this Unix timestamp, exclusive."
+              },
+              "lte": {
+                "type": "integer",
+                "description": "Return objects created before or at this Unix timestamp."
+              }
+            },
+            "additionalProperties": false,
+            "description": "A Stripe created timestamp interval filter."
+          }
+        },
+        "additionalProperties": false,
+        "description": "Input for listing Stripe products."
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "products": {
+            "type": "object",
+            "properties": {
+              "object": {
+                "type": "string",
+                "description": "The Stripe response object type."
+              },
+              "url": {
+                "type": "string",
+                "description": "The Stripe API URL for this list."
+              },
+              "has_more": {
+                "type": "boolean",
+                "description": "Whether more objects are available after this page."
+              },
+              "data": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {},
+                  "additionalProperties": true,
+                  "description": "A raw Stripe object returned by the API."
+                },
+                "description": "Stripe objects returned on this page."
+              }
+            },
+            "additionalProperties": false,
+            "required": [
+              "object",
+              "url",
+              "has_more",
+              "data"
+            ],
+            "description": "A Stripe list response."
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "products"
+        ],
+        "description": "Stripe products page."
+      }
+    },
+    {
+      "name": "search_products",
+      "description": "Search Stripe products with Stripe's search query syntax.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "minLength": 1,
+            "description": "A Stripe product search query, such as active:'true'."
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "description": "The maximum number of objects to return. Stripe accepts values from 1 to 100."
+          },
+          "page": {
+            "type": "string",
+            "description": "A Stripe search pagination token returned by a previous search response."
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "query"
+        ],
+        "description": "Input for searching Stripe products."
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "products": {
+            "type": "object",
+            "properties": {
+              "object": {
+                "type": "string",
+                "description": "The Stripe response object type."
+              },
+              "url": {
+                "type": "string",
+                "description": "The Stripe API URL for this list."
+              },
+              "has_more": {
+                "type": "boolean",
+                "description": "Whether more objects are available after this page."
+              },
+              "data": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {},
+                  "additionalProperties": true,
+                  "description": "A raw Stripe object returned by the API."
+                },
+                "description": "Stripe objects returned on this page."
+              }
+            },
+            "additionalProperties": false,
+            "required": [
+              "object",
+              "url",
+              "has_more",
+              "data"
+            ],
+            "description": "A Stripe list response."
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "products"
+        ],
+        "description": "Stripe product search results."
+      }
+    },
+    {
+      "name": "delete_product",
+      "description": "Delete a Stripe product by ID.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "productId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The Stripe product ID to delete."
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "productId"
+        ],
+        "description": "Input for deleting a Stripe product."
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "deleted": {
+            "type": "boolean",
+            "description": "Whether Stripe deleted the object."
+          },
+          "object": {
+            "type": "string",
+            "description": "The deleted Stripe object type."
+          },
+          "id": {
+            "type": "string",
+            "description": "The deleted Stripe object ID."
+          },
+          "raw": {
+            "type": "object",
+            "properties": {},
+            "additionalProperties": true,
+            "description": "A raw Stripe object returned by the API."
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "deleted",
+          "object",
+          "id",
+          "raw"
+        ],
+        "description": "A Stripe delete result."
+      }
+    },
+    {
+      "name": "create_price",
+      "description": "Create a Stripe one-time or recurring price for an existing or inline product.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "currency": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 3,
+            "description": "Three-letter ISO currency code in lowercase."
+          },
+          "product": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The Stripe product ID this price belongs to."
+          },
+          "product_data": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1,
+                "description": "The product's display name."
+              },
+              "active": {
+                "type": "boolean",
+                "description": "Whether the product is available for purchase."
+              },
+              "metadata": {
+                "type": "object",
+                "additionalProperties": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "boolean"
+                    }
+                  ]
+                },
+                "description": "Stripe metadata key-value pairs. Values are forwarded as strings, numbers, booleans, or empty strings."
+              },
+              "statement_descriptor": {
+                "type": "string",
+                "maxLength": 22,
+                "description": "Statement descriptor for subscription payments."
+              },
+              "tax_code": {
+                "type": "string",
+                "description": "Stripe tax code ID for this product."
+              },
+              "unit_label": {
+                "type": "string",
+                "maxLength": 12,
+                "description": "A label that represents units of this product."
+              }
+            },
+            "additionalProperties": false,
+            "required": [
+              "name"
+            ],
+            "description": "Inline product data for creating a product while creating a price."
+          },
+          "unit_amount": {
+            "type": "integer",
+            "description": "Unit amount in the smallest currency unit."
+          },
+          "unit_amount_decimal": {
+            "type": "string",
+            "description": "Decimal unit amount in the smallest currency unit."
+          },
+          "custom_unit_amount": {
+            "type": "object",
+            "properties": {
+              "enabled": {
+                "const": true,
+                "type": "boolean",
+                "description": "Whether customer-defined pricing is enabled for this price."
+              },
+              "minimum": {
+                "type": "integer",
+                "description": "The minimum allowed amount in the smallest currency unit."
+              },
+              "maximum": {
+                "type": "integer",
+                "description": "The maximum allowed amount in the smallest currency unit."
+              },
+              "preset": {
+                "type": "integer",
+                "description": "The suggested amount in the smallest currency unit."
+              }
+            },
+            "additionalProperties": false,
+            "required": [
+              "enabled"
+            ],
+            "description": "Custom unit amount configuration that lets the payer choose the price amount."
+          },
+          "active": {
+            "type": "boolean",
+            "description": "Whether the price can be used for new purchases."
+          },
+          "lookup_key": {
+            "type": "string",
+            "maxLength": 200,
+            "description": "A lookup key used to retrieve this price dynamically."
+          },
+          "metadata": {
+            "type": "object",
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "boolean"
+                }
+              ]
+            },
+            "description": "Stripe metadata key-value pairs. Values are forwarded as strings, numbers, booleans, or empty strings."
+          },
+          "nickname": {
+            "type": "string",
+            "description": "A brief internal description of the price."
+          },
+          "recurring": {
+            "type": "object",
+            "properties": {
+              "interval": {
+                "type": "string",
+                "enum": [
+                  "day",
+                  "week",
+                  "month",
+                  "year"
+                ],
+                "description": "The billing frequency interval."
+              },
+              "interval_count": {
+                "type": "integer",
+                "description": "The number of intervals between subscription billings."
+              },
+              "usage_type": {
+                "type": "string",
+                "enum": [
+                  "licensed",
+                  "metered"
+                ],
+                "description": "How usage is billed for this price."
+              }
+            },
+            "additionalProperties": false,
+            "required": [
+              "interval"
+            ],
+            "description": "Recurring billing configuration for a Stripe price."
+          },
+          "tax_behavior": {
+            "type": "string",
+            "enum": [
+              "exclusive",
+              "inclusive",
+              "unspecified"
+            ],
+            "description": "How Stripe should handle tax for this price."
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "currency"
+        ],
+        "description": "Input for creating a Stripe price."
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "price": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": true,
+                "description": "A raw Stripe object returned by the API."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "price"
+        ],
+        "description": "A Stripe price result."
+      }
+    },
+    {
+      "name": "update_price",
+      "description": "Update mutable fields on a Stripe price.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "priceId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The Stripe price ID to update."
+          },
+          "active": {
+            "type": "boolean",
+            "description": "Whether the price can be used for new purchases."
+          },
+          "lookup_key": {
+            "type": "string",
+            "maxLength": 200,
+            "description": "A lookup key used to retrieve this price dynamically."
+          },
+          "metadata": {
+            "type": "object",
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "boolean"
+                }
+              ]
+            },
+            "description": "Stripe metadata key-value pairs. Values are forwarded as strings, numbers, booleans, or empty strings."
+          },
+          "nickname": {
+            "type": "string",
+            "description": "A brief internal description of the price."
+          },
+          "tax_behavior": {
+            "type": "string",
+            "enum": [
+              "exclusive",
+              "inclusive",
+              "unspecified"
+            ],
+            "description": "How Stripe should handle tax for this price."
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "priceId"
+        ],
+        "description": "Input for updating a Stripe price."
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "price": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": true,
+                "description": "A raw Stripe object returned by the API."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "price"
+        ],
+        "description": "A Stripe price result."
+      }
+    },
+    {
+      "name": "get_price",
+      "description": "Retrieve a Stripe price by ID.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "priceId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The Stripe price ID to retrieve."
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "priceId"
+        ],
+        "description": "Input for retrieving a Stripe price."
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "price": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": true,
+                "description": "A raw Stripe object returned by the API."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "price"
+        ],
+        "description": "A Stripe price result."
+      }
+    },
+    {
+      "name": "list_prices",
+      "description": "List Stripe prices with optional product, active, type, and cursor filters.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "description": "The maximum number of objects to return. Stripe accepts values from 1 to 100."
+          },
+          "starting_after": {
+            "type": "string",
+            "minLength": 1,
+            "description": "A cursor object ID that fetches the next page after that object."
+          },
+          "ending_before": {
+            "type": "string",
+            "minLength": 1,
+            "description": "A cursor object ID that fetches the previous page before that object."
+          },
+          "active": {
+            "type": "boolean",
+            "description": "Filter prices by active status."
+          },
+          "currency": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 3,
+            "description": "Filter prices by three-letter ISO currency code in lowercase."
+          },
+          "product": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Filter prices by Stripe product ID."
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "one_time",
+              "recurring"
+            ],
+            "description": "Filter prices by one-time or recurring type."
+          },
+          "created": {
+            "type": "object",
+            "properties": {
+              "gt": {
+                "type": "integer",
+                "description": "Return objects created after this Unix timestamp, exclusive."
+              },
+              "gte": {
+                "type": "integer",
+                "description": "Return objects created after or at this Unix timestamp."
+              },
+              "lt": {
+                "type": "integer",
+                "description": "Return objects created before this Unix timestamp, exclusive."
+              },
+              "lte": {
+                "type": "integer",
+                "description": "Return objects created before or at this Unix timestamp."
+              }
+            },
+            "additionalProperties": false,
+            "description": "A Stripe created timestamp interval filter."
+          }
+        },
+        "additionalProperties": false,
+        "description": "Input for listing Stripe prices."
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "prices": {
+            "type": "object",
+            "properties": {
+              "object": {
+                "type": "string",
+                "description": "The Stripe response object type."
+              },
+              "url": {
+                "type": "string",
+                "description": "The Stripe API URL for this list."
+              },
+              "has_more": {
+                "type": "boolean",
+                "description": "Whether more objects are available after this page."
+              },
+              "data": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {},
+                  "additionalProperties": true,
+                  "description": "A raw Stripe object returned by the API."
+                },
+                "description": "Stripe objects returned on this page."
+              }
+            },
+            "additionalProperties": false,
+            "required": [
+              "object",
+              "url",
+              "has_more",
+              "data"
+            ],
+            "description": "A Stripe list response."
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "prices"
+        ],
+        "description": "Stripe prices page."
+      }
+    },
+    {
+      "name": "search_prices",
+      "description": "Search Stripe prices with Stripe's search query syntax.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "minLength": 1,
+            "description": "A Stripe price search query, such as active:'true'."
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "description": "The maximum number of objects to return. Stripe accepts values from 1 to 100."
+          },
+          "page": {
+            "type": "string",
+            "description": "A Stripe search pagination token returned by a previous search response."
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "query"
+        ],
+        "description": "Input for searching Stripe prices."
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "prices": {
+            "type": "object",
+            "properties": {
+              "object": {
+                "type": "string",
+                "description": "The Stripe response object type."
+              },
+              "url": {
+                "type": "string",
+                "description": "The Stripe API URL for this list."
+              },
+              "has_more": {
+                "type": "boolean",
+                "description": "Whether more objects are available after this page."
+              },
+              "data": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {},
+                  "additionalProperties": true,
+                  "description": "A raw Stripe object returned by the API."
+                },
+                "description": "Stripe objects returned on this page."
+              }
+            },
+            "additionalProperties": false,
+            "required": [
+              "object",
+              "url",
+              "has_more",
+              "data"
+            ],
+            "description": "A Stripe list response."
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "prices"
+        ],
+        "description": "Stripe price search results."
+      }
+    }
+  ]
+}

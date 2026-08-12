@@ -1,0 +1,37 @@
+{
+  "service": "alt_text_generator_ai",
+  "displayName": "Alt Text Generator AI",
+  "authTypes": [
+    "api_key"
+  ],
+  "actions": [
+    {
+      "name": "generate_alt_text",
+      "description": "Generate concise, accessibility-friendly alt text for a publicly reachable image URL.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "imageUrl": {
+            "type": "string",
+            "description": "The publicly reachable HTTP or HTTPS URL of the image to describe.",
+            "format": "uri"
+          }
+        },
+        "additionalProperties": false,
+        "description": "Input for generating alt text from a public image URL."
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "altText": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The alt text generated for the image."
+          }
+        },
+        "additionalProperties": false,
+        "description": "Generated alt text for the image."
+      }
+    }
+  ]
+}

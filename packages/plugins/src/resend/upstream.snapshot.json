@@ -1,0 +1,71 @@
+{
+  "service": "resend",
+  "displayName": "Resend",
+  "authTypes": [
+    "api_key"
+  ],
+  "actions": [
+    {
+      "name": "send_email",
+      "description": "Send an email with Resend.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "from": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The sender email address."
+          },
+          "to": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The recipient email address."
+          },
+          "subject": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The email subject line."
+          },
+          "html": {
+            "type": "string",
+            "description": "The HTML body of the email."
+          },
+          "text": {
+            "type": "string",
+            "description": "The plain text body of the email."
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "from",
+          "to",
+          "subject"
+        ],
+        "description": "The input payload for sending a Resend email.",
+        "anyOf": [
+          {
+            "required": [
+              "html"
+            ]
+          },
+          {
+            "required": [
+              "text"
+            ]
+          }
+        ]
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "emailId": {
+            "type": "string",
+            "description": "The unique identifier of the sent email."
+          }
+        },
+        "additionalProperties": false,
+        "description": "The output payload for this action."
+      }
+    }
+  ]
+}

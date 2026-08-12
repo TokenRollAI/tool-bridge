@@ -1,0 +1,4 @@
+{
+  "actions": ["send_email"],
+  "reason": "上游 inputSchema 用 `anyOf: [{required:['html']},{required:['text']}]` 表达“正文二选一必填”,与 type/properties 同级共存。Zod 侧要写成 .refine(),而 refine 无法反推进 JSON Schema —— 自动生成的话等价闸门判不了,契约会悄悄变宽。故手写这一个 schema,并在 schema.handwritten.ts 里把该约束显式写出来。"
+}
