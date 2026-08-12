@@ -1,3 +1,4 @@
+import { isTBError, type TBError } from '@tool-bridge/core'
 import { describe, expect, it, vi } from 'vitest'
 import { assertPublicHttpUrl, createGuardedFetch, EgressBlockedError } from '../../src/_runtime/guardedFetch'
 import { classifyIpAddress, isIpAddress } from '../../src/_runtime/ipPolicy'
@@ -118,5 +119,113 @@ describe('重定向逐跳校验', () => {
     })
     await guarded('https://api.example.com/start', { method: 'POST', body: 'x' })
     expect(seen).toEqual(['POST', 'GET'])
+  })
+})
+
+describe('EgressBlockedError 的语义', () => {
+  /**
+   * 它必须是 TBError。裸 Error 冒到 plugin-sdk 的归一处会变成 `internal` 500
+   * 「internal plugin error」—— 于是"拦下了一次 SSRF"对运维呈现为"插件崩了"。
+   */
+  it('是 invalid_argument 而非 internal,且不可重试', () => {
+    try {
+      assertPublicHttpUrl('http://169.254.169.254/latest/')
+      expect.unreachable('应当抛出')
+    } catch (err) {
+      expect(isTBError(err), '不是 TBError → 会被归一成 internal 500').toBe(true)
+      expect((err as TBError).code).toBe('invalid_argument')
+      // 那个目标不会变,标成可重试只会让调用方白重试。
+      expect((err as TBError).retryable).toBe(false)
+    }
+  })
+})
+
+describe('跨源重定向剥凭证', () => {
+  /** 记录每一跳看到的 URL 与凭证类头。 */
+  function tracer(steps: Array<(url: string) => Response>): {
+    fetch: typeof fetch
+    hops: Array<{ headers: Record<string, string>, url: string }>
+  } {
+    const hops: Array<{ headers: Record<string, string>, url: string }> = []
+    let i = 0
+    const fetchImpl = vi.fn((input: Request) => {
+      hops.push({
+        url: input.url,
+        headers: Object.fromEntries([...input.headers].filter(([name]) =>
+          /auth|key|token|secret|cookie/i.test(name))),
+      })
+      const step = steps[i++]
+      if (step === undefined) throw new Error(`没有为第 ${i} 跳准备响应`)
+      return Promise.resolve(step(input.url))
+    }) as unknown as typeof fetch
+    return { fetch: fetchImpl, hops }
+  }
+
+  const redirectTo = (target: string) => (): Response =>
+    new Response(null, { status: 302, headers: { location: target } })
+  const ok = (): Response => new Response('ok', { status: 200 })
+
+  it('**换 origin 就剥掉 Authorization**(否则 302 一下就把 API key 送给第三方)', async () => {
+    const { fetch: transport, hops } = tracer([redirectTo('https://evil.example/steal'), ok])
+    await createGuardedFetch({ fetch: transport })('https://api.legit.example/v1/thing', {
+      headers: { authorization: 'Bearer SECRET_KEY' },
+    })
+    expect(hops[0]?.headers.authorization).toBe('Bearer SECRET_KEY')
+    expect(hops[1]?.headers.authorization, '凭证被带到了 evil.example').toBeUndefined()
+  })
+
+  it('自定义密钥头也剥(各家命名不统一,凡名字带 key/token/secret 的一律剥)', async () => {
+    const { fetch: transport, hops } = tracer([redirectTo('https://other.example/x'), ok])
+    await createGuardedFetch({ fetch: transport })('https://api.legit.example/v1', {
+      headers: {
+        'x-api-key': 'K',
+        'x-subscription-token': 'T',
+        'x-access-token': 'A',
+        'accept': 'application/json',
+      },
+    })
+    expect(Object.keys(hops[1]?.headers ?? {})).toEqual([])
+    // 非凭证头不受影响(这里只过滤了凭证类,accept 不在记录范围内 —— 用下一条验证)。
+  })
+
+  it('**同源重定向保留凭证**(常见的 /v1 → /v2 迁移不该因此坏掉)', async () => {
+    const { fetch: transport, hops } = tracer([
+      redirectTo('https://api.legit.example/v2/thing'),
+      ok,
+    ])
+    await createGuardedFetch({ fetch: transport })('https://api.legit.example/v1/thing', {
+      headers: { authorization: 'Bearer SECRET_KEY' },
+    })
+    expect(hops[1]?.url).toBe('https://api.legit.example/v2/thing')
+    expect(hops[1]?.headers.authorization, '同源跳转不该剥凭证').toBe('Bearer SECRET_KEY')
+  })
+
+  it('降级为 GET 的那条路径同样剥(303 / 非 GET 收到 302)', async () => {
+    const { fetch: transport, hops } = tracer([
+      () => new Response(null, { status: 303, headers: { location: 'https://evil.example/x' } }),
+      ok,
+    ])
+    await createGuardedFetch({ fetch: transport })('https://api.legit.example/v1', {
+      method: 'POST',
+      body: 'x',
+      headers: { authorization: 'Bearer SECRET_KEY' },
+    })
+    expect(hops[1]?.headers.authorization).toBeUndefined()
+  })
+
+  it('非凭证头跨源保留(剥的是凭证,不是所有头)', async () => {
+    let secondAccept: string | null = null
+    let n = 0
+    const transport = vi.fn((input: Request) => {
+      n += 1
+      if (n === 2) secondAccept = input.headers.get('accept')
+      return Promise.resolve(n === 1
+        ? new Response(null, { status: 302, headers: { location: 'https://other.example/x' } })
+        : new Response('ok', { status: 200 }))
+    }) as unknown as typeof fetch
+    await createGuardedFetch({ fetch: transport })('https://api.legit.example/v1', {
+      headers: { accept: 'application/json', authorization: 'Bearer K' },
+    })
+    expect(secondAccept).toBe('application/json')
   })
 })

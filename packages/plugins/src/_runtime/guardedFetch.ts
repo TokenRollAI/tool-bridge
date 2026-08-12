@@ -11,14 +11,55 @@
  * (IP 字面量、协议、重定向链),DNS rebinding 类攻击由部署侧的出网策略负责。
  */
 
+import { TBError } from '@tool-bridge/plugin-sdk'
 import { classifyIpAddress, isIpAddress } from './ipPolicy'
 
 /** 默认最多跟随的重定向跳数。 */
 const MAX_REDIRECTS = 5
 
-export class EgressBlockedError extends Error {
+/**
+ * 跨 origin 重定向时必须剥掉的请求头。
+ *
+ * 平台自动跟随重定向时,Fetch 规范本来就会剥这些头;我们为了逐跳校验地址改成手动跟随,
+ * 就得自己补上这一条 —— 否则「域名合法但 302 到别处」不再是 SSRF,而是**凭证外泄**:
+ * 上游被接管、CDN 配错、或干脆是个恶意上游,一次 302 就能把租户的 API key 拿走。
+ */
+const CROSS_ORIGIN_STRIPPED_HEADERS = [
+  'authorization',
+  'cookie',
+  'proxy-authorization',
+  // 各家自定义的密钥头没有统一命名,凡是名字里带 key/token/secret 的一律剥掉:
+  // 宁可让跨源跳转少带一个无关头,也不能漏带走一个凭证。
+] as const
+
+/** 名字看起来像凭证的头(各家自定义密钥头没有统一命名)。 */
+function looksLikeCredentialHeader(name: string): boolean {
+  return /(?:^|-)(?:api[-_]?key|key|token|secret|auth)(?:$|-)/i.test(name)
+}
+
+/** 跨 origin 时产出剥掉凭证后的 headers。 */
+function stripCredentials(headers: Headers): Headers {
+  const next = new Headers(headers)
+  for (const [name] of headers) {
+    if (CROSS_ORIGIN_STRIPPED_HEADERS.includes(name.toLowerCase() as never)
+      || looksLikeCredentialHeader(name)) {
+      next.delete(name)
+    }
+  }
+  return next
+}
+
+/**
+ * 出站被本层拒绝。**继承 TBError 而不是裸 Error**:裸 Error 冒到 plugin-sdk 的错误归一处
+ * 会变成 `internal` 500「internal plugin error」—— 于是"我们拦下了一次 SSRF"对运维呈现为
+ * "插件崩了",原因被完全抹掉。
+ *
+ * 归 `invalid_argument`:出站目标不合法是**输入/配置**问题(上游 base URL 配错、租户填了
+ * 内网地址、上游 302 到保留网段),不是服务故障,更不该被标成可重试 —— 那个目标不会变。
+ */
+export class EgressBlockedError extends TBError {
   constructor(message: string) {
-    super(message)
+    super('invalid_argument', message)
     this.name = 'EgressBlockedError'
   }
 }
@@ -87,13 +128,19 @@ export function createGuardedFetch(options: GuardedFetchOptions = {}): typeof fe
         throw new EgressBlockedError(`出站重定向超过 ${maxRedirects} 跳`)
       }
       // 逐跳校验:这才是这层存在的主要理由。
+      const previousOrigin = new URL(request.url).origin
       url = assertPublicHttpUrl(new URL(location, url))
+      // 换了 origin 就剥凭证头 —— 只查「跳到哪」不管「带什么去」,等于把 SSRF 防线
+      // 变成凭证外泄通道(见 CROSS_ORIGIN_STRIPPED_HEADERS)。
+      const headers = url.origin === previousOrigin
+        ? request.headers
+        : stripCredentials(request.headers)
       // 303,以及「非 GET 收到 301/302」,按 Fetch 规范降级为 GET 且丢弃 body。
       const downgrade = response.status === 303
         || ((response.status === 301 || response.status === 302) && request.method !== 'GET')
       request = downgrade
-        ? new Request(url, { method: 'GET', headers: request.headers, redirect: 'manual' })
-        : new Request(url, request)
+        ? new Request(url, { method: 'GET', headers, redirect: 'manual' })
+        : new Request(url, { ...request, headers, redirect: 'manual' })
     }
   }
 }
