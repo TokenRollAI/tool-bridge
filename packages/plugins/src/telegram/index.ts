@@ -1,0 +1,130 @@
+/**
+ * Telegram Bot —— 从 open-connector 迁移的 provider(api_key,50 个 action)。
+ *
+ * 分工同其他迁移产物:`schema.ts` 是生成的 Zod 声明,`api.ts` 是人工改写的业务逻辑,
+ * 本文件把两张表对起来(键集合不吻合会在装配期炸)。
+ *
+ * 凭证是 BotFather 发的 bot token,**拼在出站 URL 的路径段里**(Bot API 的设计,见 `api.ts`
+ * 顶部注释)—— 部署侧需知日志脱敏。
+ */
+
+import {
+  answerCallbackQuery,
+  approveChatJoinRequest,
+  banChatMember,
+  copyMessage,
+  copyMessages,
+  createChatInviteLink,
+  declineChatJoinRequest,
+  deleteBusinessMessages,
+  deleteMessage,
+  deleteMessages,
+  deleteWebhook,
+  editChatInviteLink,
+  editMessageText,
+  exportChatInviteLink,
+  forwardMessage,
+  forwardMessages,
+  getBusinessConnection,
+  getChat,
+  getChatAdministrators,
+  getChatMember,
+  getChatMembersCount,
+  getMe,
+  getUpdates,
+  getWebhookInfo,
+  pinChatMessage,
+  promoteChatMember,
+  readBusinessMessage,
+  restrictChatMember,
+  revokeChatInviteLink,
+  sendAnimation,
+  sendAudio,
+  sendChatAction,
+  sendContact,
+  sendDice,
+  sendDocument,
+  sendLocation,
+  sendMediaGroup,
+  sendMessage,
+  sendPhoto,
+  sendPoll,
+  sendVenue,
+  sendVideo,
+  sendVoice,
+  setChatPermissions,
+  setMessageReaction,
+  setMyCommands,
+  setWebhook,
+  unbanChatMember,
+  unpinAllChatMessages,
+  unpinChatMessage,
+} from './api'
+import { createProviderPlugin, type ProviderEnv } from '../_runtime/plugin'
+import { telegramActions } from './schema'
+
+export type { ProviderEnv as Env }
+
+export function createTelegramPlugin(): ReturnType<typeof createProviderPlugin> {
+  return createProviderPlugin({
+    description: 'Telegram Bot',
+    actions: telegramActions,
+    // 上游 credentialValidators 就是打 getMe 试 token,这里对应到同一个 action:
+    // effect 是 read、入参是空 strictObject,满足探针的三个条件。
+    credentialProbe: 'get_me',
+    handlers: {
+      get_me: getMe,
+      get_webhook_info: getWebhookInfo,
+      get_updates: getUpdates,
+      send_message: sendMessage,
+      copy_message: copyMessage,
+      copy_messages: copyMessages,
+      forward_messages: forwardMessages,
+      delete_messages: deleteMessages,
+      set_message_reaction: setMessageReaction,
+      send_chat_action: sendChatAction,
+      send_video: sendVideo,
+      send_audio: sendAudio,
+      send_voice: sendVoice,
+      send_animation: sendAnimation,
+      send_media_group: sendMediaGroup,
+      send_contact: sendContact,
+      send_venue: sendVenue,
+      send_dice: sendDice,
+      get_business_connection: getBusinessConnection,
+      read_business_message: readBusinessMessage,
+      delete_business_messages: deleteBusinessMessages,
+      edit_message_text: editMessageText,
+      send_photo: sendPhoto,
+      send_document: sendDocument,
+      send_poll: sendPoll,
+      get_chat: getChat,
+      get_chat_member: getChatMember,
+      get_chat_administrators: getChatAdministrators,
+      get_chat_members_count: getChatMembersCount,
+      ban_chat_member: banChatMember,
+      unban_chat_member: unbanChatMember,
+      restrict_chat_member: restrictChatMember,
+      promote_chat_member: promoteChatMember,
+      set_chat_permissions: setChatPermissions,
+      pin_chat_message: pinChatMessage,
+      unpin_chat_message: unpinChatMessage,
+      unpin_all_chat_messages: unpinAllChatMessages,
+      approve_chat_join_request: approveChatJoinRequest,
+      decline_chat_join_request: declineChatJoinRequest,
+      delete_message: deleteMessage,
+      forward_message: forwardMessage,
+      send_location: sendLocation,
+      export_chat_invite_link: exportChatInviteLink,
+      create_chat_invite_link: createChatInviteLink,
+      edit_chat_invite_link: editChatInviteLink,
+      revoke_chat_invite_link: revokeChatInviteLink,
+      answer_callback_query: answerCallbackQuery,
+      set_my_commands: setMyCommands,
+      set_webhook: setWebhook,
+      delete_webhook: deleteWebhook,
+    },
+  })
+}
+
+export default createTelegramPlugin()

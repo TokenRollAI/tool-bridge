@@ -45,6 +45,64 @@ open-connector 有 1337 个 provider、约 104 万行,且基本是逐个写出�
 当时目录规模的副产物,不是它要证明的东西。已改成对着 `BUILTIN_PLUGIN_LOADERS` 的长度断言,
 策展增删目录不再需要改测试。**凡是写死了目录规模的断言都属于这类**。
 
+## 第四批(部分完成):按价值选的 57 个,交付 26 个
+
+策展腾出空间后,反过来从上游按**价值**选批(前三批选的是"流程能否规模化",这批选的是
+"这个 provider 有没有人用")。
+
+选批用全量探针数据,不是拍脑袋:对 121 个候选跑 codegen + 等价比对(1949 action,
+1827 等价 = 93.8%),按 provider 汇总后取"价值 ∩ 可行性"。剔除分两类 ——
+脏度高不值得开豁免(clickup 16/68、qdrant 6/7、plausible_analytics 4/4、firecrawl 6/30、
+googlesheets 7/40),以及与保留项能力重复(gitea↔github、serpapi/linkup↔tavily、
+mailgun/sendgrid↔resend)。
+
+**已交付 26 个**(四件套齐全 + 过三道闸门):airtable / anthropic / circleci /
+cloudflare_dns / confluence / deepseek / docker_hub / e2b / exa / figma / fly / jira /
+mem0 / outline / perplexity / pinecone / pipedrive / posthog / postmark / railway /
+telegram / trello / umami / unsplash / upstash_redis / wolfram_alpha_api
+
+**未完成的 30 个在 `.pending-migration/`**(schema 已生成并过等价校验,api.ts/测试待补;
+指纹登记也一并撤到那里的 `fingerprints.json`)。撤出而不是留在 `src/` 的理由:形状闸门
+按指纹清单判"这个 provider 拼得起来吗",半成品留在清单里会让闸门长红,反而看不出真问题。
+补完时把目录移回 `src/`、指纹条目并回主清单即可,codegen 不用重跑。
+
+### 这一轮学到的
+
+- **agent 批量中断是常态,要设计成可断点续跑**。这轮 13 个 subagent 先后因 API 连接中断
+  与**周额度耗尽**全部退出。前三批也挂过三个 —— 区别是这次挂在半途的比例高得多。
+  形状闸门照例把半成品精确报了出来(缺 index.ts / 缺测试),但真正省事的是
+  `.pending-migration/` 这个撤出机制:**未完成 ≠ 要删掉重来**,schema 是确定性产物,
+  值钱且可复用。
+- **wire 测试绿 ≠ 类型是对的**。vitest 不做 typecheck,7 个产物的 `compact()` helper
+  各自独立写出了同一个类型缺陷(返回 `Json` 但下游要 `Record<string, QueryValue>`),
+  测试全绿而 `tsc` 红。批量收尾**必须**单独跑一次 typecheck。
+- **`new Response('', {status: 204})` 在 undici 下直接 TypeError**(204/205/304 是
+  null body status),而那个异常冒到 plugin-sdk 会被归一成 `internal` 500 ——
+  呈现出来是"插件崩了",实际是测试构造响应的那一行写错了。两个产物的测试 helper 同时
+  踩到。查法:直调 handler 看原始异常,别只看 envelope 回的错误码。
+- **任务书写错了要按源码纠正**。我给 `cloudflare_dns/handwritten.json` 写的 reason 是
+  看 schema 截断输出推断的("按记录类型的 oneOf 分支"),实际是两条 `anyOf`
+  (content/data 二选一、至少改一个字段),与记录类型无关。执行的 agent 读了源码后指出
+  不符并按源码写了 refine 版本 —— 这是对的:按错误 reason 写判别联合会把契约收得比
+  上游窄(TXT 记录用 `data` 给结构化内容,上游接受、判别式会拒),那是行为变更不是迁移。
+
+### oauth2 通道:平台侧早就通了,缺的是 SDK 声明面
+
+`providerOAuth.ts` 的托管授权码流程有 16 个端到端集成测试(PKCE、state 密封、401 自愈、
+卸载不继承旧令牌、注入 access token 而非 clientSecret),但**没有任何插件能触发它** ——
+`plugin-sdk` 的 `ToolsExport` 上没有 `oauth()`,连那些集成测试都是手写 `~describe`
+绕过 SDK 的。本轮补上了(见 `plugin-sdk` 0.3.0),并在 SDK 侧当场拒三处互斥组合
+(`credentials`/`credentialProbe` 双向)—— 平台契约层本就会拒,但那要等注册时才 400,
+作者看到的是个远端错误。
+
+C 层 5 个 oauth2 provider(sentry / gmail / googlecalendar / googledocs / dropbox)的
+schema 已生成,api.ts 待补,同样在 `.pending-migration/`。迁的时候注意:
+- **Google 系必须带 `authorizationParams: {access_type:'offline', prompt:'consent'}`**,
+  否则拿不到 refresh_token,令牌一过期用户就得手工重授权;Dropbox 同理需要
+  `token_access_type: 'offline'`。这几个值抄上游 `definition.ts`,不要自己发挥。
+- handler 里照常 `requireApiKey(ctx, SERVICE)` —— 拿到的就是平台换来并按需刷新的
+  access token,插件不需要知道它是 OAuth 来的。
+
 ## 一个迁移产物长什么样
 
 ```
@@ -328,6 +386,10 @@ function requireId(value: unknown, field: string): string {
 | `feishu_app_bot` | custom_credential | 330 | 待平台侧补多字段凭证通道 |
 | `feishu` | oauth2 | 396 | 待平台侧补 oauth2 通道 |
 
+> 这张表是第三批当时的状态。两条"待平台侧补"**都已解决**:多字段凭证见本文
+> 「多字段凭证(custom_credential)」一节,oauth2 见「oauth2 通道:平台侧早就通了,
+> 缺的是 SDK 声明面」。`feishu_app_bot` / `feishu` 本身仍未迁。
+
 `feishu_custom_bot` 有三处值得注意的处置:凭证两种形态都收但校验 origin(防 webhook token
 被发给第三方)、加签从 `node:crypto` 改 Web Crypto(算法产物一致)、HTTP 200 但业务码非 0
 也算失败(飞书用信封表达错误)。
@@ -416,6 +478,10 @@ function requireId(value: unknown, field: string): string {
 再往后要先在 codegen 里支持 `allOf`/`not`/顶层 `$schema`,或接受它们走手写豁免。
 `custom_credential`(54 个)**通道已通**(见下),可以开始迁;`oauth2`(42 个)仍需平台侧
 先补托管授权码流程。
+
+> 后续修正:oauth2 那句**已过时**。平台侧的托管授权码流程当时其实已经落地
+> (`app/src/providerOAuth.ts`,16 个端到端集成测试),真正缺的是 `plugin-sdk` 的
+> `oauth()` 声明面 —— 已在第四批补上(plugin-sdk 0.3.0)。
 
 ## `mountConfig` 与凭证的分界
 

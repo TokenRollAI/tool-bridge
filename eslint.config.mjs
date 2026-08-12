@@ -19,6 +19,9 @@ export default [
     '**/.output/',
     '**/node_modules/',
     '.llmdoc-tmp/',
+    // 未完成的迁移半成品(schema 已生成并过等价校验,api.ts/测试待补)。
+    // 不参与 lint/typecheck —— 它们还没进内置目录,补完时会随产物一起过全部闸门。
+    'packages/plugins/.pending-migration/',
     'output/',
     'archive/',
     'packages/dashboard/public/',
