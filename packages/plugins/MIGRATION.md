@@ -342,17 +342,11 @@ function requireId(value: unknown, field: string): string {
 | — | OAuth 挂载的探针把 client secret 发给插件 | 契约拒该组合 + 挂载层纵深 |
 | — | `invalidateProviderOAuth` 写了没接,同路径重挂继承旧令牌 | 三处清理点补齐 |
 | — | notes 样例多挂载数据串号 | 按 `providerConfig.workspace` 分区 |
+| B5 | 不返回 `expires_in` 的 provider 令牌失效后**永久坏死** | 401 触发强制刷新并重试一次 |
+| B6 | 加签密钥走 `providerConfig`(明文进节点记录) | 改用 `credentialFields`;契约写明 mountConfig 定位 |
 
 **未修、已登记**(按优先级):
 
-- **B5**:不返回 `expires_in` 的 OAuth provider 会永久坏死。`shouldRefresh` 的注释说
-  "靠 401 触发",但 provider 这条路上没有"401 → 刷新后重试"的实现(mcp 那条由 SDK 兜住,
-  同一句话搬过来就不成立)。修法:`pluginClient` 对 OAuth 挂载的 401 做一次强制刷新重试。
-- **B6**:`mountConfig` 成了事实上的第二密钥通道(`feishu_custom_bot` 的加签密钥走它)。
-  `providerConfig` 明文进节点记录、不受 `assertSecretRefUse` 保护,任何对该节点有 read 的
-  SK 都能取走。根因是契约只有一条凭证通道 —— 要么开第二条,要么让 `credentialFields`
-  支持"非 authRef 来源"。同时该更新 `plugin-hosted-install` 决策文档(它记的
-  "mountConfig = 非敏感配置" 与实现已经不符)。
 - **B7**:单值凭证无法声明"必需",漏配 `authRef` 挂载照过,运行时 `unavailable`(可重试)
   把配置错说成服务故障。应加"本 export 必须有凭证"的声明,且 `requireApiKey` 改
   `invalid_argument`。
@@ -381,6 +375,24 @@ function requireId(value: unknown, field: string): string {
 再往后要先在 codegen 里支持 `allOf`/`not`/顶层 `$schema`,或接受它们走手写豁免。
 `custom_credential`(54 个)**通道已通**(见下),可以开始迁;`oauth2`(42 个)仍需平台侧
 先补托管授权码流程。
+
+## `mountConfig` 与凭证的分界
+
+`providerConfig`(插件侧 `ctx.mountConfig`)**只发给该节点对应的 plugin**,随本次调用的信封
+下发,插件之间不共享 —— 同一 plugin 部署的不同挂载各自收到自己那份。
+
+但它**不是密钥通道**。实测:`system/registry get` 对一个**只有该节点 `read` 权限**的窄 SK
+也原样回显整个 `config`,`providerConfig` 里的东西是明文。这绕过了三条防线:SecretStore
+的只写不读、`assertSecretRefUse` 的 secret admin 要求、以及静态加密。
+
+| 放什么 | 去哪 |
+|---|---|
+| region / baseUrl override / 功能开关 / workspace 归属 | `providerConfig` |
+| API key / 密钥 / token / 任何泄漏有后果的东西 | `authRef` 指向的 secret(多字段用 `credentialFields`) |
+
+`feishu_custom_bot` 的加签密钥曾走 `providerConfig`(当时只有单值凭证通道),已改。
+决策文档 `plugin-hosted-install` 记的"mountConfig = 每挂载非敏感配置"是对的 —— 是实现
+一度违反了它。
 
 ## 多字段凭证(custom_credential)
 
