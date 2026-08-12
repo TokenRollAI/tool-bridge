@@ -169,18 +169,29 @@ ipqualityscore / brave_search / lightfield / opensea / fathom
 
 ### 凭证进 URL 的 provider(部署侧需知)
 
-多数上游把 API key 放请求头,但有两个放在 URL 里 —— 这是**上游 API 的设计**,换成 header
+多数上游把 API key 放请求头,但有一批放在 URL 里 —— 这是**上游 API 的设计**,换成 header
 会直接 401,迁移没有选择余地:
 
-| provider | 位置 |
+| 位置 | provider |
 |---|---|
-| `screenshot_fyi` | query 参数 `?accessKey=` |
-| `ipqualityscore` | **路径段** `/api/json/<family>/<apiKey>/<value>` |
+| query 参数 | `cincopa`(api_token)、`eodhd_apis`(api_token)、`fixer`(access_key)、`graphhopper`(key)、`gumroad`(access_token)、`ipgeolocation_io`(apiKey)、`moosend`(apikey)、`realphonevalidation`(token)、`scrapfly`(key)、`scrapingbee`(api_key)、`screenshot_fyi`(accessKey)、`shodan`(key) |
+| **路径段** | `ipqualityscore`(`/api/json/<family>/<apiKey>/<value>`) |
 
-后果:凭证会出现在出站 URL 里,可能落进网关访问日志、上游的日志、以及任何中间代理。
-挂载这两个 provider 前应确认部署侧的日志策略(URL 是否脱敏、是否外发)。
+后果:凭证会出现在出站 URL 里,可能落进网关访问日志、上游日志,以及任何中间代理。
+挂载这些 provider 前应确认部署侧的日志策略(URL 是否脱敏、是否外发)。
 
-`guardedFetch` 的错误消息不回显 URL,这一点上没有额外泄漏;但常规的请求日志会。
+`guardedFetch` 的错误消息不回显 URL,这一点上没有额外泄漏;但常规请求日志会。
+
+**怎么查新产物属不属于这一类**:`grep -n requireApiKey src/<service>/api.ts`,看它是流进
+`searchParams` / 路径模板,还是流进 `headers`。别信静态正则的批量扫描 —— 凭证常经 helper
+函数间接传入(`buildUrl(path, requireApiKey(...), params)`),行级 grep 会漏。
+
+### 凭证是裸 Authorization 的 provider
+
+`chorus` 与 `stormglass_io` 的 Authorization 头**不带 `Bearer ` 前缀**,凭证原样放进去
+(与上游一致,已核对)。存 secret 时不要自己加前缀,否则上游 401。
+
+查法:`grep -oE "authorization.*requireApiKey" src/<service>/api.ts`,看有没有 `Bearer`。
 
 ### 凭证探针:`credentialValidators` 的落点(已实现)
 
