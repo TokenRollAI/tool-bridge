@@ -247,6 +247,41 @@ function requireId(value: unknown, field: string): string {
 这类 provider 现在**跳过不迁**,不要写成"调用即抛 unavailable"的幽灵工具(与
 `_runtime/plugin.ts` 装配期校验的原则相反)。要迁得先在插件契约里开一个文件中转出口。
 
+## 第三批(已完成):99 provider + feishu_custom_bot
+
+验证流程在**百量级**下仍然成立。累计 114 个产物、806 个 action、116 个内置插件。
+
+选批脚本化:从 1329 个筛出 168 个合格候选,跨规模均匀取 99 个,按 executors 行数均衡分 12 组
+(每组约 2600 行)。100/114 个产物带了 credentialProbe。
+
+### 这一轮学到的
+
+- **agent 会中途挂**。三个 subagent 因 API 连接中断退出,留下 10 个只做了一半的 provider。
+  形状闸门是发现它们的手段(`producedShape.test.ts` 会报"缺 index.ts"),之后补跑即可。
+  **批量 fan-out 必须有这么一道机器检查**,否则半成品会静默混进提交。
+- **pre-commit 的全仓 typecheck 会被在途文件挡住**。agent 还在写的时候提交不了 —— 这是
+  hook 在正确工作,但要把提交安排在整批结束后,别中途试。
+- 上游 provider 里有一类"拿某一个 action 的 `z.infer` 当共有入参类型"的错误抽象
+  (intelliprint 的 `BaseListInput`)。同名字段的**枚举各 action 不同**,钉死一个就把其余的
+  合法取值排除了。typecheck 会抓到,但要读懂它在说什么。
+
+### 飞书
+
+三个上游 provider,只有一个现在能迁:
+
+| provider | auth | actions | 状态 |
+|---|---|---|---|
+| `feishu_custom_bot` | api_key | 5 | **已迁** |
+| `feishu_app_bot` | custom_credential | 330 | 待平台侧补多字段凭证通道 |
+| `feishu` | oauth2 | 396 | 待平台侧补 oauth2 通道 |
+
+`feishu_custom_bot` 有三处值得注意的处置:凭证两种形态都收但校验 origin(防 webhook token
+被发给第三方)、加签从 `node:crypto` 改 Web Crypto(算法产物一致)、HTTP 200 但业务码非 0
+也算失败(飞书用信封表达错误)。
+
+本仓另有一个 `feishu` 插件是**代理型**(转发到飞书官方 MCP,140 行)。按决定:迁完
+`feishu_app_bot` 后替掉它 —— 自实现的 330 个 action 能力面远大于代理的默认 8 个工具。
+
 ### 下一批的建议
 
 剩余 ~170 个"codegen 全干净 + 纯 api_key + 单文件"的候选可以直接照这个流程跑。
