@@ -51,8 +51,12 @@ jobs:
       - run: pnpm --filter @tool-bridge/app --filter @tool-bridge/server test
       - run: pnpm --filter @tool-bridge/server build
 
-      # dist 冒烟:守护 better-sqlite3 等 native/运行时依赖误 bundle(bundle 炸则起不来)
+      # dist 冒烟:守护 better-sqlite3 等 native/运行时依赖误 bundle(bundle 炸则起不来)。
+      # 首次引导 fail closed,故须预置 TB_BOOTSTRAP_ADMIN_SK——用固定的 CI 假 SK 走
+      # 生产引导路径(而非 TB_ALLOW_INSECURE_BOOTSTRAP 的 dev 兼容路径);容器随 job 销毁。
       - name: Smoke dist
+        env:
+          TB_BOOTSTRAP_ADMIN_SK: tbk_ci_smoke_000000000000
         run: |
           TB_PORT=18787 TB_DATA_DIR=/tmp/tb-smoke node packages/server/dist/main.js &
           SERVER_PID=$!
