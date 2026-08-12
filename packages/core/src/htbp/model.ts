@@ -49,6 +49,12 @@ export interface CmdSpec {
   inputSchema?: unknown
   method: 'POST'
   name: string
+  /**
+   * 该 cmd 返回值的 JSON Schema(可选,裸 JSON Schema)。
+   * JSON 表现直接输出它;DSL 渲染为 `result` 行(与 `body` 行对称:一个是请求体示意,
+   * 一个是响应示意)。`returns` 是人读的一句话类型描述,两者并存不互斥。
+   */
+  outputSchema?: unknown
   path: string
   returns?: string
   scope: Action
@@ -98,6 +104,8 @@ export interface HelpJson {
     inputSchema?: unknown
     method: 'POST'
     name: string
+    /** 返回值的 JSON Schema,对应 DSL 的 `result` 行(有值才出现)。 */
+    outputSchema?: unknown
     path: string
     returns?: string
     scope: Action

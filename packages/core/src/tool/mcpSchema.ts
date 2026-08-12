@@ -14,7 +14,7 @@ import { summarizeOneLine } from '../htbp/summary'
 import { cmdPath } from '../builtin/util'
 
 /**
- * 单个(虚拟化后)ToolSpec → CmdSpec;index=true 时略去 inputSchema/returns(索引形态),
+ * 单个(虚拟化后)ToolSpec → CmdSpec;index=true 时略去 inputSchema/outputSchema/returns(索引形态),
  * 且 `h` 压缩为一句话摘要(上游 description 常是整篇多行 markdown,索引里只留概述句;
  * 全文保留在单工具全量 `~help`)。
  * cmd 宣告**直连工具路径** `POST /<node>/<tool>`(body 即 arguments 本体,flatBody);
@@ -32,6 +32,7 @@ function toolToCmd(nodePath: TreePath, tool: ToolSpec, index: boolean): CmdSpec 
     cmd.h = index ? summarizeOneLine(tool.description) : tool.description
   }
   if (!index && tool.inputSchema !== undefined) cmd.inputSchema = tool.inputSchema
+  if (!index && tool.outputSchema !== undefined) cmd.outputSchema = tool.outputSchema
   if (tool.effect !== undefined) cmd.effect = tool.effect
   const confirm = tool.confirm ?? (tool.effect === 'destructive' ? true : undefined)
   if (confirm) cmd.confirm = confirm

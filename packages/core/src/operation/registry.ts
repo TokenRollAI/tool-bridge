@@ -47,6 +47,12 @@ export interface OperationSpec<S extends InputSchemaLike | undefined = undefined
   /** Zod schema 或 raw shape;省略 → 不校验,handler 收到原始 args。 */
   inputSchema?: S
   /**
+   * 返回值的 JSON Schema(可选,裸 JSON Schema)。仅作**声明**进 ToolSpec 供消费方参考,
+   * 本表不校验返回值 —— 校验出参会把 handler 的实现细节变成硬契约,而 handler 常直接
+   * 透传上游响应,上游加字段就会炸。声明用于 `~help` 与 MCP consumer 的结构化输出提示。
+   */
+  outputSchema?: unknown
+  /**
    * 低层逃生阀:直接给 JSON Schema(与 inputSchema 互斥)。
    * 给出时本表不做入参校验 —— 作者自负其责。文档默认路径仍是 Zod。
    */
@@ -134,6 +140,7 @@ export class OperationRegistry<TCtx = unknown> {
     if (spec.confirm !== undefined) toolSpec.confirm = spec.confirm
     if (schema !== undefined) toolSpec.inputSchema = toJsonSchema(schema)
     else if (spec.rawInputSchema !== undefined) toolSpec.inputSchema = spec.rawInputSchema
+    if (spec.outputSchema !== undefined) toolSpec.outputSchema = spec.outputSchema
 
     this.ops.set(name, {
       schema,

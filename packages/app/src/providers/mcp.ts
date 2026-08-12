@@ -83,6 +83,8 @@ interface McpTool {
   description?: string
   inputSchema?: unknown
   name: string
+  /** MCP 2025-06-18 起的结构化输出声明;归一进 ToolSpec 后经工具级 `~help` 披露。 */
+  outputSchema?: unknown
 }
 
 /** annotations → effect 词汇;无明确提示则返回 undefined(不臆测 write)。 */
@@ -97,6 +99,7 @@ function toSpec(t: McpTool): ToolSpec {
   const spec: ToolSpec = { name: t.name }
   if (t.description !== undefined) spec.description = t.description
   if (t.inputSchema !== undefined) spec.inputSchema = t.inputSchema
+  if (t.outputSchema !== undefined) spec.outputSchema = t.outputSchema
   const effect = effectFromAnnotations(t.annotations)
   if (effect !== undefined) spec.effect = effect
   return spec

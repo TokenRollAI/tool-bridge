@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { HelpModel } from '../../src/htbp/model'
-import { parseHelpDsl, renderHelpDsl } from '../../src/htbp/helpDsl'
+import { parseHelpDsl, renderHelpDsl, renderHelpJson } from '../../src/htbp/helpDsl'
 import { omit } from '../../src/omit'
 
 describe('renderHelpDsl 格式', () => {
@@ -237,5 +237,60 @@ describe('note 行与 feedback 块(未知行忽略扩展通道)', () => {
     const bare = renderHelpDsl({ ...model, note: undefined, feedback: [] })
     expect(bare).not.toContain('note "')
     expect(bare).not.toContain('feedback ')
+  })
+})
+
+describe('outputSchema:`result` 行与 JSON 的 outputSchema(与 inputSchema 对称的返回值声明)', () => {
+  const model: HelpModel = {
+    node: { path: 'billing/stripe', kind: 'tool', description: 'Stripe' },
+    cmds: [
+      {
+        name: 'get_customer',
+        method: 'POST',
+        path: '/billing/stripe/get_customer',
+        flatBody: true,
+        inputSchema: { type: 'object', properties: { customerId: { type: 'string' } } },
+        outputSchema: { type: 'object', properties: { customer: { type: 'object' } } },
+        returns: '一个 Stripe customer 对象',
+        scope: 'call',
+      },
+    ],
+  }
+
+  it('DSL 渲染为 `result` 行,单行 JSON、两空格缩进,紧随 body 之后', () => {
+    const lines = renderHelpDsl(model).split('\n')
+    const bodyIdx = lines.findIndex(l => l.startsWith('  body '))
+    expect(lines[bodyIdx + 1]).toBe(
+      '  result {"type":"object","properties":{"customer":{"type":"object"}}}',
+    )
+  })
+
+  it('`result` 与人读的 `returns` 并存不互斥', () => {
+    const lines = renderHelpDsl(model).split('\n')
+    expect(lines.filter(l => l.startsWith('  result '))).toHaveLength(1)
+    expect(lines).toContain('  returns 一个 Stripe customer 对象')
+  })
+
+  it('JSON 侧是裸 outputSchema(与 DSL 语义等价、表现不同)', () => {
+    const json = renderHelpJson(model)
+    expect(json.cmds[0]?.outputSchema).toEqual(model.cmds[0]?.outputSchema)
+    expect(json.cmds[0]?.returns).toBe('一个 Stripe customer 对象')
+  })
+
+  it('无 outputSchema 时两种表现都不出现该字段', () => {
+    const bare: HelpModel = {
+      ...model,
+      cmds: [{ ...model.cmds[0]!, outputSchema: undefined }],
+    }
+    expect(renderHelpDsl(bare)).not.toContain('  result ')
+    expect(renderHelpJson(bare).cmds[0]).not.toHaveProperty('outputSchema')
+  })
+
+  it('`result` 对最小 parser 是未知行:解析结果与去掉它完全一致', () => {
+    const bare: HelpModel = {
+      ...model,
+      cmds: [{ ...model.cmds[0]!, outputSchema: undefined }],
+    }
+    expect(parseHelpDsl(renderHelpDsl(model))).toEqual(parseHelpDsl(renderHelpDsl(bare)))
   })
 })

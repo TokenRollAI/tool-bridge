@@ -19,6 +19,14 @@ export interface ToolSpec {
   inputSchema?: unknown
   /** 工具名(虚拟化前为上游原名,虚拟化后为对外虚拟名)。 */
   name: string
+  /**
+   * 返回值的 JSON Schema(可选)。与 `inputSchema` 对称,同为裸 JSON Schema。
+   *
+   * 来源:MCP 上游的 `Tool.outputSchema`、plugin 作者在 `OperationSpec.outputSchema` 里的声明。
+   * 去处:工具级全量 `~help`(JSON 的 `outputSchema` / DSL 的 `result` 行)与 MCP consumer 端点。
+   * 索引形态的 `~help` 不含它(同 inputSchema,两级披露)。
+   */
+  outputSchema?: unknown
 }
 
 /**

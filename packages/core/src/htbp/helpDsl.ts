@@ -37,11 +37,11 @@ function attrLines(key: string, value: string): string[] {
  * 渲染 Help DSL:
  *   首行 `htbp 0.1`;`node` 行;可选 `hint` 行(下一步指引,单行);可选 `note` 行
  *   (管理员补充说明,单行);每 cmd 一行
- *   `cmd <name> POST <path>` + 缩进的 `h`/`body`/`returns`/`scope`/`effect`/`confirm`
+ *   `cmd <name> POST <path>` + 缩进的 `h`/`body`/`result`/`returns`/`scope`/`effect`/`confirm`
  *   (此顺序);directory 的 children 续为 `node` 行;末尾可选 `feedback` 块
  *   (`feedback <count> POST /system/feedback` 头行 + 缩进的 `<id> <score> "<title>"` 条目行
  *   + 缩进的 `use` 指引行)。
- * `scope` 恒有;`h`/`inputSchema`/`returns`/`effect` 有值才渲染;`confirm` 仅在为真时渲染(其缺席即默认 false)。
+ * `scope` 恒有;`h`/`inputSchema`/`outputSchema`/`returns`/`effect` 有值才渲染;`confirm` 仅在为真时渲染(其缺席即默认 false)。
  * 多行 `h` 经 attrLines 以续行(4 空格缩进)保留全文;消费方按未知行忽略即可。
  *
  * `note`/`feedback` 走"未知行忽略"扩展通道(同 `hint` 先例):最小 parser 不识别它们,
@@ -66,6 +66,7 @@ export function renderHelpDsl(model: HelpModel): string {
       const body = cmd.flatBody ? cmd.inputSchema : { tool: cmd.name, arguments: cmd.inputSchema }
       lines.push(`  body ${JSON.stringify(body)}`)
     }
+    if (cmd.outputSchema !== undefined) lines.push(`  result ${JSON.stringify(cmd.outputSchema)}`)
     if (cmd.returns !== undefined) lines.push(...attrLines('returns', cmd.returns))
     lines.push(`  scope ${cmd.scope}`)
     if (cmd.effect !== undefined) lines.push(`  effect ${cmd.effect}`)
@@ -91,9 +92,10 @@ export function renderHelpDsl(model: HelpModel): string {
 
 /**
  * 渲染 Help JSON(规范性)——与 DSL 语义等价、字段不多不少。
- * `hint`/`inputSchema`/`returns`/`effect` 仅在有值时出现;`confirm` 仅在为真时出现(与 DSL 的存在性对齐)。
+ * `hint`/`inputSchema`/`outputSchema`/`returns`/`effect` 仅在有值时出现;`confirm` 仅在为真时出现(与 DSL 的存在性对齐)。
  * 注:JSON 的 `cmds[].inputSchema` 是 arguments 的裸 JSON Schema(不含信封);DSL 的 `body` 行
- * 才把它包成请求信封示意。JSON 的 `node.path`/`children[].path` 承载原始 TreePath(根为空串)。
+ * 才把它包成请求信封示意。`outputSchema` 两侧都是裸 JSON Schema,DSL 侧是 `result` 行。
+ * JSON 的 `node.path`/`children[].path` 承载原始 TreePath(根为空串)。
  */
 export function renderHelpJson(model: HelpModel): HelpJson {
   const cmds = model.cmds.map((cmd) => {
@@ -105,6 +107,7 @@ export function renderHelpJson(model: HelpModel): HelpJson {
     }
     if (cmd.h !== undefined) out.h = cmd.h
     if (cmd.inputSchema !== undefined) out.inputSchema = cmd.inputSchema
+    if (cmd.outputSchema !== undefined) out.outputSchema = cmd.outputSchema
     if (cmd.returns !== undefined) out.returns = cmd.returns
     if (cmd.effect !== undefined) out.effect = cmd.effect
     if (cmd.confirm) out.confirm = cmd.confirm
