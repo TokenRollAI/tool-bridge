@@ -32,3 +32,8 @@ jobs:
       - run: pnpm install --frozen-lockfile
 
       - run: pnpm verify
+
+      # verify 不含 build:tsup/dts 的断裂(如 dts.resolve 配错、external 清单漂移)
+      # 只在发布 workflow 里才暴露,届时 tag 已推、版本已定,返工代价高。
+      # 全量 build 约 6s,在这里当闸门最便宜。
+      - run: pnpm turbo run build
