@@ -11,7 +11,9 @@
     // test/ 一并纳入这条约束(见下方 include):测试跑在 Node 上,但仍不得使用 Node
     // 专属 API——它们打的是同一套中立面,拿 process/Buffer 写断言等于绕过验证对象。
     // 需要 env 开关或真实 binding 的 opt-in 用例留在 packages/gateway 的 workerd 套件。
-    "lib": ["ES2023", "DOM"],
+    // DOM.Iterable:`Headers` 按 WHATWG Fetch 规范在每个目标宿主都可迭代
+    // (`headers.entries()/keys()`),缺了它会被误判为不存在。补齐,不是放宽。
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
     "types": []
   },
   "include": ["src", "test", "tsup.config.ts", "vitest.config.ts"]

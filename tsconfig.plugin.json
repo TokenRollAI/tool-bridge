@@ -3,9 +3,13 @@
   // 插件共享 preset:Web 标准运行时(Worker / Deno / Bun / Node 22+ fetch),
   // 与 plugin-sdk 同姿势 —— 刻意不引 @types/node,插件只依赖 fetch 家族全局,
   // 保证同一份代码能被任意宿主装载。各插件自带 tsconfig.json 只声明 extends 与 include。
+  //
+  // DOM.Iterable:`Headers`/`URLSearchParams`/`FormData` 按 WHATWG 规范在上述每个目标
+  // 运行时都是可迭代的(`entries()`/`keys()`/`for...of`),缺了它会被误判为不存在。
+  // 这是 preset 的补齐,不是放宽。
   "extends": "./tsconfig.base.json",
   "compilerOptions": {
-    "lib": ["ES2023", "DOM"],
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
     "types": []
   }
 }
