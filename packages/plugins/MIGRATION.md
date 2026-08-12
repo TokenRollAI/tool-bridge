@@ -326,6 +326,55 @@ function requireId(value: unknown, field: string): string {
 114 个迁移产物**全部无状态**(已核:`api.ts` 里没有模块级可变状态),所以这条只对手写的
 有状态插件成立。
 
+## 一次设计 review 的结果(2026-08-12)
+
+三轮迁移 + 三个新能力(credentialProbe / credentialFields / oauth)叠加后做了一次 review。
+**已修**的按严重性:
+
+| # | 问题 | 处置 |
+|---|---|---|
+| A1 | 插件 env = 宿主全环境,一行 `ctx.env.TB_SECRET_ENCRYPTION_KEY` 拿主密钥 | 收窄成白名单;生产宿主尚未接线,趁早钉 |
+| A2 | 跨源重定向把凭证带给新 origin(33 个产物凭证在 header) | 换 origin 剥凭证头;同源保留 |
+| A2b | `EgressBlockedError` 是裸 Error → SSRF 拦截对外成 internal 500 | 继承 TBError,归 invalid_argument |
+| A3 | `credentialProbe` 的"只读/无必填入参"零校验,而平台每次挂载真调它 | 平台从 List 核验形状 |
+| A4 | 未配 PLUGIN_TOKEN 时只要求 Bearer 非空(fail-open) | fail closed + 显式开发开关 |
+| B9 | binding 传输没有 30s 超时(114 个产物走这条) | 补上,与网络分支同一常量 |
+| — | OAuth 挂载的探针把 client secret 发给插件 | 契约拒该组合 + 挂载层纵深 |
+| — | `invalidateProviderOAuth` 写了没接,同路径重挂继承旧令牌 | 三处清理点补齐 |
+| — | notes 样例多挂载数据串号 | 按 `providerConfig.workspace` 分区 |
+
+**未修、已登记**(按优先级):
+
+- **B5**:不返回 `expires_in` 的 OAuth provider 会永久坏死。`shouldRefresh` 的注释说
+  "靠 401 触发",但 provider 这条路上没有"401 → 刷新后重试"的实现(mcp 那条由 SDK 兜住,
+  同一句话搬过来就不成立)。修法:`pluginClient` 对 OAuth 挂载的 401 做一次强制刷新重试。
+- **B6**:`mountConfig` 成了事实上的第二密钥通道(`feishu_custom_bot` 的加签密钥走它)。
+  `providerConfig` 明文进节点记录、不受 `assertSecretRefUse` 保护,任何对该节点有 read 的
+  SK 都能取走。根因是契约只有一条凭证通道 —— 要么开第二条,要么让 `credentialFields`
+  支持"非 authRef 来源"。同时该更新 `plugin-hosted-install` 决策文档(它记的
+  "mountConfig = 非敏感配置" 与实现已经不符)。
+- **B7**:单值凭证无法声明"必需",漏配 `authRef` 挂载照过,运行时 `unavailable`(可重试)
+  把配置错说成服务故障。应加"本 export 必须有凭证"的声明,且 `requireApiKey` 改
+  `invalid_argument`。
+- **B8**:`X-TB-Context` 把调用方完整 scope 拓扑送给每个插件。插件只需要
+  traceId/mountPath/mountConfig/exportId。1000 个插件里有一个恶意的,这就是现成的侦察数据。
+- **B10**:`RequestDedupe` 的键只有 requestId,不含 mountPath/凭证指纹。今天靠
+  `randomUUID()` 不碰撞,任何宿主改用确定性 id 就是跨租户结果重放。成本极低,该补。
+- **C11~C16**:`configSchema`/`mountConfigSchema` 零消费点、`context/v1` 不能声明
+  credentialFields、保留 secret 命名空间可经 authRef 使用、`List` 返回值零校验、
+  `catalog` 全量扫 KV(1000 个注册就是 1000 条)、`httpStatus` 跨信封丢失。
+
+### review 给出的结论(值得原样留着)
+
+> 最大风险:**插件是特权代码,但整套契约把它当普通配置对待。** 平台把插件的声明当可信输入
+> 直接执行,进程内形态又让插件与网关同权;而真正的凭证边界 —— 探针只读、凭证不进
+> providerConfig、模块级缓存按凭证键控、出站重定向不带凭证 —— 全靠作者纪律与迁移期人工
+> 评审维持,机器上一处都没有。
+>
+> 114 个产物由同一批人在同一周内写完,纪律还在;1000 个、尤其掺入社区插件之后,只剩声明。
+
+这一轮把其中四条(A1/A2/A3/A4)变成了机器可执行的约束。B6/B8/B10 仍是"靠纪律"的状态。
+
 ### 下一批的建议
 
 剩余 ~170 个"codegen 全干净 + 纯 api_key + 单文件"的候选可以直接照这个流程跑。
