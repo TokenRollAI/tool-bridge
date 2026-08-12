@@ -1,6 +1,6 @@
 # Guide:npm 发布(cli / sdk / app / gateway / dashboard / server)
 
-> 用途:发布 public npm 包的新版本,以及新增可发布包的首发流程。适用:发 cli/sdk/gateway/dashboard/server 新版本、新增可发布包、排查 CI 发布失败。现状(2026-08-12):**六包首发全部完成**,Trusted Publisher 均已配置。本轮版本对齐 **cli 0.8.0 / sdk 0.5.0 / gateway 0.5.0 / dashboard 0.7.0 四包 CI 发布成功**;**app 0.1.1 与 server 0.1.1 两个 run 失败**,registry latest 仍停在 0.1.0——两者都挂在发布前的构建/冒烟步骤,**与 Trusted Publishing / OIDC 无关**(app:`dts.resolve: true` 撞 zod 的 `.d.cts`;server:冒烟没跟上 bootstrap fail-closed),修复见坑段前三条。故 **app/server 的 CI 发布通路至今仍未实证**。快照见 [../must/current-state.md](../must/current-state.md)。
+> 用途:发布 public npm 包的新版本,以及新增可发布包的首发流程。适用:发 cli/sdk/gateway/dashboard/server 新版本、新增可发布包、排查 CI 发布失败。现状(2026-08-12):**六包首发全部完成,Trusted Publisher 均已配置,六包的 CI 发布通路均已实证**(app/server 的 0.1.1 是两者第一次经 CI 发布,provenance 为 SLSA v1)。registry latest 为 **cli 0.8.0 / sdk 0.5.0 / gateway 0.5.0 / dashboard 0.7.0 / app 0.1.1 / server 0.1.1**,与 main 逐包对齐。本轮 app/server 首次尝试失败(挂在发布前的构建/冒烟步骤,**与 Trusted Publishing/OIDC 无关**),修复后删 tag 重打成功——教训见坑段前三条。快照见 [../must/current-state.md](../must/current-state.md)。
 
 ## 包形态(发布模式)
 
@@ -48,7 +48,20 @@
    - 校验 tag 版本与 package.json 版本一致(不一致直接 fail,防漂移);
    - typecheck / test / build(`publish-server.yml` 额外做 **dist 起服冒烟**:从构建产物直接起进程探活,防"测试绿但发布物起不来");
    - `npm publish` 走 **npm Trusted Publishing(OIDC,免 token)**。workflow 里先 `npm install -g npm@11`(OIDC 发布需 npm >= 11.5.1,setup-node 自带的可能偏旧;**不要用 `npm@latest`**,见坑)。
-4. 验证:`npm view @tool-bridge/<pkg> version`。
+4. 验证:`npm view @tool-bridge/<pkg> version`,并核对 `dist.attestations` 非 null(CI 发布必签 SLSA v1 provenance;为 null 说明这一版实际是手动发的)。
+
+### 发布 run 失败后的重跑
+
+**失败的版本号没被占用,原号重发即可**(publish 是 workflow 最后一步,前面任何步骤失败都不会有产物进 registry;先 `npm view <pkg> versions` 确认)。修复合入 main 后:
+
+```sh
+git push origin :refs/tags/<tag>   # 删远端旧 tag(它指向没有修复的 commit)
+git tag -d <tag>                   # 删本地
+git fetch origin main              # 必须先 fetch,否则 tag 打到过期的本地 ref 上
+git tag <tag> origin/main && git push origin <tag>   # 重打并单独 push
+```
+
+**为什么必须重打而不是 re-run**:tag 触发时 GitHub 读的是 **tag 所指 commit** 里的 workflow 文件与源码,旧 tag 还指向没修复的 commit,直接 re-run 会原样再失败一次。同理,新增 workflow 的包在 workflow 还只存在于 feature 分支时打 tag,不会触发任何 run。
 
 ### Dashboard 有两个独立发布面
 
@@ -64,7 +77,7 @@ Trusted Publisher 必须在包已存在后才能配置,所以新包固定走两�
 2. **配置 Trusted Publisher**:用户在 npmjs.com 该包设置页 → Trusted Publisher → GitHub Actions,填 repo `TokenRollAI/tool-bridge` + 对应 workflow 文件名(如 `publish-sdk.yml`)。
 3. 之后按上节 tag 触发 CI 发布。
 
-六包均已走完第 1、2 段。app/server 于 2026-08-12 手动首发(app 首发物核对:main/types/exports 全指 dist、4 文件 482.4 KB、`repository.url` 正确),**第 3 段仍未走**——首次 CI 发布要等 `publish-app.yml` 进 main 之后,因为 **tag 触发读的是 tag 所指 commit 里的 workflow 文件**,workflow 只在 feature 分支时打 tag 不触发任何 run(新增 workflow 的包首次 CI 发布的常见卡点)。**顺序约束:dashboard 须先于 server 发布**——dashboard 是 server 的 regular dependency,`workspace:*` 在 `pnpm pack` 时解析成具体版本,dashboard 那一版没进 registry 的话 server 的 tarball 装不上。每轮版本对齐都要重新满足这条,不是一次性约束。
+六包均已走完全部三段。app/server 于 2026-08-12 手动首发 0.1.0(app 首发物核对:main/types/exports 全指 dist、4 文件 482.4 KB、`repository.url` 正确),**第 3 段(首次 CI 发布)在同日的 0.1.1 完成**——首次 CI 发布要等 `publish-app.yml` 进 main 之后,因为 **tag 触发读的是 tag 所指 commit 里的 workflow 文件**,workflow 只在 feature 分支时打 tag 不触发任何 run(新增 workflow 的包首次 CI 发布的常见卡点)。**顺序约束:dashboard 须先于 server 发布**——dashboard 是 server 的 regular dependency,`workspace:*` 在 `pnpm pack` 时解析成具体版本,dashboard 那一版没进 registry 的话 server 的 tarball 装不上。每轮版本对齐都要重新满足这条,不是一次性约束。
 
 ## 坑
 
