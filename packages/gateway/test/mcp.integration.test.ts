@@ -1,7 +1,7 @@
+import { mcpToolIdentity, mcpToolName } from '@tool-bridge/app'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { SELF } from 'cloudflare:test'
 import { connectModernMcpClient, connectTestMcpClient } from './mcpClient'
-import { mcpToolIdentity, mcpToolName } from '../src/mcpServer'
 import pkg from '../package.json' with { type: 'json' }
 import { TEST_ADMIN_SK } from './fixtures'
 

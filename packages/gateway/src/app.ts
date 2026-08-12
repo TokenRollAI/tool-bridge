@@ -1,12 +1,17 @@
+import {
+  createTbApp,
+  ensureBootstrapped,
+  parseS3Credentials,
+  type PluginBindings,
+  type RemoteSettings,
+  type TbAppDeps,
+} from '@tool-bridge/app'
 import { normalizeCanonicalOrigin, SecretStoreImpl, type StateStore } from '@tool-bridge/core'
 import { Hono } from 'hono'
-import type { RemoteSettings } from './providers/remote'
 import type { DeviceSession } from './deviceSession'
-import { createTbApp, parseS3Credentials, type PluginBindings, type TbAppDeps } from './tbApp'
 import { createR2ObjectStore, type R2PresignCredentials } from './providers/r2Object'
 import pkg from '../package.json' with { type: 'json' }
 import { D1SearchIndex } from './search/d1SearchIndex'
-import { ensureBootstrapped } from './bootstrap'
 import { KvStateStore } from './kvStateStore'
 
 /**

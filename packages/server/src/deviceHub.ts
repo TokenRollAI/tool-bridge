@@ -14,7 +14,6 @@
  *   探活(isAlive + 周期 ping + terminate)踢半开死连接,避免调用一律吃 60s 超时。
  */
 
-import type { DeviceInvokeRequest } from '@tool-bridge/gateway/tbApp'
 import type { Duplex } from 'node:stream'
 import type * as http from 'node:http'
 import {
@@ -32,9 +31,10 @@ import {
 } from '@tool-bridge/core'
 import {
   assertDeviceId,
+  type DeviceInvokeRequest,
   processDeviceHello,
   SearchSynchronizer,
-} from '@tool-bridge/gateway/deviceHello'
+} from '@tool-bridge/app'
 import { type WebSocket, WebSocketServer } from 'ws'
 
 export const DEVICE_WS_PATH = '/system/device/ws'

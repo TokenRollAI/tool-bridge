@@ -1,4 +1,4 @@
-import type { PluginBindings } from '@tool-bridge/gateway/tbApp'
+import type { PluginBindings } from '@tool-bridge/app'
 import { type ContextProvider,
   type DeviceClientState,
   type DeviceExpose,

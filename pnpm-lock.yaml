@@ -136,6 +136,37 @@ importers:
         specifier: 'catalog:'
         version: 4.107.0(@cloudflare/workers-types@5.20260706.1)
 
+  packages/app:
+    dependencies:
+      '@cfworker/json-schema':
+        specifier: 'catalog:'
+        version: 4.1.1
+      '@modelcontextprotocol/client':
+        specifier: 'catalog:'
+        version: 2.0.0
+      '@modelcontextprotocol/core':
+        specifier: 'catalog:'
+        version: 2.0.0
+      '@modelcontextprotocol/server':
+        specifier: 'catalog:'
+        version: 2.0.0
+      aws4fetch:
+        specifier: 'catalog:'
+        version: 1.0.20
+      hono:
+        specifier: 'catalog:'
+        version: 4.12.28
+    devDependencies:
+      '@tool-bridge/core':
+        specifier: workspace:*
+        version: link:../core
+      tsup:
+        specifier: 'catalog:'
+        version: 8.5.1(jiti@2.7.0)(postcss@8.5.16)(supports-color@10.2.2)(tsx@4.23.0)(typescript@5.9.3)(yaml@2.9.0)
+      typescript:
+        specifier: 'catalog:'
+        version: 5.9.3
+
   packages/cli:
     dependencies:
       commander:
@@ -171,7 +202,7 @@ importers:
         version: 8.5.1(jiti@2.7.0)(postcss@8.5.16)(supports-color@10.2.2)(tsx@4.23.0)(typescript@5.9.3)(yaml@2.9.0)
       vitest:
         specifier: 'catalog:'
-        version: 4.1.10(@types/node@26.1.0)(vite@8.1.3(@types/node@26.1.0)(esbuild@0.27.7)(jiti@2.7.0)(tsx@4.23.0)(yaml@2.9.0))
+        version: 4.1.10(@types/node@26.1.0)(vite@8.1.3(@types/node@26.1.0)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.0)(yaml@2.9.0))
 
   packages/core:
     dependencies:
@@ -312,6 +343,9 @@ importers:
       '@modelcontextprotocol/sdk':
         specifier: 'catalog:'
         version: 1.29.0(@cfworker/json-schema@4.1.1)(supports-color@10.2.2)(zod@4.4.3)
+      '@tool-bridge/app':
+        specifier: workspace:*
+        version: link:../app
       '@tool-bridge/core':
         specifier: workspace:*
         version: link:../core
@@ -405,12 +439,12 @@ importers:
       '@hono/node-server':
         specifier: 'catalog:'
         version: 1.19.14(hono@4.12.28)
+      '@tool-bridge/app':
+        specifier: workspace:*
+        version: link:../app
       '@tool-bridge/core':
         specifier: workspace:*
         version: link:../core
-      '@tool-bridge/gateway':
-        specifier: workspace:*
-        version: link:../gateway
       '@types/node':
         specifier: 'catalog:'
         version: 26.1.0
@@ -451,12 +485,12 @@ importers:
         specifier: 'catalog:'
         version: 8.21.0
     devDependencies:
+      '@tool-bridge/app':
+        specifier: workspace:*
+        version: link:../app
       '@tool-bridge/core':
         specifier: workspace:*
         version: link:../core
-      '@tool-bridge/gateway':
-        specifier: workspace:*
-        version: link:../gateway
       '@types/better-sqlite3':
         specifier: ^7.6.13
         version: 7.6.13
@@ -7217,14 +7251,6 @@ snapshots:
       chai: 6.2.2
       tinyrainbow: 3.1.0
 
-  '@vitest/mocker@4.1.10(vite@8.1.3(@types/node@26.1.0)(esbuild@0.27.7)(jiti@2.7.0)(tsx@4.23.0)(yaml@2.9.0))':
-    dependencies:
-      '@vitest/spy': 4.1.10
-      estree-walker: 3.0.3
-      magic-string: 0.30.21
-    optionalDependencies:
-      vite: 8.1.3(@types/node@26.1.0)(esbuild@0.27.7)(jiti@2.7.0)(tsx@4.23.0)(yaml@2.9.0)
-
   '@vitest/mocker@4.1.10(vite@8.1.3(@types/node@26.1.0)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.0)(yaml@2.9.0))':
     dependencies:
       '@vitest/spy': 4.1.10
@@ -10383,21 +10409,6 @@ snapshots:
       '@types/unist': 3.0.3
       vfile-message: 4.0.3
 
-  vite@8.1.3(@types/node@26.1.0)(esbuild@0.27.7)(jiti@2.7.0)(tsx@4.23.0)(yaml@2.9.0):
-    dependencies:
-      lightningcss: 1.32.0
-      picomatch: 4.0.5
-      postcss: 8.5.16
-      rolldown: 1.1.4
-      tinyglobby: 0.2.17
-    optionalDependencies:
-      '@types/node': 26.1.0
-      esbuild: 0.27.7
-      fsevents: 2.3.3
-      jiti: 2.7.0
-      tsx: 4.23.0
-      yaml: 2.9.0
-
   vite@8.1.3(@types/node@26.1.0)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.0)(yaml@2.9.0):
     dependencies:
       lightningcss: 1.32.0
@@ -10412,33 +10423,6 @@ snapshots:
       jiti: 2.7.0
       tsx: 4.23.0
       yaml: 2.9.0
-
-  vitest@4.1.10(@types/node@26.1.0)(vite@8.1.3(@types/node@26.1.0)(esbuild@0.27.7)(jiti@2.7.0)(tsx@4.23.0)(yaml@2.9.0)):
-    dependencies:
-      '@vitest/expect': 4.1.10
-      '@vitest/mocker': 4.1.10(vite@8.1.3(@types/node@26.1.0)(esbuild@0.27.7)(jiti@2.7.0)(tsx@4.23.0)(yaml@2.9.0))
-      '@vitest/pretty-format': 4.1.10
-      '@vitest/runner': 4.1.10
-      '@vitest/snapshot': 4.1.10
-      '@vitest/spy': 4.1.10
-      '@vitest/utils': 4.1.10
-      es-module-lexer: 2.3.0
-      expect-type: 1.4.0
-      magic-string: 0.30.21
-      obug: 2.1.3
-      pathe: 2.0.3
-      picomatch: 4.0.5
-      std-env: 4.1.0
-      tinybench: 2.9.0
-      tinyexec: 1.2.4
-      tinyglobby: 0.2.17
-      tinyrainbow: 3.1.0
-      vite: 8.1.3(@types/node@26.1.0)(esbuild@0.27.7)(jiti@2.7.0)(tsx@4.23.0)(yaml@2.9.0)
-      why-is-node-running: 2.3.0
-    optionalDependencies:
-      '@types/node': 26.1.0
-    transitivePeerDependencies:
-      - msw
 
   vitest@4.1.10(@types/node@26.1.0)(vite@8.1.3(@types/node@26.1.0)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.0)(yaml@2.9.0)):
     dependencies:

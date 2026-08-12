@@ -15,11 +15,14 @@ import {
   TBError,
   type TreePath,
 } from '@tool-bridge/core'
+import {
+  assertDeviceId,
+  ensureBootstrapped,
+  processDeviceHello,
+  SearchSynchronizer,
+} from '@tool-bridge/app'
 import { DurableObject } from 'cloudflare:workers'
-import { assertDeviceId, processDeviceHello } from './deviceHello'
-import { SearchSynchronizer } from './search/synchronizer'
 import { D1SearchIndex } from './search/d1SearchIndex'
-import { ensureBootstrapped } from './bootstrap'
 import { KvStateStore } from './kvStateStore'
 
 interface DeviceSessionEnv {

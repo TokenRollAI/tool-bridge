@@ -1,8 +1,8 @@
 import { KEY_BOOTSTRAPPED, MemoryStateStore } from '@tool-bridge/core'
+import { runBootstrap } from '@tool-bridge/app'
 import { describe, expect, it } from 'vitest'
 import { SELF } from 'cloudflare:test'
 import pkg from '../package.json' with { type: 'json' }
-import { runBootstrap } from '../src/bootstrap'
 import { TEST_ADMIN_SK } from './fixtures'
 
 // 穿透测试:HTTP 进 → Worker 出(认证 + HTBP 核心树 + builtin)。

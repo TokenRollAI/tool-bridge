@@ -1,19 +1,25 @@
 import { defineConfig } from 'tsup'
 
-// 打包为 ESM 库 + bin(node22 目标):core 与 gateway 的宿主中立模块经 devDependencies
-// bundle 进产物(与 SDK 同一发布模式);运行时依赖留 external(better-sqlite3 是
-// native 模块绝不可 bundle)。dts 用 tsconfig.build.json 的 paths 把 workspace 包类型
-// 内联进 dist/index.d.ts(core/gateway 是 dev 消费,不随发布走)。
+// 打包为 ESM 库 + bin(node22 目标):core 与宿主中立层 `@tool-bridge/app` 经
+// devDependencies bundle 进产物(与 SDK 同一发布模式);运行时依赖留 external
+// (better-sqlite3 是 native 模块绝不可 bundle)。**app 必须 noExternal**:private 的
+// core 由每个发布产物各自 bundle,若 app 留 external 则运行时两份 core 副本并存,
+// `err instanceof TBError` 跨副本恒为 false。
+// dts.resolve 必须是数组而非 true:true 会把 node 内置模块也内联,曾把
+// `http.Server` 降级成 undefined(2026-07-08 反思)。
 export default defineConfig({
   entry: { index: 'src/index.ts', main: 'src/main.ts' },
   format: ['esm'],
   target: 'node22',
   platform: 'node',
   tsconfig: 'tsconfig.build.json',
-  dts: { entry: { index: 'src/index.ts' }, resolve: ['@tool-bridge/core', '@tool-bridge/gateway'] },
+  dts: {
+    entry: { index: 'src/index.ts' },
+    resolve: ['@tool-bridge/core', '@tool-bridge/app'],
+  },
   clean: true,
   minify: false,
-  noExternal: ['@tool-bridge/core', '@tool-bridge/gateway'],
+  noExternal: ['@tool-bridge/core', '@tool-bridge/app'],
   external: [
     'better-sqlite3',
     'ws',

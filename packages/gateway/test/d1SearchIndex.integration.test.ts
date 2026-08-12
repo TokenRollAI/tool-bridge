@@ -1,4 +1,5 @@
 import { NodeRegistryStore, TOOL_SEARCH_AUDIT_NODE_LIMIT } from '@tool-bridge/core'
+import { SearchSynchronizer } from '@tool-bridge/app'
 import { describe, expect, it } from 'vitest'
 import { env, SELF } from 'cloudflare:test'
 import {
@@ -6,7 +7,6 @@ import {
   D1SearchIndex,
 } from '../src/search/d1SearchIndex'
 import { verifySearchIndexContract } from '../../core/test/search/searchIndex.fixture'
-import { SearchSynchronizer } from '../src/search/synchronizer'
 import { KvStateStore } from '../src/kvStateStore'
 import { createApp, type Env } from '../src/app'
 import { TEST_ADMIN_SK } from './fixtures'

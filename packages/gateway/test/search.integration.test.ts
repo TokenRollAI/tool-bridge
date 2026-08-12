@@ -5,10 +5,9 @@ import {
   SecretStoreImpl,
   SKRegistryStore,
 } from '@tool-bridge/core'
+import { createTbApp, runBootstrap } from '@tool-bridge/app'
 import { describe, expect, it, vi } from 'vitest'
 import { TEST_ADMIN_SK, TEST_ENCRYPTION_KEY } from './fixtures'
-import { runBootstrap } from '../src/bootstrap'
-import { createTbApp } from '../src/tbApp'
 
 const adminHeaders = {
   'accept': 'application/json',

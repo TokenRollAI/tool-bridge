@@ -4,7 +4,7 @@
  * 解析函数镜像 app.ts 的 allowInsecure / remoteSettingsFromEnv / positiveIntEnv。
  */
 
-import type { PluginBindings } from '@tool-bridge/gateway/tbApp'
+import type { PluginBindings } from '@tool-bridge/app'
 import { normalizeCanonicalOrigin } from '@tool-bridge/core'
 
 const DEFAULT_PORT = 8787

@@ -17,8 +17,8 @@ import {
   type ObjectStore,
   TBError,
 } from '@tool-bridge/core'
+import { encodeObjectKey, presignS3Url } from '@tool-bridge/app'
 import { AwsClient } from 'aws4fetch'
-import { encodeObjectKey, presignS3Url } from './s3Sign'
 
 /** R2 S3 兼容端点的 presign 参数(凭证链解析见 app.ts;缺省 = 不提供 presign)。 */
 export interface R2PresignCredentials {

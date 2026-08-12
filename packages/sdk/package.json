@@ -42,8 +42,8 @@
   },
   "devDependencies": {
     "@hono/node-server": "catalog:",
+    "@tool-bridge/app": "workspace:*",
     "@tool-bridge/core": "workspace:*",
-    "@tool-bridge/gateway": "workspace:*",
     "@types/node": "catalog:",
     "@types/ws": "catalog:",
     "tsup": "catalog:",

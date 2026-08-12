@@ -1,10 +1,8 @@
 import { MemoryStateStore, parseHelpDsl, SecretStoreImpl } from '@tool-bridge/core'
+import { createTbApp, type PluginBindings, runBootstrap } from '@tool-bridge/app'
 import { createNotesPlugin, type Env } from '@tool-bridge/plugins/notes'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { PluginBindings } from '../src/providers/pluginClient'
 import { TEST_ADMIN_SK, TEST_ENCRYPTION_KEY } from './fixtures'
-import { runBootstrap } from '../src/bootstrap'
-import { createTbApp } from '../src/tbApp'
 
 /**
  * binding: 进程内插件传输(plugin-in-process-catalog 决策第一刀)。

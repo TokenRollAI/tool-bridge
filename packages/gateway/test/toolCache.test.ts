@@ -1,6 +1,6 @@
+import { getTools, peekToolCache } from '@tool-bridge/app'
 import { MemoryStateStore } from '@tool-bridge/core'
 import { describe, expect, it } from 'vitest'
-import { getTools, peekToolCache } from '../src/providers/toolCache'
 
 describe('tool cache canonical boundary', () => {
   it('caches provider snapshots larger than the optional search projection', async () => {

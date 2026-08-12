@@ -2,8 +2,8 @@ import { createApp } from './app'
 
 export { createApp, type Env } from './app'
 export { DeviceSession } from './deviceSession'
-export type { PluginBindingHandler, PluginBindings } from './providers/pluginClient'
 export { D1SearchIndex } from './search/d1SearchIndex'
+export type { PluginBindingHandler, PluginBindings } from '@tool-bridge/app'
 
 /**
  * Workers 入口。Hono 实例实现了 `fetch(request, env, ctx)`,可直接作为 default export

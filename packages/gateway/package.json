@@ -1,15 +1,12 @@
 {
   "name": "@tool-bridge/gateway",
   "version": "0.4.0",
-  "description": "tool-bridge gateway as a Cloudflare Worker library: default-export the HTBP app plus the DeviceSession Durable Object, deploy with your own wrangler config",
+  "description": "Cloudflare Workers host adapter for tool-bridge: binds KV / R2 / D1 / Durable Objects / Static Assets to the host-neutral @tool-bridge/app, and default-exports the Worker plus the DeviceSession Durable Object",
   "type": "module",
   "license": "MIT",
   "main": "src/index.ts",
   "exports": {
-    ".": "./src/index.ts",
-    "./tbApp": "./src/tbApp.ts",
-    "./bootstrap": "./src/bootstrap.ts",
-    "./deviceHello": "./src/deviceHello.ts"
+    ".": "./src/index.ts"
   },
   "files": [
     "dist"
@@ -54,6 +51,7 @@
     "@cloudflare/vitest-pool-workers": "catalog:",
     "@cloudflare/workers-types": "catalog:",
     "@modelcontextprotocol/sdk": "catalog:",
+    "@tool-bridge/app": "workspace:*",
     "@tool-bridge/core": "workspace:*",
     "@tool-bridge/dashboard": "workspace:*",
     "@tool-bridge/plugins": "workspace:*",

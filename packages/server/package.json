@@ -52,8 +52,8 @@
     "ws": "catalog:"
   },
   "devDependencies": {
+    "@tool-bridge/app": "workspace:*",
     "@tool-bridge/core": "workspace:*",
-    "@tool-bridge/gateway": "workspace:*",
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "catalog:",
     "@types/ws": "catalog:",

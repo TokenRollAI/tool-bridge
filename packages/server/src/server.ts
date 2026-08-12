@@ -8,8 +8,7 @@
  */
 
 import type * as http from 'node:http'
-import { createTbApp, type TbAppDeps } from '@tool-bridge/gateway/tbApp'
-import { runBootstrap } from '@tool-bridge/gateway/bootstrap'
+import { createTbApp, runBootstrap, type TbAppDeps } from '@tool-bridge/app'
 import { serve, type ServerType } from '@hono/node-server'
 import { SecretStoreImpl } from '@tool-bridge/core'
 import { mkdirSync } from 'node:fs'

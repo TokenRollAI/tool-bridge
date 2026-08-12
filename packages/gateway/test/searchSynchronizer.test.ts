@@ -8,8 +8,8 @@ import {
   type ToolSearchDocument,
   type ToolSpec,
 } from '@tool-bridge/core'
+import { SearchSynchronizer } from '@tool-bridge/app'
 import { describe, expect, it } from 'vitest'
-import { SearchSynchronizer } from '../src/search/synchronizer'
 
 class RecordingSearchIndex implements MutableSearchIndex {
   readonly capabilities = ['search'] as const

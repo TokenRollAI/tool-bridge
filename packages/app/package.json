@@ -1,0 +1,54 @@
+{
+  "name": "@tool-bridge/app",
+  "version": "0.1.0",
+  "description": "Host-neutral HTBP application: assemble the tool-bridge tree on any runtime (Workers / Node / Deno / Bun) by injecting StateStore, ObjectStore, SecretStore, DeviceTransport and SearchIndex",
+  "type": "module",
+  "license": "MIT",
+  "main": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "files": [
+    "dist"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts",
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "import": "./dist/index.js"
+      }
+    }
+  },
+  "keywords": [
+    "htbp",
+    "tool-bridge",
+    "agent-tools",
+    "mcp",
+    "host-neutral"
+  ],
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "tsup"
+  },
+  "dependencies": {
+    "@cfworker/json-schema": "catalog:",
+    "@modelcontextprotocol/client": "catalog:",
+    "@modelcontextprotocol/core": "catalog:",
+    "@modelcontextprotocol/server": "catalog:",
+    "aws4fetch": "catalog:",
+    "hono": "catalog:"
+  },
+  "devDependencies": {
+    "@tool-bridge/core": "workspace:*",
+    "tsup": "catalog:",
+    "typescript": "catalog:"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/TokenRollAI/tool-bridge.git",
+    "directory": "packages/app"
+  }
+}

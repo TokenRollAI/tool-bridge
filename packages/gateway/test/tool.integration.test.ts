@@ -1,7 +1,7 @@
 import { MemoryStateStore, parseHelpDsl, SecretStoreImpl, type StateStore } from '@tool-bridge/core'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { createMcpProvider } from '@tool-bridge/app'
 import { env, SELF } from 'cloudflare:test'
-import { createMcpProvider } from '../src/providers/mcp'
 import { KvStateStore } from '../src/kvStateStore'
 import { TEST_ADMIN_SK } from './fixtures'
 

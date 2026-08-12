@@ -1,9 +1,8 @@
 import { isTBError, MemoryStateStore, SecretStoreImpl } from '@tool-bridge/core'
+import { createHttpProvider, createMcpProvider } from '@tool-bridge/app'
 import { describe, expect, it } from 'vitest'
 import { SELF } from 'cloudflare:test'
 import { TEST_ADMIN_SK, TEST_ENCRYPTION_KEY } from './fixtures'
-import { createHttpProvider } from '../src/providers/http'
-import { createMcpProvider } from '../src/providers/mcp'
 
 // Secret Reference 使用授权(confused-deputy 合入阻断项)集成测试:
 // 两条注册通道(system/registry write/update + ~register)在权限判定后、落库前统一

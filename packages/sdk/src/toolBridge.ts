@@ -17,10 +17,10 @@ import {
 import {
   createTbApp,
   dispatchContextCmd,
+  runBootstrap,
   type TbAppDeps,
   type UpstreamProvider,
-} from '@tool-bridge/gateway/tbApp'
-import { runBootstrap } from '@tool-bridge/gateway/bootstrap'
+} from '@tool-bridge/app'
 import { hostname } from 'node:os'
 import type {
   ConnectOptions,
