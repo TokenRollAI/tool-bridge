@@ -121,7 +121,7 @@ export async function helpModelFor(
       // —— providers/pluginContext.ts 按同一集合挂 handler。
       const model = contextHelpModel(node, { readOnly: node.config.readOnly ?? false })
       const { export: exported } = await requirePluginExport(
-        deps.state,
+        deps,
         node.config.provider,
         'context',
         'context',

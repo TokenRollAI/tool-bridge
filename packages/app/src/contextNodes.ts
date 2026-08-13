@@ -324,7 +324,8 @@ export async function assertContextConfig(config: unknown, deps: TbAppDeps): Pro
   if (cfg.provider !== 'r2' && cfg.provider !== 's3') {
     // plugin 挂载:不存在/kind 不符/禁用 → invalid_argument(device-fs 由网关代写、
     // SDK '@local' 由 registerContext 内部通道落库,均不经注册面)。
-    await requirePluginExport(deps.state, cfg.provider, 'context', 'context', cfg.export)
+    // 传 deps 而不是 deps.state:内置 binding 插件未注册时在这里自动补齐(免手工注册)。
+    await requirePluginExport(deps, cfg.provider, 'context', 'context', cfg.export)
     return
   }
   if (cfg.provider === 's3') {

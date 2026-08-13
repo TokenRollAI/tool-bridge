@@ -25,6 +25,7 @@ import {
   type ToolSpec,
   type TreeNode,
   type TreePath,
+  validatePluginContract,
   virtualizeTools,
 } from '@tool-bridge/core'
 import type { UpstreamProvider } from './providers/types'
@@ -38,6 +39,7 @@ import { assertNoDeviceMarker, deviceToolMarker } from './deviceNodes'
 import { createHttpProvider, type HttpConfig } from './providers/http'
 import { createMcpProvider, type McpConfig } from './providers/mcp'
 import { createPluginToolProvider } from './providers/pluginTool'
+import { fetchPluginContract } from './providers/pluginClient'
 import { resolveProviderAccessToken } from './providerOAuth'
 import { getTools } from './providers/toolCache'
 
@@ -81,14 +83,66 @@ export function upstreamTools(
  * `config.export` 与节点 kind 选出唯一 export(单 export 可省略;多 export 必须显式,
  * 见 core resolvePluginExport)。不存在/禁用 → invalid_argument(不泄露更多)。
  */
+/**
+ * 宿主装配的 binding 插件**自动注册**(免手工 `tb plugin register`)。
+ *
+ * 内置插件与网关同源同构建 —— 它的代码就在这个 Worker 里,由本仓库的闸门保证可用。
+ * 让用户先注册一遍只是仪式:注册那四件事里,探活对同进程代码没有信息量(它不可能
+ * "连不上"),mint token 对 binding 是同义反复(见 plugin-sdk 的 TB_PLUGIN_IN_PROCESS),
+ * 真正必要的只有 **`~describe` 缓存** —— 挂载表单选 export、凭证提示列字段都靠它。
+ *
+ * 故这里只做那一件必要的事:直调 `~describe` 抓契约 → 落 manifest 与 meta。
+ * 不探活、不 mint、不写 SK。
+ *
+ * 只对**装配表里有同名 binding** 的 id 生效;外挂 https 插件仍须显式注册(它在网络那头,
+ * 探活与契约校验都是必要的前置)。
+ */
+async function autoRegisterBinding(
+  deps: Pick<TbAppDeps, 'pluginBindings' | 'state'>,
+  id: string,
+): Promise<PluginManifest | null> {
+  if (deps.pluginBindings?.has(id) !== true) return null
+  const manifest: PluginManifest = {
+    id,
+    protocolVersion: 'plugin/v2',
+    endpoint: `${'binding:'}${id}`,
+    // binding 直调不校验 token(同进程,调用方就是平台自己),但 manifest 形状要合法。
+    auth: { kind: 'platform-token' },
+    healthPath: '/healthz',
+    enabled: true,
+  }
+  const contract = await fetchPluginContract(manifest, deps.pluginBindings)
+  const describe = validatePluginContract({ manifest, describe: contract.describe })
+  await deps.state.put(KEY_PLUGIN_META + id, describe)
+  await deps.state.put(KEY_PLUGIN + id, { ...manifest, exports: describe.exports })
+  return manifest
+}
+
+/**
+ * 第一参可以是 deps 也可以是裸 store。
+ *
+ * 裸 store 形态是**降级**:拿不到 `pluginBindings`,自动注册就不会发生,行为与从前一致
+ * (未注册 → invalid_argument)。留这个重载是为了不让"多一个可选能力"逼着四条调用链
+ * 全部改签名;能拿到 deps 的调用点(挂载校验、调用、help)传 deps 即可享受免注册。
+ */
+type PluginLookupSource = Pick<TbAppDeps, 'pluginBindings' | 'state'> | StateStore
+
+function sourceOf(from: PluginLookupSource): Pick<TbAppDeps, 'pluginBindings' | 'state'> {
+  return 'state' in from ? from : { state: from }
+}
+
 export async function requirePluginExport(
-  store: StateStore,
+  from: PluginLookupSource,
   id: string,
   nodeKind: 'tool' | 'context',
   what: 'context' | 'tool',
   exportId?: string,
 ): Promise<{ export: PluginExport, manifest: PluginManifest }> {
-  const manifest = (await store.get(KEY_PLUGIN + id)) as PluginManifest | null
+  const deps = sourceOf(from)
+  const store = deps.state
+  let manifest = (await store.get(KEY_PLUGIN + id)) as PluginManifest | null
+  // 未注册但宿主装配了同名 binding → 当场补齐(内置插件免注册)。
+  manifest ??= await autoRegisterBinding(deps, id)
   if (manifest === null) {
     throw new TBError('invalid_argument', `未知 ${what} provider:'${id}'`)
   }
@@ -186,7 +240,8 @@ export async function providerFor(
     if (local !== undefined) return local
     // plugin 工具源:provider = 已注册 tool-provider plugin 的 id。
     const { manifest, export: exported } = await requirePluginExport(
-      deps.state,
+      // deps 而不是 deps.state:内置 binding 插件未注册时在这里自动补齐(免手工注册)。
+      deps,
       node.config.provider,
       'tool',
       'tool',
@@ -409,7 +464,7 @@ export async function assertToolConfig(
   }
   const exportId = (config as { export?: unknown }).export
   const { manifest, export: exported } = await requirePluginExport(
-    deps.state,
+    deps,
     provider,
     'tool',
     'tool',

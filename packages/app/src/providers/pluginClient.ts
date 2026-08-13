@@ -209,17 +209,29 @@ async function resolveSecretCredential(opts: PluginCallOptions): Promise<string>
   return cred
 }
 
-/** Authorization 按 manifest.auth 从 SecretStore 解析;无法解析 → unavailable。 */
+/**
+ * Authorization 按 manifest.auth 从 SecretStore 解析;无法解析 → unavailable。
+ *
+ * **binding 插件的 platform-token 可以缺席**:进程内直调不校验 token(调用方就是平台
+ * 自己,见 plugin-sdk 的 `TB_PLUGIN_IN_PROCESS`),而自动注册的内置插件刻意不 mint ——
+ * mint 一个双方都不验的 token 只是徒增一份要轮转的凭证。此时不发 Authorization 头。
+ *
+ * 显式注册的 binding 插件仍会 mint(注册面的既有行为),那个 token 会照常发出去,
+ * 插件侧照常忽略 —— 两条路都通,差别只在 SecretStore 里多不多一条记录。
+ */
 async function pluginAuthorization(
   manifest: PluginManifest,
   secrets: SecretStoreImpl,
-): Promise<string> {
+): Promise<string | undefined> {
   const name
     = manifest.auth.kind === 'platform-token'
       ? pluginTokenSecretName(manifest.id)
       : manifest.auth.secretRef
   const token = await secrets.resolve(name)
   if (token === undefined) {
+    if (manifest.auth.kind === 'platform-token' && manifest.endpoint.startsWith(BINDING_PREFIX)) {
+      return undefined
+    }
     throw new TBError('unavailable', `plugin '${manifest.id}' 凭证 '${name}' 无法解析`, {
       retryable: false,
     })
@@ -297,10 +309,12 @@ export async function callPlugin(
   args: Record<string, unknown>,
 ): Promise<unknown> {
   const body = encodePluginCall({ tool: method, arguments: args })
+  // binding + 自动注册的插件没有 platform-token(双方都不验它),此时不发这个头。
+  const authorization = await pluginAuthorization(opts.manifest, opts.secrets)
   const headers: Record<string, string> = {
     'content-type': 'application/json',
     'accept': 'application/json',
-    'authorization': await pluginAuthorization(opts.manifest, opts.secrets),
+    ...(authorization !== undefined ? { authorization } : {}),
     [HEADER_TB_CONTEXT]: encodeCallContext(opts.ctx),
     [HEADER_TB_REQUEST_ID]: crypto.randomUUID(),
   }

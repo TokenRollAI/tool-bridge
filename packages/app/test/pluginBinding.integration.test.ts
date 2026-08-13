@@ -1,6 +1,7 @@
 import { MemoryStateStore, parseHelpDsl, SecretStoreImpl } from '@tool-bridge/core'
 import { createNotesPlugin, type Env } from '@tool-bridge/plugins/notes'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { builtinPluginBindings } from '@tool-bridge/plugins'
 import { createTbApp, type PluginBindings, runBootstrap } from '../src/index'
 import { TEST_ADMIN_SK, TEST_ENCRYPTION_KEY } from './fixtures'
 
@@ -222,5 +223,97 @@ describe('binding 传输的超时', () => {
     expect(seenSignal, 'binding 收到的 Request 没有 signal —— 上游挂住就无上界').toBeDefined()
     expect(seenSignal).not.toBeNull()
     expect(seenSignal?.aborted).toBe(false)
+  })
+})
+
+/**
+ * 内置 binding 插件**免手工注册**:挂载时若 provider 是宿主装配的 binding 却没注册,
+ * 当场补齐 manifest 与 `~describe` 缓存。
+ *
+ * 为什么能省:内置插件与网关同源同构建,代码就在这个 Worker 里 —— 探活对它没有信息量
+ * (不可能"连不上"),mint token 是同义反复(binding 直调跳过 token 校验)。真正必要的
+ * 只有 `~describe` 缓存(挂载选 export、Dashboard 列凭证字段都靠它),故只做那一件。
+ *
+ * 边界:**只对装配表里有同名 binding 的 id 生效**。外挂 https 插件在网络那头,
+ * 探活与契约校验是必要前置,仍须显式注册 —— 最后一个用例钉住这条。
+ */
+describe('内置 binding 插件免注册', () => {
+  /**
+   * 用 `builtinPluginBindings` 装配 —— 这是**生产宿主的真实装配方式**
+   * (gateway 的 deployEntry.ts 就这么调),它递给插件的 env 带 `TB_PLUGIN_IN_PROCESS`,
+   * 插件因此跳过 PLUGIN_TOKEN 校验。
+   *
+   * 上面那些用例手工造 Map 是为了模拟"宿主自己装配"并注入受控的 token;
+   * 而免注册这条路**不 mint token**(那对同进程调用是同义反复),所以它必须配
+   * 真实装配方式才成立 —— 这不是测试的将就,是这条能力的前置条件。
+   */
+  async function appWithBuiltins(): Promise<ReturnType<typeof createTbApp>> {
+    const state = new MemoryStateStore()
+    await runBootstrap(state, { adminSk: TEST_ADMIN_SK, requireAdminSk: true })
+    return createTbApp({
+      allowInsecureHttp: false,
+      pluginBindings: builtinPluginBindings({}, { include: ['notes'] }),
+      remote: { allowlist: [], maxHops: 4, allowInsecure: false },
+      secrets: new SecretStoreImpl(state, TEST_ENCRYPTION_KEY),
+      state,
+      version: 'test',
+    })
+  }
+
+  const mountNotes = (app: ReturnType<typeof createTbApp>, path = 'auto/notes') =>
+    postJson(app, 'system/registry', {
+      tool: 'write',
+      arguments: {
+        path,
+        kind: 'tool',
+        description: 'auto-registered notes',
+        // notes 有两个 export,按契约必须显式指定 —— 与自动注册无关。
+        config: { kind: 'tool', provider: 'notes', export: 'actions' },
+      },
+    })
+
+  it('直接挂载未注册的 binding provider → 自动补齐,工具可列可调', async () => {
+    const app = await appWithBuiltins()
+
+    // 注意:没有 register 那一步。
+    expect((await mountNotes(app)).status).toBe(200)
+
+    // manifest 与 ~describe 缓存都已落库 —— plugin get 能读到。
+    const got = await postJson(app, 'system/plugin', { tool: 'get', arguments: { id: 'notes' } })
+    expect(got.status).toBe(200)
+    const record = (await got.json()) as { endpoint: string, exports?: Array<{ id: string }> }
+    expect(record.endpoint).toBe('binding:notes')
+    // exports 缓存是关键:挂载表单选 export、Dashboard 的凭证提示都靠它。
+    expect(record.exports?.map(e => e.id)).toContain('actions')
+
+    // 真的能用(全程零网络出站 —— 本文件把 fetch 打桩为一碰即炸)。
+    const help = await app.request(new Request('https://tb.test/auto/notes/~help', {
+      headers: { authorization: `Bearer ${TEST_ADMIN_SK}`, accept: 'text/plain' },
+    }))
+    expect(help.status).toBe(200)
+    expect(parseHelpDsl(await help.text()).cmds.length).toBeGreaterThan(0)
+  })
+
+  it('catalog 随后把它标成已注册(自动与手工注册殊途同归)', async () => {
+    const app = await appWithBuiltins()
+    await mountNotes(app)
+    const res = await postJson(app, 'system/plugin', { tool: 'catalog', arguments: {} })
+    const items = ((await res.json()) as { items: Array<{ name: string, registered: boolean }> }).items
+    expect(items.find(i => i.name === 'notes')?.registered).toBe(true)
+  })
+
+  it('**装配表里没有的 provider 仍然拒绝** —— 自动注册不是"什么都收"', async () => {
+    const app = await appWithBuiltins()
+    const res = await postJson(app, 'system/registry', {
+      tool: 'write',
+      arguments: {
+        path: 'auto/nope',
+        kind: 'tool',
+        description: 'x',
+        config: { kind: 'tool', provider: 'not-assembled' },
+      },
+    })
+    expect(res.status).toBe(400)
+    expect(((await res.json()) as { message: string }).message).toContain('not-assembled')
   })
 })
