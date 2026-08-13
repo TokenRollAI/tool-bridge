@@ -157,16 +157,24 @@ function depsFromEnv(env: Env): TbAppDeps {
 /**
  * Workers 入口的 Hono app。Workers 的 env 只在请求期可得,故每 isolate 按 env 惰性
  * 装配一次 tb app(env 对象在同一 isolate 内稳定,WeakMap 命中;跨 isolate 各自装配)。
- * opts.pluginBindings:进程内插件装配表(构建期打包进 Worker 的插件集合按名直调)。
+ *
+ * `opts.pluginBindings`:进程内插件装配表(构建期打包进 Worker 的插件集合按名直调)。
+ * 可以直接给一张表,也可以给一个 **`(env) => 表`** 的工厂 —— 后者是内置目录需要的形态:
+ * `builtinPluginBindings(env)` 要读 env(它内部按白名单收窄后递给插件),而 env 在
+ * `createApp()` 调用时还不存在。工厂与 app 一起按 env 缓存,每 isolate 只建一次。
  */
-export function createApp(opts: { pluginBindings?: PluginBindings } = {}): Hono<{ Bindings: Env }> {
+export function createApp(
+  opts: { pluginBindings?: PluginBindings | ((env: Env) => PluginBindings) } = {},
+): Hono<{ Bindings: Env }> {
   const apps = new WeakMap<Env, ReturnType<typeof createTbApp>>()
   const appFor = (env: Env): ReturnType<typeof createTbApp> => {
     let app = apps.get(env)
     if (app === undefined) {
+      const bindings
+        = typeof opts.pluginBindings === 'function' ? opts.pluginBindings(env) : opts.pluginBindings
       app = createTbApp({
         ...depsFromEnv(env),
-        ...(opts.pluginBindings !== undefined ? { pluginBindings: opts.pluginBindings } : {}),
+        ...(bindings !== undefined ? { pluginBindings: bindings } : {}),
       })
       apps.set(env, app)
     }

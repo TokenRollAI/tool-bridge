@@ -1,6 +1,6 @@
 {
   "name": "@tool-bridge/gateway",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "Cloudflare Workers host adapter for tool-bridge: binds KV / R2 / D1 / Durable Objects / Static Assets to the host-neutral @tool-bridge/app, and default-exports the Worker plus the DeviceSession Durable Object",
   "type": "module",
   "license": "MIT",
@@ -53,6 +53,7 @@
     "@tool-bridge/app": "workspace:*",
     "@tool-bridge/core": "workspace:*",
     "@tool-bridge/dashboard": "workspace:*",
+    "@tool-bridge/plugins": "workspace:*",
     "s3rver": "^3.7.1",
     "tsup": "catalog:",
     "tsx": "catalog:",

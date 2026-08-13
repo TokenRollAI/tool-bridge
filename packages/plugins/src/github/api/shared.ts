@@ -245,7 +245,10 @@ export function decodeContent(contentBase64: string, encoding: string | undefine
     const binary = atob(contentBase64)
     const bytes = new Uint8Array(binary.length)
     for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i)
-    return new TextDecoder('utf-8', { fatal: true }).decode(bytes)
+    // `ignoreBOM: false` 是默认值,显式写出来是为了满足 workers-types 的
+    // `TextDecoderConstructorOptions`(它要求两个字段都给)—— gateway 把本包 bundle 进
+    // Worker 后按那套类型编译,只声明 `fatal` 会 TS2345。语义与只写 fatal 时一致。
+    return new TextDecoder('utf-8', { fatal: true, ignoreBOM: false }).decode(bytes)
   } catch {
     return undefined
   }

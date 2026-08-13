@@ -357,6 +357,9 @@ importers:
       '@tool-bridge/dashboard':
         specifier: workspace:*
         version: link:../dashboard
+      '@tool-bridge/plugins':
+        specifier: workspace:*
+        version: link:../plugins
       s3rver:
         specifier: ^3.7.1
         version: 3.7.1(supports-color@10.2.2)
