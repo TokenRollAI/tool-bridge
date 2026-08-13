@@ -349,6 +349,16 @@ export function createPlugin<Env = unknown>(opts: CreatePluginOptions<Env> = {})
   }
 
   function assertAuthorized(request: Request, env: Env): void {
+    // **进程内 binding 直调:调用方就是平台本身**,token 比对在这里是同义反复 ——
+    // 平台从 SecretStore 取出自己 mint 的 token、发给同进程的自己去比对,而宿主装配时
+    // 根本拿不到那个值(它在注册时才生成、按 plugin id 存),这条路因此从来打不通。
+    //
+    // 标识走 **env 而不是 header**:env 是宿主装配时闭包持有的,任何网络请求都碰不到它;
+    // 用 header 表达"我是进程内调用"等于把 fail-closed 拆了 —— 公网发一个同名头即可绕过。
+    // 外挂 https 插件仍走下面的 token 比对,那条 fail-closed 一点没动。
+    if ((env as { TB_PLUGIN_IN_PROCESS?: unknown } | undefined)?.TB_PLUGIN_IN_PROCESS === true) {
+      return
+    }
     const header = request.headers.get('authorization') ?? ''
     const presented = header.startsWith('Bearer ') ? header.slice('Bearer '.length) : ''
     const expected = opts.token?.(env)

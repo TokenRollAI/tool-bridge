@@ -48,6 +48,11 @@ export const BUILTIN_PLUGIN_ENV_KEYS: readonly string[] = [
 /**
  * 从宿主环境里挑出允许递给插件的键。导出供测试直接断言 —— 这条约束是安全边界,
  * 得能被直接钉住,而不是只能从行为侧间接推断。
+ *
+ * 注意返回值里的 `TB_PLUGIN_IN_PROCESS: true` 是**布尔字面量**,而 `BuiltinPluginEnv`
+ * 的索引签名只收 `string | undefined` —— 宿主环境里的同名变量(只可能是字符串 `'true'`)
+ * 因此无法伪造它。这不是巧合,是刻意的:那个标记让 plugin-sdk 跳过 token 校验,
+ * 能被环境变量伪造就等于把 fail-closed 拆了。见下方 `builtinPluginBindings` 的说明。
  */
 export function narrowPluginEnv(env: BuiltinPluginEnv): BuiltinPluginEnv {
   const narrowed: BuiltinPluginEnv = {}
@@ -65,6 +70,16 @@ export function narrowPluginEnv(env: BuiltinPluginEnv): BuiltinPluginEnv {
  * opts.include 给出时只装配指定子集(CF 宿主按构建体积裁剪集合)。
  *
  * `env` 会先经白名单收窄(见 `BuiltinPluginEnv`):宿主可以放心把整份 `process.env` 传进来。
+ *
+ * **递下去的 env 带 `TB_PLUGIN_IN_PROCESS: true`**,plugin-sdk 见到它就跳过 PLUGIN_TOKEN
+ * 校验。理由:进程内直调的调用方就是平台本身,token 比对是同义反复 —— 平台从 SecretStore
+ * 取出自己 mint 的 token、发给同进程的自己去比对;而宿主装配时根本拿不到那个值
+ * (它在注册时才生成、按 plugin id 存 `plugin-token:<id>`),这条路从来打不通。
+ * 生产实测:99 个 binding 插件全部报「未配置 PLUGIN_TOKEN」,一个都调不动。
+ *
+ * 走 **env 而不是请求头**是这个修法成立的前提:env 由本函数在装配期闭包持有,
+ * 任何网络请求都碰不到;而 `true` 是布尔字面量,宿主环境变量(只能是字符串)伪造不出来。
+ * 外挂 https 插件仍走 token 比对,那条 fail-closed 一点没动。
  */
 export function builtinPluginBindings(
   env: BuiltinPluginEnv,
@@ -72,7 +87,7 @@ export function builtinPluginBindings(
 ): Map<string, (request: Request) => Promise<Response>> {
   const names = opts.include ?? Object.keys(BUILTIN_PLUGIN_LOADERS)
   // 收窄一次,之后每个插件拿到的都是这份 —— 而不是宿主原始环境。
-  const pluginEnv = narrowPluginEnv(env)
+  const pluginEnv = { ...narrowPluginEnv(env), TB_PLUGIN_IN_PROCESS: true }
   const bindings = new Map<string, (request: Request) => Promise<Response>>()
   for (const name of names) {
     const loader = BUILTIN_PLUGIN_LOADERS[name]

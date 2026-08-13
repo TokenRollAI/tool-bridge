@@ -69,3 +69,20 @@ describe('builtinPluginBindings', () => {
     expect(bindings.size).toBeGreaterThan(0)
   })
 })
+
+describe('进程内标记', () => {
+  it('builtinPluginBindings 递下去的 env 带 TB_PLUGIN_IN_PROCESS: true(布尔,不是字符串)', async () => {
+    // 直接从一个真实插件的行为侧验证:不配 PLUGIN_TOKEN、不带 Authorization 也能调通。
+    // 这条以前是 503「未配置 PLUGIN_TOKEN」—— 99 个 binding 插件全部调不动。
+    const bindings = builtinPluginBindings({}, { include: ['notes'] })
+    const handler = bindings.get('notes')!
+    const res = await handler(new Request('https://p.test/~describe'))
+    expect(res.status).toBe(200)
+  })
+
+  it('narrowPluginEnv 本身不产出这个标记(它只做白名单收窄)', () => {
+    // 标记由 builtinPluginBindings 加,不是 narrowPluginEnv 的职责 —— 后者是纯收窄函数,
+    // 宿主可以单独用它而不隐含"进程内"语义。
+    expect(narrowPluginEnv({ TB_PLUGIN_IN_PROCESS: 'true' })).toEqual({})
+  })
+})

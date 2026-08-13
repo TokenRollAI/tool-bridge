@@ -478,3 +478,50 @@ describe('oauth:平台托管的 provider 型 OAuth2 声明', () => {
     expect(() => t2.oauth(OAUTH)).toThrow(/已声明 credentialProbe/)
   })
 })
+
+describe('进程内 binding 跳过 token 校验', () => {
+  /**
+   * 平台按 plugin id mint token 存 SecretStore,而宿主装配 binding 时拿不到那个值 ——
+   * 于是进程内插件的 token 比对从来打不通(生产实测 99 个全报「未配置 PLUGIN_TOKEN」)。
+   * 进程内直调的调用方就是平台本身,这个比对本来就是同义反复。
+   *
+   * 关键是标识走 **env 而不是请求头**:env 由宿主在装配期闭包持有,网络请求碰不到。
+   */
+  function call(env: Record<string, unknown>, auth?: string): Promise<Response> {
+    const plugin = createPlugin<never>({ token: e => (e as { PLUGIN_TOKEN?: string })?.PLUGIN_TOKEN })
+    plugin.tools('actions').register('ping', { description: 'p', effect: 'read' }, () => 'pong')
+    const headers: Record<string, string> = {
+      'content-type': 'application/json',
+      [HEADER_TB_CONTEXT]: encodeCallContext(CALLER),
+    }
+    if (auth !== undefined) headers.authorization = auth
+    return Promise.resolve(plugin.fetch(
+      new Request('https://p.test/', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ tool: 'Call', arguments: { name: 'ping', args: {} } }),
+      }),
+      env as never,
+    ))
+  }
+
+  it('env.TB_PLUGIN_IN_PROCESS === true:没配 token、没带 Authorization 也放行', async () => {
+    const res = await call({ TB_PLUGIN_IN_PROCESS: true })
+    expect(res.status).toBe(200)
+  })
+
+  it('**字符串 "true" 不算** —— 宿主环境变量只能是字符串,伪造不出这个标记', async () => {
+    const res = await call({ TB_PLUGIN_IN_PROCESS: 'true' })
+    // 落回原有的 fail closed:没配 PLUGIN_TOKEN → 503。
+    expect(res.status).toBe(503)
+    expect((await res.json() as { message: string }).message).toContain('PLUGIN_TOKEN')
+  })
+
+  it('不带这个标记时 fail closed 一点没动(外挂 https 插件走的正是这条)', async () => {
+    expect((await call({})).status).toBe(503)
+    expect((await call({}, 'Bearer anything')).status).toBe(503)
+    // 配了 token 就按 token 比对。
+    expect((await call({ PLUGIN_TOKEN: 'tok' }, 'Bearer wrong')).status).toBe(401)
+    expect((await call({ PLUGIN_TOKEN: 'tok' }, 'Bearer tok')).status).toBe(200)
+  })
+})
