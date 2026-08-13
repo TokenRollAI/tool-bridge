@@ -361,3 +361,24 @@ export function buildRegistryWriteArgs(
     ...(virtualize ? { virtualize } : {}),
   }
 }
+
+/**
+ * 这个节点要不要显示"授权"入口(对等 `tb tool auth`)。
+ *
+ * 两类节点走网关托管的 OAuth,而它们是**两套机制**、共用 `~authorize`:
+ * - `auth:'oauth'` 的 mcp 挂载 —— 判据就在挂载配置里,能精确判;
+ * - export 声明了 `oauth` 的 plugin tool 挂载(provider 型)—— **判据不在这里**:
+ *   oauth 声明在 plugin 的 `~describe` 里,而列表页只有节点记录。
+ *
+ * 故对所有 `kind:'tool'` 都给入口。代价是非 oauth 的 tool 节点点了会收到
+ * invalid_argument(平台侧 `authorizeToolNode` 查 export 后拒),但反过来 ——
+ * 收窄成"只有 mcp"会让 oauth 型 tool 挂载**完全没有入口**,那是管理旁路(缺陷),
+ * 比多一个会报错的按钮严重得多。平台侧 `routes/register.ts` 的分派用的是同一判据。
+ */
+export function showsAuthorizeAction(node: {
+  config?: Record<string, unknown>
+  kind: string
+}): boolean {
+  if (node.kind === 'tool') return true
+  return node.kind === 'mcp' && node.config?.auth === 'oauth'
+}

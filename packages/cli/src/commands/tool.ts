@@ -220,6 +220,14 @@ Examples:
           printLine(`mounted ${kind} node at ${path}`)
           if (kind === 'mcp' && (config as { auth?: string }).auth === 'oauth') {
             printLine(`next: run \`tb tool auth ${path}\` to authorize the upstream`)
+          } else if (kind === 'tool' && (config as { authRef?: string }).authRef !== undefined) {
+            // plugin tool 挂载:export 声明了 oauth 的话还要授权一步,而**这里判不出来**
+            // (oauth 在 plugin 的 `~describe` 里,不在挂载配置里)。不提示的话用户挂完
+            // 一个 oauth 型 provider(gmail 之类)完全没有线索知道还差一步,只会在第一次
+            // 调用时收到 permission_denied。故给条件式提示。
+            printLine(
+              `note: if this export declares oauth, run \`tb tool auth ${path}\` to authorize`,
+            )
           }
         }
       })
@@ -331,15 +339,20 @@ async function runLocalCallbackFlow(
 }
 
 /**
- * `tb tool auth <path>` —— 为 auth:'oauth' 的 mcp 挂载发起网关托管 OAuth 授权。
+ * `tb tool auth <path>` —— 为 OAuth 型挂载发起网关托管授权。两类节点:
+ * - `auth:'oauth'` 的 **mcp** 挂载(靠 MCP SDK 的 discovery + DCR);
+ * - export 声明了 `oauth` 的 **plugin tool** 挂载(provider 型:端点写死在 `~describe` 里,
+ *   client 凭证由用户自注册)。两者是两套机制,共用这一个命令与 `/~oauth/callback`。
+ *
  * 默认:授权回跳直达网关 `/~oauth/callback`,浏览器完成即结束。
  * `--local`:上游 DCR 只放行 localhost 回调时(如 Bytebase),本机起临时端口接收回跳,
- * code 由 CLI 转交网关兑换(token 仍不出网关)。
+ * code 由 CLI 转交网关兑换(token 仍不出网关)。**仅 mcp 那条支持** —— provider 型的
+ * `~authorize` 不读 body 里的 redirectUri,授权 URL 里始终是网关回调。
  */
 export function toolAuthCommand(): Command {
   return withGlobalOpts(new Command('auth'))
-    .description('Authorize an OAuth-backed mcp mount (gateway-managed flow)')
-    .argument('<path>', 'Tree path of the mcp mount')
+    .description('Authorize an OAuth-backed mcp or plugin tool mount (gateway-managed flow)')
+    .argument('<path>', 'Tree path of the mcp mount, or of a plugin tool mount whose export declares oauth')
     .option('--no-open', 'Print the authorization URL without opening a browser')
     .option('--local', 'Use a localhost callback (for upstreams that only allow loopback URIs)')
     .action(

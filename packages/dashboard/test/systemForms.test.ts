@@ -4,6 +4,7 @@ import {
   buildRegistryWriteArgs,
   INITIAL_REGISTRY_MOUNT_FORM,
   type RegistryMountFormState,
+  showsAuthorizeAction,
 } from '../src/pages/system/forms/registryConfig'
 import {
   buildPluginManifestFields,
@@ -263,5 +264,35 @@ describe('secret key config', () => {
       owner: 'agent:reader',
       expiresAt: 'not-a-date',
     })).toThrow('过期时间格式非法')
+  })
+})
+
+/**
+ * 授权入口的显示条件(对等 `tb tool auth` 的可达性)。
+ *
+ * 这条以前是 JSX 里的内联条件、无测试:`node.kind === 'mcp' && config.auth === 'oauth'`
+ * —— 于是 provider 型 oauth 挂载(kind:'tool')在 Dashboard 上**完全没有授权入口**,
+ * 是个管理旁路。抽成纯函数就是为了让它有闸门。
+ */
+describe('showsAuthorizeAction', () => {
+  it('auth:oauth 的 mcp 挂载:显示', () => {
+    expect(showsAuthorizeAction({ kind: 'mcp', config: { auth: 'oauth' } })).toBe(true)
+  })
+
+  it('普通 mcp 挂载(authRef 或公开):不显示', () => {
+    expect(showsAuthorizeAction({ kind: 'mcp', config: { authRef: 'x' } })).toBe(false)
+    expect(showsAuthorizeAction({ kind: 'mcp' })).toBe(false)
+  })
+
+  it('**plugin tool 挂载:显示** —— oauth 声明在 ~describe 里,列表页判不出,故一律给入口', () => {
+    expect(showsAuthorizeAction({ kind: 'tool', config: { provider: 'gmail', authRef: 'c' } })).toBe(true)
+    // 连不带 authRef 的也显示:判不出就不能替用户断言"这个不需要授权"。
+    expect(showsAuthorizeAction({ kind: 'tool', config: { provider: 'notes' } })).toBe(true)
+  })
+
+  it('其余 kind:不显示', () => {
+    for (const kind of ['http', 'context', 'skillhub', 'remote', 'device']) {
+      expect(showsAuthorizeAction({ kind }), kind).toBe(false)
+    }
   })
 })

@@ -42,6 +42,7 @@ import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { encodeTreePath } from '@/lib/path'
 import { cn } from '@/lib/utils'
+import { showsAuthorizeAction } from './forms/registryConfig'
 import { MountDialog } from './forms/MountDialog'
 
 const KIND_FILTERS = [
@@ -162,6 +163,14 @@ export function RegistryPage() {
 
   // auth:'oauth' 挂载的授权入口(对等 tb tool auth):redirect → 新标签打开 AS 授权页。
   // 严格上游(DCR 只放行 localhost 回调,如 Bytebase)→ 指引 CLI --local 通道。
+  //
+  // 两类节点走这个入口:auth:'oauth' 的 mcp 挂载,以及 export 声明了 oauth 的 plugin
+  // tool 挂载(provider 型托管流程,两者是两套机制、共用 `~authorize`)。
+  // **tool 节点无法在前端精确判定**:oauth 声明在 plugin 的 `~describe` 里,不在节点
+  // 记录的 config 里,而列表页只有后者。故对所有 tool 节点都给按钮 —— 平台侧对
+  // 非 oauth 的 export 会回 invalid_argument 并说清原因(register.ts 的分派同此判据:
+  // 先按 kind 分派,再由 authorizeToolNode 查 export)。让按钮在少数情况下点了报错,
+  // 好过让 oauth 型 tool 挂载**完全没有入口**(那是管理旁路)。
   const authorize = (path: string) => {
     oauth.mutate(path, {
       onSuccess: (r) => {
@@ -396,7 +405,7 @@ export function RegistryPage() {
                             </TableCell>
                             <TableCell>
                               <div className="flex justify-end gap-1">
-                                {node.kind === 'mcp' && node.config?.auth === 'oauth' && (
+                                {showsAuthorizeAction(node) && (
                                   <Button
                                     aria-label={`授权 ${node.path}`}
                                     disabled={oauth.isPending}

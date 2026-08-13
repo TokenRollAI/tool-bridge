@@ -119,3 +119,58 @@ describe('tb tool auth', () => {
     expect(process.exitCode).toBe(1)
   })
 })
+
+/**
+ * 挂载后的"下一步"提示。oauth 型挂载差一步授权,而**挂载时判不出来**:
+ * - mcp:`config.auth === 'oauth'` 就在挂载配置里,能精确提示;
+ * - plugin tool:oauth 声明在 plugin 的 `~describe` 里、不在挂载配置里,只能按
+ *   "带了 authRef"给条件式提示。
+ *
+ * 不提示的后果:用户挂完一个 oauth 型 provider(gmail 之类)没有任何线索知道还差一步,
+ * 只会在第一次调用时收到 permission_denied。
+ */
+describe('tb tool mount 的授权提示', () => {
+  /** 非 --json 模式才打提示(--json 输出是给程序消费的,不塞人读文案)。 */
+  function humanOutput(): string[] {
+    const lines: string[] = []
+    vi.spyOn(process.stdout, 'write').mockImplementation((chunk: unknown) => {
+      lines.push(String(chunk))
+      return true
+    })
+    return lines
+  }
+
+  const humanBase = ['--base-url', 'https://gw', '--sk', 'tbk_x']
+
+  it('mcp + --auth oauth → 明确提示跑 tb tool auth', async () => {
+    captureFetch({ path: 'db/bytebase', kind: 'mcp' })
+    const lines = humanOutput()
+    await runCli([
+      'tool', 'mount', 'db/bytebase', '--kind', 'mcp',
+      '--url', 'https://mcp.example/mcp', '--auth', 'oauth', ...humanBase,
+    ])
+    expect(lines.join('')).toContain('tb tool auth db/bytebase')
+  })
+
+  it('plugin tool + --auth-ref → 条件式提示(oauth 声明在 ~describe 里,挂载时判不出)', async () => {
+    captureFetch({ path: 'mail/gmail', kind: 'tool' })
+    const lines = humanOutput()
+    await runCli([
+      'tool', 'mount', 'mail/gmail', '--kind', 'tool',
+      '--provider', 'gmail', '--auth-ref', 'gmail-client', ...humanBase,
+    ])
+    const out = lines.join('')
+    expect(out).toContain('tb tool auth mail/gmail')
+    // 措辞必须是条件式的 —— 多数 tool 挂载走 api_key,不需要授权。
+    expect(out).toMatch(/if this export declares oauth/i)
+  })
+
+  it('plugin tool 不带 authRef → 不提示(没有凭证引用就谈不上授权)', async () => {
+    captureFetch({ path: 'notes', kind: 'tool' })
+    const lines = humanOutput()
+    await runCli([
+      'tool', 'mount', 'notes', '--kind', 'tool', '--provider', 'notes', ...humanBase,
+    ])
+    expect(lines.join('')).not.toContain('tb tool auth')
+  })
+})
