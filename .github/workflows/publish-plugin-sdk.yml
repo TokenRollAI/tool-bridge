@@ -1,0 +1,84 @@
+# 备注:发布走 npm Trusted Publishing(OIDC,免 token)。前置一次性配置见 npmjs.com 包设置页:
+# Package Settings → Trusted Publisher → GitHub Actions,
+# repo `TokenRollAI/tool-bridge`,workflow `publish-plugin-sdk.yml`。
+#
+# 这是**首发包**:npm 上还不存在 @tool-bridge/plugin-sdk,而 Trusted Publisher 只能在
+# 已存在的包上配置。故首发要走两段式(见 llmdoc/guides/npm-publish.md):
+# 先本地 `npm publish` 一次(需 2FA/token)把包创建出来,再回 npm 配 Trusted Publisher,
+# 之后本 workflow 才能免 token 发布。
+
+name: publish-plugin-sdk
+
+on:
+  push:
+    tags:
+      - 'plugin-sdk-v*' # 打 tag 即发布:git tag plugin-sdk-v0.3.0 && git push origin plugin-sdk-v0.3.0
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write # npm Trusted Publishing(OIDC)必需
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4 # 版本取 package.json 的 packageManager 字段
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+
+      # Trusted Publishing 需要 npm >= 11.5.1(setup-node 自带的可能偏旧)。
+      # 钉 11.x:npm 12.0.0(2026-07-08 发布)publish 缺 sigstore 模块直接崩(MODULE_NOT_FOUND)。
+      - run: npm install -g npm@11
+
+      - run: pnpm install --frozen-lockfile
+
+      # tag 版本与 package.json 一致性校验(防止 tag 与包版本漂移)
+      - name: Check tag matches package version
+        if: github.ref_type == 'tag'
+        run: |
+          TAG_VERSION="${GITHUB_REF_NAME#plugin-sdk-v}"
+          PKG_VERSION="$(node -p "require('./packages/plugin-sdk/package.json').version")"
+          if [ "$TAG_VERSION" != "$PKG_VERSION" ]; then
+            echo "tag plugin-sdk-v$TAG_VERSION != package.json $PKG_VERSION" >&2
+            exit 1
+          fi
+
+      # plugin-sdk 把 core 的操作内核 bundle 进产物,两包 typecheck 一起过
+      - run: pnpm --filter @tool-bridge/core --filter @tool-bridge/plugin-sdk typecheck
+      # 产物含 core 的 OperationRegistry/toToolResult,故 core 的套件也是发布闸门。
+      # plugins 包(private)是 plugin-sdk 的最大消费者:97 个迁移产物全走这条契约,
+      # 它的套件能抓到 SDK 侧的契约回归,纳入闸门。
+      - run: pnpm --filter @tool-bridge/core --filter @tool-bridge/plugin-sdk --filter @tool-bridge/plugins test
+      - run: pnpm --filter @tool-bridge/plugin-sdk build
+
+      # **必须 pnpm pack + npm publish <tarball>**,不能裸 `npm publish`:
+      # plugin-sdk 的开发态 `main`/`exports` 指 `src/index.ts`(workspace 内被按名消费),
+      # 发布形态靠 `publishConfig` 覆盖成 dist。而 **`npm publish` 不应用字段覆盖,
+      # `pnpm pack` 才应用** —— 裸 publish 会发出一个入口指向 src 的包,消费者装了跑不起来。
+      # (sdk/cli 那几个 workflow 用裸 publish 是对的:它们的 main 本来就指 dist。)
+      - name: Pack (applies publishConfig overrides)
+        working-directory: packages/plugin-sdk
+        run: |
+          TARBALL="$(pnpm pack | tail -1)"
+          echo "TARBALL=$PWD/$TARBALL" >> "$GITHUB_ENV"
+
+      # 发布前核对入口真的指向 dist —— 这是上面那条坑的机器化检查。
+      - name: Verify tarball entry points
+        working-directory: packages/plugin-sdk
+        run: |
+          MAIN="$(tar -xOf "$TARBALL" package/package.json | node -p "JSON.parse(require('fs').readFileSync(0,'utf8')).main")"
+          echo "tarball main = $MAIN"
+          case "$MAIN" in
+            ./dist/*) ;;
+            *) echo "publishConfig 覆盖未生效:main=$MAIN(应指 dist)" >&2; exit 1 ;;
+          esac
+
+      - name: Publish to npm
+        working-directory: packages/plugin-sdk
+        run: npm publish "$TARBALL"
