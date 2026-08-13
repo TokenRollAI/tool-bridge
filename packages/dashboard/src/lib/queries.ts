@@ -5,6 +5,7 @@ import type {
   ContextEntryMeta,
   FederationHost,
   Page,
+  PluginCatalogItem,
   PluginManifest,
   RegistryNode,
   SecretKeyInfo,
@@ -218,6 +219,27 @@ export function useSecretList() {
 
 export function usePluginList() {
   return usePagedBuiltin<PluginManifest>('plugin-list', 'system/plugin')
+}
+
+/**
+ * 宿主装配的进程内插件目录(对等 `tb plugin catalog`)。
+ *
+ * 与 `usePluginList` 的分工:那个列**已注册**的 plugin(system/plugin 的 list),
+ * 这个列**宿主构建里带了哪些可用插件**并标出各自的注册状态 —— 没有它,用户在
+ * Dashboard 上无从知道这个部署带了什么(生产实测 99 个装配、0 个注册)。
+ *
+ * 不走 `usePagedBuiltin`:catalog 是一次性全量返回,没有 cursor。
+ */
+export function usePluginCatalog() {
+  const conn = useConn()
+  const base = useKeyBase()
+  return useQuery({
+    queryKey: [...base, 'plugin-catalog'],
+    queryFn: async () => {
+      const r = await invoke(conn, 'system/plugin', 'catalog', {})
+      return (r.json as { items: PluginCatalogItem[] }).items
+    },
+  })
 }
 
 /** remote 联邦 host 白名单合并视图(env 基线 + 运行时条目;对等 `tb federation ls`)。 */

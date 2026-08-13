@@ -47,6 +47,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { EditPluginDialog, RegisterPluginDialog } from './forms/PluginFormDialogs'
+import { BuiltinCatalog } from './BuiltinCatalog'
 
 /** profile → 挂载成哪种树节点（与 core NODE_KIND_BY_PROFILE 同一张表）。 */
 const NODE_KIND_BY_PROFILE = { 'tools/v1': 'tool', 'context/v1': 'context' } as const
@@ -506,6 +507,15 @@ export function PluginsPage() {
         eyebrow="CONTROL PLANE / PROVIDERS"
         title="Plugin"
       />
+
+      {/*
+        内置目录放在已注册列表**之前**:这个部署带了什么是第一个要回答的问题。
+        此前只有"已注册"一张表,新部署上它是空的,用户无从知道有 99 个插件可用。
+      */}
+      <section className="mt-6">
+        <h2 className="mb-3 text-sm font-semibold">内置插件目录</h2>
+        <BuiltinCatalog onToken={setToken} />
+      </section>
 
       <section className="mt-6 flex flex-col gap-3 rounded-lg border bg-card/45 px-4 py-3.5 sm:flex-row sm:items-center">
         <span className="grid size-9 shrink-0 place-items-center rounded-md border bg-background/70 text-primary">

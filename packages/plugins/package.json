@@ -10,10 +10,11 @@
     "./notes": "./src/notes/index.ts"
   },
   "scripts": {
-    "typecheck": "tsc --noEmit",
-    "test": "vitest run",
+    "deploy:feishu:cf": "wrangler deploy --config wrangler.feishu.jsonc",
+    "generate:registry": "node scripts/generateRegistry.mjs",
     "serve": "tsx scripts/serve.ts",
-    "deploy:feishu:cf": "wrangler deploy --config wrangler.feishu.jsonc"
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@cfworker/json-schema": "catalog:",

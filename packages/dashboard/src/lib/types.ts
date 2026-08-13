@@ -161,6 +161,22 @@ export interface PluginManifest {
   protocolVersion: string
 }
 
+/**
+ * 宿主装配的一个进程内插件("可用目录"里的一项;对等 `tb plugin catalog`)。
+ *
+ * **装配 ≠ 注册 ≠ 挂载**:装配是"这个宿主的构建里带了这段代码",注册是"它进了 plugin 表、
+ * 拿到了 pluginToken",挂载才是"树上有个节点指向它"。三步都做完才能被 agent 调到。
+ */
+export interface PluginCatalogItem {
+  /** 注册时填这个值(`binding:<name>`)。 */
+  endpoint: string
+  /** binding 名 = 宿主装配表的 key。 */
+  name: string
+  /** 已注册时给出注册记录的 id(通常与 name 同,但注册方可以另起)。 */
+  pluginId?: string
+  registered: boolean
+}
+
 /** write/update 返回:pluginToken 仅该次响应出现一次(auth=platform-token 时)。 */
 export interface PluginRegistration extends PluginManifest {
   pluginToken?: string
