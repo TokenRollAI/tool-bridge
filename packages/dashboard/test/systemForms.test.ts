@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   buildRegistryConfig,
   buildRegistryWriteArgs,
+  credentialPlanFor,
   INITIAL_REGISTRY_MOUNT_FORM,
   type RegistryMountFormState,
   showsAuthorizeAction,
@@ -294,5 +295,73 @@ describe('showsAuthorizeAction', () => {
     for (const kind of ['http', 'context', 'skillhub', 'remote', 'device']) {
       expect(showsAuthorizeAction({ kind }), kind).toBe(false)
     }
+  })
+})
+
+/**
+ * 挂载表单的凭证提示。数据早就有(注册时缓存的 `~describe`),但 Dashboard 的
+ * `PluginExport` 类型漏了 credentialFields/credentialProbe/oauth 三个字段 ——
+ * 于是挂载 deepseek / feishu_custom_bot / jira 时,表单只给一个空的 authRef 输入框,
+ * 用户看不到该填什么。这几条钉住"从缓存的 export 推出配置需求"。
+ */
+describe('credentialPlanFor', () => {
+  it('多字段:按 secret 标志分成 authRef 与 providerConfig 两组', () => {
+    // jira 的真实形状(线上 ~describe 实测):baseUrl 非密钥、PAT 是密钥。
+    const plan = credentialPlanFor([{
+      id: 'actions',
+      profile: 'tools/v1',
+      credentialProbe: 'list_projects',
+      credentialFields: [
+        { key: 'baseUrl', label: 'Instance URL', required: true, secret: false },
+        { key: 'personalAccessToken', label: 'PAT', required: true, secret: true },
+      ],
+    }], 'actions')
+    expect(plan.kind).toBe('fields')
+    expect(plan.secretFields.map(f => f.key)).toEqual(['personalAccessToken'])
+    expect(plan.configFields.map(f => f.key)).toEqual(['baseUrl'])
+    expect(plan.probe).toBe('list_projects')
+  })
+
+  it('secret 缺省视为密钥(保守:漏标不该把凭证泄进明文 providerConfig)', () => {
+    const plan = credentialPlanFor([{
+      id: 'actions',
+      profile: 'tools/v1',
+      credentialFields: [{ key: 'apiKey', label: 'API key' }],
+    }], 'actions')
+    expect(plan.secretFields.map(f => f.key)).toEqual(['apiKey'])
+    expect(plan.configFields).toEqual([])
+  })
+
+  it('oauth:不列字段,authRef 存 clientId/clientSecret,且要提示授权一步', () => {
+    const plan = credentialPlanFor([{
+      id: 'actions',
+      profile: 'tools/v1',
+      oauth: {
+        authorizationUrl: 'https://sentry.io/oauth/authorize/',
+        tokenUrl: 'https://sentry.io/oauth/token/',
+        scopes: ['org:read'],
+      },
+    }], 'actions')
+    expect(plan.kind).toBe('oauth')
+    expect(plan.oauth?.scopes).toEqual(['org:read'])
+  })
+
+  it('都没声明:单值 API key(deepseek 这类)', () => {
+    const plan = credentialPlanFor([{ id: 'actions', profile: 'tools/v1' }], 'actions')
+    expect(plan.kind).toBe('single')
+  })
+
+  it('exportId 留空时取第一个(与"单 export 可留空"的表单语义一致)', () => {
+    const plan = credentialPlanFor([{
+      id: 'actions',
+      profile: 'tools/v1',
+      credentialFields: [{ key: 'apiKey', label: 'k', secret: true }],
+    }], '  ')
+    expect(plan.secretFields.map(f => f.key)).toEqual(['apiKey'])
+  })
+
+  it('exports 为空或 id 对不上:退化成 single,不炸', () => {
+    expect(credentialPlanFor([], 'actions').kind).toBe('single')
+    expect(credentialPlanFor([{ id: 'a', profile: 'tools/v1' }], 'nope').kind).toBe('single')
   })
 })

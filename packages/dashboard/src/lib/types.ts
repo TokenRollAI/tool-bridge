@@ -139,11 +139,36 @@ export interface FederationHost {
 export type PluginProfile = 'tools/v1' | 'context/v1'
 
 /** `~describe` 里的一个 export：plugin/v2 把「提供什么」从部署身份移到了 export 上。 */
+/**
+ * 多字段凭证的一个字段声明(来自 plugin 的 `~describe`,注册时缓存进 manifest)。
+ *
+ * `secret` 决定它落哪条通道:true → authRef 指向的 secret(加密、只写不读);
+ * false → 挂载的 providerConfig(明文、`system/registry get` 会回显)。baseUrl 这类
+ * 属于后者 —— 泄漏无后果,但**必配**。
+ */
+export interface PluginCredentialField {
+  description?: string
+  key: string
+  label: string
+  required?: boolean
+  secret?: boolean
+}
+
 export interface PluginExport {
   capabilities?: string[]
+  /** 该 export 需要的多字段凭证;缺省表示单值 API key(或不需要凭证)。 */
+  credentialFields?: PluginCredentialField[]
+  /** 挂载时平台会用真实凭证空参调一次这个只读工具,当场判定凭证可用。 */
+  credentialProbe?: string
   description?: string
   id: string
   methods?: string[]
+  /** 声明了它就走平台托管的 OAuth2 授权码流程(与 credentialFields/Probe 互斥)。 */
+  oauth?: {
+    authorizationUrl: string
+    scopes?: string[]
+    tokenUrl: string
+  }
   profile: PluginProfile
 }
 

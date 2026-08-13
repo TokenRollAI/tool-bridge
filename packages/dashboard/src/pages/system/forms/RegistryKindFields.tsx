@@ -19,6 +19,7 @@ import {
   pluginsForProfile,
   type RegistryMountFormState,
 } from './registryConfig'
+import { CredentialHint } from './CredentialHint'
 
 function ExportField({
   id,
@@ -325,6 +326,7 @@ export function RegistryKindFields({
             {state.provider !== 'r2' && state.provider !== 's3' && (
               <>
                 <ExportField id="ctx-export" onChange={value => update('ctxExport', value)} options={contextExports} value={state.ctxExport} />
+                <CredentialHint exportId={state.ctxExport} exports={contextExports} pluginId={state.provider} />
                 <Field id="ctx-plugin-auth" label="authRef（可空）" onChange={value => update('ctxAuthRef', value)} value={state.ctxAuthRef} />
               </>
             )}
@@ -391,6 +393,8 @@ export function RegistryKindFields({
               )}
             </div>
             <ExportField id="tool-export" onChange={value => update('toolExport', value)} options={toolExports} value={state.toolExport} />
+            {/* 选了 provider 就告诉用户凭证要配什么 —— 数据来自注册时缓存的 ~describe。 */}
+            <CredentialHint exportId={state.toolExport} exports={toolExports} pluginId={state.toolProvider} />
             <Field id="tool-auth" label="authRef（可空，上游凭证引用）" onChange={value => update('toolAuthRef', value)} value={state.toolAuthRef} />
           </>
         )}

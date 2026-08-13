@@ -1,4 +1,4 @@
-import type { PluginExport, PluginManifest, PluginProfile } from '@/lib/types'
+import type { PluginCredentialField, PluginExport, PluginManifest, PluginProfile } from '@/lib/types'
 
 export type MountKind = 'mcp' | 'http' | 'context' | 'skillhub' | 'remote' | 'tool'
 export type AuthSchemeMode = 'bearer' | 'raw' | 'custom'
@@ -381,4 +381,53 @@ export function showsAuthorizeAction(node: {
 }): boolean {
   if (node.kind === 'tool') return true
   return node.kind === 'mcp' && node.config?.auth === 'oauth'
+}
+
+/**
+ * 挂载某个 plugin export 时,凭证该怎么配。
+ *
+ * 数据来自注册时缓存的 `~describe`(平台早就存了),但 Dashboard 此前的 `PluginExport`
+ * 类型漏了这几个字段,于是**挂载表单只给一个空的 authRef 输入框** —— 用户看不到
+ * 该填什么、有几个字段、哪些是 secret,只能去翻插件源码或 CLI。
+ *
+ * 三种互斥形态(SDK 侧保证互斥):
+ * - `oauth`:authRef 指向的 secret 固定存 clientId/clientSecret,挂载后还要授权一步;
+ * - `credentialFields`:多字段,secret:true 的进 authRef,false 的进 providerConfig;
+ * - 都没有:单值 API key(或不需要凭证)。
+ */
+export function credentialPlanFor(
+  exports: PluginExport[],
+  exportId: string,
+): {
+  /** 走 providerConfig 的字段(secret === false,如 baseUrl)。 */
+  configFields: PluginCredentialField[]
+  kind: 'oauth' | 'fields' | 'single'
+  oauth?: PluginExport['oauth']
+  probe?: string
+  /** 走 authRef 那个 secret 的字段(secret !== false)。 */
+  secretFields: PluginCredentialField[]
+} {
+  // exportId 为空时取第一个 —— 与"单 export 可留空"的表单语义一致。
+  const target = exportId.trim() === ''
+    ? exports[0]
+    : exports.find(e => e.id === exportId.trim())
+  if (target === undefined) return { kind: 'single', secretFields: [], configFields: [] }
+  if (target.oauth !== undefined) {
+    return { kind: 'oauth', secretFields: [], configFields: [], oauth: target.oauth }
+  }
+  const fields = target.credentialFields ?? []
+  if (fields.length === 0) {
+    return {
+      kind: 'single',
+      secretFields: [],
+      configFields: [],
+      ...(target.credentialProbe !== undefined ? { probe: target.credentialProbe } : {}),
+    }
+  }
+  return {
+    kind: 'fields',
+    secretFields: fields.filter(f => f.secret !== false),
+    configFields: fields.filter(f => f.secret === false),
+    ...(target.credentialProbe !== undefined ? { probe: target.credentialProbe } : {}),
+  }
 }
