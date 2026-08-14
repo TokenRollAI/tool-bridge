@@ -41,12 +41,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: pnpm/action-setup@v4
-
+      # **不设 `cache: pnpm`**:本 job 只跑一个纯读脚本(零依赖,只用 node 内置模块与
+      # fetch),从不 `pnpm install` —— 而 setup-node 的 pnpm 缓存在 post 步骤要求 store
+      # 路径存在,不装依赖就会以 "Path Validation Error" 让**整个 job 失败**,
+      # 于是 plan 明明算对了、needs 却判定失败把 release job 跳过(实测 run 31812060455)。
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: pnpm
 
       # 只发 main 上的东西:tag 一推 CI 就发 npm,而 npm 版本号不可回收 ——
       # 从未合入的分支发布过的版本号再也拿不回来。
