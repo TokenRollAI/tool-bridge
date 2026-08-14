@@ -510,11 +510,11 @@ export function PluginsPage() {
 
       {/*
         内置目录放在已注册列表**之前**:这个部署带了什么是第一个要回答的问题。
-        此前只有"已注册"一张表,新部署上它是空的,用户无从知道有 99 个插件可用。
+        下面那张表只列 external plugin —— 内置集成不落库,故永远不会出现在里面。
       */}
       <section className="mt-6">
-        <h2 className="mb-3 text-sm font-semibold">内置插件目录</h2>
-        <BuiltinCatalog onToken={setToken} />
+        <h2 className="mb-3 text-sm font-semibold">内置集成目录</h2>
+        <BuiltinCatalog />
       </section>
 
       <section className="mt-6 flex flex-col gap-3 rounded-lg border bg-card/45 px-4 py-3.5 sm:flex-row sm:items-center">

@@ -1,8 +1,5 @@
-import { useQueryClient } from '@tanstack/react-query'
-import { PlugZap, Search } from 'lucide-react'
 import { useMemo, useState } from 'react'
-import { toast } from 'sonner'
-import type { PluginCatalogItem, PluginRegistration } from '@/lib/types'
+import { Search } from 'lucide-react'
 import {
   Table,
   TableBody,
@@ -11,65 +8,39 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import { useInvoke, usePluginCatalog } from '@/lib/queries'
+import { useIntegrationCatalog } from '@/lib/queries'
 import { Skeleton } from '@/components/ui/skeleton'
-import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
+import { IntegrationDialog } from './forms/IntegrationDialog'
 
 /**
- * 宿主装配的内置插件目录(对等 `tb plugin catalog`)。
+ * 内置集成目录(对等 `tb integration catalog`)。
  *
- * 为什么要有这个视图:**装配 ≠ 注册 ≠ 挂载**。此前 Dashboard 只列已注册的 plugin,
- * 于是"这个部署带了哪些可用插件"在界面上完全不可见 —— 生产实测 99 个装配、0 个注册,
- * 用户看到的是一张空表,无从知道有东西可用。
+ * **不再有"注册"按钮**:内置插件的 descriptor 是编译期常量(catalog),不落库,
+ * 所以没有"注册"这个状态可言 —— 直接挂载即可用。此前这一页把 `binding:` 插件当成
+ * external plugin 引导用户先注册一遍,那一步的四件事对同进程代码全是仪式
+ * (探活无信息量、mint token 双方都不验、落 manifest 只为给读路径查)。
  *
- * 注册按钮走的是与 `RegisterPluginDialog` 同一个 `system/plugin` write,
- * 只是 endpoint / protocolVersion / auth 都由目录项直接给出,不需要用户填 ——
- * 从目录注册一个内置插件本来就没有可填的东西。
+ * 数据源也从 `system/plugin catalog`(admin)换成 `system/catalog`(read):后者回的是
+ * "声明了什么"(export / 可挂 kind / 凭证字段 / 要不要授权),前者只回 binding 名。
+ * read scope 让非 admin 也看得见 —— 挂载只要 register,浏览不该更严。
  */
-export function BuiltinCatalog({ onToken }: { onToken: (v: { id: string, token: string }) => void }) {
-  const catalog = usePluginCatalog()
-  const invoke = useInvoke()
-  const qc = useQueryClient()
+export function BuiltinCatalog() {
+  const catalog = useIntegrationCatalog()
   const [search, setSearch] = useState('')
-  const [pending, setPending] = useState<string | null>(null)
 
+  // 包进 useMemo:裸 `?? []` 每次渲染都是新引用,下面的过滤 memo 会失效。
+  const all = useMemo(() => catalog.data ?? [], [catalog.data])
   const items = useMemo(() => {
     const needle = search.trim().toLowerCase()
-    const all = catalog.data ?? []
-    return needle === '' ? all : all.filter(i => i.name.toLowerCase().includes(needle))
-  }, [catalog.data, search])
-
-  const register = (item: PluginCatalogItem) => {
-    setPending(item.name)
-    invoke.mutate(
-      {
-        path: 'system/plugin',
-        tool: 'write',
-        args: {
-          id: item.name,
-          protocolVersion: 'plugin/v2',
-          endpoint: item.endpoint,
-          // 进程内 binding 不走网络,平台用 mint 出的 token 调它。
-          auth: { kind: 'platform-token' },
-          healthPath: '/healthz',
-          enabled: true,
-        },
-      },
-      {
-        onSuccess: (response) => {
-          const reg = response.json as PluginRegistration
-          toast.success(`${reg.id} 已注册(下一步:挂到树上才能被调用)`)
-          // pluginToken 只在这一次响应里出现,交给页面展示。
-          if (reg.pluginToken) onToken({ id: reg.id, token: reg.pluginToken })
-          void qc.invalidateQueries({ queryKey: ['tb'] })
-        },
-        onError: e => toast.error(`注册 ${item.name} 失败:${e.message}`),
-        onSettled: () => setPending(null),
-      },
+    if (needle === '') return all
+    return all.filter(
+      i =>
+        i.id.toLowerCase().includes(needle)
+        || (i.description ?? '').toLowerCase().includes(needle),
     )
-  }
+  }, [all, search])
 
   if (catalog.isLoading) return <Skeleton className="h-40 w-full" />
 
@@ -82,17 +53,24 @@ export function BuiltinCatalog({ onToken }: { onToken: (v: { id: string, token: 
     )
   }
 
-  const all = catalog.data ?? []
-  const registered = all.filter(i => i.registered).length
-
   if (all.length === 0) {
     return (
       <div className="rounded-lg border bg-card/55 p-4 text-sm text-muted-foreground">
-        <p>这个宿主没有装配任何内置插件。</p>
+        <p>这个宿主没有装配内置集成。</p>
         <p className="mt-1 text-xs">
-          装配发生在**构建期**(宿主调用 `builtinPluginBindings`)。Workers 宿主见
+          装配发生在**构建期**:宿主同时传
+          {' '}
+          <code className="font-mono">builtinPluginBindings</code>
+          (代码)与
+          {' '}
+          <code className="font-mono">BUILTIN_CATALOG</code>
+          (声明)。见
           {' '}
           <code className="font-mono">packages/gateway/src/deployEntry.ts</code>
+          {' '}
+          与
+          {' '}
+          <code className="font-mono">packages/server/src/main.ts</code>
           。
         </p>
       </div>
@@ -103,24 +81,23 @@ export function BuiltinCatalog({ onToken }: { onToken: (v: { id: string, token: 
     <div className="space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="text-xs text-muted-foreground">
-          宿主装配
+          这个部署自带
           {' '}
           <span className="font-mono text-foreground">{all.length}</span>
           {' '}
-          个 · 已注册
-          {' '}
-          <span className="font-mono text-foreground">{registered}</span>
-          {' '}
-          · 注册后还需挂到树上才能被调用
+          个集成 · 直接挂载即可用(无需注册)
         </div>
-        <div className="relative w-full sm:w-64">
-          <Search className="absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            className="pl-8"
-            onChange={e => setSearch(e.target.value)}
-            placeholder="过滤插件名"
-            value={search}
-          />
+        <div className="flex items-center gap-2">
+          <div className="relative w-full sm:w-64">
+            <Search className="absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              className="pl-8"
+              onChange={e => setSearch(e.target.value)}
+              placeholder="过滤集成"
+              value={search}
+            />
+          </div>
+          <IntegrationDialog />
         </div>
       </div>
 
@@ -128,39 +105,37 @@ export function BuiltinCatalog({ onToken }: { onToken: (v: { id: string, token: 
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>Binding</TableHead>
-              <TableHead>Endpoint</TableHead>
-              <TableHead>状态</TableHead>
-              <TableHead className="text-right">操作</TableHead>
+              <TableHead>集成</TableHead>
+              <TableHead>可挂 kind</TableHead>
+              <TableHead>Export</TableHead>
+              <TableHead>凭证</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {items.map(item => (
-              <TableRow key={item.name}>
-                <TableCell className="font-mono text-xs">{item.name}</TableCell>
+              <TableRow key={item.id}>
+                <TableCell>
+                  <div className="font-mono text-xs">{item.id}</div>
+                  {item.description !== undefined && (
+                    <div className="text-xs text-muted-foreground">{item.description}</div>
+                  )}
+                </TableCell>
                 <TableCell className="font-mono text-xs text-muted-foreground">
-                  {item.endpoint}
+                  {item.nodeKinds.join(' · ')}
+                </TableCell>
+                <TableCell className="font-mono text-xs text-muted-foreground">
+                  {item.exports.join(', ')}
                 </TableCell>
                 <TableCell>
-                  <Badge variant={item.registered ? 'default' : 'outline'}>
-                    {item.registered ? `已注册${item.pluginId && item.pluginId !== item.name ? ` · ${item.pluginId}` : ''}` : '可用'}
-                  </Badge>
-                </TableCell>
-                <TableCell className="text-right">
-                  {item.registered
-                    ? <span className="text-xs text-muted-foreground">—</span>
-                    : (
-                        <Button
-                          aria-label={`注册 ${item.name}`}
-                          disabled={pending !== null}
-                          onClick={() => register(item)}
-                          size="sm"
-                          variant="outline"
-                        >
-                          <PlugZap className="mr-1 size-3.5" />
-                          {pending === item.name ? '注册中…' : '注册'}
-                        </Button>
-                      )}
+                  {item.needsOAuth
+                    ? <Badge variant="outline">OAuth 授权</Badge>
+                    : item.credentialFields !== undefined
+                      ? (
+                          <span className="font-mono text-xs text-muted-foreground">
+                            {item.credentialFields.map(f => f.key).join(', ')}
+                          </span>
+                        )
+                      : <span className="text-xs text-muted-foreground">单值 API key</span>}
                 </TableCell>
               </TableRow>
             ))}
@@ -169,7 +144,7 @@ export function BuiltinCatalog({ onToken }: { onToken: (v: { id: string, token: 
                 <TableCell className="text-sm text-muted-foreground" colSpan={4}>
                   没有匹配「
                   {search}
-                  」的插件。
+                  」的集成。
                 </TableCell>
               </TableRow>
             )}

@@ -1,6 +1,7 @@
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useSyncExternalStore } from 'react'
 import type {
+  CatalogListItem,
   ContextEntry,
   ContextEntryMeta,
   FederationHost,
@@ -239,6 +240,30 @@ export function usePluginCatalog() {
       const r = await invoke(conn, 'system/plugin', 'catalog', {})
       return (r.json as { items: PluginCatalogItem[] }).items
     },
+  })
+}
+
+/**
+ * 内置集成目录(`system/catalog`,对等 `tb integration catalog`)。
+ *
+ * 与 {@link usePluginCatalog} 的分工:那个查 `system/plugin catalog`(**admin**),回的是
+ * "宿主装配了哪些 binding + 各自注册状态";这个查 `system/catalog`(**read**),回的是
+ * "每个内置集成声明了什么" —— export、可挂成什么 kind、要哪些凭证字段、要不要授权。
+ *
+ * 挂载向导要的是后者:只有它能把"该填什么"从 descriptor 直接渲染成表单,而且 read scope
+ * 意味着非 admin 的用户也看得见(挂载只要 register scope,浏览不该更严)。
+ */
+export function useIntegrationCatalog() {
+  const conn = useConn()
+  const base = useKeyBase()
+  return useQuery({
+    queryKey: [...base, 'integration-catalog'],
+    queryFn: async () => {
+      const r = await invoke(conn, 'system/catalog', 'list', { opts: { limit: 200 } })
+      return (r.json as { items: CatalogListItem[] }).items ?? []
+    },
+    // descriptor 是编译期常量:同一部署内不会变,没必要反复拉。
+    staleTime: 5 * 60 * 1000,
   })
 }
 

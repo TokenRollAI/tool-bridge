@@ -6,6 +6,7 @@ import {
   Globe2,
   KeyRound,
   Layers3,
+  Plus,
   Search,
   Trash2,
 } from 'lucide-react'
@@ -43,6 +44,7 @@ import { Input } from '@/components/ui/input'
 import { encodeTreePath } from '@/lib/path'
 import { cn } from '@/lib/utils'
 import { showsAuthorizeAction } from './forms/registryConfig'
+import { IntegrationDialog } from './forms/IntegrationDialog'
 import { MountDialog } from './forms/MountDialog'
 
 const KIND_FILTERS = [
@@ -215,10 +217,20 @@ export function RegistryPage() {
     <div className="mx-auto max-w-7xl px-4 py-5 sm:px-6 sm:py-6 lg:px-8 lg:py-8">
       <PageHeader
         actions={(
-          <MountDialog
-            existingPaths={mounted.map(node => node.path)}
-            hasUnloadedPaths={Boolean(list.hasNextPage)}
-          />
+          <div className="flex flex-wrap gap-2">
+            {/* 常见路径在前:挂一个现成集成。通用挂载器降为次要按钮。 */}
+            <IntegrationDialog />
+            <MountDialog
+              existingPaths={mounted.map(node => node.path)}
+              hasUnloadedPaths={Boolean(list.hasNextPage)}
+              trigger={(
+                <Button size="sm" variant="outline">
+                  <Plus />
+                  挂载节点
+                </Button>
+              )}
+            />
+          </div>
         )}
         description="把 MCP、HTTP、Plugin、Context 与远端 HTBP 服务挂入统一能力树，并集中查看连接与认证边界。"
         eyebrow="SYSTEM / REGISTRY"

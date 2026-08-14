@@ -1,0 +1,182 @@
+/**
+ * `IntegrationDialog` 的纯逻辑:从 catalog 项推出"该填什么",并把表单态编译成
+ * 要发的两三个调用。
+ *
+ * 抽成无 React/DOM 依赖的纯函数是本仓的既有姿势(见 registryConfig.ts):wire payload
+ * 能被 Node vitest 直接断言,不必起 DOM。
+ */
+
+import type { CatalogListItem, PluginCredentialField } from '@/lib/types'
+
+/** 凭证的四种给法。与 CLI `tb integration add` 的互斥组一一对应。 */
+export type CredentialMode = 'inline' | 'existing' | 'oauth' | 'none'
+
+export interface IntegrationFormState {
+  /** 非凭证挂载配置(providerConfig)。 */
+  config: Record<string, string>
+  /** 用户填的凭证字段值(key → value);单值凭证用 SINGLE_FIELD_KEY。 */
+  credentials: Record<string, string>
+  description: string
+  /** 复用已有 secret 时的名字。 */
+  existingSecret: string
+  exportId: string
+  mode: CredentialMode
+  path: string
+  provider: string
+}
+
+export const SINGLE_FIELD_KEY = '__single__'
+
+export const INITIAL_INTEGRATION_FORM: IntegrationFormState = {
+  provider: '',
+  path: '',
+  exportId: '',
+  description: '',
+  mode: 'inline',
+  credentials: {},
+  existingSecret: '',
+  config: {},
+}
+
+/**
+ * 这个集成要怎么配凭证。
+ *
+ * 三种形态互斥(plugin-sdk 侧保证):oauth / 多字段 / 单值。**`secret: false` 不再分流** ——
+ * 声明了 credentialFields 的 export,全部字段都进 authRef 指向的那个 secret,`secret`
+ * 只决定输入框要不要遮蔽。
+ */
+export function integrationPlan(entry: CatalogListItem | undefined): {
+  fields: PluginCredentialField[]
+  kind: 'oauth' | 'fields' | 'single'
+  needsExportChoice: boolean
+} {
+  if (entry === undefined) {
+    return { kind: 'single', fields: [], needsExportChoice: false }
+  }
+  const needsExportChoice = entry.exports.length > 1
+  if (entry.needsOAuth) return { kind: 'oauth', fields: [], needsExportChoice }
+  const fields = entry.credentialFields ?? []
+  if (fields.length === 0) return { kind: 'single', fields: [], needsExportChoice }
+  return { kind: 'fields', fields, needsExportChoice }
+}
+
+/** secret 名由挂载路径派生 —— authRef 不再是两处都要打对的自由文本。 */
+export function derivedSecretName(path: string): string {
+  return `integration-${path.trim().replace(/\//g, '-')}`
+}
+
+/** 多字段凭证的 secret 明文:键序固定(与 core encodeCredentialValues 同规则)。 */
+export function encodeFields(values: Record<string, string>): string {
+  const sorted: Record<string, string> = {}
+  for (const key of Object.keys(values).sort()) sorted[key] = values[key]!
+  return JSON.stringify(sorted)
+}
+
+export interface IntegrationCalls {
+  /** 挂载节点(`system/registry write`)。 */
+  mount: {
+    config: Record<string, unknown>
+    description: string
+    kind: 'context' | 'tool'
+    path: string
+  }
+  /** 挂载后是否要引导 OAuth 授权。 */
+  needsAuthorize: boolean
+  /** 先写 secret(`system/secret set`);复用已有或无需凭证时为 undefined。 */
+  secret?: { name: string, value: string }
+}
+
+/**
+ * 表单态 → 要发的调用。校验在这里做(而不是等平台拒),因为这里能说清是哪个字段。
+ *
+ * @throws Error 校验失败;消息面向用户,直接进错误条。
+ */
+export function buildIntegrationCalls(
+  state: IntegrationFormState,
+  entry: CatalogListItem | undefined,
+): IntegrationCalls {
+  const path = state.path.trim()
+  if (path === '') throw new Error('path 必填')
+  const provider = state.provider.trim()
+  if (provider === '') throw new Error('先选一个集成')
+
+  const plan = integrationPlan(entry)
+  const exportId = state.exportId.trim()
+  if (plan.needsExportChoice && exportId === '') {
+    throw new Error(`${provider} 有多个 export(${entry!.exports.join('、')}),挂载须选一个`)
+  }
+  if (exportId !== '' && entry !== undefined && !entry.exports.includes(exportId)) {
+    throw new Error(`${provider} 没有 export "${exportId}"`)
+  }
+
+  const nodeKind: 'context' | 'tool'
+    = entry?.nodeKinds.length === 1 ? entry.nodeKinds[0]! : 'tool'
+
+  let authRef: string | undefined
+  let secret: { name: string, value: string } | undefined
+
+  if (state.mode === 'existing') {
+    const name = state.existingSecret.trim()
+    if (name === '') throw new Error('选一个已有凭证,或改用"新建凭证"')
+    authRef = name
+  } else if (state.mode === 'inline') {
+    if (plan.kind === 'fields') {
+      const values: Record<string, string> = {}
+      const missing: string[] = []
+      for (const field of plan.fields) {
+        const value = (state.credentials[field.key] ?? '').trim()
+        // 缺省视为必填(与运行时 parseCredentialValues 同口径)。
+        if (value === '') {
+          if (field.required !== false) missing.push(field.key)
+          continue
+        }
+        values[field.key] = value
+      }
+      if (missing.length > 0) throw new Error(`缺必填凭证字段:${missing.join('、')}`)
+      authRef = derivedSecretName(path)
+      secret = { name: authRef, value: encodeFields(values) }
+    } else if (plan.kind === 'oauth') {
+      // OAuth 的 secret 存 clientId/clientSecret 两个固定字段。
+      const clientId = (state.credentials.clientId ?? '').trim()
+      const clientSecret = (state.credentials.clientSecret ?? '').trim()
+      if (clientId === '' || clientSecret === '') {
+        throw new Error('OAuth 集成需要 clientId 与 clientSecret(到 provider 后台注册应用后获得)')
+      }
+      authRef = derivedSecretName(path)
+      secret = { name: authRef, value: encodeFields({ clientId, clientSecret }) }
+    } else {
+      const value = (state.credentials[SINGLE_FIELD_KEY] ?? '').trim()
+      if (value !== '') {
+        authRef = derivedSecretName(path)
+        secret = { name: authRef, value }
+      }
+      // 单值且留空 = 这个 provider 不需要凭证(少数如 v2ex);不强制。
+    }
+  }
+
+  const config: Record<string, unknown> = {
+    kind: nodeKind,
+    provider,
+    ...(exportId !== '' ? { export: exportId } : {}),
+    ...(authRef !== undefined ? { authRef } : {}),
+  }
+  const providerConfig: Record<string, string> = {}
+  for (const [key, value] of Object.entries(state.config)) {
+    const trimmed = value.trim()
+    if (key.trim() !== '' && trimmed !== '') providerConfig[key.trim()] = trimmed
+  }
+  if (Object.keys(providerConfig).length > 0) config.providerConfig = providerConfig
+
+  return {
+    ...(secret !== undefined ? { secret } : {}),
+    mount: {
+      path,
+      kind: nodeKind,
+      description: state.description.trim() === ''
+        ? `${provider} integration at ${path}`
+        : state.description.trim(),
+      config,
+    },
+    needsAuthorize: plan.kind === 'oauth',
+  }
+}

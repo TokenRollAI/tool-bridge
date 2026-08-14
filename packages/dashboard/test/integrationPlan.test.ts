@@ -1,0 +1,241 @@
+import { describe, expect, it } from 'vitest'
+import type { CatalogListItem } from '../src/lib/types'
+import {
+  buildIntegrationCalls,
+  derivedSecretName,
+  INITIAL_INTEGRATION_FORM,
+  type IntegrationFormState,
+  integrationPlan,
+  SINGLE_FIELD_KEY,
+} from '../src/pages/system/forms/integrationPlan'
+
+/**
+ * 集成向导的纯逻辑。对等 CLI 的 `tb integration add` —— 两个操作面共用同一套判断
+ * (该填什么、authRef 怎么来、要不要授权),故这里的断言与 cli/test/integration.test.ts
+ * 是同一组语义。
+ */
+
+const TAVILY: CatalogListItem = {
+  id: 'tavily',
+  digest: 'd1',
+  exports: ['actions'],
+  nodeKinds: ['tool'],
+  needsOAuth: false,
+  description: 'Tavily',
+}
+
+const JIRA: CatalogListItem = {
+  id: 'jira',
+  digest: 'd2',
+  exports: ['actions'],
+  nodeKinds: ['tool'],
+  needsOAuth: false,
+  credentialFields: [
+    { key: 'baseUrl', label: 'Instance URL', required: true, secret: false },
+    { key: 'personalAccessToken', label: 'PAT', required: true, secret: true },
+  ],
+}
+
+const SENTRY: CatalogListItem = {
+  id: 'sentry',
+  digest: 'd3',
+  exports: ['actions'],
+  nodeKinds: ['tool'],
+  needsOAuth: true,
+}
+
+const MULTI: CatalogListItem = {
+  id: 'notes',
+  digest: 'd4',
+  exports: ['actions', 'documents'],
+  nodeKinds: ['context', 'tool'],
+  needsOAuth: false,
+}
+
+const form = (patch: Partial<IntegrationFormState>): IntegrationFormState => ({
+  ...INITIAL_INTEGRATION_FORM,
+  path: 'tools/x',
+  ...patch,
+})
+
+describe('integrationPlan', () => {
+  it('三种形态互斥:oauth / 多字段 / 单值', () => {
+    expect(integrationPlan(SENTRY).kind).toBe('oauth')
+    expect(integrationPlan(JIRA).kind).toBe('fields')
+    expect(integrationPlan(TAVILY).kind).toBe('single')
+  })
+
+  it('多字段:全部字段都列出来(secret:false 不再被分流走)', () => {
+    expect(integrationPlan(JIRA).fields.map(f => f.key)).toEqual([
+      'baseUrl',
+      'personalAccessToken',
+    ])
+  })
+
+  it('多 export 要选一个', () => {
+    expect(integrationPlan(MULTI).needsExportChoice).toBe(true)
+    expect(integrationPlan(TAVILY).needsExportChoice).toBe(false)
+  })
+
+  it('目录里没有(external plugin)→ 退化成单值,不报错', () => {
+    expect(integrationPlan(undefined).kind).toBe('single')
+  })
+})
+
+describe('derivedSecretName', () => {
+  it('由路径派生 —— authRef 不再是两处要打对的自由文本', () => {
+    expect(derivedSecretName('tools/tavily')).toBe('integration-tools-tavily')
+    expect(derivedSecretName(' a/b/c ')).toBe('integration-a-b-c')
+  })
+})
+
+describe('buildIntegrationCalls', () => {
+  it('单值凭证:先写 secret 再挂载,authRef 自动对上', () => {
+    const calls = buildIntegrationCalls(
+      form({ provider: 'tavily', credentials: { [SINGLE_FIELD_KEY]: ' tvly-k ' } }),
+      TAVILY,
+    )
+    expect(calls.secret).toEqual({ name: 'integration-tools-x', value: 'tvly-k' })
+    // 单 export 时不写 export 字段(平台按 resolvePluginExport 自己选唯一那个),
+    // 与 CLI `tb integration add` 一致 —— 两个操作面发出的 wire payload 应当同形。
+    expect(calls.mount.config).toEqual({
+      kind: 'tool',
+      provider: 'tavily',
+      authRef: 'integration-tools-x',
+    })
+    expect(calls.needsAuthorize).toBe(false)
+  })
+
+  it('多字段:编码成键序固定的 JSON 对象', () => {
+    const calls = buildIntegrationCalls(
+      form({
+        provider: 'jira',
+        exportId: 'actions',
+        credentials: { personalAccessToken: 'pat', baseUrl: 'https://x' },
+      }),
+      JIRA,
+    )
+    expect(calls.secret?.value).toBe('{"baseUrl":"https://x","personalAccessToken":"pat"}')
+  })
+
+  it('缺必填字段 → 抛错并点名(不等平台拒)', () => {
+    expect(() =>
+      buildIntegrationCalls(
+        form({ provider: 'jira', exportId: 'actions', credentials: { baseUrl: 'https://x' } }),
+        JIRA,
+      )).toThrow(/personalAccessToken/)
+  })
+
+  it('required:false 的字段留空不算缺', () => {
+    const optional: CatalogListItem = {
+      ...JIRA,
+      credentialFields: [
+        { key: 'apiKey', required: true },
+        { key: 'workspace', required: false },
+      ],
+    }
+    const calls = buildIntegrationCalls(
+      form({ provider: 'jira', exportId: 'actions', credentials: { apiKey: 'k' } }),
+      optional,
+    )
+    expect(JSON.parse(calls.secret!.value)).toEqual({ apiKey: 'k' })
+  })
+
+  it('oauth:secret 存 clientId/clientSecret,并标出要授权', () => {
+    const calls = buildIntegrationCalls(
+      form({
+        provider: 'sentry',
+        exportId: 'actions',
+        credentials: { clientId: 'cid', clientSecret: 'cs' },
+      }),
+      SENTRY,
+    )
+    expect(JSON.parse(calls.secret!.value)).toEqual({ clientId: 'cid', clientSecret: 'cs' })
+    expect(calls.needsAuthorize).toBe(true)
+  })
+
+  it('oauth 缺 client 凭证 → 抛错', () => {
+    expect(() =>
+      buildIntegrationCalls(
+        form({ provider: 'sentry', exportId: 'actions', credentials: { clientId: 'cid' } }),
+        SENTRY,
+      )).toThrow(/clientSecret/)
+  })
+
+  it('复用已有 secret:不写 secret,authRef 用给定名字', () => {
+    const calls = buildIntegrationCalls(
+      form({ provider: 'tavily', mode: 'existing', existingSecret: ' shared-key ' }),
+      TAVILY,
+    )
+    expect(calls.secret).toBeUndefined()
+    expect(calls.mount.config).toMatchObject({ authRef: 'shared-key' })
+  })
+
+  it('复用模式没选 secret → 抛错', () => {
+    expect(() =>
+      buildIntegrationCalls(form({ provider: 'tavily', mode: 'existing' }), TAVILY)).toThrow(
+      /已有凭证|新建凭证/,
+    )
+  })
+
+  it('"暂不配置":既不写 secret 也不带 authRef', () => {
+    const calls = buildIntegrationCalls(form({ provider: 'tavily', mode: 'none' }), TAVILY)
+    expect(calls.secret).toBeUndefined()
+    expect(calls.mount.config).toEqual({ kind: 'tool', provider: 'tavily' })
+  })
+
+  it('单值留空 = 该集成不需要凭证(不强制)', () => {
+    const calls = buildIntegrationCalls(form({ provider: 'tavily' }), TAVILY)
+    expect(calls.secret).toBeUndefined()
+    expect(calls.mount.config).not.toHaveProperty('authRef')
+  })
+
+  it('providerConfig:空 key/value 被剔除', () => {
+    const calls = buildIntegrationCalls(
+      form({
+        provider: 'tavily',
+        credentials: { [SINGLE_FIELD_KEY]: 'k' },
+        config: { 'baseUrl': ' https://m.example.com ', '': 'x', 'region': '  ' },
+      }),
+      TAVILY,
+    )
+    expect(calls.mount.config.providerConfig).toEqual({ baseUrl: 'https://m.example.com' })
+  })
+
+  it('context/v1 的集成挂成 kind:context', () => {
+    const ctxEntry: CatalogListItem = { ...TAVILY, id: 'docs', nodeKinds: ['context'] }
+    const calls = buildIntegrationCalls(form({ provider: 'docs', mode: 'none' }), ctxEntry)
+    expect(calls.mount.kind).toBe('context')
+    expect(calls.mount.config.kind).toBe('context')
+  })
+
+  it('多 export 未选 → 抛错;选了不存在的也抛错', () => {
+    expect(() => buildIntegrationCalls(form({ provider: 'notes', mode: 'none' }), MULTI))
+      .toThrow(/多个 export/)
+    expect(() =>
+      buildIntegrationCalls(
+        form({ provider: 'notes', exportId: 'nope', mode: 'none' }),
+        MULTI,
+      )).toThrow(/没有 export/)
+  })
+
+  it('path 与 provider 必填', () => {
+    expect(() => buildIntegrationCalls(form({ path: '  ', provider: 'tavily' }), TAVILY))
+      .toThrow(/path/)
+    expect(() => buildIntegrationCalls(form({ provider: ' ' }), TAVILY)).toThrow(/集成/)
+  })
+
+  it('描述留空时派生一句', () => {
+    const calls = buildIntegrationCalls(form({ provider: 'tavily', mode: 'none' }), TAVILY)
+    expect(calls.mount.description).toBe('tavily integration at tools/x')
+  })
+
+  /** external plugin 不在 catalog 里:仍能挂,只是没有字段提示。 */
+  it('目录里没有该 provider 时仍能构造出挂载', () => {
+    const calls = buildIntegrationCalls(
+      form({ provider: 'my-ext', credentials: { [SINGLE_FIELD_KEY]: 'k' } }),
+      undefined,
+    )
+    expect(calls.mount.config).toMatchObject({ kind: 'tool', provider: 'my-ext' })
+  })
+})
