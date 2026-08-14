@@ -1,4 +1,4 @@
-import { KeyRound, Settings2, ShieldCheck } from 'lucide-react'
+import { KeyRound, ShieldCheck } from 'lucide-react'
 import type { PluginCredentialField, PluginExport } from '@/lib/types'
 import { Badge } from '@/components/ui/badge'
 import { credentialPlanFor } from './registryConfig'
@@ -14,8 +14,7 @@ function FieldList({
 }) {
   return (
     <div className="space-y-1">
-      <p className="flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground uppercase">
-        {title === '配置字段' && <Settings2 className="size-3" />}
+      <p className="text-[11px] font-medium text-muted-foreground uppercase">
         {title}
       </p>
       <ul className="space-y-1">
@@ -120,36 +119,19 @@ export function CredentialHint({
             <KeyRound className="size-3.5" />
             这个 export 需要多字段凭证
           </p>
-          {plan.secretFields.length > 0 && (
-            <FieldList
-              fields={plan.secretFields}
-              hint={(
-                <>
-                  存进 authRef 指向的 secret(JSON 对象):
-                  <code className="mx-1 font-mono">
-                    tb secret set &lt;name&gt;
-                    {plan.secretFields.map(f => ` --field ${f.key}=…`).join('')}
-                  </code>
-                </>
-              )}
-              title="密钥字段"
-            />
-          )}
-          {plan.configFields.length > 0 && (
-            <FieldList
-              fields={plan.configFields}
-              hint={(
-                <>
-                  这些**不是密钥**,填在下面的
-                  <span className="mx-1 font-medium">providerConfig</span>
-                  里(明文存,
-                  <code className="mx-1 font-mono">system/registry get</code>
-                  会回显)。
-                </>
-              )}
-              title="配置字段"
-            />
-          )}
+          <FieldList
+            fields={plan.secretFields}
+            hint={(
+              <>
+                全部字段存进 authRef 指向的同一个 secret(JSON 对象):
+                <code className="mx-1 font-mono">
+                  tb secret set &lt;name&gt;
+                  {plan.secretFields.map(f => ` --field ${f.key}=…`).join('')}
+                </code>
+              </>
+            )}
+            title="凭证字段"
+          />
           {plan.probe !== undefined && <ProbeNote probe={plan.probe} />}
         </div>
       )}

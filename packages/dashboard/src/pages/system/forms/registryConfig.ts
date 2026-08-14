@@ -392,42 +392,49 @@ export function showsAuthorizeAction(node: {
  *
  * 三种互斥形态(SDK 侧保证互斥):
  * - `oauth`:authRef 指向的 secret 固定存 clientId/clientSecret,挂载后还要授权一步;
- * - `credentialFields`:多字段,secret:true 的进 authRef,false 的进 providerConfig;
+ * - `credentialFields`:多字段,**全部**进 authRef 指向的那个 secret;
  * - 都没有:单值 API key(或不需要凭证)。
+ *
+ * **`secret: false` 不改变通道**(此前这里按它把字段分流进 providerConfig,是个真 bug):
+ * 运行时 `assertToolConfig` 把整个 `credentialFields` 交给 core `parseCredentialValues`,
+ * 后者要求每个 `required !== false` 的字段都出现在 authRef 解出的 JSON 里。照分流后的
+ * 引导操作,挂载必被拒("多字段凭证缺少必填字段:…"),精确影响 8 个声明了 `secret: false`
+ * 的 provider(confluence / ghost / jira / mattermost / shopify / twilio / upstash_redis /
+ * wordpress)—— 它们的 handler 也都是从 `ctx.credentials` 取那些字段的,通道本来就只有一条。
+ *
+ * `secret` 是**展示语义**(要不要遮蔽输入),不是通道语义。非凭证的挂载配置
+ * (baseUrl / region / workspace 之类)该由 export 独立声明,而不是混在凭证字段里靠一个
+ * 布尔标志区分 —— 那条路走 providerConfig,由后续的 mountConfigSchema 驱动。
  */
 export function credentialPlanFor(
   exports: PluginExport[],
   exportId: string,
 ): {
-  /** 走 providerConfig 的字段(secret === false,如 baseUrl)。 */
-  configFields: PluginCredentialField[]
   kind: 'oauth' | 'fields' | 'single'
   oauth?: PluginExport['oauth']
   probe?: string
-  /** 走 authRef 那个 secret 的字段(secret !== false)。 */
+  /** 走 authRef 那个 secret 的字段 —— 声明了 credentialFields 就是全部。 */
   secretFields: PluginCredentialField[]
 } {
   // exportId 为空时取第一个 —— 与"单 export 可留空"的表单语义一致。
   const target = exportId.trim() === ''
     ? exports[0]
     : exports.find(e => e.id === exportId.trim())
-  if (target === undefined) return { kind: 'single', secretFields: [], configFields: [] }
+  if (target === undefined) return { kind: 'single', secretFields: [] }
   if (target.oauth !== undefined) {
-    return { kind: 'oauth', secretFields: [], configFields: [], oauth: target.oauth }
+    return { kind: 'oauth', secretFields: [], oauth: target.oauth }
   }
   const fields = target.credentialFields ?? []
   if (fields.length === 0) {
     return {
       kind: 'single',
       secretFields: [],
-      configFields: [],
       ...(target.credentialProbe !== undefined ? { probe: target.credentialProbe } : {}),
     }
   }
   return {
     kind: 'fields',
-    secretFields: fields.filter(f => f.secret !== false),
-    configFields: fields.filter(f => f.secret === false),
+    secretFields: fields,
     ...(target.credentialProbe !== undefined ? { probe: target.credentialProbe } : {}),
   }
 }

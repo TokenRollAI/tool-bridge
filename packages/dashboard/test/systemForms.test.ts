@@ -305,8 +305,17 @@ describe('showsAuthorizeAction', () => {
  * 用户看不到该填什么。这几条钉住"从缓存的 export 推出配置需求"。
  */
 describe('credentialPlanFor', () => {
-  it('多字段:按 secret 标志分成 authRef 与 providerConfig 两组', () => {
-    // jira 的真实形状(线上 ~describe 实测):baseUrl 非密钥、PAT 是密钥。
+  /**
+   * **`secret: false` 不分流**。此前这里断言按该标志把字段拆成 authRef / providerConfig
+   * 两组,把一个真 bug 固化成了规格:运行时 `assertToolConfig` 把整个 credentialFields
+   * 交给 core `parseCredentialValues`,后者要求每个 `required !== false` 的字段都在 authRef
+   * 解出的 JSON 里。照分流后的引导操作 → 挂载被拒("缺少必填字段:baseUrl")。
+   * 精确影响 8 个声明了 `secret: false` 的 provider,且它们的 handler 也都从
+   * `ctx.credentials` 取这些字段 —— 通道从来只有一条。
+   */
+  it('多字段:全部字段都进 authRef 那个 secret(secret:false 只是展示语义)', () => {
+    // jira 的真实形状(线上 ~describe 实测):baseUrl 标了 secret:false,但它同样经
+    // ctx.credentials 取(见 plugins/src/jira/api.ts 的 requireCredential)。
     const plan = credentialPlanFor([{
       id: 'actions',
       profile: 'tools/v1',
@@ -317,19 +326,17 @@ describe('credentialPlanFor', () => {
       ],
     }], 'actions')
     expect(plan.kind).toBe('fields')
-    expect(plan.secretFields.map(f => f.key)).toEqual(['personalAccessToken'])
-    expect(plan.configFields.map(f => f.key)).toEqual(['baseUrl'])
+    expect(plan.secretFields.map(f => f.key)).toEqual(['baseUrl', 'personalAccessToken'])
     expect(plan.probe).toBe('list_projects')
   })
 
-  it('secret 缺省视为密钥(保守:漏标不该把凭证泄进明文 providerConfig)', () => {
+  it('secret 缺省同样进凭证(与 core parseCredentialValues 的口径一致)', () => {
     const plan = credentialPlanFor([{
       id: 'actions',
       profile: 'tools/v1',
       credentialFields: [{ key: 'apiKey', label: 'API key' }],
     }], 'actions')
     expect(plan.secretFields.map(f => f.key)).toEqual(['apiKey'])
-    expect(plan.configFields).toEqual([])
   })
 
   it('oauth:不列字段,authRef 存 clientId/clientSecret,且要提示授权一步', () => {
