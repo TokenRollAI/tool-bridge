@@ -37,3 +37,11 @@ jobs:
       # 只在发布 workflow 里才暴露,届时 tag 已推、版本已定,返工代价高。
       # 全量 build 约 6s,在这里当闸门最便宜。
       - run: pnpm turbo run build
+
+      # public 包的 src 改了却没 bump 版本 → 提醒(不拦)。
+      # 为什么是 warning 而不是 error:哪些包该 bump 是 public artifact ownership 的判断
+      # (改的是内部实现还是外部契约),机器判不了;但"改了 src 而版本没动"值得当场看见 ——
+      # 漏 bump 的表现是发布轮次里一个包静默落后,下次才发现。
+      - name: Warn on unbumped public packages
+        if: github.event_name == 'pull_request'
+        run: node scripts/check-version-bumps.mjs "origin/${{ github.base_ref }}"

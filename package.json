@@ -22,6 +22,8 @@
     "compose:reset": "docker compose down -v --remove-orphans",
     "gen-dev-vars": "node scripts/gen-dev-vars.mjs",
     "provision": "node scripts/provision.mjs",
+    "release:plan": "node scripts/release-plan.mjs",
+    "release:check-bumps": "node scripts/check-version-bumps.mjs",
     "smoke": "tsx scripts/smoke.ts",
     "verify:mcp": "tsx scripts/verify-mcp.ts",
     "verify:search": "pnpm --filter @tool-bridge/cli build && tsx scripts/verify-search.ts",

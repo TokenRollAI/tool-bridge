@@ -1,0 +1,156 @@
+# 一轮发布的编排器:**一次 dispatch 发完所有待发包**,不必手工打 N 个 tag。
+#
+# 为什么是"触发既有 workflow"而不是"合成一个大 workflow":
+#   npm Trusted Publishing 的信任是按 **workflow 文件名**授予的(每个包在 npmjs.com 上
+#   配的是 `publish-<pkg>.yml`)。把发布动作搬进本文件 = 7 个包都要重配 Trusted Publisher,
+#   而配错的表现是发布时 OIDC 失败。故本文件只做编排:算顺序 → 逐个 `gh workflow run`
+#   → 等每个跑完再触发下一个。零 OIDC 改动,失败隔离也保留(某个包挂了不影响已发的)。
+#
+# 打 tag 的活也交给它:tag 仍然会被创建(那是发布的审计痕迹,也是 publish-*.yml 里
+# 版本一致性校验的输入),只是不用人一个一个 `git push` —— 实测一次推多个 tag
+# **不触发**任何 tag workflow,那个坑本身就是"必须逐个推"的来源。
+name: release
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry-run:
+        description: '只打印计划,不打 tag、不触发发布'
+        type: boolean
+        default: true
+      packages:
+        description: '限定包(逗号分隔,如 dashboard,server);留空 = 全部待发包'
+        type: string
+        default: ''
+
+concurrency:
+  # 发布不可并发:两轮同时跑会让 dashboard→server 的顺序保证失效。
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: write # 打 tag
+  actions: write # 触发 publish-*.yml
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      order: ${{ steps.plan.outputs.order }}
+      empty: ${{ steps.plan.outputs.empty }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      # 只发 main 上的东西:tag 一推 CI 就发 npm,而 npm 版本号不可回收 ——
+      # 从未合入的分支发布过的版本号再也拿不回来。
+      - name: Refuse to release off main
+        run: |
+          if [ "${GITHUB_REF_NAME}" != "main" ]; then
+            echo "release 只能从 main 运行(当前 ${GITHUB_REF_NAME})" >&2
+            exit 1
+          fi
+
+      - id: plan
+        name: Compute release plan
+        run: |
+          set -o pipefail
+          node scripts/release-plan.mjs | tee plan.txt
+          PLAN="$(node scripts/release-plan.mjs --json)"
+          ORDER="$(echo "$PLAN" | node -e "
+            const p = JSON.parse(require('fs').readFileSync(0, 'utf8'))
+            const only = process.env.ONLY.split(',').map(s => s.trim()).filter(Boolean)
+            const order = only.length > 0 ? p.order.filter(x => only.includes(x)) : p.order
+            const unknown = only.filter(x => !p.order.includes(x))
+            if (unknown.length > 0) {
+              console.error('这些包不在待发列表里:' + unknown.join(', '))
+              process.exit(1)
+            }
+            console.log(JSON.stringify(order))
+          ")"
+          echo "order=$ORDER" >> "$GITHUB_OUTPUT"
+          if [ "$ORDER" = "[]" ]; then echo "empty=true" >> "$GITHUB_OUTPUT"; fi
+        env:
+          ONLY: ${{ inputs.packages }}
+
+      - name: Summary
+        run: |
+          {
+            echo '## 发布计划'
+            echo '```'
+            cat plan.txt
+            echo '```'
+            if [ "${{ inputs.dry-run }}" = "true" ]; then
+              echo '> dry-run:没有打 tag、没有触发发布。'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  release:
+    needs: plan
+    if: ${{ inputs.dry-run == false && needs.plan.outputs.empty != 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # 逐个:打 tag → 触发对应 publish workflow → 等它结束。
+      # **串行是有意的**:dashboard 必须先于 server 真正发布完成(不只是"先触发"),
+      # 否则 server 的 pack 会写进一个 registry 上还不存在的 dashboard 版本。
+      - name: Publish in dependency order
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ORDER: ${{ needs.plan.outputs.order }}
+        run: |
+          set -euo pipefail
+          for PKG in $(echo "$ORDER" | node -e "
+            console.log(JSON.parse(require('fs').readFileSync(0,'utf8')).join(' '))
+          "); do
+            VERSION="$(node -p "require('./packages/$PKG/package.json').version")"
+            TAG="$PKG-v$VERSION"
+            WORKFLOW="publish-$PKG.yml"
+
+            echo "::group::$TAG"
+
+            if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null 2>&1; then
+              echo "tag $TAG 已存在 —— 跳过(该版本已发过或正在发)"
+              echo "::endgroup::"
+              continue
+            fi
+
+            git tag "$TAG"
+            git push origin "$TAG"
+            echo "pushed $TAG"
+
+            # tag push 会触发 publish workflow;等它出现再等它结束。
+            # 不用 `gh workflow run`:那会在 ref 上再跑一次,与 tag 触发的重复。
+            for _ in $(seq 1 30); do
+              RUN_ID="$(gh run list --workflow "$WORKFLOW" --event push --limit 5 \
+                --json databaseId,headBranch \
+                --jq "[.[] | select(.headBranch == \"$TAG\")] | first | .databaseId")"
+              if [ -n "$RUN_ID" ] && [ "$RUN_ID" != "null" ]; then break; fi
+              sleep 5
+            done
+            if [ -z "$RUN_ID" ] || [ "$RUN_ID" = "null" ]; then
+              echo "等不到 $WORKFLOW 的 run(tag 已推,可手工查看 Actions)" >&2
+              exit 1
+            fi
+
+            echo "watching run $RUN_ID"
+            gh run watch "$RUN_ID" --exit-status
+            echo "::endgroup::"
+          done
+
+      - name: Summary
+        if: always()
+        run: |
+          echo '## 发布结果见上面各 group' >> "$GITHUB_STEP_SUMMARY"
+          echo '`npm view <pkg> version` 可能有 CDN 传播延迟(实测 91s 后仍 404),等一两分钟再查。' >> "$GITHUB_STEP_SUMMARY"

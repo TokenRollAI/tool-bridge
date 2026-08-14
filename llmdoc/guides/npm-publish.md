@@ -17,9 +17,39 @@
 - **验证类型自包含要用隔离 tsc,grep 不够**:在仓库外的隔离目录写一个只 import dist 类型的 check.ts,用仓库 `node_modules/.bin/tsc`(不开 skipLibCheck)编译通过才算数——"可独立消费性"不在常规 `pnpm verify` 覆盖内。Workers 目标包(如 gateway)额外注意:隔离 tsconfig 的 `lib` 必须只含 `["ES2022"]` 不带 DOM(`@cloudflare/workers-types` 与 lib.dom 类型冲突),`types` 要加 `@cloudflare/workers-types`;软链依赖要指向**包自己的 node_modules**(pnpm 不提升,仓库根下没有)。
 - `files: ["dist"]` + `publishConfig.access: "public"`(scoped 包默认 restricted,必须显式 public)。
 
+## 一轮多包发布:走 `release` workflow(推荐)
+
+**不要再手工逐个打 tag**。一轮全发此前约 40 个手工动作,且三条约束全靠人记(逐个 push tag、
+dashboard 必须先于 server、verify 不跑 build)。现在:
+
+```sh
+pnpm release:plan                      # 纯读:列出待发包、发布顺序、阻塞项
+gh workflow run release.yml -f dry-run=true    # 在 CI 上复算一遍(看 Summary)
+gh workflow run release.yml -f dry-run=false   # 真发:按顺序打 tag + 等每个 publish 跑完
+```
+
+`release.yml` 的设计要点(改它之前先读):
+
+- **只编排,不自己发**。npm Trusted Publishing 的信任按 **workflow 文件名**授予
+  (每个包在 npmjs.com 上配的是 `publish-<pkg>.yml`),把 `npm publish` 搬进 `release.yml`
+  等于 7 个包都要重配 Trusted Publisher。故它只做:算顺序 → 打 tag → `gh run watch` 等结果。
+- **串行**。dashboard 必须**真正发布完成**(不只是"先触发")才能发 server ——
+  `pnpm pack` 会把 `workspace:*` 改写成具体版本号,dashboard 没进 registry,server 装不上。
+- **顺序是算出来的**,不是硬编表:`scripts/release-plan.mjs` 声明偏序
+  (只有 dashboard→server 一条真约束)后拓扑排序。
+- **拒绝非 main 分支**:tag 一推 CI 就发 npm,而 npm 版本号不可回收。
+- **tag 已存在则跳过**:重跑安全(某个包中途失败,修完再跑不会重发已成功的)。
+- `-f packages=dashboard,server` 可只发子集(必须是待发列表的子集,否则报错)。
+
+单包发布仍可直接打 tag(下面的标准流程),两条路等价 —— `release.yml` 走的就是同样的 tag。
+
 ## 发新版本标准流程(Trusted Publisher 已配置的包)
 
 版本范围先按 **public artifact ownership** 判定:只有自身外部契约、依赖约束或发布内容变化的 public 包才 bump。private 且被 bundle 的 workspace 包不因内部实现变化自动单独 bump,也不能沿源码依赖图传递式提升所有 public 包。
+
+漏 bump 有个 CI 提醒兜底(`scripts/check-version-bumps.mjs`,PR 上跑,**warning 不拦**):
+"改了 public 包 src 却没 bump"与"bundle 的 private 包变了却没 bump"都会报。判断仍是人的
+——那个脚本判不了"这个改动消费者能不能感知"。
 
 1. 改 `packages/<pkg>/package.json` 的 `version`,提交。
    发布物验证必须从本轮重建开始,并让 build → 实际入口版本 → dry-run pack **fail fast**。例如在 `packages/cli` 下执行:
@@ -43,6 +73,7 @@
    ```
 
    **多包同发必须逐个 push tag**:`git push origin tag1 tag2 tag3` 一次推多个 tag 时 GitHub **不触发任何 tag workflow**(2026-07-08 实测:四 tag 同推零触发;删除远端 tag 后逐个重推,四个 workflow 全部正常触发)。tag 已推但没触发时的恢复手法:`git push origin :refs/tags/<tag>` 删远端 → 单独重推。
+   多包同发用上面的 `release` workflow 即可,它就是替你逐个推的。
 
 3. CI 自动发布(`.github/workflows/publish-<pkg>.yml`,六包各一份,也可 workflow_dispatch 手动触发):
    - 校验 tag 版本与 package.json 版本一致(不一致直接 fail,防漂移);
