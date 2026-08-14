@@ -67,7 +67,26 @@ export function registerPublicRoutes(app: TbHono, env: RouteEnv): void {
   const { deps } = env
 
   // GET /healthz → 200 JSON,树外免认证。version 单一真源:宿主 package.json。
-  app.get('/healthz', c => c.json({ healthy: true, version: deps.version }))
+  //
+  // `catalog` 回显**装配了几个内置集成**与目录级 digest(未装配则整个字段缺席)。
+  // 用途是三宿主对拍:同一个 commit 部署到 Workers 与 Node/Docker,两边这个 digest 必须
+  // 相同 —— 此前"部署形态改变产品能力"(Workers 99 个 provider、官方 Node 镜像 0 个)
+  // 恰恰是**没有任何机器可读的信号**才拖了那么久。digest 只覆盖 (id, per-entry digest) 对,
+  // 故改一个 provider 的文案不会翻动它。
+  //
+  // 免认证暴露它是安全的:那是一串 sha256 与一个计数,不含 provider 名更不含凭证;
+  // 而部署诊断恰恰需要在拿到 SK 之前就能看。
+  app.get('/healthz', async (c) => {
+    const catalog = deps.pluginCatalog
+    const digest = await env.pluginCatalogDigest()
+    return c.json({
+      healthy: true,
+      version: deps.version,
+      ...(catalog !== undefined && digest !== undefined
+        ? { catalog: { count: Object.keys(catalog).length, digest } }
+        : {}),
+    })
+  })
 
   // GET /~ref/<token> → 大对象中转下载,树外免认证(中转下载路由)。
   // 注册在认证中间件之前:token 本身即凭证(HMAC 限时签名);验签失败/过期一律 404 不泄露。

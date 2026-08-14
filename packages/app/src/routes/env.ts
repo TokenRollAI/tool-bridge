@@ -4,7 +4,12 @@
  * createTbApp 装配时构造一次,handler 只读:builtin 模块表按 store 现造(每请求 store
  * 相同,但 builtin 需要 store 句柄),搜索派生同步器与全局 search 能力表随注入点存在性决定。
  */
-import { type BuiltinModule, createBuiltins, type StateStore } from '@tool-bridge/core'
+import {
+  type BuiltinModule,
+  catalogSetDigest,
+  createBuiltins,
+  type StateStore,
+} from '@tool-bridge/core'
 import type { TbAppDeps } from '../deps'
 import { isMutableSearchIndex, SearchSynchronizer } from '../search/synchronizer'
 import { buildDeps } from '../bootstrap'
@@ -16,6 +21,13 @@ export interface RouteEnv {
   deps: TbAppDeps
   /** 全局工具搜索能力表;未注入索引或未声明 search → 空数组(端点不存在)。 */
   globalSearchCapabilities: () => Array<'search' | 'search:semantic'>
+  /**
+   * 内置目录的目录级 digest(`/healthz` 回显,供三宿主对拍)。
+   *
+   * **算一次、之后复用同一个 promise**:catalog 是编译期常量,digest 在进程生命周期内恒定,
+   * 而 healthz 是高频探测路径,不该每次都跑一遍 sha256。未注入 catalog → undefined。
+   */
+  pluginCatalogDigest: () => Promise<string> | undefined
   /** 派生搜索状态同步器;索引不可写(或未注入)→ undefined,全部同步点变成 no-op。 */
   searchSync: SearchSynchronizer | undefined
 }
@@ -44,5 +56,13 @@ export function createRouteEnv(deps: TbAppDeps): RouteEnv {
       ...(declared.has('search:semantic') ? ['search:semantic' as const] : []),
     ]
   }
-  return { builtinsOf, deps, globalSearchCapabilities, searchSync }
+  // 惰性 + 记忆化:装配期不付 sha256 的代价(冷启动路径),首个 healthz 之后复用。
+  let catalogDigest: Promise<string> | undefined
+  const pluginCatalogDigest = (): Promise<string> | undefined => {
+    const catalog = deps.pluginCatalog
+    if (catalog === undefined) return undefined
+    catalogDigest ??= catalogSetDigest(catalog)
+    return catalogDigest
+  }
+  return { builtinsOf, deps, globalSearchCapabilities, pluginCatalogDigest, searchSync }
 }

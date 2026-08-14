@@ -1,4 +1,5 @@
 import {
+  type BuiltinCatalog,
   MemoryObjectStore,
   MemoryStateStore,
   type ObjectStore,
@@ -44,6 +45,8 @@ export interface TestAppOpts {
   /** 缺省注入 MemoryObjectStore;传 null 则不注入(模拟宿主无对象存储)。 */
   objects?: ObjectStore | null
   pluginBindings?: PluginBindings
+  /** 内置集成目录;缺省不注入 → `system/catalog` 回空页(未装内置插件的宿主)。 */
+  pluginCatalog?: BuiltinCatalog
   refThresholdBytes?: number
   refTtlSec?: number
   remote?: Partial<RemoteSettings>
@@ -82,6 +85,7 @@ export async function createTestApp(opts: TestAppOpts = {}): Promise<TestApp> {
   if (opts.canonicalOrigin !== undefined) deps.canonicalOrigin = opts.canonicalOrigin
   if (opts.device !== undefined) deps.device = opts.device
   if (opts.pluginBindings !== undefined) deps.pluginBindings = opts.pluginBindings
+  if (opts.pluginCatalog !== undefined) deps.pluginCatalog = opts.pluginCatalog
   if (opts.refThresholdBytes !== undefined) deps.refThresholdBytes = opts.refThresholdBytes
   if (opts.refTtlSec !== undefined) deps.refTtlSec = opts.refTtlSec
   if (opts.search !== undefined) deps.search = opts.search
