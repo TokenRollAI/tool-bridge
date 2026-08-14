@@ -1,4 +1,5 @@
 import { Command } from 'commander'
+import { integrationCommand } from './commands/integration'
 import { federationCommand } from './commands/federation'
 import pkg from '../package.json' with { type: 'json' }
 import { feedbackCommand } from './commands/feedback'
@@ -91,6 +92,7 @@ Agent feedback — every path carries experience from other agents:
   program.addCommand(deviceCommand())
   program.addCommand(mountCommand())
   program.addCommand(pluginCommand())
+  program.addCommand(integrationCommand())
   showGlobalOptionsInHelp(program)
   return program
 }
