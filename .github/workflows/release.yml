@@ -126,31 +126,46 @@ jobs:
               continue
             fi
 
-            # 记下推 tag 的时刻:下面只认这之后创建的 run。同名 tag 可能被删过重推
-            # (发布失败的既有恢复手法),那些**历史失败 run** 的 headBranch 与新的一模一样,
+            # 记下时刻:下面只认这之后创建的 run。同名 tag 可能被删过重推(发布失败的
+            # 既有恢复手法),那些**历史失败 run** 的 headBranch 与新的一模一样,
             # 不按时间过滤会让 `gh run watch --exit-status` 盯上一个早已失败的旧 run。
             SINCE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
             git tag "$TAG"
             git push origin "$TAG"
             echo "pushed $TAG at $SINCE"
 
-            # tag push 会触发 publish workflow;等它们出现再等它们结束。
-            # 不用 `gh workflow run`:那会在 ref 上再跑一次,与 tag 触发的重复。
+            # **必须显式 `gh workflow run`,不能指望 tag push 触发。**
+            # GitHub 刻意不让用 `GITHUB_TOKEN` 推的 tag 触发其它 workflow(防无限递归),
+            # 故这里 push 完**什么都不会发生** —— 实测 run 31812567922:`app-v0.4.0` 推成功、
+            # 零 workflow 被触发,整轮发布就停在第一个包。
             #
-            # **按 tag 找而不是按 workflow 名找**:`server-v*` 同时触发两个 workflow
-            # (publish-server 发 npm、publish-docker 推 GHCR 镜像)。只盯 publish-server
-            # 会让镜像构建失败被静默放过 —— 那也是发布物的一部分。
+            # 在 tag ref 上 dispatch 与 tag 触发等价:`publish-*.yml` 都声明了
+            # `workflow_dispatch`,且它们的「tag 版本 == package.json 版本」校验用的是
+            # `GITHUB_REF_NAME`,在 tag ref 上照样成立(实测 app@0.4.0 由此发出)。
+            #
+            # `server-v*` 对应**两个** workflow(publish-server 发 npm、publish-docker 推
+            # GHCR 镜像),两个都要 dispatch 并等 —— 镜像也是发布物,失败不该被静默放过。
+            WORKFLOWS="publish-$PKG.yml"
+            if [ "$PKG" = 'server' ]; then WORKFLOWS="$WORKFLOWS publish-docker.yml"; fi
+            for WF in $WORKFLOWS; do
+              gh workflow run "$WF" --ref "$TAG"
+              echo "dispatched $WF on $TAG"
+            done
+
             RUNS=''
             for _ in $(seq 1 30); do
-              RUNS="$(gh run list --event push --limit 40 \
+              RUNS="$(gh run list --event workflow_dispatch --limit 40 \
                 --json databaseId,headBranch,createdAt,workflowName \
                 --jq "[.[] | select(.headBranch == \"$TAG\" and .createdAt >= \"$SINCE\")] \
                       | map(.databaseId) | join(\" \")")"
-              if [ -n "$RUNS" ]; then break; fi
+              # 等齐:server 要两个 run 都出现再往下走。
+              COUNT="$(echo "$RUNS" | wc -w | tr -d ' ')"
+              WANT="$(echo "$WORKFLOWS" | wc -w | tr -d ' ')"
+              if [ "$COUNT" = "$WANT" ]; then break; fi
               sleep 5
             done
             if [ -z "$RUNS" ]; then
-              echo "等不到 $TAG 触发的 run(tag 已推,去 Actions 页查看)" >&2
+              echo "等不到 $TAG 的 run(tag 已推,去 Actions 页查看)" >&2
               exit 1
             fi
 
