@@ -1,4 +1,4 @@
-import { builtinPluginBindings, type BuiltinPluginEnv } from '@tool-bridge/plugins'
+import { BUILTIN_CATALOG, builtinPluginBindings, type BuiltinPluginEnv } from '@tool-bridge/plugins'
 import { createApp } from './app'
 
 export { createApp, type Env } from './app'
@@ -36,6 +36,7 @@ export type { PluginBindingHandler, PluginBindings } from '@tool-bridge/app'
  */
 const app = createApp({
   pluginBindings: env => builtinPluginBindings(env as unknown as BuiltinPluginEnv),
+  pluginCatalog: BUILTIN_CATALOG,
 })
 
 export default app

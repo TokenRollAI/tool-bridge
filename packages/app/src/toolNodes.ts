@@ -10,22 +10,17 @@ import {
   check,
   type HelpModel,
   isTBError,
-  KEY_PLUGIN,
-  KEY_PLUGIN_META,
   NodeRegistryStore,
   parseCredentialValues,
-  type PluginDescribe,
   type PluginExport,
   type PluginManifest,
   type PluginOAuth,
-  resolvePluginExport,
-  type StateStore,
+  resolveIntegration,
   TBError,
   toolHelpModel,
   type ToolSpec,
   type TreeNode,
   type TreePath,
-  validatePluginContract,
   virtualizeTools,
 } from '@tool-bridge/core'
 import type { UpstreamProvider } from './providers/types'
@@ -39,7 +34,6 @@ import { assertNoDeviceMarker, deviceToolMarker } from './deviceNodes'
 import { createHttpProvider, type HttpConfig } from './providers/http'
 import { createMcpProvider, type McpConfig } from './providers/mcp'
 import { createPluginToolProvider } from './providers/pluginTool'
-import { fetchPluginContract } from './providers/pluginClient'
 import { resolveProviderAccessToken } from './providerOAuth'
 import { getTools } from './providers/toolCache'
 
@@ -84,81 +78,36 @@ export function upstreamTools(
  * 见 core resolvePluginExport)。不存在/禁用 → invalid_argument(不泄露更多)。
  */
 /**
- * 宿主装配的 binding 插件**自动注册**(免手工 `tb plugin register`)。
+ * 解析挂载目标 export:**内置目录(编译期常量)+ 注册记录(external),两条路都只读**。
  *
- * 内置插件与网关同源同构建 —— 它的代码就在这个 Worker 里,由本仓库的闸门保证可用。
- * 让用户先注册一遍只是仪式:注册那四件事里,探活对同进程代码没有信息量(它不可能
- * "连不上"),mint token 对 binding 是同义反复(见 plugin-sdk 的 TB_PLUGIN_IN_PROCESS),
- * 真正必要的只有 **`~describe` 缓存** —— 挂载表单选 export、凭证提示列字段都靠它。
+ * 第一参收 `Pick<TbAppDeps, 'pluginCatalog' | 'state'>`,而 `resolveIntegration` 只吃
+ * {@link ReadOnlyStore}(只有 `get`)—— 于是这个函数**结构上写不了库**。
  *
- * 故这里只做那一件必要的事:直调 `~describe` 抓契约 → 落 manifest 与 meta。
- * 不探活、不 mint、不写 SK。
+ * 此前这里是 `manifest ??= autoRegisterBinding(deps, id)`:查不到就当场写
+ * `plugin:` + `pluginmeta:`。而它被 `providerFor`(help / call / tools list 共用)调用,
+ * 于是**任何一次读都会把删掉的记录写回来**;更糟的是 7 个调用点里传 `deps` 还是传裸
+ * `store` 是各自随手决定的,同一语义在四条链上有四种行为(tool 侧 help/call 都复活、
+ * context 侧 help 复活但 call 报"未知 provider")。
  *
- * 只对**装配表里有同名 binding** 的 id 生效;外挂 https 插件仍须显式注册(它在网络那头,
- * 探活与契约校验都是必要的前置)。
+ * 免注册的体验不靠"读的时候补一下"来兑现,而是 catalog 本身就是目录:内置插件的
+ * descriptor 是构建产物,不需要先搬进 KV 再读出来。`autoRegisterBinding` 因此整个删掉。
  */
-async function autoRegisterBinding(
-  deps: Pick<TbAppDeps, 'pluginBindings' | 'state'>,
-  id: string,
-): Promise<PluginManifest | null> {
-  if (deps.pluginBindings?.has(id) !== true) return null
-  const manifest: PluginManifest = {
-    id,
-    protocolVersion: 'plugin/v2',
-    endpoint: `${'binding:'}${id}`,
-    // binding 直调不校验 token(同进程,调用方就是平台自己),但 manifest 形状要合法。
-    auth: { kind: 'platform-token' },
-    healthPath: '/healthz',
-    enabled: true,
-  }
-  const contract = await fetchPluginContract(manifest, deps.pluginBindings)
-  const describe = validatePluginContract({ manifest, describe: contract.describe })
-  await deps.state.put(KEY_PLUGIN_META + id, describe)
-  await deps.state.put(KEY_PLUGIN + id, { ...manifest, exports: describe.exports })
-  return manifest
-}
-
-/**
- * 第一参可以是 deps 也可以是裸 store。
- *
- * 裸 store 形态是**降级**:拿不到 `pluginBindings`,自动注册就不会发生,行为与从前一致
- * (未注册 → invalid_argument)。留这个重载是为了不让"多一个可选能力"逼着四条调用链
- * 全部改签名;能拿到 deps 的调用点(挂载校验、调用、help)传 deps 即可享受免注册。
- */
-type PluginLookupSource = Pick<TbAppDeps, 'pluginBindings' | 'state'> | StateStore
-
-function sourceOf(from: PluginLookupSource): Pick<TbAppDeps, 'pluginBindings' | 'state'> {
-  return 'state' in from ? from : { state: from }
-}
-
 export async function requirePluginExport(
-  from: PluginLookupSource,
+  from: Pick<TbAppDeps, 'pluginCatalog' | 'state'>,
   id: string,
   nodeKind: 'tool' | 'context',
   what: 'context' | 'tool',
   exportId?: string,
 ): Promise<{ export: PluginExport, manifest: PluginManifest }> {
-  const deps = sourceOf(from)
-  const store = deps.state
-  let manifest = (await store.get(KEY_PLUGIN + id)) as PluginManifest | null
-  // 未注册但宿主装配了同名 binding → 当场补齐(内置插件免注册)。
-  manifest ??= await autoRegisterBinding(deps, id)
-  if (manifest === null) {
-    throw new TBError('invalid_argument', `未知 ${what} provider:'${id}'`)
-  }
-  if (manifest.enabled !== true) {
-    throw new TBError('invalid_argument', `plugin '${id}' 已禁用`)
-  }
-  const describe = (await store.get(KEY_PLUGIN_META + id)) as PluginDescribe | null
-  if (describe === null) {
-    throw new TBError('invalid_argument', `plugin '${id}' 缺少 ~describe 缓存,请重新注册`)
-  }
-  const chosen = resolvePluginExport(describe, {
+  const resolved = await resolveIntegration(
+    from.state,
+    from.pluginCatalog ?? {},
+    id,
     nodeKind,
-    pluginId: id,
-    ...(exportId !== undefined ? { exportId } : {}),
-  })
-  return { manifest, export: chosen }
+    what,
+    exportId,
+  )
+  return { manifest: resolved.manifest, export: resolved.export }
 }
 
 /**

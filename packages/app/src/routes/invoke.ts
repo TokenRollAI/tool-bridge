@@ -226,7 +226,7 @@ export async function handleInvoke(c: AppContext, env: RouteEnv): Promise<Respon
       // plugin-backed context:provider 非 r2/s3 视为 plugin id,
       // 经 envelope 转发;plugin 不存在/禁用/kind 不符 → invalid_argument。
       const { manifest, export: exported } = await requirePluginExport(
-        store,
+        deps,
         cfg.provider,
         'context',
         'context',

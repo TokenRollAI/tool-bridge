@@ -76,7 +76,7 @@ export async function handleDescribe(c: AppContext, env: RouteEnv): Promise<Resp
         : local !== null
           ? localCapabilities(local)
           : (
-              await requirePluginExport(store, cfg.provider, 'context', 'context', cfg.export)
+              await requirePluginExport(deps, cfg.provider, 'context', 'context', cfg.export)
             ).export.capabilities ?? []
     return new Response(JSON.stringify({ kind: 'context', capabilities }), {
       headers: { 'content-type': contentTypeFor('json') },

@@ -6,6 +6,7 @@
  * toolNodes/contextNodes/helpModel 与 routes/*,装配在 tbApp.ts。
  */
 import type {
+  BuiltinCatalog,
   CallContext,
   ContextProvider,
   ObjectStore,
@@ -74,6 +75,16 @@ export interface TbAppDeps {
    * `binding:<name>` 的插件经此直调,零网络跳;未装配的 binding 注册/调用报 unavailable。
    */
   pluginBindings?: PluginBindings
+  /**
+   * 内置插件目录(descriptor)。**编译期常量**,由 `@tool-bridge/plugins` 的
+   * `catalog.generated.ts` 求值生成 —— 内置插件的目录项与它的代码是同一份构建产物,
+   * 故不会陈旧、也不落库(见 `llmdoc/memory/decisions/builtin-catalog-not-registry.md`)。
+   *
+   * 与 {@link pluginBindings} **是一对**:catalog 说"声明了什么"(挂载校验、选 export、
+   * 列凭证字段),bindings 说"代码在哪"(实际调用)。装配了 binding 却没给 catalog,
+   * 那个插件解析不出 export;反之则解析得出但调不动(unavailable)。宿主该两者同源装配。
+   */
+  pluginCatalog?: BuiltinCatalog
   /** context Get 的 $ref 内联阈值(字节,缺省 1 MiB)。 */
   refThresholdBytes?: number
   /** $ref URL(presign 与 /~ref 中转)有效期秒(缺省 900)。 */

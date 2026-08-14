@@ -5,7 +5,8 @@
     "paths": {
       "@tool-bridge/app": ["../app/src/index.ts"],
       "@tool-bridge/core": ["../core/src/index.ts"],
-      "@tool-bridge/core/node": ["../core/src/node/index.ts"]
+      "@tool-bridge/core/node": ["../core/src/node/index.ts"],
+      "@tool-bridge/plugins": ["../plugins/src/registry.ts"]
     }
   }
 }

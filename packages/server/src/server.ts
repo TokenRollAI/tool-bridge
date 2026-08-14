@@ -62,6 +62,7 @@ export function createTbServer(config: ServerConfig): TbServer {
   }
   if (config.encryptionKey !== undefined) deps.encryptionKey = config.encryptionKey
   if (config.pluginBindings !== undefined) deps.pluginBindings = config.pluginBindings
+  if (config.pluginCatalog !== undefined) deps.pluginCatalog = config.pluginCatalog
   // 规范 origin(与 Workers app.ts 对等):给出即钉死 OAuth redirect_uri。
   if (config.canonicalOrigin !== undefined) deps.canonicalOrigin = config.canonicalOrigin
   const assets = resolveUiAssets(config.uiDir)

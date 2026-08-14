@@ -35,7 +35,7 @@ async function finishToolAuthorization(opts: {
   const config = opts.node.config as { authRef?: string, export?: string, provider: string }
   try {
     const { export: exported } = await requirePluginExport(
-      opts.deps.state,
+      opts.deps,
       config.provider,
       'tool',
       'tool',

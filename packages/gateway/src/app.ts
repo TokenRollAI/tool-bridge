@@ -6,7 +6,12 @@ import {
   type RemoteSettings,
   type TbAppDeps,
 } from '@tool-bridge/app'
-import { normalizeCanonicalOrigin, SecretStoreImpl, type StateStore } from '@tool-bridge/core'
+import {
+  type BuiltinCatalog,
+  normalizeCanonicalOrigin,
+  SecretStoreImpl,
+  type StateStore,
+} from '@tool-bridge/core'
 import { Hono } from 'hono'
 import type { DeviceSession } from './deviceSession'
 import { createR2ObjectStore, type R2PresignCredentials } from './providers/r2Object'
@@ -162,9 +167,15 @@ function depsFromEnv(env: Env): TbAppDeps {
  * 可以直接给一张表,也可以给一个 **`(env) => 表`** 的工厂 —— 后者是内置目录需要的形态:
  * `builtinPluginBindings(env)` 要读 env(它内部按白名单收窄后递给插件),而 env 在
  * `createApp()` 调用时还不存在。工厂与 app 一起按 env 缓存,每 isolate 只建一次。
+ *
+ * `opts.pluginCatalog`:那些插件的 descriptor(编译期常量,不读 env,故不需要工厂)。
+ * 与 bindings **应当同源装配** —— 只给 bindings 的话插件调得动但解析不出 export。
  */
 export function createApp(
-  opts: { pluginBindings?: PluginBindings | ((env: Env) => PluginBindings) } = {},
+  opts: {
+    pluginBindings?: PluginBindings | ((env: Env) => PluginBindings)
+    pluginCatalog?: BuiltinCatalog
+  } = {},
 ): Hono<{ Bindings: Env }> {
   const apps = new WeakMap<Env, ReturnType<typeof createTbApp>>()
   const appFor = (env: Env): ReturnType<typeof createTbApp> => {
@@ -175,6 +186,7 @@ export function createApp(
       app = createTbApp({
         ...depsFromEnv(env),
         ...(bindings !== undefined ? { pluginBindings: bindings } : {}),
+        ...(opts.pluginCatalog !== undefined ? { pluginCatalog: opts.pluginCatalog } : {}),
       })
       apps.set(env, app)
     }

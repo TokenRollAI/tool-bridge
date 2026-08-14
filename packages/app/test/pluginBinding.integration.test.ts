@@ -1,7 +1,7 @@
 import { MemoryStateStore, parseHelpDsl, SecretStoreImpl } from '@tool-bridge/core'
+import { BUILTIN_CATALOG, builtinPluginBindings } from '@tool-bridge/plugins'
 import { createNotesPlugin, type Env } from '@tool-bridge/plugins/notes'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { builtinPluginBindings } from '@tool-bridge/plugins'
 import { createTbApp, type PluginBindings, runBootstrap } from '../src/index'
 import { TEST_ADMIN_SK, TEST_ENCRYPTION_KEY } from './fixtures'
 
@@ -227,25 +227,28 @@ describe('binding 传输的超时', () => {
 })
 
 /**
- * 内置 binding 插件**免手工注册**:挂载时若 provider 是宿主装配的 binding 却没注册,
- * 当场补齐 manifest 与 `~describe` 缓存。
+ * 内置 binding 插件**免手工注册**:装配了 catalog 的宿主,直接挂载即可用。
  *
- * 为什么能省:内置插件与网关同源同构建,代码就在这个 Worker 里 —— 探活对它没有信息量
- * (不可能"连不上"),mint token 是同义反复(binding 直调跳过 token 校验)。真正必要的
- * 只有 `~describe` 缓存(挂载选 export、Dashboard 列凭证字段都靠它),故只做那一件。
+ * 免的不是"注册这个动作",而是**注册这份状态**:内置插件的 descriptor 由构建期求值
+ * `~describe` 生成(`catalog.generated.ts`),与插件代码同一份构建产物 —— 不需要先搬进 KV
+ * 再读出来。故解析走 catalog,**零写库**。
  *
- * 边界:**只对装配表里有同名 binding 的 id 生效**。外挂 https 插件在网络那头,
- * 探活与契约校验是必要前置,仍须显式注册 —— 最后一个用例钉住这条。
+ * 此前这条能力由 `autoRegisterBinding` 兑现:读到未注册就当场写 `plugin:` + `pluginmeta:`。
+ * 那让 help/call 这类读操作带上写副作用(删掉后随便读一次就复活),而且 7 个调用点里
+ * 传 deps 还是传裸 store 是随手决定的。现在解析函数结构上拿不到写能力。
+ *
+ * 边界:**只对 catalog 里有的 id 生效**。外挂 https 插件在网络那头,探活与契约校验是必要
+ * 前置,仍须显式注册 —— 倒数第二个用例钉住这条。
  */
 describe('内置 binding 插件免注册', () => {
   /**
-   * 用 `builtinPluginBindings` 装配 —— 这是**生产宿主的真实装配方式**
-   * (gateway 的 deployEntry.ts 就这么调),它递给插件的 env 带 `TB_PLUGIN_IN_PROCESS`,
-   * 插件因此跳过 PLUGIN_TOKEN 校验。
+   * 用 `builtinPluginBindings` + `BUILTIN_CATALOG` 装配 —— **生产宿主的真实装配方式**
+   * (gateway `deployEntry.ts` 与 server `main.ts` 都这么调)。两者是一对:catalog 说
+   * "声明了什么",bindings 说"代码在哪"。
    *
-   * 上面那些用例手工造 Map 是为了模拟"宿主自己装配"并注入受控的 token;
-   * 而免注册这条路**不 mint token**(那对同进程调用是同义反复),所以它必须配
-   * 真实装配方式才成立 —— 这不是测试的将就,是这条能力的前置条件。
+   * bindings 那半边还有个前置条件:`builtinPluginBindings` 递给插件的 env 带
+   * `TB_PLUGIN_IN_PROCESS`,插件因此跳过 PLUGIN_TOKEN 校验。上面那些用例手工造 Map 是为了
+   * 模拟"宿主自己装配"并注入受控 token;这里必须用真实装配方式才成立。
    */
   async function appWithBuiltins(): Promise<ReturnType<typeof createTbApp>> {
     const state = new MemoryStateStore()
@@ -253,6 +256,7 @@ describe('内置 binding 插件免注册', () => {
     return createTbApp({
       allowInsecureHttp: false,
       pluginBindings: builtinPluginBindings({}, { include: ['notes'] }),
+      pluginCatalog: { notes: BUILTIN_CATALOG.notes! },
       remote: { allowlist: [], maxHops: 4, allowInsecure: false },
       secrets: new SecretStoreImpl(state, TEST_ENCRYPTION_KEY),
       state,
@@ -272,19 +276,11 @@ describe('内置 binding 插件免注册', () => {
       },
     })
 
-  it('直接挂载未注册的 binding provider → 自动补齐,工具可列可调', async () => {
+  it('直接挂载未注册的 binding provider → 工具可列可调', async () => {
     const app = await appWithBuiltins()
 
     // 注意:没有 register 那一步。
     expect((await mountNotes(app)).status).toBe(200)
-
-    // manifest 与 ~describe 缓存都已落库 —— plugin get 能读到。
-    const got = await postJson(app, 'system/plugin', { tool: 'get', arguments: { id: 'notes' } })
-    expect(got.status).toBe(200)
-    const record = (await got.json()) as { endpoint: string, exports?: Array<{ id: string }> }
-    expect(record.endpoint).toBe('binding:notes')
-    // exports 缓存是关键:挂载表单选 export、Dashboard 的凭证提示都靠它。
-    expect(record.exports?.map(e => e.id)).toContain('actions')
 
     // 真的能用(全程零网络出站 —— 本文件把 fetch 打桩为一碰即炸)。
     const help = await app.request(new Request('https://tb.test/auto/notes/~help', {
@@ -294,15 +290,40 @@ describe('内置 binding 插件免注册', () => {
     expect(parseHelpDsl(await help.text()).cmds.length).toBeGreaterThan(0)
   })
 
-  it('catalog 随后把它标成已注册(自动与手工注册殊途同归)', async () => {
+  /**
+   * **A1 的回归**:挂载 + 读一整轮之后,注册表里一条 plugin 记录都不该有。
+   *
+   * 此前这里会写 `plugin:notes` 与 `pluginmeta:notes`,于是 `tb plugin rm notes` 删掉后
+   * 任何一次 help/call 都会把它写回来 —— 删除即复活。现在 builtin 不落库,`plugin list`
+   * 因此只列真正注册过的 external plugin(而内置目录由 catalog 呈现)。
+   */
+  it('挂载与调用全程零写库(删除即复活的回归)', async () => {
+    const app = await appWithBuiltins()
+    await mountNotes(app)
+    await app.request(new Request('https://tb.test/auto/notes/~help', {
+      headers: { authorization: `Bearer ${TEST_ADMIN_SK}`, accept: 'text/plain' },
+    }))
+
+    const listed = await postJson(app, 'system/plugin', { tool: 'list', arguments: {} })
+    expect(((await listed.json()) as { items: unknown[] }).items).toEqual([])
+
+    // get 也读不到:它从来没被注册过,而这正是"内置目录项不落库"的意思。
+    const got = await postJson(app, 'system/plugin', { tool: 'get', arguments: { id: 'notes' } })
+    expect(got.status).toBe(404)
+  })
+
+  it('catalog 仍把它列为可用(available,但不是 registered)', async () => {
     const app = await appWithBuiltins()
     await mountNotes(app)
     const res = await postJson(app, 'system/plugin', { tool: 'catalog', arguments: {} })
     const items = ((await res.json()) as { items: Array<{ name: string, registered: boolean }> }).items
-    expect(items.find(i => i.name === 'notes')?.registered).toBe(true)
+    const notes = items.find(i => i.name === 'notes')
+    expect(notes).toBeDefined()
+    // registered 现在如实反映"有没有 external 注册记录" —— 内置插件可用但未注册。
+    expect(notes?.registered).toBe(false)
   })
 
-  it('**装配表里没有的 provider 仍然拒绝** —— 自动注册不是"什么都收"', async () => {
+  it('**catalog 里没有的 provider 仍然拒绝** —— 免注册不是"什么都收"', async () => {
     const app = await appWithBuiltins()
     const res = await postJson(app, 'system/registry', {
       tool: 'write',
@@ -315,5 +336,25 @@ describe('内置 binding 插件免注册', () => {
     })
     expect(res.status).toBe(400)
     expect(((await res.json()) as { message: string }).message).toContain('not-assembled')
+  })
+
+  /**
+   * 装配了 bindings 却没给 catalog:插件调得动,但解析不出 export。这条把那个失配钉成
+   * 明确的 invalid_argument,而不是让它表现成别的什么 —— 宿主该两者同源装配。
+   */
+  it('只给 bindings 不给 catalog → 解析不出 export(装配失配是可见的)', async () => {
+    const state = new MemoryStateStore()
+    await runBootstrap(state, { adminSk: TEST_ADMIN_SK, requireAdminSk: true })
+    const app = createTbApp({
+      allowInsecureHttp: false,
+      pluginBindings: builtinPluginBindings({}, { include: ['notes'] }),
+      remote: { allowlist: [], maxHops: 4, allowInsecure: false },
+      secrets: new SecretStoreImpl(state, TEST_ENCRYPTION_KEY),
+      state,
+      version: 'test',
+    })
+    const res = await mountNotes(app)
+    expect(res.status).toBe(400)
+    expect(((await res.json()) as { message: string }).message).toContain('notes')
   })
 })

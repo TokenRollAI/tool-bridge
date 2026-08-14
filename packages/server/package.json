@@ -1,6 +1,6 @@
 {
   "name": "@tool-bridge/server",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "tool-bridge self-hosted server: run the HTBP gateway on Node with SQLite persistence, filesystem object storage and WebSocket device channel — single container via docker run",
   "type": "module",
   "license": "MIT",
@@ -54,6 +54,7 @@
   "devDependencies": {
     "@tool-bridge/app": "workspace:*",
     "@tool-bridge/core": "workspace:*",
+    "@tool-bridge/plugins": "workspace:*",
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "catalog:",
     "@types/ws": "catalog:",

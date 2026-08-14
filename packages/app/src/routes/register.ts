@@ -40,7 +40,7 @@ async function authorizeToolNode(
   const { deps } = env
   const config = node.config as { authRef?: string, export?: string, provider: string }
   const { export: exported } = await requirePluginExport(
-    deps.state,
+    deps,
     config.provider,
     'tool',
     'tool',

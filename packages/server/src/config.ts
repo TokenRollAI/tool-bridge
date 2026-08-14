@@ -5,7 +5,7 @@
  */
 
 import type { PluginBindings } from '@tool-bridge/app'
-import { normalizeCanonicalOrigin } from '@tool-bridge/core'
+import { type BuiltinCatalog, normalizeCanonicalOrigin } from '@tool-bridge/core'
 
 const DEFAULT_PORT = 8787
 const DEFAULT_MAX_HOPS = 4
@@ -34,10 +34,15 @@ export interface ServerConfig {
   encryptionKey?: string
   host: string
   /**
-   * 进程内插件装配表(binding 名 → fetch handler),供程序化嵌入方注入;
-   * `binding:<name>` 的插件经此直调,零网络跳。bin 入口暂不从 env 装配。
+   * 进程内插件装配表(binding 名 → fetch handler)。缺省时 bin 入口装配**全量内置目录**
+   * (见 `main.ts`);程序化嵌入方可给自己的表来覆盖或裁剪。
    */
   pluginBindings?: PluginBindings
+  /**
+   * 内置插件目录的 descriptor。与 {@link pluginBindings} 同源装配 —— 只给 bindings
+   * 的话插件调得动但解析不出 export(挂载校验会报"未知 provider")。
+   */
+  pluginCatalog?: BuiltinCatalog
   port: number
   refThresholdBytes?: number
   refTtlSec?: number

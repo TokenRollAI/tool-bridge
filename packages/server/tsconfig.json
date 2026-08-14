@@ -1,6 +1,12 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
+    // DOM/DOM.Iterable:本包自 `main.ts` 起装配 `@tool-bridge/plugins`,而 workspace 内
+    // 消费的是**源码**,故 tsc 会一路编译进插件实现 —— 那些代码按 `tsconfig.plugin.json`
+    // 只依赖 Web 标准全局(`BodyInit`/`Headers`/fetch 家族)。gateway 同样消费插件源码,
+    // 它靠 `@cloudflare/workers-types` 拿到这些符号;Node 宿主这边只能由 lib 补齐。
+    // 不是放宽:`types: ["node"]` 仍在,本包自己的代码照旧可用 Node API。
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
     "types": ["node"]
   },
   "include": ["src", "test", "tsup.config.ts", "vitest.config.ts"]

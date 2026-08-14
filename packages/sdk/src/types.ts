@@ -1,5 +1,6 @@
 import type { PluginBindings } from '@tool-bridge/app'
-import { type ContextProvider,
+import { type BuiltinCatalog,
+  type ContextProvider,
   type DeviceClientState,
   type DeviceExpose,
   type NodeInput,
@@ -67,6 +68,15 @@ export interface ToolBridgeConfig {
   objects?: ObjectStore
   /** 进程内插件装配表(binding 名 → fetch handler);`binding:<name>` 插件经此直调。 */
   pluginBindings?: PluginBindings
+  /**
+   * 内置插件目录的 descriptor(编译期常量)。与 {@link pluginBindings} **同源装配** ——
+   * catalog 说"声明了什么"(挂载校验、选 export、列凭证字段),bindings 说"代码在哪"。
+   * 只给 bindings 的话插件调得动但解析不出 export。
+   *
+   * 装 `@tool-bridge/plugins` 的宿主直接传它的 `BUILTIN_CATALOG`;自建插件集的嵌入方
+   * 按同形状给自己那份。
+   */
+  pluginCatalog?: BuiltinCatalog
 
   // ---- 以下为 SDK 引导扩展(标准签名未列) ----
 
