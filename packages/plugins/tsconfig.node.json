@@ -1,0 +1,14 @@
+{
+  // Node-only 的构建期/开发期脚本(codegen 与外挂 serve 替身)。**插件本体不在这里** ——
+  // 它们由 tsconfig.json 按宿主中立 preset 编译,不许碰 Node API。
+  //
+  // 分两份而不是给整包加 `types: ["node"]`:后者会让插件实现里误用 `process.env`
+  // 或 `Buffer` 静态通过,而那正是宿主中立要防的事(core 用 tsconfig.node.json 解决
+  // 同一问题,这里沿用)。
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "types": ["node"]
+  },
+  "include": ["scripts"]
+}

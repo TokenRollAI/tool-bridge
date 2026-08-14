@@ -15,6 +15,12 @@ import { BUILTIN_PLUGIN_LOADERS, type BuiltinPluginModule } from './registry.gen
 export { BUILTIN_PLUGIN_LOADERS, type BuiltinPluginModule }
 
 /**
+ * 内置插件目录的 descriptor(编译期常量,求值生成)。宿主装配 bindings 时应当**同源**
+ * 把它一起传进去:catalog 说"声明了什么",bindings 说"代码在哪",缺一个那个插件就残。
+ */
+export { BUILTIN_CATALOG, BUILTIN_CATALOG_DIGEST } from './catalog.generated'
+
+/**
  * 宿主传给插件的 env。
  *
  * **不是宿主的全环境**。进程内插件与网关同权(plugin-in-process-catalog 决策),把

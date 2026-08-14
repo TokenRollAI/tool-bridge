@@ -1,4 +1,6 @@
 {
+  // 插件本体与测试:宿主中立 preset(无 Node 全局)。Node-only 的 `scripts/` 走
+  // tsconfig.node.json —— 让 codegen 能用 node:fs,同时不给插件实现开 Node 的门。
   "extends": "../../tsconfig.plugin.json",
-  "include": ["src", "test", "scripts", "vitest.config.ts"]
+  "include": ["src", "test", "vitest.config.ts"]
 }
