@@ -129,6 +129,35 @@ function validateToolDef(t: unknown, i: number): HttpToolDef {
   return def
 }
 
+/**
+ * 可重复 `--config key=value` → providerConfig 对象;空数组返回 undefined(不塞空对象)。
+ *
+ * 这是 `kind:'tool'` 与 plugin context 挂载的 **providerConfig 输入口**。此前 CLI 与
+ * Dashboard 都没有,于是 memos / grafana / metabase / langsmith 这些"必须配 baseUrl 或
+ * instanceUrl"的 provider 在两个操作面都挂不出可用状态 —— 只能手写节点 JSON 直打
+ * `system/registry`,那是管理旁路(算缺陷,见 CLAUDE.md 的三入口对等纪律)。
+ *
+ * **值一律按字符串收**:providerConfig 是明文存的非敏感配置(`system/registry get` 会原样
+ * 回显),当前消费方(如 memos 的 `ctx.config.baseUrl`)取的都是字符串。不猜类型转换 ——
+ * 猜错会把 `region=0755` 变成数字 755。结构化配置留给后续的 mountConfigSchema 校验面。
+ *
+ * 密钥不走这里:它明文进节点记录,任何对该节点有 read 的 SK 都看得见。凭证走 --auth-ref。
+ */
+export function parseConfigSpecs(specs: string[]): Record<string, string> | undefined {
+  const config: Record<string, string> = {}
+  for (const spec of specs) {
+    const idx = spec.indexOf('=')
+    if (idx < 0) {
+      throw new CliError(`invalid --config "${spec}": expected "key=value"`)
+    }
+    const key = spec.slice(0, idx).trim()
+    const value = spec.slice(idx + 1).trim()
+    if (!key || !value) throw new CliError(`invalid --config "${spec}": empty key/value`)
+    config[key] = value
+  }
+  return Object.keys(config).length ? config : undefined
+}
+
 /** 从文件读取并校验 HttpToolDef[](--kind http 的工具集数据源)。 */
 export function parseToolsFile(file: string): HttpToolDef[] {
   let raw: string
