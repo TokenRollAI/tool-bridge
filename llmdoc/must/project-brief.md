@@ -55,14 +55,16 @@ tool-bridge 是一个"自描述、可反向注册、协议开放的工具与上�
 - **Help DSL**:`htbp 0.1` 头 + `node`/`hint`/`cmd` 行 + 缩进属性(`q/h/body/returns/scope/effect/confirm`);每 cmd 必声明 `scope`;未知行必须忽略。格式详见 [../reference/protocol-contract.md](../reference/protocol-contract.md)。
 - **渐进式发现**:已知路径 → `~help` → 最小调用 →(必要时)`~skill` → 按需下钻,省 token。
 - **node kind**:`directory`/`mcp`/`http`/`builtin`/`context`/`device`/`remote` 七种。
-- **NodeRegistry**:builtin `system/registry`,List/Get/Write/Update/Delete/Resolve;**一切"挂上树"的动作最终落 `NodeRegistry.Write`**(统一注册面)。
+- **NodeRegistry**:builtin `system/registry`,List/Get/Write/Update/Delete/Resolve;**一切"挂上树"的动作最终落 `NodeRegistry.Write`**(统一注册面,`tb integration add` 与 `~register` 也不例外)。`node:`(NodeRegistry)与 `secret:`(SecretStore)是唯一权威存储,catalog 与 integration instance 都是派生视图。
 - **SK(Secret Key)**:唯一凭证形态,opaque token,sha256 哈希存查;记录 owner(`user:`/`agent:`/`device:`)与 scopes。
 - **Scope**:`(路径 glob 模式, 动作集, effect?)`;动作 = read/write/call/register/admin;deny 优先、无匹配默认拒。
 - **Admin SK**:scope=`**` 全动作,用于签发更细 SK;Workers 必须通过 secret 预置,不得把随机明文写入日志。Node/Docker server默认同样要求 `TB_BOOTSTRAP_ADMIN_SK` 并在监听前 fail closed;仅显式 `TB_ALLOW_INSECURE_BOOTSTRAP=true` 才放行随机生成并打印一次。宿主中立 `runBootstrap` 与未传 `adminSk` 的 SDK仍保留兼容随机流程,嵌入方负责收紧。
 - **Authorizer.Check**:唯一权限判定入口,所有模块只依赖它。
 - **SecretStore**:builtin `system/secret`,上游凭证 AES-256-GCM 加密只写不读,主密钥 `TB_SECRET_ENCRYPTION_KEY` env-only。
 - **authRef / skRef**:节点配置中对 SecretStore 凭证的引用名(凭证本体不出网关);**pluginToken**:Plugin 回调平台的令牌,签发仅一次。
-- **Provider**:纯接口。ToolProvider = List/Get/Call;ContextProvider = List/Get/Update/Write 四动词 + 可选 Search/Watch/Delete;内置与 Plugin 地位对等。
+- **Provider**:纯接口。ToolProvider = List/Get/Call;ContextProvider = List/Get/Update/Write 四动词 + 可选 Search/Watch/Delete;内置与 Plugin 地位对等。**内置 provider 的目录是编译期常量**(构建期求值插件 `~describe` 生成,与插件代码同一份构建产物),不落库、不可能陈旧;external plugin 才有注册记录。
+- **Integration(集成)**:用户视角的"接上一个外部服务"。**一个 instance = 一次挂载,身份 = 节点 path**;同一 provider 挂两次就是两个账号,没有独立的 instance 表(`tb integration ls` 只是 NodeRegistry 的投影)。技术分层不变:catalog(有什么)→ secret(凭证)→ 节点(挂在哪)→ 可选 OAuth 授权;`tb integration add` 是这几步的编排,不是新协议。
+- **catalog(内置集成目录)**:builtin `system/catalog`,list/get/search 三 cmd **全 read scope**(descriptor 无敏感信息,挂载只要 register scope,浏览不该更严)。与 `system/plugin`(external plugin 注册面,admin)分工:前者答"平台自带什么",后者管"外部部署的注册与探活"。
 - **工具虚拟化**:namespace 前缀 / rename / hide / description override,对外只暴露虚拟名。
 - **remote 联邦**:kind=`remote` 联到另一 HTBP 服务,https 强制 + host 白名单 + `X-TB-Via` 环检测(maxHops 默认 4)。
 - **`$ref`**:超限大对象(>1 MiB)返回预签名 URL,不过网关流量;无 presign 凭证时走 `/~ref` 网关中转下载兜底。

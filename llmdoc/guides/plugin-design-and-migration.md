@@ -3,7 +3,7 @@
 > 用途:两件事的单一入口 —— (1) 写/审 plugin 时该守的边界与已知取舍;(2) 把 open-connector
 > 的 provider 迁成 tool-bridge plugin 的可重复流程与回归闸门。
 > 来源:2026-08-12 三轮批量迁移(3 → 12 → 100 个 provider)+ 三个新能力(credentialProbe /
-> credentialFields / oauth)+ 一次设计 review 的取证与修复。
+> credentialFields / oauth)+ 一次设计 review 的取证与修复;2026-08-14 内置目录改编译期 catalog。
 > 更新时机:plugin 契约面变化、迁移流水线改动、或新的安全/规模边界被实测出来时。
 >
 > **这里只写方法与判据,不记单个 plugin 的清单** —— 产物级细节(哪些 provider 已迁、各自的
@@ -18,9 +18,10 @@ plugin 与网关**同进程、同权**,没有任何隔离层。这条决定了�
 |---|---|---|
 | plugin 的 `env` 只有白名单 | `plugins/src/registry.ts` `narrowPluginEnv` | 一行 `ctx.env.TB_SECRET_ENCRYPTION_KEY` 拿到 SecretStore 主密钥,「凭证不出网关」归零 |
 | 出站只经 guardedFetch,跨源重定向剥凭证 | `plugins/src/_runtime/guardedFetch.ts` | SSRF 打内网/云元数据;或 302 一下把租户 API key 送给第三方 |
-| 未配 `PLUGIN_TOKEN` 一律拒 | `plugin-sdk` `assertAuthorized` | 公网任何人自造 `X-TB-Context` 即可调该 plugin 全部 action,当匿名出站中转 |
+| 外挂 endpoint 未配 `PLUGIN_TOKEN` 一律拒 | `plugin-sdk` `assertAuthorized` | 公网任何人自造 `X-TB-Context` 即可调该 plugin 全部 action,当匿名出站中转。**进程内 binding 例外**:标识走 `env.TB_PLUGIN_IN_PROCESS`(宿主装配时闭包持有,网络请求碰不到)而非 header —— 用 header 表达"我是进程内"等于把 fail-closed 拆了 |
 | `credentialProbe` 必须只读、无必填入参 | `app/src/toolNodes.ts` `assertProbeShape`(从 List 核验) | 每次挂载都产生业务副作用;或永久拒绝挂载却报"稍后重试" |
 | 密钥不进 `providerConfig` | 契约注释 + 作者纪律(**尚无机器校验**) | `system/registry get` 对只有该节点 read 的窄 SK 也明文回显 |
+| 读路径不写库 | core `plugin/catalog.ts` 的解析函数只吃 `ReadOnlyStore` | 曾靠"调用点传裸 store"维持,结果 7 个调用点 4 个传了可写的 deps:删掉一个插件后随便读一次就复活,且四条链行为各异 |
 
 **判据**:凡是"靠作者纪律维持"的边界,在规模上都会失效。114 个产物由同一批人在同一周写完,
 纪律还在;1000 个、尤其掺入外部 plugin 之后只剩声明。新增能力时先问一句"这条谁来强制"。
@@ -37,6 +38,16 @@ plugin 与网关**同进程、同权**,没有任何隔离层。这条决定了�
 最后一行是关键:`providerConfig` 只发给那个 plugin(插件之间不共享),**但不是密钥通道** ——
 `system/registry get` 按目标节点的 read 判定后 `return store.get(path)`,整个 config 明文回显。
 放密钥进去等于绕过 SecretStore 的加密、只写不读、以及 `assertSecretRefUse` 的 admin 要求。
+输入口是 `tb tool mount --config k=v` / `tb ctx mount --config k=v` 与 Dashboard 向导的
+config 行(共享 `cli/src/registry.ts` 的 `parseConfigSpecs`);值一律按字符串收,不猜类型转换。
+
+**`credentialFields[].secret` 是展示语义,不是通道语义。** 声明了 `credentialFields` 的
+export,它的**全部字段**都进 authRef 指向的那个 secret —— 运行时 `assertToolConfig` 把整份声明
+交给 core `parseCredentialValues`,后者要求每个 `required !== false` 的字段都出现在解出的 JSON
+里。`secret: false` 只表示"这个值不敏感,输入框不必遮蔽"(如 baseUrl)。**按它分流进
+`providerConfig` 是错的**:Dashboard 曾这么引导,照做则挂载必被拒,精确影响 8 个声明了
+`secret: false` 的 provider。非凭证的挂载配置该由 export 独立声明(`mountConfigSchema`,已接线
+但当前零消费点),而不是混在凭证字段里靠一个布尔标志区分。
 
 `oauth` 与 `credentialFields` **互斥**(契约当场拒):两者都在描述"authRef 指向的 secret 存
 什么",而 oauth 模式下那个 secret 固定存 client 凭证。`oauth` 与 `credentialProbe` 同样互斥:
@@ -222,5 +233,26 @@ open-connector 有 1329 个 provider、约 104 万行,且基本逐个手写(全�
 懒加载确实生效 —— 装配零成本。但全量外推到 1000 个是 **~8 秒**,对 Workers 启动预算是硬约束:
 CF 侧必须靠构建期 `include` 裁剪集合,不能指望运行时懒加载兜住。
 
-另有两处随注册数(而非装配数)线性增长、到 1000 会成问题:`system/plugin` 的 `catalog` 全量
-分页扫 `plugin:*`;plugin 变更时 `registry.subtree('')` 全树扫反查挂载。
+另有两处随注册数(而非装配数)线性增长、到 1000 会成问题:`system/plugin` 的 `catalog` cmd 全量
+分页扫 `plugin:*`;plugin 变更时 `registry.subtree('')` 全树扫反查挂载。**`system/catalog` 不在
+其中** —— 它读的是内存里的编译期常量,零 KV 往返(降序代价是它只覆盖内置目录,external plugin
+仍走注册表)。
+
+## 十一、内置插件不需要注册
+
+**内置插件的目录是编译期常量**,由构建期求值每个插件的 `~describe` 生成
+(`packages/plugins/scripts/generateCatalog.ts` → `src/catalog.generated.ts`,99 条 / 35.9 KiB)。
+决策与求值前提见 [builtin-catalog-not-registry](../memory/decisions/builtin-catalog-not-registry.md)。
+对写/审 plugin 的人,三条直接后果:
+
+- **别写"先 `tb plugin register` 再挂载"的文档或引导**。内置插件直接 `tb integration add`
+  或 `tb tool mount --provider <id>` 即可用;`system/plugin` 那条路是给外挂 https 部署的
+  (它在网络那头,探活与契约校验是必要前置)。
+- **改了 export 的声明就要重跑 codegen**:`pnpm --filter @tool-bridge/plugins generate:catalog`。
+  闸门在 `test/runtime/catalogCodegen.test.ts`(逐条对拍求值 digest),忘了会红在 `pnpm verify`。
+  为什么闸门放 test 而不是 build:verify 比发布 workflow 的 build 早得多,漏到打 tag 之后
+  返工要删 tag 重打。
+- **`~describe` 必须是纯内存、零凭证、零 env 的**(现状 99/99 如此)。codegen 会真调它;
+  一个需要网络或凭证才能 describe 的插件进不了目录。另注意 **`dynamic: true` 不在 `~describe`
+  里** —— plugin-sdk 只在 `help()` 输出它,`describe()` 刻意让 proxyTools 与静态 tools 对外
+  同形状,故 codegen 无法从 descriptor 判断哪个 export 是动态的。

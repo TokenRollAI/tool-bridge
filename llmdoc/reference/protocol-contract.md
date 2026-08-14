@@ -133,7 +133,8 @@ cmd resolve-library-id POST /docs/context7/resolve-library-id  ← cmd 行:<name
 - `Scope{pattern,actions,effect?}`:动作 = read/write/call/register/admin;**deny 优先 → allow → 无匹配默认拒**;`*`/`**` glob 语义。
 - `ContextEntry`:主键 `uri = node://<namespace-path>/<entry-path>`;`version` 乐观并发(`ifVersion` 不符 → conflict;r2 落地 etag=version);`contentType` 决定表现;>1 MiB 的 Get 返回 `$ref`。
 - `PluginManifest{id,protocolVersion:'plugin/v2',endpoint,auth,healthPath,enabled}`:manifest 只描述部署与生命周期,不含 v1 的 `kind`/`interfaceVersion`;能力由 `~describe.exports[]` 的 `profile`/`methods` 声明。auth = `{kind:'platform-token'}` 或 `{kind:'bearer',secretRef}`。
-- builtin 模块名集合:`sk | secret | registry | status | plugin | federation | annotation`(引导时全部物化)。
+- builtin 模块名集合:`sk | secret | registry | status | plugin | catalog | federation | annotation`(引导时全部物化;已引导实例升级后由 `ensureBuiltinNodes` 补挂缺失节点)。
+- `BuiltinCatalogEntry{id,kind:'builtin',endpoint:'binding:<id>',digest,describe}`:内置集成目录的一项,**编译期常量**(由构建期求值插件 `~describe` 生成,与插件代码同一份构建产物),`digest` = descriptor canonical JSON 的 sha256;目录级 digest 只覆盖 (id, per-entry digest) 对。内置集成**不写** `plugin:`/`pluginmeta:`/`pluginhealth:`,故没有 registered 状态,也不可能陈旧。manifest 由 id 现算(endpoint 恒 `binding:<id>`、healthPath 恒 `/healthz`、永远 enabled、`auth.kind:'platform-token'`),只活在单次调用的内存里。
 - `Annotation{path,text,updatedAt,updatedBy}`:key `annotation:<path>`,每 path 一条覆盖写;text trim 后 1..2000;path 须 resolve 命中(根 `''` 放行 = 全树公告);独立于 TreeNode,工具子路径可标注。
 - `FeedbackEntry{id,title,detail,by,at,up[],down[]}`:key `feedback:<path>` 单 key 数组(KV last-write-wins,低频非关键数据接受并发窗口);`id = fb_ + 6 位 base36`;`by`/投票人 = `ctx.owner`;净分 = up-down(派生不落库);title ≤ 80、detail ≤ 500(trim 后)。
 - 四动词语义:`Write` 幂等 upsert / `Update` patch(不存在 → not_found,path 不可改)/ `Get` 不存在 → not_found / `Delete` 幂等静默(SKRegistry)或 not_found(NodeRegistry)。
@@ -166,7 +167,28 @@ cmd resolve-library-id POST /docs/context7/resolve-library-id  ← cmd 行:<name
 - 可选声明 `credentialProbe`(仅 tools/v1):一个只读、零副作用、无必填入参的工具名。挂载时平台用注入的凭证真调一次它,凭证不可用当场拒绝挂载 —— 否则配错的 key 要等第一次业务调用才 401。平台从 `List` 核验探针形状(在工具表里、`effect==='read'`、`required` 为空),不合规按 `invalid_argument` 拒。
 - 托管 OAuth 有**两套**、共用 `/~oauth/callback` 与 state 密封,流程分开:mcp 上游那条靠 MCP SDK 的 discovery + 动态客户端注册;provider 型(`kind:'tool'` 且 export 声明 `oauth`)的端点是声明的已知值、client 由用户自己在 provider 后台注册。回调按目标节点 kind 分派。调用期令牌过期自动刷新,上游 401 触发一次强制刷新重试(不返回 `expires_in` 的 provider 只有这条路能自愈)。
 - `pluginToken`(Plugin 回调平台的令牌)注册时签发仅一次。
-- 生命周期:注册时自动探活(`GET {healthPath}`)+ 抓取 `~describe` 并校验 plugin/v2 exports;不再抓 `~help`。endpoint 可为 `binding:<name>`(宿主装配的进程内插件,探活/契约/调用直调 handler,零网络;`system/plugin` 的 `catalog` cmd 列目录)。endpoint/healthPath/protocolVersion 更新时重探活并刷新 contract,auth/enabled 等本地字段变化不触发 contract refresh;未声明的可选方法不会被调用;周期探活反映健康态但不自动注销。
+- 生命周期:注册时自动探活(`GET {healthPath}`)+ 抓取 `~describe` 并校验 plugin/v2 exports;不再抓 `~help`。endpoint/healthPath/protocolVersion 更新时重探活并刷新 contract,auth/enabled 等本地字段变化不触发 contract refresh;未声明的可选方法不会被调用;周期探活反映健康态但不自动注销。
+- **`system/plugin` 实际只承载显式注册的 plugin**:内置插件**不再经它注册、不写** `plugin:`/`pluginmeta:`/`pluginhealth:`(它们的 descriptor 由编译期 catalog 提供),故 `plugin list`/`get` 只见显式注册过的记录,`plugin catalog`(admin,列宿主装配的 binding 名)里内置项恒 `registered:false`——那不是"没配好",是"不需要"。内置集成的浏览面是 `system/catalog`(见 8a)。`write` 仍**受理** `binding:<name>` endpoint(显式注册一个进程内插件是合法路径,也是覆盖同名内置项的方式),只是内置目录不再需要走这一步。
+- 挂载时的 export 解析走**唯一分发口**,优先级由 **endpoint 决定契约真源**:
+  - `https://` 注册记录 **赢** 同名内置目录项 —— 注册是用户的显式动作(自建 `github` 插件该覆盖内置那个),且它的契约真源本就是注册时抓的 `pluginmeta:` 快照;
+  - `binding:` 注册记录 **输给** 内置目录 —— 它指向的代码就是本进程这一份,catalog 的 descriptor 与它同源同构建、不可能更旧;而那种记录的快照只在注册那一刻抓过一次(已删除的自动补注册在存量部署里留下的记录尤其如此),让它赢等于让"契约永久陈旧"在升级过的部署里原样复活;
+  - `binding:` 记录但目录里没有该 id(宿主没装配那个插件)→ 仍走注册记录。
+- **三条路都只读** —— "读路径不写库"由函数签名保证(解析函数只接受目录值与只有 `get` 的只读 store),不靠调用点传参纪律。此前读路径会自动补写注册记录,表现是"删掉一个插件后随便读一次就复活",且四条调用链行为各异。
+
+## 8a. `system/catalog` — 内置集成目录(只读)
+
+平台自带能力的**目录**,与 `system/plugin`(external plugin 的注册面,admin,有副作用)分工明确。数据源是编译期常量 `BuiltinCatalog`(宿主经 `pluginCatalog` 注入),未注入则各 cmd 回空页而非报错。
+
+| cmd | scope | args → 返回 |
+|---|---|---|
+| `list` | **read** | `{opts?:{limit?,cursor?}}` → `Page<CatalogListItem>`(按 id 升序) |
+| `get` | **read** | `{id}` → `BuiltinCatalogEntry`(含 `describe` **全文**);目录里没有 → `not_found` |
+| `search` | **read** | `{q,opts?}` → `Page<CatalogListItem>`;`q` 对 id 与 description 做大小写不敏感**子串**匹配(刻意不做分词/打分:目录规模 = 宿主装配数;全局工具搜索走 `/~search`) |
+
+- **scope 是 read 而非 admin**,理由是契约的一部分:descriptor 里没有敏感信息(只有 provider 名、export id、凭证**字段名**与它们要不要遮蔽,没有任何凭证值),而挂载只要 `register` scope —— 浏览比挂载更严会让渐进式发现在这条路上断掉。判定仍走 `Authorizer.Check`(读得到 `system/catalog` 这个节点才能列),无旁路。
+- `CatalogListItem{id,digest,exports[],nodeKinds[],needsOAuth,description?,credentialFields?}` 是**投影**:`nodeKinds` 由 export 的 `profile` 推(`tools/v1`→`tool`、`context/v1`→`context`),`needsOAuth` = 任一 export 声明了 `oauth`,`credentialFields` 只给**字段名**(多 export 各不相同时取第一个有声明的作为提示,精确形状去 `get`)。挂载表单/CLI 的字段校验以此为依据。
+- 分页 cursor = **下一条的 id**(不透明性对有界内存目录无意义)。cursor 指向的条目已随宿主重新装配消失时**从头开始而不是报错** —— 目录是派生视图,失效 cursor 不该变成不可恢复的错误。这与 `/~search` 的 AES-GCM opaque cursor 语义**不同**,别混用。
+- `exports.length > 1` 的 provider 挂载时必须显式给 `config.export`;`config.provider` 在目录与注册表里都找不到 → `invalid_argument`("未知 provider")。免注册**不等于什么都收**。
 
 ## 9. CLI 命令族矩阵
 
@@ -181,11 +203,12 @@ CLI 是纯 API 客户端,无专用端点。全局参数为 `--json` / `--base-ur
 | `tb ls` / `tree` / `help` | `~help` / `GET /~tree?depth=N`;CLI 显式 `--depth` 严格为 1..8(缺省由网关取 2);`tb help` 默认 Markdown 表现(TTY 下经 marked-terminal 渲染 ANSI 富文本,管道/非 TTY/NO_COLOR 输出裸 markdown),`--md` 强制裸 markdown,`--dsl` 请求紧凑 DSL(Accept: text/plain),`--json` 结构化 |
 | `tb search <query>` | 直连 root-only `POST /~search` + `{query,opts:{mode?,limit?,cursor?}}`;`--json` 保留完整 Page/cursor,人类模式打印工具表与 `next cursor` |
 | `tb call` | 直连 `POST /<path>`(path 即工具路径,body 为 arguments 本体);`--tool` 给出时信封 `POST /<path>` + `{tool,arguments}`(builtin/context 等通用)。arguments 三种给法互斥:第二 positional 裸 JSON(`tb call <path> '{...}'`)/ `--args` / `--args-file`。调用失败(unavailable/internal/invalid_argument/rate_limited)时尽力拉取该 path `~feedback` 注入提示(有条目列 top 3,无条目引导 submit;拉取限时 5s、失败静默) |
-| `tb tool mount` / `rm` | NodeRegistry.Write/Delete(kind=mcp/http/tool);`--kind tool --provider <plugin-id> [--auth-ref]` 挂 tool-provider Plugin;mcp/http 含 virtualize prefix/rename/hide/describe,条件 flag 在本地严格拒绝串用;缺 `--description` 时派生非空描述 |
+| `tb integration catalog/add/auth/ls/rm` | 集成的用户面(见下方小节);底层是 `system/catalog` + `system/secret` + `~register` + `system/registry`,**无新端点** |
+| `tb tool mount` / `rm` | NodeRegistry.Write/Delete(kind=mcp/http/tool);`--kind tool --provider <plugin-id> [--auth-ref] [--config k=v]` 挂 tool-provider Plugin(provider 可以是内置目录项或已注册 plugin,`--config` 是 providerConfig 输入口、**仅 `--kind tool` 接受**);mcp/http 含 virtualize prefix/rename/hide/describe,条件 flag 在本地严格拒绝串用;缺 `--description` 时派生非空描述 |
 | `tb tool auth <path>` | mcp 托管 OAuth 发起(POST `/<path>/~authorize`):authorized → 直接完成;redirect → 打印授权 URL 并尝试开浏览器(`--no-open` 只打印)。`--local`:本机 127.0.0.1 临时端口收 AS 回跳,code+state 转交网关 `/~oauth/callback` 兑换(适配 Bytebase 等只放行 loopback 回调的严格上游;默认流程遇 redirect 类报错会提示) |
 | `tb server add` / `ls` / `rm` | NodeRegistry(kind=remote 联邦);远端地址用 `--remote-url`,`--base-url` 始终表示当前网关(旧脚本须迁移,help 与缺参错误均提示);add 缺描述时派生非空描述,ls 支持分页;无 Registry 可见性时退到 `~tree`,该 fallback 不支持 `--limit/--cursor` 并明确报错 |
 | `tb ctx ls/cat/put/patch/rm/search` | Context List/Get/Write/Update/Delete + Search;内容 `--content`/`--file` 互斥,交互式 stdin 无输入源立即报错,List/Search 支持分页 |
-| `tb ctx mount` / `unmount` | NodeRegistry(kind=context,provider=r2/s3 或 context-provider Plugin id);provider 条件 flag 本地严格校验,缺描述时派生非空描述 |
+| `tb ctx mount` / `unmount` | NodeRegistry(kind=context,provider=r2/s3 或 context-provider Plugin id);provider 条件 flag 本地严格校验(`--config k=v` **仅 plugin provider** 接受,`--endpoint/--bucket/--region/--prefix` 反之),缺描述时派生非空描述 |
 | `tb skill ls/get/search/publish/rm` | skillhub 数据面(List/Get/Search/Publish/Remove;`get --out` 落本地目录、`publish <dir>` 递归读文本文件) |
 | `tb skill mount` / `unmount` | NodeRegistry(kind=skillhub,provider 默认 r2 无需凭证 / s3 opt-in) |
 | `tb connect` | 设备长驻(WS 反向注册,partysocket 重连 + 心跳) |
@@ -196,6 +219,27 @@ CLI 是纯 API 客户端,无专用端点。全局参数为 `--json` / `--base-ur
 | `tb federation ls/add/rm` | builtin `system/federation`:remote 联邦 host 白名单(list 合并 env 基线 ∪ 运行时;add/rm 只动运行时叠加层,env 基线条目 removable=false 不可删) |
 | `tb note ls/get/set/rm` | builtin `system/annotation`:Path 补充说明(set/rm 需 admin;path `'/'` = 根空串 = 全树公告) |
 | `tb feedback ls/get/submit/vote/rm` | `~feedback` 保留段端点(ls 可 `--hidden`;submit 须 `--title`/`--detail`;rm 走 DELETE 需 admin) |
-| `tb plugin register/list/get/update/health/catalog/rm` | PluginRegistry + 探活;list 支持分页;catalog 列宿主装配的进程内插件目录(`binding:<name>`,可用≠已激活) |
+| `tb plugin register/list/get/update/health/catalog/rm` | PluginRegistry(**external-only**)+ 探活;list 支持分页且只见 external plugin;catalog(admin)列宿主装配的 binding 名,内置项恒 `registered:false`——看内置集成用 `tb integration catalog` |
 
 `tool rm`/`server rm` 前有 kind 校验,防止命令名误删其它节点。`tb init`(部署向导)未实现,见 [../must/current-state.md](../must/current-state.md) 未竟事项。
+
+### `tb integration` 命令族(集成 = 一次挂载)
+
+树面的动词仍是 mount,协议未变;这一族是**编排**,把"挂一个现成集成"从四个概念三条命令收成一条。
+
+| 子命令 | 做什么 |
+|---|---|
+| `catalog [--search q] [--limit/--cursor]` | `system/catalog` 的 `list`/`search`(read scope,非 admin) |
+| `add <path> --provider <id> [--export] [凭证] [--config k=v] [--description]` | 编排:secret set →(`~register` 等价的)mount →(声明 oauth 时)提示 `tb integration auth` |
+| `auth <path>` | 与 `tb tool auth` **同一个 Command 本体**(含 `--local` loopback 逃生阀与 redirect 降级) |
+| `ls [--limit/--cursor]` | `system/registry list` 的投影(kind∈{tool,context} 且 provider∉{r2,s3}),**不是第二个真源** |
+| `rm <path> [--purge]` | `system/registry delete`(admin);`--purge` 连带删 add 代建的派生 secret,没有则静默 |
+
+`add` 的契约要点:
+
+- 凭证**四源互斥**(违反即本地拒):`--key <value>` / `--key-stdin`(推荐:argv 全局可读)/ `--field k=v`(可重复,多字段凭证)/ `--secret <name>`(复用已有 secret)。前三种会代建 secret。
+- **secret 名由挂载路径派生**:`integration-<path>`(`/` 换 `-`)。此前 authRef 是两处都要打对的自由文本,拼错不报错、agent 首次调用才 401。
+- 多字段凭证的明文是**键序固定的 JSON 对象**(core `encodeCredentialValues`),与 `tb secret set --field` 同一规则;全部字段进同一个 secret,`credentialFields[].secret:false` **不改变通道**(只表示输入不必遮蔽)。
+- 五类错误在**本地**拒(不消耗一次往返):字段名不在声明里、缺必填字段、声明了多字段却给单值、多 export 未指定 `--export`、`--export` 不在声明里。
+- 目录**查不到或无 read 权限时降级**为不给提示、**不阻断挂载**:catalog 只覆盖内置集成,external plugin 不在里面,平台侧校验照旧。
+- `--config k=v` 写 `providerConfig`(明文,`system/registry get` 会回显)。密钥不走这里。

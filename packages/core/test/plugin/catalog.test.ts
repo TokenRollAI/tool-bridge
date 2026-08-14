@@ -150,6 +150,64 @@ describe('resolveIntegration', () => {
   })
 
   /**
+   * **A3 在升级过的部署里不复活**:已删除的 `autoRegisterBinding` 在存量库里留下
+   * `plugin:<id>`(endpoint 是 `binding:`)+ 一份只在注册那刻抓过的 `pluginmeta:` 快照。
+   * 若让注册记录赢,改了插件声明后平台仍按老快照校验挂载 —— 那正是 catalog 要消灭的陈旧。
+   * endpoint 决定契约真源:`binding:` 的真源是构建产物,不是 KV 快照。
+   */
+  it('binding: 的存量注册记录不覆盖 catalog(陈旧快照不赢构建产物)', async () => {
+    const catalog = await catalogOf({ demo: MULTI_DESCRIBE })
+    const store = new MemoryStateStore()
+    await store.put(`${KEY_PLUGIN}demo`, {
+      id: 'demo',
+      protocolVersion: 'plugin/v2',
+      endpoint: 'binding:demo',
+      auth: { kind: 'platform-token' },
+      healthPath: '/healthz',
+      enabled: true,
+    })
+    // 陈旧快照:只有一个 export,而当前代码(catalog)已经有两个。
+    await store.put(`${KEY_PLUGIN_META}demo`, TOOLS_DESCRIBE)
+
+    const resolved = await resolveIntegration(store, catalog, 'demo', 'context', 'context', 'documents')
+    // 按陈旧快照解析会报"无 export 'documents'";走 catalog 才解析得出。
+    expect(resolved.source).toBe('builtin')
+    expect(resolved.export.id).toBe('documents')
+  })
+
+  it('binding: 记录但 catalog 里没有该 id → 仍走注册记录(宿主没装配那个插件)', async () => {
+    const store = new MemoryStateStore()
+    await store.put(`${KEY_PLUGIN}gone`, {
+      id: 'gone',
+      protocolVersion: 'plugin/v2',
+      endpoint: 'binding:gone',
+      auth: { kind: 'platform-token' },
+      healthPath: '/healthz',
+      enabled: true,
+    })
+    await store.put(`${KEY_PLUGIN_META}gone`, TOOLS_DESCRIBE)
+    const resolved = await resolveIntegration(store, {}, 'gone', 'tool', 'tool')
+    expect(resolved.source).toBe('external')
+  })
+
+  it('https 注册记录仍然优先(用户自建的覆盖同名内置项)', async () => {
+    const catalog = await catalogOf({ github: TOOLS_DESCRIBE })
+    const store = new MemoryStateStore()
+    await store.put(`${KEY_PLUGIN}github`, {
+      id: 'github',
+      protocolVersion: 'plugin/v2',
+      endpoint: 'https://my-github-plugin.example.com',
+      auth: { kind: 'platform-token' },
+      healthPath: '/healthz',
+      enabled: true,
+    })
+    await store.put(`${KEY_PLUGIN_META}github`, TOOLS_DESCRIBE)
+    const resolved = await resolveIntegration(store, catalog, 'github', 'tool', 'tool')
+    expect(resolved.source).toBe('external')
+    expect(resolved.manifest.endpoint).toBe('https://my-github-plugin.example.com')
+  })
+
+  /**
    * A1 的**结构性**回归:解析一次内置 provider 后,store 必须一个键都没多。
    * 此前这条路会写 `plugin:` 与 `pluginmeta:`,于是"删除即复活"。
    */

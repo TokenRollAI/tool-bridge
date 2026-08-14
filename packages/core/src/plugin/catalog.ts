@@ -185,12 +185,22 @@ export async function resolveExternalExport(
 }
 
 /**
- * 唯一分发入口:**显式注册记录优先**,内置目录兜底。
+ * 唯一分发入口:**外挂注册记录优先**,内置目录兜底。
  *
  * 顺序是有意的:注册是用户的显式动作,同名时该赢过平台自带的目录项(比如用户想用自己
  * 部署的 `github` 插件覆盖内置那个)。反过来会让"我明明注册了却没生效"变成无解的困惑。
  *
- * 两条路都只读。存量 external plugin 因此行为完全不变,而 builtin 从此零写库。
+ * **但 `binding:` endpoint 的注册记录例外:catalog 赢。** 那种记录有两个来源,两者都该让
+ * 编译期目录优先:
+ *
+ * - 已删除的 `autoRegisterBinding` 在存量部署里写下的 —— 升级后它们还在 KV 里,而它们的
+ *   `pluginmeta:` 快照**只在注册那一刻抓过一次**。若让它们赢,A3(契约永久陈旧)就在
+ *   升级过的部署里原样复活:改了插件的 export 声明,平台仍按老快照校验挂载。
+ * - 用户显式 `system/plugin write` 一个 `binding:` 插件 —— 那条路仍受理,但它指向的
+ *   代码就是本进程里的同一份,catalog 的 descriptor 与它同源同构建,不可能更旧。
+ *
+ * 换句话说:**endpoint 决定契约的真源**。`binding:` 的真源是这份构建产物,https 的真源
+ * 才是注册时抓的快照。两条路都只读。
  */
 export async function resolveIntegration(
   store: ReadOnlyStore,
@@ -201,7 +211,8 @@ export async function resolveIntegration(
   exportId?: string,
 ): Promise<ResolvedIntegration> {
   const manifest = (await store.get(KEY_PLUGIN + id)) as PluginManifest | null
-  if (manifest !== null) {
+  const isBinding = manifest?.endpoint.startsWith('binding:') === true
+  if (manifest !== null && !(isBinding && catalog[id] !== undefined)) {
     return await resolveExternalExport(store, id, nodeKind, what, exportId)
   }
   return resolveBuiltinExport(catalog, id, nodeKind, what, exportId)

@@ -6,8 +6,8 @@
 
 ## must/ — 每轮必读的复发性上下文
 
-- [must/project-brief.md](must/project-brief.md) — 项目定义、知识真源、七个 User Case、工程纪律(含选型表)、术语表精选。
-- [must/current-state.md](must/current-state.md) — 部署资源、代码现状(六包 + 测试数)、常用命令、.env 凭据状态表、工具链、未竟事项路线图(易变,每轮更新;含 2026-07-24 安全报告复核与本地修复状态)。
+- [must/project-brief.md](must/project-brief.md) — 项目定义、知识真源、七个 User Case、工程纪律(含选型表)、术语表精选(含 Integration / catalog 与"instance = 一次挂载"不变量)。
+- [must/current-state.md](must/current-state.md) — 部署资源、代码现状(九包 + 测试数)、常用命令、.env 凭据状态表、工具链、未竟事项路线图(易变,每轮更新;含发布积压与 2026-07-24 安全报告复核状态)。
 
 ## overview/ — 项目形态与边界
 
@@ -20,7 +20,7 @@
 
 ## reference/ — 稳定查表事实
 
-- [reference/protocol-contract.md](reference/protocol-contract.md) — HTBP 契约查表:端点面、内容协商、TBError、Help DSL、数据模型、SK/注册路径规则、设备帧协议、Plugin 传输契约、CLI 全局参数/分页/命令矩阵。**引用接口契约先查这里。**
+- [reference/protocol-contract.md](reference/protocol-contract.md) — HTBP 契约查表:端点面、内容协商、TBError、Help DSL、数据模型、SK/注册路径规则、设备帧协议、Plugin 传输契约、`system/catalog` 内置集成目录、CLI 全局参数/分页/命令矩阵(含 `tb integration`)。**引用接口契约先查这里。**
 - [reference/v1-lessons.md](reference/v1-lessons.md) — v1 前代实现:保留资产、重写动机(现状)、文件级检索地图、踩坑结论。
 
 ## guides/ — 一事一篇的工作流
@@ -30,8 +30,8 @@
 - [guides/do-websocket-hibernation.md](guides/do-websocket-hibernation.md) — DO hibernation WS 生产坑:边缘 ~100s 空闲掐断须客户端心跳保活、唤醒后内存状态机须从 storage 恢复(restoreReady)、本地 miniflare 测不出须线上跨休眠窗口验证。**改设备通道前必读。**
 - [guides/mcp-upstream-pitfalls.md](guides/mcp-upstream-pitfalls.md) — MCP 上游生产坑:会话复用机制(mcpsession KV 无 TTL + 400/404 失效信号)、不合规上游对过期会话回 200+空列表(实测 MetaMCP)与空列表防御、需自定义认证头的上游(飞书官方 MCP:X-Lark-MCP-\* 原样注入 + 必带工具白名单头)、生产可重跑排查手法(refresh=1 区分缓存层、幂等 update 强制重握手、塞伪 session 复现)。**挂载/排查 mcp 上游前必读。**
 - [guides/docker-host.md](guides/docker-host.md) — Docker/Node 宿主一篇通:env/bootstrap、`/data` 布局、production 单容器验收、localhost Compose 三跳开发栈与卷/凭据边界、CF 差异、`server-v*` 发布。**改 server 包或做 Docker/Compose 前必读。**
-- [guides/plugin-design-and-migration.md](guides/plugin-design-and-migration.md) — Plugin 设计取舍与 open-connector 迁移:plugin 是特权代码(同进程同权)故各边界须机器保证、四条凭证通道的分工与互斥、三个反复踩的错误语义错位、有状态 plugin 的分区键不是 mountPath、迁移流水线四阶段与三道回归闸门(等价/形状/wire)、批量 fan-out 的操作纪律、不该走迁移的 provider、规模实测数字。**写或审 plugin、跑迁移前必读。**
-- [guides/npm-publish.md](guides/npm-publish.md) — cli / sdk / gateway / dashboard / server 五包的 npm 发布:tsup bundle + dts 内联、publishConfig 覆盖、tag 触发 Trusted Publishing、新包两段式及常见坑;明确 Dashboard npm 与生产 `/ui` Static Assets 是两个独立发布面。
+- [guides/plugin-design-and-migration.md](guides/plugin-design-and-migration.md) — Plugin 设计取舍与 open-connector 迁移:plugin 是特权代码(同进程同权)故各边界须机器保证、四条凭证通道的分工与互斥(`credentialFields[].secret` 只管展示不管通道)、三个反复踩的错误语义错位、有状态 plugin 的分区键不是 mountPath、迁移流水线四阶段与三道回归闸门(等价/形状/wire)、批量 fan-out 的操作纪律、不该走迁移的 provider、规模实测数字、**内置插件不需要注册**(编译期 catalog 与 codegen 纪律)。**写或审 plugin、跑迁移前必读。**
+- [guides/npm-publish.md](guides/npm-publish.md) — 七个 public 包的 npm 发布:**一轮多包走 `release` workflow**(`pnpm release:plan` → `gh workflow run release.yml`,不再手工逐个打 tag)、tsup bundle + dts 内联、publishConfig 覆盖、tag 触发 Trusted Publishing、新包两段式及常见坑;明确 Dashboard npm 与生产 `/ui` Static Assets 是两个独立发布面。
 - [guides/verification-and-commit-practices.md](guides/verification-and-commit-practices.md) — 验证与提交纪律:证据矩阵、Dashboard 真实浏览器四面证据、收尾同轮更新 current-state、配置面对等、出站边界测试、opt-in 退出码、长驻进程与跨休眠验证、先取证后改码、批量清理后 lint:fix、pathspec 提交与 hook 自动暂存防污染。
 - [guides/cli-argument-contract-review.md](guides/cli-argument-contract-review.md) — CLI 参数契约审查:Commander 解析/本地语义/服务端安全三层、同名同义、条件 flag、全局参数位置、分页 cursor 与 API↔CLI↔Dashboard 能力矩阵。**新增或修改 CLI 参数前必读。**
 
@@ -41,6 +41,7 @@
 - `memory/decisions/` — durable 设计/流程决策,recorder 维护。现存:
   - [memory/decisions/plugin-hosted-install.md](memory/decisions/plugin-hosted-install.md) — 2026-07-07:Plugin 托管化安装(插件市场),CF 宿主经 scoped API token 自动部署;多挂载扩展 CallContext(`mountPath`/`mountConfig`);手动 register 通道保留。
   - [memory/decisions/plugin-in-process-catalog.md](memory/decisions/plugin-in-process-catalog.md) — 2026-08-11:Plugin 走"进程内目录"(可用≠实例化、单进程装载、`binding:` 进程内直调、构建期可选集合以适配 CF 体积上限);与托管安装并存分账。
+  - [memory/decisions/builtin-catalog-not-registry.md](memory/decisions/builtin-catalog-not-registry.md) — 2026-08-14:内置插件目录是**编译期常量**不是运行时状态(`~describe` 求值落 `catalog.generated.ts`,不写 `plugin:`/`pluginmeta:`/`pluginhealth:`);读路径无写由函数签名保证;免注册体验由 catalog 兑现而非自动补注册;`system/plugin` 收窄 + 新增只读 `system/catalog`(read scope)。含求值前提实测与"不收 action 表"的取舍。
 - `memory/reflections/` — 新反思写此目录(reflector 维护),定期把 durable 教训提炼进 guides 后归档。现存:2026-07-07 gateway/dashboard 可发布化(publishConfig 覆盖、隔离 tsc 环境坑);2026-07-07 Dashboard/CLI 能力对等(长驻进程管道坑、共享工作区 lint:fix、双向矩阵审计);2026-07-08 CLI citty→commander 迁移(宽松解析在权限面是安全缺陷、二次补丁即换框架、范例钉模式+workflow 平移打法);2026-07-08 ~help 可读性重构(UX 类抱怨也先拉线上真实输出取证、协议扩展走未知行忽略通道不拼语义字段、markdown 定位可读性表现避免等价矩阵、行式多行值双层防御);[memory/reflections/2026-07-08-docker-node-host.md](memory/reflections/2026-07-08-docker-node-host.md) Docker/Node 宿主落地(环境污染排查与 dts/端口/流接口等教训);[memory/reflections/2026-07-08-annotation-feedback.md](memory/reflections/2026-07-08-annotation-feedback.md) annotation+feedback 能力(协议级 vs 管理面级形态先对齐、保留段继承 path 级权限、core store/协议壳分层压低返工);[memory/reflections/2026-07-10-dashboard-functional-refactor.md](memory/reflections/2026-07-10-dashboard-functional-refactor.md) Dashboard 功能性重构(敏感数据生命周期、cursor/后端语义、真实浏览器证据、lazy 失败恢复)。bootstrap 期存量反思已提炼完毕并归档至 `archive/llmdoc-reflections/`。
 - [memory/reflections/2026-07-10-dashboard-0.5.0-release.md](memory/reflections/2026-07-10-dashboard-0.5.0-release.md) — Dashboard 0.5.0 发布(拆分 npm/生产发布面、先读 Cloudflare 状态避免重复部署、静态产物 hash 验收、瞬时网络错误幂等重试)。
 - [memory/reflections/2026-07-10-dashboard-0.6.0-release.md](memory/reflections/2026-07-10-dashboard-0.6.0-release.md) — Dashboard 0.6.0 整站大修与发布(ActivityRail/Explorer/Workspace 信息架构、树查询/ARIA、跨 observer 生命周期的 Promise 结算、npm 与生产静态资产双发布面)。
@@ -83,6 +84,7 @@
 | 改设备 WS 通道/排查设备离线/DO hibernation 行为 | guides/do-websocket-hibernation.md |
 | 挂载 mcp 上游/排查 mcp 节点工具消失或会话异常 | guides/mcp-upstream-pitfalls.md |
 | 写/审 plugin、加 plugin 契约能力、跑 open-connector 迁移 | guides/plugin-design-and-migration.md |
-| 发 npm 新版本/新增可发布包/排查 CI 发布失败 | guides/npm-publish.md |
+| 动内置集成目录(catalog codegen / `system/catalog` / 挂载解析路径) | memory/decisions/builtin-catalog-not-registry.md → architecture/code-map.md |
+| 发 npm 新版本/一轮多包发布/新增可发布包/排查 CI 发布失败 | guides/npm-publish.md |
 | 了解产品定位/非目标/模块落地状态 | overview/project-overview.md |
 | 追溯 bootstrap 期规范原文/验收证据 | 仓库根 `archive/`(历史) |
