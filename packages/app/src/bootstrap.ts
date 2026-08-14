@@ -1,6 +1,7 @@
 import {
   adminBootstrapInput,
   AnnotationStore,
+  type BuiltinCatalog,
   type BuiltinDeps,
   checkScopes,
   KEY_BOOTSTRAPPED,
@@ -36,13 +37,14 @@ interface BootstrapEnv {
  * 展示一次的兼容路径。
  */
 
-/** 引导时注册的内置节点(system directory + 七个 builtin,含 annotation;feedback 走 ~feedback 保留段,非 builtin)。 */
+/** 引导时注册的内置节点(system directory + 八个 builtin;feedback 走 ~feedback 保留段,非 builtin)。 */
 const BUILTIN_MODULES = [
   'sk',
   'secret',
   'registry',
   'status',
   'plugin',
+  'catalog',
   'federation',
   'annotation',
 ] as const
@@ -52,7 +54,8 @@ const BUILTIN_DESCRIPTIONS: Record<string, string> = {
   secret: 'Upstream credential store',
   registry: 'Node registry',
   status: 'Gateway health and summary',
-  plugin: 'Plugin registry',
+  plugin: 'Plugin registry (external plugins)',
+  catalog: 'Built-in integration catalog (read-only)',
   federation: 'Remote federation host allowlist',
   annotation: 'Admin notes shown in ~help of any path',
 }
@@ -175,6 +178,8 @@ export interface BuiltinAssemblyOpts {
   allowInsecureHttp: boolean
   /** 进程内插件装配表;binding: endpoint 的探活/契约抓取经此直调。 */
   pluginBindings?: PluginBindings
+  /** 内置插件目录 descriptor;`system/catalog` 的数据源(只读)。 */
+  pluginCatalog?: BuiltinCatalog
   /** remote 联邦白名单的 env 基线(TB_REMOTE_ALLOWLIST 解析后;供 system/federation list 标注不可删)。 */
   remoteAllowlistBase: string[]
   secrets: SecretStoreImpl
@@ -206,6 +211,9 @@ export function buildDeps(opts: BuiltinAssemblyOpts): BuiltinDeps {
     federation: { store: new RemoteAllowlistStore(opts.store), base: opts.remoteAllowlistBase },
     // annotation 模块:Path 补充说明(registry 复用上方注入做 path 校验)。
     annotation: { store: new AnnotationStore(opts.store) },
+    // catalog 模块:内置目录的只读浏览面。装配了目录才挂 —— 没装内置插件的宿主
+    // 不该多一个恒空的节点(引导仍会建 system/catalog 节点,但 dispatch 回空页)。
+    catalog: { catalog: () => opts.pluginCatalog ?? {} },
   }
 }
 

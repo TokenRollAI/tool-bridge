@@ -12,6 +12,7 @@ import type { NodeRegistryStore } from '../tree/registry'
 import type { ScopeChecker } from '../tree/visibility'
 import type { SKRegistryStore } from '../auth/sk'
 import type { BuiltinModule } from './types'
+import { type CatalogModuleDeps, createCatalogModule } from './catalog'
 import { createPluginModule, type PluginModuleDeps } from './plugin'
 import { createAnnotationModule } from './annotation'
 import { createFederationModule } from './federation'
@@ -24,6 +25,11 @@ import { createSkModule } from './sk'
 export interface BuiltinDeps {
   /** annotation 模块装配(Path 补充说明;registry 复用上方注入)。缺省不装配。 */
   annotation?: { store: AnnotationStore }
+  /**
+   * catalog 模块装配:内置插件目录的只读浏览面(read scope)。
+   * 缺省不装配 system/catalog —— 没装内置插件的宿主不该多一个恒空的节点。
+   */
+  catalog?: CatalogModuleDeps
   /**
    * federation 模块装配:remote host 白名单的运行时存储 + env 基线。
    * 缺省不装配 system/federation(纯逻辑单测无需)。
@@ -80,6 +86,9 @@ export function createBuiltins(deps: BuiltinDeps): Map<string, BuiltinModule> {
       createPluginModule({ ...deps.plugin, sk: deps.sk, secrets: deps.secret, now }),
     )
   }
+  if (deps.catalog !== undefined) {
+    modules.set('catalog', createCatalogModule(deps.catalog))
+  }
   if (deps.federation !== undefined) {
     modules.set(
       'federation',
@@ -99,6 +108,7 @@ export {
   type AnnotationModuleDeps,
   createAnnotationModule,
 } from './annotation'
+export { type CatalogListItem, type CatalogModuleDeps, createCatalogModule } from './catalog'
 export {
   createFederationModule,
   type FederationHost,

@@ -33,6 +33,7 @@ export function createRouteEnv(deps: TbAppDeps): RouteEnv {
         allowInsecureHttp: deps.allowInsecureHttp,
         remoteAllowlistBase: deps.remote.allowlist,
         ...(deps.pluginBindings !== undefined ? { pluginBindings: deps.pluginBindings } : {}),
+        ...(deps.pluginCatalog !== undefined ? { pluginCatalog: deps.pluginCatalog } : {}),
       }),
     )
   const globalSearchCapabilities = (): Array<'search' | 'search:semantic'> => {
