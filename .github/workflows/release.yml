@@ -116,7 +116,6 @@ jobs:
           "); do
             VERSION="$(node -p "require('./packages/$PKG/package.json').version")"
             TAG="$PKG-v$VERSION"
-            WORKFLOW="publish-$PKG.yml"
 
             echo "::group::$TAG"
 
@@ -126,26 +125,38 @@ jobs:
               continue
             fi
 
+            # 记下推 tag 的时刻:下面只认这之后创建的 run。同名 tag 可能被删过重推
+            # (发布失败的既有恢复手法),那些**历史失败 run** 的 headBranch 与新的一模一样,
+            # 不按时间过滤会让 `gh run watch --exit-status` 盯上一个早已失败的旧 run。
+            SINCE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
             git tag "$TAG"
             git push origin "$TAG"
-            echo "pushed $TAG"
+            echo "pushed $TAG at $SINCE"
 
-            # tag push 会触发 publish workflow;等它出现再等它结束。
+            # tag push 会触发 publish workflow;等它们出现再等它们结束。
             # 不用 `gh workflow run`:那会在 ref 上再跑一次,与 tag 触发的重复。
+            #
+            # **按 tag 找而不是按 workflow 名找**:`server-v*` 同时触发两个 workflow
+            # (publish-server 发 npm、publish-docker 推 GHCR 镜像)。只盯 publish-server
+            # 会让镜像构建失败被静默放过 —— 那也是发布物的一部分。
+            RUNS=''
             for _ in $(seq 1 30); do
-              RUN_ID="$(gh run list --workflow "$WORKFLOW" --event push --limit 5 \
-                --json databaseId,headBranch \
-                --jq "[.[] | select(.headBranch == \"$TAG\")] | first | .databaseId")"
-              if [ -n "$RUN_ID" ] && [ "$RUN_ID" != "null" ]; then break; fi
+              RUNS="$(gh run list --event push --limit 40 \
+                --json databaseId,headBranch,createdAt,workflowName \
+                --jq "[.[] | select(.headBranch == \"$TAG\" and .createdAt >= \"$SINCE\")] \
+                      | map(.databaseId) | join(\" \")")"
+              if [ -n "$RUNS" ]; then break; fi
               sleep 5
             done
-            if [ -z "$RUN_ID" ] || [ "$RUN_ID" = "null" ]; then
-              echo "等不到 $WORKFLOW 的 run(tag 已推,可手工查看 Actions)" >&2
+            if [ -z "$RUNS" ]; then
+              echo "等不到 $TAG 触发的 run(tag 已推,去 Actions 页查看)" >&2
               exit 1
             fi
 
-            echo "watching run $RUN_ID"
-            gh run watch "$RUN_ID" --exit-status
+            for RUN_ID in $RUNS; do
+              echo "watching run $RUN_ID"
+              gh run watch "$RUN_ID" --exit-status
+            done
             echo "::endgroup::"
           done
 
