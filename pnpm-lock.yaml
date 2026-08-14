@@ -496,6 +496,9 @@ importers:
       '@tool-bridge/core':
         specifier: workspace:*
         version: link:../core
+      '@tool-bridge/plugins':
+        specifier: workspace:*
+        version: link:../plugins
       '@types/better-sqlite3':
         specifier: ^7.6.13
         version: 7.6.13
