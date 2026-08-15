@@ -3,7 +3,8 @@
 > 用途:两件事的单一入口 —— (1) 写/审 plugin 时该守的边界与已知取舍;(2) 把 open-connector
 > 的 provider 迁成 tool-bridge plugin 的可重复流程与回归闸门。
 > 来源:2026-08-12 三轮批量迁移(3 → 12 → 100 个 provider)+ 三个新能力(credentialProbe /
-> credentialFields / oauth)+ 一次设计 review 的取证与修复;2026-08-14 内置目录改编译期 catalog。
+> credentialFields / oauth)+ 一次设计 review 的取证与修复;2026-08-14 内置目录改编译期 catalog;
+> 2026-08-15 export 级 mountConfigFields(providerConfig 的声明面)。
 > 更新时机:plugin 契约面变化、迁移流水线改动、或新的安全/规模边界被实测出来时。
 >
 > **这里只写方法与判据,不记单个 plugin 的清单** —— 产物级细节(哪些 provider 已迁、各自的
@@ -33,7 +34,7 @@ plugin 与网关**同进程、同权**,没有任何隔离层。这条决定了�
 | `authRef` → secret(单值) | 一个 API key | 平台 resolve 后经 `X-TB-Upstream-Auth` 给该 plugin;SecretStore 只写不读 |
 | `authRef` → secret(`credentialFields` 多字段) | app_id+app_secret、access key+secret+region… | 同上,SDK 按声明解析成 `ctx.credentials` |
 | `authRef` → secret(`oauth` 模式) | **client 凭证**(clientId/clientSecret) | 只有平台读;插件拿到的是平台换来并刷新的 access token |
-| `providerConfig`(`ctx.mountConfig`) | region / baseUrl override / 功能开关 / workspace 归属 | **该节点对应的 plugin + 任何对该节点有 `read` 的 SK** |
+| `providerConfig`(`ctx.mountConfig`;声明面 `mountConfigFields`) | region / baseUrl override / 功能开关 / workspace 归属(非密钥) | **该节点对应的 plugin + 任何对该节点有 `read` 的 SK** |
 
 最后一行是关键:`providerConfig` 只发给那个 plugin(插件之间不共享),**但不是密钥通道** ——
 `system/registry get` 按目标节点的 read 判定后 `return store.get(path)`,整个 config 明文回显。
@@ -41,13 +42,26 @@ plugin 与网关**同进程、同权**,没有任何隔离层。这条决定了�
 输入口是 `tb tool mount --config k=v` / `tb ctx mount --config k=v` 与 Dashboard 向导的
 config 行(共享 `cli/src/registry.ts` 的 `parseConfigSpecs`);值一律按字符串收,不猜类型转换。
 
+这条通道此前只有输入口、没有**声明面** —— 该配哪些 `providerConfig` 全靠用户猜或读插件源码。
+export 现在可选 `mountConfig(fields)`(plugin-sdk setter,`~describe` 落 `mountConfigFields`,
+仅 tools/v1)补这个缺口:字段是扁平的 `{key,label?,description?,required?}`,管理面据此渲染带
+标签输入框、必填缺失挂载前拦下(CLI `assertMountConfig`、Dashboard 向导)。与 `credentialFields`
+的边界是**硬的、不是风格选择**:值明文进 providerConfig,故 `PluginMountConfigField`(core
+`plugin/contract.ts`)**刻意没有 `secret` 字段** —— 给了就等于诱导把密钥塞进不加密的通道,
+密钥永远走 `credentialFields`。`required` 缺省 = **非必填**(与 providerConfig "有就用没有走默认"
+一致;凭证字段缺省是**必填**,方向相反 —— 少个 baseUrl 多半有云端兜底,少个凭证字段必然调不通)。
+与 `credentials()`/`oauth()` **不互斥**:一个 export 可以既要凭证又要 baseUrl。消费面还有 catalog
+投影 `CatalogListItem.mountConfigFields` 与 `tb integration catalog` 的 CONFIG 列。
+
 **`credentialFields[].secret` 是展示语义,不是通道语义。** 声明了 `credentialFields` 的
 export,它的**全部字段**都进 authRef 指向的那个 secret —— 运行时 `assertToolConfig` 把整份声明
 交给 core `parseCredentialValues`,后者要求每个 `required !== false` 的字段都出现在解出的 JSON
 里。`secret: false` 只表示"这个值不敏感,输入框不必遮蔽"(如 baseUrl)。**按它分流进
 `providerConfig` 是错的**:Dashboard 曾这么引导,照做则挂载必被拒,精确影响 8 个声明了
-`secret: false` 的 provider。非凭证的挂载配置该由 export 独立声明(`mountConfigSchema`,已接线
-但当前零消费点),而不是混在凭证字段里靠一个布尔标志区分。
+`secret: false` 的 provider。非凭证的挂载配置该由 export 用上面的 `mountConfigFields` 独立声明,
+而不是混在凭证字段里靠一个布尔标志区分。**别和 `PluginPackage.mountConfigSchema` 混**(core
+`plugin/package.ts`):那是插件包**安装分发单位**的 JSON Schema 配置(P3,当前零消费点),
+`mountConfigFields` 是 **export 挂载**时的扁平字段声明,两个不同层。
 
 `oauth` 与 `credentialFields` **互斥**(契约当场拒):两者都在描述"authRef 指向的 secret 存
 什么",而 oauth 模式下那个 secret 固定存 client 凭证。`oauth` 与 `credentialProbe` 同样互斥:

@@ -163,7 +163,7 @@ cmd resolve-library-id POST /docs/context7/resolve-library-id  ← cmd 行:<name
   - 声明 `credentialFields` = JSON 对象,SDK 按声明解析并校验必填后给 `ctx.credentials`,挂载时平台也校验字段齐全(缺了当场拒并点名);
   - 声明 `oauth` = 平台换来并按需刷新的 **access token**(此时 authRef 指向的 secret 存的是 clientId/clientSecret,不出网关)。
   `oauth` 与 `credentialFields`、`oauth` 与 `credentialProbe` 均**互斥**(契约当场拒:三者都在描述"那个 secret 存什么"或"怎么验它")。
-- `X-TB-Context` 的 `mountConfig`(= 挂载节点 `providerConfig`)只发给该节点对应的 plugin,插件之间不共享;但它**不是密钥通道** —— 明文进节点记录,`system/registry get` 对任何有该节点 `read` 的 SK 都原样回显。密钥一律走 authRef。
+- `X-TB-Context` 的 `mountConfig`(= 挂载节点 `providerConfig`)只发给该节点对应的 plugin,插件之间不共享;但它**不是密钥通道** —— 明文进节点记录,`system/registry get` 对任何有该节点 `read` 的 SK 都原样回显。密钥一律走 authRef。export 可选声明 `mountConfigFields`(仅 tools/v1;`~describe` 校验字段名为合法标识符且不重复)告诉平台该挂载需要哪些 providerConfig 字段(如 baseUrl/region),管理面据此渲染带标签输入框、必填缺失挂载前拒。它与 `credentialFields` 是**两条通道**,故 `PluginMountConfigField` **刻意没有 `secret` 字段**(能遮蔽输入会诱导把密钥放进这条明文通道);`required` 缺省=非必填(与 providerConfig "有就用没有走默认" 一致,与凭证字段缺省必填方向相反)。core `plugin/contract.ts`(`PluginMountConfigField`)。
 - 可选声明 `credentialProbe`(仅 tools/v1):一个只读、零副作用、无必填入参的工具名。挂载时平台用注入的凭证真调一次它,凭证不可用当场拒绝挂载 —— 否则配错的 key 要等第一次业务调用才 401。平台从 `List` 核验探针形状(在工具表里、`effect==='read'`、`required` 为空),不合规按 `invalid_argument` 拒。
 - 托管 OAuth 有**两套**、共用 `/~oauth/callback` 与 state 密封,流程分开:mcp 上游那条靠 MCP SDK 的 discovery + 动态客户端注册;provider 型(`kind:'tool'` 且 export 声明 `oauth`)的端点是声明的已知值、client 由用户自己在 provider 后台注册。回调按目标节点 kind 分派。调用期令牌过期自动刷新,上游 401 触发一次强制刷新重试(不返回 `expires_in` 的 provider 只有这条路能自愈)。
 - `pluginToken`(Plugin 回调平台的令牌)注册时签发仅一次。
@@ -185,8 +185,8 @@ cmd resolve-library-id POST /docs/context7/resolve-library-id  ← cmd 行:<name
 | `get` | **read** | `{id}` → `BuiltinCatalogEntry`(含 `describe` **全文**);目录里没有 → `not_found` |
 | `search` | **read** | `{q,opts?}` → `Page<CatalogListItem>`;`q` 对 id 与 description 做大小写不敏感**子串**匹配(刻意不做分词/打分:目录规模 = 宿主装配数;全局工具搜索走 `/~search`) |
 
-- **scope 是 read 而非 admin**,理由是契约的一部分:descriptor 里没有敏感信息(只有 provider 名、export id、凭证**字段名**与它们要不要遮蔽,没有任何凭证值),而挂载只要 `register` scope —— 浏览比挂载更严会让渐进式发现在这条路上断掉。判定仍走 `Authorizer.Check`(读得到 `system/catalog` 这个节点才能列),无旁路。
-- `CatalogListItem{id,digest,exports[],nodeKinds[],needsOAuth,description?,credentialFields?}` 是**投影**:`nodeKinds` 由 export 的 `profile` 推(`tools/v1`→`tool`、`context/v1`→`context`),`needsOAuth` = 任一 export 声明了 `oauth`,`credentialFields` 只给**字段名**(多 export 各不相同时取第一个有声明的作为提示,精确形状去 `get`)。挂载表单/CLI 的字段校验以此为依据。
+- **scope 是 read 而非 admin**,理由是契约的一部分:descriptor 里没有敏感信息(只有 provider 名、export id、凭证**字段名**与它们要不要遮蔽、非凭证配置**字段名**,没有任何凭证值),而挂载只要 `register` scope —— 浏览比挂载更严会让渐进式发现在这条路上断掉。判定仍走 `Authorizer.Check`(读得到 `system/catalog` 这个节点才能列),无旁路。
+- `CatalogListItem{id,digest,exports[],nodeKinds[],needsOAuth,description?,credentialFields?,mountConfigFields?}` 是**投影**:`nodeKinds` 由 export 的 `profile` 推(`tools/v1`→`tool`、`context/v1`→`context`),`needsOAuth` = 任一 export 声明了 `oauth`,`credentialFields`/`mountConfigFields` 都只给**字段名**(各多 export 各不相同时取第一个有该声明的作为提示,精确形状去 `get`)。前者是凭证字段名,后者是非凭证的 providerConfig 字段名(如 baseUrl/region,含 `required` 但无 `secret`)。挂载表单/CLI 的字段校验以此为依据。
 - 分页 cursor = **下一条的 id**(不透明性对有界内存目录无意义)。cursor 指向的条目已随宿主重新装配消失时**从头开始而不是报错** —— 目录是派生视图,失效 cursor 不该变成不可恢复的错误。这与 `/~search` 的 AES-GCM opaque cursor 语义**不同**,别混用。
 - `exports.length > 1` 的 provider 挂载时必须显式给 `config.export`;`config.provider` 在目录与注册表里都找不到 → `invalid_argument`("未知 provider")。免注册**不等于什么都收**。
 
