@@ -33,6 +33,12 @@ interface CatalogListItem {
   digest: string
   exports: string[]
   id: string
+  mountConfigFields?: Array<{
+    description?: string
+    key: string
+    label?: string
+    required?: boolean
+  }>
   needsOAuth: boolean
   nodeKinds: Array<'context' | 'tool'>
 }
@@ -123,6 +129,30 @@ function assertFieldNames(
   }
 }
 
+/**
+ * 必填的非凭证配置(如 memos 的 baseUrl)缺了就在挂载前拦 —— 否则要么 credentialProbe
+ * 报个看着像凭证问题的错,要么等 agent 首次调用才 invalid_argument。
+ *
+ * 只校验**必填缺失**,不拦未知 key:providerConfig 允许 export 未声明的额外配置
+ * (mountConfigFields 是"该配什么"的提示,不是白名单),且 catalog 查不到时(external
+ * plugin / 无 read 权限)整个校验跳过 —— 与凭证字段校验同一"尽力而为"姿势。
+ */
+function assertMountConfig(
+  entry: CatalogListItem | undefined,
+  given: Record<string, string> | undefined,
+): void {
+  const fields = entry?.mountConfigFields
+  if (fields === undefined) return
+  const provided = new Set(Object.keys(given ?? {}))
+  const missing = fields.filter(f => f.required === true && !provided.has(f.key)).map(f => f.key)
+  if (missing.length > 0) {
+    throw new CliError(
+      `missing required config for "${entry!.id}": ${missing.join(', ')} `
+      + `(pass with --config ${missing[0]}=…)`,
+    )
+  }
+}
+
 /** secret 名由挂载路径派生:不再让用户手打一个两处都要对上的自由文本。 */
 function derivedSecretName(path: string): string {
   return `integration-${path.replace(/\//g, '-')}`
@@ -159,7 +189,7 @@ Examples:
           return
         }
         printLine(table(
-          ['ID', 'KINDS', 'EXPORTS', 'CREDENTIAL'],
+          ['ID', 'KINDS', 'EXPORTS', 'CREDENTIAL', 'CONFIG'],
           items.map(i => [
             i.id,
             i.nodeKinds.join(','),
@@ -169,6 +199,11 @@ Examples:
               : i.credentialFields !== undefined
                 ? i.credentialFields.map(f => f.key).join(',')
                 : 'single api key',
+            i.mountConfigFields === undefined
+              ? '—'
+              : i.mountConfigFields
+                  .map(f => (f.required === true ? `${f.key}*` : f.key))
+                  .join(','),
           ]),
         ))
         if (result.cursor !== undefined) printLine(`\nnext: --cursor ${result.cursor}`)
@@ -239,6 +274,11 @@ Examples:
         // 目标节点 kind 由 export 的 profile 决定;单一 kind 时可自动判定。
         const nodeKind = entry?.nodeKinds.length === 1 ? entry.nodeKinds[0]! : 'tool'
 
+        // 挂载配置在**任何写操作之前**解析并校验:缺必填 baseUrl 就该在这里拒,
+        // 而不是等 secret 已经代建出来才炸(那会留下孤儿 secret)。
+        const providerConfig = parseConfigSpecs(opts.config)
+        assertMountConfig(entry, providerConfig)
+
         let authRef = opts.secret !== undefined ? String(opts.secret).trim() : undefined
         let createdSecret: string | undefined
         let secretFields: string[] | undefined
@@ -268,7 +308,6 @@ Examples:
           createdSecret = authRef
         }
 
-        const providerConfig = parseConfigSpecs(opts.config)
         const config: NodeConfig = nodeKind === 'context'
           ? {
               kind: 'context',

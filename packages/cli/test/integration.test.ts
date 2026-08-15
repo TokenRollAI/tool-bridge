@@ -61,6 +61,18 @@ const SENTRY = {
   needsOAuth: true,
 }
 
+/** 自建实例型:单值凭证 + 一个必配的非凭证 baseUrl。 */
+const MEMOS = {
+  id: 'memos',
+  digest: 'd4',
+  exports: ['actions'],
+  nodeKinds: ['tool'],
+  needsOAuth: false,
+  mountConfigFields: [
+    { key: 'baseUrl', label: '实例地址', required: true },
+  ],
+}
+
 const savedBaseUrl = process.env.TB_BASE_URL
 
 beforeEach(() => {
@@ -253,6 +265,44 @@ describe('tb integration add', () => {
     const mount = bodyOf(calls, /~register/)
     expect(mount.config.providerConfig).toEqual({ baseUrl: 'https://memos.example.com' })
     expect(mount.config.authRef).toBe('integration-notes-memos')
+  })
+
+  /** 必配的非凭证配置缺失,此前要等 credentialProbe 或首次调用才炸;现在挂载前拦。 */
+  it('缺必填 mountConfig(baseUrl)→ 本地拒,不写 secret 不挂载', async () => {
+    const calls = routedFetch([catalogOf([MEMOS])])
+    await runCli([
+      'integration',
+      'add',
+      'notes/memos',
+      '--provider',
+      'memos',
+      '--key',
+      'k',
+      ...base,
+    ])
+    expect(process.exitCode).not.toBe(0)
+    expect(bodyOf(calls, /system\/secret/)).toBeUndefined()
+    expect(bodyOf(calls, /~register/)).toBeUndefined()
+  })
+
+  it('给了必填 mountConfig 就正常挂载', async () => {
+    const calls = routedFetch([catalogOf([MEMOS])])
+    await runCli([
+      'integration',
+      'add',
+      'notes/memos',
+      '--provider',
+      'memos',
+      '--key',
+      'k',
+      '--config',
+      'baseUrl=https://memos.example.com',
+      ...base,
+    ])
+    expect(process.exitCode).toBe(0)
+    expect(bodyOf(calls, /~register/).config.providerConfig).toEqual({
+      baseUrl: 'https://memos.example.com',
+    })
   })
 
   it('context/v1 的 provider 挂成 kind:context', async () => {
