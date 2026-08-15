@@ -116,8 +116,14 @@ describe('契约面', () => {
     expect(body.exports).toHaveLength(1)
     expect(body.exports[0]?.profile).toBe('tools/v1')
     expect(body.exports[0]?.credentialProbe).toBe('get_current_user')
-    // instanceUrl 是配置不是密钥,不该占 secret 通道。
+    // instanceUrl 是配置不是密钥,不该占 secret 通道 —— 它走 mountConfigFields。
     expect('credentials' in body.exports[0]!).toBe(false)
+    expect(body.exports[0]?.mountConfigFields).toEqual([{
+      key: 'instanceUrl',
+      label: '实例地址',
+      description: '你的 Metabase 实例地址,如 https://x.metabaseapp.com',
+      required: true,
+    }])
   })
 })
 

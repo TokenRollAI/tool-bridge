@@ -30,6 +30,12 @@ export function createRailwayPlugin(): ReturnType<typeof createProviderPlugin> {
     description: 'Railway',
     credentialProbe: 'list_projects',
     actions: railwayActions,
+    // workspaceId 非必配:决定 list_projects 用哪条 query,留空用账户默认。
+    mountConfigFields: [{
+      key: 'workspaceId',
+      label: 'Workspace ID',
+      description: '限定 list_projects 的工作区;留空用账户默认',
+    }],
     handlers: {
       list_projects: listProjects,
       get_project: getProject,

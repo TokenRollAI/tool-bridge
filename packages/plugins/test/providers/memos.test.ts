@@ -113,6 +113,12 @@ describe('契约面', () => {
         profile: 'tools/v1',
         description: 'Memos',
         credentialProbe: 'get_current_user',
+        mountConfigFields: [{
+          key: 'baseUrl',
+          label: '实例地址',
+          description: '你的 Memos 实例地址,如 https://memos.example.com',
+          required: true,
+        }],
       }],
     })
   })

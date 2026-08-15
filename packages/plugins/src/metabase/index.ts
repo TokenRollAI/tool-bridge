@@ -34,6 +34,12 @@ export function createMetabasePlugin(): ReturnType<typeof createProviderPlugin> 
     description: 'Metabase',
     actions: metabaseActions,
     credentialProbe: 'get_current_user',
+    mountConfigFields: [{
+      key: 'instanceUrl',
+      label: '实例地址',
+      description: '你的 Metabase 实例地址,如 https://x.metabaseapp.com',
+      required: true,
+    }],
     handlers: {
       get_current_user: getCurrentUser,
       list_databases: listDatabases,

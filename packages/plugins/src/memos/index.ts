@@ -40,6 +40,12 @@ export function createMemosPlugin(): ReturnType<typeof createProviderPlugin> {
     description: 'Memos',
     actions: memosActions,
     credentialProbe: 'get_current_user',
+    mountConfigFields: [{
+      key: 'baseUrl',
+      label: '实例地址',
+      description: '你的 Memos 实例地址,如 https://memos.example.com',
+      required: true,
+    }],
     handlers: {
       create_memo: createMemo,
       list_memos: listMemos,

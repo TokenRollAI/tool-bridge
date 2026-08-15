@@ -116,8 +116,16 @@ describe('契约面', () => {
     expect(body.exports).toHaveLength(1)
     expect(body.exports[0]?.profile).toBe('tools/v1')
     expect(body.exports[0]?.credentialProbe).toBe('list_workspaces')
-    // region / workspaceId 是配置不是密钥,不该占 secret 通道。
+    // region / workspaceId 是配置不是密钥,不该占 secret 通道 —— 它们走 mountConfigFields。
     expect('credentials' in body.exports[0]!).toBe(false)
+    expect(body.exports[0]?.mountConfigFields).toEqual([
+      { key: 'region', label: '区域', description: 'us、eu、apac 或 aws_us 之一;留空用 us' },
+      {
+        key: 'workspaceId',
+        label: 'Workspace ID',
+        description: '限定到某个 workspace;留空用凭证的默认 workspace',
+      },
+    ])
   })
 })
 

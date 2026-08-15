@@ -31,6 +31,12 @@ export function createOutlinePlugin(): ReturnType<typeof createProviderPlugin> {
     // 上游 credentialValidators 打的 `/auth.info` 没有对应 action;`list_collections` 同样
     // 只读、无必填入参,且同样要求凭证有效,拿它当挂载时的凭证探针。
     credentialProbe: 'list_collections',
+    // baseUrl 非必配:缺省走 Outline 云端(app.getoutline.com),自建实例才配。
+    mountConfigFields: [{
+      key: 'baseUrl',
+      label: '实例地址',
+      description: '自建 Outline 的根地址;留空用云端 app.getoutline.com',
+    }],
     handlers: {
       list_collections: listCollections,
       get_collection: getCollection,

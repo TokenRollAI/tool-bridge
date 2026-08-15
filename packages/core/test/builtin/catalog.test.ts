@@ -57,11 +57,26 @@ const BOTH_KINDS: PluginDescribe = {
   ],
 }
 
+/** 自建实例型:单值凭证 + 一个必配的非凭证 baseUrl(如 memos)。 */
+const WITH_MOUNT_CONFIG: PluginDescribe = {
+  protocolVersion: 'plugin/v2',
+  exports: [{
+    id: 'actions',
+    profile: 'tools/v1',
+    description: 'Memos',
+    credentialProbe: 'get_current_user',
+    mountConfigFields: [
+      { key: 'baseUrl', label: '实例地址', description: 'https://memos.example.com', required: true },
+    ],
+  }],
+}
+
 const CATALOG: BuiltinCatalog = {
   tavily: entry('tavily', TOOLS),
   jira: entry('jira', WITH_FIELDS),
   sentry: entry('sentry', WITH_OAUTH),
   notes: entry('notes', BOTH_KINDS),
+  memos: entry('memos', WITH_MOUNT_CONFIG),
 }
 
 const mod = createCatalogModule({ catalog: () => CATALOG })
@@ -85,13 +100,25 @@ describe('system/catalog help', () => {
 describe('list', () => {
   it('按 id 排序,投影出挂载要知道的东西', async () => {
     const { items } = await list()
-    expect(items.map(i => i.id)).toEqual(['jira', 'notes', 'sentry', 'tavily'])
+    expect(items.map(i => i.id)).toEqual(['jira', 'memos', 'notes', 'sentry', 'tavily'])
     const jira = items.find(i => i.id === 'jira')!
     expect(jira.exports).toEqual(['actions'])
     expect(jira.nodeKinds).toEqual(['tool'])
     expect(jira.needsOAuth).toBe(false)
     // 字段**名**要给(挂载表单靠它生成输入),值从来不在 descriptor 里。
     expect(jira.credentialFields?.map(f => f.key)).toEqual(['baseUrl', 'personalAccessToken'])
+  })
+
+  it('投影 mountConfigFields —— 挂载向导据此渲染非凭证配置输入', async () => {
+    const { items } = await list()
+    const memos = items.find(i => i.id === 'memos')!
+    expect(memos.mountConfigFields).toEqual([
+      { key: 'baseUrl', label: '实例地址', description: 'https://memos.example.com', required: true },
+    ])
+    // 单值凭证 + 有 mountConfig,不该混进 credentialFields。
+    expect(memos.credentialFields).toBeUndefined()
+    // 不声明的 provider 不带这个键(不塞空数组)。
+    expect(items.find(i => i.id === 'tavily')).not.toHaveProperty('mountConfigFields')
   })
 
   it('oauth 型标出来 —— 挂载后还要授权一步', async () => {
@@ -119,18 +146,18 @@ describe('list', () => {
       seen.push(...page.items.map(i => i.id))
       cursor = page.cursor
     } while (cursor !== undefined)
-    expect(seen).toEqual(['jira', 'notes', 'sentry', 'tavily'])
+    expect(seen).toEqual(['jira', 'memos', 'notes', 'sentry', 'tavily'])
   })
 
   it('limit 超上限被夹到 200', async () => {
     const { items } = await list({ opts: { limit: 9999 } })
-    expect(items.length).toBe(4)
+    expect(items.length).toBe(5)
   })
 
   /** 目录是派生视图:失效 cursor 不该变成不可恢复的错误。 */
   it('失效 cursor 从头开始而不是报错', async () => {
     const { items } = await list({ opts: { cursor: 'gone-after-reassembly' } })
-    expect(items.map(i => i.id)).toEqual(['jira', 'notes', 'sentry', 'tavily'])
+    expect(items.map(i => i.id)).toEqual(['jira', 'memos', 'notes', 'sentry', 'tavily'])
   })
 
   it('空目录回空页(未装内置插件的宿主)', async () => {

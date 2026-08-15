@@ -479,6 +479,50 @@ describe('oauth:平台托管的 provider 型 OAuth2 声明', () => {
   })
 })
 
+describe('mountConfig:非凭证挂载配置字段声明', () => {
+  const FIELDS = [
+    { key: 'baseUrl', label: '实例地址', description: 'https://memos.example.com', required: true },
+  ]
+
+  it('~describe 把 mountConfigFields 原样报给平台(挂载向导据此渲染输入框)', async () => {
+    const plugin = createPlugin<Env>({ token: env => env.PLUGIN_TOKEN })
+    plugin.tools('actions', { description: 'Memos' })
+      .mountConfig(FIELDS)
+      .register('list', { description: 'List', effect: 'read' }, () => ({}))
+    const res = await plugin.fetch(new Request('https://plugin.test/~describe'), ENV)
+    const body = (await res.json()) as { exports: Array<{ mountConfigFields?: unknown }> }
+    expect(body.exports[0]?.mountConfigFields).toEqual(FIELDS)
+  })
+
+  it('没声明的 export 不带这个字段(不是 undefined 占位)', async () => {
+    const res = await makePlugin().fetch(new Request('https://plugin.test/~describe'), ENV)
+    const body = (await res.json()) as { exports: Array<Record<string, unknown>> }
+    expect('mountConfigFields' in body.exports[0]!).toBe(false)
+  })
+
+  it('空字段表 → 当场拒', () => {
+    const plugin = createPlugin<Env>({ token: env => env.PLUGIN_TOKEN })
+    expect(() => plugin.tools('actions').mountConfig([])).toThrow(/至少要声明一个字段/)
+  })
+
+  // 与凭证/oauth 是不同维度:一个 provider 可以既要 API key 又要 baseUrl,不互斥。
+  it('与 credentials() 共存 —— 两条通道并行声明', async () => {
+    const plugin = createPlugin<Env>({ token: env => env.PLUGIN_TOKEN })
+    plugin.tools('actions')
+      .credentials([{ key: 'apiKey', label: 'API Key', required: true }])
+      .mountConfig(FIELDS)
+      .register('list', { description: 'List', effect: 'read' }, () => ({}))
+    const res = await plugin.fetch(new Request('https://plugin.test/~describe'), ENV)
+    const body = (await res.json()) as {
+      exports: Array<{ credentialFields?: unknown, mountConfigFields?: unknown }>
+    }
+    expect(body.exports[0]?.credentialFields).toEqual([
+      { key: 'apiKey', label: 'API Key', required: true },
+    ])
+    expect(body.exports[0]?.mountConfigFields).toEqual(FIELDS)
+  })
+})
+
 describe('进程内 binding 跳过 token 校验', () => {
   /**
    * 平台按 plugin id mint token 存 SecretStore,而宿主装配 binding 时拿不到那个值 ——

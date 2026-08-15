@@ -32,6 +32,19 @@ export function createLangsmithPlugin(): ReturnType<typeof createProviderPlugin>
     // 上游 credentialValidators 就是打 /api/v1/workspaces 试凭证,这里对应到同一个 action:
     // effect 是 read、入参全可选,满足探针的三个条件。
     credentialProbe: 'list_workspaces',
+    // 两者均非必配:region 缺省走 us,workspaceId 缺省用凭证的默认 workspace。
+    mountConfigFields: [
+      {
+        key: 'region',
+        label: '区域',
+        description: 'us、eu、apac 或 aws_us 之一;留空用 us',
+      },
+      {
+        key: 'workspaceId',
+        label: 'Workspace ID',
+        description: '限定到某个 workspace;留空用凭证的默认 workspace',
+      },
+    ],
     handlers: {
       list_workspaces: listWorkspaces,
       list_projects: listProjects,

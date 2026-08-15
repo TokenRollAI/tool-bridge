@@ -120,6 +120,12 @@ describe('契约面', () => {
         profile: 'tools/v1',
         description: 'Grafana',
         credentialProbe: 'search_dashboards',
+        mountConfigFields: [{
+          key: 'baseUrl',
+          label: '实例地址',
+          description: 'Grafana 实例根地址(Cloud 或自建),如 https://x.grafana.net',
+          required: true,
+        }],
       }],
     })
   })

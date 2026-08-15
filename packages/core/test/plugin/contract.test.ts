@@ -104,6 +104,48 @@ describe('validatePluginContract(plugin/v2)', () => {
     })
     expect(err.message).toContain('Search')
   })
+
+  it('tools/v1 声明 mountConfigFields → 通过并原样保留', () => {
+    const parsed = validatePluginContract({
+      manifest: MANIFEST,
+      describe: {
+        protocolVersion: 'plugin/v2',
+        exports: [{
+          id: 'actions',
+          profile: 'tools/v1',
+          mountConfigFields: [{ key: 'baseUrl', label: '实例地址', required: true }],
+        }],
+      },
+    })
+    expect(parsed.exports[0]?.mountConfigFields).toEqual([
+      { key: 'baseUrl', label: '实例地址', required: true },
+    ])
+  })
+
+  it('context/v1 上声明 mountConfigFields → invalid_argument(仅 tools/v1)', () => {
+    const err = expectInvalid({
+      protocolVersion: 'plugin/v2',
+      exports: [{
+        id: 'docs',
+        profile: 'context/v1',
+        methods: ['Get'],
+        mountConfigFields: [{ key: 'baseUrl' }],
+      }],
+    })
+    expect(err.message).toContain('mountConfigFields')
+  })
+
+  it('mountConfigFields 有重复字段名 → invalid_argument', () => {
+    const err = expectInvalid({
+      protocolVersion: 'plugin/v2',
+      exports: [{
+        id: 'actions',
+        profile: 'tools/v1',
+        mountConfigFields: [{ key: 'baseUrl' }, { key: 'baseUrl' }],
+      }],
+    })
+    expect(err.message).toContain('重复')
+  })
 })
 
 describe('resolvePluginExport', () => {

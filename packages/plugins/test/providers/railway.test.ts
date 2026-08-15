@@ -95,6 +95,11 @@ describe('契约面', () => {
         profile: 'tools/v1',
         description: 'Railway',
         credentialProbe: 'list_projects',
+        mountConfigFields: [{
+          key: 'workspaceId',
+          label: 'Workspace ID',
+          description: '限定 list_projects 的工作区;留空用账户默认',
+        }],
       }],
     })
   })

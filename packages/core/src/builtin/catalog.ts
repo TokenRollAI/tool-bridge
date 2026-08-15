@@ -12,8 +12,8 @@
  * 才能列),没有旁路。
  */
 
+import type { PluginCredentialField, PluginMountConfigField } from '../plugin/contract'
 import type { BuiltinCatalog, BuiltinCatalogEntry } from '../plugin/catalog'
-import type { PluginCredentialField } from '../plugin/contract'
 import type { CmdSpec, HelpModel } from '../htbp/model'
 import type { BuiltinModule } from './types'
 import { cmdPath, LIST_OPTS_SCHEMA, requireString } from './util'
@@ -36,6 +36,11 @@ export interface CatalogListItem {
   /** 可挂载的 export id(单 export 时挂载可省略 config.export)。 */
   exports: string[]
   id: string
+  /**
+   * 声明了非凭证挂载配置(如 baseUrl)时给出字段名与是否必填(不含值)。挂载向导据此
+   * 渲染带标签的输入框;未声明为 undefined。
+   */
+  mountConfigFields?: PluginMountConfigField[]
   /** 声明了 oauth → 挂载后还要授权一步。 */
   needsOAuth: boolean
   /** 这些 export 能挂成什么 kind 的节点。 */
@@ -57,6 +62,7 @@ function projectListItem(entry: BuiltinCatalogEntry): CatalogListItem {
   // 多 export 时字段声明可能各不相同;列表取第一个声明了凭证字段的那个作为提示,
   // 精确形状由 get 给出(挂载表单也该按选定的 export 取)。
   const withFields = exports.find(e => e.credentialFields !== undefined)
+  const withMountConfig = exports.find(e => e.mountConfigFields !== undefined)
   const description = exports.find(e => e.description !== undefined)?.description
   return {
     id: entry.id,
@@ -67,6 +73,9 @@ function projectListItem(entry: BuiltinCatalogEntry): CatalogListItem {
     ...(description !== undefined ? { description } : {}),
     ...(withFields?.credentialFields !== undefined
       ? { credentialFields: withFields.credentialFields }
+      : {}),
+    ...(withMountConfig?.mountConfigFields !== undefined
+      ? { mountConfigFields: withMountConfig.mountConfigFields }
       : {}),
   }
 }

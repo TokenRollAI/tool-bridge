@@ -7,7 +7,7 @@
  * `index.ts` 只剩它自己的东西。
  */
 
-import type { InputSchemaLike, OperationSpec, PluginCredentialField, PluginOAuth } from '@tool-bridge/core'
+import type { InputSchemaLike, OperationSpec, PluginCredentialField, PluginMountConfigField, PluginOAuth } from '@tool-bridge/core'
 import { createPlugin, type Plugin, type PluginCallContext, TBError } from '@tool-bridge/plugin-sdk'
 
 /** 迁移产物统一的 env(平台注册时 mint 的回调令牌)。 */
@@ -89,6 +89,15 @@ export interface ProviderPluginInput {
   /** handler 表:键必须与 actions 完全一致。 */
   handlers: Record<string, Handler>
   /**
+   * 本 provider 挂载时需要的**非凭证配置**字段(如自建实例的 baseUrl / instanceUrl /
+   * region)。对应上游 open-connector 把这些放在 api_key `extraFields` 里 `secret: false`
+   * 的那批。handler 里照常从 `ctx.config` 取(如 `ctx.config?.baseUrl`)。
+   *
+   * 声明了它,挂载向导就知道该配什么、必填项缺失可在挂载前拦 —— 而不是让用户对着自由
+   * k=v 框猜。**只放非密钥**:值明文进节点记录,密钥走 `credentialFields`/authRef。
+   */
+  mountConfigFields?: PluginMountConfigField[]
+  /**
    * 本 provider 走**平台托管的 OAuth2**(授权码 + PKCE)时声明端点与 scope。
    * 对应上游 open-connector 的 `OAuth2AuthDefinition`。
    *
@@ -120,6 +129,7 @@ export function createProviderPlugin(input: ProviderPluginInput): Plugin<Provide
   const tools = plugin.tools(input.exportId ?? 'actions', { description: input.description })
   if (input.oauth !== undefined) tools.oauth(input.oauth)
   if (input.credentialFields !== undefined) tools.credentials(input.credentialFields)
+  if (input.mountConfigFields !== undefined) tools.mountConfig(input.mountConfigFields)
   for (const name of names) {
     tools.register(name, input.actions[name]!, (args, ctx: PluginCallContext<ProviderEnv>) =>
       input.handlers[name]!(args as never, {

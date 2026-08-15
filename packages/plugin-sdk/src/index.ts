@@ -52,6 +52,7 @@ import {
   parseCredentialValues,
   type PluginCredentialField,
   type PluginCredentialValues,
+  type PluginMountConfigField,
   type PluginOAuth,
   RequestDedupe,
   type SearchOptions,
@@ -176,6 +177,7 @@ interface ToolsExportState<Env> {
   description: string | undefined
   id: string
   kind: 'tools'
+  mountConfigFields: PluginMountConfigField[] | undefined
   oauth: PluginOAuth | undefined
   registry: OperationRegistry<PluginCallContext<Env>>
 }
@@ -210,6 +212,18 @@ export interface ToolsExport<Env> {
    * handler 里用 `ctx.credentials` 取字段表。
    */
   credentials: (fields: PluginCredentialField[]) => ToolsExport<Env>
+  /**
+   * 声明本 export 挂载时还需要哪些**非凭证配置**(如自建实例的 baseUrl、region)。
+   *
+   * 与 `credentials()` 是两条通道:那条进加密的 SecretStore,这里的值明文进节点记录
+   * (`ctx.mountConfig` 取用,`system/registry get` 会回显)。**故这里只放非密钥配置** ——
+   * 声明本身没有 `secret` 选项,就是不给"把密钥藏进明文通道"留口子。
+   *
+   * 声明了它,平台的挂载向导据此渲染带标签的输入框、必填项缺失可在挂载前拦下 ——
+   * 而不是让用户对着一个自由 k=v 框猜该配什么。与 `credentials()`/`oauth()` **不互斥**:
+   * 一个 export 可以既要凭证又要 baseUrl。
+   */
+  mountConfig: (fields: PluginMountConfigField[]) => ToolsExport<Env>
   /**
    * 声明本 export 走**平台托管的 provider 型 OAuth2**(授权码 + PKCE)。
    *
@@ -315,6 +329,9 @@ export function createPlugin<Env = unknown>(opts: CreatePluginOptions<Env> = {})
               : {}),
             ...(state.credentialFields !== undefined
               ? { credentialFields: state.credentialFields }
+              : {}),
+            ...(state.kind === 'tools' && state.mountConfigFields !== undefined
+              ? { mountConfigFields: state.mountConfigFields }
               : {}),
             ...(state.kind === 'tools' && state.oauth !== undefined
               ? { oauth: state.oauth }
@@ -541,6 +558,7 @@ export function createPlugin<Env = unknown>(opts: CreatePluginOptions<Env> = {})
         description: meta?.description,
         credentialProbe: undefined,
         credentialFields: undefined,
+        mountConfigFields: undefined,
         oauth: undefined,
         registry: new OperationRegistry<PluginCallContext<Env>>(),
       }
@@ -564,6 +582,13 @@ export function createPlugin<Env = unknown>(opts: CreatePluginOptions<Env> = {})
             )
           }
           state.credentialFields = fields
+          return surface
+        },
+        mountConfig(fields) {
+          if (fields.length === 0) {
+            throw new TBError('invalid_argument', 'mountConfig() 至少要声明一个字段')
+          }
+          state.mountConfigFields = fields
           return surface
         },
         oauth(config) {

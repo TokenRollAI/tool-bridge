@@ -45,6 +45,12 @@ export function createGrafanaPlugin(): ReturnType<typeof createProviderPlugin> {
     description: 'Grafana',
     actions: grafanaActions,
     credentialProbe: 'search_dashboards',
+    mountConfigFields: [{
+      key: 'baseUrl',
+      label: '实例地址',
+      description: 'Grafana 实例根地址(Cloud 或自建),如 https://x.grafana.net',
+      required: true,
+    }],
     handlers: {
       list_folders: listFolders,
       get_folder: getFolder,

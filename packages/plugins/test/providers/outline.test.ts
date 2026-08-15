@@ -104,6 +104,11 @@ describe('契约面', () => {
         profile: 'tools/v1',
         description: 'Outline',
         credentialProbe: 'list_collections',
+        mountConfigFields: [{
+          key: 'baseUrl',
+          label: '实例地址',
+          description: '自建 Outline 的根地址;留空用云端 app.getoutline.com',
+        }],
       }],
     })
   })

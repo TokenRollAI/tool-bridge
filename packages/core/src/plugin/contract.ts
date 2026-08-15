@@ -92,6 +92,17 @@ const exportSchema = z.object({
     /** 敏感字段:管理面不回显、日志不打印。缺省按敏感处理(fail safe)。 */
     secret: z.boolean().optional(),
   })).min(1).optional(),
+  /**
+   * 非凭证的挂载配置字段(如 baseUrl / instanceUrl / region)。声明了它,平台就知道
+   * 该 export 挂载时还需要哪些 `providerConfig`,管理面据此渲染带标签的输入框而不是让
+   * 用户对着一个自由 k=v 框猜 —— 见 `mountConfigFields` 的类型注释。
+   */
+  mountConfigFields: z.array(z.object({
+    key: z.string().regex(/^[A-Za-z_][\w]*$/, '字段名须为合法标识符'),
+    label: z.string().optional(),
+    description: z.string().optional(),
+    required: z.boolean().optional(),
+  })).min(1).optional(),
 })
 
 const describeSchema = z.object({
@@ -132,6 +143,15 @@ export interface PluginExport {
   id: string
   methods?: string[]
   /**
+   * 非凭证的挂载配置字段声明(仅 tools/v1)。声明了它,平台就知道该 export 挂载时还需要
+   * 哪些 `providerConfig`(如 memos 的 baseUrl),管理面据此渲染带标签的输入框、缺必填项
+   * 可在挂载前拦下 —— 此前这些需求只写在插件源码注释里,用户要到运行时才发现。
+   *
+   * 见 {@link PluginMountConfigField}:它与 `credentialFields` 是两条通道,值明文进节点记录,
+   * 故只放非密钥配置。
+   */
+  mountConfigFields?: PluginMountConfigField[]
+  /**
    * provider 型 OAuth2 的声明(仅 tools/v1)。
    *
    * 与 mcp 上游的托管 OAuth 是两套机制:那条从资源服务器 discovery + 动态注册客户端(DCR),
@@ -154,6 +174,26 @@ export interface PluginCredentialField {
   required?: boolean
   /** 敏感字段:管理面不回显、日志不打印。缺省按敏感处理。 */
   secret?: boolean
+}
+
+/**
+ * 非凭证挂载配置的单个字段声明(providerConfig)。
+ *
+ * 与 `PluginCredentialField` 的分工是硬边界,不是风格选择:凭证走 `authRef` → 加密的
+ * SecretStore(只写不读);这里的值明文进节点记录,`system/registry get` 会回显给任何
+ * 对该节点有 `read` 的 SK。**所以这里没有 `secret` 字段** —— 能声明"遮蔽输入"会诱导作者
+ * 把密钥放进来,而那条通道根本不加密。密钥永远走 `credentialFields`。
+ *
+ * 典型值:自建实例的 `baseUrl`/`instanceUrl`、`region`、`workspaceId`。`required` 缺省
+ * 视为**非必填**(与 providerConfig "有就用、没有走默认" 的既有语义一致;凭证字段那边
+ * 缺省是必填,方向相反是因为两者的失败代价不同 —— 少个 baseUrl 多半有云端兜底,
+ * 少个凭证字段则必然调不通)。
+ */
+export interface PluginMountConfigField {
+  description?: string
+  key: string
+  label?: string
+  required?: boolean
 }
 
 /** `/~describe` 响应形状(v2)。 */
@@ -250,6 +290,27 @@ export function validatePluginContract(input: PluginContractInput): PluginDescri
           throw new TBError(
             'invalid_argument',
             `plugin '${manifest.id}' export '${exported.id}' 的 credentialFields 有重复字段 '${field.key}'`,
+          )
+        }
+        keys.add(field.key)
+      }
+    }
+    if (exported.mountConfigFields !== undefined) {
+      // 与 credentialFields 同一理由:context/v1 的挂载配置语义不同(它没有 providerConfig
+      // 注入 handler 的这套),声明在错的 profile 上是配置错误而非可忽略的多余字段。
+      if (exported.profile !== 'tools/v1') {
+        throw new TBError(
+          'invalid_argument',
+          `plugin '${manifest.id}' export '${exported.id}' 在 ${exported.profile} 上声明了 `
+          + 'mountConfigFields,该字段仅 tools/v1 支持',
+        )
+      }
+      const keys = new Set<string>()
+      for (const field of exported.mountConfigFields) {
+        if (keys.has(field.key)) {
+          throw new TBError(
+            'invalid_argument',
+            `plugin '${manifest.id}' export '${exported.id}' 的 mountConfigFields 有重复字段 '${field.key}'`,
           )
         }
         keys.add(field.key)
