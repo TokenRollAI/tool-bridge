@@ -49,6 +49,7 @@ const MULTI: CatalogListItem = {
   id: 'notes',
   digest: 'd4',
   exports: ['actions', 'documents'],
+  exportKinds: { actions: 'tool', documents: 'context' },
   nodeKinds: ['context', 'tool'],
   needsOAuth: false,
 }
@@ -249,6 +250,25 @@ describe('buildIntegrationCalls', () => {
     const calls = buildIntegrationCalls(form({ provider: 'docs', mode: 'none' }), ctxEntry)
     expect(calls.mount.kind).toBe('context')
     expect(calls.mount.config.kind).toBe('context')
+  })
+
+  /**
+   * 跨 kind 多 export(notes):选 context export 时按 exportKinds 挂成 context,
+   * 不能从 nodeKinds=['context','tool'] 落到默认 'tool'(那样平台会拒且用户无解)。
+   */
+  it('跨 kind provider 按选中 export 定 kind(context export → context)', () => {
+    const ctx = buildIntegrationCalls(
+      form({ provider: 'notes', exportId: 'documents', mode: 'none' }),
+      MULTI,
+    )
+    expect(ctx.mount.kind).toBe('context')
+    expect(ctx.mount.config.kind).toBe('context')
+
+    const tool = buildIntegrationCalls(
+      form({ provider: 'notes', exportId: 'actions', mode: 'none' }),
+      MULTI,
+    )
+    expect(tool.mount.kind).toBe('tool')
   })
 
   it('多 export 未选 → 抛错;选了不存在的也抛错', () => {

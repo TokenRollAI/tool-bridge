@@ -33,6 +33,13 @@ export interface CatalogListItem {
   description?: string
   /** descriptor 指纹;升级检测与三宿主对拍用。 */
   digest: string
+  /**
+   * export id → 它能挂成的节点 kind。选定 export 后 kind 是**确定**的 —— `nodeKinds` 只说
+   * "这个 provider 涉及哪些 kind",挂哪个 kind 取决于挂的是哪个 export。多 export 跨 kind 的
+   * provider(如 notes:actions=tool / notes=context)靠它把选中的 export 挂到对的 kind,
+   * 而不是落到默认值。
+   */
+  exportKinds: Record<string, 'tool' | 'context'>
   /** 可挂载的 export id(单 export 时挂载可省略 config.export)。 */
   exports: string[]
   id: string
@@ -55,9 +62,13 @@ const NODE_KIND_BY_PROFILE: Record<string, 'tool' | 'context'> = {
 function projectListItem(entry: BuiltinCatalogEntry): CatalogListItem {
   const exports = entry.describe.exports
   const kinds = new Set<'tool' | 'context'>()
+  const exportKinds: Record<string, 'tool' | 'context'> = {}
   for (const e of exports) {
     const kind = NODE_KIND_BY_PROFILE[e.profile]
-    if (kind !== undefined) kinds.add(kind)
+    if (kind !== undefined) {
+      kinds.add(kind)
+      exportKinds[e.id] = kind
+    }
   }
   // 多 export 时字段声明可能各不相同;列表取第一个声明了凭证字段的那个作为提示,
   // 精确形状由 get 给出(挂载表单也该按选定的 export 取)。
@@ -68,6 +79,7 @@ function projectListItem(entry: BuiltinCatalogEntry): CatalogListItem {
     id: entry.id,
     digest: entry.digest,
     exports: exports.map(e => e.id),
+    exportKinds,
     nodeKinds: [...kinds].sort(),
     needsOAuth: exports.some(e => e.oauth !== undefined),
     ...(description !== undefined ? { description } : {}),

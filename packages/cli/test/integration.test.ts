@@ -313,6 +313,45 @@ describe('tb integration add', () => {
     expect(bodyOf(calls, /~register/).kind).toBe('context')
   })
 
+  /**
+   * 跨 kind 多 export(notes:actions=tool / documents=context):选 context export 时 kind
+   * 必须按 exportKinds 取,而不是从 nodeKinds 数组落到默认 'tool'(那样挂载被平台拒且无解)。
+   */
+  it('跨 kind provider 选 context export → 挂成 kind:context(不落默认 tool)', async () => {
+    const NOTES = {
+      id: 'notes',
+      digest: 'dn',
+      exports: ['actions', 'documents'],
+      exportKinds: { actions: 'tool', documents: 'context' },
+      nodeKinds: ['context', 'tool'],
+      needsOAuth: false,
+    }
+    const calls = routedFetch([catalogOf([NOTES])])
+    await runCli([
+      'integration', 'add', 'notes/docs',
+      '--provider', 'notes', '--export', 'documents', '--key', 'k', ...base,
+    ])
+    expect(bodyOf(calls, /~register/).kind).toBe('context')
+    expect(bodyOf(calls, /~register/).config.kind).toBe('context')
+  })
+
+  it('跨 kind provider 选 tool export → 挂成 kind:tool', async () => {
+    const NOTES = {
+      id: 'notes',
+      digest: 'dn',
+      exports: ['actions', 'documents'],
+      exportKinds: { actions: 'tool', documents: 'context' },
+      nodeKinds: ['context', 'tool'],
+      needsOAuth: false,
+    }
+    const calls = routedFetch([catalogOf([NOTES])])
+    await runCli([
+      'integration', 'add', 'notes/actions',
+      '--provider', 'notes', '--export', 'actions', '--key', 'k', ...base,
+    ])
+    expect(bodyOf(calls, /~register/).kind).toBe('tool')
+  })
+
   it('多 export 未指定 → 本地拒(免一次往返)', async () => {
     const calls = routedFetch([catalogOf([{ ...TAVILY, exports: ['a', 'b'] }])])
     await runCli(['integration', 'add', 'p', '--provider', 'tavily', '--key', 'k', ...base])

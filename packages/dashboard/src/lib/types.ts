@@ -222,6 +222,8 @@ export interface CatalogListItem {
   description?: string
   /** descriptor 指纹(升级检测/三宿主对拍)。 */
   digest: string
+  /** export id → 它能挂成的节点 kind;选定 export 后 kind 是确定的(跨 kind 多 export 靠它挂对)。 */
+  exportKinds?: Record<string, 'context' | 'tool'>
   /** 可挂载的 export id;长度 > 1 时挂载必须显式选一个。 */
   exports: string[]
   id: string

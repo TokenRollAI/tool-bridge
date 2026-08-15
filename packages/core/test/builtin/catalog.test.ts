@@ -132,6 +132,17 @@ describe('list', () => {
     expect(items.find(i => i.id === 'notes')?.nodeKinds).toEqual(['context', 'tool'])
   })
 
+  it('exportKinds 保留 export→kind 映射(选定 export 后 kind 是确定的)', async () => {
+    const { items } = await list()
+    // notes 跨 kind:actions 是 tool、documents 是 context。挂载按选中的 export 取 kind,
+    // 而不是从 nodeKinds 数组猜 —— 否则挂 context export 会落到默认值挂错。
+    expect(items.find(i => i.id === 'notes')?.exportKinds).toEqual({
+      actions: 'tool',
+      documents: 'context',
+    })
+    expect(items.find(i => i.id === 'tavily')?.exportKinds).toEqual({ actions: 'tool' })
+  })
+
   it('不回 describe 全文(那是 get 的事)', async () => {
     const { items } = await list()
     expect(items[0]).not.toHaveProperty('describe')

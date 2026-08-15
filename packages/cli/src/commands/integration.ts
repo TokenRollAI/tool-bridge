@@ -31,6 +31,7 @@ interface CatalogListItem {
   }>
   description?: string
   digest: string
+  exportKinds?: Record<string, 'context' | 'tool'>
   exports: string[]
   id: string
   mountConfigFields?: Array<{
@@ -271,8 +272,13 @@ Examples:
           )
         }
 
-        // 目标节点 kind 由 export 的 profile 决定;单一 kind 时可自动判定。
-        const nodeKind = entry?.nodeKinds.length === 1 ? entry.nodeKinds[0]! : 'tool'
+        // 目标节点 kind 由**选中 export** 的 profile 决定。多 export 跨 kind 的 provider
+        // (如 notes:actions=tool / notes=context)必须按 exportId 取,否则挂 context export
+        // 会落到默认 'tool' 被平台拒且无解。退化顺序:选中 export 的 kind → 单一 nodeKind →
+        // 'tool'(catalog 查不到 external plugin 时的兜底,那时确实无从判断)。
+        const nodeKind: 'context' | 'tool'
+          = (exportId !== undefined ? entry?.exportKinds?.[exportId] : undefined)
+            ?? (entry?.nodeKinds.length === 1 ? entry.nodeKinds[0]! : 'tool')
 
         // 挂载配置在**任何写操作之前**解析并校验:缺必填 baseUrl 就该在这里拒,
         // 而不是等 secret 已经代建出来才炸(那会留下孤儿 secret)。

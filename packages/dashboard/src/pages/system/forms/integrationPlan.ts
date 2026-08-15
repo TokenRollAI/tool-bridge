@@ -123,8 +123,12 @@ export function buildIntegrationCalls(
     throw new Error(`${provider} 没有 export "${exportId}"`)
   }
 
+  // kind 由**选中 export** 决定:跨 kind 的多 export provider(notes:actions=tool /
+  // notes=context)挂 context export 时不能落到默认 'tool'(平台会拒且用户无参数可救)。
+  // 退化:选中 export 的 kind → 单一 nodeKind → 'tool'(external plugin 不在 catalog 时的兜底)。
   const nodeKind: 'context' | 'tool'
-    = entry?.nodeKinds.length === 1 ? entry.nodeKinds[0]! : 'tool'
+    = (exportId !== '' ? entry?.exportKinds?.[exportId] : undefined)
+      ?? (entry?.nodeKinds.length === 1 ? entry.nodeKinds[0]! : 'tool')
 
   let authRef: string | undefined
   let secret: { name: string, value: string } | undefined
