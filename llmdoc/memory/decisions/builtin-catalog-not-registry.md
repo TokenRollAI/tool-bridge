@@ -57,7 +57,11 @@
   会让任一 provider 的文案改动触发全局红灯,"三宿主一致"退化成噪声。
 - **B2 在 P0' 只做 CLI**。B1-X 之后 `secret` 降为展示语义,Dashboard 表单**失去了机器可判的
   依据**来区分"字段进 secret 还是进 providerConfig",自由 k=v 文本框比现状更难自我解释。
-  Dashboard 的 providerConfig 输入口等 `mountConfigSchema` 落地后一次做对。
+  Dashboard 的 providerConfig 输入口等一个声明面落地后一次做对。**2026-08-15 更新**:那个声明面
+  是 export 级 `mountConfigFields`(扁平字段,`core/src/plugin/contract.ts`),**不是**这里预期的
+  包级 `mountConfigSchema`(那是插件包安装分发层,仍 P3 零消费点)。Dashboard `IntegrationDialog`
+  已据 `mountConfigFields` 渲染带标签输入。契约面见 `reference/protocol-contract.md` 8/8a 节、
+  边界与通道分工见 `guides/plugin-design-and-migration.md` 第二节。
 - **A4 的措辞修正**:`opts.include` **是接了线的**(`registry.ts` `opts.include ?? Object.keys(…)`),
   没接线的是调用方(`deployEntry.ts` 不传)。
 
