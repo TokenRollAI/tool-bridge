@@ -14,11 +14,15 @@ import { TEST_ADMIN_SK } from './fixtures'
  * 曾只有一次性 curl 证据;这里把它固化成可重跑回归。
  */
 
-/** 生产装配方式的一个子集(notes 有两个 export,tavily 单 export 带探针)。 */
+/**
+ * 生产装配方式的一个子集:notes 有两个 export、tavily 单 export 带探针、jira 多字段凭证、
+ * memos 单值凭证 + 必配的非凭证 baseUrl(验 mountConfigFields 端到端透传)。
+ */
 const CATALOG = {
   notes: BUILTIN_CATALOG.notes!,
   tavily: BUILTIN_CATALOG.tavily!,
   jira: BUILTIN_CATALOG.jira!,
+  memos: BUILTIN_CATALOG.memos!,
 }
 
 async function appWithCatalog() {
@@ -86,7 +90,7 @@ describe('system/catalog 数据面', () => {
     const res = await callCatalog(tb, 'list')
     expect(res.status).toBe(200)
     const page = (await res.json()) as { items: Array<Record<string, unknown>> }
-    expect(page.items.map(i => i.id)).toEqual(['jira', 'notes', 'tavily'])
+    expect(page.items.map(i => i.id)).toEqual(['jira', 'memos', 'notes', 'tavily'])
     expect(page.items[0]).not.toHaveProperty('describe')
   })
 
@@ -112,6 +116,28 @@ describe('system/catalog 数据面', () => {
     const notes = page.items.find(i => i.id === 'notes')!
     expect(notes.exports.length).toBeGreaterThan(1)
     expect(notes.nodeKinds).toEqual(['context', 'tool'])
+  })
+
+  /**
+   * mountConfigFields 端到端:真实产物 memos 声明了必配 baseUrl,它必须从编译期 catalog
+   * 一路透到 HTTP list 响应 —— 这是挂载向导"该配什么"的数据来源。
+   */
+  it('list 投影出 mountConfigFields(非凭证配置,如 memos 的 baseUrl)', async () => {
+    const tb = await appWithCatalog()
+    const page = (await (await callCatalog(tb, 'list')).json()) as {
+      items: Array<{
+        credentialFields?: unknown
+        id: string
+        mountConfigFields?: Array<{ key: string, required?: boolean }>
+      }>
+    }
+    const memos = page.items.find(i => i.id === 'memos')!
+    expect(memos.mountConfigFields?.map(f => f.key)).toContain('baseUrl')
+    expect(memos.mountConfigFields?.find(f => f.key === 'baseUrl')?.required).toBe(true)
+    // baseUrl 是配置不是密钥:走 mountConfigFields,不占凭证通道。
+    expect(memos.credentialFields).toBeUndefined()
+    // 不声明的 provider 不带这个键。
+    expect(page.items.find(i => i.id === 'tavily')).not.toHaveProperty('mountConfigFields')
   })
 
   it('get 回 describe 全文与 digest;不存在 → 404', async () => {
@@ -154,7 +180,7 @@ describe('system/catalog 数据面', () => {
       seen.push(...page.items.map(i => i.id))
       cursor = page.cursor
     } while (cursor !== undefined)
-    expect(seen).toEqual(['jira', 'notes', 'tavily'])
+    expect(seen).toEqual(['jira', 'memos', 'notes', 'tavily'])
   })
 
   it('未知 cmd → 400', async () => {
@@ -208,7 +234,7 @@ describe('GET /healthz 的 catalog 字段', () => {
       healthy: boolean
     }
     expect(body.healthy).toBe(true)
-    expect(body.catalog?.count).toBe(3)
+    expect(body.catalog?.count).toBe(4)
     expect(body.catalog?.digest).toMatch(/^[0-9a-f]{64}$/)
   })
 
