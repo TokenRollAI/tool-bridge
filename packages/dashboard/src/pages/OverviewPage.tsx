@@ -2,6 +2,7 @@ import {
   Activity,
   ArrowRight,
   ArrowUpRight,
+  Blocks,
   Boxes,
   Cpu,
   History,
@@ -26,6 +27,12 @@ import { encodeTreePath } from '@/lib/path'
 import { cn } from '@/lib/utils'
 
 const QUICK_LINKS = [
+  {
+    to: '/manage/plugins',
+    label: '集成目录',
+    desc: '浏览并添加',
+    icon: Blocks,
+  },
   {
     to: '/manage/registry',
     label: '节点注册',

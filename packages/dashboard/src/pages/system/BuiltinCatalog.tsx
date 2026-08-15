@@ -1,5 +1,5 @@
+import { Plus, Search } from 'lucide-react'
 import { useMemo, useState } from 'react'
-import { Search } from 'lucide-react'
 import {
   Table,
   TableBody,
@@ -10,6 +10,7 @@ import {
 } from '@/components/ui/table'
 import { useIntegrationCatalog } from '@/lib/queries'
 import { Skeleton } from '@/components/ui/skeleton'
+import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { IntegrationDialog } from './forms/IntegrationDialog'
@@ -109,6 +110,10 @@ export function BuiltinCatalog() {
               <TableHead>可挂 kind</TableHead>
               <TableHead>Export</TableHead>
               <TableHead>凭证</TableHead>
+              <TableHead>配置</TableHead>
+              <TableHead className="w-24">
+                <span className="sr-only">操作</span>
+              </TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -137,11 +142,30 @@ export function BuiltinCatalog() {
                         )
                       : <span className="text-xs text-muted-foreground">单值 API key</span>}
                 </TableCell>
+                <TableCell className="font-mono text-xs text-muted-foreground">
+                  {item.mountConfigFields === undefined
+                    ? '—'
+                    : item.mountConfigFields
+                        .map(f => (f.required === true ? `${f.key}*` : f.key))
+                        .join(', ')}
+                </TableCell>
+                <TableCell>
+                  {/* 目录行内直接挂载:预选该 provider、派生默认路径,不必去顶部再搜一次。 */}
+                  <IntegrationDialog
+                    defaultProvider={item.id}
+                    trigger={(
+                      <Button size="sm" variant="outline">
+                        <Plus />
+                        添加
+                      </Button>
+                    )}
+                  />
+                </TableCell>
               </TableRow>
             ))}
             {items.length === 0 && (
               <TableRow>
-                <TableCell className="text-sm text-muted-foreground" colSpan={4}>
+                <TableCell className="text-sm text-muted-foreground" colSpan={6}>
                   没有匹配「
                   {search}
                   」的集成。

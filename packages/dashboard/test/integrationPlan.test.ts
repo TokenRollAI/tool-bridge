@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { CatalogListItem } from '../src/lib/types'
 import {
   buildIntegrationCalls,
+  defaultMountPath,
   derivedSecretName,
   INITIAL_INTEGRATION_FORM,
   type IntegrationFormState,
@@ -52,6 +53,18 @@ const MULTI: CatalogListItem = {
   needsOAuth: false,
 }
 
+/** 自建实例型:单值凭证 + 一个必配的非凭证 baseUrl(如 memos)。 */
+const MEMOS: CatalogListItem = {
+  id: 'memos',
+  digest: 'd5',
+  exports: ['actions'],
+  nodeKinds: ['tool'],
+  needsOAuth: false,
+  mountConfigFields: [
+    { key: 'baseUrl', label: '实例地址', required: true },
+  ],
+}
+
 const form = (patch: Partial<IntegrationFormState>): IntegrationFormState => ({
   ...INITIAL_INTEGRATION_FORM,
   path: 'tools/x',
@@ -79,6 +92,15 @@ describe('integrationPlan', () => {
 
   it('目录里没有(external plugin)→ 退化成单值,不报错', () => {
     expect(integrationPlan(undefined).kind).toBe('single')
+  })
+
+  it('暴露 mountConfigFields —— 向导据此渲染带标签的非凭证配置输入', () => {
+    expect(integrationPlan(MEMOS).mountConfigFields).toEqual([
+      { key: 'baseUrl', label: '实例地址', required: true },
+    ])
+    // 未声明的 provider 是空数组(而非 undefined),渲染端不必判空。
+    expect(integrationPlan(TAVILY).mountConfigFields).toEqual([])
+    expect(integrationPlan(undefined).mountConfigFields).toEqual([])
   })
 })
 
@@ -202,6 +224,26 @@ describe('buildIntegrationCalls', () => {
     expect(calls.mount.config.providerConfig).toEqual({ baseUrl: 'https://m.example.com' })
   })
 
+  it('缺必填 mountConfig(baseUrl)→ 抛错并点名(不等平台/探针拒)', () => {
+    expect(() =>
+      buildIntegrationCalls(
+        form({ provider: 'memos', credentials: { [SINGLE_FIELD_KEY]: 'k' } }),
+        MEMOS,
+      )).toThrow(/baseUrl/)
+  })
+
+  it('给了必填 mountConfig 就正常挂载', () => {
+    const calls = buildIntegrationCalls(
+      form({
+        provider: 'memos',
+        credentials: { [SINGLE_FIELD_KEY]: 'k' },
+        config: { baseUrl: 'https://memos.example.com' },
+      }),
+      MEMOS,
+    )
+    expect(calls.mount.config.providerConfig).toEqual({ baseUrl: 'https://memos.example.com' })
+  })
+
   it('context/v1 的集成挂成 kind:context', () => {
     const ctxEntry: CatalogListItem = { ...TAVILY, id: 'docs', nodeKinds: ['context'] }
     const calls = buildIntegrationCalls(form({ provider: 'docs', mode: 'none' }), ctxEntry)
@@ -237,5 +279,17 @@ describe('buildIntegrationCalls', () => {
       undefined,
     )
     expect(calls.mount.config).toMatchObject({ kind: 'tool', provider: 'my-ext' })
+  })
+})
+
+describe('defaultMountPath', () => {
+  it('tool 型 → tools/<id>,context 型 → notes/<id>', () => {
+    expect(defaultMountPath(TAVILY)).toBe('tools/tavily')
+    expect(defaultMountPath({ ...TAVILY, id: 'docs', nodeKinds: ['context'] })).toBe('notes/docs')
+  })
+
+  it('多 kind 或无目录项时退回 tools/(拿不到唯一 kind)', () => {
+    expect(defaultMountPath(MULTI)).toBe('tools/notes')
+    expect(defaultMountPath(undefined)).toBe('')
   })
 })

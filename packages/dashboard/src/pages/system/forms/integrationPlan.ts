@@ -6,7 +6,7 @@
  * 能被 Node vitest 直接断言,不必起 DOM。
  */
 
-import type { CatalogListItem, PluginCredentialField } from '@/lib/types'
+import type { CatalogListItem, PluginCredentialField, PluginMountConfigField } from '@/lib/types'
 
 /** 凭证的四种给法。与 CLI `tb integration add` 的互斥组一一对应。 */
 export type CredentialMode = 'inline' | 'existing' | 'oauth' | 'none'
@@ -48,21 +48,35 @@ export const INITIAL_INTEGRATION_FORM: IntegrationFormState = {
 export function integrationPlan(entry: CatalogListItem | undefined): {
   fields: PluginCredentialField[]
   kind: 'oauth' | 'fields' | 'single'
+  /** 该 export 声明的非凭证配置字段(如 baseUrl);向导据此渲染带标签的输入而非自由 k=v。 */
+  mountConfigFields: PluginMountConfigField[]
   needsExportChoice: boolean
 } {
   if (entry === undefined) {
-    return { kind: 'single', fields: [], needsExportChoice: false }
+    return { kind: 'single', fields: [], mountConfigFields: [], needsExportChoice: false }
   }
   const needsExportChoice = entry.exports.length > 1
-  if (entry.needsOAuth) return { kind: 'oauth', fields: [], needsExportChoice }
+  const mountConfigFields = entry.mountConfigFields ?? []
+  if (entry.needsOAuth) return { kind: 'oauth', fields: [], mountConfigFields, needsExportChoice }
   const fields = entry.credentialFields ?? []
-  if (fields.length === 0) return { kind: 'single', fields: [], needsExportChoice }
-  return { kind: 'fields', fields, needsExportChoice }
+  if (fields.length === 0) return { kind: 'single', fields: [], mountConfigFields, needsExportChoice }
+  return { kind: 'fields', fields, mountConfigFields, needsExportChoice }
 }
 
 /** secret 名由挂载路径派生 —— authRef 不再是两处都要打对的自由文本。 */
 export function derivedSecretName(path: string): string {
   return `integration-${path.trim().replace(/\//g, '-')}`
+}
+
+/**
+ * 选中 provider 时给挂载路径一个默认值,省得用户从零想。前缀按节点 kind 分:tool → `tools/`、
+ * context → `notes/`(与既有内置节点的习惯一致);拿不到 kind(external / 无 read)退回 `tools/`。
+ * 这只是**默认值**,用户可改 —— 故仅在 path 尚空时用它,不覆盖已输入的路径。
+ */
+export function defaultMountPath(entry: CatalogListItem | undefined): string {
+  if (entry === undefined) return ''
+  const kind = entry.nodeKinds.length === 1 ? entry.nodeKinds[0]! : 'tool'
+  return `${kind === 'context' ? 'notes' : 'tools'}/${entry.id}`
 }
 
 /** 多字段凭证的 secret 明文:键序固定(与 core encodeCredentialValues 同规则)。 */
@@ -164,6 +178,14 @@ export function buildIntegrationCalls(
   for (const [key, value] of Object.entries(state.config)) {
     const trimmed = value.trim()
     if (key.trim() !== '' && trimmed !== '') providerConfig[key.trim()] = trimmed
+  }
+  // 必配的非凭证配置(如 memos 的 baseUrl)缺了就在这里拦 —— 与凭证字段同口径,
+  // 说清缺哪个,而不是等 credentialProbe 报个像凭证问题的错、或首次调用才 invalid_argument。
+  const missingConfig = plan.mountConfigFields
+    .filter(f => f.required === true && (providerConfig[f.key] ?? '') === '')
+    .map(f => f.key)
+  if (missingConfig.length > 0) {
+    throw new Error(`缺必填配置:${missingConfig.join('、')}`)
   }
   if (Object.keys(providerConfig).length > 0) config.providerConfig = providerConfig
 

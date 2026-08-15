@@ -158,6 +158,20 @@ export interface PluginCredentialField {
   secret?: boolean
 }
 
+/**
+ * 非凭证挂载配置的字段声明(providerConfig,如 baseUrl / region)。
+ *
+ * 与 {@link PluginCredentialField} 是两条通道:凭证进加密的 SecretStore,这里的值明文进
+ * 节点记录(`system/registry get` 会回显)。**故没有 `secret` 字段** —— 密钥永远走
+ * credentialFields。`required` 缺省视为非必填(providerConfig "有就用、没有走默认")。
+ */
+export interface PluginMountConfigField {
+  description?: string
+  key: string
+  label?: string
+  required?: boolean
+}
+
 export interface PluginExport {
   capabilities?: string[]
   /** 该 export 需要的多字段凭证;缺省表示单值 API key(或不需要凭证)。 */
@@ -167,6 +181,8 @@ export interface PluginExport {
   description?: string
   id: string
   methods?: string[]
+  /** 该 export 挂载时需要的非凭证配置(如 baseUrl);缺省表示无需额外配置。 */
+  mountConfigFields?: PluginMountConfigField[]
   /** 声明了它就走平台托管的 OAuth2 授权码流程(与 credentialFields/Probe 互斥)。 */
   oauth?: {
     authorizationUrl: string
@@ -209,6 +225,8 @@ export interface CatalogListItem {
   /** 可挂载的 export id;长度 > 1 时挂载必须显式选一个。 */
   exports: string[]
   id: string
+  /** 声明了非凭证配置(如 baseUrl)时给出字段名与是否必填;挂载向导据此渲染输入框。 */
+  mountConfigFields?: PluginMountConfigField[]
   /** 声明了 oauth → 挂载后还要授权一步。 */
   needsOAuth: boolean
   nodeKinds: Array<'context' | 'tool'>

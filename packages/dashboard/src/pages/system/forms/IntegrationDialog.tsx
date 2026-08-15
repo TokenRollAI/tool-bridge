@@ -28,6 +28,7 @@ import { Badge } from '@/components/ui/badge'
 import {
   buildIntegrationCalls,
   type CredentialMode,
+  defaultMountPath,
   INITIAL_INTEGRATION_FORM,
   type IntegrationFormState,
   integrationPlan,
@@ -105,9 +106,12 @@ function ConfigRows({
  */
 export function IntegrationDialog({
   defaultPath,
+  defaultProvider,
   trigger,
 }: {
   defaultPath?: string
+  /** 从目录某一行直接"添加"时预选的 provider —— 省得用户在向导里再搜一次。 */
+  defaultProvider?: string
   trigger?: ReactNode
 }) {
   const invoke = useInvoke()
@@ -202,7 +206,19 @@ export function IntegrationDialog({
   const changeOpen = (next: boolean) => {
     if (invoke.isPending) return
     setOpen(next)
-    if (next) setErr(null)
+    if (next) {
+      setErr(null)
+      // 从目录某行直接"添加":预选该 provider 并派生默认路径,用户落到已填好 provider 的向导。
+      if (defaultProvider !== undefined) {
+        const preset = items.find(i => i.id === defaultProvider)
+        setForm({
+          ...INITIAL_INTEGRATION_FORM,
+          provider: defaultProvider,
+          path: defaultPath ?? defaultMountPath(preset),
+          exportId: preset?.exports.length === 1 ? preset.exports[0]! : '',
+        })
+      }
+    }
   }
 
   return (
@@ -271,8 +287,12 @@ export function IntegrationDialog({
                         setForm(current => ({
                           ...current,
                           provider: item.id,
+                          // path 尚空则给个默认(tools/<id> 或 notes/<id>),用户可改;不覆盖已输入的。
+                          path: current.path.trim() === '' ? defaultMountPath(item) : current.path,
                           exportId: item.exports.length === 1 ? item.exports[0]! : '',
+                          // 换 provider 要清掉上一个的凭证与配置残留(字段名多半不同)。
                           credentials: {},
+                          config: {},
                           mode: item.needsOAuth ? 'inline' : current.mode,
                         }))}
                       type="button"
@@ -476,12 +496,46 @@ export function IntegrationDialog({
               <FormSection
                 description="非密钥配置(如自建实例地址),明文存进节点记录。"
                 index="03"
-                title="配置(可选)"
+                title={plan.mountConfigFields.some(f => f.required === true) ? '配置' : '配置(可选)'}
               >
-                <ConfigRows
-                  onChange={config => setForm(current => ({ ...current, config }))}
-                  value={form.config}
-                />
+                {/* catalog 声明了要配什么 → 渲染带标签的字段;否则退回自由 k=v(external plugin)。 */}
+                {plan.mountConfigFields.length > 0
+                  ? (
+                      <div className="grid gap-2">
+                        {plan.mountConfigFields.map(field => (
+                          <div className="grid gap-1.5" key={field.key}>
+                            <Label className="text-xs" htmlFor={`int-mc-${field.key}`}>
+                              {field.key}
+                              {field.required === true && ' *'}
+                              {field.label !== undefined && (
+                                <span className="ml-1.5 font-normal text-muted-foreground">
+                                  {field.label}
+                                </span>
+                              )}
+                            </Label>
+                            <Input
+                              className="font-mono text-sm"
+                              id={`int-mc-${field.key}`}
+                              onChange={event =>
+                                setForm(current => ({
+                                  ...current,
+                                  config: { ...current.config, [field.key]: event.target.value },
+                                }))}
+                              value={form.config[field.key] ?? ''}
+                            />
+                            {field.description !== undefined && (
+                              <p className="text-[11px] text-muted-foreground">{field.description}</p>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )
+                  : (
+                      <ConfigRows
+                        onChange={config => setForm(current => ({ ...current, config }))}
+                        value={form.config}
+                      />
+                    )}
                 <div className="grid gap-1.5">
                   <Label className="text-xs" htmlFor="int-desc">描述</Label>
                   <Input
