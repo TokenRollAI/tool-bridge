@@ -19,6 +19,9 @@ describe('catalog.generated.ts', () => {
     expect(Object.keys(BUILTIN_CATALOG).sort()).toEqual(Object.keys(BUILTIN_PLUGIN_LOADERS).sort())
   })
 
+  // 超时给到 60s(默认 5s 不够):这条要 import + 求值 + digest 全部 99 个插件,
+  // 慢 CI runner 上逼近 5s(实测 5041ms 撞默认超时),而"全量对拍"本就是慢测试,
+  // 缩覆盖是错的方向 —— 给它够用的预算。
   it('每条 descriptor 与磁盘上插件的 ~describe 求值一致', async () => {
     for (const [id, entry] of Object.entries(BUILTIN_CATALOG)) {
       const loader = BUILTIN_PLUGIN_LOADERS[id]
@@ -33,7 +36,7 @@ describe('catalog.generated.ts', () => {
       // 逐条比 digest 而不是比对象:失败时报的是"哪个插件漂了",而不是一屏 diff。
       expect(await catalogDigest(describe), `${id} 的 descriptor 漂了`).toBe(entry.digest)
     }
-  })
+  }, 60_000)
 
   it('目录级 digest 与逐条 digest 对得上', async () => {
     expect(await catalogSetDigest(BUILTIN_CATALOG)).toBe(BUILTIN_CATALOG_DIGEST)
