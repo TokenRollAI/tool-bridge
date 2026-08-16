@@ -52,6 +52,7 @@ import {
   parseCredentialValues,
   type PluginCredentialField,
   type PluginCredentialValues,
+  type PluginExportAuth,
   type PluginMountConfigField,
   type PluginOAuth,
   RequestDedupe,
@@ -109,6 +110,7 @@ export type ToolHandler<S extends InputSchemaLike | undefined, Env>
  * 代理型放弃这些是因为**上游才是 schema 的真源**,由 plugin 复述一遍只会漂移。
  */
 export interface ProxyToolsHandlers<Env = unknown> {
+  auth?: PluginExportAuth
   call: (
     input: { args: Record<string, unknown>, name: string },
     ctx: PluginCallContext<Env>,
@@ -139,10 +141,12 @@ export interface ContextSearchInput { opts?: SearchOptions, query: string }
  * `/~describe` 的 methods 与 capabilities 由存在性推导(与平台侧 Round 7 的语义一致)。
  */
 export interface ContextHandlers<Env = unknown> {
+  auth?: PluginExportAuth
   delete?: (input: ContextDeleteInput, ctx: PluginCallContext<Env>) => unknown | Promise<unknown>
   description?: string
   get?: (input: ContextGetInput, ctx: PluginCallContext<Env>) => unknown | Promise<unknown>
   list?: (input: ContextListInput, ctx: PluginCallContext<Env>) => unknown | Promise<unknown>
+  mountConfigFields?: PluginMountConfigField[]
   search?: (input: ContextSearchInput, ctx: PluginCallContext<Env>) => unknown | Promise<unknown>
   update?: (input: ContextUpdateInput, ctx: PluginCallContext<Env>) => unknown | Promise<unknown>
   write?: (input: ContextWriteInput, ctx: PluginCallContext<Env>) => unknown | Promise<unknown>
@@ -172,6 +176,7 @@ export interface CreatePluginOptions<Env = unknown> {
 }
 
 interface ToolsExportState<Env> {
+  auth: PluginExportAuth | undefined
   credentialFields: PluginCredentialField[] | undefined
   credentialProbe: string | undefined
   description: string | undefined
@@ -183,13 +188,16 @@ interface ToolsExportState<Env> {
 }
 
 interface ContextExportState<Env> {
+  auth: PluginExportAuth | undefined
   description: string | undefined
   handlers: ContextHandlers<Env>
   id: string
   kind: 'context'
+  mountConfigFields: PluginMountConfigField[] | undefined
 }
 
 interface ProxyToolsExportState<Env> {
+  auth: PluginExportAuth | undefined
   credentialFields: PluginCredentialField[] | undefined
   description: string | undefined
   handlers: ProxyToolsHandlers<Env>
@@ -204,6 +212,8 @@ type ExportState<Env>
 
 /** tools export 的注册面(链式)。 */
 export interface ToolsExport<Env> {
+  /** 明确声明无需上游凭证,或声明单值凭证的展示/必填语义。 */
+  auth: (config: PluginExportAuth) => ToolsExport<Env>
   /**
    * 声明本 export 需要**多字段凭证**(默认单值:一个 API key)。
    *
@@ -324,6 +334,7 @@ export function createPlugin<Env = unknown>(opts: CreatePluginOptions<Env> = {})
             id: state.id,
             profile: 'tools/v1',
             ...(state.description !== undefined ? { description: state.description } : {}),
+            ...(state.auth !== undefined ? { auth: state.auth } : {}),
             ...(state.kind === 'tools' && state.credentialProbe !== undefined
               ? { credentialProbe: state.credentialProbe }
               : {}),
@@ -346,8 +357,12 @@ export function createPlugin<Env = unknown>(opts: CreatePluginOptions<Env> = {})
           id: state.id,
           profile: 'context/v1',
           ...(state.description !== undefined ? { description: state.description } : {}),
+          ...(state.auth !== undefined ? { auth: state.auth } : {}),
           methods,
           ...(capabilities.length > 0 ? { capabilities } : {}),
+          ...(state.mountConfigFields !== undefined
+            ? { mountConfigFields: state.mountConfigFields }
+            : {}),
         }
       }),
     }
@@ -553,6 +568,7 @@ export function createPlugin<Env = unknown>(opts: CreatePluginOptions<Env> = {})
     tools(id, meta) {
       assertFreshId(id)
       const state: ToolsExportState<Env> = {
+        auth: undefined,
         kind: 'tools',
         id,
         description: meta?.description,
@@ -564,6 +580,22 @@ export function createPlugin<Env = unknown>(opts: CreatePluginOptions<Env> = {})
       }
       exports.set(id, state)
       const surface: ToolsExport<Env> = {
+        auth(config) {
+          if (state.oauth !== undefined || state.credentialFields !== undefined) {
+            throw new TBError(
+              'invalid_argument',
+              `export '${id}' 已声明 oauth/credentials(),不能再声明 auth`,
+            )
+          }
+          if (config.kind === 'none' && state.credentialProbe !== undefined) {
+            throw new TBError(
+              'invalid_argument',
+              `export '${id}' 已声明 credentialProbe,不能再声明 auth:none`,
+            )
+          }
+          state.auth = config
+          return surface
+        },
         register(name, spec, handler) {
           state.registry.register(name, spec, handler)
           return surface
@@ -580,6 +612,9 @@ export function createPlugin<Env = unknown>(opts: CreatePluginOptions<Env> = {})
               `export '${id}' 已声明 oauth,不能再声明 credentials()`
               + '(oauth 模式下 authRef 指向的 secret 固定存 clientId/clientSecret)',
             )
+          }
+          if (state.auth !== undefined) {
+            throw new TBError('invalid_argument', `export '${id}' 已声明 auth,不能再声明 credentials()`)
           }
           state.credentialFields = fields
           return surface
@@ -598,6 +633,9 @@ export function createPlugin<Env = unknown>(opts: CreatePluginOptions<Env> = {})
               `export '${id}' 已声明 credentials(),不能再声明 oauth`
               + '(oauth 模式下 authRef 指向的 secret 固定存 clientId/clientSecret)',
             )
+          }
+          if (state.auth !== undefined) {
+            throw new TBError('invalid_argument', `export '${id}' 已声明 auth,不能再声明 oauth`)
           }
           if (state.credentialProbe !== undefined) {
             throw new TBError(
@@ -627,6 +665,9 @@ export function createPlugin<Env = unknown>(opts: CreatePluginOptions<Env> = {})
               + '又会把 clientSecret 送进插件)',
             )
           }
+          if (state.auth?.kind === 'none') {
+            throw new TBError('invalid_argument', `export '${id}' 声明 auth:none,不能再声明 credentialProbe`)
+          }
           state.credentialProbe = name
           return surface
         },
@@ -636,7 +677,11 @@ export function createPlugin<Env = unknown>(opts: CreatePluginOptions<Env> = {})
 
     proxyTools(id, handlers) {
       assertFreshId(id)
+      if (handlers.auth !== undefined && handlers.credentialFields !== undefined) {
+        throw new TBError('invalid_argument', `export '${id}' 的 auth 不能与 credentialFields 同时声明`)
+      }
       exports.set(id, {
+        auth: handlers.auth,
         kind: 'proxyTools',
         id,
         description: handlers.description,
@@ -649,10 +694,12 @@ export function createPlugin<Env = unknown>(opts: CreatePluginOptions<Env> = {})
     context(id, handlers) {
       assertFreshId(id)
       exports.set(id, {
+        auth: handlers.auth,
         kind: 'context',
         id,
         description: handlers.description,
         handlers,
+        mountConfigFields: handlers.mountConfigFields,
       })
       return plugin
     },

@@ -48,6 +48,7 @@ const SENTRY: CatalogListItem = {
 /** 记录 invoke 调用顺序(测试的核心观测点)。 */
 const calls: Array<{ args: Record<string, unknown>, path: string, tool: string }> = []
 const oauthCalls: string[] = []
+let failMount = false
 
 vi.mock('@/lib/queries', () => ({
   useIntegrationCatalog: () => ({
@@ -60,6 +61,11 @@ vi.mock('@/lib/queries', () => ({
   useSecretList: () => ({ data: { items: [{ name: 'shared-key' }] } }),
   useInvoke: () => ({
     isPending: false,
+    mutateAsync: async (input: { args: Record<string, unknown>, path: string, tool: string }) => {
+      calls.push(input)
+      if (failMount && input.path === 'system/registry') throw new Error('mount rejected')
+      return { json: {} }
+    },
     mutate: (
       input: { args: Record<string, unknown>, path: string, tool: string },
       opts?: { onSuccess?: (r: unknown) => void },
@@ -91,6 +97,7 @@ afterEach(() => {
   cleanup()
   calls.length = 0
   oauthCalls.length = 0
+  failMount = false
   vi.restoreAllMocks()
 })
 
@@ -183,6 +190,22 @@ describe('提交顺序', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /添加 sentry/ }))
     await waitFor(() => expect(oauthCalls).toEqual(['tools/sentry']))
+  })
+
+  it('挂载失败会删除刚创建的 secret,不留下孤儿凭证', async () => {
+    failMount = true
+    await openAndPick('tavily')
+    fireEvent.change(screen.getByLabelText('挂载路径 *'), { target: { value: 'tools/tavily' } })
+    fireEvent.change(screen.getByLabelText('API key'), { target: { value: 'tvly-k' } })
+
+    fireEvent.click(screen.getByRole('button', { name: /添加 tavily/ }))
+    await waitFor(() => expect(calls.length).toBe(3))
+    expect(calls.map(call => `${call.path}:${call.tool}`)).toEqual([
+      'system/secret:set',
+      'system/registry:write',
+      'system/secret:delete',
+    ])
+    expect(calls[2]?.args).toEqual({ name: 'integration-tools-tavily' })
   })
 
   it('校验失败时不发任何请求,并就地显示原因', async () => {

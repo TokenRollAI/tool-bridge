@@ -106,7 +106,12 @@ describe('契约面', () => {
     const res = await plugin.fetch(new Request('https://plugin.test/~describe'), ENV as never)
     await expect(res.json()).resolves.toEqual({
       protocolVersion: 'plugin/v2',
-      exports: [{ id: 'actions', profile: 'tools/v1', description: 'Docker Hub' }],
+      exports: [{
+        auth: { kind: 'single', required: true },
+        id: 'actions',
+        profile: 'tools/v1',
+        description: 'Docker Hub',
+      }],
     })
   })
 

@@ -52,8 +52,19 @@ const WITH_OAUTH: PluginDescribe = {
 const BOTH_KINDS: PluginDescribe = {
   protocolVersion: 'plugin/v2',
   exports: [
-    { id: 'actions', profile: 'tools/v1' },
-    { id: 'documents', profile: 'context/v1', methods: ['Get', 'List'] },
+    {
+      auth: { kind: 'none' },
+      id: 'actions',
+      profile: 'tools/v1',
+      mountConfigFields: [{ key: 'workspace' }],
+    },
+    {
+      auth: { kind: 'single', label: 'Reader key', required: true },
+      id: 'documents',
+      profile: 'context/v1',
+      methods: ['Get', 'List'],
+      mountConfigFields: [{ key: 'tenant', required: true }],
+    },
   ],
 }
 
@@ -141,6 +152,24 @@ describe('list', () => {
       documents: 'context',
     })
     expect(items.find(i => i.id === 'tavily')?.exportKinds).toEqual({ actions: 'tool' })
+  })
+
+  it('exportDetails 保留逐 export 的 auth/config,不再把第一份声明套给全部 export', async () => {
+    const notes = (await list()).items.find(i => i.id === 'notes')!
+    expect(notes.exportDetails.actions).toEqual({
+      auth: { kind: 'none' },
+      id: 'actions',
+      kind: 'tool',
+      mountConfigFields: [{ key: 'workspace' }],
+    })
+    expect(notes.exportDetails.documents).toEqual({
+      auth: { kind: 'single', label: 'Reader key', required: true },
+      id: 'documents',
+      kind: 'context',
+      mountConfigFields: [{ key: 'tenant', required: true }],
+    })
+    expect(notes.exportDetails.actions?.mountConfigFields)
+      .not.toEqual(notes.exportDetails.documents?.mountConfigFields)
   })
 
   it('不回 describe 全文(那是 get 的事)', async () => {

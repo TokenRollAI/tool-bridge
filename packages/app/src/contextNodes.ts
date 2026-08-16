@@ -29,8 +29,8 @@ import {
 } from '@tool-bridge/core'
 import type { TbAppDeps } from './deps'
 import { createS3ObjectStore, type S3StoreConfig } from './providers/s3Object'
+import { assertPluginMountContract, requirePluginExport } from './toolNodes'
 import { assertNoDeviceMarker } from './deviceNodes'
-import { requirePluginExport } from './toolNodes'
 import { signRefToken } from './refToken'
 
 // ---------- SDK 进程内 Provider ----------
@@ -325,7 +325,14 @@ export async function assertContextConfig(config: unknown, deps: TbAppDeps): Pro
     // plugin 挂载:不存在/kind 不符/禁用 → invalid_argument(device-fs 由网关代写、
     // SDK '@local' 由 registerContext 内部通道落库,均不经注册面)。
     // 传 deps 而不是 deps.state:内置 binding 插件未注册时在这里自动补齐(免手工注册)。
-    await requirePluginExport(deps, cfg.provider, 'context', 'context', cfg.export)
+    const { export: exported } = await requirePluginExport(
+      deps,
+      cfg.provider,
+      'context',
+      'context',
+      cfg.export,
+    )
+    await assertPluginMountContract(exported, cfg, deps)
     return
   }
   if (cfg.provider === 's3') {

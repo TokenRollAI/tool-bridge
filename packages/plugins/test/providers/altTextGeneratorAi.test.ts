@@ -63,7 +63,12 @@ describe('alt_text_generator_ai(迁移产物)', () => {
     const res = await plugin.fetch(new Request('https://plugin.test/~describe'), ENV as never)
     await expect(res.json()).resolves.toEqual({
       protocolVersion: 'plugin/v2',
-      exports: [{ id: 'actions', profile: 'tools/v1', description: 'Alt Text Generator AI' }],
+      exports: [{
+        auth: { kind: 'single', required: true },
+        id: 'actions',
+        profile: 'tools/v1',
+        description: 'Alt Text Generator AI',
+      }],
     })
   })
 

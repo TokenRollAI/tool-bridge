@@ -15,6 +15,24 @@ import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { IntegrationDialog } from './forms/IntegrationDialog'
 
+function exportAuthLabel(item: NonNullable<ReturnType<typeof useIntegrationCatalog>['data']>[number], exportId: string): string {
+  const auth = item.exportDetails?.[exportId]?.auth
+  if (auth?.kind === 'none') return '无需凭证'
+  if (auth?.kind === 'oauth') return 'OAuth 授权'
+  if (auth?.kind === 'fields') return auth.fields.map(field => field.key).join(', ')
+  if (auth?.kind === 'single') return auth.required ? '单值凭证 *' : '单值凭证（可选）'
+  if (item.needsOAuth) return 'OAuth 授权'
+  if (item.credentialFields !== undefined) {
+    return item.credentialFields.map(field => field.key).join(', ')
+  }
+  return '单值凭证（可选）'
+}
+
+function exportConfigLabel(item: NonNullable<ReturnType<typeof useIntegrationCatalog>['data']>[number], exportId: string): string {
+  const fields = item.exportDetails?.[exportId]?.mountConfigFields ?? item.mountConfigFields
+  return fields?.map(field => (field.required === true ? `${field.key}*` : field.key)).join(', ') ?? '—'
+}
+
 /**
  * 内置集成目录(对等 `tb integration catalog`)。
  *
@@ -132,22 +150,36 @@ export function BuiltinCatalog() {
                   {item.exports.join(', ')}
                 </TableCell>
                 <TableCell>
-                  {item.needsOAuth
-                    ? <Badge variant="outline">OAuth 授权</Badge>
-                    : item.credentialFields !== undefined
-                      ? (
-                          <span className="font-mono text-xs text-muted-foreground">
-                            {item.credentialFields.map(f => f.key).join(', ')}
+                  <div className="grid gap-1">
+                    {item.exports.map(exportId => (
+                      <div className="text-xs text-muted-foreground" key={exportId}>
+                        {item.exports.length > 1 && (
+                          <span className="font-mono text-foreground">
+                            {exportId}
+                            {': '}
                           </span>
-                        )
-                      : <span className="text-xs text-muted-foreground">单值 API key</span>}
+                        )}
+                        {exportAuthLabel(item, exportId) === 'OAuth 授权'
+                          ? <Badge variant="outline">OAuth 授权</Badge>
+                          : exportAuthLabel(item, exportId)}
+                      </div>
+                    ))}
+                  </div>
                 </TableCell>
-                <TableCell className="font-mono text-xs text-muted-foreground">
-                  {item.mountConfigFields === undefined
-                    ? '—'
-                    : item.mountConfigFields
-                        .map(f => (f.required === true ? `${f.key}*` : f.key))
-                        .join(', ')}
+                <TableCell>
+                  <div className="grid gap-1 font-mono text-xs text-muted-foreground">
+                    {item.exports.map(exportId => (
+                      <div key={exportId}>
+                        {item.exports.length > 1 && (
+                          <span className="text-foreground">
+                            {exportId}
+                            {': '}
+                          </span>
+                        )}
+                        {exportConfigLabel(item, exportId)}
+                      </div>
+                    ))}
+                  </div>
                 </TableCell>
                 <TableCell>
                   {/* 目录行内直接挂载:预选该 provider、派生默认路径,不必去顶部再搜一次。 */}

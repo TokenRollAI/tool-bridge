@@ -31,6 +31,7 @@ interface CatalogListItem {
   }>
   description?: string
   digest: string
+  exportDetails?: Record<string, CatalogExportDetails>
   exportKinds?: Record<string, 'context' | 'tool'>
   exports: string[]
   id: string
@@ -42,6 +43,20 @@ interface CatalogListItem {
   }>
   needsOAuth: boolean
   nodeKinds: Array<'context' | 'tool'>
+}
+
+type CatalogExportAuth
+  = | { fields: NonNullable<CatalogListItem['credentialFields']>, kind: 'fields' }
+    | { kind: 'none' }
+    | { kind: 'oauth' }
+    | { description?: string, kind: 'single', label?: string, required: boolean }
+
+interface CatalogExportDetails {
+  auth: CatalogExportAuth
+  description?: string
+  id: string
+  kind: 'context' | 'tool'
+  mountConfigFields?: NonNullable<CatalogListItem['mountConfigFields']>
 }
 
 /** 全局参数的公共形状(本仓无集中 GlobalOpts 类型,各命令 inline 声明)。 */
@@ -106,18 +121,48 @@ async function catalogEntry(
   }
 }
 
+/** 新 catalog 按 export 给精确契约;旧宿主退化到 provider 级汇总字段。 */
+function detailsFor(
+  entry: CatalogListItem | undefined,
+  exportId: string | undefined,
+): CatalogExportDetails | undefined {
+  if (entry === undefined) return undefined
+  const id = exportId ?? (entry.exports.length === 1 ? entry.exports[0] : undefined)
+  if (id !== undefined && entry.exportDetails?.[id] !== undefined) return entry.exportDetails[id]
+  if (id === undefined) return undefined
+  const auth: CatalogExportAuth = entry.needsOAuth
+    ? { kind: 'oauth' }
+    : entry.credentialFields !== undefined
+      ? { kind: 'fields', fields: entry.credentialFields }
+      : { kind: 'single', required: false }
+  return {
+    id,
+    kind: entry.exportKinds?.[id]
+      ?? (entry.nodeKinds.length === 1 ? entry.nodeKinds[0]! : 'tool'),
+    auth,
+    ...(entry.mountConfigFields !== undefined
+      ? { mountConfigFields: entry.mountConfigFields }
+      : {}),
+  }
+}
+
 /** 字段名校验:挂载前就拒掉拼错的字段,而不是等 agent 首次调用收 401。 */
 function assertFieldNames(
   entry: CatalogListItem | undefined,
-  exportId: string | undefined,
+  details: CatalogExportDetails | undefined,
   given: string[],
 ): void {
-  const declared = entry?.credentialFields?.map(f => f.key)
+  const fields = details?.auth.kind === 'fields'
+    ? details.auth.fields
+    : details?.auth.kind === 'oauth'
+      ? [{ key: 'clientId' }, { key: 'clientSecret' }]
+      : undefined
+  const declared = fields?.map(f => f.key)
   if (declared === undefined || declared.length === 0) return
   const unknown = given.filter(k => !declared.includes(k))
   if (unknown.length > 0) {
     throw new CliError(
-      `unknown credential field(s) for "${entry!.id}"${exportId ? ` export "${exportId}"` : ''}: `
+      `unknown credential field(s) for "${entry!.id}" export "${details!.id}": `
       + `${unknown.join(', ')}; declared: ${declared.join(', ')}`,
     )
   }
@@ -140,9 +185,10 @@ function assertFieldNames(
  */
 function assertMountConfig(
   entry: CatalogListItem | undefined,
+  details: CatalogExportDetails | undefined,
   given: Record<string, string> | undefined,
 ): void {
-  const fields = entry?.mountConfigFields
+  const fields = details?.mountConfigFields
   if (fields === undefined) return
   const provided = new Set(Object.keys(given ?? {}))
   const missing = fields.filter(f => f.required === true && !provided.has(f.key)).map(f => f.key)
@@ -195,16 +241,19 @@ Examples:
             i.id,
             i.nodeKinds.join(','),
             i.exports.join(','),
-            i.needsOAuth
-              ? 'oauth (authorize after mount)'
-              : i.credentialFields !== undefined
-                ? i.credentialFields.map(f => f.key).join(',')
-                : 'single api key',
-            i.mountConfigFields === undefined
-              ? '—'
-              : i.mountConfigFields
-                  .map(f => (f.required === true ? `${f.key}*` : f.key))
-                  .join(','),
+            i.exports.map((id) => {
+              const auth = detailsFor(i, id)?.auth
+              if (auth?.kind === 'oauth') return `${id}:oauth`
+              if (auth?.kind === 'none') return `${id}:none`
+              if (auth?.kind === 'fields') return `${id}:${auth.fields.map(f => f.key).join('+')}`
+              return `${id}:api-key${auth?.required === true ? '*' : ''}`
+            }).join(';'),
+            i.exports.map((id) => {
+              const fields = detailsFor(i, id)?.mountConfigFields
+              return fields === undefined
+                ? `${id}:—`
+                : `${id}:${fields.map(f => (f.required === true ? `${f.key}*` : f.key)).join('+')}`
+            }).join(';'),
           ]),
         ))
         if (result.cursor !== undefined) printLine(`\nnext: --cursor ${result.cursor}`)
@@ -271,19 +320,34 @@ Examples:
             `provider "${provider}" has no export "${exportId}" (declared: ${entry.exports.join(', ')})`,
           )
         }
+        const details = detailsFor(entry, exportId)
 
         // 目标节点 kind 由**选中 export** 的 profile 决定。多 export 跨 kind 的 provider
         // (如 notes:actions=tool / notes=context)必须按 exportId 取,否则挂 context export
         // 会落到默认 'tool' 被平台拒且无解。退化顺序:选中 export 的 kind → 单一 nodeKind →
         // 'tool'(catalog 查不到 external plugin 时的兜底,那时确实无从判断)。
         const nodeKind: 'context' | 'tool'
-          = (exportId !== undefined ? entry?.exportKinds?.[exportId] : undefined)
+          = details?.kind
+            ?? (exportId !== undefined ? entry?.exportKinds?.[exportId] : undefined)
             ?? (entry?.nodeKinds.length === 1 ? entry.nodeKinds[0]! : 'tool')
 
         // 挂载配置在**任何写操作之前**解析并校验:缺必填 baseUrl 就该在这里拒,
         // 而不是等 secret 已经代建出来才炸(那会留下孤儿 secret)。
         const providerConfig = parseConfigSpecs(opts.config)
-        assertMountConfig(entry, providerConfig)
+        assertMountConfig(entry, details, providerConfig)
+
+        if (details?.auth.kind === 'none' && sources.length > 0) {
+          throw new CliError(`provider "${provider}" export "${details.id}" does not accept credentials`)
+        }
+        if (details?.auth.kind === 'single' && details.auth.required && sources.length === 0) {
+          throw new CliError(`provider "${provider}" export "${details.id}" requires a credential`)
+        }
+        if (
+          (details?.auth.kind === 'fields' || details?.auth.kind === 'oauth')
+          && sources.length === 0
+        ) {
+          throw new CliError(`provider "${provider}" export "${details.id}" requires credentials`)
+        }
 
         let authRef = opts.secret !== undefined ? String(opts.secret).trim() : undefined
         let createdSecret: string | undefined
@@ -291,7 +355,10 @@ Examples:
 
         if (opts.field.length > 0) {
           const fields = parseFields(opts.field)
-          assertFieldNames(entry, exportId, Object.keys(fields))
+          if (details?.auth.kind === 'single' || details?.auth.kind === 'none') {
+            throw new CliError(`provider "${provider}" export "${details.id}" does not use --field`)
+          }
+          assertFieldNames(entry, details, Object.keys(fields))
           authRef = derivedSecretName(path)
           secretFields = Object.keys(fields).sort()
           await callTool(target, '/system/secret', 'set', {
@@ -303,11 +370,15 @@ Examples:
           const value = opts.keyStdin === true ? await readStdin() : String(opts.key)
           if (value === '') throw new CliError('credential value is empty')
           // 声明了多字段却给单值:平台会在挂载时拒,这里先说清该怎么给。
-          if (entry?.credentialFields !== undefined && entry.credentialFields.length > 1) {
+          const declaredFields = details?.auth.kind === 'fields' ? details.auth.fields : undefined
+          if (declaredFields !== undefined && declaredFields.length > 1) {
             throw new CliError(
               `provider "${provider}" needs multiple credential fields `
-              + `(${entry.credentialFields.map(f => f.key).join(', ')}); use --field key=value`,
+              + `(${declaredFields.map(f => f.key).join(', ')}); use --field key=value`,
             )
+          }
+          if (details?.auth.kind === 'oauth') {
+            throw new CliError('oauth credentials need --field clientId=… --field clientSecret=… or --secret')
           }
           authRef = derivedSecretName(path)
           await callTool(target, '/system/secret', 'set', { name: authRef, value })
@@ -339,14 +410,23 @@ Examples:
           config,
         }
 
-        const node = await registerNode(target, input)
+        let node: Awaited<ReturnType<typeof registerNode>>
+        try {
+          node = await registerNode(target, input)
+        } catch (error) {
+          // 本轮代建的 secret 不能因挂载失败变成孤儿;复用的 --secret 不在清理范围。
+          if (createdSecret !== undefined) {
+            await callTool(target, '/system/secret', 'delete', { name: createdSecret }).catch(() => {})
+          }
+          throw error
+        }
 
         if (asJson) {
           printJson({
             node,
             ...(createdSecret !== undefined ? { createdSecret } : {}),
             ...(secretFields !== undefined ? { secretFields } : {}),
-            needsAuthorization: entry?.needsOAuth ?? false,
+            needsAuthorization: details?.auth.kind === 'oauth',
           })
           return
         }
@@ -358,7 +438,7 @@ Examples:
         }
         printLine(`mounted ${provider} at ${path}`)
         // 目录说得准就精确提示,说不准(external plugin)才给条件式那句。
-        if (entry?.needsOAuth === true) {
+        if (details?.auth.kind === 'oauth') {
           printLine(`next: run \`tb integration auth ${path}\` to authorize ${provider}`)
         } else if (entry === undefined && authRef !== undefined) {
           printLine(`note: if this export declares oauth, run \`tb integration auth ${path}\``)

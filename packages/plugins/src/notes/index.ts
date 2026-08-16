@@ -70,6 +70,11 @@ function metaOf(mountPath: string | undefined, path: string, note: Note): {
  * 没声明的落到默认区(单团队用法零配置)。真实 plugin 用 KV/D1 时同理:key 带这个前缀。
  */
 export function createNotesPlugin(): Plugin<Env> {
+  const workspaceConfig = [{
+    key: 'workspace',
+    label: 'Workspace',
+    description: '两个 export 使用相同值即可共享笔记;不同值彼此隔离',
+  }]
   /** workspace → 该工作区的笔记表。 */
   const byWorkspace = new Map<string, Map<string, Note>>()
   const notesOf = (config: Record<string, unknown> | undefined): Map<string, Note> => {
@@ -86,6 +91,8 @@ export function createNotesPlugin(): Plugin<Env> {
 
   plugin
     .tools('actions', { description: '记事本动作' })
+    .auth({ kind: 'none' })
+    .mountConfig(workspaceConfig)
     .register(
       'create_note',
       {
@@ -127,7 +134,9 @@ export function createNotesPlugin(): Plugin<Env> {
     )
 
   plugin.context('notes', {
+    auth: { kind: 'none' },
     description: '笔记内容面(append-only:可读可写,不可改不可删)',
+    mountConfigFields: workspaceConfig,
 
     list: ({ path }, ctx) => ({
       items: [...notesOf(ctx.mountConfig).entries()]

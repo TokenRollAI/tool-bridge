@@ -12,7 +12,7 @@
  * 才能列),没有旁路。
  */
 
-import type { PluginCredentialField, PluginMountConfigField } from '../plugin/contract'
+import type { PluginCredentialField, PluginExport, PluginMountConfigField } from '../plugin/contract'
 import type { BuiltinCatalog, BuiltinCatalogEntry } from '../plugin/catalog'
 import type { CmdSpec, HelpModel } from '../htbp/model'
 import type { BuiltinModule } from './types'
@@ -39,6 +39,8 @@ export interface CatalogListItem {
    * provider(如 notes:actions=tool / notes=context)靠它把选中的 export 挂到对的 kind,
    * 而不是落到默认值。
    */
+  /** 每个 export 的精确挂载契约;新客户端必须以选中的 export 为准。 */
+  exportDetails: Record<string, CatalogExportDetails>
   exportKinds: Record<string, 'tool' | 'context'>
   /** 可挂载的 export id(单 export 时挂载可省略 config.export)。 */
   exports: string[]
@@ -54,20 +56,61 @@ export interface CatalogListItem {
   nodeKinds: Array<'tool' | 'context'>
 }
 
+export type CatalogExportAuth
+  = | { fields: PluginCredentialField[], kind: 'fields' }
+    | { kind: 'none' }
+    | { kind: 'oauth' }
+    | { description?: string, kind: 'single', label?: string, required: boolean }
+
+export interface CatalogExportDetails {
+  auth: CatalogExportAuth
+  description?: string
+  id: string
+  kind: 'tool' | 'context'
+  mountConfigFields?: PluginMountConfigField[]
+}
+
 const NODE_KIND_BY_PROFILE: Record<string, 'tool' | 'context'> = {
   'tools/v1': 'tool',
   'context/v1': 'context',
+}
+
+function projectExportAuth(exported: PluginExport): CatalogExportAuth {
+  if (exported.oauth !== undefined) return { kind: 'oauth' }
+  if (exported.credentialFields !== undefined) {
+    return { kind: 'fields', fields: exported.credentialFields }
+  }
+  if (exported.auth?.kind === 'none') return { kind: 'none' }
+  return {
+    kind: 'single',
+    // 兼容旧 descriptor:未显式声明 auth 时沿用“单值但可留空”。
+    required: exported.auth?.required ?? false,
+    ...(exported.auth?.label !== undefined ? { label: exported.auth.label } : {}),
+    ...(exported.auth?.description !== undefined
+      ? { description: exported.auth.description }
+      : {}),
+  }
 }
 
 function projectListItem(entry: BuiltinCatalogEntry): CatalogListItem {
   const exports = entry.describe.exports
   const kinds = new Set<'tool' | 'context'>()
   const exportKinds: Record<string, 'tool' | 'context'> = {}
+  const exportDetails: Record<string, CatalogExportDetails> = {}
   for (const e of exports) {
     const kind = NODE_KIND_BY_PROFILE[e.profile]
     if (kind !== undefined) {
       kinds.add(kind)
       exportKinds[e.id] = kind
+      exportDetails[e.id] = {
+        id: e.id,
+        kind,
+        auth: projectExportAuth(e),
+        ...(e.description !== undefined ? { description: e.description } : {}),
+        ...(e.mountConfigFields !== undefined
+          ? { mountConfigFields: e.mountConfigFields }
+          : {}),
+      }
     }
   }
   // 多 export 时字段声明可能各不相同;列表取第一个声明了凭证字段的那个作为提示,
@@ -80,6 +123,7 @@ function projectListItem(entry: BuiltinCatalogEntry): CatalogListItem {
     digest: entry.digest,
     exports: exports.map(e => e.id),
     exportKinds,
+    exportDetails,
     nodeKinds: [...kinds].sort(),
     needsOAuth: exports.some(e => e.oauth !== undefined),
     ...(description !== undefined ? { description } : {}),

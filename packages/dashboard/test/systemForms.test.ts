@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest'
 import {
   buildRegistryConfig,
   buildRegistryWriteArgs,
+  catalogPluginsForMount,
   credentialPlanFor,
+  exportOptionsFor,
   INITIAL_REGISTRY_MOUNT_FORM,
   type RegistryMountFormState,
   showsAuthorizeAction,
@@ -177,6 +179,66 @@ describe('registry mount config', () => {
       mount({ kind: 'mcp', mcpUrl: 'https://mcp.example.com', renameSpec: 'broken' }),
       { context: [], tool: [] },
     )).toThrow('from=to')
+  })
+
+  it('内置 catalog 可进入高级挂载并携带 providerConfig + 虚拟化', () => {
+    const plugins = catalogPluginsForMount([{
+      digest: 'd',
+      exportDetails: {
+        actions: {
+          auth: { kind: 'single', required: true },
+          id: 'actions',
+          kind: 'tool',
+          mountConfigFields: [{ key: 'baseUrl', required: true }],
+        },
+      },
+      exportKinds: { actions: 'tool' },
+      exports: ['actions'],
+      id: 'posthog',
+      needsOAuth: false,
+      nodeKinds: ['tool'],
+    }])
+    const exports = exportOptionsFor(plugins, 'posthog', 'tools/v1')
+    const args = buildRegistryWriteArgs(
+      mount({
+        kind: 'tool',
+        toolProvider: 'posthog',
+        toolExport: 'actions',
+        toolAuthRef: 'posthog-key',
+        pluginConfig: { baseUrl: ' https://eu.posthog.com ' },
+        prefix: 'ph__',
+      }),
+      { context: [], tool: exports },
+    )
+    expect(args.config).toEqual({
+      kind: 'tool',
+      provider: 'posthog',
+      export: 'actions',
+      authRef: 'posthog-key',
+      providerConfig: { baseUrl: 'https://eu.posthog.com' },
+    })
+    expect(args.virtualize).toEqual({ prefix: 'ph__' })
+  })
+
+  it('高级挂载按 export 拒绝缺失配置/凭证与 auth:none 的多余 authRef', () => {
+    const required = [{
+      auth: { kind: 'single' as const, required: true },
+      id: 'actions',
+      profile: 'tools/v1' as const,
+      mountConfigFields: [{ key: 'baseUrl', required: true }],
+    }]
+    expect(() => buildRegistryConfig(
+      mount({ kind: 'tool', toolProvider: 'posthog', toolExport: 'actions' }),
+      { context: [], tool: required },
+    )).toThrow(/authRef|baseUrl/)
+
+    expect(() => buildRegistryConfig(
+      mount({ kind: 'tool', toolProvider: 'notes', toolAuthRef: 'unused' }),
+      {
+        context: [],
+        tool: [{ auth: { kind: 'none' }, id: 'actions', profile: 'tools/v1' }],
+      },
+    )).toThrow(/无需凭证/)
   })
 })
 

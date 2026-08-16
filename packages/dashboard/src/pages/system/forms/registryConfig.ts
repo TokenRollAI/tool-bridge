@@ -1,4 +1,10 @@
-import type { PluginCredentialField, PluginExport, PluginManifest, PluginProfile } from '@/lib/types'
+import type {
+  CatalogListItem,
+  PluginCredentialField,
+  PluginExport,
+  PluginManifest,
+  PluginProfile,
+} from '@/lib/types'
 
 export type MountKind = 'mcp' | 'http' | 'context' | 'skillhub' | 'remote' | 'tool'
 export type AuthSchemeMode = 'bearer' | 'raw' | 'custom'
@@ -25,6 +31,7 @@ export interface RegistryMountFormState {
   mcpSchemeMode: AuthSchemeMode
   mcpUrl: string
   path: string
+  pluginConfig: Record<string, string>
   prefix: string
   provider: string
   readOnly: boolean
@@ -63,6 +70,7 @@ export const INITIAL_REGISTRY_MOUNT_FORM: RegistryMountFormState = {
   mcpSchemeMode: 'bearer',
   mcpUrl: '',
   path: '',
+  pluginConfig: {},
   prefix: '',
   provider: 'r2',
   readOnly: false,
@@ -104,6 +112,44 @@ export function exportOptionsFor(
   return plugin === undefined ? [] : exportsForProfile(plugin, profile)
 }
 
+/** 把只读内置 catalog 投影成高级挂载器现有的 plugin/export 选择形状。 */
+export function catalogPluginsForMount(items: CatalogListItem[]): PluginManifest[] {
+  return items.map(item => ({
+    auth: { kind: 'platform-token' },
+    enabled: true,
+    endpoint: `binding:${item.id}`,
+    exports: item.exports.map((id): PluginExport => {
+      const details = item.exportDetails?.[id]
+      const auth = details?.auth
+      return {
+        id,
+        profile: (details?.kind ?? item.exportKinds?.[id] ?? 'tool') === 'context'
+          ? 'context/v1'
+          : 'tools/v1',
+        ...(details?.description !== undefined ? { description: details.description } : {}),
+        ...(details?.mountConfigFields !== undefined
+          ? { mountConfigFields: details.mountConfigFields }
+          : details === undefined && item.mountConfigFields !== undefined
+            ? { mountConfigFields: item.mountConfigFields }
+            : {}),
+        ...(auth?.kind === 'fields'
+          ? { credentialFields: auth.fields }
+          : details === undefined && item.credentialFields !== undefined
+            ? { credentialFields: item.credentialFields }
+            : {}),
+        ...(auth?.kind === 'none' || auth?.kind === 'single' ? { auth } : {}),
+        // 这里只供 Dashboard 判断“挂载后要授权”,端点全文仍以 gateway 的 describe 为真源。
+        ...(auth?.kind === 'oauth' || (details === undefined && item.needsOAuth)
+          ? { oauth: { authorizationUrl: '', tokenUrl: '' } }
+          : {}),
+      }
+    }),
+    healthPath: '/healthz',
+    id: item.id,
+    protocolVersion: 'plugin/v2',
+  }))
+}
+
 export function parsePairs(spec: string, field: string): Record<string, string> {
   const out: Record<string, string> = {}
   for (const line of spec.split('\n')) {
@@ -131,6 +177,77 @@ export function resolvePluginExport(
     )
   }
   return ''
+}
+
+function selectedExport(options: PluginExport[], chosen: string): PluginExport | undefined {
+  const id = chosen.trim()
+  return id === '' ? options[0] : options.find(item => item.id === id)
+}
+
+/**
+ * 按选中的 export 计算凭证形状。`secret:false` 只影响展示,字段仍全部走 authRef;
+ * 非凭证配置由独立的 `mountConfigFields` 驱动并写入 providerConfig。
+ */
+export function credentialPlanFor(
+  exports: PluginExport[],
+  exportId: string,
+): {
+  authRequired: boolean
+  kind: 'none' | 'oauth' | 'fields' | 'single'
+  oauth?: PluginExport['oauth']
+  probe?: string
+  /** 走 authRef 那个 secret 的字段 —— 声明了 credentialFields 就是全部。 */
+  secretFields: PluginCredentialField[]
+} {
+  // exportId 为空时取第一个 —— 与“单 export 可留空”的表单语义一致。
+  const target = selectedExport(exports, exportId)
+  if (target === undefined) return { authRequired: false, kind: 'single', secretFields: [] }
+  if (target.auth?.kind === 'none') {
+    return { authRequired: false, kind: 'none', secretFields: [] }
+  }
+  if (target.oauth !== undefined) {
+    return { authRequired: true, kind: 'oauth', secretFields: [], oauth: target.oauth }
+  }
+  const fields = target.credentialFields ?? []
+  if (fields.length === 0) {
+    return {
+      kind: 'single',
+      authRequired: target.auth?.kind === 'single' && target.auth.required === true,
+      secretFields: [],
+      ...(target.credentialProbe !== undefined ? { probe: target.credentialProbe } : {}),
+    }
+  }
+  return {
+    authRequired: true,
+    kind: 'fields',
+    secretFields: fields,
+    ...(target.credentialProbe !== undefined ? { probe: target.credentialProbe } : {}),
+  }
+}
+
+function pluginProviderConfig(
+  options: PluginExport[],
+  chosen: string,
+  values: Record<string, string>,
+): Record<string, string> | undefined {
+  const fields = selectedExport(options, chosen)?.mountConfigFields ?? []
+  const config: Record<string, string> = {}
+  for (const [key, value] of Object.entries(values)) {
+    const trimmed = value.trim()
+    if (key.trim() !== '' && trimmed !== '') config[key.trim()] = trimmed
+  }
+  const missing = fields
+    .filter(field => field.required === true && (config[field.key] ?? '') === '')
+    .map(field => field.key)
+  if (missing.length > 0) throw new Error(`缺必填配置:${missing.join('、')}`)
+  return Object.keys(config).length > 0 ? config : undefined
+}
+
+function assertPluginAuthRef(options: PluginExport[], chosen: string, authRef: string): void {
+  const plan = credentialPlanFor(options, chosen)
+  const hasAuthRef = authRef.trim() !== ''
+  if (plan.kind === 'none' && hasAuthRef) throw new Error('该 export 声明无需凭证,不要填写 authRef')
+  if (plan.authRequired && !hasAuthRef) throw new Error('该 export 需要 authRef')
 }
 
 function parseTtl(value: string): number | undefined {
@@ -285,11 +402,18 @@ export function buildRegistryConfig(
         }
       }
       const exportId = resolvePluginExport(state.ctxExport, exports.context, state.provider)
+      assertPluginAuthRef(exports.context, state.ctxExport, state.ctxAuthRef)
+      const providerConfig = pluginProviderConfig(
+        exports.context,
+        state.ctxExport,
+        state.pluginConfig,
+      )
       return {
         kind: 'context',
         provider: state.provider,
         ...(exportId ? { export: exportId } : {}),
         ...(state.ctxAuthRef.trim() ? { authRef: state.ctxAuthRef.trim() } : {}),
+        ...(providerConfig !== undefined ? { providerConfig } : {}),
         ...(state.readOnly ? { readOnly: true } : {}),
         ...(ttl !== undefined ? { ttl } : {}),
       }
@@ -335,11 +459,18 @@ export function buildRegistryConfig(
     case 'tool': {
       if (!state.toolProvider) throw new Error('先选择一个 plugin(没有则去「Plugin」注册)')
       const exportId = resolvePluginExport(state.toolExport, exports.tool, state.toolProvider)
+      assertPluginAuthRef(exports.tool, state.toolExport, state.toolAuthRef)
+      const providerConfig = pluginProviderConfig(
+        exports.tool,
+        state.toolExport,
+        state.pluginConfig,
+      )
       return {
         kind: 'tool',
         provider: state.toolProvider,
         ...(exportId ? { export: exportId } : {}),
         ...(state.toolAuthRef.trim() ? { authRef: state.toolAuthRef.trim() } : {}),
+        ...(providerConfig !== undefined ? { providerConfig } : {}),
       }
     }
   }
@@ -381,60 +512,4 @@ export function showsAuthorizeAction(node: {
 }): boolean {
   if (node.kind === 'tool') return true
   return node.kind === 'mcp' && node.config?.auth === 'oauth'
-}
-
-/**
- * 挂载某个 plugin export 时,凭证该怎么配。
- *
- * 数据来自注册时缓存的 `~describe`(平台早就存了),但 Dashboard 此前的 `PluginExport`
- * 类型漏了这几个字段,于是**挂载表单只给一个空的 authRef 输入框** —— 用户看不到
- * 该填什么、有几个字段、哪些是 secret,只能去翻插件源码或 CLI。
- *
- * 三种互斥形态(SDK 侧保证互斥):
- * - `oauth`:authRef 指向的 secret 固定存 clientId/clientSecret,挂载后还要授权一步;
- * - `credentialFields`:多字段,**全部**进 authRef 指向的那个 secret;
- * - 都没有:单值 API key(或不需要凭证)。
- *
- * **`secret: false` 不改变通道**(此前这里按它把字段分流进 providerConfig,是个真 bug):
- * 运行时 `assertToolConfig` 把整个 `credentialFields` 交给 core `parseCredentialValues`,
- * 后者要求每个 `required !== false` 的字段都出现在 authRef 解出的 JSON 里。照分流后的
- * 引导操作,挂载必被拒("多字段凭证缺少必填字段:…"),精确影响 8 个声明了 `secret: false`
- * 的 provider(confluence / ghost / jira / mattermost / shopify / twilio / upstash_redis /
- * wordpress)—— 它们的 handler 也都是从 `ctx.credentials` 取那些字段的,通道本来就只有一条。
- *
- * `secret` 是**展示语义**(要不要遮蔽输入),不是通道语义。非凭证的挂载配置
- * (baseUrl / region / workspace 之类)该由 export 独立声明,而不是混在凭证字段里靠一个
- * 布尔标志区分 —— 那条路走 providerConfig,由后续的 mountConfigSchema 驱动。
- */
-export function credentialPlanFor(
-  exports: PluginExport[],
-  exportId: string,
-): {
-  kind: 'oauth' | 'fields' | 'single'
-  oauth?: PluginExport['oauth']
-  probe?: string
-  /** 走 authRef 那个 secret 的字段 —— 声明了 credentialFields 就是全部。 */
-  secretFields: PluginCredentialField[]
-} {
-  // exportId 为空时取第一个 —— 与"单 export 可留空"的表单语义一致。
-  const target = exportId.trim() === ''
-    ? exports[0]
-    : exports.find(e => e.id === exportId.trim())
-  if (target === undefined) return { kind: 'single', secretFields: [] }
-  if (target.oauth !== undefined) {
-    return { kind: 'oauth', secretFields: [], oauth: target.oauth }
-  }
-  const fields = target.credentialFields ?? []
-  if (fields.length === 0) {
-    return {
-      kind: 'single',
-      secretFields: [],
-      ...(target.credentialProbe !== undefined ? { probe: target.credentialProbe } : {}),
-    }
-  }
-  return {
-    kind: 'fields',
-    secretFields: fields,
-    ...(target.credentialProbe !== undefined ? { probe: target.credentialProbe } : {}),
-  }
 }

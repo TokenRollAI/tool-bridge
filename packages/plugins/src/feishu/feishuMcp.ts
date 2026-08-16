@@ -16,6 +16,7 @@ import {
 import { CfWorkerJsonSchemaValidator } from '@modelcontextprotocol/sdk/validation/cfworker'
 import { isTBError, normalizeUpstreamError, TBError } from '@tool-bridge/core'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
+import { createGuardedFetch } from '../_runtime/guardedFetch'
 
 export const DEFAULT_MCP_URL = 'https://mcp.feishu.cn/mcp'
 
@@ -40,6 +41,11 @@ interface CachedSession {
 /** MCP 会话按 app_id 键控(同一部署可服务多凭证挂载,会话不得串号)。 */
 const sessions = new Map<string, CachedSession>()
 
+const feishuMcpFetch = createGuardedFetch({
+  crossOriginRedirect: 'error',
+  sensitiveHeaders: ['x-lark-mcp-tat'],
+})
+
 /** 测试用:清空进程内 MCP 会话缓存。 */
 export function clearSessionCache(): void {
   sessions.clear()
@@ -59,7 +65,7 @@ const noStandaloneSseFetch: typeof fetch = (input, init) => {
   if (String(method).toUpperCase() === 'GET') {
     return Promise.resolve(new Response(null, { status: 405, statusText: 'Method Not Allowed' }))
   }
-  return fetch(input, init)
+  return feishuMcpFetch(input, init)
 }
 
 function isSessionInvalid(err: unknown): boolean {

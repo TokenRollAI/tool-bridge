@@ -172,7 +172,13 @@ export interface PluginMountConfigField {
   required?: boolean
 }
 
+export type PluginExportAuth
+  = | { kind: 'none' }
+    | { description?: string, kind: 'single', label?: string, required?: boolean }
+
 export interface PluginExport {
+  /** 明确声明无凭证/单值凭证;旧 descriptor 缺省时仍按兼容单值处理。 */
+  auth?: PluginExportAuth
   capabilities?: string[]
   /** 该 export 需要的多字段凭证;缺省表示单值 API key(或不需要凭证)。 */
   credentialFields?: PluginCredentialField[]
@@ -222,6 +228,8 @@ export interface CatalogListItem {
   description?: string
   /** descriptor 指纹(升级检测/三宿主对拍)。 */
   digest: string
+  /** 每个 export 的精确 auth/config/kind 契约。 */
+  exportDetails?: Record<string, CatalogExportDetails>
   /** export id → 它能挂成的节点 kind;选定 export 后 kind 是确定的(跨 kind 多 export 靠它挂对)。 */
   exportKinds?: Record<string, 'context' | 'tool'>
   /** 可挂载的 export id;长度 > 1 时挂载必须显式选一个。 */
@@ -232,6 +240,20 @@ export interface CatalogListItem {
   /** 声明了 oauth → 挂载后还要授权一步。 */
   needsOAuth: boolean
   nodeKinds: Array<'context' | 'tool'>
+}
+
+export type CatalogExportAuth
+  = | { fields: PluginCredentialField[], kind: 'fields' }
+    | { kind: 'none' }
+    | { kind: 'oauth' }
+    | { description?: string, kind: 'single', label?: string, required: boolean }
+
+export interface CatalogExportDetails {
+  auth: CatalogExportAuth
+  description?: string
+  id: string
+  kind: 'context' | 'tool'
+  mountConfigFields?: PluginMountConfigField[]
 }
 
 /**

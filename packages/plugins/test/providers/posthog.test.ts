@@ -111,11 +111,20 @@ describe('契约面', () => {
   it('~describe 报单个 tools/v1 export,并声明 get_current_user 为凭证探针', async () => {
     const res = await plugin.fetch(new Request('https://plugin.test/~describe'), ENV as never)
     const body = (await res.json()) as {
-      exports: Array<{ credentialProbe?: string, id: string, profile: string }>
+      exports: Array<{
+        credentialProbe?: string
+        id: string
+        mountConfigFields?: Array<{ key: string, required?: boolean }>
+        profile: string
+      }>
     }
     expect(body.exports).toHaveLength(1)
     expect(body.exports[0]?.profile).toBe('tools/v1')
     expect(body.exports[0]?.credentialProbe).toBe('get_current_user')
+    expect(body.exports[0]?.mountConfigFields).toEqual([
+      expect.objectContaining({ key: 'baseUrl', required: true }),
+      expect.objectContaining({ key: 'organizationId' }),
+    ])
   })
 
   it('探针满足"无必填入参 + effect:read"(平台会空参真调它)', () => {

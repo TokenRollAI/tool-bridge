@@ -11,6 +11,7 @@ import {
   type HelpModel,
   isTBError,
   NodeRegistryStore,
+  OAUTH_CLIENT_FIELDS,
   parseCredentialValues,
   type PluginExport,
   type PluginManifest,
@@ -127,6 +128,65 @@ export function mountCallContext(
     ...(providerConfig !== undefined ? { mountConfig: providerConfig } : {}),
     // v2 多 export:plugin 据此把调用路由到正确的 export。
     ...(exportId !== undefined ? { exportId } : {}),
+  }
+}
+
+/**
+ * plugin export 的挂载配置权威校验。CLI/Dashboard 的表单校验只改善体验,不能成为安全边界:
+ * 直接调用 registry/~register 也必须得到同样的接受/拒绝结果。
+ */
+export async function assertPluginMountContract(
+  exported: PluginExport,
+  config: { authRef?: unknown, providerConfig?: Record<string, unknown> },
+  deps: Pick<TbAppDeps, 'secrets'>,
+): Promise<void> {
+  const providerConfig = config.providerConfig ?? {}
+  const missingConfig = (exported.mountConfigFields ?? [])
+    .filter((field) => {
+      if (field.required !== true) return false
+      const value = providerConfig[field.key]
+      return value === undefined || value === null || (typeof value === 'string' && value.trim() === '')
+    })
+    .map(field => field.key)
+  if (missingConfig.length > 0) {
+    throw new TBError(
+      'invalid_argument',
+      `plugin export '${exported.id}' 缺少必填 providerConfig:${missingConfig.join(', ')}`,
+    )
+  }
+
+  const authRef = typeof config.authRef === 'string' && config.authRef.trim() !== ''
+    ? config.authRef.trim()
+    : undefined
+  if (exported.auth?.kind === 'none') {
+    if (authRef !== undefined) {
+      throw new TBError(
+        'invalid_argument',
+        `plugin export '${exported.id}' 声明 auth:none,不得绑定 authRef`,
+      )
+    }
+    return
+  }
+
+  const requiresAuth = exported.oauth !== undefined
+    || exported.credentialFields !== undefined
+    || (exported.auth?.kind === 'single' && exported.auth.required === true)
+  if (requiresAuth && authRef === undefined) {
+    throw new TBError(
+      'invalid_argument',
+      `plugin export '${exported.id}' 需要 authRef`,
+    )
+  }
+  if (authRef === undefined) return
+
+  const raw = await deps.secrets.resolve(authRef)
+  if (raw === undefined) {
+    throw new TBError('invalid_argument', `secret '${authRef}' 不存在或无法解密`)
+  }
+  if (exported.credentialFields !== undefined) {
+    parseCredentialValues(raw, exported.credentialFields)
+  } else if (exported.oauth !== undefined) {
+    parseCredentialValues(raw, [...OAUTH_CLIENT_FIELDS])
   }
 }
 
@@ -421,17 +481,11 @@ export async function assertToolConfig(
   )
 
   const authRef = (config as { authRef?: unknown }).authRef
-
-  // 多字段凭证:挂载时就校验字段齐全,不等到第一次调用。缺字段是**配置**错误,
-  // 越早报越好 —— 而且这里能说清缺哪个字段,运行时报错只能说"凭证不可用"。
-  if (exported.credentialFields !== undefined && typeof authRef === 'string') {
-    const raw = await deps.secrets.resolve(authRef)
-    if (raw === undefined) {
-      throw new TBError('invalid_argument', `secret '${authRef}' 不存在或无法解密`)
-    }
-    // 抛的就是 invalid_argument,消息点名缺哪个字段且不回显值(见 core parseCredentialValues)。
-    parseCredentialValues(raw, exported.credentialFields)
-  }
+  await assertPluginMountContract(
+    exported,
+    config as { authRef?: unknown, providerConfig?: Record<string, unknown> },
+    deps,
+  )
 
   if (
     exported.credentialProbe === undefined

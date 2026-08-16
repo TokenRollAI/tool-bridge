@@ -76,6 +76,7 @@ describe('契约面', () => {
     await expect(res.json()).resolves.toEqual({
       protocolVersion: 'plugin/v2',
       exports: [{
+        auth: { kind: 'single', required: true },
         id: 'actions',
         profile: 'tools/v1',
         description: 'Pipedrive',

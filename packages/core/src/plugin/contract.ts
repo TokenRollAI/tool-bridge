@@ -63,6 +63,16 @@ export function optionalMethodsForCapabilities(capabilities: readonly string[]):
 // export id 与 plugin id 同规则:会进挂载配置并被路径化引用。
 const EXPORT_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/
 
+const exportAuthSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('none') }),
+  z.object({
+    kind: z.literal('single'),
+    description: z.string().optional(),
+    label: z.string().optional(),
+    required: z.boolean().optional(),
+  }),
+])
+
 const exportSchema = z.object({
   id: z.string().regex(EXPORT_ID_RE, 'export id 须为 [A-Za-z0-9._-] 且不以标点开头'),
   profile: z.enum(PLUGIN_PROFILES),
@@ -70,17 +80,19 @@ const exportSchema = z.object({
   /** context/v1:实际提供的动词;tools/v1 由运行时 List 发现,可省。 */
   methods: z.array(z.string()).optional(),
   capabilities: z.array(z.string()).optional(),
+  /** export 的单值/无凭证声明;多字段与 OAuth 继续由各自字段表达。 */
+  auth: exportAuthSchema.optional(),
   /**
    * tools/v1 可选:一个**只读、零副作用、无必填入参**的工具名,平台在挂载时拿它做一次
    * 真实调用来验证 `authRef` 指向的凭证可用(见 `credentialProbe` 的类型注释)。
    */
   credentialProbe: z.string().optional(),
   /**
-   * 多字段凭证的字段声明(仅 tools/v1)。声明了它,平台就知道该 secret 存的是一个 JSON
+   * 多字段凭证的字段声明(tools/v1)。声明了它,平台就知道该 secret 存的是一个 JSON
    * 对象而非单值,并在挂载时校验字段齐全 —— 见 `credentialFields` 的类型注释。
    */
   /**
-   * provider 型 OAuth2 的声明(仅 tools/v1)。声明了它,平台就托管授权码流程:
+   * provider 型 OAuth2 的声明(tools/v1)。声明了它,平台就托管授权码流程:
    * `POST /<path>/~authorize` 发起、回调兑换、调用时自动刷新,插件只拿到 access token。
    */
   oauth: pluginOAuthSchema.optional(),
@@ -112,6 +124,8 @@ const describeSchema = z.object({
 
 /** 单个 export 的声明。 */
 export interface PluginExport {
+  /** 明确声明无需凭证,或声明单值凭证的展示/必填语义。缺省兼容为可选单值凭证。 */
+  auth?: PluginExportAuth
   capabilities?: string[]
   /**
    * 多字段凭证的字段声明(仅 tools/v1)。
@@ -143,7 +157,7 @@ export interface PluginExport {
   id: string
   methods?: string[]
   /**
-   * 非凭证的挂载配置字段声明(仅 tools/v1)。声明了它,平台就知道该 export 挂载时还需要
+   * 非凭证的挂载配置字段声明。声明了它,平台就知道该 export 挂载时还需要
    * 哪些 `providerConfig`(如 memos 的 baseUrl),管理面据此渲染带标签的输入框、缺必填项
    * 可在挂载前拦下 —— 此前这些需求只写在插件源码注释里,用户要到运行时才发现。
    *
@@ -196,6 +210,11 @@ export interface PluginMountConfigField {
   required?: boolean
 }
 
+/** export 的上游凭证形态补充;多字段与 OAuth 由既有声明表达。 */
+export type PluginExportAuth
+  = | { kind: 'none' }
+    | { description?: string, kind: 'single', label?: string, required?: boolean }
+
 /** `/~describe` 响应形状(v2)。 */
 export interface PluginDescribe {
   exports: PluginExport[]
@@ -237,6 +256,21 @@ export function validatePluginContract(input: PluginContractInput): PluginDescri
       throw new TBError('invalid_argument', `plugin '${manifest.id}' 的 export id 重复:'${exported.id}'`)
     }
     seen.add(exported.id)
+
+    if (exported.auth !== undefined) {
+      if (exported.oauth !== undefined || exported.credentialFields !== undefined) {
+        throw new TBError(
+          'invalid_argument',
+          `plugin '${manifest.id}' export '${exported.id}' 的 auth 不能与 oauth/credentialFields 同时声明`,
+        )
+      }
+      if (exported.auth.kind === 'none' && exported.credentialProbe !== undefined) {
+        throw new TBError(
+          'invalid_argument',
+          `plugin '${manifest.id}' export '${exported.id}' 声明 auth:none,不能再声明 credentialProbe`,
+        )
+      }
+    }
 
     // credentialProbe 只对 tools/v1 有意义(context/v1 的动词表本身就够平台探活)。
     // 声明在错的 profile 上是配置错误,不是"忽略即可"的多余字段 —— 否则作者会以为
@@ -296,15 +330,6 @@ export function validatePluginContract(input: PluginContractInput): PluginDescri
       }
     }
     if (exported.mountConfigFields !== undefined) {
-      // 与 credentialFields 同一理由:context/v1 的挂载配置语义不同(它没有 providerConfig
-      // 注入 handler 的这套),声明在错的 profile 上是配置错误而非可忽略的多余字段。
-      if (exported.profile !== 'tools/v1') {
-        throw new TBError(
-          'invalid_argument',
-          `plugin '${manifest.id}' export '${exported.id}' 在 ${exported.profile} 上声明了 `
-          + 'mountConfigFields,该字段仅 tools/v1 支持',
-        )
-      }
       const keys = new Set<string>()
       for (const field of exported.mountConfigFields) {
         if (keys.has(field.key)) {

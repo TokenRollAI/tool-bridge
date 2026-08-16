@@ -352,6 +352,75 @@ describe('tb integration add', () => {
     expect(bodyOf(calls, /~register/).kind).toBe('tool')
   })
 
+  it('逐 export 契约:只使用选中 export 的 auth 与 mountConfigFields', async () => {
+    const MULTI = {
+      id: 'multi',
+      digest: 'dm',
+      exports: ['actions', 'documents'],
+      exportKinds: { actions: 'tool', documents: 'context' },
+      exportDetails: {
+        actions: { id: 'actions', kind: 'tool', auth: { kind: 'none' } },
+        documents: {
+          id: 'documents',
+          kind: 'context',
+          auth: { kind: 'fields', fields: [{ key: 'readerToken', required: true }] },
+          mountConfigFields: [{ key: 'tenant', required: true }],
+        },
+      },
+      nodeKinds: ['context', 'tool'],
+      needsOAuth: false,
+    }
+    const calls = routedFetch([catalogOf([MULTI])])
+    await runCli([
+      'integration', 'add', 'docs/multi', '--provider', 'multi', '--export', 'documents',
+      '--field', 'readerToken=secret', '--config', 'tenant=acme', ...base,
+    ])
+    expect(process.exitCode).toBe(0)
+    expect(bodyOf(calls, /~register/).config).toMatchObject({
+      kind: 'context',
+      provider: 'multi',
+      export: 'documents',
+      providerConfig: { tenant: 'acme' },
+    })
+  })
+
+  it('auth:none export 给凭证 → 本地拒且不写 secret', async () => {
+    const NO_AUTH = {
+      ...TAVILY,
+      exportDetails: {
+        actions: { id: 'actions', kind: 'tool', auth: { kind: 'none' } },
+      },
+    }
+    const calls = routedFetch([catalogOf([NO_AUTH])])
+    await runCli([
+      'integration', 'add', 'tools/public', '--provider', 'tavily', '--key', 'unused', ...base,
+    ])
+    expect(process.exitCode).not.toBe(0)
+    expect(bodyOf(calls, /system\/secret/)).toBeUndefined()
+    expect(bodyOf(calls, /~register/)).toBeUndefined()
+  })
+
+  it('挂载失败会回滚本轮代建的 secret,不留下孤儿记录', async () => {
+    const calls = routedFetch([
+      catalogOf([TAVILY]),
+      { match: /system\/secret/, body: { ok: true } },
+      {
+        match: /~register/,
+        body: { code: 'invalid_argument', message: 'mount rejected', retryable: false },
+        status: 400,
+      },
+    ])
+    await runCli([
+      'integration', 'add', 'tools/tavily', '--provider', 'tavily', '--key', 'secret', ...base,
+    ])
+    expect(process.exitCode).not.toBe(0)
+    const secretBodies = calls
+      .filter(c => /system\/secret/.test(c.url))
+      .map(c => c.body as WireBody)
+    expect(secretBodies.map(body => body.tool)).toEqual(['set', 'delete'])
+    expect(secretBodies[1]?.arguments?.name).toBe('integration-tools-tavily')
+  })
+
   it('多 export 未指定 → 本地拒(免一次往返)', async () => {
     const calls = routedFetch([catalogOf([{ ...TAVILY, exports: ['a', 'b'] }])])
     await runCli(['integration', 'add', 'p', '--provider', 'tavily', '--key', 'k', ...base])

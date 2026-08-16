@@ -35,67 +35,6 @@ import {
   SINGLE_FIELD_KEY,
 } from './integrationPlan'
 
-/** providerConfig 的 k=v 行编辑器(mountConfigSchema 落地后换成 schema 驱动的表单)。 */
-function ConfigRows({
-  onChange,
-  value,
-}: {
-  onChange: (next: Record<string, string>) => void
-  value: Record<string, string>
-}) {
-  const rows = Object.entries(value)
-  const setRow = (index: number, key: string, val: string) => {
-    const next: Record<string, string> = {}
-    rows.forEach(([k, v], i) => {
-      if (i === index) next[key] = val
-      else next[k] = v
-    })
-    onChange(next)
-  }
-  return (
-    <div className="grid gap-2">
-      {rows.map(([key, val], index) => (
-        <div className="grid grid-cols-[1fr_1fr_auto] gap-2" key={index}>
-          <Input
-            className="font-mono text-xs"
-            onChange={event => setRow(index, event.target.value, val)}
-            placeholder="baseUrl"
-            value={key}
-          />
-          <Input
-            className="font-mono text-xs"
-            onChange={event => setRow(index, key, event.target.value)}
-            placeholder="https://memos.example.com"
-            value={val}
-          />
-          <Button
-            onClick={() => {
-              const next = { ...value }
-              delete next[key]
-              onChange(next)
-            }}
-            size="sm"
-            type="button"
-            variant="ghost"
-          >
-            删除
-          </Button>
-        </div>
-      ))}
-      <Button
-        className="justify-self-start"
-        onClick={() => onChange({ ...value, '': '' })}
-        size="sm"
-        type="button"
-        variant="outline"
-      >
-        <Plus />
-        添加配置项
-      </Button>
-    </div>
-  )
-}
-
 /**
  * 集成挂载向导 —— 选集成 → 填凭证 → 挂载(需要时授权),一屏走完。
  *
@@ -134,7 +73,7 @@ export function IntegrationDialog({
     () => items.find(i => i.id === form.provider),
     [items, form.provider],
   )
-  const plan = integrationPlan(entry)
+  const plan = integrationPlan(entry, form.exportId)
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
     if (q === '') return items.slice(0, 50)
@@ -146,7 +85,7 @@ export function IntegrationDialog({
   const setField = (key: string, value: string) =>
     setForm(current => ({ ...current, credentials: { ...current.credentials, [key]: value } }))
 
-  const submit = () => {
+  const submit = async () => {
     let calls: ReturnType<typeof buildIntegrationCalls>
     try {
       calls = buildIntegrationCalls(form, entry)
@@ -155,51 +94,49 @@ export function IntegrationDialog({
       return
     }
 
-    const mountThen = () => {
-      invoke.mutate(
-        { path: 'system/registry', tool: 'write', args: calls.mount },
-        {
-          onSuccess: () => {
-            toast.success(`已挂载 ${form.provider} → ${calls.mount.path}`)
-            setOpen(false)
-            setErr(null)
-            setForm({ ...INITIAL_INTEGRATION_FORM, path: '' })
-            qc.invalidateQueries({ queryKey: ['tb'] })
-            if (calls.needsAuthorize) {
-              oauth.mutate(calls.mount.path, {
-                onSuccess: (result) => {
-                  if (result.status === 'authorized') {
-                    toast.success(`${calls.mount.path} 已授权`)
-                  } else if (result.authorizationUrl) {
-                    window.open(result.authorizationUrl, '_blank', 'noopener')
-                    toast.info('已打开授权页,完成后即可调用')
-                  }
-                },
-                onError: error =>
-                  toast.error(
-                    /redirect/i.test(error.message)
-                      ? `该上游只允许 localhost 回调,请用 CLI:tb integration auth ${calls.mount.path} --local`
-                      : `发起授权失败:${error.message}`,
-                  ),
-              })
-            }
-          },
-          onError: error => setErr(error.message),
-        },
-      )
+    let createdSecret = false
+    try {
+      // 先写凭证再挂载:挂载时平台会用凭证跑 credentialProbe,顺序反了探针必失败。
+      if (calls.secret !== undefined) {
+        await invoke.mutateAsync({ path: 'system/secret', tool: 'set', args: calls.secret })
+        createdSecret = true
+      }
+      await invoke.mutateAsync({ path: 'system/registry', tool: 'write', args: calls.mount })
+    } catch (error) {
+      // 仅清理由本轮创建的 secret;复用已有凭证不动。即使回滚失败也保留原挂载错误。
+      if (createdSecret && calls.secret !== undefined) {
+        await invoke.mutateAsync({
+          path: 'system/secret',
+          tool: 'delete',
+          args: { name: calls.secret.name },
+        }).catch(() => {})
+      }
+      setErr((error as Error).message)
+      return
     }
 
-    // 先写凭证再挂载:挂载时平台会用凭证跑 credentialProbe,顺序反了探针必失败。
-    if (calls.secret !== undefined) {
-      invoke.mutate(
-        { path: 'system/secret', tool: 'set', args: calls.secret },
-        {
-          onSuccess: mountThen,
-          onError: error => setErr(`写入凭证失败:${error.message}`),
+    toast.success(`已挂载 ${form.provider} → ${calls.mount.path}`)
+    setOpen(false)
+    setErr(null)
+    setForm({ ...INITIAL_INTEGRATION_FORM, path: '' })
+    qc.invalidateQueries({ queryKey: ['tb'] })
+    if (calls.needsAuthorize) {
+      oauth.mutate(calls.mount.path, {
+        onSuccess: (result) => {
+          if (result.status === 'authorized') {
+            toast.success(`${calls.mount.path} 已授权`)
+          } else if (result.authorizationUrl) {
+            window.open(result.authorizationUrl, '_blank', 'noopener')
+            toast.info('已打开授权页,完成后即可调用')
+          }
         },
-      )
-    } else {
-      mountThen()
+        onError: error =>
+          toast.error(
+            /redirect/i.test(error.message)
+              ? `该上游只允许 localhost 回调,请用 CLI:tb integration auth ${calls.mount.path} --local`
+              : `发起授权失败:${error.message}`,
+          ),
+      })
     }
   }
 
@@ -211,11 +148,13 @@ export function IntegrationDialog({
       // 从目录某行直接"添加":预选该 provider 并派生默认路径,用户落到已填好 provider 的向导。
       if (defaultProvider !== undefined) {
         const preset = items.find(i => i.id === defaultProvider)
+        const exportId = preset?.exports.length === 1 ? preset.exports[0]! : ''
         setForm({
           ...INITIAL_INTEGRATION_FORM,
           provider: defaultProvider,
           path: defaultPath ?? defaultMountPath(preset),
-          exportId: preset?.exports.length === 1 ? preset.exports[0]! : '',
+          exportId,
+          mode: integrationPlan(preset, exportId).kind === 'none' ? 'none' : 'inline',
         })
       }
     }
@@ -283,18 +222,22 @@ export function IntegrationDialog({
                         form.provider === item.id ? 'bg-muted' : ''
                       }`}
                       key={item.id}
-                      onClick={() =>
+                      onClick={() => {
+                        const exportId = item.exports.length === 1 ? item.exports[0]! : ''
+                        const nextPlan = integrationPlan(item, exportId)
                         setForm(current => ({
                           ...current,
                           provider: item.id,
                           // path 尚空则给个默认(tools/<id> 或 notes/<id>),用户可改;不覆盖已输入的。
                           path: current.path.trim() === '' ? defaultMountPath(item) : current.path,
-                          exportId: item.exports.length === 1 ? item.exports[0]! : '',
+                          exportId,
                           // 换 provider 要清掉上一个的凭证与配置残留(字段名多半不同)。
                           credentials: {},
+                          existingSecret: '',
                           config: {},
-                          mode: item.needsOAuth ? 'inline' : current.mode,
-                        }))}
+                          mode: nextPlan.kind === 'none' ? 'none' : 'inline',
+                        }))
+                      }}
                       type="button"
                     >
                       <code className="font-mono font-medium">{item.id}</code>
@@ -327,8 +270,17 @@ export function IntegrationDialog({
                   <div className="grid gap-1.5">
                     <Label className="text-xs">export *</Label>
                     <Select
-                      onValueChange={value =>
-                        setForm(current => ({ ...current, exportId: value }))}
+                      onValueChange={(value) => {
+                        const nextPlan = integrationPlan(entry, value)
+                        setForm(current => ({
+                          ...current,
+                          exportId: value,
+                          credentials: {},
+                          existingSecret: '',
+                          config: {},
+                          mode: nextPlan.kind === 'none' ? 'none' : 'inline',
+                        }))
+                      }}
                       value={form.exportId}
                     >
                       <SelectTrigger className="font-mono text-xs">
@@ -354,21 +306,31 @@ export function IntegrationDialog({
                 index="02"
                 title="凭证"
               >
-                <div className="grid gap-1.5">
-                  <Label className="text-xs">方式</Label>
-                  <Select
-                    onValueChange={value =>
-                      setForm(current => ({ ...current, mode: value as CredentialMode }))}
-                    value={form.mode}
-                  >
-                    <SelectTrigger className="text-xs"><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem className="text-xs" value="inline">新建凭证(推荐)</SelectItem>
-                      <SelectItem className="text-xs" value="existing">复用已有凭证</SelectItem>
-                      <SelectItem className="text-xs" value="none">暂不配置</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
+                {plan.kind !== 'none' && (
+                  <div className="grid gap-1.5">
+                    <Label className="text-xs">方式</Label>
+                    <Select
+                      onValueChange={value =>
+                        setForm(current => ({ ...current, mode: value as CredentialMode }))}
+                      value={form.mode}
+                    >
+                      <SelectTrigger className="text-xs"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem className="text-xs" value="inline">新建凭证(推荐)</SelectItem>
+                        <SelectItem className="text-xs" value="existing">复用已有凭证</SelectItem>
+                        {!plan.authRequired && (
+                          <SelectItem className="text-xs" value="none">暂不配置</SelectItem>
+                        )}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
+
+                {plan.kind === 'none' && (
+                  <p className="rounded-md border bg-muted/30 px-3 py-2.5 text-xs text-muted-foreground">
+                    该 export 明确声明无需上游凭证，不会创建或绑定 secret。
+                  </p>
+                )}
 
                 {form.mode === 'existing' && (
                   <div className="grid gap-1.5">
@@ -463,7 +425,10 @@ export function IntegrationDialog({
 
                 {form.mode === 'inline' && plan.kind === 'single' && (
                   <div className="grid gap-1.5">
-                    <Label className="text-xs" htmlFor="int-key">API key</Label>
+                    <Label className="text-xs" htmlFor="int-key">
+                      API key
+                      {plan.authRequired && ' *'}
+                    </Label>
                     <Input
                       className="font-mono text-sm"
                       id="int-key"
@@ -472,7 +437,7 @@ export function IntegrationDialog({
                       value={form.credentials[SINGLE_FIELD_KEY] ?? ''}
                     />
                     <p className="text-[11px] text-muted-foreground">
-                      留空表示这个集成不需要凭证。凭证会存成
+                      {plan.authRequired ? '凭证会存成' : '留空表示不绑定凭证；填写后会存成'}
                       <code className="mx-1 font-mono">
                         integration-
                         {form.path.trim().replace(/\//g, '-') || '<path>'}
@@ -498,7 +463,7 @@ export function IntegrationDialog({
                 index="03"
                 title={plan.mountConfigFields.some(f => f.required === true) ? '配置' : '配置(可选)'}
               >
-                {/* catalog 声明了要配什么 → 渲染带标签的字段;否则退回自由 k=v(external plugin)。 */}
+                {/* catalog 声明了要配什么 → 渲染带标签的字段;无声明就明确告知无需配置。 */}
                 {plan.mountConfigFields.length > 0
                   ? (
                       <div className="grid gap-2">
@@ -531,10 +496,9 @@ export function IntegrationDialog({
                       </div>
                     )
                   : (
-                      <ConfigRows
-                        onChange={config => setForm(current => ({ ...current, config }))}
-                        value={form.config}
-                      />
+                      <p className="rounded-md border bg-muted/30 px-3 py-2.5 text-xs text-muted-foreground">
+                        该 export 无需额外的非密钥配置。
+                      </p>
                     )}
                 <div className="grid gap-1.5">
                   <Label className="text-xs" htmlFor="int-desc">描述</Label>

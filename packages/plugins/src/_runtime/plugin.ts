@@ -7,7 +7,7 @@
  * `index.ts` 只剩它自己的东西。
  */
 
-import type { InputSchemaLike, OperationSpec, PluginCredentialField, PluginMountConfigField, PluginOAuth } from '@tool-bridge/core'
+import type { InputSchemaLike, OperationSpec, PluginCredentialField, PluginExportAuth, PluginMountConfigField, PluginOAuth } from '@tool-bridge/core'
 import { createPlugin, type Plugin, type PluginCallContext, TBError } from '@tool-bridge/plugin-sdk'
 
 /** 迁移产物统一的 env(平台注册时 mint 的回调令牌)。 */
@@ -69,6 +69,8 @@ type Handler = (input: never, ctx: ProviderContext) => unknown | Promise<unknown
 export interface ProviderPluginInput {
   /** 规格表:action 名 → OperationSpec(来自生成的 schema.ts)。 */
   actions: Record<string, Spec>
+  /** 明确声明无需凭证,或声明单值凭证的展示/必填语义。 */
+  auth?: PluginExportAuth
   /**
    * 本 provider 需要**多字段凭证**时声明字段(缺省单值:一个 API key)。
    * 对应上游 open-connector 的 `custom_credential` auth 形态。
@@ -127,6 +129,13 @@ export function createProviderPlugin(input: ProviderPluginInput): Plugin<Provide
 
   const plugin = createPlugin<ProviderEnv>({ token: env => env.PLUGIN_TOKEN })
   const tools = plugin.tools(input.exportId ?? 'actions', { description: input.description })
+  if (input.auth !== undefined) {
+    tools.auth(input.auth)
+  } else if (input.oauth === undefined && input.credentialFields === undefined) {
+    // 迁移 provider 的 handler 都通过 requireApiKey fail closed。把这个既有运行时事实
+    // 写进 descriptor,让 CLI/Dashboard 在挂载前就能准确要求凭证。
+    tools.auth({ kind: 'single', required: true })
+  }
   if (input.oauth !== undefined) tools.oauth(input.oauth)
   if (input.credentialFields !== undefined) tools.credentials(input.credentialFields)
   if (input.mountConfigFields !== undefined) tools.mountConfig(input.mountConfigFields)

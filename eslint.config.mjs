@@ -91,6 +91,24 @@ export default [
       'react-hooks/rules-of-hooks': 'error',
     },
   }),
+  // 内置 plugin 与网关同进程同权:业务源码不得绕过逐跳出站校验。
+  ...defineConfig({
+    files: ['packages/plugins/src/**/*.ts'],
+    ignores: ['packages/plugins/src/_runtime/guardedFetch.ts'],
+    rules: {
+      'no-restricted-syntax': [
+        'error',
+        {
+          message: 'plugin 出站请求必须使用 guardedFetch/createGuardedFetch',
+          selector: 'CallExpression[callee.type="Identifier"][callee.name="fetch"]',
+        },
+        {
+          message: 'plugin 出站请求必须使用 guardedFetch/createGuardedFetch',
+          selector: 'CallExpression[callee.object.name="globalThis"][callee.property.name="fetch"]',
+        },
+      ],
+    },
+  }),
   // 脚本/配置文件：放开 console
   ...defineConfig({
     files: ['scripts/**', '**/*.config.{ts,mjs,js}', 'eslint.config.mjs'],

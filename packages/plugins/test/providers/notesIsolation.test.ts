@@ -15,6 +15,26 @@ import { createNotesPlugin } from '../../src/notes/index'
 
 const plugin = createNotesPlugin()
 
+describe('挂载契约', () => {
+  it('两个 export 都明确无需凭证,并声明 workspace 配置', async () => {
+    const response = await plugin.fetch(new Request('https://p.test/~describe'), {
+      PLUGIN_TOKEN: 't',
+    } as never)
+    const body = (await response.json()) as {
+      exports: Array<{
+        auth?: { kind: string }
+        id: string
+        mountConfigFields?: Array<{ key: string }>
+      }>
+    }
+    expect(body.exports.map(exported => exported.id).sort()).toEqual(['actions', 'notes'])
+    for (const exported of body.exports) {
+      expect(exported.auth).toEqual({ kind: 'none' })
+      expect(exported.mountConfigFields?.map(field => field.key)).toEqual(['workspace'])
+    }
+  })
+})
+
 function call(
   workspace: string | undefined,
   name: string,

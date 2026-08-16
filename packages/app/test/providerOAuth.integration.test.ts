@@ -198,7 +198,7 @@ describe('发起授权', () => {
         enabled: true,
       },
     })
-    await postJson(app, 'system/registry', {
+    const mounted = await postJson(app, 'system/registry', {
       tool: 'write',
       arguments: {
         path: 'svc/noauth',
@@ -207,9 +207,8 @@ describe('发起授权', () => {
         config: { kind: 'tool', provider: 'oauthp', export: 'actions' },
       },
     })
-    const res = await postJson(app, 'svc/noauth/~authorize', {})
-    expect(res.status).toBe(400)
-    expect(((await res.json()) as { message: string }).message).toContain('authRef')
+    expect(mounted.status).toBe(400)
+    expect(((await mounted.json()) as { message: string }).message).toContain('authRef')
   })
 })
 

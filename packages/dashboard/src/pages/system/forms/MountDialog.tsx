@@ -1,6 +1,6 @@
 import { Loader2, Plus, TriangleAlert } from 'lucide-react'
+import { type ReactNode, useMemo, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
-import { type ReactNode, useState } from 'react'
 import { toast } from 'sonner'
 import {
   Dialog,
@@ -18,13 +18,15 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { useInvoke, useOAuthAuthorize, usePluginList } from '@/lib/queries'
+import { useIntegrationCatalog, useInvoke, useOAuthAuthorize, usePluginList } from '@/lib/queries'
 import { FormSection } from '@/components/FormSection'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import {
   buildRegistryWriteArgs,
+  catalogPluginsForMount,
+  credentialPlanFor,
   exportOptionsFor,
   INITIAL_REGISTRY_MOUNT_FORM,
   type MountKind,
@@ -47,6 +49,7 @@ export function MountDialog({
   const oauth = useOAuthAuthorize()
   const qc = useQueryClient()
   const plugins = usePluginList()
+  const catalog = useIntegrationCatalog()
   const [open, setOpen] = useState(false)
   const [form, setForm] = useState<RegistryMountFormState>(() => ({
     ...INITIAL_REGISTRY_MOUNT_FORM,
@@ -56,7 +59,12 @@ export function MountDialog({
   const normalizedPath = form.path.trim()
   const isReplacement = normalizedPath !== '' && existingPaths.includes(normalizedPath)
   const mayReplaceUnloaded = normalizedPath !== '' && !isReplacement && hasUnloadedPaths
-  const pluginItems = plugins.data?.items ?? []
+  const pluginItems = useMemo(() => {
+    const byId = new Map(catalogPluginsForMount(catalog.data ?? []).map(item => [item.id, item]))
+    // 显式注册的同名 external plugin 覆盖内置项,与网关 `https:` 契约优先级一致。
+    for (const item of plugins.data?.items ?? []) byId.set(item.id, item)
+    return [...byId.values()].sort((a, b) => a.id.localeCompare(b.id))
+  }, [catalog.data, plugins.data?.items])
   const toolExportOptions = exportOptionsFor(pluginItems, form.toolProvider, 'tools/v1')
   const contextExportOptions = exportOptionsFor(pluginItems, form.provider, 'context/v1')
 
@@ -87,7 +95,11 @@ export function MountDialog({
           setErr(null)
           setForm(current => ({ ...current, path: '', description: '' }))
           qc.invalidateQueries({ queryKey: ['tb'] })
-          if (form.kind === 'mcp' && form.mcpAuthMode === 'oauth') {
+          const needsOAuth = form.kind === 'mcp'
+            ? form.mcpAuthMode === 'oauth'
+            : form.kind === 'tool'
+              && credentialPlanFor(toolExportOptions, form.toolExport).kind === 'oauth'
+          if (needsOAuth) {
             oauth.mutate(mounted, {
               onSuccess: (result) => {
                 if (result.status === 'authorized') {

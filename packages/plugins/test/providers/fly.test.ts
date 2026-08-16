@@ -77,7 +77,12 @@ describe('契约面', () => {
     const res = await createFlyPlugin().fetch(new Request('https://plugin.test/~describe'), {} as never)
     await expect(res.json()).resolves.toEqual({
       protocolVersion: 'plugin/v2',
-      exports: [{ id: 'actions', profile: 'tools/v1', description: 'Fly.io' }],
+      exports: [{
+        auth: { kind: 'single', required: true },
+        id: 'actions',
+        profile: 'tools/v1',
+        description: 'Fly.io',
+      }],
     })
   })
 

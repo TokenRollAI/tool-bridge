@@ -1,6 +1,6 @@
 {
   "name": "@tool-bridge/plugin-sdk",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Author tool-bridge plugins: declare Zod-typed operations, the SDK serves the whole HTBP plugin protocol",
   "type": "module",
   "license": "MIT",

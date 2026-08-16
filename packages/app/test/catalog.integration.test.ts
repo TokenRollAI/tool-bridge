@@ -99,6 +99,10 @@ describe('system/catalog 数据面', () => {
     const page = (await (await callCatalog(tb, 'list')).json()) as {
       items: Array<{
         credentialFields?: Array<{ key: string }>
+        exportDetails?: Record<string, {
+          auth: { kind: string }
+          mountConfigFields?: Array<{ key: string, required?: boolean }>
+        }>
         exports: string[]
         id: string
         needsOAuth: boolean
@@ -116,6 +120,9 @@ describe('system/catalog 数据面', () => {
     const notes = page.items.find(i => i.id === 'notes')!
     expect(notes.exports.length).toBeGreaterThan(1)
     expect(notes.nodeKinds).toEqual(['context', 'tool'])
+    expect(notes.exportDetails?.actions?.auth.kind).toBe('none')
+    expect(notes.exportDetails?.notes?.auth.kind).toBe('none')
+    expect(notes.exportDetails?.actions?.mountConfigFields?.map(f => f.key)).toEqual(['workspace'])
   })
 
   /**
@@ -335,5 +342,92 @@ describe('catalog 与挂载解析同源', () => {
       }),
     )
     expect(res.status).toBe(400)
+  })
+
+  it('直接写 registry 也会拒绝缺失的 export 必填配置', async () => {
+    const tb = await createTestApp({ pluginCatalog: { posthog: BUILTIN_CATALOG.posthog! } })
+    const res = await tb.request(
+      'https://tb.test/system/registry',
+      bearer(TEST_ADMIN_SK, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'accept': 'application/json' },
+        body: JSON.stringify({
+          tool: 'write',
+          arguments: {
+            path: 'tools/posthog',
+            kind: 'tool',
+            description: 'missing required baseUrl',
+            config: { kind: 'tool', provider: 'posthog', export: 'actions' },
+          },
+        }),
+      }),
+    )
+    expect(res.status).toBe(400)
+    expect(((await res.json()) as { message: string }).message).toContain('baseUrl')
+  })
+
+  it('auth:none export 拒绝绑定 authRef,避免把无关 secret 暴露给 plugin', async () => {
+    const tb = await appWithCatalog()
+    const res = await tb.request(
+      'https://tb.test/system/registry',
+      bearer(TEST_ADMIN_SK, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'accept': 'application/json' },
+        body: JSON.stringify({
+          tool: 'write',
+          arguments: {
+            path: 'from-catalog/notes-with-secret',
+            kind: 'tool',
+            description: 'notes should not receive credentials',
+            config: {
+              kind: 'tool',
+              provider: 'notes',
+              export: 'actions',
+              authRef: 'should-not-be-used',
+            },
+          },
+        }),
+      }),
+    )
+    expect(res.status).toBe(400)
+    expect(((await res.json()) as { message: string }).message).toContain('auth:none')
+  })
+
+  it('context export 的必填 mountConfigFields 同样由网关权威校验', async () => {
+    const notes = BUILTIN_CATALOG.notes!
+    const tb = await createTestApp({
+      pluginCatalog: {
+        notes: {
+          ...notes,
+          describe: {
+            ...notes.describe,
+            exports: notes.describe.exports.map(exported => exported.id === 'notes'
+              ? {
+                  ...exported,
+                  mountConfigFields: [{ key: 'workspace', required: true }],
+                }
+              : exported),
+          },
+        },
+      },
+    })
+    const res = await tb.request(
+      'https://tb.test/system/registry',
+      bearer(TEST_ADMIN_SK, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'accept': 'application/json' },
+        body: JSON.stringify({
+          tool: 'write',
+          arguments: {
+            path: 'docs/notes',
+            kind: 'context',
+            description: 'missing workspace',
+            config: { kind: 'context', provider: 'notes', export: 'notes' },
+          },
+        }),
+      }),
+    )
+    expect(res.status).toBe(400)
+    expect(((await res.json()) as { message: string }).message).toContain('workspace')
   })
 })

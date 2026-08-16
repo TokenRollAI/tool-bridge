@@ -152,7 +152,7 @@ describe('跨源重定向剥凭证', () => {
       hops.push({
         url: input.url,
         headers: Object.fromEntries([...input.headers].filter(([name]) =>
-          /auth|key|token|secret|cookie/i.test(name))),
+          /auth|key|token|secret|cookie|tat/i.test(name))),
       })
       const step = steps[i++]
       if (step === undefined) throw new Error(`没有为第 ${i} 跳准备响应`)
@@ -186,6 +186,36 @@ describe('跨源重定向剥凭证', () => {
     })
     expect(Object.keys(hops[1]?.headers ?? {})).toEqual([])
     // 非凭证头不受影响(这里只过滤了凭证类,accept 不在记录范围内 —— 用下一条验证)。
+  })
+
+  it('精确声明命名不明显的敏感头,跨源时同样剥掉', async () => {
+    const { fetch: transport, hops } = tracer([redirectTo('https://other.example/x'), ok])
+    await createGuardedFetch({
+      fetch: transport,
+      sensitiveHeaders: ['X-Lark-MCP-TAT'],
+    })('https://api.legit.example/v1', {
+      headers: { 'X-Lark-MCP-TAT': 'tenant-secret' },
+    })
+    expect(hops[1]?.headers['x-lark-mcp-tat']).toBeUndefined()
+  })
+
+  it('敏感请求可配置为拒绝跨源重定向,307 不会转发请求体', async () => {
+    const seenBodies: string[] = []
+    const transport = vi.fn(async (input: Request) => {
+      seenBodies.push(await input.text())
+      return new Response(null, {
+        status: 307,
+        headers: { location: 'https://evil.example/steal' },
+      })
+    }) as unknown as typeof fetch
+    const guarded = createGuardedFetch({ crossOriginRedirect: 'error', fetch: transport })
+
+    await expect(guarded('https://api.legit.example/token', {
+      body: JSON.stringify({ app_secret: 'tenant-secret' }),
+      method: 'POST',
+    })).rejects.toThrow(/不允许跨源重定向/)
+    expect(seenBodies).toEqual(['{"app_secret":"tenant-secret"}'])
+    expect(transport).toHaveBeenCalledTimes(1)
   })
 
   it('**同源重定向保留凭证**(常见的 /v1 → /v2 迁移不该因此坏掉)', async () => {

@@ -122,17 +122,33 @@ describe('validatePluginContract(plugin/v2)', () => {
     ])
   })
 
-  it('context/v1 上声明 mountConfigFields → invalid_argument(仅 tools/v1)', () => {
+  it('context/v1 声明 mountConfigFields → 通过并原样保留', () => {
+    const parsed = validatePluginContract({
+      manifest: MANIFEST,
+      describe: {
+        protocolVersion: 'plugin/v2',
+        exports: [{
+          id: 'docs',
+          profile: 'context/v1',
+          methods: ['Get'],
+          mountConfigFields: [{ key: 'workspace' }],
+        }],
+      },
+    })
+    expect(parsed.exports[0]?.mountConfigFields).toEqual([{ key: 'workspace' }])
+  })
+
+  it('auth:none 与 credentialProbe 冲突 → invalid_argument', () => {
     const err = expectInvalid({
       protocolVersion: 'plugin/v2',
       exports: [{
-        id: 'docs',
-        profile: 'context/v1',
-        methods: ['Get'],
-        mountConfigFields: [{ key: 'baseUrl' }],
+        auth: { kind: 'none' },
+        credentialProbe: 'ping',
+        id: 'actions',
+        profile: 'tools/v1',
       }],
     })
-    expect(err.message).toContain('mountConfigFields')
+    expect(err.message).toContain('auth:none')
   })
 
   it('mountConfigFields 有重复字段名 → invalid_argument', () => {

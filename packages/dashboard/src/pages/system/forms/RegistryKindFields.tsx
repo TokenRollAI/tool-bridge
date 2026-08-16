@@ -1,4 +1,4 @@
-import { Loader2 } from 'lucide-react'
+import { Loader2, Plus, X } from 'lucide-react'
 import { Link } from 'react-router'
 import type { PluginExport, PluginManifest } from '@/lib/types'
 import {
@@ -15,6 +15,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import {
+  credentialPlanFor,
   exportOptionsFor,
   pluginsForProfile,
   type RegistryMountFormState,
@@ -94,6 +95,106 @@ function Field({
   )
 }
 
+function PluginMountConfigFields({
+  allowArbitrary,
+  exportId,
+  exports,
+  onChange,
+  value,
+}: {
+  allowArbitrary: boolean
+  exportId: string
+  exports: PluginExport[]
+  onChange: (next: Record<string, string>) => void
+  value: Record<string, string>
+}) {
+  const target = exportId.trim() === ''
+    ? exports[0]
+    : exports.find(item => item.id === exportId.trim())
+  const fields = target?.mountConfigFields
+  if (fields === undefined) {
+    if (!allowArbitrary) {
+      return <p className="text-[11px] text-muted-foreground">该 export 无需额外挂载配置。</p>
+    }
+    return (
+      <div className="grid gap-2">
+        <Label className="text-xs">providerConfig（兼容模式）</Label>
+        {Object.entries(value).map(([key, val], index) => (
+          <div className="grid grid-cols-[1fr_1fr_auto] gap-2" key={`${key}-${index}`}>
+            <Input
+              aria-label={`providerConfig key ${index + 1}`}
+              className="font-mono text-xs"
+              onChange={(event) => {
+                const next = { ...value }
+                delete next[key]
+                next[event.target.value] = val
+                onChange(next)
+              }}
+              placeholder="baseUrl"
+              value={key}
+            />
+            <Input
+              aria-label={`providerConfig value ${index + 1}`}
+              className="font-mono text-xs"
+              onChange={event => onChange({ ...value, [key]: event.target.value })}
+              placeholder="https://plugin.example.com"
+              value={val}
+            />
+            <Button
+              aria-label={`删除 providerConfig 第 ${index + 1} 行`}
+              onClick={() => {
+                const next = { ...value }
+                delete next[key]
+                onChange(next)
+              }}
+              size="icon-xs"
+              type="button"
+              variant="ghost"
+            >
+              <X />
+            </Button>
+          </div>
+        ))}
+        <Button
+          className="justify-self-start"
+          disabled={Object.hasOwn(value, '')}
+          onClick={() => onChange({ ...value, '': '' })}
+          size="xs"
+          type="button"
+          variant="outline"
+        >
+          <Plus />
+          添加配置
+        </Button>
+        <p className="text-[11px] text-muted-foreground">
+          此 external plugin 未声明字段；这里只作兼容输入。密钥仍须放在 authRef 指向的 secret。
+        </p>
+      </div>
+    )
+  }
+  return (
+    <div className="grid gap-2">
+      {fields.map(field => (
+        <div className="grid gap-1.5" key={field.key}>
+          <Label className="text-xs" htmlFor={`plugin-config-${field.key}`}>
+            {field.label ?? field.key}
+            {field.required === true && ' *'}
+          </Label>
+          <Input
+            className="font-mono text-xs"
+            id={`plugin-config-${field.key}`}
+            onChange={event => onChange({ ...value, [field.key]: event.target.value })}
+            value={value[field.key] ?? ''}
+          />
+          {field.description !== undefined && (
+            <p className="text-[11px] text-muted-foreground">{field.description}</p>
+          )}
+        </div>
+      ))}
+    </div>
+  )
+}
+
 function S3Fields({
   onChange,
   prefix,
@@ -163,6 +264,10 @@ export function RegistryKindFields({
   const contextPlugins = pluginsForProfile(pluginItems, 'context/v1')
   const toolExports = exportOptionsFor(pluginItems, state.toolProvider, 'tools/v1')
   const contextExports = exportOptionsFor(pluginItems, state.provider, 'context/v1')
+  const toolPlugin = pluginItems.find(plugin => plugin.id === state.toolProvider)
+  const contextPlugin = pluginItems.find(plugin => plugin.id === state.provider)
+  const toolAuth = credentialPlanFor(toolExports, state.toolExport)
+  const contextAuth = credentialPlanFor(contextExports, state.ctxExport)
 
   return (
     <>
@@ -303,7 +408,13 @@ export function RegistryKindFields({
               <div className="grid gap-1.5">
                 <Label className="text-xs">provider</Label>
                 <Select
-                  onValueChange={value => onChange({ ...state, provider: value, ctxExport: '' })}
+                  onValueChange={value => onChange({
+                    ...state,
+                    provider: value,
+                    ctxExport: '',
+                    ctxAuthRef: '',
+                    pluginConfig: {},
+                  })}
                   value={state.provider}
                 >
                   <SelectTrigger className="font-mono text-xs"><SelectValue /></SelectTrigger>
@@ -325,9 +436,33 @@ export function RegistryKindFields({
             </div>
             {state.provider !== 'r2' && state.provider !== 's3' && (
               <>
-                <ExportField id="ctx-export" onChange={value => update('ctxExport', value)} options={contextExports} value={state.ctxExport} />
+                <ExportField
+                  id="ctx-export"
+                  onChange={value => onChange({
+                    ...state,
+                    ctxExport: value,
+                    ctxAuthRef: '',
+                    pluginConfig: {},
+                  })}
+                  options={contextExports}
+                  value={state.ctxExport}
+                />
                 <CredentialHint exportId={state.ctxExport} exports={contextExports} pluginId={state.provider} />
-                <Field id="ctx-plugin-auth" label="authRef（可空）" onChange={value => update('ctxAuthRef', value)} value={state.ctxAuthRef} />
+                {contextAuth.kind !== 'none' && (
+                  <Field
+                    id="ctx-plugin-auth"
+                    label={`authRef${contextAuth.authRequired ? ' *' : '（可空）'}`}
+                    onChange={value => update('ctxAuthRef', value)}
+                    value={state.ctxAuthRef}
+                  />
+                )}
+                <PluginMountConfigFields
+                  allowArbitrary={contextPlugin?.endpoint.startsWith('binding:') === false}
+                  exportId={state.ctxExport}
+                  exports={contextExports}
+                  onChange={value => update('pluginConfig', value)}
+                  value={state.pluginConfig}
+                />
               </>
             )}
             {state.provider === 's3' && <S3Fields onChange={onChange} prefix="ctx" state={state} />}
@@ -365,13 +500,19 @@ export function RegistryKindFields({
         {state.kind === 'tool' && (
           <>
             <div className="grid gap-1.5">
-              <Label className="text-xs">provider *（已注册 plugin）</Label>
+              <Label className="text-xs">provider *（内置或已注册 plugin）</Label>
               <Select
-                onValueChange={value => onChange({ ...state, toolProvider: value, toolExport: '' })}
+                onValueChange={value => onChange({
+                  ...state,
+                  toolProvider: value,
+                  toolExport: '',
+                  toolAuthRef: '',
+                  pluginConfig: {},
+                })}
                 value={state.toolProvider}
               >
                 <SelectTrigger className="font-mono text-xs">
-                  <SelectValue placeholder={toolPlugins.length === 0 ? '无已注册 plugin' : '选择 plugin…'} />
+                  <SelectValue placeholder={toolPlugins.length === 0 ? '无可用 plugin' : '选择 plugin…'} />
                 </SelectTrigger>
                 <SelectContent>
                   {toolPlugins.map(plugin => (
@@ -384,7 +525,7 @@ export function RegistryKindFields({
               </Select>
               {toolPlugins.length === 0 && (
                 <p className="text-[11px] text-muted-foreground">
-                  先在
+                  当前部署没有内置 tool plugin；也可以先在
                   {' '}
                   <Link className="underline underline-offset-2" to="/manage/plugins">Plugin</Link>
                   {' '}
@@ -392,10 +533,36 @@ export function RegistryKindFields({
                 </p>
               )}
             </div>
-            <ExportField id="tool-export" onChange={value => update('toolExport', value)} options={toolExports} value={state.toolExport} />
+            <ExportField
+              id="tool-export"
+              onChange={value => onChange({
+                ...state,
+                toolExport: value,
+                toolAuthRef: '',
+                pluginConfig: {},
+              })}
+              options={toolExports}
+              value={state.toolExport}
+            />
             {/* 选了 provider 就告诉用户凭证要配什么 —— 数据来自注册时缓存的 ~describe。 */}
             <CredentialHint exportId={state.toolExport} exports={toolExports} pluginId={state.toolProvider} />
-            <Field id="tool-auth" label="authRef（可空，上游凭证引用）" onChange={value => update('toolAuthRef', value)} value={state.toolAuthRef} />
+            {toolAuth.kind !== 'none' && (
+              <Field
+                id="tool-auth"
+                label={`authRef${toolAuth.authRequired ? ' *' : '（可空，上游凭证引用）'}`}
+                onChange={value => update('toolAuthRef', value)}
+                value={state.toolAuthRef}
+              />
+            )}
+            {state.toolProvider !== '' && (
+              <PluginMountConfigFields
+                allowArbitrary={toolPlugin?.endpoint.startsWith('binding:') === false}
+                exportId={state.toolExport}
+                exports={toolExports}
+                onChange={value => update('pluginConfig', value)}
+                value={state.pluginConfig}
+              />
+            )}
           </>
         )}
 

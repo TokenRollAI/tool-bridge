@@ -13,11 +13,15 @@
  */
 
 import { TBError } from '@tool-bridge/core'
+import { createGuardedFetch } from '../_runtime/guardedFetch'
 
 export const DEFAULT_AUTH_URL
   = 'https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal'
 
 const REFRESH_MARGIN_MS = 5 * 60_000
+
+// app_secret 在 JSON body 中,307/308 跨源跳转会原样转发;飞书换发端点不应跨源。
+const feishuAuthFetch = createGuardedFetch({ crossOriginRedirect: 'error' })
 
 interface CachedTat {
   expiresAtMs: number
@@ -53,7 +57,7 @@ export async function tenantAccessToken(cfg: TatConfig, force = false): Promise<
   }
   let resp: Response
   try {
-    resp = await fetch(cfg.authUrl ?? DEFAULT_AUTH_URL, {
+    resp = await feishuAuthFetch(cfg.authUrl ?? DEFAULT_AUTH_URL, {
       method: 'POST',
       headers: { 'content-type': 'application/json; charset=utf-8' },
       body: JSON.stringify({ app_id: cfg.appId, app_secret: cfg.appSecret }),

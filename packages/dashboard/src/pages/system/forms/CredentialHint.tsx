@@ -113,6 +113,12 @@ export function CredentialHint({
         </div>
       )}
 
+      {plan.kind === 'none' && (
+        <p className="text-muted-foreground">
+          这个 export 明确声明无需上游凭证，不要填写 authRef。
+        </p>
+      )}
+
       {plan.kind === 'fields' && (
         <div className="space-y-2">
           <p className="flex items-center gap-1.5 font-medium">

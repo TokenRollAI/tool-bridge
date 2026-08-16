@@ -53,20 +53,20 @@ describe('生产部署入口(deployEntry)的内置目录装配', () => {
   })
 
   it('bindings 与 catalog 是一对:目录里的 provider 能挂载且能列工具', async () => {
-    // 挑一个真实内置 provider(单 export、无凭证探针),走完整挂载 → ~help 链路。
+    // 挑一个明确 auth:none 的真实内置 export,走完整挂载 → ~help 链路。
     const mount = await post('system/registry', {
       tool: 'write',
       arguments: {
-        path: 'prod-entry/amap',
+        path: 'prod-entry/notes',
         kind: 'tool',
         description: 'assembled by deployEntry',
-        config: { kind: 'tool', provider: 'amap' },
+        config: { kind: 'tool', provider: 'notes', export: 'actions' },
       },
     })
     expect(mount.status).toBe(200)
 
     // 工具可列 = binding 真的能被调用(catalog 只解决"声明",这一步验的是"代码在哪")。
-    const help = await SELF.fetch('https://tb.test/prod-entry/amap/~help', {
+    const help = await SELF.fetch('https://tb.test/prod-entry/notes/~help', {
       headers: { authorization: `Bearer ${TEST_ADMIN_SK}`, accept: 'application/json' },
     })
     expect(help.status).toBe(200)
@@ -74,17 +74,17 @@ describe('生产部署入口(deployEntry)的内置目录装配', () => {
     expect(model.cmds.length).toBeGreaterThan(0)
 
     // 清理:同一文件内多用例共享一份 KV。
-    await post('system/registry', { tool: 'delete', arguments: { path: 'prod-entry/amap' } })
+    await post('system/registry', { tool: 'delete', arguments: { path: 'prod-entry/notes' } })
   })
 
   it('内置集成零写库:挂载后 plugin list 仍为空', async () => {
     const mount = await post('system/registry', {
       tool: 'write',
       arguments: {
-        path: 'prod-entry/tavily',
+        path: 'prod-entry/notes-zero-write',
         kind: 'tool',
         description: 'x',
-        config: { kind: 'tool', provider: 'tavily' },
+        config: { kind: 'tool', provider: 'notes', export: 'actions' },
       },
     })
     expect(mount.status).toBe(200)
@@ -92,7 +92,10 @@ describe('生产部署入口(deployEntry)的内置目录装配', () => {
     const listed = await post('system/plugin', { tool: 'list', arguments: {} })
     expect(((await listed.json()) as { items: unknown[] }).items).toEqual([])
 
-    await post('system/registry', { tool: 'delete', arguments: { path: 'prod-entry/tavily' } })
+    await post('system/registry', {
+      tool: 'delete',
+      arguments: { path: 'prod-entry/notes-zero-write' },
+    })
   })
 
   /**

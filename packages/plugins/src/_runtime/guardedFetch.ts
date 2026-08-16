@@ -38,11 +38,12 @@ function looksLikeCredentialHeader(name: string): boolean {
 }
 
 /** 跨 origin 时产出剥掉凭证后的 headers。 */
-function stripCredentials(headers: Headers): Headers {
+function stripCredentials(headers: Headers, sensitiveHeaders: ReadonlySet<string>): Headers {
   const next = new Headers(headers)
   for (const [name] of headers) {
     if (CROSS_ORIGIN_STRIPPED_HEADERS.includes(name.toLowerCase() as never)
-      || looksLikeCredentialHeader(name)) {
+      || looksLikeCredentialHeader(name)
+      || sensitiveHeaders.has(name.toLowerCase())) {
       next.delete(name)
     }
   }
@@ -65,10 +66,14 @@ export class EgressBlockedError extends TBError {
 }
 
 export interface GuardedFetchOptions {
+  /** 跨 origin 重定向策略。请求体含凭证时必须用 error,否则 307/308 会原样转发 body。 */
+  crossOriginRedirect?: 'error' | 'follow'
   /** 底层传输;缺省全局 fetch。测试注入用。 */
   fetch?: typeof fetch
   /** 最多跟随几跳重定向;超过即报错(而非静默停在中途返回 302)。 */
   maxRedirects?: number
+  /** 额外按精确名字认定为凭证的请求头(不依赖 key/token/secret 命名启发式)。 */
+  sensitiveHeaders?: readonly string[]
 }
 
 /**
@@ -104,7 +109,11 @@ export function assertPublicHttpUrl(value: string | URL): URL {
  * 注意 `init.redirect` 会被忽略:重定向必须由本函数手动跟随才能逐跳校验。
  */
 export function createGuardedFetch(options: GuardedFetchOptions = {}): typeof fetch {
+  const crossOriginRedirect = options.crossOriginRedirect ?? 'follow'
   const maxRedirects = options.maxRedirects ?? MAX_REDIRECTS
+  const sensitiveHeaders = new Set(
+    (options.sensitiveHeaders ?? []).map(name => name.toLowerCase()),
+  )
 
   return async function guardedFetch(input, init) {
     // 每次调用才解析底层传输,不在构造时绑定 globalThis.fetch:共享实例是模块级常量,
@@ -130,11 +139,15 @@ export function createGuardedFetch(options: GuardedFetchOptions = {}): typeof fe
       // 逐跳校验:这才是这层存在的主要理由。
       const previousOrigin = new URL(request.url).origin
       url = assertPublicHttpUrl(new URL(location, url))
+      const crossesOrigin = url.origin !== previousOrigin
+      if (crossesOrigin && crossOriginRedirect === 'error') {
+        throw new EgressBlockedError('携带敏感信息的出站请求不允许跨源重定向')
+      }
       // 换了 origin 就剥凭证头 —— 只查「跳到哪」不管「带什么去」,等于把 SSRF 防线
       // 变成凭证外泄通道(见 CROSS_ORIGIN_STRIPPED_HEADERS)。
-      const headers = url.origin === previousOrigin
+      const headers = !crossesOrigin
         ? request.headers
-        : stripCredentials(request.headers)
+        : stripCredentials(request.headers, sensitiveHeaders)
       // 303,以及「非 GET 收到 301/302」,按 Fetch 规范降级为 GET 且丢弃 body。
       const downgrade = response.status === 303
         || ((response.status === 301 || response.status === 302) && request.method !== 'GET')

@@ -160,12 +160,14 @@ describe('挂载时的凭证探针', () => {
     await expect(res.json()).resolves.toMatchObject({ code: 'unavailable', retryable: true })
   })
 
-  it('没配 authRef → 不探测,挂载照常(探针只在有凭证可验时才有意义)', async () => {
+  it('provider 已声明单值凭证必填 → 没配 authRef 时挂载即拒绝,且不打探针', async () => {
     upstream = vi.fn(() => Promise.resolve(new Response('{}', { status: 200 })))
     vi.stubGlobal('fetch', upstream as unknown as typeof fetch)
 
     const app = await registeredApp('sk_test_good')
-    expect((await mount(app, {})).status).toBe(200)
+    const response = await mount(app, {})
+    expect(response.status).toBe(400)
+    expect(((await response.json()) as { message: string }).message).toContain('authRef')
     expect(upstream).not.toHaveBeenCalled()
   })
 })

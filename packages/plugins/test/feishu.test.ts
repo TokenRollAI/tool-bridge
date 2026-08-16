@@ -70,11 +70,12 @@ function feishuMock(tools: Array<{ description: string, name: string }>) {
   let authCalls = 0
 
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-    const url = new URL(input instanceof Request ? input.url : String(input))
+    const request = input instanceof Request ? input : new Request(input, init)
+    const url = new URL(request.url)
 
     if (url.href === AUTH_URL) {
       authCalls += 1
-      const body = JSON.parse(String(init?.body)) as { app_id?: string, app_secret?: string }
+      const body = await request.json() as { app_id?: string, app_secret?: string }
       // 任意 app_id + 固定 secret 视为有效(多租户用例用不同 app_id)。
       if (!body.app_id || body.app_secret !== 'test_secret') {
         return new Response(JSON.stringify({ code: 10003, msg: 'invalid app credential' }), {
@@ -92,7 +93,7 @@ function feishuMock(tools: Array<{ description: string, name: string }>) {
     }
 
     if (url.host === MCP_HOST) {
-      const headers = new Headers(init?.headers)
+      const headers = request.headers
       const tat = headers.get('X-Lark-MCP-TAT')
       if (tat === null || !validTokens.has(tat)) {
         return new Response('unauthorized', { status: 401 })
@@ -101,7 +102,7 @@ function feishuMock(tools: Array<{ description: string, name: string }>) {
         .split(',')
         .map(s => s.trim())
         .filter(Boolean)
-      const body = JSON.parse(String(init?.body)) as {
+      const body = await request.json() as {
         id?: number | string
         method: string
         params?: { arguments?: unknown, name?: string, protocolVersion?: string }

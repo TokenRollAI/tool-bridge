@@ -505,6 +505,21 @@ describe('mountConfig:非凭证挂载配置字段声明', () => {
     expect(() => plugin.tools('actions').mountConfig([])).toThrow(/至少要声明一个字段/)
   })
 
+  it('context export 同样透出 mountConfigFields 与 auth:none', async () => {
+    const plugin = createPlugin<Env>({ token: env => env.PLUGIN_TOKEN })
+    plugin.context('documents', {
+      auth: { kind: 'none' },
+      get: () => ({}),
+      mountConfigFields: [{ key: 'workspace' }],
+    })
+    const res = await plugin.fetch(new Request('https://plugin.test/~describe'), ENV)
+    const body = await res.json() as {
+      exports: Array<{ auth?: unknown, mountConfigFields?: unknown }>
+    }
+    expect(body.exports[0]?.auth).toEqual({ kind: 'none' })
+    expect(body.exports[0]?.mountConfigFields).toEqual([{ key: 'workspace' }])
+  })
+
   // 与凭证/oauth 是不同维度:一个 provider 可以既要 API key 又要 baseUrl,不互斥。
   it('与 credentials() 共存 —— 两条通道并行声明', async () => {
     const plugin = createPlugin<Env>({ token: env => env.PLUGIN_TOKEN })

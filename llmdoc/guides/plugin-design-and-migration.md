@@ -4,7 +4,8 @@
 > 的 provider 迁成 tool-bridge plugin 的可重复流程与回归闸门。
 > 来源:2026-08-12 三轮批量迁移(3 → 12 → 100 个 provider)+ 三个新能力(credentialProbe /
 > credentialFields / oauth)+ 一次设计 review 的取证与修复;2026-08-14 内置目录改编译期 catalog;
-> 2026-08-15 export 级 mountConfigFields(providerConfig 的声明面)。
+> 2026-08-15 export 级 mountConfigFields(providerConfig 的声明面);2026-08-17 per-export auth/
+> catalog 契约与飞书敏感重定向防线。
 > 更新时机:plugin 契约面变化、迁移流水线改动、或新的安全/规模边界被实测出来时。
 >
 > **这里只写方法与判据,不记单个 plugin 的清单** —— 产物级细节(哪些 provider 已迁、各自的
@@ -18,7 +19,7 @@ plugin 与网关**同进程、同权**,没有任何隔离层。这条决定了�
 | 边界 | 机器保证在哪 | 违反的后果 |
 |---|---|---|
 | plugin 的 `env` 只有白名单 | `plugins/src/registry.ts` `narrowPluginEnv` | 一行 `ctx.env.TB_SECRET_ENCRYPTION_KEY` 拿到 SecretStore 主密钥,「凭证不出网关」归零 |
-| 出站只经 guardedFetch,跨源重定向剥凭证 | `plugins/src/_runtime/guardedFetch.ts` | SSRF 打内网/云元数据;或 302 一下把租户 API key 送给第三方 |
+| 出站只经 guardedFetch,敏感请求跨源重定向直接拒 | `plugins/src/_runtime/guardedFetch.ts` + ESLint 裸 fetch 禁令 | SSRF 打内网/云元数据;或 redirect 把自定义凭证头乃至 307/308 保留的 secret body 送给第三方 |
 | 外挂 endpoint 未配 `PLUGIN_TOKEN` 一律拒 | `plugin-sdk` `assertAuthorized` | 公网任何人自造 `X-TB-Context` 即可调该 plugin 全部 action,当匿名出站中转。**进程内 binding 例外**:标识走 `env.TB_PLUGIN_IN_PROCESS`(宿主装配时闭包持有,网络请求碰不到)而非 header —— 用 header 表达"我是进程内"等于把 fail-closed 拆了 |
 | `credentialProbe` 必须只读、无必填入参 | `app/src/toolNodes.ts` `assertProbeShape`(从 List 核验) | 每次挂载都产生业务副作用;或永久拒绝挂载却报"稍后重试" |
 | 密钥不进 `providerConfig` | 契约注释 + 作者纪律(**尚无机器校验**) | `system/registry get` 对只有该节点 read 的窄 SK 也明文回显 |
@@ -28,6 +29,12 @@ plugin 与网关**同进程、同权**,没有任何隔离层。这条决定了�
 纪律还在;1000 个、尤其掺入外部 plugin 之后只剩声明。新增能力时先问一句"这条谁来强制"。
 
 ## 二、四条凭证通道,别混用
+
+export 必须把凭证语义说完整:`auth:none` 明确无凭证;`auth:single` 表示单值并可声明
+`required/label/description`;多字段与 OAuth 仍走各自声明。仓内 open-connector 迁移 provider 的
+handler 全部以 `requireApiKey` fail closed,故共用装配器自动声明 `auth:single(required:true)`;
+旧第三方 descriptor 缺 `auth` 时继续兼容成可选单值。不要从 `credentialProbe` 猜必填 —— 探针只
+描述“有凭证时怎么验”,不是凭证基数。Notes 这类本地能力应显式 `auth:none`,否则管理面只能猜。
 
 | 通道 | 装什么 | 谁能读 |
 |---|---|---|
@@ -44,14 +51,15 @@ config 行(共享 `cli/src/registry.ts` 的 `parseConfigSpecs`);值一律按字�
 
 这条通道此前只有输入口、没有**声明面** —— 该配哪些 `providerConfig` 全靠用户猜或读插件源码。
 export 现在可选 `mountConfig(fields)`(plugin-sdk setter,`~describe` 落 `mountConfigFields`,
-仅 tools/v1)补这个缺口:字段是扁平的 `{key,label?,description?,required?}`,管理面据此渲染带
+tools/context 都支持)补这个缺口:字段是扁平的 `{key,label?,description?,required?}`,管理面据此渲染带
 标签输入框、必填缺失挂载前拦下(CLI `assertMountConfig`、Dashboard 向导)。与 `credentialFields`
 的边界是**硬的、不是风格选择**:值明文进 providerConfig,故 `PluginMountConfigField`(core
 `plugin/contract.ts`)**刻意没有 `secret` 字段** —— 给了就等于诱导把密钥塞进不加密的通道,
 密钥永远走 `credentialFields`。`required` 缺省 = **非必填**(与 providerConfig "有就用没有走默认"
 一致;凭证字段缺省是**必填**,方向相反 —— 少个 baseUrl 多半有云端兜底,少个凭证字段必然调不通)。
-与 `credentials()`/`oauth()` **不互斥**:一个 export 可以既要凭证又要 baseUrl。消费面还有 catalog
-投影 `CatalogListItem.mountConfigFields` 与 `tb integration catalog` 的 CONFIG 列。
+与 `credentials()`/`oauth()` **不互斥**:一个 export 可以既要凭证又要 baseUrl。catalog 的真源是
+`CatalogListItem.exportDetails[exportId]`;provider 级 `mountConfigFields`/`credentialFields`/`needsOAuth`
+仅为旧客户端兼容提示。任何表单或 CLI 都必须按选中的 export 读精确契约。
 
 **`credentialFields[].secret` 是展示语义,不是通道语义。** 声明了 `credentialFields` 的
 export,它的**全部字段**都进 authRef 指向的那个 secret —— 运行时 `assertToolConfig` 把整份声明
@@ -188,7 +196,12 @@ open-connector 有 1329 个 provider、约 104 万行,且基本逐个手写(全�
 - **先跑全量探针再动手**。首轮实测干净率 62.9%,而前两名根因都是流水线自身的疏漏 ——
   按根因排序修完直接到 77.4%。逐个 provider 试错要慢得多。
 - **测试绿 ≠ 做完**。收尾要 grep 一遍:有没有 import 上游 helper、有没有裸 `fetch(`、是不是
-  都走了 `guardedFetch`/`requireApiKey`、`git status` 里有没有 ` M`(agent 只该新增)。
+  都走了 `guardedFetch`/`requireApiKey`、`git status` 里有没有 ` M`(agent 只该新增)。仓库 ESLint
+  已禁止 plugin 业务源码直接调用 `fetch`/`globalThis.fetch`,新例外必须在 runtime 边界集中审查。
+- **自定义敏感头或 secret body 要把跨源 redirect 设为 error**。只剥标准 Authorization 不够:
+  飞书 MCP 用 `X-Lark-MCP-TAT`,租户 token body 又可能被 307/308 原样重放。调用
+  `createGuardedFetch({crossOriginRedirect:'error',sensitiveHeaders:[...]})`;精确头名也会在普通
+  follow 模式跨源时被剥。测试至少钉住“只打一跳、第二个 transport 未收到 body/头”。
 - **agent 会中途挂**。实测三个因 API 连接中断退出,留下半成品。形状闸门是发现它们的手段。
 - **pre-commit 的全仓 typecheck 会被在途文件挡住**。把提交安排在整批结束后,别中途试。
 - **别信静态正则的批量扫描**:凭证常经 helper 间接传入(`buildUrl(path, requireApiKey(...))`),

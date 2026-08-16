@@ -54,6 +54,29 @@ const MULTI: CatalogListItem = {
   needsOAuth: false,
 }
 
+const PER_EXPORT: CatalogListItem = {
+  id: 'mixed',
+  digest: 'd6',
+  exports: ['actions', 'documents'],
+  exportKinds: { actions: 'tool', documents: 'context' },
+  exportDetails: {
+    actions: {
+      auth: { kind: 'none' },
+      id: 'actions',
+      kind: 'tool',
+      mountConfigFields: [{ key: 'workspace' }],
+    },
+    documents: {
+      auth: { kind: 'fields', fields: [{ key: 'readerToken', required: true }] },
+      id: 'documents',
+      kind: 'context',
+      mountConfigFields: [{ key: 'tenant', required: true }],
+    },
+  },
+  nodeKinds: ['context', 'tool'],
+  needsOAuth: false,
+}
+
 /** 自建实例型:单值凭证 + 一个必配的非凭证 baseUrl(如 memos)。 */
 const MEMOS: CatalogListItem = {
   id: 'memos',
@@ -73,10 +96,11 @@ const form = (patch: Partial<IntegrationFormState>): IntegrationFormState => ({
 })
 
 describe('integrationPlan', () => {
-  it('三种形态互斥:oauth / 多字段 / 单值', () => {
+  it('四种形态互斥:none / oauth / 多字段 / 单值', () => {
     expect(integrationPlan(SENTRY).kind).toBe('oauth')
     expect(integrationPlan(JIRA).kind).toBe('fields')
     expect(integrationPlan(TAVILY).kind).toBe('single')
+    expect(integrationPlan(PER_EXPORT, 'actions').kind).toBe('none')
   })
 
   it('多字段:全部字段都列出来(secret:false 不再被分流走)', () => {
@@ -102,6 +126,20 @@ describe('integrationPlan', () => {
     // 未声明的 provider 是空数组(而非 undefined),渲染端不必判空。
     expect(integrationPlan(TAVILY).mountConfigFields).toEqual([])
     expect(integrationPlan(undefined).mountConfigFields).toEqual([])
+  })
+
+  it('多 export 只读取当前选择的 auth/config,不会拿第一份汇总套给全部', () => {
+    expect(integrationPlan(PER_EXPORT, 'actions')).toMatchObject({
+      authRequired: false,
+      kind: 'none',
+      mountConfigFields: [{ key: 'workspace' }],
+    })
+    expect(integrationPlan(PER_EXPORT, 'documents')).toMatchObject({
+      authRequired: true,
+      kind: 'fields',
+      fields: [{ key: 'readerToken', required: true }],
+      mountConfigFields: [{ key: 'tenant', required: true }],
+    })
   })
 })
 
@@ -269,6 +307,42 @@ describe('buildIntegrationCalls', () => {
       MULTI,
     )
     expect(tool.mount.kind).toBe('tool')
+  })
+
+  it('逐 export 编译:auth:none 不建 secret;另一个 export 校验自己的字段与配置', () => {
+    const actions = buildIntegrationCalls(
+      form({ provider: 'mixed', exportId: 'actions', mode: 'none' }),
+      PER_EXPORT,
+    )
+    expect(actions.secret).toBeUndefined()
+    expect(actions.mount.config).toMatchObject({ kind: 'tool', export: 'actions' })
+
+    const documents = buildIntegrationCalls(
+      form({
+        provider: 'mixed',
+        exportId: 'documents',
+        credentials: { readerToken: 'r' },
+        config: { tenant: 'acme' },
+      }),
+      PER_EXPORT,
+    )
+    expect(documents.mount.config).toMatchObject({
+      kind: 'context',
+      export: 'documents',
+      providerConfig: { tenant: 'acme' },
+    })
+    expect(JSON.parse(documents.secret!.value)).toEqual({ readerToken: 'r' })
+  })
+
+  it('auth:none 不接受复用 secret;必填凭证 export 不接受“暂不配置”', () => {
+    expect(() => buildIntegrationCalls(
+      form({ provider: 'mixed', exportId: 'actions', mode: 'existing', existingSecret: 'x' }),
+      PER_EXPORT,
+    )).toThrow(/不需要凭证/)
+    expect(() => buildIntegrationCalls(
+      form({ provider: 'mixed', exportId: 'documents', mode: 'none' }),
+      PER_EXPORT,
+    )).toThrow(/需要凭证/)
   })
 
   it('多 export 未选 → 抛错;选了不存在的也抛错', () => {

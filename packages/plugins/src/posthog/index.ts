@@ -82,6 +82,19 @@ export function createPosthogPlugin(): ReturnType<typeof createProviderPlugin> {
     description: 'PostHog',
     actions: posthogActions,
     credentialProbe: 'get_current_user',
+    mountConfigFields: [
+      {
+        key: 'baseUrl',
+        label: 'PostHog API URL',
+        description: '例如 https://us.posthog.com、https://eu.posthog.com 或自托管地址',
+        required: true,
+      },
+      {
+        key: 'organizationId',
+        label: 'Organization ID',
+        description: '可选;需要按组织范围调用的接口会使用它',
+      },
+    ],
     handlers: {
       get_current_user: getCurrentUser,
       list_projects: listProjects,

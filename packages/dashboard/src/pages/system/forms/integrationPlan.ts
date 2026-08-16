@@ -6,7 +6,12 @@
  * 能被 Node vitest 直接断言,不必起 DOM。
  */
 
-import type { CatalogListItem, PluginCredentialField, PluginMountConfigField } from '@/lib/types'
+import type {
+  CatalogExportDetails,
+  CatalogListItem,
+  PluginCredentialField,
+  PluginMountConfigField,
+} from '@/lib/types'
 
 /** 凭证的四种给法。与 CLI `tb integration add` 的互斥组一一对应。 */
 export type CredentialMode = 'inline' | 'existing' | 'oauth' | 'none'
@@ -45,22 +50,47 @@ export const INITIAL_INTEGRATION_FORM: IntegrationFormState = {
  * 声明了 credentialFields 的 export,全部字段都进 authRef 指向的那个 secret,`secret`
  * 只决定输入框要不要遮蔽。
  */
-export function integrationPlan(entry: CatalogListItem | undefined): {
+export function integrationPlan(entry: CatalogListItem | undefined, exportId = ''): {
+  authRequired: boolean
   fields: PluginCredentialField[]
-  kind: 'oauth' | 'fields' | 'single'
+  kind: 'none' | 'oauth' | 'fields' | 'single'
   /** 该 export 声明的非凭证配置字段(如 baseUrl);向导据此渲染带标签的输入而非自由 k=v。 */
   mountConfigFields: PluginMountConfigField[]
   needsExportChoice: boolean
 } {
   if (entry === undefined) {
-    return { kind: 'single', fields: [], mountConfigFields: [], needsExportChoice: false }
+    return {
+      authRequired: false,
+      kind: 'single',
+      fields: [],
+      mountConfigFields: [],
+      needsExportChoice: false,
+    }
   }
   const needsExportChoice = entry.exports.length > 1
-  const mountConfigFields = entry.mountConfigFields ?? []
-  if (entry.needsOAuth) return { kind: 'oauth', fields: [], mountConfigFields, needsExportChoice }
-  const fields = entry.credentialFields ?? []
-  if (fields.length === 0) return { kind: 'single', fields: [], mountConfigFields, needsExportChoice }
-  return { kind: 'fields', fields, mountConfigFields, needsExportChoice }
+  const chosen = exportId.trim() || (entry.exports.length === 1 ? entry.exports[0]! : '')
+  const details: CatalogExportDetails | undefined = chosen === ''
+    ? undefined
+    : entry.exportDetails?.[chosen]
+  const mountConfigFields = details?.mountConfigFields ?? entry.mountConfigFields ?? []
+  const auth = details?.auth
+  if (auth?.kind === 'none') {
+    return { authRequired: false, kind: 'none', fields: [], mountConfigFields, needsExportChoice }
+  }
+  if (auth?.kind === 'oauth' || (auth === undefined && entry.needsOAuth)) {
+    return { authRequired: true, kind: 'oauth', fields: [], mountConfigFields, needsExportChoice }
+  }
+  const fields = auth?.kind === 'fields' ? auth.fields : entry.credentialFields ?? []
+  if (fields.length > 0) {
+    return { authRequired: true, kind: 'fields', fields, mountConfigFields, needsExportChoice }
+  }
+  return {
+    authRequired: auth?.kind === 'single' ? auth.required : false,
+    kind: 'single',
+    fields: [],
+    mountConfigFields,
+    needsExportChoice,
+  }
 }
 
 /** secret 名由挂载路径派生 —— authRef 不再是两处都要打对的自由文本。 */
@@ -114,20 +144,27 @@ export function buildIntegrationCalls(
   const provider = state.provider.trim()
   if (provider === '') throw new Error('先选一个集成')
 
-  const plan = integrationPlan(entry)
   const exportId = state.exportId.trim()
+  const plan = integrationPlan(entry, exportId)
   if (plan.needsExportChoice && exportId === '') {
     throw new Error(`${provider} 有多个 export(${entry!.exports.join('、')}),挂载须选一个`)
   }
   if (exportId !== '' && entry !== undefined && !entry.exports.includes(exportId)) {
     throw new Error(`${provider} 没有 export "${exportId}"`)
   }
+  if (plan.kind === 'none' && (state.mode === 'existing' || state.existingSecret.trim() !== '')) {
+    throw new Error(`${provider} 的 export ${exportId || entry?.exports[0] || ''} 不需要凭证`)
+  }
+  if (plan.authRequired && state.mode === 'none') {
+    throw new Error(`${provider} 的 export ${exportId || entry?.exports[0] || ''} 需要凭证`)
+  }
 
   // kind 由**选中 export** 决定:跨 kind 的多 export provider(notes:actions=tool /
   // notes=context)挂 context export 时不能落到默认 'tool'(平台会拒且用户无参数可救)。
   // 退化:选中 export 的 kind → 单一 nodeKind → 'tool'(external plugin 不在 catalog 时的兜底)。
   const nodeKind: 'context' | 'tool'
-    = (exportId !== '' ? entry?.exportKinds?.[exportId] : undefined)
+    = (exportId !== '' ? entry?.exportDetails?.[exportId]?.kind : undefined)
+      ?? (exportId !== '' ? entry?.exportKinds?.[exportId] : undefined)
       ?? (entry?.nodeKinds.length === 1 ? entry.nodeKinds[0]! : 'tool')
 
   let authRef: string | undefined
@@ -137,7 +174,7 @@ export function buildIntegrationCalls(
     const name = state.existingSecret.trim()
     if (name === '') throw new Error('选一个已有凭证,或改用"新建凭证"')
     authRef = name
-  } else if (state.mode === 'inline') {
+  } else if (state.mode === 'inline' && plan.kind !== 'none') {
     if (plan.kind === 'fields') {
       const values: Record<string, string> = {}
       const missing: string[] = []
@@ -164,6 +201,7 @@ export function buildIntegrationCalls(
       secret = { name: authRef, value: encodeFields({ clientId, clientSecret }) }
     } else {
       const value = (state.credentials[SINGLE_FIELD_KEY] ?? '').trim()
+      if (value === '' && plan.authRequired) throw new Error('API key 必填')
       if (value !== '') {
         authRef = derivedSecretName(path)
         secret = { name: authRef, value }
