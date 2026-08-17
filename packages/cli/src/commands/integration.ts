@@ -12,8 +12,8 @@
  */
 
 import { encodeCredentialValues } from '@tool-bridge/core'
-import { Command } from 'commander'
-import type { NodeConfig, NodeInput, Page } from '../types'
+import { Command, Option } from 'commander'
+import type { NodeConfig, NodeInput, Page, SecretSummary } from '../types'
 import { collect, parsePageOpts, resolveTarget, withGlobalOpts, withPageOpts } from '../args'
 import { guard, printJson, printLine, table } from '../output'
 import { parseConfigSpecs, registerNode } from '../registry'
@@ -69,6 +69,7 @@ interface CommonOpts {
 
 interface IntegrationAddOpts extends CommonOpts {
   config: string[]
+  credential?: string
   description?: string
   export?: string
   field: string[]
@@ -77,6 +78,8 @@ interface IntegrationAddOpts extends CommonOpts {
   provider: string
   secret?: string
 }
+
+type SecretExistence = 'absent' | 'exists' | 'unknown'
 
 /** 读 stdin 全量(单值凭证的推荐通道:不进 shell history、不进 ps 输出)。 */
 async function readStdin(): Promise<string> {
@@ -200,9 +203,38 @@ function assertMountConfig(
   }
 }
 
-/** secret 名由挂载路径派生:不再让用户手打一个两处都要对上的自由文本。 */
-function derivedSecretName(path: string): string {
-  return `integration-${path.replace(/\//g, '-')}`
+/**
+ * 内置集成的内部凭证槽。encodeURIComponent 对完整 path 是一一映射，故 `a/b` 与 `a-b`
+ * 不再像 legacy 的 slash→dash 规则那样碰撞。这个名字只进入 wire，不属于用户输出。
+ */
+export function derivedSecretName(path: string): string {
+  return `integration-v2-${encodeURIComponent(path.trim())}`
+}
+
+/**
+ * secret set 是 upsert。挂载失败前只有确认槽位原本不存在，才允许删除本轮写入；
+ * 列表无权限/中途失败一律视为 unknown，宁可保留不可见孤儿也不误删既有凭证。
+ */
+async function secretExistence(
+  target: ReturnType<typeof resolveTarget>,
+  name: string,
+): Promise<SecretExistence> {
+  let cursor: string | undefined
+  try {
+    do {
+      const page = await callTool<Page<SecretSummary>>(
+        target,
+        '/system/secret',
+        'list',
+        { opts: { limit: 200, ...(cursor !== undefined ? { cursor } : {}) } },
+      )
+      if ((page.items ?? []).some(item => item.name === name)) return 'exists'
+      cursor = page.cursor
+    } while (cursor !== undefined)
+    return 'absent'
+  } catch {
+    return 'unknown'
+  }
 }
 
 /** `tb integration catalog` → system/catalog list/search(read scope,非 admin)。 */
@@ -265,8 +297,7 @@ Examples:
  * `tb integration add <path> --provider <id>` —— 配凭证 + 挂载(+ oauth 提示)一步完成。
  *
  * 凭证四种给法互斥:`--key`(单值)/ `--key-stdin`(单值,推荐)/ `--field k=v`(多字段)
- * / `--secret <name>`(复用已有 secret)。前三种会**代建 secret**,名字由路径派生
- * (`integration-<path>`),用户不必也不该记住它。
+ * / `--credential <name>`(复用已保存凭证)。前三种会由平台自动托管,内部槽位不进用户输出。
  */
 export function integrationAddCommand(): Command {
   return withGlobalOpts(new Command('add'))
@@ -277,7 +308,9 @@ export function integrationAddCommand(): Command {
     .option('--key <value>', 'Single-value credential (prefer --key-stdin: argv is world-readable)')
     .option('--key-stdin', 'Read the single-value credential from stdin')
     .option('--field <key=value>', 'One field of a multi-field credential (repeatable)', collect, [])
-    .option('--secret <name>', 'Reuse an existing secret instead of creating one')
+    .option('--credential <name>', 'Reuse a saved credential')
+    // 0.14 兼容别名；从 help 隐藏，避免把存储实现重新带回高层集成心智。
+    .addOption(new Option('--secret <name>').hideHelp())
     .option('--config <key=value>', 'Non-secret provider config, e.g. baseUrl (repeatable)', collect, [])
     .option('--description <text>', 'One-line node description (default: auto-generated)')
     .addHelpText('after', `
@@ -285,7 +318,7 @@ Examples:
   tb integration add tools/tavily --provider tavily --key-stdin < key.txt
   tb integration add tools/jira --provider jira --field baseUrl=https://x.atlassian.net --field personalAccessToken=…
   tb integration add notes/memos --provider memos --key-stdin --config baseUrl=https://memos.example.com
-  tb integration add tools/sentry --provider sentry --secret sentry-oauth-client   # then: tb integration auth tools/sentry`)
+  tb integration add tools/sentry --provider sentry --credential sentry-oauth-client   # then: tb integration auth tools/sentry`)
     .action(async (pathArg: string, opts: IntegrationAddOpts) => {
       const asJson = Boolean(opts.json)
       await guard(asJson, async () => {
@@ -300,6 +333,7 @@ Examples:
           opts.key !== undefined ? '--key' : undefined,
           opts.keyStdin === true ? '--key-stdin' : undefined,
           opts.field.length > 0 ? '--field' : undefined,
+          opts.credential !== undefined ? '--credential' : undefined,
           opts.secret !== undefined ? '--secret' : undefined,
         ].filter((s): s is string => s !== undefined)
         if (sources.length > 1) {
@@ -349,8 +383,13 @@ Examples:
           throw new CliError(`provider "${provider}" export "${details.id}" requires credentials`)
         }
 
-        let authRef = opts.secret !== undefined ? String(opts.secret).trim() : undefined
-        let createdSecret: string | undefined
+        const savedCredential = opts.credential ?? opts.secret
+        let authRef = savedCredential !== undefined ? String(savedCredential).trim() : undefined
+        if (savedCredential !== undefined && authRef === '') {
+          throw new CliError('saved credential name is empty')
+        }
+        let managedCredential: string | undefined
+        let shouldDeleteOnFailure = false
         let secretFields: string[] | undefined
 
         if (opts.field.length > 0) {
@@ -360,12 +399,13 @@ Examples:
           }
           assertFieldNames(entry, details, Object.keys(fields))
           authRef = derivedSecretName(path)
+          shouldDeleteOnFailure = await secretExistence(target, authRef) === 'absent'
           secretFields = Object.keys(fields).sort()
           await callTool(target, '/system/secret', 'set', {
             name: authRef,
             value: encodeCredentialValues(fields),
           })
-          createdSecret = authRef
+          managedCredential = authRef
         } else if (opts.key !== undefined || opts.keyStdin === true) {
           const value = opts.keyStdin === true ? await readStdin() : String(opts.key)
           if (value === '') throw new CliError('credential value is empty')
@@ -378,11 +418,14 @@ Examples:
             )
           }
           if (details?.auth.kind === 'oauth') {
-            throw new CliError('oauth credentials need --field clientId=… --field clientSecret=… or --secret')
+            throw new CliError(
+              'oauth credentials need --field clientId=… --field clientSecret=… or --credential',
+            )
           }
           authRef = derivedSecretName(path)
+          shouldDeleteOnFailure = await secretExistence(target, authRef) === 'absent'
           await callTool(target, '/system/secret', 'set', { name: authRef, value })
-          createdSecret = authRef
+          managedCredential = authRef
         }
 
         const config: NodeConfig = nodeKind === 'context'
@@ -414,28 +457,26 @@ Examples:
         try {
           node = await registerNode(target, input)
         } catch (error) {
-          // 本轮代建的 secret 不能因挂载失败变成孤儿;复用的 --secret 不在清理范围。
-          if (createdSecret !== undefined) {
-            await callTool(target, '/system/secret', 'delete', { name: createdSecret }).catch(() => {})
+          // 仅确认此前不存在的内部槽位可清理；同名既有/存在性未知的凭证绝不删除。
+          if (managedCredential !== undefined && shouldDeleteOnFailure) {
+            await callTool(target, '/system/secret', 'delete', { name: managedCredential }).catch(() => {})
           }
           throw error
         }
 
         if (asJson) {
+          const visibleConfig = { ...(node.config ?? {}) } as Record<string, unknown>
+          const credential = typeof visibleConfig.authRef === 'string' ? 'managed' : 'none'
+          delete visibleConfig.authRef
           printJson({
-            node,
-            ...(createdSecret !== undefined ? { createdSecret } : {}),
+            node: { ...node, config: visibleConfig, credential },
+            ...(managedCredential !== undefined ? { credentialStored: true } : {}),
             ...(secretFields !== undefined ? { secretFields } : {}),
             needsAuthorization: details?.auth.kind === 'oauth',
           })
           return
         }
-        if (createdSecret !== undefined) {
-          printLine(
-            `created secret: ${createdSecret}`
-            + (secretFields !== undefined ? ` (fields: ${secretFields.join(', ')})` : ''),
-          )
-        }
+        if (managedCredential !== undefined) printLine('credential stored and managed by the platform')
         printLine(`mounted ${provider} at ${path}`)
         // 目录说得准就精确提示,说不准(external plugin)才给条件式那句。
         if (details?.auth.kind === 'oauth') {
@@ -488,8 +529,17 @@ export function integrationLsCommand(): Command {
           const provider = n.config?.provider
           return typeof provider === 'string' && provider !== 'r2' && provider !== 's3'
         })
+        const visibleItems = items.map((node) => {
+          const config = { ...(node.config ?? {}) }
+          const managed = typeof config.authRef === 'string'
+          delete config.authRef
+          return { ...node, config, credential: managed ? 'managed' : 'none' }
+        })
         if (asJson) {
-          printJson({ items, ...(page.cursor !== undefined ? { cursor: page.cursor } : {}) })
+          printJson({
+            items: visibleItems,
+            ...(page.cursor !== undefined ? { cursor: page.cursor } : {}),
+          })
           return
         }
         if (items.length === 0) {
@@ -498,11 +548,11 @@ export function integrationLsCommand(): Command {
         }
         printLine(table(
           ['PATH', 'KIND', 'PROVIDER', 'CREDENTIAL'],
-          items.map(n => [
+          visibleItems.map(n => [
             n.path,
             n.kind,
             String(n.config?.provider ?? '?'),
-            typeof n.config?.authRef === 'string' ? String(n.config.authRef) : '(none)',
+            n.credential,
           ]),
         ))
         if (page.cursor !== undefined) printLine(`\nnext: --cursor ${page.cursor}`)
@@ -515,13 +565,14 @@ export function integrationLsCommand(): Command {
  *
  * **对称性**:挂载走 `~register`(register scope),卸载此前只能走 `system/registry delete`
  * (admin)—— 能装不能卸是权限面的不对称。这里仍走管理面(协议未变),但把它放进同一个
- * 命令族,并在 404 时给出可操作提示。`--purge` 连带删掉 add 代建的那个 secret。
+ * 命令族,并在 404 时给出可操作提示。0.14 的 `--purge` 只作隐藏兼容入口。
  */
 export function integrationRmCommand(): Command {
   return withGlobalOpts(new Command('rm'))
-    .description('Unmount an integration (optionally delete the secret `add` created)')
+    .description('Unmount an integration')
     .argument('<path>', 'Mounted integration path')
-    .option('--purge', 'Also delete the derived secret (integration-<path>), if any')
+    // legacy 高级兼容开关；高层帮助不再要求用户理解派生 secret。
+    .addOption(new Option('--purge').hideHelp())
     .action(async (pathArg: string, opts: CommonOpts & { purge?: boolean }) => {
       const asJson = Boolean(opts.json)
       await guard(asJson, async () => {
@@ -529,20 +580,20 @@ export function integrationRmCommand(): Command {
         if (!path) throw new CliError('tree path is required')
         const target = resolveTarget(opts)
         await callTool(target, '/system/registry', 'delete', { path })
-        let purged: string | undefined
+        let credentialDeleted = false
         if (opts.purge === true) {
           const name = derivedSecretName(path)
           try {
             await callTool(target, '/system/secret', 'delete', { name })
-            purged = name
+            credentialDeleted = true
           } catch {
-            // 没有派生 secret(用了 --secret 复用现成的,或本来不需要凭证):不是错误。
+            // 没有内部槽位(复用已保存凭证,或本来不需要凭证):不是错误。
           }
         }
-        if (asJson) printJson({ ok: true, path, ...(purged !== undefined ? { purged } : {}) })
+        if (asJson) printJson({ ok: true, path, ...(credentialDeleted ? { credentialDeleted } : {}) })
         else {
           printLine(`unmounted ${path}`)
-          if (purged !== undefined) printLine(`deleted secret: ${purged}`)
+          if (credentialDeleted) printLine('deleted managed credential')
         }
       })
     })
@@ -559,7 +610,7 @@ Examples:
   tb integration catalog --search tavily
   tb integration add tools/tavily --provider tavily --key-stdin < key.txt
   tb integration ls
-  tb integration rm tools/tavily --purge`)
+  tb integration rm tools/tavily`)
   cmd.addCommand(integrationCatalogCommand())
   cmd.addCommand(integrationAddCommand())
   cmd.addCommand(integrationAuthCommand())

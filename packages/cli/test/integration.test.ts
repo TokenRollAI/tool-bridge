@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { integrationAddCommand, integrationRmCommand } from '../src/commands/integration'
 import { resetFetch, setFetch } from '../src/http'
 import { runCli } from './cliHarness'
 
@@ -10,14 +11,18 @@ import { runCli } from './cliHarness'
  */
 
 interface Call { body: unknown, url: string }
+interface FetchRoute { body: unknown, match: RegExp, status?: number, tool?: string }
 
 /** 按 URL 路由的桩:catalog 查询与后续写操作用同一个 fetch。 */
-function routedFetch(routes: Array<{ body: unknown, match: RegExp, status?: number }>): Call[] {
+function routedFetch(routes: FetchRoute[]): Call[] {
   const calls: Call[] = []
   setFetch((async (url: string, init?: RequestInit) => {
     const body = init?.body === undefined ? undefined : JSON.parse(String(init.body))
     calls.push({ url: String(url), body })
-    const route = routes.find(r => r.match.test(String(url)))
+    const route = routes.find(r =>
+      r.match.test(String(url))
+      && (r.tool === undefined || (body as WireBody | undefined)?.tool === r.tool),
+    )
     const payload = route?.body ?? {}
     return new Response(JSON.stringify(payload), {
       status: route?.status ?? 200,
@@ -98,8 +103,10 @@ interface WireBody {
   tool?: string
 }
 
-const bodyOf = (calls: Call[], re: RegExp): WireBody | undefined =>
-  calls.find(c => re.test(c.url))?.body as WireBody | undefined
+const bodyOf = (calls: Call[], re: RegExp, tool?: string): WireBody | undefined =>
+  calls.find(c =>
+    re.test(c.url) && (tool === undefined || (c.body as WireBody | undefined)?.tool === tool),
+  )?.body as WireBody | undefined
 
 describe('tb integration add', () => {
   it('单值凭证:代建 secret(名字由路径派生)后挂载,authRef 自动对上', async () => {
@@ -116,15 +123,15 @@ describe('tb integration add', () => {
     ])
     expect(process.exitCode).toBe(0)
 
-    const secret = bodyOf(calls, /system\/secret/)
-    expect(secret.arguments.name).toBe('integration-tools-tavily')
+    const secret = bodyOf(calls, /system\/secret/, 'set')
+    expect(secret.arguments.name).toBe('integration-v2-tools%2Ftavily')
     expect(secret.arguments.value).toBe('tvly-secret')
 
     const mount = bodyOf(calls, /~register/)
     expect(mount.config).toEqual({
       kind: 'tool',
       provider: 'tavily',
-      authRef: 'integration-tools-tavily',
+      authRef: 'integration-v2-tools%2Ftavily',
     })
   })
 
@@ -143,7 +150,7 @@ describe('tb integration add', () => {
       ...base,
     ])
     expect(process.exitCode).toBe(0)
-    const secret = bodyOf(calls, /system\/secret/)
+    const secret = bodyOf(calls, /system\/secret/, 'set')
     expect(JSON.parse(secret.arguments.value)).toEqual({
       baseUrl: 'https://x.atlassian.net',
       personalAccessToken: 'pat',
@@ -193,7 +200,7 @@ describe('tb integration add', () => {
     expect(bodyOf(calls, /~register/)).toBeUndefined()
   })
 
-  it('--secret 复用已有 secret:不代建,authRef 用给定名字', async () => {
+  it('--credential 复用已保存凭证:不代建,内部自动绑定', async () => {
     const calls = routedFetch([catalogOf([SENTRY])])
     await runCli([
       'integration',
@@ -201,13 +208,29 @@ describe('tb integration add', () => {
       'tools/sentry',
       '--provider',
       'sentry',
-      '--secret',
+      '--credential',
       'sentry-client',
       ...base,
     ])
     expect(process.exitCode).toBe(0)
     expect(bodyOf(calls, /system\/secret/)).toBeUndefined()
     expect(bodyOf(calls, /~register/).config.authRef).toBe('sentry-client')
+  })
+
+  it('0.14 的 --secret 仍可解析但从帮助隐藏', async () => {
+    const calls = routedFetch([catalogOf([SENTRY])])
+    await runCli([
+      'integration', 'add', 'tools/sentry', '--provider', 'sentry',
+      '--secret', 'legacy-client', ...base,
+    ])
+    expect(process.exitCode).toBe(0)
+    expect(bodyOf(calls, /~register/).config.authRef).toBe('legacy-client')
+
+    const help = integrationAddCommand().helpInformation()
+    expect(help).toContain('--credential <name>')
+    expect(help).not.toContain('--secret')
+    expect(help).not.toContain('authRef')
+    expect(help).not.toContain('integration-v2-')
   })
 
   it('凭证四种给法互斥', async () => {
@@ -220,7 +243,7 @@ describe('tb integration add', () => {
       'tavily',
       '--key',
       'a',
-      '--secret',
+      '--credential',
       'b',
       ...base,
     ])
@@ -241,7 +264,7 @@ describe('tb integration add', () => {
       'tools/sentry',
       '--provider',
       'sentry',
-      '--secret',
+      '--credential',
       'c',
       ...base,
     ])
@@ -264,7 +287,7 @@ describe('tb integration add', () => {
     ])
     const mount = bodyOf(calls, /~register/)
     expect(mount.config.providerConfig).toEqual({ baseUrl: 'https://memos.example.com' })
-    expect(mount.config.authRef).toBe('integration-notes-memos')
+    expect(mount.config.authRef).toBe('integration-v2-notes%2Fmemos')
   })
 
   /** 必配的非凭证配置缺失,此前要等 credentialProbe 或首次调用才炸;现在挂载前拦。 */
@@ -403,6 +426,7 @@ describe('tb integration add', () => {
   it('挂载失败会回滚本轮代建的 secret,不留下孤儿记录', async () => {
     const calls = routedFetch([
       catalogOf([TAVILY]),
+      { match: /system\/secret/, tool: 'list', body: { items: [] } },
       { match: /system\/secret/, body: { ok: true } },
       {
         match: /~register/,
@@ -417,8 +441,84 @@ describe('tb integration add', () => {
     const secretBodies = calls
       .filter(c => /system\/secret/.test(c.url))
       .map(c => c.body as WireBody)
-    expect(secretBodies.map(body => body.tool)).toEqual(['set', 'delete'])
-    expect(secretBodies[1]?.arguments?.name).toBe('integration-tools-tavily')
+    expect(secretBodies.map(body => body.tool)).toEqual(['list', 'set', 'delete'])
+    expect(secretBodies[2]?.arguments?.name).toBe('integration-v2-tools%2Ftavily')
+  })
+
+  it('挂载失败不会误删同名既有凭证', async () => {
+    const name = 'integration-v2-tools%2Ftavily'
+    const calls = routedFetch([
+      catalogOf([TAVILY]),
+      { match: /system\/secret/, tool: 'list', body: { items: [{ name }] } },
+      { match: /system\/secret/, body: { ok: true } },
+      {
+        match: /~register/,
+        body: { code: 'invalid_argument', message: 'mount rejected', retryable: false },
+        status: 400,
+      },
+    ])
+    await runCli([
+      'integration', 'add', 'tools/tavily', '--provider', 'tavily', '--key', 'rotated', ...base,
+    ])
+    expect(process.exitCode).not.toBe(0)
+    const tools = calls
+      .filter(c => /system\/secret/.test(c.url))
+      .map(c => (c.body as WireBody).tool)
+    expect(tools).toEqual(['list', 'set'])
+  })
+
+  it('内部槽位按完整 path 编码,slash 与 dash 不碰撞', async () => {
+    let calls = routedFetch([catalogOf([TAVILY])])
+    await runCli(['integration', 'add', 'a/b', '--provider', 'tavily', '--key', 'one', ...base])
+    const slashName = bodyOf(calls, /system\/secret/, 'set').arguments.name
+
+    resetFetch()
+    calls = routedFetch([catalogOf([TAVILY])])
+    await runCli(['integration', 'add', 'a-b', '--provider', 'tavily', '--key', 'two', ...base])
+    const dashName = bodyOf(calls, /system\/secret/, 'set').arguments.name
+
+    expect(slashName).toBe('integration-v2-a%2Fb')
+    expect(dashName).toBe('integration-v2-a-b')
+    expect(slashName).not.toBe(dashName)
+  })
+
+  it('人类输出与 JSON 都不回显内部槽位或 authRef', async () => {
+    routedFetch([catalogOf([TAVILY])])
+    const lines: string[] = []
+    vi.spyOn(process.stdout, 'write').mockImplementation((chunk) => {
+      lines.push(String(chunk))
+      return true
+    })
+    await runCli([
+      'integration', 'add', 'tools/tavily', '--provider', 'tavily', '--key', 'secret',
+      '--base-url', 'https://gw', '--sk', 'tbk_x',
+    ])
+    expect(lines.join('')).toContain('credential stored and managed by the platform')
+    expect(lines.join('')).not.toContain('integration-v2-')
+    expect(lines.join('')).not.toContain('authRef')
+
+    vi.mocked(process.stdout.write).mockClear()
+    lines.length = 0
+    resetFetch()
+    routedFetch([
+      catalogOf([TAVILY]),
+      {
+        match: /~register/,
+        body: {
+          path: 'tools/tavily',
+          kind: 'tool',
+          config: { provider: 'tavily', authRef: 'integration-v2-tools%2Ftavily' },
+        },
+      },
+    ])
+    await runCli([
+      'integration', 'add', 'tools/tavily', '--provider', 'tavily', '--key', 'secret', ...base,
+    ])
+    const json = JSON.parse(lines.join(''))
+    expect(json.credentialStored).toBe(true)
+    expect(json.node.credential).toBe('managed')
+    expect(json.node.config.authRef).toBeUndefined()
+    expect(JSON.stringify(json)).not.toContain('integration-v2-')
   })
 
   it('多 export 未指定 → 本地拒(免一次往返)', async () => {
@@ -501,6 +601,9 @@ describe('tb integration ls', () => {
     await runCli(['integration', 'ls', ...base])
     const out = JSON.parse(lines.join(''))
     expect(out.items.map((i: { path: string }) => i.path)).toEqual(['tools/tavily', 'ctx/docs'])
+    expect(out.items[0].credential).toBe('managed')
+    expect(out.items[0].config.authRef).toBeUndefined()
+    expect(JSON.stringify(out)).not.toContain('"authRef"')
   })
 })
 
@@ -512,7 +615,7 @@ describe('tb integration rm', () => {
     const bodies = calls.filter(c => /system\//.test(c.url)).map(c => c.body as WireBody)
     expect(bodies.some(b => b.tool === 'delete' && b.arguments?.path === 'tools/tavily')).toBe(true)
     expect(
-      bodies.some(b => b.tool === 'delete' && b.arguments?.name === 'integration-tools-tavily'),
+      bodies.some(b => b.tool === 'delete' && b.arguments?.name === 'integration-v2-tools%2Ftavily'),
     ).toBe(true)
   })
 
@@ -523,7 +626,7 @@ describe('tb integration rm', () => {
     expect(bodies.some(b => b.arguments?.name !== undefined)).toBe(false)
   })
 
-  /** 用了 --secret 复用现成凭证时没有派生 secret:删不到不是错误。 */
+  /** 用了 --credential 复用现成凭证时没有派生 secret:删不到不是错误。 */
   it('--purge 删不到派生 secret 时不报错', async () => {
     routedFetch([
       { match: /system\/secret/, body: { code: 'not_found' }, status: 404 },
@@ -531,5 +634,9 @@ describe('tb integration rm', () => {
     ])
     await runCli(['integration', 'rm', 'tools/x', '--purge', ...base])
     expect(process.exitCode).toBe(0)
+  })
+
+  it('--purge 仅作兼容解析,不再出现在高层帮助', () => {
+    expect(integrationRmCommand().helpInformation()).not.toContain('--purge')
   })
 })

@@ -49,6 +49,7 @@ const SENTRY: CatalogListItem = {
 const calls: Array<{ args: Record<string, unknown>, path: string, tool: string }> = []
 const oauthCalls: string[] = []
 let failMount = false
+let secretNames = ['shared-key']
 
 vi.mock('@/lib/queries', () => ({
   useIntegrationCatalog: () => ({
@@ -58,7 +59,10 @@ vi.mock('@/lib/queries', () => ({
     error: null,
     isLoading: false,
   }),
-  useSecretList: () => ({ data: { items: [{ name: 'shared-key' }] } }),
+  useSecretList: () => ({
+    data: { items: secretNames.map(name => ({ name })) },
+    hasNextPage: false,
+  }),
   useInvoke: () => ({
     isPending: false,
     mutateAsync: async (input: { args: Record<string, unknown>, path: string, tool: string }) => {
@@ -98,6 +102,7 @@ afterEach(() => {
   calls.length = 0
   oauthCalls.length = 0
   failMount = false
+  secretNames = ['shared-key']
   vi.restoreAllMocks()
 })
 
@@ -121,14 +126,15 @@ describe('按 descriptor 生成表单', () => {
     expect(pat.type).toBe('password')
   })
 
-  it('单值集成:只有一个 API key 框,且提示派生出的 secret 名', async () => {
+  it('单值集成:只显示业务凭证，不暴露内部引用名', async () => {
     await openAndPick('tavily')
     await waitFor(() => expect(screen.getByLabelText('API key')).toBeDefined())
     expect(screen.queryByLabelText(/baseUrl/)).toBeNull()
 
     fireEvent.change(screen.getByLabelText('挂载路径 *'), { target: { value: 'tools/tavily' } })
-    // 用户不必知道 authRef 这个词,但该看得见凭证会存到哪。
-    await waitFor(() => expect(screen.getByText(/integration-tools-tavily/)).toBeDefined())
+    await waitFor(() => expect(screen.getByText(/平台自动加密保管和绑定/)).toBeDefined())
+    expect(screen.queryByText(/integration-v2-tools%2Ftavily/)).toBeNull()
+    expect(screen.queryByText(/authRef/i)).toBeNull()
   })
 
   it('OAuth 集成:要 clientId/clientSecret,不要 API key', async () => {
@@ -152,20 +158,20 @@ describe('提交顺序', () => {
     expect(calls[0]).toMatchObject({ path: 'system/secret', tool: 'set' })
     expect(calls[1]).toMatchObject({ path: 'system/registry', tool: 'write' })
     // 挂载配置里的 authRef 与刚写的 secret 名对得上(不靠用户手打)。
-    expect((calls[0]!.args as { name: string }).name).toBe('integration-tools-tavily')
+    expect((calls[0]!.args as { name: string }).name).toBe('integration-v2-tools%2Ftavily')
     expect(
       ((calls[1]!.args as { config: { authRef: string } }).config).authRef,
-    ).toBe('integration-tools-tavily')
+    ).toBe('integration-v2-tools%2Ftavily')
   })
 
   it('复用已有凭证时不写 secret,只挂载', async () => {
     await openAndPick('tavily')
     fireEvent.change(screen.getByLabelText('挂载路径 *'), { target: { value: 'tools/t2' } })
-    // 切到"复用已有凭证"并选中下拉里的那个 —— 下拉本身就是"不手打引用名"的兑现。
+    // 切到“使用已保存凭证”并选中下拉里的那个，不要求用户理解内部引用术语。
     const modeTrigger = screen.getAllByRole('combobox')[0]!
     fireEvent.click(modeTrigger)
-    await waitFor(() => expect(screen.getByText('复用已有凭证')).toBeDefined())
-    fireEvent.click(screen.getByText('复用已有凭证'))
+    await waitFor(() => expect(screen.getByText('使用已保存凭证')).toBeDefined())
+    fireEvent.click(screen.getByText('使用已保存凭证'))
 
     await waitFor(() => expect(screen.getAllByRole('combobox').length).toBeGreaterThan(1))
     const secretTrigger = screen.getAllByRole('combobox')[1]!
@@ -205,7 +211,22 @@ describe('提交顺序', () => {
       'system/registry:write',
       'system/secret:delete',
     ])
-    expect(calls[2]?.args).toEqual({ name: 'integration-tools-tavily' })
+    expect(calls[2]?.args).toEqual({ name: 'integration-v2-tools%2Ftavily' })
+  })
+
+  it('挂载失败不会误删同名的既有凭证', async () => {
+    failMount = true
+    secretNames = ['shared-key', 'integration-v2-tools%2Ftavily']
+    await openAndPick('tavily')
+    fireEvent.change(screen.getByLabelText('挂载路径 *'), { target: { value: 'tools/tavily' } })
+    fireEvent.change(screen.getByLabelText('API key'), { target: { value: 'rotated-key' } })
+
+    fireEvent.click(screen.getByRole('button', { name: /添加 tavily/ }))
+    await waitFor(() => expect(screen.getByRole('alert')).toBeDefined())
+    expect(calls.map(call => `${call.path}:${call.tool}`)).toEqual([
+      'system/secret:set',
+      'system/registry:write',
+    ])
   })
 
   it('校验失败时不发任何请求,并就地显示原因', async () => {

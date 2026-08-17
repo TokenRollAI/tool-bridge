@@ -20,6 +20,8 @@ import {
   pluginsForProfile,
   type RegistryMountFormState,
 } from './registryConfig'
+import { ManagedCredentialFields } from './ManagedCredentialFields'
+import { initialManagedCredential } from './managedCredential'
 import { CredentialHint } from './CredentialHint'
 
 function ExportField({
@@ -244,16 +246,20 @@ function ContentPolicyFields({
 export function RegistryKindFields({
   fetchNextPlugins,
   hasNextPlugins,
+  hasExistingManagedCredential,
   isFetchingNextPlugins,
   onChange,
   pluginItems,
+  secretNames,
   state,
 }: {
   fetchNextPlugins: () => void
+  hasExistingManagedCredential: boolean
   hasNextPlugins: boolean
   isFetchingNextPlugins: boolean
   onChange: (next: RegistryMountFormState) => void
   pluginItems: PluginManifest[]
+  secretNames: string[]
   state: RegistryMountFormState
 }) {
   const update = <K extends keyof RegistryMountFormState>(
@@ -268,11 +274,13 @@ export function RegistryKindFields({
   const contextPlugin = pluginItems.find(plugin => plugin.id === state.provider)
   const toolAuth = credentialPlanFor(toolExports, state.toolExport)
   const contextAuth = credentialPlanFor(contextExports, state.ctxExport)
+  const toolBuiltin = toolPlugin?.endpoint.startsWith('binding:') === true
+  const contextBuiltin = contextPlugin?.endpoint.startsWith('binding:') === true
 
   return (
     <>
       <FormSection
-        description="配置 Provider、端点与凭证引用；认证材料本体始终留在凭证保管中。"
+        description="配置 Provider、端点与认证；内置集成的敏感凭证由平台自动保管。"
         index="02"
         title="连接与认证"
       >
@@ -408,13 +416,17 @@ export function RegistryKindFields({
               <div className="grid gap-1.5">
                 <Label className="text-xs">provider</Label>
                 <Select
-                  onValueChange={value => onChange({
-                    ...state,
-                    provider: value,
-                    ctxExport: '',
-                    ctxAuthRef: '',
-                    pluginConfig: {},
-                  })}
+                  onValueChange={(value) => {
+                    const nextExports = exportOptionsFor(pluginItems, value, 'context/v1')
+                    onChange({
+                      ...state,
+                      provider: value,
+                      ctxExport: '',
+                      ctxAuthRef: '',
+                      ctxCredential: initialManagedCredential(credentialPlanFor(nextExports, '')),
+                      pluginConfig: {},
+                    })
+                  }}
                   value={state.provider}
                 >
                   <SelectTrigger className="font-mono text-xs"><SelectValue /></SelectTrigger>
@@ -442,20 +454,40 @@ export function RegistryKindFields({
                     ...state,
                     ctxExport: value,
                     ctxAuthRef: '',
+                    ctxCredential: initialManagedCredential(credentialPlanFor(contextExports, value)),
                     pluginConfig: {},
                   })}
                   options={contextExports}
                   value={state.ctxExport}
                 />
-                <CredentialHint exportId={state.ctxExport} exports={contextExports} pluginId={state.provider} />
-                {contextAuth.kind !== 'none' && (
-                  <Field
-                    id="ctx-plugin-auth"
-                    label={`authRef${contextAuth.authRequired ? ' *' : '（可空）'}`}
-                    onChange={value => update('ctxAuthRef', value)}
-                    value={state.ctxAuthRef}
-                  />
-                )}
+                {contextBuiltin
+                  ? (
+                      <ManagedCredentialFields
+                        fallbackAvailable={hasExistingManagedCredential}
+                        idPrefix="context-credential"
+                        onChange={value => update('ctxCredential', value)}
+                        plan={{
+                          authRequired: contextAuth.authRequired,
+                          fields: contextAuth.secretFields,
+                          kind: contextAuth.kind,
+                        }}
+                        secretNames={secretNames}
+                        state={state.ctxCredential}
+                      />
+                    )
+                  : (
+                      <>
+                        <CredentialHint exportId={state.ctxExport} exports={contextExports} pluginId={state.provider} />
+                        {contextAuth.kind !== 'none' && (
+                          <Field
+                            id="ctx-plugin-auth"
+                            label={`authRef${contextAuth.authRequired ? ' *' : '（可空）'}`}
+                            onChange={value => update('ctxAuthRef', value)}
+                            value={state.ctxAuthRef}
+                          />
+                        )}
+                      </>
+                    )}
                 <PluginMountConfigFields
                   allowArbitrary={contextPlugin?.endpoint.startsWith('binding:') === false}
                   exportId={state.ctxExport}
@@ -502,13 +534,17 @@ export function RegistryKindFields({
             <div className="grid gap-1.5">
               <Label className="text-xs">provider *（内置或已注册 plugin）</Label>
               <Select
-                onValueChange={value => onChange({
-                  ...state,
-                  toolProvider: value,
-                  toolExport: '',
-                  toolAuthRef: '',
-                  pluginConfig: {},
-                })}
+                onValueChange={(value) => {
+                  const nextExports = exportOptionsFor(pluginItems, value, 'tools/v1')
+                  onChange({
+                    ...state,
+                    toolProvider: value,
+                    toolExport: '',
+                    toolAuthRef: '',
+                    toolCredential: initialManagedCredential(credentialPlanFor(nextExports, '')),
+                    pluginConfig: {},
+                  })
+                }}
                 value={state.toolProvider}
               >
                 <SelectTrigger className="font-mono text-xs">
@@ -539,21 +575,41 @@ export function RegistryKindFields({
                 ...state,
                 toolExport: value,
                 toolAuthRef: '',
+                toolCredential: initialManagedCredential(credentialPlanFor(toolExports, value)),
                 pluginConfig: {},
               })}
               options={toolExports}
               value={state.toolExport}
             />
-            {/* 选了 provider 就告诉用户凭证要配什么 —— 数据来自注册时缓存的 ~describe。 */}
-            <CredentialHint exportId={state.toolExport} exports={toolExports} pluginId={state.toolProvider} />
-            {toolAuth.kind !== 'none' && (
-              <Field
-                id="tool-auth"
-                label={`authRef${toolAuth.authRequired ? ' *' : '（可空，上游凭证引用）'}`}
-                onChange={value => update('toolAuthRef', value)}
-                value={state.toolAuthRef}
-              />
-            )}
+            {toolPlugin !== undefined && (toolBuiltin
+              ? (
+                  <ManagedCredentialFields
+                    fallbackAvailable={hasExistingManagedCredential}
+                    idPrefix="tool-credential"
+                    onChange={value => update('toolCredential', value)}
+                    plan={{
+                      authRequired: toolAuth.authRequired,
+                      fields: toolAuth.secretFields,
+                      kind: toolAuth.kind,
+                    }}
+                    secretNames={secretNames}
+                    state={state.toolCredential}
+                  />
+                )
+              : (
+                  <>
+                    {/* external plugin 无 catalog 编排面时保留底层兼容入口。 */}
+                    <CredentialHint exportId={state.toolExport} exports={toolExports} pluginId={state.toolProvider} />
+                    {toolAuth.kind !== 'none' && (
+                      <Field
+                        id="tool-auth"
+                        label={`authRef${toolAuth.authRequired ? ' *' : '（可空，上游凭证引用）'}`}
+                        onChange={value => update('toolAuthRef', value)}
+                        value={state.toolAuthRef}
+                      />
+                    )}
+                  </>
+                ))}
             {state.toolProvider !== '' && (
               <PluginMountConfigFields
                 allowArbitrary={toolPlugin?.endpoint.startsWith('binding:') === false}

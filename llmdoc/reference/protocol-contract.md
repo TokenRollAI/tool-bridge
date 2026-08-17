@@ -234,13 +234,14 @@ CLI 是纯 API 客户端,无专用端点。全局参数为 `--json` / `--base-ur
 | `catalog [--search q] [--limit/--cursor]` | `system/catalog` 的 `list`/`search`(read scope,非 admin) |
 | `add <path> --provider <id> [--export] [凭证] [--config k=v] [--description]` | 编排:secret set →(`~register` 等价的)mount →(声明 oauth 时)提示 `tb integration auth` |
 | `auth <path>` | 与 `tb tool auth` **同一个 Command 本体**(含 `--local` loopback 逃生阀与 redirect 降级) |
-| `ls [--limit/--cursor]` | `system/registry list` 的投影(kind∈{tool,context} 且 provider∉{r2,s3}),**不是第二个真源** |
-| `rm <path> [--purge]` | `system/registry delete`(admin);`--purge` 连带删 add 代建的派生 secret,没有则静默 |
+| `ls [--limit/--cursor]` | `system/registry list` 的投影(kind∈{tool,context} 且 provider∉{r2,s3}),**不是第二个真源**;文本与 JSON 都只报 credential=`managed|none`,不回显内部引用 |
+| `rm <path>` | `system/registry delete`(admin);0.14 的 `--purge` 仅作隐藏兼容解析,不再进入高层帮助 |
 
 `add` 的契约要点:
 
-- 凭证**四源互斥**(违反即本地拒):`--key <value>` / `--key-stdin`(推荐:argv 全局可读)/ `--field k=v`(可重复,多字段凭证)/ `--secret <name>`(复用已有 secret)。前三种会代建 secret。
-- **secret 名由挂载路径派生**:`integration-<path>`(`/` 换 `-`)。此前 authRef 是两处都要打对的自由文本,拼错不报错、agent 首次调用才 401。
+- 凭证**四源互斥**(违反即本地拒):`--key <value>` / `--key-stdin`(推荐:argv 全局可读)/ `--field k=v`(可重复,多字段凭证)/ `--credential <name>`(复用已保存凭证)。前三种由平台自动托管;0.14 的 `--secret` 仅作隐藏兼容别名。
+- **内部槽位不属于用户契约**:新写入按 `integration-v2-${encodeURIComponent(path)}` 派生,完整 path 编码使 `a/b` 与 `a-b` 不碰撞;成功文本、`--json`、`integration ls` 均不回显槽位或 authRef。已有 Dashboard 挂载编辑通过节点现存 authRef 保留 legacy 槽,不强迁移。
+- secret set 是 upsert:挂载失败只在完整 secret 分页确认槽位此前不存在时清理;列表无权限/失败或同名已存在时不删,避免把轮换/既有凭证误当成本轮新建。
 - 多字段凭证的明文是**键序固定的 JSON 对象**(core `encodeCredentialValues`),与 `tb secret set --field` 同一规则;全部字段进同一个 secret,`credentialFields[].secret:false` **不改变通道**(只表示输入不必遮蔽)。
 - 五类错误在**本地**拒(不消耗一次往返):字段名不在声明里、缺必填字段、声明了多字段却给单值、多 export 未指定 `--export`、`--export` 不在声明里。
 - 目录**查不到或无 read 权限时降级**为不给提示、**不阻断挂载**:catalog 只覆盖内置集成,external plugin 不在里面,平台侧校验照旧。

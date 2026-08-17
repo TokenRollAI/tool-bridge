@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   buildRegistryConfig,
+  buildRegistryMountCalls,
   buildRegistryWriteArgs,
   catalogPluginsForMount,
   credentialPlanFor,
@@ -18,6 +19,7 @@ import {
   buildSkWriteArgs,
   INITIAL_SK_FORM,
 } from '../src/pages/system/forms/skConfig'
+import { SINGLE_FIELD_KEY } from '../src/pages/system/forms/managedCredential'
 
 const mount = (patch: Partial<RegistryMountFormState>): RegistryMountFormState => ({
   ...INITIAL_REGISTRY_MOUNT_FORM,
@@ -218,6 +220,79 @@ describe('registry mount config', () => {
       providerConfig: { baseUrl: 'https://eu.posthog.com' },
     })
     expect(args.virtualize).toEqual({ prefix: 'ph__' })
+  })
+
+  it('内置 plugin 高级挂载只收业务凭证，自动编译 secret + authRef', () => {
+    const exports = [{
+      auth: { kind: 'single' as const, required: true },
+      id: 'actions',
+      profile: 'tools/v1' as const,
+    }]
+    const calls = buildRegistryMountCalls(
+      mount({
+        kind: 'tool',
+        toolProvider: 'amap',
+        toolCredential: {
+          credentials: { [SINGLE_FIELD_KEY]: ' amap-key ' },
+          existingSecret: '',
+          mode: 'inline',
+        },
+      }),
+      { context: [], tool: exports },
+      { contextBuiltin: false, toolBuiltin: true },
+    )
+    expect(calls.secret).toEqual({ name: 'integration-v2-providers%2Fdemo', value: 'amap-key' })
+    expect(calls.mount.config).toEqual({
+      kind: 'tool',
+      provider: 'amap',
+      authRef: 'integration-v2-providers%2Fdemo',
+    })
+  })
+
+  it('替换同 provider/export 时凭证全留空 = 保留已有内部绑定', () => {
+    const exports = [{
+      auth: { kind: 'single' as const, required: true },
+      id: 'actions',
+      profile: 'tools/v1' as const,
+    }]
+    const calls = buildRegistryMountCalls(
+      mount({ kind: 'tool', toolProvider: 'amap' }),
+      { context: [], tool: exports },
+      {
+        contextBuiltin: false,
+        existing: {
+          config: { kind: 'tool', provider: 'amap', authRef: 'old-managed-slot' },
+          description: 'old',
+          kind: 'tool',
+          path: 'providers/demo',
+        },
+        toolBuiltin: true,
+      },
+    )
+    expect(calls.secret).toBeUndefined()
+    expect(calls.mount.config).toMatchObject({ authRef: 'old-managed-slot' })
+  })
+
+  it('替换成另一个 provider 不会误用旧凭证', () => {
+    const exports = [{
+      auth: { kind: 'single' as const, required: true },
+      id: 'actions',
+      profile: 'tools/v1' as const,
+    }]
+    expect(() => buildRegistryMountCalls(
+      mount({ kind: 'tool', toolProvider: 'openai' }),
+      { context: [], tool: exports },
+      {
+        contextBuiltin: false,
+        existing: {
+          config: { kind: 'tool', provider: 'amap', authRef: 'amap-key' },
+          description: 'old',
+          kind: 'tool',
+          path: 'providers/demo',
+        },
+        toolBuiltin: true,
+      },
+    )).toThrow('API key 必填')
   })
 
   it('高级挂载按 export 拒绝缺失配置/凭证与 auth:none 的多余 authRef', () => {

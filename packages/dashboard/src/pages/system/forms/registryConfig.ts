@@ -4,7 +4,14 @@ import type {
   PluginExport,
   PluginManifest,
   PluginProfile,
+  RegistryNode,
 } from '@/lib/types'
+import {
+  buildCredentialBinding,
+  type CredentialInputPlan,
+  initialManagedCredential,
+  type ManagedCredentialFormState,
+} from './managedCredential'
 
 export type MountKind = 'mcp' | 'http' | 'context' | 'skillhub' | 'remote' | 'tool'
 export type AuthSchemeMode = 'bearer' | 'raw' | 'custom'
@@ -14,6 +21,7 @@ export interface RegistryMountFormState {
   authScheme: string
   baseUrl: string
   ctxAuthRef: string
+  ctxCredential: ManagedCredentialFormState
   ctxExport: string
   ctxPrefix: string
   describeSpec: string
@@ -42,6 +50,7 @@ export interface RegistryMountFormState {
   skillProvider: 'r2' | 's3'
   skRef: string
   toolAuthRef: string
+  toolCredential: ManagedCredentialFormState
   toolExport: string
   toolProvider: string
   toolsJson: string
@@ -53,6 +62,7 @@ export const INITIAL_REGISTRY_MOUNT_FORM: RegistryMountFormState = {
   authScheme: '',
   baseUrl: '',
   ctxAuthRef: '',
+  ctxCredential: initialManagedCredential(),
   ctxExport: '',
   ctxPrefix: '',
   describeSpec: '',
@@ -81,6 +91,7 @@ export const INITIAL_REGISTRY_MOUNT_FORM: RegistryMountFormState = {
   skillProvider: 'r2',
   skRef: '',
   toolAuthRef: '',
+  toolCredential: initialManagedCredential(),
   toolExport: '',
   toolProvider: '',
   toolsJson:
@@ -222,6 +233,15 @@ export function credentialPlanFor(
     kind: 'fields',
     secretFields: fields,
     ...(target.credentialProbe !== undefined ? { probe: target.credentialProbe } : {}),
+  }
+}
+
+function credentialInputPlanFor(exports: PluginExport[], exportId: string): CredentialInputPlan {
+  const plan = credentialPlanFor(exports, exportId)
+  return {
+    authRequired: plan.authRequired,
+    fields: plan.secretFields,
+    kind: plan.kind,
   }
 }
 
@@ -490,6 +510,98 @@ export function buildRegistryWriteArgs(
     description,
     config: buildRegistryConfig(state, exports),
     ...(virtualize ? { virtualize } : {}),
+  }
+}
+
+function effectiveExportId(options: PluginExport[], chosen: string): string | undefined {
+  const explicit = chosen.trim()
+  if (explicit !== '') return explicit
+  return options.length === 1 ? options[0]!.id : undefined
+}
+
+/**
+ * 替换同一内置 provider/export 时允许留空保留原凭证。跨 provider/export 绝不复用，
+ * 防止把一个服务的 token 静默交给另一个服务。
+ */
+export function existingManagedAuthRef(
+  existing: RegistryNode | undefined,
+  state: RegistryMountFormState,
+  exports: { context: PluginExport[], tool: PluginExport[] },
+): string | undefined {
+  if (existing === undefined || existing.kind !== state.kind) return undefined
+  const config = existing.config
+  if (config === undefined || typeof config.authRef !== 'string') return undefined
+
+  if (state.kind === 'tool') {
+    if (config.provider !== state.toolProvider) return undefined
+    const before = typeof config.export === 'string'
+      ? config.export
+      : effectiveExportId(exports.tool, '')
+    const after = effectiveExportId(exports.tool, state.toolExport)
+    return before === after ? config.authRef : undefined
+  }
+  if (state.kind === 'context' && state.provider !== 'r2' && state.provider !== 's3') {
+    if (config.provider !== state.provider) return undefined
+    const before = typeof config.export === 'string'
+      ? config.export
+      : effectiveExportId(exports.context, '')
+    const after = effectiveExportId(exports.context, state.ctxExport)
+    return before === after ? config.authRef : undefined
+  }
+  return undefined
+}
+
+export interface RegistryMountCalls {
+  mount: ReturnType<typeof buildRegistryWriteArgs>
+  /** 仅内置 plugin 且用户填写了新凭证时出现。 */
+  secret?: { name: string, value: string }
+}
+
+/**
+ * 高级挂载器的编排计划。内置 plugin 的用户态凭证在这里编译成内部 authRef；external
+ * plugin 继续使用兼容的手填引用。最终 registry payload 仍走 buildRegistryWriteArgs 一处。
+ */
+export function buildRegistryMountCalls(
+  state: RegistryMountFormState,
+  exports: { context: PluginExport[], tool: PluginExport[] },
+  options: {
+    contextBuiltin: boolean
+    existing?: RegistryNode
+    toolBuiltin: boolean
+  },
+): RegistryMountCalls {
+  let resolved = state
+  let secret: RegistryMountCalls['secret']
+  const fallbackAuthRef = existingManagedAuthRef(options.existing, state, exports)
+
+  if (state.kind === 'tool' && options.toolBuiltin) {
+    const binding = buildCredentialBinding(
+      state.toolCredential,
+      credentialInputPlanFor(exports.tool, state.toolExport),
+      state.path,
+      fallbackAuthRef,
+    )
+    resolved = { ...state, toolAuthRef: binding.authRef ?? '' }
+    secret = binding.secret
+  } else if (
+    state.kind === 'context'
+    && state.provider !== 'r2'
+    && state.provider !== 's3'
+    && options.contextBuiltin
+  ) {
+    const binding = buildCredentialBinding(
+      state.ctxCredential,
+      credentialInputPlanFor(exports.context, state.ctxExport),
+      state.path,
+      fallbackAuthRef,
+    )
+    resolved = { ...state, ctxAuthRef: binding.authRef ?? '' }
+    secret = binding.secret
+  }
+
+  return {
+    mount: buildRegistryWriteArgs(resolved, exports),
+    ...(secret !== undefined ? { secret } : {}),
   }
 }
 

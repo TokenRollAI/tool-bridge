@@ -2,6 +2,7 @@ import { Loader2, Plus, TriangleAlert } from 'lucide-react'
 import { type ReactNode, useMemo, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
+import type { RegistryNode } from '@/lib/types'
 import {
   Dialog,
   DialogContent,
@@ -12,21 +13,28 @@ import {
   DialogTrigger,
 } from '@/components/ui/dialog'
 import {
+  useIntegrationCatalog,
+  useInvoke,
+  useOAuthAuthorize,
+  usePluginList,
+  useSecretList,
+} from '@/lib/queries'
+import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { useIntegrationCatalog, useInvoke, useOAuthAuthorize, usePluginList } from '@/lib/queries'
 import { FormSection } from '@/components/FormSection'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import {
-  buildRegistryWriteArgs,
+  buildRegistryMountCalls,
   catalogPluginsForMount,
   credentialPlanFor,
+  existingManagedAuthRef,
   exportOptionsFor,
   INITIAL_REGISTRY_MOUNT_FORM,
   type MountKind,
@@ -35,12 +43,14 @@ import {
 import { RegistryKindFields } from './RegistryKindFields'
 
 export function MountDialog({
+  existingNodes = [],
   existingPaths,
   hasUnloadedPaths = false,
   defaultPath,
   trigger,
 }: {
   defaultPath?: string
+  existingNodes?: RegistryNode[]
   existingPaths: string[]
   hasUnloadedPaths?: boolean
   trigger?: ReactNode
@@ -50,6 +60,7 @@ export function MountDialog({
   const qc = useQueryClient()
   const plugins = usePluginList()
   const catalog = useIntegrationCatalog()
+  const secrets = useSecretList()
   const [open, setOpen] = useState(false)
   const [form, setForm] = useState<RegistryMountFormState>(() => ({
     ...INITIAL_REGISTRY_MOUNT_FORM,
@@ -57,7 +68,8 @@ export function MountDialog({
   }))
   const [err, setErr] = useState<string | null>(null)
   const normalizedPath = form.path.trim()
-  const isReplacement = normalizedPath !== '' && existingPaths.includes(normalizedPath)
+  const existingNode = existingNodes.find(node => node.path === normalizedPath)
+  const isReplacement = existingNode !== undefined || existingPaths.includes(normalizedPath)
   const mayReplaceUnloaded = normalizedPath !== '' && !isReplacement && hasUnloadedPaths
   const pluginItems = useMemo(() => {
     const byId = new Map(catalogPluginsForMount(catalog.data ?? []).map(item => [item.id, item]))
@@ -67,60 +79,89 @@ export function MountDialog({
   }, [catalog.data, plugins.data?.items])
   const toolExportOptions = exportOptionsFor(pluginItems, form.toolProvider, 'tools/v1')
   const contextExportOptions = exportOptionsFor(pluginItems, form.provider, 'context/v1')
+  const toolBuiltin = pluginItems
+    .find(item => item.id === form.toolProvider)
+    ?.endpoint.startsWith('binding:') === true
+  const contextBuiltin = pluginItems
+    .find(item => item.id === form.provider)
+    ?.endpoint.startsWith('binding:') === true
+  const managedFallback = existingManagedAuthRef(existingNode, form, {
+    context: contextExportOptions,
+    tool: toolExportOptions,
+  })
 
-  const submit = () => {
-    let args: ReturnType<typeof buildRegistryWriteArgs>
+  const submit = async () => {
+    let calls: ReturnType<typeof buildRegistryMountCalls>
     try {
-      args = buildRegistryWriteArgs(form, {
-        context: contextExportOptions,
-        tool: toolExportOptions,
-      })
+      calls = buildRegistryMountCalls(
+        form,
+        { context: contextExportOptions, tool: toolExportOptions },
+        { contextBuiltin, existing: existingNode, toolBuiltin },
+      )
     } catch (buildError) {
       setErr((buildError as Error).message)
       return
     }
-    invoke.mutate(
-      { path: 'system/registry', tool: 'write', args },
-      {
-        onSuccess: () => {
-          const mounted = args.path
-          toast.success(
-            isReplacement
-              ? `已替换挂载 ${mounted}`
-              : mayReplaceUnloaded
-                ? `已写入挂载 ${mounted}`
-                : `已挂载 ${mounted}`,
-          )
-          setOpen(false)
-          setErr(null)
-          setForm(current => ({ ...current, path: '', description: '' }))
-          qc.invalidateQueries({ queryKey: ['tb'] })
-          const needsOAuth = form.kind === 'mcp'
-            ? form.mcpAuthMode === 'oauth'
-            : form.kind === 'tool'
-              && credentialPlanFor(toolExportOptions, form.toolExport).kind === 'oauth'
-          if (needsOAuth) {
-            oauth.mutate(mounted, {
-              onSuccess: (result) => {
-                if (result.status === 'authorized') {
-                  toast.success(`${mounted} 已授权（凭证有效）`)
-                } else if (result.authorizationUrl) {
-                  window.open(result.authorizationUrl, '_blank', 'noopener')
-                  toast.info('已打开授权页，完成授权后即可调用')
-                }
-              },
-              onError: error =>
-                toast.error(
-                  /redirect/i.test(error.message)
-                    ? `该上游只允许 localhost 回调，请用 CLI 完成授权：tb tool auth ${mounted} --local`
-                    : `发起授权失败：${error.message}`,
-                ),
-            })
+
+    let shouldDeleteOnFailure = false
+    try {
+      if (calls.secret !== undefined) {
+        const knownSecret = (secrets.data?.items ?? []).some(item => item.name === calls.secret!.name)
+        // secret set 是 upsert。替换/轮换已有槽时不能删除；列表未完整加载时也不能
+        // 把“当前页没看到”当成“不存在”。只有确认是新路径的新槽才清理孤儿。
+        shouldDeleteOnFailure = !isReplacement
+          && secrets.data !== undefined
+          && !secrets.hasNextPage
+          && !knownSecret
+        await invoke.mutateAsync({ path: 'system/secret', tool: 'set', args: calls.secret })
+      }
+      await invoke.mutateAsync({ path: 'system/registry', tool: 'write', args: calls.mount })
+    } catch (error) {
+      if (shouldDeleteOnFailure && calls.secret !== undefined) {
+        await invoke.mutateAsync({
+          path: 'system/secret',
+          tool: 'delete',
+          args: { name: calls.secret.name },
+        }).catch(() => {})
+      }
+      setErr((error as Error).message)
+      return
+    }
+
+    const mounted = calls.mount.path
+    toast.success(
+      isReplacement
+        ? `已替换挂载 ${mounted}`
+        : mayReplaceUnloaded
+          ? `已写入挂载 ${mounted}`
+          : `已挂载 ${mounted}`,
+    )
+    setOpen(false)
+    setErr(null)
+    setForm({ ...INITIAL_REGISTRY_MOUNT_FORM, path: '' })
+    qc.invalidateQueries({ queryKey: ['tb'] })
+    const needsOAuth = form.kind === 'mcp'
+      ? form.mcpAuthMode === 'oauth'
+      : form.kind === 'tool'
+        && credentialPlanFor(toolExportOptions, form.toolExport).kind === 'oauth'
+    if (needsOAuth) {
+      oauth.mutate(mounted, {
+        onSuccess: (result) => {
+          if (result.status === 'authorized') {
+            toast.success(`${mounted} 已授权（凭证有效）`)
+          } else if (result.authorizationUrl) {
+            window.open(result.authorizationUrl, '_blank', 'noopener')
+            toast.info('已打开授权页，完成授权后即可调用')
           }
         },
-        onError: error => setErr(error.message),
-      },
-    )
+        onError: error =>
+          toast.error(
+            /redirect/i.test(error.message)
+              ? `该上游只允许 localhost 回调，请用 CLI 完成授权：tb tool auth ${mounted} --local`
+              : `发起授权失败：${error.message}`,
+          ),
+      })
+    }
   }
 
   const changeOpen = (next: boolean) => {
@@ -225,10 +266,12 @@ export function MountDialog({
 
             <RegistryKindFields
               fetchNextPlugins={() => void plugins.fetchNextPage()}
+              hasExistingManagedCredential={managedFallback !== undefined}
               hasNextPlugins={plugins.hasNextPage}
               isFetchingNextPlugins={plugins.isFetchingNextPage}
               onChange={setForm}
               pluginItems={pluginItems}
+              secretNames={(secrets.data?.items ?? []).map(item => item.name)}
               state={form}
             />
 
@@ -244,7 +287,7 @@ export function MountDialog({
         </div>
 
         <DialogFooter className="border-t bg-background px-5 py-4 sm:px-7">
-          <Button disabled={invoke.isPending} onClick={submit}>
+          <Button disabled={invoke.isPending} onClick={() => void submit()}>
             {invoke.isPending && <Loader2 className="animate-spin" />}
             {invoke.isPending
               ? '正在写入'

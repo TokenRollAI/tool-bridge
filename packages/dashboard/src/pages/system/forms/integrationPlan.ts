@@ -12,9 +12,17 @@ import type {
   PluginCredentialField,
   PluginMountConfigField,
 } from '@/lib/types'
+import {
+  buildCredentialBinding,
+  type CredentialMode,
+} from './managedCredential'
 
-/** 凭证的四种给法。与 CLI `tb integration add` 的互斥组一一对应。 */
-export type CredentialMode = 'inline' | 'existing' | 'oauth' | 'none'
+export {
+  type CredentialMode,
+  derivedSecretName,
+  encodeFields,
+  SINGLE_FIELD_KEY,
+} from './managedCredential'
 
 export interface IntegrationFormState {
   /** 非凭证挂载配置(providerConfig)。 */
@@ -29,8 +37,6 @@ export interface IntegrationFormState {
   path: string
   provider: string
 }
-
-export const SINGLE_FIELD_KEY = '__single__'
 
 export const INITIAL_INTEGRATION_FORM: IntegrationFormState = {
   provider: '',
@@ -93,11 +99,6 @@ export function integrationPlan(entry: CatalogListItem | undefined, exportId = '
   }
 }
 
-/** secret 名由挂载路径派生 —— authRef 不再是两处都要打对的自由文本。 */
-export function derivedSecretName(path: string): string {
-  return `integration-${path.trim().replace(/\//g, '-')}`
-}
-
 /**
  * 选中 provider 时给挂载路径一个默认值,省得用户从零想。前缀按节点 kind 分:tool → `tools/`、
  * context → `notes/`(与既有内置节点的习惯一致);拿不到 kind(external / 无 read)退回 `tools/`。
@@ -107,13 +108,6 @@ export function defaultMountPath(entry: CatalogListItem | undefined): string {
   if (entry === undefined) return ''
   const kind = entry.nodeKinds.length === 1 ? entry.nodeKinds[0]! : 'tool'
   return `${kind === 'context' ? 'notes' : 'tools'}/${entry.id}`
-}
-
-/** 多字段凭证的 secret 明文:键序固定(与 core encodeCredentialValues 同规则)。 */
-export function encodeFields(values: Record<string, string>): string {
-  const sorted: Record<string, string> = {}
-  for (const key of Object.keys(values).sort()) sorted[key] = values[key]!
-  return JSON.stringify(sorted)
 }
 
 export interface IntegrationCalls {
@@ -167,48 +161,16 @@ export function buildIntegrationCalls(
       ?? (exportId !== '' ? entry?.exportKinds?.[exportId] : undefined)
       ?? (entry?.nodeKinds.length === 1 ? entry.nodeKinds[0]! : 'tool')
 
-  let authRef: string | undefined
-  let secret: { name: string, value: string } | undefined
-
-  if (state.mode === 'existing') {
-    const name = state.existingSecret.trim()
-    if (name === '') throw new Error('选一个已有凭证,或改用"新建凭证"')
-    authRef = name
-  } else if (state.mode === 'inline' && plan.kind !== 'none') {
-    if (plan.kind === 'fields') {
-      const values: Record<string, string> = {}
-      const missing: string[] = []
-      for (const field of plan.fields) {
-        const value = (state.credentials[field.key] ?? '').trim()
-        // 缺省视为必填(与运行时 parseCredentialValues 同口径)。
-        if (value === '') {
-          if (field.required !== false) missing.push(field.key)
-          continue
-        }
-        values[field.key] = value
-      }
-      if (missing.length > 0) throw new Error(`缺必填凭证字段:${missing.join('、')}`)
-      authRef = derivedSecretName(path)
-      secret = { name: authRef, value: encodeFields(values) }
-    } else if (plan.kind === 'oauth') {
-      // OAuth 的 secret 存 clientId/clientSecret 两个固定字段。
-      const clientId = (state.credentials.clientId ?? '').trim()
-      const clientSecret = (state.credentials.clientSecret ?? '').trim()
-      if (clientId === '' || clientSecret === '') {
-        throw new Error('OAuth 集成需要 clientId 与 clientSecret(到 provider 后台注册应用后获得)')
-      }
-      authRef = derivedSecretName(path)
-      secret = { name: authRef, value: encodeFields({ clientId, clientSecret }) }
-    } else {
-      const value = (state.credentials[SINGLE_FIELD_KEY] ?? '').trim()
-      if (value === '' && plan.authRequired) throw new Error('API key 必填')
-      if (value !== '') {
-        authRef = derivedSecretName(path)
-        secret = { name: authRef, value }
-      }
-      // 单值且留空 = 这个 provider 不需要凭证(少数如 v2ex);不强制。
-    }
-  }
+  const binding = buildCredentialBinding(
+    {
+      credentials: state.credentials,
+      existingSecret: state.existingSecret,
+      mode: state.mode,
+    },
+    plan,
+    path,
+  )
+  const { authRef, secret } = binding
 
   const config: Record<string, unknown> = {
     kind: nodeKind,

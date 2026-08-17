@@ -1,6 +1,6 @@
-import { KeyRound, Loader2, Plus, Search, ShieldCheck, TriangleAlert } from 'lucide-react'
 import { type ReactNode, useMemo, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
+import { Loader2, Plus, Search } from 'lucide-react'
 import { toast } from 'sonner'
 import type { CatalogListItem } from '@/lib/types'
 import {
@@ -27,13 +27,12 @@ import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
 import {
   buildIntegrationCalls,
-  type CredentialMode,
   defaultMountPath,
   INITIAL_INTEGRATION_FORM,
   type IntegrationFormState,
   integrationPlan,
-  SINGLE_FIELD_KEY,
 } from './integrationPlan'
+import { ManagedCredentialFields } from './ManagedCredentialFields'
 
 /**
  * 集成挂载向导 —— 选集成 → 填凭证 → 挂载(需要时授权),一屏走完。
@@ -82,9 +81,6 @@ export function IntegrationDialog({
       .slice(0, 50)
   }, [items, query])
 
-  const setField = (key: string, value: string) =>
-    setForm(current => ({ ...current, credentials: { ...current.credentials, [key]: value } }))
-
   const submit = async () => {
     let calls: ReturnType<typeof buildIntegrationCalls>
     try {
@@ -94,17 +90,20 @@ export function IntegrationDialog({
       return
     }
 
-    let createdSecret = false
+    let shouldDeleteOnFailure = false
     try {
       // 先写凭证再挂载:挂载时平台会用凭证跑 credentialProbe,顺序反了探针必失败。
       if (calls.secret !== undefined) {
+        const knownSecret = (secrets.data?.items ?? []).some(item => item.name === calls.secret!.name)
+        // secret set 是 upsert。只有列表已完整加载且确认名字此前不存在，失败时才可删除；
+        // 否则可能把同名的既有凭证当成“本轮新建”误删。
+        shouldDeleteOnFailure = secrets.data !== undefined && !secrets.hasNextPage && !knownSecret
         await invoke.mutateAsync({ path: 'system/secret', tool: 'set', args: calls.secret })
-        createdSecret = true
       }
       await invoke.mutateAsync({ path: 'system/registry', tool: 'write', args: calls.mount })
     } catch (error) {
       // 仅清理由本轮创建的 secret;复用已有凭证不动。即使回滚失败也保留原挂载错误。
-      if (createdSecret && calls.secret !== undefined) {
+      if (shouldDeleteOnFailure && calls.secret !== undefined) {
         await invoke.mutateAsync({
           path: 'system/secret',
           tool: 'delete',
@@ -302,158 +301,26 @@ export function IntegrationDialog({
 
             {form.provider !== '' && (
               <FormSection
-                description="凭证经加密的 SecretStore 存放,只写不读,不进节点记录。"
+                description="平台自动加密保管，不写入节点配置，也不会回显。"
                 index="02"
                 title="凭证"
               >
-                {plan.kind !== 'none' && (
-                  <div className="grid gap-1.5">
-                    <Label className="text-xs">方式</Label>
-                    <Select
-                      onValueChange={value =>
-                        setForm(current => ({ ...current, mode: value as CredentialMode }))}
-                      value={form.mode}
-                    >
-                      <SelectTrigger className="text-xs"><SelectValue /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem className="text-xs" value="inline">新建凭证(推荐)</SelectItem>
-                        <SelectItem className="text-xs" value="existing">复用已有凭证</SelectItem>
-                        {!plan.authRequired && (
-                          <SelectItem className="text-xs" value="none">暂不配置</SelectItem>
-                        )}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                )}
-
-                {plan.kind === 'none' && (
-                  <p className="rounded-md border bg-muted/30 px-3 py-2.5 text-xs text-muted-foreground">
-                    该 export 明确声明无需上游凭证，不会创建或绑定 secret。
-                  </p>
-                )}
-
-                {form.mode === 'existing' && (
-                  <div className="grid gap-1.5">
-                    <Label className="text-xs">已有凭证</Label>
-                    <Select
-                      onValueChange={value =>
-                        setForm(current => ({ ...current, existingSecret: value }))}
-                      value={form.existingSecret}
-                    >
-                      <SelectTrigger className="font-mono text-xs">
-                        <SelectValue placeholder="选一个 secret" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {(secrets.data?.items ?? []).map(s => (
-                          <SelectItem className="font-mono text-xs" key={s.name} value={s.name}>
-                            {s.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <p className="text-[11px] text-muted-foreground">
-                      下拉自 Secrets 页 —— 不再手打引用名(打错不会当场报错,agent 首次调用才 401)。
-                    </p>
-                  </div>
-                )}
-
-                {form.mode === 'inline' && plan.kind === 'oauth' && (
-                  <div className="grid gap-2">
-                    <p className="flex items-center gap-1.5 text-xs font-medium">
-                      <ShieldCheck className="size-3.5" />
-                      这个集成走平台托管的 OAuth2
-                    </p>
-                    <div className="grid gap-1.5">
-                      <Label className="text-xs" htmlFor="int-cid">clientId *</Label>
-                      <Input
-                        className="font-mono text-sm"
-                        id="int-cid"
-                        onChange={event => setField('clientId', event.target.value)}
-                        value={form.credentials.clientId ?? ''}
-                      />
-                    </div>
-                    <div className="grid gap-1.5">
-                      <Label className="text-xs" htmlFor="int-cs">clientSecret *</Label>
-                      <Input
-                        className="font-mono text-sm"
-                        id="int-cs"
-                        onChange={event => setField('clientSecret', event.target.value)}
-                        type="password"
-                        value={form.credentials.clientSecret ?? ''}
-                      />
-                    </div>
-                    <p className="text-[11px] text-muted-foreground">
-                      到 provider 后台注册应用后获得。挂载完成会自动跳授权页。
-                    </p>
-                  </div>
-                )}
-
-                {form.mode === 'inline' && plan.kind === 'fields' && (
-                  <div className="grid gap-2">
-                    <p className="flex items-center gap-1.5 text-xs font-medium">
-                      <KeyRound className="size-3.5" />
-                      这个集成需要
-                      {plan.fields.length}
-                      个凭证字段
-                    </p>
-                    {plan.fields.map(field => (
-                      <div className="grid gap-1.5" key={field.key}>
-                        <Label className="text-xs" htmlFor={`int-f-${field.key}`}>
-                          {field.key}
-                          {field.required !== false && ' *'}
-                          {field.label !== undefined && (
-                            <span className="ml-1.5 font-normal text-muted-foreground">
-                              {field.label}
-                            </span>
-                          )}
-                        </Label>
-                        <Input
-                          className="font-mono text-sm"
-                          id={`int-f-${field.key}`}
-                          onChange={event => setField(field.key, event.target.value)}
-                          // secret 只管遮蔽:全部字段都进同一个加密 secret。
-                          type={field.secret === false ? 'text' : 'password'}
-                          value={form.credentials[field.key] ?? ''}
-                        />
-                        {field.description !== undefined && (
-                          <p className="text-[11px] text-muted-foreground">{field.description}</p>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                {form.mode === 'inline' && plan.kind === 'single' && (
-                  <div className="grid gap-1.5">
-                    <Label className="text-xs" htmlFor="int-key">
-                      API key
-                      {plan.authRequired && ' *'}
-                    </Label>
-                    <Input
-                      className="font-mono text-sm"
-                      id="int-key"
-                      onChange={event => setField(SINGLE_FIELD_KEY, event.target.value)}
-                      type="password"
-                      value={form.credentials[SINGLE_FIELD_KEY] ?? ''}
-                    />
-                    <p className="text-[11px] text-muted-foreground">
-                      {plan.authRequired ? '凭证会存成' : '留空表示不绑定凭证；填写后会存成'}
-                      <code className="mx-1 font-mono">
-                        integration-
-                        {form.path.trim().replace(/\//g, '-') || '<path>'}
-                      </code>
-                    </p>
-                  </div>
-                )}
-
-                {form.mode === 'none' && (
-                  <div className="flex items-start gap-2.5 rounded-lg border border-warn/30 bg-warn/[0.045] px-3 py-2.5 text-xs">
-                    <TriangleAlert aria-hidden="true" className="mt-0.5 size-3.5 shrink-0 text-warn" />
-                    <p>
-                      不配凭证也能挂上,但需要凭证的集成会在 agent 首次调用时报权限错误。
-                    </p>
-                  </div>
-                )}
+                <ManagedCredentialFields
+                  idPrefix="integration-credential"
+                  onChange={credential => setForm(current => ({
+                    ...current,
+                    credentials: credential.credentials,
+                    existingSecret: credential.existingSecret,
+                    mode: credential.mode,
+                  }))}
+                  plan={plan}
+                  secretNames={(secrets.data?.items ?? []).map(item => item.name)}
+                  state={{
+                    credentials: form.credentials,
+                    existingSecret: form.existingSecret,
+                    mode: form.mode,
+                  }}
+                />
               </FormSection>
             )}
 

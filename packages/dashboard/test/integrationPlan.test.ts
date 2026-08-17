@@ -145,8 +145,12 @@ describe('integrationPlan', () => {
 
 describe('derivedSecretName', () => {
   it('由路径派生 —— authRef 不再是两处要打对的自由文本', () => {
-    expect(derivedSecretName('tools/tavily')).toBe('integration-tools-tavily')
-    expect(derivedSecretName(' a/b/c ')).toBe('integration-a-b-c')
+    expect(derivedSecretName('tools/tavily')).toBe('integration-v2-tools%2Ftavily')
+    expect(derivedSecretName(' a/b/c ')).toBe('integration-v2-a%2Fb%2Fc')
+  })
+
+  it('完整路径编码不会把 slash 与 dash 压成同一槽位', () => {
+    expect(derivedSecretName('a/b')).not.toBe(derivedSecretName('a-b'))
   })
 })
 
@@ -156,13 +160,13 @@ describe('buildIntegrationCalls', () => {
       form({ provider: 'tavily', credentials: { [SINGLE_FIELD_KEY]: ' tvly-k ' } }),
       TAVILY,
     )
-    expect(calls.secret).toEqual({ name: 'integration-tools-x', value: 'tvly-k' })
+    expect(calls.secret).toEqual({ name: 'integration-v2-tools%2Fx', value: 'tvly-k' })
     // 单 export 时不写 export 字段(平台按 resolvePluginExport 自己选唯一那个),
     // 与 CLI `tb integration add` 一致 —— 两个操作面发出的 wire payload 应当同形。
     expect(calls.mount.config).toEqual({
       kind: 'tool',
       provider: 'tavily',
-      authRef: 'integration-tools-x',
+      authRef: 'integration-v2-tools%2Fx',
     })
     expect(calls.needsAuthorize).toBe(false)
   })
@@ -235,7 +239,7 @@ describe('buildIntegrationCalls', () => {
   it('复用模式没选 secret → 抛错', () => {
     expect(() =>
       buildIntegrationCalls(form({ provider: 'tavily', mode: 'existing' }), TAVILY)).toThrow(
-      /已有凭证|新建凭证/,
+      /已保存凭证|填写新凭证/,
     )
   })
 

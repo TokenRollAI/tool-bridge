@@ -11,8 +11,8 @@ import {
   Trash2,
 } from 'lucide-react'
 import { useQueryClient } from '@tanstack/react-query'
+import { useMemo, useState } from 'react'
 import { Link } from 'react-router'
-import { useState } from 'react'
 import { toast } from 'sonner'
 import type { RegistryNode } from '@/lib/types'
 import {
@@ -30,7 +30,12 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import { useInvoke, useOAuthAuthorize, useRegistryList } from '@/lib/queries'
+import {
+  useIntegrationCatalog,
+  useInvoke,
+  useOAuthAuthorize,
+  useRegistryList,
+} from '@/lib/queries'
 import { PaginationFooter } from '@/components/PaginationFooter'
 import { ConfirmAction } from '@/components/ConfirmAction'
 import { CopyButton } from '@/components/CopyButton'
@@ -59,7 +64,17 @@ const KIND_FILTERS = [
 ] as const
 type KindFilter = (typeof KIND_FILTERS)[number]
 
-function configSummary(node: RegistryNode): { detail: string, target: string } {
+function isBuiltinPluginNode(node: RegistryNode, builtinProviders: Set<string>): boolean {
+  const provider = node.config?.provider
+  return (node.kind === 'tool' || node.kind === 'context')
+    && typeof provider === 'string'
+    && builtinProviders.has(provider)
+}
+
+function configSummary(
+  node: RegistryNode,
+  builtinProviders: Set<string>,
+): { detail: string, target: string } {
   const config = node.config ?? {}
   const value = (key: string) => (typeof config[key] === 'string' ? config[key] : '')
   switch (node.kind) {
@@ -96,11 +111,26 @@ function configSummary(node: RegistryNode): { detail: string, target: string } {
     case 'tool':
       return {
         target: value('provider') || 'tool-provider plugin',
-        detail: value('authRef') ? `authRef · ${value('authRef')}` : '平台 Provider',
+        detail: isBuiltinPluginNode(node, builtinProviders)
+          ? value('authRef') ? '凭证由平台保管' : '无需服务商凭证'
+          : value('authRef') ? `authRef · ${value('authRef')}` : '平台 Provider',
       }
     default:
       return { target: node.kind, detail: 'registry node' }
   }
+}
+
+/** 内置集成的详情视图隐藏内部引用实现；外部/协议级节点仍保留原始配置。 */
+function registryNodeForDisplay(
+  node: RegistryNode,
+  builtinProviders: Set<string>,
+): RegistryNode & { credential?: string } {
+  if (!isBuiltinPluginNode(node, builtinProviders) || typeof node.config?.authRef !== 'string') {
+    return node
+  }
+  const config = { ...node.config }
+  delete config.authRef
+  return { ...node, config, credential: 'managed by platform' }
 }
 
 function RegistryMetric({
@@ -145,12 +175,20 @@ function ConfigFact({ label, value }: { label: string, value: string }) {
  */
 export function RegistryPage() {
   const list = useRegistryList()
+  const catalog = useIntegrationCatalog()
   const invoke = useInvoke()
   const oauth = useOAuthAuthorize()
   const qc = useQueryClient()
   const [kindFilter, setKindFilter] = useState<KindFilter>('all')
   const [search, setSearch] = useState('')
   const [inspecting, setInspecting] = useState<RegistryNode | null>(null)
+  const builtinProviders = useMemo(
+    () => new Set((catalog.data ?? []).map(item => item.id)),
+    [catalog.data],
+  )
+  const displayedInspection = inspecting === null
+    ? null
+    : registryNodeForDisplay(inspecting, builtinProviders)
 
   const unmount = async (path: string) => {
     try {
@@ -221,6 +259,7 @@ export function RegistryPage() {
             {/* 常见路径在前:挂一个现成集成。通用挂载器降为次要按钮。 */}
             <IntegrationDialog />
             <MountDialog
+              existingNodes={mounted}
               existingPaths={mounted.map(node => node.path)}
               hasUnloadedPaths={Boolean(list.hasNextPage)}
               trigger={(
@@ -354,7 +393,7 @@ export function RegistryPage() {
                     </TableHeader>
                     <TableBody>
                       {items.map((node) => {
-                        const summary = configSummary(node)
+                        const summary = configSummary(node, builtinProviders)
                         return (
                           <TableRow key={node.path}>
                             <TableCell className="max-w-80 whitespace-normal">
@@ -487,7 +526,7 @@ export function RegistryPage() {
               {inspecting && <KindBadge kind={inspecting.kind} />}
             </div>
             <DialogDescription>
-              注册配置只展示 authRef / skRef 等引用，不包含凭证明文。
+              内置集成的凭证由平台管理；这里不展示密钥或内部引用。
             </DialogDescription>
           </DialogHeader>
           {inspecting && (
@@ -514,12 +553,12 @@ export function RegistryPage() {
               <div className="relative mt-5">
                 <div className="mb-2 flex items-center justify-between gap-3">
                   <p className="text-[10px] font-semibold tracking-[0.14em] text-muted-foreground uppercase">
-                    Raw registry record
+                    Registry configuration
                   </p>
-                  <CopyButton label="复制配置" value={JSON.stringify(inspecting, null, 2)} />
+                  <CopyButton label="复制配置" value={JSON.stringify(displayedInspection, null, 2)} />
                 </div>
                 <pre className="max-h-[55vh] overflow-auto rounded-lg border bg-card px-4 py-3 font-mono text-xs leading-relaxed">
-                  {JSON.stringify(inspecting, null, 2)}
+                  {JSON.stringify(displayedInspection, null, 2)}
                 </pre>
               </div>
             </div>
