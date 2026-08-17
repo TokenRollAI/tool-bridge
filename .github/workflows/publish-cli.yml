@@ -123,6 +123,7 @@ jobs:
           TB_VERSION: ${{ steps.version.outputs.value }}
         run: |
           docker run --rm --platform linux/amd64 "$IMAGE_REF" --version | grep -Fx "$TB_VERSION"
-          docker run --rm --platform linux/arm64 "$IMAGE_REF" --version | grep -Fx "$TB_VERSION"
           docker run --rm --platform linux/amd64 "$IMAGE_REF" connect --help | grep -F -- '--fs-readonly'
+          docker image rm "$IMAGE_REF"
+          docker run --rm --platform linux/arm64 "$IMAGE_REF" --version | grep -Fx "$TB_VERSION"
           docker run --rm --platform linux/arm64 "$IMAGE_REF" connect --help | grep -F -- '--fs-readonly'
