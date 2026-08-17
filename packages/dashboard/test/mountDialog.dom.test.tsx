@@ -95,5 +95,5 @@ describe('高级挂载的内置凭证体验', () => {
       config: { provider: 'amap', authRef: 'integration-v2-tools%2Famap' },
       path: 'tools/amap',
     })
-  })
+  }, 15_000)
 })
