@@ -9,6 +9,15 @@ on:
     tags:
       - 'cli-v*' # 打 tag 即发布:git tag cli-v0.1.0 && git push origin cli-v0.1.0
   workflow_dispatch:
+    inputs:
+      publish_npm:
+        description: Publish the package to npm (normally use a cli-v* tag instead)
+        type: boolean
+        default: false
+      publish_edge:
+        description: Publish the current ref as the GHCR edge image
+        type: boolean
+        default: true
 
 permissions:
   contents: read
@@ -17,6 +26,7 @@ permissions:
 
 jobs:
   publish-npm:
+    if: github.ref_type == 'tag' || inputs.publish_npm
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -54,8 +64,8 @@ jobs:
         run: npm publish
 
   publish-image:
-    # 正式镜像只随 cli-v* tag 发布；workflow_dispatch 保留给 npm 首发/排错，不覆盖镜像标签。
-    if: github.ref_type == 'tag'
+    # cli-v* 发布正式版本 + latest；手工 dispatch 只允许覆盖明确标成预览的 edge。
+    if: github.ref_type == 'tag' || inputs.publish_edge
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -63,11 +73,13 @@ jobs:
       - name: Read and check CLI version
         id: version
         run: |
-          TAG_VERSION="${GITHUB_REF_NAME#cli-v}"
           PKG_VERSION="$(node -p "require('./packages/cli/package.json').version")"
-          if [ "$TAG_VERSION" != "$PKG_VERSION" ]; then
-            echo "tag cli-v$TAG_VERSION != package.json $PKG_VERSION" >&2
-            exit 1
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            TAG_VERSION="${GITHUB_REF_NAME#cli-v}"
+            if [ "$TAG_VERSION" != "$PKG_VERSION" ]; then
+              echo "tag cli-v$TAG_VERSION != package.json $PKG_VERSION" >&2
+              exit 1
+            fi
           fi
           echo "value=$PKG_VERSION" >> "$GITHUB_OUTPUT"
 
@@ -85,8 +97,9 @@ jobs:
         with:
           images: ghcr.io/${{ github.repository }}-cli
           tags: |
-            type=raw,value=${{ steps.version.outputs.value }}
-            type=raw,value=latest
+            type=raw,value=${{ steps.version.outputs.value }},enable=${{ github.ref_type == 'tag' }}
+            type=raw,value=latest,enable=${{ github.ref_type == 'tag' }}
+            type=raw,value=edge,enable=${{ github.event_name == 'workflow_dispatch' && inputs.publish_edge }}
 
       - uses: docker/build-push-action@v6
         with:
