@@ -102,6 +102,20 @@ curl -X POST -H "Authorization: Bearer $TB_SK" \
 npm install -g @tool-bridge/cli
 ```
 
+也可把**全部 `tb` 子命令**作为单个 Bun 独立二进制装进小型 Alpine 镜像（目标机无需
+Node.js）：
+
+```sh
+docker build -f Dockerfile.cli -t tb-cli:local .
+docker run --rm tb-cli:local --version
+docker run --rm -e TB_BASE_URL=https://your-tb.example.com -e TB_SK="$TB_SK" \
+  tb-cli:local tree --depth 2
+```
+
+完整的本机、守护进程和 Kubernetes sidecar 用法见
+[`packages/cli/README.md`](packages/cli/README.md#完整-cli-镜像)；容器部署和二进制抽取说明见
+[`packages/cli/CONTAINER.md`](packages/cli/CONTAINER.md)。
+
 ```sh
 tb login                                    # 交互保存 BaseURL + SK(多 profile)
 tb status --json                            # 网关健康摘要
@@ -142,7 +156,7 @@ tb sk rm <id>
 tb plugin register --file ./manifest.json && tb plugin health my-plugin
 ```
 
-21 个顶层命令共享全局参数位置语义：`--json` / `--base-url` / `--sk` / `--timeout`
+23 个顶层命令共享全局参数位置语义：`--json` / `--base-url` / `--sk` / `--timeout`
 可放在根命令、命令组或叶子命令位置（长驻 `connect` / `mount fs` 不适用 timeout，会明确
 报错）；返回 `Page` 的列表/搜索命令统一支持 `--limit 1..200` 与 `--cursor`。CLI 是纯
 API 客户端，没有任何专用端点。
@@ -284,7 +298,7 @@ tb login && tb status --json
 | `packages/app` | 宿主中立的网关本体:整棵 HTBP 树的路由与行为,经五个注入点(状态 / 对象 / 密钥 / 设备通道 / 搜索)装配,不认识任何具体平台 |
 | `packages/server` | Node 宿主适配器:SQLite + 本地 FS + 进程内 WebSocket,单容器自部署入口 |
 | `packages/gateway` | Cloudflare Workers 宿主适配器:KV / R2 / D1 / Durable Object / Static Assets 绑定 |
-| `packages/cli` | `tb` 命令行(citty),纯 API 客户端 — npm 包 [`@tool-bridge/cli`](https://www.npmjs.com/package/@tool-bridge/cli) |
+| `packages/cli` | `tb` 命令行(commander),纯 API 客户端；可发布为 npm 包或 Bun 独立二进制镜像 — [`@tool-bridge/cli`](https://www.npmjs.com/package/@tool-bridge/cli) |
 | `packages/sdk` | npm 包 [`@tool-bridge/sdk`](https://www.npmjs.com/package/@tool-bridge/sdk):内嵌 TB 实例、程序化注册、反向连接 |
 | `packages/plugin-sdk` | 写第三方 Plugin(Tool/Context Provider)的最小 SDK 与契约 |
 | `packages/plugins` | 内置 Plugin 源(如飞书),可托管在 Workers 上,也可用 `scripts/serve.ts` 跑成 Node 进程 |

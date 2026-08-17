@@ -10,6 +10,71 @@ npm install -g @tool-bridge/cli
 pnpm add -g @tool-bridge/cli
 ```
 
+也可以把全部 `tb` 子命令编译进一个 Bun 独立二进制，不需要在目标机器安装 Node.js：
+
+```sh
+pnpm --filter @tool-bridge/cli build
+pnpm --filter @tool-bridge/cli build:binary
+./packages/cli/binary/tb --version
+./packages/cli/binary/tb tree --base-url https://your-gateway.example.com --sk "$TB_SK"
+```
+
+该命令默认编译当前宿主平台。Linux amd64/arm64 的可复现构建见仓库根目录
+[`Dockerfile.cli`](../../Dockerfile.cli)。
+
+## 完整 CLI 镜像
+
+镜像入口就是完整的 `tb`，并非仅包含 Device 命令：
+
+正式发布镜像为 `ghcr.io/tokenrollai/tool-bridge-cli:<version>`；一次性命令、配置持久化、Device
+守护、Kubernetes Sidecar 和二进制抽取方式见独立的
+[`CONTAINER.md`](./CONTAINER.md)。
+
+```sh
+docker build -f Dockerfile.cli -t tb-cli:local .
+
+docker run --rm tb-cli:local --version
+docker run --rm \
+  -e TB_BASE_URL=https://your-gateway.example.com \
+  -e TB_SK="$TB_SK" \
+  tb-cli:local tree --depth 2
+```
+
+需要持久化 `tb login` 的 profile 时，把配置目录挂到容器的 `/home/tb/.config`：
+
+```sh
+docker volume create tb-cli-config
+docker run --rm -it -v tb-cli-config:/home/tb/.config \
+  tb-cli:local login --base-url https://your-gateway.example.com --sk "$TB_SK"
+docker run --rm -v tb-cli-config:/home/tb/.config tb-cli:local status --json
+```
+
+`tb connect` 本身保持前台运行，内部使用 WebSocket 心跳和自动重连；守护与崩溃拉起交给容器运行时：
+
+```sh
+docker run -d --name tb-device --restart unless-stopped \
+  -e TB_BASE_URL=https://your-gateway.example.com \
+  -e TB_SK="$TB_SK" \
+  -v "$PWD/shared:/workspace:ro" \
+  tb-cli:local connect \
+    --device-id build-01 \
+    --path device/build-01 \
+    --allow uname \
+    --fs /workspace --fs-readonly
+```
+
+Kubernetes 可将同一镜像作为普通 sidecar 运行；Pod 负责异常退出后的重启，CLI 负责网络闪断后的
+原连接重建。可直接改造的清单见
+[`examples/kubernetes-sidecar.yaml`](./examples/kubernetes-sidecar.yaml)。生产环境建议给每个 Pod 使用
+唯一 `--device-id` / `--path`（例如 Pod UID），并使用最小权限 SK、shell 白名单和只读文件挂载。
+
+构建并推送 amd64 + arm64 镜像：
+
+```sh
+docker buildx build --platform linux/amd64,linux/arm64 \
+  -f Dockerfile.cli -t ghcr.io/tokenrollai/tool-bridge-cli:0.14.0 --push .
+```
+
 ## 快速开始
 
 ```sh
@@ -58,7 +123,7 @@ tb server add fed/team-b --remote-url https://team-b.example.com
 这是对旧 `tb server add ... --base-url <remote>` 写法的迁移；旧写法会明确提示缺少
 `--remote-url`，不会再把同一个参数解释成两种地址。
 
-## 要求
+## npm 安装要求
 
 Node.js >= 22。
 

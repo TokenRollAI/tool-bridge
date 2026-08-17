@@ -13,9 +13,10 @@ on:
 permissions:
   contents: read
   id-token: write # npm Trusted Publishing(OIDC)必需
+  packages: write # 推送完整 CLI 镜像到 GHCR
 
 jobs:
-  publish:
+  publish-npm:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -51,3 +52,53 @@ jobs:
       - name: Publish to npm
         working-directory: packages/cli
         run: npm publish
+
+  publish-image:
+    # 正式镜像只随 cli-v* tag 发布；workflow_dispatch 保留给 npm 首发/排错，不覆盖镜像标签。
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read and check CLI version
+        id: version
+        run: |
+          TAG_VERSION="${GITHUB_REF_NAME#cli-v}"
+          PKG_VERSION="$(node -p "require('./packages/cli/package.json').version")"
+          if [ "$TAG_VERSION" != "$PKG_VERSION" ]; then
+            echo "tag cli-v$TAG_VERSION != package.json $PKG_VERSION" >&2
+            exit 1
+          fi
+          echo "value=$PKG_VERSION" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}-cli
+          tags: |
+            type=raw,value=${{ steps.version.outputs.value }}
+            type=raw,value=latest
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.cli
+          platforms: linux/amd64,linux/arm64
+          build-args: |
+            TB_VERSION=${{ steps.version.outputs.value }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: mode=max
+          sbom: true

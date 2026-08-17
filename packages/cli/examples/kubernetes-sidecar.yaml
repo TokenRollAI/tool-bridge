@@ -1,0 +1,98 @@
+# 示例用途:把 Pod 的共享目录通过完整 tb CLI 镜像接入 Tool Bridge。
+# 请先把 tb-cli:local 替换为你的镜像地址，并替换 Secret 中的示例值。
+apiVersion: v1
+kind: Secret
+metadata:
+  name: tobridge-cli
+type: Opaque
+stringData:
+  config.json: |
+    {
+      "current": "cluster",
+      "profiles": {
+        "cluster": {
+          "baseUrl": "https://tobridge.example.com",
+          "sk": "replace-with-device-sk"
+        }
+      }
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tobridge-sidecar-example
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: tobridge-sidecar-example
+  template:
+    metadata:
+      labels:
+        app: tobridge-sidecar-example
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        fsGroup: 10001
+        fsGroupChangePolicy: OnRootMismatch
+      terminationGracePeriodSeconds: 15
+      containers:
+        - name: app
+          image: busybox:1.37
+          command: ["sh", "-c", "while true; do date > /workspace/heartbeat; sleep 30; done"]
+          volumeMounts:
+            - name: workspace
+              mountPath: /workspace
+
+        # ENTRYPOINT 是完整的 `tb`；这里仅选择长驻的 connect 子命令。
+        - name: tobridge
+          image: tb-cli:local
+          imagePullPolicy: IfNotPresent
+          args:
+            - connect
+            - --device-id
+            - $(POD_UID)
+            - --path
+            - k8s/$(POD_NAMESPACE)/$(POD_UID)
+            - --allow
+            - ls
+            - --allow
+            - cat
+            - --fs
+            - /workspace
+            - --fs-readonly
+          env:
+            - name: POD_UID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.uid
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: XDG_CONFIG_HOME
+              value: /var/run/tobridge-config
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: true
+            runAsGroup: 10001
+            runAsNonRoot: true
+            runAsUser: 10001
+            seccompProfile:
+              type: RuntimeDefault
+          volumeMounts:
+            - name: workspace
+              mountPath: /workspace
+              readOnly: true
+            - name: tobridge-config
+              mountPath: /var/run/tobridge-config/tool-bridge
+              readOnly: true
+      volumes:
+        - name: workspace
+          emptyDir: {}
+        - name: tobridge-config
+          secret:
+            secretName: tobridge-cli
+            defaultMode: 0440
