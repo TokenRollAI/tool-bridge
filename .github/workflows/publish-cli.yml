@@ -101,7 +101,8 @@ jobs:
             type=raw,value=latest,enable=${{ github.ref_type == 'tag' }}
             type=raw,value=edge,enable=${{ github.event_name == 'workflow_dispatch' && inputs.publish_edge }}
 
-      - uses: docker/build-push-action@v6
+      - id: build
+        uses: docker/build-push-action@v6
         with:
           context: .
           file: Dockerfile.cli
@@ -115,3 +116,13 @@ jobs:
           cache-to: type=gha,mode=max
           provenance: mode=max
           sbom: true
+
+      - name: Smoke test both published architectures
+        env:
+          IMAGE_REF: ghcr.io/${{ github.repository }}-cli@${{ steps.build.outputs.digest }}
+          TB_VERSION: ${{ steps.version.outputs.value }}
+        run: |
+          docker run --rm --platform linux/amd64 "$IMAGE_REF" --version | grep -Fx "$TB_VERSION"
+          docker run --rm --platform linux/arm64 "$IMAGE_REF" --version | grep -Fx "$TB_VERSION"
+          docker run --rm --platform linux/amd64 "$IMAGE_REF" connect --help | grep -F -- '--fs-readonly'
+          docker run --rm --platform linux/arm64 "$IMAGE_REF" connect --help | grep -F -- '--fs-readonly'
