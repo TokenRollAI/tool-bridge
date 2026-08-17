@@ -1,6 +1,6 @@
 {
   "name": "@tool-bridge/cli",
-  "version": "0.13.0",
+  "version": "0.14.0",
   "description": "tb — Tool Bridge CLI: one gateway for HTBP/MCP/HTTP tools, contexts, and device shells",
   "type": "module",
   "license": "MIT",
@@ -8,7 +8,8 @@
     "tb": "dist/index.js"
   },
   "files": [
-    "dist"
+    "dist",
+    "scripts/build-binary.sh"
   ],
   "engines": {
     "node": ">=22"
@@ -26,6 +27,7 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "build": "tsup",
+    "build:binary": "sh scripts/build-binary.sh",
     "dev": "tsx src/index.ts",
     "test": "vitest run"
   },

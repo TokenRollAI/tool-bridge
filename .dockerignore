@@ -2,6 +2,7 @@
 .git
 **/node_modules
 **/dist
+**/binary
 **/.wrangler
 .env
 .dev.vars

@@ -1,0 +1,64 @@
+# `tb` 完整 CLI 的独立 Bun 二进制镜像。
+#
+# 本地构建:
+#   docker build -f Dockerfile.cli -t tb-cli:local .
+#   docker run --rm tb-cli:local --version
+#
+# 多架构发布:
+#   docker buildx build --platform linux/amd64,linux/arm64 \
+#     -f Dockerfile.cli -t ghcr.io/tokenrollai/tool-bridge-cli:0.14.0 --push .
+
+ARG BUN_VERSION=1.3.14
+ARG TB_VERSION=0.14.0
+FROM --platform=$BUILDPLATFORM oven/bun:${BUN_VERSION}-alpine AS bun
+
+FROM --platform=$BUILDPLATFORM node:22-alpine AS build
+WORKDIR /repo
+ARG TB_VERSION
+
+COPY --from=bun /usr/local/bin/bun /usr/local/bin/bun
+RUN corepack enable
+
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json ./
+COPY packages ./packages
+# Bun 只需 CLI 的运行时依赖与 core 源码；不下载测试、lint、Workers 等构建无关依赖。
+# core 在 CLI manifest 中是 devDependency（npm 版由 tsup 内联），这里显式链接给 Bun 解析。
+RUN pnpm install --frozen-lockfile --prod --ignore-scripts \
+      --filter @tool-bridge/cli --filter @tool-bridge/core \
+    && mkdir -p packages/cli/node_modules/@tool-bridge \
+    && ln -s /repo/packages/core packages/cli/node_modules/@tool-bridge/core
+
+ARG TARGETARCH
+RUN test "$(node -p "require('./packages/cli/package.json').version")" = "$TB_VERSION" \
+    && case "$TARGETARCH" in \
+      amd64) bun_target=bun-linux-x64-musl ;; \
+      arm64) bun_target=bun-linux-arm64-musl ;; \
+      *) echo "unsupported TARGETARCH: $TARGETARCH" >&2; exit 1 ;; \
+    esac \
+    && mkdir -p /out \
+    && bun build packages/cli/src/index.ts \
+      --compile \
+      --minify \
+      --target="$bun_target" \
+      --outfile=/out/tb
+
+FROM alpine:3.22
+ARG TB_VERSION
+LABEL org.opencontainers.image.title="Tool Bridge CLI" \
+      org.opencontainers.image.description="Complete tb CLI compiled as a standalone Bun executable" \
+      org.opencontainers.image.version="$TB_VERSION" \
+      org.opencontainers.image.source="https://github.com/TokenRollAI/tool-bridge"
+
+RUN apk add --no-cache ca-certificates libgcc libstdc++ \
+    && addgroup -S -g 10001 tb \
+    && adduser -S -D -u 10001 -G tb -h /home/tb tb \
+    && mkdir -p /home/tb/.config \
+    && chown tb:tb /home/tb/.config
+COPY --from=build --chown=tb:tb /out/tb /usr/local/bin/tb
+
+ENV HOME=/home/tb
+USER tb
+WORKDIR /home/tb
+STOPSIGNAL SIGTERM
+ENTRYPOINT ["/usr/local/bin/tb"]
+CMD ["--help"]
