@@ -98,6 +98,28 @@ curl -X POST \
 
 `~help` 默认返回 Markdown；使用 `Accept: text/plain` 可获得紧凑 Help DSL，使用 `Accept: application/json` 可获得包含 JSON Schema 的结构化描述。
 
+## 让 Agent 直接使用 tool-bridge
+
+公开的 [`tool-bridge` Agent Skill](https://github.com/TokenRollAI/tool-bridge-skill) 可以安装到 Codex、Claude Code、Cursor、OpenCode 等兼容 Agent。它不会保存某个实例的静态工具清单，而是让 Agent 从当前网关的 `~search`、`~tree` 与 `~help` 实时发现能力：
+
+```sh
+# 安装到本机检测到的 Agent
+npx skills add TokenRollAI/tool-bridge-skill
+
+# 或不安装，只使用一次
+npx skills use TokenRollAI/tool-bridge-skill@tool-bridge
+```
+
+交互使用时先按上面的快速开始运行 `tb login`；自动化环境则通过 Secret 注入 `TB_BASE_URL` 与最小权限 `TB_SK`。不要把 SK 写进 prompt、仓库或命令参数。
+
+安装后直接用自然语言描述目标，例如：
+
+```text
+通过 Tool Bridge 找到文档搜索工具，搜索 HTBP 的权限模型，并总结关键约束。
+```
+
+Skill 会先验证目标，再搜索或逐级浏览、读取工具级 schema 与已有 feedback，最后按运行时声明调用。遇到错误、超时或结果异常时，Agent 会立即查询该精确路径的 feedback，再决定是否安全重试；已有经验确实有效时及时投票，新问题或已验证解法则在获得 feedback 写入授权后去重提交。`~help` 始终是契约真源，feedback 只是经验层，不能覆盖当前 schema。
+
 ## 现在可以怎么用
 
 | 使用方式 | 当前入口 | 典型用途 |

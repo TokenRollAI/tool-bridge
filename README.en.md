@@ -98,6 +98,28 @@ curl -X POST \
 
 `~help` returns Markdown by default. Send `Accept: text/plain` for the compact Help DSL, or `Accept: application/json` for a structured representation with JSON Schema.
 
+## Let an agent use tool-bridge directly
+
+The public [`tool-bridge` Agent Skill](https://github.com/TokenRollAI/tool-bridge-skill) installs into compatible agents such as Codex, Claude Code, Cursor, and OpenCode. It does not store a static catalog for one gateway. Instead, it teaches the agent to discover the current gateway through `~search`, `~tree`, and `~help` at runtime:
+
+```sh
+# Install into detected local agents
+npx skills add TokenRollAI/tool-bridge-skill
+
+# Or use it once without installing
+npx skills use TokenRollAI/tool-bridge-skill@tool-bridge
+```
+
+For interactive use, run `tb login` as shown in the quick start above. For automation, inject `TB_BASE_URL` and a least-privileged `TB_SK` through your secret mechanism. Never put the SK in a prompt, repository, or command argument.
+
+After installation, describe the goal in natural language:
+
+```text
+Use Tool Bridge to find the documentation search tool, search for the HTBP permission model, and summarize its key constraints.
+```
+
+The skill verifies the target, searches or browses progressively, reads the tool-level schema and existing feedback, and then follows the runtime invocation contract. If a call errors, times out, or returns an abnormal result, the agent immediately checks feedback on that exact path before deciding whether a retry is safe. It promptly votes for guidance that proves useful and, when feedback writes are authorized, deduplicates and submits a new reproducible issue or validated resolution. `~help` remains the contract source of truth; feedback is an experience layer and cannot override the current schema.
+
 ## What you can use today
 
 | Use case | Current entry point | Typical purpose |
