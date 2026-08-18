@@ -14,7 +14,7 @@
 |---|---|
 | 产品定位、技术选型、长期约束 | [must/project-brief.md](must/project-brief.md) |
 | 当前阶段、近期重点、验收入口 | [must/current-state.md](must/current-state.md) |
-| 用户能力与部署形态 | [overview/project-overview.md](overview/project-overview.md) |
+| 用户能力、部署形态与公共文档边界 | [overview/project-overview.md](overview/project-overview.md) |
 | 包职责、依赖方向、宿主注入 | [architecture/modules-and-boundaries.md](architecture/modules-and-boundaries.md) |
 | 文件与符号导航 | [architecture/code-map.md](architecture/code-map.md) |
 | 插件目录、binding 与外部注册 | [architecture/plugin-runtime.md](architecture/plugin-runtime.md) |
@@ -31,6 +31,12 @@
 | MCP 外部协议兼容 | [guides/mcp-upstream-pitfalls.md](guides/mcp-upstream-pitfalls.md) |
 | Durable Object WebSocket | [guides/do-websocket-hibernation.md](guides/do-websocket-hibernation.md) |
 | Workers KV 语义 | [guides/workers-kv-pitfalls.md](guides/workers-kv-pitfalls.md) |
+
+## 本轮 reflection
+
+| 主题 | 文档 |
+|---|---|
+| 公共站点独立仓库与 CI 启动 | [memory/reflections/public-site-bootstrap.md](memory/reflections/public-site-bootstrap.md) |
 
 ## 维护边界
 
