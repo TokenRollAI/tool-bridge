@@ -37,6 +37,7 @@
 | 主题 | 文档 |
 |---|---|
 | 公共站点独立仓库与 CI 启动 | [memory/reflections/public-site-bootstrap.md](memory/reflections/public-site-bootstrap.md) |
+| 公共站点任务化重构与契约校对 | [memory/reflections/public-site-redesign.md](memory/reflections/public-site-redesign.md) |
 
 ## 维护边界
 
