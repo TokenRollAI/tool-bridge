@@ -2,6 +2,7 @@ import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises
 import { spawnSync } from 'node:child_process'
 import { delimiter, join } from 'node:path'
 import assert from 'node:assert/strict'
+import { parseEnv } from 'node:util'
 import { tmpdir } from 'node:os'
 import test from 'node:test'
 
@@ -127,13 +128,14 @@ test('provision creates KV/R2/D1 once, backfills ids, then skips all existing re
     const config = JSON.parse(await readFile(ws.configPath, 'utf8'))
     assert.equal(config.kv_namespaces[0].id, 'kv-id')
     assert.equal(config.d1_databases[0].database_id, 'd1-id')
-    // 账户特定值缺 env 时不臆造:配置保持中立,并把后果说出来。
+    // 无自定义域时必须主动打开 workers.dev，首次部署才能得到可访问入口。
     assert.equal(config.account_id, undefined)
+    assert.equal(config.workers_dev, true)
     assert.deepEqual(config.routes, [])
     assert.equal(config.vars.TB_CANONICAL_ORIGIN, '')
     assert.equal(config.vars.TB_R2_S3_ENDPOINT, undefined)
     assert.match(first.stdout, /CLOUDFLARE_ACCOUNT_ID 未设置/)
-    assert.match(first.stdout, /TB_DOMAIN 未设置/)
+    assert.match(first.stdout, /TB_DOMAIN 未设置 → 启用 workers.dev/)
   } finally {
     await rm(ws.dir, { force: true, recursive: true })
   }
@@ -153,6 +155,7 @@ test('provision backfills account/domain/origin and prefix-derived names from .e
 
     const config = JSON.parse(await readFile(ws.configPath, 'utf8'))
     assert.equal(config.account_id, 'acct123')
+    assert.equal(config.workers_dev, false)
     assert.deepEqual(config.routes, [{ pattern: 'tb.acme.example', custom_domain: true }])
     assert.equal(config.vars.TB_CANONICAL_ORIGIN, 'https://tb.acme.example')
     assert.equal(config.vars.TB_R2_S3_ENDPOINT, 'https://acct123.r2.cloudflarestorage.com')
@@ -172,4 +175,18 @@ test('provision backfills account/domain/origin and prefix-derived names from .e
   } finally {
     await rm(ws.dir, { force: true, recursive: true })
   }
+})
+
+test('Deploy Button collects both trust-root secrets without shipping shared defaults', async () => {
+  const example = parseEnv(await readFile(join(root, 'template', '.dev.vars.example'), 'utf8'))
+  assert.deepEqual(Object.keys(example).sort(), [
+    'TB_BOOTSTRAP_ADMIN_SK',
+    'TB_SECRET_ENCRYPTION_KEY',
+  ])
+  assert.equal(example.TB_BOOTSTRAP_ADMIN_SK, '')
+  assert.equal(example.TB_SECRET_ENCRYPTION_KEY, '')
+
+  const manifest = JSON.parse(await readFile(join(root, 'template', 'package.json'), 'utf8'))
+  assert.match(manifest.cloudflare.bindings.TB_BOOTSTRAP_ADMIN_SK.description, /Required.*password manager/)
+  assert.match(manifest.cloudflare.bindings.TB_SECRET_ENCRYPTION_KEY.description, /Required.*root key/)
 })

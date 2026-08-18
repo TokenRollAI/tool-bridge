@@ -47,6 +47,7 @@ describe('未知 flag 必须报错(事故回归)', () => {
 
   it('每个叶子命令的未知 flag 都报错', async () => {
     const cases: string[][] = [
+      ['init', 'cloudflare', '--bogus'],
       ['status', '--bogus'],
       ['login', '--bogus'],
       ['whoami', '--bogus'],

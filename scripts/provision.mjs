@@ -200,9 +200,14 @@ function applyDeployTargets() {
     console.log('CLOUDFLARE_ACCOUNT_ID 未设置 → 不写 account_id(多账户 OAuth 下 wrangler 会要求显式指定)')
   }
   if (domain) {
+    setConfigPath(['workers_dev'], false, 'workers_dev')
     setConfigPath(['routes'], [{ pattern: domain, custom_domain: true }], 'routes')
   } else {
-    console.log('TB_DOMAIN 未设置 → 不写 routes(workers_dev:false 时部署出来的 Worker 无入口)')
+    // 首次部署最常见的是没有自定义域。这里显式恢复 workers.dev 入口，避免中立配置里的
+    // workers_dev:false 产出一个“部署成功但无 URL”的 Worker；复跑时也会清掉旧 custom route。
+    setConfigPath(['workers_dev'], true, 'workers_dev')
+    setConfigPath(['routes'], [], 'routes')
+    console.log('TB_DOMAIN 未设置 → 启用 workers.dev 入口并清空 custom routes')
   }
   if (baseUrl) {
     setConfigPath(['vars', 'TB_CANONICAL_ORIGIN'], baseUrl, 'vars.TB_CANONICAL_ORIGIN')

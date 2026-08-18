@@ -1,6 +1,6 @@
 {
   "name": "@tool-bridge/cli",
-  "version": "0.15.0",
+  "version": "0.16.0",
   "description": "tb — Tool Bridge CLI: one gateway for HTBP/MCP/HTTP tools, contexts, and device shells",
   "type": "module",
   "license": "MIT",
@@ -32,9 +32,11 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@clack/prompts": "^1.7.0",
     "commander": "^15.0.0",
     "marked": "^15.0.12",
     "marked-terminal": "^7.3.0",
+    "p-retry": "^8.0.0",
     "partysocket": "catalog:",
     "ws": "catalog:"
   },

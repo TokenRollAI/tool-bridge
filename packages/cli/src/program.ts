@@ -19,6 +19,7 @@ import { helpCommand } from './commands/help'
 import { noteCommand } from './commands/note'
 import { toolCommand } from './commands/tool'
 import { treeCommand } from './commands/tree'
+import { initCommand } from './commands/init'
 import { configureGlobalOpts } from './args'
 import { ctxCommand } from './commands/ctx'
 import { useCommand } from './commands/use'
@@ -38,7 +39,8 @@ function showGlobalOptionsInHelp(command: Command): void {
 }
 
 /**
- * `tb` —— tool-bridge CLI(纯 API 客户端)。命令族:
+ * `tb` —— tool-bridge CLI(公开 API 客户端；init 是本地部署编排例外)。命令族:
+ * - init cloudflare:从源码 checkout 完成 Cloudflare provision/deploy/bootstrap。
  * - status:部署健康摘要。
  * - login/whoami/use/sk/secret/ls/tree/help/search:档案、SK、密钥与工具树浏览/管理。
  * - federation ls/add/rm:remote 联邦 host 白名单(运行时叠加 env 基线)。
@@ -70,6 +72,7 @@ Agent feedback — every path carries experience from other agents:
   hit a pitfall:         tb feedback submit <path> --title "<short summary>" --detail "<how to avoid>"
   rate what helped you:  tb feedback vote <path> <id> up|down`,
   )
+  program.addCommand(initCommand())
   program.addCommand(statusCommand())
   program.addCommand(loginCommand())
   program.addCommand(whoamiCommand())
