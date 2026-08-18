@@ -23,6 +23,7 @@
 | 认证、密钥、出站与日志边界 | [architecture/security-boundaries.md](architecture/security-boundaries.md) |
 | HTBP、节点、builtin、CLI 契约 | [reference/protocol-contract.md](reference/protocol-contract.md) |
 | CLI 参数与三入口对等 | [guides/cli-argument-contract-review.md](guides/cli-argument-contract-review.md) |
+| Agent Skill 接入、feedback 工作流与验收 | [guides/agent-skill-integration.md](guides/agent-skill-integration.md) |
 | 插件设计、迁移和三道闸门 | [guides/plugin-design-and-migration.md](guides/plugin-design-and-migration.md) |
 | 本地/CI/真实环境验证 | [guides/verification-and-commit-practices.md](guides/verification-and-commit-practices.md) |
 | Cloudflare 初始化、部署和验收 | [guides/deploy-and-verify.md](guides/deploy-and-verify.md) |
@@ -39,6 +40,7 @@
 | 公共站点独立仓库与 CI 启动 | [memory/reflections/public-site-bootstrap.md](memory/reflections/public-site-bootstrap.md) |
 | 公共站点任务化重构与契约校对 | [memory/reflections/public-site-redesign.md](memory/reflections/public-site-redesign.md) |
 | 公共站点自动发布与切页性能 | [memory/reflections/public-site-delivery-performance.md](memory/reflections/public-site-delivery-performance.md) |
+| Agent Skill 接入与 feedback 异常闭环 | [memory/reflections/agent-skill-bootstrap.md](memory/reflections/agent-skill-bootstrap.md) |
 
 ## 维护边界
 

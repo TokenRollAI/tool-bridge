@@ -10,6 +10,7 @@ tool-bridge 将异构能力投影为带路径的树：目录负责组织，工�
 - CLI：`tb` 对常用数据面和管理面提供脚本友好的命令。
 - Dashboard：消费同一 API，提供树、搜索、插件、集成和系统管理界面。
 - MCP：`/~mcp` 将可见工具投影给 MCP 客户端。
+- Agent Skill：独立仓库 `TokenRollAI/tool-bridge-skill` 教 Agent 经 `tb` 做运行时发现、调用与 feedback 闭环；不静态复制实例工具目录。
 
 ## 能力面
 
@@ -36,6 +37,8 @@ tool-bridge 将异构能力投影为带路径的树：目录负责组织，工�
 ## 公共文档边界
 
 产品首页和面向用户的公开文档由独立仓库 `TokenRollAI/tool-bridge-site` 维护，已通过 Cloudflare Pages 上线；正式入口是 [toolbridge.tokenroll.ai](https://toolbridge.tokenroll.ai/)，文档从 [/docs/](https://toolbridge.tokenroll.ai/docs/) 进入。本仓库继续拥有实现、发布产物与面向开发 agent 的 llmdoc。不要把 llmdoc 整体复制到公共站点，它包含工程工作流、内部边界和会随实现收敛的维护知识。
+
+Agent 使用入口由独立仓库 [`TokenRollAI/tool-bridge-skill`](https://github.com/TokenRollAI/tool-bridge-skill) 维护，可用 `npx skills add TokenRollAI/tool-bridge-skill` 安装。Skill 只固化 Agent 的发现、schema 下钻、安全调用和 feedback 消费/贡献流程；目标实例的 URL、SK、动态工具清单和运行结果不进入仓库。维护与验收见 [Agent Skill 接入与验收](../guides/agent-skill-integration.md)。
 
 公共站点按“开始使用 → 核心概念 → 部署 → 接入能力 → 使用与治理 → 参考排障”组织任务型页面。每篇操作指南应交代适用边界、前置权限、可复制步骤、成功证据、安全与 SecretStore、常见失败、回滚和下一步；参考页负责把读者送回任务流，而不是成为孤立终点。
 
