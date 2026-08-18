@@ -26,7 +26,7 @@
 | Device Gateway | 设备 WebSocket 反向注册 + 调用转发 | 已落地 |
 | Auth(横切) | SK 签发/作用域/访问判定(`Authorizer.Check` 唯一入口) | 已落地 |
 | SDK | 内嵌 TB Server / 程序化注册 / 反向连接 | 已落地(npm 发布) |
-| CLI | 纯 API 客户端 `tb`,子命令一一映射接口面 | 已落地(npm 发布) |
+| CLI | `tb` 管理命令映射公开接口面；`init cloudflare` 是源码 checkout 的部署编排例外 | 已落地(npm 发布；0.16.0 待发) |
 | Plugin System | 自定义 Provider 注册与生命周期 | 已落地 |
 | Dashboard | `~help` 通用渲染器 + 管理表单(无专用后端) | 已落地 |
 | Server/部署 | CF 与 Docker 两条部署路径产出同一棵树 | 均已落地(CF 生产上线;Docker 镜像验收通过) |

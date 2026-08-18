@@ -194,12 +194,13 @@ cmd resolve-library-id POST /docs/context7/resolve-library-id  ← cmd 行:<name
 
 ## 9. CLI 命令族矩阵
 
-CLI 是纯 API 客户端,无专用端点。全局参数为 `--json` / `--base-url` / `--sk` / `--timeout <seconds>`;均可放在根、命令组或叶子命令位置,组级 help 展示 `Global Options`,也读 `TB_BASE_URL`/`TB_SK` 与 `~/.config/tool-bridge/config.json`(XDG,多 profile)。`--timeout` 是单次 HTTP 请求等待上限(默认 120s;超时报 retryable 错误),status、login 与 tool auth 本地回调兑换均走统一超时客户端;长驻 `tb connect` 明确拒绝该参数,避免被误解为进程总寿命。错误呈现:TBError 的 `retryable:true` 在人类模式加 `(retryable — try again)` 尾注,`--json` 错误对象含 `retryable`(及 call 失败时的结构化 `feedback`);Commander 的未知参数、缺值、多余 positional 等解析错误在真正解析到 `--json` option 时也输出 `{ok:false,error,code}` 并非零退出,`--` 后仅作为 positional value 的同名文本不切换输出通道。
+除 `tb init cloudflare` 的本地部署编排外，CLI 是公开 API 客户端,无专用端点。全局参数为 `--json` / `--base-url` / `--sk` / `--timeout <seconds>`;均可放在根、命令组或叶子命令位置,组级 help 展示 `Global Options`,也读 `TB_BASE_URL`/`TB_SK` 与 `~/.config/tool-bridge/config.json`(XDG,多 profile)。`--timeout` 是单次 HTTP 请求等待上限(默认 120s;超时报 retryable 错误),status、login 与 tool auth 本地回调兑换均走统一超时客户端;长驻 `tb connect` 明确拒绝该参数,避免被误解为进程总寿命。错误呈现:TBError 的 `retryable:true` 在人类模式加 `(retryable — try again)` 尾注,`--json` 错误对象含 `retryable`(及 call 失败时的结构化 `feedback`);Commander 的未知参数、缺值、多余 positional 等解析错误在真正解析到 `--json` option 时也输出 `{ok:false,error,code}` 并非零退出,`--` 后仅作为 positional value 的同名文本不切换输出通道。
 
 所有返回 `Page<T>` 的 CLI list/search 命令统一接受 `--limit 1..200` / `--cursor`;HTBP 数据面请求把分页参数置于 `arguments.opts`,root `tb search` 则按自身契约置于 body `opts`。JSON 保留 page 形状,人类模式打印 `next cursor`。当前覆盖 root Tool Search、SK/Secret/Plugin 列表、Context/Skill List+Search,以及基于 Registry 页过滤的 Server/Device 列表;过滤当前页时仍保留原始 cursor,当前页无匹配不等于全集为空。
 
 | 命令 | 对应接口面 |
 |---|---|
+| `tb init cloudflare` | 无新网关端点；在源码 checkout 编排 Wrangler auth/account、只读 Worker/secret 探测、provision、Dashboard build、`deploy --secrets-file`、`GET /~help` 验证与本地 profile。新实例生成 trust root；既有实例必须先验证 profile且不覆盖 Admin SK；真实写入须确认或 `--yes` |
 | `tb status` | 树外 `GET /healthz`;遵守 `--timeout` |
 | `tb login` / `whoami` / `use` | 本地凭据管理,无服务端接口(whoami = 本地配置态 + `~help` 探测 + status 摘要) |
 | `tb ls` / `tree` / `help` | `~help` / `GET /~tree?depth=N`;CLI 显式 `--depth` 严格为 1..8(缺省由网关取 2);`tb help` 默认 Markdown 表现(TTY 下经 marked-terminal 渲染 ANSI 富文本,管道/非 TTY/NO_COLOR 输出裸 markdown),`--md` 强制裸 markdown,`--dsl` 请求紧凑 DSL(Accept: text/plain),`--json` 结构化 |
@@ -223,7 +224,7 @@ CLI 是纯 API 客户端,无专用端点。全局参数为 `--json` / `--base-ur
 | `tb feedback ls/get/submit/vote/rm` | `~feedback` 保留段端点(ls 可 `--hidden`;submit 须 `--title`/`--detail`;rm 走 DELETE 需 admin) |
 | `tb plugin register/list/get/update/health/catalog/rm` | PluginRegistry(**external-only**)+ 探活;list 支持分页且只见 external plugin;catalog(admin)列宿主装配的 binding 名,内置项恒 `registered:false`——看内置集成用 `tb integration catalog` |
 
-`tool rm`/`server rm` 前有 kind 校验,防止命令名误删其它节点。`tb init`(部署向导)未实现,见 [../must/current-state.md](../must/current-state.md) 未竟事项。
+`tool rm`/`server rm` 前有 kind 校验,防止命令名误删其它节点。
 
 ### `tb integration` 命令族(集成 = 一次挂载)
 

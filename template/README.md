@@ -14,31 +14,32 @@ The button copies this template into a new repo in your GitHub account, provisio
 
 The Worker itself is a thin shell over the published [`@tool-bridge/gateway`](https://www.npmjs.com/package/@tool-bridge/gateway) package; the dashboard UI ships prebuilt in [`@tool-bridge/dashboard`](https://www.npmjs.com/package/@tool-bridge/dashboard).
 
+## Before deploying: create the two trust-root secrets
+
+The Deploy Button reads [`.dev.vars.example`](.dev.vars.example) and asks for both values **before the first build**. Generate them locally; do not reuse the examples or share them:
+
+```sh
+# Save this Admin SK in a password manager; the gateway stores only its hash after bootstrap.
+node -e "console.log('tbk_'+require('crypto').randomBytes(32).toString('base64url'))"
+
+# SecretStore encryption root (you normally do not need to use it directly).
+node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"
+```
+
+Paste the first value into `TB_BOOTSTRAP_ADMIN_SK` and the second into `TB_SECRET_ENCRYPTION_KEY` on Cloudflare's setup form. Cloudflare stores both as encrypted Worker secrets rather than plaintext variables. A new Worker without the Admin secret fails closed, and tool-bridge never writes its plaintext to Worker logs.
+
 ## After deploying
 
-1. **Create and save your Admin SecretKey.** Generate a high-entropy value locally (for example, a `tbk_` prefix plus 32 random bytes), save it in a password manager, then set it through Wrangler's interactive secret prompt **before the first authenticated request**:
+1. Copy the generated `*.workers.dev` URL from the deployment result.
+2. Verify with the Admin SK you saved:
 
-   ```sh
-   npx wrangler secret put TB_BOOTSTRAP_ADMIN_SK
-   ```
+```sh
+curl https://<your-worker>.workers.dev/healthz
+curl -H "Authorization: Bearer <your-admin-sk>" \
+  https://<your-worker>.workers.dev/~help
+```
 
-   New Workers fail closed until this secret is set. The gateway never writes the Admin SK plaintext to Worker logs.
-
-2. **(Recommended) Set an encryption key** for upstream credentials stored in the gateway:
-
-   ```sh
-   npx wrangler secret put TB_SECRET_ENCRYPTION_KEY
-   ```
-
-3. **Verify:**
-
-   ```sh
-   curl https://<your-worker>.workers.dev/healthz    # → {"healthy":true,...}
-   curl -H "Authorization: Bearer <your-admin-sk>" \
-     https://<your-worker>.workers.dev/~help         # → htbp 0.1 ...
-   ```
-
-   The dashboard lives at `https://<your-worker>.workers.dev/ui`.
+The dashboard lives at `https://<your-worker>.workers.dev/ui`. You can also save the target locally with `tb login --base-url https://<your-worker>.workers.dev --profile default`; enter the Admin SK at the prompt so it does not appear in shell history.
 
 ## Optional configuration
 
@@ -62,6 +63,11 @@ npm run dev        # copies the dashboard into ./public, then wrangler dev
 
 ```sh
 npm create cloudflare@latest my-tool-bridge -- --template=TokenRollAI/tool-bridge/template
-# or, inside this directory:
-npm install && npm run deploy
+cd my-tool-bridge
+npm install
+cp .dev.vars.example .dev.vars
+# Fill both generated values in .dev.vars; the file is gitignored.
+npm run deploy -- --secrets-file .dev.vars
 ```
+
+`wrangler deploy --secrets-file` injects the secrets in the same deployment that creates the Worker, avoiding the new-Worker chicken-and-egg problem of running `wrangler secret put` before a Worker exists.

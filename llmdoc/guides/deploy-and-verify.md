@@ -4,6 +4,33 @@
 
 ## 流程
 
+### 0. 全新账户初始化：Deploy Button 或 `tb init cloudflare`
+
+**零本地工具路径**：仓内 `template/` 的 Deploy Button 会从 `.dev.vars.example` 识别
+`TB_BOOTSTRAP_ADMIN_SK` / `TB_SECRET_ENCRYPTION_KEY`，在首次 build 前要求用户填写并作为 Worker
+secrets 注入。两项都先在本机生成；Admin SK 另存密码管理器。不要在仓库放共享默认值，也不要把
+“部署后再 `wrangler secret put`”写成首次创建流程——Worker 不存在时该命令本身无法完成。
+
+**源码完整形态路径**：安装依赖与已含该命令的 CLI 后，从仓库内运行：
+
+```sh
+tb init cloudflare --repo .
+# CI/无交互；多账户必须明确 account id，--yes 是真实资源写入授权
+tb init cloudflare --repo . --account-id <id> --yes
+# 可选 custom domain；缺省自动打开 workers.dev
+tb init cloudflare --repo . --domain tb.example.com
+```
+
+向导顺序固定为：Wrangler auth/account → `secret list` 只读判新旧 → 既有实例先验证本地 profile →
+确认 → provision → Dashboard build → `wrangler deploy --secrets-file` → 认证 `GET /~help` → 保存
+profile。新 trust root 只经 mode 0600 临时文件传递，值不进 argv/child env；完成后删除。既有同名
+Worker 永不生成/覆盖 Admin SK，缺 profile 或验证失败都在 provision 前 fail closed。无 custom domain
+时 provision 负责设 `workers_dev:true` 并清旧 routes；有 domain 时反向设 false。
+
+这条初始化证据与真实生产验收分账：单测/模板 `wrangler deploy --dry-run` 不证明账户权限、资源真实
+创建、custom domain 生效或首次 KV bootstrap；获得授权后仍按下文 curl/smoke 验证，真实外部资源每轮
+最多操作一次。
+
 ### 1. 本地验证:`pnpm verify`
 
 typecheck + biome lint + 单测(core/cli/sdk)+ 集成测试(gateway 真实 workerd + server 纯 Node + plugin-feishu 真实 workerd)一把过。

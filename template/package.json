@@ -11,13 +11,13 @@
     "check": "tsc --noEmit"
   },
   "dependencies": {
-    "@tool-bridge/dashboard": "^0.1.0",
-    "@tool-bridge/gateway": "^0.1.1"
+    "@tool-bridge/dashboard": "^0.13.0",
+    "@tool-bridge/gateway": "^0.9.0"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^4.20260701.1",
+    "@cloudflare/workers-types": "^5.20260818.1",
     "typescript": "^5.9.3",
-    "wrangler": "^4.107.0"
+    "wrangler": "^4.123.0"
   },
   "cloudflare": {
     "bindings": {
@@ -29,6 +29,12 @@
       },
       "TB_DEVICE": {
         "description": "One Durable Object per connected device (WebSocket hibernation)."
+      },
+      "TB_BOOTSTRAP_ADMIN_SK": {
+        "description": "Required. Generate once with `node -e \"console.log('tbk_'+require('crypto').randomBytes(32).toString('base64url'))\"`, save it in a password manager, and paste it here."
+      },
+      "TB_SECRET_ENCRYPTION_KEY": {
+        "description": "Required. SecretStore root key; generate with `node -e \"console.log(require('crypto').randomBytes(32).toString('base64url'))\"`."
       }
     }
   }

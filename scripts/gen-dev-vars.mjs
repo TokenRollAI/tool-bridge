@@ -12,6 +12,7 @@ import { join } from 'node:path'
 // Worker 运行时白名单(TB_SECRET_ENCRYPTION_KEY 为 SecretStore 主密钥,env-only)。
 const RUNTIME_WHITELIST = [
   'TB_NAME_PREFIX',
+  'TB_BOOTSTRAP_ADMIN_SK',
   'TB_SECRET_ENCRYPTION_KEY',
   'TB_R2_ACCESS_KEY_ID',
   'TB_R2_SECRET_ACCESS_KEY',

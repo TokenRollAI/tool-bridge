@@ -117,6 +117,7 @@ docker run --rm -e TB_BASE_URL=https://your-tb.example.com -e TB_SK="$TB_SK" \
 [`packages/cli/CONTAINER.md`](packages/cli/CONTAINER.md)。
 
 ```sh
+tb init cloudflare --repo .                  # 从源码仓库初始化并部署 Cloudflare
 tb login                                    # 交互保存 BaseURL + SK(多 profile)
 tb status --json                            # 网关健康摘要
 tb tree --depth 3                           # 树视图
@@ -156,10 +157,10 @@ tb sk rm <id>
 tb plugin register --file ./manifest.json && tb plugin health my-plugin
 ```
 
-23 个顶层命令共享全局参数位置语义：`--json` / `--base-url` / `--sk` / `--timeout`
+24 个顶层命令共享全局参数位置语义：`--json` / `--base-url` / `--sk` / `--timeout`
 可放在根命令、命令组或叶子命令位置（长驻 `connect` / `mount fs` 不适用 timeout，会明确
-报错）；返回 `Page` 的列表/搜索命令统一支持 `--limit 1..200` 与 `--cursor`。CLI 是纯
-API 客户端，没有任何专用端点。
+报错）；返回 `Page` 的列表/搜索命令统一支持 `--limit 1..200` 与 `--cursor`。除本地配置与
+`init cloudflare` 部署编排外，CLI 通过公开 HTBP/API 工作，没有任何专用管理端点。
 
 ### Dashboard
 
@@ -253,38 +254,50 @@ Compose 默认凭据只用于本机开发,gateway 8787 也只绑定 `127.0.0.1`;
 ### Cloudflare Workers
 
 一键部署见 [template/](template/)(上方 Deploy 按钮),它在**你的**账户里建 KV/R2/DO 并部署
-一个薄壳 Worker。从本仓库部署完整形态:
+一个薄壳 Worker。Cloudflare 会读取 `template/.dev.vars.example`，在部署表单中预先要求填写：
+
+- `TB_BOOTSTRAP_ADMIN_SK`：Admin SK；请先在本机生成并保存到密码管理器；
+- `TB_SECRET_ENCRYPTION_KEY`：网关 SecretStore 的 32 字节主密钥。
+
+```sh
+node -e "console.log('tbk_'+require('crypto').randomBytes(32).toString('base64url'))"
+node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"
+```
+
+把两个输出分别粘贴到 Deploy Button 表单即可；它们会作为加密的 Worker secrets 注入，不需要
+先部署一个无密钥实例，也不要把值提交到 Git。
+
+如果要从本仓库部署完整形态，推荐使用 CLI 向导：
 
 ```sh
 git clone https://github.com/TokenRollAI/tool-bridge && cd tool-bridge
 pnpm install
+npm install -g @tool-bridge/cli
 
-# 1. 配置:填 CLOUDFLARE_ACCOUNT_ID / TB_DOMAIN / TB_BASE_URL,
-#    并生成 TB_SECRET_ENCRYPTION_KEY(模板内有生成命令)
-cp .env.example .env
+# 自动检查/登录 Wrangler、选择账户、生成两个 trust-root secrets、幂等创建 KV/R2/D1、
+# 构建并部署，再以 Admin SK 验证 /~help，最后保存本机 default profile。
+tb init cloudflare --repo .
 
-# 2. 本地验证(typecheck + lint + 单测 + 真实 workerd 集成测试)
-pnpm verify
+# 无交互/CI：多账户时必须给 account id；--yes 才允许真实资源写入。
+tb init cloudflare --repo . --account-id <account-id> --yes
 
-# 3. 注入生产 secrets(Admin SK 明文 + SecretStore 主密钥)
-cd packages/gateway
-npx wrangler secret put TB_BOOTSTRAP_ADMIN_SK
-npx wrangler secret put TB_SECRET_ENCRYPTION_KEY
-cd ../..
-
-# 4. 部署:幂等创建 KV/R2/D1 → 构建 Dashboard → 部署 gateway
-pnpm deploy:all
-
-# 5. 冒烟验证
-TB_BASE_URL=https://your-tb.example.com TB_SK=... pnpm smoke
-tb login && tb status --json
+# 自定义域可同时指定；否则向导自动启用 workers.dev。
+tb init cloudflare --repo . --domain tb.example.com
 ```
+
+向导生成的 Admin SK 只显示一次，同时写入权限为 0600 的本机 profile；请仍将它保存到密码管理器。
+secret 不进入子进程 argv 或环境变量，而是经临时 0600 文件交给 `wrangler deploy --secrets-file`，
+部署结束即删除。重跑时若发现同名 Worker，必须先用对应 profile 验证成功，向导才会继续；它不会
+生成或覆盖既有实例的 Admin SK。
 
 `pnpm provision`(被 `deploy:all` 编排)是 **Cloudflare 专用的可选步骤**,不是通用部署入口:
 它幂等创建 KV/R2/D1,并把 `.env` 里的账户特定值回填进 `packages/gateway/wrangler.jsonc`
 (`account_id`、custom domain 路由、`TB_CANONICAL_ORIGIN`、R2 S3 端点与前缀派生的资源名/id)。
 仓库里那份 wrangler.jsonc 因此不含任何账户 id 或域名——回填结果是你自己的部署配置,别推回公共仓库。
-没有自定义域就留空 `TB_DOMAIN` 并把 `workers_dev` 改成 `true`。Node/Docker 路径不需要这一步。
+没有自定义域就留空 `TB_DOMAIN`，provision 会自动启用 `workers_dev` 并清空旧 custom routes。
+Node/Docker 路径不需要这一步。若不使用向导，仍可在 `.env` 中显式准备变量后运行
+`pnpm deploy:all`；首次创建 Worker 时应使用 `wrangler deploy --secrets-file` 同次注入 trust root，
+不要先部署无密钥实例再补 `secret put`。
 
 首次运行时网关自动完成引导:用预置的 `TB_BOOTSTRAP_ADMIN_SK` 物化 `system/*` 管理子树(sk / secret / registry / status / plugin)。Workers 新实例未预置该 secret 会拒绝引导,不会把 Admin SK 明文写入日志。
 
@@ -298,7 +311,7 @@ tb login && tb status --json
 | `packages/app` | 宿主中立的网关本体:整棵 HTBP 树的路由与行为,经五个注入点(状态 / 对象 / 密钥 / 设备通道 / 搜索)装配,不认识任何具体平台 |
 | `packages/server` | Node 宿主适配器:SQLite + 本地 FS + 进程内 WebSocket,单容器自部署入口 |
 | `packages/gateway` | Cloudflare Workers 宿主适配器:KV / R2 / D1 / Durable Object / Static Assets 绑定 |
-| `packages/cli` | `tb` 命令行(commander),纯 API 客户端；可发布为 npm 包或 Bun 独立二进制镜像 — [`@tool-bridge/cli`](https://www.npmjs.com/package/@tool-bridge/cli) |
+| `packages/cli` | `tb` 命令行(commander),公开 API 客户端 + Cloudflare 初始化编排；可发布为 npm 包或 Bun 独立二进制镜像 — [`@tool-bridge/cli`](https://www.npmjs.com/package/@tool-bridge/cli) |
 | `packages/sdk` | npm 包 [`@tool-bridge/sdk`](https://www.npmjs.com/package/@tool-bridge/sdk):内嵌 TB 实例、程序化注册、反向连接 |
 | `packages/plugin-sdk` | 写第三方 Plugin(Tool/Context Provider)的最小 SDK 与契约 |
 | `packages/plugins` | 内置 Plugin 源(如飞书),可托管在 Workers 上,也可用 `scripts/serve.ts` 跑成 Node 进程 |
@@ -319,7 +332,7 @@ pnpm lint:fix            # eslint 自动修复
 
 ## 项目状态
 
-积极开发中(pre-release),当前没有正式生产环境。核心能力已全部落地,并在 Cloudflare 共享开发环境完成鉴权、MCP、Search、飞书 Plugin、WebSocket hibernation 与 Dashboard 的端到端验证;这类在线证据不等同于 production release。网关本体已抽成宿主中立的 `@tool-bridge/app`,Cloudflare 与 Node 两个适配器都只是它的装配层。`@tool-bridge/cli` 与 `@tool-bridge/sdk` 已发布 npm,Node/Docker 单容器自部署与本地 Compose 三跳开发栈也已落地。当前收尾项是功能 PR 合入、外部 HTBP Draft 同步与 `tb init` 一键部署向导。
+积极开发中(pre-release),当前没有正式生产环境。核心能力已全部落地,并在 Cloudflare 共享开发环境完成鉴权、MCP、Search、飞书 Plugin、WebSocket hibernation 与 Dashboard 的端到端验证;这类在线证据不等同于 production release。网关本体已抽成宿主中立的 `@tool-bridge/app`,Cloudflare 与 Node 两个适配器都只是它的装配层。`@tool-bridge/cli` 与 `@tool-bridge/sdk` 已发布 npm,Node/Docker 单容器自部署、本地 Compose 三跳开发栈与 `tb init cloudflare` 初始化向导也已落地。当前收尾项是功能 PR 合入、外部 HTBP Draft 同步与对外 Deploy Button 模板同步。
 
 ## License
 

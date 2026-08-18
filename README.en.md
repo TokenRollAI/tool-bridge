@@ -137,7 +137,7 @@ tb sk list && tb sk rm <id>
 tb plugin register ./manifest.json && tb plugin health my-plugin
 ```
 
-All 17 subcommands support `--json` and cover the full management surface (the CLI is a pure API client — there are no dedicated endpoints).
+All 24 top-level commands share the global `--json` / `--base-url` / `--sk` / `--timeout` options. Apart from local profiles and `init cloudflare` deployment orchestration, the CLI uses the public HTBP/API surface and has no private management endpoint.
 
 ### Dashboard
 
@@ -234,33 +234,39 @@ Compose defaults are local-only fixtures, and gateway port 8787 is bound to `127
 ### Cloudflare Workers
 
 For one-click deploys see [template/](template/) (the Deploy button above): it provisions
-KV/R2/DO in **your** account and deploys a thin shell Worker. To deploy the full shape
-from this repository:
+KV/R2/DO in **your** account and deploys a thin shell Worker. Before building, Cloudflare
+reads `template/.dev.vars.example` and asks for both trust-root secrets. Generate and save
+them locally, then paste them into the setup form:
+
+```sh
+node -e "console.log('tbk_'+require('crypto').randomBytes(32).toString('base64url'))"
+node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"
+```
+
+The first value is `TB_BOOTSTRAP_ADMIN_SK`; save it in a password manager. The second is
+`TB_SECRET_ENCRYPTION_KEY`. Cloudflare stores both as encrypted Worker secrets, so the
+first deployment is never exposed without its trust root.
+
+To deploy the full shape from this repository, use the CLI wizard:
 
 ```sh
 git clone https://github.com/TokenRollAI/tool-bridge && cd tool-bridge
 pnpm install
+npm install -g @tool-bridge/cli
 
-# 1. Configure: fill in CLOUDFLARE_ACCOUNT_ID / TB_DOMAIN / TB_BASE_URL,
-#    and generate TB_SECRET_ENCRYPTION_KEY (the template includes the command)
-cp .env.example .env
+tb init cloudflare --repo .
 
-# 2. Verify locally (typecheck + lint + unit tests + real-workerd integration tests)
-pnpm verify
+# Non-interactive/CI; account id is required when more than one account is available.
+tb init cloudflare --repo . --account-id <account-id> --yes
 
-# 3. Inject production secrets (Admin SK plaintext + SecretStore master key)
-cd packages/gateway
-npx wrangler secret put TB_BOOTSTRAP_ADMIN_SK
-npx wrangler secret put TB_SECRET_ENCRYPTION_KEY
-cd ../..
-
-# 4. Deploy: idempotently create KV/R2/D1 → build the Dashboard → deploy the gateway
-pnpm deploy:all
-
-# 5. Smoke-test
-TB_BASE_URL=https://your-tb.example.com TB_SK=... pnpm smoke
-tb login && tb status --json
+# Optional custom domain; otherwise workers.dev is enabled automatically.
+tb init cloudflare --repo . --domain tb.example.com
 ```
+
+The wizard generates the Admin SK, passes secrets to `wrangler deploy --secrets-file`
+through a temporary mode-0600 file, verifies `~help`, and stores a local profile. It never
+places secret values in child-process argv or environment variables. If the Worker already
+exists, the saved profile must authenticate first and the existing Admin SK is preserved.
 
 `pnpm provision` (orchestrated by `deploy:all`) is a **Cloudflare-only optional step**, not
 the generic deployment entry point: it idempotently creates KV/R2/D1 and backfills the
@@ -268,7 +274,8 @@ account-specific values from `.env` into `packages/gateway/wrangler.jsonc` (`acc
 the custom-domain route, `TB_CANONICAL_ORIGIN`, the R2 S3 endpoint, and the prefix-derived
 resource names/ids). The committed wrangler.jsonc therefore carries no account id and no
 domain — what provision writes is *your* deployment config, so keep it out of public forks.
-Without a custom domain, leave `TB_DOMAIN` empty and flip `workers_dev` to `true`. The
+Without a custom domain, leave `TB_DOMAIN` empty; provision enables `workers_dev` and clears
+stale custom routes automatically. The
 Node/Docker path does not need this step at all.
 
 On first request the gateway bootstraps itself from the preconfigured `TB_BOOTSTRAP_ADMIN_SK` and materializes the `system/*` management subtree (sk / secret / registry / status / plugin). A new Workers instance without that secret fails closed and never prints an Admin SK in plaintext.
@@ -283,7 +290,7 @@ Local development: `pnpm gen-dev-vars` (generates .dev.vars from .env), then `np
 | `packages/app` | The host-neutral gateway itself: routing and behavior for the whole HTBP tree, assembled through five injection points (state / objects / secrets / device channel / search); knows no concrete platform |
 | `packages/server` | Node host adapter: SQLite + local FS + in-process WebSocket; the single-container self-hosting entry point |
 | `packages/gateway` | Cloudflare Workers host adapter: KV / R2 / D1 / Durable Object / Static Assets bindings |
-| `packages/cli` | The `tb` command line (citty), a pure API client — npm package [`@tool-bridge/cli`](https://www.npmjs.com/package/@tool-bridge/cli) |
+| `packages/cli` | The `tb` command line (Commander): public API client plus Cloudflare initialization orchestration — npm package [`@tool-bridge/cli`](https://www.npmjs.com/package/@tool-bridge/cli) |
 | `packages/sdk` | npm package [`@tool-bridge/sdk`](https://www.npmjs.com/package/@tool-bridge/sdk): embedded TB instance, programmatic registration, reverse connect |
 | `packages/plugin-sdk` | Minimal SDK and contract for writing third-party plugins (tool/context providers) |
 | `packages/plugins` | Built-in plugin sources (e.g. Feishu); host them on Workers, or run them as a Node process via `scripts/serve.ts` |
@@ -304,7 +311,7 @@ Engineering rule: **the code is the source of truth for behavior**; the lookup d
 
 ## Status
 
-Under active development (pre-release), with no formal production environment yet. The core capabilities have landed and have been exercised end to end in a shared Cloudflare development environment, including auth, MCP, Search, the Feishu plugin, WebSocket hibernation, and the Dashboard; this online evidence is not a production release. The gateway itself has been extracted into the host-neutral `@tool-bridge/app`, so the Cloudflare and Node adapters are both just assembly layers over it. `@tool-bridge/cli` and `@tool-bridge/sdk` are published to npm, and Node/Docker single-container self-hosting plus the local three-hop Compose stack are implemented. Remaining release work includes merging the feature PR, synchronizing the external HTBP Draft, and building the `tb init` one-shot deployment wizard.
+Under active development (pre-release), with no formal production environment yet. The core capabilities have landed and have been exercised end to end in a shared Cloudflare development environment, including auth, MCP, Search, the Feishu plugin, WebSocket hibernation, and the Dashboard; this online evidence is not a production release. The gateway itself has been extracted into the host-neutral `@tool-bridge/app`, so the Cloudflare and Node adapters are both just assembly layers over it. `@tool-bridge/cli` and `@tool-bridge/sdk` are published to npm, and Node/Docker single-container self-hosting plus the local three-hop Compose stack are implemented. Remaining release work includes merging the feature PR and synchronizing the external HTBP Draft.
 
 ## License
 

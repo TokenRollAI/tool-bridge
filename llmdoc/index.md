@@ -25,7 +25,7 @@
 
 ## guides/ — 一事一篇的工作流
 
-- [guides/deploy-and-verify.md](guides/deploy-and-verify.md) — 从零到线上验证:`pnpm verify` → 先查 Cloudflare deployments/versions → 必要时 `pnpm deploy:all` → curl/smoke;Dashboard 另做 HTML/chunk hash 与 SPA 深链接验收,含自动部署去重和瞬时网络故障的幂等重试。
+- [guides/deploy-and-verify.md](guides/deploy-and-verify.md) — 从零到线上验证:全新账户走 Deploy Button 两项 secret 预收集或 `tb init cloudflare` 安全重入向导；已有环境 `pnpm verify` → 先查 deployments/versions → 必要时 deploy → curl/smoke；含 trust-root、workers.dev、静态产物与自动部署去重边界。
 - [guides/workers-kv-pitfalls.md](guides/workers-kv-pitfalls.md) — Workers/KV 生产坑:KV list+get 最终一致窗口(须跳 null)、子请求上限约束逐 key get、吊销通常约 60s 但可能更久(历史实测 0.3s 仅作样本)、vitest-pool-workers 0.18 API 变更。
 - [guides/do-websocket-hibernation.md](guides/do-websocket-hibernation.md) — DO hibernation WS 生产坑:边缘 ~100s 空闲掐断须客户端心跳保活、唤醒后内存状态机须从 storage 恢复(restoreReady)、本地 miniflare 测不出须线上跨休眠窗口验证。**改设备通道前必读。**
 - [guides/mcp-upstream-pitfalls.md](guides/mcp-upstream-pitfalls.md) — MCP 上游生产坑:会话复用机制(mcpsession KV 无 TTL + 400/404 失效信号)、不合规上游对过期会话回 200+空列表(实测 MetaMCP)与空列表防御、需自定义认证头的上游(飞书官方 MCP:X-Lark-MCP-\* 原样注入 + 必带工具白名单头)、生产可重跑排查手法(refresh=1 区分缓存层、幂等 update 强制重握手、塞伪 session 复现)。**挂载/排查 mcp 上游前必读。**
@@ -64,6 +64,7 @@
 - [memory/reflections/2026-08-11-shared-development-deploy-evidence.md](memory/reflections/2026-08-11-shared-development-deploy-evidence.md) — 共享开发环境部署例外与在线证据分账(feature-branch覆盖须显式授权且不冒充production;真实D1幂等与KV收敛窗口;MCP/Search/Device/Feishu在线证据;Web Analytics beacon/CSP冲突;临时资源清理)。
 - [memory/reflections/2026-08-11-lightweight-search-mcp-discovery-parity.md](memory/reflections/2026-08-11-lightweight-search-mcp-discovery-parity.md) — 轻量搜索索引与MCP发现面对等(召回文档不存完整ToolSpec;canonical批量水合;MCP合成Search/Help/List复用HTBP权限;v3从真源重建)。
 - [memory/reflections/2026-08-11-host-neutral-layer-extraction.md](memory/reflections/2026-08-11-host-neutral-layer-extraction.md) — 抽宿主中立层 `@tool-bridge/app`(可被静默违反的约束才值得付搬迁成本;收紧类型面是廉价找 bug 手段;bundle 图正确性在 workspace 内不可测;体积结论必须实测基线;dts.resolve↔paths 两份清单不一致静默通过;搬迁与验证面迁移分两刀)。
+- [memory/reflections/2026-08-18-cloudflare-bootstrap-init.md](memory/reflections/2026-08-18-cloudflare-bootstrap-init.md) — Cloudflare 首次引导与部署事务(trust root 同次注入；Deploy Button secret 声明；既有 Worker 先认证且不覆盖 Admin SK；workers.dev 确定入口；模板须隔离 install/tsc/wrangler dry-run)。
 - [memory/reflections/2026-08-11-neutral-layer-verification-surface.md](memory/reflections/2026-08-11-neutral-layer-verification-surface.md) — 中立层验证面迁到中立宿主(先数这套测试实际用到多少宿主能力再决定它跑在哪;静态约束管写不出、执行验证管跑得动;换宿主重跑是廉价的存量问题探针;补内存实现优于把用例留在旧宿主、共享逻辑下沉 core;包边界一变要逐个重算 publish 闸门;worktree 写文件后确认写进了哪份工作树)。
 - [memory/reflections/2026-08-12-infra-lock-backlog-and-tbapp-split.md](memory/reflections/2026-08-12-infra-lock-backlog-and-tbapp-split.md) — infra-lock 待办清仓与 tbApp 拆分(纯移动要拿行集合 diff 当证据;先显式化闭包成 RouteEnv 再搬、别 sed 改写函数体;平台语义降级成显式下界而非删除;逻辑 vs 驱动的收敛判据;lint 反向约束签名;一次性授权仍按项切提交)。
 

@@ -1,0 +1,4 @@
+# The Deploy Button asks for both values before building and stores them as Worker secrets.
+# Generate unique values as described in README; never commit real secrets here.
+TB_BOOTSTRAP_ADMIN_SK=
+TB_SECRET_ENCRYPTION_KEY=

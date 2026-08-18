@@ -85,10 +85,24 @@ tb help docs/context7            # 节点级 ~help(工具索引)
 tb call docs/context7 --tool resolve-library-id --args '{"query":"react"}'
 ```
 
+从 tool-bridge 源码仓库首次部署到 Cloudflare，可直接运行：
+
+```sh
+git clone https://github.com/TokenRollAI/tool-bridge && cd tool-bridge
+pnpm install
+tb init cloudflare --repo .
+```
+
+向导会登录/选择 Cloudflare 账户、生成并注入 Admin SK 与 SecretStore 主密钥、幂等创建
+KV/R2/D1、构建部署、验证 `~help`，最后保存本机 profile。Admin SK 只显示一次；请立即存入
+密码管理器。CI 使用 `--account-id <id> --yes`，自定义域使用 `--domain tb.example.com`。
+发现同名 Worker 时，向导必须先用对应 `--profile` 验证成功，且不会覆盖既有 Admin SK。
+
 ## 常用命令
 
 | 命令 | 用途 |
 |---|---|
+| `tb init cloudflare` | 从源码仓库初始化、部署并验证 Cloudflare Worker |
 | `tb login` / `tb whoami` / `tb use` | 档案管理(多网关/多 SK 切换) |
 | `tb ls` / `tb tree` / `tb help <path>` | 浏览工具树与节点文档 |
 | `tb call <path> --tool <tool>` / `tb call <tool-path> '{…}'` | 调用任意已挂载工具 |
