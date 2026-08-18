@@ -18,8 +18,10 @@ const TAVILY: CatalogListItem = {
   id: 'tavily',
   digest: 'd1',
   exports: ['actions'],
+  exportDetails: {
+    actions: { auth: { kind: 'single', required: false }, id: 'actions', kind: 'tool' },
+  },
   nodeKinds: ['tool'],
-  needsOAuth: false,
   description: 'Tavily search',
 }
 
@@ -27,21 +29,31 @@ const JIRA: CatalogListItem = {
   id: 'jira',
   digest: 'd2',
   exports: ['actions'],
+  exportDetails: {
+    actions: {
+      auth: {
+        kind: 'fields',
+        fields: [
+          { key: 'baseUrl', label: 'Instance URL', required: true, secret: false },
+          { key: 'personalAccessToken', label: 'PAT', required: true, secret: true },
+        ],
+      },
+      id: 'actions',
+      kind: 'tool',
+    },
+  },
   nodeKinds: ['tool'],
-  needsOAuth: false,
   description: 'Jira',
-  credentialFields: [
-    { key: 'baseUrl', label: 'Instance URL', required: true, secret: false },
-    { key: 'personalAccessToken', label: 'PAT', required: true, secret: true },
-  ],
 }
 
 const SENTRY: CatalogListItem = {
   id: 'sentry',
   digest: 'd3',
   exports: ['actions'],
+  exportDetails: {
+    actions: { auth: { kind: 'oauth' }, id: 'actions', kind: 'tool' },
+  },
   nodeKinds: ['tool'],
-  needsOAuth: true,
   description: 'Sentry',
 }
 
@@ -133,7 +145,7 @@ describe('按 descriptor 生成表单', () => {
 
     fireEvent.change(screen.getByLabelText('挂载路径 *'), { target: { value: 'tools/tavily' } })
     await waitFor(() => expect(screen.getByText(/平台自动加密保管和绑定/)).toBeDefined())
-    expect(screen.queryByText(/integration-v2-tools%2Ftavily/)).toBeNull()
+    expect(screen.queryByText(/integration-tools%2Ftavily/)).toBeNull()
     expect(screen.queryByText(/authRef/i)).toBeNull()
   })
 
@@ -158,10 +170,10 @@ describe('提交顺序', () => {
     expect(calls[0]).toMatchObject({ path: 'system/secret', tool: 'set' })
     expect(calls[1]).toMatchObject({ path: 'system/registry', tool: 'write' })
     // 挂载配置里的 authRef 与刚写的 secret 名对得上(不靠用户手打)。
-    expect((calls[0]!.args as { name: string }).name).toBe('integration-v2-tools%2Ftavily')
+    expect((calls[0]!.args as { name: string }).name).toBe('integration-tools%2Ftavily')
     expect(
       ((calls[1]!.args as { config: { authRef: string } }).config).authRef,
-    ).toBe('integration-v2-tools%2Ftavily')
+    ).toBe('integration-tools%2Ftavily')
   })
 
   it('复用已有凭证时不写 secret,只挂载', async () => {
@@ -211,12 +223,12 @@ describe('提交顺序', () => {
       'system/registry:write',
       'system/secret:delete',
     ])
-    expect(calls[2]?.args).toEqual({ name: 'integration-v2-tools%2Ftavily' })
+    expect(calls[2]?.args).toEqual({ name: 'integration-tools%2Ftavily' })
   })
 
   it('挂载失败不会误删同名的既有凭证', async () => {
     failMount = true
-    secretNames = ['shared-key', 'integration-v2-tools%2Ftavily']
+    secretNames = ['shared-key', 'integration-tools%2Ftavily']
     await openAndPick('tavily')
     fireEvent.change(screen.getByLabelText('挂载路径 *'), { target: { value: 'tools/tavily' } })
     fireEvent.change(screen.getByLabelText('API key'), { target: { value: 'rotated-key' } })

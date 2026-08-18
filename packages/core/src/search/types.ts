@@ -292,9 +292,6 @@ export function serializeToolSearchDocuments(
     serializeToolSearchSnapshot(path, group.tools, group.feedback))
 }
 
-/** 兼容旧调用名；新代码应使用 serializeToolSearchDocuments。 */
-export const serializeToolSearchHits = serializeToolSearchDocuments
-
 /** 节点快照摘要；用于 material-change 判定，避免相同快照无谓失效全部 cursor。 */
 export function toolSearchSnapshotDigest(
   records: readonly SerializedToolSearchRecord[],

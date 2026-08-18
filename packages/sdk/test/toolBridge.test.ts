@@ -408,16 +408,7 @@ describe('createToolBridge:配置语义', () => {
     expect(res.status).toBe(503)
   })
 
-  it('deviceTransport 注入 → unimplemented(本轮未实现,语义显式)', () => {
-    expect(() =>
-      createToolBridge({
-        state: new MemoryStateStore(),
-        deviceTransport: { onConnection: () => {} },
-      }),
-    ).toThrow(TBError)
-  })
-
-  it('device 能力禁用:未注入 deviceTransport → /system/device/ws 501', async () => {
+  it('SDK 不提供网关侧 device 宿主 → /system/device/ws 501', async () => {
     const tb = createToolBridge({ state: new MemoryStateStore(), adminSk: ADMIN_SK })
     const res = await tb.fetch(
       new Request('http://tb.local/system/device/ws?deviceId=x', {

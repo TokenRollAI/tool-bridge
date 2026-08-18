@@ -4,7 +4,7 @@ import { BUILTIN_PLUGIN_ENV_KEYS, BUILTIN_PLUGIN_LOADERS, builtinPluginBindings,
 /**
  * 插件拿到的 env 必须是白名单收窄后的,不是宿主全环境。
  *
- * 进程内插件与网关**同权**(plugin-in-process-catalog 决策):把 `process.env` 整份递下去,
+ * 进程内插件与网关**同权**:把 `process.env` 整份递下去,
  * 任一 handler 一行 `ctx.env.TB_SECRET_ENCRYPTION_KEY` 就拿到 SecretStore 主密钥 ——
  * 「凭证不出网关」整条防线归零,而且没有隔离层能拦。
  *

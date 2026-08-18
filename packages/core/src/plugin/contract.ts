@@ -124,7 +124,7 @@ const describeSchema = z.object({
 
 /** 单个 export 的声明。 */
 export interface PluginExport {
-  /** 明确声明无需凭证,或声明单值凭证的展示/必填语义。缺省兼容为可选单值凭证。 */
+  /** 明确声明无需凭证,或声明单值凭证的展示/必填语义；与 oauth/credentialFields 三选一。 */
   auth?: PluginExportAuth
   capabilities?: string[]
   /**
@@ -256,6 +256,17 @@ export function validatePluginContract(input: PluginContractInput): PluginDescri
       throw new TBError('invalid_argument', `plugin '${manifest.id}' 的 export id 重复:'${exported.id}'`)
     }
     seen.add(exported.id)
+
+    if (
+      exported.auth === undefined
+      && exported.oauth === undefined
+      && exported.credentialFields === undefined
+    ) {
+      throw new TBError(
+        'invalid_argument',
+        `plugin '${manifest.id}' export '${exported.id}' 必须显式声明 auth、oauth 或 credentialFields`,
+      )
+    }
 
     if (exported.auth !== undefined) {
       if (exported.oauth !== undefined || exported.credentialFields !== undefined) {

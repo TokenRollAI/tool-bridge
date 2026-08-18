@@ -32,6 +32,7 @@ const DESCRIBE = {
   protocolVersion: 'plugin/v2',
   exports: [
     {
+      auth: { kind: 'none' },
       id: 'documents',
       profile: 'context/v1',
       methods: ['List', 'Get', 'Update', 'Write', 'Search'],
@@ -72,10 +73,9 @@ describe('builtin plugin 模块', () => {
     h = makeHarness()
   })
 
-  it('help():cmd 表 = list/get/write/update/delete/health/catalog,全 admin scope', () => {
+  it('help():cmd 表 = list/get/write/update/delete/health,全 admin scope', () => {
     const help = h.mod.help('system/plugin')
     expect(help.cmds.map(c => c.name).sort()).toEqual([
-      'catalog',
       'delete',
       'get',
       'health',
@@ -84,38 +84,6 @@ describe('builtin plugin 模块', () => {
       'write',
     ])
     expect(help.cmds.every(c => c.scope === 'admin')).toBe(true)
-  })
-
-  it('catalog:无 bindings 注入 → 空目录;有 bindings → 按名列出并对拍注册状态', async () => {
-    // 缺省宿主(未注入 bindings):空目录,不报错。
-    expect(await h.mod.dispatch('catalog', {}, ctx)).toEqual({ items: [] })
-
-    // 注入两个 binding;其中 zeta 已按 binding: endpoint 注册。
-    const store = new MemoryStateStore()
-    const sk = new SKRegistryStore(store)
-    const secrets = new SecretStoreImpl(
-      store,
-      base64urlEncode(crypto.getRandomValues(new Uint8Array(32))),
-    )
-    const mod = createPluginModule({
-      store,
-      sk,
-      secrets,
-      now: () => NOW,
-      probe: vi.fn(async () => ({ healthy: true })),
-      fetchContract: vi.fn(async () => ({ describe: DESCRIBE })),
-      bindings: () => ['zeta', 'alpha'],
-    })
-    await mod.dispatch('write', { ...MANIFEST, id: 'zeta-plugin', endpoint: 'binding:zeta' }, ctx)
-
-    const result = (await mod.dispatch('catalog', {}, ctx)) as {
-      items: Array<{ endpoint: string, name: string, pluginId?: string, registered: boolean }>
-    }
-    // 按名排序;alpha 可用未激活,zeta 已注册且带 pluginId。
-    expect(result.items).toEqual([
-      { name: 'alpha', endpoint: 'binding:alpha', registered: false },
-      { name: 'zeta', endpoint: 'binding:zeta', registered: true, pluginId: 'zeta-plugin' },
-    ])
   })
 
   it('write 全流程:探活 → 契约校验 → mint pluginToken(platform-token)→ 存 manifest/meta/health', async () => {
@@ -167,12 +135,12 @@ describe('builtin plugin 模块', () => {
     expect(updated.enabled).toBe(false)
   })
 
-  it('meta 缓存缺失(老记录)→ 省略 exports 而不是编一个空数组', async () => {
+  it('meta 缓存缺失 → unavailable，拒绝返回不完整记录', async () => {
     await h.mod.dispatch('write', { ...MANIFEST }, ctx)
     await h.store.delete(KEY_PLUGIN_META + MANIFEST.id)
-    const got = (await h.mod.dispatch('get', { id: MANIFEST.id }, ctx)) as Record<string, unknown>
-    expect(got).toEqual(MANIFEST)
-    expect('exports' in got).toBe(false)
+    await expect(h.mod.dispatch('get', { id: MANIFEST.id }, ctx)).rejects.toSatisfy(
+      e => isTBError(e) && e.code === 'unavailable' && e.message.includes('重新注册'),
+    )
   })
 
   it('重注册换发 pluginToken 并吊销上一代 SK', async () => {
@@ -210,6 +178,7 @@ describe('builtin plugin 模块', () => {
         protocolVersion: 'plugin/v2',
         exports: [
           {
+            auth: { kind: 'none' },
             id: 'documents',
             profile: 'context/v1',
             methods: ['List', 'Get'],

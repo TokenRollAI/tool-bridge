@@ -28,7 +28,7 @@ export interface DeviceInvokeRequest {
   tool: string
 }
 
-/** 设备通道宿主(CF = DeviceSession DO / Docker = ws;deviceTransport 的消费面)。 */
+/** 设备通道宿主(CF = DeviceSession DO / Docker = ws)。 */
 export interface DeviceChannel {
   /** HTTP→WS 调用转发:结果为 DeviceCallResult 形状(设备侧 result 帧)。 */
   invoke(deviceId: string, req: DeviceInvokeRequest): Promise<unknown>
@@ -78,7 +78,7 @@ export interface TbAppDeps {
   /**
    * 内置插件目录(descriptor)。**编译期常量**,由 `@tool-bridge/plugins` 的
    * `catalog.generated.ts` 求值生成 —— 内置插件的目录项与它的代码是同一份构建产物,
-   * 故不会陈旧、也不落库(见 `llmdoc/memory/decisions/builtin-catalog-not-registry.md`)。
+   * 故不会陈旧、也不落库(见 `llmdoc/architecture/plugin-runtime.md`)。
    *
    * 与 {@link pluginBindings} **是一对**:catalog 说"声明了什么"(挂载校验、选 export、
    * 列凭证字段),bindings 说"代码在哪"(实际调用)。装配了 binding 却没给 catalog,

@@ -23,10 +23,10 @@ export { BUILTIN_CATALOG, BUILTIN_CATALOG_DIGEST } from './catalog.generated'
 /**
  * 宿主传给插件的 env。
  *
- * **不是宿主的全环境**。进程内插件与网关同权(plugin-in-process-catalog 决策),把
+ * **不是宿主的全环境**。进程内插件与网关同权,把
  * `process.env` 整份递给它们,任一 handler 一行 `ctx.env.TB_SECRET_ENCRYPTION_KEY` 就拿到
  * SecretStore 主密钥,`TB_BOOTSTRAP_ADMIN_SK`、KV 凭据同理 —— "凭证不出网关"整条防线归零,
- * 而且没有任何隔离层能拦。这正是那份决策留的未决项「binding 插件的 env(secrets)注入形态」。
+ * 而且没有任何隔离层能拦。
  *
  * 所以这里定成**白名单**:平台统一的 `PLUGIN_TOKEN`,加上各插件自己声明的配置项
  * (`BUILTIN_PLUGIN_ENV_KEYS`)。`builtinPluginBindings` 只把白名单内的键递下去,宿主传进来

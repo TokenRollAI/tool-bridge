@@ -82,16 +82,8 @@ export function upstreamTools(
  * 解析挂载目标 export:**内置目录(编译期常量)+ 注册记录(external),两条路都只读**。
  *
  * 第一参收 `Pick<TbAppDeps, 'pluginCatalog' | 'state'>`,而 `resolveIntegration` 只吃
- * {@link ReadOnlyStore}(只有 `get`)—— 于是这个函数**结构上写不了库**。
- *
- * 此前这里是 `manifest ??= autoRegisterBinding(deps, id)`:查不到就当场写
- * `plugin:` + `pluginmeta:`。而它被 `providerFor`(help / call / tools list 共用)调用,
- * 于是**任何一次读都会把删掉的记录写回来**;更糟的是 7 个调用点里传 `deps` 还是传裸
- * `store` 是各自随手决定的,同一语义在四条链上有四种行为(tool 侧 help/call 都复活、
- * context 侧 help 复活但 call 报"未知 provider")。
- *
- * 免注册的体验不靠"读的时候补一下"来兑现,而是 catalog 本身就是目录:内置插件的
- * descriptor 是构建产物,不需要先搬进 KV 再读出来。`autoRegisterBinding` 因此整个删掉。
+ * {@link ReadOnlyStore}(只有 `get`)—— 于是这个函数**结构上写不了库**。内置 descriptor
+ * 直接来自 catalog，读路径不创建注册状态。
  */
 export async function requirePluginExport(
   from: Pick<TbAppDeps, 'pluginCatalog' | 'state'>,
@@ -232,7 +224,7 @@ export async function providerFor(
   if (node.kind === 'mcp' && node.config?.kind === 'mcp') {
     return createMcpProvider(node.config as McpConfig, deps.secrets, {
       allowInsecure: insecure,
-      // 会话复用凭证存 StateStore(mcpsession:<path>);调用结果不缓存(providers/mcp.ts)。
+      // era 判定存 StateStore(mcpera:<path>);调用结果不缓存(providers/mcp.ts)。
       session: { store: deps.state, nodePath: node.path },
       // auth:'oauth' 节点的托管凭证存取面(mcpoauth:*);密钥缺省 → provider 内报 unavailable。
       ...(deps.encryptionKey !== undefined

@@ -201,11 +201,12 @@ function applyDeployTargets() {
   }
   if (domain) {
     setConfigPath(['workers_dev'], false, 'workers_dev')
+    setConfigPath(['preview_urls'], false, 'preview_urls')
     setConfigPath(['routes'], [{ pattern: domain, custom_domain: true }], 'routes')
   } else {
-    // 首次部署最常见的是没有自定义域。这里显式恢复 workers.dev 入口，避免中立配置里的
-    // workers_dev:false 产出一个“部署成功但无 URL”的 Worker；复跑时也会清掉旧 custom route。
+    // 没有自定义域时显式恢复开发入口；复跑时也会清掉旧 custom route。
     setConfigPath(['workers_dev'], true, 'workers_dev')
+    setConfigPath(['preview_urls'], true, 'preview_urls')
     setConfigPath(['routes'], [], 'routes')
     console.log('TB_DOMAIN 未设置 → 启用 workers.dev 入口并清空 custom routes')
   }

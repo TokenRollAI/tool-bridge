@@ -12,8 +12,8 @@
  *   Operation(注册表)名称、schema、权限、副作用、handler
  *
  * endpoint 与上游 provider 同规则:https:// 强制,`allowInsecureHttp`
- * (宿主由 env `TB_ALLOW_INSECURE_HTTP=true` 注入)放行本地 http;
- * `binding:<name>` 为平台内 service binding。
+ * (宿主由 env `TB_ALLOW_INSECURE_HTTP=true` 注入)放行本地 http。`binding:` 用于宿主
+ * 显式装配的进程内插件传输；内置目录无需注册即可直接挂载。
  */
 
 import { z } from 'zod'
@@ -28,7 +28,7 @@ export type PluginAuth = { kind: 'platform-token' } | { kind: 'bearer', secretRe
 export interface PluginManifest {
   auth: PluginAuth
   enabled: boolean
-  /** https:// 或 `binding:<name>`(平台内 service binding)。 */
+  /** https://、本地开发 http://，或宿主进程内 `binding:<name>`。 */
   endpoint: string
   /** 如 "/healthz";必须以 '/' 开头。 */
   healthPath: string
@@ -41,7 +41,6 @@ export interface PluginManifest {
 // 限 path-segment 安全字符(不含 '/'、':'、空白、'~' 前缀)。
 const ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/
 const BINDING_RE = /^binding:[A-Za-z0-9_-]+$/
-
 const authSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('platform-token') }),
   z.object({ kind: z.literal('bearer'), secretRef: z.string().min(1) }),
@@ -51,7 +50,6 @@ const manifestSchema = z.object({
   id: z.string().regex(ID_RE, 'id 须为 path-segment 安全字符([A-Za-z0-9._-],不以标点开头)'),
   protocolVersion: z
     .string()
-    .default(PLUGIN_PROTOCOL_VERSION)
     .refine(v => v === PLUGIN_PROTOCOL_VERSION, {
       error: `protocolVersion 须为 '${PLUGIN_PROTOCOL_VERSION}'`,
     }),
@@ -59,7 +57,7 @@ const manifestSchema = z.object({
   auth: authSchema,
   healthPath: z.string().regex(/^\//, 'healthPath 须以 \'/\' 开头'),
   enabled: z.boolean(),
-})
+}).strict()
 
 export interface ParsePluginManifestOptions {
   /** 放行 http:// endpoint(仅本地开发;宿主按 env `TB_ALLOW_INSECURE_HTTP=true` 注入)。 */
@@ -68,8 +66,8 @@ export interface ParsePluginManifestOptions {
 
 /**
  * 校验并构造 PluginManifest:
- * - 字段形状经 zod(未知字段剥离 = 忽略,v1 的 kind/interfaceVersion 因此被安静丢弃);
- * - endpoint 为 `binding:<name>` 或过 {@link assertSecureUrl} 的 URL。
+ * - 字段形状经严格 zod 校验，未知/旧版字段直接拒绝；
+ * - endpoint 为合法 `binding:<name>`，或必须通过 {@link assertSecureUrl}。
  * 任何不符 → TBError invalid_argument。
  */
 export function parsePluginManifest(

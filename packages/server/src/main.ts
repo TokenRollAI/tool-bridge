@@ -16,10 +16,6 @@ import { configFromEnv } from './config'
 /**
  * **内置插件目录全量装配**(与 Workers 的 `deployEntry.ts` 对等)。
  *
- * 此前只有 gateway 的部署入口装配它,`packages/server` 连 `@tool-bridge/plugins` 依赖都没有
- * —— 于是同一份代码在 Workers 上有 99 个可用 provider,在官方 Node/Docker 镜像上是 0 个。
- * **部署形态改变了产品能力**,而这不是任何人的设计意图。
- *
  * Node 侧没有 Worker 那样的 bundle 体积上限,故不必裁剪;loader 仍是懒加载(装配只建
  * Map 与闭包,不 import 插件模块),启动不付全量代价。
  */

@@ -1,0 +1,41 @@
+# 插件运行时
+
+## 两种来源
+
+内置 plugin 与外部 plugin 共用 `plugin/v2` descriptor 和 envelope，但控制面不同：
+
+| 来源 | descriptor 真源 | 发现/挂载 | 状态 |
+|---|---|---|---|
+| 内置 | 构建期生成的 `BUILTIN_CATALOG` | `system/catalog`，直接挂载 | 不落 plugin KV |
+| 外部 HTTP(S) | 注册时抓取并校验 `/~describe` | `system/plugin` 注册后挂载 | manifest/meta/health 落 StateStore |
+| 自定义进程内 binding | 宿主显式装配 handler；可按外部注册流程接入 | `binding:<name>` | 只用于宿主自定义，不替代内置 catalog |
+
+`pluginBindings` 说明代码在哪里，`pluginCatalog` 说明它导出什么；标准宿主从 `@tool-bridge/plugins` 同源装配两者。只给一半会得到“能解析不能调用”或“有代码但无法选择 export”。
+
+## catalog 契约
+
+`system/catalog list/search` 每项保留：
+
+- `id`、`digest`、`description?`
+- 有序 `exports`
+- 展示用的 `nodeKinds`
+- 必有的 `exportDetails[exportId]`
+
+`exportDetails` 是 kind、auth、mountConfig 的唯一真源。CLI 和 Dashboard 不再从 provider 级 `needsOAuth`、`credentialFields`、`mountConfigFields` 或 `exportKinds` 猜测选中 export 的行为。
+
+内置 export 必须显式声明凭证形态：`auth:none`、`auth:single`、`credentialFields` 或 `oauth`。`~describe` 必须纯内存、零凭证、零网络，否则无法安全 codegen。
+
+## 调用与密钥
+
+- 节点只保存 `authRef`；SecretStore 保存明文。
+- 单值、多字段与 OAuth client 凭证是互斥形态。
+- 非敏感挂载配置进入 `providerConfig`，会被 registry get 回显；密钥不得混入。
+- plugin 与网关同进程同权，内置 handler 的 env 必须经 `narrowPluginEnv` 白名单收窄。
+- plugin 出站必须用 `guardedFetch`；自定义敏感头或 secret body 遇跨源 redirect 应拒绝。
+- 未配置 `PLUGIN_TOKEN` 的外部托管 plugin 必须 fail closed；进程内模式由宿主明确标记。
+
+## 注册与解析优先级
+
+同名显式注册记录优先于内置 catalog，允许部署者用自己的实现覆盖内置项。内置项的普通流程不注册、不探活、不写 meta；删除内置节点后，读 `~help` 也不得偷偷把注册状态写回来。
+
+删除/更新 catalog 或 wire 字段时，core、CLI、Dashboard 与 app 集成测试必须同轮改；旧预览客户端不在兼容范围。

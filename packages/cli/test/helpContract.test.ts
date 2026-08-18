@@ -59,7 +59,6 @@ describe('CLI help 参数契约', () => {
     const serverHelp = fullHelpAt('server', 'add')
     expect(serverHelp).toContain('Required remote HTBP server URL')
     expect(serverHelp).toContain('One-line node description (default: derived from remote URL)')
-    expect(serverHelp).toContain('Migration: remote URL uses --remote-url')
 
     const serverLsHelp = fullHelpAt('server', 'ls')
     expect(serverLsHelp).toContain(

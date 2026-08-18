@@ -59,6 +59,7 @@ const CONTEXT_DESCRIBE = {
   protocolVersion: 'plugin/v2',
   exports: [
     {
+      auth: { kind: 'single', required: false },
       id: 'entries',
       profile: 'context/v1',
       methods: ['List', 'Get', 'Update', 'Write', 'Search'],
@@ -68,14 +69,14 @@ const CONTEXT_DESCRIBE = {
 }
 const TOOL_DESCRIBE = {
   protocolVersion: 'plugin/v2',
-  exports: [{ id: 'actions', profile: 'tools/v1' }],
+  exports: [{ auth: { kind: 'single', required: false }, id: 'actions', profile: 'tools/v1' }],
 }
 /** 一个部署同时导出 tools 与 context —— 管理面必须能分别看到并分别挂载。 */
 const DUAL_DESCRIBE = {
   protocolVersion: 'plugin/v2',
   exports: [
-    { id: 'actions', profile: 'tools/v1', description: 'Demo actions' },
-    { id: 'entries', profile: 'context/v1', methods: ['List', 'Get'] },
+    { auth: { kind: 'none' }, id: 'actions', profile: 'tools/v1', description: 'Demo actions' },
+    { auth: { kind: 'none' }, id: 'entries', profile: 'context/v1', methods: ['List', 'Get'] },
   ],
 }
 
@@ -217,6 +218,7 @@ describe('system/plugin 注册全流程', () => {
         protocolVersion: 'plugin/v2',
         exports: [
           {
+            auth: { kind: 'none' },
             id: 'entries',
             profile: 'context/v1',
             methods: ['List', 'Get'],
@@ -294,7 +296,6 @@ describe('system/plugin 注册全流程', () => {
     expect(res.status).toBe(200)
     const json = (await res.json()) as { cmds: Array<{ name: string, scope: string }> }
     expect(json.cmds.map(c => c.name).sort()).toEqual([
-      'catalog',
       'delete',
       'get',
       'health',

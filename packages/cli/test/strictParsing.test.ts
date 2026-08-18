@@ -104,7 +104,6 @@ describe('未知 flag 必须报错(事故回归)', () => {
       ['plugin', 'get', 'id', '--bogus'],
       ['plugin', 'update', 'id', '--file', 'f', '--bogus'],
       ['plugin', 'health', 'id', '--bogus'],
-      ['plugin', 'catalog', '--bogus'],
       ['plugin', 'rm', 'id', '--bogus'],
       ['integration', 'catalog', '--bogus'],
       ['integration', 'add', 'p', '--provider', 'x', '--bogus'],

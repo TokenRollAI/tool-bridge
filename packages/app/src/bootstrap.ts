@@ -32,9 +32,8 @@ interface BootstrapEnv {
  * 只跑一次真正的引导逻辑)。幂等标志 KEY_BOOTSTRAPPED 存在即整体跳过(E2E-1③ 重跑不重复
  * 输出 Admin SK 明文)。
  *
- * Workers 首次引导必须提供 TB_BOOTSTRAP_ADMIN_SK(sha256 后入库),不把最高权限凭证
- * 写入持久日志。宿主中立 runBootstrap 仍为 Node/SDK 保留随机生成并向本地 stdout
- * 展示一次的兼容路径。
+ * 首次引导默认必须提供 TB_BOOTSTRAP_ADMIN_SK(sha256 后入库),不把最高权限凭证
+ * 写入持久日志。Node server 仅在显式开发逃生配置下允许随机生成。
  */
 
 /** 引导时注册的内置节点(system directory + 八个 builtin;feedback 走 ~feedback 保留段,非 builtin)。 */
@@ -151,8 +150,7 @@ export function runBootstrap(
   store: StateStore,
   opts?: { adminSk?: string, requireAdminSk?: boolean },
 ): Promise<void> {
-  // Node/SDK 有部署者可见的本地 stdout,为兼容现有一次性引导流程默认仍允许随机生成。
-  return doBootstrap(store, opts?.adminSk, opts?.requireAdminSk ?? false)
+  return doBootstrap(store, opts?.adminSk, opts?.requireAdminSk ?? true)
 }
 
 /**
@@ -203,9 +201,6 @@ export function buildDeps(opts: BuiltinAssemblyOpts): BuiltinDeps {
       probe: manifest => probePlugin(manifest, opts.pluginBindings),
       fetchContract: manifest => fetchPluginContract(manifest, opts.pluginBindings),
       allowInsecureHttp: opts.allowInsecureHttp,
-      ...(opts.pluginBindings !== undefined
-        ? { bindings: () => [...(opts.pluginBindings ?? new Map<string, never>()).keys()] }
-        : {}),
     },
     // federation 模块:remote host 白名单运行时存储 + env 基线。
     federation: { store: new RemoteAllowlistStore(opts.store), base: opts.remoteAllowlistBase },

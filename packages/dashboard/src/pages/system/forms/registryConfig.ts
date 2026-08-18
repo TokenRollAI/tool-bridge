@@ -130,27 +130,23 @@ export function catalogPluginsForMount(items: CatalogListItem[]): PluginManifest
     enabled: true,
     endpoint: `binding:${item.id}`,
     exports: item.exports.map((id): PluginExport => {
-      const details = item.exportDetails?.[id]
-      const auth = details?.auth
+      const details = item.exportDetails[id]!
+      const auth = details.auth
       return {
         id,
-        profile: (details?.kind ?? item.exportKinds?.[id] ?? 'tool') === 'context'
+        profile: details.kind === 'context'
           ? 'context/v1'
           : 'tools/v1',
-        ...(details?.description !== undefined ? { description: details.description } : {}),
-        ...(details?.mountConfigFields !== undefined
+        ...(details.description !== undefined ? { description: details.description } : {}),
+        ...(details.mountConfigFields !== undefined
           ? { mountConfigFields: details.mountConfigFields }
-          : details === undefined && item.mountConfigFields !== undefined
-            ? { mountConfigFields: item.mountConfigFields }
-            : {}),
+          : {}),
         ...(auth?.kind === 'fields'
           ? { credentialFields: auth.fields }
-          : details === undefined && item.credentialFields !== undefined
-            ? { credentialFields: item.credentialFields }
-            : {}),
+          : {}),
         ...(auth?.kind === 'none' || auth?.kind === 'single' ? { auth } : {}),
         // 这里只供 Dashboard 判断“挂载后要授权”,端点全文仍以 gateway 的 describe 为真源。
-        ...(auth?.kind === 'oauth' || (details === undefined && item.needsOAuth)
+        ...(auth?.kind === 'oauth'
           ? { oauth: { authorizationUrl: '', tokenUrl: '' } }
           : {}),
       }

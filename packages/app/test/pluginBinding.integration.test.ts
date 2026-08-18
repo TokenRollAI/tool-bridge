@@ -6,7 +6,7 @@ import { createTbApp, type PluginBindings, runBootstrap } from '../src/index'
 import { TEST_ADMIN_SK, TEST_ENCRYPTION_KEY } from './fixtures'
 
 /**
- * binding: 进程内插件传输(plugin-in-process-catalog 决策第一刀)。
+ * binding: 宿主显式装配的进程内插件传输。
  *
  * 与 pluginExample.integration.test.ts 的关键差别:那边 stub 全局 fetch 模拟
  * "外挂 HTTP plugin";这里**把全局 fetch 打桩为一碰即炸**——注册(探活 +
@@ -90,13 +90,6 @@ describe('binding: 进程内插件传输', () => {
   it('注册(探活+契约)→ 挂载 → 工具调用全链路零网络出站', async () => {
     const app = await appWithBindings()
 
-    // catalog:注册前 notes 是"可用未激活"。
-    const before = await postJson(app, 'system/plugin', { tool: 'catalog', arguments: {} })
-    expect(before.status).toBe(200)
-    expect(((await before.json()) as { items: unknown[] }).items).toEqual([
-      { name: 'notes', endpoint: 'binding:notes', registered: false },
-    ])
-
     const registered = await registerBindingPlugin(app, 'binding:notes')
     expect(registered.status).toBe(200)
     pluginToken = ((await registered.json()) as { pluginToken?: string }).pluginToken
@@ -129,12 +122,6 @@ describe('binding: 进程内插件传输', () => {
     })
     expect(created.status).toBe(200)
     expect(await created.json()).toEqual({ path: 'in-process', version: 1 })
-
-    // catalog:注册后状态翻为 registered 并带 pluginId。
-    const after = await postJson(app, 'system/plugin', { tool: 'catalog', arguments: {} })
-    expect(((await after.json()) as { items: unknown[] }).items).toEqual([
-      { name: 'notes', endpoint: 'binding:notes', registered: true, pluginId: 'notes' },
-    ])
 
     // 全局 fetch 从未被触达。
     expect(vi.mocked(fetch)).not.toHaveBeenCalled()
@@ -174,9 +161,7 @@ describe('binding: 进程内插件传输', () => {
 
 describe('binding 传输的超时', () => {
   /**
-   * 进程内直调也必须有超时。此前只有网络分支带 `AbortSignal.timeout`,binding 分支裸调 ——
-   * 而 114 个迁移产物走的正是 binding。某个产物忘了给自己的出站加超时,上游挂住就会无上界
-   * 占着这个请求:CF 侧撞 30s CPU/墙钟限制,Node 侧无限等,而 callPlugin 的重试还会再来一轮。
+   * 进程内直调也必须有超时，不能让挂起 handler 无上界占用请求。
    */
   it('**binding handler 收到的 Request 带 signal**', async () => {
     let seenSignal: AbortSignal | null | undefined
@@ -195,7 +180,7 @@ describe('binding 传输的超时', () => {
         if (url.pathname === '/~describe') {
           return Promise.resolve(json({
             protocolVersion: 'plugin/v2',
-            exports: [{ id: 'actions', profile: 'tools/v1' }],
+            exports: [{ auth: { kind: 'single', required: false }, id: 'actions', profile: 'tools/v1' }],
           }))
         }
         return Promise.resolve(json([]))
@@ -233,9 +218,7 @@ describe('binding 传输的超时', () => {
  * `~describe` 生成(`catalog.generated.ts`),与插件代码同一份构建产物 —— 不需要先搬进 KV
  * 再读出来。故解析走 catalog,**零写库**。
  *
- * 此前这条能力由 `autoRegisterBinding` 兑现:读到未注册就当场写 `plugin:` + `pluginmeta:`。
- * 那让 help/call 这类读操作带上写副作用(删掉后随便读一次就复活),而且 7 个调用点里
- * 传 deps 还是传裸 store 是随手决定的。现在解析函数结构上拿不到写能力。
+ * 解析函数结构上拿不到写能力，help/call 只读 catalog。
  *
  * 边界:**只对 catalog 里有的 id 生效**。外挂 https 插件在网络那头,探活与契约校验是必要
  * 前置,仍须显式注册 —— 倒数第二个用例钉住这条。
@@ -290,14 +273,8 @@ describe('内置 binding 插件免注册', () => {
     expect(parseHelpDsl(await help.text()).cmds.length).toBeGreaterThan(0)
   })
 
-  /**
-   * **A1 的回归**:挂载 + 读一整轮之后,注册表里一条 plugin 记录都不该有。
-   *
-   * 此前这里会写 `plugin:notes` 与 `pluginmeta:notes`,于是 `tb plugin rm notes` 删掉后
-   * 任何一次 help/call 都会把它写回来 —— 删除即复活。现在 builtin 不落库,`plugin list`
-   * 因此只列真正注册过的 external plugin(而内置目录由 catalog 呈现)。
-   */
-  it('挂载与调用全程零写库(删除即复活的回归)', async () => {
+  /** 内置挂载 + 读取后，注册表仍只包含真正注册过的 external plugin。 */
+  it('挂载与调用全程零写 plugin 注册记录', async () => {
     const app = await appWithBuiltins()
     await mountNotes(app)
     await app.request(new Request('https://tb.test/auto/notes/~help', {
@@ -312,15 +289,13 @@ describe('内置 binding 插件免注册', () => {
     expect(got.status).toBe(404)
   })
 
-  it('catalog 仍把它列为可用(available,但不是 registered)', async () => {
+  it('system/catalog 把内置项列为可直接挂载', async () => {
     const app = await appWithBuiltins()
     await mountNotes(app)
-    const res = await postJson(app, 'system/plugin', { tool: 'catalog', arguments: {} })
-    const items = ((await res.json()) as { items: Array<{ name: string, registered: boolean }> }).items
-    const notes = items.find(i => i.name === 'notes')
+    const res = await postJson(app, 'system/catalog', { tool: 'list', arguments: {} })
+    const items = ((await res.json()) as { items: Array<{ id: string }> }).items
+    const notes = items.find(i => i.id === 'notes')
     expect(notes).toBeDefined()
-    // registered 现在如实反映"有没有 external 注册记录" —— 内置插件可用但未注册。
-    expect(notes?.registered).toBe(false)
   })
 
   it('**catalog 里没有的 provider 仍然拒绝** —— 免注册不是"什么都收"', async () => {

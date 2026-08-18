@@ -60,13 +60,13 @@ tool-bridge 把这五件事收敛为**一棵自描述的树**:所有能力(工�
 
 | 能力 | 说明 |
 |---|---|
-| **HTBP 树与渐进发现** | 根 `/~help` 出发逐级下钻;`~tree?depth=N` 受限深度总览;`~help` 默认返回面向 LLM 的紧凑 Help DSL(`text/plain`),声明 `Accept: application/json` 得到语义等价的 JSON(含真 JSON Schema,可直接渲染表单) |
-| **工具层** | 挂载 MCP server(Streamable HTTP,官方 SDK 会话复用)、任意 HTTP API(声明式 HttpToolDef);**工具虚拟化**(前缀 / 重命名 / 隐藏 / 描述覆盖),对外只暴露虚拟名 |
+| **HTBP 树与渐进发现** | 根 `/~help` 出发逐级下钻;`~tree?depth=N` 受限深度总览;`~help` 默认返回 Markdown，声明 `Accept: text/plain` 得到紧凑 Help DSL，声明 `Accept: application/json` 得到语义等价的 JSON(含真 JSON Schema,可直接渲染表单) |
+| **工具层** | 挂载 MCP server(Streamable HTTP,modern/legacy era 协商)、任意 HTTP API(声明式 HttpToolDef);**工具虚拟化**(前缀 / 重命名 / 隐藏 / 描述覆盖),对外只暴露虚拟名 |
 | **remote 联邦** | 把另一个 HTBP 服务挂成子树,`~help`/`~tree`/调用透传;https 强制 + host 白名单 + `X-TB-Via` 环检测;本地调用者 SK 不外传,出站凭证经 `skRef` 换发 |
 | **Context 层** | R2 / S3 挂成 namespace,统一 `List/Get/Update/Write` 四动词 + `Search`;乐观并发(`ifVersion`);>1 MiB 大对象返回 `$ref` 预签名 URL(无凭证时走网关中转),不占网关流量 |
 | **Skillhub 层** | 把 Agent Skill(`SKILL.md` + 文本文件的目录)发布到树上、任意 Agent 凭 fetch 发现并取用:`List/Get/Search/Publish/Remove`;存平台自带 R2 **无需外部凭证**,服务端解析 `SKILL.md` frontmatter 成 name/description 目录(`tb skill get --out` 直接拉到本地 `.claude/skills/`) |
 | **设备反向注册** | 内网机器 `tb connect` 主动建立 WebSocket,把自己的 shell 与 fs 挂上树;shell 默认拒绝一切命令、白名单放行;断线返回 503 retryable,重连自愈;云侧用 Durable Object WebSocket Hibernation,空闲近零计费 |
-| **SK 权限模型** | 每个 Secret Key = owner + 作用域列表(路径 glob × 动作集,deny 优先、无匹配默认拒);**可见性即权限**:无权节点在 `~help`/`~tree` 中不存在(404 而非 403);CF KV 宿主的吊销最终一致,其它边缘通常约 60s 内可见但可能更久(同区域实测 0.3s) |
+| **SK 权限模型** | 每个 Secret Key = owner + 作用域列表(路径 glob × 动作集,deny 优先、无匹配默认拒);**可见性即权限**:无权节点在 `~help`/`~tree` 中不存在(404 而非 403);CF KV 宿主的吊销为最终一致，不承诺精确传播时间 |
 | **凭证托管** | 上游 AK/SK 经 SecretStore 加密存储(AES-256-GCM,只写不读),节点配置只存引用名,凭证不出网关、不出现在任何 `~help`/返回值 |
 | **Plugin 系统** | 第三方以 HTTP 服务形态实现 Tool/Context Provider,注册即探活 + 契约校验,与内置 Provider 地位对等 |
 | **SDK** | 在自己的 Node 进程里内嵌一个 TB 实例,注册本地函数为工具,还可反向 `connect` 到远程网关——本地函数出现在远程树上 |
@@ -79,7 +79,7 @@ tool-bridge 把这五件事收敛为**一棵自描述的树**:所有能力(工�
 不需要任何 SDK——这正是设计目标:
 
 ```sh
-# 从根开始渐进发现(~help 返回面向 LLM 的紧凑 Help DSL)
+# 从根开始渐进发现(~help 默认返回 Markdown)
 curl -H "Authorization: Bearer $TB_SK" https://your-tb.example.com/~help
 
 # 下钻某个节点,看它有哪些工具、怎么调
@@ -157,7 +157,7 @@ tb sk rm <id>
 tb plugin register --file ./manifest.json && tb plugin health my-plugin
 ```
 
-24 个顶层命令共享全局参数位置语义：`--json` / `--base-url` / `--sk` / `--timeout`
+顶层命令共享全局参数位置语义：`--json` / `--base-url` / `--sk` / `--timeout`
 可放在根命令、命令组或叶子命令位置（长驻 `connect` / `mount fs` 不适用 timeout，会明确
 报错）；返回 `Page` 的列表/搜索命令统一支持 `--limit 1..200` 与 `--cursor`。除本地配置与
 `init cloudflare` 部署编排外，CLI 通过公开 HTBP/API 工作，没有任何专用管理端点。
@@ -183,7 +183,10 @@ npm install @tool-bridge/sdk
 import { serve } from '@hono/node-server'
 import { createToolBridge, MemoryStateStore } from '@tool-bridge/sdk'
 
-const tb = createToolBridge({ state: new MemoryStateStore() })
+const tb = createToolBridge({
+  state: new MemoryStateStore(),
+  adminSk: process.env.TB_BOOTSTRAP_ADMIN_SK!,
+})
 
 // 把本地函数注册为树上的工具
 tb.registerTool('tools/echo', {
@@ -299,7 +302,7 @@ Node/Docker 路径不需要这一步。若不使用向导，仍可在 `.env` 中
 `pnpm deploy:all`；首次创建 Worker 时应使用 `wrangler deploy --secrets-file` 同次注入 trust root，
 不要先部署无密钥实例再补 `secret put`。
 
-首次运行时网关自动完成引导:用预置的 `TB_BOOTSTRAP_ADMIN_SK` 物化 `system/*` 管理子树(sk / secret / registry / status / plugin)。Workers 新实例未预置该 secret 会拒绝引导,不会把 Admin SK 明文写入日志。
+首次运行时网关自动完成引导:用预置的 `TB_BOOTSTRAP_ADMIN_SK` 物化 `system/*` 管理子树；具体 builtin 集合以 core 装配为准。Workers 新实例未预置该 secret 会拒绝引导,不会把 Admin SK 明文写入日志。
 
 本地开发:`pnpm gen-dev-vars`(从 .env 生成 .dev.vars)后 `npx wrangler dev`。
 
@@ -314,10 +317,9 @@ Node/Docker 路径不需要这一步。若不使用向导，仍可在 `.env` 中
 | `packages/cli` | `tb` 命令行(commander),公开 API 客户端 + Cloudflare 初始化编排；可发布为 npm 包或 Bun 独立二进制镜像 — [`@tool-bridge/cli`](https://www.npmjs.com/package/@tool-bridge/cli) |
 | `packages/sdk` | npm 包 [`@tool-bridge/sdk`](https://www.npmjs.com/package/@tool-bridge/sdk):内嵌 TB 实例、程序化注册、反向连接 |
 | `packages/plugin-sdk` | 写第三方 Plugin(Tool/Context Provider)的最小 SDK 与契约 |
-| `packages/plugins` | 内置 Plugin 源(如飞书),可托管在 Workers 上,也可用 `scripts/serve.ts` 跑成 Node 进程 |
+| `packages/plugins` | 内置 Plugin 源与生成 catalog；标准宿主进程内直挂，也可用 `scripts/serve.ts` 跑成外部 Node plugin |
 | `packages/dashboard` | Web 管理面:`~help` 通用渲染器 + 管理表单,无专用后端 |
-| `llmdoc/` | 项目知识库(架构边界、协议契约、生产坑、工作流) |
-| `archive/` | bootstrap 期规范与过程文档归档(仅历史追溯) |
+| `llmdoc/` | 项目知识库(架构边界、协议契约、运行时坑、工作流) |
 
 ## 开发
 
@@ -328,11 +330,11 @@ pnpm test:integration    # 宿主适配层集成测试(gateway 跑真实 workerd
 pnpm lint:fix            # eslint 自动修复
 ```
 
-工程约定:**代码是行为真源**;接口契约、模块边界与生产坑的查表文档在 [llmdoc/](llmdoc/index.md)(契约入口:`llmdoc/reference/protocol-contract.md`)。
+工程约定:**代码是行为真源**;接口契约、模块边界与运行时指南在 [llmdoc/](llmdoc/index.md)(契约入口:`llmdoc/reference/protocol-contract.md`)。
 
 ## 项目状态
 
-积极开发中(pre-release),当前没有正式生产环境。核心能力已全部落地,并在 Cloudflare 共享开发环境完成鉴权、MCP、Search、飞书 Plugin、WebSocket hibernation 与 Dashboard 的端到端验证;这类在线证据不等同于 production release。网关本体已抽成宿主中立的 `@tool-bridge/app`,Cloudflare 与 Node 两个适配器都只是它的装配层。`@tool-bridge/cli` 与 `@tool-bridge/sdk` 已发布 npm,Node/Docker 单容器自部署、本地 Compose 三跳开发栈与 `tb init cloudflare` 初始化向导也已落地。当前收尾项是功能 PR 合入、外部 HTBP Draft 同步与对外 Deploy Button 模板同步。
+积极开发中(pre-launch)，当前没有正式生产环境。现有 Cloudflare、Node/Docker 与 SDK 形态都以同一宿主中立 app 装配；发布准备以 `llmdoc/must/current-state.md` 的当前阻塞项和仓库验证命令为准，不在 README 维护环境流水或一次性验收记录。
 
 ## License
 

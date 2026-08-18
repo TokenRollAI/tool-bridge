@@ -10,8 +10,8 @@
  * 抄第二遍,抄漏一处就是"契约与实现不一致且零报错"。所以这里直接 import 插件模块、
  * 真调它的 `fetch('/~describe')`,拿它自己吐出来的形状。
  *
- * 求值成本实测:99 个插件全部成功,零网络、零凭证、零 env(`~describe` 是纯内存的
- * 生命周期端点,见 plugin-sdk 的 GET 分支),产物合计 18.9 KiB。
+ * 求值必须对所有 loader 成功,且保持零网络、零凭证、零 env(`~describe` 是纯内存的
+ * 生命周期端点,见 plugin-sdk 的 GET 分支)。
  *
  * **刻意不收 action 表**。求值 tools `List` 也能成功(98/99,唯一失败的 feishu 是
  * proxyTools 要真实凭证),但那份产物 2.49 MiB —— 与 `src/<name>/schema.ts` 是同一份数据
@@ -93,7 +93,7 @@ async function build(): Promise<string> {
  *
  * 内容 = 每个内置插件 \`/~describe\` 的**求值**产物。这是编译期常量:内置插件的目录项
  * 与它的代码同一份构建产物,故不可能陈旧,也不需要落库(见
- * \`llmdoc/memory/decisions/builtin-catalog-not-registry.md\`)。
+ * \`llmdoc/architecture/plugin-runtime.md\`)。
  *
  * **一行一个插件**是有意的:diff 只显示真正变化的那些条目,review 时看得清"谁的声明动了"。
  */

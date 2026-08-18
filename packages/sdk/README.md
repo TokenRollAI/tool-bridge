@@ -18,7 +18,7 @@ import { createToolBridge, MemoryStateStore } from '@tool-bridge/sdk'
 
 const tb = createToolBridge({
   state: new MemoryStateStore(),      // 或任何 StateStore 实现(SQLite / KV / ...)
-  adminSk: process.env.TB_ADMIN_SK,   // 缺省读 env TB_BOOTSTRAP_ADMIN_SK;皆无则首次启动随机生成并打印一次
+  adminSk: process.env.TB_ADMIN_SK,   // 缺省读 env TB_BOOTSTRAP_ADMIN_SK;首次引导时必须提供
 })
 
 tb.registerTool(
@@ -55,7 +55,6 @@ conn.close()                   // 下线;远程节点保留标记 offline,超回
 | `state`(必填) | 树配置 / SK / manifest 的存取 |
 | `objects?` | context 对象存储(`provider:'r2'` 的落点);缺省该 provider 返回 unavailable |
 | `secrets?` | 上游凭证;缺省 = 基于 state 的加密存储,主密钥 `encryptionKey` 或 env `TB_SECRET_ENCRYPTION_KEY`,皆无则 secret 能力禁用(Set 返回 unavailable) |
-| `deviceTransport?` | 网关侧设备 WS 宿主;未注入则 device 能力禁用 |
 | `reservedRoots?` / `remoteAllowlist?` / `maxHops?` | 追加保留根 / remote 白名单(空 = 拒一切 remote)/ Via 跳数上限(默认 4) |
 
 ## License

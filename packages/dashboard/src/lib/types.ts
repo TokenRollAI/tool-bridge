@@ -177,7 +177,7 @@ export type PluginExportAuth
     | { description?: string, kind: 'single', label?: string, required?: boolean }
 
 export interface PluginExport {
-  /** 明确声明无凭证/单值凭证;旧 descriptor 缺省时仍按兼容单值处理。 */
+  /** 明确声明无凭证/单值凭证；与 oauth/credentialFields 三选一。 */
   auth?: PluginExportAuth
   capabilities?: string[]
   /** 该 export 需要的多字段凭证;缺省表示单值 API key(或不需要凭证)。 */
@@ -203,8 +203,8 @@ export interface PluginManifest {
   enabled: boolean
   /** https:// 或 `binding:<name>`。 */
   endpoint: string
-  /** 注册时缓存的 `~describe.exports`（挂载时 config.export 从中选）；老记录可能缺省。 */
-  exports?: PluginExport[]
+  /** 注册时缓存的 `~describe.exports`（挂载时 config.export 从中选）。 */
+  exports: PluginExport[]
   /** 如 "/healthz";必须以 '/' 开头。 */
   healthPath: string
   id: string
@@ -218,27 +218,17 @@ export interface PluginManifest {
  * 这是**挂载向导的数据源**:它直接回答"能挂成什么 kind、有哪几个 export、要填哪些凭证
  * 字段、要不要再授权一步",故表单可以从它生成而不必让用户去翻插件源码。
  *
- * 与 {@link PluginCatalogItem} 的差别:那个是 admin 面的"装配了哪些 binding + 注册状态",
- * 这个是 read 面的"每个集成声明了什么"。内置集成**不落库**,所以这里没有 registered ——
- * 目录项与它的代码是同一份构建产物。
+ * 内置集成**不落库**；目录项与它的代码是同一份构建产物。
  */
 export interface CatalogListItem {
-  /** 声明了多字段凭证时给出字段名(不含值);单值凭证为 undefined。 */
-  credentialFields?: PluginCredentialField[]
   description?: string
   /** descriptor 指纹(升级检测/三宿主对拍)。 */
   digest: string
-  /** 每个 export 的精确 auth/config/kind 契约。 */
-  exportDetails?: Record<string, CatalogExportDetails>
-  /** export id → 它能挂成的节点 kind;选定 export 后 kind 是确定的(跨 kind 多 export 靠它挂对)。 */
-  exportKinds?: Record<string, 'context' | 'tool'>
+  /** 每个 export 的精确 auth/config/kind 契约；挂载逻辑的唯一真源。 */
+  exportDetails: Record<string, CatalogExportDetails>
   /** 可挂载的 export id;长度 > 1 时挂载必须显式选一个。 */
   exports: string[]
   id: string
-  /** 声明了非凭证配置(如 baseUrl)时给出字段名与是否必填;挂载向导据此渲染输入框。 */
-  mountConfigFields?: PluginMountConfigField[]
-  /** 声明了 oauth → 挂载后还要授权一步。 */
-  needsOAuth: boolean
   nodeKinds: Array<'context' | 'tool'>
 }
 
@@ -254,26 +244,6 @@ export interface CatalogExportDetails {
   id: string
   kind: 'context' | 'tool'
   mountConfigFields?: PluginMountConfigField[]
-}
-
-/**
- * 宿主装配的一个进程内插件("可用目录"里的一项;对等 `tb plugin catalog`)。
- *
- * **装配 ≠ 注册 ≠ 挂载**:装配是"这个宿主的构建里带了这段代码",注册是"它进了 plugin 表、
- * 拿到了 pluginToken",挂载才是"树上有个节点指向它"。三步都做完才能被 agent 调到。
- *
- * 注意:**内置插件不再走注册**(descriptor 由 catalog 提供),故它们在这里恒为
- * `registered: false` —— 那不是"没配好",而是"不需要"。要看内置集成用
- * {@link CatalogListItem}。
- */
-export interface PluginCatalogItem {
-  /** 注册时填这个值(`binding:<name>`)。 */
-  endpoint: string
-  /** binding 名 = 宿主装配表的 key。 */
-  name: string
-  /** 已注册时给出注册记录的 id(通常与 name 同,但注册方可以另起)。 */
-  pluginId?: string
-  registered: boolean
 }
 
 /** write/update 返回:pluginToken 仅该次响应出现一次(auth=platform-token 时)。 */

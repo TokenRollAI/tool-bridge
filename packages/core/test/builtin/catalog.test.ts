@@ -7,9 +7,7 @@ import { isTBError } from '../../src/errors'
  * `system/catalog`:内置目录的**只读**浏览面。
  *
  * 与 `system/plugin` 的分工是这套设计的要点:那个是 external plugin 的注册面(admin,
- * 有副作用),这个是平台自带能力的目录(read,纯读)。此前"有哪些内置 provider"只能经
- * admin 的 `system/plugin catalog` 看 —— 一个只有 register scope 的用户能挂载却看不到
- * 有什么可挂,能力可用而不可发现。
+ * 有副作用),这个是平台自带能力的目录(read,纯读)。
  */
 
 function entry(id: string, describe: PluginDescribe, digest = `d-${id}`) {
@@ -18,7 +16,7 @@ function entry(id: string, describe: PluginDescribe, digest = `d-${id}`) {
 
 const TOOLS: PluginDescribe = {
   protocolVersion: 'plugin/v2',
-  exports: [{ id: 'actions', profile: 'tools/v1', description: 'Tavily' }],
+  exports: [{ auth: { kind: 'single', required: false }, id: 'actions', profile: 'tools/v1', description: 'Tavily' }],
 }
 
 const WITH_FIELDS: PluginDescribe = {
@@ -75,6 +73,7 @@ const WITH_MOUNT_CONFIG: PluginDescribe = {
     id: 'actions',
     profile: 'tools/v1',
     description: 'Memos',
+    auth: { kind: 'single', required: false },
     credentialProbe: 'get_current_user',
     mountConfigFields: [
       { key: 'baseUrl', label: '实例地址', description: 'https://memos.example.com', required: true },
@@ -115,27 +114,26 @@ describe('list', () => {
     const jira = items.find(i => i.id === 'jira')!
     expect(jira.exports).toEqual(['actions'])
     expect(jira.nodeKinds).toEqual(['tool'])
-    expect(jira.needsOAuth).toBe(false)
-    // 字段**名**要给(挂载表单靠它生成输入),值从来不在 descriptor 里。
-    expect(jira.credentialFields?.map(f => f.key)).toEqual(['baseUrl', 'personalAccessToken'])
+    expect(jira.exportDetails.actions?.auth).toMatchObject({ kind: 'fields' })
   })
 
   it('投影 mountConfigFields —— 挂载向导据此渲染非凭证配置输入', async () => {
     const { items } = await list()
     const memos = items.find(i => i.id === 'memos')!
-    expect(memos.mountConfigFields).toEqual([
+    expect(memos.exportDetails.actions?.mountConfigFields).toEqual([
       { key: 'baseUrl', label: '实例地址', description: 'https://memos.example.com', required: true },
     ])
     // 单值凭证 + 有 mountConfig,不该混进 credentialFields。
-    expect(memos.credentialFields).toBeUndefined()
-    // 不声明的 provider 不带这个键(不塞空数组)。
-    expect(items.find(i => i.id === 'tavily')).not.toHaveProperty('mountConfigFields')
+    expect(items.find(i => i.id === 'tavily')?.exportDetails.actions)
+      .not.toHaveProperty('mountConfigFields')
   })
 
   it('oauth 型标出来 —— 挂载后还要授权一步', async () => {
     const { items } = await list()
-    expect(items.find(i => i.id === 'sentry')?.needsOAuth).toBe(true)
-    expect(items.find(i => i.id === 'tavily')?.needsOAuth).toBe(false)
+    expect(items.find(i => i.id === 'sentry')?.exportDetails.actions?.auth)
+      .toEqual({ kind: 'oauth' })
+    expect(items.find(i => i.id === 'tavily')?.exportDetails.actions?.auth)
+      .toEqual({ kind: 'single', required: false })
   })
 
   it('多 profile 的 export 映射出两种 nodeKind', async () => {
@@ -143,15 +141,13 @@ describe('list', () => {
     expect(items.find(i => i.id === 'notes')?.nodeKinds).toEqual(['context', 'tool'])
   })
 
-  it('exportKinds 保留 export→kind 映射(选定 export 后 kind 是确定的)', async () => {
+  it('exportDetails 保留 export→kind 映射(选定 export 后 kind 是确定的)', async () => {
     const { items } = await list()
     // notes 跨 kind:actions 是 tool、documents 是 context。挂载按选中的 export 取 kind,
     // 而不是从 nodeKinds 数组猜 —— 否则挂 context export 会落到默认值挂错。
-    expect(items.find(i => i.id === 'notes')?.exportKinds).toEqual({
-      actions: 'tool',
-      documents: 'context',
-    })
-    expect(items.find(i => i.id === 'tavily')?.exportKinds).toEqual({ actions: 'tool' })
+    expect(items.find(i => i.id === 'notes')?.exportDetails.actions?.kind).toBe('tool')
+    expect(items.find(i => i.id === 'notes')?.exportDetails.documents?.kind).toBe('context')
+    expect(items.find(i => i.id === 'tavily')?.exportDetails.actions?.kind).toBe('tool')
   })
 
   it('exportDetails 保留逐 export 的 auth/config,不再把第一份声明套给全部 export', async () => {

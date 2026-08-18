@@ -1,5 +1,5 @@
 /**
- * builtin 装配:把四个 system/* 模块组装为 `module → BuiltinModule` 映射。
+ * builtin 装配:把基础模块与宿主可选模块组装为 `module → BuiltinModule` 映射。
  *
  * 存储实例(SKRegistryStore / SecretStoreImpl / NodeRegistryStore)由网关注入并复用;
  * status 的 nodeCount 经翻页统计 registry 全量节点(当前树规模小,可接受)。
@@ -69,7 +69,7 @@ async function countNodes(registry: NodeRegistryStore): Promise<number> {
   return count
 }
 
-/** 构造 module 名 → BuiltinModule 映射(sk / secret / registry / status / plugin)。 */
+/** 构造 module 名 → BuiltinModule 映射；可选模块只在宿主提供依赖时装配。 */
 export function createBuiltins(deps: BuiltinDeps): Map<string, BuiltinModule> {
   const now = deps.now ?? (() => new Date().toISOString())
   const modules = new Map<string, BuiltinModule>()

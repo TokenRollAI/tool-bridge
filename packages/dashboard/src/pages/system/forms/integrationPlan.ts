@@ -77,16 +77,16 @@ export function integrationPlan(entry: CatalogListItem | undefined, exportId = '
   const chosen = exportId.trim() || (entry.exports.length === 1 ? entry.exports[0]! : '')
   const details: CatalogExportDetails | undefined = chosen === ''
     ? undefined
-    : entry.exportDetails?.[chosen]
-  const mountConfigFields = details?.mountConfigFields ?? entry.mountConfigFields ?? []
+    : entry.exportDetails[chosen]
+  const mountConfigFields = details?.mountConfigFields ?? []
   const auth = details?.auth
   if (auth?.kind === 'none') {
     return { authRequired: false, kind: 'none', fields: [], mountConfigFields, needsExportChoice }
   }
-  if (auth?.kind === 'oauth' || (auth === undefined && entry.needsOAuth)) {
+  if (auth?.kind === 'oauth') {
     return { authRequired: true, kind: 'oauth', fields: [], mountConfigFields, needsExportChoice }
   }
-  const fields = auth?.kind === 'fields' ? auth.fields : entry.credentialFields ?? []
+  const fields = auth?.kind === 'fields' ? auth.fields : []
   if (fields.length > 0) {
     return { authRequired: true, kind: 'fields', fields, mountConfigFields, needsExportChoice }
   }
@@ -155,11 +155,11 @@ export function buildIntegrationCalls(
 
   // kind 由**选中 export** 决定:跨 kind 的多 export provider(notes:actions=tool /
   // notes=context)挂 context export 时不能落到默认 'tool'(平台会拒且用户无参数可救)。
-  // 退化:选中 export 的 kind → 单一 nodeKind → 'tool'(external plugin 不在 catalog 时的兜底)。
+  // external plugin 不在 catalog 时退回 tool；目录项始终按选中 export 决定 kind。
   const nodeKind: 'context' | 'tool'
-    = (exportId !== '' ? entry?.exportDetails?.[exportId]?.kind : undefined)
-      ?? (exportId !== '' ? entry?.exportKinds?.[exportId] : undefined)
-      ?? (entry?.nodeKinds.length === 1 ? entry.nodeKinds[0]! : 'tool')
+    = (exportId !== '' ? entry?.exportDetails[exportId]?.kind : undefined)
+      ?? (entry?.exports.length === 1 ? entry.exportDetails[entry.exports[0]!]?.kind : undefined)
+      ?? 'tool'
 
   const binding = buildCredentialBinding(
     {

@@ -194,10 +194,8 @@ describe('registry mount config', () => {
           mountConfigFields: [{ key: 'baseUrl', required: true }],
         },
       },
-      exportKinds: { actions: 'tool' },
       exports: ['actions'],
       id: 'posthog',
-      needsOAuth: false,
       nodeKinds: ['tool'],
     }])
     const exports = exportOptionsFor(plugins, 'posthog', 'tools/v1')
@@ -241,11 +239,11 @@ describe('registry mount config', () => {
       { context: [], tool: exports },
       { contextBuiltin: false, toolBuiltin: true },
     )
-    expect(calls.secret).toEqual({ name: 'integration-v2-providers%2Fdemo', value: 'amap-key' })
+    expect(calls.secret).toEqual({ name: 'integration-providers%2Fdemo', value: 'amap-key' })
     expect(calls.mount.config).toEqual({
       kind: 'tool',
       provider: 'amap',
-      authRef: 'integration-v2-providers%2Fdemo',
+      authRef: 'integration-providers%2Fdemo',
     })
   })
 

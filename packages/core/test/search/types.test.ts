@@ -5,7 +5,7 @@ import {
   encodeToolSearchCursor,
   literalToolSearchQuery,
   prepareToolSearchQuery,
-  serializeToolSearchHits,
+  serializeToolSearchDocuments,
   serializeToolSearchSnapshot,
   TBError,
   TOOL_SEARCH_AUDIT_NODE_LIMIT,
@@ -47,7 +47,7 @@ describe('SearchIndex mutation contract', () => {
       { name: 'find' },
       { name: 'find' },
     ])).toThrowError(TBError)
-    expect(() => serializeToolSearchHits([
+    expect(() => serializeToolSearchDocuments([
       { path: 'providers/calendar', tool: { name: 'find' } },
       { path: '/providers/calendar/', tool: { name: 'find' } },
     ])).toThrowError(TBError)
@@ -80,11 +80,11 @@ describe('SearchIndex mutation contract', () => {
   it('does not impose an artificial tool-count limit below the JSON budget', () => {
     const tools = Array.from({ length: 125 }, (_, index) => ({ name: `tool_${index}` }))
     expect(serializeToolSearchSnapshot('providers/calendar', tools)).toHaveLength(125)
-    expect(serializeToolSearchHits(tools.map(tool => ({
+    expect(serializeToolSearchDocuments(tools.map(tool => ({
       path: 'providers/calendar',
       tool,
     })))).toHaveLength(125)
-    expect(() => serializeToolSearchHits(Array.from(
+    expect(() => serializeToolSearchDocuments(Array.from(
       { length: TOOL_SEARCH_AUDIT_NODE_LIMIT + 1 },
       (_, index) => ({ path: `providers/${index}`, tool: { name: 'probe' } }),
     ))).toThrowError(TBError)

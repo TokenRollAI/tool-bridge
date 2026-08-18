@@ -32,32 +32,15 @@ export interface ToolProviderLike {
  */
 export type ToolSource = OperationRegistry | ToolProviderLike
 
-/**
- * 设备 WS 的网关侧宿主注入点。SDK 未实现其消费,注入将得到 unimplemented。
- */
-export interface DeviceTransport {
-  onConnection(handler: (conn: DeviceConn) => void): void
-}
-
-export interface DeviceConn {
-  readonly authorization?: string
-  close(code?: number): void
-  onClose(handler: () => void): void
-  onFrame(handler: (frame: unknown) => void): void
-  send(frame: unknown): void
-}
-
 /** createToolBridge 配置(标准签名 + SDK 引导扩展,后者见各字段注释)。 */
 export interface ToolBridgeConfig {
   /**
    * Admin SK 明文(引导时 sha256 入库,与 gateway TB_BOOTSTRAP_ADMIN_SK 同语义);
-   * 缺省取 env TB_BOOTSTRAP_ADMIN_SK;皆无 → 首次引导随机生成并 console.log 一次。
+   * 缺省取 env TB_BOOTSTRAP_ADMIN_SK；首次引导时两者皆无则拒绝启动。
    */
   adminSk?: string
   /** 放行 http:// 上游(仅本地开发)。 */
   allowInsecureHttp?: boolean
-  /** 设备 WS 的网关侧宿主;未注入则 device 能力禁用。当前注入 → unimplemented。 */
-  deviceTransport?: DeviceTransport
   /** secrets 缺省实现的主密钥(base64url 32B);缺省取 env TB_SECRET_ENCRYPTION_KEY。 */
   encryptionKey?: string
   /** 本实例 X-TB-Via 标识(缺省用入站 host 派生)。 */

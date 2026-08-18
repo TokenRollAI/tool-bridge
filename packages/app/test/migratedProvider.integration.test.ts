@@ -112,14 +112,6 @@ afterEach(() => {
 })
 
 describe('迁移产物经 binding: 挂上树', () => {
-  it('内置目录报成"可用未激活"', async () => {
-    const app = await appWithPlugin()
-    const catalog = await postJson(app, 'system/plugin', { tool: 'catalog', arguments: {} })
-    expect(((await catalog.json()) as { items: unknown[] }).items).toEqual([
-      { name: 'alt_text_generator_ai', endpoint: 'binding:alt_text_generator_ai', registered: false },
-    ])
-  })
-
   it('节点 ~help 是索引形态(不带 schema)', async () => {
     const app = await mountedApp()
     const help = await getJson(app, 'ai/alt-text/~help')

@@ -17,14 +17,9 @@
  *     `initialize`),即上游升级到 modern 我们永远发现不了。故按 `LEGACY_ERA_HORIZON_SEC`
  *     到期重探。
  *
- * - **不做会话复用**(v2 起)。迁移前我们缓存上游 `Mcp-Session-Id` 跳过 initialize 换取
- *   单趟往返;v2 下这条路会**静默返回空工具列表且零网络请求**:跳过握手 ⇒ 客户端不知道
- *   服务端能力 ⇒ `listTools()` 被能力门挡下直接回空(实测 era=undefined、tools=0、请求数=0)。
- *   这正是 2026-07-08 生产事故的形态,只会变成确定性复发。SDK 未提供播种能力的入口,
- *   故 `mcpsession:` 缓存、`forceFresh` KV 边缘缓存绕行、过期会话空列表防御一并移除——
- *   它们本就只为让会话复用安全存在。代价:legacy 上游每次调用 3 趟请求(initialize +
- *   notifications/initialized + 业务),modern 上游 1 趟(与迁移前最优持平)。
- *   `~help` 的 `toolcache` 仍在,承担跨请求的工具清单复用;**调用结果永不缓存**。
+ * - **不复用会话**。每次传输都保留 SDK 建立能力状态所需的握手；era cache 只跳过协议
+ *   探测,不保存 `Mcp-Session-Id`。`~help` 的 `toolcache` 负责跨请求复用工具清单，调用结果
+ *   永不缓存。
  *
  * - `enforceStrictCapabilities: true`:能力门一旦落空就抛错,不返回空列表。空工具清单是
  *   我们踩过的事故类型,宁可响亮失败也不静默交付一个空目录。

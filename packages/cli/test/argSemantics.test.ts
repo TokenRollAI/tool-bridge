@@ -278,13 +278,13 @@ describe('条件参数与挂载语义', () => {
     })
   })
 
-  it('server add 旧 --base-url 远端写法会给出可执行迁移提示', async () => {
+  it('server add 缺 --remote-url 时给出当前参数说明', async () => {
     const fn = jsonFetch({})
     await runCli(['server', 'add', 'fed/team', '--base-url', 'https://old-remote', '--json'])
     expect(fn).not.toHaveBeenCalled()
     expect(JSON.parse(stdoutText())).toMatchObject({
       ok: false,
-      error: expect.stringContaining('--base-url now selects the gateway'),
+      error: expect.stringContaining('--base-url selects the gateway'),
     })
     expect(JSON.parse(stdoutText()).error).toContain('--remote-url')
     expect(process.exitCode).toBe(1)

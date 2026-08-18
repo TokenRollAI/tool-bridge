@@ -16,34 +16,24 @@ import { Input } from '@/components/ui/input'
 import { IntegrationDialog } from './forms/IntegrationDialog'
 
 function exportAuthLabel(item: NonNullable<ReturnType<typeof useIntegrationCatalog>['data']>[number], exportId: string): string {
-  const auth = item.exportDetails?.[exportId]?.auth
+  const auth = item.exportDetails[exportId]?.auth
   if (auth?.kind === 'none') return '无需凭证'
   if (auth?.kind === 'oauth') return 'OAuth 授权'
   if (auth?.kind === 'fields') return auth.fields.map(field => field.key).join(', ')
   if (auth?.kind === 'single') return auth.required ? '单值凭证 *' : '单值凭证（可选）'
-  if (item.needsOAuth) return 'OAuth 授权'
-  if (item.credentialFields !== undefined) {
-    return item.credentialFields.map(field => field.key).join(', ')
-  }
-  return '单值凭证（可选）'
+  return '契约缺失'
 }
 
 function exportConfigLabel(item: NonNullable<ReturnType<typeof useIntegrationCatalog>['data']>[number], exportId: string): string {
-  const fields = item.exportDetails?.[exportId]?.mountConfigFields ?? item.mountConfigFields
+  const fields = item.exportDetails[exportId]?.mountConfigFields
   return fields?.map(field => (field.required === true ? `${field.key}*` : field.key)).join(', ') ?? '—'
 }
 
 /**
  * 内置集成目录(对等 `tb integration catalog`)。
  *
- * **不再有"注册"按钮**:内置插件的 descriptor 是编译期常量(catalog),不落库,
- * 所以没有"注册"这个状态可言 —— 直接挂载即可用。此前这一页把 `binding:` 插件当成
- * external plugin 引导用户先注册一遍,那一步的四件事对同进程代码全是仪式
- * (探活无信息量、mint token 双方都不验、落 manifest 只为给读路径查)。
- *
- * 数据源也从 `system/plugin catalog`(admin)换成 `system/catalog`(read):后者回的是
- * "声明了什么"(export / 可挂 kind / 凭证字段 / 要不要授权),前者只回 binding 名。
- * read scope 让非 admin 也看得见 —— 挂载只要 register,浏览不该更严。
+ * 内置插件的 descriptor 是编译期常量(catalog),不落库,所以没有注册状态；直接挂载即可用。
+ * 数据来自 `system/catalog`(read),包含逐 export 的 kind、凭证和挂载配置契约。
  */
 export function BuiltinCatalog() {
   const catalog = useIntegrationCatalog()

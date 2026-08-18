@@ -14,21 +14,20 @@ import {
 } from '../../src/index'
 
 /**
- * catalog 解析的语义。重点不是"能不能解析出来",而是**解析函数拿不到写能力**——
- * 此前 `requirePluginExport` 收 `deps`(含可写 state),于是 help/call 这类读操作会写库:
- * 删掉一个 plugin 后随便读一次就复活,且 7 个调用点里传 deps 还是传裸 store 是随手决定的。
+ * catalog 解析的语义。重点不是"能不能解析出来",而是**解析函数拿不到写能力**：
+ * `requirePluginExport` 只收只读 state，help/call 不能写库。
  */
 
 const TOOLS_DESCRIBE: PluginDescribe = {
   protocolVersion: 'plugin/v2',
-  exports: [{ id: 'actions', profile: 'tools/v1', description: 'demo' }],
+  exports: [{ auth: { kind: 'none' }, id: 'actions', profile: 'tools/v1', description: 'demo' }],
 }
 
 const MULTI_DESCRIBE: PluginDescribe = {
   protocolVersion: 'plugin/v2',
   exports: [
-    { id: 'actions', profile: 'tools/v1' },
-    { id: 'documents', profile: 'context/v1', methods: ['Get', 'List'] },
+    { auth: { kind: 'none' }, id: 'actions', profile: 'tools/v1' },
+    { auth: { kind: 'none' }, id: 'documents', profile: 'context/v1', methods: ['Get', 'List'] },
   ],
 }
 
@@ -149,47 +148,6 @@ describe('resolveIntegration', () => {
     expect(resolved.source).toBe('builtin')
   })
 
-  /**
-   * **A3 在升级过的部署里不复活**:已删除的 `autoRegisterBinding` 在存量库里留下
-   * `plugin:<id>`(endpoint 是 `binding:`)+ 一份只在注册那刻抓过的 `pluginmeta:` 快照。
-   * 若让注册记录赢,改了插件声明后平台仍按老快照校验挂载 —— 那正是 catalog 要消灭的陈旧。
-   * endpoint 决定契约真源:`binding:` 的真源是构建产物,不是 KV 快照。
-   */
-  it('binding: 的存量注册记录不覆盖 catalog(陈旧快照不赢构建产物)', async () => {
-    const catalog = await catalogOf({ demo: MULTI_DESCRIBE })
-    const store = new MemoryStateStore()
-    await store.put(`${KEY_PLUGIN}demo`, {
-      id: 'demo',
-      protocolVersion: 'plugin/v2',
-      endpoint: 'binding:demo',
-      auth: { kind: 'platform-token' },
-      healthPath: '/healthz',
-      enabled: true,
-    })
-    // 陈旧快照:只有一个 export,而当前代码(catalog)已经有两个。
-    await store.put(`${KEY_PLUGIN_META}demo`, TOOLS_DESCRIBE)
-
-    const resolved = await resolveIntegration(store, catalog, 'demo', 'context', 'context', 'documents')
-    // 按陈旧快照解析会报"无 export 'documents'";走 catalog 才解析得出。
-    expect(resolved.source).toBe('builtin')
-    expect(resolved.export.id).toBe('documents')
-  })
-
-  it('binding: 记录但 catalog 里没有该 id → 仍走注册记录(宿主没装配那个插件)', async () => {
-    const store = new MemoryStateStore()
-    await store.put(`${KEY_PLUGIN}gone`, {
-      id: 'gone',
-      protocolVersion: 'plugin/v2',
-      endpoint: 'binding:gone',
-      auth: { kind: 'platform-token' },
-      healthPath: '/healthz',
-      enabled: true,
-    })
-    await store.put(`${KEY_PLUGIN_META}gone`, TOOLS_DESCRIBE)
-    const resolved = await resolveIntegration(store, {}, 'gone', 'tool', 'tool')
-    expect(resolved.source).toBe('external')
-  })
-
   it('https 注册记录仍然优先(用户自建的覆盖同名内置项)', async () => {
     const catalog = await catalogOf({ github: TOOLS_DESCRIBE })
     const store = new MemoryStateStore()
@@ -208,10 +166,9 @@ describe('resolveIntegration', () => {
   })
 
   /**
-   * A1 的**结构性**回归:解析一次内置 provider 后,store 必须一个键都没多。
-   * 此前这条路会写 `plugin:` 与 `pluginmeta:`,于是"删除即复活"。
+   * 解析一次内置 provider 后,store 必须一个键都没多。
    */
-  it('解析内置 provider 零写库(删除即复活的结构性防线)', async () => {
+  it('解析内置 provider 零写库', async () => {
     const catalog = await catalogOf({ demo: TOOLS_DESCRIBE })
     const store = new MemoryStateStore()
     const writes: string[] = []

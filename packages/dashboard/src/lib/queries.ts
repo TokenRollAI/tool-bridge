@@ -6,7 +6,6 @@ import type {
   ContextEntryMeta,
   FederationHost,
   Page,
-  PluginCatalogItem,
   PluginManifest,
   RegistryNode,
   SecretKeyInfo,
@@ -223,32 +222,7 @@ export function usePluginList() {
 }
 
 /**
- * 宿主装配的进程内插件目录(对等 `tb plugin catalog`)。
- *
- * 与 `usePluginList` 的分工:那个列**已注册**的 plugin(system/plugin 的 list),
- * 这个列**宿主构建里带了哪些可用插件**并标出各自的注册状态 —— 没有它,用户在
- * Dashboard 上无从知道这个部署带了什么(生产实测 99 个装配、0 个注册)。
- *
- * 不走 `usePagedBuiltin`:catalog 是一次性全量返回,没有 cursor。
- */
-export function usePluginCatalog() {
-  const conn = useConn()
-  const base = useKeyBase()
-  return useQuery({
-    queryKey: [...base, 'plugin-catalog'],
-    queryFn: async () => {
-      const r = await invoke(conn, 'system/plugin', 'catalog', {})
-      return (r.json as { items: PluginCatalogItem[] }).items
-    },
-  })
-}
-
-/**
  * 内置集成目录(`system/catalog`,对等 `tb integration catalog`)。
- *
- * 与 {@link usePluginCatalog} 的分工:那个查 `system/plugin catalog`(**admin**),回的是
- * "宿主装配了哪些 binding + 各自注册状态";这个查 `system/catalog`(**read**),回的是
- * "每个内置集成声明了什么" —— export、可挂成什么 kind、要哪些凭证字段、要不要授权。
  *
  * 挂载向导要的是后者:只有它能把"该填什么"从 descriptor 直接渲染成表单,而且 read scope
  * 意味着非 admin 的用户也看得见(挂载只要 register scope,浏览不该更严)。

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { integrationAddCommand, integrationRmCommand } from '../src/commands/integration'
+import { integrationAddCommand } from '../src/commands/integration'
 import { resetFetch, setFetch } from '../src/http'
 import { runCli } from './cliHarness'
 
@@ -41,8 +41,10 @@ const TAVILY = {
   id: 'tavily',
   digest: 'd1',
   exports: ['actions'],
+  exportDetails: {
+    actions: { id: 'actions', kind: 'tool', auth: { kind: 'single', required: false } },
+  },
   nodeKinds: ['tool'],
-  needsOAuth: false,
   description: 'Tavily',
 }
 
@@ -50,20 +52,30 @@ const JIRA = {
   id: 'jira',
   digest: 'd2',
   exports: ['actions'],
+  exportDetails: {
+    actions: {
+      id: 'actions',
+      kind: 'tool',
+      auth: {
+        kind: 'fields',
+        fields: [
+          { key: 'baseUrl', required: true, secret: false },
+          { key: 'personalAccessToken', required: true, secret: true },
+        ],
+      },
+    },
+  },
   nodeKinds: ['tool'],
-  needsOAuth: false,
-  credentialFields: [
-    { key: 'baseUrl', required: true, secret: false },
-    { key: 'personalAccessToken', required: true, secret: true },
-  ],
 }
 
 const SENTRY = {
   id: 'sentry',
   digest: 'd3',
   exports: ['actions'],
+  exportDetails: {
+    actions: { id: 'actions', kind: 'tool', auth: { kind: 'oauth' } },
+  },
   nodeKinds: ['tool'],
-  needsOAuth: true,
 }
 
 /** 自建实例型:单值凭证 + 一个必配的非凭证 baseUrl。 */
@@ -71,11 +83,15 @@ const MEMOS = {
   id: 'memos',
   digest: 'd4',
   exports: ['actions'],
+  exportDetails: {
+    actions: {
+      id: 'actions',
+      kind: 'tool',
+      auth: { kind: 'single', required: false },
+      mountConfigFields: [{ key: 'baseUrl', label: '实例地址', required: true }],
+    },
+  },
   nodeKinds: ['tool'],
-  needsOAuth: false,
-  mountConfigFields: [
-    { key: 'baseUrl', label: '实例地址', required: true },
-  ],
 }
 
 const savedBaseUrl = process.env.TB_BASE_URL
@@ -124,14 +140,14 @@ describe('tb integration add', () => {
     expect(process.exitCode).toBe(0)
 
     const secret = bodyOf(calls, /system\/secret/, 'set')
-    expect(secret.arguments.name).toBe('integration-v2-tools%2Ftavily')
+    expect(secret.arguments.name).toBe('integration-tools%2Ftavily')
     expect(secret.arguments.value).toBe('tvly-secret')
 
     const mount = bodyOf(calls, /~register/)
     expect(mount.config).toEqual({
       kind: 'tool',
       provider: 'tavily',
-      authRef: 'integration-v2-tools%2Ftavily',
+      authRef: 'integration-tools%2Ftavily',
     })
   })
 
@@ -217,20 +233,12 @@ describe('tb integration add', () => {
     expect(bodyOf(calls, /~register/).config.authRef).toBe('sentry-client')
   })
 
-  it('0.14 的 --secret 仍可解析但从帮助隐藏', async () => {
-    const calls = routedFetch([catalogOf([SENTRY])])
-    await runCli([
-      'integration', 'add', 'tools/sentry', '--provider', 'sentry',
-      '--secret', 'legacy-client', ...base,
-    ])
-    expect(process.exitCode).toBe(0)
-    expect(bodyOf(calls, /~register/).config.authRef).toBe('legacy-client')
-
+  it('帮助只暴露当前凭证入口', () => {
     const help = integrationAddCommand().helpInformation()
     expect(help).toContain('--credential <name>')
     expect(help).not.toContain('--secret')
     expect(help).not.toContain('authRef')
-    expect(help).not.toContain('integration-v2-')
+    expect(help).not.toContain('integration-')
   })
 
   it('凭证四种给法互斥', async () => {
@@ -287,7 +295,7 @@ describe('tb integration add', () => {
     ])
     const mount = bodyOf(calls, /~register/)
     expect(mount.config.providerConfig).toEqual({ baseUrl: 'https://memos.example.com' })
-    expect(mount.config.authRef).toBe('integration-v2-notes%2Fmemos')
+    expect(mount.config.authRef).toBe('integration-notes%2Fmemos')
   })
 
   /** 必配的非凭证配置缺失,此前要等 credentialProbe 或首次调用才炸;现在挂载前拦。 */
@@ -330,7 +338,19 @@ describe('tb integration add', () => {
 
   it('context/v1 的 provider 挂成 kind:context', async () => {
     const calls = routedFetch([
-      catalogOf([{ ...TAVILY, id: 'docs', nodeKinds: ['context'], exports: ['documents'] }]),
+      catalogOf([{
+        ...TAVILY,
+        id: 'docs',
+        nodeKinds: ['context'],
+        exports: ['documents'],
+        exportDetails: {
+          documents: {
+            id: 'documents',
+            kind: 'context',
+            auth: { kind: 'single', required: false },
+          },
+        },
+      }]),
     ])
     await runCli(['integration', 'add', 'ctx/docs', '--provider', 'docs', '--key', 'k', ...base])
     expect(bodyOf(calls, /~register/).kind).toBe('context')
@@ -338,16 +358,18 @@ describe('tb integration add', () => {
 
   /**
    * 跨 kind 多 export(notes:actions=tool / documents=context):选 context export 时 kind
-   * 必须按 exportKinds 取,而不是从 nodeKinds 数组落到默认 'tool'(那样挂载被平台拒且无解)。
+   * 必须按 exportDetails 取,而不是从 nodeKinds 数组猜。
    */
   it('跨 kind provider 选 context export → 挂成 kind:context(不落默认 tool)', async () => {
     const NOTES = {
       id: 'notes',
       digest: 'dn',
       exports: ['actions', 'documents'],
-      exportKinds: { actions: 'tool', documents: 'context' },
+      exportDetails: {
+        actions: { id: 'actions', kind: 'tool', auth: { kind: 'single', required: false } },
+        documents: { id: 'documents', kind: 'context', auth: { kind: 'single', required: false } },
+      },
       nodeKinds: ['context', 'tool'],
-      needsOAuth: false,
     }
     const calls = routedFetch([catalogOf([NOTES])])
     await runCli([
@@ -363,9 +385,11 @@ describe('tb integration add', () => {
       id: 'notes',
       digest: 'dn',
       exports: ['actions', 'documents'],
-      exportKinds: { actions: 'tool', documents: 'context' },
+      exportDetails: {
+        actions: { id: 'actions', kind: 'tool', auth: { kind: 'single', required: false } },
+        documents: { id: 'documents', kind: 'context', auth: { kind: 'single', required: false } },
+      },
       nodeKinds: ['context', 'tool'],
-      needsOAuth: false,
     }
     const calls = routedFetch([catalogOf([NOTES])])
     await runCli([
@@ -380,7 +404,6 @@ describe('tb integration add', () => {
       id: 'multi',
       digest: 'dm',
       exports: ['actions', 'documents'],
-      exportKinds: { actions: 'tool', documents: 'context' },
       exportDetails: {
         actions: { id: 'actions', kind: 'tool', auth: { kind: 'none' } },
         documents: {
@@ -391,7 +414,6 @@ describe('tb integration add', () => {
         },
       },
       nodeKinds: ['context', 'tool'],
-      needsOAuth: false,
     }
     const calls = routedFetch([catalogOf([MULTI])])
     await runCli([
@@ -442,11 +464,11 @@ describe('tb integration add', () => {
       .filter(c => /system\/secret/.test(c.url))
       .map(c => c.body as WireBody)
     expect(secretBodies.map(body => body.tool)).toEqual(['list', 'set', 'delete'])
-    expect(secretBodies[2]?.arguments?.name).toBe('integration-v2-tools%2Ftavily')
+    expect(secretBodies[2]?.arguments?.name).toBe('integration-tools%2Ftavily')
   })
 
   it('挂载失败不会误删同名既有凭证', async () => {
-    const name = 'integration-v2-tools%2Ftavily'
+    const name = 'integration-tools%2Ftavily'
     const calls = routedFetch([
       catalogOf([TAVILY]),
       { match: /system\/secret/, tool: 'list', body: { items: [{ name }] } },
@@ -477,8 +499,8 @@ describe('tb integration add', () => {
     await runCli(['integration', 'add', 'a-b', '--provider', 'tavily', '--key', 'two', ...base])
     const dashName = bodyOf(calls, /system\/secret/, 'set').arguments.name
 
-    expect(slashName).toBe('integration-v2-a%2Fb')
-    expect(dashName).toBe('integration-v2-a-b')
+    expect(slashName).toBe('integration-a%2Fb')
+    expect(dashName).toBe('integration-a-b')
     expect(slashName).not.toBe(dashName)
   })
 
@@ -494,7 +516,7 @@ describe('tb integration add', () => {
       '--base-url', 'https://gw', '--sk', 'tbk_x',
     ])
     expect(lines.join('')).toContain('credential stored and managed by the platform')
-    expect(lines.join('')).not.toContain('integration-v2-')
+    expect(lines.join('')).not.toContain('integration-')
     expect(lines.join('')).not.toContain('authRef')
 
     vi.mocked(process.stdout.write).mockClear()
@@ -507,7 +529,7 @@ describe('tb integration add', () => {
         body: {
           path: 'tools/tavily',
           kind: 'tool',
-          config: { provider: 'tavily', authRef: 'integration-v2-tools%2Ftavily' },
+          config: { provider: 'tavily', authRef: 'integration-tools%2Ftavily' },
         },
       },
     ])
@@ -518,7 +540,7 @@ describe('tb integration add', () => {
     expect(json.credentialStored).toBe(true)
     expect(json.node.credential).toBe('managed')
     expect(json.node.config.authRef).toBeUndefined()
-    expect(JSON.stringify(json)).not.toContain('integration-v2-')
+    expect(JSON.stringify(json)).not.toContain('integration-')
   })
 
   it('多 export 未指定 → 本地拒(免一次往返)', async () => {
@@ -608,35 +630,10 @@ describe('tb integration ls', () => {
 })
 
 describe('tb integration rm', () => {
-  it('卸载节点;--purge 连带删派生 secret', async () => {
-    const calls = routedFetch([{ match: /system\//, body: { ok: true } }])
-    await runCli(['integration', 'rm', 'tools/tavily', '--purge', ...base])
-    expect(process.exitCode).toBe(0)
-    const bodies = calls.filter(c => /system\//.test(c.url)).map(c => c.body as WireBody)
-    expect(bodies.some(b => b.tool === 'delete' && b.arguments?.path === 'tools/tavily')).toBe(true)
-    expect(
-      bodies.some(b => b.tool === 'delete' && b.arguments?.name === 'integration-v2-tools%2Ftavily'),
-    ).toBe(true)
-  })
-
-  it('不给 --purge 就只卸载,不碰 secret', async () => {
+  it('只卸载节点，凭证由 tb secret 显式管理', async () => {
     const calls = routedFetch([{ match: /system\//, body: { ok: true } }])
     await runCli(['integration', 'rm', 'tools/tavily', ...base])
     const bodies = calls.map(c => c.body as WireBody)
     expect(bodies.some(b => b.arguments?.name !== undefined)).toBe(false)
-  })
-
-  /** 用了 --credential 复用现成凭证时没有派生 secret:删不到不是错误。 */
-  it('--purge 删不到派生 secret 时不报错', async () => {
-    routedFetch([
-      { match: /system\/secret/, body: { code: 'not_found' }, status: 404 },
-      { match: /system\/registry/, body: { ok: true } },
-    ])
-    await runCli(['integration', 'rm', 'tools/x', '--purge', ...base])
-    expect(process.exitCode).toBe(0)
-  })
-
-  it('--purge 仅作兼容解析,不再出现在高层帮助', () => {
-    expect(integrationRmCommand().helpInformation()).not.toContain('--purge')
   })
 })

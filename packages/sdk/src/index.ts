@@ -1,6 +1,6 @@
 /**
  * @tool-bridge/sdk 公开面:createToolBridge / ToolBridge / Connection +
- * 四个宿主注入点。核心逻辑来自 @tool-bridge/core 与 gateway 的宿主中立 tbApp
+ * 宿主注入点。核心逻辑来自 @tool-bridge/core 与 app 的宿主中立 tbApp
  * (createTbApp),SDK 只做装配——公开面即全部通道,不存在私有通道。
  */
 

@@ -15,7 +15,6 @@ const AMAP: CatalogListItem = {
   },
   exports: ['actions'],
   id: 'amap',
-  needsOAuth: false,
   nodeKinds: ['tool'],
 }
 
@@ -90,9 +89,9 @@ describe('高级挂载的内置凭证体验', () => {
       'system/secret:set',
       'system/registry:write',
     ])
-    expect(calls[0]?.args).toEqual({ name: 'integration-v2-tools%2Famap', value: 'amap-key' })
+    expect(calls[0]?.args).toEqual({ name: 'integration-tools%2Famap', value: 'amap-key' })
     expect(calls[1]?.args).toMatchObject({
-      config: { provider: 'amap', authRef: 'integration-v2-tools%2Famap' },
+      config: { provider: 'amap', authRef: 'integration-tools%2Famap' },
       path: 'tools/amap',
     })
   }, 15_000)

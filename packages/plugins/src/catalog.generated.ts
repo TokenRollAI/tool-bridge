@@ -5,7 +5,7 @@
  *
  * 内容 = 每个内置插件 `/~describe` 的**求值**产物。这是编译期常量:内置插件的目录项
  * 与它的代码同一份构建产物,故不可能陈旧,也不需要落库(见
- * `llmdoc/memory/decisions/builtin-catalog-not-registry.md`)。
+ * `llmdoc/architecture/plugin-runtime.md`)。
  *
  * **一行一个插件**是有意的:diff 只显示真正变化的那些条目,review 时看得清"谁的声明动了"。
  */

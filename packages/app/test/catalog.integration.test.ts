@@ -98,31 +98,29 @@ describe('system/catalog 数据面', () => {
     const tb = await appWithCatalog()
     const page = (await (await callCatalog(tb, 'list')).json()) as {
       items: Array<{
-        credentialFields?: Array<{ key: string }>
-        exportDetails?: Record<string, {
-          auth: { kind: string }
+        exportDetails: Record<string, {
+          auth: { fields?: Array<{ key: string }>, kind: string }
           mountConfigFields?: Array<{ key: string, required?: boolean }>
         }>
         exports: string[]
         id: string
-        needsOAuth: boolean
         nodeKinds: string[]
       }>
     }
     const jira = page.items.find(i => i.id === 'jira')!
     // 真实产物的形状(不是构造的 fixture):jira 声明两个字段,其中 baseUrl 标了 secret:false
     // —— 它同样进凭证通道,故必须出现在这里。
-    expect(jira.credentialFields?.map(f => f.key)).toEqual(['baseUrl', 'personalAccessToken'])
+    expect(jira.exportDetails.actions?.auth.fields?.map(f => f.key))
+      .toEqual(['baseUrl', 'personalAccessToken'])
     expect(jira.nodeKinds).toEqual(['tool'])
-    expect(jira.needsOAuth).toBe(false)
 
     // notes 有 tools + context 两个 export。
     const notes = page.items.find(i => i.id === 'notes')!
     expect(notes.exports.length).toBeGreaterThan(1)
     expect(notes.nodeKinds).toEqual(['context', 'tool'])
-    expect(notes.exportDetails?.actions?.auth.kind).toBe('none')
-    expect(notes.exportDetails?.notes?.auth.kind).toBe('none')
-    expect(notes.exportDetails?.actions?.mountConfigFields?.map(f => f.key)).toEqual(['workspace'])
+    expect(notes.exportDetails.actions?.auth.kind).toBe('none')
+    expect(notes.exportDetails.notes?.auth.kind).toBe('none')
+    expect(notes.exportDetails.actions?.mountConfigFields?.map(f => f.key)).toEqual(['workspace'])
   })
 
   /**
@@ -133,18 +131,18 @@ describe('system/catalog 数据面', () => {
     const tb = await appWithCatalog()
     const page = (await (await callCatalog(tb, 'list')).json()) as {
       items: Array<{
-        credentialFields?: unknown
+        exportDetails: Record<string, {
+          mountConfigFields?: Array<{ key: string, required?: boolean }>
+        }>
         id: string
-        mountConfigFields?: Array<{ key: string, required?: boolean }>
       }>
     }
     const memos = page.items.find(i => i.id === 'memos')!
-    expect(memos.mountConfigFields?.map(f => f.key)).toContain('baseUrl')
-    expect(memos.mountConfigFields?.find(f => f.key === 'baseUrl')?.required).toBe(true)
-    // baseUrl 是配置不是密钥:走 mountConfigFields,不占凭证通道。
-    expect(memos.credentialFields).toBeUndefined()
-    // 不声明的 provider 不带这个键。
-    expect(page.items.find(i => i.id === 'tavily')).not.toHaveProperty('mountConfigFields')
+    const fields = memos.exportDetails.actions?.mountConfigFields
+    expect(fields?.map(f => f.key)).toContain('baseUrl')
+    expect(fields?.find(f => f.key === 'baseUrl')?.required).toBe(true)
+    expect(page.items.find(i => i.id === 'tavily')?.exportDetails.actions)
+      .not.toHaveProperty('mountConfigFields')
   })
 
   it('get 回 describe 全文与 digest;不存在 → 404', async () => {
@@ -228,8 +226,7 @@ describe('read scope 够用(非 admin)', () => {
 /**
  * `/healthz` 回显 catalog 计数与 digest,**免认证**。
  *
- * 存在的理由:此前"部署形态改变产品能力"(Workers 99 个 provider、官方 Node 镜像 0 个)
- * 之所以拖了那么久,正是因为没有任何机器可读的信号 —— 两个宿主的 `/healthz` 长得一模一样。
+ * 这个机器可读信号用于核对不同宿主是否装配了同一份内置能力。
  */
 describe('GET /healthz 的 catalog 字段', () => {
   it('回显装配数与目录级 digest(免认证)', async () => {

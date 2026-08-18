@@ -52,15 +52,8 @@ import { BuiltinCatalog } from './BuiltinCatalog'
 /** profile → 挂载成哪种树节点（与 core NODE_KIND_BY_PROFILE 同一张表）。 */
 const NODE_KIND_BY_PROFILE = { 'tools/v1': 'tool', 'context/v1': 'context' } as const
 
-/** export 徽标：`<id> · <profile>`；缺 ~describe 缓存的老记录不编造。 */
-function ExportBadges({ exports }: { exports?: PluginExport[] }) {
-  if (exports === undefined || exports.length === 0) {
-    return (
-      <Badge className="text-[10px] text-muted-foreground" variant="outline">
-        无 ~describe 缓存
-      </Badge>
-    )
-  }
+/** export 徽标：`<id> · <profile>`。 */
+function ExportBadges({ exports }: { exports: PluginExport[] }) {
   return (
     <>
       {exports.map(e => (
@@ -501,7 +494,7 @@ export function PluginsPage() {
             {' '}
             <code className="font-mono text-xs">tb plugin</code>
             {' '}
-            六个命令保持对等。
+            命令面保持对等。
           </>
         )}
         eyebrow="CONTROL PLANE / PROVIDERS"

@@ -20,8 +20,10 @@ const TAVILY: CatalogListItem = {
   id: 'tavily',
   digest: 'd1',
   exports: ['actions'],
+  exportDetails: {
+    actions: { auth: { kind: 'single', required: false }, id: 'actions', kind: 'tool' },
+  },
   nodeKinds: ['tool'],
-  needsOAuth: false,
   description: 'Tavily',
 }
 
@@ -29,36 +31,47 @@ const JIRA: CatalogListItem = {
   id: 'jira',
   digest: 'd2',
   exports: ['actions'],
+  exportDetails: {
+    actions: {
+      auth: {
+        kind: 'fields',
+        fields: [
+          { key: 'baseUrl', label: 'Instance URL', required: true, secret: false },
+          { key: 'personalAccessToken', label: 'PAT', required: true, secret: true },
+        ],
+      },
+      id: 'actions',
+      kind: 'tool',
+    },
+  },
   nodeKinds: ['tool'],
-  needsOAuth: false,
-  credentialFields: [
-    { key: 'baseUrl', label: 'Instance URL', required: true, secret: false },
-    { key: 'personalAccessToken', label: 'PAT', required: true, secret: true },
-  ],
 }
 
 const SENTRY: CatalogListItem = {
   id: 'sentry',
   digest: 'd3',
   exports: ['actions'],
+  exportDetails: {
+    actions: { auth: { kind: 'oauth' }, id: 'actions', kind: 'tool' },
+  },
   nodeKinds: ['tool'],
-  needsOAuth: true,
 }
 
 const MULTI: CatalogListItem = {
   id: 'notes',
   digest: 'd4',
   exports: ['actions', 'documents'],
-  exportKinds: { actions: 'tool', documents: 'context' },
+  exportDetails: {
+    actions: { auth: { kind: 'none' }, id: 'actions', kind: 'tool' },
+    documents: { auth: { kind: 'none' }, id: 'documents', kind: 'context' },
+  },
   nodeKinds: ['context', 'tool'],
-  needsOAuth: false,
 }
 
 const PER_EXPORT: CatalogListItem = {
   id: 'mixed',
   digest: 'd6',
   exports: ['actions', 'documents'],
-  exportKinds: { actions: 'tool', documents: 'context' },
   exportDetails: {
     actions: {
       auth: { kind: 'none' },
@@ -74,7 +87,6 @@ const PER_EXPORT: CatalogListItem = {
     },
   },
   nodeKinds: ['context', 'tool'],
-  needsOAuth: false,
 }
 
 /** 自建实例型:单值凭证 + 一个必配的非凭证 baseUrl(如 memos)。 */
@@ -82,11 +94,15 @@ const MEMOS: CatalogListItem = {
   id: 'memos',
   digest: 'd5',
   exports: ['actions'],
+  exportDetails: {
+    actions: {
+      auth: { kind: 'single', required: false },
+      id: 'actions',
+      kind: 'tool',
+      mountConfigFields: [{ key: 'baseUrl', label: '实例地址', required: true }],
+    },
+  },
   nodeKinds: ['tool'],
-  needsOAuth: false,
-  mountConfigFields: [
-    { key: 'baseUrl', label: '实例地址', required: true },
-  ],
 }
 
 const form = (patch: Partial<IntegrationFormState>): IntegrationFormState => ({
@@ -145,8 +161,8 @@ describe('integrationPlan', () => {
 
 describe('derivedSecretName', () => {
   it('由路径派生 —— authRef 不再是两处要打对的自由文本', () => {
-    expect(derivedSecretName('tools/tavily')).toBe('integration-v2-tools%2Ftavily')
-    expect(derivedSecretName(' a/b/c ')).toBe('integration-v2-a%2Fb%2Fc')
+    expect(derivedSecretName('tools/tavily')).toBe('integration-tools%2Ftavily')
+    expect(derivedSecretName(' a/b/c ')).toBe('integration-a%2Fb%2Fc')
   })
 
   it('完整路径编码不会把 slash 与 dash 压成同一槽位', () => {
@@ -160,13 +176,13 @@ describe('buildIntegrationCalls', () => {
       form({ provider: 'tavily', credentials: { [SINGLE_FIELD_KEY]: ' tvly-k ' } }),
       TAVILY,
     )
-    expect(calls.secret).toEqual({ name: 'integration-v2-tools%2Fx', value: 'tvly-k' })
+    expect(calls.secret).toEqual({ name: 'integration-tools%2Fx', value: 'tvly-k' })
     // 单 export 时不写 export 字段(平台按 resolvePluginExport 自己选唯一那个),
     // 与 CLI `tb integration add` 一致 —— 两个操作面发出的 wire payload 应当同形。
     expect(calls.mount.config).toEqual({
       kind: 'tool',
       provider: 'tavily',
-      authRef: 'integration-v2-tools%2Fx',
+      authRef: 'integration-tools%2Fx',
     })
     expect(calls.needsAuthorize).toBe(false)
   })
@@ -194,10 +210,19 @@ describe('buildIntegrationCalls', () => {
   it('required:false 的字段留空不算缺', () => {
     const optional: CatalogListItem = {
       ...JIRA,
-      credentialFields: [
-        { key: 'apiKey', required: true },
-        { key: 'workspace', required: false },
-      ],
+      exportDetails: {
+        actions: {
+          auth: {
+            kind: 'fields',
+            fields: [
+              { key: 'apiKey', required: true },
+              { key: 'workspace', required: false },
+            ],
+          },
+          id: 'actions',
+          kind: 'tool',
+        },
+      },
     }
     const calls = buildIntegrationCalls(
       form({ provider: 'jira', exportId: 'actions', credentials: { apiKey: 'k' } }),
@@ -288,14 +313,21 @@ describe('buildIntegrationCalls', () => {
   })
 
   it('context/v1 的集成挂成 kind:context', () => {
-    const ctxEntry: CatalogListItem = { ...TAVILY, id: 'docs', nodeKinds: ['context'] }
+    const ctxEntry: CatalogListItem = {
+      ...TAVILY,
+      id: 'docs',
+      nodeKinds: ['context'],
+      exportDetails: {
+        actions: { auth: { kind: 'single', required: false }, id: 'actions', kind: 'context' },
+      },
+    }
     const calls = buildIntegrationCalls(form({ provider: 'docs', mode: 'none' }), ctxEntry)
     expect(calls.mount.kind).toBe('context')
     expect(calls.mount.config.kind).toBe('context')
   })
 
   /**
-   * 跨 kind 多 export(notes):选 context export 时按 exportKinds 挂成 context,
+   * 跨 kind 多 export(notes):选 context export 时按 exportDetails 挂成 context,
    * 不能从 nodeKinds=['context','tool'] 落到默认 'tool'(那样平台会拒且用户无解)。
    */
   it('跨 kind provider 按选中 export 定 kind(context export → context)', () => {

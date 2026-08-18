@@ -37,10 +37,6 @@ export function serverAddCommand(): Command {
     )
     .option('--sk-ref <ref>', 'SecretStore ref for outbound SK (skRef)')
     .option('--description <text>', 'One-line node description (default: derived from remote URL)')
-    .addHelpText(
-      'after',
-      '\nMigration: remote URL uses --remote-url; --base-url always selects the gateway.\n',
-    )
     .action(async (pathArg: string, opts: ServerAddOpts) => {
       const asJson = Boolean(opts.json)
       await guard(asJson, async () => {
@@ -48,9 +44,7 @@ export function serverAddCommand(): Command {
         if (!path) throw new CliError('tree path is required')
         const remoteUrl = String(opts.remoteUrl ?? '').trim()
         if (!remoteUrl) {
-          throw new CliError(
-            '--remote-url is required; --base-url now selects the gateway (migrate the old remote URL flag to --remote-url)',
-          )
+          throw new CliError('--remote-url is required; --base-url selects the gateway')
         }
         const skRef = opts.skRef ? String(opts.skRef) : undefined
 

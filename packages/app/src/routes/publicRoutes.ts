@@ -70,9 +70,7 @@ export function registerPublicRoutes(app: TbHono, env: RouteEnv): void {
   //
   // `catalog` 回显**装配了几个内置集成**与目录级 digest(未装配则整个字段缺席)。
   // 用途是三宿主对拍:同一个 commit 部署到 Workers 与 Node/Docker,两边这个 digest 必须
-  // 相同 —— 此前"部署形态改变产品能力"(Workers 99 个 provider、官方 Node 镜像 0 个)
-  // 恰恰是**没有任何机器可读的信号**才拖了那么久。digest 只覆盖 (id, per-entry digest) 对,
-  // 故改一个 provider 的文案不会翻动它。
+  // 相同。digest 只覆盖 (id, per-entry digest) 对,故改一个 provider 的文案不会翻动它。
   //
   // 免认证暴露它是安全的:那是一串 sha256 与一个计数,不含 provider 名更不含凭证;
   // 而部署诊断恰恰需要在拿到 SK 之前就能看。

@@ -37,7 +37,7 @@ import { ManagedCredentialFields } from './ManagedCredentialFields'
 /**
  * 集成挂载向导 —— 选集成 → 填凭证 → 挂载(需要时授权),一屏走完。
  *
- * 与 `MountDialog` 的分工:那个是**协议面的通用挂载器**(六个 kind、虚拟化、替换语义,
+ * 与 `MountDialog` 的分工:那个是**协议面的通用挂载器**(全部 kind、虚拟化、替换语义,
  * 面向知道自己在干什么的 admin);这个只做最常见那件事 —— 挂一个 provider,而且
  * 由 catalog 驱动:该填哪些字段、要不要授权、能挂成什么 kind 都从 descriptor 来,
  * 用户不必去翻插件源码,authRef 也不再是两处要打对的自由文本。
@@ -241,7 +241,7 @@ export function IntegrationDialog({
                     >
                       <code className="font-mono font-medium">{item.id}</code>
                       <span className="truncate text-muted-foreground">{item.description}</span>
-                      {item.needsOAuth && (
+                      {Object.values(item.exportDetails).some(detail => detail.auth.kind === 'oauth') && (
                         <Badge className="ml-auto px-1 py-0 text-[10px]" variant="outline">
                           OAuth
                         </Badge>

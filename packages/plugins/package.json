@@ -2,7 +2,7 @@
   "name": "@tool-bridge/plugins",
   "version": "0.1.0",
   "private": true,
-  "description": "Built-in plugin catalog: every folder under src/ is one in-process plugin (available code, activated only when registered & mounted)",
+  "description": "Built-in plugin catalog: every provider under src/ can be mounted directly by an assembled host",
   "type": "module",
   "exports": {
     ".": "./src/registry.ts",

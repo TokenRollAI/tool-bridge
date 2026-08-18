@@ -2,7 +2,7 @@
  * `tb integration` —— 集成的**用户面**:浏览目录 → 一条命令配好凭证并挂载 → 需要时授权。
  *
  * 为什么另起一个命令族:此前挂一个内置 provider 要串起四个概念、三条命令 ——
- * `tb plugin catalog` 看有什么(而且要 admin)、`tb secret set --name X` 起个**自由文本**
+ * `tb integration catalog` 看有什么、`tb secret set --name X` 起个**自由文本**
  * 名字、`tb tool mount --provider p --auth-ref X` 手打同一个名字(拼错不报错,agent
  * 首次调用才 401)、oauth 型还要 `tb tool auth`。用户心智里这是一件事。
  *
@@ -12,7 +12,7 @@
  */
 
 import { encodeCredentialValues } from '@tool-bridge/core'
-import { Command, Option } from 'commander'
+import { Command } from 'commander'
 import type { NodeConfig, NodeInput, Page, SecretSummary } from '../types'
 import { collect, parsePageOpts, resolveTarget, withGlobalOpts, withPageOpts } from '../args'
 import { guard, printJson, printLine, table } from '../output'
@@ -22,31 +22,31 @@ import { toolAuthCommand } from './tool'
 
 /** system/catalog 的列表项(core builtin/catalog 的 CatalogListItem)。 */
 interface CatalogListItem {
-  credentialFields?: Array<{
-    description?: string
-    key: string
-    label?: string
-    required?: boolean
-    secret?: boolean
-  }>
   description?: string
   digest: string
-  exportDetails?: Record<string, CatalogExportDetails>
-  exportKinds?: Record<string, 'context' | 'tool'>
+  exportDetails: Record<string, CatalogExportDetails>
   exports: string[]
   id: string
-  mountConfigFields?: Array<{
-    description?: string
-    key: string
-    label?: string
-    required?: boolean
-  }>
-  needsOAuth: boolean
   nodeKinds: Array<'context' | 'tool'>
 }
 
+interface CatalogCredentialField {
+  description?: string
+  key: string
+  label?: string
+  required?: boolean
+  secret?: boolean
+}
+
+interface CatalogMountConfigField {
+  description?: string
+  key: string
+  label?: string
+  required?: boolean
+}
+
 type CatalogExportAuth
-  = | { fields: NonNullable<CatalogListItem['credentialFields']>, kind: 'fields' }
+  = | { fields: CatalogCredentialField[], kind: 'fields' }
     | { kind: 'none' }
     | { kind: 'oauth' }
     | { description?: string, kind: 'single', label?: string, required: boolean }
@@ -56,7 +56,7 @@ interface CatalogExportDetails {
   description?: string
   id: string
   kind: 'context' | 'tool'
-  mountConfigFields?: NonNullable<CatalogListItem['mountConfigFields']>
+  mountConfigFields?: CatalogMountConfigField[]
 }
 
 /** 全局参数的公共形状(本仓无集中 GlobalOpts 类型,各命令 inline 声明)。 */
@@ -76,7 +76,6 @@ interface IntegrationAddOpts extends CommonOpts {
   key?: string
   keyStdin?: boolean
   provider: string
-  secret?: string
 }
 
 type SecretExistence = 'absent' | 'exists' | 'unknown'
@@ -124,29 +123,14 @@ async function catalogEntry(
   }
 }
 
-/** 新 catalog 按 export 给精确契约;旧宿主退化到 provider 级汇总字段。 */
+/** 目录按 export 给出唯一的精确契约。 */
 function detailsFor(
   entry: CatalogListItem | undefined,
   exportId: string | undefined,
 ): CatalogExportDetails | undefined {
   if (entry === undefined) return undefined
   const id = exportId ?? (entry.exports.length === 1 ? entry.exports[0] : undefined)
-  if (id !== undefined && entry.exportDetails?.[id] !== undefined) return entry.exportDetails[id]
-  if (id === undefined) return undefined
-  const auth: CatalogExportAuth = entry.needsOAuth
-    ? { kind: 'oauth' }
-    : entry.credentialFields !== undefined
-      ? { kind: 'fields', fields: entry.credentialFields }
-      : { kind: 'single', required: false }
-  return {
-    id,
-    kind: entry.exportKinds?.[id]
-      ?? (entry.nodeKinds.length === 1 ? entry.nodeKinds[0]! : 'tool'),
-    auth,
-    ...(entry.mountConfigFields !== undefined
-      ? { mountConfigFields: entry.mountConfigFields }
-      : {}),
-  }
+  return id === undefined ? undefined : entry.exportDetails[id]
 }
 
 /** 字段名校验:挂载前就拒掉拼错的字段,而不是等 agent 首次调用收 401。 */
@@ -205,10 +189,10 @@ function assertMountConfig(
 
 /**
  * 内置集成的内部凭证槽。encodeURIComponent 对完整 path 是一一映射，故 `a/b` 与 `a-b`
- * 不再像 legacy 的 slash→dash 规则那样碰撞。这个名字只进入 wire，不属于用户输出。
+ * 不会让 `a/b` 与 `a-b` 碰撞。这个名字只进入 wire，不属于用户输出。
  */
 export function derivedSecretName(path: string): string {
-  return `integration-v2-${encodeURIComponent(path.trim())}`
+  return `integration-${encodeURIComponent(path.trim())}`
 }
 
 /**
@@ -309,8 +293,6 @@ export function integrationAddCommand(): Command {
     .option('--key-stdin', 'Read the single-value credential from stdin')
     .option('--field <key=value>', 'One field of a multi-field credential (repeatable)', collect, [])
     .option('--credential <name>', 'Reuse a saved credential')
-    // 0.14 兼容别名；从 help 隐藏，避免把存储实现重新带回高层集成心智。
-    .addOption(new Option('--secret <name>').hideHelp())
     .option('--config <key=value>', 'Non-secret provider config, e.g. baseUrl (repeatable)', collect, [])
     .option('--description <text>', 'One-line node description (default: auto-generated)')
     .addHelpText('after', `
@@ -334,7 +316,6 @@ Examples:
           opts.keyStdin === true ? '--key-stdin' : undefined,
           opts.field.length > 0 ? '--field' : undefined,
           opts.credential !== undefined ? '--credential' : undefined,
-          opts.secret !== undefined ? '--secret' : undefined,
         ].filter((s): s is string => s !== undefined)
         if (sources.length > 1) {
           throw new CliError(`${sources.join(' / ')} are mutually exclusive`)
@@ -358,12 +339,9 @@ Examples:
 
         // 目标节点 kind 由**选中 export** 的 profile 决定。多 export 跨 kind 的 provider
         // (如 notes:actions=tool / notes=context)必须按 exportId 取,否则挂 context export
-        // 会落到默认 'tool' 被平台拒且无解。退化顺序:选中 export 的 kind → 单一 nodeKind →
-        // 'tool'(catalog 查不到 external plugin 时的兜底,那时确实无从判断)。
+        // 会落到默认 'tool' 被平台拒且无解。catalog 查不到 external plugin 时才退回 tool。
         const nodeKind: 'context' | 'tool'
-          = details?.kind
-            ?? (exportId !== undefined ? entry?.exportKinds?.[exportId] : undefined)
-            ?? (entry?.nodeKinds.length === 1 ? entry.nodeKinds[0]! : 'tool')
+          = details?.kind ?? 'tool'
 
         // 挂载配置在**任何写操作之前**解析并校验:缺必填 baseUrl 就该在这里拒,
         // 而不是等 secret 已经代建出来才炸(那会留下孤儿 secret)。
@@ -383,7 +361,7 @@ Examples:
           throw new CliError(`provider "${provider}" export "${details.id}" requires credentials`)
         }
 
-        const savedCredential = opts.credential ?? opts.secret
+        const savedCredential = opts.credential
         let authRef = savedCredential !== undefined ? String(savedCredential).trim() : undefined
         if (savedCredential !== undefined && authRef === '') {
           throw new CliError('saved credential name is empty')
@@ -565,36 +543,20 @@ export function integrationLsCommand(): Command {
  *
  * **对称性**:挂载走 `~register`(register scope),卸载此前只能走 `system/registry delete`
  * (admin)—— 能装不能卸是权限面的不对称。这里仍走管理面(协议未变),但把它放进同一个
- * 命令族,并在 404 时给出可操作提示。0.14 的 `--purge` 只作隐藏兼容入口。
+ * 命令族,并在 404 时给出可操作提示。凭证生命周期仍由 `tb secret` 显式管理。
  */
 export function integrationRmCommand(): Command {
   return withGlobalOpts(new Command('rm'))
     .description('Unmount an integration')
     .argument('<path>', 'Mounted integration path')
-    // legacy 高级兼容开关；高层帮助不再要求用户理解派生 secret。
-    .addOption(new Option('--purge').hideHelp())
-    .action(async (pathArg: string, opts: CommonOpts & { purge?: boolean }) => {
+    .action(async (pathArg: string, opts: CommonOpts) => {
       const asJson = Boolean(opts.json)
       await guard(asJson, async () => {
         const path = String(pathArg ?? '').trim()
         if (!path) throw new CliError('tree path is required')
-        const target = resolveTarget(opts)
-        await callTool(target, '/system/registry', 'delete', { path })
-        let credentialDeleted = false
-        if (opts.purge === true) {
-          const name = derivedSecretName(path)
-          try {
-            await callTool(target, '/system/secret', 'delete', { name })
-            credentialDeleted = true
-          } catch {
-            // 没有内部槽位(复用已保存凭证,或本来不需要凭证):不是错误。
-          }
-        }
-        if (asJson) printJson({ ok: true, path, ...(credentialDeleted ? { credentialDeleted } : {}) })
-        else {
-          printLine(`unmounted ${path}`)
-          if (credentialDeleted) printLine('deleted managed credential')
-        }
+        await callTool(resolveTarget(opts), '/system/registry', 'delete', { path })
+        if (asJson) printJson({ ok: true, path })
+        else printLine(`unmounted ${path}`)
       })
     })
 }

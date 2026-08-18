@@ -339,7 +339,7 @@ export class DeviceSession extends DurableObject<DeviceSessionEnv> {
    * 连接失效统一收尾(正常关闭 / activeSocket 发现半开丢失):registry 下线 + 清 activeConnId
    * + 回收 alarm。**按 connId 条件执行**:重读 meta,仅当当前 activeConnId 仍是被拆除的这条
    * 连接时才下线并清空——否则期间已有新连接完成 hello(activeConnId 已换),旧连接的收尾
-   * 不得用陈旧 meta 覆盖新连接、把在线设备误标离线(2026-07-24 反思:陈旧 meta 覆盖新连接)。
+   * 不得用陈旧 meta 覆盖新连接、把在线设备误标离线。
    */
   private async markDisconnected(deviceId: string, connId: string): Promise<void> {
     const meta = await this.ctx.storage.get<DeviceMeta>(META_KEY)
@@ -376,9 +376,8 @@ export class DeviceSession extends DurableObject<DeviceSessionEnv> {
   /**
    * 连接代际 + 授权重验(invoke/唤醒热路径共用)。跨 KV await(identify)后连接可能被
    * 替换,故:①identify 前后都以传入的 connId 为准比对;②不仅校验凭据有效与 keyId 一致,
-   * 还用 hello 落库时同一个 `checkRegisterPath` 复核该 SK **现在**仍能注册该 mountPath
-   * ——scope 与 registerPaths 事后收紧都会失效(2026-07-24 反思:重验须同时含凭据/授权/
-   * 连接代际)。existing 传 null:此处判的是"现在还能不能注册",不是占用冲突。
+   * 还用 hello 落库时同一个 `checkRegisterPath` 复核该 SK **现在**仍能注册该 mountPath。
+   * existing 传 null:此处判的是"现在还能不能注册",不是占用冲突。
    * 通过 → true;否则 → false(调用方按失效处理)。
    */
   private async reverifyConn(meta: DeviceMeta, attachment: SocketAttachment): Promise<boolean> {

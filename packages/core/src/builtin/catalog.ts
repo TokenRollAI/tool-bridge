@@ -2,9 +2,7 @@
  * builtin 模块 "catalog" → **内置插件目录的只读浏览面**(挂载为 system/catalog 节点)。
  *
  * 与 `system/plugin` 的分工:那个是 external plugin 的**注册面**(admin,有副作用);
- * 这个是平台自带能力的**目录**(read,纯读)。此前"有哪些内置 provider 可用"只能经
- * `system/plugin catalog`(admin)看,于是一个只有 register scope 的用户想挂载内置插件,
- * 却看不到有哪些可挂 —— 能力可用而不可发现。
+ * 这个是平台自带能力的**目录**(read,纯读)。内置 provider 只从此处发现,不进入注册表。
  *
  * **scope=read 而非 admin**:descriptor 里没有敏感信息(provider 名、export id、
  * 凭证**字段名**与它们要不要遮蔽;没有任何凭证值)。挂载需要 register scope,浏览不该
@@ -28,8 +26,6 @@ const DESCRIPTION = 'Built-in integration catalog (read-only; mount one via syst
  * 要全文走 `get`。
  */
 export interface CatalogListItem {
-  /** 声明了多字段凭证时给出字段名(不含值);单值凭证为 undefined。 */
-  credentialFields?: PluginCredentialField[]
   description?: string
   /** descriptor 指纹;升级检测与三宿主对拍用。 */
   digest: string
@@ -41,17 +37,9 @@ export interface CatalogListItem {
    */
   /** 每个 export 的精确挂载契约;新客户端必须以选中的 export 为准。 */
   exportDetails: Record<string, CatalogExportDetails>
-  exportKinds: Record<string, 'tool' | 'context'>
   /** 可挂载的 export id(单 export 时挂载可省略 config.export)。 */
   exports: string[]
   id: string
-  /**
-   * 声明了非凭证挂载配置(如 baseUrl)时给出字段名与是否必填(不含值)。挂载向导据此
-   * 渲染带标签的输入框;未声明为 undefined。
-   */
-  mountConfigFields?: PluginMountConfigField[]
-  /** 声明了 oauth → 挂载后还要授权一步。 */
-  needsOAuth: boolean
   /** 这些 export 能挂成什么 kind 的节点。 */
   nodeKinds: Array<'tool' | 'context'>
 }
@@ -81,12 +69,17 @@ function projectExportAuth(exported: PluginExport): CatalogExportAuth {
     return { kind: 'fields', fields: exported.credentialFields }
   }
   if (exported.auth?.kind === 'none') return { kind: 'none' }
+  if (exported.auth?.kind !== 'single') {
+    throw new TBError(
+      'invalid_argument',
+      `catalog export '${exported.id}' 必须显式声明 auth、oauth 或 credentialFields`,
+    )
+  }
   return {
     kind: 'single',
-    // 兼容旧 descriptor:未显式声明 auth 时沿用“单值但可留空”。
-    required: exported.auth?.required ?? false,
-    ...(exported.auth?.label !== undefined ? { label: exported.auth.label } : {}),
-    ...(exported.auth?.description !== undefined
+    required: exported.auth.required ?? false,
+    ...(exported.auth.label !== undefined ? { label: exported.auth.label } : {}),
+    ...(exported.auth.description !== undefined
       ? { description: exported.auth.description }
       : {}),
   }
@@ -95,13 +88,11 @@ function projectExportAuth(exported: PluginExport): CatalogExportAuth {
 function projectListItem(entry: BuiltinCatalogEntry): CatalogListItem {
   const exports = entry.describe.exports
   const kinds = new Set<'tool' | 'context'>()
-  const exportKinds: Record<string, 'tool' | 'context'> = {}
   const exportDetails: Record<string, CatalogExportDetails> = {}
   for (const e of exports) {
     const kind = NODE_KIND_BY_PROFILE[e.profile]
     if (kind !== undefined) {
       kinds.add(kind)
-      exportKinds[e.id] = kind
       exportDetails[e.id] = {
         id: e.id,
         kind,
@@ -113,33 +104,21 @@ function projectListItem(entry: BuiltinCatalogEntry): CatalogListItem {
       }
     }
   }
-  // 多 export 时字段声明可能各不相同;列表取第一个声明了凭证字段的那个作为提示,
-  // 精确形状由 get 给出(挂载表单也该按选定的 export 取)。
-  const withFields = exports.find(e => e.credentialFields !== undefined)
-  const withMountConfig = exports.find(e => e.mountConfigFields !== undefined)
   const description = exports.find(e => e.description !== undefined)?.description
   return {
     id: entry.id,
     digest: entry.digest,
     exports: exports.map(e => e.id),
-    exportKinds,
     exportDetails,
     nodeKinds: [...kinds].sort(),
-    needsOAuth: exports.some(e => e.oauth !== undefined),
     ...(description !== undefined ? { description } : {}),
-    ...(withFields?.credentialFields !== undefined
-      ? { credentialFields: withFields.credentialFields }
-      : {}),
-    ...(withMountConfig?.mountConfigFields !== undefined
-      ? { mountConfigFields: withMountConfig.mountConfigFields }
-      : {}),
   }
 }
 
 /**
  * 搜索:按 id 与 description 子串匹配(大小写不敏感)。
  *
- * 刻意不做分词/打分:目录规模是宿主装配数(当前 99),而这里的用途是"我记得有个
+ * 刻意不做分词/打分:目录规模由宿主装配决定,而这里的用途是"我记得有个
  * 叫 tavily 的" —— 子串够用。全局工具搜索是另一条路(`/~search`,有索引与权重)。
  */
 function matches(item: CatalogListItem, query: string): boolean {
@@ -159,7 +138,7 @@ function catalogCmds(nodePath: TreePath): CmdSpec[] {
       path,
       h: 'list built-in integrations available on this host (no credentials, read scope)',
       inputSchema: { type: 'object', properties: { opts: LIST_OPTS_SCHEMA } },
-      returns: 'Page<CatalogListItem> — id, exports, nodeKinds, credential field names',
+      returns: 'Page<CatalogListItem> — id, exports, nodeKinds, exportDetails',
       scope: 'read',
     },
     {

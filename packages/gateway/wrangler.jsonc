@@ -8,45 +8,38 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "tb-gateway",
   // **不是 src/index.ts**:那个是**库入口**(npm 产物导出 createApp,不装配任何插件)。
-  // 部署要的是 deployEntry.ts —— 它全量装配内置插件目录(97 个迁移产物)。
+  // 部署要的是 deployEntry.ts —— 它全量装配生成的内置插件目录。
   // 两个入口分开,免得 npm 消费者被迫吞下约 6 MB 插件代码。
   "main": "src/deployEntry.ts",
   "compatibility_date": "2025-06-01",
   "compatibility_flags": ["nodejs_compat"],
-  // 生产只允许规范自定义域;关闭 workers.dev 与版本预览 URL,避免同一状态暴露多 origin。
-  // 没有自定义域(routes 为空)时把 workers_dev 改成 true,否则部署出来的 Worker 无入口。
-  "workers_dev": false,
-  "preview_urls": false,
-  // 生产入口 = TB_DOMAIN(.env),由 provision 写成 custom domain 路由。
-  "routes": [
-    {
-      "pattern": "tool-bridge.pdjjq.org",
-      "custom_domain": true
-    }
-  ],
+  // 中立模板使用 workers.dev；provision 在提供 TB_DOMAIN 时改成 custom domain。
+  "workers_dev": true,
+  "preview_urls": true,
+  "routes": [],
   "observability": {
     "enabled": true
   },
   "vars": {
     // 规范 origin(钉死 OAuth redirect_uri);空串 = 本部署不钉,由 provision 从 TB_BASE_URL 回填。
-    "TB_CANONICAL_ORIGIN": "https://tool-bridge.pdjjq.org",
+    "TB_CANONICAL_ORIGIN": "",
     // r2 presign 的 bucket 名;S3 兼容端点 TB_R2_S3_ENDPOINT 由 provision 从
     // CLOUDFLARE_ACCOUNT_ID 派生写入(缺省则大对象 $ref 走网关 /~ref 中转)。
     // presign 凭证本体走 SecretStore 'r2-presign' 或 wrangler secret,不入 vars。
     "TB_R2_BUCKET": "tb-r2",
-    "TB_R2_S3_ENDPOINT": "https://0cb9b897010bc426cd8bf33d8c052d11.r2.cloudflarestorage.com"
+    "TB_R2_S3_ENDPOINT": ""
   },
   // KV:树配置 / SK 哈希表 / manifest。id 为占位,由 scripts/provision.mjs
   // 幂等创建后回填;本地 wrangler dev / vitest-pool-workers 用 miniflare 本地实例,不校验该 id。
   "kv_namespaces": [
-    { "binding": "TB_KV", "id": "d18c93de33cf4ba2b1fbf7d26fd742f1" }
+    { "binding": "TB_KV", "id": "00000000000000000000000000000000" }
   ],
   // D1:FTS5/trigram 工具搜索索引。database_id 由 scripts/provision.mjs 幂等回填。
   "d1_databases": [
     {
       "binding": "TB_SEARCH",
       "database_name": "tb-search",
-      "database_id": "f788b779-ec1c-4fba-ac1f-b780fab990fc"
+      "database_id": "00000000-0000-0000-0000-000000000000"
     }
   ],
   // R2:context r2 provider 与大对象 $ref。
@@ -67,6 +60,5 @@
     "directory": "../dashboard/dist",
     "binding": "ASSETS",
     "run_worker_first": true
-  },
-  "account_id": "0cb9b897010bc426cd8bf33d8c052d11"
+  }
 }

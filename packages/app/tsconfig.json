@@ -6,7 +6,7 @@
     // @cloudflare/workers-types 也不引 @types/node** —— types 收窄为空,
     // 让类型系统而非人工纪律来保证这一层不出现 KVNamespace / R2Bucket / process 之类的
     // 宿主专属符号。宿主差异一律经 TbAppDeps 的五个注入点(StateStore / ObjectStore /
-    // SecretStore / DeviceTransport / SearchIndex)传入。
+    // SecretStore / DeviceChannel / SearchIndex)传入。
     //
     // test/ 一并纳入这条约束(见下方 include):测试跑在 Node 上,但仍不得使用 Node
     // 专属 API——它们打的是同一套中立面,拿 process/Buffer 写断言等于绕过验证对象。

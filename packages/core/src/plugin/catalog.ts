@@ -5,14 +5,8 @@
  * `/~describe` 生成(`@tool-bridge/plugins` 的 `catalog.generated.ts`),与插件代码同一份
  * 构建产物 —— 故不可能陈旧,也不需要落 KV。
  *
- * 这里定的是**解析函数的能力边界**。此前 `requirePluginExport` 拿的是 `deps`
- * (含可写 `state`),于是 help/call 这类读操作也能写库:`manifest ??= autoRegisterBinding(…)`
- * 让"删掉一个 plugin 后随便读一次就复活",而 7 个调用点里传 `deps` 还是传裸 store
- * 是随手决定的 —— 同一个语义在四条链上有四种行为。
- *
- * 修法不是"约定读路径要传只读的东西",而是**让解析函数结构上拿不到写能力**:
- * 下面三个函数的入参只有 catalog(纯值)与 {@link ReadOnlyStore}(只有 get)。
- * 想在这里写库得先改签名,而那是 code review 能看见的事。
+ * 这里定的是**解析函数的能力边界**。下面三个函数的入参只有 catalog(纯值)与
+ * {@link ReadOnlyStore}(只有 get)，因此 help/call 等读路径结构上不能创建或修写注册状态。
  */
 
 import {
@@ -190,17 +184,7 @@ export async function resolveExternalExport(
  * 顺序是有意的:注册是用户的显式动作,同名时该赢过平台自带的目录项(比如用户想用自己
  * 部署的 `github` 插件覆盖内置那个)。反过来会让"我明明注册了却没生效"变成无解的困惑。
  *
- * **但 `binding:` endpoint 的注册记录例外:catalog 赢。** 那种记录有两个来源,两者都该让
- * 编译期目录优先:
- *
- * - 已删除的 `autoRegisterBinding` 在存量部署里写下的 —— 升级后它们还在 KV 里,而它们的
- *   `pluginmeta:` 快照**只在注册那一刻抓过一次**。若让它们赢,A3(契约永久陈旧)就在
- *   升级过的部署里原样复活:改了插件的 export 声明,平台仍按老快照校验挂载。
- * - 用户显式 `system/plugin write` 一个 `binding:` 插件 —— 那条路仍受理,但它指向的
- *   代码就是本进程里的同一份,catalog 的 descriptor 与它同源同构建,不可能更旧。
- *
- * 换句话说:**endpoint 决定契约的真源**。`binding:` 的真源是这份构建产物,https 的真源
- * 才是注册时抓的快照。两条路都只读。
+ * 注册记录按用户的显式选择优先；内置目录不再读取或迁移旧注册快照。
  */
 export async function resolveIntegration(
   store: ReadOnlyStore,
@@ -211,8 +195,7 @@ export async function resolveIntegration(
   exportId?: string,
 ): Promise<ResolvedIntegration> {
   const manifest = (await store.get(KEY_PLUGIN + id)) as PluginManifest | null
-  const isBinding = manifest?.endpoint.startsWith('binding:') === true
-  if (manifest !== null && !(isBinding && catalog[id] !== undefined)) {
+  if (manifest !== null) {
     return await resolveExternalExport(store, id, nodeKind, what, exportId)
   }
   return resolveBuiltinExport(catalog, id, nodeKind, what, exportId)

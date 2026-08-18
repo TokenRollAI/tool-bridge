@@ -24,8 +24,8 @@ export interface PluginManifest {
   auth: { kind: 'platform-token' } | { kind: 'bearer', secretRef: string }
   enabled: boolean
   endpoint: string
-  /** 注册时缓存的 `~describe.exports`(挂载 `--export` 从这里选);老记录可能缺省。 */
-  exports?: PluginExport[]
+  /** 注册时缓存的 `~describe.exports`(挂载 `--export` 从这里选)。 */
+  exports: PluginExport[]
   healthPath: string
   id: string
   protocolVersion: string
@@ -43,11 +43,9 @@ export interface PluginHealth {
   healthy: boolean
 }
 
-/** export 摘要:`actions:tools/v1, notes:context/v1`;缺省缓存时给 '-'(不假装没有 export)。 */
+/** export 摘要:`actions:tools/v1, notes:context/v1`。 */
 function exportsSummary(m: Pick<PluginManifest, 'exports'>): string {
-  const list = m.exports ?? []
-  if (list.length === 0) return '-'
-  return list.map(e => `${e.id}:${e.profile}`).join(', ')
+  return m.exports.map(e => `${e.id}:${e.profile}`).join(', ')
 }
 
 interface PluginOpts {
@@ -187,9 +185,7 @@ export function pluginGetCommand(): Command {
         // v2:「提供什么」在 export 上 —— 逐个列出,并给出它对应的挂载命令
         // (profile 决定挂成哪种节点,用户不必自己换算)。
         printLine('exports:')
-        const exports = m.exports ?? []
-        if (exports.length === 0) printLine('  - (no ~describe cache; re-register to refresh)')
-        for (const e of exports) {
+        for (const e of m.exports) {
           const extra = [
             e.methods?.length ? `methods=${e.methods.join('|')}` : '',
             e.capabilities?.length ? `capabilities=${e.capabilities.join('|')}` : '',
@@ -286,50 +282,6 @@ export function pluginRmCommand(): Command {
     })
 }
 
-/** catalog cmd 目录项(宿主装配的进程内插件;registered=false 即"可用未激活")。 */
-export interface PluginCatalogItem {
-  endpoint: string
-  name: string
-  pluginId?: string
-  registered: boolean
-}
-
-/** `tb plugin catalog` → PluginRegistry.Catalog(宿主装配的进程内插件目录)。 */
-export function pluginCatalogCommand(): Command {
-  return withGlobalOpts(new Command('catalog'))
-    .description('List in-process plugins assembled by this host (available code, not yet activated)')
-    .addHelpText('after', `
-Examples:
-  tb plugin catalog                 # what this host bundles in-process
-  tb plugin register --file m.json  # activate one: manifest endpoint = "binding:<name>"`)
-    .action(async (opts: PluginOpts) => {
-      const asJson = Boolean(opts.json)
-      await guard(asJson, async () => {
-        const result = await callTool<{ items: PluginCatalogItem[] }>(
-          resolveTarget(opts),
-          '/system/plugin',
-          'catalog',
-          {},
-        )
-        if (asJson) {
-          printJson(result)
-          return
-        }
-        const items = result.items ?? []
-        if (items.length === 0) {
-          printLine('(no in-process plugins assembled on this host)')
-          return
-        }
-        const rows = items.map(i => [
-          i.name,
-          i.endpoint,
-          i.registered ? `registered (${i.pluginId ?? '?'})` : 'available',
-        ])
-        printLine(table(['NAME', 'ENDPOINT', 'STATE'], rows))
-      })
-    })
-}
-
 export function pluginCommand(): Command {
   return new Command('plugin')
     .description('Manage plugins (system/plugin; admin scope)')
@@ -338,6 +290,5 @@ export function pluginCommand(): Command {
     .addCommand(pluginGetCommand())
     .addCommand(pluginUpdateCommand())
     .addCommand(pluginHealthCommand())
-    .addCommand(pluginCatalogCommand())
     .addCommand(pluginRmCommand())
 }

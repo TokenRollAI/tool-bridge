@@ -308,7 +308,12 @@ describe('平台核验探针形状', () => {
       if (url.pathname === '/~describe') {
         return json({
           protocolVersion: 'plugin/v2',
-          exports: [{ id: 'actions', profile: 'tools/v1', credentialProbe: 'probe' }],
+          exports: [{
+            auth: { kind: 'single', required: true },
+            id: 'actions',
+            profile: 'tools/v1',
+            credentialProbe: 'probe',
+          }],
         })
       }
       const body = (await request.json()) as { tool: string }

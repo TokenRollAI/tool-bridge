@@ -187,10 +187,6 @@ export function createToolBridge(config: ToolBridgeConfig): ToolBridge {
   }
   const encryptionKey = config.encryptionKey ?? process.env.TB_SECRET_ENCRYPTION_KEY
   if (encryptionKey !== undefined) deps.encryptionKey = encryptionKey
-  if (config.deviceTransport !== undefined) {
-    throw TBError.unimplemented('deviceTransport 宿主注入(网关侧设备通道)SDK 未实现')
-  }
-
   const app = createTbApp(deps)
 
   /** 缺省 expose:本实例注册的节点经 hello 帧 nodes+cmds 上报。 */

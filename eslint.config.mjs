@@ -23,7 +23,6 @@ export default [
     // 不参与 lint/typecheck —— 它们还没进内置目录,补完时会随产物一起过全部闸门。
     'packages/plugins/.pending-migration/',
     'output/',
-    'archive/',
     'packages/dashboard/public/',
     'packages/dashboard/src/index.css',
   ]),

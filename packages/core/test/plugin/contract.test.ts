@@ -21,9 +21,10 @@ const MANIFEST: PluginManifest = {
 const DUAL_EXPORT = {
   protocolVersion: 'plugin/v2',
   exports: [
-    { id: 'actions', profile: 'tools/v1', description: 'Feishu actions' },
+    { auth: { kind: 'none' }, id: 'actions', profile: 'tools/v1', description: 'Feishu actions' },
     {
       id: 'documents',
+      auth: { kind: 'none' },
       profile: 'context/v1',
       description: 'Feishu documents',
       methods: ['Get', 'List', 'Search'],
@@ -54,9 +55,17 @@ describe('validatePluginContract(plugin/v2)', () => {
   it('tools/v1 无需声明 methods(运行时经 List 发现)', () => {
     const parsed = validatePluginContract({
       manifest: MANIFEST,
-      describe: { protocolVersion: 'plugin/v2', exports: [{ id: 'a', profile: 'tools/v1' }] },
+      describe: { protocolVersion: 'plugin/v2', exports: [{ auth: { kind: 'none' }, id: 'a', profile: 'tools/v1' }] },
     })
     expect(parsed.exports[0]?.methods).toBeUndefined()
+  })
+
+  it('每个 export 必须显式声明凭证形态', () => {
+    const err = expectInvalid({
+      protocolVersion: 'plugin/v2',
+      exports: [{ id: 'a', profile: 'tools/v1' }],
+    })
+    expect(err.message).toContain('必须显式声明')
   })
 
   it('形状非法(缺 exports / 空 exports)→ invalid_argument', () => {
@@ -73,8 +82,8 @@ describe('validatePluginContract(plugin/v2)', () => {
     const err = expectInvalid({
       protocolVersion: 'plugin/v2',
       exports: [
-        { id: 'dup', profile: 'tools/v1' },
-        { id: 'dup', profile: 'context/v1' },
+        { auth: { kind: 'none' }, id: 'dup', profile: 'tools/v1' },
+        { auth: { kind: 'none' }, id: 'dup', profile: 'context/v1' },
       ],
     })
     expect(err.message).toContain('重复')
@@ -90,7 +99,7 @@ describe('validatePluginContract(plugin/v2)', () => {
   it('context/v1 声明未知动词 → invalid_argument', () => {
     const err = expectInvalid({
       protocolVersion: 'plugin/v2',
-      exports: [{ id: 'c', profile: 'context/v1', methods: ['Get', 'Frobnicate'] }],
+      exports: [{ auth: { kind: 'none' }, id: 'c', profile: 'context/v1', methods: ['Get', 'Frobnicate'] }],
     })
     expect(err.message).toContain('Frobnicate')
   })
@@ -99,7 +108,7 @@ describe('validatePluginContract(plugin/v2)', () => {
     const err = expectInvalid({
       protocolVersion: 'plugin/v2',
       exports: [
-        { id: 'c', profile: 'context/v1', methods: ['Get', 'List'], capabilities: ['search'] },
+        { auth: { kind: 'none' }, id: 'c', profile: 'context/v1', methods: ['Get', 'List'], capabilities: ['search'] },
       ],
     })
     expect(err.message).toContain('Search')
@@ -112,6 +121,7 @@ describe('validatePluginContract(plugin/v2)', () => {
         protocolVersion: 'plugin/v2',
         exports: [{
           id: 'actions',
+          auth: { kind: 'none' },
           profile: 'tools/v1',
           mountConfigFields: [{ key: 'baseUrl', label: '实例地址', required: true }],
         }],
@@ -129,6 +139,7 @@ describe('validatePluginContract(plugin/v2)', () => {
         protocolVersion: 'plugin/v2',
         exports: [{
           id: 'docs',
+          auth: { kind: 'none' },
           profile: 'context/v1',
           methods: ['Get'],
           mountConfigFields: [{ key: 'workspace' }],
@@ -155,6 +166,7 @@ describe('validatePluginContract(plugin/v2)', () => {
     const err = expectInvalid({
       protocolVersion: 'plugin/v2',
       exports: [{
+        auth: { kind: 'none' },
         id: 'actions',
         profile: 'tools/v1',
         mountConfigFields: [{ key: 'baseUrl' }, { key: 'baseUrl' }],
@@ -182,7 +194,7 @@ describe('resolvePluginExport', () => {
   it('省略 export 且恰好一个 → 取它(单 export plugin 挂载不必写 export)', () => {
     const single = validatePluginContract({
       manifest: MANIFEST,
-      describe: { protocolVersion: 'plugin/v2', exports: [{ id: 'only', profile: 'tools/v1' }] },
+      describe: { protocolVersion: 'plugin/v2', exports: [{ auth: { kind: 'none' }, id: 'only', profile: 'tools/v1' }] },
     })
     expect(resolvePluginExport(single, { nodeKind: 'tool', pluginId: 'feishu' }).id).toBe('only')
   })

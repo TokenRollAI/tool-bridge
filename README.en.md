@@ -60,13 +60,13 @@ tool-bridge collapses all five into **one self-describing tree**: every capabili
 
 | Capability | Details |
 |---|---|
-| **HTBP tree & progressive discovery** | Drill down from the root `/~help`; `~tree?depth=N` for a bounded overview; `~help` defaults to a compact, LLM-oriented Help DSL (`text/plain`), and `Accept: application/json` returns the semantically equivalent JSON (with real JSON Schema — directly renderable as forms) |
-| **Tool layer** | Mount MCP servers (Streamable HTTP, official SDK with session reuse) and arbitrary HTTP APIs (declarative HttpToolDef); **tool virtualization** (prefix / rename / hide / description override) — only virtual names are exposed |
+| **HTBP tree & progressive discovery** | Drill down from the root `/~help`; `~tree?depth=N` for a bounded overview; `~help` defaults to Markdown, `Accept: text/plain` returns the compact Help DSL, and `Accept: application/json` returns semantically equivalent JSON (with real JSON Schema — directly renderable as forms) |
+| **Tool layer** | Mount MCP servers (Streamable HTTP with modern/legacy era negotiation) and arbitrary HTTP APIs (declarative HttpToolDef); **tool virtualization** (prefix / rename / hide / description override) — only virtual names are exposed |
 | **Remote federation** | Mount another HTBP service as a subtree with `~help`/`~tree`/call passthrough; https enforced + host allowlist + `X-TB-Via` cycle detection; the caller's SK never leaves the gateway — outbound credentials are re-issued via `skRef` |
 | **Context layer** | Mount R2 / S3 as namespaces behind unified `List/Get/Update/Write` verbs + `Search`; optimistic concurrency (`ifVersion`); entries >1 MiB return a presigned `$ref` URL (gateway-relayed fallback when no credential), keeping large payloads off the gateway |
 | **Skillhub layer** | Publish Agent Skills (a directory of `SKILL.md` + text files) onto the tree so any agent can discover and fetch them over plain fetch: `List/Get/Search/Publish/Remove`; stored in the platform's own R2 **with no external credentials**; the server parses `SKILL.md` frontmatter into a name/description catalog (`tb skill get --out` pulls a skill straight into local `.claude/skills/`) |
 | **Device reverse registration** | An intranet machine runs `tb connect` to open a WebSocket and mount its own shell and fs onto the tree; the shell denies everything by default with an explicit allowlist; disconnects return 503 retryable and reconnects self-heal; cloud side uses Durable Object WebSocket Hibernation — near-zero idle cost |
-| **SK permission model** | Every Secret Key = owner + scope list (path glob × action set; deny wins, no match denies); **visibility is permission**: unauthorized nodes are absent from `~help`/`~tree` (404, not 403); revocation propagates globally within 60s (0.3s measured) |
+| **SK permission model** | Every Secret Key = owner + scope list (path glob × action set; deny wins, no match denies); **visibility is permission**: unauthorized nodes are absent from `~help`/`~tree` (404, not 403); revocation on the CF KV host is eventually consistent, with no exact propagation SLA |
 | **Credential custody** | Upstream AK/SKs are stored encrypted in the SecretStore (AES-256-GCM, write-only); node configs hold only reference names — credentials never leave the gateway and never appear in any `~help` or response |
 | **Plugin system** | Third parties implement Tool/Context providers as plain HTTP services; registration performs health checks + contract validation; plugins are peers of built-in providers |
 | **SDK** | Embed a TB instance in your own Node process, register local functions as tools, and optionally reverse-`connect` to a remote gateway — your local functions appear on the remote tree |
@@ -79,7 +79,7 @@ tool-bridge collapses all five into **one self-describing tree**: every capabili
 No SDK required — that's the whole point:
 
 ```sh
-# Progressive discovery from the root (~help returns a compact, LLM-oriented Help DSL)
+# Progressive discovery from the root (~help defaults to Markdown)
 curl -H "Authorization: Bearer $TB_SK" https://your-tb.example.com/~help
 
 # Drill into a node to see its tools and how to call them
@@ -127,17 +127,20 @@ tb device ls                                              # from another termina
 tb call device/<id>/shell --tool exec --args '{"command":"echo hi"}'
 
 # ── Federate another HTBP service ─────────────────────
-tb server add fed/team-b --base-url https://tb.team-b.example.com --sk-ref team-b-sk
+tb server add fed/team-b --remote-url https://tb.team-b.example.com --sk-ref team-b-sk
 
 # ── Permissions ───────────────────────────────────────
 tb sk create --owner agent:reader --scope 'ctx/docs/**:read' --scope 'tools/search:call'
-tb sk list && tb sk rm <id>
+tb sk list --limit 50
+tb sk get <id> && tb sk disable <id> && tb sk enable <id>
+tb sk update <id> --expires 2026-12-31T23:59:59Z
+tb sk rm <id>
 
 # ── Plugins ───────────────────────────────────────────
-tb plugin register ./manifest.json && tb plugin health my-plugin
+tb plugin register --file ./manifest.json && tb plugin health my-plugin
 ```
 
-All 24 top-level commands share the global `--json` / `--base-url` / `--sk` / `--timeout` options. Apart from local profiles and `init cloudflare` deployment orchestration, the CLI uses the public HTBP/API surface and has no private management endpoint.
+Top-level commands share the global `--json` / `--base-url` / `--sk` / `--timeout` options. Apart from local profiles and `init cloudflare` deployment orchestration, the CLI uses the public HTBP/API surface and has no private management endpoint.
 
 ### Dashboard
 
@@ -160,7 +163,10 @@ npm install @tool-bridge/sdk
 import { serve } from '@hono/node-server'
 import { createToolBridge, MemoryStateStore } from '@tool-bridge/sdk'
 
-const tb = createToolBridge({ state: new MemoryStateStore() })
+const tb = createToolBridge({
+  state: new MemoryStateStore(),
+  adminSk: process.env.TB_BOOTSTRAP_ADMIN_SK!,
+})
 
 // Register a local function as a tool on the tree
 tb.registerTool('tools/echo', {
@@ -278,7 +284,7 @@ Without a custom domain, leave `TB_DOMAIN` empty; provision enables `workers_dev
 stale custom routes automatically. The
 Node/Docker path does not need this step at all.
 
-On first request the gateway bootstraps itself from the preconfigured `TB_BOOTSTRAP_ADMIN_SK` and materializes the `system/*` management subtree (sk / secret / registry / status / plugin). A new Workers instance without that secret fails closed and never prints an Admin SK in plaintext.
+On first request the gateway bootstraps itself from the preconfigured `TB_BOOTSTRAP_ADMIN_SK` and materializes the `system/*` management subtree; the concrete builtin set is defined by the core assembly. A new Workers instance without that secret fails closed and never prints an Admin SK in plaintext.
 
 Local development: `pnpm gen-dev-vars` (generates .dev.vars from .env), then `npx wrangler dev`.
 
@@ -293,10 +299,9 @@ Local development: `pnpm gen-dev-vars` (generates .dev.vars from .env), then `np
 | `packages/cli` | The `tb` command line (Commander): public API client plus Cloudflare initialization orchestration — npm package [`@tool-bridge/cli`](https://www.npmjs.com/package/@tool-bridge/cli) |
 | `packages/sdk` | npm package [`@tool-bridge/sdk`](https://www.npmjs.com/package/@tool-bridge/sdk): embedded TB instance, programmatic registration, reverse connect |
 | `packages/plugin-sdk` | Minimal SDK and contract for writing third-party plugins (tool/context providers) |
-| `packages/plugins` | Built-in plugin sources (e.g. Feishu); host them on Workers, or run them as a Node process via `scripts/serve.ts` |
+| `packages/plugins` | Built-in plugin sources and generated catalog; standard hosts mount them in-process, or run them as an external Node plugin via `scripts/serve.ts` |
 | `packages/dashboard` | Web management UI: a generic `~help` renderer + admin forms, no dedicated backend |
-| `llmdoc/` | Project knowledge base (architecture boundaries, protocol contract, production pitfalls, workflows) |
-| `archive/` | Archived bootstrap-era spec & process docs (historical reference only) |
+| `llmdoc/` | Project knowledge base (architecture boundaries, protocol contract, runtime pitfalls, workflows) |
 
 ## Development
 
@@ -307,11 +312,11 @@ pnpm test:integration    # host-adapter integration tests (gateway on real worke
 pnpm lint:fix            # eslint auto-fix
 ```
 
-Engineering rule: **the code is the source of truth for behavior**; the lookup docs for the interface contract, module boundaries, and production pitfalls live in [llmdoc/](llmdoc/index.md) (contract entry point: `llmdoc/reference/protocol-contract.md`).
+Engineering rule: **the code is the source of truth for behavior**; the lookup docs for the interface contract, module boundaries, and runtime guidance live in [llmdoc/](llmdoc/index.md) (contract entry point: `llmdoc/reference/protocol-contract.md`).
 
 ## Status
 
-Under active development (pre-release), with no formal production environment yet. The core capabilities have landed and have been exercised end to end in a shared Cloudflare development environment, including auth, MCP, Search, the Feishu plugin, WebSocket hibernation, and the Dashboard; this online evidence is not a production release. The gateway itself has been extracted into the host-neutral `@tool-bridge/app`, so the Cloudflare and Node adapters are both just assembly layers over it. `@tool-bridge/cli` and `@tool-bridge/sdk` are published to npm, and Node/Docker single-container self-hosting plus the local three-hop Compose stack are implemented. Remaining release work includes merging the feature PR and synchronizing the external HTBP Draft.
+Under active development (pre-launch), with no formal production environment. Cloudflare, Node/Docker, and SDK hosts assemble the same host-neutral app. Release readiness is tracked by `llmdoc/must/current-state.md` and reproducible repository checks rather than environment history in this README.
 
 ## License
 

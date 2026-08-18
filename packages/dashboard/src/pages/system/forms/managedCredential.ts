@@ -34,11 +34,11 @@ export function initialManagedCredential(plan?: Pick<CredentialInputPlan, 'kind'
 
 /**
  * 一个挂载路径拥有一个稳定的内部凭证槽。名字只进入 wire，不应出现在内置集成表单里。
- * encodeURIComponent 对完整 path 是一一映射，避免 legacy slash→dash 规则让 `a/b` 与
- * `a-b` 误用同一凭证；v2 前缀同时与既有槽隔离。已有挂载编辑仍由 fallbackAuthRef 保留旧槽。
+ * encodeURIComponent 对完整 path 是一一映射，避免 `a/b` 与 `a-b` 误用同一凭证。
+ * 已有挂载编辑仍由 fallbackAuthRef 保留当前绑定的槽位。
  */
 export function derivedSecretName(path: string): string {
-  return `integration-v2-${encodeURIComponent(path.trim())}`
+  return `integration-${encodeURIComponent(path.trim())}`
 }
 
 /** 多字段凭证的 secret 明文：键序固定，与 core encodeCredentialValues 同规则。 */
