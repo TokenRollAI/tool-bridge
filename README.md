@@ -8,7 +8,7 @@
 
 Agent 只需要一个 BaseURL 和一个 Secret Key，就能发现能力、阅读契约并发起调用；不要求安装特定 SDK，也不要求运行 MCP client。
 
-简体中文 | [English](README.en.md)
+简体中文 | [English](README.en.md) | [在线文档](https://tool-bridge.tokenroll.ai/)
 
 [![npm: cli](https://img.shields.io/npm/v/@tool-bridge/cli?label=%40tool-bridge%2Fcli)](https://www.npmjs.com/package/@tool-bridge/cli)
 [![npm: sdk](https://img.shields.io/npm/v/@tool-bridge/sdk?label=%40tool-bridge%2Fsdk)](https://www.npmjs.com/package/@tool-bridge/sdk)

@@ -8,7 +8,7 @@
 
 An agent only needs a BaseURL and a Secret Key to discover capabilities, read their contracts, and invoke them. No specific SDK or MCP client runtime is required.
 
-[简体中文](README.md) | English
+[简体中文](README.md) | English | [Online documentation](https://tool-bridge.tokenroll.ai/)
 
 [![npm: cli](https://img.shields.io/npm/v/@tool-bridge/cli?label=%40tool-bridge%2Fcli)](https://www.npmjs.com/package/@tool-bridge/cli)
 [![npm: sdk](https://img.shields.io/npm/v/@tool-bridge/sdk?label=%40tool-bridge%2Fsdk)](https://www.npmjs.com/package/@tool-bridge/sdk)
