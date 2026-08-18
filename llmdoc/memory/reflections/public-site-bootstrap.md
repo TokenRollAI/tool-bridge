@@ -15,4 +15,3 @@
 - 公共文档 ownership、运行时真源优先级和平台配置边界已提升到 `overview/project-overview.md`。
 - 干净环境构建脚本许可与当前 Action 版本属于站点仓库自身的可执行配置，不复制进 tool-bridge 的部署 guide。
 - Cloudflare 凭证、Pages project 和域名绑定仍是用户后续的平台配置；未获授权时，CI 应完成验证并明确跳过上传，而不是暗中创建云资源。
-

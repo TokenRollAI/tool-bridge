@@ -38,6 +38,7 @@
 |---|---|
 | 公共站点独立仓库与 CI 启动 | [memory/reflections/public-site-bootstrap.md](memory/reflections/public-site-bootstrap.md) |
 | 公共站点任务化重构与契约校对 | [memory/reflections/public-site-redesign.md](memory/reflections/public-site-redesign.md) |
+| 公共站点自动发布与切页性能 | [memory/reflections/public-site-delivery-performance.md](memory/reflections/public-site-delivery-performance.md) |
 
 ## 维护边界
 
