@@ -59,9 +59,14 @@ jobs:
       - run: pnpm --filter @tool-bridge/core --filter @tool-bridge/cli test
       - run: pnpm --filter @tool-bridge/cli build
 
+      - name: Pack and verify npm tarball
+        run: |
+          TARBALL="$(node scripts/pack-and-verify-package.mjs packages/cli \
+            --output-dir "$RUNNER_TEMP/cli" --bin tb)"
+          echo "TARBALL=$TARBALL" >> "$GITHUB_ENV"
+
       - name: Publish to npm
-        working-directory: packages/cli
-        run: npm publish
+        run: npm publish "$TARBALL"
 
   publish-image:
     # cli-v* 发布正式版本 + latest；手工 dispatch 只允许覆盖明确标成预览的 edge。

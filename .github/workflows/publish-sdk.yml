@@ -50,6 +50,11 @@ jobs:
       - run: pnpm --filter @tool-bridge/core --filter @tool-bridge/app --filter @tool-bridge/sdk test
       - run: pnpm --filter @tool-bridge/sdk build
 
+      - name: Pack and verify npm tarball
+        run: |
+          TARBALL="$(node scripts/pack-and-verify-package.mjs packages/sdk \
+            --output-dir "$RUNNER_TEMP/sdk")"
+          echo "TARBALL=$TARBALL" >> "$GITHUB_ENV"
+
       - name: Publish to npm
-        working-directory: packages/sdk
-        run: npm publish
+        run: npm publish "$TARBALL"

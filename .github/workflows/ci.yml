@@ -38,6 +38,16 @@ jobs:
       # 全量 build 约 6s,在这里当闸门最便宜。
       - run: pnpm turbo run build
 
+      # 合入前检查所有 public package 的最终 tarball manifest。这里故意跳过仓库外安装:
+      # server 可能引用同一 PR 中尚未发布的 dashboard 新版本;真实安装留在按依赖顺序运行的
+      # publish workflow。两处复用同一个 verifier,避免 pack 路径再次分叉。
+      - name: Verify packed public package manifests
+        run: |
+          for PKG in app cli dashboard gateway plugin-sdk sdk server; do
+            node scripts/pack-and-verify-package.mjs "packages/$PKG" \
+              --output-dir "$RUNNER_TEMP/$PKG" --skip-install
+          done
+
       # public 包的 src 改了却没 bump 版本 → 提醒(不拦)。
       # 为什么是 warning 而不是 error:哪些包该 bump 是 public artifact ownership 的判断
       # (改的是内部实现还是外部契约),机器判不了;但"改了 src 而版本没动"值得当场看见 ——

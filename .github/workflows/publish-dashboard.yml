@@ -47,6 +47,11 @@ jobs:
       # 发布物 = vite build 产物(dist),typecheck 含在 build 的 tsc -b 里
       - run: pnpm --filter @tool-bridge/dashboard build
 
+      - name: Pack and verify npm tarball
+        run: |
+          TARBALL="$(node scripts/pack-and-verify-package.mjs packages/dashboard \
+            --output-dir "$RUNNER_TEMP/dashboard")"
+          echo "TARBALL=$TARBALL" >> "$GITHUB_ENV"
+
       - name: Publish to npm
-        working-directory: packages/dashboard
-        run: npm publish
+        run: npm publish "$TARBALL"

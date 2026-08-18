@@ -60,13 +60,12 @@ jobs:
       # **必须 pnpm pack + npm publish <tarball>**,不能裸 `npm publish`:
       # plugin-sdk 的开发态 `main`/`exports` 指 `src/index.ts`(workspace 内被按名消费),
       # 发布形态靠 `publishConfig` 覆盖成 dist。而 **`npm publish` 不应用字段覆盖,
-      # `pnpm pack` 才应用** —— 裸 publish 会发出一个入口指向 src 的包,消费者装了跑不起来。
-      # (sdk/cli 那几个 workflow 用裸 publish 是对的:它们的 main 本来就指 dist。)
-      - name: Pack (applies publishConfig overrides)
-        working-directory: packages/plugin-sdk
+      # `pnpm pack` 才应用**,也只有它会解析 catalog/workspace 依赖。
+      - name: Pack and verify npm tarball
         run: |
-          TARBALL="$(pnpm pack | tail -1)"
-          echo "TARBALL=$PWD/$TARBALL" >> "$GITHUB_ENV"
+          TARBALL="$(node scripts/pack-and-verify-package.mjs packages/plugin-sdk \
+            --output-dir "$RUNNER_TEMP/plugin-sdk")"
+          echo "TARBALL=$TARBALL" >> "$GITHUB_ENV"
 
       # 发布前核对入口真的指向 dist —— 这是上面那条坑的机器化检查。
       - name: Verify tarball entry points
@@ -80,5 +79,4 @@ jobs:
           esac
 
       - name: Publish to npm
-        working-directory: packages/plugin-sdk
         run: npm publish "$TARBALL"

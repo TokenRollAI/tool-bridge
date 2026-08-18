@@ -51,10 +51,13 @@ jobs:
       - run: pnpm --filter @tool-bridge/core --filter @tool-bridge/app test
       - run: pnpm --filter @tool-bridge/app build
 
-      # 开发态 exports 指 src(同 workspace 按包名消费),发布形态由 publishConfig 覆盖到 dist;
-      # 覆盖只在 pnpm pack 时应用,故先 pack 再 npm publish tarball(npm publish 不认字段覆盖)。
-      - name: Publish to npm
-        working-directory: packages/app
+      # pnpm pack 同时应用 publishConfig 覆盖与 catalog/workspace 版本改写;
+      # verifier 对最终 tarball 做协议扫描和仓库外 npm 安装,发布只能消费该 tarball。
+      - name: Pack and verify npm tarball
         run: |
-          pnpm pack
-          npm publish tool-bridge-app-*.tgz
+          TARBALL="$(node scripts/pack-and-verify-package.mjs packages/app \
+            --output-dir "$RUNNER_TEMP/app")"
+          echo "TARBALL=$TARBALL" >> "$GITHUB_ENV"
+
+      - name: Publish to npm
+        run: npm publish "$TARBALL"
