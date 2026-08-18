@@ -17,6 +17,7 @@ tool-bridge 将异构能力投影为带路径的树：目录负责组织，工�
 - Provider：MCP、HTTP、plugin tools/context、本地 SDK provider、R2/S3 context。
 - 集成：编译期内置 catalog 与显式外部 plugin 注册。
 - Search：从权威节点/工具描述派生索引，再按请求身份 hydrate 和裁剪。
+- Feedback：使用经验附着在具体节点或工具路径；高分条目进入 `~help` 与 Search 投影，CLI 与 Dashboard 均可读写和投票。
 - 设备：CLI/SDK 反向连接，将本地工具、文件或自定义节点挂到远端树。
 - 运维：SK、SecretStore、registry、status、catalog、federation、annotation。
 

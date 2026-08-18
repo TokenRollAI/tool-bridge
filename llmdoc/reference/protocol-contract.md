@@ -7,6 +7,7 @@
 - `GET /<path>/~help`：默认 Markdown；`Accept: text/plain` 返回 Help DSL；`Accept: application/json` 返回 Help JSON。
 - `GET /<path>/~tree?depth=N`：返回经过身份可见性裁剪的树。
 - `POST /~search`：全局工具搜索；只有宿主声明 search capability 时存在。
+- `GET|POST|DELETE /<path>/~feedback[/<id>]`：具体路径的使用反馈、投票与管理；不是集中 builtin。
 - `ALL /~mcp`：把当前身份可见工具投影为 MCP server。
 - `GET /healthz`：公开健康信息，不证明认证数据面可用。
 - 错误统一为 `{code,message,retryable}`；主要 code：not_found、permission_denied、invalid_argument、conflict、unavailable、rate_limited、internal。
@@ -35,11 +36,21 @@
 
 所有路径先规范化；保留段和保留根在服务端权威拒绝。`virtualize` 的 hide/rename/prefix/describe 只改变投影视图，不改变上游身份。
 
+remote host allowlist 为空时拒绝所有联邦目标。生效集合是部署期 env 基线与 `system/federation` 运行时条目的并集；env 条目不可经 API 删除。remote 出站身份只从自身 `skRef` 解析，不转发本地调用者 SK。
+
 ## 权限
 
 Action：read、write、call、register、admin。scope 使用完整路径 glob；deny 优先。`scopes: []` 表示无权限。不可见路径以 404 表达。
 
 注册路径还受 SK 的 `registerPaths` 约束。调用者的 SK 不向上游透传；remote/plugin/provider 凭证从 SecretStore 引用解析。
+
+## Feedback
+
+Feedback 附着在具体节点或其工具子路径，根路径不接受反馈。`GET` 列表/详情需要目标路径的 read；`POST` 提交或投票还需要 call；`DELETE` 清理单条反馈需要 admin。read 不通过时按可见性规则返回 404。
+
+条目按净分与时间排序；默认可见的头部条目以精简形状进入该路径的 `~help`。宿主装配 Search 时，同一批头部反馈的 title/detail 进入该节点的工具搜索派生索引。CLI `tb feedback` 与 Dashboard 节点详情消费相同端点。
+
+Feedback 是低频、非权威协作数据。Workers KV 宿主允许并发 submit/vote 的最终一致窗口，不把投票结果当作强一致状态。
 
 ## builtin
 

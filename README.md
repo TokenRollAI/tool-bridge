@@ -4,9 +4,9 @@
 
 # tool-bridge
 
-**自描述、可反向注册、协议开放的工具与上下文网关**
+**把工具、上下文、设备和远端服务组织成一棵带权限的、自描述的 HTTP 树。**
 
-任何会 HTTP fetch 的 Agent,凭一个 Secret Key + 一个 BaseURL,即可发现并使用一个组织的全部工具、上下文与设备。
+Agent 只需要一个 BaseURL 和一个 Secret Key，就能发现能力、阅读契约并发起调用；不要求安装特定 SDK，也不要求运行 MCP client。
 
 简体中文 | [English](README.en.md)
 
@@ -16,171 +16,219 @@
 
 [![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/TokenRollAI/tool-bridge/tree/main/template)
 
-一键部署到 Cloudflare Workers,或 `docker run` 自部署一个 Node 容器 —— 见[部署](#部署)
-
 </div>
 
----
+> [!IMPORTANT]
+> tool-bridge 目前处于 **pre-launch** 开发阶段。Cloudflare、Node/Docker、SDK、CLI 和 Dashboard 已能组成完整使用闭环，但项目尚无正式生产环境，也暂不承诺稳定性 SLA。现在适合自托管试用、内部集成和参与开发；升级前请阅读发布说明并保留数据备份。
 
-tool-bridge 是 [HTBP](https://github.com/TokenRollAI/HTBP)(HTTP ToolBridge Protocol)的参考实现。核心理念:**能 fetch URL,就能学会用对应的工具**。
+## tool-bridge 是什么
 
-<div align="center">
-<table><tr><td>
+tool-bridge 是 [HTBP（HTTP ToolBridge Protocol）](https://github.com/TokenRollAI/HTBP)的参考实现。它把原本分散在 MCP server、HTTP API、对象存储、本地机器和其他网关里的能力投影到同一棵树上：
 
+```text
+Agent / CLI / Dashboard / MCP client
+                │
+        BaseURL + scoped SK
+                │
+                ▼
+┌──────────────────────────────────────┐
+│              tool-bridge             │
+│  ~help · ~tree · ~search · ~feedback │
+│  路径权限 · SecretStore · Federation  │
+└───────────┬──────────┬───────────────┘
+            │          │
+     MCP / HTTP /   Context / Device /
+       Plugins       Remote gateway
 ```
-┌──────────────────────────────────────────────────────┐
-│  任意 Agent / CLI / Dashboard(只需 SK + BaseURL)     │  ← GET /~help 渐进发现
-├──────────────────────────────────────────────────────┤
-│                    tool-bridge                        │
-│   HTBP Tree · Tool Layer · Context Layer              │
-│   Device Gateway(反向注册) · Auth(SK 作用域)       │
-├──────────────────────────────────────────────────────┤
-│  上游:MCP server(Streamable HTTP) · HTTP API       │
-│  来源:R2 / S3 / File / 自定义 Provider(Plugin)     │
-│  设备:任何跑得动 CLI/SDK 的机器(WebSocket 反向接入) │
-└──────────────────────────────────────────────────────┘
-```
 
-</td></tr></table>
-</div>
+这棵树同时解决四件事：
 
-## 它解决什么问题
+- **发现**：每一级路径都有 `~help`，文档、参数 schema 和当前身份可见面来自运行时本身。
+- **调用**：HTTP、CLI、Dashboard 和 `/~mcp` 访问同一套能力与权限模型。
+- **治理**：Secret Key 按路径和动作授权，deny 优先；无权路径对调用者表现为不存在。
+- **协作**：Agent 可以给具体路径留下使用反馈，也可以把另一套 HTBP 服务联邦成当前树的子树。
 
-让 Agent 用上"组织里已有的能力"(工具、文档、机器),今天必须逐个打通:
+## 快速开始：本地运行一个网关
 
-1. **工具接入受限于运行环境**——边缘函数、浏览器、受限 sandbox 里跑不了 MCP client;
-2. **上下文碎片化**——知识散落在 R2/S3、文件系统、内部系统里,没有统一读写检索面;
-3. **机器能力够不着**——内网服务器的 shell 与文件系统对云上 Agent 完全不可见;
-4. **发现即文档**——每接一个工具就要写一份说明,说明与实现总是漂移;
-5. **权限缺失**——一把 key 要么全能要么不能,缺少"只能读 `docs/`、只能调 `search/`"的表达。
+下面使用 Node/Docker 宿主。它把状态存到 SQLite，把对象存到 `/data`，适合先完成一个本地闭环。
 
-tool-bridge 把这五件事收敛为**一棵自描述的树**:所有能力(工具、Context、设备、联邦服务)都是树上节点;树上每一级路径都响应 `~help`,`~help` 即文档、即契约、即按权限裁剪后的可见面;每个 Secret Key 有明确作用域,无权节点对调用者根本不存在。
+### 1. 生成信任根并启动
 
-## 能力总览
-
-| 能力 | 说明 |
-|---|---|
-| **HTBP 树与渐进发现** | 根 `/~help` 出发逐级下钻;`~tree?depth=N` 受限深度总览;`~help` 默认返回 Markdown，声明 `Accept: text/plain` 得到紧凑 Help DSL，声明 `Accept: application/json` 得到语义等价的 JSON(含真 JSON Schema,可直接渲染表单) |
-| **工具层** | 挂载 MCP server(Streamable HTTP,modern/legacy era 协商)、任意 HTTP API(声明式 HttpToolDef);**工具虚拟化**(前缀 / 重命名 / 隐藏 / 描述覆盖),对外只暴露虚拟名 |
-| **remote 联邦** | 把另一个 HTBP 服务挂成子树,`~help`/`~tree`/调用透传;https 强制 + host 白名单 + `X-TB-Via` 环检测;本地调用者 SK 不外传,出站凭证经 `skRef` 换发 |
-| **Context 层** | R2 / S3 挂成 namespace,统一 `List/Get/Update/Write` 四动词 + `Search`;乐观并发(`ifVersion`);>1 MiB 大对象返回 `$ref` 预签名 URL(无凭证时走网关中转),不占网关流量 |
-| **Skillhub 层** | 把 Agent Skill(`SKILL.md` + 文本文件的目录)发布到树上、任意 Agent 凭 fetch 发现并取用:`List/Get/Search/Publish/Remove`;存平台自带 R2 **无需外部凭证**,服务端解析 `SKILL.md` frontmatter 成 name/description 目录(`tb skill get --out` 直接拉到本地 `.claude/skills/`) |
-| **设备反向注册** | 内网机器 `tb connect` 主动建立 WebSocket,把自己的 shell 与 fs 挂上树;shell 默认拒绝一切命令、白名单放行;断线返回 503 retryable,重连自愈;云侧用 Durable Object WebSocket Hibernation,空闲近零计费 |
-| **SK 权限模型** | 每个 Secret Key = owner + 作用域列表(路径 glob × 动作集,deny 优先、无匹配默认拒);**可见性即权限**:无权节点在 `~help`/`~tree` 中不存在(404 而非 403);CF KV 宿主的吊销为最终一致，不承诺精确传播时间 |
-| **凭证托管** | 上游 AK/SK 经 SecretStore 加密存储(AES-256-GCM,只写不读),节点配置只存引用名,凭证不出网关、不出现在任何 `~help`/返回值 |
-| **Plugin 系统** | 第三方以 HTTP 服务形态实现 Tool/Context Provider,注册即探活 + 契约校验,与内置 Provider 地位对等 |
-| **SDK** | 在自己的 Node 进程里内嵌一个 TB 实例,注册本地函数为工具,还可反向 `connect` 到远程网关——本地函数出现在远程树上 |
-| **三入口对等** | Agent(直接 HTTP)、CLI(`tb`,全命令 `--json`)、Dashboard 对同一棵树行为一致,不存在管理旁路 |
-
-## 使用方式
-
-### Agent 视角:只需 fetch
-
-不需要任何 SDK——这正是设计目标:
+需要 Node.js 22+ 来生成两个随机值；请保存 Admin SK，丢失后无法从网关中读回。
 
 ```sh
-# 从根开始渐进发现(~help 默认返回 Markdown)
-curl -H "Authorization: Bearer $TB_SK" https://your-tb.example.com/~help
+export TB_ADMIN_SK="$(node -e "console.log('tbk_'+require('crypto').randomBytes(32).toString('base64url'))")"
+export TB_ENCRYPTION_KEY="$(node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))")"
 
-# 下钻某个节点,看它有哪些工具、怎么调
-curl -H "Authorization: Bearer $TB_SK" https://your-tb.example.com/tools/search/~help
-
-# 调用工具
-curl -X POST -H "Authorization: Bearer $TB_SK" \
-  -d '{"tool":"query","arguments":{"q":"hello"}}' \
-  https://your-tb.example.com/tools/search
-
-# 读一个 context 条目
-curl -X POST -H "Authorization: Bearer $TB_SK" \
-  -d '{"tool":"Get","arguments":{"path":"notes/readme.md"}}' \
-  https://your-tb.example.com/ctx/docs
+docker run -d --name tool-bridge \
+  -p 127.0.0.1:8787:8787 \
+  -v tool-bridge-data:/data \
+  -e TB_BOOTSTRAP_ADMIN_SK="$TB_ADMIN_SK" \
+  -e TB_SECRET_ENCRYPTION_KEY="$TB_ENCRYPTION_KEY" \
+  ghcr.io/tokenrollai/tool-bridge:latest
 ```
 
-### CLI:`tb`
+生产部署应通过平台的 Secret 机制注入这两个值，不要把它们写进镜像、仓库或共享脚本。
+
+### 2. 用 CLI 登录、发现和调用
 
 ```sh
 npm install -g @tool-bridge/cli
+
+tb login --base-url http://127.0.0.1:8787   # 按提示输入刚才保存的 Admin SK
+tb tree --depth 2                           # 浏览当前身份可见的树
+tb help system/status                      # 阅读节点的实时契约
+tb call system/status --tool get           # 调用节点上的 get
 ```
 
-也可把**全部 `tb` 子命令**作为单个 Bun 独立二进制装进小型 Alpine 镜像（目标机无需
-Node.js）：
+部署包含 Dashboard，可直接打开 [http://127.0.0.1:8787/ui](http://127.0.0.1:8787/ui)。Dashboard 使用同一套公开 API，SK 只保存在浏览器本地。
+
+不使用 CLI 也可以直接 fetch：
 
 ```sh
-docker build -f Dockerfile.cli -t tb-cli:local .
-docker run --rm tb-cli:local --version
-docker run --rm -e TB_BASE_URL=https://your-tb.example.com -e TB_SK="$TB_SK" \
-  tb-cli:local tree --depth 2
+curl -H "Authorization: Bearer $TB_ADMIN_SK" \
+  http://127.0.0.1:8787/~help
+
+curl -X POST \
+  -H "Authorization: Bearer $TB_ADMIN_SK" \
+  -H "Content-Type: application/json" \
+  -d '{"tool":"get","arguments":{}}' \
+  http://127.0.0.1:8787/system/status
 ```
 
-完整的本机、守护进程和 Kubernetes sidecar 用法见
-[`packages/cli/README.md`](packages/cli/README.md#完整-cli-镜像)；容器部署和二进制抽取说明见
-[`packages/cli/CONTAINER.md`](packages/cli/CONTAINER.md)。
+`~help` 默认返回 Markdown；使用 `Accept: text/plain` 可获得紧凑 Help DSL，使用 `Accept: application/json` 可获得包含 JSON Schema 的结构化描述。
+
+## 现在可以怎么用
+
+| 使用方式 | 当前入口 | 典型用途 |
+|---|---|---|
+| 接入已有工具 | MCP、声明式 HTTP、内置集成、外部 Plugin | 给 Agent 提供统一发现与调用入口 |
+| 管理上下文与技能 | R2、S3、Node 文件对象存储、Plugin Context、Skillhub | 统一读写、搜索文档与对象，发布和获取 Agent Skill |
+| 接入本地机器 | `tb connect`、SDK `connect()` | 从内网主动连接，按白名单暴露 shell、文件或本地函数 |
+| 共享使用经验 | 每个路径的 `~feedback`、CLI、Dashboard | 让后续 Agent 在调用前看到已验证的坑和建议 |
+| 联邦多个团队 | remote 节点、`system/federation` | 把另一棵 HTBP 树挂成子树，不共享本地调用者凭据 |
+| 兼容 MCP 客户端 | `/<base>/~mcp` | 将当前身份可见的工具投影为 MCP server |
+
+### 接入工具与上下文
+
+先从宿主内置 catalog 选择集成，或直接挂载一个 Streamable HTTP MCP server：
 
 ```sh
-tb init cloudflare --repo .                  # 从源码仓库初始化并部署 Cloudflare
-tb login                                    # 交互保存 BaseURL + SK(多 profile)
-tb status --json                            # 网关健康摘要
-tb tree --depth 3                           # 树视图
-tb help tools/search                        # 任意节点的 ~help
+tb integration catalog --search tavily
+tb integration add tools/tavily --provider tavily --key-stdin < tavily.key
 
-# ── 挂载工具 ──────────────────────────────────────────
-tb tool mount tools/docs --kind mcp --url https://mcp.example.com/mcp
-tb tool mount tools/echo --kind http --endpoint https://postman-echo.com \
-  --tools-file ./echo-tools.json
-tb tool mount tools/notion --kind tool --provider notion-tools --auth-ref notion-token
-tb call tools/echo --tool get --args '{"foo":"bar"}'
+tb tool mount tools/docs \
+  --kind mcp \
+  --url https://mcp.example.com/mcp
 
-# ── 挂载 Context ─────────────────────────────────────
-tb secret set --name s3-cred                         # 凭证从 stdin 进 SecretStore,只写不读
-tb ctx mount ctx/docs --provider s3 --endpoint https://... --bucket docs --auth-ref s3-cred
-tb ctx put ctx/docs notes/hello.md --content '# hi'
-tb ctx cat ctx/docs notes/hello.md
-tb ctx search ctx/docs hi
-tb ctx rm ctx/docs notes/hello.md
-
-# ── 反向注册本机 ─────────────────────────────────────
-tb connect --allow 'echo' --allow 'uname' --fs ~/shared   # 长驻;shell 白名单 + fs 暴露
-tb device ls                                              # 另一终端:看设备在线状态
-tb call device/<id>/shell --tool exec --args '{"command":"echo hi"}'
-
-# ── 联邦另一个 HTBP 服务 ─────────────────────────────
-tb server add fed/team-b --remote-url https://tb.team-b.example.com --sk-ref team-b-sk
-
-# ── 权限管理 ─────────────────────────────────────────
-tb sk create --owner agent:reader --scope 'ctx/docs/**:read' --scope 'tools/search:call'
-tb sk list --limit 50
-tb sk get <id> && tb sk disable <id> && tb sk enable <id>
-tb sk update <id> --expires 2026-12-31T23:59:59Z
-tb sk rm <id>
-
-# ── Plugin ───────────────────────────────────────────
-tb plugin register --file ./manifest.json && tb plugin health my-plugin
+tb help tools/docs
+tb call tools/docs --tool search --args '{"query":"tool-bridge"}'
 ```
 
-顶层命令共享全局参数位置语义：`--json` / `--base-url` / `--sk` / `--timeout`
-可放在根命令、命令组或叶子命令位置（长驻 `connect` / `mount fs` 不适用 timeout，会明确
-报错）；返回 `Page` 的列表/搜索命令统一支持 `--limit 1..200` 与 `--cursor`。除本地配置与
-`init cloudflare` 部署编排外，CLI 通过公开 HTBP/API 工作，没有任何专用管理端点。
+S3 兼容对象存储可以挂成 Context namespace。凭证只写入 SecretStore，节点记录只保存引用名：
 
-### Dashboard
+```sh
+# s3-credential.json: {"accessKeyId":"...","secretAccessKey":"..."}
+tb secret set --name docs-s3 < s3-credential.json
+tb ctx mount ctx/docs \
+  --provider s3 \
+  --endpoint https://s3.example.com \
+  --bucket docs \
+  --auth-ref docs-s3
 
-部署后访问 `https://your-tb.example.com/ui`,输入 SK + BaseURL:
+tb ctx ls ctx/docs
+tb ctx cat ctx/docs notes/readme.md
+```
 
-- 树导航 + 任意节点的表单调用(`~help` 的 JSON Schema 自动渲染表单)+ markdown 返回值展示;
-- context 条目浏览(List 钻取 / Search / Get 预览 / Write 编辑);
-- SK 签发与吊销、Registry 管理、设备在线状态、凭证管理;
-- ⌘K 命令面板全树模糊跳转。
+完整参数以 `tb <command> --help` 和 [`packages/cli/README.md`](packages/cli/README.md) 为准。
 
-Dashboard 无专用后端——它只是 `~help` 的通用渲染器,SK 只存浏览器本地。
+### 把本地机器接入树
 
-### SDK:内嵌一个 TB 实例
+`tb connect` 从本机主动建立 WebSocket，不要求云端反向访问内网。Shell 默认拒绝所有命令，只有显式 allowlist 中的命令可以执行：
+
+```sh
+tb connect \
+  --device-id build-01 \
+  --path device/build-01 \
+  --allow uname \
+  --allow ls \
+  --fs ./shared \
+  --fs-readonly
+```
+
+远端调用者随后可以通过同一棵树发现 `device/build-01`。长驻容器和 Kubernetes sidecar 示例见 [`packages/cli/CONTAINER.md`](packages/cli/CONTAINER.md)。
+
+## 让 Agent 共享真实使用反馈
+
+反馈不是集中在另一个论坛里，而是附着在具体节点或工具路径上。Agent 在使用前读取经验，踩坑后提交简短建议，再由其他身份投票：
+
+```sh
+# 使用前：高分反馈也会直接出现在 tb help <path> 中
+tb feedback ls tools/docs
+
+# 使用后：记录可复用的限制或正确姿势
+tb feedback submit tools/docs \
+  --title "搜索前先确认索引范围" \
+  --detail "该上游默认只索引公开文档；私有空间需要单独授权。"
+
+# 其他 Agent 对有帮助的经验投票
+tb feedback vote tools/docs <feedback-id> up
+```
+
+反馈权限落在目标路径本身：读取需要该路径的 `read`，提交和投票还需要 `call`，删除需要 `admin`。得分靠前的反馈会进入 `~help`，并在启用 Search 的宿主中参与工具搜索，让“实际怎么用”与运行时契约一起被发现。
+
+Dashboard 的节点详情页提供相同的查看、提交、投票和管理能力。
+
+## 联邦多个 tool-bridge
+
+Federation 把另一个 HTBP 服务挂到本地路径下。管理员先开放远端 host，再保存远端专用 SK，最后创建 remote 节点：
+
+```sh
+tb federation add tb.team-b.example.com
+tb secret set --name team-b-sk < team-b.sk
+
+tb server add teams/team-b \
+  --remote-url https://tb.team-b.example.com \
+  --sk-ref team-b-sk
+
+tb tree teams/team-b --depth 2
+tb help teams/team-b/tools/search
+```
+
+联邦默认 fail closed：空 host allowlist 不允许任何远端；只接受 HTTPS（本地开发例外）；本地调用者的 SK 不会发送给远端，出站身份来自 SecretStore 中的 `skRef`。网关还会执行跳数限制、环检测和远端路径校验。
+
+## 部署与嵌入
+
+| 形态 | 状态与对象 | 适合场景 |
+|---|---|---|
+| **Node / Docker** | SQLite + 本地文件系统；单容器和 `/data` 卷 | 自托管、内网、快速本地验证 |
+| **Cloudflare Workers** | KV + R2 + D1 + Durable Objects | 边缘部署、低运维、设备长连接 |
+| **嵌入式 SDK** | 由调用方注入 store/provider | 在自己的 Node/Workers 应用里注册本地函数 |
+
+### Cloudflare Workers
+
+最快入口是页面顶部的 Deploy Button。部署前先生成并保存 `TB_BOOTSTRAP_ADMIN_SK` 与 `TB_SECRET_ENCRYPTION_KEY`，模板会在首次构建前要求填写，避免先启动一个没有信任根的实例。完整说明见 [`template/README.md`](template/README.md)。
+
+从源码 checkout 部署完整形态时，推荐使用 CLI 向导：
+
+```sh
+git clone https://github.com/TokenRollAI/tool-bridge
+cd tool-bridge
+pnpm install
+npm install -g @tool-bridge/cli
+
+tb init cloudflare --repo .
+```
+
+向导负责登录/选择账户、生成 trust roots、创建 KV/R2/D1、构建部署、验证 `~help` 并保存本机 profile。非交互环境使用 `--account-id <id> --yes`，自定义域使用 `--domain tb.example.com`。
+
+### 嵌入自己的应用
 
 ```sh
 npm install @tool-bridge/sdk
 ```
 
 ```ts
-import { serve } from '@hono/node-server'
 import { createToolBridge, MemoryStateStore } from '@tool-bridge/sdk'
 
 const tb = createToolBridge({
@@ -188,153 +236,66 @@ const tb = createToolBridge({
   adminSk: process.env.TB_BOOTSTRAP_ADMIN_SK!,
 })
 
-// 把本地函数注册为树上的工具
 tb.registerTool('tools/echo', {
-  List: () => [{ name: 'echo', description: '原样返回 text' }],
+  List: () => [{ name: 'echo', description: 'Return the input text' }],
   Call: (_name, args) => ({ content: { echoed: args.text } }),
 })
 
-// 作为独立 HTBP 服务对外
-serve({ fetch: (req) => tb.fetch(req), port: 8787 })
-
-// 或者:反向连接到远程网关——本地函数工具出现在远程树上
-const conn = await tb.connect('https://your-tb.example.com', process.env.TB_SK!)
-await conn.ready
+export default { fetch: tb.fetch }
 ```
 
-详见 [packages/sdk/README.md](packages/sdk/README.md)。
+Node HTTP server、反向连接和自定义 store 说明见 [`packages/sdk/README.md`](packages/sdk/README.md)。
 
-## 部署
+## 权限与安全边界
 
-网关本体是宿主中立的 `@tool-bridge/app`(Hono app + 五个注入点:状态 / 对象 / 密钥 /
-设备通道 / 搜索),宿主适配器只把这五个口接到具体平台上。两个一等适配器能力面一致,
-选哪个取决于你想把数据放在哪:
+- 每个 SK 由 owner、路径 glob 和 `read/write/call/register/admin` 动作组成；deny 优先，无匹配默认拒绝。
+- 不可见路径在 `~help`、`~tree` 和调用中返回 404，避免泄露节点是否存在。
+- 上游密钥进入只写 SecretStore；节点配置、日志和只读管理响应不返回密钥值。
+- 内置 Plugin 与网关同进程同权，并使用受控出站；外部 Plugin 在注册时校验 descriptor 和健康状态。
+- Workers KV 的吊销和注册读取存在最终一致窗口；需要强一致状态时优先使用 Node/SQLite 宿主。
 
-| | Node / Docker(`@tool-bridge/server`) | Cloudflare Workers(`@tool-bridge/gateway`) |
-|---|---|---|
-| 状态(树配置 / SK) | SQLite | Workers KV |
-| 对象(context / 大对象) | 本地文件系统 | R2 |
-| 工具搜索 | better-sqlite3 FTS5/trigram | D1 FTS5/trigram |
-| 设备通道 | 进程内 WebSocket | Durable Object(WS hibernation) |
-| 运行形态 | 一个容器 + 一个 `/data` 卷 | 单 Worker(API + Dashboard 一体),空闲近零成本 |
-
-协议行为(路由 / 权限 / 内容协商 / plugin / OAuth / 搜索联动)在宿主中立层用 Node 套件
-统一验证,两个适配器各自另有集成测试(gateway 跑真实 workerd,server 跑 Node)。
-第三种形态是把 TB 直接嵌进你自己的进程,见上文 [SDK](#sdk内嵌一个-tb-实例)。
-
-### Node / Docker(自部署,不依赖任何云厂商)
-
-单容器:SQLite + 本地 FS,`/data` 卷持久化,缺 Admin SK 时 fail closed:
+签发最小权限 SK 的示例：
 
 ```sh
-docker build -t tool-bridge .
-docker run -d --name tool-bridge -p 8787:8787 -v tool-bridge-data:/data \
-  -e TB_BOOTSTRAP_ADMIN_SK=... \
-  -e TB_SECRET_ENCRYPTION_KEY=... \
-  tool-bridge
-
-# 冒烟验证
-TB_BASE_URL=http://127.0.0.1:8787 TB_SK=... pnpm smoke
+tb sk create \
+  --owner agent:researcher \
+  --scope 'ctx/docs/**:read' \
+  --scope 'tools/search/**:read,call'
 ```
 
-不想要容器就直接跑进程:`pnpm --filter @tool-bridge/server start`
-(`TB_DATA_DIR` / `TB_PORT` / `TB_HOST` 见 [.env.example](.env.example))。放到公网时
-自备 TLS 终结,并把 `TB_CANONICAL_ORIGIN` 设成对外的规范 origin。
+## 仓库结构
 
-仓库开发可用 Compose 一次启动 gateway、真实 Wrangler plugin Worker 与受认证的 mock MCP 上游,
-再同步执行“注册 plugin → 挂载 export → 调用 echo”的三跳 smoke:
+| 路径 | 职责 |
+|---|---|
+| `packages/core` | 树、授权、协议、store、builtin 等纯逻辑 |
+| `packages/app` | 宿主中立的 Hono 应用与 provider 编排 |
+| `packages/server` | Node/SQLite/文件/WebSocket 宿主 |
+| `packages/gateway` | Cloudflare KV/R2/D1/DO/Assets 宿主 |
+| `packages/cli` | `tb` CLI、设备连接与 Cloudflare 初始化 |
+| `packages/dashboard` | 使用公开 API 的 Web 管理面 |
+| `packages/sdk` | 嵌入式实例、本地 provider 与反向连接 |
+| `packages/plugin-sdk` / `packages/plugins` | Plugin 作者契约与内置集成 |
+| `llmdoc` | 当前架构、协议契约和可重跑工作流 |
+
+## 开发
+
+要求 Node.js 22+、pnpm 11+。
+
+```sh
+pnpm install
+pnpm verify              # typecheck + lint + test
+pnpm turbo run build     # 修改可发布包、依赖或打包配置时还必须执行
+```
+
+本地 Compose 闭环会启动 Node gateway、真实 plugin Worker 和受认证的 mock MCP 上游：
 
 ```sh
 pnpm compose:up
 pnpm compose:smoke
-pnpm compose:down       # 删除容器与网络,保留 gateway-data
-pnpm compose:reset      # 同时删除开发数据卷,恢复固定本地 fixture
+pnpm compose:down
 ```
 
-Compose 默认凭据只用于本机开发,gateway 8787 也只绑定 `127.0.0.1`;不要复制到生产配置。生产根
-`Dockerfile` 的单容器入口不依赖 Compose。
-
-### Cloudflare Workers
-
-一键部署见 [template/](template/)(上方 Deploy 按钮),它在**你的**账户里建 KV/R2/DO 并部署
-一个薄壳 Worker。Cloudflare 会读取 `template/.dev.vars.example`，在部署表单中预先要求填写：
-
-- `TB_BOOTSTRAP_ADMIN_SK`：Admin SK；请先在本机生成并保存到密码管理器；
-- `TB_SECRET_ENCRYPTION_KEY`：网关 SecretStore 的 32 字节主密钥。
-
-```sh
-node -e "console.log('tbk_'+require('crypto').randomBytes(32).toString('base64url'))"
-node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"
-```
-
-把两个输出分别粘贴到 Deploy Button 表单即可；它们会作为加密的 Worker secrets 注入，不需要
-先部署一个无密钥实例，也不要把值提交到 Git。
-
-如果要从本仓库部署完整形态，推荐使用 CLI 向导：
-
-```sh
-git clone https://github.com/TokenRollAI/tool-bridge && cd tool-bridge
-pnpm install
-npm install -g @tool-bridge/cli
-
-# 自动检查/登录 Wrangler、选择账户、生成两个 trust-root secrets、幂等创建 KV/R2/D1、
-# 构建并部署，再以 Admin SK 验证 /~help，最后保存本机 default profile。
-tb init cloudflare --repo .
-
-# 无交互/CI：多账户时必须给 account id；--yes 才允许真实资源写入。
-tb init cloudflare --repo . --account-id <account-id> --yes
-
-# 自定义域可同时指定；否则向导自动启用 workers.dev。
-tb init cloudflare --repo . --domain tb.example.com
-```
-
-向导生成的 Admin SK 只显示一次，同时写入权限为 0600 的本机 profile；请仍将它保存到密码管理器。
-secret 不进入子进程 argv 或环境变量，而是经临时 0600 文件交给 `wrangler deploy --secrets-file`，
-部署结束即删除。重跑时若发现同名 Worker，必须先用对应 profile 验证成功，向导才会继续；它不会
-生成或覆盖既有实例的 Admin SK。
-
-`pnpm provision`(被 `deploy:all` 编排)是 **Cloudflare 专用的可选步骤**,不是通用部署入口:
-它幂等创建 KV/R2/D1,并把 `.env` 里的账户特定值回填进 `packages/gateway/wrangler.jsonc`
-(`account_id`、custom domain 路由、`TB_CANONICAL_ORIGIN`、R2 S3 端点与前缀派生的资源名/id)。
-仓库里那份 wrangler.jsonc 因此不含任何账户 id 或域名——回填结果是你自己的部署配置,别推回公共仓库。
-没有自定义域就留空 `TB_DOMAIN`，provision 会自动启用 `workers_dev` 并清空旧 custom routes。
-Node/Docker 路径不需要这一步。若不使用向导，仍可在 `.env` 中显式准备变量后运行
-`pnpm deploy:all`；首次创建 Worker 时应使用 `wrangler deploy --secrets-file` 同次注入 trust root，
-不要先部署无密钥实例再补 `secret put`。
-
-首次运行时网关自动完成引导:用预置的 `TB_BOOTSTRAP_ADMIN_SK` 物化 `system/*` 管理子树；具体 builtin 集合以 core 装配为准。Workers 新实例未预置该 secret 会拒绝引导,不会把 Admin SK 明文写入日志。
-
-本地开发:`pnpm gen-dev-vars`(从 .env 生成 .dev.vars)后 `npx wrangler dev`。
-
-## 仓库结构(pnpm monorepo)
-
-| 包 | 职责 |
-|---|---|
-| `packages/core` | 纯逻辑内核:树 / Auth(SK 作用域判定)/ HTBP 编解码 / Context·Device·Plugin 纯逻辑 / SecretStore / builtin 模块,无宿主依赖 |
-| `packages/app` | 宿主中立的网关本体:整棵 HTBP 树的路由与行为,经五个注入点(状态 / 对象 / 密钥 / 设备通道 / 搜索)装配,不认识任何具体平台 |
-| `packages/server` | Node 宿主适配器:SQLite + 本地 FS + 进程内 WebSocket,单容器自部署入口 |
-| `packages/gateway` | Cloudflare Workers 宿主适配器:KV / R2 / D1 / Durable Object / Static Assets 绑定 |
-| `packages/cli` | `tb` 命令行(commander),公开 API 客户端 + Cloudflare 初始化编排；可发布为 npm 包或 Bun 独立二进制镜像 — [`@tool-bridge/cli`](https://www.npmjs.com/package/@tool-bridge/cli) |
-| `packages/sdk` | npm 包 [`@tool-bridge/sdk`](https://www.npmjs.com/package/@tool-bridge/sdk):内嵌 TB 实例、程序化注册、反向连接 |
-| `packages/plugin-sdk` | 写第三方 Plugin(Tool/Context Provider)的最小 SDK 与契约 |
-| `packages/plugins` | 内置 Plugin 源与生成 catalog；标准宿主进程内直挂，也可用 `scripts/serve.ts` 跑成外部 Node plugin |
-| `packages/dashboard` | Web 管理面:`~help` 通用渲染器 + 管理表单,无专用后端 |
-| `llmdoc/` | 项目知识库(架构边界、协议契约、运行时坑、工作流) |
-
-## 开发
-
-```sh
-pnpm verify              # 一把过:typecheck + lint + 全部测试
-pnpm test:unit           # core / cli / sdk / plugin 单测
-pnpm test:integration    # 宿主适配层集成测试(gateway 跑真实 workerd,server 跑 Node)
-pnpm lint:fix            # eslint 自动修复
-```
-
-工程约定:**代码是行为真源**;接口契约、模块边界与运行时指南在 [llmdoc/](llmdoc/index.md)(契约入口:`llmdoc/reference/protocol-contract.md`)。
-
-## 项目状态
-
-积极开发中(pre-launch)，当前没有正式生产环境。现有 Cloudflare、Node/Docker 与 SDK 形态都以同一宿主中立 app 装配；发布准备以 `llmdoc/must/current-state.md` 的当前阻塞项和仓库验证命令为准，不在 README 维护环境流水或一次性验收记录。
+代码与生成产物是行为真源。架构边界、协议契约、部署和验证指南从 [`llmdoc/index.md`](llmdoc/index.md) 开始阅读。
 
 ## License
 

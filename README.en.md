@@ -4,9 +4,9 @@
 
 # tool-bridge
 
-**A self-describing, reverse-registrable, protocol-open tool & context gateway**
+**Organize tools, context, devices, and remote services into one permissioned, self-describing HTTP tree.**
 
-Any agent that can do an HTTP fetch can discover and use all of an organization's tools, contexts, and devices — with nothing but a Secret Key and a BaseURL.
+An agent only needs a BaseURL and a Secret Key to discover capabilities, read their contracts, and invoke them. No specific SDK or MCP client runtime is required.
 
 [简体中文](README.md) | English
 
@@ -16,151 +16,219 @@ Any agent that can do an HTTP fetch can discover and use all of an organization'
 
 [![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/TokenRollAI/tool-bridge/tree/main/template)
 
-One-click deploy to Cloudflare Workers, or `docker run` a self-hosted Node container — see [Deployment](#deployment)
-
 </div>
 
----
+> [!IMPORTANT]
+> tool-bridge is currently in **pre-launch** development. Cloudflare, Node/Docker, the SDK, CLI, and Dashboard already form complete working flows, but there is no formal production environment or stability SLA yet. It is ready for self-hosted evaluation, internal integrations, and development; read the release notes and back up your data before upgrading.
 
-tool-bridge is the reference implementation of [HTBP](https://github.com/TokenRollAI/HTBP) (HTTP ToolBridge Protocol). The core idea: **if you can fetch a URL, you can learn to use the tool behind it**.
+## What is tool-bridge?
 
-<div align="center">
-<table><tr><td>
+tool-bridge is the reference implementation of [HTBP (HTTP ToolBridge Protocol)](https://github.com/TokenRollAI/HTBP). It projects capabilities spread across MCP servers, HTTP APIs, object stores, local machines, and other gateways into one tree:
 
+```text
+Agent / CLI / Dashboard / MCP client
+                │
+        BaseURL + scoped SK
+                │
+                ▼
+┌──────────────────────────────────────┐
+│              tool-bridge             │
+│  ~help · ~tree · ~search · ~feedback │
+│  path auth · SecretStore · Federation │
+└───────────┬──────────┬───────────────┘
+            │          │
+     MCP / HTTP /   Context / Device /
+       Plugins       Remote gateway
 ```
-┌──────────────────────────────────────────────────────┐
-│  Any Agent / CLI / Dashboard (just SK + BaseURL)      │  ← GET /~help progressive discovery
-├──────────────────────────────────────────────────────┤
-│                    tool-bridge                        │
-│   HTBP Tree · Tool Layer · Context Layer              │
-│   Device Gateway (reverse registration) · Auth (SK)   │
-├──────────────────────────────────────────────────────┤
-│  Upstream: MCP servers (Streamable HTTP) · HTTP APIs  │
-│  Sources: R2 / S3 / File / custom providers (plugins) │
-│  Devices: any machine that can run the CLI/SDK (WS)   │
-└──────────────────────────────────────────────────────┘
-```
 
-</td></tr></table>
-</div>
+The tree brings four concerns together:
 
-## The problem
+- **Discovery**: every path exposes `~help`; documentation, argument schemas, and the current identity's visible surface come from the runtime itself.
+- **Invocation**: raw HTTP, the CLI, the Dashboard, and `/~mcp` use the same capabilities and permission model.
+- **Governance**: Secret Keys are scoped by path and action, deny wins, and unauthorized paths appear not to exist.
+- **Collaboration**: agents can leave usage feedback on a specific path, and another HTBP service can be federated as a subtree.
 
-Getting an agent to use "what the organization already has" (tools, docs, machines) means wiring things up one by one today:
+## Quick start: run a gateway locally
 
-1. **Tool access is limited by runtime** — edge functions, browsers, and restricted sandboxes can't run an MCP client;
-2. **Context is fragmented** — knowledge lives in R2/S3, filesystems, and internal systems with no unified read/write/search surface;
-3. **Machines are out of reach** — the shell and filesystem of an intranet server are invisible to cloud agents;
-4. **Discovery drifts from docs** — every integrated tool needs a hand-written usage doc that inevitably drifts from the implementation;
-5. **Permissions are all-or-nothing** — there is no ready way to express "this agent may only read `docs/` and only call `search/`".
+This example uses the Node/Docker host. It stores state in SQLite and objects under `/data`, making it the shortest path to a local end-to-end setup.
 
-tool-bridge collapses all five into **one self-describing tree**: every capability (tool, context, device, federated service) is a node on the tree; every path level answers `~help`; `~help` is the documentation, the contract, and the permission-trimmed visible surface; every Secret Key has an explicit scope, and nodes outside it simply don't exist for that caller.
+### 1. Generate trust roots and start the server
 
-## Capabilities
-
-| Capability | Details |
-|---|---|
-| **HTBP tree & progressive discovery** | Drill down from the root `/~help`; `~tree?depth=N` for a bounded overview; `~help` defaults to Markdown, `Accept: text/plain` returns the compact Help DSL, and `Accept: application/json` returns semantically equivalent JSON (with real JSON Schema — directly renderable as forms) |
-| **Tool layer** | Mount MCP servers (Streamable HTTP with modern/legacy era negotiation) and arbitrary HTTP APIs (declarative HttpToolDef); **tool virtualization** (prefix / rename / hide / description override) — only virtual names are exposed |
-| **Remote federation** | Mount another HTBP service as a subtree with `~help`/`~tree`/call passthrough; https enforced + host allowlist + `X-TB-Via` cycle detection; the caller's SK never leaves the gateway — outbound credentials are re-issued via `skRef` |
-| **Context layer** | Mount R2 / S3 as namespaces behind unified `List/Get/Update/Write` verbs + `Search`; optimistic concurrency (`ifVersion`); entries >1 MiB return a presigned `$ref` URL (gateway-relayed fallback when no credential), keeping large payloads off the gateway |
-| **Skillhub layer** | Publish Agent Skills (a directory of `SKILL.md` + text files) onto the tree so any agent can discover and fetch them over plain fetch: `List/Get/Search/Publish/Remove`; stored in the platform's own R2 **with no external credentials**; the server parses `SKILL.md` frontmatter into a name/description catalog (`tb skill get --out` pulls a skill straight into local `.claude/skills/`) |
-| **Device reverse registration** | An intranet machine runs `tb connect` to open a WebSocket and mount its own shell and fs onto the tree; the shell denies everything by default with an explicit allowlist; disconnects return 503 retryable and reconnects self-heal; cloud side uses Durable Object WebSocket Hibernation — near-zero idle cost |
-| **SK permission model** | Every Secret Key = owner + scope list (path glob × action set; deny wins, no match denies); **visibility is permission**: unauthorized nodes are absent from `~help`/`~tree` (404, not 403); revocation on the CF KV host is eventually consistent, with no exact propagation SLA |
-| **Credential custody** | Upstream AK/SKs are stored encrypted in the SecretStore (AES-256-GCM, write-only); node configs hold only reference names — credentials never leave the gateway and never appear in any `~help` or response |
-| **Plugin system** | Third parties implement Tool/Context providers as plain HTTP services; registration performs health checks + contract validation; plugins are peers of built-in providers |
-| **SDK** | Embed a TB instance in your own Node process, register local functions as tools, and optionally reverse-`connect` to a remote gateway — your local functions appear on the remote tree |
-| **Three equal entry points** | Agent (raw HTTP), CLI (`tb`, `--json` everywhere), and Dashboard behave identically against the same tree — no management side-channels |
-
-## Usage
-
-### As an agent: just fetch
-
-No SDK required — that's the whole point:
+Node.js 22+ is used below to generate two random values. Save the Admin SK: the gateway cannot reveal it later.
 
 ```sh
-# Progressive discovery from the root (~help defaults to Markdown)
-curl -H "Authorization: Bearer $TB_SK" https://your-tb.example.com/~help
+export TB_ADMIN_SK="$(node -e "console.log('tbk_'+require('crypto').randomBytes(32).toString('base64url'))")"
+export TB_ENCRYPTION_KEY="$(node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))")"
 
-# Drill into a node to see its tools and how to call them
-curl -H "Authorization: Bearer $TB_SK" https://your-tb.example.com/tools/search/~help
-
-# Call a tool
-curl -X POST -H "Authorization: Bearer $TB_SK" \
-  -d '{"tool":"query","arguments":{"q":"hello"}}' \
-  https://your-tb.example.com/tools/search
-
-# Read a context entry
-curl -X POST -H "Authorization: Bearer $TB_SK" \
-  -d '{"tool":"Get","arguments":{"path":"notes/readme.md"}}' \
-  https://your-tb.example.com/ctx/docs
+docker run -d --name tool-bridge \
+  -p 127.0.0.1:8787:8787 \
+  -v tool-bridge-data:/data \
+  -e TB_BOOTSTRAP_ADMIN_SK="$TB_ADMIN_SK" \
+  -e TB_SECRET_ENCRYPTION_KEY="$TB_ENCRYPTION_KEY" \
+  ghcr.io/tokenrollai/tool-bridge:latest
 ```
 
-### CLI: `tb`
+In production, inject both values through your platform's secret mechanism. Do not bake them into an image, repository, or shared script.
+
+### 2. Log in, discover, and invoke with the CLI
 
 ```sh
 npm install -g @tool-bridge/cli
+
+tb login --base-url http://127.0.0.1:8787   # enter the saved Admin SK when prompted
+tb tree --depth 2                           # browse the current identity's visible tree
+tb help system/status                      # read the node's live contract
+tb call system/status --tool get           # invoke its get command
 ```
+
+The deployment includes the Dashboard at [http://127.0.0.1:8787/ui](http://127.0.0.1:8787/ui). It uses the same public API, and the SK stays in local browser storage.
+
+You can also use plain fetch without the CLI:
 
 ```sh
-tb login                                    # interactively save BaseURL + SK (multi-profile)
-tb status --json                            # gateway health summary
-tb tree --depth 3                           # tree view
-tb help tools/search                        # ~help of any node
+curl -H "Authorization: Bearer $TB_ADMIN_SK" \
+  http://127.0.0.1:8787/~help
 
-# ── Mount tools ───────────────────────────────────────
-tb tool mount tools/docs --kind mcp --url https://mcp.example.com/mcp
-tb tool mount tools/echo --kind http --endpoint https://postman-echo.com \
-  --tools-file ./echo-tools.json
-tb call tools/echo --tool get --args '{"foo":"bar"}'
-
-# ── Mount contexts ────────────────────────────────────
-tb secret set --name s3-cred                         # credential read from stdin into the write-only SecretStore
-tb ctx mount ctx/docs --provider s3 --endpoint https://... --bucket docs --auth-ref s3-cred
-tb ctx put ctx/docs notes/hello.md --content '# hi'
-tb ctx cat ctx/docs notes/hello.md
-tb ctx search ctx/docs hi
-
-# ── Reverse-register this machine ─────────────────────
-tb connect --allow 'echo' --allow 'uname' --fs ~/shared   # long-running; shell allowlist + fs exposure
-tb device ls                                              # from another terminal: device online status
-tb call device/<id>/shell --tool exec --args '{"command":"echo hi"}'
-
-# ── Federate another HTBP service ─────────────────────
-tb server add fed/team-b --remote-url https://tb.team-b.example.com --sk-ref team-b-sk
-
-# ── Permissions ───────────────────────────────────────
-tb sk create --owner agent:reader --scope 'ctx/docs/**:read' --scope 'tools/search:call'
-tb sk list --limit 50
-tb sk get <id> && tb sk disable <id> && tb sk enable <id>
-tb sk update <id> --expires 2026-12-31T23:59:59Z
-tb sk rm <id>
-
-# ── Plugins ───────────────────────────────────────────
-tb plugin register --file ./manifest.json && tb plugin health my-plugin
+curl -X POST \
+  -H "Authorization: Bearer $TB_ADMIN_SK" \
+  -H "Content-Type: application/json" \
+  -d '{"tool":"get","arguments":{}}' \
+  http://127.0.0.1:8787/system/status
 ```
 
-Top-level commands share the global `--json` / `--base-url` / `--sk` / `--timeout` options. Apart from local profiles and `init cloudflare` deployment orchestration, the CLI uses the public HTBP/API surface and has no private management endpoint.
+`~help` returns Markdown by default. Send `Accept: text/plain` for the compact Help DSL, or `Accept: application/json` for a structured representation with JSON Schema.
 
-### Dashboard
+## What you can use today
 
-After deploying, open `https://your-tb.example.com/ui` and enter your SK + BaseURL:
+| Use case | Current entry point | Typical purpose |
+|---|---|---|
+| Connect existing tools | MCP, declarative HTTP, built-in integrations, external plugins | Give agents one discovery and invocation surface |
+| Manage context and skills | R2, S3, Node file object storage, plugin contexts, Skillhub | Read, write, and search documents and objects; publish and fetch Agent Skills |
+| Connect local machines | `tb connect`, SDK `connect()` | Dial out from a private network and expose allowlisted shell, files, or local functions |
+| Share usage experience | Per-path `~feedback`, CLI, Dashboard | Show later agents verified pitfalls and recommendations before they call a tool |
+| Federate teams | Remote nodes, `system/federation` | Mount another HTBP tree without sharing the local caller's credentials |
+| Support MCP clients | `/<base>/~mcp` | Project the current identity's visible tools as an MCP server |
 
-- tree navigation + form-based calls on any node (forms auto-rendered from the JSON Schema in `~help`) + markdown result display;
-- context entry browsing (List drill-down / Search / Get preview / Write editing);
-- SK issuance & revocation, registry management, device online status, credential management;
-- ⌘K command palette with fuzzy jump across the whole tree.
+### Connect tools and context
 
-The Dashboard has no dedicated backend — it is just a generic `~help` renderer; the SK stays in your browser.
+Choose an integration from the host's built-in catalog, or mount a Streamable HTTP MCP server directly:
 
-### SDK: embed a TB instance
+```sh
+tb integration catalog --search tavily
+tb integration add tools/tavily --provider tavily --key-stdin < tavily.key
+
+tb tool mount tools/docs \
+  --kind mcp \
+  --url https://mcp.example.com/mcp
+
+tb help tools/docs
+tb call tools/docs --tool search --args '{"query":"tool-bridge"}'
+```
+
+An S3-compatible object store can be mounted as a Context namespace. Credentials are written only to the SecretStore; node records keep the reference name:
+
+```sh
+# s3-credential.json: {"accessKeyId":"...","secretAccessKey":"..."}
+tb secret set --name docs-s3 < s3-credential.json
+tb ctx mount ctx/docs \
+  --provider s3 \
+  --endpoint https://s3.example.com \
+  --bucket docs \
+  --auth-ref docs-s3
+
+tb ctx ls ctx/docs
+tb ctx cat ctx/docs notes/readme.md
+```
+
+Use `tb <command> --help` and [`packages/cli/README.md`](packages/cli/README.md) for the complete command surface.
+
+### Connect a local machine to the tree
+
+`tb connect` opens an outbound WebSocket from the machine, so the gateway never needs inbound access to the private network. The shell denies every command by default; only explicitly allowlisted commands can run:
+
+```sh
+tb connect \
+  --device-id build-01 \
+  --path device/build-01 \
+  --allow uname \
+  --allow ls \
+  --fs ./shared \
+  --fs-readonly
+```
+
+Remote callers can then discover `device/build-01` through the same tree. Long-running container and Kubernetes sidecar examples live in [`packages/cli/CONTAINER.md`](packages/cli/CONTAINER.md).
+
+## Share real usage feedback between agents
+
+Feedback is attached to the exact node or tool path instead of living in a separate forum. An agent reads prior experience before use, submits a short recommendation after hitting a pitfall, and other identities vote on it:
+
+```sh
+# Before use: top feedback also appears directly in tb help <path>
+tb feedback ls tools/docs
+
+# After use: record a reusable constraint or correct workflow
+tb feedback submit tools/docs \
+  --title "Confirm the index scope before searching" \
+  --detail "This upstream indexes public docs by default; private spaces require separate authorization."
+
+# Other agents vote on useful experience
+tb feedback vote tools/docs <feedback-id> up
+```
+
+Feedback permissions are evaluated on the target path: reading requires `read`, submitting and voting also require `call`, and removal requires `admin`. Top-scoring feedback is included in `~help` and, on hosts with Search enabled, participates in tool search. This makes “how the tool actually behaves” discoverable next to its runtime contract.
+
+The Dashboard node view provides the same list, submit, vote, and moderation actions.
+
+## Federate multiple tool-bridge gateways
+
+Federation mounts another HTBP service under a local path. An administrator first allows the remote host, saves a dedicated remote SK, and then creates the remote node:
+
+```sh
+tb federation add tb.team-b.example.com
+tb secret set --name team-b-sk < team-b.sk
+
+tb server add teams/team-b \
+  --remote-url https://tb.team-b.example.com \
+  --sk-ref team-b-sk
+
+tb tree teams/team-b --depth 2
+tb help teams/team-b/tools/search
+```
+
+Federation fails closed by default: an empty host allowlist permits no remote, HTTPS is required outside local development, and the local caller's SK is never sent upstream. Outbound identity comes from the SecretStore `skRef`. The gateway also enforces hop limits, cycle detection, and remote path validation.
+
+## Deploy or embed
+
+| Shape | State and objects | Best fit |
+|---|---|---|
+| **Node / Docker** | SQLite + local filesystem; one container and one `/data` volume | Self-hosting, private networks, quick local evaluation |
+| **Cloudflare Workers** | KV + R2 + D1 + Durable Objects | Edge deployment, low operations, long-lived device connections |
+| **Embedded SDK** | Caller-injected stores and providers | Register local functions inside your own Node/Workers application |
+
+### Cloudflare Workers
+
+The fastest entry point is the Deploy Button at the top of this page. Generate and save `TB_BOOTSTRAP_ADMIN_SK` and `TB_SECRET_ENCRYPTION_KEY` first. The template requests both before the first build so a gateway is never started without its trust roots. See [`template/README.md`](template/README.md) for the complete flow.
+
+For a full deployment from a source checkout, use the CLI wizard:
+
+```sh
+git clone https://github.com/TokenRollAI/tool-bridge
+cd tool-bridge
+pnpm install
+npm install -g @tool-bridge/cli
+
+tb init cloudflare --repo .
+```
+
+The wizard logs into and selects an account, generates trust roots, provisions KV/R2/D1, builds and deploys, verifies `~help`, and saves a local profile. Use `--account-id <id> --yes` in non-interactive environments and `--domain tb.example.com` for a custom domain.
+
+### Embed in your own application
 
 ```sh
 npm install @tool-bridge/sdk
 ```
 
 ```ts
-import { serve } from '@hono/node-server'
 import { createToolBridge, MemoryStateStore } from '@tool-bridge/sdk'
 
 const tb = createToolBridge({
@@ -168,155 +236,66 @@ const tb = createToolBridge({
   adminSk: process.env.TB_BOOTSTRAP_ADMIN_SK!,
 })
 
-// Register a local function as a tool on the tree
 tb.registerTool('tools/echo', {
-  List: () => [{ name: 'echo', description: 'echo the text back' }],
-  Get: () => ({ name: 'echo' }),
+  List: () => [{ name: 'echo', description: 'Return the input text' }],
   Call: (_name, args) => ({ content: { echoed: args.text } }),
 })
 
-// Serve as a standalone HTBP service
-serve({ fetch: (req) => tb.fetch(req), port: 8787 })
-
-// Or: reverse-connect to a remote gateway — the local tool appears on the remote tree
-const conn = await tb.connect('https://your-tb.example.com', process.env.TB_SK!)
-await conn.ready
+export default { fetch: tb.fetch }
 ```
 
-See [packages/sdk/README.md](packages/sdk/README.md) for details.
+See [`packages/sdk/README.md`](packages/sdk/README.md) for a Node HTTP server, reverse connection, and custom store examples.
 
-## Deployment
+## Permissions and security boundaries
 
-The gateway itself is host-neutral `@tool-bridge/app` (a Hono app plus five injection
-points: state / objects / secrets / device channel / search). A host adapter only wires
-those five points to a concrete platform. The two first-class adapters expose the same
-capability surface — pick the one that puts your data where you want it:
+- Every SK has an owner plus path globs and `read/write/call/register/admin` actions. Deny wins; no match denies.
+- Invisible paths return 404 from `~help`, `~tree`, and invocation, avoiding existence leaks.
+- Upstream credentials enter the write-only SecretStore. Node config, logs, and read-only management responses do not reveal secret values.
+- Built-in plugins share the gateway's process privileges and use controlled outbound access. External plugins are descriptor- and health-checked during registration.
+- Workers KV has eventual-consistency windows for revocation and registry reads. Prefer the Node/SQLite host when state must be strongly consistent.
 
-| | Node / Docker (`@tool-bridge/server`) | Cloudflare Workers (`@tool-bridge/gateway`) |
-|---|---|---|
-| State (tree config / SKs) | SQLite | Workers KV |
-| Objects (contexts / large payloads) | Local filesystem | R2 |
-| Tool search | better-sqlite3 FTS5/trigram | D1 FTS5/trigram |
-| Device channel | In-process WebSocket | Durable Object (WS hibernation) |
-| Runtime shape | One container + one `/data` volume | A single Worker (API + Dashboard), near-zero idle cost |
-
-Protocol behavior (routing / permissions / content negotiation / plugins / OAuth / search)
-is verified once at the host-neutral layer with a Node suite; each adapter has its own
-integration tests on top (gateway on real workerd, server on Node). A third shape is
-embedding TB directly into your own process — see [SDK](#sdk-embed-a-tb-instance) above.
-
-### Node / Docker (self-hosting, no cloud vendor required)
-
-One container: SQLite + local FS, persisted through the `/data` volume, fails closed
-without an Admin SK:
+Example: issue a least-privilege SK.
 
 ```sh
-docker build -t tool-bridge .
-docker run -d --name tool-bridge -p 8787:8787 -v tool-bridge-data:/data \
-  -e TB_BOOTSTRAP_ADMIN_SK=... \
-  -e TB_SECRET_ENCRYPTION_KEY=... \
-  tool-bridge
-
-# Smoke-test
-TB_BASE_URL=http://127.0.0.1:8787 TB_SK=... pnpm smoke
+tb sk create \
+  --owner agent:researcher \
+  --scope 'ctx/docs/**:read' \
+  --scope 'tools/search/**:read,call'
 ```
 
-Prefer a plain process? `pnpm --filter @tool-bridge/server start`
-(`TB_DATA_DIR` / `TB_PORT` / `TB_HOST` are documented in [.env.example](.env.example)).
-When exposing it publicly, terminate TLS yourself and set `TB_CANONICAL_ORIGIN` to the
-canonical public origin.
+## Repository layout
 
-For repository development, Compose starts the gateway, a real Wrangler plugin Worker, and an authenticated mock MCP upstream. The synchronous smoke registers the plugin, mounts its export, and calls `echo` across all three hops:
+| Path | Responsibility |
+|---|---|
+| `packages/core` | Pure tree, auth, protocol, store, and builtin logic |
+| `packages/app` | Host-neutral Hono application and provider orchestration |
+| `packages/server` | Node/SQLite/filesystem/WebSocket host |
+| `packages/gateway` | Cloudflare KV/R2/D1/DO/Assets host |
+| `packages/cli` | `tb` CLI, device connection, and Cloudflare initialization |
+| `packages/dashboard` | Web management UI over the public API |
+| `packages/sdk` | Embedded instance, local providers, and reverse connection |
+| `packages/plugin-sdk` / `packages/plugins` | Plugin author contract and built-in integrations |
+| `llmdoc` | Current architecture, protocol contracts, and reproducible workflows |
+
+## Development
+
+Node.js 22+ and pnpm 11+ are required.
+
+```sh
+pnpm install
+pnpm verify              # typecheck + lint + test
+pnpm turbo run build     # also required after changing public packages, deps, or build config
+```
+
+The local Compose flow starts the Node gateway, a real plugin Worker, and an authenticated mock MCP upstream:
 
 ```sh
 pnpm compose:up
 pnpm compose:smoke
-pnpm compose:down       # remove containers and network; keep gateway-data
-pnpm compose:reset      # also delete the development data volume
+pnpm compose:down
 ```
 
-Compose defaults are local-only fixtures, and gateway port 8787 is bound to `127.0.0.1` only. Do not reuse those credentials in production. The production root `Dockerfile` remains independent of Compose.
-
-### Cloudflare Workers
-
-For one-click deploys see [template/](template/) (the Deploy button above): it provisions
-KV/R2/DO in **your** account and deploys a thin shell Worker. Before building, Cloudflare
-reads `template/.dev.vars.example` and asks for both trust-root secrets. Generate and save
-them locally, then paste them into the setup form:
-
-```sh
-node -e "console.log('tbk_'+require('crypto').randomBytes(32).toString('base64url'))"
-node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"
-```
-
-The first value is `TB_BOOTSTRAP_ADMIN_SK`; save it in a password manager. The second is
-`TB_SECRET_ENCRYPTION_KEY`. Cloudflare stores both as encrypted Worker secrets, so the
-first deployment is never exposed without its trust root.
-
-To deploy the full shape from this repository, use the CLI wizard:
-
-```sh
-git clone https://github.com/TokenRollAI/tool-bridge && cd tool-bridge
-pnpm install
-npm install -g @tool-bridge/cli
-
-tb init cloudflare --repo .
-
-# Non-interactive/CI; account id is required when more than one account is available.
-tb init cloudflare --repo . --account-id <account-id> --yes
-
-# Optional custom domain; otherwise workers.dev is enabled automatically.
-tb init cloudflare --repo . --domain tb.example.com
-```
-
-The wizard generates the Admin SK, passes secrets to `wrangler deploy --secrets-file`
-through a temporary mode-0600 file, verifies `~help`, and stores a local profile. It never
-places secret values in child-process argv or environment variables. If the Worker already
-exists, the saved profile must authenticate first and the existing Admin SK is preserved.
-
-`pnpm provision` (orchestrated by `deploy:all`) is a **Cloudflare-only optional step**, not
-the generic deployment entry point: it idempotently creates KV/R2/D1 and backfills the
-account-specific values from `.env` into `packages/gateway/wrangler.jsonc` (`account_id`,
-the custom-domain route, `TB_CANONICAL_ORIGIN`, the R2 S3 endpoint, and the prefix-derived
-resource names/ids). The committed wrangler.jsonc therefore carries no account id and no
-domain — what provision writes is *your* deployment config, so keep it out of public forks.
-Without a custom domain, leave `TB_DOMAIN` empty; provision enables `workers_dev` and clears
-stale custom routes automatically. The
-Node/Docker path does not need this step at all.
-
-On first request the gateway bootstraps itself from the preconfigured `TB_BOOTSTRAP_ADMIN_SK` and materializes the `system/*` management subtree; the concrete builtin set is defined by the core assembly. A new Workers instance without that secret fails closed and never prints an Admin SK in plaintext.
-
-Local development: `pnpm gen-dev-vars` (generates .dev.vars from .env), then `npx wrangler dev`.
-
-## Repository layout (pnpm monorepo)
-
-| Package | Responsibility |
-|---|---|
-| `packages/core` | Pure-logic kernel: tree / auth (SK scope checks) / HTBP encoding / context·device·plugin pure logic / SecretStore / builtin modules; zero host dependencies |
-| `packages/app` | The host-neutral gateway itself: routing and behavior for the whole HTBP tree, assembled through five injection points (state / objects / secrets / device channel / search); knows no concrete platform |
-| `packages/server` | Node host adapter: SQLite + local FS + in-process WebSocket; the single-container self-hosting entry point |
-| `packages/gateway` | Cloudflare Workers host adapter: KV / R2 / D1 / Durable Object / Static Assets bindings |
-| `packages/cli` | The `tb` command line (Commander): public API client plus Cloudflare initialization orchestration — npm package [`@tool-bridge/cli`](https://www.npmjs.com/package/@tool-bridge/cli) |
-| `packages/sdk` | npm package [`@tool-bridge/sdk`](https://www.npmjs.com/package/@tool-bridge/sdk): embedded TB instance, programmatic registration, reverse connect |
-| `packages/plugin-sdk` | Minimal SDK and contract for writing third-party plugins (tool/context providers) |
-| `packages/plugins` | Built-in plugin sources and generated catalog; standard hosts mount them in-process, or run them as an external Node plugin via `scripts/serve.ts` |
-| `packages/dashboard` | Web management UI: a generic `~help` renderer + admin forms, no dedicated backend |
-| `llmdoc/` | Project knowledge base (architecture boundaries, protocol contract, runtime pitfalls, workflows) |
-
-## Development
-
-```sh
-pnpm verify              # one-shot: typecheck + lint + all tests
-pnpm test:unit           # core / cli / sdk / plugin unit tests
-pnpm test:integration    # host-adapter integration tests (gateway on real workerd, server on Node)
-pnpm lint:fix            # eslint auto-fix
-```
-
-Engineering rule: **the code is the source of truth for behavior**; the lookup docs for the interface contract, module boundaries, and runtime guidance live in [llmdoc/](llmdoc/index.md) (contract entry point: `llmdoc/reference/protocol-contract.md`).
-
-## Status
-
-Under active development (pre-launch), with no formal production environment. Cloudflare, Node/Docker, and SDK hosts assemble the same host-neutral app. Release readiness is tracked by `llmdoc/must/current-state.md` and reproducible repository checks rather than environment history in this README.
+Code and generated artifacts are the source of truth for behavior. Start at [`llmdoc/index.md`](llmdoc/index.md) for architecture boundaries, protocol contracts, deployment, and verification guides.
 
 ## License
 
