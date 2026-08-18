@@ -41,6 +41,7 @@
 | 公共站点任务化重构与契约校对 | [memory/reflections/public-site-redesign.md](memory/reflections/public-site-redesign.md) |
 | 公共站点自动发布与切页性能 | [memory/reflections/public-site-delivery-performance.md](memory/reflections/public-site-delivery-performance.md) |
 | Agent Skill 接入与 feedback 异常闭环 | [memory/reflections/agent-skill-bootstrap.md](memory/reflections/agent-skill-bootstrap.md) |
+| CLI registry tarball 的工作区依赖协议泄漏 | [memory/reflections/cli-registry-catalog-dependency.md](memory/reflections/cli-registry-catalog-dependency.md) |
 
 ## 维护边界
 
