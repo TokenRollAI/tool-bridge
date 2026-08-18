@@ -86,3 +86,5 @@ Manifest 描述部署：`id`、`protocolVersion:'plugin/v2'`、`endpoint`、`aut
 顶层命令族以 `packages/cli/src/program.ts` 为准。全局 `--json`、`--base-url`、`--sk`、`--timeout` 可位于根、组或叶子位置；未知 flag、多余 positional、缺必填参数均失败。当前集成入口只接受 `--credential`，卸载不再提供隐藏 `--purge`；凭证清理由 `tb secret` 显式完成。
 
 CLI 和 Dashboard 的便利校验不替代服务端权威校验。接口或字段变化时按 API / CLI / Dashboard 三入口同轮更新。
+
+`tb daemon install/status/logs/restart/uninstall` 是当前 Linux 主机上 systemd user service、私有配置与 journal 的本地生命周期入口，不是 HTBP 服务端管理能力；因此它天然没有对应的 Dashboard 或直接 API 入口，不适用三入口对等要求。

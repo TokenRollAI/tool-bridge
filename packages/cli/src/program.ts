@@ -5,6 +5,7 @@ import pkg from '../package.json' with { type: 'json' }
 import { feedbackCommand } from './commands/feedback'
 import { connectCommand } from './commands/connect'
 import { skillCommand } from './commands/skillhub'
+import { daemonCommand } from './commands/daemon'
 import { deviceCommand } from './commands/device'
 import { pluginCommand } from './commands/plugin'
 import { secretCommand } from './commands/secret'
@@ -49,7 +50,7 @@ function showGlobalOptionsInHelp(command: Command): void {
  * - tool mount/rm、server add/ls/rm、call:挂载工具源与数据面调用。
  * - ctx ls/cat/put/patch/rm/search/mount/unmount:Context Layer。
  * - skill ls/get/search/publish/rm/mount/unmount:skillhub(Agent Skill 仓库)。
- * - connect、device ls、mount fs:设备反向注册。
+ * - connect、daemon、device ls、mount fs:设备反向注册与本机守护。
  * - plugin register/list/get/update/health/rm:插件注册表。
  *
  * commander 严格解析:未知 flag / 多余 positional / 缺 required 一律报错退出,
@@ -92,6 +93,7 @@ Agent feedback — every path carries experience from other agents:
   program.addCommand(ctxCommand())
   program.addCommand(skillCommand())
   program.addCommand(connectCommand())
+  program.addCommand(daemonCommand())
   program.addCommand(deviceCommand())
   program.addCommand(mountCommand())
   program.addCommand(pluginCommand())

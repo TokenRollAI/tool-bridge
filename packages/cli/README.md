@@ -85,6 +85,48 @@ tb help docs/context7            # 节点级 ~help(工具索引)
 tb call docs/context7 --tool resolve-library-id --args '{"query":"react"}'
 ```
 
+## 把 Linux 机器作为 daemon 接入
+
+Linux + systemd 上不需要手写 unit。先用一把只允许注册该设备路径的 Device SK 建立独立
+profile，再一条命令安装用户级服务：
+
+```sh
+tb login --profile device --base-url https://your-gateway.example.com
+
+tb daemon install \
+  --device-id build-01 \
+  --path device/build-01 \
+  --allow git \
+  --allow npm
+```
+
+安装命令会冻结当前解析出的网关、SK 与 expose 参数到 `0600` 私有配置，生成 systemd user
+unit、启用 login linger、立即启动，并等待设备真正连接成功。unit 与进程参数中不包含 SK；以后执行
+`tb use` 切换交互 profile 也不会改变已安装 daemon 的目标。
+
+```sh
+tb daemon status
+tb daemon logs --follow
+tb daemon restart
+tb daemon uninstall
+```
+
+`uninstall` 只移除本机服务和 daemon 配置，不删除登录 profile，也不吊销服务端 SK。安装与管理
+命令应以目标 Linux 用户运行，不要使用 `sudo tb daemon ...`；首次启用 linger 若需要管理员授权，CLI
+只会为固定的 `loginctl enable-linger` 操作请求 sudo。
+
+Shell 缺省仍然拒绝所有命令。`--allow '*'` 会把任意 shell 命令开放给有该路径 `call` 权限的
+身份，实际系统权限等于运行 daemon 的 Linux 用户；交互安装会二次确认，非交互安装还必须显式
+传 `--yes`。daemon 配置可被同一用户读取，因此只能使用最小权限 Device SK，绝不能复用 Admin
+SK。Device SK 的注册权限应类似：
+
+```sh
+tb sk create \
+  --owner device:build-01 \
+  --scope 'device/build-01/**:register' \
+  --register-path device/build-01
+```
+
 从 tool-bridge 源码仓库首次部署到 Cloudflare，可直接运行：
 
 ```sh
@@ -110,6 +152,7 @@ KV/R2/D1、构建部署、验证 `~help`，最后保存本机 profile。Admin SK
 | `tb ctx ls/cat/put/patch/rm/search` | 上下文(对象存储)读写 |
 | `tb sk` / `tb secret` | SK 签发/查看/更新/禁用/吊销与上游凭证管理 |
 | `tb connect` | 将本机注册为设备(shell/fs 反向通道) |
+| `tb daemon install/status/logs/restart/uninstall` | 在 Linux 上持久运行本机设备连接 |
 | `tb device ls` | 设备清单 |
 | `tb skill ls/get/search/publish/rm/mount/unmount` | Agent Skill 仓库 |
 | `tb federation` / `tb note` / `tb feedback` | 联邦白名单、路径注解与使用反馈 |

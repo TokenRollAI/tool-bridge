@@ -126,7 +126,7 @@ Skill 会先验证目标，再搜索或逐级浏览、读取工具级 schema 与
 |---|---|---|
 | 接入已有工具 | MCP、声明式 HTTP、内置集成、外部 Plugin | 给 Agent 提供统一发现与调用入口 |
 | 管理上下文与技能 | R2、S3、Node 文件对象存储、Plugin Context、Skillhub | 统一读写、搜索文档与对象，发布和获取 Agent Skill |
-| 接入本地机器 | `tb connect`、SDK `connect()` | 从内网主动连接，按白名单暴露 shell、文件或本地函数 |
+| 接入本地机器 | `tb daemon install`、`tb connect`、SDK `connect()` | 从内网主动连接，按白名单暴露 shell、文件或本地函数 |
 | 共享使用经验 | 每个路径的 `~feedback`、CLI、Dashboard | 让后续 Agent 在调用前看到已验证的坑和建议 |
 | 联邦多个团队 | remote 节点、`system/federation` | 把另一棵 HTBP 树挂成子树，不共享本地调用者凭据 |
 | 兼容 MCP 客户端 | `/<base>/~mcp` | 将当前身份可见的工具投影为 MCP server |
@@ -166,10 +166,11 @@ tb ctx cat ctx/docs notes/readme.md
 
 ### 把本地机器接入树
 
-`tb connect` 从本机主动建立 WebSocket，不要求云端反向访问内网。Shell 默认拒绝所有命令，只有显式 allowlist 中的命令可以执行：
+Linux + systemd 上优先用 `tb daemon install`：它会安装用户级服务、启用 login linger、开机
+自启并在网络闪断后自动重连，不依赖 SSH 会话。参数与前台 `tb connect` 相同：
 
 ```sh
-tb connect \
+tb daemon install \
   --device-id build-01 \
   --path device/build-01 \
   --allow uname \
@@ -178,7 +179,11 @@ tb connect \
   --fs-readonly
 ```
 
-远端调用者随后可以通过同一棵树发现 `device/build-01`。长驻容器和 Kubernetes sidecar 示例见 [`packages/cli/CONTAINER.md`](packages/cli/CONTAINER.md)。
+Shell 默认拒绝所有命令，只有显式 allowlist 中的命令可以执行。用 `tb daemon status`、
+`tb daemon logs --follow`、`tb daemon restart` 与 `tb daemon uninstall` 管理本机服务；需要前台
+调试时仍可运行同参数的 `tb connect`。远端调用者随后可以通过同一棵树发现
+`device/build-01`。长驻容器和 Kubernetes sidecar 示例见
+[`packages/cli/CONTAINER.md`](packages/cli/CONTAINER.md)。
 
 ## 让 Agent 共享真实使用反馈
 

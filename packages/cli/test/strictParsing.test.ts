@@ -97,6 +97,12 @@ describe('未知 flag 必须报错(事故回归)', () => {
       ['skill', 'mount', 'hub', '--bogus'],
       ['skill', 'unmount', 'hub', '--bogus'],
       ['connect', '--bogus'],
+      ['daemon', 'install', '--bogus'],
+      ['daemon', 'status', '--bogus'],
+      ['daemon', 'logs', '--bogus'],
+      ['daemon', 'restart', '--bogus'],
+      ['daemon', 'uninstall', '--bogus'],
+      ['daemon', '_run', '--config', '/tmp/device.json', '--bogus'],
       ['device', 'ls', '--bogus'],
       ['mount', 'fs', '/tmp', '--bogus'],
       ['plugin', 'register', '--file', 'f', '--bogus'],
@@ -161,6 +167,7 @@ describe('缺 required option / positional 必须报错', () => {
     [['skill', 'unmount'], 'commander.missingArgument'],
     [['mount', 'fs'], 'commander.missingArgument'],
     [['plugin', 'get'], 'commander.missingArgument'],
+    [['daemon', '_run'], 'commander.missingMandatoryOptionValue'],
   ])('%j → %s', async (argv, code) => {
     expect(await parseError(argv as string[])).toBe(code)
   })

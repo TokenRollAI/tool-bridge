@@ -21,6 +21,14 @@ export interface ConnectArgs {
   url?: string
 }
 
+export interface PreparedConnect {
+  baseUrl: string
+  deviceId: string
+  expose: DeviceExpose
+  mountPath?: string
+  sk: string
+}
+
 /** 长驻设备连接仍展示全局参数，但明确标出其中不适用或互斥的参数。 */
 export function withDeviceConnectionGlobalOpts(command: Command): Command {
   const configured = withGlobalOpts(command)
@@ -46,7 +54,8 @@ export function buildExpose(args: ConnectArgs): DeviceExpose {
   return expose
 }
 
-export async function runConnect(args: ConnectArgs): Promise<void> {
+/** 前台 connect 与 daemon install 共用的参数/目标解析，避免安全语义漂移。 */
+export function prepareConnect(args: ConnectArgs): PreparedConnect {
   if (args.timeout !== undefined) {
     throw new CliError('--timeout does not apply to the long-running connect command')
   }
@@ -69,16 +78,23 @@ export async function runConnect(args: ConnectArgs): Promise<void> {
   if (!target.sk) throw new CliError('missing SK: pass --sk, set TB_SK, or run tb login')
   const deviceId = resolveDeviceId(args.deviceId ? String(args.deviceId) : undefined)
   const expose = buildExpose(args)
-  const asJson = Boolean(args.json)
-  await runDeviceConnection({
+  return {
     baseUrl: target.baseUrl,
     sk: target.sk,
     deviceId,
-    ...(args.path ? { mountPath: String(args.path) } : {}),
     expose,
+    ...(args.path ? { mountPath: String(args.path) } : {}),
+  }
+}
+
+export async function runConnect(args: ConnectArgs): Promise<void> {
+  const prepared = prepareConnect(args)
+  const asJson = Boolean(args.json)
+  await runDeviceConnection({
+    ...prepared,
     onReady: (mountPath) => {
-      if (asJson) printJson({ event: 'ready', deviceId, mountPath })
-      else printLine(`connected ${deviceId} -> ${mountPath}`)
+      if (asJson) printJson({ event: 'ready', deviceId: prepared.deviceId, mountPath })
+      else printLine(`connected ${prepared.deviceId} -> ${mountPath}`)
     },
     onStateChange: (state) => {
       if (asJson) printJson({ event: 'state', state })
