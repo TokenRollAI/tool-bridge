@@ -325,3 +325,46 @@ describe('list 分页与 limit 钳制', () => {
     expect(page.items.every(n => n.path === 'bulk' || n.path.startsWith('bulk/'))).toBe(true)
   })
 })
+
+describe('设备 presence:online / lastSeenAt 写入语义', () => {
+  const dir: NodeInput = { path: 'device/d1', kind: 'directory', description: '设备 d1' }
+
+  it('write 带 online+lastSeenAt(对位 hello 落库)', async () => {
+    const node = await reg.write(dir, 'device:d1', T1, { online: true, lastSeenAt: T1 })
+    expect(node.online).toBe(true)
+    expect(node.lastSeenAt).toBe(T1)
+  })
+
+  it('setOnline(true) 视为存活观察,同步刷新 lastSeenAt', async () => {
+    await reg.write(dir, 'device:d1', T1, { online: false, lastSeenAt: T1 })
+    const node = await reg.setOnline('device/d1', true, T2)
+    expect(node.online).toBe(true)
+    expect(node.lastSeenAt).toBe(T2)
+  })
+
+  it('setOnline(false) 保留原 lastSeenAt(用于展示最后在线于)', async () => {
+    await reg.write(dir, 'device:d1', T1, { online: true, lastSeenAt: T1 })
+    const node = await reg.setOnline('device/d1', false, T2)
+    expect(node.online).toBe(false)
+    expect(node.lastSeenAt).toBe(T1)
+    expect(node.updatedAt).toBe(T2)
+  })
+
+  it('touchSeen 只刷 lastSeenAt,不改 online 也不动 updatedAt', async () => {
+    await reg.write(dir, 'device:d1', T1, { online: true, lastSeenAt: T1 })
+    await reg.touchSeen('device/d1', T2)
+    const node = await reg.get('device/d1')
+    expect(node.lastSeenAt).toBe(T2)
+    expect(node.online).toBe(true)
+    expect(node.updatedAt).toBe(T1)
+  })
+
+  it('touchSeen 对不存在的节点静默返回(心跳晚于删除的竞态)', async () => {
+    await expect(reg.touchSeen('device/gone', T2)).resolves.toBeUndefined()
+  })
+
+  it('setOnline 对不存在的节点抛 not_found', async () => {
+    const err = await grabError(() => reg.setOnline('device/gone', true, T1))
+    expect(err.code).toBe('not_found')
+  })
+})

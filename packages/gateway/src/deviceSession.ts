@@ -52,6 +52,13 @@ interface DeviceMeta {
 const META_KEY = 'meta'
 const RESULT_KEY_PREFIX = 'result:'
 const DEFAULT_RECLAIM_SEC = 24 * 60 * 60
+/**
+ * presence 心跳刷新间隔。DO 用 auto-response 应答 ping/pong 时**不唤醒对象**,所以 DO 代码
+ * 路径看不到心跳,无法在收到 pong 时刷新 KV 的 lastSeenAt。改由周期 alarm 主动巡检:读平台
+ * 记录的最后 auto-response 时刻(getWebSocketAutoResponseTimestamp)回写 lastSeenAt。
+ * 取 45s——小于 presence TTL(90s)确保活动设备不被误降级 stale,又不过度放大 KV 写。
+ */
+const PRESENCE_REFRESH_MS = 45_000
 
 function jsonResponse(value: unknown, status = 200): Response {
   return new Response(JSON.stringify(value), {
@@ -168,13 +175,18 @@ export class DeviceSession extends DurableObject<DeviceSessionEnv> {
 
   override async alarm(): Promise<void> {
     const meta = await this.ctx.storage.get<DeviceMeta>(META_KEY)
-    if (
-      meta === undefined
-      || meta.activeConnId !== undefined
-      || meta.disconnectedAt === undefined
-    ) {
+    if (meta === undefined) return
+
+    // 有活连接:这是一次 presence 心跳巡检,不是 reclaim。读平台记录的最后 auto-response
+    // 时刻回写 lastSeenAt,并重排下一次刷新。设备虽在线但 socket 实际已消失(半开/evict)时,
+    // activeSocket() 会返回 null 并触发 markDisconnected——此处只负责活动设备的新鲜度续期。
+    if (meta.activeConnId !== undefined) {
+      await this.refreshPresence(meta)
+      await this.ctx.storage.setAlarm(Date.now() + PRESENCE_REFRESH_MS)
       return
     }
+
+    if (meta.disconnectedAt === undefined) return
     const reclaimMs = parsePositiveInt(this.env.TB_DEVICE_RECLAIM_SEC, DEFAULT_RECLAIM_SEC) * 1000
     if (Date.now() - Date.parse(meta.disconnectedAt) < reclaimMs) {
       await this.ctx.storage.setAlarm(Date.parse(meta.disconnectedAt) + reclaimMs)
@@ -307,7 +319,9 @@ export class DeviceSession extends DurableObject<DeviceSessionEnv> {
       activeConnId: attachment.connId,
       connectedAt: now,
     })
-    await this.ctx.storage.deleteAlarm()
+    // 设备已上线:排一个心跳刷新 alarm(取代原先的 deleteAlarm)。alarm 现在多用途——
+    // 有活连接时刷新 presence 的 lastSeenAt,无活连接且已断线时执行 reclaim。
+    await this.ctx.storage.setAlarm(Date.now() + PRESENCE_REFRESH_MS)
     this.closeSupersededSockets(ws, attachment.connId)
     session.accept(mountPath)
   }
@@ -403,6 +417,33 @@ export class DeviceSession extends DurableObject<DeviceSessionEnv> {
       action: 'write',
       existing: null,
     }).allow
+  }
+
+  /**
+   * presence 心跳续期(alarm 巡检调用):找到当前活动连接的 socket,读平台记录的最后
+   * auto-response(pong)时刻,回写 registry 的 lastSeenAt。socket 已消失(半开/未 attach)或
+   * 平台无时刻记录时不回写——宁可让 lastSeenAt 自然过期降级为 stale,也不谎报新鲜。
+   */
+  private async refreshPresence(meta: DeviceMeta): Promise<void> {
+    const tagged = this.ctx.getWebSockets(`device:${meta.deviceId}`)
+    const sockets = tagged.length > 0 ? tagged : this.ctx.getWebSockets()
+    let seenAt: Date | null = null
+    for (const ws of sockets) {
+      try {
+        if (attachmentOf(ws).connId !== meta.activeConnId) continue
+      } catch {
+        continue
+      }
+      seenAt = this.ctx.getWebSocketAutoResponseTimestamp(ws)
+      break
+    }
+    if (seenAt === null) return
+    try {
+      const registry = await this.registry()
+      await registry.touchSeen(meta.mountPath, seenAt.toISOString())
+    } catch {
+      // 节点可能已被管理面删除;心跳续期失败不影响连接与调用。
+    }
   }
 
   private async activeSocket(): Promise<WebSocket | null> {

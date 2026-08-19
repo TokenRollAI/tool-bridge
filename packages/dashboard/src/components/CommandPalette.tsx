@@ -14,7 +14,7 @@ import {
 } from 'lucide-react'
 import { useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router'
-import type { NodeKind, TreeJson } from '@/lib/types'
+import type { NodeKind, Presence, TreeJson } from '@/lib/types'
 import {
   CommandDialog,
   CommandEmpty,
@@ -24,6 +24,7 @@ import {
   CommandList,
   CommandSeparator,
 } from '@/components/ui/command'
+import { PRESENCE_HINT, PRESENCE_LABEL } from '@/lib/presence'
 import { KindBadge } from '@/components/KindBadge'
 import { KIND_ICON } from '@/components/kind-icon'
 import { useSession } from '@/lib/session-context'
@@ -35,8 +36,9 @@ import { cn } from '@/lib/utils'
 interface FlatNode {
   description: string
   kind: NodeKind
-  online?: boolean
   path: string
+  /** 数据源是 `~tree`,宿主已投影好三态;这里只搬运不重算。 */
+  presence?: Presence
 }
 
 function flatten(node: TreeJson, acc: FlatNode[] = []): FlatNode[] {
@@ -45,7 +47,7 @@ function flatten(node: TreeJson, acc: FlatNode[] = []): FlatNode[] {
       path: node.path,
       kind: node.kind,
       description: node.description,
-      online: node.online,
+      ...(node.presence !== undefined ? { presence: node.presence } : {}),
     })
   }
   for (const c of node.children ?? []) flatten(c, acc)
@@ -113,8 +115,17 @@ export function CommandPalette({
                 >
                   <Icon className={cn('size-3.5', iconClass)} strokeWidth={1.75} />
                   <span className="truncate font-mono text-xs">{n.path}</span>
-                  {n.online === false && (
-                    <span className="font-mono text-[10px] text-muted-foreground">offline</span>
+                  {/* 只标非 online 的状态:online 是默认预期,不占面板宽度。 */}
+                  {n.presence !== undefined && n.presence.state !== 'online' && (
+                    <span
+                      className={cn(
+                        'font-mono text-[10px]',
+                        n.presence.state === 'stale' ? 'text-warn' : 'text-muted-foreground',
+                      )}
+                      title={PRESENCE_HINT[n.presence.state]}
+                    >
+                      {PRESENCE_LABEL[n.presence.state]}
+                    </span>
                   )}
                   <KindBadge className="ml-auto" kind={n.kind} />
                 </CommandItem>

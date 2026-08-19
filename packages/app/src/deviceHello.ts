@@ -209,7 +209,7 @@ export async function processDeviceHello(opts: {
         input,
         authCtx.keyId,
         now,
-        input.path === mountPath ? { online: true } : {},
+        input.path === mountPath ? { online: true, lastSeenAt: now } : {},
       )
     } catch (error) {
       await searchSync?.abort(marker)

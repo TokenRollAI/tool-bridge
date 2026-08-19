@@ -5,13 +5,20 @@ import { guard, printJson, printLine } from '../output'
 import { apiJson, CliError } from '../http'
 import { nodePath } from '../paths'
 
-/** 把 TreeJson 渲染成缩进树(纯函数,便于单测)。 */
+/**
+ * 把 TreeJson 渲染成缩进树(纯函数,便于单测)。
+ *
+ * presence 三态里只有 `online` 不标注 —— 健康设备保持安静,`stale`/`offline` 才出现在 flag 里,
+ * 因为它们意味着调用很可能失败。缺省 presence(非 device 节点)同样不标。
+ */
 export function renderTree(node: TreeJson, depth = 0): string {
   const pad = '  '.repeat(depth)
   const name = node.path === '' ? '/' : node.path
-  const flags = [node.online === false ? 'offline' : '', node.truncated ? 'truncated' : ''].filter(
-    Boolean,
-  )
+  const state = node.presence?.state
+  const flags = [
+    state === 'stale' || state === 'offline' ? state : '',
+    node.truncated ? 'truncated' : '',
+  ].filter(Boolean)
   const suffix = flags.length ? ` [${flags.join(', ')}]` : ''
   const desc = node.description ? ` — ${node.description}` : ''
   const lines = [`${pad}${name} (${node.kind})${desc}${suffix}`]

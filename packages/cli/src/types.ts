@@ -11,6 +11,20 @@ export interface NodeSummary {
   path: string
 }
 
+/**
+ * 设备三态在线状态(core PresenceState 的本地镜像)。
+ * - `online`:连接位为真且最近有存活观察。
+ * - `stale`:连接位仍为真但存活观察已超时,很可能已不可路由。
+ * - `offline`:已观察到连接拆除。
+ */
+export type PresenceState = 'online' | 'stale' | 'offline'
+
+/** `~tree` / `~help` 上的 presence 形状,取代旧版裸 `online` 布尔。 */
+export interface Presence {
+  lastSeenAt?: string
+  state: PresenceState
+}
+
 export interface HelpCmd {
   /** arguments 的 JSON Schema(不含 {tool,arguments} 信封)。 */
   inputSchema?: unknown
@@ -32,8 +46,9 @@ export interface TreeJson {
   children?: TreeJson[]
   description?: string
   kind: string
-  online?: boolean
   path: string
+  /** 仅 device:三态在线状态(网关投影时由 online + lastSeenAt 派生)。 */
+  presence?: Presence
   truncated?: boolean
 }
 
@@ -148,12 +163,17 @@ export type NodeConfig
     ttl?: number
   }
 
-/** Node 投影(NodeRegistry.List/Get 返回;CLI 只取渲染所需字段)。 */
+/**
+ * Node 投影(NodeRegistry.List/Get 返回;CLI 只取渲染所需字段)。
+ * 这是存储层形状:保留裸 `online`(连接建立/拆除的事件位),不是 `~tree` 的三态 presence。
+ */
 export interface Node {
   config?: NodeConfig
   createdAt?: string
   description?: string
   kind: string
+  /** 最近一次观察到设备存活的时刻;与 `online` 合看才是新鲜度。 */
+  lastSeenAt?: string
   online?: boolean
   path: string
   registeredBy?: string
@@ -176,7 +196,7 @@ export interface ContextEntry extends ContextEntryMeta {
   content: string | unknown
 }
 
-/** NodeInput = Omit<Node,'registeredBy'|'online'|'createdAt'|'updatedAt'>。 */
+/** NodeInput = Omit<Node,'registeredBy'|'online'|'lastSeenAt'|'createdAt'|'updatedAt'>。 */
 export interface NodeInput {
   config?: NodeConfig
   description: string

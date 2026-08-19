@@ -10,6 +10,7 @@ import {
   type CallContext,
   contextHelpModel,
   contextMethodsOf,
+  derivePresence,
   deviceDirectoryHelpModel,
   deviceFsHelpModel,
   deviceShellHelpModel,
@@ -57,8 +58,13 @@ export async function helpModelFor(
       ctx.scopes,
     )
     if (node.online !== undefined) {
+      const presence = derivePresence({
+        online: node.online,
+        ...(node.lastSeenAt !== undefined ? { lastSeenAt: node.lastSeenAt } : {}),
+        now: opts.now,
+      })
       return deviceDirectoryHelpModel(
-        { path: node.path, description: node.description, online: node.online },
+        { path: node.path, description: node.description, presence },
         children.map(n => ({ path: n.path, kind: n.kind, description: n.description })),
       )
     }

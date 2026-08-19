@@ -7,6 +7,7 @@ import {
   ShieldCheck,
   Terminal,
   Wifi,
+  WifiLow,
   WifiOff,
 } from 'lucide-react'
 import { Link } from 'react-router'
@@ -19,7 +20,14 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import {
+  derivePresence,
+  PRESENCE_HINT,
+  PRESENCE_STALE_AFTER_MS,
+  PRESENCE_TONE,
+} from '@/lib/presence'
 import { PaginationFooter } from '@/components/PaginationFooter'
+import { PresenceBadge } from '@/components/PresenceBadge'
 import { CopyButton } from '@/components/CopyButton'
 import { EmptyState } from '@/components/EmptyState'
 import { PageHeader } from '@/components/PageHeader'
@@ -27,7 +35,6 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { useSession } from '@/lib/session-context'
 import { Button } from '@/components/ui/button'
 import { useRegistryList } from '@/lib/queries'
-import { Badge } from '@/components/ui/badge'
 import { encodeTreePath } from '@/lib/path'
 import { cn } from '@/lib/utils'
 
@@ -53,11 +60,23 @@ export function DevicesPage() {
   const [refreshedAt, setRefreshedAt] = useState<number | null>(null)
   const baseUrl = active?.baseUrl || window.location.origin
 
-  const devices = (list.data?.items ?? []).filter(
-    n => n.kind === 'directory' && n.online !== undefined,
-  )
-  const online = devices.filter(d => d.online).length
-  const offline = devices.length - online
+  // 数据源是 system/registry(存储态 TreeNode):只有裸 online + lastSeenAt,没有投影好的
+  // presence。三态要在客户端派生 —— 这正是本页要解决的问题:online 位可能因拆除事件丢失
+  // 而永久停在 true,只看布尔会把已失联的设备报成在线。
+  const devices = (list.data?.items ?? [])
+    .filter(n => n.kind === 'directory' && n.online !== undefined)
+    .map(node => ({
+      node,
+      presence: derivePresence({
+        online: node.online,
+        ...(node.lastSeenAt !== undefined ? { lastSeenAt: node.lastSeenAt } : {}),
+      }),
+    }))
+  const counts = {
+    offline: devices.filter(d => d.presence.state === 'offline').length,
+    online: devices.filter(d => d.presence.state === 'online').length,
+    stale: devices.filter(d => d.presence.state === 'stale').length,
+  }
   const connectCmd = `tb connect ${baseUrl}`
 
   const refresh = async () => {
@@ -131,7 +150,7 @@ export function DevicesPage() {
         </div>
       </section>
 
-      <div className="mt-4 grid gap-3 sm:grid-cols-3">
+      <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <div className="rounded-lg border bg-card/55 p-4">
           <div className="flex items-center justify-between gap-3">
             <span className="text-xs text-muted-foreground">已加载设备</span>
@@ -144,14 +163,27 @@ export function DevicesPage() {
             <span className="text-xs text-muted-foreground">在线会话</span>
             <Wifi className="size-4 text-ok" />
           </div>
-          <p className="mt-2 font-mono text-2xl font-semibold text-ok tabular-nums">{online}</p>
+          <p className="mt-2 font-mono text-2xl font-semibold text-ok tabular-nums">
+            {counts.online}
+          </p>
+        </div>
+        <div className="rounded-lg border border-warn/20 bg-warn/[0.035] p-4">
+          <div className="flex items-center justify-between gap-3">
+            <span className="text-xs text-muted-foreground" title={PRESENCE_HINT.stale}>
+              疑似失联
+            </span>
+            <WifiLow className="size-4 text-warn" />
+          </div>
+          <p className="mt-2 font-mono text-2xl font-semibold text-warn tabular-nums">
+            {counts.stale}
+          </p>
         </div>
         <div className="rounded-lg border bg-card/55 p-4">
           <div className="flex items-center justify-between gap-3">
             <span className="text-xs text-muted-foreground">离线保留</span>
             <WifiOff className="size-4 text-muted-foreground" />
           </div>
-          <p className="mt-2 font-mono text-2xl font-semibold tabular-nums">{offline}</p>
+          <p className="mt-2 font-mono text-2xl font-semibold tabular-nums">{counts.offline}</p>
         </div>
       </div>
 
@@ -220,16 +252,14 @@ export function DevicesPage() {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {devices.map(device => (
+                      {devices.map(({ node: device, presence }) => (
                         <TableRow key={device.path}>
                           <TableCell>
                             <div className="flex min-w-52 items-center gap-3">
                               <span
                                 className={cn(
                                   'grid size-8 shrink-0 place-items-center rounded-md border',
-                                  device.online
-                                    ? 'border-ok/25 bg-ok/[0.06] text-ok'
-                                    : 'bg-muted/20 text-muted-foreground',
+                                  PRESENCE_TONE[presence.state],
                                 )}
                               >
                                 <Cpu className="size-3.5" />
@@ -241,31 +271,28 @@ export function DevicesPage() {
                             </div>
                           </TableCell>
                           <TableCell>
-                            <Badge
-                              className={cn(
-                                'font-mono text-[10px]',
-                                device.online
-                                  ? 'border-ok/35 bg-ok/[0.045] text-ok'
-                                  : 'bg-muted/20 text-muted-foreground',
-                              )}
-                              variant="outline"
-                            >
-                              {device.online ? <Wifi /> : <WifiOff />}
-                              {device.online ? 'online' : 'offline'}
-                            </Badge>
+                            <PresenceBadge state={presence.state} />
                           </TableCell>
                           <TableCell className="max-w-80 whitespace-normal">
                             <p className="line-clamp-2 text-xs leading-5 text-muted-foreground">
                               {device.description || '设备通过反向通道注册的能力集合'}
                             </p>
                           </TableCell>
-                          <TableCell title={device.updatedAt}>
+                          {/*
+                            最近活动优先取 lastSeenAt(存活观察:hello / 心跳 / 成功调用)。
+                            心跳刷 lastSeenAt 但**不动** updatedAt(心跳不是元数据变更),所以
+                            updatedAt 只能表示"注册信息最后一次改动",拿它当活跃度会低报。
+                            旧数据没有 lastSeenAt 时回落到 updatedAt。
+                          */}
+                          <TableCell title={presence.lastSeenAt ?? device.updatedAt}>
                             <p className="font-mono text-xs text-foreground">
-                              {formatActivity(device.updatedAt)}
+                              {formatActivity(presence.lastSeenAt ?? device.updatedAt)}
                             </p>
-                            {device.updatedAt && (
+                            {(presence.lastSeenAt ?? device.updatedAt) && (
                               <p className="mt-0.5 font-mono text-[10px] text-muted-foreground">
-                                {new Date(device.updatedAt).toLocaleString()}
+                                {new Date(
+                                  (presence.lastSeenAt ?? device.updatedAt) as string,
+                                ).toLocaleString()}
                               </p>
                             )}
                           </TableCell>
@@ -302,6 +329,14 @@ export function DevicesPage() {
           普通 registry delete 只允许删除叶节点，不支持递归删除带 shell / fs
           后代的设备根，因此此页不会提供必然失败的“清理设备”按钮。 offline
           仅表示当前会话不可用，调用会返回可重试的 503。
+        </p>
+        <p className="mt-1.5">
+          stale 表示连接位仍为真但已超过
+          {' '}
+          {Math.round(PRESENCE_STALE_AFTER_MS / 1000)}
+          {' '}
+          秒没有存活观察（心跳丢失、进程被杀或连接半开），调用很可能失败；重连后会自动回到
+          online。
         </p>
       </div>
     </div>

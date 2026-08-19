@@ -83,7 +83,8 @@ export function localizeRemoteEntry(
     kind: entry.kind,
     description: entry.description,
   }
-  if (entry.online !== undefined) out.online = entry.online
+  // presence 由上游 ~tree 已派生好,本地原样透传(远端设备的新鲜度以远端时钟为准)。
+  if (entry.presence !== undefined) out.presence = entry.presence
   return out
 }
 /**

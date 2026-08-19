@@ -137,10 +137,18 @@ describe('startHeartbeat', () => {
 })
 
 describe('tb device ls', () => {
+  const lastSeenAt = '2026-01-01T00:00:00.000Z'
+
   it('调用 system/registry list(prefix=device),只输出 online 字段存在的设备根', async () => {
     const fn = captureFetch({
       items: [
-        { path: 'device/d1', kind: 'directory', description: '设备 d1', online: true },
+        {
+          path: 'device/d1',
+          kind: 'directory',
+          description: '设备 d1',
+          online: true,
+          lastSeenAt,
+        },
         { path: 'device/d1/shell', kind: 'device', description: 'shell' },
         { path: 'device/d2', kind: 'directory', description: '设备 d2', online: false },
       ],
@@ -158,5 +166,20 @@ describe('tb device ls', () => {
     expect(text).toContain('d2')
     expect(text).toContain('no')
     expect(text).not.toContain('shell')
+  })
+
+  it('LAST_SEEN 列展示 lastSeenAt,缺省记为 -', async () => {
+    captureFetch({
+      items: [
+        { path: 'device/d1', kind: 'directory', online: true, lastSeenAt },
+        { path: 'device/d2', kind: 'directory', online: true },
+      ],
+    })
+    await runCli(['device', 'ls', '--base-url', 'https://gw', '--sk', 'tbk_x'])
+    const lines = stdoutText().split('\n')
+    expect(lines[0]).toContain('LAST_SEEN')
+    // 本地化渲染依赖时区,用同一转换求期望值而非硬编码字面量。
+    expect(lines[1]).toContain(new Date(lastSeenAt).toLocaleString())
+    expect(lines[2]).toContain('-')
   })
 })

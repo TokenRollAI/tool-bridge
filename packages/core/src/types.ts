@@ -121,7 +121,11 @@ export interface TreeNode {
   /** 一句话;上级 ~help 列子节点时展示。 */
   description: string
   kind: NodeKind
-  /** 仅 device:连接状态。 */
+  /** 仅 device:最近一次观察到设备存活(hello / 心跳 / 成功调用)的时刻。缺省表示从未观察或旧数据;
+   *  freshness 判定见 device/presence.ts。写路径专用,不经普通注册面。 */
+  lastSeenAt?: Timestamp
+  /** 仅 device:连接是否已建立(hello 落库 true,连接拆除 false)。是否"可立即路由"还须看
+   *  `lastSeenAt` 的新鲜度——投影时由 derivePresence 综合成三态 presence,不要直接把它当在线。 */
   online?: boolean
   /** 唯一键。 */
   path: TreePath
@@ -239,7 +243,10 @@ export type NodeConfig
     ttl?: number
   }
 
-export type NodeInput = Omit<TreeNode, 'registeredBy' | 'online' | 'createdAt' | 'updatedAt'>
+export type NodeInput = Omit<
+  TreeNode,
+  'registeredBy' | 'online' | 'lastSeenAt' | 'createdAt' | 'updatedAt'
+>
 
 /** 自动物化中间 directory 的 registeredBy 标记。 */
 export const SYSTEM_AUTO = 'system:auto'

@@ -9,18 +9,13 @@ import { ChevronRight, CircleAlert, Loader2, RefreshCw, Route, SearchX } from 'l
 import { Link, NavLink, useLocation } from 'react-router'
 import type { NodeKind, TreeJson } from '@/lib/types'
 import { Skeleton } from '@/components/ui/skeleton'
+import { pruneOfflineNodes } from '@/lib/presence'
+import { OnlineDot } from '@/components/KindBadge'
 import { KIND_ICON } from '@/components/kind-icon'
 import { useSession } from '@/lib/session-context'
 import { encodeTreePath } from '@/lib/path'
 import { useTree } from '@/lib/queries'
 import { cn } from '@/lib/utils'
-
-/** 离线设备不进导航树（设备管理页仍可见全部）；其余节点原样保留。 */
-function pruneOffline(nodes: TreeJson[]): TreeJson[] {
-  return nodes
-    .filter(node => node.online !== false)
-    .map(node => (node.children ? { ...node, children: pruneOffline(node.children) } : node))
-}
 
 interface FilteredTree {
   matches: Set<string>
@@ -297,7 +292,9 @@ function TreeBranch({
   const lazyDepth = remoteScope ? LAZY_DEPTH_REMOTE : LAZY_DEPTH_LOCAL
   const subtree = useTree(node.path, lazyDepth, { enabled: effectiveOpen && lazy })
   const lazyChildren
-    = lazy && subtree.data ? pruneOffline(localizeSubtree(subtree.data, node.path)) : undefined
+    = lazy && subtree.data
+      ? pruneOfflineNodes(localizeSubtree(subtree.data, node.path))
+      : undefined
   const children = lazyChildren ?? node.children ?? []
   const expandable = children.length > 0 || lazy
   const label = node.path.split('/').pop() ?? node.path
@@ -387,12 +384,8 @@ function TreeBranch({
               REMOTE
             </span>
           )}
-          {node.online === true && (
-            <span
-              className="size-1.5 shrink-0 rounded-full bg-ok shadow-[0_0_5px_var(--ok)]"
-              title="online"
-            />
-          )}
+          {/* offline 已被 pruneOfflineNodes 剪掉,这里实际只出现 online(绿)与 stale(琥珀)。 */}
+          <OnlineDot state={node.presence?.state} />
           {node.truncated === true && !subtree.isFetching && (
             <span
               className={cn(
@@ -489,7 +482,7 @@ export function TreeNav({ filter = '', onNavigate }: { filter?: string, onNaviga
 
   // 深树尚未返回时保留 root 树，避免输入筛选后导航瞬间清空。
   const source = filtering ? (deep.data ?? root.data) : root.data
-  const pruned = useMemo(() => pruneOffline(source?.children ?? []), [source])
+  const pruned = useMemo(() => pruneOfflineNodes(source?.children ?? []), [source])
   const filtered = useMemo(
     () => (filtering ? filterTree(pruned, query) : { nodes: pruned, matches: new Set<string>() }),
     [filtering, pruned, query],

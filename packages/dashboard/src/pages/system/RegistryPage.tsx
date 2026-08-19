@@ -37,12 +37,14 @@ import {
   useRegistryList,
 } from '@/lib/queries'
 import { PaginationFooter } from '@/components/PaginationFooter'
+import { PresenceBadge } from '@/components/PresenceBadge'
 import { ConfirmAction } from '@/components/ConfirmAction'
 import { CopyButton } from '@/components/CopyButton'
 import { EmptyState } from '@/components/EmptyState'
 import { PageHeader } from '@/components/PageHeader'
 import { Skeleton } from '@/components/ui/skeleton'
 import { KindBadge } from '@/components/KindBadge'
+import { derivePresence } from '@/lib/presence'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
@@ -432,27 +434,29 @@ export function RegistryPage() {
                                 </p>
                               )}
                             </TableCell>
+                            {/*
+                              数据源是 system/registry(存储态):device 节点带裸 online +
+                              lastSeenAt,非 device 节点两者都缺 → 'registered'。三态在客户端
+                              派生,避免把丢了拆除事件的 online 报成在线。
+                            */}
                             <TableCell>
-                              <Badge
-                                className={cn(
-                                  'font-mono text-[10px]',
-                                  node.online === true && 'border-ok/35 bg-ok/[0.045] text-ok',
-                                  node.online === false && 'text-muted-foreground',
-                                )}
-                                variant="outline"
-                              >
-                                <span
-                                  className={cn(
-                                    'size-1.5 rounded-full bg-muted-foreground',
-                                    node.online === true && 'bg-ok',
+                              {node.online === undefined
+                                ? (
+                                    <Badge className="font-mono text-[10px]" variant="outline">
+                                      <span className="size-1.5 rounded-full bg-muted-foreground" />
+                                      registered
+                                    </Badge>
+                                  )
+                                : (
+                                    <PresenceBadge
+                                      state={derivePresence({
+                                        online: node.online,
+                                        ...(node.lastSeenAt !== undefined
+                                          ? { lastSeenAt: node.lastSeenAt }
+                                          : {}),
+                                      }).state}
+                                    />
                                   )}
-                                />
-                                {node.online === undefined
-                                  ? 'registered'
-                                  : node.online
-                                    ? 'online'
-                                    : 'offline'}
-                              </Badge>
                             </TableCell>
                             <TableCell>
                               <div className="flex justify-end gap-1">

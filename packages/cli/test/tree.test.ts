@@ -31,9 +31,27 @@ describe('renderTree 缩进树渲染', () => {
     const tree: TreeJson = {
       path: 'device/x',
       kind: 'device',
-      online: false,
+      presence: { state: 'offline', lastSeenAt: '2026-01-01T00:00:00.000Z' },
       truncated: true,
     }
     expect(renderTree(tree)).toBe('device/x (device) [offline, truncated]')
+  })
+
+  it('presence stale 标注 stale', () => {
+    const tree: TreeJson = {
+      path: 'device/x',
+      kind: 'device',
+      presence: { state: 'stale', lastSeenAt: '2026-01-01T00:00:00.000Z' },
+    }
+    expect(renderTree(tree)).toBe('device/x (device) [stale]')
+  })
+
+  it('presence online 保持安静,不加 flag', () => {
+    const tree: TreeJson = {
+      path: 'device/x',
+      kind: 'device',
+      presence: { state: 'online', lastSeenAt: '2026-01-01T00:00:00.000Z' },
+    }
+    expect(renderTree(tree)).toBe('device/x (device)')
   })
 })

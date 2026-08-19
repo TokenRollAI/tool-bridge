@@ -74,21 +74,45 @@ export interface FeedbackView {
   up: number
 }
 
+/**
+ * device presence 三态(对齐 core 的 `device/presence.ts`)。
+ * `online` 只是连接建立/拆除的事件位;拆除事件可能永不到达,所以读路径由宿主结合
+ * `lastSeenAt` 的新鲜度投影为三态,`stale` = 连接位仍为真但存活观察已超时。
+ */
+export type PresenceState = 'online' | 'stale' | 'offline'
+
+/** `~tree` 上 device 节点的在线状态形状;取代旧版裸 `online` 布尔。 */
+export interface Presence {
+  /** 最近一次观察到设备存活的时刻;缺省表示从未观察(旧连接或旧数据)。 */
+  lastSeenAt?: string
+  state: PresenceState
+}
+
 export interface TreeJson {
   children?: TreeJson[]
   description: string
   kind: NodeKind
-  online?: boolean
   path: string
+  /** 仅 device:宿主已投影好的三态在线状态。 */
+  presence?: Presence
   truncated?: boolean
 }
 
-/** system/registry 返回的节点(builtin/registry.ts 的 Node 面)。 */
+/**
+ * system/registry 返回的节点(builtin/registry.ts 的 Node 面 = 存储层 TreeNode)。
+ *
+ * 注意与 `TreeJson` 的差别:registry 是**存储态**,保留裸 `online`(连接事件位)+ `lastSeenAt`,
+ * 不做投影;`~tree` 是**读投影**,只给 `presence`。消费时别把两者混为一谈——registry 侧要三态
+ * 得自己过 `lib/presence.ts` 的 `derivePresence`。
+ */
 export interface RegistryNode {
   config?: Record<string, unknown>
   createdAt?: string
   description: string
   kind: NodeKind
+  /** 仅 device:最近一次存活观察(hello / 心跳 / 成功调用)。 */
+  lastSeenAt?: string
+  /** 仅 device:连接是否已建立。不等于"此刻可路由",须结合 `lastSeenAt` 判新鲜度。 */
   online?: boolean
   path: string
   registeredBy?: string

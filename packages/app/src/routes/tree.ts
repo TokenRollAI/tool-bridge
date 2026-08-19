@@ -37,6 +37,7 @@ export async function handleTree(c: AppContext, env: RouteEnv): Promise<Response
   // 根路径('')免 read 判定(整棵树入口);非根节点需 (path,'read')。
   if (path !== '' && !check(ctx, path, 'read').allow) throw TBError.notFound('not found')
   const registry = new NodeRegistryStore(store)
+  const now = new Date().toISOString()
 
   // remote 透传:非根路径命中 remote 节点(或其后代)→ 改写 ~tree 打到 baseUrl,
   // 远端返回的子树作为响应(query 如 ?depth 一并带过去)。
@@ -59,7 +60,7 @@ export async function handleTree(c: AppContext, env: RouteEnv): Promise<Response
     if (rootNode.kind === 'context' && rootNode.config?.kind === 'context') {
       await assertContextAlive(rootNode, rootNode.config, registry)
     }
-    rootEntry = toEntry(rootNode)
+    rootEntry = toEntry(rootNode, now)
   }
 
   // 一次性读入整棵子树(而非每层递归各扫一遍),内存建 parent→直接子 索引 + 可见性裁剪。
@@ -68,7 +69,7 @@ export async function handleTree(c: AppContext, env: RouteEnv): Promise<Response
   const getChildren = async (p: TreePath): Promise<TreeEntry[]> => {
     const localKids = filterListVisible(byParent.get(p) ?? [], ctx.scopes)
     const remoteKids = await remoteTreeChildren(c, ctx, registry, p, deps)
-    return [...localKids.map(n => toEntry(n)), ...remoteKids]
+    return [...localKids.map(n => toEntry(n, now)), ...remoteKids]
   }
 
   const depth = clampDepth(Number(c.req.query('depth')))

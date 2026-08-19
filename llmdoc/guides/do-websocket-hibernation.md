@@ -7,8 +7,16 @@ Cloudflare 设备连接由 Durable Object 持有。正确性不只包括“能�
 - 设备帧使用 core 的稳定 codec；ping/pong 字面量由共享常量产生。
 - DO 使用 WebSocket auto-response 处理 heartbeat，避免仅为 pong 唤醒对象。
 - 当前活动连接标识写入 DO storage；对象恢复时从 storage 重建必要状态，不依赖旧内存。
-- KV 中的 online 状态只用于发现和路由提示，不是强一致租约；真正发送仍以 DO 内活动 socket 为准。
-- close/error、替换连接和过期状态都必须清理，且不得让旧连接覆盖新连接。
+- KV 中的 online 位仍不是强一致租约；真正发送以 DO 内活动 socket 为准。但发现面不再只凭这个位:
+  节点带 `lastSeenAt`(hello 与 alarm 心跳巡检写入),`~tree`/`~help`/`device ls` 投影时经
+  `derivePresence` 结合 TTL 把过期的 online 降级为 `stale`——避免树谎报 online 而调用返回 offline。
+- DO 用 auto-response 应答 ping/pong **不唤醒对象**,故心跳无法在收到 pong 时写 KV。改由周期 alarm
+  巡检:有活连接时读 `getWebSocketAutoResponseTimestamp(ws)` 回写 `lastSeenAt` 并重排 alarm;无活
+  连接且已断线时才执行 reclaim。同一个 alarm 多用途,靠 `meta.activeConnId` 是否存在分流。
+- 投影是只读降级:读路径按 `lastSeenAt` 把 online 显示为 stale,但**绝不回写** `setOnline(false)`
+  (权威状态只由连接生命周期写)。
+- close/error、替换连接和过期状态都必须清理,且不得让旧连接覆盖新连接。Node 宿主启动 `sweepOrphans`
+  的崩溃态分支(meta 无 disconnectedAt 却无活连接)也要同步把 registry online 翻 false,不能只排 reclaim。
 
 ## 验证
 

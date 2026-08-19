@@ -20,6 +20,7 @@ export * from './context/types'
 export * from './device/client'
 export * from './device/frames'
 export * from './device/helpModel'
+export * from './device/presence'
 export * from './device/session'
 export * from './device/shellAllow'
 export {

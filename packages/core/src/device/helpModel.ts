@@ -3,10 +3,11 @@
  *
  * shell 节点:单 cmd `exec`,effect destructive + confirm,allow 白名单进 `h` 行;
  * fs 节点:复用 context 的静态 help(file provider 语义,不复制 cmd 表);
- * directory(mountPath)节点:description 呈现 online 状态。
+ * directory(mountPath)节点:description 呈现三态 presence(online/stale/offline)。
  */
 
 import type { ChildRef, CmdSpec, HelpModel } from '../htbp/model'
+import type { Presence } from './presence'
 import type { TreePath } from '../types'
 import { contextHelpModel, type ContextHelpOptions } from '../context/help'
 import { describeAllow } from './shellAllow'
@@ -52,16 +53,16 @@ export function deviceFsHelpModel(
   return contextHelpModel(node, opts)
 }
 
-/** `<mountPath>` directory 节点的 ~help;description 附 online/offline 状态。 */
+/** `<mountPath>` directory 节点的 ~help;description 附三态 presence(online/stale/offline)。 */
 export function deviceDirectoryHelpModel(
-  node: { description: string, online: boolean, path: TreePath },
+  node: { description: string, path: TreePath, presence: Presence },
   children: ChildRef[] = [],
 ): HelpModel {
   return {
     node: {
       path: node.path,
       kind: 'directory',
-      description: `${node.description} (${node.online ? 'online' : 'offline'})`,
+      description: `${node.description} (${node.presence.state})`,
     },
     cmds: [],
     children,

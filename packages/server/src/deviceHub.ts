@@ -172,7 +172,15 @@ export class DeviceHub {
         const meta = item.value
         if (this.activeByDevice.has(meta.deviceId)) continue
         if (meta.disconnectedAt === undefined) {
+          // 崩溃态:进程重启后无活连接却 meta 无 disconnectedAt,说明上次没走 onClose。
+          // 按"此刻断线"起算回收,并同步把 registry 的 online 翻 false——否则树会一直谎报
+          // online 直到 24h reclaim 删子树。
           const now = new Date().toISOString()
+          try {
+            await new NodeRegistryStore(this.store).setOnline(meta.mountPath, false, now)
+          } catch {
+            // 节点可能已被管理面删除;只更新 meta 即可。
+          }
           await this.store.put(KEY_DEVICE_META + meta.deviceId, { ...meta, disconnectedAt: now })
           this.scheduleReclaim(meta.deviceId, this.reclaimSec * 1000)
         } else {
@@ -249,6 +257,13 @@ export class DeviceHub {
     this.connections.add(conn)
     ws.on('pong', () => {
       conn.isAlive = true
+      // 心跳即一次存活观察:刷新 presence 的 lastSeenAt,让 ~tree 能把长时间无心跳的
+      // "online" 降级为 stale。仅在 hello 完成(mountPath 已知)后有意义;失败不影响连接。
+      if (conn.mountPath !== undefined) {
+        void new NodeRegistryStore(this.store)
+          .touchSeen(conn.mountPath, new Date().toISOString())
+          .catch(() => {})
+      }
     })
     ws.on('message', (data) => {
       try {

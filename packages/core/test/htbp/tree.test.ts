@@ -64,13 +64,13 @@ describe('buildTree 基本形状', () => {
     expect(b?.children).toBeUndefined()
   })
 
-  it('携带 online 字段', async () => {
-    const withOnline: Record<string, TreeEntry[]> = {
-      '': [{ path: 'd', kind: 'device', description: 'D', online: false }],
+  it('携带 presence 字段', async () => {
+    const withPresence: Record<string, TreeEntry[]> = {
+      '': [{ path: 'd', kind: 'device', description: 'D', presence: { state: 'offline' } }],
       'd': [],
     }
-    const tree = await buildTree({ root: '', depth: 2, getChildren: childrenFrom(withOnline) })
-    expect(tree.children?.[0]?.online).toBe(false)
+    const tree = await buildTree({ root: '', depth: 2, getChildren: childrenFrom(withPresence) })
+    expect(tree.children?.[0]?.presence).toEqual({ state: 'offline' })
   })
 
   it('rootEntry 提供时用真实节点元数据(不伪造为 directory)', async () => {

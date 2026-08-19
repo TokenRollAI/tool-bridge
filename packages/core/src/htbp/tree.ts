@@ -6,6 +6,7 @@
  */
 
 import type { NodeKind, TreePath } from '../types'
+import type { Presence } from '../device/presence'
 
 /** `~tree` 深度默认值。 */
 export const DEFAULT_TREE_DEPTH = 2
@@ -28,9 +29,9 @@ export function clampDepth(depth: number | undefined): number {
 export interface TreeEntry {
   description: string
   kind: NodeKind
-  /** 仅 device:连接状态。 */
-  online?: boolean
   path: TreePath
+  /** 仅 device:三态在线状态(由宿主投影时经 derivePresence 从 online+lastSeenAt 派生)。 */
+  presence?: Presence
 }
 
 /** `~tree` 响应形状(规范性);递归。 */
@@ -38,8 +39,9 @@ export interface TreeJson {
   children?: TreeJson[]
   description: string
   kind: NodeKind
-  online?: boolean
   path: TreePath
+  /** 仅 device:三态在线状态。取代旧版裸 `online` 布尔。 */
+  presence?: Presence
   /** 深度上限 / 节点上限 / 环检测截断。 */
   truncated?: boolean
 }
@@ -60,7 +62,7 @@ export interface BuildTreeOpts {
   opaqueKinds?: Set<string>
   root: TreePath
   /**
-   * 根节点自身的元数据(kind/description/online)。提供则用它——网关传真实节点,
+   * 根节点自身的元数据(kind/description/presence)。提供则用它——网关传真实节点,
    * 避免子树根被伪造为 `directory`;缺省回退 `kind:'directory', description:''`。
    */
   rootEntry?: TreeEntry
@@ -74,7 +76,7 @@ export interface BuildTreeOpts {
  * `truncated`。环检测用 visited Set:子节点路径已在集合中 → 作为 `truncated` 叶子收入、不递归
  * (本地树理论无环,此为防 provider 异常)。
  *
- * 根节点自身元数据:优先用 `opts.rootEntry`(网关传真实节点的 kind/description/online);
+ * 根节点自身元数据:优先用 `opts.rootEntry`(网关传真实节点的 kind/description/presence);
  * 缺省回退 `kind:'directory'`、`description:''`。
  */
 export async function buildTree(opts: BuildTreeOpts): Promise<TreeJson> {
@@ -86,7 +88,7 @@ export async function buildTree(opts: BuildTreeOpts): Promise<TreeJson> {
     visited.add(entry.path)
     count++
     const node: TreeJson = { path: entry.path, kind: entry.kind, description: entry.description }
-    if (entry.online !== undefined) node.online = entry.online
+    if (entry.presence !== undefined) node.presence = entry.presence
 
     if (depthLeft <= 0) {
       // 不透明 kind(如 remote 联邦):必然可能有子,直接标 truncated,免去边界探测的远端 fetch。
@@ -116,7 +118,7 @@ export async function buildTree(opts: BuildTreeOpts): Promise<TreeJson> {
           description: kid.description,
           truncated: true,
         }
-        if (kid.online !== undefined) cyc.online = kid.online
+        if (kid.presence !== undefined) cyc.presence = kid.presence
         count++
         children.push(cyc)
         continue

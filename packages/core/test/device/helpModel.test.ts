@@ -74,14 +74,14 @@ describe('deviceFsHelpModel(复用 context 静态 help)', () => {
   })
 })
 
-describe('deviceDirectoryHelpModel(mountPath 节点 online 呈现)', () => {
-  it('online/offline 进 description;children 透传', () => {
+describe('deviceDirectoryHelpModel(mountPath 节点 presence 呈现)', () => {
+  it('presence.state 进 description;children 透传', () => {
     const children = [
       { path: 'device/d1/shell', kind: 'device' as const, description: 'shell' },
       { path: 'device/d1/fs', kind: 'context' as const, description: 'fs' },
     ]
     const online = deviceDirectoryHelpModel(
-      { path: 'device/d1', description: '设备 d1', online: true },
+      { path: 'device/d1', description: '设备 d1', presence: { state: 'online' } },
       children,
     )
     expect(online.node).toEqual({
@@ -91,10 +91,16 @@ describe('deviceDirectoryHelpModel(mountPath 节点 online 呈现)', () => {
     })
     expect(online.children).toEqual(children)
     expect(online.cmds).toEqual([])
+    const stale = deviceDirectoryHelpModel({
+      path: 'device/d1',
+      description: '设备 d1',
+      presence: { state: 'stale' },
+    })
+    expect(stale.node.description).toBe('设备 d1 (stale)')
     const offline = deviceDirectoryHelpModel({
       path: 'device/d1',
       description: '设备 d1',
-      online: false,
+      presence: { state: 'offline' },
     })
     expect(offline.node.description).toBe('设备 d1 (offline)')
     expect(offline.children).toEqual([])

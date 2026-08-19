@@ -85,6 +85,8 @@ call id 在同一设备进程内用于执行中合并与有界结果缓存；当
 
 call 帧带可选 `context`（caller.keyId/owner、traceId、createdAt、expiresAt），由网关鉴权后签发，不接受来自调用 arguments，故意不含 scopes/SK/敏感参数。授权判定仍全在网关侧（转发前 `check(...,'call')`）；设备只消费 context 做审计与限时，不做 scope 裁决。`expiresAt` 是网关权威时间戳（对齐 `DEVICE_CALL_TIMEOUT_MS`），设备复检以此为准，不信任本地时钟。老网关不带 context，新设备须按缺省显式降级；老设备 decoder 忽略未知字段。
 
+设备在线状态在 `~tree`/`~help`/`device ls` 上表示为三态 `presence: { state: 'online'|'stale'|'offline', lastSeenAt? }`，取代旧的裸 `online` 布尔。`state` 由存储层的 `online` 位（连接建立/拆除事件）结合 `lastSeenAt`（hello 与心跳观察）在投影时派生：online 但心跳超时降级 `stale`，从而不谎报"可立即路由"。`presence` 只是发现提示，调用可路由性仍以宿主活动 socket 为准。存储层 TreeNode（`system/registry` 返回）仍保留 `online` 与新增的 `lastSeenAt`；wire 派生只发生在树/help 投影处，读路径不回写权威状态。
+
 `@tool-bridge/sdk/device` 的安全作者面只声明可路由回设备的 tool/context 节点；raw wire decoder 仍兼容完整 DeviceExpose。移动端默认是前台实时在线设备：宿主将 AppState 映射为 suspend/resume，后台永久在线或进程被杀后的任务属于另一个异步队列/推送能力。
 
 ## CLI 契约

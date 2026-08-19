@@ -8,6 +8,7 @@ import {
   checkRegisterPath,
   checkScopes,
   type CmdSpec,
+  derivePresence,
   NodeRegistryStore,
   TBError,
   type TreeEntry,
@@ -88,10 +89,20 @@ export async function assertRegisterPath(
   if (!res.allow) throw res.error
 }
 
-/** TreeNode → TreeEntry(丢弃 config 等,仅保留 tree 视图字段)。 */
-export function toEntry(n: TreeNode): TreeEntry {
+/**
+ * TreeNode → TreeEntry(丢弃 config 等,仅保留 tree 视图字段)。
+ * device 节点的 online 位在此投影为三态 presence:结合 lastSeenAt 与 now,把过期的 online
+ * 降级为 stale(纯投影,不回写权威状态)。只有带 online 位的节点(device mount 根)才出 presence。
+ */
+export function toEntry(n: TreeNode, now: string): TreeEntry {
   const e: TreeEntry = { path: n.path, kind: n.kind, description: n.description }
-  if (n.online !== undefined) e.online = n.online
+  if (n.online !== undefined) {
+    e.presence = derivePresence({
+      online: n.online,
+      ...(n.lastSeenAt !== undefined ? { lastSeenAt: n.lastSeenAt } : {}),
+      now,
+    })
+  }
   return e
 }
 

@@ -218,7 +218,7 @@ export class NodeRegistryStore {
     node: NodeInput,
     registeredBy: string,
     now: Timestamp,
-    opts: { online?: boolean } = {},
+    opts: { lastSeenAt?: Timestamp, online?: boolean } = {},
   ): Promise<TreeNode> {
     const path = normalizePath(node.path)
     const invalid = validatePath(path)
@@ -247,6 +247,7 @@ export class NodeRegistryStore {
       ...(node.config !== undefined ? { config: node.config } : {}),
       ...(node.virtualize !== undefined ? { virtualize: node.virtualize } : {}),
       ...(opts.online !== undefined ? { online: opts.online } : {}),
+      ...(opts.lastSeenAt !== undefined ? { lastSeenAt: opts.lastSeenAt } : {}),
       registeredBy,
       createdAt: existing?.createdAt ?? now,
       updatedAt: now,
@@ -277,14 +278,34 @@ export class NodeRegistryStore {
     return merged
   }
 
-  /** 设备生命周期专用:只更新节点 online 状态,不存在 → not_found。 */
+  /**
+   * 设备生命周期专用:更新节点 online 状态,不存在 → not_found。
+   * online 翻 true 时视为一次存活观察,同步把 `lastSeenAt` 刷到 now;翻 false 时保留原
+   * `lastSeenAt`(用于展示"最后在线于")。
+   */
   async setOnline(path: TreePath, online: boolean, now: Timestamp): Promise<TreeNode> {
     const norm = normalizePath(path)
     const existing = await this.read(norm)
     if (!existing) throw new TBError('not_found', `节点不存在:'${norm}'`)
-    const updated: TreeNode = { ...existing, online, updatedAt: now }
+    const updated: TreeNode = {
+      ...existing,
+      online,
+      ...(online ? { lastSeenAt: now } : {}),
+      updatedAt: now,
+    }
     await this.store.put(this.keyOf(norm), updated)
     return updated
+  }
+
+  /**
+   * 设备心跳专用:只把 `lastSeenAt` 刷到 now,不改 online 也不动 updatedAt(心跳不是元数据变更,
+   * 不该扰动 updatedAt 的语义)。节点不存在时静默返回——心跳晚于节点删除是正常竞态,不报错。
+   */
+  async touchSeen(path: TreePath, now: Timestamp): Promise<void> {
+    const norm = normalizePath(path)
+    const existing = await this.read(norm)
+    if (!existing) return
+    await this.store.put(this.keyOf(norm), { ...existing, lastSeenAt: now })
   }
 
   /**

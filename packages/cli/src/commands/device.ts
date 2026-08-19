@@ -44,13 +44,17 @@ export function deviceLsCommand(): Command {
           if (page.cursor) printLine(`next cursor: ${page.cursor}`)
           return
         }
+        // ONLINE 来自存储层的连接位(建立/拆除),不是 `~tree` 的三态 presence:registry list
+        // 返回未投影的 TreeNode。LAST_SEEN 给出最近一次存活观察,让 online=yes 但早已失联的设备
+        // 能被看出来。
         printLine(
           table(
-            ['DEVICE_ID', 'PATH', 'ONLINE', 'DESCRIPTION'],
+            ['DEVICE_ID', 'PATH', 'ONLINE', 'LAST_SEEN', 'DESCRIPTION'],
             devices.map(n => [
               deviceIdFromPath(n.path),
               n.path,
               n.online ? 'yes' : 'no',
+              n.lastSeenAt ? new Date(n.lastSeenAt).toLocaleString() : '-',
               n.description ?? '',
             ]),
           ),
