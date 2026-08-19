@@ -82,6 +82,21 @@ describe('CLI help 参数契约', () => {
     expect(serverLsHelp.match(/--base-url <url>/g)).toHaveLength(1)
   })
 
+  it('call help 标明 arguments 四源互斥、stdin 与 --arg 定型规则', () => {
+    const help = fullHelpAt('call')
+    expect(help).toContain('Arguments from a JSON file, or `-` for stdin')
+    expect(help).toContain('mutually exclusive with [args]/--args/--args-file')
+    expect(help).toContain('true/false -> boolean')
+    expect(help).toContain('A repeated key wins with its last occurrence')
+    expect(help).toContain('--args-file -')
+  })
+
+  it('search help 标明 --schemas 只作用于人类模式', () => {
+    const help = fullHelpAt('search')
+    expect(help).toContain('arguments JSON Schema')
+    expect(help).toContain('no effect with --json')
+  })
+
   it('tree/skill/sk help 标明取值范围与互斥关系', () => {
     expect(commandAt('tree').helpInformation()).toContain('1-8 (default: 2)')
 

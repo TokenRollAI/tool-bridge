@@ -1,12 +1,33 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { parseCallArgs } from '../src/commands/call'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { parseArgEntries, parseCallArgs } from '../src/commands/call'
 import { resetFetch, setFetch } from '../src/http'
 import { resolveTarget } from '../src/args'
 import { runCli } from './cliHarness'
 
 /**
+ * `--args-file -` 走 `readFileSync(0)`(ctx put 同款 stdin 读法),进程内无法替换 fd 0,
+ * 因此在这里给 node:fs 装一个只拦 fd 0 的透传 mock;其余路径仍走真实 fs。
+ */
+let stdinText: string | undefined
+
+vi.mock('node:fs', async (importOriginal) => {
+  const mod = await importOriginal<typeof import('node:fs')>()
+  return {
+    ...mod,
+    readFileSync: (target: unknown, ...rest: unknown[]) =>
+      target === 0 && stdinText !== undefined
+        ? stdinText
+        : (mod.readFileSync as (...a: unknown[]) => unknown)(target, ...rest),
+  }
+})
+
+/**
  * 本轮 Agent 体验修复的回归面:
  * - `tb call` 第二 positional 直接当 arguments JSON(误写 `--json '{...}'` 也自然工作);
+ * - `--arg k=v` 扁平标量与 `--args-file -`(stdin)两条便利入口,及与整块 JSON 的四源互斥;
  * - 失败现场的 ~feedback 提示(有条目列 top、无条目引导 submit、拉取失败静默);
  * - retryable 呈现与 `--timeout` 解析。
  */
@@ -86,6 +107,162 @@ describe('tb call — positional JSON arguments', () => {
     expect(() => parseCallArgs('{}', undefined, '{}')).toThrow(/mutually exclusive/)
     expect(() => parseCallArgs(undefined, '/tmp/x.json', '{}')).toThrow(/mutually exclusive/)
     expect(parseCallArgs(undefined, undefined, '{"a":1}')).toEqual({ a: 1 })
+  })
+})
+
+describe('tb call — --arg k=v 扁平参数', () => {
+  it('多个 --arg 合并为 arguments;标量按保守规则定型', async () => {
+    const fn = sequenceFetch([{ body: { ok: true } }])
+    await runCli([
+      'call',
+      'docs/ctx7/resolve',
+      '--arg',
+      'name=react',
+      '--arg',
+      'limit=5',
+      '--json',
+      ...GLOBALS,
+    ])
+    const [, init] = fn.mock.calls[0] as unknown as [string, RequestInit]
+    expect(JSON.parse(init.body as string)).toEqual({ name: 'react', limit: 5 })
+    expect(process.exitCode).toBe(0)
+  })
+
+  it('`--arg=k=v` 形式同样收集', async () => {
+    const fn = sequenceFetch([{ body: { ok: true } }])
+    await runCli(['call', 'docs/ctx7/resolve', '--arg=name=react', '--json', ...GLOBALS])
+    const [, init] = fn.mock.calls[0] as unknown as [string, RequestInit]
+    expect(JSON.parse(init.body as string)).toEqual({ name: 'react' })
+  })
+
+  it('保守标量解析:true/false/null/整数/小数定型,其余保持 string', () => {
+    expect(
+      parseArgEntries([
+        'yes=true',
+        'no=false',
+        'nothing=null',
+        'count=5',
+        'ratio=-1.5',
+        'text=react',
+        'version=1.2.3',
+        'plus=+5',
+        'exp=1e3',
+        'hex=0x10',
+        'padded= 42',
+        'empty=',
+      ]),
+    ).toEqual({
+      yes: true,
+      no: false,
+      nothing: null,
+      count: 5,
+      ratio: -1.5,
+      text: 'react',
+      // 多段点号、正号前缀、指数与十六进制都不是"纯整数/小数",保持 string。
+      version: '1.2.3',
+      plus: '+5',
+      exp: '1e3',
+      hex: '0x10',
+      // value 不 trim:带空白就不再是纯数字字面量。
+      padded: ' 42',
+      empty: '',
+    })
+  })
+
+  it('value 可含 `=`(只按第一个 `=` 切分)', () => {
+    expect(parseArgEntries(['q=a=b=c', 'token=YWJj=='])).toEqual({ q: 'a=b=c', token: 'YWJj==' })
+  })
+
+  it('重复 key 后者覆盖前者', () => {
+    expect(parseArgEntries(['n=1', 'n=2', 'n=last'])).toEqual({ n: 'last' })
+  })
+
+  it('缺 `=` 或空 key → CliError', () => {
+    expect(() => parseArgEntries(['bare'])).toThrow(/expected "key=value"/)
+    expect(() => parseArgEntries(['=v'])).toThrow(/empty key/)
+    expect(() => parseArgEntries(['   =v'])).toThrow(/empty key/)
+  })
+
+  it('--arg 与 positional / --args / --args-file 互斥', () => {
+    expect(() => parseCallArgs(undefined, undefined, '{"a":1}', ['b=2'])).toThrow(
+      /mutually exclusive/,
+    )
+    expect(() => parseCallArgs('{"a":1}', undefined, undefined, ['b=2'])).toThrow(
+      /mutually exclusive/,
+    )
+    expect(() => parseCallArgs(undefined, '/tmp/x.json', undefined, ['b=2'])).toThrow(
+      /mutually exclusive/,
+    )
+  })
+
+  it('命令行 --arg 与 --args 同时给 → exit 1 且提示互斥', async () => {
+    sequenceFetch([{ body: { ok: true } }])
+    await runCli([
+      'call',
+      'docs/ctx7/resolve',
+      '--args',
+      '{"a":1}',
+      '--arg',
+      'b=2',
+      '--json',
+      ...GLOBALS,
+    ])
+    expect(process.exitCode).toBe(1)
+    expect(written(process.stdout)).toContain('mutually exclusive')
+  })
+
+  it('无 --arg 时不影响缺省 {}', () => {
+    expect(parseCallArgs(undefined, undefined, undefined, [])).toEqual({})
+  })
+})
+
+describe('tb call — --args-file', () => {
+  let tmp: string
+  const wasTTY = process.stdin.isTTY
+
+  beforeEach(() => {
+    tmp = mkdtempSync(join(tmpdir(), 'tb-call-args-'))
+    // 管道场景:isTTY 为假才允许 `--args-file -`。
+    Object.defineProperty(process.stdin, 'isTTY', { value: false, configurable: true })
+  })
+
+  afterEach(() => {
+    stdinText = undefined
+    rmSync(tmp, { recursive: true, force: true })
+    Object.defineProperty(process.stdin, 'isTTY', { value: wasTTY, configurable: true })
+  })
+
+  it('`-` → 从 stdin 读整块 JSON', async () => {
+    stdinText = '{"libraryName":"react"}\n'
+    const fn = sequenceFetch([{ body: { ok: true } }])
+    await runCli(['call', 'docs/ctx7/resolve', '--args-file', '-', '--json', ...GLOBALS])
+    const [, init] = fn.mock.calls[0] as unknown as [string, RequestInit]
+    expect(JSON.parse(init.body as string)).toEqual({ libraryName: 'react' })
+    expect(process.exitCode).toBe(0)
+  })
+
+  it('stdin 为空 → 沿用"空 → {}"语义', () => {
+    stdinText = '\n  \n'
+    expect(parseCallArgs(undefined, '-')).toEqual({})
+  })
+
+  it('stdin 非法 JSON → arguments must be valid JSON', () => {
+    stdinText = 'not-json'
+    expect(() => parseCallArgs(undefined, '-')).toThrow(/arguments must be valid JSON/)
+  })
+
+  it('stdin 是 TTY(没接管道)→ 直接拒绝而不是挂住', () => {
+    Object.defineProperty(process.stdin, 'isTTY', { value: true, configurable: true })
+    expect(() => parseCallArgs(undefined, '-')).toThrow(/pipe the arguments JSON via stdin/)
+  })
+
+  it('普通文件路径不受 `-` 分支影响', () => {
+    const file = join(tmp, 'args.json')
+    writeFileSync(file, '{"a":1}')
+    expect(parseCallArgs(undefined, file)).toEqual({ a: 1 })
+    expect(() => parseCallArgs(undefined, join(tmp, 'missing.json'))).toThrow(
+      /cannot read --args-file/,
+    )
   })
 })
 

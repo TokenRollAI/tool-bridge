@@ -10,10 +10,29 @@ interface SearchOpts {
   json?: boolean
   limit?: string
   mode?: string
+  schemas?: boolean
   sk?: string
 }
 
-function printSearchPage(page: Page<ToolSearchItem>): void {
+/**
+ * `--schemas` 的附加段:逐工具打 `NODE/TOOL` 标题 + pretty inputSchema。
+ * schema 已在 `~search` 响应里(`items[].tool.inputSchema`),因此这只是渲染开关,
+ * 不额外请求 —— 目的是省掉"search 命中后再 `tb help` 拿 schema"的往返。
+ */
+function printSearchSchemas(page: Page<ToolSearchItem>): void {
+  for (const { path, tool } of page.items) {
+    printLine('')
+    printLine(`${path}/${tool.name}`)
+    if (tool.inputSchema === undefined) printLine('  (no input schema)')
+    else {
+      for (const line of JSON.stringify(tool.inputSchema, null, 2).split('\n')) {
+        printLine(`  ${line}`)
+      }
+    }
+  }
+}
+
+function printSearchPage(page: Page<ToolSearchItem>, withSchemas = false): void {
   if (page.items.length === 0) {
     printLine('(no visible tools found)')
     return
@@ -30,6 +49,7 @@ function printSearchPage(page: Page<ToolSearchItem>): void {
       ]),
     ),
   )
+  if (withSchemas) printSearchSchemas(page)
   if (page.cursor) printLine(`next cursor: ${page.cursor}`)
 }
 
@@ -39,6 +59,18 @@ export function searchCommand(): Command {
     .description('Search callable tools across the gateway')
     .argument('<query>', 'Tool name, description, or feedback query')
     .option('--mode <mode>', 'Search mode: keyword | semantic (default keyword)')
+    .option(
+      '--schemas',
+      'Also print each result\'s arguments JSON Schema (no effect with --json, which always carries it)',
+      false,
+    )
+    .addHelpText(
+      'after',
+      `
+Examples:
+  tb search calendar
+  tb search calendar --schemas   print arguments schemas inline, no extra \`tb help\` round-trip`,
+    )
     .action(async (queryArg: string, opts: SearchOpts) => {
       const asJson = Boolean(opts.json)
       await guard(asJson, async () => {
@@ -59,7 +91,7 @@ export function searchCommand(): Command {
           },
         })
         if (asJson) printJson(page)
-        else printSearchPage(page)
+        else printSearchPage(page, Boolean(opts.schemas))
       })
     })
 }
