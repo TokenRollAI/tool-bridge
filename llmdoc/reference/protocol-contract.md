@@ -83,6 +83,8 @@ Manifest 描述部署：`id`、`protocolVersion:'plugin/v2'`、`endpoint`、`aut
 
 call id 在同一设备进程内用于执行中合并与有界结果缓存；当前契约不承诺跨进程 exactly-once。cancel 是协作式提示：设备向 handler 的 AbortSignal 发信号，忽略 signal 的 handler 仍可完成并缓存结果，不能把 cancel 表述为外部副作用已撤销。未知 handler 异常对 wire 脱敏，result 必须可 JSON 序列化。
 
+call 帧带可选 `context`（caller.keyId/owner、traceId、createdAt、expiresAt），由网关鉴权后签发，不接受来自调用 arguments，故意不含 scopes/SK/敏感参数。授权判定仍全在网关侧（转发前 `check(...,'call')`）；设备只消费 context 做审计与限时，不做 scope 裁决。`expiresAt` 是网关权威时间戳（对齐 `DEVICE_CALL_TIMEOUT_MS`），设备复检以此为准，不信任本地时钟。老网关不带 context，新设备须按缺省显式降级；老设备 decoder 忽略未知字段。
+
 `@tool-bridge/sdk/device` 的安全作者面只声明可路由回设备的 tool/context 节点；raw wire decoder 仍兼容完整 DeviceExpose。移动端默认是前台实时在线设备：宿主将 AppState 映射为 suspend/resume，后台永久在线或进程被杀后的任务属于另一个异步队列/推送能力。
 
 ## CLI 契约

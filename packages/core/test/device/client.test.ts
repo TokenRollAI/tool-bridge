@@ -108,6 +108,54 @@ describe('call 处理与幂等', () => {
     expect(sent).toEqual([{ type: 'result', id: 'r1', ok: true, value: { stdout: 'hi\n' } }])
   })
 
+  it('call 带 context → handler 收到 caller/deadline', async () => {
+    const calls: Array<Record<string, unknown>> = []
+    const { client } = makeClient({
+      handler: async (call) => {
+        calls.push(call)
+        return 'ok'
+      },
+    })
+    const { socket } = fakeSocket()
+    client.socketOpened(socket)
+    await client.socketMessage(READY)
+    await client.socketMessage(encodeDeviceFrame({
+      type: 'call',
+      id: 'rc',
+      path: 'shell',
+      tool: 'exec',
+      arguments: {},
+      context: {
+        caller: { keyId: 'sk_1', owner: 'agent:researcher' },
+        traceId: 'tr',
+        createdAt: '2026-08-19T00:00:00.000Z',
+        expiresAt: '2026-08-19T00:01:00.000Z',
+      },
+    }))
+    expect(calls[0]?.context).toEqual({
+      caller: { keyId: 'sk_1', owner: 'agent:researcher' },
+      traceId: 'tr',
+      createdAt: '2026-08-19T00:00:00.000Z',
+      expiresAt: '2026-08-19T00:01:00.000Z',
+    })
+  })
+
+  it('兼容:老网关 call 不带 context → handler 的 context 为 undefined(显式降级)', async () => {
+    const calls: Array<Record<string, unknown>> = []
+    const { client } = makeClient({
+      handler: async (call) => {
+        calls.push(call)
+        return 'ok'
+      },
+    })
+    const { socket } = fakeSocket()
+    client.socketOpened(socket)
+    await client.socketMessage(READY)
+    await client.socketMessage(CALL)
+    expect(calls[0]).not.toHaveProperty('context')
+    expect(calls[0]?.context).toBeUndefined()
+  })
+
   it('handler 抛 TBError → 回错误 result(码保真)', async () => {
     const { client } = makeClient({
       handler: async () => {

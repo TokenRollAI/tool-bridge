@@ -10,7 +10,7 @@
  *   迟到的 result 仅入幂等表(后续重复 id 以它应答)。
  */
 
-import { deviceErrorFrame, type DeviceFrame, type HelloFrame } from './frames'
+import { type DeviceCallContext, deviceErrorFrame, type DeviceFrame, type HelloFrame } from './frames'
 import { TBError, type TBErrorBody } from '../errors'
 
 /** 设备调用超时;区别于 Plugin 30s / Workers CPU 30s,勿混用常量。 */
@@ -49,6 +49,8 @@ interface PendingCall {
 
 export interface DeviceCallRequest {
   arguments: Record<string, unknown>
+  /** 网关鉴权后的调用方来源与权威期限;缺省则不写入 call 帧(老网关行为)。 */
+  context?: DeviceCallContext
   id: string
   /** 相对 mountPath,如 "shell"。 */
   path: string
@@ -168,6 +170,8 @@ export class DeviceGatewaySession {
       path: req.path,
       tool: req.tool,
       arguments: req.arguments,
+      // undefined 经 JSON.stringify 丢弃:老网关不带 context 时帧形状不变。
+      ...(req.context !== undefined ? { context: req.context } : {}),
     })
   }
 

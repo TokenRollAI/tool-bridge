@@ -154,6 +154,12 @@ describe('@tool-bridge/sdk/device neutral connection', () => {
       path: 'camera',
       tool: 'capture',
       arguments: { quality: 0.8 },
+      context: {
+        caller: { keyId: 'sk_1', owner: 'agent:researcher' },
+        traceId: 'trace-1',
+        createdAt: '2026-08-19T00:00:00.000Z',
+        expiresAt: '2026-08-19T00:01:00.000Z',
+      },
     })
     await vi.waitFor(() => expect(socket.sent).toHaveLength(1))
     expect(calls).toHaveLength(1)
@@ -163,6 +169,11 @@ describe('@tool-bridge/sdk/device neutral connection', () => {
       tool: 'capture',
       arguments: { quality: 0.8 },
       signal: { aborted: false },
+      context: {
+        caller: { keyId: 'sk_1', owner: 'agent:researcher' },
+        traceId: 'trace-1',
+        expiresAt: '2026-08-19T00:01:00.000Z',
+      },
     })
     expect(helloFrames(socket)).toEqual([
       { type: 'result', id: 'call-1', ok: true, value: { uri: 'file:///capture.jpg' } },
@@ -171,6 +182,34 @@ describe('@tool-bridge/sdk/device neutral connection', () => {
     connection.close()
     await connection.closed
     expect(connection.state).toBe('closed')
+  })
+
+  it('兼容:老网关 call 不带 context → consumer handler 的 context 为 undefined', async () => {
+    const harness = factoryHarness()
+    const calls: Array<Record<string, unknown>> = []
+    const connection = connectDevice({
+      baseUrl: 'https://tb.example',
+      deviceId: 'phone-legacy',
+      expose: { nodes: [{ path: 'status', kind: 'context', description: '状态' }] },
+      credentialProvider: { prepare: () => ({ headers: {} }) },
+      webSocketFactory: harness.factory,
+      handler: async (call) => {
+        calls.push(call)
+        return null
+      },
+    })
+
+    const socket = await connectAttempt(harness, 1)
+    socket.open()
+    socket.receive({ type: 'ready', mountPath: 'device/phone-legacy' })
+    await connection.ready
+    socket.receive({ type: 'call', id: 'c1', path: 'status', tool: 'get', arguments: {} })
+    await vi.waitFor(() => expect(calls).toHaveLength(1))
+    expect(calls[0]).not.toHaveProperty('context')
+    expect(calls[0]?.context).toBeUndefined()
+
+    connection.close()
+    await connection.closed
   })
 
   it('每次 restart 重新读取凭证', async () => {

@@ -7,6 +7,7 @@
 
 import {
   type DeviceCallHandler as CoreDeviceCallHandler,
+  type DeviceCallContext,
   DeviceClient,
   type DeviceNodeCmd,
   normalizePath,
@@ -58,8 +59,12 @@ export interface DeviceClientExpose {
   nodes: readonly DeviceNodeDefinition[]
 }
 
+export type { DeviceCallContext }
+
 export type DeviceCallHandler = (call: {
   arguments: Record<string, unknown>
+  /** 网关鉴权后的调用方来源与权威期限;老网关不带,handler 须按缺省显式降级。 */
+  context?: DeviceCallContext
   id: string
   path: string
   signal: AbortSignal
@@ -493,6 +498,8 @@ export function connectDevice(opts: ConnectDeviceOptions): DeviceConnection {
       tool: call.tool,
       arguments: call.arguments,
       signal: call.signal as AbortSignal,
+      // 老网关不带 context:字段缺省透传,consumer handler 侧显式降级。
+      ...(call.context !== undefined ? { context: call.context } : {}),
     }),
     webSocketFactory: opts.webSocketFactory,
     ...(opts.heartbeatIntervalMs === undefined

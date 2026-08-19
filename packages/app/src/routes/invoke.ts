@@ -44,8 +44,8 @@ import {
   requirePluginExport,
   upstreamTools,
 } from '../toolNodes'
+import { deviceCallContextFrom, deviceMarkerOf, deviceToolMarker, invokeDevice, relativeDevicePath } from '../deviceNodes'
 import { assertRemoteConfigAllowed, remotePassthroughIfMatch, resolveRemoteSettings } from '../federation'
-import { deviceMarkerOf, deviceToolMarker, invokeDevice, relativeDevicePath } from '../deviceNodes'
 import { createPluginContextProvider } from '../providers/pluginContext'
 import { assertRegisterPath, decodePath, scopeForCmd } from '../paths'
 import { invalidateToolCache } from '../providers/toolCache'
@@ -129,6 +129,7 @@ export async function handleInvoke(c: AppContext, env: RouteEnv): Promise<Respon
       path: relativeDevicePath(node.path, toolMarker.mountPath),
       tool,
       arguments: args,
+      context: deviceCallContextFrom(ctx),
     })
     return renderResult(result, negotiate(c.req.header('accept')))
   }
@@ -169,6 +170,7 @@ export async function handleInvoke(c: AppContext, env: RouteEnv): Promise<Respon
       path: 'shell',
       tool: body.tool,
       arguments: (body.arguments ?? {}) as Record<string, unknown>,
+      context: deviceCallContextFrom(ctx),
     })
     return renderResult(result, negotiate(c.req.header('accept')))
   }
@@ -203,6 +205,7 @@ export async function handleInvoke(c: AppContext, env: RouteEnv): Promise<Respon
         path: 'fs',
         tool: body.tool,
         arguments: args,
+        context: deviceCallContextFrom(ctx),
       })
       return renderResult(result, negotiate(c.req.header('accept')))
     }
@@ -213,6 +216,7 @@ export async function handleInvoke(c: AppContext, env: RouteEnv): Promise<Respon
         path: relativeDevicePath(node.path, contextMarker.mountPath),
         tool: body.tool,
         arguments: args,
+        context: deviceCallContextFrom(ctx),
       })
       return renderResult(result, negotiate(c.req.header('accept')))
     }

@@ -152,6 +152,25 @@ describe('call 与 requestId 幂等', () => {
     expect(stored).toEqual([['r1', { ok: true, value: 'out' }]])
   })
 
+  it('无 context(老网关)→ call 帧不含 context 字段', () => {
+    const { session, sent } = readySession()
+    session.call(REQ, () => {})
+    expect(sent[0]).not.toHaveProperty('context')
+    expect(sent).toEqual([{ type: 'call', ...REQ }])
+  })
+
+  it('带 context → 原样写入 call 帧', () => {
+    const { session, sent } = readySession()
+    const context = {
+      caller: { keyId: 'sk_1', owner: 'agent:researcher' as const },
+      traceId: 'trace-1',
+      createdAt: '2026-08-19T00:00:00.000Z',
+      expiresAt: '2026-08-19T00:01:00.000Z',
+    }
+    session.call({ ...REQ, context }, () => {})
+    expect(sent).toEqual([{ type: 'call', ...REQ, context }])
+  })
+
   it('重复 id(已有结果)→ 以首次结果立即应答,不再下发', () => {
     const { session, sent } = readySession()
     session.call(REQ, () => {})

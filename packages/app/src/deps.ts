@@ -9,6 +9,7 @@ import type {
   BuiltinCatalog,
   CallContext,
   ContextProvider,
+  DeviceCallContext,
   ObjectStore,
   SearchIndex,
   SecretStoreImpl,
@@ -23,6 +24,8 @@ import type { RemoteSettings } from './providers/remote'
 /** 帧协议 call 转发的入参(id 由调用点生成,幂等键)。 */
 export interface DeviceInvokeRequest {
   arguments: Record<string, unknown>
+  /** 网关鉴权后的调用方来源与权威期限;缺省则不写入 call 帧。 */
+  context?: DeviceCallContext
   id: string
   path: string
   tool: string

@@ -11,6 +11,7 @@ import type { DeviceExpose, TreePath } from '../types'
 import {
   type CallFrame,
   decodeDeviceFrame,
+  type DeviceCallContext,
   type DeviceFrame,
   encodeDeviceFrame,
   PONG_FRAME_JSON,
@@ -35,6 +36,8 @@ export interface DeviceAbortSignal {
 
 export type DeviceCallHandler = (call: {
   arguments: Record<string, unknown>
+  /** 网关鉴权后的调用方来源与权威期限;老网关不带,handler 须按缺省显式降级。 */
+  context?: DeviceCallContext
   id: string
   path: string
   signal: DeviceAbortSignal
@@ -208,6 +211,8 @@ export class DeviceClient {
         tool: frame.tool,
         arguments: frame.arguments,
         signal: controller.signal,
+        // 老网关不带 context:字段缺省透传,handler 侧显式降级。
+        ...(frame.context !== undefined ? { context: frame.context } : {}),
       })
       result = { type: 'result', id: frame.id, ok: true, value: jsonValue(value) }
     } catch (e) {

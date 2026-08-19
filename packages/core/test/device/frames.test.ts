@@ -120,6 +120,52 @@ describe('encode/decode 往返', () => {
     }
   })
 
+  it('call 帧携带 context(caller/deadline)往返保持', () => {
+    const frame: DeviceFrame = {
+      type: 'call',
+      id: 'r3',
+      path: 'tools/echo',
+      tool: 'echo',
+      arguments: { text: 'hi' },
+      context: {
+        caller: { keyId: 'sk_1', owner: 'agent:researcher', displayName: 'Researcher' },
+        traceId: 'trace-1',
+        createdAt: '2026-08-19T00:00:00.000Z',
+        expiresAt: '2026-08-19T00:01:00.000Z',
+      },
+    }
+    expect(decodeDeviceFrame(encodeDeviceFrame(frame))).toEqual(frame)
+  })
+
+  it('call 帧的 context 缺 displayName 合法;缺必填字段 → invalid_argument', () => {
+    const ok
+      = '{"type":"call","id":"r1","path":"p","tool":"t","arguments":{},"context":{"caller":{"keyId":"k","owner":"user:a"},"traceId":"tr","createdAt":"t0","expiresAt":"t1"}}'
+    expect(decodeDeviceFrame(ok)).toMatchObject({
+      context: { caller: { keyId: 'k', owner: 'user:a' } },
+    })
+    const bad = [
+      // caller 缺 keyId
+      '{"type":"call","id":"r1","path":"p","tool":"t","arguments":{},"context":{"caller":{"owner":"user:a"},"traceId":"tr","createdAt":"t0","expiresAt":"t1"}}',
+      // 缺 expiresAt
+      '{"type":"call","id":"r1","path":"p","tool":"t","arguments":{},"context":{"caller":{"keyId":"k","owner":"user:a"},"traceId":"tr","createdAt":"t0"}}',
+    ]
+    for (const text of bad) {
+      expect(codeOf(() => decodeDeviceFrame(text)), `应拒绝:${text}`).toBe('invalid_argument')
+    }
+  })
+
+  it('兼容:新网关 → 老设备 decoder,call 帧含 context 不影响既有字段解析', () => {
+    // 老设备只读 id/path/tool/arguments;decoder 仍完整解析,context 作为已知可选字段保留。
+    const text
+      = '{"type":"call","id":"r1","path":"shell","tool":"exec","arguments":{"command":"ls"},"context":{"caller":{"keyId":"k","owner":"user:a"},"traceId":"tr","createdAt":"t0","expiresAt":"t1"}}'
+    expect(decodeDeviceFrame(text)).toMatchObject({
+      id: 'r1',
+      path: 'shell',
+      tool: 'exec',
+      arguments: { command: 'ls' },
+    })
+  })
+
   it('ping/pong 序列化为稳定字面量(DO autoResponse 精确匹配)', () => {
     expect(encodeDeviceFrame({ type: 'ping' })).toBe(PING_FRAME_JSON)
     expect(encodeDeviceFrame({ type: 'pong' })).toBe(PONG_FRAME_JSON)

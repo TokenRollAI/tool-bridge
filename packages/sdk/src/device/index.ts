@@ -8,6 +8,7 @@ export {
 } from './connection'
 export type {
   ConnectDeviceOptions,
+  DeviceCallContext,
   DeviceCallHandler,
   DeviceClientExpose,
   DeviceConnection,
