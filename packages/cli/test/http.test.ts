@@ -52,13 +52,45 @@ describe('apiFetch 构造请求', () => {
     expect(JSON.parse(init.body as string)).toEqual({ tool: 'list', arguments: { a: 1 } })
   })
 
-  it('网络错误 → CliError', async () => {
+  it('网络错误 → CliError,带 unavailable/retryable(不再是无 code 的裸消息)', async () => {
     setFetch(
       vi.fn(async () => {
-        throw new Error('ECONNREFUSED')
+        throw new Error('fetch failed')
       }) as unknown as typeof fetch,
     )
-    await expect(apiFetch(TARGET, { path: '/x' })).rejects.toThrow(/request failed/)
+    await expect(apiFetch(TARGET, { path: '/x' })).rejects.toMatchObject({
+      message: expect.stringMatching(/request failed/),
+      code: 'unavailable',
+      retryable: true,
+    })
+  })
+
+  it('undici cause.code 拼进 message(如 ECONNREFUSED)', async () => {
+    setFetch(
+      vi.fn(async () => {
+        throw Object.assign(new TypeError('fetch failed'), { cause: { code: 'ECONNREFUSED' } })
+      }) as unknown as typeof fetch,
+    )
+    await expect(apiFetch(TARGET, { path: '/x' })).rejects.toMatchObject({
+      message: expect.stringMatching(/ECONNREFUSED/),
+      code: 'unavailable',
+      retryable: true,
+    })
+  })
+
+  it('响应体中途断流 → 按网络失败归一(不裸露 undici 消息)', async () => {
+    setFetch(
+      vi.fn(async () => ({
+        ok: true,
+        status: 200,
+        headers: { get: () => null },
+        text: () => Promise.reject(new TypeError('terminated')),
+      })) as unknown as typeof fetch,
+    )
+    await expect(apiFetch(TARGET, { path: '/x' })).rejects.toMatchObject({
+      code: 'unavailable',
+      retryable: true,
+    })
   })
 })
 
@@ -90,6 +122,39 @@ describe('apiJson TBError 归一', () => {
       headers: { 'content-type': 'application/json' },
     })
     expect(await apiJson(TARGET, { path: '/x' })).toEqual({ items: [1, 2] })
+  })
+
+  it('非规范错误体(HTML 502)→ 按 status 回退出 unavailable/retryable', async () => {
+    mockOnce('<html>502 Bad Gateway</html>', { status: 502 })
+    await expect(apiJson(TARGET, { path: '/x' })).rejects.toMatchObject({
+      code: 'unavailable',
+      retryable: true,
+    })
+  })
+
+  it('非规范错误体(429)→ rate_limited/retryable', async () => {
+    mockOnce('too many', { status: 429 })
+    await expect(apiJson(TARGET, { path: '/x' })).rejects.toMatchObject({
+      code: 'rate_limited',
+      retryable: true,
+    })
+  })
+
+  it('非规范错误体(400)→ invalid_argument,不可重试', async () => {
+    mockOnce('bad', { status: 400 })
+    await expect(apiJson(TARGET, { path: '/x' })).rejects.toMatchObject({
+      code: 'invalid_argument',
+      retryable: false,
+    })
+  })
+
+  it('2xx 但响应体非法 JSON → internal/retryable', async () => {
+    mockOnce('not json', { status: 200, headers: { 'content-type': 'application/json' } })
+    await expect(apiJson(TARGET, { path: '/x' })).rejects.toMatchObject({
+      message: expect.stringMatching(/invalid JSON/),
+      code: 'internal',
+      retryable: true,
+    })
   })
 })
 
