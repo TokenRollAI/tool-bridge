@@ -79,7 +79,11 @@ Manifest 描述部署：`id`、`protocolVersion:'plugin/v2'`、`endpoint`、`aut
 
 ## 设备
 
-设备先连 `/system/device/ws?deviceId=...`，hello 声明 expose；服务端验证身份与 `registerPaths` 后代写 `device/<id>/...`。调用以 id 做幂等关联。PING/PONG 是稳定字面量，支持边缘 auto-response；连接替换后旧 generation 不得完成新调用。
+设备先连 `/system/device/ws?deviceId=...`，hello 声明 expose；服务端验证身份与 `registerPaths` 后代写 `device/<id>/...`。完整帧集合是 hello、ready、error、call、result、ping、pong、cancel。PING/PONG 是稳定字面量，支持边缘 auto-response；只有当前 generation 进入 ready 后才能执行 call，连接替换后旧 generation 的 message、close 与迟到结果不得污染新连接。
+
+call id 在同一设备进程内用于执行中合并与有界结果缓存；当前契约不承诺跨进程 exactly-once。cancel 是协作式提示：设备向 handler 的 AbortSignal 发信号，忽略 signal 的 handler 仍可完成并缓存结果，不能把 cancel 表述为外部副作用已撤销。未知 handler 异常对 wire 脱敏，result 必须可 JSON 序列化。
+
+`@tool-bridge/sdk/device` 的安全作者面只声明可路由回设备的 tool/context 节点；raw wire decoder 仍兼容完整 DeviceExpose。移动端默认是前台实时在线设备：宿主将 AppState 映射为 suspend/resume，后台永久在线或进程被杀后的任务属于另一个异步队列/推送能力。
 
 ## CLI 契约
 

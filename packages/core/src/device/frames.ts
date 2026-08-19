@@ -88,6 +88,7 @@ const deviceNodeCmdSchema = z
     name: z.string().min(1),
     description: z.string().optional(),
     inputSchema: z.unknown().optional(),
+    outputSchema: z.unknown().optional(),
     effect: z.string().optional(),
     confirm: z.boolean().optional(),
   })

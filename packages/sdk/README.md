@@ -1,6 +1,6 @@
 # @tool-bridge/sdk
 
-tool-bridge 的库形态:在任意 Node / Workers 宿主内嵌一个 TB 实例,程序化注册本地 Provider,并可反向连接到远程网关把本地工具挂上远程树。
+tool-bridge 的库形态。根入口面向 Node 22+：内嵌 TB 实例、注册本地 Provider，并可反向连接远程网关。`@tool-bridge/sdk/device` 是独立的运行时中立入口，面向 React Native / Hermes 等设备宿主。
 
 公开面即全部通道,不存在私有通道:`createToolBridge(config)` → `{ fetch, registerTool, registerContext, connect }`。
 
@@ -47,6 +47,49 @@ await conn.ready               // ready 帧到达,本实例注册的节点已挂
 
 conn.close()                   // 下线;远程节点保留标记 offline,超回收期自动删除
 ```
+
+## React Native / Hermes 设备入口
+
+只从子入口导入；不要从包根入口导入移动端能力：
+
+```ts
+import * as SecureStore from 'expo-secure-store'
+import {
+  connectDevice,
+  createReactNativeWebSocketFactory,
+} from '@tool-bridge/sdk/device'
+
+const connection = connectDevice({
+  baseUrl: 'https://your-gateway.example.com',
+  deviceId: 'phone-01',
+  expose: {
+    nodes: [{
+      path: 'camera',
+      kind: 'tool',
+      description: '手机相机',
+      cmds: [{ name: 'capture', description: '拍照' }],
+    }],
+  },
+  credentialProvider: {
+    prepare: async () => {
+      const sk = await SecureStore.getItemAsync('tool-bridge-device-sk')
+      if (!sk) throw new Error('device credential is missing')
+      return { headers: { authorization: `Bearer ${sk}` } }
+    },
+  },
+  webSocketFactory: createReactNativeWebSocketFactory(WebSocket),
+  handler: async ({ path, tool, arguments: args, signal }) => {
+    // policy、权限提示、原生能力和 signal 取消处理都属于 App 适配层。
+    return await runNativeTool({ path, tool, args, signal })
+  },
+})
+
+// AppState active → connection.resume()
+// AppState background/inactive → connection.suspend()
+await connection.ready
+```
+
+移动端默认只承诺 App 前台实时在线。`SecureStore`、`AppState`、SQLite 和原生 executor 由应用选择，SDK 不直接依赖 React Native 或 Expo。当前原生 RN adapter 使用第三参数注入 WebSocket upgrade headers；浏览器/RN Web 若不能设置 header，需要网关短期 ticket 能力。
 
 ## 配置要点
 

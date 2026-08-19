@@ -109,6 +109,7 @@ function cmdsOf(specs: Awaited<ReturnType<ToolProviderLike['List']>>): DeviceNod
     name: t.name,
     ...(t.description !== undefined ? { description: t.description } : {}),
     ...(t.inputSchema !== undefined ? { inputSchema: t.inputSchema } : {}),
+    ...(t.outputSchema !== undefined ? { outputSchema: t.outputSchema } : {}),
     ...(t.effect !== undefined ? { effect: t.effect } : {}),
     ...(t.confirm !== undefined ? { confirm: t.confirm } : {}),
   }))

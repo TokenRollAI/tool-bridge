@@ -177,6 +177,7 @@ export interface DeviceNodeCmd {
   effect?: string
   inputSchema?: unknown
   name: string
+  outputSchema?: unknown
 }
 
 export type NodeConfig

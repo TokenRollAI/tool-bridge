@@ -10,6 +10,8 @@ app ← plugins
 gateway  plugin-sdk
 server
 sdk
+├─ sdk 根入口(Node 22+:app/ws/node adapter)
+└─ sdk/device(neutral:device protocol + supervisor)
 
 CLI / Dashboard ──HTTP──> app contract
 ```
@@ -24,7 +26,7 @@ CLI / Dashboard ──HTTP──> app contract
 | `app` | Hono 路由、发现/调用、provider 编排、宿主注入面 | Wrangler、SQLite、Node/CF 专属启动 |
 | `gateway` | Workers Env → app 依赖，KV/R2/D1/DO/Assets | 复制 app 业务分支 |
 | `server` | Node 配置、SQLite/FS/ws、HTTP 监听、Docker 入口 | 改写共享协议语义 |
-| `sdk` | 嵌入 app、注册本地 provider、反向连接 | 暴露尚未实现的网关侧设备宿主 API |
+| `sdk` | 根入口嵌入 app、注册本地 provider、以 Node ws 反向连接；`./device` 提供独立 neutral 设备客户端 | 让 `./device` 触达 app、Node ws、`node:*` 或根入口；暴露尚未实现的网关侧设备宿主 API |
 | `plugin-sdk` | plugin descriptor、OperationRegistry、envelope、受控出站 | 承担平台注册和 SecretStore |
 | `plugins` | 内置 provider 源码、生成 catalog、迁移回归闸门 | 运行时注册状态 |
 | `cli` | 严格 argv、本地语义、HTTP 调用、脚本输出 | 成为服务端唯一校验层 |
@@ -50,6 +52,8 @@ bootstrap builtin 清单在 `packages/app/src/bootstrap.ts` 的 `BUILTIN_MODULES
 
 ## 运行时差异
 
+- `@tool-bridge/sdk` 是多入口包：根入口的 `engines.node` 与 Node 依赖属于安装/根运行时约束；`@tool-bridge/sdk/device` 的 Hermes 兼容性由独立 neutral JS/d.ts 产物和最终 tarball 模块闭包保证。设备入口不得从包根重新导出。
+- 设备宿主通过 WebSocket factory、credential provider、handler 和 suspend/resume 注入 RN/Node 差异；SecureStore、AppState、原生 executor 与业务 policy 不属于 SDK 依赖。
 - Workers StateStore 基于 KV，认证和注册读存在最终一致窗口；Node SQLite 强一致。
 - Workers 设备会话结果与连接元数据进入 DO storage；Node 部分幂等结果只在进程内。
 - Workers 静态 UI 经 Assets binding；Node 从 `TB_UI_DIR` 或 dashboard 包读取。

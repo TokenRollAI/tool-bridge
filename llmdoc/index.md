@@ -44,6 +44,7 @@
 | Agent Skill 接入与 feedback 异常闭环 | [memory/reflections/agent-skill-bootstrap.md](memory/reflections/agent-skill-bootstrap.md) |
 | CLI registry tarball 的工作区依赖协议泄漏 | [memory/reflections/cli-registry-catalog-dependency.md](memory/reflections/cli-registry-catalog-dependency.md) |
 | Linux 设备 daemon 产品化 | [memory/reflections/device-daemon.md](memory/reflections/device-daemon.md) |
+| SDK device 多运行时边界 | [memory/reflections/sdk-device-runtime-boundary.md](memory/reflections/sdk-device-runtime-boundary.md) |
 
 ## 维护边界
 

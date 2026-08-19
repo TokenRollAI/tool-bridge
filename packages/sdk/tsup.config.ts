@@ -10,8 +10,8 @@ export default defineConfig({
   format: ['esm'],
   target: 'node22',
   tsconfig: 'tsconfig.build.json',
-  dts: { resolve: ['@tool-bridge/core', '@tool-bridge/app'] },
+  dts: { resolve: ['@tool-bridge/core', '@tool-bridge/core/device', '@tool-bridge/app'] },
   clean: true,
   minify: false,
-  noExternal: ['@tool-bridge/core', '@tool-bridge/app'],
+  noExternal: ['@tool-bridge/core', '@tool-bridge/core/device', '@tool-bridge/app'],
 })

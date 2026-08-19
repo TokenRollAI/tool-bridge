@@ -86,6 +86,7 @@ describe('encode/decode 往返', () => {
                 name: 'echo',
                 description: '原样返回',
                 inputSchema: { type: 'object', properties: { text: { type: 'string' } } },
+                outputSchema: { type: 'object', properties: { echoed: { type: 'string' } } },
                 effect: 'read',
               },
               { name: 'wipe', effect: 'destructive', confirm: true },

@@ -97,7 +97,14 @@ describe('call 处理与幂等', () => {
     await client.socketMessage(READY)
     sent.length = 0
     await client.socketMessage(CALL)
-    expect(calls).toEqual([{ path: 'shell', tool: 'exec', arguments: { command: 'echo hi' } }])
+    expect(calls).toHaveLength(1)
+    expect(calls[0]).toMatchObject({
+      id: 'r1',
+      path: 'shell',
+      tool: 'exec',
+      arguments: { command: 'echo hi' },
+      signal: { aborted: false },
+    })
     expect(sent).toEqual([{ type: 'result', id: 'r1', ok: true, value: { stdout: 'hi\n' } }])
   })
 
@@ -136,8 +143,95 @@ describe('call 处理与幂等', () => {
     expect(sent[0]).toMatchObject({
       type: 'result',
       ok: false,
-      error: { code: 'internal', message: 'boom' },
+      error: { code: 'internal', message: 'device handler failed' },
     })
+  })
+
+  it('ready 前的 call 不交给 handler', async () => {
+    let runs = 0
+    const protocolErrors: string[] = []
+    const { client } = makeClient({
+      handler: async () => {
+        runs++
+        return 'unexpected'
+      },
+      onProtocolError: message => protocolErrors.push(message),
+    })
+    const { socket, sent } = fakeSocket()
+    client.socketOpened(socket)
+    sent.length = 0
+    await client.socketMessage(CALL)
+    expect(runs).toBe(0)
+    expect(sent).toEqual([])
+    expect(protocolErrors).toEqual(['call frame received before ready'])
+  })
+
+  it('cancel 触发协作式 AbortSignal 并归一为可重试 unavailable', async () => {
+    const { client } = makeClient({
+      handler: async ({ signal }) => await new Promise((_resolve, reject) => {
+        signal.addEventListener('abort', () => reject(new Error('local cancellation detail')), {
+          once: true,
+        })
+      }),
+    })
+    const { socket, sent } = fakeSocket()
+    client.socketOpened(socket)
+    await client.socketMessage(READY)
+    sent.length = 0
+    const pending = client.socketMessage(CALL)
+    await client.socketMessage(encodeDeviceFrame({ type: 'cancel', id: 'r1' }))
+    await pending
+    expect(sent).toEqual([
+      {
+        type: 'result',
+        id: 'r1',
+        ok: false,
+        error: {
+          code: 'unavailable',
+          message: 'device call cancelled',
+          retryable: true,
+        },
+      },
+    ])
+  })
+
+  it('handler 忽略 cancel 时仍可完成并缓存结果', async () => {
+    let release: (() => void) | undefined
+    const { client } = makeClient({
+      handler: async () => await new Promise((resolve) => {
+        release = () => resolve('late result')
+      }),
+    })
+    const { socket, sent } = fakeSocket()
+    client.socketOpened(socket)
+    await client.socketMessage(READY)
+    sent.length = 0
+    const pending = client.socketMessage(CALL)
+    await client.socketMessage(encodeDeviceFrame({ type: 'cancel', id: 'r1' }))
+    release?.()
+    await pending
+    await client.socketMessage(CALL)
+    expect(sent).toEqual([
+      { type: 'result', id: 'r1', ok: true, value: 'late result' },
+      { type: 'result', id: 'r1', ok: true, value: 'late result' },
+    ])
+  })
+
+  it('非 JSON 返回值归一为脱敏 internal', async () => {
+    const { client } = makeClient({ handler: async () => 1n })
+    const { socket, sent } = fakeSocket()
+    client.socketOpened(socket)
+    await client.socketMessage(READY)
+    sent.length = 0
+    await client.socketMessage(CALL)
+    expect(sent).toEqual([
+      {
+        type: 'result',
+        id: 'r1',
+        ok: false,
+        error: { code: 'internal', message: 'device handler failed', retryable: false },
+      },
+    ])
   })
 
   it('重复 call id → handler 只执行一次,以缓存结果幂等应答', async () => {
@@ -234,6 +328,49 @@ describe('心跳、重连与关闭', () => {
     ])
     await client.socketMessage(encodeDeviceFrame({ type: 'ready', mountPath: 'device/d1' }))
     expect(states).toEqual(['ready', 'reconnecting', 'ready'])
+  })
+
+  it('旧 generation 的迟到 message/close 不污染新连接', async () => {
+    const { client, readies } = makeClient()
+    const first = fakeSocket()
+    const firstGeneration = client.socketOpened(first.socket)
+    const second = fakeSocket()
+    const secondGeneration = client.socketOpened(second.socket)
+
+    await client.socketMessage(READY, firstGeneration)
+    client.socketClosed(firstGeneration)
+    expect(client.state).toBe('connecting')
+    expect(readies).toEqual([])
+
+    await client.socketMessage(READY, secondGeneration)
+    expect(client.state).toBe('ready')
+    expect(readies).toEqual(['device/d1'])
+  })
+
+  it('旧 generation 的迟到 handler 结果不发到新连接', async () => {
+    let release: (() => void) | undefined
+    const { client } = makeClient({
+      handler: async () => await new Promise((resolve) => {
+        release = () => resolve('old result')
+      }),
+    })
+    const first = fakeSocket()
+    const firstGeneration = client.socketOpened(first.socket)
+    await client.socketMessage(READY, firstGeneration)
+    first.sent.length = 0
+    const pending = client.socketMessage(
+      encodeDeviceFrame({ type: 'call', id: 'old', path: 'shell', tool: 'exec', arguments: {} }),
+      firstGeneration,
+    )
+    client.socketClosed(firstGeneration)
+
+    const second = fakeSocket()
+    const secondGeneration = client.socketOpened(second.socket)
+    await client.socketMessage(READY, secondGeneration)
+    second.sent.length = 0
+    release?.()
+    await pending
+    expect(second.sent).toEqual([])
   })
 
   it('close():closed + 关 socket;之后 socketClosed 不改状态、socketOpened 直接关新连接', () => {

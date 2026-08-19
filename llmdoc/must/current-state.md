@@ -7,6 +7,7 @@
 ## 当前事实
 
 - 宿主中立应用在 `packages/app`，Cloudflare、Node、SDK 分别位于 gateway、server、sdk。
+- SDK 根入口面向 Node 22+；React Native/Hermes 设备从独立 neutral 产物 `@tool-bridge/sdk/device` 导入，宿主注入 WebSocket、凭证、生命周期与 executor。
 - 节点 kind 与 builtin 清单以 core 类型和 app bootstrap 常量为准，不在 MUST 手抄数量。
 - 内置集成由生成 catalog + binding 成对装配，直接挂载；`system/plugin` 只承担显式注册管理。
 - `system/catalog` 只返回逐 export 的 `exportDetails` 精确契约，不兼容 provider 级聚合字段。

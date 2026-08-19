@@ -25,6 +25,7 @@ tag 前缀与目录同名，包括 `plugin-sdk-`。Dashboard 若嵌入 server/ga
 - 所有公开包统一用 `node scripts/pack-and-verify-package.mjs packages/<pkg> --output-dir <dir>` 打包和验证；CLI 额外传 `--bin tb`。
 - 默认模式通过 `pnpm pack` 生成确切 tarball、扫描 packed manifest，并在仓库外创建干净 npm 消费者安装；CLI 还执行 `tb --version` 与 `tb --help`。
 - `files`、exports、bin、types 与 `publishConfig` 必须指向构建后真实存在的文件。
+- 多入口包必须递归检查 `exports` 的全部条件目标（包括 `types`、`import`、`react-native`），不能只验证 `main`。`@tool-bridge/sdk/device` 还必须扫描最终 tarball 中的 JS/d.ts：不得引用 `node:*`、Node `ws`、Hono、`process.env`、private workspace 包或 Node-only 声明类型；干净消费者同时 import 根入口与 device 子入口。
 - 解包最终 packed tarball，检查其中 `package.json` 的 `dependencies`、`optionalDependencies` 与 `peerDependencies`；不得残留 `catalog:`、`workspace:` 或其他 npm 不支持的工作区协议。
 - CI 在全仓 build 后复用同一脚本并传 `--skip-install`，只保留 packed manifest 协议闸门；合入前的 workspace 依赖版本可能尚未发布到 registry，不能把这类不可安装误判为 tarball 协议错误。publish workflow 不得跳过干净安装。
 - publish workflow 必须捕获脚本返回的 tarball 路径，并将同一个文件交给 `npm publish`；校验后重新打包会留下产物漂移窗口。

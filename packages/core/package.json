@@ -5,6 +5,7 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
+    "./device": "./src/device/public.ts",
     "./node": "./src/node/index.ts"
   },
   "scripts": {

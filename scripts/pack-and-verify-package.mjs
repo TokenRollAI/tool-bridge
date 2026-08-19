@@ -47,6 +47,68 @@ export function assertNoUnsupportedRuntimeDependencySpecs(manifest) {
   throw new Error(`packed manifest contains unsupported dependency protocols: ${details}`)
 }
 
+function collectConditionalTargets(value, targets) {
+  if (typeof value === 'string') {
+    if (value.startsWith('./')) targets.add(value)
+    return
+  }
+  if (Array.isArray(value)) {
+    for (const entry of value) collectConditionalTargets(entry, targets)
+    return
+  }
+  if (value !== null && typeof value === 'object') {
+    for (const entry of Object.values(value)) collectConditionalTargets(entry, targets)
+  }
+}
+
+export function collectPackedEntryTargets(manifest) {
+  const targets = new Set()
+  collectConditionalTargets(manifest.main, targets)
+  collectConditionalTargets(manifest.module, targets)
+  collectConditionalTargets(manifest.types, targets)
+  collectConditionalTargets(manifest.exports, targets)
+  collectConditionalTargets(manifest.bin, targets)
+  return [...targets].sort()
+}
+
+export function assertPackedEntryTargetsExist(manifest, packedFiles) {
+  const missing = collectPackedEntryTargets(manifest)
+    .map(target => `package/${target.slice(2)}`)
+    .filter(target => !packedFiles.has(target))
+  if (missing.length > 0) {
+    throw new Error(`packed manifest points to missing files: ${missing.join(', ')}`)
+  }
+}
+
+export function assertSdkDeviceArtifact(deviceJs, deviceDts) {
+  const forbiddenRuntime = [
+    ['Node builtin', /(?:from\s+|import\s*)["']node:/],
+    ['process.env', /\bprocess\.env\b/],
+    ['Node ws package', /(?:from\s+|import\s*)["']ws["']/],
+    ['private workspace package', /["']@tool-bridge\/(?:app|core)(?:\/[^"']*)?["']/],
+    ['Hono', /(?:from\s+|import\s*)["']hono(?:\/[^"']*)?["']/],
+  ]
+  for (const [label, pattern] of forbiddenRuntime) {
+    if (pattern.test(deviceJs)) throw new Error(`sdk device artifact contains ${label}`)
+  }
+  if (/\b(?:NodeJS|Buffer)\b/.test(deviceDts)) {
+    throw new Error('sdk device declarations contain Node-only types')
+  }
+  if (/@tool-bridge\/(?:app|core)/.test(deviceDts)) {
+    throw new Error('sdk device declarations reference a private workspace package')
+  }
+
+  const externalImports = [
+    ...deviceJs.matchAll(/\bfrom\s+["']([^"']+)["']/g),
+    ...deviceJs.matchAll(/\bimport\s+["']([^"']+)["']/g),
+  ].map(match => match[1]).filter(Boolean)
+  const unexpected = externalImports.filter(specifier =>
+    specifier !== 'partysocket/ws' && !specifier.startsWith('./'))
+  if (unexpected.length > 0) {
+    throw new Error(`sdk device artifact has unexpected imports: ${unexpected.join(', ')}`)
+  }
+}
+
 export function parseCliArguments(argv) {
   let bin
   let outputDir
@@ -149,6 +211,25 @@ async function readPackedManifest(tarballPath) {
   }
 }
 
+async function listPackedFiles(tarballPath) {
+  const { stdout } = await runCommand('tar', ['-tf', tarballPath], { logOutput: false })
+  return new Set(stdout.split(/\r?\n/).filter(Boolean).map(path => path.replace(/\/$/, '')))
+}
+
+async function readPackedFile(tarballPath, path) {
+  const { stdout } = await runCommand('tar', ['-xOf', tarballPath, path], { logOutput: false })
+  return stdout
+}
+
+async function verifyPackedArtifacts(tarballPath, manifest) {
+  const packedFiles = await listPackedFiles(tarballPath)
+  assertPackedEntryTargetsExist(manifest, packedFiles)
+  if (manifest.name !== '@tool-bridge/sdk') return
+  const deviceJs = await readPackedFile(tarballPath, 'package/dist/device.js')
+  const deviceDts = await readPackedFile(tarballPath, 'package/dist/device.d.ts')
+  assertSdkDeviceArtifact(deviceJs, deviceDts)
+}
+
 function installedBinPath(consumerDir, bin) {
   const filename = process.platform === 'win32' ? `${bin}.cmd` : bin
   return join(consumerDir, 'node_modules', '.bin', filename)
@@ -171,23 +252,34 @@ async function verifyConsumerInstall(tarballPath, manifest, bin) {
       tarballPath,
     ], { cwd: consumerDir })
 
-    if (bin === undefined) return
-    const manifestBin = typeof manifest.bin === 'string'
-      ? { [basename(manifest.name)]: manifest.bin }
-      : manifest.bin
-    if (manifestBin === null || typeof manifestBin !== 'object' || !(bin in manifestBin)) {
-      throw new Error(`packed manifest does not declare bin ${JSON.stringify(bin)}`)
-    }
+    if (bin !== undefined) {
+      const manifestBin = typeof manifest.bin === 'string'
+        ? { [basename(manifest.name)]: manifest.bin }
+        : manifest.bin
+      if (manifestBin === null || typeof manifestBin !== 'object' || !(bin in manifestBin)) {
+        throw new Error(`packed manifest does not declare bin ${JSON.stringify(bin)}`)
+      }
 
-    const binPath = installedBinPath(consumerDir, bin)
-    const versionResult = await runCommand(binPath, ['--version'], { cwd: consumerDir })
-    if (versionResult.stdout.trim() !== manifest.version) {
-      throw new Error(
-        `${bin} --version returned ${JSON.stringify(versionResult.stdout.trim())}; `
-        + `expected ${JSON.stringify(manifest.version)}`,
-      )
+      const binPath = installedBinPath(consumerDir, bin)
+      const versionResult = await runCommand(binPath, ['--version'], { cwd: consumerDir })
+      if (versionResult.stdout.trim() !== manifest.version) {
+        throw new Error(
+          `${bin} --version returned ${JSON.stringify(versionResult.stdout.trim())}; `
+          + `expected ${JSON.stringify(manifest.version)}`,
+        )
+      }
+      await runCommand(binPath, ['--help'], { cwd: consumerDir })
     }
-    await runCommand(binPath, ['--help'], { cwd: consumerDir })
+    if (manifest.name === '@tool-bridge/sdk') {
+      await runCommand(process.execPath, [
+        '--input-type=module',
+        '--eval',
+        'const root=await import(\'@tool-bridge/sdk\');'
+        + 'const device=await import(\'@tool-bridge/sdk/device\');'
+        + 'if(typeof root.createToolBridge!==\'function\'||typeof device.connectDevice!==\'function\')'
+        + 'throw new Error(\'sdk entrypoint smoke failed\')',
+      ], { cwd: consumerDir })
+    }
   } finally {
     await rm(consumerDir, { force: true, recursive: true })
   }
@@ -210,6 +302,7 @@ export async function packAndVerifyPackage({ bin, outputDir, packageDir, skipIns
 
   const packedManifest = await readPackedManifest(tarballPath)
   assertNoUnsupportedRuntimeDependencySpecs(packedManifest)
+  await verifyPackedArtifacts(tarballPath, packedManifest)
   if (!skipInstall) await verifyConsumerInstall(tarballPath, packedManifest, bin)
 
   return tarballPath

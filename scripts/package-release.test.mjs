@@ -3,6 +3,9 @@ import assert from 'node:assert/strict'
 import { join } from 'node:path'
 import test from 'node:test'
 import {
+  assertPackedEntryTargetsExist,
+  assertSdkDeviceArtifact,
+  collectPackedEntryTargets,
   findUnsupportedRuntimeDependencySpecs,
   parseCliArguments,
 } from './pack-and-verify-package.mjs'
@@ -46,6 +49,52 @@ test('registry, alias, URL, git, and npm-supported file specs pass', () => {
     optionalDependencies: { prerelease: '2.0.0-beta.1' },
     peerDependencies: { wildcard: '*' },
   }), [])
+})
+
+test('packed entry targets include conditional subpath exports and types', () => {
+  const manifest = {
+    main: './dist/index.js',
+    types: './dist/index.d.ts',
+    exports: {
+      '.': { import: './dist/index.js', types: './dist/index.d.ts' },
+      './device': {
+        'import': './dist/device.js',
+        'react-native': './dist/device.js',
+        'types': './dist/device.d.ts',
+      },
+    },
+  }
+  assert.deepEqual(collectPackedEntryTargets(manifest), [
+    './dist/device.d.ts',
+    './dist/device.js',
+    './dist/index.d.ts',
+    './dist/index.js',
+  ])
+  assert.doesNotThrow(() => assertPackedEntryTargetsExist(manifest, new Set([
+    'package/dist/device.d.ts',
+    'package/dist/device.js',
+    'package/dist/index.d.ts',
+    'package/dist/index.js',
+  ])))
+  assert.throws(
+    () => assertPackedEntryTargetsExist(manifest, new Set(['package/dist/index.js'])),
+    /missing files/,
+  )
+})
+
+test('SDK device artifact rejects Node runtime and private type leakage', () => {
+  assert.doesNotThrow(() => assertSdkDeviceArtifact(
+    'import ReconnectingWebSocket from "partysocket/ws"; export const ok = true',
+    'export declare const ok: boolean',
+  ))
+  assert.throws(
+    () => assertSdkDeviceArtifact('import WS from "ws"', 'export {}'),
+    /Node ws package/,
+  )
+  assert.throws(
+    () => assertSdkDeviceArtifact('export {}', 'type X = import("@tool-bridge/core").TreePath'),
+    /private workspace package/,
+  )
 })
 
 test('--bin cannot be combined with --skip-install', () => {
