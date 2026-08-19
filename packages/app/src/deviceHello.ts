@@ -37,6 +37,13 @@ export interface DeviceHello {
 export interface HelloAcceptance {
   keyId: string
   mountPath: TreePath
+  /**
+   * 设备节点是否已进入工具搜索索引。false 表示 canonical audit 容量
+   * (`TOOL_SEARCH_AUDIT_NODE_LIMIT`)已被 registry 撑满,索引保留 last-known-good,
+   * 本设备的工具**暂不可被全局搜索命中**(调用与 `~help` 不受影响)。宿主据此告警,
+   * 避免"新增设备后搜不到且无任何提示"。未注入 search 时恒为 true(该宿主无搜索面)。
+   */
+  searchIndexed: boolean
 }
 
 export function assertDeviceId(deviceId: string): void {
@@ -212,6 +219,11 @@ export async function processDeviceHello(opts: {
       throw error
     }
   }
-  await searchSync?.rebuildAll(searchMarkers)
-  return { mountPath, keyId: authCtx.keyId }
+  // rebuildAll 在 registry 超出 canonical audit 容量时返回 false(保留 last-known-good),
+  // 此时新设备节点不进索引——透出给宿主告警,不阻断 hello(设备仍可调用)。
+  // 未注入 search 时视为已索引(该宿主无搜索面,不产生误导告警)。
+  const searchIndexed = searchSync === undefined
+    ? true
+    : await searchSync.rebuildAll(searchMarkers)
+  return { mountPath, keyId: authCtx.keyId, searchIndexed }
 }

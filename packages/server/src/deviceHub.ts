@@ -268,7 +268,7 @@ export class DeviceHub {
     hello: { deviceId: string, expose: DeviceMetaExpose, mountPath?: TreePath },
   ): Promise<void> {
     const now = new Date().toISOString()
-    const { mountPath, keyId } = await processDeviceHello({
+    const { mountPath, keyId, searchIndexed } = await processDeviceHello({
       store: this.store,
       authorization: conn.authorization,
       deviceIdHint: conn.deviceId,
@@ -276,6 +276,11 @@ export class DeviceHub {
       now,
       ...(this.search === undefined ? {} : { search: this.search }),
     })
+    if (!searchIndexed) {
+      console.warn(
+        `[tool-bridge] device '${conn.deviceId}' mounted at ${mountPath} but its tools are NOT in the search index: registry exceeds the tool-search capacity (TOOL_SEARCH_AUDIT_NODE_LIMIT). The device is callable but won't appear in \`tb search\` until capacity frees up.`,
+      )
+    }
     const meta: DeviceMeta = { deviceId: conn.deviceId, mountPath, keyId, connectedAt: now }
     await this.store.put(KEY_DEVICE_META + conn.deviceId, meta)
     conn.keyId = keyId

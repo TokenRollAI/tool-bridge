@@ -40,8 +40,12 @@ export async function helpModelFor(
   ctx: CallContext,
   builtins: Map<string, BuiltinModule>,
   deps: TbAppDeps,
-  opts: { now: string, refresh: boolean },
+  opts: { now: string, refresh: boolean, schemas?: boolean },
 ): Promise<HelpModel> {
+  // schemas=1:节点级 `~help` 直接内联每个工具的全量 inputSchema(关闭两级披露的
+  // 索引形态),让 agent 在一次往返里拿到可调用契约,省掉逐工具下钻。只影响 mcp/http/
+  // tool 与 device tool 节点(其余 kind 本就在节点级带全量 schema)。
+  const index = opts.schemas !== true
   if (node.kind === 'builtin' && node.config?.kind === 'builtin') {
     const mod = builtins.get(node.config.module)
     if (mod) return mod.help(node.path)
@@ -73,21 +77,20 @@ export async function helpModelFor(
       node.path,
       { kind: node.kind, description: node.description },
       toolMarker.cmds ?? [],
-      { index: true },
+      { index },
     )
   }
   if (node.kind === 'mcp' || node.kind === 'http' || node.kind === 'tool') {
     const provider = await providerFor(node, ctx, deps)
     const raw = await upstreamTools(node, provider, deps, opts.refresh, opts.now)
     const { exposed } = virtualizeTools(node.virtualize, raw)
-    // 索引形态(两级披露):不含 inputSchema;全量 spec 走工具级 ~help。
+    // 默认索引形态(两级披露):不含 inputSchema,全量 spec 走工具级 ~help;
+    // schemas=1 时 index=false,节点级即内联全量 schema。
     return toolsToHelpModel(
       node.path,
       { kind: node.kind, description: node.description },
       exposed,
-      {
-        index: true,
-      },
+      { index },
     )
   }
   if (node.kind === 'device' && node.config?.kind === 'device') {

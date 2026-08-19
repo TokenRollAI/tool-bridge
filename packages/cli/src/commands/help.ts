@@ -11,6 +11,7 @@ interface HelpOpts {
   dsl?: boolean
   json?: boolean
   md?: boolean
+  schemas?: boolean
   sk?: string
 }
 
@@ -28,6 +29,10 @@ export function helpCommand(): Command {
     .argument('[path]', 'Tree path (default: root)')
     .option('--md', 'Force raw markdown (skip terminal rendering)')
     .option('--dsl', 'Render as compact Help DSL (Accept: text/plain)')
+    .option(
+      '--schemas',
+      'Inline every tool\'s full input schema at the node level (skips per-tool drill-down)',
+    )
     .action(async (pathArg: string | undefined, opts: HelpOpts) => {
       const asJson = Boolean(opts.json)
       await guard(asJson, async () => {
@@ -36,12 +41,13 @@ export function helpCommand(): Command {
         if (opts.md && asJson) throw new CliError('--md and --json are mutually exclusive')
         const target = resolveTarget(opts)
         const path = nodePath('~help', pathArg)
+        const query = opts.schemas ? { schemas: '1' } : undefined
         if (asJson) {
-          printJson(await apiJson<HelpJson>(target, { path }))
+          printJson(await apiJson<HelpJson>(target, { path, query }))
         } else if (opts.dsl) {
-          printLine(await apiText(target, { path, accept: 'text' }))
+          printLine(await apiText(target, { path, query, accept: 'text' }))
         } else {
-          const md = await apiText(target, { path, accept: 'markdown' })
+          const md = await apiText(target, { path, query, accept: 'markdown' })
           // --md 强制裸输出;否则 TTY → ANSI 富文本、管道/Agent → 裸 markdown(markdown.ts 判定)。
           if (opts.md) printLine(md.replace(/\n+$/, ''))
           else printMarkdown(md)

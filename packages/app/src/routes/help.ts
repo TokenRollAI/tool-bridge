@@ -65,8 +65,10 @@ export async function handleHelp(c: AppContext, env: RouteEnv): Promise<Response
   }
   const builtins = builtinsOf(store)
   const refresh = c.req.query('refresh') === '1'
+  const schemas = c.req.query('schemas') === '1'
   const model = await helpModelFor(node, registry, ctx, builtins, deps, {
     refresh,
+    schemas,
     now: new Date().toISOString(),
   })
   return renderHelp(await enrichHelp(model, path, store), rep)

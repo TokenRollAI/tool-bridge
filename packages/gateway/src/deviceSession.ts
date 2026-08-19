@@ -284,7 +284,7 @@ export class DeviceSession extends DurableObject<DeviceSessionEnv> {
     await ensureBootstrapped(store, this.env)
 
     const now = new Date().toISOString()
-    const { mountPath, keyId } = await processDeviceHello({
+    const { mountPath, keyId, searchIndexed } = await processDeviceHello({
       store,
       authorization: attachment.authorization,
       deviceIdHint: attachment.deviceIdHint,
@@ -294,6 +294,11 @@ export class DeviceSession extends DurableObject<DeviceSessionEnv> {
         ? {}
         : { search: new D1SearchIndex(this.env.TB_SEARCH) }),
     })
+    if (!searchIndexed) {
+      console.warn(
+        `[tool-bridge] device '${hello.deviceId}' mounted at ${mountPath} but its tools are NOT in the search index: registry exceeds the tool-search capacity (TOOL_SEARCH_AUDIT_NODE_LIMIT). The device is callable but won't appear in tool search until capacity frees up.`,
+      )
+    }
     await this.ctx.storage.put<DeviceMeta>(META_KEY, {
       deviceId: hello.deviceId,
       mountPath,
