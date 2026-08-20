@@ -187,6 +187,53 @@ describe('checkRegisterPath(反向注册路径规则)', () => {
       expect(r.allow).toBe(false)
       if (!r.allow) expect(r.error.code).toBe('conflict')
     })
+
+    it('持目标路径 admin scope 可 delete 他人注册的节点(绕过 conflict)', () => {
+      const r = checkRegisterPath({
+        sk: sk({ scopes: [{ pattern: '**', actions: ['register', 'admin'] }] }),
+        targetPath: 'device/build-01',
+        action: 'delete',
+        existing: { registeredBy: 'other-key' },
+      })
+      expect(r.allow).toBe(true)
+    })
+
+    it('持目标路径 admin scope 可接管(write)他人注册的节点', () => {
+      const r = checkRegisterPath({
+        sk: sk({ scopes: [{ pattern: '**', actions: ['register', 'admin'] }] }),
+        targetPath: 'docs/x',
+        action: 'write',
+        existing: { registeredBy: 'other-key' },
+      })
+      expect(r.allow).toBe(true)
+    })
+
+    it('仅有 register 而无 admin scope,仍对他人节点 conflict', () => {
+      const r = checkRegisterPath({
+        sk: sk({ scopes: [{ pattern: '**', actions: ['register'] }] }),
+        targetPath: 'docs/x',
+        action: 'delete',
+        existing: { registeredBy: 'other-key' },
+      })
+      expect(r.allow).toBe(false)
+      if (!r.allow) expect(r.error.code).toBe('conflict')
+    })
+
+    it('admin scope 不覆盖目标路径时,他人节点仍 conflict', () => {
+      const r = checkRegisterPath({
+        sk: sk({
+          scopes: [
+            { pattern: '**', actions: ['register'] },
+            { pattern: 'other/**', actions: ['admin'] },
+          ],
+        }),
+        targetPath: 'docs/x',
+        action: 'delete',
+        existing: { registeredBy: 'other-key' },
+      })
+      expect(r.allow).toBe(false)
+      if (!r.allow) expect(r.error.code).toBe('conflict')
+    })
   })
 
   describe('保留段:~ 开头段出现在路径中 → invalid_argument', () => {

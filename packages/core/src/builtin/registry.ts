@@ -123,7 +123,7 @@ function registryCmds(nodePath: TreePath): CmdSpec[] {
       name: 'delete',
       method: 'POST',
       path,
-      h: 'unmount a node (and reclaim empty auto-created parents)',
+      h: 'unmount a node (and reclaim empty auto-created parents); a node registered by another key can only be removed by its registrar or by a key holding the \'admin\' scope on that path',
       inputSchema: {
         type: 'object',
         properties: { path: { type: 'string', description: 'exact tree path' } },

@@ -44,6 +44,8 @@ Action：read、write、call、register、admin。scope 使用完整路径 glob�
 
 注册路径还受 SK 的 `registerPaths` 约束。调用者的 SK 不向上游透传；remote/plugin/provider 凭证从 SecretStore 引用解析。
 
+节点归属：`system/registry` 的 write/delete 若目标已被他人 SK 注册（且非 `system:auto` 物化），默认 `conflict`；持目标路径 `admin` scope 的调用者例外，可接管（write）或清理（delete）他人注册的节点——`register` scope 仍须通过。这是 admin 清理 stale/orphaned 节点的支持路径。
+
 ## Feedback
 
 Feedback 附着在具体节点或其工具子路径，根路径不接受反馈。`GET` 列表/详情需要目标路径的 read；`POST` 提交或投票还需要 call；`DELETE` 清理单条反馈需要 admin。read 不通过时按可见性规则返回 404。

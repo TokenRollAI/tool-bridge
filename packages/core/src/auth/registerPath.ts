@@ -6,6 +6,8 @@
  *   b. 未声明 registerPaths → 拒保留根(RESERVED_ROOTS + 部署追加)下的注册,其余放行;
  *   c. 两种情形都仍需 (path, 'register') scope 通过——registerPaths 是收紧,不是授权来源;
  *   d. 目标已存在且非本 SK 所注册(且非 system:auto 物化)→ conflict;同 SK 同路径幂等。
+ *      例外:持目标路径 (path, 'admin') scope 的调用者可接管/清理他人注册的节点,绕过 conflict
+ *      ——管理面清理路径(admin 对该路径有完全控制,删后重建等价于接管);(path,'register') 仍须通过。
  * 保留段(~ 开头段)出现在路径中 → invalid_argument(输入非法,先于其余判定)。
  */
 
@@ -71,7 +73,13 @@ export function checkRegisterPath(input: CheckRegisterPathInput): CheckRegisterP
   }
 
   // d:占用冲突——已存在且非本 SK、非 system:auto 物化。
-  if (existing && existing.registeredBy !== sk.id && existing.registeredBy !== SYSTEM_AUTO) {
+  // 持目标路径 admin scope 者例外:可接管/清理他人注册的节点(管理面清理路径)。
+  if (
+    existing
+    && existing.registeredBy !== sk.id
+    && existing.registeredBy !== SYSTEM_AUTO
+    && !checkScopes(sk.scopes, targetPath, 'admin')
+  ) {
     return {
       allow: false,
       error: new TBError('conflict', `path '${targetPath}' is registered by another key`),
