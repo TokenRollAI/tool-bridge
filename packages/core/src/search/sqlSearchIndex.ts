@@ -174,6 +174,58 @@ export interface SqlSearchStatement {
   readonly sql: string
 }
 
+/**
+ * 固定形态语句:参数个数与语义在 core 编排里写死,方言只提供 SQL 文本。
+ * 占位符语法(`?` / `$n`)与字符串函数由各方言自行决定。
+ */
+export interface SqlSearchStatements {
+  readonly bumpRevision: string
+  readonly completeRebuild: string
+  readonly deleteAllSnapshots: string
+  readonly deleteAllTools: string
+  readonly deleteSnapshot: string
+  readonly deleteSnapshotPrefix: string
+  readonly deleteTools: string
+  readonly deleteToolsPrefix: string
+  /** 单 path 的 path→digest 快照插入(replace 内联使用)。 */
+  readonly insertSnapshot: string
+  /** 读 meta 单例(revision/seeded/cursor_secret)。 */
+  readonly meta: string
+  /** replace 前置探测:本 path 的 digest、是否残留 source 行、已用节点数。 */
+  readonly pathState: string
+  /** 单 path 是否存在 source 行。 */
+  readonly present: string
+  /** path 或其子树是否存在 source 行。 */
+  readonly presentPrefix: string
+  /** 全量快照 digest,按 path 升序。 */
+  readonly snapshotDigests: string
+}
+
+/**
+ * SQL 方言:把与具体引擎绑定的 SQL 文本从数据库无关的编排里分出来。
+ *
+ * `SqlSearchIndex` 只认识本接口——候选查询 + 一组固定语句 + 建表 DDL。
+ * D1 与 better-sqlite3 同为 SQLite,共用 {@link sqliteSearchDialect};其它引擎
+ * (如 Postgres)实现自己的方言,替换全文检索与占位符语法。方言只管 SQL 文本,
+ * 具体驱动的同步/异步、批量预算、结果整形仍由 {@link SqlSearchDriver} 吸收。
+ */
+export interface SqlSearchDialect {
+  /**
+   * 把已 normalize 的 query 变成候选查询语句(含排序与分页)。
+   * prepare(分词、短/长词切分、方言专属语法)由各方言自理——SQLite 走 trigram
+   * FTS + 短词 LIKE,PG 走 ILIKE 子串;编排层只给 normalized query,不预设方言。
+   */
+  candidateStatement(
+    query: string,
+    limit: number,
+    offset: number,
+  ): SqlSearchStatement
+  /** 建表(幂等),元素不带尾分号。 */
+  readonly schemaStatements: readonly string[]
+  /** 编排直接下发的固定语句。 */
+  readonly statements: SqlSearchStatements
+}
+
 interface CandidateRow {
   id: number
   name: string
@@ -283,10 +335,40 @@ export function toolSearchInsertPayload(
   }))
 }
 
+/** SQLite/FTS5 方言:D1 与 better-sqlite3 共用。SQL 文本与占位符是 SQLite 形态。 */
+export const sqliteSearchDialect: SqlSearchDialect = {
+  candidateStatement: (query, limit, offset) =>
+    toolSearchCandidateStatement(prepareToolSearchQuery(query), limit, offset),
+  schemaStatements: TOOL_SEARCH_SCHEMA_STATEMENTS,
+  statements: {
+    bumpRevision: BUMP_REVISION_SQL,
+    completeRebuild: COMPLETE_REBUILD_SQL,
+    deleteAllSnapshots: DELETE_ALL_SNAPSHOTS_SQL,
+    deleteAllTools: DELETE_ALL_TOOLS_SQL,
+    deleteSnapshot: DELETE_SNAPSHOT_SQL,
+    deleteSnapshotPrefix: DELETE_SNAPSHOT_PREFIX_SQL,
+    deleteTools: DELETE_TOOLS_SQL,
+    deleteToolsPrefix: DELETE_TOOLS_PREFIX_SQL,
+    insertSnapshot: TOOL_SEARCH_INSERT_SNAPSHOT_SQL,
+    meta: META_SQL,
+    pathState: PATH_STATE_SQL,
+    present: PRESENT_SQL,
+    presentPrefix: PRESENT_PREFIX_SQL,
+    snapshotDigests: SNAPSHOT_DIGESTS_SQL,
+  },
+}
+
 export class SqlSearchIndex implements MutableSearchIndex {
   readonly capabilities: readonly SearchCapability[] = ['search']
 
-  constructor(protected readonly driver: SqlSearchDriver) {}
+  protected readonly dialect: SqlSearchDialect
+
+  constructor(
+    protected readonly driver: SqlSearchDriver,
+    dialect: SqlSearchDialect = sqliteSearchDialect,
+  ) {
+    this.dialect = dialect
+  }
 
   /** 容量 trigger 的 ABORT 在各驱动里错误形状不同,统一按标记串归一。 */
   private async writeOrCapacity(statements: readonly SqlSearchStatement[]): Promise<void> {
@@ -301,7 +383,7 @@ export class SqlSearchIndex implements MutableSearchIndex {
   }
 
   private async meta(): Promise<MetaRow> {
-    const row = await this.driver.first<MetaRow>({ params: [], sql: META_SQL })
+    const row = await this.driver.first<MetaRow>({ params: [], sql: this.dialect.statements.meta })
     if (row === null) throw new TBError('internal', '工具搜索 meta 缺失')
     return row
   }
@@ -309,7 +391,7 @@ export class SqlSearchIndex implements MutableSearchIndex {
   private async snapshotDigests(): Promise<Map<TreePath, string>> {
     const rows = await this.driver.all<{ digest: string, path: string }>({
       params: [],
-      sql: SNAPSHOT_DIGESTS_SQL,
+      sql: this.dialect.statements.snapshotDigests,
     })
     return new Map(rows.map(row => [row.path, row.digest]))
   }
@@ -329,7 +411,7 @@ export class SqlSearchIndex implements MutableSearchIndex {
     await this.driver.ensureSchema()
     const current = await this.driver.first<PathStateRow>({
       params: [canonical, canonical],
-      sql: PATH_STATE_SQL,
+      sql: this.dialect.statements.pathState,
     })
     const digest = records.length === 0 ? null : toolSearchSnapshotDigest(records)
     // 快照未实质变化(含"本来就空、现在还空")→ 不 bump revision,避免无谓失效全部 cursor。
@@ -350,14 +432,15 @@ export class SqlSearchIndex implements MutableSearchIndex {
     }
     const inserts = this.driver.insertRecords(records)
     this.driver.assertInsertBudget?.(inserts.length)
+    const statements = this.dialect.statements
     await this.writeOrCapacity([
-      { params: [canonical], sql: DELETE_TOOLS_SQL },
+      { params: [canonical], sql: statements.deleteTools },
       ...inserts,
-      { params: [canonical], sql: DELETE_SNAPSHOT_SQL },
+      { params: [canonical], sql: statements.deleteSnapshot },
       ...(digest === null
         ? []
-        : [{ params: [canonical, digest], sql: TOOL_SEARCH_INSERT_SNAPSHOT_SQL }]),
-      { params: [], sql: BUMP_REVISION_SQL },
+        : [{ params: [canonical, digest], sql: statements.insertSnapshot }]),
+      { params: [], sql: statements.bumpRevision },
     ])
   }
 
@@ -366,13 +449,14 @@ export class SqlSearchIndex implements MutableSearchIndex {
     await this.driver.ensureSchema()
     const current = await this.driver.first<{ present: number }>({
       params: [canonical],
-      sql: PRESENT_SQL,
+      sql: this.dialect.statements.present,
     })
     if (current === null) return
+    const statements = this.dialect.statements
     await this.driver.write([
-      { params: [canonical], sql: DELETE_TOOLS_SQL },
-      { params: [canonical], sql: DELETE_SNAPSHOT_SQL },
-      { params: [], sql: BUMP_REVISION_SQL },
+      { params: [canonical], sql: statements.deleteTools },
+      { params: [canonical], sql: statements.deleteSnapshot },
+      { params: [], sql: statements.bumpRevision },
     ])
   }
 
@@ -382,13 +466,14 @@ export class SqlSearchIndex implements MutableSearchIndex {
     const prefixParams = [canonical, canonical, canonical]
     const current = await this.driver.first<{ present: number }>({
       params: prefixParams,
-      sql: PRESENT_PREFIX_SQL,
+      sql: this.dialect.statements.presentPrefix,
     })
     if (current === null) return
+    const statements = this.dialect.statements
     await this.driver.write([
-      { params: prefixParams, sql: DELETE_TOOLS_PREFIX_SQL },
-      { params: prefixParams, sql: DELETE_SNAPSHOT_PREFIX_SQL },
-      { params: [], sql: BUMP_REVISION_SQL },
+      { params: prefixParams, sql: statements.deleteToolsPrefix },
+      { params: prefixParams, sql: statements.deleteSnapshotPrefix },
+      { params: [], sql: statements.bumpRevision },
     ])
   }
 
@@ -404,12 +489,13 @@ export class SqlSearchIndex implements MutableSearchIndex {
     const inserts = this.driver.insertRecords(records)
     const snapshots = this.driver.insertSnapshots(desired)
     this.driver.assertInsertBudget?.(inserts.length + snapshots.length)
+    const statements = this.dialect.statements
     await this.writeOrCapacity([
-      { params: [], sql: DELETE_ALL_TOOLS_SQL },
-      { params: [], sql: DELETE_ALL_SNAPSHOTS_SQL },
+      { params: [], sql: statements.deleteAllTools },
+      { params: [], sql: statements.deleteAllSnapshots },
       ...inserts,
       ...snapshots,
-      { params: [], sql: COMPLETE_REBUILD_SQL },
+      { params: [], sql: statements.completeRebuild },
     ])
   }
 
@@ -429,7 +515,7 @@ export class SqlSearchIndex implements MutableSearchIndex {
     )
     const limit = Math.min(normalizeToolSearchLimit(opts?.limit), TOOL_SEARCH_BATCH_LIMIT)
     const rows = await this.driver.all<CandidateRow>(
-      toolSearchCandidateStatement(prepareToolSearchQuery(normalized), limit, offset),
+      this.dialect.candidateStatement(normalized, limit, offset),
     )
     // 多取一条只为判断 hasMore,不进入返回页。
     const hasMore = rows.length > limit
