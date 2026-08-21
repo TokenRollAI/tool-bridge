@@ -88,6 +88,15 @@ export class PgStateStore implements StateStore {
     `
   }
 
+  async putIfAbsent(key: string, value: unknown): Promise<boolean> {
+    // ON CONFLICT DO NOTHING 原子:count=0 即已存在(输者),不覆盖。
+    const result = await this.sql`
+      INSERT INTO tb_kv (key, value) VALUES (${key}, ${this.sql.json(value as never)})
+      ON CONFLICT (key) DO NOTHING
+    `
+    return result.count > 0
+  }
+
   async delete(key: string): Promise<void> {
     await this.sql`DELETE FROM tb_kv WHERE key = ${key}`
   }

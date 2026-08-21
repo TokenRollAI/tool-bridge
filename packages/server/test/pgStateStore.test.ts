@@ -155,6 +155,14 @@ suite('PgStateStore 契约(vs MemoryStateStore)', () => {
       return await store.get('v')
     })
   })
+
+  it('putIfAbsent:首写 true;已存在 false 且不覆盖旧值', async () => {
+    await contract('pia', async (store) => {
+      const first = await store.putIfAbsent?.('once', 'winner')
+      const second = await store.putIfAbsent?.('once', 'loser')
+      return { first, second, value: await store.get('once') }
+    })
+  })
 })
 
 suite('PG 持久化(重连同一 schema)', () => {

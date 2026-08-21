@@ -25,6 +25,14 @@ export interface StateStore {
     opts?: { cursor?: string, limit?: number },
   ): Promise<{ cursor?: string, items: Array<{ key: string, value: unknown }> }>
   put(key: string, value: unknown): Promise<void>
+  /**
+   * 可选原子原语:key 不存在则写入并返回 true;已存在则不覆盖并返回 false。
+   * 用途是多副本/多 isolate 并发引导的 winner-takes-all 去重(如 Admin SK 铸造)。
+   * SQL 后端原子实现;Workers KV 最终一致且无 CAS,**不实现**此方法——调用方必须
+   * 容忍回退到非原子的 get-miss→put,并保证重复写幂等或后果可接受。
+   * 可选而非必选:必选会破坏 SDK 消费者已实现的自定义 StateStore。
+   */
+  putIfAbsent?(key: string, value: unknown): Promise<boolean>
 }
 
 export const KEY_SK_HASH = 'sk:h:'
@@ -62,6 +70,12 @@ export class MemoryStateStore implements StateStore {
 
   async put(key: string, value: unknown): Promise<void> {
     this.m.set(key, value)
+  }
+
+  async putIfAbsent(key: string, value: unknown): Promise<boolean> {
+    if (this.m.has(key)) return false
+    this.m.set(key, value)
+    return true
   }
 
   async delete(key: string): Promise<void> {

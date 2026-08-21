@@ -129,6 +129,14 @@ describe('SqliteStateStore 契约(vs MemoryStateStore)', () => {
       return await store.get('v')
     })
   })
+
+  it('putIfAbsent:首写 true;已存在 false 且不覆盖旧值', async () => {
+    await contract(async (store) => {
+      const first = await store.putIfAbsent?.('once', 'winner')
+      const second = await store.putIfAbsent?.('once', 'loser')
+      return { first, second, value: await store.get('once') }
+    })
+  })
 })
 
 describe('SQLite 持久化(重开同一 db 文件)', () => {

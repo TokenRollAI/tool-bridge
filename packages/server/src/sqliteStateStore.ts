@@ -90,6 +90,14 @@ export class SqliteStateStore implements StateStore {
     this.stmtPut.run(key, JSON.stringify(value))
   }
 
+  async putIfAbsent(key: string, value: unknown): Promise<boolean> {
+    // INSERT OR IGNORE 原子:changes=0 即已存在(输者),不覆盖。
+    const info = this.db
+      .prepare('INSERT OR IGNORE INTO kv (key, value) VALUES (?, ?)')
+      .run(key, JSON.stringify(value))
+    return info.changes > 0
+  }
+
   async delete(key: string): Promise<void> {
     this.stmtDelete.run(key)
   }
