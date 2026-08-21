@@ -47,6 +47,12 @@
 | SDK device 多运行时边界 | [memory/reflections/sdk-device-runtime-boundary.md](memory/reflections/sdk-device-runtime-boundary.md) |
 | 多副本部署产品化与 CF 发布路径合流 | [memory/reflections/multi-deploy-productionization.md](memory/reflections/multi-deploy-productionization.md) |
 
+## 待拍板 decision
+
+| 主题 | 文档 |
+|---|---|
+| Cloudflare 权威状态 KV→D1(proposed) | [memory/decisions/adr-001-kv-to-d1-authoritative-state.md](memory/decisions/adr-001-kv-to-d1-authoritative-state.md) |
+
 ## 维护边界
 
 - `must/` 不记录精确版本、测试数、URL、资源 ID、登录状态或某台机器的工作树。
