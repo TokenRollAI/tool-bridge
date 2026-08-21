@@ -54,10 +54,27 @@ Compose 默认值仅用于本机闭环，不是部署模板。交付前至少验
 
 部署前必须知道的三个限制：
 
-- **ObjectStore 仍是容器本地 FS**，落在 `TB_DATA_DIR`。context 的 `$ref` 大对象因此不随 PG 共享：容器重建即丢，多副本之间也互不可见。只用工具调用与树管理不受影响；依赖 `$ref` 大对象就得挂持久卷并保持单副本。
+- **ObjectStore 缺省是容器本地 FS**（落在 `TB_DATA_DIR`），此时 `$ref` 大对象容器重建即丢、多副本互不可见。配 `TB_OBJECT_STORE_*` 换成 S3/R2 即可外置，见下节。
 - **设备 WebSocket 连接是进程内状态**（`DeviceHub` 的 `Map`）。多副本下设备只连在其中一个副本上，HTTP 调用打到别的副本会找不到该设备。要用设备通道就保持单副本，或在平台侧做粘性路由。
 - **首次引导需要 `TB_BOOTSTRAP_ADMIN_SK`**，缺失时 fail closed 拒绝启动。平台上表现为容器反复重启，日志有明确原因。
 
-结论：**单副本 + 托管 PG 的形态可以直接部署**；要横向扩容，得先把 ObjectStore 换成 S3/R2 并把设备通道外置，这两项目前都没做。
+结论：**单副本 + 托管 PG + S3 对象存储的形态可以直接部署，且容器可无状态重建**。要横向扩容到多副本，剩下的唯一阻碍是设备 WebSocket 的进程内状态。
+
+## 平台对象存储（S3 / R2）
+
+配齐这四项即用 S3 兼容端点，缺省回退本地 FS：
+
+```
+TB_OBJECT_STORE_ENDPOINT=https://<account>.r2.cloudflarestorage.com
+TB_OBJECT_STORE_BUCKET=tb-objects
+TB_OBJECT_STORE_ACCESS_KEY_ID=...
+TB_OBJECT_STORE_SECRET_ACCESS_KEY=...
+TB_OBJECT_STORE_REGION=auto          # 可选，缺省 auto（R2 约定；AWS 端点应显式给区域）
+```
+
+- **四项必须齐全，缺一即拒绝启动。** 半套凭证静默回退本地 FS 的话，运维以为对象在 S3、实际写进容器层，容器重建即丢——这类错误只在故障时暴露，代价远高于启动即拒。
+- 配上后 `$ref` 走 **S3 presign 直连**，大对象下载不再穿过网关进程（本地 FS 无 presign，只能走 `/~ref` 中转）。
+- 这是**启动期基础设施配置**，不在 Dashboard 里改：运行时换端点会让已写入的 `$ref` 指向失效。需要按节点用不同存储时，走 `kind: 'context'` 节点自己的 S3 配置（那个本就可经控制面管理）。
+- 与 `TB_DATABASE_URL` 组合即完整无状态形态：状态在 PG、对象在 S3，换全新容器（空 `TB_DATA_DIR`）仍能读回一切。这一条有集成测试覆盖。
 
 Cloudflare 专属的 KV/R2/D1、Durable Object 与 Wrangler 配置不得下沉进 server；Node 的 SQLite/PG/文件语义也不得反向泄漏进 app。

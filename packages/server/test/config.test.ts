@@ -38,6 +38,51 @@ describe('configFromEnv 端口解析', () => {
   })
 })
 
+const S3_ENV = {
+  TB_OBJECT_STORE_ACCESS_KEY_ID: 'ak',
+  TB_OBJECT_STORE_BUCKET: 'tb-objects',
+  TB_OBJECT_STORE_ENDPOINT: 'https://s3.example.com',
+  TB_OBJECT_STORE_SECRET_ACCESS_KEY: 'sk',
+}
+
+describe('configFromEnv 平台对象存储', () => {
+  it('缺省不带 objectStore(走本地 FS)', () => {
+    expect(configFromEnv({ ...base }).objectStore).toBeUndefined()
+  })
+
+  it('四项齐全时解析出配置', () => {
+    expect(configFromEnv({ ...base, ...S3_ENV }).objectStore).toEqual({
+      accessKeyId: 'ak',
+      bucket: 'tb-objects',
+      endpoint: 'https://s3.example.com',
+      secretAccessKey: 'sk',
+    })
+  })
+
+  it('region 可选,给了就带上', () => {
+    const config = configFromEnv({ ...base, ...S3_ENV, TB_OBJECT_STORE_REGION: 'us-east-1' })
+    expect(config.objectStore?.region).toBe('us-east-1')
+  })
+
+  /**
+   * 半套凭证必须 fail closed。静默回退本地 FS 的话运维以为对象在 S3、实际写进容器层,
+   * 容器重建即丢且多副本互不可见 —— 这类错误在故障时才暴露,代价远高于启动即拒。
+   */
+  it.each(Object.keys(S3_ENV))('缺 %s 时拒绝启动而不是静默回退', (omitted) => {
+    const partial = Object.fromEntries(
+      Object.entries(S3_ENV).filter(([key]) => key !== omitted),
+    )
+    expect(() => configFromEnv({ ...base, ...partial })).toThrow(/对象存储配置不完整/)
+  })
+
+  it('报错点明缺哪一项', () => {
+    expect(() => configFromEnv({
+      ...base,
+      TB_OBJECT_STORE_ENDPOINT: 'https://s3.example.com',
+    })).toThrow(/TB_OBJECT_STORE_BUCKET/)
+  })
+})
+
 describe('configFromEnv 后端选择', () => {
   it('缺省不带 databaseUrl(走 SQLite)', () => {
     expect(configFromEnv({ ...base }).databaseUrl).toBeUndefined()

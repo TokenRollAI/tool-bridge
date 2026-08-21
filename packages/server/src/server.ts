@@ -9,8 +9,8 @@
  */
 
 import type * as http from 'node:http'
+import { createS3ObjectStore, createTbApp, runBootstrap, type TbAppDeps } from '@tool-bridge/app'
 import { type MutableSearchIndex, SecretStoreImpl, type StateStore } from '@tool-bridge/core'
-import { createTbApp, runBootstrap, type TbAppDeps } from '@tool-bridge/app'
 import { serve, type ServerType } from '@hono/node-server'
 import postgres, { type Sql } from 'postgres'
 import { mkdirSync } from 'node:fs'
@@ -122,7 +122,11 @@ export function createTbServer(config: ServerConfig): TbServer {
   const state = backends.state.value
   const search = backends.search.value
   const secrets = new SecretStoreImpl(state, config.encryptionKey)
-  const objects = createDataObjectStore(config.dataDir)
+  // 平台对象存储:配了 S3/R2 就用它(可无状态横向扩容、支持 presign 直连),
+  // 否则回退 dataDir 下的本地 FS(单副本;容器重建即丢)。
+  const objects = config.objectStore === undefined
+    ? createDataObjectStore(config.dataDir)
+    : createS3ObjectStore(config.objectStore, { allowInsecure: config.allowInsecureHttp })
   const hub = new DeviceHub({
     store: state,
     search,

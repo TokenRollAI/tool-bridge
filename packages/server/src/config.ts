@@ -29,7 +29,7 @@ export interface ServerConfig {
   canonicalOrigin?: string
   /**
    * Postgres 连接串(TB_DATABASE_URL)。给出则 StateStore 与 SearchIndex 都走 PG
-   * (ILIKE 子串检索,无扩展依赖);缺省回退到 dataDir 下的 SQLite。ObjectStore 始终用 fs。
+   * (ILIKE 子串检索,无扩展依赖);缺省回退到 dataDir 下的 SQLite。
    */
   databaseUrl?: string
   /** SQLite 库与 fs 对象根所在目录(state.sqlite3 + objects/)。 */
@@ -39,6 +39,18 @@ export interface ServerConfig {
   /** SecretStore 主密钥 + $ref 中转 token 签名密钥(base64url 32B)。 */
   encryptionKey?: string
   host: string
+  /**
+   * 平台对象存储(context `$ref` 大对象落点)。给出则用 S3/R2 兼容端点,
+   * 缺省回退 dataDir 下的本地 FS。配 S3 后容器可无状态横向扩容 —— FS 落点
+   * 在多副本间互不可见、容器重建即丢。
+   */
+  objectStore?: {
+    accessKeyId: string
+    bucket: string
+    endpoint: string
+    region?: string
+    secretAccessKey: string
+  }
   /**
    * 进程内插件装配表(binding 名 → fetch handler)。缺省时 bin 入口装配**全量内置目录**
    * (见 `main.ts`);程序化嵌入方可给自己的表来覆盖或裁剪。
@@ -104,6 +116,34 @@ export function configFromEnv(env: NodeJS.ProcessEnv = process.env): ServerConfi
   if (env.TB_UI_DIR !== undefined && env.TB_UI_DIR.length > 0) config.uiDir = env.TB_UI_DIR
   if (env.TB_DATABASE_URL !== undefined && env.TB_DATABASE_URL.length > 0) {
     config.databaseUrl = env.TB_DATABASE_URL
+  }
+  // 平台对象存储:四项必给,缺一即 fail closed —— 半套凭证静默回退到本地 FS 的话,
+  // 运维以为对象在 S3、实际写进容器层,重建即丢且多副本互不可见。
+  const s3Vars = [
+    ['TB_OBJECT_STORE_ENDPOINT', env.TB_OBJECT_STORE_ENDPOINT],
+    ['TB_OBJECT_STORE_BUCKET', env.TB_OBJECT_STORE_BUCKET],
+    ['TB_OBJECT_STORE_ACCESS_KEY_ID', env.TB_OBJECT_STORE_ACCESS_KEY_ID],
+    ['TB_OBJECT_STORE_SECRET_ACCESS_KEY', env.TB_OBJECT_STORE_SECRET_ACCESS_KEY],
+  ] as const
+  const present = s3Vars.filter(([, value]) => value !== undefined && value.length > 0)
+  if (present.length > 0) {
+    if (present.length < s3Vars.length) {
+      const missing = s3Vars
+        .filter(([, value]) => value === undefined || value.length === 0)
+        .map(([name]) => name)
+      throw new Error(
+        `平台对象存储配置不完整(给了 ${present.length}/${s3Vars.length} 项),缺少:${missing.join(', ')}`,
+      )
+    }
+    config.objectStore = {
+      accessKeyId: env.TB_OBJECT_STORE_ACCESS_KEY_ID as string,
+      bucket: env.TB_OBJECT_STORE_BUCKET as string,
+      endpoint: env.TB_OBJECT_STORE_ENDPOINT as string,
+      secretAccessKey: env.TB_OBJECT_STORE_SECRET_ACCESS_KEY as string,
+      ...(env.TB_OBJECT_STORE_REGION !== undefined && env.TB_OBJECT_STORE_REGION.length > 0
+        ? { region: env.TB_OBJECT_STORE_REGION }
+        : {}),
+    }
   }
   if (env.TB_BOOTSTRAP_ADMIN_SK !== undefined && env.TB_BOOTSTRAP_ADMIN_SK.length > 0) {
     config.adminSk = env.TB_BOOTSTRAP_ADMIN_SK
