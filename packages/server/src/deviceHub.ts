@@ -36,6 +36,13 @@ import {
   SearchSynchronizer,
 } from '@tool-bridge/app'
 import { type WebSocket, WebSocketServer } from 'ws'
+import type { DeviceRouter } from './deviceRouter'
+
+/** router 回调本副本执行设备调用的签名。 */
+export type DeviceLocalCall = (
+  deviceId: string,
+  req: DeviceInvokeRequest,
+) => Promise<DeviceCallResult>
 
 export const DEVICE_WS_PATH = '/system/device/ws'
 const KEY_DEVICE_META = 'devicemeta:'
@@ -93,19 +100,34 @@ export class DeviceHub {
   private readonly connections = new Set<Conn>()
   private readonly reclaimTimers = new Map<string, NodeJS.Timeout>()
   private heartbeat: NodeJS.Timeout | undefined
+  /** 多副本路由;缺省(单副本)时所有跨副本逻辑短路,行为与之前完全一致。 */
+  private router: DeviceRouter | undefined
 
   constructor(opts: {
     heartbeatMs?: number
     reclaimSec: number
+    /** 多副本部署的调用路由工厂;拿到 onLocalCall 回调后构造(避免循环依赖)。 */
+    router?: (onLocalCall: DeviceLocalCall) => DeviceRouter
     search?: MutableSearchIndex
     store: StateStore
   }) {
     this.store = opts.store
     this.search = opts.search
     this.reclaimSec = opts.reclaimSec
+    this.router = opts.router?.(
+      async (deviceId, req) => await this.invokeLocal(deviceId, req),
+    )
     const heartbeatMs = opts.heartbeatMs ?? DEFAULT_HEARTBEAT_MS
     this.heartbeat = setInterval(() => this.pingConnections(), heartbeatMs)
     this.heartbeat.unref?.()
+  }
+
+  /**
+   * 启动多副本路由(订阅本副本频道 + 路由续期)。单副本时是 no-op。
+   * 必须在开始服务前完成:订阅没建好时转发进来的调用会丢。
+   */
+  async startRouter(): Promise<void> {
+    await this.router?.start()
   }
 
   /** 挂到 http.Server 的 'upgrade' 事件(仅处理 DEVICE_WS_PATH,其余 404)。 */
@@ -120,8 +142,27 @@ export class DeviceHub {
     })
   }
 
-  /** DeviceChannel.invoke:HTTP→WS 调用转发(无活连接 → deviceOffline)。 */
+  /**
+   * DeviceChannel.invoke:HTTP→WS 调用转发。
+   *
+   * 本副本持有该设备 → 直接走本地 socket(单副本部署恒走这条,零额外开销)。
+   * 本地没有但配了 router → 问路由表并转发给持有者副本(socket 不可序列化,
+   * 只能把调用送到 socket 所在进程)。都没有 → deviceOffline。
+   */
   async invoke(deviceId: string, req: DeviceInvokeRequest): Promise<unknown> {
+    if (this.activeByDevice.has(deviceId)) return await this.invokeLocal(deviceId, req)
+    const offline: DeviceCallResult = { ok: false, error: TBError.deviceOffline().toJSON() }
+    if (this.router === undefined) return offline
+    return (await this.router.forward(deviceId, req)) ?? offline
+  }
+
+  /**
+   * 只走本副本 socket 的调用执行。
+   *
+   * router 收到转发来的调用时回调这里 —— **不能**回调 `invoke`:本地连接刚断时
+   * 那会再次查路由并转发,在两个副本间弹来弹去。这里没有连接就直接 offline。
+   */
+  private async invokeLocal(deviceId: string, req: DeviceInvokeRequest): Promise<DeviceCallResult> {
     const offline: DeviceCallResult = { ok: false, error: TBError.deviceOffline().toJSON() }
     const conn = this.activeByDevice.get(deviceId)
     if (conn === undefined) return offline
@@ -171,6 +212,10 @@ export class DeviceHub {
         if (!isDeviceMeta(item.value)) continue
         const meta = item.value
         if (this.activeByDevice.has(meta.deviceId)) continue
+        // 多副本下别的副本可能正持有该设备:那不是孤儿,别把它标记下线或排回收。
+        if (this.router !== undefined && await this.router.isOnlineAnywhere(meta.deviceId)) {
+          continue
+        }
         if (meta.disconnectedAt === undefined) {
           // 崩溃态:进程重启后无活连接却 meta 无 disconnectedAt,说明上次没走 onClose。
           // 按"此刻断线"起算回收,并同步把 registry 的 online 翻 false——否则树会一直谎报
@@ -201,6 +246,10 @@ export class DeviceHub {
     for (const conn of this.connections) conn.ws.terminate()
     this.connections.clear()
     this.activeByDevice.clear()
+    // 主动释放路由条目并断开 Redis:不等 TTL 过期,让别的副本立刻知道这些设备已不在此。
+    const router = this.router
+    this.router = undefined
+    await router?.close().catch(() => {})
     await new Promise<void>(resolve => this.wss.close(() => resolve()))
   }
 
@@ -304,6 +353,9 @@ export class DeviceHub {
     const prev = this.activeByDevice.get(conn.deviceId)
     if (prev !== undefined && prev !== conn) prev.ws.close(1000, 'replaced')
     this.activeByDevice.set(conn.deviceId, conn)
+    // 声明所有权要在 accept 之前:accept 一发,调用随时可能从任意副本打进来。
+    // 路由不可用不阻断设备接入 —— 本副本直连仍可用,只是别的副本转发不过来。
+    await this.router?.claim(conn.deviceId).catch(() => {})
     conn.session.accept(mountPath)
   }
 
@@ -313,6 +365,8 @@ export class DeviceHub {
     this.connections.delete(conn)
     if (this.activeByDevice.get(conn.deviceId) !== conn) return
     this.activeByDevice.delete(conn.deviceId)
+    // 释放路由所有权(值匹配才删,不会误删顶替者刚写的条目)。
+    await this.router?.release(conn.deviceId).catch(() => {})
 
     const raw = await this.store.get(KEY_DEVICE_META + conn.deviceId)
     if (!isDeviceMeta(raw)) return
@@ -347,6 +401,16 @@ export class DeviceHub {
   private async reclaim(deviceId: string): Promise<void> {
     this.reclaimTimers.delete(deviceId)
     if (this.activeByDevice.has(deviceId)) return
+    // 多副本下"本副本没有"不等于"设备离线":设备可能已重连到别的副本。
+    // 只看本地 Map 会误删一个仍在线设备的整棵子树 —— 这是删数据的操作,必须查全局路由。
+    if (this.router !== undefined) {
+      try {
+        if (await this.router.isOnlineAnywhere(deviceId)) return
+      } catch {
+        // 路由查不通时保守跳过本次回收:宁可晚删,不可错删。
+        return
+      }
+    }
     const raw = await this.store.get(KEY_DEVICE_META + deviceId)
     if (!isDeviceMeta(raw)) return
     const searchSync = this.search === undefined

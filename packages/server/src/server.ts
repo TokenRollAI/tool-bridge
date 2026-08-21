@@ -14,14 +14,17 @@ import { type MutableSearchIndex, SecretStoreImpl, type StateStore } from '@tool
 import { serve, type ServerType } from '@hono/node-server'
 import postgres, { type Sql } from 'postgres'
 import { mkdirSync } from 'node:fs'
+import { hostname } from 'node:os'
 import { join } from 'node:path'
 import type { ServerConfig } from './config'
+import { RedisDeviceRouterBackend } from './redisDeviceRouter'
 import pkg from '../package.json' with { type: 'json' }
 import { SqliteSearchIndex } from './sqliteSearchIndex'
 import { SqliteStateStore } from './sqliteStateStore'
 import { createDataObjectStore } from './objects'
 import { PgSearchIndex } from './pgSearchIndex'
 import { PgStateStore } from './pgStateStore'
+import { DeviceRouter } from './deviceRouter'
 import { resolveUiAssets } from './assets'
 import { DeviceHub } from './deviceHub'
 
@@ -131,6 +134,16 @@ export function createTbServer(config: ServerConfig): TbServer {
     store: state,
     search,
     reclaimSec: config.deviceReclaimSec,
+    // 配了 Redis 才启用多副本路由;缺省单副本,设备调用恒走本地 socket。
+    ...(config.redisUrl === undefined
+      ? {}
+      : {
+          router: onLocalCall => new DeviceRouter(
+            config.replicaId ?? hostname(),
+            new RedisDeviceRouterBackend(config.redisUrl as string),
+            { onLocalCall },
+          ),
+        }),
   })
 
   const deps: TbAppDeps = {
@@ -166,6 +179,8 @@ export function createTbServer(config: ServerConfig): TbServer {
       // 两个后端各自就绪(PG 建表 / SQLite no-op);state 必须早于 runBootstrap 的读写。
       await backends.state.ensureReady()
       await backends.search.ensureReady()
+      // 多副本路由必须在开始服务前订阅完成,否则早期转发调用会丢。
+      await hub.startRouter()
       // fail closed:缺 TB_BOOTSTRAP_ADMIN_SK 时默认拒绝启动(不随机生成 Admin SK 写 stdout);
       // 仅 TB_ALLOW_INSECURE_BOOTSTRAP=true 的本地/一次性开发保留旧的随机生成+打印一次路径。
       await runBootstrap(state, {

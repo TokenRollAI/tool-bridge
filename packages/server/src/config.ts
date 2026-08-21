@@ -62,6 +62,14 @@ export interface ServerConfig {
    */
   pluginCatalog?: BuiltinCatalog
   port: number
+  /**
+   * 多副本设备通道路由的 Redis 连接串(TB_REDIS_URL)。
+   *
+   * 设备的 WebSocket 是活 socket、只存在于接受它的进程里,故多副本时打给"连在别的
+   * 副本上的设备"的调用必须跨副本转发。配上即启用路由表 + pub/sub 转发;
+   * 单副本部署不需要配(本地直连恒命中)。
+   */
+  redisUrl?: string
   refThresholdBytes?: number
   refTtlSec?: number
   remote: {
@@ -70,6 +78,11 @@ export interface ServerConfig {
     instanceId?: string
     maxHops: number
   }
+  /**
+   * 本副本标识(TB_REPLICA_ID),路由表的 value。缺省用 hostname —— 容器平台上
+   * 每个副本的 hostname 天然唯一;同机多进程需显式区分。
+   */
+  replicaId?: string
   toolCacheTtlSec?: number
   /** Dashboard 静态资源目录覆盖(缺省经 @tool-bridge/dashboard 包解析)。 */
   uiDir?: string
@@ -116,6 +129,12 @@ export function configFromEnv(env: NodeJS.ProcessEnv = process.env): ServerConfi
   if (env.TB_UI_DIR !== undefined && env.TB_UI_DIR.length > 0) config.uiDir = env.TB_UI_DIR
   if (env.TB_DATABASE_URL !== undefined && env.TB_DATABASE_URL.length > 0) {
     config.databaseUrl = env.TB_DATABASE_URL
+  }
+  if (env.TB_REDIS_URL !== undefined && env.TB_REDIS_URL.length > 0) {
+    config.redisUrl = env.TB_REDIS_URL
+  }
+  if (env.TB_REPLICA_ID !== undefined && env.TB_REPLICA_ID.length > 0) {
+    config.replicaId = env.TB_REPLICA_ID
   }
   // 平台对象存储:四项必给,缺一即 fail closed —— 半套凭证静默回退到本地 FS 的话,
   // 运维以为对象在 S3、实际写进容器层,重建即丢且多副本互不可见。

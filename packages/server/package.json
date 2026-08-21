@@ -49,6 +49,7 @@
     "aws4fetch": "catalog:",
     "better-sqlite3": "^12.6.0",
     "hono": "catalog:",
+    "ioredis": "^6.0.0",
     "postgres": "^3.4.9",
     "ws": "catalog:"
   },
