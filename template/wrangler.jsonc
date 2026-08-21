@@ -28,6 +28,16 @@
     "bindings": [{ "name": "TB_DEVICE", "class_name": "DeviceSession" }]
   },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["DeviceSession"] }],
+  // D1: FTS5/trigram tool-search index (`~search`). The deploy flow provisions the
+  // database and fills in the id, like the KV namespace above. Without this binding
+  // the gateway still works but exposes no search capability.
+  "d1_databases": [
+    {
+      "binding": "TB_SEARCH",
+      "database_name": "tool-bridge-search",
+      "database_id": "00000000-0000-0000-0000-000000000000"
+    }
+  ],
   // Dashboard static assets, copied from @tool-bridge/dashboard by
   // scripts/copy-ui.mjs (the dev/deploy scripts run it for you).
   // run_worker_first=true: every request enters the Worker first; the /ui route

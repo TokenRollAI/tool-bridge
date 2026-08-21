@@ -11,8 +11,8 @@
     "check": "tsc --noEmit"
   },
   "dependencies": {
-    "@tool-bridge/dashboard": "^0.13.0",
-    "@tool-bridge/gateway": "^0.9.0"
+    "@tool-bridge/dashboard": "^0.16.0",
+    "@tool-bridge/gateway": "^0.14.0"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20260818.1",
@@ -29,6 +29,9 @@
       },
       "TB_DEVICE": {
         "description": "One Durable Object per connected device (WebSocket hibernation)."
+      },
+      "TB_SEARCH": {
+        "description": "D1 database backing the global tool-search index (`~search`)."
       },
       "TB_BOOTSTRAP_ADMIN_SK": {
         "description": "Required. Generate once with `node -e \"console.log('tbk_'+require('crypto').randomBytes(32).toString('base64url'))\"`, save it in a password manager, and paste it here."
