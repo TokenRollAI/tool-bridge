@@ -14,6 +14,7 @@ x-healthcheck: &healthcheck
   start_period: 5s
 
 services:
+  # 状态后端 = SQLite(/data 卷)。默认栈,不需要 postgres 服务。
   gateway:
     image: tool-bridge-compose-gateway:local
     build:
@@ -35,6 +36,65 @@ services:
         - node
         - -e
         - "fetch('http://127.0.0.1:8787/healthz').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"
+
+  # 状态后端 = Postgres。`--profile pg` 才启用:
+  #
+  #   docker compose --profile pg up -d --build       # 起 postgres + gateway-pg
+  #   docker compose --profile pg run --rm smoke-pg   # 同一份 smoke 打到 PG 栈
+  #
+  # 用独立宿主端口(默认 8788),故可与 SQLite 栈同时运行、互不抢端口 —— 想对照两个
+  # 后端的行为时很方便。注意两者是**两套独立数据**:PG 栈不会带上 /data 卷里的树、
+  # SK 与 secret,会自己重新走一次引导。
+  gateway-pg:
+    image: tool-bridge-compose-gateway:local
+    build:
+      context: .
+      dockerfile: Dockerfile
+    init: true
+    profiles:
+      - pg
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      TB_ALLOW_INSECURE_HTTP: 'true'
+      TB_BOOTSTRAP_ADMIN_SK: ${TB_COMPOSE_ADMIN_SK:-tbk_compose_admin_000000000000}
+      TB_SECRET_ENCRYPTION_KEY: ${TB_COMPOSE_ENCRYPTION_KEY:-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA}
+      TB_DATABASE_URL: postgres://${TB_COMPOSE_PG_USER:-toolbridge}:${TB_COMPOSE_PG_PASSWORD:-toolbridge}@postgres:5432/${TB_COMPOSE_PG_DB:-toolbridge}
+    ports:
+      # 独立端口:与 SQLite 栈(8787)并存不冲突。
+      - '127.0.0.1:${TB_COMPOSE_GATEWAY_PG_PORT:-8788}:8787'
+    volumes:
+      # 状态在 PG,但 ObjectStore 始终是本地 FS —— $ref 大对象仍需要这个卷。
+      - gateway-pg-objects:/data
+    healthcheck:
+      <<: *healthcheck
+      start_period: 10s
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:8787/healthz').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"
+
+  postgres:
+    # 与 CI 及本地验证同一镜像。当前后端不需要任何扩展(检索是纯 ILIKE),
+    # 用 pgvector 变体只是为后续 pgvector 语义搜索留同一环境。
+    image: pgvector/pgvector:pg16
+    profiles:
+      - pg
+    environment:
+      POSTGRES_USER: ${TB_COMPOSE_PG_USER:-toolbridge}
+      POSTGRES_PASSWORD: ${TB_COMPOSE_PG_PASSWORD:-toolbridge}
+      POSTGRES_DB: ${TB_COMPOSE_PG_DB:-toolbridge}
+    expose:
+      - '5432'
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      <<: *healthcheck
+      test:
+        - CMD-SHELL
+        - pg_isready -U ${TB_COMPOSE_PG_USER:-toolbridge} -d ${TB_COMPOSE_PG_DB:-toolbridge}
 
   upstream:
     <<: *dev-image
@@ -117,5 +177,34 @@ services:
       TB_COMPOSE_PLUGIN_URL: http://plugin:8788
       TB_COMPOSE_UPSTREAM_URL: http://upstream:39001
 
+  # 同一份 smoke,只把目标指向 PG 后端的 gateway —— smoke 全程走 HTTP,
+  # 与状态后端无关,所以两条栈能共用同一套断言(这正是后端对等的验收方式)。
+  smoke-pg:
+    <<: *dev-image
+    init: true
+    restart: 'no'
+    profiles:
+      - pg
+    depends_on:
+      gateway-pg:
+        condition: service_healthy
+      plugin:
+        condition: service_healthy
+      upstream:
+        condition: service_healthy
+    command:
+      - /repo/node_modules/.bin/tsx
+      - /repo/packages/gateway/scripts/compose-smoke.ts
+    environment:
+      TB_COMPOSE_ADMIN_SK: ${TB_COMPOSE_ADMIN_SK:-tbk_compose_admin_000000000000}
+      TB_COMPOSE_APP_ID: ${TB_COMPOSE_APP_ID:-compose-app}
+      TB_COMPOSE_APP_SECRET: ${TB_COMPOSE_APP_SECRET:-compose-secret}
+      TB_COMPOSE_GATEWAY_URL: http://gateway-pg:8787
+      TB_COMPOSE_PLUGIN_TOKEN: ${TB_COMPOSE_PLUGIN_TOKEN:-tbp_compose_dev_token}
+      TB_COMPOSE_PLUGIN_URL: http://plugin:8788
+      TB_COMPOSE_UPSTREAM_URL: http://upstream:39001
+
 volumes:
   gateway-data:
+  gateway-pg-objects:
+  postgres-data:

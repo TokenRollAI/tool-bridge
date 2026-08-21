@@ -25,13 +25,39 @@ SDK 内嵌与 Node server 使用同一引导下界：首次启动没有显式 Ad
 ## Compose 开发栈
 
 ```bash
-pnpm compose:up
+pnpm compose:up      # SQLite 后端(默认栈,127.0.0.1:8787)
 pnpm compose:smoke
 pnpm compose:down
 ```
 
-需要清空本地卷时才执行 `pnpm compose:reset`；这会删除 Compose 数据，运行前先确认目标只是本地开发状态。
+Postgres 后端走 `pg` profile，映射到独立端口（默认 8788），可与 SQLite 栈并存对照：
+
+```bash
+pnpm compose:pg:up      # postgres + gateway-pg(127.0.0.1:8788)
+pnpm compose:pg:smoke   # 同一份 smoke 打到 PG 栈
+pnpm compose:pg:down
+```
+
+两条栈是**两套独立数据**：PG 栈不会带上 `/data` 卷里的树、SK 与 secret，会自己重新引导。`smoke` 全程走 HTTP、与状态后端无关，所以两边共用同一套断言——这正是后端对等的验收方式。
+
+需要清空本地卷时才执行 `pnpm compose:reset`；它会删除**两条栈**的所有卷（含 PG 数据），运行前先确认目标只是本地开发状态。
 
 Compose 默认值仅用于本机闭环，不是部署模板。交付前至少验证：冷启动、持久卷重启、Dashboard 静态资源、HTTP 工具调用、设备 WebSocket，以及缺 Admin SK 时拒绝启动。
+
+## 部署到容器 PaaS（Railway / Fly / Cloud Run / CF Container）
+
+镜像是单容器 + `EXPOSE 8787`，配 PG 后不再需要持久卷来存状态，因此适合这类平台。已就绪的部分：
+
+- 端口取 `TB_PORT`，缺省兜底平台注入的 `PORT`，最后才是 8787。
+- 状态与搜索都可外置到托管 PG（`TB_DATABASE_URL`），无扩展依赖，容器本身可无状态重启。
+- `TB_CANONICAL_ORIGIN` 把 OAuth `redirect_uri` 钉在规范域名，多域名接入（平台默认域 + 自定义域）必须设置。
+
+部署前必须知道的三个限制：
+
+- **ObjectStore 仍是容器本地 FS**，落在 `TB_DATA_DIR`。context 的 `$ref` 大对象因此不随 PG 共享：容器重建即丢，多副本之间也互不可见。只用工具调用与树管理不受影响；依赖 `$ref` 大对象就得挂持久卷并保持单副本。
+- **设备 WebSocket 连接是进程内状态**（`DeviceHub` 的 `Map`）。多副本下设备只连在其中一个副本上，HTTP 调用打到别的副本会找不到该设备。要用设备通道就保持单副本，或在平台侧做粘性路由。
+- **首次引导需要 `TB_BOOTSTRAP_ADMIN_SK`**，缺失时 fail closed 拒绝启动。平台上表现为容器反复重启，日志有明确原因。
+
+结论：**单副本 + 托管 PG 的形态可以直接部署**；要横向扩容，得先把 ObjectStore 换成 S3/R2 并把设备通道外置，这两项目前都没做。
 
 Cloudflare 专属的 KV/R2/D1、Durable Object 与 Wrangler 配置不得下沉进 server；Node 的 SQLite/PG/文件语义也不得反向泄漏进 app。
