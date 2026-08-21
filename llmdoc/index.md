@@ -32,7 +32,6 @@
 | npm 版本与发布 | [guides/npm-publish.md](guides/npm-publish.md) |
 | MCP 外部协议兼容 | [guides/mcp-upstream-pitfalls.md](guides/mcp-upstream-pitfalls.md) |
 | Durable Object WebSocket | [guides/do-websocket-hibernation.md](guides/do-websocket-hibernation.md) |
-| Workers KV 语义 | [guides/workers-kv-pitfalls.md](guides/workers-kv-pitfalls.md) |
 
 ## 本轮 reflection
 
@@ -47,11 +46,11 @@
 | SDK device 多运行时边界 | [memory/reflections/sdk-device-runtime-boundary.md](memory/reflections/sdk-device-runtime-boundary.md) |
 | 多副本部署产品化与 CF 发布路径合流 | [memory/reflections/multi-deploy-productionization.md](memory/reflections/multi-deploy-productionization.md) |
 
-## 待拍板 decision
+## decision
 
 | 主题 | 文档 |
 |---|---|
-| Cloudflare 权威状态 KV→D1(proposed) | [memory/decisions/adr-001-kv-to-d1-authoritative-state.md](memory/decisions/adr-001-kv-to-d1-authoritative-state.md) |
+| Cloudflare 权威状态 KV→D1(accepted,已实施) | [memory/decisions/adr-001-kv-to-d1-authoritative-state.md](memory/decisions/adr-001-kv-to-d1-authoritative-state.md) |
 
 ## 维护边界
 

@@ -226,7 +226,7 @@ Federation fails closed by default: an empty host allowlist permits no remote, H
 | **Docker (single container)** | SQLite + local filesystem + in-process WebSocket | 1 | Self-hosting, private networks, quick evaluation |
 | **Docker Compose** | PostgreSQL (+ optional S3/R2, Redis) | 1–2 (one machine) | Single-machine production, incl. an HA reference stack — see [`deploy/compose/`](deploy/compose/docker-compose.yml) |
 | **Kubernetes (Helm)** | PostgreSQL + S3/R2 + Redis → stateless multi-replica; or SQLite + PVC single replica | 1–N | Multi-replica production with rolling updates — see [`deploy/helm/tool-bridge/`](deploy/helm/tool-bridge) |
-| **Cloudflare Workers** | KV + R2 + D1 + Durable Objects | serverless | Edge deployment, low operations, long-lived device connections |
+| **Cloudflare Workers** | D1 + R2 + Durable Objects | serverless | Edge deployment, low operations, long-lived device connections |
 | **Embedded SDK** | Caller-injected stores and providers | — | Register local functions inside your own Node/Workers application |
 
 Horizontal scaling formula for the Node host: **PostgreSQL (`TB_DATABASE_URL`) + S3/R2 (`TB_OBJECT_STORE_*`) + Redis (`TB_REDIS_URL`) together make it a stateless multi-replica deployment**; with only the first two it is a single-replica stateless shape (containers can be recreated freely, but do not scale out). The Helm chart rejects dangerous combinations (such as `replicas>1 + SQLite`) at render time. Health probes: `/livez` (liveness), `/readyz` (readiness: backend connectivity plus early traffic removal during graceful shutdown), `/healthz` (version and catalog digest).
@@ -246,7 +246,7 @@ npm install -g @tool-bridge/cli
 tb init cloudflare --repo .
 ```
 
-The wizard logs into and selects an account, generates trust roots, provisions KV/R2/D1, builds and deploys, verifies `~help`, and saves a local profile. Use `--account-id <id> --yes` in non-interactive environments and `--domain tb.example.com` for a custom domain.
+The wizard logs into and selects an account, generates trust roots, provisions R2/D1, builds and deploys, verifies `~help`, and saves a local profile. Use `--account-id <id> --yes` in non-interactive environments and `--domain tb.example.com` for a custom domain.
 
 ### Embed in your own application
 
@@ -278,7 +278,7 @@ See [`packages/sdk/README.md`](packages/sdk/README.md) for a Node HTTP server, r
 - Invisible paths return 404 from `~help`, `~tree`, and invocation, avoiding existence leaks.
 - Upstream credentials enter the write-only SecretStore. Node config, logs, and read-only management responses do not reveal secret values.
 - Built-in plugins share the gateway's process privileges and use controlled outbound access. External plugins are descriptor- and health-checked during registration.
-- Workers KV has eventual-consistency windows for revocation and registry reads. Prefer the Node/SQLite host when state must be strongly consistent.
+- Authoritative state is strongly consistent on every host (Workers = D1, Node = SQLite/PG); SK revocation takes effect immediately.
 
 Example: issue a least-privilege SK.
 
@@ -296,7 +296,7 @@ tb sk create \
 | `packages/core` | Pure tree, auth, protocol, store, and builtin logic |
 | `packages/app` | Host-neutral Hono application and provider orchestration |
 | `packages/server` | Node/SQLite/filesystem/WebSocket host |
-| `packages/gateway` | Cloudflare KV/R2/D1/DO/Assets host |
+| `packages/gateway` | Cloudflare D1/R2/DO/Assets host |
 | `packages/cli` | `tb` CLI, device connection, and Cloudflare initialization |
 | `packages/dashboard` | Web management UI over the public API |
 | `packages/sdk` | Embedded instance, local providers, and reverse connection |

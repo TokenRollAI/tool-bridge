@@ -1,6 +1,8 @@
 # ADR-001:Cloudflare 宿主权威状态从 KV 迁往 D1
 
-状态:**proposed(待拍板)** · 提出:2026-08-21 · 影响:gateway(Workers 宿主)
+状态:**accepted(已实施)** · 提出/拍板:2026-08-21 · 影响:gateway(Workers 宿主)
+
+**拍板记录**:选项 A(全量迁 D1),pre-launch 无线上用户、零迁移负担,跳过前置量化直接实施(延迟观测留待真实部署验收)。共库问题在实施中按用户意见改判:**一个 D1 库(`tb-db`)、两个 binding(TB_STATE/TB_SEARCH)指向它** —— 分库唯一的实质理由(search rebuild 与认证热路径的写竞争)在控制面网关的真实量级下可忽略,而共库省一个云资源、省 provision 步骤、用户心智"一个库"收益是实打实的;binding 表达用途、库表达存储位置,将来要拆只动配置不动代码。state 表名 `tb_state_kv`(与 `tb_search_*` 共库自解释)。
 
 ## 背景与问题
 

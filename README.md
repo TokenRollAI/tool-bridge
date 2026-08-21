@@ -231,7 +231,7 @@ tb help teams/team-b/tools/search
 | **Docker 单容器** | SQLite + 本地文件系统 + 进程内 WebSocket | 1 | 自托管、内网、快速验证 |
 | **Docker Compose** | PostgreSQL(+ 可选 S3/R2、Redis) | 1–2(单机) | 单机生产、含 HA 参考栈,见 [`deploy/compose/`](deploy/compose/docker-compose.yml) |
 | **Kubernetes(Helm)** | PostgreSQL + S3/R2 + Redis → 无状态多副本;或 SQLite + PVC 单副本 | 1–N | 多副本生产、滚动更新,见 [`deploy/helm/tool-bridge/`](deploy/helm/tool-bridge) |
-| **Cloudflare Workers** | KV + R2 + D1 + Durable Objects | serverless | 边缘部署、低运维、设备长连接 |
+| **Cloudflare Workers** | D1 + R2 + Durable Objects | serverless | 边缘部署、低运维、设备长连接 |
 | **嵌入式 SDK** | 由调用方注入 store/provider | — | 在自己的 Node/Workers 应用里注册本地函数 |
 
 Node 宿主的横向扩容公式:**PG(`TB_DATABASE_URL`)+ S3/R2(`TB_OBJECT_STORE_*`)+ Redis(`TB_REDIS_URL`)三件配齐即无状态多副本**;只配前两件是"容器可随意重建、但别扩副本"的单副本无状态形态。Helm chart 会在渲染期直接拒绝危险组合(如 `replicas>1 + SQLite`)。健康探针:`/livez`(liveness)、`/readyz`(readiness,探后端连通 + 优雅关停时提前摘流量)、`/healthz`(版本与 catalog 对拍)。
@@ -251,7 +251,7 @@ npm install -g @tool-bridge/cli
 tb init cloudflare --repo .
 ```
 
-向导负责登录/选择账户、生成 trust roots、创建 KV/R2/D1、构建部署、验证 `~help` 并保存本机 profile。非交互环境使用 `--account-id <id> --yes`，自定义域使用 `--domain tb.example.com`。
+向导负责登录/选择账户、生成 trust roots、创建 R2/D1、构建部署、验证 `~help` 并保存本机 profile。非交互环境使用 `--account-id <id> --yes`，自定义域使用 `--domain tb.example.com`。
 
 ### 嵌入自己的应用
 
@@ -283,7 +283,7 @@ Node HTTP server、反向连接和自定义 store 说明见 [`packages/sdk/READM
 - 不可见路径在 `~help`、`~tree` 和调用中返回 404，避免泄露节点是否存在。
 - 上游密钥进入只写 SecretStore；节点配置、日志和只读管理响应不返回密钥值。
 - 内置 Plugin 与网关同进程同权，并使用受控出站；外部 Plugin 在注册时校验 descriptor 和健康状态。
-- Workers KV 的吊销和注册读取存在最终一致窗口；需要强一致状态时优先使用 Node/SQLite 宿主。
+- 三宿主的权威状态均为强一致后端(Workers=D1、Node=SQLite/PG),SK 吊销即时生效。
 
 签发最小权限 SK 的示例：
 
@@ -301,7 +301,7 @@ tb sk create \
 | `packages/core` | 树、授权、协议、store、builtin 等纯逻辑 |
 | `packages/app` | 宿主中立的 Hono 应用与 provider 编排 |
 | `packages/server` | Node/SQLite/文件/WebSocket 宿主 |
-| `packages/gateway` | Cloudflare KV/R2/D1/DO/Assets 宿主 |
+| `packages/gateway` | Cloudflare D1/R2/DO/Assets 宿主 |
 | `packages/cli` | `tb` CLI、设备连接与 Cloudflare 初始化 |
 | `packages/dashboard` | 使用公开 API 的 Web 管理面 |
 | `packages/sdk` | 嵌入式实例、本地 provider 与反向连接 |

@@ -1,6 +1,6 @@
 # Cloudflare 初始化、部署与验收
 
-Cloudflare 是一种宿主，不是业务真源。仓库中的 `packages/gateway/wrangler.jsonc` 必须保持账户中立：不提交 account ID、域名、KV/D1/R2 ID 或环境凭据。
+Cloudflare 是一种宿主，不是业务真源。仓库中的 `packages/gateway/wrangler.jsonc` 必须保持账户中立：不提交 account ID、域名、D1/R2 ID 或环境凭据。
 
 ## 推荐入口
 
@@ -22,7 +22,7 @@ pnpm --filter @tool-bridge/dashboard build
 pnpm --filter @tool-bridge/gateway run deploy
 ```
 
-`provision` 从环境读取账户与命名前缀，幂等创建 KV、R2、D1，并把本地 checkout 的部署目标写入 wrangler 配置。该写回含环境标识，不应作为通用模板提交。
+`provision` 从环境读取账户与命名前缀，幂等创建 R2 与一个 D1 库(TB_STATE/TB_SEARCH 两个 binding 指向它)，并把本地 checkout 的部署目标写入 wrangler 配置。该写回含环境标识，不应作为通用模板提交。
 
 ## gateway 双入口与三条发布路径
 
