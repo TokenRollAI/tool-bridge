@@ -86,6 +86,25 @@ export function registerPublicRoutes(app: TbHono, env: RouteEnv): void {
     })
   })
 
+  // GET /livez → 恒 200(进程活着即可;k8s liveness 的惯用名)。后端断连不算"死",
+  // 那是 /readyz 的职责——liveness 探后端会让编排器在 PG 抖动时错杀健康进程。
+  app.get('/livez', c => c.json({ live: true }))
+
+  // GET /readyz → 就绪探测,树外免认证(编排器无 SK)。宿主注入的 readiness 闭包探测
+  // 长连接后端并叠加 draining;未注入(Workers/嵌入宿主)恒 200。ready=false → 503,
+  // k8s/LB 据此摘流量。报告只含布尔与短语级 detail,不含凭证。
+  app.get('/readyz', async (c) => {
+    const probe = deps.readiness
+    if (probe === undefined) return c.json({ checks: {}, ready: true })
+    try {
+      const report = await probe()
+      return c.json(report, report.ready ? 200 : 503)
+    } catch {
+      // 探测器本身抛错 = 未就绪;不泄漏内部错误细节。
+      return c.json({ checks: {}, ready: false }, 503)
+    }
+  })
+
   // GET /~ref/<token> → 大对象中转下载,树外免认证(中转下载路由)。
   // 注册在认证中间件之前:token 本身即凭证(HMAC 限时签名);验签失败/过期一律 404 不泄露。
   app.get('/~ref/:token', c =>

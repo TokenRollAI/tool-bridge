@@ -9,7 +9,13 @@
  */
 
 import type * as http from 'node:http'
-import { createS3ObjectStore, createTbApp, runBootstrap, type TbAppDeps } from '@tool-bridge/app'
+import {
+  createS3ObjectStore,
+  createTbApp,
+  type ReadinessReport,
+  runBootstrap,
+  type TbAppDeps,
+} from '@tool-bridge/app'
 import { type MutableSearchIndex, SecretStoreImpl, type StateStore } from '@tool-bridge/core'
 import { serve, type ServerType } from '@hono/node-server'
 import postgres, { type Sql } from 'postgres'
@@ -35,6 +41,12 @@ export interface TbServer {
   search: MutableSearchIndex
   /** 引导(幂等)+ 孤儿设备回收排程 + 监听;返回实际端口(config.port=0 时由系统分配)。 */
   start(): Promise<{ port: number }>
+  /**
+   * 进入 draining:/readyz 立即转 503(编排器摘流量),但继续服务既有与新到请求。
+   * SIGTERM 处理器先调它、等一拍(TB_SHUTDOWN_DRAIN_SEC)再 close(),避免 k8s
+   * endpoint 摘除传播期间仍被路由过来的请求吃闭门羹。幂等。
+   */
+  startDraining(): void
   state: StateStore
 }
 
@@ -49,6 +61,8 @@ interface BackendResource<T> {
   close: () => Promise<void>
   /** 异步建表等就绪动作;必须早于任何读写(SQLite 构造时已建好,故为 no-op)。 */
   ensureReady: () => Promise<void>
+  /** 连通性探测(/readyz);缺省 = 无长连接可断(SQLite 进程内文件),恒视为 ok。 */
+  ping?: () => Promise<void>
   value: T
 }
 
@@ -65,6 +79,9 @@ function pgBackends(databaseUrl: string): {
     state: {
       value: state,
       ensureReady: async () => await state.ensureSchema(),
+      ping: async () => {
+        await sql`SELECT 1`
+      },
       close: async () => await sql.end({ timeout: 5 }),
     },
     search: {
@@ -130,21 +147,66 @@ export function createTbServer(config: ServerConfig): TbServer {
   const objects = config.objectStore === undefined
     ? createDataObjectStore(config.dataDir)
     : createS3ObjectStore(config.objectStore, { allowInsecure: config.allowInsecureHttp })
+  // Redis backend 提出来单独持有:readiness 探测要 ping 它,不能埋在 router 工厂闭包里。
+  const redisBackend = config.redisUrl === undefined
+    ? undefined
+    : new RedisDeviceRouterBackend(config.redisUrl)
   const hub = new DeviceHub({
     store: state,
     search,
     reclaimSec: config.deviceReclaimSec,
     // 配了 Redis 才启用多副本路由;缺省单副本,设备调用恒走本地 socket。
-    ...(config.redisUrl === undefined
+    ...(redisBackend === undefined
       ? {}
       : {
           router: onLocalCall => new DeviceRouter(
             config.replicaId ?? hostname(),
-            new RedisDeviceRouterBackend(config.redisUrl as string),
+            redisBackend,
             { onLocalCall },
           ),
         }),
   })
+
+  // draining:SIGTERM 后置位,/readyz 立即转 503;进程仍继续服务到 close()。
+  let draining = false
+
+  /** 单项探测:限时 1s——探针不能反过来拖垮进程(PG 挂起时探测也会挂起)。 */
+  const probeOne = async (fn: () => Promise<void>): Promise<{ detail?: string, ok: boolean }> => {
+    let timer: NodeJS.Timeout | undefined
+    try {
+      await Promise.race([
+        fn(),
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(() => reject(new Error('timeout after 1000ms')), 1000)
+          timer.unref?.()
+        }),
+      ])
+      return { ok: true }
+    } catch (err) {
+      return { ok: false, detail: err instanceof Error ? err.message : 'probe failed' }
+    } finally {
+      if (timer !== undefined) clearTimeout(timer)
+    }
+  }
+
+  const readiness = async (): Promise<ReadinessReport> => {
+    const checks: ReadinessReport['checks'] = {}
+    const probes: Array<Promise<void>> = []
+    const statePing = backends.state.ping
+    if (statePing !== undefined) {
+      probes.push(probeOne(statePing).then((r) => {
+        checks.state = r
+      }))
+    }
+    if (redisBackend !== undefined) {
+      probes.push(probeOne(async () => await redisBackend.ping()).then((r) => {
+        checks.redis = r
+      }))
+    }
+    await Promise.all(probes)
+    if (draining) checks.draining = { ok: false, detail: 'shutting down' }
+    return { checks, ready: !draining && Object.values(checks).every(c => c.ok) }
+  }
 
   const deps: TbAppDeps = {
     state,
@@ -155,6 +217,7 @@ export function createTbServer(config: ServerConfig): TbServer {
     allowInsecureHttp: config.allowInsecureHttp,
     objects: () => objects,
     device: hub,
+    readiness,
   }
   if (config.encryptionKey !== undefined) deps.encryptionKey = config.encryptionKey
   if (config.pluginBindings !== undefined) deps.pluginBindings = config.pluginBindings
@@ -195,14 +258,26 @@ export function createTbServer(config: ServerConfig): TbServer {
         hub.attach(server as http.Server)
       })
     },
+    startDraining(): void {
+      draining = true
+    },
     async close(): Promise<void> {
-      await hub.close()
+      // 顺序即关停语义:先停止接受新连接(既有请求继续跑完),再终止设备 WS,最后等
+      // HTTP 排空、关后端。反过来(旧序:先杀 hub)会出现"设备通道已死、HTTP 还在收
+      // 新请求"的窗口——期间到达的设备调用一律误报离线。
+      draining = true
+      let closed: Promise<void> | undefined
       if (server !== undefined) {
-        await new Promise<void>((resolve, reject) => {
-          server?.close(err => (err ? reject(err) : resolve()))
+        const s = server
+        closed = new Promise<void>((resolve, reject) => {
+          s.close(err => (err ? reject(err) : resolve()))
         })
-        server = undefined
+        // keep-alive 空闲连接会让 close 永远等不完;设备 WS 由 hub.close() 终止。
+        ;(s as http.Server).closeIdleConnections?.()
       }
+      await hub.close()
+      if (closed !== undefined) await closed
+      server = undefined
       // search 先关(可能依赖 state 侧的连接池),再关 state。
       await backends.search.close()
       await backends.state.close()

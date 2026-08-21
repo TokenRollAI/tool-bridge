@@ -54,6 +54,11 @@ export class RedisDeviceRouterBackend implements DeviceRouterBackend {
     await this.commands.publish(channel, payload)
   }
 
+  /** 就绪探测(/readyz):命令连接 PING 一次。断连时 ioredis 会抛/挂起,由调用方限时。 */
+  async ping(): Promise<void> {
+    await this.commands.ping()
+  }
+
   async subscribe(channel: string, handler: (payload: string) => void): Promise<void> {
     this.handlers.set(channel, handler)
     await this.subscriber.subscribe(channel)

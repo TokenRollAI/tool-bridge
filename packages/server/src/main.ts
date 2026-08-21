@@ -47,14 +47,23 @@ let shuttingDown = false
 const shutdown = (signal: string): void => {
   if (shuttingDown) return
   shuttingDown = true
-  console.log(`[tool-bridge] ${signal} received, shutting down`)
-  server
-    .close()
-    .then(() => process.exit(0))
-    .catch((err) => {
-      console.error('[tool-bridge] shutdown error', err)
-      process.exit(1)
-    })
+  console.log(`[tool-bridge] ${signal} received, draining`)
+  // 先摘流量再关停:/readyz 立即转 503,但继续服务 —— k8s endpoint 摘除有传播延迟,
+  // 等一拍(TB_SHUTDOWN_DRAIN_SEC,缺省 0)让 LB 停止路由新请求,再优雅关闭。
+  server.startDraining()
+  const doClose = (): void => {
+    console.log(`[tool-bridge] shutting down`)
+    server
+      .close()
+      .then(() => process.exit(0))
+      .catch((err) => {
+        console.error('[tool-bridge] shutdown error', err)
+        process.exit(1)
+      })
+  }
+  const drainSec = config.shutdownDrainSec ?? 0
+  if (drainSec > 0) setTimeout(doClose, drainSec * 1000)
+  else doClose()
 }
 process.on('SIGINT', () => shutdown('SIGINT'))
 process.on('SIGTERM', () => shutdown('SIGTERM'))

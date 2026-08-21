@@ -83,6 +83,12 @@ export interface ServerConfig {
    * 每个副本的 hostname 天然唯一;同机多进程需显式区分。
    */
   replicaId?: string
+  /**
+   * SIGTERM 后先置 draining(/readyz 转 503)再关停的等待秒数(TB_SHUTDOWN_DRAIN_SEC,
+   * 缺省 0)。k8s 滚动更新时 endpoint 摘除有传播延迟,不等一拍就关会把仍被路由过来的
+   * 请求吃闭门羹;单机/本地开发保持 0,关停立即进行。
+   */
+  shutdownDrainSec?: number
   toolCacheTtlSec?: number
   /** Dashboard 静态资源目录覆盖(缺省经 @tool-bridge/dashboard 包解析)。 */
   uiDir?: string
@@ -125,6 +131,11 @@ export function configFromEnv(env: NodeJS.ProcessEnv = process.env): ServerConfi
       allowInsecure,
     },
     deviceReclaimSec: positiveIntEnv(env.TB_DEVICE_RECLAIM_SEC) ?? DEFAULT_DEVICE_RECLAIM_SEC,
+    // 0 合法(立即关停,本地/单机默认);positiveIntEnv 拒 0,故单独解析。
+    shutdownDrainSec: (() => {
+      const n = Number(env.TB_SHUTDOWN_DRAIN_SEC)
+      return Number.isInteger(n) && n >= 0 ? n : 0
+    })(),
   }
   if (env.TB_UI_DIR !== undefined && env.TB_UI_DIR.length > 0) config.uiDir = env.TB_UI_DIR
   if (env.TB_DATABASE_URL !== undefined && env.TB_DATABASE_URL.length > 0) {

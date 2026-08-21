@@ -94,6 +94,38 @@ describe('Node 宿主 HTTP 面', () => {
     expect(text).toContain('system')
   })
 
+  it('livez/readyz 免认证;draining 后 readyz 503 而 livez 仍 200(k8s 摘流量语义)', async () => {
+    const { server, baseUrl } = await startServer(tmpDataDir())
+    cleanups.push(() => server.close())
+
+    const live = await fetch(`${baseUrl}/livez`)
+    expect(live.status).toBe(200)
+    expect(await live.json()).toEqual({ live: true })
+
+    // SQLite 无长连接后端可断:checks 为空、ready true。
+    const ready = await fetch(`${baseUrl}/readyz`)
+    expect(ready.status).toBe(200)
+    expect(await ready.json()).toEqual({ checks: {}, ready: true })
+
+    server.startDraining()
+    const drainingReady = await fetch(`${baseUrl}/readyz`)
+    expect(drainingReady.status).toBe(503)
+    const body = (await drainingReady.json()) as {
+      checks: Record<string, { ok: boolean }>
+      ready: boolean
+    }
+    expect(body.ready).toBe(false)
+    expect(body.checks.draining?.ok).toBe(false)
+
+    // liveness 不受 draining 影响:进程还活着,编排器不该重启它。
+    const stillLive = await fetch(`${baseUrl}/livez`)
+    expect(stillLive.status).toBe(200)
+
+    // draining 期间既有 HTTP 面继续服务(摘流量 ≠ 拒服务)。
+    const help = await fetch(`${baseUrl}/~help`, admin())
+    expect(help.status).toBe(200)
+  })
+
   it('重启同 dataDir:注册的节点在新进程仍在(User Case #4)', async () => {
     const dataDir = tmpDataDir()
     const first = await startServer(dataDir)

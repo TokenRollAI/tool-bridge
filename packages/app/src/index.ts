@@ -43,6 +43,7 @@ export {
   type DeviceChannel,
   type DeviceInvokeRequest,
   type LocalProviderHooks,
+  type ReadinessReport,
   type TbAppDeps,
 } from './deps'
 

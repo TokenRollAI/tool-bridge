@@ -48,6 +48,16 @@ export interface LocalProviderHooks {
 }
 
 /**
+ * 就绪探测报告(GET /readyz 的响应体)。checks 逐后端给出连通结果;
+ * ready=false → 503,编排器(k8s readiness / LB)据此摘除流量。
+ * detail 只放短语级原因(如 "timeout after 1000ms"),不放凭证或拓扑细节。
+ */
+export interface ReadinessReport {
+  checks: Record<string, { detail?: string, ok: boolean }>
+  ready: boolean
+}
+
+/**
  * tb app 的宿主注入面(五注入点 + 解析后的部署配置)。
  * 核心业务逻辑零分叉:Workers 适配层(app.ts)与 SDK(packages/sdk)都注入此形状。
  */
@@ -88,6 +98,12 @@ export interface TbAppDeps {
    * 那个插件解析不出 export;反之则解析得出但调不动(unavailable)。宿主该两者同源装配。
    */
   pluginCatalog?: BuiltinCatalog
+  /**
+   * 后端连通性探测(GET /readyz;k8s readiness)。宿主注入闭包,自行探测其长连接
+   * 后端(PG 池 / Redis)并叠加 draining 状态。缺省 → /readyz 恒 200:请求期绑定
+   * 宿主(Workers 的 KV/D1/R2)无"断连"态,嵌入宿主自理。
+   */
+  readiness?: () => Promise<ReadinessReport>
   /** context Get 的 $ref 内联阈值(字节,缺省 1 MiB)。 */
   refThresholdBytes?: number
   /** $ref URL(presign 与 /~ref 中转)有效期秒(缺省 900)。 */
