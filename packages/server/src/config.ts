@@ -1,6 +1,7 @@
 /**
  * Node 宿主的 env 配置面。变量名与语义对齐 CF 宿主(gateway/src/app.ts 的 Env),
- * 仅新增宿主形态相关的 TB_PORT / TB_HOST / TB_DATA_DIR / TB_UI_DIR。
+ * 仅新增宿主形态相关的 TB_PORT / TB_HOST / TB_DATA_DIR / TB_UI_DIR / TB_DATABASE_URL。
+ * 端口额外兜底平台注入的 PORT(PaaS 通行约定)。
  * 解析函数镜像 app.ts 的 allowInsecure / remoteSettingsFromEnv / positiveIntEnv。
  */
 
@@ -82,7 +83,9 @@ export function configFromEnv(env: NodeJS.ProcessEnv = process.env): ServerConfi
     .map(s => s.trim())
     .filter(s => s.length > 0)
   const config: ServerConfig = {
-    port: portEnv(env.TB_PORT) ?? DEFAULT_PORT,
+    // TB_PORT 优先,PORT 兜底:Railway / Fly / Cloud Run / CF Container 等 PaaS 只注入
+    // PORT,不认识 TB_PORT —— 不兜底的话容器会监听 8787 而平台探活另一个端口,部署直接失败。
+    port: portEnv(env.TB_PORT) ?? portEnv(env.PORT) ?? DEFAULT_PORT,
     host: env.TB_HOST !== undefined && env.TB_HOST.length > 0 ? env.TB_HOST : '0.0.0.0',
     dataDir:
       env.TB_DATA_DIR !== undefined && env.TB_DATA_DIR.length > 0 ? env.TB_DATA_DIR : './data',
