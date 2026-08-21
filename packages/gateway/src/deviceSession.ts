@@ -23,14 +23,14 @@ import {
 } from '@tool-bridge/app'
 import { DurableObject } from 'cloudflare:workers'
 import { D1SearchIndex } from './search/d1SearchIndex'
-import { KvStateStore } from './kvStateStore'
+import { D1StateStore } from './d1StateStore'
 
 interface DeviceSessionEnv {
   TB_BOOTSTRAP_ADMIN_SK?: string
   TB_DEVICE_RECLAIM_SEC?: string
-  TB_KV: KVNamespace
   TB_SEARCH?: D1Database
   TB_SECRET_ENCRYPTION_KEY?: string
+  TB_STATE: D1Database
 }
 
 interface SocketAttachment {
@@ -193,7 +193,7 @@ export class DeviceSession extends DurableObject<DeviceSessionEnv> {
       return
     }
     const registry = await this.registry()
-    const state = new KvStateStore(this.env.TB_KV)
+    const state = new D1StateStore(this.env.TB_STATE)
     const searchSync = this.env.TB_SEARCH === undefined
       ? undefined
       : new SearchSynchronizer(state, new D1SearchIndex(this.env.TB_SEARCH))
@@ -210,7 +210,7 @@ export class DeviceSession extends DurableObject<DeviceSessionEnv> {
   private async acceptWebSocket(request: Request, url: URL): Promise<Response> {
     const deviceIdHint = url.searchParams.get('deviceId') ?? ''
     assertDeviceId(deviceIdHint)
-    await ensureBootstrapped(new KvStateStore(this.env.TB_KV), this.env)
+    await ensureBootstrapped(new D1StateStore(this.env.TB_STATE), this.env)
 
     const pair = new WebSocketPair()
     const client = pair[0]
@@ -292,7 +292,7 @@ export class DeviceSession extends DurableObject<DeviceSessionEnv> {
     hello: { deviceId: string, expose: DeviceExpose, mountPath?: TreePath },
   ): Promise<void> {
     const attachment = attachmentOf(ws)
-    const store = new KvStateStore(this.env.TB_KV)
+    const store = new D1StateStore(this.env.TB_STATE)
     await ensureBootstrapped(store, this.env)
 
     const now = new Date().toISOString()
@@ -402,7 +402,7 @@ export class DeviceSession extends DurableObject<DeviceSessionEnv> {
   private async reverifyConn(meta: DeviceMeta, attachment: SocketAttachment): Promise<boolean> {
     if (attachment.connId !== meta.activeConnId) return false
     const authCtx = await identify(
-      new KvStateStore(this.env.TB_KV),
+      new D1StateStore(this.env.TB_STATE),
       attachment.authorization,
       new Date().toISOString(),
     )
@@ -478,7 +478,7 @@ export class DeviceSession extends DurableObject<DeviceSessionEnv> {
   }
 
   private async registry(): Promise<NodeRegistryStore> {
-    const store: StateStore = new KvStateStore(this.env.TB_KV)
+    const store: StateStore = new D1StateStore(this.env.TB_STATE)
     await ensureBootstrapped(store, this.env)
     return new NodeRegistryStore(store)
   }

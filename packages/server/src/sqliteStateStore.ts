@@ -14,37 +14,10 @@
  * 防御性地对返回行再做 startsWith 过滤。
  */
 
-import type { StateStore } from '@tool-bridge/core'
+import { prefixUpperBound, type StateStore } from '@tool-bridge/core'
 import Database from 'better-sqlite3'
 
 const DEFAULT_LIST_LIMIT = 1000
-
-/** Unicode 最大 scalar;等于它的码点无法再加一,需继续向左借位。 */
-const MAX_CODE_POINT = 0x10ffff
-/** 代理区间 [D800, DFFF] 不是合法 scalar,加一时必须跳过。 */
-const SURROGATE_START = 0xd800
-const SURROGATE_END = 0xdfff
-
-/**
- * prefix 在 UTF-8 字节序下的字典序后继(范围扫描上界);无上界时返回 undefined。
- *
- * 必须按 **code point** 而非 UTF-16 code unit 递增。按 code unit 加一会拆开代理对:
- * 以 `🏿`(U+1F3FF = D83C DFFF)结尾时,给低代理 DFFF 加一得到孤立高代理 `D83C E000`,
- * 编码成 UTF-8 时 D83C 变 U+FFFD(ef bf bd),upper bound 的字节序反而**小于** prefix
- * (ef… < f0…),范围查询恒空——补充平面 key 的子树静默消失,不报错。
- * 跳过代理区间同理:U+D7FF 的后继是 U+E000,不是 U+D800。
- */
-function prefixUpperBound(prefix: string): string | undefined {
-  const points = [...prefix]
-  for (let i = points.length - 1; i >= 0; i--) {
-    const code = points[i]?.codePointAt(0)
-    if (code === undefined || code >= MAX_CODE_POINT) continue
-    let next = code + 1
-    if (next >= SURROGATE_START && next <= SURROGATE_END) next = SURROGATE_END + 1
-    return points.slice(0, i).join('') + String.fromCodePoint(next)
-  }
-  return undefined
-}
 
 export class SqliteStateStore implements StateStore {
   private readonly db: Database.Database

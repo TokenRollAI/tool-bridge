@@ -67,10 +67,9 @@ export class NodeRegistryStore {
    * 只扫子树(前缀限定),不再对全树做内存过滤——避免 children/hasChildren/subtree 的
    * O(N²)(每层各扫全树)。`opts.limit` 传给底层 `store.list` 以小步取(hasChildren 短路用)。
    *
-   * **Workers 子请求上限约束**:KvStateStore.list 对每个键各发一次 `get`,即翻页取到的每个
-   * 键消耗一次 Workers 子请求(免费套餐 50 / 付费 1000,含出站 fetch 与 KV 读)。故子树规模
-   * (含中间 directory)应远小于该上限——当前树规模小(节点数十级)可接受;规模变大后
-   * 需改 KV metadata 承载值(list 不再逐 get)或换 SQLite 宿主。
+   * **Workers 查询预算约束**:D1StateStore.list 是单条 SQL 直接带值返回(ADR-001 迁 D1 后
+   * 不再逐键 get),每页只花一次 D1 查询;但 Workers 单请求仍有查询/子请求预算,深翻页的
+   * 页数应远小于预算——当前树规模小(节点数十级)可接受。
    */
   private async scanPrefix(
     keyPrefix: string,

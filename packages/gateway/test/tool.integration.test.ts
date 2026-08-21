@@ -2,7 +2,7 @@ import { MemoryStateStore, parseHelpDsl, SecretStoreImpl, type StateStore } from
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createMcpProvider } from '@tool-bridge/app'
 import { env, SELF } from 'cloudflare:test'
-import { KvStateStore } from '../src/kvStateStore'
+import { D1StateStore } from '../src/d1StateStore'
 import { TEST_ADMIN_SK } from './fixtures'
 
 // Tool Layer 集成测试:mcp/http Provider、工具虚拟化、调用点 call 判定、
@@ -254,7 +254,7 @@ describe('tool cache → SearchIndex 自动同步', () => {
         },
       }],
     })
-    const dirty = await new KvStateStore((env as { TB_KV: KVNamespace }).TB_KV)
+    const dirty = await new D1StateStore((env as { TB_STATE: D1Database }).TB_STATE)
       .list('searchdirty:')
     expect(dirty.items.filter(item => (
       (item.value as { path?: unknown }).path === 'ext/search-cache-sync'

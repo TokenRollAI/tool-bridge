@@ -7,7 +7,7 @@ import {
   D1SearchIndex,
 } from '../src/search/d1SearchIndex'
 import { verifySearchIndexContract } from '../../core/test/search/searchIndex.fixture'
-import { KvStateStore } from '../src/kvStateStore'
+import { D1StateStore } from '../src/d1StateStore'
 import { createApp, type Env } from '../src/app'
 import { TEST_ADMIN_SK } from './fixtures'
 
@@ -106,7 +106,7 @@ describe('D1SearchIndex', () => {
   })
 
   it('does not let a partial node reconcile claim that the full canonical tree is seeded', async () => {
-    const state = new KvStateStore((env as { TB_KV: KVNamespace }).TB_KV)
+    const state = new D1StateStore((env as { TB_STATE: D1Database }).TB_STATE)
     const registry = new NodeRegistryStore(state)
     const now = new Date().toISOString()
     const makeNode = (path: string, name: string) => ({
@@ -335,7 +335,7 @@ describe('D1SearchIndex', () => {
 
   it('bulk-reads more than 100 distinct registry paths in one Worker search request', async () => {
     const now = new Date().toISOString()
-    const kv = (env as { TB_KV: KVNamespace }).TB_KV
+    const state = new D1StateStore((env as { TB_STATE: D1Database }).TB_STATE)
     const documents = Array.from({ length: 125 }, (_, index) => {
       const path = `search/bulk-paths/${String(index).padStart(3, '0')}`
       return {
@@ -348,9 +348,9 @@ describe('D1SearchIndex', () => {
         },
       }
     })
-    await Promise.all(documents.map(async ({ path, tool }) => await kv.put(
+    await Promise.all(documents.map(async ({ path, tool }) => await state.put(
       `node:${path}`,
-      JSON.stringify({
+      {
         path,
         kind: 'http',
         description: 'Bulk path fixture',
@@ -362,7 +362,7 @@ describe('D1SearchIndex', () => {
         registeredBy: 'system:test',
         createdAt: now,
         updatedAt: now,
-      }),
+      },
     )))
     await new D1SearchIndex(searchDb).rebuild(documents)
 

@@ -1,8 +1,8 @@
 {
   // tool-bridge gateway — deployable to any Cloudflare account.
-  // The "Deploy to Cloudflare" button reads this file, provisions the KV
-  // namespace / R2 bucket / Durable Object below in your account, and fills
-  // in the resource ids automatically.
+  // The "Deploy to Cloudflare" button reads this file, provisions the D1 database
+  // / R2 bucket / Durable Object below in your account, and fills in the resource
+  // ids automatically.
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "tool-bridge",
   "main": "src/index.ts",
@@ -13,12 +13,6 @@
   "observability": {
     "enabled": true
   },
-  // KV: node tree config / SecretKey hash table / plugin manifests.
-  // The id is a placeholder — the deploy flow (or `wrangler kv namespace create`)
-  // replaces it. Local `wrangler dev` uses a miniflare instance and ignores it.
-  "kv_namespaces": [
-    { "binding": "TB_KV", "id": "00000000000000000000000000000000" }
-  ],
   // R2: context objects and large $ref payloads.
   "r2_buckets": [
     { "binding": "TB_R2", "bucket_name": "tool-bridge" }
@@ -28,13 +22,19 @@
     "bindings": [{ "name": "TB_DEVICE", "class_name": "DeviceSession" }]
   },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["DeviceSession"] }],
-  // D1: FTS5/trigram tool-search index (`~search`). The deploy flow provisions the
-  // database and fills in the id, like the KV namespace above. Without this binding
-  // the gateway still works but exposes no search capability.
+  // D1: one database, two bindings (the deploy flow provisions it and fills in the id).
+  // TB_STATE is the authoritative state store (node tree, SecretKey hashes, encrypted
+  // secrets, plugin manifests — strongly consistent, revocation is immediate).
+  // TB_SEARCH is the FTS5/trigram tool-search index (`~search`).
   "d1_databases": [
     {
+      "binding": "TB_STATE",
+      "database_name": "tool-bridge-db",
+      "database_id": "00000000-0000-0000-0000-000000000000"
+    },
+    {
       "binding": "TB_SEARCH",
-      "database_name": "tool-bridge-search",
+      "database_name": "tool-bridge-db",
       "database_id": "00000000-0000-0000-0000-000000000000"
     }
   ],

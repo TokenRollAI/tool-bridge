@@ -16,16 +16,12 @@ const logPath = process.env.TB_PROVISION_FAKE_LOG
 const p = process.env.TB_PROVISION_FAKE_PREFIX || 'tb'
 const state = existsSync(statePath)
   ? JSON.parse(readFileSync(statePath, 'utf8'))
-  : { kv: false, r2: false, d1: false }
+  : { r2: false, d1: false }
 const args = process.argv.slice(2)
 if (args.shift() !== 'wrangler') process.exit(64)
 const command = args.join(' ')
 writeFileSync(logPath, command + '\n', { flag: 'a' })
-if (command === 'kv namespace list') {
-  console.log(JSON.stringify(state.kv ? [{ title: p + '-kv', id: 'kv-id' }] : []))
-} else if (command === 'kv namespace create ' + p + '-kv') {
-  state.kv = true
-} else if (command === 'r2 bucket info ' + p + '-r2 --json') {
+if (command === 'r2 bucket info ' + p + '-r2 --json') {
   if (!state.r2) {
     console.error('The specified bucket does not exist. [code: 10006]')
     process.exit(1)
@@ -34,8 +30,8 @@ if (command === 'kv namespace list') {
 } else if (command === 'r2 bucket create ' + p + '-r2') {
   state.r2 = true
 } else if (command === 'd1 list --json') {
-  console.log(JSON.stringify(state.d1 ? [{ name: p + '-search', uuid: 'd1-id' }] : []))
-} else if (command === 'd1 create ' + p + '-search') {
+  console.log(JSON.stringify(state.d1 ? [{ name: p + '-db', uuid: 'd1-id' }] : []))
+} else if (command === 'd1 create ' + p + '-db') {
   state.d1 = true
 } else {
   console.error('unexpected fake wrangler command: ' + command)
@@ -53,10 +49,13 @@ const NEUTRAL_CONFIG = `{
     "TB_CANONICAL_ORIGIN": "",
     "TB_R2_BUCKET": "tb-r2"
   },
-  "kv_namespaces": [{ "binding": "TB_KV", "id": "kv-placeholder" }],
   "d1_databases": [{
+    "binding": "TB_STATE",
+    "database_name": "tb-db",
+    "database_id": "d1-placeholder"
+  }, {
     "binding": "TB_SEARCH",
-    "database_name": "tb-search",
+    "database_name": "tb-db",
     "database_id": "d1-placeholder"
   }],
   "r2_buckets": [{ "binding": "TB_R2", "bucket_name": "tb-r2" }]
@@ -110,24 +109,24 @@ async function workspace(envContent) {
   }
 }
 
-test('provision creates KV/R2/D1 once, backfills ids, then skips all existing resources', async () => {
+test('provision creates R2/D1 once, backfills both D1 binding ids, then skips existing resources', async () => {
   const ws = await workspace('TB_NAME_PREFIX=tb\n')
   try {
     const first = runProvision(ws)
     assert.equal(first.status, 0, first.stderr)
     const second = runProvision(ws)
     assert.equal(second.status, 0, second.stderr)
-    assert.match(second.stdout, /D1 database 'tb-search' exists .* — skip/)
+    assert.match(second.stdout, /D1 database 'tb-db' exists .* — skip/)
 
     const calls = (await readFile(ws.logPath, 'utf8')).trim().split('\n')
-    assert.equal(calls.filter(call => call === 'kv namespace create tb-kv').length, 1)
     assert.equal(calls.filter(call => call === 'r2 bucket create tb-r2').length, 1)
-    assert.equal(calls.filter(call => call === 'd1 create tb-search').length, 1)
+    assert.equal(calls.filter(call => call === 'd1 create tb-db').length, 1)
     assert.equal(calls.filter(call => call === 'd1 list --json').length, 3)
 
     const config = JSON.parse(await readFile(ws.configPath, 'utf8'))
-    assert.equal(config.kv_namespaces[0].id, 'kv-id')
+    // 单库两 binding:TB_STATE 与 TB_SEARCH 必须回填到同一个 database_id。
     assert.equal(config.d1_databases[0].database_id, 'd1-id')
+    assert.equal(config.d1_databases[1].database_id, 'd1-id')
     // 无自定义域时必须主动打开 workers.dev，首次部署才能得到可访问入口。
     assert.equal(config.account_id, undefined)
     assert.equal(config.workers_dev, true)
@@ -162,11 +161,12 @@ test('provision backfills account/domain/origin and prefix-derived names from .e
     // 前缀改了,资源名与新建资源必须一起改,否则 deploy 绑到不存在的 bucket/DB。
     assert.equal(config.vars.TB_R2_BUCKET, 'acme-r2')
     assert.equal(config.r2_buckets[0].bucket_name, 'acme-r2')
-    assert.equal(config.d1_databases[0].database_name, 'acme-search')
+    assert.equal(config.d1_databases[0].database_name, 'acme-db')
+    assert.equal(config.d1_databases[1].database_name, 'acme-db')
 
     const calls = (await readFile(ws.logPath, 'utf8')).trim().split('\n')
     assert.ok(calls.includes('r2 bucket create acme-r2'))
-    assert.ok(calls.includes('d1 create acme-search'))
+    assert.ok(calls.includes('d1 create acme-db'))
 
     // 幂等:同一份 .env 复跑不再改写配置。
     const second = runProvision({ ...ws, prefix: 'acme' })

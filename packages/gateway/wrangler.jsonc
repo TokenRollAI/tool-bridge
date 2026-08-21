@@ -29,16 +29,21 @@
     "TB_R2_BUCKET": "tb-r2",
     "TB_R2_S3_ENDPOINT": ""
   },
-  // KV:树配置 / SK 哈希表 / manifest。id 为占位,由 scripts/provision.mjs
-  // 幂等创建后回填;本地 wrangler dev / vitest-pool-workers 用 miniflare 本地实例,不校验该 id。
-  "kv_namespaces": [
-    { "binding": "TB_KV", "id": "00000000000000000000000000000000" }
-  ],
-  // D1:FTS5/trigram 工具搜索索引。database_id 由 scripts/provision.mjs 幂等回填。
+  // D1:**一个库,两个 binding**(id 由 scripts/provision.mjs 幂等创建后回填;本地
+  // wrangler dev / vitest-pool-workers 用 miniflare 本地实例,不校验 id)。
+  // binding 表达用途、库表达存储位置——将来要拆库只动这里,不动代码:
+  // - TB_STATE:权威 StateStore(表 tb_state_kv;ADR-001 从 KV 迁入——强一致读写、
+  //   原子 putIfAbsent、撤销即时生效;树配置 / SK 哈希表 / 加密 secret / manifest 全在此)。
+  // - TB_SEARCH:FTS5/trigram 工具搜索索引(表 tb_search_*;可选,不配则无 search capability)。
   "d1_databases": [
     {
+      "binding": "TB_STATE",
+      "database_name": "tb-db",
+      "database_id": "00000000-0000-0000-0000-000000000000"
+    },
+    {
       "binding": "TB_SEARCH",
-      "database_name": "tb-search",
+      "database_name": "tb-db",
       "database_id": "00000000-0000-0000-0000-000000000000"
     }
   ],

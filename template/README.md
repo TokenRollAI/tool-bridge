@@ -8,10 +8,10 @@ The button copies this template into a new repo in your GitHub account, provisio
 
 | Resource | Binding | Purpose |
 |---|---|---|
-| Workers KV | `TB_KV` | node tree config, SecretKey hashes, plugin manifests |
+| D1 database | `TB_STATE` | authoritative state: node tree config, SecretKey hashes, encrypted secrets, plugin manifests |
+| D1 database (same DB) | `TB_SEARCH` | global tool-search index (`~search`) |
 | R2 bucket | `TB_R2` | context objects, large `$ref` payloads |
 | Durable Object | `TB_DEVICE` | one `DeviceSession` per connected device (WebSocket hibernation) |
-| D1 database | `TB_SEARCH` | global tool-search index (`~search`) |
 
 The Worker itself is a thin shell over the published [`@tool-bridge/gateway`](https://www.npmjs.com/package/@tool-bridge/gateway) package — it imports the `@tool-bridge/gateway/full` entry, which ships the **same fully-assembled gateway as a source deploy** (built-in integration catalog included); the dashboard UI ships prebuilt in [`@tool-bridge/dashboard`](https://www.npmjs.com/package/@tool-bridge/dashboard).
 

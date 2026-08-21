@@ -1,7 +1,7 @@
 {
   "name": "@tool-bridge/gateway",
-  "version": "0.14.0",
-  "description": "Cloudflare Workers host adapter for tool-bridge: binds KV / R2 / D1 / Durable Objects / Static Assets to the host-neutral @tool-bridge/app, and default-exports the Worker plus the DeviceSession Durable Object",
+  "version": "0.15.0",
+  "description": "Cloudflare Workers host adapter for tool-bridge: binds D1 / R2 / Durable Objects / Static Assets to the host-neutral @tool-bridge/app, and default-exports the Worker plus the DeviceSession Durable Object",
   "type": "module",
   "license": "MIT",
   "main": "src/index.ts",

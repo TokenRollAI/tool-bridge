@@ -17,10 +17,10 @@ import type { DeviceSession } from './deviceSession'
 import { createR2ObjectStore, type R2PresignCredentials } from './providers/r2Object'
 import pkg from '../package.json' with { type: 'json' }
 import { D1SearchIndex } from './search/d1SearchIndex'
-import { KvStateStore } from './kvStateStore'
+import { D1StateStore } from './d1StateStore'
 
 /**
- * Workers 运行时绑定。KV/R2 名称从 TB_NAME_PREFIX 派生(wrangler.jsonc)。
+ * Workers 运行时绑定。D1/R2 名称从 TB_NAME_PREFIX 派生(wrangler.jsonc)。
  * TB_SECRET_ENCRYPTION_KEY / TB_BOOTSTRAP_ADMIN_SK 经 wrangler secret 或 .dev.vars 注入。
  */
 export interface Env {
@@ -40,7 +40,6 @@ export interface Env {
   TB_DEVICE_RECLAIM_SEC?: string
   /** 本实例 X-TB-Via 标识(缺省用入站 host 派生)。 */
   TB_INSTANCE_ID?: string
-  TB_KV: KVNamespace
   /** X-TB-Via 跳数上限(默认 4)。 */
   TB_MAX_HOPS?: string
   TB_R2: R2Bucket
@@ -59,6 +58,8 @@ export interface Env {
   /** FTS5/trigram 工具搜索索引；发布包宿主未配置 binding 时不暴露 search capability。 */
   TB_SEARCH?: D1Database
   TB_SECRET_ENCRYPTION_KEY?: string
+  /** 权威 StateStore(D1;ADR-001 从 KV 迁入,强一致 + 原子 putIfAbsent)。 */
+  TB_STATE: D1Database
   /** opt-in 集成测试:真实 MCP echo server 的 URL(仅测试注入)。 */
   TB_TEST_MCP_URL?: string
   TB_TEST_S3_ACCESS_KEY_ID?: string
@@ -129,7 +130,7 @@ async function r2PresignCredentials(
 
 /** Env → TbAppDeps(Workers 宿主适配；D1 SearchIndex 是第五个宿主注入点)。 */
 function depsFromEnv(env: Env): TbAppDeps {
-  const state: StateStore = new KvStateStore(env.TB_KV)
+  const state: StateStore = new D1StateStore(env.TB_STATE)
   const secrets = new SecretStoreImpl(state, env.TB_SECRET_ENCRYPTION_KEY)
   const deps: TbAppDeps = {
     state,
