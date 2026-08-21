@@ -39,8 +39,21 @@ jobs:
           --health-timeout 5s
           --health-retries 10
 
+      # 多副本设备通道的跨副本转发测试要真 Redis:socket 不可序列化,那组测试是
+      # 唯一能证明"设备连在副本 A、调用打到副本 B 也通"的手段,不能靠 mock。
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
     env:
       TB_TEST_DATABASE_URL: postgres://postgres:tb@localhost:5432/toolbridge
+      TB_TEST_REDIS_URL: redis://localhost:6379
 
     steps:
       - uses: actions/checkout@v4
@@ -60,6 +73,7 @@ jobs:
         run: |
           pnpm --filter @tool-bridge/server exec vitest run \
             test/pgStateStore.test.ts test/pgSearchIndex.test.ts test/pgServer.e2e.test.ts \
+            test/deviceRouter.integration.test.ts \
             --reporter=json --outputFile="$RUNNER_TEMP/pg-tests.json"
           node -e '
             const r = require(process.env.RUNNER_TEMP + "/pg-tests.json");
