@@ -26,6 +26,11 @@ export interface ServerConfig {
    * configFromEnv 抛错,进程拒绝启动(fail closed,不静默回退到请求期 origin)。
    */
   canonicalOrigin?: string
+  /**
+   * Postgres 连接串(TB_DATABASE_URL)。给出则 StateStore 与 SearchIndex 都走 PG
+   * (ILIKE 子串检索,无扩展依赖);缺省回退到 dataDir 下的 SQLite。ObjectStore 始终用 fs。
+   */
+  databaseUrl?: string
   /** SQLite 库与 fs 对象根所在目录(state.sqlite3 + objects/)。 */
   dataDir: string
   /** 设备断线后未重连的回收秒数(缺省 24h)。 */
@@ -94,6 +99,9 @@ export function configFromEnv(env: NodeJS.ProcessEnv = process.env): ServerConfi
     deviceReclaimSec: positiveIntEnv(env.TB_DEVICE_RECLAIM_SEC) ?? DEFAULT_DEVICE_RECLAIM_SEC,
   }
   if (env.TB_UI_DIR !== undefined && env.TB_UI_DIR.length > 0) config.uiDir = env.TB_UI_DIR
+  if (env.TB_DATABASE_URL !== undefined && env.TB_DATABASE_URL.length > 0) {
+    config.databaseUrl = env.TB_DATABASE_URL
+  }
   if (env.TB_BOOTSTRAP_ADMIN_SK !== undefined && env.TB_BOOTSTRAP_ADMIN_SK.length > 0) {
     config.adminSk = env.TB_BOOTSTRAP_ADMIN_SK
   }

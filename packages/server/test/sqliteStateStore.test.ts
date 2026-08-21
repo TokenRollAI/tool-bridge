@@ -38,6 +38,11 @@ const KEYS = [
   'node:a%b',
   'node:a[1]',
   'node:中文/路径',
+  // 补充平面(代理对):prefixUpperBound 按 code unit 加一会拆开代理对,
+  // 让 upper bound 的 UTF-8 字节序小于 prefix,子树查询恒空。
+  'node:🏿',
+  'node:🏿/child',
+  'node:🏿/child/deep',
   'sk:h:aaa',
   'sk:h:bbb',
   'sk:i:001',
@@ -84,6 +89,9 @@ describe('SqliteStateStore 契约(vs MemoryStateStore)', () => {
         percent: (await store.list('node:a%')).items.map(i => i.key),
         bracket: (await store.list('node:a[')).items.map(i => i.key),
         cjk: (await store.list('node:中文/')).items.map(i => i.key),
+        // 代理对 prefix:必须取到自身与整棵子树。
+        astral: (await store.list('node:🏿')).items.map(i => i.key),
+        astralSubtree: (await store.list('node:🏿/')).items.map(i => i.key),
         all: (await store.list('')).items.map(i => i.key),
         missPrefix: (await store.list('zzz:')).items,
       }

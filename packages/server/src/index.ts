@@ -1,6 +1,8 @@
 export { configFromEnv, type ServerConfig } from './config'
 export { DEVICE_WS_PATH, DeviceHub } from './deviceHub'
 export { createDataObjectStore } from './objects'
+export { PgSearchIndex } from './pgSearchIndex'
+export { PgStateStore } from './pgStateStore'
 export { createTbServer, type TbServer } from './server'
 export { SqliteSearchIndex } from './sqliteSearchIndex'
 export { SqliteStateStore } from './sqliteStateStore'

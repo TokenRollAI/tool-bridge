@@ -357,6 +357,20 @@ function likePattern(term: string): string {
 }
 
 /**
+ * 把 query 的每个 term 都变成 escaped LIKE 模式(不区分长短词)。
+ *
+ * 供不分长短词、整句走子串匹配的方言(如 Postgres ILIKE)使用;
+ * 转义规则与 {@link prepareToolSearchQuery} 的短词路径一致(`!` 为 ESCAPE 字符)。
+ */
+export function toolSearchLikePatterns(query: string): string[] {
+  const terms = normalizeToolSearchQuery(query).split(/\s+/u)
+  if (terms.length > TOOL_SEARCH_TERM_LIMIT) {
+    throw new TBError('invalid_argument', `搜索 query 最多 ${TOOL_SEARCH_TERM_LIMIT} 个 terms`)
+  }
+  return terms.map(likePattern)
+}
+
+/**
  * 长词继续由 trigram FTS 匹配，短词分别用 escaped LIKE；hybrid 同时 AND 两侧。
  * 因 LIKE pattern 只来自 `<3` code points 的 term，始终低于 D1 的 50-byte 限制。
  */

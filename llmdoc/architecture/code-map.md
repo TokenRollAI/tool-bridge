@@ -20,7 +20,7 @@
 | builtin 装配 | `builtin/index.ts` |
 | 外部 plugin 注册 | `builtin/plugin.ts`、`plugin/manifest.ts`、`plugin/contract.ts` |
 | 内置 catalog | `builtin/catalog.ts`、`plugin/catalog.ts` |
-| Search 契约 | `search/types.ts`、`search/sqlSearchIndex.ts` |
+| Search 契约 | `search/types.ts`、`search/sqlSearchIndex.ts`(编排 + `SqlSearchDialect`)、`search/pgSearchDialect.ts` |
 | 设备协议 | `device/frames.ts`、`device/session.ts`、`device/client.ts` |
 | HTBP 表示 | `htbp/helpDsl.ts`、`helpMarkdown.ts`、`tree.ts` |
 
@@ -39,7 +39,7 @@
 ## 宿主与客户端
 
 - Workers：`packages/gateway/src/app.ts` 装配 Env；`deployEntry.ts` 全量装内置 catalog；`kvStateStore.ts`、`search/d1SearchIndex.ts`、`deviceSession.ts` 是适配器。
-- Node：`packages/server/src/main.ts`、`server.ts`、`config.ts`；SQLite/FS/ws 实现在同包。
+- Node：`packages/server/src/main.ts`、`server.ts`（`resolveBackends` 选 state/search 后端）、`config.ts`；SQLite/PG/FS/ws 实现在同包（`sqlite*` / `pg*`）。
 - SDK：`packages/sdk/src/toolBridge.ts`、`deviceClient.ts`、`types.ts`。
 - CLI：`packages/cli/src/program.ts` 装配命令；`commands/` 按业务拆分；`http.ts` 统一调用与错误。
 - Dashboard：`packages/dashboard/src/lib/` 是 API/query/session；`pages/system/` 是系统控制面；`components/` 是共享 UI。

@@ -25,7 +25,7 @@ tool-bridge 把工具、上下文、设备与远端服务组织成一棵受权�
 | CLI | Commander | 全局参数、错误通道和严格解析保持统一 |
 | S3/R2 签名 | aws4fetch | 不手写签名协议 |
 | Cloudflare CLI | Wrangler | 资源创建与部署经现有 provision/deploy 流程 |
-| Node 状态 | better-sqlite3 | SQLite 为 Node 权威 StateStore |
+| Node 状态 | better-sqlite3 / postgres.js | SQLite 为默认权威 StateStore；设 `TB_DATABASE_URL` 则改用 PostgreSQL，切换不迁移既有数据 |
 | 测试 | Vitest + Node test | 宿主专属行为才进入重型运行时测试 |
 | Monorepo | pnpm + Turborepo | 根验收命令是 `pnpm verify` |
 
