@@ -23,10 +23,12 @@ RUN pnpm --filter @tool-bridge/server build
 # (--legacy:不启用 inject-workspace-packages,workspace 依赖按 pack 规则复制)
 RUN pnpm --filter @tool-bridge/server --prod deploy --legacy /out
 
+# 不设 TB_PORT:让 config.ts 的 `TB_PORT ?? PORT ?? 8787` 兜底链生效——PaaS(Railway/
+# Fly/Cloud Run/CF Container)只注入 PORT,写死 TB_PORT 会把平台端口摁死,容器监听 8787
+# 而平台探活另一个端口,部署直接失败。缺省仍是 8787(DEFAULT_PORT),行为不变。
 FROM node:22-bookworm-slim
 ENV NODE_ENV=production \
     TB_DATA_DIR=/data \
-    TB_PORT=8787 \
     TB_HOST=0.0.0.0 \
     TB_UI_DIR=/app/dashboard
 COPY --from=build /out /app
@@ -34,7 +36,9 @@ COPY --from=build /repo/packages/dashboard/dist /app/dashboard
 RUN mkdir -p /data && chown node:node /data
 USER node
 VOLUME /data
+# EXPOSE 仅文档性质、不支持变量;默认端口 8787,平台注入 PORT 时以运行时监听为准。
 EXPOSE 8787
+# healthcheck 读与 config.ts 同一套 env(TB_PORT ?? PORT ?? 8787),端口被平台覆盖时不误报。
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s \
-  CMD node -e "fetch('http://127.0.0.1:8787/healthz').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"
+  CMD node -e "const p=process.env.TB_PORT||process.env.PORT||8787;fetch('http://127.0.0.1:'+p+'/healthz').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"
 CMD ["node", "/app/dist/main.js"]
