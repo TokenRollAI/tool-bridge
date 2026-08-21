@@ -10,6 +10,16 @@
 - `TB_ALLOW_INSECURE_HTTP=true` 只放行本地 HTTP 上游，不应进入公网部署。
 - 反向代理必须保留 WebSocket upgrade、Authorization 和原始 host/proto 语义。
 
+## 健康探针与优雅关停
+
+三个免认证端点分工明确,k8s 探针按此接线:
+
+- `/livez` → 恒 200(进程存活;liveness)。后端断连**不算死**——liveness 探后端会让编排器在 PG 抖动时错杀健康进程。
+- `/readyz` → 就绪探测(readiness):Node 宿主逐后端连通性检查(PG `SELECT 1`、Redis `PING`,各限时 1s)+ draining 状态;任一不通或 draining → 503,编排器摘流量。SQLite/FS 无长连接可断,checks 为空恒 200。Workers/嵌入宿主未注入探测器,恒 200。
+- `/healthz` → 保持原语义(版本 + catalog digest,三宿主对拍用),容器 HEALTHCHECK 用它。
+
+关停顺序(SIGTERM):置 draining(`/readyz` 立即 503)→ 等 `TB_SHUTDOWN_DRAIN_SEC` 秒(缺省 0;k8s 建议 5–10,等 endpoint 摘除传播)→ 停止接受新连接、既有请求跑完 → 终止设备 WS → 关后端。镜像不再写死 `ENV TB_PORT`,平台注入的 `PORT` 真实生效,HEALTHCHECK 同步读 `TB_PORT ?? PORT ?? 8787`。
+
 SDK 内嵌与 Node server 使用同一引导下界：首次启动没有显式 Admin SK 就拒绝继续。设备通道由宿主装配的 `DeviceChannel` 提供，不存在可配置但未实现的公共 `DeviceTransport`。
 
 ## PostgreSQL 后端
@@ -43,6 +53,26 @@ pnpm compose:pg:down
 需要清空本地卷时才执行 `pnpm compose:reset`；它会删除**两条栈**的所有卷（含 PG 数据），运行前先确认目标只是本地开发状态。
 
 Compose 默认值仅用于本机闭环，不是部署模板。交付前至少验证：冷启动、持久卷重启、Dashboard 静态资源、HTTP 工具调用、设备 WebSocket，以及缺 Admin SK 时拒绝启动。
+
+## 生产 Compose(deploy/compose/)
+
+`deploy/compose/docker-compose.yml` 是生产参考栈,与根目录的 dev compose 是两回事:没有测试上游/plugin/smoke 装置,secret 全部 `:?required`(缺失时 compose 启动前报错,不会起一个 fail-closed 循环重启的容器),PG 用标准 `postgres:16`。
+
+- `--profile default`:gateway + postgres 单副本。
+- `--profile ha`:双 gateway(`TB_REPLICA_ID` 显式 a/b)+ Redis 路由 + Caddy LB,对外一个端口。是**单机** HA 参考栈——验证跨副本设备转发用,机器本身仍是单点;真多副本走 Helm。
+- 双副本共享 `$ref` 对象要求配 `TB_OBJECT_STORE_*`;compose 无渲染期校验,这条约束只能靠注释与 README 提醒(Helm 有硬校验)。
+- gateway healthcheck 打 `/readyz`(非 `/healthz`):后端断连时容器转 unhealthy,`restart: unless-stopped` + LB 依赖才有意义。
+
+## Kubernetes(deploy/helm/tool-bridge)
+
+Helm chart 按后端配置自动推断形态,无独立 mode 开关:
+
+- **standalone**(缺省,`postgres.url` 空):StatefulSet + RWO PVC,副本恒 1。用 StatefulSet 而非 Deployment+PVC 是为避免 RWO 卷上滚动更新的"新 Pod 等旧 Pod 释放卷"死锁。
+- **HA**(`postgres.url` + `objectStore.*` 配齐):无状态 Deployment,`/data` 用 emptyDir(readOnlyRootFilesystem 下的可写落点),`maxUnavailable: 0` 滚动;`replicaCount > 1` 还必须配 `redis.url`。
+- 危险组合(`replicas>1 + SQLite`、objectStore 半配、standalone 开 HPA、缺信任根)在 `helm template` 渲染期 `fail`,与运行时 fail-closed 语义对齐——坏栈根本部署不出去。
+- `TB_REPLICA_ID` 用 `fieldRef: metadata.name`(Pod 名天然唯一);探针三分工 `/healthz`(startup)、`/livez`(liveness)、`/readyz`(readiness);`terminationGracePeriodSeconds` 要盖过 `shutdownDrainSec` + 排空时间。
+- Ingress 接设备 WebSocket 必须放长 proxy 读写超时(nginx:`proxy-read-timeout`/`proxy-send-timeout`,示例见 `examples/values-ha.yaml`);Authorization/Host 语义按反代通则保留。
+- chart 不打包 PG/Redis,只留 values 接线点;信任根生产建议走 `secrets.existingSecret`(External Secrets 等),不写明文 values。
 
 ## 部署到容器 PaaS（Railway / Fly / Cloud Run / CF Container）
 

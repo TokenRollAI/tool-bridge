@@ -24,6 +24,21 @@ pnpm --filter @tool-bridge/gateway run deploy
 
 `provision` 从环境读取账户与命名前缀，幂等创建 KV、R2、D1，并把本地 checkout 的部署目标写入 wrangler 配置。该写回含环境标识，不应作为通用模板提交。
 
+## gateway 双入口与三条发布路径
+
+`@tool-bridge/gateway` 有两个入口：包根是零插件库入口；`./full` 是全量装配入口（内置插件目录 + D1 search）。到 Cloudflare 的发布路径有三条，必须保持同形态：
+
+1. 源码 wrangler 部署：main 为 `packages/gateway/src/deployEntry.ts`。
+2. npm 消费：`@tool-bridge/gateway/full`。
+3. Deploy Button template：导入 `/full`。
+
+一致性要求：
+
+- 改 gateway 装配（插件目录、search 后端、入口 wiring）时，三处同轮核对，不允许某一条路径掉队。
+- template 的依赖版本要与当轮发布的 gateway/dashboard minor 对齐：0.x 下 caret 不跨 minor，template 停在旧 minor 就装不到新装配。
+
+会复发的构建坑：给 Workers 目标 bundle 含 `@modelcontextprotocol/sdk` 的入口时，tsup 的 `platform: 'neutral'` 必须设 esbuild `conditions: ['workerd', 'worker', 'browser']`；否则 `pkce-challenge`（exports 只有 browser/node 分支）解析失败。
+
 ## 必需安全配置
 
 - 首次引导必须预置 `TB_BOOTSTRAP_ADMIN_SK`，并保存在密码管理器；不得从日志回收最高权限凭据。

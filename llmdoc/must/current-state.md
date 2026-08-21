@@ -8,6 +8,10 @@
 
 - 宿主中立应用在 `packages/app`，Cloudflare、Node、SDK 分别位于 gateway、server、sdk。
 - Node server 的 StateStore/SearchIndex 是两个独立后端：缺省 SQLite，设 `TB_DATABASE_URL` 走 PostgreSQL（纯 `ILIKE` 检索，无扩展依赖）。切换后端不迁移既有数据。
+- Node server 具备完整生产探针面：`/livez` 恒 200 只报进程存活；`/readyz` 做 PG/Redis 连通探测并在 draining 时返回未就绪；`/healthz` 报版本与 catalog digest 供对拍。SIGTERM 先进入 draining 再关停，窗口由 `TB_SHUTDOWN_DRAIN_SEC` 控制。
+- StateStore 契约含可选原子原语 `putIfAbsent`：SQL 后端原子实现，Workers KV 不实现走回退。bootstrap Admin SK 铸造以 hash key winner-takes-all 去重，多副本并发冷启动不再产生重复 sk 索引。
+- `@tool-bridge/gateway` 是双入口发布：包根是零插件库入口，`./full` 是与源码部署同形态的全量装配入口（内置插件目录 + D1 search）。Deploy Button template 消费 `./full`，template 与源码部署是同一个产品。
+- 部署产物：`deploy/helm/tool-bridge`（standalone=StatefulSet+PVC 单副本，HA=无状态 Deployment 多副本，危险组合在渲染期 fail）与 `deploy/compose`（生产参考栈，default/ha 两 profile）。CI 的 deploy-artifacts job 把 helm lint、双形态渲染、负向用例、compose config 钉成硬闸门。
 - SDK 根入口面向 Node 22+；React Native/Hermes 设备从独立 neutral 产物 `@tool-bridge/sdk/device` 导入，宿主注入 WebSocket、凭证、生命周期与 executor。
 - 节点 kind 与 builtin 清单以 core 类型和 app bootstrap 常量为准，不在 MUST 手抄数量。
 - 内置集成由生成 catalog + binding 成对装配，直接挂载；`system/plugin` 只承担显式注册管理。

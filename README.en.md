@@ -221,11 +221,15 @@ Federation fails closed by default: an empty host allowlist permits no remote, H
 
 ## Deploy or embed
 
-| Shape | State and objects | Best fit |
-|---|---|---|
-| **Node / Docker** | SQLite + local filesystem; one container and one `/data` volume | Self-hosting, private networks, quick local evaluation |
-| **Cloudflare Workers** | KV + R2 + D1 + Durable Objects | Edge deployment, low operations, long-lived device connections |
-| **Embedded SDK** | Caller-injected stores and providers | Register local functions inside your own Node/Workers application |
+| Shape | State / objects / devices | Replicas | Best fit |
+|---|---|---|---|
+| **Docker (single container)** | SQLite + local filesystem + in-process WebSocket | 1 | Self-hosting, private networks, quick evaluation |
+| **Docker Compose** | PostgreSQL (+ optional S3/R2, Redis) | 1–2 (one machine) | Single-machine production, incl. an HA reference stack — see [`deploy/compose/`](deploy/compose/docker-compose.yml) |
+| **Kubernetes (Helm)** | PostgreSQL + S3/R2 + Redis → stateless multi-replica; or SQLite + PVC single replica | 1–N | Multi-replica production with rolling updates — see [`deploy/helm/tool-bridge/`](deploy/helm/tool-bridge) |
+| **Cloudflare Workers** | KV + R2 + D1 + Durable Objects | serverless | Edge deployment, low operations, long-lived device connections |
+| **Embedded SDK** | Caller-injected stores and providers | — | Register local functions inside your own Node/Workers application |
+
+Horizontal scaling formula for the Node host: **PostgreSQL (`TB_DATABASE_URL`) + S3/R2 (`TB_OBJECT_STORE_*`) + Redis (`TB_REDIS_URL`) together make it a stateless multi-replica deployment**; with only the first two it is a single-replica stateless shape (containers can be recreated freely, but do not scale out). The Helm chart rejects dangerous combinations (such as `replicas>1 + SQLite`) at render time. Health probes: `/livez` (liveness), `/readyz` (readiness: backend connectivity plus early traffic removal during graceful shutdown), `/healthz` (version and catalog digest).
 
 ### Cloudflare Workers
 

@@ -226,11 +226,15 @@ tb help teams/team-b/tools/search
 
 ## 部署与嵌入
 
-| 形态 | 状态与对象 | 适合场景 |
-|---|---|---|
-| **Node / Docker** | SQLite + 本地文件系统；单容器和 `/data` 卷 | 自托管、内网、快速本地验证 |
-| **Cloudflare Workers** | KV + R2 + D1 + Durable Objects | 边缘部署、低运维、设备长连接 |
-| **嵌入式 SDK** | 由调用方注入 store/provider | 在自己的 Node/Workers 应用里注册本地函数 |
+| 形态 | 状态 / 对象 / 设备 | 副本 | 适合场景 |
+|---|---|---|---|
+| **Docker 单容器** | SQLite + 本地文件系统 + 进程内 WebSocket | 1 | 自托管、内网、快速验证 |
+| **Docker Compose** | PostgreSQL(+ 可选 S3/R2、Redis) | 1–2(单机) | 单机生产、含 HA 参考栈,见 [`deploy/compose/`](deploy/compose/docker-compose.yml) |
+| **Kubernetes(Helm)** | PostgreSQL + S3/R2 + Redis → 无状态多副本;或 SQLite + PVC 单副本 | 1–N | 多副本生产、滚动更新,见 [`deploy/helm/tool-bridge/`](deploy/helm/tool-bridge) |
+| **Cloudflare Workers** | KV + R2 + D1 + Durable Objects | serverless | 边缘部署、低运维、设备长连接 |
+| **嵌入式 SDK** | 由调用方注入 store/provider | — | 在自己的 Node/Workers 应用里注册本地函数 |
+
+Node 宿主的横向扩容公式:**PG(`TB_DATABASE_URL`)+ S3/R2(`TB_OBJECT_STORE_*`)+ Redis(`TB_REDIS_URL`)三件配齐即无状态多副本**;只配前两件是"容器可随意重建、但别扩副本"的单副本无状态形态。Helm chart 会在渲染期直接拒绝危险组合(如 `replicas>1 + SQLite`)。健康探针:`/livez`(liveness)、`/readyz`(readiness,探后端连通 + 优雅关停时提前摘流量)、`/healthz`(版本与 catalog 对拍)。
 
 ### Cloudflare Workers
 

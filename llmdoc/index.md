@@ -28,7 +28,7 @@
 | 插件设计、迁移和三道闸门 | [guides/plugin-design-and-migration.md](guides/plugin-design-and-migration.md) |
 | 本地/CI/真实环境验证 | [guides/verification-and-commit-practices.md](guides/verification-and-commit-practices.md) |
 | Cloudflare 初始化、部署和验收 | [guides/deploy-and-verify.md](guides/deploy-and-verify.md) |
-| Node、Docker 与 Compose | [guides/docker-host.md](guides/docker-host.md) |
+| Node、Docker、Compose 与 Kubernetes | [guides/docker-host.md](guides/docker-host.md) |
 | npm 版本与发布 | [guides/npm-publish.md](guides/npm-publish.md) |
 | MCP 外部协议兼容 | [guides/mcp-upstream-pitfalls.md](guides/mcp-upstream-pitfalls.md) |
 | Durable Object WebSocket | [guides/do-websocket-hibernation.md](guides/do-websocket-hibernation.md) |
@@ -45,6 +45,7 @@
 | CLI registry tarball 的工作区依赖协议泄漏 | [memory/reflections/cli-registry-catalog-dependency.md](memory/reflections/cli-registry-catalog-dependency.md) |
 | Linux 设备 daemon 产品化 | [memory/reflections/device-daemon.md](memory/reflections/device-daemon.md) |
 | SDK device 多运行时边界 | [memory/reflections/sdk-device-runtime-boundary.md](memory/reflections/sdk-device-runtime-boundary.md) |
+| 多副本部署产品化与 CF 发布路径合流 | [memory/reflections/multi-deploy-productionization.md](memory/reflections/multi-deploy-productionization.md) |
 
 ## 维护边界
 
