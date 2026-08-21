@@ -1,0 +1,47 @@
+# HA 形态示例:PostgreSQL + S3/R2 + Redis,3 副本无状态。
+# 三件套配齐才允许多副本;缺任何一件,helm template/install 会在渲染期直接报错。
+replicaCount: 3
+
+secrets:
+  # 生产建议改用 existingSecret(External Secrets / SealedSecrets 管理),
+  # 此处明文仅作字段示例。
+  bootstrapAdminSk: "tbk_REPLACE_ME"
+  encryptionKey: "REPLACE_ME_32B_base64url"
+
+postgres:
+  url: "postgres://toolbridge:REPLACE_ME@pg.example.internal:5432/toolbridge"
+
+objectStore:
+  endpoint: "https://<account>.r2.cloudflarestorage.com"
+  bucket: "tb-objects"
+  region: "auto"
+  accessKeyId: "REPLACE_ME"
+  secretAccessKey: "REPLACE_ME"
+
+redis:
+  url: "redis://redis.example.internal:6379"
+
+canonicalOrigin: "https://tb.example.com"
+
+ingress:
+  enabled: true
+  className: nginx
+  host: tb.example.com
+  annotations:
+    # 设备 WebSocket 长连接:必须放长读写超时,否则 nginx 60s 掐断。
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+  tls:
+    - secretName: tb-example-com-tls
+      hosts: [tb.example.com]
+
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 2
+
+resources:
+  requests:
+    cpu: 250m
+    memory: 256Mi
+  limits:
+    memory: 512Mi

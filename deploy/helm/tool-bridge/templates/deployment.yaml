@@ -1,0 +1,43 @@
+{{/*
+HA 形态(postgres + objectStore 配齐):无状态 Deployment,/data 用 emptyDir
+(readOnlyRootFilesystem 下给运行时一个可写落点;状态在 PG、对象在 S3,卷内容可丢)。
+*/}}
+{{- include "tool-bridge.validate" . -}}
+{{- if include "tool-bridge.stateless" . }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "tool-bridge.fullname" . }}
+  labels:
+    {{- include "tool-bridge.labels" . | nindent 4 }}
+spec:
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "tool-bridge.selectorLabels" . | nindent 6 }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      # 滚动更新不缩容可用副本:设备 WS 断线重连由客户端 supervisor 兜底,
+      # 但同时只滚一格能把重连风暴摊平。
+      maxUnavailable: 0
+      maxSurge: 1
+  template:
+    metadata:
+      labels:
+        {{- include "tool-bridge.selectorLabels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      {{- include "tool-bridge.podSpec" . | nindent 6 }}
+      volumes:
+        - name: data
+          emptyDir: {}
+{{- end }}

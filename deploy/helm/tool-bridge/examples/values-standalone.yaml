@@ -1,0 +1,9 @@
+# standalone 形态示例:SQLite + PVC,单副本(缺省形态,最少配置)。
+# 只需要两个信任根;状态与对象都落在 PVC(/data)。
+secrets:
+  bootstrapAdminSk: "tbk_REPLACE_ME"
+  encryptionKey: "REPLACE_ME_32B_base64url"
+
+persistence:
+  size: 10Gi
+  # storageClass: fast-ssd

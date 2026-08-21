@@ -1,0 +1,106 @@
+# tool-bridge Helm values。
+#
+# 两种受支持形态(由后端配置自动推断,不设独立 mode 开关):
+#
+# 1. standalone(缺省):SQLite + 本地对象存储 → StatefulSet + PVC,副本数强制 1。
+# 2. HA:postgres.url + objectStore.* 配齐 → 无状态 Deployment;replicaCount > 1
+#    时还必须配 redis.url(跨副本设备 WebSocket 转发),否则渲染期直接报错。
+#
+# 危险组合(如 replicas>1 + SQLite)在模板渲染期 fail,不会部署出隐性坏栈。
+
+image:
+  repository: ghcr.io/tokenrollai/tool-bridge
+  # 缺省用 Chart.appVersion;固定部署版本时显式给 tag。
+  tag: ""
+  pullPolicy: IfNotPresent
+imagePullSecrets: []
+
+replicaCount: 1
+
+# ============================================================
+# 信任根(必填;二选一)
+# ============================================================
+secrets:
+  # 引用已存在的 Secret(须含 TB_BOOTSTRAP_ADMIN_SK / TB_SECRET_ENCRYPTION_KEY 两个 key;
+  # 配 postgres/redis/objectStore 时还可含 TB_DATABASE_URL / TB_REDIS_URL /
+  # TB_OBJECT_STORE_ACCESS_KEY_ID / TB_OBJECT_STORE_SECRET_ACCESS_KEY,
+  # 优先于下方与 postgres/redis/objectStore 里的明文值)。
+  existingSecret: ""
+  # 首次引导的 Admin SK。生成:
+  #   node -e "console.log('tbk_'+require('crypto').randomBytes(32).toString('base64url'))"
+  bootstrapAdminSk: ""
+  # SecretStore 主密钥(base64url 32B)。生成:
+  #   node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"
+  encryptionKey: ""
+
+# ============================================================
+# 后端(配齐 postgres + objectStore = 无状态形态)
+# ============================================================
+postgres:
+  # TB_DATABASE_URL(postgres://user:pass@host:5432/db)。空 = SQLite(standalone)。
+  url: ""
+
+objectStore:
+  # TB_OBJECT_STORE_*:四项必须齐全,半配在渲染期与运行时都会拒绝。
+  endpoint: ""
+  bucket: ""
+  region: ""
+  accessKeyId: ""
+  secretAccessKey: ""
+
+redis:
+  # TB_REDIS_URL(redis://host:6379)。replicaCount > 1 时必填。
+  url: ""
+
+# ============================================================
+# 网关行为
+# ============================================================
+# TB_CANONICAL_ORIGIN:多域名接入(Ingress 域 + 内网域)时钉死 OAuth redirect_uri。
+canonicalOrigin: ""
+# SIGTERM 后 /readyz 先转 503、等这么多秒再关停(k8s endpoint 摘除传播窗口)。
+shutdownDrainSec: 10
+# 追加环境变量(原样注入容器 env,支持 valueFrom)。
+extraEnv: []
+
+# ============================================================
+# standalone 持久卷(仅 SQLite / 本地对象模式使用;HA 形态忽略)
+# ============================================================
+persistence:
+  size: 10Gi
+  storageClass: ""
+
+service:
+  type: ClusterIP
+  port: 8787
+
+ingress:
+  enabled: false
+  className: ""
+  # 设备 WebSocket 是长连接,nginx Ingress 需要放长读写超时,例如:
+  #   nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+  #   nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+  annotations: {}
+  host: ""
+  tls: []
+
+resources: {}
+nodeSelector: {}
+tolerations: []
+affinity: {}
+podAnnotations: {}
+podLabels: {}
+
+# 多副本时建议开启(HA 形态)。
+podDisruptionBudget:
+  enabled: false
+  minAvailable: 1
+
+# 仅 HA 形态可用;standalone 下开启会在渲染期报错。
+autoscaling:
+  enabled: false
+  minReplicas: 2
+  maxReplicas: 5
+  targetCPUUtilizationPercentage: 80
+
+# 覆盖 drain(shutdownDrainSec)+ 排空既有请求 + 设备 WS 收尾。
+terminationGracePeriodSeconds: 60

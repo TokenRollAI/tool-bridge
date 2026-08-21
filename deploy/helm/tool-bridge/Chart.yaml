@@ -1,0 +1,19 @@
+apiVersion: v2
+name: tool-bridge
+description: >-
+  Self-describing, reverse-registrable tool & context gateway (HTBP).
+  Deploys the Node host (ghcr.io/tokenrollai/tool-bridge) in one of two shapes:
+  standalone (SQLite + PVC, single replica) or HA (external PostgreSQL + S3 +
+  Redis, stateless multi-replica).
+type: application
+# chart 版本与 appVersion 解耦:appVersion 跟随 @tool-bridge/server 的镜像 tag。
+version: 0.1.0
+appVersion: "0.10.0"
+keywords:
+  - tool-bridge
+  - htbp
+  - mcp
+  - agent-tools
+home: https://github.com/TokenRollAI/tool-bridge
+sources:
+  - https://github.com/TokenRollAI/tool-bridge

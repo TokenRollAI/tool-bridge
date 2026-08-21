@@ -109,3 +109,54 @@ jobs:
       - name: Warn on unbumped public packages
         if: github.event_name == 'pull_request'
         run: node scripts/check-version-bumps.mjs "origin/${{ github.base_ref }}"
+
+  # 部署产物是纯声明文件,没有测试兜底 —— 模板语法错、危险组合校验失效只会在用户
+  # helm install 时暴露。这里把 lint、双形态渲染与负向用例(必须 fail 的组合真的 fail)
+  # 都钉成硬闸门;compose 同理做语法与必填检查。全程秒级。
+  deploy-artifacts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Helm lint + render both shapes
+        working-directory: deploy/helm/tool-bridge
+        run: |
+          helm lint . -f examples/values-standalone.yaml
+          helm lint . -f examples/values-ha.yaml
+          # standalone → StatefulSet;HA → Deployment。渲染断言防两形态判定回归。
+          helm template tb . -f examples/values-standalone.yaml | grep -q "^kind: StatefulSet"
+          helm template tb . -f examples/values-ha.yaml | grep -q "^kind: Deployment"
+
+      - name: Helm negative cases must fail
+        working-directory: deploy/helm/tool-bridge
+        run: |
+          set -e
+          fails=(
+            "-f examples/values-standalone.yaml --set replicaCount=3"
+            "-f examples/values-ha.yaml --set redis.url="
+            "-f examples/values-ha.yaml --set objectStore.secretAccessKey="
+            "-f examples/values-standalone.yaml --set secrets.bootstrapAdminSk="
+            "-f examples/values-standalone.yaml --set autoscaling.enabled=true"
+          )
+          for args in "${fails[@]}"; do
+            if helm template tb . $args >/dev/null 2>&1; then
+              echo "危险组合未被拒绝: $args" >&2
+              exit 1
+            fi
+          done
+
+      - name: Compose config (both profiles) + required-var check
+        working-directory: deploy/compose
+        env:
+          TB_BOOTSTRAP_ADMIN_SK: tbk_ci_syntax_check
+          TB_SECRET_ENCRYPTION_KEY: ci_syntax_check
+          TB_PG_PASSWORD: ci_syntax_check
+        run: |
+          docker compose --profile default config >/dev/null
+          docker compose --profile ha config >/dev/null
+          # 必填缺失必须在启动前报错(而不是起一个 fail closed 循环重启的容器)。
+          if env -u TB_BOOTSTRAP_ADMIN_SK docker compose --profile default config >/dev/null 2>&1; then
+            echo "缺 TB_BOOTSTRAP_ADMIN_SK 未被拒绝" >&2
+            exit 1
+          fi

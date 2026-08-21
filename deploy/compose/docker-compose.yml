@@ -1,0 +1,148 @@
+# tool-bridge 生产参考栈(区别于仓库根 docker-compose.yml —— 那份是本地开发闭环,
+# 内置测试上游与确定性 fixture,不要用于对外部署)。
+#
+# 用法(在本目录):
+#   cp .env.example .env   # 填入真实 secret(必填项缺失时 compose 直接报错)
+#   docker compose --profile default up -d   # 默认栈:gateway + postgres(单副本)
+#   docker compose --profile ha up -d        # 单机 HA 参考栈:双副本 + redis + caddy LB
+#
+# 形态说明:
+# - 默认栈:状态在 PG;$ref 大对象缺省落 gateway 容器卷(TB_OBJECT_STORE_* 配上
+#   外部 S3/R2 后容器可无状态重建)。单副本,不需要 Redis。
+# - ha profile:双 gateway + Redis 设备路由 + Caddy 负载均衡,对外一个端口。
+#   这是**单机** HA 参考栈(演示/验证跨副本转发),机器本身仍是单点;
+#   真正的多副本生产部署用 deploy/helm/tool-bridge。
+#
+# 镜像缺省用 GHCR 发布版;要跑本地改动:TB_IMAGE=tool-bridge:local 并先在仓库根
+# `docker build -t tool-bridge:local .`。
+
+name: tool-bridge-prod
+
+x-gateway-base: &gateway-base
+  image: ${TB_IMAGE:-ghcr.io/tokenrollai/tool-bridge:latest}
+  init: true
+  restart: unless-stopped
+  depends_on:
+    postgres:
+      condition: service_healthy
+  environment: &gateway-env
+    # 必填信任根:缺失时 compose 在启动前报错,而不是容器 fail closed 循环重启。
+    # 生成方式见 .env.example。
+    TB_BOOTSTRAP_ADMIN_SK: ${TB_BOOTSTRAP_ADMIN_SK:?missing - see .env.example}
+    TB_SECRET_ENCRYPTION_KEY: ${TB_SECRET_ENCRYPTION_KEY:?missing - see .env.example}
+    TB_DATABASE_URL: postgres://${TB_PG_USER:-toolbridge}:${TB_PG_PASSWORD:?missing - set a real postgres password}@postgres:5432/${TB_PG_DB:-toolbridge}
+    # 多域名接入时钉死 OAuth redirect_uri(强烈建议在反代/TLS 场景设置)。
+    TB_CANONICAL_ORIGIN: ${TB_CANONICAL_ORIGIN:-}
+    TB_SHUTDOWN_DRAIN_SEC: ${TB_SHUTDOWN_DRAIN_SEC:-5}
+    # 外部 S3/R2(可选;四项必须齐全,半配会被运行时拒绝启动):
+    TB_OBJECT_STORE_ENDPOINT: ${TB_OBJECT_STORE_ENDPOINT:-}
+    TB_OBJECT_STORE_BUCKET: ${TB_OBJECT_STORE_BUCKET:-}
+    TB_OBJECT_STORE_REGION: ${TB_OBJECT_STORE_REGION:-}
+    TB_OBJECT_STORE_ACCESS_KEY_ID: ${TB_OBJECT_STORE_ACCESS_KEY_ID:-}
+    TB_OBJECT_STORE_SECRET_ACCESS_KEY: ${TB_OBJECT_STORE_SECRET_ACCESS_KEY:-}
+  healthcheck: &gateway-healthcheck
+    test:
+      - CMD
+      - node
+      - -e
+      - "fetch('http://127.0.0.1:8787/readyz').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"
+    interval: 10s
+    timeout: 5s
+    retries: 6
+    start_period: 15s
+
+services:
+  # ---------- 默认栈:单副本 ----------
+  gateway:
+    <<: *gateway-base
+    profiles: ["default"]
+    ports:
+      - '${TB_BIND:-127.0.0.1}:${TB_PUBLIC_PORT:-8787}:8787'
+    volumes:
+      # 未配 TB_OBJECT_STORE_* 时 $ref 大对象落这里;配了则卷仅作可写目录。
+      - gateway-data:/data
+
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${TB_PG_USER:-toolbridge}
+      POSTGRES_PASSWORD: ${TB_PG_PASSWORD:?missing - set a real postgres password}
+      POSTGRES_DB: ${TB_PG_DB:-toolbridge}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U ${TB_PG_USER:-toolbridge} -d ${TB_PG_DB:-toolbridge}
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  # ---------- ha profile:双副本 + Redis 路由 + Caddy LB(单机参考栈) ----------
+  # 注意:双副本共享 $ref 对象要求配 TB_OBJECT_STORE_*(外部 S3/R2);
+  # 不配时两副本的本地对象互不可见(与 Helm 校验同一约束,compose 无法渲染期拦截)。
+  gateway-a:
+    <<: *gateway-base
+    profiles: ["ha"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      <<: *gateway-env
+      TB_REDIS_URL: redis://redis:6379
+      TB_REPLICA_ID: replica-a
+    volumes:
+      - gateway-a-data:/data
+
+  gateway-b:
+    <<: *gateway-base
+    profiles: ["ha"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      <<: *gateway-env
+      TB_REDIS_URL: redis://redis:6379
+      TB_REPLICA_ID: replica-b
+    volumes:
+      - gateway-b-data:/data
+
+  redis:
+    image: redis:7-alpine
+    profiles: ["ha"]
+    restart: unless-stopped
+    healthcheck:
+      test: [CMD, redis-cli, ping]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  lb:
+    # Caddy 轮询两副本;WebSocket 透传开箱即用(Upgrade/Authorization/Host 原样保留)。
+    image: caddy:2-alpine
+    profiles: ["ha"]
+    restart: unless-stopped
+    depends_on:
+      gateway-a:
+        condition: service_healthy
+      gateway-b:
+        condition: service_healthy
+    command:
+      - caddy
+      - reverse-proxy
+      - --from=:8787
+      - --to=gateway-a:8787
+      - --to=gateway-b:8787
+    ports:
+      - '${TB_BIND:-127.0.0.1}:${TB_PUBLIC_PORT:-8787}:8787'
+
+volumes:
+  gateway-data:
+  gateway-a-data:
+  gateway-b-data:
+  postgres-data:

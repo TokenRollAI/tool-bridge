@@ -1,0 +1,19 @@
+tool-bridge {{ .Values.image.tag | default .Chart.AppVersion }} 已部署:
+{{- if include "tool-bridge.stateless" . }}
+  形态:HA(PostgreSQL + S3 对象存储{{ if .Values.redis.url }} + Redis 设备路由{{ end }}),{{ .Values.replicaCount }} 副本,Pod 无状态可滚动更新。
+{{- else }}
+  形态:standalone(SQLite + PVC),单副本。扩容前先配 postgres.url + objectStore.*(+ redis.url)。
+{{- end }}
+
+验证:
+  kubectl -n {{ .Release.Namespace }} rollout status {{ if include "tool-bridge.stateless" . }}deployment{{ else }}statefulset{{ end }}/{{ include "tool-bridge.fullname" . }}
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "tool-bridge.fullname" . }} 8787:{{ .Values.service.port }}
+  curl http://127.0.0.1:8787/healthz
+  curl http://127.0.0.1:8787/readyz
+
+首次引导用的 Admin SK 保存在密码管理器;网关只存 hash。
+用 `tb use` 指向网关地址后即可 `tb help /` 浏览整棵树。
+
+提示:
+- 容器反复重启且日志含 "refusing to start" → 检查 Secret 里的 TB_BOOTSTRAP_ADMIN_SK。
+- Ingress 接设备 WebSocket 时放长 proxy 读写超时(见 values.yaml ingress.annotations 注释)。
