@@ -16,6 +16,8 @@ pnpm turbo run build
 
 优先从改动附近的定向测试开始，最后执行全仓闸门。失败就报告失败；跳过真实外部验证时说明未验证的边界。
 
+多 agent 共用同一 worktree 时，指定单一验证 owner，按“定向测试 → `pnpm verify` → 必需的 `pnpm turbo run build`”串行执行。其他 agent 不并发运行会重建 workspace 依赖链接的 pnpm 命令，避免共享 `node_modules` 软链接竞争产生无法归因的瞬时缺模块失败。
+
 ## 证据放置
 
 | 变化 | 最小证据 |

@@ -10,13 +10,14 @@ import {
   ReactFlowProvider,
   useReactFlow,
 } from '@xyflow/react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { CircleAlert, Maximize2, RefreshCw } from 'lucide-react'
-import { useCallback, useEffect, useMemo } from 'react'
 import dagre from '@dagrejs/dagre'
 import '@xyflow/react/dist/style.css'
 import { useSession } from '@/lib/session-context'
 import { Button } from '@/components/ui/button'
 import { useTree } from '@/lib/queries'
+import { useTheme } from '@/lib/theme'
 import { cn } from '@/lib/utils'
 import {
   buildGraph,
@@ -24,8 +25,8 @@ import {
   type FlowNodeData,
   layoutGraph,
 } from './treeGraph'
-import { useCanvasTree, useExpandedPaths } from './useCanvasTree'
-import { CanvasNode } from './CanvasNode'
+import { useCanvasCommands, useCanvasTree, useExpandedPaths } from './useCanvasTree'
+import { CanvasNode, type CanvasNodeAction } from './CanvasNode'
 
 const nodeTypes = { tbNode: CanvasNode }
 
@@ -33,34 +34,164 @@ const nodeTypes = { tbNode: CanvasNode }
 const AUTO_COLLAPSE_THRESHOLD = 60
 
 interface TreeCanvasProps {
+  onAddChild?: (target: CanvasActionTarget) => void
+  onDelete?: (target: CanvasActionTarget) => void
+  onOpenCommand: (path: string, commandName: string) => void
+  onOpenCommands: (path: string) => void
   onSelect: (path: string) => void
   /** 当前选中节点(受控;通常来自 URL)。 */
   selectedPath: string | null
 }
 
-function CanvasInner({ selectedPath, onSelect }: TreeCanvasProps) {
+export interface CanvasActionTarget {
+  childPaths: string[]
+  description: string
+  hasUnloadedPaths: boolean
+  label: string
+  path: string
+}
+
+/** MiniMap 只画矩形，用稳定高对比色编码角色/kind，不能复用暗色卡片 token。 */
+function minimapNodeColor(node: Node): string {
+  const data = node.data as unknown as FlowNodeData
+  if (node.selected || data.virtualRoot) return '#facc15'
+  if (data.role !== 'tree') return '#f59e0b'
+  if (data.remoteScope) return '#d946ef'
+  const colors: Partial<Record<FlowNodeData['kind'], string>> = {
+    builtin: '#38bdf8',
+    context: '#34d399',
+    device: '#fbbf24',
+    directory: '#94a3b8',
+    http: '#2dd4bf',
+    mcp: '#a78bfa',
+    skillhub: '#818cf8',
+    tool: '#fb7185',
+  }
+  return colors[data.kind] ?? '#94a3b8'
+}
+
+function CanvasInner({
+  selectedPath,
+  onSelect,
+  onAddChild,
+  onDelete,
+  onOpenCommand,
+  onOpenCommands,
+}: TreeCanvasProps) {
   const { active } = useSession()
+  const [theme] = useTheme()
   // 展开集合的种子直接取共享的根查询(depth=1),不必额外跑一遍 useCanvasTree。
   const rootSeed = useTree('', 1)
-  const { expanded, toggle, expand } = useExpandedPaths(rootSeed.data?.children, active?.id ?? '')
-  const tree = useCanvasTree(expanded)
+  const { expanded, toggle } = useExpandedPaths(rootSeed.data?.children, active?.id ?? '')
+  const [lazyPaths, setLazyPaths] = useState<ReadonlyMap<string, boolean>>(() => new Map())
+  const [commandOwners, setCommandOwners] = useState<ReadonlySet<string>>(() => new Set())
+  const tree = useCanvasTree(expanded, lazyPaths)
   const { fitView } = useReactFlow()
+  const fittedProfileRef = useRef<string | null>(null)
+
+  useEffect(() => {
+    setLazyPaths(new Map())
+    setCommandOwners(new Set())
+  }, [active?.id])
+
+  // 命令 help 只订阅当前图中可见且用户明确打开过的 owner；折叠祖先会停止 observer。
+  const visibleTreePaths = useMemo(() => {
+    const graph = buildGraph(tree.roots, {
+      expanded,
+      autoCollapseThreshold: AUTO_COLLAPSE_THRESHOLD,
+    })
+    return new Set(graph.nodes.filter(node => node.data.role === 'tree').map(node => node.data.path))
+  }, [tree.roots, expanded])
+  const visibleCommandOwners = useMemo(
+    () => new Set([...commandOwners].filter(path => visibleTreePaths.has(path))),
+    [commandOwners, visibleTreePaths],
+  )
+  const commandTree = useCanvasCommands(visibleCommandOwners)
+
+  const onNodeAction = useCallback(
+    (action: CanvasNodeAction, data: FlowNodeData) => {
+      if (action === 'toggle') {
+        if (data.truncated && !data.expanded) {
+          setLazyPaths((current) => {
+            const next = new Map(current)
+            next.set(data.path, data.remoteScope)
+            return next
+          })
+        }
+        toggle(data.path)
+        return
+      }
+      if (action === 'commands') {
+        if (commandTree.errorPaths.has(data.path)) {
+          commandTree.refetch(data.path)
+          return
+        }
+        setCommandOwners((current) => {
+          const next = new Set(current)
+          if (next.has(data.path)) {
+            next.delete(data.path)
+          } else {
+            next.add(data.path)
+          }
+          return next
+        })
+        return
+      }
+      if (action === 'invoke' && data.commandName) {
+        onOpenCommand(data.path, data.commandName)
+        return
+      }
+      if (action === 'openCommands') {
+        onOpenCommands(data.path)
+        return
+      }
+      if (action === 'inspect') {
+        onSelect(data.path)
+        return
+      }
+      const target: CanvasActionTarget = {
+        path: data.path,
+        label: data.label,
+        description: data.description,
+        childPaths: data.childPaths,
+        hasUnloadedPaths: data.truncated,
+      }
+      if (action === 'add') onAddChild?.(target)
+      if (action === 'delete') onDelete?.(target)
+    },
+    [
+      commandTree,
+      onAddChild,
+      onDelete,
+      onOpenCommand,
+      onOpenCommands,
+      onSelect,
+      toggle,
+    ],
+  )
 
   const { nodes, edges } = useMemo(() => {
     const built = buildGraph(tree.roots, {
       expanded,
       autoCollapseThreshold: AUTO_COLLAPSE_THRESHOLD,
+      commandsByPath: commandTree.commandsByPath,
     })
     const laid = layoutGraph(built.nodes, built.edges, dagre as unknown as DagreModule, 'LR')
     const rfNodes: Node[] = laid.map(n => ({
       id: n.id,
       type: n.type,
       position: n.position,
+      width: n.width,
+      height: n.height,
       data: {
         ...n.data,
         loading: tree.loadingPaths.has(n.id),
+        commandsOpen: n.data.role === 'tree' && commandOwners.has(n.data.path),
+        commandLoading: n.data.role === 'tree' && commandTree.loadingPaths.has(n.data.path),
+        commandError: n.data.role === 'tree' && commandTree.errorPaths.has(n.data.path),
+        onAction: (action: CanvasNodeAction) => onNodeAction(action, n.data),
       },
-      selected: n.id === selectedPath,
+      selected: n.data.role === 'tree' && n.data.path === selectedPath,
     }))
     const rfEdges: Edge[] = built.edges.map(e => ({
       id: e.id,
@@ -68,35 +199,52 @@ function CanvasInner({ selectedPath, onSelect }: TreeCanvasProps) {
       target: e.target,
       type: 'smoothstep',
       animated: false,
-      style: e.remoteScope
-        ? { stroke: 'var(--color-brand-to)', strokeDasharray: '4 3', strokeWidth: 1.5 }
-        : { stroke: 'var(--border)', strokeWidth: 1.5 },
+      style: e.relation === 'commands'
+        ? { stroke: '#f59e0b', strokeDasharray: '3 3', strokeWidth: 1.5 }
+        : e.remoteScope
+          ? { stroke: 'var(--color-brand-to)', strokeDasharray: '4 3', strokeWidth: 1.5 }
+          : { stroke: 'var(--border)', strokeWidth: 1.5 },
     }))
     return { nodes: rfNodes, edges: rfEdges }
-  }, [tree.roots, tree.loadingPaths, expanded, selectedPath])
+  }, [
+    tree.roots,
+    tree.loadingPaths,
+    expanded,
+    commandTree.commandsByPath,
+    commandTree.loadingPaths,
+    commandTree.errorPaths,
+    commandOwners,
+    selectedPath,
+    onNodeAction,
+  ])
 
-  // 首次布局完成后自动 fit;节点集合变化时轻量重 fit。
+  // 每个连接首次布局后只自动适配一次；后续展开、选中和命令显隐必须保留用户视口。
   useEffect(() => {
     if (nodes.length === 0) return
+    const profileId = active?.id ?? ''
+    if (fittedProfileRef.current === profileId) return
+    fittedProfileRef.current = profileId
     const id = requestAnimationFrame(() => void fitView({ padding: 0.2, duration: 300, maxZoom: 1.1 }))
     return () => cancelAnimationFrame(id)
-  }, [nodes.length, fitView])
+  }, [active?.id, nodes.length, fitView])
 
   const onNodeClick: NodeMouseHandler = useCallback(
     (event, node) => {
       const data = node.data as unknown as FlowNodeData
-      // 点在展开切换上:只切换展开,不选中。
+      // 节点内部快捷按钮自己处理动作，不再触发卡片的详情行为。
       const target = event.target as HTMLElement
-      if (target.closest('[data-expand-toggle]')) {
-        if (data.childCount > 0 || data.truncated) {
-          toggle(data.path)
-          if (data.truncated) expand(data.path)
-        }
+      if (target.closest('button')) return
+      if (data.role === 'command' && data.commandName) {
+        onOpenCommand(data.path, data.commandName)
+        return
+      }
+      if (data.role === 'commandOverflow') {
+        onOpenCommands(data.path)
         return
       }
       onSelect(data.path)
     },
-    [onSelect, toggle, expand],
+    [onOpenCommand, onOpenCommands, onSelect],
   )
 
   if (tree.isPending) {
@@ -129,6 +277,7 @@ function CanvasInner({ selectedPath, onSelect }: TreeCanvasProps) {
   return (
     <ReactFlow
       className="tb-canvas"
+      colorMode={theme}
       edges={edges}
       fitView
       maxZoom={1.6}
@@ -149,12 +298,18 @@ function CanvasInner({ selectedPath, onSelect }: TreeCanvasProps) {
         showInteractive={false}
       />
       <MiniMap
-        className="!rounded-lg !border !bg-card"
-        maskColor="color-mix(in oklch, var(--background) 70%, transparent)"
-        nodeColor="var(--muted)"
-        nodeStrokeColor="var(--border)"
+        ariaLabel="能力树导航缩略图"
+        bgColor="var(--card)"
+        className="!rounded-xl !border !border-border !shadow-lg max-sm:!hidden"
+        maskColor="rgb(2 6 23 / 0.28)"
+        maskStrokeColor="var(--primary)"
+        maskStrokeWidth={1.25}
+        nodeBorderRadius={6}
+        nodeColor={minimapNodeColor}
+        nodeStrokeColor="rgb(15 23 42 / 0.72)"
+        nodeStrokeWidth={1}
         pannable
-        zoomable
+        style={{ width: 176, height: 112 }}
       />
     </ReactFlow>
   )
@@ -186,7 +341,14 @@ export function TreeCanvas(props: TreeCanvasProps & { className?: string }) {
     <div className={cn('relative h-full min-h-0 w-full', props.className)}>
       <ReactFlowProvider>
         <FitButton />
-        <CanvasInner onSelect={props.onSelect} selectedPath={props.selectedPath} />
+        <CanvasInner
+          onAddChild={props.onAddChild}
+          onDelete={props.onDelete}
+          onOpenCommand={props.onOpenCommand}
+          onOpenCommands={props.onOpenCommands}
+          onSelect={props.onSelect}
+          selectedPath={props.selectedPath}
+        />
       </ReactFlowProvider>
     </div>
   )

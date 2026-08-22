@@ -528,6 +528,20 @@ export function RegistryPage() {
             <div className="flex flex-wrap items-center gap-2 pr-8">
               <DialogTitle className="font-mono text-base">{inspecting?.path}</DialogTitle>
               {inspecting && <KindBadge kind={inspecting.kind} />}
+              {inspecting && (
+                <Button
+                  aria-label={`打开 ${inspecting.path} 工具详情`}
+                  asChild
+                  className="ml-auto"
+                  size="icon-sm"
+                  title="打开工具详情"
+                  variant="ghost"
+                >
+                  <Link to={`/nodes/${encodeTreePath(inspecting.path)}`}>
+                    <ExternalLink />
+                  </Link>
+                </Button>
+              )}
             </div>
             <DialogDescription>
               内置集成的凭证由平台管理；这里不展示密钥或内部引用。

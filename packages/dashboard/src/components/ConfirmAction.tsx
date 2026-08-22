@@ -20,24 +20,36 @@ export function ConfirmAction({
   actionLabel = '确认执行',
   pending: externalPending = false,
   onConfirm,
+  open: controlledOpen,
+  onOpenChange,
 }: {
   actionLabel?: string
   description?: ReactNode
   onConfirm: () => void | Promise<void>
+  onOpenChange?: (open: boolean) => void
+  open?: boolean
   pending?: boolean
   title: string
-  trigger: ReactNode
+  /** 受控模式可省略 trigger，由外部直接打开确认框。 */
+  trigger?: ReactNode
 }) {
-  const [open, setOpen] = useState(false)
+  const [internalOpen, setInternalOpen] = useState(false)
+  const open = controlledOpen ?? internalOpen
   const [internalPending, setInternalPending] = useState(false)
   const pending = externalPending || internalPending
+
+  const changeOpen = (next: boolean) => {
+    if (pending) return
+    if (controlledOpen === undefined) setInternalOpen(next)
+    onOpenChange?.(next)
+  }
 
   const confirm = async () => {
     if (pending) return
     setInternalPending(true)
     try {
       await onConfirm()
-      setOpen(false)
+      changeOpen(false)
     } catch {
       // 调用方负责 toast/错误呈现；失败时保留弹窗，允许用户重试或取消。
     } finally {
@@ -46,8 +58,8 @@ export function ConfirmAction({
   }
 
   return (
-    <AlertDialog onOpenChange={next => !pending && setOpen(next)} open={open}>
-      <AlertDialogTrigger asChild>{trigger}</AlertDialogTrigger>
+    <AlertDialog onOpenChange={changeOpen} open={open}>
+      {trigger !== undefined && <AlertDialogTrigger asChild>{trigger}</AlertDialogTrigger>}
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle className="text-base">{title}</AlertDialogTitle>

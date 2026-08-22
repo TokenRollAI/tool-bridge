@@ -1,5 +1,5 @@
+import { Command, GitBranch, Menu, Moon, Search, Sun } from 'lucide-react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router'
-import { Command, Menu, Moon, Search, Sun } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import {
   DropdownMenu,
@@ -200,7 +200,7 @@ function ManageRail({ collapsed }: { collapsed: boolean }) {
   return (
     <TooltipProvider delayDuration={200}>
       <nav aria-label="库务导航" className="flex h-full flex-col gap-1 p-2">
-        <RailLink collapsed={collapsed} exact icon={<Search className="size-4" />} label="工作树" to="/" />
+        <RailLink collapsed={collapsed} exact icon={<GitBranch className="size-4" />} label="能力树" to="/" />
         <div className="my-1 h-px bg-border/70" />
         <p
           className={cn(

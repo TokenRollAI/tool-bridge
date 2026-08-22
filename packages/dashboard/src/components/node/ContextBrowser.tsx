@@ -5,9 +5,9 @@ import {
   FilePlus2,
   FileText,
   FolderOpen,
+  Link2,
   ListFilter,
   Loader2,
-  PanelRight,
   Pencil,
   RefreshCw,
   Search,
@@ -15,6 +15,7 @@ import {
 } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import Markdown from 'react-markdown'
+import { Link } from 'react-router'
 import remarkGfm from 'remark-gfm'
 import { toast } from 'sonner'
 import type { ContextEntry, HelpCmd } from '@/lib/types'
@@ -42,6 +43,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { encodeTreePath } from '@/lib/path'
 import { cn } from '@/lib/utils'
 
 /** node://<ns>/<entry> → namespace 内相对条目路径。 */
@@ -84,21 +86,6 @@ function useDebounced(value: string): string {
     return () => clearTimeout(t)
   }, [value])
   return v
-}
-
-/** 预览只在桌面常驻；移动端继续使用 Dialog，避免隐藏的 Portal 意外打开。 */
-function useDesktopContextLayout(): boolean {
-  const [desktop, setDesktop] = useState(() =>
-    typeof window === 'undefined' ? false : window.matchMedia('(min-width: 1024px)').matches,
-  )
-  useEffect(() => {
-    const media = window.matchMedia('(min-width: 1024px)')
-    const update = () => setDesktop(media.matches)
-    update()
-    media.addEventListener('change', update)
-    return () => media.removeEventListener('change', update)
-  }, [])
-  return desktop
 }
 
 function entryText(entry: ContextEntry): string {
@@ -217,142 +204,6 @@ function metaToLines(metadata: Record<string, string> | undefined): string {
     .join('\n')
 }
 
-function EntryPreviewPane({
-  path,
-  entryPath,
-  canWrite,
-  canDelete,
-  onEdit,
-  onDelete,
-}: {
-  canDelete: boolean
-  canWrite: boolean
-  entryPath: string | null
-  onDelete: (rel: string) => Promise<void>
-  onEdit: (rel: string) => void
-  path: string
-}) {
-  const entry = useCtxEntry(path, entryPath)
-  const e = entry.data
-  const ref = e ? refOf(e.content) : null
-  const text = e && ref === null ? entryText(e) : ''
-
-  return (
-    <aside className="hidden min-w-0 overflow-hidden rounded-xl border bg-card/35 lg:sticky lg:top-4 lg:flex lg:min-h-[40rem] lg:max-h-[calc(100dvh-8rem)] lg:flex-col">
-      {entryPath === null
-        ? (
-            <div className="grid min-h-[40rem] place-items-center p-8 text-center">
-              <div className="max-w-64">
-                <span className="mx-auto grid size-12 place-items-center rounded-xl border bg-background/70 text-muted-foreground">
-                  <PanelRight className="size-5" />
-                </span>
-                <h2 className="mt-4 text-sm font-medium">选择条目查看详情</h2>
-                <p className="mt-1.5 text-xs leading-5 text-muted-foreground">
-                  预览会固定在这里，筛选、翻页和目录上下文都不会丢失。
-                </p>
-              </div>
-            </div>
-          )
-        : (
-            <>
-              <header className="flex min-h-16 items-start justify-between gap-4 border-b px-4 py-3.5">
-                <div className="min-w-0">
-                  <p className="font-mono text-[9px] tracking-[0.14em] text-muted-foreground">
-                    PREVIEW
-                  </p>
-                  <h2 className="mt-1 break-all font-mono text-sm font-medium">{entryPath}</h2>
-                  {e && <EntryFacts entry={e} />}
-                </div>
-                <div className="flex shrink-0 items-center gap-1">
-                  <Button
-                    aria-label="刷新预览"
-                    disabled={entry.isFetching}
-                    onClick={() => entry.refetch()}
-                    size="icon-sm"
-                    title="刷新预览"
-                    variant="ghost"
-                  >
-                    <RefreshCw className={cn(entry.isFetching && 'animate-spin')} />
-                  </Button>
-                  {canWrite && (
-                    <Button onClick={() => onEdit(entryPath)} size="sm" variant="outline">
-                      <Pencil />
-                      编辑
-                    </Button>
-                  )}
-                  {canDelete && (
-                    <ConfirmAction
-                      actionLabel="删除"
-                      description={<p>删除是幂等的，但内容不可恢复。</p>}
-                      onConfirm={() => onDelete(entryPath)}
-                      title={`删除条目 ${entryPath}?`}
-                      trigger={(
-                        <Button aria-label="删除条目" size="icon-sm" title="删除" variant="ghost">
-                          <Trash2 className="text-destructive" />
-                        </Button>
-                      )}
-                    />
-                  )}
-                </div>
-              </header>
-
-              <div className="min-h-0 flex-1 overflow-y-auto p-4">
-                {entry.isPending
-                  ? (
-                      <div aria-label="正在读取条目" className="grid gap-3" role="status">
-                        <Skeleton className="h-5 w-full" />
-                        <Skeleton className="h-5 w-5/6" />
-                        <Skeleton className="h-48 w-full" />
-                      </div>
-                    )
-                  : entry.isError
-                    ? (
-                        <div
-                          className="rounded-lg border border-destructive/40 bg-destructive/10 p-3"
-                          role="alert"
-                        >
-                          <p className="text-sm text-destructive">{entry.error.message}</p>
-                          <Button
-                            className="mt-3"
-                            disabled={entry.isFetching}
-                            onClick={() => entry.refetch()}
-                            size="sm"
-                            variant="outline"
-                          >
-                            <RefreshCw className={cn(entry.isFetching && 'animate-spin')} />
-                            重试读取
-                          </Button>
-                        </div>
-                      )
-                    : e
-                      ? (
-                          <div className="grid gap-5">
-                            <EntryContent entry={e} />
-                            <EntryMetadata entry={e} />
-                          </div>
-                        )
-                      : null}
-              </div>
-
-              {e && (
-                <footer className="flex min-h-12 items-center justify-between gap-3 border-t bg-background/25 px-4 py-2.5">
-                  <p
-                    className="min-w-0 truncate font-mono text-[10px] text-muted-foreground"
-                    title={e.version}
-                  >
-                    version ·
-                    {' '}
-                    {e.version}
-                  </p>
-                  {ref === null && <CopyButton label="复制内容" size="icon-sm" value={text} />}
-                </footer>
-              )}
-            </>
-          )}
-    </aside>
-  )
-}
-
 /** 条目预览:meta + 内容(markdown/json/text);大对象给 $ref 下载链接。 */
 function EntryViewDialog({
   path,
@@ -378,61 +229,94 @@ function EntryViewDialog({
 
   return (
     <Dialog onOpenChange={o => !o && onClose()} open={entryPath !== null}>
-      <DialogContent className="max-h-[calc(100dvh-1rem)] overflow-y-auto p-4 sm:max-h-[85vh] sm:max-w-2xl sm:p-6">
-        <DialogHeader>
-          <DialogTitle className="min-w-0 break-all pr-6 font-mono text-sm">
-            {entryPath}
-          </DialogTitle>
-          {e && (
-            <DialogDescription asChild>
-              <div>
-                <EntryFacts entry={e} />
-              </div>
-            </DialogDescription>
-          )}
+      <DialogContent className="max-h-[calc(100dvh-1rem)] grid-rows-[auto_minmax(0,1fr)_auto] gap-0 overflow-hidden p-0 sm:max-h-[90dvh] sm:max-w-5xl">
+        <DialogHeader className="border-b px-4 py-4 pr-12 sm:px-6 sm:py-5 sm:pr-14">
+          <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div className="min-w-0">
+              <p className="font-mono text-[9px] tracking-[0.14em] text-muted-foreground">
+                CONTEXT ENTRY
+              </p>
+              <DialogTitle className="mt-1 min-w-0 break-all font-mono text-sm">
+                {entryPath}
+              </DialogTitle>
+            </div>
+            <div className="flex shrink-0 items-center gap-1 self-start">
+              <Button
+                aria-label="刷新条目内容"
+                disabled={entry.isFetching}
+                onClick={() => entry.refetch()}
+                size="icon-sm"
+                title="刷新条目内容"
+                variant="ghost"
+              >
+                <RefreshCw className={cn(entry.isFetching && 'animate-spin')} />
+              </Button>
+              <Button asChild size="sm" variant="outline">
+                <Link
+                  aria-label={`查看所属工具 ${path} 的详情（新窗口打开）`}
+                  rel="noopener noreferrer"
+                  target="_blank"
+                  title={`查看所属工具：${path}`}
+                  to={`/nodes/${encodeTreePath(path)}`}
+                >
+                  <Link2 />
+                  查看所属工具详情
+                </Link>
+              </Button>
+            </div>
+          </div>
+          <DialogDescription asChild>
+            <div>
+              {e
+                ? <EntryFacts entry={e} />
+                : <span>{entry.isError ? '条目读取失败，可重试。' : '正在读取条目内容。'}</span>}
+            </div>
+          </DialogDescription>
         </DialogHeader>
 
-        {entry.isPending
-          ? (
-              <div className="grid gap-2">
-                <Skeleton className="h-4 w-full" />
-                <Skeleton className="h-4 w-5/6" />
-                <Skeleton className="h-4 w-3/6" />
-              </div>
-            )
-          : entry.isError
+        <div className="min-h-0 overflow-y-auto px-4 py-4 sm:px-6 sm:py-5">
+          {entry.isPending
             ? (
-                <div
-                  className="rounded-lg border border-destructive/40 bg-destructive/10 p-3"
-                  role="alert"
-                >
-                  <p className="text-sm text-destructive">{entry.error.message}</p>
-                  <Button
-                    className="mt-3"
-                    disabled={entry.isFetching}
-                    onClick={() => entry.refetch()}
-                    size="sm"
-                    variant="outline"
-                  >
-                    <RefreshCw className={cn(entry.isFetching && 'animate-spin')} />
-                    重试读取
-                  </Button>
+                <div aria-label="正在读取条目" className="grid gap-3" role="status">
+                  <Skeleton className="h-5 w-full" />
+                  <Skeleton className="h-5 w-5/6" />
+                  <Skeleton className="h-48 w-full" />
                 </div>
               )
-            : e
+            : entry.isError
               ? (
-                  <div className="grid gap-5">
-                    <EntryContent entry={e} />
-                    <EntryMetadata entry={e} />
+                  <div
+                    className="rounded-lg border border-destructive/40 bg-destructive/10 p-3"
+                    role="alert"
+                  >
+                    <p className="text-sm text-destructive">{entry.error.message}</p>
+                    <Button
+                      className="mt-3"
+                      disabled={entry.isFetching}
+                      onClick={() => entry.refetch()}
+                      size="sm"
+                      variant="outline"
+                    >
+                      <RefreshCw className={cn(entry.isFetching && 'animate-spin')} />
+                      重试读取
+                    </Button>
                   </div>
                 )
-              : null}
+              : e
+                ? (
+                    <div className="grid gap-5">
+                      <EntryContent entry={e} />
+                      <EntryMetadata entry={e} />
+                    </div>
+                  )
+                : null}
+        </div>
 
-        <DialogFooter className="items-center sm:justify-between">
+        <DialogFooter className="items-stretch border-t bg-background/90 px-4 py-3 sm:items-center sm:justify-between sm:px-6">
           <div className="flex items-center gap-1">
             {ref === null && e && <CopyButton label="复制内容" size="icon-sm" value={text} />}
           </div>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap justify-end gap-2">
             {canDelete && entryPath && (
               <ConfirmAction
                 actionLabel="删除"
@@ -744,10 +628,8 @@ export function ContextBrowser({ path, cmds }: { cmds: HelpCmd[], path: string }
   const entries = useCtxEntries(path, searchActive ? '' : prefix, effectiveQuery, searchMode)
   const invoke = useInvoke()
   const invalidate = useInvalidate()
-  const desktop = useDesktopContextLayout()
 
   const [selected, setSelected] = useState<string | null>(null)
-  const [mobileViewing, setMobileViewing] = useState<string | null>(null)
   const [editing, setEditing] = useState<{ entry?: ContextEntry, entryPath: string } | null>(null)
 
   const refresh = () => invalidate()
@@ -757,7 +639,6 @@ export function ContextBrowser({ path, cmds }: { cmds: HelpCmd[], path: string }
       await invoke.mutateAsync({ commandPath: `${path}/delete`, args: { path: entryPath } })
       toast.success(`已删除 ${entryPath}`)
       setSelected(current => (current === entryPath ? null : current))
-      setMobileViewing(current => (current === entryPath ? null : current))
       await refresh()
     } catch (error) {
       toast.error(error instanceof Error ? error.message : '删除 Context 条目失败')
@@ -768,11 +649,10 @@ export function ContextBrowser({ path, cmds }: { cmds: HelpCmd[], path: string }
   const items = entries.data?.pages.flatMap(p => p.items) ?? []
   const openEntry = (entryPath: string) => {
     setSelected(entryPath)
-    if (!desktop) setMobileViewing(entryPath)
   }
 
   return (
-    <section className="grid min-w-0 gap-4 lg:grid-cols-[minmax(360px,0.9fr)_minmax(420px,1.1fr)] lg:items-start">
+    <section className="min-w-0">
       <section className="min-w-0 overflow-hidden rounded-xl border bg-card/35">
         <header className="flex min-h-14 items-center justify-between gap-3 border-b px-3.5 py-3 sm:px-4">
           <div className="min-w-0">
@@ -1051,23 +931,14 @@ export function ContextBrowser({ path, cmds }: { cmds: HelpCmd[], path: string }
         </footer>
       </section>
 
-      <EntryPreviewPane
-        canDelete={canDelete}
-        canWrite={canWrite}
-        entryPath={desktop ? selected : null}
-        onDelete={remove}
-        onEdit={rel => setEditing({ entryPath: rel })}
-        path={path}
-      />
-
       <EntryViewDialog
         canDelete={canDelete}
         canWrite={canWrite}
-        entryPath={desktop ? null : mobileViewing}
-        onClose={() => setMobileViewing(null)}
+        entryPath={selected}
+        onClose={() => setSelected(null)}
         onDelete={remove}
         onEdit={(rel) => {
-          setMobileViewing(null)
+          setSelected(null)
           setEditing({ entryPath: rel })
         }}
         path={path}

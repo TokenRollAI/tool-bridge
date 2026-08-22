@@ -1,10 +1,10 @@
 import { useCallback, useMemo, useRef, useState } from 'react'
 import { useQueries } from '@tanstack/react-query'
-import type { TreeJson } from '@/lib/types'
+import type { HelpCmd, TreeJson } from '@/lib/types'
 import { useConn, useSession } from '@/lib/session-context'
 import { pruneOfflineNodes } from '@/lib/presence'
+import { getHelp, getTree } from '@/lib/api'
 import { useTree } from '@/lib/queries'
-import { getTree } from '@/lib/api'
 
 /**
  * 画布的数据编排:根树 depth=1 常驻,展开某个 truncated 分支时按需拉它的子树,
@@ -52,30 +52,70 @@ export interface CanvasTree {
   roots: TreeJson[]
 }
 
+export interface CanvasCommands {
+  commandsByPath: ReadonlyMap<string, readonly HelpCmd[]>
+  errorPaths: ReadonlySet<string>
+  loadingPaths: ReadonlySet<string>
+  refetch: (path: string) => void
+}
+
 /**
- * @param expanded 当前展开集合(来自画布状态);只对其中 truncated 的分支发懒加载。
+ * 只为用户明确打开的、当前仍可见的 owner 订阅 `~help`。query key 与 `useHelp`
+ * 完全一致，因此 Inspector 与画布共享缓存；真正打开命令时 schema 仍由 CmdPanel 按需补水。
  */
-export function useCanvasTree(expanded: ReadonlySet<string>): CanvasTree {
+export function useCanvasCommands(ownerPaths: ReadonlySet<string>): CanvasCommands {
+  const conn = useConn()
+  const { active, revision } = useSession()
+  const paths = useMemo(() => [...ownerPaths].sort(), [ownerPaths])
+  const base = ['tb', active?.id ?? '', active?.baseUrl ?? '', revision] as const
+  const results = useQueries({
+    queries: paths.map(path => ({
+      queryKey: [...base, 'help', path] as const,
+      queryFn: ({ signal }: { signal: AbortSignal }) => getHelp(conn, path, signal),
+    })),
+  })
+
+  return useMemo(() => {
+    const commandsByPath = new Map<string, readonly HelpCmd[]>()
+    const loadingPaths = new Set<string>()
+    const errorPaths = new Set<string>()
+    paths.forEach((path, index) => {
+      const result = results[index]
+      if (result?.data) commandsByPath.set(path, result.data.cmds)
+      else if (result?.isError) errorPaths.add(path)
+      else if (result?.isPending) loadingPaths.add(path)
+    })
+    return {
+      commandsByPath,
+      loadingPaths,
+      errorPaths,
+      refetch: (path: string) => {
+        const index = paths.indexOf(path)
+        if (index >= 0) void results[index]?.refetch()
+      },
+    }
+  }, [paths, results])
+}
+
+/**
+ * @param expanded 当前展开集合(来自画布状态)。
+ * @param lazyPaths 用户点开的 truncated 分支及其 remote 作用域；显式记录后，懒加载
+ * 结果里新出现的深层 truncated 节点也能继续请求，而不局限于根查询返回的第一层。
+ */
+export function useCanvasTree(
+  expanded: ReadonlySet<string>,
+  lazyPaths: ReadonlyMap<string, boolean>,
+): CanvasTree {
   const conn = useConn()
   const { active, revision } = useSession()
   const root = useTree('', ROOT_DEPTH)
 
-  // 记录哪些路径确实是 truncated 且已展开 —— 只对它们懒加载。
+  // 只保留当前仍展开的显式懒加载入口；折叠时停止订阅，缓存仍由 Query 保留。
   const truncatedExpanded = useMemo(() => {
-    const result: Array<{ path: string, remote: boolean }> = []
-    const rootChildren = root.data?.children ?? []
-    const index = new Map<string, TreeJson>()
-    const walk = (node: TreeJson, remoteScope: boolean) => {
-      index.set(node.path, node)
-      const remote = remoteScope || node.kind === 'remote'
-      if (node.truncated === true && expanded.has(node.path)) {
-        result.push({ path: node.path, remote })
-      }
-      node.children?.forEach(child => walk(child, remote))
-    }
-    rootChildren.forEach(child => walk(child, child.kind === 'remote'))
-    return result
-  }, [root.data, expanded])
+    return [...lazyPaths]
+      .filter(([path]) => expanded.has(path))
+      .map(([path, remote]) => ({ path, remote }))
+  }, [expanded, lazyPaths])
 
   const base = ['tb', active?.id ?? '', active?.baseUrl ?? '', revision] as const
   const subtrees = useQueries({
@@ -127,39 +167,33 @@ export function useCanvasTree(expanded: ReadonlySet<string>): CanvasTree {
   }
 }
 
-/** 画布展开集合状态:每个 profile 首次拿到根树时默认展开本地首层目录。 */
+/** 画布展开集合状态:每个 profile 默认只展开虚拟 `/` 总根，分支由用户按需展开。 */
 export function useExpandedPaths(rootChildren: TreeJson[] | undefined, profileId: string) {
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set())
   const initialized = useRef<string | null>(null)
 
   if (rootChildren && initialized.current !== profileId) {
     initialized.current = profileId
-    const next = new Set<string>()
-    for (const node of rootChildren) {
-      if (node.kind !== 'remote' && node.truncated !== true && (node.children?.length ?? 0) > 0) {
-        next.add(node.path)
-      }
-    }
+    const next = new Set<string>([''])
     setExpanded(next)
   }
 
   const toggle = useCallback((path: string) => {
     setExpanded((prev) => {
       const next = new Set(prev)
-      if (next.has(path)) next.delete(path)
-      else next.add(path)
+      if (next.has(path)) {
+        // 折叠父分支时同步清掉后代展开态，避免隐藏子树继续订阅懒加载请求。
+        for (const candidate of next) {
+          if (candidate === path || path === '' || candidate.startsWith(`${path}/`)) {
+            next.delete(candidate)
+          }
+        }
+      } else {
+        next.add(path)
+      }
       return next
     })
   }, [])
 
-  const expand = useCallback((path: string) => {
-    setExpanded((prev) => {
-      if (prev.has(path)) return prev
-      const next = new Set(prev)
-      next.add(path)
-      return next
-    })
-  }, [])
-
-  return { expanded, toggle, expand }
+  return { expanded, toggle }
 }

@@ -1,10 +1,10 @@
-import { GitBranch, Plus, TerminalSquare, Trash2, X } from 'lucide-react'
+import { Activity, CircleCheck, CircleX, GitBranch, Plus, TerminalSquare, Trash2, X } from 'lucide-react'
 import { useNavigate } from 'react-router'
 import { toast } from 'sonner'
 import type { ApiError } from '@/lib/api'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { useHelp, useHistory, useInvalidate, useInvoke } from '@/lib/queries'
 import { CommandWorkspace } from '@/components/node/CommandWorkspace'
-import { useHelp, useInvalidate, useInvoke } from '@/lib/queries'
 import { ContextBrowser } from '@/components/node/ContextBrowser'
 import { FeedbackPanel } from '@/components/node/FeedbackPanel'
 import { MountDialog } from '@/pages/system/forms/MountDialog'
@@ -18,6 +18,16 @@ import { Button } from '@/components/ui/button'
 import { encodeTreePath } from '@/lib/path'
 import { cn } from '@/lib/utils'
 import { InspectorHelpDoc } from './InspectorHelpDoc'
+
+function invokeTime(iso: string): string {
+  const time = Date.parse(iso)
+  if (Number.isNaN(time)) return iso
+  const seconds = Math.max(0, Math.floor((Date.now() - time) / 1000))
+  if (seconds < 60) return '刚刚'
+  if (seconds < 3600) return `${Math.floor(seconds / 60)} 分钟前`
+  if (seconds < 86_400) return `${Math.floor(seconds / 3600)} 小时前`
+  return new Date(time).toLocaleDateString()
+}
 
 /** 子节点跳转卡片(画布点击子节点会选中它;这里给一个列表入口)。 */
 function ChildList({
@@ -85,10 +95,19 @@ function InspectorFrame({
             <h2 className="min-w-0 truncate font-mono text-lg tracking-tight">{title ?? path}</h2>
             {kind && <KindBadge kind={kind} />}
           </div>
-          <p className="mt-0.5 truncate font-mono text-[11px] text-muted-foreground" title={path || '/'}>
-            node://
-            {path || '/'}
-          </p>
+          <div
+            aria-label={`节点路径：/${path}`}
+            className="mt-1 flex min-w-0 items-center gap-1 overflow-hidden font-mono text-[10px] text-muted-foreground"
+            title={`/${path}`}
+          >
+            <span className="shrink-0 text-primary">/</span>
+            {path.split('/').filter(Boolean).map((part, index) => (
+              <span className="flex min-w-0 items-center gap-1" key={`${part}-${index}`}>
+                {index > 0 && <span className="shrink-0 opacity-55">/</span>}
+                <span className="truncate">{part}</span>
+              </span>
+            ))}
+          </div>
         </div>
         <Button aria-label="关闭" onClick={onClose} size="icon-sm" variant="ghost">
           <X />
@@ -108,15 +127,22 @@ function InspectorFrame({
  */
 export function NodeInspector({
   path,
+  initialTool,
+  initialView,
   onClose,
   onUnmounted,
 }: {
+  /** 从搜索或画布命令叶直达时，自动打开对应调用弹窗。 */
+  initialTool?: string
+  /** “查看完整目录”直达调用 tab，不影响普通节点的默认浏览 tab。 */
+  initialView?: 'invoke'
   onClose: () => void
   /** 卸载成功后通知画布把选中清掉(并让树失效)。 */
   onUnmounted: (path: string) => void
   path: string
 }) {
   const help = useHelp(path)
+  const history = useHistory()
   const invoke = useInvoke()
   const invalidate = useInvalidate()
   const navigate = useNavigate()
@@ -179,6 +205,8 @@ export function NodeInspector({
   const canUnmountSelf = path !== '' && !isSystem
   const childDefaultPath = path === '' ? '' : `${path}/`
   const shortName = path === '' ? '/' : path.split('/').pop()
+  const nodeHistory = history.filter(record => record.path === path)
+  const latestInvoke = nodeHistory[0]
 
   return (
     <InspectorFrame
@@ -204,6 +232,33 @@ export function NodeInspector({
               {children?.length ?? 0}
               {' 子节点'}
             </span>
+            <span
+              className="inline-flex items-center gap-1.5 rounded-md border bg-card px-2 py-1 font-mono"
+              title="只统计此浏览器、当前连接档案最近保存的 50 次调用"
+            >
+              <Activity className="size-3 text-primary" />
+              本机调用
+              {' '}
+              {nodeHistory.length}
+            </span>
+            {latestInvoke && (
+              <span
+                className={cn(
+                  'inline-flex items-center gap-1.5 rounded-md border px-2 py-1 font-mono',
+                  latestInvoke.ok
+                    ? 'border-ok/25 bg-ok/5 text-ok'
+                    : 'border-destructive/25 bg-destructive/5 text-destructive',
+                )}
+                title={`本机最近调用 · ${latestInvoke.tool} · ${invokeTime(latestInvoke.at)}`}
+              >
+                {latestInvoke.ok
+                  ? <CircleCheck className="size-3" />
+                  : <CircleX className="size-3" />}
+                {latestInvoke.tool}
+                {' · '}
+                {latestInvoke.ok ? `${latestInvoke.ms} ms` : latestInvoke.code ?? '失败'}
+              </span>
+            )}
           </div>
           {(canMountChild || canUnmountSelf) && (
             <div className="mt-3 flex flex-wrap gap-2">
@@ -240,7 +295,11 @@ export function NodeInspector({
           </div>
         </div>
 
-        <Tabs className="gap-0" defaultValue={hasBrowser ? 'browse' : 'invoke'} key={path}>
+        <Tabs
+          className="gap-0"
+          defaultValue={initialTool || initialView === 'invoke' ? 'invoke' : hasBrowser ? 'browse' : 'invoke'}
+          key={path}
+        >
           <div className="overflow-x-auto border-b px-5">
             <TabsList className="h-11 min-w-max gap-5 p-0" variant="line">
               {hasBrowser && (
@@ -281,6 +340,7 @@ export function NodeInspector({
               ? (
                   <CommandWorkspace
                     cmds={cmds}
+                    initialTool={initialTool}
                     lazySchema={node.kind === 'mcp' || node.kind === 'http'}
                     path={path}
                   />

@@ -49,6 +49,8 @@ export function MountDialog({
   defaultPath,
   defaultKind,
   trigger,
+  open: controlledOpen,
+  onOpenChange,
 }: {
   /** 打开时预选的 kind(向导按来源分流时用);缺省 mcp。 */
   defaultKind?: MountKind
@@ -56,7 +58,10 @@ export function MountDialog({
   existingNodes?: RegistryNode[]
   existingPaths: string[]
   hasUnloadedPaths?: boolean
-  trigger?: ReactNode
+  onOpenChange?: (open: boolean) => void
+  open?: boolean
+  /** null 表示仅由受控 open 打开，不渲染触发按钮。 */
+  trigger?: ReactNode | null
 }) {
   const invoke = useInvoke()
   const oauth = useOAuthAuthorize()
@@ -64,7 +69,8 @@ export function MountDialog({
   const plugins = usePluginList()
   const catalog = useIntegrationCatalog()
   const secrets = useSecretList()
-  const [open, setOpen] = useState(false)
+  const [internalOpen, setInternalOpen] = useState(false)
+  const open = controlledOpen ?? internalOpen
   const [form, setForm] = useState<RegistryMountFormState>(() => ({
     ...INITIAL_REGISTRY_MOUNT_FORM,
     ...(defaultKind !== undefined ? { kind: defaultKind } : {}),
@@ -139,7 +145,8 @@ export function MountDialog({
           ? `已写入挂载 ${mounted}`
           : `已挂载 ${mounted}`,
     )
-    setOpen(false)
+    if (controlledOpen === undefined) setInternalOpen(false)
+    onOpenChange?.(false)
     setErr(null)
     setForm({ ...INITIAL_REGISTRY_MOUNT_FORM, path: '' })
     invalidate()
@@ -169,7 +176,8 @@ export function MountDialog({
 
   const changeOpen = (next: boolean) => {
     if (invoke.isPending) return
-    setOpen(next)
+    if (controlledOpen === undefined) setInternalOpen(next)
+    onOpenChange?.(next)
     if (next) {
       setErr(null)
       if (defaultPath !== undefined || defaultKind !== undefined) {
@@ -184,14 +192,16 @@ export function MountDialog({
 
   return (
     <Dialog onOpenChange={changeOpen} open={open}>
-      <DialogTrigger asChild>
-        {trigger ?? (
-          <Button size="sm">
-            <Plus />
-            挂载节点
-          </Button>
-        )}
-      </DialogTrigger>
+      {trigger !== null && (
+        <DialogTrigger asChild>
+          {trigger ?? (
+            <Button size="sm">
+              <Plus />
+              挂载节点
+            </Button>
+          )}
+        </DialogTrigger>
+      )}
       <DialogContent
         className="top-0 right-0 bottom-0 left-auto flex h-dvh max-h-none w-full max-w-full translate-x-0 translate-y-0 flex-col gap-0 rounded-none border-y-0 border-r-0 p-0 sm:max-w-3xl"
         showCloseButton={!invoke.isPending}
