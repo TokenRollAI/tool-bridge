@@ -64,6 +64,7 @@ let failMount = false
 let secretNames = ['shared-key']
 
 vi.mock('@/lib/queries', () => ({
+  useInvalidate: () => () => {},
   useIntegrationCatalog: () => ({
     data: [JIRA, SENTRY, TAVILY],
     isPending: false,

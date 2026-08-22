@@ -17,6 +17,7 @@ import {
 import { Link } from 'react-router'
 import { useHealthz, useHistory, useStatus, useTree } from '@/lib/queries'
 import { clearHistory, historyScope } from '@/lib/history'
+import { ConfirmAction } from '@/components/ConfirmAction'
 import { EmptyState } from '@/components/EmptyState'
 import { PageHeader } from '@/components/PageHeader'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -142,10 +143,14 @@ export function OverviewPage() {
         title="网关总览"
       />
 
-      <section className="relative mt-6 overflow-hidden rounded-xl border bg-card/70 p-5 sm:p-6">
+      <section className="glass relative mt-6 overflow-hidden rounded-2xl p-5 sm:p-6">
         <div
           aria-hidden
           className="absolute inset-0 opacity-20 [background-image:linear-gradient(var(--border)_1px,transparent_1px),linear-gradient(90deg,var(--border)_1px,transparent_1px)] [background-size:32px_32px] [mask-image:linear-gradient(90deg,black,transparent_78%)]"
+        />
+        <div
+          aria-hidden
+          className="pointer-events-none absolute -top-24 -right-16 size-64 rounded-full opacity-40 blur-3xl [background:radial-gradient(circle,color-mix(in_oklch,var(--brand-to)_60%,transparent),transparent_70%)]"
         />
         <div className="relative grid gap-6 lg:grid-cols-[minmax(0,1fr)_20rem] lg:items-end">
           <div className="min-w-0">
@@ -263,7 +268,7 @@ export function OverviewPage() {
 
       <nav
         aria-label="管理动作"
-        className="mt-4 flex flex-col gap-1 rounded-lg border bg-card/40 p-2 lg:flex-row lg:items-stretch"
+        className="glass mt-4 flex flex-col gap-1 rounded-xl p-2 lg:flex-row lg:items-stretch"
       >
         <div className="flex items-center gap-2 px-2 py-2 lg:w-36 lg:shrink-0">
           <Activity className="size-4 text-primary" />
@@ -295,7 +300,7 @@ export function OverviewPage() {
       </nav>
 
       <div className="mt-6 grid gap-6 lg:grid-cols-[minmax(0,1.45fr)_minmax(18rem,0.85fr)]">
-        <section className="rounded-lg border bg-card/45">
+        <section className="glass rounded-xl">
           <SectionHeader
             icon={Network}
             meta={tree.data ? `${rootChildren.length} 个根节点` : undefined}
@@ -373,21 +378,28 @@ export function OverviewPage() {
           </div>
         </section>
 
-        <section className="rounded-lg border bg-card/45">
+        <section className="glass rounded-xl">
           <SectionHeader
             action={
               history.length > 0
                 ? (
-                    <Button
-                      aria-label="清空历史"
-                      className="text-muted-foreground"
-                      onClick={() => clearHistory(active ? historyScope(active) : '')}
-                      size="icon-xs"
-                      title="清空历史"
-                      variant="ghost"
-                    >
-                      <Trash2 />
-                    </Button>
+                    <ConfirmAction
+                      actionLabel="清空"
+                      description={<p>将清空本机记录的最近调用历史（仅本浏览器，不影响服务端）。此操作不可撤销。</p>}
+                      onConfirm={() => clearHistory(active ? historyScope(active) : '')}
+                      title="清空最近调用历史?"
+                      trigger={(
+                        <Button
+                          aria-label="清空历史"
+                          className="text-muted-foreground"
+                          size="icon-xs"
+                          title="清空历史"
+                          variant="ghost"
+                        >
+                          <Trash2 />
+                        </Button>
+                      )}
+                    />
                   )
                 : undefined
             }

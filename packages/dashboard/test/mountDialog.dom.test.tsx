@@ -21,6 +21,7 @@ const AMAP: CatalogListItem = {
 const calls: Array<{ args: Record<string, unknown>, path: string, tool: string }> = []
 
 vi.mock('@/lib/queries', () => ({
+  useInvalidate: () => () => {},
   useIntegrationCatalog: () => ({ data: [AMAP] }),
   usePluginList: () => ({
     data: { items: [] },

@@ -18,7 +18,7 @@ Dashboard 是纯 HTTP 客户端，不 import core。wire 类型在 `src/lib/type
 - 新凭证先写 SecretStore，再写 registry；挂载失败只在确认本轮创建了新槽时回滚，不能误删既有凭证。
 - 编辑挂载时留空表示沿用现有 `authRef`，因为 SecretStore 不可回读明文。
 - secret/authRef 不进入调用历史、toast、URL 或人类输出；JSON 管理输出也要裁剪敏感字段。
-- 切换 profile 时 query cache、history 和状态按 profile identity 隔离。
+- query cache、history 和状态按 profile identity 隔离：queryKey 以 profile 标识为前缀，缓存失效（`useInvalidate`）也始终限定当前 profile —— 不带参失效整个 profile，带域名参数只失效对应域段，绝不跨 profile 失效。
 - 列表超过服务端默认页时必须可继续分页，客户端筛选不能吞 cursor。
 
 ## 验证

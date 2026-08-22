@@ -13,7 +13,6 @@ import {
   Search,
   Trash2,
 } from 'lucide-react'
-import { useQueryClient } from '@tanstack/react-query'
 import { useEffect, useState } from 'react'
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -34,7 +33,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { useCtxEntries, useCtxEntry, useInvoke } from '@/lib/queries'
+import { useCtxEntries, useCtxEntry, useInvalidate, useInvoke } from '@/lib/queries'
 import { ConfirmAction } from '@/components/ConfirmAction'
 import { CopyButton } from '@/components/CopyButton'
 import { EmptyState } from '@/components/EmptyState'
@@ -746,14 +745,14 @@ export function ContextBrowser({ path, cmds }: { cmds: HelpCmd[], path: string }
 
   const entries = useCtxEntries(path, searchActive ? '' : prefix, effectiveQuery, searchMode)
   const invoke = useInvoke()
-  const qc = useQueryClient()
+  const invalidate = useInvalidate()
   const desktop = useDesktopContextLayout()
 
   const [selected, setSelected] = useState<string | null>(null)
   const [mobileViewing, setMobileViewing] = useState<string | null>(null)
   const [editing, setEditing] = useState<{ entry?: ContextEntry, entryPath: string } | null>(null)
 
-  const refresh = () => qc.invalidateQueries({ queryKey: ['tb'] })
+  const refresh = () => invalidate()
 
   const remove = async (entryPath: string) => {
     try {

@@ -1,6 +1,5 @@
 import { Loader2, Plus, TriangleAlert } from 'lucide-react'
 import { type ReactNode, useMemo, useState } from 'react'
-import { useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import type { RegistryNode } from '@/lib/types'
 import {
@@ -14,6 +13,7 @@ import {
 } from '@/components/ui/dialog'
 import {
   useIntegrationCatalog,
+  useInvalidate,
   useInvoke,
   useOAuthAuthorize,
   usePluginList,
@@ -57,7 +57,7 @@ export function MountDialog({
 }) {
   const invoke = useInvoke()
   const oauth = useOAuthAuthorize()
-  const qc = useQueryClient()
+  const invalidate = useInvalidate()
   const plugins = usePluginList()
   const catalog = useIntegrationCatalog()
   const secrets = useSecretList()
@@ -139,7 +139,7 @@ export function MountDialog({
     setOpen(false)
     setErr(null)
     setForm({ ...INITIAL_REGISTRY_MOUNT_FORM, path: '' })
-    qc.invalidateQueries({ queryKey: ['tb'] })
+    invalidate()
     const needsOAuth = form.kind === 'mcp'
       ? form.mcpAuthMode === 'oauth'
       : form.kind === 'tool'

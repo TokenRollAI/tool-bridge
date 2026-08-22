@@ -1,14 +1,13 @@
 import { ArrowUpRight, GitBranch, Plus, TerminalSquare, Trash2 } from 'lucide-react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router'
-import { useQueryClient } from '@tanstack/react-query'
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { Fragment } from 'react'
 import { toast } from 'sonner'
 import type { ApiError } from '@/lib/api'
+import { useHelp, useHelpMarkdown, useInvalidate, useInvoke } from '@/lib/queries'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { CommandWorkspace } from '@/components/node/CommandWorkspace'
-import { useHelp, useHelpMarkdown, useInvoke } from '@/lib/queries'
 import { ContextBrowser } from '@/components/node/ContextBrowser'
 import { FeedbackPanel } from '@/components/node/FeedbackPanel'
 import { SkillBrowser } from '@/components/node/SkillBrowser'
@@ -101,7 +100,7 @@ export function NodePage() {
   const initialTool = searchParams.get('tool') ?? undefined
   const help = useHelp(path)
   const invoke = useInvoke()
-  const qc = useQueryClient()
+  const invalidate = useInvalidate()
   const navigate = useNavigate()
 
   // 卸载 = registry delete;成功后失效 ['tb'](刷新树 + 本页)。错误由此处 toast,再抛给
@@ -110,7 +109,7 @@ export function NodePage() {
     try {
       await invoke.mutateAsync({ path: 'system/registry', tool: 'delete', args: { path: target } })
       toast.success(`已卸载 ${target}`)
-      await qc.invalidateQueries({ queryKey: ['tb'] })
+      await invalidate()
     } catch (error) {
       toast.error(error instanceof Error ? error.message : '卸载节点失败')
       throw error

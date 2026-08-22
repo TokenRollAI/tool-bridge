@@ -12,7 +12,6 @@ import {
   ShieldEllipsis,
   Sun,
 } from 'lucide-react'
-import { useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router'
 import type { NodeKind, Presence, TreeJson } from '@/lib/types'
 import {
@@ -25,11 +24,11 @@ import {
   CommandSeparator,
 } from '@/components/ui/command'
 import { PRESENCE_HINT, PRESENCE_LABEL } from '@/lib/presence'
+import { useInvalidate, useTree } from '@/lib/queries'
 import { KindBadge } from '@/components/KindBadge'
 import { KIND_ICON } from '@/components/kind-icon'
 import { useSession } from '@/lib/session-context'
 import { encodeTreePath } from '@/lib/path'
-import { useTree } from '@/lib/queries'
 import { useTheme } from '@/lib/theme'
 import { cn } from '@/lib/utils'
 
@@ -81,7 +80,7 @@ export function CommandPalette({
   const navigate = useNavigate()
   const [theme, toggleTheme] = useTheme()
   const { logout } = useSession()
-  const qc = useQueryClient()
+  const invalidate = useInvalidate()
 
   const nodes = tree.data ? flatten(tree.data) : []
 
@@ -162,7 +161,7 @@ export function CommandPalette({
           </CommandItem>
           <CommandItem
             onSelect={() => {
-              qc.invalidateQueries({ queryKey: ['tb'] })
+              invalidate()
               onOpenChange(false)
             }}
             value="action refresh 刷新数据"

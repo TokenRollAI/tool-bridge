@@ -17,7 +17,6 @@ import {
   Trash2,
 } from 'lucide-react'
 import { type ReactNode, useRef, useState } from 'react'
-import { useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router'
 import { toast } from 'sonner'
 import type { PluginExport, PluginHealth, PluginManifest } from '@/lib/types'
@@ -37,9 +36,9 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import { useInvalidate, useInvoke, usePluginList } from '@/lib/queries'
 import { PaginationFooter } from '@/components/PaginationFooter'
 import { ConfirmAction } from '@/components/ConfirmAction'
-import { useInvoke, usePluginList } from '@/lib/queries'
 import { CopyButton } from '@/components/CopyButton'
 import { EmptyState } from '@/components/EmptyState'
 import { PageHeader } from '@/components/PageHeader'
@@ -378,7 +377,7 @@ export function PluginsPage() {
   const list = usePluginList()
   const invoke = useInvoke()
   const detailsInvoke = useInvoke()
-  const qc = useQueryClient()
+  const invalidate = useInvalidate()
   const inspectingId = useRef<string | null>(null)
   const [token, setToken] = useState<{ id: string, token: string } | null>(null)
   const [editing, setEditing] = useState<PluginManifest | null>(null)
@@ -386,7 +385,8 @@ export function PluginsPage() {
   const [changingEnabled, setChangingEnabled] = useState<string | null>(null)
   const [health, setHealth] = useState<Record<string, HealthView>>({})
 
-  const refresh = () => qc.invalidateQueries({ queryKey: ['tb'] })
+  // plugin 启用/禁用/注销会改变工具树的解析结果,故一并失效 tree/help;仍限当前 profile。
+  const refresh = () => invalidate('plugin-list', 'tree', 'help', 'helpMarkdown')
   const clearHealth = (id: string) => {
     setHealth((current) => {
       if (!(id in current)) return current
@@ -408,6 +408,8 @@ export function PluginsPage() {
       void refresh()
     } catch (error) {
       toast.error(error instanceof Error ? error.message : '更新 Plugin 生命周期失败')
+      // 向上抛出让禁用确认弹窗保留、允许重试(启用路径的调用方自行吞掉)。
+      throw error
     } finally {
       setChangingEnabled(current => (current === plugin.id ? null : current))
     }
@@ -650,31 +652,42 @@ export function PluginsPage() {
                             >
                               {plugin.enabled ? 'enabled' : 'disabled'}
                             </Badge>
-                            <Button
-                              className="mt-1.5 -ml-2 text-muted-foreground"
-                              disabled={changingEnabled !== null}
-                              onClick={() => void setEnabled(plugin, !plugin.enabled)}
-                              size="xs"
-                              type="button"
-                              variant="ghost"
-                            >
-                              {changingEnabled === plugin.id
-                                ? (
-                                    <Loader2 className="animate-spin" />
-                                  )
-                                : plugin.enabled
-                                  ? (
-                                      <Ban />
-                                    )
-                                  : (
-                                      <Check />
+                            {plugin.enabled
+                              ? (
+                                  // 禁用会让引用该 plugin 的挂载节点下次调用失败,与注销的确认标准对齐。
+                                  <ConfirmAction
+                                    actionLabel="禁用调用"
+                                    description={<p>禁用后引用该 plugin 的挂载节点在下次调用时会失败。可随时重新启用。</p>}
+                                    onConfirm={async () => { await setEnabled(plugin, false) }}
+                                    title={`禁用 ${plugin.id}?`}
+                                    trigger={(
+                                      <Button
+                                        className="mt-1.5 -ml-2 text-muted-foreground"
+                                        disabled={changingEnabled !== null}
+                                        size="xs"
+                                        type="button"
+                                        variant="ghost"
+                                      >
+                                        {changingEnabled === plugin.id ? <Loader2 className="animate-spin" /> : <Ban />}
+                                        {changingEnabled === plugin.id ? '正在更新' : '禁用调用'}
+                                      </Button>
                                     )}
-                              {changingEnabled === plugin.id
-                                ? '正在更新'
-                                : plugin.enabled
-                                  ? '禁用调用'
-                                  : '重新启用'}
-                            </Button>
+                                  />
+                                )
+                              : (
+                                  // 重新启用是恢复,非破坏性,直接点击。
+                                  <Button
+                                    className="mt-1.5 -ml-2 text-muted-foreground"
+                                    disabled={changingEnabled !== null}
+                                    onClick={() => { void setEnabled(plugin, true).catch(() => {}) }}
+                                    size="xs"
+                                    type="button"
+                                    variant="ghost"
+                                  >
+                                    {changingEnabled === plugin.id ? <Loader2 className="animate-spin" /> : <Check />}
+                                    {changingEnabled === plugin.id ? '正在更新' : '重新启用'}
+                                  </Button>
+                                )}
                           </TableCell>
                           <TableCell className="whitespace-normal">
                             <PluginHealthCell

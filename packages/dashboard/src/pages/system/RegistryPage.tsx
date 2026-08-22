@@ -10,11 +10,17 @@ import {
   Search,
   Trash2,
 } from 'lucide-react'
-import { useQueryClient } from '@tanstack/react-query'
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router'
 import { toast } from 'sonner'
 import type { RegistryNode } from '@/lib/types'
+import {
+  useIntegrationCatalog,
+  useInvalidate,
+  useInvoke,
+  useOAuthAuthorize,
+  useRegistryList,
+} from '@/lib/queries'
 import {
   Dialog,
   DialogContent,
@@ -30,12 +36,6 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import {
-  useIntegrationCatalog,
-  useInvoke,
-  useOAuthAuthorize,
-  useRegistryList,
-} from '@/lib/queries'
 import { PaginationFooter } from '@/components/PaginationFooter'
 import { PresenceBadge } from '@/components/PresenceBadge'
 import { ConfirmAction } from '@/components/ConfirmAction'
@@ -180,7 +180,7 @@ export function RegistryPage() {
   const catalog = useIntegrationCatalog()
   const invoke = useInvoke()
   const oauth = useOAuthAuthorize()
-  const qc = useQueryClient()
+  const invalidate = useInvalidate()
   const [kindFilter, setKindFilter] = useState<KindFilter>('all')
   const [search, setSearch] = useState('')
   const [inspecting, setInspecting] = useState<RegistryNode | null>(null)
@@ -196,7 +196,7 @@ export function RegistryPage() {
     try {
       await invoke.mutateAsync({ path: 'system/registry', tool: 'delete', args: { path } })
       toast.success(`已卸载 ${path}`)
-      await qc.invalidateQueries({ queryKey: ['tb'] })
+      await invalidate()
     } catch (error) {
       toast.error(error instanceof Error ? error.message : '卸载节点失败')
       throw error

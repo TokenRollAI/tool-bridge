@@ -13,7 +13,6 @@ import {
   Trash2,
   UserRound,
 } from 'lucide-react'
-import { useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { toast } from 'sonner'
 import {
@@ -33,13 +32,13 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import { useInvalidate, useInvoke, useSkList } from '@/lib/queries'
 import { PaginationFooter } from '@/components/PaginationFooter'
 import { type Scope, type SecretKeyInfo } from '@/lib/types'
 import { ConfirmAction } from '@/components/ConfirmAction'
 import { CopyButton } from '@/components/CopyButton'
 import { EmptyState } from '@/components/EmptyState'
 import { PageHeader } from '@/components/PageHeader'
-import { useInvoke, useSkList } from '@/lib/queries'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -247,7 +246,7 @@ function CreateSkDialog({
   onIssued: (value: { id: string, secret: string }) => void
 }) {
   const invoke = useInvoke()
-  const qc = useQueryClient()
+  const invalidate = useInvalidate()
   const [open, setOpen] = useState(false)
   const [form, setForm] = useState<SkFormState>(INITIAL_SK_FORM)
   const [err, setErr] = useState<string | null>(null)
@@ -278,7 +277,7 @@ function CreateSkDialog({
           setOpen(false)
           onIssued({ id: data.key.id, secret: data.secret })
           resetDraft()
-          qc.invalidateQueries({ queryKey: ['tb'] })
+          invalidate('sk-list')
           // 明文已转移到不可意外关闭的一次性结果弹窗，立即清除 mutation data 副本。
           setTimeout(() => invoke.reset(), 0)
         },
@@ -353,29 +352,26 @@ function CreateSkDialog({
 export function SkPage() {
   const list = useSkList()
   const invoke = useInvoke()
-  const qc = useQueryClient()
+  const invalidate = useInvalidate()
   const [issued, setIssued] = useState<{ id: string, secret: string } | null>(null)
   const [filter, setFilter] = useState('')
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
 
-  const refresh = () => qc.invalidateQueries({ queryKey: ['tb'] })
+  const refresh = () => invalidate('sk-list')
 
-  const setDisabled = async (sk: SecretKeyInfo, disabled: boolean) => {
-    try {
-      await invoke.mutateAsync(
-        { path: 'system/sk', tool: 'update', args: { id: sk.id, patch: { disabled } } },
-        {
-          onSuccess: () => {
-            toast.success(`${sk.owner} 的 SK 已${disabled ? '禁用' : '启用'}`)
-            refresh()
-          },
-          onError: error => toast.error(error.message),
+  // 不吞 rejection:onError 已 toast,拒绝向上传递让 ConfirmAction 的禁用弹窗保留、允许重试;
+  // 启用路径的调用方自行 .catch 掉。
+  const setDisabled = (sk: SecretKeyInfo, disabled: boolean) =>
+    invoke.mutateAsync(
+      { path: 'system/sk', tool: 'update', args: { id: sk.id, patch: { disabled } } },
+      {
+        onSuccess: () => {
+          toast.success(`${sk.owner} 的 SK 已${disabled ? '禁用' : '启用'}`)
+          refresh()
         },
-      )
-    } catch {
-      // mutateAsync 的错误已在 onError 中反馈，保留当前列表上下文。
-    }
-  }
+        onError: error => toast.error(error.message),
+      },
+    )
 
   const remove = async (sk: SecretKeyInfo) => {
     try {
@@ -601,16 +597,40 @@ export function SkPage() {
                               </TableCell>
                               <TableCell className="py-4">
                                 <div className="flex justify-end gap-1">
-                                  <Button
-                                    aria-label={sk.disabled ? '启用' : '禁用'}
-                                    disabled={invoke.isPending}
-                                    onClick={() => void setDisabled(sk, !sk.disabled)}
-                                    size="icon-sm"
-                                    title={sk.disabled ? '启用' : '禁用'}
-                                    variant="ghost"
-                                  >
-                                    {sk.disabled ? <Check /> : <Ban />}
-                                  </Button>
+                                  {sk.disabled
+                                    ? (
+                                        // 启用是恢复访问，非破坏性，直接点击。
+                                        <Button
+                                          aria-label="启用"
+                                          disabled={invoke.isPending}
+                                          onClick={() => { void setDisabled(sk, false).catch(() => {}) }}
+                                          size="icon-sm"
+                                          title="启用"
+                                          variant="ghost"
+                                        >
+                                          <Check />
+                                        </Button>
+                                      )
+                                    : (
+                                        // 禁用会立即拒绝该 SK 的所有请求，与吊销的确认标准对齐。
+                                        <ConfirmAction
+                                          actionLabel="禁用"
+                                          description={<p>禁用后该 SK 的所有请求会立即被拒绝（引用它的 Agent/设备随即断开）。可随时重新启用。</p>}
+                                          onConfirm={async () => { await setDisabled(sk, true) }}
+                                          title={`禁用 ${sk.id}?`}
+                                          trigger={(
+                                            <Button
+                                              aria-label="禁用"
+                                              disabled={invoke.isPending}
+                                              size="icon-sm"
+                                              title="禁用"
+                                              variant="ghost"
+                                            >
+                                              <Ban />
+                                            </Button>
+                                          )}
+                                        />
+                                      )}
                                   <ConfirmAction
                                     actionLabel="吊销并删除"
                                     description={

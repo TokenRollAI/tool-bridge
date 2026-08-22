@@ -1,7 +1,6 @@
 import type { RJSFSchema } from '@rjsf/utils'
 import { Braces, ChevronRight, ClipboardList, Loader2, Play, TriangleAlert } from 'lucide-react'
 import { lazy, Suspense, useEffect, useId, useState } from 'react'
-import { useQueryClient } from '@tanstack/react-query'
 import type { HelpCmd } from '@/lib/types'
 import type { ApiError } from '@/lib/api'
 import {
@@ -23,8 +22,8 @@ import {
 } from '@/components/ui/select'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import { isFormFriendly, skeletonFromSchema } from '@/lib/schemaForm'
+import { useInvalidate, useInvoke, useToolHelp } from '@/lib/queries'
 import { ResultView } from '@/components/node/ResultView'
-import { useInvoke, useToolHelp } from '@/lib/queries'
 import { CliHint } from '@/components/node/CliHint'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Textarea } from '@/components/ui/textarea'
@@ -144,7 +143,7 @@ export function CmdPanel({
   const [accept, setAccept] = useState<'markdown' | 'json'>('markdown')
   const [pendingArgs, setPendingArgs] = useState<unknown | null>(null)
   const invoke = useInvoke()
-  const qc = useQueryClient()
+  const invalidate = useInvalidate()
   const acceptId = useId()
 
   /** 当前编辑中的参数(CliHint 展示用;JSON 模式解析失败时回落 {})。 */
@@ -173,7 +172,7 @@ export function CmdPanel({
   const doInvoke = async (args: unknown) => {
     try {
       await invoke.mutateAsync({ path, tool: cmd.name, args, accept, direct })
-      if (MUTATING.test(cmd.name)) await qc.invalidateQueries({ queryKey: ['tb'] })
+      if (MUTATING.test(cmd.name)) await invalidate()
     } catch {
       // Mutation 错误由 useInvoke 保留给 ResultView；这里吞掉 Promise rejection，
       // 让卸载后的调用也能安全结算，不产生未处理拒绝。

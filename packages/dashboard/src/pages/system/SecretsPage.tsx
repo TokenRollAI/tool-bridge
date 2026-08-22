@@ -10,7 +10,6 @@ import {
   ShieldCheck,
   Trash2,
 } from 'lucide-react'
-import { useQueryClient } from '@tanstack/react-query'
 import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
 import {
@@ -29,9 +28,9 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import { useInvalidate, useInvoke, useSecretList } from '@/lib/queries'
 import { PaginationFooter } from '@/components/PaginationFooter'
 import { ConfirmAction } from '@/components/ConfirmAction'
-import { useInvoke, useSecretList } from '@/lib/queries'
 import { CopyButton } from '@/components/CopyButton'
 import { EmptyState } from '@/components/EmptyState'
 import { PageHeader } from '@/components/PageHeader'
@@ -100,7 +99,7 @@ function SetSecretDialog({
   open: boolean
 }) {
   const invoke = useInvoke()
-  const qc = useQueryClient()
+  const invalidate = useInvalidate()
   const [name, setName] = useState('')
   const [value, setValue] = useState('')
   const [showValue, setShowValue] = useState(false)
@@ -145,7 +144,7 @@ function SetSecretDialog({
       {
         onSuccess: () => {
           toast.success(`凭证 ${normalizedName} 已${action}，值不会回显`)
-          qc.invalidateQueries({ queryKey: ['tb'] })
+          invalidate('secret-list')
           onOpenChange(false)
           setName('')
           setValue('')
@@ -302,7 +301,7 @@ function SetSecretDialog({
 export function SecretsPage() {
   const list = useSecretList()
   const invoke = useInvoke()
-  const qc = useQueryClient()
+  const invalidate = useInvalidate()
   const [filter, setFilter] = useState('')
   const [editor, setEditor] = useState({ open: false, initialName: '' })
 
@@ -310,7 +309,7 @@ export function SecretsPage() {
     try {
       await invoke.mutateAsync({ path: 'system/secret', tool: 'delete', args: { name } })
       toast.success(`凭证 ${name} 已删除`)
-      await qc.invalidateQueries({ queryKey: ['tb'] })
+      await invalidate('secret-list')
     } catch (error) {
       toast.error(error instanceof Error ? error.message : '删除凭证失败')
       throw error

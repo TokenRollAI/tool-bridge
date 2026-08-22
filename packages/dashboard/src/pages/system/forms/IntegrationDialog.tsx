@@ -1,5 +1,4 @@
 import { type ReactNode, useMemo, useState } from 'react'
-import { useQueryClient } from '@tanstack/react-query'
 import { Loader2, Plus, Search } from 'lucide-react'
 import { toast } from 'sonner'
 import type { CatalogListItem } from '@/lib/types'
@@ -19,7 +18,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { useIntegrationCatalog, useInvoke, useOAuthAuthorize, useSecretList } from '@/lib/queries'
+import { useIntegrationCatalog, useInvalidate, useInvoke, useOAuthAuthorize, useSecretList } from '@/lib/queries'
 import { FormSection } from '@/components/FormSection'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -54,7 +53,7 @@ export function IntegrationDialog({
 }) {
   const invoke = useInvoke()
   const oauth = useOAuthAuthorize()
-  const qc = useQueryClient()
+  const invalidate = useInvalidate()
   const catalog = useIntegrationCatalog()
   const secrets = useSecretList()
   const [open, setOpen] = useState(false)
@@ -118,7 +117,7 @@ export function IntegrationDialog({
     setOpen(false)
     setErr(null)
     setForm({ ...INITIAL_INTEGRATION_FORM, path: '' })
-    qc.invalidateQueries({ queryKey: ['tb'] })
+    invalidate()
     if (calls.needsAuthorize) {
       oauth.mutate(calls.mount.path, {
         onSuccess: (result) => {

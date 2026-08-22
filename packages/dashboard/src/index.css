@@ -11,63 +11,86 @@
 @custom-variant dark (&:is(.dark *));
 
 /*
- * 主题:工业控制台(graphite + 信号琥珀)。
+ * 主题:玻璃拟态(青→紫品牌渐变 + 景深微光)。
  * 深色为默认(index.html 上挂 .dark);浅色为对照组,由 ThemeToggle 切换。
+ * 品牌强调色统一走 --brand-from(青)→ --brand-to(紫);玻璃表面/描边/发光的可复用
+ * 变量集中在这里,组件只引用语义 token 与 .glass-* 工具类,不各自写死渐变值。
  */
 :root {
-  --background: oklch(0.97 0.003 90);
-  --foreground: oklch(0.24 0.012 260);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.24 0.012 260);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.24 0.012 260);
-  --primary: oklch(0.62 0.13 65);
-  --primary-foreground: oklch(0.14 0.01 260);
-  --secondary: oklch(0.93 0.005 90);
-  --secondary-foreground: oklch(0.3 0.012 260);
-  --muted: oklch(0.93 0.005 90);
-  --muted-foreground: oklch(0.5 0.01 260);
-  --accent: oklch(0.9 0.02 75);
-  --accent-foreground: oklch(0.28 0.03 65);
-  --destructive: oklch(0.55 0.19 27);
-  --destructive-foreground: oklch(0.98 0 0);
-  --border: oklch(0.88 0.005 90);
-  --input: oklch(0.86 0.005 90);
-  --ring: oklch(0.62 0.13 65);
-  --radius: 0.375rem;
-  --ok: oklch(0.62 0.15 150);
-  --warn: oklch(0.68 0.14 75);
+  --background: oklch(0.975 0.004 240);
+  --foreground: oklch(0.26 0.02 265);
+  --card: oklch(0.995 0.002 240);
+  --card-foreground: oklch(0.26 0.02 265);
+  --popover: oklch(0.995 0.002 240);
+  --popover-foreground: oklch(0.26 0.02 265);
+  --primary: oklch(0.58 0.16 245);
+  --primary-foreground: oklch(0.99 0.005 240);
+  --secondary: oklch(0.94 0.008 250);
+  --secondary-foreground: oklch(0.32 0.02 265);
+  --muted: oklch(0.94 0.008 250);
+  --muted-foreground: oklch(0.52 0.02 262);
+  --accent: oklch(0.92 0.03 270);
+  --accent-foreground: oklch(0.34 0.06 275);
+  --destructive: oklch(0.57 0.2 27);
+  --destructive-foreground: oklch(0.99 0 0);
+  --border: oklch(0.9 0.008 255);
+  --input: oklch(0.88 0.008 255);
+  --ring: oklch(0.58 0.16 245);
+  --radius: 0.75rem;
+  --ok: oklch(0.62 0.15 165);
+  --warn: oklch(0.7 0.15 75);
   /* 应用框架层级:activity rail → resource explorer → workspace → raised card。 */
-  --rail: oklch(0.92 0.008 255);
-  --panel: oklch(0.985 0.002 90);
+  --rail: oklch(0.94 0.01 255);
+  --panel: oklch(0.985 0.004 245);
   --panel-raised: oklch(1 0 0);
+
+  /* 品牌渐变端点(青→紫)。所有强调渐变/发光都由这两个派生。 */
+  --brand-from: oklch(0.62 0.17 230);
+  --brand-to: oklch(0.55 0.2 300);
+  /* 玻璃表面:半透明底 + 描边 + 高光 + 景深投影。浅色主题下用近白高透。 */
+  --glass-bg: color-mix(in oklch, var(--card) 72%, transparent);
+  --glass-border: color-mix(in oklch, var(--foreground) 12%, transparent);
+  --glass-highlight: color-mix(in oklch, white 60%, transparent);
+  --glass-shadow: 0 8px 32px -12px oklch(0.4 0.05 265 / 0.28);
+  --glass-blur: 14px;
+  /* 品牌发光(hover/active/焦点强调用)。 */
+  --glow-brand: 0 0 24px -6px color-mix(in oklch, var(--brand-to) 55%, transparent);
 }
 
 .dark {
-  --background: oklch(0.16 0.008 265);
-  --foreground: oklch(0.88 0.006 90);
-  --card: oklch(0.2 0.009 265);
-  --card-foreground: oklch(0.88 0.006 90);
-  --popover: oklch(0.19 0.009 265);
-  --popover-foreground: oklch(0.88 0.006 90);
-  --primary: oklch(0.78 0.13 70);
-  --primary-foreground: oklch(0.15 0.01 265);
-  --secondary: oklch(0.25 0.01 265);
-  --secondary-foreground: oklch(0.85 0.006 90);
-  --muted: oklch(0.24 0.01 265);
-  --muted-foreground: oklch(0.62 0.01 260);
-  --accent: oklch(0.28 0.02 70);
-  --accent-foreground: oklch(0.85 0.08 75);
-  --destructive: oklch(0.62 0.19 27);
-  --destructive-foreground: oklch(0.98 0 0);
-  --border: oklch(0.28 0.01 265);
-  --input: oklch(0.3 0.01 265);
-  --ring: oklch(0.78 0.13 70);
-  --ok: oklch(0.72 0.15 150);
-  --warn: oklch(0.78 0.13 70);
-  --rail: oklch(0.115 0.012 265);
-  --panel: oklch(0.175 0.011 265);
-  --panel-raised: oklch(0.205 0.01 265);
+  --background: oklch(0.15 0.014 265);
+  --foreground: oklch(0.9 0.008 250);
+  --card: oklch(0.2 0.016 265);
+  --card-foreground: oklch(0.9 0.008 250);
+  --popover: oklch(0.19 0.016 265);
+  --popover-foreground: oklch(0.9 0.008 250);
+  --primary: oklch(0.72 0.15 250);
+  --primary-foreground: oklch(0.15 0.02 265);
+  --secondary: oklch(0.26 0.02 265);
+  --secondary-foreground: oklch(0.88 0.008 250);
+  --muted: oklch(0.25 0.018 265);
+  --muted-foreground: oklch(0.66 0.02 258);
+  --accent: oklch(0.3 0.04 275);
+  --accent-foreground: oklch(0.88 0.08 275);
+  --destructive: oklch(0.64 0.2 27);
+  --destructive-foreground: oklch(0.99 0 0);
+  --border: oklch(0.3 0.018 265);
+  --input: oklch(0.32 0.02 265);
+  --ring: oklch(0.72 0.15 250);
+  --ok: oklch(0.74 0.16 165);
+  --warn: oklch(0.8 0.14 80);
+  --rail: oklch(0.115 0.014 265);
+  --panel: oklch(0.175 0.016 265);
+  --panel-raised: oklch(0.215 0.018 265);
+
+  --brand-from: oklch(0.72 0.16 235);
+  --brand-to: oklch(0.68 0.2 300);
+  --glass-bg: color-mix(in oklch, var(--card) 58%, transparent);
+  --glass-border: color-mix(in oklch, white 12%, transparent);
+  --glass-highlight: color-mix(in oklch, white 14%, transparent);
+  --glass-shadow: 0 12px 40px -12px oklch(0 0 0 / 0.55);
+  --glass-blur: 16px;
+  --glow-brand: 0 0 28px -4px color-mix(in oklch, var(--brand-to) 60%, transparent);
 }
 
 @theme inline {
@@ -94,10 +117,12 @@
   --color-warn: var(--warn);
   --color-panel: var(--panel);
   --color-panel-raised: var(--panel-raised);
-  --radius-sm: calc(var(--radius) - 2px);
-  --radius-md: var(--radius);
-  --radius-lg: calc(var(--radius) + 2px);
-  --radius-xl: calc(var(--radius) + 6px);
+  --color-brand-from: var(--brand-from);
+  --color-brand-to: var(--brand-to);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
   --font-sans: 'IBM Plex Sans Variable', ui-sans-serif, system-ui, sans-serif;
   --font-mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', monospace;
 }
@@ -141,8 +166,61 @@
 }
 
 /*
- * Command Deck 三层框架。Rail 最深、Explorer 次深、Workspace 最开阔；
- * 信息层级来自表面明度与边界，不再依赖整页琥珀光晕。
+ * 玻璃拟态可复用工具类。组件套 .glass / .glass-raised 即得半透明表面 + 背景模糊 +
+ * 描边高光 + 景深投影;.glow-brand 加品牌发光;.text-brand / .border-brand 走品牌渐变。
+ * 全站铺开时优先套这些类,而不是各处手写 backdrop-blur/渐变值(收敛任意值 class 的抓手)。
+ */
+.glass {
+  background: var(--glass-bg);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  border: 1px solid var(--glass-border);
+  box-shadow:
+    var(--glass-shadow),
+    inset 0 1px 0 0 var(--glass-highlight);
+}
+
+/* 更强的浮起玻璃(对话框、悬浮卡片):模糊更重、投影更深。 */
+.glass-raised {
+  background: color-mix(in oklch, var(--card) 82%, transparent);
+  backdrop-filter: blur(calc(var(--glass-blur) + 6px));
+  -webkit-backdrop-filter: blur(calc(var(--glass-blur) + 6px));
+  border: 1px solid var(--glass-border);
+  box-shadow:
+    var(--glass-shadow),
+    inset 0 1px 0 0 var(--glass-highlight);
+}
+
+.glow-brand {
+  box-shadow: var(--glow-brand);
+}
+
+/* 品牌渐变文字(标题/logo 强调)。 */
+.text-brand {
+  background: linear-gradient(105deg, var(--brand-from), var(--brand-to));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* 品牌渐变实底(主按钮/强调条)。 */
+.bg-brand {
+  background: linear-gradient(105deg, var(--brand-from), var(--brand-to));
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  /* 尊重"减少透明"偏好:退回不透明表面,去模糊。 */
+  .glass,
+  .glass-raised {
+    background: var(--card);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+}
+
+/*
+ * Command Deck 三层框架。Rail 最深、Explorer 次深、Workspace 最开阔;
+ * 玻璃拟态下改由品牌微光背景 + 半透明表面承载层级,workspace 铺一层极淡品牌光晕。
  */
 .app-activity-rail {
   background: var(--rail);
@@ -154,8 +232,8 @@
   background:
     linear-gradient(
       to bottom,
-      color-mix(in oklch, var(--primary) 4%, transparent),
-      transparent 8rem
+      color-mix(in oklch, var(--brand-from) 8%, transparent),
+      transparent 9rem
     ),
     var(--panel);
 }
@@ -163,11 +241,15 @@
 .app-workspace {
   width: 100%;
   background-color: var(--background);
+  /* 双色品牌光晕(左上青、右下紫,极淡)+ 细网格,营造景深。 */
   background-image:
-    linear-gradient(to right, color-mix(in oklch, var(--border) 18%, transparent) 1px, transparent 1px),
-    linear-gradient(to bottom, color-mix(in oklch, var(--border) 12%, transparent) 1px, transparent 1px);
-  background-size: 40px 40px;
-  background-position: -1px -1px;
+    radial-gradient(60rem 40rem at 0% 0%, color-mix(in oklch, var(--brand-from) 12%, transparent), transparent 60%),
+    radial-gradient(50rem 40rem at 100% 100%, color-mix(in oklch, var(--brand-to) 12%, transparent), transparent 55%),
+    linear-gradient(to right, color-mix(in oklch, var(--border) 14%, transparent) 1px, transparent 1px),
+    linear-gradient(to bottom, color-mix(in oklch, var(--border) 10%, transparent) 1px, transparent 1px);
+  background-size: 100% 100%, 100% 100%, 40px 40px, 40px 40px;
+  background-position: 0 0, 0 0, -1px -1px, -1px -1px;
+  background-attachment: fixed, fixed, local, local;
 }
 
 @media (max-width: 767px) {

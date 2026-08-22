@@ -1,5 +1,4 @@
 import { Check, FileCheck2, Loader2, Plus } from 'lucide-react'
-import { useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { toast } from 'sonner'
 import type { PluginManifest, PluginRegistration } from '@/lib/types'
@@ -12,10 +11,10 @@ import {
   DialogTitle,
   DialogTrigger,
 } from '@/components/ui/dialog'
+import { useInvalidate, useInvoke } from '@/lib/queries'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { useInvoke } from '@/lib/queries'
 import {
   buildPluginManifestFields,
   INITIAL_MANIFEST_FORM,
@@ -32,7 +31,7 @@ export function RegisterPluginDialog({
   onToken: (value: { id: string, token: string }) => void
 }) {
   const invoke = useInvoke()
-  const qc = useQueryClient()
+  const invalidate = useInvalidate()
   const [open, setOpen] = useState(false)
   const [id, setId] = useState('')
   const [form, setForm] = useState<ManifestFormState>(INITIAL_MANIFEST_FORM)
@@ -78,7 +77,7 @@ export function RegisterPluginDialog({
             onToken({ id: registration.id, token: registration.pluginToken })
             setTimeout(() => invoke.reset(), 0)
           }
-          qc.invalidateQueries({ queryKey: ['tb'] })
+          invalidate()
         },
         onError: submitError => setError(submitError.message),
       },
@@ -186,7 +185,7 @@ export function EditPluginDialog({
   plugin: PluginManifest
 }) {
   const invoke = useInvoke()
-  const qc = useQueryClient()
+  const invalidate = useInvalidate()
   const [form, setForm] = useState<ManifestFormState>(() => manifestFormState(plugin))
   const [error, setError] = useState<string | null>(null)
 
@@ -220,7 +219,7 @@ export function EditPluginDialog({
             onToken({ id: plugin.id, token: registration.pluginToken })
             setTimeout(() => invoke.reset(), 0)
           }
-          qc.invalidateQueries({ queryKey: ['tb'] })
+          invalidate()
         },
         onError: submitError => setError(submitError.message),
       },

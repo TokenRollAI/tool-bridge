@@ -1,5 +1,4 @@
 import { Loader2, Pencil, StickyNote } from 'lucide-react'
-import { useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { toast } from 'sonner'
 import {
@@ -11,9 +10,9 @@ import {
   DialogTitle,
   DialogTrigger,
 } from '@/components/ui/dialog'
+import { useInvalidate, useInvoke } from '@/lib/queries'
 import { Textarea } from '@/components/ui/textarea'
 import { Button } from '@/components/ui/button'
-import { useInvoke } from '@/lib/queries'
 
 function AddNoteTrigger() {
   return (
@@ -34,7 +33,7 @@ function NoteDialog({
   trigger: React.ReactNode
 }) {
   const invoke = useInvoke()
-  const qc = useQueryClient()
+  const invalidate = useInvalidate()
   const [open, setOpen] = useState(false)
   const [text, setText] = useState(current)
   const [err, setErr] = useState<string | null>(null)
@@ -43,7 +42,7 @@ function NoteDialog({
     toast.success(msg)
     setOpen(false)
     setErr(null)
-    qc.invalidateQueries({ queryKey: ['tb'] })
+    invalidate('help', 'helpMarkdown', 'tree')
   }
 
   const save = () => {

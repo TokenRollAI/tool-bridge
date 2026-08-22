@@ -11,7 +11,6 @@ import {
   Trash2,
   X,
 } from 'lucide-react'
-import { useQueryClient } from '@tanstack/react-query'
 import { useEffect, useState } from 'react'
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -25,7 +24,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { useInvoke, useSkill, useSkillFile, useSkills } from '@/lib/queries'
+import { useInvalidate, useInvoke, useSkill, useSkillFile, useSkills } from '@/lib/queries'
 import { ConfirmAction } from '@/components/ConfirmAction'
 import { CopyButton } from '@/components/CopyButton'
 import { EmptyState } from '@/components/EmptyState'
@@ -666,14 +665,14 @@ export function SkillBrowser({ path, cmds }: { cmds: HelpCmd[], path: string }) 
 
   const skills = useSkills(path, effectiveQuery)
   const invoke = useInvoke()
-  const qc = useQueryClient()
+  const invalidate = useInvalidate()
   const desktop = useDesktopLayout()
 
   const [selected, setSelected] = useState<string | null>(null)
   const [mobileViewing, setMobileViewing] = useState<string | null>(null)
   const [publishing, setPublishing] = useState(false)
 
-  const refresh = () => qc.invalidateQueries({ queryKey: ['tb'] })
+  const refresh = () => invalidate()
 
   const remove = async (id: string) => {
     try {

@@ -1,5 +1,5 @@
 import { Loader2, MessageSquarePlus, Minus, ThumbsDown, ThumbsUp, Trash2 } from 'lucide-react'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useMutation } from '@tanstack/react-query'
 import { useState } from 'react'
 import { toast } from 'sonner'
 import type { FeedbackView } from '@/lib/types'
@@ -12,8 +12,8 @@ import {
   DialogTitle,
   DialogTrigger,
 } from '@/components/ui/dialog'
+import { useFeedbackDetail, useFeedbackList, useInvalidate } from '@/lib/queries'
 import { feedbackRemove, feedbackSubmit, feedbackVote } from '@/lib/api'
-import { useFeedbackDetail, useFeedbackList } from '@/lib/queries'
 import { ConfirmAction } from '@/components/ConfirmAction'
 import { EmptyState } from '@/components/EmptyState'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -66,8 +66,8 @@ function FeedbackRow({
   path: string
 }) {
   const conn = useConn()
-  const qc = useQueryClient()
-  const refresh = () => qc.invalidateQueries({ queryKey: ['tb'] })
+  const invalidate = useInvalidate()
+  const refresh = () => invalidate('feedback-list', 'feedback-detail', 'help', 'helpMarkdown')
 
   const vote = useMutation({
     mutationFn: (value: 'up' | 'down' | 'clear') => feedbackVote(conn, path, item.id, value),
@@ -159,7 +159,7 @@ function FeedbackRow({
 
 function SubmitDialog({ path }: { path: string }) {
   const conn = useConn()
-  const qc = useQueryClient()
+  const invalidate = useInvalidate()
   const [open, setOpen] = useState(false)
   const [title, setTitle] = useState('')
   const [detail, setDetail] = useState('')
@@ -173,7 +173,7 @@ function SubmitDialog({ path }: { path: string }) {
       setTitle('')
       setDetail('')
       setErr(null)
-      qc.invalidateQueries({ queryKey: ['tb'] })
+      invalidate('feedback-list', 'feedback-detail', 'help', 'helpMarkdown')
     },
     onError: e => setErr(e.message),
   })

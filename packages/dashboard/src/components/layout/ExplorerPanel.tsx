@@ -1,6 +1,5 @@
 import { ChevronsUpDown, ListFilter, LogOut, Moon, RefreshCw, Sun, X } from 'lucide-react'
 import { NavLink, useLocation, useNavigate } from 'react-router'
-import { useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import {
   DropdownMenu,
@@ -14,6 +13,7 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { TreeNav } from '@/components/layout/TreeNav'
 import { useSession } from '@/lib/session-context'
 import { Button } from '@/components/ui/button'
+import { useInvalidate } from '@/lib/queries'
 import { useTheme } from '@/lib/theme'
 import { cn } from '@/lib/utils'
 import { MANAGE_LINKS } from './navigation'
@@ -109,7 +109,7 @@ export function ExplorerPanel({
   const [filter, setFilter] = useState('')
   const [mobileMode, setMobileMode] = useState<'resources' | 'manage'>('resources')
   const location = useLocation()
-  const qc = useQueryClient()
+  const invalidate = useInvalidate()
   const currentPath = nodePathFromLocation(location.pathname)
   const nonNodeLabel = location.pathname === '/search' ? '工具搜索' : '管理控制面'
   const healthLabel = healthError
@@ -232,7 +232,7 @@ export function ExplorerPanel({
               <button
                 aria-label="刷新资源树"
                 className="ml-auto grid size-7 place-items-center rounded-md text-muted-foreground hover:bg-secondary hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-                onClick={() => qc.invalidateQueries({ queryKey: ['tb'] })}
+                onClick={() => invalidate()}
                 title="刷新资源树"
                 type="button"
               >

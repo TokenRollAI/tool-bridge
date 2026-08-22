@@ -17,9 +17,9 @@ export function PageHeader({
     <header className="flex flex-col items-stretch gap-4 sm:flex-row sm:flex-wrap sm:items-end sm:gap-x-6">
       <div className="min-w-0 flex-1">
         <div className={`mb-2 flex items-center gap-2.5 ${eyebrow ? 'min-h-3' : 'h-px'}`}>
-          <span className="h-px w-8 shrink-0 bg-primary" />
+          <span className="bg-brand h-px w-8 shrink-0" />
           {eyebrow && (
-            <span className="text-[10px] font-semibold tracking-[0.18em] text-primary uppercase">
+            <span className="text-brand text-[10px] font-semibold tracking-[0.18em] uppercase">
               {eyebrow}
             </span>
           )}

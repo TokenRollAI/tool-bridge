@@ -174,7 +174,34 @@ export function useHistory(): InvokeRecord[] {
   return useSyncExternalStore(subscribeHistory, () => loadHistory(scope))
 }
 
-/** 使树与节点级缓存失效(挂载/卸载/SK 变更后)。 */
+/**
+ * 缓存失效器。**始终限定当前 profile**(queryKey 前缀含 profile 标识),因此绝不再波及其它
+ * profile 的查询 —— 这是此前全局 `invalidateQueries({queryKey:['tb']})` 最大的浪费:切 profile
+ * 本就隔离缓存,失效别的 profile 纯属白打请求。
+ *
+ * - `invalidate()` 不带参:失效整个 profile(结构性变更用 —— 挂载/卸载/通用调用,影响面跨域,
+ *   宁可多刷不可漏刷)。
+ * - `invalidate('sk-list', …)`:只失效列出的域(域段 = queryKey 的第 5 段;支持 `registry-list:<prefix>`
+ *   这类带冒号后缀的键)。自成一路由的管理页用它,把"改一条 SK 却重拉工具树/catalog"的浪费砍掉。
+ */
+export function useInvalidate() {
+  const qc = useQueryClient()
+  const base = useKeyBase()
+  return (...domains: string[]) => {
+    if (domains.length === 0) return qc.invalidateQueries({ queryKey: base })
+    return qc.invalidateQueries({
+      predicate: (query) => {
+        const key = query.queryKey as unknown[]
+        for (let i = 0; i < base.length; i++) if (key[i] !== base[i]) return false
+        const domain = key[base.length]
+        return typeof domain === 'string'
+          && domains.some(d => domain === d || domain.startsWith(`${d}:`))
+      },
+    })
+  }
+}
+
+/** 使树与节点级缓存失效(挂载/卸载/SK 变更后);profile 范围。 */
 export function useInvalidateTree() {
   const qc = useQueryClient()
   const base = useKeyBase()
