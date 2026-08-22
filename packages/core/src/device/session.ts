@@ -52,9 +52,8 @@ export interface DeviceCallRequest {
   /** 网关鉴权后的调用方来源与权威期限;缺省则不写入 call 帧(老网关行为)。 */
   context?: DeviceCallContext
   id: string
-  /** 相对 mountPath,如 "shell"。 */
+  /** 相对 mountPath 且含命令叶子段,如 "shell/exec"、"fs/get"。 */
   path: string
-  tool: string
 }
 
 export class DeviceGatewaySession {
@@ -168,7 +167,6 @@ export class DeviceGatewaySession {
       type: 'call',
       id: req.id,
       path: req.path,
-      tool: req.tool,
       arguments: req.arguments,
       // undefined 经 JSON.stringify 丢弃:老网关不带 context 时帧形状不变。
       ...(req.context !== undefined ? { context: req.context } : {}),

@@ -21,7 +21,7 @@ function routedFetch(routes: FetchRoute[]): Call[] {
     calls.push({ url: String(url), body })
     const route = routes.find(r =>
       r.match.test(String(url))
-      && (r.tool === undefined || (body as WireBody | undefined)?.tool === r.tool),
+      && (r.tool === undefined || String(url).endsWith(`/${r.tool}`)),
     )
     const payload = route?.body ?? {}
     return new Response(JSON.stringify(payload), {
@@ -111,17 +111,19 @@ afterEach(() => {
 
 const base = ['--json', '--base-url', 'https://gw', '--sk', 'tbk_x']
 
-/** 平台调用的 wire body:`{tool, arguments}`(builtin)或 NodeInput(`~register`)。 */
+/** 直连调用的 wire body:裸 arguments 本体(命令名在 URL 路径的叶子段)。 */
 interface WireBody {
-  arguments?: Record<string, string>
   config?: Record<string, unknown>
   kind?: string
-  tool?: string
+  name?: string
+  path?: string
+  q?: string
+  value?: string
 }
 
 const bodyOf = (calls: Call[], re: RegExp, tool?: string): WireBody | undefined =>
   calls.find(c =>
-    re.test(c.url) && (tool === undefined || (c.body as WireBody | undefined)?.tool === tool),
+    re.test(c.url) && (tool === undefined || c.url.endsWith(`/${tool}`)),
   )?.body as WireBody | undefined
 
 describe('tb integration add', () => {
@@ -140,8 +142,8 @@ describe('tb integration add', () => {
     expect(process.exitCode).toBe(0)
 
     const secret = bodyOf(calls, /system\/secret/, 'set')
-    expect(secret.arguments.name).toBe('integration-tools%2Ftavily')
-    expect(secret.arguments.value).toBe('tvly-secret')
+    expect(secret.name).toBe('integration-tools%2Ftavily')
+    expect(secret.value).toBe('tvly-secret')
 
     const mount = bodyOf(calls, /~register/)
     expect(mount.config).toEqual({
@@ -167,7 +169,7 @@ describe('tb integration add', () => {
     ])
     expect(process.exitCode).toBe(0)
     const secret = bodyOf(calls, /system\/secret/, 'set')
-    expect(JSON.parse(secret.arguments.value)).toEqual({
+    expect(JSON.parse(secret.value)).toEqual({
       baseUrl: 'https://x.atlassian.net',
       personalAccessToken: 'pat',
     })
@@ -460,11 +462,10 @@ describe('tb integration add', () => {
       'integration', 'add', 'tools/tavily', '--provider', 'tavily', '--key', 'secret', ...base,
     ])
     expect(process.exitCode).not.toBe(0)
-    const secretBodies = calls
-      .filter(c => /system\/secret/.test(c.url))
-      .map(c => c.body as WireBody)
-    expect(secretBodies.map(body => body.tool)).toEqual(['list', 'set', 'delete'])
-    expect(secretBodies[2]?.arguments?.name).toBe('integration-tools%2Ftavily')
+    const secretCalls = calls.filter(c => /system\/secret/.test(c.url))
+    const secretVerbs = secretCalls.map(c => c.url.split('/').pop())
+    expect(secretVerbs).toEqual(['list', 'set', 'delete'])
+    expect((secretCalls[2]?.body as WireBody | undefined)?.name).toBe('integration-tools%2Ftavily')
   })
 
   it('挂载失败不会误删同名既有凭证', async () => {
@@ -485,19 +486,19 @@ describe('tb integration add', () => {
     expect(process.exitCode).not.toBe(0)
     const tools = calls
       .filter(c => /system\/secret/.test(c.url))
-      .map(c => (c.body as WireBody).tool)
+      .map(c => c.url.split('/').pop())
     expect(tools).toEqual(['list', 'set'])
   })
 
   it('内部槽位按完整 path 编码,slash 与 dash 不碰撞', async () => {
     let calls = routedFetch([catalogOf([TAVILY])])
     await runCli(['integration', 'add', 'a/b', '--provider', 'tavily', '--key', 'one', ...base])
-    const slashName = bodyOf(calls, /system\/secret/, 'set').arguments.name
+    const slashName = bodyOf(calls, /system\/secret/, 'set').name
 
     resetFetch()
     calls = routedFetch([catalogOf([TAVILY])])
     await runCli(['integration', 'add', 'a-b', '--provider', 'tavily', '--key', 'two', ...base])
-    const dashName = bodyOf(calls, /system\/secret/, 'set').arguments.name
+    const dashName = bodyOf(calls, /system\/secret/, 'set').name
 
     expect(slashName).toBe('integration-a%2Fb')
     expect(dashName).toBe('integration-a-b')
@@ -590,14 +591,13 @@ describe('tb integration catalog', () => {
   it('无 --search 走 list,有则走 search', async () => {
     let calls = routedFetch([catalogOf([TAVILY])])
     await runCli(['integration', 'catalog', ...base])
-    expect(bodyOf(calls, /system\/catalog/).tool).toBe('list')
+    expect(calls.some(c => /system\/catalog\/list$/.test(c.url))).toBe(true)
 
     resetFetch()
     calls = routedFetch([catalogOf([TAVILY])])
     await runCli(['integration', 'catalog', '--search', 'tav', ...base])
-    const body = bodyOf(calls, /system\/catalog/)
-    expect(body.tool).toBe('search')
-    expect(body.arguments.q).toBe('tav')
+    const body = bodyOf(calls, /system\/catalog/, 'search')
+    expect(body?.q).toBe('tav')
   })
 })
 
@@ -637,7 +637,7 @@ describe('tb integration rm', () => {
     ])
     await runCli(['integration', 'rm', 'tools/tavily', ...base])
     const bodies = calls.map(c => c.body as WireBody)
-    expect(bodies.some(b => b.arguments?.name !== undefined)).toBe(false)
+    expect(bodies.some(b => b.name !== undefined)).toBe(false)
   })
 
   it('拒绝卸载非 tool/context 节点(误删 device 节点的护栏)', async () => {
@@ -647,7 +647,7 @@ describe('tb integration rm', () => {
     ])
     await runCli(['integration', 'rm', 'device/build-01', ...base])
     // kind 校验失败 → 只发了 get,绝不发 delete;命令以非零码退出。
-    expect(calls.some(c => (c.body as WireBody).tool === 'delete')).toBe(false)
+    expect(calls.some(c => c.url.endsWith('/delete'))).toBe(false)
     expect(process.exitCode).not.toBe(0)
     // base 带 --json,错误经 stdout 输出结构化 {ok:false,error}。
     const stdout = (process.stdout.write as unknown as ReturnType<typeof vi.fn>).mock.calls

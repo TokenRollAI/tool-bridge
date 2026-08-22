@@ -69,7 +69,7 @@ describe('真正的全局参数', () => {
   ])('%s也会传入叶子 action', async (_label, argv) => {
     const fn = jsonFetch({ items: [] })
     await runCli(argv)
-    expect(String(fn.mock.calls[0]?.[0])).toBe('https://gw/system/sk')
+    expect(String(fn.mock.calls[0]?.[0])).toBe('https://gw/system/sk/list')
     expect(JSON.parse(stdoutText())).toEqual({ items: [] })
   })
 
@@ -107,7 +107,7 @@ describe('SK 参数与能力对齐', () => {
     clearStdout()
     await runCli([...base, '--expires', '2026-07-23T08:00:00+08:00', '--json'])
     const payload = JSON.parse((fn.mock.calls[0]?.[1] as RequestInit).body as string)
-    expect(payload.arguments.expiresAt).toBe('2026-07-23T00:00:00.000Z')
+    expect(payload.expiresAt).toBe('2026-07-23T00:00:00.000Z')
   })
 
   it('get/update/disable 映射到已有 SKRegistry 动词', async () => {
@@ -116,26 +116,17 @@ describe('SK 参数与能力对齐', () => {
     const gw = ['--base-url', 'https://gw', '--sk', 'admin', '--json']
 
     await runCli(['sk', 'get', 'k1', ...gw])
-    expect(JSON.parse((fn.mock.calls[0]?.[1] as RequestInit).body as string)).toEqual({
-      tool: 'get',
-      arguments: { id: 'k1' },
-    })
+    expect(JSON.parse((fn.mock.calls[0]?.[1] as RequestInit).body as string)).toEqual({ id: 'k1' })
     await runCli(['sk', 'update', 'k1', '--description', 'build key', '--scope', 'ci/**:call', ...gw])
     expect(JSON.parse((fn.mock.calls[1]?.[1] as RequestInit).body as string)).toEqual({
-      tool: 'update',
-      arguments: {
-        id: 'k1',
-        patch: {
-          description: 'build key',
-          scopes: [{ pattern: 'ci/**', actions: ['call'] }],
-        },
+      id: 'k1',
+      patch: {
+        description: 'build key',
+        scopes: [{ pattern: 'ci/**', actions: ['call'] }],
       },
     })
     await runCli(['sk', 'disable', 'k1', ...gw])
-    expect(JSON.parse((fn.mock.calls[2]?.[1] as RequestInit).body as string)).toEqual({
-      tool: 'update',
-      arguments: { id: 'k1', patch: { disabled: true } },
-    })
+    expect(JSON.parse((fn.mock.calls[2]?.[1] as RequestInit).body as string)).toEqual({ id: 'k1', patch: { disabled: true } })
   })
 })
 
@@ -158,8 +149,8 @@ describe('分页参数', () => {
       'admin',
       '--json',
     ])
-    expect(String(fn.mock.calls[0]?.[0])).toBe(`https://gw${path}`)
-    expect(JSON.parse((fn.mock.calls[0]?.[1] as RequestInit).body as string).arguments).toEqual({
+    expect(String(fn.mock.calls[0]?.[0])).toBe(`https://gw${path}/list`)
+    expect(JSON.parse((fn.mock.calls[0]?.[1] as RequestInit).body as string)).toEqual({
       opts: { limit: 10, cursor: 'c1' },
     })
   })
@@ -185,12 +176,12 @@ describe('分页参数', () => {
     const fn = jsonFetch({ items: [] })
     const gw = ['--base-url', 'https://gw', '--sk', 'admin', '--json']
     await runCli(['ctx', 'search', 'ctx/docs', 'q', '--cursor', 'ctx-c', ...gw])
-    expect(JSON.parse((fn.mock.calls[0]?.[1] as RequestInit).body as string).arguments).toEqual({
+    expect(JSON.parse((fn.mock.calls[0]?.[1] as RequestInit).body as string)).toEqual({
       query: 'q',
       opts: { cursor: 'ctx-c' },
     })
     await runCli(['skill', 'search', 'skills/team', 'q', '--cursor', 'skill-c', ...gw])
-    expect(JSON.parse((fn.mock.calls[1]?.[1] as RequestInit).body as string).arguments).toEqual({
+    expect(JSON.parse((fn.mock.calls[1]?.[1] as RequestInit).body as string)).toEqual({
       query: 'q',
       opts: { cursor: 'skill-c' },
     })
@@ -203,7 +194,7 @@ describe('分页参数', () => {
     })
     const gw = ['--base-url', 'https://gw', '--sk', 'admin', '--json']
     await runCli(['device', 'ls', '--limit', '10', '--cursor', 'd0', ...gw])
-    expect(JSON.parse((fn.mock.calls[0]?.[1] as RequestInit).body as string).arguments).toEqual({
+    expect(JSON.parse((fn.mock.calls[0]?.[1] as RequestInit).body as string)).toEqual({
       prefix: 'device',
       opts: { limit: 10, cursor: 'd0' },
     })
@@ -221,7 +212,7 @@ describe('分页参数', () => {
       ),
     )
     await runCli(['server', 'ls', '--limit', '20', '--cursor', 's0', ...gw])
-    expect(JSON.parse((fn.mock.calls[0]?.[1] as RequestInit).body as string).arguments).toEqual({
+    expect(JSON.parse((fn.mock.calls[0]?.[1] as RequestInit).body as string)).toEqual({
       opts: { limit: 20, cursor: 's0' },
     })
     expect(JSON.parse(stdoutText()).cursor).toBe('server-next')
@@ -323,10 +314,7 @@ describe('条件参数与挂载语义', () => {
 
     process.exitCode = 0
     await runCli(['ctx', 'rm', 'ctx/docs', 'a', ...gw])
-    expect(JSON.parse((fn.mock.calls[0]?.[1] as RequestInit).body as string)).toEqual({
-      tool: 'Delete',
-      arguments: { path: 'a' },
-    })
+    expect(JSON.parse((fn.mock.calls[0]?.[1] as RequestInit).body as string)).toEqual({ path: 'a' })
   })
 
   it('connect 的重复 URL、无效 shell/fs 组合会提前失败', async () => {

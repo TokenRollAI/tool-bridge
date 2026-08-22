@@ -27,7 +27,7 @@ const DUAL_EXPORT = {
       auth: { kind: 'none' },
       profile: 'context/v1',
       description: 'Feishu documents',
-      methods: ['Get', 'List', 'Search'],
+      methods: ['get', 'list', 'search'],
       capabilities: ['search'],
     },
   ],
@@ -99,7 +99,7 @@ describe('validatePluginContract(plugin/v2)', () => {
   it('context/v1 声明未知动词 → invalid_argument', () => {
     const err = expectInvalid({
       protocolVersion: 'plugin/v2',
-      exports: [{ auth: { kind: 'none' }, id: 'c', profile: 'context/v1', methods: ['Get', 'Frobnicate'] }],
+      exports: [{ auth: { kind: 'none' }, id: 'c', profile: 'context/v1', methods: ['get', 'Frobnicate'] }],
     })
     expect(err.message).toContain('Frobnicate')
   })
@@ -108,10 +108,10 @@ describe('validatePluginContract(plugin/v2)', () => {
     const err = expectInvalid({
       protocolVersion: 'plugin/v2',
       exports: [
-        { auth: { kind: 'none' }, id: 'c', profile: 'context/v1', methods: ['Get', 'List'], capabilities: ['search'] },
+        { auth: { kind: 'none' }, id: 'c', profile: 'context/v1', methods: ['get', 'list'], capabilities: ['search'] },
       ],
     })
-    expect(err.message).toContain('Search')
+    expect(err.message).toContain('search')
   })
 
   it('tools/v1 声明 mountConfigFields → 通过并原样保留', () => {
@@ -141,7 +141,7 @@ describe('validatePluginContract(plugin/v2)', () => {
           id: 'docs',
           auth: { kind: 'none' },
           profile: 'context/v1',
-          methods: ['Get'],
+          methods: ['get'],
           mountConfigFields: [{ key: 'workspace' }],
         }],
       },
@@ -238,6 +238,6 @@ describe('resolvePluginExport', () => {
 describe('optionalMethodsForCapabilities', () => {
   it('基名映射 + 限定词按 ":" 前判定 + 未知基名忽略', () => {
     expect([...optionalMethodsForCapabilities(['search:semantic', 'delete', 'future'])].sort())
-      .toEqual(['Delete', 'Search'])
+      .toEqual(['delete', 'search'])
   })
 })

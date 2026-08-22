@@ -81,10 +81,11 @@ async function mountNamespace(baseUrl: string, path: string): Promise<Response> 
 async function ctxCall(
   baseUrl: string,
   path: string,
-  tool: string,
+  command: string,
   args: Record<string, unknown>,
 ): Promise<Response> {
-  return postJson(baseUrl, path, { tool, arguments: args }, admin())
+  // 直连唯一形态:命令进 URL 末段,body 即裸 arguments。
+  return postJson(baseUrl, `${path}/${command}`, args, admin())
 }
 
 describe('context 平台对象存储(fs-backed)', () => {
@@ -93,7 +94,7 @@ describe('context 平台对象存储(fs-backed)', () => {
     cleanups.push(() => server.close())
     expect((await mountNamespace(baseUrl, 'ctxtest/rw')).status).toBe(200)
 
-    const w = await ctxCall(baseUrl, 'ctxtest/rw', 'Write', {
+    const w = await ctxCall(baseUrl, 'ctxtest/rw', 'write', {
       path: 'notes/a.md',
       entry: { contentType: 'text/markdown', content: '# hi node' },
     })
@@ -101,34 +102,34 @@ describe('context 平台对象存储(fs-backed)', () => {
     const wrote = (await w.json()) as { uri: string, version: string }
     expect(wrote.uri).toBe('node://ctxtest/rw/notes/a.md')
 
-    const l = await ctxCall(baseUrl, 'ctxtest/rw', 'List', {})
+    const l = await ctxCall(baseUrl, 'ctxtest/rw', 'list', {})
     expect(l.status).toBe(200)
     const listed = (await l.json()) as { items: Array<{ contentType: string, uri: string }> }
     const dir = listed.items.find(i => i.uri === 'node://ctxtest/rw/notes/')
     expect(dir?.contentType).toBe('application/x-directory')
 
-    const g = await ctxCall(baseUrl, 'ctxtest/rw', 'Get', { path: 'notes/a.md' })
+    const g = await ctxCall(baseUrl, 'ctxtest/rw', 'get', { path: 'notes/a.md' })
     expect(g.status).toBe(200)
     expect(((await g.json()) as { content: unknown }).content).toBe('# hi node')
 
-    const u = await ctxCall(baseUrl, 'ctxtest/rw', 'Update', {
+    const u = await ctxCall(baseUrl, 'ctxtest/rw', 'update', {
       path: 'notes/a.md',
       patch: { content: '# hi node v2' },
     })
     expect(u.status).toBe(200)
     expect(((await u.json()) as { version: string }).version).not.toBe(wrote.version)
 
-    expect((await ctxCall(baseUrl, 'ctxtest/rw', 'Delete', { path: 'notes/a.md' })).status).toBe(
+    expect((await ctxCall(baseUrl, 'ctxtest/rw', 'delete', { path: 'notes/a.md' })).status).toBe(
       200,
     )
-    expect((await ctxCall(baseUrl, 'ctxtest/rw', 'Get', { path: 'notes/a.md' })).status).toBe(404)
+    expect((await ctxCall(baseUrl, 'ctxtest/rw', 'get', { path: 'notes/a.md' })).status).toBe(404)
   })
 
   it('对象随 /data 卷持久:重启后 Get 仍读到内容', async () => {
     const dataDir = tmpDataDir()
     const first = await startServer(dataDir)
     expect((await mountNamespace(first.baseUrl, 'ctxtest/persist')).status).toBe(200)
-    const w = await ctxCall(first.baseUrl, 'ctxtest/persist', 'Write', {
+    const w = await ctxCall(first.baseUrl, 'ctxtest/persist', 'write', {
       path: 'keep.txt',
       entry: { contentType: 'text/plain', content: 'survive restart' },
     })
@@ -137,7 +138,7 @@ describe('context 平台对象存储(fs-backed)', () => {
 
     const second = await startServer(dataDir)
     cleanups.push(() => second.server.close())
-    const g = await ctxCall(second.baseUrl, 'ctxtest/persist', 'Get', { path: 'keep.txt' })
+    const g = await ctxCall(second.baseUrl, 'ctxtest/persist', 'get', { path: 'keep.txt' })
     expect(g.status).toBe(200)
     expect(((await g.json()) as { content: unknown }).content).toBe('survive restart')
   })
@@ -150,13 +151,13 @@ describe('context 平台对象存储(fs-backed)', () => {
     expect((await mountNamespace(baseUrl, 'ctxtest/big')).status).toBe(200)
 
     const bigContent = 'x'.repeat(64)
-    const w = await ctxCall(baseUrl, 'ctxtest/big', 'Write', {
+    const w = await ctxCall(baseUrl, 'ctxtest/big', 'write', {
       path: 'big.txt',
       entry: { contentType: 'text/plain', content: bigContent },
     })
     expect(w.status).toBe(200)
 
-    const g = await ctxCall(baseUrl, 'ctxtest/big', 'Get', { path: 'big.txt' })
+    const g = await ctxCall(baseUrl, 'ctxtest/big', 'get', { path: 'big.txt' })
     expect(g.status).toBe(200)
     const entry = (await g.json()) as { content: { $ref?: string } }
     const refUrl = entry.content.$ref ?? ''

@@ -267,8 +267,7 @@ function CreateSkDialog({
 
     invoke.mutate(
       {
-        path: 'system/sk',
-        tool: 'write',
+        commandPath: 'system/sk/write',
         args,
       },
       {
@@ -363,7 +362,7 @@ export function SkPage() {
   // 启用路径的调用方自行 .catch 掉。
   const setDisabled = (sk: SecretKeyInfo, disabled: boolean) =>
     invoke.mutateAsync(
-      { path: 'system/sk', tool: 'update', args: { id: sk.id, patch: { disabled } } },
+      { commandPath: 'system/sk/update', args: { id: sk.id, patch: { disabled } } },
       {
         onSuccess: () => {
           toast.success(`${sk.owner} 的 SK 已${disabled ? '禁用' : '启用'}`)
@@ -375,7 +374,7 @@ export function SkPage() {
 
   const remove = async (sk: SecretKeyInfo) => {
     try {
-      await invoke.mutateAsync({ path: 'system/sk', tool: 'delete', args: { id: sk.id } })
+      await invoke.mutateAsync({ commandPath: 'system/sk/delete', args: { id: sk.id } })
       toast.success(`${sk.id} 已吊销并删除`)
       await refresh()
     } catch (error) {

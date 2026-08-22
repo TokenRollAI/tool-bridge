@@ -80,7 +80,7 @@ describe('未知 flag 必须报错(事故回归)', () => {
       ['server', 'add', 'p', '--remote-url', 'u', '--bogus'],
       ['server', 'ls', '--bogus'],
       ['server', 'rm', 'p', '--bogus'],
-      ['call', 'p', '--tool', 't', '--bogus'],
+      ['call', 'p/cmd', '--bogus'],
       ['ctx', 'ls', 'ns', '--bogus'],
       ['ctx', 'cat', 'ns', 'e', '--bogus'],
       ['ctx', 'put', 'ns', 'e', '--content', 'c', '--bogus'],

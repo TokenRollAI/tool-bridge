@@ -91,10 +91,11 @@ async function mountNamespace(baseUrl: string, path: string): Promise<Response> 
 async function ctxCall(
   baseUrl: string,
   path: string,
-  tool: string,
+  command: string,
   args: unknown,
 ): Promise<Response> {
-  return await postJson(baseUrl, path, { tool, arguments: args })
+  // 直连唯一形态:命令进 URL 末段,body 即裸 arguments。
+  return await postJson(baseUrl, `${path}/${command}`, args)
 }
 
 /** 直接向 S3 列举,确认对象真在桶里(绕开被测服务自己的读路径)。 */
@@ -120,13 +121,13 @@ suite('平台对象存储 = S3 兼容端点', () => {
     cleanups.push(async () => await server.close())
     expect((await mountNamespace(baseUrl, 'ctxs3/basic')).status).toBe(200)
 
-    const write = await ctxCall(baseUrl, 'ctxs3/basic', 'Write', {
+    const write = await ctxCall(baseUrl, 'ctxs3/basic', 'write', {
       path: 's3probe.txt',
       entry: { contentType: 'text/plain', content: 's3 platform object' },
     })
     expect(write.status).toBe(200)
 
-    const get = await ctxCall(baseUrl, 'ctxs3/basic', 'Get', { path: 's3probe.txt' })
+    const get = await ctxCall(baseUrl, 'ctxs3/basic', 'get', { path: 's3probe.txt' })
     expect(get.status).toBe(200)
     expect(((await get.json()) as { content: unknown }).content).toBe('s3 platform object')
 
@@ -137,9 +138,9 @@ suite('平台对象存储 = S3 兼容端点', () => {
     // …而不在容器本地 FS(dataDir 下不应出现 objects/ 目录)。
     expect(readdirSync(dataDir)).not.toContain('objects')
 
-    const del = await ctxCall(baseUrl, 'ctxs3/basic', 'Delete', { path: 's3probe.txt' })
+    const del = await ctxCall(baseUrl, 'ctxs3/basic', 'delete', { path: 's3probe.txt' })
     expect(del.status).toBe(200)
-    const after = await ctxCall(baseUrl, 'ctxs3/basic', 'Get', { path: 's3probe.txt' })
+    const after = await ctxCall(baseUrl, 'ctxs3/basic', 'get', { path: 's3probe.txt' })
     expect(after.status).toBe(404)
   })
 
@@ -151,12 +152,12 @@ suite('平台对象存储 = S3 兼容端点', () => {
     expect((await mountNamespace(baseUrl, 'ctxs3/big')).status).toBe(200)
 
     const bigContent = 'y'.repeat(64)
-    expect((await ctxCall(baseUrl, 'ctxs3/big', 'Write', {
+    expect((await ctxCall(baseUrl, 'ctxs3/big', 'write', {
       path: 'big.txt',
       entry: { contentType: 'text/plain', content: bigContent },
     })).status).toBe(200)
 
-    const get = await ctxCall(baseUrl, 'ctxs3/big', 'Get', { path: 'big.txt' })
+    const get = await ctxCall(baseUrl, 'ctxs3/big', 'get', { path: 'big.txt' })
     expect(get.status).toBe(200)
     const entry = (await get.json()) as { content: { $ref?: string } }
     const refUrl = entry.content.$ref ?? ''
@@ -183,7 +184,7 @@ suite('平台对象存储 = S3 兼容端点', () => {
     const dataDir = tmpDataDir()
     const first = await startServer(dataDir)
     expect((await mountNamespace(first.baseUrl, 'ctxs3/persist')).status).toBe(200)
-    expect((await ctxCall(first.baseUrl, 'ctxs3/persist', 'Write', {
+    expect((await ctxCall(first.baseUrl, 'ctxs3/persist', 'write', {
       path: 'keep.txt',
       entry: { contentType: 'text/plain', content: 'survives restart' },
     })).status).toBe(200)
@@ -191,7 +192,7 @@ suite('平台对象存储 = S3 兼容端点', () => {
 
     const second = await startServer(dataDir)
     cleanups.push(async () => await second.server.close())
-    const get = await ctxCall(second.baseUrl, 'ctxs3/persist', 'Get', { path: 'keep.txt' })
+    const get = await ctxCall(second.baseUrl, 'ctxs3/persist', 'get', { path: 'keep.txt' })
     expect(get.status).toBe(200)
     expect(((await get.json()) as { content: unknown }).content).toBe('survives restart')
     // 对象始终只在 S3,本地 dataDir 没有 objects/ 落点。
@@ -221,7 +222,7 @@ suite('平台对象存储 = S3 兼容端点', () => {
 
       const first = await startServer(tmpDataDir(), pgEnv)
       expect((await mountNamespace(first.baseUrl, 'ctxs3/stateless')).status).toBe(200)
-      expect((await ctxCall(first.baseUrl, 'ctxs3/stateless', 'Write', {
+      expect((await ctxCall(first.baseUrl, 'ctxs3/stateless', 'write', {
         path: 'keep.txt',
         entry: { contentType: 'text/plain', content: 'survives container rebuild' },
       })).status).toBe(200)
@@ -230,7 +231,7 @@ suite('平台对象存储 = S3 兼容端点', () => {
       // 全新 dataDir = 容器重建,本地卷全丢。状态在 PG、对象在 S3,故都还在。
       const second = await startServer(tmpDataDir(), pgEnv)
       cleanups.push(async () => await second.server.close())
-      const get = await ctxCall(second.baseUrl, 'ctxs3/stateless', 'Get', { path: 'keep.txt' })
+      const get = await ctxCall(second.baseUrl, 'ctxs3/stateless', 'get', { path: 'keep.txt' })
       expect(get.status).toBe(200)
       expect(((await get.json()) as { content: unknown }).content)
         .toBe('survives container rebuild')

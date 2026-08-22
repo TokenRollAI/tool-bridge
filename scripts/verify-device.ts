@@ -10,7 +10,7 @@ import { fileURLToPath } from 'node:url'
  *
  * 流程:
  *   1. spawn `tb connect --device-id verify-dev-<rand> --allow echo --fs <tmp>`,等 ready 事件;
- *   2. 断言①:`tb call device/<id>/shell --tool exec` → stdout 含 hi-p4;
+ *   2. 断言①:`tb call device/<id>/shell/exec` → stdout 含 hi-p4;
  *   3. 断言②:`tb ctx cat device/<id>/fs <root>/hello.txt` → 读到临时文件真实内容;
  *   4. 断言③:同 deviceId 第二连接顶替第一连接,旧连接进入 reconnecting 后立即停止,
  *      仅新连接允许的命令仍能调用成功;
@@ -217,9 +217,7 @@ async function cleanupDeviceNodes(deviceId: string, sk: string): Promise<void> {
       await runCli(
         [
           'call',
-          'system/registry',
-          '--tool',
-          'delete',
+          'system/registry/delete',
           '--args',
           JSON.stringify({ path }),
           '--json',
@@ -231,9 +229,7 @@ async function cleanupDeviceNodes(deviceId: string, sk: string): Promise<void> {
     const got = await runCli(
       [
         'call',
-        'system/registry',
-        '--tool',
-        'get',
+        'system/registry/get',
         '--args',
         JSON.stringify({ path: `device/${deviceId}` }),
         '--json',
@@ -253,7 +249,7 @@ interface ExecResult {
 
 function callShell(deviceId: string, command: string): Promise<ExecResult> {
   return cliJson<ExecResult>(
-    ['call', `device/${deviceId}/shell`, '--tool', 'exec', '--args', JSON.stringify({ command })],
+    ['call', `device/${deviceId}/shell/exec`, '--args', JSON.stringify({ command })],
     adminSk,
   )
 }
@@ -397,9 +393,7 @@ async function main(): Promise<void> {
         const got = await runCli(
           [
             'call',
-            'system/registry',
-            '--tool',
-            'get',
+            'system/registry/get',
             '--args',
             JSON.stringify({ path: `device/${outsideId}` }),
             '--json',

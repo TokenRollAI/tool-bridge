@@ -2,7 +2,7 @@
 
 ## 是什么
 
-tool-bridge 把工具、上下文、设备与远端服务组织成一棵受权限约束的 HTBP 树。调用方通过统一的 `~help`、`~tree`、`~search`、直接调用或 `{tool, arguments}` 信封发现和调用能力；CLI、Dashboard 与直接 API 是同一控制面的三个入口。
+tool-bridge 把工具、上下文、设备与远端服务组织成一棵受权限约束的 HTBP 树。调用方通过统一的 `~help`、`~tree`、`~search` 发现能力,并以唯一形态 `POST /<nodePath>/<command>`(body 即 arguments 本体,无信封)调用;命令是节点下的虚拟叶子。标识符大小写不敏感、规范化为小写。CLI、Dashboard 与直接 API 是同一控制面的三个入口。
 
 项目当前处于 pre-launch 开发期，尚无正式生产环境。共享或临时部署只用于验证，不能写成“产品已上线”，也不能把其中的域名、账户、资源 ID 或测试凭据固化进长期文档。
 

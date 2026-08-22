@@ -78,7 +78,7 @@ npm install -g @tool-bridge/cli
 tb login --base-url http://127.0.0.1:8787   # 按提示输入刚才保存的 Admin SK
 tb tree --depth 2                           # 浏览当前身份可见的树
 tb help system/status                      # 阅读节点的实时契约
-tb call system/status --tool get           # 调用节点上的 get
+tb call system/status/get                  # 调用节点上的 get 命令
 ```
 
 部署包含 Dashboard，可直接打开 [http://127.0.0.1:8787/ui](http://127.0.0.1:8787/ui)。Dashboard 使用同一套公开 API，SK 只保存在浏览器本地。
@@ -92,8 +92,8 @@ curl -H "Authorization: Bearer $TB_ADMIN_SK" \
 curl -X POST \
   -H "Authorization: Bearer $TB_ADMIN_SK" \
   -H "Content-Type: application/json" \
-  -d '{"tool":"get","arguments":{}}' \
-  http://127.0.0.1:8787/system/status
+  -d '{}' \
+  http://127.0.0.1:8787/system/status/get
 ```
 
 `~help` 默认返回 Markdown；使用 `Accept: text/plain` 可获得紧凑 Help DSL，使用 `Accept: application/json` 可获得包含 JSON Schema 的结构化描述。
@@ -144,7 +144,7 @@ tb tool mount tools/docs \
   --url https://mcp.example.com/mcp
 
 tb help tools/docs
-tb call tools/docs --tool search --args '{"query":"tool-bridge"}'
+tb call tools/docs/search --args '{"query":"tool-bridge"}'
 ```
 
 S3 兼容对象存储可以挂成 Context namespace。凭证只写入 SecretStore，节点记录只保存引用名：
@@ -268,8 +268,8 @@ const tb = createToolBridge({
 })
 
 tb.registerTool('tools/echo', {
-  List: () => [{ name: 'echo', description: 'Return the input text' }],
-  Call: (_name, args) => ({ content: { echoed: args.text } }),
+  list: () => [{ name: 'echo', description: 'Return the input text' }],
+  call: (_name, args) => ({ content: { echoed: args.text } }),
 })
 
 export default { fetch: tb.fetch }

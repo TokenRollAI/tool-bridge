@@ -50,10 +50,8 @@ describe('tb federation', () => {
     }
     const fn = jsonFetch(page)
     await runCli(['federation', 'ls', ...gw, '--json'])
-    const [url, init] = fn.mock.calls[0] as [string, RequestInit]
-    expect(url).toBe('https://gw/system/federation')
-    const payload = JSON.parse(init.body as string)
-    expect(payload.tool).toBe('list')
+    const [url] = fn.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe('https://gw/system/federation/list')
     expect(process.exitCode).toBe(0)
     expect(JSON.parse(stdoutText())).toEqual(page)
   })
@@ -62,10 +60,9 @@ describe('tb federation', () => {
     const fn = jsonFetch({ host: 'example.com', updatedAt: '2026-07-08T00:00:00.000Z' })
     await runCli(['federation', 'add', 'example.com', ...gw, '--json'])
     const [url, init] = fn.mock.calls[0] as [string, RequestInit]
-    expect(url).toBe('https://gw/system/federation')
+    expect(url).toBe('https://gw/system/federation/add')
     const payload = JSON.parse(init.body as string)
-    expect(payload.tool).toBe('add')
-    expect(payload.arguments).toEqual({ host: 'example.com' })
+    expect(payload).toEqual({ host: 'example.com' })
     expect(process.exitCode).toBe(0)
   })
 
@@ -73,10 +70,9 @@ describe('tb federation', () => {
     const fn = jsonFetch({ ok: true })
     await runCli(['federation', 'rm', 'example.com', ...gw, '--json'])
     const [url, init] = fn.mock.calls[0] as [string, RequestInit]
-    expect(url).toBe('https://gw/system/federation')
+    expect(url).toBe('https://gw/system/federation/remove')
     const payload = JSON.parse(init.body as string)
-    expect(payload.tool).toBe('remove')
-    expect(payload.arguments).toEqual({ host: 'example.com' })
+    expect(payload).toEqual({ host: 'example.com' })
     expect(process.exitCode).toBe(0)
   })
 

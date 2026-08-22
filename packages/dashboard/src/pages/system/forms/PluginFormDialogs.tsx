@@ -60,8 +60,7 @@ export function RegisterPluginDialog({
     }
     invoke.mutate(
       {
-        path: 'system/plugin',
-        tool: 'write',
+        commandPath: 'system/plugin/write',
         args: { id: id.trim(), ...fields },
       },
       {
@@ -205,8 +204,7 @@ export function EditPluginDialog({
     }
     invoke.mutate(
       {
-        path: 'system/plugin',
-        tool: 'update',
+        commandPath: 'system/plugin/update',
         args: { id: plugin.id, patch: fields },
       },
       {

@@ -6,7 +6,7 @@ import { parsePageOpts, resolveTarget, withGlobalOpts, withPageOpts } from '../a
 import { guard, printJson, printLine, table } from '../output'
 import { deleteNode, registerNode } from '../registry'
 import { confirmDestructive } from '../confirm'
-import { callTool, CliError } from '../http'
+import { callDirect, CliError } from '../http'
 
 /**
  * `tb skill *` —— skillhub 命令族(与 device 并列的一等 kind:Agent Skill 仓库)。
@@ -120,7 +120,7 @@ export function skillLsCommand(): Command {
         const hub = String(hubArg ?? '').trim()
         if (!hub) throw new CliError('skillhub path is required')
         const callOpts = parsePageOpts(opts)
-        const page = await callTool<Page<SkillSummary>>(resolveTarget(opts), hubUri(hub), 'List', {
+        const page = await callDirect<Page<SkillSummary>>(resolveTarget(opts), `${hubUri(hub)}/list`, {
           ...(Object.keys(callOpts).length ? { opts: callOpts } : {}),
         })
         if (asJson) printJson(page)
@@ -150,7 +150,7 @@ export function skillGetCommand(): Command {
 
           // --file:取单个 bundled 文件。
           if (opts.file) {
-            const file = await callTool<SkillFile>(target, hubUri(hub), 'Get', {
+            const file = await callDirect<SkillFile>(target, `${hubUri(hub)}/get`, {
               id,
               file: String(opts.file),
             })
@@ -167,7 +167,7 @@ export function skillGetCommand(): Command {
             return
           }
 
-          const detail = await callTool<SkillDetail>(target, hubUri(hub), 'Get', { id })
+          const detail = await callDirect<SkillDetail>(target, `${hubUri(hub)}/get`, { id })
 
           // --out:把整包写到本地目录(SKILL.md 用 detail.content,其余逐文件取)。
           if (opts.out) {
@@ -181,7 +181,7 @@ export function skillGetCommand(): Command {
                 written++
                 continue
               }
-              const one = await callTool<SkillFile>(target, hubUri(hub), 'Get', {
+              const one = await callDirect<SkillFile>(target, `${hubUri(hub)}/get`, {
                 id,
                 file: f.path,
               })
@@ -229,10 +229,8 @@ export function skillSearchCommand(): Command {
           const query = String(queryArg ?? '').trim()
           if (!query) throw new CliError('query is required')
           const callOpts = parsePageOpts(opts)
-          const page = await callTool<Page<SkillSummary>>(
-            resolveTarget(opts),
-            hubUri(hub),
-            'Search',
+          const page = await callDirect<Page<SkillSummary>>(
+            resolveTarget(opts), `${hubUri(hub)}/search`,
             {
               query,
               ...(Object.keys(callOpts).length ? { opts: callOpts } : {}),
@@ -263,10 +261,8 @@ export function skillPublishCommand(): Command {
         if (!files.some(f => f.path === SKILL_DOC)) {
           throw new CliError(`directory "${dir}" has no ${SKILL_DOC} at its root`)
         }
-        const result = await callTool<{ fileCount: number, id: string, name: string }>(
-          resolveTarget(opts),
-          hubUri(hub),
-          'Publish',
+        const result = await callDirect<{ fileCount: number, id: string, name: string }>(
+          resolveTarget(opts), `${hubUri(hub)}/publish`,
           { ...(opts.id ? { id: String(opts.id) } : {}), files },
         )
         if (asJson) printJson(result)
@@ -290,7 +286,7 @@ export function skillRmCommand(): Command {
         const id = String(idArg ?? '').trim()
         if (!id) throw new CliError('skill id is required')
         await confirmDestructive(opts, `Delete skill '${id}' and all its files from ${hub}?`)
-        await callTool(resolveTarget(opts), hubUri(hub), 'Remove', { id })
+        await callDirect(resolveTarget(opts), `${hubUri(hub)}/remove`, { id })
         if (asJson) printJson({ ok: true, id })
         else printLine(`removed skill '${id}'`)
       })

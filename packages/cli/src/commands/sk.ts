@@ -10,7 +10,7 @@ import {
 } from '../args'
 import { guard, printJson, printLine, table } from '../output'
 import { confirmDestructive } from '../confirm'
-import { callTool, CliError } from '../http'
+import { callDirect, CliError } from '../http'
 import { parseScope } from '../scope'
 
 interface SkGlobalOpts {
@@ -46,10 +46,8 @@ export function skListCommand(): Command {
       const asJson = Boolean(opts.json)
       await guard(asJson, async () => {
         const pageOpts = parsePageOpts(opts)
-        const page = await callTool<Page<SecretKeyView>>(
-          resolveTarget(opts),
-          '/system/sk',
-          'list',
+        const page = await callDirect<Page<SecretKeyView>>(
+          resolveTarget(opts), '/system/sk/list',
           Object.keys(pageOpts).length ? { opts: pageOpts } : {},
         )
         if (asJson) {
@@ -79,7 +77,7 @@ export function skGetCommand(): Command {
       await guard(asJson, async () => {
         const id = String(idArg ?? '').trim()
         if (!id) throw new CliError('secret key id is required')
-        const key = await callTool<SecretKeyView>(resolveTarget(opts), '/system/sk', 'get', { id })
+        const key = await callDirect<SecretKeyView>(resolveTarget(opts), '/system/sk/get', { id })
         if (asJson) printJson(key)
         else printKey(key)
       })
@@ -146,10 +144,8 @@ Examples:
           ...(opts.description ? { description: String(opts.description) } : {}),
         }
 
-        const created = await callTool<SecretKeyCreated>(
-          resolveTarget(opts),
-          '/system/sk',
-          'write',
+        const created = await callDirect<SecretKeyCreated>(
+          resolveTarget(opts), '/system/sk/write',
           input as unknown as Record<string, unknown>,
         )
 
@@ -214,7 +210,7 @@ export function skUpdateCommand(): Command {
         if (Object.keys(patch).length === 0) {
           throw new CliError('nothing to update: pass at least one patch option')
         }
-        const key = await callTool<SecretKeyView>(resolveTarget(opts), '/system/sk', 'update', {
+        const key = await callDirect<SecretKeyView>(resolveTarget(opts), '/system/sk/update', {
           id,
           patch,
         })
@@ -233,7 +229,7 @@ function skStateCommand(name: 'disable' | 'enable', disabled: boolean): Command 
       await guard(asJson, async () => {
         const id = String(idArg ?? '').trim()
         if (!id) throw new CliError('secret key id is required')
-        const key = await callTool<SecretKeyView>(resolveTarget(opts), '/system/sk', 'update', {
+        const key = await callDirect<SecretKeyView>(resolveTarget(opts), '/system/sk/update', {
           id,
           patch: { disabled },
         })
@@ -255,7 +251,7 @@ export function skRmCommand(): Command {
         const id = String(idArg ?? '').trim()
         if (!id) throw new CliError('secret key id is required')
         await confirmDestructive(opts, `Revoke SK ${id}? This is irreversible.`)
-        await callTool(resolveTarget(opts), '/system/sk', 'delete', { id })
+        await callDirect(resolveTarget(opts), '/system/sk/delete', { id })
         if (asJson) printJson({ ok: true, id })
         else printLine(`revoked SK: ${id}`)
       })

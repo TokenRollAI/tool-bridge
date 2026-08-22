@@ -194,7 +194,7 @@ export function RegistryPage() {
 
   const unmount = async (path: string) => {
     try {
-      await invoke.mutateAsync({ path: 'system/registry', tool: 'delete', args: { path } })
+      await invoke.mutateAsync({ commandPath: 'system/registry/delete', args: { path } })
       toast.success(`已卸载 ${path}`)
       await invalidate()
     } catch (error) {

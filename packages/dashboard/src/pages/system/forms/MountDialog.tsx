@@ -117,14 +117,13 @@ export function MountDialog({
           && secrets.data !== undefined
           && !secrets.hasNextPage
           && !knownSecret
-        await invoke.mutateAsync({ path: 'system/secret', tool: 'set', args: calls.secret })
+        await invoke.mutateAsync({ commandPath: 'system/secret/set', args: calls.secret })
       }
-      await invoke.mutateAsync({ path: 'system/registry', tool: 'write', args: calls.mount })
+      await invoke.mutateAsync({ commandPath: 'system/registry/write', args: calls.mount })
     } catch (error) {
       if (shouldDeleteOnFailure && calls.secret !== undefined) {
         await invoke.mutateAsync({
-          path: 'system/secret',
-          tool: 'delete',
+          commandPath: 'system/secret/delete',
           args: { name: calls.secret.name },
         }).catch(() => {})
       }

@@ -19,7 +19,7 @@ const TAVILY: CatalogListItem = {
   nodeKinds: ['tool'],
 }
 
-const calls: Array<{ args: Record<string, unknown>, path: string, tool: string }> = []
+const calls: Array<{ args: Record<string, unknown>, commandPath: string }> = []
 
 vi.mock('@/lib/queries', () => ({
   useInvalidate: () => async () => {},
@@ -33,7 +33,7 @@ vi.mock('@/lib/queries', () => ({
   useSecretList: () => ({ data: { items: [] }, hasNextPage: false }),
   useInvoke: () => ({
     isPending: false,
-    mutateAsync: async (input: { args: Record<string, unknown>, path: string, tool: string }) => {
+    mutateAsync: async (input: { args: Record<string, unknown>, commandPath: string }) => {
       calls.push(input)
       return { json: {} }
     },
@@ -85,12 +85,12 @@ describe('AddToolWizard 渲染与挂载', () => {
 
     // 单值凭证留空 = 不建 secret,只发一条 registry write
     await waitFor(() => {
-      expect(calls.some(c => c.path === 'system/registry' && c.tool === 'write')).toBe(true)
+      expect(calls.some(c => c.commandPath === 'system/registry/write')).toBe(true)
     })
     // 可见步骤:挂载成功
     expect(await screen.findByText('tavily 挂载成功')).toBeTruthy()
     // 没有写 secret(单值留空)
-    expect(calls.some(c => c.path === 'system/secret')).toBe(false)
+    expect(calls.some(c => c.commandPath.startsWith('system/secret/'))).toBe(false)
   })
 
   it('预设直达:点 Tavily 搜索预设直接进配置步骤', async () => {

@@ -80,8 +80,7 @@ describe('tb sk create:--scope / --register-path 可重复', () => {
       'p/b',
       ...gw,
     ])
-    const body = requestBody(fn)
-    const args = body.arguments as { registerPaths: string[], scopes: unknown[] }
+    const args = requestBody(fn) as { registerPaths: string[], scopes: unknown[] }
     expect(args.scopes).toEqual([
       { pattern: 'a/**', actions: ['read'] },
       { pattern: 'b/**', actions: ['call'] },
@@ -92,7 +91,7 @@ describe('tb sk create:--scope / --register-path 可重复', () => {
   it('单个 --scope 仍工作', async () => {
     const fn = captureFetch({ key: { id: 'sk1', owner: 'user:a' }, secret: 'tbk_s' })
     await runCli(['sk', 'create', '--owner', 'user:a', '--scope', 'a/**:read', ...gw])
-    const args = requestBody(fn).arguments as { scopes: unknown[] }
+    const args = requestBody(fn) as { scopes: unknown[] }
     expect(args.scopes).toEqual([{ pattern: 'a/**', actions: ['read'] }])
   })
 
@@ -198,7 +197,7 @@ describe('tb ctx put/patch:--meta 可重复', () => {
       'k2=v2',
       ...gw,
     ])
-    const args = requestBody(fn).arguments as { entry: { metadata?: Record<string, string> } }
+    const args = requestBody(fn) as { entry: { metadata?: Record<string, string> } }
     expect(args.entry.metadata).toEqual({ k1: 'v1', k2: 'v2' })
   })
 
@@ -215,7 +214,7 @@ describe('tb ctx put/patch:--meta 可重复', () => {
       'k2=v2',
       ...gw,
     ])
-    const args = requestBody(fn).arguments as { patch: { metadata?: Record<string, string> } }
+    const args = requestBody(fn) as { patch: { metadata?: Record<string, string> } }
     expect(args.patch.metadata).toEqual({ k1: 'v1', k2: 'v2' })
   })
 })

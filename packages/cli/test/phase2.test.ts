@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { buildVirtualize, parseToolsFile } from '../src/registry'
 import { parseCallArgs } from '../src/commands/call'
 import { resetFetch, setFetch } from '../src/http'
-import { runCli } from './cliHarness'
+import { parseError, runCli } from './cliHarness'
 
 /** 捕获请求并按 body 应答;返回 mock 以断言 URL/body。 */
 function captureFetch(body: unknown, status = 200): ReturnType<typeof vi.fn> {
@@ -324,8 +324,8 @@ describe('tb server ls / rm', () => {
     })
     await runCli(['server', 'ls', '--json', '--base-url', 'https://gw', '--sk', 'tbk_x'])
     const [url, init] = fn.mock.calls[0] as [string, RequestInit]
-    expect(url).toBe('https://gw/system/registry')
-    expect(JSON.parse(init.body as string)).toEqual({ tool: 'list', arguments: {} })
+    expect(url).toBe('https://gw/system/registry/list')
+    expect(JSON.parse(init.body as string)).toEqual({})
     const stdout = process.stdout.write as unknown as ReturnType<typeof vi.fn>
     const printed = stdout.mock.calls.map(c => String(c[0])).join('')
     expect(JSON.parse(printed)).toEqual({
@@ -341,9 +341,8 @@ describe('tb server ls / rm', () => {
   })
 
   it('server rm 先确认 kind=remote 再 delete', async () => {
-    const fn = vi.fn(async (_url: string, init?: RequestInit) => {
-      const body = JSON.parse(init?.body as string)
-      if (body.tool === 'get') {
+    const fn = vi.fn(async (url: string) => {
+      if (String(url).endsWith('/get')) {
         return new Response(JSON.stringify({ path: 'fed/peer', kind: 'remote' }), {
           status: 200,
           headers: { 'content-type': 'application/json' },
@@ -368,37 +367,28 @@ describe('tb server ls / rm', () => {
     expect(fn).toHaveBeenCalledTimes(2)
     const firstBody = JSON.parse((fn.mock.calls[0]?.[1] as RequestInit).body as string)
     const secondBody = JSON.parse((fn.mock.calls[1]?.[1] as RequestInit).body as string)
-    expect(firstBody).toEqual({ tool: 'get', arguments: { path: 'fed/peer' } })
-    expect(secondBody).toEqual({ tool: 'delete', arguments: { path: 'fed/peer' } })
+    expect(firstBody).toEqual({ path: 'fed/peer' })
+    expect(secondBody).toEqual({ path: 'fed/peer' })
   })
 })
 
 describe('tb call', () => {
-  it('--tool 给出 → 信封 body {tool, arguments}(--json)', async () => {
-    const fn = captureFetch({ ok: true })
-    await runCli([
-      'call',
-      'docs/ctx7',
-      '--json',
-      '--base-url',
-      'https://gw',
-      '--sk',
-      'tbk_x',
-      '--tool',
-      'resolve',
-      '--args',
-      '{"libraryName":"react"}',
-    ])
-    const [url, init] = fn.mock.calls[0] as [string, RequestInit]
-    expect(url).toBe('https://gw/docs/ctx7')
-    expect(JSON.parse(init.body as string)).toEqual({
-      tool: 'resolve',
-      arguments: { libraryName: 'react' },
-    })
-    expect(process.exitCode).toBe(0)
+  it('--tool 已删除 → commander 报未知参数(不再有信封形态)', async () => {
+    expect(
+      await parseError([
+        'call',
+        'docs/ctx7',
+        '--tool',
+        'resolve',
+        '--base-url',
+        'https://gw',
+        '--sk',
+        'tbk_x',
+      ]),
+    ).toBe('commander.unknownOption')
   })
 
-  it('--tool 省略 → path 即直连工具路径,body 为 arguments 本体(--json)', async () => {
+  it('直连:path 即完整命令路径,body 为 arguments 本体(--json)', async () => {
     const fn = captureFetch({ ok: true })
     await runCli([
       'call',
@@ -417,7 +407,7 @@ describe('tb call', () => {
     expect(process.exitCode).toBe(0)
   })
 
-  it('--tool 省略且无 --args → 直连空对象 body', async () => {
+  it('直连且无 --args → 空对象 body', async () => {
     const fn = captureFetch({ ok: true })
     await runCli([
       'call',
@@ -438,14 +428,12 @@ describe('tb call', () => {
     captureFetch({})
     await runCli([
       'call',
-      'docs/ctx7',
+      'docs/ctx7/resolve',
       '--json',
       '--base-url',
       'https://gw',
       '--sk',
       'tbk_x',
-      '--tool',
-      'resolve',
       '--args',
       'not-json',
     ])

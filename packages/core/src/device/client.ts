@@ -41,7 +41,6 @@ export type DeviceCallHandler = (call: {
   id: string
   path: string
   signal: DeviceAbortSignal
-  tool: string
 }) => Promise<unknown> | unknown
 
 export interface DeviceClientOptions {
@@ -208,7 +207,6 @@ export class DeviceClient {
       const value = await this.opts.handler({
         id: frame.id,
         path: frame.path,
-        tool: frame.tool,
         arguments: frame.arguments,
         signal: controller.signal,
         // 老网关不带 context:字段缺省透传,handler 侧显式降级。

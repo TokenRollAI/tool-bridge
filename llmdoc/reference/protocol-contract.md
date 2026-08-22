@@ -16,9 +16,10 @@
 
 ## 调用
 
-- 直接调用：`POST /<nodePath>/<toolName>`，body 是 arguments。
-- 信封调用：`POST /<nodePath>`，body 是 `{tool, arguments}`。
-- builtin、context、skillhub 与工具名无法安全放进单个 URL segment 时使用信封；普通 tool 节点可直接调用。
+- 唯一形态：`POST /<nodePath>/<command>`，body 即 arguments 本体。命令是节点下的**虚拟叶子**(不写 Registry），对一切可调用 kind(mcp/http/tool 工具、builtin/context/skillhub 命令、device shell/fs）一视同仁。没有 `{tool, arguments}` 信封。
+- 节点本身(无命令段的 `POST /<nodePath>`）不可调用，返回 404。
+- 命令可被寻址：`GET /<nodePath>/<command>/~help`、`POST /<nodePath>/<command>`；`~tree` 只列权威注册拓扑,动态命令经 `~help`/`~search` 发现。
+- 标识符大小写不敏感、规范化为小写：路径段、命令/工具名、export id、scope pattern 字面段、device 暴露路径都小写。输入大小写不敏感,存储与输出恒小写；规范化后冲突(如上游同时暴露 `Foo`/`foo`)→ `invalid_argument`，不选其一。命令名含 `/`、为空、以 `~` 开头、为 `.`/`..` 一律拒。第三方(MCP/HTTP 上游)原始工具名是外部身份,适配器维护 `公开小写名 → 上游原名` 映射,不改上游大小写。
 - `Page<T>` 为 `{items,cursor?}`，默认 limit 50、最大 200；cursor 只表示继续位置，不是授权凭据。
 
 ## 节点
@@ -77,11 +78,11 @@ Manifest 描述部署：`id`、`protocolVersion:'plugin/v2'`、`endpoint`、`aut
 
 ## Context
 
-基础动词：Get、List；按 capability 追加 Put、Patch、Delete、Search、Subscribe。content 可内联或返回 `$ref`。大对象 URL 必须短期有效并受签名/宿主边界保护。
+动词(全小写,cmd 名 = provider 方法名）：`list`、`get`(读）；`write`、`update`、`delete`(写）；`search`(可选能力）。全部可选,能力由 provider handler 存在性推导——`~help` 只列真实存在的动词,无任何写动词即只读。content 可内联或返回 `$ref`;大对象 URL 必须短期有效并受签名/宿主边界保护。skillhub 动词:`list`、`get`(传 `file` 参数则取单文件,内部走 provider `get_file`)、`search`、`publish`、`remove`。
 
 ## 设备
 
-设备先连 `/system/device/ws?deviceId=...`，hello 声明 expose；服务端验证身份与 `registerPaths` 后代写 `device/<id>/...`。完整帧集合是 hello、ready、error、call、result、ping、pong、cancel。PING/PONG 是稳定字面量，支持边缘 auto-response；只有当前 generation 进入 ready 后才能执行 call，连接替换后旧 generation 的 message、close 与迟到结果不得污染新连接。
+设备先连 `/system/device/ws?deviceId=...`，hello 声明 expose；服务端验证身份与 `registerPaths` 后代写 `device/<id>/...`。完整帧集合是 hello、ready、error、call、result、ping、pong、cancel。`call` 帧的 `path` 相对 mountPath 且**含命令叶子段**(如 `shell/exec`、`fs/get`、`<mount 相对路径>/<命令>`）——与直连调用一致,命令是路径最后一段,不再单列 `tool` 字段。PING/PONG 是稳定字面量，支持边缘 auto-response；只有当前 generation 进入 ready 后才能执行 call，连接替换后旧 generation 的 message、close 与迟到结果不得污染新连接。
 
 call id 在同一设备进程内用于执行中合并与有界结果缓存；当前契约不承诺跨进程 exactly-once。cancel 是协作式提示：设备向 handler 的 AbortSignal 发信号，忽略 signal 的 handler 仍可完成并缓存结果，不能把 cancel 表述为外部副作用已撤销。未知 handler 异常对 wire 脱敏，result 必须可 JSON 序列化。
 

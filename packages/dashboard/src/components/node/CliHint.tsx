@@ -12,19 +12,15 @@ function sq(s: string): string {
 /**
  * 三入口对照:当前表单参数的等价 `tb call` 与 curl 命令(可复制)。
  * SK 一律以 $TB_SK 占位,不落明文——Dashboard 能做的 CLI/API 必须能做。
- * `direct`(mcp/http/tool 工具)生成直连形态:`tb call <path>/<tool>`、
- * `curl POST /<path>/<tool>` body 即 arguments;否则信封形态。
+ * 唯一直连形态:`tb call <commandPath>`、`curl POST /<commandPath>` body 即 arguments。
+ * commandPath 为含命令/工具叶子段的完整路径。
  */
 export function CliHint({
-  path,
-  tool,
+  commandPath,
   args,
-  direct = false,
 }: {
   args: unknown
-  direct?: boolean
-  path: string
-  tool: string
+  commandPath: string
 }) {
   const [open, setOpen] = useState(false)
   const { active } = useSession()
@@ -32,14 +28,12 @@ export function CliHint({
 
   const argsJson = JSON.stringify(args ?? {})
   const argsFlag = argsJson === '{}' ? '' : ` --args ${sq(argsJson)}`
-  const tb = direct
-    ? `tb call ${path}/${tool}${argsFlag}`
-    : `tb call ${path} --tool ${tool}${argsFlag}`
+  const tb = `tb call ${commandPath}${argsFlag}`
   const curl = [
-    `curl -X POST ${sq(`${base}/${path}${direct ? `/${tool}` : ''}`)}`,
+    `curl -X POST ${sq(`${base}/${commandPath}`)}`,
     `-H "Authorization: Bearer $TB_SK"`,
     `-H 'Content-Type: application/json'`,
-    `-d ${sq(direct ? argsJson : JSON.stringify({ tool, arguments: args ?? {} }))}`,
+    `-d ${sq(argsJson)}`,
   ].join(' \\\n  ')
 
   return (

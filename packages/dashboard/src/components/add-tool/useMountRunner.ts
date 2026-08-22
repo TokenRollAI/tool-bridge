@@ -61,7 +61,7 @@ export function useMountRunner() {
 
         patchStep('secret', { state: 'running' })
         try {
-          await invoke.mutateAsync({ path: 'system/secret', tool: 'set', args: calls.secret })
+          await invoke.mutateAsync({ commandPath: 'system/secret/set', args: calls.secret })
           patchStep('secret', { state: 'done' })
         } catch (error) {
           patchStep('secret', {
@@ -75,7 +75,7 @@ export function useMountRunner() {
 
       patchStep('mount', { state: 'running' })
       try {
-        await invoke.mutateAsync({ path: 'system/registry', tool: 'write', args: calls.mount })
+        await invoke.mutateAsync({ commandPath: 'system/registry/write', args: calls.mount })
         patchStep('mount', { state: 'done' })
       } catch (error) {
         patchStep('mount', {
@@ -92,7 +92,7 @@ export function useMountRunner() {
             ],
           }))
           const removed = await invoke
-            .mutateAsync({ path: 'system/secret', tool: 'delete', args: { name: calls.secret.name } })
+            .mutateAsync({ commandPath: 'system/secret/delete', args: { name: calls.secret.name } })
             .then(() => true)
             .catch(() => false)
           patchStep('rollback', { state: removed ? 'rolled-back' : 'failed' })

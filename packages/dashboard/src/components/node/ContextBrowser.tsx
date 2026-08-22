@@ -524,8 +524,7 @@ function EntryEditDialog({
     if (!isNew && ref !== null) {
       try {
         await invoke.mutateAsync({
-          path,
-          tool: 'Update',
+          commandPath: `${path}/update`,
           args: {
             path: entryPath,
             patch: { metadata: metadata ?? {}, ifVersion: baselineVersion },
@@ -555,8 +554,7 @@ function EntryEditDialog({
     }
     try {
       await invoke.mutateAsync({
-        path,
-        tool: 'Write',
+        commandPath: `${path}/write`,
         args: {
           path: p,
           entry: {
@@ -729,9 +727,9 @@ function EntryEditDialog({
  * 与 `tb ctx ls|cat|put|rm` 走同一数据面,无管理旁路。
  */
 export function ContextBrowser({ path, cmds }: { cmds: HelpCmd[], path: string }) {
-  const canWrite = cmds.some(c => c.name === 'Write')
-  const canDelete = cmds.some(c => c.name === 'Delete')
-  const canSearch = cmds.some(c => c.name === 'Search')
+  const canWrite = cmds.some(c => c.name === 'write')
+  const canDelete = cmds.some(c => c.name === 'delete')
+  const canSearch = cmds.some(c => c.name === 'search')
 
   const [prefixInput, setPrefixInput] = useState('')
   const [queryInput, setQueryInput] = useState('')
@@ -756,7 +754,7 @@ export function ContextBrowser({ path, cmds }: { cmds: HelpCmd[], path: string }
 
   const remove = async (entryPath: string) => {
     try {
-      await invoke.mutateAsync({ path, tool: 'Delete', args: { path: entryPath } })
+      await invoke.mutateAsync({ commandPath: `${path}/delete`, args: { path: entryPath } })
       toast.success(`已删除 ${entryPath}`)
       setSelected(current => (current === entryPath ? null : current))
       setMobileViewing(current => (current === entryPath ? null : current))

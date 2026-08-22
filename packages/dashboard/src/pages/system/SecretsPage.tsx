@@ -140,7 +140,7 @@ function SetSecretDialog({
     }
     const action = isRotation ? '轮换' : mayRotateUnloaded ? '写入' : '保存'
     invoke.mutate(
-      { path: 'system/secret', tool: 'set', args: { name: normalizedName, value } },
+      { commandPath: 'system/secret/set', args: { name: normalizedName, value } },
       {
         onSuccess: () => {
           toast.success(`凭证 ${normalizedName} 已${action}，值不会回显`)
@@ -307,7 +307,7 @@ export function SecretsPage() {
 
   const remove = async (name: string) => {
     try {
-      await invoke.mutateAsync({ path: 'system/secret', tool: 'delete', args: { name } })
+      await invoke.mutateAsync({ commandPath: 'system/secret/delete', args: { name } })
       toast.success(`凭证 ${name} 已删除`)
       await invalidate('secret-list')
     } catch (error) {

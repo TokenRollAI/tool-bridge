@@ -4,7 +4,7 @@ import type { Page, SecretSummary } from '../types'
 import { parsePageOpts, resolveTarget, withGlobalOpts, withPageOpts } from '../args'
 import { guard, printJson, printLine, table } from '../output'
 import { confirmDestructive } from '../confirm'
-import { callTool, CliError } from '../http'
+import { callDirect, CliError } from '../http'
 
 /** 从 stdin 读取全部内容(去掉尾随换行)——用于 secret set 避免值进 shell history。 */
 async function readStdin(): Promise<string> {
@@ -79,7 +79,7 @@ export function secretSetCommand(): Command {
           value = await readStdin()
         }
 
-        await callTool(resolveTarget(opts), '/system/secret', 'set', { name, value })
+        await callDirect(resolveTarget(opts), '/system/secret/set', { name, value })
         // 只回名字与字段名,**不回显值**(字段名不是机密,能帮用户确认写对了哪几个)。
         const written = fields.length > 0 ? Object.keys(parseFields(fields)).sort() : undefined
         if (asJson) printJson({ ok: true, name, ...(written === undefined ? {} : { fields: written }) })
@@ -96,10 +96,8 @@ export function secretLsCommand(): Command {
       const asJson = Boolean(opts.json)
       await guard(asJson, async () => {
         const pageOpts = parsePageOpts(opts)
-        const page = await callTool<Page<SecretSummary>>(
-          resolveTarget(opts),
-          '/system/secret',
-          'list',
+        const page = await callDirect<Page<SecretSummary>>(
+          resolveTarget(opts), '/system/secret/list',
           Object.keys(pageOpts).length ? { opts: pageOpts } : {},
         )
         if (asJson) {
@@ -125,7 +123,7 @@ export function secretRmCommand(): Command {
         const name = String(nameArg ?? '').trim()
         if (!name) throw new CliError('secret name is required')
         await confirmDestructive(opts, `Delete secret '${name}'? Nodes referencing it will fail on next call.`)
-        await callTool(resolveTarget(opts), '/system/secret', 'delete', { name })
+        await callDirect(resolveTarget(opts), '/system/secret/delete', { name })
         if (asJson) printJson({ ok: true, name })
         else printLine(`deleted secret: ${name}`)
       })

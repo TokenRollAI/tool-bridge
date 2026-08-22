@@ -58,7 +58,7 @@ const SENTRY: CatalogListItem = {
 }
 
 /** 记录 invoke 调用顺序(测试的核心观测点)。 */
-const calls: Array<{ args: Record<string, unknown>, path: string, tool: string }> = []
+const calls: Array<{ args: Record<string, unknown>, commandPath: string }> = []
 const oauthCalls: string[] = []
 let failMount = false
 let secretNames = ['shared-key']
@@ -78,13 +78,13 @@ vi.mock('@/lib/queries', () => ({
   }),
   useInvoke: () => ({
     isPending: false,
-    mutateAsync: async (input: { args: Record<string, unknown>, path: string, tool: string }) => {
+    mutateAsync: async (input: { args: Record<string, unknown>, commandPath: string }) => {
       calls.push(input)
-      if (failMount && input.path === 'system/registry') throw new Error('mount rejected')
+      if (failMount && input.commandPath === 'system/registry/write') throw new Error('mount rejected')
       return { json: {} }
     },
     mutate: (
-      input: { args: Record<string, unknown>, path: string, tool: string },
+      input: { args: Record<string, unknown>, commandPath: string },
       opts?: { onSuccess?: (r: unknown) => void },
     ) => {
       calls.push(input)
@@ -168,8 +168,8 @@ describe('提交顺序', () => {
     fireEvent.click(screen.getByRole('button', { name: /添加 tavily/ }))
 
     await waitFor(() => expect(calls.length).toBe(2))
-    expect(calls[0]).toMatchObject({ path: 'system/secret', tool: 'set' })
-    expect(calls[1]).toMatchObject({ path: 'system/registry', tool: 'write' })
+    expect(calls[0]).toMatchObject({ commandPath: 'system/secret/set' })
+    expect(calls[1]).toMatchObject({ commandPath: 'system/registry/write' })
     // 挂载配置里的 authRef 与刚写的 secret 名对得上(不靠用户手打)。
     expect((calls[0]!.args as { name: string }).name).toBe('integration-tools%2Ftavily')
     expect(
@@ -194,7 +194,7 @@ describe('提交顺序', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /添加 tavily/ }))
     await waitFor(() => expect(calls.length).toBe(1))
-    expect(calls[0]).toMatchObject({ path: 'system/registry', tool: 'write' })
+    expect(calls[0]).toMatchObject({ commandPath: 'system/registry/write' })
     expect(
       ((calls[0]!.args as { config: { authRef: string } }).config).authRef,
     ).toBe('shared-key')
@@ -219,10 +219,10 @@ describe('提交顺序', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /添加 tavily/ }))
     await waitFor(() => expect(calls.length).toBe(3))
-    expect(calls.map(call => `${call.path}:${call.tool}`)).toEqual([
-      'system/secret:set',
-      'system/registry:write',
-      'system/secret:delete',
+    expect(calls.map(call => call.commandPath)).toEqual([
+      'system/secret/set',
+      'system/registry/write',
+      'system/secret/delete',
     ])
     expect(calls[2]?.args).toEqual({ name: 'integration-tools%2Ftavily' })
   })
@@ -236,9 +236,9 @@ describe('提交顺序', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /添加 tavily/ }))
     await waitFor(() => expect(screen.getByRole('alert')).toBeDefined())
-    expect(calls.map(call => `${call.path}:${call.tool}`)).toEqual([
-      'system/secret:set',
-      'system/registry:write',
+    expect(calls.map(call => call.commandPath)).toEqual([
+      'system/secret/set',
+      'system/registry/write',
     ])
   })
 

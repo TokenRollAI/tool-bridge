@@ -42,8 +42,8 @@ describe('tb skill ls', () => {
     const fn = captureFetch({ items: [] })
     await runCli(['skill', 'ls', 'skills/team', ...gw, '--json'])
     const [url, init] = fn.mock.calls[0] as [string, RequestInit]
-    expect(url).toBe('https://gw/skills/team')
-    expect(JSON.parse(init.body as string)).toEqual({ tool: 'List', arguments: {} })
+    expect(url).toBe('https://gw/skills/team/list')
+    expect(JSON.parse(init.body as string)).toEqual({})
     expect(process.exitCode).toBe(0)
   })
 
@@ -51,10 +51,7 @@ describe('tb skill ls', () => {
     const fn = captureFetch({ items: [] })
     await runCli(['skill', 'ls', 'skills/team', '--limit', '5', '--cursor', 'c1', ...gw, '--json'])
     const [, init] = fn.mock.calls[0] as [string, RequestInit]
-    expect(JSON.parse(init.body as string)).toEqual({
-      tool: 'List',
-      arguments: { opts: { limit: 5, cursor: 'c1' } },
-    })
+    expect(JSON.parse(init.body as string)).toEqual({ opts: { limit: 5, cursor: 'c1' } })
   })
 })
 
@@ -63,8 +60,8 @@ describe('tb skill get', () => {
     const fn = captureFetch({ id: 'pdf', name: 'pdf', description: 'd', content: '# x', files: [] })
     await runCli(['skill', 'get', 'skills/team', 'pdf', ...gw, '--json'])
     const [url, init] = fn.mock.calls[0] as [string, RequestInit]
-    expect(url).toBe('https://gw/skills/team')
-    expect(JSON.parse(init.body as string)).toEqual({ tool: 'Get', arguments: { id: 'pdf' } })
+    expect(url).toBe('https://gw/skills/team/get')
+    expect(JSON.parse(init.body as string)).toEqual({ id: 'pdf' })
   })
 
   it('--file → Get{id,file}', async () => {
@@ -76,10 +73,7 @@ describe('tb skill get', () => {
     })
     await runCli(['skill', 'get', 'skills/team', 'pdf', '--file', 'scripts/a.py', ...gw, '--json'])
     const [, init] = fn.mock.calls[0] as [string, RequestInit]
-    expect(JSON.parse(init.body as string)).toEqual({
-      tool: 'Get',
-      arguments: { id: 'pdf', file: 'scripts/a.py' },
-    })
+    expect(JSON.parse(init.body as string)).toEqual({ id: 'pdf', file: 'scripts/a.py' })
   })
 })
 
@@ -88,7 +82,7 @@ describe('tb skill search', () => {
     const fn = captureFetch({ items: [] })
     await runCli(['skill', 'search', 'skills/team', 'pdf', ...gw, '--json'])
     const [, init] = fn.mock.calls[0] as [string, RequestInit]
-    expect(JSON.parse(init.body as string)).toEqual({ tool: 'Search', arguments: { query: 'pdf' } })
+    expect(JSON.parse(init.body as string)).toEqual({ query: 'pdf' })
   })
 })
 
@@ -97,8 +91,8 @@ describe('tb skill rm', () => {
     const fn = captureFetch({})
     await runCli(['skill', 'rm', 'skills/team', 'pdf', ...gw, '--json'])
     const [url, init] = fn.mock.calls[0] as [string, RequestInit]
-    expect(url).toBe('https://gw/skills/team')
-    expect(JSON.parse(init.body as string)).toEqual({ tool: 'Remove', arguments: { id: 'pdf' } })
+    expect(url).toBe('https://gw/skills/team/remove')
+    expect(JSON.parse(init.body as string)).toEqual({ id: 'pdf' })
   })
 })
 
@@ -112,13 +106,11 @@ describe('tb skill publish', () => {
     const fn = captureFetch({ id: 'demo', name: 'demo', description: 'd', fileCount: 2 })
     await runCli(['skill', 'publish', 'skills/team', dir, ...gw, '--json'])
     const [url, init] = fn.mock.calls[0] as [string, RequestInit]
-    expect(url).toBe('https://gw/skills/team')
+    expect(url).toBe('https://gw/skills/team/publish')
     const body = JSON.parse(init.body as string) as {
-      arguments: { files: { content: string, path: string }[] }
-      tool: string
+      files: { content: string, path: string }[]
     }
-    expect(body.tool).toBe('Publish')
-    const paths = body.arguments.files.map(f => f.path).sort()
+    const paths = body.files.map(f => f.path).sort()
     expect(paths).toEqual(['SKILL.md', 'scripts/run.sh'])
     expect(process.exitCode).toBe(0)
   })
@@ -204,14 +196,9 @@ describe('tb skill unmount', () => {
     // 第一次 get 校验 kind,第二次 delete。
     const first = fn.mock.calls[0] as [string, RequestInit]
     const second = fn.mock.calls[1] as [string, RequestInit]
-    expect(first[0]).toBe('https://gw/system/registry')
-    expect(JSON.parse(first[1].body as string)).toEqual({
-      tool: 'get',
-      arguments: { path: 'skills/team' },
-    })
-    expect(JSON.parse(second[1].body as string)).toEqual({
-      tool: 'delete',
-      arguments: { path: 'skills/team' },
-    })
+    expect(first[0]).toBe('https://gw/system/registry/get')
+    expect(second[0]).toBe('https://gw/system/registry/delete')
+    expect(JSON.parse(first[1].body as string)).toEqual({ path: 'skills/team' })
+    expect(JSON.parse(second[1].body as string)).toEqual({ path: 'skills/team' })
   })
 })

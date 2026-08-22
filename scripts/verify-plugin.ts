@@ -205,8 +205,8 @@ async function main(): Promise<void> {
   const rand = randomBytes(4).toString('hex')
   const pluginId = `stub-${rand}`
   const mountPath = `docs/stub-${rand}`
-  const requiredMethods = ['List', 'Get', 'Update', 'Write']
-  const allMethods = [...requiredMethods, 'Search', 'Delete']
+  const requiredMethods = ['list', 'get', 'update', 'write']
+  const allMethods = [...requiredMethods, 'search', 'delete']
 
   // 逐条收集失败:一条失败不阻断其余断言,最后统一汇总(verify-device 同款)。
   const failures: string[] = []
@@ -288,9 +288,7 @@ async function main(): Promise<void> {
     await step('挂载 plugin-backed context 节点', async () => {
       await cliJson([
         'call',
-        'system/registry',
-        '--tool',
-        'write',
+        'system/registry/write',
         '--args',
         JSON.stringify({
           path: mountPath,
@@ -415,9 +413,9 @@ async function main(): Promise<void> {
         path: `verify/replay-${rand}.md`,
         entry: { contentType: 'text/markdown', content: 'replay me' },
       }
-      const first = await envelope('Write', writeArgs, { token: pluginToken, requestId })
+      const first = await envelope('write', writeArgs, { token: pluginToken, requestId })
       assert.equal(first.status, 200, `Write 首发预期 200,实际 ${first.status}`)
-      const second = await envelope('Write', writeArgs, { token: pluginToken, requestId })
+      const second = await envelope('write', writeArgs, { token: pluginToken, requestId })
       assert.equal(second.status, 200)
       assert.deepEqual(second.body, first.body, '同 Request-Id 重放应返回首次结果(幂等)')
       // 经树:Update 不存在的 path → not_found(HTTP 404 原样透传)。
@@ -435,7 +433,7 @@ async function main(): Promise<void> {
     })
 
     await step('清单④ 错误 TBError 形状 {code,message,retryable}', async () => {
-      const res = await envelope('Get', { path: `verify/ghost-${rand}.md` }, { token: pluginToken })
+      const res = await envelope('get', { path: `verify/ghost-${rand}.md` }, { token: pluginToken })
       assert.equal(res.status, 404, `Get 缺失预期 404,实际 ${res.status}`)
       const err = assertTBErrorShape(res.body, 'Get 缺失')
       assert.equal(err.code, 'not_found')
@@ -475,12 +473,12 @@ async function main(): Promise<void> {
     })
 
     await step('清单⑥ 无/错凭证被拒(401 TBError)', async () => {
-      const missing = await envelope('List', { path: '' }, {})
+      const missing = await envelope('list', { path: '' }, {})
       assert.equal(missing.status, 401, `无凭证预期 401,实际 ${missing.status}`)
       assertTBErrorShape(missing.body, '无凭证')
       if (externalStubUrl === undefined) {
         // 钉扎模式:非空但错误的 token 同样 401。
-        const wrong = await envelope('List', { path: '' }, { token: 'tbk_wrong-token' })
+        const wrong = await envelope('list', { path: '' }, { token: 'tbk_wrong-token' })
         assert.equal(wrong.status, 401, `错凭证预期 401,实际 ${wrong.status}`)
         assertTBErrorShape(wrong.body, '错凭证')
       } else {

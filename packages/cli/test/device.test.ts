@@ -155,11 +155,8 @@ describe('tb device ls', () => {
     })
     await runCli(['device', 'ls', '--base-url', 'https://gw', '--sk', 'tbk_x'])
     const [url, init] = fn.mock.calls[0] as [string, RequestInit]
-    expect(url).toBe('https://gw/system/registry')
-    expect(JSON.parse(init.body as string)).toEqual({
-      tool: 'list',
-      arguments: { prefix: 'device' },
-    })
+    expect(url).toBe('https://gw/system/registry/list')
+    expect(JSON.parse(init.body as string)).toEqual({ prefix: 'device' })
     const text = stdoutText()
     expect(text).toContain('d1')
     expect(text).toContain('yes')

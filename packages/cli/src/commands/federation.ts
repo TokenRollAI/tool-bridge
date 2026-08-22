@@ -2,7 +2,7 @@ import { Command } from 'commander'
 import { guard, printJson, printLine, table } from '../output'
 import { resolveTarget, withGlobalOpts } from '../args'
 import { confirmDestructive } from '../confirm'
-import { callTool, CliError } from '../http'
+import { callDirect, CliError } from '../http'
 
 interface FederationGlobalOpts {
   baseUrl?: string
@@ -29,10 +29,8 @@ export function federationLsCommand(): Command {
     .action(async (opts: FederationGlobalOpts) => {
       const asJson = Boolean(opts.json)
       await guard(asJson, async () => {
-        const page = await callTool<{ items: FederationHost[] }>(
-          resolveTarget(opts),
-          '/system/federation',
-          'list',
+        const page = await callDirect<{ items: FederationHost[] }>(
+          resolveTarget(opts), '/system/federation/list',
           {},
         )
         if (asJson) {
@@ -60,10 +58,8 @@ export function federationAddCommand(): Command {
       await guard(asJson, async () => {
         const host = String(hostArg ?? '').trim()
         if (!host) throw new CliError('host is required')
-        const entry = await callTool<{ host: string, updatedAt: string }>(
-          resolveTarget(opts),
-          '/system/federation',
-          'add',
+        const entry = await callDirect<{ host: string, updatedAt: string }>(
+          resolveTarget(opts), '/system/federation/add',
           { host },
         )
         if (asJson) printJson(entry)
@@ -84,7 +80,7 @@ export function federationRmCommand(): Command {
         const host = String(hostArg ?? '').trim()
         if (!host) throw new CliError('host is required')
         await confirmDestructive(opts, `Remove ${host} from the remote allowlist?`)
-        await callTool(resolveTarget(opts), '/system/federation', 'remove', { host })
+        await callDirect(resolveTarget(opts), '/system/federation/remove', { host })
         if (asJson) printJson({ ok: true, host })
         else printLine(`removed remote host: ${host}`)
       })

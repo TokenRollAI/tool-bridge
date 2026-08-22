@@ -4,8 +4,6 @@ import {
   apiJson,
   callDirect,
   callDirectText,
-  callTool,
-  callToolText,
   CliError,
   type Target,
 } from '../http'
@@ -142,12 +140,10 @@ export async function attachFeedbackHint(
 }
 
 /**
- * `tb call <path> ['<json>'] [--tool <name>] [--args '<json>' | --args-file <f> | --arg k=v …]`
- * —— 数据面调用。两种形态:
- * - `--tool` 给出 → 信封 `POST /<path>` + `{tool,arguments}`(适用一切 kind:
- *   builtin/context/device 的 cmd 不在直连路由上,信封是通用入口;旧用法不变)。
- * - `--tool` 省略 → path 即直连工具路径,`POST /<path>`、body 为 arguments 本体
- *   (`~help` 对 mcp/http/tool 工具宣告的形态:`tb call docs/context7/resolve-library-id`)。
+ * `tb call <path> ['<json>'] [--args '<json>' | --args-file <f> | --arg k=v …]`
+ * —— 数据面调用。唯一形态:path 即完整命令路径,`POST /<path>`、body 为 arguments 本体
+ * (无 `{tool,arguments}` 信封)。适用一切 kind:命令是节点下的虚拟叶子,
+ * `tb call system/status/get`、`tb call docs/context7/resolve-library-id`。
  * arguments 四种给法互斥:第二 positional(裸 JSON)/ `--args` / `--args-file`(`-` = stdin)/
  * 可重复 `--arg k=v`(扁平标量,见 parseArgScalar)。
  * 默认人类模式:markdown 原样打印;`--json`:输出原始 JSON。TBError → stderr + exit 1。
@@ -160,20 +156,18 @@ export interface CallArgs {
   json?: boolean
   sk?: string
   timeout?: string
-  tool?: string
 }
 
 export function callCommand(): Command {
   return withGlobalOpts(new Command('call'))
     .description(
-      'Invoke a tool: `tb call <node>/<tool> \'<json>\'` or `tb call <node> --tool <name>`',
+      'Invoke a command: `tb call <node>/<command> \'<json>\'` (body is the arguments object)',
     )
     .argument(
       '<path>',
-      'Direct tool path (e.g. docs/context7/resolve-library-id), or node path when --tool is given',
+      'Full command path, e.g. system/status/get or docs/context7/resolve-library-id',
     )
     .argument('[args]', 'Arguments as an inline JSON object (same as --args)')
-    .option('--tool <name>', 'Tool/cmd name (envelope form; works for every node kind)')
     .option('--args <json>', 'Arguments as inline JSON object')
     .option('--args-file <file>', 'Arguments from a JSON file, or `-` for stdin')
     .option(
@@ -186,12 +180,13 @@ export function callCommand(): Command {
       'after',
       `
 Examples:
+  tb call system/status/get
   tb call docs/context7/resolve-library-id '{"libraryName":"react"}'
   tb call docs/context7/resolve-library-id --args '{"libraryName":"react"}'
   tb call docs/context7/resolve-library-id --arg libraryName=react --arg tokens=5000
   cat args.json | tb call docs/context7/resolve-library-id --args-file -
-  tb call system/status --tool get
-  tb help <path>   shows each tool's arguments schema before you call it
+  tb call contexts/main/get --arg path=readme.md
+  tb help <path>   shows each command's arguments schema before you call it
 
 --arg value typing (conservative scalars only):
   true/false -> boolean, null -> null, 42 / -1.5 -> number, anything else -> string.
@@ -202,9 +197,7 @@ Examples:
       const asJson = Boolean(opts.json)
       await guard(asJson, async () => {
         const path = String(pathArg ?? '').trim()
-        if (!path) throw new CliError('node path is required')
-        const tool = opts.tool === undefined ? undefined : String(opts.tool).trim()
-        if (tool === '') throw new CliError('--tool must be non-empty when given')
+        if (!path) throw new CliError('command path is required')
 
         const callArgs = parseCallArgs(opts.args, opts.argsFile, argsPositional, opts.arg ?? [])
         const target = resolveTarget(opts)
@@ -212,18 +205,10 @@ Examples:
 
         try {
           if (asJson) {
-            const result
-              = tool !== undefined
-                ? await callTool<unknown>(target, nodeUri, tool, callArgs)
-                : await callDirect<unknown>(target, nodeUri, callArgs)
-            printJson(result)
+            printJson(await callDirect<unknown>(target, nodeUri, callArgs))
           } else {
-            const text
-              = tool !== undefined
-                ? await callToolText(target, nodeUri, tool, callArgs)
-                : await callDirectText(target, nodeUri, callArgs)
             // 人类模式的结果是网关的 markdown 表现:TTY → ANSI 渲染,管道 → 原样。
-            printMarkdown(text)
+            printMarkdown(await callDirectText(target, nodeUri, callArgs))
           }
         } catch (err) {
           await attachFeedbackHint(err, target, nodeUri)

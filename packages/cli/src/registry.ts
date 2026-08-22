@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
 import type { HttpToolDef, Node, NodeInput, Virtualize } from './types'
-import { apiJson, callTool, CliError, type Target } from './http'
+import { apiJson, callDirect, CliError, type Target } from './http'
 import { asArray } from './output'
 import { nodePath } from './paths'
 
@@ -32,7 +32,7 @@ export async function deleteNode(
 ): Promise<void> {
   try {
     if (expectedKinds !== undefined) {
-      const node = await callTool<Node>(target, '/system/registry', 'get', { path })
+      const node = await callDirect<Node>(target, '/system/registry/get', { path })
       if (!expectedKinds.includes(node.kind)) {
         throw new CliError(
           `node '${path}' is kind '${node.kind}', expected ${expectedKinds.join(' | ')}`,
@@ -40,7 +40,7 @@ export async function deleteNode(
         )
       }
     }
-    await callTool(target, '/system/registry', 'delete', { path })
+    await callDirect(target, '/system/registry/delete', { path })
   } catch (err) {
     if (err instanceof CliError && err.code === 'not_found') {
       throw new CliError(

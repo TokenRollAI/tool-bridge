@@ -230,16 +230,6 @@ export async function apiText(
   return r.text
 }
 
-/** 数据面工具调用(信封形态):`POST /<path>` body `{tool, arguments}`。 */
-export async function callTool<T>(
-  target: Target,
-  path: string,
-  tool: string,
-  args: Record<string, unknown> = {},
-): Promise<T> {
-  return apiJson<T>(target, { method: 'POST', path, body: { tool, arguments: args } })
-}
-
 /** 直连工具调用:`POST /<node>/<tool>`,body 即 arguments 本体(无信封)。 */
 export async function callDirect<T>(
   target: Target,
@@ -258,19 +248,6 @@ async function invokeText(target: Target, path: string, body: unknown): Promise<
   })
   if (!r.ok) throw errorFromResponse(r.text, r.status)
   return r.text
-}
-
-/**
- * 数据面调用(人类模式):`Accept: text/markdown`,返回原始渲染文本。
- * 非 2xx 时按 TBError 归一为 CliError。
- */
-export async function callToolText(
-  target: Target,
-  path: string,
-  tool: string,
-  args: Record<string, unknown> = {},
-): Promise<string> {
-  return invokeText(target, path, { tool, arguments: args })
 }
 
 /** 直连工具调用(人类模式):body 即 arguments 本体。 */

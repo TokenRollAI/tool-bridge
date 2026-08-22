@@ -121,11 +121,10 @@ export function CmdPanel({
   // dialog(弹窗)用"常开大编辑器"形态,DialogContent 已提供外框;accordion 仍是可折叠行。
   const dialog = variant === 'dialog'
   const effectiveOpen = dialog || open
-  // 直连工具 cmd(mcp/http/tool):~help 宣告的 path 含工具段(协议判别规则)
-  // → POST /<path>/<tool>,body 即 arguments;否则信封 POST /<path>。
-  // '/' 工具名不是单个 URL path segment；保留 ToolSpec 兼容性，改走节点信封调用。
+  // 唯一调用形态:~help 宣告的 cmd.path 是完整命令路径(含命令/工具叶子段),
+  // 直接 POST 到它,body 即 arguments。
+  const commandPath = cmd.path.replace(/^\/+/, '')
   const segmentSafe = isPathSegmentSafe(cmd.name)
-  const direct = segmentSafe && cmd.path === `/${path}/${cmd.name}`
   const lazyNeeded = segmentSafe && lazySchema && cmd.inputSchema === undefined
   const toolHelp = useToolHelp(path, cmd.name, lazyNeeded && effectiveOpen)
   const inputSchema = cmd.inputSchema ?? toolHelp.data?.cmds[0]?.inputSchema
@@ -165,7 +164,7 @@ export function CmdPanel({
 
   const doInvoke = async (args: unknown) => {
     try {
-      await invoke.mutateAsync({ path, tool: cmd.name, args, accept, direct })
+      await invoke.mutateAsync({ commandPath, args, accept })
       if (MUTATING.test(cmd.name)) await invalidate()
     } catch {
       // Mutation 错误由 useInvoke 保留给 ResultView；这里吞掉 Promise rejection，
@@ -379,7 +378,7 @@ export function CmdPanel({
                     </div>
                   )}
 
-            <CliHint args={currentArgs} direct={direct} path={path} tool={cmd.name} />
+            <CliHint args={currentArgs} commandPath={commandPath} />
 
             <ResultView
               className="mt-5"

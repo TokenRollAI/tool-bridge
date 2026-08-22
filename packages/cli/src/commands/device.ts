@@ -2,7 +2,7 @@ import { Command } from 'commander'
 import type { Node, Page } from '../types'
 import { parsePageOpts, resolveTarget, withGlobalOpts, withPageOpts } from '../args'
 import { guard, printJson, printLine, table } from '../output'
-import { callTool } from '../http'
+import { callDirect } from '../http'
 
 function deviceIdFromPath(path: string): string {
   const parts = path.split('/')
@@ -25,7 +25,7 @@ export function deviceLsCommand(): Command {
       await guard(asJson, async () => {
         const target = resolveTarget(opts)
         const pageOpts = parsePageOpts(opts)
-        const page = await callTool<Page<Node>>(target, '/system/registry', 'list', {
+        const page = await callDirect<Page<Node>>(target, '/system/registry/list', {
           prefix: 'device',
           ...(Object.keys(pageOpts).length ? { opts: pageOpts } : {}),
         })

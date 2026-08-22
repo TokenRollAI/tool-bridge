@@ -2,7 +2,7 @@ import { Command } from 'commander'
 import { guard, printJson, printLine, table } from '../output'
 import { resolveTarget, withGlobalOpts } from '../args'
 import { confirmDestructive } from '../confirm'
-import { callTool } from '../http'
+import { callDirect } from '../http'
 
 interface NoteGlobalOpts {
   baseUrl?: string
@@ -38,10 +38,9 @@ export function noteLsCommand(): Command {
       const asJson = Boolean(opts.json)
       await guard(asJson, async () => {
         const args = prefixArg !== undefined ? { prefix: prefixArg } : {}
-        const page = await callTool<{ items: Annotation[] }>(
+        const page = await callDirect<{ items: Annotation[] }>(
           resolveTarget(opts),
-          '/system/annotation',
-          'list',
+          '/system/annotation/list',
           args,
         )
         if (asJson) {
@@ -66,7 +65,7 @@ export function noteGetCommand(): Command {
     .action(async (pathArg: string, opts: NoteGlobalOpts) => {
       const asJson = Boolean(opts.json)
       await guard(asJson, async () => {
-        const entry = await callTool<Annotation>(resolveTarget(opts), '/system/annotation', 'get', {
+        const entry = await callDirect<Annotation>(resolveTarget(opts), '/system/annotation/get', {
           path: apiPath(pathArg),
         })
         if (asJson) printJson(entry)
@@ -84,7 +83,7 @@ export function noteSetCommand(): Command {
     .action(async (pathArg: string, textArg: string, opts: NoteGlobalOpts) => {
       const asJson = Boolean(opts.json)
       await guard(asJson, async () => {
-        const entry = await callTool<Annotation>(resolveTarget(opts), '/system/annotation', 'set', {
+        const entry = await callDirect<Annotation>(resolveTarget(opts), '/system/annotation/set', {
           path: apiPath(pathArg),
           text: textArg,
         })
@@ -105,7 +104,7 @@ export function noteRmCommand(): Command {
       await guard(asJson, async () => {
         const path = apiPath(pathArg)
         await confirmDestructive(opts, `Remove the note on ${displayPath(path)}?`)
-        await callTool(resolveTarget(opts), '/system/annotation', 'remove', { path })
+        await callDirect(resolveTarget(opts), '/system/annotation/remove', { path })
         if (asJson) printJson({ ok: true, path })
         else printLine(`note removed from ${displayPath(path)}`)
       })

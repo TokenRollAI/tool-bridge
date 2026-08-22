@@ -223,8 +223,7 @@ function AddHostDialog() {
     await invoke
       .mutateAsync(
         {
-          path: 'system/federation',
-          tool: 'add',
+          commandPath: 'system/federation/add',
           args: { host: preview.normalized },
         },
         {
@@ -352,7 +351,7 @@ export function FederationPage() {
 
   const remove = async (host: string) => {
     try {
-      await invoke.mutateAsync({ path: 'system/federation', tool: 'remove', args: { host } })
+      await invoke.mutateAsync({ commandPath: 'system/federation/remove', args: { host } })
       toast.success(`已移除 ${host}`)
       await invalidate('federation-list')
     } catch (error) {

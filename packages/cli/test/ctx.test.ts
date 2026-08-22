@@ -43,12 +43,9 @@ describe('tb ctx ls', () => {
     const fn = captureFetch({ items: [] })
     await runCli(['ctx', 'ls', 'ctx/notes', ...gw, '--json'])
     const [url, init] = fn.mock.calls[0] as [string, RequestInit]
-    expect(url).toBe('https://gw/ctx/notes')
+    expect(url).toBe('https://gw/ctx/notes/list')
     expect((init.method ?? '').toUpperCase()).toBe('POST')
-    expect(JSON.parse(init.body as string)).toEqual({
-      tool: 'List',
-      arguments: { path: '' },
-    })
+    expect(JSON.parse(init.body as string)).toEqual({ path: '' })
     expect(process.exitCode).toBe(0)
   })
 
@@ -79,10 +76,7 @@ describe('tb ctx ls', () => {
       '--json',
     ])
     const [, init] = fn.mock.calls[0] as [string, RequestInit]
-    expect(JSON.parse(init.body as string)).toEqual({
-      tool: 'List',
-      arguments: { path: 'guides/', opts: { limit: 10, cursor: 'c1' } },
-    })
+    expect(JSON.parse(init.body as string)).toEqual({ path: 'guides/', opts: { limit: 10, cursor: 'c1' } })
     expect(JSON.parse(stdoutText())).toEqual(page)
   })
 
@@ -120,11 +114,8 @@ describe('tb ctx cat', () => {
     })
     await runCli(['ctx', 'cat', 'ctx/notes', 'a.md', ...gw])
     const [url, init] = fn.mock.calls[0] as [string, RequestInit]
-    expect(url).toBe('https://gw/ctx/notes')
-    expect(JSON.parse(init.body as string)).toEqual({
-      tool: 'Get',
-      arguments: { path: 'a.md' },
-    })
+    expect(url).toBe('https://gw/ctx/notes/get')
+    expect(JSON.parse(init.body as string)).toEqual({ path: 'a.md' })
     expect(stdoutText()).toBe('hello world\n')
     expect(process.exitCode).toBe(0)
   })
@@ -182,18 +173,15 @@ describe('tb ctx put', () => {
       '--json',
     ])
     const [url, init] = fn.mock.calls[0] as [string, RequestInit]
-    expect(url).toBe('https://gw/ctx/notes')
+    expect(url).toBe('https://gw/ctx/notes/write')
     expect(JSON.parse(init.body as string)).toEqual({
-      tool: 'Write',
-      arguments: {
-        path: 'a',
-        entry: {
-          contentType: 'text/plain',
-          content: 'hi',
-          // "=" 只按第一个分割:value 内可以再含 "="。
-          metadata: { author: 'djj', topic: 'phase=3' },
-          ifVersion: 'v1',
-        },
+      path: 'a',
+      entry: {
+        contentType: 'text/plain',
+        content: 'hi',
+        // "=" 只按第一个分割:value 内可以再含 "="。
+        metadata: { author: 'djj', topic: 'phase=3' },
+        ifVersion: 'v1',
       },
     })
     expect(process.exitCode).toBe(0)
@@ -207,11 +195,8 @@ describe('tb ctx put', () => {
     await runCli(['ctx', 'put', 'ctx/notes', 'note.md', '--file', file, ...gw, '--json'])
     const [, init] = fn.mock.calls[0] as [string, RequestInit]
     expect(JSON.parse(init.body as string)).toEqual({
-      tool: 'Write',
-      arguments: {
-        path: 'note.md',
-        entry: { contentType: 'text/markdown', content: '# title\n' },
-      },
+      path: 'note.md',
+      entry: { contentType: 'text/markdown', content: '# title\n' },
     })
   })
 
@@ -231,7 +216,7 @@ describe('tb ctx put', () => {
     ])
     const [, init] = fn.mock.calls[0] as [string, RequestInit]
     const payload = JSON.parse(init.body as string)
-    expect(payload.arguments.entry.contentType).toBe('application/json')
+    expect(payload.entry.contentType).toBe('application/json')
   })
 
   it('--meta 缺 "=" → 退出码 1,不发请求', async () => {
@@ -286,21 +271,15 @@ describe('tb ctx patch', () => {
       '--json',
     ])
     const [url, init] = fn.mock.calls[0] as [string, RequestInit]
-    expect(url).toBe('https://gw/ctx/notes')
-    expect(JSON.parse(init.body as string)).toEqual({
-      tool: 'Update',
-      arguments: { path: 'a', patch: { content: 'new body', ifVersion: 'v2' } },
-    })
+    expect(url).toBe('https://gw/ctx/notes/update')
+    expect(JSON.parse(init.body as string)).toEqual({ path: 'a', patch: { content: 'new body', ifVersion: 'v2' } })
   })
 
   it('仅 --meta → patch 只带 metadata', async () => {
     const fn = captureFetch({ uri: 'node://ctx/notes/a', version: 'v3' })
     await runCli(['ctx', 'patch', 'ctx/notes', 'a', '--meta', 'reviewed=yes', ...gw, '--json'])
     const [, init] = fn.mock.calls[0] as [string, RequestInit]
-    expect(JSON.parse(init.body as string)).toEqual({
-      tool: 'Update',
-      arguments: { path: 'a', patch: { metadata: { reviewed: 'yes' } } },
-    })
+    expect(JSON.parse(init.body as string)).toEqual({ path: 'a', patch: { metadata: { reviewed: 'yes' } } })
   })
 
   it('content 与 meta 都缺 → 本地退出码 1,不发请求', async () => {
@@ -327,11 +306,8 @@ describe('tb ctx search', () => {
       '--json',
     ])
     const [url, init] = fn.mock.calls[0] as [string, RequestInit]
-    expect(url).toBe('https://gw/ctx/notes')
-    expect(JSON.parse(init.body as string)).toEqual({
-      tool: 'Search',
-      arguments: { query: 'phase', opts: { mode: 'keyword', limit: 5 } },
-    })
+    expect(url).toBe('https://gw/ctx/notes/search')
+    expect(JSON.parse(init.body as string)).toEqual({ query: 'phase', opts: { mode: 'keyword', limit: 5 } })
     expect(process.exitCode).toBe(0)
   })
 
@@ -339,10 +315,7 @@ describe('tb ctx search', () => {
     const fn = captureFetch({ items: [] })
     await runCli(['ctx', 'search', 'ctx/notes', 'phase', ...gw, '--json'])
     const [, init] = fn.mock.calls[0] as [string, RequestInit]
-    expect(JSON.parse(init.body as string)).toEqual({
-      tool: 'Search',
-      arguments: { query: 'phase' },
-    })
+    expect(JSON.parse(init.body as string)).toEqual({ query: 'phase' })
 
     fn.mockClear()
     await runCli(['ctx', 'search', 'ctx/notes', 'phase', '--mode', 'fuzzy', ...gw, '--json'])
@@ -492,9 +465,8 @@ describe('tb ctx mount', () => {
 
 describe('tb ctx unmount', () => {
   it('先 get 确认 kind=context 再 delete(管理面 system/registry)', async () => {
-    const fn = vi.fn(async (_url: string, init?: RequestInit) => {
-      const body = JSON.parse(init?.body as string)
-      if (body.tool === 'get') {
+    const fn = vi.fn(async (url: string) => {
+      if (String(url).endsWith('/get')) {
         return new Response(JSON.stringify({ path: 'ctx/notes', kind: 'context' }), {
           status: 200,
           headers: { 'content-type': 'application/json' },
@@ -508,15 +480,10 @@ describe('tb ctx unmount', () => {
     setFetch(fn as unknown as typeof fetch)
     await runCli(['ctx', 'unmount', 'ctx/notes', ...gw, '--json'])
     expect(fn).toHaveBeenCalledTimes(2)
-    expect(String(fn.mock.calls[0]?.[0])).toBe('https://gw/system/registry')
-    expect(JSON.parse((fn.mock.calls[0]?.[1] as RequestInit).body as string)).toEqual({
-      tool: 'get',
-      arguments: { path: 'ctx/notes' },
-    })
-    expect(JSON.parse((fn.mock.calls[1]?.[1] as RequestInit).body as string)).toEqual({
-      tool: 'delete',
-      arguments: { path: 'ctx/notes' },
-    })
+    expect(String(fn.mock.calls[0]?.[0])).toBe('https://gw/system/registry/get')
+    expect(String(fn.mock.calls[1]?.[0])).toBe('https://gw/system/registry/delete')
+    expect(JSON.parse((fn.mock.calls[0]?.[1] as RequestInit).body as string)).toEqual({ path: 'ctx/notes' })
+    expect(JSON.parse((fn.mock.calls[1]?.[1] as RequestInit).body as string)).toEqual({ path: 'ctx/notes' })
     expect(process.exitCode).toBe(0)
   })
 

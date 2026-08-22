@@ -123,14 +123,14 @@ async function callShell(baseUrl: string, deviceId: string): Promise<{
   body: string
   status: number
 }> {
-  const response = await fetch(`${baseUrl}/device/${deviceId}/shell`, {
+  const response = await fetch(`${baseUrl}/device/${deviceId}/shell/exec`, {
     method: 'POST',
     headers: {
       'authorization': `Bearer ${ADMIN_SK}`,
       'content-type': 'application/json',
       'accept': 'application/json',
     },
-    body: JSON.stringify({ tool: 'exec', arguments: { command: 'echo hi' } }),
+    body: JSON.stringify({ command: 'echo hi' }),
   })
   return { status: response.status, body: JSON.stringify(await response.json()) }
 }

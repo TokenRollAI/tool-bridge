@@ -105,7 +105,7 @@ describe('握手状态机', () => {
 
   it('设备发出网关方向帧(如 call)→ 拒', () => {
     const { session, sent, closed } = readySession()
-    session.handleFrame({ type: 'call', id: 'x', path: 'shell', tool: 'exec', arguments: {} })
+    session.handleFrame({ type: 'call', id: 'x', path: 'shell/exec', arguments: {} })
     expect(sent[0]).toMatchObject({ type: 'error' })
     expect(closed).toEqual([DEVICE_REJECT_CLOSE_CODE])
   })
@@ -124,8 +124,8 @@ describe('握手状态机', () => {
     expect(session.phase).toBe('ready')
     expect(sent).toEqual([])
     const got: DeviceCallResult[] = []
-    session.call({ id: 'r1', path: 'shell', tool: 'exec', arguments: {} }, r => got.push(r))
-    expect(sent).toEqual([{ type: 'call', id: 'r1', path: 'shell', tool: 'exec', arguments: {} }])
+    session.call({ id: 'r1', path: 'shell/exec', arguments: {} }, r => got.push(r))
+    expect(sent).toEqual([{ type: 'call', id: 'r1', path: 'shell/exec', arguments: {} }])
     session.handleFrame({ type: 'result', id: 'r1', ok: true, value: 42 })
     expect(got).toEqual([{ ok: true, value: 42 }])
   })
@@ -140,7 +140,7 @@ describe('握手状态机', () => {
 })
 
 describe('call 与 requestId 幂等', () => {
-  const REQ = { id: 'r1', path: 'shell', tool: 'exec', arguments: { command: 'echo hi' } }
+  const REQ = { id: 'r1', path: 'shell/exec', arguments: { command: 'echo hi' } }
 
   it('call → 下发 call 帧;result → 回调调用方并入幂等表', () => {
     const { session, sent, stored } = readySession()
@@ -225,7 +225,7 @@ describe('call 与 requestId 幂等', () => {
 })
 
 describe('超时语义(60s → unavailable retryable + cancel 帧)', () => {
-  const REQ = { id: 'r1', path: 'shell', tool: 'exec', arguments: {} }
+  const REQ = { id: 'r1', path: 'shell/exec', arguments: {} }
 
   it('缺省超时 = DEVICE_CALL_TIMEOUT_MS(60s,区别于 Plugin 30s)', () => {
     expect(DEVICE_CALL_TIMEOUT_MS).toBe(60_000)
@@ -280,7 +280,7 @@ describe('心跳与断线', () => {
   it('dispose:待决调用回 unavailable(retryable),定时器取消', () => {
     const { session, timers } = readySession()
     const got: DeviceCallResult[] = []
-    session.call({ id: 'r1', path: 'shell', tool: 'exec', arguments: {} }, r => got.push(r))
+    session.call({ id: 'r1', path: 'shell/exec', arguments: {} }, r => got.push(r))
     session.dispose()
     expect(got).toEqual([
       { ok: false, error: expect.objectContaining({ code: 'unavailable', retryable: true }) },
@@ -293,7 +293,7 @@ describe('心跳与断线', () => {
     const { session } = readySession()
     session.dispose()
     const got: DeviceCallResult[] = []
-    session.call({ id: 'rx', path: 'shell', tool: 'exec', arguments: {} }, r => got.push(r))
+    session.call({ id: 'rx', path: 'shell/exec', arguments: {} }, r => got.push(r))
     expect(got).toEqual([
       { ok: false, error: expect.objectContaining({ code: 'unavailable', retryable: true }) },
     ])

@@ -18,7 +18,7 @@ const AMAP: CatalogListItem = {
   nodeKinds: ['tool'],
 }
 
-const calls: Array<{ args: Record<string, unknown>, path: string, tool: string }> = []
+const calls: Array<{ args: Record<string, unknown>, commandPath: string }> = []
 
 vi.mock('@/lib/queries', () => ({
   useInvalidate: () => () => {},
@@ -32,7 +32,7 @@ vi.mock('@/lib/queries', () => ({
   useSecretList: () => ({ data: { items: [{ name: 'shared-key' }] }, hasNextPage: false }),
   useInvoke: () => ({
     isPending: false,
-    mutateAsync: async (input: { args: Record<string, unknown>, path: string, tool: string }) => {
+    mutateAsync: async (input: { args: Record<string, unknown>, commandPath: string }) => {
       calls.push(input)
       return { json: {} }
     },
@@ -86,9 +86,9 @@ describe('高级挂载的内置凭证体验', () => {
     fireEvent.click(screen.getByRole('button', { name: '挂载 tools/amap' }))
 
     await waitFor(() => expect(calls.length).toBe(2))
-    expect(calls.map(call => `${call.path}:${call.tool}`)).toEqual([
-      'system/secret:set',
-      'system/registry:write',
+    expect(calls.map(call => call.commandPath)).toEqual([
+      'system/secret/set',
+      'system/registry/write',
     ])
     expect(calls[0]?.args).toEqual({ name: 'integration-tools%2Famap', value: 'amap-key' })
     expect(calls[1]?.args).toMatchObject({

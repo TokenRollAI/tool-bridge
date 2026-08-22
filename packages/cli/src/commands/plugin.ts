@@ -4,7 +4,7 @@ import type { Page } from '../types'
 import { parsePageOpts, resolveTarget, withGlobalOpts, withPageOpts } from '../args'
 import { guard, printJson, printLine, table } from '../output'
 import { confirmDestructive } from '../confirm'
-import { callTool, CliError } from '../http'
+import { callDirect, CliError } from '../http'
 
 /**
  * `tb plugin` → builtin `system/plugin`(PluginRegistry;全部需 admin)。
@@ -109,10 +109,8 @@ export function pluginRegisterCommand(): Command {
         const file = String(opts.file ?? '').trim()
         if (!file) throw new CliError('--file is required')
         const manifest = await readManifest(file)
-        const reg = await callTool<PluginRegistration>(
-          resolveTarget(opts),
-          '/system/plugin',
-          'write',
+        const reg = await callDirect<PluginRegistration>(
+          resolveTarget(opts), '/system/plugin/write',
           manifest,
         )
         if (asJson) {
@@ -138,10 +136,8 @@ export function pluginListCommand(): Command {
       const asJson = Boolean(opts.json)
       await guard(asJson, async () => {
         const pageOpts = parsePageOpts(opts)
-        const page = await callTool<Page<PluginManifest>>(
-          resolveTarget(opts),
-          '/system/plugin',
-          'list',
+        const page = await callDirect<Page<PluginManifest>>(
+          resolveTarget(opts), '/system/plugin/list',
           Object.keys(pageOpts).length ? { opts: pageOpts } : {},
         )
         if (asJson) {
@@ -170,7 +166,7 @@ export function pluginGetCommand(): Command {
       await guard(asJson, async () => {
         const id = String(idArg ?? '').trim()
         if (!id) throw new CliError('plugin id is required')
-        const m = await callTool<PluginManifest>(resolveTarget(opts), '/system/plugin', 'get', {
+        const m = await callDirect<PluginManifest>(resolveTarget(opts), '/system/plugin/get', {
           id,
         })
         if (asJson) {
@@ -224,10 +220,8 @@ export function pluginUpdateCommand(): Command {
         const file = String(opts.file ?? '').trim()
         if (!file) throw new CliError('--file is required')
         const patch = await readManifest(file)
-        const updated = await callTool<PluginRegistration>(
-          resolveTarget(opts),
-          '/system/plugin',
-          'update',
+        const updated = await callDirect<PluginRegistration>(
+          resolveTarget(opts), '/system/plugin/update',
           { id, patch },
         )
         if (asJson) {
@@ -255,7 +249,7 @@ export function pluginHealthCommand(): Command {
       await guard(asJson, async () => {
         const id = String(idArg ?? '').trim()
         if (!id) throw new CliError('plugin id is required')
-        const h = await callTool<PluginHealth>(resolveTarget(opts), '/system/plugin', 'health', {
+        const h = await callDirect<PluginHealth>(resolveTarget(opts), '/system/plugin/health', {
           id,
         })
         if (asJson) printJson(h)
@@ -278,7 +272,7 @@ export function pluginRmCommand(): Command {
         const id = String(idArg ?? '').trim()
         if (!id) throw new CliError('plugin id is required')
         await confirmDestructive(opts, `Unregister plugin '${id}'? Mounted nodes referencing it will fail on next call.`)
-        await callTool(resolveTarget(opts), '/system/plugin', 'delete', { id })
+        await callDirect(resolveTarget(opts), '/system/plugin/delete', { id })
         if (asJson) printJson({ ok: true, id })
         else printLine(`removed plugin: ${id}`)
       })

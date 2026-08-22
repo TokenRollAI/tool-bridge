@@ -97,15 +97,14 @@ export function IntegrationDialog({
         // secret set 是 upsert。只有列表已完整加载且确认名字此前不存在，失败时才可删除；
         // 否则可能把同名的既有凭证当成“本轮新建”误删。
         shouldDeleteOnFailure = secrets.data !== undefined && !secrets.hasNextPage && !knownSecret
-        await invoke.mutateAsync({ path: 'system/secret', tool: 'set', args: calls.secret })
+        await invoke.mutateAsync({ commandPath: 'system/secret/set', args: calls.secret })
       }
-      await invoke.mutateAsync({ path: 'system/registry', tool: 'write', args: calls.mount })
+      await invoke.mutateAsync({ commandPath: 'system/registry/write', args: calls.mount })
     } catch (error) {
       // 仅清理由本轮创建的 secret;复用已有凭证不动。即使回滚失败也保留原挂载错误。
       if (shouldDeleteOnFailure && calls.secret !== undefined) {
         await invoke.mutateAsync({
-          path: 'system/secret',
-          tool: 'delete',
+          commandPath: 'system/secret/delete',
           args: { name: calls.secret.name },
         }).catch(() => {})
       }

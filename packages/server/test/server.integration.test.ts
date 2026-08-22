@@ -50,6 +50,7 @@ async function postJson(
   body: unknown,
   init: RequestInit = {},
 ): Promise<Response> {
+  // 数据面调用唯一形态:POST /<node>/<command>,body 即裸 arguments(无 {tool,arguments} 信封)。
   return fetch(`${baseUrl}/${path}`, {
     method: 'POST',
     ...init,
@@ -155,11 +156,8 @@ describe('Node 宿主 HTTP 面', () => {
 
     const mint = await postJson(
       baseUrl,
-      'system/sk',
-      {
-        tool: 'write',
-        arguments: { owner: 'agent:probe', scopes: [{ pattern: '**', actions: ['read'] }] },
-      },
+      'system/sk/write',
+      { owner: 'agent:probe', scopes: [{ pattern: '**', actions: ['read'] }] },
       admin(),
     )
     expect(mint.status).toBe(200)
@@ -172,8 +170,8 @@ describe('Node 宿主 HTTP 面', () => {
 
     const del = await postJson(
       baseUrl,
-      'system/sk',
-      { tool: 'delete', arguments: { id: minted.key.id } },
+      'system/sk/delete',
+      { id: minted.key.id },
       admin(),
     )
     expect(del.status).toBe(200)
@@ -189,8 +187,8 @@ describe('Node 宿主 HTTP 面', () => {
     const first = await startServer(dataDir)
     const list1 = await postJson(
       first.baseUrl,
-      'system/sk',
-      { tool: 'list', arguments: {} },
+      'system/sk/list',
+      {},
       admin(),
     )
     expect(list1.status).toBe(200)
@@ -201,8 +199,8 @@ describe('Node 宿主 HTTP 面', () => {
     cleanups.push(() => second.server.close())
     const list2 = await postJson(
       second.baseUrl,
-      'system/sk',
-      { tool: 'list', arguments: {} },
+      'system/sk/list',
+      {},
       admin(),
     )
     expect(list2.status).toBe(200)
@@ -222,24 +220,21 @@ describe('Node 宿主 HTTP 面', () => {
     }
     const register = await postJson(
       first.baseUrl,
-      'system/registry',
+      'system/registry/write',
       {
-        tool: 'write',
-        arguments: {
-          path,
+        path,
+        kind: 'http',
+        description: 'SQLite search wire fixture',
+        config: {
           kind: 'http',
-          description: 'SQLite search wire fixture',
-          config: {
-            kind: 'http',
-            endpoint: 'https://calendar.example.test',
-            tools: [{
-              name: tool.name,
-              description: tool.description,
-              inputSchema: tool.inputSchema,
-              method: 'GET',
-              pathTemplate: '/calendar',
-            }],
-          },
+          endpoint: 'https://calendar.example.test',
+          tools: [{
+            name: tool.name,
+            description: tool.description,
+            inputSchema: tool.inputSchema,
+            method: 'GET',
+            pathTemplate: '/calendar',
+          }],
         },
       },
       admin(),
@@ -281,24 +276,21 @@ describe('Node 宿主 HTTP 面', () => {
     }
     const hiddenRegister = await postJson(
       second.baseUrl,
-      'system/registry',
+      'system/registry/write',
       {
-        tool: 'write',
-        arguments: {
-          path: hiddenPath,
+        path: hiddenPath,
+        kind: 'http',
+        description: 'Hidden SQLite search wire fixture',
+        config: {
           kind: 'http',
-          description: 'Hidden SQLite search wire fixture',
-          config: {
-            kind: 'http',
-            endpoint: 'https://hidden-calendar.example.test',
-            tools: [{
-              name: hiddenTool.name,
-              description: hiddenTool.description,
-              inputSchema: hiddenTool.inputSchema,
-              method: 'GET',
-              pathTemplate: '/calendar',
-            }],
-          },
+          endpoint: 'https://hidden-calendar.example.test',
+          tools: [{
+            name: hiddenTool.name,
+            description: hiddenTool.description,
+            inputSchema: hiddenTool.inputSchema,
+            method: 'GET',
+            pathTemplate: '/calendar',
+          }],
         },
       },
       admin(),
@@ -321,13 +313,10 @@ describe('Node 宿主 HTTP 面', () => {
 
     const mint = await postJson(
       second.baseUrl,
-      'system/sk',
+      'system/sk/write',
       {
-        tool: 'write',
-        arguments: {
-          owner: 'agent:search-e2e-c',
-          scopes: [{ pattern: path, actions: ['read', 'call'] }],
-        },
+        owner: 'agent:search-e2e-c',
+        scopes: [{ pattern: path, actions: ['read', 'call'] }],
       },
       admin(),
     )

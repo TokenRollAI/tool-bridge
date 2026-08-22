@@ -56,18 +56,19 @@ const admin = (extra: RequestInit = {}): RequestInit => ({
 })
 
 async function registryGet(baseUrl: string, path: string): Promise<Response> {
-  return fetch(`${baseUrl}/system/registry`, {
+  return fetch(`${baseUrl}/system/registry/get`, {
     method: 'POST',
     headers: {
       'authorization': `Bearer ${ADMIN_SK}`,
       'content-type': 'application/json',
       'accept': 'application/json',
     },
-    body: JSON.stringify({ tool: 'get', arguments: { path } }),
+    body: JSON.stringify({ path }),
   })
 }
 
 async function postJson(baseUrl: string, path: string, body: unknown): Promise<Response> {
+  // 数据面调用唯一形态:POST /<node>/<command>,body 即裸 arguments(无 {tool,arguments} 信封)。
   return fetch(`${baseUrl}/${path}`, {
     method: 'POST',
     headers: {
@@ -185,14 +186,14 @@ describe('DeviceHub 全链路', () => {
     expect(node.status).toBe(200)
     expect(JSON.stringify(await node.json())).toContain('"online":true')
 
-    const call = await fetch(`${baseUrl}/device/dev1/shell`, {
+    const call = await fetch(`${baseUrl}/device/dev1/shell/exec`, {
       method: 'POST',
       headers: {
         'authorization': `Bearer ${ADMIN_SK}`,
         'content-type': 'application/json',
         'accept': 'application/json',
       },
-      body: JSON.stringify({ tool: 'exec', arguments: { command: 'echo hi' } }),
+      body: JSON.stringify({ command: 'echo hi' }),
     })
     expect(call.status).toBe(200)
     expect(await call.text()).toContain('device says hi-node')
@@ -212,7 +213,7 @@ describe('DeviceHub 全链路', () => {
       }
     })
 
-    const req = { id: 'fixed-id-1', path: 'shell', tool: 'exec', arguments: {} }
+    const req = { id: 'fixed-id-1', path: 'shell/exec', arguments: {} }
     const first = (await server.deviceHub.invoke('dev2', req)) as { ok: boolean, value: unknown }
     const second = (await server.deviceHub.invoke('dev2', req)) as { ok: boolean, value: unknown }
     expect(first).toEqual({ ok: true, value: { n: 1 } })
@@ -225,8 +226,7 @@ describe('DeviceHub 全链路', () => {
     cleanups.push(() => server.close())
     const res = (await server.deviceHub.invoke('ghost', {
       id: 'x',
-      path: 'shell',
-      tool: 'exec',
+      path: 'shell/exec',
       arguments: {},
     })) as { error?: { code: string }, ok: boolean }
     expect(res.ok).toBe(false)
@@ -279,8 +279,7 @@ describe('DeviceHub 全链路', () => {
 
     const invoke = server.deviceHub.invoke(deviceId, {
       id: 'replace-race',
-      path: 'shell',
-      tool: 'exec',
+      path: 'shell/exec',
       arguments: { command: 'echo should-not-reach-stale' },
     }) as Promise<{ error?: { code: string }, ok: boolean }>
     await identifyBlocked
@@ -306,27 +305,22 @@ describe('DeviceHub 全链路', () => {
   it('设备 SK 被禁用后,下一次调用重新认证并关闭现有连接', async () => {
     const { server, baseUrl, wsBase } = await startServer(tmpDataDir())
     cleanups.push(() => server.close())
-    const issuedRes = await postJson(baseUrl, 'system/sk', {
-      tool: 'write',
-      arguments: {
-        owner: 'device:revoked-node',
-        scopes: [{ pattern: '**', actions: ['read', 'register', 'call'] }],
-      },
+    const issuedRes = await postJson(baseUrl, 'system/sk/write', {
+      owner: 'device:revoked-node',
+      scopes: [{ pattern: '**', actions: ['read', 'register', 'call'] }],
     })
     expect(issuedRes.status).toBe(200)
     const issued = (await issuedRes.json()) as { key: { id: string }, secret: string }
     const ws = await connectDevice(wsBase, 'revoked-node', { sk: issued.secret })
 
-    const disabled = await postJson(baseUrl, 'system/sk', {
-      tool: 'update',
-      arguments: { id: issued.key.id, patch: { disabled: true } },
+    const disabled = await postJson(baseUrl, 'system/sk/update', {
+      id: issued.key.id, patch: { disabled: true },
     })
     expect(disabled.status).toBe(200)
 
     const rejected = nextFrame(ws)
-    const invoke = await postJson(baseUrl, 'device/revoked-node/shell', {
-      tool: 'exec',
-      arguments: { command: 'echo should-not-run' },
+    const invoke = await postJson(baseUrl, 'device/revoked-node/shell/exec', {
+      command: 'echo should-not-run',
     })
     expect(invoke.status).toBe(503)
     expect(await rejected).toMatchObject({ type: 'error', error: { code: 'permission_denied' } })
@@ -336,31 +330,24 @@ describe('DeviceHub 全链路', () => {
     const { server, baseUrl, wsBase } = await startServer(tmpDataDir())
     cleanups.push(() => server.close())
     // 初始 SK 能在 device/** 注册;连上后把 scope 改窄到与 mountPath 无关的前缀。
-    const issuedRes = await postJson(baseUrl, 'system/sk', {
-      tool: 'write',
-      arguments: {
-        owner: 'device:narrowed-node',
-        scopes: [{ pattern: 'device/**', actions: ['read', 'register', 'call'] }],
-      },
+    const issuedRes = await postJson(baseUrl, 'system/sk/write', {
+      owner: 'device:narrowed-node',
+      scopes: [{ pattern: 'device/**', actions: ['read', 'register', 'call'] }],
     })
     expect(issuedRes.status).toBe(200)
     const issued = (await issuedRes.json()) as { key: { id: string }, secret: string }
     const ws = await connectDevice(wsBase, 'narrowed-node', { sk: issued.secret })
 
     // SK 仍有效、keyId 不变,但收紧后不再对 device/narrowed-node 持 register。
-    const narrowed = await postJson(baseUrl, 'system/sk', {
-      tool: 'update',
-      arguments: {
-        id: issued.key.id,
-        patch: { scopes: [{ pattern: 'other/**', actions: ['read', 'register', 'call'] }] },
-      },
+    const narrowed = await postJson(baseUrl, 'system/sk/update', {
+      id: issued.key.id,
+      patch: { scopes: [{ pattern: 'other/**', actions: ['read', 'register', 'call'] }] },
     })
     expect(narrowed.status).toBe(200)
 
     const rejected = nextFrame(ws)
-    const invoke = await postJson(baseUrl, 'device/narrowed-node/shell', {
-      tool: 'exec',
-      arguments: { command: 'echo should-not-run' },
+    const invoke = await postJson(baseUrl, 'device/narrowed-node/shell/exec', {
+      command: 'echo should-not-run',
     })
     expect(invoke.status).toBe(503)
     expect(await rejected).toMatchObject({ type: 'error', error: { code: 'permission_denied' } })
@@ -371,19 +358,15 @@ describe('DeviceHub 全链路', () => {
     cleanups.push(() => server.close())
 
     // 平台已有一条 admin 写入的上游凭证。
-    const setSecret = await postJson(baseUrl, 'system/secret', {
-      tool: 'set',
-      arguments: { name: 'victim-s3', value: '{"accessKeyId":"AK","secretAccessKey":"SK"}' },
+    const setSecret = await postJson(baseUrl, 'system/secret/set', {
+      name: 'victim-s3', value: '{"accessKeyId":"AK","secretAccessKey":"SK"}',
     })
     expect(setSecret.status).toBe(200)
 
     // 设备 SK:能在 device/** 注册,但没有 system/secret admin。
-    const issuedRes = await postJson(baseUrl, 'system/sk', {
-      tool: 'write',
-      arguments: {
-        owner: 'device:thief',
-        scopes: [{ pattern: 'device/**', actions: ['read', 'register', 'call'] }],
-      },
+    const issuedRes = await postJson(baseUrl, 'system/sk/write', {
+      owner: 'device:thief',
+      scopes: [{ pattern: 'device/**', actions: ['read', 'register', 'call'] }],
     })
     expect(issuedRes.status).toBe(200)
     const issued = (await issuedRes.json()) as { secret: string }

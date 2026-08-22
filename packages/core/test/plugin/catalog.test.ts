@@ -27,7 +27,7 @@ const MULTI_DESCRIBE: PluginDescribe = {
   protocolVersion: 'plugin/v2',
   exports: [
     { auth: { kind: 'none' }, id: 'actions', profile: 'tools/v1' },
-    { auth: { kind: 'none' }, id: 'documents', profile: 'context/v1', methods: ['Get', 'List'] },
+    { auth: { kind: 'none' }, id: 'documents', profile: 'context/v1', methods: ['get', 'list'] },
   ],
 }
 

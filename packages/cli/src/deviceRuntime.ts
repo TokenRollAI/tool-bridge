@@ -124,25 +124,25 @@ function dispatchFs(
   tool: string,
   args: Record<string, unknown>,
 ): Promise<unknown> {
-  switch (tool) {
-    case 'List':
-      return provider.List((args.path as string) ?? '', args.opts as ListOptions | undefined)
-    case 'Get':
-      return provider.Get(args.path as string)
-    case 'Write':
+  switch (tool.toLowerCase()) {
+    case 'list':
+      return provider.list((args.path as string) ?? '', args.opts as ListOptions | undefined)
+    case 'get':
+      return provider.get(args.path as string)
+    case 'write':
       if (typeof args.entry !== 'object' || args.entry === null) {
-        throw new TBError('invalid_argument', 'Write 需要对象 \'entry\'')
+        throw new TBError('invalid_argument', 'write 需要对象 \'entry\'')
       }
-      return provider.Write(args.path as string, args.entry as ContextEntryInput)
-    case 'Update':
+      return provider.write(args.path as string, args.entry as ContextEntryInput)
+    case 'update':
       if (typeof args.patch !== 'object' || args.patch === null) {
-        throw new TBError('invalid_argument', 'Update 需要对象 \'patch\'')
+        throw new TBError('invalid_argument', 'update 需要对象 \'patch\'')
       }
-      return provider.Update(args.path as string, args.patch as ContextPatch)
-    case 'Delete':
-      return provider.Delete(args.path as string)
-    case 'Search':
-      return provider.Search(args.query as string, args.opts as SearchOptions | undefined)
+      return provider.update(args.path as string, args.patch as ContextPatch)
+    case 'delete':
+      return provider.delete(args.path as string)
+    case 'search':
+      return provider.search(args.query as string, args.opts as SearchOptions | undefined)
     default:
       throw new TBError('invalid_argument', `unknown fs cmd '${tool}'`)
   }
@@ -195,9 +195,12 @@ export function startDeviceConnection(opts: DeviceConnectionOptions): DeviceConn
       socket.close(1008, error.message)
     },
     handler: async (call) => {
-      if (call.path === 'shell') {
-        if (call.tool !== 'exec')
-          throw new TBError('invalid_argument', `unknown shell cmd '${call.tool}'`)
+      // 帧 path 含命令叶子段(如 "shell/exec"、"fs/get"):拆出 mount 与命令。
+      const slash = call.path.lastIndexOf('/')
+      const mount = slash < 0 ? call.path : call.path.slice(0, slash)
+      const cmd = slash < 0 ? '' : call.path.slice(slash + 1)
+      if (mount === 'shell') {
+        if (cmd !== 'exec') throw new TBError('invalid_argument', `unknown shell cmd '${cmd}'`)
         if (shell === undefined) throw TBError.notFound('shell not exposed')
         const command = call.arguments.command
         if (typeof command !== 'string' || command.trim() === '') {
@@ -210,9 +213,9 @@ export function startDeviceConnection(opts: DeviceConnectionOptions): DeviceConn
             : {}),
         })
       }
-      if (call.path === 'fs') {
+      if (mount === 'fs') {
         if (fsProvider === undefined) throw TBError.notFound('fs not exposed')
-        return dispatchFs(fsProvider, call.tool, call.arguments)
+        return dispatchFs(fsProvider, cmd, call.arguments)
       }
       throw TBError.notFound(`device path not exposed:'${call.path}'`)
     },

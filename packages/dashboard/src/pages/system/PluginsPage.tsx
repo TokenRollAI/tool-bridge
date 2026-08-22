@@ -400,8 +400,7 @@ export function PluginsPage() {
     setChangingEnabled(plugin.id)
     try {
       await invoke.mutateAsync({
-        path: 'system/plugin',
-        tool: 'update',
+        commandPath: 'system/plugin/update',
         args: { id: plugin.id, patch: { enabled } },
       })
       toast.success(`${plugin.id} 已${enabled ? '启用' : '禁用'}`)
@@ -418,8 +417,7 @@ export function PluginsPage() {
   const remove = async (plugin: PluginManifest) => {
     try {
       await invoke.mutateAsync({
-        path: 'system/plugin',
-        tool: 'delete',
+        commandPath: 'system/plugin/delete',
         args: { id: plugin.id },
       })
       toast.success(`已注销 plugin ${plugin.id}`)
@@ -435,8 +433,7 @@ export function PluginsPage() {
     setHealth(current => ({ ...current, [plugin.id]: { state: 'probing' } }))
     try {
       const response = await invoke.mutateAsync({
-        path: 'system/plugin',
-        tool: 'health',
+        commandPath: 'system/plugin/health',
         args: { id: plugin.id },
       })
       setHealth(current => ({
@@ -459,7 +456,7 @@ export function PluginsPage() {
     setInspecting(plugin)
     detailsInvoke.reset()
     detailsInvoke.mutate(
-      { path: 'system/plugin', tool: 'get', args: { id: plugin.id } },
+      { commandPath: 'system/plugin/get', args: { id: plugin.id } },
       {
         onSuccess: (response) => {
           if (inspectingId.current === plugin.id) {

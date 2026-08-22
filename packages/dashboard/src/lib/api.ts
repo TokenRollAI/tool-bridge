@@ -114,25 +114,23 @@ export interface InvokeResult {
 }
 
 /**
- * POST 数据面调用。`direct`(mcp/http/tool 工具,~help 宣告直连路径)→
- * `POST /<path>/<tool>`,body 即 arguments 本体;否则信封 `POST /<path>` + {tool,arguments}。
+ * POST 数据面调用。唯一形态:`POST /<commandPath>`,body 即 arguments 本体
+ * (commandPath 为含命令/工具叶子段的完整路径,如 `docs/ctx7/resolve` 或 `system/status/get`)。
  * accept 'json' 拿结构化返回,'markdown' 拿默认 markdown 表现。
  */
 export async function invoke(
   conn: Connection,
-  path: string,
-  tool: string,
+  commandPath: string,
   args: unknown,
   accept: 'json' | 'markdown' = 'json',
-  direct = false,
 ): Promise<InvokeResult> {
   const started = performance.now()
   const res = await request(
     conn,
-    direct ? `${nodeUrl(path)}/${encodeURIComponent(tool)}` : nodeUrl(path),
+    nodeUrl(commandPath),
     {
       method: 'POST',
-      body: direct ? (args ?? {}) : { tool, arguments: args ?? {} },
+      body: args ?? {},
       accept: accept === 'json' ? 'application/json' : 'text/markdown',
     },
   )

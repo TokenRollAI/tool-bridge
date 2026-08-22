@@ -1,7 +1,7 @@
 import { Command } from 'commander'
 import type { StatusView } from '../types'
 import { guard, maskSecret, printJson, printLine } from '../output'
-import { apiFetch, callTool, requireTarget } from '../http'
+import { apiFetch, callDirect, requireTarget } from '../http'
 import { resolveTarget, withGlobalOpts } from '../args'
 
 /**
@@ -28,7 +28,7 @@ export function whoamiCommand(): Command {
         let health: StatusView | undefined
         if (authenticated) {
           try {
-            health = await callTool<StatusView>(target, '/system/status', 'get', {})
+            health = await callDirect<StatusView>(target, '/system/status/get', {})
           } catch {
             // system/status 不可达或无权:whoami 不因此失败
           }

@@ -532,8 +532,7 @@ function SkillPublishDialog({
     }
     try {
       const r = await invoke.mutateAsync({
-        path,
-        tool: 'Publish',
+        commandPath: `${path}/publish`,
         args: { ...(id.trim() ? { id: id.trim() } : {}), files },
       })
       const published = (r.json as { id?: string })?.id ?? id.trim()
@@ -655,9 +654,9 @@ function SkillPublishDialog({
  * 与 `tb skill ls|cat|publish|rm` 走同一数据面,无管理旁路。
  */
 export function SkillBrowser({ path, cmds }: { cmds: HelpCmd[], path: string }) {
-  const canPublish = cmds.some(c => c.name === 'Publish')
-  const canRemove = cmds.some(c => c.name === 'Remove')
-  const canSearch = cmds.some(c => c.name === 'Search')
+  const canPublish = cmds.some(c => c.name === 'publish')
+  const canRemove = cmds.some(c => c.name === 'remove')
+  const canSearch = cmds.some(c => c.name === 'search')
 
   const [queryInput, setQueryInput] = useState('')
   const query = useDebounced(queryInput)
@@ -676,7 +675,7 @@ export function SkillBrowser({ path, cmds }: { cmds: HelpCmd[], path: string }) 
 
   const remove = async (id: string) => {
     try {
-      await invoke.mutateAsync({ path, tool: 'Remove', args: { id } })
+      await invoke.mutateAsync({ commandPath: `${path}/remove`, args: { id } })
       toast.success(`已删除 ${id}`)
       setSelected(current => (current === id ? null : current))
       setMobileViewing(current => (current === id ? null : current))

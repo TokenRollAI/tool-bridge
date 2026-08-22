@@ -123,7 +123,7 @@ export function NodeInspector({
 
   const unmount = async (target: string) => {
     try {
-      await invoke.mutateAsync({ path: 'system/registry', tool: 'delete', args: { path: target } })
+      await invoke.mutateAsync({ commandPath: 'system/registry/delete', args: { path: target } })
       toast.success(`已卸载 ${target}`)
       await invalidate()
     } catch (error) {

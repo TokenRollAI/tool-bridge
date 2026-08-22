@@ -12,7 +12,7 @@ import {
 import { deleteNode, parseConfigSpecs, registerNode } from '../registry'
 import { asArray, guard, printJson, printLine, table } from '../output'
 import { confirmDestructive } from '../confirm'
-import { callTool, CliError } from '../http'
+import { callDirect, CliError } from '../http'
 
 /**
  * `tb ctx *` —— Context Layer 命令族。
@@ -120,10 +120,8 @@ export function ctxLsCommand(): Command {
           if (!ns) throw new CliError('namespace path is required')
           const callOpts = parsePageOpts(opts)
 
-          const page = await callTool<Page<ContextEntryMeta>>(
-            resolveTarget(opts),
-            nsUri(ns),
-            'List',
+          const page = await callDirect<Page<ContextEntryMeta>>(
+            resolveTarget(opts), `${nsUri(ns)}/list`,
             {
               path: prefix ? String(prefix) : '',
               ...(Object.keys(callOpts).length ? { opts: callOpts } : {}),
@@ -150,7 +148,7 @@ export function ctxCatCommand(): Command {
         const entryPath = String(entryArg ?? '').trim()
         if (!entryPath) throw new CliError('entry path is required')
 
-        const entry = await callTool<ContextEntry>(resolveTarget(opts), nsUri(ns), 'Get', {
+        const entry = await callDirect<ContextEntry>(resolveTarget(opts), `${nsUri(ns)}/get`, {
           path: entryPath,
         })
         if (asJson) {
@@ -217,7 +215,7 @@ export function ctxPutCommand(): Command {
             ? String(opts.contentType)
             : guessContentType(opts.content === undefined ? file : undefined)
 
-          const meta = await callTool<ContextEntryMeta>(resolveTarget(opts), nsUri(ns), 'Write', {
+          const meta = await callDirect<ContextEntryMeta>(resolveTarget(opts), `${nsUri(ns)}/write`, {
             path: entryPath,
             entry: {
               contentType,
@@ -272,7 +270,7 @@ export function ctxPatchCommand(): Command {
             throw new CliError('nothing to update: pass --content/--file and/or --meta')
           }
 
-          const meta = await callTool<ContextEntryMeta>(resolveTarget(opts), nsUri(ns), 'Update', {
+          const meta = await callDirect<ContextEntryMeta>(resolveTarget(opts), `${nsUri(ns)}/update`, {
             path: entryPath,
             patch: {
               ...(content !== undefined ? { content } : {}),
@@ -313,10 +311,8 @@ export function ctxSearchCommand(): Command {
           const callOpts: Record<string, unknown> = parsePageOpts(opts)
           if (mode) callOpts.mode = mode
 
-          const page = await callTool<Page<ContextEntryMeta>>(
-            resolveTarget(opts),
-            nsUri(ns),
-            'Search',
+          const page = await callDirect<Page<ContextEntryMeta>>(
+            resolveTarget(opts), `${nsUri(ns)}/search`,
             { query, ...(Object.keys(callOpts).length ? { opts: callOpts } : {}) },
           )
           if (asJson) printJson(page)
@@ -341,7 +337,7 @@ export function ctxRmCommand(): Command {
         const entryPath = String(entryArg ?? '').trim()
         if (!entryPath) throw new CliError('entry path is required')
         await confirmDestructive(opts, `Delete context entry ${entryPath} in ${ns}?`)
-        await callTool(resolveTarget(opts), nsUri(ns), 'Delete', { path: entryPath })
+        await callDirect(resolveTarget(opts), `${nsUri(ns)}/delete`, { path: entryPath })
         if (asJson) printJson({ ok: true, path: entryPath })
         else printLine(`deleted ${entryPath}`)
       })

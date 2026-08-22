@@ -3,7 +3,7 @@ import {
   apiFetch,
   apiJson,
   apiText,
-  callTool,
+  callDirect,
   CliError,
   requireTarget,
   resetFetch,
@@ -46,10 +46,10 @@ describe('apiFetch 构造请求', () => {
 
   it('body 时带 content-type 并序列化', async () => {
     const fn = mockOnce('{}', { status: 200, headers: { 'content-type': 'application/json' } })
-    await callTool(TARGET, '/system/sk', 'list', { a: 1 })
+    await callDirect(TARGET, '/system/sk/list', { a: 1 })
     const [, init] = fn.mock.calls[0] as [string, RequestInit]
     expect((init.headers as Record<string, string>)['content-type']).toBe('application/json')
-    expect(JSON.parse(init.body as string)).toEqual({ tool: 'list', arguments: { a: 1 } })
+    expect(JSON.parse(init.body as string)).toEqual({ a: 1 })
   })
 
   it('网络错误 → CliError,带 unavailable/retryable(不再是无 code 的裸消息)', async () => {

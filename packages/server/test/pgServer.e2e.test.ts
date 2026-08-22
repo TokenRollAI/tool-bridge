@@ -84,25 +84,22 @@ suite('PG 后端端到端(createTbServer + HTTP ~search)', () => {
   })
 
   it('注册节点后可经 ~search 命中(长词/CJK 短词/名称)', async () => {
-    const register = await fetch(`${base}/system/registry`, {
+    const register = await fetch(`${base}/system/registry/write`, {
       method: 'POST',
       headers,
       body: JSON.stringify({
-        tool: 'write',
-        arguments: {
-          path: 'e2e/pg',
+        path: 'e2e/pg',
+        kind: 'http',
+        description: 'PG e2e fixture',
+        config: {
           kind: 'http',
-          description: 'PG e2e fixture',
-          config: {
-            kind: 'http',
-            endpoint: 'https://pg.example.test',
-            tools: [{
-              name: 'lookup_calendar',
-              description: 'Search calendar 日程 appointments',
-              method: 'GET',
-              pathTemplate: '/cal',
-            }],
-          },
+          endpoint: 'https://pg.example.test',
+          tools: [{
+            name: 'lookup_calendar',
+            description: 'Search calendar 日程 appointments',
+            method: 'GET',
+            pathTemplate: '/cal',
+          }],
         },
       }),
     })
@@ -114,10 +111,10 @@ suite('PG 后端端到端(createTbServer + HTTP ~search)', () => {
   })
 
   it('删除节点后索引同步清空', async () => {
-    const remove = await fetch(`${base}/system/registry`, {
+    const remove = await fetch(`${base}/system/registry/delete`, {
       method: 'POST',
       headers,
-      body: JSON.stringify({ tool: 'delete', arguments: { path: 'e2e/pg' } }),
+      body: JSON.stringify({ path: 'e2e/pg' }),
     })
     expect(remove.status).toBe(200)
     expect(await search('calendar')).toEqual([])

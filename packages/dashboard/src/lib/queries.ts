@@ -121,10 +121,16 @@ export function useHealthz() {
 export interface InvokeInput {
   accept?: 'json' | 'markdown'
   args: unknown
-  /** 直连工具调用(mcp/http/tool 工具):POST /<path>/<tool>,body 即 arguments。 */
-  direct?: boolean
-  path: string
-  tool: string
+  /** 完整命令路径(含命令/工具叶子段,如 `docs/ctx7/resolve` 或 `system/status/get`)。 */
+  commandPath: string
+}
+
+/** 完整命令路径拆成历史记录的 {节点 path, 命令 tool}(末段 = 命令名,仅供历史展示)。 */
+function splitCommand(commandPath: string): { path: string, tool: string } {
+  const at = commandPath.lastIndexOf('/')
+  return at < 0
+    ? { path: '', tool: commandPath }
+    : { path: commandPath.slice(0, at), tool: commandPath.slice(at + 1) }
 }
 
 /** 数据面调用(变更型;成功后由调用方决定失效哪些查询)。全部调用落 per-profile 历史。 */
@@ -137,20 +143,18 @@ export function useInvoke() {
     // 结果供 UI 展示;reset/卸载后最多保留 1s(而非默认 5min)。不用 0,
     // 避免长调用 pending 期卸载 observer 后 query-core 持续重排 0ms GC timer。
     gcTime: 1_000,
-    mutationFn: ({ path, tool, args, accept, direct }) =>
-      invoke(conn, path, tool, args, accept ?? 'json', direct ?? false),
-    onSuccess: (r, { path, tool }) =>
+    mutationFn: ({ commandPath, args, accept }) =>
+      invoke(conn, commandPath, args, accept ?? 'json'),
+    onSuccess: (r, { commandPath }) =>
       recordInvoke(scope, {
-        path,
-        tool,
+        ...splitCommand(commandPath),
         ok: true,
         ms: r.ms,
         at: new Date().toISOString(),
       }),
-    onError: (e, { path, tool }) =>
+    onError: (e, { commandPath }) =>
       recordInvoke(scope, {
-        path,
-        tool,
+        ...splitCommand(commandPath),
         ok: false,
         code: (e as ApiError).code ?? 'internal',
         ms: 0,
@@ -221,7 +225,7 @@ function usePagedBuiltin<T>(key: string, path: string, args: Record<string, unkn
     queryKey: [...base, key, args],
     queryFn: async ({ pageParam }) => {
       const opts = pageParam ? { cursor: pageParam } : {}
-      const r = await invoke(conn, path, 'list', { ...args, opts })
+      const r = await invoke(conn, `${path}/list`, { ...args, opts })
       return r.json as Page<T>
     },
     initialPageParam: undefined as string | undefined,
@@ -260,7 +264,7 @@ export function useIntegrationCatalog() {
   return useQuery({
     queryKey: [...base, 'integration-catalog'],
     queryFn: async () => {
-      const r = await invoke(conn, 'system/catalog', 'list', { opts: { limit: 200 } })
+      const r = await invoke(conn, 'system/catalog/list', { opts: { limit: 200 } })
       return (r.json as { items: CatalogListItem[] }).items ?? []
     },
     // descriptor 是编译期常量:同一部署内不会变,没必要反复拉。
@@ -275,7 +279,7 @@ export function useFederationList() {
   return useQuery({
     queryKey: [...base, 'federation-list'],
     queryFn: async () => {
-      const r = await invoke(conn, 'system/federation', 'list', {})
+      const r = await invoke(conn, 'system/federation/list', {})
       return r.json as { items: FederationHost[] }
     },
   })
@@ -317,7 +321,7 @@ export function useStatus() {
   return useQuery({
     queryKey: [...base, 'status'],
     queryFn: async () => {
-      const r = await invoke(conn, 'system/status', 'get', {})
+      const r = await invoke(conn, 'system/status/get', {})
       return r.json as { healthy: boolean, nodeCount: number, version: string }
     },
     refetchInterval: 30_000,
@@ -344,8 +348,8 @@ export function useCtxEntries(
     queryFn: async ({ pageParam }) => {
       const opts = pageParam ? { cursor: pageParam } : {}
       const r = query
-        ? await invoke(conn, nodePath, 'Search', { query, opts: { ...opts, mode } })
-        : await invoke(conn, nodePath, 'List', { path: prefix, opts })
+        ? await invoke(conn, `${nodePath}/search`, { query, opts: { ...opts, mode } })
+        : await invoke(conn, `${nodePath}/list`, { path: prefix, opts })
       return r.json as Page<ContextEntryMeta>
     },
     initialPageParam: undefined as string | undefined,
@@ -360,7 +364,7 @@ export function useCtxEntry(nodePath: string, entryPath: string | null) {
   return useQuery({
     queryKey: [...base, 'ctx-entry', nodePath, entryPath ?? ''],
     queryFn: async () => {
-      const r = await invoke(conn, nodePath, 'Get', { path: entryPath })
+      const r = await invoke(conn, `${nodePath}/get`, { path: entryPath })
       return r.json as ContextEntry
     },
     enabled: entryPath !== null,
@@ -381,8 +385,8 @@ export function useSkills(nodePath: string, query: string) {
     queryFn: async ({ pageParam }) => {
       const opts = pageParam ? { cursor: pageParam } : {}
       const r = query
-        ? await invoke(conn, nodePath, 'Search', { query, opts })
-        : await invoke(conn, nodePath, 'List', { opts })
+        ? await invoke(conn, `${nodePath}/search`, { query, opts })
+        : await invoke(conn, `${nodePath}/list`, { opts })
       return r.json as Page<SkillSummary>
     },
     initialPageParam: undefined as string | undefined,
@@ -397,7 +401,7 @@ export function useSkill(nodePath: string, id: string | null) {
   return useQuery({
     queryKey: [...base, 'skill', nodePath, id ?? ''],
     queryFn: async () => {
-      const r = await invoke(conn, nodePath, 'Get', { id })
+      const r = await invoke(conn, `${nodePath}/get`, { id })
       return r.json as SkillDetail
     },
     enabled: id !== null,
@@ -411,7 +415,7 @@ export function useSkillFile(nodePath: string, id: string | null, file: string |
   return useQuery({
     queryKey: [...base, 'skill-file', nodePath, id ?? '', file ?? ''],
     queryFn: async () => {
-      const r = await invoke(conn, nodePath, 'Get', { id, file })
+      const r = await invoke(conn, `${nodePath}/get`, { id, file })
       return r.json as SkillFile
     },
     enabled: id !== null && file !== null,

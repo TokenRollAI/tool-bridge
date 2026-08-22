@@ -191,9 +191,9 @@ describe('contentType 按扩展名推断(objectProvider 内联判定依赖)', ()
     await store.put('roota/inline/note.txt', 'hello inline')
     await store.put('roota/inline/data.json', '{"n":1}')
     const provider = createObjectContextProvider(store, { nsPath: 'device/d1/fs' })
-    const txt = await provider.Get('roota/inline/note.txt')
+    const txt = await provider.get('roota/inline/note.txt')
     expect(txt.content).toBe('hello inline') // 内联原文,而非 { $ref } / unavailable
-    const json = await provider.Get('roota/inline/data.json')
+    const json = await provider.get('roota/inline/data.json')
     expect(json.content).toEqual({ n: 1 }) // application/json → 解析后内联
   })
 })

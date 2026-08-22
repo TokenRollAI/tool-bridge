@@ -298,7 +298,7 @@ export interface ContextEntry extends ContextEntryMeta {
   content: string | unknown
 }
 
-/** skillhub 目录条目摘要(List/Search 返回的 SkillSummary)。 */
+/** skillhub 目录条目摘要(list/search 返回的 SkillSummary)。 */
 export interface SkillSummary {
   description: string
   id: string
@@ -307,7 +307,7 @@ export interface SkillSummary {
   version?: string
 }
 
-/** skillhub 技能内文件(Get{id,file} 返回;大对象 content = { $ref })。 */
+/** skillhub 技能内文件(get{id,file} 返回;大对象 content = { $ref })。 */
 export interface SkillFile {
   content?: string | { $ref: string }
   contentType: string
@@ -316,7 +316,7 @@ export interface SkillFile {
   version: string
 }
 
-/** skillhub 技能详情(Get{id} 返回:SKILL.md 正文 + 文件清单)。 */
+/** skillhub 技能详情(get{id} 返回:SKILL.md 正文 + 文件清单)。 */
 export interface SkillDetail extends SkillSummary {
   /** SKILL.md 正文(YAML frontmatter + Markdown)。 */
   content: string

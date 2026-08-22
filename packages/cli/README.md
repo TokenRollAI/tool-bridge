@@ -82,7 +82,7 @@ tb login --base-url https://your-gateway.example.com   # 交互输入 SK
 tb status            # 网关健康与版本
 tb tree              # 浏览可见的工具树
 tb help docs/context7            # 节点级 ~help(工具索引)
-tb call docs/context7 --tool resolve-library-id --args '{"query":"react"}'
+tb call docs/context7/resolve-library-id --args '{"query":"react"}'
 ```
 
 ## 把 Linux 机器作为 daemon 接入
@@ -147,7 +147,7 @@ KV/R2/D1、构建部署、验证 `~help`，最后保存本机 profile。Admin SK
 | `tb init cloudflare` | 从源码仓库初始化、部署并验证 Cloudflare Worker |
 | `tb login` / `tb whoami` / `tb use` | 档案管理(多网关/多 SK 切换) |
 | `tb ls` / `tb tree` / `tb help <path>` | 浏览工具树与节点文档 |
-| `tb call <path> --tool <tool>` / `tb call <tool-path> '{…}'` | 调用任意已挂载工具 |
+| `tb call <path>/<command> '{…}'` | 调用任意已挂载工具/命令(直连,body 即 arguments) |
 | `tb tool mount/rm` · `tb server add/ls/rm` | 挂载 HTTP/MCP/plugin 上游与远端 HTBP 服务 |
 | `tb ctx ls/cat/put/patch/rm/search` | 上下文(对象存储)读写 |
 | `tb sk` / `tb secret` | SK 签发/查看/更新/禁用/吊销与上游凭证管理 |

@@ -47,10 +47,9 @@ describe('tb note', () => {
     const fn = jsonFetch(page)
     await runCli(['note', 'ls', 'feishu', ...gw, '--json'])
     const [url, init] = fn.mock.calls[0] as [string, RequestInit]
-    expect(url).toBe('https://gw/system/annotation')
+    expect(url).toBe('https://gw/system/annotation/list')
     const payload = JSON.parse(init.body as string)
-    expect(payload.tool).toBe('list')
-    expect(payload.arguments).toEqual({ prefix: 'feishu' })
+    expect(payload).toEqual({ prefix: 'feishu' })
     expect(JSON.parse(stdoutText())).toEqual(page)
     expect(process.exitCode).toBe(0)
   })
@@ -59,7 +58,7 @@ describe('tb note', () => {
     const fn = jsonFetch({ items: [] })
     await runCli(['note', 'ls', ...gw, '--json'])
     const [, init] = fn.mock.calls[0] as [string, RequestInit]
-    expect(JSON.parse(init.body as string).arguments).toEqual({})
+    expect(JSON.parse(init.body as string)).toEqual({})
   })
 
   it('get <path> → system/annotation get;非 json 输出全文', async () => {
@@ -67,8 +66,7 @@ describe('tb note', () => {
     await runCli(['note', 'get', 'feishu/create-doc', ...gw])
     const [, init] = fn.mock.calls[0] as [string, RequestInit]
     const payload = JSON.parse(init.body as string)
-    expect(payload.tool).toBe('get')
-    expect(payload.arguments).toEqual({ path: 'feishu/create-doc' })
+    expect(payload).toEqual({ path: 'feishu/create-doc' })
     expect(stdoutText()).toContain('mode 必填')
     expect(process.exitCode).toBe(0)
   })
@@ -78,8 +76,7 @@ describe('tb note', () => {
     await runCli(['note', 'set', '/', '全树公告', ...gw, '--json'])
     const [, init] = fn.mock.calls[0] as [string, RequestInit]
     const payload = JSON.parse(init.body as string)
-    expect(payload.tool).toBe('set')
-    expect(payload.arguments).toEqual({ path: '', text: '全树公告' })
+    expect(payload).toEqual({ path: '', text: '全树公告' })
     expect(process.exitCode).toBe(0)
   })
 
@@ -88,8 +85,7 @@ describe('tb note', () => {
     await runCli(['note', 'rm', 'feishu/create-doc', ...gw, '--json'])
     const [, init] = fn.mock.calls[0] as [string, RequestInit]
     const payload = JSON.parse(init.body as string)
-    expect(payload.tool).toBe('remove')
-    expect(payload.arguments).toEqual({ path: 'feishu/create-doc' })
+    expect(payload).toEqual({ path: 'feishu/create-doc' })
     expect(process.exitCode).toBe(0)
   })
 

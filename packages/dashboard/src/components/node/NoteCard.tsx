@@ -51,14 +51,14 @@ function NoteDialog({
       return
     }
     invoke.mutate(
-      { path: 'system/annotation', tool: 'set', args: { path, text: text.trim() } },
+      { commandPath: 'system/annotation/set', args: { path, text: text.trim() } },
       { onSuccess: () => done('补充说明已保存'), onError: e => setErr(e.message) },
     )
   }
 
   const remove = () => {
     invoke.mutate(
-      { path: 'system/annotation', tool: 'remove', args: { path } },
+      { commandPath: 'system/annotation/remove', args: { path } },
       { onSuccess: () => done('补充说明已移除'), onError: e => setErr(e.message) },
     )
   }

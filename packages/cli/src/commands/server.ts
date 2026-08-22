@@ -2,8 +2,8 @@ import { Command } from 'commander'
 import type { Node, NodeInput, Page, TreeJson } from '../types'
 import { parsePageOpts, resolveTarget, withGlobalOpts, withPageOpts } from '../args'
 import { guard, printJson, printLine, table } from '../output'
+import { apiJson, callDirect, CliError } from '../http'
 import { deleteNode, registerNode } from '../registry'
-import { apiJson, callTool, CliError } from '../http'
 import { confirmDestructive } from '../confirm'
 
 interface ServerAddOpts {
@@ -90,10 +90,8 @@ export function serverLsCommand(): Command {
         const target = resolveTarget(opts)
         const pageOpts = parsePageOpts(opts)
         try {
-          const page = await callTool<Page<Node>>(
-            target,
-            '/system/registry',
-            'list',
+          const page = await callDirect<Page<Node>>(
+            target, '/system/registry/list',
             Object.keys(pageOpts).length ? { opts: pageOpts } : {},
           )
           const remotes = (page.items ?? []).filter(n => n.kind === 'remote')

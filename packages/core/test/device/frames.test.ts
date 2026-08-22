@@ -44,7 +44,7 @@ describe('encode/decode 往返', () => {
     },
     { type: 'ready', mountPath: 'device/build-01' },
     { type: 'error', error: { code: 'permission_denied', message: 'nope', retryable: false } },
-    { type: 'call', id: 'r1', path: 'shell', tool: 'exec', arguments: { command: 'echo hi' } },
+    { type: 'call', id: 'r1', path: 'shell/exec', arguments: { command: 'echo hi' } },
     { type: 'result', id: 'r1', ok: true, value: { stdout: 'hi\n', stderr: '', exitCode: 0 } },
     {
       type: 'result',
@@ -124,8 +124,7 @@ describe('encode/decode 往返', () => {
     const frame: DeviceFrame = {
       type: 'call',
       id: 'r3',
-      path: 'tools/echo',
-      tool: 'echo',
+      path: 'tools/echo/echo',
       arguments: { text: 'hi' },
       context: {
         caller: { keyId: 'sk_1', owner: 'agent:researcher', displayName: 'Researcher' },
@@ -157,11 +156,10 @@ describe('encode/decode 往返', () => {
   it('兼容:新网关 → 老设备 decoder,call 帧含 context 不影响既有字段解析', () => {
     // 老设备只读 id/path/tool/arguments;decoder 仍完整解析,context 作为已知可选字段保留。
     const text
-      = '{"type":"call","id":"r1","path":"shell","tool":"exec","arguments":{"command":"ls"},"context":{"caller":{"keyId":"k","owner":"user:a"},"traceId":"tr","createdAt":"t0","expiresAt":"t1"}}'
+      = '{"type":"call","id":"r1","path":"shell/exec","arguments":{"command":"ls"},"context":{"caller":{"keyId":"k","owner":"user:a"},"traceId":"tr","createdAt":"t0","expiresAt":"t1"}}'
     expect(decodeDeviceFrame(text)).toMatchObject({
       id: 'r1',
-      path: 'shell',
-      tool: 'exec',
+      path: 'shell/exec',
       arguments: { command: 'ls' },
     })
   })

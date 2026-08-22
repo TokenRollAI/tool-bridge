@@ -52,14 +52,17 @@ export interface DeviceCallContext {
   traceId: string
 }
 
-/** 网关 → 设备:调用转发;path 相对 mountPath(如 "shell")。 */
+/**
+ * 网关 → 设备:调用转发。`path` 相对 mountPath 且**含命令叶子段**(如 "shell/exec"、
+ * "fs/get"、"<mountRelative>/<tool>")—— 与直连调用形态一致,命令是路径的最后一段,
+ * 不再单列 `tool` 字段。
+ */
 export interface CallFrame {
   arguments: Record<string, unknown>
   /** 网关鉴权后的调用方来源与权威期限;老网关不带,新设备须显式降级。 */
   context?: DeviceCallContext
   id: string
   path: string
-  tool: string
   type: 'call'
 }
 
@@ -174,8 +177,7 @@ const schemaByType = {
   call: z.object({
     type: z.literal('call'),
     id: idSchema,
-    path: z.string(),
-    tool: z.string().min(1),
+    path: z.string().min(1),
     arguments: z.record(z.string(), z.unknown()),
     context: deviceCallContextSchema.optional(),
   }),

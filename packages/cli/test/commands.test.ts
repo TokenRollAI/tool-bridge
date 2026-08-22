@@ -93,15 +93,14 @@ describe('tb sk create', () => {
     ])
 
     const [url, init] = fn.mock.calls[0] as [string, RequestInit]
-    expect(url).toBe('https://gw/system/sk')
+    expect(url).toBe('https://gw/system/sk/write')
     const payload = JSON.parse(init.body as string)
-    expect(payload.tool).toBe('write')
-    expect(payload.arguments.owner).toBe('user:a')
-    expect(payload.arguments.scopes).toEqual([
+    expect(payload.owner).toBe('user:a')
+    expect(payload.scopes).toEqual([
       { pattern: 'docs/**', actions: ['read', 'call'] },
       { pattern: 'device/x', actions: ['call'] },
     ])
-    expect(payload.arguments.registerPaths).toEqual(['device/x'])
+    expect(payload.registerPaths).toEqual(['device/x'])
     expect(process.exitCode).toBe(0)
   })
 

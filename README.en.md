@@ -78,7 +78,7 @@ npm install -g @tool-bridge/cli
 tb login --base-url http://127.0.0.1:8787   # enter the saved Admin SK when prompted
 tb tree --depth 2                           # browse the current identity's visible tree
 tb help system/status                      # read the node's live contract
-tb call system/status --tool get           # invoke its get command
+tb call system/status/get                  # invoke its get command
 ```
 
 The deployment includes the Dashboard at [http://127.0.0.1:8787/ui](http://127.0.0.1:8787/ui). It uses the same public API, and the SK stays in local browser storage.
@@ -92,8 +92,8 @@ curl -H "Authorization: Bearer $TB_ADMIN_SK" \
 curl -X POST \
   -H "Authorization: Bearer $TB_ADMIN_SK" \
   -H "Content-Type: application/json" \
-  -d '{"tool":"get","arguments":{}}' \
-  http://127.0.0.1:8787/system/status
+  -d '{}' \
+  http://127.0.0.1:8787/system/status/get
 ```
 
 `~help` returns Markdown by default. Send `Accept: text/plain` for the compact Help DSL, or `Accept: application/json` for a structured representation with JSON Schema.
@@ -144,7 +144,7 @@ tb tool mount tools/docs \
   --url https://mcp.example.com/mcp
 
 tb help tools/docs
-tb call tools/docs --tool search --args '{"query":"tool-bridge"}'
+tb call tools/docs/search --args '{"query":"tool-bridge"}'
 ```
 
 An S3-compatible object store can be mounted as a Context namespace. Credentials are written only to the SecretStore; node records keep the reference name:
@@ -263,8 +263,8 @@ const tb = createToolBridge({
 })
 
 tb.registerTool('tools/echo', {
-  List: () => [{ name: 'echo', description: 'Return the input text' }],
-  Call: (_name, args) => ({ content: { echoed: args.text } }),
+  list: () => [{ name: 'echo', description: 'Return the input text' }],
+  call: (_name, args) => ({ content: { echoed: args.text } }),
 })
 
 export default { fetch: tb.fetch }

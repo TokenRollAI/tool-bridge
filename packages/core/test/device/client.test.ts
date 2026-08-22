@@ -79,8 +79,7 @@ describe('call 处理与幂等', () => {
   const CALL = encodeDeviceFrame({
     type: 'call',
     id: 'r1',
-    path: 'shell',
-    tool: 'exec',
+    path: 'shell/exec',
     arguments: { command: 'echo hi' },
   })
 
@@ -100,8 +99,7 @@ describe('call 处理与幂等', () => {
     expect(calls).toHaveLength(1)
     expect(calls[0]).toMatchObject({
       id: 'r1',
-      path: 'shell',
-      tool: 'exec',
+      path: 'shell/exec',
       arguments: { command: 'echo hi' },
       signal: { aborted: false },
     })
@@ -122,8 +120,7 @@ describe('call 处理与幂等', () => {
     await client.socketMessage(encodeDeviceFrame({
       type: 'call',
       id: 'rc',
-      path: 'shell',
-      tool: 'exec',
+      path: 'shell/exec',
       arguments: {},
       context: {
         caller: { keyId: 'sk_1', owner: 'agent:researcher' },
@@ -333,7 +330,7 @@ describe('call 处理与幂等', () => {
     client.socketOpened(socket)
     await client.socketMessage(READY)
     const callFrame = (id: string) =>
-      encodeDeviceFrame({ type: 'call', id, path: 'shell', tool: 'exec', arguments: {} })
+      encodeDeviceFrame({ type: 'call', id, path: 'shell/exec', arguments: {} })
     await client.socketMessage(callFrame('a'))
     await client.socketMessage(callFrame('b')) // 逐出 a
     sent.length = 0
@@ -407,7 +404,7 @@ describe('心跳、重连与关闭', () => {
     await client.socketMessage(READY, firstGeneration)
     first.sent.length = 0
     const pending = client.socketMessage(
-      encodeDeviceFrame({ type: 'call', id: 'old', path: 'shell', tool: 'exec', arguments: {} }),
+      encodeDeviceFrame({ type: 'call', id: 'old', path: 'shell/exec', arguments: {} }),
       firstGeneration,
     )
     client.socketClosed(firstGeneration)

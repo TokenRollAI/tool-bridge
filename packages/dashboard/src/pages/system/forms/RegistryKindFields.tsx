@@ -498,7 +498,7 @@ export function RegistryKindFields({
               </>
             )}
             {state.provider === 's3' && <S3Fields onChange={onChange} prefix="ctx" state={state} />}
-            <ContentPolicyFields onChange={onChange} readOnlyLabel="readOnly（拒绝 Write/Update/Delete）" state={state} />
+            <ContentPolicyFields onChange={onChange} readOnlyLabel="readOnly（拒绝 write/update/delete）" state={state} />
           </>
         )}
 
@@ -518,7 +518,7 @@ export function RegistryKindFields({
               <Field id="skill-prefix" label="key 前缀（可空）" onChange={value => update('ctxPrefix', value)} value={state.ctxPrefix} />
             </div>
             {state.skillProvider === 's3' && <S3Fields onChange={onChange} prefix="skill" state={state} />}
-            <ContentPolicyFields onChange={onChange} readOnlyLabel="readOnly（隐藏 Publish/Remove）" state={state} />
+            <ContentPolicyFields onChange={onChange} readOnlyLabel="readOnly（隐藏 publish/remove）" state={state} />
           </>
         )}
 

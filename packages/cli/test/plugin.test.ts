@@ -76,10 +76,9 @@ describe('tb plugin register', () => {
     await runCli(['plugin', 'register', ...gw, '--json', '--file', file])
 
     const [url, init] = fn.mock.calls[0] as [string, RequestInit]
-    expect(url).toBe('https://gw/system/plugin')
+    expect(url).toBe('https://gw/system/plugin/write')
     const payload = JSON.parse(init.body as string)
-    expect(payload.tool).toBe('write')
-    expect(payload.arguments).toEqual(manifest)
+    expect(payload).toEqual(manifest)
     expect(process.exitCode).toBe(0)
     expect(JSON.parse(stdoutText())).toEqual({ ...manifest, pluginToken: 'tbk_plugin_once' })
   })
@@ -90,7 +89,7 @@ describe('tb plugin register', () => {
       const fn = jsonFetch(manifest)
       await runCli(['plugin', 'register', ...gw, '--json', '--file', '-'])
       const [, init] = fn.mock.calls[0] as [string, RequestInit]
-      expect(JSON.parse(init.body as string).arguments).toEqual(manifest)
+      expect(JSON.parse(init.body as string)).toEqual(manifest)
       expect(process.exitCode).toBe(0)
     } finally {
       restore()
@@ -126,8 +125,8 @@ describe('tb plugin list', () => {
     const fn = jsonFetch({ items: [manifest] })
     await runCli(['plugin', 'list', ...gw, '--json'])
     const [url, init] = fn.mock.calls[0] as [string, RequestInit]
-    expect(url).toBe('https://gw/system/plugin')
-    expect(JSON.parse(init.body as string).tool).toBe('list')
+    expect(url).toBe('https://gw/system/plugin/list')
+    expect(JSON.parse(init.body as string)).toEqual({})
     expect(JSON.parse(stdoutText())).toEqual({ items: [manifest] })
     expect(process.exitCode).toBe(0)
   })
@@ -151,8 +150,7 @@ describe('tb plugin get', () => {
     await runCli(['plugin', 'get', 'notion-ctx', ...gw, '--json'])
     const [, init] = fn.mock.calls[0] as [string, RequestInit]
     const payload = JSON.parse(init.body as string)
-    expect(payload.tool).toBe('get')
-    expect(payload.arguments).toEqual({ id: 'notion-ctx' })
+    expect(payload).toEqual({ id: 'notion-ctx' })
     expect(JSON.parse(stdoutText())).toEqual(manifest)
     expect(process.exitCode).toBe(0)
   })
@@ -185,10 +183,9 @@ describe('tb plugin update', () => {
     await runCli(['plugin', 'update', 'notion-ctx', ...gw, '--json', '--file', file])
 
     const [url, init] = fn.mock.calls[0] as [string, RequestInit]
-    expect(url).toBe('https://gw/system/plugin')
+    expect(url).toBe('https://gw/system/plugin/update')
     const payload = JSON.parse(init.body as string)
-    expect(payload.tool).toBe('update')
-    expect(payload.arguments).toEqual({ id: 'notion-ctx', patch: { enabled: false } })
+    expect(payload).toEqual({ id: 'notion-ctx', patch: { enabled: false } })
     expect(JSON.parse(stdoutText())).toEqual({ ...manifest, enabled: false })
     expect(process.exitCode).toBe(0)
   })
@@ -241,8 +238,7 @@ describe('tb plugin rm', () => {
     await runCli(['plugin', 'rm', 'notion-ctx', ...gw])
     const [, init] = fn.mock.calls[0] as [string, RequestInit]
     const payload = JSON.parse(init.body as string)
-    expect(payload.tool).toBe('delete')
-    expect(payload.arguments).toEqual({ id: 'notion-ctx' })
+    expect(payload).toEqual({ id: 'notion-ctx' })
     expect(stdoutText()).toContain('removed plugin: notion-ctx')
     expect(process.exitCode).toBe(0)
   })

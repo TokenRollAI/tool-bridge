@@ -18,7 +18,7 @@ import { collect, parsePageOpts, resolveTarget, withGlobalOpts, withPageOpts } f
 import { deleteNode, parseConfigSpecs, registerNode } from '../registry'
 import { guard, printJson, printLine, table } from '../output'
 import { confirmDestructive } from '../confirm'
-import { callTool, CliError } from '../http'
+import { callDirect, CliError } from '../http'
 import { toolAuthCommand } from './tool'
 
 /** system/catalog 的列表项(core builtin/catalog 的 CatalogListItem)。 */
@@ -111,10 +111,8 @@ async function catalogEntry(
   provider: string,
 ): Promise<CatalogListItem | undefined> {
   try {
-    const page = await callTool<Page<CatalogListItem>>(
-      target,
-      '/system/catalog',
-      'search',
+    const page = await callDirect<Page<CatalogListItem>>(
+      target, '/system/catalog/search',
       { q: provider },
     )
     return (page.items ?? []).find(i => i.id === provider)
@@ -207,10 +205,8 @@ async function secretExistence(
   let cursor: string | undefined
   try {
     do {
-      const page = await callTool<Page<SecretSummary>>(
-        target,
-        '/system/secret',
-        'list',
+      const page = await callDirect<Page<SecretSummary>>(
+        target, '/system/secret/list',
         { opts: { limit: 200, ...(cursor !== undefined ? { cursor } : {}) } },
       )
       if ((page.items ?? []).some(item => item.name === name)) return 'exists'
@@ -237,10 +233,8 @@ Examples:
       await guard(asJson, async () => {
         const pageOpts = parsePageOpts(opts)
         const q = opts.search !== undefined ? String(opts.search).trim() : undefined
-        const result = await callTool<Page<CatalogListItem>>(
-          resolveTarget(opts),
-          '/system/catalog',
-          q ? 'search' : 'list',
+        const result = await callDirect<Page<CatalogListItem>>(
+          resolveTarget(opts), `/system/catalog/${q ? 'search' : 'list'}`,
           { ...(q ? { q } : {}), ...(pageOpts ? { opts: pageOpts } : {}) },
         )
         if (asJson) {
@@ -380,7 +374,7 @@ Examples:
           authRef = derivedSecretName(path)
           shouldDeleteOnFailure = await secretExistence(target, authRef) === 'absent'
           secretFields = Object.keys(fields).sort()
-          await callTool(target, '/system/secret', 'set', {
+          await callDirect(target, '/system/secret/set', {
             name: authRef,
             value: encodeCredentialValues(fields),
           })
@@ -403,7 +397,7 @@ Examples:
           }
           authRef = derivedSecretName(path)
           shouldDeleteOnFailure = await secretExistence(target, authRef) === 'absent'
-          await callTool(target, '/system/secret', 'set', { name: authRef, value })
+          await callDirect(target, '/system/secret/set', { name: authRef, value })
           managedCredential = authRef
         }
 
@@ -438,7 +432,7 @@ Examples:
         } catch (error) {
           // 仅确认此前不存在的内部槽位可清理；同名既有/存在性未知的凭证绝不删除。
           if (managedCredential !== undefined && shouldDeleteOnFailure) {
-            await callTool(target, '/system/secret', 'delete', { name: managedCredential }).catch(() => {})
+            await callDirect(target, '/system/secret/delete', { name: managedCredential }).catch(() => {})
           }
           throw error
         }
@@ -493,14 +487,12 @@ export function integrationLsCommand(): Command {
       const asJson = Boolean(opts.json)
       await guard(asJson, async () => {
         const pageOpts = parsePageOpts(opts)
-        const page = await callTool<Page<{
+        const page = await callDirect<Page<{
           config?: Record<string, unknown>
           kind: string
           path: string
         }>>(
-          resolveTarget(opts),
-          '/system/registry',
-          'list',
+          resolveTarget(opts), '/system/registry/list',
           { ...(pageOpts ? { opts: pageOpts } : {}) },
         )
         const items = (page.items ?? []).filter((n) => {
