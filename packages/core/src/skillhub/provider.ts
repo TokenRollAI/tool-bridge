@@ -76,12 +76,12 @@ export interface SkillPublishResult {
 }
 
 export interface SkillhubProvider {
-  Get(id: string): Promise<SkillDetail>
-  GetFile(id: string, file: string): Promise<SkillFile>
-  List(opts?: ListOptions): Promise<Page<SkillSummary>>
-  Publish(input: SkillPublishInput): Promise<SkillPublishResult>
-  Remove(id: string): Promise<void>
-  Search(query: string, opts?: ListOptions): Promise<Page<SkillSummary>>
+  get(id: string): Promise<SkillDetail>
+  get_file(id: string, file: string): Promise<SkillFile>
+  list(opts?: ListOptions): Promise<Page<SkillSummary>>
+  publish(input: SkillPublishInput): Promise<SkillPublishResult>
+  remove(id: string): Promise<void>
+  search(query: string, opts?: ListOptions): Promise<Page<SkillSummary>>
 }
 
 /** provider 选项与 ObjectContextProvider 同形(直接透传底层存储能力)。 */
@@ -185,7 +185,7 @@ export function createSkillhubProvider(
   }
 
   return {
-    async List(listOpts?: ListOptions): Promise<Page<SkillSummary>> {
+    async list(listOpts?: ListOptions): Promise<Page<SkillSummary>> {
       const limit = clampLimit(listOpts?.limit)
       // 顶层 skill 目录 = keyPrefix 下的折叠前缀。
       const res = await store.list(keyPrefix, {
@@ -208,7 +208,7 @@ export function createSkillhubProvider(
       return res.cursor !== undefined ? { items, cursor: res.cursor } : { items }
     },
 
-    async Get(idRaw: string): Promise<SkillDetail> {
+    async get(idRaw: string): Promise<SkillDetail> {
       const id = assertSkillId(idRaw)
       const { text, meta } = await readDoc(id)
       const summary = summaryOf(id, text, meta)
@@ -232,7 +232,7 @@ export function createSkillhubProvider(
       return { ...summary, content: text, files }
     },
 
-    async GetFile(idRaw: string, file: string): Promise<SkillFile> {
+    async get_file(idRaw: string, file: string): Promise<SkillFile> {
       const id = assertSkillId(idRaw)
       const rel = normalizeEntryPath(file)
       const key = `${skillPrefix(id)}${rel}`
@@ -250,7 +250,7 @@ export function createSkillhubProvider(
       return { ...base, content: await readStreamText(got.body) }
     },
 
-    async Search(query: string, searchOpts?: ListOptions): Promise<Page<SkillSummary>> {
+    async search(query: string, searchOpts?: ListOptions): Promise<Page<SkillSummary>> {
       if (typeof query !== 'string' || query === '') {
         throw new TBError('invalid_argument', 'query 不能为空')
       }
@@ -301,8 +301,8 @@ export function createSkillhubProvider(
       return hasMore && lastPrefix !== undefined ? { items, cursor: lastPrefix } : { items }
     },
 
-    async Publish(input: SkillPublishInput): Promise<SkillPublishResult> {
-      assertWritable('Publish')
+    async publish(input: SkillPublishInput): Promise<SkillPublishResult> {
+      assertWritable('publish')
       if (!Array.isArray(input.files) || input.files.length === 0) {
         throw new TBError('invalid_argument', 'files 不能为空')
       }
@@ -350,8 +350,8 @@ export function createSkillhubProvider(
       return { id, name: fm.name, description: fm.description, fileCount: files.length }
     },
 
-    async Remove(idRaw: string): Promise<void> {
-      assertWritable('Remove')
+    async remove(idRaw: string): Promise<void> {
+      assertWritable('remove')
       const id = assertSkillId(idRaw)
       const prefix = skillPrefix(id)
       let cursor: string | undefined

@@ -44,13 +44,16 @@ function matchFrom(pat: string[], pi: number, seg: string[], si: number): boolea
 const MAX_PATTERN_SEGMENTS = 64
 
 export function matchGlob(pattern: string, path: TreePath): boolean {
+  // 标识符大小写不敏感:pattern 字面段与 path 段统一小写后比较('*'/'**' 小写化不变)。
+  // 与 registry/canonicalizePath 同一口径——资源侧已小写,pattern 侧在此折叠。
   const pat: string[] = []
   for (const token of segments(pattern)) {
-    if (token === '**' && pat[pat.length - 1] === '**') continue
-    pat.push(token)
+    const lower = token.toLowerCase()
+    if (lower === '**' && pat[pat.length - 1] === '**') continue
+    pat.push(lower)
   }
   if (pat.length > MAX_PATTERN_SEGMENTS) return false
-  return matchFrom(pat, 0, segments(path), 0)
+  return matchFrom(pat, 0, segments(path).map(s => s.toLowerCase()), 0)
 }
 
 const effectOf = (scope: Scope): 'allow' | 'deny' => scope.effect ?? 'allow'

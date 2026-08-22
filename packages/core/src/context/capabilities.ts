@@ -14,12 +14,12 @@
 import type { ContextProvider } from './types'
 
 /** 数据面动词全集(cmd 名 = 方法名;与 help.ts 的 SCOPE_BY_CMD 同源)。 */
-export const CONTEXT_METHODS = ['List', 'Get', 'Search', 'Write', 'Update', 'Delete'] as const
+export const CONTEXT_METHODS = ['list', 'get', 'search', 'write', 'update', 'delete'] as const
 
 export type ContextMethod = (typeof CONTEXT_METHODS)[number]
 
 /** 写动词(判定只读用)。 */
-export const CONTEXT_WRITE_METHODS: readonly ContextMethod[] = ['Write', 'Update', 'Delete']
+export const CONTEXT_WRITE_METHODS: readonly ContextMethod[] = ['write', 'update', 'delete']
 
 /** 按 handler 存在性推导 provider 实际支持的方法集。 */
 export function contextMethodsOf(provider: ContextProvider): Set<ContextMethod> {
@@ -45,7 +45,7 @@ export function isReadOnlyProvider(provider: ContextProvider): boolean {
  */
 export function contextCapabilitiesOf(provider: ContextProvider): string[] {
   const capabilities: string[] = []
-  if (provider.Search !== undefined) capabilities.push('search')
-  if (provider.Delete !== undefined) capabilities.push('delete')
+  if (provider.search !== undefined) capabilities.push('search')
+  if (provider.delete !== undefined) capabilities.push('delete')
   return capabilities
 }

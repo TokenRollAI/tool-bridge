@@ -143,7 +143,7 @@ export function createObjectContextProvider(
   const notFound = (path: string): TBError => TBError.notFound(`context entry 不存在:'${path}'`)
 
   return {
-    async List(path: string, listOpts?: ListOptions): Promise<Page<ContextEntryMeta>> {
+    async list(path: string, listOpts?: ListOptions): Promise<Page<ContextEntryMeta>> {
       rejectFilter(listOpts)
       const limit = clampLimit(listOpts?.limit)
       const rel = path === '' ? '' : `${normalizeEntryPath(path)}/`
@@ -167,7 +167,7 @@ export function createObjectContextProvider(
       return res.cursor !== undefined ? { items, cursor: res.cursor } : { items }
     },
 
-    async Get(path: string): Promise<ContextEntry> {
+    async get(path: string): Promise<ContextEntry> {
       const key = keyFor(path)
       const head = await store.head(key)
       if (!head) throw notFound(path)
@@ -188,8 +188,8 @@ export function createObjectContextProvider(
       return { ...meta, content: text }
     },
 
-    async Write(path: string, entry: ContextEntryInput): Promise<ContextEntryMeta> {
-      assertWritable('Write')
+    async write(path: string, entry: ContextEntryInput): Promise<ContextEntryMeta> {
+      assertWritable('write')
       const key = keyFor(path)
       const { body, contentType } = serializeInput(entry)
       const meta = await store.put(key, body, {
@@ -200,8 +200,8 @@ export function createObjectContextProvider(
       return toMeta(meta)
     },
 
-    async Update(path: string, patch: ContextPatch): Promise<ContextEntryMeta> {
-      assertWritable('Update')
+    async update(path: string, patch: ContextPatch): Promise<ContextEntryMeta> {
+      assertWritable('update')
       const key = keyFor(path)
       if (patch.content === undefined && patch.metadata === undefined) {
         throw new TBError('invalid_argument', 'patch 至少提供 content 或 metadata 之一')
@@ -227,12 +227,12 @@ export function createObjectContextProvider(
       return toMeta(meta)
     },
 
-    async Delete(path: string): Promise<void> {
-      assertWritable('Delete')
+    async delete(path: string): Promise<void> {
+      assertWritable('delete')
       await store.delete(keyFor(path))
     },
 
-    async Search(query: string, searchOpts?: SearchOptions): Promise<Page<ContextEntryMeta>> {
+    async search(query: string, searchOpts?: SearchOptions): Promise<Page<ContextEntryMeta>> {
       const mode = searchOpts?.mode ?? 'keyword'
       if (mode === 'semantic') {
         throw new TBError('invalid_argument', 'semantic 检索未声明(\'search:semantic\' capability)')

@@ -53,14 +53,14 @@ export interface SearchOptions extends ListOptions {
  * 方法或抛 unimplemented。未实现的动词在数据面按 unknown cmd 拒绝(invalid_argument)。
  */
 export interface ContextProvider {
-  Delete?(path: string): Promise<void>
+  delete?(path: string): Promise<void>
   /** 读取单个条目(含内容);不存在 → not_found。 */
-  Get?(path: string): Promise<ContextEntry>
+  get?(path: string): Promise<ContextEntry>
   /** 枚举条目(浅层列表 + 分页);path 为 namespace 内相对路径前缀。 */
-  List?(path: string, opts?: ListOptions): Promise<Page<ContextEntryMeta>>
-  Search?(query: string, opts?: SearchOptions): Promise<Page<ContextEntryMeta>>
+  list?(path: string, opts?: ListOptions): Promise<Page<ContextEntryMeta>>
+  search?(query: string, opts?: SearchOptions): Promise<Page<ContextEntryMeta>>
   /** 部分更新已存在条目的内容或 metadata;不存在 → not_found。 */
-  Update?(path: string, patch: ContextPatch): Promise<ContextEntryMeta>
+  update?(path: string, patch: ContextPatch): Promise<ContextEntryMeta>
   /** 创建或整体替换条目(幂等 upsert)。 */
-  Write?(path: string, entry: ContextEntryInput): Promise<ContextEntryMeta>
+  write?(path: string, entry: ContextEntryInput): Promise<ContextEntryMeta>
 }

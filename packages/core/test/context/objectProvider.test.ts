@@ -33,7 +33,7 @@ async function codeOf(p: Promise<unknown>): Promise<TBErrorCode | string | null>
 describe('Write', () => {
   it('创建条目并返回 Meta(uri 形状 node://<nsPath>/<entryPath>)', async () => {
     const { provider } = makeProvider()
-    const meta = await provider.Write('notes/a.md', {
+    const meta = await provider.write('notes/a.md', {
       contentType: 'text/markdown',
       content: '# hi',
       metadata: { topic: 'demo' },
@@ -50,28 +50,28 @@ describe('Write', () => {
 
   it('幂等 upsert:复写同 path 不报 conflict,version 前进、内容替换', async () => {
     const { provider } = makeProvider()
-    const m1 = await provider.Write('a.txt', { contentType: 'text/plain', content: 'one' })
-    const m2 = await provider.Write('a.txt', { contentType: 'text/plain', content: 'two' })
+    const m1 = await provider.write('a.txt', { contentType: 'text/plain', content: 'one' })
+    const m2 = await provider.write('a.txt', { contentType: 'text/plain', content: 'two' })
     expect(m2.version).not.toBe(m1.version)
-    expect((await provider.Get('a.txt')).content).toBe('two')
+    expect((await provider.get('a.txt')).content).toBe('two')
   })
 
   it('非 string content:JSON.stringify 存储,contentType 缺省 application/json', async () => {
     const { provider } = makeProvider()
-    const meta = await provider.Write('cfg.json', {
+    const meta = await provider.write('cfg.json', {
       contentType: '',
       content: { a: 1 },
     })
     expect(meta.contentType).toBe('application/json')
-    expect((await provider.Get('cfg.json')).content).toEqual({ a: 1 })
+    expect((await provider.get('cfg.json')).content).toEqual({ a: 1 })
     // contentType 字段整个缺省同样落 application/json(可选)
-    const meta2 = await provider.Write('cfg2.json', { content: { b: 2 } })
+    const meta2 = await provider.write('cfg2.json', { content: { b: 2 } })
     expect(meta2.contentType).toBe('application/json')
   })
 
   it('非 string content 且显式 contentType:不被覆盖', async () => {
     const { provider } = makeProvider()
-    const meta = await provider.Write('v.json', {
+    const meta = await provider.write('v.json', {
       contentType: 'application/vnd.x+json',
       content: [1],
     })
@@ -80,31 +80,31 @@ describe('Write', () => {
 
   it('content 缺失 / string content 无 contentType → invalid_argument', async () => {
     const { provider } = makeProvider()
-    expect(await codeOf(provider.Write('x', { contentType: 'text/plain' } as never))).toBe(
+    expect(await codeOf(provider.write('x', { contentType: 'text/plain' } as never))).toBe(
       'invalid_argument',
     )
-    expect(await codeOf(provider.Write('x', { contentType: '', content: 's' }))).toBe(
+    expect(await codeOf(provider.write('x', { contentType: '', content: 's' }))).toBe(
       'invalid_argument',
     )
-    expect(await codeOf(provider.Write('x', { content: 's' }))).toBe('invalid_argument')
+    expect(await codeOf(provider.write('x', { content: 's' }))).toBe('invalid_argument')
   })
 
   it('ifVersion:匹配放行;不匹配 / 条目不存在 → conflict', async () => {
     const { provider } = makeProvider()
-    const m1 = await provider.Write('v.txt', { contentType: 'text/plain', content: '1' })
-    await provider.Write('v.txt', {
+    const m1 = await provider.write('v.txt', { contentType: 'text/plain', content: '1' })
+    await provider.write('v.txt', {
       contentType: 'text/plain',
       content: '2',
       ifVersion: m1.version,
     })
     expect(
       await codeOf(
-        provider.Write('v.txt', { contentType: 'text/plain', content: '3', ifVersion: m1.version }),
+        provider.write('v.txt', { contentType: 'text/plain', content: '3', ifVersion: m1.version }),
       ),
     ).toBe('conflict')
     expect(
       await codeOf(
-        provider.Write('ghost', { contentType: 'text/plain', content: 'x', ifVersion: 'v0' }),
+        provider.write('ghost', { contentType: 'text/plain', content: 'x', ifVersion: 'v0' }),
       ),
     ).toBe('conflict')
   })
@@ -113,34 +113,34 @@ describe('Write', () => {
 describe('Get', () => {
   it('不存在 → not_found', async () => {
     const { provider } = makeProvider()
-    expect(await codeOf(provider.Get('nope.md'))).toBe('not_found')
+    expect(await codeOf(provider.get('nope.md'))).toBe('not_found')
   })
 
   it('text/* 内联;application/json 内联并 JSON.parse', async () => {
     const { provider } = makeProvider()
-    await provider.Write('t.md', { contentType: 'text/markdown; charset=utf-8', content: 'md' })
-    await provider.Write('j.json', { contentType: 'application/json', content: '{"a":1}' })
-    expect((await provider.Get('t.md')).content).toBe('md')
-    expect((await provider.Get('j.json')).content).toEqual({ a: 1 })
+    await provider.write('t.md', { contentType: 'text/markdown; charset=utf-8', content: 'md' })
+    await provider.write('j.json', { contentType: 'application/json', content: '{"a":1}' })
+    expect((await provider.get('t.md')).content).toBe('md')
+    expect((await provider.get('j.json')).content).toEqual({ a: 1 })
   })
 
   it('application/json 但 JSON.parse 失败 → 按原文本返回', async () => {
     const { provider } = makeProvider()
-    await provider.Write('bad.json', { contentType: 'application/json', content: 'oops{' })
-    expect((await provider.Get('bad.json')).content).toBe('oops{')
+    await provider.write('bad.json', { contentType: 'application/json', content: 'oops{' })
+    expect((await provider.get('bad.json')).content).toBe('oops{')
   })
 
   it('head 后对象消失(竞态)→ not_found', async () => {
     const { store, provider } = makeProvider()
-    await provider.Write('r.txt', { contentType: 'text/plain', content: 'x' })
+    await provider.write('r.txt', { contentType: 'text/plain', content: 'x' })
     vi.spyOn(store, 'get').mockResolvedValue(null)
-    expect(await codeOf(provider.Get('r.txt'))).toBe('not_found')
+    expect(await codeOf(provider.get('r.txt'))).toBe('not_found')
   })
 
   it('存量对象无 contentType:Meta 回落 application/octet-stream 并走 $ref', async () => {
     const { store, provider } = makeProvider({ relayRefUrl: key => `https://relay/${key}` })
     await store.put('raw.bin', 'data')
-    const entry = await provider.Get('raw.bin')
+    const entry = await provider.get('raw.bin')
     expect(entry.contentType).toBe('application/octet-stream')
     expect(entry.content).toEqual({ $ref: 'https://relay/raw.bin' })
   })
@@ -150,19 +150,19 @@ describe('Get', () => {
       refThresholdBytes: 8,
       relayRefUrl: key => `https://relay/${key}`,
     })
-    await provider.Write('small.txt', { contentType: 'text/plain', content: '12345678' })
-    await provider.Write('big.txt', { contentType: 'text/plain', content: '123456789' })
-    expect((await provider.Get('small.txt')).content).toBe('12345678')
+    await provider.write('small.txt', { contentType: 'text/plain', content: '12345678' })
+    await provider.write('big.txt', { contentType: 'text/plain', content: '123456789' })
+    expect((await provider.get('small.txt')).content).toBe('12345678')
     const getSpy = vi.spyOn(store, 'get')
-    const big = await provider.Get('big.txt')
+    const big = await provider.get('big.txt')
     expect(big.content).toEqual({ $ref: 'https://relay/big.txt' })
     expect(getSpy).not.toHaveBeenCalled()
   })
 
   it('非文本 contentType(小对象)也走 $ref', async () => {
     const { provider } = makeProvider({ relayRefUrl: key => `https://relay/${key}` })
-    await provider.Write('bin', { contentType: 'application/octet-stream', content: 'xx' })
-    expect((await provider.Get('bin')).content).toEqual({ $ref: 'https://relay/bin' })
+    await provider.write('bin', { contentType: 'application/octet-stream', content: 'xx' })
+    expect((await provider.get('bin')).content).toEqual({ $ref: 'https://relay/bin' })
   })
 
   it('presign 优先于 relayRefUrl,携带 presignTtlSec(缺省 900)', async () => {
@@ -174,111 +174,111 @@ describe('Get', () => {
       nsPath: NS,
       relayRefUrl: key => `https://relay/${key}`,
     })
-    await provider.Write('bin', { contentType: 'application/octet-stream', content: 'xx' })
-    expect((await provider.Get('bin')).content).toEqual({ $ref: 'https://signed/bin?ttl=900' })
+    await provider.write('bin', { contentType: 'application/octet-stream', content: 'xx' })
+    expect((await provider.get('bin')).content).toEqual({ $ref: 'https://signed/bin?ttl=900' })
     const provider60 = createObjectContextProvider(withPresign, { nsPath: NS, presignTtlSec: 60 })
-    expect((await provider60.Get('bin')).content).toEqual({ $ref: 'https://signed/bin?ttl=60' })
+    expect((await provider60.get('bin')).content).toEqual({ $ref: 'https://signed/bin?ttl=60' })
   })
 
   it('relayRefUrl 可为异步工厂(网关 HMAC 签 token 场景)', async () => {
     const { provider } = makeProvider({
       relayRefUrl: async key => `https://relay/${key}?signed=1`,
     })
-    await provider.Write('bin', { contentType: 'application/octet-stream', content: 'xx' })
-    expect((await provider.Get('bin')).content).toEqual({ $ref: 'https://relay/bin?signed=1' })
+    await provider.write('bin', { contentType: 'application/octet-stream', content: 'xx' })
+    expect((await provider.get('bin')).content).toEqual({ $ref: 'https://relay/bin?signed=1' })
   })
 
   it('presign 与 relayRefUrl 都缺 → unavailable', async () => {
     const { provider } = makeProvider()
-    await provider.Write('bin', { contentType: 'application/octet-stream', content: 'xx' })
-    expect(await codeOf(provider.Get('bin'))).toBe('unavailable')
+    await provider.write('bin', { contentType: 'application/octet-stream', content: 'xx' })
+    expect(await codeOf(provider.get('bin'))).toBe('unavailable')
   })
 })
 
 describe('Update', () => {
   it('不存在 → not_found', async () => {
     const { provider } = makeProvider()
-    expect(await codeOf(provider.Update('nope', { content: 'x' }))).toBe('not_found')
+    expect(await codeOf(provider.update('nope', { content: 'x' }))).toBe('not_found')
   })
 
   it('空 patch(无 content 也无 metadata)→ invalid_argument', async () => {
     const { provider } = makeProvider()
-    await provider.Write('a.txt', { contentType: 'text/plain', content: 'keep' })
-    expect(await codeOf(provider.Update('a.txt', {}))).toBe('invalid_argument')
-    expect(await codeOf(provider.Update('a.txt', { ifVersion: 'v1' }))).toBe('invalid_argument')
+    await provider.write('a.txt', { contentType: 'text/plain', content: 'keep' })
+    expect(await codeOf(provider.update('a.txt', {}))).toBe('invalid_argument')
+    expect(await codeOf(provider.update('a.txt', { ifVersion: 'v1' }))).toBe('invalid_argument')
   })
 
   it('仅 metadata:浅合并(同键覆盖、异键保留),content 原样保留', async () => {
     const { provider } = makeProvider()
-    await provider.Write('a.txt', {
+    await provider.write('a.txt', {
       contentType: 'text/plain',
       content: 'keep me',
       metadata: { a: '1', b: '2' },
     })
-    const meta = await provider.Update('a.txt', { metadata: { b: '3' } })
+    const meta = await provider.update('a.txt', { metadata: { b: '3' } })
     expect(meta.metadata).toEqual({ a: '1', b: '3' })
-    const entry = await provider.Get('a.txt')
+    const entry = await provider.get('a.txt')
     expect(entry.content).toBe('keep me')
     expect(entry.metadata).toEqual({ a: '1', b: '3' })
   })
 
   it('content 替换:version 前进、contentType 不变', async () => {
     const { provider } = makeProvider()
-    const m1 = await provider.Write('a.md', { contentType: 'text/markdown', content: 'v1' })
-    const m2 = await provider.Update('a.md', { content: 'v2' })
+    const m1 = await provider.write('a.md', { contentType: 'text/markdown', content: 'v1' })
+    const m2 = await provider.update('a.md', { content: 'v2' })
     expect(m2.version).not.toBe(m1.version)
     expect(m2.contentType).toBe('text/markdown')
-    expect((await provider.Get('a.md')).content).toBe('v2')
+    expect((await provider.get('a.md')).content).toBe('v2')
   })
 
   it('ifVersion:匹配放行;不匹配 → conflict', async () => {
     const { provider } = makeProvider()
-    const m1 = await provider.Write('a.txt', { contentType: 'text/plain', content: '1' })
-    const m2 = await provider.Update('a.txt', { content: '2', ifVersion: m1.version })
-    expect(await codeOf(provider.Update('a.txt', { content: '3', ifVersion: m1.version }))).toBe(
+    const m1 = await provider.write('a.txt', { contentType: 'text/plain', content: '1' })
+    const m2 = await provider.update('a.txt', { content: '2', ifVersion: m1.version })
+    expect(await codeOf(provider.update('a.txt', { content: '3', ifVersion: m1.version }))).toBe(
       'conflict',
     )
-    await provider.Update('a.txt', { content: '3', ifVersion: m2.version })
-    expect((await provider.Get('a.txt')).content).toBe('3')
+    await provider.update('a.txt', { content: '3', ifVersion: m2.version })
+    expect((await provider.get('a.txt')).content).toBe('3')
   })
 
   it('content 为对象:JSON 序列化存储', async () => {
     const { provider } = makeProvider()
-    await provider.Write('a.json', { contentType: 'application/json', content: '{"a":1}' })
-    await provider.Update('a.json', { content: { b: 2 } })
-    expect((await provider.Get('a.json')).content).toEqual({ b: 2 })
+    await provider.write('a.json', { contentType: 'application/json', content: '{"a":1}' })
+    await provider.update('a.json', { content: { b: 2 } })
+    expect((await provider.get('a.json')).content).toEqual({ b: 2 })
   })
 
   it('head 后对象消失(竞态)→ not_found', async () => {
     const { store, provider } = makeProvider()
-    await provider.Write('a.txt', { contentType: 'text/plain', content: 'x' })
+    await provider.write('a.txt', { contentType: 'text/plain', content: 'x' })
     vi.spyOn(store, 'get').mockResolvedValue(null)
-    expect(await codeOf(provider.Update('a.txt', { metadata: { k: '2' } }))).toBe('not_found')
+    expect(await codeOf(provider.update('a.txt', { metadata: { k: '2' } }))).toBe('not_found')
   })
 })
 
 describe('Delete', () => {
   it('删除后 Get → not_found;不存在时静默(幂等)', async () => {
     const { provider } = makeProvider()
-    await provider.Write('a.txt', { contentType: 'text/plain', content: 'x' })
-    await provider.Delete('a.txt')
-    expect(await codeOf(provider.Get('a.txt'))).toBe('not_found')
-    await provider.Delete('a.txt')
+    await provider.write('a.txt', { contentType: 'text/plain', content: 'x' })
+    await provider.delete('a.txt')
+    expect(await codeOf(provider.get('a.txt'))).toBe('not_found')
+    await provider.delete('a.txt')
   })
 })
 
 describe('List', () => {
   async function seed(provider: ObjectContextProvider): Promise<void> {
-    await provider.Write('a.md', { contentType: 'text/markdown', content: 'a' })
-    await provider.Write('docs/one.md', { contentType: 'text/markdown', content: '1' })
-    await provider.Write('docs/two.md', { contentType: 'text/markdown', content: '2' })
-    await provider.Write('docs/deep/three.md', { contentType: 'text/markdown', content: '3' })
+    await provider.write('a.md', { contentType: 'text/markdown', content: 'a' })
+    await provider.write('docs/one.md', { contentType: 'text/markdown', content: '1' })
+    await provider.write('docs/two.md', { contentType: 'text/markdown', content: '2' })
+    await provider.write('docs/deep/three.md', { contentType: 'text/markdown', content: '3' })
   }
 
   it('浅层列举:子前缀折叠为目录条目(uri 尾 /、x-directory、version 空、无 size)', async () => {
     const { provider } = makeProvider()
     await seed(provider)
-    const top = await provider.List('')
+    const top = await provider.list('')
     expect(top.items.map(i => i.uri)).toEqual([`node://${NS}/a.md`, `node://${NS}/docs/`])
     const dir = top.items[1] as ContextEntryMeta
     expect(dir.contentType).toBe('application/x-directory')
@@ -290,7 +290,7 @@ describe('List', () => {
     const { store, provider } = makeProvider()
     await seed(provider)
     await store.put('docs/', '')
-    const page = await provider.List('docs')
+    const page = await provider.list('docs')
     expect(page.items.map(i => i.uri)).toEqual([
       `node://${NS}/docs/deep/`,
       `node://${NS}/docs/one.md`,
@@ -301,29 +301,29 @@ describe('List', () => {
   it('分页:limit + cursor 透传;limit 超上限静默钳制、非法 limit 拒绝', async () => {
     const { provider } = makeProvider()
     await seed(provider)
-    const p1 = await provider.List('docs', { limit: 2 })
+    const p1 = await provider.list('docs', { limit: 2 })
     expect(p1.items).toHaveLength(2)
     expect(p1.cursor).toBeDefined()
-    const p2 = await provider.List('docs', { limit: 2, cursor: p1.cursor })
+    const p2 = await provider.list('docs', { limit: 2, cursor: p1.cursor })
     expect(p2.items.map(i => i.uri)).toEqual([`node://${NS}/docs/two.md`])
     expect(p2.cursor).toBeUndefined()
-    await provider.List('', { limit: 500 })
-    expect(await codeOf(provider.List('', { limit: 0 }))).toBe('invalid_argument')
+    await provider.list('', { limit: 500 })
+    expect(await codeOf(provider.list('', { limit: 0 }))).toBe('invalid_argument')
   })
 
   it('未声明的 filter 键 → invalid_argument;空 filter 对象放行;limit 非整数拒绝', async () => {
     const { provider } = makeProvider()
-    expect(await codeOf(provider.List('', { filter: { k: 'v' } }))).toBe('invalid_argument')
-    await provider.List('', { filter: {} })
-    expect(await codeOf(provider.List('', { limit: 1.5 }))).toBe('invalid_argument')
+    expect(await codeOf(provider.list('', { filter: { k: 'v' } }))).toBe('invalid_argument')
+    await provider.list('', { filter: {} })
+    expect(await codeOf(provider.list('', { limit: 1.5 }))).toBe('invalid_argument')
   })
 
   it('keyPrefix:落盘 key 带前缀、uri 不带', async () => {
     const { store, provider } = makeProvider({ keyPrefix: 'tenant' })
-    const meta = await provider.Write('x.md', { contentType: 'text/markdown', content: 'x' })
+    const meta = await provider.write('x.md', { contentType: 'text/markdown', content: 'x' })
     expect(meta.uri).toBe(`node://${NS}/x.md`)
     expect(await store.head('tenant/x.md')).not.toBeNull()
-    const page = await provider.List('')
+    const page = await provider.list('')
     expect(page.items.map(i => i.uri)).toEqual([`node://${NS}/x.md`])
   })
 })
@@ -331,15 +331,15 @@ describe('List', () => {
 describe('Search', () => {
   it('keyword(缺省):路径名与 metadata 值大小写不敏感子串匹配、深层召回、不拉 body', async () => {
     const { store, provider } = makeProvider()
-    await provider.Write('docs/Alpha-notes.md', { contentType: 'text/markdown', content: 'x' })
-    await provider.Write('docs/deep/beta.md', {
+    await provider.write('docs/Alpha-notes.md', { contentType: 'text/markdown', content: 'x' })
+    await provider.write('docs/deep/beta.md', {
       contentType: 'text/markdown',
       content: 'x',
       metadata: { topic: 'ALPHA' },
     })
-    await provider.Write('other.md', { contentType: 'text/markdown', content: 'x' })
+    await provider.write('other.md', { contentType: 'text/markdown', content: 'x' })
     const getSpy = vi.spyOn(store, 'get')
-    const page = await provider.Search('alpha')
+    const page = await provider.search('alpha')
     expect(page.items.map(i => i.uri).sort()).toEqual([
       `node://${NS}/docs/Alpha-notes.md`,
       `node://${NS}/docs/deep/beta.md`,
@@ -349,25 +349,25 @@ describe('Search', () => {
 
   it('分页:limit + cursor 续接', async () => {
     const { provider } = makeProvider()
-    await provider.Write('note1.md', { contentType: 'text/markdown', content: 'x' })
-    await provider.Write('note2.md', { contentType: 'text/markdown', content: 'x' })
-    await provider.Write('note3.md', { contentType: 'text/markdown', content: 'x' })
-    const p1 = await provider.Search('note', { limit: 2 })
+    await provider.write('note1.md', { contentType: 'text/markdown', content: 'x' })
+    await provider.write('note2.md', { contentType: 'text/markdown', content: 'x' })
+    await provider.write('note3.md', { contentType: 'text/markdown', content: 'x' })
+    const p1 = await provider.search('note', { limit: 2 })
     expect(p1.items).toHaveLength(2)
     expect(p1.cursor).toBeDefined()
-    const p2 = await provider.Search('note', { limit: 2, cursor: p1.cursor })
+    const p2 = await provider.search('note', { limit: 2, cursor: p1.cursor })
     expect(p2.items.map(i => i.uri)).toEqual([`node://${NS}/note3.md`])
     expect(p2.cursor).toBeUndefined()
   })
 
   it('mode=semantic(未声明 capability)/ 未知 mode / 空 query → invalid_argument', async () => {
     const { provider } = makeProvider()
-    expect(await codeOf(provider.Search('q', { mode: 'semantic' }))).toBe('invalid_argument')
-    expect(await codeOf(provider.Search('q', { mode: 'fuzzy' } as unknown as SearchOptions))).toBe(
+    expect(await codeOf(provider.search('q', { mode: 'semantic' }))).toBe('invalid_argument')
+    expect(await codeOf(provider.search('q', { mode: 'fuzzy' } as unknown as SearchOptions))).toBe(
       'invalid_argument',
     )
-    expect(await codeOf(provider.Search(''))).toBe('invalid_argument')
-    expect(await codeOf(provider.Search(123 as unknown as string))).toBe('invalid_argument')
+    expect(await codeOf(provider.search(''))).toBe('invalid_argument')
+    expect(await codeOf(provider.search(123 as unknown as string))).toBe('invalid_argument')
   })
 
   it('内部深层遍历跨多页(>200 对象仍能召回末尾条目)', async () => {
@@ -376,7 +376,7 @@ describe('Search', () => {
       await store.put(`bulk/item-${String(i).padStart(3, '0')}.txt`, 'x')
     }
     await store.put('zz-target.md', 'x')
-    const page = await provider.Search('zz-target')
+    const page = await provider.search('zz-target')
     expect(page.items.map(i => i.uri)).toEqual([`node://${NS}/zz-target.md`])
     expect(page.cursor).toBeUndefined()
   })
@@ -395,7 +395,7 @@ describe('Search', () => {
     }
     const provider = createObjectContextProvider(store, { nsPath: NS })
     await base.put('hit.md', 'x')
-    const page = await provider.Search('hit')
+    const page = await provider.search('hit')
     expect(page.items.map(i => i.uri)).toEqual([`node://${NS}/hit.md`])
   })
 
@@ -422,15 +422,15 @@ describe('Search', () => {
   it('list 不带 metadata(如 s3):head 补取后按 metadata 值召回;路径已命中的不 head', async () => {
     const base = new MemoryObjectStore(() => NOW)
     const provider = createObjectContextProvider(makeMetadataLessListStore(base), { nsPath: NS })
-    await provider.Write('docs/alpha.md', { contentType: 'text/markdown', content: 'x' })
-    await provider.Write('docs/beta.md', {
+    await provider.write('docs/alpha.md', { contentType: 'text/markdown', content: 'x' })
+    await provider.write('docs/beta.md', {
       contentType: 'text/markdown',
       content: 'y',
       metadata: { topic: 'ALPHA' },
     })
-    await provider.Write('other.md', { contentType: 'text/markdown', content: 'z' })
+    await provider.write('other.md', { contentType: 'text/markdown', content: 'z' })
     const headSpy = vi.spyOn(base, 'head')
-    const page = await provider.Search('alpha')
+    const page = await provider.search('alpha')
     expect(page.items.map(i => i.uri).sort()).toEqual([
       `node://${NS}/docs/alpha.md`,
       `node://${NS}/docs/beta.md`,
@@ -454,7 +454,7 @@ describe('Search', () => {
     await base.put('x-by-meta.md', 'x', { metadata: { tag: 'needle' } })
     await base.put('zz-needle.md', 'x')
     const headSpy = vi.spyOn(base, 'head')
-    const page = await provider.Search('needle')
+    const page = await provider.search('needle')
     expect(page.items.map(i => i.uri)).toEqual([`node://${NS}/zz-needle.md`])
     expect(headSpy).toHaveBeenCalledTimes(SEARCH_METADATA_HEAD_MAX)
   })
@@ -464,28 +464,28 @@ describe('readOnly 挂载', () => {
   it('Write/Update/Delete → permission_denied;List/Get/Search 照常', async () => {
     const store = new MemoryObjectStore(() => NOW)
     const rw = createObjectContextProvider(store, { nsPath: NS })
-    await rw.Write('a.txt', { contentType: 'text/plain', content: 'x' })
+    await rw.write('a.txt', { contentType: 'text/plain', content: 'x' })
     const ro = createObjectContextProvider(store, { nsPath: NS, readOnly: true })
-    expect(await codeOf(ro.Write('b.txt', { contentType: 'text/plain', content: 'y' }))).toBe(
+    expect(await codeOf(ro.write('b.txt', { contentType: 'text/plain', content: 'y' }))).toBe(
       'permission_denied',
     )
-    expect(await codeOf(ro.Update('a.txt', { content: 'z' }))).toBe('permission_denied')
-    expect(await codeOf(ro.Delete('a.txt'))).toBe('permission_denied')
-    expect((await ro.List('')).items).toHaveLength(1)
-    expect((await ro.Get('a.txt')).content).toBe('x')
-    expect((await ro.Search('a')).items).toHaveLength(1)
+    expect(await codeOf(ro.update('a.txt', { content: 'z' }))).toBe('permission_denied')
+    expect(await codeOf(ro.delete('a.txt'))).toBe('permission_denied')
+    expect((await ro.list('')).items).toHaveLength(1)
+    expect((await ro.get('a.txt')).content).toBe('x')
+    expect((await ro.search('a')).items).toHaveLength(1)
   })
 })
 
 describe('路径穿越拒绝(所有动词先过 normalizeEntryPath)', () => {
   it('Get/Write/Update/Delete/List 对穿越路径 → invalid_argument', async () => {
     const { provider } = makeProvider()
-    expect(await codeOf(provider.Get('../x'))).toBe('invalid_argument')
-    expect(await codeOf(provider.Write('/abs', { contentType: 'text/plain', content: 'x' }))).toBe(
+    expect(await codeOf(provider.get('../x'))).toBe('invalid_argument')
+    expect(await codeOf(provider.write('/abs', { contentType: 'text/plain', content: 'x' }))).toBe(
       'invalid_argument',
     )
-    expect(await codeOf(provider.Update('%2e%2e/x', { content: 'x' }))).toBe('invalid_argument')
-    expect(await codeOf(provider.Delete('a/../..'))).toBe('invalid_argument')
-    expect(await codeOf(provider.List('..'))).toBe('invalid_argument')
+    expect(await codeOf(provider.update('%2e%2e/x', { content: 'x' }))).toBe('invalid_argument')
+    expect(await codeOf(provider.delete('a/../..'))).toBe('invalid_argument')
+    expect(await codeOf(provider.list('..'))).toBe('invalid_argument')
   })
 })

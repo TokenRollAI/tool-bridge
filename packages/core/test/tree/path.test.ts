@@ -1,10 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import {
+  assertNoCollision,
+  canonicalizePath,
+  canonicalizeSegment,
   isPrefixOf,
   normalizePath,
   parentPaths,
   segments,
   validatePath,
+  validateSegment,
 } from '../../src/tree/path'
 import { RESERVED_SEGMENTS } from '../../src/types'
 
@@ -72,6 +76,51 @@ describe('validatePath', () => {
 
   it('以 ~ 开头的任意段 → invalid_argument', () => {
     expect(validatePath('~future')?.code).toBe('invalid_argument')
+  })
+})
+
+describe('canonicalizeSegment(小写化 + 形状校验)', () => {
+  it.each([
+    ['Foo', 'foo'],
+    ['GET_BY', 'get_by'],
+    ['resolve-library-id', 'resolve-library-id'],
+    ['Foo_Bar', 'foo_bar'],
+  ])('canonicalizeSegment(%j) === %j', (input, expected) => {
+    expect(canonicalizeSegment(input)).toBe(expected)
+  })
+
+  it.each(['', '~x', '.', '..'])('非法段 %j 抛 invalid_argument', (seg) => {
+    expect(() => canonicalizeSegment(seg)).toThrow()
+    expect(validateSegment(seg)?.code).toBe('invalid_argument')
+  })
+})
+
+describe('canonicalizePath(整条路径小写化)', () => {
+  it.each([
+    ['SYSTEM/Status/Get', 'system/status/get'],
+    ['/Docs/Context7/', 'docs/context7'],
+    ['', ''],
+    ['Foo_Bar/BAZ', 'foo_bar/baz'],
+  ])('canonicalizePath(%j) === %j', (input, expected) => {
+    expect(canonicalizePath(input)).toBe(expected)
+  })
+
+  it.each(['a/~x/c', 'a/./b', 'a/../b', 'a//b'])('非法路径 %j 抛', (p) => {
+    expect(() => canonicalizePath(p)).toThrow()
+  })
+})
+
+describe('assertNoCollision(大小写折叠冲突 fail closed)', () => {
+  it('Foo 与 foo 同时出现 → 抛 invalid_argument,不选其一', () => {
+    expect(() => assertNoCollision(['Foo', 'foo'], 'test')).toThrow()
+  })
+
+  it('同名(全等)不算冲突', () => {
+    expect(() => assertNoCollision(['foo', 'foo', 'bar'], 'test')).not.toThrow()
+  })
+
+  it('规范化后互异 → 放行', () => {
+    expect(() => assertNoCollision(['foo', 'bar', 'baz'], 'test')).not.toThrow()
   })
 })
 

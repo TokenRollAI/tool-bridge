@@ -3,6 +3,18 @@ import type { Action, Scope } from '../../src/types'
 import { checkScopes, matchGlob } from '../../src/auth/scope'
 
 describe('matchGlob(glob 语义)', () => {
+  describe('标识符大小写不敏感(pattern 与 path 段均折叠小写)', () => {
+    it('大写 pattern 匹配小写 path', () => {
+      expect(matchGlob('Docs/**', 'docs/context7')).toBe(true)
+    })
+    it('小写 pattern 匹配大写 path', () => {
+      expect(matchGlob('docs/**', 'DOCS/Context7')).toBe(true)
+    })
+    it('混合大小写字面段互相匹配', () => {
+      expect(matchGlob('System/Status', 'system/status')).toBe(true)
+    })
+  })
+
   describe('** 匹配任意层级(含零段)', () => {
     it.each(['', 'a', 'a/b', 'a/b/c/d'])('matchGlob("**", %o) === true', (path) => {
       expect(matchGlob('**', path)).toBe(true)

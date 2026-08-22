@@ -42,8 +42,8 @@ export const NODE_KIND_BY_PROFILE: Record<PluginProfile, 'tool' | 'context'> = {
  * 限定词(如 `search:semantic`)按 ':' 前的基名判定;未知基名忽略(向前兼容)。
  */
 const OPTIONAL_METHOD_BY_CAPABILITY: Record<string, string> = {
-  search: 'Search',
-  delete: 'Delete',
+  search: 'search',
+  delete: 'delete',
 }
 
 /**

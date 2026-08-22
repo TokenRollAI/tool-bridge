@@ -8,18 +8,18 @@
 
 import type { CmdSpec, HelpModel } from '../htbp/model'
 import type { TreePath } from '../types'
-import { cmdPath } from '../builtin/util'
+import { cmdPath, withCommandPaths } from '../builtin/util'
 
 /** ~describe 声明的可选能力(本实现提供 Search 与 Delete)。 */
 export const CONTEXT_CAPABILITIES: readonly string[] = ['search', 'delete']
 
 const SCOPE_BY_CMD: Record<string, 'read' | 'write'> = {
-  List: 'read',
-  Get: 'read',
-  Search: 'read',
-  Write: 'write',
-  Update: 'write',
-  Delete: 'write',
+  list: 'read',
+  get: 'read',
+  search: 'read',
+  write: 'write',
+  update: 'write',
+  delete: 'write',
 }
 
 /** 数据面 {tool} → scope;未知(含大小写不符)→ null,由网关按 invalid_argument 处理。 */
@@ -80,9 +80,9 @@ const PATCH_SCHEMA = {
 
 function contextCmds(nodePath: TreePath): CmdSpec[] {
   const path = cmdPath(nodePath)
-  return [
+  const cmds: CmdSpec[] = [
     {
-      name: 'List',
+      name: 'list',
       method: 'POST',
       path,
       h: 'list entries directly under a path (shallow, paginated)',
@@ -97,7 +97,7 @@ function contextCmds(nodePath: TreePath): CmdSpec[] {
       scope: 'read',
     },
     {
-      name: 'Get',
+      name: 'get',
       method: 'POST',
       path,
       h: 'read one entry with content (oversized content comes back as { $ref: <download URL> })',
@@ -112,7 +112,7 @@ function contextCmds(nodePath: TreePath): CmdSpec[] {
       scope: 'read',
     },
     {
-      name: 'Write',
+      name: 'write',
       method: 'POST',
       path,
       h: 'create or fully replace an entry (idempotent upsert)',
@@ -128,7 +128,7 @@ function contextCmds(nodePath: TreePath): CmdSpec[] {
       scope: 'write',
     },
     {
-      name: 'Update',
+      name: 'update',
       method: 'POST',
       path,
       h: 'partially update content and/or metadata (shallow merge); not_found if the entry does not exist',
@@ -144,7 +144,7 @@ function contextCmds(nodePath: TreePath): CmdSpec[] {
       scope: 'write',
     },
     {
-      name: 'Delete',
+      name: 'delete',
       method: 'POST',
       path,
       h: 'delete an entry (idempotent)',
@@ -159,7 +159,7 @@ function contextCmds(nodePath: TreePath): CmdSpec[] {
       effect: 'destructive',
     },
     {
-      name: 'Search',
+      name: 'search',
       method: 'POST',
       path,
       h: 'keyword search: substring match on entry paths and metadata values',
@@ -175,6 +175,7 @@ function contextCmds(nodePath: TreePath): CmdSpec[] {
       scope: 'read',
     },
   ]
+  return withCommandPaths(nodePath, cmds)
 }
 
 export interface ContextHelpOptions {

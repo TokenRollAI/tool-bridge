@@ -4,23 +4,23 @@ import { CONTEXT_CAPABILITIES, contextHelpModel, contextScopeForCmd } from '../.
 const node = { path: 'ctx/main', description: 'main context' }
 
 describe('contextHelpModel', () => {
-  it('六 cmd 首字母大写,scope:List/Get/Search=read,Write/Update/Delete=write', () => {
+  it('六 cmd 全小写,scope:list/get/search=read,write/update/delete=write', () => {
     const help = contextHelpModel(node)
     expect(help.node).toEqual({ path: 'ctx/main', kind: 'context', description: 'main context' })
     expect(help.cmds.map(c => c.name)).toEqual([
-      'List',
-      'Get',
-      'Write',
-      'Update',
-      'Delete',
-      'Search',
+      'list',
+      'get',
+      'write',
+      'update',
+      'delete',
+      'search',
     ])
     const scopeOf = (name: string) => help.cmds.find(c => c.name === name)?.scope
-    for (const name of ['List', 'Get', 'Search']) expect(scopeOf(name)).toBe('read')
-    for (const name of ['Write', 'Update', 'Delete']) expect(scopeOf(name)).toBe('write')
+    for (const name of ['list', 'get', 'search']) expect(scopeOf(name)).toBe('read')
+    for (const name of ['write', 'update', 'delete']) expect(scopeOf(name)).toBe('write')
     for (const c of help.cmds) {
       expect(c.method).toBe('POST')
-      expect(c.path).toBe('/ctx/main')
+      expect(c.path).toBe(`/ctx/main/${c.name}`)
     }
   })
 
@@ -32,29 +32,29 @@ describe('contextHelpModel', () => {
         required?: string[]
         type: string
       }
-    expect(Object.keys(schemaOf('List').properties).sort()).toEqual(['opts', 'path'])
-    expect(schemaOf('Get').required).toEqual(['path'])
-    expect(schemaOf('Write').required).toEqual(['path', 'entry'])
-    expect(schemaOf('Update').required).toEqual(['path', 'patch'])
-    expect(schemaOf('Search').required).toEqual(['query'])
+    expect(Object.keys(schemaOf('list').properties).sort()).toEqual(['opts', 'path'])
+    expect(schemaOf('get').required).toEqual(['path'])
+    expect(schemaOf('write').required).toEqual(['path', 'entry'])
+    expect(schemaOf('update').required).toEqual(['path', 'patch'])
+    expect(schemaOf('search').required).toEqual(['query'])
     for (const c of help.cmds) expect((c.inputSchema as { type: string }).type).toBe('object')
   })
 
-  it('readOnly 隐藏 Write/Update/Delete(决策 D11)', () => {
+  it('readOnly 隐藏 write/update/delete(决策 D11)', () => {
     const help = contextHelpModel(node, { readOnly: true })
-    expect(help.cmds.map(c => c.name)).toEqual(['List', 'Get', 'Search'])
+    expect(help.cmds.map(c => c.name)).toEqual(['list', 'get', 'search'])
   })
 })
 
 describe('contextScopeForCmd', () => {
-  it('read/write 映射;未知或小写 cmd → null', () => {
-    expect(contextScopeForCmd('List')).toBe('read')
-    expect(contextScopeForCmd('Get')).toBe('read')
-    expect(contextScopeForCmd('Search')).toBe('read')
-    expect(contextScopeForCmd('Write')).toBe('write')
-    expect(contextScopeForCmd('Update')).toBe('write')
-    expect(contextScopeForCmd('Delete')).toBe('write')
-    expect(contextScopeForCmd('list')).toBeNull()
+  it('read/write 映射;未知或大写 cmd → null', () => {
+    expect(contextScopeForCmd('list')).toBe('read')
+    expect(contextScopeForCmd('get')).toBe('read')
+    expect(contextScopeForCmd('search')).toBe('read')
+    expect(contextScopeForCmd('write')).toBe('write')
+    expect(contextScopeForCmd('update')).toBe('write')
+    expect(contextScopeForCmd('delete')).toBe('write')
+    expect(contextScopeForCmd('List')).toBeNull()
     expect(contextScopeForCmd('Watch')).toBeNull()
   })
 })

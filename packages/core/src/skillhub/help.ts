@@ -8,17 +8,17 @@
 
 import type { CmdSpec, HelpModel } from '../htbp/model'
 import type { TreePath } from '../types'
-import { cmdPath } from '../builtin/util'
+import { cmdPath, withCommandPaths } from '../builtin/util'
 
 /** ~describe 声明的可选能力(本实现提供 Search)。 */
 export const SKILLHUB_CAPABILITIES: readonly string[] = ['search']
 
 const SCOPE_BY_CMD: Record<string, 'read' | 'write'> = {
-  List: 'read',
-  Get: 'read',
-  Search: 'read',
-  Publish: 'write',
-  Remove: 'write',
+  list: 'read',
+  get: 'read',
+  search: 'read',
+  publish: 'write',
+  remove: 'write',
 }
 
 /** 数据面 {tool} → scope;未知(含大小写不符)→ null,由网关按 invalid_argument 处理。 */
@@ -50,9 +50,9 @@ const PUBLISH_FILE_SCHEMA = {
 
 function skillhubCmds(nodePath: TreePath): CmdSpec[] {
   const path = cmdPath(nodePath)
-  return [
+  const cmds: CmdSpec[] = [
     {
-      name: 'List',
+      name: 'list',
       method: 'POST',
       path,
       h: 'list published skills (id / name / description from SKILL.md frontmatter, paginated)',
@@ -64,7 +64,7 @@ function skillhubCmds(nodePath: TreePath): CmdSpec[] {
       scope: 'read',
     },
     {
-      name: 'Get',
+      name: 'get',
       method: 'POST',
       path,
       h: 'read a skill: SKILL.md body + file manifest; pass \'file\' to fetch one bundled file (oversized/binary as { $ref })',
@@ -83,7 +83,7 @@ function skillhubCmds(nodePath: TreePath): CmdSpec[] {
       scope: 'read',
     },
     {
-      name: 'Search',
+      name: 'search',
       method: 'POST',
       path,
       h: 'keyword search over skill id / name / description',
@@ -99,7 +99,7 @@ function skillhubCmds(nodePath: TreePath): CmdSpec[] {
       scope: 'read',
     },
     {
-      name: 'Publish',
+      name: 'publish',
       method: 'POST',
       path,
       h: 'publish/replace a skill from a set of text files (must include SKILL.md with name+description frontmatter)',
@@ -122,7 +122,7 @@ function skillhubCmds(nodePath: TreePath): CmdSpec[] {
       scope: 'write',
     },
     {
-      name: 'Remove',
+      name: 'remove',
       method: 'POST',
       path,
       h: 'delete a skill and all its files (not_found if it does not exist)',
@@ -135,6 +135,7 @@ function skillhubCmds(nodePath: TreePath): CmdSpec[] {
       effect: 'destructive',
     },
   ]
+  return withCommandPaths(nodePath, cmds)
 }
 
 export interface SkillhubHelpOptions {
