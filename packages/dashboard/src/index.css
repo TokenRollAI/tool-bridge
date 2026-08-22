@@ -11,86 +11,91 @@
 @custom-variant dark (&:is(.dark *));
 
 /*
- * 主题:玻璃拟态(青→紫品牌渐变 + 景深微光)。
+ * 主题:信息优先的深色控制台(画布 + 面板)。青→紫品牌渐变仅用于强调,不再铺满界面。
  * 深色为默认(index.html 上挂 .dark);浅色为对照组,由 ThemeToggle 切换。
- * 品牌强调色统一走 --brand-from(青)→ --brand-to(紫);玻璃表面/描边/发光的可复用
- * 变量集中在这里,组件只引用语义 token 与 .glass-* 工具类,不各自写死渐变值。
+ * 表面走 --panel/--panel-raised 实底(替代重玻璃);.glass-* 工具类保留但改为轻模糊,
+ * 只在浮层(对话框/悬浮卡)使用。组件优先引用语义 token,不各自写死渐变值。
  */
 :root {
-  --background: oklch(0.975 0.004 240);
-  --foreground: oklch(0.26 0.02 265);
-  --card: oklch(0.995 0.002 240);
-  --card-foreground: oklch(0.26 0.02 265);
-  --popover: oklch(0.995 0.002 240);
-  --popover-foreground: oklch(0.26 0.02 265);
-  --primary: oklch(0.58 0.16 245);
-  --primary-foreground: oklch(0.99 0.005 240);
-  --secondary: oklch(0.94 0.008 250);
-  --secondary-foreground: oklch(0.32 0.02 265);
-  --muted: oklch(0.94 0.008 250);
-  --muted-foreground: oklch(0.52 0.02 262);
-  --accent: oklch(0.92 0.03 270);
-  --accent-foreground: oklch(0.34 0.06 275);
+  /* 黑 / 白 / 黄 三色体系。中性面近乎无彩(极低 chroma、微暖 hue 85),
+     强调只走黄色家族:文字/图标用可读的深金(--primary),实底填充用亮黄(--brand)。 */
+  --background: oklch(0.99 0.002 85);
+  --foreground: oklch(0.2 0.004 75);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.2 0.004 75);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.2 0.004 75);
+  /* 文字/图标强调:深金,在白底上对比达标(不可用亮黄做前景)。 */
+  --primary: oklch(0.6 0.13 78);
+  --primary-foreground: oklch(0.2 0.02 70);
+  --secondary: oklch(0.955 0.004 85);
+  --secondary-foreground: oklch(0.3 0.006 75);
+  --muted: oklch(0.955 0.004 85);
+  --muted-foreground: oklch(0.5 0.008 75);
+  --accent: oklch(0.95 0.03 90);
+  --accent-foreground: oklch(0.32 0.04 70);
   --destructive: oklch(0.57 0.2 27);
   --destructive-foreground: oklch(0.99 0 0);
-  --border: oklch(0.9 0.008 255);
-  --input: oklch(0.88 0.008 255);
-  --ring: oklch(0.58 0.16 245);
+  --border: oklch(0.9 0.004 85);
+  --input: oklch(0.87 0.004 85);
+  --ring: oklch(0.6 0.13 78);
   --radius: 0.75rem;
   --ok: oklch(0.62 0.15 165);
-  --warn: oklch(0.7 0.15 75);
+  --warn: oklch(0.68 0.16 55);
   /* 应用框架层级:activity rail → resource explorer → workspace → raised card。 */
-  --rail: oklch(0.94 0.01 255);
-  --panel: oklch(0.985 0.004 245);
+  --rail: oklch(0.955 0.004 85);
+  --panel: oklch(0.985 0.003 88);
   --panel-raised: oklch(1 0 0);
 
-  /* 品牌渐变端点(青→紫)。所有强调渐变/发光都由这两个派生。 */
-  --brand-from: oklch(0.62 0.17 230);
-  --brand-to: oklch(0.55 0.2 300);
+  /* 品牌渐变端点(亮黄→暖金)。仅用于 CTA 实底/强调条,始终配深色文字。 */
+  --brand-from: oklch(0.86 0.17 92);
+  --brand-to: oklch(0.8 0.16 72);
   /* 玻璃表面:半透明底 + 描边 + 高光 + 景深投影。浅色主题下用近白高透。 */
   --glass-bg: color-mix(in oklch, var(--card) 72%, transparent);
   --glass-border: color-mix(in oklch, var(--foreground) 12%, transparent);
   --glass-highlight: color-mix(in oklch, white 60%, transparent);
-  --glass-shadow: 0 8px 32px -12px oklch(0.4 0.05 265 / 0.28);
-  --glass-blur: 14px;
-  /* 品牌发光(hover/active/焦点强调用)。 */
-  --glow-brand: 0 0 24px -6px color-mix(in oklch, var(--brand-to) 55%, transparent);
+  --glass-shadow: 0 8px 32px -12px oklch(0.35 0.01 80 / 0.24);
+  --glass-blur: 10px;
+  /* 品牌发光(hover/active/焦点强调用;克制)。 */
+  --glow-brand: 0 0 18px -8px color-mix(in oklch, var(--brand-from) 55%, transparent);
 }
 
 .dark {
-  --background: oklch(0.15 0.014 265);
-  --foreground: oklch(0.9 0.008 250);
-  --card: oklch(0.2 0.016 265);
-  --card-foreground: oklch(0.9 0.008 250);
-  --popover: oklch(0.19 0.016 265);
-  --popover-foreground: oklch(0.9 0.008 250);
-  --primary: oklch(0.72 0.15 250);
-  --primary-foreground: oklch(0.15 0.02 265);
-  --secondary: oklch(0.26 0.02 265);
-  --secondary-foreground: oklch(0.88 0.008 250);
-  --muted: oklch(0.25 0.018 265);
-  --muted-foreground: oklch(0.66 0.02 258);
-  --accent: oklch(0.3 0.04 275);
-  --accent-foreground: oklch(0.88 0.08 275);
+  /* 黑底 + 亮黄强调。中性面走近乎无彩的暖灰(hue 80),纯黑不用死黑(0)以留层次。 */
+  --background: oklch(0.145 0.003 80);
+  --foreground: oklch(0.92 0.004 85);
+  --card: oklch(0.195 0.004 80);
+  --card-foreground: oklch(0.92 0.004 85);
+  --popover: oklch(0.185 0.004 80);
+  --popover-foreground: oklch(0.92 0.004 85);
+  /* 深色下亮黄做前景可读,直接用品牌黄。 */
+  --primary: oklch(0.85 0.16 90);
+  --primary-foreground: oklch(0.18 0.03 80);
+  --secondary: oklch(0.255 0.005 80);
+  --secondary-foreground: oklch(0.9 0.004 85);
+  --muted: oklch(0.245 0.005 80);
+  --muted-foreground: oklch(0.68 0.008 82);
+  --accent: oklch(0.3 0.04 88);
+  --accent-foreground: oklch(0.9 0.08 92);
   --destructive: oklch(0.64 0.2 27);
   --destructive-foreground: oklch(0.99 0 0);
-  --border: oklch(0.3 0.018 265);
-  --input: oklch(0.32 0.02 265);
-  --ring: oklch(0.72 0.15 250);
+  --border: oklch(0.29 0.005 80);
+  --input: oklch(0.31 0.006 80);
+  --ring: oklch(0.85 0.16 90);
   --ok: oklch(0.74 0.16 165);
   --warn: oklch(0.8 0.14 80);
-  --rail: oklch(0.115 0.014 265);
-  --panel: oklch(0.175 0.016 265);
-  --panel-raised: oklch(0.215 0.018 265);
+  --rail: oklch(0.11 0.003 80);
+  --panel: oklch(0.17 0.004 80);
+  --panel-raised: oklch(0.21 0.005 80);
 
-  --brand-from: oklch(0.72 0.16 235);
-  --brand-to: oklch(0.68 0.2 300);
+  --brand-from: oklch(0.87 0.17 92);
+  --brand-to: oklch(0.8 0.16 72);
   --glass-bg: color-mix(in oklch, var(--card) 58%, transparent);
   --glass-border: color-mix(in oklch, white 12%, transparent);
   --glass-highlight: color-mix(in oklch, white 14%, transparent);
-  --glass-shadow: 0 12px 40px -12px oklch(0 0 0 / 0.55);
-  --glass-blur: 16px;
-  --glow-brand: 0 0 28px -4px color-mix(in oklch, var(--brand-to) 60%, transparent);
+  --glass-shadow: 0 12px 40px -14px oklch(0 0 0 / 0.5);
+  --glass-blur: 12px;
+  --glow-brand: 0 0 20px -6px color-mix(in oklch, var(--brand-from) 50%, transparent);
 }
 
 @theme inline {
@@ -170,34 +175,30 @@
  * 描边高光 + 景深投影;.glow-brand 加品牌发光;.text-brand / .border-brand 走品牌渐变。
  * 全站铺开时优先套这些类,而不是各处手写 backdrop-blur/渐变值(收敛任意值 class 的抓手)。
  */
+/* 面板表面:近实底 + 细描边 + 克制投影(替代重玻璃;信息优先)。 */
 .glass {
-  background: var(--glass-bg);
+  background: color-mix(in oklch, var(--card) 94%, transparent);
+  border: 1px solid var(--border);
+  box-shadow: 0 1px 2px 0 oklch(0 0 0 / 0.05);
+}
+
+/* 浮层(对话框、悬浮卡片):轻模糊 + 更深投影,仅这一层用 backdrop-filter。 */
+.glass-raised {
+  background: color-mix(in oklch, var(--card) 88%, transparent);
   backdrop-filter: blur(var(--glass-blur));
   -webkit-backdrop-filter: blur(var(--glass-blur));
   border: 1px solid var(--glass-border);
-  box-shadow:
-    var(--glass-shadow),
-    inset 0 1px 0 0 var(--glass-highlight);
-}
-
-/* 更强的浮起玻璃(对话框、悬浮卡片):模糊更重、投影更深。 */
-.glass-raised {
-  background: color-mix(in oklch, var(--card) 82%, transparent);
-  backdrop-filter: blur(calc(var(--glass-blur) + 6px));
-  -webkit-backdrop-filter: blur(calc(var(--glass-blur) + 6px));
-  border: 1px solid var(--glass-border);
-  box-shadow:
-    var(--glass-shadow),
-    inset 0 1px 0 0 var(--glass-highlight);
+  box-shadow: var(--glass-shadow);
 }
 
 .glow-brand {
   box-shadow: var(--glow-brand);
 }
 
-/* 品牌渐变文字(标题/logo 强调)。 */
+/* 品牌渐变文字(标题/logo 强调)。基于可读的 --primary(而非亮黄填充色),
+   否则黄字落在白底上不可读;第二端点向 foreground 轻微偏移,保留渐变层次。 */
 .text-brand {
-  background: linear-gradient(105deg, var(--brand-from), var(--brand-to));
+  background: linear-gradient(105deg, var(--primary), color-mix(in oklch, var(--primary) 78%, var(--foreground)));
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
@@ -219,54 +220,35 @@
 }
 
 /*
- * Command Deck 三层框架。Rail 最深、Explorer 次深、Workspace 最开阔;
- * 玻璃拟态下改由品牌微光背景 + 半透明表面承载层级,workspace 铺一层极淡品牌光晕。
+ * 工作树画布(React Flow)的主题对齐。画布本体用极淡的双色品牌光晕铺底,
+ * 让节点卡片浮起;点阵由 React Flow 的 Background 负责,这里只管底色与光晕。
  */
-.app-activity-rail {
-  background: var(--rail);
-  box-shadow: inset -1px 0 color-mix(in oklch, var(--border) 48%, transparent);
-}
-
-.app-explorer,
-.app-mobile-header {
-  background:
-    linear-gradient(
-      to bottom,
-      color-mix(in oklch, var(--brand-from) 8%, transparent),
-      transparent 9rem
-    ),
-    var(--panel);
-}
-
-.app-workspace {
-  width: 100%;
-  background-color: var(--background);
-  /* 双色品牌光晕(左上青、右下紫,极淡)+ 细网格,营造景深。 */
+.tb-canvas {
+  background-color: var(--panel);
   background-image:
-    radial-gradient(60rem 40rem at 0% 0%, color-mix(in oklch, var(--brand-from) 12%, transparent), transparent 60%),
-    radial-gradient(50rem 40rem at 100% 100%, color-mix(in oklch, var(--brand-to) 12%, transparent), transparent 55%),
-    linear-gradient(to right, color-mix(in oklch, var(--border) 14%, transparent) 1px, transparent 1px),
-    linear-gradient(to bottom, color-mix(in oklch, var(--border) 10%, transparent) 1px, transparent 1px);
-  background-size: 100% 100%, 100% 100%, 40px 40px, 40px 40px;
-  background-position: 0 0, 0 0, -1px -1px, -1px -1px;
-  background-attachment: fixed, fixed, local, local;
+    radial-gradient(48rem 32rem at 12% 0%, color-mix(in oklch, var(--brand-from) 7%, transparent), transparent 60%),
+    radial-gradient(42rem 32rem at 100% 100%, color-mix(in oklch, var(--brand-to) 6%, transparent), transparent 55%);
 }
 
-@media (max-width: 767px) {
-  /* 页面根节点普遍自带 px-8/max-w-*；在移动工作区统一收窄边距并释放全宽。 */
-  .app-workspace > div {
-    max-width: none;
-    padding-top: 1.25rem;
-    padding-right: 1rem;
-    padding-bottom: max(2rem, env(safe-area-inset-bottom));
-    padding-left: 1rem;
-  }
+/* React Flow 控件/小地图与主题 token 对齐(库默认是浅色硬编码)。 */
+.tb-canvas .react-flow__controls-button {
+  border-color: var(--border);
+  background: var(--card);
+  color: var(--foreground);
 }
 
-@media (min-width: 1024px) {
-  .app-explorer {
-    box-shadow: inset -1px 0 color-mix(in oklch, var(--border) 65%, transparent);
-  }
+.tb-canvas .react-flow__controls-button:hover {
+  background: var(--accent);
+}
+
+.tb-canvas .react-flow__edge-path {
+  stroke-linecap: round;
+}
+
+/* 选中节点的连线加重,呼应 Inspector 焦点。 */
+.tb-canvas .react-flow__edge.selected .react-flow__edge-path,
+.tb-canvas .react-flow__edge:focus .react-flow__edge-path {
+  stroke: var(--primary);
 }
 
 @media (prefers-reduced-motion: reduce) {

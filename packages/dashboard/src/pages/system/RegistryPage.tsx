@@ -36,6 +36,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import { AddToolWizard } from '@/components/add-tool/AddToolWizard'
 import { PaginationFooter } from '@/components/PaginationFooter'
 import { PresenceBadge } from '@/components/PresenceBadge'
 import { ConfirmAction } from '@/components/ConfirmAction'
@@ -51,7 +52,6 @@ import { Input } from '@/components/ui/input'
 import { encodeTreePath } from '@/lib/path'
 import { cn } from '@/lib/utils'
 import { showsAuthorizeAction } from './forms/registryConfig'
-import { IntegrationDialog } from './forms/IntegrationDialog'
 import { MountDialog } from './forms/MountDialog'
 
 const KIND_FILTERS = [
@@ -258,8 +258,8 @@ export function RegistryPage() {
       <PageHeader
         actions={(
           <div className="flex flex-wrap gap-2">
-            {/* 常见路径在前:挂一个现成集成。通用挂载器降为次要按钮。 */}
-            <IntegrationDialog />
+            {/* 统一入口:选来源 → 配置 → 挂载并预检。旧的分散 dialog 收敛进向导。 */}
+            <AddToolWizard />
             <MountDialog
               existingNodes={mounted}
               existingPaths={mounted.map(node => node.path)}
@@ -267,7 +267,7 @@ export function RegistryPage() {
               trigger={(
                 <Button size="sm" variant="outline">
                   <Plus />
-                  挂载节点
+                  通用挂载器
                 </Button>
               )}
             />

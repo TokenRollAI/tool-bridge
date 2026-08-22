@@ -47,8 +47,11 @@ export function MountDialog({
   existingPaths,
   hasUnloadedPaths = false,
   defaultPath,
+  defaultKind,
   trigger,
 }: {
+  /** 打开时预选的 kind(向导按来源分流时用);缺省 mcp。 */
+  defaultKind?: MountKind
   defaultPath?: string
   existingNodes?: RegistryNode[]
   existingPaths: string[]
@@ -64,6 +67,7 @@ export function MountDialog({
   const [open, setOpen] = useState(false)
   const [form, setForm] = useState<RegistryMountFormState>(() => ({
     ...INITIAL_REGISTRY_MOUNT_FORM,
+    ...(defaultKind !== undefined ? { kind: defaultKind } : {}),
     path: defaultPath ?? '',
   }))
   const [err, setErr] = useState<string | null>(null)
@@ -169,8 +173,12 @@ export function MountDialog({
     setOpen(next)
     if (next) {
       setErr(null)
-      if (defaultPath !== undefined) {
-        setForm(current => ({ ...current, path: defaultPath }))
+      if (defaultPath !== undefined || defaultKind !== undefined) {
+        setForm(current => ({
+          ...current,
+          ...(defaultKind !== undefined ? { kind: defaultKind } : {}),
+          ...(defaultPath !== undefined ? { path: defaultPath } : {}),
+        }))
       }
     }
   }

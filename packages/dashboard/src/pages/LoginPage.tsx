@@ -69,14 +69,11 @@ export function LoginPage() {
   const target = usesSameOrigin ? window.location.origin : baseUrl.trim()
 
   return (
-    <div className="relative h-svh overflow-x-hidden overflow-y-auto bg-background">
+    <div className="relative h-svh overflow-x-hidden overflow-y-auto bg-panel">
+      {/* 与画布同一套克制的双色品牌光晕铺底,替代此前的网格 + 硬光斑。 */}
       <div
         aria-hidden
-        className="pointer-events-none absolute inset-0 opacity-[0.16] [background-image:linear-gradient(var(--border)_1px,transparent_1px),linear-gradient(90deg,var(--border)_1px,transparent_1px)] [background-size:48px_48px]"
-      />
-      <div
-        aria-hidden
-        className="pointer-events-none absolute -top-56 left-[18%] h-[34rem] w-[34rem] rounded-full bg-primary/[0.07] blur-3xl"
+        className="pointer-events-none absolute inset-0 [background-image:radial-gradient(48rem_32rem_at_12%_-8%,color-mix(in_oklch,var(--brand-from)_10%,transparent),transparent_60%),radial-gradient(42rem_32rem_at_100%_108%,color-mix(in_oklch,var(--brand-to)_9%,transparent),transparent_55%)]"
       />
 
       <header className="relative z-10 flex h-16 items-center justify-between px-5 sm:px-8 lg:px-12">
@@ -123,12 +120,14 @@ export function LoginPage() {
           </div>
 
           <div aria-hidden className="absolute bottom-5 left-[42%] opacity-45 xl:bottom-3">
-            <img alt="" className="w-40 xl:w-48" src={hero} />
+            {/* hero.png 的挤出面烘焙了紫色;用 hue-rotate 移到品牌琥珀色,
+                线稿/白色面因饱和度近 0 不受影响。 */}
+            <img alt="" className="w-40 [filter:hue-rotate(145deg)_saturate(1.15)] xl:w-48" src={hero} />
           </div>
         </section>
 
         <section aria-labelledby="login-title" className="mx-auto w-full max-w-md">
-          <div className="relative overflow-hidden rounded-xl border bg-card/80 p-5 shadow-xl shadow-black/[0.08] backdrop-blur-xl sm:p-7">
+          <div className="glass-raised relative overflow-hidden rounded-xl p-5 sm:p-7">
             <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-primary to-transparent" />
 
             <div className="mb-6">
