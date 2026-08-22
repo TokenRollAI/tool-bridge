@@ -36,7 +36,7 @@ async function postJson(path: string, body: unknown, init: RequestInit = {}): Pr
 }
 
 async function issueSk(input: unknown): Promise<string> {
-  const res = await postJson('system/sk', { tool: 'write', arguments: input }, admin())
+  const res = await postJson('system/sk/write', input, admin())
   expect(res.status).toBe(200)
   return ((await res.json()) as { secret: string }).secret
 }
@@ -61,7 +61,7 @@ async function call(
   args: Record<string, unknown>,
   init: RequestInit = admin(),
 ): Promise<Response> {
-  return postJson(path, { tool, arguments: args }, init)
+  return postJson(`${path}/${tool}`, args, init)
 }
 
 const SKILL_MD = `---
@@ -86,7 +86,7 @@ describe('skillhub 发布/发现循环', () => {
     expect((await mountHub('hubtest/main')).status).toBe(200)
 
     // Publish:一个多文件 skill(SKILL.md + 脚本 + 参考)。
-    const pub = await call('hubtest/main', 'Publish', {
+    const pub = await call('hubtest/main', 'publish', {
       files: [
         { path: 'SKILL.md', content: SKILL_MD },
         { path: 'scripts/fill.py', content: 'print("fill")\n' },
@@ -100,7 +100,7 @@ describe('skillhub 发布/发现循环', () => {
     expect(pubbed.fileCount).toBe(3)
 
     // List:目录条目 name/description 来自 frontmatter。
-    const l = await call('hubtest/main', 'List', {})
+    const l = await call('hubtest/main', 'list', {})
     expect(l.status).toBe(200)
     const listed = (await l.json()) as { items: SkillSummary[] }
     const entry = listed.items.find(s => s.id === 'pdf-tools')
@@ -109,7 +109,7 @@ describe('skillhub 发布/发现循环', () => {
     expect(entry?.version).toBe('1.2.0')
 
     // Get:SKILL.md 正文内联 + 文件清单。
-    const g = await call('hubtest/main', 'Get', { id: 'pdf-tools' })
+    const g = await call('hubtest/main', 'get', { id: 'pdf-tools' })
     expect(g.status).toBe(200)
     const detail = (await g.json()) as {
       content: string
@@ -125,39 +125,39 @@ describe('skillhub 发布/发现循环', () => {
     ])
 
     // GetFile:取单个 bundled 文件(内联文本)。
-    const gf = await call('hubtest/main', 'Get', { id: 'pdf-tools', file: 'scripts/fill.py' })
+    const gf = await call('hubtest/main', 'get', { id: 'pdf-tools', file: 'scripts/fill.py' })
     expect(gf.status).toBe(200)
     const one = (await gf.json()) as { content: unknown, path: string }
     expect(one.path).toBe('scripts/fill.py')
     expect(one.content).toBe('print("fill")\n')
 
     // Search:命中 description。
-    const s = await call('hubtest/main', 'Search', { query: 'pdf' })
+    const s = await call('hubtest/main', 'search', { query: 'pdf' })
     expect(s.status).toBe(200)
     expect(
       ((await s.json()) as { items: SkillSummary[] }).items.some(x => x.id === 'pdf-tools'),
     ).toBe(true)
 
     // Remove → 再 Get 404;Remove 不存在 → 404。
-    expect((await call('hubtest/main', 'Remove', { id: 'pdf-tools' })).status).toBe(200)
-    expect((await call('hubtest/main', 'Get', { id: 'pdf-tools' })).status).toBe(404)
-    expect((await call('hubtest/main', 'Remove', { id: 'pdf-tools' })).status).toBe(404)
+    expect((await call('hubtest/main', 'remove', { id: 'pdf-tools' })).status).toBe(200)
+    expect((await call('hubtest/main', 'get', { id: 'pdf-tools' })).status).toBe(404)
+    expect((await call('hubtest/main', 'remove', { id: 'pdf-tools' })).status).toBe(404)
   })
 
   it('Publish 整体替换:移除旧文件', async () => {
     expect((await mountHub('hubtest/replace')).status).toBe(200)
-    await call('hubtest/replace', 'Publish', {
+    await call('hubtest/replace', 'publish', {
       id: 's',
       files: [
         { path: 'SKILL.md', content: SKILL_MD },
         { path: 'old.txt', content: 'old\n' },
       ],
     })
-    await call('hubtest/replace', 'Publish', {
+    await call('hubtest/replace', 'publish', {
       id: 's',
       files: [{ path: 'SKILL.md', content: SKILL_MD }],
     })
-    const g = await call('hubtest/replace', 'Get', { id: 's' })
+    const g = await call('hubtest/replace', 'get', { id: 's' })
     const detail = (await g.json()) as { files: { path: string }[] }
     expect(detail.files.map(f => f.path)).toEqual(['SKILL.md'])
   })
@@ -166,12 +166,12 @@ describe('skillhub 发布/发现循环', () => {
 describe('skillhub 校验与权限', () => {
   it('缺 SKILL.md → 400;frontmatter 缺 name/description → 400', async () => {
     expect((await mountHub('hubtest/valid')).status).toBe(200)
-    const noDoc = await call('hubtest/valid', 'Publish', {
+    const noDoc = await call('hubtest/valid', 'publish', {
       id: 'x',
       files: [{ path: 'readme.md', content: '# nope\n' }],
     })
     expect(noDoc.status).toBe(400)
-    const noName = await call('hubtest/valid', 'Publish', {
+    const noName = await call('hubtest/valid', 'publish', {
       files: [{ path: 'SKILL.md', content: '---\ndescription: only desc\n---\nbody\n' }],
     })
     expect(noName.status).toBe(400)
@@ -179,7 +179,7 @@ describe('skillhub 校验与权限', () => {
 
   it('readOnly 挂载拒绝 Publish/Remove(403),仍可 List/Get', async () => {
     expect((await mountHub('hubtest/ro-seed')).status).toBe(200)
-    await call('hubtest/ro-seed', 'Publish', {
+    await call('hubtest/ro-seed', 'publish', {
       id: 'seed',
       files: [{ path: 'SKILL.md', content: SKILL_MD }],
     })
@@ -187,13 +187,13 @@ describe('skillhub 校验与权限', () => {
     expect((await mountHub('hubtest/ro', { readOnly: true })).status).toBe(200)
     expect(
       (
-        await call('hubtest/ro', 'Publish', {
+        await call('hubtest/ro', 'publish', {
           files: [{ path: 'SKILL.md', content: SKILL_MD }],
         })
       ).status,
     ).toBe(403)
-    expect((await call('hubtest/ro', 'Remove', { id: 'x' })).status).toBe(403)
-    expect((await call('hubtest/ro', 'List', {})).status).toBe(200)
+    expect((await call('hubtest/ro', 'remove', { id: 'x' })).status).toBe(403)
+    expect((await call('hubtest/ro', 'list', {})).status).toBe(200)
   })
 
   it('窄 scope SK:read 可 List、write 被拒 403', async () => {
@@ -202,12 +202,12 @@ describe('skillhub 校验与权限', () => {
       owner: 'agent:reader',
       scopes: [{ pattern: 'hubtest/scoped', actions: ['read'] }],
     })
-    expect((await call('hubtest/scoped', 'List', {}, bearer(readerSk))).status).toBe(200)
+    expect((await call('hubtest/scoped', 'list', {}, bearer(readerSk))).status).toBe(200)
     expect(
       (
         await call(
           'hubtest/scoped',
-          'Publish',
+          'publish',
           { files: [{ path: 'SKILL.md', content: SKILL_MD }] },
           bearer(readerSk),
         )
@@ -217,7 +217,7 @@ describe('skillhub 校验与权限', () => {
 
   it('未知 cmd → 400', async () => {
     expect((await mountHub('hubtest/unk')).status).toBe(200)
-    expect((await call('hubtest/unk', 'Frobnicate', {})).status).toBe(400)
+    expect((await call('hubtest/unk', 'frobnicate', {})).status).toBe(400)
   })
 })
 
@@ -232,7 +232,7 @@ describe('skillhub ~help / ~describe', () => {
     const help = (await res.json()) as { cmds: { name: string }[], node: { kind: string } }
     expect(help.node.kind).toBe('skillhub')
     const names = help.cmds.map(c => c.name).sort()
-    expect(names).toEqual(['Get', 'List', 'Publish', 'Remove', 'Search'])
+    expect(names).toEqual(['get', 'list', 'publish', 'remove', 'search'])
   })
 
   it('~describe 返回 skillhub capabilities', async () => {
@@ -252,8 +252,8 @@ describe('skillhub ~help / ~describe', () => {
     )
     const help = (await res.json()) as { cmds: { name: string }[] }
     const names = help.cmds.map(c => c.name)
-    expect(names).not.toContain('Publish')
-    expect(names).not.toContain('Remove')
-    expect(names).toContain('List')
+    expect(names).not.toContain('publish')
+    expect(names).not.toContain('remove')
+    expect(names).toContain('list')
   })
 })

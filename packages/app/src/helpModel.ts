@@ -140,10 +140,10 @@ export async function helpModelFor(
         = exported.methods !== undefined
           ? new Set(exported.methods)
           : new Set([
-              'List',
-              'Get',
-              'Write',
-              'Update',
+              'list',
+              'get',
+              'write',
+              'update',
               ...optionalMethodsForCapabilities(exported.capabilities ?? []),
             ])
       return { ...model, cmds: model.cmds.filter(c => declared.has(c.name)) }
@@ -155,4 +155,44 @@ export async function helpModelFor(
     return skillhubHelpModel(node, { readOnly: node.config.readOnly ?? false })
   }
   throw TBError.unimplemented(`~help for kind '${node.kind}' not implemented yet`)
+}
+
+/**
+ * 命令级 `~help`(`GET /<nodePath>/<command>/~help`)对 builtin/context/skillhub 成立:
+ * resolve 到父节点,构建其全量 HelpModel(schemas 形态,cmd 带 inputSchema),
+ * 取出叶子段命中的单条 cmd 单独返回。mcp/http/tool 的工具级 help 由 toolHelpModelFor 承载,
+ * 不进此函数(调用点已先试过)。命中不到(节点不可调用 / 命令不存在)→ null(交调用点 404)。
+ *
+ * 授权:节点可见性(read)已在 handleHelp 判过;命令是节点下虚拟叶子,授权只到节点,
+ * 故此处不额外判命令级 scope。
+ */
+export async function commandHelpModelFor(
+  registry: NodeRegistryStore,
+  ctx: CallContext,
+  builtins: Map<string, BuiltinModule>,
+  deps: TbAppDeps,
+  path: TreeNode['path'],
+  opts: { refresh: boolean, schemas?: boolean },
+): Promise<HelpModel | null> {
+  const resolved = await registry.resolve(path).catch(() => null)
+  if (resolved === null || resolved.rest === '' || resolved.rest.includes('/')) return null
+  const { node, rest: command } = resolved
+  // builtin/context/skillhub 才在此处理;其余 kind(mcp/http/tool/device/directory/remote)
+  // 要么已由 toolHelpModelFor 命中,要么无命令级 help。
+  if (
+    !(node.kind === 'builtin' || node.kind === 'context' || node.kind === 'skillhub')
+  ) {
+    return null
+  }
+  const full = await helpModelFor(node, registry, ctx, builtins, deps, {
+    refresh: opts.refresh,
+    schemas: true,
+    now: new Date().toISOString(),
+  })
+  const cmd = full.cmds.find(c => c.name === command)
+  if (cmd === undefined) return null
+  return {
+    node: { path: `${node.path}/${command}`, kind: node.kind, description: cmd.h ?? full.node.description },
+    cmds: [cmd],
+  }
 }

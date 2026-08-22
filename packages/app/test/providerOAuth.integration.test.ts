@@ -51,7 +51,7 @@ function oauthBinding(): (request: Request) => Promise<Response> {
       )
     }
     const body = (await request.json()) as { tool: string }
-    if (body.tool === 'List') return json([{ name: 'whoami', description: 'who am i' }])
+    if (body.tool === 'list') return json([{ name: 'whoami', description: 'who am i' }])
     return json({ content: { ok: true } })
   }
 }
@@ -90,35 +90,26 @@ async function postJson(
 /** 存 client 凭证 + 注册 plugin + 挂载,返回就绪的 app。 */
 async function mountedApp(): Promise<ReturnType<typeof createTbApp>> {
   const app = await buildApp()
-  expect((await postJson(app, 'system/secret', {
-    tool: 'set',
-    arguments: {
-      name: 'oauth-client',
-      value: encodeCredentialValues({ clientId: 'cid', clientSecret: 'csecret' }),
-    },
+  expect((await postJson(app, 'system/secret/set', {
+    name: 'oauth-client',
+    value: encodeCredentialValues({ clientId: 'cid', clientSecret: 'csecret' }),
   })).status).toBe(200)
 
-  const registered = await postJson(app, 'system/plugin', {
-    tool: 'write',
-    arguments: {
-      id: 'oauthp',
-      protocolVersion: 'plugin/v2',
-      endpoint: 'binding:oauthp',
-      auth: { kind: 'platform-token' },
-      healthPath: '/healthz',
-      enabled: true,
-    },
+  const registered = await postJson(app, 'system/plugin/write', {
+    id: 'oauthp',
+    protocolVersion: 'plugin/v2',
+    endpoint: 'binding:oauthp',
+    auth: { kind: 'platform-token' },
+    healthPath: '/healthz',
+    enabled: true,
   })
   expect(registered.status).toBe(200)
 
-  expect((await postJson(app, 'system/registry', {
-    tool: 'write',
-    arguments: {
-      path: 'svc/oauthp',
-      kind: 'tool',
-      description: 'oauth provider',
-      config: { kind: 'tool', provider: 'oauthp', export: 'actions', authRef: 'oauth-client' },
-    },
+  expect((await postJson(app, 'system/registry/write', {
+    path: 'svc/oauthp',
+    kind: 'tool',
+    description: 'oauth provider',
+    config: { kind: 'tool', provider: 'oauthp', export: 'actions', authRef: 'oauth-client' },
   })).status).toBe(200)
   return app
 }
@@ -187,25 +178,19 @@ describe('发起授权', () => {
 
   it('没配 authRef → 拒绝并说清要配什么', async () => {
     const app = await buildApp()
-    await postJson(app, 'system/plugin', {
-      tool: 'write',
-      arguments: {
-        id: 'oauthp',
-        protocolVersion: 'plugin/v2',
-        endpoint: 'binding:oauthp',
-        auth: { kind: 'platform-token' },
-        healthPath: '/healthz',
-        enabled: true,
-      },
+    await postJson(app, 'system/plugin/write', {
+      id: 'oauthp',
+      protocolVersion: 'plugin/v2',
+      endpoint: 'binding:oauthp',
+      auth: { kind: 'platform-token' },
+      healthPath: '/healthz',
+      enabled: true,
     })
-    const mounted = await postJson(app, 'system/registry', {
-      tool: 'write',
-      arguments: {
-        path: 'svc/noauth',
-        kind: 'tool',
-        description: 'x',
-        config: { kind: 'tool', provider: 'oauthp', export: 'actions' },
-      },
+    const mounted = await postJson(app, 'system/registry/write', {
+      path: 'svc/noauth',
+      kind: 'tool',
+      description: 'x',
+      config: { kind: 'tool', provider: 'oauthp', export: 'actions' },
     })
     expect(mounted.status).toBe(400)
     expect(((await mounted.json()) as { message: string }).message).toContain('authRef')
@@ -252,7 +237,7 @@ describe('调用时的令牌注入', () => {
     const started = (await (await authorize(app)).json()) as { authorizationUrl: string }
     await callback(app, stateOf(started.authorizationUrl))
 
-    const res = await postJson(app, 'svc/oauthp', { tool: 'whoami', arguments: {} })
+    const res = await postJson(app, 'svc/oauthp/whoami', {})
     expect(res.status).toBe(200)
     expect(seenUpstreamAuth).toBe('at-1')
     expect(seenUpstreamAuth).not.toContain('csecret')
@@ -260,7 +245,7 @@ describe('调用时的令牌注入', () => {
 
   it('**未授权就调用 → permission_denied 并指引去授权**(不是笼统的 unavailable)', async () => {
     const app = await mountedApp()
-    const res = await postJson(app, 'svc/oauthp', { tool: 'whoami', arguments: {} })
+    const res = await postJson(app, 'svc/oauthp/whoami', {})
     expect(res.status).toBe(403)
     const body = (await res.json()) as { code: string, message: string }
     expect(body.code).toBe('permission_denied')
@@ -275,7 +260,7 @@ describe('调用时的令牌注入', () => {
     await callback(app, stateOf(started.authorizationUrl))
 
     tokenResponses = [{ body: { access_token: 'at-new', expires_in: 3600 } }]
-    await postJson(app, 'svc/oauthp', { tool: 'whoami', arguments: {} })
+    await postJson(app, 'svc/oauthp/whoami', {})
     expect(seenUpstreamAuth).toBe('at-new')
 
     const refresh = upstreamCalls.filter(r => r.url === TOKEN_URL).at(-1)!
@@ -296,8 +281,8 @@ describe('调用时的令牌注入', () => {
       { body: { access_token: 'at-2', expires_in: 10 } },
       { body: { access_token: 'at-3', expires_in: 10 } },
     ]
-    expect((await postJson(app, 'svc/oauthp', { tool: 'whoami', arguments: {} })).status).toBe(200)
-    const second = await postJson(app, 'svc/oauthp', { tool: 'whoami', arguments: {} })
+    expect((await postJson(app, 'svc/oauthp/whoami', {})).status).toBe(200)
+    const second = await postJson(app, 'svc/oauthp/whoami', {})
     expect(second.status, '第二次刷新失败,说明旧 refresh token 没被保留').toBe(200)
 
     // 每一次刷新都必须带着最初那个 refresh token —— 丢了就再也刷不动。
@@ -317,7 +302,7 @@ describe('调用时的令牌注入', () => {
     await callback(app, stateOf(started.authorizationUrl))
 
     tokenResponses = [{ status: 400, body: { error: 'invalid_grant' } }]
-    const res = await postJson(app, 'svc/oauthp', { tool: 'whoami', arguments: {} })
+    const res = await postJson(app, 'svc/oauthp/whoami', {})
     expect(res.status).toBe(403)
     expect(((await res.json()) as { message: string }).message).toContain('tb tool auth')
   })
@@ -372,7 +357,7 @@ describe('OAuth 与 credentialProbe 叠加', () => {
         ))
       }
       const body = (await request.json()) as { tool: string }
-      return json(body.tool === 'List' ? [{ name: 'ping' }] : { content: {} })
+      return json(body.tool === 'list' ? [{ name: 'ping' }] : { content: {} })
     }
   }
 
@@ -390,16 +375,13 @@ describe('OAuth 与 credentialProbe 叠加', () => {
       state,
       version: 'test',
     })
-    const res = await postJson(app, 'system/plugin', {
-      tool: 'write',
-      arguments: {
-        id: 'probep',
-        protocolVersion: 'plugin/v2',
-        endpoint: 'binding:probep',
-        auth: { kind: 'platform-token' },
-        healthPath: '/healthz',
-        enabled: true,
-      },
+    const res = await postJson(app, 'system/plugin/write', {
+      id: 'probep',
+      protocolVersion: 'plugin/v2',
+      endpoint: 'binding:probep',
+      auth: { kind: 'platform-token' },
+      healthPath: '/healthz',
+      enabled: true,
     })
     expect(res.status).toBe(400)
     const body = (await res.json()) as { message: string }
@@ -424,32 +406,23 @@ describe('OAuth 与 credentialProbe 叠加', () => {
       version: 'test',
     })
 
-    await postJson(app, 'system/secret', {
-      tool: 'set',
-      arguments: {
-        name: 'cli-cred',
-        value: encodeCredentialValues({ clientId: 'cid', clientSecret: 'MUST_NOT_LEAK' }),
-      },
+    await postJson(app, 'system/secret/set', {
+      name: 'cli-cred',
+      value: encodeCredentialValues({ clientId: 'cid', clientSecret: 'MUST_NOT_LEAK' }),
     })
-    await postJson(app, 'system/plugin', {
-      tool: 'write',
-      arguments: {
-        id: 'probep',
-        protocolVersion: 'plugin/v2',
-        endpoint: 'binding:probep',
-        auth: { kind: 'platform-token' },
-        healthPath: '/healthz',
-        enabled: true,
-      },
+    await postJson(app, 'system/plugin/write', {
+      id: 'probep',
+      protocolVersion: 'plugin/v2',
+      endpoint: 'binding:probep',
+      auth: { kind: 'platform-token' },
+      healthPath: '/healthz',
+      enabled: true,
     })
-    const mounted = await postJson(app, 'system/registry', {
-      tool: 'write',
-      arguments: {
-        path: 'svc/probep',
-        kind: 'tool',
-        description: 'oauth + probe',
-        config: { kind: 'tool', provider: 'probep', export: 'actions', authRef: 'cli-cred' },
-      },
+    const mounted = await postJson(app, 'system/registry/write', {
+      path: 'svc/probep',
+      kind: 'tool',
+      description: 'oauth + probe',
+      config: { kind: 'tool', provider: 'probep', export: 'actions', authRef: 'cli-cred' },
     })
     expect(mounted.status).toBe(200)
     // 探针根本不该跑;即便跑了也绝不能把 client 凭证送出去。
@@ -471,18 +444,12 @@ describe('令牌生命周期', () => {
     expect(((await (await authorize(app)).json()) as { status: string }).status).toBe('authorized')
 
     // 卸载,再用同一路径重挂。
-    expect((await postJson(app, 'system/registry', {
-      tool: 'delete',
-      arguments: { path: 'svc/oauthp' },
-    })).status).toBe(200)
-    expect((await postJson(app, 'system/registry', {
-      tool: 'write',
-      arguments: {
-        path: 'svc/oauthp',
-        kind: 'tool',
-        description: 'remounted',
-        config: { kind: 'tool', provider: 'oauthp', export: 'actions', authRef: 'oauth-client' },
-      },
+    expect((await postJson(app, 'system/registry/delete', { path: 'svc/oauthp' })).status).toBe(200)
+    expect((await postJson(app, 'system/registry/write', {
+      path: 'svc/oauthp',
+      kind: 'tool',
+      description: 'remounted',
+      config: { kind: 'tool', provider: 'oauthp', export: 'actions', authRef: 'oauth-client' },
     })).status).toBe(200)
 
     // 新挂载不该继承上一次的授权 —— 否则换 provider 重挂就等于白拿别人的令牌。
@@ -532,7 +499,7 @@ describe('401 触发的自愈(不返回 expires_in 的 provider)', () => {
         ))
       }
       const body = (await request.json()) as { tool: string }
-      if (body.tool === 'List') return json([{ name: 'ping', effect: 'read' }])
+      if (body.tool === 'list') return json([{ name: 'ping', effect: 'read' }])
       // 真实上游:只拒那个已失效的 token,刷新拿到的新 token 有效。
       if (!valid && seen === 'at-1') {
         return json({ code: 'permission_denied', message: 'token expired' }, 401)
@@ -563,32 +530,23 @@ describe('401 触发的自愈(不返回 expires_in 的 provider)', () => {
       version: 'test',
     })
 
-    await postJson(app, 'system/secret', {
-      tool: 'set',
-      arguments: {
-        name: 'cli',
-        value: encodeCredentialValues({ clientId: 'cid', clientSecret: 'cs' }),
-      },
+    await postJson(app, 'system/secret/set', {
+      name: 'cli',
+      value: encodeCredentialValues({ clientId: 'cid', clientSecret: 'cs' }),
     })
-    await postJson(app, 'system/plugin', {
-      tool: 'write',
-      arguments: {
-        id: 'selfheal',
-        protocolVersion: 'plugin/v2',
-        endpoint: 'binding:selfheal',
-        auth: { kind: 'platform-token' },
-        healthPath: '/healthz',
-        enabled: true,
-      },
+    await postJson(app, 'system/plugin/write', {
+      id: 'selfheal',
+      protocolVersion: 'plugin/v2',
+      endpoint: 'binding:selfheal',
+      auth: { kind: 'platform-token' },
+      healthPath: '/healthz',
+      enabled: true,
     })
-    await postJson(app, 'system/registry', {
-      tool: 'write',
-      arguments: {
-        path: 'svc/selfheal',
-        kind: 'tool',
-        description: 'x',
-        config: { kind: 'tool', provider: 'selfheal', export: 'actions', authRef: 'cli' },
-      },
+    await postJson(app, 'system/registry/write', {
+      path: 'svc/selfheal',
+      kind: 'tool',
+      description: 'x',
+      config: { kind: 'tool', provider: 'selfheal', export: 'actions', authRef: 'cli' },
     })
 
     const started = (await (await postJson(app, 'svc/selfheal/~authorize', {})).json()) as {
@@ -597,13 +555,13 @@ describe('401 触发的自愈(不返回 expires_in 的 provider)', () => {
     await callback(app, stateOf(started.authorizationUrl))
 
     // 正常调用一次。
-    expect((await postJson(app, 'svc/selfheal', { tool: 'ping', arguments: {} })).status).toBe(200)
+    expect((await postJson(app, 'svc/selfheal/ping', {})).status).toBe(200)
     expect(seen).toBe('at-1')
     const callsBefore = tokenCalls
 
     // 上游作废了这个令牌(密钥轮换 / 自然过期,而我们没有 expiresAt 所以无从预知)。
     valid = false
-    const res = await postJson(app, 'svc/selfheal', { tool: 'ping', arguments: {} })
+    const res = await postJson(app, 'svc/selfheal/ping', {})
     expect(res.status, '401 之后没有用 refresh token 自愈').toBe(200)
     expect(tokenCalls, '没有触发刷新').toBe(callsBefore + 1)
     expect(seen, '重试时没换成新令牌').toBe('at-2')
@@ -630,7 +588,7 @@ describe('401 触发的自愈(不返回 expires_in 的 provider)', () => {
         })
       }
       const body = (await request.json()) as { tool: string }
-      if (body.tool === 'List') return json([{ name: 'ping', effect: 'read' }])
+      if (body.tool === 'list') return json([{ name: 'ping', effect: 'read' }])
       return json({ code: 'permission_denied', message: 'token rejected' }, 401)
     }
 
@@ -658,36 +616,27 @@ describe('401 触发的自愈(不返回 expires_in 的 provider)', () => {
       state,
       version: 'test',
     })
-    await postJson(app, 'system/secret', {
-      tool: 'set',
-      arguments: { name: 'cli', value: encodeCredentialValues({ clientId: 'c', clientSecret: 's' }) },
+    await postJson(app, 'system/secret/set', { name: 'cli', value: encodeCredentialValues({ clientId: 'c', clientSecret: 's' }) })
+    await postJson(app, 'system/plugin/write', {
+      id: 'deadend',
+      protocolVersion: 'plugin/v2',
+      endpoint: 'binding:deadend',
+      auth: { kind: 'platform-token' },
+      healthPath: '/healthz',
+      enabled: true,
     })
-    await postJson(app, 'system/plugin', {
-      tool: 'write',
-      arguments: {
-        id: 'deadend',
-        protocolVersion: 'plugin/v2',
-        endpoint: 'binding:deadend',
-        auth: { kind: 'platform-token' },
-        healthPath: '/healthz',
-        enabled: true,
-      },
-    })
-    await postJson(app, 'system/registry', {
-      tool: 'write',
-      arguments: {
-        path: 'svc/deadend',
-        kind: 'tool',
-        description: 'x',
-        config: { kind: 'tool', provider: 'deadend', export: 'actions', authRef: 'cli' },
-      },
+    await postJson(app, 'system/registry/write', {
+      path: 'svc/deadend',
+      kind: 'tool',
+      description: 'x',
+      config: { kind: 'tool', provider: 'deadend', export: 'actions', authRef: 'cli' },
     })
     const started = (await (await postJson(app, 'svc/deadend/~authorize', {})).json()) as {
       authorizationUrl: string
     }
     await callback(app, stateOf(started.authorizationUrl))
 
-    const res = await postJson(app, 'svc/deadend', { tool: 'ping', arguments: {} })
+    const res = await postJson(app, 'svc/deadend/ping', {})
     expect(res.status, '刷新失败后应抛原始的 permission_denied').toBe(403)
     // 试过刷新(不是直接放弃),但没成功。
     expect(tokenCalls).toBeGreaterThan(1)

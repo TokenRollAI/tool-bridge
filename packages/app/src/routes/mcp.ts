@@ -60,17 +60,16 @@ const mcpCommand = (
 ): McpBridgeTool => {
   const modelPath = nodePath.replace(/^\/+|\/+$/g, '')
   const commandPath = command.path.replace(/^\/+|\/+$/g, '')
-  if (commandPath !== modelPath && !commandPath.startsWith(`${modelPath}/`)) {
+  // command.path 现在恒为完整命令路径(含叶子段);它必须落在节点子树内。
+  if (!commandPath.startsWith(`${modelPath}/`)) {
     throw new TBError('internal', `command path '${command.path}' escapes node '${nodePath}'`)
   }
   const invokePath = `/${commandPath}`
-  const invokeWithEnvelope = commandPath === modelPath
   return {
-    identity: mcpToolIdentity(invokePath, command.name, invokeWithEnvelope),
+    identity: mcpToolIdentity(invokePath, command.name),
     sourcePath: nodePath,
     toolName: command.name,
     invokePath,
-    invokeWithEnvelope,
     description: command.h ?? nodeDescription,
     ...(command.inputSchema !== undefined ? { inputSchema: command.inputSchema } : {}),
     ...(command.effect !== undefined ? { effect: command.effect } : {}),
@@ -83,13 +82,12 @@ const toolSpecCommand = (
   tool: ToolSpec,
   providerBacked = false,
 ): McpBridgeTool => {
-  const path = `/${node.path}`
+  const invokePath = `/${node.path}/${tool.name}`
   return {
-    identity: mcpToolIdentity(path, tool.name, true),
+    identity: mcpToolIdentity(invokePath, tool.name),
     sourcePath: node.path,
     toolName: tool.name,
-    invokePath: path,
-    invokeWithEnvelope: true,
+    invokePath,
     ...(providerBacked ? { providerBacked: true } : {}),
     description: tool.description ?? node.description,
     ...(tool.inputSchema !== undefined ? { inputSchema: tool.inputSchema } : {}),
@@ -113,12 +111,10 @@ const remoteCommand = (
     throw new TBError('unavailable', 'remote ~help returned a command outside its node')
   }
   const suffix = remoteCommandPath.slice(remoteNodePath.length)
-  const directTool = suffix.startsWith('/')
+  // 完整命令路径 rebase 到本地联邦挂载点;命令是虚拟叶子,直连调用(无信封)。
   return mcpCommand(localNodePath, model.node.description, {
     ...command,
-    // Tool-layer nodes retain the envelope entrypoint. It keeps authorization on the
-    // node path instead of requiring callers to hold an exact scope for the tool suffix.
-    path: directTool ? `/${localNodePath}` : `/${localNodePath}${suffix}`,
+    path: `/${localNodePath}${suffix}`,
   })
 }
 
@@ -140,7 +136,6 @@ function mcpBridgeFor(c: AppContext, env: RouteEnv, app: TbHono): McpToolBridge 
           sourcePath: '',
           toolName: 'Search',
           invokePath: '/~search',
-          invokeWithEnvelope: false,
           mcpName: 'tb_search',
           operation: 'search' as const,
           description: 'Search visible tools across the Tool Bridge tree.',
@@ -163,7 +158,6 @@ function mcpBridgeFor(c: AppContext, env: RouteEnv, app: TbHono): McpToolBridge 
       sourcePath: '',
       toolName: 'Help',
       invokePath: '/~help',
-      invokeWithEnvelope: false,
       mcpName: 'tb_help',
       operation: 'help',
       description: 'Describe a visible Tool Bridge node or one of its tools.',
@@ -183,7 +177,6 @@ function mcpBridgeFor(c: AppContext, env: RouteEnv, app: TbHono): McpToolBridge 
       sourcePath: '',
       toolName: 'List',
       invokePath: '/~tree',
-      invokeWithEnvelope: false,
       mcpName: 'tb_list_nodes',
       operation: 'listNodes',
       description: 'List the visible Tool Bridge node tree from a path.',
@@ -456,11 +449,9 @@ function mcpBridgeFor(c: AppContext, env: RouteEnv, app: TbHono): McpToolBridge 
         'authorization': c.req.header('authorization') ?? '',
         'content-type': 'application/json',
       })
-      const body = tool.invokeWithEnvelope
-        ? { tool: tool.toolName, arguments: args }
-        : args
+      // 唯一调用形态:直连 `POST <invokePath>`(含命令/工具叶子段),body 即 arguments 本体。
       const response = await app.request(
-        new Request(url, { method: 'POST', headers, body: JSON.stringify(body) }),
+        new Request(url, { method: 'POST', headers, body: JSON.stringify(args) }),
       )
       return await resultFromResponse(response)
     },

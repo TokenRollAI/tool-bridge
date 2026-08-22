@@ -39,7 +39,7 @@ async function getJson(path: string, init: RequestInit = {}): Promise<Response> 
 }
 
 async function issueSk(input: unknown): Promise<string> {
-  const res = await postJson('system/sk', { tool: 'write', arguments: input }, admin())
+  const res = await postJson('system/sk/write', input, admin())
   expect(res.status).toBe(200)
   return ((await res.json()) as { secret: string }).secret
 }
@@ -53,24 +53,19 @@ async function issueAgentSk(name: string, pattern = '**'): Promise<string> {
 }
 
 async function mountEcho(path: string): Promise<void> {
-  const res = await postJson(
-    'system/registry',
-    {
-      tool: 'write',
-      arguments: {
-        path,
-        kind: 'http',
-        description: 'echo tools',
-        config: {
-          kind: 'http',
-          endpoint: 'https://postman-echo.com',
-          tools: [
-            { name: 'get_thing', description: 'GET a thing', method: 'GET', pathTemplate: '/get' },
-          ],
-        },
-      },
+  const res = await postJson('system/registry/write', {
+    path,
+    kind: 'http',
+    description: 'echo tools',
+    config: {
+      kind: 'http',
+      endpoint: 'https://postman-echo.com',
+      tools: [
+        { name: 'get_thing', description: 'GET a thing', method: 'GET', pathTemplate: '/get' },
+      ],
     },
-    admin(),
+  },
+  admin(),
   )
   expect(res.status).toBe(200)
 }
@@ -127,9 +122,7 @@ describe('根 ~help 引导 ~feedback 双向使用', () => {
 describe('annotation:admin 写,~help 三表现注入(节点级 + 工具级 + 根)', () => {
   it('set 后节点 ~help 的 DSL note 行 / JSON note 字段 / Markdown Notes 节都出现', async () => {
     await mountEcho('ext/anno-node')
-    const set = await postJson(
-      'system/annotation',
-      { tool: 'set', arguments: { path: 'ext/anno-node', text: '上游偶发限流,重试即可' } },
+    const set = await postJson('system/annotation/set', { path: 'ext/anno-node', text: '上游偶发限流,重试即可' },
       admin(),
     )
     expect(set.status).toBe(200)
@@ -144,35 +137,27 @@ describe('annotation:admin 写,~help 三表现注入(节点级 + 工具级 + 根
 
   it('工具子路径(非注册节点)的 annotation 注入工具级 ~help', async () => {
     await mountEcho('ext/anno-tool')
-    await postJson(
-      'system/annotation',
-      { tool: 'set', arguments: { path: 'ext/anno-tool/get_thing', text: '参数区分大小写' } },
+    await postJson('system/annotation/set', { path: 'ext/anno-tool/get_thing', text: '参数区分大小写' },
       admin(),
     )
     expect((await helpJson('ext/anno-tool/get_thing')).note).toBe('参数区分大小写')
   })
 
   it('根路径 annotation = 全树公告,注入根 ~help', async () => {
-    await postJson(
-      'system/annotation',
-      { tool: 'set', arguments: { path: '', text: '本网关处于灰度窗口' } },
+    await postJson('system/annotation/set', { path: '', text: '本网关处于灰度窗口' },
       admin(),
     )
     expect((await helpJson('')).note).toBe('本网关处于灰度窗口')
   })
 
   it('悬空路径 set → 404;agent SK(read+call)set → 403', async () => {
-    const dangling = await postJson(
-      'system/annotation',
-      { tool: 'set', arguments: { path: 'no/such/node', text: 'x' } },
+    const dangling = await postJson('system/annotation/set', { path: 'no/such/node', text: 'x' },
       admin(),
     )
     expect(dangling.status).toBe(404)
 
     const agentSk = await issueAgentSk('anno-writer')
-    const denied = await postJson(
-      'system/annotation',
-      { tool: 'set', arguments: { path: 'system', text: 'x' } },
+    const denied = await postJson('system/annotation/set', { path: 'system', text: 'x' },
       bearer(agentSk),
     )
     expect(denied.status).toBe(403)

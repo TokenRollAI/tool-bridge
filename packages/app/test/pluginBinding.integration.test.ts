@@ -62,16 +62,13 @@ async function registerBindingPlugin(
   endpoint: string,
   id = 'notes',
 ): Promise<Response> {
-  return postJson(app, 'system/plugin', {
-    tool: 'write',
-    arguments: {
-      id,
-      protocolVersion: 'plugin/v2',
-      endpoint,
-      auth: { kind: 'platform-token' },
-      healthPath: '/healthz',
-      enabled: true,
-    },
+  return postJson(app, 'system/plugin/write', {
+    id,
+    protocolVersion: 'plugin/v2',
+    endpoint,
+    auth: { kind: 'platform-token' },
+    healthPath: '/healthz',
+    enabled: true,
   })
 }
 
@@ -95,14 +92,11 @@ describe('binding: 进程内插件传输', () => {
     pluginToken = ((await registered.json()) as { pluginToken?: string }).pluginToken
     expect(pluginToken).toMatch(/^tbk_/)
 
-    const mounted = await postJson(app, 'system/registry', {
-      tool: 'write',
-      arguments: {
-        path: 'tools/notes',
-        kind: 'tool',
-        description: 'notes actions (in-process)',
-        config: { kind: 'tool', provider: 'notes', export: 'actions' },
-      },
+    const mounted = await postJson(app, 'system/registry/write', {
+      path: 'tools/notes',
+      kind: 'tool',
+      description: 'notes actions (in-process)',
+      config: { kind: 'tool', provider: 'notes', export: 'actions' },
     })
     expect(mounted.status).toBe(200)
 
@@ -116,10 +110,7 @@ describe('binding: 进程内插件传输', () => {
     const names = parseHelpDsl(await help.text()).cmds.map(c => c.name).sort()
     expect(names).toEqual(['count_notes', 'create_note'])
 
-    const created = await postJson(app, 'tools/notes', {
-      tool: 'create_note',
-      arguments: { title: 'In Process', body: 'no network hop' },
-    })
+    const created = await postJson(app, 'tools/notes/create_note', { title: 'In Process', body: 'no network hop' })
     expect(created.status).toBe(200)
     expect(await created.json()).toEqual({ path: 'in-process', version: 1 })
 
@@ -140,20 +131,14 @@ describe('binding: 进程内插件传输', () => {
     const registered = await registerBindingPlugin(app, 'binding:notes')
     expect(registered.status).toBe(200)
     pluginToken = ((await registered.json()) as { pluginToken?: string }).pluginToken
-    expect((await postJson(app, 'system/registry', {
-      tool: 'write',
-      arguments: {
-        path: 'tools/notes',
-        kind: 'tool',
-        description: 'notes actions',
-        config: { kind: 'tool', provider: 'notes', export: 'actions' },
-      },
+    expect((await postJson(app, 'system/registry/write', {
+      path: 'tools/notes',
+      kind: 'tool',
+      description: 'notes actions',
+      config: { kind: 'tool', provider: 'notes', export: 'actions' },
     })).status).toBe(200)
 
-    const bad = await postJson(app, 'tools/notes', {
-      tool: 'create_note',
-      arguments: { title: 'no body' },
-    })
+    const bad = await postJson(app, 'tools/notes/create_note', { title: 'no body' })
     expect(bad.status).toBe(400)
     expect(((await bad.json()) as { code: string }).code).toBe('invalid_argument')
   })
@@ -191,16 +176,13 @@ describe('binding 传输的超时', () => {
       version: 'test',
     })
 
-    const registered = await postJson(app, 'system/plugin', {
-      tool: 'write',
-      arguments: {
-        id: 'probe',
-        protocolVersion: 'plugin/v2',
-        endpoint: 'binding:probe',
-        auth: { kind: 'platform-token' },
-        healthPath: '/healthz',
-        enabled: true,
-      },
+    const registered = await postJson(app, 'system/plugin/write', {
+      id: 'probe',
+      protocolVersion: 'plugin/v2',
+      endpoint: 'binding:probe',
+      auth: { kind: 'platform-token' },
+      healthPath: '/healthz',
+      enabled: true,
     })
     expect(registered.status).toBe(200)
 
@@ -248,15 +230,12 @@ describe('内置 binding 插件免注册', () => {
   }
 
   const mountNotes = (app: ReturnType<typeof createTbApp>, path = 'auto/notes') =>
-    postJson(app, 'system/registry', {
-      tool: 'write',
-      arguments: {
-        path,
-        kind: 'tool',
-        description: 'auto-registered notes',
-        // notes 有两个 export,按契约必须显式指定 —— 与自动注册无关。
-        config: { kind: 'tool', provider: 'notes', export: 'actions' },
-      },
+    postJson(app, 'system/registry/write', {
+      path,
+      kind: 'tool',
+      description: 'auto-registered notes',
+      // notes 有两个 export,按契约必须显式指定 —— 与自动注册无关。
+      config: { kind: 'tool', provider: 'notes', export: 'actions' },
     })
 
   it('直接挂载未注册的 binding provider → 工具可列可调', async () => {
@@ -281,18 +260,18 @@ describe('内置 binding 插件免注册', () => {
       headers: { authorization: `Bearer ${TEST_ADMIN_SK}`, accept: 'text/plain' },
     }))
 
-    const listed = await postJson(app, 'system/plugin', { tool: 'list', arguments: {} })
+    const listed = await postJson(app, 'system/plugin/list', {})
     expect(((await listed.json()) as { items: unknown[] }).items).toEqual([])
 
     // get 也读不到:它从来没被注册过,而这正是"内置目录项不落库"的意思。
-    const got = await postJson(app, 'system/plugin', { tool: 'get', arguments: { id: 'notes' } })
+    const got = await postJson(app, 'system/plugin/get', { id: 'notes' })
     expect(got.status).toBe(404)
   })
 
   it('system/catalog 把内置项列为可直接挂载', async () => {
     const app = await appWithBuiltins()
     await mountNotes(app)
-    const res = await postJson(app, 'system/catalog', { tool: 'list', arguments: {} })
+    const res = await postJson(app, 'system/catalog/list', {})
     const items = ((await res.json()) as { items: Array<{ id: string }> }).items
     const notes = items.find(i => i.id === 'notes')
     expect(notes).toBeDefined()
@@ -300,14 +279,11 @@ describe('内置 binding 插件免注册', () => {
 
   it('**catalog 里没有的 provider 仍然拒绝** —— 免注册不是"什么都收"', async () => {
     const app = await appWithBuiltins()
-    const res = await postJson(app, 'system/registry', {
-      tool: 'write',
-      arguments: {
-        path: 'auto/nope',
-        kind: 'tool',
-        description: 'x',
-        config: { kind: 'tool', provider: 'not-assembled' },
-      },
+    const res = await postJson(app, 'system/registry/write', {
+      path: 'auto/nope',
+      kind: 'tool',
+      description: 'x',
+      config: { kind: 'tool', provider: 'not-assembled' },
     })
     expect(res.status).toBe(400)
     expect(((await res.json()) as { message: string }).message).toContain('not-assembled')

@@ -36,7 +36,7 @@ async function postJson(path: string, body: unknown, init: RequestInit = {}): Pr
 }
 
 async function issueSk(input: unknown): Promise<string> {
-  const res = await postJson('system/sk', { tool: 'write', arguments: input }, admin())
+  const res = await postJson('system/sk/write', input, admin())
   expect(res.status).toBe(200)
   return ((await res.json()) as { secret: string }).secret
 }
@@ -62,7 +62,7 @@ const CONTEXT_DESCRIBE = {
       auth: { kind: 'single', required: false },
       id: 'entries',
       profile: 'context/v1',
-      methods: ['List', 'Get', 'Update', 'Write', 'Search'],
+      methods: ['list', 'get', 'update', 'write', 'search'],
       capabilities: ['search'],
     },
   ],
@@ -76,7 +76,7 @@ const DUAL_DESCRIBE = {
   protocolVersion: 'plugin/v2',
   exports: [
     { auth: { kind: 'none' }, id: 'actions', profile: 'tools/v1', description: 'Demo actions' },
-    { auth: { kind: 'none' }, id: 'entries', profile: 'context/v1', methods: ['List', 'Get'] },
+    { auth: { kind: 'none' }, id: 'entries', profile: 'context/v1', methods: ['list', 'get'] },
   ],
 }
 
@@ -125,7 +125,7 @@ function stubProvider(opts: {
 }
 
 async function registerPlugin(m: Record<string, unknown>): Promise<{ pluginToken?: string }> {
-  const res = await postJson('system/plugin', { tool: 'write', arguments: m }, admin())
+  const res = await postJson('system/plugin/write', m, admin())
   expect(res.status).toBe(200)
   return (await res.json()) as { pluginToken?: string }
 }
@@ -135,18 +135,13 @@ async function mountContext(
   provider: string,
   providerConfig?: Record<string, unknown>,
 ): Promise<Response> {
-  return postJson(
-    'system/registry',
-    {
-      tool: 'write',
-      arguments: {
-        path,
-        kind: 'context',
-        description: 'plugin ctx',
-        config: { kind: 'context', provider, ...(providerConfig ? { providerConfig } : {}) },
-      },
-    },
-    admin(),
+  return postJson('system/registry/write', {
+    path,
+    kind: 'context',
+    description: 'plugin ctx',
+    config: { kind: 'context', provider, ...(providerConfig ? { providerConfig } : {}) },
+  },
+  admin(),
   )
 }
 
@@ -160,7 +155,7 @@ describe('system/plugin 注册全流程', () => {
     const reg = await registerPlugin(manifest('feishu-docs'))
     expect(reg.pluginToken).toMatch(/^tbk_/)
 
-    const list = await postJson('system/plugin', { tool: 'list', arguments: {} }, admin())
+    const list = await postJson('system/plugin/list', {}, admin())
     expect(list.status).toBe(200)
     const page = (await list.json()) as { items: Array<Record<string, unknown>> }
     const item = page.items.find(p => p.id === 'feishu-docs')
@@ -168,9 +163,7 @@ describe('system/plugin 注册全流程', () => {
     expect(item).not.toHaveProperty('pluginToken')
     expect(item).not.toHaveProperty('tokenSkId')
 
-    const got = await postJson(
-      'system/plugin',
-      { tool: 'get', arguments: { id: 'feishu-docs' } },
+    const got = await postJson('system/plugin/get', { id: 'feishu-docs' },
       admin(),
     )
     expect(got.status).toBe(200)
@@ -185,13 +178,11 @@ describe('system/plugin 注册全流程', () => {
     const reg = (await registerPlugin(manifest('dual-plugin'))) as { exports?: unknown }
     expect(reg.exports).toEqual(DUAL_DESCRIBE.exports)
 
-    const list = await postJson('system/plugin', { tool: 'list', arguments: {} }, admin())
+    const list = await postJson('system/plugin/list', {}, admin())
     const page = (await list.json()) as { items: Array<Record<string, unknown>> }
     expect(page.items.find(p => p.id === 'dual-plugin')?.exports).toEqual(DUAL_DESCRIBE.exports)
 
-    const got = await postJson(
-      'system/plugin',
-      { tool: 'get', arguments: { id: 'dual-plugin' } },
+    const got = await postJson('system/plugin/get', { id: 'dual-plugin' },
       admin(),
     )
     const body = (await got.json()) as Record<string, unknown>
@@ -203,9 +194,7 @@ describe('system/plugin 注册全流程', () => {
 
   it('探活失败({healthy:false})→ 503 unavailable 拒注册', async () => {
     stubProvider({ healthy: { healthy: false } })
-    const res = await postJson(
-      'system/plugin',
-      { tool: 'write', arguments: manifest('down-plugin') },
+    const res = await postJson('system/plugin/write', manifest('down-plugin'),
       admin(),
     )
     expect(res.status).toBe(503)
@@ -221,30 +210,26 @@ describe('system/plugin 注册全流程', () => {
             auth: { kind: 'none' },
             id: 'entries',
             profile: 'context/v1',
-            methods: ['List', 'Get'],
+            methods: ['list', 'get'],
             capabilities: ['search'],
           },
         ],
       },
     })
-    const res = await postJson(
-      'system/plugin',
-      { tool: 'write', arguments: manifest('bad-contract') },
+    const res = await postJson('system/plugin/write', manifest('bad-contract'),
       admin(),
     )
     expect(res.status).toBe(400)
     const body = (await res.json()) as { code: string, message: string }
     expect(body.code).toBe('invalid_argument')
-    expect(body.message).toContain('Search')
+    expect(body.message).toContain('search')
   })
 
   it('health cmd:按需探活,返回 { id, healthy, checkedAt };不健康如实反映', async () => {
     stubProvider({})
     await registerPlugin(manifest('health-plugin'))
 
-    const up = await postJson(
-      'system/plugin',
-      { tool: 'health', arguments: { id: 'health-plugin' } },
+    const up = await postJson('system/plugin/health', { id: 'health-plugin' },
       admin(),
     )
     expect(up.status).toBe(200)
@@ -254,9 +239,7 @@ describe('system/plugin 注册全流程', () => {
     expect(typeof upBody.checkedAt).toBe('string')
 
     stubProvider({ healthy: { healthy: false } })
-    const down = await postJson(
-      'system/plugin',
-      { tool: 'health', arguments: { id: 'health-plugin' } },
+    const down = await postJson('system/plugin/health', { id: 'health-plugin' },
       admin(),
     )
     expect(down.status).toBe(200)
@@ -269,9 +252,7 @@ describe('system/plugin 注册全流程', () => {
       owner: 'agent:plugin-ro',
       scopes: [{ pattern: 'system/**', actions: ['read', 'call'] }],
     })
-    const denied = await postJson(
-      'system/plugin',
-      { tool: 'list', arguments: {} },
+    const denied = await postJson('system/plugin/list', {},
       { headers: { authorization: `Bearer ${roSk}` } },
     )
     expect(denied.status).toBe(403)
@@ -280,9 +261,7 @@ describe('system/plugin 注册全流程', () => {
       owner: 'agent:plugin-other',
       scopes: [{ pattern: 'docs/**', actions: ['read', 'call'] }],
     })
-    const invisible = await postJson(
-      'system/plugin',
-      { tool: 'list', arguments: {} },
+    const invisible = await postJson('system/plugin/list', {},
       { headers: { authorization: `Bearer ${otherSk}` } },
     )
     expect(invisible.status).toBe(404)
@@ -312,7 +291,7 @@ describe('plugin-backed context 挂载消费(envelope)', () => {
     const { seen } = stubProvider({
       invoke: (entry) => {
         const { tool } = entry.body
-        if (tool === 'Get') {
+        if (tool === 'get') {
           return new Response(
             JSON.stringify({
               uri: 'node://docs/feishu/x',
@@ -325,7 +304,7 @@ describe('plugin-backed context 挂载消费(envelope)', () => {
             { headers: { 'content-type': 'application/json' } },
           )
         }
-        if (tool === 'List' || tool === 'Search') {
+        if (tool === 'list' || tool === 'search') {
           return new Response(JSON.stringify({ items: [] }), {
             headers: { 'content-type': 'application/json' },
           })
@@ -346,34 +325,25 @@ describe('plugin-backed context 挂载消费(envelope)', () => {
     const reg = await registerPlugin(manifest('feishu-live'))
     expect((await mountContext('docs/feishu', 'feishu-live')).status).toBe(200)
 
-    const got = await postJson('docs/feishu', { tool: 'Get', arguments: { path: 'x' } }, admin())
+    const got = await postJson('docs/feishu/get', { path: 'x' }, admin())
     expect(got.status).toBe(200)
     expect(((await got.json()) as { content: string }).content).toBe('hello from plugin')
 
-    const written = await postJson(
-      'docs/feishu',
-      {
-        tool: 'Write',
-        arguments: { path: 'x', entry: { contentType: 'text/markdown', content: 'v' } },
-      },
+    const written = await postJson('docs/feishu/write', { path: 'x', entry: { contentType: 'text/markdown', content: 'v' } },
       admin(),
     )
     expect(written.status).toBe(200)
 
-    const updated = await postJson(
-      'docs/feishu',
-      { tool: 'Update', arguments: { path: 'x', patch: { content: 'v2' } } },
+    const updated = await postJson('docs/feishu/update', { path: 'x', patch: { content: 'v2' } },
       admin(),
     )
     expect(updated.status).toBe(200)
 
-    const listed = await postJson('docs/feishu', { tool: 'List', arguments: { path: '' } }, admin())
+    const listed = await postJson('docs/feishu/list', { path: '' }, admin())
     expect(listed.status).toBe(200)
 
     // 已声明 capability 的可选方法(Search)可用。
-    const searched = await postJson(
-      'docs/feishu',
-      { tool: 'Search', arguments: { query: 'q' } },
+    const searched = await postJson('docs/feishu/search', { query: 'q' },
       admin(),
     )
     expect(searched.status).toBe(200)
@@ -383,7 +353,7 @@ describe('plugin-backed context 挂载消费(envelope)', () => {
     expect(seen.length).toBe(5)
     const first = seen[0] as SeenEnvelope
     expect(first.url.startsWith(ENDPOINT)).toBe(true)
-    expect(first.body).toEqual({ tool: 'Get', arguments: { path: 'x' } })
+    expect(first.body).toEqual({ tool: 'get', arguments: { path: 'x' } })
     expect(first.headers.get('authorization')).toBe(`Bearer ${reg.pluginToken}`)
     expect(first.headers.get('authorization')).not.toBe(`Bearer ${TEST_ADMIN_SK}`)
     const ctxHeader = first.headers.get('x-tb-context') as string
@@ -412,10 +382,10 @@ describe('plugin-backed context 挂载消费(envelope)', () => {
     expect((await mountContext('docs/feishu-us', 'feishu-multi')).status).toBe(200)
 
     expect(
-      (await postJson('docs/feishu-cn', { tool: 'List', arguments: { path: '' } }, admin())).status,
+      (await postJson('docs/feishu-cn/list', { path: '' }, admin())).status,
     ).toBe(200)
     expect(
-      (await postJson('docs/feishu-us', { tool: 'List', arguments: { path: '' } }, admin())).status,
+      (await postJson('docs/feishu-us/list', { path: '' }, admin())).status,
     ).toBe(200)
 
     expect(seen.length).toBe(2)
@@ -432,9 +402,7 @@ describe('plugin-backed context 挂载消费(envelope)', () => {
     const { seen } = stubProvider({})
     await registerPlugin(manifest('feishu-nodelete'))
     expect((await mountContext('docs/nodelete', 'feishu-nodelete')).status).toBe(200)
-    const res = await postJson(
-      'docs/nodelete',
-      { tool: 'Delete', arguments: { path: 'x' } },
+    const res = await postJson('docs/nodelete/delete', { path: 'x' },
       admin(),
     )
     expect(res.status).toBe(400)
@@ -458,7 +426,7 @@ describe('plugin-backed context 挂载消费(envelope)', () => {
     const names = parseHelpDsl(await help.text())
       .cmds.map(c => c.name)
       .sort()
-    expect(names).toEqual(['Get', 'List', 'Search', 'Update', 'Write'])
+    expect(names).toEqual(['get', 'list', 'search', 'update', 'write'])
   })
 
   it('retryable 失败重试 1 次且 X-TB-Request-Id 不变(首次 503 → 重试成功)', async () => {
@@ -476,7 +444,7 @@ describe('plugin-backed context 挂载消费(envelope)', () => {
     await registerPlugin(manifest('feishu-retry'))
     expect((await mountContext('docs/retry', 'feishu-retry')).status).toBe(200)
 
-    const res = await postJson('docs/retry', { tool: 'List', arguments: { path: '' } }, admin())
+    const res = await postJson('docs/retry/list', { path: '' }, admin())
     expect(res.status).toBe(200)
     expect(seen.length).toBe(2)
     expect(seen[0]?.headers.get('x-tb-request-id')).toBe(seen[1]?.headers.get('x-tb-request-id'))
@@ -492,9 +460,7 @@ describe('plugin-backed context 挂载消费(envelope)', () => {
     })
     await registerPlugin(manifest('feishu-notfound'))
     expect((await mountContext('docs/notfound', 'feishu-notfound')).status).toBe(200)
-    const res = await postJson(
-      'docs/notfound',
-      { tool: 'Get', arguments: { path: 'gone' } },
+    const res = await postJson('docs/notfound/get', { path: 'gone' },
       admin(),
     )
     expect(res.status).toBe(404)
@@ -508,9 +474,7 @@ describe('plugin-backed context 挂载消费(envelope)', () => {
     expect(missing.status).toBe(400)
 
     await registerPlugin(manifest('feishu-disabled'))
-    const upd = await postJson(
-      'system/plugin',
-      { tool: 'update', arguments: { id: 'feishu-disabled', patch: { enabled: false } } },
+    const upd = await postJson('system/plugin/update', { id: 'feishu-disabled', patch: { enabled: false } },
       admin(),
     )
     expect(upd.status).toBe(200)
@@ -529,7 +493,7 @@ describe('kind:\'tool\' 挂载消费(tool-provider plugin)', () => {
     return stubProvider({
       describe: TOOL_DESCRIBE,
       invoke: (entry) => {
-        if (entry.body.tool === 'List') {
+        if (entry.body.tool === 'list') {
           return new Response(JSON.stringify(TOOLS), {
             headers: { 'content-type': 'application/json' },
           })
@@ -546,18 +510,13 @@ describe('kind:\'tool\' 挂载消费(tool-provider plugin)', () => {
     provider: string,
     providerConfig?: Record<string, unknown>,
   ): Promise<Response> {
-    return postJson(
-      'system/registry',
-      {
-        tool: 'write',
-        arguments: {
-          path,
-          kind: 'tool',
-          description: 'plugin tools',
-          config: { kind: 'tool', provider, ...(providerConfig ? { providerConfig } : {}) },
-        },
-      },
-      admin(),
+    return postJson('system/registry/write', {
+      path,
+      kind: 'tool',
+      description: 'plugin tools',
+      config: { kind: 'tool', provider, ...(providerConfig ? { providerConfig } : {}) },
+    },
+    admin(),
     )
   }
 
@@ -577,16 +536,14 @@ describe('kind:\'tool\' 挂载消费(tool-provider plugin)', () => {
     const names = parseHelpDsl(await help.text()).cmds.map(c => c.name)
     expect(names.sort()).toEqual(['create_order', 'get_order'])
 
-    const call = await postJson(
-      'tools/orders',
-      { tool: 'create_order', arguments: { sku: 'A1' } },
+    const call = await postJson('tools/orders/create_order', { sku: 'A1' },
       admin(),
     )
     expect(call.status).toBe(200)
     expect(((await call.json()) as { echo: { args: { sku: string } } }).echo.args.sku).toBe('A1')
 
     // envelope 的 tool 是方法名(List/Call),工具名在 arguments.name。
-    const callEnvelope = seen.find(s => s.body.tool === 'Call') as SeenEnvelope
+    const callEnvelope = seen.find(s => s.body.tool === 'call') as SeenEnvelope
     expect(callEnvelope.body.arguments).toEqual({ name: 'create_order', args: { sku: 'A1' } })
     // kind:'tool' 挂载同样带挂载上下文。
     const callCtx = decodeCallContext(
@@ -622,12 +579,7 @@ describe('kind:\'tool\' 挂载消费(tool-provider plugin)', () => {
     }
     expect((await search()).items.map(item => item.path)).toContain('tools/search-lifecycle')
 
-    const disabled = await postJson(
-      'system/plugin',
-      {
-        tool: 'update',
-        arguments: { id: 'search-lifecycle-plugin', patch: { enabled: false } },
-      },
+    const disabled = await postJson('system/plugin/update', { id: 'search-lifecycle-plugin', patch: { enabled: false } },
       admin(),
     )
     expect(disabled.status).toBe(200)
@@ -639,31 +591,22 @@ describe('kind:\'tool\' 挂载消费(tool-provider plugin)', () => {
     await registerPlugin(
       manifest('feishu-like'),
     )
-    const setSecret = await postJson(
-      'system/secret',
-      { tool: 'set', arguments: { name: 'feishu-app', value: '{"app_id":"a","app_secret":"s"}' } },
+    const setSecret = await postJson('system/secret/set', { name: 'feishu-app', value: '{"app_id":"a","app_secret":"s"}' },
       admin(),
     )
     expect(setSecret.status).toBe(200)
 
-    const mounted = await postJson(
-      'system/registry',
-      {
-        tool: 'write',
-        arguments: {
-          path: 'tools/feishu-auth',
-          kind: 'tool',
-          description: 'plugin tools with upstream auth',
-          config: { kind: 'tool', provider: 'feishu-like', authRef: 'feishu-app' },
-        },
-      },
-      admin(),
+    const mounted = await postJson('system/registry/write', {
+      path: 'tools/feishu-auth',
+      kind: 'tool',
+      description: 'plugin tools with upstream auth',
+      config: { kind: 'tool', provider: 'feishu-like', authRef: 'feishu-app' },
+    },
+    admin(),
     )
     expect(mounted.status).toBe(200)
 
-    const call = await postJson(
-      'tools/feishu-auth',
-      { tool: 'create_order', arguments: {} },
+    const call = await postJson('tools/feishu-auth/create_order', {},
       admin(),
     )
     expect(call.status).toBe(200)
@@ -679,9 +622,7 @@ describe('kind:\'tool\' 挂载消费(tool-provider plugin)', () => {
     // 对照:不带 authRef 的挂载(前一用例的 tools/orders 形态)不发该头。
     seen.length = 0
     expect((await mountTool('tools/no-auth', 'feishu-like')).status).toBe(200)
-    const plainCall = await postJson(
-      'tools/no-auth',
-      { tool: 'create_order', arguments: {} },
+    const plainCall = await postJson('tools/no-auth/create_order', {},
       admin(),
     )
     expect(plainCall.status).toBe(200)

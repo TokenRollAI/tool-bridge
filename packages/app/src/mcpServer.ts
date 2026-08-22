@@ -34,7 +34,6 @@ export interface McpBridgeTool {
   identity: string
   inputSchema?: unknown
   invokePath: string
-  invokeWithEnvelope: boolean
   mcpName?: string
   operation?: 'help' | 'listNodes' | 'search'
   providerBacked?: boolean
@@ -55,13 +54,9 @@ function hex(bytes: Uint8Array): string {
   return [...bytes].map(byte => byte.toString(16).padStart(2, '0')).join('')
 }
 
-/** Length-unambiguous identity for an HTBP invocation tuple. */
-export function mcpToolIdentity(
-  invokePath: string,
-  toolName: string,
-  invokeWithEnvelope: boolean,
-): string {
-  return JSON.stringify([invokePath, toolName, invokeWithEnvelope ? 'envelope' : 'flat'])
+/** Length-unambiguous identity for an HTBP invocation tuple (direct command path + tool name). */
+export function mcpToolIdentity(invokePath: string, toolName: string): string {
+  return JSON.stringify([invokePath, toolName])
 }
 
 /** MCP-safe encoding; long identities retain a readable prefix plus collision-resistant SHA-256. */

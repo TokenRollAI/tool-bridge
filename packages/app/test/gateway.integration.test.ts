@@ -32,7 +32,7 @@ async function postJson(path: string, body: unknown, init: RequestInit = {}): Pr
 
 /** 用 Admin SK 调 system/sk write 签发一把新 SK,返回明文 secret。 */
 async function issueSk(input: unknown): Promise<string> {
-  const res = await postJson('system/sk', { tool: 'write', arguments: input }, admin())
+  const res = await postJson('system/sk/write', input, admin())
   expect(res.status).toBe(200)
   const body = (await res.json()) as { secret: string }
   return body.secret
@@ -212,8 +212,8 @@ describe('受限 SK 的可见性裁剪', () => {
     // 受限 SK 调 system/sk list → 403(system/sk 需 read 可见 → 实际 404 隐藏存在性)。
     // system/sk 对 docsSk 的 read 判不过 → 404(不泄露存在性,v1 教训)。
     const skList = await postJson(
-      'system/sk',
-      { tool: 'list', arguments: {} },
+      'system/sk/list',
+      {},
       { headers: authDocs },
     )
     expect(skList.status).toBe(404)
@@ -230,8 +230,8 @@ describe('注册与三级 ~help(集成面)', () => {
     })
     const authReg = { authorization: `Bearer ${regSk}` }
     const mk = await postJson(
-      'system/registry',
-      { tool: 'write', arguments: { path: 'a/b/c', kind: 'directory', description: 'c' } },
+      'system/registry/write',
+      { path: 'a/b/c', kind: 'directory', description: 'c' },
       { headers: authReg },
     )
     expect(mk.status).toBe(200)
@@ -260,15 +260,15 @@ describe('secret 只写不读(集成面)', () => {
   it('admin set → list 只见 name + updatedAt,不回显明文', async () => {
     const SECRET = 'upstream-token-xyz'
     const set = await postJson(
-      'system/secret',
-      { tool: 'set', arguments: { name: 'ctx7', value: SECRET } },
+      'system/secret/set',
+      { name: 'ctx7', value: SECRET },
       admin(),
     )
     expect(set.status).toBe(200)
     const setText = await set.text()
     expect(setText).not.toContain(SECRET)
 
-    const list = await postJson('system/secret', { tool: 'list', arguments: {} }, admin())
+    const list = await postJson('system/secret/list', {}, admin())
     const body = (await list.json()) as { items: Array<{ name: string, updatedAt: string }> }
     const item = body.items.find(i => i.name === 'ctx7')
     expect(item).toBeDefined()
@@ -279,7 +279,7 @@ describe('secret 只写不读(集成面)', () => {
 
 describe('status get', () => {
   it('admin 调 system/status get → { healthy, version, nodeCount }', async () => {
-    const res = await postJson('system/status', { tool: 'get', arguments: {} }, admin())
+    const res = await postJson('system/status/get', {}, admin())
     expect(res.status).toBe(200)
     const body = (await res.json()) as { healthy: boolean, nodeCount: number, version: string }
     expect(body.healthy).toBe(true)
@@ -299,13 +299,13 @@ describe('system/registry 管理通道也遵守可见性裁剪(修复 5)', () =>
   it('宽 allow + 窄 deny:list 不见 denied 节点,get denied 路径 → 404', async () => {
     // 先以 admin 注册可见/不可见两棵子树。
     await postJson(
-      'system/registry',
-      { tool: 'write', arguments: { path: 'vis/y', kind: 'directory', description: 'y' } },
+      'system/registry/write',
+      { path: 'vis/y', kind: 'directory', description: 'y' },
       admin(),
     )
     await postJson(
-      'system/registry',
-      { tool: 'write', arguments: { path: 'hidden/x', kind: 'directory', description: 'x' } },
+      'system/registry/write',
+      { path: 'hidden/x', kind: 'directory', description: 'x' },
       admin(),
     )
     // 一把对 system/registry 可读、但 deny hidden/** read 的 SK。
@@ -319,8 +319,8 @@ describe('system/registry 管理通道也遵守可见性裁剪(修复 5)', () =>
     const auth = { authorization: `Bearer ${sk}` }
 
     const list = await postJson(
-      'system/registry',
-      { tool: 'list', arguments: {} },
+      'system/registry/list',
+      {},
       { headers: auth },
     )
     expect(list.status).toBe(200)
@@ -331,8 +331,8 @@ describe('system/registry 管理通道也遵守可见性裁剪(修复 5)', () =>
 
     // get denied 路径 → 404(deny==not_found,不泄露存在性)。
     const get = await postJson(
-      'system/registry',
-      { tool: 'get', arguments: { path: 'hidden/x' } },
+      'system/registry/get',
+      { path: 'hidden/x' },
       { headers: auth },
     )
     expect(get.status).toBe(404)
@@ -365,11 +365,8 @@ describe('URL 路径解码(修复 7)', () => {
     })
     const auth = { authorization: `Bearer ${regSk}` }
     const mk = await postJson(
-      'system/registry',
-      {
-        tool: 'write',
-        arguments: { path: 'docs/hello world', kind: 'directory', description: 'spaced' },
-      },
+      'system/registry/write',
+      { path: 'docs/hello world', kind: 'directory', description: 'spaced' },
       { headers: auth },
     )
     expect(mk.status).toBe(200)
@@ -414,15 +411,12 @@ describe('mcp 节点 ~help(上游 https 强制)', () => {
     })
     const auth = { authorization: `Bearer ${sk}` }
     const mk = await postJson(
-      'system/registry',
+      'system/registry/write',
       {
-        tool: 'write',
-        arguments: {
-          path: 'ext/ctx7',
-          kind: 'mcp',
-          description: 'ctx7',
-          config: { kind: 'mcp', url: 'http://insecure.invalid/mcp' },
-        },
+        path: 'ext/ctx7',
+        kind: 'mcp',
+        description: 'ctx7',
+        config: { kind: 'mcp', url: 'http://insecure.invalid/mcp' },
       },
       admin(),
     )
@@ -446,11 +440,11 @@ describe('SK 吊销 / 认证失效(修复 9)', () => {
     expect((await tb.request('https://tb.test/~help', { headers: auth })).status).toBe(200)
     // 取该 SK 的 id 以 delete。
     const list = (await (
-      await postJson('system/sk', { tool: 'list', arguments: {} }, admin())
+      await postJson('system/sk/list', {}, admin())
     ).json()) as { items: Array<{ id: string, owner: string }> }
     const id = list.items.find(k => k.owner === 'agent:revoke')?.id
     expect(id).toBeDefined()
-    const del = await postJson('system/sk', { tool: 'delete', arguments: { id } }, admin())
+    const del = await postJson('system/sk/delete', { id }, admin())
     expect(del.status).toBe(200)
     // 吊销后 → 401。
     expect((await tb.request('https://tb.test/~help', { headers: auth })).status).toBe(401)
@@ -464,12 +458,12 @@ describe('SK 吊销 / 认证失效(修复 9)', () => {
     const auth = { authorization: `Bearer ${secret}` }
     expect((await tb.request('https://tb.test/~help', { headers: auth })).status).toBe(200)
     const list = (await (
-      await postJson('system/sk', { tool: 'list', arguments: {} }, admin())
+      await postJson('system/sk/list', {}, admin())
     ).json()) as { items: Array<{ id: string, owner: string }> }
     const id = list.items.find(k => k.owner === 'agent:disable')?.id
     const upd = await postJson(
-      'system/sk',
-      { tool: 'update', arguments: { id, patch: { disabled: true } } },
+      'system/sk/update',
+      { id, patch: { disabled: true } },
       admin(),
     )
     expect(upd.status).toBe(200)

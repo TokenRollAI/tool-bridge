@@ -32,7 +32,7 @@ export function requireDevice(deps: TbAppDeps): DeviceChannel {
 export async function invokeDevice(
   deps: TbAppDeps,
   deviceId: string,
-  req: { arguments: Record<string, unknown>, context?: DeviceCallContext, path: string, tool: string },
+  req: { arguments: Record<string, unknown>, context?: DeviceCallContext, path: string },
 ): Promise<unknown> {
   const id = crypto.randomUUID()
   const body = (await requireDevice(deps).invoke(deviceId, { id, ...req })) as DeviceCallResult

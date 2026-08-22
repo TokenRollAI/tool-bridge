@@ -13,16 +13,16 @@ import { callPlugin, type PluginCallOptions } from './pluginClient'
 export function createPluginToolProvider(opts: PluginCallOptions): UpstreamProvider {
   return {
     list: async (): Promise<ToolSpec[]> => {
-      const value = await callPlugin(opts, 'List', {})
+      const value = await callPlugin(opts, 'list', {})
       if (!Array.isArray(value)) {
-        throw new TBError('unavailable', `plugin '${opts.manifest.id}' 的 List 未返回工具数组`, {
+        throw new TBError('unavailable', `plugin '${opts.manifest.id}' 的 list 未返回工具数组`, {
           retryable: false,
         })
       }
       return value as ToolSpec[]
     },
     call: async (name, args): Promise<ToolResult> => {
-      const value = await callPlugin(opts, 'Call', { name, args })
+      const value = await callPlugin(opts, 'call', { name, args })
       if (value !== null && typeof value === 'object' && 'content' in value) {
         return value as ToolResult
       }

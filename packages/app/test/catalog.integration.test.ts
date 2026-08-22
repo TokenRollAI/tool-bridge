@@ -39,11 +39,11 @@ async function callCatalog(
   sk: string = TEST_ADMIN_SK,
 ): Promise<Response> {
   return await tb.request(
-    'https://tb.test/system/catalog',
+    `https://tb.test/system/catalog/${tool}`,
     bearer(sk, {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'accept': 'application/json' },
-      body: JSON.stringify({ tool, arguments: args }),
+      body: JSON.stringify(args),
     }),
   )
 }
@@ -53,16 +53,13 @@ async function mintReadOnlySk(
   tb: Awaited<ReturnType<typeof appWithCatalog>>,
 ): Promise<string> {
   const res = await tb.request(
-    'https://tb.test/system/sk',
+    'https://tb.test/system/sk/write',
     bearer(TEST_ADMIN_SK, {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'accept': 'application/json' },
       body: JSON.stringify({
-        tool: 'write',
-        arguments: {
-          owner: 'agent:reader',
-          scopes: [{ pattern: '**', actions: ['read'] }],
-        },
+        owner: 'agent:reader',
+        scopes: [{ pattern: '**', actions: ['read'] }],
       }),
     }),
   )
@@ -212,11 +209,11 @@ describe('read scope 够用(非 admin)', () => {
     const tb = await appWithCatalog()
     const readSk = await mintReadOnlySk(tb)
     const res = await tb.request(
-      'https://tb.test/system/plugin',
+      'https://tb.test/system/plugin/list',
       bearer(readSk, {
         method: 'POST',
         headers: { 'content-type': 'application/json', 'accept': 'application/json' },
-        body: JSON.stringify({ tool: 'list', arguments: {} }),
+        body: JSON.stringify({}),
       }),
     )
     expect(res.status).toBe(403)
@@ -277,11 +274,11 @@ describe('未装配 catalog 的宿主', () => {
   it('list 回空页而不是报错(该节点仍存在)', async () => {
     const tb = await createTestApp()
     const res = await tb.request(
-      'https://tb.test/system/catalog',
+      'https://tb.test/system/catalog/list',
       bearer(TEST_ADMIN_SK, {
         method: 'POST',
         headers: { 'content-type': 'application/json', 'accept': 'application/json' },
-        body: JSON.stringify({ tool: 'list', arguments: {} }),
+        body: JSON.stringify({}),
       }),
     )
     expect(res.status).toBe(200)
@@ -302,18 +299,15 @@ describe('catalog 与挂载解析同源', () => {
     expect(listed.items.map(i => i.id)).toContain('notes')
 
     const res = await tb.request(
-      'https://tb.test/system/registry',
+      'https://tb.test/system/registry/write',
       bearer(TEST_ADMIN_SK, {
         method: 'POST',
         headers: { 'content-type': 'application/json', 'accept': 'application/json' },
         body: JSON.stringify({
-          tool: 'write',
-          arguments: {
-            path: 'from-catalog/notes',
-            kind: 'tool',
-            description: 'mounted straight from the catalog',
-            config: { kind: 'tool', provider: 'notes', export: 'actions' },
-          },
+          path: 'from-catalog/notes',
+          kind: 'tool',
+          description: 'mounted straight from the catalog',
+          config: { kind: 'tool', provider: 'notes', export: 'actions' },
         }),
       }),
     )
@@ -323,18 +317,15 @@ describe('catalog 与挂载解析同源', () => {
   it('catalog 里没有的 provider 挂不上(免注册不等于什么都收)', async () => {
     const tb = await appWithCatalog()
     const res = await tb.request(
-      'https://tb.test/system/registry',
+      'https://tb.test/system/registry/write',
       bearer(TEST_ADMIN_SK, {
         method: 'POST',
         headers: { 'content-type': 'application/json', 'accept': 'application/json' },
         body: JSON.stringify({
-          tool: 'write',
-          arguments: {
-            path: 'from-catalog/nope',
-            kind: 'tool',
-            description: 'x',
-            config: { kind: 'tool', provider: 'not-in-catalog' },
-          },
+          path: 'from-catalog/nope',
+          kind: 'tool',
+          description: 'x',
+          config: { kind: 'tool', provider: 'not-in-catalog' },
         }),
       }),
     )
@@ -344,18 +335,15 @@ describe('catalog 与挂载解析同源', () => {
   it('直接写 registry 也会拒绝缺失的 export 必填配置', async () => {
     const tb = await createTestApp({ pluginCatalog: { posthog: BUILTIN_CATALOG.posthog! } })
     const res = await tb.request(
-      'https://tb.test/system/registry',
+      'https://tb.test/system/registry/write',
       bearer(TEST_ADMIN_SK, {
         method: 'POST',
         headers: { 'content-type': 'application/json', 'accept': 'application/json' },
         body: JSON.stringify({
-          tool: 'write',
-          arguments: {
-            path: 'tools/posthog',
-            kind: 'tool',
-            description: 'missing required baseUrl',
-            config: { kind: 'tool', provider: 'posthog', export: 'actions' },
-          },
+          path: 'tools/posthog',
+          kind: 'tool',
+          description: 'missing required baseUrl',
+          config: { kind: 'tool', provider: 'posthog', export: 'actions' },
         }),
       }),
     )
@@ -366,22 +354,19 @@ describe('catalog 与挂载解析同源', () => {
   it('auth:none export 拒绝绑定 authRef,避免把无关 secret 暴露给 plugin', async () => {
     const tb = await appWithCatalog()
     const res = await tb.request(
-      'https://tb.test/system/registry',
+      'https://tb.test/system/registry/write',
       bearer(TEST_ADMIN_SK, {
         method: 'POST',
         headers: { 'content-type': 'application/json', 'accept': 'application/json' },
         body: JSON.stringify({
-          tool: 'write',
-          arguments: {
-            path: 'from-catalog/notes-with-secret',
+          path: 'from-catalog/notes-with-secret',
+          kind: 'tool',
+          description: 'notes should not receive credentials',
+          config: {
             kind: 'tool',
-            description: 'notes should not receive credentials',
-            config: {
-              kind: 'tool',
-              provider: 'notes',
-              export: 'actions',
-              authRef: 'should-not-be-used',
-            },
+            provider: 'notes',
+            export: 'actions',
+            authRef: 'should-not-be-used',
           },
         }),
       }),
@@ -409,18 +394,15 @@ describe('catalog 与挂载解析同源', () => {
       },
     })
     const res = await tb.request(
-      'https://tb.test/system/registry',
+      'https://tb.test/system/registry/write',
       bearer(TEST_ADMIN_SK, {
         method: 'POST',
         headers: { 'content-type': 'application/json', 'accept': 'application/json' },
         body: JSON.stringify({
-          tool: 'write',
-          arguments: {
-            path: 'docs/notes',
-            kind: 'context',
-            description: 'missing workspace',
-            config: { kind: 'context', provider: 'notes', export: 'notes' },
-          },
+          path: 'docs/notes',
+          kind: 'context',
+          description: 'missing workspace',
+          config: { kind: 'context', provider: 'notes', export: 'notes' },
         }),
       }),
     )

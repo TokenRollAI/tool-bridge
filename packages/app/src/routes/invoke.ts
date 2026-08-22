@@ -1,10 +1,11 @@
 /**
- * `POST /<path>`:数据面调用总入口(信封 `{tool, arguments}` 与直连工具路径两种形态)。
+ * `POST /<nodePath>/<command>`:数据面调用总入口。唯一形态——命令是节点下的虚拟叶子,
+ * body 即 arguments 本体,无 `{tool, arguments}` 信封。resolve 得到 {节点, 命令段};
+ * 命令段必须恰一段(非空、不含 '/'),节点本身不可调用(404)。
  *
  * 一个 handler 覆盖全部可调用 kind,分支顺序即语义优先级:remote 透传 → device 自定义
  * tool 标记(provider 是设备本地保留 id,须先于 plugin 分支)→ mcp/http/tool 上游 →
- * device shell → context/skillhub 动词 → builtin。可见性(read→404)统一在最前判,
- * 各分支只判自己的 call/read/write/admin scope。
+ * device shell → context/skillhub 动词 → builtin。可见性(read→404)与授权统一判在**节点路径**。
  */
 import {
   assertSecretRefUse,
@@ -65,56 +66,36 @@ export async function handleInvoke(c: AppContext, env: RouteEnv): Promise<Respon
   const store = c.get('store')
   const registry = new NodeRegistryStore(store)
 
-  // 节点不可见 → 404(隐藏存在性)。
-  if (!check(ctx, raw, 'read').allow) throw TBError.notFound('not found')
-
   // remote 透传:命中 remote 节点(或其后代)→ 改写 POST 打到 baseUrl(scope 恒 'call')。
-  const remote = await remotePassthroughIfMatch(c, ctx, registry, raw, null, deps)
-  if (remote) return remote
-
-  let node: TreeNode
-  // 直连工具路径(POST /<node>/<tool>)命中时为工具虚拟名;body 即 arguments 本体。
-  let directTool: string | null = null
-  try {
-    node = await registry.get(raw)
-  } catch {
-    // 非注册路径:最长前缀命中 mcp/http/tool 节点且剩余恰一段 → 直连工具调用
-    // (与工具级 ~help 同一路径面);其余 404。可见性按节点 path 复判
-    // (raw 含工具段,scope 精确到节点路径时会漏判)。
-    const resolved = await registry.resolve(raw).catch(() => null)
-    if (
-      resolved === null
-      || (resolved.node.kind !== 'mcp'
-        && resolved.node.kind !== 'http'
-        && resolved.node.kind !== 'tool')
-      || resolved.node.config === undefined
-      || resolved.rest === ''
-      || resolved.rest.includes('/')
-    ) {
-      throw TBError.notFound('not found')
-    }
-    if (!check(ctx, resolved.node.path, 'read').allow) throw TBError.notFound('not found')
-    node = resolved.node
-    directTool = resolved.rest
+  // remote 判定用完整 raw 路径(含命令段),透传时原样转发给下游。
+  const remoteVisible = check(ctx, raw, 'read').allow
+  if (remoteVisible) {
+    const remote = await remotePassthroughIfMatch(c, ctx, registry, raw, null, deps)
+    if (remote) return remote
   }
 
-  // 解析调用体:直连路径 body 即 arguments(可空);节点路径沿用 {tool,arguments} 信封。
+  // 唯一调用形态:`POST /<nodePath>/<command>`,body 即 arguments 本体(无 {tool,arguments} 信封)。
+  // 最长前缀 resolve 得到所属节点与剩余段;剩余段即命令名,必须恰一段(不为空、不含 '/')。
+  // 节点本身(rest='')不可调用——必须带命令段。可见性/授权判在**节点路径**(决策:授权只到节点)。
+  const resolved = await registry.resolve(raw).catch(() => null)
+  if (resolved === null || resolved.rest === '' || resolved.rest.includes('/')) {
+    throw TBError.notFound('not found')
+  }
+  const node: TreeNode = resolved.node
+  const command = resolved.rest
+  // 节点不可见 → 404(隐藏存在性),判在节点路径。
+  if (!check(ctx, node.path, 'read').allow) throw TBError.notFound('not found')
+
+  // 调用体恒为裸 arguments 对象(可空);命令名来自路径叶子段。
   const readInvokeBody = async (): Promise<{
     args: Record<string, unknown>
     tool: string
   }> => {
     const parsed = (await c.req.json().catch(() => null)) as unknown
-    if (directTool !== null) {
-      if (parsed !== null && (typeof parsed !== 'object' || Array.isArray(parsed))) {
-        throw new TBError('invalid_argument', 'body must be a JSON object (tool arguments)')
-      }
-      return { tool: directTool, args: (parsed ?? {}) as Record<string, unknown> }
+    if (parsed !== null && (typeof parsed !== 'object' || Array.isArray(parsed))) {
+      throw new TBError('invalid_argument', 'body must be a JSON object (command arguments)')
     }
-    const body = parsed as { arguments?: unknown, tool?: unknown } | null
-    if (!body || typeof body.tool !== 'string') {
-      throw new TBError('invalid_argument', 'body must be {tool, arguments}')
-    }
-    return { tool: body.tool, args: (body.arguments ?? {}) as Record<string, unknown> }
+    return { tool: command, args: (parsed ?? {}) as Record<string, unknown> }
   }
 
   // --- device 自定义 tool 节点:providerConfig 标记 → 帧协议 call 转发。 ---
@@ -126,8 +107,8 @@ export async function handleInvoke(c: AppContext, env: RouteEnv): Promise<Respon
     }
     const { tool, args } = await readInvokeBody()
     const result = await invokeDevice(deps, toolMarker.deviceId, {
-      path: relativeDevicePath(node.path, toolMarker.mountPath),
-      tool,
+      // 帧 path 含命令叶子段:<mount 相对路径>/<命令>。
+      path: `${relativeDevicePath(node.path, toolMarker.mountPath)}/${tool}`,
       arguments: args,
       context: deviceCallContextFrom(ctx),
     })
@@ -156,20 +137,13 @@ export async function handleInvoke(c: AppContext, env: RouteEnv): Promise<Respon
     if (!check(ctx, node.path, 'call').allow) {
       throw new TBError('permission_denied', `no scope grants 'call' on '${node.path}'`)
     }
-    const body = (await c.req.json().catch(() => null)) as {
-      arguments?: unknown
-      tool?: unknown
-    } | null
-    if (!body || typeof body.tool !== 'string') {
-      throw new TBError('invalid_argument', 'body must be {tool, arguments}')
-    }
-    if (body.tool !== 'exec') {
-      throw new TBError('invalid_argument', `unknown cmd '${body.tool}' on '${node.path}'`)
+    const { tool, args } = await readInvokeBody()
+    if (tool !== 'exec') {
+      throw new TBError('invalid_argument', `unknown cmd '${tool}' on '${node.path}'`)
     }
     const result = await invokeDevice(deps, node.config.deviceId, {
-      path: 'shell',
-      tool: body.tool,
-      arguments: (body.arguments ?? {}) as Record<string, unknown>,
+      path: 'shell/exec',
+      arguments: args,
       context: deviceCallContextFrom(ctx),
     })
     return renderResult(result, negotiate(c.req.header('accept')))
@@ -180,16 +154,10 @@ export async function handleInvoke(c: AppContext, env: RouteEnv): Promise<Respon
     const cfg = node.config
     // ttl 懒回收:POST 命中即判,过期删节点并 404。
     await assertContextAlive(node, cfg, registry)
-    const body = (await c.req.json().catch(() => null)) as {
-      arguments?: unknown
-      tool?: unknown
-    } | null
-    if (!body || typeof body.tool !== 'string') {
-      throw new TBError('invalid_argument', 'body must be {tool, arguments}')
-    }
-    const scope = contextScopeForCmd(body.tool)
+    const { tool, args } = await readInvokeBody()
+    const scope = contextScopeForCmd(tool)
     if (scope === null) {
-      throw new TBError('invalid_argument', `unknown cmd '${body.tool}' on '${node.path}'`)
+      throw new TBError('invalid_argument', `unknown cmd '${tool}' on '${node.path}'`)
     }
     // 节点可见性(read→404)已在上方统一判过;这里按 cmd 的 read/write scope 判 403。
     if (!check(ctx, node.path, scope).allow) {
@@ -197,13 +165,11 @@ export async function handleInvoke(c: AppContext, env: RouteEnv): Promise<Respon
     }
     // readOnly 挂载对写动词直接拒(provider 内亦拒,双保险)。
     if (cfg.readOnly === true && scope === 'write') {
-      throw new TBError('permission_denied', `readOnly 挂载拒绝 '${body.tool}'`)
+      throw new TBError('permission_denied', `readOnly 挂载拒绝 '${tool}'`)
     }
-    const args = (body.arguments ?? {}) as Record<string, unknown>
     if (cfg.provider === 'device-fs') {
       const result = await invokeDevice(deps, deviceIdForDeviceFs(cfg), {
-        path: 'fs',
-        tool: body.tool,
+        path: `fs/${tool}`,
         arguments: args,
         context: deviceCallContextFrom(ctx),
       })
@@ -213,8 +179,7 @@ export async function handleInvoke(c: AppContext, env: RouteEnv): Promise<Respon
     const contextMarker = deviceMarkerOf(cfg.providerConfig)
     if (cfg.provider !== 'r2' && cfg.provider !== 's3' && contextMarker !== null) {
       const result = await invokeDevice(deps, contextMarker.deviceId, {
-        path: relativeDevicePath(node.path, contextMarker.mountPath),
-        tool: body.tool,
+        path: `${relativeDevicePath(node.path, contextMarker.mountPath)}/${tool}`,
         arguments: args,
         context: deviceCallContextFrom(ctx),
       })
@@ -224,7 +189,7 @@ export async function handleInvoke(c: AppContext, env: RouteEnv): Promise<Respon
       // SDK 进程内 context Provider(registerContext):按节点路径查本实例表。
       const local = localContext(deps, node)
       if (local !== null) {
-        const result = await dispatchContextCmd(local, body.tool, args)
+        const result = await dispatchContextCmd(local, tool, args)
         return renderResult(result, negotiate(c.req.header('accept')))
       }
       // plugin-backed context:provider 非 r2/s3 视为 plugin id,
@@ -246,11 +211,11 @@ export async function handleInvoke(c: AppContext, env: RouteEnv): Promise<Respon
         ...(cfg.authRef !== undefined ? { upstreamAuthRef: cfg.authRef } : {}),
         ...(deps.pluginBindings !== undefined ? { bindings: deps.pluginBindings } : {}),
       })
-      const result = await dispatchContextCmd(provider, body.tool, args)
+      const result = await dispatchContextCmd(provider, tool, args)
       return renderResult(result, negotiate(c.req.header('accept')))
     }
     const provider = await contextProviderFor(node, cfg, deps, c.req.url)
-    const result = await dispatchContextCmd(provider, body.tool, args)
+    const result = await dispatchContextCmd(provider, tool, args)
     return renderResult(result, negotiate(c.req.header('accept')))
   }
 
@@ -259,27 +224,20 @@ export async function handleInvoke(c: AppContext, env: RouteEnv): Promise<Respon
     const cfg = node.config
     // ttl 懒回收:POST 命中即判,过期删节点并 404。
     await assertContextAlive(node, cfg, registry)
-    const body = (await c.req.json().catch(() => null)) as {
-      arguments?: unknown
-      tool?: unknown
-    } | null
-    if (!body || typeof body.tool !== 'string') {
-      throw new TBError('invalid_argument', 'body must be {tool, arguments}')
-    }
-    const scope = skillhubScopeForCmd(body.tool)
+    const { tool, args } = await readInvokeBody()
+    const scope = skillhubScopeForCmd(tool)
     if (scope === null) {
-      throw new TBError('invalid_argument', `unknown cmd '${body.tool}' on '${node.path}'`)
+      throw new TBError('invalid_argument', `unknown cmd '${tool}' on '${node.path}'`)
     }
     // 节点可见性(read→404)已统一判过;这里按 cmd 的 read/write scope 判 403。
     if (!check(ctx, node.path, scope).allow) {
       throw new TBError('permission_denied', `no scope grants '${scope}' on '${node.path}'`)
     }
     if (cfg.readOnly === true && scope === 'write') {
-      throw new TBError('permission_denied', `readOnly 挂载拒绝 '${body.tool}'`)
+      throw new TBError('permission_denied', `readOnly 挂载拒绝 '${tool}'`)
     }
-    const args = (body.arguments ?? {}) as Record<string, unknown>
     const provider = await skillhubProviderFor(node, cfg, deps, c.req.url)
-    const result = await dispatchSkillhubCmd(provider, body.tool, args)
+    const result = await dispatchSkillhubCmd(provider, tool, args)
     return renderResult(result, negotiate(c.req.header('accept')))
   }
 
@@ -291,15 +249,7 @@ export async function handleInvoke(c: AppContext, env: RouteEnv): Promise<Respon
   const mod = builtins.get(node.config.module)
   if (!mod) throw TBError.unimplemented(`builtin module '${node.config.module}' not available`)
 
-  const body = (await c.req.json().catch(() => null)) as {
-    arguments?: unknown
-    tool?: unknown
-  } | null
-  if (!body || typeof body.tool !== 'string') {
-    throw new TBError('invalid_argument', 'body must be {tool, arguments}')
-  }
-  const cmd = body.tool
-  const args = (body.arguments ?? {}) as Record<string, unknown>
+  const { tool: cmd, args } = await readInvokeBody()
 
   const spec = scopeForCmd(mod, node.path, cmd)
   if (!spec) throw new TBError('invalid_argument', `unknown cmd '${cmd}' on '${node.path}'`)

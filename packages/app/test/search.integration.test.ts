@@ -67,10 +67,10 @@ async function postRegistry(
   app: ReturnType<typeof createTbApp>,
   args: Record<string, unknown>,
 ): Promise<Response> {
-  return await app.request(new Request('https://tb.test/system/registry', {
+  return await app.request(new Request('https://tb.test/system/registry/write', {
     method: 'POST',
     headers: adminHeaders,
-    body: new Blob([JSON.stringify({ tool: 'write', arguments: args })], {
+    body: new Blob([JSON.stringify(args)], {
       type: 'application/json',
     }),
   }))

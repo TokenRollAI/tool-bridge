@@ -28,7 +28,7 @@ export interface PluginContextOptions extends PluginCallOptions {
 }
 
 /** 四核心动词(export 未自报 methods 时的默认集合)。 */
-const CORE_METHODS = ['List', 'Get', 'Write', 'Update'] as const
+const CORE_METHODS = ['list', 'get', 'write', 'update'] as const
 
 export function createPluginContextProvider(opts: PluginContextOptions): ContextProvider {
   const call = (method: string, args: Record<string, unknown>): Promise<unknown> =>
@@ -40,36 +40,36 @@ export function createPluginContextProvider(opts: PluginContextOptions): Context
       : new Set<string>([...CORE_METHODS, ...optionalMethodsForCapabilities(opts.capabilities)])
 
   const provider: ContextProvider = {}
-  if (declared.has('List')) {
-    provider.List = (path: string, listOpts?: ListOptions) =>
-      call('List', { path, ...(listOpts !== undefined ? { opts: listOpts } : {}) }) as Promise<
+  if (declared.has('list')) {
+    provider.list = (path: string, listOpts?: ListOptions) =>
+      call('list', { path, ...(listOpts !== undefined ? { opts: listOpts } : {}) }) as Promise<
         Page<ContextEntryMeta>
       >
   }
-  if (declared.has('Get')) {
-    provider.Get = (path: string) => call('Get', { path }) as Promise<ContextEntry>
+  if (declared.has('get')) {
+    provider.get = (path: string) => call('get', { path }) as Promise<ContextEntry>
   }
-  if (declared.has('Update')) {
-    provider.Update = (path: string, patch: ContextPatch) =>
-      call('Update', { path, patch }) as Promise<ContextEntryMeta>
+  if (declared.has('update')) {
+    provider.update = (path: string, patch: ContextPatch) =>
+      call('update', { path, patch }) as Promise<ContextEntryMeta>
   }
-  if (declared.has('Write')) {
-    provider.Write = (path: string, entry: ContextEntryInput) =>
-      call('Write', { path, entry }) as Promise<ContextEntryMeta>
+  if (declared.has('write')) {
+    provider.write = (path: string, entry: ContextEntryInput) =>
+      call('write', { path, entry }) as Promise<ContextEntryMeta>
   }
   // 可选能力仍须在 capabilities 里声明过(调用方据 capabilities 先探测再用),
   // 且 methods 自报时二者必须一致(注册期契约校验已钉死,见 core validatePluginContract)。
   const optional = optionalMethodsForCapabilities(opts.capabilities)
-  if (declared.has('Search') && optional.has('Search')) {
-    provider.Search = (query: string, searchOpts?: SearchOptions) =>
-      call('Search', {
+  if (declared.has('search') && optional.has('search')) {
+    provider.search = (query: string, searchOpts?: SearchOptions) =>
+      call('search', {
         query,
         ...(searchOpts !== undefined ? { opts: searchOpts } : {}),
       }) as Promise<Page<ContextEntryMeta>>
   }
-  if (declared.has('Delete') && optional.has('Delete')) {
-    provider.Delete = async (path: string): Promise<void> => {
-      await call('Delete', { path })
+  if (declared.has('delete') && optional.has('delete')) {
+    provider.delete = async (path: string): Promise<void> => {
+      await call('delete', { path })
     }
   }
   return provider

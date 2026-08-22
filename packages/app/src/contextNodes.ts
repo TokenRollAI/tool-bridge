@@ -207,25 +207,25 @@ export async function dispatchSkillhubCmd(
   tool: string,
   args: Record<string, unknown>,
 ): Promise<unknown> {
-  switch (tool) {
-    case 'List':
-      return await provider.List(args.opts as ListOptions | undefined)
-    case 'Get':
+  switch (tool.toLowerCase()) {
+    case 'list':
+      return await provider.list(args.opts as ListOptions | undefined)
+    case 'get':
       return typeof args.file === 'string'
-        ? await provider.GetFile(args.id as string, args.file)
-        : await provider.Get(args.id as string)
-    case 'Search':
-      return await provider.Search(args.query as string, args.opts as ListOptions | undefined)
-    case 'Publish':
+        ? await provider.get_file(args.id as string, args.file)
+        : await provider.get(args.id as string)
+    case 'search':
+      return await provider.search(args.query as string, args.opts as ListOptions | undefined)
+    case 'publish':
       if (!Array.isArray(args.files)) {
-        throw new TBError('invalid_argument', 'Publish 需要数组 \'files\'')
+        throw new TBError('invalid_argument', 'publish 需要数组 \'files\'')
       }
-      return await provider.Publish({
+      return await provider.publish({
         ...(typeof args.id === 'string' ? { id: args.id } : {}),
         files: args.files as SkillPublishFile[],
       })
-    case 'Remove':
-      return await provider.Remove(args.id as string)
+    case 'remove':
+      return await provider.remove(args.id as string)
     default:
       // skillhubScopeForCmd 已挡未知 cmd;此处为类型完备性兜底。
       throw new TBError('invalid_argument', `unknown cmd '${tool}'`)
@@ -247,31 +247,31 @@ export async function dispatchContextCmd(
   const unimplemented = (): never => {
     throw new TBError('invalid_argument', `unknown cmd '${tool}'(provider 未实现)`)
   }
-  switch (tool) {
-    case 'List':
-      if (provider.List === undefined) return unimplemented()
-      return await provider.List((args.path as string) ?? '', args.opts as ListOptions | undefined)
-    case 'Get':
-      if (provider.Get === undefined) return unimplemented()
-      return await provider.Get(args.path as string)
-    case 'Write':
-      if (provider.Write === undefined) return unimplemented()
+  switch (tool.toLowerCase()) {
+    case 'list':
+      if (provider.list === undefined) return unimplemented()
+      return await provider.list((args.path as string) ?? '', args.opts as ListOptions | undefined)
+    case 'get':
+      if (provider.get === undefined) return unimplemented()
+      return await provider.get(args.path as string)
+    case 'write':
+      if (provider.write === undefined) return unimplemented()
       if (typeof args.entry !== 'object' || args.entry === null) {
-        throw new TBError('invalid_argument', 'Write 需要对象 \'entry\'')
+        throw new TBError('invalid_argument', 'write 需要对象 \'entry\'')
       }
-      return await provider.Write(args.path as string, args.entry as ContextEntryInput)
-    case 'Update':
-      if (provider.Update === undefined) return unimplemented()
+      return await provider.write(args.path as string, args.entry as ContextEntryInput)
+    case 'update':
+      if (provider.update === undefined) return unimplemented()
       if (typeof args.patch !== 'object' || args.patch === null) {
-        throw new TBError('invalid_argument', 'Update 需要对象 \'patch\'')
+        throw new TBError('invalid_argument', 'update 需要对象 \'patch\'')
       }
-      return await provider.Update(args.path as string, args.patch as ContextPatch)
-    case 'Delete':
-      if (provider.Delete === undefined) return unimplemented()
-      return await provider.Delete(args.path as string)
-    case 'Search':
-      if (provider.Search === undefined) return unimplemented()
-      return await provider.Search(args.query as string, args.opts as SearchOptions | undefined)
+      return await provider.update(args.path as string, args.patch as ContextPatch)
+    case 'delete':
+      if (provider.delete === undefined) return unimplemented()
+      return await provider.delete(args.path as string)
+    case 'search':
+      if (provider.search === undefined) return unimplemented()
+      return await provider.search(args.query as string, args.opts as SearchOptions | undefined)
     default:
       // contextScopeForCmd 已挡未知 cmd;此处为类型完备性兜底。
       throw new TBError('invalid_argument', `unknown cmd '${tool}'`)

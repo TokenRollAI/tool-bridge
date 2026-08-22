@@ -33,18 +33,13 @@ async function postJson(path: string, body: unknown, init: RequestInit = {}): Pr
 }
 
 async function mountOAuthMcp(path: string): Promise<void> {
-  const res = await postJson(
-    'system/registry',
-    {
-      tool: 'write',
-      arguments: {
-        path,
-        kind: 'mcp',
-        description: 'oauth mcp',
-        config: { kind: 'mcp', url: 'https://mcp-oauth.test/mcp', auth: 'oauth' },
-      },
-    },
-    admin(),
+  const res = await postJson('system/registry/write', {
+    path,
+    kind: 'mcp',
+    description: 'oauth mcp',
+    config: { kind: 'mcp', url: 'https://mcp-oauth.test/mcp', auth: 'oauth' },
+  },
+  admin(),
   )
   expect(res.status).toBe(200)
 }
@@ -351,18 +346,13 @@ describe('mcp 托管 OAuth:拒绝路径', () => {
   it('对非 oauth 挂载 ~authorize → invalid_argument', async () => {
     const upstream = oauthUpstreamMock([])
     vi.stubGlobal('fetch', upstream.fetchMock)
-    const res = await postJson(
-      'system/registry',
-      {
-        tool: 'write',
-        arguments: {
-          path: 'db/plain',
-          kind: 'mcp',
-          description: 'plain mcp',
-          config: { kind: 'mcp', url: 'https://mcp-oauth.test/mcp' },
-        },
-      },
-      admin(),
+    const res = await postJson('system/registry/write', {
+      path: 'db/plain',
+      kind: 'mcp',
+      description: 'plain mcp',
+      config: { kind: 'mcp', url: 'https://mcp-oauth.test/mcp' },
+    },
+    admin(),
     )
     expect(res.status).toBe(200)
     const auth = await postJson('db/plain/~authorize', {}, admin())

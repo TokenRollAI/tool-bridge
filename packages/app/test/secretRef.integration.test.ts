@@ -31,13 +31,13 @@ async function postJson(path: string, body: unknown, init: RequestInit = {}): Pr
 }
 
 async function issueSk(input: unknown): Promise<string> {
-  const res = await postJson('system/sk', { tool: 'write', arguments: input }, admin())
+  const res = await postJson('system/sk/write', input, admin())
   expect(res.status).toBe(200)
   return ((await res.json()) as { secret: string }).secret
 }
 
 async function setSecret(name: string, value: string): Promise<void> {
-  const res = await postJson('system/secret', { tool: 'set', arguments: { name, value } }, admin())
+  const res = await postJson('system/secret/set', { name, value }, admin())
   expect(res.status).toBe(200)
 }
 
@@ -67,18 +67,13 @@ describe('Secret Reference 使用授权', () => {
   it('广权注册者(无 admin)经 system/registry write 绑定他人 skRef → permission_denied', async () => {
     await setSecret('victim-remote-sk', 'super-secret-token')
     const sk = await issueBroadRegistrant()
-    const res = await postJson(
-      'system/registry',
-      {
-        tool: 'write',
-        arguments: {
-          path: 'team/evil-remote',
-          kind: 'remote',
-          description: 'confused deputy attempt',
-          config: { kind: 'remote', baseUrl: 'https://example.com', skRef: 'victim-remote-sk' },
-        },
-      },
-      bearer(sk),
+    const res = await postJson('system/registry/write', {
+      path: 'team/evil-remote',
+      kind: 'remote',
+      description: 'confused deputy attempt',
+      config: { kind: 'remote', baseUrl: 'https://example.com', skRef: 'victim-remote-sk' },
+    },
+    bearer(sk),
     )
     expect(res.status).toBe(403)
     const body = (await res.json()) as { code: string, message: string }
@@ -127,16 +122,11 @@ describe('Secret Reference 使用授权', () => {
     )
     expect(mk.status).toBe(200)
     // 再试图 update 追加 skRef → 被授权门拦下。
-    const res = await postJson(
-      'system/registry',
-      {
-        tool: 'update',
-        arguments: {
-          path: 'team/plain-remote',
-          patch: { config: { kind: 'remote', baseUrl: 'https://example.com', skRef: 'victim-update-sk' } },
-        },
-      },
-      bearer(sk),
+    const res = await postJson('system/registry/update', {
+      path: 'team/plain-remote',
+      patch: { config: { kind: 'remote', baseUrl: 'https://example.com', skRef: 'victim-update-sk' } },
+    },
+    bearer(sk),
     )
     expect(res.status).toBe(403)
     expect(((await res.json()) as { code: string }).code).toBe('permission_denied')
@@ -159,18 +149,13 @@ describe('Secret Reference 使用授权', () => {
 
   it('admin 绑定 skRef → 放行(与创建 Secret 同权)', async () => {
     await setSecret('admin-remote-sk', 'token')
-    const res = await postJson(
-      'system/registry',
-      {
-        tool: 'write',
-        arguments: {
-          path: 'federation/upstream',
-          kind: 'remote',
-          description: 'admin binds a ref',
-          config: { kind: 'remote', baseUrl: 'https://example.com', skRef: 'admin-remote-sk' },
-        },
-      },
-      admin(),
+    const res = await postJson('system/registry/write', {
+      path: 'federation/upstream',
+      kind: 'remote',
+      description: 'admin binds a ref',
+      config: { kind: 'remote', baseUrl: 'https://example.com', skRef: 'admin-remote-sk' },
+    },
+    admin(),
     )
     expect(res.status).toBe(200)
   })

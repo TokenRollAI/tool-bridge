@@ -76,20 +76,15 @@ afterEach(() => {
 })
 
 async function registerNotesPlugin(id = 'notes'): Promise<void> {
-  const res = await postJson(
-    'system/plugin',
-    {
-      tool: 'write',
-      arguments: {
-        id,
-        protocolVersion: 'plugin/v2',
-        endpoint: ENDPOINT,
-        auth: { kind: 'platform-token' },
-        healthPath: '/healthz',
-        enabled: true,
-      },
-    },
-    admin(),
+  const res = await postJson('system/plugin/write', {
+    id,
+    protocolVersion: 'plugin/v2',
+    endpoint: ENDPOINT,
+    auth: { kind: 'platform-token' },
+    healthPath: '/healthz',
+    enabled: true,
+  },
+  admin(),
   )
   expect(res.status).toBe(200)
   pluginToken = ((await res.json()) as { pluginToken?: string }).pluginToken
@@ -101,18 +96,13 @@ async function mount(
   kind: 'context' | 'tool',
   exportId: string,
 ): Promise<Response> {
-  return postJson(
-    'system/registry',
-    {
-      tool: 'write',
-      arguments: {
-        path,
-        kind,
-        description: `notes ${exportId}`,
-        config: { kind, provider: 'notes', export: exportId },
-      },
-    },
-    admin(),
+  return postJson('system/registry/write', {
+    path,
+    kind,
+    description: `notes ${exportId}`,
+    config: { kind, provider: 'notes', export: exportId },
+  },
+  admin(),
   )
 }
 
@@ -128,7 +118,7 @@ describe('样例 plugin(SDK 写的双 export)端到端', () => {
     ])
     // context export 的动词/能力由 handler 存在性推导(未写 update/delete → 不自报)。
     const ctxExport = describeBody?.exports.find(e => e.id === 'notes')
-    expect(ctxExport?.methods).toEqual(['List', 'Get', 'Write', 'Search'])
+    expect(ctxExport?.methods).toEqual(['list', 'get', 'write', 'search'])
     expect(ctxExport?.capabilities).toEqual(['search'])
 
     // 2. 两个 export 各挂一处(多 export 必须显式 config.export)。
@@ -171,18 +161,14 @@ describe('样例 plugin(SDK 写的双 export)端到端', () => {
     expect(cmd?.inputSchema?.properties?.title?.description).toBe('笔记标题')
 
     // 4. 调工具:裸返回值被 SDK 包成 ToolResult,平台原样透出。
-    const created = await postJson(
-      'tools/notes',
-      { tool: 'create_note', arguments: { title: 'Weekly Plan', body: '# 计划\n写周报', tags: ['work'] } },
+    const created = await postJson('tools/notes/create_note', { title: 'Weekly Plan', body: '# 计划\n写周报', tags: ['work'] },
       admin(),
     )
     expect(created.status).toBe(200)
     expect(await created.json()).toEqual({ path: 'weekly-plan', version: 1 })
 
     // 5. 读 context:同一个部署的另一个 export,工具写入的笔记在这里可读。
-    const got = await postJson(
-      'docs/notes',
-      { tool: 'Get', arguments: { path: 'weekly-plan' } },
+    const got = await postJson('docs/notes/get', { path: 'weekly-plan' },
       admin(),
     )
     expect(got.status).toBe(200)
@@ -192,15 +178,13 @@ describe('样例 plugin(SDK 写的双 export)端到端', () => {
     expect(entry.uri).toBe('node://docs/notes/weekly-plan')
 
     // 6. 声明过的可选能力(Search)可用;List 也走同一 export。
-    const searched = await postJson(
-      'docs/notes',
-      { tool: 'Search', arguments: { query: '周报' } },
+    const searched = await postJson('docs/notes/search', { query: '周报' },
       admin(),
     )
     expect(searched.status).toBe(200)
     expect(((await searched.json()) as { items: unknown[] }).items).toHaveLength(1)
 
-    const listed = await postJson('docs/notes', { tool: 'List', arguments: { path: '' } }, admin())
+    const listed = await postJson('docs/notes/list', { path: '' }, admin())
     expect(listed.status).toBe(200)
     expect(((await listed.json()) as { items: unknown[] }).items).toHaveLength(1)
 
@@ -212,9 +196,7 @@ describe('样例 plugin(SDK 写的双 export)端到端', () => {
     await registerNotesPlugin()
     expect((await mount('tools/notes', 'tool', 'actions')).status).toBe(200)
 
-    const bad = await postJson(
-      'tools/notes',
-      { tool: 'create_note', arguments: { title: 'no body' } },
+    const bad = await postJson('tools/notes/create_note', { title: 'no body' },
       admin(),
     )
     expect(bad.status).toBe(400)
@@ -227,9 +209,7 @@ describe('样例 plugin(SDK 写的双 export)端到端', () => {
     await registerNotesPlugin()
     expect((await mount('docs/notes', 'context', 'notes')).status).toBe(200)
 
-    const missing = await postJson(
-      'docs/notes',
-      { tool: 'Get', arguments: { path: 'nope' } },
+    const missing = await postJson('docs/notes/get', { path: 'nope' },
       admin(),
     )
     expect(missing.status).toBe(404)
@@ -248,18 +228,14 @@ describe('样例 plugin(SDK 写的双 export)端到端', () => {
     const names = parseHelpDsl(await help.text())
       .cmds.map(c => c.name)
       .sort()
-    expect(names).toEqual(['Get', 'List', 'Search', 'Write'])
+    expect(names).toEqual(['get', 'list', 'search', 'write'])
 
     const before = seen.filter(s => s.method === 'POST').length
-    const updated = await postJson(
-      'docs/notes',
-      { tool: 'Update', arguments: { path: 'weekly-plan', patch: { content: 'x' } } },
+    const updated = await postJson('docs/notes/update', { path: 'weekly-plan', patch: { content: 'x' } },
       admin(),
     )
     expect(updated.status).toBe(400)
-    const deleted = await postJson(
-      'docs/notes',
-      { tool: 'Delete', arguments: { path: 'weekly-plan' } },
+    const deleted = await postJson('docs/notes/delete', { path: 'weekly-plan' },
       admin(),
     )
     expect(deleted.status).toBe(400)
@@ -271,21 +247,16 @@ describe('样例 plugin(SDK 写的双 export)端到端', () => {
     expect((await mount('tools/notes', 'tool', 'actions')).status).toBe(200)
     expect((await mount('docs/notes', 'context', 'notes')).status).toBe(200)
 
-    const written = await postJson(
-      'docs/notes',
-      {
-        tool: 'Write',
-        arguments: {
-          path: 'meeting',
-          entry: { contentType: 'text/markdown', content: '# 会议纪要', metadata: { title: '会议' } },
-        },
-      },
-      admin(),
+    const written = await postJson('docs/notes/write', {
+      path: 'meeting',
+      entry: { contentType: 'text/markdown', content: '# 会议纪要', metadata: { title: '会议' } },
+    },
+    admin(),
     )
     expect(written.status).toBe(200)
     expect((await written.json()) as { version: string }).toMatchObject({ version: '1' })
 
-    const counted = await postJson('tools/notes', { tool: 'count_notes', arguments: {} }, admin())
+    const counted = await postJson('tools/notes/count_notes', {}, admin())
     expect(counted.status).toBe(200)
     expect(await counted.json()).toEqual({ count: 1 })
   })

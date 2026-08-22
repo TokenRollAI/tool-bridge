@@ -64,37 +64,28 @@ async function getJson(app: ReturnType<typeof createTbApp>, path: string): Promi
 async function mountedApp(): Promise<ReturnType<typeof createTbApp>> {
   const app = await appWithPlugin()
 
-  expect((await postJson(app, 'system/secret', {
-    tool: 'set',
-    arguments: { name: 'alt-text-key', value: API_KEY },
-  })).status).toBe(200)
+  expect((await postJson(app, 'system/secret/set', { name: 'alt-text-key', value: API_KEY })).status).toBe(200)
 
-  const registered = await postJson(app, 'system/plugin', {
-    tool: 'write',
-    arguments: {
-      id: 'alt_text_generator_ai',
-      protocolVersion: 'plugin/v2',
-      endpoint: 'binding:alt_text_generator_ai',
-      auth: { kind: 'platform-token' },
-      healthPath: '/healthz',
-      enabled: true,
-    },
+  const registered = await postJson(app, 'system/plugin/write', {
+    id: 'alt_text_generator_ai',
+    protocolVersion: 'plugin/v2',
+    endpoint: 'binding:alt_text_generator_ai',
+    auth: { kind: 'platform-token' },
+    healthPath: '/healthz',
+    enabled: true,
   })
   expect(registered.status).toBe(200)
   pluginToken = ((await registered.json()) as { pluginToken?: string }).pluginToken
 
-  expect((await postJson(app, 'system/registry', {
-    tool: 'write',
-    arguments: {
-      path: 'ai/alt-text',
+  expect((await postJson(app, 'system/registry/write', {
+    path: 'ai/alt-text',
+    kind: 'tool',
+    description: 'Alt text generation',
+    config: {
       kind: 'tool',
-      description: 'Alt text generation',
-      config: {
-        kind: 'tool',
-        provider: 'alt_text_generator_ai',
-        export: 'actions',
-        authRef: 'alt-text-key',
-      },
+      provider: 'alt_text_generator_ai',
+      export: 'actions',
+      authRef: 'alt-text-key',
     },
   })).status).toBe(200)
 
@@ -136,10 +127,7 @@ describe('迁移产物经 binding: 挂上树', () => {
 
   it('调用链:平台解 authRef → 插件 → 上游,凭证不出网关', async () => {
     const app = await mountedApp()
-    const res = await postJson(app, 'ai/alt-text', {
-      tool: 'generate_alt_text',
-      arguments: { imageUrl: 'https://cdn.example.com/cat.jpg' },
-    })
+    const res = await postJson(app, 'ai/alt-text/generate_alt_text', { imageUrl: 'https://cdn.example.com/cat.jpg' })
     expect(res.status).toBe(200)
     await expect(res.json()).resolves.toEqual({ altText: 'A cat on a windowsill' })
 
@@ -155,10 +143,7 @@ describe('迁移产物经 binding: 挂上树', () => {
 
   it('入参校验在插件侧真的生效:非法 URL → 400,且不打上游', async () => {
     const app = await mountedApp()
-    const res = await postJson(app, 'ai/alt-text', {
-      tool: 'generate_alt_text',
-      arguments: { imageUrl: 'not-a-url' },
-    })
+    const res = await postJson(app, 'ai/alt-text/generate_alt_text', { imageUrl: 'not-a-url' })
     expect(res.status).toBe(400)
     expect(((await res.json()) as { code: string }).code).toBe('invalid_argument')
     expect(upstream).not.toHaveBeenCalled()

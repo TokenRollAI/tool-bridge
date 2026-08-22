@@ -31,9 +31,7 @@ async function postJson(path: string, body: unknown, init: RequestInit = {}): Pr
 }
 
 async function issueSk(input: unknown): Promise<string> {
-  const response = await postJson(
-    'system/sk',
-    { tool: 'write', arguments: input },
+  const response = await postJson('system/sk/write', input,
     admin(),
   )
   expect(response.status).toBe(200)
@@ -41,22 +39,17 @@ async function issueSk(input: unknown): Promise<string> {
 }
 
 async function mountHttpTools(path: string, tools: unknown[]): Promise<void> {
-  const response = await postJson(
-    'system/registry',
-    {
-      tool: 'write',
-      arguments: {
-        path,
-        kind: 'http',
-        description: `${path} tools`,
-        config: {
-          kind: 'http',
-          endpoint: 'https://mcp-exit-upstream.test',
-          tools,
-        },
-      },
+  const response = await postJson('system/registry/write', {
+    path,
+    kind: 'http',
+    description: `${path} tools`,
+    config: {
+      kind: 'http',
+      endpoint: 'https://mcp-exit-upstream.test',
+      tools,
     },
-    admin(),
+  },
+  admin(),
   )
   expect(response.status).toBe(200)
   mountedPaths.push(path)
@@ -79,54 +72,39 @@ async function mountHttp(path: string): Promise<void> {
 }
 
 async function mountMcp(path: string): Promise<void> {
-  const response = await postJson(
-    'system/registry',
-    {
-      tool: 'write',
-      arguments: {
-        path,
-        kind: 'mcp',
-        description: `${path} MCP`,
-        config: { kind: 'mcp', url: 'https://round15-mcp-upstream.test/mcp' },
-      },
-    },
-    admin(),
+  const response = await postJson('system/registry/write', {
+    path,
+    kind: 'mcp',
+    description: `${path} MCP`,
+    config: { kind: 'mcp', url: 'https://round15-mcp-upstream.test/mcp' },
+  },
+  admin(),
   )
   expect(response.status).toBe(200)
   mountedPaths.push(path)
 }
 
 async function mountContext(path: string): Promise<void> {
-  const response = await postJson(
-    'system/registry',
-    {
-      tool: 'write',
-      arguments: {
-        path,
-        kind: 'context',
-        description: `${path} context`,
-        config: { kind: 'context', provider: 'r2' },
-      },
-    },
-    admin(),
+  const response = await postJson('system/registry/write', {
+    path,
+    kind: 'context',
+    description: `${path} context`,
+    config: { kind: 'context', provider: 'r2' },
+  },
+  admin(),
   )
   expect(response.status).toBe(200)
   mountedPaths.push(path)
 }
 
 async function mountRemote(path: string): Promise<void> {
-  const response = await postJson(
-    'system/registry',
-    {
-      tool: 'write',
-      arguments: {
-        path,
-        kind: 'remote',
-        description: `${path} remote`,
-        config: { kind: 'remote', baseUrl: 'https://api.example.com/htbp' },
-      },
-    },
-    admin(),
+  const response = await postJson('system/registry/write', {
+    path,
+    kind: 'remote',
+    description: `${path} remote`,
+    config: { kind: 'remote', baseUrl: 'https://api.example.com/htbp' },
+  },
+  admin(),
   )
   expect(response.status).toBe(200)
   mountedPaths.push(path)
@@ -134,9 +112,7 @@ async function mountRemote(path: string): Promise<void> {
 
 afterEach(async () => {
   for (const path of mountedPaths.reverse()) {
-    await postJson(
-      'system/registry',
-      { tool: 'delete', arguments: { path } },
+    await postJson('system/registry/delete', { path },
       admin(),
     )
   }
@@ -347,8 +323,8 @@ describe('MCP consumer endpoint', () => {
       const contextCommands = listed.tools
         .filter(tool => tool._meta?.['io.tool-bridge/path'] === 'mcp-round15/context')
         .map(tool => tool._meta?.['io.tool-bridge/command'])
-      expect(contextCommands).toContain('List')
-      expect(contextCommands).not.toContain('Write')
+      expect(contextCommands).toContain('list')
+      expect(contextCommands).not.toContain('write')
 
       await expect(client.callTool({
         name: allowed?.name ?? '',
@@ -542,13 +518,10 @@ describe('MCP consumer endpoint', () => {
           headers: { 'content-type': 'application/json' },
         })
 
-      if (init?.method === 'POST' && url.pathname === '/htbp/alpha') {
-        const body = JSON.parse(String(init.body)) as {
-          arguments?: Record<string, unknown>
-          tool?: string
-        }
-        expect(body).toEqual({ tool: 'echo', arguments: { text: 'remote' } })
-        return json({ echoed: body.arguments?.text })
+      if (init?.method === 'POST' && url.pathname === '/htbp/alpha/echo') {
+        const body = JSON.parse(String(init.body)) as Record<string, unknown>
+        expect(body).toEqual({ text: 'remote' })
+        return json({ echoed: body.text })
       }
       if (url.pathname === '/htbp/~tree') {
         return json({
@@ -632,7 +605,7 @@ describe('MCP consumer endpoint', () => {
       expect(called).toMatchObject({ structuredContent: { echoed: 'remote' } })
       expect(
         remoteFetch.mock.calls.some(([input, init]) =>
-          init?.method === 'POST' && new URL(String(input)).pathname === '/htbp/alpha'),
+          init?.method === 'POST' && new URL(String(input)).pathname === '/htbp/alpha/echo'),
       ).toBe(true)
     } finally {
       await client.close()
@@ -765,10 +738,10 @@ describe('MCP consumer endpoint', () => {
   )
 
   it('flat names are collision-safe, client-compatible, and length bounded', async () => {
-    const slash = await mcpToolName(mcpToolIdentity('/a', 'b\0c', true))
-    const shiftedNul = await mcpToolName(mcpToolIdentity('/a\0b', 'c', true))
-    const escapedLiteral = await mcpToolName(mcpToolIdentity('/a_2Fb', 'c', true))
-    const long = await mcpToolName(mcpToolIdentity(`/${'很长'.repeat(100)}`, '工具', true))
+    const slash = await mcpToolName(mcpToolIdentity('/a', 'b\0c'))
+    const shiftedNul = await mcpToolName(mcpToolIdentity('/a\0b', 'c'))
+    const escapedLiteral = await mcpToolName(mcpToolIdentity('/a_2Fb', 'c'))
+    const long = await mcpToolName(mcpToolIdentity(`/${'很长'.repeat(100)}`, '工具'))
     expect(slash).not.toBe(shiftedNul)
     expect(slash).not.toBe(escapedLiteral)
     expect(long).toMatch(/^[A-Za-z0-9._-]{1,128}$/)

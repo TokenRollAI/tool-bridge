@@ -23,7 +23,7 @@ const INPUT_SCHEMA = {
 }
 
 async function mountHttp(path: string): Promise<void> {
-  const response = await tb.request('https://tb.test/system/registry', {
+  const response = await tb.request('https://tb.test/system/registry/write', {
     method: 'POST',
     headers: {
       'accept': 'application/json',
@@ -31,24 +31,21 @@ async function mountHttp(path: string): Promise<void> {
       ...admin().headers,
     },
     body: JSON.stringify({
-      tool: 'write',
-      arguments: {
-        path,
+      path,
+      kind: 'http',
+      description: `${path} tools`,
+      config: {
         kind: 'http',
-        description: `${path} tools`,
-        config: {
-          kind: 'http',
-          endpoint: 'https://help-schemas-upstream.test',
-          tools: [
-            {
-              name: 'greet',
-              description: 'greet someone by name',
-              method: 'POST',
-              pathTemplate: '/greet',
-              inputSchema: INPUT_SCHEMA,
-            },
-          ],
-        },
+        endpoint: 'https://help-schemas-upstream.test',
+        tools: [
+          {
+            name: 'greet',
+            description: 'greet someone by name',
+            method: 'POST',
+            pathTemplate: '/greet',
+            inputSchema: INPUT_SCHEMA,
+          },
+        ],
       },
     }),
   })

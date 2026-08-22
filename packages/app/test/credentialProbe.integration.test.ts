@@ -53,21 +53,15 @@ async function postJson(
 /** 存凭证 + 注册 plugin,返回就绪的 app(尚未挂载)。 */
 async function registeredApp(secretValue: string): Promise<ReturnType<typeof createTbApp>> {
   const app = await appWithClerk()
-  expect((await postJson(app, 'system/secret', {
-    tool: 'set',
-    arguments: { name: 'clerk-key', value: secretValue },
-  })).status).toBe(200)
+  expect((await postJson(app, 'system/secret/set', { name: 'clerk-key', value: secretValue })).status).toBe(200)
 
-  const registered = await postJson(app, 'system/plugin', {
-    tool: 'write',
-    arguments: {
-      id: 'clerk',
-      protocolVersion: 'plugin/v2',
-      endpoint: 'binding:clerk',
-      auth: { kind: 'platform-token' },
-      healthPath: '/healthz',
-      enabled: true,
-    },
+  const registered = await postJson(app, 'system/plugin/write', {
+    id: 'clerk',
+    protocolVersion: 'plugin/v2',
+    endpoint: 'binding:clerk',
+    auth: { kind: 'platform-token' },
+    healthPath: '/healthz',
+    enabled: true,
   })
   expect(registered.status).toBe(200)
   pluginToken = ((await registered.json()) as { pluginToken?: string }).pluginToken
@@ -78,14 +72,11 @@ function mount(
   app: ReturnType<typeof createTbApp>,
   config: Record<string, unknown>,
 ): Promise<Response> {
-  return postJson(app, 'system/registry', {
-    tool: 'write',
-    arguments: {
-      path: 'auth/clerk',
-      kind: 'tool',
-      description: 'Clerk users',
-      config: { kind: 'tool', provider: 'clerk', export: 'actions', ...config },
-    },
+  return postJson(app, 'system/registry/write', {
+    path: 'auth/clerk',
+    kind: 'tool',
+    description: 'Clerk users',
+    config: { kind: 'tool', provider: 'clerk', export: 'actions', ...config },
   })
 }
 
@@ -221,30 +212,24 @@ describe('多字段凭证的挂载校验', () => {
       version: 'test',
     })
 
-    expect((await postJson(app, 'system/plugin', {
-      tool: 'write',
-      arguments: {
-        id: 'mf',
-        protocolVersion: 'plugin/v2',
-        endpoint: 'binding:mf',
-        auth: { kind: 'platform-token' },
-        healthPath: '/healthz',
-        enabled: true,
-      },
+    expect((await postJson(app, 'system/plugin/write', {
+      id: 'mf',
+      protocolVersion: 'plugin/v2',
+      endpoint: 'binding:mf',
+      auth: { kind: 'platform-token' },
+      healthPath: '/healthz',
+      enabled: true,
     })).status).toBe(200)
 
     return {
       app,
       setSecret: (value: string) =>
-        postJson(app, 'system/secret', { tool: 'set', arguments: { name: 'mf-cred', value } }),
-      mount: (authRef: string) => postJson(app, 'system/registry', {
-        tool: 'write',
-        arguments: {
-          path: 'svc/mf',
-          kind: 'tool',
-          description: 'multi-field',
-          config: { kind: 'tool', provider: 'mf', export: 'actions', authRef },
-        },
+        postJson(app, 'system/secret/set', { name: 'mf-cred', value }),
+      mount: (authRef: string) => postJson(app, 'system/registry/write', {
+        path: 'svc/mf',
+        kind: 'tool',
+        description: 'multi-field',
+        config: { kind: 'tool', provider: 'mf', export: 'actions', authRef },
       }),
     }
   }
@@ -317,7 +302,7 @@ describe('平台核验探针形状', () => {
         })
       }
       const body = (await request.json()) as { tool: string }
-      return json(body.tool === 'List' ? [tool] : { content: { ok: true } })
+      return json(body.tool === 'list' ? [tool] : { content: { ok: true } })
     }
   }
 
@@ -332,29 +317,20 @@ describe('平台核验探针形状', () => {
       state,
       version: 'test',
     })
-    await postJson(app, 'system/secret', {
-      tool: 'set',
-      arguments: { name: 'k', value: 'sk_x' },
-    })
-    expect((await postJson(app, 'system/plugin', {
-      tool: 'write',
-      arguments: {
-        id: 'shape',
-        protocolVersion: 'plugin/v2',
-        endpoint: 'binding:shape',
-        auth: { kind: 'platform-token' },
-        healthPath: '/healthz',
-        enabled: true,
-      },
+    await postJson(app, 'system/secret/set', { name: 'k', value: 'sk_x' })
+    expect((await postJson(app, 'system/plugin/write', {
+      id: 'shape',
+      protocolVersion: 'plugin/v2',
+      endpoint: 'binding:shape',
+      auth: { kind: 'platform-token' },
+      healthPath: '/healthz',
+      enabled: true,
     })).status).toBe(200)
-    return postJson(app, 'system/registry', {
-      tool: 'write',
-      arguments: {
-        path: 'svc/shape',
-        kind: 'tool',
-        description: 'shape',
-        config: { kind: 'tool', provider: 'shape', export: 'actions', authRef: 'k' },
-      },
+    return postJson(app, 'system/registry/write', {
+      path: 'svc/shape',
+      kind: 'tool',
+      description: 'shape',
+      config: { kind: 'tool', provider: 'shape', export: 'actions', authRef: 'k' },
     })
   }
 
