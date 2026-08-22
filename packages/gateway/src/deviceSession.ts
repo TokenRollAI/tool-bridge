@@ -106,17 +106,15 @@ function invokeRequestFromBody(body: unknown): DeviceCallRequest {
   if (
     typeof b.id !== 'string'
     || typeof b.path !== 'string'
-    || typeof b.tool !== 'string'
     || typeof b.arguments !== 'object'
     || b.arguments === null
     || Array.isArray(b.arguments)
   ) {
-    throw new TBError('invalid_argument', 'device invoke body must be {id,path,tool,arguments}')
+    throw new TBError('invalid_argument', 'device invoke body must be {id,path,arguments}')
   }
   return {
     id: b.id,
     path: b.path,
-    tool: b.tool,
     arguments: b.arguments as Record<string, unknown>,
   }
 }

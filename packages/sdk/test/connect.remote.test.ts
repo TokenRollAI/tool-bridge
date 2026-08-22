@@ -30,9 +30,9 @@ async function remote(path: string, init: RequestInit = {}): Promise<Response> {
 }
 
 async function deleteNode(path: string): Promise<Response> {
-  return remote('system/registry', {
+  return remote('system/registry/delete', {
     method: 'POST',
-    body: JSON.stringify({ tool: 'delete', arguments: { path } }),
+    body: JSON.stringify({ path }),
   })
 }
 
@@ -48,10 +48,12 @@ describeRemote('SDK connect 全链路(生产网关,opt-in)', () => {
     tb.registerTool(
       'tools/echo',
       {
-        List: (): ToolSpec[] => [
+        list: (): ToolSpec[] => [
           { name: 'echo', description: 'echo back', inputSchema: { type: 'object' } },
         ],
-        Call: (_name, args): ToolResult => ({ content: { echoed: args.text, marker } }),
+        call: (_name: string, args: Record<string, unknown>): ToolResult => ({
+          content: { echoed: args.text, marker },
+        }),
       },
       { description: 'SDK e2e echo' },
     )
@@ -70,9 +72,9 @@ describeRemote('SDK connect 全链路(生产网关,opt-in)', () => {
       expect(model.cmds.map(c => c.name)).toContain('echo')
 
       // 经远程 HTTP 调用 → HTTP→WS 帧转发 → 本地函数结果回传。
-      const call = await remote(nodePath, {
+      const call = await remote(`${nodePath}/echo`, {
         method: 'POST',
-        body: JSON.stringify({ tool: 'echo', arguments: { text: 'hello from remote' } }),
+        body: JSON.stringify({ text: 'hello from remote' }),
       })
       expect(call.status).toBe(200)
       expect(await call.json()).toEqual({ echoed: 'hello from remote', marker })

@@ -38,8 +38,7 @@ describe('SDK Node 根入口设备连接', () => {
             socket.send(encodeDeviceFrame({
               type: 'call',
               id: 'node-call',
-              path: 'tools/echo',
-              tool: 'echo',
+              path: 'tools/echo/echo',
               arguments: { text: 'hello' },
             }))
           } else if (frame.type === 'result') {

@@ -47,8 +47,8 @@ function greetRegistry(): OperationRegistry {
 
 function echoProvider() {
   return {
-    List: (): ToolSpec[] => [echoTool],
-    Call: (name: string, args: Record<string, unknown>): ToolResult => {
+    list: (): ToolSpec[] => [echoTool],
+    call: (name: string, args: Record<string, unknown>): ToolResult => {
       if (name !== 'echo') throw TBError.notFound(`no such tool: ${name}`)
       return { content: { echoed: args.text } }
     },
@@ -66,17 +66,17 @@ function memoryContextProvider() {
     metadata: {},
   })
   return {
-    async List() {
+    async list() {
       return {
         items: [...entries.entries()].map(([path, e]) => meta(path, e)),
       }
     },
-    async Get(path: string) {
+    async get(path: string) {
       const e = entries.get(path)
       if (!e) throw TBError.notFound(`no such entry: ${path}`)
       return { ...meta(path, e), content: e.content }
     },
-    async Write(path: string, entry: { content: unknown }) {
+    async write(path: string, entry: { content: unknown }) {
       const existing = entries.get(path)
       const e = {
         content: entry.content,
@@ -86,7 +86,7 @@ function memoryContextProvider() {
       entries.set(path, e)
       return meta(path, e)
     },
-    async Update(path: string, patch: { content?: unknown }) {
+    async update(path: string, patch: { content?: unknown }) {
       const existing = entries.get(path)
       if (!existing) throw TBError.notFound(`no such entry: ${path}`)
       const e = {
@@ -133,6 +133,7 @@ async function call(
   init: RequestInit = {},
   sk: string = ADMIN_SK,
 ): Promise<Response> {
+  // 数据面调用唯一形态:POST /<node>/<command>,body 即裸 arguments(无 {tool,arguments} 信封)。
   return fetch(`${h.baseUrl}/${path}`, {
     ...init,
     headers: {
@@ -176,9 +177,9 @@ describe('createToolBridge:本地 HTTP(@hono/node-server)', () => {
   })
 
   it('POST 调用本地函数工具成功返回', async () => {
-    const res = await call(h, 'tools/echo', {
+    const res = await call(h, 'tools/echo/echo', {
       method: 'POST',
-      body: JSON.stringify({ tool: 'echo', arguments: { text: 'hi sdk' } }),
+      body: JSON.stringify({ text: 'hi sdk' }),
     })
     expect(res.status).toBe(200)
     expect(await res.json()).toEqual({ echoed: 'hi sdk' })
@@ -206,58 +207,52 @@ describe('createToolBridge:本地 HTTP(@hono/node-server)', () => {
   })
 
   it('OperationRegistry 工具经 HTTP 调用:裸返回值被包装,入参不合报字段名', async () => {
-    const ok = await call(h, 'tools/greet', {
+    const ok = await call(h, 'tools/greet/greet', {
       method: 'POST',
-      body: JSON.stringify({ tool: 'greet', arguments: { name: 'sam' } }),
+      body: JSON.stringify({ name: 'sam' }),
     })
     expect(ok.status).toBe(200)
     expect(await ok.json()).toEqual({ greeting: 'hello sam' })
 
-    const bad = await call(h, 'tools/greet', {
+    const bad = await call(h, 'tools/greet/greet', {
       method: 'POST',
-      body: JSON.stringify({ tool: 'greet', arguments: {} }),
+      body: JSON.stringify({}),
     })
     expect(bad.status).toBe(400)
     expect(JSON.stringify(await bad.json())).toContain('name')
   })
 
   it('registerContext 四动词经 HTTP 可用;未实现的可选方法被拒', async () => {
-    const write = await call(h, 'notes', {
+    const write = await call(h, 'notes/write', {
       method: 'POST',
-      body: JSON.stringify({
-        tool: 'Write',
-        arguments: { path: 'a.md', entry: { content: 'hello' } },
-      }),
+      body: JSON.stringify({ path: 'a.md', entry: { content: 'hello' } }),
     })
     expect(write.status).toBe(200)
 
-    const get = await call(h, 'notes', {
+    const get = await call(h, 'notes/get', {
       method: 'POST',
-      body: JSON.stringify({ tool: 'Get', arguments: { path: 'a.md' } }),
+      body: JSON.stringify({ path: 'a.md' }),
     })
     expect(get.status).toBe(200)
     const entry = (await get.json()) as { content: unknown }
     expect(entry.content).toBe('hello')
 
-    const list = await call(h, 'notes', {
+    const list = await call(h, 'notes/list', {
       method: 'POST',
-      body: JSON.stringify({ tool: 'List', arguments: { path: '' } }),
+      body: JSON.stringify({ path: '' }),
     })
     expect(list.status).toBe(200)
 
-    const update = await call(h, 'notes', {
+    const update = await call(h, 'notes/update', {
       method: 'POST',
-      body: JSON.stringify({
-        tool: 'Update',
-        arguments: { path: 'a.md', patch: { content: 'hello v2' } },
-      }),
+      body: JSON.stringify({ path: 'a.md', patch: { content: 'hello v2' } }),
     })
     expect(update.status).toBe(200)
 
-    // Delete 未实现 → capability 未声明,unknown cmd 拒。
-    const del = await call(h, 'notes', {
+    // delete 未实现 → capability 未声明,unknown cmd 拒。
+    const del = await call(h, 'notes/delete', {
       method: 'POST',
-      body: JSON.stringify({ tool: 'Delete', arguments: { path: 'a.md' } }),
+      body: JSON.stringify({ path: 'a.md' }),
     })
     expect(del.status).toBe(400)
 
@@ -268,30 +263,26 @@ describe('createToolBridge:本地 HTTP(@hono/node-server)', () => {
   })
 
   it('r2 平台 provider 走注入的 objects(MemoryObjectStore)', async () => {
-    const mount = await call(h, 'system/registry', {
+    const mount = await call(h, 'system/registry/write', {
       method: 'POST',
       body: JSON.stringify({
-        tool: 'write',
-        arguments: {
-          path: 'docs/mem',
-          kind: 'context',
-          description: '内存对象桶',
-          config: { kind: 'context', provider: 'r2' },
-        },
+        path: 'docs/mem',
+        kind: 'context',
+        description: '内存对象桶',
+        config: { kind: 'context', provider: 'r2' },
       }),
     })
     expect(mount.status).toBe(200)
-    const write = await call(h, 'docs/mem', {
+    const write = await call(h, 'docs/mem/write', {
       method: 'POST',
       body: JSON.stringify({
-        tool: 'Write',
-        arguments: { path: 'x.md', entry: { content: 'obj', contentType: 'text/markdown' } },
+        path: 'x.md', entry: { content: 'obj', contentType: 'text/markdown' },
       }),
     })
     expect(write.status).toBe(200)
-    const get = await call(h, 'docs/mem', {
+    const get = await call(h, 'docs/mem/get', {
       method: 'POST',
-      body: JSON.stringify({ tool: 'Get', arguments: { path: 'x.md' } }),
+      body: JSON.stringify({ path: 'x.md' }),
     })
     expect(get.status).toBe(200)
     expect(((await get.json()) as { content: unknown }).content).toBe('obj')
@@ -299,16 +290,13 @@ describe('createToolBridge:本地 HTTP(@hono/node-server)', () => {
 
   it('registerTool 落库节点带 @local provider,注册面不可伪造', async () => {
     // 经注册面手工挂 kind:'tool' + provider '@local' → 拒(@local 不是已注册 plugin)。
-    const res = await call(h, 'system/registry', {
+    const res = await call(h, 'system/registry/write', {
       method: 'POST',
       body: JSON.stringify({
-        tool: 'write',
-        arguments: {
-          path: 'evil/tool',
-          kind: 'tool',
-          description: 'forged',
-          config: { kind: 'tool', provider: '@local' },
-        },
+        path: 'evil/tool',
+        kind: 'tool',
+        description: 'forged',
+        config: { kind: 'tool', provider: '@local' },
       }),
     })
     expect(res.status).toBe(400)
@@ -323,14 +311,14 @@ describe('createToolBridge:配置语义', () => {
     try {
       const tb = createToolBridge({ state: new MemoryStateStore(), adminSk: ADMIN_SK })
       const res = await tb.fetch(
-        new Request('http://tb.local/system/secret', {
+        new Request('http://tb.local/system/secret/set', {
           method: 'POST',
           headers: {
             'authorization': `Bearer ${ADMIN_SK}`,
             'content-type': 'application/json',
             'accept': 'application/json',
           },
-          body: JSON.stringify({ tool: 'set', arguments: { name: 'k', value: 'v' } }),
+          body: JSON.stringify({ name: 'k', value: 'v' }),
         }),
       )
       expect(res.status).toBe(503)
@@ -383,26 +371,23 @@ describe('createToolBridge:配置语义', () => {
       'accept': 'application/json',
     }
     const mount = await tb.fetch(
-      new Request('http://tb.local/system/registry', {
+      new Request('http://tb.local/system/registry/write', {
         method: 'POST',
         headers,
         body: JSON.stringify({
-          tool: 'write',
-          arguments: {
-            path: 'docs/r2',
-            kind: 'context',
-            description: 'no objects',
-            config: { kind: 'context', provider: 'r2' },
-          },
+          path: 'docs/r2',
+          kind: 'context',
+          description: 'no objects',
+          config: { kind: 'context', provider: 'r2' },
         }),
       }),
     )
     expect(mount.status).toBe(200)
     const res = await tb.fetch(
-      new Request('http://tb.local/docs/r2', {
+      new Request('http://tb.local/docs/r2/list', {
         method: 'POST',
         headers,
-        body: JSON.stringify({ tool: 'List', arguments: { path: '' } }),
+        body: JSON.stringify({ path: '' }),
       }),
     )
     expect(res.status).toBe(503)

@@ -151,8 +151,7 @@ describe('@tool-bridge/sdk/device neutral connection', () => {
     socket.receive({
       type: 'call',
       id: 'call-1',
-      path: 'camera',
-      tool: 'capture',
+      path: 'camera/capture',
       arguments: { quality: 0.8 },
       context: {
         caller: { keyId: 'sk_1', owner: 'agent:researcher' },
@@ -165,8 +164,7 @@ describe('@tool-bridge/sdk/device neutral connection', () => {
     expect(calls).toHaveLength(1)
     expect(calls[0]).toMatchObject({
       id: 'call-1',
-      path: 'camera',
-      tool: 'capture',
+      path: 'camera/capture',
       arguments: { quality: 0.8 },
       signal: { aborted: false },
       context: {
@@ -203,7 +201,7 @@ describe('@tool-bridge/sdk/device neutral connection', () => {
     socket.open()
     socket.receive({ type: 'ready', mountPath: 'device/phone-legacy' })
     await connection.ready
-    socket.receive({ type: 'call', id: 'c1', path: 'status', tool: 'get', arguments: {} })
+    socket.receive({ type: 'call', id: 'c1', path: 'status/get', arguments: {} })
     await vi.waitFor(() => expect(calls).toHaveLength(1))
     expect(calls[0]).not.toHaveProperty('context')
     expect(calls[0]?.context).toBeUndefined()

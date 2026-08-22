@@ -24,15 +24,15 @@ const tb = createToolBridge({
 tb.registerTool(
   'tools/echo',
   {
-    List: () => [{ name: 'echo', description: '原样返回 text' }],
-    Call: (_name, args) => ({ content: { echoed: args.text } }),
+    list: () => [{ name: 'echo', description: '原样返回 text' }],
+    call: (_name, args) => ({ content: { echoed: args.text } }),
   },
   { description: '本地 echo 工具' },
 )
 
 serve({ fetch: (req) => tb.fetch(req), port: 8787 })
 // curl -H "Authorization: Bearer $TB_ADMIN_SK" http://127.0.0.1:8787/tools/echo/~help
-// curl -X POST -H "Authorization: Bearer $TB_ADMIN_SK" -d '{"tool":"echo","arguments":{"text":"hi"}}' http://127.0.0.1:8787/tools/echo
+// curl -X POST -H "Authorization: Bearer $TB_ADMIN_SK" -d '{"text":"hi"}' http://127.0.0.1:8787/tools/echo/echo
 ```
 
 ## 反向连接远程网关(HTTP → WebSocket)
@@ -43,7 +43,7 @@ const conn = tb.connect('https://your-gateway.example.com', process.env.TB_SK!, 
 })
 
 await conn.ready               // ready 帧到达,本实例注册的节点已挂到远程树 device/<deviceId>/ 下
-// 远程即可:POST /device/my-service-01/tools/echo {"tool":"echo","arguments":{...}}
+// 远程即可:POST /device/my-service-01/tools/echo/echo  body {...arguments}
 
 conn.close()                   // 下线;远程节点保留标记 offline,超回收期自动删除
 ```
@@ -78,9 +78,10 @@ const connection = connectDevice({
     },
   },
   webSocketFactory: createReactNativeWebSocketFactory(WebSocket),
-  handler: async ({ path, tool, arguments: args, signal }) => {
-    // policy、权限提示、原生能力和 signal 取消处理都属于 App 适配层。
-    return await runNativeTool({ path, tool, args, signal })
+  handler: async ({ path, arguments: args, signal }) => {
+    // path 含命令叶子段(如 "fs/get"),命令是最后一段;policy、权限提示、
+    // 原生能力和 signal 取消处理都属于 App 适配层。
+    return await runNativeTool({ path, args, signal })
   },
 })
 

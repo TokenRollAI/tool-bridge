@@ -66,9 +66,9 @@ export type DeviceCallHandler = (call: {
   /** 网关鉴权后的调用方来源与权威期限;老网关不带,handler 须按缺省显式降级。 */
   context?: DeviceCallContext
   id: string
+  /** 相对 mountPath 且含命令叶子段(如 "fs/get");命令是最后一段。 */
   path: string
   signal: AbortSignal
-  tool: string
 }) => Promise<unknown> | unknown
 
 export interface PreparedDeviceCredential {
@@ -495,7 +495,6 @@ export function connectDevice(opts: ConnectDeviceOptions): DeviceConnection {
     handler: async call => await opts.handler({
       id: call.id,
       path: call.path,
-      tool: call.tool,
       arguments: call.arguments,
       signal: call.signal as AbortSignal,
       // 老网关不带 context:字段缺省透传,consumer handler 侧显式降级。

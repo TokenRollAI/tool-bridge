@@ -103,7 +103,7 @@ describe('契约面(生命周期 GET)', () => {
     ])
     const docs = body.exports[1]
     // 只写了 get/list/search → 只声明这三个动词;未写 write/update/delete 就不声明。
-    expect(docs?.methods?.sort()).toEqual(['Get', 'List', 'Search'])
+    expect(docs?.methods?.sort()).toEqual(['get', 'list', 'search'])
     expect(docs?.capabilities).toEqual(['search'])
   })
 
@@ -111,7 +111,7 @@ describe('契约面(生命周期 GET)', () => {
     const res = await makePlugin().fetch(new Request('https://plugin.test/~help'), ENV)
     const body = (await res.json()) as { exports: Array<{ cmds: Array<{ name: string }>, id: string }> }
     expect(body.exports[0]?.cmds.map(c => c.name)).toEqual(['create_document', 'ping'])
-    expect(body.exports[1]?.cmds.map(c => c.name).sort()).toEqual(['Get', 'List', 'Search'])
+    expect(body.exports[1]?.cmds.map(c => c.name).sort()).toEqual(['get', 'list', 'search'])
   })
 
   it('未知路径 → 404', async () => {
@@ -123,7 +123,7 @@ describe('契约面(生命周期 GET)', () => {
 describe('鉴权', () => {
   it('token 不符 → 401', async () => {
     const res = await makePlugin().fetch(
-      envelope({ tool: 'List', arguments: {} }, { caller: withExport('actions'), token: 'wrong' }),
+      envelope({ tool: 'list', arguments: {} }, { caller: withExport('actions'), token: 'wrong' }),
       ENV,
     )
     expect(res.status).toBe(401)
@@ -133,7 +133,7 @@ describe('鉴权', () => {
     const req = new Request('https://plugin.test/', {
       method: 'POST',
       headers: { authorization: `Bearer ${ENV.PLUGIN_TOKEN}` },
-      body: JSON.stringify({ tool: 'List', arguments: {} }),
+      body: JSON.stringify({ tool: 'list', arguments: {} }),
     })
     const res = await makePlugin().fetch(req, ENV)
     expect(res.status).toBe(400)
@@ -143,7 +143,7 @@ describe('鉴权', () => {
 describe('tools export', () => {
   it('List 回 ToolSpec,inputSchema 由 Zod 自动派生(作者未写一行 JSON Schema)', async () => {
     const res = await makePlugin().fetch(
-      envelope({ tool: 'List', arguments: {} }, { caller: withExport('actions') }),
+      envelope({ tool: 'list', arguments: {} }, { caller: withExport('actions') }),
       ENV,
     )
     const specs = (await res.json()) as Array<{ effect?: string, inputSchema?: Record<string, unknown>, name: string }>
@@ -158,7 +158,7 @@ describe('tools export', () => {
     const calls: string[] = []
     const res = await makePlugin(calls).fetch(
       envelope(
-        { tool: 'Call', arguments: { name: 'create_document', args: { title: 'Spec' } } },
+        { tool: 'call', arguments: { name: 'create_document', args: { title: 'Spec' } } },
         { caller: withExport('actions'), upstreamAuth: 'upstream-token' },
       ),
       ENV,
@@ -171,7 +171,7 @@ describe('tools export', () => {
   it('入参不合 schema → invalid_argument,消息含字段名', async () => {
     const res = await makePlugin().fetch(
       envelope(
-        { tool: 'Call', arguments: { name: 'create_document', args: { title: 42 } } },
+        { tool: 'call', arguments: { name: 'create_document', args: { title: 42 } } },
         { caller: withExport('actions') },
       ),
       ENV,
@@ -184,7 +184,7 @@ describe('tools export', () => {
 
   it('平台从不发 Get(v1 的纯样板)→ 未知方法', async () => {
     const res = await makePlugin().fetch(
-      envelope({ tool: 'Get', arguments: { name: 'ping' } }, { caller: withExport('actions') }),
+      envelope({ tool: 'get', arguments: { name: 'ping' } }, { caller: withExport('actions') }),
       ENV,
     )
     expect(res.status).toBe(400)
@@ -193,7 +193,7 @@ describe('tools export', () => {
   it('同一 X-TB-Request-Id 重放 → handler 只执行一次', async () => {
     const calls: string[] = []
     const plugin = makePlugin(calls)
-    const body = { tool: 'Call', arguments: { name: 'create_document', args: { title: 'Once' } } }
+    const body = { tool: 'call', arguments: { name: 'create_document', args: { title: 'Once' } } }
     const first = await plugin.fetch(
       envelope(body, { caller: withExport('actions'), requestId: 'req-1' }),
       ENV,
@@ -210,7 +210,7 @@ describe('tools export', () => {
 describe('context export', () => {
   it('已实现的动词经 wire 可用', async () => {
     const res = await makePlugin().fetch(
-      envelope({ tool: 'Get', arguments: { path: 'a.md' } }, { caller: withExport('documents') }),
+      envelope({ tool: 'get', arguments: { path: 'a.md' } }, { caller: withExport('documents') }),
       ENV,
     )
     expect(await res.json()).toEqual({ path: 'a.md', content: 'hello' })
@@ -219,7 +219,7 @@ describe('context export', () => {
   it('未实现的动词(Write)→ invalid_argument,而不是假装成功', async () => {
     const res = await makePlugin().fetch(
       envelope(
-        { tool: 'Write', arguments: { path: 'a.md', entry: { content: 'x' } } },
+        { tool: 'write', arguments: { path: 'a.md', entry: { content: 'x' } } },
         { caller: withExport('documents') },
       ),
       ENV,
@@ -232,7 +232,7 @@ describe('context export', () => {
 describe('export 路由', () => {
   it('exportId 命中对应 export', async () => {
     const res = await makePlugin().fetch(
-      envelope({ tool: 'List', arguments: { path: '' } }, { caller: withExport('documents') }),
+      envelope({ tool: 'list', arguments: { path: '' } }, { caller: withExport('documents') }),
       ENV,
     )
     // documents 的 List 返回 items,不是 ToolSpec 数组
@@ -241,7 +241,7 @@ describe('export 路由', () => {
 
   it('未知 exportId → invalid_argument', async () => {
     const res = await makePlugin().fetch(
-      envelope({ tool: 'List', arguments: {} }, { caller: withExport('nope') }),
+      envelope({ tool: 'list', arguments: {} }, { caller: withExport('nope') }),
       ENV,
     )
     expect(res.status).toBe(400)
@@ -251,7 +251,7 @@ describe('export 路由', () => {
     const solo = createPlugin<Env>({ token: env => env.PLUGIN_TOKEN })
     solo.tools('only').register('ping', {}, () => 'pong')
     const res = await solo.fetch(
-      envelope({ tool: 'Call', arguments: { name: 'ping', args: {} } }, { caller: CALLER }),
+      envelope({ tool: 'call', arguments: { name: 'ping', args: {} } }, { caller: CALLER }),
       ENV,
     )
     expect(await res.json()).toEqual({ content: 'pong' })
@@ -259,7 +259,7 @@ describe('export 路由', () => {
 
   it('多 export 但未给 exportId → invalid_argument(不猜)', async () => {
     const res = await makePlugin().fetch(
-      envelope({ tool: 'List', arguments: {} }, { caller: CALLER }),
+      envelope({ tool: 'list', arguments: {} }, { caller: CALLER }),
       ENV,
     )
     expect(res.status).toBe(400)
@@ -312,7 +312,7 @@ describe('proxyTools:工具表来自上游的代理型 export', () => {
     const seen: string[] = []
     const plugin = makeProxy(seen)
     const list = await plugin.fetch(
-      envelope({ tool: 'List', arguments: {} }, { caller: CALLER_PROXY, upstreamAuth: 'secret-x' }),
+      envelope({ tool: 'list', arguments: {} }, { caller: CALLER_PROXY, upstreamAuth: 'secret-x' }),
       ENV,
     )
     expect(await list.json()).toEqual([
@@ -321,7 +321,7 @@ describe('proxyTools:工具表来自上游的代理型 export', () => {
 
     const call = await plugin.fetch(
       envelope(
-        { tool: 'Call', arguments: { name: 'remote_tool', args: { a: 1 } } },
+        { tool: 'call', arguments: { name: 'remote_tool', args: { a: 1 } } },
         { caller: CALLER_PROXY, upstreamAuth: 'secret-x' },
       ),
       ENV,
@@ -338,13 +338,13 @@ describe('proxyTools:工具表来自上游的代理型 export', () => {
     const seen: string[] = []
     const plugin = makeProxy(seen)
     const noName = await plugin.fetch(
-      envelope({ tool: 'Call', arguments: {} }, { caller: CALLER_PROXY, upstreamAuth: 's' }),
+      envelope({ tool: 'call', arguments: {} }, { caller: CALLER_PROXY, upstreamAuth: 's' }),
       ENV,
     )
     expect(noName.status).toBe(400)
 
     const get = await plugin.fetch(
-      envelope({ tool: 'Get', arguments: { name: 'remote_tool' } }, { caller: CALLER_PROXY }),
+      envelope({ tool: 'get', arguments: { name: 'remote_tool' } }, { caller: CALLER_PROXY }),
       ENV,
     )
     expect(get.status).toBe(400)
@@ -353,7 +353,7 @@ describe('proxyTools:工具表来自上游的代理型 export', () => {
 
   it('坏 X-TB-Upstream-Auth → 400 invalid_argument(不是 500)', async () => {
     const plugin = makeProxy()
-    const req = envelope({ tool: 'List', arguments: {} }, { caller: CALLER_PROXY })
+    const req = envelope({ tool: 'list', arguments: {} }, { caller: CALLER_PROXY })
     const headers = new Headers(req.headers)
     headers.set(HEADER_TB_UPSTREAM_AUTH, 'not-base64url!!!')
     const res = await plugin.fetch(
@@ -393,7 +393,7 @@ describe('鉴权 fail closed(未配置 PLUGIN_TOKEN)', () => {
             mountPath: 'p', exportId: 'actions',
           }),
         },
-        body: JSON.stringify({ tool: 'Call', arguments: { name: 'ping', args: {} } }),
+        body: JSON.stringify({ tool: 'call', arguments: { name: 'ping', args: {} } }),
       }),
       env as never,
     ))
@@ -558,7 +558,7 @@ describe('进程内 binding 跳过 token 校验', () => {
       new Request('https://p.test/', {
         method: 'POST',
         headers,
-        body: JSON.stringify({ tool: 'Call', arguments: { name: 'ping', args: {} } }),
+        body: JSON.stringify({ tool: 'call', arguments: { name: 'ping', args: {} } }),
       }),
       env as never,
     ))

@@ -23,7 +23,7 @@ async function postJson(path: string, body: unknown, init: RequestInit = {}): Pr
 }
 
 async function issueSk(input: unknown): Promise<{ id: string, secret: string }> {
-  const res = await postJson('system/sk', { tool: 'write', arguments: input }, admin())
+  const res = await postJson('system/sk/write', input, admin())
   expect(res.status).toBe(200)
   const body = (await res.json()) as { key: { id: string }, secret: string }
   return { id: body.key.id, secret: body.secret }
@@ -123,16 +123,13 @@ describe('DeviceSession DO + /system/device/ws', () => {
     expect(help).toContain('allowed commands: echo; everything else denied')
 
     const callSeen = nextFrame(ws)
-    const invoke = postJson(
-      `device/${deviceId}/shell`,
-      { tool: 'exec', arguments: { command: 'echo hi' } },
+    const invoke = postJson(`device/${deviceId}/shell/exec`, { command: 'echo hi' },
       admin(),
     )
     const call = await callSeen
     expect(call).toMatchObject({
       type: 'call',
-      path: 'shell',
-      tool: 'exec',
+      path: 'shell/exec',
       arguments: { command: 'echo hi' },
     })
     if (call.type !== 'call') throw new Error('expected call frame')
@@ -149,16 +146,13 @@ describe('DeviceSession DO + /system/device/ws', () => {
     expect(await invokeRes.json()).toEqual({ stdout: 'hi\n', stderr: '', exitCode: 0 })
 
     const fsCallSeen = nextFrame(ws)
-    const fsInvoke = postJson(
-      `device/${deviceId}/fs`,
-      { tool: 'Get', arguments: { path: 'tmp/note.txt' } },
+    const fsInvoke = postJson(`device/${deviceId}/fs/get`, { path: 'tmp/note.txt' },
       admin(),
     )
     const fsCall = await fsCallSeen
     expect(fsCall).toMatchObject({
       type: 'call',
-      path: 'fs',
-      tool: 'Get',
+      path: 'fs/get',
       arguments: { path: 'tmp/note.txt' },
     })
     if (fsCall.type !== 'call') throw new Error('expected fs call frame')
@@ -183,9 +177,7 @@ describe('DeviceSession DO + /system/device/ws', () => {
 
     ws.close(1000)
     await new Promise(resolve => setTimeout(resolve, 20))
-    const offline = await postJson(
-      `device/${deviceId}/shell`,
-      { tool: 'exec', arguments: { command: 'echo hi' } },
+    const offline = await postJson(`device/${deviceId}/shell/exec`, { command: 'echo hi' },
       admin(),
     )
     expect(offline.status).toBe(503)
@@ -197,16 +189,13 @@ describe('DeviceSession DO + /system/device/ws', () => {
       fs: { roots: ['/tmp'], readOnly: true },
     })
     const restoredCallSeen = nextFrame(ws2)
-    const restoredInvoke = postJson(
-      `device/${deviceId}/shell`,
-      { tool: 'exec', arguments: { command: 'echo again' } },
+    const restoredInvoke = postJson(`device/${deviceId}/shell/exec`, { command: 'echo again' },
       admin(),
     )
     const restoredCall = await restoredCallSeen
     expect(restoredCall).toMatchObject({
       type: 'call',
-      path: 'shell',
-      tool: 'exec',
+      path: 'shell/exec',
       arguments: { command: 'echo again' },
     })
     if (restoredCall.type !== 'call') throw new Error('expected restored call frame')
@@ -231,9 +220,7 @@ describe('DeviceSession DO + /system/device/ws', () => {
     const deviceId = `d-${crypto.randomUUID().slice(0, 8)}`
     const ws = await connectDevice(deviceId, { fs: { roots: ['/tmp'], readOnly: true } })
     const callSeen = nextFrame(ws)
-    const invoke = postJson(
-      `device/${deviceId}/fs`,
-      { tool: 'Get', arguments: { path: 'tmp/bare.txt' } },
+    const invoke = postJson(`device/${deviceId}/fs/get`, { path: 'tmp/bare.txt' },
       admin(),
     )
     const call = await callSeen
@@ -308,17 +295,13 @@ describe('DeviceSession DO + /system/device/ws', () => {
       shell: { allow: ['echo'] },
     })
 
-    const disabled = await postJson(
-      'system/sk',
-      { tool: 'update', arguments: { id: issued.id, patch: { disabled: true } } },
+    const disabled = await postJson('system/sk/update', { id: issued.id, patch: { disabled: true } },
       admin(),
     )
     expect(disabled.status).toBe(200)
 
     const rejected = nextFrame(ws)
-    const invoke = await postJson(
-      `device/${deviceId}/shell`,
-      { tool: 'exec', arguments: { command: 'echo should-not-run' } },
+    const invoke = await postJson(`device/${deviceId}/shell/exec`, { command: 'echo should-not-run' },
       admin(),
     )
     expect(invoke.status).toBe(503)
@@ -337,23 +320,16 @@ describe('DeviceSession DO + /system/device/ws', () => {
     })
 
     // SK 仍有效、keyId 不变,但收紧后不再对 mountPath 持 register(连接代际重验须复核)。
-    const narrowed = await postJson(
-      'system/sk',
-      {
-        tool: 'update',
-        arguments: {
-          id: issued.id,
-          patch: { scopes: [{ pattern: 'other/**', actions: ['read', 'register', 'call'] }] },
-        },
-      },
-      admin(),
+    const narrowed = await postJson('system/sk/update', {
+      id: issued.id,
+      patch: { scopes: [{ pattern: 'other/**', actions: ['read', 'register', 'call'] }] },
+    },
+    admin(),
     )
     expect(narrowed.status).toBe(200)
 
     const rejected = nextFrame(ws)
-    const invoke = await postJson(
-      `device/${deviceId}/shell`,
-      { tool: 'exec', arguments: { command: 'echo should-not-run' } },
+    const invoke = await postJson(`device/${deviceId}/shell/exec`, { command: 'echo should-not-run' },
       admin(),
     )
     expect(invoke.status).toBe(503)

@@ -26,7 +26,7 @@ async function postJson(path: string, body: unknown, init: RequestInit = {}): Pr
 }
 
 async function issueSk(input: unknown): Promise<string> {
-  const res = await postJson('system/sk', { tool: 'write', arguments: input }, admin())
+  const res = await postJson('system/sk/write', input, admin())
   expect(res.status).toBe(200)
   return ((await res.json()) as { secret: string }).secret
 }
@@ -52,7 +52,7 @@ async function ctxCall(
   args: Record<string, unknown>,
   init: RequestInit = admin(),
 ): Promise<Response> {
-  return postJson(path, { tool, arguments: args }, init)
+  return postJson(`${path}/${tool.toLowerCase()}`, args, init)
 }
 
 interface EntryMeta {
@@ -138,7 +138,8 @@ describe('r2 namespace 四动词循环', () => {
 
   it('未知 cmd → 400;路径穿越 Get "../x" → 400', async () => {
     expect((await mountR2('ctxtest/bad')).status).toBe(200)
-    expect((await ctxCall('ctxtest/bad', 'list', {})).status).toBe(400) // 大小写不符
+    expect((await ctxCall('ctxtest/bad', 'frobnicate', {})).status).toBe(400) // 未知动词
+    // 大小写不敏感:Get 规范化为 get,动词本身有效;拒绝点在 entry-path 的路径穿越。
     expect((await ctxCall('ctxtest/bad', 'Get', { path: '../x' })).status).toBe(400)
   })
 })
@@ -183,7 +184,7 @@ describe('readOnly 挂载(D11)', () => {
     const names = ((await help.json()) as { cmds: Array<{ name: string }> }).cmds
       .map(c => c.name)
       .sort()
-    expect(names).toEqual(['Get', 'List', 'Search'])
+    expect(names).toEqual(['get', 'list', 'search'])
 
     const w = await ctxCall('ctxtest/ro', 'Write', {
       path: 'x.txt',
@@ -362,19 +363,14 @@ const s3Ready
 describe.skipIf(!s3Ready)('s3 provider E2E(opt-in via TB_TEST_S3_*)', () => {
   async function mountS3(path: string): Promise<Response> {
     // 凭证按 S3 类形状入 SecretStore,挂载走 authRef 引用。
-    const cred = await postJson(
-      'system/secret',
-      {
-        tool: 'set',
-        arguments: {
-          name: 's3-test-cred',
-          value: JSON.stringify({
-            accessKeyId: s3Env.TB_TEST_S3_ACCESS_KEY_ID,
-            secretAccessKey: s3Env.TB_TEST_S3_SECRET_ACCESS_KEY,
-          }),
-        },
-      },
-      admin(),
+    const cred = await postJson('system/secret/set', {
+      name: 's3-test-cred',
+      value: JSON.stringify({
+        accessKeyId: s3Env.TB_TEST_S3_ACCESS_KEY_ID,
+        secretAccessKey: s3Env.TB_TEST_S3_SECRET_ACCESS_KEY,
+      }),
+    },
+    admin(),
     )
     expect(cred.status).toBe(200)
     return postJson(

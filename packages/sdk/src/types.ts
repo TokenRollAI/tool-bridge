@@ -16,13 +16,13 @@ import { type BuiltinCatalog,
 export type Awaitable<T> = T | Promise<T>
 
 /**
- * SDK 使用者手写的工具源:**只有 List 与 Call 两个动词**。
- * 此前还强制 `Get`,但平台从不发 Get(`~help` 的数据源是 List 产出的 ToolSpec[]),
+ * SDK 使用者手写的工具源:**只有 list 与 call 两个动词**(全小写,cmd 名 = 方法名)。
+ * 此前还强制 `get`,但平台从不发 get(`~help` 的数据源是 list 产出的 ToolSpec[]),
  * 那是纯样板 —— 已随 core 的 `ToolProvider` 一并删除。方法可同步可异步。
  */
 export interface ToolProviderLike {
-  Call(name: string, args: Record<string, unknown>): Awaitable<ToolResult>
-  List(): Awaitable<ToolSpec[]>
+  call(name: string, args: Record<string, unknown>): Awaitable<ToolResult>
+  list(): Awaitable<ToolSpec[]>
 }
 
 /**

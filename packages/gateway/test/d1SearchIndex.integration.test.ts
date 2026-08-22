@@ -154,26 +154,23 @@ describe('D1SearchIndex', () => {
       inputSchema: { type: 'object', properties: { day: { type: 'string' } } },
       effect: 'read',
     }
-    const register = await SELF.fetch('https://tb.test/system/registry', {
+    const register = await SELF.fetch('https://tb.test/system/registry/write', {
       method: 'POST',
       headers: adminHeaders,
       body: JSON.stringify({
-        tool: 'write',
-        arguments: {
-          path,
+        path,
+        kind: 'http',
+        description: 'Search wire fixture',
+        config: {
           kind: 'http',
-          description: 'Search wire fixture',
-          config: {
-            kind: 'http',
-            endpoint: 'https://calendar.example.test',
-            tools: [{
-              name: tool.name,
-              description: tool.description,
-              inputSchema: tool.inputSchema,
-              method: 'GET',
-              pathTemplate: '/calendar',
-            }],
-          },
+          endpoint: 'https://calendar.example.test',
+          tools: [{
+            name: tool.name,
+            description: tool.description,
+            inputSchema: tool.inputSchema,
+            method: 'GET',
+            pathTemplate: '/calendar',
+          }],
         },
       }),
     })
@@ -259,20 +256,17 @@ describe('D1SearchIndex', () => {
       bulkTools.slice(i * 20, (i + 1) * 20),
     )
     for (const [groupIndex, tools] of bulkGroups.entries()) {
-      const bulkRegister = await SELF.fetch('https://tb.test/system/registry', {
+      const bulkRegister = await SELF.fetch('https://tb.test/system/registry/write', {
         method: 'POST',
         headers: adminHeaders,
         body: JSON.stringify({
-          tool: 'write',
-          arguments: {
-            path: `search/wire/d1-bulk-${groupIndex}`,
+          path: `search/wire/d1-bulk-${groupIndex}`,
+          kind: 'http',
+          description: 'Bulk search wire fixture',
+          config: {
             kind: 'http',
-            description: 'Bulk search wire fixture',
-            config: {
-              kind: 'http',
-              endpoint: 'https://bulk.example.test',
-              tools,
-            },
+            endpoint: 'https://bulk.example.test',
+            tools,
           },
         }),
       })
@@ -297,11 +291,11 @@ describe('D1SearchIndex', () => {
       tools: [{ name, description, method: 'GET' as const, pathTemplate: '/probe' }],
     })
     const registryCall = async (tool: string, args: unknown): Promise<Response> => await SELF.fetch(
-      'https://tb.test/system/registry',
+      `https://tb.test/system/registry/${tool}`,
       {
         method: 'POST',
         headers: adminHeaders,
-        body: JSON.stringify({ tool, arguments: args }),
+        body: JSON.stringify(args),
       },
     )
     const search = async (query: string): Promise<{ items: Array<{ path: string }> }> => {

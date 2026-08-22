@@ -152,18 +152,11 @@ export interface ContextHandlers<Env = unknown> {
   write?: (input: ContextWriteInput, ctx: PluginCallContext<Env>) => unknown | Promise<unknown>
 }
 
-/** context handler 名 → 协议动词名。 */
-const CONTEXT_VERB_BY_HANDLER = {
-  list: 'List',
-  get: 'Get',
-  write: 'Write',
-  update: 'Update',
-  delete: 'Delete',
-  search: 'Search',
-} as const
+/** context handler 名即协议动词名(全小写,cmd 名 = 方法名)。 */
+const CONTEXT_HANDLER_VERBS = ['list', 'get', 'write', 'update', 'delete', 'search'] as const
 
-/** 可选能力(进 `/~describe` 的 capabilities)。 */
-const CAPABILITY_BY_VERB: Record<string, string> = { Search: 'search', Delete: 'delete' }
+/** 可选能力(进 `/~describe` 的 capabilities);key 是小写协议动词。 */
+const CAPABILITY_BY_VERB: Record<string, string> = { search: 'search', delete: 'delete' }
 
 export interface CreatePluginOptions<Env = unknown> {
   /** 健康检查路径(须以 '/' 开头);缺省 '/healthz'。 */
@@ -292,11 +285,11 @@ function errorResponse(err: unknown): Response {
   return json(new TBError('internal', 'internal plugin error').toJSON(), 500)
 }
 
-/** context handler 存在性 → 协议动词集合。 */
+/** context handler 存在性 → 协议动词集合(handler 名即动词)。 */
 function contextVerbs<Env>(handlers: ContextHandlers<Env>): string[] {
   const verbs: string[] = []
-  for (const [key, verb] of Object.entries(CONTEXT_VERB_BY_HANDLER)) {
-    if (typeof handlers[key as keyof ContextHandlers<Env>] === 'function') verbs.push(verb)
+  for (const verb of CONTEXT_HANDLER_VERBS) {
+    if (typeof handlers[verb as keyof ContextHandlers<Env>] === 'function') verbs.push(verb)
   }
   return verbs
 }
@@ -438,17 +431,21 @@ export function createPlugin<Env = unknown>(opts: CreatePluginOptions<Env> = {})
     args: Record<string, unknown>,
     ctx: PluginCallContext<Env>,
   ): Promise<unknown> {
-    // 平台只发 List 与 Call —— v1 强制的 Get 是纯样板,v2 不再要求实现。
-    if (method === 'List') return state.registry.list() satisfies ToolSpec[]
-    if (method === 'Call') {
-      const name = args.name
-      if (typeof name !== 'string') {
-        throw new TBError('invalid_argument', 'Call requires a string \'name\'')
+    // 平台只发 list 与 call —— v1 强制的 get 是纯样板,v2 不再要求实现。
+    switch (method.toLowerCase()) {
+      case 'list':
+        return state.registry.list() satisfies ToolSpec[]
+      case 'call': {
+        const name = args.name
+        if (typeof name !== 'string') {
+          throw new TBError('invalid_argument', 'call requires a string \'name\'')
+        }
+        const callArgs = (args.args ?? {}) as Record<string, unknown>
+        return await state.registry.call(name, callArgs, ctx)
       }
-      const callArgs = (args.args ?? {}) as Record<string, unknown>
-      return await state.registry.call(name, callArgs, ctx)
+      default:
+        throw new TBError('invalid_argument', `unknown method '${method}' on a tools export`)
     }
-    throw new TBError('invalid_argument', `unknown method '${method}' on a tools export`)
   }
 
   async function dispatchProxyTools(
@@ -457,20 +454,24 @@ export function createPlugin<Env = unknown>(opts: CreatePluginOptions<Env> = {})
     args: Record<string, unknown>,
     ctx: PluginCallContext<Env>,
   ): Promise<unknown> {
-    if (method === 'List') return await state.handlers.list(ctx)
-    if (method === 'Call') {
-      const name = args.name
-      if (typeof name !== 'string' || name === '') {
-        throw new TBError('invalid_argument', 'Call requires a non-empty string \'name\'')
+    switch (method.toLowerCase()) {
+      case 'list':
+        return await state.handlers.list(ctx)
+      case 'call': {
+        const name = args.name
+        if (typeof name !== 'string' || name === '') {
+          throw new TBError('invalid_argument', 'call requires a non-empty string \'name\'')
+        }
+        const callArgs
+          = typeof args.args === 'object' && args.args !== null
+            ? (args.args as Record<string, unknown>)
+            : {}
+        // 上游返回值形状不由我们决定:裸值包成 ToolResult,已是结果形状则透传(与静态路径同规则)。
+        return toToolResult(await state.handlers.call({ name, args: callArgs }, ctx))
       }
-      const callArgs
-        = typeof args.args === 'object' && args.args !== null
-          ? (args.args as Record<string, unknown>)
-          : {}
-      // 上游返回值形状不由我们决定:裸值包成 ToolResult,已是结果形状则透传(与静态路径同规则)。
-      return toToolResult(await state.handlers.call({ name, args: callArgs }, ctx))
+      default:
+        throw new TBError('invalid_argument', `unknown method '${method}' on a tools export`)
     }
-    throw new TBError('invalid_argument', `unknown method '${method}' on a tools export`)
   }
 
   async function dispatchContext(
@@ -480,32 +481,32 @@ export function createPlugin<Env = unknown>(opts: CreatePluginOptions<Env> = {})
     ctx: PluginCallContext<Env>,
   ): Promise<unknown> {
     const handlers = state.handlers
-    switch (method) {
-      case 'List':
+    switch (method.toLowerCase()) {
+      case 'list':
         if (handlers.list === undefined) break
         return await handlers.list(
           { path: String(args.path ?? ''), ...(args.opts !== undefined ? { opts: args.opts as ListOptions } : {}) },
           ctx,
         )
-      case 'Get':
+      case 'get':
         if (handlers.get === undefined) break
         return await handlers.get({ path: String(args.path ?? '') }, ctx)
-      case 'Write':
+      case 'write':
         if (handlers.write === undefined) break
         return await handlers.write(
           { path: String(args.path ?? ''), entry: (args.entry ?? {}) as ContextEntryInput },
           ctx,
         )
-      case 'Update':
+      case 'update':
         if (handlers.update === undefined) break
         return await handlers.update(
           { path: String(args.path ?? ''), patch: (args.patch ?? {}) as ContextPatch },
           ctx,
         )
-      case 'Delete':
+      case 'delete':
         if (handlers.delete === undefined) break
         return await handlers.delete({ path: String(args.path ?? '') }, ctx)
-      case 'Search':
+      case 'search':
         if (handlers.search === undefined) break
         return await handlers.search(
           { query: String(args.query ?? ''), ...(args.opts !== undefined ? { opts: args.opts as SearchOptions } : {}) },

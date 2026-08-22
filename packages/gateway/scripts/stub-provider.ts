@@ -6,7 +6,7 @@
  *   GET  /healthz     → { healthy: true }
  *   GET  /~describe   → { protocolVersion, exports:[{ id, profile, methods, capabilities }] }
  *   GET  /~help       → Help DSL(Accept: application/json → HelpJson;复用 core 渲染器)
- *   POST /            → envelope {"tool":"<Method>","arguments":{...}}
+ *   POST /<export>/<command>  → body 即 arguments 本体(直连,无信封)
  * 数据是内存里的几条 markdown 条目(进程退出即失);List 支持 cursor 分页,
  * X-TB-Request-Id 幂等去重复用 core 的 RequestDedupe(重放返回首次结果,含错误)。
  *
@@ -194,24 +194,24 @@ function doSearch(args: Record<string, unknown>): Record<string, unknown> {
 }
 
 function invoke(tool: string, args: Record<string, unknown>): unknown {
-  switch (tool) {
-    case 'List': {
+  switch (tool.toLowerCase()) {
+    case 'list': {
       const prefix = typeof args.path === 'string' ? args.path : ''
       const keys = [...entries.keys()].sort().filter(k => k.startsWith(prefix))
       return pageOf(keys, optsOf(args))
     }
-    case 'Get': {
+    case 'get': {
       const path = requirePath(args)
       const e = requireEntry(path)
       return { ...toMeta(path, e), content: e.content }
     }
-    case 'Write':
+    case 'write':
       return doWrite(args)
-    case 'Update':
+    case 'update':
       return doUpdate(args)
-    case 'Search':
+    case 'search':
       return doSearch(args)
-    case 'Delete': {
+    case 'delete': {
       const path = requirePath(args)
       requireEntry(path) // 不存在 → not_found
       entries.delete(path)
@@ -232,7 +232,7 @@ const HELP: HelpModel = {
   },
   cmds: [
     {
-      name: 'List',
+      name: 'list',
       method: 'POST',
       path: '/',
       h: 'List entries under a prefix (paged)',
@@ -240,7 +240,7 @@ const HELP: HelpModel = {
       scope: 'read',
     },
     {
-      name: 'Get',
+      name: 'get',
       method: 'POST',
       path: '/',
       h: 'Read one entry with content',
@@ -248,7 +248,7 @@ const HELP: HelpModel = {
       scope: 'read',
     },
     {
-      name: 'Write',
+      name: 'write',
       method: 'POST',
       path: '/',
       h: 'Create or replace an entry (idempotent upsert)',
@@ -256,7 +256,7 @@ const HELP: HelpModel = {
       scope: 'write',
     },
     {
-      name: 'Update',
+      name: 'update',
       method: 'POST',
       path: '/',
       h: 'Patch content/metadata of an existing entry',
@@ -264,7 +264,7 @@ const HELP: HelpModel = {
       scope: 'write',
     },
     {
-      name: 'Search',
+      name: 'search',
       method: 'POST',
       path: '/',
       h: 'Keyword search over paths and contents',
@@ -272,7 +272,7 @@ const HELP: HelpModel = {
       scope: 'read',
     },
     {
-      name: 'Delete',
+      name: 'delete',
       method: 'POST',
       path: '/',
       h: 'Delete an entry',
@@ -332,7 +332,7 @@ const server = createServer((req, res) => {
           {
             id: EXPORT_ID,
             profile: 'context/v1',
-            methods: ['List', 'Get', 'Update', 'Write', 'Search', 'Delete'],
+            methods: ['list', 'get', 'update', 'write', 'search', 'delete'],
             capabilities: [...CAPABILITIES],
           },
         ],

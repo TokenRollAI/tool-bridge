@@ -88,8 +88,8 @@ function normalizeDeviceId(input: string): string {
 function providerOf(source: ToolSource): ToolProviderLike {
   if (source instanceof OperationRegistry) {
     return {
-      List: () => source.list(),
-      Call: async (name, args) => await source.call(name, args, undefined),
+      list: () => source.list(),
+      call: async (name, args) => await source.call(name, args, undefined),
     }
   }
   return source
@@ -98,13 +98,13 @@ function providerOf(source: ToolSource): ToolProviderLike {
 /** ToolProviderLike → gateway UpstreamProvider(list 产出的即对外名;'@local' 不虚拟化)。 */
 function upstreamOf(provider: ToolProviderLike): UpstreamProvider {
   return {
-    list: async () => await provider.List(),
-    call: async (name, args) => await provider.Call(name, args),
+    list: async () => await provider.list(),
+    call: async (name, args) => await provider.call(name, args),
   }
 }
 
 /** ToolSpec → hello 帧 nodes[].cmds 元素(同形收窄;inputSchema 原样上送作 ~help 数据源)。 */
-function cmdsOf(specs: Awaited<ReturnType<ToolProviderLike['List']>>): DeviceNodeCmd[] {
+function cmdsOf(specs: Awaited<ReturnType<ToolProviderLike['list']>>): DeviceNodeCmd[] {
   return specs.map(t => ({
     name: t.name,
     ...(t.description !== undefined ? { description: t.description } : {}),
@@ -196,7 +196,7 @@ export function createToolBridge(config: ToolBridgeConfig): ToolBridge {
     for (const reg of registrations.values()) {
       // 与本地落库同一构造:virtualize / readOnly / 自定义 config 一并上报,不再丢失。
       const node = nodeInputOf(reg)
-      nodes.push(reg.kind === 'tool' ? { ...node, cmds: cmdsOf(await reg.provider.List()) } : node)
+      nodes.push(reg.kind === 'tool' ? { ...node, cmds: cmdsOf(await reg.provider.list()) } : node)
     }
     if (nodes.length === 0) {
       throw new TBError(
@@ -207,20 +207,25 @@ export function createToolBridge(config: ToolBridgeConfig): ToolBridge {
     return { nodes }
   }
 
-  /** 设备侧 call 帧派发:path 相对 mountPath = 本实例注册路径。 */
+  /**
+   * 设备侧 call 帧派发:call.path 相对 mountPath 且**含命令叶子段**(如 "<注册路径>/<命令>")。
+   * 拆出注册路径(mount)与命令名(最后一段)。
+   */
   const handler = async (call: {
     arguments: Record<string, unknown>
     path: string
-    tool: string
   }): Promise<unknown> => {
-    const reg = registrations.get(normalizePath(call.path))
+    const slash = call.path.lastIndexOf('/')
+    const mount = slash < 0 ? call.path : call.path.slice(0, slash)
+    const cmd = slash < 0 ? '' : call.path.slice(slash + 1)
+    const reg = registrations.get(normalizePath(mount))
     if (reg === undefined) throw TBError.notFound(`device path not exposed:'${call.path}'`)
     if (reg.kind === 'tool') {
-      const result: ToolResult = await reg.provider.Call(call.tool, call.arguments)
+      const result: ToolResult = await reg.provider.call(cmd, call.arguments)
       // 与本地 HTTP 调用同形:网关渲染的是 ToolResult.content(tbApp handleInvoke)。
       return result.content
     }
-    return await dispatchContextCmd(reg.provider, call.tool, call.arguments)
+    return await dispatchContextCmd(reg.provider, cmd, call.arguments)
   }
 
   return {
