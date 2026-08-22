@@ -28,6 +28,7 @@ import {
   requireObject,
   requireString,
   VOID_ACK,
+  withCommandPaths,
 } from './util'
 import { TBError } from '../errors'
 
@@ -57,7 +58,7 @@ const NODE_FIELD_SCHEMAS = {
 
 function registryCmds(nodePath: TreePath): CmdSpec[] {
   const path = cmdPath(nodePath)
-  return [
+  const cmds: CmdSpec[] = [
     {
       name: 'list',
       method: 'POST',
@@ -133,6 +134,7 @@ function registryCmds(nodePath: TreePath): CmdSpec[] {
       scope: 'register',
     },
   ]
+  return withCommandPaths(nodePath, cmds)
 }
 
 /**

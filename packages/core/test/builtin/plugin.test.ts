@@ -35,7 +35,7 @@ const DESCRIBE = {
       auth: { kind: 'none' },
       id: 'documents',
       profile: 'context/v1',
-      methods: ['List', 'Get', 'Update', 'Write', 'Search'],
+      methods: ['list', 'get', 'update', 'write', 'search'],
       capabilities: ['search'],
     },
   ],
@@ -181,14 +181,14 @@ describe('builtin plugin 模块', () => {
             auth: { kind: 'none' },
             id: 'documents',
             profile: 'context/v1',
-            methods: ['List', 'Get'],
+            methods: ['list', 'get'],
             capabilities: ['search'],
           },
         ],
       },
     })
     await expect(bad.mod.dispatch('write', { ...MANIFEST }, ctx)).rejects.toSatisfy(
-      e => isTBError(e) && e.code === 'invalid_argument' && e.message.includes('Search'),
+      e => isTBError(e) && e.code === 'invalid_argument' && e.message.includes('search'),
     )
     expect(await bad.store.get(KEY_PLUGIN + MANIFEST.id)).toBeNull()
   })

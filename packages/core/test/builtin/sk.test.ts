@@ -39,7 +39,7 @@ describe('builtin sk 模块', () => {
       'write',
     ])
     expect(help.cmds.every(c => c.scope === 'admin')).toBe(true)
-    expect(help.cmds.every(c => c.method === 'POST' && c.path === '/system/sk')).toBe(true)
+    expect(help.cmds.every(c => c.method === 'POST' && c.path === `/system/sk/${c.name}`)).toBe(true)
   })
 
   it('write → list:签发的 SK 出现在 list 且投影不含 hash;write 返回一次性 secret', async () => {

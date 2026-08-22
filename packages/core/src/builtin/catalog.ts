@@ -14,7 +14,7 @@ import type { PluginCredentialField, PluginExport, PluginMountConfigField } from
 import type { BuiltinCatalog, BuiltinCatalogEntry } from '../plugin/catalog'
 import type { CmdSpec, HelpModel } from '../htbp/model'
 import type { BuiltinModule } from './types'
-import { cmdPath, LIST_OPTS_SCHEMA, requireString } from './util'
+import { cmdPath, LIST_OPTS_SCHEMA, requireString, withCommandPaths } from './util'
 import { LIST_LIMIT_MAX, type TreePath } from '../types'
 import { TBError } from '../errors'
 
@@ -131,7 +131,7 @@ function matches(item: CatalogListItem, query: string): boolean {
 
 function catalogCmds(nodePath: TreePath): CmdSpec[] {
   const path = cmdPath(nodePath)
-  return [
+  const cmds: CmdSpec[] = [
     {
       name: 'list',
       method: 'POST',
@@ -171,6 +171,7 @@ function catalogCmds(nodePath: TreePath): CmdSpec[] {
       scope: 'read',
     },
   ]
+  return withCommandPaths(nodePath, cmds)
 }
 
 export interface CatalogModuleDeps {

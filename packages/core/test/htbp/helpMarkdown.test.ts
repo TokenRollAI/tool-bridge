@@ -8,7 +8,7 @@ const mcpModel: HelpModel = {
     {
       name: 'resolve-library-id',
       method: 'POST',
-      path: '/docs/context7',
+      path: '/docs/context7/resolve-library-id',
       h: '解析库 id。\n\n多行说明全文保留。',
       inputSchema: {
         type: 'object',
@@ -21,7 +21,7 @@ const mcpModel: HelpModel = {
     {
       name: 'drop-db',
       method: 'POST',
-      path: '/docs/context7',
+      path: '/docs/context7/drop-db',
       scope: 'write',
       effect: 'destructive',
       confirm: true,
@@ -38,10 +38,10 @@ describe('renderHelpMarkdown:语义明确(不用单字符缩写)', () => {
     expect(md).toContain('Context7 文档检索')
   })
 
-  it('调用信封用完整语句 + 代码块解释(取代 DSL 的 body 单行)', () => {
+  it('调用说明:每命令有直连 URL,body 即 arguments 本体(无信封)', () => {
     expect(md).toContain('## How to call')
-    expect(md).toContain('POST /docs/context7')
-    expect(md).toContain('{"tool": "<command name>", "arguments": {...}}')
+    expect(md).toContain('POST /docs/context7/resolve-library-id')
+    expect(md).toContain('{...arguments}')
     expect(md).toContain('permission your Secret Key must hold')
   })
 
@@ -49,14 +49,14 @@ describe('renderHelpMarkdown:语义明确(不用单字符缩写)', () => {
     expect(md).toContain('### `resolve-library-id`')
     expect(md).toContain('多行说明全文保留。')
     expect(md).toContain(
-      '- Invoke: `POST /docs/context7` with body `{"tool": "resolve-library-id", "arguments": {...}}`',
+      '- Invoke: `POST /docs/context7/resolve-library-id` with body `{...arguments}`',
     )
     expect(md).toContain('- Required scope: `call`')
     expect(md).toContain('- Returns: markdown 文档库列表')
   })
 
   it('inputSchema 以缩进 JSON 代码块呈现', () => {
-    expect(md).toContain('Arguments (JSON Schema of the `arguments` field):')
+    expect(md).toContain('Request body (JSON Schema):')
     expect(md).toContain('"libraryName": {')
   })
 
@@ -73,7 +73,7 @@ describe('renderHelpMarkdown:使用路径清晰(索引形态与 children)', () =
   it('index 模型:hint 渲染为 Next step 引言,无 schema 的 cmd 给出下钻 GET 路径', () => {
     const m: HelpModel = {
       node: { path: 'logs', kind: 'mcp', description: 'SLS' },
-      cmds: [{ name: 'explore', method: 'POST', path: '/logs', h: '概览', scope: 'call' }],
+      cmds: [{ name: 'explore', method: 'POST', path: '/logs/explore', h: '概览', scope: 'call' }],
       index: true,
       hint: 'this is an index; GET /logs/<tool>/~help returns one tool\'s full spec',
     }
@@ -123,7 +123,6 @@ describe('renderHelpMarkdown:使用路径清晰(索引形态与 children)', () =
           path: '/docs/x/echo',
           h: '回显',
           scope: 'call',
-          flatBody: true,
         },
       ],
       index: true,

@@ -21,6 +21,7 @@ import type { SecretStoreImpl } from '../secret/secretStore'
 import type { CmdSpec, HelpModel } from '../htbp/model'
 import type { SKRegistryStore } from '../auth/sk'
 import type { BuiltinModule } from './types'
+import { cmdPath, LIST_OPTS_SCHEMA, optListOptions, requireString, VOID_ACK, withCommandPaths } from './util'
 import {
   LIST_LIMIT_DEFAULT,
   LIST_LIMIT_MAX,
@@ -28,7 +29,6 @@ import {
   type TreePath,
 } from '../types'
 import { type PluginDescribe, type PluginExport, validatePluginContract } from '../plugin/contract'
-import { cmdPath, LIST_OPTS_SCHEMA, optListOptions, requireString, VOID_ACK } from './util'
 import { KEY_PLUGIN, KEY_PLUGIN_HEALTH, KEY_PLUGIN_META, type StateStore } from '../store'
 import {
   parsePluginManifest,
@@ -108,7 +108,7 @@ function pluginCmds(nodePath: TreePath): CmdSpec[] {
     properties: { id: { type: 'string', description: 'plugin id' } },
     required: ['id'],
   }
-  return [
+  const cmds: CmdSpec[] = [
     {
       name: 'list',
       method: 'POST',
@@ -193,6 +193,7 @@ function pluginCmds(nodePath: TreePath): CmdSpec[] {
       scope: 'admin',
     },
   ]
+  return withCommandPaths(nodePath, cmds)
 }
 
 function clampLimit(limit?: number): number {

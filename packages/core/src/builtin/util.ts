@@ -6,10 +6,20 @@
  */
 
 import type { ListOptions, TreePath } from '../types'
+import type { CmdSpec } from '../htbp/model'
 import { TBError } from '../errors'
 
 /** void 语义 cmd(delete / set)的应答体:不回显任何值(secret.set 明确不回显 value)。 */
 export const VOID_ACK = { ok: true } as const
+
+/**
+ * 把每个 cmd 的 `path` 统一钉成完整直连命令路径 `/<nodePath>/<cmd.name>`。
+ * builtin 模块的 cmd 构造只关心 name/schema,path 由此处统一派生——命令是节点下的
+ * 虚拟叶子,`POST /<nodePath>/<name>` 是唯一调用形态(body 即 arguments 本体)。
+ */
+export function withCommandPaths(nodePath: TreePath, cmds: CmdSpec[]): CmdSpec[] {
+  return cmds.map(cmd => ({ ...cmd, path: `/${nodePath}/${cmd.name}` }))
+}
 
 /** list 类 cmd 的 `opts: ListOptions` 在 ~help 中的共用 schema(默认/上限对齐 types.ts)。 */
 export const LIST_OPTS_SCHEMA = {
@@ -21,7 +31,11 @@ export const LIST_OPTS_SCHEMA = {
   },
 } as const
 
-/** 节点数据面调用的 HTTP 路径(带前导 '/'):cmd 行的 `POST /<nodePath>`。 */
+/**
+ * 命令所属**节点**的路径(带前导 '/')。CmdSpec.path 存节点路径;完整直连调用路径
+ * `POST /<nodePath>/<cmd>` 由渲染/身份层统一派生(见 htbp/model.ts leafCmdPath)——
+ * 命令是节点下的虚拟叶子,唯一调用形态是直连,没有 `{tool,arguments}` 信封。
+ */
 export function cmdPath(nodePath: TreePath): string {
   return `/${nodePath}`
 }

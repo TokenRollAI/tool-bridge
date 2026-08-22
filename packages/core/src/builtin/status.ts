@@ -9,8 +9,8 @@
 import type { CmdSpec, HelpModel } from '../htbp/model'
 import type { BuiltinModule } from './types'
 import type { TreePath } from '../types'
+import { cmdPath, withCommandPaths } from './util'
 import { TBError } from '../errors'
-import { cmdPath } from './util'
 
 const DESCRIPTION = 'Gateway health and summary (readable without admin)'
 
@@ -27,7 +27,7 @@ export interface StatusDeps {
 }
 
 function statusCmds(nodePath: TreePath): CmdSpec[] {
-  return [
+  return withCommandPaths(nodePath, [
     {
       name: 'get',
       method: 'POST',
@@ -37,7 +37,7 @@ function statusCmds(nodePath: TreePath): CmdSpec[] {
       returns: '{ healthy, version, nodeCount }',
       scope: 'read',
     },
-  ]
+  ])
 }
 
 export function createStatusModule(deps: StatusDeps): BuiltinModule {

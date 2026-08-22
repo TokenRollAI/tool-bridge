@@ -49,10 +49,9 @@ function attrLines(key: string, value: string): string[] {
  * `feedback` 块的端点与 `use` 指引由 node.path 派生(`/<path>/~feedback` 保留段端点;
  * 类比 `body` 行由 inputSchema 派生,属表现不属语义);JSON 侧的语义等价字段是 `note` 与 `feedback[]`。
  *
- * `body` 行是**请求体示意**:缺省由 cmd 的 `inputSchema`(arguments 的 JSON Schema)
- * 包成 `{ "tool": <name>, "arguments": <inputSchema> }` 单行紧凑 JSON;`flatBody` 的 cmd
- * (直连工具路径 `POST /<node>/<tool>`)body 即裸 `inputSchema`——两种都与 JSON 表现的
- * 裸 `inputSchema` 语义等价、结构表现不同。
+ * `body` 行是**请求体示意**:直接是 cmd 的 `inputSchema`(arguments 的 JSON Schema)单行紧凑
+ * JSON。调用形态唯一——`POST <path>`(path 含命令/工具叶子段),body 即 arguments 本体,
+ * 无 `{tool,arguments}` 信封;与 JSON 表现的裸 `inputSchema` 语义一致。
  */
 export function renderHelpDsl(model: HelpModel): string {
   const lines: string[] = [HTBP_HELP_HEADER]
@@ -63,8 +62,8 @@ export function renderHelpDsl(model: HelpModel): string {
     lines.push(`cmd ${cmd.name} ${cmd.method} ${cmd.path}`)
     if (cmd.h !== undefined) lines.push(...attrLines('h', cmd.h))
     if (cmd.inputSchema !== undefined) {
-      const body = cmd.flatBody ? cmd.inputSchema : { tool: cmd.name, arguments: cmd.inputSchema }
-      lines.push(`  body ${JSON.stringify(body)}`)
+      // body 即 arguments 本体(直连 `POST <path>`,无 {tool,arguments} 信封)。
+      lines.push(`  body ${JSON.stringify(cmd.inputSchema)}`)
     }
     if (cmd.outputSchema !== undefined) lines.push(`  result ${JSON.stringify(cmd.outputSchema)}`)
     if (cmd.returns !== undefined) lines.push(...attrLines('returns', cmd.returns))

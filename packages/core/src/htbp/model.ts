@@ -24,28 +24,22 @@ export interface ChildRef {
 }
 
 /**
- * 单条命令声明。`path` 是数据面调用的 HTTP 路径(如 "/docs/context7",
- * 带前导 '/'),DSL 的 `cmd` 行与 JSON 的 `cmds[].path` 都原样承载它。
+ * 单条命令声明。`path` 是该命令的**完整直连调用路径**(如 "/docs/context7/resolve_library_id",
+ * 带前导 '/',含命令/工具叶子段),DSL 的 `cmd` 行与 JSON 的 `cmds[].path` 都原样承载它。
+ * 调用形态唯一:`POST <path>`,body 即 arguments 本体,无 `{tool,arguments}` 信封。
  * `scope` 必填(每个 cmd 必须声明 scope);`inputSchema`/`returns`/`effect`/`confirm` 可选。
  *
- * `inputSchema` 是该 cmd `arguments` 的 JSON Schema(不含 {tool,arguments} 信封)——
- * JSON 表现直接输出它;DSL 的 `body` 行则由它生成请求信封示意(`renderHelpDsl` 负责),
- * 二者语义等价、结构表现不同。
+ * `inputSchema` 是该 cmd `arguments`(= 请求体)的 JSON Schema;DSL/JSON/Markdown 都直接
+ * 把它作为请求体示意,不再包信封。
  */
 export interface CmdSpec {
   /** 危险操作需二次确认(HTBP 属性表可选)。 */
   confirm?: boolean
   /** 副作用描述(HTBP 属性表可选)。 */
   effect?: string
-  /**
-   * body 即 arguments 本体(直连工具路径,无 {tool,arguments} 信封)。
-   * 仅影响 DSL `body` 行渲染;JSON 表现恒为裸 inputSchema,body 形状由 path 判别
-   * (path 含工具段 ⇒ 扁平)。
-   */
-  flatBody?: boolean
   /** 工具级一句话描述(`h` 行,定型;mcp/http 工具的上游 description 落此)。 */
   h?: string
-  /** 该 cmd `arguments` 的 JSON Schema(不含 {tool,arguments} 信封)。 */
+  /** 该 cmd `arguments` 的 JSON Schema;body 即此 schema 本体(直连,无信封)。 */
   inputSchema?: unknown
   method: 'POST'
   name: string

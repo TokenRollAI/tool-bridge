@@ -34,11 +34,8 @@ function cmdSection(cmd: CmdSpec, index: boolean): string[] {
   if (cmd.h !== undefined && cmd.h.trim() !== '') {
     lines.push(cmd.h.trim(), '')
   }
-  // flatBody(直连工具路径):body 即 arguments 本体;否则为 {tool,arguments} 信封。
-  const bodyShape = cmd.flatBody
-    ? '`{...arguments}`'
-    : `\`{"tool": "${cmd.name}", "arguments": {...}}\``
-  lines.push(`- Invoke: \`POST ${cmd.path}\` with body ${bodyShape}`)
+  // 唯一调用形态:直连 `POST <path>`(path 含命令/工具叶子段),body 即 arguments 本体。
+  lines.push(`- Invoke: \`POST ${cmd.path}\` with body \`{...arguments}\``)
   lines.push(`- Required scope: \`${cmd.scope}\``)
   if (cmd.effect !== undefined) {
     lines.push(
@@ -51,18 +48,15 @@ function cmdSection(cmd: CmdSpec, index: boolean): string[] {
   if (cmd.inputSchema !== undefined) {
     lines.push(
       '',
-      cmd.flatBody
-        ? 'Request body (JSON Schema):'
-        : 'Arguments (JSON Schema of the `arguments` field):',
+      'Request body (JSON Schema):',
       '',
       '```json',
       JSON.stringify(cmd.inputSchema, null, 2),
       '```',
     )
   } else if (index) {
-    // flatBody 的 cmd.path 已含工具段,直接加 /~help;信封 cmd 补 /<name> 段。
-    const specPath = cmd.flatBody ? `${cmd.path}/~help` : `${cmd.path}/${cmd.name}/~help`
-    lines.push(`- Arguments: schema not shown in this index — \`GET ${specPath}\``)
+    // cmd.path 已是完整命令路径,直接加 /~help 取该命令全量 spec。
+    lines.push(`- Arguments: schema not shown in this index — \`GET ${cmd.path}/~help\``)
   } else {
     lines.push('- Arguments: none declared')
   }
@@ -90,33 +84,19 @@ export function renderHelpMarkdown(model: HelpModel): string {
   }
 
   if (model.cmds.length > 0) {
-    const allFlat = model.cmds.every(c => c.flatBody === true)
     out.push('## How to call')
     out.push('')
-    if (allFlat) {
-      // 直连工具路径:每个 cmd 有自己的 POST 路径,body 即 arguments 本体。
-      out.push(
-        'Each command has its own direct URL; the request body is the arguments object itself:',
-      )
-      out.push('')
-      out.push('```')
-      out.push(`POST ${model.cmds[0]?.path ?? displayPath(model.node.path)}`)
-      out.push('Content-Type: application/json')
-      out.push('')
-      out.push('{...arguments}')
-      out.push('```')
-    } else {
-      // 信封形态:所有 cmd 共享同一数据面入口;取第一条的 path 作示例。
-      const invokePath = model.cmds[0]?.path ?? displayPath(model.node.path)
-      out.push('Every command on this node is invoked with the same request shape:')
-      out.push('')
-      out.push('```')
-      out.push(`POST ${invokePath}`)
-      out.push('Content-Type: application/json')
-      out.push('')
-      out.push('{"tool": "<command name>", "arguments": {...}}')
-      out.push('```')
-    }
+    // 唯一调用形态:每个命令是节点下的虚拟叶子,有自己的直连 URL,body 即 arguments 本体。
+    out.push(
+      'Each command has its own direct URL; the request body is the arguments object itself:',
+    )
+    out.push('')
+    out.push('```')
+    out.push(`POST ${model.cmds[0]?.path ?? displayPath(model.node.path)}`)
+    out.push('Content-Type: application/json')
+    out.push('')
+    out.push('{...arguments}')
+    out.push('```')
     out.push('')
     out.push('`Required scope` names the permission your Secret Key must hold for that command.')
     out.push('')

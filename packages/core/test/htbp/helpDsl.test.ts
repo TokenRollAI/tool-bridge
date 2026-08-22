@@ -10,7 +10,7 @@ describe('renderHelpDsl 格式', () => {
       {
         name: 'resolve-library-id',
         method: 'POST',
-        path: '/docs/context7',
+        path: '/docs/context7/resolve-library-id',
         inputSchema: {
           type: 'object',
           properties: { libraryName: { type: 'string' } },
@@ -31,13 +31,13 @@ describe('renderHelpDsl 格式', () => {
     expect(lines[1]).toBe('node docs/context7 mcp "Context7 文档检索"')
   })
 
-  it('cmd 行:cmd <name> POST <path>', () => {
-    expect(lines[2]).toBe('cmd resolve-library-id POST /docs/context7')
+  it('cmd 行:cmd <name> POST <完整命令路径>', () => {
+    expect(lines[2]).toBe('cmd resolve-library-id POST /docs/context7/resolve-library-id')
   })
 
-  it('body 行为请求信封示意(tool+arguments),单行 JSON 且带两空格缩进', () => {
+  it('body 行为裸 arguments schema(直连,无 {tool,arguments} 信封),单行 JSON 两空格缩进', () => {
     expect(lines[3]).toBe(
-      '  body {"tool":"resolve-library-id","arguments":{"type":"object","properties":{"libraryName":{"type":"string"}},"required":["libraryName"]}}',
+      '  body {"type":"object","properties":{"libraryName":{"type":"string"}},"required":["libraryName"]}',
     )
   })
 
@@ -248,7 +248,6 @@ describe('outputSchema:`result` 行与 JSON 的 outputSchema(与 inputSchema 对
         name: 'get_customer',
         method: 'POST',
         path: '/billing/stripe/get_customer',
-        flatBody: true,
         inputSchema: { type: 'object', properties: { customerId: { type: 'string' } } },
         outputSchema: { type: 'object', properties: { customer: { type: 'object' } } },
         returns: '一个 Stripe customer 对象',

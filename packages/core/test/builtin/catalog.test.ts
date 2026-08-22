@@ -60,7 +60,7 @@ const BOTH_KINDS: PluginDescribe = {
       auth: { kind: 'single', label: 'Reader key', required: true },
       id: 'documents',
       profile: 'context/v1',
-      methods: ['Get', 'List'],
+      methods: ['get', 'list'],
       mountConfigFields: [{ key: 'tenant', required: true }],
     },
   ],

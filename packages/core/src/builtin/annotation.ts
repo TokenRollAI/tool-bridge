@@ -12,7 +12,7 @@ import type { NodeRegistryStore } from '../tree/registry'
 import type { CmdSpec, HelpModel } from '../htbp/model'
 import type { CallContext, TreePath } from '../types'
 import type { BuiltinModule } from './types'
-import { cmdPath, optString, requireString, VOID_ACK } from './util'
+import { cmdPath, optString, requireString, VOID_ACK, withCommandPaths } from './util'
 import { normalizePath } from '../tree/path'
 import { TBError } from '../errors'
 
@@ -21,7 +21,7 @@ const DESCRIPTION
 
 function annotationCmds(nodePath: TreePath): CmdSpec[] {
   const path = cmdPath(nodePath)
-  return [
+  const cmds: CmdSpec[] = [
     {
       name: 'set',
       method: 'POST',
@@ -82,6 +82,7 @@ function annotationCmds(nodePath: TreePath): CmdSpec[] {
       scope: 'read',
     },
   ]
+  return withCommandPaths(nodePath, cmds)
 }
 
 export interface AnnotationModuleDeps {

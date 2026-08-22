@@ -9,7 +9,7 @@ import type { SecretStoreImpl } from '../secret/secretStore'
 import type { CmdSpec, HelpModel } from '../htbp/model'
 import type { BuiltinModule } from './types'
 import type { TreePath } from '../types'
-import { cmdPath, LIST_OPTS_SCHEMA, optListOptions, requireString, VOID_ACK } from './util'
+import { cmdPath, LIST_OPTS_SCHEMA, optListOptions, requireString, VOID_ACK, withCommandPaths } from './util'
 import { TBError } from '../errors'
 
 const DESCRIPTION
@@ -30,7 +30,7 @@ function assertUserSecretName(name: string): void {
 
 function secretCmds(nodePath: TreePath): CmdSpec[] {
   const path = cmdPath(nodePath)
-  return [
+  const cmds: CmdSpec[] = [
     {
       name: 'set',
       method: 'POST',
@@ -76,6 +76,7 @@ function secretCmds(nodePath: TreePath): CmdSpec[] {
       scope: 'admin',
     },
   ]
+  return withCommandPaths(nodePath, cmds)
 }
 
 export function createSecretModule(store: SecretStoreImpl, now: () => string): BuiltinModule {

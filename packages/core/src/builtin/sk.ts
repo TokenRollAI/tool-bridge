@@ -15,6 +15,7 @@ import {
   requireObject,
   requireString,
   VOID_ACK,
+  withCommandPaths,
 } from './util'
 import { normalizeExpiresAt, type SKRegistryStore, type SKUpdatePatch } from '../auth/sk'
 import { TBError } from '../errors'
@@ -61,7 +62,7 @@ const SK_FIELD_SCHEMAS = {
 
 function skCmds(nodePath: TreePath): CmdSpec[] {
   const path = cmdPath(nodePath)
-  return [
+  const cmds: CmdSpec[] = [
     {
       name: 'list',
       method: 'POST',
@@ -136,6 +137,7 @@ function skCmds(nodePath: TreePath): CmdSpec[] {
       scope: 'admin',
     },
   ]
+  return withCommandPaths(nodePath, cmds)
 }
 
 /** args 整体即 SecretKeyInput;校验 owner/scopes,透传可选字段。 */

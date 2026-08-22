@@ -10,7 +10,7 @@ import type { CmdSpec, HelpModel } from '../htbp/model'
 import type { BuiltinModule } from './types'
 import type { TreePath } from '../types'
 import { normalizeAllowHost, type RemoteAllowlistStore } from '../tool/allowlist'
-import { cmdPath, requireString, VOID_ACK } from './util'
+import { cmdPath, requireString, VOID_ACK, withCommandPaths } from './util'
 import { TBError } from '../errors'
 
 const DESCRIPTION
@@ -26,7 +26,7 @@ export interface FederationHost {
 
 function federationCmds(nodePath: TreePath): CmdSpec[] {
   const path = cmdPath(nodePath)
-  return [
+  const cmds: CmdSpec[] = [
     {
       name: 'list',
       method: 'POST',
@@ -68,6 +68,7 @@ function federationCmds(nodePath: TreePath): CmdSpec[] {
       scope: 'admin',
     },
   ]
+  return withCommandPaths(nodePath, cmds)
 }
 
 export interface FederationModuleDeps {

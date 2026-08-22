@@ -27,7 +27,6 @@ describe('toolsToHelpModel(上游工具集 → HelpModel)', () => {
     expect(c0?.method).toBe('POST')
     expect(c0?.path).toBe('/docs/context7/resolve-library-id')
     expect(c0?.scope).toBe('call')
-    expect(c0?.flatBody).toBe(true)
   })
 
   it('description → h 行;inputSchema 透传;effect 透传', () => {
