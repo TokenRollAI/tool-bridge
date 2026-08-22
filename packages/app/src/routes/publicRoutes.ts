@@ -154,12 +154,19 @@ export function registerPublicRoutes(app: TbHono, env: RouteEnv): void {
       return tbErrorResponse(TBError.notFound('dashboard assets not deployed'))
     }
     const url = new URL(c.req.url)
+    // 内容协商与条件请求交给 assets 实现(Node 侧做压缩/304,CF 侧平台代劳):
+    // 只透传这两个安全的读侧头,不带 SK/cookie 等(/ui 免认证,静态资源无机密)。
+    const fwd = new Headers()
+    const ae = c.req.header('accept-encoding')
+    if (ae) fwd.set('accept-encoding', ae)
+    const inm = c.req.header('if-none-match')
+    if (inm) fwd.set('if-none-match', inm)
     // 构建产物是站点根布局(index.html + assets/*),/ui 挂载前缀在此剥离。
     const sub = url.pathname.slice('/ui'.length) || '/'
-    const res = await assets(new Request(new URL(sub, url.origin)))
+    const res = await assets(new Request(new URL(sub, url.origin), { headers: fwd }))
     if (res.status !== 404) return res
     // SPA 回退(仅 /ui 内):深链交给前端路由,由 '/' 取回 index.html。
-    return await assets(new Request(new URL('/', url.origin)))
+    return await assets(new Request(new URL('/', url.origin), { headers: fwd }))
   }
   app.get('/ui', c => c.redirect('/ui/', 302))
   app.get('/ui/*', serveUi)

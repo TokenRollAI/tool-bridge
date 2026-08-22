@@ -3,6 +3,7 @@ import { Command } from 'commander'
 import type { Page, SecretSummary } from '../types'
 import { parsePageOpts, resolveTarget, withGlobalOpts, withPageOpts } from '../args'
 import { guard, printJson, printLine, table } from '../output'
+import { confirmDestructive } from '../confirm'
 import { callTool, CliError } from '../http'
 
 /** 从 stdin 读取全部内容(去掉尾随换行)——用于 secret set 避免值进 shell history。 */
@@ -115,13 +116,15 @@ export function secretLsCommand(): Command {
 /** `tb secret rm <name>` → SecretStore.Delete。 */
 export function secretRmCommand(): Command {
   return withGlobalOpts(new Command('rm'))
-    .description('Delete a secret')
+    .description('Delete a secret (nodes referencing it fail on next call)')
     .argument('<name>', 'Secret name')
-    .action(async (nameArg: string, opts: SecretGlobalOpts) => {
+    .option('--yes', 'Skip the confirmation prompt')
+    .action(async (nameArg: string, opts: SecretGlobalOpts & { yes?: boolean }) => {
       const asJson = Boolean(opts.json)
       await guard(asJson, async () => {
         const name = String(nameArg ?? '').trim()
         if (!name) throw new CliError('secret name is required')
+        await confirmDestructive(opts, `Delete secret '${name}'? Nodes referencing it will fail on next call.`)
         await callTool(resolveTarget(opts), '/system/secret', 'delete', { name })
         if (asJson) printJson({ ok: true, name })
         else printLine(`deleted secret: ${name}`)

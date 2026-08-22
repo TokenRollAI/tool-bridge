@@ -25,12 +25,15 @@ function tmpDir(prefix: string): string {
   return dir
 }
 
-/** fixture UI:index.html + assets/app.js。 */
+/**
+ * fixture UI:index.html + assets/app.js。
+ * app.js 填充到 >1KB,才能触发压缩(小于 MIN_COMPRESS_BYTES 的按原样发送)。
+ */
 function makeUiFixture(): string {
   const dir = tmpDir('tb-ui-')
   writeFileSync(join(dir, 'index.html'), '<!doctype html><title>tb-ui-fixture</title>')
   mkdirSync(join(dir, 'assets'), { recursive: true })
-  writeFileSync(join(dir, 'assets', 'app.js'), 'console.log("fixture")')
+  writeFileSync(join(dir, 'assets', 'app.js'), `console.log("fixture");${'//pad\n'.repeat(400)}`)
   return dir
 }
 
@@ -73,6 +76,37 @@ describe('/ui 静态托管', () => {
     if (traversal.status === 200) {
       expect(await traversal.text()).toContain('tb-ui-fixture') // 只能是 SPA 回退,不能是根外文件
     }
+  })
+
+  it('hash 资产 immutable、index.html no-cache;br/gzip 内容协商;ETag → 304', async () => {
+    const { baseUrl } = await startServer(makeUiFixture())
+
+    // hash 资产(assets/*)→ immutable 长缓存。
+    const asset = await fetch(`${baseUrl}/ui/assets/app.js`, { headers: { 'accept-encoding': 'identity' } })
+    expect(asset.status).toBe(200)
+    expect(asset.headers.get('cache-control')).toBe('public, max-age=31536000, immutable')
+    const etag = asset.headers.get('etag')
+    expect(etag).toBeTruthy()
+
+    // index.html(无 hash)→ no-cache,强制重验证。
+    const index = await fetch(`${baseUrl}/ui/`)
+    expect(index.headers.get('cache-control')).toBe('no-cache')
+
+    // 内容协商:声明 gzip 得到 gzip;声明 br 得到 br;都带 Vary。
+    const gz = await fetch(`${baseUrl}/ui/assets/app.js`, { headers: { 'accept-encoding': 'gzip' } })
+    expect(gz.headers.get('content-encoding')).toBe('gzip')
+    expect(gz.headers.get('vary')).toContain('Accept-Encoding')
+    const br = await fetch(`${baseUrl}/ui/assets/app.js`, { headers: { 'accept-encoding': 'br' } })
+    expect(br.headers.get('content-encoding')).toBe('br')
+    // 解压后与原文一致(fetch 自动解 gzip;br 需 node 未必自动解,断言字节非空即可)。
+    expect(await gz.text()).toContain('fixture')
+
+    // 条件请求:带上一次的 ETag → 304 空体。
+    const revalidate = await fetch(`${baseUrl}/ui/assets/app.js`, {
+      headers: { 'if-none-match': etag as string, 'accept-encoding': 'identity' },
+    })
+    expect(revalidate.status).toBe(304)
+    expect(await revalidate.text()).toBe('')
   })
 
   it('GET /(Accept html)→ 302 /ui/;TB_UI_DIR 无效 → /ui 404 优雅降级', async () => {

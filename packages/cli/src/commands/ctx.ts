@@ -11,6 +11,7 @@ import {
 } from '../args'
 import { deleteNode, parseConfigSpecs, registerNode } from '../registry'
 import { asArray, guard, printJson, printLine, table } from '../output'
+import { confirmDestructive } from '../confirm'
 import { callTool, CliError } from '../http'
 
 /**
@@ -98,6 +99,7 @@ interface GlobalOpts {
   baseUrl?: string
   json?: boolean
   sk?: string
+  yes?: boolean
 }
 
 /** `tb ctx ls <ns> [prefix]` —— 浅层列表(ContextProvider.List)。 */
@@ -330,6 +332,7 @@ export function ctxRmCommand(): Command {
     .description('Delete a context entry')
     .argument('<ns>', 'Context namespace tree path')
     .argument('<entry>', 'Entry path inside namespace')
+    .option('--yes', 'Skip the confirmation prompt')
     .action(async (nsArg: string, entryArg: string, opts: GlobalOpts) => {
       const asJson = Boolean(opts.json)
       await guard(asJson, async () => {
@@ -337,6 +340,7 @@ export function ctxRmCommand(): Command {
         if (!ns) throw new CliError('namespace path is required')
         const entryPath = String(entryArg ?? '').trim()
         if (!entryPath) throw new CliError('entry path is required')
+        await confirmDestructive(opts, `Delete context entry ${entryPath} in ${ns}?`)
         await callTool(resolveTarget(opts), nsUri(ns), 'Delete', { path: entryPath })
         if (asJson) printJson({ ok: true, path: entryPath })
         else printLine(`deleted ${entryPath}`)
@@ -466,11 +470,13 @@ export function ctxUnmountCommand(): Command {
   return withGlobalOpts(new Command('unmount'))
     .description('Unmount a context namespace')
     .argument('<path>', 'Tree path to remove')
+    .option('--yes', 'Skip the confirmation prompt')
     .action(async (pathArg: string, opts: GlobalOpts) => {
       const asJson = Boolean(opts.json)
       await guard(asJson, async () => {
         const path = String(pathArg ?? '').trim()
         if (!path) throw new CliError('tree path is required')
+        await confirmDestructive(opts, `Unmount context namespace at ${path}?`)
         await deleteNode(resolveTarget(opts), path, ['context'])
         if (asJson) printJson({ ok: true, path })
         else printLine(`unmounted context node: ${path}`)

@@ -15,8 +15,9 @@ import { encodeCredentialValues } from '@tool-bridge/core'
 import { Command } from 'commander'
 import type { NodeConfig, NodeInput, Page, SecretSummary } from '../types'
 import { collect, parsePageOpts, resolveTarget, withGlobalOpts, withPageOpts } from '../args'
+import { deleteNode, parseConfigSpecs, registerNode } from '../registry'
 import { guard, printJson, printLine, table } from '../output'
-import { parseConfigSpecs, registerNode } from '../registry'
+import { confirmDestructive } from '../confirm'
 import { callTool, CliError } from '../http'
 import { toolAuthCommand } from './tool'
 
@@ -544,17 +545,23 @@ export function integrationLsCommand(): Command {
  * **对称性**:挂载走 `~register`(register scope),卸载此前只能走 `system/registry delete`
  * (admin)—— 能装不能卸是权限面的不对称。这里仍走管理面(协议未变),但把它放进同一个
  * 命令族,并在 404 时给出可操作提示。凭证生命周期仍由 `tb secret` 显式管理。
+ *
+ * **kind 守卫**:集成挂载只会产生 tool/context 节点(见 add 的 nodeKind),卸载必须限定这两类。
+ * 此前直打 `system/registry delete` 无校验,`tb integration rm device/build-01` 会误删设备节点。
+ * 走 deleteNode 先 get 校验 kind,越界即拒。
  */
 export function integrationRmCommand(): Command {
   return withGlobalOpts(new Command('rm'))
-    .description('Unmount an integration')
+    .description('Unmount an integration (tool/context nodes only)')
     .argument('<path>', 'Mounted integration path')
-    .action(async (pathArg: string, opts: CommonOpts) => {
+    .option('--yes', 'Skip the confirmation prompt')
+    .action(async (pathArg: string, opts: CommonOpts & { yes?: boolean }) => {
       const asJson = Boolean(opts.json)
       await guard(asJson, async () => {
         const path = String(pathArg ?? '').trim()
         if (!path) throw new CliError('tree path is required')
-        await callTool(resolveTarget(opts), '/system/registry', 'delete', { path })
+        await confirmDestructive(opts, `Unmount integration at ${path}?`)
+        await deleteNode(resolveTarget(opts), path, ['tool', 'context'])
         if (asJson) printJson({ ok: true, path })
         else printLine(`unmounted ${path}`)
       })

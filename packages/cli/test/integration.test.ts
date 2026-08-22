@@ -631,9 +631,27 @@ describe('tb integration ls', () => {
 
 describe('tb integration rm', () => {
   it('只卸载节点，凭证由 tb secret 显式管理', async () => {
-    const calls = routedFetch([{ match: /system\//, body: { ok: true } }])
+    const calls = routedFetch([
+      { match: /system\/registry/, tool: 'get', body: { path: 'tools/tavily', kind: 'tool' } },
+      { match: /system\/registry/, tool: 'delete', body: { ok: true } },
+    ])
     await runCli(['integration', 'rm', 'tools/tavily', ...base])
     const bodies = calls.map(c => c.body as WireBody)
     expect(bodies.some(b => b.arguments?.name !== undefined)).toBe(false)
+  })
+
+  it('拒绝卸载非 tool/context 节点(误删 device 节点的护栏)', async () => {
+    const calls = routedFetch([
+      { match: /system\/registry/, tool: 'get', body: { path: 'device/build-01', kind: 'device' } },
+      { match: /system\/registry/, tool: 'delete', body: { ok: true } },
+    ])
+    await runCli(['integration', 'rm', 'device/build-01', ...base])
+    // kind 校验失败 → 只发了 get,绝不发 delete;命令以非零码退出。
+    expect(calls.some(c => (c.body as WireBody).tool === 'delete')).toBe(false)
+    expect(process.exitCode).not.toBe(0)
+    // base 带 --json,错误经 stdout 输出结构化 {ok:false,error}。
+    const stdout = (process.stdout.write as unknown as ReturnType<typeof vi.fn>).mock.calls
+      .map(c => String(c[0])).join('')
+    expect(stdout).toContain('expected tool | context')
   })
 })

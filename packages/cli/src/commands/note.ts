@@ -1,12 +1,14 @@
 import { Command } from 'commander'
 import { guard, printJson, printLine, table } from '../output'
 import { resolveTarget, withGlobalOpts } from '../args'
+import { confirmDestructive } from '../confirm'
 import { callTool } from '../http'
 
 interface NoteGlobalOpts {
   baseUrl?: string
   json?: boolean
   sk?: string
+  yes?: boolean
 }
 
 /** system/annotation 的一条补充说明。 */
@@ -97,10 +99,12 @@ export function noteRmCommand(): Command {
   return withGlobalOpts(new Command('rm'))
     .description('Remove the note of a path')
     .argument('<path>', 'Tree path (use \'/\' for the tree-wide notice)')
+    .option('--yes', 'Skip the confirmation prompt')
     .action(async (pathArg: string, opts: NoteGlobalOpts) => {
       const asJson = Boolean(opts.json)
       await guard(asJson, async () => {
         const path = apiPath(pathArg)
+        await confirmDestructive(opts, `Remove the note on ${displayPath(path)}?`)
         await callTool(resolveTarget(opts), '/system/annotation', 'remove', { path })
         if (asJson) printJson({ ok: true, path })
         else printLine(`note removed from ${displayPath(path)}`)

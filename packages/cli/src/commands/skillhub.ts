@@ -5,6 +5,7 @@ import type { Node, NodeConfig, NodeInput, Page } from '../types'
 import { parsePageOpts, resolveTarget, withGlobalOpts, withPageOpts } from '../args'
 import { guard, printJson, printLine, table } from '../output'
 import { deleteNode, registerNode } from '../registry'
+import { confirmDestructive } from '../confirm'
 import { callTool, CliError } from '../http'
 
 /**
@@ -49,6 +50,7 @@ interface GlobalOpts {
   baseUrl?: string
   json?: boolean
   sk?: string
+  yes?: boolean
 }
 
 function parsePositiveInt(value: unknown, flag: string): number | undefined {
@@ -279,6 +281,7 @@ export function skillRmCommand(): Command {
     .description('Delete a skill and all its files')
     .argument('<hub>', 'Skillhub tree path')
     .argument('<id>', 'Skill id')
+    .option('--yes', 'Skip the confirmation prompt')
     .action(async (hubArg: string, idArg: string, opts: GlobalOpts) => {
       const asJson = Boolean(opts.json)
       await guard(asJson, async () => {
@@ -286,6 +289,7 @@ export function skillRmCommand(): Command {
         if (!hub) throw new CliError('skillhub path is required')
         const id = String(idArg ?? '').trim()
         if (!id) throw new CliError('skill id is required')
+        await confirmDestructive(opts, `Delete skill '${id}' and all its files from ${hub}?`)
         await callTool(resolveTarget(opts), hubUri(hub), 'Remove', { id })
         if (asJson) printJson({ ok: true, id })
         else printLine(`removed skill '${id}'`)
@@ -384,11 +388,13 @@ export function skillUnmountCommand(): Command {
   return withGlobalOpts(new Command('unmount'))
     .description('Unmount a skillhub')
     .argument('<path>', 'Tree path to remove')
+    .option('--yes', 'Skip the confirmation prompt')
     .action(async (pathArg: string, opts: GlobalOpts) => {
       const asJson = Boolean(opts.json)
       await guard(asJson, async () => {
         const path = String(pathArg ?? '').trim()
         if (!path) throw new CliError('tree path is required')
+        await confirmDestructive(opts, `Unmount skillhub at ${path}?`)
         await deleteNode(resolveTarget(opts), path, ['skillhub'])
         if (asJson) printJson({ ok: true, path })
         else printLine(`unmounted skillhub: ${path}`)

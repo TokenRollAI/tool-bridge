@@ -1,12 +1,14 @@
 import { Command } from 'commander'
 import { guard, printJson, printLine, table } from '../output'
 import { resolveTarget, withGlobalOpts } from '../args'
+import { confirmDestructive } from '../confirm'
 import { callTool, CliError } from '../http'
 
 interface FederationGlobalOpts {
   baseUrl?: string
   json?: boolean
   sk?: string
+  yes?: boolean
 }
 
 /** system/federation list 的一行(env 基线不可删;运行时条目可删)。 */
@@ -75,11 +77,13 @@ export function federationRmCommand(): Command {
   return withGlobalOpts(new Command('rm'))
     .description('Remove a runtime allowlist entry (env baseline entries are not removable)')
     .argument('<host>', 'Host suffix to remove')
+    .option('--yes', 'Skip the confirmation prompt')
     .action(async (hostArg: string, opts: FederationGlobalOpts) => {
       const asJson = Boolean(opts.json)
       await guard(asJson, async () => {
         const host = String(hostArg ?? '').trim()
         if (!host) throw new CliError('host is required')
+        await confirmDestructive(opts, `Remove ${host} from the remote allowlist?`)
         await callTool(resolveTarget(opts), '/system/federation', 'remove', { host })
         if (asJson) printJson({ ok: true, host })
         else printLine(`removed remote host: ${host}`)

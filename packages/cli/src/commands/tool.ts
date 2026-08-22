@@ -11,6 +11,7 @@ import {
 import { collect, resolveTarget, withGlobalOpts } from '../args'
 import { guard, printJson, printLine } from '../output'
 import { apiFetch, apiJson, CliError } from '../http'
+import { confirmDestructive } from '../confirm'
 
 interface ToolMountOpts {
   auth?: string
@@ -430,11 +431,13 @@ export function toolRmCommand(): Command {
   return withGlobalOpts(new Command('rm'))
     .description('Unmount a tool node')
     .argument('<path>', 'Tree path to remove')
-    .action(async (pathArg: string, opts: { baseUrl?: string, json?: boolean, sk?: string }) => {
+    .option('--yes', 'Skip the confirmation prompt')
+    .action(async (pathArg: string, opts: { baseUrl?: string, json?: boolean, sk?: string, yes?: boolean }) => {
       const asJson = Boolean(opts.json)
       await guard(asJson, async () => {
         const path = String(pathArg ?? '').trim()
         if (!path) throw new CliError('tree path is required')
+        await confirmDestructive(opts, `Unmount tool node at ${path}?`)
         await deleteNode(resolveTarget(opts), path, ['mcp', 'http', 'tool'])
         if (asJson) printJson({ ok: true, path })
         else printLine(`removed node: ${path}`)

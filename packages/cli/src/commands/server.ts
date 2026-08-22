@@ -4,6 +4,7 @@ import { parsePageOpts, resolveTarget, withGlobalOpts, withPageOpts } from '../a
 import { guard, printJson, printLine, table } from '../output'
 import { deleteNode, registerNode } from '../registry'
 import { apiJson, callTool, CliError } from '../http'
+import { confirmDestructive } from '../confirm'
 
 interface ServerAddOpts {
   baseUrl?: string
@@ -21,6 +22,7 @@ interface GlobalOpts {
   json?: boolean
   limit?: string
   sk?: string
+  yes?: boolean
 }
 
 /**
@@ -150,11 +152,13 @@ export function serverRmCommand(): Command {
   return withGlobalOpts(new Command('rm'))
     .description('Remove a federated remote server')
     .argument('<path>', 'Tree path to remove')
+    .option('--yes', 'Skip the confirmation prompt')
     .action(async (pathArg: string, opts: GlobalOpts) => {
       const asJson = Boolean(opts.json)
       await guard(asJson, async () => {
         const path = String(pathArg ?? '').trim()
         if (!path) throw new CliError('tree path is required')
+        await confirmDestructive(opts, `Remove remote server at ${path}?`)
         await deleteNode(resolveTarget(opts), path, ['remote'])
         if (asJson) printJson({ ok: true, path })
         else printLine(`removed remote server: ${path}`)

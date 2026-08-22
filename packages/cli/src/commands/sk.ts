@@ -9,6 +9,7 @@ import {
   withPageOpts,
 } from '../args'
 import { guard, printJson, printLine, table } from '../output'
+import { confirmDestructive } from '../confirm'
 import { callTool, CliError } from '../http'
 import { parseScope } from '../scope'
 
@@ -18,6 +19,7 @@ interface SkGlobalOpts {
   json?: boolean
   limit?: string
   sk?: string
+  yes?: boolean
 }
 
 export function scopeSummary(k: SecretKeyView): string {
@@ -110,6 +112,7 @@ export function skCreateCommand(): Command {
     .option('--register-path <prefix>', 'Allowed register path prefix (repeatable)', collect, [])
     .option('--expires <ts>', 'Expiry ISO 8601 timestamp with timezone')
     .option('--description <text>', 'Human description')
+    .option('--yes', 'Skip the confirmation prompt for a scopeless key')
     .addHelpText(
       'after',
       `
@@ -126,6 +129,15 @@ Examples:
 
         const scopes = opts.scope.map(parseScope)
         const registerPaths = opts.registerPath
+        // 既无 scope 又无 register-path = 一把什么都做不了的 key。这在人类交互下几乎总是漏给了
+        // --scope,静默签出会让人以为成功了、实际调用全被拒。TTY 下确认一次;--json/脚本放行
+        // (device-only key 合法地可以没有 scope,只靠 register-path)。
+        if (scopes.length === 0 && registerPaths.length === 0 && !asJson) {
+          await confirmDestructive(
+            opts,
+            'No --scope given: this key will be denied every call. Issue it anyway?',
+          )
+        }
         const input: SecretKeyInput = {
           owner,
           scopes,
@@ -234,13 +246,15 @@ function skStateCommand(name: 'disable' | 'enable', disabled: boolean): Command 
 /** `tb sk rm <id>` → SKRegistry.Delete(吊销)。 */
 export function skRmCommand(): Command {
   return withGlobalOpts(new Command('rm'))
-    .description('Revoke (delete) a secret key')
+    .description('Revoke (delete) a secret key (irreversible; consider `sk disable` to pause)')
     .argument('<id>', 'Secret key id')
+    .option('--yes', 'Skip the confirmation prompt')
     .action(async (idArg: string, opts: SkGlobalOpts) => {
       const asJson = Boolean(opts.json)
       await guard(asJson, async () => {
         const id = String(idArg ?? '').trim()
         if (!id) throw new CliError('secret key id is required')
+        await confirmDestructive(opts, `Revoke SK ${id}? This is irreversible.`)
         await callTool(resolveTarget(opts), '/system/sk', 'delete', { id })
         if (asJson) printJson({ ok: true, id })
         else printLine(`revoked SK: ${id}`)

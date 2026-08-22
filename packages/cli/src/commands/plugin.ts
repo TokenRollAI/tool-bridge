@@ -3,6 +3,7 @@ import { Command } from 'commander'
 import type { Page } from '../types'
 import { parsePageOpts, resolveTarget, withGlobalOpts, withPageOpts } from '../args'
 import { guard, printJson, printLine, table } from '../output'
+import { confirmDestructive } from '../confirm'
 import { callTool, CliError } from '../http'
 
 /**
@@ -265,16 +266,18 @@ export function pluginHealthCommand(): Command {
     })
 }
 
-/** `tb plugin rm <id>` → PluginRegistry.Delete(与 sk rm 同为直删,无确认交互)。 */
+/** `tb plugin rm <id>` → PluginRegistry.Delete。 */
 export function pluginRmCommand(): Command {
   return withGlobalOpts(new Command('rm'))
-    .description('Unregister (delete) a plugin')
+    .description('Unregister (delete) a plugin (mounted nodes referencing it fail on next call)')
     .argument('<id>', 'Plugin id')
-    .action(async (idArg: string, opts: PluginOpts) => {
+    .option('--yes', 'Skip the confirmation prompt')
+    .action(async (idArg: string, opts: PluginOpts & { yes?: boolean }) => {
       const asJson = Boolean(opts.json)
       await guard(asJson, async () => {
         const id = String(idArg ?? '').trim()
         if (!id) throw new CliError('plugin id is required')
+        await confirmDestructive(opts, `Unregister plugin '${id}'? Mounted nodes referencing it will fail on next call.`)
         await callTool(resolveTarget(opts), '/system/plugin', 'delete', { id })
         if (asJson) printJson({ ok: true, id })
         else printLine(`removed plugin: ${id}`)

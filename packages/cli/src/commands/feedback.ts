@@ -1,12 +1,14 @@
 import { Command } from 'commander'
 import { guard, printJson, printLine, table } from '../output'
 import { resolveTarget, withGlobalOpts } from '../args'
+import { confirmDestructive } from '../confirm'
 import { apiJson, CliError } from '../http'
 
 interface FeedbackGlobalOpts {
   baseUrl?: string
   json?: boolean
   sk?: string
+  yes?: boolean
 }
 
 /** ~feedback 列表的一行(不含 detail;下钻用 get)。 */
@@ -141,9 +143,11 @@ export function feedbackRmCommand(): Command {
     .description('Remove one feedback (admin scope)')
     .argument('<path>', 'Tree path the feedback belongs to')
     .argument('<id>', 'Feedback id (fb_*)')
+    .option('--yes', 'Skip the confirmation prompt')
     .action(async (pathArg: string, idArg: string, opts: FeedbackGlobalOpts) => {
       const asJson = Boolean(opts.json)
       await guard(asJson, async () => {
+        await confirmDestructive(opts, `Remove feedback ${idArg} on ${pathArg}?`)
         await apiJson(resolveTarget(opts), { method: 'DELETE', path: fbPath(pathArg, idArg) })
         if (asJson) printJson({ ok: true, id: idArg })
         else printLine(`feedback ${idArg} removed`)

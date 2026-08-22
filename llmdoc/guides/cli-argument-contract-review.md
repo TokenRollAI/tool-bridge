@@ -9,7 +9,8 @@ CLI 是公共控制面，不是 API 的宽松包装。修改命令时同时检�
 - 未知参数、缺值和多余位置参数必须失败，退出码与 stderr 保持可脚本化。
 - 互斥、依赖、默认值和枚举在解析层显式表达；不要把非法组合静默改写。
 - 密钥只从专用 secret 流程进入，不保留隐藏的旧 flag，也不把明文带入普通资源命令。
-- 删除资源只做命令名承诺的动作。集成卸载与密钥删除是两个显式操作。
+- 删除资源只做命令名承诺的动作，并校验目标 kind：`integration rm` 只卸 tool/context 节点，打到 device 等其它 kind 即拒（走 `deleteNode(target, path, ['tool','context'])`）。集成卸载与密钥删除是两个显式操作。
+- 破坏性命令（rm/unmount 及 `sk create` 空 scope）的二次确认只对交互式 TTY 且未给 `--yes` 生效；`--yes` 与非 TTY（管道 / CI / Agent `--json`）一律放行。确认是人类安全网，不改变脚本/Agent 既有行为，因此不破坏三入口对等；真正的护栏（如上面的 kind 校验、服务端权威校验）不能依赖它。共享 helper 在 `packages/cli/src/confirm.ts`。
 
 ## 三入口对等
 

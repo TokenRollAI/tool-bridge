@@ -56,5 +56,5 @@ bootstrap builtin 清单在 `packages/app/src/bootstrap.ts` 的 `BUILTIN_MODULES
 - 设备宿主通过 WebSocket factory、credential provider、handler 和 suspend/resume 注入 RN/Node 差异；SecureStore、AppState、原生 executor 与业务 policy 不属于 SDK 依赖。
 - 三宿主 StateStore 均为强一致 SQL 后端(Workers=D1、Node=SQLite/PG),SK 吊销即时生效;共享契约测试对拍语义。
 - Workers 设备会话结果与连接元数据进入 DO storage；Node 部分幂等结果只在进程内。
-- Workers 静态 UI 经 Assets binding；Node 从 `TB_UI_DIR` 或 dashboard 包读取。
+- Workers 静态 UI 经 Assets binding，缓存/压缩/条件请求由平台代劳；Node 从 `TB_UI_DIR` 或 dashboard 包读取，并由 `server` 的 `uiAssetsFetcher` 自理这些（hash 资产 immutable、其余 no-cache，内容协商 br/gzip，弱 ETag + 304），不下沉进 core/app。
 - 共享逻辑必须留在 core/app；适配器差异写成注入实现和明确测试，不在业务路由分叉。
