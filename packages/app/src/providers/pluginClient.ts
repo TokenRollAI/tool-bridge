@@ -1,8 +1,9 @@
 /**
  * Plugin 传输客户端:探活、契约抓取、envelope 调用。
  *
- * - envelope 与节点调用同形:POST {endpoint} body `{"tool":"<Method>","arguments":{...}}`,
- *   `X-TB-Context` 承载 CallContext(base64url,唯一载体)、`X-TB-Request-Id` 每次逻辑调用
+ * - plugin/v2 envelope 是独立于公开 HTBP 直连数据面的内部传输：POST {endpoint} body
+ *   `{"tool":"<Method>","arguments":{...}}`；`X-TB-Context` 承载 CallContext
+ *   (base64url,唯一载体)、`X-TB-Request-Id` 每次逻辑调用
  *   唯一;编解码复用 core plugin/envelope(体积守卫 ≤ 1 MiB)。
  * - Authorization 按 manifest.auth 解析:platform-token → SecretStore 保留名
  *   `plugin-token:<id>`;bearer → secretRef。

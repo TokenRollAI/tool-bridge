@@ -63,7 +63,7 @@ export async function handleHelp(c: AppContext, env: RouteEnv): Promise<Response
   } catch {
     // 非注册路径:命令级 ~help(两级披露)。命令是节点下的虚拟叶子:
     // - mcp/http/tool 上游工具:toolHelpModelFor 命中缓存工具表(不额外打上游);
-    // - builtin/context/skillhub:resolve 到父节点,取其 HelpModel 里的单条 cmd。
+    // - builtin/context/skillhub/device shell:resolve 到父节点,取其 HelpModel 里的单条 cmd。
     const toolModel = await toolHelpModelFor(c, ctx, registry, path, deps)
     if (toolModel !== null) return renderHelp(await enrichHelp(toolModel, path, store), rep)
     const cmdModel = await commandHelpModelFor(registry, ctx, builtins, deps, path, {

@@ -173,7 +173,8 @@ function ConfigFact({ label, value }: { label: string, value: string }) {
 
 /**
  * 节点注册管理(对等 `tb tool mount|rm` / `tb server add|ls|rm` / `tb ctx mount|unmount`;
- * E2E-6 ④ 的 Dashboard 写路径)。底层同一接口:POST /system/registry {tool: list|write|delete}。
+ * E2E-6 ④ 的 Dashboard 写路径)。底层走完整命令路径
+ * `POST /system/registry/<list|write|delete>`，body 是裸 arguments 对象。
  */
 export function RegistryPage() {
   const list = useRegistryList()

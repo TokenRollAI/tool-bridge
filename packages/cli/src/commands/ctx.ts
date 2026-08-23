@@ -16,7 +16,7 @@ import { callDirect, CliError } from '../http'
 
 /**
  * `tb ctx *` —— Context Layer 命令族。
- * 数据面四动词 + Search 走 `POST /<ns>` `{tool,arguments}`(cmd 名首字母大写);
+ * 数据面动词走 `POST /<ns>/<command>`，body 是裸 arguments 对象；
  * mount/unmount 与 tool.ts 同通道:`~register` 注册 / 管理面 `system/registry` delete。
  */
 

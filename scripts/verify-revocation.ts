@@ -33,14 +33,14 @@ const POLL_INTERVAL_MS = 2_000
 const sleep = (ms: number): Promise<void> => new Promise(r => setTimeout(r, ms))
 
 async function skCall(cmd: string, args: unknown): Promise<Response> {
-  return fetch(`${baseUrl}/system/sk`, {
+  return fetch(`${baseUrl}/system/sk/${cmd}`, {
     method: 'POST',
     headers: {
       'authorization': `Bearer ${adminSk}`,
       'content-type': 'application/json',
       'accept': 'application/json',
     },
-    body: JSON.stringify({ tool: cmd, arguments: args }),
+    body: JSON.stringify(args),
   })
 }
 

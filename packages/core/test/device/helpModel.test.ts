@@ -19,7 +19,7 @@ describe('deviceShellHelpModel(shell 契约)', () => {
     expect(exec).toMatchObject({
       name: 'exec',
       method: 'POST',
-      path: '/device/d1/shell',
+      path: '/device/d1/shell/exec',
       scope: 'call',
       effect: 'destructive',
       confirm: true,
@@ -51,6 +51,7 @@ describe('deviceShellHelpModel(shell 契约)', () => {
     const model = deviceShellHelpModel('device/d1/shell', { description: 'CI 机器' })
     expect(model.node.description).toBe('CI 机器')
     const dsl = renderHelpDsl(model)
+    expect(dsl).toContain('cmd exec POST /device/d1/shell/exec')
     expect(dsl).toContain('effect destructive')
     expect(dsl).toContain('confirm')
   })

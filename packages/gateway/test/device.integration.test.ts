@@ -117,13 +117,43 @@ describe('DeviceSession DO + /system/device/ws', () => {
     )
     expect(helpRes.status).toBe(200)
     const help = await helpRes.text()
-    expect(help).toContain('cmd exec POST')
+    expect(help).toContain(`cmd exec POST /device/${deviceId}/shell/exec`)
     expect(help).toContain('scope call')
     expect(help).toContain('effect destructive')
     expect(help).toContain('allowed commands: echo; everything else denied')
 
+    // Dashboard 消费 JSON 的 cmds[].path 生成实际调用与等价 CLI/curl；这里必须是完整
+    // 命令叶子路径，不能退回仅指向 shell 节点并另带 tool 的旧形态。
+    const helpJsonRes = await SELF.fetch(
+      `https://tb.test/device/${deviceId}/shell/~help`,
+      admin({ headers: { accept: 'application/json' } }),
+    )
+    expect(helpJsonRes.status).toBe(200)
+    const helpJson = (await helpJsonRes.json()) as { cmds: Array<{ name: string, path: string }> }
+    const execSpec = helpJson.cmds.find(cmd => cmd.name === 'exec')
+    expect(execSpec).toMatchObject({
+      name: 'exec',
+      path: `/device/${deviceId}/shell/exec`,
+    })
+    if (execSpec === undefined) throw new Error('expected exec command in shell help')
+    const execCommandPath = execSpec.path.replace(/^\/+/, '')
+
+    const commandHelpRes = await SELF.fetch(
+      `https://tb.test/${execCommandPath}/~help`,
+      admin({ headers: { accept: 'application/json' } }),
+    )
+    expect(commandHelpRes.status).toBe(200)
+    const commandHelp = (await commandHelpRes.json()) as {
+      cmds: Array<{ name: string, path: string }>
+    }
+    expect(commandHelp.cmds[0]).toMatchObject({
+      name: 'exec',
+      path: `/device/${deviceId}/shell/exec`,
+    })
+
     const callSeen = nextFrame(ws)
-    const invoke = postJson(`device/${deviceId}/shell/exec`, { command: 'echo hi' },
+    // 发现 → 执行闭环：真实调用直接使用 ~help 宣告的路径。
+    const invoke = postJson(execCommandPath, { command: 'echo hi' },
       admin(),
     )
     const call = await callSeen
@@ -177,7 +207,7 @@ describe('DeviceSession DO + /system/device/ws', () => {
 
     ws.close(1000)
     await new Promise(resolve => setTimeout(resolve, 20))
-    const offline = await postJson(`device/${deviceId}/shell/exec`, { command: 'echo hi' },
+    const offline = await postJson(execCommandPath, { command: 'echo hi' },
       admin(),
     )
     expect(offline.status).toBe(503)
@@ -189,7 +219,7 @@ describe('DeviceSession DO + /system/device/ws', () => {
       fs: { roots: ['/tmp'], readOnly: true },
     })
     const restoredCallSeen = nextFrame(ws2)
-    const restoredInvoke = postJson(`device/${deviceId}/shell/exec`, { command: 'echo again' },
+    const restoredInvoke = postJson(execCommandPath, { command: 'echo again' },
       admin(),
     )
     const restoredCall = await restoredCallSeen

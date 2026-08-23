@@ -4,7 +4,8 @@
  * 每个 system/* 节点(sk / secret / registry / status)背后是一个 BuiltinModule:
  * - `help(nodePath)` 产出该节点的 {@link HelpModel}(cmd 集合 + scope),供 ~help 渲染
  *   与网关取 cmd→scope 做判定;
- * - `dispatch(cmd, args, ctx)` 执行数据面调用(POST /<nodePath> body {tool,arguments})。
+ * - `dispatch(cmd, args, ctx)` 执行数据面调用；cmd 来自 `POST /<nodePath>/<cmd>` 的路径
+ *   叶子段，body 是裸 arguments 对象。
  *
  * 纯逻辑:存储经注入的 Store(SKRegistryStore / SecretStoreImpl / NodeRegistryStore)。
  * 权限判定不在此——由网关调用点统一做(见 gateway/app.ts)。

@@ -3,7 +3,7 @@
  * 以及注册面的配置校验(含 s3 连通探测)。
  *
  * 语义真源在 core 的 objectProvider / skillhub;这里只负责把宿主注入的 ObjectStore、
- * keyPrefix、$ref 阈值与中转 URL 工厂接上,并把数据面 {tool} 映射到 provider 方法。
+ * keyPrefix、$ref 阈值与中转 URL 工厂接上,并把数据面路径的命令叶子映射到 provider 方法。
  */
 import {
   contextCapabilitiesOf,
@@ -201,13 +201,13 @@ export async function skillhubProviderFor(
   return createSkillhubProvider(objects, opts)
 }
 
-/** 数据面 {tool} → SkillhubProvider 方法派发;入参精细校验由 provider 承担。 */
+/** 数据面路径的命令叶子 → SkillhubProvider 方法派发;入参精细校验由 provider 承担。 */
 export async function dispatchSkillhubCmd(
   provider: SkillhubProvider,
-  tool: string,
+  command: string,
   args: Record<string, unknown>,
 ): Promise<unknown> {
-  switch (tool.toLowerCase()) {
+  switch (command.toLowerCase()) {
     case 'list':
       return await provider.list(args.opts as ListOptions | undefined)
     case 'get':
@@ -228,26 +228,26 @@ export async function dispatchSkillhubCmd(
       return await provider.remove(args.id as string)
     default:
       // skillhubScopeForCmd 已挡未知 cmd;此处为类型完备性兜底。
-      throw new TBError('invalid_argument', `unknown cmd '${tool}'`)
+      throw new TBError('invalid_argument', `unknown cmd '${command}'`)
   }
 }
 
 /**
- * 数据面 {tool} → ContextProvider 方法派发;入参精细校验由 provider 承担。
+ * 数据面路径的命令叶子 → ContextProvider 方法派发;入参精细校验由 provider 承担。
  * 可选方法(Search/Delete)未实现(plugin 未在 capabilities 声明)→ 按 unknown cmd 拒
  * (未声明的可选方法平台永不调用)。SDK 设备侧 handler 派发同形复用(导出)。
  */
 export async function dispatchContextCmd(
   provider: ContextProvider,
-  tool: string,
+  command: string,
   args: Record<string, unknown>,
 ): Promise<unknown> {
   // 全动词可选:未实现的动词一律按 unknown cmd 拒绝(与"~help 只列真实存在的操作"一致,
   // 调用方看到的动词表与可调用集合始终吻合)。
   const unimplemented = (): never => {
-    throw new TBError('invalid_argument', `unknown cmd '${tool}'(provider 未实现)`)
+    throw new TBError('invalid_argument', `unknown cmd '${command}'(provider 未实现)`)
   }
-  switch (tool.toLowerCase()) {
+  switch (command.toLowerCase()) {
     case 'list':
       if (provider.list === undefined) return unimplemented()
       return await provider.list((args.path as string) ?? '', args.opts as ListOptions | undefined)
@@ -274,7 +274,7 @@ export async function dispatchContextCmd(
       return await provider.search(args.query as string, args.opts as SearchOptions | undefined)
     default:
       // contextScopeForCmd 已挡未知 cmd;此处为类型完备性兜底。
-      throw new TBError('invalid_argument', `unknown cmd '${tool}'`)
+      throw new TBError('invalid_argument', `unknown cmd '${command}'`)
   }
 }
 

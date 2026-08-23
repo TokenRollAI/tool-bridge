@@ -129,15 +129,17 @@ describe('parseHelpDsl(最小 parser,向前兼容)', () => {
     const text = [
       'htbp 0.1',
       'node docs mcp "文档"',
-      'cmd search POST /docs',
-      '  body {"tool":"search"}',
+      'cmd search POST /docs/search',
+      '  body {"type":"object","properties":{"query":{"type":"string"}}}',
       '  returns 结果',
       '  scope call',
     ].join('\n')
     const parsed = parseHelpDsl(text)
     expect(parsed.htbp).toBe('0.1')
     expect(parsed.nodes).toEqual([{ path: 'docs', kind: 'mcp', description: '文档' }])
-    expect(parsed.cmds).toEqual([{ name: 'search', method: 'POST', path: '/docs', scope: 'call' }])
+    expect(parsed.cmds).toEqual([
+      { name: 'search', method: 'POST', path: '/docs/search', scope: 'call' },
+    ])
   })
 
   it('未知行被忽略(向前兼容)', () => {

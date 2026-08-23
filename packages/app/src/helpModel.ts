@@ -158,7 +158,8 @@ export async function helpModelFor(
 }
 
 /**
- * 命令级 `~help`(`GET /<nodePath>/<command>/~help`)对 builtin/context/skillhub 成立:
+ * 命令级 `~help`(`GET /<nodePath>/<command>/~help`)对 builtin/context/skillhub 与
+ * 标准 device shell 成立:
  * resolve 到父节点,构建其全量 HelpModel(schemas 形态,cmd 带 inputSchema),
  * 取出叶子段命中的单条 cmd 单独返回。mcp/http/tool 的工具级 help 由 toolHelpModelFor 承载,
  * 不进此函数(调用点已先试过)。命中不到(节点不可调用 / 命令不存在)→ null(交调用点 404)。
@@ -177,10 +178,15 @@ export async function commandHelpModelFor(
   const resolved = await registry.resolve(path).catch(() => null)
   if (resolved === null || resolved.rest === '' || resolved.rest.includes('/')) return null
   const { node, rest: command } = resolved
-  // builtin/context/skillhub 才在此处理;其余 kind(mcp/http/tool/device/directory/remote)
-  // 要么已由 toolHelpModelFor 命中,要么无命令级 help。
+  // builtin/context/skillhub 与 device shell 在此处理；mcp/http/tool（含 device 自定义
+  // tool）已由 toolHelpModelFor 命中，directory/remote 没有本地命令级 help。
   if (
-    !(node.kind === 'builtin' || node.kind === 'context' || node.kind === 'skillhub')
+    !(
+      node.kind === 'builtin'
+      || node.kind === 'context'
+      || node.kind === 'skillhub'
+      || (node.kind === 'device' && node.config?.kind === 'device')
+    )
   ) {
     return null
   }

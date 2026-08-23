@@ -299,16 +299,18 @@ describe('直连工具调用(POST /<node>/<tool>,body 即 arguments)', () => {
     expect(empty.status).toBe(200)
   })
 
-  it('信封入口不受影响:POST /<node> + {tool,arguments} 仍可调用', async () => {
+  it('节点本身不可调用:POST /<node> + {tool,arguments} 不作为兼容入口', async () => {
     const upstream = mcpUpstreamMock([{ name: 'echo', description: 'echo back' }])
     vi.stubGlobal('fetch', upstream.fetchMock)
     await mountMcp('ext/direct-legacy')
 
-    const res = await postJson('ext/direct-legacy/echo', { text: 'hi' },
+    const res = await postJson(
+      'ext/direct-legacy',
+      { tool: 'echo', arguments: { text: 'hi' } },
       admin(),
     )
-    expect(res.status).toBe(200)
-    expect(await res.json()).toBe('called:echo:{"text":"hi"}')
+    expect(res.status).toBe(404)
+    expect(await res.json()).toMatchObject({ code: 'not_found' })
   })
 
   it('直连虚拟化:rename 后新名可直连、原名与 hidden 404;未知工具 404', async () => {

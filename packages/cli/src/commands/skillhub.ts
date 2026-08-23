@@ -10,7 +10,7 @@ import { callDirect, CliError } from '../http'
 
 /**
  * `tb skill *` —— skillhub 命令族(与 device 并列的一等 kind:Agent Skill 仓库)。
- * 数据面 List/Get/Search + Publish/Remove 走 `POST /<hub>` `{tool,arguments}`;
+ * 数据面 List/Get/Search + Publish/Remove 走 `POST /<hub>/<command>`，body 是裸 arguments 对象；
  * mount/unmount 与 ctx.ts 同通道(`~register` / 管理面 `system/registry` delete)。
  * 每个 skill = 一个目录 <id>/SKILL.md(+ 文本文件),SKILL.md frontmatter 需含 name/description。
  */

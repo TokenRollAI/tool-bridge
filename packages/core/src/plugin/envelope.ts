@@ -1,8 +1,9 @@
 /**
  * Plugin 传输契约编解码(纯逻辑)。
  *
- * 与节点调用同形:POST {endpoint},body `{"tool":"<Method>","arguments":{...}}`
- * (arguments 按名传递,opts 整体传不平铺);调用上下文经 `X-TB-Context` header
+ * 这是独立于公开 HTBP 直连数据面的 plugin/v2 内部传输：POST {endpoint},body
+ * `{"tool":"<Method>","arguments":{...}}`（tool 是 plugin 方法名；arguments 按名传递，
+ * opts 整体传不平铺）；调用上下文经 `X-TB-Context` header
  * 以 CallContext JSON 的 base64url 承载(唯一载体,body 不重复);`X-TB-Request-Id`
  * 每次逻辑调用唯一、重试不变(去重表见 dedupe.ts)。
  * 单次请求/响应 ≤ 1 MiB,超限 → invalid_argument;更大内容经 `{ "$ref": <URL> }`。

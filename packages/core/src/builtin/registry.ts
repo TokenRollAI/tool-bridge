@@ -3,8 +3,9 @@
  *
  * cmd:list/get(scope read)、write/update/delete(scope register)。
  * **反向注册路径判定(registerPaths 收紧 / 保留根 / conflict)不在 dispatch 内做**——
- * 网关在调用点(POST /<path> 与 POST /<path>/~register)统一过 checkRegisterPath 后才 dispatch,
- * 见 gateway/app.ts。dispatch 只做数据结构语义(幂等 upsert、物化、回收),registeredBy=调用者 keyId。
+ * app 在调用点（`POST /system/registry/<write|update|delete>` 与
+ * `POST /<path>/~register`）统一过注册路径检查后才 dispatch。dispatch 只做数据结构语义
+ * (幂等 upsert、物化、回收),registeredBy=调用者 keyId。
  */
 
 import type { NodeRegistryStore } from '../tree/registry'

@@ -22,9 +22,9 @@ const SCOPE_BY_CMD: Record<string, 'read' | 'write'> = {
   delete: 'write',
 }
 
-/** 数据面 {tool} → scope;未知(含大小写不符)→ null,由网关按 invalid_argument 处理。 */
-export function contextScopeForCmd(tool: string): 'read' | 'write' | null {
-  return SCOPE_BY_CMD[tool] ?? null
+/** 数据面路径的命令叶子 → scope;未知(含大小写不符)→ null,由网关按 invalid_argument 处理。 */
+export function contextScopeForCmd(command: string): 'read' | 'write' | null {
+  return SCOPE_BY_CMD[command] ?? null
 }
 
 const OPTS_SCHEMA = {

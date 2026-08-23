@@ -53,14 +53,15 @@ async function assertDashboard(): Promise<void> {
 }
 
 async function call(path: string, tool: string, arguments_: JsonObject): Promise<unknown> {
-  const response = await fetch(`${gatewayUrl}/${path}`, {
+  const commandPath = `${path}/${tool}`
+  const response = await fetch(`${gatewayUrl}/${commandPath}`, {
     method: 'POST',
     headers: {
       'accept': 'application/json',
       'authorization': `Bearer ${adminSk}`,
       'content-type': 'application/json',
     },
-    body: JSON.stringify({ tool, arguments: arguments_ }),
+    body: JSON.stringify(arguments_),
   })
   const text = await response.text()
   let body: unknown = text
@@ -72,7 +73,7 @@ async function call(path: string, tool: string, arguments_: JsonObject): Promise
   assert.equal(
     response.status,
     200,
-    `${path}:${tool} expected HTTP 200, got ${response.status}: ${text}`,
+    `${commandPath} expected HTTP 200, got ${response.status}: ${text}`,
   )
   return body
 }

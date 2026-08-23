@@ -92,8 +92,8 @@ export function renderHelpDsl(model: HelpModel): string {
 /**
  * 渲染 Help JSON(规范性)——与 DSL 语义等价、字段不多不少。
  * `hint`/`inputSchema`/`outputSchema`/`returns`/`effect` 仅在有值时出现;`confirm` 仅在为真时出现(与 DSL 的存在性对齐)。
- * 注:JSON 的 `cmds[].inputSchema` 是 arguments 的裸 JSON Schema(不含信封);DSL 的 `body` 行
- * 才把它包成请求信封示意。`outputSchema` 两侧都是裸 JSON Schema,DSL 侧是 `result` 行。
+ * 注:JSON 的 `cmds[].inputSchema` 与 DSL 的 `body` 行都是 arguments 的裸 JSON Schema，
+ * 不包含调用信封。`outputSchema` 两侧也都是裸 JSON Schema,DSL 侧是 `result` 行。
  * JSON 的 `node.path`/`children[].path` 承载原始 TreePath(根为空串)。
  */
 export function renderHelpJson(model: HelpModel): HelpJson {

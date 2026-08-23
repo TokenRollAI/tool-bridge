@@ -138,15 +138,15 @@ describe('encode/decode 往返', () => {
 
   it('call 帧的 context 缺 displayName 合法;缺必填字段 → invalid_argument', () => {
     const ok
-      = '{"type":"call","id":"r1","path":"p","tool":"t","arguments":{},"context":{"caller":{"keyId":"k","owner":"user:a"},"traceId":"tr","createdAt":"t0","expiresAt":"t1"}}'
+      = '{"type":"call","id":"r1","path":"p/run","arguments":{},"context":{"caller":{"keyId":"k","owner":"user:a"},"traceId":"tr","createdAt":"t0","expiresAt":"t1"}}'
     expect(decodeDeviceFrame(ok)).toMatchObject({
       context: { caller: { keyId: 'k', owner: 'user:a' } },
     })
     const bad = [
       // caller 缺 keyId
-      '{"type":"call","id":"r1","path":"p","tool":"t","arguments":{},"context":{"caller":{"owner":"user:a"},"traceId":"tr","createdAt":"t0","expiresAt":"t1"}}',
+      '{"type":"call","id":"r1","path":"p/run","arguments":{},"context":{"caller":{"owner":"user:a"},"traceId":"tr","createdAt":"t0","expiresAt":"t1"}}',
       // 缺 expiresAt
-      '{"type":"call","id":"r1","path":"p","tool":"t","arguments":{},"context":{"caller":{"keyId":"k","owner":"user:a"},"traceId":"tr","createdAt":"t0"}}',
+      '{"type":"call","id":"r1","path":"p/run","arguments":{},"context":{"caller":{"keyId":"k","owner":"user:a"},"traceId":"tr","createdAt":"t0"}}',
     ]
     for (const text of bad) {
       expect(codeOf(() => decodeDeviceFrame(text)), `应拒绝:${text}`).toBe('invalid_argument')
@@ -154,7 +154,7 @@ describe('encode/decode 往返', () => {
   })
 
   it('兼容:新网关 → 老设备 decoder,call 帧含 context 不影响既有字段解析', () => {
-    // 老设备只读 id/path/tool/arguments;decoder 仍完整解析,context 作为已知可选字段保留。
+    // 老设备只读 id/path/arguments;decoder 仍完整解析,context 作为已知可选字段保留。
     const text
       = '{"type":"call","id":"r1","path":"shell/exec","arguments":{"command":"ls"},"context":{"caller":{"keyId":"k","owner":"user:a"},"traceId":"tr","createdAt":"t0","expiresAt":"t1"}}'
     expect(decodeDeviceFrame(text)).toMatchObject({
@@ -201,8 +201,8 @@ describe('decode 拒绝非法输入 → invalid_argument', () => {
       '{"type":"ready"}', // 缺 mountPath
       '{"type":"error","error":{"code":"nope","message":"m","retryable":false}}', // 非法错误码
       '{"type":"error","error":{"code":"internal","message":"m"}}', // 缺 retryable
-      '{"type":"call","id":"1","tool":"t","arguments":{}}', // 缺 path
-      '{"type":"call","id":"1","path":"p","tool":"t","arguments":"x"}', // arguments 非对象
+      '{"type":"call","id":"1","arguments":{}}', // 缺 path
+      '{"type":"call","id":"1","path":"p/run","arguments":"x"}', // arguments 非对象
       '{"type":"result","id":"1"}', // 缺 ok
       '{"type":"result","id":"1","ok":false}', // ok:false 缺 error
       '{"type":"cancel"}', // 缺 id

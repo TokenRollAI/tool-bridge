@@ -10,8 +10,8 @@ import type { ChildRef, CmdSpec, HelpModel } from '../htbp/model'
 import type { Presence } from './presence'
 import type { TreePath } from '../types'
 import { contextHelpModel, type ContextHelpOptions } from '../context/help'
+import { cmdPath, withCommandPaths } from '../builtin/util'
 import { describeAllow } from './shellAllow'
-import { cmdPath } from '../builtin/util'
 
 const SHELL_DESCRIPTION = 'device shell (remote command execution)'
 
@@ -41,7 +41,9 @@ export function deviceShellHelpModel(
   }
   return {
     node: { path: nodePath, kind: 'device', description: shell.description ?? SHELL_DESCRIPTION },
-    cmds: [exec],
+    // exec 是节点下的虚拟命令叶子；HelpModel 必须宣告完整直连路径，Dashboard、CLI
+    // 与 Agent 都直接消费该字段，不能退回只指向 shell 节点的旧信封语义。
+    cmds: withCommandPaths(nodePath, [exec]),
   }
 }
 

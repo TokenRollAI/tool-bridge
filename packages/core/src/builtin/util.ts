@@ -32,9 +32,9 @@ export const LIST_OPTS_SCHEMA = {
 } as const
 
 /**
- * 命令所属**节点**的路径(带前导 '/')。CmdSpec.path 存节点路径;完整直连调用路径
- * `POST /<nodePath>/<cmd>` 由渲染/身份层统一派生(见 htbp/model.ts leafCmdPath)——
- * 命令是节点下的虚拟叶子,唯一调用形态是直连,没有 `{tool,arguments}` 信封。
+ * 静态命令表构造时共用的节点路径占位符(带前导 `/`)。
+ * 调用方必须在返回 HelpModel 前经过 `withCommandPaths`,由它把每条 `CmdSpec.path`
+ * 统一替换为 `/<nodePath>/<cmd.name>`；渲染层不会再补命令名。
  */
 export function cmdPath(nodePath: TreePath): string {
   return `/${nodePath}`
