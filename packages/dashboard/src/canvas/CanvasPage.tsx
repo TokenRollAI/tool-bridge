@@ -4,10 +4,10 @@ import { useCallback, useState } from 'react'
 import { toast } from 'sonner'
 import { AddToolWizard } from '@/components/add-tool/AddToolWizard'
 import { MountDialog } from '@/pages/system/forms/MountDialog'
+import { decodeTreePath, encodeTreePath } from '@/lib/path'
 import { ConfirmAction } from '@/components/ConfirmAction'
 import { useInvalidate, useInvoke } from '@/lib/queries'
 import { Button } from '@/components/ui/button'
-import { encodeTreePath } from '@/lib/path'
 import { cn } from '@/lib/utils'
 import { type CanvasActionTarget, TreeCanvas } from './TreeCanvas'
 import { NodeInspector } from './NodeInspector'
@@ -76,7 +76,9 @@ export function CanvasPage() {
   const invalidate = useInvalidate()
   const [mountTarget, setMountTarget] = useState<CanvasActionTarget | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<CanvasActionTarget | null>(null)
-  const selectedPath = splat === undefined ? null : splat.replace(/\/+$/, '')
+  // splat 是原始 pathname 片段(react-router 不替消费者解码);逐段解码回真实节点路径,
+  // 再去尾斜杠。`undefined`(index 路由)= 未选中,不能塌成空串 —— 空串是根节点的合法路径。
+  const selectedPath = splat === undefined ? null : decodeTreePath(splat).replace(/\/+$/, '')
   const selectedTool = searchParams.get('tool') ?? undefined
   const openCommandDirectory = searchParams.get('tab') === 'invoke'
 
