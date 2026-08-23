@@ -31,6 +31,19 @@ pnpm turbo run build
 
 搜索等派生状态要分别验证写入、删除、失败保留 last-known-good 和读路径不修写。安全变化要覆盖 allow、deny、不可见 404 与日志无敏感值。
 
+## wire 变更闭环
+
+命令寻址或请求体变化不能只测“手写正确 URL 能调用”。至少为每个受影响的 kind 跑通同一条发现驱动闭环：
+
+1. 请求 owner 的 JSON `~help`，精确断言目标 `cmds[].path` 等于带命令叶子的完整路径。
+2. 不重建 URL，直接用返回的 `cmd.path` 和裸 arguments body 发起 POST，断言请求形状与响应。
+3. 直接用同一个 `cmd.path` 请求命令级 `~help`，确认发现、帮助与执行指向同一命令身份。
+4. 真实发送旧形态 `POST /<owner>` + `{tool,arguments}`，断言被拒绝(当前为 404）；标题、注释或只测新请求不能替代此负向证据。
+
+路径和 body 使用精确结构断言；模糊子串、从测试 fixture 手写正确叶子路径，或分别验证 help 与 invoke 都不能证明闭环。公开 HTBP 的直连 wire 与 plugin/v2 固定 endpoint 的内部 `{tool,arguments}` 信封要分层测试，避免机械删除合法适配协议。
+
+wire 迁移还必须审计仓库中的 smoke、验证脚本、示例与运维 helper，不能只查主请求处理器。优先把 URL/body 构造抽成可离线断言的纯函数，或让本地 stub smoke 进入常规闸门；真实外部资源验证只能补充证据，不能成为发现旧 wire 漂移的唯一办法。
+
 ## 提交纪律
 
 - 先检查 `git status --short`，保留用户已有改动。

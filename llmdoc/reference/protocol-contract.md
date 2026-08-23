@@ -17,10 +17,20 @@
 ## 调用
 
 - 唯一形态：`POST /<nodePath>/<command>`，body 即 arguments 本体。命令是节点下的**虚拟叶子**(不写 Registry），对一切可调用 kind(mcp/http/tool 工具、builtin/context/skillhub 命令、device shell/fs）一视同仁。没有 `{tool, arguments}` 信封。
+- owner 节点的 `GET /<nodePath>/~help` 返回的每条 `cmds[].path` 都是带命令/工具叶子的完整直连路径(如 `/device/mac/shell/exec`），不是 owner 定位或展示提示。消费者必须原样把它用于 `GET <cmd.path>/~help` 与 `POST <cmd.path>`，不得再用 `node.path + cmd.name` 重建命令身份。
 - 节点本身(无命令段的 `POST /<nodePath>`）不可调用，返回 404。
 - 命令可被寻址：`GET /<nodePath>/<command>/~help`、`POST /<nodePath>/<command>`；`~tree` 只列权威注册拓扑,动态命令经 `~help`/`~search` 发现。
 - 标识符大小写不敏感、规范化为小写：路径段、命令/工具名、export id、scope pattern 字面段、device 暴露路径都小写。输入大小写不敏感,存储与输出恒小写；规范化后冲突(如上游同时暴露 `Foo`/`foo`)→ `invalid_argument`，不选其一。命令名含 `/`、为空、以 `~` 开头、为 `.`/`..` 一律拒。第三方(MCP/HTTP 上游)原始工具名是外部身份,适配器维护 `公开小写名 → 上游原名` 映射,不改上游大小写。
 - `Page<T>` 为 `{items,cursor?}`，默认 limit 50、最大 200；cursor 只表示继续位置，不是授权凭据。
+
+公开 HTBP 与 plugin/v2 是两层不同的 wire，不能互相套用：
+
+| 边界 | URL | body | `tool` 的含义 |
+|---|---|---|---|
+| 调用方 → HTBP gateway | `POST <cmds[].path>` | 裸 arguments 对象 | 不存在；命令身份已经在路径叶子中 |
+| gateway → plugin/v2 | `POST <manifest.endpoint>`(固定 endpoint) | `{tool,arguments}` | plugin 内部方法名，由平台适配层生成 |
+
+因此，公开请求向 owner 路径发送 `{tool,arguments}` 必须拒绝；反过来，全仓清理公开旧信封时不得删除 plugin/v2 适配层的合法内部信封。
 
 ## 节点
 
@@ -73,6 +83,8 @@ Feedback 是低频、非权威协作数据。Workers KV 宿主允许并发 submi
 ## plugin/v2
 
 Manifest 描述部署：`id`、`protocolVersion:'plugin/v2'`、`endpoint`、`auth`、`healthPath`、`enabled`。`~describe` 描述 exports；每个 export 决定 profile、methods/capabilities、auth、凭证字段、挂载配置与可选 probe。
+
+plugin/v2 的 endpoint 是平台到 plugin 的固定内部传输入口，不是公开 HTBP 命令路径；调用体保留 `{tool:<plugin 方法>,arguments:<命名参数>}`。公开调用先在 gateway 以完整命令路径和裸 body 完成路由，再由 provider 适配层转换为该内部信封。
 
 标准内置流程从编译期 catalog 直接挂载。外部 HTTP(S) endpoint 需注册、探活、抓取并校验 descriptor；自定义宿主可显式装配 `binding:<name>` handler。
 

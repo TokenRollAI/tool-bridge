@@ -27,6 +27,7 @@ Dashboard 是纯 HTTP 客户端，不 import core。wire 类型在 `src/lib/type
 - 画布选中态由 URL 驱动(`/nodes/<path>`，BrowserRouter basename `/ui`)：命令面板跳转、deep-link、前进后退都要能定位节点并开对应 Inspector，`/` 不选中(全景)。命令叶和搜索生成的 `?tool=<command>` 必须由 `NodeInspector` 消费，切到调用 tab 并由 `CommandWorkspace` 打开对应命令；切换路径或 URL 状态时 Inspector 整体 remount，不跨节点残留 tab/表单状态。
 - 画布只渲染"已加载 + 已展开"的节点：truncated/remote 子树按需懒加载，offline 设备节点进入布局前剪掉，节点总数超阈值时默认只展根层——换成画布不能丢这三条 TreeNav 既有性能边界。
 - `~tree` 只承载实体节点；命令是用户点击 owner 的独立开关后，复用节点级 `~help` query 投影出的 `owner → 命令叶`虚拟子树，不增加 commandGroup 中转或二次折叠。虚拟角色与图 ID 必须独立，不复用实体节点的 `childCount`、挂载权限或 `expanded`；每个 owner 在画布最多直接展示 10 条命令，超出部分统一进入 Inspector 的可筛选完整目录。只订阅用户已打开且当前可见的 owner；真实树折叠使 owner 不可见时停止 observer，不留虚拟节点或悬边。
+- `CmdPanel`、实际 `invoke` 与 `CliHint` 共同信任 owner `~help` 返回的 `cmds[].path`：它已经是含命令叶子的完整直连路径，除 URL 拼接所需的前导斜杠规范化外必须原样传递。禁止用 owner path + `cmd.name` 重建、另传 `tool`，或把 body 包成 `{tool,arguments}`；实际 POST、`tb call` 与 curl 必须使用同一 command path 和裸 arguments。
 - 每个 profile 首次产生可见布局时只自动执行一次 fit view；之后展开/收起实体树、显隐命令或切换选中都不得重置用户的平移与缩放。用户需要重置时通过“适应视图”显式触发。
 - React Flow 节点适配必须传递 dagre 产出的 `width` / `height`，避免 MiniMap 矩形退化。React Flow `colorMode` 与 Dashboard 主题同步；MiniMap 的背景、mask、节点 fill/stroke 使用显式高对比 SVG 配色，不盲用卡片的暗色 token，且与画布底部操作提示分区布局、不互相遮挡。
 - Inspector 内部布局必须以实际容器宽度为准，不能只凭 viewport breakpoint 推导双栏。Context 正文等高密度详情统一放入宽 Dialog，header/footer 固定、正文独立滚动，长路径与预格式内容允许换行或横向滚动，并保留返回所属工具的链接。若恢复常驻双栏，使用容器查询或 Inspector 显式传入布局能力。
