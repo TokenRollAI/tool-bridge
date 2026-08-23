@@ -45,6 +45,7 @@
 | Linux 设备 daemon 产品化 | [memory/reflections/device-daemon.md](memory/reflections/device-daemon.md) |
 | SDK device 多运行时边界 | [memory/reflections/sdk-device-runtime-boundary.md](memory/reflections/sdk-device-runtime-boundary.md) |
 | 多副本部署产品化与 CF 发布路径合流 | [memory/reflections/multi-deploy-productionization.md](memory/reflections/multi-deploy-productionization.md) |
+| Cloudflare D1 Sessions、Placement 与延迟诊断 | [memory/reflections/cloudflare-d1-performance.md](memory/reflections/cloudflare-d1-performance.md) |
 | Dashboard 能力树与 Context 详情交互 | [memory/reflections/dashboard-tree-context-ui.md](memory/reflections/dashboard-tree-context-ui.md) |
 | 直连命令路径不变量与 wire 闭环 | [memory/reflections/direct-command-path-invariant.md](memory/reflections/direct-command-path-invariant.md) |
 

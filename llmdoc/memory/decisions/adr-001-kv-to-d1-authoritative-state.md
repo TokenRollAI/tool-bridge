@@ -4,6 +4,15 @@
 
 **拍板记录**:选项 A(全量迁 D1),pre-launch 无线上用户、零迁移负担,跳过前置量化直接实施(延迟观测留待真实部署验收)。共库问题在实施中按用户意见改判:**一个 D1 库(`tb-db`)、两个 binding(TB_STATE/TB_SEARCH)指向它** —— 分库唯一的实质理由(search rebuild 与认证热路径的写竞争)在控制面网关的真实量级下可忽略,而共库省一个云资源、省 provision 步骤、用户心智"一个库"收益是实打实的;binding 表达用途、库表达存储位置,将来要拆只动配置不动代码。state 表名 `tb_state_kv`(与 `tb_search_*` 共库自解释)。
 
+## 延迟跟进（已实施）
+
+- 主 Worker 按 HTTP 请求为 State 与 Search 分别创建 `first-primary` D1 Session。State 的首个权威读始终看到最新版本，维持 SK 吊销/权限收紧即时生效；Search 首读 primary 避免首次惰性建表尚未复制时命中旧副本。两边后续读都可使用满足 bookmark 的副本。
+- DeviceSession DO 不跨 hibernation 复用 D1 session；每条独立状态/搜索操作链按同样约束新建 session。
+- `D1StateStore.getMany` 把分块 statement 放进一次 `batch()`，减少网络往返；schema gate 仍按 isolate/DO 实例复用。
+- Wrangler 默认开启 Smart Placement、Workers Logs/Traces；响应暴露不含内部数据的 `Server-Timing`，500ms 以上请求记录 D1 wall/SQL 时间与执行区域，解决“SQL 很快但跨区很慢”无法区分的问题。
+- 鉴权短 TTL 内存缓存没有实施：它会把吊销即时性重新降为 TTL 上界。若将来引入，必须作为明确的安全语义变化重新决策。
+- Read Replication 仍需部署者在 D1 Settings 打开；Sessions 代码在未开复制时也正确，只是查询仍由 primary 服务。
+
 ## 背景与问题
 
 Workers 宿主的 `StateStore` 由 KV 承担(`KvStateStore`,绑定 `TB_KV`),存放 SK 哈希表、节点树、加密 secret、plugin manifest、feedback 等全部权威状态。KV 是最终一致存储,带来四类已知代价:
@@ -24,7 +33,7 @@ D1 已在同宿主用于 SearchIndex(`TB_SEARCH`,FTS5),即 D1 的绑定、provis
 **A. 全量迁 D1(推荐)**:新建 `D1StateStore`(单表 kv,与 server 的 `SqliteStateStore`/`PgStateStore` 同布局同语义——D1 就是 SQLite,`prefixUpperBound` 范围扫描、`INSERT OR IGNORE` putIfAbsent 可近乎照搬);`TB_KV` 从状态存储撤出。
 - 得:强一致撤销、原子 putIfAbsent、幽灵消失、三宿主 StateStore 全部收敛到 SQL 语义(契约测试可共享)。
 - 失:**认证热路径延迟**。`sk:h:<hash>` 每请求一读:KV 边缘命中是毫秒级,D1 查询回源主库(读复制走 Sessions API,仍非边缘缓存),跨区域可到几十 ms。这是唯一实质代价,必须先量化再全量切。
-- 缓解:per-isolate 内存缓存 + 短 TTL(5–15s)+ 负缓存禁用;撤销语义从"KV 传播不可控"变为"缓存 TTL 上界可控"——反而是收益。
+- 缓解（原始候选）:per-isolate 内存缓存 + 短 TTL(5–15s)+ 负缓存禁用。后续实现没有采用，改用请求级 Sessions + Smart Placement，避免把即时吊销重新降为 TTL 一致性；见上方“延迟跟进”。
 
 **B. 只迁热敏数据(SK/撤销/引导标志),树与 manifest 留 KV**:按 key 前缀路由两个后端。
 - 得:改动面小。失:长期两套一致性语义并存,`StateStore` 之上要加路由层,list 跨后端语义混乱;省下的延迟恰恰在最热的 SK 路径上并不省(SK 正是要迁的部分)。**不推荐**。

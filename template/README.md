@@ -32,13 +32,16 @@ Paste the first value into `TB_BOOTSTRAP_ADMIN_SK` and the second into `TB_SECRE
 ## After deploying
 
 1. Copy the generated `*.workers.dev` URL from the deployment result.
-2. Verify with the Admin SK you saved:
+2. In Cloudflare Dashboard, open `D1 → tool-bridge-db → Settings` and enable **Read Replication**. The gateway already uses request-scoped D1 Sessions; replicas are only used after this database setting is enabled.
+3. Verify with the Admin SK you saved:
 
 ```sh
 curl https://<your-worker>.workers.dev/healthz
 curl -H "Authorization: Bearer <your-admin-sk>" \
   https://<your-worker>.workers.dev/~help
 ```
+
+Authenticated responses include `Server-Timing: tb-d1;dur=..., tb-worker;dur=...`. Requests taking at least 500ms emit a structured `tool_bridge_slow_request` warning in Workers Logs with D1 wall/SQL time and primary/replica regions, but never SQL, keys, credentials, or response data. Smart Placement is enabled for API latency; because `/ui` currently runs Worker-first, this may trade a little static-asset TTFB for fewer cross-region D1 round trips.
 
 The dashboard lives at `https://<your-worker>.workers.dev/ui`. You can also save the target locally with `tb login --base-url https://<your-worker>.workers.dev --profile default`; enter the Admin SK at the prompt so it does not appear in shell history.
 

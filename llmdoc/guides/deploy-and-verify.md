@@ -24,6 +24,23 @@ pnpm --filter @tool-bridge/gateway run deploy
 
 `provision` 从环境读取账户与命名前缀，幂等创建 R2 与一个 D1 库(TB_STATE/TB_SEARCH 两个 binding 指向它)，并把本地 checkout 的部署目标写入 wrangler 配置。该写回含环境标识，不应作为通用模板提交。
 
+## D1 延迟配置
+
+gateway 已按请求使用 D1 Sessions API，但**代码接入与数据库启用读复制是两步**：
+
+1. 在 Cloudflare Dashboard 打开 `D1 → <数据库> → Settings → Read Replication`。Wrangler 当前没有对应的启用命令，`provision` 会提醒但不会伪装成已经开启。
+2. State session 用 `first-primary`：每个 HTTP 请求的首个权威查询必须看到最新 SK/权限/节点状态，保留吊销即时生效；同请求后续查询可由满足 bookmark 的副本服务。
+3. Search session 也用 `first-primary`：首次惰性建表后若立即从尚未同步 schema 的副本读取会报错；首查询钉 primary 后，同 session 的后续候选查询仍可由满足 bookmark 的副本服务并保持 read-my-own-writes。
+
+`wrangler.jsonc` 默认启用 Smart Placement。所有鉴权请求至少访问一次 State primary，把 Worker 放近主要后端可减少单请求内连续 D1/上游往返的跨区成本。当前 Dashboard 仍是 `assets.run_worker_first=true`，所以 `/ui` 静态资源也会先到 Smart-Placed Worker；这是核心 API 延迟优先的明确取舍。若要同时追求全球静态资源最低 TTFB，应把 UI 拆到 edge-first Assets/Pages Worker，再用同源或明确 CORS 接 API，不能只改 `run_worker_first` 让 SPA 吞掉 API 路由。
+
+性能诊断不靠体感：
+
+- 响应 `Server-Timing` 含 `tb-worker`，有 D1 查询时另含 `tb-d1`（D1 等待时间总和）。
+- 总处理时间达到 500ms 时，Workers Logs 写一条 `event=tool_bridge_slow_request` 的结构化 warning，包含 D1 调用数、wall/SQL 时间、`served_by_region`、primary/replica 次数、入站 colo；不记录 SQL、key、参数、SK 或返回值。
+- D1 SQL time 很低但 wall time 很高，优先查 primary/replica 区域和网络往返；两者都低但 `tb-worker` 很高，继续查外部 provider、R2/DO 或应用 CPU。
+- 兼容日期必须与仓库锁定的 workerd 可验证上限一致；升级 Wrangler/Miniflare/workerd 后再同步推进，不能把“最新日期”写成测试无法启动的配置。
+
 ## gateway 双入口与三条发布路径
 
 `@tool-bridge/gateway` 有两个入口：包根是零插件库入口；`./full` 是全量装配入口（内置插件目录 + D1 search）。到 Cloudflare 的发布路径有三条，必须保持同形态：

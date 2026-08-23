@@ -253,6 +253,8 @@ tb init cloudflare --repo .
 
 向导负责登录/选择账户、生成 trust roots、创建 R2/D1、构建部署、验证 `~help` 并保存本机 profile。非交互环境使用 `--account-id <id> --yes`，自定义域使用 `--domain tb.example.com`。
 
+部署完成后还要在 Cloudflare Dashboard 的 `D1 → <数据库> → Settings` 打开 **Read Replication**。gateway 已按请求使用 D1 Sessions（State/Search 首读 primary，后续读可使用满足 bookmark 的副本）并默认启用 Smart Placement；若数据库未开复制，行为仍正确但查询仍由 primary 服务。响应里的 `Server-Timing` 与 Workers Logs 的 `tool_bridge_slow_request` 可区分 D1 网络等待、SQL 时间和应用/上游耗时。
+
 ### 嵌入自己的应用
 
 ```sh

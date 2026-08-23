@@ -10,7 +10,7 @@
 - Node server 的 StateStore/SearchIndex 是两个独立后端：缺省 SQLite，设 `TB_DATABASE_URL` 走 PostgreSQL（纯 `ILIKE` 检索，无扩展依赖）。切换后端不迁移既有数据。
 - Node server 具备完整生产探针面：`/livez` 恒 200 只报进程存活；`/readyz` 做 PG/Redis 连通探测并在 draining 时返回未就绪；`/healthz` 报版本与 catalog digest 供对拍。SIGTERM 先进入 draining 再关停，窗口由 `TB_SHUTDOWN_DRAIN_SEC` 控制。
 - StateStore 契约含可选原子原语 `putIfAbsent`，三宿主(D1/SQLite/PG)均原子实现。bootstrap Admin SK 铸造以 hash key winner-takes-all 去重，多副本并发冷启动不再产生重复 sk 索引。
-- Cloudflare 宿主权威状态在 D1(ADR-001;TB_STATE/TB_SEARCH 两个 binding 指向同一个库),KV 已从 Cloudflare 宿主撤出,吊销即时生效。
+- Cloudflare 宿主权威状态在 D1(ADR-001;TB_STATE/TB_SEARCH 两个 binding 指向同一个库),KV 已撤出；State/Search 均用请求级 `first-primary` Session，保留吊销即时性并让同请求后续读使用满足 bookmark 的副本；Wrangler 默认 Smart Placement 并输出 D1/Worker 时延观测。
 - `@tool-bridge/gateway` 是双入口发布：包根是零插件库入口，`./full` 是与源码部署同形态的全量装配入口（内置插件目录 + D1 search）。Deploy Button template 消费 `./full`，template 与源码部署是同一个产品。
 - 部署产物：`deploy/helm/tool-bridge`（standalone=StatefulSet+PVC 单副本，HA=无状态 Deployment 多副本，危险组合在渲染期 fail）与 `deploy/compose`（生产参考栈，default/ha 两 profile）。CI 的 deploy-artifacts job 把 helm lint、双形态渲染、负向用例、compose config 钉成硬闸门。
 - SDK 根入口面向 Node 22+；React Native/Hermes 设备从独立 neutral 产物 `@tool-bridge/sdk/device` 导入，宿主注入 WebSocket、凭证、生命周期与 executor。

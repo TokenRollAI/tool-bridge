@@ -248,6 +248,8 @@ tb init cloudflare --repo .
 
 The wizard logs into and selects an account, generates trust roots, provisions R2/D1, builds and deploys, verifies `~help`, and saves a local profile. Use `--account-id <id> --yes` in non-interactive environments and `--domain tb.example.com` for a custom domain.
 
+After deployment, enable **Read Replication** under `D1 → <database> → Settings` in the Cloudflare Dashboard. The gateway already uses request-scoped D1 Sessions (State and Search start on primary; later reads may use replicas that satisfy the session bookmark) and enables Smart Placement by default. Without database replication the behavior remains correct, but queries still run on primary. Use the response `Server-Timing` header and `tool_bridge_slow_request` Workers Logs events to separate D1 network wait, SQL execution, and application/upstream time.
+
 ### Embed in your own application
 
 ```sh
