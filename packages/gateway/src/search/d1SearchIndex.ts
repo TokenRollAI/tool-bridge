@@ -11,6 +11,12 @@ import {
   toolSearchInsertPayload,
   type TreePath,
 } from '@tool-bridge/core'
+import {
+  type D1Executor,
+  type D1RequestMetrics,
+  D1SchemaGate,
+  measuredD1,
+} from '../d1Runtime'
 
 /** source + snapshot JSON1 导入块总上限。 */
 export const D1_SEARCH_MUTATION_LIMIT = 20
@@ -25,6 +31,13 @@ export const D1_SEARCH_COLD_QUERY_MAX
 
 const D1_SEARCH_JSON_CHUNK_BYTES = TOOL_SEARCH_RECORD_JSON_BYTES_MAX
 
+/** 同一 binding 在一个 isolate 内共享 schema gate，避免请求级 session 重复跑 DDL。 */
+export function createD1SearchSchema(db: D1Executor): D1SchemaGate {
+  return new D1SchemaGate(async () => {
+    await db.batch(TOOL_SEARCH_SCHEMA_STATEMENTS.map(sql => db.prepare(sql)))
+  })
+}
+
 /**
  * D1 驱动:语句/事务/批量插入三处宿主差异,其余全部逻辑在 core 的 SqlSearchIndex。
  *
@@ -32,22 +45,20 @@ const D1_SEARCH_JSON_CHUNK_BYTES = TOOL_SEARCH_RECORD_JSON_BYTES_MAX
  * (`json_each`),否则 500 节点的 rebuild 会直接撞预算。块大小按单参数字节上限切。
  */
 class D1SearchDriver implements SqlSearchDriver {
-  private schemaReady: Promise<void> | undefined
+  private readonly metrics: D1RequestMetrics | undefined
+  private readonly schema: D1SchemaGate
 
-  constructor(private readonly db: D1Database) {}
+  constructor(
+    private readonly db: D1Executor,
+    opts: { metrics?: D1RequestMetrics, schema?: D1SchemaGate } = {},
+  ) {
+    this.metrics = opts.metrics
+    this.schema = opts.schema ?? createD1SearchSchema(db)
+  }
 
   private prepare(statement: SqlSearchStatement): D1PreparedStatement {
     const prepared = this.db.prepare(statement.sql)
     return statement.params.length === 0 ? prepared : prepared.bind(...statement.params)
-  }
-
-  private async initializeSchema(): Promise<void> {
-    try {
-      await this.db.batch(TOOL_SEARCH_SCHEMA_STATEMENTS.map(sql => this.db.prepare(sql)))
-    } catch (error) {
-      this.schemaReady = undefined
-      throw error
-    }
   }
 
   /** 按 JSON 字节上限切块;单条就超限说明 core 的节点上限被绕过,fail closed。 */
@@ -74,7 +85,11 @@ class D1SearchDriver implements SqlSearchDriver {
   }
 
   async all<T>(statement: SqlSearchStatement): Promise<T[]> {
-    return (await this.prepare(statement).all<T>()).results
+    return (await measuredD1(
+      this.metrics,
+      'search',
+      async () => await this.prepare(statement).all<T>(),
+    )).results
   }
 
   assertInsertBudget(count: number): void {
@@ -87,12 +102,16 @@ class D1SearchDriver implements SqlSearchDriver {
   }
 
   ensureSchema(): Promise<void> {
-    this.schemaReady ??= this.initializeSchema()
-    return this.schemaReady
+    return this.schema.ensure()
   }
 
   async first<T>(statement: SqlSearchStatement): Promise<T | null> {
-    return await this.prepare(statement).first<T>()
+    const result = await measuredD1(
+      this.metrics,
+      'search',
+      async () => await this.prepare(statement).all<T>(),
+    )
+    return result.results[0] ?? null
   }
 
   insertRecords(records: readonly SerializedToolSearchRecord[]): SqlSearchStatement[] {
@@ -106,13 +125,20 @@ class D1SearchDriver implements SqlSearchDriver {
   }
 
   async write(statements: readonly SqlSearchStatement[]): Promise<void> {
-    await this.db.batch(statements.map(statement => this.prepare(statement)))
+    await measuredD1(
+      this.metrics,
+      'search',
+      async () => await this.db.batch(statements.map(statement => this.prepare(statement))),
+    )
   }
 }
 
 /** Cloudflare D1 的持久 FTS5/trigram SearchIndex。 */
 export class D1SearchIndex extends SqlSearchIndex {
-  constructor(db: D1Database) {
-    super(new D1SearchDriver(db))
+  constructor(
+    db: D1Executor,
+    opts: { metrics?: D1RequestMetrics, schema?: D1SchemaGate } = {},
+  ) {
+    super(new D1SearchDriver(db, opts))
   }
 }

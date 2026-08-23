@@ -11,15 +11,28 @@
   // 部署要的是 deployEntry.ts —— 它全量装配生成的内置插件目录。
   // 两个入口分开,免得 npm 消费者被迫吞下约 6 MB 插件代码。
   "main": "src/deployEntry.ts",
-  "compatibility_date": "2025-06-01",
+  // 与仓库锁定的 workerd/miniflare 支持上限一致；升级工具链时再同步推进。
+  "compatibility_date": "2026-07-08",
   "compatibility_flags": ["nodejs_compat"],
   // 中立模板使用 workers.dev；provision 在提供 TB_DOMAIN 时改成 custom domain。
   "workers_dev": true,
   "preview_urls": true,
   "routes": [],
   "observability": {
-    "enabled": true
+    "enabled": true,
+    "logs": {
+      "enabled": true,
+      "head_sampling_rate": 1
+    },
+    "traces": {
+      "enabled": true,
+      "head_sampling_rate": 0.1
+    }
   },
+  // 每个鉴权请求至少访问一次权威 D1 primary；Smart Placement 把 Worker 计算移近
+  // 主要后端，避免一条请求内的多次 D1/上游往返都跨洲。注意 /ui 目前也先过 Worker，
+  // 因此纯静态 Dashboard 的首字节可能不如 edge-first；核心 API 延迟优先。
+  "placement": { "mode": "smart" },
   "vars": {
     // 规范 origin(钉死 OAuth redirect_uri);空串 = 本部署不钉,由 provision 从 TB_BASE_URL 回填。
     "TB_CANONICAL_ORIGIN": "",

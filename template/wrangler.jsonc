@@ -6,13 +6,25 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "tool-bridge",
   "main": "src/index.ts",
-  "compatibility_date": "2025-06-01",
+  // Kept aligned with the source deployment and its verified workerd runtime.
+  "compatibility_date": "2026-07-08",
   "compatibility_flags": ["nodejs_compat"],
   // Keep the account's workers.dev hostname, but do not expose per-version alternate origins.
   "preview_urls": false,
   "observability": {
-    "enabled": true
+    "enabled": true,
+    "logs": {
+      "enabled": true,
+      "head_sampling_rate": 1
+    },
+    "traces": {
+      "enabled": true,
+      "head_sampling_rate": 0.1
+    }
   },
+  // Every authenticated request reads authoritative D1 state. Keep the Worker close
+  // to its dominant backends so repeated D1/upstream round trips do not cross regions.
+  "placement": { "mode": "smart" },
   // R2: context objects and large $ref payloads.
   "r2_buckets": [
     { "binding": "TB_R2", "bucket_name": "tool-bridge" }

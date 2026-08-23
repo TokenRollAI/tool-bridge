@@ -22,8 +22,9 @@ import {
   SearchSynchronizer,
 } from '@tool-bridge/app'
 import { DurableObject } from 'cloudflare:workers'
-import { D1SearchIndex } from './search/d1SearchIndex'
-import { D1StateStore } from './d1StateStore'
+import type { D1SchemaGate } from './d1Runtime'
+import { createD1SearchSchema, D1SearchIndex } from './search/d1SearchIndex'
+import { createD1StateSchema, D1StateStore } from './d1StateStore'
 
 interface DeviceSessionEnv {
   TB_BOOTSTRAP_ADMIN_SK?: string
@@ -126,9 +127,13 @@ function invokeRequestFromBody(body: unknown): DeviceCallRequest {
 export class DeviceSession extends DurableObject<DeviceSessionEnv> {
   /** 惰性建会话(Promise 防并发重建):hibernation 唤醒后由 sessionFor 按 meta 恢复 ready 态。 */
   private readonly sessions = new Map<WebSocket, Promise<DeviceGatewaySession>>()
+  private readonly searchSchema: D1SchemaGate | undefined
+  private readonly stateSchema: D1SchemaGate
 
   constructor(ctx: DurableObjectState, env: DeviceSessionEnv) {
     super(ctx, env)
+    this.stateSchema = createD1StateSchema(env.TB_STATE)
+    this.searchSchema = env.TB_SEARCH === undefined ? undefined : createD1SearchSchema(env.TB_SEARCH)
     ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair(PING_FRAME_JSON, PONG_FRAME_JSON))
   }
 
@@ -191,10 +196,11 @@ export class DeviceSession extends DurableObject<DeviceSessionEnv> {
       return
     }
     const registry = await this.registry()
-    const state = new D1StateStore(this.env.TB_STATE)
-    const searchSync = this.env.TB_SEARCH === undefined
+    const state = this.stateStore()
+    const search = this.searchIndex()
+    const searchSync = search === undefined
       ? undefined
-      : new SearchSynchronizer(state, new D1SearchIndex(this.env.TB_SEARCH))
+      : new SearchSynchronizer(state, search)
     const marker = await searchSync?.markSubtree(meta.mountPath)
     try {
       await registry.deleteSubtree(meta.mountPath)
@@ -208,7 +214,7 @@ export class DeviceSession extends DurableObject<DeviceSessionEnv> {
   private async acceptWebSocket(request: Request, url: URL): Promise<Response> {
     const deviceIdHint = url.searchParams.get('deviceId') ?? ''
     assertDeviceId(deviceIdHint)
-    await ensureBootstrapped(new D1StateStore(this.env.TB_STATE), this.env)
+    await ensureBootstrapped(this.stateStore(), this.env)
 
     const pair = new WebSocketPair()
     const client = pair[0]
@@ -290,8 +296,9 @@ export class DeviceSession extends DurableObject<DeviceSessionEnv> {
     hello: { deviceId: string, expose: DeviceExpose, mountPath?: TreePath },
   ): Promise<void> {
     const attachment = attachmentOf(ws)
-    const store = new D1StateStore(this.env.TB_STATE)
+    const store = this.stateStore()
     await ensureBootstrapped(store, this.env)
+    const search = this.searchIndex()
 
     const now = new Date().toISOString()
     const { mountPath, keyId, searchIndexed } = await processDeviceHello({
@@ -300,9 +307,9 @@ export class DeviceSession extends DurableObject<DeviceSessionEnv> {
       deviceIdHint: attachment.deviceIdHint,
       hello,
       now,
-      ...(this.env.TB_SEARCH === undefined
+      ...(search === undefined
         ? {}
-        : { search: new D1SearchIndex(this.env.TB_SEARCH) }),
+        : { search }),
     })
     if (!searchIndexed) {
       console.warn(
@@ -400,7 +407,7 @@ export class DeviceSession extends DurableObject<DeviceSessionEnv> {
   private async reverifyConn(meta: DeviceMeta, attachment: SocketAttachment): Promise<boolean> {
     if (attachment.connId !== meta.activeConnId) return false
     const authCtx = await identify(
-      new D1StateStore(this.env.TB_STATE),
+      this.stateStore(),
       attachment.authorization,
       new Date().toISOString(),
     )
@@ -476,8 +483,23 @@ export class DeviceSession extends DurableObject<DeviceSessionEnv> {
   }
 
   private async registry(): Promise<NodeRegistryStore> {
-    const store: StateStore = new D1StateStore(this.env.TB_STATE)
+    const store: StateStore = this.stateStore()
     await ensureBootstrapped(store, this.env)
     return new NodeRegistryStore(store)
+  }
+
+  /** 每条独立 D1 操作链创建新 session；不把 bookmark 与 I/O 对象跨 hibernation 复用。 */
+  private stateStore(): D1StateStore {
+    return new D1StateStore(this.env.TB_STATE.withSession('first-primary'), {
+      schema: this.stateSchema,
+    })
+  }
+
+  /** Search 首读 primary，避免惰性 schema 尚未复制；后续读可使用满足 bookmark 的副本。 */
+  private searchIndex(): D1SearchIndex | undefined {
+    if (this.env.TB_SEARCH === undefined || this.searchSchema === undefined) return undefined
+    return new D1SearchIndex(this.env.TB_SEARCH.withSession('first-primary'), {
+      schema: this.searchSchema,
+    })
   }
 }

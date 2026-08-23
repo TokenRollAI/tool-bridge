@@ -86,6 +86,15 @@ describe('D1StateStore 契约(对拍 MemoryStateStore)', () => {
       return { first, second, value: await store.get(`${ns}once`) }
     })
   })
+
+  it('D1 Session 内保持 read-my-own-writes', async () => {
+    const store = new D1StateStore(db.withSession('first-primary'))
+    const key = `session:${round++}`
+    await store.put(key, { revision: 1 })
+    expect(await store.get(key)).toEqual({ revision: 1 })
+    await store.put(key, { revision: 2 })
+    expect(await store.get(key)).toEqual({ revision: 2 })
+  })
 })
 
 describe('与 search 同库共存', () => {

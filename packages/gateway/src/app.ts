@@ -15,9 +15,10 @@ import {
 import { Hono } from 'hono'
 import type { DeviceSession } from './deviceSession'
 import { createR2ObjectStore, type R2PresignCredentials } from './providers/r2Object'
+import { createD1SearchSchema, D1SearchIndex } from './search/d1SearchIndex'
+import { createD1StateSchema, D1StateStore } from './d1StateStore'
+import { D1RequestMetrics, type D1SchemaGate } from './d1Runtime'
 import pkg from '../package.json' with { type: 'json' }
-import { D1SearchIndex } from './search/d1SearchIndex'
-import { D1StateStore } from './d1StateStore'
 
 /**
  * Workers 运行时绑定。D1/R2 名称从 TB_NAME_PREFIX 派生(wrangler.jsonc)。
@@ -77,6 +78,13 @@ function allowInsecure(env: Env): boolean {
 }
 
 const DEFAULT_MAX_HOPS = 4
+const SLOW_REQUEST_MS = 500
+
+interface SharedEnvResources {
+  pluginBindings?: PluginBindings
+  searchSchema?: D1SchemaGate
+  stateSchema: D1SchemaGate
+}
 
 /** env → remote 透传配置(TB_REMOTE_ALLOWLIST 逗号分隔;TB_MAX_HOPS 缺省 4)。 */
 function remoteSettingsFromEnv(env: Env): RemoteSettings {
@@ -128,9 +136,12 @@ async function r2PresignCredentials(
   return undefined
 }
 
-/** Env → TbAppDeps(Workers 宿主适配；D1 SearchIndex 是第五个宿主注入点)。 */
-function depsFromEnv(env: Env): TbAppDeps {
-  const state: StateStore = new D1StateStore(env.TB_STATE)
+/** Env + 请求级 D1 session → TbAppDeps(D1 SearchIndex 是第五个宿主注入点)。 */
+function depsFromEnv(
+  env: Env,
+  state: StateStore,
+  search: D1SearchIndex | undefined,
+): TbAppDeps {
   const secrets = new SecretStoreImpl(state, env.TB_SECRET_ENCRYPTION_KEY)
   const deps: TbAppDeps = {
     state,
@@ -145,7 +156,7 @@ function depsFromEnv(env: Env): TbAppDeps {
       ws: async (deviceId, request) => await env.TB_DEVICE.getByName(deviceId).fetch(request),
     },
   }
-  if (env.TB_SEARCH !== undefined) deps.search = new D1SearchIndex(env.TB_SEARCH)
+  if (search !== undefined) deps.search = search
   if (env.TB_SECRET_ENCRYPTION_KEY !== undefined) deps.encryptionKey = env.TB_SECRET_ENCRYPTION_KEY
   const canonicalOrigin = normalizeCanonicalOrigin(env.TB_CANONICAL_ORIGIN)
   if (canonicalOrigin !== undefined) deps.canonicalOrigin = canonicalOrigin
@@ -160,14 +171,42 @@ function depsFromEnv(env: Env): TbAppDeps {
   return deps
 }
 
+function withServerTiming(response: Response, metrics: D1RequestMetrics, totalMs: number): Response {
+  // 101 Response 不能由 Web Response 构造器重建，否则会丢失 webSocket 句柄。
+  if (response.status === 101) return response
+  const headers = new Headers(response.headers)
+  const d1 = metrics.serverTiming()
+  if (d1 !== undefined) headers.append('server-timing', d1)
+  headers.append('server-timing', `tb-worker;dur=${totalMs.toFixed(1)}`)
+  return new Response(response.body, {
+    headers,
+    status: response.status,
+    statusText: response.statusText,
+  })
+}
+
+function logSlowRequest(request: Request, metrics: D1RequestMetrics, totalMs: number): void {
+  if (totalMs < SLOW_REQUEST_MS) return
+  console.warn(JSON.stringify({
+    event: 'tool_bridge_slow_request',
+    colo: request.cf?.colo,
+    d1: metrics.snapshot(),
+    durationMs: Number(totalMs.toFixed(1)),
+    method: request.method,
+    path: new URL(request.url).pathname,
+  }))
+}
+
 /**
- * Workers 入口的 Hono app。Workers 的 env 只在请求期可得,故每 isolate 按 env 惰性
- * 装配一次 tb app(env 对象在同一 isolate 内稳定,WeakMap 命中;跨 isolate 各自装配)。
+ * Workers 入口的 Hono app。Workers 的 env 只在请求期可得,故 schema gate 与插件 binding
+ * 每 isolate 按 env 惰性装配一次；tb app / StateStore / SearchIndex 则按请求创建，从而让
+ * 一个 HTTP 请求内的权威 State 操作共享一个 bookmark、Search 操作共享另一个 bookmark，
+ * 且不把任何 session 跨请求复用。
  *
  * `opts.pluginBindings`:进程内插件装配表(构建期打包进 Worker 的插件集合按名直调)。
  * 可以直接给一张表,也可以给一个 **`(env) => 表`** 的工厂 —— 后者是内置目录需要的形态:
  * `builtinPluginBindings(env)` 要读 env(它内部按白名单收窄后递给插件),而 env 在
- * `createApp()` 调用时还不存在。工厂与 app 一起按 env 缓存,每 isolate 只建一次。
+ * `createApp()` 调用时还不存在。工厂结果按 env 缓存,每 isolate 只建一次。
  *
  * `opts.pluginCatalog`:那些插件的 descriptor(编译期常量,不读 env,故不需要工厂)。
  * 与 bindings **应当同源装配** —— 只给 bindings 的话插件调得动但解析不出 export。
@@ -178,22 +217,51 @@ export function createApp(
     pluginCatalog?: BuiltinCatalog
   } = {},
 ): Hono<{ Bindings: Env }> {
-  const apps = new WeakMap<Env, ReturnType<typeof createTbApp>>()
-  const appFor = (env: Env): ReturnType<typeof createTbApp> => {
-    let app = apps.get(env)
-    if (app === undefined) {
-      const bindings
+  const resources = new WeakMap<Env, SharedEnvResources>()
+  const resourcesFor = (env: Env): SharedEnvResources => {
+    let shared = resources.get(env)
+    if (shared === undefined) {
+      const pluginBindings
         = typeof opts.pluginBindings === 'function' ? opts.pluginBindings(env) : opts.pluginBindings
-      app = createTbApp({
-        ...depsFromEnv(env),
-        ...(bindings !== undefined ? { pluginBindings: bindings } : {}),
-        ...(opts.pluginCatalog !== undefined ? { pluginCatalog: opts.pluginCatalog } : {}),
-      })
-      apps.set(env, app)
+      shared = {
+        stateSchema: createD1StateSchema(env.TB_STATE),
+        ...(env.TB_SEARCH === undefined
+          ? {}
+          : { searchSchema: createD1SearchSchema(env.TB_SEARCH) }),
+        ...(pluginBindings === undefined ? {} : { pluginBindings }),
+      }
+      resources.set(env, shared)
     }
-    return app
+    return shared
   }
   const outer = new Hono<{ Bindings: Env }>()
-  outer.all('*', c => appFor(c.env).fetch(c.req.raw))
+  outer.all('*', async (c) => {
+    const started = performance.now()
+    const env = c.env
+    const shared = resourcesFor(env)
+    const metrics = new D1RequestMetrics()
+    // State 首读必须命中 primary：SK 吊销与权限收紧仍保持立即生效。Search 也从
+    // primary 起步，避免首次惰性建表尚未复制时命中旧副本；两边后续查询都可由满足
+    // bookmark 的副本服务。
+    const state = new D1StateStore(env.TB_STATE.withSession('first-primary'), {
+      metrics,
+      schema: shared.stateSchema,
+    })
+    const search = env.TB_SEARCH === undefined || shared.searchSchema === undefined
+      ? undefined
+      : new D1SearchIndex(env.TB_SEARCH.withSession('first-primary'), {
+          metrics,
+          schema: shared.searchSchema,
+        })
+    const app = createTbApp({
+      ...depsFromEnv(env, state, search),
+      ...(shared.pluginBindings !== undefined ? { pluginBindings: shared.pluginBindings } : {}),
+      ...(opts.pluginCatalog !== undefined ? { pluginCatalog: opts.pluginCatalog } : {}),
+    })
+    const response = await app.fetch(c.req.raw)
+    const totalMs = performance.now() - started
+    logSlowRequest(c.req.raw, metrics, totalMs)
+    return withServerTiming(response, metrics, totalMs)
+  })
   return outer
 }

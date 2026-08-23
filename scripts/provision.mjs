@@ -194,4 +194,8 @@ console.log(`provisioning with prefix '${prefix}'${accountId ? ` (account ${acco
 applyDeployTargets()
 ensureR2()
 ensureD1()
+console.log(
+  `performance: enable D1 Read Replication for '${d1Name}' in Cloudflare Dashboard → D1 → Settings; `
+  + 'the gateway already uses request-scoped Sessions API and remains correct before replicas are enabled.',
+)
 console.log('provision done.')

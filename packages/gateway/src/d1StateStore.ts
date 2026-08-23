@@ -1,4 +1,10 @@
 import { prefixUpperBound, type StateStore } from '@tool-bridge/core'
+import {
+  type D1Executor,
+  type D1RequestMetrics,
+  D1SchemaGate,
+  measuredD1,
+} from './d1Runtime'
 
 const DEFAULT_LIST_LIMIT = 1000
 /**
@@ -6,6 +12,17 @@ const DEFAULT_LIST_LIMIT = 1000
  * 避免恰好卡线的 off-by-one 在平台收紧限制时炸掉。
  */
 const GET_MANY_CHUNK = 50
+
+/** 同一 binding 在一个 isolate 内共享 schema gate，避免请求级 session 重复跑 DDL。 */
+export function createD1StateSchema(db: D1Executor): D1SchemaGate {
+  return new D1SchemaGate(async () => {
+    await db
+      .prepare(
+        'CREATE TABLE IF NOT EXISTS tb_state_kv (key TEXT PRIMARY KEY, value TEXT NOT NULL) WITHOUT ROWID',
+      )
+      .run()
+  })
+}
 
 /**
  * D1StateStore:Cloudflare D1 实现的 StateStore(绑定 TB_STATE;store.ts key 布局)。
@@ -22,45 +39,54 @@ const GET_MANY_CHUNK = 50
  * Workers 无启动钩子,首次操作前建表。
  */
 export class D1StateStore implements StateStore {
-  private schemaReady: Promise<void> | undefined
+  private readonly schema: D1SchemaGate
 
-  constructor(private readonly db: D1Database) {}
+  constructor(
+    private readonly db: D1Executor,
+    opts: { metrics?: D1RequestMetrics, schema?: D1SchemaGate } = {},
+  ) {
+    this.metrics = opts.metrics
+    this.schema = opts.schema ?? createD1StateSchema(db)
+  }
+
+  private readonly metrics: D1RequestMetrics | undefined
 
   private ensureSchema(): Promise<void> {
-    this.schemaReady ??= this.db
-      .prepare(
-        'CREATE TABLE IF NOT EXISTS tb_state_kv (key TEXT PRIMARY KEY, value TEXT NOT NULL) WITHOUT ROWID',
-      )
-      .run()
-      .then(() => undefined)
-      .catch((error: unknown) => {
-        this.schemaReady = undefined
-        throw error
-      })
-    return this.schemaReady
+    return this.schema.ensure()
   }
 
   async get(key: string): Promise<unknown | null> {
     await this.ensureSchema()
-    const row = await this.db
-      .prepare('SELECT value FROM tb_state_kv WHERE key = ?')
+    // 用 all + LIMIT 1 保留 D1 meta，慢请求日志才能区分 primary / replica 与 SQL 时间。
+    const result = await measuredD1(this.metrics, 'state', async () => await this.db
+      .prepare('SELECT value FROM tb_state_kv WHERE key = ? LIMIT 1')
       .bind(key)
-      .first<{ value: string }>()
-    return row === null ? null : JSON.parse(row.value)
+      .all<{ value: string }>())
+    const row = result.results[0]
+    return row === undefined ? null : JSON.parse(row.value)
   }
 
   async getMany(keys: readonly string[]): Promise<Map<string, unknown>> {
     await this.ensureSchema()
     const out = new Map<string, unknown>()
     const unique = [...new Set(keys)]
+    const statements: D1PreparedStatement[] = []
     for (let offset = 0; offset < unique.length; offset += GET_MANY_CHUNK) {
       const chunk = unique.slice(offset, offset + GET_MANY_CHUNK)
       if (chunk.length === 0) continue
       const placeholders = chunk.map(() => '?').join(', ')
-      const rows = await this.db
+      statements.push(this.db
         .prepare(`SELECT key, value FROM tb_state_kv WHERE key IN (${placeholders})`)
-        .bind(...chunk)
-        .all<{ key: string, value: string }>()
+        .bind(...chunk))
+    }
+    if (statements.length === 0) return out
+    // StateStore 契约最多 100 keys，当前最多两个 statement；batch 合并成一次 D1 往返。
+    const batches = await measuredD1(
+      this.metrics,
+      'state',
+      async () => await this.db.batch<{ key: string, value: string }>(statements),
+    )
+    for (const rows of batches) {
       for (const row of rows.results) out.set(row.key, JSON.parse(row.value) as unknown)
     }
     return out
@@ -68,27 +94,30 @@ export class D1StateStore implements StateStore {
 
   async put(key: string, value: unknown): Promise<void> {
     await this.ensureSchema()
-    await this.db
+    await measuredD1(this.metrics, 'state', async () => await this.db
       .prepare(
         'INSERT INTO tb_state_kv (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value',
       )
       .bind(key, JSON.stringify(value))
-      .run()
+      .run())
   }
 
   async putIfAbsent(key: string, value: unknown): Promise<boolean> {
     await this.ensureSchema()
     // INSERT OR IGNORE 原子:changes=0 即已存在(输者),不覆盖。
-    const result = await this.db
+    const result = await measuredD1(this.metrics, 'state', async () => await this.db
       .prepare('INSERT OR IGNORE INTO tb_state_kv (key, value) VALUES (?, ?)')
       .bind(key, JSON.stringify(value))
-      .run()
+      .run())
     return result.meta.changes > 0
   }
 
   async delete(key: string): Promise<void> {
     await this.ensureSchema()
-    await this.db.prepare('DELETE FROM tb_state_kv WHERE key = ?').bind(key).run()
+    await measuredD1(this.metrics, 'state', async () => await this.db
+      .prepare('DELETE FROM tb_state_kv WHERE key = ?')
+      .bind(key)
+      .run())
   }
 
   async list(
@@ -114,12 +143,12 @@ export class D1StateStore implements StateStore {
       params.push(upper)
     }
     params.push(limit + 1)
-    const rows = await this.db
+    const rows = await measuredD1(this.metrics, 'state', async () => await this.db
       .prepare(
         `SELECT key, value FROM tb_state_kv WHERE ${conditions.join(' AND ')} ORDER BY key LIMIT ?`,
       )
       .bind(...params)
-      .all<{ key: string, value: string }>()
+      .all<{ key: string, value: string }>())
     // 防御性 startsWith 过滤,与 Memory/SQLite/PG 实现对齐。
     const matched = rows.results.filter(r => r.key.startsWith(prefix))
     const hasMore = matched.length > limit

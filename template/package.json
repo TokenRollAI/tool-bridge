@@ -12,7 +12,7 @@
   },
   "dependencies": {
     "@tool-bridge/dashboard": "^0.16.0",
-    "@tool-bridge/gateway": "^0.15.0"
+    "@tool-bridge/gateway": "^0.17.2"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20260818.1",

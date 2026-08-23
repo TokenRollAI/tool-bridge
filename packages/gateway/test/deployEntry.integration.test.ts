@@ -37,6 +37,7 @@ describe('生产部署入口(deployEntry)的内置目录装配', () => {
   it('system/catalog 列出全量内置集成(catalog 真的接线了)', async () => {
     const res = await post('system/catalog/list', { opts: { limit: 200 } })
     expect(res.status).toBe(200)
+    expect(res.headers.get('server-timing')).toMatch(/tb-d1;dur=.*tb-worker;dur=/)
     const page = (await res.json()) as { items: Array<{ digest: string, id: string }> }
     // 与 codegen 产物同源:数量对得上说明装的是那份编译期常量,不是某个子集。
     expect(page.items.length).toBeGreaterThan(90)
