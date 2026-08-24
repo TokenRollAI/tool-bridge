@@ -66,7 +66,15 @@ const NEUTRAL_CONFIG = `{
  * 环境显式清空 CLOUDFLARE_ACCOUNT_ID / TB_* :provision 的 .env 缺失项会回退到进程
  * 环境变量,开发机上导出的真实值会让断言随机漂移。TB_PROVISION_ENV_FILE 指向 fixture。
  */
-function runProvision({ binDir, configPath, statePath, logPath, envFile, prefix = 'tb' }) {
+function runProvision({
+  binDir,
+  configPath,
+  statePath,
+  logPath,
+  envFile,
+  extraEnv = {},
+  prefix = 'tb',
+}) {
   return spawnSync(process.execPath, [provisionScript], {
     cwd: root,
     encoding: 'utf8',
@@ -83,6 +91,7 @@ function runProvision({ binDir, configPath, statePath, logPath, envFile, prefix 
       TB_PROVISION_FAKE_PREFIX: prefix,
       TB_PROVISION_FAKE_STATE: statePath,
       TB_PROVISION_WRANGLER_CONFIG: configPath,
+      ...extraEnv,
     },
   })
 }
@@ -172,6 +181,50 @@ test('provision backfills account/domain/origin and prefix-derived names from .e
     const second = runProvision({ ...ws, prefix: 'acme' })
     assert.equal(second.status, 0, second.stderr)
     assert.doesNotMatch(second.stdout, /已写入/)
+  } finally {
+    await rm(ws.dir, { force: true, recursive: true })
+  }
+})
+
+test('config-only mode backfills an existing D1 without calling resource APIs', async () => {
+  const ws = await workspace([
+    'TB_NAME_PREFIX=acme',
+    'CLOUDFLARE_ACCOUNT_ID=acct123',
+    'TB_DOMAIN=tb.acme.example',
+    'TB_BASE_URL=https://tb.acme.example',
+    '',
+  ].join('\n'))
+  try {
+    const result = runProvision({
+      ...ws,
+      extraEnv: {
+        TB_PROVISION_CONFIG_ONLY: 'true',
+        TB_PROVISION_D1_DATABASE_ID: 'existing-d1-id',
+      },
+      prefix: 'acme',
+    })
+    assert.equal(result.status, 0, result.stderr)
+    assert.match(result.stdout, /resource API calls skipped/)
+
+    const config = JSON.parse(await readFile(ws.configPath, 'utf8'))
+    assert.equal(config.d1_databases[0].database_id, 'existing-d1-id')
+    assert.equal(config.d1_databases[1].database_id, 'existing-d1-id')
+    await assert.rejects(readFile(ws.logPath, 'utf8'), { code: 'ENOENT' })
+  } finally {
+    await rm(ws.dir, { force: true, recursive: true })
+  }
+})
+
+test('config-only mode fails closed when the existing D1 id is absent', async () => {
+  const ws = await workspace('CLOUDFLARE_ACCOUNT_ID=acct123\n')
+  try {
+    const result = runProvision({
+      ...ws,
+      extraEnv: { TB_PROVISION_CONFIG_ONLY: 'true' },
+    })
+    assert.notEqual(result.status, 0)
+    assert.match(result.stderr, /requires TB_PROVISION_D1_DATABASE_ID/)
+    await assert.rejects(readFile(ws.logPath, 'utf8'), { code: 'ENOENT' })
   } finally {
     await rm(ws.dir, { force: true, recursive: true })
   }
