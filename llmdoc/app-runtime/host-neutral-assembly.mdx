@@ -1,0 +1,52 @@
+---
+description: app 包的宿主中立装配:TbAppDeps 注入面、builtin 模块清单、Workers 与 Node 的运行时差异,以及 app 内部代码地图。
+kind: architecture
+code:
+  paths:
+    - packages/app/src/deps.ts
+    - packages/app/src/bootstrap.ts
+    - packages/app/src/tbApp.ts
+    - packages/app/src/**
+---
+
+# 宿主中立装配
+
+`app` 包持有 Hono 路由、发现/调用、provider 编排与宿主注入面；它不引入 Wrangler、SQLite 或任何 Node/CF 专属启动逻辑。宿主差异全部通过注入实现表达：共享逻辑必须留在 core/app，适配器差异写成注入实现和明确测试，不在业务路由里分叉。
+
+## TbAppDeps 注入面
+
+`packages/app/src/deps.ts` 的 `TbAppDeps` 基础注入点：
+
+- `state: StateStore`
+- `objects?: () => ObjectStore`
+- `secrets: SecretStoreImpl`
+- `device?: DeviceChannel`
+- `search?: SearchIndex`
+
+另有 assets、remote、plugin catalog/bindings、本地 provider 与缓存/安全配置。`DeviceChannel` 是 app 当前消费的真实接口；不要把未实现的 SDK `DeviceTransport` 当成现状。
+
+## builtin 装配
+
+bootstrap builtin 清单在 `packages/app/src/bootstrap.ts` 的 `BUILTIN_MODULES`：sk、secret、registry、status、plugin、catalog、federation、annotation。`~feedback` 是保留端点，不是 builtin 模块。
+
+## 运行时差异
+
+- 三宿主 StateStore 均为强一致 SQL 后端（Workers=D1、Node=SQLite/PG），SK 吊销即时生效；共享契约测试对拍语义。
+- Workers 设备会话结果与连接元数据进入 DO storage；Node 部分幂等结果只在进程内。
+- Workers 静态 UI 经 Assets binding，缓存/压缩/条件请求由平台代劳；Node 从 `TB_UI_DIR` 或 dashboard 包读取，由 `server` 的 `uiAssetsFetcher` 自理（hash 资产 immutable、其余 no-cache，内容协商 br/gzip，弱 ETag + 304），不下沉进 core/app。
+- `@tool-bridge/sdk` 是多入口包：根入口的 `engines.node` 与 Node 依赖属于安装/根运行时约束；`@tool-bridge/sdk/device` 的兼容性由独立 neutral JS/d.ts 产物和最终 tarball 模块闭包保证，设备入口不得从包根重新导出。多运行时包的兼容性按子入口产物闭包判定，不按依赖清单猜。
+
+## app 内部代码地图
+
+| 主题 | 路径/符号 |
+|---|---|
+| 宿主注入类型 | `deps.ts` / `TbAppDeps` |
+| app 组装 | `tbApp.ts`、`bootstrap.ts` |
+| 路径与节点分发 | `paths.ts`、`toolNodes.ts`、`contextNodes.ts`、`deviceNodes.ts` |
+| 路由 | `routes/` |
+| MCP 上游/入站 | `providers/mcp.ts`、`mcpServer.ts`，见 [mcp-interop.mdx](mcp-interop.mdx) |
+| plugin 调用 | `providers/pluginClient.ts` |
+| remote 联邦 | `providers/remote.ts`、`federation.ts` |
+| 搜索索引同步 | `search/synchronizer.ts` |
+
+查找时先搜符号而不是历史文档（如 `rg "createTbApp|TbAppDeps|BUILTIN_MODULES" packages/app`）；精确测试数、行数、bundle 字节不属于代码地图，需要时从当前工作树实查。

@@ -1,0 +1,17 @@
+---
+description: Cloudflare 宿主权威状态存储决策摘要(ADR-001,已实施):单 D1 库、TB_STATE/TB_SEARCH 双 binding、撤销语义与 pre-launch 零迁移窗口。
+kind: reference
+code:
+  paths:
+    - packages/gateway/src/d1StateStore.ts
+    - template/wrangler.jsonc
+---
+
+# 状态存储决策(ADR-001 摘要)
+
+Cloudflare 宿主的权威状态(SK 哈希、节点树、加密 secret、plugin manifest、feedback)已从 KV 全量迁移到 D1，由 `d1StateStore.ts` 实现。决策已 accepted 并实施完毕，此处只留稳定摘要。
+
+- **一个 D1 库、两个 binding**：`TB_STATE`(权威状态)与 `TB_SEARCH`(FTS5 搜索索引)指向同一个库。理由：binding 表达用途、库表达存储位置——将来要拆库只动配置不动代码，而共库省一个云资源、省 provision 步骤，用户心智就是"一个库"。
+- **撤销语义**：从"KV 最终一致传播不可控"变为"缓存 TTL 上界可控"。吊销 SK、删除节点在缓存 TTL 外的下一请求即生效；安全下界按缓存 TTL/最终一致的一般表达陈述，不再依赖 KV 传播假设。
+- **原子原语**：`StateStore.putIfAbsent` 在 D1/SQLite/PG 三宿主均原子实现，三宿主 StateStore 收敛到 SQL 语义，共享黑盒契约测试对拍。
+- **零迁移成本的原因**：决策落在 pre-launch 窗口，无线上用户、旧预览状态不作为兼容目标，因此不需要任何 KV→D1 数据迁移工具；正式上线后该窗口关闭。

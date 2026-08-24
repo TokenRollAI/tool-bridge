@@ -1,0 +1,66 @@
+{
+  "schema": "llmdoc.meta/v3",
+  "baseline": {
+    "revision": "2853d788b2fae39ff381aba3c1384e8fd0ad1d09",
+    "verifiedAt": "2026-08-24T13:20:00Z"
+  },
+  "documents": {
+    "app-runtime/host-neutral-assembly.mdx": {
+      "validatedRevision": null
+    },
+    "app-runtime/mcp-interop.mdx": {
+      "validatedRevision": null
+    },
+    "architecture.mdx": {
+      "validatedRevision": null
+    },
+    "cli/agent-skill-integration.mdx": {
+      "validatedRevision": null
+    },
+    "cli/argument-contract.mdx": {
+      "validatedRevision": null
+    },
+    "dashboard/canvas-architecture.mdx": {
+      "validatedRevision": null
+    },
+    "device/device-daemon.mdx": {
+      "validatedRevision": null
+    },
+    "device/do-websocket-sessions.mdx": {
+      "validatedRevision": null
+    },
+    "hosts-deploy/cloudflare-paths.mdx": {
+      "validatedRevision": null
+    },
+    "hosts-deploy/node-docker-and-helm.mdx": {
+      "validatedRevision": null
+    },
+    "hosts-deploy/state-store-decision.mdx": {
+      "validatedRevision": null
+    },
+    "plugins/designing-and-migrating-plugins.mdx": {
+      "validatedRevision": null
+    },
+    "plugins/plugin-runtime.mdx": {
+      "validatedRevision": null
+    },
+    "protocol/htbp-contract.mdx": {
+      "validatedRevision": null
+    },
+    "protocol/security-boundaries.mdx": {
+      "validatedRevision": null
+    },
+    "release/npm-publishing.mdx": {
+      "validatedRevision": null
+    },
+    "search/search-index.mdx": {
+      "validatedRevision": null
+    }
+  },
+  "convergence": {
+    "capturedAt": "2026-08-24T13:20:00Z",
+    "source": "init",
+    "documentCount": 17,
+    "totalEstimatedTokens": 9043
+  }
+}

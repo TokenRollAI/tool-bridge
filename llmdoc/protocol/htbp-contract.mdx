@@ -1,0 +1,83 @@
+---
+description: HTBP 当前协议契约:表示协商、唯一调用形态、节点与权限模型、feedback、builtin 命令表、plugin/v2、context 动词与设备帧。实现导航,不替代 ~help 运行时自描述。
+kind: reference
+relations:
+  related:
+    - protocol/security-boundaries.mdx
+code:
+  paths:
+    - packages/core/src/types.ts
+    - packages/core/src/auth/**
+    - packages/core/src/tree/**
+    - packages/core/src/builtin/**
+    - packages/app/src/routes/**
+---
+
+# HTBP 协议契约
+
+精确 schema 以 core 类型、builtin help 和当前代码为准。
+
+## 表示与错误
+
+- `GET /<path>/~help`:默认 Markdown;`Accept: text/plain` 返回 Help DSL;`Accept: application/json` 返回 Help JSON。
+- `GET /<path>/~tree?depth=N`:经身份可见性裁剪的树。`POST /~search`:仅当宿主声明 search capability 时存在。
+- `GET|POST|DELETE /<path>/~feedback[/<id>]`:具体路径的使用反馈、投票与管理;不是集中 builtin。
+- `ALL /~mcp`:把当前身份可见工具投影为 MCP server。`GET /healthz`:公开健康信息,不证明认证数据面可用。
+- 错误统一 `{code,message,retryable}`;主要 code:not_found、permission_denied、invalid_argument、conflict、unavailable、rate_limited、internal。
+- 未知 Help DSL 行与未知可选 capability 应忽略(协议演进能力);安全字段和未知写入参数不得静默忽略。
+
+## 调用
+
+- 唯一形态:`POST /<nodePath>/<command>`,body 即 arguments 本体。命令是节点下的**虚拟叶子**(不写 Registry),对一切可调用 kind 一视同仁;没有 `{tool, arguments}` 信封。
+- 节点本身(无命令段)不可调用,返回 404。命令可寻址:`GET /<nodePath>/<command>/~help`;`~tree` 只列权威注册拓扑,动态命令经 `~help`/`~search` 发现。
+- 标识符大小写不敏感、规范化为小写:路径段、命令/工具名、export id、scope pattern 字面段、device 暴露路径。规范化后冲突(上游同时暴露 `Foo`/`foo`)→ `invalid_argument`,不选其一。命令名含 `/`、为空、以 `~` 开头、为 `.`/`..` 一律拒。第三方原始工具名是外部身份,适配器维护 `公开小写名 → 上游原名` 映射。
+- `Page<T>` 为 `{items,cursor?}`,默认 limit 50、最大 200;cursor 只表示继续位置,不是授权凭据。
+
+## 节点
+
+`NodeKind`:directory、mcp、http、builtin、context、device、remote、tool、skillhub。常见配置:mcp(URL、headers、authRef/OAuth、virtualize)、http(base URL、工具定义、认证引用)、tool/context(provider、export?、authRef?、providerConfig?)、remote(baseUrl、skRef;受 host allowlist、Via 环与跳数限制)、device(由设备 hello 代写)、skillhub(R2/S3 技能存储)。
+
+所有路径先规范化;保留段与保留根在服务端权威拒绝。`virtualize` 的 hide/rename/prefix/describe 只改投影视图,不改上游身份。remote host allowlist 为空时拒绝所有联邦目标;生效集合是部署期 env 基线与 `system/federation` 运行时条目的并集,env 条目不可经 API 删除。remote 出站身份只从自身 `skRef` 解析,不转发本地调用者 SK。
+
+## 权限
+
+Action:read、write、call、register、admin。scope 用完整路径 glob,deny 优先;`scopes: []` 表示无权限;不可见路径以 404 表达。注册路径还受 SK 的 `registerPaths` 约束;调用者 SK 不向上游透传。
+
+节点归属:`system/registry` 的 write/delete 若目标已被他人 SK 注册(且非 `system:auto` 物化),默认 `conflict`;持目标路径 `admin` scope 者例外,可接管或清理他人节点——`register` scope 仍须通过。
+
+## Feedback
+
+Feedback 附着在具体节点或其工具子路径,根路径不接受。`GET` 需目标路径 read;`POST`(提交/投票)还需 call;`DELETE` 需 admin;read 不通过按可见性规则 404。条目按净分与时间排序;默认可见头部条目以精简形状进入该路径 `~help`,宿主装配 Search 时同批头部反馈进入派生索引。三宿主权威状态均为强一致 SQL 后端,投票与提交即时可读;feedback 是低频、非权威协作数据。
+
+## builtin
+
+| 路径 | 命令 |
+|---|---|
+| `system/sk` | list、get、write、update、delete |
+| `system/secret` | set、list、delete |
+| `system/registry` | list、get、write、update、delete |
+| `system/status` | get |
+| `system/plugin` | list、get、write、update、delete、health |
+| `system/catalog` | list、get、search |
+| `system/federation` | list、add、remove |
+| `system/annotation` | set、get、remove、list |
+
+`system/catalog` 是 read-only 内置目录,list/search 的 `exportDetails` 是逐 export 挂载契约;`system/plugin` 是显式注册表。`~feedback` 是保留端点,不是 builtin 模块。
+
+## plugin/v2 与 Context
+
+Manifest 描述部署:`id`、`protocolVersion:'plugin/v2'`、`endpoint`、`auth`、`healthPath`、`enabled`;`~describe` 描述 exports(profile、methods/capabilities、auth、凭证字段、挂载配置、可选 probe)。内置流程从编译期 catalog 直接挂载;外部 HTTP(S) endpoint 需注册、探活、校验 descriptor;自定义宿主显式装配 `binding:<name>`。
+
+Context 动词全小写且 cmd 名 = provider 方法名:`list`、`get`、`write`、`update`、`delete`、`search`,全部可选,能力由 handler 存在性推导。content 可内联或返回 `$ref`;大对象 URL 须短期有效并受签名/宿主边界保护。skillhub 动词:`list`、`get`(带 `file` 参数取单文件)、`search`、`publish`、`remove`。
+
+## 设备
+
+设备连 `/system/device/ws?deviceId=...`,hello 声明 expose;服务端验证身份与 `registerPaths` 后代写 `device/<id>/...`。帧集合:hello、ready、error、call、result、ping、pong、cancel。`call` 帧 `path` 相对 mountPath 且**含命令叶子段**,与直连调用一致。PING/PONG 是稳定字面量支持边缘 auto-response;只有当前 generation 进入 ready 后才能执行 call,连接替换后旧 generation 的消息与迟到结果不得污染新连接。
+
+call id 在同一设备进程内用于执行合并与有界结果缓存,不承诺跨进程 exactly-once。cancel 是协作式提示(AbortSignal),不能表述为外部副作用已撤销。call 帧可选 `context`(caller.keyId/owner、traceId、createdAt、expiresAt)由网关鉴权后签发,不接受来自 arguments,故意不含 scopes/SK;授权判定全在网关侧,设备只做审计与限时,`expiresAt` 以网关时间为准。老网关不带 context 新设备按缺省降级;老设备 decoder 忽略未知字段。
+
+设备在线状态是三态 `presence: { state: 'online'|'stale'|'offline', lastSeenAt? }`:存储层 `online` 位结合 `lastSeenAt` 在投影时派生,online 但心跳超时降级 stale。presence 只是发现提示,可路由性以宿主活动 socket 为准;wire 派生只发生在树/help 投影处,读路径不回写权威状态。`@tool-bridge/sdk/device` 安全作者面只声明可路由回设备的 tool/context 节点;移动端默认前台实时在线,后台任务属于另一个异步队列/推送能力。
+
+## CLI 契约
+
+顶层命令族以 `packages/cli/src/program.ts` 为准。全局 `--json`、`--base-url`、`--sk`、`--timeout` 可位于根/组/叶子;未知 flag、多余 positional、缺必填参数均失败。集成入口只接受 `--credential`,卸载无隐藏 `--purge`,凭证清理由 `tb secret` 显式完成。CLI 与 Dashboard 的便利校验不替代服务端权威校验;`tb daemon` 是本地生命周期入口,不适用三入口对等。

@@ -51,4 +51,4 @@ done
 6. 发布后复查:`npm view <pkg> version`。**刚发完可能仍报 E404**(registry CDN 传播延迟,
    实测 91 秒后仍 404),等一两分钟再查,或直接看 `npm view <pkg> time.created`
 
-细节与踩过的坑见 `llmdoc/guides/npm-publish.md`。
+细节与踩过的坑见 `llmdoc/release/npm-publishing.mdx`(用 `npx --no-install llmdoc show release/npm-publishing.mdx`)。

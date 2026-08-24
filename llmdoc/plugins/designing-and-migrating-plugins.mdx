@@ -1,0 +1,50 @@
+---
+description: 设计新 plugin 与迁移旧 connector 的可重跑流程:descriptor 规则、运行时安全下界、迁移四步与三道闸门。
+kind: guide
+relations:
+  requires:
+    - plugins/plugin-runtime.mdx
+code:
+  paths:
+    - packages/plugin-sdk/src/index.ts
+    - packages/plugins/src/registry.ts
+    - packages/plugins/migration-fingerprints.json
+    - packages/plugins/test/migration/**
+---
+
+# Plugin 设计与迁移
+
+先读 [plugin-runtime.mdx](plugin-runtime.mdx)。plugin 和宿主同进程同权，安全边界必须由运行时保证，不能依赖 provider 作者自觉。
+
+## descriptor 规则
+
+- 使用 `plugin/v2`，manifest 严格校验未知字段。
+- 每个 export 显式给出 profile、kind 与凭证形态；无凭证也写 `auth:none`。
+- 密钥写入 SecretStore，由节点 `authRef` 引用；`providerConfig` 只放会被管理面回显的非敏感配置。
+- `~describe` 必须纯内存、无凭证、无网络，以便生成 catalog。
+- 内置 plugin 同时提供 handler binding 与 catalog 描述；标准宿主直接挂载，不写运行时注册记录。
+
+## 运行时下界
+
+- env 经 `narrowPluginEnv` 收窄，不能把宿主全部 secrets 透传给 plugin。
+- 所有出站使用 `guardedFetch`；默认 HTTPS，敏感 header/body 遇跨源 redirect 必须拒绝。
+- 托管 plugin 未配置 `PLUGIN_TOKEN` 时 fail closed。
+- OAuth client secret、多字段凭证与单值 token 不得互相 fallback。
+- 错误、健康信息和日志不得包含 secret、Authorization 或原始敏感响应。
+
+## 迁移流程
+
+1. 固定旧 connector 的工具名、描述、输入/输出 schema 和关键错误语义。
+2. 实现 provider 的 schema、client、handler 和 descriptor；通用传输放 runtime，不在每个 provider 重写。
+3. 生成 catalog，并更新 `migration-fingerprints.json`。
+4. 删除旧 connector 入口，验证三道闸门。
+
+三道闸门：
+
+| 闸门 | 证明 |
+|---|---|
+| 等价 | 迁移前后公开工具与行为无意外漂移 |
+| 形状 | descriptor/catalog、help 与 schema 一致 |
+| wire | 真实 envelope 到上游请求、响应和错误映射正确 |
+
+迁移脚本和 fingerprints 是持续回归约束，不是一次性历史文件。若确需改变公开形状，显式更新基线并在 PR 解释原因，不能让生成器静默覆盖差异。

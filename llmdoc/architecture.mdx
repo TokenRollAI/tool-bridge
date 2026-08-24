@@ -1,0 +1,68 @@
+---
+description: tool-bridge 的产品模型、包依赖方向、宿主注入面、pre-launch 阶段约束与全仓工程公约;跨 topic 的总入口。
+kind: architecture
+relations:
+  related:
+    - protocol/htbp-contract.mdx
+    - protocol/security-boundaries.mdx
+code:
+  paths:
+    - package.json
+    - pnpm-workspace.yaml
+    - packages/core/src/types.ts
+    - packages/app/src/bootstrap.ts
+---
+
+# tool-bridge 整体架构
+
+tool-bridge 把工具、上下文、设备与远端服务组织成一棵受权限约束的 HTBP 树。调用方通过统一的 `~help`、`~tree`、`~search` 发现能力,并以唯一形态 `POST /<nodePath>/<command>`(body 即 arguments 本体,无信封)调用;命令是节点下的虚拟叶子,标识符大小写不敏感、规范化为小写。HTTP、CLI(`tb`)、Dashboard、`/~mcp` 投影与 Agent Skill 是同一控制面的五个入口。
+
+项目处于 pre-launch 开发期,无正式生产环境;共享或临时部署只用于验证。项目内部旧预览形状可直接删除,不留兼容 flag;外部协议互操作(MCP era、Help DSL 未知项忽略、S3 兼容)与安全下界不可删。
+
+## 依赖方向与包职责
+
+```text
+core
+  ↑
+app ← plugins
+  ↑       ↑
+gateway  plugin-sdk
+server
+sdk (根入口 Node 22+;./device 为 neutral 设备客户端)
+CLI / Dashboard ──HTTP──> app contract
+```
+
+- `core`:类型、授权、树、store、builtin 纯逻辑、plugin/search 协议;不碰网络、环境变量、运行时资源。
+- `app`:Hono 路由、发现/调用、provider 编排、宿主注入面;不含 Wrangler/SQLite/专属启动。
+- `gateway`(Workers)与 `server`(Node)只装配运行时适配器,不复制业务分支、不改写共享协议语义。
+- `sdk`:根入口嵌入 app 并以 Node ws 反向连接;`./device` 独立 neutral 产物,不得触达 app、Node ws、`node:*` 或根入口。
+- `plugin-sdk`:descriptor、OperationRegistry、envelope、受控出站;`plugins`:内置 provider 源码 + 生成 catalog + 迁移闸门。
+- `cli`:严格 argv 与脚本输出,不是服务端唯一校验层;`dashboard`:消费同一 HTTP 契约,不 import core。
+- `core` 与 `plugins` 是 private workspace 包,其余七个是 public artifact;发布判断按 artifact ownership,不沿依赖图机械 bump。
+
+## 宿主注入面
+
+`TbAppDeps` 基础注入点:`state: StateStore`、`objects?`、`secrets`、`device?: DeviceChannel`、`search?: SearchIndex`,另有 assets、remote、plugin catalog/bindings、本地 provider 与缓存/安全配置。`DeviceChannel` 是 app 当前消费的真实接口,不要把未实现的 SDK `DeviceTransport` 当成现状。三宿主 StateStore 均为强一致 SQL 后端(Workers=D1、Node=SQLite/PG),SK 吊销即时生效,共享契约测试对拍语义。
+
+节点 kind 唯一清单在 `packages/core/src/types.ts` 的 `NODE_KINDS`;bootstrap builtin 清单在 `packages/app/src/bootstrap.ts` 的 `BUILTIN_MODULES`;不在文档手抄数量。
+
+## 外部仓库边界
+
+- 公共站点 `TokenRollAI/tool-bridge-site`(Cloudflare Pages Git Integration);Agent Skill 仓库 `TokenRollAI/tool-bridge-skill`。
+- 动态事实的真源优先级:实例运行时(`~help`/`~describe`)> 对应版本代码 > 公共教程;skill 与站点不静态复制实例工具目录。
+
+## 工程公约
+
+1. 验收基线 `pnpm verify`(typecheck+lint+test,不含 build);改公开包、打包配置或依赖必须追加 `pnpm turbo run build`。
+2. 共享 worktree 多 agent 协作时指定单一验证 owner,串行执行 pnpm 闸门,避免 node_modules 软链接竞争。
+3. 三入口对等:新增/修改管理能力同轮核对直接 API、`tb` CLI 与 Dashboard;wire 字段变更同轮更新 core/app/CLI/Dashboard 与协议文档。`tb daemon` 是本地生命周期入口,不适用该规则。
+4. 真实外部资源(云部署、真实上游)验证每轮最多一次且需明确授权;证据留 PR/CI,不写进 llmdoc。
+5. llmdoc 不记录精确版本、测试数、URL、资源 ID、登录态;精确计数从当前工作树实查。代码是行为真源,实现与文档冲突时同轮修文档。
+6. deny 优先、不可见路径返回 404;secret/SK 不进日志、URL、argv、toast、feedback 或 llmdoc。
+7. wrangler 与配置模板保持账户中立;真实账户与资源 ID 由 provision 回填,不提交。
+8. 发布校验和发布必须消费同一个 tarball;registry 元数据存在、tarball 可安装、bin 可执行是三个独立证据。
+9. `.llmdoc-tmp/` 是可丢弃调查缓存,复用前重新核对,不从稳定文档链接。
+
+## Topic 导航
+
+契约与安全见 `protocol/`;宿主装配与 provider 编排见 `app-runtime/`;搜索索引见 `search/`;插件见 `plugins/`;设备链路见 `device/`;部署与宿主产物见 `hosts-deploy/`;CLI 契约见 `cli/`;Dashboard 见 `dashboard/`;发布与验证纪律见 `release/`。

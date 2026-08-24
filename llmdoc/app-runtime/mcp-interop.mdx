@@ -1,0 +1,37 @@
+---
+description: MCP 上游互操作指南:modern/legacy era 协商与缓存键、入站 /~mcp 无状态适配、互操作安全边界与四层验证。
+kind: guide
+code:
+  paths:
+    - packages/app/src/providers/mcp.ts
+    - packages/app/src/mcpServer.ts
+---
+
+# MCP 上游互操作
+
+MCP 是外部协议兼容面。项目内部历史状态可删，但现代/旧版 MCP 服务端的真实差异必须保留。
+
+## 会话模型
+
+- 客户端按 modern/legacy 两个 era 协商，判定缓存键为 `mcpera:<nodePath>`。缓存的是协议 era 判定，不是任何调用结果。
+- modern discovery 按上游返回的 TTL 缓存；legacy era 使用本地有限 TTL。
+- 工具清单进入 `toolcache:<nodePath>`；工具调用结果永不缓存。
+- 不复用上游 session，不存在 `mcpsession` 或 `forceFresh` 控制面。
+- 入站 `/~mcp` 是无状态适配器，不依赖 `Mcp-Session-Id`。
+
+## 互操作边界
+
+- 初次 discovery 先探测服务端能力，再按 era 选择请求形状；不要仅凭版本字符串猜测。
+- 严格 capabilities 用于阻止服务端未声明的能力；未知扩展字段仍按协议的前向兼容规则处理。
+- OAuth 与自定义认证头必须在 redirect 时遵守同源限制，不能把凭据转发给新 origin。
+- HTTP 上游默认 HTTPS；本地 stub 需要显式 `TB_ALLOW_INSECURE_HTTP=true`。
+- 错误要归一为稳定 HTBP 错误，但保留足够的上游分类用于排障，不能泄漏 token/headers/body 中的密钥。
+
+## 验证层次
+
+1. provider 单测：era 探测、TTL、能力约束、错误映射。
+2. app/gateway 集成：`~help`、单工具披露、envelope 调用、缓存命中。
+3. consumer E2E：用真实 MCP client 连接 `/~mcp`，验证初始化、发现与调用。
+4. 真实上游仅在明确提供 URL/凭据时运行 `pnpm verify:mcp`。
+
+注意：不要为了单个失常服务端加入无边界 fallback。先确认它是协议时代差异还是上游 bug，再把兼容限制在 provider 层并加回归测试。

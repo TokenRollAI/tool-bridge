@@ -7,7 +7,7 @@
 
 1. `pwd` 确认工作目录 —— 本项目常在 git worktree(`~/.superset/worktrees/...`)里工作,
    **所有绝对路径基于 `pwd` 的结果拼**,不要照提示词里出现的主仓库路径去猜。
-2. 读 `llmdoc/startup.md`,按它的顺序读 MUST 文件,再按任务读升级提示里的 guide。
+2. 项目使用 llmdoc V3:先 `npx --no-install llmdoc tree` 看全局地图,再按任务用 `index --topic` / `context --files` / `search` 定位,最后 `show` 读正文。入口文档是 `llmdoc/architecture.mdx`。
    **知识真源 = 代码 + llmdoc**;两者冲突以代码为准并回改 llmdoc。
 
 ## 验证是验收的唯一依据
@@ -72,11 +72,11 @@ done
 6. 发布后复查:`npm view <pkg> version`。**刚发完可能仍报 E404**(registry CDN 传播延迟,
    实测 91 秒后仍 404),等一两分钟再查,或直接看 `npm view <pkg> time.created`
 
-细节与踩过的坑见 `llmdoc/guides/npm-publish.md`。
+细节与踩过的坑见 `llmdoc/release/npm-publishing.mdx`。
 
 ## 依赖与选型
 
-新增基础设施前先查 `llmdoc/must/project-brief.md` 的选型表(HTTP 路由用 Hono、校验用 zod、
+新增基础设施前先查 `llmdoc/architecture.mdx` 的技术选型约定(HTTP 路由用 Hono、校验用 zod、
 S3 签名用 aws4fetch、CLI 用 commander…)。手写路由、协议、签名、argv 解析、重试/持久化都是违例;
 表外需求要先调研现成库,确认无合适方案并写明理由才允许手写。
 
@@ -87,7 +87,7 @@ S3 签名用 aws4fetch、CLI 用 commander…)。手写路由、协议、签名�
 
 ## 写 plugin / 跑 open-connector 迁移
 
-先读 `llmdoc/guides/plugin-design-and-migration.md`。要点:
+先读 `llmdoc/plugins/designing-and-migrating-plugins.mdx`。要点:
 
 - **plugin 与网关同进程同权**,所以 env 白名单、出站经 `guardedFetch`、未配 `PLUGIN_TOKEN`
   fail closed 这些边界都必须由代码保证,不能靠作者纪律。
