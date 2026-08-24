@@ -53,6 +53,7 @@ gateway 已按请求使用 D1 Sessions API，但**代码接入与数据库启用
 
 - 改 gateway 装配（插件目录、search 后端、入口 wiring）时，三处同轮核对，不允许某一条路径掉队。
 - template 的依赖版本要与当轮发布的 gateway/dashboard minor 对齐：0.x 下 caret 不跨 minor，template 停在旧 minor 就装不到新装配。
+- gateway minor 若改变 search 后端或搜索能力，除同步 template 的 0.x 依赖 pin，还要同轮核对 `template/wrangler.jsonc` 等面向部署者的 search binding 文案；旧实现描述会让模板即使装到新包仍暴露错误运维模型。
 
 会复发的构建坑：给 Workers 目标 bundle 含 `@modelcontextprotocol/sdk` 的入口时，tsup 的 `platform: 'neutral'` 必须设 esbuild `conditions: ['workerd', 'worker', 'browser']`；否则 `pkce-challenge`（exports 只有 browser/node 分支）解析失败。
 

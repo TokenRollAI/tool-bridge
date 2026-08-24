@@ -48,6 +48,7 @@
 | Cloudflare D1 Sessions、Placement 与延迟诊断 | [memory/reflections/cloudflare-d1-performance.md](memory/reflections/cloudflare-d1-performance.md) |
 | Dashboard 能力树与 Context 详情交互 | [memory/reflections/dashboard-tree-context-ui.md](memory/reflections/dashboard-tree-context-ui.md) |
 | 直连命令路径不变量与 wire 闭环 | [memory/reflections/direct-command-path-invariant.md](memory/reflections/direct-command-path-invariant.md) |
+| Search LIKE v4 统一召回、平台下界与发布闭环 | [memory/reflections/search-like-v4.md](memory/reflections/search-like-v4.md) |
 
 ## decision
 

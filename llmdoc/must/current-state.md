@@ -7,7 +7,7 @@
 ## 当前事实
 
 - 宿主中立应用在 `packages/app`，Cloudflare、Node、SDK 分别位于 gateway、server、sdk。
-- Node server 的 StateStore/SearchIndex 是两个独立后端：缺省 SQLite，设 `TB_DATABASE_URL` 走 PostgreSQL（纯 `ILIKE` 检索，无扩展依赖）。切换后端不迁移既有数据。
+- Node server 的 StateStore/SearchIndex 是两个独立后端：缺省 SQLite，设 `TB_DATABASE_URL` 走 PostgreSQL。搜索三宿主共享查询单元与评分 SQL，D1/SQLite 用纯 `LIKE`、PG 用无扩展依赖的 `ILIKE`；切换后端不迁移既有数据。
 - Node server 具备完整生产探针面：`/livez` 恒 200 只报进程存活；`/readyz` 做 PG/Redis 连通探测并在 draining 时返回未就绪；`/healthz` 报版本与 catalog digest 供对拍。SIGTERM 先进入 draining 再关停，窗口由 `TB_SHUTDOWN_DRAIN_SEC` 控制。
 - StateStore 契约含可选原子原语 `putIfAbsent`，三宿主(D1/SQLite/PG)均原子实现。bootstrap Admin SK 铸造以 hash key winner-takes-all 去重，多副本并发冷启动不再产生重复 sk 索引。
 - Cloudflare 宿主权威状态在 D1(ADR-001;TB_STATE/TB_SEARCH 两个 binding 指向同一个库),KV 已撤出；State/Search 均用请求级 `first-primary` Session，保留吊销即时性并让同请求后续读使用满足 bookmark 的副本；Wrangler 默认 Smart Placement 并输出 D1/Worker 时延观测。

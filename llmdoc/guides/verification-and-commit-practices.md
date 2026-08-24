@@ -16,6 +16,8 @@ pnpm turbo run build
 
 优先从改动附近的定向测试开始，最后执行全仓闸门。失败就报告失败；跳过真实外部验证时说明未验证的边界。
 
+搜索候选、查询单元或 schema 变化必须让 D1、better-sqlite3、PostgreSQL 共跑 `verifySearchIndexContract`；PG 组虽然由 `TB_TEST_DATABASE_URL` 门控，完整验收不得 skip。新增测试全局类型、core 导出或跨包类型依赖时，定向 Vitest 之后先跑受影响包 typecheck，再进入全仓 `verify`；运行时测试通过不能替代 TypeScript 编译证据。
+
 多 agent 共用同一 worktree 时，指定单一验证 owner，按“定向测试 → `pnpm verify` → 必需的 `pnpm turbo run build`”串行执行。其他 agent 不并发运行会重建 workspace 依赖链接的 pnpm 命令，避免共享 `node_modules` 软链接竞争产生无法归因的瞬时缺模块失败。
 
 ## 证据放置
