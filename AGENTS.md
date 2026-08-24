@@ -7,7 +7,7 @@
 
 1. `pwd` 确认工作目录 —— 本项目常在 git worktree(`~/.superset/worktrees/...`)里工作,
    **所有绝对路径基于 `pwd` 的结果拼**,不要照提示词里出现的主仓库路径去猜。
-2. 项目使用 llmdoc V3:先 `npx --no-install llmdoc tree` 看全局地图,再按任务用 `index --topic` / `context --files` / `search` 定位,最后 `show` 读正文。入口文档是 `llmdoc/architecture.mdx`。
+2. 项目使用 llmdoc V3:先 `npx @tokenroll/llmdoc tree` 看全局地图,再按任务用 `index --topic` / `context --files` / `search` 定位,最后 `show` 读正文。入口文档是 `llmdoc/architecture.mdx`。
    **知识真源 = 代码 + llmdoc**;两者冲突以代码为准并回改 llmdoc。
 
 ## 验证是验收的唯一依据
