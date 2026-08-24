@@ -47,7 +47,7 @@
   // binding 表达用途、库表达存储位置——将来要拆库只动这里,不动代码:
   // - TB_STATE:权威 StateStore(表 tb_state_kv;ADR-001 从 KV 迁入——强一致读写、
   //   原子 putIfAbsent、撤销即时生效;树配置 / SK 哈希表 / 加密 secret / manifest 全在此)。
-  // - TB_SEARCH:FTS5/trigram 工具搜索索引(表 tb_search_*;可选,不配则无 search capability)。
+  // - TB_SEARCH:纯 LIKE 工具搜索索引(表 tb_search_*;可选,不配则无 search capability)。
   "d1_databases": [
     {
       "binding": "TB_STATE",

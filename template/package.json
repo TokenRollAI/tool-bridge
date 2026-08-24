@@ -12,7 +12,7 @@
   },
   "dependencies": {
     "@tool-bridge/dashboard": "^0.16.0",
-    "@tool-bridge/gateway": "^0.17.2"
+    "@tool-bridge/gateway": "^0.18.0"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20260818.1",
@@ -25,7 +25,7 @@
         "description": "Authoritative state (D1): node tree config, SecretKey hashes, encrypted secrets, plugin manifests."
       },
       "TB_SEARCH": {
-        "description": "Tool-search index (D1, same database): FTS5/trigram backing for `~search`."
+        "description": "Tool-search index (D1, same database): weighted LIKE backing for `~search`."
       },
       "TB_R2": {
         "description": "Context objects and large `$ref` payloads."

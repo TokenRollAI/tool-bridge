@@ -72,8 +72,14 @@ export async function verifySearchIndexContract(
   await expect(candidatePage(index, 'create document')).resolves.toMatchObject({
     items: [{ path: alpha, name: documentTool.name }],
   })
-  await expect(candidatePage(index, '日程 calendar')).resolves.toEqual({ items: [] })
-  await expect(candidatePage(index, 'AI calendar')).resolves.toEqual({ items: [] })
+  const partialCjk = await candidatePage(index, '日程 calendar')
+  expect(partialCjk.items.map(item => item.name)).toEqual([
+    'legacy_calendar',
+    richTool.name,
+  ])
+  await expect(candidatePage(index, 'AI calendar')).resolves.toMatchObject({
+    items: [{ path: alpha, name: 'legacy_calendar' }],
+  })
   const longMixedTerm = `AI ${'calendar'.repeat(12)}`
   await expect(candidatePage(index, longMixedTerm)).resolves.toEqual({ items: [] })
   await expect(candidatePage(index, 'LE')).resolves.toMatchObject({
@@ -146,23 +152,49 @@ export async function verifySearchIndexContract(
   await index.rebuild([
     {
       path: `${prefix}/rank/name`,
-      tool: { name: 'calendar', description: 'ranking fixture' },
+      tool: { name: 'inbox', description: 'ranking fixture' },
+    },
+    {
+      path: `${prefix}/inbox`,
+      tool: { name: 'path_match', description: 'ranking fixture' },
     },
     {
       path: `${prefix}/rank/description`,
-      tool: { name: 'description_match', description: 'calendar ranking fixture' },
+      tool: { name: 'description_match', description: 'inbox ranking fixture' },
     },
     {
       path: `${prefix}/rank/feedback`,
       tool: { name: 'feedback_match', description: 'ranking fixture' },
-      feedback: 'calendar feedback fixture',
+      feedback: 'inbox feedback fixture',
     },
   ])
-  const weighted = await candidatePage(index, 'calendar')
+  const weighted = await candidatePage(index, 'inbox')
   expect(weighted.items.map(item => item.path)).toEqual([
     `${prefix}/rank/name`,
+    `${prefix}/inbox`,
     `${prefix}/rank/description`,
     `${prefix}/rank/feedback`,
+  ])
+
+  await index.rebuild([
+    {
+      path: `${prefix}/cjk/exact`,
+      tool: { name: 'exact_match', description: '支持发送信件到指定收件人' },
+    },
+    {
+      path: `${prefix}/cjk/bigram`,
+      tool: { name: 'bigram_match', description: '支持发送通知到指定收件人' },
+    },
+    {
+      path: `${prefix}/cjk/single`,
+      tool: { name: 'single_match', description: '保存到设备的本地信箱' },
+    },
+  ])
+  const cjkTiers = await candidatePage(index, '发送信件')
+  expect(cjkTiers.items.map(item => item.path)).toEqual([
+    `${prefix}/cjk/exact`,
+    `${prefix}/cjk/bigram`,
+    `${prefix}/cjk/single`,
   ])
 
   await index.rebuild([

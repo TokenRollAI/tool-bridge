@@ -66,9 +66,13 @@ const TOOL_SEARCH_SNAPSHOT_CHUNKS_MAX = Math.ceil(
 )
 export const TOOL_SEARCH_REBUILD_CHUNKS_MAX
   = TOOL_SEARCH_SOURCE_CHUNKS_MAX + TOOL_SEARCH_SNAPSHOT_CHUNKS_MAX
-/** FTS/LIKE 查询最多接受的 whitespace terms。 */
+/** 搜索查询最多接受的 whitespace terms。 */
 export const TOOL_SEARCH_TERM_LIMIT = 32
-/** 同时约束 FTS 工作量与 query-bound cursor 长度。 */
+/** D1 单查询 100 个绑定扣除 limit / offset 后可用的搜索单元数。 */
+export const TOOL_SEARCH_UNIT_LIMIT = 98
+/** D1 允许的单个 LIKE pattern UTF-8 字节上限。 */
+export const TOOL_SEARCH_LIKE_PATTERN_BYTES_MAX = 50
+/** 同时约束搜索工作量与 query-bound cursor 长度。 */
 export const TOOL_SEARCH_QUERY_MAX = 1024
 /** offset cursor 的防御性工作量上限；cursor 不是授权边界。 */
 export const TOOL_SEARCH_CURSOR_OFFSET_MAX = 1_000_000
@@ -152,10 +156,10 @@ export interface MutableSearchIndex extends SearchIndex {
   ): Promise<void>
 }
 
-export type PreparedToolSearchQuery
-  = | { expression: string, kind: 'fts' }
-    | { kind: 'like', patterns: string[] }
-    | { expression: string, kind: 'hybrid', patterns: string[] }
+export interface SearchUnit {
+  pattern: string
+  tier: number
+}
 
 function stableDigest(value: unknown): string {
   const bytes = new TextEncoder().encode(JSON.stringify(value))
@@ -342,12 +346,6 @@ export function normalizeToolSearchQuery(query: string): string {
   return normalized
 }
 
-/** 把用户输入变成只含 literal phrase 的 FTS5 MATCH 表达式，不开放查询语法。 */
-export function literalToolSearchQuery(query: string): string {
-  const terms = normalizeToolSearchQuery(query).split(/\s+/u)
-  return terms.map(term => `"${term.replaceAll('"', '""')}"`).join(' ')
-}
-
 function likePattern(term: string): string {
   const escaped = term
     .replaceAll('!', '!!')
@@ -356,38 +354,99 @@ function likePattern(term: string): string {
   return `%${escaped}%`
 }
 
+function likePatternBytes(term: string): number {
+  return new TextEncoder().encode(likePattern(term)).length
+}
+
+function isCjkCodePoint(value: string): boolean {
+  return /^(?:\p{Script=Han}|\p{Script=Hiragana}|\p{Script=Katakana}|\p{Script=Hangul})$/u
+    .test(value)
+}
+
+interface ScriptRun {
+  cjk: boolean
+  codePoints: string[]
+}
+
+function scriptRuns(term: string): ScriptRun[] {
+  const runs: ScriptRun[] = []
+  for (const codePoint of term) {
+    const cjk = isCjkCodePoint(codePoint)
+    const current = runs.at(-1)
+    if (current?.cjk === cjk) current.codePoints.push(codePoint)
+    else runs.push({ cjk, codePoints: [codePoint] })
+  }
+  return runs
+}
+
+function addSearchUnit(
+  units: Map<string, SearchUnit>,
+  value: string,
+  tier: number,
+): boolean {
+  const pattern = likePattern(value)
+  if (new TextEncoder().encode(pattern).length > TOOL_SEARCH_LIKE_PATTERN_BYTES_MAX) return false
+  const existing = units.get(pattern)
+  if (existing === undefined || tier > existing.tier) {
+    units.set(pattern, { pattern, tier })
+  }
+  return true
+}
+
+/** 按 code point 贪心生成不超过 LIKE 字节上限的最大连续块。 */
+function addChunkedSearchUnits(
+  units: Map<string, SearchUnit>,
+  value: string,
+  tier: number,
+): void {
+  let chunk = ''
+  for (const codePoint of value) {
+    if (likePatternBytes(chunk + codePoint) <= TOOL_SEARCH_LIKE_PATTERN_BYTES_MAX) {
+      chunk += codePoint
+      continue
+    }
+    if (chunk.length > 0) addSearchUnit(units, chunk, tier)
+    chunk = codePoint
+  }
+  if (chunk.length > 0) addSearchUnit(units, chunk, tier)
+}
+
 /**
- * 把 query 的每个 term 都变成 escaped LIKE 模式(不区分长短词)。
- *
- * 供不分长短词、整句走子串匹配的方言(如 Postgres ILIKE)使用;
- * 转义规则与 {@link prepareToolSearchQuery} 的短词路径一致(`!` 为 ESCAPE 字符)。
+ * 把 query 展开为 escaped LIKE 单元：整词优先，CJK bigram 次之，单字兜底。
+ * 跨 tier 重复 pattern 只保留最高权重；超限时优先保留高 tier 单元。
  */
-export function toolSearchLikePatterns(query: string): string[] {
+export function prepareToolSearchUnits(query: string): SearchUnit[] {
   const terms = normalizeToolSearchQuery(query).split(/\s+/u)
   if (terms.length > TOOL_SEARCH_TERM_LIMIT) {
     throw new TBError('invalid_argument', `搜索 query 最多 ${TOOL_SEARCH_TERM_LIMIT} 个 terms`)
   }
-  return terms.map(likePattern)
-}
 
-/**
- * 长词继续由 trigram FTS 匹配，短词分别用 escaped LIKE；hybrid 同时 AND 两侧。
- * 因 LIKE pattern 只来自 `<3` code points 的 term，始终低于 D1 的 50-byte 限制。
- */
-export function prepareToolSearchQuery(query: string): PreparedToolSearchQuery {
-  const normalized = normalizeToolSearchQuery(query)
-  const terms = normalized.split(/\s+/u)
-  if (terms.length > TOOL_SEARCH_TERM_LIMIT) {
-    throw new TBError('invalid_argument', `搜索 query 最多 ${TOOL_SEARCH_TERM_LIMIT} 个 terms`)
+  const units = new Map<string, SearchUnit>()
+  for (const term of terms) {
+    const wholeAdded = addSearchUnit(units, term, 4)
+
+    const runs = scriptRuns(term)
+    if (runs.length > 1) {
+      for (const run of runs) {
+        const value = run.codePoints.join('')
+        if (run.cjk) addSearchUnit(units, value, 2)
+        else addChunkedSearchUnits(units, value, 2)
+      }
+    } else if (!wholeAdded && runs[0]?.cjk === false) {
+      addChunkedSearchUnits(units, term, 2)
+    }
+    for (const run of runs) {
+      if (!run.cjk) continue
+      for (let index = 0; index < run.codePoints.length - 1; index += 1) {
+        addSearchUnit(units, run.codePoints.slice(index, index + 2).join(''), 2)
+      }
+      for (const codePoint of run.codePoints) addSearchUnit(units, codePoint, 1)
+    }
   }
-  const short = terms.filter(term => Array.from(term).length < 3)
-  const long = terms.filter(term => Array.from(term).length >= 3)
-  const patterns = short.map(likePattern)
-  if (long.length === 0) return { kind: 'like', patterns }
-  const expression = long.map(term => `"${term.replaceAll('"', '""')}"`).join(' ')
-  return patterns.length === 0
-    ? { kind: 'fts', expression }
-    : { kind: 'hybrid', expression, patterns }
+
+  return [...units.values()]
+    .sort((left, right) => right.tier - left.tier)
+    .slice(0, TOOL_SEARCH_UNIT_LIMIT)
 }
 
 interface CursorPayload {

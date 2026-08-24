@@ -45,7 +45,7 @@ async function freshIndex(tag: string): Promise<PgSearchIndex> {
 }
 
 suite('PgSearchIndex', () => {
-  it('satisfies the shared FTS mutation contract', async () => {
+  it('satisfies the shared LIKE search mutation contract', async () => {
     const index = await freshIndex('contract')
     await verifySearchIndexContract(index, 'contract/pg')
   })
@@ -124,7 +124,7 @@ suite('PgSearchIndex', () => {
       indexB.replace('contract/pg/race/winner-b', [{ name: 'winner_b' }]),
     ])
     const [row] = await a.unsafe<Array<{ count: number }>>(
-      'SELECT COUNT(*)::int AS count FROM tb_search_snapshots_v3',
+      'SELECT COUNT(*)::int AS count FROM tb_search_snapshots_v4',
     )
     expect(row?.count).toBeLessThanOrEqual(TOOL_SEARCH_AUDIT_NODE_LIMIT)
   })

@@ -133,7 +133,7 @@ class D1SearchDriver implements SqlSearchDriver {
   }
 }
 
-/** Cloudflare D1 的持久 FTS5/trigram SearchIndex。 */
+/** Cloudflare D1 的持久纯 LIKE SearchIndex。 */
 export class D1SearchIndex extends SqlSearchIndex {
   constructor(
     db: D1Executor,

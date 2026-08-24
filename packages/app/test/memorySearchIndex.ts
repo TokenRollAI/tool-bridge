@@ -7,7 +7,7 @@ import {
   normalizeToolSearchPath,
   normalizeToolSearchQuery,
   type Page,
-  prepareToolSearchQuery,
+  prepareToolSearchUnits,
   type SearchCapability,
   type SerializedToolSearchRecord,
   serializeToolSearchDocuments,
@@ -26,9 +26,9 @@ import {
 /**
  * `MutableSearchIndex` 的内存实现,给中立层测试用。
  *
- * **它不是 D1/SQLite adapter 的替身**:全文匹配那部分(trigram FTS、bm25 排序、
- * JSON1 分块、D1 50-query 预算)由 `packages/gateway` 的 `d1SearchIndex.integration`
- * 用真实 D1 覆盖,这里只做大小写不敏感的子串匹配。它覆盖的是**另一件事**:
+ * **它不是 D1/SQLite adapter 的替身**:SQL 执行、JSON1 分块与 D1 query
+ * 预算由 `packages/gateway` 的 `d1SearchIndex.integration` 用真实 D1 覆盖,
+ * 这里只复用 core 搜索单元做大小写不敏感的子串匹配。它覆盖的是**另一件事**:
  * SearchSynchronizer → 索引 → 权限裁剪 → canonical 水合这条联动链,以及
  * `/~search`、`/~mcp` 的 `tb_search` 投影在"宿主注入了索引"时的行为。
  *
@@ -56,24 +56,34 @@ function groupByPath(
 }
 
 /**
- * 经 core 的 `prepareToolSearchQuery` 走一遍(query 长度/term 数/NUL 校验与真 adapter
- * 同源、同报错),再取回朴素 term 列表做子串匹配。
+ * 还原 core 生成的 escaped LIKE pattern,仅用于内存子串匹配。
  */
-function queryTerms(normalized: string): string[] {
-  prepareToolSearchQuery(normalized)
-  return normalized.toLowerCase().split(/\s+/u).filter(term => term.length > 0)
+function likePatternLiteral(pattern: string): string {
+  let literal = ''
+  for (let index = 1; index < pattern.length - 1; index += 1) {
+    const codePoint = pattern[index]
+    if (codePoint === '!') index += 1
+    literal += pattern[index]
+  }
+  return literal.toLowerCase()
 }
 
-/** name 10 / description 3 / feedback 1;任一 term 全不命中则整条 0 分(AND)。 */
-function scoreRecord(record: SerializedToolSearchRecord, terms: readonly string[]): number {
+/** 部分命中即召回;每个单元只计入权重最高的命中字段。 */
+function scoreRecord(
+  record: SerializedToolSearchRecord,
+  units: ReturnType<typeof prepareToolSearchUnits>,
+): number {
+  const name = record.name.toLowerCase()
+  const path = record.path.toLowerCase()
+  const description = record.description.toLowerCase()
+  const feedback = record.feedback.toLowerCase()
   let total = 0
-  for (const term of terms) {
-    let score = 0
-    if (record.name.toLowerCase().includes(term)) score += 10
-    if (record.description.toLowerCase().includes(term)) score += 3
-    if (record.feedback.toLowerCase().includes(term)) score += 1
-    if (score === 0) return 0
-    total += score
+  for (const unit of units) {
+    const literal = likePatternLiteral(unit.pattern)
+    if (name.includes(literal)) total += unit.tier * 10
+    else if (path.includes(literal)) total += unit.tier * 5
+    else if (description.includes(literal)) total += unit.tier * 3
+    else if (feedback.includes(literal)) total += unit.tier
   }
   return total
 }
@@ -181,13 +191,12 @@ export class MemorySearchIndex implements MutableSearchIndex {
     )
     const limit = Math.min(normalizeToolSearchLimit(opts?.limit), TOOL_SEARCH_BATCH_LIMIT)
 
-    const terms = queryTerms(normalized)
+    const units = prepareToolSearchUnits(normalized)
     const matched = [...this.snapshots.values()]
       .flatMap(snapshot => snapshot.records)
-      // 每个 term 都要命中(AND),与 FTS/LIKE 的 hybrid AND 语义一致。
-      .map(record => ({ record, score: scoreRecord(record, terms) }))
+      .map(record => ({ record, score: scoreRecord(record, units) }))
       .filter(entry => entry.score > 0)
-      // name(10) / description(3) / feedback(1) 加权,与 D1 的 bm25 权重同序;
+      // name(10) / path(5) / description(3) / feedback(1) 加权;
       // 同分按 path、name 稳定排序,保证分页确定。
       .sort((a, b) =>
         b.score - a.score

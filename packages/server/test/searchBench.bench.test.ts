@@ -3,9 +3,8 @@
  *
  *   TB_TEST_DATABASE_URL=... npx vitest run test/searchBench.manual.ts
  *
- * 目的是量化 PG(ILIKE 子串)与 SQLite(FTS5 trigram + 短词 LIKE)在同一数据量下的
- * 检索与写入延迟。PG 侧长短词同走 ILIKE 且实测一律 Seq Scan;SQLite 侧长词走 FTS5
- * 索引、短词走无索引 LIKE —— 两边的强弱项因此不同,值得分查询型别看。
+ * 目的是量化 PG(ILIKE 子串)与 SQLite(LIKE 子串)在同一数据量、同一查询单元与
+ * 评分 SQL 下的检索与写入延迟。两侧都走受节点容量硬顶约束的顺序扫描。
  * 不做断言,只打印数字——阈值随机器波动,断言会变成 flaky。
  */
 
@@ -146,7 +145,7 @@ suite('SearchIndex 后端基准', () => {
     await percentiles('PG', async () => await pg.search('日程', { limit: 50 }))
     await percentiles('SQLite', async () => await sqlite.search('日程', { limit: 50 }))
 
-    console.log('\n  [检索] 多词 AND "calendar appointments"')
+    console.log('\n  [检索] 多词部分命中评分 "calendar appointments"')
     await percentiles('PG', async () => await pg.search('calendar appointments', { limit: 50 }))
     await percentiles(
       'SQLite',

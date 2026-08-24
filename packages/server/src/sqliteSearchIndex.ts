@@ -58,7 +58,7 @@ class SqliteSearchDriver implements SqlSearchDriver {
   }
 }
 
-/** Node 宿主的 better-sqlite3 FTS5/trigram SearchIndex。 */
+/** Node 宿主的 better-sqlite3 纯 LIKE SearchIndex。 */
 export class SqliteSearchIndex extends SqlSearchIndex {
   private readonly db: Database.Database
 

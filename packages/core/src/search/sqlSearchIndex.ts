@@ -1,11 +1,11 @@
 /**
- * SQLite 系 SearchIndex 的共享实现——D1(Workers)与 better-sqlite3(Node)两个
- * adapter 的唯一真源。
+ * SQL SearchIndex 的共享实现——D1、better-sqlite3 与 PostgreSQL 三个 adapter
+ * 的编排与候选检索唯一真源。
  *
  * 此前两边各持一份逐行相同的 schema DDL、查询 SQL、material-change 判定与
  * cursor/分页逻辑(共 ~780 行,重合度 >85%),任何一侧改动都得靠人工纪律同步到另
- * 一侧;`shortTermSql.ts` 只收敛了其中最容易出事的一小段。这里把**所有**与具体
- * 驱动无关的部分收进 `SqlSearchIndex`,宿主差异压缩成 `SqlSearchDriver` 的五个
+ * 一侧。这里把**所有**与具体驱动无关的部分收进 `SqlSearchIndex`,宿主差异压缩成
+ * `SqlSearchDriver` 的五个
  * 方法:
  *
  * - D1 全异步、写入走 `db.batch()`,且单请求有 50 查询预算 —— 故记录插入必须
@@ -26,9 +26,9 @@ import {
   normalizeToolSearchLimit,
   normalizeToolSearchPath,
   normalizeToolSearchQuery,
-  type PreparedToolSearchQuery,
-  prepareToolSearchQuery,
+  prepareToolSearchUnits,
   type SearchCapability,
+  type SearchUnit,
   type SerializedToolSearchRecord,
   serializeToolSearchDocuments,
   serializeToolSearchSnapshot,
@@ -41,7 +41,6 @@ import {
   toolSearchSnapshotDigests,
   toolSearchSnapshotDigestsEqual,
 } from './types'
-import { SHORT_MATCH_SQL, SHORT_SCORE_SQL, shortTermsSql } from './shortTermSql'
 import { TBError } from '../errors'
 
 /**
@@ -49,7 +48,7 @@ import { TBError } from '../errors'
  * `join(';')` 后 exec。容量 trigger 把节点上限压在数据库里,不依赖调用方自觉。
  */
 export const TOOL_SEARCH_SCHEMA_STATEMENTS = [
-  `CREATE TABLE IF NOT EXISTS tb_search_tools_v3 (
+  `CREATE TABLE IF NOT EXISTS tb_search_tools_v4 (
     id INTEGER PRIMARY KEY,
     path TEXT NOT NULL,
     name TEXT NOT NULL,
@@ -57,47 +56,24 @@ export const TOOL_SEARCH_SCHEMA_STATEMENTS = [
     feedback TEXT NOT NULL DEFAULT '',
     UNIQUE(path, name)
   )`,
-  `CREATE VIRTUAL TABLE IF NOT EXISTS tb_search_tools_fts_v3 USING fts5(
-    name,
-    description,
-    feedback,
-    content='tb_search_tools_v3',
-    content_rowid='id',
-    tokenize='trigram'
-  )`,
-  `CREATE TRIGGER IF NOT EXISTS tb_search_tools_v3_ai AFTER INSERT ON tb_search_tools_v3 BEGIN
-    INSERT INTO tb_search_tools_fts_v3(rowid, name, description, feedback)
-    VALUES (new.id, new.name, new.description, new.feedback);
-  END`,
-  `CREATE TRIGGER IF NOT EXISTS tb_search_tools_v3_ad AFTER DELETE ON tb_search_tools_v3 BEGIN
-    INSERT INTO tb_search_tools_fts_v3(tb_search_tools_fts_v3, rowid, name, description, feedback)
-    VALUES ('delete', old.id, old.name, old.description, old.feedback);
-  END`,
-  `CREATE TRIGGER IF NOT EXISTS tb_search_tools_v3_au
-  AFTER UPDATE OF name, description, feedback ON tb_search_tools_v3 BEGIN
-    INSERT INTO tb_search_tools_fts_v3(tb_search_tools_fts_v3, rowid, name, description, feedback)
-    VALUES ('delete', old.id, old.name, old.description, old.feedback);
-    INSERT INTO tb_search_tools_fts_v3(rowid, name, description, feedback)
-    VALUES (new.id, new.name, new.description, new.feedback);
-  END`,
-  `CREATE TABLE IF NOT EXISTS tb_search_meta_v3 (
+  `CREATE TABLE IF NOT EXISTS tb_search_meta_v4 (
     singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
     revision INTEGER NOT NULL DEFAULT 0,
     seeded INTEGER NOT NULL DEFAULT 0,
     cursor_secret TEXT NOT NULL
   )`,
-  `INSERT OR IGNORE INTO tb_search_meta_v3(
+  `INSERT OR IGNORE INTO tb_search_meta_v4(
     singleton, revision, seeded, cursor_secret
   ) VALUES (1, 0, 0, lower(hex(randomblob(32))))`,
-  `CREATE TABLE IF NOT EXISTS tb_search_snapshots_v3 (
+  `CREATE TABLE IF NOT EXISTS tb_search_snapshots_v4 (
     path TEXT PRIMARY KEY,
     digest TEXT NOT NULL
   )`,
-  `CREATE TRIGGER IF NOT EXISTS tb_search_snapshots_v3_capacity
-  BEFORE INSERT ON tb_search_snapshots_v3
+  `CREATE TRIGGER IF NOT EXISTS tb_search_snapshots_v4_capacity
+  BEFORE INSERT ON tb_search_snapshots_v4
   WHEN NOT EXISTS (
-    SELECT 1 FROM tb_search_snapshots_v3 WHERE path = new.path
-  ) AND (SELECT COUNT(*) FROM tb_search_snapshots_v3) >= ${TOOL_SEARCH_AUDIT_NODE_LIMIT}
+    SELECT 1 FROM tb_search_snapshots_v4 WHERE path = new.path
+  ) AND (SELECT COUNT(*) FROM tb_search_snapshots_v4) >= ${TOOL_SEARCH_AUDIT_NODE_LIMIT}
   BEGIN
     SELECT RAISE(ABORT, 'tb_search_path_capacity');
   END`,
@@ -108,13 +84,13 @@ export const TOOL_SEARCH_CAPACITY_MARKER = 'tb_search_path_capacity'
 
 /** 逐条插入(位置参数:path, name, description, feedback)。 */
 export const TOOL_SEARCH_INSERT_SQL = `
-INSERT INTO tb_search_tools_v3 (path, name, description, feedback)
+INSERT INTO tb_search_tools_v4 (path, name, description, feedback)
 VALUES (?, ?, ?, ?)
 `
 
 /** JSON1 批量插入(单参数:记录数组的 JSON);给有查询预算的宿主省语句数。 */
 export const TOOL_SEARCH_INSERT_JSON_SQL = `
-INSERT INTO tb_search_tools_v3 (path, name, description, feedback)
+INSERT INTO tb_search_tools_v4 (path, name, description, feedback)
 SELECT
   json_extract(value, '$.path'),
   json_extract(value, '$.name'),
@@ -125,48 +101,48 @@ FROM json_each(?)
 
 /** 逐条写 path→digest 快照(位置参数:path, digest)。 */
 export const TOOL_SEARCH_INSERT_SNAPSHOT_SQL
-  = 'INSERT INTO tb_search_snapshots_v3(path, digest) VALUES (?, ?)'
+  = 'INSERT INTO tb_search_snapshots_v4(path, digest) VALUES (?, ?)'
 
 /** JSON1 批量写快照(单参数:`[path, digest]` 二元组数组的 JSON)。 */
 export const TOOL_SEARCH_INSERT_SNAPSHOT_JSON_SQL = `
-INSERT INTO tb_search_snapshots_v3(path, digest)
+INSERT INTO tb_search_snapshots_v4(path, digest)
 SELECT json_extract(value, '$[0]'), json_extract(value, '$[1]') FROM json_each(?)
 `
 
 const META_SQL
-  = 'SELECT revision, seeded, cursor_secret FROM tb_search_meta_v3 WHERE singleton = 1'
+  = 'SELECT revision, seeded, cursor_secret FROM tb_search_meta_v4 WHERE singleton = 1'
 const SNAPSHOT_DIGESTS_SQL
-  = 'SELECT path, digest FROM tb_search_snapshots_v3 ORDER BY path'
+  = 'SELECT path, digest FROM tb_search_snapshots_v4 ORDER BY path'
 /** replace 的前置探测:一次拿到本 path 的 digest、是否残留 source 行、已用节点数。 */
 const PATH_STATE_SQL = `
 SELECT snapshots.digest,
-  EXISTS(SELECT 1 FROM tb_search_tools_v3 WHERE path = ?) AS has_tools,
-  (SELECT COUNT(*) FROM tb_search_snapshots_v3) AS path_count
+  EXISTS(SELECT 1 FROM tb_search_tools_v4 WHERE path = ?) AS has_tools,
+  (SELECT COUNT(*) FROM tb_search_snapshots_v4) AS path_count
 FROM (SELECT 1) AS singleton
-LEFT JOIN tb_search_snapshots_v3 AS snapshots ON snapshots.path = ?
+LEFT JOIN tb_search_snapshots_v4 AS snapshots ON snapshots.path = ?
 `
-const PRESENT_SQL = 'SELECT 1 AS present FROM tb_search_tools_v3 WHERE path = ? LIMIT 1'
+const PRESENT_SQL = 'SELECT 1 AS present FROM tb_search_tools_v4 WHERE path = ? LIMIT 1'
 const PRESENT_PREFIX_SQL = `
-SELECT 1 AS present FROM tb_search_tools_v3
+SELECT 1 AS present FROM tb_search_tools_v4
 WHERE path = ? OR substr(path, 1, length(?) + 1) = ? || '/'
 LIMIT 1
 `
-const DELETE_TOOLS_SQL = 'DELETE FROM tb_search_tools_v3 WHERE path = ?'
-const DELETE_SNAPSHOT_SQL = 'DELETE FROM tb_search_snapshots_v3 WHERE path = ?'
+const DELETE_TOOLS_SQL = 'DELETE FROM tb_search_tools_v4 WHERE path = ?'
+const DELETE_SNAPSHOT_SQL = 'DELETE FROM tb_search_snapshots_v4 WHERE path = ?'
 const DELETE_TOOLS_PREFIX_SQL = `
-DELETE FROM tb_search_tools_v3
+DELETE FROM tb_search_tools_v4
 WHERE path = ? OR substr(path, 1, length(?) + 1) = ? || '/'
 `
 const DELETE_SNAPSHOT_PREFIX_SQL = `
-DELETE FROM tb_search_snapshots_v3
+DELETE FROM tb_search_snapshots_v4
 WHERE path = ? OR substr(path, 1, length(?) + 1) = ? || '/'
 `
-const DELETE_ALL_TOOLS_SQL = 'DELETE FROM tb_search_tools_v3'
-const DELETE_ALL_SNAPSHOTS_SQL = 'DELETE FROM tb_search_snapshots_v3'
+const DELETE_ALL_TOOLS_SQL = 'DELETE FROM tb_search_tools_v4'
+const DELETE_ALL_SNAPSHOTS_SQL = 'DELETE FROM tb_search_snapshots_v4'
 const BUMP_REVISION_SQL
-  = 'UPDATE tb_search_meta_v3 SET revision = revision + 1 WHERE singleton = 1'
+  = 'UPDATE tb_search_meta_v4 SET revision = revision + 1 WHERE singleton = 1'
 const COMPLETE_REBUILD_SQL
-  = 'UPDATE tb_search_meta_v3 SET seeded = 1, revision = revision + 1 WHERE singleton = 1'
+  = 'UPDATE tb_search_meta_v4 SET seeded = 1, revision = revision + 1 WHERE singleton = 1'
 
 /** 一条待执行语句:SQL 文本 + 按序绑定的参数,不含任何驱动对象。 */
 export interface SqlSearchStatement {
@@ -206,14 +182,13 @@ export interface SqlSearchStatements {
  *
  * `SqlSearchIndex` 只认识本接口——候选查询 + 一组固定语句 + 建表 DDL。
  * D1 与 better-sqlite3 同为 SQLite,共用 {@link sqliteSearchDialect};其它引擎
- * (如 Postgres)实现自己的方言,替换全文检索与占位符语法。方言只管 SQL 文本,
+ * (如 Postgres)实现自己的方言,替换占位符与大小写折叠语法。方言只管 SQL 文本,
  * 具体驱动的同步/异步、批量预算、结果整形仍由 {@link SqlSearchDriver} 吸收。
  */
 export interface SqlSearchDialect {
   /**
-   * 把已 normalize 的 query 变成候选查询语句(含排序与分页)。
-   * prepare(分词、短/长词切分、方言专属语法)由各方言自理——SQLite 走 trigram
-   * FTS + 短词 LIKE,PG 走 ILIKE 子串;编排层只给 normalized query,不预设方言。
+   * 把已 normalize 的 query 变成候选查询语句(含排序与分页)。三后端共用查询单元
+   * 展开和评分形态，方言只选择占位符语法与 LIKE/ILIKE。
    */
   candidateStatement(
     query: string,
@@ -270,55 +245,50 @@ export interface SqlSearchDriver {
   write: (statements: readonly SqlSearchStatement[]) => Promise<void>
 }
 
-/** 候选查询:短词 LIKE / 长词 trigram FTS / 两者 AND,三形态共用同一套排序与分页。 */
+export interface ToolSearchSqlSyntax {
+  readonly likeOperator: 'ILIKE' | 'LIKE'
+  placeholder(index: number): string
+}
+
+/**
+ * 三后端候选查询的唯一 SQL 生成器。
+ *
+ * 每个查询单元只要命中任意索引字段即可召回；tier 与字段权重相乘后逐单元求和。
+ * 高 tier 与高权字段通常靠前，但总分不额外承诺“覆盖全部 term”绝对优先。参数只
+ * 包含 escaped LIKE pattern、limit 与 offset，tier 和 SQL syntax 都来自受控常量。
+ */
 export function toolSearchCandidateStatement(
-  prepared: PreparedToolSearchQuery,
+  units: readonly SearchUnit[],
   limit: number,
   offset: number,
+  syntax: ToolSearchSqlSyntax,
 ): SqlSearchStatement {
-  if (prepared.kind === 'like') {
-    return {
-      params: [...prepared.patterns, limit + 1, offset],
-      sql: `
-        WITH ${shortTermsSql(prepared.patterns)}
-        SELECT tools.id, tools.path, tools.name, ${SHORT_SCORE_SQL} AS short_score
-        FROM tb_search_tools_v3 AS tools
-        WHERE ${SHORT_MATCH_SQL}
-        ORDER BY short_score DESC, tools.path, tools.name
-        LIMIT ? OFFSET ?
-      `,
-    }
-  }
-  if (prepared.kind === 'hybrid') {
-    return {
-      params: [...prepared.patterns, prepared.expression, limit + 1, offset],
-      sql: `
-        WITH ${shortTermsSql(prepared.patterns)},
-        long_hits AS (
-          SELECT tools.id, bm25(tb_search_tools_fts_v3, 10.0, 3.0, 1.0) AS fts_rank
-          FROM tb_search_tools_fts_v3
-          JOIN tb_search_tools_v3 AS tools ON tools.id = tb_search_tools_fts_v3.rowid
-          WHERE tb_search_tools_fts_v3 MATCH ?
-        )
-        SELECT tools.id, tools.path, tools.name, long_hits.fts_rank,
-          ${SHORT_SCORE_SQL} AS short_score
-        FROM long_hits
-        JOIN tb_search_tools_v3 AS tools ON tools.id = long_hits.id
-        WHERE ${SHORT_MATCH_SQL}
-        ORDER BY long_hits.fts_rank, short_score DESC, tools.path, tools.name
-        LIMIT ? OFFSET ?
-      `,
-    }
-  }
+  const values = units.map((unit, index) =>
+    `(${syntax.placeholder(index + 1)}, ${unit.tier})`).join(', ')
+  const limitParam = syntax.placeholder(units.length + 1)
+  const offsetParam = syntax.placeholder(units.length + 2)
+  const like = syntax.likeOperator
   return {
-    params: [prepared.expression, limit + 1, offset],
+    params: [...units.map(unit => unit.pattern), limit + 1, offset],
     sql: `
-      SELECT tools.id, tools.path, tools.name
-      FROM tb_search_tools_fts_v3
-      JOIN tb_search_tools_v3 AS tools ON tools.id = tb_search_tools_fts_v3.rowid
-      WHERE tb_search_tools_fts_v3 MATCH ?
-      ORDER BY bm25(tb_search_tools_fts_v3, 10.0, 3.0, 1.0), tools.path, tools.name
-      LIMIT ? OFFSET ?
+      WITH units(pattern, tier) AS (VALUES ${values})
+      SELECT * FROM (
+        SELECT tools.id, tools.path, tools.name,
+          (
+            SELECT COALESCE(SUM(units.tier * CASE
+              WHEN tools.name ${like} units.pattern ESCAPE '!' THEN 10
+              WHEN tools.path ${like} units.pattern ESCAPE '!' THEN 5
+              WHEN tools.description ${like} units.pattern ESCAPE '!' THEN 3
+              WHEN tools.feedback ${like} units.pattern ESCAPE '!' THEN 1
+              ELSE 0
+            END), 0)
+            FROM units
+          ) AS score
+        FROM tb_search_tools_v4 AS tools
+      ) AS scored_tools
+      WHERE score > 0
+      ORDER BY score DESC, path, name
+      LIMIT ${limitParam} OFFSET ${offsetParam}
     `,
   }
 }
@@ -335,10 +305,15 @@ export function toolSearchInsertPayload(
   }))
 }
 
-/** SQLite/FTS5 方言:D1 与 better-sqlite3 共用。SQL 文本与占位符是 SQLite 形态。 */
+/** SQLite 方言:D1 与 better-sqlite3 共用纯 LIKE；占位符是 `?`。 */
 export const sqliteSearchDialect: SqlSearchDialect = {
   candidateStatement: (query, limit, offset) =>
-    toolSearchCandidateStatement(prepareToolSearchQuery(query), limit, offset),
+    toolSearchCandidateStatement(
+      prepareToolSearchUnits(query),
+      limit,
+      offset,
+      { likeOperator: 'LIKE', placeholder: () => '?' },
+    ),
   schemaStatements: TOOL_SEARCH_SCHEMA_STATEMENTS,
   statements: {
     bumpRevision: BUMP_REVISION_SQL,

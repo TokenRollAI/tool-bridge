@@ -1,4 +1,12 @@
-import { NodeRegistryStore, TOOL_SEARCH_AUDIT_NODE_LIMIT } from '@tool-bridge/core'
+import {
+  NodeRegistryStore,
+  prepareToolSearchUnits,
+  sqliteSearchDialect,
+  TOOL_SEARCH_AUDIT_NODE_LIMIT,
+  TOOL_SEARCH_LIKE_PATTERN_BYTES_MAX,
+  TOOL_SEARCH_SCHEMA_STATEMENTS,
+  TOOL_SEARCH_UNIT_LIMIT,
+} from '@tool-bridge/core'
 import { SearchSynchronizer } from '@tool-bridge/app'
 import { describe, expect, it } from 'vitest'
 import { env, SELF } from 'cloudflare:test'
@@ -21,6 +29,23 @@ const searchDb = (env as { TB_SEARCH: D1Database }).TB_SEARCH
 describe('D1SearchIndex', () => {
   it('keeps the cold 400-document search path within the Free D1 query budget', () => {
     expect(D1_SEARCH_COLD_QUERY_MAX).toBeLessThanOrEqual(50)
+    expect(TOOL_SEARCH_SCHEMA_STATEMENTS).toHaveLength(5)
+    expect(TOOL_SEARCH_SCHEMA_STATEMENTS.join('\n')).not.toMatch(/fts5|_fts_|_v3/iu)
+  })
+  it('keeps candidate bindings and LIKE patterns within D1 platform limits', () => {
+    const query = Array.from(
+      { length: 80 },
+      (_, index) => String.fromCodePoint(0x4E00 + index),
+    ).join('')
+    const units = prepareToolSearchUnits(query)
+    const statement = sqliteSearchDialect.candidateStatement(query, 10, 0)
+    const encoder = new TextEncoder()
+
+    expect(TOOL_SEARCH_UNIT_LIMIT + 2).toBeLessThanOrEqual(100)
+    expect(units).toHaveLength(TOOL_SEARCH_UNIT_LIMIT)
+    expect(statement.params).toHaveLength(100)
+    expect(Math.max(...units.map(unit => encoder.encode(unit.pattern).length)))
+      .toBeLessThanOrEqual(TOOL_SEARCH_LIKE_PATTERN_BYTES_MAX)
   })
   it('does not advertise search when a library host omits the optional D1 binding', async () => {
     const withoutSearch = new Proxy(env as unknown as Env, {
@@ -35,7 +60,7 @@ describe('D1SearchIndex', () => {
     expect(response.status).toBe(404)
   })
 
-  it('satisfies the shared FTS5/trigram mutation contract', async () => {
+  it('satisfies the shared LIKE search mutation contract', async () => {
     await verifySearchIndexContract(new D1SearchIndex(searchDb), 'contract/d1')
   })
 
@@ -75,11 +100,11 @@ describe('D1SearchIndex', () => {
     const index = new D1SearchIndex(searchDb)
     await index.initialized()
     await searchDb.batch([
-      searchDb.prepare('DELETE FROM tb_search_tools_v3'),
-      searchDb.prepare('DELETE FROM tb_search_snapshots_v3'),
-      searchDb.prepare('UPDATE tb_search_meta_v3 SET seeded = 0 WHERE singleton = 1'),
+      searchDb.prepare('DELETE FROM tb_search_tools_v4'),
+      searchDb.prepare('DELETE FROM tb_search_snapshots_v4'),
+      searchDb.prepare('UPDATE tb_search_meta_v4 SET seeded = 0 WHERE singleton = 1'),
       searchDb.prepare(`
-        INSERT INTO tb_search_tools_v3(path, name, description, feedback)
+        INSERT INTO tb_search_tools_v4(path, name, description, feedback)
         VALUES (?, ?, ?, '')
       `).bind(
         'contract/d1/source-only',
@@ -93,7 +118,7 @@ describe('D1SearchIndex', () => {
     await expect(index.search('legacysourceonly')).resolves.toMatchObject({ items: [] })
 
     await searchDb.prepare(`
-      INSERT INTO tb_search_tools_v3(path, name, description, feedback)
+      INSERT INTO tb_search_tools_v4(path, name, description, feedback)
       VALUES (?, ?, ?, '')
     `).bind(
       'contract/d1/source-only',
@@ -129,9 +154,9 @@ describe('D1SearchIndex', () => {
     await registry.write(makeNode(alpha, 'partial_alpha'), 'system:test', now)
     await registry.write(makeNode(beta, 'partial_beta'), 'system:test', now)
     await searchDb.batch([
-      searchDb.prepare('DELETE FROM tb_search_tools_v3'),
-      searchDb.prepare('DELETE FROM tb_search_snapshots_v3'),
-      searchDb.prepare('UPDATE tb_search_meta_v3 SET seeded = 0 WHERE singleton = 1'),
+      searchDb.prepare('DELETE FROM tb_search_tools_v4'),
+      searchDb.prepare('DELETE FROM tb_search_snapshots_v4'),
+      searchDb.prepare('UPDATE tb_search_meta_v4 SET seeded = 0 WHERE singleton = 1'),
     ])
 
     const index = new D1SearchIndex(searchDb)

@@ -56,7 +56,7 @@ export interface Env {
   TB_REF_TTL_SEC?: string
   /** remote baseUrl 的 host 后缀白名单(逗号分隔;空 = 拒一切 remote)。 */
   TB_REMOTE_ALLOWLIST?: string
-  /** FTS5/trigram 工具搜索索引；发布包宿主未配置 binding 时不暴露 search capability。 */
+  /** 纯 LIKE 工具搜索索引；发布包宿主未配置 binding 时不暴露 search capability。 */
   TB_SEARCH?: D1Database
   TB_SECRET_ENCRYPTION_KEY?: string
   /** 权威 StateStore(D1;ADR-001 从 KV 迁入,强一致 + 原子 putIfAbsent)。 */

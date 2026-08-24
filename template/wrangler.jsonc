@@ -37,7 +37,7 @@
   // D1: one database, two bindings (the deploy flow provisions it and fills in the id).
   // TB_STATE is the authoritative state store (node tree, SecretKey hashes, encrypted
   // secrets, plugin manifests — strongly consistent, revocation is immediate).
-  // TB_SEARCH is the FTS5/trigram tool-search index (`~search`).
+  // TB_SEARCH is the weighted LIKE tool-search index (`~search`).
   "d1_databases": [
     {
       "binding": "TB_STATE",

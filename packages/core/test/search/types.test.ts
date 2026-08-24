@@ -3,20 +3,23 @@ import {
   assertKeywordToolSearchMode,
   decodeToolSearchCursor,
   encodeToolSearchCursor,
-  literalToolSearchQuery,
-  prepareToolSearchQuery,
+  prepareToolSearchUnits,
   serializeToolSearchDocuments,
   serializeToolSearchSnapshot,
   TBError,
   TOOL_SEARCH_AUDIT_NODE_LIMIT,
   TOOL_SEARCH_DESCRIPTION_BYTES_MAX,
+  TOOL_SEARCH_LIKE_PATTERN_BYTES_MAX,
   TOOL_SEARCH_NODE_JSON_BYTES_MAX,
   TOOL_SEARCH_QUERY_MAX,
   TOOL_SEARCH_REBUILD_CHUNKS_MAX,
   TOOL_SEARCH_TERM_LIMIT,
+  TOOL_SEARCH_UNIT_LIMIT,
   type ToolSearchOptions,
   toolSearchSnapshotDigest,
 } from '../../src'
+
+declare const TextEncoder: { new (): { encode(input: string): Uint8Array } }
 
 describe('SearchIndex mutation contract', () => {
   it('normalizes path and stores only lightweight searchable material plus a digest', () => {
@@ -108,53 +111,96 @@ describe('SearchIndex mutation contract', () => {
     expect(toolSearchSnapshotDigest(changed)).not.toBe(toolSearchSnapshotDigest(a))
   })
 
-  it('quotes every keyword term as literal FTS input', () => {
-    expect(literalToolSearchQuery('  active   users  ')).toBe('"active" "users"')
-    expect(literalToolSearchQuery('calendar OR "private"')).toBe(
-      '"calendar" "OR" """private"""',
-    )
-    expect(() => literalToolSearchQuery('   ')).toThrowError(TBError)
-    expect(() => literalToolSearchQuery('calendar\0private')).toThrowError(TBError)
-    expect(() => literalToolSearchQuery('x'.repeat(TOOL_SEARCH_QUERY_MAX + 1)))
-      .toThrowError(TBError)
+  it('expands CJK terms into whole-word, bigram and single-code-point tiers', () => {
+    expect(prepareToolSearchUnits(' 发送信件 ')).toEqual([
+      { pattern: '%发送信件%', tier: 4 },
+      { pattern: '%发送%', tier: 2 },
+      { pattern: '%送信%', tier: 2 },
+      { pattern: '%信件%', tier: 2 },
+      { pattern: '%发%', tier: 1 },
+      { pattern: '%送%', tier: 1 },
+      { pattern: '%信%', tier: 1 },
+      { pattern: '%件%', tier: 1 },
+    ])
   })
 
-  it('uses Unicode code points and escapes literal LIKE metacharacters for short queries', () => {
-    expect(prepareToolSearchQuery(' 日程 ')).toEqual({
-      kind: 'like',
-      patterns: ['%日程%'],
-    })
-    expect(prepareToolSearchQuery('管理日')).toEqual({
-      kind: 'fts',
-      expression: '"管理日"',
-    })
-    expect(prepareToolSearchQuery('😀a')).toEqual({
-      kind: 'like',
-      patterns: ['%😀a%'],
-    })
-    expect(prepareToolSearchQuery('😀ab')).toEqual({
-      kind: 'fts',
-      expression: '"😀ab"',
-    })
-    expect(prepareToolSearchQuery('%_')).toEqual({
-      kind: 'like',
-      patterns: ['%!%!_%'],
-    })
-    expect(prepareToolSearchQuery('!')).toEqual({ kind: 'like', patterns: ['%!!%'] })
-    expect(prepareToolSearchQuery('a b')).toEqual({
-      kind: 'like',
-      patterns: ['%a%', '%b%'],
-    })
-    expect(prepareToolSearchQuery('AI calendar')).toEqual({
-      kind: 'hybrid',
-      expression: '"calendar"',
-      patterns: ['%AI%'],
-    })
+  it('adds maximal script runs for mixed terms and recognizes Han, kana and Hangul', () => {
+    expect(prepareToolSearchUnits('tb发送')).toEqual([
+      { pattern: '%tb发送%', tier: 4 },
+      { pattern: '%tb%', tier: 2 },
+      { pattern: '%发送%', tier: 2 },
+      { pattern: '%发%', tier: 1 },
+      { pattern: '%送%', tier: 1 },
+    ])
+    expect(prepareToolSearchUnits('日 かな カナ 한글')).toEqual([
+      { pattern: '%日%', tier: 4 },
+      { pattern: '%かな%', tier: 4 },
+      { pattern: '%カナ%', tier: 4 },
+      { pattern: '%한글%', tier: 4 },
+      { pattern: '%か%', tier: 1 },
+      { pattern: '%な%', tier: 1 },
+      { pattern: '%カ%', tier: 1 },
+      { pattern: '%ナ%', tier: 1 },
+      { pattern: '%한%', tier: 1 },
+      { pattern: '%글%', tier: 1 },
+    ])
+  })
+
+  it('deduplicates patterns at their highest tier and escapes LIKE metacharacters', () => {
+    expect(prepareToolSearchUnits('日程 日')).toEqual([
+      { pattern: '%日程%', tier: 4 },
+      { pattern: '%日%', tier: 4 },
+      { pattern: '%程%', tier: 1 },
+    ])
+    expect(prepareToolSearchUnits('%_!')).toEqual([
+      { pattern: '%!%!_!!%', tier: 4 },
+    ])
+  })
+
+  it('validates query boundaries and the whitespace term limit', () => {
+    expect(() => prepareToolSearchUnits('   ')).toThrowError(TBError)
+    expect(() => prepareToolSearchUnits('calendar\0private')).toThrowError(TBError)
+    expect(() => prepareToolSearchUnits('x'.repeat(TOOL_SEARCH_QUERY_MAX + 1)))
+      .toThrowError(TBError)
     const tooManyShortTerms = Array.from(
       { length: TOOL_SEARCH_TERM_LIMIT + 1 },
       () => 'a',
     ).join(' ')
-    expect(() => prepareToolSearchQuery(tooManyShortTerms)).toThrowError(TBError)
+    expect(() => prepareToolSearchUnits(tooManyShortTerms)).toThrowError(TBError)
+  })
+
+  it('keeps every LIKE pattern within the D1 byte and binding budgets', () => {
+    const longAscii = `%_!${'abcdefghijklmnop'.repeat(8)}`
+    const asciiUnits = prepareToolSearchUnits(longAscii)
+    const longCjk = Array.from(
+      { length: 70 },
+      (_, index) => String.fromCodePoint(0x4E00 + index),
+    ).join('')
+    const cjkUnits = prepareToolSearchUnits(longCjk)
+
+    expect(TOOL_SEARCH_UNIT_LIMIT + 2).toBe(100)
+    expect(asciiUnits.some(unit => unit.tier === 2)).toBe(true)
+    expect(cjkUnits).not.toContainEqual({ pattern: `%${longCjk}%`, tier: 4 })
+    expect(cjkUnits).toContainEqual({ pattern: `%${longCjk.slice(0, 2)}%`, tier: 2 })
+    for (const unit of [...asciiUnits, ...cjkUnits]) {
+      expect(new TextEncoder().encode(unit.pattern).length)
+        .toBeLessThanOrEqual(TOOL_SEARCH_LIKE_PATTERN_BYTES_MAX)
+    }
+  })
+
+  it('deterministically truncates derived units from the lowest tier first', () => {
+    const query = Array.from({ length: 32 }, (_, termIndex) => Array.from(
+      { length: 3 },
+      (_, codePointIndex) => String.fromCodePoint(0x4E00 + termIndex * 3 + codePointIndex),
+    ).join('')).join(' ')
+    const first = prepareToolSearchUnits(query)
+    const second = prepareToolSearchUnits(query)
+
+    expect(first).toHaveLength(TOOL_SEARCH_UNIT_LIMIT)
+    expect(first).toEqual(second)
+    expect(first.filter(unit => unit.tier === 4)).toHaveLength(32)
+    expect(first.filter(unit => unit.tier === 2)).toHaveLength(64)
+    expect(first.filter(unit => unit.tier === 1)).toHaveLength(2)
   })
 
   it('encrypts cursors and binds them to query, mode, revision and bounded offset', async () => {
