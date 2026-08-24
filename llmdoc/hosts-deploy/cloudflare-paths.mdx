@@ -48,6 +48,10 @@ Production 由 `.github/workflows/ci.yml` 管理。GitHub Actions 的 `productio
 
 CI 调用 `pnpm provision` 时固定设置 `TB_PROVISION_CONFIG_ONLY=true` 与 `TB_PROVISION_D1_DATABASE_ID`,只把既有账户、路由、R2 名称和同一个 D1 ID 回填进账户中立的 Wrangler 配置,不会创建或查询云资源。R2/D1 resource provisioning 仍是首次部署前的**一次性 bootstrap**(`tb init cloudflare` 或人工 `pnpm provision`),不得塞进每次 deploy。需要绕过变更过滤手动重部署 Cloudflare 时,从 `workflow_dispatch` 选择 `deploy=cloudflare`;它仍须通过同一组 CI 门禁。
 
+CI token 至少需要目标 Account 的 **Workers Scripts Write** 与目标 Zone 的 **Workers Routes Write**。推荐从 Cloudflare 官方 **Edit Cloudflare Workers** token 模板创建,再把 Account Resources 收紧到生产账户、Zone Resources 收紧到实际域名所在 zone;不要给全账户/全 zone。因为 CI 固定使用 `TB_PROVISION_CONFIG_ONLY=true`,日常 deploy 不调用 D1/R2 resource API,无需为了每次发布给 token 追加 D1 或 R2 资源管理权限;一次性 bootstrap 应使用独立的人工作业或凭据。
+
+Wrangler 打出 worker/assets 已 Uploaded 只代表上传阶段完成,随后仍会更新 `/zones/.../workers/routes`;若 token 缺 Workers Routes 权限,该阶段会以错误码 `10000` 失败。部署成功的唯一判据是 deploy 命令最终成功退出,不能凭中间 Uploaded 日志或公网健康检查判定——健康检查可能命中旧版本或已上传但尚未完成路由更新的版本,不能替代 CI job 结果。
+
 ## D1 延迟配置
 
 gateway 已按请求使用 D1 Sessions API，但**代码接入与数据库启用读复制是两步**：
