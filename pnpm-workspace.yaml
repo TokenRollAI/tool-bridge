@@ -42,4 +42,4 @@ minimumReleaseAgeExclude:
   - '@vitest/utils@4.1.10'
   - hono@4.12.28
   - vitest@4.1.10
-  - '@tokenroll/llmdoc@3.0.0'
+  - '@tokenroll/llmdoc@3.1.1'
