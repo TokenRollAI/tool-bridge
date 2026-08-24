@@ -47,6 +47,8 @@ gateway 已按请求使用 D1 Sessions API，但**代码接入与数据库启用
 1. 在 Cloudflare Dashboard 打开 `D1 → <数据库> → Settings → Read Replication`。Wrangler 当前没有对应的启用命令，`provision` 会提醒但不会伪装成已经开启。
 2. State session 用 `first-primary`：每个 HTTP 请求的首个权威查询必须看到最新 SK/权限/节点状态，保留吊销即时生效；同请求后续查询可由满足 bookmark 的副本服务。
 3. Search session 也用 `first-primary`：首次惰性建表后若立即从尚未同步 schema 的副本读取会报错；首查询钉 primary 后，同 session 的后续候选查询仍可由满足 bookmark 的副本服务并保持 read-my-own-writes。
+4. DeviceSession DO **不跨 hibernation 复用 D1 session**：每条独立的状态/搜索操作链按同样约束新建 session，hibernate 后复用会带着失效 bookmark。
+5. `D1StateStore.getMany` 把分块 statement 放进一次 `batch()` 减少网络往返；schema gate 仍按 isolate/DO 实例复用。
 
 `wrangler.jsonc` 默认启用 Smart Placement。所有鉴权请求至少访问一次 State primary，把 Worker 放近主要后端可减少单请求内连续 D1/上游往返的跨区成本。当前 Dashboard 仍是 `assets.run_worker_first=true`，所以 `/ui` 静态资源也会先到 Smart-Placed Worker；这是核心 API 延迟优先的明确取舍。若要同时追求全球静态资源最低 TTFB，应把 UI 拆到 edge-first Assets/Pages Worker，再用同源或明确 CORS 接 API，不能只改 `run_worker_first` 让 SPA 吞掉 API 路由。
 

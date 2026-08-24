@@ -30,8 +30,20 @@ code:
 
 - 唯一形态:`POST /<nodePath>/<command>`,body 即 arguments 本体。命令是节点下的**虚拟叶子**(不写 Registry),对一切可调用 kind 一视同仁;没有 `{tool, arguments}` 信封。
 - 节点本身(无命令段)不可调用,返回 404。命令可寻址:`GET /<nodePath>/<command>/~help`;`~tree` 只列权威注册拓扑,动态命令经 `~help`/`~search` 发现。
+- **`cmds[].path` 是可执行的完整路径,不是 owner 定位或展示提示**。owner 的 `~help` 返回的每条 `cmds[].path` 都已含命令叶子(如 `/device/mac/shell/exec`),消费者必须原样用于 `GET <cmd.path>/~help` 与 `POST <cmd.path>`,除 URL 拼接所需的前导斜杠规范化外不得改写。禁止用 `node.path + cmd.name` 重建命令身份、另传 `tool` 字段,或把 body 包成信封。Dashboard 的 `CmdPanel`/`CliHint`、`tb call` 与 curl 示例共同信任这一个字段,任一处重建都会同时失真。
 - 标识符大小写不敏感、规范化为小写:路径段、命令/工具名、export id、scope pattern 字面段、device 暴露路径。规范化后冲突(上游同时暴露 `Foo`/`foo`)→ `invalid_argument`,不选其一。命令名含 `/`、为空、以 `~` 开头、为 `.`/`..` 一律拒。第三方原始工具名是外部身份,适配器维护 `公开小写名 → 上游原名` 映射。
 - `Page<T>` 为 `{items,cursor?}`,默认 limit 50、最大 200;cursor 只表示继续位置,不是授权凭据。
+
+### 两层 wire 不可互相套用
+
+| 边界 | URL | body | `tool` 的含义 |
+|---|---|---|---|
+| 调用方 → HTBP gateway | `POST <cmds[].path>` | 裸 arguments 对象 | 不存在;命令身份已在路径叶子中 |
+| gateway → plugin/v2 | `POST <manifest.endpoint>`(固定 endpoint) | `{tool, arguments}` | plugin 内部方法名,由平台适配层生成 |
+
+公开请求向 owner 路径发送 `{tool, arguments}` 必须拒绝(当前为 404)。反过来,全仓清理公开旧信封时**不得**删除 plugin/v2 适配层的合法内部信封——按 `{tool,arguments}` 字面量机械搜索替换会同时漏掉公开路径漂移并误删合法内部协议。
+
+wire 变更不能只测"手写正确 URL 能调用"。每个受影响 kind 至少跑通一条发现驱动闭环:请求 owner 的 JSON `~help` 并精确断言目标 `cmds[].path` 等于含叶子的完整路径 → 不重建 URL,直接用返回的 `cmd.path` 加裸 arguments 发起 POST → 用同一个 `cmd.path` 请求命令级 `~help`,确认发现、帮助与执行指向同一命令身份 → 真实发送旧形态 `POST /<owner>` + `{tool,arguments}` 并断言被拒绝。路径和 body 用精确结构断言;模糊子串、从 fixture 手写正确叶子路径,或分别验证 help 与 invoke,都不能证明闭环。审计范围还要覆盖 smoke、验证脚本、示例与运维 helper——这些迁移后仍可编译却继续生成旧 URL,只有消耗外部资源时才会暴露漂移;优先把 URL/body 构造抽成可离线断言的纯函数。
 
 ## 节点
 
@@ -67,6 +79,8 @@ Feedback 附着在具体节点或其工具子路径,根路径不接受。`GET` �
 ## plugin/v2 与 Context
 
 Manifest 描述部署:`id`、`protocolVersion:'plugin/v2'`、`endpoint`、`auth`、`healthPath`、`enabled`;`~describe` 描述 exports(profile、methods/capabilities、auth、凭证字段、挂载配置、可选 probe)。内置流程从编译期 catalog 直接挂载;外部 HTTP(S) endpoint 需注册、探活、校验 descriptor;自定义宿主显式装配 `binding:<name>`。
+
+`endpoint` 是平台到 plugin 的**固定内部传输入口,不是公开 HTBP 命令路径**;调用体保留 `{tool:<plugin 方法>, arguments:<命名参数>}`。公开调用先在 gateway 以完整命令路径和裸 body 完成路由,再由 provider 适配层转换为该内部信封(边界表见[调用](#调用))。
 
 Context 动词全小写且 cmd 名 = provider 方法名:`list`、`get`、`write`、`update`、`delete`、`search`,全部可选,能力由 handler 存在性推导。content 可内联或返回 `$ref`;大对象 URL 须短期有效并受签名/宿主边界保护。skillhub 动词:`list`、`get`(带 `file` 参数取单文件)、`search`、`publish`、`remove`。
 

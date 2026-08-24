@@ -36,6 +36,6 @@ KV 已从 Cloudflare 宿主全面撤出(gateway 与 template 的 wrangler 配置
 Cloudflare 宿主的权威状态从 KV 迁到 D1(`d1StateStore.ts`):
 
 - **单 D1 库、两个 binding**:TB_STATE(权威状态:节点树、SK 哈希、加密 secret、plugin manifest、feedback)与 TB_SEARCH(FTS5 工具搜索索引)指向同一个库。binding 表达用途、库表达存储位置——将来要拆库只动配置不动代码;共库省一个云资源、省 provision 步骤,而分库唯一的实质理由(search rebuild 与认证热路径写竞争)在控制面网关的真实量级下可忽略。
-- **迁移动机**:KV 最终一致带来撤销传播窗口、无 CAS/事务(`putIfAbsent` 无法实现)、list/get 幽灵、逐 key 读放大。迁 D1 后撤销即时生效,撤销语义从"KV 传播不可控"变为"缓存 TTL 上界可控"。
+- **迁移动机**:KV 最终一致带来撤销传播窗口、无 CAS/事务(`putIfAbsent` 无法实现)、list/get 幽灵、逐 key 读放大。迁 D1 后撤销即时生效。
 - **零迁移成本的原因**:pre-launch 窗口——旧预览状态不作为兼容目标,切换即新部署重新引导,不需要 KV→D1 数据迁移工具。正式上线后这个窗口关闭。
-- 认证热路径延迟(D1 回源 vs KV 边缘命中)是唯一实质代价,以 per-isolate 短 TTL 缓存缓解;真实延迟数字属于部署验收证据,不固化进文档。
+- 认证热路径延迟(D1 回源 vs KV 边缘命中)是唯一实质代价。原始缓解候选是 per-isolate 短 TTL(5–15s)内存缓存加负缓存禁用,**没有实施**——它会把吊销即时性重新降为 TTL 上界,等于放弃迁移动机本身。实际改用请求级 `first-primary` Sessions + Smart Placement(见 [cloudflare-paths](./cloudflare-paths.mdx))。若将来重新引入鉴权缓存,必须作为明确的安全语义变化重新决策。真实延迟数字属于部署验收证据,不固化进文档。

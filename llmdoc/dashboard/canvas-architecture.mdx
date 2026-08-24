@@ -23,7 +23,7 @@ Dashboard 是纯 HTTP 客户端,不 import core。wire 类型在 `packages/dashb
 - `lib/session*`:profile、认证、连接上下文。
 - `canvas/`:工作区骨架与画布。`WorkspaceShell`(顶栏 + 库务栏 + Outlet)、`CanvasPage`(index 与 `/nodes/*` 同一组件:左画布 + 右 Inspector 抽屉,选中态由 URL 驱动)、`TreeCanvas`(React Flow 渲染)、`NodeInspector`(选中节点后右侧滑出,原样复用 node 子组件)。`treeGraph.ts` / `useCanvasTree.ts` 是无 DOM 的纯逻辑(工作树→图布局、展开集合、按需懒加载合并),性能边界:root depth=1、本地 lazy=1、remote lazy=3。
 - 节点动作 ownership:`CanvasNode` 只展示并上报语义动作,`TreeCanvas` 编排展开、懒加载与选中,`CanvasPage` 持有挂载/卸载 mutation 及确认交互;可操作性在图 view model 层统一派生。
-- `components/node/`:Inspector 内的节点子组件。`CommandWorkspace`(整宽命令目录,点命令开 Dialog)、`CmdPanel`(单条 cmd 调用面板,accordion 折叠行 / dialog 弹窗两态)、`ResultView`、`CliHint`、反馈与 note。
+- `components/node/`:Inspector 内的节点子组件。`CommandWorkspace`(整宽命令目录,点命令开 Dialog)、`CmdPanel`(单条 cmd 调用面板,accordion 折叠行 / dialog 弹窗两态)、`ResultView`、`CliHint`、反馈与 note。`CmdPanel`、实际 `invoke` 与 `CliHint` 共同信任 owner `~help` 返回的 `cmds[].path`——它已是含命令叶子的完整直连路径,除前导斜杠规范化外必须原样传递:不得用 owner path + `cmd.name` 重建、不得另传 `tool`、不得把 body 包成信封,实际 POST 与面板展示的 `tb call`/curl 必须使用同一 command path 和裸 arguments(契约见 [protocol/htbp-contract](../protocol/htbp-contract.mdx))。
 - `components/add-tool/`:「添加工具」向导,按来源分流;不重复造挂载逻辑,内置集成走 `buildIntegrationCalls`、自定义 kind 走 `buildRegistryMountCalls`。`mountDiagnostics.ts` 把真实 `system/registry write` 的失败按 TBError code 归类,不另起与真实挂载不一致的 dry-run 探测。
 - `pages/system/`:SK、secret、registry、plugin、catalog、federation、annotation。`pages/system/forms/`:将表单状态编译成 wire payload 的纯函数。
 

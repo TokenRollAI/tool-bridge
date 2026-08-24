@@ -12,7 +12,7 @@ code:
 
 # 设备会话:DO 休眠、presence 与 SDK device
 
-Cloudflare 设备连接由 Durable Object(`DeviceSession`)持有。正确性不只包括"能连上",还包括对象被回收后能恢复会话归属并继续转发。Node 宿主的对应实现是 `deviceHub.ts`/`deviceRouter.ts`(多副本 Redis 路由见 [[hosts-deploy/node-docker-and-helm]])。
+Cloudflare 设备连接由 Durable Object(`DeviceSession`)持有。正确性不只包括"能连上",还包括对象被回收后能恢复会话归属并继续转发。Node 宿主的对应实现是 `deviceHub.ts`/`deviceRouter.ts`(多副本 Redis 路由见 [node-docker-and-helm](../hosts-deploy/node-docker-and-helm.mdx))。
 
 ## 不变量
 
@@ -46,4 +46,4 @@ pnpm tsx scripts/verify-device.ts
 - 多运行时包的兼容性按**目标子入口的 JS/d.ts 依赖闭包**判定,不按包级 `engines`/`dependencies` 猜测。`ws` 可以继续被 sdk 安装,但不得进入 device 子入口的模块图;JS 与声明文件两条依赖图要同时隔离。
 - 设备核心以 WebSocket factory、credential provider 和显式 suspend/resume 注入宿主差异;RN 第三参数 headers 只存在于薄 adapter。
 - 幂等只保留进程内同 call id 去重(handler 获得 id 与协作式 AbortSignal)。当前网关重试不会稳定复用同一个 call id,持久化结果缓存会制造 exactly-once 的错误承诺;跨进程 durable execution 要等端到端 idempotency key 与重放协议完整设计。
-- 发布验收不止看 manifest:检查全部条件导出目标、扫描 device 产物的 Node/私有依赖泄漏、从最终 tarball 干净安装并同时 import 两个入口(闸门细节见 [[release/npm-publishing]])。
+- 发布验收不止看 manifest:检查全部条件导出目标、扫描 device 产物的 Node/私有依赖泄漏、从最终 tarball 干净安装并同时 import 两个入口(闸门细节见 [npm-publishing](../release/npm-publishing.mdx))。
