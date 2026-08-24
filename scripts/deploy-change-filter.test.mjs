@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import { deploymentTargets } from './deploy-change-filter.mjs'
 
@@ -41,4 +42,10 @@ test('纯文档与无关客户端变化不会部署', () => {
     cloudflare: false,
     railway: false,
   })
+})
+
+test('Cloudflare workflow 明确调用 gateway deploy script', () => {
+  const workflow = readFileSync(new URL('../.github/workflows/ci.yml', import.meta.url), 'utf8')
+  assert.match(workflow, /pnpm --filter @tool-bridge\/gateway run deploy/)
+  assert.doesNotMatch(workflow, /pnpm --filter @tool-bridge\/gateway deploy(?:\s|$)/)
 })

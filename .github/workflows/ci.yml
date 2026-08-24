@@ -238,4 +238,4 @@ jobs:
         run: pnpm --filter @tool-bridge/dashboard build
 
       - name: Deploy Cloudflare production
-        run: pnpm --filter @tool-bridge/gateway deploy
+        run: pnpm --filter @tool-bridge/gateway run deploy
