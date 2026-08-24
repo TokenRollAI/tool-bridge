@@ -36,7 +36,7 @@ COPY --from=build /repo/packages/dashboard/dist /app/dashboard
 RUN mkdir -p /data && chown node:node /data
 USER node
 # Railway 使用 Dockerfile.railway；契约测试保证两份文件除下一行的平台差异外完全同形。
-VOLUME /data
+# RAILWAY: /data 由平台在运行时挂载；Metal builder 不接受 Dockerfile VOLUME 指令。
 # EXPOSE 仅文档性质、不支持变量;默认端口 8787,平台注入 PORT 时以运行时监听为准。
 EXPOSE 8787
 # healthcheck 读与 config.ts 同一套 env(TB_PORT ?? PORT ?? 8787),端口被平台覆盖时不误报。
