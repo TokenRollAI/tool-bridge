@@ -1,17 +1,41 @@
 ---
-description: Cloudflare 宿主权威状态存储决策摘要(ADR-001,已实施):单 D1 库、TB_STATE/TB_SEARCH 双 binding、撤销语义与 pre-launch 零迁移窗口。
+description: 各宿主部署形态总览(修正后:Cloudflare 全面 D1、无 KV)与 ADR-001 决策摘要:单 D1 库、TB_STATE/TB_SEARCH 双 binding、撤销语义与 pre-launch 零迁移窗口。
 kind: reference
 code:
   paths:
-    - packages/gateway/src/d1StateStore.ts
+    - packages/gateway/wrangler.jsonc
     - template/wrangler.jsonc
+    - packages/gateway/src/d1StateStore.ts
+    - packages/server/src/sqliteStateStore.ts
+    - packages/server/src/pgStateStore.ts
 ---
 
-# 状态存储决策(ADR-001 摘要)
+# 部署形态与状态存储决策
 
-Cloudflare 宿主的权威状态(SK 哈希、节点树、加密 secret、plugin manifest、feedback)已从 KV 全量迁移到 D1，由 `d1StateStore.ts` 实现。决策已 accepted 并实施完毕，此处只留稳定摘要。
+## 部署形态总览
 
-- **一个 D1 库、两个 binding**：`TB_STATE`(权威状态)与 `TB_SEARCH`(FTS5 搜索索引)指向同一个库。理由：binding 表达用途、库表达存储位置——将来要拆库只动配置不动代码，而共库省一个云资源、省 provision 步骤，用户心智就是"一个库"。
-- **撤销语义**：从"KV 最终一致传播不可控"变为"缓存 TTL 上界可控"。吊销 SK、删除节点在缓存 TTL 外的下一请求即生效；安全下界按缓存 TTL/最终一致的一般表达陈述，不再依赖 KV 传播假设。
-- **原子原语**：`StateStore.putIfAbsent` 在 D1/SQLite/PG 三宿主均原子实现，三宿主 StateStore 收敛到 SQL 语义，共享黑盒契约测试对拍。
-- **零迁移成本的原因**：决策落在 pre-launch 窗口，无线上用户、旧预览状态不作为兼容目标，因此不需要任何 KV→D1 数据迁移工具；正式上线后该窗口关闭。
+| 形态 | 入口 | 适配器 |
+|---|---|---|
+| Cloudflare Deploy Button 模板 | `template/src/index.ts` | D1(TB_STATE/TB_SEARCH)、R2、Durable Objects、Static Assets;含 D1 Search |
+| Cloudflare Workers(源码部署) | `packages/gateway/src/deployEntry.ts` | D1(TB_STATE/TB_SEARCH)、R2、Durable Objects、Static Assets |
+| Node / Docker | `packages/server` | SQLite 或 PostgreSQL、文件或 S3 对象存储、ws、静态 Dashboard |
+| 嵌入式 SDK | `packages/sdk` | Node 22+;调用方注入 StateStore、ObjectStore、SecretStore 与本地 provider;当前不提供 SearchIndex 注入 |
+| 应用层库 | `packages/app` | 不绑定具体运行时,由宿主注入依赖 |
+
+KV 已从 Cloudflare 宿主全面撤出(gateway 与 template 的 wrangler 配置均无 `kv_namespaces`)。Deploy Button 模板消费 `@tool-bridge/gateway/full`,与源码部署是同一个产品形态,不是缩水模板。宿主共享 app/core 的行为,但存储一致性、设备会话持久性、Search 和静态资源托管存在明确适配差异。
+
+## 跨宿主状态存储事实
+
+- 三宿主 StateStore(D1/SQLite/PG)收敛到同一 SQL 语义,共享契约测试对拍。
+- StateStore 契约含可选原子原语 `putIfAbsent`,三宿主均原子实现;bootstrap Admin SK 铸造以 hash key winner-takes-all 去重,多副本并发冷启动不产生重复 sk 索引。
+- Node 宿主 SQLite/PG 是双后端,切换不迁移数据(细节见 [node-docker-and-helm](./node-docker-and-helm.mdx))。
+- SDK 内嵌与 Node server 使用同一引导下界:首次启动没有显式 Admin SK 就拒绝继续。设备通道由宿主装配的 `DeviceChannel` 提供,不存在可配置但未实现的公共 `DeviceTransport`。
+
+## ADR-001 决策摘要(accepted,已实施)
+
+Cloudflare 宿主的权威状态从 KV 迁到 D1(`d1StateStore.ts`):
+
+- **单 D1 库、两个 binding**:TB_STATE(权威状态:节点树、SK 哈希、加密 secret、plugin manifest、feedback)与 TB_SEARCH(FTS5 工具搜索索引)指向同一个库。binding 表达用途、库表达存储位置——将来要拆库只动配置不动代码;共库省一个云资源、省 provision 步骤,而分库唯一的实质理由(search rebuild 与认证热路径写竞争)在控制面网关的真实量级下可忽略。
+- **迁移动机**:KV 最终一致带来撤销传播窗口、无 CAS/事务(`putIfAbsent` 无法实现)、list/get 幽灵、逐 key 读放大。迁 D1 后撤销即时生效,撤销语义从"KV 传播不可控"变为"缓存 TTL 上界可控"。
+- **零迁移成本的原因**:pre-launch 窗口——旧预览状态不作为兼容目标,切换即新部署重新引导,不需要 KV→D1 数据迁移工具。正式上线后这个窗口关闭。
+- 认证热路径延迟(D1 回源 vs KV 边缘命中)是唯一实质代价,以 per-isolate 短 TTL 缓存缓解;真实延迟数字属于部署验收证据,不固化进文档。

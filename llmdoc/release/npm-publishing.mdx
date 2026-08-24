@@ -1,51 +1,55 @@
 ---
-description: npm 版本 bump 判断、发布顺序、打包与 tarball 验证闸门:七个公开包、pack-and-verify 脚本、registry 复验与产物漂移防护。
+description: npm 发布与打包闸门:七公开包与 artifact ownership bump 判断、0.x 版本规则、pack-and-verify 同一 tarball 原则、协议扫描与 registry 复验、tag/workflow 纪律。
 kind: guide
 code:
   paths:
     - scripts/pack-and-verify-package.mjs
     - scripts/check-version-bumps.mjs
+    - scripts/release-plan.mjs
     - .github/workflows/**
     - pnpm-workspace.yaml
 ---
 
 # npm 版本与发布
 
-公开包共有七个：`app`、`cli`、`dashboard`、`gateway`、`plugin-sdk`、`sdk`、`server`。`core` 与 `plugins` 是 private，其代码由公开产物消费或打包。
+公开包共有七个:`app`、`cli`、`dashboard`、`gateway`、`plugin-sdk`、`sdk`、`server`。`core` 与 `plugins` 是 private,其代码由公开产物消费或打包。
 
 ## 是否 bump
 
-按 public artifact ownership 判断：只提升消费者能感知到契约、依赖约束或发布内容变化的公开包。private 源码变化不会机械地沿依赖图提升所有包；但被 bundle 后改变公开运行时行为，仍属于对应公开包的变化。
+按 public artifact ownership 判断:只提升消费者能感知到契约、依赖约束或发布内容变化的公开包。private 源码变化不会机械地沿依赖图提升所有包;但被 bundle 后改变公开运行时行为,仍属于对应公开包的变化。
 
-仓库处于 `0.x`：破坏性变化和新增能力升 minor，纯修复升 patch。隐藏 flag 删除、既有配置从接受改为拒绝、默认安全行为收紧，都属于消费者可感知变化。
+仓库处于 `0.x`:破坏性变化和新增能力升 minor,纯修复升 patch。隐藏 flag 删除、既有配置从接受改为拒绝、默认安全行为收紧,都属于消费者可感知变化。
 
 ## 发布顺序
 
-1. 修改 `packages/<pkg>/package.json` 的 version，并同步 lockfile。
-2. 重建该包，直接检查生成入口确实包含新版本；已有 `dist` 不是证据。
-3. 执行 `pnpm verify` 和 `pnpm turbo run build`（公开包改动必须补全仓 build，`verify` 不含 build）。
+1. 修改 `packages/<pkg>/package.json` 的 version,并同步 lockfile。
+2. 重建该包,直接检查生成入口确实包含新版本;已有 `dist` 不是证据。
+3. 执行 `pnpm verify` 和 `pnpm turbo run build`(改公开包/打包配置/依赖时全仓 build 必跑,并检查产物入口)。
 4. 用 `scripts/pack-and-verify-package.mjs` 生成并验收最终将发布的确切 tarball。
-5. PR 合入 `main` 后才创建 `<pkg>-v<version>` tag。
-6. 一次只推一个 tag，等待对应 workflow；不要批量 push tags。
-7. 用 `npm view <pkg> version` 确认 registry 元数据后，再下载 registry 中的精确版本 tarball，重复干净安装与烟测。
+5. PR 合入 `main` 后才创建 `<pkg>-v<version>` tag(前缀与目录同名,包括 `plugin-sdk-`)。
+6. 一次只推一个 tag,等待对应 workflow;不要批量 push tags。
+7. 用 `npm view` 确认 registry 元数据后,再下载 registry 中的精确版本 tarball,重复干净安装与烟测。
 
-tag 前缀与目录同名，包括 `plugin-sdk-`。Dashboard 若嵌入 server/gateway 产物，应先发布它依赖的包，再发布承载最终产物的包。
+Dashboard 若嵌入 server/gateway 产物,应先发布它依赖的包,再发布承载最终产物的包。
 
 ## 三种独立证据
 
-registry 元数据存在、tarball 可被 npm 安装、安装后的 bin 可执行,是**三道互不替代的独立闸门**——只满足第一项不代表版本可用（历史上 `catalog:` 协议残留导致 latest 版本对 npm 消费者不可安装）。发布后仍须从 registry tarball 复验，`npm view` 不能代替。
+来自一次真实故障(CLI 0.17.0 发布后 `npm install -g` 报 `EUNSUPPORTEDPROTOCOL`,tarball 依赖里残留 `catalog:` 协议)的教训:
+
+- **registry 元数据存在 ≠ tarball 可被 npm 安装 ≠ 安装后的 bin 可执行**,三者是独立证据,任何一项都不能替代另一项。`npm view <pkg> version` 只证明第一项。
+- 本地 tarball 验收与 registry 实际产物验收是两道独立闸门;发布后仍须从 registry tarball 复验协议、干净安装与 bin 烟测。
 
 ## 打包检查
 
-- 所有公开包统一用 `node scripts/pack-and-verify-package.mjs packages/<pkg> --output-dir <dir>` 打包和验证；CLI 额外传 `--bin tb`。
-- 默认模式通过 `pnpm pack` 生成确切 tarball、扫描 packed manifest，并在仓库外创建干净 npm 消费者安装；CLI 还执行 `tb --version` 与 `tb --help`。
+- 所有公开包统一用 `node scripts/pack-and-verify-package.mjs packages/<pkg> --output-dir <dir>` 打包和验证;CLI 额外传 `--bin tb`。
+- 默认模式通过 `pnpm pack` 生成确切 tarball、扫描 packed manifest,并在仓库外创建干净 npm 消费者安装;CLI 还执行 `tb --version` 与 `tb --help`(可安装不足以证明 bin 契约正常)。
 - `files`、exports、bin、types 与 `publishConfig` 必须指向构建后真实存在的文件。
-- 多入口包必须递归检查 `exports` 的全部条件目标（包括 `types`、`import`、`react-native`），不能只验证 `main`。`@tool-bridge/sdk/device` 还必须扫描最终 tarball 中的 JS/d.ts：不得引用 `node:*`、Node `ws`、Hono、`process.env`、private workspace 包或 Node-only 声明类型；干净消费者同时 import 根入口与 device 子入口。
-- 解包最终 packed tarball，检查其中 `package.json` 的 `dependencies`、`optionalDependencies` 与 `peerDependencies`；不得残留 `catalog:`、`workspace:` 或其他 npm 不支持的工作区协议。
-- CI 在全仓 build 后复用同一脚本并传 `--skip-install`，只保留 packed manifest 协议闸门；合入前的 workspace 依赖版本可能尚未发布到 registry，不能把这类不可安装误判为 tarball 协议错误。publish workflow 不得跳过干净安装。
-- publish workflow 必须捕获脚本返回的 tarball 路径，并将**同一个文件**交给 `npm publish`；校验后重新打包会留下产物漂移窗口。
-- 声明文件可能跨包引用私有源码，不能只依赖 monorepo typecheck。
-- 版本字符串若编译进产物，必须在 bump 后重建并搜索实际入口。
-- 发布失败时修复后重建、重验；不要复用已经推送且不可回收的 npm 版本。
+- 多入口包必须递归检查 `exports` 的全部条件目标(包括 `types`、`import`、`react-native`),不能只验证 `main`。`@tool-bridge/sdk/device` 还必须扫描最终 tarball 中的 JS/d.ts:不得引用 `node:*`、Node `ws`、Hono、`process.env`、private workspace 包或 Node-only 声明类型;干净消费者同时 import 根入口与 device 子入口(边界背景见 [[device/do-websocket-sessions]])。
+- 解包最终 packed tarball,检查其中 `package.json` 的 `dependencies`、`optionalDependencies` 与 `peerDependencies`;不得残留 `catalog:`、`workspace:` 或其他 npm 不支持的工作区协议。只检查仓库源码 manifest 会漏掉未改写的占位符。
+- CI 在全仓 build 后复用同一脚本并传 `--skip-install`,只保留 packed manifest 协议闸门:合入前的 workspace 依赖版本可能尚未发布到 registry,不能把这类不可安装误判为 tarball 协议错误。publish workflow 不得跳过干净安装。
+- **publish workflow 必须捕获脚本返回的 tarball 路径,并把同一个文件交给 `npm publish`**;校验后重新打包会留下产物漂移窗口——"校验的"和"发布的"必须是同一个 tarball。
+- 声明文件可能跨包引用私有源码,不能只依赖 monorepo typecheck。
+- 版本字符串若编译进产物,必须在 bump 后重建并搜索实际入口。
+- 发布失败时修复后重建、重验;不要复用已经推送且不可回收的 npm 版本。
 
-不要在 llmdoc 记录某次发布的 latest、digest 或传播耗时；这些属于 registry、tag 与 CI 证据。
+不要在 llmdoc 记录某次发布的 latest、digest 或传播耗时;这些属于 registry、tag 与 CI 证据。

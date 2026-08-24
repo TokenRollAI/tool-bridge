@@ -1,39 +1,32 @@
 ---
-description: 设备 WebSocket 会话的持久性与在线状态:Cloudflare Durable Object 休眠、alarm 心跳巡检、presence 三态降级、Node 宿主 sweepOrphans,以及真实 eviction 验证方式。
+description: 设备会话的服务端与客户端边界:DO WebSocket 休眠下的 alarm 心跳巡检、presence 三态只读降级、孤儿清扫,以及 SDK device 子入口的运行时中立约束。
 kind: guide
 code:
   paths:
     - packages/core/src/device/**
     - packages/gateway/src/deviceSession.ts
     - packages/server/src/deviceHub.ts
-    - packages/server/src/redisDeviceRouter.ts
-    - scripts/verify-device.ts
+    - packages/server/src/deviceRouter.ts
+    - packages/sdk/src/device/**
 ---
 
-# 设备 WebSocket 会话与 DO 休眠
+# 设备会话:DO 休眠、presence 与 SDK device
 
-Cloudflare 设备连接由 Durable Object 持有。正确性不只包括"能连上"，还包括对象被回收后能恢复会话归属并继续转发。
+Cloudflare 设备连接由 Durable Object(`DeviceSession`)持有。正确性不只包括"能连上",还包括对象被回收后能恢复会话归属并继续转发。Node 宿主的对应实现是 `deviceHub.ts`/`deviceRouter.ts`(多副本 Redis 路由见 [[hosts-deploy/node-docker-and-helm]])。
 
 ## 不变量
 
-- 设备帧使用 core 的稳定 codec；ping/pong 字面量由共享常量产生。
-- DO 使用 WebSocket auto-response 处理 heartbeat，避免仅为 pong 唤醒对象。
-- 当前活动连接标识写入 DO storage；对象恢复时从 storage 重建必要状态，不依赖旧内存。
-- registry（D1 state store）中的 online 位不是租约；真正发送以 DO 内活动 socket 为准。但发现面不再只凭这个位:
-  节点带 `lastSeenAt`(hello 与 alarm 心跳巡检写入),`~tree`/`~help`/`device ls` 投影时经
-  `derivePresence` 结合 TTL 把过期的 online 降级为 `stale`——避免树谎报 online 而调用返回 offline。
-- DO 用 auto-response 应答 ping/pong **不唤醒对象**,故心跳无法在收到 pong 时回写 state store。改由周期 alarm
-  巡检:有活连接时读 `getWebSocketAutoResponseTimestamp(ws)` 回写 `lastSeenAt` 并重排 alarm;无活
-  连接且已断线时才执行 reclaim。同一个 alarm 多用途,靠 `meta.activeConnId` 是否存在分流。
-- 投影是只读降级:读路径按 `lastSeenAt` 把 online 显示为 stale,但**绝不回写** `setOnline(false)`
-  (权威状态只由连接生命周期写)。
-- generation guard 防止旧连接污染新连接:close/error、替换连接和过期状态都必须清理,且不得让旧连接覆盖新连接。
-- Node 宿主启动 `sweepOrphans` 的崩溃态分支(meta 无 disconnectedAt 却无活连接)也要同步把 registry online
-  翻 false,不能只排 reclaim。多副本下"本副本没有该连接"不等于"设备离线",回收前必须查全局路由,查不通时保守跳过。
+- 设备帧使用 core 的稳定 codec(`packages/core/src/device/frames.ts`);ping/pong 字面量由共享常量产生。
+- DO 使用 WebSocket auto-response 处理 heartbeat,避免仅为 pong 唤醒对象。
+- 当前活动连接标识写入 DO storage;对象恢复时从 storage 重建必要状态,不依赖旧内存。
+- D1 state store(registry)里的 online 位不是活连接租约;真正发送以 DO 内活动 socket 为准。发现面不再只凭这个位:节点带 `lastSeenAt`(hello 与 alarm 心跳巡检写入),`~tree`/`~help`/`device ls` 投影时经 `derivePresence` 结合 TTL 把过期的 online 降级为 `stale`——避免树谎报 online 而调用返回 offline。
+- auto-response 应答 ping/pong **不唤醒对象**,故心跳无法在收到 pong 时写 state store。改由周期 alarm 巡检:有活连接时读 `getWebSocketAutoResponseTimestamp(ws)` 回写 `lastSeenAt` 并重排 alarm;无活连接且已断线时才执行 reclaim。同一个 alarm 多用途,靠 `meta.activeConnId` 是否存在分流。
+- 投影是只读降级:读路径按 `lastSeenAt` 把 online 显示为 stale,但**绝不回写** `setOnline(false)`(权威状态只由连接生命周期写)。
+- close/error、替换连接和过期状态都必须清理,且不得让旧连接覆盖新连接(generation guard)。Node 宿主启动 `sweepOrphans` 的崩溃态分支(meta 无 disconnectedAt 却无活连接)也要同步把 registry online 翻 false,不能只排 reclaim。
 
 ## 验证
 
-普通 Miniflare 测试能覆盖帧、路由和状态转换，但不能证明真实边缘发生过 eviction。真实环境验证使用：
+普通 Miniflare 测试能覆盖帧、路由和状态转换,但不能证明真实边缘发生过 eviction。真实环境验证使用:
 
 ```bash
 TB_BASE_URL=https://example.invalid \
@@ -42,6 +35,15 @@ TB_VERIFY_HIBERNATION=1 \
 pnpm tsx scripts/verify-device.ts
 ```
 
-脚本会跨越足够长的空闲窗口后再次调用。该验证消耗真实部署，只在明确授权后执行；一次成功的时间数字不是长期 SLA，也不应固化进文档。
+脚本会跨越足够长的空闲窗口后再次调用。该验证消耗真实部署,只在明确授权后执行;一次成功的时间数字不是长期 SLA,也不应固化进文档。
 
-若失败，分别检查设备端 heartbeat、DO storage 的连接归属、D1 state store 中的 presence/路由状态和调用端超时，不要用增加重试掩盖状态恢复错误。
+若失败,分别检查设备端 heartbeat、DO storage 的连接归属、state store 的 presence 记录和调用端超时,不要用增加重试掩盖状态恢复错误。
+
+## SDK device 运行时边界
+
+设备客户端的 npm 消费面是双入口:`@tool-bridge/sdk` 根入口面向 Node 22+,`@tool-bridge/sdk/device` 是独立 neutral 构建,供 React Native/Hermes 等宿主使用。约束与经验:
+
+- 多运行时包的兼容性按**目标子入口的 JS/d.ts 依赖闭包**判定,不按包级 `engines`/`dependencies` 猜测。`ws` 可以继续被 sdk 安装,但不得进入 device 子入口的模块图;JS 与声明文件两条依赖图要同时隔离。
+- 设备核心以 WebSocket factory、credential provider 和显式 suspend/resume 注入宿主差异;RN 第三参数 headers 只存在于薄 adapter。
+- 幂等只保留进程内同 call id 去重(handler 获得 id 与协作式 AbortSignal)。当前网关重试不会稳定复用同一个 call id,持久化结果缓存会制造 exactly-once 的错误承诺;跨进程 durable execution 要等端到端 idempotency key 与重放协议完整设计。
+- 发布验收不止看 manifest:检查全部条件导出目标、扫描 device 产物的 Node/私有依赖泄漏、从最终 tarball 干净安装并同时 import 两个入口(闸门细节见 [[release/npm-publishing]])。
