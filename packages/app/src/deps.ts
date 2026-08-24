@@ -118,6 +118,8 @@ export interface TbAppDeps {
   state: StateStore
   /** mcp/tool 工具缓存 TTL 秒(缺省 300)。 */
   toolCacheTtlSec?: number
+  /** create_upload 写入 grant 有效期秒；缺省 min(refTtlSec, 900)。 */
+  uploadGrantTtlSec?: number
   /** healthz 与 system/status 回显的版本号(单一真源:宿主 package.json)。 */
   version: string
 }

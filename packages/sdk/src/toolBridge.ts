@@ -188,6 +188,9 @@ export function createToolBridge(config: ToolBridgeConfig): ToolBridge {
   }
   const encryptionKey = config.encryptionKey ?? process.env.TB_SECRET_ENCRYPTION_KEY
   if (encryptionKey !== undefined) deps.encryptionKey = encryptionKey
+  if (config.uploadGrantTtlSec !== undefined) {
+    deps.uploadGrantTtlSec = config.uploadGrantTtlSec
+  }
   const app = createTbApp(deps)
 
   /** 缺省 expose:本实例注册的节点经 hello 帧 nodes+cmds 上报。 */

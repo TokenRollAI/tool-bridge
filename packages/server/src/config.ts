@@ -6,7 +6,11 @@
  */
 
 import type { PluginBindings } from '@tool-bridge/app'
-import { type BuiltinCatalog, normalizeCanonicalOrigin } from '@tool-bridge/core'
+import {
+  type BuiltinCatalog,
+  normalizeCanonicalOrigin,
+  PRESIGN_TTL_SEC_MAX,
+} from '@tool-bridge/core'
 
 const DEFAULT_PORT = 8787
 const DEFAULT_MAX_HOPS = 4
@@ -92,12 +96,20 @@ export interface ServerConfig {
   toolCacheTtlSec?: number
   /** Dashboard 静态资源目录覆盖(缺省经 @tool-bridge/dashboard 包解析)。 */
   uiDir?: string
+  /** create_upload 写入 grant 有效期秒；缺省 min(refTtlSec, 900)。 */
+  uploadGrantTtlSec?: number
 }
 
 /** 正整数 env 解析;非法/缺省 → undefined。 */
 function positiveIntEnv(value: string | undefined): number | undefined {
   const n = Number(value)
   return Number.isFinite(n) && n > 0 ? Math.floor(n) : undefined
+}
+
+/** SigV4 presign TTL 同时钳制到协议上限。 */
+function presignTtlEnv(value: string | undefined): number | undefined {
+  const ttl = positiveIntEnv(value)
+  return ttl === undefined ? undefined : Math.min(ttl, PRESIGN_TTL_SEC_MAX)
 }
 
 /** 端口解析:0 合法(系统分配临时端口,测试用);非法/缺省 → undefined。 */
@@ -188,7 +200,9 @@ export function configFromEnv(env: NodeJS.ProcessEnv = process.env): ServerConfi
   if (ttl !== undefined) config.toolCacheTtlSec = ttl
   const refThreshold = positiveIntEnv(env.TB_REF_THRESHOLD_BYTES)
   if (refThreshold !== undefined) config.refThresholdBytes = refThreshold
-  const refTtl = positiveIntEnv(env.TB_REF_TTL_SEC)
+  const refTtl = presignTtlEnv(env.TB_REF_TTL_SEC)
   if (refTtl !== undefined) config.refTtlSec = refTtl
+  const uploadGrantTtl = presignTtlEnv(env.TB_UPLOAD_GRANT_TTL_SEC)
+  if (uploadGrantTtl !== undefined) config.uploadGrantTtlSec = uploadGrantTtl
   return config
 }

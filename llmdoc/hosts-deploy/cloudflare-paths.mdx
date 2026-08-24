@@ -82,6 +82,12 @@ gateway 已按请求使用 D1 Sessions API，但**代码接入与数据库启用
 - 上游默认只允许 HTTPS;`TB_ALLOW_INSECURE_HTTP=true` 仅供本地验证。
 - 自定义域名、canonical origin 与 OAuth redirect 必须一致;未配置域名时使用 workers.dev/preview 入口。
 
+## R2 直传与 CORS
+
+R2 binding 自身不提供 presign。要让 `$ref` 走 presigned GET 并让对象 context 声明 `create_upload`，必须同时配置 `TB_R2_S3_ENDPOINT`、`TB_R2_BUCKET`，并把最小权限 R2 API 凭证存入 SecretStore 保留名 `r2-presign`（或 Wrangler secrets `TB_R2_ACCESS_KEY_ID` / `TB_R2_SECRET_ACCESS_KEY`）。缺 signer 时下载退化到 `/~ref` 中转，直传能力不宣告。
+
+写 grant 使用独立的 `TB_UPLOAD_GRANT_TTL_SEC`，缺省 `min(TB_REF_TTL_SEC, 900)`，最大 604800 秒。Dashboard 直传还要求 R2 bucket CORS 精确允许 Dashboard origin、`PUT`、`Content-Type` 与 `If-None-Match`，需要读取 etag 时 expose `ETag`；设备与 CLI 不受浏览器 CORS 限制。
+
 ## 验收层次
 
 1. 本地:`pnpm verify`,以及发布/打包相关改动的全仓 build。

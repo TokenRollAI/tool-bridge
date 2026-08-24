@@ -26,6 +26,7 @@ import {
   type InvokeResult,
   searchTools,
   startOAuthAuthorize,
+  uploadContextObject,
 } from './api'
 import {
   historyScope,
@@ -368,6 +369,19 @@ export function useCtxEntry(nodePath: string, entryPath: string | null) {
       return r.json as ContextEntry
     },
     enabled: entryPath !== null,
+  })
+}
+
+/** 浏览器文件直传：grant 响应与临时 URL 最多在 observer 生命周期内短暂存在。 */
+export function useCtxUpload(nodePath: string) {
+  const conn = useConn()
+  return useMutation({
+    gcTime: 1_000,
+    mutationFn: ({ entryPath, file, overwrite = false }: {
+      entryPath: string
+      file: File
+      overwrite?: boolean
+    }) => uploadContextObject(conn, nodePath, entryPath, file, overwrite),
   })
 }
 

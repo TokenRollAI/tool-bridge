@@ -21,6 +21,12 @@ export type {
   ReactNativeWebSocketConstructor,
 } from './connection'
 
+export { uploadContextObject } from './upload'
+export type {
+  UploadContextObjectOptions,
+  UploadContextObjectResult,
+} from './upload'
+
 export {
   decodeDeviceFrame,
   deviceErrorFrame,

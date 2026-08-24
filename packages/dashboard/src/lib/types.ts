@@ -298,6 +298,15 @@ export interface ContextEntry extends ContextEntryMeta {
   content: string | unknown
 }
 
+export interface ContextUploadGrant {
+  expiresAt: string
+  headers: Record<string, string>
+  method: 'PUT'
+  uri: string
+  /** 短期 bearer secret；只交给直传请求，不写入持久状态或日志。 */
+  url: string
+}
+
 /** skillhub 目录条目摘要(list/search 返回的 SkillSummary)。 */
 export interface SkillSummary {
   description: string

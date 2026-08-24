@@ -22,7 +22,7 @@ import {
   TBError,
 } from '@tool-bridge/core'
 import { AwsClient } from 'aws4fetch'
-import { encodeObjectKey, presignS3Url } from './s3Sign'
+import { encodeObjectKey, presignS3Put, presignS3Url } from './s3Sign'
 
 /** s3 provider 的构造参数(providerConfig + authRef 解析出的凭证)。 */
 export interface S3StoreConfig {
@@ -229,6 +229,10 @@ export function createS3ObjectStore(
 
     presign(key, ttlSec) {
       return presignS3Url(client, urlFor(key), ttlSec)
+    },
+
+    presignPut(key, ttlSec, putOpts) {
+      return presignS3Put(client, urlFor(key), ttlSec, putOpts)
     },
   }
 }

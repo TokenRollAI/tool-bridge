@@ -350,6 +350,58 @@ describe('MCP consumer endpoint', () => {
     }
   })
 
+  it('没有 write scope 的 MCP tools/list 不探测直传 signer', async () => {
+    const objectsFactory = vi.fn(async () => {
+      throw new Error('must not resolve object signer')
+    })
+    const isolated = await createTestApp({ objectsFactory })
+    const register = await isolated.request('https://tb.test/mcp-read/context/~register', {
+      method: 'POST',
+      headers: {
+        ...admin().headers,
+        'accept': 'application/json',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        path: 'mcp-read/context',
+        kind: 'context',
+        description: 'read-only caller view',
+        config: { kind: 'context', provider: 'r2' },
+      }),
+    })
+    expect(register.status).toBe(200)
+    const skResponse = await isolated.request('https://tb.test/system/sk/write', {
+      method: 'POST',
+      headers: {
+        ...admin().headers,
+        'accept': 'application/json',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        owner: 'agent:mcp-read',
+        scopes: [{ pattern: 'mcp-read/context', actions: ['read'] }],
+      }),
+    })
+    expect(skResponse.status).toBe(200)
+    const sk = ((await skResponse.json()) as { secret: string }).secret
+    const client = await connectTestMcpClient(
+      'https://tb.test/~mcp',
+      sk,
+      (input, init) => isolated.request(input, init),
+    )
+    try {
+      const listed = await client.listTools()
+      const commands = listed.tools
+        .filter(tool => tool._meta?.['io.tool-bridge/path'] === 'mcp-read/context')
+        .map(tool => tool._meta?.['io.tool-bridge/command'])
+      expect(commands).toContain('list')
+      expect(commands).not.toContain('create_upload')
+      expect(objectsFactory).not.toHaveBeenCalled()
+    } finally {
+      await client.close()
+    }
+  })
+
   it('reconnects with a narrow SK to shrink the exact tool set and reject stale names', async () => {
     await mountHttp('mcp-round16/allowed')
     await mountHttp('mcp-round16/admin-only')

@@ -22,6 +22,7 @@ CLI 是公共控制面,不是 API 的宽松包装。修改命令时同时检查�
 - 未知参数、缺值和多余位置参数必须失败,退出码与 stderr 保持可脚本化。
 - 互斥、依赖、默认值和枚举在解析层显式表达;不要把非法组合静默改写。
 - 密钥只从专用 secret 流程进入,不保留隐藏的旧 flag,也不把明文带入普通资源命令。
+- `ctx put` 面向可内联文本/JSON（支持 stdin 与 metadata），`ctx upload` 面向二进制直传；后者缺省条件创建，同名 entry 以 `conflict` 失败，只有显式 `--force` 才请求可覆盖 grant。两条命令的帮助必须互指，避免把直传误解为 `put` 的别名。
 - 删除资源只做命令名承诺的动作,并校验目标 kind:`integration rm` 只卸 tool/context 节点,打到 device 等其它 kind 即拒(走 `deleteNode(target, path, ['tool','context'])`)。集成卸载与密钥删除是两个显式操作。
 
 ## 确认门不是护栏

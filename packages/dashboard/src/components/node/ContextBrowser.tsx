@@ -12,6 +12,7 @@ import {
   RefreshCw,
   Search,
   Trash2,
+  Upload,
 } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import Markdown from 'react-markdown'
@@ -34,7 +35,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { useCtxEntries, useCtxEntry, useInvalidate, useInvoke } from '@/lib/queries'
+import { useCtxEntries, useCtxEntry, useCtxUpload, useInvalidate, useInvoke } from '@/lib/queries'
 import { ConfirmAction } from '@/components/ConfirmAction'
 import { CopyButton } from '@/components/CopyButton'
 import { EmptyState } from '@/components/EmptyState'
@@ -44,6 +45,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { encodeTreePath } from '@/lib/path'
+import { ApiError } from '@/lib/api'
 import { cn } from '@/lib/utils'
 
 /** node://<ns>/<entry> → namespace 内相对条目路径。 */
@@ -612,6 +614,7 @@ function EntryEditDialog({
  */
 export function ContextBrowser({ path, cmds }: { cmds: HelpCmd[], path: string }) {
   const canWrite = cmds.some(c => c.name === 'write')
+  const canUpload = cmds.some(c => c.name === 'create_upload')
   const canDelete = cmds.some(c => c.name === 'delete')
   const canSearch = cmds.some(c => c.name === 'search')
 
@@ -627,10 +630,16 @@ export function ContextBrowser({ path, cmds }: { cmds: HelpCmd[], path: string }
 
   const entries = useCtxEntries(path, searchActive ? '' : prefix, effectiveQuery, searchMode)
   const invoke = useInvoke()
+  const upload = useCtxUpload(path)
   const invalidate = useInvalidate()
 
   const [selected, setSelected] = useState<string | null>(null)
   const [editing, setEditing] = useState<{ entry?: ContextEntry, entryPath: string } | null>(null)
+  const [uploadOpen, setUploadOpen] = useState(false)
+  const [uploadFile, setUploadFile] = useState<File | null>(null)
+  const [uploadPath, setUploadPath] = useState('')
+  const [uploadError, setUploadError] = useState<string | null>(null)
+  const [overwriteConfirmOpen, setOverwriteConfirmOpen] = useState(false)
 
   const refresh = () => invalidate()
 
@@ -649,6 +658,46 @@ export function ContextBrowser({ path, cmds }: { cmds: HelpCmd[], path: string }
   const items = entries.data?.pages.flatMap(p => p.items) ?? []
   const openEntry = (entryPath: string) => {
     setSelected(entryPath)
+  }
+
+  const chooseUploadFile = (file: File | null) => {
+    setUploadFile(file)
+    setUploadError(null)
+    if (file !== null) {
+      const base = searchRequested || searchActive
+        ? ''
+        : prefix.trim().replace(/^\/+|\/+$/g, '')
+      setUploadPath(base === '' ? file.name : `${base}/${file.name}`)
+    }
+  }
+
+  const submitUpload = async (overwrite = false, propagateError = false) => {
+    if (uploadFile === null) {
+      setUploadError('请选择文件')
+      return
+    }
+    const entryPath = uploadPath.trim().replace(/^\/+/, '')
+    if (entryPath === '') {
+      setUploadError('条目路径必填')
+      return
+    }
+    setUploadError(null)
+    try {
+      const result = await upload.mutateAsync({ entryPath, file: uploadFile, overwrite })
+      toast.success(`已上传 ${result.uri}`)
+      setOverwriteConfirmOpen(false)
+      setUploadOpen(false)
+      setUploadFile(null)
+      setUploadPath('')
+      await refresh()
+    } catch (error) {
+      if (!overwrite && error instanceof ApiError && error.code === 'conflict') {
+        setOverwriteConfirmOpen(true)
+        return
+      }
+      setUploadError(error instanceof Error ? error.message : '上传失败')
+      if (propagateError) throw error
+    }
   }
 
   return (
@@ -679,6 +728,12 @@ export function ContextBrowser({ path, cmds }: { cmds: HelpCmd[], path: string }
             >
               <RefreshCw className={cn('size-3.5', entries.isFetching && 'animate-spin')} />
             </Button>
+            {canUpload && (
+              <Button onClick={() => setUploadOpen(true)} size="sm" variant="outline">
+                <Upload />
+                上传文件
+              </Button>
+            )}
             {canWrite && (
               <Button onClick={() => setEditing({ entryPath: '' })} size="sm">
                 <FilePlus2 />
@@ -942,6 +997,81 @@ export function ContextBrowser({ path, cmds }: { cmds: HelpCmd[], path: string }
           setEditing({ entryPath: rel })
         }}
         path={path}
+      />
+      <Dialog
+        onOpenChange={next => !upload.isPending && setUploadOpen(next)}
+        open={uploadOpen}
+      >
+        <DialogContent
+          onEscapeKeyDown={event => upload.isPending && event.preventDefault()}
+          onPointerDownOutside={event => upload.isPending && event.preventDefault()}
+          showCloseButton={!upload.isPending}
+        >
+          <DialogHeader>
+            <DialogTitle>直传文件</DialogTitle>
+            <DialogDescription>
+              Dashboard 只向 Tool Bridge 申请限时凭证；文件会直接 PUT 到对象存储。
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4">
+            <div className="grid gap-1.5">
+              <Label className="text-xs" htmlFor="context-upload-file">文件 *</Label>
+              <Input
+                aria-label="选择上传文件"
+                disabled={upload.isPending}
+                id="context-upload-file"
+                onChange={event => chooseUploadFile(event.target.files?.[0] ?? null)}
+                type="file"
+              />
+            </div>
+            <div className="grid gap-1.5">
+              <Label className="text-xs" htmlFor="context-upload-path">条目路径 *</Label>
+              <Input
+                aria-label="条目路径"
+                className="font-mono text-sm"
+                disabled={upload.isPending}
+                id="context-upload-path"
+                onChange={event => setUploadPath(event.target.value)}
+                placeholder="camera/shot.jpg"
+                value={uploadPath}
+              />
+            </div>
+            {uploadFile !== null && (
+              <p className="text-xs text-muted-foreground">
+                {uploadFile.type || 'application/octet-stream'}
+                {' · '}
+                {humanSize(uploadFile.size)}
+              </p>
+            )}
+            {uploadError !== null && (
+              <p className="text-xs text-destructive" role="alert">{uploadError}</p>
+            )}
+          </div>
+          <DialogFooter>
+            <Button disabled={upload.isPending} onClick={() => void submitUpload()}>
+              {upload.isPending ? <Loader2 className="animate-spin" /> : <Upload />}
+              {upload.isPending ? '上传中…' : '开始直传'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      <ConfirmAction
+        actionLabel="覆盖上传"
+        description={(
+          <>
+            条目
+            {' '}
+            <code className="font-mono">{uploadPath}</code>
+            {' '}
+            已存在。覆盖后无法从 Tool
+            Bridge 恢复旧内容。
+          </>
+        )}
+        onConfirm={() => submitUpload(true, true)}
+        onOpenChange={setOverwriteConfirmOpen}
+        open={overwriteConfirmOpen}
+        pending={upload.isPending}
+        title="覆盖现有条目？"
       />
       {editing && (
         <EntryEditDialog

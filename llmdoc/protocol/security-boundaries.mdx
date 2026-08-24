@@ -35,6 +35,7 @@ code:
 
 - 派生投影(presence、缓存、搜索索引)的 TTL/降级防御、DO hibernation 恢复和 stale generation guard 属于安全下界,不是可删的历史兼容。
 - 日志、错误、调用历史、URL、CLI argv 与一次性验证输出都不得回显 secret、Admin SK、OAuth token 或含敏感 args 的 payload。
+- Presigned GET/PUT URL 本身是 bearer secret：客户端错误不得回显 fetch 原始 URL 或对象存储响应体，成功结果只持久化稳定 `node://` URI。写 grant 缺省把 `If-None-Match: *` 纳入签名以阻止静默覆盖，只有显式 `overwrite` 才扩大到可替换对象。
 - 配置仓库只保留账户中立模板;Cloudflare account、域名、资源 ID 与登录态在本地 provision 或平台侧管理。
 
 ## 评审规则

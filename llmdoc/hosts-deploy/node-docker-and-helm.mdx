@@ -99,6 +99,8 @@ Helm chart 按后端配置自动推断形态,无独立 mode 开关:
 配齐 `TB_OBJECT_STORE_ENDPOINT/BUCKET/ACCESS_KEY_ID/SECRET_ACCESS_KEY` 四项即用 S3 兼容端点(`TB_OBJECT_STORE_REGION` 可选,缺省 auto),缺省回退本地 FS。
 
 - **四项必须齐全,缺一即拒绝启动。** 半套凭证静默回退本地 FS 的错误只在故障时暴露,代价远高于启动即拒。
-- 配上后 `$ref` 走 S3 presign 直连,大对象下载不再穿过网关进程(本地 FS 只能走 `/~ref` 中转)。
+- 配上后 `$ref` 走 S3 presign 直连,大对象下载不再穿过网关进程；对象 context 同时暴露 `create_upload`，设备/CLI/Dashboard 可拿定路径 presigned PUT 后直传二进制（本地 FS 只能走 `/~ref` 中转，也不声明直传）。
+- `TB_REF_TTL_SEC` 控制下载 `$ref`/presigned GET；`TB_UPLOAD_GRANT_TTL_SEC` 独立控制写 grant，缺省 `min(TB_REF_TTL_SEC, 900)`。两者均钳制在 SigV4 的 `1..604800` 秒范围，放宽慢下载窗口不会把写入窗口一并拉长。
+- Dashboard 是浏览器客户端，bucket CORS 必须精确允许 Dashboard origin、`PUT` 与签名 headers（缺省为 `Content-Type`、`If-None-Match`）；需要读取 etag 时 expose `ETag`。原生设备与 CLI 不受浏览器 CORS 限制。
 - 这是**启动期基础设施配置**,不在 Dashboard 里改:运行时换端点会让已写入的 `$ref` 指向失效。按节点用不同存储走 `kind: 'context'` 节点自己的 S3 配置。
 - 与 `TB_DATABASE_URL` 组合即完整无状态形态:换全新容器仍能读回一切,有集成测试覆盖。

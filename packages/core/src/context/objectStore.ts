@@ -58,6 +58,19 @@ export interface ObjectListResult {
   items: Array<ObjectMeta | { prefix: string }>
 }
 
+export interface ObjectPresignedPut {
+  /** 上传时必须原样携带的请求头。 */
+  headers: Record<string, string>
+  method: 'PUT'
+  url: string
+}
+
+export interface ObjectPresignPutOptions {
+  contentType: string
+  /** `*` 表示仅当对象不存在时写入；必须随 PUT 一同签名并发送。 */
+  ifNoneMatch?: '*'
+}
+
 export interface ObjectStore {
   /** 幂等:不存在静默。 */
   delete(key: string): Promise<void>
@@ -66,6 +79,12 @@ export interface ObjectStore {
   list(prefix: string, opts?: ObjectListOptions): Promise<ObjectListResult>
   /** 生成限时直连 URL;后端不支持则缺省(provider 退化到 relayRefUrl)。 */
   presign?(key: string, ttlSec: number): Promise<string>
+  /** 生成限时、定路径的直传 PUT 请求；后端或凭证不支持时缺省。 */
+  presignPut?(
+    key: string,
+    ttlSec: number,
+    opts: ObjectPresignPutOptions,
+  ): Promise<ObjectPresignedPut>
   put(key: string, body: ObjectBody, opts?: ObjectPutOptions): Promise<ObjectMeta>
 }
 

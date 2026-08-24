@@ -9,6 +9,7 @@ import {
 import {
   type BuiltinCatalog,
   normalizeCanonicalOrigin,
+  PRESIGN_TTL_SEC_MAX,
   SecretStoreImpl,
   type StateStore,
 } from '@tool-bridge/core'
@@ -70,6 +71,8 @@ export interface Env {
   TB_TEST_S3_SECRET_ACCESS_KEY?: string
   /** mcp 工具缓存 TTL 秒(默认 300)。 */
   TB_TOOL_CACHE_TTL?: string
+  /** create_upload 写入 grant 有效期秒；缺省 min(TB_REF_TTL_SEC, 900)。 */
+  TB_UPLOAD_GRANT_TTL_SEC?: string
 }
 
 /** http:// 上游是否放行(env `TB_ALLOW_INSECURE_HTTP=true`,仅本地开发)。 */
@@ -103,10 +106,16 @@ function remoteSettingsFromEnv(env: Env): RemoteSettings {
   }
 }
 
-/** 正整数 env 解析(TB_TOOL_CACHE_TTL / TB_REF_THRESHOLD_BYTES / TB_REF_TTL_SEC);非法/缺省 → undefined。 */
+/** 正整数 env 解析；非法/缺省 → undefined。 */
 function positiveIntEnv(value: string | undefined): number | undefined {
   const n = Number(value)
   return Number.isFinite(n) && n > 0 ? Math.floor(n) : undefined
+}
+
+/** SigV4 presign TTL 同时钳制到平台协议上限。 */
+function presignTtlEnv(value: string | undefined): number | undefined {
+  const ttl = positiveIntEnv(value)
+  return ttl === undefined ? undefined : Math.min(ttl, PRESIGN_TTL_SEC_MAX)
 }
 
 /**
@@ -136,6 +145,20 @@ async function r2PresignCredentials(
   return undefined
 }
 
+/**
+ * 请求级异步工厂 memoize。depsFromEnv 每个 HTTP 请求重建，因此闭包绝不跨请求持有
+ * D1/R2 I/O 对象；同请求的 help/describe/invoke 则共享一次 secret 解析与 store 构造。
+ */
+export function memoizeRequestFactory<T>(
+  factory: () => Promise<T> | T,
+): () => Promise<T> {
+  let pending: Promise<T> | undefined
+  return () => {
+    pending ??= Promise.resolve().then(factory)
+    return pending
+  }
+}
+
 /** Env + 请求级 D1 session → TbAppDeps(D1 SearchIndex 是第五个宿主注入点)。 */
 function depsFromEnv(
   env: Env,
@@ -143,6 +166,8 @@ function depsFromEnv(
   search: D1SearchIndex | undefined,
 ): TbAppDeps {
   const secrets = new SecretStoreImpl(state, env.TB_SECRET_ENCRYPTION_KEY)
+  const objects = memoizeRequestFactory(async () =>
+    createR2ObjectStore(env.TB_R2, await r2PresignCredentials(env, secrets)))
   const deps: TbAppDeps = {
     state,
     secrets,
@@ -150,7 +175,7 @@ function depsFromEnv(
     ensureReady: () => ensureBootstrapped(state, env),
     remote: remoteSettingsFromEnv(env),
     allowInsecureHttp: allowInsecure(env),
-    objects: async () => createR2ObjectStore(env.TB_R2, await r2PresignCredentials(env, secrets)),
+    objects,
     device: {
       invoke: (deviceId, req) => env.TB_DEVICE.getByName(deviceId).invoke(req),
       ws: async (deviceId, request) => await env.TB_DEVICE.getByName(deviceId).fetch(request),
@@ -166,8 +191,10 @@ function depsFromEnv(
   if (ttl !== undefined) deps.toolCacheTtlSec = ttl
   const refThreshold = positiveIntEnv(env.TB_REF_THRESHOLD_BYTES)
   if (refThreshold !== undefined) deps.refThresholdBytes = refThreshold
-  const refTtl = positiveIntEnv(env.TB_REF_TTL_SEC)
+  const refTtl = presignTtlEnv(env.TB_REF_TTL_SEC)
   if (refTtl !== undefined) deps.refTtlSec = refTtl
+  const uploadGrantTtl = presignTtlEnv(env.TB_UPLOAD_GRANT_TTL_SEC)
+  if (uploadGrantTtl !== undefined) deps.uploadGrantTtlSec = uploadGrantTtl
   return deps
 }
 

@@ -84,6 +84,10 @@ Manifest 描述部署:`id`、`protocolVersion:'plugin/v2'`、`endpoint`、`auth`
 
 Context 动词全小写且 cmd 名 = provider 方法名:`list`、`get`、`write`、`update`、`delete`、`search`,全部可选,能力由 handler 存在性推导。content 可内联或返回 `$ref`;大对象 URL 须短期有效并受签名/宿主边界保护。skillhub 动词:`list`、`get`(带 `file` 参数取单文件)、`search`、`publish`、`remove`。
 
+内置 R2/S3 context 在底层 `ObjectStore.presignPut` 可用且挂载非只读时，额外声明 `direct-upload` capability 与 `POST /<context>/create_upload`（write scope）。请求体为 `{path,contentType,overwrite?}`；响应为 `{uri,method:'PUT',url,headers,expiresAt}`。`path` 经 context entry 规范化后固定到 namespace 的 keyPrefix，返回 headers 必须由上传方原样发送。
+
+`overwrite` 缺省 `false`，此时 `If-None-Match: *` 与 `Content-Type` 一同进入签名；目标已存在时对象存储返回 412，CLI、Dashboard 与 Device SDK 统一映射为 `conflict`。只有显式 `overwrite:true` 才签发可替换对象的 PUT。grant URL 是短期 bearer secret：缺省 grant 可重复发送但只有首次创建成功，可覆盖 grant 在失效前可能重复覆盖；调用方只应持久化稳定 `node://...` URI。上传 body 直接到对象存储，不新增设备帧，也不经过 Context `write` 的 JSON 通道。
+
 ## 设备
 
 设备连 `/system/device/ws?deviceId=...`,hello 声明 expose;服务端验证身份与 `registerPaths` 后代写 `device/<id>/...`。帧集合:hello、ready、error、call、result、ping、pong、cancel。`call` 帧 `path` 相对 mountPath 且**含命令叶子段**,与直连调用一致。PING/PONG 是稳定字面量支持边缘 auto-response;只有当前 generation 进入 ready 后才能执行 call,连接替换后旧 generation 的消息与迟到结果不得污染新连接。

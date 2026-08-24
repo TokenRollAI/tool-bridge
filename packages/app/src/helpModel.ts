@@ -10,6 +10,7 @@ import {
   type CallContext,
   contextHelpModel,
   contextMethodsOf,
+  contextUploadCmd,
   derivePresence,
   deviceDirectoryHelpModel,
   deviceFsHelpModel,
@@ -25,7 +26,12 @@ import {
   virtualizeTools,
 } from '@tool-bridge/core'
 import type { TbAppDeps } from './deps'
-import { assertContextAlive, localContext, pruneExpiredContext } from './contextNodes'
+import {
+  assertContextAlive,
+  contextDirectUploadAvailable,
+  localContext,
+  pruneExpiredContext,
+} from './contextNodes'
 import { providerFor, requirePluginExport, upstreamTools } from './toolNodes'
 import { deviceMarkerOf, deviceToolMarker } from './deviceNodes'
 import { filterListVisible } from './paths'
@@ -41,7 +47,13 @@ export async function helpModelFor(
   ctx: CallContext,
   builtins: Map<string, BuiltinModule>,
   deps: TbAppDeps,
-  opts: { now: string, refresh: boolean, schemas?: boolean },
+  opts: {
+    /** MCP 等调用方已知没有 write scope 时可跳过可选直传能力探测。 */
+    includeDirectUpload?: boolean
+    now: string
+    refresh: boolean
+    schemas?: boolean
+  },
 ): Promise<HelpModel> {
   // schemas=1:节点级 `~help` 直接内联每个工具的全量 inputSchema(关闭两级披露的
   // 索引形态),让 agent 在一次往返里拿到可调用契约,省掉逐工具下钻。只影响 mcp/http/
@@ -148,7 +160,15 @@ export async function helpModelFor(
             ])
       return { ...model, cmds: model.cmds.filter(c => declared.has(c.name)) }
     }
-    return contextHelpModel(node, { readOnly: node.config.readOnly ?? false })
+    const model = contextHelpModel(node, { readOnly: node.config.readOnly ?? false })
+    if (
+      node.config.readOnly !== true
+      && opts.includeDirectUpload !== false
+      && await contextDirectUploadAvailable(node.config, deps)
+    ) {
+      return { ...model, cmds: [...model.cmds, contextUploadCmd(node.path)] }
+    }
+    return model
   }
   if (node.kind === 'skillhub' && node.config?.kind === 'skillhub') {
     await assertContextAlive(node, node.config, registry)

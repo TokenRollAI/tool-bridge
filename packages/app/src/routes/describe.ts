@@ -8,6 +8,7 @@ import {
   check,
   contentTypeFor,
   CONTEXT_CAPABILITIES,
+  CONTEXT_DIRECT_UPLOAD_CAPABILITY,
   NodeRegistryStore,
   SKILLHUB_CAPABILITIES,
   TBError,
@@ -15,7 +16,12 @@ import {
 } from '@tool-bridge/core'
 import type { AppContext } from '../deps'
 import type { RouteEnv } from './env'
-import { assertContextAlive, localCapabilities, localContext } from '../contextNodes'
+import {
+  assertContextAlive,
+  contextDirectUploadAvailable,
+  localCapabilities,
+  localContext,
+} from '../contextNodes'
 import { remotePassthroughIfMatch } from '../federation'
 import { requirePluginExport } from '../toolNodes'
 import { deviceMarkerOf } from '../deviceNodes'
@@ -67,7 +73,7 @@ export async function handleDescribe(c: AppContext, env: RouteEnv): Promise<Resp
     // SDK 进程内 Provider 按可选方法实现存在性推导。
     const cfg = node.config
     const local = cfg.provider !== 'r2' && cfg.provider !== 's3' ? localContext(deps, node) : null
-    const capabilities
+    let capabilities
       = cfg.provider === 'r2'
         || cfg.provider === 's3'
         || cfg.provider === 'device-fs'
@@ -78,6 +84,13 @@ export async function handleDescribe(c: AppContext, env: RouteEnv): Promise<Resp
           : (
               await requirePluginExport(deps, cfg.provider, 'context', 'context', cfg.export)
             ).export.capabilities ?? []
+    if (
+      (cfg.provider === 'r2' || cfg.provider === 's3')
+      && cfg.readOnly !== true
+      && await contextDirectUploadAvailable(cfg, deps)
+    ) {
+      capabilities = [...capabilities, CONTEXT_DIRECT_UPLOAD_CAPABILITY]
+    }
     return new Response(JSON.stringify({ kind: 'context', capabilities }), {
       headers: { 'content-type': contentTypeFor('json') },
     })

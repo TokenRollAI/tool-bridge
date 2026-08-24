@@ -17,7 +17,7 @@ import {
   type ObjectStore,
   TBError,
 } from '@tool-bridge/core'
-import { encodeObjectKey, presignS3Url } from '@tool-bridge/app'
+import { encodeObjectKey, presignS3Put, presignS3Url } from '@tool-bridge/app'
 import { AwsClient } from 'aws4fetch'
 
 /** R2 S3 兼容端点的 presign 参数(凭证链解析见 app.ts;缺省 = 不提供 presign)。 */
@@ -103,6 +103,13 @@ export function createR2ObjectStore(bucket: R2Bucket, presign?: R2PresignCredent
     const base = presign.endpoint.replace(/\/+$/, '')
     store.presign = (key, ttlSec) =>
       presignS3Url(client, `${base}/${presign.bucket}/${encodeObjectKey(key)}`, ttlSec)
+    store.presignPut = (key, ttlSec, opts) =>
+      presignS3Put(
+        client,
+        `${base}/${presign.bucket}/${encodeObjectKey(key)}`,
+        ttlSec,
+        opts,
+      )
   }
 
   return store

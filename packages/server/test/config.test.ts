@@ -97,3 +97,22 @@ describe('configFromEnv 后端选择', () => {
     expect(configFromEnv({ ...base, TB_DATABASE_URL: '' }).databaseUrl).toBeUndefined()
   })
 })
+
+describe('configFromEnv presign TTL', () => {
+  it('下载与上传分别解析，并钳制到 SigV4 七天上限', () => {
+    const config = configFromEnv({
+      ...base,
+      TB_REF_TTL_SEC: '86400',
+      TB_UPLOAD_GRANT_TTL_SEC: '999999',
+    })
+    expect(config.refTtlSec).toBe(86_400)
+    expect(config.uploadGrantTtlSec).toBe(604_800)
+  })
+
+  it('非法上传 TTL 视为未配置，由应用使用安全缺省', () => {
+    expect(configFromEnv({
+      ...base,
+      TB_UPLOAD_GRANT_TTL_SEC: 'not-a-number',
+    }).uploadGrantTtlSec).toBeUndefined()
+  })
+})

@@ -40,6 +40,28 @@ export interface ContextPatch {
   metadata?: Record<string, string>
 }
 
+/** 为 namespace 内单个对象签发的限时直传凭证。URL 本身是 bearer secret。 */
+export interface ContextUploadGrant {
+  /** 凭证失效时间(ISO 8601)。 */
+  expiresAt: Timestamp
+  /** 上传时必须原样携带的请求头；这些值可能参与签名。 */
+  headers: Record<string, string>
+  method: 'PUT'
+  /** 上传成功后可长期保存和分享的稳定引用；不包含临时凭证。 */
+  uri: URI
+  /** 仅交给上传方使用的限时 URL，不应写入日志或持久化。 */
+  url: string
+}
+
+export interface ContextUploadInput {
+  /** 将要上传的媒体类型；会被签入 PUT 请求。 */
+  contentType: string
+  /** 缺省 false：仅当目标不存在时写入；true 才允许覆盖既有对象。 */
+  overwrite?: boolean
+  /** namespace 内的目标 entry path。 */
+  path: string
+}
+
 export interface SearchOptions extends ListOptions {
   /** 缺省 keyword;semantic 需 capabilities 声明 "search:semantic",未声明 → invalid_argument。 */
   mode?: 'keyword' | 'semantic'

@@ -12,6 +12,8 @@ import { cmdPath, withCommandPaths } from '../builtin/util'
 
 /** ~describe 声明的可选能力(本实现提供 Search 与 Delete)。 */
 export const CONTEXT_CAPABILITIES: readonly string[] = ['search', 'delete']
+/** 内置对象存储可选扩展：定路径、限时 PUT 直传。 */
+export const CONTEXT_DIRECT_UPLOAD_CAPABILITY = 'direct-upload'
 
 const SCOPE_BY_CMD: Record<string, 'read' | 'write'> = {
   list: 'read',
@@ -20,6 +22,7 @@ const SCOPE_BY_CMD: Record<string, 'read' | 'write'> = {
   write: 'write',
   update: 'write',
   delete: 'write',
+  create_upload: 'write',
 }
 
 /** 数据面路径的命令叶子 → scope;未知(含大小写不符)→ null,由网关按 invalid_argument 处理。 */
@@ -176,6 +179,31 @@ function contextCmds(nodePath: TreePath): CmdSpec[] {
     },
   ]
   return withCommandPaths(nodePath, cmds)
+}
+
+/** 对象存储直传扩展命令；仅在底层确实具备 PUT 签名能力时由宿主追加。 */
+export function contextUploadCmd(nodePath: TreePath): CmdSpec {
+  return withCommandPaths(nodePath, [{
+    name: 'create_upload',
+    method: 'POST',
+    path: cmdPath(nodePath),
+    h: 'create a short-lived, path-scoped direct-upload grant; persist the returned uri, not url',
+    inputSchema: {
+      type: 'object',
+      required: ['path', 'contentType'],
+      properties: {
+        path: { type: 'string', description: 'target entry path inside the namespace' },
+        contentType: { type: 'string', description: 'media type signed into the PUT request' },
+        overwrite: {
+          type: 'boolean',
+          description: 'allow replacing an existing object; default false',
+        },
+      },
+    },
+    returns: 'ContextUploadGrant',
+    scope: 'write',
+    effect: 'write',
+  }])[0]!
 }
 
 export interface ContextHelpOptions {

@@ -2,6 +2,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { MemoryRouter } from 'react-router'
 import type { ContextEntry, ContextEntryMeta, HelpCmd } from '@/lib/types'
+import { ApiError } from '@/lib/api'
 
 const NODE_PATH = 'tools/team docs'
 const ENTRY_PATH = 'handbook/usage.md'
@@ -20,11 +21,22 @@ const ENTRY: ContextEntry = {
   content: '# 使用说明\n\n第一行\n第二行',
 }
 let currentEntry = ENTRY
+const uploadResult = async ({ entryPath }: { entryPath: string }) => ({
+  uri: `node://${NODE_PATH}/${entryPath}`,
+  etag: 'photo-etag',
+})
+const uploadMutateAsync = vi.fn(uploadResult)
 
 const CMDS: HelpCmd[] = [
   { method: 'POST', name: 'get', path: `${NODE_PATH}/get`, scope: 'read' },
   { method: 'POST', name: 'write', path: `${NODE_PATH}/write`, scope: 'write' },
   { method: 'POST', name: 'delete', path: `${NODE_PATH}/delete`, scope: 'write' },
+  {
+    method: 'POST',
+    name: 'create_upload',
+    path: `${NODE_PATH}/create_upload`,
+    scope: 'write',
+  },
 ]
 
 vi.mock('@/lib/queries', () => ({
@@ -48,6 +60,7 @@ vi.mock('@/lib/queries', () => ({
     isSuccess: entryPath !== null,
     refetch: vi.fn(),
   }),
+  useCtxUpload: () => ({ isPending: false, mutateAsync: uploadMutateAsync }),
   useInvalidate: () => vi.fn(),
   useInvoke: () => ({ isPending: false, mutateAsync: vi.fn() }),
 }))
@@ -67,6 +80,8 @@ function renderBrowser() {
 afterEach(() => {
   cleanup()
   currentEntry = ENTRY
+  uploadMutateAsync.mockReset()
+  uploadMutateAsync.mockImplementation(uploadResult)
 })
 
 describe('ContextBrowser 条目详情', () => {
@@ -123,5 +138,54 @@ describe('ContextBrowser 条目详情', () => {
     )
     expect(refLink.getAttribute('target')).toBe('_blank')
     expect(within(dialog).queryByRole('button', { name: '复制内容' })).toBeNull()
+  })
+
+  it('能力存在时可选文件、调整 entry path 并发起直传', async () => {
+    renderBrowser()
+    fireEvent.click(screen.getByRole('button', { name: '上传文件' }))
+
+    const dialog = await screen.findByRole('dialog', { name: '直传文件' })
+    const file = new File([new Uint8Array([0xff, 0xd8, 0xff])], 'shot.jpg', {
+      type: 'image/jpeg',
+    })
+    fireEvent.change(within(dialog).getByLabelText('选择上传文件'), {
+      target: { files: [file] },
+    })
+    const pathInput = within(dialog).getByLabelText('条目路径') as HTMLInputElement
+    expect(pathInput.value).toBe('shot.jpg')
+    fireEvent.change(pathInput, { target: { value: 'camera/2026/shot.jpg' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: '开始直传' }))
+
+    await waitFor(() => expect(uploadMutateAsync).toHaveBeenCalledWith({
+      entryPath: 'camera/2026/shot.jpg',
+      file,
+      overwrite: false,
+    }))
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '直传文件' })).toBeNull())
+  })
+
+  it('同名上传先原子失败，再经确认显式覆盖', async () => {
+    uploadMutateAsync
+      .mockRejectedValueOnce(new ApiError('conflict', 412, '目标条目已存在'))
+      .mockImplementationOnce(uploadResult)
+    renderBrowser()
+    fireEvent.click(screen.getByRole('button', { name: '上传文件' }))
+    const uploadDialog = await screen.findByRole('dialog', { name: '直传文件' })
+    const file = new File([new Uint8Array([1])], 'shot.jpg', { type: 'image/jpeg' })
+    fireEvent.change(within(uploadDialog).getByLabelText('选择上传文件'), {
+      target: { files: [file] },
+    })
+    fireEvent.click(within(uploadDialog).getByRole('button', { name: '开始直传' }))
+
+    const confirm = await screen.findByRole('alertdialog', { name: '覆盖现有条目？' })
+    expect(within(confirm).getByText(/shot\.jpg/)).toBeTruthy()
+    fireEvent.click(within(confirm).getByRole('button', { name: '覆盖上传' }))
+
+    await waitFor(() => expect(uploadMutateAsync).toHaveBeenNthCalledWith(2, {
+      entryPath: 'shot.jpg',
+      file,
+      overwrite: true,
+    }))
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '直传文件' })).toBeNull())
   })
 })

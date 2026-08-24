@@ -75,6 +75,8 @@ export interface ToolBridgeConfig {
   secrets?: SecretStoreImpl
   /** 树配置 / SK / manifest 的存取(宿主注入;内存宿主可用 MemoryStateStore)。 */
   state: StateStore
+  /** create_upload 写入 grant 有效期秒；缺省 900，最大 604800。 */
+  uploadGrantTtlSec?: number
 }
 
 /** Connection(state 词表与 core DeviceClientState 逐字一致)。 */

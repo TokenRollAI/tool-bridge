@@ -45,5 +45,6 @@ pnpm tsx scripts/verify-device.ts
 
 - 多运行时包的兼容性按**目标子入口的 JS/d.ts 依赖闭包**判定,不按包级 `engines`/`dependencies` 猜测。`ws` 可以继续被 sdk 安装,但不得进入 device 子入口的模块图;JS 与声明文件两条依赖图要同时隔离。
 - 设备核心以 WebSocket factory、credential provider 和显式 suspend/resume 注入宿主差异;RN 第三参数 headers 只存在于薄 adapter。
+- 拍照等二进制产物不新增 WebSocket 帧：handler 调用 device 子入口的 `uploadContextObject`，用 `purpose:'http'` 的 Bearer header 申请 path-scoped PUT，再把 `Blob` 直传 R2/S3，只通过 result 帧返回 JSON 可序列化的 `node://` 引用。Agent 需要内容时调用对应 context `get`，由网关按当次 read scope 签发短期 `$ref`；当前不会把引用自动展开成 MCP image block。
 - 幂等只保留进程内同 call id 去重(handler 获得 id 与协作式 AbortSignal)。当前网关重试不会稳定复用同一个 call id,持久化结果缓存会制造 exactly-once 的错误承诺;跨进程 durable execution 要等端到端 idempotency key 与重放协议完整设计。
 - 发布验收不止看 manifest:检查全部条件导出目标、扫描 device 产物的 Node/私有依赖泄漏、从最终 tarball 干净安装并同时 import 两个入口(闸门细节见 [npm-publishing](../release/npm-publishing.mdx))。

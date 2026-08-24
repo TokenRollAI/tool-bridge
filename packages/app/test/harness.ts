@@ -44,6 +44,8 @@ export interface TestAppOpts {
   device?: TbAppDeps['device']
   /** 缺省注入 MemoryObjectStore;传 null 则不注入(模拟宿主无对象存储)。 */
   objects?: ObjectStore | null
+  /** 自定义对象工厂；用于验证请求期失败与调用次数。给出时优先于 objects。 */
+  objectsFactory?: TbAppDeps['objects']
   pluginBindings?: PluginBindings
   /** 内置集成目录;缺省不注入 → `system/catalog` 回空页(未装内置插件的宿主)。 */
   pluginCatalog?: BuiltinCatalog
@@ -52,6 +54,7 @@ export interface TestAppOpts {
   remote?: Partial<RemoteSettings>
   search?: SearchIndex
   toolCacheTtlSec?: number
+  uploadGrantTtlSec?: number
 }
 
 export interface TestApp {
@@ -80,7 +83,8 @@ export async function createTestApp(opts: TestAppOpts = {}): Promise<TestApp> {
     state,
     version: TEST_VERSION,
   }
-  if (objects !== undefined) deps.objects = () => objects
+  if (opts.objectsFactory !== undefined) deps.objects = opts.objectsFactory
+  else if (objects !== undefined) deps.objects = () => objects
   if (opts.assets !== undefined) deps.assets = opts.assets
   if (opts.canonicalOrigin !== undefined) deps.canonicalOrigin = opts.canonicalOrigin
   if (opts.device !== undefined) deps.device = opts.device
@@ -90,6 +94,7 @@ export async function createTestApp(opts: TestAppOpts = {}): Promise<TestApp> {
   if (opts.refTtlSec !== undefined) deps.refTtlSec = opts.refTtlSec
   if (opts.search !== undefined) deps.search = opts.search
   if (opts.toolCacheTtlSec !== undefined) deps.toolCacheTtlSec = opts.toolCacheTtlSec
+  if (opts.uploadGrantTtlSec !== undefined) deps.uploadGrantTtlSec = opts.uploadGrantTtlSec
 
   const app = createTbApp(deps)
   return {

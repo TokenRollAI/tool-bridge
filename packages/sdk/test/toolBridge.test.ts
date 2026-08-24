@@ -10,6 +10,7 @@
 import {
   MemoryObjectStore,
   MemoryStateStore,
+  type ObjectStore,
   OperationRegistry,
   TBError,
   type ToolResult,
@@ -106,10 +107,10 @@ interface Harness {
   tb: ToolBridge
 }
 
-async function startHarness(config?: { encryptionKey?: string }): Promise<Harness> {
+async function startHarness(config?: { encryptionKey?: string, objects?: ObjectStore }): Promise<Harness> {
   const tb = createToolBridge({
     state: new MemoryStateStore(),
-    objects: new MemoryObjectStore(),
+    objects: config?.objects ?? new MemoryObjectStore(),
     adminSk: ADMIN_SK,
     ...(config?.encryptionKey !== undefined ? { encryptionKey: config.encryptionKey } : {}),
   })
@@ -300,6 +301,54 @@ describe('createToolBridge:本地 HTTP(@hono/node-server)', () => {
       }),
     })
     expect(res.status).toBe(400)
+  })
+})
+
+describe('createToolBridge:对象直传注入面', () => {
+  it('objects.presignPut 让嵌入式 SDK 的 r2 context 暴露 create_upload', async () => {
+    const objects = new MemoryObjectStore() as ObjectStore
+    const presignPut = vi.fn(async (
+      key: string,
+      ttlSec: number,
+      opts: { contentType: string, ifNoneMatch?: '*' },
+    ) => ({
+      method: 'PUT' as const,
+      url: `https://upload.example/${encodeURIComponent(key)}?ttl=${ttlSec}`,
+      headers: {
+        'content-type': opts.contentType,
+        ...(opts.ifNoneMatch === undefined ? {} : { 'if-none-match': opts.ifNoneMatch }),
+      },
+    }))
+    objects.presignPut = presignPut
+    const h = await startHarness({ encryptionKey: ENCRYPTION_KEY, objects })
+    try {
+      expect((await call(h, 'system/registry/write', {
+        method: 'POST',
+        body: JSON.stringify({
+          path: 'photos',
+          kind: 'context',
+          description: 'device photos',
+          config: { kind: 'context', provider: 'r2' },
+        }),
+      })).status).toBe(200)
+
+      const response = await call(h, 'photos/create_upload', {
+        method: 'POST',
+        body: JSON.stringify({ path: 'camera/shot.jpg', contentType: 'image/jpeg' }),
+      })
+      expect(response.status).toBe(200)
+      expect(await response.json()).toMatchObject({
+        uri: 'node://photos/camera/shot.jpg',
+        method: 'PUT',
+        headers: { 'content-type': 'image/jpeg', 'if-none-match': '*' },
+      })
+      expect(presignPut).toHaveBeenCalledWith('ctx/photos/camera/shot.jpg', 900, {
+        contentType: 'image/jpeg',
+        ifNoneMatch: '*',
+      })
+    } finally {
+      h.close()
+    }
   })
 })
 

@@ -25,6 +25,10 @@ code:
 
 另有 assets、remote、plugin catalog/bindings、本地 provider 与缓存/安全配置。`DeviceChannel` 是 app 当前消费的真实接口；不要把未实现的 SDK `DeviceTransport` 当成现状。
 
+对象型 R2/S3 context 可在 `ObjectStore.presignPut` 存在时动态声明 `direct-upload`，并以 `create_upload` 为单个 entry 签发定路径、限时 PUT。发现面不是健康探针：S3 能力由实现静态判定，不解析节点 `authRef`；R2 signer 失败只隐藏可选能力，不能拖垮 `~help`、`~describe` 或整个 MCP 工具列表。Workers 的对象工厂只在单次请求闭包内 memoize Promise，避免多 context 发现时重复解析同一份 secret，同时不跨请求持有 I/O 对象。
+
+上传 grant 的 TTL 与下载 `$ref` TTL 独立，缺省取 `min(refTtlSec, 900)`，SigV4 GET/PUT 均受 604800 秒上限约束。`@tool-bridge/sdk/device` 的 `uploadContextObject` 用普通 HTTP 申请 grant，再把 `Blob`/`BodyInit` 直传对象存储并只返回稳定 `node://` 引用；`purpose:'http'` 的设备凭证必须带非空 `Authorization` header，不能把仅供 WebSocket 使用的 ticket 当作 HTTP 认证。
+
 ## builtin 装配
 
 bootstrap builtin 清单在 `packages/app/src/bootstrap.ts` 的 `BUILTIN_MODULES`：sk、secret、registry、status、plugin、catalog、federation、annotation。`~feedback` 是保留端点，不是 builtin 模块。

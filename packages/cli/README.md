@@ -149,7 +149,7 @@ KV/R2/D1、构建部署、验证 `~help`，最后保存本机 profile。Admin SK
 | `tb ls` / `tb tree` / `tb help <path>` | 浏览工具树与节点文档 |
 | `tb call <path>/<command> '{…}'` | 调用任意已挂载工具/命令(直连,body 即 arguments) |
 | `tb tool mount/rm` · `tb server add/ls/rm` | 挂载 HTTP/MCP/plugin 上游与远端 HTBP 服务 |
-| `tb ctx ls/cat/put/patch/rm/search` | 上下文(对象存储)读写 |
+| `tb ctx ls/cat/put/upload/patch/rm/search` | 上下文读写；`upload` 通过限时 PUT 直传二进制 |
 | `tb sk` / `tb secret` | SK 签发/查看/更新/禁用/吊销与上游凭证管理 |
 | `tb connect` | 将本机注册为设备(shell/fs 反向通道) |
 | `tb daemon install/status/logs/restart/uninstall` | 在 Linux 上持久运行本机设备连接 |
@@ -157,6 +157,10 @@ KV/R2/D1、构建部署、验证 `~help`，最后保存本机 profile。Admin SK
 | `tb skill ls/get/search/publish/rm/mount/unmount` | Agent Skill 仓库 |
 | `tb federation` / `tb note` / `tb feedback` | 联邦白名单、路径注解与使用反馈 |
 | `tb plugin register/list/get/update/health/rm` | 插件注册表与探活 |
+
+`tb ctx put` 面向可内联的文本/JSON，支持 stdin 与 `--meta`；`tb ctx upload` 面向大文件或
+二进制，先申请短期 PUT 后直传对象存储。`upload` 缺省拒绝覆盖同名 entry，确认替换时显式加
+`--force`。
 
 全局参数 `--json` / `--base-url` / `--sk` / `--timeout` 可放在命令前、中、后任一层级；
 即使 Commander 在业务 action 前报错，`--json` 也会返回单个可解析错误对象。配置存于

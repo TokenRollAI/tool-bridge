@@ -1,4 +1,5 @@
 import type {
+  ContextUploadGrant,
   FeedbackView,
   HelpJson,
   Page,
@@ -145,6 +146,93 @@ export async function invoke(
     }
   }
   return { contentType, text, ms }
+}
+
+function parseUploadGrant(value: unknown): ContextUploadGrant {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    throw new ApiError('internal', 502, '网关返回了无效的上传凭证', true)
+  }
+  const grant = value as Record<string, unknown>
+  if (
+    grant.method !== 'PUT'
+    || typeof grant.uri !== 'string'
+    || !grant.uri.startsWith('node://')
+    || typeof grant.url !== 'string'
+    || typeof grant.expiresAt !== 'string'
+    || !Number.isFinite(Date.parse(grant.expiresAt))
+    || grant.headers === null
+    || typeof grant.headers !== 'object'
+    || Array.isArray(grant.headers)
+    || !Object.values(grant.headers).every(value => typeof value === 'string')
+  ) {
+    throw new ApiError('internal', 502, '网关返回了无效的上传凭证', true)
+  }
+  try {
+    const url = new URL(grant.url)
+    if (
+      (url.protocol !== 'https:' && url.protocol !== 'http:')
+      || url.username !== ''
+      || url.password !== ''
+    ) throw new Error('invalid upload URL')
+    new Headers(grant.headers as Record<string, string>)
+  } catch {
+    throw new ApiError('internal', 502, '网关返回了无效的上传凭证', true)
+  }
+  return grant as unknown as ContextUploadGrant
+}
+
+/** 申请 context 上传凭证，再把 File 直接发往对象存储；二进制不经过 Tool Bridge。 */
+export async function uploadContextObject(
+  conn: Connection,
+  nodePath: string,
+  entryPath: string,
+  file: File,
+  overwrite = false,
+  signal?: AbortSignal,
+): Promise<{ etag?: string, uri: string }> {
+  const contentType = file.type || 'application/octet-stream'
+  const grant = parseUploadGrant(await (
+    await request(conn, nodeUrl(`${nodePath}/create_upload`), {
+      method: 'POST',
+      body: { path: entryPath, contentType, ...(overwrite ? { overwrite: true } : {}) },
+      signal,
+    })
+  ).json())
+  if (Date.parse(grant.expiresAt) <= Date.now()) {
+    throw new ApiError('unavailable', 503, '上传凭证在开始上传前已经过期，请重试', true)
+  }
+  let response: Response
+  try {
+    response = await fetch(grant.url, {
+      method: 'PUT',
+      headers: grant.headers,
+      body: file,
+      credentials: 'omit',
+      signal,
+    })
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') throw error
+    throw new ApiError(
+      'network',
+      0,
+      '对象存储直传失败：请检查网络与 R2/S3 CORS 配置',
+      true,
+    )
+  }
+  const etag = response.headers.get('etag')
+  await response.body?.cancel().catch(() => {})
+  if (!response.ok) {
+    if (response.status === 412) {
+      throw new ApiError('conflict', 412, '目标条目已存在', false)
+    }
+    throw new ApiError(
+      'unavailable',
+      response.status,
+      `对象存储直传返回 HTTP ${response.status}`,
+      response.status === 408 || response.status === 429 || response.status >= 500,
+    )
+  }
+  return { uri: grant.uri, ...(etag === null ? {} : { etag }) }
 }
 
 /** 登录校验:GET /~help 能过认证即有效(与 tb login 同一判据)。 */

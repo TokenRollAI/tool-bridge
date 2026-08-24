@@ -84,6 +84,7 @@ describe('未知 flag 必须报错(事故回归)', () => {
       ['ctx', 'ls', 'ns', '--bogus'],
       ['ctx', 'cat', 'ns', 'e', '--bogus'],
       ['ctx', 'put', 'ns', 'e', '--content', 'c', '--bogus'],
+      ['ctx', 'upload', 'ns', 'e', '--file', 'photo.jpg', '--bogus'],
       ['ctx', 'patch', 'ns', 'e', '--content', 'c', '--bogus'],
       ['ctx', 'rm', 'ns', 'e', '--bogus'],
       ['ctx', 'search', 'ns', 'q', '--bogus'],

@@ -86,6 +86,8 @@ export interface DeviceCredentialProvider {
   prepare(input: {
     baseUrl: string
     deviceId: string
+    /** 允许同一 Keychain/Keystore provider 区分 WS ticket 与普通 HTTP Bearer。 */
+    purpose?: 'http' | 'websocket'
     signal: AbortSignal
   }): Promise<PreparedDeviceCredential> | PreparedDeviceCredential
 }
@@ -336,6 +338,7 @@ export function openPortableDeviceConnection(
       promise: Promise.resolve(opts.credentialProvider.prepare({
         baseUrl: opts.baseUrl,
         deviceId: opts.deviceId,
+        purpose: 'websocket',
         signal: controller.signal,
       })).then(credential => validateCredential(credential, fallbackUrl)),
     }

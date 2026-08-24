@@ -11,6 +11,7 @@ import {
   assertSecretRefUse,
   check,
   contextScopeForCmd,
+  type ContextUploadInput,
   isTBError,
   KEY_PLUGIN,
   negotiate,
@@ -30,6 +31,7 @@ import {
   assertContextConfig,
   assertSkillhubConfig,
   contextProviderFor,
+  createContextUploadGrant,
   deviceIdForDeviceFs,
   dispatchContextCmd,
   dispatchSkillhubCmd,
@@ -153,7 +155,8 @@ export async function handleInvoke(c: AppContext, env: RouteEnv): Promise<Respon
     await assertContextAlive(node, cfg, registry)
     const args = await readInvokeBody()
     const scope = contextScopeForCmd(command)
-    if (scope === null) {
+    const directUpload = command === 'create_upload'
+    if (scope === null || (directUpload && cfg.provider !== 'r2' && cfg.provider !== 's3')) {
       throw new TBError('invalid_argument', `unknown cmd '${command}' on '${node.path}'`)
     }
     // 节点可见性(read→404)已在上方统一判过;这里按 cmd 的 read/write scope 判 403。
@@ -163,6 +166,15 @@ export async function handleInvoke(c: AppContext, env: RouteEnv): Promise<Respon
     // readOnly 挂载对写动词直接拒(provider 内亦拒,双保险)。
     if (cfg.readOnly === true && scope === 'write') {
       throw new TBError('permission_denied', `readOnly 挂载拒绝 '${command}'`)
+    }
+    if (directUpload) {
+      const result = await createContextUploadGrant(
+        node,
+        cfg,
+        deps,
+        args as unknown as ContextUploadInput,
+      )
+      return renderResult(result, negotiate(c.req.header('accept')))
     }
     if (cfg.provider === 'device-fs') {
       const result = await invokeDevice(deps, deviceIdForDeviceFs(cfg), {

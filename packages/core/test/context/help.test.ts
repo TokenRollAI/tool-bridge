@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { CONTEXT_CAPABILITIES, contextHelpModel, contextScopeForCmd } from '../../src/context/help'
+import {
+  CONTEXT_CAPABILITIES,
+  contextHelpModel,
+  contextScopeForCmd,
+  contextUploadCmd,
+} from '../../src/context/help'
 
 const node = { path: 'ctx/main', description: 'main context' }
 
@@ -54,8 +59,26 @@ describe('contextScopeForCmd', () => {
     expect(contextScopeForCmd('write')).toBe('write')
     expect(contextScopeForCmd('update')).toBe('write')
     expect(contextScopeForCmd('delete')).toBe('write')
+    expect(contextScopeForCmd('create_upload')).toBe('write')
     expect(contextScopeForCmd('List')).toBeNull()
     expect(contextScopeForCmd('Watch')).toBeNull()
+  })
+})
+
+describe('contextUploadCmd', () => {
+  it('声明精确直连路径、write scope 与默认不覆盖 schema', () => {
+    const cmd = contextUploadCmd(node.path)
+    expect(cmd).toMatchObject({
+      name: 'create_upload',
+      method: 'POST',
+      path: '/ctx/main/create_upload',
+      scope: 'write',
+      returns: 'ContextUploadGrant',
+    })
+    expect((cmd.inputSchema as { required: string[] }).required).toEqual(['path', 'contentType'])
+    expect((cmd.inputSchema as {
+      properties: { overwrite: { type: string } }
+    }).properties.overwrite.type).toBe('boolean')
   })
 })
 

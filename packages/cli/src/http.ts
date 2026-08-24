@@ -239,6 +239,78 @@ export async function callDirect<T>(
   return apiJson<T>(target, { method: 'POST', path: toolPath, body: args })
 }
 
+export interface PresignedPutGrant {
+  expiresAt: string
+  headers: Record<string, string>
+  method: 'PUT'
+  url: string
+}
+
+/**
+ * 把二进制直接 PUT 到对象存储。此请求绝不携带 Tool Bridge SK，错误也不读取/回显
+ * 上游响应体或预签名 URL（两者都可能含敏感信息）。
+ */
+export async function putPresigned(
+  grant: PresignedPutGrant,
+  body: NonNullable<RequestInit['body']>,
+  timeoutMs: number = DEFAULT_TIMEOUT_MS,
+): Promise<{ etag?: string }> {
+  let url: URL
+  let headers: Headers
+  try {
+    url = new URL(grant.url)
+    headers = new Headers(grant.headers)
+  } catch {
+    throw new CliError('gateway returned an invalid upload grant', 'internal', true)
+  }
+  if (
+    grant.method !== 'PUT'
+    || !Number.isFinite(Date.parse(grant.expiresAt))
+    || (url.protocol !== 'https:' && url.protocol !== 'http:')
+    || url.username !== ''
+    || url.password !== ''
+  ) {
+    throw new CliError('gateway returned an invalid upload grant', 'internal', true)
+  }
+  if (Date.parse(grant.expiresAt) <= Date.now()) {
+    throw new CliError('upload grant expired before upload started', 'unavailable', true)
+  }
+
+  let response: Response
+  try {
+    response = await fetchImpl(url, {
+      method: 'PUT',
+      headers,
+      body,
+      signal: AbortSignal.timeout(timeoutMs),
+    })
+  } catch (err) {
+    if (err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError')) {
+      throw new CliError('object upload timed out', 'unavailable', true)
+    }
+    // fetch 的错误消息可能包含完整请求 URL；预签名 query 是 bearer secret，必须脱敏。
+    throw new CliError('object upload request failed', 'unavailable', true)
+  }
+  const etag = response.headers.get('etag')
+  await response.body?.cancel().catch(() => {})
+  if (!response.ok) {
+    if (response.status === 412) {
+      throw new CliError(
+        'object already exists; re-run with --force to overwrite it',
+        'conflict',
+        false,
+      )
+    }
+    const retryable = response.status === 408 || response.status === 429 || response.status >= 500
+    throw new CliError(
+      `object upload returned HTTP ${response.status}`,
+      'unavailable',
+      retryable,
+    )
+  }
+  return etag === null ? {} : { etag }
+}
+
 async function invokeText(target: Target, path: string, body: unknown): Promise<string> {
   const r = await apiFetch(target, {
     method: 'POST',

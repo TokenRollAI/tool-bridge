@@ -105,7 +105,7 @@ export type { RemoteSettings } from './providers/remote'
 export { createS3ObjectStore, type S3StoreConfig } from './providers/s3Object'
 
 // --- 大对象 $ref:预签名与网关中转 token ---
-export { encodeObjectKey, presignS3Url } from './providers/s3Sign'
+export { encodeObjectKey, presignS3Put, presignS3Url } from './providers/s3Sign'
 export {
   cachedTools,
   getTools,

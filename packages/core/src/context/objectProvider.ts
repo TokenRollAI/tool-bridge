@@ -12,6 +12,8 @@ import type {
   ContextEntryMeta,
   ContextPatch,
   ContextProvider,
+  ContextUploadGrant,
+  ContextUploadInput,
   SearchOptions,
 } from './types'
 import { type ObjectBody, type ObjectMeta, type ObjectStore, readStreamBytes, readStreamText } from './objectStore'
@@ -24,6 +26,19 @@ import { TBError } from '../errors'
 export const REF_THRESHOLD_BYTES_DEFAULT = 1024 * 1024
 /** presign URL 有效期缺省 15 分钟。 */
 export const PRESIGN_TTL_SEC_DEFAULT = 900
+/** SigV4 query presign 的协议上限：7 天。 */
+export const PRESIGN_TTL_SEC_MAX = 604_800
+
+/** 校验 SigV4 presign TTL；宿主签名器与 core grant 生成共用。 */
+export function assertPresignTtlSec(ttlSec: number): number {
+  if (!Number.isInteger(ttlSec) || ttlSec < 1 || ttlSec > PRESIGN_TTL_SEC_MAX) {
+    throw new TBError(
+      'invalid_argument',
+      `presign TTL 必须是 1..${PRESIGN_TTL_SEC_MAX} 的整数秒`,
+    )
+  }
+  return ttlSec
+}
 
 /**
  * Search 单次调用经 head 补取 metadata 的次数上限(keyword 须匹配
@@ -51,6 +66,17 @@ export interface ObjectContextProviderOptions {
   relayRefUrl?: (key: string) => string | Promise<string>
 }
 
+export interface ObjectContextUploadGrantOptions {
+  /** 对象 key 前缀(多 namespace 共桶隔离);不参与 uri 与 entry 路径。 */
+  keyPrefix?: string
+  /** namespace 节点树路径,uri 前缀 node://<nsPath>/。 */
+  nsPath: TreePath
+  /** readOnly 挂载拒绝签发。 */
+  readOnly?: boolean
+  /** 上传 grant 有效期(秒);缺省 900，与下载 $ref TTL 独立。 */
+  uploadGrantTtlSec?: number
+}
+
 /**
  * 对象存储 provider 的具体形态:**六个动词全实现**。
  *
@@ -58,6 +84,65 @@ export interface ObjectContextProviderOptions {
  * 收紧成完全体 —— 消费方(网关 r2/s3 分支、单测)据此免去逐个判空。
  */
 export type ObjectContextProvider = Required<ContextProvider>
+
+/**
+ * 为对象 context 的一个 entry 签发直传 PUT。
+ *
+ * 这里与 provider 共用 path/keyPrefix/uri 规则，确保签名目标不会逃出挂载前缀。
+ * `url` 是短期 bearer secret；调用方应只持久化返回的稳定 `uri`。
+ */
+export async function createObjectContextUploadGrant(
+  store: ObjectStore,
+  opts: ObjectContextUploadGrantOptions,
+  input: ContextUploadInput,
+): Promise<ContextUploadGrant> {
+  if (opts.readOnly === true) {
+    throw new TBError('permission_denied', 'readOnly 挂载拒绝 create_upload')
+  }
+  if (store.presignPut === undefined) {
+    throw new TBError('unavailable', '对象存储未配置直传签名能力', { retryable: false })
+  }
+  if (typeof input?.path !== 'string') {
+    throw new TBError('invalid_argument', 'create_upload 需要字符串 \'path\'')
+  }
+  if (input.overwrite !== undefined && typeof input.overwrite !== 'boolean') {
+    throw new TBError('invalid_argument', 'create_upload 的 \'overwrite\' 必须是 boolean')
+  }
+  const unknownKeys = Object.keys(input).filter(
+    key => key !== 'path' && key !== 'contentType' && key !== 'overwrite',
+  )
+  if (unknownKeys.length > 0) {
+    throw new TBError('invalid_argument', `create_upload 含未知字段:${unknownKeys.join(',')}`)
+  }
+  if (
+    typeof input?.contentType !== 'string'
+    || input.contentType.trim() === ''
+    || input.contentType.length > 255
+    || !input.contentType.includes('/')
+    || /[\r\n\0]/.test(input.contentType)
+  ) {
+    throw new TBError('invalid_argument', 'create_upload 需要合法的 \'contentType\'')
+  }
+  const nsPath = normalizePath(opts.nsPath)
+  const entryPath = normalizeEntryPath(input.path)
+  const keyPrefixBare = opts.keyPrefix?.replace(/^\/+|\/+$/g, '') ?? ''
+  const key = `${keyPrefixBare === '' ? '' : `${keyPrefixBare}/`}${entryPath}`
+  const ttlSec = assertPresignTtlSec(opts.uploadGrantTtlSec ?? PRESIGN_TTL_SEC_DEFAULT)
+  const contentType = input.contentType.trim()
+  // 先取时间再签名：对外宣告的期限宁可略早，绝不晚于底层签名的真实期限。
+  const expiresAt = new Date(Date.now() + ttlSec * 1000).toISOString()
+  const signed = await store.presignPut(key, ttlSec, {
+    contentType,
+    ...(input.overwrite === true ? {} : { ifNoneMatch: '*' }),
+  })
+  return {
+    uri: `node://${nsPath}/${entryPath}`,
+    method: 'PUT',
+    url: signed.url,
+    headers: signed.headers,
+    expiresAt,
+  }
+}
 
 /** limit 缺省 50、超上限 200 静默钳制;非正整数拒绝。 */
 function clampLimit(limit: number | undefined): number {

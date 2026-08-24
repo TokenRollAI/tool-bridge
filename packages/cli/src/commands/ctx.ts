@@ -11,8 +11,8 @@ import {
 } from '../args'
 import { deleteNode, parseConfigSpecs, registerNode } from '../registry'
 import { asArray, guard, printJson, printLine, table } from '../output'
+import { callDirect, CliError, putPresigned } from '../http'
 import { confirmDestructive } from '../confirm'
-import { callDirect, CliError } from '../http'
 
 /**
  * `tb ctx *` —— Context Layer 命令族。
@@ -53,6 +53,29 @@ export function guessContentType(file?: string): string {
   }
 }
 
+/** 二进制直传的媒体类型推断；未知扩展名不冒充文本。 */
+export function guessUploadContentType(file: string): string {
+  switch (extname(file).toLowerCase()) {
+    case '.jpg':
+    case '.jpeg':
+      return 'image/jpeg'
+    case '.png':
+      return 'image/png'
+    case '.webp':
+      return 'image/webp'
+    case '.gif':
+      return 'image/gif'
+    case '.json':
+      return 'application/json'
+    case '.md':
+      return 'text/markdown'
+    case '.txt':
+      return 'text/plain'
+    default:
+      return 'application/octet-stream'
+  }
+}
+
 /** 可选正整数 flag(--limit/--ttl)。 */
 function parsePositiveInt(value: unknown, flag: string): number | undefined {
   if (value === undefined || value === '') return undefined
@@ -66,6 +89,14 @@ function parsePositiveInt(value: unknown, flag: string): number | undefined {
 function readContentFile(file: string): string {
   try {
     return readFileSync(file, 'utf8')
+  } catch (err) {
+    throw new CliError(`cannot read --file "${file}": ${(err as Error).message}`)
+  }
+}
+
+function readBinaryFile(file: string): Buffer {
+  try {
+    return readFileSync(file)
   } catch (err) {
     throw new CliError(`cannot read --file "${file}": ${(err as Error).message}`)
   }
@@ -172,7 +203,7 @@ export function ctxCatCommand(): Command {
 /** `tb ctx put <ns> <entry>` —— 创建/整体替换(ContextProvider.Write,幂等 upsert)。 */
 export function ctxPutCommand(): Command {
   return withGlobalOpts(new Command('put'))
-    .description('Write (create or replace) a context entry')
+    .description('Write text/JSON (create or replace); use upload for direct binary transfer')
     .argument('<ns>', 'Context namespace tree path')
     .argument('<entry>', 'Entry path inside namespace')
     .option('--file <file>', 'Read content from file')
@@ -229,6 +260,52 @@ export function ctxPutCommand(): Command {
         })
       },
     )
+}
+
+/** `tb ctx upload <ns> <entry> --file <file>` —— 申请短期 grant 后二进制直传。 */
+export function ctxUploadCommand(): Command {
+  return withGlobalOpts(new Command('upload'))
+    .description('Upload a binary file directly; existing entries require --force')
+    .argument('<ns>', 'Context namespace tree path')
+    .argument('<entry>', 'Entry path inside namespace')
+    .requiredOption('--file <file>', 'Binary file to upload')
+    .option('--content-type <type>', 'Content type (default: guessed from --file)')
+    .option('--force', 'Overwrite an existing entry (default: fail with conflict)')
+    .action(async (
+      nsArg: string,
+      entryArg: string,
+      opts: GlobalOpts & { contentType?: string, file: string, force?: boolean },
+    ) => {
+      const asJson = Boolean(opts.json)
+      await guard(asJson, async () => {
+        const ns = String(nsArg ?? '').trim()
+        if (!ns) throw new CliError('namespace path is required')
+        const entryPath = String(entryArg ?? '').trim()
+        if (!entryPath) throw new CliError('entry path is required')
+        const file = String(opts.file)
+        const contentType = opts.contentType
+          ? String(opts.contentType).trim()
+          : guessUploadContentType(file)
+        if (!contentType) throw new CliError('--content-type must not be empty')
+        const bytes = readBinaryFile(file)
+        const target = resolveTarget(opts)
+        const grant = await callDirect<{
+          expiresAt: string
+          headers: Record<string, string>
+          method: 'PUT'
+          uri: string
+          url: string
+        }>(target, `${nsUri(ns)}/create_upload`, {
+          path: entryPath,
+          contentType,
+          ...(opts.force === true ? { overwrite: true } : {}),
+        })
+        const uploaded = await putPresigned(grant, bytes, target.timeoutMs)
+        const result = { uri: grant.uri, ...uploaded }
+        if (asJson) printJson(result)
+        else printLine(`uploaded ${grant.uri}`)
+      })
+    })
 }
 
 /** `tb ctx patch <ns> <entry>` —— 部分更新(ContextProvider.Update,不存在 → not_found)。 */
@@ -489,12 +566,14 @@ export function ctxCommand(): Command {
 Examples:
   tb ctx mount notes --provider r2 --description "team notes"
   tb ctx put notes meeting/2026-07.md --file ./notes.md
+  tb ctx upload photos camera/shot.jpg --file ./shot.jpg
   tb ctx cat notes meeting/2026-07.md
   tb ctx search notes "budget"`,
     )
     .addCommand(ctxLsCommand())
     .addCommand(ctxCatCommand())
     .addCommand(ctxPutCommand())
+    .addCommand(ctxUploadCommand())
     .addCommand(ctxPatchCommand())
     .addCommand(ctxRmCommand())
     .addCommand(ctxSearchCommand())

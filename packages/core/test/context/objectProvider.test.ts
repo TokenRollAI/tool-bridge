@@ -2,10 +2,15 @@ import { describe, expect, it, vi } from 'vitest'
 import type { ContextEntryMeta, SearchOptions } from '../../src/context/types'
 import {
   createObjectContextProvider,
+  createObjectContextUploadGrant,
   type ObjectContextProvider,
   SEARCH_METADATA_HEAD_MAX,
 } from '../../src/context/objectProvider'
-import { MemoryObjectStore, type ObjectStore } from '../../src/context/objectStore'
+import {
+  MemoryObjectStore,
+  type ObjectPresignPutOptions,
+  type ObjectStore,
+} from '../../src/context/objectStore'
 import { isTBError, type TBErrorCode } from '../../src/errors'
 import { omit } from '../../src/omit'
 
@@ -29,6 +34,108 @@ async function codeOf(p: Promise<unknown>): Promise<TBErrorCode | string | null>
     return isTBError(e) ? e.code : `非TBError:${String(e)}`
   }
 }
+
+describe('createObjectContextUploadGrant', () => {
+  it('限定 namespace 前缀与 path，签入 contentType，返回稳定 uri 与短期 PUT', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date(NOW))
+    const store = new MemoryObjectStore(() => NOW) as ObjectStore
+    const presignPut = vi.fn(async (
+      key: string,
+      ttlSec: number,
+      opts: ObjectPresignPutOptions,
+    ) => ({
+      method: 'PUT' as const,
+      url: `https://upload.test/${key}?ttl=${ttlSec}`,
+      headers: {
+        'content-type': opts.contentType,
+        ...(opts.ifNoneMatch === undefined ? {} : { 'if-none-match': opts.ifNoneMatch }),
+      },
+    }))
+    store.presignPut = presignPut
+
+    const grant = await createObjectContextUploadGrant(store, {
+      nsPath: NS,
+      keyPrefix: '/ctx/prefix/',
+      uploadGrantTtlSec: 60,
+    }, {
+      path: 'camera/a 1.jpg',
+      contentType: ' image/jpeg ',
+    })
+
+    expect(presignPut).toHaveBeenCalledWith('ctx/prefix/camera/a 1.jpg', 60, {
+      contentType: 'image/jpeg',
+      ifNoneMatch: '*',
+    })
+    expect(grant).toEqual({
+      uri: `node://${NS}/camera/a 1.jpg`,
+      method: 'PUT',
+      url: 'https://upload.test/ctx/prefix/camera/a 1.jpg?ttl=60',
+      headers: { 'content-type': 'image/jpeg', 'if-none-match': '*' },
+      expiresAt: '2026-07-07T00:01:00.000Z',
+    })
+    vi.useRealTimers()
+  })
+
+  it('显式 overwrite 移除不覆盖条件，非法 TTL/字段形状 fail closed', async () => {
+    const store = new MemoryObjectStore(() => NOW) as ObjectStore
+    const presignPut = vi.fn(async () => ({
+      method: 'PUT' as const,
+      url: 'https://upload.test/a.jpg',
+      headers: {},
+    }))
+    store.presignPut = presignPut
+
+    await createObjectContextUploadGrant(store, { nsPath: NS }, {
+      path: 'a.jpg',
+      contentType: 'image/jpeg',
+      overwrite: true,
+    })
+    expect(presignPut).toHaveBeenCalledWith('a.jpg', 900, { contentType: 'image/jpeg' })
+
+    expect(await codeOf(createObjectContextUploadGrant(store, {
+      nsPath: NS,
+      uploadGrantTtlSec: 604_801,
+    }, {
+      path: 'a.jpg',
+      contentType: 'image/jpeg',
+    }))).toBe('invalid_argument')
+    expect(await codeOf(createObjectContextUploadGrant(store, { nsPath: NS }, {
+      path: 'a.jpg',
+      contentType: 'image/jpeg',
+      overwrite: 'yes' as never,
+    }))).toBe('invalid_argument')
+    expect(await codeOf(createObjectContextUploadGrant(store, { nsPath: NS }, {
+      path: 'a.jpg',
+      contentType: 'image/jpeg',
+      unexpected: true,
+    } as never))).toBe('invalid_argument')
+  })
+
+  it('缺签名能力、readOnly、路径穿越或非法 contentType 均拒绝', async () => {
+    const store = new MemoryObjectStore(() => NOW)
+    const base = { nsPath: NS }
+    expect(await codeOf(createObjectContextUploadGrant(store, base, {
+      path: 'a.jpg',
+      contentType: 'image/jpeg',
+    }))).toBe('unavailable')
+
+    const signed = store as ObjectStore
+    signed.presignPut = async () => ({ method: 'PUT', url: 'https://upload.test', headers: {} })
+    expect(await codeOf(createObjectContextUploadGrant(signed, { ...base, readOnly: true }, {
+      path: 'a.jpg',
+      contentType: 'image/jpeg',
+    }))).toBe('permission_denied')
+    expect(await codeOf(createObjectContextUploadGrant(signed, base, {
+      path: '../escape.jpg',
+      contentType: 'image/jpeg',
+    }))).toBe('invalid_argument')
+    expect(await codeOf(createObjectContextUploadGrant(signed, base, {
+      path: 'a.jpg',
+      contentType: 'image/jpeg\r\nx-leak: 1',
+    }))).toBe('invalid_argument')
+  })
+})
 
 describe('Write', () => {
   it('创建条目并返回 Meta(uri 形状 node://<nsPath>/<entryPath>)', async () => {

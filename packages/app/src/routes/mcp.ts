@@ -325,6 +325,7 @@ function mcpBridgeFor(c: AppContext, env: RouteEnv, app: TbHono): McpToolBridge 
       }
 
       const model = await helpModelFor(node, registry, ctx, builtinsOf(c.get('store')), deps, {
+        includeDirectUpload: check(ctx, node.path, 'write').allow,
         refresh: false,
         now,
       })

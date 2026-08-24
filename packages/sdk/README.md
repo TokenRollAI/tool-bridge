@@ -57,7 +57,16 @@ import * as SecureStore from 'expo-secure-store'
 import {
   connectDevice,
   createReactNativeWebSocketFactory,
+  uploadContextObject,
 } from '@tool-bridge/sdk/device'
+
+const credentialProvider = {
+  prepare: async () => {
+    const sk = await SecureStore.getItemAsync('tool-bridge-device-sk')
+    if (!sk) throw new Error('device credential is missing')
+    return { headers: { authorization: `Bearer ${sk}` } }
+  },
+}
 
 const connection = connectDevice({
   baseUrl: 'https://your-gateway.example.com',
@@ -70,13 +79,7 @@ const connection = connectDevice({
       cmds: [{ name: 'capture', description: '拍照' }],
     }],
   },
-  credentialProvider: {
-    prepare: async () => {
-      const sk = await SecureStore.getItemAsync('tool-bridge-device-sk')
-      if (!sk) throw new Error('device credential is missing')
-      return { headers: { authorization: `Bearer ${sk}` } }
-    },
-  },
+  credentialProvider,
   webSocketFactory: createReactNativeWebSocketFactory(WebSocket),
   handler: async ({ path, arguments: args, signal }) => {
     // path 含命令叶子段(如 "fs/get"),命令是最后一段;policy、权限提示、
@@ -88,9 +91,51 @@ const connection = connectDevice({
 // AppState active → connection.resume()
 // AppState background/inactive → connection.suspend()
 await connection.ready
+
+// 拍照后：先向 Tool Bridge 申请限时、定路径 PUT，再由设备直接上传原始二进制。
+// credentialProvider 可与连接共用；purpose === 'http' 时必须返回非空 Authorization header，
+// 不能只返回供 WebSocket 使用的 ticket URL。
+const uploaded = await uploadContextObject({
+  baseUrl: 'https://your-gateway.example.com',
+  deviceId: 'phone-01',
+  contextPath: 'photos',
+  entryPath: `phone-01/${Date.now()}.jpg`,
+  contentType: 'image/jpeg',
+  body: photoBlob,
+  credentialProvider,
+})
+await saveStableReference(uploaded.uri) // 只保存 node://...；不要持久化临时上传 URL
 ```
 
 移动端默认只承诺 App 前台实时在线。`SecureStore`、`AppState`、SQLite 和原生 executor 由应用选择，SDK 不直接依赖 React Native 或 Expo。当前原生 RN adapter 使用第三参数注入 WebSocket upgrade headers；浏览器/RN Web 若不能设置 header，需要网关短期 ticket 能力。
+
+`uploadContextObject` 不增加 WebSocket 帧：它以 HTTP 调用 `<context>/create_upload`，随后
+直接 PUT 到 R2/S3，并返回 `{uri, etag?}`。缺省会以条件 PUT 拒绝覆盖同名 entry；只有调用方
+显式传 `overwrite: true` 才签发可覆盖 PUT。上传 grant 不是 STS：缺省 grant 即使被重复发送，
+也只有第一次创建能成功；可覆盖 grant 在过期前仍可重复使用。两者都是 bearer secret，因此
+设备应为每张照片生成唯一 entry path，且不得记录 grant URL。
+
+Node 22+ 的嵌入宿主可从包根导入 `createS3ObjectStore`，并传给 `objects`，同一实例便会为
+`provider:'r2'` 的 context 暴露直传能力：
+
+```ts
+import { createS3ObjectStore, createToolBridge, MemoryStateStore } from '@tool-bridge/sdk'
+
+const objects = createS3ObjectStore({
+  endpoint: 'https://<account>.r2.cloudflarestorage.com',
+  bucket: 'tb-objects',
+  region: 'auto',
+  accessKeyId: process.env.R2_ACCESS_KEY_ID!,
+  secretAccessKey: process.env.R2_SECRET_ACCESS_KEY!,
+}, { allowInsecure: false })
+
+const tb = createToolBridge({
+  state: new MemoryStateStore(),
+  objects,
+  adminSk,
+  uploadGrantTtlSec: 900,
+})
+```
 
 ## 配置要点
 
@@ -98,6 +143,7 @@ await connection.ready
 |---|---|
 | `state`(必填) | 树配置 / SK / manifest 的存取 |
 | `objects?` | context 对象存储(`provider:'r2'` 的落点);缺省该 provider 返回 unavailable |
+| `uploadGrantTtlSec?` | `create_upload` 写 grant 的有效期秒，缺省 900、最大 604800；与下载 `$ref` TTL 独立 |
 | `secrets?` | 上游凭证;缺省 = 基于 state 的加密存储,主密钥 `encryptionKey` 或 env `TB_SECRET_ENCRYPTION_KEY`,皆无则 secret 能力禁用(Set 返回 unavailable) |
 | `reservedRoots?` / `remoteAllowlist?` / `maxHops?` | 追加保留根 / remote 白名单(空 = 拒一切 remote)/ Via 跳数上限(默认 4) |
 

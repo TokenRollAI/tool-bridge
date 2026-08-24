@@ -14,6 +14,8 @@ export type {
   ToolProviderLike,
   ToolSource,
 } from './types'
+/** S3/R2 S3-compatible 对象存储适配；配置到 `objects` 后可签发直传 PUT。 */
+export { createS3ObjectStore, type S3StoreConfig } from '@tool-bridge/app'
 // 常用类型与内存宿主实现的再导出(嵌入方实现 Provider / 注入 store 用)。
 export {
   type ContextEntry,
@@ -21,12 +23,16 @@ export {
   type ContextEntryMeta,
   type ContextPatch,
   type ContextProvider,
+  type ContextUploadGrant,
+  type ContextUploadInput,
   type DeviceClientState,
   type DeviceExpose,
   type ListOptions,
   MemoryObjectStore,
   MemoryStateStore,
   type NodeInput,
+  type ObjectPresignedPut,
+  type ObjectPresignPutOptions,
   type ObjectStore,
   OperationRegistry,
   type Page,

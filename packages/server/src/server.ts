@@ -229,6 +229,9 @@ export function createTbServer(config: ServerConfig): TbServer {
   if (config.toolCacheTtlSec !== undefined) deps.toolCacheTtlSec = config.toolCacheTtlSec
   if (config.refThresholdBytes !== undefined) deps.refThresholdBytes = config.refThresholdBytes
   if (config.refTtlSec !== undefined) deps.refTtlSec = config.refTtlSec
+  if (config.uploadGrantTtlSec !== undefined) {
+    deps.uploadGrantTtlSec = config.uploadGrantTtlSec
+  }
 
   const app = createTbApp(deps)
 

@@ -47,12 +47,25 @@ The dashboard lives at `https://<your-worker>.workers.dev/ui`. You can also save
 
 ## Optional configuration
 
-- **Presigned R2 links** — without them, large payload `$ref` URLs are proxied through the Worker (`/~ref`), which just works. To hand out direct presigned R2 URLs instead, add to `wrangler.jsonc` `vars`:
+- **Presigned R2 downloads and uploads** — without signing credentials, large payload `$ref` URLs are proxied through the Worker (`/~ref`) and `create_upload` is not advertised. To enable direct presigned GET plus path-scoped PUT uploads, add to `wrangler.jsonc` `vars`:
 
   - `TB_R2_S3_ENDPOINT`: `https://<your-account-id>.r2.cloudflarestorage.com`
   - `TB_R2_BUCKET`: `tool-bridge`
+  - `TB_UPLOAD_GRANT_TTL_SEC`: optional upload-grant lifetime in seconds (default `min(TB_REF_TTL_SEC, 900)`, maximum `604800`)
 
   and store an R2 API token via the gateway's secret registry under the reserved name `r2-presign` (or set `TB_R2_ACCESS_KEY_ID` / `TB_R2_SECRET_ACCESS_KEY` secrets).
+
+  Dashboard uploads also require an R2 bucket CORS policy. Restrict `AllowedOrigins` to the exact Dashboard origin, allow `PUT` with the signed `Content-Type` and `If-None-Match` headers, and expose `ETag` if the UI should display it:
+
+  ```json
+  [{
+    "AllowedOrigins": ["https://<your-worker>.workers.dev"],
+    "AllowedMethods": ["PUT"],
+    "AllowedHeaders": ["Content-Type", "If-None-Match"],
+    "ExposeHeaders": ["ETag"],
+    "MaxAgeSeconds": 3600
+  }]
+  ```
 - **Custom domains** — add a [`routes`](https://developers.cloudflare.com/workers/configuration/routing/custom-domains/) entry to `wrangler.jsonc`, set `TB_CANONICAL_ORIGIN` to the one canonical `https://...` origin used for OAuth callbacks, and keep Preview URLs disabled.
 - **Remote gateway federation** — set `TB_REMOTE_ALLOWLIST` (comma-separated host suffixes) to allow proxying to other tool-bridge instances.
 

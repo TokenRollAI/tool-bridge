@@ -10,7 +10,10 @@ import {
   type ContextEntryInput,
   type ContextPatch,
   type ContextProvider,
+  type ContextUploadGrant,
+  type ContextUploadInput,
   createObjectContextProvider,
+  createObjectContextUploadGrant,
   createSkillhubProvider,
   isContextExpired,
   isTBError,
@@ -130,6 +133,42 @@ export async function contextObjectStoreFor(cfg: ObjectNodeConfig, deps: TbAppDe
     })
   }
   throw TBError.unimplemented(`context provider '${cfg.provider}' not implemented yet`)
+}
+
+/** 内置对象 context 是否具备限时直传签名能力。 */
+export async function contextDirectUploadAvailable(
+  cfg: ObjectNodeConfig,
+  deps: TbAppDeps,
+): Promise<boolean> {
+  // S3 store 的 presignPut 是实现固有能力；发现面只描述协议支持，不应为健康探测
+  // 解析每节点 authRef。凭证缺失/损坏仍由实际 create_upload 调用 fail closed。
+  if (cfg.provider === 's3') return true
+
+  try {
+    return (await contextObjectStoreFor(cfg, deps)).presignPut !== undefined
+  } catch {
+    // ~help/~describe/MCP tools/list 是控制面。对象存储或签名凭证异常只隐藏可选
+    // direct-upload，不能让一个坏 context 拖垮整个发现面。
+    return false
+  }
+}
+
+/** 为内置 r2/s3 context 签发定路径 PUT；不经过 ContextProvider 的 JSON 内容接口。 */
+export async function createContextUploadGrant(
+  node: TreeNode,
+  cfg: ContextConfig,
+  deps: TbAppDeps,
+  input: ContextUploadInput,
+): Promise<ContextUploadGrant> {
+  const objects = await contextObjectStoreFor(cfg, deps)
+  const uploadGrantTtlSec = deps.uploadGrantTtlSec
+    ?? Math.min(deps.refTtlSec ?? PRESIGN_TTL_SEC_DEFAULT, PRESIGN_TTL_SEC_DEFAULT)
+  return createObjectContextUploadGrant(objects, {
+    nsPath: node.path,
+    keyPrefix: contextKeyPrefix(cfg, node.path),
+    readOnly: cfg.readOnly ?? false,
+    uploadGrantTtlSec,
+  }, input)
 }
 
 /**

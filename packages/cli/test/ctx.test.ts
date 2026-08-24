@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { guessContentType, parseMeta } from '../src/commands/ctx'
+import { guessContentType, guessUploadContentType, parseMeta } from '../src/commands/ctx'
 import { resetFetch, setFetch } from '../src/http'
 import { runCli } from './cliHarness'
 
@@ -252,6 +252,152 @@ describe('parseMeta / guessContentType', () => {
     expect(guessContentType('a.txt')).toBe('text/plain')
     expect(guessContentType('a.bin')).toBe('text/plain')
     expect(guessContentType(undefined)).toBe('text/plain')
+  })
+
+  it('直传媒体类型识别常见图片，未知扩展名回退 octet-stream', () => {
+    expect(guessUploadContentType('shot.JPG')).toBe('image/jpeg')
+    expect(guessUploadContentType('shot.png')).toBe('image/png')
+    expect(guessUploadContentType('shot.webp')).toBe('image/webp')
+    expect(guessUploadContentType('raw.bin')).toBe('application/octet-stream')
+  })
+})
+
+describe('tb ctx upload', () => {
+  it('先申请 grant，再把文件原始字节直传；输出不泄露签名 URL', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'tb-ctx-upload-'))
+    const file = join(dir, 'shot.jpg')
+    const bytes = new Uint8Array([0xff, 0xd8, 0xff, 0x00])
+    writeFileSync(file, bytes)
+    const grant = {
+      uri: 'node://ctx/photos/camera/shot.jpg',
+      method: 'PUT',
+      url: 'https://objects.example/shot.jpg?signature=must-not-print',
+      headers: { 'content-type': 'image/jpeg', 'if-none-match': '*' },
+      expiresAt: '2099-08-24T12:00:00.000Z',
+    }
+    const fn = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify(grant), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      }))
+      .mockResolvedValueOnce(new Response(null, { status: 200, headers: { etag: 'v-photo' } }))
+    setFetch(fn as unknown as typeof fetch)
+
+    await runCli([
+      'ctx',
+      'upload',
+      'ctx/photos',
+      'camera/shot.jpg',
+      '--file',
+      file,
+      ...gw,
+      '--json',
+    ])
+
+    expect(fn).toHaveBeenCalledTimes(2)
+    const [grantUrl, grantInit] = fn.mock.calls[0] as [string, RequestInit]
+    expect(grantUrl).toBe('https://gw/ctx/photos/create_upload')
+    expect(JSON.parse(String(grantInit.body))).toEqual({
+      path: 'camera/shot.jpg',
+      contentType: 'image/jpeg',
+    })
+    expect(new Headers(grantInit.headers).get('authorization')).toBe('Bearer tbk_x')
+
+    const [uploadUrl, uploadInit] = fn.mock.calls[1] as [URL, RequestInit]
+    expect(uploadUrl.toString()).toBe(grant.url)
+    expect(uploadInit.method).toBe('PUT')
+    expect(new Headers(uploadInit.headers).get('authorization')).toBeNull()
+    expect(new Headers(uploadInit.headers).get('content-type')).toBe('image/jpeg')
+    expect(new Headers(uploadInit.headers).get('if-none-match')).toBe('*')
+    expect(new Uint8Array(uploadInit.body as ArrayBufferLike)).toEqual(bytes)
+    expect(JSON.parse(stdoutText())).toEqual({ uri: grant.uri, etag: 'v-photo' })
+    expect(stdoutText()).not.toContain('must-not-print')
+    expect(process.exitCode).toBe(0)
+  })
+
+  it('对象存储失败仅报告状态，不回显响应体或预签名 URL', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'tb-ctx-upload-error-'))
+    const file = join(dir, 'shot.jpg')
+    writeFileSync(file, new Uint8Array([1]))
+    const secretUrl = 'https://objects.example/shot.jpg?signature=secret'
+    const fn = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        uri: 'node://ctx/photos/shot.jpg',
+        method: 'PUT',
+        url: secretUrl,
+        headers: { 'content-type': 'image/jpeg' },
+        expiresAt: '2099-08-24T12:00:00.000Z',
+      }), { status: 200 }))
+      .mockResolvedValueOnce(new Response('SignatureDoesNotMatch secret body', { status: 403 }))
+    setFetch(fn as unknown as typeof fetch)
+
+    await runCli(['ctx', 'upload', 'ctx/photos', 'shot.jpg', '--file', file, ...gw, '--json'])
+    const output = stdoutText()
+    expect(output).toContain('object upload returned HTTP 403')
+    expect(output).not.toContain('SignatureDoesNotMatch')
+    expect(output).not.toContain(secretUrl)
+    expect(process.exitCode).toBe(1)
+  })
+
+  it('对象存储网络异常不回显 fetch 错误中可能携带的预签名 URL', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'tb-ctx-upload-network-'))
+    const file = join(dir, 'shot.jpg')
+    writeFileSync(file, new Uint8Array([1]))
+    const secretUrl = 'https://objects.example/shot.jpg?signature=network-secret'
+    const fn = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        uri: 'node://ctx/photos/shot.jpg',
+        method: 'PUT',
+        url: secretUrl,
+        headers: { 'content-type': 'image/jpeg' },
+        expiresAt: '2099-08-24T12:00:00.000Z',
+      }), { status: 200 }))
+      .mockRejectedValueOnce(new Error(`fetch failed for ${secretUrl}`))
+    setFetch(fn as unknown as typeof fetch)
+
+    await runCli(['ctx', 'upload', 'ctx/photos', 'shot.jpg', '--file', file, ...gw, '--json'])
+    expect(stdoutText()).toContain('object upload request failed')
+    expect(stdoutText()).not.toContain('network-secret')
+    expect(process.exitCode).toBe(1)
+  })
+
+  it('--force 显式申请覆盖 grant；默认命中 412 时给 conflict 提示', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'tb-ctx-upload-force-'))
+    const file = join(dir, 'shot.jpg')
+    writeFileSync(file, new Uint8Array([1]))
+    const grant = {
+      uri: 'node://ctx/photos/shot.jpg',
+      method: 'PUT',
+      url: 'https://objects.example/shot.jpg?signature=secret',
+      headers: { 'content-type': 'image/jpeg' },
+      expiresAt: '2099-08-24T12:00:00.000Z',
+    }
+    const forceFetch = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify(grant), { status: 200 }))
+      .mockResolvedValueOnce(new Response(null, { status: 200 }))
+    setFetch(forceFetch as unknown as typeof fetch)
+
+    await runCli([
+      'ctx', 'upload', 'ctx/photos', 'shot.jpg', '--file', file, '--force', ...gw, '--json',
+    ])
+    expect(JSON.parse(String(forceFetch.mock.calls[0]?.[1]?.body))).toEqual({
+      path: 'shot.jpg',
+      contentType: 'image/jpeg',
+      overwrite: true,
+    })
+    expect(process.exitCode).toBe(0)
+
+    process.exitCode = 0
+    const stdout = process.stdout.write as unknown as ReturnType<typeof vi.fn>
+    stdout.mockClear()
+    const conflictFetch = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify(grant), { status: 200 }))
+      .mockResolvedValueOnce(new Response(null, { status: 412 }))
+    setFetch(conflictFetch as unknown as typeof fetch)
+    await runCli(['ctx', 'upload', 'ctx/photos', 'shot.jpg', '--file', file, ...gw, '--json'])
+    expect(stdoutText()).toContain('re-run with --force')
+    expect(stdoutText()).toContain('conflict')
+    expect(process.exitCode).toBe(1)
   })
 })
 

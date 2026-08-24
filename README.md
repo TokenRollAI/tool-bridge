@@ -160,7 +160,17 @@ tb ctx mount ctx/docs \
 
 tb ctx ls ctx/docs
 tb ctx cat ctx/docs notes/readme.md
+tb ctx upload ctx/docs photos/shot.jpg --file ./shot.jpg
+# 只有确认需要替换已有对象时才加 --force
+# tb ctx upload ctx/docs photos/shot.jpg --file ./shot.jpg --force
 ```
+
+`ctx upload` 先向 namespace 的 `create_upload` 申请定路径、限时的 presigned PUT，再把
+文件二进制直接发送到对象存储；网关只看到 `{path, contentType, overwrite?}`。缺省上传会用
+条件 PUT 拒绝覆盖同名对象，只有 CLI `--force`、Dashboard 二次确认或 SDK
+`overwrite: true` 才允许替换。命令输出的是可长期保存的 `node://...` URI，不会打印临时上传
+URL。Cloudflare R2 宿主需额外配置 presign 凭证；从 Dashboard 直传时还要为 Dashboard
+origin 配置 bucket CORS。
 
 完整参数以 `tb <command> --help` 和 [`packages/cli/README.md`](packages/cli/README.md) 为准。
 
