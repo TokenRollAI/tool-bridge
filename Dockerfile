@@ -35,7 +35,8 @@ COPY --from=build /out /app
 COPY --from=build /repo/packages/dashboard/dist /app/dashboard
 RUN mkdir -p /data && chown node:node /data
 USER node
-VOLUME /data
+# 数据卷由 Docker/编排平台在运行时显式挂载；不写 VOLUME 指令，因为 Railway
+# Metal builder 会拒绝包含该指令的 Dockerfile。本地 `-v ...:/data` 与其他平台挂载不受影响。
 # EXPOSE 仅文档性质、不支持变量;默认端口 8787,平台注入 PORT 时以运行时监听为准。
 EXPOSE 8787
 # healthcheck 读与 config.ts 同一套 env(TB_PORT ?? PORT ?? 8787),端口被平台覆盖时不误报。
