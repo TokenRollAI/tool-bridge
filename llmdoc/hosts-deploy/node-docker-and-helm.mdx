@@ -6,7 +6,9 @@ code:
     - packages/server/src/**
     - deploy/**
     - Dockerfile
+    - Dockerfile.railway
     - docker-compose.yml
+    - scripts/dockerfile-contract.test.mjs
 ---
 
 # Node、Docker 与 Compose/Helm
@@ -76,6 +78,8 @@ Helm chart 按后端配置自动推断形态,无独立 mode 开关:
 ## 容器 PaaS(Railway / Fly / Cloud Run / CF Container)
 
 镜像是单容器 + `EXPOSE 8787`,配 PG 后不需要持久卷存状态。端口取 `TB_PORT ?? PORT ?? 8787`;`TB_CANONICAL_ORIGIN` 把 OAuth `redirect_uri` 钉在规范域名,多域名接入必须设置。三个限制:
+
+Railway Metal 不接受 Dockerfile 的 `VOLUME` 指令,因此 Railway service variables 必须设置 `RAILWAY_DOCKERFILE_PATH=Dockerfile.railway`。根 `Dockerfile` 仍是 Fly/Cloud Run/CF Container 等平台的通用入口并保留 `VOLUME /data`;`Dockerfile.railway` 只省略这一条指令,其余镜像行为由 `pnpm test:dockerfile` 保证严格同形。使用本地 SQLite 或 FS 对象存储时,还必须在 Railway 把 Volume **运行时**挂载到 `/data`(平台不会因 Dockerfile 注释自动创建卷);PG + S3/R2 的无状态形态可以不挂卷。不要为选择 Dockerfile 新增已废弃的 `railway.json`/`railway.toml`;若未来要把完整 Railway 项目纳入声明式管理,另行评估新 IaC。
 
 - **ObjectStore 缺省是容器本地 FS**,`$ref` 大对象容器重建即丢、多副本互不可见;配 `TB_OBJECT_STORE_*` 外置。
 - **设备 WebSocket 多副本需配 `TB_REDIS_URL`**;不配时设备只连在一个副本上,调用打到别的副本会误判离线。
