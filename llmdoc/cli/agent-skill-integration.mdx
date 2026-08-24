@@ -19,14 +19,24 @@ code:
 
 ## Agent 运行时流程
 
-1. 用 `tb whoami --json` 验证目标与认证,输出中只能出现打码 SK。
-2. 已知目标时先 `tb search`;Search capability 不存在时逐级使用 `tb tree`、`tb ls` 与 `tb help`。
-3. 下钻工具级 `~help`,以 `cmds[].path`、schema、effect、confirm 和 scope 决定调用方式与确认边界。
-4. 调用前读取 `~help` 中相关 feedback;陌生或易失败路径再主动 `tb feedback ls/get`。
-5. 发生错误、超时、schema 合法但结果异常或上游行为不一致时,先在精确路径查用 feedback,再决定是否安全重试。
-6. 已有条目确实帮助恢复时及时投票;新问题或已验证解法先去重,再在已获反馈写权限时提交。无写入授权则当场生成草稿并请求一次确认,不能把决定拖到任务结束。
+先按 `target + profile + identity` 确定本次任务的认证上下文。每个不变的上下文在同一 task/session 内只用 `tb whoami --json` 验证一次;切换 target、profile 或 identity 后才重新验证,输出中只能出现打码 SK。CLI reference 与专题说明按需渐进加载,不作为首次调用的固定前置步骤。
 
-feedback 是调用生命周期的实时控制信号,不是事后复盘:前查、异常即查、验证后投票、去重提交都发生在调用现场。运行时 `~help` 是契约真源,feedback 是经验层——可解释坑和规避方式,但不能覆盖当前 schema,也不能把未经验证的猜测包装成结论。
+随后选择最短的适用路径:
+
+- **Fast path:** 当前 runtime 的完整命令 path、schema、`effect:read` 和 `confirm:false` 均已知时,直接 `tb call`,不重复 search、help 或 feedback 预查。
+- **Discovery path:** 能力未知时先 `tb search --json`。结果唯一、字段信息足够且确认是无副作用只读调用时直接 call;Search capability 不存在时才逐级使用 `tb tree`、`tb ls`。字段缺失、命中歧义、路径陌生或历史上易失败,以及任何写入、破坏性或需确认操作,才下钻工具级 `~help`,以 `cmds[].path`、schema、effect、confirm 和 scope 决定调用方式与确认边界。
+- **Recovery path:** call 失败、超时、schema 合法但结果异常或上游行为不一致时,优先消费 CLI 随错误附带的 hint/feedback。只 `get` 最相关的一条;没有有效提示,或为了提交新反馈而去重时,才 `feedback ls`。应用已验证 workaround 后通常最多安全复验一次,副作用结果未知时不自动重试。
+
+正常只读调用不强制 `feedback ls/get`。只有 `~help` 已嵌入高相关条目,或路径陌生、历史上易失败时才在调用前读取相关 feedback。已有条目确实帮助恢复时可投票;新问题或已验证解法先去重,并且只在已获得外部写入授权时提交。vote/submit 均不阻塞成功结果;没有授权就不写 feedback,也不为完成本次调用临时扩大权限。
+
+运行时 `~help` 是契约真源,feedback 是按信号加载的经验层——可解释坑和规避方式,但不能覆盖当前 schema,也不能把未经验证的猜测包装成结论。
+
+性能预算以目标已验证后的 CLI 往返数计算:
+
+- 已知只读路径为一次 `call`。
+- 未知只读能力为 `search + call`;首次使用某个认证上下文最多再加一次 `whoami`。
+- mutating 调用按需增加一次 `help` 与用户确认。
+- 异常恢复通常最多增加一次相关 `feedback get` 和一次安全复验;无有效附带提示时才用 `feedback ls` 扩大检索。
 
 ## 安全下界
 
@@ -49,9 +59,10 @@ feedback 是调用生命周期的实时控制信号,不是事后复盘:前查、
 
 ## 验收
 
-在 Skill 仓库至少验证 `npx --yes skills add . --list`,输出必须只发现预期的 `tool-bridge` skill。再做两个隔离前向测试:
+在 Skill 仓库至少验证 `npx --yes skills add . --list`,输出必须只发现预期的 `tool-bridge` skill。再做三个隔离前向测试:
 
-1. 正常路径覆盖 `whoami → search/tree → tool help → feedback read → call`。
-2. 异常路径用确定性的首次失败覆盖 `call failure → feedback ls/get → 安全复验 → vote 或去重 submit`。
+1. 已知只读路径在 target 已验证后直接 `call`,并断言没有冗余 discovery、help 或 feedback 命令。
+2. 未知只读能力覆盖 `search --json → call`;首次 target 可在前面出现且只出现一次 `whoami`。
+3. 用确定性的首次失败覆盖 `call failure → attached feedback get → 安全复验`,并断言无反馈写入授权时不执行 vote/submit。
 
-异常测试不能只在 prompt 里写"可能失败";若 Agent 首次调用自然成功,只证明正常路径,必须通过无真实资源的可控故障注入重测。最后以 Skill 仓库 GitHub Actions 的 discovery 校验为远端证据。
+异常测试不能只在 prompt 里写"可能失败";若 Agent 首次调用自然成功,只证明成功路径,必须通过无真实资源的可控故障注入重测。测试还应断言恢复通常不超过一次 workaround retry,且副作用不明时不重试。最后以 Skill 仓库 GitHub Actions 的 discovery 校验为远端证据。
