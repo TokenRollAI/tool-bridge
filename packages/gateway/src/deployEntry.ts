@@ -1,5 +1,5 @@
 import { BUILTIN_CATALOG, builtinPluginBindings, type BuiltinPluginEnv } from '@tool-bridge/plugins'
-import { createApp } from './app'
+import { cleanupDefaultStoreFromEnv, createApp, type Env } from './app'
 
 export { createApp, type Env } from './app'
 export { DeviceSession } from './deviceSession'
@@ -37,4 +37,15 @@ const app = createApp({
   pluginCatalog: BUILTIN_CATALOG,
 })
 
-export default app
+const handler: ExportedHandler<Env> = {
+  fetch: (request, env, ctx) => app.fetch(request, env, ctx),
+  scheduled: (_controller, env, ctx) => {
+    ctx.waitUntil(cleanupDefaultStoreFromEnv(env).catch(() => {
+      // Store errors may carry internal driver detail; scheduled logs keep a fixed safe shape.
+      console.warn(JSON.stringify({ event: 'tool_bridge_store_cleanup_failed' }))
+      throw new Error('Store cleanup failed')
+    }))
+  },
+}
+
+export default handler

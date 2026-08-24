@@ -1,7 +1,8 @@
 import { BUILTIN_CATALOG_DIGEST } from '@tool-bridge/plugins'
 import { catalogDigest } from '@tool-bridge/core'
 import { describe, expect, it } from 'vitest'
-import { SELF } from 'cloudflare:test'
+import { env, SELF } from 'cloudflare:test'
+import worker, { type Env as WorkerEnv } from '../src/deployEntry'
 import { TEST_ADMIN_SK } from './fixtures'
 
 /**
@@ -34,6 +35,19 @@ async function post(
 }
 
 describe('生产部署入口(deployEntry)的内置目录装配', () => {
+  it('scheduled export 把 Store cleanup 交给 waitUntil', async () => {
+    let cleanup: Promise<unknown> | undefined
+    const ctx = {
+      waitUntil(promise: Promise<unknown>) {
+        cleanup = promise
+      },
+    } as ExecutionContext
+
+    worker.scheduled?.({} as ScheduledController, env as unknown as WorkerEnv, ctx)
+    expect(cleanup).toBeDefined()
+    await expect(cleanup).resolves.toBeUndefined()
+  })
+
   it('system/catalog 列出全量内置集成(catalog 真的接线了)', async () => {
     const res = await post('system/catalog/list', { opts: { limit: 200 } })
     expect(res.status).toBe(200)

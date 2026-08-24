@@ -10,6 +10,7 @@
 
 import type * as http from 'node:http'
 import {
+  cleanupDefaultStore,
   createS3ObjectStore,
   createTbApp,
   type ReadinessReport,
@@ -142,7 +143,8 @@ export function createTbServer(config: ServerConfig): TbServer {
   const state = backends.state.value
   const search = backends.search.value
   const secrets = new SecretStoreImpl(state, config.encryptionKey)
-  // 平台对象存储:配了 S3/R2 就用它(可无状态横向扩容、支持 presign 直连),
+  // 部署级对象存储(default Store 与对象 Context 共用):配了 S3/R2 就用它
+  // (可无状态横向扩容、支持 presign 直连),
   // 否则回退 dataDir 下的本地 FS(单副本;容器重建即丢)。
   const objects = config.objectStore === undefined
     ? createDataObjectStore(config.dataDir)
@@ -232,10 +234,41 @@ export function createTbServer(config: ServerConfig): TbServer {
   if (config.uploadGrantTtlSec !== undefined) {
     deps.uploadGrantTtlSec = config.uploadGrantTtlSec
   }
+  if (config.storeTokenSecret !== undefined) deps.storeTokenSecret = config.storeTokenSecret
+  if (config.storeMaxObjectBytes !== undefined) {
+    deps.storeMaxObjectBytes = config.storeMaxObjectBytes
+  }
+  if (config.storeRelayMaxBytes !== undefined) {
+    deps.storeRelayMaxBytes = config.storeRelayMaxBytes
+  }
+  if (config.storeUploadTtlSec !== undefined) deps.storeUploadTtlSec = config.storeUploadTtlSec
+  if (config.storeShareTtlSec !== undefined) deps.storeShareTtlSec = config.storeShareTtlSec
+  if (config.storeReadTtlSec !== undefined) deps.storeReadTtlSec = config.storeReadTtlSec
+  if (config.storeCallMaxBytes !== undefined) deps.storeCallMaxBytes = config.storeCallMaxBytes
+  if (config.storeCallMaxObjectBytes !== undefined) {
+    deps.storeCallMaxObjectBytes = config.storeCallMaxObjectBytes
+  }
+  if (config.storeCallMaxObjects !== undefined) {
+    deps.storeCallMaxObjects = config.storeCallMaxObjects
+  }
+  if (config.storeCallAllowedContentTypes !== undefined) {
+    deps.storeCallAllowedContentTypes = config.storeCallAllowedContentTypes
+  }
 
   const app = createTbApp(deps)
 
   let server: ServerType | undefined
+  let storeCleanupTimer: NodeJS.Timeout | undefined
+  let storeCleanupInFlight = false
+  const runStoreCleanup = async (): Promise<void> => {
+    if (storeCleanupInFlight) return
+    storeCleanupInFlight = true
+    try {
+      await cleanupDefaultStore(deps)
+    } finally {
+      storeCleanupInFlight = false
+    }
+  }
   return {
     app,
     search,
@@ -254,6 +287,16 @@ export function createTbServer(config: ServerConfig): TbServer {
         requireAdminSk: !config.allowInsecureBootstrap,
       })
       await hub.sweepOrphans()
+      // Node 有真实启动点：首次监听前收敛遗留 Store 状态，随后周期清理。timer
+      // 不阻止进程退出；并发 tick 直接跳过，避免慢后端堆积 cleanup 扫描。
+      await runStoreCleanup()
+      storeCleanupTimer = setInterval(() => {
+        void runStoreCleanup().catch(() => {
+          // 固定事件名，不把可能含 driver key 的底层错误写进日志。
+          console.warn(JSON.stringify({ event: 'tool_bridge_store_cleanup_failed' }))
+        })
+      }, config.storeCleanupIntervalSec * 1000)
+      storeCleanupTimer.unref?.()
       return await new Promise((resolve) => {
         server = serve({ fetch: app.fetch, port: config.port, hostname: config.host }, (info) => {
           resolve({ port: info.port })
@@ -269,6 +312,10 @@ export function createTbServer(config: ServerConfig): TbServer {
       // HTTP 排空、关后端。反过来(旧序:先杀 hub)会出现"设备通道已死、HTTP 还在收
       // 新请求"的窗口——期间到达的设备调用一律误报离线。
       draining = true
+      if (storeCleanupTimer !== undefined) {
+        clearInterval(storeCleanupTimer)
+        storeCleanupTimer = undefined
+      }
       let closed: Promise<void> | undefined
       if (server !== undefined) {
         const s = server

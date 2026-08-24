@@ -58,6 +58,8 @@ export function resetFetch(): void {
 export interface ApiOptions {
   accept?: 'json' | 'text' | 'markdown'
   body?: unknown
+  /** 仅用于协议规定的附加 capability header；Authorization 仍由 Target 权威组装。 */
+  headers?: Record<string, string>
   method?: 'GET' | 'POST' | 'DELETE'
   path: string
   query?: Record<string, string | number | undefined>
@@ -159,6 +161,10 @@ export async function apiFetch(target: Target, opts: ApiOptions): Promise<ApiRes
   const url = `${base}${path}${buildQuery(opts.query)}`
 
   const headers: Record<string, string> = {}
+  // 调用者不能借附加 headers 改写普通控制面的身份。
+  for (const [name, value] of Object.entries(opts.headers ?? {})) {
+    if (name.toLowerCase() !== 'authorization') headers[name] = value
+  }
   if (sk) headers.authorization = `Bearer ${sk}`
   if (opts.accept === 'json') headers.accept = 'application/json'
   else if (opts.accept === 'markdown') headers.accept = 'text/markdown'
@@ -309,6 +315,129 @@ export async function putPresigned(
     )
   }
   return etag === null ? {} : { etag }
+}
+
+export interface StorePutGrant extends PresignedPutGrant {
+  maxBytes: number
+  objectUri: string
+  transport: 'relay' | 'presigned-put'
+  uploadId: string
+  uploadToken: string
+}
+
+/**
+ * Store 上传数据面。relay PUT 额外携带 upload session capability 并返回 ready descriptor；
+ * direct PUT 只发送签名 headers，provider body 永不进入错误消息。
+ */
+export async function putStoreObject(
+  grant: StorePutGrant,
+  body: NonNullable<RequestInit['body']>,
+  timeoutMs: number = DEFAULT_TIMEOUT_MS,
+): Promise<unknown | undefined> {
+  let url: URL
+  let headers: Headers
+  try {
+    url = new URL(grant.url)
+    headers = new Headers(grant.headers)
+    if (grant.transport === 'relay') headers.set('x-tb-store-upload', grant.uploadToken)
+  } catch {
+    throw new CliError('gateway returned an invalid Store upload grant', 'internal', true)
+  }
+  if (
+    grant.method !== 'PUT'
+    || (grant.transport !== 'relay' && grant.transport !== 'presigned-put')
+    || !Number.isSafeInteger(grant.maxBytes)
+    || grant.maxBytes < 1
+    || typeof grant.uploadToken !== 'string'
+    || grant.uploadToken.length === 0
+    || !Number.isFinite(Date.parse(grant.expiresAt))
+    || (url.protocol !== 'https:' && url.protocol !== 'http:')
+    || url.username !== ''
+    || url.password !== ''
+  ) {
+    throw new CliError('gateway returned an invalid Store upload grant', 'internal', true)
+  }
+  if (Date.parse(grant.expiresAt) <= Date.now()) {
+    throw new CliError('Store upload grant expired before upload started', 'unavailable', true)
+  }
+
+  let response: Response
+  try {
+    const init: RequestInit & { duplex?: 'half' } = {
+      method: 'PUT',
+      headers,
+      body,
+      signal: AbortSignal.timeout(timeoutMs),
+    }
+    // Node fetch 对流式 request body 要求 duplex；浏览器会忽略未知的 init 字段。
+    init.duplex = 'half'
+    response = await fetchImpl(url, init)
+  } catch (err) {
+    if (err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError')) {
+      throw new CliError('Store object upload timed out', 'unavailable', true)
+    }
+    throw new CliError('Store object upload request failed', 'unavailable', true)
+  }
+
+  if (!response.ok) {
+    await response.body?.cancel().catch(() => {})
+    throw new CliError(
+      `Store object upload returned HTTP ${response.status}`,
+      'unavailable',
+      response.status === 408 || response.status === 429 || response.status >= 500,
+    )
+  }
+  if (grant.transport === 'presigned-put') {
+    await response.body?.cancel().catch(() => {})
+    return undefined
+  }
+  try {
+    return await response.json()
+  } catch {
+    throw new CliError('gateway returned an invalid Store object descriptor', 'internal', true)
+  }
+}
+
+/** Store `$ref` 下载数据面：不携带 Tool Bridge SK/cookie，错误不回显 bearer URL。 */
+export async function fetchStoreRef(
+  ref: string,
+  timeoutMs: number = DEFAULT_TIMEOUT_MS,
+): Promise<Response> {
+  let url: URL
+  try {
+    url = new URL(ref)
+  } catch {
+    throw new CliError('gateway returned an invalid Store read reference', 'internal', true)
+  }
+  if (
+    (url.protocol !== 'https:' && url.protocol !== 'http:')
+    || url.username !== ''
+    || url.password !== ''
+  ) {
+    throw new CliError('gateway returned an invalid Store read reference', 'internal', true)
+  }
+  let response: Response
+  try {
+    response = await fetchImpl(url, {
+      method: 'GET',
+      credentials: 'omit',
+      signal: AbortSignal.timeout(timeoutMs),
+    })
+  } catch (err) {
+    if (err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError')) {
+      throw new CliError('Store object download timed out', 'unavailable', true)
+    }
+    throw new CliError('Store object download request failed', 'unavailable', true)
+  }
+  if (!response.ok) {
+    await response.body?.cancel().catch(() => {})
+    throw new CliError(
+      `Store object download returned HTTP ${response.status}`,
+      'unavailable',
+      response.status === 408 || response.status === 429 || response.status >= 500,
+    )
+  }
+  return response
 }
 
 async function invokeText(target: Target, path: string, body: unknown): Promise<string> {

@@ -14,6 +14,7 @@ import {
   type TreePath,
 } from '@tool-bridge/core'
 import type { DeviceChannel, TbAppDeps } from './deps'
+import { issueDeviceCallUpload } from './store'
 
 // ---------- device 节点 ----------
 
@@ -35,7 +36,23 @@ export async function invokeDevice(
   req: { arguments: Record<string, unknown>, context?: DeviceCallContext, path: string },
 ): Promise<unknown> {
   const id = crypto.randomUUID()
-  const body = (await requireDevice(deps).invoke(deviceId, { id, ...req })) as DeviceCallResult
+  const upload = req.context === undefined
+    ? null
+    : await issueDeviceCallUpload(deps, deviceId, id, req.context)
+  let body: DeviceCallResult
+  try {
+    body = (await requireDevice(deps).invoke(deviceId, {
+      id,
+      path: req.path,
+      arguments: req.arguments,
+      ...(req.context === undefined ? {} : { context: upload?.context ?? req.context }),
+    })) as DeviceCallResult
+  } finally {
+    // A returned/cancelled call must not leave its create capability replayable.
+    // Revocation is best effort: expiry remains the hard backstop and cleanup
+    // will converge state even if the call's final network hop failed.
+    await upload?.revoke().catch(() => {})
+  }
   if (!body || !('ok' in body)) {
     throw new TBError('unavailable', 'device session returned invalid result')
   }

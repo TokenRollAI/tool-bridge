@@ -102,6 +102,38 @@ export class D1StateStore implements StateStore {
       .run())
   }
 
+  async compareAndSwap(
+    key: string,
+    expectedRevision: number | null,
+    value: unknown | null,
+  ): Promise<boolean> {
+    await this.ensureSchema()
+    if (expectedRevision === null) {
+      if (value === null) return false
+      const result = await measuredD1(this.metrics, 'state', async () => await this.db
+        .prepare('INSERT OR IGNORE INTO tb_state_kv (key, value) VALUES (?, ?)')
+        .bind(key, JSON.stringify(value))
+        .run())
+      return result.meta.changes > 0
+    }
+    if (!Number.isInteger(expectedRevision) || expectedRevision < 0) return false
+
+    const predicate = `key = ?
+      AND json_type(value) = 'object'
+      AND json_type(value, '$.revision') = 'integer'
+      AND json_extract(value, '$.revision') = ?`
+    const result = value === null
+      ? await measuredD1(this.metrics, 'state', async () => await this.db
+          .prepare(`DELETE FROM tb_state_kv WHERE ${predicate}`)
+          .bind(key, expectedRevision)
+          .run())
+      : await measuredD1(this.metrics, 'state', async () => await this.db
+          .prepare(`UPDATE tb_state_kv SET value = ? WHERE ${predicate}`)
+          .bind(JSON.stringify(value), key, expectedRevision)
+          .run())
+    return result.meta.changes > 0
+  }
+
   async putIfAbsent(key: string, value: unknown): Promise<boolean> {
     await this.ensureSchema()
     // INSERT OR IGNORE 原子:changes=0 即已存在(输者),不覆盖。

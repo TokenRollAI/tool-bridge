@@ -1,4 +1,5 @@
 import {
+  cleanupDefaultStore,
   createTbApp,
   ensureBootstrapped,
   parseS3Credentials,
@@ -62,6 +63,23 @@ export interface Env {
   TB_SECRET_ENCRYPTION_KEY?: string
   /** 权威 StateStore(D1;ADR-001 从 KV 迁入,强一致 + 原子 putIfAbsent)。 */
   TB_STATE: D1Database
+  /** Store 设备调用 capability 允许的 MIME pattern（逗号分隔）。 */
+  TB_STORE_CALL_ALLOWED_CONTENT_TYPES?: string
+  /** Store 设备调用 capability 的总字节上限。 */
+  TB_STORE_CALL_MAX_BYTES?: string
+  /** Store 设备调用单对象字节上限。 */
+  TB_STORE_CALL_MAX_OBJECT_BYTES?: string
+  /** Store 设备调用最多上传对象数。 */
+  TB_STORE_CALL_MAX_OBJECTS?: string
+  /** Store 对象统一上限；有 signer 的 direct upload 可使用完整值。 */
+  TB_STORE_MAX_OBJECT_BYTES?: string
+  TB_STORE_READ_TTL_SEC?: string
+  /** Worker relay 的有效 body 上限；缺省保守低于最低公开 plan 上限。 */
+  TB_STORE_RELAY_MAX_BYTES?: string
+  TB_STORE_SHARE_TTL_SEC?: string
+  /** 显式 Store token 根密钥；缺省在 D1 原子生成并持久化。 */
+  TB_STORE_TOKEN_SECRET?: string
+  TB_STORE_UPLOAD_TTL_SEC?: string
   /** opt-in 集成测试:真实 MCP echo server 的 URL(仅测试注入)。 */
   TB_TEST_MCP_URL?: string
   TB_TEST_S3_ACCESS_KEY_ID?: string
@@ -82,6 +100,8 @@ function allowInsecure(env: Env): boolean {
 
 const DEFAULT_MAX_HOPS = 4
 const SLOW_REQUEST_MS = 500
+// Workers 最低公开 plan 的请求 body 上限为 100 MB；保留协议/平台余量。
+const DEFAULT_WORKER_STORE_RELAY_MAX_BYTES = 90 * 1024 * 1024
 
 interface SharedEnvResources {
   pluginBindings?: PluginBindings
@@ -180,6 +200,8 @@ function depsFromEnv(
       invoke: (deviceId, req) => env.TB_DEVICE.getByName(deviceId).invoke(req),
       ws: async (deviceId, request) => await env.TB_DEVICE.getByName(deviceId).fetch(request),
     },
+    storeRelayMaxBytes:
+      positiveIntEnv(env.TB_STORE_RELAY_MAX_BYTES) ?? DEFAULT_WORKER_STORE_RELAY_MAX_BYTES,
   }
   if (search !== undefined) deps.search = search
   if (env.TB_SECRET_ENCRYPTION_KEY !== undefined) deps.encryptionKey = env.TB_SECRET_ENCRYPTION_KEY
@@ -195,7 +217,44 @@ function depsFromEnv(
   if (refTtl !== undefined) deps.refTtlSec = refTtl
   const uploadGrantTtl = presignTtlEnv(env.TB_UPLOAD_GRANT_TTL_SEC)
   if (uploadGrantTtl !== undefined) deps.uploadGrantTtlSec = uploadGrantTtl
+  const storeMaxObjectBytes = positiveIntEnv(env.TB_STORE_MAX_OBJECT_BYTES)
+  if (storeMaxObjectBytes !== undefined) deps.storeMaxObjectBytes = storeMaxObjectBytes
+  const storeUploadTtlSec = presignTtlEnv(env.TB_STORE_UPLOAD_TTL_SEC)
+  if (storeUploadTtlSec !== undefined) deps.storeUploadTtlSec = storeUploadTtlSec
+  const storeShareTtlSec = presignTtlEnv(env.TB_STORE_SHARE_TTL_SEC)
+  if (storeShareTtlSec !== undefined) deps.storeShareTtlSec = storeShareTtlSec
+  const storeReadTtlSec = presignTtlEnv(env.TB_STORE_READ_TTL_SEC)
+  if (storeReadTtlSec !== undefined) deps.storeReadTtlSec = storeReadTtlSec
+  const storeCallMaxBytes = positiveIntEnv(env.TB_STORE_CALL_MAX_BYTES)
+  if (storeCallMaxBytes !== undefined) deps.storeCallMaxBytes = storeCallMaxBytes
+  const storeCallMaxObjectBytes = positiveIntEnv(env.TB_STORE_CALL_MAX_OBJECT_BYTES)
+  if (storeCallMaxObjectBytes !== undefined) {
+    deps.storeCallMaxObjectBytes = storeCallMaxObjectBytes
+  }
+  const storeCallMaxObjects = positiveIntEnv(env.TB_STORE_CALL_MAX_OBJECTS)
+  if (storeCallMaxObjects !== undefined) deps.storeCallMaxObjects = storeCallMaxObjects
+  const allowedContentTypes = (env.TB_STORE_CALL_ALLOWED_CONTENT_TYPES ?? '')
+    .split(',')
+    .map(value => value.trim())
+    .filter(value => value.length > 0)
+  if (allowedContentTypes.length > 0) deps.storeCallAllowedContentTypes = allowedContentTypes
+  if (env.TB_STORE_TOKEN_SECRET !== undefined && env.TB_STORE_TOKEN_SECRET.length > 0) {
+    if (env.TB_STORE_TOKEN_SECRET.length < 16) {
+      throw new Error('TB_STORE_TOKEN_SECRET 至少需要 16 个字符')
+    }
+    deps.storeTokenSecret = env.TB_STORE_TOKEN_SECRET
+  }
   return deps
+}
+
+/** Workers Cron Trigger 入口：按请求同构方式创建短生命周期 D1/R2 adapter 后清理 Store。 */
+export async function cleanupDefaultStoreFromEnv(env: Env): Promise<void> {
+  const metrics = new D1RequestMetrics()
+  const state = new D1StateStore(env.TB_STATE.withSession('first-primary'), {
+    metrics,
+    schema: createD1StateSchema(env.TB_STATE),
+  })
+  await cleanupDefaultStore(depsFromEnv(env, state, undefined))
 }
 
 function withServerTiming(response: Response, metrics: D1RequestMetrics, totalMs: number): Response {
@@ -212,6 +271,17 @@ function withServerTiming(response: Response, metrics: D1RequestMetrics, totalMs
   })
 }
 
+/** Capability-bearing path segments must never enter platform logs. */
+export function safeRequestLogPath(requestUrl: string): string {
+  const path = new URL(requestUrl).pathname
+  if (/^\/~ref\/[^/]+$/.test(path)) return '/~ref/<redacted>'
+  if (/^\/~store\/(?:refs|shares)\/[^/]+$/.test(path)) {
+    const family = path.startsWith('/~store/refs/') ? 'refs' : 'shares'
+    return `/~store/${family}/<redacted>`
+  }
+  return path
+}
+
 function logSlowRequest(request: Request, metrics: D1RequestMetrics, totalMs: number): void {
   if (totalMs < SLOW_REQUEST_MS) return
   console.warn(JSON.stringify({
@@ -220,7 +290,7 @@ function logSlowRequest(request: Request, metrics: D1RequestMetrics, totalMs: nu
     d1: metrics.snapshot(),
     durationMs: Number(totalMs.toFixed(1)),
     method: request.method,
-    path: new URL(request.url).pathname,
+    path: safeRequestLogPath(request.url),
   }))
 }
 

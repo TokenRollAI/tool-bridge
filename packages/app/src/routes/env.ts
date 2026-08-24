@@ -12,6 +12,7 @@ import {
 } from '@tool-bridge/core'
 import type { TbAppDeps } from '../deps'
 import { isMutableSearchIndex, SearchSynchronizer } from '../search/synchronizer'
+import { lazyDefaultStoreModule } from '../store'
 import { buildDeps } from '../bootstrap'
 
 /** 路由 handler 的公共装配面(handler 签名统一为 `(c, env)`)。 */
@@ -36,8 +37,8 @@ export function createRouteEnv(deps: TbAppDeps): RouteEnv {
   const searchSync = isMutableSearchIndex(deps.search)
     ? new SearchSynchronizer(deps.state, deps.search)
     : undefined
-  const builtinsOf = (store: StateStore): Map<string, BuiltinModule> =>
-    createBuiltins(
+  const builtinsOf = (store: StateStore): Map<string, BuiltinModule> => {
+    const builtins = createBuiltins(
       buildDeps({
         store,
         secrets: deps.secrets,
@@ -48,6 +49,9 @@ export function createRouteEnv(deps: TbAppDeps): RouteEnv {
         ...(deps.pluginCatalog !== undefined ? { pluginCatalog: deps.pluginCatalog } : {}),
       }),
     )
+    builtins.set('store', lazyDefaultStoreModule(deps))
+    return builtins
+  }
   const globalSearchCapabilities = (): Array<'search' | 'search:semantic'> => {
     const declared = new Set(deps.search?.capabilities ?? [])
     if (!declared.has('search')) return []

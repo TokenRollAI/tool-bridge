@@ -50,6 +50,16 @@ export interface DeviceCallContext {
   expiresAt: Timestamp
   /** 全链路观测,与 call id 同源。 */
   traceId: string
+  /**
+   * 本次 call 独享的 Store 上传能力。token 是短期 bearer，只由 SDK 消费并放入
+   * capability-only 请求 header，设备 handler 不应把它写入结果或日志。
+   */
+  upload?: {
+    expiresAt: Timestamp
+    maxBytes: number
+    maxObjects: number
+    token: string
+  }
 }
 
 /**
@@ -162,6 +172,15 @@ const deviceCallContextSchema = z
     traceId: z.string().min(1),
     createdAt: z.string().min(1),
     expiresAt: z.string().min(1),
+    upload: z
+      .object({
+        token: z.string().min(1),
+        expiresAt: z.iso.datetime({ offset: true }),
+        maxBytes: z.number().int().positive(),
+        maxObjects: z.number().int().positive(),
+      })
+      .strict()
+      .optional(),
   })
   .passthrough()
 

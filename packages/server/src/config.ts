@@ -15,6 +15,7 @@ import {
 const DEFAULT_PORT = 8787
 const DEFAULT_MAX_HOPS = 4
 const DEFAULT_DEVICE_RECLAIM_SEC = 24 * 60 * 60
+const DEFAULT_STORE_CLEANUP_INTERVAL_SEC = 15 * 60
 
 export interface ServerConfig {
   /** 首次引导的 Admin SK 明文(须经 TB_BOOTSTRAP_ADMIN_SK 预置;缺省且未开 insecure bootstrap 则 fail closed)。 */
@@ -44,7 +45,7 @@ export interface ServerConfig {
   encryptionKey?: string
   host: string
   /**
-   * 平台对象存储(context `$ref` 大对象落点)。给出则用 S3/R2 兼容端点,
+   * 平台对象存储(default Store + context `$ref` 大对象落点)。给出则用 S3/R2 兼容端点,
    * 缺省回退 dataDir 下的本地 FS。配 S3 后容器可无状态横向扩容 —— FS 落点
    * 在多副本间互不可见、容器重建即丢。
    */
@@ -93,6 +94,28 @@ export interface ServerConfig {
    * 请求吃闭门羹;单机/本地开发保持 0,关停立即进行。
    */
   shutdownDrainSec?: number
+  /** 设备调用允许上传的 MIME pattern；缺省由应用使用安全默认值。 */
+  storeCallAllowedContentTypes?: string[]
+  /** 设备调用所签发 Store capability 的总字节上限。 */
+  storeCallMaxBytes?: number
+  /** 设备调用单个 Store 对象的字节上限。 */
+  storeCallMaxObjectBytes?: number
+  /** 设备调用最多可创建的 Store 对象数。 */
+  storeCallMaxObjects?: number
+  /** Store 孤儿字节、过期 session/share/call capability 的周期清理间隔。 */
+  storeCleanupIntervalSec: number
+  /** Store 对象统一上限；direct upload 可使用完整值。 */
+  storeMaxObjectBytes?: number
+  /** Store owner read ref 的有效期。 */
+  storeReadTtlSec?: number
+  /** relay upload 的宿主有效上限；缺省等于对象统一上限。 */
+  storeRelayMaxBytes?: number
+  /** Store 匿名可撤销 share 的有效期。 */
+  storeShareTtlSec?: number
+  /** 显式 Store token 根密钥；缺省由应用在 StateStore 原子生成并持久化。 */
+  storeTokenSecret?: string
+  /** Store upload session 的有效期。 */
+  storeUploadTtlSec?: number
   toolCacheTtlSec?: number
   /** Dashboard 静态资源目录覆盖(缺省经 @tool-bridge/dashboard 包解析)。 */
   uiDir?: string
@@ -143,6 +166,8 @@ export function configFromEnv(env: NodeJS.ProcessEnv = process.env): ServerConfi
       allowInsecure,
     },
     deviceReclaimSec: positiveIntEnv(env.TB_DEVICE_RECLAIM_SEC) ?? DEFAULT_DEVICE_RECLAIM_SEC,
+    storeCleanupIntervalSec:
+      positiveIntEnv(env.TB_STORE_CLEANUP_INTERVAL_SEC) ?? DEFAULT_STORE_CLEANUP_INTERVAL_SEC,
     // 0 合法(立即关停,本地/单机默认);positiveIntEnv 拒 0,故单独解析。
     shutdownDrainSec: (() => {
       const n = Number(env.TB_SHUTDOWN_DRAIN_SEC)
@@ -204,5 +229,36 @@ export function configFromEnv(env: NodeJS.ProcessEnv = process.env): ServerConfi
   if (refTtl !== undefined) config.refTtlSec = refTtl
   const uploadGrantTtl = presignTtlEnv(env.TB_UPLOAD_GRANT_TTL_SEC)
   if (uploadGrantTtl !== undefined) config.uploadGrantTtlSec = uploadGrantTtl
+  const storeMaxObjectBytes = positiveIntEnv(env.TB_STORE_MAX_OBJECT_BYTES)
+  if (storeMaxObjectBytes !== undefined) config.storeMaxObjectBytes = storeMaxObjectBytes
+  const storeRelayMaxBytes = positiveIntEnv(env.TB_STORE_RELAY_MAX_BYTES)
+  if (storeRelayMaxBytes !== undefined) config.storeRelayMaxBytes = storeRelayMaxBytes
+  const storeUploadTtlSec = presignTtlEnv(env.TB_STORE_UPLOAD_TTL_SEC)
+  if (storeUploadTtlSec !== undefined) config.storeUploadTtlSec = storeUploadTtlSec
+  const storeShareTtlSec = presignTtlEnv(env.TB_STORE_SHARE_TTL_SEC)
+  if (storeShareTtlSec !== undefined) config.storeShareTtlSec = storeShareTtlSec
+  const storeReadTtlSec = presignTtlEnv(env.TB_STORE_READ_TTL_SEC)
+  if (storeReadTtlSec !== undefined) config.storeReadTtlSec = storeReadTtlSec
+  const storeCallMaxBytes = positiveIntEnv(env.TB_STORE_CALL_MAX_BYTES)
+  if (storeCallMaxBytes !== undefined) config.storeCallMaxBytes = storeCallMaxBytes
+  const storeCallMaxObjectBytes = positiveIntEnv(env.TB_STORE_CALL_MAX_OBJECT_BYTES)
+  if (storeCallMaxObjectBytes !== undefined) {
+    config.storeCallMaxObjectBytes = storeCallMaxObjectBytes
+  }
+  const storeCallMaxObjects = positiveIntEnv(env.TB_STORE_CALL_MAX_OBJECTS)
+  if (storeCallMaxObjects !== undefined) config.storeCallMaxObjects = storeCallMaxObjects
+  const storeCallAllowedContentTypes = (env.TB_STORE_CALL_ALLOWED_CONTENT_TYPES ?? '')
+    .split(',')
+    .map(value => value.trim())
+    .filter(value => value.length > 0)
+  if (storeCallAllowedContentTypes.length > 0) {
+    config.storeCallAllowedContentTypes = storeCallAllowedContentTypes
+  }
+  if (env.TB_STORE_TOKEN_SECRET !== undefined && env.TB_STORE_TOKEN_SECRET.length > 0) {
+    if (env.TB_STORE_TOKEN_SECRET.length < 16) {
+      throw new Error('TB_STORE_TOKEN_SECRET 至少需要 16 个字符')
+    }
+    config.storeTokenSecret = env.TB_STORE_TOKEN_SECRET
+  }
   return config
 }

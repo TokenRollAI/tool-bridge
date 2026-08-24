@@ -10,6 +10,7 @@ export type {
   ConnectDeviceOptions,
   DeviceCallContext,
   DeviceCallHandler,
+  DeviceCallUploadCapability,
   DeviceClientExpose,
   DeviceConnection,
   DeviceConnectionState,
@@ -21,11 +22,14 @@ export type {
   ReactNativeWebSocketConstructor,
 } from './connection'
 
-export { uploadContextObject } from './upload'
+export { uploadObject } from './storeUpload'
 export type {
-  UploadContextObjectOptions,
-  UploadContextObjectResult,
-} from './upload'
+  CallUploadObjectOptions,
+  StoreChecksum,
+  StoreObjectDescriptor,
+  UploadObjectInput,
+  UploadObjectOptions,
+} from './storeUpload'
 
 export {
   decodeDeviceFrame,

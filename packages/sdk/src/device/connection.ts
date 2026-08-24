@@ -6,8 +6,8 @@
  */
 
 import {
+  type DeviceCallContext as CoreDeviceCallContext,
   type DeviceCallHandler as CoreDeviceCallHandler,
-  type DeviceCallContext,
   DeviceClient,
   type DeviceNodeCmd,
   normalizePath,
@@ -19,6 +19,11 @@ import {
   type DeviceExpose as WireDeviceExpose,
 } from '@tool-bridge/core/device'
 import ReconnectingWebSocket from 'partysocket/ws'
+import {
+  type CallUploadObjectOptions,
+  type StoreObjectDescriptor,
+  uploadObjectWithCapability,
+} from './storeUpload'
 
 export const DEVICE_HEARTBEAT_INTERVAL_MS = 30_000
 
@@ -59,7 +64,21 @@ export interface DeviceClientExpose {
   nodes: readonly DeviceNodeDefinition[]
 }
 
-export type { DeviceCallContext }
+export interface DeviceCallUploadCapability {
+  expiresAt: string
+  maxBytes: number
+  maxObjects: number
+  token: string
+}
+
+/**
+ * Local forward-compatible view. Core's decoder preserves unknown context
+ * fields, so SDK consumers can adopt upload capabilities before core exports
+ * the field in its stable frame type.
+ */
+export type DeviceCallContext = CoreDeviceCallContext & {
+  upload?: DeviceCallUploadCapability
+}
 
 export type DeviceCallHandler = (call: {
   arguments: Record<string, unknown>
@@ -69,6 +88,8 @@ export type DeviceCallHandler = (call: {
   /** 相对 mountPath 且含命令叶子段(如 "fs/get");命令是最后一段。 */
   path: string
   signal: AbortSignal
+  /** 使用当前 call 的窄 capability 上传产物；老网关调用时明确返回 unavailable。 */
+  uploadObject(options: CallUploadObjectOptions): Promise<StoreObjectDescriptor>
 }) => Promise<unknown> | unknown
 
 export interface PreparedDeviceCredential {
@@ -136,6 +157,8 @@ export interface ConnectDeviceOptions {
   credentialProvider: DeviceCredentialProvider
   deviceId: string
   expose: DeviceClientExpose | (() => DeviceClientExpose | Promise<DeviceClientExpose>)
+  /** HTTP Store 上传实现；缺省 globalThis.fetch。 */
+  fetcher?: typeof fetch
   handler: DeviceCallHandler
   /** 缺省 30 秒；不得依赖 Node timer.unref。 */
   heartbeatIntervalMs?: number
@@ -271,6 +294,37 @@ function portableExpose(expose: DeviceClientExpose): WireDeviceExpose {
       }
     }),
   }
+}
+
+function validUploadCapability(value: unknown): value is DeviceCallUploadCapability {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false
+  const capability = value as Record<string, unknown>
+  if (
+    typeof capability.token !== 'string'
+    || capability.token.trim() === ''
+    || typeof capability.expiresAt !== 'string'
+    || !Number.isFinite(Date.parse(capability.expiresAt))
+    || typeof capability.maxBytes !== 'number'
+    || !Number.isSafeInteger(capability.maxBytes)
+    || capability.maxBytes < 0
+    || typeof capability.maxObjects !== 'number'
+    || !Number.isSafeInteger(capability.maxObjects)
+    || capability.maxObjects < 0
+  ) return false
+  try {
+    new Headers({ 'x-tb-store-capability': capability.token })
+  } catch {
+    return false
+  }
+  return true
+}
+
+function unavailableCallUpload(): TBError {
+  return new TBError(
+    'unavailable',
+    'device call does not include a usable Store upload capability',
+    { retryable: false },
+  )
 }
 
 /** SDK 根入口与 @tool-bridge/sdk/device 共用的 neutral supervisor。 */
@@ -495,14 +549,40 @@ export function connectDevice(opts: ConnectDeviceOptions): DeviceConnection {
     credentialProvider: opts.credentialProvider,
     deviceId: opts.deviceId,
     expose: async () => portableExpose(await exposeFactory()),
-    handler: async call => await opts.handler({
-      id: call.id,
-      path: call.path,
-      arguments: call.arguments,
-      signal: call.signal as AbortSignal,
-      // 老网关不带 context:字段缺省透传,consumer handler 侧显式降级。
-      ...(call.context !== undefined ? { context: call.context } : {}),
-    }),
+    handler: async (call) => {
+      const signal = call.signal as AbortSignal
+      const context = call.context as DeviceCallContext | undefined
+      const capability = validUploadCapability(context?.upload) ? context.upload : undefined
+      let uploadsStarted = 0
+      return await opts.handler({
+        id: call.id,
+        path: call.path,
+        arguments: call.arguments,
+        signal,
+        uploadObject: async (input) => {
+          if (capability === undefined || Date.parse(capability.expiresAt) <= Date.now()) {
+            throw unavailableCallUpload()
+          }
+          if (uploadsStarted >= capability.maxObjects) {
+            throw new TBError('rate_limited', 'device call upload object limit exceeded', {
+              retryable: false,
+            })
+          }
+          uploadsStarted += 1
+          return await uploadObjectWithCapability({
+            ...input,
+            baseUrl: opts.baseUrl,
+            deviceId: opts.deviceId,
+            capabilityToken: capability.token,
+            capabilityMaxBytes: capability.maxBytes,
+            signal,
+            ...(opts.fetcher === undefined ? {} : { fetcher: opts.fetcher }),
+          })
+        },
+        // 老网关不带 context:字段缺省透传,consumer handler 侧显式降级。
+        ...(context !== undefined ? { context } : {}),
+      })
+    },
     webSocketFactory: opts.webSocketFactory,
     ...(opts.heartbeatIntervalMs === undefined
       ? {}

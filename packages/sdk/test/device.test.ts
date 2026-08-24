@@ -210,6 +210,206 @@ describe('@tool-bridge/sdk/device neutral connection', () => {
     await connection.closed
   })
 
+  it('call.uploadObject 只用 call capability 创建 relay upload，并返回稳定 Store URI', async () => {
+    const harness = factoryHarness()
+    const preparePurposes: Array<string | undefined> = []
+    const httpCalls: Array<{ init?: RequestInit, input: Parameters<typeof fetch>[0] }> = []
+    const readyObject = {
+      uri: 'store://default/call-photo-01',
+      contentType: 'image/jpeg',
+      filename: 'capture.jpg',
+      size: 4,
+      createdAt: '2099-08-24T11:59:00.000Z',
+      readyAt: '2099-08-24T12:00:00.000Z',
+    }
+    const grant = {
+      uploadId: 'call-upload-01',
+      objectUri: readyObject.uri,
+      transport: 'relay',
+      method: 'PUT',
+      url: 'https://tb.example/~store/uploads/call-upload-01',
+      headers: { 'content-type': 'image/jpeg' },
+      expiresAt: '2099-08-24T12:10:00.000Z',
+      maxBytes: 1024,
+      uploadToken: 'upload-session-secret',
+    }
+    const fetcher: typeof fetch = vi.fn(async (input, init) => {
+      httpCalls.push({ input, init })
+      return httpCalls.length === 1
+        ? new Response(JSON.stringify(grant), { status: 200 })
+        : new Response(JSON.stringify(readyObject), { status: 200 })
+    })
+    const connection = connectDevice({
+      baseUrl: 'https://tb.example',
+      deviceId: 'phone-store',
+      expose: { nodes: [{ path: 'camera', kind: 'tool', description: '相机' }] },
+      credentialProvider: {
+        prepare: ({ purpose }) => {
+          preparePurposes.push(purpose)
+          return { headers: { authorization: 'Bearer device-secret' } }
+        },
+      },
+      fetcher,
+      webSocketFactory: harness.factory,
+      handler: async call => await call.uploadObject({
+        body: new Uint8Array([0xff, 0xd8, 0xff, 0x00]),
+        contentType: 'image/jpeg',
+        filename: 'capture.jpg',
+      }),
+    })
+
+    const socket = await connectAttempt(harness, 1)
+    socket.open()
+    socket.receive({ type: 'ready', mountPath: 'device/phone-store' })
+    await connection.ready
+    socket.sent.length = 0
+    socket.receive({
+      type: 'call',
+      id: 'call-store-01',
+      path: 'camera/capture',
+      arguments: {},
+      context: {
+        caller: { keyId: 'sk-caller', owner: 'agent:caller' },
+        traceId: 'trace-store-01',
+        createdAt: '2099-08-24T11:59:00.000Z',
+        expiresAt: '2099-08-24T12:10:00.000Z',
+        upload: {
+          token: 'call-capability-secret',
+          expiresAt: '2099-08-24T12:10:00.000Z',
+          maxBytes: 1024,
+          maxObjects: 1,
+        },
+      },
+    } as unknown as DeviceFrame)
+
+    await vi.waitFor(() => expect(socket.sent).toHaveLength(1))
+    expect(helloFrames(socket)).toEqual([
+      { type: 'result', id: 'call-store-01', ok: true, value: readyObject },
+    ])
+    expect(httpCalls).toHaveLength(2)
+    const createHeaders = new Headers(httpCalls[0]?.init?.headers)
+    expect(createHeaders.get('x-tb-store-capability')).toBe('call-capability-secret')
+    expect(createHeaders.get('authorization')).toBeNull()
+    expect(preparePurposes).toEqual(['websocket'])
+    const relayHeaders = new Headers(httpCalls[1]?.init?.headers)
+    expect(relayHeaders.get('x-tb-store-upload')).toBe('upload-session-secret')
+
+    connection.close()
+  })
+
+  it('老网关不带 capability 时 call.uploadObject 明确 unavailable，仍不发 HTTP', async () => {
+    const harness = factoryHarness()
+    const fetcher: typeof fetch = vi.fn()
+    const connection = connectDevice({
+      baseUrl: 'https://tb.example',
+      deviceId: 'phone-no-store-cap',
+      expose: { nodes: [{ path: 'camera', kind: 'tool', description: '相机' }] },
+      credentialProvider: { prepare: () => ({}) },
+      fetcher,
+      webSocketFactory: harness.factory,
+      handler: async call => await call.uploadObject({
+        body: new Uint8Array([1]),
+        contentType: 'image/jpeg',
+      }),
+    })
+
+    const socket = await connectAttempt(harness, 1)
+    socket.open()
+    socket.receive({ type: 'ready', mountPath: 'device/phone-no-store-cap' })
+    await connection.ready
+    socket.sent.length = 0
+    socket.receive({ type: 'call', id: 'legacy-call', path: 'camera/capture', arguments: {} })
+    await vi.waitFor(() => expect(socket.sent).toHaveLength(1))
+    expect(helloFrames(socket)).toEqual([{
+      type: 'result',
+      id: 'legacy-call',
+      ok: false,
+      error: {
+        code: 'unavailable',
+        message: 'device call does not include a usable Store upload capability',
+        retryable: false,
+      },
+    }])
+    expect(fetcher).not.toHaveBeenCalled()
+    connection.close()
+  })
+
+  it('call.uploadObject 在 capability 过期或已知 body 超限时本地拒绝', async () => {
+    const harness = factoryHarness()
+    const fetcher: typeof fetch = vi.fn()
+    const connection = connectDevice({
+      baseUrl: 'https://tb.example',
+      deviceId: 'phone-limited-store',
+      expose: { nodes: [{ path: 'camera', kind: 'tool', description: '相机' }] },
+      credentialProvider: { prepare: () => ({}) },
+      fetcher,
+      webSocketFactory: harness.factory,
+      handler: async call => await call.uploadObject({
+        body: new Uint8Array([1, 2, 3, 4]),
+        contentType: 'image/jpeg',
+      }),
+    })
+    const socket = await connectAttempt(harness, 1)
+    socket.open()
+    socket.receive({ type: 'ready', mountPath: 'device/phone-limited-store' })
+    await connection.ready
+    socket.sent.length = 0
+
+    const baseContext = {
+      caller: { keyId: 'sk-caller', owner: 'agent:caller' },
+      traceId: 'trace-limited',
+      createdAt: '2099-08-24T11:59:00.000Z',
+      expiresAt: '2099-08-24T12:10:00.000Z',
+    }
+    socket.receive({
+      type: 'call',
+      id: 'expired-upload',
+      path: 'camera/capture',
+      arguments: {},
+      context: {
+        ...baseContext,
+        upload: {
+          token: 'expired-capability',
+          expiresAt: '2000-01-01T00:00:00.000Z',
+          maxBytes: 1024,
+          maxObjects: 1,
+        },
+      },
+    } as unknown as DeviceFrame)
+    await vi.waitFor(() => expect(socket.sent).toHaveLength(1))
+    expect(helloFrames(socket)[0]).toMatchObject({
+      type: 'result',
+      id: 'expired-upload',
+      ok: false,
+      error: { code: 'unavailable' },
+    })
+
+    socket.receive({
+      type: 'call',
+      id: 'oversize-upload',
+      path: 'camera/capture',
+      arguments: {},
+      context: {
+        ...baseContext,
+        upload: {
+          token: 'small-capability',
+          expiresAt: '2099-08-24T12:10:00.000Z',
+          maxBytes: 3,
+          maxObjects: 1,
+        },
+      },
+    } as unknown as DeviceFrame)
+    await vi.waitFor(() => expect(socket.sent).toHaveLength(2))
+    expect(helloFrames(socket)[1]).toMatchObject({
+      type: 'result',
+      id: 'oversize-upload',
+      ok: false,
+      error: { code: 'invalid_argument', message: expect.stringContaining('maxBytes') },
+    })
+    expect(fetcher).not.toHaveBeenCalled()
+    connection.close()
+  })
+
   it('每次 restart 重新读取凭证', async () => {
     const harness = factoryHarness()
     let prepares = 0

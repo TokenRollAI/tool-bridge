@@ -36,7 +36,7 @@ interface BootstrapEnv {
  * 写入持久日志。Node server 仅在显式开发逃生配置下允许随机生成。
  */
 
-/** 引导时注册的内置节点(system directory + 八个 builtin;feedback 走 ~feedback 保留段,非 builtin)。 */
+/** 引导时注册的内置节点(system directory + builtin;feedback 走 ~feedback 保留段,非 builtin)。 */
 const BUILTIN_MODULES = [
   'sk',
   'secret',
@@ -46,6 +46,7 @@ const BUILTIN_MODULES = [
   'catalog',
   'federation',
   'annotation',
+  'store',
 ] as const
 
 const BUILTIN_DESCRIPTIONS: Record<string, string> = {
@@ -57,6 +58,7 @@ const BUILTIN_DESCRIPTIONS: Record<string, string> = {
   catalog: 'Built-in integration catalog (read-only)',
   federation: 'Remote federation host allowlist',
   annotation: 'Admin notes shown in ~help of any path',
+  store: 'Deployment-level private object Store',
 }
 
 let bootstrapOnce: Promise<void> | undefined

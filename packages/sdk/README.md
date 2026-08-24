@@ -14,10 +14,11 @@ npm install @tool-bridge/sdk
 
 ```ts
 import { serve } from '@hono/node-server'
-import { createToolBridge, MemoryStateStore } from '@tool-bridge/sdk'
+import { createToolBridge, MemoryObjectStore, MemoryStateStore } from '@tool-bridge/sdk'
 
 const tb = createToolBridge({
   state: new MemoryStateStore(),      // 或任何 StateStore 实现(SQLite / KV / ...)
+  objects: new MemoryObjectStore(),   // 仅示例/测试；生产须注入持久 FS、R2 或 S3 driver
   adminSk: process.env.TB_ADMIN_SK,   // 缺省读 env TB_BOOTSTRAP_ADMIN_SK;首次引导时必须提供
 })
 
@@ -57,7 +58,7 @@ import * as SecureStore from 'expo-secure-store'
 import {
   connectDevice,
   createReactNativeWebSocketFactory,
-  uploadContextObject,
+  uploadObject,
 } from '@tool-bridge/sdk/device'
 
 const credentialProvider = {
@@ -81,9 +82,20 @@ const connection = connectDevice({
   },
   credentialProvider,
   webSocketFactory: createReactNativeWebSocketFactory(WebSocket),
-  handler: async ({ path, arguments: args, signal }) => {
+  handler: async (call) => {
+    const { path, arguments: args, signal } = call
     // path 含命令叶子段(如 "fs/get"),命令是最后一段;policy、权限提示、
     // 原生能力和 signal 取消处理都属于 App 适配层。
+    if (path === 'camera/capture') {
+      const photoBlob = await takePhoto({ signal })
+      // 网关为本次远程 call 注入窄 upload capability；设备无需知道 Context 或挂载路径。
+      // relay PUT 成功即 ready；R2/S3 直传由 SDK 自动 complete。
+      return await call.uploadObject({
+        body: photoBlob,
+        contentType: 'image/jpeg',
+        filename: 'capture.jpg',
+      })
+    }
     return await runNativeTool({ path, args, signal })
   },
 })
@@ -92,31 +104,31 @@ const connection = connectDevice({
 // AppState background/inactive → connection.suspend()
 await connection.ready
 
-// 拍照后：先向 Tool Bridge 申请限时、定路径 PUT，再由设备直接上传原始二进制。
-// credentialProvider 可与连接共用；purpose === 'http' 时必须返回非空 Authorization header，
-// 不能只返回供 WebSocket 使用的 ticket URL。
-const uploaded = await uploadContextObject({
+// 设备自主上传（不属于远程 call）也直接写 default Store。此路径使用 Device HTTP identity，
+// credentialProvider 在 purpose === 'http' 时必须返回非空 Authorization header。
+const uploaded = await uploadObject({
   baseUrl: 'https://your-gateway.example.com',
   deviceId: 'phone-01',
-  contextPath: 'photos',
-  entryPath: `phone-01/${Date.now()}.jpg`,
   contentType: 'image/jpeg',
   body: photoBlob,
   credentialProvider,
 })
-await saveStableReference(uploaded.uri) // 只保存 node://...；不要持久化临时上传 URL
+await saveStableReference(uploaded.uri) // 只保存 store://default/...；不要持久化临时上传 URL
 ```
 
 移动端默认只承诺 App 前台实时在线。`SecureStore`、`AppState`、SQLite 和原生 executor 由应用选择，SDK 不直接依赖 React Native 或 Expo。当前原生 RN adapter 使用第三参数注入 WebSocket upgrade headers；浏览器/RN Web 若不能设置 header，需要网关短期 ticket 能力。
 
-`uploadContextObject` 不增加 WebSocket 帧：它以 HTTP 调用 `<context>/create_upload`，随后
-直接 PUT 到 R2/S3，并返回 `{uri, etag?}`。缺省会以条件 PUT 拒绝覆盖同名 entry；只有调用方
-显式传 `overwrite: true` 才签发可覆盖 PUT。上传 grant 不是 STS：缺省 grant 即使被重复发送，
-也只有第一次创建能成功；可覆盖 grant 在过期前仍可重复使用。两者都是 bearer secret，因此
-设备应为每张照片生成唯一 entry path，且不得记录 grant URL。
+`uploadObject` 不增加 WebSocket 二进制帧：它调用 `system/store/create_upload` 后按 grant 选择
+网关 relay 或 R2/S3 presigned PUT，最终只返回稳定 `store://default/...` descriptor。远程 call
+优先使用 `call.uploadObject`；老网关没有 call capability 时该方法会明确返回 `unavailable`，不会
+退回某个隐式 Context。独立调用 helper 时，Node 消费者可从 `@tool-bridge/sdk` 根入口导入，
+React Native/Hermes 消费者从 `@tool-bridge/sdk/device` 导入；两处是同一套 neutral 实现。
 
-Node 22+ 的嵌入宿主可从包根导入 `createS3ObjectStore`，并传给 `objects`，同一实例便会为
-`provider:'r2'` 的 context 暴露直传能力：
+设备 SDK 不再暴露 `uploadContextObject`。把二进制 author 到指定语义 Context entry 仍可通过
+Context API、`tb ctx upload` 或 Dashboard 完成；设备照片、视频、录音等产物统一进入 default Store。
+
+Node 22+ 的嵌入宿主可从包根导入 `createS3ObjectStore` 并传给 `objects`，同一实例同时作为
+default Store 与对象型 Context 的共享字节 driver，并为 Store 提供直传能力：
 
 ```ts
 import { createS3ObjectStore, createToolBridge, MemoryStateStore } from '@tool-bridge/sdk'

@@ -13,9 +13,25 @@
  *   sys:bootstrapped  → true(Admin SK 引导幂等标志)
  *   annotation:<path> → { text, updatedAt, updatedBy }(管理员 Path 补充说明)
  *   feedback:<path>   → FeedbackEntry[](Agent 使用反馈,单 key 整存)
+ *   store:object:<id>  → StoreObject(revision CAS)
+ *   store:upload:<id>  → UploadSession(revision CAS)
+ *   store:call-capability:<id> → CallUploadCapability(token 仅存 hash)
+ *   store:share:<id>   → ShareGrant(token 仅存 hash)
  */
 
 export interface StateStore {
+  /**
+   * 可选原子 compare-and-swap 原语，供带 `revision` 的权威记录做跨副本状态转换。
+   *
+   * - `expectedRevision === null`：仅当 key 不存在时写入；
+   * - 数字：仅当现存值是对象且其 `revision` 严格等于该值时替换或删除；
+   * - `value === null`：命中后删除，否则替换为 value。
+   *
+   * 调用方负责让新值的 revision 从 expectedRevision 单调加一。实现必须把比较与
+   * 写入/删除放在同一条原子存储操作中，不能用 get→put 或进程内锁模拟。
+   * StoreService 等依赖并发状态机的能力会在缺少此原语时 fail closed。
+   */
+  compareAndSwap?(key: string, expectedRevision: number | null, value: unknown | null): Promise<boolean>
   delete(key: string): Promise<void>
   get(key: string): Promise<unknown | null>
   /** 批量读取，返回值只包含当前存在的 key；单次最多 100 keys。 */
@@ -83,6 +99,33 @@ export function prefixUpperBound(prefix: string): string | undefined {
 /** 进程内存实现:单测与 SDK 内嵌宿主用。 */
 export class MemoryStateStore implements StateStore {
   private m = new Map<string, unknown>()
+
+  async compareAndSwap(
+    key: string,
+    expectedRevision: number | null,
+    value: unknown | null,
+  ): Promise<boolean> {
+    if (expectedRevision === null) {
+      if (this.m.has(key) || value === null) return false
+      this.m.set(key, value)
+      return true
+    }
+    if (!Number.isInteger(expectedRevision) || expectedRevision < 0 || !this.m.has(key)) {
+      return false
+    }
+    const current = this.m.get(key)
+    if (
+      typeof current !== 'object'
+      || current === null
+      || Array.isArray(current)
+      || (current as { revision?: unknown }).revision !== expectedRevision
+    ) {
+      return false
+    }
+    if (value === null) this.m.delete(key)
+    else this.m.set(key, value)
+    return true
+  }
 
   async get(key: string): Promise<unknown | null> {
     return this.m.has(key) ? (this.m.get(key) as unknown) : null

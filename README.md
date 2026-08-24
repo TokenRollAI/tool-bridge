@@ -125,11 +125,30 @@ Skill 会先验证目标，再搜索或逐级浏览、读取工具级 schema 与
 | 使用方式 | 当前入口 | 典型用途 |
 |---|---|---|
 | 接入已有工具 | MCP、声明式 HTTP、内置集成、外部 Plugin | 给 Agent 提供统一发现与调用入口 |
+| 存储设备产物和附件 | 部署自带的 default Store、SDK、CLI、Dashboard | 上传照片/视频/录音，获得稳定 URI，并按需短期分享 |
 | 管理上下文与技能 | R2、S3、Node 文件对象存储、Plugin Context、Skillhub | 统一读写、搜索文档与对象，发布和获取 Agent Skill |
 | 接入本地机器 | `tb daemon install`、`tb connect`、SDK `connect()` | 从内网主动连接，按白名单暴露 shell、文件或本地函数 |
 | 共享使用经验 | 每个路径的 `~feedback`、CLI、Dashboard | 让后续 Agent 在调用前看到已验证的坑和建议 |
 | 联邦多个团队 | remote 节点、`system/federation` | 把另一棵 HTBP 树挂成子树，不共享本地调用者凭据 |
 | 兼容 MCP 客户端 | `/<base>/~mcp` | 将当前身份可见的工具投影为 MCP server |
+
+### 上传设备产物与普通附件
+
+每个标准部署都自带一个与 Context 独立的 default Store。Node/Docker 默认写入 `/data` 卷，
+Cloudflare 默认写入部署时创建的 R2 bucket；设备拍照、视频和录音不需要先挂载 Context：
+
+```sh
+tb store upload ./capture.jpg --json
+tb store ls
+tb store stat store://default/<objectId>
+tb store get store://default/<objectId> --out ./capture.jpg
+tb store share store://default/<objectId> --ttl 3600 --json
+tb store revoke-share <shareId>
+```
+
+`store://default/...` 是稳定标识，本身不授予读取权限。`share` 返回的 `$ref` 是短期 bearer，
+只会在这次成功命令的 stdout/JSON 中出现；不要写入日志。Context upload 仍用于“把二进制写到某个
+语义 Context 的命名 entry”，与 Store 的匿名设备产物用途不同。
 
 ### 接入工具与上下文
 
@@ -167,8 +186,8 @@ tb ctx upload ctx/docs photos/shot.jpg --file ./shot.jpg
 
 `ctx upload` 先向 namespace 的 `create_upload` 申请定路径、限时的 presigned PUT，再把
 文件二进制直接发送到对象存储；网关只看到 `{path, contentType, overwrite?}`。缺省上传会用
-条件 PUT 拒绝覆盖同名对象，只有 CLI `--force`、Dashboard 二次确认或 SDK
-`overwrite: true` 才允许替换。命令输出的是可长期保存的 `node://...` URI，不会打印临时上传
+条件 PUT 拒绝覆盖同名对象，只有 CLI `--force` 或 Dashboard 二次确认才允许替换。
+命令输出的是可长期保存的 `node://...` URI，不会打印临时上传
 URL。Cloudflare R2 宿主需额外配置 presign 凭证；从 Dashboard 直传时还要为 Dashboard
 origin 配置 bucket CORS。
 
@@ -272,10 +291,12 @@ npm install @tool-bridge/sdk
 ```
 
 ```ts
-import { createToolBridge, MemoryStateStore } from '@tool-bridge/sdk'
+import { createToolBridge, MemoryObjectStore, MemoryStateStore } from '@tool-bridge/sdk'
 
 const tb = createToolBridge({
   state: new MemoryStateStore(),
+  // Store 是必备部署能力；内存 driver 仅适合示例/测试，生产请注入持久 FS、R2 或 S3。
+  objects: new MemoryObjectStore(),
   adminSk: process.env.TB_BOOTSTRAP_ADMIN_SK!,
 })
 

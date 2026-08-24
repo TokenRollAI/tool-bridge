@@ -3,6 +3,7 @@ import { spawnSync } from 'node:child_process'
 import { delimiter, join } from 'node:path'
 import assert from 'node:assert/strict'
 import { parseEnv } from 'node:util'
+import { parse } from 'jsonc-parser'
 import { tmpdir } from 'node:os'
 import test from 'node:test'
 
@@ -242,4 +243,28 @@ test('Deploy Button collects both trust-root secrets without shipping shared def
   const manifest = JSON.parse(await readFile(join(root, 'template', 'package.json'), 'utf8'))
   assert.match(manifest.cloudflare.bindings.TB_BOOTSTRAP_ADMIN_SK.description, /Required.*password manager/)
   assert.match(manifest.cloudflare.bindings.TB_SECRET_ENCRYPTION_KEY.description, /Required.*root key/)
+  assert.match(manifest.cloudflare.bindings.TB_R2.description, /default Store/)
+
+  // 0.x caret 不跨 minor；模板必须随本轮发布包版本同步，否则 Deploy Button 会部署旧产品面。
+  for (const packageName of ['dashboard', 'gateway']) {
+    const published = JSON.parse(await readFile(
+      join(root, 'packages', packageName, 'package.json'),
+      'utf8',
+    ))
+    assert.equal(
+      manifest.dependencies[`@tool-bridge/${packageName}`],
+      `^${published.version}`,
+      packageName,
+    )
+  }
+})
+
+test('source and Deploy Button Workers both schedule bounded Store cleanup', async () => {
+  for (const relative of [
+    join('packages', 'gateway', 'wrangler.jsonc'),
+    join('template', 'wrangler.jsonc'),
+  ]) {
+    const config = parse(await readFile(join(root, relative), 'utf8'))
+    assert.deepEqual(config.triggers?.crons, ['*/15 * * * *'], relative)
+  }
 })

@@ -63,6 +63,33 @@ export class SqliteStateStore implements StateStore {
     this.stmtPut.run(key, JSON.stringify(value))
   }
 
+  async compareAndSwap(
+    key: string,
+    expectedRevision: number | null,
+    value: unknown | null,
+  ): Promise<boolean> {
+    if (expectedRevision === null) {
+      if (value === null) return false
+      const info = this.db
+        .prepare('INSERT OR IGNORE INTO kv (key, value) VALUES (?, ?)')
+        .run(key, JSON.stringify(value))
+      return info.changes > 0
+    }
+    if (!Number.isInteger(expectedRevision) || expectedRevision < 0) return false
+
+    // JSON type guard 避免 boolean true 被 SQLite json_extract 当作数字 1 误命中。
+    const predicate = `key = ?
+      AND json_type(value) = 'object'
+      AND json_type(value, '$.revision') = 'integer'
+      AND json_extract(value, '$.revision') = ?`
+    const info = value === null
+      ? this.db.prepare(`DELETE FROM kv WHERE ${predicate}`).run(key, expectedRevision)
+      : this.db
+          .prepare(`UPDATE kv SET value = ? WHERE ${predicate}`)
+          .run(JSON.stringify(value), key, expectedRevision)
+    return info.changes > 0
+  }
+
   async putIfAbsent(key: string, value: unknown): Promise<boolean> {
     // INSERT OR IGNORE 原子:changes=0 即已存在(输者),不覆盖。
     const info = this.db

@@ -33,6 +33,9 @@
   // 主要后端，避免一条请求内的多次 D1/上游往返都跨洲。注意 /ui 目前也先过 Worker，
   // 因此纯静态 Dashboard 的首字节可能不如 edge-first；核心 API 延迟优先。
   "placement": { "mode": "smart" },
+  // Workers 无常驻进程：Store 的过期 session/share/call capability 与孤儿字节
+  // 必须由 Cron Trigger 收敛，不能依赖请求顺带清理。
+  "triggers": { "crons": ["*/15 * * * *"] },
   "vars": {
     // 规范 origin(钉死 OAuth redirect_uri);空串 = 本部署不钉,由 provision 从 TB_BASE_URL 回填。
     "TB_CANONICAL_ORIGIN": "",
@@ -60,7 +63,7 @@
       "database_id": "00000000-0000-0000-0000-000000000000"
     }
   ],
-  // R2:context r2 provider 与大对象 $ref。
+  // R2:部署级 default Store、context r2 provider 与大对象 $ref。
   "r2_buckets": [
     { "binding": "TB_R2", "bucket_name": "tb-r2" }
   ],

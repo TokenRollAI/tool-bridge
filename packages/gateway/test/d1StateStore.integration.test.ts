@@ -87,6 +87,50 @@ describe('D1StateStore 契约(对拍 MemoryStateStore)', () => {
     })
   })
 
+  it('compareAndSwap:创建、revision 替换/删除与失配语义对拍', async () => {
+    await contract(async (store, ns) => {
+      expect(store.compareAndSwap).toBeTypeOf('function')
+      const cas = store.compareAndSwap!.bind(store)
+      const key = `${ns}cas`
+      const missingDelete = await cas(key, null, null)
+      const created = await cas(key, null, { revision: 0, state: 'pending' })
+      const duplicate = await cas(key, null, { revision: 0, state: 'other' })
+      const stale = await cas(key, 1, { revision: 2 })
+      const replaced = await cas(key, 0, { revision: 1, state: 'ready' })
+      const staleDelete = await cas(key, 0, null)
+      const deleted = await cas(key, 1, null)
+      await store.put(`${ns}cas:bad`, { revision: true })
+      const booleanRevision = await cas(`${ns}cas:bad`, 1, { revision: 2 })
+      await store.put(`${ns}cas:fractional`, { revision: 1.5 })
+      const fractionalRevision = await cas(`${ns}cas:fractional`, 1, { revision: 2 })
+      return {
+        missingDelete,
+        created,
+        duplicate,
+        stale,
+        replaced,
+        staleDelete,
+        deleted,
+        booleanRevision,
+        fractionalRevision,
+        value: await store.get(key),
+      }
+    })
+  })
+
+  it('并发竞争同一 revision，只有一个原子推进', async () => {
+    const store = new D1StateStore(db)
+    const key = `cas-race:${round++}`
+    await store.put(key, { revision: 0, state: 'pending' })
+    const results = await Promise.all([
+      store.compareAndSwap(key, 0, { revision: 1, winner: 'first' }),
+      store.compareAndSwap(key, 0, { revision: 1, winner: 'second' }),
+    ])
+
+    expect(results.sort()).toEqual([false, true])
+    expect(await store.get(key)).toMatchObject({ revision: 1 })
+  })
+
   it('D1 Session 内保持 read-my-own-writes', async () => {
     const store = new D1StateStore(db.withSession('first-primary'))
     const key = `session:${round++}`

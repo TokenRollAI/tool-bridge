@@ -15,6 +15,7 @@ import { statusCommand } from './commands/status'
 import { whoamiCommand } from './commands/whoami'
 import { loginCommand } from './commands/login'
 import { mountCommand } from './commands/mount'
+import { storeCommand } from './commands/store'
 import { callCommand } from './commands/call'
 import { helpCommand } from './commands/help'
 import { noteCommand } from './commands/note'
@@ -48,7 +49,8 @@ function showGlobalOptionsInHelp(command: Command): void {
  * - note ls/get/set/rm:Path 补充说明(展示在 ~help;set/rm 需 admin)。
  * - feedback ls/get/submit/vote/rm:Agent 使用反馈(头部条目进 ~help)。
  * - tool mount/rm、server add/ls/rm、call:挂载工具源与数据面调用。
- * - ctx ls/cat/put/upload/patch/rm/search/mount/unmount:Context Layer。
+ * - ctx ls/cat/put/upload/patch/rm/search/mount/unmount:Context Layer authoring。
+ * - store upload/stat/get/share/revoke-share/rm/list:部署级默认对象存储。
  * - skill ls/get/search/publish/rm/mount/unmount:skillhub(Agent Skill 仓库)。
  * - connect、daemon、device ls、mount fs:设备反向注册与本机守护。
  * - plugin register/list/get/update/health/rm:插件注册表。
@@ -91,6 +93,7 @@ Agent feedback — every path carries experience from other agents:
   program.addCommand(serverCommand())
   program.addCommand(callCommand())
   program.addCommand(ctxCommand())
+  program.addCommand(storeCommand())
   program.addCommand(skillCommand())
   program.addCommand(connectCommand())
   program.addCommand(daemonCommand())

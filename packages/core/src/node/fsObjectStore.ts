@@ -146,6 +146,9 @@ export class FsObjectStore implements ObjectStore {
       throw new TBError('invalid_argument', `非法 entry 路径 '${key}':未知根或缺相对路径`)
     }
     await this.assertInRoot(r.root, r.full, key)
+    if (opts?.ifMatchEtag !== undefined && opts.ifNoneMatch !== undefined) {
+      throw new TBError('invalid_argument', 'ifMatchEtag 与 ifNoneMatch 不能同时使用')
+    }
     if (opts?.ifMatchEtag !== undefined) {
       const existing = await this.head(key)
       if (opts.ifMatchEtag !== existing?.etag) {
@@ -154,7 +157,14 @@ export class FsObjectStore implements ObjectStore {
     }
     const bytes = await objectBodyToBytes(body)
     await mkdir(dirname(r.full), { recursive: true })
-    await writeFile(r.full, bytes)
+    try {
+      await writeFile(r.full, bytes, opts?.ifNoneMatch === '*' ? { flag: 'wx' } : undefined)
+    } catch (e) {
+      if (opts?.ifNoneMatch === '*' && isErrnoCode(e, 'EEXIST')) {
+        throw new TBError('conflict', `对象已存在:'${key}'`)
+      }
+      throw e
+    }
     const st = await stat(r.full)
     return this.metaOf(r.key, st)
   }

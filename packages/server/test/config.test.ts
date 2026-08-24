@@ -116,3 +116,55 @@ describe('configFromEnv presign TTL', () => {
     }).uploadGrantTtlSec).toBeUndefined()
   })
 })
+
+describe('configFromEnv 默认 Store', () => {
+  it('新部署默认启用 15 分钟周期清理，其他容量使用应用安全缺省', () => {
+    const config = configFromEnv({ ...base })
+    expect(config.storeCleanupIntervalSec).toBe(900)
+    expect(config.storeMaxObjectBytes).toBeUndefined()
+    expect(config.storeRelayMaxBytes).toBeUndefined()
+    expect(config.storeTokenSecret).toBeUndefined()
+  })
+
+  it('解析容量、TTL、调用 capability 与清理配置', () => {
+    const config = configFromEnv({
+      ...base,
+      TB_STORE_CALL_ALLOWED_CONTENT_TYPES: 'image/*, video/* ,application/pdf',
+      TB_STORE_CALL_MAX_BYTES: '2000',
+      TB_STORE_CALL_MAX_OBJECT_BYTES: '1500',
+      TB_STORE_CALL_MAX_OBJECTS: '3',
+      TB_STORE_CLEANUP_INTERVAL_SEC: '60',
+      TB_STORE_MAX_OBJECT_BYTES: '4096',
+      TB_STORE_READ_TTL_SEC: '120',
+      TB_STORE_RELAY_MAX_BYTES: '2048',
+      TB_STORE_SHARE_TTL_SEC: '180',
+      TB_STORE_UPLOAD_TTL_SEC: '240',
+    })
+    expect(config).toMatchObject({
+      storeCallAllowedContentTypes: ['image/*', 'video/*', 'application/pdf'],
+      storeCallMaxBytes: 2000,
+      storeCallMaxObjectBytes: 1500,
+      storeCallMaxObjects: 3,
+      storeCleanupIntervalSec: 60,
+      storeMaxObjectBytes: 4096,
+      storeReadTtlSec: 120,
+      storeRelayMaxBytes: 2048,
+      storeShareTtlSec: 180,
+      storeUploadTtlSec: 240,
+    })
+  })
+
+  it('显式 token secret 太短时 fail closed', () => {
+    expect(() => configFromEnv({
+      ...base,
+      TB_STORE_TOKEN_SECRET: 'too-short',
+    })).toThrow(/TB_STORE_TOKEN_SECRET/)
+  })
+
+  it('显式 token secret 原样注入但不要求新部署手工配置', () => {
+    expect(configFromEnv({
+      ...base,
+      TB_STORE_TOKEN_SECRET: '0123456789abcdef',
+    }).storeTokenSecret).toBe('0123456789abcdef')
+  })
+})

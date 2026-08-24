@@ -34,6 +34,9 @@ const SecretsPage = lazy(() =>
 const SkPage = lazy(() =>
   import('@/pages/system/SkPage').then(module => ({ default: module.SkPage })),
 )
+const StorePage = lazy(() =>
+  import('@/pages/system/StorePage').then(module => ({ default: module.StorePage })),
+)
 
 function AppBooting() {
   return (
@@ -76,6 +79,14 @@ export default function App() {
     <Suspense fallback={<AppBooting />}>
       <Routes>
         <Route element={<WorkspaceShell />}>
+          <Route
+            element={(
+              <DeferredPage>
+                <StorePage />
+              </DeferredPage>
+            )}
+            path="manage/store"
+          />
           <Route
             element={(
               <DeferredPage>

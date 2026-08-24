@@ -358,7 +358,11 @@ describe('createToolBridge:配置语义', () => {
     // 隔离宿主 env(本机 .env 可能带该变量),否则测试会命中 env 回退。
     vi.stubEnv('TB_SECRET_ENCRYPTION_KEY', undefined)
     try {
-      const tb = createToolBridge({ state: new MemoryStateStore(), adminSk: ADMIN_SK })
+      const tb = createToolBridge({
+        state: new MemoryStateStore(),
+        objects: new MemoryObjectStore(),
+        adminSk: ADMIN_SK,
+      })
       const res = await tb.fetch(
         new Request('http://tb.local/system/secret/set', {
           method: 'POST',
@@ -381,6 +385,7 @@ describe('createToolBridge:配置语义', () => {
   it('reservedRoots 生效:追加保留根下注册被拒', async () => {
     const tb = createToolBridge({
       state: new MemoryStateStore(),
+      objects: new MemoryObjectStore(),
       adminSk: ADMIN_SK,
       reservedRoots: ['corp'],
     })
@@ -412,8 +417,12 @@ describe('createToolBridge:配置语义', () => {
     expect(ok.status).toBe(200)
   })
 
-  it('objects 未注入:r2 provider → 503 unavailable', async () => {
-    const tb = createToolBridge({ state: new MemoryStateStore(), adminSk: ADMIN_SK })
+  it('objects 注入后同时供默认 Store 与 r2 Context 使用', async () => {
+    const tb = createToolBridge({
+      state: new MemoryStateStore(),
+      objects: new MemoryObjectStore(),
+      adminSk: ADMIN_SK,
+    })
     const headers = {
       'authorization': `Bearer ${ADMIN_SK}`,
       'content-type': 'application/json',
@@ -426,7 +435,7 @@ describe('createToolBridge:配置语义', () => {
         body: JSON.stringify({
           path: 'docs/r2',
           kind: 'context',
-          description: 'no objects',
+          description: 'shared objects',
           config: { kind: 'context', provider: 'r2' },
         }),
       }),
@@ -439,11 +448,16 @@ describe('createToolBridge:配置语义', () => {
         body: JSON.stringify({ path: '' }),
       }),
     )
-    expect(res.status).toBe(503)
+    expect(res.status).toBe(200)
+    await expect(res.json()).resolves.toEqual({ items: [] })
   })
 
   it('SDK 不提供网关侧 device 宿主 → /system/device/ws 501', async () => {
-    const tb = createToolBridge({ state: new MemoryStateStore(), adminSk: ADMIN_SK })
+    const tb = createToolBridge({
+      state: new MemoryStateStore(),
+      objects: new MemoryObjectStore(),
+      adminSk: ADMIN_SK,
+    })
     const res = await tb.fetch(
       new Request('http://tb.local/system/device/ws?deviceId=x', {
         headers: { authorization: `Bearer ${ADMIN_SK}`, upgrade: 'websocket' },

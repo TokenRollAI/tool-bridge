@@ -47,8 +47,11 @@ export interface ToolBridgeConfig {
   instanceId?: string
   /** X-TB-Via 跳数上限;默认 4。 */
   maxHops?: number
-  /** context 对象('r2' 平台 provider 的落点);缺省 → 该 provider unavailable。 */
-  objects?: ObjectStore
+  /**
+   * default Store 与对象型 Context 的共享字节 driver。Store 是部署必备能力，
+   * 嵌入宿主必须显式注入；测试/明确易失开发可使用 MemoryObjectStore。
+   */
+  objects: ObjectStore
   /** 进程内插件装配表(binding 名 → fetch handler);`binding:<name>` 插件经此直调。 */
   pluginBindings?: PluginBindings
   /**

@@ -11,8 +11,8 @@
     "check": "tsc --noEmit"
   },
   "dependencies": {
-    "@tool-bridge/dashboard": "^0.21.0",
-    "@tool-bridge/gateway": "^0.19.0"
+    "@tool-bridge/dashboard": "^0.22.0",
+    "@tool-bridge/gateway": "^0.20.0"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20260818.1",
@@ -28,7 +28,7 @@
         "description": "Tool-search index (D1, same database): weighted LIKE backing for `~search`."
       },
       "TB_R2": {
-        "description": "Context objects and large `$ref` payloads."
+        "description": "Deployment default Store, Context objects, and large `$ref` payloads."
       },
       "TB_DEVICE": {
         "description": "One Durable Object per connected device (WebSocket hibernation)."

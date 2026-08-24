@@ -137,6 +137,54 @@ describe('SqliteStateStore 契约(vs MemoryStateStore)', () => {
       return { first, second, value: await store.get('once') }
     })
   })
+
+  it('compareAndSwap:创建、revision 替换/删除与失配语义对拍', async () => {
+    await contract(async (store) => {
+      expect(store.compareAndSwap).toBeTypeOf('function')
+      const cas = store.compareAndSwap!.bind(store)
+      const missingDelete = await cas('cas', null, null)
+      const created = await cas('cas', null, { revision: 0, state: 'pending' })
+      const duplicate = await cas('cas', null, { revision: 0, state: 'other' })
+      const stale = await cas('cas', 1, { revision: 2 })
+      const replaced = await cas('cas', 0, { revision: 1, state: 'ready' })
+      const staleDelete = await cas('cas', 0, null)
+      const deleted = await cas('cas', 1, null)
+      await store.put('cas:bad', { revision: true })
+      const booleanRevision = await cas('cas:bad', 1, { revision: 2 })
+      await store.put('cas:fractional', { revision: 1.5 })
+      const fractionalRevision = await cas('cas:fractional', 1, { revision: 2 })
+      return {
+        missingDelete,
+        created,
+        duplicate,
+        stale,
+        replaced,
+        staleDelete,
+        deleted,
+        booleanRevision,
+        fractionalRevision,
+        value: await store.get('cas'),
+      }
+    })
+  })
+})
+
+describe('SQLite compareAndSwap 并发', () => {
+  it('两个连接竞争同一 revision，只有一个原子推进', async () => {
+    const dbPath = tmpDbPath()
+    const first = new SqliteStateStore(dbPath)
+    const second = new SqliteStateStore(dbPath)
+    cleanups.push(() => first.close(), () => second.close())
+    await first.put('race', { revision: 0, state: 'pending' })
+
+    const results = await Promise.all([
+      first.compareAndSwap('race', 0, { revision: 1, winner: 'first' }),
+      second.compareAndSwap('race', 0, { revision: 1, winner: 'second' }),
+    ])
+
+    expect(results.sort()).toEqual([false, true])
+    expect(await first.get('race')).toMatchObject({ revision: 1 })
+  })
 })
 
 describe('SQLite 持久化(重开同一 db 文件)', () => {

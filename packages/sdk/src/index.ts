@@ -4,6 +4,24 @@
  * (createTbApp),SDK 只做装配——公开面即全部通道,不存在私有通道。
  */
 
+/** Hermes-safe default Store upload helper; also available from `@tool-bridge/sdk/device`. */
+export { uploadObject } from './device/storeUpload'
+export type {
+  CallUploadObjectOptions,
+  StoreChecksum,
+  StoreObjectDescriptor,
+  UploadObjectInput,
+  UploadObjectOptions,
+} from './device/storeUpload'
+export { createStoreClient } from './storeClient'
+export type {
+  StoreClient,
+  StoreClientOptions,
+  StoreListOptions,
+  StoreListPage,
+  StoreReadGrant,
+  StoreShareGrant,
+} from './storeClient'
 export { createToolBridge } from './toolBridge'
 export type {
   Connection,

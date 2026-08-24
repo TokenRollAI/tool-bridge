@@ -182,10 +182,8 @@ export function createToolBridge(config: ToolBridgeConfig): ToolBridge {
   if (config.reservedRoots !== undefined) deps.reservedRoots = config.reservedRoots
   if (config.pluginBindings !== undefined) deps.pluginBindings = config.pluginBindings
   if (config.pluginCatalog !== undefined) deps.pluginCatalog = config.pluginCatalog
-  if (config.objects !== undefined) {
-    const objects = config.objects
-    deps.objects = () => objects
-  }
+  const objects = config.objects
+  deps.objects = () => objects
   const encryptionKey = config.encryptionKey ?? process.env.TB_SECRET_ENCRYPTION_KEY
   if (encryptionKey !== undefined) deps.encryptionKey = encryptionKey
   if (config.uploadGrantTtlSec !== undefined) {

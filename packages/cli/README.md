@@ -149,6 +149,7 @@ KV/R2/D1、构建部署、验证 `~help`，最后保存本机 profile。Admin SK
 | `tb ls` / `tb tree` / `tb help <path>` | 浏览工具树与节点文档 |
 | `tb call <path>/<command> '{…}'` | 调用任意已挂载工具/命令(直连,body 即 arguments) |
 | `tb tool mount/rm` · `tb server add/ls/rm` | 挂载 HTTP/MCP/plugin 上游与远端 HTBP 服务 |
+| `tb store upload/ls/stat/get/share/revoke-share/rm` | 管理部署级 default Store；设备产物不需要 Context 挂载 |
 | `tb ctx ls/cat/put/upload/patch/rm/search` | 上下文读写；`upload` 通过限时 PUT 直传二进制 |
 | `tb sk` / `tb secret` | SK 签发/查看/更新/禁用/吊销与上游凭证管理 |
 | `tb connect` | 将本机注册为设备(shell/fs 反向通道) |
@@ -161,6 +162,10 @@ KV/R2/D1、构建部署、验证 `~help`，最后保存本机 profile。Admin SK
 `tb ctx put` 面向可内联的文本/JSON，支持 stdin 与 `--meta`；`tb ctx upload` 面向大文件或
 二进制，先申请短期 PUT 后直传对象存储。`upload` 缺省拒绝覆盖同名 entry，确认替换时显式加
 `--force`。
+
+`tb store upload` 则把普通附件、设备照片/视频等写入每个部署必备的 default Store，返回稳定的
+`store://default/...` URI；它不要求也不创建 Context。`tb store share` 的成功 stdout/JSON 会返回
+用户明确请求的短期 bearer `$ref`，stderr 与错误响应不会打印该链接。大文件上传、下载均流式执行。
 
 全局参数 `--json` / `--base-url` / `--sk` / `--timeout` 可放在命令前、中、后任一层级；
 即使 Commander 在业务 action 前报错，`--json` 也会返回单个可解析错误对象。配置存于

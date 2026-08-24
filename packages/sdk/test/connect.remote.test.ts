@@ -7,7 +7,7 @@
  * teardown 注意:节点只能由注册它的 SK 删除;此处 connect 与 delete 用同一把 SK。
  */
 
-import { MemoryStateStore, type ToolResult, type ToolSpec } from '@tool-bridge/core'
+import { MemoryObjectStore, MemoryStateStore, type ToolResult, type ToolSpec } from '@tool-bridge/core'
 import { describe, expect, it } from 'vitest'
 import { createToolBridge } from '../src'
 
@@ -44,7 +44,10 @@ describeRemote('SDK connect 全链路(生产网关,opt-in)', () => {
     const mountPath = `device/${deviceId}`
     const marker = `sdk-${Date.now()}`
 
-    const tb = createToolBridge({ state: new MemoryStateStore() })
+    const tb = createToolBridge({
+      state: new MemoryStateStore(),
+      objects: new MemoryObjectStore(),
+    })
     tb.registerTool(
       'tools/echo',
       {

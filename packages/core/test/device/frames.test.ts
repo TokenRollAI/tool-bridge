@@ -131,9 +131,36 @@ describe('encode/decode 往返', () => {
         traceId: 'trace-1',
         createdAt: '2026-08-19T00:00:00.000Z',
         expiresAt: '2026-08-19T00:01:00.000Z',
+        upload: {
+          token: 'tbc_opaque.secret',
+          expiresAt: '2026-08-19T00:01:00.000Z',
+          maxBytes: 1024,
+          maxObjects: 2,
+        },
       },
     }
     expect(decodeDeviceFrame(encodeDeviceFrame(frame))).toEqual(frame)
+  })
+
+  it('call context upload 严格校验 token/expiry/正整数限制且拒绝未知字段', () => {
+    const prefix
+      = '{"type":"call","id":"r1","path":"p/run","arguments":{},"context":{"caller":{"keyId":"k","owner":"user:a"},"traceId":"tr","createdAt":"t0","expiresAt":"t1","upload":'
+    const suffix = '}}'
+    const valid
+      = '{"token":"cap","expiresAt":"2026-08-25T00:01:00.000Z","maxBytes":10,"maxObjects":1}'
+    expect(decodeDeviceFrame(`${prefix}${valid}${suffix}`)).toMatchObject({
+      context: { upload: { token: 'cap', maxBytes: 10, maxObjects: 1 } },
+    })
+    const invalid = [
+      '{"expiresAt":"2026-08-25T00:01:00.000Z","maxBytes":10,"maxObjects":1}',
+      '{"token":"cap","expiresAt":"bad","maxBytes":10,"maxObjects":1}',
+      '{"token":"cap","expiresAt":"2026-08-25T00:01:00.000Z","maxBytes":0,"maxObjects":1}',
+      '{"token":"cap","expiresAt":"2026-08-25T00:01:00.000Z","maxBytes":10,"maxObjects":1.5}',
+      '{"token":"cap","expiresAt":"2026-08-25T00:01:00.000Z","maxBytes":10,"maxObjects":1,"extra":true}',
+    ]
+    for (const upload of invalid) {
+      expect(codeOf(() => decodeDeviceFrame(`${prefix}${upload}${suffix}`))).toBe('invalid_argument')
+    }
   })
 
   it('call 帧的 context 缺 displayName 合法;缺必填字段 → invalid_argument', () => {

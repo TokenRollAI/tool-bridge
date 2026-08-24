@@ -307,6 +307,50 @@ export interface ContextUploadGrant {
   url: string
 }
 
+/** 部署级 default Store 的公开 ready descriptor；不含 driver key 或 capability。 */
+export interface StoreObjectDescriptor {
+  checksum?: { algorithm: 'sha256', value: string }
+  contentType: string
+  createdAt: string
+  expiresAt?: string
+  filename?: string
+  originCallId?: string
+  owner: string
+  producer?: string
+  readyAt: string
+  size: number
+  status: 'ready'
+  updatedAt: string
+  uri: `store://default/${string}`
+}
+
+/** 只在一次上传 mutation 内短暂存在；禁止进入 toast、history 或 URL。 */
+export interface StoreUploadGrant {
+  expiresAt: string
+  headers: Record<string, string>
+  maxBytes: number
+  method: 'PUT'
+  objectUri: `store://default/${string}`
+  transport: 'relay' | 'presigned-put'
+  uploadId: string
+  uploadToken: string
+  url: string
+}
+
+export interface StoreReadGrant {
+  $ref: string
+  contentType: string
+  expiresAt: string
+  size: number
+}
+
+export interface StoreShareGrant {
+  $ref: string
+  expiresAt: string
+  shareId: string
+  uri: `store://default/${string}`
+}
+
 /** skillhub 目录条目摘要(list/search 返回的 SkillSummary)。 */
 export interface SkillSummary {
   description: string

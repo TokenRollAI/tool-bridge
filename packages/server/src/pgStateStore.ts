@@ -61,6 +61,38 @@ export class PgStateStore implements StateStore {
     `
   }
 
+  async compareAndSwap(
+    key: string,
+    expectedRevision: number | null,
+    value: unknown | null,
+  ): Promise<boolean> {
+    if (expectedRevision === null) {
+      if (value === null) return false
+      const result = await this.sql`
+        INSERT INTO tb_kv (key, value) VALUES (${key}, ${this.sql.json(value as never)})
+        ON CONFLICT (key) DO NOTHING
+      `
+      return result.count > 0
+    }
+    if (!Number.isInteger(expectedRevision) || expectedRevision < 0) return false
+
+    // jsonb_typeof guards 住非对象与 boolean revision；比较和 mutation 在单条 SQL 内完成。
+    const predicate = this.sql`
+      key = ${key}
+      AND jsonb_typeof(value) = 'object'
+      AND jsonb_typeof(value -> 'revision') = 'number'
+      AND (value ->> 'revision') ~ '^(0|[1-9][0-9]*)$'
+      AND (value ->> 'revision')::numeric = ${expectedRevision}
+    `
+    const result = value === null
+      ? await this.sql`DELETE FROM tb_kv WHERE ${predicate}`
+      : await this.sql`
+          UPDATE tb_kv SET value = ${this.sql.json(value as never)}
+          WHERE ${predicate}
+        `
+    return result.count > 0
+  }
+
   async putIfAbsent(key: string, value: unknown): Promise<boolean> {
     // ON CONFLICT DO NOTHING 原子:count=0 即已存在(输者),不覆盖。
     const result = await this.sql`

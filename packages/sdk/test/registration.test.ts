@@ -6,7 +6,13 @@
  * 「两条路径共用同一函数」这一结构性保证覆盖(真实远端链路见 opt-in connect.remote)。
  */
 
-import { MemoryStateStore, TBError, type ToolResult, type ToolSpec } from '@tool-bridge/core'
+import {
+  MemoryObjectStore,
+  MemoryStateStore,
+  TBError,
+  type ToolResult,
+  type ToolSpec,
+} from '@tool-bridge/core'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { serve } from '@hono/node-server'
 import { createToolBridge, type ToolBridge } from '../src'
@@ -35,7 +41,11 @@ let close: () => void
 let tb: ToolBridge
 
 beforeAll(async () => {
-  tb = createToolBridge({ state: new MemoryStateStore(), adminSk: ADMIN_SK })
+  tb = createToolBridge({
+    state: new MemoryStateStore(),
+    objects: new MemoryObjectStore(),
+    adminSk: ADMIN_SK,
+  })
   tb.registerContext('readonly-notes', readOnlyNotes(), { description: '只读笔记' })
   tb.registerTool('tools/ping', pingProvider(), {
     description: 'ping 工具',

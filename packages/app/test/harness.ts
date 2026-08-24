@@ -53,12 +53,23 @@ export interface TestAppOpts {
   refTtlSec?: number
   remote?: Partial<RemoteSettings>
   search?: SearchIndex
+  storeCallAllowedContentTypes?: string[]
+  storeCallMaxBytes?: number
+  storeCallMaxObjectBytes?: number
+  storeCallMaxObjects?: number
+  storeMaxObjectBytes?: number
+  storeReadTtlSec?: number
+  storeRelayMaxBytes?: number
+  storeShareTtlSec?: number
+  storeTokenSecret?: string
+  storeUploadTtlSec?: number
   toolCacheTtlSec?: number
   uploadGrantTtlSec?: number
 }
 
 export interface TestApp {
   app: ReturnType<typeof createTbApp>
+  deps: TbAppDeps
   objects: MemoryObjectStore | undefined
   /** `SELF.fetch` 的等价物:签名一致,直接打中立层 Hono app。 */
   request: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>
@@ -93,12 +104,27 @@ export async function createTestApp(opts: TestAppOpts = {}): Promise<TestApp> {
   if (opts.refThresholdBytes !== undefined) deps.refThresholdBytes = opts.refThresholdBytes
   if (opts.refTtlSec !== undefined) deps.refTtlSec = opts.refTtlSec
   if (opts.search !== undefined) deps.search = opts.search
+  if (opts.storeCallAllowedContentTypes !== undefined) {
+    deps.storeCallAllowedContentTypes = opts.storeCallAllowedContentTypes
+  }
+  if (opts.storeCallMaxBytes !== undefined) deps.storeCallMaxBytes = opts.storeCallMaxBytes
+  if (opts.storeCallMaxObjectBytes !== undefined) {
+    deps.storeCallMaxObjectBytes = opts.storeCallMaxObjectBytes
+  }
+  if (opts.storeCallMaxObjects !== undefined) deps.storeCallMaxObjects = opts.storeCallMaxObjects
+  if (opts.storeMaxObjectBytes !== undefined) deps.storeMaxObjectBytes = opts.storeMaxObjectBytes
+  if (opts.storeReadTtlSec !== undefined) deps.storeReadTtlSec = opts.storeReadTtlSec
+  if (opts.storeRelayMaxBytes !== undefined) deps.storeRelayMaxBytes = opts.storeRelayMaxBytes
+  if (opts.storeShareTtlSec !== undefined) deps.storeShareTtlSec = opts.storeShareTtlSec
+  if (opts.storeTokenSecret !== undefined) deps.storeTokenSecret = opts.storeTokenSecret
+  if (opts.storeUploadTtlSec !== undefined) deps.storeUploadTtlSec = opts.storeUploadTtlSec
   if (opts.toolCacheTtlSec !== undefined) deps.toolCacheTtlSec = opts.toolCacheTtlSec
   if (opts.uploadGrantTtlSec !== undefined) deps.uploadGrantTtlSec = opts.uploadGrantTtlSec
 
   const app = createTbApp(deps)
   return {
     app,
+    deps,
     objects: objects instanceof MemoryObjectStore ? objects : undefined,
     request: async (input, init) => await app.request(input as never, init),
     secrets,

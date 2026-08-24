@@ -83,6 +83,17 @@ describe('put/head/get/delete 往返(真实文件系统)', () => {
     )
   })
 
+  it('ifNoneMatch:* 使用文件系统排他创建，已存在时不覆盖', async () => {
+    const store = new FsObjectStore([rootA])
+    await store.put('roota/create-only.txt', 'first', { ifNoneMatch: '*' })
+    expect(await codeOf(() => store.put('roota/create-only.txt', 'second', {
+      ifNoneMatch: '*',
+    }))).toBe('conflict')
+    const got = await store.get('roota/create-only.txt')
+    if (got === null) throw new Error('expected object')
+    expect(await readStreamText(got.body)).toBe('first')
+  })
+
   it('不存在 → head/get null;delete 幂等;目录不是对象', async () => {
     const store = new FsObjectStore([rootA])
     expect(await store.head('roota/nope.txt')).toBeNull()

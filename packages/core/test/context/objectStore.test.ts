@@ -69,6 +69,17 @@ describe('MemoryObjectStore', () => {
     )
   })
 
+  it('ifNoneMatch:* 只允许首次创建，且不能与 ifMatchEtag 同用', async () => {
+    const s = new MemoryObjectStore()
+    await s.put('k', 'one', { ifNoneMatch: '*' })
+    await expect(s.put('k', 'two', { ifNoneMatch: '*' })).rejects.toSatisfy(
+      e => isTBError(e) && e.code === 'conflict',
+    )
+    await expect(s.put('k', 'two', { ifNoneMatch: '*', ifMatchEtag: 'v1' }))
+      .rejects.toSatisfy(e => isTBError(e) && e.code === 'invalid_argument')
+    expect(await readBody(s, 'k')).toBe('one')
+  })
+
   it('delete 幂等', async () => {
     const s = new MemoryObjectStore()
     await s.put('k', 'v')

@@ -48,6 +48,7 @@ beforeAll(async () => {
     allowInsecureHttp: true,
     remote: { allowlist: [], maxHops: 4, allowInsecure: true },
     deviceReclaimSec: 86_400,
+    storeCleanupIntervalSec: 900,
   })
   const { port } = await server.start()
   base = `http://127.0.0.1:${port}`

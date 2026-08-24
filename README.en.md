@@ -125,11 +125,31 @@ The skill verifies the target, searches or browses progressively, reads the tool
 | Use case | Current entry point | Typical purpose |
 |---|---|---|
 | Connect existing tools | MCP, declarative HTTP, built-in integrations, external plugins | Give agents one discovery and invocation surface |
+| Store device artifacts and attachments | Deployment default Store, SDK, CLI, Dashboard | Upload photos, video, or audio, keep a stable URI, and create short-lived shares |
 | Manage context and skills | R2, S3, Node file object storage, plugin contexts, Skillhub | Read, write, and search documents and objects; publish and fetch Agent Skills |
 | Connect local machines | `tb connect`, SDK `connect()` | Dial out from a private network and expose allowlisted shell, files, or local functions |
 | Share usage experience | Per-path `~feedback`, CLI, Dashboard | Show later agents verified pitfalls and recommendations before they call a tool |
 | Federate teams | Remote nodes, `system/federation` | Mount another HTBP tree without sharing the local caller's credentials |
 | Support MCP clients | `/<base>/~mcp` | Project the current identity's visible tools as an MCP server |
+
+### Upload device artifacts and ordinary attachments
+
+Every standard deployment includes a default Store that is independent from Context. Node/Docker stores
+it on the `/data` volume, while Cloudflare uses the R2 bucket created during deployment. A device does not
+need a Context mount before uploading a photo, video, or recording:
+
+```sh
+tb store upload ./capture.jpg --json
+tb store ls
+tb store stat store://default/<objectId>
+tb store get store://default/<objectId> --out ./capture.jpg
+tb store share store://default/<objectId> --ttl 3600 --json
+tb store revoke-share <shareId>
+```
+
+The stable `store://default/...` identifier grants no read access by itself. The `$ref` returned by `share`
+is a short-lived bearer shown only on that successful command's stdout/JSON; do not log it. Context upload
+remains the authoring path for a named binary entry in a semantic Context, which is a separate use case.
 
 ### Connect tools and context
 
@@ -257,10 +277,12 @@ npm install @tool-bridge/sdk
 ```
 
 ```ts
-import { createToolBridge, MemoryStateStore } from '@tool-bridge/sdk'
+import { createToolBridge, MemoryObjectStore, MemoryStateStore } from '@tool-bridge/sdk'
 
 const tb = createToolBridge({
   state: new MemoryStateStore(),
+  // Store is required. Memory is only for examples/tests; use persistent FS, R2, or S3 in production.
+  objects: new MemoryObjectStore(),
   adminSk: process.env.TB_BOOTSTRAP_ADMIN_SK!,
 })
 

@@ -116,6 +116,26 @@ export interface TbAppDeps {
   search?: SearchIndex
   secrets: SecretStoreImpl
   state: StateStore
+  /** call capability 允许的 MIME pattern；缺省 `*\/*`。 */
+  storeCallAllowedContentTypes?: string[]
+  /** 单次 device call 的聚合上传字节预算。 */
+  storeCallMaxBytes?: number
+  /** 单次 device call 的单对象字节预算。 */
+  storeCallMaxObjectBytes?: number
+  /** 单次 device call 最多创建的 Store 对象数。 */
+  storeCallMaxObjects?: number
+  /** default Store 的单对象部署级上限。 */
+  storeMaxObjectBytes?: number
+  /** owner read `$ref` 有效期秒；缺省 refTtlSec 或 900。 */
+  storeReadTtlSec?: number
+  /** relay transport 的有效 request-body 上限；direct 不受此值收紧。 */
+  storeRelayMaxBytes?: number
+  /** 短期 share 的缺省有效期秒。 */
+  storeShareTtlSec?: number
+  /** Store capability HMAC secret；缺省由 StateStore 原子生成并持久化。 */
+  storeTokenSecret?: string
+  /** Store upload session 有效期秒。 */
+  storeUploadTtlSec?: number
   /** mcp/tool 工具缓存 TTL 秒(缺省 300)。 */
   toolCacheTtlSec?: number
   /** create_upload 写入 grant 有效期秒；缺省 min(refTtlSec, 900)。 */

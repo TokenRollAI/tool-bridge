@@ -123,4 +123,14 @@ export {
   type SearchDirtyMarker,
   SearchSynchronizer,
 } from './search/synchronizer'
+// --- 部署级 default Store：宿主装配与 scheduled cleanup ---
+export {
+  cleanupDefaultStore,
+  defaultStoreRuntime,
+  KEY_STORE_CLEANUP_PROGRESS,
+  KEY_STORE_TOKEN_SECRET,
+  STORE_CALL_CAPABILITY_HEADER,
+  STORE_UPLOAD_HEADER,
+  storeTokenSecret,
+} from './store'
 export { createTbApp } from './tbApp'

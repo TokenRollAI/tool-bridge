@@ -54,6 +54,7 @@ import { assertRegisterPath, decodePath, scopeForCmd } from '../paths'
 import { invalidateToolCache } from '../providers/toolCache'
 import { renderResult, tbErrorResponse } from '../responses'
 import { invalidateProviderOAuth } from '../providerOAuth'
+import { rejectStoreCapabilityBodyFields } from './store'
 import { invalidateMcpEra } from '../providers/mcp'
 import { invalidateMcpOAuth } from '../oauth'
 
@@ -260,6 +261,7 @@ export async function handleInvoke(c: AppContext, env: RouteEnv): Promise<Respon
 
   const args = await readInvokeBody()
   const cmd = command
+  rejectStoreCapabilityBodyFields(node.config.module, args)
 
   const spec = scopeForCmd(mod, node.path, cmd)
   if (!spec) throw new TBError('invalid_argument', `unknown cmd '${cmd}' on '${node.path}'`)
@@ -329,7 +331,9 @@ export async function handleInvoke(c: AppContext, env: RouteEnv): Promise<Respon
     : await searchSync?.markNode(registryTarget)
   let result: unknown
   try {
-    result = await mod.dispatch(cmd, args, ctx)
+    result = await mod.dispatch(cmd, args, ctx, {
+      requestOrigin: deps.canonicalOrigin ?? new URL(c.req.url).origin,
+    })
   } catch (error) {
     await searchSync?.abort(registryMarker)
     await Promise.all(pluginMounts.map(async mount => await searchSync?.abort(mount.marker)))

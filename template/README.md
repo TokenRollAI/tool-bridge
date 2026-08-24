@@ -47,7 +47,7 @@ The dashboard lives at `https://<your-worker>.workers.dev/ui`. You can also save
 
 ## Optional configuration
 
-- **Presigned R2 downloads and uploads** — without signing credentials, large payload `$ref` URLs are proxied through the Worker (`/~ref`) and `create_upload` is not advertised. To enable direct presigned GET plus path-scoped PUT uploads, add to `wrangler.jsonc` `vars`:
+- **Presigned R2 downloads and uploads** — the default Store is always available: without signing credentials it relays uploads through the Worker (with a conservative 90 MiB request limit). Context `$ref` downloads are likewise proxied through `~ref`, while Context `create_upload` is not advertised. Configure signing credentials to enable direct Store uploads above the relay limit plus direct Context downloads and path-scoped Context PUT uploads. Store owner/share reads remain revocable gateway refs. Add to `wrangler.jsonc` `vars`:
 
   - `TB_R2_S3_ENDPOINT`: `https://<your-account-id>.r2.cloudflarestorage.com`
   - `TB_R2_BUCKET`: `tool-bridge`

@@ -13,8 +13,8 @@
 import {
   assertSecureUrl,
   normalizeUpstreamError,
+  type ObjectBody,
   type ObjectBodyStream,
-  objectBodyToBytes,
   type ObjectListOptions,
   type ObjectListResult,
   type ObjectMeta,
@@ -88,20 +88,80 @@ export function createS3ObjectStore(
     service: 's3',
     region: cfg.region ?? 'auto',
   })
+  // Streaming request bodies are not replayable. A dedicated client prevents
+  // aws4fetch from retrying a partially consumed PUT on 429/5xx.
+  const putClient = new AwsClient({
+    accessKeyId: cfg.accessKeyId,
+    secretAccessKey: cfg.secretAccessKey,
+    service: 's3',
+    region: cfg.region ?? 'auto',
+    retries: 0,
+  })
   const base = cfg.endpoint.replace(/\/+$/, '')
   const bucketUrl = `${base}/${cfg.bucket}`
   const urlFor = (key: string): string => `${bucketUrl}/${encodeObjectKey(key)}`
 
   /** 签名 fetch;网络失败归一为 unavailable(retryable)。 */
-  const s3Fetch = async (url: string, init: RequestInit): Promise<Response> => {
+  const s3FetchWith = async (
+    aws: AwsClient,
+    url: string,
+    init: RequestInit,
+  ): Promise<Response> => {
     try {
-      return await client.fetch(url, init)
+      return await aws.fetch(url, init)
     } catch (err) {
       throw normalizeUpstreamError({
         kind: 'network',
         message: err instanceof Error ? err.message : String(err),
       })
     }
+  }
+  const s3Fetch = async (url: string, init: RequestInit): Promise<Response> => {
+    return await s3FetchWith(client, url, init)
+  }
+
+  /** ObjectBody → fetch body without reading an ObjectBodyStream ahead of fetch. */
+  const fetchBody = (body: ObjectBody): NonNullable<RequestInit['body']> => {
+    if (typeof body === 'string' || body instanceof ArrayBuffer) return body
+    if (body instanceof Uint8Array) {
+      return body.buffer instanceof ArrayBuffer
+        ? new Uint8Array(body.buffer, body.byteOffset, body.byteLength)
+        : new Uint8Array(body)
+    }
+    const source = body
+    const reader = source.getReader()
+    return new ReadableStream<Uint8Array>({
+      async pull(controller) {
+        try {
+          const chunk = await reader.read()
+          if (chunk.done) {
+            reader.releaseLock()
+            controller.close()
+          } else if (chunk.value !== undefined) {
+            controller.enqueue(chunk.value)
+          }
+        } catch (error) {
+          try {
+            reader.releaseLock()
+          } catch {
+            // The stream may already have released its reader while failing.
+          }
+          controller.error(error)
+        }
+      },
+      async cancel(reason) {
+        try {
+          if (reader.cancel !== undefined) await reader.cancel(reason)
+          else await source.cancel?.(reason)
+        } finally {
+          try {
+            reader.releaseLock()
+          } catch {
+            // cancel may release the lock in the source implementation.
+          }
+        }
+      },
+    }, { highWaterMark: 0 })
   }
 
   const metaFromHeaders = (key: string, headers: Headers): ObjectMeta => {
@@ -123,13 +183,15 @@ export function createS3ObjectStore(
     return meta
   }
 
+  const headObject = async (key: string): Promise<ObjectMeta | null> => {
+    const resp = await s3Fetch(urlFor(key), { method: 'HEAD' })
+    if (resp.status === 404) return null
+    if (!resp.ok) throw s3Error('head', resp.status)
+    return metaFromHeaders(key, resp.headers)
+  }
+
   return {
-    async head(key) {
-      const resp = await s3Fetch(urlFor(key), { method: 'HEAD' })
-      if (resp.status === 404) return null
-      if (!resp.ok) throw s3Error('head', resp.status)
-      return metaFromHeaders(key, resp.headers)
-    },
+    head: headObject,
 
     async get(key) {
       const resp = await s3Fetch(urlFor(key), { method: 'GET' })
@@ -145,28 +207,40 @@ export function createS3ObjectStore(
     },
 
     async put(key, body, putOpts) {
-      const bytes = await objectBodyToBytes(body)
       const headers: Record<string, string> = {}
+      // aws4fetch already chooses this value for non-query S3 signing; setting
+      // it explicitly makes streaming/no-pre-read behavior an enforced input.
+      headers['x-amz-content-sha256'] = 'UNSIGNED-PAYLOAD'
       if (putOpts?.contentType !== undefined) headers['content-type'] = putOpts.contentType
       for (const [name, value] of Object.entries(putOpts?.metadata ?? {})) {
         headers[`${META_HEADER_PREFIX}${name}`] = value
       }
       if (putOpts?.ifMatchEtag !== undefined) headers['if-match'] = `"${putOpts.ifMatchEtag}"`
-      const resp = await s3Fetch(urlFor(key), { method: 'PUT', headers, body: bytes })
+      if (putOpts?.ifNoneMatch !== undefined) headers['if-none-match'] = putOpts.ifNoneMatch
+      const resp = await s3FetchWith(putClient, urlFor(key), {
+        method: 'PUT',
+        headers,
+        body: fetchBody(body),
+      })
       await resp.body?.cancel()
-      // 条件不满足 → 412;对象不存在时部分实现回 404——两者都按 core 契约归 conflict。
-      if (resp.status === 412 || (putOpts?.ifMatchEtag !== undefined && resp.status === 404)) {
-        throw new TBError('conflict', `etag 不匹配:'${key}'`)
+      const conditional = putOpts?.ifMatchEtag !== undefined || putOpts?.ifNoneMatch !== undefined
+      // S3-compatible implementations use either 409 or 412 for create-only
+      // races. if-match against a missing object may also return 404.
+      if (
+        (conditional && (resp.status === 409 || resp.status === 412))
+        || (putOpts?.ifMatchEtag !== undefined && resp.status === 404)
+      ) {
+        throw new TBError('conflict', `对象条件写冲突:'${key}'`)
       }
       if (!resp.ok) throw s3Error('put', resp.status)
-      const meta: ObjectMeta = {
-        key,
-        etag: stripEtagQuotes(resp.headers.get('etag') ?? ''),
-        size: bytes.byteLength,
-        updatedAt: new Date().toISOString(),
-        metadata: putOpts?.metadata ?? {},
+      // A streaming body has no trustworthy local byte length. HEAD is the
+      // authoritative post-write observation used by StoreService validation.
+      const meta = await headObject(key)
+      if (meta === null) {
+        throw new TBError('unavailable', 's3 put succeeded but HEAD did not observe the object', {
+          retryable: true,
+        })
       }
-      if (putOpts?.contentType !== undefined) meta.contentType = putOpts.contentType
       return meta
     },
 

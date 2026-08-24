@@ -42,6 +42,8 @@ export interface ObjectPutOptions {
   contentType?: string
   /** 与现存对象 etag 不符(含对象不存在)→ TBError conflict。 */
   ifMatchEtag?: string
+  /** `*` 表示仅当对象不存在时创建；命中现存对象 → TBError conflict。 */
+  ifNoneMatch?: '*'
   metadata?: Record<string, string>
 }
 
@@ -72,6 +74,11 @@ export interface ObjectPresignPutOptions {
 }
 
 export interface ObjectStore {
+  /**
+   * 可选宿主钩子：清理 prefix 下早于 olderThan 的未落位 staging 临时文件。
+   * staging 不进入 list，且命名/mtime 属于 driver 私有实现；返回实际删除数量。
+   */
+  cleanupStaging?(prefix: string, olderThan: string): Promise<number>
   /** 幂等:不存在静默。 */
   delete(key: string): Promise<void>
   get(key: string): Promise<{ body: ObjectBodyStream, meta: ObjectMeta } | null>
@@ -184,8 +191,14 @@ export class MemoryObjectStore implements ObjectStore {
 
   async put(key: string, body: ObjectBody, opts?: ObjectPutOptions): Promise<ObjectMeta> {
     const existing = this.m.get(key)
+    if (opts?.ifMatchEtag !== undefined && opts.ifNoneMatch !== undefined) {
+      throw new TBError('invalid_argument', 'ifMatchEtag 与 ifNoneMatch 不能同时使用')
+    }
     if (opts?.ifMatchEtag !== undefined && opts.ifMatchEtag !== existing?.meta.etag) {
       throw new TBError('conflict', `etag 不匹配:'${key}'`)
+    }
+    if (opts?.ifNoneMatch === '*' && existing !== undefined) {
+      throw new TBError('conflict', `对象已存在:'${key}'`)
     }
     const bytes = await objectBodyToBytes(body)
     const meta: ObjectMeta = {
