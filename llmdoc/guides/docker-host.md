@@ -27,8 +27,8 @@ SDK 内嵌与 Node server 使用同一引导下界：首次启动没有显式 Ad
 设 `TB_DATABASE_URL` 则 StateStore 与 SearchIndex 都走 PG（共用一个连接池），缺省回退 `TB_DATA_DIR` 下的 SQLite。两者已是独立后端句柄，可分别替换。
 
 - **不需要任何 PG 扩展**，连接角色只要能建表即可（受限托管环境常不给建扩展权限）。
-- 全文检索是纯 `ILIKE` 子串匹配，与 SQLite/D1 的 FTS5-trigram 语义对齐（整句 AND、name/description/feedback 加权）。跨后端等价性由共享黑盒契约 `verifySearchIndexContract` 守住。
-- 故意不建 trigram GIN 索引：候选查询是三列 `OR` + `LIMIT`，规划器在节点上限满载（4000 条记录）时一律选 Seq Scan，索引从不被用，却让插入慢 5.5 倍、表体积大 6.7 倍。放宽节点上限时需连同查询形状重新评估。
+- 全文检索是纯 `ILIKE` 子串匹配，与 SQLite/D1 共用查询单元、部分命中和字段加权语义；`path` 也参与评分。跨后端等价性由共享黑盒契约 `verifySearchIndexContract` 守住。
+- 故意不建 trigram GIN 索引：候选查询是小表上的加权顺扫，历史基准在 4000 条工具记录时仍选 Seq Scan；索引没有查询收益，却显著增加写入与存储成本。放宽节点/工具规模上限时需连同查询形状重新评估。
 - 索引写路径在事务开头取 advisory lock 串行化：节点容量判定依赖 `COUNT(*)`，无锁时并发 mutation 会各自读到旧计数而突破上限。
 - **切换后端不迁移数据。** 给一个已运行的 SQLite 实例设上 `TB_DATABASE_URL`，得到的是一套空 PG 状态：树、SK、secret、annotation、feedback 全部不在，且首次启动会重新走引导（需要 `TB_BOOTSTRAP_ADMIN_SK`）。回滚同理——移除变量即回到原 SQLite 数据，PG 侧写入不会回流。当前没有内建迁移工具，跨后端搬迁需自行导出/导入 `tb_kv` 与 registry 状态，并在切换后重建搜索索引。
 
@@ -81,6 +81,7 @@ Helm chart 按后端配置自动推断形态,无独立 mode 开关:
 - 端口取 `TB_PORT`，缺省兜底平台注入的 `PORT`，最后才是 8787。
 - 状态与搜索都可外置到托管 PG（`TB_DATABASE_URL`），无扩展依赖，容器本身可无状态重启。
 - `TB_CANONICAL_ORIGIN` 把 OAuth `redirect_uri` 钉在规范域名，多域名接入（平台默认域 + 自定义域）必须设置。
+- Dockerfile 不声明 `VOLUME /data`：卷由 `docker -v` 或编排平台在运行时显式挂载，镜像元数据不是持久化保证；Railway Metal builder 会直接拒绝含 `VOLUME` 的 Dockerfile。
 
 部署前必须知道的三个限制：
 
