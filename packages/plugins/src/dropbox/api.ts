@@ -77,6 +77,7 @@ import {
 } from '../_runtime/jsonValue'
 import { createProviderHttpClient, type ProviderHttpErrorContext } from '../_runtime/providerHttp'
 import { type ProviderContext, requireApiKey } from '../_runtime/plugin'
+import { bytesToBase64 } from '../_runtime/responseBytes'
 import { upstreamError } from '../_runtime/upstreamError'
 import { guardedFetch } from '../_runtime/guardedFetch'
 
@@ -140,16 +141,6 @@ function required(value: string | undefined, field: string): string {
 }
 
 // ── base64:上游用 node:buffer,这里换成 Web API(插件要能在 Workers 里跑) ──────────
-
-/** 字节 → base64。分块喂 `String.fromCharCode`,免得大文件把参数展开炸掉调用栈。 */
-function bytesToBase64(bytes: Uint8Array): string {
-  let binary = ''
-  const chunk = 0x8000
-  for (let index = 0; index < bytes.length; index += chunk) {
-    binary += String.fromCharCode(...bytes.subarray(index, index + chunk))
-  }
-  return btoa(binary)
-}
 
 /**
  * base64 → 字节。

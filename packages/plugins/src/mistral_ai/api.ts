@@ -19,6 +19,7 @@
 import { TBError } from '@tool-bridge/plugin-sdk'
 import { assertPublicHttpUrl, guardedFetch } from '../_runtime/guardedFetch'
 import { type ProviderContext, requireApiKey } from '../_runtime/plugin'
+import { readBoundedResponseBytes } from '../_runtime/responseBytes'
 import { createProviderHttpClient } from '../_runtime/providerHttp'
 import { asJsonObject as toRecord } from '../_runtime/jsonValue'
 import { upstreamError } from '../_runtime/upstreamError'
@@ -310,32 +311,11 @@ async function readBounded(
   maxBytes: number,
   field: string,
 ): Promise<Uint8Array<ArrayBuffer>> {
-  const reader = response.body?.getReader()
-  if (reader === undefined) return new Uint8Array(0)
-
-  const chunks: Uint8Array[] = []
-  let total = 0
-  try {
-    for (;;) {
-      const { done, value } = await reader.read()
-      if (done) break
-      total += value.byteLength
-      if (total > maxBytes) {
-        throw new TBError('invalid_argument', `${field} 超过 ${maxBytes} 字节上限`)
-      }
-      chunks.push(value)
-    }
-  } finally {
-    await reader.cancel().catch(() => undefined)
-  }
-
-  const bytes = new Uint8Array(total)
-  let offset = 0
-  for (const chunk of chunks) {
-    bytes.set(chunk, offset)
-    offset += chunk.byteLength
-  }
-  return bytes
+  return readBoundedResponseBytes(response, {
+    checkContentLength: false,
+    maxBytes,
+    tooLarge: () => new TBError('invalid_argument', `${field} 超过 ${maxBytes} 字节上限`),
+  })
 }
 
 async function resolveUpload(remaining: Json): Promise<UploadSource> {

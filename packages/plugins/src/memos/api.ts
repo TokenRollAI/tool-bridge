@@ -64,6 +64,7 @@ import type {
 import type { updateMemoInput } from './schema.handwritten'
 import { compactDefined as compact, asJsonObject as record, trimmedText as text } from '../_runtime/jsonValue'
 import { createProviderHttpClient, type ProviderQuery } from '../_runtime/providerHttp'
+import { bytesToBase64, readBoundedResponseBytes } from '../_runtime/responseBytes'
 import { assertPublicHttpUrl, guardedFetch } from '../_runtime/guardedFetch'
 import { type ProviderContext, requireApiKey } from '../_runtime/plugin'
 import { upstreamError } from '../_runtime/upstreamError'
@@ -73,8 +74,6 @@ const SERVICE = 'memos'
 const API_SUFFIX = '/api/v1'
 /** 附件下载上限(上游同值)。插件与网关同进程,这个上限是内存保护,不是礼貌。 */
 const ATTACHMENT_MAX_BYTES = 20 * 1024 * 1024
-/** `String.fromCharCode(...chunk)` 的分块大小:整块展开会爆调用栈。 */
-const BASE64_CHUNK = 8192
 const http = createProviderHttpClient({ service: SERVICE })
 
 type Collection = 'attachments' | 'memos' | 'users'
@@ -222,46 +221,7 @@ async function readBoundedBytes(response: Response): Promise<Uint8Array> {
     'invalid_argument',
     `fileUrl 指向的文件超过 ${ATTACHMENT_MAX_BYTES} 字节的上限`,
   )
-  // 上游声明的长度可信就先用它挡掉,省得白下载一遍。
-  const declared = Number(response.headers.get('content-length'))
-  if (Number.isFinite(declared) && declared > ATTACHMENT_MAX_BYTES) throw tooLarge()
-
-  const body = response.body
-  if (body === null) {
-    const bytes = new Uint8Array(await response.arrayBuffer())
-    if (bytes.byteLength > ATTACHMENT_MAX_BYTES) throw tooLarge()
-    return bytes
-  }
-
-  const reader = body.getReader()
-  const chunks: Uint8Array[] = []
-  let total = 0
-  for (;;) {
-    const { done, value } = await reader.read()
-    if (done) break
-    total += value.byteLength
-    if (total > ATTACHMENT_MAX_BYTES) {
-      await reader.cancel()
-      throw tooLarge()
-    }
-    chunks.push(value)
-  }
-  const bytes = new Uint8Array(total)
-  let offset = 0
-  for (const chunk of chunks) {
-    bytes.set(chunk, offset)
-    offset += chunk.byteLength
-  }
-  return bytes
-}
-
-/** 分块喂 `btoa`:一次性展开 20 MiB 会爆调用栈。 */
-function base64(bytes: Uint8Array): string {
-  let binary = ''
-  for (let offset = 0; offset < bytes.length; offset += BASE64_CHUNK) {
-    binary += String.fromCharCode(...bytes.subarray(offset, offset + BASE64_CHUNK))
-  }
-  return btoa(binary)
+  return readBoundedResponseBytes(response, { maxBytes: ATTACHMENT_MAX_BYTES, tooLarge })
 }
 
 interface AttachmentSource {
@@ -384,7 +344,7 @@ export async function uploadAttachment(
     query: compact({ attachmentId: text(input.attachmentId) }),
     body: compact({
       filename: requireText(input.filename, 'filename'),
-      content: base64(source.bytes),
+      content: bytesToBase64(source.bytes),
       type: source.mimeType,
       memo: text(input.memo),
     }),

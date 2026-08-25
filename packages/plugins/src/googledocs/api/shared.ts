@@ -48,6 +48,7 @@
 import { TBError } from '@tool-bridge/plugin-sdk'
 import { type ProviderContext, requireApiKey } from '../../_runtime/plugin'
 import { asJsonObject, compactDefined } from '../../_runtime/jsonValue'
+import { bytesToBase64 } from '../../_runtime/responseBytes'
 import { upstreamError } from '../../_runtime/upstreamError'
 import { guardedFetch } from '../../_runtime/guardedFetch'
 
@@ -59,8 +60,6 @@ export const SHEETS_API_BASE = 'https://sheets.googleapis.com/v4'
 const REQUEST_TIMEOUT_MS = 30_000
 /** 错误消息里最多回显多少上游原文。 */
 const MAX_ERROR_MESSAGE_LENGTH = 500
-/** `String.fromCharCode(...chunk)` 的分块大小:整块展开会爆调用栈。 */
-const BASE64_CHUNK = 8192
 
 /** 配额/限流的 reason:403 带上它们时按 429 归一(可重试),不是权限问题。 */
 const RATE_LIMIT_REASONS = new Set([
@@ -287,14 +286,7 @@ export async function requestRecord(ctx: ProviderContext, input: DocsRequest): P
   return requireRecord(await requestJson(ctx, input), 'Google Docs 响应')
 }
 
-/** 分块喂 `btoa`:一次性展开一份大 PDF 会爆调用栈。 */
-export function base64(bytes: Uint8Array): string {
-  let binary = ''
-  for (let offset = 0; offset < bytes.length; offset += BASE64_CHUNK) {
-    binary += String.fromCharCode(...bytes.subarray(offset, offset + BASE64_CHUNK))
-  }
-  return btoa(binary)
-}
+export { bytesToBase64 as base64 }
 
 /** 批量更新的统一出参(上游 `runBatchRequest`)。 */
 export interface BatchResult extends Json {

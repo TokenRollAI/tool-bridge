@@ -39,6 +39,7 @@ import type {
   listInputItemsInput,
   listModelsInput,
 } from './schema'
+import { bytesToBase64 as encodeBase64, readBoundedResponseBytes } from '../_runtime/responseBytes'
 import { createProviderHttpClient, type ProviderHttpErrorContext } from '../_runtime/providerHttp'
 import { assertPublicHttpUrl, guardedFetch } from '../_runtime/guardedFetch'
 import { type ProviderContext, requireApiKey } from '../_runtime/plugin'
@@ -57,16 +58,6 @@ type Json = Record<string, unknown>
 function normalizedContentType(value: string | null, fallback: string): string {
   if (value === null || value === '') return fallback
   return value.split(';', 1)[0]?.trim() || fallback
-}
-
-/** 分块喂 `btoa`:一次性 `String.fromCharCode(...bytes)` 会在几 MB 的音频上爆参数上限。 */
-function encodeBase64(bytes: Uint8Array): string {
-  const CHUNK = 0x8000
-  let binary = ''
-  for (let i = 0; i < bytes.length; i += CHUNK) {
-    binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK))
-  }
-  return btoa(binary)
 }
 
 function stripPadding(value: string): string {
@@ -220,40 +211,13 @@ function withQuery(path: string, query: Json): string {
  * 一个谎报 content-length 的 URL 就能让插件把内存吃干。
  */
 async function readBoundedBytes(response: Response, fieldName: string): Promise<Uint8Array<ArrayBuffer>> {
-  const declared = Number(response.headers.get('content-length'))
-  if (Number.isSafeInteger(declared) && declared > 0) assertAudioSourceSize(declared, fieldName)
-
-  if (response.body === null) {
-    const bytes = new Uint8Array(await response.arrayBuffer())
-    assertAudioSourceSize(bytes.byteLength, fieldName)
-    return bytes
-  }
-
-  const reader = response.body.getReader()
-  const chunks: Uint8Array[] = []
-  let total = 0
-  try {
-    for (;;) {
-      const { done, value } = await reader.read()
-      if (done) break
-      total += value.byteLength
-      if (total > AUDIO_SOURCE_MAX_BYTES) {
-        await reader.cancel().catch(() => undefined)
-        assertAudioSourceSize(total, fieldName)
-      }
-      chunks.push(value)
-    }
-  } finally {
-    reader.releaseLock()
-  }
-
-  const bytes = new Uint8Array(total)
-  let offset = 0
-  for (const chunk of chunks) {
-    bytes.set(chunk, offset)
-    offset += chunk.byteLength
-  }
-  return bytes
+  return readBoundedResponseBytes(response, {
+    maxBytes: AUDIO_SOURCE_MAX_BYTES,
+    tooLarge: () => new TBError(
+      'invalid_argument',
+      `${fieldName} exceeds ${AUDIO_SOURCE_MAX_BYTES} bytes`,
+    ),
+  })
 }
 
 async function fetchAudioSource(url: string): Promise<Response> {

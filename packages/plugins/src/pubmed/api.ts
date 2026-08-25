@@ -51,6 +51,7 @@ import type {
 } from './schema'
 import type { ProviderContext } from '../_runtime/plugin'
 import { asJsonObject as record, trimmedText as text } from '../_runtime/jsonValue'
+import { readBoundedResponseBytes } from '../_runtime/responseBytes'
 import { upstreamError } from '../_runtime/upstreamError'
 import { guardedFetch } from '../_runtime/guardedFetch'
 
@@ -188,41 +189,7 @@ async function readBoundedText(response: Response, maxBytes: number, source: str
   const tooLarge = (): TBError => invalidInput(
     `${source} 响应超过 ${maxBytes} 字节上限:把 limit / pmids / ids 调小后重试`,
   )
-
-  const declared = Number(response.headers.get('content-length'))
-  if (Number.isSafeInteger(declared) && declared > maxBytes) throw tooLarge()
-
-  if (response.body === null) {
-    const bytes = new Uint8Array(await response.arrayBuffer())
-    if (bytes.byteLength > maxBytes) throw tooLarge()
-    return new TextDecoder().decode(bytes)
-  }
-
-  const reader = response.body.getReader()
-  const chunks: Uint8Array[] = []
-  let total = 0
-  try {
-    for (;;) {
-      const { done, value } = await reader.read()
-      if (done) break
-      total += value.byteLength
-      if (total > maxBytes) {
-        await reader.cancel().catch(() => undefined)
-        throw tooLarge()
-      }
-      chunks.push(value)
-    }
-  } finally {
-    reader.releaseLock()
-  }
-
-  const bytes = new Uint8Array(total)
-  let offset = 0
-  for (const chunk of chunks) {
-    bytes.set(chunk, offset)
-    offset += chunk.byteLength
-  }
-  return new TextDecoder().decode(bytes)
+  return new TextDecoder().decode(await readBoundedResponseBytes(response, { maxBytes, tooLarge }))
 }
 
 /** NCBI 的错误体有 `{error}` 与 `{errors:[]}` 两种;都取不到就把原文截断当消息。 */
