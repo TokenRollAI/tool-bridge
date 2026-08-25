@@ -12,6 +12,9 @@ import { MountConfigFields } from '@/pages/system/forms/MountConfigFields'
 import { SkFormFields } from '@/pages/system/forms/SkFormFields'
 import { SchemaFields } from '@/components/SchemaFields'
 
+// 验证真实 RJSF 交互，但不把 Vite/RJSF 的冷转换时延计入 RTL 的断言超时。
+await import('@/components/SchemaFormRenderer')
+
 afterEach(cleanup)
 
 describe('schema 字段安全边界', () => {

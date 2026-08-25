@@ -52,6 +52,8 @@ vi.mock('@tanstack/react-query', () => ({
 
 vi.mock('sonner', () => ({ toast: { success: () => {}, info: () => {}, error: () => {} } }))
 
+// 验证真实 RJSF 交互，但不把 Vite/RJSF 的冷转换时延计入 RTL 的断言超时。
+await import('@/components/SchemaFormRenderer')
 const { MountDialog } = await import('@/pages/system/forms/MountDialog')
 
 afterEach(() => {
