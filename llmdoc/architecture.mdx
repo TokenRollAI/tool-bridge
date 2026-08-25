@@ -11,14 +11,19 @@ code:
     - knip.jsonc
     - pnpm-workspace.yaml
     - packages/core/src/types.ts
+    - packages/core/src/feedback/store.ts
     - packages/core/src/operation/**
     - packages/core/src/protocol/**
     - packages/app/src/bootstrap.ts
     - packages/sdk/src/client/**
     - packages/sdk/src/store/**
     - packages/sdk/src/device/**
+    - packages/cli/tsconfig.json
+    - packages/cli/vitest.config.ts
+    - packages/dashboard/tsconfig.app.json
     - packages/plugins/src/_runtime/providerHttp.ts
     - scripts/pack-and-verify-package.mjs
+    - scripts/package-release.test.mjs
     - scripts/select-release-packages.mjs
 ---
 
@@ -72,6 +77,9 @@ CLI / Dashboard ──> sdk neutral entries ──HTTP──> app contract
 8. 发布校验和发布必须消费同一个 tarball;registry 元数据存在、tarball 可安装、bin 可执行是三个独立证据。
 9. `.llmdoc-tmp/` 是可丢弃调查缓存,复用前重新核对,不从稳定文档链接。
 10. 重复实现是引入组件的必要条件,不是充分条件:新依赖必须同时证明运行时相容、安全语义不退化和最终产物净收益。普通 provider JSON HTTP 复用仓库薄层,不因为引入通用 HTTP 库而放开 retry、redirect 或裸 `fetch`。
+11. workspace 内消费 SDK neutral 子入口时，typecheck/test/bundle 的 resolver 都必须显式落到对应 source
+    entry，不能依赖 gitignored `dist`。`pnpm verify` 保持无 build 副作用；发布声明与 tarball 则由独立强制
+    build/pack 门验证。source-resolution 回归必须在本地已有 dist 时仍能识别错误解析目标。
 
 ## Topic 导航
 
