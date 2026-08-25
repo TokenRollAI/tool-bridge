@@ -1,5 +1,5 @@
 ---
-description: 各宿主部署形态总览(修正后:Cloudflare 全面 D1、无 KV)与 ADR-001 决策摘要:单 D1 库、TB_STATE/TB_SEARCH 双 binding、撤销语义与 pre-launch 零迁移窗口。
+description: 各宿主部署与状态存储总览:Cloudflare 全面 D1、单库双 binding、putIfAbsent/CAS、Store fail-closed 与 ADR-001。
 kind: reference
 code:
   paths:
@@ -8,6 +8,7 @@ code:
     - packages/gateway/src/d1StateStore.ts
     - packages/server/src/sqliteStateStore.ts
     - packages/server/src/pgStateStore.ts
+    - packages/core/src/store.ts
 ---
 
 # 部署形态与状态存储决策
@@ -16,8 +17,8 @@ code:
 
 | 形态 | 入口 | 适配器 |
 |---|---|---|
-| Cloudflare Deploy Button 模板 | `template/src/index.ts` | D1(TB_STATE/TB_SEARCH)、R2、Durable Objects、Static Assets;含 D1 Search |
-| Cloudflare Workers(源码部署) | `packages/gateway/src/deployEntry.ts` | D1(TB_STATE/TB_SEARCH)、R2、Durable Objects、Static Assets |
+| Cloudflare Deploy Button 模板 | `template/src/index.ts` | D1(TB_STATE/TB_SEARCH)、R2 default Store、Durable Objects、Static Assets、Cron;含 D1 Search |
+| Cloudflare Workers(源码部署) | `packages/gateway/src/deployEntry.ts` | D1(TB_STATE/TB_SEARCH)、R2 default Store、Durable Objects、Static Assets、Cron |
 | Node / Docker | `packages/server` | SQLite 或 PostgreSQL、文件或 S3 对象存储、ws、静态 Dashboard |
 | 嵌入式 SDK | `packages/sdk` | Node 22+;调用方注入 StateStore、ObjectStore、SecretStore 与本地 provider;当前不提供 SearchIndex 注入 |
 | 应用层库 | `packages/app` | 不绑定具体运行时,由宿主注入依赖 |
@@ -28,6 +29,10 @@ KV 已从 Cloudflare 宿主全面撤出(gateway 与 template 的 wrangler 配置
 
 - 三宿主 StateStore(D1/SQLite/PG)收敛到同一 SQL 语义,共享契约测试对拍。
 - StateStore 契约含可选原子原语 `putIfAbsent`,三宿主均原子实现;bootstrap Admin SK 铸造以 hash key winner-takes-all 去重,多副本并发冷启动不产生重复 sk 索引。
+- StateStore 还含 `compareAndSwap(key, expectedRevision, value)`；D1/SQLite/PG 与内存实现都原子对拍。
+  它对旧自定义 StateStore 的类型兼容仍是 optional，但 deployment-level StoreService 将它视为硬依赖：
+  对象/session/call capability/share/idempotency 的跨副本状态转换缺 CAS 时以 `unavailable` fail closed，
+  不能退化成 `get→put`。
 - Node 宿主 SQLite/PG 是双后端,切换不迁移数据(细节见 [node-docker-and-helm](./node-docker-and-helm.mdx))。
 - SDK 内嵌与 Node server 使用同一引导下界:首次启动没有显式 Admin SK 就拒绝继续。设备通道由宿主装配的 `DeviceChannel` 提供,不存在可配置但未实现的公共 `DeviceTransport`。
 

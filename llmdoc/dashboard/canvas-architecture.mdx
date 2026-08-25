@@ -1,5 +1,5 @@
 ---
-description: Dashboard 画布架构:纯 HTTP 客户端边界、canvas 分层 ownership、URL 驱动选中、虚拟命令叶、profile 隔离缓存与画布性能约束。
+description: Dashboard 架构:纯 HTTP 客户端边界、canvas 分层、独立 default Store 页面、profile 隔离缓存与性能约束。
 kind: architecture
 code:
   paths:
@@ -26,6 +26,9 @@ Dashboard 是纯 HTTP 客户端,不 import core。wire 类型在 `packages/dashb
 - `components/node/`:Inspector 内的节点子组件。`CommandWorkspace`(整宽命令目录,点命令开 Dialog)、`CmdPanel`(单条 cmd 调用面板,accordion 折叠行 / dialog 弹窗两态)、`ResultView`、`CliHint`、反馈与 note。`CmdPanel`、实际 `invoke` 与 `CliHint` 共同信任 owner `~help` 返回的 `cmds[].path`——它已是含命令叶子的完整直连路径,除前导斜杠规范化外必须原样传递:不得用 owner path + `cmd.name` 重建、不得另传 `tool`、不得把 body 包成信封,实际 POST 与面板展示的 `tb call`/curl 必须使用同一 command path 和裸 arguments(契约见 [protocol/htbp-contract](../protocol/htbp-contract.mdx))。
 - `components/add-tool/`:「添加工具」向导,按来源分流;不重复造挂载逻辑,内置集成走 `buildIntegrationCalls`、自定义 kind 走 `buildRegistryMountCalls`。`mountDiagnostics.ts` 把真实 `system/registry write` 的失败按 TBError code 归类,不另起与真实挂载不一致的 dry-run 探测。
 - `pages/system/`:SK、secret、registry、plugin、catalog、federation、annotation。`pages/system/forms/`:将表单状态编译成 wire payload 的纯函数。
+- `pages/system/StorePage.tsx` 对应 `/manage/store`，是独立 deployment Store 管理面，不属于 canvas/Registry
+  tree，也不复用 ContextBrowser。`lib/api.ts` 的 Store helper 负责 create→relay/direct PUT→direct
+  complete、descriptor/ref 校验；`lib/queries.ts` 负责 owner 列表分页和 mutation 后按当前 profile 失效。
 
 表单编译与图布局逻辑优先抽成无 React 依赖的函数(`forms/*.ts`、`canvas/treeGraph.ts`),用 Node Vitest 断言最终 payload、布局结果、互斥项、必填项和 fail-closed 分支;DOM 测试再覆盖交互顺序、焦点和敏感值展示。
 
@@ -44,6 +47,15 @@ Dashboard 是纯 HTTP 客户端,不 import core。wire 类型在 `packages/dashb
 - React Flow 节点适配必须传递 dagre 产出的 `width` / `height`,避免 MiniMap 矩形退化。React Flow `colorMode` 与 Dashboard 主题同步;MiniMap 的背景、mask、节点 fill/stroke 使用显式高对比 SVG 配色,不盲用卡片的暗色 token,且与画布底部操作提示分区布局、不互相遮挡。
 - Inspector 内部布局必须以实际容器宽度为准,不能只凭 viewport breakpoint 推导双栏。Context 正文等高密度详情统一放入宽 Dialog,header/footer 固定、正文独立滚动,长路径与预格式内容允许换行或横向滚动,并保留返回所属工具的链接。
 - "最近调用"是当前浏览器按 profile 与 gateway 隔离的本地历史,不是服务端全局审计;任何展示都必须明示"本机/当前 profile"边界。
+- Store 页面支持本地文件上传、当前 owner 的 ready 列表、stat、下载、创建/撤销短期 share 和删除。上传
+  读取 grant 的 `maxBytes`，relay PUT 直接消费 descriptor，presigned PUT 后用 `x-tb-store-upload` 调
+  complete；不能假设所有 R2 部署都有 signer。
+- `store://` URI 可进表格/详情/复制面，它只是稳定身份；upload token、headers、presigned URL 与 read/
+  share `$ref` 是 bearer secret。share `$ref` 只在用户明确创建后进入受控复制按钮，不写 toast、调用历史
+  或浏览器 URL；下载 `$ref` 立即用于隐藏 anchor 后丢弃。错误文案固定，不回显服务端可疑 URL。
+- Store 与 Context 上传语义保持分离：Store 页面新建 opaque 对象；ContextBrowser 的 upload 按钮继续
+  author 指定 Context 的命名 entry。删除 Device SDK `uploadContextObject` 不代表删除 Dashboard 的
+  Context 管理上传。
 
 ## 注意(踩过的坑)
 
@@ -54,4 +66,4 @@ Dashboard 是纯 HTTP 客户端,不 import core。wire 类型在 `packages/dashb
 
 ## 验证
 
-功能收尾至少覆盖:桌面/移动/矮屏滚动,键盘与 Escape,首屏和交互后的请求形状,localStorage 无敏感参数,分页后的计数/筛选,以及当前构建的 `/ui` deep-link/asset 行为。静态 class 审查或单张截图不构成交互证据。
+功能收尾至少覆盖:桌面/移动/矮屏滚动,键盘与 Escape,首屏和交互后的请求形状,localStorage 无敏感参数,分页后的计数/筛选,Store relay/direct 与敏感值处理,以及当前构建的 `/ui` deep-link/asset 行为。静态 class 审查或单张截图不构成交互证据。

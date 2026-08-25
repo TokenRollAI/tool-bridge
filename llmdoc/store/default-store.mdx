@@ -1,583 +1,193 @@
 ---
+description: 部署级 default Store 的当前契约：稳定对象身份、上传会话、设备 call capability、读取分享、宿主装配与 Context 边界。
 kind: architecture
-description: 部署级 default Store 的上传与分享能力、宿主装配边界及从 Context 上传迁移的架构提案。
+relations:
+  related:
+    - protocol/htbp-contract.mdx
+    - device/do-websocket-sessions.mdx
+    - hosts-deploy/cloudflare-paths.mdx
+    - hosts-deploy/node-docker-and-helm.mdx
+code:
+  paths:
+    - packages/core/src/objectStoreService/**
+    - packages/core/src/builtin/store.ts
+    - packages/app/src/store.ts
+    - packages/app/src/routes/store.ts
+    - packages/sdk/src/storeClient.ts
+    - packages/sdk/src/device/**
+    - packages/cli/src/commands/store.ts
+    - packages/dashboard/src/pages/system/StorePage.tsx
+    - packages/server/src/objects.ts
+    - packages/gateway/src/deployEntry.ts
 ---
 
-# 默认 Store 架构提案（尚未实现）
+# 部署级 Default Store
 
-> **状态：提案，尚未实现。** 本文描述已确认的产品方向和待细化的协议草案，不代表当前代码已经提供
-> `store://`、`system/store`、call-scoped upload capability 或本地 relay upload。当前行为仍以代码和
-> [HTBP 协议契约](../protocol/htbp-contract.mdx)为准。
+> **状态：已实现。** `default` Store 是部署级私有对象能力；新设备不需要先挂载 Context，就能把拍照、
+> 视频或附件上传为 `store://default/<objectId>`。本文记录当前契约，精确 schema 仍以 core 类型、builtin
+> Help 与测试为准。
 
-## 问题与用户场景
+## 为什么不是 Context
 
-典型场景是一个全新设备已经连接 Tool Bridge Server，远程的拍照或录像命令也能成功执行，但设备随后
-无法把产物交还给调用方：当前 Device SDK 的 `uploadContextObject` 强制要求 `contextPath`，服务端要求
-该路径已经挂载为可写的 R2/S3 Context。发现面仅在挂载非只读且可判定底层 `ObjectStore` 具备
-`presignPut` 时声明 `create_upload`；执行面会识别 R2/S3 Context 的该命令，但缺少 signer 时返回
-`unavailable`。因此，设备连接、命令执行和二进制上传是三段彼此独立的能力；前两段正常不代表最后
-一段可用。
+Context 是有业务语义的命名数据源，负责 `list/get/search/write/...` 等 provider 动词；部署者可能只希望
+它可读或用于检索，并不希望它成为设备的外挂文件系统。设备产物只需要一个私有、可分享的字节落点，
+不应该知道 context path、entry path、bucket key、磁盘路径或 provider 配置。
 
-这会让以下本应开箱即用的闭环失败：
+当前分工如下：
 
-```text
-调用方远程要求设备拍照
-  -> 设备成功取得照片
-  -> 设备需要一个预先存在、可写且支持 direct upload 的 Context
-  -> 新部署没有该挂载，或默认本地 ObjectStore 没有 PUT signer
-  -> 照片无法返回，整次业务调用实际不可用
-```
+| 层 | 职责 |
+|---|---|
+| `StoreService` | 对象身份、owner/producer、upload session、幂等、授权、分享、生命周期与清理 |
+| `StateStore` | 保存对象/session/capability/share 的权威元数据；并发状态转换必须使用 `compareAndSwap` |
+| `ObjectStore` | 保存字节并提供 `put/head/get/delete/list`，可选 `presignPut/presignGet` |
+| Context | 语义数据源与命名 entry；可以显式保存 `store://` URI，但不是 default Store |
 
-当前模型还有一个产品语义问题：Context 是面向 Agent 的语义数据源，部署者可能只希望它负责读取、
-搜索或组织某类业务数据，并不希望每个 Context 都被当作设备可以写入的外挂文件系统。要求设备作者先
-选择 Context、理解其 provider、取得该节点的 `write` scope 并控制 entry path，把部署细节泄漏给了
-本应只负责产出文件的设备。
+Store 字节使用独立的 `store/v1/...` driver namespace，不重解释既有 Context 对象。`filename` 只是展示
+元数据，不参与 key；object id、upload id 与 driver key 都由服务端生成。
 
-## 根因
+## 对象身份与状态
 
-底层字节存储能力已经以 `ObjectStore` 的形式存在；Node 与 Workers 标准宿主会注入，自定义/嵌入宿主
-目前可选注入。但产品入口把“上传一个对象”错误地隐藏在 Context provider 后面：
-
-- `create_upload` 是 Context 的可选命令，不是 Server 的基础能力；
-- 稳定身份是某个 Context 下的 `node://` entry，上传方必须先知道挂载路径；
-- direct upload 与 `presignPut` 绑定，本地文件实现虽能保存对象，却没有对应上传入口；
-- 权限按 Context 节点的 `write` scope 判断，无法自然表达“一次设备调用只能新建有限个产物”；
-- Context 的业务生命周期、provider 配置和 entry 命名被迫承担共享文件存储的职责。
-
-根因不是“缺一个默认 Context”，而是 **Store 没有成为独立、部署级、始终存在的产品能力**。把一个
-特殊的 `artifacts/<deviceId>` Context 自动挂载起来仍会混淆两层职责，也会继续受到 Context 节点权限
-和 provider 生命周期的约束，因此不作为目标解法。
-
-## 概念与职责边界
-
-| 概念 | 负责 | 不负责 |
-|---|---|---|
-| Store | 保存二进制、分配稳定对象身份、上传会话、对象元数据、所有权、读取/分享/删除、配额与回收 | 业务语义、目录挂载、搜索语义、provider 特有操作 |
-| Context | 向 Agent 投影语义数据源，提供 `list/get/search/write/...` 等 provider 能力，可引用 Store 对象 | 为每个设备提供底层上传落点、暴露 bucket key 或磁盘路径 |
-| BlobStoreDriver | 对本地 FS、R2、S3 或宿主 binding 执行字节级 `put/head/get/delete`，可选 presign | 用户授权、对象所有权、分享、生命周期状态机 |
-| StoreService | 在 driver 之上实现对象身份、元数据、upload session、授权、完成校验和清理 | 直接依赖 Node、Workers 或具体云厂商 API |
-
-Store 是 Tool Bridge 部署的必备基础设施；Context 是可选消费者。Context 可以在返回值或 entry 中引用
-`store://` URI，也可以在确有业务需要时通过 StoreService 保存大对象，但这不把 Store 重新变成
-Context，也不要求 Store 在 Registry 中注册为 `kind: 'context'`。
-
-Store 可以通过 `system/store` 暴露内置管理命令，但该路径只是统一控制面的入口，不是可挂载 Context，
-不接受 Context 的 `providerConfig`、`authRef`、entry path 或 provider 动词。
-
-## 目标
-
-1. 任意合规的新部署都自带一个可用的 `default` Store，不创建 Context 也能完成设备拍照、视频、录音和
-   附件上传。
-2. 设备和普通客户端只提交对象元数据与字节，不选择 Context、bucket key、磁盘路径或可覆盖路径。
-3. 本地部署走流式 relay，R2/S3 在可签名时走直传；客户端使用同一 create/upload 会话，relay PUT 直接
-   完成，direct PUT 再显式 complete。
-4. 用稳定、不可猜测的 `store://default/<objectId>` 表示对象身份，用短期、可撤销的能力表示读取或分享。
-5. 远程设备调用获得 call-scoped upload capability，上传权限与广泛的 Store/Context 写权限解耦。
-6. Store 元数据、权限、配额、审计和回收语义在所有宿主一致，字节落点由 driver 决定。
-7. API、Device/通用 SDK、`tb` CLI 和 Dashboard 同轮交付同一组能力，避免管理旁路。
-
-## 非目标
-
-- Store 不是 POSIX 文件系统、用户可控目录树、网盘、媒体库或通用内容管理系统。
-- 第一阶段不提供默认公开 bucket、永久公共静态 URL、匿名目录浏览或 CDN 发布；Store 默认私有。
-- 不在 Store 内定义 Context 的搜索、语义索引、版本合并或 provider 特有行为。
-- 不在第一阶段提供图片处理、视频转码、病毒扫描或内容审核；可预留异步 hook，但不能阻塞基础协议设计。
-- 上传幂等不承诺设备命令或其他外部副作用的跨进程 exactly-once。
-- named stores 是可扩展方向，不应推迟 `default` Store 闭环，也不要求第一阶段提供完整的运行时管理 UI。
-
-## 部署不变量与默认矩阵
-
-每个宿主装配必须得到一个名为 `default` 的 Store。测试宿主可以显式注入内存 driver；正式宿主缺少满足
-其部署形态的 driver 时应 fail closed，而不是让服务启动后在首次设备上传时才失败。
-
-| 部署形态 | `default` Store | 启动/部署约束 |
-|---|---|---|
-| 本地 Node、单进程开发 | `TB_DATA_DIR` 下的本地目录（建议 `<dataDir>/store`） | Server 自动创建；重启后仍可读 |
-| 单副本 Docker/Compose | `/data/store` 本地 driver | 生产模板默认挂持久卷；临时开发容器可显式接受易失数据 |
-| 单副本 Kubernetes | StatefulSet 的 RWO PVC | 与 State 数据同属持久化部署不变量，可分目录或独立卷 |
-| Cloudflare Workers | provision 创建并绑定的 R2 bucket | R2 binding 是必需资源；无 signer 时 relay 只覆盖账户套餐与部署配置共同决定的有效 request-body 上限；必须配置 scheduled cleanup（建议 Cron Trigger，DO alarm 仅在有明确 durable coordinator ownership 时可用） |
-| Node/Kubernetes HA、多副本无状态 | 外部 S3/R2-compatible driver | 未配置外部共享 Store 时启动或 Helm 渲染失败；不能静默回退到副本本地盘 |
-| 易失文件系统 PaaS/serverless container | 外部 S3/R2-compatible driver | 没有明确持久卷时本地 driver 不得伪装成可持久 Store |
-| 嵌入式/自定义宿主 | 调用方注入 `BlobStoreDriver` 或平台 binding | 宿主必须显式提供；内存实现只用于测试或明确的易失开发模式 |
-
-系统始终有一个 `default`，未来可通过部署配置增加 named stores。URI 包含 store 名称以保留扩展空间，
-但普通上传缺省且通常不允许客户端选择其他 store。后端切换不是热配置：把 `default` 从本地改到 S3/R2
-前必须迁移字节并核对元数据，不能只换 endpoint 让已有 URI 静默失效。
-
-Workers 没有常驻进程，不能把清理寄托在内存 timer 或下一次普通请求。scheduled handler 必须持续扫描并
-回收 pending/abandoned session、孤儿对象和到期 retention；若不用 Cron Trigger 而使用 DO alarm，必须
-先指定唯一、可恢复的 durable coordinator，避免没有 owner 或多个 DO 重复执行全局清理。
-
-## 分层设计与现有 ObjectStore 的迁移
-
-### BlobStoreDriver
-
-建议把字节级契约命名为 `BlobStoreDriver`，最小职责包括：
-
-```ts
-interface BlobStoreDriver {
-  put(key: string, body: ReadableStream, options: PutOptions): Promise<BlobMeta>
-  head(key: string): Promise<BlobMeta | undefined>
-  get(key: string, options?: GetOptions): Promise<BlobBody | undefined>
-  delete(key: string): Promise<void>
-  presignPut?(key: string, options: PresignPutOptions): Promise<PresignedRequest>
-  presignGet?(key: string, options: PresignGetOptions): Promise<PresignedRequest>
-}
-```
-
-精确 TypeScript 形状应在实现阶段按现有 stream 类型和宿主约束确定。driver 只接收 StoreService 生成的
-内部 key；不接收客户端 filename 作为路径，也不知道 owner、scope、share 或 call id。
-
-现有 `ObjectStore` 已提供大部分字节操作及可选 presign 能力，第一阶段应复用已有 FS、Memory、R2、S3
-实现，通过 adapter 或兼容别名收敛到 driver 契约，而不是重写各后端。迁移期间要保持两类 namespace
-隔离：现有 Context/SkillHub 的 key 继续按原约定解释，新 Store 对象使用独立版本化前缀（例如
-`store/v1/<shard>/<objectId>`）。不得用 Store 上线顺便移动或重解释既有 Context 对象。
-
-### StoreService
-
-`StoreService` 是宿主中立的应用服务，依赖 `StateStore` 保存元数据和 upload session，依赖一个 driver
-registry 保存字节。它负责：
-
-- 生成 object id 与内部 key；
-- 计算 owner、producer、配额和策略；
-- 创建、恢复、完成或放弃 upload session；
-- 在 local relay 与 presigned PUT 间选择传输方式；
-- `HEAD`/本地测量后验证大小、类型、etag/checksum，并推进状态；
-- 签发短期 read/share capability；
-- 实现 stat、delete、幂等和后台清理；
-- 产生不含 token、签名 URL、bucket key 或敏感 filename 的审计事件。
-
-`TbAppDeps` 最终应注入 `StoreService` 或足以构造它的 store dependencies，而不是让业务路由直接按
-Context 配置寻找 ObjectStore。Node 与 gateway 只装配 driver/relay 能力，不复制 Store 状态机。
-
-## 对象与上传会话数据模型（草案）
-
-对象身份由服务端生成的高熵 ID 决定。`filename` 只是展示元数据，绝不参与内部 key。建议至少保存：
-
-```ts
-type StoreObject = {
-  id: string
-  store: 'default' | string
-  driverKey: string                 // 仅服务端内部可见
-  status: 'pending' | 'ready' | 'failed' | 'abandoned' | 'deleted'
-  owner: PrincipalRef               // 精确形状是阶段 0 阻断性决策
-  producer?: PrincipalRef
-  originCallId?: string
-  contentType: string
-  filename?: string
-  expectedSize?: number
-  size?: number
-  checksum?: { algorithm: string; value: string }
-  etag?: string
-  createdAt: string
-  updatedAt: string
-  readyAt?: string
-  expiresAt?: string
-}
-
-type UploadSession = {
-  id: string
-  objectId: string
-  status: 'created' | 'uploading' | 'uploaded' | 'completed' | 'expired' | 'failed'
-  capabilityHash: string            // 不持久化 bearer 明文
-  transport: 'relay' | 'presigned-put' | 'multipart'
-  maxBytes: number
-  expiresAt: string
-  idempotencyKeyHash?: string
-  attempts: number                  // 首期只计整对象重试，不表示 part 重试
-  multipart?: {
-    providerUploadId: string        // 仅服务端内部可见
-    partSize: number
-    parts: Array<{ partNumber: number; etag?: string; size?: number }>
-  }
-  createdAt: string
-  completedAt?: string
-}
-```
-
-精确表结构不是本文决策；应沿用三宿主强一致 StateStore 的共享契约，不能只在某个宿主内存中保存权威
-session。owner 表示谁能管理和读取对象，producer 表示谁实际产出字节，两者不得合并。调用方远程要求
-设备拍照时，owner 是调用方身份，producer 是设备；设备自主上传时，两者都可以是设备身份。
-
-首期可以只实现 relay/single PUT；此时 `attempts` 明确表示从头重传整个对象。权威 schema 仍须为 multipart
-session 与 parts 预留可演进的独立结构（不要求照抄上面的内联草案），避免加入断点续传时对既有对象表做
-破坏性重解释。
-
-### 生命周期
+当前只开放名为 `default` 的 Store，稳定 URI 严格为：
 
 ```text
-create session
-  -> pending
-      -> relay PUT atomic commit          -> ready
-      -> direct PUT + complete verification -> ready
-      -> driver/validation error          -> failed
-      -> session expiry/no complete       -> abandoned
-ready
-  -> explicit delete / retention policy -> deleted
+store://default/<22..64 位 base64url objectId>
 ```
 
-- 只有 `ready` 对象可读、可分享或作为成功结果返回；知道 pending URI 不等于能读到半成品。
-- `complete` 必须幂等：同一成功 session 重试返回同一 descriptor；参数矛盾则返回 conflict。
-- `failed` 和 `abandoned` 保留短期元数据供诊断与幂等，再由清理器删除残留字节和 session。
-- local relay 在元数据提交失败时可能留下孤儿文件，S3/R2 在客户端未 complete 时可能留下 pending key；
-  清理器必须同时从元数据和版本化 key 前缀发现并回收，不依赖客户端主动 abort。
-- 删除先使元数据不可读，再异步清理字节；物理删除失败可重试，不能让对象重新变得可读。
-- ready 对象的默认保留期、租户配额和 owner 被删除后的处理仍是开放问题，实施前必须决策。
+URI 只表示身份，不是 bearer capability；知道 URI 不授予读取权。对象权威状态为 `pending`、`ready`、
+`failed`、`abandoned`、`deleted`，只有 `ready` 可读、可分享和进入 owner 的列表。
 
-## 上传协议（草案）
+- `owner` 是稳定 `OwnerRef`，决定普通管理面的对象级授权，不等同于某次调用使用的 SK `keyId`；SK
+  轮换不会自动改变对象 owner。
+- `producer` 单独记录实际产出者。普通管理面上传时 owner/producer 都是当前 owner；远程设备调用时
+  `owner = caller.owner`，`producer = device:<deviceId>`，并记录 `originCallId`。
+- ready descriptor 返回稳定 URI、MIME、实测 size、owner/producer 与时间等公开元数据，不返回 driver
+  key、upload/share token 或签名 URL。
+- 创建请求可声明 size、sha256 checksum、filename 与 owner-scoped `idempotencyKey`。同一 owner、同一
+  key、同一声明会恢复原 session/descriptor；声明矛盾返回 `conflict`。
 
-公开控制面建议使用独立 builtin，而不是 Context 命令：
+StoreService 构造时强制要求 `StateStore.compareAndSwap`；缺 CAS 的自定义状态后端对 Store fail closed，
+不能用进程内锁或 `get→put` 模拟跨副本状态机。capability HMAC key 优先从显式
+`storeTokenSecret`，否则从宿主 `encryptionKey`，经 `tb-store-capability-root:v1` 域分离 SHA-256 派生且
+不持久化；只有没有任何信任根的自定义/开发宿主才在 StateStore 用 CAS 生成持久 fallback。明文
+upload/call/share token 从不写入权威记录，只保存 hash。
+
+## 上传协议
+
+普通 SK 控制面使用 builtin：
 
 ```text
 POST /system/store/create_upload
-PUT  /~store/uploads/<uploadId>       # relay transport；capability 放 header，不放 URL
 POST /system/store/complete_upload
 POST /system/store/abort_upload
 ```
 
-`create_upload` 的请求只描述对象，不描述 Context 或目标路径：
+`create_upload` 只接收对象声明，不接收 context/path/overwrite。响应统一包含 `uploadId`、`objectUri`、
+`transport`、`method:'PUT'`、`url`、`headers`、`expiresAt`、`maxBytes` 与短期 `uploadToken`。调用方必须把
+grant 视为 secret，不记录 URL、headers 或 token。
 
-```json
-{
-  "contentType": "image/jpeg",
-  "filename": "photo.jpg",
-  "size": 182736,
-  "checksum": { "algorithm": "sha256", "value": "..." },
-  "idempotencyKey": "call-scoped-value"
-}
-```
+两种 transport 共用同一状态机：
 
-响应对 relay 和直传保持同形：
+1. **relay**：客户端向 `PUT /~store/uploads/<uploadId>` 流式发送 body，并用
+   `x-tb-store-upload` header 携带 upload token。服务端在流中计数、driver 原子落位后，以 CAS 把对象
+   推进 `ready`，该 PUT 直接返回 descriptor；正常路径不再额外 complete。
+2. **presigned-put**：driver 能安全签发 PUT 时，字节直接进入 R2/S3。随后客户端以 SK owner 身份，或用
+   `x-tb-store-upload` header，调用 `complete_upload`；服务端 HEAD 校验存在性、实测大小与可用元数据后
+   才推进 `ready`。
 
-```text
-{
-  "uploadId": "...",
-  "objectUri": "store://default/<objectId>",
-  "method": "PUT",
-  "url": "https://...",
-  "headers": { "Authorization": "Bearer ...", "Content-Type": "image/jpeg" },
-  "expiresAt": "...",
-  "maxBytes": <服务端为本次 transport 计算的有效字节上限>
-}
-```
+`complete_upload` 幂等；对已经完成的 session 返回同一 descriptor。relay 也可调用 complete 作崩溃恢复
+确认，但未成功提交字节时会 `conflict`。`abort_upload` 对未完成对象幂等，ready 对象不可 abort。
 
-这里的 header 和 URL 都是示意，最终 wire schema 需单独评审。协议不再接受 `contextPath`、entry path、
-bucket key 或 `overwrite`：每次 create 都分配新 object id，天然不覆盖既有对象。`idempotencyKey` 只让
-同一身份在限定窗口内重获同一 session，不允许把同一 key 改绑到不同内容声明。
+每次 grant 的 `maxBytes` 是部署上限、transport 上限与 call 配额的有效交集。已知 size 超限在 create
+阶段以 `rate_limited` 拒绝；relay 对未知流逐 chunk 计数，越界即取消并由 driver 清理临时字节。首期只
+支持整对象 single PUT，失败重试会从头发送整个对象。
 
-`maxBytes` 是每次 create 返回的整数，不是协议中写死的常量。StoreService 必须取 call/主体配额、部署
-策略、所选 transport 和宿主平台上限的有效交集。请求已知 `size` 超限时，create 阶段就返回结构化的
-非 500 客户端错误（精确 error code 在阶段 0 定稿）；未知 size 或虚报 size 仍可能在 Cloudflare 边缘
-进入 Worker 前收到平台原生 413，不能承诺所有超限错误都能被 HTBP JSON 包装。
+## 远程设备调用
 
-完整流程：
-
-1. StoreService 鉴权、应用 call capability/普通 scope、配额、MIME 和最大体积策略，计算本次
-   `maxBytes`，再创建 pending 对象与有限期 upload session；已知 size 超限时不创建 session。
-2. driver 支持安全的 `presignPut` 时返回对象存储直传请求；否则只在本次对象不超过有效 relay 上限时
-   返回网关 relay URL。R2 binding 没有 signer 不代表 default Store 不存在，但上传能力会被 relay 上限
-   截断；超过上限的大对象必须使用 signer/direct，未来可进一步选择 multipart/resumable。
-3. 客户端原样发送 method、headers 和 body。签名直传应绑定 content type、长度或 checksum（后端支持
-   时），内部 key 永远由服务端生成。
-4. relay PUT 在服务端完成流式计数/checksum 与原子落位后，必须在该请求内以原子状态转换把对象推进到
-   ready，并直接在 PUT 响应返回 descriptor。SDK 的正常 relay 路径不再额外调用 complete。
-5. direct PUT 后客户端必须显式调用 `complete_upload`；StoreService 执行 `HEAD`，验证对象存在、体积未
-   超限、声明一致，再原子推进 ready。幂等 complete 同时保留给 relay 客户端作确认/崩溃恢复：对象已
-   ready 时返回同一 descriptor，不能重复提交字节。
-6. 最终只把 `store://default/<objectId>` 作为设备结果持久化。上传 URL、
-   capability 和内部 key 不进入设备 result、调用历史或日志。
-
-relay PUT 完成即 ready 是明确的跨宿主设计，不是可选优化；显式 complete 是 relay 的可选确认/恢复端点，
-是 direct upload 的必经步骤。两条路径最终返回同一个 ready descriptor，但客户端往返数可以不同。
-
-## 读取、分享、查询与删除（草案）
-
-稳定 URI 是身份，不是 bearer capability。仅知道 `store://default/<objectId>` 不授予读取权：
-
-- `stat(uri)`：返回允许公开给当前主体的 MIME、size、checksum、owner/producer 摘要和时间信息，不返回
-  driver key、bucket 或签名 URL。
-- `read(uri)`：检查 owner/share 权限后返回短期 `$ref`；本地 driver 走 relay GET，S3/R2 可走
-  presigned GET。大文件不进入 JSON 或进程内完整缓冲区。
-- `share(uri, policy)`：创建有期限、可撤销的 share grant。第一阶段默认是短期下载能力或指定受众能力，
-  不创建永久公开静态地址；返回 share id 与短期 `$ref`，便于单独撤销和审计。
-- `delete(uri)`：owner 或 admin 使对象立即不可读，并触发幂等物理清理；默认没有就地覆盖或“恢复旧路径”。
-- `list(...)`：如第一阶段提供，必须按当前主体裁剪并 cursor 分页，不能枚举其他 owner 的对象。
-
-`$ref` 和 share URL 都是短期 bearer secret，与稳定 URI 严格分离。错误、Dashboard toast、CLI stderr、
-feedback、结构化日志和设备 result 都不得回显完整 URL。需要长期在 Tool Bridge 内传递对象时传
-`store://` URI，并在消费时重新鉴权、签发当次 `$ref`。
-
-Context 可以保存或返回 `store://` URI；是否自动把它投影成 `$ref` 或 MCP image/resource block，需要
-遵循调用者 read 权限并另行定义表示层，不能让 URI 本身绕过 Store 授权。
-
-## 设备调用与 call-scoped upload capability
-
-远程调用设备时，网关已经知道已鉴权调用者、目标设备、call id、时限和取消信号。网关应为该 call
-签发只能“创建本次调用产物”的 upload capability，并通过设备帧的受保护 context 或 SDK handler
-context 传递。推荐的设备作者体验是：
+设备帧仍是 JSON，不新增二进制 WebSocket 帧。网关在转发每次 device call 前签发窄能力并写入
+`call.context.upload`：
 
 ```ts
-device.expose('camera/take_photo', async (args, call) => {
-  const photo = await camera.takePhoto()
-  return await call.uploadObject({
-    body: photo,
-    contentType: 'image/jpeg',
-    filename: 'photo.jpg',
-  })
-})
+{
+  token: string
+  expiresAt: string
+  maxBytes: number
+  maxObjects: number
+}
 ```
 
-capability 至少绑定：call id、目标 device id、调用者/owner、有效期、最多对象数、总字节数、单对象上限
-和允许的 content type。它只能创建新对象并完成自己的 session，不能 list/read/share/delete 其他对象，
-也不能改写 owner。opaque token 只在设备与网关间传递，由 Device SDK 隐藏并在日志中强制脱敏；禁止放
-在 query string 或设备返回值里。
+Device SDK 将它封装为 handler 的 `call.uploadObject(...)`。create 请求用
+`x-tb-store-capability` header；后续 relay/complete 用本次 upload token。call capability 绑定 caller
+owner、device producer、call id、期限、对象数、总字节、单对象大小与 MIME allowlist，只能新建本次
+调用的对象，不能 list/read/share/delete 其他对象。call 返回、取消或失败后网关 best-effort revoke，
+到期与后台清理是硬兜底。
 
-owner/producer 语义：
+默认策略是每个 call 最多 4 个对象、单对象 256 MiB、合计 512 MiB、MIME `*/*`；宿主可用
+`TB_STORE_CALL_*` 覆盖。设备侧 `maxBytes/maxObjects` 只用于早拒，服务端 reservation/CAS 才是权威。
+老网关不下发 capability 时，`call.uploadObject` 明确返回 `unavailable`。
 
-- 远程设备调用：`owner = caller`，`producer = device`，使调用者在取得 URI 后能够读取或分享结果；
-- 设备自主上传：用设备 HTTP 身份请求普通 upload capability，`owner = device` 且
-  `producer = device`，之后由设备或有权管理员显式分享；
-- 调用超时或 cancel 会阻止继续创建 session，并把未完成 session 标为 abandoned，但不能声称已经上传
-  并 ready 的外部副作用被撤销。
+设备也可用普通 HTTP 身份调用顶层 `uploadObject` 做自主上传，此时 owner/producer 都是设备身份。两条
+路径最终只把 descriptor/`store://` URI 放进 result，绝不返回上传 capability。
 
-设备不需要 Admin SK、某个 Context 的 `write` scope 或共享 Store 的全局写权限。call capability 的
-签发和 owner 归属必须由网关权威决定，不能接受 arguments 中伪造的 caller、device、owner 或 call id。
+## 读取、分享与管理
 
-## 权限、安全与配额
+`system/store` 的其余命令是 `stat`、`read`、`share`、`revoke_share`、`delete`、`list`：
 
-建议把 `system/store` 纳入现有 action 模型，并叠加对象级检查：普通 create 需要 Store write，stat/read
-需要 Store read 且是 owner 或持有效 share，share/delete 需要 owner（admin 可介入）。call-scoped
-capability 是比全局 write 更窄的独立授权路径，不把设备提升为 Store writer。精确 scope 映射和 owner
-principal 形状需在协议评审中定稿。
+- `stat/read/list` 的 builtin scope 是 `read`；create/complete/abort/share/revoke/delete 是 `write`。
+  scope 通过后仍执行对象级 owner 检查；跨 owner 以 `not_found` 隐藏对象存在性。
+- `read(uri)` 返回短期 owner `$ref`，数据面为 `GET /~store/refs/<token>`；获取对象时仍检查对象保持
+  ready，因此 delete 会立即使旧 ref 失效。
+- `share(uri, ttlSec?)` 只支持有期限、匿名 bearer 下载，返回 share id 与
+  `GET /~store/shares/<token>`；share 在 StateStore 中有状态，`revoke_share` 与到期即时生效。
+- `list` 只列当前 owner 的 ready 对象并 cursor 分页。`delete` 先 CAS 标记不可读，再幂等删除字节。
 
-安全下界：
+capability-only create/complete/abort 路由在普通 SK 认证之前匹配；只有对应 header 存在时才走窄能力，
+否则继续进入普通 HTBP 鉴权。`callCapability`、`capability`、`uploadToken`、`shareToken` 等 secret 字段
+明确拒绝出现在请求 body。`/~store/refs` 与 `/~store/shares` 的 capability path 在结构化慢请求日志中
+必须脱敏；无效、过期或对象缺失统一折叠为 404。
 
-- object id 和 driver key 由服务端产生，使用足够熵；filename、MIME、设备 ID 或 caller 输入不能影响
-  磁盘/bucket 路径。路径穿越因此在产品面不可表达，driver 仍须做第二层 key 约束。
-- 对象不可就地覆盖；重试由 idempotency key/session 恢复表达。并发 complete、abort、delete 必须有
-  明确冲突和幂等语义。
-- create 前检查主体/调用/Store 配额，relay 传输中实时计数并在超限时中止，直传 complete 时用 HEAD
-  再次校验；客户端声明的 Content-Length、MIME 和 checksum 都不能作为唯一事实。
-- content type 要做语法校验和部署策略限制；需要内容嗅探、恶意文件扫描的部署可加异步 policy hook，
-  未通过前不得 ready。
-- upload/read/share capability TTL 要短、用途固定、可撤销；服务端只持久化 token hash。direct upload
-  URL 本身也是 bearer secret，必须复用现有日志脱敏下界。
-- share 默认私有且有期限；不通过“对象 ID 不可猜”代替授权。跨 owner、跨设备、跨 call 访问默认拒绝。
-- 本地文件权限、云端静态加密、传输 TLS、bucket CORS 和 endpoint allowlist 属于部署校验；CORS 必须
-  精确允许 Dashboard 所需 method/header/origin。
-- 审计记录 object id、动作、主体、driver 类别、结果、size 和 trace/call 关联，不记录字节、token、
-  完整签名 URL、内部 key 或可能敏感的原始 filename。
-- 配额至少支持单对象大小、单次 call 对象数/总字节、主体占用量、pending session 数和 share 数；默认
-  数值在实现前结合视频场景确定，不应把照片级限制硬编码成协议上限。
+## 宿主装配与清理
 
-## 数据路径
+| 宿主 | default Store 字节落点 | 上传路径与清理 |
+|---|---|---|
+| Node 单进程 / 单副本容器 | 缺省 `TB_DATA_DIR/objects/store/v1/...`；Docker 常见为 `/data/objects/...` | 本地 FS 流式 relay；启动前清理一次，之后每 `TB_STORE_CLEANUP_INTERVAL_SEC`（缺省 900 秒）清理 |
+| Node HA / 易失容器 | 四项 `TB_OBJECT_STORE_*` 配齐后的共享 S3/R2-compatible driver | 有 signer 时 presigned PUT；半配拒绝启动，多副本不得依赖副本本地盘 |
+| Cloudflare Workers | 必需 `TB_R2` binding | 有 S3 API signer 时 direct；否则 Worker relay 缺省收紧为 90 MiB。源码与 Deploy Button 均用每 15 分钟 Cron Trigger 调 scheduled cleanup |
+| SDK 嵌入宿主 | `ToolBridgeConfig.objects` 必填，可显式使用 `MemoryObjectStore` 做测试/易失开发 | driver 有 presign 则 direct，否则 relay；StateStore 同样必须提供 CAS；无 encryption/store 信任根时才生成持久 fallback |
+| 旧自定义 `TbAppDeps` 宿主 | `objects` 类型仍可缺省以保持装配兼容 | Help 可发现 `system/store`，实际 Store 调用以 `unavailable` fail closed；应迁移为显式 driver |
 
-### 本地 relay
+Node 的本地 driver 逐块写入同目录随机临时文件，fsync 后以 no-replace 原子落位，并流式读取；filename
+无法影响路径。R2/S3 signer 不可用时 Store 不消失，而是退到 relay 的有效上限。Cloudflare 超过 90 MiB
+的当前路径必须配置 signer/direct；平台仍可能在 Worker 代码运行前返回 request-body 413。
 
-本地上传必须流式处理大文件，不能调用 `arrayBuffer()` 或把完整视频放入内存。推荐顺序：
+清理是有界、cursor 分页且进度持久化的宿主任务，不由普通请求顺带触发。它收敛过期 upload/share/call
+capability/idempotency binding、pending/failed/abandoned/deleted 对象、无元数据 driver orphan 与本地
+staging 文件；清理与并发 complete 竞争时必须重新读取状态，不能删除已经 ready 的字节。
 
-1. 在最终 Store 目录内创建不可预测、排他的临时文件；
-2. 从 Request body 持续写盘，同时计数并计算可用 checksum，超限立即关闭并删除临时文件；
-3. flush/close 后以 no-replace 语义原子 rename 到 StoreService 生成的最终 key；
-4. 在 PUT handler 内写入实测 size/checksum，并以原子 compare-and-set 把 pending 推进 ready；成功响应
-   直接返回 descriptor，后续 complete 只作幂等确认/恢复；
-5. 进程崩溃后由启动/周期清理删除过期临时文件和无元数据孤儿。
+## SDK、CLI 与 Dashboard
 
-最终文件先存在、元数据后 ready 的顺序允许产生可清理孤儿，但不允许元数据声称 ready 而文件还未
-落位。read 只接受 ready。Range、条件读取和下载中转应复用现有对象读取能力，但必须保持流式背压。
+- 通用 SDK 的 `createStoreClient` 提供 upload/stat/list/read/download/share/revokeShare/delete；上传、下载
+  都保持流式，控制面错误会裁剪可疑 URL。
+- `@tool-bridge/sdk/device` 提供顶层 `uploadObject` 与 handler 内的 `call.uploadObject`，返回稳定
+  descriptor。旧 `uploadContextObject` 已从设备 SDK 删除。
+- CLI 提供 `tb store upload|stat|get|share|revoke-share|rm|list`（`list` alias 为 `ls`）。二进制 get
+  缺省流向 stdout，`--out` 以 create-only 方式写新文件。只有用户明确执行 `share` 时，成功 stdout/
+  JSON 才交付所请求的短期 `$ref`；其他输出与全部错误均裁剪 `$ref`、签名 URL、headers 和 token。
+- Dashboard 的 `/manage/store` 是独立 Store 页面，支持上传、分页列表、stat、下载、短期分享/撤销和
+  删除；它不复用 ContextBrowser，也不把 capability 写进 toast、调用历史或浏览器 URL。
 
-### R2/S3
+Context 管理上传仍保留：`ctx put`/Context `write` 用于内联语义内容，Context `create_upload`、
+`tb ctx upload` 与 Dashboard Context upload 用于把二进制 author 到指定命名 entry，继续返回
+`node://`。它们与匿名产物 Store 正交；不要把 Context upload 悄悄改写成 `store://`。
 
-driver 能签发 PUT 时，body 从客户端直达 R2/S3，网关只处理 create/complete；这样视频大小不占用网关
-内存和带宽。签名应尽量绑定 key、method、content type、长度/checksum 和 create-only 条件。客户端完成
-后必须 HEAD 校验，不能因 PUT 返回 2xx 就让未经服务端确认的对象 ready。
+## 当前限制与后续演进
 
-Cloudflare 的 R2 binding 本身不提供 S3 presign。部署没有 API signer 凭证时，default Store 仍存在，
-但 Worker relay 是入站请求，受账户套餐的 request-body limit 约束，超限由平台返回 413；详情以
-[Cloudflare Workers limits](https://developers.cloudflare.com/workers/platform/limits/)为准，不在稳定文档
-固化套餐数字。create 必须从部署配置得到有效上限并返回真实 `maxBytes`，已知 size 超限应在 create 阶段
-结构化拒绝；未知或虚报 size 不能绕过平台上限。
+- 当前只支持 `default`，没有公开 named-store 选择面。
+- 当前只有 single PUT，没有 multipart/resumable、分片恢复或弱网逐 part 重试；大视频失败会整对象重传。
+- share 当前只有短期匿名下载，没有指定 principal、永久公开 URL 或 CDN 发布。
+- 没有主体总占用量/自动淘汰策略；现有硬边界是部署单对象限制与 call 数量/字节/MIME 配额。
+- checksum 只在后端返回对应 metadata 时确认并进入 descriptor；客户端声明不能替代实测 size。
+- `store://` 尚不自动投影为 MCP image/resource 或 Context `$ref`；消费者须按当次 owner/share 权限显式
+  调用 `read`。
 
-因此 direct upload 不只是性能优化：对象超过有效 relay 上限时，signer/direct 是必需能力。首期可以只
-支持 single PUT，但它在弱网失败时需要整对象重传；R2/S3 大视频路径后续应提供 multipart/resumable，
-只重传失败 part。上传方法与限制以
-[Cloudflare R2 upload docs](https://developers.cloudflare.com/r2/objects/upload-objects/)为外部互操作依据。
-
-## API、SDK、CLI 与 Dashboard 草案
-
-### 直接 API / HTBP
-
-建议的 builtin 命令集是 `system/store/create_upload`、`complete_upload`、`abort_upload`、`stat`、`read`、
-`share`、`revoke_share`、`delete`，以及按产品需要提供的 `list`。命令继续遵循 HTBP 的完整命令路径和裸
-arguments body；relay PUT/GET 是与 `/~ref` 同类的数据平面保留端点，不是 Registry 节点。
-
-Help JSON 必须准确描述上传是否可用、大小上限和可选能力，但不能因为 signer 暂时不可用而隐藏 Store：
-relay 是受宿主 effective limit 约束的基线；create 响应的 `maxBytes` 是当次权威值，超过 relay 上限时
-direct（未来还包括 multipart）会从可选优化变成该对象能否上传的必要 capability。
-
-新增 `system/store` builtin 必须同轮更新 `llmdoc/protocol/htbp-contract.mdx` 的 builtin 表与 Store 协议、
-bootstrap/Help 清单、类似 `storeScopeForCmd` 的命令到 action 权威映射，以及 Help/发现/执行闭环测试。
-不能只加路由而让 scope、Help 或协议文档继续把 Store 当成不存在。
-
-### SDK
-
-- Device 入口新增 `uploadObject(...)`，优先消费当前 handler 的 call capability；设备自主上传时使用
-  `purpose: 'http'` 的设备身份申请受限 capability。
-- 通用 SDK 暴露 create/upload/complete 与 stat/read/share/delete 的类型安全 helper。
-- helper 自动选择 relay/direct、原样发送签名 headers；relay 读取 PUT 返回的 descriptor，direct 或恢复路径
-  调用 complete，最终只返回对象 descriptor/稳定 URI。
-- `uploadContextObject` 在阶段 1 标记 deprecated，迁移期只表达“明确写入某个 Context entry”，不再是
-  设备产物的推荐入口，并在阶段 4 删除。
-
-### CLI
-
-至少提供：
-
-```text
-tb store upload <file>
-tb store stat <store-uri>
-tb store get <store-uri> [--out <file>]
-tb store share <store-uri> [--ttl ...]
-tb store revoke-share <share-id>
-tb store rm <store-uri>
-```
-
-CLI 的 `--json` 输出使用与 API 一致的稳定 descriptor；stderr 不打印完整 share/presigned URL。大文件上传
-和下载必须流式，重试不得暗中创建多个对象。
-
-### Dashboard
-
-提供独立 Store 对象视图，而不是复用 ContextBrowser 假装对象属于某个 Context。至少支持本地文件
-上传、当前主体对象列表/元数据、下载、创建/撤销短期分享和删除；展示 owner、producer、状态和到期时间，
-不展示内部 key。浏览器 relay/direct 共用 create session：relay PUT 返回 ready descriptor，direct PUT
-之后显式 complete；两者对 expired、quota、conflict 给出一致错误。
-
-直接 API、CLI 和 Dashboard 是管理能力的三入口，新增或修改 Store 命令必须同轮对等。Device SDK 是
-设备数据面入口，也必须和同一协议对拍，不能另造只在设备可用的上传帧。
-
-## 现有 Context 上传的兼容迁移
-
-当前 `POST /<context>/create_upload`、CLI/Dashboard Context upload 和 Device SDK
-`uploadContextObject` 是“写入指定 Context entry”的既有预览能力。迁移原则：
-
-1. 先交付独立 StoreService、default driver、relay/direct 协议和 `uploadObject`，阶段 1 把仓库内设备
-   示例全部切到 Store，并把 Device SDK `uploadContextObject` 标记 deprecated。
-2. `tb ctx put`/Context `write` 保留，继续承担向语义 Context 写入命名 entry 的 authoring 能力。
-3. Context `create_upload`、`tb ctx upload` 与 Dashboard Context upload 也保留，继续表达“把二进制 author
-   到指定语义 Context 的指定命名 entry”；它们保持原 ObjectStore/keyPrefix/`node://` 语义，但不再推荐
-   给设备产物使用，也不能悄悄改成 `store://`。
-4. Context 若要引用 Store 对象，应显式写入 `store://` URI 或由 provider 明确集成 StoreService；不要让
-   StoreService 接收 `contextPath` 作为兼容参数。
-5. 阶段 4 在完成示例与调用方迁移后删除 Device SDK `uploadContextObject`；不删除上述 Context 管理/
-   authoring 能力，也不保留隐藏 compatibility flag。
-6. 已存在的 `node://` Context URI 继续由原 Context 读取，不自动搬迁、重写或批量复制到 Store。
-
-实现会至少触及 private `core`（driver/StoreService 类型与状态机）以及 public `app`（builtin/API）、
-`server`（本地 relay 与部署校验）、`gateway`（R2 relay/装配）、`sdk`（通用与 device helper）、`cli` 和
-`dashboard`。`plugin-sdk` 只有在第一阶段把 Store consumer/driver 作为插件公开扩展点时才应变化；自定义
-宿主注入本身不要求 plugin ABI。最终按实际 public artifact ownership 判定各包 bump，0.x 新增能力或
-破坏性收敛走 minor；`core` 等 private 包不单独发布，也不沿源码依赖图机械 bump 无感知的 public 包。
-
-## 分阶段实施
-
-### 阶段 0：协议与状态契约
-
-- **owner principal 是实现阻断项**：必须先决定独立 principal 还是其他稳定主体、SK 删除/轮换后的归属
-  语义与迁移约束；关闭该决策前不得创建权威表或落任何 Store 对象，禁止先写 `keyId` 再迁移；
-- 定稿 URI grammar、对象/session schema、命令形状、错误码、scope 映射、effective `maxBytes` 计算与
-  quota 默认值；
-- 即使首期只实现 single PUT，schema 也要为 multipart session/parts、逐 part 状态与 abort/recovery
-  预留非破坏性扩展面；阶段 1 的 `attempts` 只定义为整对象重试；
-- 为 StateStore 增加共享黑盒契约，覆盖状态转换、幂等、并发完成与过期清理；
-- 明确现有 ObjectStore 到 BlobStoreDriver 的 adapter，避免先重写后端。
-
-### 阶段 1：StoreService 与 Node 闭环
-
-- 实现 default Store、元数据、create/relay、幂等 complete、stat/owner read/delete；relay PUT 完成时直接
-  原子推进 ready 并返回 descriptor；
-- Node 默认落到 dataDir，本地 PUT/GET 流式、临时文件原子落位、崩溃清理；
-- owner read + relay GET 复用现有 `/~ref` 的 HMAC/WebCrypto、TTL 与域分离基础设施，但 Store 使用独立
-  token payload/domain，不复用 Context 的 `p`/`k` wire；阶段 1 不引入 share 语义；
-- 通用 SDK、Device SDK `uploadObject` 和直接 API 首先打通“无任何 Context 的新部署拍照上传”；同阶段
-  deprecate `uploadContextObject` 并迁移仓库示例。
-
-### 阶段 2：R2/S3 与部署约束
-
-- 复用现有 S3/R2 driver，先交付 direct single PUT + 显式 complete/HEAD，并按宿主 effective limit 选择
-  direct/relay；single PUT 的失败语义仍是整对象重传；
-- 后续里程碑为 R2/S3 大视频与弱网路径增加 multipart/resumable、逐 part 重试、complete/abort 和过期
-  parts 清理；阶段 0 预留的 schema 必须让该扩展无需破坏迁移；
-- Cloudflare provision 确保 R2 default binding、有效 relay 上限配置与 scheduled cleanup trigger；建议
-  Cron Trigger，若用 DO alarm 必须落实 durable coordinator ownership；Node/Helm HA 缺外部 Store fail closed；
-- 验证浏览器 CORS、平台 413、两副本可见性、后端切换拒绝和真实对象存储一次性 smoke。
-
-### 阶段 3：分享与三入口
-
-- 完成 share/revoke、配额、审计、retention cleanup；
-- CLI 与 Dashboard 对等交付 upload/stat/read/share/delete/list；
-- 根据 MCP/Context 的消费需要定义 `store://` 到当次 `$ref`/resource 的安全投影。
-
-### 阶段 4：兼容收敛
-
-- 仓库内设备与文档不再把 Context upload 用作设备产物入口；
-- 删除已 deprecated 的 Device SDK `uploadContextObject`；保留 `tb ctx put`/Context `write`、Context
-  `create_upload`、`tb ctx upload` 与 Dashboard Context upload 作为语义 Context authoring 能力；
-- 按实际包影响 bump、构建、验证并更新协议/部署文档，不在未合入分支打发布 tag。
-
-## 验证矩阵
-
-| 维度 | 必须证明的行为 |
-|---|---|
-| 新部署闭环 | Registry 中没有用户 Context，设备连接后拍照/视频仍能 upload 到 ready，并由调用者 read；relay 正常路径无需额外 complete |
-| Node 本地 | 重启后 URI 可读；大文件内存有界；relay PUT 原子 ready 并返回 descriptor；幂等 complete 可恢复；中断、超限和崩溃残留会清理 |
-| R2/S3 | `maxBytes` 反映宿主 effective limit；已知超限在 create 拒绝；未知/虚报覆盖平台 413；direct 需 complete/HEAD；single PUT 整对象重试，multipart 后续覆盖逐 part 恢复；CORS 正确 |
-| Cloudflare 清理 | scheduled trigger 能回收 pending/abandoned/orphan/retention；Cron 重入安全；使用 DO alarm 时验证唯一 durable coordinator ownership |
-| HA | 缺共享 Store 时部署 fail；两副本经同一外部 Store 上传和读取；副本重启不丢对象 |
-| 生命周期 | pending 不可读；relay PUT 原子 ready；direct complete 必需且幂等；relay complete 可确认/恢复；并发 complete/abort/delete 有确定结果；failed/abandoned/孤儿会清理 |
-| 身份与隔离 | caller owner/device producer 正确；设备不能读其他对象；跨 owner 默认拒绝；admin 与 share 明确生效 |
-| call capability | 绑定 call/device/owner/TTL/数量/字节/MIME；过期、取消、重放和篡改均拒绝；普通 arguments 不能伪造 |
-| 分享 | URI 本身无授权；短期 `$ref` 可用且到期；share 可撤销；日志与错误不泄漏 token/URL |
-| 配额与输入 | 单对象、call、主体和 pending 配额；错误 Content-Length/MIME/checksum；filename/path traversal 不影响 key |
-| 幂等 | create 重试不重复占用；首期 `attempts`/PUT 重试是整对象；complete 返回同一对象；相同 idempotency key 的矛盾声明 conflict；multipart 后续只重传失败 part |
-| 兼容 | Context `write`/`create_upload`、`tb ctx put/upload`、Dashboard Context upload 与既有 `node://` 语义保留；Device SDK helper 按阶段 deprecated/删除；Store 上传完全不要求 contextPath |
-| 入口对等 | Help/API、SDK、CLI、Dashboard 用相同 wire 和错误；新增 builtin 表、Store 协议和 `storeScopeForCmd` 类映射同轮更新；设备不新增二进制 WebSocket 帧 |
-| 工程闸门 | `pnpm verify` 全绿；公开包/打包/依赖变化追加 `pnpm turbo run build` 和最终 tarball 子入口验证 |
-
-真实 R2/S3、生产网关或真实设备验证每轮最多一次并留外部证据；其余矩阵优先用共享契约、fake driver、
-临时目录和本地 Miniflare/Server 测试完成。
-
-## 开放问题
-
-1. call capability 的 wire 放在现有 `call.context` 中，还是由 Device SDK 通过一次 HTTP exchange 获取？无论
-   哪种形状，都必须避免 token 被 handler 返回或日志记录。
-2. 阶段 3 的 share 只支持短期匿名下载，还是同时支持指定 Tool Bridge principal？永久公开链接默认不做。
-3. 默认单对象、单 call、主体总量、pending 数和 TTL 应是多少，如何为视频场景提供部署级覆盖？
-4. checksum 是 create 必填、按体积/客户端能力选填，还是只由 relay 计算？各 S3-compatible 后端可签名的
-   checksum header 不完全一致，需要互操作验证。
-5. ready 对象默认永久保留、按 owner quota 淘汰，还是支持 create 时声明 retention？删除 owner 后如何处理？
-6. multipart/resumable 在阶段 2 的哪个里程碑交付，part 大小/并行度/客户端恢复凭据和 abort 由谁管理？
-7. Cloudflare 的 effective relay limit 由 provision 自动探测还是部署者显式配置，怎样避免套餐变化后返回
-   过大的 `maxBytes`？
-8. named stores 第一阶段只作为宿主内部路由，还是允许有权客户端选择？普通设备 call 应始终固定 default。
-9. 是否在第一阶段提供 list，以及 owner/producer/filter 的可见字段；这不应阻塞 upload/read/share 闭环。
-10. `store://` 在 MCP 和 Context 返回中的自动投影边界是什么，如何确保消费方每次重新鉴权而不是缓存旧 `$ref`？
-11. 自定义 driver 只作为嵌入宿主注入，还是未来成为 plugin-sdk ABI？后者扩大同进程信任与版本兼容面，
-    不应在第一阶段顺带决定。
-
-## 决策摘要
-
-已确认的产品方向：
-
-- 设备产物进入独立 Store，不进入自动创建的特殊 Context；
-- Store 是每个部署都必须具备的基础设施，始终有 `default`；
-- 单机默认本地持久化，Cloudflare 默认 R2，HA/易失宿主必须使用外部共享 S3/R2，自定义宿主注入 driver；
-- local relay 与 R2/S3 presigned PUT 是同一上传协议的两种数据路径，但 relay 受宿主 effective body limit；
-  signer 不是 default Store 存在的前提，却是超过 relay 上限对象的必需能力，multipart/resumable 是后续
-  大视频与弱网路径；
-- 对象使用稳定 `store://` URI，读取/分享使用短期、可撤销能力，默认不公开静态托管；
-- 远程设备调用用 call-scoped capability，owner 与 producer 分离；
-- Context 可以引用 Store，但不再承担默认上传基础设施的职责。
-
-owner principal 是必须在阶段 0 先关闭的阻断性决策，不能先用 `keyId` 落对象再迁移。其余尚未决策包括
-具体 API 字段、scope、默认 quota/retention、share 受众、multipart 里程碑和 named stores 的首期范围。
-在此之前，本文中的 TypeScript、JSON 和路径都只作为协议草案。
+multipart/resumable 是明确的未来项，扩展时应新增 part 状态与恢复协议，不得把现有 `attempts` 或
+single-PUT session 破坏性重解释。

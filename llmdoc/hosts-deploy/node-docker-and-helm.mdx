@@ -1,5 +1,5 @@
 ---
-description: Node/Docker/Helm 宿主全指南:探针三分工与优雅关停、SQLite/PG 双后端、compose 双栈、Helm 形态推断与渲染期 fail、PaaS 限制、Redis 多副本设备路由、S3 对象存储。
+description: Node/Docker/Helm 宿主全指南:探针与关停、SQLite/PG、default Store、本地/S3 对象存储、Compose/Helm、PaaS 与 Redis 多副本路由。
 kind: guide
 code:
   paths:
@@ -19,7 +19,8 @@ code:
 
 ## Node 配置边界
 
-- `TB_DATA_DIR` 持有 SQLite(未用 PG 时)和对象数据,应挂载持久卷并限制文件权限。对象存储缺省始终是本地 FS,即使状态在 PG——多实例部署下 `$ref` 大对象不共享(外置见下文 S3 节)。
+- `TB_DATA_DIR` 持有 SQLite(未用 PG 时)和对象数据,应挂载持久卷并限制文件权限。对象存储缺省始终是本地 FS,即使状态在 PG：default Store 字节位于 `TB_DATA_DIR/objects/store/v1/...`（容器缺省 `/data/objects/...`），Context/`$ref` 走同一 driver 的其他 namespace。多实例部署下本地字节不共享(外置见下文 S3 节)。
+- default Store 是标准 Node 装配的必备能力。启动前先执行一次有界 cleanup，随后每 `TB_STORE_CLEANUP_INTERVAL_SEC` 周期执行（缺省 900 秒）；timer 不阻止进程退出，慢 tick 未结束时跳过并发 tick。清理失败只记录固定事件名，不输出 driver key。
 - 首次引导必须设置 `TB_BOOTSTRAP_ADMIN_SK`;缺失时启动默认 fail closed。`TB_ALLOW_INSECURE_BOOTSTRAP=true` 只用于一次性本地开发。
 - `TB_ALLOW_INSECURE_HTTP=true` 只放行本地 HTTP 上游,不应进入公网部署。
 - 反向代理必须保留 WebSocket upgrade、Authorization 和原始 host/proto 语义。
@@ -63,7 +64,7 @@ pnpm compose:pg:down
 
 - `--profile default`:gateway + postgres 单副本。
 - `--profile ha`:双 gateway(`TB_REPLICA_ID` 显式 a/b)+ Redis 路由 + Caddy LB。是**单机** HA 参考栈,机器仍是单点;真多副本走 Helm。
-- 双副本共享 `$ref` 对象要求配 `TB_OBJECT_STORE_*`;compose 无渲染期校验,只能靠注释提醒(Helm 有硬校验)。
+- 双副本共享 default Store 与 `$ref` 对象要求配 `TB_OBJECT_STORE_*`;compose 无渲染期校验,只能靠注释提醒(Helm 有硬校验)。
 - gateway healthcheck 打 `/readyz`(非 `/healthz`):后端断连时容器转 unhealthy,`restart: unless-stopped` + LB 依赖才有意义。
 
 ## Kubernetes(deploy/helm/tool-bridge)
@@ -85,7 +86,7 @@ Railway Metal 不接受 Dockerfile 的 `VOLUME` 指令,因此 Railway service va
 
 Railway production 使用平台原生 GitHub source 监听 `main`,并开启 **Wait for CI/check suites**:只有对应 main commit 的检查全绿后才开始部署。Watch Paths 只覆盖共享/Server/Dashboard/插件运行时代码、构建清单与 `Dockerfile.railway` 等真实运行时依赖,文档或 CLI/SDK-only 变化不应触发生产重建;路径边界与 `.github/workflows/ci.yml`、`scripts/deploy-change-filter.mjs` 同步维护。首次接线必须等交付这套闸门的 PR 合入 `main` 后再连接 production service,不得在 PR 合入前提前监听 `main`;构建入口仍由 `RAILWAY_DOCKERFILE_PATH=Dockerfile.railway` 指定。原生链路不可用时用 Railway CLI 手动部署作为 fallback,不要回补一套旧 Config-as-Code。
 
-- **ObjectStore 缺省是容器本地 FS**,`$ref` 大对象容器重建即丢、多副本互不可见;配 `TB_OBJECT_STORE_*` 外置。
+- **ObjectStore 缺省是容器本地 FS**,default Store/`$ref` 大对象在没有持久卷时随容器重建丢失、多副本互不可见;配 `TB_OBJECT_STORE_*` 外置。
 - **设备 WebSocket 多副本需配 `TB_REDIS_URL`**;不配时设备只连在一个副本上,调用打到别的副本会误判离线。
 - **首次引导需要 `TB_BOOTSTRAP_ADMIN_SK`**,缺失 fail closed,平台上表现为容器反复重启。
 
@@ -104,11 +105,12 @@ Railway production 使用平台原生 GitHub source 监听 `main`,并开启 **Wa
 
 ## 平台对象存储(S3 / R2)
 
-配齐 `TB_OBJECT_STORE_ENDPOINT/BUCKET/ACCESS_KEY_ID/SECRET_ACCESS_KEY` 四项即用 S3 兼容端点(`TB_OBJECT_STORE_REGION` 可选,缺省 auto),缺省回退本地 FS。
+配齐 `TB_OBJECT_STORE_ENDPOINT/BUCKET/ACCESS_KEY_ID/SECRET_ACCESS_KEY` 四项即用 S3 兼容端点(`TB_OBJECT_STORE_REGION` 可选,缺省 auto),缺省回退本地 FS。该 driver 同时承载 deployment-level default Store 与对象型 Context，但 Store 固定使用 `store/v1/...` namespace。
 
 - **四项必须齐全,缺一即拒绝启动。** 半套凭证静默回退本地 FS 的错误只在故障时暴露,代价远高于启动即拒。
-- 配上后 `$ref` 走 S3 presign 直连,大对象下载不再穿过网关进程；对象 context 同时暴露 `create_upload`，设备/CLI/Dashboard 可拿定路径 presigned PUT 后直传二进制（本地 FS 只能走 `/~ref` 中转，也不声明直传）。
+- 配上后既有 Context `$ref` 可走 S3 presign，default Store 的 `create_upload` 也优先返回 create-only presigned PUT；direct PUT 后必须 capability-only complete/HEAD 才 ready。Store owner/share read 当前仍使用独立 `~store/refs|shares` relay route，不因 driver 有 presign 就改变公开 wire。本地 FS 的 Store 上传走流式 relay，PUT 成功当次即 ready；Context 本地 FS 仍不声明 `create_upload`。
 - `TB_REF_TTL_SEC` 控制下载 `$ref`/presigned GET；`TB_UPLOAD_GRANT_TTL_SEC` 独立控制写 grant，缺省 `min(TB_REF_TTL_SEC, 900)`。两者均钳制在 SigV4 的 `1..604800` 秒范围，放宽慢下载窗口不会把写入窗口一并拉长。
+- Store 配置独立：`TB_STORE_MAX_OBJECT_BYTES`（缺省 256 MiB）、`TB_STORE_RELAY_MAX_BYTES`（Node 缺省跟随前者）、`TB_STORE_UPLOAD_TTL_SEC`、`TB_STORE_SHARE_TTL_SEC`、`TB_STORE_READ_TTL_SEC`，以及 `TB_STORE_CALL_MAX_BYTES/MAX_OBJECT_BYTES/MAX_OBJECTS/ALLOWED_CONTENT_TYPES`。显式 `TB_STORE_TOKEN_SECRET` 至少 16 字符；否则复用 `TB_SECRET_ENCRYPTION_KEY` 作根，经版本化域分离派生且不落 StateStore。两者都缺时才 CAS 生成持久 fallback，正式部署不应依赖该逃生路径。
 - Dashboard 是浏览器客户端，bucket CORS 必须精确允许 Dashboard origin、`PUT` 与签名 headers（缺省为 `Content-Type`、`If-None-Match`）；需要读取 etag 时 expose `ETag`。原生设备与 CLI 不受浏览器 CORS 限制。
-- 这是**启动期基础设施配置**,不在 Dashboard 里改:运行时换端点会让已写入的 `$ref` 指向失效。按节点用不同存储走 `kind: 'context'` 节点自己的 S3 配置。
+- 这是**启动期基础设施配置**,不在 Dashboard 里改:运行时换端点会让已写入的 `$ref` 与 `store://default/...` 字节落点失效。按节点用不同存储走 `kind: 'context'` 节点自己的 S3 配置；Store 当前不开放 named driver 热切换。
 - 与 `TB_DATABASE_URL` 组合即完整无状态形态:换全新容器仍能读回一切,有集成测试覆盖。

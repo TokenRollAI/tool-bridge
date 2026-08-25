@@ -36,6 +36,13 @@ code:
 - 派生投影(presence、缓存、搜索索引)的 TTL/降级防御、DO hibernation 恢复和 stale generation guard 属于安全下界,不是可删的历史兼容。
 - 日志、错误、调用历史、URL、CLI argv 与一次性验证输出都不得回显 secret、Admin SK、OAuth token 或含敏感 args 的 payload。
 - Presigned GET/PUT URL 本身是 bearer secret：客户端错误不得回显 fetch 原始 URL 或对象存储响应体，成功结果只持久化稳定 `node://` URI。写 grant 缺省把 `If-None-Match: *` 纳入签名以阻止静默覆盖，只有显式 `overwrite` 才扩大到可替换对象。
+- Store 的 `store://default/...` 同样只是稳定身份，不是 capability；读取仍需 owner `read` 或短期 share。
+  call/upload capability 只进 `x-tb-store-capability` / `x-tb-store-upload` header，相关 body 字段拒绝；
+  `~store/refs|shares/<token>` path、presigned URL、headers 与 token 必须在日志/错误/历史中脱敏。无效 bearer、
+  跨 owner 和非 ready 对象统一 not_found，避免对象 oracle。
+- Store HMAC key 优先从部署信任根经版本化域分离派生，不把派生 key 写入 StateStore；权威 session/share/
+  call capability 只存 token hash。relay filename 不参与 key，本地 driver 还要用根内检查、no-follow 与
+  原子 no-replace 做第二层路径防护。
 - 配置仓库只保留账户中立模板;Cloudflare account、域名、资源 ID 与登录态在本地 provision 或平台侧管理。
 
 ## 评审规则

@@ -1,5 +1,5 @@
 ---
-description: tb CLI 参数契约的评审方法:解析/客户端/服务端三层检查、三入口对等核对表、破坏性命令确认门的适用边界。
+description: tb CLI 参数契约:解析/客户端/服务端三层检查、default Store 命令、三入口对等与破坏性确认门。
 kind: guide
 relations:
   requires:
@@ -23,6 +23,17 @@ CLI 是公共控制面,不是 API 的宽松包装。修改命令时同时检查�
 - 互斥、依赖、默认值和枚举在解析层显式表达;不要把非法组合静默改写。
 - 密钥只从专用 secret 流程进入,不保留隐藏的旧 flag,也不把明文带入普通资源命令。
 - `ctx put` 面向可内联文本/JSON（支持 stdin 与 metadata），`ctx upload` 面向二进制直传；后者缺省条件创建，同名 entry 以 `conflict` 失败，只有显式 `--force` 才请求可覆盖 grant。两条命令的帮助必须互指，避免把直传误解为 `put` 的别名。
+- `tb store` 是部署级对象管理面，与 `ctx` 正交：`upload <file>` 新建 opaque Store 对象，不接收 Context
+  path/entry/overwrite；`stat|get|share|rm` 接严格 `store://default/...`，`revoke-share` 接 share id，
+  `list`/`ls` cursor 分页。帮助必须明确“命名语义 entry 用 `tb ctx upload`”，不能让两类上传互相冒充。
+- `store upload` 从文件 stat 得到 size，流式发送，并按 grant 自动选择 relay/direct；relay PUT 返回
+  descriptor，direct 才调用 capability-only complete。`--idempotency-key` 是 owner-scoped create 重试
+  key，不是覆盖路径。文件 size 大于当次 `maxBytes` 时在本地早拒，服务端仍做权威限额。
+- `store get` 缺省把字节流向 stdout；`--out` 以 create-only 打开，失败只删除本次产生的残片，不覆盖
+  既有文件。`--json` 下载必须同时给 `--out`，避免把二进制与 JSON 混到 stdout。
+- Store capability、签名 URL、headers 与 token 不进入错误/stderr。唯一例外是用户明确执行
+  `store share`：成功 stdout/JSON 必须交付该次请求产生的短期 `$ref`，否则 share 命令没有可用产物；
+  其他 Store 输出继续裁剪 bearer。
 - 删除资源只做命令名承诺的动作,并校验目标 kind:`integration rm` 只卸 tool/context 节点,打到 device 等其它 kind 即拒(走 `deleteNode(target, path, ['tool','context'])`)。集成卸载与密钥删除是两个显式操作。
 
 ## 确认门不是护栏
@@ -38,6 +49,10 @@ CLI 是公共控制面,不是 API 的宽松包装。修改命令时同时检查�
 | 直接 API / HTBP | 权限、状态码、响应形状与错误码 |
 | `tb` CLI | 参数可达、帮助文本、stdout/stderr、退出码 |
 | Dashboard | 字段来源、校验、敏感值处理与成功后刷新 |
+
+Store 的当前对等面是 `system/store`、上述 `tb store` 命令与 Dashboard `/manage/store`。Device SDK 的
+`call.uploadObject` 是设备数据面，不要求 CLI 模拟 call capability，但最终仍消费同一 create/relay/direct
+状态机。
 
 如果 Dashboard 或 API 能完成而 CLI 无法表达,就是管理旁路。若某能力有意只属于一个入口,应在契约中说明原因。
 
