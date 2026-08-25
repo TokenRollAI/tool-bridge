@@ -44,7 +44,7 @@ CLI 是公共控制面,不是 API 的宽松包装。修改命令时同时检查�
 
 ## 结构与错误边界
 
-`runMain` 包围根 `program.parseAsync`，是生产 CLI 唯一错误边界。Commander 解析错误和 action reject 都在此统一进入 `reportError`；每个 `.action()` 不得再包一层 guard/catch，否则会重复书写退出码、JSON 模式和敏感错误裁剪。帮助/版本的 Commander 提前退出仍在根边界被识别为成功。
+`runMain` 包围根 `program.parseAsync`，是生产 CLI 唯一错误边界。Commander 解析错误和 action reject 都在此统一进入 `reportError`；每个 `.action()` 不得再包一层 guard/catch，否则会重复书写退出码、JSON 模式和敏感错误裁剪。`tb status` 的 target/transport 失败也必须 reject 到该边界，不能自行输出后 return success；帮助/版本的 Commander 提前退出仍在根边界被识别为成功。
 
 CLI 只保留 argv、profile/凭证、stdout/stderr 与 Node 宿主适配。固定控制面 HTTP 交给 `@tool-bridge/sdk/client`，Store wire/transport 交给 `@tool-bridge/sdk/store`，设备 reconnect/heartbeat/credential refresh 交给 `@tool-bridge/sdk/device` 的 portable supervisor。`http.ts`、Store commands 与 `deviceRuntime.ts` 是 CLI 语义适配层，不应复制 SDK 中的 wire parser 或连接状态机。
 
