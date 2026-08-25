@@ -1,15 +1,15 @@
 # 开源组件替代与大幅代码精简审计
 
-> 审计日期：2026-08-25
-> 代码基线：`c4972b9`（已 rebase 到当前 `main`，`HEAD...main = 0/0`）
-> 审计性质：源码、测试、构建与部署配置的只读审计；没有修改业务实现、依赖或版本。
+> 审计日期：2026-08-25–26
+> 代码基线：`main@c4972b9`；实施分支从该点开始，§22–23 的数字包含其后全部正式改动。
+> 审计性质：§1–21 是方案审计，§22–23 记录按审计结论完成的实现、反证与验收。
 > 结论可信度：代码数量和重复模式来自当前工作树；删除量是区间估算，只有 PoC 的净 diff 才能作为立项承诺。
-> 文档状态：这是方案报告，不是已经批准的架构决策。
+> 文档状态：情景 A 的已实施项是当前代码事实；情景 B/C 与文末剩余候选仍需独立 ADR/PoC。
 > 复核修订：已吸收独立 review，并对 `74c02ba..c4972b9` 新增的 Default Store/object storage 整链路做了二次专项审计；同时修正 Ky 对照组、JOSE 需求矩阵、OpenConnector 净删口径、Dockerfile 平台约束和 Hono precompressed 验证前提。
 
 ## 1. 执行结论
 
-当前仓库约有 **138,535 行 TypeScript/TSX 源码**。真正能实现“数量级代码精简”的区域仍高度集中：`packages/plugins/src` 有 **82,791 行**，约占全部源码 **59.8%**；再加插件测试和迁移脚本，相关受维护代码约 **119,208 行**。
+重构前主线约有 **138,535 行 TypeScript/TSX 源码**，完成两轮后为 **136,567 行**。真正能实现“数量级代码精简”的区域高度集中：基线 `packages/plugins/src` 有 **82,791 行**，约占全部源码 **59.8%**；再加插件测试和迁移脚本，相关受维护代码约 **119,208 行**。
 
 rebase 带入的 Default Store 是一次净增 **6,091 行生产源码 + 3,592 行测试**的大改动。专项 review 的结论是：它的 CAS、capability、幂等、可撤销 share、relay/direct 和清理状态机是产品语义，不宜被 tus、Uppy、S3 SDK 或通用状态机整体替换；但 CLI/Dashboard/SDK 的 Store wire parser 与上传编排明显重复，另有一批尚未启用的持久化字段和可合并的 1:1 object/upload session，是新的高价值精简面。
 
@@ -1379,17 +1379,17 @@ PartyServer 是更贴近 DO lifecycle 的局部候选，但它只能接管 WebSo
 | Package | 基线 | 当前 | 净变化 |
 |---|---:|---:|---:|
 | app | 8,565 | 8,586 | +21 |
-| cli | 7,665 | 7,074 | **-591** |
-| core | 13,535 | 14,179 | +644 |
+| cli | 7,665 | 6,893 | **-772** |
+| core | 13,535 | 14,149 | +614 |
 | dashboard | 19,152 | 18,309 | **-843** |
 | gateway | 1,570 | 1,482 | **-88** |
 | plugin-sdk | 726 | 726 | 0 |
-| plugins | 82,791 | 80,783 | **-2,008** |
+| plugins | 82,791 | 80,701 | **-2,090** |
 | sdk | 2,138 | 3,400 | +1,262 |
 | server | 2,393 | 2,321 | **-72** |
-| **合计** | **138,535** | **136,860** | **-1,675** |
+| **合计** | **138,535** | **136,567** | **-1,968** |
 
-按 diff 方向，生产源码是 `+10,880 / -12,555 = -1,675`。core 与 SDK 的增长是有意的集中：它们新增
+按 diff 方向，生产源码是 `+11,216 / -13,184 = -1,968`。core 与 SDK 的增长是有意的集中：它们新增
 command/wire/OpenAPI/neutral client 单一真源；CLI、Dashboard、provider 与宿主消费者删除副本。不能只列
 消费者毛删除而不计真源新增。
 
@@ -1397,7 +1397,7 @@ command/wire/OpenAPI/neutral client 单一真源；CLI、Dashboard、provider �
 
 | 口径 | 增加 | 删除 | 净值 | 说明 |
 |---|---:|---:|---:|---|
-| 正式测试源码 | 5,751 | 5,224 | **+527** | provider 测试净删 2,881 行，被新增的跨端、安全、路径、发布和 characterization tests 抵消 |
+| 正式测试源码 | 5,974 | 5,225 | **+749** | provider 测试净删 2,881 行，被新增的跨端、安全、路径、发布、字节预算和 characterization tests 抵消 |
 | 生成式测试 fixture | 110 | 0 | **+110** | 固定控制面 OpenAPI/wire golden；不进入 production bundle |
 | tracked/generated production code | 0 | 0 | **0** | OpenAPI 由 Zod 投影；不提交 codegen client/provider 类型 |
 | manifest/lock/build/release/config | 1,182 | 138 | **+1,044** | neutral build、Knip、exports、release verifier 和 lockfile；不是生产源码 |
@@ -1435,7 +1435,7 @@ authority、Store capability、release tarball closure 等断言补足了原本�
 | 生产/测试/生成物分开报告 | ✅ 见 §22.9 |
 | 依赖数 | ✅ 正式 runtime 只新增 `ipaddr.js@2.5.0`；dev 新增 `knip@6.32.2`；其余候选仅在隔离 PoC |
 | bundle/cold start/build time | ✅ 七个 public artifact 的 JS/CSS 合计 raw `18,258,054 → 18,656,702 B`（+398,648），逐文件 gzip `3,396,664 → 3,493,430 B`（+96,766）；Node 冷启动中位数 `101.8 → 113.1 ms`；强制 build `10.81 → 15.61 s`，见下表与口径说明 |
-| `pnpm verify` | ✅ exit 0；9/9 package typecheck、ESLint、全部 package tests，以及 provision 6/6、release 34/34、Dockerfile 2/2、deploy-CI 5/5 |
+| `pnpm verify` | ✅ exit 0；9/9 package typecheck、ESLint、全部 package tests，以及 provision 6/6、release 35/35、Dockerfile 2/2、deploy-CI 5/5 |
 | `pnpm turbo run build` | ✅ `--force` 7/7，0 cache，Node/Workers/Dashboard/neutral SDK 全部产出；当前 real 15.61 s |
 | `pnpm analyze:dead-code` | ✅ Knip exit 0 |
 | `git diff --check` | ✅ 无输出 |
@@ -1602,3 +1602,143 @@ Important 与 1 个 Minor 全部关闭，未发现新的 Blocker/Important；rel
 按本轮审查范围可以放行发布。
 
 随后的 llmdoc 对码独立复核又指出 4 个 Important 过度承诺和 1 个 Minor：DNS 解析防线、GHCR 实物恢复、`tb status` 根错误边界、system theme 与同步 JSON parse deadline。其中 `tb status` 按结构目标修复并增加回归，其余文档收紧到实际保证；复核者确认全部关闭。
+
+## 23. 第二轮机会扫描与实施结果
+
+首轮完成后又对 CLI 类型层、core 固定控制面 wire、provider 二进制响应和发布编排做了一次针对性扫描。
+本轮继续采用同一条准入线：只有重复契约能由一个已有真源或成熟组件接管、现有运行时语义有测试可锁、且
+最终 diff 不把复杂度转移到 adapter 时才实施。结果不是再引入一批大框架，而是完成三项生产源码收敛和一项
+发布正确性收敛。
+
+### 23.1 决策摘要
+
+| 区域 | 选择 | 生产源码净变化 | 测试/配置净变化 | 结论 |
+|---|---|---:|---:|---|
+| CLI Commander 类型 | 官方 `@commander-js/extra-typings@15.0.0` ambient module | **-181** | manifest/lock/Knip +21 | 合入；无新增 runtime dependency |
+| core 固定 wire | 复用 `ACTIONS`、`NODE_KINDS`、`TB_ERROR_CODES` 与领域类型 | **-30** | tests +60 | 合入；同时消除 device/control-plane error schema 漂移 |
+| provider response bytes | 仓内窄 helper，继续复用 Web Streams/Web API | **-82** | tests +87 | 合入；不为四个 reader 引入通用 HTTP SDK |
+| release plan | 单次 registry snapshot + exact-version 判定 | +12（含 workflow） | tests +75 | 合入；这是竞态/幂等修复，不记为 LOC 精简收益 |
+| **第二轮 `packages/*/src` 合计** |  | **-293** |  | 累计生产源码净删从 1,675 增至 **1,968** 行 |
+
+CLI 的 41 行 compile-only inference fixture 位于 `src`，因此已经保守计入上表的生产路径口径；若把它按测试
+资产单列，CLI 的实现与 ambient declaration 实际净删 222 行。本轮没有删除协议测试：core、plugins 与 release
+新增/强化的正式测试净增 222 行。所有代码、测试和配置合并后，本轮在审计文档之外仍是净删 38 行；这说明
+发布正确性测试的增加被如实计入，没有只报消费者侧毛删除。
+
+### 23.2 CLI：让 option 定义同时成为类型真源
+
+此前 Commander 已经是 CLI 的解析真源，但 82 个 action 的 TypeScript 参数仍靠手写 interface/annotation
+维护。命令增加或修改 option 时，运行时、help 与 TypeScript 可以各自漂移；大量 command factory 还显式
+返回宽泛 `Command`，主动丢掉了链式 builder 已经知道的 argument/option 类型。
+
+本轮采用 Commander 官方推荐的
+[`@commander-js/extra-typings`](https://github.com/commander-js/extra-typings#ambient-module-setup)：
+
+- `commander` 仍是唯一运行时包；extra typings 只放在 devDependencies，通过 `commander.d.ts` ambient module
+  替换编译期声明，不进入发布 tarball 的 runtime dependency closure；
+- `commander` 收窄为 `~15.0.0`，与 extra typings 的 15.0 minor 线同步，避免 patch 之外的 API/声明漂移；
+- `withGlobalOpts`、`withPageOpts`、`withDeviceConnectionGlobalOpts` 保留 builder 的三个泛型参数；
+- `configureGlobalOpts` 使用并返回增强后的 command，避免在 wrapper 内重新把推断类型拓宽；
+- command factory 不再声明宽泛 `: Command`，action callback 删除重复的 options interface 与参数注解；
+- 41 行 compile-only fixture 同时覆盖 root/global、page、device、repeatable collector 和代表性字段，明确断言
+  `json/cursor/tag/baseUrl/timeout` 不是 `any`，其中 `tag` 必须推断为 `string[]`；
+- Knip 将该 fixture 声明为 compile-only entry，并仅忽略 ambient declaration 消费的 dev dependency。构建产物
+  仍只有对 `commander` 的运行时 import。
+
+独立 compiler API 复核遍历了全部 action，未发现 `any`/`unknown` options 或 positional 顺序错配；Node 22、
+Bun binary、clean tarball install、`tb --version` 和 `--help` 也均通过。这里的主要收益是删除 155 处左右的
+手写回调参数契约并防止未来漂移，不宣称 erased TypeScript 会显著缩小 JS bundle。
+
+### 23.3 provider：统一有界读取与大字节 Base64
+
+OpenAI、PubMed、Memos 与 Mistral 各自维护一份流式 reader：逐 chunk 计数、超限报错、拼接字节；OpenAI、
+Memos、Dropbox/Google Docs 又各有一份 Base64 转换。这些副本看似短，但涉及不受信任响应的内存上限、流取消
+和大数组调用栈，漂移会成为安全问题。
+
+新增的 `_runtime/responseBytes.ts` 只承担两个稳定原语：
+
+- `readBoundedResponseBytes` 可在可信协议允许时预检 `Content-Length`，并始终按实际流量再次计数；越界立即
+  cancel，所有路径释放 reader lock，最终返回独立 `ArrayBuffer` backing 的 `Uint8Array`；
+- `bytesToBase64` 以 32 KiB 分块调用原生 `btoa`，避免把大字节数组一次 spread 到调用栈；不引入 `Buffer`
+  或其它 Node-only 全局，因此 Workers/browser 闭包保持中立。
+
+Mistral 的旧契约只按实际读取字节判断，不信任/不提前拒绝声明长度；迁移时显式传
+`checkContentLength:false`，没有借重构偷改兼容行为。新增 6 个测试覆盖拼接/释放、声明长度超限、实际流超限、
+忽略声明长度、null body 和大数组 Base64。现有 `guardedFetch`、`retry=0`、错误映射与 credential boundary 均未改。
+
+### 23.4 core：wire vocabulary 与错误体只保留一个定义
+
+固定控制面 wire 曾再次手写 action、node kind 与 TBError 的枚举；device frame 又维护一份 TBError schema。
+它们与 core 领域常量当前相同，但新增 error code/action/kind 时没有结构保证会一起更新。
+
+现在 `wire.ts` 直接以 `ACTIONS`、`NODE_KINDS` 构造 Zod enum，`errorWire.ts` 以 `TB_ERROR_CODES` 建立最小错误
+模块，固定控制面和 device frame 共同导入。这个最小模块只依赖 Zod/errors，没有让 device closure 反向加载完整
+固定控制面 schema 图。
+
+这里有一个由强制 build 捕获的重要边界：初版把全部 public wire types 改成 `z.output<typeof schema>`，core
+自身 typecheck 通过，但 SDK declaration build 把 Zod 推断细节带给 Dashboard consumer，造成 kind lookup 可能
+为 `undefined`、feedback 类型退化等错误。最终实现改为：
+
+- schema 的 vocabulary/运行时校验复用领域常量；
+- 有现成领域契约的 public type 直接 alias `Action`、`NodeKind`、`TBErrorBody`、`Presence`、`ToolSpec`、`Page`
+  等稳定类型；
+- 没有等价领域类型的固定 wire 继续保留显式 public interface，并用 `ZodType<T>`/exhaustive check 对码；
+- 新测试同时锁 runtime vocabulary rejection、类型双向等价与 device/control-plane error schema 共用。
+
+这也是为什么验收必须同时跑 build：`verify` 不消费打包后的 SDK `.d.ts`，单靠 package typecheck 无法发现这类
+public artifact 边界回归。
+
+### 23.5 release：一个 registry 时刻、一个 exact-version 判据
+
+原 workflow 为人类摘要和机器 `ORDER` 分别执行一次 release plan。npm registry 若恰好在两次请求之间变化，
+summary 与实际发布集合可能互相矛盾；同时只比较 `dist-tags.latest` 会把“本地精确版本已经存在、但 latest 已指向
+更高版本”的合法恢复场景误判为需要重复发布。
+
+现在的契约是：
+
+1. `npmRegistrySnapshot` 对每包只请求一次 install metadata，同时返回 `versions` 集合与 informational `latest`；
+2. `needsPublish` 只取决于本地精确版本是否在 `versions` 中；畸形 metadata fail closed；
+3. `release-plan.mjs --json-file` 从同一个内存 plan 同时输出人类摘要和 JSON snapshot；
+4. workflow 只调用一次脚本，后续 selection/topological order 读取该文件；
+5. `buildReleasePlan` 注入 fetcher/manifest loader，测试可证明每包一次 fetch、exact/latest 漂移、首次发布和
+   `dashboard → server` 偏序。
+
+本轮只进行了一次真实 registry 验证：七个本地 minor 版本均不在 registry，latest 分别仍是上一版，计划得到
+7 个待发包和正确的 dashboard/server 顺序；没有重复消耗真实外部资源。package-release suite 由 34 增至
+35 项并全部通过。
+
+### 23.6 最终门禁与失败闭环
+
+本轮最终状态：
+
+| 门禁 | 结果 |
+|---|---|
+| `pnpm verify` | ✅ 9/9 typecheck、lint、全仓 tests；release 35/35 |
+| `pnpm turbo run build --force` | ✅ 7/7 public artifacts，0 cache |
+| `pnpm analyze:dead-code` | ✅ Knip exit 0；compile-only fixture 已显式建模 |
+| `git diff --check` | ✅ 无 whitespace error |
+| 真实 `release-plan --json` | ✅ 单次执行；七包 exact-version 与拓扑结果符合 registry 现状 |
+| 独立代码复核 | ✅ action 类型、response stream、wire artifact 与 release snapshot 均无开放高风险项 |
+
+过程里没有隐藏一次失败：第一次强制 build 暴露 `z.output` public declaration 回归，修正 artifact type boundary
+后先跑 core typecheck + SDK build + Dashboard build，再重跑完整 7/7 强制构建。Knip 初次也正确指出 compile-only
+fixture/ambient dependency 不在运行时图；补上显式工具配置后复跑为绿，而不是用全局 ignore 掩盖 CLI 文件。
+
+### 23.7 仍可继续，但不应混入本轮的候选
+
+| 候选 | 粗略净变化 | 判断与前置条件 |
+|---|---:|---|
+| npm publish workflow 抽 reusable workflow | 约 -180–240 行 YAML | 有真实删行，但 npm Trusted Publishing 与 workflow identity 绑定；先选一个低风险包做真实 canary，再迁其余六包 |
+| pack verifier 手写 argv 改 `node:util.parseArgs` | 约 -20–40 行 | 低风险、低收益；必须保留重复 option 拒绝、错误码/文案、positionals 与 `--bin × --skip-install` 契约 |
+| GHCR artifact-level recovery | **新增**约 80–130 行 | 是正确性补强而非精简；需 Packages API `packages:read`、pagination、权限不足 fail closed 与实际镜像 tag 测试 |
+| 扩大 response helper 到更多 provider | 视真实 diff | 只在上游协议确实同构时逐个迁移；不得统一掉 SSE/multipart/XML、特殊 status 或 content-length 语义 |
+| OpenConnector 混合/全外置 | 见 §10/§16 | 仍是独立 ADR；先量化 adapter、契约测试、双凭证控制面和运营成本，不能由本轮小重构自动批准 |
+
+设备反向注册也没有因为“再找开源包”而改成 Socket.IO。它仍使用 raw WebSocket/PartySocket + Durable Object
+hibernation/Node `ws`，保留 generation、单一权威连接、reverify、presence/reclaim、deadline/cancel、迟到结果和
+owner-safe lease。Socket.IO 的 Engine.IO server/rooms/ack 模型既不能直接兼容现有 raw frame，也不能替代这些
+状态机；此处继续不迁移是经过对拍后的结构选择，不是遗漏。
+
+第二轮之后，仓内已没有另一块“低风险、数百行以上、可直接由成熟包替掉”的明显重复区。接下来的真实大幅
+删减主要只剩 reusable release workflow 或 OpenConnector catalog 外置，两者都需要真实发布/运营门禁；继续
+为了 LOC 把产品状态机包装进通用框架，预期只会把代码搬到 adapter，并不会降低总维护成本。
