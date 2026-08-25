@@ -1,63 +1,63 @@
 {
   "schema": "llmdoc.meta/v3",
   "baseline": {
-    "revision": "7dbe441bd1505c1cc99a0f5508893a0c6ceeddb0",
-    "verifiedAt": "2026-08-25T03:04:54.914Z"
+    "revision": "3b9205ca41a4c32fb9f85043dae16dbca77077b2",
+    "verifiedAt": "2026-08-25T04:07:44.288Z"
   },
   "documents": {
     "app-runtime/host-neutral-assembly.mdx": {
-      "validatedRevision": "7dbe441bd1505c1cc99a0f5508893a0c6ceeddb0"
+      "validatedRevision": "3b9205ca41a4c32fb9f85043dae16dbca77077b2"
     },
     "app-runtime/mcp-interop.mdx": {
-      "validatedRevision": "7dbe441bd1505c1cc99a0f5508893a0c6ceeddb0"
+      "validatedRevision": "3b9205ca41a4c32fb9f85043dae16dbca77077b2"
     },
     "architecture.mdx": {
-      "validatedRevision": "7dbe441bd1505c1cc99a0f5508893a0c6ceeddb0"
+      "validatedRevision": "3b9205ca41a4c32fb9f85043dae16dbca77077b2"
     },
     "cli/agent-skill-integration.mdx": {
-      "validatedRevision": "7dbe441bd1505c1cc99a0f5508893a0c6ceeddb0"
+      "validatedRevision": "3b9205ca41a4c32fb9f85043dae16dbca77077b2"
     },
     "cli/argument-contract.mdx": {
-      "validatedRevision": "7dbe441bd1505c1cc99a0f5508893a0c6ceeddb0"
+      "validatedRevision": "3b9205ca41a4c32fb9f85043dae16dbca77077b2"
     },
     "dashboard/canvas-architecture.mdx": {
-      "validatedRevision": "7dbe441bd1505c1cc99a0f5508893a0c6ceeddb0"
+      "validatedRevision": "3b9205ca41a4c32fb9f85043dae16dbca77077b2"
     },
     "device/device-daemon.mdx": {
-      "validatedRevision": "7dbe441bd1505c1cc99a0f5508893a0c6ceeddb0"
+      "validatedRevision": "3b9205ca41a4c32fb9f85043dae16dbca77077b2"
     },
     "device/do-websocket-sessions.mdx": {
-      "validatedRevision": "7dbe441bd1505c1cc99a0f5508893a0c6ceeddb0"
+      "validatedRevision": "3b9205ca41a4c32fb9f85043dae16dbca77077b2"
     },
     "hosts-deploy/cloudflare-paths.mdx": {
-      "validatedRevision": "7dbe441bd1505c1cc99a0f5508893a0c6ceeddb0"
+      "validatedRevision": "3b9205ca41a4c32fb9f85043dae16dbca77077b2"
     },
     "hosts-deploy/node-docker-and-helm.mdx": {
-      "validatedRevision": "7dbe441bd1505c1cc99a0f5508893a0c6ceeddb0"
+      "validatedRevision": "3b9205ca41a4c32fb9f85043dae16dbca77077b2"
     },
     "hosts-deploy/state-store-decision.mdx": {
-      "validatedRevision": "7dbe441bd1505c1cc99a0f5508893a0c6ceeddb0"
+      "validatedRevision": "3b9205ca41a4c32fb9f85043dae16dbca77077b2"
     },
     "plugins/designing-and-migrating-plugins.mdx": {
-      "validatedRevision": "7dbe441bd1505c1cc99a0f5508893a0c6ceeddb0"
+      "validatedRevision": "3b9205ca41a4c32fb9f85043dae16dbca77077b2"
     },
     "plugins/plugin-runtime.mdx": {
-      "validatedRevision": "7dbe441bd1505c1cc99a0f5508893a0c6ceeddb0"
+      "validatedRevision": "3b9205ca41a4c32fb9f85043dae16dbca77077b2"
     },
     "protocol/htbp-contract.mdx": {
-      "validatedRevision": "7dbe441bd1505c1cc99a0f5508893a0c6ceeddb0"
+      "validatedRevision": "3b9205ca41a4c32fb9f85043dae16dbca77077b2"
     },
     "protocol/security-boundaries.mdx": {
-      "validatedRevision": "7dbe441bd1505c1cc99a0f5508893a0c6ceeddb0"
+      "validatedRevision": "3b9205ca41a4c32fb9f85043dae16dbca77077b2"
     },
     "release/npm-publishing.mdx": {
-      "validatedRevision": "7dbe441bd1505c1cc99a0f5508893a0c6ceeddb0"
+      "validatedRevision": "3b9205ca41a4c32fb9f85043dae16dbca77077b2"
     },
     "search/search-index.mdx": {
-      "validatedRevision": "7dbe441bd1505c1cc99a0f5508893a0c6ceeddb0"
+      "validatedRevision": "3b9205ca41a4c32fb9f85043dae16dbca77077b2"
     },
     "store/default-store.mdx": {
-      "validatedRevision": "7dbe441bd1505c1cc99a0f5508893a0c6ceeddb0"
+      "validatedRevision": "3b9205ca41a4c32fb9f85043dae16dbca77077b2"
     }
   },
   "convergence": {
