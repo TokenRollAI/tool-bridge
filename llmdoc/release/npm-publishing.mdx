@@ -6,6 +6,10 @@ code:
     - scripts/pack-and-verify-package.mjs
     - scripts/check-version-bumps.mjs
     - scripts/release-plan.mjs
+    - scripts/select-release-packages.mjs
+    - scripts/npm-registry-version.mjs
+    - scripts/package-release.test.mjs
+    - .github/workflows/release.yml
     - .github/workflows/**
     - pnpm-workspace.yaml
 ---
@@ -32,6 +36,12 @@ code:
 
 Dashboard 若嵌入 server/gateway 产物,应先发布它依赖的包,再发布承载最终产物的包。
 
+## 可恢复发布编排
+
+`release.yml` 只允许从 `main` 运行，并按 runtime workspace 依赖闭包选择发布子集：即使用户只选 server，未发布的 dashboard 等前置产物也必须先进入拓扑顺序。已存在 tag 只有在它精确指向当前 `main` SHA 时才可恢复；指向旧 commit 立即拒绝。编排器逐个显式 dispatch publish workflow 并等待 registry 的精确版本可见，不依赖 `GITHUB_TOKEN` 推 tag 产生级联触发。
+
+重跑时以 tag + commit + workflow 为身份：已成功 run 直接复用，active run 继续 watch，只有失败或缺失的 workflow run 才重新 dispatch。npm 另查 registry 精确版本并做幂等跳过，但当前不查 GHCR 中镜像 tag 的实物存在性：CLI/server 的成功 image workflow 若在事后被删除，编排器不会自动发现或重建。因此不得把当前模型描述为 artifact-level recovery；若要这个承诺，必须先加 registry 实物探测。不得用 latest dist-tag 代替 npm 精确版本存在性。
+
 ## 三种独立证据
 
 来自一次真实故障(CLI 0.17.0 发布后 `npm install -g` 报 `EUNSUPPORTEDPROTOCOL`,tarball 依赖里残留 `catalog:` 协议)的教训:
@@ -44,7 +54,7 @@ Dashboard 若嵌入 server/gateway 产物,应先发布它依赖的包,再发布�
 - 所有公开包统一用 `node scripts/pack-and-verify-package.mjs packages/<pkg> --output-dir <dir>` 打包和验证;CLI 额外传 `--bin tb`。
 - 默认模式通过 `pnpm pack` 生成确切 tarball、扫描 packed manifest,并在仓库外创建干净 npm 消费者安装;CLI 还执行 `tb --version` 与 `tb --help`(可安装不足以证明 bin 契约正常)。
 - `files`、exports、bin、types 与 `publishConfig` 必须指向构建后真实存在的文件。
-- 多入口包必须递归检查 `exports` 的全部条件目标(包括 `types`、`import`、`react-native`),不能只验证 `main`。`@tool-bridge/sdk/device` 还必须扫描最终 tarball 中的 JS/d.ts:不得引用 `node:*`、Node `ws`、Hono、`process.env`、private workspace 包或 Node-only 声明类型;干净消费者同时 import 根入口与 device 子入口(边界背景见 [do-websocket-sessions](../device/do-websocket-sessions.mdx))。
+- 多入口包必须递归检查 `exports` 的全部条件目标(包括 `types`、`import`、`react-native`),不能只验证 `main`。`@tool-bridge/sdk/client`、`/store`、`/device` 的 JS/d.ts 都必须从各自入口递归扫描最终 tarball shared closure：不得引用 `node:*`、Node `ws`、Hono、`process.env`、private workspace 包或 Node-only 声明类型；干净消费者同时 import 根入口和三个 neutral 子入口(设备边界背景见 [do-websocket-sessions](../device/do-websocket-sessions.mdx))。
 - 解包最终 packed tarball,检查其中 `package.json` 的 `dependencies`、`optionalDependencies` 与 `peerDependencies`;不得残留 `catalog:`、`workspace:` 或其他 npm 不支持的工作区协议。只检查仓库源码 manifest 会漏掉未改写的占位符。
 - CI 在全仓 build 后复用同一脚本并传 `--skip-install`,只保留 packed manifest 协议闸门:合入前的 workspace 依赖版本可能尚未发布到 registry,不能把这类不可安装误判为 tarball 协议错误。publish workflow 不得跳过干净安装。
 - **publish workflow 必须捕获脚本返回的 tarball 路径,并把同一个文件交给 `npm publish`**;校验后重新打包会留下产物漂移窗口——"校验的"和"发布的"必须是同一个 tarball。

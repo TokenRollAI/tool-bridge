@@ -15,9 +15,11 @@ code:
     - packages/core/src/builtin/store.ts
     - packages/app/src/store.ts
     - packages/app/src/routes/store.ts
-    - packages/sdk/src/storeClient.ts
+    - packages/sdk/src/store/**
     - packages/sdk/src/device/**
     - packages/cli/src/commands/store.ts
+    - packages/dashboard/src/lib/store.ts
+    - packages/dashboard/src/lib/store-queries.ts
     - packages/dashboard/src/pages/system/StorePage.tsx
     - packages/server/src/objects.ts
     - packages/gateway/src/deployEntry.ts
@@ -158,6 +160,8 @@ capability-only create/complete/abort 路由在普通 SK 认证之前匹配；�
 明确拒绝出现在请求 body。`/~store/refs` 与 `/~store/shares` 的 capability path 在结构化慢请求日志中
 必须脱敏；无效、过期或对象缺失统一折叠为 404。
 
+服务端签发的 relay/ref/share URL 必须保持本次控制请求的 alias host/port；在 TLS 终止代理后只用 canonical origin 校正可信 protocol。不得把 canonical host 强行改写给多域名客户端，也不得使用 `X-Forwarded-Proto` 决定 bearer URL。客户端对 grant 内的同源校验是安全门禁，不应为适配错误 origin 而放宽。
+
 ## 宿主装配与清理
 
 | 宿主 | default Store 字节落点 | 上传路径与清理 |
@@ -183,6 +187,7 @@ Store 归属，文件名本身不足以授权删除，因此自动清理不会�
 
 ## SDK、CLI 与 Dashboard
 
+- `@tool-bridge/sdk/store` 是 Store wire parser、transport、upload 状态机与 client 的中立单一真源；CLI 直接消费它，Dashboard 只在 `lib/store.ts` 保留 browser/session 适配和 API error 桥接，`lib/store-queries.ts` 只管 TanStack Query。不得在三个入口重复编写 grant parser、direct/relay 分支、错误脱敏或 upload complete 时序。
 - 通用 SDK 的 `createStoreClient` 提供 upload/stat/list/read/download/share/revokeShare/delete；管理面的
   stat/list 保留完整公开 descriptor（owner/producer/originCallId/status 等），上传/下载保持流式，控制面
   错误会裁剪可疑 URL。Node 原生 fetch 发送 `ReadableStream` 时由 SDK 补 `duplex:'half'`。
@@ -207,6 +212,7 @@ Context 管理上传仍保留：`ctx put`/Context `write` 用于内联语义内�
 - checksum 只在后端返回对应 metadata 时确认并进入 descriptor；客户端声明不能替代实测 size。
 - `store://` 尚不自动投影为 MCP image/resource 或 Context `$ref`；消费者须按当次 owner/share 权限显式
   调用 `read`。
+- object/session/capability/share 仍是分 key CAS 状态机。不得在 rolling deployment 中无维护窗口地切换为单个 aggregate blob：新旧副本无法对两种表示原子双写，会破坏 session 恢复、CAS 并发语义与清理 cursor。未来若改 keyspace，必须设计可验证的离线/维护窗口迁移，不能只为减少代码而切换存储模型。
 
 multipart/resumable 是明确的未来项，扩展时应新增 part 状态与恢复协议，不得把现有 `attempts` 或
 single-PUT session 破坏性重解释。

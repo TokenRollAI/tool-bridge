@@ -8,17 +8,24 @@ code:
     - packages/dashboard/src/components/add-tool/**
     - packages/dashboard/src/lib/api.ts
     - packages/dashboard/src/lib/queries.ts
+    - packages/dashboard/src/lib/store.ts
+    - packages/dashboard/src/lib/store-queries.ts
     - packages/dashboard/src/lib/types.ts
+    - packages/dashboard/src/components/SchemaFields.tsx
+    - packages/dashboard/src/components/SchemaFormRenderer.tsx
+    - packages/dashboard/src/components/DashboardThemeProvider.tsx
     - packages/dashboard/src/pages/**
+    - packages/sdk/src/client/**
+    - packages/sdk/src/store/**
 ---
 
 # Dashboard 画布架构
 
-Dashboard 是纯 HTTP 客户端,不 import core。wire 类型在 `packages/dashboard/src/lib/types.ts` 手抄,因此任何接口变更都要同轮更新 core、CLI、Dashboard 类型与 fixture。
+Dashboard 是纯 HTTP 客户端,不 import core。固定控制面 wire 类型与 runtime parser 从 `@tool-bridge/sdk/client` 消费；`packages/dashboard/src/lib/types.ts` 只保留 Dashboard 的组合/展示类型和尚未属于固定面的动态形状。接口变更仍要同轮更新 core schema、SDK parser、CLI/Dashboard 适配与 fixture。
 
 ## 分层
 
-- `lib/api.ts`:HTTP、TBError、表示协商。
+- `lib/api.ts`:profile/session 到 `@tool-bridge/sdk/client` 的 browser 适配、Dashboard API error 桥接，以及尚未进入固定 client 的动态 HTTP 能力。通用 URL、timeout、错误 body 与固定响应校验不在此重写。
 - `lib/queries.ts`:TanStack Query key、分页、mutation 与失效。
 - `lib/session*`:profile、认证、连接上下文。
 - `canvas/`:工作区骨架与画布。`WorkspaceShell`(顶栏 + 库务栏 + Outlet)、`CanvasPage`(index 与 `/nodes/*` 同一组件:左画布 + 右 Inspector 抽屉,选中态由 URL 驱动)、`TreeCanvas`(React Flow 渲染)、`NodeInspector`(选中节点后右侧滑出,原样复用 node 子组件)。`treeGraph.ts` / `useCanvasTree.ts` 是无 DOM 的纯逻辑(工作树→图布局、展开集合、按需懒加载合并),性能边界:root depth=1、本地 lazy=1、remote lazy=3。
@@ -27,8 +34,11 @@ Dashboard 是纯 HTTP 客户端,不 import core。wire 类型在 `packages/dashb
 - `components/add-tool/`:「添加工具」向导,按来源分流;不重复造挂载逻辑,内置集成走 `buildIntegrationCalls`、自定义 kind 走 `buildRegistryMountCalls`。`mountDiagnostics.ts` 把真实 `system/registry write` 的失败按 TBError code 归类,不另起与真实挂载不一致的 dry-run 探测。
 - `pages/system/`:SK、secret、registry、plugin、catalog、federation、annotation。`pages/system/forms/`:将表单状态编译成 wire payload 的纯函数。
 - `pages/system/StorePage.tsx` 对应 `/manage/store`，是独立 deployment Store 管理面，不属于 canvas/Registry
-  tree，也不复用 ContextBrowser。`lib/api.ts` 的 Store helper 负责 create→relay/direct PUT→direct
-  complete、descriptor/ref 校验；`lib/queries.ts` 负责 owner 列表分页和 mutation 后按当前 profile 失效。
+  tree，也不复用 ContextBrowser。`lib/store.ts` 把 browser File/session 适配到 `@tool-bridge/sdk/store`；
+  create→relay/direct PUT→direct complete、descriptor/ref parser 与敏感错误裁剪的真源在 SDK。
+  `lib/store-queries.ts` 负责 owner 列表分页和 mutation，并按当前 profile 失效共享 query cache。
+- JSON Schema 表单只有一个懒加载的 `SchemaFormRenderer`，统一持有 RJSF/AJV validator；`SchemaFields` 和命令面板只投影 props/UI，不得各自实例化另一套 schema renderer。
+- `DashboardThemeProvider` 是主题持久化与 DOM class 的唯一真源，由 `next-themes` 处理初始注入与同步；当前默认 dark 且明确禁用 system theme。业务组件只消费当前 theme，不直接维护 localStorage/class。
 
 表单编译与图布局逻辑优先抽成无 React 依赖的函数(`forms/*.ts`、`canvas/treeGraph.ts`),用 Node Vitest 断言最终 payload、布局结果、互斥项、必填项和 fail-closed 分支;DOM 测试再覆盖交互顺序、焦点和敏感值展示。
 

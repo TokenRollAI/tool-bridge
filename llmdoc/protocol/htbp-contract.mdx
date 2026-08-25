@@ -10,16 +10,25 @@ code:
     - packages/core/src/auth/**
     - packages/core/src/tree/**
     - packages/core/src/builtin/**
+    - packages/core/src/operation/**
+    - packages/core/src/protocol/**
     - packages/core/src/context/objectProvider.ts
     - packages/core/src/context/objectStore.ts
     - packages/core/src/objectStoreService/**
     - packages/app/src/store.ts
     - packages/app/src/routes/**
+    - packages/sdk/src/client/**
 ---
 
 # HTBP 协议契约
 
 精确 schema 以 core 类型、builtin help 和当前代码为准。
+
+## 契约单一真源
+
+固定控制面的请求/响应 Zod schema 位于 `packages/core/src/protocol/wire.ts`：app 路由门禁、`@tool-bridge/sdk/client` 运行时校验与 OpenAPI 3.1 artifact 从同一份 schema 投影。OpenAPI 只静态描述 health/help/tree/search/OAuth/feedback/registry 等固定面；运行时动态 HTBP 命令仍以 `~help` 发现为准。生成类型或 OpenAPI 文件都不能代替网络边界的 runtime validation。
+
+builtin、Context 与 Skillhub 的命令使用 `HtbpCommandRegistry` 注册一次，同时投影 Help metadata、scope、strict Zod 入参与 dispatch handler。不得再分别维护 command 名清单、Help switch、scope switch 和 invoke switch；宿主或 capability 差异通过裁剪同一注册表表达，而不是再造一套 schema。
 
 ## 表示与错误
 

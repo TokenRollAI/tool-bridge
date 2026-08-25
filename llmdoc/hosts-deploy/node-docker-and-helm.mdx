@@ -5,9 +5,12 @@ code:
   paths:
     - .github/workflows/ci.yml
     - packages/server/src/**
+    - packages/server/test/server.integration.test.ts
+    - packages/app/src/store.ts
     - deploy/**
     - Dockerfile
     - Dockerfile.railway
+    - Dockerfile.cli
     - docker-compose.yml
     - scripts/deploy-change-filter.mjs
     - scripts/dockerfile-contract.test.mjs
@@ -23,7 +26,7 @@ code:
 - default Store 是标准 Node 装配的必备能力。端口监听成功后异步执行首次有界 cleanup，随后每 `TB_STORE_CLEANUP_INTERVAL_SEC` 周期执行（缺省 900 秒）；历史数据再多也不阻塞 readiness，timer 不阻止进程退出，慢 tick 未结束时跳过并发 tick。每个 tick 只扫一次独立 staging 目录。自动清理不扫描未发布预览曾使用的 `objects/store/v1/**`：该路径也可能属于 Context，temp 文件名不能证明 Store 归属；试用过预览的部署须人工确认后再处理残片。清理失败只记录固定事件名，不输出 driver key。
 - 首次引导必须设置 `TB_BOOTSTRAP_ADMIN_SK`;缺失时启动默认 fail closed。`TB_ALLOW_INSECURE_BOOTSTRAP=true` 只用于一次性本地开发。
 - `TB_ALLOW_INSECURE_HTTP=true` 只放行本地 HTTP 上游,不应进入公网部署。
-- 反向代理必须保留 WebSocket upgrade、Authorization 和原始 host/proto 语义。
+- 反向代理必须保留 WebSocket upgrade、Authorization 和原始 Host。Store 数据面 URL 保留本次请求的对外 alias host/port，但 TLS 终止后的内部 Request URL 无法可信地表达 protocol；正式代理部署应设 `TB_CANONICAL_ORIGIN=https://...` 作为 protocol 信任根。服务端故意不信任 `X-Forwarded-Proto`，也不用 canonical host 覆盖客户端 alias；部署回归应通过真实 HTTP socket + Host header 验证这条规则。
 
 ## 健康探针与优雅关停
 
@@ -80,9 +83,11 @@ Helm chart 按后端配置自动推断形态,无独立 mode 开关:
 
 ## 容器 PaaS(Railway / Fly / Cloud Run / CF Container)
 
-镜像是单容器 + `EXPOSE 8787`,配 PG 后不需要持久卷存状态。端口取 `TB_PORT ?? PORT ?? 8787`;`TB_CANONICAL_ORIGIN` 把 OAuth `redirect_uri` 钉在规范域名,多域名接入必须设置。三个限制:
+镜像是单容器 + `EXPOSE 8787`,配 PG 后不需要持久卷存状态。端口取 `TB_PORT ?? PORT ?? 8787`;`TB_CANONICAL_ORIGIN` 把 OAuth `redirect_uri` 钉在规范域名,并为 TLS 终止后的 Store URL 提供可信 protocol。多域名接入仍保留当次 Host alias，不把所有 grant 改写到 canonical host。三个限制:
 
 Railway Metal 不接受 Dockerfile 的 `VOLUME` 指令,因此 Railway service variables 必须设置 `RAILWAY_DOCKERFILE_PATH=Dockerfile.railway`。根 `Dockerfile` 仍是 Fly/Cloud Run/CF Container 等平台的通用入口并保留 `VOLUME /data`;`Dockerfile.railway` 只省略这一条指令,其余镜像行为由 `pnpm test:dockerfile` 保证严格同形。使用本地 SQLite 或 FS 对象存储时,还必须在 Railway 把 Volume **运行时**挂载到 `/data`(平台不会因 Dockerfile 注释自动创建卷);PG + S3/R2 的无状态形态可以不挂卷。不要为选择 Dockerfile 新增已废弃的 `railway.json`/`railway.toml`;若未来要把完整 Railway 项目纳入声明式管理,另行评估新 IaC。
+
+`Dockerfile.cli` 是第三个、用途不同的公开 artifact：它把 `tb` 编译为独立 Bun 二进制，不是服务镜像副本。CLI 现在复用 SDK client/store/device，因此镜像必须先构建与 npm CLI 相同的 SDK-aware tsup artifact，再编译 `packages/cli/dist/index.js`；不得绕过该入口直接编译 `src/index.ts`。`test:dockerfile` 同时固定两份服务 Dockerfile 的唯一差异与 CLI 镜像的这条产物闭包。
 
 Railway production 使用平台原生 GitHub source 监听 `main`,并开启 **Wait for CI/check suites**:只有对应 main commit 的检查全绿后才开始部署。Watch Paths 只覆盖共享/Server/Dashboard/插件运行时代码、构建清单与 `Dockerfile.railway` 等真实运行时依赖,文档或 CLI/SDK-only 变化不应触发生产重建;路径边界与 `.github/workflows/ci.yml`、`scripts/deploy-change-filter.mjs` 同步维护。首次接线必须等交付这套闸门的 PR 合入 `main` 后再连接 production service,不得在 PR 合入前提前监听 `main`;构建入口仍由 `RAILWAY_DOCKERFILE_PATH=Dockerfile.railway` 指定。原生链路不可用时用 Railway CLI 手动部署作为 fallback,不要回补一套旧 Config-as-Code。
 

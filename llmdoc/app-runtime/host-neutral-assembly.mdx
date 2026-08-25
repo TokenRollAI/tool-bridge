@@ -6,6 +6,13 @@ code:
     - packages/app/src/deps.ts
     - packages/app/src/bootstrap.ts
     - packages/app/src/tbApp.ts
+    - packages/app/src/store.ts
+    - packages/app/src/routes/invoke.ts
+    - packages/app/src/routes/store.ts
+    - packages/server/test/server.integration.test.ts
+    - packages/sdk/src/client/**
+    - packages/sdk/src/store/**
+    - packages/sdk/src/device/**
     - packages/app/src/**
 ---
 
@@ -44,6 +51,8 @@ capability 和执行 cursor cleanup；`routes/store.ts` 只处理 capability-onl
 
 Context upload grant 的 TTL 与下载 `$ref` TTL 独立，缺省取 `min(refTtlSec, 900)`，SigV4 GET/PUT 均受 604800 秒上限约束。Store upload/share/read 另有独立 `store* TtlSec` 配置，缺省均为 900 秒。`@tool-bridge/sdk/device` 的顶层 `uploadObject` 用 `purpose:'http'` 的设备身份调用 Store；handler 内 `call.uploadObject` 使用网关下发的窄 capability。设备凭证必须带非空 `Authorization` header，不能把仅供 WebSocket 使用的 ticket 当作 HTTP 认证。
 
+Store relay/ref/share URL 必须与当次控制请求的 external origin 一致，这是 neutral client 的 SSRF 边界。在 Node TLS 终止代理后，`Request.url` 可能显示内部 `http:`：此时 `TB_CANONICAL_ORIGIN` 只提供可信 protocol，本次请求仍提供对外 alias host/port。不复制 canonical host，也不信任客户端可伪造的 `X-Forwarded-Proto`；这条语义必须由真实 Node HTTP socket 回归覆盖，不能只测纯函数。
+
 ## builtin 装配
 
 bootstrap builtin 清单在 `packages/app/src/bootstrap.ts` 的 `BUILTIN_MODULES`：sk、secret、registry、status、plugin、catalog、federation、annotation、store。Store module 由 `createRouteEnv` 追加为惰性实例；`~feedback` 是保留端点，不是 builtin 模块。
@@ -57,7 +66,7 @@ bootstrap builtin 清单在 `packages/app/src/bootstrap.ts` 的 `BUILTIN_MODULES
   安全窗口后以 CAS 收敛。
 - Workers 设备会话结果与连接元数据进入 DO storage；Node 部分幂等结果只在进程内。
 - Workers 静态 UI 经 Assets binding，缓存/压缩/条件请求由平台代劳；Node 从 `TB_UI_DIR` 或 dashboard 包读取，由 `server` 的 `uiAssetsFetcher` 自理（hash 资产 immutable、其余 no-cache，内容协商 br/gzip，弱 ETag + 304），不下沉进 core/app。
-- `@tool-bridge/sdk` 是多入口包：根入口的 `engines.node` 与 Node 依赖属于安装/根运行时约束；`@tool-bridge/sdk/device` 的兼容性由独立 neutral JS/d.ts 产物和最终 tarball 模块闭包保证，设备入口不得从包根重新导出。多运行时包的兼容性按子入口产物闭包判定，不按依赖清单猜。
+- `@tool-bridge/sdk` 是多入口包：根入口的 `engines.node` 与 Node 依赖属于安装/根运行时约束；`@tool-bridge/sdk/client`、`/store`、`/device` 的兼容性由各自 neutral JS/d.ts 产物和最终 tarball 模块闭包保证，子入口不得从包根重新导出。多运行时包的兼容性按子入口产物闭包判定，不按依赖清单猜。
 
 ## app 内部代码地图
 
@@ -72,5 +81,6 @@ bootstrap builtin 清单在 `packages/app/src/bootstrap.ts` 的 `BUILTIN_MODULES
 | remote 联邦 | `providers/remote.ts`、`federation.ts` |
 | 搜索索引同步 | `search/synchronizer.ts` |
 | default Store | `store.ts`、`storeRefToken.ts`、`routes/store.ts` |
+| Store external origin | `store.ts` / `resolveStoreRequestOrigin`、`routes/invoke.ts`、`routes/store.ts` |
 
 查找时先搜符号而不是历史文档（如 `rg "createTbApp|TbAppDeps|BUILTIN_MODULES" packages/app`）；精确测试数、行数、bundle 字节不属于代码地图，需要时从当前工作树实查。

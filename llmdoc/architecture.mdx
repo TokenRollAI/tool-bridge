@@ -10,7 +10,15 @@ code:
     - package.json
     - pnpm-workspace.yaml
     - packages/core/src/types.ts
+    - packages/core/src/operation/**
+    - packages/core/src/protocol/**
     - packages/app/src/bootstrap.ts
+    - packages/sdk/src/client/**
+    - packages/sdk/src/store/**
+    - packages/sdk/src/device/**
+    - packages/plugins/src/_runtime/providerHttp.ts
+    - scripts/pack-and-verify-package.mjs
+    - scripts/select-release-packages.mjs
 ---
 
 # tool-bridge 整体架构
@@ -28,14 +36,14 @@ app ← plugins
   ↑       ↑
 gateway  plugin-sdk
 server
-sdk (根入口 Node 22+;./device 为 neutral 设备客户端)
-CLI / Dashboard ──HTTP──> app contract
+sdk (根入口 Node 22+;./client、./store、./device 为 neutral 子入口)
+CLI / Dashboard ──> sdk neutral entries ──HTTP──> app contract
 ```
 
-- `core`:类型、授权、树、store、builtin 纯逻辑、plugin/search 协议;不碰网络、环境变量、运行时资源。
+- `core`:类型、授权、树、store、builtin 纯逻辑、plugin/search 协议;固定控制面 Zod wire/OpenAPI 与 HTBP 命令注册表也在此维护,不碰网络、环境变量、运行时资源。
 - `app`:Hono 路由、发现/调用、provider 编排、宿主注入面;不含 Wrangler/SQLite/专属启动。
 - `gateway`(Workers)与 `server`(Node)只装配运行时适配器,不复制业务分支、不改写共享协议语义。
-- `sdk`:根入口嵌入 app 并以 Node ws 反向连接;`./device` 独立 neutral 产物,不得触达 app、Node ws、`node:*` 或根入口。
+- `sdk`:根入口嵌入 app 并以 Node ws 反向连接;`./client`、`./store`、`./device` 是面向 Web 标准宿主的 neutral 产物,不得反向触达 app、Node ws、`node:*` 或根入口。CLI/Dashboard 对固定控制面、Store 与设备连接的复用都应停在这些子入口。
 - `plugin-sdk`:descriptor、OperationRegistry、envelope、受控出站;`plugins`:内置 provider 源码 + 生成 catalog + 迁移闸门。
 - `cli`:严格 argv 与脚本输出,不是服务端唯一校验层;`dashboard`:消费同一 HTTP 契约,不 import core。
 - `core` 与 `plugins` 是 private workspace 包,其余七个是 public artifact;发布判断按 artifact ownership,不沿依赖图机械 bump。
@@ -62,6 +70,7 @@ CLI / Dashboard ──HTTP──> app contract
 7. wrangler 与配置模板保持账户中立;真实账户与资源 ID 由 provision 回填,不提交。
 8. 发布校验和发布必须消费同一个 tarball;registry 元数据存在、tarball 可安装、bin 可执行是三个独立证据。
 9. `.llmdoc-tmp/` 是可丢弃调查缓存,复用前重新核对,不从稳定文档链接。
+10. 重复实现是引入组件的必要条件,不是充分条件:新依赖必须同时证明运行时相容、安全语义不退化和最终产物净收益。普通 provider JSON HTTP 复用仓库薄层,不因为引入通用 HTTP 库而放开 retry、redirect 或裸 `fetch`。
 
 ## Topic 导航
 

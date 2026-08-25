@@ -8,6 +8,11 @@ code:
     - packages/core/src/builtin/plugin.ts
     - packages/core/src/builtin/catalog.ts
     - packages/core/src/plugin/**
+    - packages/plugins/src/_runtime/providerHttp.ts
+    - packages/plugins/src/_runtime/guardedFetch.ts
+    - packages/plugins/src/_runtime/ipPolicy.ts
+    - packages/plugins/provider-http-exceptions.json
+    - packages/plugins/test/runtime/providerHttpPolicy.test.ts
 ---
 
 # 插件运行时
@@ -51,3 +56,11 @@ code:
 同名显式注册记录优先于内置 catalog，允许部署者用自己的实现覆盖内置项。内置项的普通流程不注册、不探活、不写 meta；删除内置节点后，读 `~help` 也不得偷偷把注册状态写回来。
 
 删除/更新 catalog 或 wire 字段时，core、CLI、Dashboard 与 app 集成测试必须同轮改；旧预览客户端不在兼容范围。
+
+## 普通 provider HTTP
+
+内置 provider 的普通 JSON REST 请求只能经 `createProviderHttpClient` 进入 `guardedFetch`。这个零运行时依赖的薄层统一 query/body、响应解码、上游错误映射和 secret 脱敏，但不提供隐式重试：每次请求只执行一次(`retry=0`)。deadline 覆盖 fetch 和异步 response body 消费，不能在收到 headers 后就停止计时；同步 `JSON.parse` 仍在请求操作解决前执行，但 JavaScript timer 无法抢占它，不把这描述成可中断的 CPU wall-clock 上限。
+
+`guardedFetch` 仍是 provider 唯一出站安全边界：初始 URL 和每一跳 redirect 都重做协议/IP 字面量策略，跨源剥离凭证、默认 fail closed。redirect method/body 必须遵循 Fetch 语义：301/302 只把 POST 改为 GET，303 把 GET/HEAD 以外的方法改为 GET 并删除 body headers，307/308 保留 method/body。IP 库只替换地址 grammar，不替换仓库的禁止网段政策。Node/Workers 不共享一致的 DNS 解析门禁，本层故意不检查域名解析结果；DNS rebinding 由部署侧出网策略阻断，不得把 IP 字面量校验误表述为完整 DNS SSRF 防线。
+
+只有流式、协议升级或其他薄层确实无法表达的边界才能保留直接 `guardedFetch`；每个例外都必须在 `provider-http-exceptions.json` 按文件/原因登记，并由策略测试同时拒绝未登记调用和已失效 allowlist。普通 provider 不得自行恢复裸 `fetch`、retry 或另一套错误映射。

@@ -11,6 +11,7 @@ code:
     - packages/server/src/deviceHub.ts
     - packages/server/src/deviceRouter.ts
     - packages/sdk/src/device/**
+    - packages/cli/src/deviceRuntime.ts
 ---
 
 # 设备会话:DO 休眠、presence 与 SDK device
@@ -26,6 +27,12 @@ Cloudflare 设备连接由 Durable Object(`DeviceSession`)持有。正确性不�
 - auto-response 应答 ping/pong **不唤醒对象**,故心跳无法在收到 pong 时写 state store。改由周期 alarm 巡检:有活连接时读 `getWebSocketAutoResponseTimestamp(ws)` 回写 `lastSeenAt` 并重排 alarm;无活连接且已断线时才执行 reclaim。同一个 alarm 多用途,靠 `meta.activeConnId` 是否存在分流。
 - 投影是只读降级:读路径按 `lastSeenAt` 把 online 显示为 stale,但**绝不回写** `setOnline(false)`(权威状态只由连接生命周期写)。
 - close/error、替换连接和过期状态都必须清理,且不得让旧连接覆盖新连接(generation guard)。Node 宿主启动 `sweepOrphans` 的崩溃态分支(meta 无 disconnectedAt 却无活连接)也要同步把 registry online 翻 false,不能只排 reclaim。
+
+## 为什么保留 raw WebSocket
+
+设备反向注册的稳定 wire 是 raw WebSocket 上的 core JSON frame，不是 Socket.IO/Engine.IO 协议。Socket.IO client 不能直接连接当前 endpoint；同时更换两端也不会代替 generation、presence、reclaim、call/result/cancel 或 Store capability 这些服务端权威状态机，反而增加第二层协议。因此服务端保留 raw WS；客户端可使用 PartySocket 的 reconnect transport，但不引入 PartyServer/rooms 来重新定义连接归属。
+
+可复用的边界是 `@tool-bridge/sdk/device` 的 portable connection supervisor：它持有 reconnect、heartbeat、credential refresh、suspend/resume 与 call dispatch；Node CLI、React Native 等宿主只注入 WebSocket factory 和凭证 provider。CLI 的 `deviceRuntime.ts` 可保留 shell/FS 处理与 `ws` adapter，不得复制 supervisor 状态机。任何未来协议替换都必须先证明上述安全不变量和 Workers DO hibernation 语义仍可保持，不能只以 rooms/reconnect API 更便利为理由。
 
 ## 验证
 
@@ -44,7 +51,7 @@ pnpm tsx scripts/verify-device.ts
 
 ## SDK device 运行时边界
 
-设备客户端的 npm 消费面是双入口:`@tool-bridge/sdk` 根入口面向 Node 22+,`@tool-bridge/sdk/device` 是独立 neutral 构建,供 React Native/Hermes 等宿主使用。约束与经验:
+设备客户端的 npm 消费面分为 Node-only 根入口与独立的 `@tool-bridge/sdk/device` neutral 子入口，后者供 React Native/Hermes 等宿主使用。约束与经验:
 
 - 多运行时包的兼容性按**目标子入口的 JS/d.ts 依赖闭包**判定,不按包级 `engines`/`dependencies` 猜测。`ws` 可以继续被 sdk 安装,但不得进入 device 子入口的模块图;JS 与声明文件两条依赖图要同时隔离。
 - 设备核心以 WebSocket factory、credential provider 和显式 suspend/resume 注入宿主差异;RN 第三参数 headers 只存在于薄 adapter。
