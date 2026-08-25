@@ -13,29 +13,6 @@ import { apiFetch, CliError, withClient } from '../http'
 import { printJson, printLine } from '../output'
 import { confirmDestructive } from '../confirm'
 
-interface ToolMountOpts {
-  auth?: string
-  authHeader?: string
-  authRef?: string
-  authScheme?: string
-  baseUrl?: string
-  config: string[]
-  describe: string[]
-  description?: string
-  endpoint?: string
-  export?: string
-  header: string[]
-  hide: string[]
-  json?: boolean
-  kind: string
-  prefix?: string
-  provider?: string
-  rename: string[]
-  sk?: string
-  toolsFile?: string
-  url?: string
-}
-
 /** 可重复 `--header Name=value` → headers 对象;空数组返回 undefined(不塞空对象)。 */
 function parseHeaderSpecs(specs: string[]): Record<string, string> | undefined {
   const headers: Record<string, string> = {}
@@ -59,7 +36,7 @@ function parseHeaderSpecs(specs: string[]): Record<string, string> | undefined {
  * 共用:`--auth-header/--auth-scheme`(凭证头名/前缀,空 scheme 原样注入)、`--description d`
  * 与虚拟化 `--prefix p / --rename from=to / --hide t / --describe from=text`。
  */
-export function toolMountCommand(): Command {
+export function toolMountCommand() {
   return withGlobalOpts(new Command('mount'))
     .description('Mount an mcp/http source or a tool-provider plugin')
     .argument('<path>', 'Tree path to mount at')
@@ -114,7 +91,7 @@ Examples:
   tb tool mount feishu --kind tool --provider feishu --export actions
   tb tool mount notes --kind tool --provider memos --auth-ref memos-key --config baseUrl=https://memos.example.com`,
     )
-    .action(async (pathArg: string, opts: ToolMountOpts) => {
+    .action(async (pathArg, opts) => {
       const asJson = Boolean(opts.json)
       const path = String(pathArg ?? '').trim()
       if (!path) throw new CliError('tree path is required')
@@ -370,7 +347,7 @@ async function runLocalCallbackFlow(
  * code 由 CLI 转交网关兑换(token 仍不出网关)。**仅 mcp 那条支持** —— provider 型的
  * `~authorize` 不读 body 里的 redirectUri,授权 URL 里始终是网关回调。
  */
-export function toolAuthCommand(): Command {
+export function toolAuthCommand() {
   return withGlobalOpts(new Command('auth'))
     .description('Authorize an OAuth-backed mcp or plugin tool mount (gateway-managed flow)')
     .argument('<path>', 'Tree path of the mcp mount, or of a plugin tool mount whose export declares oauth')
@@ -378,8 +355,8 @@ export function toolAuthCommand(): Command {
     .option('--local', 'Use a localhost callback (for upstreams that only allow loopback URIs)')
     .action(
       async (
-        pathArg: string,
-        opts: { baseUrl?: string, json?: boolean, local?: boolean, open?: boolean, sk?: string },
+        pathArg,
+        opts,
       ) => {
         const asJson = Boolean(opts.json)
         const path = String(pathArg ?? '').trim()
@@ -422,12 +399,12 @@ export function toolAuthCommand(): Command {
 }
 
 /** `tb tool rm <path>` —— 卸载节点(管理面 system/registry delete)。 */
-export function toolRmCommand(): Command {
+export function toolRmCommand() {
   return withGlobalOpts(new Command('rm'))
     .description('Unmount a tool node')
     .argument('<path>', 'Tree path to remove')
     .option('--yes', 'Skip the confirmation prompt')
-    .action(async (pathArg: string, opts: { baseUrl?: string, json?: boolean, sk?: string, yes?: boolean }) => {
+    .action(async (pathArg, opts) => {
       const asJson = Boolean(opts.json)
       const path = String(pathArg ?? '').trim()
       if (!path) throw new CliError('tree path is required')
@@ -438,7 +415,7 @@ export function toolRmCommand(): Command {
     })
 }
 
-export function toolCommand(): Command {
+export function toolCommand() {
   return new Command('tool')
     .description('Mount/remove mcp, http & plugin-backed tool sources')
     .addCommand(toolMountCommand())

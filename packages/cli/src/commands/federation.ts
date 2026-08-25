@@ -4,13 +4,6 @@ import { resolveTarget, withGlobalOpts } from '../args'
 import { confirmDestructive } from '../confirm'
 import { callDirect, CliError } from '../http'
 
-interface FederationGlobalOpts {
-  baseUrl?: string
-  json?: boolean
-  sk?: string
-  yes?: boolean
-}
-
 /** system/federation list 的一行(env 基线不可删;运行时条目可删)。 */
 interface FederationHost {
   host: string
@@ -23,10 +16,10 @@ interface FederationHost {
  * `tb federation ls` → 合并视图:env 基线(source=env,不可删)+ 运行时条目(source=store)。
  * 白名单是 remote 联邦的 host 后缀闸门,空 = 拒一切 remote。
  */
-export function federationLsCommand(): Command {
+export function federationLsCommand() {
   return withGlobalOpts(new Command('ls'))
     .description('List remote federation allowlist (env baseline + runtime entries)')
-    .action(async (opts: FederationGlobalOpts) => {
+    .action(async (opts) => {
       const asJson = Boolean(opts.json)
       const page = await callDirect<{ items: FederationHost[] }>(
         resolveTarget(opts), '/system/federation/list',
@@ -47,11 +40,11 @@ export function federationLsCommand(): Command {
 }
 
 /** `tb federation add <host>` → 运行时新增一个 host 后缀(裸主机名,不含 scheme/端口/路径)。 */
-export function federationAddCommand(): Command {
+export function federationAddCommand() {
   return withGlobalOpts(new Command('add'))
     .description('Allow a remote host suffix (bare hostname, e.g. example.com)')
     .argument('<host>', 'Host suffix to allow')
-    .action(async (hostArg: string, opts: FederationGlobalOpts) => {
+    .action(async (hostArg, opts) => {
       const asJson = Boolean(opts.json)
       const host = String(hostArg ?? '').trim()
       if (!host) throw new CliError('host is required')
@@ -65,12 +58,12 @@ export function federationAddCommand(): Command {
 }
 
 /** `tb federation rm <host>` → 删除运行时条目(env 基线条目不可删)。 */
-export function federationRmCommand(): Command {
+export function federationRmCommand() {
   return withGlobalOpts(new Command('rm'))
     .description('Remove a runtime allowlist entry (env baseline entries are not removable)')
     .argument('<host>', 'Host suffix to remove')
     .option('--yes', 'Skip the confirmation prompt')
-    .action(async (hostArg: string, opts: FederationGlobalOpts) => {
+    .action(async (hostArg, opts) => {
       const asJson = Boolean(opts.json)
       const host = String(hostArg ?? '').trim()
       if (!host) throw new CliError('host is required')
@@ -81,7 +74,7 @@ export function federationRmCommand(): Command {
     })
 }
 
-export function federationCommand(): Command {
+export function federationCommand() {
   return new Command('federation')
     .description('Manage remote federation host allowlist (system/federation; admin scope)')
     .addCommand(federationLsCommand())

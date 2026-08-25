@@ -33,7 +33,7 @@
   },
   "dependencies": {
     "@clack/prompts": "^1.7.0",
-    "commander": "^15.0.0",
+    "commander": "~15.0.0",
     "marked": "^15.0.12",
     "marked-terminal": "^7.3.0",
     "p-retry": "^8.0.0",
@@ -41,6 +41,7 @@
     "ws": "catalog:"
   },
   "devDependencies": {
+    "@commander-js/extra-typings": "15.0.0",
     "@tool-bridge/core": "workspace:*",
     "@tool-bridge/sdk": "workspace:*",
     "@types/marked-terminal": "^6.1.1",

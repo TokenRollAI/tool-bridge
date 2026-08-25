@@ -1,5 +1,5 @@
 import type { DeviceExpose } from '@tool-bridge/core'
-import { Command } from 'commander'
+import { Command, type OptionValues } from 'commander'
 import { collect, resolveTarget, withGlobalOpts } from '../args'
 import { asArray, printJson, printLine } from '../output'
 import { runDeviceConnection } from '../deviceRuntime'
@@ -30,7 +30,11 @@ export interface PreparedConnect {
 }
 
 /** 长驻设备连接仍展示全局参数，但明确标出其中不适用或互斥的参数。 */
-export function withDeviceConnectionGlobalOpts(command: Command): Command {
+export function withDeviceConnectionGlobalOpts<
+  Args extends unknown[],
+  Opts extends OptionValues,
+  GlobalOpts extends OptionValues,
+>(command: Command<Args, Opts, GlobalOpts>) {
   const configured = withGlobalOpts(command)
   const baseUrl = configured.options.find(option => option.long === '--base-url')
   const timeout = configured.options.find(option => option.long === '--timeout')
@@ -104,7 +108,7 @@ export async function runConnect(args: ConnectArgs): Promise<void> {
 }
 
 /** `tb connect [url]` —— 设备反向注册长驻进程。 */
-export function connectCommand(): Command {
+export function connectCommand() {
   return withDeviceConnectionGlobalOpts(new Command('connect'))
     .description(
       'Connect this machine as a device (long-running; exposes shell and/or fs on the tree)',
@@ -129,7 +133,7 @@ Examples:
   tb connect --no-shell --fs ~/projects --fs-readonly
   tb connect --path device/build-01 --allow '*'   # full shell (trusted machines only)`,
     )
-    .action(async (url: string | undefined, opts: Omit<ConnectArgs, 'url'>) => {
+    .action(async (url, opts) => {
       await runConnect({ ...opts, url })
     })
 }

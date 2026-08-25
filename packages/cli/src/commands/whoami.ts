@@ -13,10 +13,10 @@ import { resolveTarget, withGlobalOpts } from '../args'
  * - `GET /~help` 探可达/认证(401 = SK 被拒,其它 = 已认证);
  * - 若能调 `system/status get` 则附健康摘要(失败静默忽略)。
  */
-export function whoamiCommand(): Command {
+export function whoamiCommand() {
   return withGlobalOpts(new Command('whoami'))
     .description('Show the configured target (base URL, masked SK) and whether it authenticates')
-    .action(async (opts: { baseUrl?: string, json?: boolean, sk?: string }) => {
+    .action(async (opts) => {
       const asJson = Boolean(opts.json)
       const target = resolveTarget(opts)
       const { baseUrl, sk } = requireTarget(target)

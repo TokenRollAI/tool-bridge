@@ -43,6 +43,14 @@
       "entry": ["scripts/migrate/index.mjs", "scripts/migrate/report.mjs"]
     },
 
+    "packages/cli": {
+      // Compile-only contract fixture: tsc must check it even though the CLI never executes it.
+      "entry": ["src/commanderInference.typecheck.ts"],
+      // Consumed exclusively by the ambient commander.d.ts declaration, which Knip does not
+      // follow as a runtime dependency. The built CLI still imports only commander.
+      "ignoreDependencies": ["@commander-js/extra-typings"]
+    },
+
     "packages/sdk": {
       // @tool-bridge/app 被 noExternal bundle，但它的 external 运行时闭包仍由 SDK 产物拥有。
       "ignoreDependencies": ["@cfworker/json-schema", "aws4fetch"]

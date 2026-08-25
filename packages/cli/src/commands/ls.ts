@@ -3,21 +3,15 @@ import { printJson, printLine, table } from '../output'
 import { resolveTarget, withGlobalOpts } from '../args'
 import { withClient } from '../http'
 
-interface LsOpts {
-  baseUrl?: string
-  json?: boolean
-  sk?: string
-}
-
 /**
  * `tb ls [path]` —— 列出节点的子节点(GET <path>/~help 的 children;根缺省)。
  * 可见性已由网关按调用者裁剪。
  */
-export function lsCommand(): Command {
+export function lsCommand() {
   return withGlobalOpts(new Command('ls'))
     .description('List child nodes of a path (default: root)')
     .argument('[path]', 'Tree path (default: root)')
-    .action(async (path: string | undefined, opts: LsOpts) => {
+    .action(async (path, opts) => {
       const asJson = Boolean(opts.json)
       const target = resolveTarget(opts)
       const help = await withClient(target, async client => await client.getHelp(path ?? ''))

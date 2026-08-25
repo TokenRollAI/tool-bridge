@@ -1,4 +1,4 @@
-import type { Command } from 'commander'
+import type { Command, OptionValues } from 'commander'
 import { normalizeExpiresAt } from '@tool-bridge/core'
 import { currentProfile, readConfig } from './config'
 import { CliError, type Target } from './http'
@@ -13,7 +13,11 @@ const GLOBAL_OPTION_KEYS = ['json', 'baseUrl', 'sk', 'timeout'] as const
  *
  * 叶子命令也保留这些 option,让局部 help 自包含并保持历史调用兼容。
  */
-export function withGlobalOpts(cmd: Command): Command {
+export function withGlobalOpts<
+  Args extends unknown[],
+  Opts extends OptionValues,
+  GlobalOpts extends OptionValues,
+>(cmd: Command<Args, Opts, GlobalOpts>) {
   return cmd
     .option('--json', 'Output parseable JSON', false)
     .option('--base-url <url>', 'Gateway base URL (default: $TB_BASE_URL or config profile)')
@@ -31,16 +35,20 @@ export function withGlobalOpts(cmd: Command): Command {
  * 这里把根命令上的显式值补到尚未显式设置同名参数的叶子命令,因此以下写法等价:
  * `tb --json sk list` / `tb sk --json list` / `tb sk list --json`。
  */
-export function configureGlobalOpts(program: Command): Command {
-  withGlobalOpts(program)
-  program.hook('preAction', (_thisCommand, actionCommand) => {
+export function configureGlobalOpts<
+  Args extends unknown[],
+  Opts extends OptionValues,
+  GlobalOpts extends OptionValues,
+>(program: Command<Args, Opts, GlobalOpts>) {
+  const configured = withGlobalOpts(program)
+  configured.hook('preAction', (_thisCommand, actionCommand) => {
     for (const key of GLOBAL_OPTION_KEYS) {
-      if (program.getOptionValueSource(key) !== 'cli') continue
+      if (configured.getOptionValueSource(key) !== 'cli') continue
       if (actionCommand.getOptionValueSource(key) === 'cli') continue
-      actionCommand.setOptionValueWithSource(key, program.getOptionValue(key), 'cli')
+      actionCommand.setOptionValueWithSource(key, configured.getOptionValue(key), 'cli')
     }
   })
-  return program
+  return configured
 }
 
 /** 分页参数的统一解析与网关上限校验。 */
@@ -64,7 +72,11 @@ export function parsePageOpts(opts: { cursor?: string, limit?: string }): {
 }
 
 /** 为返回 Page 的命令附加统一的 limit/cursor 参数。 */
-export function withPageOpts(cmd: Command): Command {
+export function withPageOpts<
+  Args extends unknown[],
+  Opts extends OptionValues,
+  GlobalOpts extends OptionValues,
+>(cmd: Command<Args, Opts, GlobalOpts>) {
   return cmd
     .option('--limit <n>', 'Page size (1-200)')
     .option('--cursor <cursor>', 'Continue from a previous page cursor')

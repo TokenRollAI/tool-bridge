@@ -49,18 +49,6 @@ function exportsSummary(m: Pick<PluginManifest, 'exports'>): string {
   return m.exports.map(e => `${e.id}:${e.profile}`).join(', ')
 }
 
-interface PluginOpts {
-  baseUrl?: string
-  cursor?: string
-  json?: boolean
-  limit?: string
-  sk?: string
-}
-
-interface PluginFileOpts extends PluginOpts {
-  file: string
-}
-
 /** 从 stdin 读取全部内容(`--file -`;与 secret set 的 stdin 语义一致)。 */
 async function readStdin(): Promise<string> {
   const chunks: Buffer[] = []
@@ -99,11 +87,11 @@ async function readManifest(file: string): Promise<Record<string, unknown>> {
  * `tb plugin register --file <manifest.json>` → PluginRegistry.Write(system/plugin)。
  * pluginToken 仅注册响应出现一次:人类模式醒目警示,--json 原样输出 PluginRegistration。
  */
-export function pluginRegisterCommand(): Command {
+export function pluginRegisterCommand() {
   return withGlobalOpts(new Command('register'))
     .description('Register a plugin from a manifest file (`-` = stdin)')
     .requiredOption('--file <path>', 'Manifest JSON file path, or `-` for stdin')
-    .action(async (opts: PluginFileOpts) => {
+    .action(async (opts) => {
       const asJson = Boolean(opts.json)
       const file = String(opts.file ?? '').trim()
       if (!file) throw new CliError('--file is required')
@@ -127,10 +115,10 @@ export function pluginRegisterCommand(): Command {
 }
 
 /** `tb plugin list` → PluginRegistry.List。 */
-export function pluginListCommand(): Command {
+export function pluginListCommand() {
   return withPageOpts(withGlobalOpts(new Command('list')))
     .description('List registered plugins')
-    .action(async (opts: PluginOpts) => {
+    .action(async (opts) => {
       const asJson = Boolean(opts.json)
       const pageOpts = parsePageOpts(opts)
       const page = await callDirect<Page<PluginManifest>>(
@@ -153,11 +141,11 @@ export function pluginListCommand(): Command {
 }
 
 /** `tb plugin get <id>` → PluginRegistry.Get。 */
-export function pluginGetCommand(): Command {
+export function pluginGetCommand() {
   return withGlobalOpts(new Command('get'))
     .description('Show one plugin manifest')
     .argument('<id>', 'Plugin id')
-    .action(async (idArg: string, opts: PluginOpts) => {
+    .action(async (idArg, opts) => {
       const asJson = Boolean(opts.json)
       const id = String(idArg ?? '').trim()
       if (!id) throw new CliError('plugin id is required')
@@ -198,7 +186,7 @@ export function pluginGetCommand(): Command {
  * patch 为 Partial<PluginManifest>;auth 切到 platform-token 时响应含一次性 pluginToken,
  * 与 register 同款醒目警示。
  */
-export function pluginUpdateCommand(): Command {
+export function pluginUpdateCommand() {
   return withGlobalOpts(new Command('update'))
     .description('Update a plugin manifest with a patch file (`-` = stdin)')
     .argument('<id>', 'Plugin id')
@@ -206,7 +194,7 @@ export function pluginUpdateCommand(): Command {
       '--file <path>',
       'Patch JSON file path (Partial<PluginManifest>), or `-` for stdin',
     )
-    .action(async (idArg: string, opts: PluginFileOpts) => {
+    .action(async (idArg, opts) => {
       const asJson = Boolean(opts.json)
       const id = String(idArg ?? '').trim()
       if (!id) throw new CliError('plugin id is required')
@@ -232,11 +220,11 @@ export function pluginUpdateCommand(): Command {
 }
 
 /** `tb plugin health <id>` → 按需探活;unhealthy → 退出码 1。 */
-export function pluginHealthCommand(): Command {
+export function pluginHealthCommand() {
   return withGlobalOpts(new Command('health'))
     .description('Probe a plugin health endpoint (exit 1 if unhealthy)')
     .argument('<id>', 'Plugin id')
-    .action(async (idArg: string, opts: PluginOpts) => {
+    .action(async (idArg, opts) => {
       const asJson = Boolean(opts.json)
       const id = String(idArg ?? '').trim()
       if (!id) throw new CliError('plugin id is required')
@@ -251,12 +239,12 @@ export function pluginHealthCommand(): Command {
 }
 
 /** `tb plugin rm <id>` → PluginRegistry.Delete。 */
-export function pluginRmCommand(): Command {
+export function pluginRmCommand() {
   return withGlobalOpts(new Command('rm'))
     .description('Unregister (delete) a plugin (mounted nodes referencing it fail on next call)')
     .argument('<id>', 'Plugin id')
     .option('--yes', 'Skip the confirmation prompt')
-    .action(async (idArg: string, opts: PluginOpts & { yes?: boolean }) => {
+    .action(async (idArg, opts) => {
       const asJson = Boolean(opts.json)
       const id = String(idArg ?? '').trim()
       if (!id) throw new CliError('plugin id is required')
@@ -267,7 +255,7 @@ export function pluginRmCommand(): Command {
     })
 }
 
-export function pluginCommand(): Command {
+export function pluginCommand() {
   return new Command('plugin')
     .description('Manage plugins (system/plugin; admin scope)')
     .addCommand(pluginRegisterCommand())

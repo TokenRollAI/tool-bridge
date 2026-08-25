@@ -4,22 +4,13 @@ import { printJson, printLine } from '../output'
 import { CliError, withClient } from '../http'
 import { printMarkdown } from '../markdown'
 
-interface HelpOpts {
-  baseUrl?: string
-  dsl?: boolean
-  json?: boolean
-  md?: boolean
-  schemas?: boolean
-  sk?: string
-}
-
 /**
  * `tb help [path]` —— GET <path>/~help(根缺省)。
  * 默认输出 Markdown 表现:stdout 是 TTY 时经 ANSI 富文本渲染,管道/重定向时裸 markdown 原样;
  * --md 强制裸 markdown(TTY 下也不渲染,便于复制/落文件);
  * --json 输出等价 JSON(cmd 数组等);--dsl 输出紧凑 Help DSL(Accept: text/plain)。
  */
-export function helpCommand(): Command {
+export function helpCommand() {
   return withGlobalOpts(new Command('help'))
     .description(
       'Show a node ~help (rendered markdown by default; --md raw markdown, --json structured, --dsl compact DSL)',
@@ -31,7 +22,7 @@ export function helpCommand(): Command {
       '--schemas',
       'Inline every tool\'s full input schema at the node level (skips per-tool drill-down)',
     )
-    .action(async (pathArg: string | undefined, opts: HelpOpts) => {
+    .action(async (pathArg, opts) => {
       const asJson = Boolean(opts.json)
       if (opts.dsl && opts.md) throw new CliError('--dsl and --md are mutually exclusive')
       if (opts.dsl && asJson) throw new CliError('--dsl and --json are mutually exclusive')

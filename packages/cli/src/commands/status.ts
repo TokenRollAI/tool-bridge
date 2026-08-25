@@ -7,22 +7,15 @@ interface HealthzBody {
   version?: string
 }
 
-interface StatusOpts {
-  baseUrl?: string
-  json?: boolean
-  sk?: string
-  timeout?: string
-}
-
 /**
  * `tb status` —— 部署环境健康摘要。
  *
  * 直接打 `GET /healthz`。`--json` 输出可解析对象。
  */
-export function statusCommand(): Command {
+export function statusCommand() {
   return withGlobalOpts(new Command('status'))
     .description('Show deployment health summary (GET /healthz)')
-    .action(async (opts: StatusOpts) => {
+    .action(async (opts) => {
       const asJson = Boolean(opts.json)
       const target = resolveTarget(opts)
       const { baseUrl } = target

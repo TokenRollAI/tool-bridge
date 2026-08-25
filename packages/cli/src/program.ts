@@ -1,4 +1,4 @@
-import { Command } from 'commander'
+import { Command, type CommandUnknownOpts } from 'commander'
 import { integrationCommand } from './commands/integration'
 import { federationCommand } from './commands/federation'
 import pkg from '../package.json' with { type: 'json' }
@@ -29,7 +29,7 @@ import { lsCommand } from './commands/ls'
 import { skCommand } from './commands/sk'
 
 /** Prepared commands added with addCommand do not inherit Commander help settings. */
-function showGlobalOptionsInHelp(command: Command): void {
+function showGlobalOptionsInHelp(command: CommandUnknownOpts): void {
   const declaresGlobals = command.options.some(option =>
     ['--json', '--base-url', '--sk', '--timeout'].includes(option.long ?? ''),
   )
@@ -59,7 +59,7 @@ function showGlobalOptionsInHelp(command: Command): void {
  * 不静默吞掉(曾因 citty 把拼错的 `--alows` 当 positional 吞掉引发权限误配)。
  * `.helpCommand(false)`:`tb help [path]` 是业务命令(节点 ~help),须让位。
  */
-export function buildProgram(): Command {
+export function buildProgram() {
   const program = configureGlobalOpts(new Command('tb'))
     .version(pkg.version)
     .description(

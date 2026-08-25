@@ -197,18 +197,14 @@ async function writeResponse(response: Response, out: string | undefined): Promi
   return bytes
 }
 
-export function storeUploadCommand(): Command {
+export function storeUploadCommand() {
   return withGlobalOpts(new Command('upload'))
     .description('Upload a file to the deployment default Store (streaming)')
     .argument('<file>', 'Local file to upload')
     .option('--content-type <type>', 'MIME type (default: guessed from extension)')
     .option('--filename <name>', 'Display filename (default: local basename)')
     .option('--idempotency-key <key>', 'Owner-scoped create retry key')
-    .action(async (fileArg: string, opts: GlobalOpts & {
-      contentType?: string
-      filename?: string
-      idempotencyKey?: string
-    }) => {
+    .action(async (fileArg, opts) => {
       const asJson = Boolean(opts.json)
       const file = String(fileArg)
       const size = fileSize(file)
@@ -236,11 +232,11 @@ export function storeUploadCommand(): Command {
     })
 }
 
-export function storeStatCommand(): Command {
+export function storeStatCommand() {
   return withGlobalOpts(new Command('stat'))
     .description('Show metadata for an owned Store object')
     .argument('<store-uri>', 'store://default/<objectId>')
-    .action(async (uriArg: string, opts: GlobalOpts) => {
+    .action(async (uriArg, opts) => {
       const asJson = Boolean(opts.json)
       const uri = requireStoreUri(uriArg)
       const descriptor = await useStore(opts, async client => await client.stat(uri))
@@ -252,12 +248,12 @@ export function storeStatCommand(): Command {
     })
 }
 
-export function storeGetCommand(): Command {
+export function storeGetCommand() {
   return withGlobalOpts(new Command('get'))
     .description('Stream an owned Store object to stdout or --out')
     .argument('<store-uri>', 'store://default/<objectId>')
     .option('--out <file>', 'Write to a new file instead of stdout')
-    .action(async (uriArg: string, opts: GlobalOpts & { out?: string }) => {
+    .action(async (uriArg, opts) => {
       const asJson = Boolean(opts.json)
       if (asJson && !opts.out) throw new CliError('--json requires --out for binary downloads')
       const uri = requireStoreUri(uriArg)
@@ -271,12 +267,12 @@ export function storeGetCommand(): Command {
     })
 }
 
-export function storeShareCommand(): Command {
+export function storeShareCommand() {
   return withGlobalOpts(new Command('share'))
     .description('Create a short-lived revocable Store share')
     .argument('<store-uri>', 'store://default/<objectId>')
     .option('--ttl <seconds>', 'Share lifetime in seconds')
-    .action(async (uriArg: string, opts: GlobalOpts & { ttl?: string }) => {
+    .action(async (uriArg, opts) => {
       const asJson = Boolean(opts.json)
       const uri = requireStoreUri(uriArg)
       const ttlSec = positiveInt(opts.ttl, '--ttl')
@@ -293,11 +289,11 @@ export function storeShareCommand(): Command {
     })
 }
 
-export function storeRevokeShareCommand(): Command {
+export function storeRevokeShareCommand() {
   return withGlobalOpts(new Command('revoke-share'))
     .description('Revoke a Store share by id')
     .argument('<share-id>', 'Share grant id')
-    .action(async (shareIdArg: string, opts: GlobalOpts) => {
+    .action(async (shareIdArg, opts) => {
       const asJson = Boolean(opts.json)
       const shareId = String(shareIdArg ?? '').trim()
       if (!shareId) throw new CliError('share id is required')
@@ -307,12 +303,12 @@ export function storeRevokeShareCommand(): Command {
     })
 }
 
-export function storeRmCommand(): Command {
+export function storeRmCommand() {
   return withGlobalOpts(new Command('rm'))
     .description('Delete an owned Store object')
     .argument('<store-uri>', 'store://default/<objectId>')
     .option('-y, --yes', 'Skip interactive confirmation')
-    .action(async (uriArg: string, opts: GlobalOpts) => {
+    .action(async (uriArg, opts) => {
       const asJson = Boolean(opts.json)
       const uri = requireStoreUri(uriArg)
       await confirmDestructive(opts, `删除 Store 对象 ${uri}？此操作不可撤销。`)
@@ -322,11 +318,11 @@ export function storeRmCommand(): Command {
     })
 }
 
-export function storeListCommand(): Command {
+export function storeListCommand() {
   return withPageOpts(withGlobalOpts(new Command('list')))
     .alias('ls')
     .description('List Store objects owned by the current principal')
-    .action(async (opts: GlobalOpts & { cursor?: string, limit?: string }) => {
+    .action(async (opts) => {
       const asJson = Boolean(opts.json)
       const pageOpts = parsePageOpts(opts)
       const page = await useStore(opts, async client => await client.list({
@@ -337,7 +333,7 @@ export function storeListCommand(): Command {
     })
 }
 
-export function storeCommand(): Command {
+export function storeCommand() {
   return new Command('store')
     .description('Manage deployment-level objects in the default Store')
     .addCommand(storeUploadCommand())

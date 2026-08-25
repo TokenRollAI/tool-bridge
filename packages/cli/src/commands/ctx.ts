@@ -126,24 +126,17 @@ function printEntries(page: Page<ContextEntryMeta>): void {
   if (page.cursor) printLine(`next cursor: ${page.cursor}`)
 }
 
-interface GlobalOpts {
-  baseUrl?: string
-  json?: boolean
-  sk?: string
-  yes?: boolean
-}
-
 /** `tb ctx ls <ns> [prefix]` —— 浅层列表(ContextProvider.List)。 */
-export function ctxLsCommand(): Command {
+export function ctxLsCommand() {
   return withPageOpts(withGlobalOpts(new Command('ls')))
     .description('List entries in a context namespace')
     .argument('<ns>', 'Context namespace tree path')
     .argument('[prefix]', 'Relative prefix inside namespace')
     .action(
       async (
-        nsArg: string,
-        prefix: string | undefined,
-        opts: GlobalOpts & { cursor?: string, limit?: string },
+        nsArg,
+        prefix,
+        opts,
       ) => {
         const asJson = Boolean(opts.json)
         const ns = String(nsArg ?? '').trim()
@@ -164,12 +157,12 @@ export function ctxLsCommand(): Command {
 }
 
 /** `tb ctx cat <ns> <entry>` —— 读取 entry(ContextProvider.Get)。 */
-export function ctxCatCommand(): Command {
+export function ctxCatCommand() {
   return withGlobalOpts(new Command('cat'))
     .description('Print a context entry')
     .argument('<ns>', 'Context namespace tree path')
     .argument('<entry>', 'Entry path inside namespace')
-    .action(async (nsArg: string, entryArg: string, opts: GlobalOpts) => {
+    .action(async (nsArg, entryArg, opts) => {
       const asJson = Boolean(opts.json)
       const ns = String(nsArg ?? '').trim()
       if (!ns) throw new CliError('namespace path is required')
@@ -197,7 +190,7 @@ export function ctxCatCommand(): Command {
 }
 
 /** `tb ctx put <ns> <entry>` —— 创建/整体替换(ContextProvider.Write,幂等 upsert)。 */
-export function ctxPutCommand(): Command {
+export function ctxPutCommand() {
   return withGlobalOpts(new Command('put'))
     .description('Write text/JSON (create or replace); use upload for direct binary transfer')
     .argument('<ns>', 'Context namespace tree path')
@@ -209,15 +202,9 @@ export function ctxPutCommand(): Command {
     .option('--if-version <version>', 'Optimistic concurrency: expected version')
     .action(
       async (
-        nsArg: string,
-        entryArg: string,
-        opts: GlobalOpts & {
-          content?: string
-          contentType?: string
-          file?: string
-          ifVersion?: string
-          meta: string[]
-        },
+        nsArg,
+        entryArg,
+        opts,
       ) => {
         const asJson = Boolean(opts.json)
         const ns = String(nsArg ?? '').trim()
@@ -257,7 +244,7 @@ export function ctxPutCommand(): Command {
 }
 
 /** `tb ctx upload <ns> <entry> --file <file>` —— 申请短期 grant 后二进制直传。 */
-export function ctxUploadCommand(): Command {
+export function ctxUploadCommand() {
   return withGlobalOpts(new Command('upload'))
     .description('Upload a binary file directly; existing entries require --force')
     .argument('<ns>', 'Context namespace tree path')
@@ -266,9 +253,9 @@ export function ctxUploadCommand(): Command {
     .option('--content-type <type>', 'Content type (default: guessed from --file)')
     .option('--force', 'Overwrite an existing entry (default: fail with conflict)')
     .action(async (
-      nsArg: string,
-      entryArg: string,
-      opts: GlobalOpts & { contentType?: string, file: string, force?: boolean },
+      nsArg,
+      entryArg,
+      opts,
     ) => {
       const asJson = Boolean(opts.json)
       const ns = String(nsArg ?? '').trim()
@@ -298,7 +285,7 @@ export function ctxUploadCommand(): Command {
 }
 
 /** `tb ctx patch <ns> <entry>` —— 部分更新(ContextProvider.Update,不存在 → not_found)。 */
-export function ctxPatchCommand(): Command {
+export function ctxPatchCommand() {
   return withGlobalOpts(new Command('patch'))
     .description('Update content and/or metadata of a context entry')
     .argument('<ns>', 'Context namespace tree path')
@@ -309,14 +296,9 @@ export function ctxPatchCommand(): Command {
     .option('--if-version <version>', 'Optimistic concurrency: expected version')
     .action(
       async (
-        nsArg: string,
-        entryArg: string,
-        opts: GlobalOpts & {
-          content?: string
-          file?: string
-          ifVersion?: string
-          meta: string[]
-        },
+        nsArg,
+        entryArg,
+        opts,
       ) => {
         const asJson = Boolean(opts.json)
         const ns = String(nsArg ?? '').trim()
@@ -350,7 +332,7 @@ export function ctxPatchCommand(): Command {
 }
 
 /** `tb ctx search <ns> <query>` —— 检索(ContextProvider.Search,可选能力)。 */
-export function ctxSearchCommand(): Command {
+export function ctxSearchCommand() {
   return withPageOpts(withGlobalOpts(new Command('search')))
     .description('Search entries in a context namespace')
     .argument('<ns>', 'Context namespace tree path')
@@ -358,9 +340,9 @@ export function ctxSearchCommand(): Command {
     .option('--mode <mode>', 'Search mode: keyword | semantic (default keyword)')
     .action(
       async (
-        nsArg: string,
-        queryArg: string,
-        opts: GlobalOpts & { cursor?: string, limit?: string, mode?: string },
+        nsArg,
+        queryArg,
+        opts,
       ) => {
         const asJson = Boolean(opts.json)
         const ns = String(nsArg ?? '').trim()
@@ -385,13 +367,13 @@ export function ctxSearchCommand(): Command {
 }
 
 /** `tb ctx rm <ns> <entry>` —— 删除 context entry(ContextProvider.Delete)。 */
-export function ctxRmCommand(): Command {
+export function ctxRmCommand() {
   return withGlobalOpts(new Command('rm'))
     .description('Delete a context entry')
     .argument('<ns>', 'Context namespace tree path')
     .argument('<entry>', 'Entry path inside namespace')
     .option('--yes', 'Skip the confirmation prompt')
-    .action(async (nsArg: string, entryArg: string, opts: GlobalOpts) => {
+    .action(async (nsArg, entryArg, opts) => {
       const asJson = Boolean(opts.json)
       const ns = String(nsArg ?? '').trim()
       if (!ns) throw new CliError('namespace path is required')
@@ -409,7 +391,7 @@ export function ctxRmCommand(): Command {
  * (NodeRegistry.Write{kind:'context'} via ~register;tool.ts mount 同通道)。
  * providerConfig:r2 `{prefix?}`;s3 `{endpoint,bucket,region?,prefix?}` 且 --auth-ref 必填。
  */
-export function ctxMountCommand(): Command {
+export function ctxMountCommand() {
   return withGlobalOpts(new Command('mount'))
     .description('Mount a context namespace (r2, s3, or a context-provider plugin)')
     .argument('<path>', 'Tree path to mount at')
@@ -435,20 +417,8 @@ export function ctxMountCommand(): Command {
     )
     .action(
       async (
-        pathArg: string,
-        opts: GlobalOpts & {
-          authRef?: string
-          bucket?: string
-          config: string[]
-          description?: string
-          endpoint?: string
-          export?: string
-          prefix?: string
-          provider: string
-          readOnly?: boolean
-          region?: string
-          ttl?: string
-        },
+        pathArg,
+        opts,
       ) => {
         const asJson = Boolean(opts.json)
         const path = String(pathArg ?? '').trim()
@@ -520,12 +490,12 @@ export function ctxMountCommand(): Command {
 }
 
 /** `tb ctx unmount <path>` —— 卸载 context 节点(管理面 system/registry delete)。 */
-export function ctxUnmountCommand(): Command {
+export function ctxUnmountCommand() {
   return withGlobalOpts(new Command('unmount'))
     .description('Unmount a context namespace')
     .argument('<path>', 'Tree path to remove')
     .option('--yes', 'Skip the confirmation prompt')
-    .action(async (pathArg: string, opts: GlobalOpts) => {
+    .action(async (pathArg, opts) => {
       const asJson = Boolean(opts.json)
       const path = String(pathArg ?? '').trim()
       if (!path) throw new CliError('tree path is required')
@@ -536,7 +506,7 @@ export function ctxUnmountCommand(): Command {
     })
 }
 
-export function ctxCommand(): Command {
+export function ctxCommand() {
   return new Command('ctx')
     .description('Context Layer: mount namespaces & read/write entries')
     .addHelpText(

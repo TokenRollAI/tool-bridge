@@ -13,15 +13,6 @@ import { confirmDestructive } from '../confirm'
 import { callDirect, CliError } from '../http'
 import { parseScope } from '../scope'
 
-interface SkGlobalOpts {
-  baseUrl?: string
-  cursor?: string
-  json?: boolean
-  limit?: string
-  sk?: string
-  yes?: boolean
-}
-
 export function scopeSummary(k: SecretKeyView): string {
   return (k.scopes ?? [])
     .map(s => `${s.pattern}:${s.actions.join('+')}${s.effect === 'deny' ? '(deny)' : ''}`)
@@ -39,10 +30,10 @@ function printKey(k: SecretKeyView): void {
 }
 
 /** `tb sk list` → SKRegistry.List(system/sk),裁掉 hash。 */
-export function skListCommand(): Command {
+export function skListCommand() {
   return withPageOpts(withGlobalOpts(new Command('list')))
     .description('List secret keys (hash never returned)')
-    .action(async (opts: SkGlobalOpts) => {
+    .action(async (opts) => {
       const asJson = Boolean(opts.json)
       const pageOpts = parsePageOpts(opts)
       const page = await callDirect<Page<SecretKeyView>>(
@@ -66,11 +57,11 @@ export function skListCommand(): Command {
 }
 
 /** `tb sk get <id>` → SKRegistry.Get。 */
-export function skGetCommand(): Command {
+export function skGetCommand() {
   return withGlobalOpts(new Command('get'))
     .description('Show one secret key (hash and plaintext secret are never returned)')
     .argument('<id>', 'Secret key id')
-    .action(async (idArg: string, opts: SkGlobalOpts) => {
+    .action(async (idArg, opts) => {
       const asJson = Boolean(opts.json)
       const id = String(idArg ?? '').trim()
       if (!id) throw new CliError('secret key id is required')
@@ -80,20 +71,12 @@ export function skGetCommand(): Command {
     })
 }
 
-interface SkCreateOpts extends SkGlobalOpts {
-  description?: string
-  expires?: string
-  owner: string
-  registerPath: string[]
-  scope: string[]
-}
-
 /**
  * `tb sk create` → SKRegistry.Write(system/sk)。
  * --owner(必填)/--scope(可重复 "pattern:actions")/--register-path(可重复)/--expires/--description。
  * 明文 secret 仅签发一次:人类模式醒目警示,--json 原样输出 {key, secret}。
  */
-export function skCreateCommand(): Command {
+export function skCreateCommand() {
   return withGlobalOpts(new Command('create'))
     .description('Issue a new secret key (secret shown ONCE)')
     .requiredOption('--owner <ref>', 'Owner ref: user:<name> / agent:<name> / device:<id>')
@@ -115,7 +98,7 @@ Examples:
   tb sk create --owner user:alice --scope '**:read,write,call,register,admin'
   tb sk create --owner device:build-01 --scope 'device/build-01/**:read,call' --register-path device/build-01`,
     )
-    .action(async (opts: SkCreateOpts) => {
+    .action(async (opts) => {
       const asJson = Boolean(opts.json)
       const owner = String(opts.owner ?? '').trim()
       if (!owner) throw new CliError('--owner is required')
@@ -159,18 +142,8 @@ function collectOptional(value: string, previous?: string[]): string[] {
   return [...(previous ?? []), value]
 }
 
-interface SkUpdateOpts extends SkGlobalOpts {
-  description?: string
-  disable?: boolean
-  enable?: boolean
-  expires?: string
-  owner?: string
-  registerPath?: string[]
-  scope?: string[]
-}
-
 /** `tb sk update <id>` → SKRegistry.Update；仅发送显式给出的字段。 */
-export function skUpdateCommand(): Command {
+export function skUpdateCommand() {
   return withGlobalOpts(new Command('update'))
     .description('Patch an issued secret key')
     .argument('<id>', 'Secret key id')
@@ -181,7 +154,7 @@ export function skUpdateCommand(): Command {
     .option('--description <text>', 'Replace human description')
     .option('--disable', 'Disable the key immediately; mutually exclusive with --enable')
     .option('--enable', 'Re-enable the key immediately; mutually exclusive with --disable')
-    .action(async (idArg: string, opts: SkUpdateOpts) => {
+    .action(async (idArg, opts) => {
       const asJson = Boolean(opts.json)
       const id = String(idArg ?? '').trim()
       if (!id) throw new CliError('secret key id is required')
@@ -212,11 +185,11 @@ export function skUpdateCommand(): Command {
     })
 }
 
-function skStateCommand(name: 'disable' | 'enable', disabled: boolean): Command {
+function skStateCommand(name: 'disable' | 'enable', disabled: boolean) {
   return withGlobalOpts(new Command(name))
     .description(`${disabled ? 'Disable' : 'Re-enable'} a secret key without deleting it`)
     .argument('<id>', 'Secret key id')
-    .action(async (idArg: string, opts: SkGlobalOpts) => {
+    .action(async (idArg, opts) => {
       const asJson = Boolean(opts.json)
       const id = String(idArg ?? '').trim()
       if (!id) throw new CliError('secret key id is required')
@@ -230,12 +203,12 @@ function skStateCommand(name: 'disable' | 'enable', disabled: boolean): Command 
 }
 
 /** `tb sk rm <id>` → SKRegistry.Delete(吊销)。 */
-export function skRmCommand(): Command {
+export function skRmCommand() {
   return withGlobalOpts(new Command('rm'))
     .description('Revoke (delete) a secret key (irreversible; consider `sk disable` to pause)')
     .argument('<id>', 'Secret key id')
     .option('--yes', 'Skip the confirmation prompt')
-    .action(async (idArg: string, opts: SkGlobalOpts) => {
+    .action(async (idArg, opts) => {
       const asJson = Boolean(opts.json)
       const id = String(idArg ?? '').trim()
       if (!id) throw new CliError('secret key id is required')
@@ -246,7 +219,7 @@ export function skRmCommand(): Command {
     })
 }
 
-export function skCommand(): Command {
+export function skCommand() {
   return new Command('sk')
     .description('Manage secret keys (system/sk; admin scope)')
     .addCommand(skListCommand())

@@ -149,17 +149,7 @@ export async function attachFeedbackHint(
  * 可重复 `--arg k=v`(扁平标量,见 parseArgScalar)。
  * 默认人类模式:markdown 原样打印;`--json`:输出原始 JSON。TBError → stderr + exit 1。
  */
-export interface CallArgs {
-  arg?: string[]
-  args?: string
-  argsFile?: string
-  baseUrl?: string
-  json?: boolean
-  sk?: string
-  timeout?: string
-}
-
-export function callCommand(): Command {
+export function callCommand() {
   return withGlobalOpts(new Command('call'))
     .description(
       'Invoke a command: `tb call <node>/<command> \'<json>\'` (body is the arguments object)',
@@ -194,7 +184,7 @@ Examples:
   A repeated key wins with its last occurrence. For exact types (the string "true",
   the string "42") or nested objects/arrays, use --args / --args-file JSON instead.`,
     )
-    .action(async (pathArg: string, argsPositional: string | undefined, opts: CallArgs) => {
+    .action(async (pathArg, argsPositional, opts) => {
       const asJson = Boolean(opts.json)
       const path = String(pathArg ?? '').trim()
       if (!path) throw new CliError('command path is required')

@@ -6,30 +6,11 @@ import { printJson, printLine, table } from '../output'
 import { deleteNode, registerNode } from '../registry'
 import { confirmDestructive } from '../confirm'
 
-interface ServerAddOpts {
-  baseUrl?: string
-  description?: string
-  json?: boolean
-  remoteUrl?: string
-  sk?: string
-  skRef?: string
-  timeout?: string
-}
-
-interface GlobalOpts {
-  baseUrl?: string
-  cursor?: string
-  json?: boolean
-  limit?: string
-  sk?: string
-  yes?: boolean
-}
-
 /**
  * `tb server add <path> --remote-url <u>` —— 联邦一个外部 HTBP 服务(kind:'remote')。
  * `--base-url` 始终表示当前 CLI 要访问的网关,不再在此命令复用为远端地址。
  */
-export function serverAddCommand(): Command {
+export function serverAddCommand() {
   return withGlobalOpts(new Command('add'))
     .description('Federate a remote HTBP server as a subtree')
     .argument('<path>', 'Tree path to mount the remote at')
@@ -39,7 +20,7 @@ export function serverAddCommand(): Command {
     )
     .option('--sk-ref <ref>', 'SecretStore ref for outbound SK (skRef)')
     .option('--description <text>', 'One-line node description (default: derived from remote URL)')
-    .action(async (pathArg: string, opts: ServerAddOpts) => {
+    .action(async (pathArg, opts) => {
       const asJson = Boolean(opts.json)
       const path = String(pathArg ?? '').trim()
       if (!path) throw new CliError('tree path is required')
@@ -75,14 +56,14 @@ function collectRemotes(node: TreeJson, out: TreeJson[]): void {
  * 首选管理面 `system/registry` list(带 config.baseUrl);无可见性(404)时退化为
  * `GET /~tree?depth=8` 过滤 kind==='remote'(此路径 baseUrl 不可见,注明)。
  */
-export function serverLsCommand(): Command {
+export function serverLsCommand() {
   return withPageOpts(withGlobalOpts(new Command('ls')))
     .description('List federated remote servers')
     .addHelpText(
       'after',
       '\nPagination note: --limit/--cursor require system/registry visibility; the ~tree fallback cannot paginate.\n',
     )
-    .action(async (opts: GlobalOpts) => {
+    .action(async (opts) => {
       const asJson = Boolean(opts.json)
       const target = resolveTarget(opts)
       const pageOpts = parsePageOpts(opts)
@@ -142,12 +123,12 @@ export function serverLsCommand(): Command {
 }
 
 /** `tb server rm <path>` —— 卸载 remote 节点(管理面 system/registry delete)。 */
-export function serverRmCommand(): Command {
+export function serverRmCommand() {
   return withGlobalOpts(new Command('rm'))
     .description('Remove a federated remote server')
     .argument('<path>', 'Tree path to remove')
     .option('--yes', 'Skip the confirmation prompt')
-    .action(async (pathArg: string, opts: GlobalOpts) => {
+    .action(async (pathArg, opts) => {
       const asJson = Boolean(opts.json)
       const path = String(pathArg ?? '').trim()
       if (!path) throw new CliError('tree path is required')
@@ -158,7 +139,7 @@ export function serverRmCommand(): Command {
     })
 }
 
-export function serverCommand(): Command {
+export function serverCommand() {
   return new Command('server')
     .description('Federate/list/remove remote HTBP servers')
     .addCommand(serverAddCommand())

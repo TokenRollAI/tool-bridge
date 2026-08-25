@@ -4,16 +4,6 @@ import { parsePageOpts, resolveTarget, withGlobalOpts, withPageOpts } from '../a
 import { printJson, printLine, table } from '../output'
 import { CliError, withClient } from '../http'
 
-interface SearchOpts {
-  baseUrl?: string
-  cursor?: string
-  json?: boolean
-  limit?: string
-  mode?: string
-  schemas?: boolean
-  sk?: string
-}
-
 /**
  * `--schemas` 的附加段:逐工具打 `NODE/TOOL` 标题 + pretty inputSchema。
  * schema 已在 `~search` 响应里(`items[].tool.inputSchema`),因此这只是渲染开关,
@@ -54,7 +44,7 @@ function printSearchPage(page: Page<ToolSearchItem>, withSchemas = false): void 
 }
 
 /** `tb search <query>` —— 在当前 SK 可见且可调用的全局工具中检索。 */
-export function searchCommand(): Command {
+export function searchCommand() {
   return withPageOpts(withGlobalOpts(new Command('search')))
     .description('Search callable tools across the gateway')
     .argument('<query>', 'Tool name, description, or feedback query')
@@ -71,7 +61,7 @@ Examples:
   tb search calendar
   tb search calendar --schemas   print arguments schemas inline, no extra \`tb help\` round-trip`,
     )
-    .action(async (queryArg: string, opts: SearchOpts) => {
+    .action(async (queryArg, opts) => {
       const asJson = Boolean(opts.json)
       const query = String(queryArg ?? '').trim()
       if (!query) throw new CliError('query is required')

@@ -7,12 +7,12 @@ import { CliError } from '../http'
  * `tb use <profile>` —— 切换当前 profile(纯本地;多 server 配置切换,Arch:215)。
  * 无参数时列出全部 profile 并标注当前。
  */
-export function useCommand(): Command {
+export function useCommand() {
   return new Command('use')
     .description('Switch the current profile (or list profiles)')
     .argument('[profile]', 'Profile name to switch to')
     .option('--json', 'Output parseable JSON', false)
-    .action(async (profile: string | undefined, opts: { json?: boolean }) => {
+    .action(async (profile, opts) => {
       const asJson = Boolean(opts.json)
       const config = readConfig()
 

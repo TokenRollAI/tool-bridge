@@ -46,13 +46,6 @@ interface SkillFile extends SkillFileMeta {
   content: string | unknown
 }
 
-interface GlobalOpts {
-  baseUrl?: string
-  json?: boolean
-  sk?: string
-  yes?: boolean
-}
-
 function parsePositiveInt(value: unknown, flag: string): number | undefined {
   if (value === undefined || value === '') return undefined
   const n = Number(value)
@@ -110,11 +103,11 @@ function readSkillDir(dir: string): { content: string, path: string }[] {
 }
 
 /** `tb skill ls <hub>` —— 列出已发布 skill(目录 name/description)。 */
-export function skillLsCommand(): Command {
+export function skillLsCommand() {
   return withPageOpts(withGlobalOpts(new Command('ls')))
     .description('List published skills in a skillhub')
     .argument('<hub>', 'Skillhub tree path')
-    .action(async (hubArg: string, opts: GlobalOpts & { cursor?: string, limit?: string }) => {
+    .action(async (hubArg, opts) => {
       const asJson = Boolean(opts.json)
       const hub = String(hubArg ?? '').trim()
       if (!hub) throw new CliError('skillhub path is required')
@@ -128,7 +121,7 @@ export function skillLsCommand(): Command {
 }
 
 /** `tb skill get <hub> <id>` —— 读取 skill(SKILL.md + 清单);--out 拉到本地目录;--file 取单文件。 */
-export function skillGetCommand(): Command {
+export function skillGetCommand() {
   return withGlobalOpts(new Command('get'))
     .description('Read a skill (SKILL.md + file list); --out to download into a local dir')
     .argument('<hub>', 'Skillhub tree path')
@@ -136,7 +129,7 @@ export function skillGetCommand(): Command {
     .option('--file <path>', 'Fetch one bundled file; mutually exclusive with --out')
     .option('--out <dir>', 'Download the whole skill; mutually exclusive with --file')
     .action(
-      async (hubArg: string, idArg: string, opts: GlobalOpts & { file?: string, out?: string }) => {
+      async (hubArg, idArg, opts) => {
         const asJson = Boolean(opts.json)
         const hub = String(hubArg ?? '').trim()
         if (!hub) throw new CliError('skillhub path is required')
@@ -207,16 +200,16 @@ export function skillGetCommand(): Command {
 }
 
 /** `tb skill search <hub> <query>` —— 按 id/name/description 检索 skill。 */
-export function skillSearchCommand(): Command {
+export function skillSearchCommand() {
   return withPageOpts(withGlobalOpts(new Command('search')))
     .description('Search skills by id / name / description')
     .argument('<hub>', 'Skillhub tree path')
     .argument('<query>', 'Search query')
     .action(
       async (
-        hubArg: string,
-        queryArg: string,
-        opts: GlobalOpts & { cursor?: string, limit?: string },
+        hubArg,
+        queryArg,
+        opts,
       ) => {
         const asJson = Boolean(opts.json)
         const hub = String(hubArg ?? '').trim()
@@ -238,13 +231,13 @@ export function skillSearchCommand(): Command {
 }
 
 /** `tb skill publish <hub> <dir>` —— 从本地目录发布/替换一个 skill(须含 SKILL.md)。 */
-export function skillPublishCommand(): Command {
+export function skillPublishCommand() {
   return withGlobalOpts(new Command('publish'))
     .description('Publish/replace a skill from a local directory (must contain SKILL.md)')
     .argument('<hub>', 'Skillhub tree path')
     .argument('<dir>', 'Local skill directory')
     .option('--id <id>', 'Skill id (default: slug from SKILL.md frontmatter name)')
-    .action(async (hubArg: string, dirArg: string, opts: GlobalOpts & { id?: string }) => {
+    .action(async (hubArg, dirArg, opts) => {
       const asJson = Boolean(opts.json)
       const hub = String(hubArg ?? '').trim()
       if (!hub) throw new CliError('skillhub path is required')
@@ -264,13 +257,13 @@ export function skillPublishCommand(): Command {
 }
 
 /** `tb skill rm <hub> <id>` —— 删除一个 skill 及其全部文件。 */
-export function skillRmCommand(): Command {
+export function skillRmCommand() {
   return withGlobalOpts(new Command('rm'))
     .description('Delete a skill and all its files')
     .argument('<hub>', 'Skillhub tree path')
     .argument('<id>', 'Skill id')
     .option('--yes', 'Skip the confirmation prompt')
-    .action(async (hubArg: string, idArg: string, opts: GlobalOpts) => {
+    .action(async (hubArg, idArg, opts) => {
       const asJson = Boolean(opts.json)
       const hub = String(hubArg ?? '').trim()
       if (!hub) throw new CliError('skillhub path is required')
@@ -287,7 +280,7 @@ export function skillRmCommand(): Command {
  * `tb skill mount <path>` —— 挂载一个 skillhub(NodeRegistry.Write{kind:'skillhub'} via ~register)。
  * provider 缺省 r2(平台自带桶,无需外部凭证);s3 需 --endpoint/--bucket/--auth-ref。
  */
-export function skillMountCommand(): Command {
+export function skillMountCommand() {
   return withGlobalOpts(new Command('mount'))
     .description('Mount a skillhub (r2 by default; s3 optional)')
     .argument('<path>', 'Tree path to mount at')
@@ -302,18 +295,8 @@ export function skillMountCommand(): Command {
     .option('--region <region>', '[s3] region')
     .action(
       async (
-        pathArg: string,
-        opts: GlobalOpts & {
-          authRef?: string
-          bucket?: string
-          description?: string
-          endpoint?: string
-          prefix?: string
-          provider?: string
-          readOnly?: boolean
-          region?: string
-          ttl?: string
-        },
+        pathArg,
+        opts,
       ) => {
         const asJson = Boolean(opts.json)
         const path = String(pathArg ?? '').trim()
@@ -368,12 +351,12 @@ export function skillMountCommand(): Command {
 }
 
 /** `tb skill unmount <path>` —— 卸载 skillhub 节点(管理面 system/registry delete)。 */
-export function skillUnmountCommand(): Command {
+export function skillUnmountCommand() {
   return withGlobalOpts(new Command('unmount'))
     .description('Unmount a skillhub')
     .argument('<path>', 'Tree path to remove')
     .option('--yes', 'Skip the confirmation prompt')
-    .action(async (pathArg: string, opts: GlobalOpts) => {
+    .action(async (pathArg, opts) => {
       const asJson = Boolean(opts.json)
       const path = String(pathArg ?? '').trim()
       if (!path) throw new CliError('tree path is required')
@@ -384,7 +367,7 @@ export function skillUnmountCommand(): Command {
     })
 }
 
-export function skillCommand(): Command {
+export function skillCommand() {
   return new Command('skill')
     .description('Skillhub: publish & fetch Agent Skills (mount a hub, then publish/get skills)')
     .addHelpText(

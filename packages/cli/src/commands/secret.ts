@@ -13,14 +13,6 @@ async function readStdin(): Promise<string> {
   return Buffer.concat(chunks).toString('utf8').replace(/\n$/, '')
 }
 
-interface SecretGlobalOpts {
-  baseUrl?: string
-  cursor?: string
-  json?: boolean
-  limit?: string
-  sk?: string
-}
-
 /**
  * `--field k=v` → 字段表。多字段凭证(plugin 的 `credentialFields`)用它写入,
  * 落库形态是一个 JSON 对象;单值凭证仍走 --value/stdin。
@@ -46,7 +38,7 @@ function parseFields(entries: readonly string[]): Record<string, string> {
  * (plugin export 声明了 credentialFields,如飞书的 appId+appSecret)用可重复的 --field,
  * 落库为 JSON 对象。只写不读。
  */
-export function secretSetCommand(): Command {
+export function secretSetCommand() {
   return withGlobalOpts(new Command('set'))
     .description('Set an upstream secret (write-only; prefer stdin for value)')
     .requiredOption('--name <name>', 'Secret name')
@@ -56,7 +48,7 @@ export function secretSetCommand(): Command {
       'One field of a multi-field credential (repeatable; mutually exclusive with --value)',
       (entry: string, previous: string[] = []) => [...previous, entry],
     )
-    .action(async (opts: SecretGlobalOpts & { field?: string[], name: string, value?: string }) => {
+    .action(async (opts) => {
       const asJson = Boolean(opts.json)
       const name = String(opts.name ?? '').trim()
       if (!name) throw new CliError('--name is required')
@@ -87,10 +79,10 @@ export function secretSetCommand(): Command {
 }
 
 /** `tb secret ls` → SecretStore.List:只见 name + updatedAt(明文不回显)。 */
-export function secretLsCommand(): Command {
+export function secretLsCommand() {
   return withPageOpts(withGlobalOpts(new Command('ls')))
     .description('List secrets (name + updatedAt only)')
-    .action(async (opts: SecretGlobalOpts) => {
+    .action(async (opts) => {
       const asJson = Boolean(opts.json)
       const pageOpts = parsePageOpts(opts)
       const page = await callDirect<Page<SecretSummary>>(
@@ -108,12 +100,12 @@ export function secretLsCommand(): Command {
 }
 
 /** `tb secret rm <name>` → SecretStore.Delete。 */
-export function secretRmCommand(): Command {
+export function secretRmCommand() {
   return withGlobalOpts(new Command('rm'))
     .description('Delete a secret (nodes referencing it fail on next call)')
     .argument('<name>', 'Secret name')
     .option('--yes', 'Skip the confirmation prompt')
-    .action(async (nameArg: string, opts: SecretGlobalOpts & { yes?: boolean }) => {
+    .action(async (nameArg, opts) => {
       const asJson = Boolean(opts.json)
       const name = String(nameArg ?? '').trim()
       if (!name) throw new CliError('secret name is required')
@@ -124,7 +116,7 @@ export function secretRmCommand(): Command {
     })
 }
 
-export function secretCommand(): Command {
+export function secretCommand() {
   return new Command('secret')
     .description('Manage upstream secrets (system/secret; admin scope)')
     .addCommand(secretSetCommand())

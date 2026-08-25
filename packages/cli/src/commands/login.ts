@@ -15,14 +15,6 @@ async function prompt(question: string): Promise<string> {
   }
 }
 
-interface LoginOpts {
-  baseUrl?: string
-  json?: boolean
-  profile?: string
-  sk?: string
-  timeout?: string
-}
-
 /**
  * `tb login` —— 存 BaseURL + SK 到本地 profile(纯本地,无服务端接口)。
  *
@@ -30,11 +22,11 @@ interface LoginOpts {
  * 验证:`GET /~help` 带 Bearer——401 视为 SK 被拒;其它状态(含 403 无根读权但已认证)
  *       都视为 SK 被网关接受,写入配置并设为 current。文件权限 0600。
  */
-export function loginCommand(): Command {
+export function loginCommand() {
   return withGlobalOpts(new Command('login'))
     .description('Store gateway base URL + SK to a local profile')
     .option('--profile <name>', 'Profile name', 'default')
-    .action(async (opts: LoginOpts) => {
+    .action(async (opts) => {
       const asJson = Boolean(opts.json)
       const profile = String(opts.profile ?? 'default')
       let baseUrl = opts.baseUrl ?? process.env.TB_BASE_URL

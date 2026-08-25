@@ -1,10 +1,10 @@
 import { Command } from 'commander'
-import { type CloudflareInitOptions, runCloudflareInit } from '../cloudflareInit'
+import { runCloudflareInit } from '../cloudflareInit'
 import { printJson, printLine } from '../output'
 import { withGlobalOpts } from '../args'
 
 /** 首次部署向导；当前 Cloudflare 编排依赖源码仓库中的 provision/build 配置。 */
-export function initCommand(): Command {
+export function initCommand() {
   const cloudflare = withGlobalOpts(new Command('cloudflare'))
     .description('Provision and deploy tool-bridge to Cloudflare from a source checkout')
     .option('--account-id <id>', 'Cloudflare account ID (required when more than one is available)')
@@ -17,7 +17,7 @@ export function initCommand(): Command {
       'after',
       '\nSecurity: init never accepts an Admin SK via --sk; it generates one for a new Worker or verifies the saved --profile for an existing Worker.',
     )
-    .action(async (opts: CloudflareInitOptions) => {
+    .action(async (opts) => {
       const asJson = Boolean(opts.json)
       const result = await runCloudflareInit(opts, {
         onStep: asJson ? undefined : message => printLine(`→ ${message}`),

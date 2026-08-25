@@ -1,9 +1,9 @@
-import { type Command, CommanderError } from 'commander'
+import { CommanderError, type CommandUnknownOpts } from 'commander'
 import { buildProgram } from './program'
 import { reportError } from './output'
 import { CliError } from './http'
 
-function overrideExits(cmd: Command): void {
+function overrideExits(cmd: CommandUnknownOpts): void {
   cmd.exitOverride()
   cmd.configureOutput({ writeErr: () => {} })
   for (const child of cmd.commands) overrideExits(child)
@@ -15,7 +15,7 @@ function overrideExits(cmd: Command): void {
  * 不能扫描裸 argv：`--json` 可能位于 `--` 之后，属于 positional value，
  * 此时即使其它参数触发解析错误，也不应切换成 JSON 错误输出。
  */
-function parsedJsonMode(cmd: Command): boolean {
+function parsedJsonMode(cmd: CommandUnknownOpts): boolean {
   if (cmd.getOptionValueSource('json') === 'cli' && cmd.getOptionValue('json') === true) {
     return true
   }

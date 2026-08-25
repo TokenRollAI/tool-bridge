@@ -1,7 +1,7 @@
 import { Command } from 'commander'
-import { type ConnectArgs, runConnect, withDeviceConnectionGlobalOpts } from './connect'
+import { runConnect, withDeviceConnectionGlobalOpts } from './connect'
 
-export function mountFsCommand(): Command {
+export function mountFsCommand() {
   return withDeviceConnectionGlobalOpts(new Command('fs'))
     .description('Expose a local directory as a device fs context')
     .argument('<root>', 'Local directory root')
@@ -9,12 +9,12 @@ export function mountFsCommand(): Command {
     .option('--device-id <id>', 'Override stable local device id')
     .option('--path <path>', 'Mount path (default: device/<device-id>)')
     .option('--fs-readonly', 'Expose fs as read-only', false)
-    .action(async (root: string, url: string | undefined, opts: Omit<ConnectArgs, 'url'>) => {
+    .action(async (root, url, opts) => {
       await runConnect({ ...opts, url, shell: false, fs: [String(root)] })
     })
 }
 
-export function mountCommand(): Command {
+export function mountCommand() {
   return new Command('mount')
     .description('Mount local resources through a device connection')
     .addCommand(mountFsCommand())

@@ -9,18 +9,10 @@ function deviceIdFromPath(path: string): string {
   return parts[0] === 'device' ? (parts[1] ?? path) : path
 }
 
-interface DeviceLsOpts {
-  baseUrl?: string
-  cursor?: string
-  json?: boolean
-  limit?: string
-  sk?: string
-}
-
-export function deviceLsCommand(): Command {
+export function deviceLsCommand() {
   return withPageOpts(withGlobalOpts(new Command('ls')))
     .description('List registered devices')
-    .action(async (opts: DeviceLsOpts) => {
+    .action(async (opts) => {
       const asJson = Boolean(opts.json)
       const target = resolveTarget(opts)
       const pageOpts = parsePageOpts(opts)
@@ -62,7 +54,7 @@ export function deviceLsCommand(): Command {
     })
 }
 
-export function deviceCommand(): Command {
+export function deviceCommand() {
   return new Command('device')
     .description('Manage reverse-connected devices')
     .addCommand(deviceLsCommand())

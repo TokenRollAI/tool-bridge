@@ -25,23 +25,16 @@ export function renderTree(node: TreeJson, depth = 0): string {
   return lines.join('\n')
 }
 
-interface TreeOpts {
-  baseUrl?: string
-  depth?: string
-  json?: boolean
-  sk?: string
-}
-
 /**
  * `tb tree [path] [--depth N]` —— GET <path>/~tree?depth=N(根缺省)。
  * 人类模式画缩进树;--json 原样输出 TreeJson。
  */
-export function treeCommand(): Command {
+export function treeCommand() {
   return withGlobalOpts(new Command('tree'))
     .description('Show the node tree (depth-limited)')
     .argument('[path]', 'Tree path (default: root)')
     .option('--depth <n>', 'Tree depth, integer 1-8 (default: 2)')
-    .action(async (path: string | undefined, opts: TreeOpts) => {
+    .action(async (path, opts) => {
       const asJson = Boolean(opts.json)
       let depth: number | undefined
       if (opts.depth !== undefined) {

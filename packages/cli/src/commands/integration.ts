@@ -60,25 +60,6 @@ interface CatalogExportDetails {
   mountConfigFields?: CatalogMountConfigField[]
 }
 
-/** 全局参数的公共形状(本仓无集中 GlobalOpts 类型,各命令 inline 声明)。 */
-interface CommonOpts {
-  baseUrl?: string
-  json?: boolean
-  sk?: string
-  timeout?: string
-}
-
-interface IntegrationAddOpts extends CommonOpts {
-  config: string[]
-  credential?: string
-  description?: string
-  export?: string
-  field: string[]
-  key?: string
-  keyStdin?: boolean
-  provider: string
-}
-
 type SecretExistence = 'absent' | 'exists' | 'unknown'
 
 /** 读 stdin 全量(单值凭证的推荐通道:不进 shell history、不进 ps 输出)。 */
@@ -219,7 +200,7 @@ async function secretExistence(
 }
 
 /** `tb integration catalog` → system/catalog list/search(read scope,非 admin)。 */
-export function integrationCatalogCommand(): Command {
+export function integrationCatalogCommand() {
   return withPageOpts(withGlobalOpts(new Command('catalog')))
     .description('Browse built-in integrations available on this host (read-only)')
     .option('--search <q>', 'Case-insensitive substring over id and description')
@@ -228,7 +209,7 @@ Examples:
   tb integration catalog                    # everything this host bundles
   tb integration catalog --search jira      # narrow by name/description
   tb integration add tools/tavily --provider tavily --key-stdin < key.txt`)
-    .action(async (opts: CommonOpts & { cursor?: string, limit?: string, search?: string }) => {
+    .action(async (opts) => {
       const asJson = Boolean(opts.json)
       const pageOpts = parsePageOpts(opts)
       const q = opts.search !== undefined ? String(opts.search).trim() : undefined
@@ -276,7 +257,7 @@ Examples:
  * 凭证四种给法互斥:`--key`(单值)/ `--key-stdin`(单值,推荐)/ `--field k=v`(多字段)
  * / `--credential <name>`(复用已保存凭证)。前三种会由平台自动托管,内部槽位不进用户输出。
  */
-export function integrationAddCommand(): Command {
+export function integrationAddCommand() {
   return withGlobalOpts(new Command('add'))
     .description('Configure credentials and mount an integration in one step')
     .argument('<path>', 'Tree path to mount at')
@@ -294,7 +275,7 @@ Examples:
   tb integration add tools/jira --provider jira --field baseUrl=https://x.atlassian.net --field personalAccessToken=…
   tb integration add notes/memos --provider memos --key-stdin --config baseUrl=https://memos.example.com
   tb integration add tools/sentry --provider sentry --credential sentry-oauth-client   # then: tb integration auth tools/sentry`)
-    .action(async (pathArg: string, opts: IntegrationAddOpts) => {
+    .action(async (pathArg, opts) => {
       const asJson = Boolean(opts.json)
       const path = String(pathArg ?? '').trim()
       if (!path) throw new CliError('tree path is required')
@@ -466,7 +447,7 @@ Examples:
  * (严格上游只放行 loopback redirect)、浏览器打开、redirect 拒绝的降级指引,
  * 抄一遍必然漂移。同一个 Command 挂在两处,行为逐字相同。
  */
-export function integrationAuthCommand(): Command {
+export function integrationAuthCommand() {
   return toolAuthCommand()
 }
 
@@ -476,10 +457,10 @@ export function integrationAuthCommand(): Command {
  * 不是新的权威表:它就是 `system/registry list` 按"kind 是 tool/context 且 config.provider
  * 不是内置 r2/s3"过滤出来的投影。一个 instance = 一次挂载,身份 = 节点 path。
  */
-export function integrationLsCommand(): Command {
+export function integrationLsCommand() {
   return withPageOpts(withGlobalOpts(new Command('ls')))
     .description('List mounted integrations (a projection over the node registry)')
-    .action(async (opts: CommonOpts & { cursor?: string, limit?: string }) => {
+    .action(async (opts) => {
       const asJson = Boolean(opts.json)
       const pageOpts = parsePageOpts(opts)
       const page = await callDirect<Page<{
@@ -536,12 +517,12 @@ export function integrationLsCommand(): Command {
  * 此前直打 `system/registry delete` 无校验,`tb integration rm device/build-01` 会误删设备节点。
  * 走 deleteNode 先 get 校验 kind,越界即拒。
  */
-export function integrationRmCommand(): Command {
+export function integrationRmCommand() {
   return withGlobalOpts(new Command('rm'))
     .description('Unmount an integration (tool/context nodes only)')
     .argument('<path>', 'Mounted integration path')
     .option('--yes', 'Skip the confirmation prompt')
-    .action(async (pathArg: string, opts: CommonOpts & { yes?: boolean }) => {
+    .action(async (pathArg, opts) => {
       const asJson = Boolean(opts.json)
       const path = String(pathArg ?? '').trim()
       if (!path) throw new CliError('tree path is required')
@@ -552,7 +533,7 @@ export function integrationRmCommand(): Command {
     })
 }
 
-export function integrationCommand(): Command {
+export function integrationCommand() {
   const cmd = new Command('integration')
     .alias('int')
     .description('Integrations: browse the catalog, mount with credentials, authorize')
