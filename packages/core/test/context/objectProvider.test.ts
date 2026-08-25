@@ -10,7 +10,9 @@ import {
   MemoryObjectStore,
   type ObjectPresignPutOptions,
   type ObjectStore,
+  readStreamText,
 } from '../../src/context/objectStore'
+import { DEFAULT_STORE_DRIVER_KEY_ROOT } from '../../src/objectStoreService/types'
 import { isTBError, type TBErrorCode } from '../../src/errors'
 import { omit } from '../../src/omit'
 
@@ -29,6 +31,15 @@ function makeProvider(opts: Partial<Parameters<typeof createObjectContextProvide
 async function codeOf(p: Promise<unknown>): Promise<TBErrorCode | string | null> {
   try {
     await p
+    return null
+  } catch (e) {
+    return isTBError(e) ? e.code : `非TBError:${String(e)}`
+  }
+}
+
+function syncCodeOf(fn: () => unknown): TBErrorCode | string | null {
+  try {
+    fn()
     return null
   } catch (e) {
     return isTBError(e) ? e.code : `非TBError:${String(e)}`
@@ -134,6 +145,96 @@ describe('createObjectContextUploadGrant', () => {
       path: 'a.jpg',
       contentType: 'image/jpeg\r\nx-leak: 1',
     }))).toBe('invalid_argument')
+  })
+})
+
+describe('default Store 保留 namespace 防火墙', () => {
+  it('空 prefix Context 不可枚举、读取、覆盖、更新或删除 Store 对象', async () => {
+    const store = new MemoryObjectStore(() => NOW)
+    const storeKey = `${DEFAULT_STORE_DRIVER_KEY_ROOT}/ab/object-id`
+    const reservedParent = DEFAULT_STORE_DRIVER_KEY_ROOT.slice(
+      0,
+      DEFAULT_STORE_DRIVER_KEY_ROOT.lastIndexOf('/'),
+    )
+    const visibleKey = `${reservedParent}/visible.txt`
+    const legacyContextKey = 'store/v1/legacy.txt'
+    await store.put(storeKey, 'secret', { contentType: 'text/plain' })
+    await store.put(visibleKey, 'context', { contentType: 'text/plain' })
+    await store.put(legacyContextKey, 'legacy', { contentType: 'text/plain' })
+    const provider = createObjectContextProvider(store, { nsPath: NS })
+
+    // limit=1 刻意让 backend 第一页只返回保留目录；provider 必须跨页过滤，
+    // 也不能把保留子树的底层 cursor 泄漏给 Context 调用方。
+    const listed = await provider.list(reservedParent, { limit: 1 })
+    expect(listed).toEqual({
+      items: [expect.objectContaining({ uri: `node://${NS}/${visibleKey}` })],
+    })
+    expect(await codeOf(provider.list(DEFAULT_STORE_DRIVER_KEY_ROOT))).toBe('not_found')
+    expect(await codeOf(provider.get(storeKey))).toBe('not_found')
+    expect((await provider.search('object-id')).items).toEqual([])
+    expect((await provider.get(legacyContextKey)).content).toBe('legacy')
+
+    const putSpy = vi.spyOn(store, 'put')
+    const deleteSpy = vi.spyOn(store, 'delete')
+    expect(await codeOf(provider.write(storeKey, {
+      contentType: 'text/plain',
+      content: 'pwned',
+    }))).toBe('permission_denied')
+    expect(await codeOf(provider.update(storeKey, {
+      content: 'pwned',
+    }))).toBe('permission_denied')
+    expect(await codeOf(provider.delete(storeKey))).toBe('permission_denied')
+    expect(putSpy).not.toHaveBeenCalled()
+    expect(deleteSpy).not.toHaveBeenCalled()
+
+    const stored = await store.get(storeKey)
+    expect(stored).not.toBeNull()
+    expect(await readStreamText(stored!.body)).toBe('secret')
+  })
+
+  it('create_upload 不会为 Store 保留 key 签发 URL', async () => {
+    const store = new MemoryObjectStore(() => NOW) as ObjectStore
+    const presignPut = vi.fn(async () => ({
+      method: 'PUT' as const,
+      url: 'https://upload.test/should-not-exist',
+      headers: {},
+    }))
+    store.presignPut = presignPut
+
+    expect(await codeOf(createObjectContextUploadGrant(store, { nsPath: NS }, {
+      path: `${DEFAULT_STORE_DRIVER_KEY_ROOT}/ab/object-id`,
+      contentType: 'text/plain',
+    }))).toBe('permission_denied')
+    expect(presignPut).not.toHaveBeenCalled()
+  })
+
+  it('显式 keyPrefix 包含 Store namespace 或位于其内部时装配即拒绝', async () => {
+    const store = new MemoryObjectStore(() => NOW) as ObjectStore
+    store.presignPut = async () => ({ method: 'PUT', url: 'https://upload.test', headers: {} })
+
+    const reservedTopLevel = DEFAULT_STORE_DRIVER_KEY_ROOT.split('/')[0] as string
+    for (const keyPrefix of [
+      reservedTopLevel,
+      DEFAULT_STORE_DRIVER_KEY_ROOT,
+      `/${DEFAULT_STORE_DRIVER_KEY_ROOT}/device/`,
+    ]) {
+      expect(syncCodeOf(() => createObjectContextProvider(store, {
+        nsPath: NS,
+        keyPrefix,
+      }))).toBe('invalid_argument')
+      expect(await codeOf(createObjectContextUploadGrant(store, {
+        nsPath: NS,
+        keyPrefix,
+      }, {
+        path: 'safe.txt',
+        contentType: 'text/plain',
+      }))).toBe('invalid_argument')
+    }
+
+    // 未发布的 Store 使用专用内部 root，旧 Context 的 store/store-v1 prefix 不会被吞掉。
+    const provider = createObjectContextProvider(store, { nsPath: NS, keyPrefix: 'store/v1' })
+    await provider.write('safe.txt', { contentType: 'text/plain', content: 'ok' })
+    expect(await store.head('store/v1/safe.txt')).not.toBeNull()
   })
 })
 

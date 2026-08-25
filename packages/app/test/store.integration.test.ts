@@ -1,4 +1,5 @@
 import {
+  DEFAULT_STORE_DRIVER_KEY_ROOT,
   MemoryObjectStore,
   MemoryStateStore,
   type ObjectStore,
@@ -247,18 +248,21 @@ describe('default Store control/data plane', () => {
     expect(grant.maxBytes).toBe(3)
     const streamedTooLarge = await putRelay(tb, grant, new Uint8Array([1, 2, 3, 4]))
     expect(streamedTooLarge.status).toBe(429)
-    expect(tb.objects === undefined ? [] : (await tb.objects.list('store/v1/')).items).toHaveLength(0)
+    expect(tb.objects === undefined
+      ? []
+      : (await tb.objects.list(`${DEFAULT_STORE_DRIVER_KEY_ROOT}/`)).items).toHaveLength(0)
   })
 
   it('direct grant 使用部署级上限，header-only complete 做 HEAD 校验且幂等', async () => {
     const objects = new MemoryObjectStore() as MemoryObjectStore & {
-      presignPut: NonNullable<ObjectStore['presignPut']>
+      presignPutExact: NonNullable<ObjectStore['presignPutExact']>
     }
-    objects.presignPut = async (_key, _ttlSec, opts) => ({
+    objects.presignPutExact = async (_key, _ttlSec, opts) => ({
       method: 'PUT',
       url: 'https://objects.example.test/upload?signature=sensitive',
       headers: {
         'content-type': opts.contentType,
+        'content-length': String(opts.contentLength),
         'if-none-match': '*',
       },
     })
@@ -275,13 +279,18 @@ describe('default Store control/data plane', () => {
     const grant = (await created.json()) as Grant
     expect(grant.transport).toBe('presigned-put')
     expect(grant.maxBytes).toBe(100)
+    expect(grant.headers['content-length']).toBe('4')
     expect(grant.headers['x-tb-store-upload']).toBeUndefined()
 
     const objectId = grant.objectUri.slice('store://default/'.length)
-    await objects.put(`store/v1/${objectId.slice(0, 2)}/${objectId}`, new Uint8Array([1, 2, 3, 4]), {
-      contentType: 'video/mp4',
-      ifNoneMatch: '*',
-    })
+    await objects.put(
+      `${DEFAULT_STORE_DRIVER_KEY_ROOT}/${objectId.slice(0, 2)}/${objectId}`,
+      new Uint8Array([1, 2, 3, 4]),
+      {
+        contentType: 'video/mp4',
+        ifNoneMatch: '*',
+      },
+    )
     const complete = await postJson(tb.request, 'system/store/complete_upload', {
       uploadId: grant.uploadId,
     }, { headers: { 'x-tb-store-upload': grant.uploadToken } })
@@ -295,6 +304,26 @@ describe('default Store control/data plane', () => {
       uploadId: grant.uploadId,
     }, { headers: { 'x-tb-store-upload': grant.uploadToken } })
     expect(again.status).toBe(200)
+  })
+
+  it('未声明精确 size 时即使 backend 能签名也只发 relay grant', async () => {
+    const objects = new MemoryObjectStore() as MemoryObjectStore & {
+      presignPutExact: NonNullable<ObjectStore['presignPutExact']>
+    }
+    objects.presignPutExact = vi.fn(async () => ({
+      method: 'PUT' as const,
+      url: 'https://objects.example.test/upload?signature=sensitive',
+      headers: {},
+    }))
+    const tb = await createTestApp({ objects, storeMaxObjectBytes: 100, storeRelayMaxBytes: 3 })
+    const created = await postJson(tb.request, 'system/store/create_upload', {
+      contentType: 'application/octet-stream',
+    }, admin())
+    expect(created.status).toBe(200)
+    const grant = (await created.json()) as Grant
+    expect(grant.transport).toBe('relay')
+    expect(grant.maxBytes).toBe(3)
+    expect(objects.presignPutExact).not.toHaveBeenCalled()
   })
 
   it('upload/share capability 到期立即拒绝且错误不回显 token', async () => {
@@ -485,7 +514,37 @@ describe('Store token secret and legacy host isolation', () => {
       }
       expect(aggregateExpired).toBe(3)
       expect(await tb.state.get(KEY_STORE_CLEANUP_PROGRESS)).toBeNull()
-      expect(tb.objects === undefined ? [] : (await tb.objects.list('store/v1/')).items).toHaveLength(0)
+      expect(tb.objects === undefined
+        ? []
+        : (await tb.objects.list(`${DEFAULT_STORE_DRIVER_KEY_ROOT}/`)).items).toHaveLength(0)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('同一 cleanup tick 翻多页时只执行一次 driver maintenance', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2030-01-01T00:00:00.000Z'))
+    try {
+      class MaintenanceStore extends MemoryObjectStore {
+        cleanupCalls = 0
+
+        async cleanupStaging(): Promise<number> {
+          this.cleanupCalls++
+          return 0
+        }
+      }
+      const objects = new MaintenanceStore()
+      const tb = await createTestApp({ objects, storeUploadTtlSec: 1 })
+      for (let i = 0; i < 3; i++) {
+        await createRelay(tb, {
+          contentType: 'application/octet-stream',
+          idempotencyKey: `maintenance-${i}`,
+        })
+      }
+      vi.advanceTimersByTime(1_100)
+      await cleanupDefaultStore(tb.deps, { limit: 1, maxPages: 8 })
+      expect(objects.cleanupCalls).toBe(1)
     } finally {
       vi.useRealTimers()
     }

@@ -4,7 +4,12 @@
  */
 
 import type { AwsClient } from 'aws4fetch'
-import { assertPresignTtlSec, type ObjectPresignPutOptions } from '@tool-bridge/core'
+import {
+  assertPresignTtlSec,
+  type ObjectPresignPutExactOptions,
+  type ObjectPresignPutOptions,
+  TBError,
+} from '@tool-bridge/core'
 
 /** key 逐段 percent-encode(key 可含空格等;'/' 保持为路径分隔)。 */
 export function encodeObjectKey(key: string): string {
@@ -34,13 +39,18 @@ export async function presignS3Put(
   client: AwsClient,
   url: string,
   ttlSec: number,
-  opts: ObjectPresignPutOptions,
+  opts: ObjectPresignPutOptions | ObjectPresignPutExactOptions,
 ): Promise<{ headers: Record<string, string>, method: 'PUT', url: string }> {
   assertPresignTtlSec(ttlSec)
+  if ('contentLength' in opts
+    && (!Number.isSafeInteger(opts.contentLength) || opts.contentLength < 0)) {
+    throw new TBError('invalid_argument', 'presigned PUT contentLength 必须是非负安全整数')
+  }
   const target = new URL(url)
   target.searchParams.set('X-Amz-Expires', String(ttlSec))
   const headers = {
     'content-type': opts.contentType,
+    ...('contentLength' in opts ? { 'content-length': String(opts.contentLength) } : {}),
     ...(opts.ifNoneMatch === undefined ? {} : { 'if-none-match': opts.ifNoneMatch }),
   }
   const signed = await client.sign(

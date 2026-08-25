@@ -1,4 +1,8 @@
-import { type ObjectBodyStream, readStreamBytes } from '@tool-bridge/core'
+import {
+  DEFAULT_STORE_DRIVER_KEY_ROOT,
+  type ObjectBodyStream,
+  readStreamBytes,
+} from '@tool-bridge/core'
 import { afterEach, describe, expect, it } from 'vitest'
 import { env } from 'cloudflare:test'
 import { createR2ObjectStore } from '../src/providers/r2Object'
@@ -28,6 +32,24 @@ afterEach(async () => {
 })
 
 describe('R2 ObjectStore 流与条件写映射', () => {
+  it('S3 凭证启用定长直传并签名 Content-Length', async () => {
+    const store = createR2ObjectStore(bucketWithPut(async key => r2Object(key)), {
+      accessKeyId: 'test-access',
+      secretAccessKey: 'test-secret',
+      bucket: 'test-bucket',
+      endpoint: 'https://example.r2.cloudflarestorage.com',
+    })
+    const grant = await store.presignPutExact?.(`${DEFAULT_STORE_DRIVER_KEY_ROOT}/aa/object`, 90, {
+      contentType: 'video/mp4',
+      contentLength: 2048,
+      ifNoneMatch: '*',
+    })
+    expect(grant?.headers['content-length']).toBe('2048')
+    expect(new URL(grant?.url ?? '').searchParams.get('X-Amz-SignedHeaders')).toContain(
+      'content-length',
+    )
+  })
+
   it('原生 ReadableStream 直接交给 binding，不预读或聚合', async () => {
     let captured: unknown
     const bucket = bucketWithPut(async (key, body) => {

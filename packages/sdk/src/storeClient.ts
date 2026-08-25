@@ -1,4 +1,9 @@
-import { TB_ERROR_CODES, TBError, type TBErrorBody } from '@tool-bridge/core'
+import {
+  type StoreObjectDescriptor as CoreStoreObjectDescriptor,
+  TB_ERROR_CODES,
+  TBError,
+  type TBErrorBody,
+} from '@tool-bridge/core'
 import {
   parseStoreObjectDescriptor,
   type StoreObjectDescriptor,
@@ -35,9 +40,14 @@ export interface StoreListOptions {
   limit?: number
 }
 
+/** Full public descriptor returned by the authenticated Store management API. */
+export type StoreClientObjectDescriptor = Omit<CoreStoreObjectDescriptor, 'uri'> & {
+  uri: `store://default/${string}`
+}
+
 export interface StoreListPage {
   cursor?: string
-  items: StoreObjectDescriptor[]
+  items: StoreClientObjectDescriptor[]
 }
 
 export interface StoreClient {
@@ -51,7 +61,8 @@ export interface StoreClient {
     uri: string,
     opts?: { signal?: AbortSignal, ttlSec?: number },
   ): Promise<StoreShareGrant>
-  stat(uri: string, opts?: { signal?: AbortSignal }): Promise<StoreObjectDescriptor>
+  stat(uri: string, opts?: { signal?: AbortSignal }): Promise<StoreClientObjectDescriptor>
+  /** Upload returns the device-safe stable view; use stat when management metadata is needed. */
   upload(input: UploadObjectInput & { signal?: AbortSignal }): Promise<StoreObjectDescriptor>
 }
 
@@ -94,6 +105,49 @@ function validTimestamp(value: unknown): value is string {
 
 function validUri(value: unknown): value is `store://default/${string}` {
   return typeof value === 'string' && /^store:\/\/default\/[A-Za-z0-9_-]{22,64}$/.test(value)
+}
+
+function nonEmptyString(value: unknown): value is string {
+  return typeof value === 'string' && value.trim() !== ''
+}
+
+function parseStoreClientObjectDescriptor(
+  value: unknown,
+  expectedUri: string,
+): StoreClientObjectDescriptor {
+  const stable = parseStoreObjectDescriptor(value, expectedUri)
+  const descriptor = value as Record<string, unknown>
+  const checksum = descriptor.checksum as Record<string, unknown> | undefined
+  if (
+    descriptor.status !== 'ready'
+    || !nonEmptyString(descriptor.owner)
+    || !validTimestamp(descriptor.updatedAt)
+    || (descriptor.producer !== undefined && !nonEmptyString(descriptor.producer))
+    || (descriptor.originCallId !== undefined && !nonEmptyString(descriptor.originCallId))
+    || (descriptor.expiresAt !== undefined && !validTimestamp(descriptor.expiresAt))
+    || (checksum !== undefined && checksum.algorithm !== 'sha256')
+  ) throw new TBError('internal', 'gateway returned an invalid Store object descriptor')
+
+  return {
+    uri: stable.uri,
+    status: 'ready',
+    contentType: stable.contentType,
+    size: stable.size,
+    owner: descriptor.owner,
+    createdAt: stable.createdAt,
+    updatedAt: descriptor.updatedAt,
+    readyAt: stable.readyAt,
+    ...(stable.filename === undefined ? {} : { filename: stable.filename }),
+    ...(stable.etag === undefined ? {} : { etag: stable.etag }),
+    ...(stable.checksum === undefined
+      ? {}
+      : { checksum: { algorithm: 'sha256' as const, value: stable.checksum.value } }),
+    ...(descriptor.producer === undefined ? {} : { producer: descriptor.producer }),
+    ...(descriptor.originCallId === undefined
+      ? {}
+      : { originCallId: descriptor.originCallId }),
+    ...(descriptor.expiresAt === undefined ? {} : { expiresAt: descriptor.expiresAt }),
+  }
 }
 
 function parseRef(value: unknown, kind: 'read' | 'share'): StoreReadGrant | StoreShareGrant {
@@ -208,7 +262,7 @@ export function createStoreClient(options: StoreClientOptions): StoreClient {
       })
     },
     async stat(uri, opts) {
-      return parseStoreObjectDescriptor(
+      return parseStoreClientObjectDescriptor(
         await control('stat', { uri }, opts?.signal),
         uri,
       )
@@ -227,7 +281,7 @@ export function createStoreClient(options: StoreClientOptions): StoreClient {
         items: page.items.map((item) => {
           const uri = (item as { uri?: unknown } | null)?.uri
           if (!validUri(uri)) throw new TBError('internal', 'gateway returned an invalid Store list page')
-          return parseStoreObjectDescriptor(item, uri)
+          return parseStoreClientObjectDescriptor(item, uri)
         }),
         ...(page.cursor === undefined ? {} : { cursor: page.cursor }),
       }

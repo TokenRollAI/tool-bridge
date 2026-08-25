@@ -214,6 +214,7 @@ describe('@tool-bridge/sdk/device neutral connection', () => {
     const harness = factoryHarness()
     const preparePurposes: Array<string | undefined> = []
     const httpCalls: Array<{ init?: RequestInit, input: Parameters<typeof fetch>[0] }> = []
+    let handlerContext: unknown
     const readyObject = {
       uri: 'store://default/call-photo-01',
       contentType: 'image/jpeg',
@@ -251,11 +252,14 @@ describe('@tool-bridge/sdk/device neutral connection', () => {
       },
       fetcher,
       webSocketFactory: harness.factory,
-      handler: async call => await call.uploadObject({
-        body: new Uint8Array([0xff, 0xd8, 0xff, 0x00]),
-        contentType: 'image/jpeg',
-        filename: 'capture.jpg',
-      }),
+      handler: async (call) => {
+        handlerContext = call.context
+        return await call.uploadObject({
+          body: new Uint8Array([0xff, 0xd8, 0xff, 0x00]),
+          contentType: 'image/jpeg',
+          filename: 'capture.jpg',
+        })
+      },
     })
 
     const socket = await connectAttempt(harness, 1)
@@ -286,6 +290,16 @@ describe('@tool-bridge/sdk/device neutral connection', () => {
     expect(helloFrames(socket)).toEqual([
       { type: 'result', id: 'call-store-01', ok: true, value: readyObject },
     ])
+    expect(handlerContext).toMatchObject({
+      upload: {
+        expiresAt: '2099-08-24T12:10:00.000Z',
+        maxBytes: 1024,
+        maxObjects: 1,
+      },
+    })
+    expect(handlerContext).not.toHaveProperty('upload.token')
+    expect(JSON.stringify(handlerContext)).not.toContain('call-capability-secret')
+    expect(socket.sent.join('\n')).not.toContain('call-capability-secret')
     expect(httpCalls).toHaveLength(2)
     const createHeaders = new Headers(httpCalls[0]?.init?.headers)
     expect(createHeaders.get('x-tb-store-capability')).toBe('call-capability-secret')
@@ -294,6 +308,85 @@ describe('@tool-bridge/sdk/device neutral connection', () => {
     const relayHeaders = new Headers(httpCalls[1]?.init?.headers)
     expect(relayHeaders.get('x-tb-store-upload')).toBe('upload-session-secret')
 
+    connection.close()
+  })
+
+  it('本地校验/网络失败不消耗 SDK 对象额度，后续尝试仍交给服务端权威 reservation', async () => {
+    const harness = factoryHarness()
+    const readyObject = {
+      uri: 'store://default/retried-photo-01',
+      contentType: 'image/jpeg',
+      size: 1,
+      createdAt: '2099-08-24T11:59:00.000Z',
+      readyAt: '2099-08-24T12:00:00.000Z',
+    }
+    const grant = {
+      uploadId: 'retry-upload-01',
+      objectUri: readyObject.uri,
+      transport: 'relay',
+      method: 'PUT',
+      url: 'https://tb.example/~store/uploads/retry-upload-01',
+      headers: { 'content-type': 'image/jpeg' },
+      expiresAt: '2099-08-24T12:10:00.000Z',
+      maxBytes: 1024,
+      uploadToken: 'retry-session-secret',
+    }
+    const fetcher: typeof fetch = vi.fn()
+      .mockRejectedValueOnce(new Error('temporary network failure'))
+      .mockResolvedValueOnce(new Response(JSON.stringify(grant), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(readyObject), { status: 200 }))
+    const failures: string[] = []
+    const connection = connectDevice({
+      baseUrl: 'https://tb.example',
+      deviceId: 'phone-retry-store',
+      expose: { nodes: [{ path: 'camera', kind: 'tool', description: '相机' }] },
+      credentialProvider: { prepare: () => ({}) },
+      fetcher,
+      webSocketFactory: harness.factory,
+      handler: async (call) => {
+        try {
+          await call.uploadObject({ body: new Uint8Array([1]), contentType: '' })
+        } catch (error) {
+          failures.push((error as { code?: string }).code ?? 'unknown')
+        }
+        try {
+          await call.uploadObject({ body: new Uint8Array([1]), contentType: 'image/jpeg' })
+        } catch (error) {
+          failures.push((error as { code?: string }).code ?? 'unknown')
+        }
+        return await call.uploadObject({ body: new Uint8Array([1]), contentType: 'image/jpeg' })
+      },
+    })
+    const socket = await connectAttempt(harness, 1)
+    socket.open()
+    socket.receive({ type: 'ready', mountPath: 'device/phone-retry-store' })
+    await connection.ready
+    socket.sent.length = 0
+    socket.receive({
+      type: 'call',
+      id: 'retry-store-call',
+      path: 'camera/capture',
+      arguments: {},
+      context: {
+        caller: { keyId: 'sk-caller', owner: 'agent:caller' },
+        traceId: 'trace-retry-store',
+        createdAt: '2099-08-24T11:59:00.000Z',
+        expiresAt: '2099-08-24T12:10:00.000Z',
+        upload: {
+          token: 'retry-call-capability',
+          expiresAt: '2099-08-24T12:10:00.000Z',
+          maxBytes: 1024,
+          maxObjects: 1,
+        },
+      },
+    } as unknown as DeviceFrame)
+
+    await vi.waitFor(() => expect(socket.sent).toHaveLength(1))
+    expect(failures).toEqual(['invalid_argument', 'unavailable'])
+    expect(fetcher).toHaveBeenCalledTimes(3)
+    expect(helloFrames(socket)).toEqual([
+      { type: 'result', id: 'retry-store-call', ok: true, value: readyObject },
+    ])
     connection.close()
   })
 

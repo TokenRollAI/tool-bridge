@@ -527,6 +527,9 @@ export async function cleanupDefaultStore(
     const page = await store.service.cleanup({
       ...(limit === undefined ? {} : { limit }),
       ...(cursors === undefined ? {} : { cursors }),
+      // staging 不使用权威状态 cursor；同一 host tick 只运行一次，避免
+      // maxPages 内重复扫描同一 driver maintenance 范围。
+      runDriverMaintenance: pageNumber === 0,
     })
     addCleanupResult(aggregate, page)
     if (page.cursors === undefined) {

@@ -7,6 +7,7 @@ import type {
 import type { StateStore } from '../store'
 import {
   type CallUploadCapability,
+  DEFAULT_STORE_DRIVER_KEY_ROOT,
   DEFAULT_STORE_NAME,
   type IssueCallUploadCapabilityInput,
   type IssuedCallUploadCapability,
@@ -33,9 +34,9 @@ import {
   type OwnerRef,
   type Timestamp,
 } from '../types'
-import { parseStoreUri, STORE_OBJECT_ID_RE, storeUri } from './uri'
 import { normalizeExpiresAt, sha256Hex } from '../auth/sk'
 import { base64urlEncode } from '../encoding/base64url'
+import { parseStoreUri, storeUri } from './uri'
 import { TBError } from '../errors'
 import { omit } from '../omit'
 
@@ -78,10 +79,13 @@ type TokenDomain = keyof typeof TOKEN_PREFIX
 
 interface IdempotencyBinding {
   createdAt: Timestamp
+  domain: 'call' | 'owner'
   expiresAt: Timestamp
   fingerprint: string
   objectId: string
+  originCallId?: string
   owner: OwnerRef
+  producer: OwnerRef
   revision: number
   uploadId: string
 }
@@ -158,6 +162,7 @@ function parseCallCapability(value: unknown): CallUploadCapability {
     || typeof record.tokenHash !== 'string'
     || typeof record.owner !== 'string'
     || typeof record.producer !== 'string'
+    || typeof record.callId !== 'string'
     || !Array.isArray(record.reservations)
   ) throw stateCorrupt('call capability')
   return value as CallUploadCapability
@@ -178,6 +183,8 @@ function parseIdempotencyBinding(value: unknown): IdempotencyBinding {
   const record = assertRevisioned(value, 'idempotency binding')
   if (
     typeof record.owner !== 'string'
+    || (record.domain !== 'owner' && record.domain !== 'call')
+    || typeof record.producer !== 'string'
     || typeof record.fingerprint !== 'string'
     || typeof record.objectId !== 'string'
     || typeof record.uploadId !== 'string'
@@ -189,7 +196,6 @@ function requireOwner(owner: unknown, field = 'owner'): OwnerRef {
   if (
     typeof owner !== 'string'
     || owner.trim() === ''
-    || owner.length > 255
     || /[\r\n\0]/.test(owner)
   ) {
     throw new TBError('invalid_argument', `${field} 必须是非空 OwnerRef`)
@@ -463,6 +469,7 @@ export class StoreService {
       const next: CallUploadCapability = {
         ...capability,
         status: 'revoked',
+        terminalAt: this.nowIso(),
         revision: capability.revision + 1,
       }
       if (await this.cas(`${KEY_STORE_CALL_CAPABILITY}${capability.id}`, capability.revision, next)) {
@@ -639,9 +646,11 @@ export class StoreService {
     }
     if (object.status === 'ready') throw new TBError('conflict', 'ready 对象不能 abort')
     if (session.status === 'created') {
+      const terminalAt = this.nowIso()
       const next: UploadSession = {
         ...session,
         status: 'aborted',
+        terminalAt,
         revision: session.revision + 1,
       }
       if (await this.cas(`${KEY_STORE_UPLOAD}${session.id}`, session.revision, next)) session = next
@@ -649,6 +658,7 @@ export class StoreService {
     }
     if (session.status === 'completed') throw new TBError('conflict', 'ready 对象不能 abort')
     await this.objects.delete(object.driverKey)
+    await this.markBytesDeleted(object.id, object.driverKey)
     return { ok: true }
   }
 
@@ -708,6 +718,7 @@ export class StoreService {
       }
       if (!await this.cas(`${KEY_STORE_OBJECT}${object.id}`, object.revision, next)) continue
       await this.objects.delete(object.driverKey)
+      await this.markBytesDeleted(object.id, object.driverKey)
       return { ok: true }
     }
     throw new TBError('conflict', 'Store 对象并发删除冲突')
@@ -770,6 +781,7 @@ export class StoreService {
       const next: ShareGrant = {
         ...grant,
         status: 'revoked',
+        terminalAt: this.nowIso(),
         revision: grant.revision + 1,
       }
       if (await this.cas(`${KEY_STORE_SHARE}${grant.id}`, grant.revision, next)) {
@@ -780,8 +792,9 @@ export class StoreService {
   }
 
   /**
-   * 宿主定时器/Cron 调用的幂等清理步：过期权威记录、driver orphan 与可选 staging
-   * hook 同轮处理。返回 cursor 时宿主必须续调，直到 cursor 缺省。
+   * 宿主定时器/Cron 调用的幂等清理步。终态记录先保留一个 capability TTL 窗口，
+   * 再以 CAS 物理删除；无 metadata 的 driver 对象可能属于 legacy Context，绝不猜测为 orphan。
+   * 返回 cursor 时宿主必须续调，直到 cursor 缺省。
    */
   async cleanup(opts: StoreCleanupOptions = {}): Promise<StoreCleanupResult> {
     const pageLimit = Math.min(Math.max(1, opts.limit ?? LIST_LIMIT_MAX), LIST_LIMIT_MAX)
@@ -795,10 +808,14 @@ export class StoreService {
       expiredIdempotencyBindings: 0,
       expiredShares: 0,
     }
-    const nowMs = Date.parse(this.nowIso())
+    const now = this.nowIso()
+    const nowMs = Date.parse(now)
     const olderThan = new Date(nowMs - this.uploadTtlSec * 1000).toISOString()
-    if (this.objects.cleanupStaging !== undefined) {
-      result.deletedStaging = await this.objects.cleanupStaging('store/v1/', olderThan)
+    if (opts.runDriverMaintenance !== false && this.objects.cleanupStaging !== undefined) {
+      result.deletedStaging = await this.objects.cleanupStaging(
+        `${DEFAULT_STORE_DRIVER_KEY_ROOT}/`,
+        olderThan,
+      )
     }
 
     const uploads = opts.cursors?.uploads === null
@@ -808,22 +825,20 @@ export class StoreService {
           ...(opts.cursors?.uploads !== undefined ? { cursor: opts.cursors.uploads } : {}),
         })
     for (const item of uploads.items) {
-      const session = parseSession(item.value)
-      if (session.status !== 'created' || Date.parse(session.expiresAt) > nowMs) continue
-      await this.expireUpload(session)
-      const currentSession = await this.requireSession(session.id)
-      if (currentSession.status !== 'expired') continue
-      result.expiredUploads++
-      const object = await this.requireObject(session.objectId)
-      // expire CAS 可能输给并发 complete。ready/pending 都不能由旧 cleanup 观察删除；
-      // pending 会在 object/driver 扫描中重新判定 session 后再收敛。
-      if (object.status === 'abandoned') {
-        result.abandonedObjects++
-        await this.objects.delete(object.driverKey)
-        result.deletedBytes++
-      } else if (object.status === 'failed' || object.status === 'deleted') {
-        await this.objects.delete(object.driverKey)
-        result.deletedBytes++
+      let session = parseSession(item.value)
+      if (session.status === 'created' && Date.parse(session.expiresAt) <= nowMs) {
+        await this.expireUpload(session)
+        const currentRaw = await this.state.get(item.key)
+        if (currentRaw === null) continue
+        session = parseSession(currentRaw)
+        // expire CAS 输给并发 complete 时 current 是 completed，不能误报或回收。
+        if (session.status === 'expired') result.expiredUploads++
+      }
+      if (
+        this.uploadSessionIsTerminal(session)
+        && this.retentionElapsed(this.uploadSessionTerminalAt(session), this.uploadTtlSec, nowMs)
+      ) {
+        await this.cas(item.key, session.revision, null)
       }
     }
 
@@ -834,10 +849,20 @@ export class StoreService {
           ...(opts.cursors?.shares !== undefined ? { cursor: opts.cursors.shares } : {}),
         })
     for (const item of shares.items) {
-      const grant = parseShare(item.value)
-      if (grant.status !== 'active' || Date.parse(grant.expiresAt) > nowMs) continue
-      await this.expireShare(grant)
-      result.expiredShares++
+      let grant = parseShare(item.value)
+      if (grant.status === 'active' && Date.parse(grant.expiresAt) <= nowMs) {
+        await this.expireShare(grant)
+        const currentRaw = await this.state.get(item.key)
+        if (currentRaw === null) continue
+        grant = parseShare(currentRaw)
+        if (grant.status === 'expired') result.expiredShares++
+      }
+      if (
+        grant.status !== 'active'
+        && this.retentionElapsed(grant.terminalAt ?? grant.expiresAt, this.shareTtlSec, nowMs)
+      ) {
+        await this.cas(item.key, grant.revision, null)
+      }
     }
 
     const capabilities = opts.cursors?.callCapabilities === null
@@ -849,13 +874,27 @@ export class StoreService {
             : {}),
         })
     for (const item of capabilities.items) {
-      const capability = parseCallCapability(item.value)
+      let capability = parseCallCapability(item.value)
       if (
-        (capability.status !== 'active' && capability.status !== 'exhausted')
-        || Date.parse(capability.expiresAt) > nowMs
-      ) continue
-      await this.expireCallCapability(capability)
-      result.expiredCallCapabilities++
+        (capability.status === 'active' || capability.status === 'exhausted')
+        && Date.parse(capability.expiresAt) <= nowMs
+      ) {
+        await this.expireCallCapability(capability)
+        const currentRaw = await this.state.get(item.key)
+        if (currentRaw === null) continue
+        capability = parseCallCapability(currentRaw)
+        if (capability.status === 'expired') result.expiredCallCapabilities++
+      }
+      if (
+        (capability.status === 'expired' || capability.status === 'revoked')
+        && this.retentionElapsed(
+          capability.terminalAt ?? capability.expiresAt,
+          this.uploadTtlSec,
+          nowMs,
+        )
+      ) {
+        await this.cas(item.key, capability.revision, null)
+      }
     }
 
     const idempotencyBindings = opts.cursors?.idempotencyBindings === null
@@ -881,101 +920,72 @@ export class StoreService {
           ...(opts.cursors?.objects !== undefined ? { cursor: opts.cursors.objects } : {}),
         })
     for (const item of objectRecords.items) {
-      const object = parseObject(item.value)
+      let object = parseObject(item.value)
       if (object.status === 'ready' && object.expiresAt !== undefined
         && Date.parse(object.expiresAt) <= nowMs) {
         const deleted: StoreObject = {
           ...object,
           status: 'deleted',
-          updatedAt: this.nowIso(),
+          updatedAt: now,
           revision: object.revision + 1,
         }
         if (await this.cas(`${KEY_STORE_OBJECT}${object.id}`, object.revision, deleted)) {
-          await this.objects.delete(object.driverKey)
-          result.deletedBytes++
+          object = deleted
+        } else {
+          const currentRaw = await this.state.get(item.key)
+          if (currentRaw === null) continue
+          object = parseObject(currentRaw)
         }
       } else if (
         object.status === 'pending'
         && Date.parse(object.updatedAt) + this.uploadTtlSec * 1000 <= nowMs
       ) {
-        const abandoned: StoreObject = {
-          ...object,
-          status: 'abandoned',
-          updatedAt: this.nowIso(),
-          revision: object.revision + 1,
+        const sessionRaw = await this.state.get(`${KEY_STORE_UPLOAD}${object.uploadId}`)
+        const session = sessionRaw === null ? undefined : parseSession(sessionRaw)
+        const uploadEnded = session === undefined
+          || session.status !== 'created'
+          || Date.parse(session.expiresAt) <= nowMs
+        if (uploadEnded) {
+          const abandoned: StoreObject = {
+            ...object,
+            status: 'abandoned',
+            updatedAt: now,
+            revision: object.revision + 1,
+          }
+          if (await this.cas(`${KEY_STORE_OBJECT}${object.id}`, object.revision, abandoned)) {
+            object = abandoned
+            result.abandonedObjects++
+          } else {
+            const currentRaw = await this.state.get(item.key)
+            if (currentRaw === null) continue
+            object = parseObject(currentRaw)
+          }
         }
-        if (await this.cas(`${KEY_STORE_OBJECT}${object.id}`, object.revision, abandoned)) {
-          result.abandonedObjects++
-          await this.objects.delete(object.driverKey)
-          result.deletedBytes++
-        }
-      } else if (
-        object.status === 'failed'
-        || object.status === 'abandoned'
-        || object.status === 'deleted'
-      ) {
+      }
+      if (this.objectIsTerminal(object) && object.bytesDeletedAt === undefined) {
         await this.objects.delete(object.driverKey)
         result.deletedBytes++
+        await this.markBytesDeleted(object.id, object.driverKey)
+        const currentRaw = await this.state.get(item.key)
+        if (currentRaw === null) continue
+        object = parseObject(currentRaw)
+      }
+      if (
+        this.objectIsTerminal(object)
+        && object.bytesDeletedAt !== undefined
+        && this.retentionElapsed(object.bytesDeletedAt, this.uploadTtlSec, nowMs)
+      ) {
+        await this.cas(item.key, object.revision, null)
       }
     }
 
-    const driverObjects = opts.cursors?.driverObjects === null
-      ? { items: [] }
-      : await this.objects.list('store/v1/', {
-          limit: pageLimit,
-          ...(opts.cursors?.driverObjects !== undefined
-            ? { cursor: opts.cursors.driverObjects }
-            : {}),
-        })
-    for (const item of driverObjects.items) {
-      if (!('key' in item)) continue
-      const objectId = this.objectIdFromDriverKey(item.key)
-      if (objectId === undefined) continue
-      const raw = await this.state.get(`${KEY_STORE_OBJECT}${objectId}`)
-      if (raw === null) {
-        await this.objects.delete(item.key)
-        result.deletedOrphans++
-        continue
-      }
-      let object = parseObject(raw)
-      if (object.status === 'ready') continue
-      if (object.status === 'pending') {
-        const sessionRaw = await this.state.get(`${KEY_STORE_UPLOAD}${object.uploadId}`)
-        const session = sessionRaw === null ? undefined : parseSession(sessionRaw)
-        const expired = session === undefined
-          || session.status !== 'created'
-          || Date.parse(session.expiresAt) <= nowMs
-        if (!expired) continue
-        const abandoned: StoreObject = {
-          ...object,
-          status: 'abandoned',
-          updatedAt: this.nowIso(),
-          revision: object.revision + 1,
-        }
-        if (!await this.cas(`${KEY_STORE_OBJECT}${object.id}`, object.revision, abandoned)) {
-          object = await this.requireObject(object.id)
-          if (object.status === 'ready' || object.status === 'pending') continue
-        } else {
-          object = abandoned
-          result.abandonedObjects++
-        }
-      }
-      if (
-        object.status === 'failed'
-        || object.status === 'abandoned'
-        || object.status === 'deleted'
-      ) {
-        await this.objects.delete(item.key)
-        result.deletedOrphans++
-      }
-    }
     const cursors: StoreCleanupCursors = {
       uploads: uploads.cursor ?? null,
       shares: shares.cursor ?? null,
       callCapabilities: capabilities.cursor ?? null,
       idempotencyBindings: idempotencyBindings.cursor ?? null,
       objects: objectRecords.cursor ?? null,
-      driverObjects: driverObjects.cursor ?? null,
+      driverObjects: null,
     }
     return Object.values(cursors).some(cursor => cursor !== null) ? { ...result, cursors } : result
   }
@@ -988,12 +998,13 @@ export class StoreService {
     if (input.size !== undefined && input.size > this.maxObjectBytes) {
       throw new TBError('rate_limited', `对象超过部署上限 ${this.maxObjectBytes} bytes`)
     }
-    const resolved = await this.resolveBinding(identity.owner, input)
+    const resolved = await this.resolveBinding(identity, input)
     const binding = resolved.binding
     const existingRaw = await this.state.get(`${KEY_STORE_UPLOAD}${binding.uploadId}`)
     if (existingRaw !== null) {
       const existing = parseSession(existingRaw)
       if (existing.objectId !== binding.objectId) throw stateCorrupt('idempotent upload')
+      this.assertBindingObject(binding, await this.requireObject(binding.objectId))
       return this.startFor(existing)
     }
 
@@ -1002,10 +1013,11 @@ export class StoreService {
     let transport: UploadSession['transport'] = 'relay'
     let effectiveMaxBytes = this.relayMaxBytes
     let signedRequest: StoreUploadStart['signedRequest']
-    if (this.objects.presignPut !== undefined) {
+    if (input.size !== undefined && this.objects.presignPutExact !== undefined) {
       try {
-        signedRequest = await this.objects.presignPut(driverKey, this.uploadTtlSec, {
+        signedRequest = await this.objects.presignPutExact(driverKey, this.uploadTtlSec, {
           contentType: input.contentType,
+          contentLength: input.size,
           ifNoneMatch: '*',
         })
         transport = 'presigned-put'
@@ -1038,8 +1050,8 @@ export class StoreService {
       driverKey,
       uploadId: binding.uploadId,
       status: 'pending',
-      owner: identity.owner,
-      producer: identity.producer,
+      owner: binding.owner,
+      producer: binding.producer,
       contentType: input.contentType,
       createdAt: now,
       updatedAt: now,
@@ -1047,7 +1059,7 @@ export class StoreService {
       ...(input.filename !== undefined ? { filename: input.filename } : {}),
       ...(input.size !== undefined ? { expectedSize: input.size } : {}),
       ...(input.checksum !== undefined ? { expectedChecksum: input.checksum } : {}),
-      ...(identity.originCallId !== undefined ? { originCallId: identity.originCallId } : {}),
+      ...(binding.originCallId !== undefined ? { originCallId: binding.originCallId } : {}),
     }
     const uploadToken = await this.tokenFor('upload', binding.uploadId)
     const session: UploadSession = {
@@ -1071,13 +1083,20 @@ export class StoreService {
     const objectCreated = await this.cas(`${KEY_STORE_OBJECT}${object.id}`, null, object)
     if (!objectCreated) {
       const current = await this.requireObject(object.id)
-      if (current.owner !== object.owner || current.contentType !== object.contentType) {
+      if (
+        current.owner !== object.owner
+        || current.producer !== object.producer
+        || current.originCallId !== object.originCallId
+        || current.uploadId !== object.uploadId
+        || current.contentType !== object.contentType
+      ) {
         throw new TBError('conflict', 'Store object id 冲突')
       }
     }
     if (!await this.cas(`${KEY_STORE_UPLOAD}${session.id}`, null, session)) {
       const current = await this.requireSession(session.id)
       if (current.objectId !== object.id) throw new TBError('conflict', 'upload id 冲突')
+      this.assertBindingObject(binding, await this.requireObject(current.objectId))
       return this.startFor(current)
     }
     return {
@@ -1093,18 +1112,22 @@ export class StoreService {
   }
 
   private async resolveBinding(
-    owner: OwnerRef,
+    identity: UploadIdentity,
     input: NormalizedUploadInput,
   ): Promise<ResolvedIdempotencyBinding> {
     const now = this.nowIso()
+    const domain = identity.originCallId === undefined ? 'owner' : 'call'
     const fresh = (): IdempotencyBinding => ({
-      owner,
+      owner: identity.owner,
+      producer: identity.producer,
+      domain,
       objectId: this.randomId(),
       uploadId: this.randomId(),
       fingerprint: '',
       createdAt: now,
       expiresAt: this.afterSeconds(now, this.uploadTtlSec),
       revision: 1,
+      ...(identity.originCallId !== undefined ? { originCallId: identity.originCallId } : {}),
     })
     if (input.idempotencyKey === undefined) return { binding: fresh(), created: false }
     const fingerprint = await sha256Hex(JSON.stringify([
@@ -1113,15 +1136,19 @@ export class StoreService {
       input.size ?? null,
       input.checksum ?? null,
     ]))
-    const ownerHash = await sha256Hex(owner)
+    const ownerHash = await sha256Hex(identity.owner)
+    const scopeHash = await sha256Hex(JSON.stringify([
+      domain,
+      ...(domain === 'call' ? [identity.producer, identity.originCallId] : []),
+    ]))
     const keyHash = await sha256Hex(input.idempotencyKey)
-    const key = `${KEY_STORE_IDEMPOTENCY}${ownerHash}:${keyHash}`
+    const key = `${KEY_STORE_IDEMPOTENCY}${ownerHash}:${domain}:${scopeHash}:${keyHash}`
     const candidate = { ...fresh(), fingerprint }
     if (await this.cas(key, null, candidate)) return { binding: candidate, created: true, key }
     const raw = await this.state.get(key)
     if (raw === null) throw new TBError('conflict', 'idempotency binding 并发创建冲突')
     const existing = parseIdempotencyBinding(raw)
-    if (existing.owner !== owner || existing.fingerprint !== fingerprint) {
+    if (!this.bindingMatchesIdentity(existing, identity) || existing.fingerprint !== fingerprint) {
       throw new TBError('conflict', 'idempotencyKey 已绑定到不同上传声明')
     }
     if (Date.parse(existing.expiresAt) <= Date.parse(now)) {
@@ -1211,11 +1238,20 @@ export class StoreService {
       throw new TBError('conflict', 'upload session 已过期')
     }
     let signedRequest: StoreUploadStart['signedRequest']
-    if (session.transport === 'presigned-put' && this.objects.presignPut !== undefined) {
-      signedRequest = await this.objects.presignPut(object.driverKey, Math.max(1, Math.floor(remainingMs / 1000)), {
-        contentType: object.contentType,
-        ifNoneMatch: '*',
-      })
+    if (
+      session.transport === 'presigned-put'
+      && session.expectedSize !== undefined
+      && this.objects.presignPutExact !== undefined
+    ) {
+      signedRequest = await this.objects.presignPutExact(
+        object.driverKey,
+        Math.max(1, Math.floor(remainingMs / 1000)),
+        {
+          contentType: object.contentType,
+          contentLength: session.expectedSize,
+          ifNoneMatch: '*',
+        },
+      )
     }
     return {
       uploadId: session.id,
@@ -1227,6 +1263,67 @@ export class StoreService {
       alreadyCompleted: false,
       ...(signedRequest !== undefined ? { signedRequest } : {}),
     }
+  }
+
+  private bindingMatchesIdentity(binding: IdempotencyBinding, identity: UploadIdentity): boolean {
+    if (binding.owner !== identity.owner) return false
+    if (binding.domain === 'owner') {
+      return identity.originCallId === undefined
+        && binding.originCallId === undefined
+        && binding.producer === identity.producer
+    }
+    return identity.originCallId !== undefined
+      && binding.producer === identity.producer
+      && binding.originCallId === identity.originCallId
+  }
+
+  private assertBindingObject(binding: IdempotencyBinding, object: StoreObject): void {
+    if (
+      object.id !== binding.objectId
+      || object.uploadId !== binding.uploadId
+      || object.owner !== binding.owner
+      || object.producer !== binding.producer
+      || object.originCallId !== binding.originCallId
+    ) throw stateCorrupt('idempotent upload identity')
+  }
+
+  private uploadSessionIsTerminal(session: UploadSession): boolean {
+    return session.status === 'completed'
+      || session.status === 'aborted'
+      || session.status === 'expired'
+      || session.status === 'failed'
+  }
+
+  private uploadSessionTerminalAt(session: UploadSession): Timestamp {
+    return session.terminalAt ?? session.completedAt ?? session.expiresAt
+  }
+
+  private objectIsTerminal(object: StoreObject): boolean {
+    return object.status === 'failed'
+      || object.status === 'abandoned'
+      || object.status === 'deleted'
+  }
+
+  private retentionElapsed(timestamp: Timestamp, ttlSec: number, nowMs: number): boolean {
+    return Date.parse(timestamp) + ttlSec * 1000 <= nowMs
+  }
+
+  /** driver DELETE 成功后持久化证据；后续 cleanup 只收 tombstone，不再重复外部 DELETE。 */
+  private async markBytesDeleted(objectId: string, expectedDriverKey: string): Promise<void> {
+    for (let attempt = 0; attempt < MAX_CAS_ATTEMPTS; attempt++) {
+      const raw = await this.state.get(`${KEY_STORE_OBJECT}${objectId}`)
+      if (raw === null) return
+      const object = parseObject(raw)
+      if (object.driverKey !== expectedDriverKey) throw stateCorrupt('object driver key')
+      if (!this.objectIsTerminal(object) || object.bytesDeletedAt !== undefined) return
+      const next: StoreObject = {
+        ...object,
+        bytesDeletedAt: this.nowIso(),
+        revision: object.revision + 1,
+      }
+      if (await this.cas(`${KEY_STORE_OBJECT}${object.id}`, object.revision, next)) return
+    }
+    throw new TBError('conflict', 'Store 对象字节删除状态并发更新冲突')
   }
 
   private async authorizeOwnerUploadMutation(
@@ -1334,6 +1431,7 @@ export class StoreService {
     }
     if (object.status !== 'pending') {
       await this.objects.delete(object.driverKey)
+      await this.markBytesDeleted(object.id, object.driverKey)
       throw new TBError('conflict', `对象状态不允许 ready:${object.status}`)
     }
     const now = this.nowIso()
@@ -1355,6 +1453,7 @@ export class StoreService {
       object = await this.requireObject(object.id)
       if (object.status !== 'ready') {
         await this.objects.delete(object.driverKey)
+        await this.markBytesDeleted(object.id, object.driverKey)
         throw new TBError('conflict', `对象并发状态冲突:${object.status}`)
       }
     } else {
@@ -1368,21 +1467,25 @@ export class StoreService {
   private async completeSessionBestEffort(session: UploadSession): Promise<void> {
     if (session.status === 'completed') return
     if (session.status !== 'created') return
+    const completedAt = this.nowIso()
     const next: UploadSession = {
       ...session,
       status: 'completed',
-      completedAt: this.nowIso(),
+      completedAt,
+      terminalAt: completedAt,
       revision: session.revision + 1,
     }
     await this.cas(`${KEY_STORE_UPLOAD}${session.id}`, session.revision, next)
   }
 
   private async failUpload(session: UploadSession, object: StoreObject): Promise<void> {
+    const terminalAt = this.nowIso()
     if (object.status === 'pending') {
       const failed: StoreObject = {
         ...object,
         status: 'failed',
-        updatedAt: this.nowIso(),
+        bytesDeletedAt: terminalAt,
+        updatedAt: terminalAt,
         revision: object.revision + 1,
       }
       await this.cas(`${KEY_STORE_OBJECT}${object.id}`, object.revision, failed)
@@ -1391,10 +1494,12 @@ export class StoreService {
       const failed: UploadSession = {
         ...session,
         status: 'failed',
+        terminalAt,
         revision: session.revision + 1,
       }
       await this.cas(`${KEY_STORE_UPLOAD}${session.id}`, session.revision, failed)
     }
+    await this.markBytesDeleted(object.id, object.driverKey)
   }
 
   private async expireUpload(session: UploadSession): Promise<void> {
@@ -1402,6 +1507,7 @@ export class StoreService {
     const next: UploadSession = {
       ...session,
       status: 'expired',
+      terminalAt: this.nowIso(),
       revision: session.revision + 1,
     }
     if (!await this.cas(`${KEY_STORE_UPLOAD}${session.id}`, session.revision, next)) return
@@ -1422,6 +1528,7 @@ export class StoreService {
     const next: CallUploadCapability = {
       ...capability,
       status: 'expired',
+      terminalAt: this.nowIso(),
       revision: capability.revision + 1,
     }
     await this.cas(`${KEY_STORE_CALL_CAPABILITY}${capability.id}`, capability.revision, next)
@@ -1432,6 +1539,7 @@ export class StoreService {
     const next: ShareGrant = {
       ...grant,
       status: 'expired',
+      terminalAt: this.nowIso(),
       revision: grant.revision + 1,
     }
     await this.cas(`${KEY_STORE_SHARE}${grant.id}`, grant.revision, next)
@@ -1487,20 +1595,7 @@ export class StoreService {
   }
 
   private driverKey(objectId: string): string {
-    return `store/v1/${objectId.slice(0, 2)}/${objectId}`
-  }
-
-  private objectIdFromDriverKey(key: string): string | undefined {
-    const match = /^store\/v1\/([A-Za-z0-9_-]{2})\/([A-Za-z0-9_-]{22,64})$/.exec(key)
-    const shard = match?.[1]
-    const objectId = match?.[2]
-    if (
-      shard === undefined
-      || objectId === undefined
-      || !STORE_OBJECT_ID_RE.test(objectId)
-      || shard !== objectId.slice(0, 2)
-    ) return undefined
-    return objectId
+    return `${DEFAULT_STORE_DRIVER_KEY_ROOT}/${objectId.slice(0, 2)}/${objectId}`
   }
 
   private nowIso(): Timestamp {

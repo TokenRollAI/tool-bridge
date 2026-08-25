@@ -183,6 +183,13 @@ export function createR2ObjectStore(bucket: R2Bucket, presign?: R2PresignCredent
         ttlSec,
         opts,
       )
+    store.presignPutExact = (key, ttlSec, opts) =>
+      presignS3Put(
+        client,
+        `${base}/${presign.bucket}/${encodeObjectKey(key)}`,
+        ttlSec,
+        opts,
+      )
   }
 
   return store

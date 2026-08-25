@@ -2,6 +2,8 @@ import type { ObjectBody, ObjectPresignedPut } from '../context/objectStore'
 import type { OwnerRef, Timestamp, URI } from '../types'
 
 export const DEFAULT_STORE_NAME = 'default' as const
+/** Store 在共享 ObjectStore driver 中独占的物理 key root。 */
+export const DEFAULT_STORE_DRIVER_KEY_ROOT = '__tool_bridge_internal__/store/v1' as const
 
 export type StoreObjectStatus = 'pending' | 'ready' | 'failed' | 'abandoned' | 'deleted'
 export type UploadSessionStatus = 'created' | 'completed' | 'aborted' | 'expired' | 'failed'
@@ -16,6 +18,8 @@ export interface StoreChecksum {
 
 /** StateStore 内的权威对象记录；driverKey 绝不进入公开 descriptor。 */
 export interface StoreObject {
+  /** terminal object 的 driver 字节已完成幂等删除；cleanup 以此避免每轮重复 DELETE。 */
+  bytesDeletedAt?: Timestamp
   checksum?: StoreChecksum
   contentType: string
   createdAt: Timestamp
@@ -54,6 +58,8 @@ export interface UploadSession {
   objectId: string
   revision: number
   status: UploadSessionStatus
+  /** 进入 completed/aborted/expired/failed 的时间，作为幂等保留窗口起点。 */
+  terminalAt?: Timestamp
   transport: StoreUploadTransport
 }
 
@@ -73,6 +79,8 @@ export interface CallUploadCapability {
   reservedBytes: number
   revision: number
   status: CallUploadCapabilityStatus
+  /** 进入 revoked/expired 的时间；exhausted 仍须保留到 expiresAt 供幂等 replay。 */
+  terminalAt?: Timestamp
   tokenHash: string
 }
 
@@ -85,6 +93,8 @@ export interface ShareGrant {
   objectId: string
   revision: number
   status: ShareGrantStatus
+  /** 进入 revoked/expired 的时间，作为撤销传播后的安全保留窗口起点。 */
+  terminalAt?: Timestamp
   tokenHash: string
 }
 
@@ -190,6 +200,8 @@ export interface StoreCleanupOptions {
   cursors?: StoreCleanupCursors
   /** 每类权威记录单步最多扫描多少条；缺省 200。 */
   limit?: number
+  /** 一次宿主 cleanup tick 只在第一页运行 staging 等非分页 driver 维护；缺省 true。 */
+  runDriverMaintenance?: boolean
 }
 
 export interface StoreServiceOptions {

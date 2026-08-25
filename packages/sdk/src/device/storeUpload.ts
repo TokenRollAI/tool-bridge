@@ -395,6 +395,20 @@ function bodyByteLength(body: NonNullable<RequestInit['body']>): number | undefi
   return undefined
 }
 
+function uploadRequestInit(
+  body: NonNullable<RequestInit['body']>,
+  init: Omit<RequestInit, 'body'>,
+): RequestInit {
+  const request: RequestInit & { duplex?: 'half' } = { ...init, body }
+  if (typeof ReadableStream !== 'undefined' && body instanceof ReadableStream) {
+    // Node's native fetch requires this for streaming request bodies. `duplex`
+    // is a Web fetch extension and unknown dictionary fields are ignored by
+    // browser/RN implementations that do not expose it in their TypeScript lib.
+    request.duplex = 'half'
+  }
+  return request
+}
+
 function validateUploadInput(input: UploadObjectInput): number | undefined {
   if (!nonEmptyString(input.contentType) || /[\r\n]/.test(input.contentType)) {
     throw new TBError('invalid_argument', 'contentType must be a non-empty media type')
@@ -535,12 +549,11 @@ async function uploadObjectAuthorized(
 
   let uploadResponse: Response
   try {
-    uploadResponse = await fetcher(grant.url, {
+    uploadResponse = await fetcher(grant.url, uploadRequestInit(opts.body, {
       method: grant.method,
       headers: uploadHeaders,
-      body: opts.body,
       signal,
-    })
+    }))
   } catch (error) {
     networkError(error, 'Store object upload request failed', signal)
   }

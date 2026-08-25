@@ -46,4 +46,28 @@ describe('presignS3Put', () => {
       contentType: 'image/jpeg',
     })).rejects.toMatchObject({ code: 'invalid_argument' })
   })
+
+  it('定长 PUT 把 Content-Length 纳入签名，让存储端强制精确字节数', async () => {
+    const client = new AwsClient({
+      accessKeyId: 'test-access',
+      secretAccessKey: 'test-secret',
+      service: 's3',
+      region: 'auto',
+    })
+    const grant = await presignS3Put(
+      client,
+      'https://example.r2.cloudflarestorage.com/bucket/video.mp4',
+      90,
+      { contentType: 'video/mp4', contentLength: 1024, ifNoneMatch: '*' },
+    )
+    const signedHeaders = new URL(grant.url).searchParams.get('X-Amz-SignedHeaders')?.split(';')
+    expect(grant.headers['content-length']).toBe('1024')
+    expect(signedHeaders).toContain('content-length')
+    await expect(presignS3Put(
+      client,
+      'https://example.r2.cloudflarestorage.com/bucket/video.mp4',
+      90,
+      { contentType: 'video/mp4', contentLength: -1 },
+    )).rejects.toMatchObject({ code: 'invalid_argument' })
+  })
 })

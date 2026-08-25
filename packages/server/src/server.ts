@@ -269,6 +269,18 @@ export function createTbServer(config: ServerConfig): TbServer {
       storeCleanupInFlight = false
     }
   }
+  const reportStoreCleanupFailure = (): void => {
+    // 固定事件名，不把可能含 driver key 的底层错误写进日志。
+    console.warn(JSON.stringify({ event: 'tool_bridge_store_cleanup_failed' }))
+  }
+  const scheduleStoreCleanup = (): void => {
+    // 首次 cleanup 在端口就绪后异步执行；历史对象多时不得阻塞 readiness。
+    void runStoreCleanup().catch(reportStoreCleanupFailure)
+    storeCleanupTimer = setInterval(() => {
+      void runStoreCleanup().catch(reportStoreCleanupFailure)
+    }, config.storeCleanupIntervalSec * 1000)
+    storeCleanupTimer.unref?.()
+  }
   return {
     app,
     search,
@@ -287,18 +299,10 @@ export function createTbServer(config: ServerConfig): TbServer {
         requireAdminSk: !config.allowInsecureBootstrap,
       })
       await hub.sweepOrphans()
-      // Node 有真实启动点：首次监听前收敛遗留 Store 状态，随后周期清理。timer
-      // 不阻止进程退出；并发 tick 直接跳过，避免慢后端堆积 cleanup 扫描。
-      await runStoreCleanup()
-      storeCleanupTimer = setInterval(() => {
-        void runStoreCleanup().catch(() => {
-          // 固定事件名，不把可能含 driver key 的底层错误写进日志。
-          console.warn(JSON.stringify({ event: 'tool_bridge_store_cleanup_failed' }))
-        })
-      }, config.storeCleanupIntervalSec * 1000)
-      storeCleanupTimer.unref?.()
       return await new Promise((resolve) => {
         server = serve({ fetch: app.fetch, port: config.port, hostname: config.host }, (info) => {
+          // 并发 tick 直接跳过，避免慢后端堆积 cleanup 扫描。
+          scheduleStoreCleanup()
           resolve({ port: info.port })
         })
         hub.attach(server as http.Server)

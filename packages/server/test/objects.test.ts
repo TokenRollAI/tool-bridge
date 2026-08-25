@@ -9,7 +9,11 @@ import {
   utimesSync,
   writeFileSync,
 } from 'node:fs'
-import { type ObjectBodyStream, readStreamText } from '@tool-bridge/core'
+import {
+  DEFAULT_STORE_DRIVER_KEY_ROOT,
+  type ObjectBodyStream,
+  readStreamText,
+} from '@tool-bridge/core'
 import { afterEach, describe, expect, it } from 'vitest'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -93,6 +97,36 @@ describe('createDataObjectStore 流式原子写', () => {
     const meta = await writing
     expect(meta.size).toBe(first.byteLength + second.byteLength)
     expect(readdirSync(parent)).toEqual(['large.bin'])
+  })
+
+  it('Store 写入使用独立 staging 目录，提交后才原子落位', async () => {
+    const dataDir = tempDataDir()
+    const store = createDataObjectStore(dataDir)
+    const continueRead = deferred()
+    let reads = 0
+    const objectKey = `${DEFAULT_STORE_DRIVER_KEY_ROOT}/aa/object-id`
+    const writing = store.put(objectKey, {
+      getReader() {
+        return {
+          async read() {
+            reads++
+            if (reads === 1) return { done: false, value: new Uint8Array([1, 2]) }
+            if (reads === 2) await continueRead.promise
+            return { done: true }
+          },
+          releaseLock() {},
+        }
+      },
+    }, { ifNoneMatch: '*' })
+    const staging = join(dataDir, 'objects', '.tb-store-staging-v1')
+    await eventually(() => {
+      expect(readdirSync(staging)).toHaveLength(1)
+    })
+    expect(await store.head(objectKey)).toBeNull()
+    continueRead.resolve()
+    await writing
+    expect(readdirSync(staging)).toHaveLength(0)
+    expect((await store.head(objectKey))?.size).toBe(2)
   })
 
   it('get 对大对象返回逐块文件流，不把整段视频先读进内存', async () => {
@@ -183,13 +217,15 @@ describe('createDataObjectStore 流式原子写', () => {
     expect(existsSync(join(outside, 'nested'))).toBe(false)
   })
 
-  it('cleanupStaging 只删除 Store namespace 内超过 TTL 的临时文件', async () => {
+  it('cleanupStaging 只扫独立 Store staging，不递归遍历对象树', async () => {
     const dataDir = tempDataDir()
     const store = createDataObjectStore(dataDir)
-    const shard = join(dataDir, 'objects', 'store', 'v1', 'AA')
+    const staging = join(dataDir, 'objects', '.tb-store-staging-v1')
+    const shard = join(dataDir, 'objects', ...DEFAULT_STORE_DRIVER_KEY_ROOT.split('/'), 'AA')
+    mkdirSync(staging, { recursive: true })
     mkdirSync(shard, { recursive: true })
-    const old = join(shard, '.tb-object-upload-old.tmp')
-    const fresh = join(shard, '.tb-object-upload-fresh.tmp')
+    const old = join(staging, '.tb-object-upload-00000000-0000-4000-8000-000000000001.tmp')
+    const fresh = join(staging, '.tb-object-upload-00000000-0000-4000-8000-000000000002.tmp')
     const ordinary = join(shard, 'ordinary-object')
     writeFileSync(old, 'old')
     writeFileSync(fresh, 'fresh')
@@ -198,7 +234,7 @@ describe('createDataObjectStore 流式原子写', () => {
     utimesSync(fresh, new Date('2026-08-25T00:02:00.000Z'), new Date('2026-08-25T00:02:00.000Z'))
 
     await expect(store.cleanupStaging?.(
-      'store/v1/',
+      `${DEFAULT_STORE_DRIVER_KEY_ROOT}/`,
       '2026-08-25T00:01:00.000Z',
     )).resolves.toBe(1)
     expect(existsSync(old)).toBe(false)

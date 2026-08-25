@@ -16,6 +16,7 @@ export type {
 export { createStoreClient } from './storeClient'
 export type {
   StoreClient,
+  StoreClientObjectDescriptor,
   StoreClientOptions,
   StoreListOptions,
   StoreListPage,

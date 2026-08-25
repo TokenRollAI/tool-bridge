@@ -1,10 +1,17 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import type { StoreObject, UploadSession } from '../../src/objectStoreService/types'
 import {
   KEY_STORE_CALL_CAPABILITY,
+  KEY_STORE_IDEMPOTENCY,
   KEY_STORE_OBJECT,
+  KEY_STORE_SHARE,
+  KEY_STORE_UPLOAD,
   StoreService,
 } from '../../src/objectStoreService/service'
+import {
+  DEFAULT_STORE_DRIVER_KEY_ROOT,
+  type StoreObject,
+  type UploadSession,
+} from '../../src/objectStoreService/types'
 import { MemoryStateStore, type StateStore } from '../../src/store'
 import { MemoryObjectStore } from '../../src/context/objectStore'
 import { isTBError } from '../../src/errors'
@@ -115,6 +122,87 @@ describe('StoreService', () => {
       size: 3,
       idempotencyKey: 'same',
     }, { owner: OWNER })).rejects.toSatisfy(codeIs('conflict'))
+  })
+
+  it('owner 与 call 幂等域隔离，call replay 精确绑定 callId 与 producer', async () => {
+    const input = {
+      contentType: 'image/jpeg',
+      size: 3,
+      idempotencyKey: 'same-across-domains',
+    }
+    const ordinary = await service.beginUpload(input, { owner: OWNER })
+    await expect(service.beginUpload(input, { owner: OWNER, producer: DEVICE }))
+      .rejects.toSatisfy(codeIs('conflict'))
+    const callA = await service.issueCallUploadCapability({
+      owner: OWNER,
+      producer: DEVICE,
+      callId: 'call-a',
+      expiresAt: '2026-08-25T00:05:00.000Z',
+      maxObjects: 2,
+      maxBytes: 10,
+      maxObjectBytes: 10,
+      allowedContentTypes: ['image/*'],
+    })
+    const callB = await service.issueCallUploadCapability({
+      owner: OWNER,
+      producer: DEVICE,
+      callId: 'call-b',
+      expiresAt: '2026-08-25T00:05:00.000Z',
+      maxObjects: 2,
+      maxBytes: 10,
+      maxObjectBytes: 10,
+      allowedContentTypes: ['image/*'],
+    })
+    const otherProducer = await service.issueCallUploadCapability({
+      owner: OWNER,
+      producer: 'device:camera-02',
+      callId: 'call-a',
+      expiresAt: '2026-08-25T00:05:00.000Z',
+      maxObjects: 2,
+      maxBytes: 10,
+      maxObjectBytes: 10,
+      allowedContentTypes: ['image/*'],
+    })
+
+    const fromCallA = await service.beginCallUpload(input, callA.token)
+    const replayCallA = await service.beginCallUpload(input, callA.token)
+    const fromCallB = await service.beginCallUpload(input, callB.token)
+    const fromOtherProducer = await service.beginCallUpload(input, otherProducer.token)
+
+    expect(replayCallA.uploadId).toBe(fromCallA.uploadId)
+    expect(new Set([
+      ordinary.uploadId,
+      fromCallA.uploadId,
+      fromCallB.uploadId,
+      fromOtherProducer.uploadId,
+    ]).size).toBe(4)
+    expect((await state.list(KEY_STORE_IDEMPOTENCY)).items).toHaveLength(4)
+  })
+
+  it('OwnerRef、producer 与 callId 不施加 Store 私有 255 字符上限', async () => {
+    const longOwner = `agent:${'o'.repeat(512)}`
+    const longProducer = `device:${'p'.repeat(512)}`
+    const longCallId = `call-${'c'.repeat(512)}`
+    await expect(service.beginUpload(
+      { contentType: 'text/plain' },
+      { owner: longOwner, producer: longProducer },
+    )).resolves.toMatchObject({ transport: 'relay' })
+    await expect(service.issueCallUploadCapability({
+      owner: longOwner,
+      producer: longProducer,
+      callId: longCallId,
+      expiresAt: '2026-08-25T00:05:00.000Z',
+      maxObjects: 1,
+      maxBytes: 1,
+      maxObjectBytes: 1,
+      allowedContentTypes: ['text/plain'],
+    })).resolves.toMatchObject({
+      capability: { owner: longOwner, producer: longProducer, callId: longCallId },
+    })
+    await expect(service.beginUpload(
+      { contentType: 'text/plain' },
+      { owner: 'agent:bad\nowner' },
+    )).rejects.toSatisfy(codeIs('invalid_argument'))
   })
 
   it('超限 create 不占住 idempotency key，修正声明后可立即重试', async () => {
@@ -332,7 +420,7 @@ describe('StoreService', () => {
       const record: StoreObject = {
         id,
         store: 'default',
-        driverKey: `store/v1/${id.slice(0, 2)}/${id}`,
+        driverKey: `${DEFAULT_STORE_DRIVER_KEY_ROOT}/${id.slice(0, 2)}/${id}`,
         uploadId: `upload-${id}`,
         status: 'ready',
         owner,
@@ -409,6 +497,71 @@ describe('StoreService', () => {
       expiredCallCapabilities: 0,
       expiredShares: 0,
     })
+  })
+
+  it('cleanup 在安全窗口后删除终态 metadata，且字节删除成功后不再重复 DELETE', async () => {
+    class CountingStore extends MemoryObjectStore {
+      deleteCalls = 0
+
+      override async delete(key: string): Promise<void> {
+        this.deleteCalls++
+        await super.delete(key)
+      }
+    }
+    const cleanupState = new MemoryStateStore()
+    const cleanupObjects = new CountingStore(() => now)
+    const cleanupService = new StoreService(cleanupState, cleanupObjects, {
+      tokenSecret: TOKEN_SECRET,
+      now: () => now,
+      uploadTtlSec: 60,
+      shareTtlSec: 30,
+    })
+    const pending = await cleanupService.beginUpload({
+      contentType: 'text/plain',
+      idempotencyKey: 'cleanup-convergence',
+    }, { owner: OWNER })
+    const pendingObject = (await cleanupState.list(KEY_STORE_OBJECT)).items[0]?.value as StoreObject
+    await cleanupObjects.put(pendingObject.driverKey, 'late-bytes', { ifNoneMatch: '*' })
+
+    const readyStart = await cleanupService.beginUpload({
+      contentType: 'text/plain',
+      size: 1,
+    }, { owner: OWNER })
+    const ready = await cleanupService.commitRelayUpload({
+      uploadToken: readyStart.uploadToken,
+      body: 'x',
+    })
+    await cleanupService.share(ready.uri, OWNER, 20)
+    await cleanupService.delete(ready.uri, { owner: OWNER })
+    const issued = await cleanupService.issueCallUploadCapability({
+      owner: OWNER,
+      producer: DEVICE,
+      callId: 'cleanup-convergence-call',
+      expiresAt: '2026-08-25T00:00:30.000Z',
+      maxObjects: 1,
+      maxBytes: 1,
+      maxObjectBytes: 1,
+      allowedContentTypes: ['text/plain'],
+    })
+
+    now = '2026-08-25T00:02:00.000Z'
+    await cleanupService.cleanup()
+    expect(cleanupObjects.deleteCalls).toBe(2)
+    await cleanupService.cleanup()
+    expect(cleanupObjects.deleteCalls).toBe(2)
+    await expect(cleanupService.verifyUploadToken(pending.uploadToken))
+      .rejects.toSatisfy(codeIs('permission_denied'))
+    await expect(cleanupService.verifyCallUploadCapability(issued.token))
+      .rejects.toSatisfy(codeIs('permission_denied'))
+
+    now = '2026-08-25T00:03:01.000Z'
+    await cleanupService.cleanup()
+    expect(cleanupObjects.deleteCalls).toBe(2)
+    expect((await cleanupState.list(KEY_STORE_UPLOAD)).items).toHaveLength(0)
+    expect((await cleanupState.list(KEY_STORE_OBJECT)).items).toHaveLength(0)
+    expect((await cleanupState.list(KEY_STORE_CALL_CAPABILITY)).items).toHaveLength(0)
+    expect((await cleanupState.list(KEY_STORE_SHARE)).items).toHaveLength(0)
+    expect((await cleanupState.list(KEY_STORE_IDEMPOTENCY)).items).toHaveLength(0)
   })
 
   it('cleanup 的过期 CAS 输给并发 complete 时绝不删除 ready 字节', async () => {
@@ -493,13 +646,19 @@ describe('StoreService', () => {
     expect(expiredUploads).toBe(3)
   })
 
-  it('cleanup 调用 staging hook、删除 driver orphan，并释放过期 idempotency key', async () => {
+  it('cleanup 可仅首页调用 staging hook，保留无 metadata driver 对象并释放幂等 key', async () => {
     class CleanupAwareStore extends MemoryObjectStore {
       cleanupArgs?: { olderThan: string, prefix: string }
+      listCalls = 0
 
       async cleanupStaging(prefix: string, olderThan: string): Promise<number> {
         this.cleanupArgs = { prefix, olderThan }
         return 2
+      }
+
+      override async list(prefix: string) {
+        this.listCalls++
+        return super.list(prefix)
       }
     }
     const cleanupState = new MemoryStateStore()
@@ -514,21 +673,27 @@ describe('StoreService', () => {
       idempotencyKey: 'reusable-after-expiry',
     }, { owner: OWNER })
     const orphanId = 'ZZZZZZZZZZZZZZZZZZZZZZ'
-    const orphanKey = `store/v1/ZZ/${orphanId}`
+    const orphanKey = `${DEFAULT_STORE_DRIVER_KEY_ROOT}/ZZ/${orphanId}`
     await cleanupObjects.put(orphanKey, 'orphan')
 
     now = '2026-08-25T00:02:00.000Z'
     const cleaned = await cleanupService.cleanup()
     expect(cleaned).toMatchObject({
       deletedStaging: 2,
-      deletedOrphans: 1,
+      deletedOrphans: 0,
       expiredIdempotencyBindings: 1,
     })
     expect(cleanupObjects.cleanupArgs).toEqual({
-      prefix: 'store/v1/',
+      prefix: `${DEFAULT_STORE_DRIVER_KEY_ROOT}/`,
       olderThan: '2026-08-25T00:01:00.000Z',
     })
-    expect(await cleanupObjects.head(orphanKey)).toBeNull()
+    expect(await cleanupObjects.head(orphanKey)).not.toBeNull()
+    expect(cleanupObjects.listCalls).toBe(0)
+
+    cleanupObjects.cleanupArgs = undefined
+    const continuation = await cleanupService.cleanup({ runDriverMaintenance: false })
+    expect(continuation.deletedStaging).toBe(0)
+    expect(cleanupObjects.cleanupArgs).toBeUndefined()
 
     const retried = await cleanupService.beginUpload({
       contentType: 'text/plain',
@@ -537,7 +702,7 @@ describe('StoreService', () => {
     expect(retried.uploadId).not.toBe(first.uploadId)
   })
 
-  it('driver 反向扫描会 CAS 放弃过期 pending，再删除边界处晚到的直传字节', async () => {
+  it('metadata object 扫描会 CAS 放弃过期 pending，再删除边界处晚到的直传字节', async () => {
     const start = await service.beginUpload({ contentType: 'video/mp4' }, { owner: OWNER })
     const stored = (await state.list(KEY_STORE_OBJECT)).items[0]?.value as StoreObject
     await objects.put(stored.driverKey, 'late-direct-bytes', { ifNoneMatch: '*' })
@@ -548,11 +713,12 @@ describe('StoreService', () => {
         shares: null,
         callCapabilities: null,
         idempotencyBindings: null,
-        objects: null,
-        driverObjects: '',
+        objects: '',
+        driverObjects: null,
       },
     })
-    expect(cleaned.deletedOrphans).toBe(1)
+    expect(cleaned.deletedBytes).toBe(1)
+    expect(cleaned.deletedOrphans).toBe(0)
     expect(await objects.head(stored.driverKey)).toBeNull()
     await expect(service.verifyUploadToken(start.uploadToken))
       .rejects.toSatisfy(codeIs('permission_denied'))
@@ -562,14 +728,50 @@ describe('StoreService', () => {
 })
 
 describe('StoreService direct upload', () => {
-  it('presigned PUT 必须 complete/HEAD，且并发 complete 幂等返回同 descriptor', async () => {
-    const state = new MemoryStateStore()
-    class PresigningStore extends MemoryObjectStore {
+  it('未知 size 或只有旧 presignPut 的 backend 一律退回 relay', async () => {
+    class LegacyPresigningStore extends MemoryObjectStore {
+      legacyCalls = 0
+
       async presignPut(key: string) {
+        this.legacyCalls++
         return {
           method: 'PUT' as const,
           url: `https://objects.invalid/${key}`,
           headers: { 'If-None-Match': '*' },
+        }
+      }
+    }
+    const objects = new LegacyPresigningStore()
+    const service = new StoreService(new MemoryStateStore(), objects, {
+      tokenSecret: TOKEN_SECRET,
+      maxObjectBytes: 100,
+      relayMaxBytes: 5,
+    })
+    await expect(service.beginUpload(
+      { contentType: 'video/mp4', size: 4 },
+      { owner: OWNER },
+    )).resolves.toMatchObject({ transport: 'relay', maxBytes: 5 })
+    await expect(service.beginUpload(
+      { contentType: 'video/mp4' },
+      { owner: OWNER },
+    )).resolves.toMatchObject({ transport: 'relay', maxBytes: 5 })
+    expect(objects.legacyCalls).toBe(0)
+  })
+
+  it('presigned PUT 必须 complete/HEAD，且并发 complete 幂等返回同 descriptor', async () => {
+    const state = new MemoryStateStore()
+    class PresigningStore extends MemoryObjectStore {
+      exactLengths: number[] = []
+
+      async presignPutExact(key: string, _ttlSec: number, opts: { contentLength: number }) {
+        this.exactLengths.push(opts.contentLength)
+        return {
+          method: 'PUT' as const,
+          url: `https://objects.invalid/${key}`,
+          headers: {
+            'Content-Length': String(opts.contentLength),
+            'If-None-Match': '*',
+          },
         }
       }
     }
@@ -583,10 +785,21 @@ describe('StoreService direct upload', () => {
     const start = await service.beginUpload({
       contentType: 'video/mp4',
       size: 4,
+      idempotencyKey: 'direct-replay',
       checksum: { algorithm: 'sha256', value: 'a'.repeat(64) },
     }, { owner: OWNER })
     expect(start.transport).toBe('presigned-put')
     expect(start.maxBytes).toBe(100)
+    expect(objects.exactLengths).toEqual([4])
+    const replay = await service.beginUpload({
+      contentType: 'video/mp4',
+      size: 4,
+      idempotencyKey: 'direct-replay',
+      checksum: { algorithm: 'sha256', value: 'a'.repeat(64) },
+    }, { owner: OWNER })
+    expect(replay.transport).toBe('presigned-put')
+    expect(replay.uploadId).toBe(start.uploadId)
+    expect(objects.exactLengths).toEqual([4, 4])
     await expect(service.stat(start.objectUri, { owner: OWNER })).rejects.toSatisfy(codeIs('not_found'))
     const stored = (await state.list(KEY_STORE_OBJECT)).items[0]?.value as StoreObject
     await objects.put(stored.driverKey, 'data', { contentType: 'video/mp4', ifNoneMatch: '*' })

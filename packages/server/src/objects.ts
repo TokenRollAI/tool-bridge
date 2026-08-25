@@ -9,6 +9,7 @@
  */
 
 import {
+  DEFAULT_STORE_DRIVER_KEY_ROOT,
   normalizeEntryPath,
   type ObjectBody,
   type ObjectBodyStream,
@@ -38,6 +39,10 @@ import { Readable } from 'node:stream'
 
 const INTERNAL_ROOT = 'objects'
 const TEMP_PREFIX = '.tb-object-upload-'
+const STORE_KEY_PREFIX = `${DEFAULT_STORE_DRIVER_KEY_ROOT}/`
+const STORE_STAGING_DIR = '.tb-store-staging-v1'
+const UPLOAD_TEMP_NAME_RE
+  = /^\.tb-object-upload-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.tmp$/i
 
 function toInternal(key: string): string {
   return `${INTERNAL_ROOT}/${key}`
@@ -153,7 +158,7 @@ async function cleanupStagingTree(dir: string, cutoffMs: number): Promise<number
       deleted += await cleanupStagingTree(path, cutoffMs)
       continue
     }
-    if (!entry.isFile() || !entry.name.startsWith(TEMP_PREFIX)) continue
+    if (!entry.isFile() || !UPLOAD_TEMP_NAME_RE.test(entry.name)) continue
     try {
       const info = await stat(path)
       if (info.mtimeMs > cutoffMs) continue
@@ -215,7 +220,16 @@ export function createDataObjectStore(dataDir: string): ObjectStore {
       await mkdir(dirname(finalPath), { recursive: true })
       await assertParentInRoot(root, finalPath, key)
 
-      const tempPath = join(dirname(finalPath), `${TEMP_PREFIX}${randomUUID()}.tmp`)
+      // Store 的临时文件集中在独立目录：cleanup 只扫未完成上传，不再
+      // 递归遍历整个对象树。目录仍与最终文件在同一 filesystem，link/rename
+      // 的原子性不变。Context 写入保留旧的同目录临时文件语义。
+      const tempDir = normalizedKey.startsWith(STORE_KEY_PREFIX)
+        ? join(root, STORE_STAGING_DIR)
+        : dirname(finalPath)
+      await assertAncestorInRoot(root, join(tempDir, 'staging-probe'), key)
+      await mkdir(tempDir, { recursive: true })
+      const tempPath = join(tempDir, `${TEMP_PREFIX}${randomUUID()}.tmp`)
+      await assertParentInRoot(root, tempPath, key)
       let handle: FileHandle | undefined
       try {
         handle = await open(tempPath, 'wx')
@@ -273,8 +287,15 @@ export function createDataObjectStore(dataDir: string): ObjectStore {
         throw new TBError('invalid_argument', 'cleanupStaging olderThan 必须是 ISO timestamp')
       }
       const normalizedPrefix = normalizeEntryPath(prefix.replace(/\/+$/, ''))
-      const prefixDir = join(root, ...normalizedPrefix.split('/'))
+      const isDefaultStore = normalizedPrefix === STORE_KEY_PREFIX.slice(0, -1)
+      const prefixDir = isDefaultStore
+        ? join(root, STORE_STAGING_DIR)
+        : join(root, ...normalizedPrefix.split('/'))
       await assertAncestorInRoot(root, join(prefixDir, 'staging-probe'), prefix)
+      if (isDefaultStore) {
+        await mkdir(prefixDir, { recursive: true })
+        await assertParentInRoot(root, join(prefixDir, 'staging-probe'), prefix)
+      }
       return await cleanupStagingTree(prefixDir, cutoffMs)
     },
   }

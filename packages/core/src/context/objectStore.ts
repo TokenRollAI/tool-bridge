@@ -73,6 +73,14 @@ export interface ObjectPresignPutOptions {
   ifNoneMatch?: '*'
 }
 
+/**
+ * 定长直传契约：实现必须把 Content-Length 纳入签名，让存储端拒绝
+ * 任何与声明字节数不同的请求。普通 `presignPut` 没有这个安全保证。
+ */
+export interface ObjectPresignPutExactOptions extends ObjectPresignPutOptions {
+  contentLength: number
+}
+
 export interface ObjectStore {
   /**
    * 可选宿主钩子：清理 prefix 下早于 olderThan 的未落位 staging 临时文件。
@@ -91,6 +99,12 @@ export interface ObjectStore {
     key: string,
     ttlSec: number,
     opts: ObjectPresignPutOptions,
+  ): Promise<ObjectPresignedPut>
+  /** 仅当 backend 能在签名中强制精确 Content-Length 时提供。 */
+  presignPutExact?(
+    key: string,
+    ttlSec: number,
+    opts: ObjectPresignPutExactOptions,
   ): Promise<ObjectPresignedPut>
   put(key: string, body: ObjectBody, opts?: ObjectPutOptions): Promise<ObjectMeta>
 }

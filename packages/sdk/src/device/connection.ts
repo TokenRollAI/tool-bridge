@@ -68,16 +68,15 @@ export interface DeviceCallUploadCapability {
   expiresAt: string
   maxBytes: number
   maxObjects: number
-  token: string
 }
 
-/**
- * Local forward-compatible view. Core's decoder preserves unknown context
- * fields, so SDK consumers can adopt upload capabilities before core exports
- * the field in its stable frame type.
- */
-export type DeviceCallContext = CoreDeviceCallContext & {
+/** Handler-safe call context. The raw upload bearer remains SDK-internal. */
+export type DeviceCallContext = Omit<CoreDeviceCallContext, 'upload'> & {
   upload?: DeviceCallUploadCapability
+}
+
+interface DeviceCallUploadBearer extends DeviceCallUploadCapability {
+  token: string
 }
 
 export type DeviceCallHandler = (call: {
@@ -296,7 +295,7 @@ function portableExpose(expose: DeviceClientExpose): WireDeviceExpose {
   }
 }
 
-function validUploadCapability(value: unknown): value is DeviceCallUploadCapability {
+function validUploadCapability(value: unknown): value is DeviceCallUploadBearer {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return false
   const capability = value as Record<string, unknown>
   if (
@@ -306,10 +305,10 @@ function validUploadCapability(value: unknown): value is DeviceCallUploadCapabil
     || !Number.isFinite(Date.parse(capability.expiresAt))
     || typeof capability.maxBytes !== 'number'
     || !Number.isSafeInteger(capability.maxBytes)
-    || capability.maxBytes < 0
+    || capability.maxBytes <= 0
     || typeof capability.maxObjects !== 'number'
     || !Number.isSafeInteger(capability.maxObjects)
-    || capability.maxObjects < 0
+    || capability.maxObjects <= 0
   ) return false
   try {
     new Headers({ 'x-tb-store-capability': capability.token })
@@ -317,6 +316,26 @@ function validUploadCapability(value: unknown): value is DeviceCallUploadCapabil
     return false
   }
   return true
+}
+
+function handlerCallContext(
+  context: CoreDeviceCallContext,
+  capability: DeviceCallUploadBearer | undefined,
+): DeviceCallContext {
+  const safeContext = { ...context }
+  delete safeContext.upload
+  return {
+    ...safeContext,
+    ...(capability === undefined
+      ? {}
+      : {
+          upload: {
+            expiresAt: capability.expiresAt,
+            maxBytes: capability.maxBytes,
+            maxObjects: capability.maxObjects,
+          },
+        }),
+  }
 }
 
 function unavailableCallUpload(): TBError {
@@ -551,9 +570,13 @@ export function connectDevice(opts: ConnectDeviceOptions): DeviceConnection {
     expose: async () => portableExpose(await exposeFactory()),
     handler: async (call) => {
       const signal = call.signal as AbortSignal
-      const context = call.context as DeviceCallContext | undefined
-      const capability = validUploadCapability(context?.upload) ? context.upload : undefined
-      let uploadsStarted = 0
+      const wireContext = call.context as CoreDeviceCallContext | undefined
+      const capability = validUploadCapability(wireContext?.upload)
+        ? wireContext.upload
+        : undefined
+      const context: DeviceCallContext | undefined = wireContext === undefined
+        ? undefined
+        : handlerCallContext(wireContext, capability)
       return await opts.handler({
         id: call.id,
         path: call.path,
@@ -563,12 +586,6 @@ export function connectDevice(opts: ConnectDeviceOptions): DeviceConnection {
           if (capability === undefined || Date.parse(capability.expiresAt) <= Date.now()) {
             throw unavailableCallUpload()
           }
-          if (uploadsStarted >= capability.maxObjects) {
-            throw new TBError('rate_limited', 'device call upload object limit exceeded', {
-              retryable: false,
-            })
-          }
-          uploadsStarted += 1
           return await uploadObjectWithCapability({
             ...input,
             baseUrl: opts.baseUrl,

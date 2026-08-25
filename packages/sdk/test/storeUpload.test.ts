@@ -1,4 +1,6 @@
+import type { AddressInfo } from 'node:net'
 import { describe, expect, it, vi } from 'vitest'
+import { createServer } from 'node:http'
 import {
   TBError,
   uploadObject,
@@ -120,6 +122,67 @@ describe('uploadObject', () => {
     const relayHeaders = new Headers(calls[1]?.init?.headers)
     expect(relayHeaders.get('content-type')).toBe('image/jpeg')
     expect(relayHeaders.get('x-tb-store-upload')).toBe(RELAY_GRANT.uploadToken)
+  })
+
+  it('Node 原生 fetch 可把 ReadableStream 通过本地 HTTP server 流式 PUT', async () => {
+    const received: Uint8Array[] = []
+    let baseUrl = ''
+    const server = createServer(async (request, response) => {
+      if (request.method === 'POST' && request.url === '/api/system/store/create_upload') {
+        for await (const chunk of request) {
+          // Drain the JSON control body before reusing the keep-alive connection.
+          void chunk
+        }
+        response.setHeader('content-type', 'application/json')
+        response.end(JSON.stringify({
+          ...RELAY_GRANT,
+          url: `${baseUrl}/upload`,
+        }))
+        return
+      }
+      if (request.method === 'PUT' && request.url === '/upload') {
+        for await (const chunk of request) {
+          received.push(new Uint8Array(chunk as Buffer))
+        }
+        response.setHeader('content-type', 'application/json')
+        response.end(JSON.stringify(READY))
+        return
+      }
+      response.statusCode = 404
+      response.end()
+    })
+    await new Promise<void>((resolve, reject) => {
+      server.once('error', reject)
+      server.listen(0, '127.0.0.1', resolve)
+    })
+    const address = server.address() as AddressInfo
+    baseUrl = `http://127.0.0.1:${address.port}`
+
+    try {
+      const body = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new Uint8Array([0xff, 0xd8]))
+          controller.enqueue(new Uint8Array([0xff, 0x00]))
+          controller.close()
+        },
+      })
+      const result = await uploadObject(options({
+        baseUrl: `${baseUrl}/api`,
+        body,
+        size: 4,
+        fetcher: globalThis.fetch,
+      }))
+
+      expect(result.uri).toBe(READY.uri)
+      expect(Array.from(Buffer.concat(received.map(chunk => Buffer.from(chunk))))).toEqual([
+        0xff, 0xd8, 0xff, 0x00,
+      ])
+    } finally {
+      server.closeAllConnections()
+      await new Promise<void>((resolve, reject) => {
+        server.close(error => error === undefined ? resolve() : reject(error))
+      })
+    }
   })
 
   it('presigned-put:直传后用 session token complete，不向对象存储发送额外 token', async () => {

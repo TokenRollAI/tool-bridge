@@ -308,5 +308,9 @@ export function createS3ObjectStore(
     presignPut(key, ttlSec, putOpts) {
       return presignS3Put(client, urlFor(key), ttlSec, putOpts)
     },
+
+    presignPutExact(key, ttlSec, putOpts) {
+      return presignS3Put(client, urlFor(key), ttlSec, putOpts)
+    },
   }
 }

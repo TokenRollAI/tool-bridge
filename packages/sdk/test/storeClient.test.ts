@@ -1,17 +1,23 @@
 import { describe, expect, it, vi } from 'vitest'
-import { createStoreClient } from '../src'
+import { createStoreClient, type StoreClientObjectDescriptor } from '../src'
 
 const URI = 'store://default/AAAAAAAAAAAAAAAAAAAAAA' as const
 const DESCRIPTOR = {
   uri: URI,
   status: 'ready',
   contentType: 'text/plain',
+  filename: 'note.txt',
   size: 5,
   owner: 'agent:owner',
+  producer: 'device:camera-01',
+  originCallId: 'call-01',
+  checksum: { algorithm: 'sha256', value: 'abc123' },
+  etag: '"etag-01"',
   createdAt: '2099-01-01T00:00:00.000Z',
   updatedAt: '2099-01-01T00:00:01.000Z',
   readyAt: '2099-01-01T00:00:01.000Z',
-}
+  expiresAt: '2099-01-02T00:00:00.000Z',
+} satisfies StoreClientObjectDescriptor
 
 describe('createStoreClient', () => {
   it('提供 stat/list/read/download/share/revoke/delete 的类型安全管理面', async () => {
@@ -47,9 +53,9 @@ describe('createStoreClient', () => {
     const sk = vi.fn(() => 'rotating-secret-key')
     const store = createStoreClient({ baseUrl: 'https://tb.example/api/', sk, fetcher })
 
-    await expect(store.stat(URI)).resolves.toMatchObject({ uri: URI, size: 5 })
-    await expect(store.list({ limit: 10 })).resolves.toMatchObject({
-      items: [{ uri: URI }],
+    await expect(store.stat(URI)).resolves.toEqual(DESCRIPTOR)
+    await expect(store.list({ limit: 10 })).resolves.toEqual({
+      items: [DESCRIPTOR],
       cursor: 'next',
     })
     await expect(store.read(URI)).resolves.toMatchObject({ uri: URI, size: 5 })
@@ -105,5 +111,22 @@ describe('createStoreClient', () => {
       fetcher: never,
     }).stat(URI)).rejects.toMatchObject({ code: 'invalid_argument' })
     expect(never).not.toHaveBeenCalled()
+  })
+
+  it('stat/list 必须是完整 core wire descriptor，不能把 device 精简形状冒充管理结果', async () => {
+    const stripped = {
+      uri: URI,
+      contentType: 'text/plain',
+      size: 5,
+      createdAt: '2099-01-01T00:00:00.000Z',
+      readyAt: '2099-01-01T00:00:01.000Z',
+    }
+    const fetcher: typeof fetch = vi.fn(async input => Response.json(
+      String(input).endsWith('/list') ? { items: [stripped] } : stripped,
+    ))
+    const store = createStoreClient({ baseUrl: 'https://tb.example', sk: 'secret', fetcher })
+
+    await expect(store.stat(URI)).rejects.toMatchObject({ code: 'internal' })
+    await expect(store.list()).rejects.toMatchObject({ code: 'internal' })
   })
 })

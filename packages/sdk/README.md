@@ -18,7 +18,7 @@ import { createToolBridge, MemoryObjectStore, MemoryStateStore } from '@tool-bri
 
 const tb = createToolBridge({
   state: new MemoryStateStore(),      // 或任何 StateStore 实现(SQLite / KV / ...)
-  objects: new MemoryObjectStore(),   // 仅示例/测试；生产须注入持久 FS、R2 或 S3 driver
+  objects: new MemoryObjectStore(),   // 必填；仅示例/测试，生产须注入持久 FS、R2 或 S3 driver
   adminSk: process.env.TB_ADMIN_SK,   // 缺省读 env TB_BOOTSTRAP_ADMIN_SK;首次引导时必须提供
 })
 
@@ -154,7 +154,7 @@ const tb = createToolBridge({
 | 字段 | 语义 |
 |---|---|
 | `state`(必填) | 树配置 / SK / manifest 的存取 |
-| `objects?` | context 对象存储(`provider:'r2'` 的落点);缺省该 provider 返回 unavailable |
+| `objects`(必填) | default Store 的字节存储，也供对象型 Context 使用；生产必须注入持久 FS、R2、S3 或自定义 driver，`MemoryObjectStore` 只适合测试/易失开发 |
 | `uploadGrantTtlSec?` | `create_upload` 写 grant 的有效期秒，缺省 900、最大 604800；与下载 `$ref` TTL 独立 |
 | `secrets?` | 上游凭证;缺省 = 基于 state 的加密存储,主密钥 `encryptionKey` 或 env `TB_SECRET_ENCRYPTION_KEY`,皆无则 secret 能力禁用(Set 返回 unavailable) |
 | `reservedRoots?` / `remoteAllowlist?` / `maxHops?` | 追加保留根 / remote 白名单(空 = 拒一切 remote)/ Via 跳数上限(默认 4) |

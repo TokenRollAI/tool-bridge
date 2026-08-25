@@ -1,5 +1,5 @@
+import { DEFAULT_STORE_DRIVER_KEY_ROOT, type ObjectBodyStream } from '@tool-bridge/core'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { type ObjectBodyStream } from '@tool-bridge/core'
 import { createS3ObjectStore } from '../src/providers/s3Object'
 
 const CONFIG = {
@@ -34,6 +34,23 @@ function streamOf(chunks: Uint8Array[], onRead?: () => void): ObjectBodyStream {
 }
 
 describe('S3 ObjectStore streaming put', () => {
+  it('只通过 presignPutExact 公开 Store 可信的定长直传', async () => {
+    const store = createS3ObjectStore(CONFIG, { allowInsecure: false })
+    const grant = await store.presignPutExact?.(`${DEFAULT_STORE_DRIVER_KEY_ROOT}/aa/object`, 90, {
+      contentType: 'video/mp4',
+      contentLength: 4096,
+      ifNoneMatch: '*',
+    })
+    expect(grant?.headers).toMatchObject({
+      'content-type': 'video/mp4',
+      'content-length': '4096',
+      'if-none-match': '*',
+    })
+    expect(new URL(grant?.url ?? '').searchParams.get('X-Amz-SignedHeaders')).toContain(
+      'content-length',
+    )
+  })
+
   it('在 fetch 接管前不预读流，使用 UNSIGNED-PAYLOAD/retries:0，并以 HEAD 元数据为准', async () => {
     let reads = 0
     const calls: Request[] = []
@@ -64,7 +81,7 @@ describe('S3 ObjectStore streaming put', () => {
     vi.stubGlobal('fetch', fetcher)
     const store = createS3ObjectStore(CONFIG, { allowInsecure: false })
     const meta = await store.put(
-      'store/v1/aa/object',
+      `${DEFAULT_STORE_DRIVER_KEY_ROOT}/aa/object`,
       streamOf([new Uint8Array([1, 2]), new Uint8Array([3, 4])], () => reads++),
       {
         contentType: 'video/mp4',
@@ -75,7 +92,7 @@ describe('S3 ObjectStore streaming put', () => {
 
     expect(calls.map(call => call.method)).toEqual(['PUT', 'HEAD'])
     expect(meta).toEqual({
-      key: 'store/v1/aa/object',
+      key: `${DEFAULT_STORE_DRIVER_KEY_ROOT}/aa/object`,
       etag: 'head-etag',
       size: 4,
       contentType: 'video/mp4',
