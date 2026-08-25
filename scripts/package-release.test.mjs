@@ -16,7 +16,8 @@ import {
   parseRequestedPackages,
   selectReleasePackages,
 } from './select-release-packages.mjs'
-import { npmRegistryVersionState } from './npm-registry-version.mjs'
+import { npmRegistrySnapshot, npmRegistryVersionState } from './npm-registry-version.mjs'
+import { buildReleasePlan } from './release-plan.mjs'
 
 const root = join(import.meta.dirname, '..')
 const publicPackages = ['app', 'cli', 'dashboard', 'gateway', 'plugin-sdk', 'sdk', 'server']
@@ -106,6 +107,63 @@ test('release prerequisite closure matches public artifacts runtime workspace de
   )
 })
 
+test('release plan uses exact versions and one registry snapshot per package', async () => {
+  const manifests = {
+    app: {
+      dependencies: {},
+      name: '@tool-bridge/app',
+      version: '1.0.0',
+    },
+    dashboard: {
+      dependencies: {},
+      name: '@tool-bridge/dashboard',
+      version: '2.0.0',
+    },
+    server: {
+      dependencies: { '@tool-bridge/dashboard': 'workspace:*' },
+      name: '@tool-bridge/server',
+      version: '2.0.0',
+    },
+  }
+  const registry = {
+    '@tool-bridge/app': {
+      'dist-tags': { latest: '9.0.0' },
+      'versions': { '1.0.0': {}, '9.0.0': {} },
+    },
+    '@tool-bridge/dashboard': {
+      'dist-tags': { latest: '1.0.0' },
+      'versions': { '1.0.0': {} },
+    },
+    '@tool-bridge/server': {
+      'dist-tags': { latest: '1.0.0' },
+      'versions': { '1.0.0': {} },
+    },
+  }
+  const calls = new Map()
+  const plan = await buildReleasePlan({
+    fetcher: async (url) => {
+      const name = decodeURIComponent(new URL(url).pathname.slice(1))
+      calls.set(name, (calls.get(name) ?? 0) + 1)
+      return {
+        json: async () => registry[name],
+        ok: true,
+        status: 200,
+      }
+    },
+    manifestLoader: async pkg => manifests[pkg],
+    packages: ['app', 'dashboard', 'server'],
+  })
+
+  assert.deepEqual(Object.fromEntries(calls), {
+    '@tool-bridge/app': 1,
+    '@tool-bridge/dashboard': 1,
+    '@tool-bridge/server': 1,
+  })
+  assert.equal(plan.packages.find(entry => entry.pkg === 'app').needsPublish, false)
+  assert.equal(plan.packages.find(entry => entry.pkg === 'app').published, '9.0.0')
+  assert.deepEqual(plan.order, ['dashboard', 'server'])
+})
+
 test('exact npm registry version state distinguishes presence, absence, and failures', async () => {
   const response = (status, body) => ({
     json: async () => body,
@@ -133,6 +191,16 @@ test('exact npm registry version state distinguishes presence, absence, and fail
   await assert.rejects(
     npmRegistryVersionState('@tool-bridge/example', '1.2.3', async () => response(503)),
     /HTTP 503/,
+  )
+  const snapshot = await npmRegistrySnapshot('@tool-bridge/example', async () => response(200, {
+    'dist-tags': { latest: '2.0.0' },
+    'versions': { '1.2.3': {}, '2.0.0': {} },
+  }))
+  assert.equal(snapshot.latest, '2.0.0')
+  assert.deepEqual([...snapshot.versions], ['1.2.3', '2.0.0'])
+  await assert.rejects(
+    npmRegistryVersionState('@tool-bridge/example', '1.2.3', async () => response(200, {})),
+    /缺少 versions 对象/,
   )
 })
 
@@ -426,6 +494,13 @@ for (const [packageName, expected] of Object.entries(publishValidationClosures))
 test('release workflow closes package prerequisites and safely resumes existing tags', async () => {
   const workflow = await readFile(join(root, '.github', 'workflows', 'release.yml'), 'utf8')
 
+  assert.equal(
+    workflow.match(/node scripts\/release-plan\.mjs/g)?.length,
+    1,
+    'one release invocation must use one registry snapshot for summary and order',
+  )
+  assert.match(workflow, /release-plan\.mjs --json-file "\$PLAN_FILE" \| tee plan\.txt/)
+  assert.match(workflow, /PLAN="\$\(cat "\$PLAN_FILE"\)"/)
   assert.match(
     workflow,
     /node scripts\/select-release-packages\.mjs "\$ONLY"/,

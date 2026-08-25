@@ -62,8 +62,11 @@ jobs:
         name: Compute release plan
         run: |
           set -o pipefail
-          node scripts/release-plan.mjs | tee plan.txt
-          PLAN="$(node scripts/release-plan.mjs --json)"
+          PLAN_FILE="$RUNNER_TEMP/release-plan.json"
+          # 一次 registry snapshot 同时生成人类摘要与机器计划。不重跑
+          # release-plan:否则 registry 在两次请求间更新时,summary 与 ORDER 会互相矛盾。
+          node scripts/release-plan.mjs --json-file "$PLAN_FILE" | tee plan.txt
+          PLAN="$(cat "$PLAN_FILE")"
           # 子集不能直接 filter：server 依赖待发 dashboard 时必须
           # 自动把 dashboard 加回来，并沿用 release-plan 已验证的拓扑顺序。
           ORDER="$(printf '%s' "$PLAN" | node scripts/select-release-packages.mjs "$ONLY")"

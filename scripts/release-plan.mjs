@@ -1,26 +1,30 @@
 #!/usr/bin/env node
 /**
- * 发布计划(**纯读**:不写盘、不打 tag、不发包)。
+ * 发布计划(不改版本、不打 tag、不发包;`--json-file` 只写快照输出)。
  *
- *   node scripts/release-plan.mjs           # 人类可读
- *   node scripts/release-plan.mjs --json    # 供 workflow 消费
+ *   node scripts/release-plan.mjs                         # 人类可读
+ *   node scripts/release-plan.mjs --json                  # 供单一消费者
+ *   node scripts/release-plan.mjs --json-file <snapshot>  # 同一快照供多消费者复用
  *
- * 回答三个每轮发布都要手工回答一遍的问题:
- * 1. 哪些 public 包的本地版本领先 registry(= 待发);
+ * 回答两个每轮发布都要手工回答一遍的问题:
+ * 1. 哪些 public 包的本地精确版本尚未存在于 registry(= 待发);
  * 2. 按什么顺序发(唯一硬约束:`server` 的 regular dep 是 `@tool-bridge/dashboard`,
  *    `pnpm pack` 会把 `workspace:*` 改写成具体版本 —— dashboard 没发,server 装不上);
- * 3. 有没有"发出去就装不上"的组合(某包 tarball 引用了 registry 上不存在的版本)。
  *
- * 之所以值得一个脚本:这三问此前靠人对着 `npm view` 逐包比,而漏判的代价不对称 ——
+ * 之所以值得一个脚本:这两问此前靠人对着 `npm view` 逐包比,而漏判的代价不对称 ——
  * npm 版本号**不可回收**,发错一个就只能再 bump 一版。
  */
 
+import { writeFile } from 'node:fs/promises'
+import { fileURLToPath } from 'node:url'
 import { readFileSync } from 'node:fs'
+import { parseArgs } from 'node:util'
 import process from 'node:process'
 import { join } from 'node:path'
+import { npmRegistrySnapshot } from './npm-registry-version.mjs'
 
 /** 可发布包(private 的 core/plugins 由各产物 bundle,不单独发)。 */
-const PUBLIC_PACKAGES = ['app', 'cli', 'dashboard', 'gateway', 'plugin-sdk', 'sdk', 'server']
+export const PUBLIC_PACKAGES = ['app', 'cli', 'dashboard', 'gateway', 'plugin-sdk', 'sdk', 'server']
 
 /**
  * 发布顺序的硬约束:`依赖 → 依赖它的包`。
@@ -34,17 +38,6 @@ const ROOT = join(import.meta.dirname, '..')
 
 function manifestOf(pkg) {
   return JSON.parse(readFileSync(join(ROOT, 'packages', pkg, 'package.json'), 'utf8'))
-}
-
-/** registry 上的 latest;包不存在(首发)→ null。网络失败会抛,不静默当成"没发过"。 */
-async function registryVersion(name) {
-  const res = await fetch(`https://registry.npmjs.org/${name.replace('/', '%2F')}`, {
-    headers: { accept: 'application/vnd.npm.install-v1+json' },
-  })
-  if (res.status === 404) return null
-  if (!res.ok) throw new Error(`registry ${name} → HTTP ${res.status}`)
-  const body = await res.json()
-  return body['dist-tags']?.latest ?? null
 }
 
 /** 该包发布后,哪些 workspace 依赖会被 pnpm pack 改写成具体版本。 */
@@ -69,104 +62,111 @@ function topoSort(names) {
   return out
 }
 
-const entries = []
-for (const pkg of PUBLIC_PACKAGES) {
-  const manifest = manifestOf(pkg)
-  const local = manifest.version
-  const published = await registryVersion(manifest.name)
-  entries.push({
-    pkg,
-    name: manifest.name,
-    local,
-    published,
-    needsPublish: published !== local,
-    firstRelease: published === null,
-    deps: workspaceDeps(manifest),
-    tag: `${pkg}-v${local}`,
+export async function buildReleasePlan({
+  fetcher = globalThis.fetch,
+  manifestLoader = manifestOf,
+  packages = PUBLIC_PACKAGES,
+} = {}) {
+  if (typeof fetcher !== 'function') throw new TypeError('fetcher must be a function')
+  if (typeof manifestLoader !== 'function') throw new TypeError('manifestLoader must be a function')
+
+  // 同一调用内每包只取一次 snapshot;latest 与 exact 不会来自两个时刻。
+  const entries = await Promise.all(packages.map(async (pkg) => {
+    const manifest = await manifestLoader(pkg)
+    const local = manifest.version
+    const snapshot = await npmRegistrySnapshot(manifest.name, fetcher)
+    return {
+      pkg,
+      name: manifest.name,
+      local,
+      published: snapshot.latest,
+      needsPublish: !snapshot.versions.has(local),
+      firstRelease: !snapshot.exists,
+      deps: workspaceDeps(manifest),
+      tag: `${pkg}-v${local}`,
+    }
+  }))
+
+  const byPkg = new Map(entries.map(e => [e.pkg, e]))
+  const pending = entries.filter(e => e.needsPublish)
+  const order = topoSort(pending.map(e => e.pkg))
+
+  // 反向:某包**不**待发,但它依赖的包 bump 了 —— 那个包的已发 tarball 引用的是旧版本,
+  // 没问题;真正的坑是"依赖 bump 了而自己没 bump",消费者拿不到新依赖。仅提示。
+  const staleConsumers = []
+  for (const entry of entries) {
+    if (entry.needsPublish) continue
+    for (const dep of entry.deps) {
+      const target = byPkg.get(dep)
+      if (target?.needsPublish === true) {
+        staleConsumers.push(`${entry.name} 未 bump,但其依赖 ${target.name} 本轮要发新版`)
+      }
+    }
+  }
+
+  return {
+    order,
+    packages: entries,
+    staleConsumers,
+    tags: order.map(p => byPkg.get(p).tag),
+  }
+}
+
+export function formatReleasePlan(plan) {
+  const lines = ['包状态(local exact version;latest 仅供参考):']
+  for (const entry of plan.packages) {
+    const mark = entry.needsPublish ? (entry.firstRelease ? '首发' : '待发') : ' ok '
+    const state = entry.needsPublish
+      ? `${String(entry.published ?? '-').padStart(8)} → ${entry.local}`
+      : `${entry.local} 已存在${entry.published !== entry.local ? ` (latest ${entry.published ?? '-'})` : ''}`
+    lines.push(`  [${mark}] ${entry.name.padEnd(26)} ${state}`)
+  }
+
+  if (plan.order.length === 0) {
+    lines.push('', '没有待发包:全部精确版本已在 registry。')
+    return lines.join('\n')
+  }
+
+  const byPkg = new Map(plan.packages.map(entry => [entry.pkg, entry]))
+  lines.push('', `发布顺序(${plan.order.length} 个):`)
+  plan.order.forEach((pkg, index) => {
+    const entry = byPkg.get(pkg)
+    const why = entry.deps.length > 0 ? `  ← 依赖 ${entry.deps.join(', ')}` : ''
+    lines.push(`  ${index + 1}. ${pkg} → ${entry.tag}${why}`)
+  })
+
+  if (plan.staleConsumers.length > 0) {
+    lines.push('', '提示:', ...plan.staleConsumers.map(message => `  · ${message}`))
+  }
+  lines.push(
+    '',
+    '一条命令跑完:gh workflow run release.yml',
+    '(它按上面的顺序逐个触发 publish-*.yml,失败即停,不必手工打 tag)',
+  )
+  return lines.join('\n')
+}
+
+async function main(argv) {
+  const { values } = parseArgs({
+    args: argv,
+    options: {
+      'json': { type: 'boolean' },
+      'json-file': { type: 'string' },
+    },
+    strict: true,
+  })
+  const plan = await buildReleasePlan()
+  const json = `${JSON.stringify(plan, null, 2)}\n`
+  if (values['json-file'] !== undefined) await writeFile(values['json-file'], json)
+  process.stdout.write(values.json ? json : `${formatReleasePlan(plan)}\n`)
+}
+
+const isMain = process.argv[1] !== undefined
+  && fileURLToPath(import.meta.url) === process.argv[1]
+
+if (isMain) {
+  main(process.argv.slice(2)).catch((error) => {
+    process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`)
+    process.exitCode = 1
   })
 }
-
-const byPkg = new Map(entries.map(e => [e.pkg, e]))
-const pending = entries.filter(e => e.needsPublish)
-const order = topoSort(pending.map(e => e.pkg))
-
-/**
- * "发出去装不上"检查:某个待发包的 workspace 依赖,发布后会被改写成**本地**版本号,
- * 而那个版本此刻可能还不在 registry 上。若该依赖也在本轮待发列表里,顺序能解决;
- * 若它不在(比如有人只 bump 了 server),那就是硬错误。
- */
-const blockers = []
-for (const entry of pending) {
-  for (const dep of entry.deps) {
-    const target = byPkg.get(dep)
-    if (target === undefined) continue
-    if (target.published === target.local) continue
-    if (!target.needsPublish) continue
-    if (!order.includes(dep)) {
-      blockers.push(
-        `${entry.name}@${entry.local} 会引用 ${target.name}@${target.local},`
-        + `但 registry 上是 ${target.published ?? '(未发布)'} —— 必须同轮先发 ${dep}`,
-      )
-    }
-  }
-}
-
-// 反向:某包**不**待发,但它依赖的包 bump 了 —— 那个包的已发 tarball 引用的是旧版本,
-// 没问题;真正的坑是"依赖 bump 了而自己没 bump",消费者拿不到新依赖。仅提示。
-const staleConsumers = []
-for (const entry of entries) {
-  if (entry.needsPublish) continue
-  for (const dep of entry.deps) {
-    const target = byPkg.get(dep)
-    if (target?.needsPublish === true) {
-      staleConsumers.push(`${entry.name} 未 bump,但其依赖 ${target.name} 本轮要发新版`)
-    }
-  }
-}
-
-const plan = {
-  order,
-  packages: entries,
-  blockers,
-  staleConsumers,
-  tags: order.map(p => byPkg.get(p).tag),
-}
-
-if (process.argv.includes('--json')) {
-  console.log(JSON.stringify(plan, null, 2))
-  process.exit(blockers.length > 0 ? 1 : 0)
-}
-
-console.log('包状态(local vs registry latest):')
-for (const e of entries) {
-  const mark = e.needsPublish ? (e.firstRelease ? '首发' : '待发') : ' ok '
-  console.log(
-    `  [${mark}] ${e.name.padEnd(26)} ${String(e.published ?? '-').padStart(8)} → ${e.local}`,
-  )
-}
-
-if (pending.length === 0) {
-  console.log('\n没有待发包:全部与 registry 对齐。')
-  process.exit(0)
-}
-
-console.log(`\n发布顺序(${order.length} 个):`)
-order.forEach((p, i) => {
-  const e = byPkg.get(p)
-  const why = e.deps.length > 0 ? `  ← 依赖 ${e.deps.join(', ')}` : ''
-  console.log(`  ${i + 1}. ${p} → ${e.tag}${why}`)
-})
-
-if (staleConsumers.length > 0) {
-  console.log('\n提示:')
-  for (const s of staleConsumers) console.log(`  · ${s}`)
-}
-
-if (blockers.length > 0) {
-  console.log('\n阻塞项(发了会装不上):')
-  for (const b of blockers) console.log(`  ✗ ${b}`)
-  process.exit(1)
-}
-
-console.log('\n一条命令跑完:gh workflow run release.yml')
-console.log('(它按上面的顺序逐个触发 publish-*.yml,失败即停,不必手工打 tag)')
