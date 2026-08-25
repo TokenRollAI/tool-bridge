@@ -15,6 +15,9 @@ code:
     - packages/dashboard/src/components/SchemaFormRenderer.tsx
     - packages/dashboard/src/components/DashboardThemeProvider.tsx
     - packages/dashboard/src/pages/**
+    - packages/dashboard/test/integrationDialog.dom.test.tsx
+    - packages/dashboard/test/mountDialog.dom.test.tsx
+    - packages/dashboard/test/structuredForms.dom.test.tsx
     - packages/sdk/src/client/**
     - packages/sdk/src/store/**
 ---
@@ -40,7 +43,7 @@ Dashboard 是纯 HTTP 客户端,不 import core。固定控制面 wire 类型与
 - JSON Schema 表单只有一个懒加载的 `SchemaFormRenderer`，统一持有 RJSF/AJV validator；`SchemaFields` 和命令面板只投影 props/UI，不得各自实例化另一套 schema renderer。
 - `DashboardThemeProvider` 是主题持久化与 DOM class 的唯一真源，由 `next-themes` 处理初始注入与同步；当前默认 dark 且明确禁用 system theme。业务组件只消费当前 theme，不直接维护 localStorage/class。
 
-表单编译与图布局逻辑优先抽成无 React 依赖的函数(`forms/*.ts`、`canvas/treeGraph.ts`),用 Node Vitest 断言最终 payload、布局结果、互斥项、必填项和 fail-closed 分支;DOM 测试再覆盖交互顺序、焦点和敏感值展示。
+表单编译与图布局逻辑优先抽成无 React 依赖的函数(`forms/*.ts`、`canvas/treeGraph.ts`),用 Node Vitest 断言最终 payload、布局结果、互斥项、必填项和 fail-closed 分支;DOM 测试再覆盖交互顺序、焦点和敏感值展示。依赖懒加载 `SchemaFormRenderer` 的业务交互套件在模块收集期预热真实 renderer,让断言只衡量 RJSF/AJV 与业务交互,不把并行 CI 下的 Vite 冷转换时延当作产品契约;不得为此放大全局异步超时、mock renderer 或删除生产 `lazy`/`Suspense`,实际拆包仍由 production build 与 UI integration 验证。
 
 ## 当前约束
 
