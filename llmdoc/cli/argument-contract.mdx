@@ -6,6 +6,11 @@ relations:
     - protocol/htbp-contract.mdx
 code:
   paths:
+    - knip.jsonc
+    - packages/cli/package.json
+    - packages/cli/src/args.ts
+    - packages/cli/src/commander.d.ts
+    - packages/cli/src/commanderInference.typecheck.ts
     - packages/cli/src/main.ts
     - packages/cli/src/program.ts
     - packages/cli/src/confirm.ts
@@ -41,6 +46,19 @@ CLI 是公共控制面,不是 API 的宽松包装。修改命令时同时检查�
   `store share`：成功 stdout/JSON 必须交付该次请求产生的短期 `$ref`，否则 share 命令没有可用产物；
   其他 Store 输出继续裁剪 bearer。
 - 删除资源只做命令名承诺的动作,并校验目标 kind:`integration rm` 只卸 tool/context 节点,打到 device 等其它 kind 即拒(走 `deleteNode(target, path, ['tool','context'])`)。集成卸载与密钥删除是两个显式操作。
+
+## 类型契约
+
+Commander 的 `.argument()`/`.option()` 链同时是运行时解析、help 与 action callback 类型的真源。命令文件
+不得再维护平行的 opts interface 或重复标注 callback 参数；共享 decorator 必须保留并返回 Commander 的
+`Command<Args, Opts, GlobalOpts>` 增强泛型，调用者也必须继续使用增强后的返回值，不能重新拓宽成普通
+`Command`。
+
+CLI 使用 Commander 官方 extra typings 的 ambient module 只替换编译期声明，运行时仍只依赖并导入
+`commander`；两者的 major/minor 线必须对齐。`commanderInference.typecheck.ts` 是 `tsc --noEmit` 必须覆盖、
+但 CLI 运行入口不得 import 的 compile-only 契约夹具，用代表性 positional、全局/分页/device options 与
+repeatable collector 防止 wrapper 或依赖升级把推断退化成 `any`。Knip 对这类类型入口做窄范围显式建模，
+不得用全仓 ignore 掩盖真实未使用文件或依赖。
 
 ## 结构与错误边界
 

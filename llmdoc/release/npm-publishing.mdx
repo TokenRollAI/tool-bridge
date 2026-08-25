@@ -42,6 +42,13 @@ Dashboard 若嵌入 server/gateway 产物,应先发布它依赖的包,再发布�
 
 重跑时以 tag + commit + workflow 为身份：已成功 run 直接复用，active run 继续 watch，只有失败或缺失的 workflow run 才重新 dispatch。npm 另查 registry 精确版本并做幂等跳过，但当前不查 GHCR 中镜像 tag 的实物存在性：CLI/server 的成功 image workflow 若在事后被删除，编排器不会自动发现或重建。因此不得把当前模型描述为 artifact-level recovery；若要这个承诺，必须先加 registry 实物探测。不得用 latest dist-tag 代替 npm 精确版本存在性。
 
+发布计划的待发判据是 registry metadata 的 `versions` 是否包含**本地精确版本**；不比较 semver 大小，
+`dist-tags.latest` 只用于人类摘要。一次 plan invocation 对每包只取一次 metadata snapshot，并把同一个内存 plan
+序列化给人类摘要、包子集闭包和机器发布顺序；workflow 不得重跑 planner 让不同消费者观察两个 registry
+时刻。这里的“同一 snapshot”不是 npm 的跨包原子事务，只保证本次 planner 内每包一次观察和多个消费者同源；
+后续逐包恢复/等待可见性仍会重新查询精确版本。网络失败或 metadata 缺少合法 `versions` 时 fail closed，
+不能降级成“尚未发布”。
+
 ## 三种独立证据
 
 来自一次真实故障(CLI 0.17.0 发布后 `npm install -g` 报 `EUNSUPPORTEDPROTOCOL`,tarball 依赖里残留 `catalog:` 协议)的教训:

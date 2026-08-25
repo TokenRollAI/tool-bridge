@@ -12,6 +12,9 @@ code:
     - packages/core/src/builtin/**
     - packages/core/src/operation/**
     - packages/core/src/protocol/**
+    - packages/core/src/device/frames.ts
+    - packages/core/test/device/frames.test.ts
+    - packages/core/test/protocol/wire.test.ts
     - packages/core/src/context/objectProvider.ts
     - packages/core/src/context/objectStore.ts
     - packages/core/src/objectStoreService/**
@@ -27,6 +30,13 @@ code:
 ## 契约单一真源
 
 固定控制面的请求/响应 Zod schema 位于 `packages/core/src/protocol/wire.ts`：app 路由门禁、`@tool-bridge/sdk/client` 运行时校验与 OpenAPI 3.1 artifact 从同一份 schema 投影。OpenAPI 只静态描述 health/help/tree/search/OAuth/feedback/registry 等固定面；运行时动态 HTBP 命令仍以 `~help` 发现为准。生成类型或 OpenAPI 文件都不能代替网络边界的 runtime validation。
+
+Action、NodeKind 与 TBError code 的规范词汇分别以 core 的 `ACTIONS`、`NODE_KINDS`、`TB_ERROR_CODES` 为
+真源，wire Zod enum 从这些常量投影，不维护第二份字面量清单。最小 `errorWire.ts` 的
+`tbErrorBodySchema` 同时服务固定控制面和 device error/result frame；device codec 不为复用错误体而导入整张
+固定控制面 schema 图。发布给 SDK consumer 的 `Wire*` 类型优先直接 alias 稳定领域类型，不能为了少写几行
+改成会把 Zod 推断细节泄漏进 `.d.ts` 的类型。该规则只覆盖已有 canonical vocabulary/领域类型，不表示所有
+wire literal 都已统一。
 
 builtin、Context 与 Skillhub 的命令使用 `HtbpCommandRegistry` 注册一次，同时投影 Help metadata、scope、strict Zod 入参与 dispatch handler。不得再分别维护 command 名清单、Help switch、scope switch 和 invoke switch；宿主或 capability 差异通过裁剪同一注册表表达，而不是再造一套 schema。
 

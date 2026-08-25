@@ -64,3 +64,14 @@ code:
 `guardedFetch` 仍是 provider 唯一出站安全边界：初始 URL 和每一跳 redirect 都重做协议/IP 字面量策略，跨源剥离凭证、默认 fail closed。redirect method/body 必须遵循 Fetch 语义：301/302 只把 POST 改为 GET，303 把 GET/HEAD 以外的方法改为 GET 并删除 body headers，307/308 保留 method/body。IP 库只替换地址 grammar，不替换仓库的禁止网段政策。Node/Workers 不共享一致的 DNS 解析门禁，本层故意不检查域名解析结果；DNS rebinding 由部署侧出网策略阻断，不得把 IP 字面量校验误表述为完整 DNS SSRF 防线。
 
 只有流式、协议升级或其他薄层确实无法表达的边界才能保留直接 `guardedFetch`；每个例外都必须在 `provider-http-exceptions.json` 按文件/原因登记，并由策略测试同时拒绝未登记调用和已失效 allowlist。普通 provider 不得自行恢复裸 `fetch`、retry 或另一套错误映射。
+
+### 有界缓冲响应
+
+provider 需要把不可信二进制/文本响应完整缓冲到内存时，使用共享 `readBoundedResponseBytes`，由调用方声明
+`maxBytes` 与领域错误。默认可用合法 `Content-Length` 做早拒，但读取过程中仍按实际字节计数，后者才是
+最终硬边界；不能先无界 `arrayBuffer()` 再检查大小。超限必须 cancel stream，并在所有路径释放 reader lock。
+
+少数上游若历史契约只信实际流量，可显式关闭声明长度预检，但不得关闭实际字节上限。大字节 Base64 使用
+Web-runtime-neutral 的分块 helper，不能重新引入整数组 spread 或 Node-only `Buffer`。这些 helper 只统一
+“完整缓冲”原语：它们不是零拷贝/常量内存流式传输，也不替代 `guardedFetch`、deadline、redirect、SSE、
+multipart 或 provider 专属 status/error 语义。
