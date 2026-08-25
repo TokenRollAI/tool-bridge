@@ -1,11 +1,8 @@
 import {
-  base64urlEncode,
   type CallContext,
-  encodeCallContext,
-  HEADER_TB_CONTEXT,
-  HEADER_TB_UPSTREAM_AUTH,
 } from '@tool-bridge/core'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+import { createProviderHarness } from '../support/providerHarness'
 import { createLangsmithPlugin } from '../../src/langsmith/index'
 import { langsmithActions } from '../../src/langsmith/schema'
 
@@ -17,8 +14,6 @@ import { langsmithActions } from '../../src/langsmith/schema'
  * 以及出参裁剪里 nullable 与 optional 的区别。
  */
 
-const PLUGIN_TOKEN = 'tbp_test'
-const ENV = { PLUGIN_TOKEN }
 const API_KEY = 'lsv2_pt_deadbeef'
 const plugin = createLangsmithPlugin()
 
@@ -39,50 +34,17 @@ interface CallOptions {
   config?: Record<string, unknown> | undefined
 }
 
-function envelope(body: unknown, opts: CallOptions = {}): Promise<Response> {
-  const headers: Record<string, string> = {
-    'authorization': `Bearer ${PLUGIN_TOKEN}`,
-    'content-type': 'application/json',
-    [HEADER_TB_CONTEXT]: encodeCallContext(caller('config' in opts ? opts.config : undefined)),
-  }
-  const auth = opts.auth === undefined ? API_KEY : opts.auth
-  if (auth !== null) {
-    headers[HEADER_TB_UPSTREAM_AUTH] = base64urlEncode(new TextEncoder().encode(auth))
-  }
-  return Promise.resolve(plugin.fetch(
-    new Request('https://plugin.test/', { method: 'POST', headers, body: JSON.stringify(body) }),
-    ENV as never,
-  ))
-}
-
-function call(name: string, args: unknown, opts?: CallOptions): Promise<Response> {
-  return envelope({ tool: 'Call', arguments: { name, args } }, opts)
-}
-
-function mockLangsmith(status: number, payload: unknown): ReturnType<typeof vi.fn> {
-  const fn = vi.fn(() => Promise.resolve(new Response(JSON.stringify(payload), {
-    status,
-    headers: { 'content-type': 'application/json' },
-  })))
-  vi.stubGlobal('fetch', fn)
-  return fn
-}
+const { call, envelope, sent, mockJson: mockLangsmith, env: ENV, stubFetch } = createProviderHarness<CallOptions>({
+  caller: opts => caller('config' in opts ? opts.config : undefined),
+  mountPath: 'ai/langsmith',
+  plugin,
+  upstreamAuth: API_KEY,
+})
 
 /** 直接给一段原始 body(测空体与非 JSON 错误体)。 */
 function mockRaw(status: number, body: string | null): ReturnType<typeof vi.fn> {
-  const fn = vi.fn(() => Promise.resolve(new Response(body, { status })))
-  vi.stubGlobal('fetch', fn)
-  return fn
+  return stubFetch(() => Promise.resolve(new Response(body, { status })))
 }
-
-/** 取上游收到的那个请求。 */
-function sent(mock: ReturnType<typeof vi.fn>): Request {
-  return (mock.mock.calls[0] as [Request])[0]
-}
-
-afterEach(() => {
-  vi.unstubAllGlobals()
-})
 
 describe('契约面', () => {
   it('List 出全部 10 个 action,且都带 Zod 派生的 schema', async () => {

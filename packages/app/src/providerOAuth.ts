@@ -65,16 +65,6 @@ async function clientCredential(
   }
 }
 
-function parseTokenErrorMessage(payload: unknown): string | undefined {
-  if (typeof payload !== 'object' || payload === null || Array.isArray(payload)) return undefined
-  const record = payload as Record<string, unknown>
-  for (const key of ['error_description', 'error', 'msg', 'message']) {
-    const value = record[key]
-    if (typeof value === 'string' && value !== '') return value
-  }
-  return undefined
-}
-
 /**
  * 落库。刷新响应常**不带新的 refresh token**(未启用轮换的 provider),此时必须保留旧的 ——
  * 否则下次就没得刷,用户被迫重新授权。
@@ -123,10 +113,10 @@ async function requestTokens(opts: {
   let response: Response
   try {
     response = await opts.fetcher(endpoint, { method: 'POST', headers, body })
-  } catch (err) {
+  } catch {
     throw new TBError(
       'unavailable',
-      `令牌端点不可达:${err instanceof Error ? err.message : String(err)}`,
+      '令牌端点不可达',
       { retryable: true },
     )
   }
@@ -140,15 +130,22 @@ async function requestTokens(opts: {
   }
   if (!response.ok) {
     // 令牌端点的 4xx 基本都是 client 凭证/授权码问题(配置错),5xx 才是上游故障。
-    // 消息取自响应体,但**不回显请求内容** —— 那里有 client_secret 与 code。
-    const parsed = payload === null ? undefined : parseTokenErrorMessage(payload)
-    const detail = parsed ?? `HTTP ${response.status}`
+    // 上游错误体不可信，且常会回显 client_secret/code/verifier；只暴露状态码。
+    const detail = `HTTP ${response.status}`
     if (response.status >= 500) {
       throw new TBError('unavailable', `令牌端点返回 ${detail}`, { retryable: true })
     }
     throw new TBError('invalid_argument', `令牌端点拒绝了请求:${detail}`)
   }
-  return parseTokenResponse(payload, opts.config, opts.now)
+  try {
+    return parseTokenResponse(payload, opts.config, opts.now)
+  } catch (err) {
+    // 200 + 错误信封同样可能回显请求秘密；保留错误类别，不透传上游消息。
+    if (isTBError(err) && err.code === 'invalid_argument') {
+      throw new TBError('invalid_argument', '令牌端点返回了无效响应')
+    }
+    throw err
+  }
 }
 
 // ---------- PKCE ----------
@@ -172,7 +169,8 @@ export interface ProviderAuthorizeOpts {
   authRef: string
   config: PluginOAuth
   encryptionKey: string
-  fetcher: typeof fetch
+  /** 宿主显式注入的安全出站通道；undefined 必须 fail closed。 */
+  fetcher: typeof fetch | undefined
   nodePath: string
   now: Date
   /** 网关 origin(拼默认回调地址)。 */
@@ -185,6 +183,13 @@ export type ProviderAuthorizeResult
   = | { authorizationUrl: string, status: 'redirect' }
     | { status: 'authorized' }
 
+function requireProviderOAuthFetch(fetcher: typeof fetch | undefined): typeof fetch {
+  if (fetcher === undefined) {
+    throw new TBError('unavailable', 'Provider OAuth 出站通道未配置', { retryable: false })
+  }
+  return fetcher
+}
+
 /**
  * 发起授权。已有可用令牌(或能静默刷新)→ 直接 authorized,免交互;
  * 否则产出跳转 URL,PKCE verifier 密封在 state 里(零存储,天然绕开 KV 最终一致窗口)。
@@ -192,6 +197,7 @@ export type ProviderAuthorizeResult
 export async function startProviderAuthorization(
   opts: ProviderAuthorizeOpts,
 ): Promise<ProviderAuthorizeResult> {
+  const fetcher = requireProviderOAuthFetch(opts.fetcher)
   const existing = await readTokens(opts.store, opts.nodePath)
   if (existing !== undefined && !shouldRefresh(existing, opts.now)) {
     return { status: 'authorized' }
@@ -202,7 +208,7 @@ export async function startProviderAuthorization(
       const client = await clientCredential(opts.secrets, opts.authRef)
       const refreshed = await requestTokens({
         config: opts.config,
-        fetcher: opts.fetcher,
+        fetcher,
         now: opts.now,
         grant: { refreshToken: existing.refreshToken },
         ...client,
@@ -242,10 +248,11 @@ export async function finishProviderAuthorization(opts: ProviderAuthorizeOpts & 
   code: string
   codeVerifier: string
 }): Promise<void> {
+  const fetcher = requireProviderOAuthFetch(opts.fetcher)
   const client = await clientCredential(opts.secrets, opts.authRef)
   const tokens = await requestTokens({
     config: opts.config,
-    fetcher: opts.fetcher,
+    fetcher,
     now: opts.now,
     grant: { code: opts.code, redirectUri: opts.origin + PROVIDER_OAUTH_CALLBACK_PATH },
     ...(opts.codeVerifier === '' ? {} : { codeVerifier: opts.codeVerifier }),
@@ -266,6 +273,7 @@ export async function finishProviderAuthorization(opts: ProviderAuthorizeOpts & 
 export async function resolveProviderAccessToken(
   opts: ProviderAuthorizeOpts & { force?: boolean },
 ): Promise<string> {
+  const fetcher = requireProviderOAuthFetch(opts.fetcher)
   const tokens = await readTokens(opts.store, opts.nodePath)
   if (tokens === undefined) throw providerReauthorizeRequired(opts.nodePath)
   // force:调用方收到 401 了。上游可能在过期时刻前就作废了令牌(密钥轮换),而不返回
@@ -279,7 +287,7 @@ export async function resolveProviderAccessToken(
   try {
     refreshed = await requestTokens({
       config: opts.config,
-      fetcher: opts.fetcher,
+      fetcher,
       now: opts.now,
       grant: { refreshToken: tokens.refreshToken },
       ...client,

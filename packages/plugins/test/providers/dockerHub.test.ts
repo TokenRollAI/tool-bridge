@@ -1,11 +1,5 @@
-import {
-  base64urlEncode,
-  type CallContext,
-  encodeCallContext,
-  HEADER_TB_CONTEXT,
-  HEADER_TB_UPSTREAM_AUTH,
-} from '@tool-bridge/core'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+import { createProviderHarness } from '../support/providerHarness'
 import { createDockerHubPlugin } from '../../src/docker_hub/index'
 import { dockerHubActions } from '../../src/docker_hub/schema'
 
@@ -15,41 +9,21 @@ import { dockerHubActions } from '../../src/docker_hub/schema'
  * `get_image` 的客户端分页扫描、以及藏在 `errinfo` 里的错误原因。
  */
 
-const PLUGIN_TOKEN = 'tbp_test'
-const ENV = { PLUGIN_TOKEN }
 const API_KEY = 'octocat:dckr_pat_secret'
 const BEARER = 'hub_bearer_token'
 const TOKEN_PATH = '/v2/auth/token'
 const plugin = createDockerHubPlugin()
 
-const CALLER: CallContext = {
-  keyId: 'k1',
-  owner: 'agent:tester',
-  scopes: [],
-  traceId: 't1',
+const {
+  call,
+  envelope,
+  env: ENV,
+  stubFetch,
+} = createProviderHarness({
   mountPath: 'registry/dockerhub',
-  exportId: 'actions',
-}
-
-function envelope(body: unknown, opts: { auth?: string | null } = {}): Promise<Response> {
-  const headers: Record<string, string> = {
-    'authorization': `Bearer ${PLUGIN_TOKEN}`,
-    'content-type': 'application/json',
-    [HEADER_TB_CONTEXT]: encodeCallContext(CALLER),
-  }
-  const auth = opts.auth === undefined ? API_KEY : opts.auth
-  if (auth !== null) {
-    headers[HEADER_TB_UPSTREAM_AUTH] = base64urlEncode(new TextEncoder().encode(auth))
-  }
-  return Promise.resolve(plugin.fetch(
-    new Request('https://plugin.test/', { method: 'POST', headers, body: JSON.stringify(body) }),
-    ENV as never,
-  ))
-}
-
-function call(name: string, args: unknown, opts?: { auth?: string | null }): Promise<Response> {
-  return envelope({ tool: 'Call', arguments: { name, args } }, opts)
-}
+  plugin,
+  upstreamAuth: API_KEY,
+})
 
 function json(status: number, payload: unknown): Response {
   // 204/205/304 是 null body status:`new Response('', {status:204})` 在 undici 下直接
@@ -68,22 +42,18 @@ function json(status: number, payload: unknown): Response {
  */
 function mockHub(...business: Array<[number, unknown]>): ReturnType<typeof vi.fn> {
   const queue = [...business]
-  const fn = vi.fn((request: Request) => {
+  return stubFetch((request: Request) => {
     if (new URL(request.url).pathname === TOKEN_PATH) {
       return Promise.resolve(json(200, { access_token: BEARER }))
     }
     const [status, payload] = queue.shift() ?? [200, {}]
     return Promise.resolve(json(status, payload))
   })
-  vi.stubGlobal('fetch', fn)
-  return fn
 }
 
 /** 换 token 这一跳本身失败。 */
 function mockTokenFailure(status: number, payload: unknown): ReturnType<typeof vi.fn> {
-  const fn = vi.fn(() => Promise.resolve(json(status, payload)))
-  vi.stubGlobal('fetch', fn)
-  return fn
+  return stubFetch(() => Promise.resolve(json(status, payload)))
 }
 
 function requests(mock: ReturnType<typeof vi.fn>): Request[] {
@@ -96,10 +66,6 @@ function business(mock: ReturnType<typeof vi.fn>): Request {
   if (request === undefined) throw new Error('没有打出任何业务请求')
   return request
 }
-
-afterEach(() => {
-  vi.unstubAllGlobals()
-})
 
 describe('契约面', () => {
   it('~describe 报单个 tools/v1 export(没有 credentialProbe:read action 都要业务 id)', async () => {

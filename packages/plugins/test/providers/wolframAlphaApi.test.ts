@@ -1,13 +1,7 @@
-import {
-  base64urlEncode,
-  type CallContext,
-  encodeCallContext,
-  HEADER_TB_CONTEXT,
-  HEADER_TB_UPSTREAM_AUTH,
-} from '@tool-bridge/core'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { createWolframAlphaApiPlugin } from '../../src/wolfram_alpha_api/index'
 import { wolframAlphaApiActions } from '../../src/wolfram_alpha_api/schema'
+import { createProviderHarness } from '../support/providerHarness'
 
 /**
  * Wolfram|Alpha 迁移产物的 wire 级验收。重点在几个"迁移最容易迁丢"的地方:
@@ -15,58 +9,28 @@ import { wolframAlphaApiActions } from '../../src/wolfram_alpha_api/schema'
  * 以及 recognizer 那几个大小写混杂的字段名(抄错一个字母就静默丢字段)。
  */
 
-const PLUGIN_TOKEN = 'tbp_test'
-const ENV = { PLUGIN_TOKEN }
 const API_KEY = 'WOLFRAM-DEADBEEF'
 const plugin = createWolframAlphaApiPlugin()
 
-const CALLER: CallContext = {
-  keyId: 'k1',
-  owner: 'agent:tester',
-  scopes: [],
-  traceId: 't1',
+const {
+  call,
+  envelope,
+  sent,
+  env: ENV,
+  stubFetch,
+} = createProviderHarness({
   mountPath: 'compute/wolfram',
-  exportId: 'actions',
-}
-
-function envelope(body: unknown, opts: { auth?: string | null } = {}): Promise<Response> {
-  const headers: Record<string, string> = {
-    'authorization': `Bearer ${PLUGIN_TOKEN}`,
-    'content-type': 'application/json',
-    [HEADER_TB_CONTEXT]: encodeCallContext(CALLER),
-  }
-  const auth = opts.auth === undefined ? API_KEY : opts.auth
-  if (auth !== null) {
-    headers[HEADER_TB_UPSTREAM_AUTH] = base64urlEncode(new TextEncoder().encode(auth))
-  }
-  return Promise.resolve(plugin.fetch(
-    new Request('https://plugin.test/', { method: 'POST', headers, body: JSON.stringify(body) }),
-    ENV as never,
-  ))
-}
-
-function call(name: string, args: unknown, opts?: { auth?: string | null }): Promise<Response> {
-  return envelope({ tool: 'Call', arguments: { name, args } }, opts)
-}
+  plugin,
+  upstreamAuth: API_KEY,
+})
 
 /** Wolfram 回的是纯文本(recognizer 那条也只是把 JSON 当文本回)。 */
 function mockWolfram(status: number, body: string): ReturnType<typeof vi.fn> {
-  const fn = vi.fn(() => Promise.resolve(new Response(body, {
+  return stubFetch(() => Promise.resolve(new Response(body, {
     status,
     headers: { 'content-type': 'text/plain' },
   })))
-  vi.stubGlobal('fetch', fn)
-  return fn
 }
-
-/** 取上游收到的那个请求。 */
-function sent(mock: ReturnType<typeof vi.fn>): Request {
-  return (mock.mock.calls[0] as [Request])[0]
-}
-
-afterEach(() => {
-  vi.unstubAllGlobals()
-})
 
 describe('契约面', () => {
   it('~describe 报成单个 tools/v1 export', async () => {

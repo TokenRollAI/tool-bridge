@@ -1,6 +1,6 @@
 import { Command } from 'commander'
-import { guard, printJson, printLine } from '../output'
 import { readConfig, writeConfig } from '../config'
+import { printJson, printLine } from '../output'
 import { CliError } from '../http'
 
 /**
@@ -14,26 +14,24 @@ export function useCommand(): Command {
     .option('--json', 'Output parseable JSON', false)
     .action(async (profile: string | undefined, opts: { json?: boolean }) => {
       const asJson = Boolean(opts.json)
-      await guard(asJson, async () => {
-        const config = readConfig()
+      const config = readConfig()
 
-        if (!profile) {
-          const names = Object.keys(config.profiles)
-          if (asJson) printJson({ current: config.current ?? null, profiles: names })
-          else if (names.length === 0) printLine('no profiles yet; run `tb login`')
-          else for (const n of names) printLine(`${n === config.current ? '* ' : '  '}${n}`)
-          return
-        }
+      if (!profile) {
+        const names = Object.keys(config.profiles)
+        if (asJson) printJson({ current: config.current ?? null, profiles: names })
+        else if (names.length === 0) printLine('no profiles yet; run `tb login`')
+        else for (const n of names) printLine(`${n === config.current ? '* ' : '  '}${n}`)
+        return
+      }
 
-        if (!config.profiles[profile]) {
-          throw new CliError(
-            `unknown profile "${profile}"; run \`tb login --profile ${profile}\` first`,
-          )
-        }
-        config.current = profile
-        writeConfig(config)
-        if (asJson) printJson({ ok: true, current: profile })
-        else printLine(`switched to profile "${profile}"`)
-      })
+      if (!config.profiles[profile]) {
+        throw new CliError(
+          `unknown profile "${profile}"; run \`tb login --profile ${profile}\` first`,
+        )
+      }
+      config.current = profile
+      writeConfig(config)
+      if (asJson) printJson({ ok: true, current: profile })
+      else printLine(`switched to profile "${profile}"`)
     })
 }

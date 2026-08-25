@@ -119,6 +119,31 @@ describe('context create_upload', () => {
     })
   })
 
+  it('create_upload 经共享 strict schema 拒绝未知字段，不触发 signer', async () => {
+    const store = new MemoryObjectStore() as ObjectStore
+    const presignPut = vi.fn(async () => ({
+      method: 'PUT' as const,
+      url: 'https://r2-upload.test/strict',
+      headers: {},
+    }))
+    store.presignPut = presignPut
+    const tb = await createTestApp({ objects: store })
+    await mountR2(tb.request, 'camera/strict')
+
+    const response = await tb.request('https://tb.test/camera/strict/create_upload', {
+      method: 'POST',
+      headers: adminHeaders,
+      body: JSON.stringify({
+        path: 'shot.jpg',
+        contentType: 'image/jpeg',
+        uploadToken: 'must-not-be-accepted',
+      }),
+    })
+    expect(response.status).toBe(400)
+    expect(await response.json()).toMatchObject({ code: 'invalid_argument' })
+    expect(presignPut).not.toHaveBeenCalled()
+  })
+
   it('上传 TTL 与下载 TTL 解耦，允许显式缩放且缺省不超过 900 秒', async () => {
     const store = new MemoryObjectStore() as ObjectStore
     const presignPut = vi.fn(async () => ({

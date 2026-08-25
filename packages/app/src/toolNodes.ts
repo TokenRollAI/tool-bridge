@@ -203,7 +203,7 @@ async function providerAccessTokenFor(opts: {
     config: opts.config,
     encryptionKey,
     ...(opts.force === true ? { force: true } : {}),
-    fetcher: fetch,
+    fetcher: opts.deps.providerOAuthFetch,
     nodePath: opts.nodePath,
     now: new Date(),
     // 调用期不需要 origin(只在构造授权 URL 时用);传空串会被 buildAuthorizationUrl 用到,

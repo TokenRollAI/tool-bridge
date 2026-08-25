@@ -1,5 +1,5 @@
 import { Command } from 'commander'
-import { guard, printJson, printLine, table } from '../output'
+import { printJson, printLine, table } from '../output'
 import { resolveTarget, withGlobalOpts } from '../args'
 import { confirmDestructive } from '../confirm'
 import { callDirect } from '../http'
@@ -36,24 +36,22 @@ export function noteLsCommand(): Command {
     .argument('[prefix]', 'Only paths under this prefix')
     .action(async (prefixArg: string | undefined, opts: NoteGlobalOpts) => {
       const asJson = Boolean(opts.json)
-      await guard(asJson, async () => {
-        const args = prefixArg !== undefined ? { prefix: prefixArg } : {}
-        const page = await callDirect<{ items: Annotation[] }>(
-          resolveTarget(opts),
-          '/system/annotation/list',
-          args,
-        )
-        if (asJson) {
-          printJson(page)
-          return
-        }
-        const rows = (page.items ?? []).map(a => [
-          displayPath(a.path),
-          a.text,
-          a.updatedAt ? new Date(a.updatedAt).toLocaleString() : '-',
-        ])
-        printLine(table(['PATH', 'NOTE', 'UPDATED'], rows))
-      })
+      const args = prefixArg !== undefined ? { prefix: prefixArg } : {}
+      const page = await callDirect<{ items: Annotation[] }>(
+        resolveTarget(opts),
+        '/system/annotation/list',
+        args,
+      )
+      if (asJson) {
+        printJson(page)
+        return
+      }
+      const rows = (page.items ?? []).map(a => [
+        displayPath(a.path),
+        a.text,
+        a.updatedAt ? new Date(a.updatedAt).toLocaleString() : '-',
+      ])
+      printLine(table(['PATH', 'NOTE', 'UPDATED'], rows))
     })
 }
 
@@ -64,13 +62,11 @@ export function noteGetCommand(): Command {
     .argument('<path>', 'Tree path (use \'/\' for the tree-wide notice)')
     .action(async (pathArg: string, opts: NoteGlobalOpts) => {
       const asJson = Boolean(opts.json)
-      await guard(asJson, async () => {
-        const entry = await callDirect<Annotation>(resolveTarget(opts), '/system/annotation/get', {
-          path: apiPath(pathArg),
-        })
-        if (asJson) printJson(entry)
-        else printLine(entry.text)
+      const entry = await callDirect<Annotation>(resolveTarget(opts), '/system/annotation/get', {
+        path: apiPath(pathArg),
       })
+      if (asJson) printJson(entry)
+      else printLine(entry.text)
     })
 }
 
@@ -82,14 +78,12 @@ export function noteSetCommand(): Command {
     .argument('<text>', 'Note text (<= 2000 chars)')
     .action(async (pathArg: string, textArg: string, opts: NoteGlobalOpts) => {
       const asJson = Boolean(opts.json)
-      await guard(asJson, async () => {
-        const entry = await callDirect<Annotation>(resolveTarget(opts), '/system/annotation/set', {
-          path: apiPath(pathArg),
-          text: textArg,
-        })
-        if (asJson) printJson(entry)
-        else printLine(`note set on ${displayPath(entry.path)}`)
+      const entry = await callDirect<Annotation>(resolveTarget(opts), '/system/annotation/set', {
+        path: apiPath(pathArg),
+        text: textArg,
       })
+      if (asJson) printJson(entry)
+      else printLine(`note set on ${displayPath(entry.path)}`)
     })
 }
 
@@ -101,13 +95,11 @@ export function noteRmCommand(): Command {
     .option('--yes', 'Skip the confirmation prompt')
     .action(async (pathArg: string, opts: NoteGlobalOpts) => {
       const asJson = Boolean(opts.json)
-      await guard(asJson, async () => {
-        const path = apiPath(pathArg)
-        await confirmDestructive(opts, `Remove the note on ${displayPath(path)}?`)
-        await callDirect(resolveTarget(opts), '/system/annotation/remove', { path })
-        if (asJson) printJson({ ok: true, path })
-        else printLine(`note removed from ${displayPath(path)}`)
-      })
+      const path = apiPath(pathArg)
+      await confirmDestructive(opts, `Remove the note on ${displayPath(path)}?`)
+      await callDirect(resolveTarget(opts), '/system/annotation/remove', { path })
+      if (asJson) printJson({ ok: true, path })
+      else printLine(`note removed from ${displayPath(path)}`)
     })
 }
 

@@ -5,12 +5,13 @@
   "type": "module",
   "packageManager": "pnpm@11.21.0",
   "engines": {
-    "node": ">=22"
+    "node": ">=22.12"
   },
   "scripts": {
     "typecheck": "turbo run typecheck",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
+    "analyze:dead-code": "knip",
     "test:unit": "pnpm --filter @tool-bridge/core --filter @tool-bridge/cli --filter @tool-bridge/sdk --filter @tool-bridge/plugin-sdk --filter @tool-bridge/plugins --filter @tool-bridge/dashboard test && pnpm test:provision && pnpm test:package-release && pnpm test:dockerfile && pnpm test:deploy-ci",
     "test:deploy-ci": "node --test scripts/deploy-change-filter.test.mjs",
     "test:dockerfile": "node --test scripts/dockerfile-contract.test.mjs",
@@ -57,6 +58,7 @@
     "globals": "^16.5.0",
     "husky": "^9.1.7",
     "jsonc-parser": "^3.3.1",
+    "knip": "6.32.2",
     "lint-staged": "^16.4.0",
     "tsx": "catalog:",
     "turbo": "^2.10.9",

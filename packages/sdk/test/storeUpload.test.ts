@@ -9,7 +9,7 @@ import {
 import { uploadObject as rootUploadObject } from '../src/index'
 
 const READY = {
-  uri: 'store://default/obj_01k4photo',
+  uri: 'store://default/AAAAAAAAAAAAAAAAAAAAAA',
   contentType: 'image/jpeg',
   filename: 'capture.jpg',
   size: 4,
@@ -29,7 +29,7 @@ const RELAY_GRANT = {
   objectUri: READY.uri,
   transport: 'relay' as const,
   method: 'PUT' as const,
-  url: 'https://tb.example/~store/uploads/upload-01?signature=relay-secret',
+  url: 'https://tb.example/~store/uploads/upload-01',
   headers: { 'content-type': 'image/jpeg' },
   expiresAt: '2099-08-24T12:10:00.000Z',
   maxBytes: 1024,
@@ -105,6 +105,8 @@ describe('uploadObject', () => {
     expect(calls).toHaveLength(2)
     expect(String(calls[0]?.input)).toBe('https://tb.example/api/system/store/create_upload')
     expect(calls[0]?.init?.method).toBe('POST')
+    expect(calls[0]?.init?.credentials).toBe('omit')
+    expect(calls[0]?.init?.redirect).toBe('error')
     expect(JSON.parse(String(calls[0]?.init?.body))).toEqual({
       contentType: 'image/jpeg',
       filename: 'capture.jpg',
@@ -119,9 +121,37 @@ describe('uploadObject', () => {
 
     expect(String(calls[1]?.input)).toBe(RELAY_GRANT.url)
     expect(calls[1]?.init?.method).toBe('PUT')
+    expect(calls[1]?.init?.credentials).toBe('omit')
+    expect(calls[1]?.init?.redirect).toBe('error')
     const relayHeaders = new Headers(calls[1]?.init?.headers)
     expect(relayHeaders.get('content-type')).toBe('image/jpeg')
     expect(relayHeaders.get('x-tb-store-upload')).toBe(RELAY_GRANT.uploadToken)
+  })
+
+  it.each([
+    'cookie',
+    'cookie2',
+    'proxy-authorization',
+    'x-tb-store-capability',
+    'x-tb-store-upload',
+    'x-tb-future-authority',
+  ])('credential provider 不能注入平台权威 header: %s', async (name) => {
+    const fetcher: typeof fetch = vi.fn()
+    await expect(uploadObject(options({
+      credentialProvider: {
+        prepare: () => ({
+          headers: {
+            authorization: 'Bearer device-secret',
+            [name]: 'attacker-controlled',
+          },
+        }),
+      },
+      fetcher,
+    }))).rejects.toMatchObject({
+      code: 'invalid_argument',
+      message: `device HTTP credential cannot set reserved header '${name}'`,
+    })
+    expect(fetcher).not.toHaveBeenCalled()
   })
 
   it('Node 原生 fetch 可把 ReadableStream 通过本地 HTTP server 流式 PUT', async () => {
@@ -136,11 +166,14 @@ describe('uploadObject', () => {
         response.setHeader('content-type', 'application/json')
         response.end(JSON.stringify({
           ...RELAY_GRANT,
-          url: `${baseUrl}/upload`,
+          url: `${baseUrl}/~store/uploads/${RELAY_GRANT.uploadId}`,
         }))
         return
       }
-      if (request.method === 'PUT' && request.url === '/upload') {
+      if (
+        request.method === 'PUT'
+        && request.url === `/~store/uploads/${RELAY_GRANT.uploadId}`
+      ) {
         for await (const chunk of request) {
           received.push(new Uint8Array(chunk as Buffer))
         }
@@ -208,11 +241,15 @@ describe('uploadObject', () => {
     await expect(uploadObject(options({ fetcher }))).resolves.toMatchObject({ uri: READY.uri })
     expect(calls).toHaveLength(3)
     expect(String(calls[1]?.input)).toBe(directGrant.url)
+    expect(calls[1]?.init?.credentials).toBe('omit')
+    expect(calls[1]?.init?.redirect).toBe('error')
     expect(new Headers(calls[1]?.init?.headers).get('x-tb-store-upload')).toBeNull()
     expect(cancel).toHaveBeenCalledOnce()
 
     expect(String(calls[2]?.input)).toBe('https://tb.example/api/system/store/complete_upload')
     expect(calls[2]?.init?.method).toBe('POST')
+    expect(calls[2]?.init?.credentials).toBe('omit')
+    expect(calls[2]?.init?.redirect).toBe('error')
     expect(JSON.parse(String(calls[2]?.init?.body))).toEqual({ uploadId: directGrant.uploadId })
     const completeHeaders = new Headers(calls[2]?.init?.headers)
     expect(completeHeaders.get('x-tb-store-upload')).toBe(directGrant.uploadToken)
@@ -231,6 +268,7 @@ describe('uploadObject', () => {
       size: READY.size,
     })
     expect(fetcher).toHaveBeenCalledOnce()
+    expect(vi.mocked(fetcher).mock.calls[0]?.[1]?.credentials).toBe('omit')
   })
 
   it.each([401, 403])('普通 create 认证拒绝 HTTP %s 时 invalidate credential', async (status) => {
@@ -252,11 +290,11 @@ describe('uploadObject', () => {
       },
     }))).rejects.toMatchObject({
       code: 'permission_denied',
-      message: `gateway returned a redacted error (HTTP ${status})`,
+      message: `Store upload grant request failed with HTTP ${status}`,
     })
     expect(invalidate).toHaveBeenCalledWith({
       ...reason,
-      message: `gateway returned a redacted error (HTTP ${status})`,
+      message: `Store upload grant request failed with HTTP ${status}`,
     })
   })
 
@@ -313,12 +351,20 @@ describe('uploadObject', () => {
     expect((thrown as Error).message).not.toContain(RELAY_GRANT.uploadToken)
   })
 
-  it('relay 的结构化网关错误即使误带 URL/token 也会被客户端脱敏', async () => {
+  it('relay 错误不回显私有 body 或任意自定义 credential header', async () => {
+    const privateBody = 'private-body'
+    const customCredential = 'x-custom-credential'
     const fetcher: typeof fetch = vi.fn()
-      .mockResolvedValueOnce(new Response(JSON.stringify(RELAY_GRANT), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        ...RELAY_GRANT,
+        headers: {
+          ...RELAY_GRANT.headers,
+          'x-custom': customCredential,
+        },
+      }), { status: 200 }))
       .mockResolvedValueOnce(new Response(JSON.stringify({
         code: 'unavailable',
-        message: `failed ${RELAY_GRANT.url} with ${RELAY_GRANT.uploadToken}`,
+        message: `driver echoed ${privateBody} and ${customCredential}`,
         retryable: true,
       }), { status: 503 }))
 
@@ -330,10 +376,34 @@ describe('uploadObject', () => {
     }
     expect(thrown).toMatchObject({
       code: 'unavailable',
-      message: 'gateway returned a redacted error (HTTP 503)',
+      message: 'Store object upload failed with HTTP 503',
     })
-    expect((thrown as Error).message).not.toContain('signature=')
-    expect((thrown as Error).message).not.toContain(RELAY_GRANT.uploadToken)
+    expect((thrown as Error).message).not.toContain(privateBody)
+    expect((thrown as Error).message).not.toContain(customCredential)
+  })
+
+  it('direct complete 错误不回显 uploadId、token 或上游消息', async () => {
+    const directGrant = {
+      ...RELAY_GRANT,
+      transport: 'presigned-put' as const,
+      url: 'https://objects.example/upload?signature=direct-secret',
+    }
+    const fetcher: typeof fetch = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify(directGrant), { status: 200 }))
+      .mockResolvedValueOnce(new Response(null, { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        code: 'unavailable',
+        message: `echoed ${directGrant.uploadId} ${directGrant.uploadToken}`,
+        retryable: true,
+      }), { status: 503 }))
+
+    const error = await uploadObject(options({ fetcher })).catch(value => value) as TBError
+    expect(error).toMatchObject({
+      code: 'unavailable',
+      message: 'Store upload completion failed with HTTP 503',
+    })
+    expect(error.message).not.toContain(directGrant.uploadId)
+    expect(error.message).not.toContain(directGrant.uploadToken)
   })
 
   it('AbortSignal 在取 credential 前终止请求，并返回稳定 AbortError', async () => {
@@ -358,13 +428,53 @@ describe('uploadObject', () => {
     expect(fetcher).not.toHaveBeenCalled()
   })
 
+  it.each([200, 503])('grant HTTP %s 响应流读取中取消时保留稳定 AbortError', async (status) => {
+    const abortController = new AbortController()
+    let responseController: ReadableStreamDefaultController<Uint8Array> | undefined
+    const fetcher: typeof fetch = vi.fn(async (_input, init) => {
+      const stream = new ReadableStream<Uint8Array>({
+        start(controller) {
+          responseController = controller
+          controller.enqueue(new TextEncoder().encode('{"partial":'))
+        },
+      })
+      init?.signal?.addEventListener('abort', () => {
+        responseController?.error(new DOMException('host detail', 'AbortError'))
+      }, { once: true })
+      return new Response(stream, {
+        status,
+        headers: { 'content-type': 'application/json' },
+      })
+    })
+
+    const pending = uploadObject(options({ fetcher, signal: abortController.signal }))
+    await vi.waitFor(() => expect(fetcher).toHaveBeenCalledOnce())
+    abortController.abort(new Error(`sensitive ${RELAY_GRANT.url}`))
+    await expect(pending).rejects.toMatchObject({
+      name: 'AbortError',
+      message: 'The operation was aborted',
+    })
+  })
+
   it.each([
     null,
     { ...RELAY_GRANT, objectUri: 'node://context/photos/capture.jpg' },
+    { ...RELAY_GRANT, objectUri: 'store://default/too-short' },
     { ...RELAY_GRANT, transport: 'multipart' },
     { ...RELAY_GRANT, uploadToken: 'bad\r\ntoken' },
     { ...RELAY_GRANT, maxBytes: -1 },
     { ...RELAY_GRANT, url: 'file:///tmp/capture.jpg' },
+    { ...RELAY_GRANT, url: 'https://evil.example/~store/uploads/upload-01' },
+    { ...RELAY_GRANT, url: 'https://tb.example/~store/uploads/another-upload' },
+    { ...RELAY_GRANT, url: 'https://tb.example/~store/uploads/upload-01?leak=1' },
+    { ...RELAY_GRANT, headers: { authorization: 'Bearer gateway-secret' } },
+    { ...RELAY_GRANT, headers: { 'x-tb-store-capability': 'call-secret' } },
+    {
+      ...RELAY_GRANT,
+      transport: 'presigned-put',
+      url: 'https://objects.example/upload?signature=direct',
+      headers: { 'x-tb-store-upload': 'session-secret' },
+    },
   ])('拒绝异常 Store upload grant: %j', async (grant) => {
     const fetcher: typeof fetch = vi.fn(async () => new Response(JSON.stringify(grant), {
       status: 200,
@@ -381,7 +491,7 @@ describe('uploadObject', () => {
       .mockResolvedValueOnce(new Response(JSON.stringify(RELAY_GRANT), { status: 200 }))
       .mockResolvedValueOnce(new Response(JSON.stringify({
         ...READY,
-        uri: 'store://default/different-object',
+        uri: 'store://default/DDDDDDDDDDDDDDDDDDDDDD',
       }), { status: 200 }))
     await expect(uploadObject(options({ fetcher }))).rejects.toMatchObject({
       code: 'internal',

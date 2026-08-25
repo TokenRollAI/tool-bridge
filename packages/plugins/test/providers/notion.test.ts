@@ -1,11 +1,5 @@
-import {
-  base64urlEncode,
-  type CallContext,
-  encodeCallContext,
-  HEADER_TB_CONTEXT,
-  HEADER_TB_UPSTREAM_AUTH,
-} from '@tool-bridge/core'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+import { createProviderHarness } from '../support/providerHarness'
 import { createNotionPlugin } from '../../src/notion/index'
 import { notionActions } from '../../src/notion/schema'
 
@@ -16,63 +10,40 @@ import { notionActions } from '../../src/notion/schema'
  * `filter_properties[]` 的重复同名参数、空响应体归一成 `{}`、以及 id 进路径的编码。
  */
 
-const PLUGIN_TOKEN = 'tbp_test'
-const ENV = { PLUGIN_TOKEN }
 const API_KEY = 'secret_notion_deadbeef'
 const API_BASE = 'https://api.notion.com/v1'
 const NOTION_VERSION = '2026-03-11'
 const PAGE_ID = '11111111-2222-3333-4444-555555555555'
 const plugin = createNotionPlugin()
 
-const CALLER: CallContext = {
-  keyId: 'k1',
-  owner: 'agent:tester',
-  scopes: [],
-  traceId: 't1',
+const {
+  call,
+  envelope,
+  sent,
+  env: ENV,
+  stubFetch,
+} = createProviderHarness({
   mountPath: 'docs/notion',
-  exportId: 'actions',
-}
-
-function envelope(body: unknown, opts: { auth?: string | null } = {}): Promise<Response> {
-  const headers: Record<string, string> = {
-    'authorization': `Bearer ${PLUGIN_TOKEN}`,
-    'content-type': 'application/json',
-    [HEADER_TB_CONTEXT]: encodeCallContext(CALLER),
-  }
-  const auth = opts.auth === undefined ? API_KEY : opts.auth
-  if (auth !== null) {
-    headers[HEADER_TB_UPSTREAM_AUTH] = base64urlEncode(new TextEncoder().encode(auth))
-  }
-  return Promise.resolve(plugin.fetch(
-    new Request('https://plugin.test/', { method: 'POST', headers, body: JSON.stringify(body) }),
-    ENV as never,
-  ))
-}
-
-function call(name: string, args: unknown, opts?: { auth?: string | null }): Promise<Response> {
-  return envelope({ tool: 'Call', arguments: { name, args } }, opts)
-}
+  plugin,
+  upstreamAuth: API_KEY,
+})
 
 function mockNotion(status: number, payload: unknown): ReturnType<typeof vi.fn> {
   const body = typeof payload === 'string' ? payload : JSON.stringify(payload)
-  const fn = vi.fn(() => Promise.resolve(new Response(body, {
+  return stubFetch(() => Promise.resolve(new Response(body, {
     status,
     headers: { 'content-type': 'application/json' },
   })))
-  vi.stubGlobal('fetch', fn)
-  return fn
 }
 
 /** 空体响应:`new Response('', {status:204})` 在 undici 下会 TypeError,必须传 null。 */
 function mockEmpty(status: number): ReturnType<typeof vi.fn> {
-  const fn = vi.fn(() => Promise.resolve(new Response(null, { status })))
-  vi.stubGlobal('fetch', fn)
-  return fn
+  return stubFetch(() => Promise.resolve(new Response(null, { status })))
 }
 
 /** 按请求路径分派(get_page 会并发打两跳)。 */
 function mockByPath(routes: Record<string, unknown>): ReturnType<typeof vi.fn> {
-  const fn = vi.fn((request: Request) => {
+  return stubFetch((request: Request) => {
     const path = new URL(request.url).pathname
     const payload = routes[path]
     if (payload === undefined) {
@@ -83,18 +54,7 @@ function mockByPath(routes: Record<string, unknown>): ReturnType<typeof vi.fn> {
       headers: { 'content-type': 'application/json' },
     }))
   })
-  vi.stubGlobal('fetch', fn)
-  return fn
 }
-
-/** 取上游收到的那个请求。 */
-function sent(mock: ReturnType<typeof vi.fn>, index = 0): Request {
-  return (mock.mock.calls[index] as [Request])[0]
-}
-
-afterEach(() => {
-  vi.unstubAllGlobals()
-})
 
 describe('契约面', () => {
   it('List 出全部 25 个 action,且都带 Zod 派生的 schema', async () => {

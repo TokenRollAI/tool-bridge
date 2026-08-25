@@ -44,7 +44,6 @@ export interface StoreObject {
 
 /** 每个上传会话都有独立 bearer；StateStore 只保存其 sha256。 */
 export interface UploadSession {
-  attempts: number
   capabilityHash: string
   completedAt?: Timestamp
   contentType: string
@@ -53,7 +52,6 @@ export interface UploadSession {
   expectedSize?: number
   expiresAt: Timestamp
   id: string
-  idempotencyKeyHash?: string
   maxBytes: number
   objectId: string
   revision: number
@@ -179,7 +177,6 @@ export interface StoreCleanupResult {
   /** 存在时宿主必须把它传给下一次 cleanup，直到缺省；避免大规模记录饿死。 */
   cursors?: StoreCleanupCursors
   deletedBytes: number
-  deletedOrphans: number
   deletedStaging: number
   expiredCallCapabilities: number
   expiredIdempotencyBindings: number
@@ -189,7 +186,6 @@ export interface StoreCleanupResult {
 
 export interface StoreCleanupCursors {
   callCapabilities: string | null
-  driverObjects: string | null
   idempotencyBindings: string | null
   objects: string | null
   shares: string | null

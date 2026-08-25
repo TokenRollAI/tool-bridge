@@ -3,7 +3,7 @@ import { dirname, join, relative, sep } from 'node:path'
 import { Command } from 'commander'
 import type { Node, NodeConfig, NodeInput, Page } from '../types'
 import { parsePageOpts, resolveTarget, withGlobalOpts, withPageOpts } from '../args'
-import { guard, printJson, printLine, table } from '../output'
+import { printJson, printLine, table } from '../output'
 import { deleteNode, registerNode } from '../registry'
 import { confirmDestructive } from '../confirm'
 import { callDirect, CliError } from '../http'
@@ -116,16 +116,14 @@ export function skillLsCommand(): Command {
     .argument('<hub>', 'Skillhub tree path')
     .action(async (hubArg: string, opts: GlobalOpts & { cursor?: string, limit?: string }) => {
       const asJson = Boolean(opts.json)
-      await guard(asJson, async () => {
-        const hub = String(hubArg ?? '').trim()
-        if (!hub) throw new CliError('skillhub path is required')
-        const callOpts = parsePageOpts(opts)
-        const page = await callDirect<Page<SkillSummary>>(resolveTarget(opts), `${hubUri(hub)}/list`, {
-          ...(Object.keys(callOpts).length ? { opts: callOpts } : {}),
-        })
-        if (asJson) printJson(page)
-        else printSkills(page)
+      const hub = String(hubArg ?? '').trim()
+      if (!hub) throw new CliError('skillhub path is required')
+      const callOpts = parsePageOpts(opts)
+      const page = await callDirect<Page<SkillSummary>>(resolveTarget(opts), `${hubUri(hub)}/list`, {
+        ...(Object.keys(callOpts).length ? { opts: callOpts } : {}),
       })
+      if (asJson) printJson(page)
+      else printSkills(page)
     })
 }
 
@@ -140,72 +138,70 @@ export function skillGetCommand(): Command {
     .action(
       async (hubArg: string, idArg: string, opts: GlobalOpts & { file?: string, out?: string }) => {
         const asJson = Boolean(opts.json)
-        await guard(asJson, async () => {
-          const hub = String(hubArg ?? '').trim()
-          if (!hub) throw new CliError('skillhub path is required')
-          const id = String(idArg ?? '').trim()
-          if (!id) throw new CliError('skill id is required')
-          if (opts.file && opts.out) throw new CliError('--file and --out are mutually exclusive')
-          const target = resolveTarget(opts)
+        const hub = String(hubArg ?? '').trim()
+        if (!hub) throw new CliError('skillhub path is required')
+        const id = String(idArg ?? '').trim()
+        if (!id) throw new CliError('skill id is required')
+        if (opts.file && opts.out) throw new CliError('--file and --out are mutually exclusive')
+        const target = resolveTarget(opts)
 
-          // --file:取单个 bundled 文件。
-          if (opts.file) {
-            const file = await callDirect<SkillFile>(target, `${hubUri(hub)}/get`, {
-              id,
-              file: String(opts.file),
-            })
-            if (asJson) {
-              printJson(file)
-              return
-            }
-            const content = file.content
-            if (typeof content === 'string') printLine(content.replace(/\n$/, ''))
-            else if (content && typeof content === 'object' && '$ref' in content) {
-              process.stderr.write('large object, download via URL\n')
-              printLine(String((content as { $ref: unknown }).$ref))
-            } else printJson(content)
-            return
-          }
-
-          const detail = await callDirect<SkillDetail>(target, `${hubUri(hub)}/get`, { id })
-
-          // --out:把整包写到本地目录(SKILL.md 用 detail.content,其余逐文件取)。
-          if (opts.out) {
-            const outDir = String(opts.out)
-            let written = 0
-            for (const f of detail.files) {
-              const dest = join(outDir, f.path.split('/').join(sep))
-              mkdirSync(dirname(dest), { recursive: true })
-              if (f.path === SKILL_DOC) {
-                writeFileSync(dest, detail.content, 'utf8')
-                written++
-                continue
-              }
-              const one = await callDirect<SkillFile>(target, `${hubUri(hub)}/get`, {
-                id,
-                file: f.path,
-              })
-              if (typeof one.content === 'string') {
-                writeFileSync(dest, one.content, 'utf8')
-                written++
-              } else {
-                process.stderr.write(`skipped non-text file (served as $ref): ${f.path}\n`)
-              }
-            }
-            if (asJson) printJson({ ok: true, id, out: outDir, files: written })
-            else printLine(`pulled skill '${id}' → ${outDir} (${written} files)`)
-            return
-          }
-
+        // --file:取单个 bundled 文件。
+        if (opts.file) {
+          const file = await callDirect<SkillFile>(target, `${hubUri(hub)}/get`, {
+            id,
+            file: String(opts.file),
+          })
           if (asJson) {
-            printJson(detail)
+            printJson(file)
             return
           }
-          printLine(detail.content.replace(/\n$/, ''))
-          if (detail.files.length > 0) {
-            process.stderr.write(`\nfiles: ${detail.files.map(f => f.path).join(', ')}\n`)
+          const content = file.content
+          if (typeof content === 'string') printLine(content.replace(/\n$/, ''))
+          else if (content && typeof content === 'object' && '$ref' in content) {
+            process.stderr.write('large object, download via URL\n')
+            printLine(String((content as { $ref: unknown }).$ref))
+          } else printJson(content)
+          return
+        }
+
+        const detail = await callDirect<SkillDetail>(target, `${hubUri(hub)}/get`, { id })
+
+        // --out:把整包写到本地目录(SKILL.md 用 detail.content,其余逐文件取)。
+        if (opts.out) {
+          const outDir = String(opts.out)
+          let written = 0
+          for (const f of detail.files) {
+            const dest = join(outDir, f.path.split('/').join(sep))
+            mkdirSync(dirname(dest), { recursive: true })
+            if (f.path === SKILL_DOC) {
+              writeFileSync(dest, detail.content, 'utf8')
+              written++
+              continue
+            }
+            const one = await callDirect<SkillFile>(target, `${hubUri(hub)}/get`, {
+              id,
+              file: f.path,
+            })
+            if (typeof one.content === 'string') {
+              writeFileSync(dest, one.content, 'utf8')
+              written++
+            } else {
+              process.stderr.write(`skipped non-text file (served as $ref): ${f.path}\n`)
+            }
           }
-        })
+          if (asJson) printJson({ ok: true, id, out: outDir, files: written })
+          else printLine(`pulled skill '${id}' → ${outDir} (${written} files)`)
+          return
+        }
+
+        if (asJson) {
+          printJson(detail)
+          return
+        }
+        printLine(detail.content.replace(/\n$/, ''))
+        if (detail.files.length > 0) {
+          process.stderr.write(`\nfiles: ${detail.files.map(f => f.path).join(', ')}\n`)
+        }
       },
     )
 }
@@ -223,22 +219,20 @@ export function skillSearchCommand(): Command {
         opts: GlobalOpts & { cursor?: string, limit?: string },
       ) => {
         const asJson = Boolean(opts.json)
-        await guard(asJson, async () => {
-          const hub = String(hubArg ?? '').trim()
-          if (!hub) throw new CliError('skillhub path is required')
-          const query = String(queryArg ?? '').trim()
-          if (!query) throw new CliError('query is required')
-          const callOpts = parsePageOpts(opts)
-          const page = await callDirect<Page<SkillSummary>>(
-            resolveTarget(opts), `${hubUri(hub)}/search`,
-            {
-              query,
-              ...(Object.keys(callOpts).length ? { opts: callOpts } : {}),
-            },
-          )
-          if (asJson) printJson(page)
-          else printSkills(page)
-        })
+        const hub = String(hubArg ?? '').trim()
+        if (!hub) throw new CliError('skillhub path is required')
+        const query = String(queryArg ?? '').trim()
+        if (!query) throw new CliError('query is required')
+        const callOpts = parsePageOpts(opts)
+        const page = await callDirect<Page<SkillSummary>>(
+          resolveTarget(opts), `${hubUri(hub)}/search`,
+          {
+            query,
+            ...(Object.keys(callOpts).length ? { opts: callOpts } : {}),
+          },
+        )
+        if (asJson) printJson(page)
+        else printSkills(page)
       },
     )
 }
@@ -252,22 +246,20 @@ export function skillPublishCommand(): Command {
     .option('--id <id>', 'Skill id (default: slug from SKILL.md frontmatter name)')
     .action(async (hubArg: string, dirArg: string, opts: GlobalOpts & { id?: string }) => {
       const asJson = Boolean(opts.json)
-      await guard(asJson, async () => {
-        const hub = String(hubArg ?? '').trim()
-        if (!hub) throw new CliError('skillhub path is required')
-        const dir = String(dirArg ?? '').trim()
-        if (!dir) throw new CliError('skill directory is required')
-        const files = readSkillDir(dir)
-        if (!files.some(f => f.path === SKILL_DOC)) {
-          throw new CliError(`directory "${dir}" has no ${SKILL_DOC} at its root`)
-        }
-        const result = await callDirect<{ fileCount: number, id: string, name: string }>(
-          resolveTarget(opts), `${hubUri(hub)}/publish`,
-          { ...(opts.id ? { id: String(opts.id) } : {}), files },
-        )
-        if (asJson) printJson(result)
-        else printLine(`published skill '${result.id}' (${result.fileCount} files)`)
-      })
+      const hub = String(hubArg ?? '').trim()
+      if (!hub) throw new CliError('skillhub path is required')
+      const dir = String(dirArg ?? '').trim()
+      if (!dir) throw new CliError('skill directory is required')
+      const files = readSkillDir(dir)
+      if (!files.some(f => f.path === SKILL_DOC)) {
+        throw new CliError(`directory "${dir}" has no ${SKILL_DOC} at its root`)
+      }
+      const result = await callDirect<{ fileCount: number, id: string, name: string }>(
+        resolveTarget(opts), `${hubUri(hub)}/publish`,
+        { ...(opts.id ? { id: String(opts.id) } : {}), files },
+      )
+      if (asJson) printJson(result)
+      else printLine(`published skill '${result.id}' (${result.fileCount} files)`)
     })
 }
 
@@ -280,16 +272,14 @@ export function skillRmCommand(): Command {
     .option('--yes', 'Skip the confirmation prompt')
     .action(async (hubArg: string, idArg: string, opts: GlobalOpts) => {
       const asJson = Boolean(opts.json)
-      await guard(asJson, async () => {
-        const hub = String(hubArg ?? '').trim()
-        if (!hub) throw new CliError('skillhub path is required')
-        const id = String(idArg ?? '').trim()
-        if (!id) throw new CliError('skill id is required')
-        await confirmDestructive(opts, `Delete skill '${id}' and all its files from ${hub}?`)
-        await callDirect(resolveTarget(opts), `${hubUri(hub)}/remove`, { id })
-        if (asJson) printJson({ ok: true, id })
-        else printLine(`removed skill '${id}'`)
-      })
+      const hub = String(hubArg ?? '').trim()
+      if (!hub) throw new CliError('skillhub path is required')
+      const id = String(idArg ?? '').trim()
+      if (!id) throw new CliError('skill id is required')
+      await confirmDestructive(opts, `Delete skill '${id}' and all its files from ${hub}?`)
+      await callDirect(resolveTarget(opts), `${hubUri(hub)}/remove`, { id })
+      if (asJson) printJson({ ok: true, id })
+      else printLine(`removed skill '${id}'`)
     })
 }
 
@@ -326,55 +316,53 @@ export function skillMountCommand(): Command {
         },
       ) => {
         const asJson = Boolean(opts.json)
-        await guard(asJson, async () => {
-          const path = String(pathArg ?? '').trim()
-          if (!path) throw new CliError('tree path is required')
-          const provider = String(opts.provider ?? 'r2').trim()
-          const authRef = opts.authRef ? String(opts.authRef) : undefined
-          const prefix = opts.prefix ? String(opts.prefix) : undefined
-          const ttl = parsePositiveInt(opts.ttl, '--ttl')
+        const path = String(pathArg ?? '').trim()
+        if (!path) throw new CliError('tree path is required')
+        const provider = String(opts.provider ?? 'r2').trim()
+        const authRef = opts.authRef ? String(opts.authRef) : undefined
+        const prefix = opts.prefix ? String(opts.prefix) : undefined
+        const ttl = parsePositiveInt(opts.ttl, '--ttl')
 
-          let providerConfig: Record<string, unknown> | undefined
-          if (provider === 'r2') {
-            if (opts.endpoint || opts.bucket || opts.region || authRef) {
-              throw new CliError('--endpoint/--bucket/--region/--auth-ref only apply to s3')
-            }
-            if (prefix) providerConfig = { prefix }
-          } else if (provider === 's3') {
-            const endpoint = String(opts.endpoint ?? '').trim()
-            if (!endpoint) throw new CliError('--endpoint is required for --provider s3')
-            const bucket = String(opts.bucket ?? '').trim()
-            if (!bucket) throw new CliError('--bucket is required for --provider s3')
-            if (!authRef) throw new CliError('--auth-ref is required for --provider s3')
-            providerConfig = {
-              endpoint,
-              bucket,
-              ...(opts.region ? { region: String(opts.region) } : {}),
-              ...(prefix ? { prefix } : {}),
-            }
-          } else {
-            throw new CliError(`invalid --provider "${provider}"; valid: r2, s3`)
+        let providerConfig: Record<string, unknown> | undefined
+        if (provider === 'r2') {
+          if (opts.endpoint || opts.bucket || opts.region || authRef) {
+            throw new CliError('--endpoint/--bucket/--region/--auth-ref only apply to s3')
           }
+          if (prefix) providerConfig = { prefix }
+        } else if (provider === 's3') {
+          const endpoint = String(opts.endpoint ?? '').trim()
+          if (!endpoint) throw new CliError('--endpoint is required for --provider s3')
+          const bucket = String(opts.bucket ?? '').trim()
+          if (!bucket) throw new CliError('--bucket is required for --provider s3')
+          if (!authRef) throw new CliError('--auth-ref is required for --provider s3')
+          providerConfig = {
+            endpoint,
+            bucket,
+            ...(opts.region ? { region: String(opts.region) } : {}),
+            ...(prefix ? { prefix } : {}),
+          }
+        } else {
+          throw new CliError(`invalid --provider "${provider}"; valid: r2, s3`)
+        }
 
-          const config: NodeConfig = {
-            kind: 'skillhub',
-            provider,
-            ...(providerConfig ? { providerConfig } : {}),
-            ...(authRef ? { authRef } : {}),
-            ...(opts.readOnly ? { readOnly: true } : {}),
-            ...(ttl !== undefined ? { ttl } : {}),
-          }
-          const input: NodeInput = {
-            path,
-            kind: 'skillhub',
-            // 网关要求 description 非空;缺省派生一条,免得挂载即被拒。
-            description: opts.description ? String(opts.description) : `skillhub at ${path}`,
-            config,
-          }
-          const node = await registerNode(resolveTarget(opts), input)
-          if (asJson) printJson(node as Node)
-          else printLine(`mounted skillhub at ${path} (provider ${provider})`)
-        })
+        const config: NodeConfig = {
+          kind: 'skillhub',
+          provider,
+          ...(providerConfig ? { providerConfig } : {}),
+          ...(authRef ? { authRef } : {}),
+          ...(opts.readOnly ? { readOnly: true } : {}),
+          ...(ttl !== undefined ? { ttl } : {}),
+        }
+        const input: NodeInput = {
+          path,
+          kind: 'skillhub',
+          // 网关要求 description 非空;缺省派生一条,免得挂载即被拒。
+          description: opts.description ? String(opts.description) : `skillhub at ${path}`,
+          config,
+        }
+        const node = await registerNode(resolveTarget(opts), input)
+        if (asJson) printJson(node as Node)
+        else printLine(`mounted skillhub at ${path} (provider ${provider})`)
       },
     )
 }
@@ -387,14 +375,12 @@ export function skillUnmountCommand(): Command {
     .option('--yes', 'Skip the confirmation prompt')
     .action(async (pathArg: string, opts: GlobalOpts) => {
       const asJson = Boolean(opts.json)
-      await guard(asJson, async () => {
-        const path = String(pathArg ?? '').trim()
-        if (!path) throw new CliError('tree path is required')
-        await confirmDestructive(opts, `Unmount skillhub at ${path}?`)
-        await deleteNode(resolveTarget(opts), path, ['skillhub'])
-        if (asJson) printJson({ ok: true, path })
-        else printLine(`unmounted skillhub: ${path}`)
-      })
+      const path = String(pathArg ?? '').trim()
+      if (!path) throw new CliError('tree path is required')
+      await confirmDestructive(opts, `Unmount skillhub at ${path}?`)
+      await deleteNode(resolveTarget(opts), path, ['skillhub'])
+      if (asJson) printJson({ ok: true, path })
+      else printLine(`unmounted skillhub: ${path}`)
     })
 }
 

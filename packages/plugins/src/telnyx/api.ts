@@ -21,31 +21,22 @@ import type {
   retrieveMessagingProfileInput,
   sendMessageInput,
 } from './schema'
+import { trimmedText as text, asJsonObject as toRecord } from '../_runtime/jsonValue'
 import { type ProviderContext, requireApiKey } from '../_runtime/plugin'
+import { createProviderHttpClient } from '../_runtime/providerHttp'
 import { upstreamError } from '../_runtime/upstreamError'
-import { guardedFetch } from '../_runtime/guardedFetch'
 
 const SERVICE = 'telnyx'
 const API_BASE = 'https://api.telnyx.com/v2'
+const http = createProviderHttpClient({ baseUrl: `${API_BASE}/`, service: SERVICE })
 
 type Json = Record<string, unknown>
-
-function toRecord(value: unknown): Json | undefined {
-  return typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Json) : undefined
-}
-
-/** 上游 `optionalString` 的语义:非空白字符串才算数,且取 trim 后的值。 */
-function text(value: unknown): string | undefined {
-  if (typeof value !== 'string') return undefined
-  const trimmed = value.trim()
-  return trimmed === '' ? undefined : trimmed
-}
 
 /**
  * Telnyx 的错误体是 JSON:API 风格的 `{errors:[{code,detail,title}]}`,但边缘层(网关、
  * 限流)会回扁平的 `{message}`/`{detail}` 甚至纯文本,故两种形状都认。
  */
-function errorMessage(payload: unknown, response: Response): string {
+function errorMessage(payload: unknown, status: number, statusText: string): string {
   if (typeof payload === 'string' && payload.trim() !== '') return payload
 
   const record = toRecord(payload)
@@ -57,72 +48,41 @@ function errorMessage(payload: unknown, response: Response): string {
 
   // 上游这里退回 `response.statusText`,而 statusText 允许是空串 ——
   // `??` 接不住它,消息就成了空。用 `||` 保证调用方至少拿到状态码。
-  return message ?? (response.statusText || `Telnyx 返回 HTTP ${response.status}`)
-}
-
-/**
- * 响应体尽力解析。错误路径也要走这里(消息藏在 body 里),故空体与非 JSON 都得容忍:
- * 空体当 null,非 JSON 直接归一成错误。
- */
-async function readPayload(response: Response): Promise<unknown> {
-  const body = await response.text().catch(() => '')
-  if (body.trim() === '') return null
-  try {
-    return JSON.parse(body) as unknown
-  } catch {
-    // 429 时保留原状态:被限流的响应常是一个 HTML 错误页,归成 502 会让调用方
-    // 当作故障立刻重试,而不是按限流退避。
-    throw upstreamError(response.status === 429 ? 429 : 502, 'Telnyx 返回了非 JSON 响应')
-  }
-}
-
-async function send(url: URL, init: RequestInit): Promise<Response> {
-  try {
-    return await guardedFetch(url.toString(), init)
-  } catch (error) {
-    // 只归一真正的网络失败。出站策略拦截(EgressBlockedError)是**永久**拒绝,
-    // 归成 502 会被标成 retryable,让调用方对着一个不会变的结果重试。
-    if (error instanceof TypeError) {
-      throw upstreamError(502, `telnyx request failed: ${error.message}`)
-    }
-    throw error
-  }
+  return message ?? (statusText || `Telnyx 返回 HTTP ${status}`)
 }
 
 interface RequestInput {
   body?: Json
   method?: 'GET' | 'POST'
   /** 用数组而非对象:Telnyx 的筛选键是 `filter[name][eq]` 这种嵌套字面量,不是嵌套对象。 */
-  query?: Array<[string, unknown]>
+  query?: Array<[string, boolean | number | string | null | undefined]>
 }
 
 async function request(ctx: ProviderContext, path: string, input: RequestInput = {}): Promise<Json> {
-  const url = new URL(`${API_BASE}${path}`)
-  for (const [name, value] of input.query ?? []) {
-    // 空串不进 query:Telnyx 会把 `filter[name]=` 读成"匹配空名字",而调用方省略一个
-    // 可选筛选时想要的是"不筛选"。
-    if (value === undefined || value === null || value === '') continue
-    url.searchParams.set(name, String(value))
-  }
-
   const headers: Record<string, string> = {
     accept: 'application/json',
     authorization: `Bearer ${requireApiKey(ctx, SERVICE)}`,
   }
-  if (input.body !== undefined) headers['content-type'] = 'application/json'
-
-  const response = await send(url, {
+  const response = await http.request({
     method: input.method ?? 'GET',
+    path,
+    // 空串不进 query:Telnyx 会把 `filter[name]=` 读成"匹配空名字",而调用方省略一个
+    // 可选筛选时想要的是"不筛选"。
+    query: (input.query ?? []).filter(([, value]) => value !== undefined && value !== null && value !== ''),
     headers,
     // JSON.stringify 自己会丢掉值为 undefined 的键,故不必复制上游的 removeUndefined;
     // 但 null 必须留住 —— schema 允许 sendAt 显式传 null,那是要发给 Telnyx 的值。
-    ...(input.body === undefined ? {} : { body: JSON.stringify(input.body) }),
+    ...(input.body === undefined ? {} : { json: input.body }),
+    invalidJsonMessage: 'Telnyx 返回了非 JSON 响应',
+    mapError: ({ bodyKind, data, status, statusText }) => bodyKind === 'invalid-json'
+      ? upstreamError(status === 429 ? 429 : 502, 'Telnyx 返回了非 JSON 响应')
+      : upstreamError(status, errorMessage(bodyKind === 'empty' ? null : data, status, statusText)),
+    mapTransportError: ({ message }) => upstreamError(
+      502,
+      message === undefined ? 'telnyx request failed' : `telnyx request failed: ${message}`,
+    ),
   })
-
-  const payload = await readPayload(response)
-  if (!response.ok) throw upstreamError(response.status, errorMessage(payload, response))
-
-  const record = toRecord(payload)
+  const record = toRecord(response.bodyKind === 'empty' ? null : response.data)
   if (record === undefined) {
     // 契约说好是 `{data:...}`;不是就是上游出问题,不是调用方的错。
     throw upstreamError(502, 'Telnyx 的成功响应不是一个对象')

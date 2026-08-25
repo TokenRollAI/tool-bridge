@@ -1,12 +1,9 @@
 import {
-  base64urlEncode,
   type CallContext,
-  encodeCallContext,
-  HEADER_TB_CONTEXT,
-  HEADER_TB_UPSTREAM_AUTH,
 } from '@tool-bridge/core'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { z } from 'zod/v4'
+import { createProviderHarness } from '../support/providerHarness'
 import { createOutlinePlugin } from '../../src/outline/index'
 import { outlineActions } from '../../src/outline/schema'
 
@@ -17,8 +14,6 @@ import { outlineActions } from '../../src/outline/schema'
  * 以及从 `data` 里取值再裁剪的出参。
  */
 
-const PLUGIN_TOKEN = 'tbp_test'
-const ENV = { PLUGIN_TOKEN }
 const API_KEY = 'ol_api_deadbeef'
 const COLLECTION_ID = '11111111-1111-4111-8111-111111111111'
 const plugin = createOutlinePlugin()
@@ -40,43 +35,23 @@ interface CallOptions {
   config?: Record<string, unknown>
 }
 
-function envelope(body: unknown, opts: CallOptions = {}): Promise<Response> {
-  const headers: Record<string, string> = {
-    'authorization': `Bearer ${PLUGIN_TOKEN}`,
-    'content-type': 'application/json',
-    [HEADER_TB_CONTEXT]: encodeCallContext(caller(opts.config)),
-  }
-  const auth = opts.auth === undefined ? API_KEY : opts.auth
-  if (auth !== null) {
-    headers[HEADER_TB_UPSTREAM_AUTH] = base64urlEncode(new TextEncoder().encode(auth))
-  }
-  return Promise.resolve(plugin.fetch(
-    new Request('https://plugin.test/', { method: 'POST', headers, body: JSON.stringify(body) }),
-    ENV as never,
-  ))
-}
-
-function call(name: string, args: unknown, opts?: CallOptions): Promise<Response> {
-  return envelope({ tool: 'Call', arguments: { name, args } }, opts)
-}
+const { call, envelope, sent, stubFetch } = createProviderHarness<CallOptions>({
+  caller: opts => caller(opts.config),
+  mountPath: 'docs/outline',
+  plugin,
+  upstreamAuth: API_KEY,
+})
 
 /** 用原始文本回应,便于钉住非 JSON 响应的处理。 */
 function mockRaw(status: number, body: string): ReturnType<typeof vi.fn> {
-  const fn = vi.fn(() => Promise.resolve(new Response(body, {
+  return stubFetch(() => Promise.resolve(new Response(body, {
     status,
     headers: { 'content-type': 'application/json' },
   })))
-  vi.stubGlobal('fetch', fn)
-  return fn
 }
 
 function mockOutline(status: number, payload: unknown): ReturnType<typeof vi.fn> {
   return mockRaw(status, JSON.stringify(payload))
-}
-
-/** 取上游收到的那个请求。 */
-function sent(mock: ReturnType<typeof vi.fn>): Request {
-  return (mock.mock.calls[0] as [Request])[0]
 }
 
 const COLLECTION = {
@@ -89,10 +64,6 @@ const COLLECTION = {
   updatedAt: '2024-01-02T00:00:00.000Z',
   somethingNew: 'from a newer self-hosted build',
 }
-
-afterEach(() => {
-  vi.unstubAllGlobals()
-})
 
 describe('契约面', () => {
   it('~describe 报成单个 tools/v1 export,并带上凭证探针', async () => {

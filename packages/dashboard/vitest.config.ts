@@ -1,6 +1,11 @@
 import { defineConfig } from 'vitest/config'
 import { fileURLToPath } from 'node:url'
 
+const sdkAliases = {
+  '@tool-bridge/sdk/client': fileURLToPath(new URL('../sdk/src/client/index.ts', import.meta.url)),
+  '@tool-bridge/sdk/store': fileURLToPath(new URL('../sdk/src/store/index.ts', import.meta.url)),
+}
+
 /**
  * 两个 project,因为这个包有两类断言对象:
  *
@@ -16,6 +21,7 @@ export default defineConfig({
   test: {
     projects: [
       {
+        resolve: { alias: sdkAliases },
         test: {
           name: 'node',
           environment: 'node',
@@ -26,6 +32,7 @@ export default defineConfig({
         resolve: {
           alias: {
             '@': fileURLToPath(new URL('./src', import.meta.url)),
+            ...sdkAliases,
           },
         },
         test: {

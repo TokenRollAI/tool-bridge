@@ -18,12 +18,14 @@
 import type { z } from 'zod/v4'
 import { TBError } from '@tool-bridge/plugin-sdk'
 import type { globalSearchInput, hotListInput, zhidaInput, zhihuSearchInput } from './schema'
+import { asJsonObject as asRecord, trimmedText as optionalText } from '../_runtime/jsonValue'
 import { type ProviderContext, requireApiKey } from '../_runtime/plugin'
+import { createProviderHttpClient } from '../_runtime/providerHttp'
 import { upstreamError } from '../_runtime/upstreamError'
-import { guardedFetch } from '../_runtime/guardedFetch'
 
 const SERVICE = 'zhihu'
 const API_BASE = 'https://developer.zhihu.com'
+const http = createProviderHttpClient({ baseUrl: `${API_BASE}/`, service: SERVICE })
 
 /** 知乎业务码 → 用于归一的 HTTP 状态。上游的口径,照搬;表外的非 0 码一律当上游故障。 */
 const CODE_STATUS: Record<number, number> = {
@@ -33,19 +35,6 @@ const CODE_STATUS: Record<number, number> = {
 }
 
 type Json = Record<string, unknown>
-
-function asRecord(value: unknown): Json | undefined {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-    ? (value as Json)
-    : undefined
-}
-
-/** 上游 `optionalString` 的语义:先 trim,空则视为缺失。 */
-function optionalText(value: unknown): string | undefined {
-  if (typeof value !== 'string') return undefined
-  const trimmed = value.trim()
-  return trimmed === '' ? undefined : trimmed
-}
 
 /** 知乎的错误消息散落在四个位置,逐个试。 */
 function errorMessage(payload: unknown): string | undefined {
@@ -60,17 +49,6 @@ function errorMessage(payload: unknown): string | undefined {
     ?? optionalText(nested?.message)
 }
 
-async function readPayload(response: Response): Promise<unknown> {
-  const text = await response.text()
-  // 空体按空对象处理:知乎在某些 200 上不回内容,那不是错误。
-  if (text === '') return {}
-  try {
-    return JSON.parse(text) as unknown
-  } catch {
-    throw upstreamError(502, '知乎返回了非法 JSON')
-  }
-}
-
 interface RequestInput {
   body?: Json
   method?: 'GET' | 'POST'
@@ -80,39 +58,27 @@ interface RequestInput {
 
 async function request(ctx: ProviderContext, input: RequestInput): Promise<unknown> {
   const apiKey = requireApiKey(ctx, SERVICE)
-  const url = new URL(input.path, API_BASE)
-  for (const [key, value] of Object.entries(input.query ?? {})) {
-    if (value !== undefined) url.searchParams.set(key, String(value))
-  }
-
-  let response: Response
-  try {
-    response = await guardedFetch(url.toString(), {
-      method: input.method ?? 'GET',
-      headers: {
-        'authorization': `Bearer ${apiKey}`,
-        // 上游对 GET 也发这个头。无 body 时它没有意义,但照搬以免改变打给上游的请求形状。
-        'content-type': 'application/json',
-        'x-request-timestamp': String(Math.floor(Date.now() / 1000)),
-      },
-      ...(input.body === undefined ? {} : { body: JSON.stringify(input.body) }),
-    })
-  } catch (error) {
-    // 传输层失败必须就地归一:漏出去的裸 Error 会被 plugin-sdk 抹成 "internal plugin error"
-    // 500,把"上游不通/出网被拦"说成插件自身故障,还丢掉唯一有诊断价值的那句消息。
-    throw upstreamError(
+  const response = await http.request({
+    method: input.method ?? 'GET',
+    path: input.path,
+    query: Object.entries(input.query ?? {}).map(([key, value]) => [key, value === undefined ? undefined : String(value)]),
+    headers: {
+      'authorization': `Bearer ${apiKey}`,
+      // 上游对 GET 也发这个头。无 body 时它没有意义,但照搬以免改变打给上游的请求形状。
+      'content-type': 'application/json',
+      'x-request-timestamp': String(Math.floor(Date.now() / 1000)),
+    },
+    ...(input.body === undefined ? {} : { json: input.body }),
+    invalidJsonMessage: '知乎返回了非法 JSON',
+    mapError: ({ bodyKind, data, status }) => bodyKind === 'invalid-json'
+      ? upstreamError(502, '知乎返回了非法 JSON')
+      : upstreamError(status, errorMessage(data) ?? `知乎请求失败(HTTP ${status})`),
+    mapTransportError: ({ message }) => upstreamError(
       502,
-      error instanceof Error ? `知乎请求失败: ${error.message}` : '知乎请求失败',
-    )
-  }
-
-  const payload = await readPayload(response)
-  if (!response.ok) {
-    throw upstreamError(
-      response.status,
-      errorMessage(payload) ?? `知乎请求失败(HTTP ${response.status})`,
-    )
-  }
+      message === undefined ? '知乎请求失败' : `知乎请求失败: ${message}`,
+    ),
+  })
+  const payload = response.bodyKind === 'empty' ? {} : response.data
 
   const code = asRecord(payload)?.Code
   if (typeof code === 'number' && Number.isFinite(code) && code !== 0) {

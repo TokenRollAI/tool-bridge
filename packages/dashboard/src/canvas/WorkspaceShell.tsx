@@ -1,6 +1,7 @@
 import { Command, GitBranch, Menu, Moon, Search, Sun } from 'lucide-react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router'
 import { useEffect, useState } from 'react'
+import { useTheme } from 'next-themes'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -15,7 +16,6 @@ import { CommandPalette } from '@/components/CommandPalette'
 import { useHealthz, useStatus } from '@/lib/queries'
 import { useSession } from '@/lib/session-context'
 import { Button } from '@/components/ui/button'
-import { useTheme } from '@/lib/theme'
 import { cn } from '@/lib/utils'
 
 const isMac = typeof navigator !== 'undefined' && /Mac/.test(navigator.platform)
@@ -42,7 +42,8 @@ function TopBar({
 }) {
   const health = useHealthz()
   const status = useStatus()
-  const [theme, toggleTheme] = useTheme()
+  const { resolvedTheme, setTheme } = useTheme()
+  const isDark = resolvedTheme !== 'light'
   const navigate = useNavigate()
   const { active, profiles, switchTo, logout } = useSession()
   const healthy = health.data?.healthy
@@ -109,8 +110,13 @@ function TopBar({
           }
         />
 
-        <Button aria-label="切换主题" onClick={toggleTheme} size="icon-sm" variant="ghost">
-          {theme === 'dark' ? <Sun /> : <Moon />}
+        <Button
+          aria-label="切换主题"
+          onClick={() => setTheme(isDark ? 'light' : 'dark')}
+          size="icon-sm"
+          variant="ghost"
+        >
+          {isDark ? <Sun /> : <Moon />}
         </Button>
 
         <DropdownMenu>

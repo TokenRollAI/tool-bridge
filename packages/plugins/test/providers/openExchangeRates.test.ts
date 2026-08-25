@@ -1,13 +1,7 @@
-import {
-  base64urlEncode,
-  type CallContext,
-  encodeCallContext,
-  HEADER_TB_CONTEXT,
-  HEADER_TB_UPSTREAM_AUTH,
-} from '@tool-bridge/core'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { createOpenExchangeRatesPlugin } from '../../src/open_exchange_rates/index'
 import { openExchangeRatesActions } from '../../src/open_exchange_rates/schema'
+import { createProviderHarness } from '../support/providerHarness'
 
 /**
  * Open Exchange Rates 迁移产物的 wire 级验收。重点在几个"迁移最容易迁丢"的地方:
@@ -15,53 +9,19 @@ import { openExchangeRatesActions } from '../../src/open_exchange_rates/schema'
  * 以及 200 + `{error:true}` 这条软错误路径。
  */
 
-const PLUGIN_TOKEN = 'tbp_test'
-const ENV = { PLUGIN_TOKEN }
 const APP_ID = 'oer_app_id_deadbeef'
 const plugin = createOpenExchangeRatesPlugin()
 
-const CALLER: CallContext = {
-  keyId: 'k1',
-  owner: 'agent:tester',
-  scopes: [],
-  traceId: 't1',
+const {
+  call,
+  envelope,
+  sent,
+  mockJson: mockOer,
+} = createProviderHarness({
   mountPath: 'finance/oer',
-  exportId: 'actions',
-}
-
-function envelope(body: unknown, opts: { auth?: string | null } = {}): Promise<Response> {
-  const headers: Record<string, string> = {
-    'authorization': `Bearer ${PLUGIN_TOKEN}`,
-    'content-type': 'application/json',
-    [HEADER_TB_CONTEXT]: encodeCallContext(CALLER),
-  }
-  const auth = opts.auth === undefined ? APP_ID : opts.auth
-  if (auth !== null) {
-    headers[HEADER_TB_UPSTREAM_AUTH] = base64urlEncode(new TextEncoder().encode(auth))
-  }
-  return Promise.resolve(plugin.fetch(
-    new Request('https://plugin.test/', { method: 'POST', headers, body: JSON.stringify(body) }),
-    ENV as never,
-  ))
-}
-
-function call(name: string, args: unknown, opts?: { auth?: string | null }): Promise<Response> {
-  return envelope({ tool: 'Call', arguments: { name, args } }, opts)
-}
-
-function mockOer(status: number, payload: unknown): ReturnType<typeof vi.fn> {
-  const fn = vi.fn(() => Promise.resolve(new Response(JSON.stringify(payload), {
-    status,
-    headers: { 'content-type': 'application/json' },
-  })))
-  vi.stubGlobal('fetch', fn)
-  return fn
-}
-
-/** 取上游收到的那个请求。 */
-function sent(mock: ReturnType<typeof vi.fn>): Request {
-  return (mock.mock.calls[0] as [Request])[0]
-}
+  plugin,
+  upstreamAuth: APP_ID,
+})
 
 const RATES = {
   disclaimer: 'https://openexchangerates.org/terms/',
@@ -70,10 +30,6 @@ const RATES = {
   base: 'USD',
   rates: { EUR: 0.96, GBP: 0.79 },
 }
-
-afterEach(() => {
-  vi.unstubAllGlobals()
-})
 
 describe('契约面', () => {
   it('List 出全部 5 个 action,且都带 Zod 派生的 schema', async () => {

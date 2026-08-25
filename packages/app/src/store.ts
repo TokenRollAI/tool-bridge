@@ -27,6 +27,7 @@ import {
   TBError,
 } from '@tool-bridge/core'
 import type { TbAppDeps } from './deps'
+import { toWebObjectBodyStream } from './objectBodyStream'
 import { signStoreRefToken } from './storeRefToken'
 
 export const STORE_CALL_CAPABILITY_HEADER = 'x-tb-store-capability'
@@ -155,8 +156,17 @@ export async function defaultStoreRuntime(deps: TbAppDeps): Promise<DefaultStore
   }
 }
 
-function requestOrigin(runtime: BuiltinDispatchRuntime | undefined, deps: TbAppDeps): string {
-  const raw = deps.canonicalOrigin ?? runtime?.requestOrigin
+/**
+ * Store bearer/relay URL 必须回到客户端发起控制请求的 external origin：SDK 把它
+ * 当作 client-side SSRF 边界。Node TLS 终止代理后的 Request URL 会错误显示为
+ * `http:`，所以配置了 TB_CANONICAL_ORIGIN 时只借用其可信 protocol；alias host/port
+ * 仍来自本次请求，且绝不信任可由客户端伪造的 X-Forwarded-Proto。
+ */
+export function resolveStoreRequestOrigin(
+  rawRequestOrigin: string | undefined,
+  canonicalOrigin: string | undefined,
+): string {
+  const raw = rawRequestOrigin ?? canonicalOrigin
   if (raw === undefined) {
     throw new TBError('unavailable', 'request origin is unavailable', { retryable: false })
   }
@@ -173,7 +183,29 @@ function requestOrigin(runtime: BuiltinDispatchRuntime | undefined, deps: TbAppD
   ) {
     throw new TBError('unavailable', 'request origin is invalid', { retryable: false })
   }
+  if (rawRequestOrigin !== undefined && canonicalOrigin !== undefined) {
+    let canonical: URL
+    try {
+      canonical = new URL(canonicalOrigin)
+    } catch {
+      throw new TBError('unavailable', 'canonical origin is invalid', { retryable: false })
+    }
+    if (
+      (canonical.protocol !== 'https:' && canonical.protocol !== 'http:')
+      || canonical.username !== ''
+      || canonical.password !== ''
+    ) {
+      throw new TBError('unavailable', 'canonical origin is invalid', { retryable: false })
+    }
+    // WHATWG URL 会保留请求的非默认显式端口；若切换 protocol 后该端口成为默认值，
+    // origin 序列化会自然省略。canonical 的 host/port 不复制，避免 alias 被改写。
+    url.protocol = canonical.protocol
+  }
   return url.origin
+}
+
+function requestOrigin(runtime: BuiltinDispatchRuntime | undefined, deps: TbAppDeps): string {
+  return resolveStoreRequestOrigin(runtime?.requestOrigin, deps.canonicalOrigin)
 }
 
 export function storeUploadGrant(start: StoreUploadStart, origin: string): Record<string, unknown> {
@@ -357,39 +389,7 @@ export async function storeObjectResponse(
 ): Promise<Response> {
   const got = await objects.get(object.driverKey)
   if (got === null) throw TBError.notFound('not found')
-  const reader = got.body.getReader()
-  const body = new ReadableStream<Uint8Array>({
-    async pull(controller) {
-      try {
-        const chunk = await reader.read()
-        if (chunk.done) {
-          reader.releaseLock()
-          controller.close()
-        } else if (chunk.value !== undefined) {
-          controller.enqueue(chunk.value)
-        }
-      } catch (error) {
-        try {
-          reader.releaseLock()
-        } catch {
-          // The source may already have released the lock while failing.
-        }
-        controller.error(error)
-      }
-    },
-    async cancel(reason) {
-      try {
-        if (reader.cancel !== undefined) await reader.cancel(reason)
-        else await got.body.cancel?.(reason)
-      } finally {
-        try {
-          reader.releaseLock()
-        } catch {
-          // cancel may release the lock in the source implementation.
-        }
-      }
-    },
-  })
+  const body = toWebObjectBodyStream(got.body)
   return new Response(body, {
     headers: {
       'content-type': object.contentType,
@@ -471,7 +471,6 @@ function cleanupProgress(value: unknown): CleanupProgress {
     'objects',
     'shares',
     'callCapabilities',
-    'driverObjects',
     'idempotencyBindings',
   ] as const) {
     const cursor = (cursors as Record<string, unknown>)[field]
@@ -486,7 +485,6 @@ function emptyCleanupResult(): StoreCleanupResult {
   return {
     abandonedObjects: 0,
     deletedBytes: 0,
-    deletedOrphans: 0,
     deletedStaging: 0,
     expiredCallCapabilities: 0,
     expiredIdempotencyBindings: 0,
@@ -498,7 +496,6 @@ function emptyCleanupResult(): StoreCleanupResult {
 function addCleanupResult(target: StoreCleanupResult, page: StoreCleanupResult): void {
   target.abandonedObjects += page.abandonedObjects
   target.deletedBytes += page.deletedBytes
-  target.deletedOrphans += page.deletedOrphans
   target.deletedStaging += page.deletedStaging
   target.expiredCallCapabilities += page.expiredCallCapabilities
   target.expiredIdempotencyBindings += page.expiredIdempotencyBindings

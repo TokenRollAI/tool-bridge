@@ -1,11 +1,5 @@
-import {
-  base64urlEncode,
-  type CallContext,
-  encodeCallContext,
-  HEADER_TB_CONTEXT,
-  HEADER_TB_UPSTREAM_AUTH,
-} from '@tool-bridge/core'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+import { createProviderHarness } from '../support/providerHarness'
 import { createMistralAiPlugin } from '../../src/mistral_ai/index'
 import { mistralAiActions } from '../../src/mistral_ai/schema'
 
@@ -15,56 +9,26 @@ import { mistralAiActions } from '../../src/mistral_ai/schema'
  * queryKeys、bodyOnDelete 的 DELETE 带 body、multipart 上传、以及两处 transit file 依赖的拒绝。
  */
 
-const PLUGIN_TOKEN = 'tbp_test'
-const ENV = { PLUGIN_TOKEN }
 const API_KEY = 'mistral_test_key'
 const plugin = createMistralAiPlugin()
 
-const CALLER: CallContext = {
-  keyId: 'k1',
-  owner: 'agent:tester',
-  scopes: [],
-  traceId: 't1',
+const {
+  call,
+  envelope,
+  sent,
+  stubFetch,
+} = createProviderHarness({
   mountPath: 'ai/mistral',
-  exportId: 'actions',
-}
-
-function envelope(body: unknown, opts: { auth?: string | null } = {}): Promise<Response> {
-  const headers: Record<string, string> = {
-    'authorization': `Bearer ${PLUGIN_TOKEN}`,
-    'content-type': 'application/json',
-    [HEADER_TB_CONTEXT]: encodeCallContext(CALLER),
-  }
-  const auth = opts.auth === undefined ? API_KEY : opts.auth
-  if (auth !== null) {
-    headers[HEADER_TB_UPSTREAM_AUTH] = base64urlEncode(new TextEncoder().encode(auth))
-  }
-  return Promise.resolve(plugin.fetch(
-    new Request('https://plugin.test/', { method: 'POST', headers, body: JSON.stringify(body) }),
-    ENV as never,
-  ))
-}
-
-function call(name: string, args: unknown, opts?: { auth?: string | null }): Promise<Response> {
-  return envelope({ tool: 'Call', arguments: { name, args } }, opts)
-}
+  plugin,
+  upstreamAuth: API_KEY,
+})
 
 function mockMistral(status: number, payload: unknown): ReturnType<typeof vi.fn> {
-  const fn = vi.fn(() => Promise.resolve(new Response(status === 204 ? null : JSON.stringify(payload), {
+  return stubFetch(() => Promise.resolve(new Response(status === 204 ? null : JSON.stringify(payload), {
     status,
     headers: status === 204 ? {} : { 'content-type': 'application/json' },
   })))
-  vi.stubGlobal('fetch', fn)
-  return fn
 }
-
-function sent(mock: ReturnType<typeof vi.fn>, index = 0): Request {
-  return (mock.mock.calls[index] as [Request])[0]
-}
-
-afterEach(() => {
-  vi.unstubAllGlobals()
-})
 
 describe('契约面', () => {
   it('List 出全部 54 个 action,且都带 Zod 派生的 schema', async () => {

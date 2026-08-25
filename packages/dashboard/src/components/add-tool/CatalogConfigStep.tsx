@@ -1,6 +1,6 @@
-import { ArrowLeft, CheckCircle2, ExternalLink, Loader2, Rocket, Search } from 'lucide-react'
-import { useMemo, useState } from 'react'
+import { ArrowLeft, CheckCircle2, ExternalLink, Loader2, Rocket } from 'lucide-react'
 import { Link } from 'react-router'
+import { useState } from 'react'
 import type { CatalogListItem } from '@/lib/types'
 import {
   buildIntegrationCalls,
@@ -9,20 +9,9 @@ import {
   type IntegrationFormState,
   integrationPlan,
 } from '@/pages/system/forms/integrationPlan'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
-import { ManagedCredentialFields } from '@/pages/system/forms/ManagedCredentialFields'
-import { FormSection } from '@/components/FormSection'
+import { CatalogIntegrationFields } from '@/pages/system/forms/CatalogIntegrationFields'
 import { Button } from '@/components/ui/button'
 import { useSecretList } from '@/lib/queries'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { Badge } from '@/components/ui/badge'
 import { encodeTreePath } from '@/lib/path'
 import { INTEGRATION_PRESETS } from './addToolSources'
 import { MountStepsView } from './MountStepsView'
@@ -133,7 +122,6 @@ export function CatalogConfigStep({
 }) {
   const secrets = useSecretList()
   const runner = useMountRunner()
-  const [query, setQuery] = useState('')
   const [buildErr, setBuildErr] = useState<string | null>(null)
 
   const preset = INTEGRATION_PRESETS.find(p => p.provider === initialProvider)
@@ -151,31 +139,7 @@ export function CatalogConfigStep({
     }
   })
 
-  const entry = useMemo(() => catalog.find(i => i.id === form.provider), [catalog, form.provider])
-  const plan = integrationPlan(entry, form.exportId)
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase()
-    const base = q === ''
-      ? catalog
-      : catalog.filter(i =>
-          i.id.toLowerCase().includes(q) || (i.description ?? '').toLowerCase().includes(q))
-    return base.slice(0, 50)
-  }, [catalog, query])
-
-  const selectProvider = (item: CatalogListItem) => {
-    const exportId = item.exports.length === 1 ? item.exports[0]! : ''
-    const nextPlan = integrationPlan(item, exportId)
-    setForm(current => ({
-      ...current,
-      provider: item.id,
-      path: current.path.trim() === '' ? defaultMountPath(item) : current.path,
-      exportId,
-      credentials: {},
-      existingSecret: '',
-      config: {},
-      mode: nextPlan.kind === 'none' ? 'none' : 'inline',
-    }))
-  }
+  const entry = catalog.find(item => item.id === form.provider)
 
   const submit = () => {
     setBuildErr(null)
@@ -209,169 +173,14 @@ export function CatalogConfigStep({
         </button>
 
         <div className="grid gap-5">
-          <FormSection
-            description="平台自带的集成目录:每一项都是这个部署里现成可用的代码。"
-            index="01"
-            title="选择集成"
-          >
-            {form.provider === '' && (
-              <div className="relative">
-                <Search className="pointer-events-none absolute top-2.5 left-2.5 size-3.5 text-muted-foreground" />
-                <Input
-                  className="pl-8 text-sm"
-                  onChange={e => setQuery(e.target.value)}
-                  placeholder="tavily / jira / memos…"
-                  value={query}
-                />
-              </div>
-            )}
-            {form.provider === ''
-              ? (
-                  <div className="grid max-h-64 gap-1 overflow-y-auto rounded-md border p-1">
-                    {filtered.map(item => (
-                      <button
-                        className="flex items-center gap-2 rounded px-2 py-1.5 text-left text-xs hover:bg-muted/60"
-                        key={item.id}
-                        onClick={() => selectProvider(item)}
-                        type="button"
-                      >
-                        <code className="font-mono font-medium">{item.id}</code>
-                        <span className="truncate text-muted-foreground">{item.description}</span>
-                        {Object.values(item.exportDetails).some(d => d.auth.kind === 'oauth') && (
-                          <Badge className="ml-auto px-1 py-0 text-[10px]" variant="outline">
-                            OAuth
-                          </Badge>
-                        )}
-                      </button>
-                    ))}
-                    {filtered.length === 0 && (
-                      <p className="px-2 py-3 text-center text-xs text-muted-foreground">
-                        无匹配集成
-                      </p>
-                    )}
-                  </div>
-                )
-              : (
-                  <div className="flex items-center gap-2 rounded-lg border bg-card/50 px-3 py-2.5">
-                    <code className="font-mono text-sm font-medium">{form.provider}</code>
-                    <span className="truncate text-xs text-muted-foreground">
-                      {entry?.description}
-                    </span>
-                    <Button
-                      className="ml-auto"
-                      onClick={() => setForm(c => ({ ...c, provider: '', exportId: '' }))}
-                      size="xs"
-                      variant="ghost"
-                    >
-                      更换
-                    </Button>
-                  </div>
-                )}
-
-            {form.provider !== '' && (
-              <div className="grid gap-3 sm:grid-cols-2">
-                <div className="grid gap-1.5">
-                  <Label className="text-xs" htmlFor="wiz-path">挂载路径 *</Label>
-                  <Input
-                    className="font-mono text-sm"
-                    id="wiz-path"
-                    onChange={e => setForm(c => ({ ...c, path: e.target.value }))}
-                    placeholder="tools/tavily"
-                    value={form.path}
-                  />
-                </div>
-                {plan.needsExportChoice && (
-                  <div className="grid gap-1.5">
-                    <Label className="text-xs">export *</Label>
-                    <Select
-                      onValueChange={(value) => {
-                        const nextPlan = integrationPlan(entry, value)
-                        setForm(c => ({
-                          ...c,
-                          exportId: value,
-                          credentials: {},
-                          existingSecret: '',
-                          config: {},
-                          mode: nextPlan.kind === 'none' ? 'none' : 'inline',
-                        }))
-                      }}
-                      value={form.exportId}
-                    >
-                      <SelectTrigger className="font-mono text-xs">
-                        <SelectValue placeholder="选一个 export" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {(entry?.exports ?? []).map(id => (
-                          <SelectItem className="font-mono text-xs" key={id} value={id}>{id}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                )}
-              </div>
-            )}
-          </FormSection>
-
-          {form.provider !== '' && (
-            <FormSection
-              description="平台自动加密保管,不写入节点配置,也不会回显。"
-              index="02"
-              title="凭证"
-            >
-              <ManagedCredentialFields
-                idPrefix="wiz-credential"
-                onChange={cred => setForm(c => ({
-                  ...c,
-                  credentials: cred.credentials,
-                  existingSecret: cred.existingSecret,
-                  mode: cred.mode,
-                }))}
-                plan={plan}
-                secretNames={(secrets.data?.items ?? []).map(item => item.name)}
-                state={{
-                  credentials: form.credentials,
-                  existingSecret: form.existingSecret,
-                  mode: form.mode,
-                }}
-              />
-            </FormSection>
-          )}
-
-          {form.provider !== '' && plan.mountConfigFields.length > 0 && (
-            <FormSection
-              description="非密钥配置(如自建实例地址),明文存进节点记录。"
-              index="03"
-              title={plan.mountConfigFields.some(f => f.required === true) ? '配置' : '配置(可选)'}
-            >
-              <div className="grid gap-2">
-                {plan.mountConfigFields.map(field => (
-                  <div className="grid gap-1.5" key={field.key}>
-                    <Label className="text-xs" htmlFor={`wiz-mc-${field.key}`}>
-                      {field.key}
-                      {field.required === true && ' *'}
-                      {field.label !== undefined && (
-                        <span className="ml-1.5 font-normal text-muted-foreground">
-                          {field.label}
-                        </span>
-                      )}
-                    </Label>
-                    <Input
-                      className="font-mono text-sm"
-                      id={`wiz-mc-${field.key}`}
-                      onChange={e => setForm(c => ({
-                        ...c,
-                        config: { ...c.config, [field.key]: e.target.value },
-                      }))}
-                      value={form.config[field.key] ?? ''}
-                    />
-                    {field.description !== undefined && (
-                      <p className="text-[11px] text-muted-foreground">{field.description}</p>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </FormSection>
-          )}
+          <CatalogIntegrationFields
+            catalog={catalog}
+            collapseSelection
+            form={form}
+            idPrefix="wizard"
+            onChange={setForm}
+            secretNames={(secrets.data?.items ?? []).map(item => item.name)}
+          />
 
           {buildErr && (
             <p

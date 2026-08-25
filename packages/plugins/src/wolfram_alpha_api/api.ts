@@ -20,28 +20,19 @@
 import type { z } from 'zod/v4'
 import { TBError } from '@tool-bridge/plugin-sdk'
 import type { getShortAnswerInput, getSpokenResultInput, validateQueryInput } from './schema'
+import { asJsonObject as record, trimmedText as text } from '../_runtime/jsonValue'
 import { type ProviderContext, requireApiKey } from '../_runtime/plugin'
+import { createProviderHttpClient } from '../_runtime/providerHttp'
 import { upstreamError } from '../_runtime/upstreamError'
-import { guardedFetch } from '../_runtime/guardedFetch'
 
 const SERVICE = 'wolfram_alpha_api'
 const API_BASE = 'https://api.wolframalpha.com'
 const RECOGNIZER_URL = 'https://www.wolframalpha.com/queryrecognizer/query.jsp'
 /** 上游给每次出站定的上限;超时按 504 归一(unavailable + retryable)。 */
 const REQUEST_TIMEOUT_MS = 30_000
+const http = createProviderHttpClient({ service: SERVICE })
 
 type Json = Record<string, unknown>
-
-/** 上游 `optionalString` 的等价物:去空白后仍非空才算有值。 */
-function text(value: unknown): string | undefined {
-  if (typeof value !== 'string') return undefined
-  const trimmed = value.trim()
-  return trimmed === '' ? undefined : trimmed
-}
-
-function record(value: unknown): Json | undefined {
-  return typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Json) : undefined
-}
 
 /** 出参声明的是 `string | null`:拿不到就明确回 null,不留字段缺席。 */
 function nullableText(value: unknown): string | null {
@@ -91,22 +82,17 @@ function wolframError(status: number, body: string): TBError {
 }
 
 async function requestText(url: URL): Promise<string> {
-  let response: Response
-  try {
-    response = await guardedFetch(url, {
-      method: 'GET',
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-    })
-  } catch (error) {
-    // 只归一超时;出站策略拦截等是**永久**拒绝,标成 retryable 会让调用方白重试。
-    if (error instanceof Error && error.name === 'TimeoutError') {
-      throw upstreamError(504, `Wolfram|Alpha ${REQUEST_TIMEOUT_MS / 1000} 秒内没有返回`)
-    }
-    throw error
-  }
-
-  const body = await response.text()
-  if (!response.ok) throw wolframError(response.status, body)
+  const result = await http.request<string>({
+    baseUrl: url.origin,
+    path: url.toString(),
+    responseType: 'text',
+    timeoutMs: REQUEST_TIMEOUT_MS,
+    mapError: ({ data, status }) => wolframError(status, typeof data === 'string' ? data : ''),
+    mapTransportError: ({ kind }) => kind === 'timeout'
+      ? upstreamError(504, `Wolfram|Alpha ${REQUEST_TIMEOUT_MS / 1000} 秒内没有返回`)
+      : upstreamError(502, 'Wolfram|Alpha request failed'),
+  })
+  const body = result.data ?? ''
   // 200 也可能是凭证错误(见文件头);漏掉这一条就会把 "Invalid appid" 当答案返回。
   if (looksLikeCredentialError(body)) throw upstreamError(401, body.trim())
   return body

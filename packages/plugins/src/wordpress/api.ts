@@ -59,8 +59,16 @@ import type {
   updatePageInput,
   updatePostInput,
 } from './schema'
+import {
+  createProviderHttpClient,
+  type ProviderHttpErrorContext,
+  type ProviderHttpResult,
+  type ProviderQuery,
+  type ResponseBodyKind,
+} from '../_runtime/providerHttp'
+import { compactDefined as compact, asJsonObject as record, trimmedText as text } from '../_runtime/jsonValue'
 import { type ProviderContext, requireCredential } from '../_runtime/plugin'
-import { assertPublicHttpUrl, guardedFetch } from '../_runtime/guardedFetch'
+import { assertPublicHttpUrl } from '../_runtime/guardedFetch'
 import { upstreamError } from '../_runtime/upstreamError'
 
 const SERVICE = 'wordpress'
@@ -69,27 +77,10 @@ const API_PATH = 'wp-json/wp/v2'
 const REST_ROOT_SUFFIXES = ['/wp-json/wp/v2', '/wp-json']
 /** 上游凭证校验打的端点,也是本 provider 的 `get_current_user`。 */
 const CURRENT_USER_PATH = '/users/me'
+const http = createProviderHttpClient({ service: SERVICE })
 
 type Json = Record<string, unknown>
 type QueryValue = boolean | number | string | readonly (number | string)[] | undefined
-
-/** 上游 `optionalString` 的等价物:去空白后仍非空才算有值。 */
-function text(value: unknown): string | undefined {
-  if (typeof value !== 'string') return undefined
-  const trimmed = value.trim()
-  return trimmed === '' ? undefined : trimmed
-}
-
-function record(value: unknown): Json | undefined {
-  return typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Json) : undefined
-}
-
-/** 丢掉值为 undefined 的键(上游 `compactObject`);`null` 与 `0` 要留住。 */
-function compact<T>(input: Record<string, T | undefined>): Record<string, T> {
-  return Object.fromEntries(
-    Object.entries(input).filter(([, value]) => value !== undefined),
-  ) as Record<string, T>
-}
 
 /** 契约说好是对象;不是就是上游出问题,不是调用方的错。 */
 function requireRecord(value: unknown, message: string): Json {
@@ -167,21 +158,19 @@ function basicAuthHeader(ctx: ProviderContext): string {
 }
 
 /** 数组型参数是逗号串(WordPress 按逗号拆),不是重复的同名参数。 */
-function buildUrl(base: string, path: string, query: Record<string, QueryValue> = {}): string {
-  const url = new URL(path.replace(/^\/+/, ''), `${base}/`)
-  for (const [key, value] of Object.entries(query)) {
-    if (value === undefined) continue
-    url.searchParams.set(key, Array.isArray(value) ? value.map(String).join(',') : String(value))
-  }
-  return url.toString()
+function queryPairs(query: Record<string, QueryValue> = {}): ProviderQuery {
+  return Object.entries(query).map(([key, value]) => [
+    key,
+    Array.isArray(value) ? value.map(String).join(',') : value,
+  ] as const)
 }
 
 /** WordPress 的错误体是 `{code, message, data}`;拿不到 message 就退回 statusText。 */
-function errorMessage(payload: unknown, response: Response): string {
+function errorMessage(payload: unknown, context: ProviderHttpErrorContext): string {
   return text(record(payload)?.message)
-    ?? (text(response.statusText) === undefined
+    ?? (text(context.statusText) === undefined
       ? 'WordPress request failed'
-      : `WordPress request failed: ${response.statusText}`)
+      : `WordPress request failed: ${context.statusText}`)
 }
 
 interface RequestOptions {
@@ -191,46 +180,34 @@ interface RequestOptions {
   query?: Record<string, QueryValue>
 }
 
-async function requestResponse(ctx: ProviderContext, options: RequestOptions): Promise<Response> {
-  const headers: Record<string, string> = {
-    accept: 'application/json',
-    authorization: basicAuthHeader(ctx),
-  }
-  if (options.body !== undefined) headers['content-type'] = 'application/json'
-
-  try {
-    return await guardedFetch(buildUrl(apiBaseUrl(ctx), options.path, options.query), {
-      method: options.method ?? 'GET',
-      headers,
-      ...(options.body === undefined ? {} : { body: JSON.stringify(options.body) }),
-    })
-  } catch (error) {
-    // guardedFetch 拦下的出站(EgressBlockedError)已经是 TBError,原样冒上去。
-    if (error instanceof TBError) throw error
-    throw upstreamError(
-      502,
-      error instanceof Error ? `WordPress request failed: ${error.message}` : 'WordPress request failed',
-    )
-  }
+function jsonPayload(data: unknown, bodyKind: ResponseBodyKind): unknown {
+  return bodyKind === 'json' ? data : null
 }
 
-/** 读 body 并按状态归一;非 JSON 当作没有 body(上游 `response.json().catch(() => null)`)。 */
-async function readJson(response: Response): Promise<unknown> {
-  const raw = await response.text().catch(() => '')
-  let payload: unknown = null
-  if (raw.trim() !== '') {
-    try {
-      payload = JSON.parse(raw) as unknown
-    } catch {
-      payload = null
-    }
-  }
-  if (!response.ok) throw upstreamError(response.status || 502, errorMessage(payload, response))
-  return payload
+async function requestResponse(ctx: ProviderContext, options: RequestOptions): Promise<ProviderHttpResult> {
+  return http.request({
+    baseUrl: `${apiBaseUrl(ctx)}/`,
+    path: options.path,
+    method: options.method ?? 'GET',
+    query: queryPairs(options.query),
+    headers: { accept: 'application/json', authorization: basicAuthHeader(ctx) },
+    ...(options.body === undefined ? {} : { json: options.body }),
+    // 上游 response.json().catch(() => null)：成功或错误上的非 JSON 都按 null。
+    invalidJson: 'text',
+    mapError: context => upstreamError(
+      context.status || 502,
+      errorMessage(jsonPayload(context.data, context.bodyKind), context),
+    ),
+    mapTransportError: ({ message }) => upstreamError(
+      502,
+      message === undefined ? 'WordPress request failed' : `WordPress request failed: ${message}`,
+    ),
+  })
 }
 
 async function requestObject(ctx: ProviderContext, options: RequestOptions): Promise<Json> {
-  const payload = await readJson(await requestResponse(ctx, options))
+  const result = await requestResponse(ctx, options)
+  const payload = jsonPayload(result.data, result.bodyKind)
   return requireRecord(payload, 'WordPress response must be a JSON object')
 }
 
@@ -280,7 +257,7 @@ async function listCollection(
 ): Promise<Json> {
   assertNoIncludeExcludeOverlap(input)
   const response = await requestResponse(ctx, { path, query })
-  const payload = await readJson(response)
+  const payload = jsonPayload(response.data, response.bodyKind)
   if (!Array.isArray(payload)) {
     throw upstreamError(502, 'WordPress list response must be an array')
   }

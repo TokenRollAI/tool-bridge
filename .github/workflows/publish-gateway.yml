@@ -44,11 +44,10 @@ jobs:
             exit 1
           fi
 
-      # gateway 把 core 与宿主中立层 app 一并 bundle 进产物,三包 typecheck 一起过
-      - run: pnpm --filter @tool-bridge/core --filter @tool-bridge/app --filter @tool-bridge/gateway typecheck
-      # gateway 套件只覆盖 CF 宿主那一层(DO/D1/R2/Assets),树本身的行为在 app 的
-      # Node 套件里;产物含两者,故两套都是发布闸门。
-      - run: pnpm --filter @tool-bridge/core --filter @tool-bridge/app --filter @tool-bridge/gateway test
+      # index 内联 core/app；full 还内联 plugins/plugin-sdk，发布闸门
+      # 必须覆盖两个入口的完整 workspace 闭包。
+      - run: pnpm --filter @tool-bridge/core --filter @tool-bridge/app --filter @tool-bridge/plugin-sdk --filter @tool-bridge/plugins --filter @tool-bridge/gateway typecheck
+      - run: pnpm --filter @tool-bridge/core --filter @tool-bridge/app --filter @tool-bridge/plugin-sdk --filter @tool-bridge/plugins --filter @tool-bridge/gateway test
       - run: pnpm --filter @tool-bridge/gateway build
 
       # pnpm pack 同时应用 publishConfig 覆盖与 catalog/workspace 版本改写;

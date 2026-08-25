@@ -45,10 +45,10 @@ jobs:
             exit 1
           fi
 
-      # server 把 core 与宿主中立层 app bundle 进产物,三包 typecheck 一起过
-      - run: pnpm --filter @tool-bridge/core --filter @tool-bridge/app --filter @tool-bridge/server typecheck
-      # server 产物含中立层,故 app 的套件也是发布闸门。
-      - run: pnpm --filter @tool-bridge/app --filter @tool-bridge/server test
+      # main 内联 core/app/plugins，plugins 又使用 plugin-sdk；标签发布
+      # 必须独立验证这个完整闭包，不依赖某次 PR CI 的偶然顺序。
+      - run: pnpm --filter @tool-bridge/core --filter @tool-bridge/app --filter @tool-bridge/plugin-sdk --filter @tool-bridge/plugins --filter @tool-bridge/server typecheck
+      - run: pnpm --filter @tool-bridge/core --filter @tool-bridge/app --filter @tool-bridge/plugin-sdk --filter @tool-bridge/plugins --filter @tool-bridge/server test
       - run: pnpm --filter @tool-bridge/server build
 
       # dist 冒烟:守护 better-sqlite3 等 native/运行时依赖误 bundle(bundle 炸则起不来)。

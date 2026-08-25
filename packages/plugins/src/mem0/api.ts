@@ -35,12 +35,14 @@ import type {
   searchMemoriesInput,
   updateMemoryInput,
 } from './schema'
+import { compactDefined as compact, asJsonObject as record, trimmedText as text } from '../_runtime/jsonValue'
 import { type ProviderContext, requireApiKey } from '../_runtime/plugin'
+import { createProviderHttpClient } from '../_runtime/providerHttp'
 import { upstreamError } from '../_runtime/upstreamError'
-import { guardedFetch } from '../_runtime/guardedFetch'
 
 const SERVICE = 'mem0'
 const API_BASE = 'https://api.mem0.ai'
+const http = createProviderHttpClient({ baseUrl: `${API_BASE}/`, service: SERVICE })
 
 type Json = Record<string, unknown>
 type QueryValue = number | string | undefined
@@ -50,22 +52,6 @@ interface RequestInput {
   method?: 'DELETE' | 'GET' | 'POST' | 'PUT'
   path: string
   query?: Record<string, QueryValue>
-}
-
-/** 上游 `optionalString` 的等价物:去空白后仍非空才算有值。 */
-function text(value: unknown): string | undefined {
-  if (typeof value !== 'string') return undefined
-  const trimmed = value.trim()
-  return trimmed === '' ? undefined : trimmed
-}
-
-function record(value: unknown): Json | undefined {
-  return typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Json) : undefined
-}
-
-/** 丢掉值为 undefined 的键(上游 `compactObject`)。 */
-function compact(input: Record<string, unknown>): Json {
-  return Object.fromEntries(Object.entries(input).filter(([, value]) => value !== undefined))
 }
 
 /**
@@ -79,16 +65,10 @@ function requireText(value: unknown, field: string): string {
 }
 
 /** Mem0 的错误体形状不止一种:detail 可能是串、也可能是 FastAPI 的 [{msg}] 数组。 */
-function errorMessage(body: string, status: number): string {
-  if (body === '') return `Mem0 返回 HTTP ${status}`
-  let payload: Json | undefined
-  try {
-    payload = record(JSON.parse(body))
-  } catch {
-    return body
-  }
-  if (payload === undefined) return body
-
+function errorMessage(value: unknown, status: number): string {
+  if (typeof value === 'string') return value === '' ? `Mem0 返回 HTTP ${status}` : value
+  const payload = record(value)
+  if (payload === undefined) return `Mem0 返回 HTTP ${status}`
   const detail = payload.detail
   if (typeof detail === 'string' && detail !== '') return detail
   if (Array.isArray(detail)) {
@@ -99,44 +79,32 @@ function errorMessage(body: string, status: number): string {
   }
   if (typeof payload.message === 'string' && payload.message !== '') return payload.message
   if (typeof payload.error === 'string' && payload.error !== '') return payload.error
-  return body
+  return `Mem0 返回 HTTP ${status}`
 }
 
-function buildUrl(path: string, query: Record<string, QueryValue> | undefined): string {
-  const url = new URL(`${API_BASE}${path}`)
-  for (const [key, value] of Object.entries(query ?? {})) {
-    if (value === undefined) continue
-    url.searchParams.set(key, String(value))
-  }
-  return url.toString()
-}
-
-function rawRequest(ctx: ProviderContext, input: RequestInput): Promise<Response> {
-  const headers: Record<string, string> = {
-    // Token 而非 Bearer —— Mem0 用的是 DRF 的 TokenAuthentication。
-    authorization: `Token ${requireApiKey(ctx, SERVICE)}`,
-    accept: 'application/json',
-  }
-  if (input.body !== undefined) headers['content-type'] = 'application/json'
-  return guardedFetch(buildUrl(input.path, input.query), {
+function execute(ctx: ProviderContext, input: RequestInput) {
+  return http.request({
+    path: input.path,
     method: input.method ?? 'GET',
-    headers,
-    body: input.body === undefined ? undefined : JSON.stringify(input.body),
+    query: Object.entries(input.query ?? {}),
+    headers: {
+      accept: 'application/json',
+      // Token 而非 Bearer —— Mem0 用的是 DRF 的 TokenAuthentication。
+      authorization: `Token ${requireApiKey(ctx, SERVICE)}`,
+    },
+    ...(input.body === undefined ? {} : { json: input.body }),
+    invalidJson: 'text',
+    mapError: ({ data, status }) => upstreamError(status, errorMessage(data, status)),
   })
 }
 
 async function request(ctx: ProviderContext, input: RequestInput): Promise<unknown> {
-  const response = await rawRequest(ctx, input)
-  const body = await response.text()
-  if (!response.ok) throw upstreamError(response.status, errorMessage(body, response.status))
-  // 204 与空正文都按"成功但无内容"处理;非 JSON 正文原样兜住,不当成故障
-  // (上游如此:这些接口偶尔回纯文本 ack,压成错误会让一次成功的写变成失败)。
-  if (response.status === 204 || body === '') return {}
-  try {
-    return JSON.parse(body)
-  } catch {
-    return { raw: body }
+  const result = await execute(ctx, input)
+  if (result.bodyKind === 'empty') return {}
+  if (result.bodyKind === 'invalid-json' || result.bodyKind === 'text') {
+    return { raw: result.data }
   }
+  return result.data
 }
 
 export function addMemories(input: z.infer<typeof addMemoriesInput>, ctx: ProviderContext): Promise<unknown> {
@@ -230,21 +198,11 @@ export function updateMemory(input: z.infer<typeof updateMemoryInput>, ctx: Prov
 
 export async function deleteMemory(input: z.infer<typeof deleteMemoryInput>, ctx: ProviderContext): Promise<Json> {
   const memoryId = requireText(input.memory_id, 'memory_id')
-  const response = await rawRequest(ctx, {
+  const result = await execute(ctx, {
     method: 'DELETE',
     path: `/v1/memories/${encodeURIComponent(memoryId)}/`,
   })
-  const body = await response.text()
-  if (!response.ok) throw upstreamError(response.status, errorMessage(body, response.status))
-
-  // 删除的响应体形状不稳定(有时空、有时 {message}),但出参契约要求一个明确的回执:
-  // 只回"上游没报错"给调用方,它分不清"删掉了"和"这次调用被吞了"。
-  let payload: Json | undefined
-  try {
-    payload = body === '' ? undefined : record(JSON.parse(body))
-  } catch {
-    payload = undefined
-  }
+  const payload = result.bodyKind === 'json' ? record(result.data) : undefined
   return {
     memory_id: memoryId,
     deleted: true,

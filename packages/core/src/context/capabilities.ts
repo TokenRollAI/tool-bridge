@@ -12,14 +12,18 @@
  */
 
 import type { ContextProvider } from './types'
+import { contextCommands } from './commands'
 
-/** 数据面动词全集(cmd 名 = 方法名;与 help.ts 的 SCOPE_BY_CMD 同源)。 */
-export const CONTEXT_METHODS = ['list', 'get', 'search', 'write', 'update', 'delete'] as const
+export type ContextMethod = keyof ContextProvider
 
-export type ContextMethod = (typeof CONTEXT_METHODS)[number]
+/** 数据面 provider 动词全集；名称和 scope 均由命令注册真源派生。 */
+export const CONTEXT_METHODS: readonly ContextMethod[] = contextCommands
+  .names()
+  .filter(name => name !== 'create_upload') as ContextMethod[]
 
 /** 写动词(判定只读用)。 */
-export const CONTEXT_WRITE_METHODS: readonly ContextMethod[] = ['write', 'update', 'delete']
+export const CONTEXT_WRITE_METHODS: readonly ContextMethod[] = CONTEXT_METHODS
+  .filter(method => contextCommands.scopeFor(method) === 'write')
 
 /** 按 handler 存在性推导 provider 实际支持的方法集。 */
 export function contextMethodsOf(provider: ContextProvider): Set<ContextMethod> {

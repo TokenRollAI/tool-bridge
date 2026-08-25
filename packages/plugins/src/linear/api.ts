@@ -75,6 +75,11 @@ import type {
   updateLinearCommentInput,
   updateLinearProjectInput,
 } from './schema'
+import {
+  asJsonObject as asRecord,
+  booleanValue as bool,
+  compactDefined as compact,
+} from '../_runtime/jsonValue'
 import { type ProviderContext, requireApiKey } from '../_runtime/plugin'
 import { upstreamError } from '../_runtime/upstreamError'
 import { guardedFetch } from '../_runtime/guardedFetch'
@@ -332,12 +337,6 @@ const detailedIssueFields = `
 
 // ── 取值助手 ─────────────────────────────────────────────────────────────────
 
-function asRecord(value: unknown): Json | undefined {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-    ? (value as Json)
-    : undefined
-}
-
 /**
  * 上游 `asOptionalString` / `getOptionalString` 的语义:**空串视同没给**,但**不 trim**
  * (Linear 的 description / body 里首尾空白是内容的一部分,不能替调用方剪掉)。
@@ -348,19 +347,6 @@ function str(value: unknown): string | undefined {
 
 function num(value: unknown): number | undefined {
   return typeof value === 'number' ? value : undefined
-}
-
-function bool(value: unknown): boolean | undefined {
-  return typeof value === 'boolean' ? value : undefined
-}
-
-/** 丢掉值为 `undefined` 的键;`null` 要留着(出参里它表示"这一项确实没有")。 */
-function compact(input: Json): Json {
-  const output: Json = {}
-  for (const [key, value] of Object.entries(input)) {
-    if (value !== undefined) output[key] = value
-  }
-  return output
 }
 
 /** GraphQL connection 的 `nodes`;缺席按空列表处理(上游如此)。 */

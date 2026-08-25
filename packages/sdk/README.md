@@ -1,6 +1,6 @@
 # @tool-bridge/sdk
 
-tool-bridge 的库形态。根入口面向 Node 22+：内嵌 TB 实例、注册本地 Provider，并可反向连接远程网关。`@tool-bridge/sdk/device` 是独立的运行时中立入口，面向 React Native / Hermes 等设备宿主。
+tool-bridge 的库形态。根入口面向 Node 22+：内嵌 TB 实例、注册本地 Provider，并可反向连接远程网关。`@tool-bridge/sdk/device` 是独立的运行时中立设备入口；`@tool-bridge/sdk/store` 是浏览器、Node 与 React Native 共用的 default Store 控制面与流式传输入口。
 
 公开面即全部通道,不存在私有通道:`createToolBridge(config)` → `{ fetch, registerTool, registerContext, connect }`。
 
@@ -48,6 +48,34 @@ await conn.ready               // ready 帧到达,本实例注册的节点已挂
 
 conn.close()                   // 下线;远程节点保留标记 offline,超回收期自动删除
 ```
+
+## 运行时中立的 Store 客户端
+
+管理 default Store 时优先从独立子入口导入。它只依赖 Web 标准，支持注入 `fetch`，不会把 app、WebSocket
+或 Node API 带入浏览器/RN 产物：
+
+```ts
+import { createStoreClient, parseStoreUri } from '@tool-bridge/sdk/store'
+
+const store = createStoreClient({
+  baseUrl: 'https://your-gateway.example.com',
+  // 每次控制请求都会重新读取，便于无停机轮换；不要把 SK 写进 URL 或日志。
+  sk: async () => await readCurrentSk(),
+})
+
+const uploaded = await store.upload({
+  body: photoBlob,
+  contentType: 'image/jpeg',
+  filename: 'capture.jpg',
+})
+
+const uri = parseStoreUri(uploaded.uri)
+const response = await store.download(uri)
+await consumeWithoutBuffering(response.body)
+```
+
+`createStoreClient` 还提供 `stat/list/read/share/revokeShare/delete`。短期 `$ref`、上传 grant 与签名 URL
+都属于 bearer secret；SDK 会裁剪 wire 未知字段并脱敏错误，但调用方仍不应持久化或记录这些值。
 
 ## React Native / Hermes 设备入口
 

@@ -44,30 +44,21 @@ import type {
   stopMachineInput,
   waitForMachineInput,
 } from './schema'
+import { createProviderHttpClient, type ProviderQuery, type ResponseBodyKind } from '../_runtime/providerHttp'
+import { compactDefined as compact, asJsonObject as record, trimmedText as text } from '../_runtime/jsonValue'
 import { type ProviderContext, requireApiKey } from '../_runtime/plugin'
 import { upstreamError } from '../_runtime/upstreamError'
-import { guardedFetch } from '../_runtime/guardedFetch'
 
 const SERVICE = 'fly'
 /** 末尾斜杠是必需的:`new URL('apps', base)` 靠它把 `/v1` 保住而不是替换掉。 */
 const API_BASE = 'https://api.machines.dev/v1/'
+const http = createProviderHttpClient({ baseUrl: API_BASE, service: SERVICE })
 
 type Json = Record<string, unknown>
 type QueryValue = boolean | number | string | undefined
 
 /** 生命周期动作的固定应答(上游 `{ ok: true }`)。 */
 interface Ack { ok: true }
-
-function record(value: unknown): Json | undefined {
-  return typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Json) : undefined
-}
-
-/** 上游 `optionalString` 的等价物:去空白后仍非空才算有值。 */
-function text(value: unknown): string | undefined {
-  if (typeof value !== 'string') return undefined
-  const trimmed = value.trim()
-  return trimmed === '' ? undefined : trimmed
-}
 
 /** 上游 `requiredActionString`:schema 没标 required 的字段,必填断言落在这里。 */
 function requireText(value: unknown, field: string): string {
@@ -76,42 +67,21 @@ function requireText(value: unknown, field: string): string {
   return result
 }
 
-/** 上游 `jsonObject`:丢掉值为 undefined 的键(`null` 是有意义的值,要留住)。 */
-function compact(input: Json): Json {
-  return Object.fromEntries(Object.entries(input).filter(([, value]) => value !== undefined))
-}
-
 /** 全字段都缺时不发请求体 —— Fly 对空对象体与无体的处理不同。 */
 function optionalBody(input: Json): Json | undefined {
   const body = compact(input)
   return Object.keys(body).length === 0 ? undefined : body
 }
 
-function buildUrl(path: string, query: Record<string, QueryValue>): string {
-  const url = new URL(path, API_BASE)
-  for (const [key, value] of Object.entries(query)) {
-    // 空串与 undefined 同等对待:Fly 把 `?region=` 当成真的按空 region 过滤。
-    if (value === undefined || value === '') continue
-    url.searchParams.set(key, String(value))
-  }
-  return url.toString()
-}
-
-function headers(apiKey: string, hasBody: boolean): Record<string, string> {
-  return {
-    accept: 'application/json',
-    authorization: `Bearer ${apiKey}`,
-    ...(hasBody ? { 'content-type': 'application/json' } : {}),
-  }
-}
-
 /**
  * Fly 不保证给对 content-type,故"声明是 JSON"与"看起来像 JSON"任一成立就试解析;
  * 解析不出来就把原文当结果 —— 错误分支要靠它拿到人能读的消息。
  */
-function readPayload(response: Response, body: string): unknown {
-  if (body === '') return undefined
-  const contentType = (response.headers.get('content-type') ?? '').toLowerCase()
+function flyPayload(data: unknown, bodyKind: ResponseBodyKind, headers: Headers): unknown {
+  if (bodyKind === 'empty') return undefined
+  if (bodyKind === 'json') return data
+  const body = String(data)
+  const contentType = (headers.get('content-type') ?? '').toLowerCase()
   const trimmed = body.trim()
   if (contentType.includes('application/json') || trimmed.startsWith('{') || trimmed.startsWith('[')) {
     try {
@@ -150,24 +120,23 @@ interface RequestInput {
 async function request(ctx: ProviderContext, input: RequestInput): Promise<unknown> {
   // 取凭证放在 try 外:它抛的是配置错误,不该被下面的传输失败兜底吞成 502。
   const apiKey = requireApiKey(ctx, SERVICE)
-
-  let response: Response
-  let payload: unknown
-  try {
-    response = await guardedFetch(buildUrl(input.path, input.query ?? {}), {
-      method: input.method,
-      headers: headers(apiKey, input.body !== undefined),
-      body: input.body === undefined ? undefined : JSON.stringify(input.body),
-    })
-    payload = readPayload(response, await response.text())
-  } catch (error) {
-    // 传输层失败必须就地归一:漏出去的裸 Error 会被 plugin-sdk 抹成 "internal plugin error"
-    // 500。EgressBlockedError 本身是 TBError(invalid_argument),原样冒上去。
-    if (error instanceof TBError) throw error
-    throw upstreamError(502, error instanceof Error ? error.message : 'Fly.io request failed')
-  }
-
-  if (!response.ok) throw upstreamError(response.status, errorMessage(payload, response.status))
+  const result = await http.request({
+    path: input.path,
+    method: input.method,
+    // 空串与 undefined 同等对待:Fly 把 `?region=` 当成真的按空 region 过滤。
+    query: Object.entries(input.query ?? {})
+      .filter(([, value]) => value !== undefined && value !== '') satisfies ProviderQuery,
+    headers: { accept: 'application/json', authorization: `Bearer ${apiKey}` },
+    ...(input.body === undefined ? {} : { json: input.body }),
+    invalidJson: 'text',
+    responseType: 'auto',
+    mapError: context => upstreamError(
+      context.status,
+      errorMessage(flyPayload(context.data, context.bodyKind, context.headers), context.status),
+    ),
+    mapTransportError: ({ message }) => upstreamError(502, message ?? 'Fly.io request failed'),
+  })
+  const payload = flyPayload(result.data, result.bodyKind, result.headers)
   if (input.expectJson === false) return payload
   if (payload === undefined) {
     // 契约说好有结果,却回了空体 —— 是上游出问题,不是调用方的错。

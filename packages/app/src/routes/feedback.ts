@@ -1,3 +1,12 @@
+import {
+  feedbackDetailSchema,
+  feedbackListSchema,
+  feedbackRemoveResponseSchema,
+  feedbackSubmitRequestSchema,
+  feedbackSubmitResponseSchema,
+  feedbackViewSchema,
+  feedbackVoteRequestSchema,
+} from '@tool-bridge/core/protocol'
 /**
  * `~feedback`:per-path 的 Agent 反馈(一级协议能力)。
  *
@@ -23,8 +32,12 @@ import { splitFeedback } from '../paths'
 // 排序/阈值/防刷在 core FeedbackStore;~help 默认区块经 enrichHelp 注入。
 
 /** 反馈条目的线上视图:投票人集合不外露,只回计数与净分。 */
-const feedbackJson = (value: unknown): Response =>
-  new Response(JSON.stringify(value), { headers: { 'content-type': contentTypeFor('json') } })
+const feedbackJson = (
+  schema: { parse(value: unknown): unknown },
+  value: unknown,
+): Response => new Response(JSON.stringify(schema.parse(value)), {
+  headers: { 'content-type': contentTypeFor('json') },
+})
 
 // GET /<path>/~feedback → 列表(?hidden=1 含净分 ≤ 阈值的隐藏条目);GET .../~feedback/<id> → 单条详情。
 export async function handleFeedbackGet(c: AppContext): Promise<Response> {
@@ -35,7 +48,7 @@ export async function handleFeedbackGet(c: AppContext): Promise<Response> {
   const fb = new FeedbackStore(c.get('store'))
   if (target.id !== undefined) {
     const e = await fb.get(target.path, target.id)
-    return feedbackJson({
+    return feedbackJson(feedbackDetailSchema, {
       id: e.id,
       path: target.path,
       title: e.title,
@@ -50,7 +63,7 @@ export async function handleFeedbackGet(c: AppContext): Promise<Response> {
   const views = await fb.listViews(target.path)
   const items
     = c.req.query('hidden') === '1' ? views : views.filter(v => v.score > FEEDBACK_HIDE_SCORE)
-  return feedbackJson({ items })
+  return feedbackJson(feedbackListSchema, { items })
 }
 
 // POST /<path>/~feedback {title,detail} → 提交;POST .../~feedback/<id> {vote} → 投票(每身份一票,可改票)。
@@ -74,24 +87,33 @@ export async function handleFeedbackPost(c: AppContext, env: RouteEnv): Promise<
       await searchSync?.reconcileNodeQuietly(path, { feedback: entries, marker })
     })
     if (target.id !== undefined) {
-      const vote = body.vote
-      if (vote !== 'up' && vote !== 'down' && vote !== 'clear') {
+      const input = feedbackVoteRequestSchema.safeParse(body)
+      if (!input.success) {
         throw new TBError('invalid_argument', `body.vote must be 'up' | 'down' | 'clear'`)
       }
-      return feedbackJson(await fb.vote(target.path, target.id, ctx.owner, vote))
+      return feedbackJson(
+        feedbackViewSchema,
+        await fb.vote(target.path, target.id, ctx.owner, input.data.vote),
+      )
     }
-    if (typeof body.title !== 'string' || typeof body.detail !== 'string') {
+    const input = feedbackSubmitRequestSchema.safeParse(body)
+    if (!input.success) {
       throw new TBError('invalid_argument', 'body must be { title: string, detail: string }')
     }
     // path 须挂在真实节点(或其工具子路径)下,防悬空路径积垃圾。
     await new NodeRegistryStore(store).resolve(target.path)
     const entry = await fb.submit(
       target.path,
-      { title: body.title, detail: body.detail },
+      input.data,
       ctx.owner,
       new Date().toISOString(),
     )
-    return feedbackJson({ id: entry.id, path: target.path, title: entry.title, at: entry.at })
+    return feedbackJson(feedbackSubmitResponseSchema, {
+      id: entry.id,
+      path: target.path,
+      title: entry.title,
+      at: entry.at,
+    })
   } catch (error) {
     await searchSync?.abort(marker)
     throw error
@@ -119,5 +141,5 @@ export async function handleFeedbackDelete(c: AppContext, env: RouteEnv): Promis
     await searchSync?.abort(marker)
     throw error
   }
-  return feedbackJson({ ok: true })
+  return feedbackJson(feedbackRemoveResponseSchema, { ok: true })
 }

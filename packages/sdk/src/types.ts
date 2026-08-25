@@ -63,6 +63,11 @@ export interface ToolBridgeConfig {
    * 按同形状给自己那份。
    */
   pluginCatalog?: BuiltinCatalog
+  /**
+   * Provider OAuth 令牌端点的出站通道。SDK 不会回退到全局 fetch；嵌入方启用
+   * Provider OAuth 时必须显式注入，并负责逐跳出站策略与跨源 body 重定向保护。
+   */
+  providerOAuthFetch?: typeof fetch
 
   // ---- 以下为 SDK 引导扩展(标准签名未列) ----
 

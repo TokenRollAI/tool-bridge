@@ -1,6 +1,6 @@
 {
   "name": "@tool-bridge/dashboard",
-  "version": "0.22.0",
+  "version": "0.23.0",
   "description": "tool-bridge dashboard as prebuilt static assets (Vite build output in dist/), serve via Workers Static Assets or any static host",
   "type": "module",
   "license": "MIT",
@@ -35,6 +35,7 @@
     "@tanstack/react-query": "^5.90.5",
     "@testing-library/dom": "^10.4.1",
     "@testing-library/react": "^16.3.2",
+    "@tool-bridge/sdk": "workspace:*",
     "@types/node": "catalog:",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",

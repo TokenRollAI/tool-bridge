@@ -1,11 +1,5 @@
-import {
-  base64urlEncode,
-  type CallContext,
-  encodeCallContext,
-  HEADER_TB_CONTEXT,
-  HEADER_TB_UPSTREAM_AUTH,
-} from '@tool-bridge/core'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+import { createProviderHarness } from '../support/providerHarness'
 import { createScrapflyPlugin } from '../../src/scrapfly/index'
 import { scrapflyActions } from '../../src/scrapfly/schema'
 
@@ -15,60 +9,30 @@ import { scrapflyActions } from '../../src/scrapfly/schema'
  * 计费信息只在响应头里、body/content_type 的成对约束。
  */
 
-const PLUGIN_TOKEN = 'tbp_test'
-const ENV = { PLUGIN_TOKEN }
 const API_KEY = 'scp-live-deadbeef'
 const plugin = createScrapflyPlugin()
 
-const CALLER: CallContext = {
-  keyId: 'k1',
-  owner: 'agent:tester',
-  scopes: [],
-  traceId: 't1',
+const {
+  call,
+  envelope,
+  sent,
+  stubFetch,
+} = createProviderHarness({
   mountPath: 'scrape/scrapfly',
-  exportId: 'actions',
-}
-
-function envelope(body: unknown, opts: { auth?: string | null } = {}): Promise<Response> {
-  const headers: Record<string, string> = {
-    'authorization': `Bearer ${PLUGIN_TOKEN}`,
-    'content-type': 'application/json',
-    [HEADER_TB_CONTEXT]: encodeCallContext(CALLER),
-  }
-  const auth = opts.auth === undefined ? API_KEY : opts.auth
-  if (auth !== null) {
-    headers[HEADER_TB_UPSTREAM_AUTH] = base64urlEncode(new TextEncoder().encode(auth))
-  }
-  return Promise.resolve(plugin.fetch(
-    new Request('https://plugin.test/', { method: 'POST', headers, body: JSON.stringify(body) }),
-    ENV as never,
-  ))
-}
-
-function call(name: string, args: unknown, opts?: { auth?: string | null }): Promise<Response> {
-  return envelope({ tool: 'Call', arguments: { name, args } }, opts)
-}
+  plugin,
+  upstreamAuth: API_KEY,
+})
 
 function mockScrapfly(
   status: number,
   payload: unknown,
   extraHeaders: Record<string, string> = {},
 ): ReturnType<typeof vi.fn> {
-  const fn = vi.fn(() => Promise.resolve(new Response(JSON.stringify(payload), {
+  return stubFetch(() => Promise.resolve(new Response(JSON.stringify(payload), {
     status,
     headers: { 'content-type': 'application/json', ...extraHeaders },
   })))
-  vi.stubGlobal('fetch', fn)
-  return fn
 }
-
-function sent(mock: ReturnType<typeof vi.fn>): Request {
-  return (mock.mock.calls[0] as [Request])[0]
-}
-
-afterEach(() => {
-  vi.unstubAllGlobals()
-})
 
 describe('契约面', () => {
   it('List 出全部 2 个 action,且都带 Zod 派生的 schema', async () => {

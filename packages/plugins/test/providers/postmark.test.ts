@@ -1,11 +1,5 @@
-import {
-  base64urlEncode,
-  type CallContext,
-  encodeCallContext,
-  HEADER_TB_CONTEXT,
-  HEADER_TB_UPSTREAM_AUTH,
-} from '@tool-bridge/core'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+import { createProviderHarness } from '../support/providerHarness'
 import { createPostmarkPlugin } from '../../src/postmark/index'
 import { postmarkActions } from '../../src/postmark/schema'
 
@@ -15,63 +9,24 @@ import { postmarkActions } from '../../src/postmark/schema'
  * metadata 过滤器摊平成 `metadata_<key>`、以及 HTTP 422 底下那张 ErrorCode 码表。
  */
 
-const PLUGIN_TOKEN = 'tbp_test'
-const ENV = { PLUGIN_TOKEN }
 const API_KEY = 'pm_server_token'
 const plugin = createPostmarkPlugin()
 
-const CALLER: CallContext = {
-  keyId: 'k1',
-  owner: 'agent:tester',
-  scopes: [],
-  traceId: 't1',
+const {
+  call,
+  envelope,
+  sent,
+  sentUrl,
+  mockJson: mockPostmark,
+  env: ENV,
+} = createProviderHarness({
   mountPath: 'email/postmark',
-  exportId: 'actions',
-}
-
-function envelope(body: unknown, opts: { auth?: string | null } = {}): Promise<Response> {
-  const headers: Record<string, string> = {
-    'authorization': `Bearer ${PLUGIN_TOKEN}`,
-    'content-type': 'application/json',
-    [HEADER_TB_CONTEXT]: encodeCallContext(CALLER),
-  }
-  const auth = opts.auth === undefined ? API_KEY : opts.auth
-  if (auth !== null) {
-    headers[HEADER_TB_UPSTREAM_AUTH] = base64urlEncode(new TextEncoder().encode(auth))
-  }
-  return Promise.resolve(plugin.fetch(
-    new Request('https://plugin.test/', { method: 'POST', headers, body: JSON.stringify(body) }),
-    ENV as never,
-  ))
-}
-
-function call(name: string, args: unknown, opts?: { auth?: string | null }): Promise<Response> {
-  return envelope({ tool: 'Call', arguments: { name, args } }, opts)
-}
-
-function mockPostmark(status: number, payload: unknown): ReturnType<typeof vi.fn> {
-  const fn = vi.fn(() => Promise.resolve(new Response(JSON.stringify(payload), {
-    status,
-    headers: { 'content-type': 'application/json' },
-  })))
-  vi.stubGlobal('fetch', fn)
-  return fn
-}
-
-function sent(mock: ReturnType<typeof vi.fn>): Request {
-  return (mock.mock.calls[0] as [Request])[0]
-}
-
-function sentUrl(mock: ReturnType<typeof vi.fn>): URL {
-  return new URL(sent(mock).url)
-}
+  plugin,
+  upstreamAuth: API_KEY,
+})
 
 /** 一封最小可发的信,用来给各条断言当基线。 */
 const EMAIL = { From: 'a@example.com', To: 'b@example.com', Subject: 'hi', TextBody: 'yo' }
-
-afterEach(() => {
-  vi.unstubAllGlobals()
-})
 
 describe('契约面', () => {
   it('~describe 报单个 tools/v1 export,并宣告 get_server 为凭证探针', async () => {

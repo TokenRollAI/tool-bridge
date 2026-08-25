@@ -1,13 +1,107 @@
-import { Plus, Trash2 } from 'lucide-react'
+import { type SchemaField, SchemaFields } from '@/components/SchemaFields'
 import { FormSection } from '@/components/FormSection'
-import { Checkbox } from '@/components/ui/checkbox'
-import { Textarea } from '@/components/ui/textarea'
-import { Button } from '@/components/ui/button'
-import { Badge } from '@/components/ui/badge'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
 import { ACTIONS } from '@/lib/types'
-import type { SkFormState } from './skConfig'
+import type { ScopeRow, SkFormState } from './skConfig'
+
+const IDENTITY_FIELDS: SchemaField[] = [
+  {
+    key: 'owner',
+    label: 'owner',
+    required: true,
+    description: '建议：user:alice / agent:bot / device:host',
+    ui: {
+      'ui:autocomplete': 'off',
+      'ui:classNames': 'font-mono',
+      'ui:placeholder': 'agent:researcher',
+    },
+  },
+  {
+    key: 'description',
+    label: '用途说明',
+    description: '用于列表识别和后续权限审计。',
+    ui: { 'ui:placeholder': '只读知识库检索' },
+  },
+]
+
+const PERMISSION_FIELDS: SchemaField[] = [
+  {
+    key: 'scopes',
+    label: 'scope 规则',
+    required: true,
+    schema: {
+      type: 'array',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        default: { pattern: '', actions: ['read'], effect: 'allow' },
+        properties: {
+          pattern: { type: 'string', title: 'path pattern' },
+          actions: {
+            type: 'array',
+            title: 'actions',
+            minItems: 1,
+            uniqueItems: true,
+            items: { type: 'string', enum: [...ACTIONS] },
+          },
+          effect: {
+            type: 'string',
+            title: 'effect',
+            oneOf: [
+              { const: 'allow', title: 'allow' },
+              { const: 'deny', title: 'deny（优先于 allow）' },
+            ],
+          },
+        },
+        required: ['pattern', 'actions', 'effect'],
+      },
+    },
+    ui: {
+      'ui:options': { orderable: false },
+      'items': {
+        'ui:options': { label: false },
+        'pattern': { 'ui:classNames': 'font-mono', 'ui:placeholder': 'docs/**' },
+        'actions': { 'ui:widget': 'checkboxes', 'ui:options': { inline: true } },
+        'effect': {
+          'ui:widget': 'radio',
+          'ui:options': { inline: true, optionValueFormat: 'realValue' },
+        },
+      },
+    },
+  },
+  {
+    key: 'registerPaths',
+    label: 'registerPaths（高级，可空）',
+    description: '每行一条；只约束反向注册路径，不会自动授予 register action。',
+    ui: {
+      'ui:classNames': 'font-mono',
+      'ui:placeholder': 'device/build-01/**\ndevice/build-02/**',
+      'ui:widget': 'textarea',
+      'ui:options': { rows: 3 },
+    },
+  },
+]
+
+const LIFECYCLE_FIELDS: SchemaField[] = [
+  {
+    key: 'expiresAt',
+    label: '过期时间（可空）',
+    ui: { 'ui:widget': 'datetime' },
+  },
+]
+
+function scopeRows(value: unknown, fallback: ScopeRow[]): ScopeRow[] {
+  if (!Array.isArray(value)) return fallback
+  return value.map((item): ScopeRow => {
+    const row = item as Partial<ScopeRow>
+    return {
+      pattern: typeof row.pattern === 'string' ? row.pattern : '',
+      actions: Array.isArray(row.actions)
+        ? row.actions.filter(action => ACTIONS.includes(action))
+        : [],
+      effect: row.effect === 'deny' ? 'deny' : 'allow',
+    }
+  })
+}
 
 export function SkFormFields({
   disabled,
@@ -18,7 +112,6 @@ export function SkFormFields({
   onChange: (next: SkFormState) => void
   state: SkFormState
 }) {
-  const setScopes = (next: SkFormState['scopes']) => onChange({ ...state, scopes: next })
   return (
     <>
       <FormSection
@@ -26,32 +119,17 @@ export function SkFormFields({
         index="01"
         title="身份"
       >
-        <div className="grid gap-3 sm:grid-cols-2">
-          <div className="grid gap-1.5">
-            <Label htmlFor="sk-owner">owner *</Label>
-            <Input
-              autoComplete="off"
-              className="font-mono text-sm"
-              id="sk-owner"
-              onChange={event => onChange({ ...state, owner: event.target.value })}
-              placeholder="agent:researcher"
-              value={state.owner}
-            />
-            <p className="text-[11px] text-muted-foreground">
-              建议：user:alice / agent:bot / device:host
-            </p>
-          </div>
-          <div className="grid gap-1.5">
-            <Label htmlFor="sk-description">用途说明</Label>
-            <Input
-              id="sk-description"
-              onChange={event => onChange({ ...state, description: event.target.value })}
-              placeholder="只读知识库检索"
-              value={state.description}
-            />
-            <p className="text-[11px] text-muted-foreground">用于列表识别和后续权限审计。</p>
-          </div>
-        </div>
+        <SchemaFields
+          disabled={disabled}
+          fields={IDENTITY_FIELDS}
+          idPrefix="sk-identity"
+          onChange={next => onChange({
+            ...state,
+            owner: typeof next.owner === 'string' ? next.owner : '',
+            description: typeof next.description === 'string' ? next.description : '',
+          })}
+          value={{ owner: state.owner, description: state.description }}
+        />
       </FormSection>
 
       <FormSection
@@ -59,130 +137,17 @@ export function SkFormFields({
         index="02"
         title="权限"
       >
-        <div className="grid gap-3">
-          {state.scopes.map((row, index) => (
-            <div
-              className={`rounded-lg border p-3 ${
-                row.effect === 'deny'
-                  ? 'border-destructive/25 bg-destructive/[0.025]'
-                  : 'bg-muted/10'
-              }`}
-              // biome-ignore lint/suspicious/noArrayIndexKey: scope 行在提交前没有稳定业务 id
-              key={index}
-            >
-              <div className="flex items-center justify-between gap-3">
-                <div className="flex items-center gap-2">
-                  <span className="font-mono text-[10px] text-muted-foreground">
-                    RULE
-                    {' '}
-                    {String(index + 1).padStart(2, '0')}
-                  </span>
-                  <Badge
-                    className={
-                      row.effect === 'deny'
-                        ? 'border-destructive/30 text-destructive'
-                        : 'border-ok/30 text-ok'
-                    }
-                    variant="outline"
-                  >
-                    {row.effect}
-                  </Badge>
-                </div>
-                <Button
-                  aria-label={`移除第 ${index + 1} 条 scope`}
-                  disabled={disabled}
-                  onClick={() => setScopes(state.scopes.filter((_, item) => item !== index))}
-                  size="icon-xs"
-                  type="button"
-                  variant="ghost"
-                >
-                  <Trash2 />
-                </Button>
-              </div>
-              <div className="mt-3 grid gap-3 md:grid-cols-[minmax(180px,0.8fr)_1.6fr]">
-                <div className="grid gap-1.5">
-                  <Label className="text-xs" htmlFor={`scope-pattern-${index}`}>path pattern</Label>
-                  <Input
-                    className="h-9 font-mono text-xs"
-                    id={`scope-pattern-${index}`}
-                    onChange={event =>
-                      setScopes(state.scopes.map((scope, item) =>
-                        item === index ? { ...scope, pattern: event.target.value } : scope))}
-                    placeholder="docs/**"
-                    value={row.pattern}
-                  />
-                </div>
-                <fieldset className="grid gap-1.5">
-                  <legend className="text-xs font-medium">actions</legend>
-                  <div className="flex min-h-9 flex-wrap items-center gap-x-3 gap-y-2 rounded-md border bg-background/65 px-3 py-2">
-                    {ACTIONS.map(action => (
-                      // biome-ignore lint/a11y/noLabelWithoutControl: Radix Checkbox 在 label 内提供关联
-                      <label className="flex items-center gap-1.5 font-mono text-xs" key={action}>
-                        <Checkbox
-                          checked={row.actions.includes(action)}
-                          onCheckedChange={checked =>
-                            setScopes(state.scopes.map((scope, item) =>
-                              item === index
-                                ? {
-                                    ...scope,
-                                    actions: checked
-                                      ? [...scope.actions, action]
-                                      : scope.actions.filter(value => value !== action),
-                                  }
-                                : scope))}
-                        />
-                        {action}
-                      </label>
-                    ))}
-                  </div>
-                </fieldset>
-              </div>
-              <div className="mt-3 flex justify-end">
-                {/* biome-ignore lint/a11y/noLabelWithoutControl: Radix Checkbox 在 label 内提供关联 */}
-                <label className="flex items-center gap-2 text-xs text-muted-foreground">
-                  <Checkbox
-                    checked={row.effect === 'deny'}
-                    onCheckedChange={checked =>
-                      setScopes(state.scopes.map((scope, item) =>
-                        item === index
-                          ? { ...scope, effect: checked ? 'deny' : 'allow' }
-                          : scope))}
-                  />
-                  设为 deny 规则（优先于所有 allow）
-                </label>
-              </div>
-            </div>
-          ))}
-          <Button
-            className="justify-self-start"
-            disabled={disabled}
-            onClick={() => setScopes([
-              ...state.scopes,
-              { pattern: '', actions: ['read'], effect: 'allow' },
-            ])}
-            size="sm"
-            type="button"
-            variant="outline"
-          >
-            <Plus />
-            添加 scope 规则
-          </Button>
-
-          <div className="grid gap-1.5 border-t pt-4">
-            <Label htmlFor="sk-register-paths">registerPaths（高级，可空）</Label>
-            <Textarea
-              className="font-mono text-xs"
-              id="sk-register-paths"
-              onChange={event => onChange({ ...state, registerPaths: event.target.value })}
-              placeholder={'device/build-01/**\ndevice/build-02/**'}
-              rows={3}
-              value={state.registerPaths}
-            />
-            <p className="text-[11px] text-muted-foreground">
-              每行一条；只约束反向注册路径，不会自动授予 register action。
-            </p>
-          </div>
-        </div>
+        <SchemaFields
+          disabled={disabled}
+          fields={PERMISSION_FIELDS}
+          idPrefix="sk-permission"
+          onChange={next => onChange({
+            ...state,
+            scopes: scopeRows(next.scopes, state.scopes),
+            registerPaths: typeof next.registerPaths === 'string' ? next.registerPaths : '',
+          })}
+          value={{ scopes: state.scopes, registerPaths: state.registerPaths }}
+        />
       </FormSection>
 
       <FormSection
@@ -190,15 +155,16 @@ export function SkFormFields({
         index="03"
         title="生命周期"
       >
-        <div className="grid gap-1.5 sm:max-w-sm">
-          <Label htmlFor="sk-expiry">过期时间（可空）</Label>
-          <Input
-            id="sk-expiry"
-            onChange={event => onChange({ ...state, expiresAt: event.target.value })}
-            type="datetime-local"
-            value={state.expiresAt}
-          />
-        </div>
+        <SchemaFields
+          disabled={disabled}
+          fields={LIFECYCLE_FIELDS}
+          idPrefix="sk-lifecycle"
+          onChange={next => onChange({
+            ...state,
+            expiresAt: typeof next.expiresAt === 'string' ? next.expiresAt : '',
+          })}
+          value={{ expiresAt: state.expiresAt }}
+        />
       </FormSection>
     </>
   )

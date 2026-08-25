@@ -110,4 +110,13 @@ describe('builtin sk 模块', () => {
     }
     expect(unchanged.expiresAt).toBe('2026-07-07T00:00:00.000Z')
   })
+
+  it('write 顶层与 scope 嵌套对象都拒绝未知字段', async () => {
+    await expect(mod.dispatch('write', { owner: 'agent:x', scopes: [], hash: 'forged' }, ctx))
+      .rejects.toSatisfy(e => isTBError(e) && e.code === 'invalid_argument')
+    await expect(mod.dispatch('write', {
+      owner: 'agent:x',
+      scopes: [{ pattern: '**', actions: ['read'], unexpected: true }],
+    }, ctx)).rejects.toSatisfy(e => isTBError(e) && e.code === 'invalid_argument')
+  })
 })

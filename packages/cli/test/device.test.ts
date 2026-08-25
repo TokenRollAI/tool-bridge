@@ -3,8 +3,8 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { normalizeDeviceId, resolveDeviceId } from '../src/deviceId'
-import { deviceWsUrl, startHeartbeat } from '../src/deviceRuntime'
 import { buildExpose } from '../src/commands/connect'
+import { deviceWsUrl } from '../src/deviceRuntime'
 import { resetFetch, setFetch } from '../src/http'
 import { configPath } from '../src/config'
 import { runCli } from './cliHarness'
@@ -79,60 +79,6 @@ describe('device runtime helpers', () => {
     expect(buildExpose({ shell: false, fs: '/tmp' })).toEqual({
       fs: { roots: ['/tmp'], readOnly: false },
     })
-  })
-})
-
-describe('startHeartbeat', () => {
-  function fakeSocket(readyState = 1) {
-    return { readyState, send: vi.fn(), reconnect: vi.fn() }
-  }
-
-  it('每周期发 ping;markAlive(收到任何入站帧)后持续保活不重连', () => {
-    vi.useFakeTimers()
-    try {
-      const socket = fakeSocket()
-      const hb = startHeartbeat(socket, 1000)
-      vi.advanceTimersByTime(1000)
-      expect(socket.send).toHaveBeenCalledWith('{"type":"ping"}')
-      hb.markAlive() // 模拟 pong 到达
-      vi.advanceTimersByTime(1000)
-      expect(socket.send).toHaveBeenCalledTimes(2)
-      expect(socket.reconnect).not.toHaveBeenCalled()
-      hb.stop()
-      vi.advanceTimersByTime(5000)
-      expect(socket.send).toHaveBeenCalledTimes(2)
-    } finally {
-      vi.useRealTimers()
-    }
-  })
-
-  it('一个周期内无入站帧 → 判定半开连接,主动 reconnect', () => {
-    vi.useFakeTimers()
-    try {
-      const socket = fakeSocket()
-      const hb = startHeartbeat(socket, 1000)
-      vi.advanceTimersByTime(1000) // 发 ping,无应答
-      vi.advanceTimersByTime(1000) // 死链 → reconnect
-      expect(socket.reconnect).toHaveBeenCalledTimes(1)
-      expect(socket.send).toHaveBeenCalledTimes(1)
-      hb.stop()
-    } finally {
-      vi.useRealTimers()
-    }
-  })
-
-  it('非 OPEN 状态不发 ping 也不判死链', () => {
-    vi.useFakeTimers()
-    try {
-      const socket = fakeSocket(0)
-      const hb = startHeartbeat(socket, 1000)
-      vi.advanceTimersByTime(3000)
-      expect(socket.send).not.toHaveBeenCalled()
-      expect(socket.reconnect).not.toHaveBeenCalled()
-      hb.stop()
-    } finally {
-      vi.useRealTimers()
-    }
   })
 })
 

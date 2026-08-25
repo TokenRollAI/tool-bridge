@@ -14,6 +14,11 @@ import {
   TBError,
   type TreeNode,
 } from '@tool-bridge/core'
+import {
+  oauthAuthorizeRequestSchema,
+  oauthAuthorizeResponseSchema,
+  registryNodeSchema,
+} from '@tool-bridge/core/protocol'
 import type { AppContext } from '../deps'
 import type { RouteEnv } from './env'
 import { assertToolConfig, refreshDynamicSearchNode, requirePluginExport } from '../toolNodes'
@@ -62,14 +67,14 @@ async function authorizeToolNode(
     authRef: config.authRef,
     config: exported.oauth,
     encryptionKey,
-    fetcher: fetch,
+    fetcher: deps.providerOAuthFetch,
     nodePath: node.path,
     now: new Date(),
     origin: deps.canonicalOrigin ?? new URL(c.req.url).origin,
     secrets: deps.secrets,
     store: deps.state,
   })
-  return new Response(JSON.stringify(result), {
+  return new Response(JSON.stringify(oauthAuthorizeResponseSchema.parse(result)), {
     headers: { 'content-type': contentTypeFor('json') },
   })
 }
@@ -129,7 +134,7 @@ export async function handleRegister(c: AppContext, env: RouteEnv): Promise<Resp
   await invalidateProviderOAuth(store, body.path)
   await searchSync?.reconcileNodeQuietly(body.path, { marker })
   if (await refreshDynamicSearchNode(node, ctx, deps)) await searchSync?.abort(marker)
-  return new Response(JSON.stringify(node), {
+  return new Response(JSON.stringify(registryNodeSchema.parse(node)), {
     headers: { 'content-type': contentTypeFor('json') },
   })
 }
@@ -158,6 +163,11 @@ export async function handleAuthorize(c: AppContext, env: RouteEnv): Promise<Res
   } catch {
     throw TBError.notFound('not found')
   }
+  const rawBody = await c.req.json().catch(() => ({}))
+  const body = oauthAuthorizeRequestSchema.safeParse(rawBody)
+  if (!body.success) {
+    throw new TBError('invalid_argument', 'body only accepts optional redirectUri string')
+  }
   // kind:'tool' 且 export 声明了 oauth → provider 型托管流程(与 mcp 那条是两套机制,
   // 见 providerOAuth.ts 头注)。
   if (node.kind === 'tool' && node.config?.kind === 'tool') {
@@ -170,9 +180,7 @@ export async function handleAuthorize(c: AppContext, env: RouteEnv): Promise<Res
     )
   }
   // 可选 body {redirectUri}:CLI 本地回调通道(严格上游只放行 loopback 回调时)。
-  const body = (await c.req.json().catch(() => null)) as { redirectUri?: unknown } | null
-  const redirectUri
-    = body !== null && typeof body.redirectUri === 'string' ? body.redirectUri : undefined
+  const redirectUri = body.data.redirectUri
   const result = await startMcpAuthorization({
     store,
     encryptionKey: encKey,
@@ -181,7 +189,7 @@ export async function handleAuthorize(c: AppContext, env: RouteEnv): Promise<Res
     origin: deps.canonicalOrigin ?? new URL(c.req.url).origin,
     ...(redirectUri !== undefined ? { redirectUri } : {}),
   })
-  return new Response(JSON.stringify(result), {
+  return new Response(JSON.stringify(oauthAuthorizeResponseSchema.parse(result)), {
     headers: { 'content-type': contentTypeFor('json') },
   })
 }

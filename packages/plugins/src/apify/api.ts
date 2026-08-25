@@ -23,12 +23,14 @@ import type {
   runActorInput,
 } from './schema'
 import { type ProviderContext, requireApiKey } from '../_runtime/plugin'
+import { createProviderHttpClient } from '../_runtime/providerHttp'
+import { asJsonObject as asRecord } from '../_runtime/jsonValue'
 import { upstreamError } from '../_runtime/upstreamError'
-import { guardedFetch } from '../_runtime/guardedFetch'
 
 const SERVICE = 'apify'
 const API_BASE = 'https://api.apify.com'
 const CURRENT_USER_PATH = '/v2/users/me'
+const http = createProviderHttpClient({ baseUrl: `${API_BASE}/`, service: SERVICE })
 
 type Json = Record<string, unknown>
 
@@ -36,12 +38,6 @@ interface RequestInput {
   body?: Json
   method?: 'GET' | 'POST'
   query?: Record<string, number | string | undefined>
-}
-
-function asRecord(value: unknown): Json | undefined {
-  return value !== null && typeof value === 'object' && !Array.isArray(value)
-    ? (value as Json)
-    : undefined
 }
 
 function nonEmpty(value: unknown): string | undefined {
@@ -58,16 +54,6 @@ function errorMessage(payload: unknown, status: number): string {
     ?? `Apify request failed with status ${status}`
 }
 
-async function readPayload(response: Response): Promise<unknown> {
-  const text = await response.text().catch(() => '')
-  if (text === '') return null
-  try {
-    return JSON.parse(text) as unknown
-  } catch {
-    throw new TBError('unavailable', 'Apify 返回了非 JSON 响应', { retryable: true })
-  }
-}
-
 /**
  * 生成的 schema 把 get_actor 的 actorId 标成了 optional(上游 action 定义如此),
  * 但上游 handler 一律 `requiredString(...)`。在本地挡住,免得拼出 `/acts/undefined`。
@@ -80,37 +66,26 @@ function requiredId(value: string | undefined, field: string): string {
 }
 
 async function request(ctx: ProviderContext, path: string, init: RequestInput = {}): Promise<unknown> {
-  const url = new URL(path, API_BASE)
-  for (const [key, value] of Object.entries(init.query ?? {})) {
-    if (value !== undefined) url.searchParams.set(key, String(value))
-  }
-
-  const headers: Record<string, string> = {
-    accept: 'application/json',
-    authorization: `Bearer ${requireApiKey(ctx, SERVICE)}`,
-  }
-  if (init.body !== undefined) headers['content-type'] = 'application/json'
-
-  let response: Response
-  let payload: unknown
-  try {
-    response = await guardedFetch(url.toString(), {
-      method: init.method ?? 'GET',
-      headers,
-      ...(init.body === undefined ? {} : { body: JSON.stringify(init.body) }),
-    })
-    payload = await readPayload(response)
-  } catch (error) {
-    if (error instanceof TBError) throw error
-    throw new TBError(
+  const { data } = await http.request({
+    path,
+    method: init.method ?? 'GET',
+    query: Object.entries(init.query ?? {}),
+    headers: {
+      accept: 'application/json',
+      authorization: `Bearer ${requireApiKey(ctx, SERVICE)}`,
+    },
+    ...(init.body === undefined ? {} : { json: init.body }),
+    invalidJsonMessage: 'Apify 返回了非 JSON 响应',
+    mapError: ({ bodyKind, data: payload, status }) => bodyKind === 'invalid-json'
+      ? new TBError('unavailable', 'Apify 返回了非 JSON 响应', { retryable: true })
+      : upstreamError(status, errorMessage(payload, status)),
+    mapTransportError: ({ message }) => new TBError(
       'unavailable',
-      error instanceof Error ? `Apify 请求失败: ${error.message}` : 'Apify 请求失败',
+      message === undefined ? 'Apify 请求失败' : `Apify 请求失败: ${message}`,
       { retryable: true },
-    )
-  }
-
-  if (!response.ok) throw upstreamError(response.status, errorMessage(payload, response.status))
-  return payload
+    ),
+  })
+  return data ?? null
 }
 
 /** `{data: ...}` 包裹存在时拆一层,不存在就是响应本身(上游两种形状都见过)。 */

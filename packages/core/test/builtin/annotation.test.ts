@@ -90,4 +90,9 @@ describe('builtin annotation 模块', () => {
       e => isTBError(e) && e.code === 'invalid_argument',
     )
   })
+
+  it('顶层未知字段不被静默忽略', async () => {
+    await expect(mod.dispatch('list', { prefix: 'feishu', extra: true }, ctx))
+      .rejects.toSatisfy(e => isTBError(e) && e.code === 'invalid_argument')
+  })
 })

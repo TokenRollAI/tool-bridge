@@ -1,6 +1,6 @@
 import { Command } from 'commander'
 import { type CloudflareInitOptions, runCloudflareInit } from '../cloudflareInit'
-import { guard, printJson, printLine } from '../output'
+import { printJson, printLine } from '../output'
 import { withGlobalOpts } from '../args'
 
 /** 首次部署向导；当前 Cloudflare 编排依赖源码仓库中的 provision/build 配置。 */
@@ -19,24 +19,22 @@ export function initCommand(): Command {
     )
     .action(async (opts: CloudflareInitOptions) => {
       const asJson = Boolean(opts.json)
-      await guard(asJson, async () => {
-        const result = await runCloudflareInit(opts, {
-          onStep: asJson ? undefined : message => printLine(`→ ${message}`),
-        })
-        if (asJson) {
-          printJson({ ok: true, platform: 'cloudflare', ...result })
-          return
-        }
-        printLine(`deployed: ${result.baseUrl}`)
-        printLine(`profile: ${result.profile}`)
-        if (result.adminSk) {
-          printLine('')
-          printLine('Admin SK（仅显示这一次，请立即保存到密码管理器）:')
-          printLine(result.adminSk)
-        } else {
-          printLine('existing Admin SK preserved; local profile verified')
-        }
+      const result = await runCloudflareInit(opts, {
+        onStep: asJson ? undefined : message => printLine(`→ ${message}`),
       })
+      if (asJson) {
+        printJson({ ok: true, platform: 'cloudflare', ...result })
+        return
+      }
+      printLine(`deployed: ${result.baseUrl}`)
+      printLine(`profile: ${result.profile}`)
+      if (result.adminSk) {
+        printLine('')
+        printLine('Admin SK（仅显示这一次，请立即保存到密码管理器）:')
+        printLine(result.adminSk)
+      } else {
+        printLine('existing Admin SK preserved; local profile verified')
+      }
     })
 
   return new Command('init')

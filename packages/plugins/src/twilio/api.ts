@@ -37,6 +37,7 @@ import type {
   listUsageRecordsInput,
   sendMessageInput,
 } from './schema'
+import { integerValue as integer, asJsonObject as record, trimmedText as text } from '../_runtime/jsonValue'
 import { type ProviderContext, requireCredential } from '../_runtime/plugin'
 import { upstreamError } from '../_runtime/upstreamError'
 import { guardedFetch } from '../_runtime/guardedFetch'
@@ -46,21 +47,6 @@ const API_BASE = 'https://api.twilio.com/2010-04-01'
 
 type Json = Record<string, unknown>
 type QueryValue = number | string | undefined
-
-/** 上游 `optionalString` 的等价物:去空白后仍非空才算有值。 */
-function text(value: unknown): string | undefined {
-  if (typeof value !== 'string') return undefined
-  const trimmed = value.trim()
-  return trimmed === '' ? undefined : trimmed
-}
-
-function record(value: unknown): Json | undefined {
-  return typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Json) : undefined
-}
-
-function integer(value: unknown): number | undefined {
-  return typeof value === 'number' && Number.isInteger(value) ? value : undefined
-}
 
 /**
  * 上游 `requiredString`:Zod 的 `min(1)` 拦不住纯空白串,而空白的 To/Body 打到 Twilio

@@ -20,12 +20,14 @@ import type {
   listIncidentsInput,
   listServicesInput,
 } from './schema'
+import { compactDefined as compact, asJsonObject as record, trimmedText as text } from '../_runtime/jsonValue'
 import { type ProviderContext, requireApiKey } from '../_runtime/plugin'
+import { createProviderHttpClient } from '../_runtime/providerHttp'
 import { upstreamError } from '../_runtime/upstreamError'
-import { guardedFetch } from '../_runtime/guardedFetch'
 
 const SERVICE = 'firehydrant'
 const API_BASE = 'https://api.firehydrant.io/v1'
+const http = createProviderHttpClient({ baseUrl: `${API_BASE}/`, service: SERVICE })
 
 type Json = Record<string, unknown>
 
@@ -34,15 +36,6 @@ interface RequestInput {
   method?: 'GET' | 'POST'
   path: string
   query?: Record<string, string | undefined>
-}
-
-/** 上游 `optionalString`:只有非空(去空白后)字符串才算给了值。 */
-function text(value: unknown): string | undefined {
-  return typeof value === 'string' ? value.trim() || undefined : undefined
-}
-
-function record(value: unknown): Json | undefined {
-  return typeof value === 'object' && value !== null && !Array.isArray(value) ? value as Json : undefined
 }
 
 /** 契约说好这一层是对象;不是就是上游出问题,不是调用方的错。 */
@@ -67,32 +60,22 @@ function errorMessage(payload: unknown, status: number): string {
 }
 
 async function request(ctx: ProviderContext, input: RequestInput): Promise<unknown> {
-  const url = new URL(`${API_BASE}${input.path}`)
-  for (const [key, value] of Object.entries(input.query ?? {})) {
-    if (value !== undefined) url.searchParams.set(key, value)
-  }
-
-  const response = await guardedFetch(url.toString(), {
+  const { data } = await http.request({
+    path: input.path,
     method: input.method ?? 'GET',
+    query: Object.entries(input.query ?? {}),
     headers: {
       'accept': 'application/json',
       'authorization': `Bearer ${requireApiKey(ctx, SERVICE)}`,
       'content-type': 'application/json',
     },
-    ...(input.body === undefined ? {} : { body: JSON.stringify(input.body) }),
+    ...(input.body === undefined ? {} : { json: input.body }),
+    invalidJsonMessage: 'FireHydrant 返回了非法 JSON',
+    mapError: ({ bodyKind, data: payload, status }) => bodyKind === 'invalid-json'
+      ? new TBError('unavailable', 'FireHydrant 返回了非法 JSON', { retryable: true })
+      : upstreamError(status, errorMessage(payload, status)),
   })
-
-  const body = await response.text()
-  let payload: unknown = {}
-  if (body !== '') {
-    try {
-      payload = JSON.parse(body)
-    } catch {
-      throw new TBError('unavailable', 'FireHydrant 返回了非法 JSON', { retryable: true })
-    }
-  }
-  if (!response.ok) throw upstreamError(response.status, errorMessage(payload, response.status))
-  return payload
+  return data ?? {}
 }
 
 // —— 出参归一 ——
@@ -214,10 +197,6 @@ function listQuery(input: ListInput): Record<string, string | undefined> {
     updated_after: text(incident.updatedAfter),
     updated_before: text(incident.updatedBefore),
   }
-}
-
-function compact(input: Json): Json {
-  return Object.fromEntries(Object.entries(input).filter(([, value]) => value !== undefined))
 }
 
 async function listCollection(

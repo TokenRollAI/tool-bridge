@@ -1,11 +1,5 @@
-import {
-  base64urlEncode,
-  type CallContext,
-  encodeCallContext,
-  HEADER_TB_CONTEXT,
-  HEADER_TB_UPSTREAM_AUTH,
-} from '@tool-bridge/core'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+import { createProviderHarness } from '../support/providerHarness'
 import { createPipedrivePlugin } from '../../src/pipedrive/index'
 import { pipedriveActions } from '../../src/pipedrive/schema'
 
@@ -17,58 +11,28 @@ import { pipedriveActions } from '../../src/pipedrive/schema'
  * 以及 `{id}` 路径段在 schema 全 optional 时的本地必填断言。
  */
 
-const PLUGIN_TOKEN = 'tbp_test'
-const ENV = { PLUGIN_TOKEN }
 const API_KEY = 'pd_testdeadbeef'
 const plugin = createPipedrivePlugin()
 
-const CALLER: CallContext = {
-  keyId: 'k1',
-  owner: 'agent:tester',
-  scopes: [],
-  traceId: 't1',
+const {
+  call,
+  envelope,
+  sent,
+  env: ENV,
+  stubFetch,
+} = createProviderHarness({
   mountPath: 'crm/pipedrive',
-  exportId: 'actions',
-}
-
-function envelope(body: unknown, opts: { auth?: string | null } = {}): Promise<Response> {
-  const headers: Record<string, string> = {
-    'authorization': `Bearer ${PLUGIN_TOKEN}`,
-    'content-type': 'application/json',
-    [HEADER_TB_CONTEXT]: encodeCallContext(CALLER),
-  }
-  const auth = opts.auth === undefined ? API_KEY : opts.auth
-  if (auth !== null) {
-    headers[HEADER_TB_UPSTREAM_AUTH] = base64urlEncode(new TextEncoder().encode(auth))
-  }
-  return Promise.resolve(plugin.fetch(
-    new Request('https://plugin.test/', { method: 'POST', headers, body: JSON.stringify(body) }),
-    ENV as never,
-  ))
-}
-
-function call(name: string, args: unknown, opts?: { auth?: string | null }): Promise<Response> {
-  return envelope({ tool: 'Call', arguments: { name, args } }, opts)
-}
+  plugin,
+  upstreamAuth: API_KEY,
+})
 
 function mockPipedrive(status: number, payload: unknown): ReturnType<typeof vi.fn> {
   const body = typeof payload === 'string' ? payload : JSON.stringify(payload)
-  const fn = vi.fn(() => Promise.resolve(new Response(body, {
+  return stubFetch(() => Promise.resolve(new Response(body, {
     status,
     headers: { 'content-type': 'application/json' },
   })))
-  vi.stubGlobal('fetch', fn)
-  return fn
 }
-
-/** 取上游收到的那个请求。 */
-function sent(mock: ReturnType<typeof vi.fn>): Request {
-  return (mock.mock.calls[0] as [Request])[0]
-}
-
-afterEach(() => {
-  vi.unstubAllGlobals()
-})
 
 describe('契约面', () => {
   it('~describe 报成单个 tools/v1 export,并把凭证探针一并声明出去', async () => {

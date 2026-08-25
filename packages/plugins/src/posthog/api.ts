@@ -92,13 +92,20 @@ import type {
   updateInsightInput,
   updatePropertyDefinitionInput,
 } from './schema'
-import { assertPublicHttpUrl, guardedFetch } from '../_runtime/guardedFetch'
+import {
+  createProviderHttpClient,
+  type ProviderQuery,
+  type ResponseBodyKind,
+} from '../_runtime/providerHttp'
+import { booleanValue as bool, compactDefined as compact } from '../_runtime/jsonValue'
 import { type ProviderContext, requireApiKey } from '../_runtime/plugin'
+import { assertPublicHttpUrl } from '../_runtime/guardedFetch'
 import { upstreamError } from '../_runtime/upstreamError'
 
 const SERVICE = 'posthog'
 /** 当前用户接口;既是 `get_current_user`,也是 organization_id 推断与凭证探针的落点。 */
 const CURRENT_USER_PATH = '/api/users/@me/'
+const http = createProviderHttpClient({ service: SERVICE })
 
 type Json = Record<string, unknown>
 type QueryValue = boolean | number | string | null | undefined
@@ -107,7 +114,7 @@ type PathValue = number | string | undefined
 
 interface RequestOptions {
   body?: unknown
-  method?: string
+  method?: 'DELETE' | 'GET' | 'PATCH' | 'POST'
   path: string
   query?: Record<string, QueryValue>
 }
@@ -120,10 +127,6 @@ function str(value: unknown): string | undefined {
 
 function num(value: unknown): number | undefined {
   return typeof value === 'number' ? value : undefined
-}
-
-function bool(value: unknown): boolean | undefined {
-  return typeof value === 'boolean' ? value : undefined
 }
 
 /** `null` 与"字段缺席"是两回事:前者是上游明确置空,要原样透出。 */
@@ -172,11 +175,6 @@ function looseId(value: unknown): string | undefined {
   if (typeof value === 'string' && value.trim() !== '') return value
   if (typeof value === 'number' && Number.isFinite(value)) return String(value)
   return undefined
-}
-
-/** 丢掉值为 undefined 的键(上游 `compactObject`);`null` 要留住 —— 它是"置空"的指令。 */
-function compact(input: Record<string, unknown>): Json {
-  return Object.fromEntries(Object.entries(input).filter(([, value]) => value !== undefined))
 }
 
 // ---------- 入参端的断言(schema 说 optional,executor 说必填的那一批) ----------
@@ -261,16 +259,6 @@ function resolveAuth(ctx: ProviderContext): Auth {
   return { baseUrl: resolveBaseUrl(ctx), token }
 }
 
-function buildUrl(baseUrl: string, path: string, query: Record<string, QueryValue> | undefined): string {
-  const url = new URL(`${baseUrl}${path}`)
-  for (const [key, value] of Object.entries(query ?? {})) {
-    // null 在 query 里没有表达手段,与缺席同义;body 里则要留住(见 compact)。
-    if (value === undefined || value === null) continue
-    url.searchParams.set(key, String(value))
-  }
-  return url.toString()
-}
-
 /**
  * PostHog 的错误体是 DRF 风格的 `{type, code, detail, attr}`。`attr` 指出是哪个字段出的问题,
  * 上游把它拼进消息尾巴 —— 那是排错时最有用的一段,保留。
@@ -282,48 +270,35 @@ function posthogError(status: number, payload: unknown, fallback: string): TBErr
   return upstreamError(status, attr === undefined || attr === '' ? detail : `${detail} (${attr})`)
 }
 
+function responsePayload(data: unknown, bodyKind: ResponseBodyKind): unknown {
+  return bodyKind === 'json' ? data : undefined
+}
+
 async function request(ctx: ProviderContext, options: RequestOptions): Promise<unknown> {
   const auth = resolveAuth(ctx)
-  let response: Response
-  try {
-    response = await guardedFetch(buildUrl(auth.baseUrl, options.path, options.query), {
-      method: options.method ?? 'GET',
-      headers: {
-        'authorization': `Bearer ${auth.token}`,
-        'content-type': 'application/json',
-      },
-      ...(options.body === undefined ? {} : { body: JSON.stringify(options.body) }),
-    })
-  } catch (err) {
-    // guardedFetch 拦下的出站(内网地址、超跳数)已经是 TBError/invalid_argument,别压成故障。
-    if (err instanceof TBError) throw err
-    throw new TBError(
+  const result = await http.request({
+    baseUrl: `${auth.baseUrl}/`,
+    path: options.path,
+    method: options.method ?? 'GET',
+    query: Object.entries(options.query ?? {}) satisfies ProviderQuery,
+    // 迁移前 GET 也带 content-type，保留真实 wire。
+    headers: { 'authorization': `Bearer ${auth.token}`, 'content-type': 'application/json' },
+    ...(options.body === undefined ? {} : { json: options.body }),
+    invalidJson: 'text',
+    mapError: ({ bodyKind, data, status }) => posthogError(
+      status,
+      bodyKind === 'json' ? data : undefined,
+      bodyKind === 'empty' ? `${SERVICE} 返回 HTTP ${status}` : String(data),
+    ),
+    mapTransportError: ({ message }) => new TBError(
       'unavailable',
-      `${SERVICE} 请求失败:${err instanceof Error ? err.message : String(err)}`,
+      `${SERVICE} 请求失败:${message ?? 'undefined'}`,
       { retryable: true },
-    )
-  }
-
-  const body = await response.text().catch(() => '')
-  let payload: unknown
-  if (body !== '') {
-    try {
-      payload = JSON.parse(body)
-    } catch {
-      payload = undefined
-    }
-  }
-
-  if (!response.ok) {
-    throw posthogError(
-      response.status,
-      payload,
-      body === '' ? `${SERVICE} 返回 HTTP ${response.status}` : body,
-    )
-  }
+    ),
+  })
   // 空体是正常成功形态:204 之外,PATCH/DELETE 也常回 200 空体。上游在这里落 `{}`,
   // 整形函数据此产出 `{deleted:true, ...}`,不能当成"响应不是 JSON"报故障。
-  return payload
+  return responsePayload(result.data, result.bodyKind)
 }
 
 async function requestObject(ctx: ProviderContext, options: RequestOptions): Promise<Json> {

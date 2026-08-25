@@ -40,13 +40,20 @@ import type {
   removeOrgMemberInput,
   removeTeamMemberInput,
 } from './schema'
+import {
+  compactDefined as compact,
+  integerValue as int,
+  asJsonObject as record,
+  trimmedText as text,
+} from '../_runtime/jsonValue'
+import { createProviderHttpClient, type ProviderQuery, type ResponseBodyKind } from '../_runtime/providerHttp'
 import { type ProviderContext, requireApiKey } from '../_runtime/plugin'
 import { upstreamError } from '../_runtime/upstreamError'
-import { guardedFetch } from '../_runtime/guardedFetch'
 
 const SERVICE = 'docker_hub'
 const API_BASE = 'https://hub.docker.com'
 const TOKEN_PATH = '/v2/auth/token'
+const http = createProviderHttpClient({ baseUrl: API_BASE, service: SERVICE })
 /** `get_image` 扫描 tag 列表时的缺省页大小与最多翻几页。 */
 const DEFAULT_IMAGE_PAGE_SIZE = 25
 const DEFAULT_IMAGE_MAX_PAGES = 20
@@ -54,24 +61,9 @@ const DEFAULT_IMAGE_MAX_PAGES = 20
 type Json = Record<string, unknown>
 type QueryValue = boolean | number | string | undefined
 
-function record(value: unknown): Json | undefined {
-  return typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Json) : undefined
-}
-
-/** 上游 `optionalString` 的等价物:去空白后仍非空才算有值。 */
-function text(value: unknown): string | undefined {
-  if (typeof value !== 'string') return undefined
-  const trimmed = value.trim()
-  return trimmed === '' ? undefined : trimmed
-}
-
 /** 上游 `readNullableText`:拿不到字符串一律落 null(出参声明里这些字段都是 nullable)。 */
 function nullableText(value: unknown): string | null {
   return text(value) ?? null
-}
-
-function int(value: unknown): number | undefined {
-  return typeof value === 'number' && Number.isInteger(value) ? value : undefined
 }
 
 /** 只有真的是布尔才当布尔,其余(含缺席)落 null。 */
@@ -87,13 +79,6 @@ function objectArray(value: unknown): Json[] {
 function stringArray(value: unknown): string[] {
   if (!Array.isArray(value)) return []
   return value.filter((item): item is string => typeof item === 'string')
-}
-
-/** 丢掉值为 undefined 的键(上游 `compactObject`);`null` 与 `false` 要留住。 */
-function compact<T>(input: Record<string, T | undefined>): Record<string, T> {
-  return Object.fromEntries(
-    Object.entries(input).filter(([, value]) => value !== undefined),
-  ) as Record<string, T>
 }
 
 /** 上游回的形状不符合契约 —— 是上游的问题,不是调用方的错。 */
@@ -127,23 +112,9 @@ function errorMessage(payload: unknown): string | undefined {
 }
 
 /** 空正文回 null;非 JSON 正文当成 `{message}`(错误响应上回 HTML 错误页很常见)。 */
-async function readPayload(response: Response): Promise<unknown> {
-  const raw = await response.text()
-  if (raw === '') return null
-  try {
-    return JSON.parse(raw)
-  } catch {
-    return { message: raw }
-  }
-}
-
-function buildUrl(path: string, query?: Record<string, QueryValue>): string {
-  const url = new URL(path, API_BASE)
-  for (const [key, value] of Object.entries(query ?? {})) {
-    if (value === undefined) continue
-    url.searchParams.set(key, String(value))
-  }
-  return url.toString()
+function payload(data: unknown, bodyKind: ResponseBodyKind): unknown {
+  if (bodyKind === 'empty') return null
+  return bodyKind === 'invalid-json' ? { message: data } : data
 }
 
 /** 凭证形如 `identifier:secret`;secret 里可能含冒号,故只按**第一个**冒号切。 */
@@ -163,47 +134,52 @@ function credential(ctx: ProviderContext): { identifier: string, secret: string 
 
 /** 换短期 bearer token。每次调用现换 —— 见文件头注释里"为什么不缓存"。 */
 async function accessToken(ctx: ProviderContext): Promise<string> {
-  const response = await guardedFetch(buildUrl(TOKEN_PATH), {
+  const auth = credential(ctx)
+  const result = await http.request({
+    path: TOKEN_PATH,
     method: 'POST',
-    headers: { 'accept': 'application/json', 'content-type': 'application/json' },
-    body: JSON.stringify(credential(ctx)),
+    headers: { accept: 'application/json' },
+    json: auth,
+    invalidJson: 'text',
+    sensitiveValues: [auth.identifier, auth.secret],
+    mapError: ({ data, bodyKind, status }) => upstreamError(
+      status,
+      errorMessage(payload(data, bodyKind)) ?? `Docker Hub 换取令牌失败(HTTP ${status})`,
+    ),
   })
-
-  const payload = await readPayload(response)
-  if (!response.ok) {
-    throw upstreamError(response.status, errorMessage(payload) ?? `Docker Hub 换取令牌失败(HTTP ${response.status})`)
-  }
-  const token = text(requireRecord(payload).access_token)
+  const token = text(requireRecord(payload(result.data, result.bodyKind)).access_token)
   if (token === undefined) throw responseError('Docker Hub 换取令牌的响应里没有 access_token')
   return token
 }
 
 interface RequestInput {
   body?: Json
-  method?: string
+  method?: 'DELETE' | 'GET' | 'POST'
   path: string
   query?: Record<string, QueryValue>
 }
 
-async function send(ctx: ProviderContext, input: RequestInput): Promise<{ payload: unknown, response: Response }> {
-  const response = await guardedFetch(buildUrl(input.path, input.query), {
+async function send(ctx: ProviderContext, input: RequestInput): Promise<unknown> {
+  const result = await http.request({
+    path: input.path,
     method: input.method ?? 'GET',
+    query: Object.entries(input.query ?? {}) satisfies ProviderQuery,
     headers: {
       accept: 'application/json',
       authorization: `Bearer ${await accessToken(ctx)}`,
-      ...(input.body === undefined ? {} : { 'content-type': 'application/json' }),
     },
-    body: input.body === undefined ? undefined : JSON.stringify(input.body),
+    ...(input.body === undefined ? {} : { json: input.body }),
+    invalidJson: 'text',
+    mapError: ({ data, bodyKind, status }) => upstreamError(
+      status,
+      errorMessage(payload(data, bodyKind)) ?? `Docker Hub 返回 HTTP ${status}`,
+    ),
   })
-  const payload = await readPayload(response)
-  if (!response.ok) {
-    throw upstreamError(response.status, errorMessage(payload) ?? `Docker Hub 返回 HTTP ${response.status}`)
-  }
-  return { payload, response }
+  return payload(result.data, result.bodyKind)
 }
 
 async function requestJson(ctx: ProviderContext, input: RequestInput): Promise<unknown> {
-  return (await send(ctx, input)).payload
+  return send(ctx, input)
 }
 
 /** DELETE 类接口不回正文,成功与否只看状态。 */

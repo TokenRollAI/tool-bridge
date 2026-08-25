@@ -2,7 +2,7 @@ import { encodeCredentialValues } from '@tool-bridge/core'
 import { Command } from 'commander'
 import type { Page, SecretSummary } from '../types'
 import { parsePageOpts, resolveTarget, withGlobalOpts, withPageOpts } from '../args'
-import { guard, printJson, printLine, table } from '../output'
+import { printJson, printLine, table } from '../output'
 import { confirmDestructive } from '../confirm'
 import { callDirect, CliError } from '../http'
 
@@ -58,33 +58,31 @@ export function secretSetCommand(): Command {
     )
     .action(async (opts: SecretGlobalOpts & { field?: string[], name: string, value?: string }) => {
       const asJson = Boolean(opts.json)
-      await guard(asJson, async () => {
-        const name = String(opts.name ?? '').trim()
-        if (!name) throw new CliError('--name is required')
+      const name = String(opts.name ?? '').trim()
+      if (!name) throw new CliError('--name is required')
 
-        const fields = opts.field ?? []
-        if (fields.length > 0 && opts.value !== undefined) {
-          throw new CliError('--field and --value are mutually exclusive')
+      const fields = opts.field ?? []
+      if (fields.length > 0 && opts.value !== undefined) {
+        throw new CliError('--field and --value are mutually exclusive')
+      }
+
+      let value: string
+      if (fields.length > 0) {
+        value = encodeCredentialValues(parseFields(fields))
+      } else if (opts.value !== undefined) {
+        value = opts.value
+      } else {
+        if (process.stdin.isTTY) {
+          throw new CliError('provide --value, --field, or pipe the secret via stdin')
         }
+        value = await readStdin()
+      }
 
-        let value: string
-        if (fields.length > 0) {
-          value = encodeCredentialValues(parseFields(fields))
-        } else if (opts.value !== undefined) {
-          value = opts.value
-        } else {
-          if (process.stdin.isTTY) {
-            throw new CliError('provide --value, --field, or pipe the secret via stdin')
-          }
-          value = await readStdin()
-        }
-
-        await callDirect(resolveTarget(opts), '/system/secret/set', { name, value })
-        // 只回名字与字段名,**不回显值**(字段名不是机密,能帮用户确认写对了哪几个)。
-        const written = fields.length > 0 ? Object.keys(parseFields(fields)).sort() : undefined
-        if (asJson) printJson({ ok: true, name, ...(written === undefined ? {} : { fields: written }) })
-        else printLine(`set secret: ${name}${written === undefined ? '' : ` (fields: ${written.join(', ')})`}`)
-      })
+      await callDirect(resolveTarget(opts), '/system/secret/set', { name, value })
+      // 只回名字与字段名,**不回显值**(字段名不是机密,能帮用户确认写对了哪几个)。
+      const written = fields.length > 0 ? Object.keys(parseFields(fields)).sort() : undefined
+      if (asJson) printJson({ ok: true, name, ...(written === undefined ? {} : { fields: written }) })
+      else printLine(`set secret: ${name}${written === undefined ? '' : ` (fields: ${written.join(', ')})`}`)
     })
 }
 
@@ -94,20 +92,18 @@ export function secretLsCommand(): Command {
     .description('List secrets (name + updatedAt only)')
     .action(async (opts: SecretGlobalOpts) => {
       const asJson = Boolean(opts.json)
-      await guard(asJson, async () => {
-        const pageOpts = parsePageOpts(opts)
-        const page = await callDirect<Page<SecretSummary>>(
-          resolveTarget(opts), '/system/secret/list',
-          Object.keys(pageOpts).length ? { opts: pageOpts } : {},
-        )
-        if (asJson) {
-          printJson(page)
-          return
-        }
-        const rows = (page.items ?? []).map(s => [s.name, s.updatedAt ?? '-'])
-        printLine(table(['NAME', 'UPDATED'], rows))
-        if (page.cursor) printLine(`next cursor: ${page.cursor}`)
-      })
+      const pageOpts = parsePageOpts(opts)
+      const page = await callDirect<Page<SecretSummary>>(
+        resolveTarget(opts), '/system/secret/list',
+        Object.keys(pageOpts).length ? { opts: pageOpts } : {},
+      )
+      if (asJson) {
+        printJson(page)
+        return
+      }
+      const rows = (page.items ?? []).map(s => [s.name, s.updatedAt ?? '-'])
+      printLine(table(['NAME', 'UPDATED'], rows))
+      if (page.cursor) printLine(`next cursor: ${page.cursor}`)
     })
 }
 
@@ -119,14 +115,12 @@ export function secretRmCommand(): Command {
     .option('--yes', 'Skip the confirmation prompt')
     .action(async (nameArg: string, opts: SecretGlobalOpts & { yes?: boolean }) => {
       const asJson = Boolean(opts.json)
-      await guard(asJson, async () => {
-        const name = String(nameArg ?? '').trim()
-        if (!name) throw new CliError('secret name is required')
-        await confirmDestructive(opts, `Delete secret '${name}'? Nodes referencing it will fail on next call.`)
-        await callDirect(resolveTarget(opts), '/system/secret/delete', { name })
-        if (asJson) printJson({ ok: true, name })
-        else printLine(`deleted secret: ${name}`)
-      })
+      const name = String(nameArg ?? '').trim()
+      if (!name) throw new CliError('secret name is required')
+      await confirmDestructive(opts, `Delete secret '${name}'? Nodes referencing it will fail on next call.`)
+      await callDirect(resolveTarget(opts), '/system/secret/delete', { name })
+      if (asJson) printJson({ ok: true, name })
+      else printLine(`deleted secret: ${name}`)
     })
 }
 

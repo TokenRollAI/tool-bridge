@@ -32,27 +32,18 @@ import type {
   setInput,
   ttlInput,
 } from './schema'
+import { asJsonObject as record, trimmedText as text } from '../_runtime/jsonValue'
 import { type ProviderContext, requireCredential } from '../_runtime/plugin'
+import { createProviderHttpClient } from '../_runtime/providerHttp'
 import { upstreamError } from '../_runtime/upstreamError'
-import { guardedFetch } from '../_runtime/guardedFetch'
 
 const SERVICE = 'upstash_redis'
 /** 只认官方端点:凭证决定出站目标,不能放行任意主机。 */
 const HOSTNAME_SUFFIX = '.upstash.io'
+const http = createProviderHttpClient({ service: SERVICE })
 
 type Json = Record<string, unknown>
 type CommandArgument = number | string
-
-/** 上游 `optionalString` 的等价物:去空白后仍非空才算有值。 */
-function text(value: unknown): string | undefined {
-  if (typeof value !== 'string') return undefined
-  const trimmed = value.trim()
-  return trimmed === '' ? undefined : trimmed
-}
-
-function record(value: unknown): Json | undefined {
-  return typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Json) : undefined
-}
 
 /** 上游回的形状不符合契约 —— 是上游的问题,不是调用方的错。 */
 function responseError(message: string): TBError {
@@ -128,31 +119,19 @@ function unwrap(payload: unknown): unknown {
 }
 
 async function command(ctx: ProviderContext, args: readonly CommandArgument[]): Promise<unknown> {
-  const response = await guardedFetch(restUrl(ctx), {
+  const result = await http.request({
+    baseUrl: restUrl(ctx),
+    path: '/',
     method: 'POST',
     headers: {
-      'accept': 'application/json',
-      'authorization': `Bearer ${requireCredential(ctx, SERVICE, 'restToken')}`,
-      'content-type': 'application/json',
+      accept: 'application/json',
+      authorization: `Bearer ${requireCredential(ctx, SERVICE, 'restToken')}`,
     },
-    body: JSON.stringify(args),
+    json: args,
+    invalidJsonMessage: 'Upstash Redis 返回了非 JSON 响应',
+    mapError: ({ data, rawText, status }) => commandError(status, data, rawText ?? ''),
   })
-
-  const body = await response.text()
-  let payload: unknown
-  let parsed = false
-  if (body !== '') {
-    try {
-      payload = JSON.parse(body)
-      parsed = true
-    } catch {
-      // 2xx 上回非 JSON 只能是上游坏了;错误响应上回 HTML 错误页却很常见,那时按 HTTP
-      // 状态归一比报"响应不是 JSON"准得多。
-      if (response.ok) throw responseError('Upstash Redis 返回了非 JSON 响应')
-    }
-  }
-  if (!response.ok) throw commandError(response.status, parsed ? payload : undefined, body)
-  return unwrap(payload)
+  return unwrap(result.data)
 }
 
 /** key 按上游语义去空白;Zod 的 `min(1)` 拦不住纯空白串,故这层必须保留。 */

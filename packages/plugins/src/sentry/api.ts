@@ -54,13 +54,15 @@ import type {
   listOrganizationSentryAppsInput,
   updateIssueInput,
 } from './schema'
+import { compactDefined as compact, asJsonObject as record } from '../_runtime/jsonValue'
+import { createProviderHttpClient, type ProviderQuery } from '../_runtime/providerHttp'
 import { type ProviderContext, requireApiKey } from '../_runtime/plugin'
 import { upstreamError } from '../_runtime/upstreamError'
-import { guardedFetch } from '../_runtime/guardedFetch'
 
 const SERVICE = 'sentry'
 /** 尾斜杠是刻意的:见文件头注释,path 用相对形式拼在它后面。 */
 const API_BASE = 'https://sentry.io/api/0/'
+const http = createProviderHttpClient({ baseUrl: API_BASE, service: SERVICE })
 
 type Json = Record<string, unknown>
 type QueryValue = boolean | number | string | Array<number | string> | undefined
@@ -69,10 +71,6 @@ type QueryValue = boolean | number | string | Array<number | string> | undefined
 interface Cursors {
   nextCursor: string | null
   previousCursor: string | null
-}
-
-function record(value: unknown): Json | undefined {
-  return typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Json) : undefined
 }
 
 /** 上游 `optionalString`:只认字符串,**不** trim(trim 会把有意义的前后空格吃掉)。 */
@@ -125,11 +123,6 @@ function arrayValue(value: unknown): unknown[] {
   return Array.isArray(value) ? value : []
 }
 
-/** 上游 `compactObject`:丢掉值为 undefined 的键。 */
-function compact(value: Json): Json {
-  return Object.fromEntries(Object.entries(value).filter(([, child]) => child !== undefined))
-}
-
 /** 上游 `expectRecord`:形状不符是上游违约,不是调用方的错。 */
 function expectRecord(value: unknown, label: string): Json {
   const body = record(value)
@@ -155,21 +148,6 @@ function joinClauses(...clauses: Array<string | undefined>): string | undefined 
   return kept.length > 0 ? kept.join(' ') : undefined
 }
 
-function buildUrl(path: string, query?: Record<string, QueryValue>): string {
-  // path 不带前导斜杠 —— 见文件头注释,否则 /api/0 前缀会被整段吃掉。
-  const url = new URL(path, API_BASE)
-  for (const [key, value] of Object.entries(query ?? {})) {
-    if (value === undefined) continue
-    if (Array.isArray(value)) {
-      // 多值过滤器(environment / project / field …)展开成重复的同名参数。
-      for (const item of value) url.searchParams.append(key, String(item))
-      continue
-    }
-    url.searchParams.set(key, String(value))
-  }
-  return url.toString()
-}
-
 /** 上游 `extractSentryErrorMessage`:四个平铺键,再退回 `detail.message` 嵌套形态。 */
 function errorMessage(payload: unknown, status: number): string {
   const body = record(payload)
@@ -177,19 +155,6 @@ function errorMessage(payload: unknown, status: number): string {
   return pickStr(body?.error_description, body?.detail, body?.error, body?.message)
     ?? (nonEmpty(nested) ? nested : undefined)
     ?? `Sentry 返回 HTTP ${status}`
-}
-
-/**
- * 只在 content-type 含 `application/json` 时才解析(上游 `readJsonResponse`)。
- * 4xx 常回 HTML 错误页,硬解会得到一个编出来的消息。
- */
-async function readJson(response: Response): Promise<unknown> {
-  if (!(response.headers.get('content-type') ?? '').includes('application/json')) return null
-  try {
-    return (await response.json()) as unknown
-  } catch {
-    return null
-  }
 }
 
 interface RequestOptions {
@@ -205,29 +170,34 @@ interface SentryResponse {
 
 async function request(ctx: ProviderContext, path: string, options: RequestOptions = {}): Promise<SentryResponse> {
   const token = requireApiKey(ctx, SERVICE)
-  const headers: Record<string, string> = {
-    accept: 'application/json',
-    authorization: `Bearer ${token}`,
-  }
-  if (options.body !== undefined) headers['content-type'] = 'application/json'
-
-  let response: Response
-  try {
-    response = await guardedFetch(buildUrl(path, options.query), {
-      method: options.method ?? 'GET',
-      headers,
-      ...(options.body === undefined ? {} : { body: JSON.stringify(options.body) }),
-    })
-  } catch (error) {
-    // 传输层失败必须就地归一:漏出去的裸 Error 会被 plugin-sdk 抹成 500,
-    // 把"上游不通/出网被拦"说成插件自身故障。
-    if (error instanceof TBError) throw error
-    throw upstreamError(502, `Sentry 请求失败:${error instanceof Error ? error.message : '未知错误'}`)
-  }
-
-  const payload = await readJson(response)
-  if (!response.ok) throw upstreamError(response.status, errorMessage(payload, response.status))
-  return { payload, headers: response.headers }
+  const result = await http.request({
+    // path 不带前导斜杠 —— 见文件头注释,否则 /api/0 前缀会被整段吃掉。
+    path,
+    method: options.method ?? 'GET',
+    // 多值过滤器(environment / project / field …)展开成重复的同名参数。
+    query: Object.entries(options.query ?? {}) satisfies ProviderQuery,
+    headers: { accept: 'application/json', authorization: `Bearer ${token}` },
+    ...(options.body === undefined ? {} : { json: options.body }),
+    invalidJson: 'text',
+    responseType: 'auto',
+    mapError: ({ bodyKind, data, headers, status }) => {
+      // Sentry 只认可 application/json；HTML 与其它媒体类型不能被当成错误消息。
+      const payload = headers.get('content-type')?.includes('application/json') === true
+        && bodyKind === 'json'
+        ? data
+        : null
+      return upstreamError(status, errorMessage(payload, status))
+    },
+    mapTransportError: ({ message }) => upstreamError(
+      502,
+      `Sentry 请求失败:${message ?? '未知错误'}`,
+    ),
+  })
+  const payload = result.headers.get('content-type')?.includes('application/json') === true
+    && result.bodyKind === 'json'
+    ? result.data
+    : null
+  return { payload, headers: result.headers }
 }
 
 /**

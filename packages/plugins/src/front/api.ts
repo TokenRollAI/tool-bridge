@@ -15,41 +15,22 @@ import type {
   listContactsInput,
   updateContactInput,
 } from './schema'
+import { asJsonObject as record, trimmedText as text } from '../_runtime/jsonValue'
 import { type ProviderContext, requireApiKey } from '../_runtime/plugin'
+import { createProviderHttpClient } from '../_runtime/providerHttp'
 import { upstreamError } from '../_runtime/upstreamError'
-import { guardedFetch } from '../_runtime/guardedFetch'
 
 const SERVICE = 'front'
 const API_BASE = 'https://api2.frontapp.com'
 /** 上游对 Front 设的请求超时;超时与"上游不通"要分开归一(504 vs 502)。 */
 const REQUEST_TIMEOUT_MS = 15_000
+const http = createProviderHttpClient({ baseUrl: `${API_BASE}/`, service: SERVICE })
 
 type Json = Record<string, unknown>
 
 interface FrontContactHandle {
   handle: string
   source: string
-}
-
-/** 上游 `optionalString` 的等价物:非字符串、或去空白后为空,都算缺失。 */
-function text(value: unknown): string | undefined {
-  if (typeof value !== 'string') return undefined
-  const trimmed = value.trim()
-  return trimmed === '' ? undefined : trimmed
-}
-
-function record(value: unknown): Json | undefined {
-  return typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Json) : undefined
-}
-
-async function readPayload(response: Response): Promise<unknown> {
-  const body = await response.text().catch(() => '')
-  if (body.trim() === '') return {}
-  try {
-    return JSON.parse(body) as unknown
-  } catch {
-    return body
-  }
 }
 
 /** Front 的错误体形状不止一种,四个候选键按上游顺序取第一个有文本的。 */
@@ -69,46 +50,30 @@ interface RequestInput {
 }
 
 async function request(ctx: ProviderContext, path: string, input: RequestInput): Promise<unknown> {
-  // 取凭证放在 try 外:它抛的是配置错误,不该被下面的传输失败兜底吞成 502。
   const apiKey = requireApiKey(ctx, SERVICE)
-
-  const url = new URL(path, API_BASE)
+  const query: Array<[string, number | string]> = []
   for (const [key, value] of input.query ?? []) {
     // 上游 setOptionalSearchParam 只认非空字符串与数字,其余(含空串)静默跳过。
-    if (typeof value === 'string' && value !== '') url.searchParams.set(key, value)
-    else if (typeof value === 'number') url.searchParams.set(key, String(value))
+    if (typeof value === 'string' && value !== '') query.push([key, value])
+    else if (typeof value === 'number') query.push([key, value])
   }
-
-  const headers: Record<string, string> = {
-    accept: 'application/json',
-    authorization: `Bearer ${apiKey}`,
-  }
-  if (input.body !== undefined) headers['content-type'] = 'application/json'
-
-  const timeoutSignal = AbortSignal.timeout(REQUEST_TIMEOUT_MS)
-  let response: Response
-  try {
-    response = await guardedFetch(url.toString(), {
-      method: input.method,
-      headers,
-      signal: timeoutSignal,
-      ...(input.body === undefined ? {} : { body: JSON.stringify(input.body) }),
-    })
-  } catch (error) {
-    // 传输层失败必须就地归一:漏出去的裸 Error 会被 plugin-sdk 抹成 500,
-    // 把"上游不通/出网被拦"说成插件自身故障。
-    if (timeoutSignal.aborted) throw upstreamError(504, 'front 请求超时')
-    throw upstreamError(502, error instanceof Error ? `front 请求失败: ${error.message}` : 'front 请求失败')
-  }
-
-  const payload = await readPayload(response)
-  if (!response.ok) {
-    throw upstreamError(
-      response.status,
-      errorMessage(payload) ?? (response.statusText || `front 返回 HTTP ${response.status}`),
-    )
-  }
-  return payload
+  const { data } = await http.request({
+    path,
+    method: input.method,
+    query,
+    headers: { accept: 'application/json', authorization: `Bearer ${apiKey}` },
+    ...(input.body === undefined ? {} : { json: input.body }),
+    timeoutMs: REQUEST_TIMEOUT_MS,
+    invalidJson: 'text',
+    mapError: ({ data: payload, status }) => upstreamError(
+      status,
+      errorMessage(payload) ?? `front 返回 HTTP ${status}`,
+    ),
+    mapTransportError: ({ kind, message }) => kind === 'timeout'
+      ? upstreamError(504, 'front 请求超时')
+      : upstreamError(502, message === undefined ? 'front 请求失败' : `front 请求失败: ${message}`),
+  })
+  return data ?? {}
 }
 
 /** 列表响应统一裹在 `_results` 里;拿不到就是上游破了契约,不是调用方的错。 */

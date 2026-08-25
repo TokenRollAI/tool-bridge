@@ -40,26 +40,23 @@ import type {
   searchDocumentsInput,
 } from './schema'
 import type { getDocumentInput } from './schema.handwritten'
-import { assertPublicHttpUrl, guardedFetch } from '../_runtime/guardedFetch'
+import {
+  compactDefined as compact,
+  integerValue as integer,
+  asJsonObject as record,
+  trimmedText as text,
+} from '../_runtime/jsonValue'
+import { createProviderHttpClient, type ResponseBodyKind } from '../_runtime/providerHttp'
 import { type ProviderContext, requireApiKey } from '../_runtime/plugin'
+import { assertPublicHttpUrl } from '../_runtime/guardedFetch'
 import { upstreamError } from '../_runtime/upstreamError'
 
 const SERVICE = 'outline'
 /** 没配 `providerConfig.baseUrl` 时的云端地址。 */
 const CLOUD_API_BASE = 'https://app.getoutline.com/api'
+const http = createProviderHttpClient({ service: SERVICE })
 
 type Json = Record<string, unknown>
-
-function record(value: unknown): Json | undefined {
-  return typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Json) : undefined
-}
-
-/** 上游 `optionalString` 的等价物:非字符串、或去空白后为空,都算缺失。 */
-function text(value: unknown): string | undefined {
-  if (typeof value !== 'string') return undefined
-  const trimmed = value.trim()
-  return trimmed === '' ? undefined : trimmed
-}
 
 /** 上游 `nullableString`:`null` 是"上游明确说这里没有",与"字段缺席"不是一回事。 */
 function nullableText(value: unknown): string | null | undefined {
@@ -69,15 +66,6 @@ function nullableText(value: unknown): string | null | undefined {
 function nullableBoolean(value: unknown): boolean | null | undefined {
   if (value === null) return null
   return typeof value === 'boolean' ? value : undefined
-}
-
-function integer(value: unknown): number | undefined {
-  return typeof value === 'number' && Number.isInteger(value) ? value : undefined
-}
-
-/** 丢掉值为 undefined 的键(上游 `compactObject`);`null` 要留住。 */
-function compact(input: Record<string, unknown>): Json {
-  return Object.fromEntries(Object.entries(input).filter(([, value]) => value !== undefined))
 }
 
 /** 上游回的形状不符合契约 —— 是上游的问题,不是调用方的错。 */
@@ -133,44 +121,32 @@ function errorMessage(status: number, payload: unknown): string {
     ?? `outline request failed with status ${status}`
 }
 
+function errorPayload(data: unknown, bodyKind: ResponseBodyKind): unknown {
+  return bodyKind === 'invalid-json' && typeof data === 'string'
+    ? { message: data.trim() }
+    : data
+}
+
 async function request(ctx: ProviderContext, path: string, body: Json = {}): Promise<unknown> {
   // 取凭证与解析 baseUrl 放在 try 外:它们抛的是配置错误,不该被下面的传输失败兜底吞成 502。
   const apiKey = requireApiKey(ctx, SERVICE)
-  const apiBase = resolveApiBase(ctx)
-
-  let response: Response
-  try {
-    response = await guardedFetch(`${apiBase}/${path}`, {
-      method: 'POST',
-      headers: {
-        'accept': 'application/json',
-        'authorization': `Bearer ${apiKey}`,
-        'content-type': 'application/json',
-      },
-      body: JSON.stringify(body),
-    })
-  } catch (error) {
-    // 传输层失败必须就地归一:漏出去的裸 Error 会被 plugin-sdk 抹成 "internal plugin error"
-    // 500,把"上游不通/出网被拦"说成插件自身故障。
-    if (error instanceof TBError) throw error
-    const message = error instanceof Error ? error.message : 'unknown network error'
-    throw upstreamError(502, `outline ${path} failed before receiving response: ${message}`)
-  }
-
-  const raw = await response.text().catch(() => '')
-  let payload: unknown = null
-  if (raw.trim() !== '') {
-    try {
-      payload = JSON.parse(raw)
-    } catch {
-      // 2xx 上回非 JSON 只能是上游坏了;错误响应上回 HTML 错误页却很常见,那时把原文当消息
-      // 比报"响应不是 JSON"有用得多(自建实例前面挂反代时尤其常见)。
-      if (response.ok) throw responseError('outline 返回了非 JSON 响应')
-      payload = { message: raw.trim() }
-    }
-  }
-  if (!response.ok) throw upstreamError(response.status, errorMessage(response.status, payload))
-  return payload
+  const result = await http.request({
+    baseUrl: `${resolveApiBase(ctx)}/`,
+    path,
+    method: 'POST',
+    headers: { accept: 'application/json', authorization: `Bearer ${apiKey}` },
+    json: body,
+    invalidJsonMessage: 'outline 返回了非 JSON 响应',
+    mapError: ({ bodyKind, data, status }) => upstreamError(
+      status,
+      errorMessage(status, errorPayload(data, bodyKind)),
+    ),
+    mapTransportError: ({ message }) => upstreamError(
+      502,
+      `outline ${path} failed before receiving response: ${message ?? 'unknown network error'}`,
+    ),
+  })
+  return result.data === undefined ? null : result.data
 }
 
 /** Outline 把结果统一裹在 `data` 里;没有这层就说明响应不是它该有的形状。 */

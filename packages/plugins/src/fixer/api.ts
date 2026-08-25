@@ -19,25 +19,16 @@
 import type { z } from 'zod/v4'
 import { TBError } from '@tool-bridge/plugin-sdk'
 import type { getHistoricalRatesInput, getLatestRatesInput, getSupportedSymbolsInput } from './schema'
+import { createProviderHttpClient, type ProviderQuery } from '../_runtime/providerHttp'
+import { asJsonObject as record, trimmedText as text } from '../_runtime/jsonValue'
 import { type ProviderContext, requireApiKey } from '../_runtime/plugin'
 import { upstreamError } from '../_runtime/upstreamError'
-import { guardedFetch } from '../_runtime/guardedFetch'
 
 const SERVICE = 'fixer'
 const API_BASE = 'https://data.fixer.io/api'
+const http = createProviderHttpClient({ baseUrl: `${API_BASE}/`, service: SERVICE })
 
 type Json = Record<string, unknown>
-
-/** 上游 `optionalString` 的等价物:非字符串、或去空白后为空,都算缺失。 */
-function text(value: unknown): string | undefined {
-  if (typeof value !== 'string') return undefined
-  const trimmed = value.trim()
-  return trimmed === '' ? undefined : trimmed
-}
-
-function record(value: unknown): Json | undefined {
-  return typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Json) : undefined
-}
 
 /** 错误信息优先取人类可读的 `error.info`,退回 `error.type`,再退回顶层 `message`。 */
 function errorMessage(payload: unknown): string | undefined {
@@ -84,37 +75,23 @@ function toError(status: number, payload: unknown): TBError {
   return upstreamError(status, message)
 }
 
-async function readPayload(response: Response): Promise<unknown> {
-  const body = await response.text()
-  if (body === '') return null
-  try {
-    return JSON.parse(body) as unknown
-  } catch {
-    throw upstreamError(502, 'Fixer returned an invalid JSON response')
-  }
-}
-
 async function request(ctx: ProviderContext, path: string, query: Record<string, string | undefined> = {}): Promise<Json> {
-  // 取凭证放在 try 外:它抛的是配置错误,不该被下面的传输失败兜底吞成 502。
   const apiKey = requireApiKey(ctx, SERVICE)
-
-  const url = new URL(path.replace(/^\//, ''), `${API_BASE}/`)
-  url.searchParams.set('access_key', apiKey)
-  for (const [key, value] of Object.entries(query)) {
-    if (value !== undefined) url.searchParams.set(key, value)
-  }
-
-  let response: Response
-  try {
-    response = await guardedFetch(url.toString(), { method: 'GET' })
-  } catch (error) {
-    // 传输层失败必须就地归一:漏出去的裸 Error 会被 plugin-sdk 抹成 "internal plugin error"
-    // 500,把"上游不通/出网被拦"说成插件自身故障,还丢掉唯一有诊断价值的那句消息。
-    throw upstreamError(502, error instanceof Error ? `Fixer request failed: ${error.message}` : 'Fixer request failed')
-  }
-
-  const payload = await readPayload(response)
-  if (!response.ok || isErrorPayload(payload)) throw toError(response.status, payload)
+  const requestQuery: ProviderQuery = [['access_key', apiKey], ...Object.entries(query)]
+  const { data, status } = await http.request({
+    path: path.replace(/^\//, ''),
+    query: requestQuery,
+    invalidJsonMessage: 'Fixer returned an invalid JSON response',
+    mapError: ({ bodyKind, data: payload, status: responseStatus }) => bodyKind === 'invalid-json'
+      ? upstreamError(502, 'Fixer returned an invalid JSON response')
+      : toError(responseStatus, payload),
+    mapTransportError: ({ message }) => upstreamError(
+      502,
+      message === undefined ? 'Fixer request failed' : `Fixer request failed: ${message}`,
+    ),
+  })
+  const payload = data ?? null
+  if (isErrorPayload(payload)) throw toError(status, payload)
 
   const body = record(payload)
   if (body === undefined) throw upstreamError(502, 'Fixer returned an invalid JSON response')

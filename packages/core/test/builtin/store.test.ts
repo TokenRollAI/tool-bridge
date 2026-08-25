@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import type { CallContext } from '../../src/types'
-import { createStoreModule, storeScopeForCmd } from '../../src/builtin/store'
+import { createStoreModule, STORE_COMMANDS, storeScopeForCmd } from '../../src/builtin/store'
 import { StoreService } from '../../src/objectStoreService/service'
 import { MemoryObjectStore } from '../../src/context/objectStore'
 import { MemoryStateStore } from '../../src/store'
@@ -44,6 +44,7 @@ describe('builtin store 模块', () => {
 
   it('Help 列全命令与权威 scope/path 映射', () => {
     const help = mod.help('system/store')
+    expect(help.cmds.map(cmd => cmd.name)).toEqual(STORE_COMMANDS)
     expect(Object.fromEntries(help.cmds.map(cmd => [cmd.name, cmd.scope]))).toEqual({
       create_upload: 'write',
       complete_upload: 'write',
@@ -93,5 +94,14 @@ describe('builtin store 模块', () => {
         error => isTBError(error) && error.code === 'invalid_argument',
       )
     }
+  })
+
+  it('嵌套 checksum/opts 也使用 strict schema', async () => {
+    await expect(mod.dispatch('create_upload', {
+      contentType: 'image/jpeg',
+      checksum: { algorithm: 'sha256', value: '0'.repeat(64), token: 'secret' },
+    }, ctx)).rejects.toSatisfy(error => isTBError(error) && error.code === 'invalid_argument')
+    await expect(mod.dispatch('list', { opts: { cursor: 'x', extra: true } }, ctx))
+      .rejects.toSatisfy(error => isTBError(error) && error.code === 'invalid_argument')
   })
 })

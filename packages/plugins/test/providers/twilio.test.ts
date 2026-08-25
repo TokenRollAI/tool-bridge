@@ -1,12 +1,8 @@
 import {
-  base64urlEncode,
-  type CallContext,
-  encodeCallContext,
   encodeCredentialValues,
-  HEADER_TB_CONTEXT,
-  HEADER_TB_UPSTREAM_AUTH,
 } from '@tool-bridge/core'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+import { createProviderHarness } from '../support/providerHarness'
 import { createTwilioPlugin } from '../../src/twilio/index'
 import { twilioActions } from '../../src/twilio/schema'
 
@@ -16,61 +12,30 @@ import { twilioActions } from '../../src/twilio/schema'
  * camelCase 入参 → PascalCase query 参数的改名、以及错误消息末尾那个数字业务码。
  */
 
-const PLUGIN_TOKEN = 'tbp_test'
-const ENV = { PLUGIN_TOKEN }
 const ACCOUNT_SID = 'ACdeadbeefdeadbeefdeadbeefdeadbeef'
 const AUTH_TOKEN = 'tok_deadbeef'
 const CREDENTIALS = { accountSid: ACCOUNT_SID, authToken: AUTH_TOKEN }
 const EXPECTED_BASIC = `Basic ${btoa(`${ACCOUNT_SID}:${AUTH_TOKEN}`)}`
 const plugin = createTwilioPlugin()
 
-const CALLER: CallContext = {
-  keyId: 'k1',
-  owner: 'agent:tester',
-  scopes: [],
-  traceId: 't1',
+const {
+  call,
+  envelope,
+  sent,
+  stubFetch,
+} = createProviderHarness({
   mountPath: 'comms/twilio',
-  exportId: 'actions',
-}
-
-function envelope(body: unknown, opts: { auth?: string | null } = {}): Promise<Response> {
-  const headers: Record<string, string> = {
-    'authorization': `Bearer ${PLUGIN_TOKEN}`,
-    'content-type': 'application/json',
-    [HEADER_TB_CONTEXT]: encodeCallContext(CALLER),
-  }
-  const auth = opts.auth === undefined ? encodeCredentialValues(CREDENTIALS) : opts.auth
-  if (auth !== null) {
-    headers[HEADER_TB_UPSTREAM_AUTH] = base64urlEncode(new TextEncoder().encode(auth))
-  }
-  return Promise.resolve(plugin.fetch(
-    new Request('https://plugin.test/', { method: 'POST', headers, body: JSON.stringify(body) }),
-    ENV as never,
-  ))
-}
-
-function call(name: string, args: unknown, opts?: { auth?: string | null }): Promise<Response> {
-  return envelope({ tool: 'Call', arguments: { name, args } }, opts)
-}
+  plugin,
+  upstreamAuth: encodeCredentialValues(CREDENTIALS),
+})
 
 function mockTwilio(status: number, payload: unknown): ReturnType<typeof vi.fn> {
   const body = typeof payload === 'string' ? payload : JSON.stringify(payload)
-  const fn = vi.fn(() => Promise.resolve(new Response(body, {
+  return stubFetch(() => Promise.resolve(new Response(body, {
     status,
     headers: { 'content-type': 'application/json' },
   })))
-  vi.stubGlobal('fetch', fn)
-  return fn
 }
-
-/** 取上游收到的那个请求。 */
-function sent(mock: ReturnType<typeof vi.fn>): Request {
-  return (mock.mock.calls[0] as [Request])[0]
-}
-
-afterEach(() => {
-  vi.unstubAllGlobals()
-})
 
 describe('契约面', () => {
   it('List 出全部 5 个 action,且都带 Zod 派生的 schema', async () => {

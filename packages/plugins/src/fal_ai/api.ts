@@ -33,6 +33,8 @@ import type {
   queueGetStatusInput,
   queueGetStatusStreamInput,
 } from './schema'
+import { compactDefined as compact, asJsonObject as record, trimmedText as text } from '../_runtime/jsonValue'
+import { createProviderHttpClient, type ProviderQuery } from '../_runtime/providerHttp'
 import { type ProviderContext, requireApiKey } from '../_runtime/plugin'
 import { upstreamError } from '../_runtime/upstreamError'
 import { guardedFetch } from '../_runtime/guardedFetch'
@@ -42,6 +44,7 @@ const SERVICE = 'fal_ai'
 const PLATFORM_BASE = 'https://api.fal.ai'
 /** 队列面:排队请求的状态/结果/取消。 */
 const QUEUE_BASE = 'https://queue.fal.run'
+const http = createProviderHttpClient({ service: SERVICE })
 
 type Json = Record<string, unknown>
 type QueryValue = number | string | string[] | undefined
@@ -58,16 +61,9 @@ interface RequestInput {
   base: string
   body?: Json
   headers?: Record<string, string>
-  method?: string
+  method?: 'GET' | 'POST' | 'PUT'
   path: string
   query?: Record<string, QueryValue>
-}
-
-/** 上游 `optionalString`:去空白后仍非空才算有值。 */
-function text(value: unknown): string | undefined {
-  if (typeof value !== 'string') return undefined
-  const trimmed = value.trim()
-  return trimmed === '' ? undefined : trimmed
 }
 
 /**
@@ -76,15 +72,6 @@ function text(value: unknown): string | undefined {
  */
 function str(value: unknown): string | undefined {
   return typeof value === 'string' ? value : undefined
-}
-
-function record(value: unknown): Json | undefined {
-  return typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Json) : undefined
-}
-
-/** 丢掉值为 undefined 的键(上游 `compactObject`);`0` 与 `null` 要留住。 */
-function compact<T>(input: Record<string, T>): Record<string, T> {
-  return Object.fromEntries(Object.entries(input).filter(([, value]) => value !== undefined))
 }
 
 function objectArray(value: unknown): Json[] {
@@ -153,32 +140,24 @@ function errorMessage(payload: unknown, status: number): string {
  * 对调用方是两件事,压成一码后 agent 无从区分。422 两边都是 `invalid_argument`,无差异。
  */
 async function request(ctx: ProviderContext, input: RequestInput): Promise<unknown> {
-  const response = await guardedFetch(buildUrl(input.base, input.path, input.query), {
+  const result = await http.request({
+    baseUrl: input.base,
+    path: input.path,
     method: input.method ?? (input.body === undefined ? 'GET' : 'POST'),
+    query: Object.entries(input.query ?? {}) satisfies ProviderQuery,
     headers: {
       'authorization': `Key ${requireApiKey(ctx, SERVICE)}`,
       'content-type': 'application/json',
       ...input.headers,
     },
-    body: input.body === undefined ? undefined : JSON.stringify(input.body),
+    ...(input.body === undefined ? {} : { json: input.body }),
+    invalidJsonMessage: 'fal.ai 返回了非 JSON 响应',
+    mapError: ({ bodyKind, data, status }) => upstreamError(
+      status,
+      errorMessage(bodyKind === 'json' ? data : null, status),
+    ),
   })
-
-  const body = await response.text()
-  let payload: unknown = null
-  if (body !== '') {
-    try {
-      payload = JSON.parse(body)
-    } catch {
-      // 2xx 上回非 JSON 只能是上游坏了(上游直接 `response.json()`,那个 SyntaxError 冒到
-      // plugin-sdk 会变成 internal 500,运维看到的是"插件崩了");错误响应上回 HTML 错误页
-      // 却很常见,那时按 HTTP 状态归一比报"响应不是 JSON"准得多。
-      if (response.ok) {
-        throw new TBError('unavailable', 'fal.ai 返回了非 JSON 响应', { retryable: true })
-      }
-    }
-  }
-  if (!response.ok) throw upstreamError(response.status, errorMessage(payload, response.status))
-  return payload
+  return result.data === undefined ? null : result.data
 }
 
 /** 契约说好是对象;不是就是上游出问题,不是调用方的错。 */

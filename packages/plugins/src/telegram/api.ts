@@ -75,39 +75,31 @@ import type {
   unpinAllChatMessagesInput,
   unpinChatMessageInput,
 } from './schema'
-import { assertPublicHttpUrl, guardedFetch } from '../_runtime/guardedFetch'
+import {
+  booleanValue as bool,
+  compactDefined as compact,
+  finiteNumber as num,
+  asJsonObject as record,
+  trimmedText as text,
+} from '../_runtime/jsonValue'
+import {
+  createProviderHttpClient,
+  type ProviderHttpErrorContext,
+  type ProviderHttpResult,
+} from '../_runtime/providerHttp'
 import { type ProviderContext, requireApiKey } from '../_runtime/plugin'
+import { assertPublicHttpUrl } from '../_runtime/guardedFetch'
 import { upstreamError } from '../_runtime/upstreamError'
 
 const SERVICE = 'telegram'
 const API_BASE = 'https://api.telegram.org'
 /** 上游 `telegramDefaultRequestTimeoutMs`:getUpdates 的长轮询最长 50 秒,但单次请求卡死不能无限等。 */
 const REQUEST_TIMEOUT_MS = 30_000
+const http = createProviderHttpClient({ baseUrl: API_BASE, service: SERVICE })
 
 type Json = Record<string, unknown>
 /** 发给 Bot API 的请求体;值为 `undefined` 的键在发出前会被丢掉。 */
 type Body = Record<string, unknown>
-
-/** 上游 `optionalString`:去空白后仍非空才算有值。 */
-function text(value: unknown): string | undefined {
-  if (typeof value !== 'string') return undefined
-  const trimmed = value.trim()
-  return trimmed === '' ? undefined : trimmed
-}
-
-/** 上游 `optionalNumber`:只认有限数,字符串数字不做隐式转换。 */
-function num(value: unknown): number | undefined {
-  return typeof value === 'number' && Number.isFinite(value) ? value : undefined
-}
-
-/** 上游 `optionalBoolean`:只认真布尔值。 */
-function bool(value: unknown): boolean | undefined {
-  return typeof value === 'boolean' ? value : undefined
-}
-
-function record(value: unknown): Json | undefined {
-  return typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Json) : undefined
-}
 
 /** 契约说好是对象;不是就是上游破了契约,不是调用方的错。 */
 function asRecord(value: unknown): Json {
@@ -116,11 +108,6 @@ function asRecord(value: unknown): Json {
     throw new TBError('unavailable', 'Telegram 返回了非预期的对象负载', { retryable: true })
   }
   return result
-}
-
-/** 上游 `compactTelegramBody`:丢掉值为 undefined 的键(`null` 要留住,它对 Bot API 有意义)。 */
-function compact(value: Body): Body {
-  return Object.fromEntries(Object.entries(value).filter(([, child]) => child !== undefined))
 }
 
 /**
@@ -142,11 +129,11 @@ function methodUrl(botToken: string, method: string): string {
  * 读响应体。非 JSON(网关的 HTML 错误页)按上游口径整体折成一条 `ok:false` 信封,
  * 让下面的归一逻辑只有一条路径。
  */
-async function readEnvelope(response: Response): Promise<Json> {
+function readEnvelope(response: ProviderHttpErrorContext | ProviderHttpResult): Json {
   if ((response.headers.get('content-type') ?? '').includes('application/json')) {
-    return await response.json().then(value => record(value) ?? {}).catch(() => ({}))
+    return response.bodyKind === 'json' ? (record(response.data) ?? {}) : {}
   }
-  const body = await response.text().catch(() => '')
+  const body = typeof response.data === 'string' ? response.data : ''
   return {
     ok: false,
     description: body === '' ? `telegram request failed with ${response.status}` : body,
@@ -158,8 +145,8 @@ async function readEnvelope(response: Response): Promise<Json> {
  * 信封 → TBError。`error_code` 比 HTTP 状态准(信封式错误的 HTTP 状态可能是 200);
  * 两者都拿不到时说明响应不符合契约,归 unavailable 让调用方重试。
  */
-function telegramError(response: Response, payload: Json, method: string): TBError {
-  const code = num(payload.error_code) ?? (response.ok ? undefined : response.status)
+function telegramError(statusCode: number, responseOk: boolean, payload: Json, method: string): TBError {
+  const code = num(payload.error_code) ?? (responseOk ? undefined : statusCode)
   const status = code ?? 502
   const description = text(payload.description) ?? `telegram ${method} request failed with ${status}`
   if (status === 429) {
@@ -172,29 +159,27 @@ function telegramError(response: Response, payload: Json, method: string): TBErr
 
 async function request(ctx: ProviderContext, method: string, body?: Body): Promise<unknown> {
   // 取凭证放在 try 外:它抛的是配置错误,不该被下面的传输失败兜底吞成 502。
-  const url = methodUrl(requireApiKey(ctx, SERVICE), method)
-  const timeoutSignal = AbortSignal.timeout(REQUEST_TIMEOUT_MS)
+  const botToken = requireApiKey(ctx, SERVICE)
+  const result = await http.request({
+    path: methodUrl(botToken, method),
+    method: body === undefined ? 'GET' : 'POST',
+    ...(body === undefined ? {} : { json: body }),
+    responseType: 'auto',
+    invalidJson: 'text',
+    timeoutMs: REQUEST_TIMEOUT_MS,
+    sensitiveValues: [botToken],
+    mapError: (context) => {
+      const payload = readEnvelope(context)
+      return telegramError(context.status, false, payload, method)
+    },
+    mapTransportError: ({ kind, message }) => kind === 'timeout'
+      ? upstreamError(504, `telegram ${method} 请求超时(${REQUEST_TIMEOUT_MS / 1000} 秒)`)
+      : upstreamError(502, `telegram ${method} 请求失败: ${message ?? '未知错误'}`),
+  })
 
-  let response: Response
-  try {
-    response = await guardedFetch(url, {
-      method: body === undefined ? 'GET' : 'POST',
-      ...(body === undefined ? {} : { headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }),
-      signal: timeoutSignal,
-    })
-  } catch (error) {
-    // 传输层失败必须就地归一:漏出去的裸 Error 会被 plugin-sdk 抹成 500,
-    // 把"上游不通/出网被拦"说成插件自身故障。
-    if (error instanceof TBError) throw error
-    if (timeoutSignal.aborted) {
-      throw upstreamError(504, `telegram ${method} 请求超时(${REQUEST_TIMEOUT_MS / 1000} 秒)`)
-    }
-    throw upstreamError(502, `telegram ${method} 请求失败: ${error instanceof Error ? error.message : '未知错误'}`)
-  }
-
-  const payload = await readEnvelope(response)
+  const payload = readEnvelope(result)
   // 信封式错误:HTTP 200 也可能是失败,`ok` 才是判据。
-  if (!response.ok || payload.ok !== true) throw telegramError(response, payload, method)
+  if (payload.ok !== true) throw telegramError(result.status, true, payload, method)
   if (payload.result === undefined) {
     throw new TBError('unavailable', `telegram ${method} response did not include result`, { retryable: true })
   }

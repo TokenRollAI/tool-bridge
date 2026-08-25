@@ -1,12 +1,6 @@
-import {
-  base64urlEncode,
-  type CallContext,
-  encodeCallContext,
-  HEADER_TB_CONTEXT,
-  HEADER_TB_UPSTREAM_AUTH,
-} from '@tool-bridge/core'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { createScrapingbeePlugin } from '../../src/scrapingbee/index'
+import { createProviderHarness } from '../support/providerHarness'
 import { scrapingbeeActions } from '../../src/scrapingbee/schema'
 
 /**
@@ -14,52 +8,26 @@ import { scrapingbeeActions } from '../../src/scrapingbee/schema'
  * 布尔/整数参数的字符串化、`spb-*` 响应头上的诊断信息、extract_rules 的 JSON 序列化。
  */
 
-const PLUGIN_TOKEN = 'tbp_test'
-const ENV = { PLUGIN_TOKEN }
 const API_KEY = 'spb_test_deadbeef'
 const plugin = createScrapingbeePlugin()
 
-const CALLER: CallContext = {
-  keyId: 'k1',
-  owner: 'agent:tester',
-  scopes: [],
-  traceId: 't1',
+const {
+  call,
+  envelope,
+  sent,
+  stubFetch,
+} = createProviderHarness({
   mountPath: 'data/scrapingbee',
-  exportId: 'actions',
-}
-
-function envelope(body: unknown, opts: { auth?: string | null } = {}): Promise<Response> {
-  const headers: Record<string, string> = {
-    'authorization': `Bearer ${PLUGIN_TOKEN}`,
-    'content-type': 'application/json',
-    [HEADER_TB_CONTEXT]: encodeCallContext(CALLER),
-  }
-  const auth = opts.auth === undefined ? API_KEY : opts.auth
-  if (auth !== null) {
-    headers[HEADER_TB_UPSTREAM_AUTH] = base64urlEncode(new TextEncoder().encode(auth))
-  }
-  return Promise.resolve(plugin.fetch(
-    new Request('https://plugin.test/', { method: 'POST', headers, body: JSON.stringify(body) }),
-    ENV as never,
-  ))
-}
-
-function call(name: string, args: unknown, opts?: { auth?: string | null }): Promise<Response> {
-  return envelope({ tool: 'Call', arguments: { name, args } }, opts)
-}
+  plugin,
+  upstreamAuth: API_KEY,
+})
 
 function mockScrapingbee(
   status: number,
   body: string,
   headers: Record<string, string> = {},
 ): ReturnType<typeof vi.fn> {
-  const fn = vi.fn(() => Promise.resolve(new Response(body, { status, headers })))
-  vi.stubGlobal('fetch', fn)
-  return fn
-}
-
-function sent(mock: ReturnType<typeof vi.fn>): Request {
-  return (mock.mock.calls[0] as [Request])[0]
+  return stubFetch(() => Promise.resolve(new Response(body, { status, headers })))
 }
 
 const USAGE = JSON.stringify({
@@ -68,10 +36,6 @@ const USAGE = JSON.stringify({
   max_concurrency: 5,
   current_concurrency: 1,
   renewal_subscription_date: '2026-09-01T00:00:00Z',
-})
-
-afterEach(() => {
-  vi.unstubAllGlobals()
 })
 
 describe('契约面', () => {

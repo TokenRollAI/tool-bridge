@@ -1,20 +1,21 @@
-/**
- * HTBP 线上形状(与 core 的 HelpJson/TreeJson/TBError 对齐)。
- * Dashboard 是纯 API 客户端,不 import core——形状按网关契约手抄,字段不多不少。
- */
+import type { Action } from '@tool-bridge/sdk/client'
 
-export type NodeKind
-  = | 'directory'
-    | 'builtin'
-    | 'mcp'
-    | 'http'
-    | 'remote'
-    | 'context'
-    | 'skillhub'
-    | 'device'
-    | 'tool'
-
-export type Action = 'read' | 'write' | 'call' | 'register' | 'admin'
+/** 固定控制面 wire 类型来自 SDK public artifact，不再由 Dashboard 手抄。 */
+export type {
+  Action,
+  FeedbackView,
+  HelpCommand as HelpCmd,
+  HelpJson,
+  NodeKind,
+  Page,
+  Presence,
+  PresenceState,
+  RegistryNode,
+  TBErrorBody,
+  ToolSearchItem,
+  ToolSpec,
+  TreeJson,
+} from '@tool-bridge/sdk/client'
 
 export const ACTIONS: readonly Action[] = ['read', 'write', 'call', 'register', 'admin']
 
@@ -24,100 +25,6 @@ export interface Scope {
   effect?: 'allow' | 'deny'
   /** 树路径 glob:"**" | "docs/**"。 */
   pattern: string
-}
-
-export interface TBErrorBody {
-  code:
-    | 'not_found'
-    | 'permission_denied'
-    | 'invalid_argument'
-    | 'conflict'
-    | 'unavailable'
-    | 'rate_limited'
-    | 'internal'
-  message: string
-  retryable: boolean
-}
-
-export interface HelpCmd {
-  confirm?: boolean
-  effect?: string
-  h?: string
-  inputSchema?: Record<string, unknown>
-  method: 'POST'
-  name: string
-  path: string
-  returns?: string
-  scope: Action
-}
-
-export interface HelpJson {
-  children?: Array<{ description: string, kind: NodeKind, path: string }>
-  cmds: HelpCmd[]
-  /** Agent feedback 默认区块(头部条目,只含 id/title/score)。 */
-  feedback?: Array<{ id: string, score: number, title: string }>
-  htbp: string
-  node: { description: string, kind: NodeKind, path: string }
-  /** 管理员补充说明(system/annotation,网关 ~help 注入)。 */
-  note?: string
-}
-
-/** ~feedback 端点的条目视图(list 不含 detail;get 含)。 */
-export interface FeedbackView {
-  at: string
-  by: string
-  detail?: string
-  down: number
-  id: string
-  score: number
-  title: string
-  up: number
-}
-
-/**
- * device presence 三态(对齐 core 的 `device/presence.ts`)。
- * `online` 只是连接建立/拆除的事件位;拆除事件可能永不到达,所以读路径由宿主结合
- * `lastSeenAt` 的新鲜度投影为三态,`stale` = 连接位仍为真但存活观察已超时。
- */
-export type PresenceState = 'online' | 'stale' | 'offline'
-
-/** `~tree` 上 device 节点的在线状态形状;取代旧版裸 `online` 布尔。 */
-export interface Presence {
-  /** 最近一次观察到设备存活的时刻;缺省表示从未观察(旧连接或旧数据)。 */
-  lastSeenAt?: string
-  state: PresenceState
-}
-
-export interface TreeJson {
-  children?: TreeJson[]
-  description: string
-  kind: NodeKind
-  path: string
-  /** 仅 device:宿主已投影好的三态在线状态。 */
-  presence?: Presence
-  truncated?: boolean
-}
-
-/**
- * system/registry 返回的节点(builtin/registry.ts 的 Node 面 = 存储层 TreeNode)。
- *
- * 注意与 `TreeJson` 的差别:registry 是**存储态**,保留裸 `online`(连接事件位)+ `lastSeenAt`,
- * 不做投影;`~tree` 是**读投影**,只给 `presence`。消费时别把两者混为一谈——registry 侧要三态
- * 得自己过 `lib/presence.ts` 的 `derivePresence`。
- */
-export interface RegistryNode {
-  config?: Record<string, unknown>
-  createdAt?: string
-  description: string
-  kind: NodeKind
-  /** 仅 device:最近一次存活观察(hello / 心跳 / 成功调用)。 */
-  lastSeenAt?: string
-  /** 仅 device:连接是否已建立。不等于"此刻可路由",须结合 `lastSeenAt` 判新鲜度。 */
-  online?: boolean
-  path: string
-  registeredBy?: string
-  updatedAt?: string
-  virtualize?: Record<string, unknown>
 }
 
 /** system/sk 返回的 SecretKey(无 hash)。 */
@@ -130,25 +37,6 @@ export interface SecretKeyInfo {
   owner: string
   registerPaths?: string[]
   scopes: Scope[]
-}
-
-export interface Page<T> {
-  cursor?: string
-  items: T[]
-}
-
-/** root `~search` 返回的虚拟化后 ToolSpec。 */
-export interface ToolSpec {
-  confirm?: boolean
-  description?: string
-  effect?: string
-  inputSchema?: unknown
-  name: string
-}
-
-export interface ToolSearchItem {
-  path: string
-  tool: ToolSpec
 }
 
 /** system/federation list 的一行:remote 联邦 host 白名单合并视图。 */
@@ -296,59 +184,6 @@ export interface ContextEntryMeta {
 /** context 条目(含内容;大对象 content = { $ref })。 */
 export interface ContextEntry extends ContextEntryMeta {
   content: string | unknown
-}
-
-export interface ContextUploadGrant {
-  expiresAt: string
-  headers: Record<string, string>
-  method: 'PUT'
-  uri: string
-  /** 短期 bearer secret；只交给直传请求，不写入持久状态或日志。 */
-  url: string
-}
-
-/** 部署级 default Store 的公开 ready descriptor；不含 driver key 或 capability。 */
-export interface StoreObjectDescriptor {
-  checksum?: { algorithm: 'sha256', value: string }
-  contentType: string
-  createdAt: string
-  expiresAt?: string
-  filename?: string
-  originCallId?: string
-  owner: string
-  producer?: string
-  readyAt: string
-  size: number
-  status: 'ready'
-  updatedAt: string
-  uri: `store://default/${string}`
-}
-
-/** 只在一次上传 mutation 内短暂存在；禁止进入 toast、history 或 URL。 */
-export interface StoreUploadGrant {
-  expiresAt: string
-  headers: Record<string, string>
-  maxBytes: number
-  method: 'PUT'
-  objectUri: `store://default/${string}`
-  transport: 'relay' | 'presigned-put'
-  uploadId: string
-  uploadToken: string
-  url: string
-}
-
-export interface StoreReadGrant {
-  $ref: string
-  contentType: string
-  expiresAt: string
-  size: number
-}
-
-export interface StoreShareGrant {
-  $ref: string
-  expiresAt: string
-  shareId: string
-  uri: `store://default/${string}`
 }
 
 /** skillhub 目录条目摘要(list/search 返回的 SkillSummary)。 */

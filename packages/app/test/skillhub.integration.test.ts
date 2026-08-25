@@ -177,6 +177,17 @@ describe('skillhub 校验与权限', () => {
     expect(noName.status).toBe(400)
   })
 
+  it('Publish files[] 未知字段经 strict schema 拒绝', async () => {
+    expect((await mountHub('hubtest/strict')).status).toBe(200)
+    const response = await call('hubtest/strict', 'publish', {
+      files: [{ path: 'SKILL.md', content: SKILL_MD, mode: 0o755 }],
+    })
+    expect(response.status).toBe(400)
+    expect(await response.json()).toMatchObject({ code: 'invalid_argument' })
+    const listed = await call('hubtest/strict', 'list', {})
+    expect((await listed.json()) as { items: unknown[] }).toEqual({ items: [] })
+  })
+
   it('readOnly 挂载拒绝 Publish/Remove(403),仍可 List/Get', async () => {
     expect((await mountHub('hubtest/ro-seed')).status).toBe(200)
     await call('hubtest/ro-seed', 'publish', {

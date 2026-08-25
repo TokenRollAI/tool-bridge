@@ -38,14 +38,16 @@ import type {
   listBlogsInput,
   listPagesInput,
 } from './schema'
+import { createProviderHttpClient, type ProviderQuery } from '../_runtime/providerHttp'
+import { asJsonObject as record, trimmedText as text } from '../_runtime/jsonValue'
 import { type ProviderContext, requireCredential } from '../_runtime/plugin'
 import { upstreamError } from '../_runtime/upstreamError'
-import { guardedFetch } from '../_runtime/guardedFetch'
 
 const SERVICE = 'shopify'
 /** 上游钉死的 REST 版本;换版本会改变出参形状,不随调用方走。 */
 const REST_API_VERSION = '2026-04'
 const MYSHOPIFY_SUFFIX = '.myshopify.com'
+const http = createProviderHttpClient({ service: SERVICE })
 
 type Json = Record<string, unknown>
 
@@ -57,17 +59,6 @@ interface Pagination {
 interface RestResult {
   pagination: Pagination
   payload: unknown
-}
-
-/** 上游 `optionalString` 的等价物:去空白后仍非空才算有值。 */
-function text(value: unknown): string | undefined {
-  if (typeof value !== 'string') return undefined
-  const trimmed = value.trim()
-  return trimmed === '' ? undefined : trimmed
-}
-
-function record(value: unknown): Json | undefined {
-  return typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Json) : undefined
 }
 
 /** 契约说好是对象;不是就是上游出问题,不是调用方的错。 */
@@ -176,50 +167,31 @@ async function request(
   path: string,
   query?: Record<string, string>,
 ): Promise<RestResult> {
-  const url = new URL(
-    path.startsWith('/') ? path.slice(1) : path,
-    `https://${shopHost(ctx)}/admin/api/${REST_API_VERSION}/`,
-  )
-  for (const [key, value] of Object.entries(query ?? {})) url.searchParams.set(key, value)
-
-  const response = await guardedFetch(url.toString(), {
-    method: 'GET',
+  const result = await http.request({
+    baseUrl: `https://${shopHost(ctx)}/admin/api/${REST_API_VERSION}/`,
+    path,
+    query: Object.entries(query ?? {}) satisfies ProviderQuery,
     headers: {
       'accept': 'application/json',
       'x-shopify-access-token': requireCredential(ctx, SERVICE, 'apiKey'),
     },
+    invalidJsonMessage: 'Shopify REST 返回了非 JSON 响应',
+    mapError: ({ data, status }) => {
+      const detail = errorDetail(data)
+      return upstreamError(
+        status,
+        detail === undefined
+          ? `Shopify REST 返回 HTTP ${status}`
+          : `Shopify REST 返回 HTTP ${status}: ${detail}`,
+      )
+    },
   })
 
-  const body = await response.text()
-  let payload: unknown = null
-  if (body.trim() !== '') {
-    try {
-      payload = JSON.parse(body)
-    } catch {
-      // 2xx 上回非 JSON 只能是上游坏了;错误响应回 HTML(Shopify 的限流页就是)很常见,
-      // 那时把正文当消息、按 HTTP 状态归一,比报"响应不是 JSON"准。
-      if (response.ok) {
-        throw new TBError('unavailable', 'Shopify REST 返回了非 JSON 响应', { retryable: true })
-      }
-      payload = body
-    }
-  }
-
-  if (!response.ok) {
-    const detail = errorDetail(payload)
-    throw upstreamError(
-      response.status,
-      detail === undefined
-        ? `Shopify REST 返回 HTTP ${response.status}`
-        : `Shopify REST 返回 HTTP ${response.status}: ${detail}`,
-    )
-  }
-
   return {
-    payload,
+    payload: result.data === undefined ? null : result.data,
     pagination: {
-      nextPageInfo: pageInfoForRel(response.headers.get('link'), 'next'),
-      previousPageInfo: pageInfoForRel(response.headers.get('link'), 'previous'),
+      nextPageInfo: pageInfoForRel(result.headers.get('link'), 'next'),
+      previousPageInfo: pageInfoForRel(result.headers.get('link'), 'previous'),
     },
   }
 }

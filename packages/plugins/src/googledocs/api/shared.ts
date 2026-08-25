@@ -47,6 +47,7 @@
 
 import { TBError } from '@tool-bridge/plugin-sdk'
 import { type ProviderContext, requireApiKey } from '../../_runtime/plugin'
+import { asJsonObject, compactDefined } from '../../_runtime/jsonValue'
 import { upstreamError } from '../../_runtime/upstreamError'
 import { guardedFetch } from '../../_runtime/guardedFetch'
 
@@ -96,9 +97,7 @@ export interface DocsRequest {
   url: string
 }
 
-export function record(value: unknown): Json | undefined {
-  return typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Json) : undefined
-}
+export const record = asJsonObject
 
 /**
  * 上游 googledocs 自己那份 `optionalString`:**只把空串当"没给",不去空白**。
@@ -109,11 +108,7 @@ export function optionalText(value: string | undefined): string | undefined {
 }
 
 /** 丢掉值为 undefined 的键(上游 `compactObject`);`null` 要留住。 */
-export function compact<T>(input: Record<string, T | undefined>): Record<string, T> {
-  return Object.fromEntries(
-    Object.entries(input).filter((entry): entry is [string, T] => entry[1] !== undefined),
-  )
-}
+export const compact = compactDefined
 
 /** 契约说好是对象的地方上游回了别的东西 —— 上游违约,不是调用方的错。 */
 export function requireRecord(value: unknown, label: string): Json {

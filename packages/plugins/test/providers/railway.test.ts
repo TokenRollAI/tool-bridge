@@ -1,11 +1,8 @@
 import {
-  base64urlEncode,
   type CallContext,
-  encodeCallContext,
-  HEADER_TB_CONTEXT,
-  HEADER_TB_UPSTREAM_AUTH,
 } from '@tool-bridge/core'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+import { createProviderHarness } from '../support/providerHarness'
 import { createRailwayPlugin } from '../../src/railway/index'
 import { railwayActions } from '../../src/railway/schema'
 
@@ -15,8 +12,6 @@ import { railwayActions } from '../../src/railway/schema'
  * 上游声明里没写 required 但 executor 有断言的那批字段、以及 workspace 令牌那条分支。
  */
 
-const PLUGIN_TOKEN = 'tbp_test'
-const ENV = { PLUGIN_TOKEN }
 const API_KEY = 'railway_test_token'
 const GRAPHQL_URL = 'https://backboard.railway.com/graphql/v2'
 const plugin = createRailwayPlugin()
@@ -38,38 +33,12 @@ interface CallOptions {
   workspaceId?: string
 }
 
-function envelope(body: unknown, opts: CallOptions = {}): Promise<Response> {
-  const headers: Record<string, string> = {
-    'authorization': `Bearer ${PLUGIN_TOKEN}`,
-    'content-type': 'application/json',
-    [HEADER_TB_CONTEXT]: encodeCallContext(caller(opts.workspaceId)),
-  }
-  const auth = opts.auth === undefined ? API_KEY : opts.auth
-  if (auth !== null) {
-    headers[HEADER_TB_UPSTREAM_AUTH] = base64urlEncode(new TextEncoder().encode(auth))
-  }
-  return Promise.resolve(plugin.fetch(
-    new Request('https://plugin.test/', { method: 'POST', headers, body: JSON.stringify(body) }),
-    ENV as never,
-  ))
-}
-
-function call(name: string, args: unknown, opts?: CallOptions): Promise<Response> {
-  return envelope({ tool: 'Call', arguments: { name, args } }, opts)
-}
-
-function mockRailway(status: number, payload: unknown): ReturnType<typeof vi.fn> {
-  const fn = vi.fn(() => Promise.resolve(new Response(JSON.stringify(payload), {
-    status,
-    headers: { 'content-type': 'application/json' },
-  })))
-  vi.stubGlobal('fetch', fn)
-  return fn
-}
-
-function sent(mock: ReturnType<typeof vi.fn>): Request {
-  return (mock.mock.calls[0] as [Request])[0]
-}
+const { call, envelope, sent, mockJson: mockRailway, env: ENV } = createProviderHarness<CallOptions>({
+  caller: opts => caller(opts.workspaceId),
+  mountPath: 'infra/railway',
+  plugin,
+  upstreamAuth: API_KEY,
+})
 
 /** 上游收到的 GraphQL 请求体。 */
 async function sentBody(mock: ReturnType<typeof vi.fn>): Promise<{ query: string, variables?: unknown }> {
@@ -80,10 +49,6 @@ async function sentBody(mock: ReturnType<typeof vi.fn>): Promise<{ query: string
 function flat(query: string): string {
   return query.replace(/\s+/g, ' ').trim()
 }
-
-afterEach(() => {
-  vi.unstubAllGlobals()
-})
 
 describe('契约面', () => {
   it('~describe 报单个 tools/v1 export,并宣告 list_projects 为凭证探针', async () => {

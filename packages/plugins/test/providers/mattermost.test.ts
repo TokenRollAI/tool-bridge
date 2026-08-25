@@ -1,13 +1,9 @@
 import {
-  base64urlEncode,
-  type CallContext,
-  encodeCallContext,
   encodeCredentialValues,
-  HEADER_TB_CONTEXT,
-  HEADER_TB_UPSTREAM_AUTH,
 } from '@tool-bridge/core'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { createMattermostPlugin } from '../../src/mattermost/index'
+import { createProviderHarness } from '../support/providerHarness'
 import { mattermostActions } from '../../src/mattermost/schema'
 
 /**
@@ -17,60 +13,30 @@ import { mattermostActions } from '../../src/mattermost/schema'
  * `since` 与其他分页参数的互斥、以及帖子列表必须按 `order` 重排。
  */
 
-const PLUGIN_TOKEN = 'tbp_test'
-const ENV = { PLUGIN_TOKEN }
 const TOKEN = 'pat_deadbeef'
 const CREDENTIALS = { apiKey: TOKEN, instanceUrl: 'https://mm.example.com' }
 const API_BASE = 'https://mm.example.com/api/v4'
 const plugin = createMattermostPlugin()
 
-const CALLER: CallContext = {
-  keyId: 'k1',
-  owner: 'agent:tester',
-  scopes: [],
-  traceId: 't1',
+interface CallOptions {
+  credentials?: Record<string, string> | null
+}
+
+const { call, envelope, sent, env: ENV, stubFetch } = createProviderHarness<CallOptions>({
   mountPath: 'chat/mattermost',
-  exportId: 'actions',
-}
-
-function envelope(body: unknown, opts: { credentials?: Record<string, string> | null } = {}): Promise<Response> {
-  const headers: Record<string, string> = {
-    'authorization': `Bearer ${PLUGIN_TOKEN}`,
-    'content-type': 'application/json',
-    [HEADER_TB_CONTEXT]: encodeCallContext(CALLER),
-  }
-  const credentials = opts.credentials === undefined ? CREDENTIALS : opts.credentials
-  if (credentials !== null) {
-    const encoded = encodeCredentialValues(credentials)
-    headers[HEADER_TB_UPSTREAM_AUTH] = base64urlEncode(new TextEncoder().encode(encoded))
-  }
-  return Promise.resolve(plugin.fetch(
-    new Request('https://plugin.test/', { method: 'POST', headers, body: JSON.stringify(body) }),
-    ENV as never,
-  ))
-}
-
-function call(
-  name: string,
-  args: unknown,
-  opts?: { credentials?: Record<string, string> | null },
-): Promise<Response> {
-  return envelope({ tool: 'Call', arguments: { name, args } }, opts)
-}
+  plugin,
+  resolveUpstreamAuth: opts => opts.credentials === null
+    ? null
+    : encodeCredentialValues(opts.credentials ?? CREDENTIALS),
+})
 
 function mockMattermost(status: number, payload: unknown): ReturnType<typeof vi.fn> {
-  const fn = vi.fn(() => Promise.resolve(payload === null
+  return stubFetch(() => Promise.resolve(payload === null
     ? new Response(null, { status })
     : new Response(typeof payload === 'string' ? payload : JSON.stringify(payload), {
         status,
         headers: { 'content-type': 'application/json' },
       })))
-  vi.stubGlobal('fetch', fn)
-  return fn
-}
-
-function sent(mock: ReturnType<typeof vi.fn>): Request {
-  return (mock.mock.calls[0] as [Request])[0]
 }
 
 async function content(res: Response): Promise<unknown> {
@@ -80,10 +46,6 @@ async function content(res: Response): Promise<unknown> {
 async function message(res: Response): Promise<string> {
   return ((await res.json()) as { message: string }).message
 }
-
-afterEach(() => {
-  vi.unstubAllGlobals()
-})
 
 describe('契约面', () => {
   it('List 出全部 7 个 action,且都带 Zod 派生的 schema', async () => {

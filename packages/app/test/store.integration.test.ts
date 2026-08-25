@@ -13,6 +13,7 @@ import {
   defaultStoreRuntime,
   KEY_STORE_CLEANUP_PROGRESS,
   KEY_STORE_TOKEN_SECRET,
+  resolveStoreRequestOrigin,
   runBootstrap,
   storeTokenSecret,
   type TbAppDeps,
@@ -22,6 +23,30 @@ import { TEST_ADMIN_SK, TEST_ENCRYPTION_KEY } from './fixtures'
 import { bearer, createTestApp, TEST_REMOTE } from './harness'
 import { signStoreRefToken } from '../src/storeRefToken'
 import { verifyRefToken } from '../src/refToken'
+
+describe('Store external request origin', () => {
+  it('canonical 只修正可信 protocol，保留 alias host 与非默认端口', () => {
+    expect(resolveStoreRequestOrigin(
+      'http://public-alias.example/internal/path',
+      'https://canonical.example',
+    )).toBe('https://public-alias.example')
+    expect(resolveStoreRequestOrigin(
+      'http://public-alias.example:443/internal/path',
+      'https://canonical.example',
+    )).toBe('https://public-alias.example')
+    expect(resolveStoreRequestOrigin(
+      'http://public-alias.example:8443/internal/path',
+      'https://canonical.example',
+    )).toBe('https://public-alias.example:8443')
+  })
+
+  it('无请求 origin 时回退 canonical；无 canonical 时保留直接请求 origin', () => {
+    expect(resolveStoreRequestOrigin(undefined, 'https://canonical.example/path'))
+      .toBe('https://canonical.example')
+    expect(resolveStoreRequestOrigin('http://localhost:8787/path', undefined))
+      .toBe('http://localhost:8787')
+  })
+})
 
 interface Grant {
   alreadyCompleted?: boolean
@@ -91,6 +116,40 @@ async function putRelay(
 }
 
 describe('default Store control/data plane', () => {
+  it('多域名访问时 Store bearer/relay 留在请求 origin，不被 OAuth canonical origin 改写', async () => {
+    const tb = await createTestApp({ canonicalOrigin: 'https://canonical.test' })
+    const postAlias = async (command: string, body: unknown): Promise<Response> => {
+      return await tb.request(`https://alias.test/system/store/${command}`, {
+        method: 'POST',
+        headers: {
+          ...admin().headers,
+          'accept': 'application/json',
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify(body),
+      })
+    }
+
+    const created = await postAlias('create_upload', { contentType: 'text/plain', size: 5 })
+    expect(created.status).toBe(200)
+    const grant = (await created.json()) as Grant
+    expect(new URL(grant.url).origin).toBe('https://alias.test')
+    expect((await tb.request(grant.url, {
+      method: 'PUT',
+      headers: grant.headers,
+      body: 'hello',
+    })).status).toBe(200)
+
+    const read = await postAlias('read', { uri: grant.objectUri })
+    const share = await postAlias('share', { uri: grant.objectUri, ttlSec: 60 })
+    expect(new URL(((await read.json()) as { $ref: string }).$ref).origin).toBe(
+      'https://alias.test',
+    )
+    expect(new URL(((await share.json()) as { $ref: string }).$ref).origin).toBe(
+      'https://alias.test',
+    )
+  })
+
   it('bootstrap 暴露 Help；普通 create 要 SK/scope，capability secret 只接受 header', async () => {
     const tb = await createTestApp()
     const help = await tb.request('https://tb.test/system/store/~help', admin({
@@ -236,6 +295,28 @@ describe('default Store control/data plane', () => {
     expect((await tb.request(`https://tb.test/~store/refs/${expiredToken}`)).status).toBe(404)
   })
 
+  it('delete CAS 后已签发但仍 active 的 owner ref 与 share 都立即 404', async () => {
+    const tb = await createTestApp()
+    const grant = await createRelay(tb, { contentType: 'text/plain', size: 5 })
+    expect((await putRelay(tb, grant, new TextEncoder().encode('hello'))).status).toBe(200)
+    const read = await postJson(tb.request, 'system/store/read', { uri: grant.objectUri }, admin())
+    const share = await postJson(tb.request, 'system/store/share', {
+      uri: grant.objectUri,
+      ttlSec: 60,
+    }, admin())
+    const ownerRef = ((await read.json()) as { $ref: string }).$ref
+    const shareRef = ((await share.json()) as { $ref: string }).$ref
+    expect((await tb.request(ownerRef)).status).toBe(200)
+    expect((await tb.request(shareRef)).status).toBe(200)
+
+    const deleted = await postJson(tb.request, 'system/store/delete', {
+      uri: grant.objectUri,
+    }, admin())
+    expect(deleted.status).toBe(200)
+    expect((await tb.request(ownerRef)).status).toBe(404)
+    expect((await tb.request(shareRef)).status).toBe(404)
+  })
+
   it('relay effective maxBytes 在 create 与传输中都强制执行', async () => {
     const tb = await createTestApp({ storeMaxObjectBytes: 100, storeRelayMaxBytes: 3 })
     const knownTooLarge = await postJson(tb.request, 'system/store/create_upload', {
@@ -361,6 +442,7 @@ describe('default Store control/data plane', () => {
     let deniedByMime = 0
     const deps: TbAppDeps = {
       allowInsecureHttp: false,
+      canonicalOrigin: 'https://canonical.test',
       objects: () => objects,
       remote: TEST_REMOTE,
       secrets,
@@ -389,6 +471,9 @@ describe('default Store control/data plane', () => {
             { headers: { 'x-tb-store-capability': capability } },
           )
           const grant = (await created.json()) as Grant
+          // Capability request arrives through the alias origin used by postJson.
+          // Store URLs stay there even when OAuth callbacks are canonicalized elsewhere.
+          expect(new URL(grant.url).origin).toBe('https://tb.test')
           const ready = await appRef.current!.request(grant.url, {
             method: 'PUT',
             headers: grant.headers,

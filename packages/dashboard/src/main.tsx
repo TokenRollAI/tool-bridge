@@ -2,6 +2,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { createRoot } from 'react-dom/client'
 import { BrowserRouter } from 'react-router'
 import { StrictMode } from 'react'
+import { DashboardThemeProvider } from '@/components/DashboardThemeProvider'
 import { AppErrorBoundary } from '@/components/AppErrorBoundary'
 import { Toaster } from '@/components/ui/sonner'
 import { SessionProvider } from '@/lib/session'
@@ -25,16 +26,18 @@ const root = document.getElementById('root')
 if (!root) throw new Error('missing #root')
 createRoot(root).render(
   <StrictMode>
-    <QueryClientProvider client={queryClient}>
-      <SessionProvider>
-        <AppErrorBoundary>
-          {/* Vite base 与 gateway 静态挂载点都是 /ui,路由 basename 与之对齐 */}
-          <BrowserRouter basename="/ui">
-            <App />
-          </BrowserRouter>
-        </AppErrorBoundary>
-        <Toaster position="bottom-right" richColors />
-      </SessionProvider>
-    </QueryClientProvider>
+    <DashboardThemeProvider>
+      <QueryClientProvider client={queryClient}>
+        <SessionProvider>
+          <AppErrorBoundary>
+            {/* Vite base 与 gateway 静态挂载点都是 /ui,路由 basename 与之对齐 */}
+            <BrowserRouter basename="/ui">
+              <App />
+            </BrowserRouter>
+          </AppErrorBoundary>
+          <Toaster position="bottom-right" richColors />
+        </SessionProvider>
+      </QueryClientProvider>
+    </DashboardThemeProvider>
   </StrictMode>,
 )

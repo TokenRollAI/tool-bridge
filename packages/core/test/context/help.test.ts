@@ -45,6 +45,48 @@ describe('contextHelpModel', () => {
     for (const c of help.cmds) expect((c.inputSchema as { type: string }).type).toBe('object')
   })
 
+  it('write Help 精确带完整 path/required/additionalProperties', () => {
+    const write = contextHelpModel(node).cmds.find(command => command.name === 'write')
+    expect(write).toEqual({
+      name: 'write',
+      method: 'POST',
+      path: '/ctx/main/write',
+      scope: 'write',
+      h: 'create or fully replace an entry (idempotent upsert)',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          path: { type: 'string', description: 'entry path inside the namespace' },
+          entry: {
+            type: 'object',
+            properties: {
+              contentType: {
+                description: 'required when content is a string; defaults to application/json for non-string content',
+                type: 'string',
+              },
+              content: { description: 'entry body: string, or any JSON value' },
+              metadata: {
+                description: 'string-to-string metadata map',
+                type: 'object',
+                propertyNames: { type: 'string' },
+                additionalProperties: { type: 'string' },
+              },
+              ifVersion: {
+                description: 'optimistic concurrency: expected current version',
+                type: 'string',
+              },
+            },
+            required: ['content'],
+            additionalProperties: false,
+          },
+        },
+        required: ['path', 'entry'],
+        additionalProperties: false,
+      },
+      returns: 'ContextEntryMeta',
+    })
+  })
+
   it('readOnly 隐藏 write/update/delete(决策 D11)', () => {
     const help = contextHelpModel(node, { readOnly: true })
     expect(help.cmds.map(c => c.name)).toEqual(['list', 'get', 'search'])
@@ -79,6 +121,7 @@ describe('contextUploadCmd', () => {
     expect((cmd.inputSchema as {
       properties: { overwrite: { type: string } }
     }).properties.overwrite.type).toBe('boolean')
+    expect((cmd.inputSchema as { additionalProperties: boolean }).additionalProperties).toBe(false)
   })
 })
 

@@ -26,42 +26,28 @@ import type {
   getUserBalanceInput,
   listModelsInput,
 } from './schema'
+import { compactDefined as compact, asJsonObject as record, trimmedText as text } from '../_runtime/jsonValue'
+import { createProviderHttpClient, type ResponseBodyKind } from '../_runtime/providerHttp'
 import { type ProviderContext, requireApiKey } from '../_runtime/plugin'
 import { upstreamError } from '../_runtime/upstreamError'
-import { guardedFetch } from '../_runtime/guardedFetch'
 
 const SERVICE = 'deepseek'
 const API_BASE = 'https://api.deepseek.com'
 /** Anthropic 兼容面挂在同一域名的子路径下,但认证头与 OpenAI 兼容面不同。 */
-const ANTHROPIC_API_BASE = 'https://api.deepseek.com/anthropic'
+const ANTHROPIC_API_PREFIX = '/anthropic'
+const http = createProviderHttpClient({ baseUrl: API_BASE, service: SERVICE })
 
 type Json = Record<string, unknown>
 
-function text(value: unknown): string | undefined {
-  if (typeof value !== 'string') return undefined
-  const trimmed = value.trim()
-  return trimmed === '' ? undefined : trimmed
-}
-
-function record(value: unknown): Json | undefined {
-  return typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Json) : undefined
-}
-
-/** 丢掉值为 undefined 的键(上游 `compactObject`);`null` 要留住(消息 content 可以是 null)。 */
-function compact(input: Json): Json {
-  return Object.fromEntries(Object.entries(input).filter(([, value]) => value !== undefined))
-}
-
 /** 上游 `readDeepseekError`:错误文案依次落在 `error.message` / 顶层 `message` / 原始 body。 */
-function errorMessage(raw: string, status: number): string {
+function errorMessage(payload: unknown, bodyKind: ResponseBodyKind, status: number): string {
   const fallback = `deepseek request failed with ${status}`
-  try {
-    const payload = record(JSON.parse(raw))
-    const nested = record(payload?.error)
-    return text(nested?.message) ?? text(payload?.message) ?? text(raw) ?? fallback
-  } catch {
-    return text(raw) ?? fallback
-  }
+  const body = record(payload)
+  const nested = record(body?.error)
+  return text(nested?.message)
+    ?? text(body?.message)
+    ?? (bodyKind === 'invalid-json' || bodyKind === 'text' ? text(payload) : undefined)
+    ?? fallback
 }
 
 /** SSE 在这条链路上没有承载,给 true 直接拒绝而不是静默降级成非流式。 */
@@ -85,20 +71,19 @@ async function request(ctx: ProviderContext, options: RequestOptions): Promise<u
     ? { 'content-type': 'application/json', 'x-api-key': apiKey }
     : { 'authorization': `Bearer ${apiKey}`, 'content-type': 'application/json' }
 
-  const response = await guardedFetch(`${options.anthropic === true ? ANTHROPIC_API_BASE : API_BASE}${options.path}`, {
+  const { data } = await http.request({
+    path: `${options.anthropic === true ? ANTHROPIC_API_PREFIX : ''}${options.path}`,
     method: options.method ?? 'GET',
     headers,
-    ...(options.body === undefined ? {} : { body: JSON.stringify(options.body) }),
+    ...(options.body === undefined ? {} : { json: options.body }),
+    invalidJsonMessage: 'deepseek returned malformed JSON',
+    mapError: ({ bodyKind, data: payload, status }) => upstreamError(
+      status,
+      errorMessage(payload, bodyKind, status),
+    ),
   })
-
-  const raw = await response.text().catch(() => '')
-  if (!response.ok) throw upstreamError(response.status, errorMessage(raw, response.status))
-  try {
-    return JSON.parse(raw) as unknown
-  } catch {
-    // 2xx 上回非 JSON 只能是上游坏了,标 retryable 让调用方重试一次。
-    throw upstreamError(502, 'deepseek returned malformed JSON')
-  }
+  if (data === undefined) throw upstreamError(502, 'deepseek returned malformed JSON')
+  return data
 }
 
 export function listModels(_input: z.infer<typeof listModelsInput>, ctx: ProviderContext): Promise<unknown> {

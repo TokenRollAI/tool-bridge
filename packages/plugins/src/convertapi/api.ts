@@ -15,6 +15,7 @@
 import type { z } from 'zod/v4'
 import { TBError } from '@tool-bridge/plugin-sdk'
 import type { convertPdfToDocxInput } from './schema'
+import { integerValue as integer, asJsonObject as toRecord } from '../_runtime/jsonValue'
 import { assertPublicHttpUrl, guardedFetch } from '../_runtime/guardedFetch'
 import { type ProviderContext, requireApiKey } from '../_runtime/plugin'
 import { upstreamError } from '../_runtime/upstreamError'
@@ -26,20 +27,9 @@ const REQUEST_TIMEOUT_MS = 120_000
 
 type Json = Record<string, unknown>
 
-function toRecord(value: unknown): Json | undefined {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-    ? (value as Json)
-    : undefined
-}
-
 /** 非空字符串;上游 `optionalString` 的等价物。 */
 function text(value: unknown): string | undefined {
   return typeof value === 'string' && value !== '' ? value : undefined
-}
-
-/** 整数;上游 `optionalInteger` 的等价物(非整数一律丢弃,不做四舍五入)。 */
-function integer(value: unknown): number | undefined {
-  return typeof value === 'number' && Number.isInteger(value) ? value : undefined
 }
 
 /** ConvertAPI 的错误文案在 `Message`,少数路径用小写 `message`。 */

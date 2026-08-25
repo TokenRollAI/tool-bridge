@@ -1,3 +1,4 @@
+import { z } from 'zod/v4'
 import type {
   ObjectBody,
   ObjectBodyStream,
@@ -115,81 +116,136 @@ function stateCorrupt(kind: string): TBError {
   return new TBError('internal', `Store ${kind} 状态损坏`, { retryable: false })
 }
 
-function asRecord(value: unknown, kind: string): Record<string, unknown> {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
-    throw stateCorrupt(kind)
+const persistedId = z.string().min(1)
+const persistedOwner = z.string().min(1).refine(value => !/[\r\n\0]/.test(value))
+const persistedTimestamp = z.string().refine(value => Number.isFinite(Date.parse(value)))
+const persistedNonNegativeInt = z.number().int().nonnegative().refine(Number.isSafeInteger)
+const persistedPositiveInt = persistedNonNegativeInt.refine(value => value > 0)
+const persistedHash = z.string().regex(/^[0-9a-f]{64}$/)
+const persistedChecksum = z.looseObject({
+  algorithm: z.literal('sha256'),
+  value: z.string().min(1),
+})
+
+/**
+ * 持久化记录允许向前增加字段，但所有已知字段都 fail-closed 校验。
+ * 只验证主键会让 `Date.parse(undefined) => NaN` 一类脏记录永久保持 active，
+ * 或让损坏的 quota/reservation 绕过限制；这比拒绝一条坏记录危险得多。
+ */
+function stateParser<T>(kind: string, shape: z.ZodRawShape): (value: unknown) => T {
+  const schema = z.looseObject({ revision: persistedPositiveInt, ...shape })
+  return (value) => {
+    const parsed = schema.safeParse(value)
+    if (!parsed.success) throw stateCorrupt(kind)
+    return parsed.data as T
   }
-  return value as Record<string, unknown>
 }
 
-function assertRevisioned(value: unknown, kind: string): Record<string, unknown> {
-  const record = asRecord(value, kind)
-  if (!Number.isInteger(record.revision) || (record.revision as number) < 1) {
-    throw stateCorrupt(kind)
-  }
-  return record
-}
-
-function parseObject(value: unknown): StoreObject {
-  const record = assertRevisioned(value, 'object')
-  if (
-    typeof record.id !== 'string'
-    || record.store !== DEFAULT_STORE_NAME
-    || typeof record.driverKey !== 'string'
-    || typeof record.owner !== 'string'
-    || typeof record.contentType !== 'string'
-    || typeof record.uploadId !== 'string'
-    || typeof record.status !== 'string'
-  ) throw stateCorrupt('object')
-  return value as StoreObject
-}
+const parseObject = stateParser<StoreObject>('object', {
+  bytesDeletedAt: persistedTimestamp.optional(),
+  checksum: persistedChecksum.optional(),
+  contentType: z.string().min(1),
+  createdAt: persistedTimestamp,
+  driverKey: persistedId,
+  etag: z.string().optional(),
+  expectedChecksum: persistedChecksum.optional(),
+  expectedSize: persistedNonNegativeInt.optional(),
+  expiresAt: persistedTimestamp.optional(),
+  filename: z.string().optional(),
+  id: persistedId,
+  originCallId: persistedId.optional(),
+  owner: persistedOwner,
+  producer: persistedOwner.optional(),
+  readyAt: persistedTimestamp.optional(),
+  size: persistedNonNegativeInt.optional(),
+  status: z.enum(['pending', 'ready', 'failed', 'abandoned', 'deleted']),
+  store: z.literal(DEFAULT_STORE_NAME),
+  updatedAt: persistedTimestamp,
+  uploadId: persistedId,
+})
+const parseSessionRecord = stateParser<UploadSession>('upload session', {
+  capabilityHash: persistedHash,
+  completedAt: persistedTimestamp.optional(),
+  contentType: z.string().min(1),
+  createdAt: persistedTimestamp,
+  expectedChecksum: persistedChecksum.optional(),
+  expectedSize: persistedNonNegativeInt.optional(),
+  expiresAt: persistedTimestamp,
+  id: persistedId,
+  maxBytes: persistedPositiveInt,
+  objectId: persistedId,
+  status: z.enum(['created', 'completed', 'aborted', 'expired', 'failed']),
+  terminalAt: persistedTimestamp.optional(),
+  transport: z.enum(['relay', 'presigned-put']),
+})
+const parseCallCapabilityRecord = stateParser<CallUploadCapability>('call capability', {
+  allowedContentTypes: z.array(z.string().min(1)).min(1),
+  callId: persistedId,
+  createdAt: persistedTimestamp,
+  expiresAt: persistedTimestamp,
+  id: persistedId,
+  maxBytes: persistedPositiveInt,
+  maxObjectBytes: persistedPositiveInt,
+  maxObjects: persistedPositiveInt,
+  owner: persistedOwner,
+  producer: persistedOwner,
+  reservations: z.array(z.looseObject({
+    maxBytes: persistedPositiveInt,
+    objectId: persistedId,
+  })),
+  reservedBytes: persistedNonNegativeInt,
+  status: z.enum(['active', 'exhausted', 'revoked', 'expired']),
+  terminalAt: persistedTimestamp.optional(),
+  tokenHash: persistedHash,
+})
+const parseShare = stateParser<ShareGrant>('share grant', {
+  createdAt: persistedTimestamp,
+  createdBy: persistedOwner,
+  expiresAt: persistedTimestamp,
+  id: persistedId,
+  objectId: persistedId,
+  status: z.enum(['active', 'revoked', 'expired']),
+  terminalAt: persistedTimestamp.optional(),
+  tokenHash: persistedHash,
+})
+const parseIdempotencyBinding = stateParser<IdempotencyBinding>('idempotency binding', {
+  createdAt: persistedTimestamp,
+  domain: z.enum(['owner', 'call']),
+  expiresAt: persistedTimestamp,
+  fingerprint: persistedHash,
+  objectId: persistedId,
+  originCallId: persistedId.optional(),
+  owner: persistedOwner,
+  producer: persistedOwner,
+  uploadId: persistedId,
+})
 
 function parseSession(value: unknown): UploadSession {
-  const record = assertRevisioned(value, 'upload session')
+  const session = parseSessionRecord(value)
   if (
-    typeof record.id !== 'string'
-    || typeof record.objectId !== 'string'
-    || typeof record.capabilityHash !== 'string'
-    || typeof record.status !== 'string'
+    (session.expectedSize !== undefined && session.expectedSize > session.maxBytes)
+    || (session.transport === 'presigned-put' && session.expectedSize === undefined)
   ) throw stateCorrupt('upload session')
-  return value as UploadSession
+  return session
 }
 
 function parseCallCapability(value: unknown): CallUploadCapability {
-  const record = assertRevisioned(value, 'call capability')
+  const capability = parseCallCapabilityRecord(value)
+  const reservedBytes = capability.reservations.reduce(
+    (total, reservation) => total + reservation.maxBytes,
+    0,
+  )
+  const ids = new Set(capability.reservations.map(reservation => reservation.objectId))
   if (
-    typeof record.id !== 'string'
-    || typeof record.tokenHash !== 'string'
-    || typeof record.owner !== 'string'
-    || typeof record.producer !== 'string'
-    || typeof record.callId !== 'string'
-    || !Array.isArray(record.reservations)
+    capability.maxObjectBytes > capability.maxBytes
+    || capability.reservations.length > capability.maxObjects
+    || ids.size !== capability.reservations.length
+    || capability.reservations.some(reservation => reservation.maxBytes > capability.maxObjectBytes)
+    || !Number.isSafeInteger(reservedBytes)
+    || reservedBytes !== capability.reservedBytes
+    || reservedBytes > capability.maxBytes
   ) throw stateCorrupt('call capability')
-  return value as CallUploadCapability
-}
-
-function parseShare(value: unknown): ShareGrant {
-  const record = assertRevisioned(value, 'share grant')
-  if (
-    typeof record.id !== 'string'
-    || typeof record.objectId !== 'string'
-    || typeof record.tokenHash !== 'string'
-    || typeof record.createdBy !== 'string'
-  ) throw stateCorrupt('share grant')
-  return value as ShareGrant
-}
-
-function parseIdempotencyBinding(value: unknown): IdempotencyBinding {
-  const record = assertRevisioned(value, 'idempotency binding')
-  if (
-    typeof record.owner !== 'string'
-    || (record.domain !== 'owner' && record.domain !== 'call')
-    || typeof record.producer !== 'string'
-    || typeof record.fingerprint !== 'string'
-    || typeof record.objectId !== 'string'
-    || typeof record.uploadId !== 'string'
-  ) throw stateCorrupt('idempotency binding')
-  return value as IdempotencyBinding
+  return capability
 }
 
 function requireOwner(owner: unknown, field = 'owner'): OwnerRef {
@@ -244,7 +300,10 @@ function normalizeContentType(value: unknown): string {
 
 function normalizeChecksum(value: unknown): StoreChecksum | undefined {
   if (value === undefined) return undefined
-  const record = asRecord(value, 'checksum')
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    throw new TBError('invalid_argument', 'checksum 仅支持 sha256')
+  }
+  const record = value as Record<string, unknown>
   if (record.algorithm !== 'sha256' || typeof record.value !== 'string') {
     throw new TBError('invalid_argument', 'checksum 仅支持 sha256')
   }
@@ -395,6 +454,17 @@ export class StoreService {
     )
   }
 
+  /** 所有已存在记录的 CAS 共用 revision 期望，并拒绝错误的版本跃迁。 */
+  private async compareRecord<T extends { revision: number }>(
+    key: string,
+    current: T,
+    next: T | null,
+  ): Promise<boolean> {
+    if (next !== null && next.revision !== current.revision + 1)
+      throw stateCorrupt('revision transition')
+    return await this.cas(key, current.revision, next)
+  }
+
   async issueCallUploadCapability(
     input: IssueCallUploadCapabilityInput,
   ): Promise<IssuedCallUploadCapability> {
@@ -472,7 +542,7 @@ export class StoreService {
         terminalAt: this.nowIso(),
         revision: capability.revision + 1,
       }
-      if (await this.cas(`${KEY_STORE_CALL_CAPABILITY}${capability.id}`, capability.revision, next)) {
+      if (await this.compareRecord(`${KEY_STORE_CALL_CAPABILITY}${capability.id}`, capability, next)) {
         return
       }
     }
@@ -517,7 +587,7 @@ export class StoreService {
   /** relay PUT 成功即在同一调用内把对象推进 ready；后续 complete 仅作幂等确认。 */
   async commitRelayUpload(input: RelayCommitInput): Promise<StoreObjectDescriptor> {
     const session = await this.verifyUploadToken(input.uploadToken)
-    if (session.status === 'completed') return this.readyDescriptor(session.objectId)
+    if (session.status === 'completed') return descriptorOf(await this.requireObject(session.objectId))
     if (session.transport !== 'relay') {
       throw new TBError('invalid_argument', '该 upload session 不是 relay transport')
     }
@@ -556,7 +626,7 @@ export class StoreService {
       await this.failUpload(session, object)
       throw error
     }
-    return this.markReady(session, object, meta)
+    return this.markReady(session, meta)
   }
 
   /** 普通管理面 complete：只接受稳定 owner，不接受 capability body 字段。 */
@@ -582,7 +652,7 @@ export class StoreService {
     object: StoreObject,
   ): Promise<StoreObjectDescriptor> {
     if (session.status === 'completed' || object.status === 'ready') {
-      if (object.status !== 'ready') return this.readyDescriptor(object.id)
+      if (object.status !== 'ready') return descriptorOf(await this.requireObject(object.id))
       await this.completeSessionBestEffort(session)
       return descriptorOf(object)
     }
@@ -605,7 +675,7 @@ export class StoreService {
       await this.failUpload(session, object)
       throw error
     }
-    return this.markReady(session, object, meta)
+    return this.markReady(session, meta)
   }
 
   /** 普通管理面 abort：owner 路径。 */
@@ -616,9 +686,7 @@ export class StoreService {
 
   /** capability-only abort：token 只应来自 Authorization header。 */
   async abortUploadWithToken(uploadId: string, uploadToken: string): Promise<{ ok: true }> {
-    const id = this.tokenId(uploadToken, 'upload')
-    const session = await this.requireSession(id)
-    await this.assertTokenHash(uploadToken, session.capabilityHash, 'upload capability 无效')
+    const session = await this.verifyUploadToken(uploadToken)
     if (session.id !== uploadId) {
       throw new TBError('permission_denied', 'upload capability 与 session 不匹配')
     }
@@ -641,7 +709,7 @@ export class StoreService {
         updatedAt: this.nowIso(),
         revision: object.revision + 1,
       }
-      if (await this.cas(`${KEY_STORE_OBJECT}${object.id}`, object.revision, next)) object = next
+      if (await this.compareRecord(`${KEY_STORE_OBJECT}${object.id}`, object, next)) object = next
       else object = await this.requireObject(object.id)
     }
     if (object.status === 'ready') throw new TBError('conflict', 'ready 对象不能 abort')
@@ -653,7 +721,7 @@ export class StoreService {
         terminalAt,
         revision: session.revision + 1,
       }
-      if (await this.cas(`${KEY_STORE_UPLOAD}${session.id}`, session.revision, next)) session = next
+      if (await this.compareRecord(`${KEY_STORE_UPLOAD}${session.id}`, session, next)) session = next
       else session = await this.requireSession(session.id)
     }
     if (session.status === 'completed') throw new TBError('conflict', 'ready 对象不能 abort')
@@ -716,7 +784,7 @@ export class StoreService {
         updatedAt: this.nowIso(),
         revision: object.revision + 1,
       }
-      if (!await this.cas(`${KEY_STORE_OBJECT}${object.id}`, object.revision, next)) continue
+      if (!await this.compareRecord(`${KEY_STORE_OBJECT}${object.id}`, object, next)) continue
       await this.objects.delete(object.driverKey)
       await this.markBytesDeleted(object.id, object.driverKey)
       return { ok: true }
@@ -784,7 +852,7 @@ export class StoreService {
         terminalAt: this.nowIso(),
         revision: grant.revision + 1,
       }
-      if (await this.cas(`${KEY_STORE_SHARE}${grant.id}`, grant.revision, next)) {
+      if (await this.compareRecord(`${KEY_STORE_SHARE}${grant.id}`, grant, next)) {
         return { ok: true }
       }
     }
@@ -802,7 +870,6 @@ export class StoreService {
       expiredUploads: 0,
       abandonedObjects: 0,
       deletedBytes: 0,
-      deletedOrphans: 0,
       deletedStaging: 0,
       expiredCallCapabilities: 0,
       expiredIdempotencyBindings: 0,
@@ -838,7 +905,7 @@ export class StoreService {
         this.uploadSessionIsTerminal(session)
         && this.retentionElapsed(this.uploadSessionTerminalAt(session), this.uploadTtlSec, nowMs)
       ) {
-        await this.cas(item.key, session.revision, null)
+        await this.compareRecord(item.key, session, null)
       }
     }
 
@@ -861,7 +928,7 @@ export class StoreService {
         grant.status !== 'active'
         && this.retentionElapsed(grant.terminalAt ?? grant.expiresAt, this.shareTtlSec, nowMs)
       ) {
-        await this.cas(item.key, grant.revision, null)
+        await this.compareRecord(item.key, grant, null)
       }
     }
 
@@ -893,7 +960,7 @@ export class StoreService {
           nowMs,
         )
       ) {
-        await this.cas(item.key, capability.revision, null)
+        await this.compareRecord(item.key, capability, null)
       }
     }
 
@@ -908,7 +975,7 @@ export class StoreService {
     for (const item of idempotencyBindings.items) {
       const binding = parseIdempotencyBinding(item.value)
       if (Date.parse(binding.expiresAt) > nowMs) continue
-      if (await this.cas(item.key, binding.revision, null)) {
+      if (await this.compareRecord(item.key, binding, null)) {
         result.expiredIdempotencyBindings++
       }
     }
@@ -929,7 +996,7 @@ export class StoreService {
           updatedAt: now,
           revision: object.revision + 1,
         }
-        if (await this.cas(`${KEY_STORE_OBJECT}${object.id}`, object.revision, deleted)) {
+        if (await this.compareRecord(`${KEY_STORE_OBJECT}${object.id}`, object, deleted)) {
           object = deleted
         } else {
           const currentRaw = await this.state.get(item.key)
@@ -952,7 +1019,7 @@ export class StoreService {
             updatedAt: now,
             revision: object.revision + 1,
           }
-          if (await this.cas(`${KEY_STORE_OBJECT}${object.id}`, object.revision, abandoned)) {
+          if (await this.compareRecord(`${KEY_STORE_OBJECT}${object.id}`, object, abandoned)) {
             object = abandoned
             result.abandonedObjects++
           } else {
@@ -975,7 +1042,7 @@ export class StoreService {
         && object.bytesDeletedAt !== undefined
         && this.retentionElapsed(object.bytesDeletedAt, this.uploadTtlSec, nowMs)
       ) {
-        await this.cas(item.key, object.revision, null)
+        await this.compareRecord(item.key, object, null)
       }
     }
 
@@ -985,7 +1052,6 @@ export class StoreService {
       callCapabilities: capabilities.cursor ?? null,
       idempotencyBindings: idempotencyBindings.cursor ?? null,
       objects: objectRecords.cursor ?? null,
-      driverObjects: null,
     }
     return Object.values(cursors).some(cursor => cursor !== null) ? { ...result, cursors } : result
   }
@@ -1071,14 +1137,10 @@ export class StoreService {
       contentType: input.contentType,
       maxBytes,
       expiresAt: this.afterSeconds(now, this.uploadTtlSec),
-      attempts: 0,
       createdAt: now,
       revision: 1,
       ...(input.size !== undefined ? { expectedSize: input.size } : {}),
       ...(input.checksum !== undefined ? { expectedChecksum: input.checksum } : {}),
-      ...(input.idempotencyKey !== undefined
-        ? { idempotencyKeyHash: await sha256Hex(input.idempotencyKey) }
-        : {}),
     }
     const objectCreated = await this.cas(`${KEY_STORE_OBJECT}${object.id}`, null, object)
     if (!objectCreated) {
@@ -1162,7 +1224,7 @@ export class StoreService {
     // 只释放本次刚创建且还没有 session 的 binding；并发 winner 已开始落 session
     // 时保留绑定，让同 key 重试恢复同一对象。
     if (await this.state.get(`${KEY_STORE_UPLOAD}${resolved.binding.uploadId}`) !== null) return
-    await this.cas(resolved.key, resolved.binding.revision, null)
+    await this.compareRecord(resolved.key, resolved.binding, null)
   }
 
   private async reserveCallCapability(
@@ -1174,7 +1236,18 @@ export class StoreService {
     for (let attempt = 0; attempt < MAX_CAS_ATTEMPTS; attempt++) {
       const capability = await this.verifyCallUploadCapability(token)
       const previous = capability.reservations.find(r => r.objectId === objectId)
-      if (previous !== undefined) return previous.maxBytes
+      if (previous !== undefined) {
+        // 并发 begin 可能一次拿到 direct signer、另一次退回 relay；重放不能继承更宽的
+        // direct reservation 后再把 relay session 以该上限落库。
+        const replayMaxBytes = Math.min(previous.maxBytes, transportMaxBytes)
+        if (input.size !== undefined && input.size > replayMaxBytes) {
+          throw new TBError(
+            'rate_limited',
+            `对象超过本次上传上限 ${replayMaxBytes} bytes`,
+          )
+        }
+        return replayMaxBytes
+      }
       if (capability.status !== 'active') {
         throw new TBError('rate_limited', 'call upload capability 配额已耗尽')
       }
@@ -1205,11 +1278,8 @@ export class StoreService {
         status: exhausted ? 'exhausted' : 'active',
         revision: capability.revision + 1,
       }
-      if (await this.cas(
-        `${KEY_STORE_CALL_CAPABILITY}${capability.id}`,
-        capability.revision,
-        next,
-      )) return maxBytes
+      if (await this.compareRecord(`${KEY_STORE_CALL_CAPABILITY}${capability.id}`, capability, next))
+        return maxBytes
     }
     throw new TBError('conflict', 'call upload capability 并发消费冲突')
   }
@@ -1217,7 +1287,9 @@ export class StoreService {
   private async startFor(session: UploadSession): Promise<StoreUploadStart> {
     const object = await this.requireObject(session.objectId)
     const uploadToken = await this.tokenFor('upload', session.id)
-    if (session.status === 'completed' && object.status === 'ready') {
+    // object 是生命周期权威；complete 已线性化但 session 收敛落后时仍返回同 descriptor。
+    if (object.status === 'ready') {
+      await this.completeSessionBestEffort(session)
       return {
         uploadId: session.id,
         objectUri: storeUri(object.id),
@@ -1238,11 +1310,11 @@ export class StoreService {
       throw new TBError('conflict', 'upload session 已过期')
     }
     let signedRequest: StoreUploadStart['signedRequest']
-    if (
-      session.transport === 'presigned-put'
-      && session.expectedSize !== undefined
-      && this.objects.presignPutExact !== undefined
-    ) {
+    if (session.transport === 'presigned-put') {
+      if (session.expectedSize === undefined) throw stateCorrupt('direct upload size')
+      if (this.objects.presignPutExact === undefined) {
+        throw new TBError('unavailable', 'direct upload signer 当前不可用', { retryable: true })
+      }
       signedRequest = await this.objects.presignPutExact(
         object.driverKey,
         Math.max(1, Math.floor(remainingMs / 1000)),
@@ -1321,7 +1393,7 @@ export class StoreService {
         bytesDeletedAt: this.nowIso(),
         revision: object.revision + 1,
       }
-      if (await this.cas(`${KEY_STORE_OBJECT}${object.id}`, object.revision, next)) return
+      if (await this.compareRecord(`${KEY_STORE_OBJECT}${object.id}`, object, next)) return
     }
     throw new TBError('conflict', 'Store 对象字节删除状态并发更新冲突')
   }
@@ -1420,62 +1492,57 @@ export class StoreService {
 
   private async markReady(
     sessionInput: UploadSession,
-    objectInput: StoreObject,
     meta: ObjectMeta,
   ): Promise<StoreObjectDescriptor> {
-    let object = await this.requireObject(objectInput.id)
-    if (object.status === 'ready') {
-      const currentSession = await this.requireSession(sessionInput.id)
-      await this.completeSessionBestEffort(currentSession)
-      return descriptorOf(object)
-    }
-    if (object.status !== 'pending') {
-      await this.objects.delete(object.driverKey)
-      await this.markBytesDeleted(object.id, object.driverKey)
-      throw new TBError('conflict', `对象状态不允许 ready:${object.status}`)
-    }
-    const now = this.nowIso()
     const actualChecksum = sessionInput.expectedChecksum !== undefined
       && meta.metadata?.['checksum-sha256']?.toLowerCase() === sessionInput.expectedChecksum.value
       ? sessionInput.expectedChecksum
       : undefined
-    const ready: StoreObject = {
-      ...object,
-      status: 'ready',
-      size: meta.size,
-      etag: meta.etag,
-      readyAt: now,
-      updatedAt: now,
-      revision: object.revision + 1,
-      ...(actualChecksum !== undefined ? { checksum: actualChecksum } : {}),
-    }
-    if (!await this.cas(`${KEY_STORE_OBJECT}${object.id}`, object.revision, ready)) {
-      object = await this.requireObject(object.id)
-      if (object.status !== 'ready') {
+    for (let attempt = 0; attempt < MAX_CAS_ATTEMPTS; attempt++) {
+      const object = await this.requireObject(sessionInput.objectId)
+      if (object.status === 'ready') {
+        await this.completeSessionBestEffort(await this.requireSession(sessionInput.id))
+        return descriptorOf(object)
+      }
+      if (object.status !== 'pending') {
         await this.objects.delete(object.driverKey)
         await this.markBytesDeleted(object.id, object.driverKey)
-        throw new TBError('conflict', `对象并发状态冲突:${object.status}`)
+        const detail = attempt === 0 ? '状态不允许 ready' : '并发状态冲突'
+        throw new TBError('conflict', `对象${detail}:${object.status}`)
       }
-    } else {
-      object = ready
+      const now = this.nowIso()
+      const ready: StoreObject = {
+        ...object,
+        status: 'ready',
+        size: meta.size,
+        etag: meta.etag,
+        readyAt: now,
+        updatedAt: now,
+        revision: object.revision + 1,
+        ...(actualChecksum !== undefined ? { checksum: actualChecksum } : {}),
+      }
+      if (!await this.compareRecord(`${KEY_STORE_OBJECT}${object.id}`, object, ready)) continue
+      await this.completeSessionBestEffort(await this.requireSession(sessionInput.id))
+      return descriptorOf(ready)
     }
-    const session = await this.requireSession(sessionInput.id)
-    await this.completeSessionBestEffort(session)
-    return descriptorOf(object)
+    // CAS 可能因高竞争或后端暂态失败返回 false；没有终态 winner 时字节仍可供重试 complete。
+    throw new TBError('conflict', '对象并发状态冲突:pending')
   }
 
-  private async completeSessionBestEffort(session: UploadSession): Promise<void> {
-    if (session.status === 'completed') return
-    if (session.status !== 'created') return
-    const completedAt = this.nowIso()
-    const next: UploadSession = {
-      ...session,
-      status: 'completed',
-      completedAt,
-      terminalAt: completedAt,
-      revision: session.revision + 1,
+  private async completeSessionBestEffort(sessionInput: UploadSession): Promise<void> {
+    for (let attempt = 0; attempt < MAX_CAS_ATTEMPTS; attempt++) {
+      const session = await this.requireSession(sessionInput.id)
+      if (session.status === 'completed' || session.status !== 'created') return
+      const completedAt = this.nowIso()
+      const next: UploadSession = {
+        ...session,
+        status: 'completed',
+        completedAt,
+        terminalAt: completedAt,
+        revision: session.revision + 1,
+      }
+      if (await this.compareRecord(`${KEY_STORE_UPLOAD}${session.id}`, session, next)) return
     }
-    await this.cas(`${KEY_STORE_UPLOAD}${session.id}`, session.revision, next)
   }
 
   private async failUpload(session: UploadSession, object: StoreObject): Promise<void> {
@@ -1488,7 +1555,7 @@ export class StoreService {
         updatedAt: terminalAt,
         revision: object.revision + 1,
       }
-      await this.cas(`${KEY_STORE_OBJECT}${object.id}`, object.revision, failed)
+      await this.compareRecord(`${KEY_STORE_OBJECT}${object.id}`, object, failed)
     }
     if (session.status === 'created') {
       const failed: UploadSession = {
@@ -1497,21 +1564,14 @@ export class StoreService {
         terminalAt,
         revision: session.revision + 1,
       }
-      await this.cas(`${KEY_STORE_UPLOAD}${session.id}`, session.revision, failed)
+      await this.compareRecord(`${KEY_STORE_UPLOAD}${session.id}`, session, failed)
     }
     await this.markBytesDeleted(object.id, object.driverKey)
   }
 
   private async expireUpload(session: UploadSession): Promise<void> {
     if (session.status !== 'created') return
-    const next: UploadSession = {
-      ...session,
-      status: 'expired',
-      terminalAt: this.nowIso(),
-      revision: session.revision + 1,
-    }
-    if (!await this.cas(`${KEY_STORE_UPLOAD}${session.id}`, session.revision, next)) return
-    const object = await this.requireObject(session.objectId)
+    let object = await this.requireObject(session.objectId)
     if (object.status === 'pending') {
       const abandoned: StoreObject = {
         ...object,
@@ -1519,8 +1579,28 @@ export class StoreService {
         updatedAt: this.nowIso(),
         revision: object.revision + 1,
       }
-      await this.cas(`${KEY_STORE_OBJECT}${object.id}`, object.revision, abandoned)
+      if (await this.compareRecord(`${KEY_STORE_OBJECT}${object.id}`, object, abandoned)) {
+        object = abandoned
+      } else {
+        object = await this.requireObject(object.id)
+      }
     }
+    // complete 赢得 object CAS 时把 session 收敛为 completed；cleanup 不能产生 ready/expired。
+    if (object.status === 'ready') {
+      await this.completeSessionBestEffort(session)
+      return
+    }
+    // CAS 暂态失败但没有 terminal winner：保留 created，下一次 cleanup 重试。
+    if (object.status === 'pending') return
+    const current = await this.requireSession(session.id)
+    if (current.status !== 'created') return
+    const next: UploadSession = {
+      ...current,
+      status: 'expired',
+      terminalAt: this.nowIso(),
+      revision: current.revision + 1,
+    }
+    await this.compareRecord(`${KEY_STORE_UPLOAD}${current.id}`, current, next)
   }
 
   private async expireCallCapability(capability: CallUploadCapability): Promise<void> {
@@ -1531,7 +1611,7 @@ export class StoreService {
       terminalAt: this.nowIso(),
       revision: capability.revision + 1,
     }
-    await this.cas(`${KEY_STORE_CALL_CAPABILITY}${capability.id}`, capability.revision, next)
+    await this.compareRecord(`${KEY_STORE_CALL_CAPABILITY}${capability.id}`, capability, next)
   }
 
   private async expireShare(grant: ShareGrant): Promise<void> {
@@ -1542,11 +1622,7 @@ export class StoreService {
       terminalAt: this.nowIso(),
       revision: grant.revision + 1,
     }
-    await this.cas(`${KEY_STORE_SHARE}${grant.id}`, grant.revision, next)
-  }
-
-  private async readyDescriptor(objectId: string): Promise<StoreObjectDescriptor> {
-    return descriptorOf(await this.requireObject(objectId))
+    await this.compareRecord(`${KEY_STORE_SHARE}${grant.id}`, grant, next)
   }
 
   private async requireObject(id: string): Promise<StoreObject> {

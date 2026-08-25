@@ -1,14 +1,10 @@
 import {
-  base64urlEncode,
-  type CallContext,
-  encodeCallContext,
   encodeCredentialValues,
-  HEADER_TB_CONTEXT,
-  HEADER_TB_UPSTREAM_AUTH,
 } from '@tool-bridge/core'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { createUpstashRedisPlugin } from '../../src/upstash_redis/index'
 import { upstashRedisActions } from '../../src/upstash_redis/schema'
+import { createProviderHarness } from '../support/providerHarness'
 
 /**
  * Upstash Redis 迁移产物的 wire 级验收。重点在四处迁移最容易迁丢的地方:
@@ -16,20 +12,9 @@ import { upstashRedisActions } from '../../src/upstash_redis/schema'
  * 藏在错误消息里的配额信号、以及 key 去空白 / value 逐字保留的不对称。
  */
 
-const PLUGIN_TOKEN = 'tbp_test'
-const ENV = { PLUGIN_TOKEN }
 const REST_URL = 'https://us1-test-12345.upstash.io'
 const REST_TOKEN = 'AX_test_token'
 const plugin = createUpstashRedisPlugin()
-
-const CALLER: CallContext = {
-  keyId: 'k1',
-  owner: 'agent:tester',
-  scopes: [],
-  traceId: 't1',
-  mountPath: 'data/upstash',
-  exportId: 'actions',
-}
 
 interface CallOptions {
   /** 整份凭证都不给(测"没配 authRef")。 */
@@ -38,51 +23,21 @@ interface CallOptions {
   restUrl?: string
 }
 
-function envelope(body: unknown, opts: CallOptions = {}): Promise<Response> {
-  const headers: Record<string, string> = {
-    'authorization': `Bearer ${PLUGIN_TOKEN}`,
-    'content-type': 'application/json',
-    [HEADER_TB_CONTEXT]: encodeCallContext(CALLER),
-  }
-  if (opts.auth !== null) {
-    const values = encodeCredentialValues({
-      restUrl: opts.restUrl ?? REST_URL,
-      restToken: opts.restToken ?? REST_TOKEN,
-    })
-    headers[HEADER_TB_UPSTREAM_AUTH] = base64urlEncode(new TextEncoder().encode(values))
-  }
-  return Promise.resolve(plugin.fetch(
-    new Request('https://plugin.test/', { method: 'POST', headers, body: JSON.stringify(body) }),
-    ENV as never,
-  ))
-}
-
-function call(name: string, args: unknown, opts?: CallOptions): Promise<Response> {
-  return envelope({ tool: 'Call', arguments: { name, args } }, opts)
-}
-
-/** Upstash 的成功信封是 `{result}`。 */
-function mockUpstash(status: number, payload: unknown): ReturnType<typeof vi.fn> {
-  const fn = vi.fn(() => Promise.resolve(new Response(JSON.stringify(payload), {
-    status,
-    headers: { 'content-type': 'application/json' },
-  })))
-  vi.stubGlobal('fetch', fn)
-  return fn
-}
-
-function sent(mock: ReturnType<typeof vi.fn>): Request {
-  return (mock.mock.calls[0] as [Request])[0]
-}
+const { call, envelope, sent, mockJson: mockUpstash, env: ENV } = createProviderHarness<CallOptions>({
+  mountPath: 'data/upstash',
+  plugin,
+  resolveUpstreamAuth: opts => opts.auth === null
+    ? null
+    : encodeCredentialValues({
+        restUrl: opts.restUrl ?? REST_URL,
+        restToken: opts.restToken ?? REST_TOKEN,
+      }),
+})
 
 /** 上游收到的那条 Redis 命令(请求体就是命令数组)。 */
 function sentCommand(mock: ReturnType<typeof vi.fn>): Promise<unknown> {
   return sent(mock).json()
 }
-
-afterEach(() => {
-  vi.unstubAllGlobals()
-})
 
 describe('契约面', () => {
   it('~describe 报单个 tools/v1 export,并宣告 restUrl/restToken 两个凭证字段', async () => {

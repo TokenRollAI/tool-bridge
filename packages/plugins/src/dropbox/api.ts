@@ -68,6 +68,14 @@ import type {
   searchFilesInput,
   uploadFileInput,
 } from './schema'
+import {
+  booleanValue as bool,
+  compactDefined as compact,
+  finiteNumber as num,
+  asJsonObject as record,
+  trimmedText as text,
+} from '../_runtime/jsonValue'
+import { createProviderHttpClient, type ProviderHttpErrorContext } from '../_runtime/providerHttp'
 import { type ProviderContext, requireApiKey } from '../_runtime/plugin'
 import { upstreamError } from '../_runtime/upstreamError'
 import { guardedFetch } from '../_runtime/guardedFetch'
@@ -77,37 +85,12 @@ const SERVICE = 'dropbox'
 const API_BASE = 'https://api.dropboxapi.com/2'
 /** 内容面:上传下载,参数走 Dropbox-API-Arg 头。 */
 const CONTENT_BASE = 'https://content.dropboxapi.com/2'
+const http = createProviderHttpClient({ baseUrl: `${API_BASE}/`, service: SERVICE })
 /** 单请求上传上限。超过要走 upload_session(上游第一版没做,这里同样不做)。 */
 const MAX_SIMPLE_UPLOAD_BYTES = 150 * 1024 * 1024
 const DEFAULT_MIME_TYPE = 'application/octet-stream'
 
 type Json = Record<string, unknown>
-
-/** 上游 `optionalString`:去空白后仍非空才算有值。 */
-function text(value: unknown): string | undefined {
-  if (typeof value !== 'string') return undefined
-  const trimmed = value.trim()
-  return trimmed === '' ? undefined : trimmed
-}
-
-function bool(value: unknown): boolean | undefined {
-  return typeof value === 'boolean' ? value : undefined
-}
-
-function num(value: unknown): number | undefined {
-  return typeof value === 'number' && Number.isFinite(value) ? value : undefined
-}
-
-function record(value: unknown): Json | undefined {
-  return typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Json) : undefined
-}
-
-/** 丢掉值为 undefined 的键(上游 `compactObject`);`false`、`0`、`null` 都留住。 */
-function compact<T>(input: Record<string, T | undefined>): Record<string, T> {
-  return Object.fromEntries(
-    Object.entries(input).filter(([, value]) => value !== undefined),
-  ) as Record<string, T>
-}
 
 /** 上游 `readObjectArray`:只保留是对象的项,不是数组则空数组。 */
 function objectArray(value: unknown): Json[] {
@@ -242,6 +225,18 @@ function authHeader(ctx: ProviderContext): string {
   return `Bearer ${requireApiKey(ctx, SERVICE)}`
 }
 
+function rpcError(context: ProviderHttpErrorContext, fallback: string): TBError {
+  if (!context.headers.get('content-type')?.includes('application/json')) {
+    const raw = context.rawText?.trim()
+    return dropboxError(context.status, undefined, raw === undefined || raw === '' ? fallback : raw)
+  }
+  const payload = record(context.data)
+  const summary = text(payload?.error_summary)
+  const tag = text(record(payload?.error)?.['.tag'])
+  const message = summary === undefined ? tag ?? fallback : trimSummary(summary)
+  return dropboxError(context.status, summary ?? tag, message)
+}
+
 /**
  * RPC 请求。所有 RPC 都是 POST。
  *
@@ -254,28 +249,20 @@ async function rpc(
   options: { allowEmptyResponse?: boolean, body?: Json } = {},
 ): Promise<Json> {
   const hasBody = options.body !== undefined
-  const response = await guardedFetch(`${API_BASE}/${route}`, {
+  const result = await http.request({
+    path: route,
     method: 'POST',
-    headers: hasBody
-      ? { 'authorization': authHeader(ctx), 'content-type': 'application/json' }
-      : { authorization: authHeader(ctx) },
-    body: hasBody ? JSON.stringify(options.body) : undefined,
+    headers: { authorization: authHeader(ctx) },
+    ...(hasBody ? { json: options.body } : {}),
+    invalidJsonMessage: 'Dropbox 返回了非 JSON 响应',
+    mapError: context => rpcError(context, `Dropbox ${route} 调用失败`),
   })
-
-  if (!response.ok) throw await readError(response, `Dropbox ${route} 调用失败`)
-
-  const raw = await response.text()
-  if (raw.trim() === '') {
+  if (result.bodyKind === 'empty') {
     // 空响应只在明确允许时才算成功(revoke_shared_link 就什么都不回)。
     if (options.allowEmptyResponse === true) return {}
     throw new TBError('unavailable', `Dropbox ${route} 返回了空响应`, { retryable: true })
   }
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(raw)
-  } catch {
-    throw new TBError('unavailable', 'Dropbox 返回了非 JSON 响应', { retryable: true })
-  }
+  const parsed = result.data
   if (parsed === null) return {}
   return requiredRecord(parsed, `${route} 响应`)
 }

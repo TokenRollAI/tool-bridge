@@ -17,12 +17,14 @@
 import type { z } from 'zod/v4'
 import { TBError } from '@tool-bridge/plugin-sdk'
 import type { imageSearchInput, newsSearchInput, videoSearchInput, webSearchInput } from './schema'
+import { compactDefined as compact, asJsonObject as record, trimmedText as text } from '../_runtime/jsonValue'
 import { type ProviderContext, requireApiKey } from '../_runtime/plugin'
+import { createProviderHttpClient } from '../_runtime/providerHttp'
 import { upstreamError } from '../_runtime/upstreamError'
-import { guardedFetch } from '../_runtime/guardedFetch'
 
 const SERVICE = 'brave_search'
 const API_BASE = 'https://api.search.brave.com'
+const http = createProviderHttpClient({ baseUrl: `${API_BASE}/`, service: SERVICE })
 
 type Json = Record<string, unknown>
 type QueryValue = boolean | number | string | string[] | undefined
@@ -33,17 +35,6 @@ const RATE_LIMIT_CODES = new Set(['QUOTA_LIMITED', 'RATE_LIMITED', 'USAGE_LIMIT_
 const AUTH_CODES = new Set(['SUBSCRIPTION_TOKEN_INVALID', 'SUBSCRIPTION_NOT_FOUND'])
 /** 请求本身不被接受(套餐不含该选项、参数非法):归 invalid_argument。 */
 const INVALID_CODES = new Set(['RESOURCE_NOT_ALLOWED', 'OPTION_NOT_IN_PLAN', 'INVALID_URL'])
-
-/** 上游 `optionalString` 的等价物:去空白后仍非空才算有值。 */
-function text(value: unknown): string | undefined {
-  if (typeof value !== 'string') return undefined
-  const trimmed = value.trim()
-  return trimmed === '' ? undefined : trimmed
-}
-
-function record(value: unknown): Json | undefined {
-  return typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Json) : undefined
-}
 
 /** 出参里 `null` 与"字段缺席"是两回事:前者是上游明确说"这一族没有结果"。 */
 function nullableRecord(value: unknown): Json | null | undefined {
@@ -64,11 +55,6 @@ function objectArray(value: unknown): Json[] | undefined {
   return value.map(item => requireRecord(item, 'Brave Search 结果项'))
 }
 
-/** 丢掉值为 undefined 的键(上游 `compactObject`);`null` 要留住。 */
-function compact(input: Record<string, unknown>): Json {
-  return Object.fromEntries(Object.entries(input).filter(([, value]) => value !== undefined))
-}
-
 /** 纯空白的 q 能过 Zod 的 `min(1)`,但打到上游就是一次必然失败的空查询,先挡下。 */
 function searchTerm(value: string): string {
   const term = text(value)
@@ -81,20 +67,6 @@ function goggles(value: string | string[] | undefined): string | string[] | unde
   if (value === undefined || typeof value === 'string') return text(value)
   const items = value.map(item => text(item)).filter((item): item is string => item !== undefined)
   return items.length > 0 ? items : undefined
-}
-
-function buildUrl(path: string, query: Record<string, QueryValue>): string {
-  const url = new URL(`${API_BASE}${path}`)
-  for (const [key, value] of Object.entries(query)) {
-    if (value === undefined) continue
-    if (Array.isArray(value)) {
-      // 多 goggles 靠重复同名参数表达,不能拼成一个逗号串。
-      for (const item of value) url.searchParams.append(key, item)
-      continue
-    }
-    url.searchParams.set(key, String(value))
-  }
-  return url.toString()
 }
 
 /** Brave 错误 → TBError。稳定错误码优先,拿不到码再按 HTTP 状态走公共归一表。 */
@@ -111,29 +83,18 @@ function braveSearchError(status: number, payload: unknown): TBError {
 }
 
 async function request(ctx: ProviderContext, path: string, query: Record<string, QueryValue>): Promise<unknown> {
-  const response = await guardedFetch(buildUrl(path, query), {
+  const { data } = await http.request({
+    path,
     method: 'GET',
+    query: Object.entries(query),
     headers: {
       'accept': 'application/json',
       'x-subscription-token': requireApiKey(ctx, SERVICE),
     },
+    invalidJsonMessage: 'Brave Search 返回了非 JSON 响应',
+    mapError: ({ data: payload, status }) => braveSearchError(status, payload),
   })
-
-  const body = await response.text()
-  let payload: unknown = null
-  if (body !== '') {
-    try {
-      payload = JSON.parse(body)
-    } catch {
-      // 2xx 上回非 JSON 只能是上游坏了;错误响应上回 HTML 错误页却很常见,那时按 HTTP
-      // 状态归一比报"响应不是 JSON"准得多(上游把两种情形都压成 502,丢掉了 401/429 之别)。
-      if (response.ok) {
-        throw new TBError('unavailable', 'Brave Search 返回了非 JSON 响应', { retryable: true })
-      }
-    }
-  }
-  if (!response.ok) throw braveSearchError(response.status, payload)
-  return payload
+  return data ?? null
 }
 
 /** web 与其余三个 action 的出参形状不同:前者按结果族分列,后者是一条结果列表。 */

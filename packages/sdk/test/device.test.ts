@@ -7,6 +7,7 @@ import {
   type DeviceWebSocketFactory,
   type DeviceWebSocketFactoryInput,
   encodeDeviceFrame,
+  openPortableDeviceConnection,
   type ReactNativeWebSocketConstructor,
 } from '../src/device'
 
@@ -91,6 +92,35 @@ afterEach(() => {
 })
 
 describe('@tool-bridge/sdk/device neutral connection', () => {
+  it('公开低层 supervisor 原样保留 legacy shell/fs expose wire', async () => {
+    const harness = factoryHarness()
+    const connection = openPortableDeviceConnection({
+      baseUrl: 'https://tb.example',
+      deviceId: 'legacy-host',
+      credentialProvider: { prepare: () => ({ headers: {} }) },
+      expose: async () => ({
+        shell: { allow: ['echo'], description: 'legacy shell' },
+        fs: { roots: ['/tmp'], readOnly: true },
+      }),
+      handler: async () => null,
+      webSocketFactory: harness.factory,
+    })
+
+    const socket = await connectAttempt(harness, 1)
+    socket.open()
+    expect(helloFrames(socket)).toEqual([{
+      type: 'hello',
+      deviceId: 'legacy-host',
+      expose: {
+        shell: { allow: ['echo'], description: 'legacy shell' },
+        fs: { roots: ['/tmp'], readOnly: true },
+      },
+    }])
+
+    connection.close()
+    await connection.closed
+  })
+
   it('注入 RN transport 与 Authorization，完成 hello/ready/call/result', async () => {
     const harness = factoryHarness()
     const calls: unknown[] = []
@@ -216,7 +246,7 @@ describe('@tool-bridge/sdk/device neutral connection', () => {
     const httpCalls: Array<{ init?: RequestInit, input: Parameters<typeof fetch>[0] }> = []
     let handlerContext: unknown
     const readyObject = {
-      uri: 'store://default/call-photo-01',
+      uri: 'store://default/BBBBBBBBBBBBBBBBBBBBBB',
       contentType: 'image/jpeg',
       filename: 'capture.jpg',
       size: 4,
@@ -314,7 +344,7 @@ describe('@tool-bridge/sdk/device neutral connection', () => {
   it('本地校验/网络失败不消耗 SDK 对象额度，后续尝试仍交给服务端权威 reservation', async () => {
     const harness = factoryHarness()
     const readyObject = {
-      uri: 'store://default/retried-photo-01',
+      uri: 'store://default/CCCCCCCCCCCCCCCCCCCCCC',
       contentType: 'image/jpeg',
       size: 1,
       createdAt: '2099-08-24T11:59:00.000Z',

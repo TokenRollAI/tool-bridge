@@ -35,25 +35,16 @@ import type {
   listProductsInput,
   listSubscriptionsInput,
 } from './schema'
+import { createProviderHttpClient, type ProviderQuery, type QueryScalar } from '../_runtime/providerHttp'
+import { asJsonObject as record, trimmedText as text } from '../_runtime/jsonValue'
 import { type ProviderContext, requireApiKey } from '../_runtime/plugin'
 import { upstreamError } from '../_runtime/upstreamError'
-import { guardedFetch } from '../_runtime/guardedFetch'
 
 const SERVICE = 'polar'
 const API_BASE = 'https://api.polar.sh/v1'
+const http = createProviderHttpClient({ baseUrl: `${API_BASE}/`, service: SERVICE })
 
 type Json = Record<string, unknown>
-
-/** 上游 `optionalString`:去空白后仍非空才算有值。 */
-function text(value: unknown): string | undefined {
-  if (typeof value !== 'string') return undefined
-  const trimmed = value.trim()
-  return trimmed === '' ? undefined : trimmed
-}
-
-function record(value: unknown): Json | undefined {
-  return typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Json) : undefined
-}
 
 /** 契约说好是对象;不是就是上游出问题,不是调用方的错。 */
 function requireRecord(value: unknown, label: string): Json {
@@ -73,39 +64,39 @@ function requireId(value: unknown, field: string): string {
 }
 
 /** 上游 `appendQueryValue`:null/undefined 跳过,数组逐项展开,布尔与数字显式转串。 */
-function appendQueryValue(url: URL, key: string, value: unknown): void {
+function appendQueryValue(query: Array<readonly [string, QueryScalar]>, key: string, value: unknown): void {
   if (value === undefined || value === null) return
   if (Array.isArray(value)) {
     // Polar 的多值筛选靠重复同名参数表达,不能拼成逗号串。
-    for (const child of value) appendQueryValue(url, key, child)
+    for (const child of value) appendQueryValue(query, key, child)
     return
   }
   if (typeof value === 'boolean') {
-    url.searchParams.append(key, value ? 'true' : 'false')
+    query.push([key, value ? 'true' : 'false'])
     return
   }
   if (typeof value === 'number') {
-    url.searchParams.append(key, String(value))
+    query.push([key, String(value)])
     return
   }
   const stringValue = text(value)
-  if (stringValue !== undefined) url.searchParams.append(key, stringValue)
+  if (stringValue !== undefined) query.push([key, stringValue])
 }
 
 /** 上游 `buildListPath`:入参整份变成 query,`metadata` 走 deepObject 展开。 */
-function listUrl(path: string, input: object): string {
-  const url = new URL(`${API_BASE}${path}`)
+function listQuery(input: object): ProviderQuery {
+  const query: Array<readonly [string, QueryScalar]> = []
   for (const [key, value] of Object.entries(input)) {
     if (key === 'metadata') {
       const metadata = record(value)
       if (metadata !== undefined) {
-        for (const [name, child] of Object.entries(metadata)) appendQueryValue(url, `metadata[${name}]`, child)
+        for (const [name, child] of Object.entries(metadata)) appendQueryValue(query, `metadata[${name}]`, child)
       }
       continue
     }
-    appendQueryValue(url, key, value)
+    appendQueryValue(query, key, value)
   }
-  return url.toString()
+  return query
 }
 
 /** 上游 `extractPolarErrorMessage`:detail 可能是串、也可能是 FastAPI 的校验错误数组。 */
@@ -123,42 +114,32 @@ function errorDetail(payload: unknown): string | undefined {
   return text(body.message) ?? text(body.error) ?? text(body.title)
 }
 
-async function request(ctx: ProviderContext, url: string): Promise<unknown> {
-  const response = await guardedFetch(url, {
+async function request(ctx: ProviderContext, path: string, query?: ProviderQuery): Promise<unknown> {
+  const { data } = await http.request({
+    path,
     method: 'GET',
+    query,
     headers: {
       accept: 'application/json',
       authorization: `Bearer ${requireApiKey(ctx, SERVICE)}`,
     },
+    invalidJsonMessage: 'Polar 返回了非 JSON 响应',
+    mapError: ({ data: payload, status }) => upstreamError(
+      status,
+      errorDetail(payload) ?? `Polar 返回 HTTP ${status}`,
+    ),
   })
-
-  const body = await response.text()
-  let payload: unknown = null
-  if (body.trim() !== '') {
-    try {
-      payload = JSON.parse(body)
-    } catch {
-      // 2xx 上回非 JSON 只能是上游坏了;错误响应回 HTML(网关的 502 页面)很常见,那时按
-      // HTTP 状态归一比报"响应不是 JSON"准,也不用把上游正文回显给调用方。
-      if (response.ok) {
-        throw new TBError('unavailable', 'Polar 返回了非 JSON 响应', { retryable: true })
-      }
-    }
-  }
-  if (!response.ok) {
-    throw upstreamError(response.status, errorDetail(payload) ?? `Polar 返回 HTTP ${response.status}`)
-  }
-  return payload
+  return data ?? null
 }
 
 /** list 类:出参就是上游那一页(`{items, pagination}`)。 */
 async function listResources(path: string, input: object, ctx: ProviderContext): Promise<Json> {
-  return requireRecord(await request(ctx, listUrl(path, input)), '列表响应')
+  return requireRecord(await request(ctx, path, listQuery(input)), '列表响应')
 }
 
 /** get 类:出参包一层 `{payload}` —— 上游 `wrapPayload`,让资源对象与将来可能的元数据分层。 */
 async function getResource(path: string, ctx: ProviderContext): Promise<Json> {
-  return { payload: requireRecord(await request(ctx, `${API_BASE}${path}`), '资源响应') }
+  return { payload: requireRecord(await request(ctx, path), '资源响应') }
 }
 
 export function listOrganizations(

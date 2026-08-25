@@ -45,39 +45,28 @@ import type {
   updateVectorInput,
   upsertVectorsInput,
 } from './schema'
+import { compactDefined as compact, asJsonObject as record, trimmedText as text } from '../_runtime/jsonValue'
+import {
+  createProviderHttpClient,
+  type ProviderQuery,
+} from '../_runtime/providerHttp'
 import { type ProviderContext, requireApiKey } from '../_runtime/plugin'
 import { upstreamError } from '../_runtime/upstreamError'
-import { guardedFetch } from '../_runtime/guardedFetch'
 
 const SERVICE = 'pinecone'
 const CONTROL_API_BASE = 'https://api.pinecone.io'
 /** 响应形状按它协商,值变了就是换了一套契约。 */
 const API_VERSION = '2026-04'
+const http = createProviderHttpClient({ service: SERVICE })
 
 type Json = Record<string, unknown>
 type QueryValue = string | string[] | undefined
-
-function record(value: unknown): Json | undefined {
-  return typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Json) : undefined
-}
-
-/** 上游 `optionalString` 的等价物:去空白后仍非空才算有值。 */
-function text(value: unknown): string | undefined {
-  if (typeof value !== 'string') return undefined
-  const trimmed = value.trim()
-  return trimmed === '' ? undefined : trimmed
-}
 
 /** 上游 `requiredString`:schema 没标 required 的字段,必填断言落在这里。 */
 function requireText(value: unknown, field: string): string {
   const result = text(value)
   if (result === undefined) throw new TBError('invalid_argument', `${field} is required.`)
   return result
-}
-
-/** 上游 `compactObject`:丢掉值为 undefined 的键。 */
-function compact(input: Json): Json {
-  return Object.fromEntries(Object.entries(input).filter(([, value]) => value !== undefined))
 }
 
 /** 上游 `compactJson`:逐层丢掉 undefined;数组下标有语义,原样保留。 */
@@ -109,24 +98,10 @@ function requireIndexHost(value: unknown): string {
   if (parsed.username !== '' || parsed.password !== '') {
     throw new TBError('invalid_argument', 'indexHost must not include credentials')
   }
-  parsed.pathname = parsed.pathname.replace(/\/+$/, '')
   parsed.search = ''
   parsed.hash = ''
-  return parsed.toString().replace(/\/+$/, '')
-}
-
-function buildUrl(baseUrl: string, path: string, query: Record<string, QueryValue> | undefined): string {
-  const url = new URL(path, `${baseUrl.replace(/\/+$/, '')}/`)
-  for (const [key, value] of Object.entries(query ?? {})) {
-    if (value === undefined) continue
-    if (Array.isArray(value)) {
-      // ids 靠重复同名参数表达,不能拼成一个逗号串。
-      for (const item of value) url.searchParams.append(key, item)
-      continue
-    }
-    url.searchParams.set(key, value)
-  }
-  return url.toString()
+  // 数据面只认 origin；调用方附带的 path 不能成为命令前缀。
+  return parsed.origin
 }
 
 function headers(apiKey: string, hasBody: boolean): Record<string, string> {
@@ -161,33 +136,23 @@ async function request(ctx: ProviderContext, input: RequestInput): Promise<unkno
   // 取凭证放在 try 外:它抛的是配置错误,不该被下面的传输失败兜底吞成 502。
   const apiKey = requireApiKey(ctx, SERVICE)
 
-  let response: Response
-  try {
-    response = await guardedFetch(buildUrl(input.baseUrl ?? CONTROL_API_BASE, input.path, input.query), {
-      method: input.method,
-      headers: headers(apiKey, input.body !== undefined),
-      body: input.body === undefined ? undefined : JSON.stringify(compactDeep(input.body)),
-    })
-  } catch (error) {
-    // 传输层失败必须就地归一:漏出去的裸 Error 会被 plugin-sdk 抹成 "internal plugin error"
-    // 500。EgressBlockedError 本身是 TBError(invalid_argument),原样冒上去。
-    if (error instanceof TBError) throw error
-    const message = error instanceof Error ? `Pinecone request failed: ${error.message}` : 'Pinecone request failed'
-    throw upstreamError(502, message)
-  }
-
-  const raw = await response.text().catch(() => '')
-  let payload: unknown = {}
-  if (raw.trim() !== '') {
-    try {
-      payload = JSON.parse(raw)
-    } catch {
-      // 判 ok 之前就拦:Pinecone 的错误体是稳定 JSON,回非 JSON 说明请求压根没到 Pinecone。
-      throw upstreamError(502, 'Pinecone returned invalid JSON')
-    }
-  }
-  if (!response.ok) throw upstreamError(response.status, errorMessage(payload, response.status))
-  return payload
+  const result = await http.request({
+    baseUrl: `${(input.baseUrl ?? CONTROL_API_BASE).replace(/\/+$/, '')}/`,
+    path: input.path,
+    method: input.method,
+    query: Object.entries(input.query ?? {}) satisfies ProviderQuery,
+    headers: headers(apiKey, input.body !== undefined),
+    ...(input.body === undefined ? {} : { json: compactDeep(input.body) }),
+    invalidJsonMessage: 'Pinecone returned invalid JSON',
+    mapError: ({ bodyKind, data, status }) => bodyKind === 'invalid-json'
+      ? upstreamError(502, 'Pinecone returned invalid JSON')
+      : upstreamError(status, errorMessage(data, status)),
+    mapTransportError: ({ message }) => upstreamError(
+      502,
+      message === undefined ? 'Pinecone request failed' : `Pinecone request failed: ${message}`,
+    ),
+  })
+  return result.data === undefined ? {} : result.data
 }
 
 /** 契约说好是 JSON 对象;不是就是上游出问题,不是调用方的错。 */

@@ -1,13 +1,9 @@
 import {
-  base64urlEncode,
-  type CallContext,
-  encodeCallContext,
   encodeCredentialValues,
-  HEADER_TB_CONTEXT,
-  HEADER_TB_UPSTREAM_AUTH,
 } from '@tool-bridge/core'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { z } from 'zod/v4'
+import { createProviderHarness } from '../support/providerHarness'
 import { createShopifyPlugin } from '../../src/shopify/index'
 import { shopifyActions } from '../../src/shopify/schema'
 
@@ -17,8 +13,6 @@ import { shopifyActions } from '../../src/shopify/schema'
  * `page_info` 与筛选参数互斥、`popular` 用 `1` 而不是 `true`、以及 errors 三种形态的错误消息。
  */
 
-const PLUGIN_TOKEN = 'tbp_test'
-const ENV = { PLUGIN_TOKEN }
 const CREDENTIALS = {
   apiKey: 'shpat_deadbeef',
   shopDomain: 'acme.myshopify.com',
@@ -26,34 +20,17 @@ const CREDENTIALS = {
 const API_BASE = 'https://acme.myshopify.com/admin/api/2026-04'
 const plugin = createShopifyPlugin()
 
-const CALLER: CallContext = {
-  keyId: 'k1',
-  owner: 'agent:tester',
-  scopes: [],
-  traceId: 't1',
+const {
+  call,
+  envelope,
+  sent,
+  env: ENV,
+  stubFetch,
+} = createProviderHarness({
   mountPath: 'shop/shopify',
-  exportId: 'actions',
-}
-
-function envelope(body: unknown, opts: { auth?: string | null } = {}): Promise<Response> {
-  const headers: Record<string, string> = {
-    'authorization': `Bearer ${PLUGIN_TOKEN}`,
-    'content-type': 'application/json',
-    [HEADER_TB_CONTEXT]: encodeCallContext(CALLER),
-  }
-  const auth = opts.auth === undefined ? encodeCredentialValues(CREDENTIALS) : opts.auth
-  if (auth !== null) {
-    headers[HEADER_TB_UPSTREAM_AUTH] = base64urlEncode(new TextEncoder().encode(auth))
-  }
-  return Promise.resolve(plugin.fetch(
-    new Request('https://plugin.test/', { method: 'POST', headers, body: JSON.stringify(body) }),
-    ENV as never,
-  ))
-}
-
-function call(name: string, args: unknown, opts?: { auth?: string | null }): Promise<Response> {
-  return envelope({ tool: 'Call', arguments: { name, args } }, opts)
-}
+  plugin,
+  upstreamAuth: encodeCredentialValues(CREDENTIALS),
+})
 
 function mockShopify(
   status: number,
@@ -61,26 +38,16 @@ function mockShopify(
   headers: Record<string, string> = {},
 ): ReturnType<typeof vi.fn> {
   const body = typeof payload === 'string' ? payload : JSON.stringify(payload)
-  const fn = vi.fn(() => Promise.resolve(new Response(body, {
+  return stubFetch(() => Promise.resolve(new Response(body, {
     status,
     headers: { 'content-type': 'application/json', ...headers },
   })))
-  vi.stubGlobal('fetch', fn)
-  return fn
-}
-
-function sent(mock: ReturnType<typeof vi.fn>): Request {
-  return (mock.mock.calls[0] as [Request])[0]
 }
 
 /** 换一份凭证跑一次(shopDomain 的各种填法)。 */
 function callWithShopDomain(shopDomain: string, name: string, args: unknown): Promise<Response> {
   return call(name, args, { auth: encodeCredentialValues({ apiKey: CREDENTIALS.apiKey, shopDomain }) })
 }
-
-afterEach(() => {
-  vi.unstubAllGlobals()
-})
 
 describe('契约面', () => {
   it('List 出全部 13 个 action,且都带 Zod 派生的 schema', async () => {

@@ -32,12 +32,14 @@ import type {
   sendEmailWithTemplateInput,
   validateTemplateInput,
 } from './schema'
+import { compactDefined as compact, asJsonObject as record, trimmedText as text } from '../_runtime/jsonValue'
+import { createProviderHttpClient, type ProviderQuery } from '../_runtime/providerHttp'
 import { type ProviderContext, requireApiKey } from '../_runtime/plugin'
 import { upstreamError } from '../_runtime/upstreamError'
-import { guardedFetch } from '../_runtime/guardedFetch'
 
 const SERVICE = 'postmark'
 const API_BASE = 'https://api.postmarkapp.com'
+const http = createProviderHttpClient({ baseUrl: API_BASE, service: SERVICE })
 
 type Json = Record<string, unknown>
 type QueryValue = boolean | number | string | undefined
@@ -53,24 +55,6 @@ const NOT_FOUND_CODES = new Set([12, 701, 1001, 1101])
  * "这个账号不被允许做这件事"。这是与上游的**有意偏离**。
  */
 const ACCOUNT_BLOCKED_CODES = new Set([405, 412, 413])
-
-/** 上游 `optionalString` 的等价物:去空白后仍非空才算有值。 */
-function text(value: unknown): string | undefined {
-  if (typeof value !== 'string') return undefined
-  const trimmed = value.trim()
-  return trimmed === '' ? undefined : trimmed
-}
-
-function record(value: unknown): Json | undefined {
-  return typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Json) : undefined
-}
-
-/** 丢掉值为 undefined 的键(上游 `compactObject`);`null` 与 `false` 要留住。 */
-function compact<T>(input: Record<string, T | undefined>): Record<string, T> {
-  return Object.fromEntries(
-    Object.entries(input).filter(([, value]) => value !== undefined),
-  ) as Record<string, T>
-}
 
 /** 上游回的形状不符合契约 —— 是上游的问题,不是调用方的错。 */
 function responseError(message: string): TBError {
@@ -107,44 +91,31 @@ function postmarkError(status: number, payload: Json): TBError {
 
 interface RequestInput {
   body?: unknown
-  method?: string
+  method?: 'GET' | 'POST' | 'PUT'
   path: string
   query?: Record<string, QueryValue>
 }
 
 async function request(ctx: ProviderContext, input: RequestInput): Promise<unknown> {
-  const url = new URL(input.path, API_BASE)
-  for (const [key, value] of Object.entries(input.query ?? {})) {
-    if (value !== undefined) url.searchParams.set(key, String(value))
-  }
-
-  const response = await guardedFetch(url.toString(), {
+  const { data } = await http.request({
+    path: input.path,
     method: input.method ?? 'GET',
+    query: Object.entries(input.query ?? {}) satisfies ProviderQuery,
     headers: {
       'accept': 'application/json',
-      ...(input.body === undefined ? {} : { 'content-type': 'application/json' }),
       'x-postmark-server-token': requireApiKey(ctx, SERVICE),
     },
-    body: input.body === undefined ? undefined : JSON.stringify(input.body),
+    ...(input.body === undefined ? {} : { json: input.body }),
+    invalidJsonMessage: 'Postmark 返回了非 JSON 响应',
+    mapError: ({ bodyKind, data: payload, status }) => postmarkError(
+      status,
+      bodyKind === 'json'
+        ? record(payload) ?? {}
+        : (bodyKind === 'empty' ? {} : { Message: payload }),
+    ),
   })
-
-  const raw = await response.text()
-  let payload: unknown
-  let parsed = false
-  if (raw !== '') {
-    try {
-      payload = JSON.parse(raw)
-      parsed = true
-    } catch {
-      // 错误响应上回 HTML 错误页很常见,此时把整段正文当消息(上游同样这么兜底)。
-      if (response.ok) throw responseError('Postmark 返回了非 JSON 响应')
-    }
-  }
-  if (!response.ok) {
-    throw postmarkError(response.status, parsed ? record(payload) ?? {} : (raw === '' ? {} : { Message: raw }))
-  }
-  if (!parsed) throw responseError('Postmark 返回了非 JSON 响应')
-  return payload
+  if (data === undefined) throw responseError('Postmark 返回了非 JSON 响应')
+  return data
 }
 
 export function getServer(_input: unknown, ctx: ProviderContext): Promise<unknown> {

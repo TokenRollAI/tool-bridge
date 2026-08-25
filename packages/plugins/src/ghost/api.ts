@@ -43,14 +43,21 @@ import type {
   listPostsInput,
   listTagsInput,
 } from './schema'
+import {
+  createProviderHttpClient,
+  type ProviderQuery,
+  type ResponseBodyKind,
+} from '../_runtime/providerHttp'
+import { asJsonObject as record, trimmedText as text } from '../_runtime/jsonValue'
 import { type ProviderContext, requireCredential } from '../_runtime/plugin'
-import { assertPublicHttpUrl, guardedFetch } from '../_runtime/guardedFetch'
+import { assertPublicHttpUrl } from '../_runtime/guardedFetch'
 import { upstreamError } from '../_runtime/upstreamError'
 
 const SERVICE = 'ghost'
 /** 上游钉死的 Content API 路径与版本;换版本会改变出参形状,不随调用方走。 */
 const CONTENT_PATH_PREFIX = '/ghost/api/content'
 const CONTENT_API_VERSION = 'v5.0'
+const http = createProviderHttpClient({ service: SERVICE })
 
 type Json = Record<string, unknown>
 /** 四个集合共用 browse/read 两套逻辑,出参键由集合名决定。 */
@@ -58,17 +65,6 @@ type Collection = 'authors' | 'pages' | 'posts' | 'tags'
 
 type BrowseInput = z.infer<typeof listPostsInput>
 type ReadInput = z.infer<typeof getPostInput>
-
-/** 上游 `optionalString` 的等价物:去空白后仍非空才算有值(Zod 的 `min(1)` 拦不住纯空白串)。 */
-function text(value: unknown): string | undefined {
-  if (typeof value !== 'string') return undefined
-  const trimmed = value.trim()
-  return trimmed === '' ? undefined : trimmed
-}
-
-function record(value: unknown): Json | undefined {
-  return typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Json) : undefined
-}
 
 /**
  * 把租户填的站点地址归一成 Content API base。
@@ -111,40 +107,31 @@ function errorMessage(status: number, payload: unknown): string {
   return text(body?.message) ?? `Ghost 返回 HTTP ${status}`
 }
 
+function errorPayload(data: unknown, bodyKind: ResponseBodyKind): unknown {
+  return bodyKind === 'invalid-json' ? { message: data } : data
+}
+
 async function request(
   ctx: ProviderContext,
   path: string,
   query: Record<string, number | string | undefined> = {},
 ): Promise<unknown> {
-  // base 里已经带了 /ghost/api/content/v5.0,相对路径不能以斜杠开头(否则会把它整段冲掉)。
-  const url = new URL(path.replace(/^\/+/, ''), `${contentBaseUrl(ctx)}/`)
-  url.searchParams.set('key', requireCredential(ctx, SERVICE, 'apiKey'))
-  for (const [key, value] of Object.entries(query)) {
-    if (value !== undefined) url.searchParams.set(key, String(value))
-  }
-
-  const response = await guardedFetch(url.toString(), {
-    method: 'GET',
+  const result = await http.request({
+    // base 里已经带 /ghost/api/content/v5.0；薄层会保住这段部署路径。
+    baseUrl: `${contentBaseUrl(ctx)}/`,
+    path,
+    query: [
+      ['key', requireCredential(ctx, SERVICE, 'apiKey')],
+      ...Object.entries(query),
+    ] satisfies ProviderQuery,
     headers: { accept: 'application/json' },
+    invalidJsonMessage: 'Ghost 返回了非 JSON 响应',
+    mapError: ({ bodyKind, data, status }) => upstreamError(
+      status,
+      errorMessage(status, errorPayload(data, bodyKind)),
+    ),
   })
-
-  const body = await response.text()
-  let payload: unknown = {}
-  if (body !== '') {
-    try {
-      payload = JSON.parse(body)
-    } catch {
-      // 2xx 上回非 JSON 只能是上游坏了;错误响应回 HTML 却很常见(Ghost 前面常挂 CDN),
-      // 那时把正文当消息、按 HTTP 状态归一,比报"响应不是 JSON"准。
-      if (response.ok) {
-        throw new TBError('unavailable', 'Ghost 返回了非 JSON 响应', { retryable: true })
-      }
-      payload = { message: body }
-    }
-  }
-
-  if (!response.ok) throw upstreamError(response.status, errorMessage(response.status, payload))
-  return payload
+  return result.data === undefined ? {} : result.data
 }
 
 /** 上游 `browseQuery`:整数原样发,字符串去空白后仍非空才发。 */

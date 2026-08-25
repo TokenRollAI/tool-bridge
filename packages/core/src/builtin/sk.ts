@@ -5,189 +5,140 @@
  * write 返回 { key, secret },secret(明文)仅此一次;list/get/update 一律无 hash。
  */
 
-import type { Scope, SecretKeyInput, TreePath } from '../types'
-import type { CmdSpec, HelpModel } from '../htbp/model'
+import { z } from 'zod/v4'
+import type { Scope, SecretKeyInput } from '../types'
 import type { BuiltinModule } from './types'
-import {
-  cmdPath,
-  LIST_OPTS_SCHEMA,
-  optListOptions,
-  requireObject,
-  requireString,
-  VOID_ACK,
-  withCommandPaths,
-} from './util'
 import { normalizeExpiresAt, type SKRegistryStore, type SKUpdatePatch } from '../auth/sk'
-import { TBError } from '../errors'
+import { BuiltinCommandRegistry } from './commandRegistry'
+import { LIST_OPTS_ZOD_SCHEMA, VOID_ACK } from './util'
 
 const DESCRIPTION
   = 'Secret Key registry: issue / list / update / revoke access keys (the only credential form; admin only)'
 
-/** write 与 update.patch 共用的 SK 字段 schema(update 全可选,另加 disabled)。 */
-const SK_FIELD_SCHEMAS = {
-  owner: {
-    type: 'string',
-    description: 'owner ref: "user:<name>" | "agent:<name>" | "device:<id>"',
-  },
-  description: { type: 'string', description: 'what this key is for (shown in list)' },
-  scopes: {
-    type: 'array',
-    description: 'permission grants; deny wins over allow, no match = denied',
-    items: {
-      type: 'object',
-      properties: {
-        pattern: {
-          type: 'string',
-          description: 'tree path glob, e.g. "**" (everything) or "docs/**"',
-        },
-        actions: {
-          type: 'array',
-          items: { type: 'string', enum: ['read', 'write', 'call', 'register', 'admin'] },
-        },
-        effect: { type: 'string', enum: ['allow', 'deny'], description: 'default "allow"' },
-      },
-      required: ['pattern', 'actions'],
-    },
-  },
-  registerPaths: {
-    type: 'array',
-    items: { type: 'string' },
-    description: 'path prefixes this key may self-register nodes under (via ~register)',
-  },
-  expiresAt: {
-    type: 'string',
-    description: 'expiry, ISO 8601 timestamp with timezone; omit = never',
-  },
-} as const
+interface SkModuleDeps {
+  now: () => string
+  store: SKRegistryStore
+}
 
-function skCmds(nodePath: TreePath): CmdSpec[] {
-  const path = cmdPath(nodePath)
-  const cmds: CmdSpec[] = [
+const actionSchema = z.enum(['read', 'write', 'call', 'register', 'admin'])
+const scopeSchema = z.strictObject({
+  pattern: z.string().describe('tree path glob, e.g. "**" (everything) or "docs/**"'),
+  actions: z.array(actionSchema),
+  effect: z.enum(['allow', 'deny']).optional().describe('default "allow"'),
+})
+
+const ownerSchema = z.string().min(1).describe(
+  'owner ref: "user:<name>" | "agent:<name>" | "device:<id>"',
+)
+const descriptionSchema = z.string().optional().describe('what this key is for (shown in list)')
+const scopesSchema = z.array(scopeSchema).describe(
+  'permission grants; deny wins over allow, no match = denied',
+)
+const registerPathsSchema = z.array(z.string()).optional().describe(
+  'path prefixes this key may self-register nodes under (via ~register)',
+)
+const expiresAtSchema = z.string().optional().describe(
+  'expiry, ISO 8601 timestamp with timezone; omit = never',
+)
+
+const writeSchema = z.strictObject({
+  owner: ownerSchema,
+  description: descriptionSchema,
+  scopes: scopesSchema,
+  registerPaths: registerPathsSchema,
+  expiresAt: expiresAtSchema,
+})
+
+const patchSchema = z.strictObject({
+  owner: ownerSchema.optional(),
+  description: descriptionSchema,
+  scopes: scopesSchema.optional(),
+  registerPaths: registerPathsSchema,
+  expiresAt: expiresAtSchema,
+  disabled: z.boolean().optional().describe('true = key rejected until re-enabled'),
+}).describe('fields to change; same shape as write (all optional) plus disabled')
+
+function toSecretKeyInput(input: z.infer<typeof writeSchema>): SecretKeyInput {
+  return {
+    owner: input.owner,
+    scopes: input.scopes as Scope[],
+    ...(input.description !== undefined ? { description: input.description } : {}),
+    ...(input.registerPaths !== undefined ? { registerPaths: input.registerPaths } : {}),
+    ...(input.expiresAt !== undefined ? { expiresAt: normalizeExpiresAt(input.expiresAt) } : {}),
+  }
+}
+
+function toUpdatePatch(input: z.infer<typeof patchSchema>): SKUpdatePatch {
+  return {
+    ...(input.owner !== undefined ? { owner: input.owner } : {}),
+    ...(input.description !== undefined ? { description: input.description } : {}),
+    ...(input.scopes !== undefined ? { scopes: input.scopes as Scope[] } : {}),
+    ...(input.registerPaths !== undefined ? { registerPaths: input.registerPaths } : {}),
+    ...(input.expiresAt !== undefined ? { expiresAt: normalizeExpiresAt(input.expiresAt) } : {}),
+    ...(input.disabled !== undefined ? { disabled: input.disabled } : {}),
+  }
+}
+
+const COMMANDS = new BuiltinCommandRegistry<SkModuleDeps>('sk', DESCRIPTION)
+  .register(
+    'list',
     {
-      name: 'list',
-      method: 'POST',
-      path,
       h: 'list issued keys (id, owner, scopes; the secret itself is never returned)',
-      inputSchema: { type: 'object', properties: { opts: LIST_OPTS_SCHEMA } },
+      inputSchema: z.strictObject({ opts: LIST_OPTS_ZOD_SCHEMA.optional() }),
       returns: 'Page<SecretKey without hash>',
       scope: 'admin',
     },
+    ({ opts }, { deps }) => deps.store.list(opts),
+  )
+  .register(
+    'get',
     {
-      name: 'get',
-      method: 'POST',
-      path,
       h: 'fetch one key by id',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          id: { type: 'string', description: 'key id (from list or the issue response)' },
-        },
-        required: ['id'],
-      },
+      inputSchema: z.strictObject({
+        id: z.string().min(1).describe('key id (from list or the issue response)'),
+      }),
       returns: 'SecretKey without hash',
       scope: 'admin',
     },
+    ({ id }, { deps }) => deps.store.get(id),
+  )
+  .register(
+    'write',
     {
-      name: 'write',
-      method: 'POST',
-      path,
       h: 'issue a new key — the response carries the plaintext secret exactly once, store it immediately',
-      inputSchema: {
-        type: 'object',
-        properties: SK_FIELD_SCHEMAS,
-        required: ['owner', 'scopes'],
-      },
+      inputSchema: writeSchema,
       returns: '{ key: SecretKey without hash, secret } — secret shown once',
       scope: 'admin',
     },
+    (input, { deps }) => deps.store.write(toSecretKeyInput(input), deps.now()),
+  )
+  .register(
+    'update',
     {
-      name: 'update',
-      method: 'POST',
-      path,
       h: 'patch fields of an issued key (scopes, expiresAt, disabled, …); takes effect immediately',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          id: { type: 'string', description: 'key id' },
-          patch: {
-            type: 'object',
-            description: 'fields to change; same shape as write (all optional) plus disabled',
-            properties: {
-              ...SK_FIELD_SCHEMAS,
-              disabled: { type: 'boolean', description: 'true = key rejected until re-enabled' },
-            },
-          },
-        },
-        required: ['id', 'patch'],
-      },
+      inputSchema: z.strictObject({
+        id: z.string().min(1).describe('key id'),
+        patch: patchSchema,
+      }),
       returns: 'SecretKey without hash',
       scope: 'admin',
     },
+    ({ id, patch }, { deps }) => deps.store.update(id, toUpdatePatch(patch)),
+  )
+  .register(
+    'delete',
     {
-      name: 'delete',
-      method: 'POST',
-      path,
       h: 'revoke a key permanently; takes effect immediately',
-      inputSchema: {
-        type: 'object',
-        properties: { id: { type: 'string', description: 'key id' } },
-        required: ['id'],
-      },
+      inputSchema: z.strictObject({ id: z.string().min(1).describe('key id') }),
       returns: 'void',
       scope: 'admin',
     },
-  ]
-  return withCommandPaths(nodePath, cmds)
-}
-
-/** args 整体即 SecretKeyInput;校验 owner/scopes,透传可选字段。 */
-function asSecretKeyInput(args: Record<string, unknown>): SecretKeyInput {
-  const owner = requireString(args, 'owner')
-  if (!Array.isArray(args.scopes)) {
-    throw new TBError('invalid_argument', 'field \'scopes\' must be an array')
-  }
-  const input: SecretKeyInput = { owner, scopes: args.scopes as Scope[] }
-  if (typeof args.description === 'string') input.description = args.description
-  if (Array.isArray(args.registerPaths)) input.registerPaths = args.registerPaths as TreePath[]
-  if ('expiresAt' in args) input.expiresAt = normalizeExpiresAt(args.expiresAt)
-  return input
-}
-
-function asSkUpdatePatch(args: Record<string, unknown>): SKUpdatePatch {
-  const patch = { ...args } as SKUpdatePatch
-  if ('expiresAt' in args) patch.expiresAt = normalizeExpiresAt(args.expiresAt)
-  return patch
-}
+    async ({ id }, { deps }) => {
+      await deps.store.delete(id)
+      return VOID_ACK
+    },
+  )
 
 export function createSkModule(store: SKRegistryStore, now: () => string): BuiltinModule {
-  return {
-    module: 'sk',
-    description: DESCRIPTION,
-    help(nodePath: TreePath): HelpModel {
-      return {
-        node: { path: nodePath, kind: 'builtin', description: DESCRIPTION },
-        cmds: skCmds(nodePath),
-      }
-    },
-    async dispatch(cmd: string, args: Record<string, unknown>): Promise<unknown> {
-      switch (cmd) {
-        case 'list':
-          return store.list(optListOptions(args))
-        case 'get':
-          return store.get(requireString(args, 'id'))
-        case 'write':
-          return store.write(asSecretKeyInput(args), now())
-        case 'update':
-          return store.update(
-            requireString(args, 'id'),
-            asSkUpdatePatch(requireObject(args, 'patch')),
-          )
-        case 'delete':
-          await store.delete(requireString(args, 'id'))
-          return VOID_ACK
-        default:
-          throw new TBError('invalid_argument', `unknown cmd '${cmd}' on system/sk`)
-      }
-    },
-  }
+  return COMMANDS.module({ store, now })
 }

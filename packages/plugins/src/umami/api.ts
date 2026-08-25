@@ -35,12 +35,14 @@ import type {
   listEventsInput,
   listWebsitesInput,
 } from './schema'
+import { asJsonObject as asRecord, trimmedText as optionalText } from '../_runtime/jsonValue'
 import { type ProviderContext, requireApiKey } from '../_runtime/plugin'
+import { createProviderHttpClient } from '../_runtime/providerHttp'
 import { upstreamError } from '../_runtime/upstreamError'
-import { guardedFetch } from '../_runtime/guardedFetch'
 
 const SERVICE = 'umami'
 const API_BASE = 'https://api.umami.is'
+const http = createProviderHttpClient({ baseUrl: `${API_BASE}/`, service: SERVICE })
 
 type Json = Record<string, unknown>
 type Query = Record<string, string | undefined>
@@ -62,19 +64,6 @@ interface DateRangeFilters {
   url?: string
 }
 
-function asRecord(value: unknown): Json | undefined {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-    ? (value as Json)
-    : undefined
-}
-
-/** 上游 `optionalString` 的语义:先 trim,空则视为缺失(于是空过滤器不会发出去)。 */
-function optionalText(value: unknown): string | undefined {
-  if (typeof value !== 'string') return undefined
-  const trimmed = value.trim()
-  return trimmed === '' ? undefined : trimmed
-}
-
 /**
  * 必填字符串入参。schema 上是 `min(1)`,拦得住空串**拦不住纯空白** —— 而纯空白的
  * websiteId 会拼出 `/api/websites/%20`,timezone 则让上游按 UTC 静默算错一批数字。
@@ -83,17 +72,6 @@ function requiredText(value: unknown, field: string): string {
   const text = optionalText(value)
   if (text === undefined) throw new TBError('invalid_argument', `${field} 不能为空`)
   return text
-}
-
-/** 空体回 null,非 JSON 回原文 —— Umami 的网关错误页有时是纯文本。 */
-async function readPayload(response: Response): Promise<unknown> {
-  const text = await response.text().catch(() => '')
-  if (text.trim() === '') return null
-  try {
-    return JSON.parse(text) as unknown
-  } catch {
-    return text
-  }
 }
 
 /** 错误消息藏在 `error`(字符串或对象)与 `message` 三处之一,纯文本体则整段拿来用。 */
@@ -108,37 +86,25 @@ function errorMessage(payload: unknown): string | undefined {
 
 async function request(ctx: ProviderContext, path: string, query: Query = {}): Promise<unknown> {
   const apiKey = requireApiKey(ctx, SERVICE)
-  const url = new URL(`${API_BASE}${path}`)
-  for (const [key, value] of Object.entries(query)) {
-    if (value !== undefined) url.searchParams.set(key, value)
-  }
-
-  let response: Response
-  let payload: unknown
-  try {
-    response = await guardedFetch(url.toString(), {
-      method: 'GET',
-      headers: {
-        accept: 'application/json',
-        authorization: `Bearer ${apiKey}`,
-      },
-    })
-    payload = await readPayload(response)
-  } catch (error) {
-    // 传输层失败必须就地归一:漏出去的裸 Error 会被 plugin-sdk 抹成 "internal plugin error"
-    // 500,把"上游不通/出网被拦"说成插件自身故障,还丢掉唯一有诊断价值的那句消息。
-    if (error instanceof TBError) throw error
-    throw upstreamError(502, error instanceof Error ? `umami 请求失败: ${error.message}` : 'umami 请求失败')
-  }
-
-  if (!response.ok) {
-    throw upstreamError(
-      response.status,
-      errorMessage(payload) ?? (response.statusText || `umami 返回 HTTP ${response.status}`),
-    )
-  }
-  if (typeof payload === 'string') throw upstreamError(502, 'umami 返回了非 JSON 响应')
-  return payload
+  const response = await http.request({
+    path,
+    query: Object.entries(query),
+    headers: {
+      accept: 'application/json',
+      authorization: `Bearer ${apiKey}`,
+    },
+    invalidJson: 'text',
+    mapError: ({ data, status, statusText }) => upstreamError(
+      status,
+      errorMessage(data) ?? (statusText || `umami 返回 HTTP ${status}`),
+    ),
+    mapTransportError: ({ message }) => upstreamError(
+      502,
+      message === undefined ? 'umami 请求失败' : `umami 请求失败: ${message}`,
+    ),
+  })
+  if (response.bodyKind === 'invalid-json') throw upstreamError(502, 'umami 返回了非 JSON 响应')
+  return response.bodyKind === 'empty' ? null : response.data
 }
 
 /** 响应里契约要求是对象的位置;不是就是上游破了契约,不是调用方的错。 */

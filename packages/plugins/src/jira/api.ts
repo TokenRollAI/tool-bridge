@@ -43,13 +43,22 @@ import type {
   listProjectsInput,
   searchIssuesInput,
 } from './schema'
+import {
+  booleanValue as boolean,
+  compactDefined as compact,
+  integerValue as integer,
+  asJsonObject as record,
+  trimmedText as text,
+} from '../_runtime/jsonValue'
+import { createProviderHttpClient, type ResponseBodyKind } from '../_runtime/providerHttp'
 import { type ProviderContext, requireCredential } from '../_runtime/plugin'
-import { assertPublicHttpUrl, guardedFetch } from '../_runtime/guardedFetch'
+import { assertPublicHttpUrl } from '../_runtime/guardedFetch'
 import { upstreamError } from '../_runtime/upstreamError'
 
 const SERVICE = 'jira'
 /** 上游显式补的分页默认值。 */
 const DEFAULT_LIMIT = 50
+const http = createProviderHttpClient({ service: SERVICE })
 
 /** 每个 issue 至少要回的字段,叠加调用方的 includeFields。 */
 const DEFAULT_ISSUE_FIELD_IDS = [
@@ -68,31 +77,6 @@ const DEFAULT_ISSUE_FIELD_IDS = [
 ]
 
 type Json = Record<string, unknown>
-
-function text(value: unknown): string | undefined {
-  if (typeof value !== 'string') return undefined
-  const trimmed = value.trim()
-  return trimmed === '' ? undefined : trimmed
-}
-
-function record(value: unknown): Json | undefined {
-  return typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Json) : undefined
-}
-
-function integer(value: unknown): number | undefined {
-  return typeof value === 'number' && Number.isInteger(value) ? value : undefined
-}
-
-function boolean(value: unknown): boolean | undefined {
-  return typeof value === 'boolean' ? value : undefined
-}
-
-/** 丢掉值为 undefined 的键(上游 `compactObject`);`null` 与 `[]` 要留住。 */
-function compact<T>(input: Record<string, T | undefined>): Record<string, T> {
-  return Object.fromEntries(
-    Object.entries(input).filter(([, value]) => value !== undefined),
-  ) as Record<string, T>
-}
 
 function stringArray(value: unknown): string[] {
   if (!Array.isArray(value)) return []
@@ -166,7 +150,7 @@ function buildUrl(base: string, pathOrUrl: string, query?: Record<string, string
     : new URL(pathOrUrl.replace(/^\/+/, ''), `${base}/`)
   const baseUrl = new URL(base)
   if (target.origin !== baseUrl.origin || !target.pathname.startsWith(`${baseUrl.pathname}/`)) {
-    throw new TBError('invalid_argument', `jira requests must target ${base}`)
+    throw new TBError('invalid_argument', 'jira requests must target the configured API base')
   }
   for (const [key, value] of Object.entries(query ?? {})) {
     // 上游用的是 falsy 判断,空串也跳过 —— 照搬(空 expand 发上去 Jira 会 400)。
@@ -197,15 +181,10 @@ function errorMessage(payload: unknown): string {
   return text(body.message) ?? 'jira request failed'
 }
 
-/** 空 body 当空对象;非 JSON 的错误页塞进 message,让上面的归一能拿到文案。 */
-async function readPayload(response: Response): Promise<unknown> {
-  const raw = await response.text().catch(() => '')
-  if (raw === '') return {}
-  try {
-    return JSON.parse(raw) as unknown
-  } catch {
-    return { message: raw }
-  }
+/** 空 body 当空对象;非 JSON 的错误页塞进 message,保持迁移前 wire。 */
+function responsePayload(data: unknown, bodyKind: ResponseBodyKind): unknown {
+  if (bodyKind === 'empty') return {}
+  return bodyKind === 'invalid-json' ? { message: data } : data
 }
 
 interface RequestOptions {
@@ -217,21 +196,24 @@ interface RequestOptions {
 
 /** 返回上游 JSON 的原值(可能是数组,如 DC 的 `/project`)。 */
 async function requestValue(ctx: ProviderContext, options: RequestOptions): Promise<unknown> {
-  const headers: Record<string, string> = {
-    accept: 'application/json',
-    authorization: `Bearer ${requireCredential(ctx, SERVICE, 'personalAccessToken')}`,
-  }
-  if (options.body !== undefined) headers['content-type'] = 'application/json'
-
-  const response = await guardedFetch(buildUrl(apiBaseUrl(ctx), options.path, options.query), {
+  const baseUrl = apiBaseUrl(ctx)
+  const result = await http.request({
+    baseUrl,
+    // create_issue 会跟随 Jira 返回的 self；buildUrl 先锁定 origin 与 REST API path 前缀。
+    path: buildUrl(baseUrl, options.path, options.query),
     method: options.method ?? (options.body === undefined ? 'GET' : 'POST'),
-    headers,
-    ...(options.body === undefined ? {} : { body: JSON.stringify(options.body) }),
+    headers: {
+      accept: 'application/json',
+      authorization: `Bearer ${requireCredential(ctx, SERVICE, 'personalAccessToken')}`,
+    },
+    ...(options.body === undefined ? {} : { json: options.body }),
+    invalidJson: 'text',
+    mapError: ({ bodyKind, data, status }) => upstreamError(
+      status,
+      errorMessage(responsePayload(data, bodyKind)),
+    ),
   })
-
-  const payload = await readPayload(response)
-  if (!response.ok) throw upstreamError(response.status, errorMessage(payload))
-  return payload
+  return responsePayload(result.data, result.bodyKind)
 }
 
 /** 同上,但契约说好回对象。 */

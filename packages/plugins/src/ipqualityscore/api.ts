@@ -21,11 +21,12 @@ import type {
   validatePhoneInput,
 } from './schema'
 import { type ProviderContext, requireApiKey } from '../_runtime/plugin'
+import { createProviderHttpClient } from '../_runtime/providerHttp'
 import { upstreamError } from '../_runtime/upstreamError'
-import { guardedFetch } from '../_runtime/guardedFetch'
 
 const SERVICE = 'ipqualityscore'
 const API_BASE = 'https://www.ipqualityscore.com'
+const http = createProviderHttpClient({ baseUrl: API_BASE, service: SERVICE })
 
 /** 上游用 `node:net` 的 isIP 卡这一层;这里换成同语义的 Zod 校验器,不引运行时依赖。 */
 const IP_LITERAL = z.union([z.ipv4(), z.ipv6()])
@@ -66,22 +67,22 @@ function messageOf(payload: unknown): string | undefined {
  * 三段顺序不能调:额度耗尽的文案里常一并提到 API key(「your API key has insufficient
  * credits」),先判凭证会把限流误报成 permission_denied,调用方于是不再重试。
  */
-function ipqsError(response: Response, payload: unknown): TBError {
+function ipqsError(status: number, statusText: string, payload: unknown): TBError {
   const message = messageOf(payload)
-    ?? optionalText(response.statusText)
-    ?? `IPQualityScore request failed with ${response.status}`
+    ?? optionalText(statusText)
+    ?? `IPQualityScore request failed with ${status}`
   const lower = message.toLowerCase()
 
-  if (response.status === 429 || response.status === 402 || lower.includes('insufficient credits')) {
+  if (status === 429 || status === 402 || lower.includes('insufficient credits')) {
     return upstreamError(429, message)
   }
   // 上游把 403 和一切凭证类文案都收敛成 401(对调用方而言都是"这把 key 不能用")。
   if (lower.includes('invalid api key') || lower.includes('api key')
-    || response.status === 401 || response.status === 403) {
+    || status === 401 || status === 403) {
     return upstreamError(401, message)
   }
   if (
-    response.status === 400
+    status === 400
     || lower.includes('invalid ip')
     || lower.includes('invalid email')
     || lower.includes('invalid phone')
@@ -90,18 +91,7 @@ function ipqsError(response: Response, payload: unknown): TBError {
     return upstreamError(400, message)
   }
   // 状态码 2xx/3xx 却走到这里 = 上游自称失败但没给可归类的理由,当作上游故障。
-  return upstreamError(response.status >= 400 ? response.status : 502, message)
-}
-
-/** 尽力解析响应体:IPQS 在边缘错误上会回空体或纯文本。 */
-async function readPayload(response: Response): Promise<unknown> {
-  const body = await response.text()
-  if (body === '') return null
-  try {
-    return JSON.parse(body) as unknown
-  } catch {
-    return body
-  }
+  return upstreamError(status >= 400 ? status : 502, message)
 }
 
 async function request(
@@ -110,34 +100,26 @@ async function request(
   value: string,
   query: Query = [],
 ): Promise<Json> {
-  const path = `/api/json/${family}/${encodeURIComponent(requireApiKey(ctx, SERVICE))}/${encodeURIComponent(value)}`
-  const url = new URL(path, API_BASE)
-  for (const [key, queryValue] of query) {
-    if (queryValue !== undefined) url.searchParams.append(key, queryValue)
-  }
-
-  let response: Response
-  let payload: unknown
-  try {
-    response = await guardedFetch(url.toString(), {
-      method: 'GET',
-      headers: { accept: 'application/json' },
-    })
-    payload = await readPayload(response)
-  } catch (error) {
-    // 上游主机是写死的常量,这里只可能是网络/传输问题 —— 重试有意义,不该归成 internal。
-    throw new TBError(
+  const apiKey = requireApiKey(ctx, SERVICE)
+  const result = await http.request({
+    path: `/api/json/${family}/${encodeURIComponent(apiKey)}/${encodeURIComponent(value)}`,
+    method: 'GET',
+    query,
+    headers: { accept: 'application/json' },
+    invalidJson: 'text',
+    sensitiveValues: [apiKey],
+    mapError: ({ data, status, statusText }) => ipqsError(status, statusText, data),
+    mapTransportError: ({ message }) => new TBError(
       'unavailable',
-      error instanceof Error ? `IPQualityScore 请求失败: ${error.message}` : 'IPQualityScore 请求失败',
+      message === undefined ? 'IPQualityScore 请求失败' : `IPQualityScore 请求失败: ${message}`,
       { retryable: true },
-    )
-  }
-
-  if (!response.ok) throw ipqsError(response, payload)
+    ),
+  })
+  const payload = result.bodyKind === 'empty' ? null : result.data
   if (payload === null || typeof payload !== 'object' || Array.isArray(payload)) {
     throw new TBError('unavailable', `IPQualityScore 对 ${family} 的响应不是 JSON 对象`, { retryable: true })
   }
-  if ((payload as Json).success === false) throw ipqsError(response, payload)
+  if ((payload as Json).success === false) throw ipqsError(result.status, result.statusText, payload)
   return payload as Json
 }
 

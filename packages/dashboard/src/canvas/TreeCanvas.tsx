@@ -12,12 +12,12 @@ import {
 } from '@xyflow/react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { CircleAlert, Maximize2, RefreshCw } from 'lucide-react'
+import { useTheme } from 'next-themes'
 import dagre from '@dagrejs/dagre'
 import '@xyflow/react/dist/style.css'
 import { useSession } from '@/lib/session-context'
 import { Button } from '@/components/ui/button'
 import { useTree } from '@/lib/queries'
-import { useTheme } from '@/lib/theme'
 import { cn } from '@/lib/utils'
 import {
   buildGraph,
@@ -79,7 +79,8 @@ function CanvasInner({
   onOpenCommands,
 }: TreeCanvasProps) {
   const { active } = useSession()
-  const [theme] = useTheme()
+  const { resolvedTheme } = useTheme()
+  const colorMode = resolvedTheme === 'light' ? 'light' : 'dark'
   // 展开集合的种子直接取共享的根查询(depth=1),不必额外跑一遍 useCanvasTree。
   const rootSeed = useTree('', 1)
   const { expanded, toggle } = useExpandedPaths(rootSeed.data?.children, active?.id ?? '')
@@ -277,7 +278,7 @@ function CanvasInner({
   return (
     <ReactFlow
       className="tb-canvas"
-      colorMode={theme}
+      colorMode={colorMode}
       edges={edges}
       fitView
       maxZoom={1.6}

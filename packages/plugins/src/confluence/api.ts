@@ -31,43 +31,30 @@ import type {
   searchContentInput,
   updatePageInput,
 } from './schema'
+import {
+  booleanValue as boolean,
+  compactDefined as compact,
+  integerValue as integer,
+  asJsonObject as record,
+  trimmedText as text,
+} from '../_runtime/jsonValue'
+import {
+  createProviderHttpClient,
+  type ProviderHttpErrorContext,
+  type ProviderQuery,
+} from '../_runtime/providerHttp'
 import { type ProviderContext, requireCredential } from '../_runtime/plugin'
 import { upstreamError } from '../_runtime/upstreamError'
-import { guardedFetch } from '../_runtime/guardedFetch'
 
 const SERVICE = 'confluence'
 /** 照搬上游的 30s 单请求上限。 */
 const REQUEST_TIMEOUT_MS = 30_000
 /** 上游显式补的分页默认值,不是 Confluence 的服务端默认。 */
 const DEFAULT_LIMIT = 25
+const http = createProviderHttpClient({ service: SERVICE })
 
 type Json = Record<string, unknown>
 type QueryValue = number | string | undefined
-
-function text(value: unknown): string | undefined {
-  if (typeof value !== 'string') return undefined
-  const trimmed = value.trim()
-  return trimmed === '' ? undefined : trimmed
-}
-
-function record(value: unknown): Json | undefined {
-  return typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Json) : undefined
-}
-
-function integer(value: unknown): number | undefined {
-  return typeof value === 'number' && Number.isInteger(value) ? value : undefined
-}
-
-function boolean(value: unknown): boolean | undefined {
-  return typeof value === 'boolean' ? value : undefined
-}
-
-/** 丢掉值为 undefined 的键(上游 `compactObject`);`null` 要留住。 */
-function compact<T>(input: Record<string, T | undefined>): Record<string, T> {
-  return Object.fromEntries(
-    Object.entries(input).filter(([, value]) => value !== undefined),
-  ) as Record<string, T>
-}
 
 /** 契约说好是对象;不是就是上游出问题,不是调用方的错。 */
 function requireRecord(value: unknown, message: string): Json {
@@ -110,7 +97,7 @@ function basicAuthHeader(ctx: ProviderContext): string {
 }
 
 /** Confluence 的错误文案:纯文本 body 直接用,JSON 则依次看 message / errorMessage / error / errors[].message。 */
-function errorMessage(payload: unknown, response: Response): string {
+function errorMessage(payload: unknown, context: ProviderHttpErrorContext): string {
   if (typeof payload === 'string') {
     const trimmed = payload.trim()
     if (trimmed !== '') return trimmed
@@ -120,7 +107,7 @@ function errorMessage(payload: unknown, response: Response): string {
     ? body.errors.map(item => text(record(item)?.message)).find(item => item !== undefined)
     : undefined
   return text(body?.message) ?? text(body?.errorMessage) ?? text(body?.error) ?? fromList
-    ?? text(response.statusText) ?? 'Confluence request failed'
+    ?? text(context.statusText) ?? 'Confluence request failed'
 }
 
 interface RequestOptions {
@@ -131,50 +118,22 @@ interface RequestOptions {
 }
 
 async function request(ctx: ProviderContext, options: RequestOptions): Promise<unknown> {
-  const headers: Record<string, string> = {
-    accept: 'application/json',
-    authorization: basicAuthHeader(ctx),
-  }
-  if (options.body !== undefined) headers['content-type'] = 'application/json'
-
-  const url = new URL(options.path.replace(/^\//, ''), `${siteBaseUrl(ctx)}/`)
-  for (const [key, value] of Object.entries(options.query ?? {})) {
-    if (value !== undefined) url.searchParams.set(key, String(value))
-  }
-
-  let response: Response
-  try {
-    response = await guardedFetch(url.toString(), {
-      method: options.method,
-      headers,
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-      ...(options.body === undefined ? {} : { body: JSON.stringify(options.body) }),
-    })
-  } catch (error) {
-    // guardedFetch 拦下的出站(EgressBlockedError)已经是 TBError,原样冒上去。
-    if (error instanceof TBError) throw error
-    if (error instanceof Error && error.name === 'TimeoutError') {
-      throw upstreamError(504, `Confluence request timed out after ${REQUEST_TIMEOUT_MS / 1000} seconds`)
-    }
-    throw upstreamError(
-      502,
-      error instanceof Error ? `Confluence request failed: ${error.message}` : 'Confluence request failed',
-    )
-  }
-
-  const raw = await response.text().catch(() => '')
-  let payload: unknown = null
-  if (raw.trim() !== '') {
-    try {
-      payload = JSON.parse(raw) as unknown
-    } catch {
-      // 上游对 2xx 的非 JSON 也只是把原文透出去(它的出参整形随后会判形状),这里照搬。
-      payload = raw
-    }
-  }
-
-  if (!response.ok) throw upstreamError(response.status, errorMessage(payload, response))
-  return payload
+  const result = await http.request({
+    baseUrl: `${siteBaseUrl(ctx)}/`,
+    path: options.path,
+    method: options.method,
+    query: Object.entries(options.query ?? {}) satisfies ProviderQuery,
+    headers: { accept: 'application/json', authorization: basicAuthHeader(ctx) },
+    ...(options.body === undefined ? {} : { json: options.body }),
+    timeoutMs: REQUEST_TIMEOUT_MS,
+    invalidJson: 'text',
+    mapError: context => upstreamError(context.status, errorMessage(context.data, context)),
+    mapTransportError: ({ kind, message }) => kind === 'timeout'
+      ? upstreamError(504, `Confluence request timed out after ${REQUEST_TIMEOUT_MS / 1000} seconds`)
+      : upstreamError(502, message === undefined ? 'Confluence request failed' : `Confluence request failed: ${message}`),
+  })
+  // 旧实现把空正文读成 null；不要让薄层内部的 undefined 漂到公开输出。
+  return result.data === undefined ? null : result.data
 }
 
 /**

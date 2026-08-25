@@ -12,27 +12,22 @@
  */
 
 import type { z } from 'zod/v4'
-import { TBError } from '@tool-bridge/plugin-sdk'
 import type {
   getAstronomyInput,
   getTimezoneInput,
   lookupIpInput,
 } from './schema'
 import { type ProviderContext, requireApiKey } from '../_runtime/plugin'
+import { createProviderHttpClient } from '../_runtime/providerHttp'
+import { asJsonObject as toRecord } from '../_runtime/jsonValue'
 import { upstreamError } from '../_runtime/upstreamError'
-import { guardedFetch } from '../_runtime/guardedFetch'
 
 const SERVICE = 'ipgeolocation_io'
 const API_BASE = 'https://api.ipgeolocation.io/'
 const REQUEST_TIMEOUT_MS = 30_000
+const http = createProviderHttpClient({ baseUrl: API_BASE, service: SERVICE })
 
 type Json = Record<string, unknown>
-
-function toRecord(value: unknown): Json | undefined {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-    ? (value as Json)
-    : undefined
-}
 
 /** 字符串化取值:数字/布尔也接受(上游同样宽松),取不到就是 null。 */
 function nullableString(value: unknown): string | null {
@@ -64,52 +59,31 @@ function errorMessage(payload: unknown, status: number): string {
   return `IPGeolocation.io request failed with status ${status}`
 }
 
-async function readPayload(response: Response): Promise<unknown> {
-  const body = await response.text()
-  if (body.trim() === '') return null
-  try {
-    return JSON.parse(body) as unknown
-  } catch {
-    throw upstreamError(502, 'IPGeolocation.io returned invalid JSON')
-  }
-}
-
 async function request(
   ctx: ProviderContext,
   path: string,
   params: Record<string, string | undefined>,
 ): Promise<Json> {
-  const url = new URL(path, API_BASE)
-  url.searchParams.set('apiKey', requireApiKey(ctx, SERVICE))
-  for (const [key, value] of Object.entries(params)) {
-    if (value !== undefined) url.searchParams.set(key, value)
-  }
-
-  let response: Response
-  try {
-    response = await guardedFetch(url.toString(), {
-      method: 'GET',
-      headers: { accept: 'application/json' },
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-    })
-  } catch (error) {
-    if (error instanceof TBError) throw error
-    if (error instanceof Error && error.name === 'TimeoutError') {
-      throw upstreamError(504, 'IPGeolocation.io request timed out')
-    }
-    throw error
-  }
-
-  const payload = await readPayload(response)
-  if (!response.ok) {
-    // 上游把所有 4xx(429 与凭证类除外)一律压成 400:这些端点的 404/422 都是
-    // "参数不对",没有"资源不存在"的语义。保留。
-    const status = response.status
-    const normalized = status === 429 || status === 401 || status === 403
-      ? status
-      : (status >= 400 && status < 500 ? 400 : (status || 500))
-    throw upstreamError(normalized, errorMessage(payload, status))
-  }
+  const { data: payload } = await http.request({
+    path,
+    method: 'GET',
+    query: [['apiKey', requireApiKey(ctx, SERVICE)], ...Object.entries(params)],
+    headers: { accept: 'application/json' },
+    timeoutMs: REQUEST_TIMEOUT_MS,
+    invalidJsonMessage: 'IPGeolocation.io returned invalid JSON',
+    mapError: ({ bodyKind, data, status }) => {
+      if (bodyKind === 'invalid-json') return upstreamError(502, 'IPGeolocation.io returned invalid JSON')
+      // 上游把所有 4xx(429 与凭证类除外)一律压成 400:这些端点的 404/422 都是
+      // "参数不对",没有"资源不存在"的语义。保留。
+      const normalized = status === 429 || status === 401 || status === 403
+        ? status
+        : (status >= 400 && status < 500 ? 400 : (status || 500))
+      return upstreamError(normalized, errorMessage(data, status))
+    },
+    mapTransportError: ({ kind }) => kind === 'timeout'
+      ? upstreamError(504, 'IPGeolocation.io request timed out')
+      : upstreamError(502, 'IPGeolocation.io request failed'),
+  })
 
   const record = toRecord(payload)
   if (record === undefined) throw upstreamError(502, 'IPGeolocation.io returned an invalid payload')

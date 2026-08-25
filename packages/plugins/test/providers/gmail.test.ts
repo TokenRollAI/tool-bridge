@@ -1,12 +1,9 @@
 import {
   base64urlDecode,
   base64urlEncode,
-  type CallContext,
-  encodeCallContext,
-  HEADER_TB_CONTEXT,
-  HEADER_TB_UPSTREAM_AUTH,
 } from '@tool-bridge/core'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+import { createProviderHarness } from '../support/providerHarness'
 import { createGmailPlugin } from '../../src/gmail/index'
 import { gmailActions } from '../../src/gmail/schema'
 
@@ -17,40 +14,21 @@ import { gmailActions } from '../../src/gmail/schema'
  * filters 列表那个单数字段名、以及 403 的两种含义。
  */
 
-const PLUGIN_TOKEN = 'tbp_test'
-const ENV = { PLUGIN_TOKEN }
 /** 平台托管 OAuth2 换来的 access token —— 插件侧与一个 API key 没有区别。 */
 const ACCESS_TOKEN = 'ya29.a0Ahtestdeadbeef'
 const plugin = createGmailPlugin()
 
-const CALLER: CallContext = {
-  keyId: 'k1',
-  owner: 'agent:tester',
-  scopes: [],
-  traceId: 't1',
+const {
+  call,
+  envelope,
+  sent,
+  env: ENV,
+  stubFetch,
+} = createProviderHarness({
   mountPath: 'mail/gmail',
-  exportId: 'actions',
-}
-
-function envelope(body: unknown, opts: { auth?: string | null } = {}): Promise<Response> {
-  const headers: Record<string, string> = {
-    'authorization': `Bearer ${PLUGIN_TOKEN}`,
-    'content-type': 'application/json',
-    [HEADER_TB_CONTEXT]: encodeCallContext(CALLER),
-  }
-  const auth = opts.auth === undefined ? ACCESS_TOKEN : opts.auth
-  if (auth !== null) {
-    headers[HEADER_TB_UPSTREAM_AUTH] = base64urlEncode(new TextEncoder().encode(auth))
-  }
-  return Promise.resolve(plugin.fetch(
-    new Request('https://plugin.test/', { method: 'POST', headers, body: JSON.stringify(body) }),
-    ENV as never,
-  ))
-}
-
-function call(name: string, args: unknown, opts?: { auth?: string | null }): Promise<Response> {
-  return envelope({ tool: 'Call', arguments: { name, args } }, opts)
-}
+  plugin,
+  upstreamAuth: ACCESS_TOKEN,
+})
 
 /**
  * 按调用顺序回一串响应(最后一个会被复用)。Gmail 的好几个 action 是"列表 + 逐个详情",
@@ -58,7 +36,7 @@ function call(name: string, args: unknown, opts?: { auth?: string | null }): Pro
  */
 function mockGmail(...responses: Array<{ body?: unknown, status?: number }>): ReturnType<typeof vi.fn> {
   let index = 0
-  const fn = vi.fn(() => {
+  return stubFetch(() => {
     const next = responses[Math.min(index, responses.length - 1)] ?? {}
     index += 1
     const status = next.status ?? 200
@@ -66,12 +44,6 @@ function mockGmail(...responses: Array<{ body?: unknown, status?: number }>): Re
     const body = status === 204 || next.body === undefined ? null : JSON.stringify(next.body)
     return Promise.resolve(new Response(body, { status, headers: { 'content-type': 'application/json' } }))
   })
-  vi.stubGlobal('fetch', fn)
-  return fn
-}
-
-function sent(mock: ReturnType<typeof vi.fn>, index = 0): Request {
-  return (mock.mock.calls[index] as [Request])[0]
 }
 
 function url(mock: ReturnType<typeof vi.fn>, index = 0): URL {
@@ -124,10 +96,6 @@ function messageResource(overrides: Record<string, unknown> = {}): Record<string
     ...overrides,
   }
 }
-
-afterEach(() => {
-  vi.unstubAllGlobals()
-})
 
 describe('契约面', () => {
   it('List 出全部 46 个 action,且都带 Zod 派生的 schema', async () => {

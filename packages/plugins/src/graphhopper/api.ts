@@ -20,27 +20,24 @@ import type {
   computeMatrixInput,
   geocodeInput,
 } from './schema'
+import { createProviderHttpClient, type ProviderHttpErrorContext, type ProviderQuery } from '../_runtime/providerHttp'
 import { type ProviderContext, requireApiKey } from '../_runtime/plugin'
+import { asJsonObject as record } from '../_runtime/jsonValue'
 import { upstreamError } from '../_runtime/upstreamError'
-import { guardedFetch } from '../_runtime/guardedFetch'
 
 const SERVICE = 'graphhopper'
 const API_BASE = 'https://graphhopper.com'
 const API_PREFIX = '/api/1'
+const http = createProviderHttpClient({ baseUrl: `${API_BASE}${API_PREFIX}/`, service: SERVICE })
 
-type Json = Record<string, unknown>
 type Query = Record<string, boolean | number | readonly number[] | readonly string[] | string | undefined>
-
-function record(value: unknown): Json | undefined {
-  return typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Json) : undefined
-}
 
 function text(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim() !== '' ? value : undefined
 }
 
 /** GraphHopper 的错误文案分散在 message/error/details,还有 `hints[].message`。 */
-function errorMessage(payload: unknown, response: Response): string {
+function errorMessage(payload: unknown, context: Pick<ProviderHttpErrorContext, 'statusText'>): string {
   if (typeof payload === 'string' && payload.trim() !== '') return payload
   const body = record(payload)
   if (body !== undefined) {
@@ -53,46 +50,26 @@ function errorMessage(payload: unknown, response: Response): string {
       }
     }
   }
-  return text(response.statusText) ?? 'GraphHopper request failed'
+  return text(context.statusText) ?? 'GraphHopper request failed'
 }
 
 async function request(ctx: ProviderContext, path: string, query: Query): Promise<unknown> {
-  const url = new URL(`${API_PREFIX}${path}`, API_BASE)
-  for (const [key, value] of Object.entries(query)) {
-    if (value === undefined) continue
-    if (Array.isArray(value)) {
-      for (const item of value) url.searchParams.append(key, String(item))
-      continue
-    }
-    url.searchParams.set(key, String(value))
-  }
-  url.searchParams.set('key', requireApiKey(ctx, SERVICE))
-
-  let response: Response
-  let payload: unknown = null
-  try {
-    response = await guardedFetch(url.toString(), {
-      method: 'GET',
-      headers: { accept: 'application/json' },
-    })
-    const raw = await response.text()
-    if (raw.trim() !== '') {
-      try {
-        payload = JSON.parse(raw)
-      } catch {
-        // 错误体常是纯文本;留给消息提取,免得"非法 JSON"顶掉真实状态码。
-        payload = raw
-      }
-    }
-  } catch (error) {
-    const message = error instanceof Error
-      ? `GraphHopper request failed: ${error.message}`
-      : 'GraphHopper request failed'
-    throw upstreamError(502, message)
-  }
-
-  if (!response.ok) throw upstreamError(response.status, errorMessage(payload, response))
-  return payload
+  const result = await http.request({
+    path,
+    method: 'GET',
+    query: [
+      ...Object.entries(query),
+      ['key', requireApiKey(ctx, SERVICE)],
+    ] satisfies ProviderQuery,
+    headers: { accept: 'application/json' },
+    invalidJson: 'text',
+    mapError: context => upstreamError(context.status, errorMessage(context.data, context)),
+    mapTransportError: ({ message }) => upstreamError(
+      502,
+      message === undefined ? 'GraphHopper request failed' : `GraphHopper request failed: ${message}`,
+    ),
+  })
+  return result.bodyKind === 'empty' ? null : result.data
 }
 
 export async function calculateRoute(

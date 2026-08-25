@@ -6,12 +6,52 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { Input } from '@/components/ui/input'
+import { type SchemaField, SchemaFields } from '@/components/SchemaFields'
 import { Label } from '@/components/ui/label'
 import { type CredentialInputPlan,
   type CredentialMode,
   type ManagedCredentialFormState,
   SINGLE_FIELD_KEY } from './managedCredential'
+
+function credentialFieldModel(
+  plan: CredentialInputPlan,
+  fallbackAvailable: boolean,
+): SchemaField[] {
+  if (plan.kind === 'oauth') {
+    return [
+      { key: 'clientId', label: 'clientId', required: true, ui: { 'ui:classNames': 'font-mono text-sm' } },
+      { key: 'clientSecret', label: 'clientSecret', required: true, ui: { 'ui:classNames': 'font-mono text-sm', 'ui:widget': 'password' } },
+    ]
+  }
+  if (plan.kind === 'fields') {
+    return plan.fields.map(field => ({
+      key: field.key,
+      label: field.label === undefined ? field.key : `${field.key} — ${field.label}`,
+      required: field.required !== false,
+      description: field.description,
+      ui: {
+        'ui:classNames': 'font-mono text-sm',
+        ...(field.secret === false ? {} : { 'ui:widget': 'password' }),
+      },
+    }))
+  }
+  if (plan.kind === 'single') return [{
+    key: SINGLE_FIELD_KEY,
+    label: 'API key',
+    required: plan.authRequired && !fallbackAvailable,
+    ui: { 'ui:classNames': 'font-mono text-sm', 'ui:widget': 'password' },
+  }]
+  return []
+}
+
+function credentialValues(fields: SchemaField[], value: Record<string, unknown>): Record<string, string> {
+  const projected: Record<string, string> = {}
+  for (const field of fields) {
+    const item = value[field.key]
+    if (typeof item === 'string') projected[field.key] = item
+  }
+  return projected
+}
 
 /**
  * 内置集成共用的凭证输入面。它只讲服务商凭证，不暴露 SecretStore/authRef 的实现术语。
@@ -32,9 +72,6 @@ export function ManagedCredentialFields({
   secretNames: string[]
   state: ManagedCredentialFormState
 }) {
-  const setField = (key: string, value: string) =>
-    onChange({ ...state, credentials: { ...state.credentials, [key]: value } })
-
   if (plan.kind === 'none') {
     return (
       <p className="rounded-md border bg-muted/30 px-3 py-2.5 text-xs text-muted-foreground">
@@ -42,6 +79,8 @@ export function ManagedCredentialFields({
       </p>
     )
   }
+
+  const fields = credentialFieldModel(plan, fallbackAvailable)
 
   return (
     <div className="grid gap-3">
@@ -94,83 +133,39 @@ export function ManagedCredentialFields({
         </p>
       )}
 
-      {state.mode === 'inline' && plan.kind === 'oauth' && (
+      {state.mode === 'inline' && (
         <div className="grid gap-2">
-          <p className="flex items-center gap-1.5 text-xs font-medium">
-            <ShieldCheck className="size-3.5" />
-            平台托管 OAuth2
-          </p>
-          <div className="grid gap-1.5">
-            <Label className="text-xs" htmlFor={`${idPrefix}-client-id`}>clientId *</Label>
-            <Input
-              className="font-mono text-sm"
-              id={`${idPrefix}-client-id`}
-              onChange={event => setField('clientId', event.target.value)}
-              value={state.credentials.clientId ?? ''}
-            />
-          </div>
-          <div className="grid gap-1.5">
-            <Label className="text-xs" htmlFor={`${idPrefix}-client-secret`}>clientSecret *</Label>
-            <Input
-              className="font-mono text-sm"
-              id={`${idPrefix}-client-secret`}
-              onChange={event => setField('clientSecret', event.target.value)}
-              type="password"
-              value={state.credentials.clientSecret ?? ''}
-            />
-          </div>
-          <p className="text-[11px] text-muted-foreground">
-            到服务商后台注册应用后获得；挂载完成会继续打开授权页。
-          </p>
-        </div>
-      )}
-
-      {state.mode === 'inline' && plan.kind === 'fields' && (
-        <div className="grid gap-2">
-          <p className="flex items-center gap-1.5 text-xs font-medium">
-            <KeyRound className="size-3.5" />
-            需要
-            {plan.fields.length}
-            个服务商凭证字段
-          </p>
-          {plan.fields.map(field => (
-            <div className="grid gap-1.5" key={field.key}>
-              <Label className="text-xs" htmlFor={`${idPrefix}-${field.key}`}>
-                {field.key}
-                {field.required !== false && ' *'}
-                {field.label !== undefined && (
-                  <span className="ml-1.5 font-normal text-muted-foreground">{field.label}</span>
-                )}
-              </Label>
-              <Input
-                className="font-mono text-sm"
-                id={`${idPrefix}-${field.key}`}
-                onChange={event => setField(field.key, event.target.value)}
-                type={field.secret === false ? 'text' : 'password'}
-                value={state.credentials[field.key] ?? ''}
-              />
-              {field.description !== undefined && (
-                <p className="text-[11px] text-muted-foreground">{field.description}</p>
-              )}
-            </div>
-          ))}
-        </div>
-      )}
-
-      {state.mode === 'inline' && plan.kind === 'single' && (
-        <div className="grid gap-1.5">
-          <Label className="text-xs" htmlFor={`${idPrefix}-api-key`}>
-            API key
-            {plan.authRequired && !fallbackAvailable && ' *'}
-          </Label>
-          <Input
-            className="font-mono text-sm"
-            id={`${idPrefix}-api-key`}
-            onChange={event => setField(SINGLE_FIELD_KEY, event.target.value)}
-            type="password"
-            value={state.credentials[SINGLE_FIELD_KEY] ?? ''}
+          {plan.kind === 'oauth' && (
+            <p className="flex items-center gap-1.5 text-xs font-medium">
+              <ShieldCheck className="size-3.5" />
+              平台托管 OAuth2
+            </p>
+          )}
+          {plan.kind === 'fields' && (
+            <p className="flex items-center gap-1.5 text-xs font-medium">
+              <KeyRound className="size-3.5" />
+              需要
+              {plan.fields.length}
+              个服务商凭证字段
+            </p>
+          )}
+          <SchemaFields
+            fields={fields}
+            idPrefix={`${idPrefix}-${plan.kind}`}
+            onChange={value => onChange({
+              ...state,
+              credentials: credentialValues(fields, value),
+            })}
+            value={state.credentials}
           />
-          <p className="text-[11px] text-muted-foreground">填写后由平台自动加密保管和绑定。</p>
+          {plan.kind === 'oauth' && (
+            <p className="text-[11px] text-muted-foreground">
+              到服务商后台注册应用后获得；挂载完成会继续打开授权页。
+            </p>
+          )}
+          {plan.kind === 'single' && (
+            <p className="text-[11px] text-muted-foreground">填写后由平台自动加密保管和绑定。</p>
+          )}
         </div>
       )}
 

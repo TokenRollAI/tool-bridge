@@ -5,6 +5,7 @@ export {
   createReactNativeWebSocketFactory,
   DEVICE_HEARTBEAT_INTERVAL_MS,
   deviceWsUrl,
+  openPortableDeviceConnection,
 } from './connection'
 export type {
   ConnectDeviceOptions,
@@ -18,6 +19,7 @@ export type {
   DeviceNodeDefinition,
   DeviceWebSocketFactory,
   DeviceWebSocketFactoryInput,
+  OpenPortableDeviceConnectionOptions,
   PreparedDeviceCredential,
   ReactNativeWebSocketConstructor,
 } from './connection'

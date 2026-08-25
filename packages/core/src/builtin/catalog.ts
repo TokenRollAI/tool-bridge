@@ -10,12 +10,13 @@
  * 才能列),没有旁路。
  */
 
+import { z } from 'zod/v4'
 import type { PluginCredentialField, PluginExport, PluginMountConfigField } from '../plugin/contract'
 import type { BuiltinCatalog, BuiltinCatalogEntry } from '../plugin/catalog'
-import type { CmdSpec, HelpModel } from '../htbp/model'
 import type { BuiltinModule } from './types'
-import { cmdPath, LIST_OPTS_SCHEMA, requireString, withCommandPaths } from './util'
-import { LIST_LIMIT_MAX, type TreePath } from '../types'
+import { BuiltinCommandRegistry } from './commandRegistry'
+import { LIST_OPTS_ZOD_SCHEMA } from './util'
+import { LIST_LIMIT_MAX } from '../types'
 import { TBError } from '../errors'
 
 const DESCRIPTION = 'Built-in integration catalog (read-only; mount one via system/registry)'
@@ -129,51 +130,6 @@ function matches(item: CatalogListItem, query: string): boolean {
   )
 }
 
-function catalogCmds(nodePath: TreePath): CmdSpec[] {
-  const path = cmdPath(nodePath)
-  const cmds: CmdSpec[] = [
-    {
-      name: 'list',
-      method: 'POST',
-      path,
-      h: 'list built-in integrations available on this host (no credentials, read scope)',
-      inputSchema: { type: 'object', properties: { opts: LIST_OPTS_SCHEMA } },
-      returns: 'Page<CatalogListItem> — id, exports, nodeKinds, exportDetails',
-      scope: 'read',
-    },
-    {
-      name: 'get',
-      method: 'POST',
-      path,
-      h: 'fetch one catalog entry including its full /~describe descriptor',
-      inputSchema: {
-        type: 'object',
-        properties: { id: { type: 'string', description: 'catalog entry id (= provider id)' } },
-        required: ['id'],
-      },
-      returns: 'CatalogEntry — id, endpoint, digest, describe',
-      scope: 'read',
-    },
-    {
-      name: 'search',
-      method: 'POST',
-      path,
-      h: 'substring search over catalog id and description',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          q: { type: 'string', description: 'case-insensitive substring' },
-          opts: LIST_OPTS_SCHEMA,
-        },
-        required: ['q'],
-      },
-      returns: 'Page<CatalogListItem>',
-      scope: 'read',
-    },
-  ]
-  return withCommandPaths(nodePath, cmds)
-}
-
 export interface CatalogModuleDeps {
   /** 宿主装配的内置目录(编译期常量)。缺省空目录 → list 回空页,不报错。 */
   catalog: () => BuiltinCatalog
@@ -182,17 +138,13 @@ export interface CatalogModuleDeps {
 /** 分页:目录是内存里的有序数组,cursor 就是下一条的 id(不透明性无意义,规模有界)。 */
 function paginate(
   items: CatalogListItem[],
-  opts: unknown,
+  opts?: { cursor?: string, limit?: number },
 ): { cursor?: string, items: CatalogListItem[] } {
-  const o = (typeof opts === 'object' && opts !== null ? opts : {}) as {
-    cursor?: unknown
-    limit?: unknown
-  }
   const limit
-    = typeof o.limit === 'number' && o.limit > 0 ? Math.min(o.limit, LIST_LIMIT_MAX) : 50
+    = typeof opts?.limit === 'number' && opts.limit > 0 ? Math.min(opts.limit, LIST_LIMIT_MAX) : 50
   let start = 0
-  if (typeof o.cursor === 'string' && o.cursor !== '') {
-    const idx = items.findIndex(i => i.id === o.cursor)
+  if (opts?.cursor !== undefined && opts.cursor !== '') {
+    const idx = items.findIndex(i => i.id === opts.cursor)
     // cursor 指向的条目可能已随宿主重新装配消失:从头开始而不是报错
     // (目录是派生视图,不该让一个失效 cursor 变成不可恢复的错误)。
     start = idx >= 0 ? idx : 0
@@ -202,40 +154,53 @@ function paginate(
   return { items: page, ...(next !== undefined ? { cursor: next.id } : {}) }
 }
 
-export function createCatalogModule(deps: CatalogModuleDeps): BuiltinModule {
-  const sortedItems = (): CatalogListItem[] =>
-    Object.values(deps.catalog())
-      .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
-      .map(projectListItem)
+function sortedItems(deps: CatalogModuleDeps): CatalogListItem[] {
+  return Object.values(deps.catalog())
+    .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+    .map(projectListItem)
+}
 
-  return {
-    module: 'catalog',
-    description: DESCRIPTION,
-    help(nodePath: TreePath): HelpModel {
-      return {
-        node: { path: nodePath, kind: 'builtin', description: DESCRIPTION },
-        cmds: catalogCmds(nodePath),
-      }
+const COMMANDS = new BuiltinCommandRegistry<CatalogModuleDeps>('catalog', DESCRIPTION)
+  .register(
+    'list',
+    {
+      h: 'list built-in integrations available on this host (no credentials, read scope)',
+      inputSchema: z.strictObject({ opts: LIST_OPTS_ZOD_SCHEMA.optional() }),
+      returns: 'Page<CatalogListItem> — id, exports, nodeKinds, exportDetails',
+      scope: 'read',
     },
-    async dispatch(cmd: string, args: Record<string, unknown>): Promise<unknown> {
-      switch (cmd) {
-        case 'list':
-          return paginate(sortedItems(), args.opts)
-        case 'get': {
-          const id = requireString(args, 'id')
-          const entry = deps.catalog()[id]
-          if (entry === undefined) {
-            throw new TBError('not_found', `no catalog entry '${id}'`)
-          }
-          return entry
-        }
-        case 'search': {
-          const q = requireString(args, 'q')
-          return paginate(sortedItems().filter(i => matches(i, q)), args.opts)
-        }
-        default:
-          throw new TBError('invalid_argument', `unknown cmd '${cmd}' on system/catalog`)
-      }
+    ({ opts }, { deps }) => paginate(sortedItems(deps), opts),
+  )
+  .register(
+    'get',
+    {
+      h: 'fetch one catalog entry including its full /~describe descriptor',
+      inputSchema: z.strictObject({
+        id: z.string().min(1).describe('catalog entry id (= provider id)'),
+      }),
+      returns: 'CatalogEntry — id, endpoint, digest, describe',
+      scope: 'read',
     },
-  }
+    ({ id }, { deps }) => {
+      const entry = deps.catalog()[id]
+      if (entry === undefined) throw new TBError('not_found', `no catalog entry '${id}'`)
+      return entry
+    },
+  )
+  .register(
+    'search',
+    {
+      h: 'substring search over catalog id and description',
+      inputSchema: z.strictObject({
+        q: z.string().min(1).describe('case-insensitive substring'),
+        opts: LIST_OPTS_ZOD_SCHEMA.optional(),
+      }),
+      returns: 'Page<CatalogListItem>',
+      scope: 'read',
+    },
+    ({ opts, q }, { deps }) => paginate(sortedItems(deps).filter(i => matches(i, q)), opts),
+  )
+
+export function createCatalogModule(deps: CatalogModuleDeps): BuiltinModule {
+  return COMMANDS.module(deps)
 }

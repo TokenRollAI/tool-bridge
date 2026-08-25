@@ -10,11 +10,10 @@ import {
 import {
   DEFAULT_STORE_DRIVER_KEY_ROOT,
   type StoreObject,
-  type UploadSession,
 } from '../../src/objectStoreService/types'
 import { MemoryStateStore, type StateStore } from '../../src/store'
 import { MemoryObjectStore } from '../../src/context/objectStore'
-import { isTBError } from '../../src/errors'
+import { isTBError, TBError } from '../../src/errors'
 
 const TOKEN_SECRET = 'test-store-token-secret-at-least-16'
 const OWNER = 'agent:caller'
@@ -55,6 +54,70 @@ describe('StoreService', () => {
     }
     expect(() => new StoreService(noCas, objects, { tokenSecret: TOKEN_SECRET }))
       .toThrowError(/compareAndSwap/)
+  })
+
+  it('持久化记录只容忍未知新字段，已知时间/配额/状态字段损坏一律 fail closed', async () => {
+    const corrupt = async (key: string, patch: Record<string, unknown>): Promise<void> => {
+      const current = await state.get(key) as Record<string, unknown> | null
+      expect(current).not.toBeNull()
+      await state.put(key, { ...current, futureField: 'rolling-deploy-compatible', ...patch })
+    }
+    const expectCorrupt = async (operation: Promise<unknown>): Promise<void> => {
+      await expect(operation).rejects.toMatchObject({
+        code: 'internal',
+        retryable: false,
+      })
+    }
+
+    const upload = await service.beginUpload(
+      { contentType: 'text/plain', size: 1 },
+      { owner: OWNER },
+    )
+    await corrupt(`${KEY_STORE_UPLOAD}${upload.uploadId}`, { expiresAt: undefined })
+    await expectCorrupt(service.verifyUploadToken(upload.uploadToken))
+
+    const call = await service.issueCallUploadCapability({
+      allowedContentTypes: ['*/*'],
+      callId: 'corrupt-call',
+      expiresAt: '2026-08-25T01:00:00.000Z',
+      maxBytes: 10,
+      maxObjectBytes: 5,
+      maxObjects: 2,
+      owner: OWNER,
+      producer: DEVICE,
+    })
+    await corrupt(`${KEY_STORE_CALL_CAPABILITY}${call.capability.id}`, {
+      reservations: [{ maxBytes: 5, objectId: 'reserved-object' }],
+      reservedBytes: 0,
+    })
+    await expectCorrupt(service.verifyCallUploadCapability(call.token))
+
+    const sharedUpload = await service.beginUpload(
+      { contentType: 'text/plain', size: 1 },
+      { owner: OWNER },
+    )
+    const ready = await service.commitRelayUpload({
+      uploadToken: sharedUpload.uploadToken,
+      body: 'x',
+    })
+    const share = await service.share(ready.uri, OWNER)
+    await corrupt(`${KEY_STORE_SHARE}${share.shareId}`, { expiresAt: 'not-a-timestamp' })
+    await expectCorrupt(service.verifyShareToken(share.token))
+
+    const idempotentInput = {
+      contentType: 'text/plain',
+      idempotencyKey: 'corrupt-binding',
+      size: 1,
+    }
+    await service.beginUpload(idempotentInput, { owner: OWNER })
+    const binding = (await state.list(KEY_STORE_IDEMPOTENCY)).items
+      .find(item => (item.value as { fingerprint?: unknown }).fingerprint !== undefined)
+    expect(binding).toBeDefined()
+    await corrupt(binding!.key, { expiresAt: null })
+    await expectCorrupt(service.beginUpload(idempotentInput, { owner: OWNER }))
+
+    await corrupt(`${KEY_STORE_OBJECT}${ready.uri.split('/').at(-1)!}`, { updatedAt: undefined })
+    await expectCorrupt(service.stat(ready.uri, { owner: OWNER }))
   })
 
   it('upload/share capability TTL 有七天硬上限', async () => {
@@ -122,6 +185,77 @@ describe('StoreService', () => {
       size: 3,
       idempotencyKey: 'same',
     }, { owner: OWNER })).rejects.toSatisfy(codeIs('conflict'))
+  })
+
+  it('begin 的 session CAS 已落地但响应丢失时，幂等 replay 恢复同一外部身份', async () => {
+    class LostSessionAckState extends MemoryStateStore {
+      loseAck = true
+
+      override async compareAndSwap(
+        key: string,
+        expectedRevision: number | null,
+        value: unknown | null,
+      ): Promise<boolean> {
+        const written = await super.compareAndSwap(key, expectedRevision, value)
+        if (this.loseAck && written && key.startsWith(KEY_STORE_UPLOAD)) {
+          this.loseAck = false
+          throw new Error('session CAS acknowledgement lost')
+        }
+        return written
+      }
+    }
+    const replayState = new LostSessionAckState()
+    const replayService = new StoreService(replayState, objects, {
+      tokenSecret: TOKEN_SECRET,
+      now: () => now,
+      maxObjectBytes: 1024,
+      uploadTtlSec: 60,
+    })
+    const input = {
+      contentType: 'image/jpeg',
+      size: 3,
+      idempotencyKey: 'lost-session-ack',
+    }
+    await expect(replayService.beginUpload(input, { owner: OWNER }))
+      .rejects.toThrow('session CAS acknowledgement lost')
+    const pending = (await replayState.list(KEY_STORE_OBJECT)).items[0]?.value as StoreObject
+
+    const replay = await replayService.beginUpload(input, { owner: OWNER })
+    expect(replay).toMatchObject({
+      uploadId: pending.uploadId,
+      objectUri: `store://default/${pending.id}`,
+      alreadyCompleted: false,
+    })
+    await expect(replayService.commitRelayUpload({
+      uploadToken: replay.uploadToken,
+      body: 'abc',
+    })).resolves.toMatchObject({ uri: replay.objectUri, status: 'ready' })
+  })
+
+  it('upload/call/share token 保持独立 domain，grant 分别返回 uploadId 与 Store URI', async () => {
+    const upload = await service.beginUpload({ contentType: 'text/plain', size: 1 }, { owner: OWNER })
+    expect(upload.uploadId).toMatch(/^[A-Za-z0-9_-]{22,64}$/)
+    expect(upload.objectUri).toMatch(/^store:\/\/default\/[A-Za-z0-9_-]{22,64}$/)
+    expect(upload.uploadToken).toMatch(new RegExp(`^tbu_${upload.uploadId}\\.`))
+    const ready = await service.commitRelayUpload({ uploadToken: upload.uploadToken, body: 'x' })
+    const share = await service.share(ready.uri, OWNER)
+    const call = await service.issueCallUploadCapability({
+      owner: OWNER,
+      producer: DEVICE,
+      callId: 'domain-call',
+      expiresAt: '2026-08-25T00:05:00.000Z',
+      maxObjects: 1,
+      maxBytes: 1,
+      maxObjectBytes: 1,
+      allowedContentTypes: ['text/plain'],
+    })
+    expect(share.token).toMatch(/^tbs_/)
+    expect(call.token).toMatch(/^tbc_/)
+    await expect(service.verifyUploadToken(call.token)).rejects.toSatisfy(codeIs('permission_denied'))
+    await expect(service.verifyCallUploadCapability(share.token))
+      .rejects.toSatisfy(codeIs('permission_denied'))
+    await expect(service.verifyShareToken(upload.uploadToken))
+      .rejects.toSatisfy(codeIs('permission_denied'))
   })
 
   it('owner 与 call 幂等域隔离，call replay 精确绑定 callId 与 producer', async () => {
@@ -236,6 +370,8 @@ describe('StoreService', () => {
     now = '2026-08-25T00:02:00.000Z'
     await expect(service.commitRelayUpload({ uploadToken: expired.uploadToken, body: 'x' }))
       .rejects.toSatisfy(codeIs('permission_denied'))
+    await expect(service.abortUploadWithToken(expired.uploadId, expired.uploadToken))
+      .rejects.toSatisfy(codeIs('permission_denied'))
 
     now = '2026-08-25T00:00:00.000Z'
     const wrongSize = await service.beginUpload({
@@ -342,6 +478,89 @@ describe('StoreService', () => {
       .map(item => item.value as StoreObject)
       .find(item => item.originCallId === 'call-123')
     expect(object).toMatchObject({ owner: OWNER, producer: DEVICE, originCallId: 'call-123' })
+  })
+
+  it('并发 call begin 的 relay contender 不继承 direct reservation 上限', async () => {
+    class ReservationRaceState extends MemoryStateStore {
+      readonly reservationWritten: Promise<void>
+      private pause = true
+      private releaseReservation!: () => void
+      private signalReservation!: () => void
+
+      constructor() {
+        super()
+        this.reservationWritten = new Promise(resolve => this.signalReservation = resolve)
+      }
+
+      resumeDirect(): void {
+        this.releaseReservation()
+      }
+
+      override async compareAndSwap(
+        key: string,
+        expectedRevision: number | null,
+        value: unknown | null,
+      ): Promise<boolean> {
+        const reservations = (value as { reservations?: unknown[] } | null)?.reservations
+        if (
+          this.pause
+          && key.startsWith(KEY_STORE_CALL_CAPABILITY)
+          && expectedRevision !== null
+          && reservations?.length === 1
+        ) {
+          this.pause = false
+          const written = await super.compareAndSwap(key, expectedRevision, value)
+          this.signalReservation()
+          await new Promise<void>(resolve => this.releaseReservation = resolve)
+          return written
+        }
+        return await super.compareAndSwap(key, expectedRevision, value)
+      }
+    }
+    class SplitSignerStore extends MemoryObjectStore {
+      calls = 0
+
+      async presignPutExact(key: string, _ttlSec: number, opts: { contentLength: number }) {
+        this.calls++
+        if (this.calls > 1) throw new Error('signer temporarily unavailable')
+        return {
+          method: 'PUT' as const,
+          url: `https://objects.invalid/${key}`,
+          headers: { 'Content-Length': String(opts.contentLength), 'If-None-Match': '*' },
+        }
+      }
+    }
+    const raceState = new ReservationRaceState()
+    const raceObjects = new SplitSignerStore(() => now)
+    const raceService = new StoreService(raceState, raceObjects, {
+      tokenSecret: TOKEN_SECRET,
+      now: () => now,
+      maxObjectBytes: 100,
+      relayMaxBytes: 5,
+    })
+    const issued = await raceService.issueCallUploadCapability({
+      owner: OWNER,
+      producer: DEVICE,
+      callId: 'reservation-race',
+      expiresAt: '2026-08-25T00:05:00.000Z',
+      maxObjects: 2,
+      maxBytes: 100,
+      maxObjectBytes: 100,
+      allowedContentTypes: ['video/*'],
+    })
+    const input = { contentType: 'video/mp4', size: 6, idempotencyKey: 'same-race' }
+    const directPending = raceService.beginCallUpload(input, issued.token)
+    await raceState.reservationWritten
+    await expect(raceService.beginCallUpload(input, issued.token))
+      .rejects.toSatisfy(codeIs('rate_limited'))
+    raceState.resumeDirect()
+
+    await expect(directPending).resolves.toMatchObject({
+      transport: 'presigned-put',
+      maxBytes: 6,
+    })
+    expect(raceObjects.calls).toBe(2)
+    expect((await raceState.list(KEY_STORE_UPLOAD)).items).toHaveLength(1)
   })
 
   it('call capability 拒绝 MIME、篡改与过期 token', async () => {
@@ -458,6 +677,110 @@ describe('StoreService', () => {
       .rejects.toSatisfy(codeIs('conflict'))
   })
 
+  it.each(['ready', 'abandoned'] as const)(
+    'complete×abort 的 object CAS winner=%s 决定唯一终态',
+    async (winner) => {
+      class CompleteAbortRaceState extends MemoryStateStore {
+        private readonly winnerDone: Promise<void>
+        private releaseWinner!: () => void
+
+        constructor() {
+          super()
+          this.winnerDone = new Promise(resolve => this.releaseWinner = resolve)
+        }
+
+        override async compareAndSwap(
+          key: string,
+          expectedRevision: number | null,
+          value: unknown | null,
+        ): Promise<boolean> {
+          const status = (value as { status?: unknown } | null)?.status
+          if (
+            key.startsWith(KEY_STORE_OBJECT)
+            && expectedRevision === 1
+            && (status === 'ready' || status === 'abandoned')
+          ) {
+            if (status === winner) {
+              const won = await super.compareAndSwap(key, expectedRevision, value)
+              this.releaseWinner()
+              return won
+            }
+            await this.winnerDone
+          }
+          return await super.compareAndSwap(key, expectedRevision, value)
+        }
+      }
+      const raceState = new CompleteAbortRaceState()
+      const raceObjects = new MemoryObjectStore(() => now)
+      const raceService = new StoreService(raceState, raceObjects, {
+        tokenSecret: TOKEN_SECRET,
+        now: () => now,
+        maxObjectBytes: 1024,
+        uploadTtlSec: 60,
+      })
+      const start = await raceService.beginUpload({
+        contentType: 'text/plain', size: 2,
+      }, { owner: OWNER })
+      const [complete, abort] = await Promise.allSettled([
+        raceService.commitRelayUpload({ uploadToken: start.uploadToken, body: 'ok' }),
+        raceService.abortUploadWithToken(start.uploadId, start.uploadToken),
+      ])
+      const object = (await raceState.list(KEY_STORE_OBJECT)).items[0]?.value as StoreObject
+
+      if (winner === 'ready') {
+        expect(complete.status).toBe('fulfilled')
+        expect(abort.status).toBe('rejected')
+        expect(object.status).toBe('ready')
+        expect(await raceObjects.head(object.driverKey)).not.toBeNull()
+      } else {
+        expect(complete.status).toBe('rejected')
+        expect(abort.status).toBe('fulfilled')
+        expect(object.status).toBe('abandoned')
+        expect(await raceObjects.head(object.driverKey)).toBeNull()
+      }
+    },
+  )
+
+  it('delete×read/share：已线性化的读取快照可返回，之后访问与新 share 均不可用', async () => {
+    class DeleteBeforeShareState extends MemoryStateStore {
+      beforeShareCreate?: () => Promise<void>
+
+      override async compareAndSwap(
+        key: string,
+        expectedRevision: number | null,
+        value: unknown | null,
+      ): Promise<boolean> {
+        if (key.startsWith(KEY_STORE_SHARE) && expectedRevision === null) {
+          const hook = this.beforeShareCreate
+          this.beforeShareCreate = undefined
+          await hook?.()
+        }
+        return await super.compareAndSwap(key, expectedRevision, value)
+      }
+    }
+    const raceState = new DeleteBeforeShareState()
+    const raceObjects = new MemoryObjectStore(() => now)
+    const raceService = new StoreService(raceState, raceObjects, {
+      tokenSecret: TOKEN_SECRET,
+      now: () => now,
+      uploadTtlSec: 60,
+      shareTtlSec: 30,
+    })
+    const start = await raceService.beginUpload({ contentType: 'text/plain', size: 1 }, { owner: OWNER })
+    const ready = await raceService.commitRelayUpload({ uploadToken: start.uploadToken, body: 'x' })
+    const readSnapshot = await raceService.authorizeRead(ready.uri, { owner: OWNER })
+    raceState.beforeShareCreate = async () => {
+      await raceService.delete(ready.uri, { owner: OWNER })
+    }
+
+    const share = await raceService.share(ready.uri, OWNER)
+    expect(readSnapshot).toMatchObject({ status: 'ready', id: ready.uri.split('/').at(-1) })
+    await expect(raceService.authorizeRead(ready.uri, { owner: OWNER }))
+      .rejects.toSatisfy(codeIs('not_found'))
+    await expect(raceService.authorizeSharedRead(ready.uri, share.token))
+      .rejects.toSatisfy(codeIs('not_found'))
+  })
+
   it('cleanup 幂等回收过期 upload/call/share 及 pending bytes', async () => {
     const pending = await service.beginUpload({ contentType: 'text/plain' }, { owner: OWNER })
     const issued = await service.issueCallUploadCapability({
@@ -564,49 +887,43 @@ describe('StoreService', () => {
     expect((await cleanupState.list(KEY_STORE_IDEMPOTENCY)).items).toHaveLength(0)
   })
 
-  it('cleanup 的过期 CAS 输给并发 complete 时绝不删除 ready 字节', async () => {
-    class CompleteWinsState extends MemoryStateStore {
-      win = true
+  it('complete 在 object ready 与 session completed 之间遇 cleanup，最终仍收敛 completed', async () => {
+    class CompleteCleanupRaceState extends MemoryStateStore {
+      readonly completePaused: Promise<void>
+      private pause = true
+      private releaseComplete!: () => void
+      private signalPaused!: () => void
+
+      constructor() {
+        super()
+        this.completePaused = new Promise(resolve => this.signalPaused = resolve)
+      }
+
+      resumeComplete(): void {
+        this.releaseComplete()
+      }
 
       override async compareAndSwap(
         key: string,
         expectedRevision: number | null,
         value: unknown | null,
       ): Promise<boolean> {
-        const next = value as { status?: unknown } | null
+        const status = (value as { status?: unknown } | null)?.status
         if (
-          this.win
-          && key.startsWith('store:upload:')
+          this.pause
+          && key.startsWith(KEY_STORE_UPLOAD)
           && expectedRevision !== null
-          && next?.status === 'expired'
+          && status === 'completed'
         ) {
-          this.win = false
-          const session = await this.get(key) as UploadSession
-          const objectKey = `${KEY_STORE_OBJECT}${session.objectId}`
-          const object = await this.get(objectKey) as StoreObject
-          const readyAt = '2026-08-25T00:02:00.000Z'
-          await super.compareAndSwap(objectKey, object.revision, {
-            ...object,
-            status: 'ready',
-            size: 4,
-            etag: 'winner',
-            readyAt,
-            updatedAt: readyAt,
-            revision: object.revision + 1,
-          })
-          await super.compareAndSwap(key, session.revision, {
-            ...session,
-            status: 'completed',
-            completedAt: readyAt,
-            revision: session.revision + 1,
-          })
-          return false
+          this.pause = false
+          this.signalPaused()
+          await new Promise<void>(resolve => this.releaseComplete = resolve)
         }
         return await super.compareAndSwap(key, expectedRevision, value)
       }
     }
 
-    const raceState = new CompleteWinsState()
+    const raceState = new CompleteCleanupRaceState()
     const raceObjects = new MemoryObjectStore(() => now)
     const raceService = new StoreService(raceState, raceObjects, {
       tokenSecret: TOKEN_SECRET,
@@ -618,17 +935,22 @@ describe('StoreService', () => {
       size: 4,
     }, { owner: OWNER })
     const object = (await raceState.list(KEY_STORE_OBJECT)).items[0]?.value as StoreObject
-    await raceObjects.put(object.driverKey, 'data', { ifNoneMatch: '*' })
-
+    const completing = raceService.commitRelayUpload({
+      uploadToken: start.uploadToken,
+      body: 'data',
+    })
+    await raceState.completePaused
     now = '2026-08-25T00:02:00.000Z'
     const cleaned = await raceService.cleanup()
+    raceState.resumeComplete()
+    const ready = await completing
+
     expect(cleaned.expiredUploads).toBe(0)
     expect(cleaned.deletedBytes).toBe(0)
+    expect(ready).toMatchObject({ status: 'ready', size: 4 })
     expect(await raceObjects.head(object.driverKey)).not.toBeNull()
-    await expect(raceService.stat(start.objectUri, { owner: OWNER })).resolves.toMatchObject({
-      status: 'ready',
-      size: 4,
-    })
+    const session = (await raceState.list(KEY_STORE_UPLOAD)).items[0]?.value as { status: string }
+    expect(session.status).toBe('completed')
   })
 
   it('cleanup 返回各前缀 cursor，小页循环不会让后续过期记录饿死', async () => {
@@ -680,7 +1002,6 @@ describe('StoreService', () => {
     const cleaned = await cleanupService.cleanup()
     expect(cleaned).toMatchObject({
       deletedStaging: 2,
-      deletedOrphans: 0,
       expiredIdempotencyBindings: 1,
     })
     expect(cleanupObjects.cleanupArgs).toEqual({
@@ -714,11 +1035,9 @@ describe('StoreService', () => {
         callCapabilities: null,
         idempotencyBindings: null,
         objects: '',
-        driverObjects: null,
       },
     })
     expect(cleaned.deletedBytes).toBe(1)
-    expect(cleaned.deletedOrphans).toBe(0)
     expect(await objects.head(stored.driverKey)).toBeNull()
     await expect(service.verifyUploadToken(start.uploadToken))
       .rejects.toSatisfy(codeIs('permission_denied'))
@@ -756,6 +1075,40 @@ describe('StoreService direct upload', () => {
       { owner: OWNER },
     )).resolves.toMatchObject({ transport: 'relay', maxBytes: 5 })
     expect(objects.legacyCalls).toBe(0)
+  })
+
+  it('幂等 replay 的 direct signer 不可用时返回 unavailable，不伪装成 relay grant', async () => {
+    class FlakySignerStore extends MemoryObjectStore {
+      available = true
+
+      async presignPutExact(key: string, _ttlSec: number, opts: { contentLength: number }) {
+        if (!this.available) {
+          throw new TBError('unavailable', 'signer temporarily unavailable', { retryable: true })
+        }
+        return {
+          method: 'PUT' as const,
+          url: `https://objects.invalid/${key}`,
+          headers: { 'Content-Length': String(opts.contentLength), 'If-None-Match': '*' },
+        }
+      }
+    }
+    const objects = new FlakySignerStore()
+    const service = new StoreService(new MemoryStateStore(), objects, {
+      tokenSecret: TOKEN_SECRET,
+      maxObjectBytes: 100,
+      relayMaxBytes: 5,
+    })
+    const input = {
+      contentType: 'video/mp4',
+      size: 6,
+      idempotencyKey: 'direct-signer-replay',
+    }
+    await expect(service.beginUpload(input, { owner: OWNER })).resolves.toMatchObject({
+      transport: 'presigned-put',
+    })
+    objects.available = false
+    await expect(service.beginUpload(input, { owner: OWNER }))
+      .rejects.toSatisfy(codeIs('unavailable'))
   })
 
   it('presigned PUT 必须 complete/HEAD，且并发 complete 幂等返回同 descriptor', async () => {
@@ -811,5 +1164,54 @@ describe('StoreService direct upload', () => {
     expect(left).toMatchObject({ uri: start.objectUri, size: 4, status: 'ready' })
     // backend 未返回可验证 checksum metadata 时，声明值绝不能冒充已验证值。
     expect(left.checksum).toBeUndefined()
+  })
+
+  it('direct 字节已落地但 ready metadata CAS 暂态失败时原地重试，不删除可恢复字节', async () => {
+    class FalseOnceReadyState extends MemoryStateStore {
+      failed = false
+
+      override async compareAndSwap(
+        key: string,
+        expectedRevision: number | null,
+        value: unknown | null,
+      ): Promise<boolean> {
+        if (
+          !this.failed
+          && key.startsWith(KEY_STORE_OBJECT)
+          && expectedRevision !== null
+          && (value as { status?: unknown } | null)?.status === 'ready'
+        ) {
+          this.failed = true
+          return false
+        }
+        return await super.compareAndSwap(key, expectedRevision, value)
+      }
+    }
+    class DirectStore extends MemoryObjectStore {
+      async presignPutExact(key: string, _ttlSec: number, opts: { contentLength: number }) {
+        return {
+          method: 'PUT' as const,
+          url: `https://objects.invalid/${key}`,
+          headers: { 'Content-Length': String(opts.contentLength), 'If-None-Match': '*' },
+        }
+      }
+    }
+    const state = new FalseOnceReadyState()
+    const objects = new DirectStore(() => '2026-08-25T00:00:00.000Z')
+    const service = new StoreService(state, objects, {
+      tokenSecret: TOKEN_SECRET,
+      now: () => '2026-08-25T00:00:00.000Z',
+      maxObjectBytes: 100,
+    })
+    const start = await service.beginUpload({
+      contentType: 'video/mp4', size: 4,
+    }, { owner: OWNER })
+    const object = (await state.list(KEY_STORE_OBJECT)).items[0]?.value as StoreObject
+    await objects.put(object.driverKey, 'data', { contentType: 'video/mp4', ifNoneMatch: '*' })
+
+    await expect(service.completeUploadWithToken(start.uploadId, start.uploadToken))
+      .resolves.toMatchObject({ uri: start.objectUri, size: 4, status: 'ready' })
+    expect(state.failed).toBe(true)
+    expect(await objects.head(object.driverKey)).not.toBeNull()
   })
 })

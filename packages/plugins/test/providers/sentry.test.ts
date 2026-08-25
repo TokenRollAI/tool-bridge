@@ -1,11 +1,5 @@
-import {
-  base64urlEncode,
-  type CallContext,
-  encodeCallContext,
-  HEADER_TB_CONTEXT,
-  HEADER_TB_UPSTREAM_AUTH,
-} from '@tool-bridge/core'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+import { createProviderHarness } from '../support/providerHarness'
 import { createSentryPlugin } from '../../src/sentry/index'
 import { sentryActions } from '../../src/sentry/schema'
 
@@ -19,41 +13,22 @@ import { sentryActions } from '../../src/sentry/schema'
  * 以及 alerts 的 `{data}` 信封。
  */
 
-const PLUGIN_TOKEN = 'tbp_test'
-const ENV = { PLUGIN_TOKEN }
 /** 平台换来并按需刷新的 access token —— 插件侧与 api_key 型取法完全一样。 */
 const ACCESS_TOKEN = 'sntrys_accesstokendeadbeef'
 const ORG = 'acme'
 const plugin = createSentryPlugin()
 
-const CALLER: CallContext = {
-  keyId: 'k1',
-  owner: 'agent:tester',
-  scopes: [],
-  traceId: 't1',
+const {
+  call,
+  envelope,
+  sent,
+  env: ENV,
+  stubFetch,
+} = createProviderHarness({
   mountPath: 'dev/sentry',
-  exportId: 'actions',
-}
-
-function envelope(body: unknown, opts: { auth?: string | null } = {}): Promise<Response> {
-  const headers: Record<string, string> = {
-    'authorization': `Bearer ${PLUGIN_TOKEN}`,
-    'content-type': 'application/json',
-    [HEADER_TB_CONTEXT]: encodeCallContext(CALLER),
-  }
-  const auth = opts.auth === undefined ? ACCESS_TOKEN : opts.auth
-  if (auth !== null) {
-    headers[HEADER_TB_UPSTREAM_AUTH] = base64urlEncode(new TextEncoder().encode(auth))
-  }
-  return Promise.resolve(plugin.fetch(
-    new Request('https://plugin.test/', { method: 'POST', headers, body: JSON.stringify(body) }),
-    ENV as never,
-  ))
-}
-
-function call(name: string, args: unknown, opts?: { auth?: string | null }): Promise<Response> {
-  return envelope({ tool: 'Call', arguments: { name, args } }, opts)
-}
+  plugin,
+  upstreamAuth: ACCESS_TOKEN,
+})
 
 /** JSON 响应(带 content-type,否则 api.ts 会刻意不解析)。 */
 function mockSentry(
@@ -61,32 +36,19 @@ function mockSentry(
   payload: unknown,
   extraHeaders: Record<string, string> = {},
 ): ReturnType<typeof vi.fn> {
-  const fn = vi.fn(() => Promise.resolve(new Response(JSON.stringify(payload), {
+  return stubFetch(() => Promise.resolve(new Response(JSON.stringify(payload), {
     status,
     headers: { 'content-type': 'application/json', ...extraHeaders },
   })))
-  vi.stubGlobal('fetch', fn)
-  return fn
 }
 
 /** 不带 JSON content-type 的响应(测"只在 JSON 时才解析")。 */
 function mockNonJson(status: number, body: string | null, contentType = 'text/html'): ReturnType<typeof vi.fn> {
-  const fn = vi.fn(() => Promise.resolve(new Response(body, {
+  return stubFetch(() => Promise.resolve(new Response(body, {
     status,
     headers: { 'content-type': contentType },
   })))
-  vi.stubGlobal('fetch', fn)
-  return fn
 }
-
-/** 取上游收到的那个请求。 */
-function sent(mock: ReturnType<typeof vi.fn>): Request {
-  return (mock.mock.calls[0] as [Request])[0]
-}
-
-afterEach(() => {
-  vi.unstubAllGlobals()
-})
 
 describe('契约面', () => {
   it('List 出全部 19 个 action,且都带 Zod 派生的 schema', async () => {

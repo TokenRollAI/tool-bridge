@@ -52,13 +52,19 @@ import type {
   searchSnippetsInput,
 } from './schema'
 import { type ProviderContext, requireApiKey } from '../_runtime/plugin'
+import { createProviderHttpClient } from '../_runtime/providerHttp'
+import { asJsonObject as record } from '../_runtime/jsonValue'
 import { upstreamError } from '../_runtime/upstreamError'
-import { guardedFetch } from '../_runtime/guardedFetch'
 
 const SERVICE = 'semantic_scholar'
 const GRAPH_BASE = 'https://api.semanticscholar.org/graph/v1'
 const RECOMMENDATIONS_BASE = 'https://api.semanticscholar.org/recommendations/v1'
 const REQUEST_TIMEOUT_MS = 30_000
+const graphHttp = createProviderHttpClient({ baseUrl: `${GRAPH_BASE}/`, service: SERVICE })
+const recommendationsHttp = createProviderHttpClient({
+  baseUrl: `${RECOMMENDATIONS_BASE}/`,
+  service: SERVICE,
+})
 
 type Json = Record<string, unknown>
 type Family = 'graph' | 'recommendations'
@@ -71,10 +77,6 @@ interface S2Request {
   method: 'GET' | 'POST'
   params?: Params
   path: string
-}
-
-function record(value: unknown): Json | undefined {
-  return typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Json) : undefined
 }
 
 /** 上游 `optionalRawString(...)?.trim()`:错误消息取值用。 */
@@ -150,26 +152,6 @@ function paperSearchParams(input: Json, pagingKey: 'offset' | 'token'): Params {
   return { ...params(input, PAPER_SEARCH_FILTER_KEYS), ...params(input, [pagingKey]) }
 }
 
-function buildUrl(input: S2Request): string {
-  const base = input.family === 'graph' ? GRAPH_BASE : RECOMMENDATIONS_BASE
-  const url = new URL(`${base}${input.path}`)
-  for (const [key, value] of Object.entries(input.params ?? {})) {
-    if (value !== undefined) url.searchParams.set(key, value)
-  }
-  return url.toString()
-}
-
-/** 空体(含纯空白)读成 null;非 JSON 是上游违约。 */
-async function readPayload(response: Response): Promise<unknown> {
-  const body = await response.text()
-  if (body.trim() === '') return null
-  try {
-    return JSON.parse(body)
-  } catch {
-    throw new TBError('unavailable', 'Semantic Scholar 返回了非 JSON 响应', { retryable: true })
-  }
-}
-
 /** 错误消息:上游把它散在 `message` / `error` / `detail` 三个键上,还可能直接是一个字符串。 */
 function errorMessage(payload: unknown, status: number): string {
   const direct = trimmed(payload)
@@ -186,32 +168,25 @@ async function request(ctx: ProviderContext, input: S2Request): Promise<unknown>
     'accept': 'application/json',
     'x-api-key': requireApiKey(ctx, SERVICE),
   }
-  if (input.method === 'POST') headers['content-type'] = 'application/json'
-
-  let response: Response
-  try {
-    response = await guardedFetch(buildUrl(input), {
-      method: input.method,
-      headers,
-      // 上游对 POST 一律发 body(没给就发 `{}`),保留:batch 端点不接受空请求。
-      body: input.method === 'POST' ? JSON.stringify(input.body ?? {}) : undefined,
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-    })
-  } catch (error) {
-    // 传输层失败必须就地归一:漏出去的裸 Error 会被 plugin-sdk 抹成 "internal plugin error"
-    // 500,把"上游不通/出网被拦"说成插件自身故障。
-    if (error instanceof TBError) throw error
-    if (error instanceof Error && error.name === 'TimeoutError') {
-      throw upstreamError(504, `Semantic Scholar 请求超时(${REQUEST_TIMEOUT_MS / 1000} 秒)`)
-    }
-    const message = error instanceof Error ? error.message : 'unknown network error'
-    throw upstreamError(502, `Semantic Scholar 请求失败:${message}`)
-  }
-
-  const payload = await readPayload(response)
-  // 429 走公共归一表 → rate_limited + retryable(限速是这个 provider 的常态,见文件头)。
-  if (!response.ok) throw upstreamError(response.status, errorMessage(payload, response.status))
-  return payload
+  const http = input.family === 'graph' ? graphHttp : recommendationsHttp
+  const response = await http.request({
+    method: input.method,
+    path: input.path,
+    query: Object.entries(input.params ?? {}),
+    headers,
+    // 上游对 POST 一律发 body(没给就发 `{}`),保留:batch 端点不接受空请求。
+    ...(input.method === 'POST' ? { json: input.body ?? {} } : {}),
+    timeoutMs: REQUEST_TIMEOUT_MS,
+    invalidJsonMessage: 'Semantic Scholar 返回了非 JSON 响应',
+    mapError: ({ bodyKind, data, status }) => bodyKind === 'invalid-json'
+      ? new TBError('unavailable', 'Semantic Scholar 返回了非 JSON 响应', { retryable: true })
+      // 429 走公共归一表 → rate_limited + retryable(限速是这个 provider 的常态,见文件头)。
+      : upstreamError(status, errorMessage(data, status)),
+    mapTransportError: ({ kind, message }) => kind === 'timeout'
+      ? upstreamError(504, `Semantic Scholar 请求超时(${REQUEST_TIMEOUT_MS / 1000} 秒)`)
+      : upstreamError(502, `Semantic Scholar 请求失败:${message ?? 'unknown network error'}`),
+  })
+  return response.bodyKind === 'empty' ? null : response.data
 }
 
 /** 论文列表族的出参:`data`(graph)与 `recommendedPapers`(recommendations)是同一个位置。 */

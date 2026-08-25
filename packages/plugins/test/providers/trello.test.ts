@@ -1,12 +1,8 @@
 import {
-  base64urlEncode,
-  type CallContext,
-  encodeCallContext,
   encodeCredentialValues,
-  HEADER_TB_CONTEXT,
-  HEADER_TB_UPSTREAM_AUTH,
 } from '@tool-bridge/core'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+import { createProviderHarness } from '../support/providerHarness'
 import { createTrelloPlugin } from '../../src/trello/index'
 import { trelloActions } from '../../src/trello/schema'
 
@@ -16,69 +12,23 @@ import { trelloActions } from '../../src/trello/schema'
  * 以及一批"声明里 optional 但 executor 里必填"的 id 字段。
  */
 
-const PLUGIN_TOKEN = 'tbp_test'
-const ENV = { PLUGIN_TOKEN }
 const API_KEY = 'trellokey123'
 const API_TOKEN = 'trellotoken456'
 const CARD = 'card789'
 const BOARD = 'board456'
 const plugin = createTrelloPlugin()
 
-const CALLER: CallContext = {
-  keyId: 'k1',
-  owner: 'agent:tester',
-  scopes: [],
-  traceId: 't1',
+interface CallOptions {
+  raw?: string | null
+}
+
+const { call, envelope, mockJson: mockTrello, mockRaw, sent } = createProviderHarness<CallOptions>({
   mountPath: 'tasks/trello',
-  exportId: 'actions',
-}
-
-function envelope(body: unknown, opts: { raw?: string | null } = {}): Promise<Response> {
-  const headers: Record<string, string> = {
-    'authorization': `Bearer ${PLUGIN_TOKEN}`,
-    'content-type': 'application/json',
-    [HEADER_TB_CONTEXT]: encodeCallContext(CALLER),
-  }
-  const auth = opts.raw !== undefined
+  plugin,
+  resolveUpstreamAuth: opts => opts.raw !== undefined
     ? opts.raw
-    : encodeCredentialValues({ apiKey: API_KEY, apiToken: API_TOKEN })
-  if (auth !== null) {
-    headers[HEADER_TB_UPSTREAM_AUTH] = base64urlEncode(new TextEncoder().encode(auth))
-  }
-  return Promise.resolve(plugin.fetch(
-    new Request('https://plugin.test/', { method: 'POST', headers, body: JSON.stringify(body) }),
-    ENV as never,
-  ))
-}
-
-function call(name: string, args: unknown, opts?: { raw?: string | null }): Promise<Response> {
-  return envelope({ tool: 'Call', arguments: { name, args } }, opts)
-}
-
-function mockTrello(status: number, payload: unknown): ReturnType<typeof vi.fn> {
-  const fn = vi.fn(() => Promise.resolve(new Response(JSON.stringify(payload), {
-    status,
-    headers: { 'content-type': 'application/json' },
-  })))
-  vi.stubGlobal('fetch', fn)
-  return fn
-}
-
-function mockRaw(status: number, body: string, contentType?: string): ReturnType<typeof vi.fn> {
-  // 204/205/304 是 null body status:传 '' 会让 undici 的 Response 构造器直接 TypeError,
-  // 而那个异常被 plugin-sdk 归一成 internal 500 —— 看起来像产物的 bug,实际是这一行。
-  const NULL_BODY = new Set([204, 205, 304])
-  const fn = vi.fn(() => Promise.resolve(new Response(NULL_BODY.has(status) ? null : body, {
-    status,
-    headers: contentType === undefined ? {} : { 'content-type': contentType },
-  })))
-  vi.stubGlobal('fetch', fn)
-  return fn
-}
-
-function sent(mock: ReturnType<typeof vi.fn>): Request {
-  return (mock.mock.calls[0] as [Request])[0]
-}
+    : encodeCredentialValues({ apiKey: API_KEY, apiToken: API_TOKEN }),
+})
 
 /** 去掉两个凭证参数后剩下的 query —— 断言业务参数时用。 */
 function businessQuery(request: Request): Record<string, string> {
@@ -101,10 +51,6 @@ const CARD_PAYLOAD = {
   dueComplete: false,
   badges: { votes: 0 },
 }
-
-afterEach(() => {
-  vi.unstubAllGlobals()
-})
 
 describe('契约面', () => {
   it('List 出全部 28 个 action,且都带 Zod 派生的 schema', async () => {

@@ -82,6 +82,10 @@ export {
   type StartAuthorizationResult,
   startMcpAuthorization,
 } from './oauth'
+export {
+  toWebObjectBodyStream,
+  type WebObjectBodyStreamOptions,
+} from './objectBodyStream'
 // --- Provider 接线零件(自建宿主按需装配)---
 export { createHttpProvider, type HttpConfig } from './providers/http'
 export { createMcpProvider, invalidateMcpEra, type McpConfig } from './providers/mcp'
@@ -129,6 +133,7 @@ export {
   defaultStoreRuntime,
   KEY_STORE_CLEANUP_PROGRESS,
   KEY_STORE_TOKEN_SECRET,
+  resolveStoreRequestOrigin,
   STORE_CALL_CAPABILITY_HEADER,
   STORE_UPLOAD_HEADER,
   storeTokenSecret,

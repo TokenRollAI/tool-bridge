@@ -13,6 +13,7 @@ import {
   Sun,
 } from 'lucide-react'
 import { useNavigate } from 'react-router'
+import { useTheme } from 'next-themes'
 import type { NodeKind, Presence, TreeJson } from '@/lib/types'
 import {
   CommandDialog,
@@ -29,7 +30,6 @@ import { KindBadge } from '@/components/KindBadge'
 import { KIND_ICON } from '@/components/kind-icon'
 import { useSession } from '@/lib/session-context'
 import { encodeTreePath } from '@/lib/path'
-import { useTheme } from '@/lib/theme'
 import { cn } from '@/lib/utils'
 
 interface FlatNode {
@@ -78,7 +78,8 @@ export function CommandPalette({
   // 命令面板关闭时不拉全树,避免首屏绕过 TreeNav 的 remote 懒加载。
   const tree = useTree('', 8, { enabled: open })
   const navigate = useNavigate()
-  const [theme, toggleTheme] = useTheme()
+  const { resolvedTheme, setTheme } = useTheme()
+  const isDark = resolvedTheme !== 'light'
   const { logout } = useSession()
   const invalidate = useInvalidate()
 
@@ -147,15 +148,15 @@ export function CommandPalette({
         <CommandGroup heading="动作">
           <CommandItem
             onSelect={() => {
-              toggleTheme()
+              setTheme(isDark ? 'light' : 'dark')
               onOpenChange(false)
             }}
             value="action theme 切换主题 dark light"
           >
-            {theme === 'dark' ? <Sun className="size-3.5" /> : <Moon className="size-3.5" />}
+            {isDark ? <Sun className="size-3.5" /> : <Moon className="size-3.5" />}
             <span className="text-xs">
               切换到
-              {theme === 'dark' ? '浅色' : '深色'}
+              {isDark ? '浅色' : '深色'}
               主题
             </span>
           </CommandItem>

@@ -67,8 +67,16 @@ import type {
   updateDataSourceInput,
   updateFolderInput,
 } from './schema'
-import { assertPublicHttpUrl, guardedFetch } from '../_runtime/guardedFetch'
+import {
+  booleanValue as boolean,
+  compactDefined as compact,
+  integerValue as integer,
+  asJsonObject as record,
+  trimmedText as text,
+} from '../_runtime/jsonValue'
+import { createProviderHttpClient, type ProviderQuery } from '../_runtime/providerHttp'
 import { type ProviderContext, requireApiKey } from '../_runtime/plugin'
+import { assertPublicHttpUrl } from '../_runtime/guardedFetch'
 import { upstreamError } from '../_runtime/upstreamError'
 
 const SERVICE = 'grafana'
@@ -85,6 +93,7 @@ const API_GROUPS = {
   folders: 'folder.grafana.app',
 } as const
 const API_VERSION_CACHE_MAX = 256
+const http = createProviderHttpClient({ service: SERVICE })
 
 type AppResource = keyof typeof API_GROUPS
 type Json = Record<string, unknown>
@@ -101,32 +110,6 @@ const apiVersionCache = new Map<string, string>()
 interface Target {
   apiKey: string
   baseUrl: string
-}
-
-function record(value: unknown): Json | undefined {
-  return typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Json) : undefined
-}
-
-/** 上游 `optionalString` 的等价物:去空白后仍非空才算有值。 */
-function text(value: unknown): string | undefined {
-  if (typeof value !== 'string') return undefined
-  const trimmed = value.trim()
-  return trimmed === '' ? undefined : trimmed
-}
-
-function integer(value: unknown): number | undefined {
-  return typeof value === 'number' && Number.isInteger(value) ? value : undefined
-}
-
-function boolean(value: unknown): boolean | undefined {
-  return typeof value === 'boolean' ? value : undefined
-}
-
-/** 丢掉值为 undefined 的键(上游 `compactObject`);`null` 要留住。 */
-function compact<T>(input: Record<string, T | undefined>): Record<string, T> {
-  return Object.fromEntries(
-    Object.entries(input).filter(([, value]) => value !== undefined),
-  ) as Record<string, T>
 }
 
 /** 上游 `requireString`:schema 没标 required(或 `min(1)` 放过纯空白)的字段,断言落在这层。 */
@@ -225,55 +208,30 @@ interface RequestInput {
   query?: Record<string, QueryValue>
 }
 
-function buildUrl(baseUrl: string, input: RequestInput): string {
-  // base 末尾补斜杠、path 去掉打头斜杠:否则实例带部署上下文路径(`https://host/grafana`)时
-  // `new URL` 会把那段路径整个替换掉。
-  const url = new URL(input.path.replace(/^\/+/, ''), `${baseUrl}/`)
-  for (const [key, value] of Object.entries(input.query ?? {})) {
-    if (value !== undefined) url.searchParams.set(key, String(value))
-  }
-  for (const [key, values] of Object.entries(input.multiValueQuery ?? {})) {
-    for (const value of values ?? []) url.searchParams.append(key, value)
-  }
-  return url.toString()
-}
-
-/** 空体按 `null`;非 JSON 体退化成原文,好让错误分支拿到人能读的消息。 */
-function readPayload(body: string): unknown {
-  if (body.trim() === '') return null
-  try {
-    return JSON.parse(body)
-  } catch {
-    return body
-  }
-}
-
 async function request(target: Target, input: RequestInput): Promise<unknown> {
-  let response: Response
-  let payload: unknown
-  try {
-    response = await guardedFetch(buildUrl(target.baseUrl, input), {
-      method: input.method,
-      headers: {
-        accept: 'application/json',
-        authorization: `Bearer ${target.apiKey}`,
-        ...(input.body === undefined ? {} : { 'content-type': 'application/json' }),
-      },
-      body: input.body === undefined ? undefined : JSON.stringify(input.body),
-    })
-    payload = readPayload(await response.text())
-  } catch (error) {
-    // 传输层失败必须就地归一:漏出去的裸 Error 会被 plugin-sdk 抹成 "internal plugin error"
-    // 500。EgressBlockedError 本身是 TBError(invalid_argument),原样冒上去。
-    if (error instanceof TBError) throw error
-    const detail = error instanceof Error ? error.message : 'unknown network error'
-    throw upstreamError(502, `Grafana request failed: ${detail}`)
-  }
-
-  if (!response.ok) {
-    throw upstreamError(response.status, errorMessage(payload, response.status, response.statusText))
-  }
-  return payload
+  const query: ProviderQuery = [
+    ...Object.entries(input.query ?? {}),
+    ...Object.entries(input.multiValueQuery ?? {}),
+  ]
+  const result = await http.request({
+    // 尾斜杠保住实例部署上下文路径(`/grafana`)；薄层再强制 path 不得换 origin。
+    baseUrl: `${target.baseUrl}/`,
+    path: input.path,
+    method: input.method,
+    query,
+    headers: { accept: 'application/json', authorization: `Bearer ${target.apiKey}` },
+    ...(input.body === undefined ? {} : { json: input.body }),
+    invalidJson: 'text',
+    mapError: ({ data, status, statusText }) => upstreamError(
+      status,
+      errorMessage(data, status, statusText),
+    ),
+    mapTransportError: ({ message }) => upstreamError(
+      502,
+      `Grafana request failed: ${message ?? 'unknown network error'}`,
+    ),
+  })
+  return result.data === undefined ? null : result.data
 }
 
 function cacheApiVersion(key: string, version: string): void {

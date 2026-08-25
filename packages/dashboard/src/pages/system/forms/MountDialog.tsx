@@ -19,17 +19,9 @@ import {
   usePluginList,
   useSecretList,
 } from '@/lib/queries'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
+import { type SchemaField, SchemaFields } from '@/components/SchemaFields'
 import { FormSection } from '@/components/FormSection'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
 import {
   buildRegistryMountCalls,
   catalogPluginsForMount,
@@ -41,6 +33,34 @@ import {
   type RegistryMountFormState,
 } from './registryConfig'
 import { RegistryKindFields } from './RegistryKindFields'
+
+const MOUNT_KINDS: MountKind[] = ['mcp', 'http', 'context', 'skillhub', 'remote', 'tool']
+const MOUNT_IDENTITY_FIELDS: SchemaField[] = [
+  {
+    key: 'kind',
+    label: 'kind',
+    required: true,
+    schema: {
+      type: 'string',
+      oneOf: [
+        ['mcp', 'mcp — MCP server'],
+        ['http', 'http — HTTP endpoint'],
+        ['context', 'context — 存储 namespace'],
+        ['skillhub', 'skillhub — Agent 技能目录'],
+        ['remote', 'remote — 联邦 HTBP 服务'],
+        ['tool', 'tool — plugin 工具源'],
+      ].map(([value, title]) => ({ const: value, title })),
+    },
+    ui: { 'ui:classNames': 'font-mono text-xs', 'ui:widget': 'select' },
+  },
+  {
+    key: 'path',
+    label: 'path',
+    required: true,
+    ui: { 'ui:classNames': 'font-mono text-sm', 'ui:placeholder': 'docs/context7' },
+  },
+  { key: 'description', label: '描述', required: true },
+]
 
 export function MountDialog({
   existingNodes = [],
@@ -224,37 +244,20 @@ export function MountDialog({
               index="01"
               title="基础身份"
             >
-              <div className="grid gap-3 sm:grid-cols-2">
-                <div className="grid gap-1.5">
-                  <Label className="text-xs">kind</Label>
-                  <Select
-                    onValueChange={value =>
-                      setForm(current => ({ ...current, kind: value as MountKind }))}
-                    value={form.kind}
-                  >
-                    <SelectTrigger className="font-mono text-xs"><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem className="font-mono text-xs" value="mcp">mcp — MCP server</SelectItem>
-                      <SelectItem className="font-mono text-xs" value="http">http — HTTP endpoint</SelectItem>
-                      <SelectItem className="font-mono text-xs" value="context">context — 存储 namespace</SelectItem>
-                      <SelectItem className="font-mono text-xs" value="skillhub">skillhub — Agent 技能目录</SelectItem>
-                      <SelectItem className="font-mono text-xs" value="remote">remote — 联邦 HTBP 服务</SelectItem>
-                      <SelectItem className="font-mono text-xs" value="tool">tool — plugin 工具源</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="grid gap-1.5">
-                  <Label className="text-xs" htmlFor="mount-path">path *</Label>
-                  <Input
-                    className="font-mono text-sm"
-                    id="mount-path"
-                    onChange={event =>
-                      setForm(current => ({ ...current, path: event.target.value }))}
-                    placeholder="docs/context7"
-                    value={form.path}
-                  />
-                </div>
-              </div>
+              <SchemaFields
+                disabled={invoke.isPending}
+                fields={MOUNT_IDENTITY_FIELDS}
+                idPrefix="mount-identity"
+                onChange={next => setForm(current => ({
+                  ...current,
+                  kind: MOUNT_KINDS.includes(next.kind as MountKind)
+                    ? next.kind as MountKind
+                    : current.kind,
+                  path: typeof next.path === 'string' ? next.path : '',
+                  description: typeof next.description === 'string' ? next.description : '',
+                }))}
+                value={form as unknown as Record<string, unknown>}
+              />
 
               {(isReplacement || mayReplaceUnloaded) && (
                 <div className="flex items-start gap-2.5 rounded-lg border border-warn/30 bg-warn/[0.045] px-3 py-2.5 text-xs">
@@ -269,16 +272,6 @@ export function MountDialog({
                 </div>
               )}
 
-              <div className="grid gap-1.5">
-                <Label className="text-xs" htmlFor="mount-desc">描述 *</Label>
-                <Input
-                  className="text-sm"
-                  id="mount-desc"
-                  onChange={event =>
-                    setForm(current => ({ ...current, description: event.target.value }))}
-                  value={form.description}
-                />
-              </div>
             </FormSection>
 
             <RegistryKindFields

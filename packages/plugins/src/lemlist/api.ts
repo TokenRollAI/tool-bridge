@@ -18,30 +18,16 @@ import type {
   listCampaignLeadsInput,
   listCampaignsInput,
 } from './schema'
+import { compactDefined as compact, asJsonObject as record, trimmedText as text } from '../_runtime/jsonValue'
 import { type ProviderContext, requireApiKey } from '../_runtime/plugin'
+import { createProviderHttpClient } from '../_runtime/providerHttp'
 import { upstreamError } from '../_runtime/upstreamError'
-import { guardedFetch } from '../_runtime/guardedFetch'
 
 const SERVICE = 'lemlist'
 const API_BASE = 'https://api.lemlist.com/api'
+const http = createProviderHttpClient({ baseUrl: `${API_BASE}/`, service: SERVICE })
 
 type Json = Record<string, unknown>
-
-/** 上游 `optionalString`:非字符串、或去空白后为空,都算缺失。 */
-function text(value: unknown): string | undefined {
-  if (typeof value !== 'string') return undefined
-  const trimmed = value.trim()
-  return trimmed === '' ? undefined : trimmed
-}
-
-function record(value: unknown): Json | undefined {
-  return typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Json) : undefined
-}
-
-/** 上游 `compactObject`:剥掉值为 undefined 的键。 */
-function compact(input: Json): Json {
-  return Object.fromEntries(Object.entries(input).filter(([, value]) => value !== undefined))
-}
 
 function stringArray(value: unknown): string[] | undefined {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : undefined
@@ -67,46 +53,33 @@ function errorMessage(payload: unknown): string | undefined {
   return text(body.message) ?? text(body.error) ?? text(body.reason)
 }
 
-/** 空体回 null;JSON 解析不了就把原文当 payload,留给消息提取。 */
-async function readPayload(response: Response): Promise<unknown> {
-  const body = await response.text().catch(() => '')
-  if (body.trim() === '') return null
-  try {
-    return JSON.parse(body) as unknown
-  } catch {
-    return body
-  }
-}
-
 async function request(
   ctx: ProviderContext,
   path: string,
   query: Record<string, unknown> = {},
 ): Promise<unknown> {
-  // 取凭证放在 try 外:它抛的是配置错误,不该被下面的传输失败兜底吞成 502。
   const apiKey = requireApiKey(ctx, SERVICE)
-
-  const url = new URL(`${API_BASE}${path}`)
+  const pairs: Array<[string, number | string]> = []
   for (const [key, value] of Object.entries(query)) {
-    if (value !== undefined && value !== null && value !== '') url.searchParams.set(key, String(value))
+    if (typeof value === 'number' || (typeof value === 'string' && value !== '')) {
+      pairs.push([key, value])
+    }
   }
-
-  let response: Response
-  try {
-    response = await guardedFetch(url.toString(), {
-      method: 'GET',
-      headers: { accept: 'application/json', authorization: basicAuthHeader(apiKey) },
-    })
-  } catch (error) {
-    // 传输层失败必须就地归一:漏出去的裸 Error 会被 plugin-sdk 抹成 500。
-    throw upstreamError(502, error instanceof Error ? `lemlist 请求失败: ${error.message}` : 'lemlist 请求失败')
-  }
-
-  const payload = await readPayload(response)
-  if (!response.ok) {
-    throw upstreamError(response.status, errorMessage(payload) ?? `lemlist 请求失败,HTTP ${response.status}`)
-  }
-  return payload
+  const { data } = await http.request({
+    path,
+    query: pairs,
+    headers: { accept: 'application/json', authorization: basicAuthHeader(apiKey) },
+    invalidJson: 'text',
+    mapError: ({ data: payload, status }) => upstreamError(
+      status,
+      errorMessage(payload) ?? `lemlist 请求失败,HTTP ${status}`,
+    ),
+    mapTransportError: ({ message }) => upstreamError(
+      502,
+      message === undefined ? 'lemlist 请求失败' : `lemlist 请求失败: ${message}`,
+    ),
+  })
+  return data ?? null
 }
 
 function requireObject(value: unknown, message: string): Json {

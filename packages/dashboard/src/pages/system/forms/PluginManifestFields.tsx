@@ -1,19 +1,58 @@
 import { KeyRound } from 'lucide-react'
 import { Link } from 'react-router'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
+import { type SchemaField, SchemaFields } from '@/components/SchemaFields'
 import { FormSection } from '@/components/FormSection'
-import { Checkbox } from '@/components/ui/checkbox'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import {
-  type ManifestFormState,
-} from './pluginManifest'
+import type { ManifestFormState } from './pluginManifest'
+
+const ENDPOINT_FIELDS: SchemaField[] = [
+  {
+    key: 'endpoint',
+    label: 'Plugin endpoint',
+    required: true,
+    ui: {
+      'ui:classNames': 'font-mono text-xs',
+      'ui:placeholder': 'https://plugin.example.com 或 binding:MY_PLUGIN',
+    },
+  },
+  {
+    key: 'healthPath',
+    label: 'Health path',
+    required: true,
+    description: '必须以 / 开头；注册时和手动检查都会请求它。',
+    ui: { 'ui:placeholder': '/healthz' },
+  },
+]
+
+const AUTH_KIND_FIELD: SchemaField = {
+  key: 'authKind',
+  label: 'Auth mode',
+  required: true,
+  schema: {
+    type: 'string',
+    oneOf: [
+      { const: 'platform-token', title: 'platform-token — 平台签发' },
+      { const: 'bearer', title: 'bearer — 引用已存凭证' },
+    ],
+  },
+  ui: {
+    'ui:widget': 'radio',
+    'ui:options': { inline: true, optionValueFormat: 'realValue' },
+  },
+}
+
+const SECRET_REF_FIELD: SchemaField = {
+  key: 'secretRef',
+  label: 'Secret reference',
+  required: true,
+  ui: { 'ui:placeholder': 'my-plugin-token' },
+}
+
+const ENABLED_FIELD: SchemaField = {
+  key: 'enabled',
+  label: '注册后启用调用',
+  description: '关闭后 manifest 仍保留，但挂载节点调用会返回 unavailable，可随时重新启用。',
+  schema: { type: 'boolean' },
+}
 
 export function PluginManifestFields({
   state,
@@ -26,12 +65,6 @@ export function PluginManifestFields({
   onChange: (next: ManifestFormState) => void
   state: ManifestFormState
 }) {
-  const endpointId = `${idPrefix}-endpoint`
-  const healthId = `${idPrefix}-health`
-  const authId = `${idPrefix}-auth`
-  const secretId = `${idPrefix}-secret`
-  const enabledId = `${idPrefix}-enabled`
-
   return (
     <div className="grid gap-3">
       <FormSection
@@ -39,31 +72,17 @@ export function PluginManifestFields({
         index="01"
         title="Endpoint"
       >
-        <div className="grid gap-1.5">
-          <Label className="text-xs" htmlFor={endpointId}>Plugin endpoint *</Label>
-          <Input
-            className="font-mono text-xs"
-            disabled={disabled}
-            id={endpointId}
-            onChange={event => onChange({ ...state, endpoint: event.target.value })}
-            placeholder="https://plugin.example.com 或 binding:MY_PLUGIN"
-            value={state.endpoint}
-          />
-        </div>
-        <div className="grid gap-1.5 sm:max-w-xs">
-          <Label className="text-xs" htmlFor={healthId}>Health path *</Label>
-          <Input
-            className="font-mono text-xs"
-            disabled={disabled}
-            id={healthId}
-            onChange={event => onChange({ ...state, healthPath: event.target.value })}
-            placeholder="/healthz"
-            value={state.healthPath}
-          />
-          <p className="text-[10px] leading-5 text-muted-foreground">
-            必须以 / 开头；注册时和手动检查都会请求它。
-          </p>
-        </div>
+        <SchemaFields
+          disabled={disabled}
+          fields={ENDPOINT_FIELDS}
+          idPrefix={`${idPrefix}-endpoint`}
+          onChange={next => onChange({
+            ...state,
+            endpoint: typeof next.endpoint === 'string' ? next.endpoint : '',
+            healthPath: typeof next.healthPath === 'string' ? next.healthPath : '',
+          })}
+          value={{ endpoint: state.endpoint, healthPath: state.healthPath }}
+        />
       </FormSection>
 
       <FormSection
@@ -90,46 +109,27 @@ export function PluginManifestFields({
         index="03"
         title="Authentication"
       >
-        <div className="grid gap-1.5 sm:max-w-sm">
-          <Label className="text-xs" htmlFor={authId}>Auth mode *</Label>
-          <Select
-            disabled={disabled}
-            onValueChange={value =>
-              onChange({ ...state, authKind: value as 'platform-token' | 'bearer' })}
-            value={state.authKind}
-          >
-            <SelectTrigger className="font-mono text-xs" id={authId}><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem className="font-mono text-xs" value="platform-token">
-                platform-token — 平台签发
-              </SelectItem>
-              <SelectItem className="font-mono text-xs" value="bearer">
-                bearer — 引用已存凭证
-              </SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
+        <SchemaFields
+          disabled={disabled}
+          fields={[AUTH_KIND_FIELD, ...(state.authKind === 'bearer' ? [SECRET_REF_FIELD] : [])]}
+          idPrefix={`${idPrefix}-auth`}
+          onChange={next => onChange({
+            ...state,
+            authKind: next.authKind === 'bearer' ? 'bearer' : 'platform-token',
+            ...(typeof next.secretRef === 'string' ? { secretRef: next.secretRef } : {}),
+          })}
+          value={{ authKind: state.authKind, secretRef: state.secretRef }}
+        />
 
         {state.authKind === 'bearer'
           ? (
-              <div className="grid gap-1.5">
-                <Label className="text-xs" htmlFor={secretId}>Secret reference *</Label>
-                <Input
-                  className="font-mono text-xs"
-                  disabled={disabled}
-                  id={secretId}
-                  onChange={event => onChange({ ...state, secretRef: event.target.value })}
-                  placeholder="my-plugin-token"
-                  value={state.secretRef}
-                />
-                <p className="text-[10px] leading-5 text-muted-foreground">
-                  这里只填写
-                  <Link className="mx-1 text-foreground underline underline-offset-2" to="/manage/secrets">
-                    凭证保管
-                  </Link>
-                  中的名字，明文不会进入 manifest。
-                </p>
-              </div>
+              <p className="text-[10px] leading-5 text-muted-foreground">
+                这里只填写
+                <Link className="mx-1 text-foreground underline underline-offset-2" to="/manage/secrets">
+                  凭证保管
+                </Link>
+                中的名字，明文不会进入 manifest。
+              </p>
             )
           : (
               <div className="flex items-start gap-2.5 rounded-md border border-primary/20 bg-primary/[0.045] px-3 py-2.5">
@@ -147,20 +147,13 @@ export function PluginManifestFields({
         index="04"
         title="Lifecycle"
       >
-        <div className="flex items-start gap-3 rounded-md border bg-background/55 px-3 py-3">
-          <Checkbox
-            checked={state.enabled}
-            disabled={disabled}
-            id={enabledId}
-            onCheckedChange={value => onChange({ ...state, enabled: value === true })}
-          />
-          <Label className="grid cursor-pointer gap-1 text-xs leading-5" htmlFor={enabledId}>
-            <span>注册后启用调用</span>
-            <span className="font-normal text-[10px] text-muted-foreground">
-              关闭后 manifest 仍保留，但挂载节点调用会返回 unavailable，可随时重新启用。
-            </span>
-          </Label>
-        </div>
+        <SchemaFields
+          disabled={disabled}
+          fields={[ENABLED_FIELD]}
+          idPrefix={`${idPrefix}-lifecycle`}
+          onChange={next => onChange({ ...state, enabled: next.enabled === true })}
+          value={{ enabled: state.enabled }}
+        />
       </FormSection>
     </div>
   )

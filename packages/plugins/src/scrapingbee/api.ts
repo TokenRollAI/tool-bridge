@@ -19,12 +19,14 @@
 
 import type { z } from 'zod/v4'
 import type { extractDataInput, fetchHtmlInput, getUsageStatsInput } from './schema'
+import { createProviderHttpClient, type ProviderHttpResult } from '../_runtime/providerHttp'
+import { compactDefined as compact, asJsonObject as record } from '../_runtime/jsonValue'
 import { type ProviderContext, requireApiKey } from '../_runtime/plugin'
 import { upstreamError } from '../_runtime/upstreamError'
-import { guardedFetch } from '../_runtime/guardedFetch'
 
 const SERVICE = 'scrapingbee'
 const API_BASE = 'https://app.scrapingbee.com/api/v1/'
+const http = createProviderHttpClient({ baseUrl: API_BASE, service: SERVICE })
 
 type Json = Record<string, unknown>
 
@@ -51,17 +53,6 @@ interface FetchOptions {
   waitMs?: number
 }
 
-function record(value: unknown): Json | undefined {
-  return typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Json) : undefined
-}
-
-/** 丢掉值为 undefined 的键(上游 `compactObject`);值类型透传给调用点。 */
-function compact<T>(input: Record<string, T | undefined>): Record<string, T> {
-  return Object.fromEntries(
-    Object.entries(input).filter((entry): entry is [string, T] => entry[1] !== undefined),
-  )
-}
-
 /** 上游的 `readOptionalString`:空串当作没给(它不 trim,这里也不 trim)。 */
 function str(value: string | undefined): string | undefined {
   return value === undefined || value === '' ? undefined : value
@@ -73,15 +64,6 @@ function bool(value: boolean | undefined): string | undefined {
 
 function int(value: number | undefined): string | undefined {
   return value === undefined ? undefined : String(value)
-}
-
-function buildUrl(path: string, apiKey: string, params: Record<string, string | undefined>): string {
-  const url = new URL(path, API_BASE)
-  url.searchParams.set('api_key', apiKey)
-  for (const [key, value] of Object.entries(params)) {
-    if (value !== undefined) url.searchParams.set(key, value)
-  }
-  return url.toString()
 }
 
 /** ScrapingBee 的错误体形状不定:优先 `message`、再 `error`,都没有就把原文当消息。 */
@@ -158,11 +140,14 @@ async function requestText(
   ctx: ProviderContext,
   path: string,
   params: Record<string, string | undefined>,
-): Promise<{ body: string, response: Response }> {
-  const response = await guardedFetch(buildUrl(path, requireApiKey(ctx, SERVICE), params), { method: 'GET' })
-  const body = await response.text()
-  if (!response.ok) throw upstreamError(response.status, errorMessage(body, response.status))
-  return { body, response }
+): Promise<{ body: string, response: ProviderHttpResult<string> }> {
+  const response = await http.request<string>({
+    path,
+    query: [['api_key', requireApiKey(ctx, SERVICE)], ...Object.entries(params)],
+    responseType: 'text',
+    mapError: ({ data, status }) => upstreamError(status, errorMessage(String(data ?? ''), status)),
+  })
+  return { body: response.data, response }
 }
 
 export async function fetchHtml(

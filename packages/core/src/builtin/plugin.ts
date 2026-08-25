@@ -17,23 +17,23 @@
  * (enabled 等)变更跳过;auth.kind 切换时吊销/换发 pluginToken(新 token 仅本响应一次)。
  */
 
+import { z } from 'zod/v4'
 import type { SecretStoreImpl } from '../secret/secretStore'
-import type { CmdSpec, HelpModel } from '../htbp/model'
 import type { SKRegistryStore } from '../auth/sk'
 import type { BuiltinModule } from './types'
-import { cmdPath, LIST_OPTS_SCHEMA, optListOptions, requireString, VOID_ACK, withCommandPaths } from './util'
+import { type PluginDescribe, type PluginExport, validatePluginContract } from '../plugin/contract'
+import { KEY_PLUGIN, KEY_PLUGIN_HEALTH, KEY_PLUGIN_META, type StateStore } from '../store'
 import {
   LIST_LIMIT_DEFAULT,
   LIST_LIMIT_MAX,
   type Timestamp,
-  type TreePath,
 } from '../types'
-import { type PluginDescribe, type PluginExport, validatePluginContract } from '../plugin/contract'
-import { KEY_PLUGIN, KEY_PLUGIN_HEALTH, KEY_PLUGIN_META, type StateStore } from '../store'
 import {
   parsePluginManifest,
   type PluginManifest,
 } from '../plugin/manifest'
+import { BuiltinCommandRegistry } from './commandRegistry'
+import { LIST_OPTS_ZOD_SCHEMA, VOID_ACK } from './util'
 import { TBError } from '../errors'
 import { omit } from '../omit'
 
@@ -101,100 +101,109 @@ export interface PluginModuleDeps {
   store: StateStore
 }
 
-function pluginCmds(nodePath: TreePath): CmdSpec[] {
-  const path = cmdPath(nodePath)
-  const idSchema = {
-    type: 'object',
-    properties: { id: { type: 'string', description: 'plugin id' } },
-    required: ['id'],
-  }
-  const cmds: CmdSpec[] = [
+interface PluginCommandService {
+  get(id: string): Promise<unknown>
+  health(id: string): Promise<unknown>
+  list(opts?: { cursor?: string, limit?: number }): Promise<unknown>
+  remove(id: string): Promise<void>
+  update(id: string, patch: Record<string, unknown>): Promise<PluginRegistration>
+  write(input: Record<string, unknown>): Promise<PluginRegistration>
+}
+
+const pluginAuthSchema = z.discriminatedUnion('kind', [
+  z.strictObject({ kind: z.literal('platform-token') }),
+  z.strictObject({ kind: z.literal('bearer'), secretRef: z.string().min(1) }),
+]).describe(
+  '{ kind: "platform-token" } — gateway mints the token (shown once in the response); or { kind: "bearer", secretRef }',
+)
+const pluginIdSchema = z.string().min(1).describe('plugin id')
+const manifestFields = {
+  id: z.string().min(1).describe('unique plugin id'),
+  protocolVersion: z.literal('plugin/v2').describe(
+    'transport protocol version; what the plugin provides is declared by its /~describe exports',
+  ),
+  endpoint: z.string().min(1).describe('https base URL of the plugin service'),
+  auth: pluginAuthSchema,
+  healthPath: z.string().min(1).describe('GET probe path, e.g. "/healthz"'),
+  enabled: z.boolean(),
+}
+const pluginWriteSchema = z.strictObject(manifestFields)
+const pluginPatchSchema = z.strictObject({
+  id: manifestFields.id.optional(),
+  protocolVersion: manifestFields.protocolVersion.optional(),
+  endpoint: manifestFields.endpoint.optional(),
+  auth: manifestFields.auth.optional(),
+  healthPath: manifestFields.healthPath.optional(),
+  enabled: manifestFields.enabled.optional(),
+}).describe('fields to change; same shape as write, all optional')
+
+const COMMANDS = new BuiltinCommandRegistry<PluginCommandService>('plugin', DESCRIPTION)
+  .register(
+    'list',
     {
-      name: 'list',
-      method: 'POST',
-      path,
       h: 'list registered plugins (pluginToken never returned)',
-      inputSchema: { type: 'object', properties: { opts: LIST_OPTS_SCHEMA } },
+      inputSchema: z.strictObject({ opts: LIST_OPTS_ZOD_SCHEMA.optional() }),
       returns: 'Page<PluginView> — manifest + the exports declared by its /~describe',
       scope: 'admin',
     },
+    ({ opts }, { deps }) => deps.list(opts),
+  )
+  .register(
+    'get',
     {
-      name: 'get',
-      method: 'POST',
-      path,
       h: 'fetch one plugin manifest by id',
-      inputSchema: idSchema,
+      inputSchema: z.strictObject({ id: pluginIdSchema }),
       returns: 'PluginView — manifest + the exports declared by its /~describe',
       scope: 'admin',
     },
+    ({ id }, { deps }) => deps.get(id),
+  )
+  .register(
+    'write',
     {
-      name: 'write',
-      method: 'POST',
-      path,
       h: 'register a plugin: probes health and validates its /~describe exports before accepting; then mount an export via system/registry (config.provider = plugin id, config.export = export id)',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          id: { type: 'string', description: 'unique plugin id' },
-          protocolVersion: {
-            type: 'string',
-            enum: ['plugin/v2'],
-            description: 'transport protocol version; what the plugin provides is declared by its /~describe exports',
-          },
-          endpoint: { type: 'string', description: 'https base URL of the plugin service' },
-          auth: {
-            type: 'object',
-            description:
-              '{ kind: "platform-token" } — gateway mints the token (shown once in the response); or { kind: "bearer", secretRef }',
-          },
-          healthPath: { type: 'string', description: 'GET probe path, e.g. "/healthz"' },
-          enabled: { type: 'boolean' },
-        },
-        required: ['id', 'endpoint', 'auth', 'healthPath', 'enabled'],
-      },
+      inputSchema: pluginWriteSchema,
       returns: 'PluginView + pluginToken shown once (platform-token only)',
       scope: 'admin',
     },
+    (input, { deps }) => deps.write(input),
+  )
+  .register(
+    'update',
     {
-      name: 'update',
-      method: 'POST',
-      path,
       h: 'patch a registration; endpoint changes re-probe and re-validate the exports before applying',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          id: { type: 'string', description: 'plugin id' },
-          patch: {
-            type: 'object',
-            description: 'fields to change; same shape as write, all optional',
-          },
-        },
-        required: ['id', 'patch'],
-      },
+      inputSchema: z.strictObject({
+        id: pluginIdSchema,
+        patch: pluginPatchSchema,
+      }),
       returns: 'PluginView — pluginToken shown once if auth switched to platform-token',
       scope: 'admin',
     },
+    ({ id, patch }, { deps }) => deps.update(id, patch),
+  )
+  .register(
+    'delete',
     {
-      name: 'delete',
-      method: 'POST',
-      path,
       h: 'unregister a plugin and revoke its platform token; mounted nodes referencing it stop working',
-      inputSchema: idSchema,
+      inputSchema: z.strictObject({ id: pluginIdSchema }),
       returns: 'void',
       scope: 'admin',
     },
+    async ({ id }, { deps }) => {
+      await deps.remove(id)
+      return VOID_ACK
+    },
+  )
+  .register(
+    'health',
     {
-      name: 'health',
-      method: 'POST',
-      path,
       h: 'probe the plugin health endpoint now',
-      inputSchema: idSchema,
+      inputSchema: z.strictObject({ id: pluginIdSchema }),
       returns: '{ id, healthy, checkedAt }',
       scope: 'admin',
     },
-  ]
-  return withCommandPaths(nodePath, cmds)
-}
+    ({ id }, { deps }) => deps.health(id),
+  )
 
 function clampLimit(limit?: number): number {
   if (limit === undefined || limit < 1) return LIST_LIMIT_DEFAULT
@@ -377,51 +386,26 @@ export function createPluginModule(deps: PluginModuleDeps): BuiltinModule {
     await store.delete(KEY_PLUGIN_META + id)
   }
 
-  return {
-    module: 'plugin',
-    description: DESCRIPTION,
-    help(nodePath: TreePath): HelpModel {
-      return {
-        node: { path: nodePath, kind: 'builtin', description: DESCRIPTION },
-        cmds: pluginCmds(nodePath),
-      }
+  return COMMANDS.module({
+    async list(opts) {
+      const listOpts: { cursor?: string, limit: number } = { limit: clampLimit(opts?.limit) }
+      if (opts?.cursor !== undefined) listOpts.cursor = opts.cursor
+      const page = await store.list(KEY_PLUGIN, listOpts)
+      const items = await Promise.all(
+        page.items.map(({ value }) => view(value as StoredPlugin)),
+      )
+      return page.cursor !== undefined ? { items, cursor: page.cursor } : { items }
     },
-    async dispatch(cmd: string, args: Record<string, unknown>): Promise<unknown> {
-      switch (cmd) {
-        case 'list': {
-          const opts = optListOptions(args)
-          const listOpts: { cursor?: string, limit: number } = { limit: clampLimit(opts?.limit) }
-          if (opts?.cursor !== undefined) listOpts.cursor = opts.cursor
-          const page = await store.list(KEY_PLUGIN, listOpts)
-          const items = await Promise.all(
-            page.items.map(({ value }) => view(value as StoredPlugin)),
-          )
-          return page.cursor !== undefined ? { items, cursor: page.cursor } : { items }
-        }
-        case 'get':
-          return await view(await require(requireString(args, 'id')))
-        case 'write':
-          return write(args)
-        case 'update': {
-          const id = requireString(args, 'id')
-          const patch = args.patch
-          if (typeof patch !== 'object' || patch === null) {
-            throw new TBError('invalid_argument', 'field \'patch\' must be an object')
-          }
-          return update(id, patch as Record<string, unknown>)
-        }
-        case 'delete':
-          await remove(requireString(args, 'id'))
-          return VOID_ACK
-        case 'health': {
-          const id = requireString(args, 'id')
-          const manifest = projectManifest(await require(id))
-          const record = await probeAndRecord(manifest)
-          return { id, healthy: record.healthy, checkedAt: record.checkedAt }
-        }
-        default:
-          throw new TBError('invalid_argument', `unknown cmd '${cmd}' on system/plugin`)
-      }
+    async get(id) {
+      return await view(await require(id))
     },
-  }
+    write,
+    update,
+    remove,
+    async health(id) {
+      const manifest = projectManifest(await require(id))
+      const record = await probeAndRecord(manifest)
+      return { id, healthy: record.healthy, checkedAt: record.checkedAt }
+    },
+  })
 }

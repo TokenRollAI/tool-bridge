@@ -17,7 +17,9 @@ export default defineConfig({
   tsconfig: 'tsconfig.build.json',
   dts: {
     entry: { index: 'src/index.ts' },
-    resolve: ['@tool-bridge/core', '@tool-bridge/app'],
+    // app/core 的公开类型包含 Zod 推导；一起内联，避免 packed declarations
+    // 指向未声明的传递依赖。
+    resolve: ['@tool-bridge/core', '@tool-bridge/app', 'zod'],
   },
   clean: true,
   minify: false,

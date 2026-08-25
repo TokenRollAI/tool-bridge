@@ -23,6 +23,7 @@ import {
 } from '@tool-bridge/core'
 import { AwsClient } from 'aws4fetch'
 import { encodeObjectKey, presignS3Put, presignS3Url } from './s3Sign'
+import { toWebObjectBodyStream } from '../objectBodyStream'
 
 /** s3 provider 的构造参数(providerConfig + authRef 解析出的凭证)。 */
 export interface S3StoreConfig {
@@ -87,14 +88,8 @@ export function createS3ObjectStore(
     secretAccessKey: cfg.secretAccessKey,
     service: 's3',
     region: cfg.region ?? 'auto',
-  })
-  // Streaming request bodies are not replayable. A dedicated client prevents
-  // aws4fetch from retrying a partially consumed PUT on 429/5xx.
-  const putClient = new AwsClient({
-    accessKeyId: cfg.accessKeyId,
-    secretAccessKey: cfg.secretAccessKey,
-    service: 's3',
-    region: cfg.region ?? 'auto',
+    // Store 的重试由上层按操作幂等性统一决定。传输层不得自动重放写入，
+    // 也不能让读/删路径悄悄继承 aws4fetch 的默认 10 次重试。
     retries: 0,
   })
   const base = cfg.endpoint.replace(/\/+$/, '')
@@ -128,40 +123,7 @@ export function createS3ObjectStore(
         ? new Uint8Array(body.buffer, body.byteOffset, body.byteLength)
         : new Uint8Array(body)
     }
-    const source = body
-    const reader = source.getReader()
-    return new ReadableStream<Uint8Array>({
-      async pull(controller) {
-        try {
-          const chunk = await reader.read()
-          if (chunk.done) {
-            reader.releaseLock()
-            controller.close()
-          } else if (chunk.value !== undefined) {
-            controller.enqueue(chunk.value)
-          }
-        } catch (error) {
-          try {
-            reader.releaseLock()
-          } catch {
-            // The stream may already have released its reader while failing.
-          }
-          controller.error(error)
-        }
-      },
-      async cancel(reason) {
-        try {
-          if (reader.cancel !== undefined) await reader.cancel(reason)
-          else await source.cancel?.(reason)
-        } finally {
-          try {
-            reader.releaseLock()
-          } catch {
-            // cancel may release the lock in the source implementation.
-          }
-        }
-      },
-    }, { highWaterMark: 0 })
+    return toWebObjectBodyStream(body, { highWaterMark: 0 })
   }
 
   const metaFromHeaders = (key: string, headers: Headers): ObjectMeta => {
@@ -217,7 +179,7 @@ export function createS3ObjectStore(
       }
       if (putOpts?.ifMatchEtag !== undefined) headers['if-match'] = `"${putOpts.ifMatchEtag}"`
       if (putOpts?.ifNoneMatch !== undefined) headers['if-none-match'] = putOpts.ifNoneMatch
-      const resp = await s3FetchWith(putClient, urlFor(key), {
+      const resp = await s3Fetch(urlFor(key), {
         method: 'PUT',
         headers,
         body: fetchBody(body),

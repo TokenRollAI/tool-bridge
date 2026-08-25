@@ -2,20 +2,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { mockJsonResponse, parseError, runCli } from './cliHarness'
 import { buildVirtualize, parseToolsFile } from '../src/registry'
 import { parseCallArgs } from '../src/commands/call'
 import { resetFetch, setFetch } from '../src/http'
-import { parseError, runCli } from './cliHarness'
 
 /** 捕获请求并按 body 应答;返回 mock 以断言 URL/body。 */
 function captureFetch(body: unknown, status = 200): ReturnType<typeof vi.fn> {
-  const fn = vi.fn(
-    async () =>
-      new Response(JSON.stringify(body), {
-        status,
-        headers: { 'content-type': 'application/json' },
-      }),
-  )
+  const fn = vi.fn(async (url: string, init?: RequestInit) =>
+    mockJsonResponse(url, init, body, status))
   setFetch(fn as unknown as typeof fetch)
   return fn
 }

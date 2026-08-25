@@ -19,12 +19,15 @@
 import { TBError } from '@tool-bridge/plugin-sdk'
 import { assertPublicHttpUrl, guardedFetch } from '../_runtime/guardedFetch'
 import { type ProviderContext, requireApiKey } from '../_runtime/plugin'
+import { createProviderHttpClient } from '../_runtime/providerHttp'
+import { asJsonObject as toRecord } from '../_runtime/jsonValue'
 import { upstreamError } from '../_runtime/upstreamError'
 
 const SERVICE = 'mistral_ai'
 const API_BASE = 'https://api.mistral.ai'
 /** 从 file.url 拉取上传源时的字节上限,照搬上游。 */
 const MAX_REMOTE_UPLOAD_BYTES = 100 * 1024 * 1024
+const http = createProviderHttpClient({ baseUrl: API_BASE, service: SERVICE })
 
 type Json = Record<string, unknown>
 type Method = 'DELETE' | 'GET' | 'PATCH' | 'POST' | 'PUT'
@@ -169,12 +172,6 @@ const SPECS: Record<string, ActionSpec> = {
     pathKeys: ['library_id'],
     bodyOnDelete: true,
   },
-}
-
-function toRecord(value: unknown): Json | undefined {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-    ? (value as Json)
-    : undefined
 }
 
 function text(value: unknown): string | undefined {
@@ -392,15 +389,27 @@ async function executeJson(spec: ActionSpec, input: Json, ctx: ProviderContext):
   const sendsBody = spec.method === 'POST' || spec.method === 'PUT' || spec.method === 'PATCH'
     || (spec.method === 'DELETE' && spec.bodyOnDelete === true)
 
-  const response = await guardedFetch(url, {
+  const result = await http.request({
+    path: url,
     method: spec.method,
     headers: authHeaders(ctx, true),
-    ...(sendsBody ? { body: JSON.stringify(compactJson(remaining)) } : {}),
+    ...(sendsBody ? { json: compactJson(remaining) } : {}),
+    responseType: 'auto',
+    invalidJsonMessage: 'mistral_ai returned malformed JSON',
+    mapError: ({ data, rawText, status }) => {
+      const payload = toRecord(data)
+      const fallback = `mistral_ai request failed with ${status}`
+      const message = text(payload?.detail)
+        ?? text(payload?.message)
+        ?? text(payload?.error)
+        ?? text(rawText)
+        ?? fallback
+      return upstreamError(status === 422 ? 400 : (status || 502), message)
+    },
   })
-  await assertOk(response)
   // 204 没有 body,但删除类 action 的出参 schema 要一个 `{deleted:true}`。
-  if (response.status === 204) return { deleted: true }
-  return await readResponse(response)
+  if (result.status === 204) return { deleted: true }
+  return result.bodyKind === 'empty' ? '' : result.data
 }
 
 async function executeMultipart(spec: ActionSpec, input: Json, ctx: ProviderContext): Promise<unknown> {

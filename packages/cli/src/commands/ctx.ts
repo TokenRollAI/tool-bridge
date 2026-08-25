@@ -9,9 +9,9 @@ import {
   withGlobalOpts,
   withPageOpts,
 } from '../args'
+import { callDirect, CliError, parseContextUploadGrant, putPresigned } from '../http'
 import { deleteNode, parseConfigSpecs, registerNode } from '../registry'
-import { asArray, guard, printJson, printLine, table } from '../output'
-import { callDirect, CliError, putPresigned } from '../http'
+import { asArray, printJson, printLine, table } from '../output'
 import { confirmDestructive } from '../confirm'
 
 /**
@@ -146,21 +146,19 @@ export function ctxLsCommand(): Command {
         opts: GlobalOpts & { cursor?: string, limit?: string },
       ) => {
         const asJson = Boolean(opts.json)
-        await guard(asJson, async () => {
-          const ns = String(nsArg ?? '').trim()
-          if (!ns) throw new CliError('namespace path is required')
-          const callOpts = parsePageOpts(opts)
+        const ns = String(nsArg ?? '').trim()
+        if (!ns) throw new CliError('namespace path is required')
+        const callOpts = parsePageOpts(opts)
 
-          const page = await callDirect<Page<ContextEntryMeta>>(
-            resolveTarget(opts), `${nsUri(ns)}/list`,
-            {
-              path: prefix ? String(prefix) : '',
-              ...(Object.keys(callOpts).length ? { opts: callOpts } : {}),
-            },
-          )
-          if (asJson) printJson(page)
-          else printEntries(page)
-        })
+        const page = await callDirect<Page<ContextEntryMeta>>(
+          resolveTarget(opts), `${nsUri(ns)}/list`,
+          {
+            path: prefix ? String(prefix) : '',
+            ...(Object.keys(callOpts).length ? { opts: callOpts } : {}),
+          },
+        )
+        if (asJson) printJson(page)
+        else printEntries(page)
       },
     )
 }
@@ -173,30 +171,28 @@ export function ctxCatCommand(): Command {
     .argument('<entry>', 'Entry path inside namespace')
     .action(async (nsArg: string, entryArg: string, opts: GlobalOpts) => {
       const asJson = Boolean(opts.json)
-      await guard(asJson, async () => {
-        const ns = String(nsArg ?? '').trim()
-        if (!ns) throw new CliError('namespace path is required')
-        const entryPath = String(entryArg ?? '').trim()
-        if (!entryPath) throw new CliError('entry path is required')
+      const ns = String(nsArg ?? '').trim()
+      if (!ns) throw new CliError('namespace path is required')
+      const entryPath = String(entryArg ?? '').trim()
+      if (!entryPath) throw new CliError('entry path is required')
 
-        const entry = await callDirect<ContextEntry>(resolveTarget(opts), `${nsUri(ns)}/get`, {
-          path: entryPath,
-        })
-        if (asJson) {
-          printJson(entry)
-          return
-        }
-        const content = entry.content
-        if (typeof content === 'string') {
-          printLine(content.replace(/\n$/, ''))
-        } else if (content && typeof content === 'object' && '$ref' in content) {
-          // 大对象:content = { $ref: <预签名 URL> }。
-          process.stderr.write('large object, download via URL\n')
-          printLine(String((content as { $ref: unknown }).$ref))
-        } else {
-          printJson(content)
-        }
+      const entry = await callDirect<ContextEntry>(resolveTarget(opts), `${nsUri(ns)}/get`, {
+        path: entryPath,
       })
+      if (asJson) {
+        printJson(entry)
+        return
+      }
+      const content = entry.content
+      if (typeof content === 'string') {
+        printLine(content.replace(/\n$/, ''))
+      } else if (content && typeof content === 'object' && '$ref' in content) {
+        // 大对象:content = { $ref: <预签名 URL> }。
+        process.stderr.write('large object, download via URL\n')
+        printLine(String((content as { $ref: unknown }).$ref))
+      } else {
+        printJson(content)
+      }
     })
 }
 
@@ -224,40 +220,38 @@ export function ctxPutCommand(): Command {
         },
       ) => {
         const asJson = Boolean(opts.json)
-        await guard(asJson, async () => {
-          const ns = String(nsArg ?? '').trim()
-          if (!ns) throw new CliError('namespace path is required')
-          const entryPath = String(entryArg ?? '').trim()
-          if (!entryPath) throw new CliError('entry path is required')
+        const ns = String(nsArg ?? '').trim()
+        if (!ns) throw new CliError('namespace path is required')
+        const entryPath = String(entryArg ?? '').trim()
+        if (!entryPath) throw new CliError('entry path is required')
 
-          const metadata = parseMeta(opts.meta)
-          const file = opts.file ? String(opts.file) : undefined
-          if (opts.content !== undefined && opts.file !== undefined) {
-            throw new CliError('--content and --file are mutually exclusive')
-          }
-          let content: string
-          if (opts.content !== undefined) content = String(opts.content)
-          else if (file) content = readContentFile(file)
-          else {
-            if (process.stdin.isTTY) throw new CliError('pass --content/--file or pipe content via stdin')
-            content = readStdin()
-          }
-          const contentType = opts.contentType
-            ? String(opts.contentType)
-            : guessContentType(opts.content === undefined ? file : undefined)
+        const metadata = parseMeta(opts.meta)
+        const file = opts.file ? String(opts.file) : undefined
+        if (opts.content !== undefined && opts.file !== undefined) {
+          throw new CliError('--content and --file are mutually exclusive')
+        }
+        let content: string
+        if (opts.content !== undefined) content = String(opts.content)
+        else if (file) content = readContentFile(file)
+        else {
+          if (process.stdin.isTTY) throw new CliError('pass --content/--file or pipe content via stdin')
+          content = readStdin()
+        }
+        const contentType = opts.contentType
+          ? String(opts.contentType)
+          : guessContentType(opts.content === undefined ? file : undefined)
 
-          const meta = await callDirect<ContextEntryMeta>(resolveTarget(opts), `${nsUri(ns)}/write`, {
-            path: entryPath,
-            entry: {
-              contentType,
-              content,
-              ...(metadata ? { metadata } : {}),
-              ...(opts.ifVersion ? { ifVersion: String(opts.ifVersion) } : {}),
-            },
-          })
-          if (asJson) printJson(meta)
-          else printLine(`wrote ${meta.uri ?? entryPath}`)
+        const meta = await callDirect<ContextEntryMeta>(resolveTarget(opts), `${nsUri(ns)}/write`, {
+          path: entryPath,
+          entry: {
+            contentType,
+            content,
+            ...(metadata ? { metadata } : {}),
+            ...(opts.ifVersion ? { ifVersion: String(opts.ifVersion) } : {}),
+          },
         })
+        if (asJson) printJson(meta)
+        else printLine(`wrote ${meta.uri ?? entryPath}`)
       },
     )
 }
@@ -277,34 +271,29 @@ export function ctxUploadCommand(): Command {
       opts: GlobalOpts & { contentType?: string, file: string, force?: boolean },
     ) => {
       const asJson = Boolean(opts.json)
-      await guard(asJson, async () => {
-        const ns = String(nsArg ?? '').trim()
-        if (!ns) throw new CliError('namespace path is required')
-        const entryPath = String(entryArg ?? '').trim()
-        if (!entryPath) throw new CliError('entry path is required')
-        const file = String(opts.file)
-        const contentType = opts.contentType
-          ? String(opts.contentType).trim()
-          : guessUploadContentType(file)
-        if (!contentType) throw new CliError('--content-type must not be empty')
-        const bytes = readBinaryFile(file)
-        const target = resolveTarget(opts)
-        const grant = await callDirect<{
-          expiresAt: string
-          headers: Record<string, string>
-          method: 'PUT'
-          uri: string
-          url: string
-        }>(target, `${nsUri(ns)}/create_upload`, {
+      const ns = String(nsArg ?? '').trim()
+      if (!ns) throw new CliError('namespace path is required')
+      const entryPath = String(entryArg ?? '').trim()
+      if (!entryPath) throw new CliError('entry path is required')
+      const file = String(opts.file)
+      const contentType = opts.contentType
+        ? String(opts.contentType).trim()
+        : guessUploadContentType(file)
+      if (!contentType) throw new CliError('--content-type must not be empty')
+      const bytes = readBinaryFile(file)
+      const target = resolveTarget(opts)
+      const grant = parseContextUploadGrant(await callDirect<unknown>(
+        target,
+        `${nsUri(ns)}/create_upload`, {
           path: entryPath,
           contentType,
           ...(opts.force === true ? { overwrite: true } : {}),
-        })
-        const uploaded = await putPresigned(grant, bytes, target.timeoutMs)
-        const result = { uri: grant.uri, ...uploaded }
-        if (asJson) printJson(result)
-        else printLine(`uploaded ${grant.uri}`)
-      })
+        },
+      ))
+      const uploaded = await putPresigned(grant, bytes, target.timeoutMs)
+      const result = { uri: grant.uri, ...uploaded }
+      if (asJson) printJson(result)
+      else printLine(`uploaded ${grant.uri}`)
     })
 }
 
@@ -330,34 +319,32 @@ export function ctxPatchCommand(): Command {
         },
       ) => {
         const asJson = Boolean(opts.json)
-        await guard(asJson, async () => {
-          const ns = String(nsArg ?? '').trim()
-          if (!ns) throw new CliError('namespace path is required')
-          const entryPath = String(entryArg ?? '').trim()
-          if (!entryPath) throw new CliError('entry path is required')
+        const ns = String(nsArg ?? '').trim()
+        if (!ns) throw new CliError('namespace path is required')
+        const entryPath = String(entryArg ?? '').trim()
+        if (!entryPath) throw new CliError('entry path is required')
 
-          const metadata = parseMeta(opts.meta)
-          if (opts.content !== undefined && opts.file !== undefined) {
-            throw new CliError('--content and --file are mutually exclusive')
-          }
-          let content: string | undefined
-          if (opts.content !== undefined) content = String(opts.content)
-          else if (opts.file) content = readContentFile(String(opts.file))
-          if (content === undefined && !metadata) {
-            throw new CliError('nothing to update: pass --content/--file and/or --meta')
-          }
+        const metadata = parseMeta(opts.meta)
+        if (opts.content !== undefined && opts.file !== undefined) {
+          throw new CliError('--content and --file are mutually exclusive')
+        }
+        let content: string | undefined
+        if (opts.content !== undefined) content = String(opts.content)
+        else if (opts.file) content = readContentFile(String(opts.file))
+        if (content === undefined && !metadata) {
+          throw new CliError('nothing to update: pass --content/--file and/or --meta')
+        }
 
-          const meta = await callDirect<ContextEntryMeta>(resolveTarget(opts), `${nsUri(ns)}/update`, {
-            path: entryPath,
-            patch: {
-              ...(content !== undefined ? { content } : {}),
-              ...(metadata ? { metadata } : {}),
-              ...(opts.ifVersion ? { ifVersion: String(opts.ifVersion) } : {}),
-            },
-          })
-          if (asJson) printJson(meta)
-          else printLine(`updated ${meta.uri ?? entryPath}`)
+        const meta = await callDirect<ContextEntryMeta>(resolveTarget(opts), `${nsUri(ns)}/update`, {
+          path: entryPath,
+          patch: {
+            ...(content !== undefined ? { content } : {}),
+            ...(metadata ? { metadata } : {}),
+            ...(opts.ifVersion ? { ifVersion: String(opts.ifVersion) } : {}),
+          },
         })
+        if (asJson) printJson(meta)
+        else printLine(`updated ${meta.uri ?? entryPath}`)
       },
     )
 }
@@ -376,25 +363,23 @@ export function ctxSearchCommand(): Command {
         opts: GlobalOpts & { cursor?: string, limit?: string, mode?: string },
       ) => {
         const asJson = Boolean(opts.json)
-        await guard(asJson, async () => {
-          const ns = String(nsArg ?? '').trim()
-          if (!ns) throw new CliError('namespace path is required')
-          const query = String(queryArg ?? '').trim()
-          if (!query) throw new CliError('query is required')
-          const mode = opts.mode ? String(opts.mode) : undefined
-          if (mode !== undefined && mode !== 'keyword' && mode !== 'semantic') {
-            throw new CliError(`invalid --mode "${mode}"; valid: keyword, semantic`)
-          }
-          const callOpts: Record<string, unknown> = parsePageOpts(opts)
-          if (mode) callOpts.mode = mode
+        const ns = String(nsArg ?? '').trim()
+        if (!ns) throw new CliError('namespace path is required')
+        const query = String(queryArg ?? '').trim()
+        if (!query) throw new CliError('query is required')
+        const mode = opts.mode ? String(opts.mode) : undefined
+        if (mode !== undefined && mode !== 'keyword' && mode !== 'semantic') {
+          throw new CliError(`invalid --mode "${mode}"; valid: keyword, semantic`)
+        }
+        const callOpts: Record<string, unknown> = parsePageOpts(opts)
+        if (mode) callOpts.mode = mode
 
-          const page = await callDirect<Page<ContextEntryMeta>>(
-            resolveTarget(opts), `${nsUri(ns)}/search`,
-            { query, ...(Object.keys(callOpts).length ? { opts: callOpts } : {}) },
-          )
-          if (asJson) printJson(page)
-          else printEntries(page)
-        })
+        const page = await callDirect<Page<ContextEntryMeta>>(
+          resolveTarget(opts), `${nsUri(ns)}/search`,
+          { query, ...(Object.keys(callOpts).length ? { opts: callOpts } : {}) },
+        )
+        if (asJson) printJson(page)
+        else printEntries(page)
       },
     )
 }
@@ -408,16 +393,14 @@ export function ctxRmCommand(): Command {
     .option('--yes', 'Skip the confirmation prompt')
     .action(async (nsArg: string, entryArg: string, opts: GlobalOpts) => {
       const asJson = Boolean(opts.json)
-      await guard(asJson, async () => {
-        const ns = String(nsArg ?? '').trim()
-        if (!ns) throw new CliError('namespace path is required')
-        const entryPath = String(entryArg ?? '').trim()
-        if (!entryPath) throw new CliError('entry path is required')
-        await confirmDestructive(opts, `Delete context entry ${entryPath} in ${ns}?`)
-        await callDirect(resolveTarget(opts), `${nsUri(ns)}/delete`, { path: entryPath })
-        if (asJson) printJson({ ok: true, path: entryPath })
-        else printLine(`deleted ${entryPath}`)
-      })
+      const ns = String(nsArg ?? '').trim()
+      if (!ns) throw new CliError('namespace path is required')
+      const entryPath = String(entryArg ?? '').trim()
+      if (!entryPath) throw new CliError('entry path is required')
+      await confirmDestructive(opts, `Delete context entry ${entryPath} in ${ns}?`)
+      await callDirect(resolveTarget(opts), `${nsUri(ns)}/delete`, { path: entryPath })
+      if (asJson) printJson({ ok: true, path: entryPath })
+      else printLine(`deleted ${entryPath}`)
     })
 }
 
@@ -468,72 +451,70 @@ export function ctxMountCommand(): Command {
         },
       ) => {
         const asJson = Boolean(opts.json)
-        await guard(asJson, async () => {
-          const path = String(pathArg ?? '').trim()
-          if (!path) throw new CliError('tree path is required')
-          const provider = String(opts.provider ?? '').trim()
-          const authRef = opts.authRef ? String(opts.authRef) : undefined
-          const prefix = opts.prefix ? String(opts.prefix) : undefined
-          const ttl = parsePositiveInt(opts.ttl, '--ttl')
+        const path = String(pathArg ?? '').trim()
+        if (!path) throw new CliError('tree path is required')
+        const provider = String(opts.provider ?? '').trim()
+        const authRef = opts.authRef ? String(opts.authRef) : undefined
+        const prefix = opts.prefix ? String(opts.prefix) : undefined
+        const ttl = parsePositiveInt(opts.ttl, '--ttl')
 
-          let providerConfig: Record<string, unknown> | undefined
-          if (provider === 'r2') {
-            if (opts.endpoint || opts.bucket || opts.region || authRef) {
-              throw new CliError('--endpoint/--bucket/--region/--auth-ref only apply to s3')
-            }
-            if (opts.config.length > 0) {
-              throw new CliError('--config only applies to plugin providers')
-            }
-            if (prefix) providerConfig = { prefix }
-          } else if (provider === 's3') {
-            const endpoint = String(opts.endpoint ?? '').trim()
-            if (!endpoint) throw new CliError('--endpoint is required for --provider s3')
-            const bucket = String(opts.bucket ?? '').trim()
-            if (!bucket) throw new CliError('--bucket is required for --provider s3')
-            if (!authRef) throw new CliError('--auth-ref is required for --provider s3')
-            if (opts.config.length > 0) {
-              throw new CliError('--config only applies to plugin providers')
-            }
-            providerConfig = {
-              endpoint,
-              bucket,
-              ...(opts.region ? { region: String(opts.region) } : {}),
-              ...(prefix ? { prefix } : {}),
-            }
-          } else {
-            if (opts.endpoint || opts.bucket || opts.region || prefix) {
-              throw new CliError(
-                '--endpoint/--bucket/--region/--prefix are not supported for plugin providers',
-              )
-            }
-            // plugin context 的非密钥挂载配置(baseUrl / workspace 之类)。
-            providerConfig = parseConfigSpecs(opts.config)
+        let providerConfig: Record<string, unknown> | undefined
+        if (provider === 'r2') {
+          if (opts.endpoint || opts.bucket || opts.region || authRef) {
+            throw new CliError('--endpoint/--bucket/--region/--auth-ref only apply to s3')
           }
+          if (opts.config.length > 0) {
+            throw new CliError('--config only applies to plugin providers')
+          }
+          if (prefix) providerConfig = { prefix }
+        } else if (provider === 's3') {
+          const endpoint = String(opts.endpoint ?? '').trim()
+          if (!endpoint) throw new CliError('--endpoint is required for --provider s3')
+          const bucket = String(opts.bucket ?? '').trim()
+          if (!bucket) throw new CliError('--bucket is required for --provider s3')
+          if (!authRef) throw new CliError('--auth-ref is required for --provider s3')
+          if (opts.config.length > 0) {
+            throw new CliError('--config only applies to plugin providers')
+          }
+          providerConfig = {
+            endpoint,
+            bucket,
+            ...(opts.region ? { region: String(opts.region) } : {}),
+            ...(prefix ? { prefix } : {}),
+          }
+        } else {
+          if (opts.endpoint || opts.bucket || opts.region || prefix) {
+            throw new CliError(
+              '--endpoint/--bucket/--region/--prefix are not supported for plugin providers',
+            )
+          }
+          // plugin context 的非密钥挂载配置(baseUrl / workspace 之类)。
+          providerConfig = parseConfigSpecs(opts.config)
+        }
 
-          const exportId = String(opts.export ?? '').trim()
-          if (exportId && (provider === 'r2' || provider === 's3')) {
-            throw new CliError('--export only applies to plugin providers')
-          }
-          const config: NodeConfig = {
-            kind: 'context',
-            provider,
-            ...(exportId ? { export: exportId } : {}),
-            ...(providerConfig ? { providerConfig } : {}),
-            ...(authRef ? { authRef } : {}),
-            ...(opts.readOnly ? { readOnly: true } : {}),
-            ...(ttl !== undefined ? { ttl } : {}),
-          }
-          const input: NodeInput = {
-            path,
-            kind: 'context',
-            description: opts.description ? String(opts.description) : `context at ${path}`,
-            config,
-          }
+        const exportId = String(opts.export ?? '').trim()
+        if (exportId && (provider === 'r2' || provider === 's3')) {
+          throw new CliError('--export only applies to plugin providers')
+        }
+        const config: NodeConfig = {
+          kind: 'context',
+          provider,
+          ...(exportId ? { export: exportId } : {}),
+          ...(providerConfig ? { providerConfig } : {}),
+          ...(authRef ? { authRef } : {}),
+          ...(opts.readOnly ? { readOnly: true } : {}),
+          ...(ttl !== undefined ? { ttl } : {}),
+        }
+        const input: NodeInput = {
+          path,
+          kind: 'context',
+          description: opts.description ? String(opts.description) : `context at ${path}`,
+          config,
+        }
 
-          const node = await registerNode(resolveTarget(opts), input)
-          if (asJson) printJson(node)
-          else printLine(`mounted context node at ${path} (provider ${provider})`)
-        })
+        const node = await registerNode(resolveTarget(opts), input)
+        if (asJson) printJson(node)
+        else printLine(`mounted context node at ${path} (provider ${provider})`)
       },
     )
 }
@@ -546,14 +527,12 @@ export function ctxUnmountCommand(): Command {
     .option('--yes', 'Skip the confirmation prompt')
     .action(async (pathArg: string, opts: GlobalOpts) => {
       const asJson = Boolean(opts.json)
-      await guard(asJson, async () => {
-        const path = String(pathArg ?? '').trim()
-        if (!path) throw new CliError('tree path is required')
-        await confirmDestructive(opts, `Unmount context namespace at ${path}?`)
-        await deleteNode(resolveTarget(opts), path, ['context'])
-        if (asJson) printJson({ ok: true, path })
-        else printLine(`unmounted context node: ${path}`)
-      })
+      const path = String(pathArg ?? '').trim()
+      if (!path) throw new CliError('tree path is required')
+      await confirmDestructive(opts, `Unmount context namespace at ${path}?`)
+      await deleteNode(resolveTarget(opts), path, ['context'])
+      if (asJson) printJson({ ok: true, path })
+      else printLine(`unmounted context node: ${path}`)
     })
 }
 

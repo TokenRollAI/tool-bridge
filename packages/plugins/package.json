@@ -7,6 +7,7 @@
   "exports": {
     ".": "./src/registry.ts",
     "./feishu": "./src/feishu/index.ts",
+    "./guarded-fetch": "./src/_runtime/guardedFetch.ts",
     "./notes": "./src/notes/index.ts"
   },
   "scripts": {
@@ -22,6 +23,7 @@
     "@cfworker/json-schema": "catalog:",
     "@modelcontextprotocol/sdk": "catalog:",
     "@tool-bridge/plugin-sdk": "workspace:*",
+    "ipaddr.js": "2.5.0",
     "zod": "catalog:"
   },
   "devDependencies": {

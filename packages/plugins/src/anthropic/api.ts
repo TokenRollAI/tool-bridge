@@ -32,38 +32,24 @@ import type {
   getModelInput,
   listModelsInput,
 } from './schema'
+import { compactDefined as compact, asJsonObject as record, trimmedText as text } from '../_runtime/jsonValue'
 import { type ProviderContext, requireApiKey } from '../_runtime/plugin'
+import { createProviderHttpClient } from '../_runtime/providerHttp'
 import { upstreamError } from '../_runtime/upstreamError'
-import { guardedFetch } from '../_runtime/guardedFetch'
 
 const SERVICE = 'anthropic'
 const API_BASE = 'https://api.anthropic.com'
 /** 上游 API 的版本契约:每个请求都要带,值变了就是换了一套响应形状。 */
 const API_VERSION = '2023-06-01'
+const http = createProviderHttpClient({ baseUrl: `${API_BASE}/`, service: SERVICE })
 
 type Json = Record<string, unknown>
-
-function record(value: unknown): Json | undefined {
-  return typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Json) : undefined
-}
-
-/** 上游 `optionalString` 的等价物:去空白后仍非空才算有值。 */
-function text(value: unknown): string | undefined {
-  if (typeof value !== 'string') return undefined
-  const trimmed = value.trim()
-  return trimmed === '' ? undefined : trimmed
-}
 
 /** 上游 `requiredString`:schema 没标 required 的字段,必填断言落在这里。 */
 function requireText(value: unknown, field: string): string {
   const result = text(value)
   if (result === undefined) throw new TBError('invalid_argument', `${field} 不能为空`)
   return result
-}
-
-/** 上游 `compactObject`:丢掉值为 undefined 的键(`null` 是有意义的值,要留住)。 */
-function compact(input: Json): Json {
-  return Object.fromEntries(Object.entries(input).filter(([, value]) => value !== undefined))
 }
 
 function headers(apiKey: string): Record<string, string> {
@@ -76,62 +62,37 @@ function headers(apiKey: string): Record<string, string> {
 }
 
 /** Anthropic 的错误体是 `{type, error:{type, message}}`;网关层的错误可能是纯文本。 */
-function errorMessage(status: number, body: string): string {
+function errorMessage(status: number, payload: unknown): string {
   const fallback = `anthropic request failed with ${status}`
-  try {
-    const nested = record(record(JSON.parse(body))?.error)
-    const message = text(nested?.message)
-    if (message !== undefined) return message
-  } catch {
-    // 非 JSON 错误体(网关回的 HTML、空体)走下面的原文兜底。
-  }
-  return text(body) ?? fallback
+  const nested = record(record(payload)?.error)
+  return text(nested?.message) ?? text(payload) ?? fallback
 }
 
 interface RequestInput {
   body?: Json
   method?: 'GET' | 'POST'
   path: string
-  query?: Json
-}
-
-function buildUrl(path: string, query: Json | undefined): string {
-  const url = new URL(`${API_BASE}${path}`)
-  for (const [key, value] of Object.entries(query ?? {})) {
-    if (value === undefined || value === null) continue
-    url.searchParams.set(key, String(value))
-  }
-  return url.toString()
+  query?: Record<string, boolean | null | number | string | undefined>
 }
 
 async function request(ctx: ProviderContext, input: RequestInput): Promise<unknown> {
-  // 取凭证放在 try 外:它抛的是配置错误,不该被下面的传输失败兜底吞成 502。
   const apiKey = requireApiKey(ctx, SERVICE)
   const method = input.method ?? 'GET'
-
-  let response: Response
-  try {
-    response = await guardedFetch(buildUrl(input.path, input.query), {
-      method,
-      headers: headers(apiKey),
-      body: input.body === undefined ? undefined : JSON.stringify(input.body),
-    })
-  } catch (error) {
-    // 传输层失败必须就地归一:漏出去的裸 Error 会被 plugin-sdk 抹成 "internal plugin error"
-    // 500,把"上游不通/出网被拦"说成插件自身故障。EgressBlockedError 本身是 TBError
-    // (invalid_argument),它该原样冒上去而不是被说成上游故障。
-    if (error instanceof TBError) throw error
-    const message = error instanceof Error ? error.message : 'unknown network error'
-    throw upstreamError(502, `anthropic ${method} ${input.path} failed before receiving response: ${message}`)
-  }
-
-  const raw = await response.text().catch(() => '')
-  if (!response.ok) throw upstreamError(response.status, errorMessage(response.status, raw))
-  try {
-    return JSON.parse(raw)
-  } catch {
-    throw upstreamError(502, 'anthropic returned malformed JSON')
-  }
+  const { data } = await http.request({
+    path: input.path,
+    method,
+    query: Object.entries(input.query ?? {}),
+    headers: headers(apiKey),
+    ...(input.body === undefined ? {} : { json: input.body }),
+    invalidJsonMessage: 'anthropic returned malformed JSON',
+    mapError: ({ data: payload, status }) => upstreamError(status, errorMessage(status, payload)),
+    mapTransportError: ({ message }) => upstreamError(
+      502,
+      `anthropic ${method} ${input.path} failed before receiving response: ${message ?? 'unknown network error'}`,
+    ),
+  })
+  if (data === undefined) throw upstreamError(502, 'anthropic returned malformed JSON')
+  return data
 }
 
 /** 连接器只支持非流式:让上游回一段没人能消费的 SSE 不如当场说清。 */

@@ -1,6 +1,5 @@
 import { Command } from 'commander'
 import { type ConnectArgs, runConnect, withDeviceConnectionGlobalOpts } from './connect'
-import { guard } from '../output'
 
 export function mountFsCommand(): Command {
   return withDeviceConnectionGlobalOpts(new Command('fs'))
@@ -11,9 +10,7 @@ export function mountFsCommand(): Command {
     .option('--path <path>', 'Mount path (default: device/<device-id>)')
     .option('--fs-readonly', 'Expose fs as read-only', false)
     .action(async (root: string, url: string | undefined, opts: Omit<ConnectArgs, 'url'>) => {
-      await guard(Boolean(opts.json), () =>
-        runConnect({ ...opts, url, shell: false, fs: [String(root)] }),
-      )
+      await runConnect({ ...opts, url, shell: false, fs: [String(root)] })
     })
 }
 

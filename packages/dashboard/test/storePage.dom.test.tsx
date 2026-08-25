@@ -1,9 +1,9 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { StoreObjectDescriptor } from '@/lib/types'
+import type { StoreObjectDescriptor } from '@/lib/store'
 
 const OBJECT: StoreObjectDescriptor = {
-  uri: 'store://default/obj_01k4photo',
+  uri: 'store://default/AbCdEfGhIjKlMnOpQrStUv',
   contentType: 'image/jpeg',
   filename: 'capture.jpg',
   size: 4096,
@@ -18,6 +18,7 @@ const secretRef = 'https://gw.example/~store/shares/bearer-secret'
 const uploadMutate = vi.fn(async () => OBJECT)
 const readMutate = vi.fn(async () => ({
   $ref: 'https://gw.example/~store/refs/read-secret',
+  uri: OBJECT.uri,
   contentType: OBJECT.contentType,
   size: OBJECT.size,
   expiresAt: '2099-08-24T12:10:00.000Z',
@@ -35,6 +36,9 @@ const readReset = vi.fn()
 
 vi.mock('@/lib/queries', () => ({
   useInvalidate: () => invalidate,
+}))
+
+vi.mock('@/lib/store-queries', () => ({
   useStoreDelete: () => ({ isPending: false, mutateAsync: deleteMutate }),
   useStoreObjects: () => ({
     data: { pages: [{ items: [OBJECT] }] },

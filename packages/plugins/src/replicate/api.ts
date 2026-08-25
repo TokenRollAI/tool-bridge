@@ -36,14 +36,16 @@ import type {
   listModelVersionsInput,
   listPredictionsInput,
 } from './schema'
+import { compactDefined as compact, asJsonObject as record, trimmedText as text } from '../_runtime/jsonValue'
 import { type ProviderContext, requireApiKey } from '../_runtime/plugin'
+import { createProviderHttpClient } from '../_runtime/providerHttp'
 import { upstreamError } from '../_runtime/upstreamError'
-import { guardedFetch } from '../_runtime/guardedFetch'
 
 const SERVICE = 'replicate'
 const API_BASE = 'https://api.replicate.com'
 /** 上游 credentialValidators 打的也是这个端点。 */
 const ACCOUNT_PATH = '/v1/account'
+const http = createProviderHttpClient({ baseUrl: `${API_BASE}/`, service: SERVICE })
 
 type Json = Record<string, unknown>
 
@@ -53,24 +55,6 @@ interface RequestInput {
   method?: 'GET' | 'POST'
   path: string
   query?: Record<string, string | undefined>
-}
-
-/** 上游 `optionalString`:去空白后仍非空才算有值。 */
-function text(value: unknown): string | undefined {
-  if (typeof value !== 'string') return undefined
-  const trimmed = value.trim()
-  return trimmed === '' ? undefined : trimmed
-}
-
-function record(value: unknown): Json | undefined {
-  return typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Json) : undefined
-}
-
-/** 丢掉值为 undefined 的键(上游 `compactObject`)。 */
-function compact<T>(input: Record<string, T | undefined>): Record<string, T> {
-  return Object.fromEntries(
-    Object.entries(input).filter(([, value]) => value !== undefined),
-  ) as Record<string, T>
 }
 
 /** 上游 `requiredString` 的等价物:去空白后仍非空,否则报 `invalid_argument`。 */
@@ -104,45 +88,30 @@ function segment(value: string | undefined, field: string): string {
  *   错误响应上回纯文本仍照上游用法,当成错误消息(见下面的 detail)。
  */
 async function request(ctx: ProviderContext, input: RequestInput): Promise<unknown> {
-  const url = new URL(`${API_BASE}${input.path}`)
-  for (const [key, value] of Object.entries(input.query ?? {})) {
-    // 上游这里连空串一起跳过(空的 created_after 打出去会被上游当成非法时间戳)。
-    if (value !== undefined && value !== '') url.searchParams.set(key, value)
-  }
-
   const headers: Record<string, string> = {
     accept: 'application/json',
     authorization: `Bearer ${requireApiKey(ctx, SERVICE)}`,
     ...input.headers,
   }
-  if (input.body !== undefined) headers['content-type'] = 'application/json'
-
-  const response = await guardedFetch(url.toString(), {
+  const response = await http.request({
     method: input.method ?? 'GET',
+    path: input.path,
+    // 上游这里连空串一起跳过(空的 created_after 打出去会被上游当成非法时间戳)。
+    query: Object.entries(input.query ?? {}).filter(([, value]) => value !== undefined && value !== ''),
     headers,
-    body: input.body === undefined ? undefined : JSON.stringify(input.body),
+    ...(input.body === undefined ? {} : { json: input.body }),
+    invalidJson: 'text',
+    mapError: ({ bodyKind, data, status }) => {
+      const body = bodyKind === 'json' ? record(data) ?? {} : { detail: data }
+      return upstreamError(status, text(body.detail) ?? text(body.title) ?? `Replicate 返回 HTTP ${status}`)
+    },
   })
-
-  const raw = await response.text()
   // 空体记成 `{}`(上游语义:cancel 之类可能不回内容)。
-  let payload: unknown = {}
-  let isJson = true
-  if (raw !== '') {
-    try {
-      payload = JSON.parse(raw)
-    } catch {
-      isJson = false
-      payload = { detail: raw }
-    }
+  if (response.bodyKind === 'empty') return {}
+  if (response.bodyKind !== 'json') {
+    throw new TBError('unavailable', 'Replicate 返回了非 JSON 响应', { retryable: true })
   }
-
-  if (!response.ok) {
-    const body = record(payload) ?? {}
-    const message = text(body.detail) ?? text(body.title) ?? `Replicate 返回 HTTP ${response.status}`
-    throw upstreamError(response.status, message)
-  }
-  if (!isJson) throw new TBError('unavailable', 'Replicate 返回了非 JSON 响应', { retryable: true })
-  return payload
+  return response.data
 }
 
 /** 契约说好是对象;不是就是上游出问题,不是调用方的错。 */

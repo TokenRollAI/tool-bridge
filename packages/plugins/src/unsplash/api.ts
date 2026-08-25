@@ -26,30 +26,17 @@ import type {
   listTopicsInput,
   searchPhotosInput,
 } from './schema'
+import { finiteNumber as numeric, asJsonObject as record, trimmedText as text } from '../_runtime/jsonValue'
 import { type ProviderContext, requireApiKey } from '../_runtime/plugin'
+import { createProviderHttpClient } from '../_runtime/providerHttp'
 import { upstreamError } from '../_runtime/upstreamError'
-import { guardedFetch } from '../_runtime/guardedFetch'
 
 const SERVICE = 'unsplash'
 const API_BASE = 'https://api.unsplash.com'
+const http = createProviderHttpClient({ baseUrl: `${API_BASE}/`, service: SERVICE })
 
 type Json = Record<string, unknown>
 type QueryValue = number | string | undefined
-
-/** 上游 `optionalString` 的等价物:去空白后仍非空才算有值。 */
-function text(value: unknown): string | undefined {
-  if (typeof value !== 'string') return undefined
-  const trimmed = value.trim()
-  return trimmed === '' ? undefined : trimmed
-}
-
-function record(value: unknown): Json | undefined {
-  return typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Json) : undefined
-}
-
-function numeric(value: unknown): number | undefined {
-  return typeof value === 'number' && Number.isFinite(value) ? value : undefined
-}
 
 function requireRecord(value: unknown, label: string): Json {
   const result = record(value)
@@ -85,14 +72,6 @@ function csv(value: string[] | undefined): string | undefined {
   return items.length > 0 ? items.join(',') : undefined
 }
 
-function buildUrl(path: string, query: Record<string, QueryValue>): string {
-  const url = new URL(`${API_BASE}${path}`)
-  for (const [key, value] of Object.entries(query)) {
-    if (value !== undefined) url.searchParams.set(key, String(value))
-  }
-  return url.toString()
-}
-
 /** Unsplash 的错误体有三种形态:`errors: string[]` / `error` / `message`。 */
 function errorMessage(payload: unknown): string | undefined {
   const body = record(payload)
@@ -107,33 +86,25 @@ function errorMessage(payload: unknown): string | undefined {
 }
 
 async function request(ctx: ProviderContext, path: string, query: Record<string, QueryValue> = {}): Promise<unknown> {
-  const response = await guardedFetch(buildUrl(path, query), {
-    method: 'GET',
+  const response = await http.request({
+    path,
+    query: Object.entries(query),
     headers: {
       'accept': 'application/json',
       // Unsplash 自有的方案名,不是 Bearer。
       'authorization': `Client-ID ${requireApiKey(ctx, SERVICE)}`,
       'accept-version': 'v1',
     },
+    invalidJson: 'text',
+    mapError: ({ bodyKind, data, status }) => upstreamError(
+      status,
+      errorMessage(bodyKind === 'json' ? data : null) ?? `Unsplash 返回 HTTP ${status}`,
+    ),
   })
-
-  const body = await response.text()
-  let payload: unknown = null
-  if (body !== '') {
-    try {
-      payload = JSON.parse(body)
-    } catch {
-      // 2xx 上回非 JSON 只能是上游坏了;错误响应上回 HTML 错误页却很常见,那时按 HTTP
-      // 状态归一比报"响应不是 JSON"准得多。
-      if (response.ok) {
-        throw new TBError('unavailable', 'Unsplash 返回了非 JSON 响应', { retryable: true })
-      }
-    }
+  if (response.bodyKind === 'invalid-json') {
+    throw new TBError('unavailable', 'Unsplash 返回了非 JSON 响应', { retryable: true })
   }
-  if (!response.ok) {
-    throw upstreamError(response.status, errorMessage(payload) ?? `Unsplash 返回 HTTP ${response.status}`)
-  }
-  return payload
+  return response.bodyKind === 'empty' ? null : response.data
 }
 
 export async function listPhotos(input: z.infer<typeof listPhotosInput>, ctx: ProviderContext): Promise<Json> {

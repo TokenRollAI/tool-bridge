@@ -61,12 +61,14 @@ import type {
   updateProjectApiKeyInput,
   upsertProjectSecretsInput,
 } from './schema'
+import { compactDefined as compact, asJsonObject as record, trimmedText as text } from '../_runtime/jsonValue'
+import { createProviderHttpClient, type ProviderQuery } from '../_runtime/providerHttp'
 import { type ProviderContext, requireApiKey } from '../_runtime/plugin'
 import { upstreamError } from '../_runtime/upstreamError'
-import { guardedFetch } from '../_runtime/guardedFetch'
 
 const SERVICE = 'supabase'
 const API_BASE = 'https://api.supabase.com/v1'
+const http = createProviderHttpClient({ baseUrl: `${API_BASE}/`, service: SERVICE })
 
 /** project 状态的已知取值;上游出现新状态时归一成 UNKNOWN 而不是原样透出。 */
 const PROJECT_STATUSES = new Set([
@@ -100,25 +102,9 @@ interface RequestInput {
   query?: Record<string, QueryValue>
 }
 
-/** 上游 `optionalString`:去空白后仍非空才算有值。 */
-function text(value: unknown): string | undefined {
-  if (typeof value !== 'string') return undefined
-  const trimmed = value.trim()
-  return trimmed === '' ? undefined : trimmed
-}
-
 /** 上游 `nullableString`:`null` 与"没有值"是两回事,前者要留住。 */
 function nullableText(value: unknown): string | null | undefined {
   return value === null ? null : text(value)
-}
-
-function record(value: unknown): Json | undefined {
-  return typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Json) : undefined
-}
-
-/** 丢掉值为 undefined 的键(上游 `compactObject` / `jsonObject`);`null` 要留住。 */
-function compact(input: Record<string, unknown>): Json {
-  return Object.fromEntries(Object.entries(input).filter(([, value]) => value !== undefined))
 }
 
 /** 上游 `providerInputError`:调用方给的参数不对。 */
@@ -182,44 +168,24 @@ function errorMessage(status: number, payload: unknown): string {
 }
 
 async function request(ctx: ProviderContext, input: RequestInput): Promise<unknown> {
-  const url = new URL(`${API_BASE}${input.path}`)
-  for (const [key, value] of Object.entries(input.query ?? {})) {
-    if (value === undefined) continue
-    if (Array.isArray(value)) {
-      // health 的 services 靠**重复同名参数**表达;statuses 那种逗号串在调用处就拼好了。
-      for (const item of value) url.searchParams.append(key, item)
-      continue
-    }
-    url.searchParams.set(key, String(value))
-  }
-
   const hasBody = input.body !== undefined
-  const response = await guardedFetch(url.toString(), {
+  const { data } = await http.request({
+    path: input.path,
     method: input.method ?? 'GET',
+    // health 的 services 靠**重复同名参数**表达;statuses 那种逗号串在调用处就拼好了。
+    query: Object.entries(input.query ?? {}) satisfies ProviderQuery,
     headers: {
       accept: 'application/json',
       authorization: `Bearer ${requireApiKey(ctx, SERVICE)}`,
-      ...(hasBody ? { 'content-type': 'application/json' } : {}),
     },
-    body: hasBody ? JSON.stringify(input.body) : undefined,
+    ...(hasBody ? { json: input.body } : {}),
+    invalidJsonMessage: 'malformed supabase response: malformed supabase json response',
+    mapError: ({ data: payload, status }) => upstreamError(
+      status,
+      errorMessage(status, typeof payload === 'string' ? { message: payload } : payload),
+    ),
   })
-
-  const raw = await response.text()
-  let payload: unknown
-  if (raw.trim() === '') {
-    payload = null
-  } else {
-    try {
-      payload = JSON.parse(raw)
-    } catch {
-      // 2xx 上回非 JSON 只能是上游坏了;错误响应回 HTML 错误页很常见,那时把正文当消息、
-      // 按 HTTP 状态归一 —— 否则 401 的错误页会变成可重试的 unavailable。
-      if (response.ok) throw malformed('malformed supabase json response')
-      payload = { message: raw }
-    }
-  }
-
-  if (!response.ok) throw upstreamError(response.status, errorMessage(response.status, payload))
+  const payload = data ?? null
   if (payload === null && input.allowEmpty !== true) throw malformed('empty body')
   return payload
 }

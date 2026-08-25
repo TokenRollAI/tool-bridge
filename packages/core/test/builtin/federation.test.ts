@@ -69,4 +69,9 @@ describe('builtin federation 模块', () => {
       e => isTBError(e) && e.code === 'invalid_argument',
     )
   })
+
+  it('写命令拒绝未知字段', async () => {
+    await expect(mod.dispatch('add', { host: 'runtime.com', token: 'secret' }, ctx))
+      .rejects.toSatisfy(e => isTBError(e) && e.code === 'invalid_argument')
+  })
 })

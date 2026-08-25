@@ -1,12 +1,6 @@
-import {
-  base64urlEncode,
-  type CallContext,
-  encodeCallContext,
-  HEADER_TB_CONTEXT,
-  HEADER_TB_UPSTREAM_AUTH,
-} from '@tool-bridge/core'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { z } from 'zod/v4'
+import { createProviderHarness } from '../support/providerHarness'
 import { createGithubPlugin } from '../../src/github/index'
 import { githubActions } from '../../src/github/schema'
 
@@ -23,48 +17,27 @@ import { githubActions } from '../../src/github/schema'
  * - contents 路径要逐段编码但**保留斜杠**,编错就打到别的资源上
  */
 
-const PLUGIN_TOKEN = 'tbp_test'
-const ENV = { PLUGIN_TOKEN }
 const TOKEN = 'github_pat_testdeadbeef'
 const plugin = createGithubPlugin()
 
-const CALLER: CallContext = {
-  keyId: 'k1',
-  owner: 'agent:tester',
-  scopes: [],
-  traceId: 't1',
+const {
+  call,
+  envelope,
+  sent,
+  sentUrl,
+  stubFetch,
+} = createProviderHarness({
   mountPath: 'dev/github',
-  exportId: 'actions',
-}
-
-function envelope(body: unknown, opts: { auth?: string | null } = {}): Promise<Response> {
-  const headers: Record<string, string> = {
-    'authorization': `Bearer ${PLUGIN_TOKEN}`,
-    'content-type': 'application/json',
-    [HEADER_TB_CONTEXT]: encodeCallContext(CALLER),
-  }
-  const auth = opts.auth === undefined ? TOKEN : opts.auth
-  if (auth !== null) {
-    headers[HEADER_TB_UPSTREAM_AUTH] = base64urlEncode(new TextEncoder().encode(auth))
-  }
-  return Promise.resolve(plugin.fetch(
-    new Request('https://plugin.test/', { method: 'POST', headers, body: JSON.stringify(body) }),
-    ENV as never,
-  ))
-}
-
-function call(name: string, args: unknown, opts?: { auth?: string | null }): Promise<Response> {
-  return envelope({ tool: 'Call', arguments: { name, args } }, opts)
-}
+  plugin,
+  upstreamAuth: TOKEN,
+})
 
 /** 200 + JSON body 的常规上游响应。 */
 function mockGithub(status: number, payload: unknown, headers: Record<string, string> = {}) {
-  const fn = vi.fn(() => Promise.resolve(new Response(JSON.stringify(payload), {
+  return stubFetch(() => Promise.resolve(new Response(JSON.stringify(payload), {
     status,
     headers: { 'content-type': 'application/json', ...headers },
   })))
-  vi.stubGlobal('fetch', fn)
-  return fn
 }
 
 /**
@@ -72,17 +45,7 @@ function mockGithub(status: number, payload: unknown, headers: Record<string, st
  * 在 undici 下直接 TypeError,那个异常会被归一成 internal 500,看起来像产物的 bug。
  */
 function mockStatus(status: number, headers: Record<string, string> = {}) {
-  const fn = vi.fn(() => Promise.resolve(new Response(null, { status, headers })))
-  vi.stubGlobal('fetch', fn)
-  return fn
-}
-
-function sent(mock: ReturnType<typeof vi.fn>): Request {
-  return (mock.mock.calls[0] as [Request])[0]
-}
-
-function sentUrl(mock: ReturnType<typeof vi.fn>): URL {
-  return new URL(sent(mock).url)
+  return stubFetch(() => Promise.resolve(new Response(null, { status, headers })))
 }
 
 async function sentBody(mock: ReturnType<typeof vi.fn>): Promise<unknown> {
@@ -92,10 +55,6 @@ async function sentBody(mock: ReturnType<typeof vi.fn>): Promise<unknown> {
 async function content(res: Response): Promise<Record<string, unknown>> {
   return ((await res.json()) as { content: Record<string, unknown> }).content
 }
-
-afterEach(() => {
-  vi.unstubAllGlobals()
-})
 
 describe('契约面', () => {
   it('~describe 报成单个 tools/v1 export,并带上凭证探针', async () => {

@@ -54,13 +54,15 @@ import type {
   updateSectionInput,
   updateTaskInput,
 } from './schema'
+import { compactDefined as compact, asJsonObject as record, trimmedText as text } from '../_runtime/jsonValue'
+import { createProviderHttpClient, type ProviderQuery } from '../_runtime/providerHttp'
 import { type ProviderContext, requireApiKey } from '../_runtime/plugin'
 import { upstreamError } from '../_runtime/upstreamError'
-import { guardedFetch } from '../_runtime/guardedFetch'
 
 const SERVICE = 'todoist'
 const API_BASE = 'https://api.todoist.com/api/v1'
 const USER_PATH = '/user'
+const http = createProviderHttpClient({ baseUrl: `${API_BASE}/`, service: SERVICE })
 
 type Json = Record<string, unknown>
 type QueryValue = number | string | string[] | undefined
@@ -70,22 +72,6 @@ interface RequestInput {
   method?: 'GET' | 'POST'
   path: string
   query?: Record<string, QueryValue>
-}
-
-/** 上游 `optionalString` 的等价物:去空白后仍非空才算有值(Zod 的 `min(1)` 拦不住纯空白串)。 */
-function text(value: unknown): string | undefined {
-  if (typeof value !== 'string') return undefined
-  const trimmed = value.trim()
-  return trimmed === '' ? undefined : trimmed
-}
-
-function record(value: unknown): Json | undefined {
-  return typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Json) : undefined
-}
-
-/** 丢掉值为 undefined 的键(上游 `compactObject`);**`null` 要留住**(update 的"清空"语义)。 */
-function compact(input: Record<string, unknown>): Json {
-  return Object.fromEntries(Object.entries(input).filter(([, value]) => value !== undefined))
 }
 
 /**
@@ -128,41 +114,28 @@ function errorMessage(status: number, payload: unknown): string {
 }
 
 async function request(ctx: ProviderContext, input: RequestInput): Promise<unknown> {
-  const url = new URL(input.path.replace(/^\/+/, ''), `${API_BASE}/`)
-  for (const [key, value] of Object.entries(input.query ?? {})) {
-    if (value === undefined) continue
-    // 多值参数(list_tasks 的 ids)是**逗号串**,不是重复的同名参数。
-    url.searchParams.set(key, Array.isArray(value) ? value.join(',') : String(value))
-  }
-
   const hasBody = input.body !== undefined
-  const response = await guardedFetch(url.toString(), {
+  const query = Object.entries(input.query ?? {}).map(([key, value]) => [
+    key,
+    // 多值参数(list_tasks 的 ids)是**逗号串**,不是重复的同名参数。
+    Array.isArray(value) ? value.join(',') : value,
+  ] as const) satisfies ProviderQuery
+  const { data } = await http.request({
+    path: input.path,
     method: input.method ?? 'GET',
+    query,
     headers: {
       accept: 'application/json',
       authorization: `Bearer ${requireApiKey(ctx, SERVICE)}`,
-      ...(hasBody ? { 'content-type': 'application/json' } : {}),
     },
-    body: hasBody ? JSON.stringify(input.body) : undefined,
+    ...(hasBody ? { json: input.body } : {}),
+    invalidJsonMessage: 'Todoist 返回了非 JSON 响应',
+    mapError: ({ data, status }) => upstreamError(
+      status,
+      errorMessage(status, typeof data === 'string' ? { message: data } : data),
+    ),
   })
-
-  const raw = await response.text()
-  let payload: unknown = {}
-  if (raw !== '') {
-    try {
-      payload = JSON.parse(raw)
-    } catch {
-      // 2xx 上回非 JSON 只能是上游坏了;错误响应回 HTML 错误页很常见,那时把正文当消息、
-      // 按 HTTP 状态归一,比报"响应不是 JSON"准。
-      if (response.ok) {
-        throw new TBError('unavailable', 'Todoist 返回了非 JSON 响应', { retryable: true })
-      }
-      payload = { message: raw }
-    }
-  }
-
-  if (!response.ok) throw upstreamError(response.status, errorMessage(response.status, payload))
-  return payload
+  return data ?? {}
 }
 
 /** list 类端点的 `{results, next_cursor}`:results 缺失或不是数组即契约破了。 */

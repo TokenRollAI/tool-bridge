@@ -25,11 +25,13 @@ import type {
   updateUserInput,
 } from './schema'
 import { type ProviderContext, requireApiKey } from '../_runtime/plugin'
+import { createProviderHttpClient } from '../_runtime/providerHttp'
+import { compactDefined as compact } from '../_runtime/jsonValue'
 import { upstreamError } from '../_runtime/upstreamError'
-import { guardedFetch } from '../_runtime/guardedFetch'
 
 const SERVICE = 'workos'
 const API_BASE = 'https://api.workos.com'
+const http = createProviderHttpClient({ baseUrl: `${API_BASE}/`, service: SERVICE })
 
 type Json = Record<string, unknown>
 type QueryValue = boolean | number | string | string[] | undefined
@@ -52,56 +54,45 @@ async function request(
   input: { body?: Json, method: 'GET' | 'POST' | 'PUT', path: string, query?: Record<string, QueryValue> },
 ): Promise<Json> {
   const apiKey = requireApiKey(ctx, SERVICE)
-  const url = new URL(input.path, API_BASE)
-  for (const [key, value] of Object.entries(input.query ?? {})) {
-    if (value === undefined) continue
-    if (Array.isArray(value)) {
-      // 多值过滤是重复同名键(与 Render 的逗号拼接不同)。
-      for (const item of value) url.searchParams.append(key, item)
-      continue
-    }
-    url.searchParams.set(key, String(value))
-  }
-
   const headers: Record<string, string> = {
     accept: 'application/json',
     authorization: `Bearer ${apiKey}`,
   }
-  if (input.body !== undefined) headers['content-type'] = 'application/json'
-
-  let response: Response
-  let text: string
-  try {
-    response = await guardedFetch(url.toString(), {
-      method: input.method,
-      headers,
-      body: input.body === undefined ? undefined : JSON.stringify(input.body),
-    })
-    text = await response.text()
-  } catch (error) {
-    if (error instanceof TBError) throw error
-    throw new TBError(
+  const response = await http.request({
+    method: input.method,
+    path: input.path,
+    // 多值过滤是重复同名键(与 Render 的逗号拼接不同)。
+    query: Object.entries(input.query ?? {}),
+    headers,
+    ...(input.body === undefined ? {} : { json: input.body }),
+    invalidJsonMessage: 'WorkOS 返回了非法 JSON',
+    mapError: ({ bodyKind, data, status }) => {
+      if (bodyKind === 'invalid-json') {
+        return new TBError('unavailable', 'WorkOS 返回了非法 JSON', { retryable: true })
+      }
+      const payload = bodyKind === 'empty'
+        ? {}
+        : data !== null && typeof data === 'object' && !Array.isArray(data)
+          ? data as Json
+          : undefined
+      return payload === undefined
+        ? new TBError('unavailable', 'WorkOS 返回的不是 JSON 对象', { retryable: true })
+        : upstreamError(status, errorMessage(payload, status))
+    },
+    mapTransportError: ({ message }) => new TBError(
       'unavailable',
-      error instanceof Error ? `WorkOS 请求失败: ${error.message}` : 'WorkOS 请求失败',
+      message === undefined ? 'WorkOS 请求失败' : `WorkOS 请求失败: ${message}`,
       { retryable: true },
-    )
+    ),
+  })
+  const payload = response.bodyKind === 'empty'
+    ? {}
+    : response.data !== null && typeof response.data === 'object' && !Array.isArray(response.data)
+      ? response.data as Json
+      : undefined
+  if (payload === undefined) {
+    throw new TBError('unavailable', 'WorkOS 返回的不是 JSON 对象', { retryable: true })
   }
-
-  let payload: Json = {}
-  if (text.trim() !== '') {
-    let parsed: unknown
-    try {
-      parsed = JSON.parse(text)
-    } catch {
-      throw new TBError('unavailable', 'WorkOS 返回了非法 JSON', { retryable: true })
-    }
-    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
-      throw new TBError('unavailable', 'WorkOS 返回的不是 JSON 对象', { retryable: true })
-    }
-    payload = parsed as Json
-  }
-
-  if (!response.ok) throw upstreamError(response.status, errorMessage(payload, response.status))
   return payload
 }
 
@@ -138,15 +129,6 @@ async function wrappedAction(
 ): Promise<Json> {
   const payload = await request(ctx, input)
   return { [wrapperKey]: unwrap(payload, wrapperKey), raw: payload }
-}
-
-/** `undefined` 的字段不进 body:WorkOS 把显式 null 当"清空",省略才是"不改"。 */
-function compact(input: Json): Json {
-  const output: Json = {}
-  for (const [key, value] of Object.entries(input)) {
-    if (value !== undefined) output[key] = value
-  }
-  return output
 }
 
 function userBody(input: Partial<z.infer<typeof createUserInput>>): Json {

@@ -50,6 +50,7 @@ import type {
   searchArticlesInput,
 } from './schema'
 import type { ProviderContext } from '../_runtime/plugin'
+import { asJsonObject as record, trimmedText as text } from '../_runtime/jsonValue'
 import { upstreamError } from '../_runtime/upstreamError'
 import { guardedFetch } from '../_runtime/guardedFetch'
 
@@ -75,17 +76,6 @@ const SORT_VALUES: Record<string, string> = {
 }
 
 type Json = Record<string, unknown>
-
-function record(value: unknown): Json | undefined {
-  return typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Json) : undefined
-}
-
-/** 上游 `optionalString` 的等价物:非字符串、或去空白后为空,都算缺失。 */
-function text(value: unknown): string | undefined {
-  if (typeof value !== 'string') return undefined
-  const trimmed = value.trim()
-  return trimmed === '' ? undefined : trimmed
-}
 
 /** 参数非法(含"schema 没标 required 但这里必须有"的那些字段)。 */
 function invalidInput(message: string): TBError {

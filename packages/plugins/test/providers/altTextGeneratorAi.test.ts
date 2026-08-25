@@ -1,12 +1,11 @@
 import {
-  base64urlEncode,
   type CallContext,
   encodeCallContext,
   HEADER_TB_CONTEXT,
-  HEADER_TB_UPSTREAM_AUTH,
 } from '@tool-bridge/core'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { createAltTextGeneratorAiPlugin } from '../../src/alt_text_generator_ai/index'
+import { createProviderHarness } from '../support/providerHarness'
 
 /**
  * 迁移产物的 wire 级验收:断言都经真实 envelope,不直调内部函数。
@@ -28,35 +27,20 @@ const CALLER: CallContext = {
   exportId: 'actions',
 }
 
+const { call: callProvider, stubFetch } = createProviderHarness({
+  env: ENV,
+  mountPath: 'ai/alt-text',
+  plugin,
+  upstreamAuth: API_KEY,
+})
+
 function call(args: unknown, opts: { auth?: string | null } = {}): Promise<Response> {
-  const headers: Record<string, string> = {
-    'authorization': `Bearer ${PLUGIN_TOKEN}`,
-    'content-type': 'application/json',
-    [HEADER_TB_CONTEXT]: encodeCallContext(CALLER),
-  }
-  const auth = opts.auth === undefined ? API_KEY : opts.auth
-  if (auth !== null) {
-    headers[HEADER_TB_UPSTREAM_AUTH] = base64urlEncode(new TextEncoder().encode(auth))
-  }
-  return Promise.resolve(plugin.fetch(
-    new Request('https://plugin.test/', {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({ tool: 'Call', arguments: { name: 'generate_alt_text', args } }),
-    }),
-    ENV as never,
-  ))
+  return callProvider('generate_alt_text', args, opts)
 }
 
 function mockUpstream(status: number, body: string): ReturnType<typeof vi.fn> {
-  const fn = vi.fn(() => Promise.resolve(new Response(body, { status })))
-  vi.stubGlobal('fetch', fn)
-  return fn
+  return stubFetch(() => Promise.resolve(new Response(body, { status })))
 }
-
-afterEach(() => {
-  vi.unstubAllGlobals()
-})
 
 describe('alt_text_generator_ai(迁移产物)', () => {
   it('~describe 报成单个 tools/v1 export', async () => {

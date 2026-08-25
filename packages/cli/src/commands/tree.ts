@@ -1,9 +1,8 @@
 import { Command } from 'commander'
 import type { TreeJson } from '../types'
 import { resolveTarget, withGlobalOpts } from '../args'
-import { guard, printJson, printLine } from '../output'
-import { apiJson, CliError } from '../http'
-import { nodePath } from '../paths'
+import { printJson, printLine } from '../output'
+import { CliError, withClient } from '../http'
 
 /**
  * 把 TreeJson 渲染成缩进树(纯函数,便于单测)。
@@ -44,20 +43,19 @@ export function treeCommand(): Command {
     .option('--depth <n>', 'Tree depth, integer 1-8 (default: 2)')
     .action(async (path: string | undefined, opts: TreeOpts) => {
       const asJson = Boolean(opts.json)
-      await guard(asJson, async () => {
-        let depth: number | undefined
-        if (opts.depth !== undefined) {
-          depth = Number(opts.depth)
-          if (!Number.isInteger(depth) || depth < 1 || depth > 8) {
-            throw new CliError(`invalid --depth "${opts.depth}": expected an integer between 1 and 8`)
-          }
+      let depth: number | undefined
+      if (opts.depth !== undefined) {
+        depth = Number(opts.depth)
+        if (!Number.isInteger(depth) || depth < 1 || depth > 8) {
+          throw new CliError(`invalid --depth "${opts.depth}": expected an integer between 1 and 8`)
         }
-        const tree = await apiJson<TreeJson>(resolveTarget(opts), {
-          path: nodePath('~tree', path),
-          query: { depth },
-        })
-        if (asJson) printJson(tree)
-        else printLine(renderTree(tree))
-      })
+      }
+      const target = resolveTarget(opts)
+      const tree = await withClient(
+        target,
+        async client => await client.getTree(path ?? '', { depth }),
+      )
+      if (asJson) printJson(tree)
+      else printLine(renderTree(tree))
     })
 }

@@ -7,13 +7,15 @@ import { runCli } from './cliHarness'
 
 const gw = ['--base-url', 'https://gw.example', '--sk', 'tbk_owner']
 const READY = {
-  uri: 'store://default/obj_01k4photo',
+  uri: 'store://default/abcdefghijklmnopqrstuv',
   contentType: 'image/jpeg',
   filename: 'capture.jpg',
   size: 4,
+  status: 'ready',
   createdAt: '2099-08-24T11:59:00.000Z',
+  updatedAt: '2099-08-24T12:00:00.000Z',
   readyAt: '2099-08-24T12:00:00.000Z',
-  owner: { kind: 'user', id: 'alice' },
+  owner: 'user:alice',
   driverKey: 'store/v1/private',
   uploadToken: 'must-not-escape',
   url: 'https://private.example/?signature=must-not-escape',
@@ -111,12 +113,15 @@ describe('tb store upload', () => {
     const headers = new Headers(calls[2]?.init?.headers)
     expect(headers.get('x-tb-store-upload')).toBe(grant.uploadToken)
     expect(headers.get('authorization')).toBeNull()
+    expect(calls[0]?.init?.signal).not.toBe(calls[1]?.init?.signal)
+    expect(calls[1]?.init?.signal).not.toBe(calls[2]?.init?.signal)
   })
 
   it('幂等 create 已完成时直接返回 descriptor，绝不再次 PUT', async () => {
     const file = join(dir, 'capture.jpg')
     writeFileSync(file, Buffer.from([1, 2, 3, 4]))
     const fetcher = vi.fn(async () => new Response(JSON.stringify({
+      ...RELAY_GRANT,
       alreadyCompleted: true,
       descriptor: READY,
     }), { status: 200 }))
@@ -136,6 +141,22 @@ describe('tb store upload', () => {
 })
 
 describe('tb store management', () => {
+  it('本地使用 SDK 的严格 Store URI parser，短 object id 不触发请求', async () => {
+    const fetcher = vi.fn()
+    setFetch(fetcher as typeof fetch)
+
+    await runCli(['store', 'stat', 'store://default/too-short', '--json', ...gw])
+
+    expect(process.exitCode).toBe(1)
+    expect(fetcher).not.toHaveBeenCalled()
+    const stdout = vi.mocked(process.stdout.write).mock.calls.map(call => String(call[0])).join('')
+    expect(JSON.parse(stdout)).toMatchObject({
+      ok: false,
+      code: 'invalid_argument',
+      retryable: false,
+    })
+  })
+
   it('list/stat 使用普通 owner SK 且 JSON 不泄漏 driver/token/url', async () => {
     const fetcher = vi.fn(async (input: RequestInfo | URL) => new Response(JSON.stringify(
       String(input).endsWith('/list') ? { items: [READY] } : READY,
@@ -151,6 +172,25 @@ describe('tb store management', () => {
     const stdout = vi.mocked(process.stdout.write).mock.calls.map(call => String(call[0])).join('')
     expect(stdout).toContain(READY.uri)
     expect(stdout).not.toContain('driverKey')
+    expect(stdout).not.toContain('must-not-escape')
+  })
+
+  it('SDK TBError 映射为稳定 CliError，且服务端 URL 不进入 JSON 错误', async () => {
+    setFetch(vi.fn(async () => new Response(JSON.stringify({
+      code: 'rate_limited',
+      message: 'retry https://private.example/?signature=must-not-escape',
+      retryable: true,
+    }), { status: 429 })) as typeof fetch)
+
+    await runCli(['store', 'list', '--json', ...gw])
+
+    expect(process.exitCode).toBe(1)
+    const stdout = vi.mocked(process.stdout.write).mock.calls.map(call => String(call[0])).join('')
+    expect(JSON.parse(stdout)).toMatchObject({
+      ok: false,
+      code: 'rate_limited',
+      retryable: true,
+    })
     expect(stdout).not.toContain('must-not-escape')
   })
 
@@ -177,6 +217,7 @@ describe('tb store management', () => {
       return calls.length === 1
         ? new Response(JSON.stringify({
             $ref: ref,
+            uri: READY.uri,
             contentType: 'image/jpeg',
             size: 4,
             expiresAt: '2099-08-24T12:10:00.000Z',
@@ -199,6 +240,7 @@ describe('tb store management', () => {
     writeFileSync(out, Buffer.from('original'))
     setFetch(vi.fn(async () => new Response(JSON.stringify({
       $ref: 'https://gw.example/~store/refs/read-secret',
+      uri: READY.uri,
       contentType: 'application/octet-stream',
       size: 4,
       expiresAt: '2099-08-24T12:10:00.000Z',

@@ -19,46 +19,26 @@ import type {
   listServicesInput,
   listTeamsInput,
 } from './schema'
+import {
+  compactDefined as compact,
+  trimmedText as text,
+  asJsonObject as toRecord,
+} from '../_runtime/jsonValue'
 import { type ProviderContext, requireApiKey } from '../_runtime/plugin'
+import { createProviderHttpClient } from '../_runtime/providerHttp'
 import { upstreamError } from '../_runtime/upstreamError'
-import { guardedFetch } from '../_runtime/guardedFetch'
 
 const SERVICE = 'rootly'
 const API_BASE = 'https://api.rootly.com/v1'
 const JSON_API_CONTENT_TYPE = 'application/vnd.api+json'
+const http = createProviderHttpClient({ baseUrl: `${API_BASE}/`, service: SERVICE })
 
 type Json = Record<string, unknown>
-
-function toRecord(value: unknown): Json | undefined {
-  return typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Json) : undefined
-}
-
-/** 上游 `optionalString` 的语义:非空白字符串才算数,且取 trim 后的值。 */
-function text(value: unknown): string | undefined {
-  if (typeof value !== 'string') return undefined
-  const trimmed = value.trim()
-  return trimmed === '' ? undefined : trimmed
-}
 
 function requireRecord(value: unknown, label: string): Json {
   const record = toRecord(value)
   if (record === undefined) throw upstreamError(502, `${label} was not an object`)
   return record
-}
-
-/**
- * 空体当空对象(Rootly 某些 204 场景),错误响应解不开就把原文塞进 JSON:API 的错误形状,
- * 让下游 `errorMessage` 有统一的一条路径可走。
- */
-async function readPayload(response: Response): Promise<unknown> {
-  const body = await response.text()
-  if (body.trim() === '') return {}
-  try {
-    return JSON.parse(body) as unknown
-  } catch {
-    if (!response.ok) return { errors: [{ detail: body }] }
-    throw upstreamError(502, 'Rootly returned invalid JSON')
-  }
 }
 
 function errorMessage(payload: unknown, status: number): string {
@@ -73,19 +53,23 @@ async function requestJson(
   path: string,
   query: Record<string, string>,
 ): Promise<unknown> {
-  const url = new URL(`${API_BASE}${path}`)
-  for (const [name, value] of Object.entries(query)) url.searchParams.set(name, value)
-
-  const response = await guardedFetch(url.toString(), {
+  const response = await http.request({
+    path,
+    query: Object.entries(query),
     headers: {
       'accept': JSON_API_CONTENT_TYPE,
       'authorization': `Bearer ${requireApiKey(ctx, SERVICE)}`,
       'content-type': JSON_API_CONTENT_TYPE,
     },
+    invalidJson: 'text',
+    mapError: ({ bodyKind, data, status }) => upstreamError(
+      status,
+      errorMessage(bodyKind === 'json' ? data : { errors: [{ detail: data }] }, status),
+    ),
   })
-  const payload = await readPayload(response)
-  if (!response.ok) throw upstreamError(response.status, errorMessage(payload, response.status))
-  return payload
+  if (response.bodyKind === 'empty') return {}
+  if (response.bodyKind !== 'json') throw upstreamError(502, 'Rootly returned invalid JSON')
+  return response.data
 }
 
 /**
@@ -146,13 +130,6 @@ async function getList(
     ...readSidecars(payload),
     raw: payload,
   }
-}
-
-/** 丢掉未提供的过滤器;Rootly 把空串当作真实的过滤条件,不能误发。 */
-function compact(input: Record<string, string | undefined>): Record<string, string> {
-  return Object.fromEntries(
-    Object.entries(input).filter((entry): entry is [string, string] => entry[1] !== undefined),
-  )
 }
 
 function includeQuery(include: readonly string[] | undefined): Record<string, string | undefined> {

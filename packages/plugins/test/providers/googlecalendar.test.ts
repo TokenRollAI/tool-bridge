@@ -1,13 +1,7 @@
-import {
-  base64urlEncode,
-  type CallContext,
-  encodeCallContext,
-  HEADER_TB_CONTEXT,
-  HEADER_TB_UPSTREAM_AUTH,
-} from '@tool-bridge/core'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { createGooglecalendarPlugin } from '../../src/googlecalendar/index'
 import { googlecalendarActions } from '../../src/googlecalendar/schema'
+import { createProviderHarness } from '../support/providerHarness'
 
 /**
  * Google Calendar 迁移产物的 wire 级验收。除了常规的请求拼装/错误归一,重点钉住几处
@@ -20,41 +14,22 @@ import { googlecalendarActions } from '../../src/googlecalendar/schema'
  * - `list_events_all_calendars` 的部分失败、401 整体上抛、全天事件按**日历自己的时区**排序。
  */
 
-const PLUGIN_TOKEN = 'tbp_test'
-const ENV = { PLUGIN_TOKEN }
 /** 平台注入的是 OAuth2 换来的 access token,插件侧照常当单值凭证取。 */
 const ACCESS_TOKEN = 'ya29.a0test'
 const API_BASE = 'https://www.googleapis.com/calendar/v3'
 const plugin = createGooglecalendarPlugin()
 
-const CALLER: CallContext = {
-  keyId: 'k1',
-  owner: 'agent:tester',
-  scopes: [],
-  traceId: 't1',
+const {
+  call,
+  envelope,
+  sent,
+  env: ENV,
+  stubFetch,
+} = createProviderHarness({
   mountPath: 'calendar/google',
-  exportId: 'actions',
-}
-
-function envelope(body: unknown, opts: { auth?: string | null } = {}): Promise<Response> {
-  const headers: Record<string, string> = {
-    'authorization': `Bearer ${PLUGIN_TOKEN}`,
-    'content-type': 'application/json',
-    [HEADER_TB_CONTEXT]: encodeCallContext(CALLER),
-  }
-  const auth = opts.auth === undefined ? ACCESS_TOKEN : opts.auth
-  if (auth !== null) {
-    headers[HEADER_TB_UPSTREAM_AUTH] = base64urlEncode(new TextEncoder().encode(auth))
-  }
-  return Promise.resolve(plugin.fetch(
-    new Request('https://plugin.test/', { method: 'POST', headers, body: JSON.stringify(body) }),
-    ENV as never,
-  ))
-}
-
-function call(name: string, args: unknown, opts?: { auth?: string | null }): Promise<Response> {
-  return envelope({ tool: 'Call', arguments: { name, args } }, opts)
-}
+  plugin,
+  upstreamAuth: ACCESS_TOKEN,
+})
 
 /** 一次上游响应。`payload: null` 表示空响应体(204 必须传 null,传 '' 在 undici 下 TypeError)。 */
 type Reply = [status: number, payload: unknown]
@@ -64,7 +39,7 @@ type Reply = [status: number, payload: unknown]
  */
 function mockCalendar(...replies: Reply[]): ReturnType<typeof vi.fn> {
   const queue = [...replies]
-  const fn = vi.fn(() => {
+  return stubFetch(() => {
     const [status, payload] = queue.length > 1 ? queue.shift()! : queue[0]!
     return Promise.resolve(payload === null
       ? new Response(null, { status })
@@ -73,13 +48,6 @@ function mockCalendar(...replies: Reply[]): ReturnType<typeof vi.fn> {
           headers: { 'content-type': 'application/json' },
         }))
   })
-  vi.stubGlobal('fetch', fn)
-  return fn
-}
-
-/** 取上游收到的第 index 个请求。 */
-function sent(mock: ReturnType<typeof vi.fn>, index = 0): Request {
-  return (mock.mock.calls[index] as [Request])[0]
 }
 
 function query(mock: ReturnType<typeof vi.fn>, index = 0): Record<string, string> {
@@ -93,10 +61,6 @@ async function body(mock: ReturnType<typeof vi.fn>, index = 0): Promise<unknown>
 async function content(res: Response): Promise<unknown> {
   return ((await res.json()) as { content: unknown }).content
 }
-
-afterEach(() => {
-  vi.unstubAllGlobals()
-})
 
 describe('契约面', () => {
   it('List 出全部 37 个 action,且都带 Zod 派生的 schema', async () => {

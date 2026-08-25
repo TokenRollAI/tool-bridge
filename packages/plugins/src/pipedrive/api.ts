@@ -31,12 +31,14 @@
  */
 
 import { TBError } from '@tool-bridge/plugin-sdk'
+import { asJsonObject as asRecord, trimmedText as optionalText } from '../_runtime/jsonValue'
 import { type ProviderContext, requireApiKey } from '../_runtime/plugin'
+import { createProviderHttpClient } from '../_runtime/providerHttp'
 import { upstreamError } from '../_runtime/upstreamError'
-import { guardedFetch } from '../_runtime/guardedFetch'
 
 const SERVICE = 'pipedrive'
 const API_BASE = 'https://api.pipedrive.com'
+const http = createProviderHttpClient({ baseUrl: `${API_BASE}/`, service: SERVICE })
 
 type Json = Record<string, unknown>
 type Method = 'DELETE' | 'GET' | 'PATCH' | 'POST'
@@ -106,19 +108,6 @@ const OPERATIONS: Record<string, Operation> = {
   get_stage: { method: 'GET', path: '/api/v2/stages/{id}', idField: 'stageId', itemKey: 'stage' },
 }
 
-function asRecord(value: unknown): Json | undefined {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-    ? (value as Json)
-    : undefined
-}
-
-/** 上游 `optionalString` 的语义:先 trim,空则视为缺失。 */
-function optionalText(value: unknown): string | undefined {
-  if (typeof value !== 'string') return undefined
-  const trimmed = value.trim()
-  return trimmed === '' ? undefined : trimmed
-}
-
 function requiredText(value: unknown, field: string): string {
   const text = optionalText(value)
   if (text === undefined) throw new TBError('invalid_argument', `${field} 不能为空`)
@@ -175,17 +164,6 @@ function buildBody(operation: Operation, input: Json): Json {
   return body
 }
 
-/** 空体回 null,非 JSON 回原文 —— Pipedrive 的网关错误页有时是纯文本。 */
-async function readPayload(response: Response): Promise<unknown> {
-  const text = await response.text().catch(() => '')
-  if (text.trim() === '') return null
-  try {
-    return JSON.parse(text) as unknown
-  } catch {
-    return text
-  }
-}
-
 function errorMessage(payload: unknown): string | undefined {
   if (typeof payload === 'string') return optionalText(payload)
   const record = asRecord(payload)
@@ -198,45 +176,30 @@ function errorMessage(payload: unknown): string | undefined {
 
 async function request(ctx: ProviderContext, operation: Operation, input: Json): Promise<Json> {
   const apiKey = requireApiKey(ctx, SERVICE)
-  const url = new URL(buildPath(operation, input), API_BASE)
-  if (operation.method === 'GET') {
-    for (const [key, value] of Object.entries(buildQuery(operation, input))) {
-      if (value !== undefined) url.searchParams.set(key, value)
-    }
-  }
-
   const hasBody = operation.method === 'POST' || operation.method === 'PATCH'
   const headers: Record<string, string> = {
     'accept': 'application/json',
     'x-api-token': apiKey,
   }
-  if (hasBody) headers['content-type'] = 'application/json'
-
-  let response: Response
-  let payload: unknown
-  try {
-    response = await guardedFetch(url.toString(), {
-      method: operation.method,
-      headers,
-      ...(hasBody ? { body: JSON.stringify(buildBody(operation, input)) } : {}),
-    })
-    payload = await readPayload(response)
-  } catch (error) {
-    // 传输层失败必须就地归一:漏出去的裸 Error 会被 plugin-sdk 抹成 "internal plugin error"
-    // 500,把"上游不通/出网被拦"说成插件自身故障,还丢掉唯一有诊断价值的那句消息。
-    if (error instanceof TBError) throw error
-    throw upstreamError(502, error instanceof Error ? `pipedrive 请求失败: ${error.message}` : 'pipedrive 请求失败')
-  }
-
-  if (!response.ok) {
-    throw upstreamError(
-      response.status,
-      errorMessage(payload) ?? (response.statusText || `pipedrive 返回 HTTP ${response.status}`),
-    )
-  }
+  const response = await http.request({
+    method: operation.method,
+    path: buildPath(operation, input),
+    headers,
+    ...(operation.method === 'GET' ? { query: Object.entries(buildQuery(operation, input)) } : {}),
+    ...(hasBody ? { json: buildBody(operation, input) } : {}),
+    invalidJson: 'text',
+    mapError: ({ data, status, statusText }) => upstreamError(
+      status,
+      errorMessage(data) ?? (statusText || `pipedrive 返回 HTTP ${status}`),
+    ),
+    mapTransportError: ({ message }) => upstreamError(
+      502,
+      message === undefined ? 'pipedrive 请求失败' : `pipedrive 请求失败: ${message}`,
+    ),
+  })
 
   // 空体(DELETE 常见)按空信封处理;非 JSON 或非对象则是上游破了契约。
-  const record = payload === null ? {} : asRecord(payload)
+  const record = response.bodyKind === 'empty' ? {} : asRecord(response.data)
   if (record === undefined) throw upstreamError(502, 'pipedrive 返回的响应不是 JSON 对象')
   if (record.success === false) {
     // 信封式失败:HTTP 200 也可能带 `success: false`,那是失败,不能当成功返回。

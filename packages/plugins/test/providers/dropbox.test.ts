@@ -1,11 +1,5 @@
-import {
-  base64urlEncode,
-  type CallContext,
-  encodeCallContext,
-  HEADER_TB_CONTEXT,
-  HEADER_TB_UPSTREAM_AUTH,
-} from '@tool-bridge/core'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+import { createProviderHarness } from '../support/providerHarness'
 import { createDropboxPlugin } from '../../src/dropbox/index'
 import { dropboxActions } from '../../src/dropbox/schema'
 
@@ -16,49 +10,22 @@ import { dropboxActions } from '../../src/dropbox/schema'
  * 错误压在 409 上时靠 `.tag` 判别语义。
  */
 
-const PLUGIN_TOKEN = 'tbp_test'
-const ENV = { PLUGIN_TOKEN }
 /** 平台换来并按需刷新的 access token —— 插件侧和 api key 走同一个通道。 */
 const ACCESS_TOKEN = 'sl.dropbox-access-token'
 const plugin = createDropboxPlugin()
 
-const CALLER: CallContext = {
-  keyId: 'k1',
-  owner: 'agent:tester',
-  scopes: [],
-  traceId: 't1',
+const {
+  call,
+  envelope,
+  sent,
+  mockJson: mockDropbox,
+  env: ENV,
+  stubFetch,
+} = createProviderHarness({
   mountPath: 'storage/dropbox',
-  exportId: 'actions',
-}
-
-function envelope(body: unknown, opts: { auth?: string | null } = {}): Promise<Response> {
-  const headers: Record<string, string> = {
-    'authorization': `Bearer ${PLUGIN_TOKEN}`,
-    'content-type': 'application/json',
-    [HEADER_TB_CONTEXT]: encodeCallContext(CALLER),
-  }
-  const auth = opts.auth === undefined ? ACCESS_TOKEN : opts.auth
-  if (auth !== null) {
-    headers[HEADER_TB_UPSTREAM_AUTH] = base64urlEncode(new TextEncoder().encode(auth))
-  }
-  return Promise.resolve(plugin.fetch(
-    new Request('https://plugin.test/', { method: 'POST', headers, body: JSON.stringify(body) }),
-    ENV as never,
-  ))
-}
-
-function call(name: string, args: unknown, opts?: { auth?: string | null }): Promise<Response> {
-  return envelope({ tool: 'Call', arguments: { name, args } }, opts)
-}
-
-function mockDropbox(status: number, payload: unknown): ReturnType<typeof vi.fn> {
-  const fn = vi.fn(() => Promise.resolve(new Response(JSON.stringify(payload), {
-    status,
-    headers: { 'content-type': 'application/json' },
-  })))
-  vi.stubGlobal('fetch', fn)
-  return fn
-}
+  plugin,
+  upstreamAuth: ACCESS_TOKEN,
+})
 
 /** 内容面的下载响应:元数据在 dropbox-api-result 头,字节在 body。 */
 function mockDownload(
@@ -68,21 +35,11 @@ function mockDownload(
 ): ReturnType<typeof vi.fn> {
   const headers: Record<string, string> = { 'dropbox-api-result': JSON.stringify(metadata) }
   if (opts.contentType !== undefined) headers['content-type'] = opts.contentType
-  const fn = vi.fn(() => Promise.resolve(new Response(body, { status: 200, headers })))
-  vi.stubGlobal('fetch', fn)
-  return fn
-}
-
-function sent(mock: ReturnType<typeof vi.fn>): Request {
-  return (mock.mock.calls[0] as [Request])[0]
+  return stubFetch(() => Promise.resolve(new Response(body, { status: 200, headers })))
 }
 
 /** 一个满足出参契约的最小文件元数据。 */
 const FILE = { '.tag': 'file', 'name': 'a.txt', 'id': 'id:1', 'rev': '01', 'size': 3 }
-
-afterEach(() => {
-  vi.unstubAllGlobals()
-})
 
 describe('契约面', () => {
   it('List 出全部 24 个 action,且都带 Zod 派生的 schema', async () => {

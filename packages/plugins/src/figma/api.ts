@@ -50,12 +50,14 @@ import type {
   renderImagesInput,
 } from './schema'
 import type { updateDevResourcesInput } from './schema.handwritten'
+import { compactDefined as compact, asJsonObject as record, trimmedText as text } from '../_runtime/jsonValue'
+import { createProviderHttpClient, type ProviderQuery } from '../_runtime/providerHttp'
 import { type ProviderContext, requireApiKey } from '../_runtime/plugin'
 import { upstreamError } from '../_runtime/upstreamError'
-import { guardedFetch } from '../_runtime/guardedFetch'
 
 const SERVICE = 'figma'
 const API_BASE = 'https://api.figma.com'
+const http = createProviderHttpClient({ baseUrl: API_BASE, service: SERVICE })
 
 type Json = Record<string, unknown>
 type QueryValue = boolean | number | string | undefined
@@ -65,22 +67,6 @@ interface RequestInput {
   method?: 'DELETE' | 'GET' | 'POST' | 'PUT'
   path: string
   query?: Record<string, QueryValue>
-}
-
-/** 上游 `optionalString`:去空白后仍非空才算有值。 */
-function text(value: unknown): string | undefined {
-  if (typeof value !== 'string') return undefined
-  const trimmed = value.trim()
-  return trimmed === '' ? undefined : trimmed
-}
-
-function record(value: unknown): Json | undefined {
-  return typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Json) : undefined
-}
-
-/** 丢掉值为 undefined 的键(上游 `compactObject`)。 */
-function compact(input: Record<string, unknown>): Json {
-  return Object.fromEntries(Object.entries(input).filter(([, value]) => value !== undefined))
 }
 
 /**
@@ -135,48 +121,23 @@ function errorMessage(payload: unknown, status: number): string {
     ?? `Figma 返回 HTTP ${status}`
 }
 
-function buildUrl(path: string, query: Record<string, QueryValue> | undefined): string {
-  const url = new URL(path, API_BASE)
-  for (const [key, value] of Object.entries(query ?? {})) {
-    if (value === undefined) continue
-    url.searchParams.set(key, String(value))
-  }
-  return url.toString()
-}
-
 async function request(ctx: ProviderContext, input: RequestInput): Promise<unknown> {
   const hasBody = input.body !== undefined
-  const headers: Record<string, string> = {
-    'accept': 'application/json',
-    'x-figma-token': requireApiKey(ctx, SERVICE),
-  }
-  if (hasBody) headers['content-type'] = 'application/json'
-
-  let response: Response
-  try {
-    response = await guardedFetch(buildUrl(input.path, input.query), {
-      method: input.method ?? 'GET',
-      headers,
-      body: hasBody ? JSON.stringify(input.body) : undefined,
-    })
-  } catch (error) {
-    // guardedFetch 拦下的出站(EgressBlockedError)本身就是 TBError,别把它压成网络故障。
-    if (error instanceof TBError) throw error
-    throw new TBError('unavailable', 'Figma 请求失败', { retryable: true })
-  }
-
-  // 解析不出 JSON 就保留原文:Figma 的错误消息有时就是一行纯文本。
-  const body = await response.text().catch(() => '')
-  let payload: unknown = null
-  if (body.trim() !== '') {
-    try {
-      payload = JSON.parse(body)
-    } catch {
-      payload = body
-    }
-  }
-  if (!response.ok) throw upstreamError(response.status, errorMessage(payload, response.status))
-  return payload
+  const { data } = await http.request({
+    path: input.path,
+    method: input.method ?? 'GET',
+    query: Object.entries(input.query ?? {}) satisfies ProviderQuery,
+    headers: {
+      'accept': 'application/json',
+      'x-figma-token': requireApiKey(ctx, SERVICE),
+    },
+    ...(hasBody ? { json: input.body } : {}),
+    // Figma 的错误消息有时是纯文本；成功响应也保留旧实现的原文 payload 语义。
+    invalidJson: 'text',
+    mapError: ({ data: payload, status }) => upstreamError(status, errorMessage(payload, status)),
+    mapTransportError: () => new TBError('unavailable', 'Figma 请求失败', { retryable: true }),
+  })
+  return data ?? null
 }
 
 /** 多个读接口共用的文件级 query(版本、节点、深度…)。 */

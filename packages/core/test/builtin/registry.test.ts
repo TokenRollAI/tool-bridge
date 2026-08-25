@@ -68,6 +68,15 @@ describe('builtin registry 模块', () => {
       e => isTBError(e) && e.code === 'invalid_argument',
     )
   })
+
+  it('write 与 update.patch 都拒绝未知字段', async () => {
+    await expect(mod.dispatch('write', {
+      path: 'a', kind: 'directory', description: 'a', registeredBy: 'forged',
+    }, ctx)).rejects.toSatisfy(e => isTBError(e) && e.code === 'invalid_argument')
+    await expect(mod.dispatch('update', {
+      path: 'a', patch: { description: 'x', updatedAt: NOW },
+    }, ctx)).rejects.toSatisfy(e => isTBError(e) && e.code === 'invalid_argument')
+  })
 })
 
 describe('builtin registry 可见性裁剪(注入 visibility)', () => {

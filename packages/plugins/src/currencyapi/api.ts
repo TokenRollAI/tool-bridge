@@ -19,41 +19,22 @@ import type {
   getLatestRatesInput,
   getSupportedCurrenciesInput,
 } from './schema'
+import { asJsonObject as record, trimmedText as text } from '../_runtime/jsonValue'
 import { type ProviderContext, requireApiKey } from '../_runtime/plugin'
+import { createProviderHttpClient } from '../_runtime/providerHttp'
 import { upstreamError } from '../_runtime/upstreamError'
-import { guardedFetch } from '../_runtime/guardedFetch'
 
 const SERVICE = 'currencyapi'
 const API_BASE = 'https://api.currencyapi.com'
+const http = createProviderHttpClient({ baseUrl: `${API_BASE}/`, service: SERVICE })
 
 type Json = Record<string, unknown>
 type QueryValue = number | string | undefined
-
-function record(value: unknown): Json | undefined {
-  return typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Json) : undefined
-}
-
-function text(value: unknown): string | undefined {
-  if (typeof value !== 'string') return undefined
-  const trimmed = value.trim()
-  return trimmed === '' ? undefined : trimmed
-}
 
 function errorMessage(payload: unknown): string | undefined {
   if (typeof payload === 'string') return text(payload)
   const body = record(payload)
   return text(body?.message) ?? text(record(body?.error)?.message)
-}
-
-/** 解析不出 JSON 就把原文本身当 payload,留给消息提取。 */
-async function readPayload(response: Response): Promise<unknown> {
-  const body = await response.text().catch(() => '')
-  if (body.trim() === '') return null
-  try {
-    return JSON.parse(body) as unknown
-  } catch {
-    return body
-  }
 }
 
 function requireObject(value: unknown, field: string): Json {
@@ -64,38 +45,22 @@ function requireObject(value: unknown, field: string): Json {
 }
 
 async function request(ctx: ProviderContext, path: string, query?: Record<string, QueryValue>): Promise<Json> {
-  // 取凭证放在 try 外:它抛的是配置错误,不该被下面的传输失败兜底吞成 502。
   const apiKey = requireApiKey(ctx, SERVICE)
-
-  const url = new URL(path, API_BASE)
-  for (const [key, value] of Object.entries(query ?? {})) {
-    if (value !== undefined) url.searchParams.set(key, String(value))
-  }
-
-  let response: Response
-  let payload: unknown
-  try {
-    response = await guardedFetch(url.toString(), {
-      method: 'GET',
-      // 凭证走自定义 `apikey` 头,不是 Authorization。
-      headers: { accept: 'application/json', apikey: apiKey },
-    })
-    payload = await readPayload(response)
-  } catch (error) {
-    // 传输层失败必须就地归一:漏出去的裸 Error 会被 plugin-sdk 抹成 "internal plugin error" 500。
-    throw upstreamError(
+  const { data } = await http.request({
+    path,
+    query: Object.entries(query ?? {}),
+    headers: { accept: 'application/json', apikey: apiKey },
+    invalidJson: 'text',
+    mapError: ({ data: payload, status }) => upstreamError(
+      status,
+      errorMessage(payload) ?? `currencyapi request failed with ${status || 500}`,
+    ),
+    mapTransportError: ({ message }) => upstreamError(
       502,
-      error instanceof Error ? `currencyapi request failed: ${error.message}` : 'currencyapi request failed',
-    )
-  }
-
-  if (!response.ok) {
-    throw upstreamError(
-      response.status,
-      errorMessage(payload) ?? `currencyapi request failed with ${response.status || 500}`,
-    )
-  }
-  return requireObject(payload, 'payload')
+      message === undefined ? 'currencyapi request failed' : `currencyapi request failed: ${message}`,
+    ),
+  })
+  return requireObject(data ?? null, 'payload')
 }
 
 function requireString(value: unknown, field: string): string {

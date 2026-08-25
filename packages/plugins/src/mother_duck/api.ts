@@ -19,46 +19,21 @@ import type {
   listTokensInput,
   setUserDucklingConfigInput,
 } from './schema'
+import { compactDefined as compact, asJsonObject as record, trimmedText as text } from '../_runtime/jsonValue'
 import { type ProviderContext, requireApiKey } from '../_runtime/plugin'
+import { createProviderHttpClient } from '../_runtime/providerHttp'
 import { upstreamError } from '../_runtime/upstreamError'
-import { guardedFetch } from '../_runtime/guardedFetch'
 
 const SERVICE = 'mother_duck'
 const API_BASE = 'https://api.motherduck.com'
+const http = createProviderHttpClient({ baseUrl: `${API_BASE}/`, service: SERVICE })
 
 type Json = Record<string, unknown>
-
-/** 上游 `optionalString`:非字符串、或去空白后为空,都算缺失。 */
-function text(value: unknown): string | undefined {
-  if (typeof value !== 'string') return undefined
-  const trimmed = value.trim()
-  return trimmed === '' ? undefined : trimmed
-}
-
-function record(value: unknown): Json | undefined {
-  return typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Json) : undefined
-}
-
-/** 上游 `jsonObject`:剥掉值为 undefined 的键。 */
-function compact(input: Json): Json {
-  return Object.fromEntries(Object.entries(input).filter(([, value]) => value !== undefined))
-}
 
 function errorMessage(payload: unknown): string | undefined {
   const body = record(payload)
   if (body === undefined) return undefined
   return text(body.message) ?? text(body.error) ?? text(body.code)
-}
-
-/** 空体按 `{}` 处理;JSON 解析不了就把原文塞进 message,留给消息提取。 */
-async function readPayload(response: Response): Promise<unknown> {
-  const body = await response.text().catch(() => '')
-  if (body.trim() === '') return {}
-  try {
-    return JSON.parse(body) as unknown
-  } catch {
-    return { message: body }
-  }
 }
 
 function isEmpty(payload: unknown): boolean {
@@ -74,34 +49,29 @@ interface RequestInput {
 }
 
 async function request(ctx: ProviderContext, path: string, input: RequestInput = {}): Promise<unknown> {
-  // 取凭证放在 try 外:它抛的是配置错误,不该被下面的传输失败兜底吞成 502。
   const apiKey = requireApiKey(ctx, SERVICE)
-
-  const headers: Record<string, string> = {
-    accept: 'application/json',
-    authorization: `Bearer ${apiKey}`,
-  }
-  if (input.body !== undefined) headers['content-type'] = 'application/json'
-
-  let response: Response
-  try {
-    response = await guardedFetch(new URL(path, API_BASE).toString(), {
-      method: input.method ?? 'GET',
-      headers,
-      ...(input.body === undefined ? {} : { body: JSON.stringify(input.body) }),
-    })
-  } catch (error) {
-    // 传输层失败必须就地归一:漏出去的裸 Error 会被 plugin-sdk 抹成 500。
-    throw upstreamError(
+  const result = await http.request({
+    path,
+    method: input.method ?? 'GET',
+    headers: { accept: 'application/json', authorization: `Bearer ${apiKey}` },
+    ...(input.body === undefined ? {} : { json: input.body }),
+    invalidJson: 'text',
+    mapError: ({ bodyKind, data, status }) => upstreamError(
+      status,
+      bodyKind === 'invalid-json' && typeof data === 'string'
+        ? data
+        : (errorMessage(data) ?? `MotherDuck 请求失败,HTTP ${status}`),
+    ),
+    mapTransportError: ({ message }) => upstreamError(
       502,
-      error instanceof Error ? `MotherDuck 请求失败: ${error.message}` : 'MotherDuck 请求失败',
-    )
-  }
-
-  const payload = await readPayload(response)
-  if (!response.ok) {
-    throw upstreamError(response.status, errorMessage(payload) ?? `MotherDuck 请求失败,HTTP ${response.status}`)
-  }
+      message === undefined ? 'MotherDuck 请求失败' : `MotherDuck 请求失败: ${message}`,
+    ),
+  })
+  const payload = result.bodyKind === 'empty'
+    ? {}
+    : result.bodyKind === 'invalid-json' && typeof result.data === 'string'
+      ? { message: result.data }
+      : result.data
   if (input.allowEmpty === true && isEmpty(payload)) return {}
   return payload
 }

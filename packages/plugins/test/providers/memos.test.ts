@@ -1,12 +1,9 @@
 import {
-  base64urlEncode,
   type CallContext,
-  encodeCallContext,
-  HEADER_TB_CONTEXT,
-  HEADER_TB_UPSTREAM_AUTH,
 } from '@tool-bridge/core'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { z } from 'zod/v4'
+import { createProviderHarness } from '../support/providerHarness'
 import { createMemosPlugin } from '../../src/memos/index'
 import { memosActions } from '../../src/memos/schema'
 
@@ -17,8 +14,6 @@ import { memosActions } from '../../src/memos/schema'
  * `upload_attachment` 的"取回再转发 + 20 MiB 上限 + base64"、以及分页 token 缺席时的 `null`。
  */
 
-const PLUGIN_TOKEN = 'tbp_test'
-const ENV = { PLUGIN_TOKEN }
 const API_KEY = 'memos_pat_deadbeef'
 const BASE = 'https://memos.example.com'
 const plugin = createMemosPlugin()
@@ -40,25 +35,12 @@ interface CallOptions {
   config?: Record<string, unknown>
 }
 
-function envelope(body: unknown, opts: CallOptions = {}): Promise<Response> {
-  const headers: Record<string, string> = {
-    'authorization': `Bearer ${PLUGIN_TOKEN}`,
-    'content-type': 'application/json',
-    [HEADER_TB_CONTEXT]: encodeCallContext(caller(opts.config === undefined ? { baseUrl: BASE } : opts.config)),
-  }
-  const auth = opts.auth === undefined ? API_KEY : opts.auth
-  if (auth !== null) {
-    headers[HEADER_TB_UPSTREAM_AUTH] = base64urlEncode(new TextEncoder().encode(auth))
-  }
-  return Promise.resolve(plugin.fetch(
-    new Request('https://plugin.test/', { method: 'POST', headers, body: JSON.stringify(body) }),
-    ENV as never,
-  ))
-}
-
-function call(name: string, args: unknown, opts?: CallOptions): Promise<Response> {
-  return envelope({ tool: 'Call', arguments: { name, args } }, opts)
-}
+const { call, envelope, sent, sentUrl, stubFetch } = createProviderHarness<CallOptions>({
+  caller: opts => caller(opts.config === undefined ? { baseUrl: BASE } : opts.config),
+  mountPath: 'notes/memos',
+  plugin,
+  upstreamAuth: API_KEY,
+})
 
 interface Reply {
   /** 原始体;传 `null` 表示无体(204 必须这么给,`''` 在 undici 下直接 TypeError)。 */
@@ -73,7 +55,7 @@ interface Reply {
 /** 按顺序回应出站请求(`upload_attachment` 先下载 fileUrl,再打 Memos)。 */
 function mockReplies(...replies: Reply[]): ReturnType<typeof vi.fn> {
   const queue = [...replies]
-  const fn = vi.fn(() => {
+  return stubFetch(() => {
     const reply = queue.shift() ?? { payload: {} }
     // `bytes` 走 Uint8Array,但本仓的 DOM lib 里 `BodyInit` 不含它(只认 ArrayBuffer /
     // ArrayBufferView 的部分子集),故取它的 buffer 交出去 —— 运行期等价。
@@ -85,23 +67,9 @@ function mockReplies(...replies: Reply[]): ReturnType<typeof vi.fn> {
       headers: reply.headers ?? { 'content-type': 'application/json' },
     }))
   })
-  vi.stubGlobal('fetch', fn)
-  return fn
-}
-
-function sent(mock: ReturnType<typeof vi.fn>, index = 0): Request {
-  return (mock.mock.calls[index] as [Request])[0]
-}
-
-function sentUrl(mock: ReturnType<typeof vi.fn>, index = 0): URL {
-  return new URL(sent(mock, index).url)
 }
 
 const MEMO = { name: 'memos/abc', content: 'hello', visibility: 'PRIVATE' }
-
-afterEach(() => {
-  vi.unstubAllGlobals()
-})
 
 describe('契约面', () => {
   it('~describe 报成单个 tools/v1 export,并带上凭证探针', async () => {

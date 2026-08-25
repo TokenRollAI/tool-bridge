@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { integrationAddCommand } from '../src/commands/integration'
+import { mockJsonResponse, runCli } from './cliHarness'
 import { resetFetch, setFetch } from '../src/http'
-import { runCli } from './cliHarness'
 
 /**
  * `tb integration` —— 集成的用户面。
@@ -24,10 +24,7 @@ function routedFetch(routes: FetchRoute[]): Call[] {
       && (r.tool === undefined || String(url).endsWith(`/${r.tool}`)),
     )
     const payload = route?.body ?? {}
-    return new Response(JSON.stringify(payload), {
-      status: route?.status ?? 200,
-      headers: { 'content-type': 'application/json' },
-    })
+    return mockJsonResponse(url, init, payload, route?.status ?? 200)
   }) as unknown as typeof fetch)
   return calls
 }

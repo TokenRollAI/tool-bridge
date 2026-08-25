@@ -23,51 +23,24 @@
 import type { z } from 'zod/v4'
 import { TBError } from '@tool-bridge/plugin-sdk'
 import type { answerInput, findSimilarInput, getContentsInput, searchInput } from './schema'
+import {
+  asJsonObject as asRecord,
+  compactDefined as compact,
+  trimmedText as optionalText,
+} from '../_runtime/jsonValue'
 import { type ProviderContext, requireApiKey } from '../_runtime/plugin'
+import { createProviderHttpClient } from '../_runtime/providerHttp'
 import { upstreamError } from '../_runtime/upstreamError'
-import { guardedFetch } from '../_runtime/guardedFetch'
 
 const SERVICE = 'exa'
 const API_BASE = 'https://api.exa.ai'
+const http = createProviderHttpClient({ baseUrl: API_BASE, service: SERVICE })
 const SEARCH_PATH = '/search'
 const CONTENTS_PATH = '/contents'
 const ANSWER_PATH = '/answer'
 const FIND_SIMILAR_PATH = '/findSimilar'
 
 type Json = Record<string, unknown>
-
-function asRecord(value: unknown): Json | undefined {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-    ? (value as Json)
-    : undefined
-}
-
-/** 上游 `optionalString` 的语义:先 trim,空则视为缺失。 */
-function optionalText(value: unknown): string | undefined {
-  if (typeof value !== 'string') return undefined
-  const trimmed = value.trim()
-  return trimmed === '' ? undefined : trimmed
-}
-
-/** 丢掉值为 `undefined` 的键;`null` 要留着(Exa 用 null 表示"这一项确实没有")。 */
-function compact(input: Json): Json {
-  const output: Json = {}
-  for (const [key, value] of Object.entries(input)) {
-    if (value !== undefined) output[key] = value
-  }
-  return output
-}
-
-/** 空体回 null,非 JSON 回原文 —— Exa 的网关错误页有时是纯文本。 */
-async function readPayload(response: Response): Promise<unknown> {
-  const text = await response.text().catch(() => '')
-  if (text.trim() === '') return null
-  try {
-    return JSON.parse(text) as unknown
-  } catch {
-    return text
-  }
-}
 
 function errorMessage(payload: unknown): string | undefined {
   if (typeof payload === 'string') return optionalText(payload)
@@ -78,39 +51,25 @@ function errorMessage(payload: unknown): string | undefined {
 
 async function request(ctx: ProviderContext, path: string, body: Json): Promise<unknown> {
   const apiKey = requireApiKey(ctx, SERVICE)
-
-  let response: Response
-  let payload: unknown
-  try {
-    response = await guardedFetch(new URL(path, API_BASE).toString(), {
-      method: 'POST',
-      headers: {
-        'accept': 'application/json',
-        'content-type': 'application/json',
-        'x-api-key': apiKey,
-      },
-      body: JSON.stringify(body),
-    })
-    payload = await readPayload(response)
-  } catch (error) {
-    // 传输层失败必须就地归一:漏出去的裸 Error 会被 plugin-sdk 抹成 "internal plugin error"
-    // 500,把"上游不通/出网被拦"说成插件自身故障,还丢掉唯一有诊断价值的那句消息。
-    if (error instanceof TBError) throw error
-    throw upstreamError(502, error instanceof Error ? `exa 请求失败: ${error.message}` : 'exa 请求失败')
-  }
-
-  if (!response.ok) {
-    throw upstreamError(
-      response.status,
-      errorMessage(payload) ?? (response.statusText || `exa 返回 HTTP ${response.status}`),
-    )
-  }
+  const { bodyKind, data } = await http.request({
+    path,
+    method: 'POST',
+    headers: { 'accept': 'application/json', 'x-api-key': apiKey },
+    json: body,
+    invalidJson: 'text',
+    mapError: ({ data: payload, status, statusText }) => upstreamError(
+      status,
+      errorMessage(payload) ?? (statusText || `exa 返回 HTTP ${status}`),
+    ),
+    mapTransportError: ({ message }) => upstreamError(
+      502,
+      message === undefined ? 'exa 请求失败' : `exa 请求失败: ${message}`,
+    ),
+  })
   // 2xx 空体按 `{}` 处理(上游如此);2xx 回非 JSON 则是上游破了契约。
-  if (payload === null) return {}
-  if (typeof payload === 'string') {
-    throw upstreamError(502, 'exa 返回了非 JSON 响应')
-  }
-  return payload
+  if (bodyKind === 'empty') return {}
+  if (bodyKind === 'invalid-json') throw upstreamError(502, 'exa 返回了非 JSON 响应')
+  return data
 }
 
 /** 响应里契约要求的字段;取不到是**上游**破了契约,不是调用方的错。 */

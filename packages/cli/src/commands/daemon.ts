@@ -14,7 +14,7 @@ import {
   prepareConnect,
   withDeviceConnectionGlobalOpts,
 } from './connect'
-import { asArray, guard, printJson, printLine } from '../output'
+import { asArray, printJson, printLine } from '../output'
 import { collect, withGlobalOpts } from '../args'
 import { CliError } from '../http'
 
@@ -94,19 +94,17 @@ Examples:
     )
     .action(async (url: string | undefined, opts: DaemonInstallOpts) => {
       const asJson = Boolean(opts.json)
-      await guard(asJson, async () => {
-        await confirmAllowAll(opts)
-        const prepared = prepareConnect({ ...opts, url })
-        const status = await installDaemon(prepared)
-        if (asJson) printJson(status)
-        else {
-          printLine(`daemon installed for ${prepared.deviceId}`)
-          printStatus(status)
-          if (status.connection !== 'ready') {
-            printLine('connection is still starting; inspect with `tb daemon status` or `tb daemon logs`')
-          }
+      await confirmAllowAll(opts)
+      const prepared = prepareConnect({ ...opts, url })
+      const status = await installDaemon(prepared)
+      if (asJson) printJson(status)
+      else {
+        printLine(`daemon installed for ${prepared.deviceId}`)
+        printStatus(status)
+        if (status.connection !== 'ready') {
+          printLine('connection is still starting; inspect with `tb daemon status` or `tb daemon logs`')
         }
-      })
+      }
     })
 }
 
@@ -115,12 +113,10 @@ function daemonStatusCommand(): Command {
     .description('Show the local daemon and device connection state')
     .action(async (opts: LocalOpts) => {
       const asJson = Boolean(opts.json)
-      await guard(asJson, async () => {
-        assertLocalOpts(opts)
-        const status = await daemonStatus()
-        if (asJson) printJson(status)
-        else printStatus(status)
-      })
+      assertLocalOpts(opts)
+      const status = await daemonStatus()
+      if (asJson) printJson(status)
+      else printStatus(status)
     })
 }
 
@@ -129,15 +125,13 @@ function daemonRestartCommand(): Command {
     .description('Restart the installed local device daemon')
     .action(async (opts: LocalOpts) => {
       const asJson = Boolean(opts.json)
-      await guard(asJson, async () => {
-        assertLocalOpts(opts)
-        const status = await restartDaemon()
-        if (asJson) printJson(status)
-        else {
-          printLine('daemon restarted')
-          printStatus(status)
-        }
-      })
+      assertLocalOpts(opts)
+      const status = await restartDaemon()
+      if (asJson) printJson(status)
+      else {
+        printLine('daemon restarted')
+        printStatus(status)
+      }
     })
 }
 
@@ -146,12 +140,10 @@ function daemonUninstallCommand(): Command {
     .description('Stop and remove the local daemon (does not revoke or delete the login profile)')
     .action(async (opts: LocalOpts) => {
       const asJson = Boolean(opts.json)
-      await guard(asJson, async () => {
-        assertLocalOpts(opts)
-        const result = await uninstallDaemon()
-        if (asJson) printJson(result)
-        else printLine(result.removed ? 'daemon uninstalled' : 'daemon is not installed')
-      })
+      assertLocalOpts(opts)
+      const result = await uninstallDaemon()
+      if (asJson) printJson(result)
+      else printLine(result.removed ? 'daemon uninstalled' : 'daemon is not installed')
     })
 }
 
@@ -170,11 +162,9 @@ function daemonLogsCommand(): Command {
     .option('--lines <n>', 'Number of existing lines to show (1-10000)', '100')
     .action(async (opts: LocalOpts & { follow?: boolean, lines: string }) => {
       const asJson = Boolean(opts.json)
-      await guard(asJson, async () => {
-        assertLocalOpts(opts)
-        if (asJson) throw new CliError('--json is not supported with daemon logs')
-        await daemonLogs({ follow: Boolean(opts.follow), lines: parseLines(opts.lines) })
-      })
+      assertLocalOpts(opts)
+      if (asJson) throw new CliError('--json is not supported with daemon logs')
+      await daemonLogs({ follow: Boolean(opts.follow), lines: parseLines(opts.lines) })
     })
 }
 
@@ -183,7 +173,7 @@ function daemonRunCommand(): Command {
     .description('Internal systemd entrypoint')
     .requiredOption('--config <path>', 'Absolute daemon config path')
     .action(async (opts: { config: string }) => {
-      await guard(false, () => runDaemon(String(opts.config)))
+      await runDaemon(String(opts.config))
     })
 }
 

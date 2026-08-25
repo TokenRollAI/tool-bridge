@@ -1,5 +1,5 @@
 import { Command } from 'commander'
-import { guard, printJson, printLine, table } from '../output'
+import { printJson, printLine, table } from '../output'
 import { resolveTarget, withGlobalOpts } from '../args'
 import { confirmDestructive } from '../confirm'
 import { callDirect, CliError } from '../http'
@@ -28,23 +28,21 @@ export function federationLsCommand(): Command {
     .description('List remote federation allowlist (env baseline + runtime entries)')
     .action(async (opts: FederationGlobalOpts) => {
       const asJson = Boolean(opts.json)
-      await guard(asJson, async () => {
-        const page = await callDirect<{ items: FederationHost[] }>(
-          resolveTarget(opts), '/system/federation/list',
-          {},
-        )
-        if (asJson) {
-          printJson(page)
-          return
-        }
-        const rows = (page.items ?? []).map(h => [
-          h.host,
-          h.source,
-          h.removable ? 'yes' : 'no',
-          h.updatedAt ? new Date(h.updatedAt).toLocaleString() : '-',
-        ])
-        printLine(table(['HOST', 'SOURCE', 'REMOVABLE', 'UPDATED'], rows))
-      })
+      const page = await callDirect<{ items: FederationHost[] }>(
+        resolveTarget(opts), '/system/federation/list',
+        {},
+      )
+      if (asJson) {
+        printJson(page)
+        return
+      }
+      const rows = (page.items ?? []).map(h => [
+        h.host,
+        h.source,
+        h.removable ? 'yes' : 'no',
+        h.updatedAt ? new Date(h.updatedAt).toLocaleString() : '-',
+      ])
+      printLine(table(['HOST', 'SOURCE', 'REMOVABLE', 'UPDATED'], rows))
     })
 }
 
@@ -55,16 +53,14 @@ export function federationAddCommand(): Command {
     .argument('<host>', 'Host suffix to allow')
     .action(async (hostArg: string, opts: FederationGlobalOpts) => {
       const asJson = Boolean(opts.json)
-      await guard(asJson, async () => {
-        const host = String(hostArg ?? '').trim()
-        if (!host) throw new CliError('host is required')
-        const entry = await callDirect<{ host: string, updatedAt: string }>(
-          resolveTarget(opts), '/system/federation/add',
-          { host },
-        )
-        if (asJson) printJson(entry)
-        else printLine(`allowed remote host: ${entry.host}`)
-      })
+      const host = String(hostArg ?? '').trim()
+      if (!host) throw new CliError('host is required')
+      const entry = await callDirect<{ host: string, updatedAt: string }>(
+        resolveTarget(opts), '/system/federation/add',
+        { host },
+      )
+      if (asJson) printJson(entry)
+      else printLine(`allowed remote host: ${entry.host}`)
     })
 }
 
@@ -76,14 +72,12 @@ export function federationRmCommand(): Command {
     .option('--yes', 'Skip the confirmation prompt')
     .action(async (hostArg: string, opts: FederationGlobalOpts) => {
       const asJson = Boolean(opts.json)
-      await guard(asJson, async () => {
-        const host = String(hostArg ?? '').trim()
-        if (!host) throw new CliError('host is required')
-        await confirmDestructive(opts, `Remove ${host} from the remote allowlist?`)
-        await callDirect(resolveTarget(opts), '/system/federation/remove', { host })
-        if (asJson) printJson({ ok: true, host })
-        else printLine(`removed remote host: ${host}`)
-      })
+      const host = String(hostArg ?? '').trim()
+      if (!host) throw new CliError('host is required')
+      await confirmDestructive(opts, `Remove ${host} from the remote allowlist?`)
+      await callDirect(resolveTarget(opts), '/system/federation/remove', { host })
+      if (asJson) printJson({ ok: true, host })
+      else printLine(`removed remote host: ${host}`)
     })
 }
 

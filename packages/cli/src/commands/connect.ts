@@ -1,7 +1,7 @@
 import type { DeviceExpose } from '@tool-bridge/core'
 import { Command } from 'commander'
 import { collect, resolveTarget, withGlobalOpts } from '../args'
-import { asArray, guard, printJson, printLine } from '../output'
+import { asArray, printJson, printLine } from '../output'
 import { runDeviceConnection } from '../deviceRuntime'
 import { resolveDeviceId } from '../deviceId'
 import { CliError } from '../http'
@@ -130,6 +130,6 @@ Examples:
   tb connect --path device/build-01 --allow '*'   # full shell (trusted machines only)`,
     )
     .action(async (url: string | undefined, opts: Omit<ConnectArgs, 'url'>) => {
-      await guard(Boolean(opts.json), () => runConnect({ ...opts, url }))
+      await runConnect({ ...opts, url })
     })
 }

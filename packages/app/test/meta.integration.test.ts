@@ -245,6 +245,13 @@ describe('~feedback 保留段:agent 开箱提交/投票,~help 区块与阈值隐
     )
     expect(tooLong.status).toBe(400)
 
+    const extraSubmitField = await postJson(
+      'ext/fb-guard/~feedback',
+      { title: 't', detail: 'd', typo: true },
+      bearer(agentSk),
+    )
+    expect(extraSubmitField.status).toBe(400)
+
     const dangling = await postJson('no/such/node/~feedback', { title: 't', detail: 'd' }, admin())
     expect(dangling.status).toBe(404)
 
@@ -255,6 +262,12 @@ describe('~feedback 保留段:agent 开箱提交/投票,~help 区块与阈值隐
       bearer(agentSk),
     )
     expect(badVote.status).toBe(400)
+    const extraVoteField = await postJson(
+      `ext/fb-guard/~feedback/${id}`,
+      { vote: 'up', typo: true },
+      bearer(agentSk),
+    )
+    expect(extraVoteField.status).toBe(400)
 
     const denied = await tb.request(`https://tb.test/ext/fb-guard/~feedback/${id}`, {
       method: 'DELETE',

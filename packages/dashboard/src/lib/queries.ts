@@ -12,12 +12,10 @@ import type {
   SkillDetail,
   SkillFile,
   SkillSummary,
-  StoreObjectDescriptor,
   ToolSearchItem,
 } from './types'
 import {
   type ApiError,
-  deleteStoreObject,
   feedbackGet,
   feedbackList,
   getHealthz,
@@ -26,15 +24,9 @@ import {
   getTree,
   invoke,
   type InvokeResult,
-  listStoreObjects,
-  readStoreObject,
-  revokeStoreShare,
   searchTools,
-  shareStoreObject,
   startOAuthAuthorize,
-  statStoreObject,
   uploadContextObject,
-  uploadStoreObject,
 } from './api'
 import {
   historyScope,
@@ -46,7 +38,7 @@ import {
 import { useConn, useSession } from './session-context'
 
 /** queryKey 前缀含 profile 标识:切换档案后互不串缓存。 */
-function useKeyBase(): readonly unknown[] {
+export function useKeyBase(): readonly unknown[] {
   const { active, revision } = useSession()
   return ['tb', active?.id ?? '', active?.baseUrl ?? '', revision] as const
 }
@@ -390,72 +382,6 @@ export function useCtxUpload(nodePath: string) {
       file: File
       overwrite?: boolean
     }) => uploadContextObject(conn, nodePath, entryPath, file, overwrite),
-  })
-}
-
-// ---- deployment Store（独立于 Context authoring）----
-
-export function useStoreObjects() {
-  const conn = useConn()
-  const base = useKeyBase()
-  return useInfiniteQuery({
-    queryKey: [...base, 'store-list'],
-    queryFn: ({ pageParam, signal }) => listStoreObjects(conn, {
-      limit: 50,
-      ...(typeof pageParam === 'string' ? { cursor: pageParam } : {}),
-    }, signal),
-    initialPageParam: undefined as string | undefined,
-    getNextPageParam: last => last.cursor,
-  })
-}
-
-export function useStoreStat(uri: string | null) {
-  const conn = useConn()
-  const base = useKeyBase()
-  return useQuery<StoreObjectDescriptor>({
-    queryKey: [...base, 'store-stat', uri ?? ''],
-    queryFn: ({ signal }) => statStoreObject(conn, uri ?? '', signal),
-    enabled: uri !== null,
-  })
-}
-
-export function useStoreUpload() {
-  const conn = useConn()
-  return useMutation({
-    gcTime: 1_000,
-    mutationFn: ({ file, filename }: { file: File, filename?: string }) =>
-      uploadStoreObject(conn, file, { ...(filename ? { filename } : {}) }),
-  })
-}
-
-export function useStoreRead() {
-  const conn = useConn()
-  return useMutation({
-    gcTime: 1_000,
-    mutationFn: (uri: string) => readStoreObject(conn, uri),
-  })
-}
-
-export function useStoreShare() {
-  const conn = useConn()
-  return useMutation({
-    gcTime: 1_000,
-    mutationFn: ({ uri, ttlSec }: { ttlSec?: number, uri: string }) =>
-      shareStoreObject(conn, uri, ttlSec),
-  })
-}
-
-export function useStoreRevokeShare() {
-  const conn = useConn()
-  return useMutation({
-    mutationFn: (shareId: string) => revokeStoreShare(conn, shareId),
-  })
-}
-
-export function useStoreDelete() {
-  const conn = useConn()
-  return useMutation({
-    mutationFn: (uri: string) => deleteStoreObject(conn, uri),
   })
 }
 

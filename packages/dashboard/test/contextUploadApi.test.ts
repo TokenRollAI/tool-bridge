@@ -47,6 +47,7 @@ describe('uploadContextObject API', () => {
       method: 'PUT',
       body: file,
       credentials: 'omit',
+      redirect: 'error',
     })
   })
 
@@ -127,6 +128,25 @@ describe('uploadContextObject API', () => {
       'shot.bin',
       new File([new Uint8Array([1])], 'shot.bin'),
     )).rejects.toMatchObject({ code: 'unavailable', status: 503 })
+    expect(fetcher).toHaveBeenCalledOnce()
+  })
+
+  it('拒绝 grant 注入平台凭证 header，不发送对象存储请求', async () => {
+    const fetcher = vi.fn(async () => new Response(JSON.stringify({
+      uri: 'node://photos/shot.jpg',
+      method: 'PUT',
+      url: 'https://objects.example/shot.jpg?signature=secret',
+      headers: { authorization: 'Bearer tbk-must-not-leak' },
+      expiresAt: '2099-08-24T12:00:00.000Z',
+    }), { status: 200 }))
+    vi.stubGlobal('fetch', fetcher)
+
+    await expect(uploadContextObject(
+      { baseUrl: 'https://gw.example', sk: 'tbk-secret' },
+      'photos',
+      'shot.bin',
+      new File([new Uint8Array([1])], 'shot.bin'),
+    )).rejects.toMatchObject({ code: 'internal', status: 502 })
     expect(fetcher).toHaveBeenCalledOnce()
   })
 })

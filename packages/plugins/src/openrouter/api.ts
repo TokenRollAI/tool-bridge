@@ -32,12 +32,14 @@ import type {
   listZdrEndpointsInput,
 } from './schema'
 import type { createCoinbaseChargeInput } from './schema.handwritten'
+import { compactDefined as compact, asJsonObject as record, trimmedText as text } from '../_runtime/jsonValue'
 import { type ProviderContext, requireApiKey } from '../_runtime/plugin'
+import { createProviderHttpClient } from '../_runtime/providerHttp'
 import { upstreamError } from '../_runtime/upstreamError'
-import { guardedFetch } from '../_runtime/guardedFetch'
 
 const SERVICE = 'openrouter'
 const API_BASE = 'https://openrouter.ai/api/v1'
+const http = createProviderHttpClient({ baseUrl: `${API_BASE}/`, service: SERVICE })
 
 /** 这两个入参是请求**头**的来源,不进请求体。 */
 const HEADER_INPUT_KEYS = ['httpReferer', 'xTitle'] as const
@@ -56,17 +58,6 @@ interface RequestInput {
   query?: Record<string, QueryValue>
 }
 
-/** 上游 `optionalString`:去空白后仍非空才算有值。 */
-function text(value: unknown): string | undefined {
-  if (typeof value !== 'string') return undefined
-  const trimmed = value.trim()
-  return trimmed === '' ? undefined : trimmed
-}
-
-function record(value: unknown): Json | undefined {
-  return typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Json) : undefined
-}
-
 /** 契约说好是对象;不是就是上游出问题,不是调用方的错。 */
 function requireRecord(value: unknown, label: string): Json {
   const result = record(value)
@@ -74,11 +65,6 @@ function requireRecord(value: unknown, label: string): Json {
     throw new TBError('unavailable', `OpenRouter 的${label}不是对象`, { retryable: true })
   }
   return result
-}
-
-/** 丢掉值为 undefined 的键(上游 `compactObject`);`null` 要留住。 */
-function compact(input: Json): Json {
-  return Object.fromEntries(Object.entries(input).filter(([, value]) => value !== undefined))
 }
 
 /** 请求体 = 入参去掉两个"伪入参"与未给的字段。 */
@@ -110,14 +96,6 @@ function legacyToolChoice(value: unknown): Json | string | undefined {
   return { type: 'function', function: { name } }
 }
 
-function buildUrl(path: string, query: Record<string, QueryValue>): string {
-  const url = new URL(`${API_BASE}${path}`)
-  for (const [key, value] of Object.entries(query)) {
-    if (value !== undefined) url.searchParams.set(key, String(value))
-  }
-  return url.toString()
-}
-
 /** OpenRouter 的错误体:`{error:{type, code, message}}`,也可能把 message 放在根上。 */
 function errorMessage(payload: unknown): string | undefined {
   const body = record(payload)
@@ -128,39 +106,37 @@ function errorMessage(payload: unknown): string | undefined {
 async function request(ctx: ProviderContext, input: RequestInput): Promise<Json> {
   const hasBody = input.body !== undefined
   const headers = new Headers({ authorization: `Bearer ${requireApiKey(ctx, SERVICE)}` })
-  if (hasBody) headers.set('content-type', 'application/json')
   const referer = text(input.headerSource?.httpReferer)
   const title = text(input.headerSource?.xTitle)
   if (referer !== undefined) headers.set('HTTP-Referer', referer)
   if (title !== undefined) headers.set('X-Title', title)
 
-  const response = await guardedFetch(buildUrl(input.path, input.query ?? {}), {
+  const response = await http.request({
     method: input.method ?? 'GET',
+    path: input.path,
+    query: Object.entries(input.query ?? {}),
     headers,
-    ...(hasBody ? { body: JSON.stringify(compact(input.body ?? {})) } : {}),
+    ...(hasBody ? { json: compact(input.body ?? {}) } : {}),
+    responseType: 'json',
+    invalidJson: 'text',
+    mapError: ({ bodyKind, data, status }) => upstreamError(
+      status,
+      bodyKind === 'json'
+        ? errorMessage(data) ?? `OpenRouter 返回 HTTP ${status}`
+        : `OpenRouter 返回 HTTP ${status}`,
+    ),
   })
 
-  const body = await response.text()
-  if (response.ok) {
-    const contentType = response.headers.get('content-type') ?? ''
-    const isText = contentType.includes('xml') || contentType.includes('rss') || contentType.startsWith('text/')
-    // 只有显式要了 RSS 才接受非 JSON;否则非 JSON 就是上游坏了。
-    if (input.allowText === true && isText) return { rss: body }
-    try {
-      return requireRecord(JSON.parse(body), '响应')
-    } catch (error) {
-      if (error instanceof TBError) throw error
-      throw new TBError('unavailable', 'OpenRouter 返回了非 JSON 响应', { retryable: true })
-    }
+  const contentType = response.headers.get('content-type') ?? ''
+  const isText = contentType.includes('xml') || contentType.includes('rss') || contentType.startsWith('text/')
+  // 只有显式要了 RSS 才接受非 JSON;否则非 JSON 就是上游坏了。
+  if (input.allowText === true && response.bodyKind === 'invalid-json' && isText) {
+    return { rss: String(response.data) }
   }
-
-  let payload: unknown = null
-  try {
-    payload = JSON.parse(body)
-  } catch {
-    // 错误响应回 HTML(网关的 5xx 页面)很常见,那时按 HTTP 状态归一,不把上游正文回显。
+  if (response.bodyKind !== 'json') {
+    throw new TBError('unavailable', 'OpenRouter 返回了非 JSON 响应', { retryable: true })
   }
-  throw upstreamError(response.status, errorMessage(payload) ?? `OpenRouter 返回 HTTP ${response.status}`)
+  return requireRecord(response.data, '响应')
 }
 
 export function createChatCompletion(

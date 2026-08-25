@@ -19,6 +19,7 @@ import type {
   updateMonitorInput,
 } from './schema'
 import { type ProviderContext, requireApiKey } from '../_runtime/plugin'
+import { asJsonObject as record } from '../_runtime/jsonValue'
 import { upstreamError } from '../_runtime/upstreamError'
 import { guardedFetch } from '../_runtime/guardedFetch'
 
@@ -26,10 +27,6 @@ const SERVICE = 'uptimerobot'
 const API_BASE = 'https://api.uptimerobot.com/v2/'
 
 type Json = Record<string, unknown>
-
-function record(value: unknown): Json | undefined {
-  return typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Json) : undefined
-}
 
 /** 上游 `optionalString`:非字符串或空串都算缺失。 */
 function text(value: unknown): string | undefined {

@@ -2,7 +2,7 @@ import { readFile } from 'node:fs/promises'
 import { Command } from 'commander'
 import type { Page } from '../types'
 import { parsePageOpts, resolveTarget, withGlobalOpts, withPageOpts } from '../args'
-import { guard, printJson, printLine, table } from '../output'
+import { printJson, printLine, table } from '../output'
 import { confirmDestructive } from '../confirm'
 import { callDirect, CliError } from '../http'
 
@@ -105,26 +105,24 @@ export function pluginRegisterCommand(): Command {
     .requiredOption('--file <path>', 'Manifest JSON file path, or `-` for stdin')
     .action(async (opts: PluginFileOpts) => {
       const asJson = Boolean(opts.json)
-      await guard(asJson, async () => {
-        const file = String(opts.file ?? '').trim()
-        if (!file) throw new CliError('--file is required')
-        const manifest = await readManifest(file)
-        const reg = await callDirect<PluginRegistration>(
-          resolveTarget(opts), '/system/plugin/write',
-          manifest,
-        )
-        if (asJson) {
-          printJson(reg)
-          return
-        }
-        printLine(`registered plugin: ${reg.id} (${reg.endpoint})`)
-        printLine(`exports: ${exportsSummary(reg)}`)
-        if (reg.pluginToken) {
-          printLine('')
-          printLine('!! PLUGIN TOKEN (shown once — store it now, it cannot be retrieved again):')
-          printLine(`   ${reg.pluginToken}`)
-        }
-      })
+      const file = String(opts.file ?? '').trim()
+      if (!file) throw new CliError('--file is required')
+      const manifest = await readManifest(file)
+      const reg = await callDirect<PluginRegistration>(
+        resolveTarget(opts), '/system/plugin/write',
+        manifest,
+      )
+      if (asJson) {
+        printJson(reg)
+        return
+      }
+      printLine(`registered plugin: ${reg.id} (${reg.endpoint})`)
+      printLine(`exports: ${exportsSummary(reg)}`)
+      if (reg.pluginToken) {
+        printLine('')
+        printLine('!! PLUGIN TOKEN (shown once — store it now, it cannot be retrieved again):')
+        printLine(`   ${reg.pluginToken}`)
+      }
     })
 }
 
@@ -134,25 +132,23 @@ export function pluginListCommand(): Command {
     .description('List registered plugins')
     .action(async (opts: PluginOpts) => {
       const asJson = Boolean(opts.json)
-      await guard(asJson, async () => {
-        const pageOpts = parsePageOpts(opts)
-        const page = await callDirect<Page<PluginManifest>>(
-          resolveTarget(opts), '/system/plugin/list',
-          Object.keys(pageOpts).length ? { opts: pageOpts } : {},
-        )
-        if (asJson) {
-          printJson(page)
-          return
-        }
-        const rows = (page.items ?? []).map(p => [
-          p.id,
-          exportsSummary(p),
-          p.endpoint,
-          p.enabled ? 'enabled' : 'disabled',
-        ])
-        printLine(table(['ID', 'EXPORTS', 'ENDPOINT', 'STATE'], rows))
-        if (page.cursor) printLine(`next cursor: ${page.cursor}`)
-      })
+      const pageOpts = parsePageOpts(opts)
+      const page = await callDirect<Page<PluginManifest>>(
+        resolveTarget(opts), '/system/plugin/list',
+        Object.keys(pageOpts).length ? { opts: pageOpts } : {},
+      )
+      if (asJson) {
+        printJson(page)
+        return
+      }
+      const rows = (page.items ?? []).map(p => [
+        p.id,
+        exportsSummary(p),
+        p.endpoint,
+        p.enabled ? 'enabled' : 'disabled',
+      ])
+      printLine(table(['ID', 'EXPORTS', 'ENDPOINT', 'STATE'], rows))
+      if (page.cursor) printLine(`next cursor: ${page.cursor}`)
     })
 }
 
@@ -163,39 +159,37 @@ export function pluginGetCommand(): Command {
     .argument('<id>', 'Plugin id')
     .action(async (idArg: string, opts: PluginOpts) => {
       const asJson = Boolean(opts.json)
-      await guard(asJson, async () => {
-        const id = String(idArg ?? '').trim()
-        if (!id) throw new CliError('plugin id is required')
-        const m = await callDirect<PluginManifest>(resolveTarget(opts), '/system/plugin/get', {
-          id,
-        })
-        if (asJson) {
-          printJson(m)
-          return
-        }
-        printLine(`id:               ${m.id}`)
-        printLine(`protocolVersion:  ${m.protocolVersion}`)
-        printLine(`endpoint:         ${m.endpoint}`)
-        printLine(`auth:             ${m.auth?.kind ?? '-'}`)
-        printLine(`healthPath:       ${m.healthPath}`)
-        printLine(`state:            ${m.enabled ? 'enabled' : 'disabled'}`)
-        // v2:「提供什么」在 export 上 —— 逐个列出,并给出它对应的挂载命令
-        // (profile 决定挂成哪种节点,用户不必自己换算)。
-        printLine('exports:')
-        for (const e of m.exports) {
-          const extra = [
-            e.methods?.length ? `methods=${e.methods.join('|')}` : '',
-            e.capabilities?.length ? `capabilities=${e.capabilities.join('|')}` : '',
-            e.description ?? '',
-          ].filter(Boolean)
-          printLine(`  ${e.id} (${e.profile})${extra.length ? `  ${extra.join('  ')}` : ''}`)
-          printLine(
-            e.profile === 'tools/v1'
-              ? `    mount: tb tool mount <path> --kind tool --provider ${m.id} --export ${e.id}`
-              : `    mount: tb ctx mount <path> --provider ${m.id} --export ${e.id}`,
-          )
-        }
+      const id = String(idArg ?? '').trim()
+      if (!id) throw new CliError('plugin id is required')
+      const m = await callDirect<PluginManifest>(resolveTarget(opts), '/system/plugin/get', {
+        id,
       })
+      if (asJson) {
+        printJson(m)
+        return
+      }
+      printLine(`id:               ${m.id}`)
+      printLine(`protocolVersion:  ${m.protocolVersion}`)
+      printLine(`endpoint:         ${m.endpoint}`)
+      printLine(`auth:             ${m.auth?.kind ?? '-'}`)
+      printLine(`healthPath:       ${m.healthPath}`)
+      printLine(`state:            ${m.enabled ? 'enabled' : 'disabled'}`)
+      // v2:「提供什么」在 export 上 —— 逐个列出,并给出它对应的挂载命令
+      // (profile 决定挂成哪种节点,用户不必自己换算)。
+      printLine('exports:')
+      for (const e of m.exports) {
+        const extra = [
+          e.methods?.length ? `methods=${e.methods.join('|')}` : '',
+          e.capabilities?.length ? `capabilities=${e.capabilities.join('|')}` : '',
+          e.description ?? '',
+        ].filter(Boolean)
+        printLine(`  ${e.id} (${e.profile})${extra.length ? `  ${extra.join('  ')}` : ''}`)
+        printLine(
+          e.profile === 'tools/v1'
+            ? `    mount: tb tool mount <path> --kind tool --provider ${m.id} --export ${e.id}`
+            : `    mount: tb ctx mount <path> --provider ${m.id} --export ${e.id}`,
+        )
+      }
     })
 }
 
@@ -214,28 +208,26 @@ export function pluginUpdateCommand(): Command {
     )
     .action(async (idArg: string, opts: PluginFileOpts) => {
       const asJson = Boolean(opts.json)
-      await guard(asJson, async () => {
-        const id = String(idArg ?? '').trim()
-        if (!id) throw new CliError('plugin id is required')
-        const file = String(opts.file ?? '').trim()
-        if (!file) throw new CliError('--file is required')
-        const patch = await readManifest(file)
-        const updated = await callDirect<PluginRegistration>(
-          resolveTarget(opts), '/system/plugin/update',
-          { id, patch },
-        )
-        if (asJson) {
-          printJson(updated)
-          return
-        }
-        printLine(`updated plugin: ${updated.id} (${updated.endpoint})`)
-        printLine(`exports: ${exportsSummary(updated)}`)
-        if (updated.pluginToken) {
-          printLine('')
-          printLine('!! PLUGIN TOKEN (shown once — store it now, it cannot be retrieved again):')
-          printLine(`   ${updated.pluginToken}`)
-        }
-      })
+      const id = String(idArg ?? '').trim()
+      if (!id) throw new CliError('plugin id is required')
+      const file = String(opts.file ?? '').trim()
+      if (!file) throw new CliError('--file is required')
+      const patch = await readManifest(file)
+      const updated = await callDirect<PluginRegistration>(
+        resolveTarget(opts), '/system/plugin/update',
+        { id, patch },
+      )
+      if (asJson) {
+        printJson(updated)
+        return
+      }
+      printLine(`updated plugin: ${updated.id} (${updated.endpoint})`)
+      printLine(`exports: ${exportsSummary(updated)}`)
+      if (updated.pluginToken) {
+        printLine('')
+        printLine('!! PLUGIN TOKEN (shown once — store it now, it cannot be retrieved again):')
+        printLine(`   ${updated.pluginToken}`)
+      }
     })
 }
 
@@ -246,17 +238,15 @@ export function pluginHealthCommand(): Command {
     .argument('<id>', 'Plugin id')
     .action(async (idArg: string, opts: PluginOpts) => {
       const asJson = Boolean(opts.json)
-      await guard(asJson, async () => {
-        const id = String(idArg ?? '').trim()
-        if (!id) throw new CliError('plugin id is required')
-        const h = await callDirect<PluginHealth>(resolveTarget(opts), '/system/plugin/health', {
-          id,
-        })
-        if (asJson) printJson(h)
-        else
-          printLine(`${id}: ${h.healthy ? 'healthy' : 'unhealthy'} (checked ${h.checkedAt ?? '-'})`)
-        if (!h.healthy) process.exitCode = 1
+      const id = String(idArg ?? '').trim()
+      if (!id) throw new CliError('plugin id is required')
+      const h = await callDirect<PluginHealth>(resolveTarget(opts), '/system/plugin/health', {
+        id,
       })
+      if (asJson) printJson(h)
+      else
+        printLine(`${id}: ${h.healthy ? 'healthy' : 'unhealthy'} (checked ${h.checkedAt ?? '-'})`)
+      if (!h.healthy) process.exitCode = 1
     })
 }
 
@@ -268,14 +258,12 @@ export function pluginRmCommand(): Command {
     .option('--yes', 'Skip the confirmation prompt')
     .action(async (idArg: string, opts: PluginOpts & { yes?: boolean }) => {
       const asJson = Boolean(opts.json)
-      await guard(asJson, async () => {
-        const id = String(idArg ?? '').trim()
-        if (!id) throw new CliError('plugin id is required')
-        await confirmDestructive(opts, `Unregister plugin '${id}'? Mounted nodes referencing it will fail on next call.`)
-        await callDirect(resolveTarget(opts), '/system/plugin/delete', { id })
-        if (asJson) printJson({ ok: true, id })
-        else printLine(`removed plugin: ${id}`)
-      })
+      const id = String(idArg ?? '').trim()
+      if (!id) throw new CliError('plugin id is required')
+      await confirmDestructive(opts, `Unregister plugin '${id}'? Mounted nodes referencing it will fail on next call.`)
+      await callDirect(resolveTarget(opts), '/system/plugin/delete', { id })
+      if (asJson) printJson({ ok: true, id })
+      else printLine(`removed plugin: ${id}`)
     })
 }
 

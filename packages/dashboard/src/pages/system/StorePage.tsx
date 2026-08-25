@@ -12,9 +12,8 @@ import {
 } from 'lucide-react'
 import { useRef, useState } from 'react'
 import { toast } from 'sonner'
-import type { StoreObjectDescriptor, StoreShareGrant } from '@/lib/types'
+import type { StoreObjectDescriptor, StoreShareGrant } from '@/lib/store'
 import {
-  useInvalidate,
   useStoreDelete,
   useStoreObjects,
   useStoreRead,
@@ -22,7 +21,7 @@ import {
   useStoreShare,
   useStoreStat,
   useStoreUpload,
-} from '@/lib/queries'
+} from '@/lib/store-queries'
 import {
   Dialog,
   DialogContent,
@@ -45,6 +44,7 @@ import { EmptyState } from '@/components/EmptyState'
 import { PageHeader } from '@/components/PageHeader'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Button } from '@/components/ui/button'
+import { useInvalidate } from '@/lib/queries'
 import { Input } from '@/components/ui/input'
 
 function humanStoreSize(size: number): string {

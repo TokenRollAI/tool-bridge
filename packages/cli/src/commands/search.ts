@@ -1,8 +1,8 @@
 import { Command } from 'commander'
 import type { Page, ToolSearchItem } from '../types'
 import { parsePageOpts, resolveTarget, withGlobalOpts, withPageOpts } from '../args'
-import { guard, printJson, printLine, table } from '../output'
-import { apiJson, CliError } from '../http'
+import { printJson, printLine, table } from '../output'
+import { CliError, withClient } from '../http'
 
 interface SearchOpts {
   baseUrl?: string
@@ -73,25 +73,26 @@ Examples:
     )
     .action(async (queryArg: string, opts: SearchOpts) => {
       const asJson = Boolean(opts.json)
-      await guard(asJson, async () => {
-        const query = String(queryArg ?? '').trim()
-        if (!query) throw new CliError('query is required')
-        const mode = opts.mode ? String(opts.mode) : undefined
-        if (mode !== undefined && mode !== 'keyword' && mode !== 'semantic') {
-          throw new CliError(`invalid --mode "${mode}"; valid: keyword, semantic`)
-        }
-        const pageOpts: Record<string, unknown> = parsePageOpts(opts)
-        if (mode) pageOpts.mode = mode
-        const page = await apiJson<Page<ToolSearchItem>>(resolveTarget(opts), {
-          method: 'POST',
-          path: '/~search',
-          body: {
-            query,
-            ...(Object.keys(pageOpts).length > 0 ? { opts: pageOpts } : {}),
-          },
-        })
-        if (asJson) printJson(page)
-        else printSearchPage(page, Boolean(opts.schemas))
-      })
+      const query = String(queryArg ?? '').trim()
+      if (!query) throw new CliError('query is required')
+      const mode = opts.mode ? String(opts.mode) : undefined
+      if (mode !== undefined && mode !== 'keyword' && mode !== 'semantic') {
+        throw new CliError(`invalid --mode "${mode}"; valid: keyword, semantic`)
+      }
+      const searchMode = mode as 'keyword' | 'semantic' | undefined
+      const pageOpts = {
+        ...parsePageOpts(opts),
+        ...(searchMode === undefined ? {} : { mode: searchMode }),
+      }
+      const target = resolveTarget(opts)
+      const page = await withClient(
+        target,
+        async client => await client.search({
+          query,
+          ...(Object.keys(pageOpts).length > 0 ? { opts: pageOpts } : {}),
+        }),
+      )
+      if (asJson) printJson(page)
+      else printSearchPage(page, Boolean(opts.schemas))
     })
 }

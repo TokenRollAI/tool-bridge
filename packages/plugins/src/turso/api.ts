@@ -43,37 +43,23 @@ import type {
   listLocationsInput,
   listOrganizationsInput,
 } from './schema'
+import { compactDefined as compact, asJsonObject as record, trimmedText as text } from '../_runtime/jsonValue'
 import { type ProviderContext, requireApiKey } from '../_runtime/plugin'
+import { createProviderHttpClient } from '../_runtime/providerHttp'
 import { upstreamError } from '../_runtime/upstreamError'
-import { guardedFetch } from '../_runtime/guardedFetch'
 
 const SERVICE = 'turso'
 const API_BASE = 'https://api.turso.tech'
+const http = createProviderHttpClient({ baseUrl: `${API_BASE}/`, service: SERVICE })
 
 type Json = Record<string, unknown>
 type Method = 'DELETE' | 'GET' | 'POST'
-
-function record(value: unknown): Json | undefined {
-  return typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Json) : undefined
-}
-
-/** 上游 `optionalString` 的等价物:去空白后仍非空才算有值。 */
-function text(value: unknown): string | undefined {
-  if (typeof value !== 'string') return undefined
-  const trimmed = value.trim()
-  return trimmed === '' ? undefined : trimmed
-}
 
 /** 上游 `readInputString`:schema 的 `min(1)` 放过纯空白串,必填断言落在这层。 */
 function requireText(value: unknown, field: string): string {
   const result = text(value)
   if (result === undefined) throw new TBError('invalid_argument', `${field} is required.`)
   return result
-}
-
-/** 丢掉值为 undefined 的键(上游 `compactObject`)。 */
-function compact(input: Json): Json {
-  return Object.fromEntries(Object.entries(input).filter(([, value]) => value !== undefined))
 }
 
 /** 上游回的形状不符合契约 —— 是上游的问题,不是调用方的错。 */
@@ -139,16 +125,6 @@ function singleResource(payload: unknown, keys: string[]): Json {
   return normalizeResource(fields)
 }
 
-/** 空体(DELETE 常见)按 `{}` 处理;非 JSON 体退化成 `{message: <原文>}` 好让错误分支拿到消息。 */
-function readPayload(body: string): unknown {
-  if (body.trim() === '') return {}
-  try {
-    return JSON.parse(body)
-  } catch {
-    return { message: body }
-  }
-}
-
 /** Turso 的错误消息散落在五六个键里,按上游的顺序找。 */
 function errorMessage(payload: unknown, status: number): string {
   const direct = text(payload)
@@ -174,28 +150,26 @@ async function request(ctx: ProviderContext, input: RequestInput): Promise<unkno
   // 取凭证放在 try 外:它抛的是配置错误,不该被下面的传输失败兜底吞成 502。
   const apiKey = requireApiKey(ctx, SERVICE)
 
-  let response: Response
-  let payload: unknown
-  try {
-    response = await guardedFetch(`${API_BASE}${input.path}`, {
-      method: input.method,
-      headers: {
-        accept: 'application/json',
-        authorization: `Bearer ${apiKey}`,
-        ...(input.body === undefined ? {} : { 'content-type': 'application/json' }),
-      },
-      body: input.body === undefined ? undefined : JSON.stringify(input.body),
-    })
-    payload = readPayload(await response.text())
-  } catch (error) {
-    // 传输层失败必须就地归一:漏出去的裸 Error 会被 plugin-sdk 抹成 "internal plugin error"
-    // 500。EgressBlockedError 本身是 TBError(invalid_argument),原样冒上去。
-    if (error instanceof TBError) throw error
-    throw upstreamError(502, error instanceof Error ? `Turso request failed: ${error.message}` : 'Turso request failed')
-  }
-
-  if (!response.ok) throw upstreamError(response.status, errorMessage(payload, response.status))
-  return payload
+  const response = await http.request({
+    method: input.method,
+    path: input.path,
+    headers: {
+      accept: 'application/json',
+      authorization: `Bearer ${apiKey}`,
+    },
+    ...(input.body === undefined ? {} : { json: input.body }),
+    invalidJson: 'text',
+    mapError: ({ bodyKind, data, status }) => upstreamError(
+      status,
+      errorMessage(bodyKind === 'empty' ? {} : bodyKind === 'json' ? data : { message: data }, status),
+    ),
+    mapTransportError: ({ message }) => upstreamError(
+      502,
+      message === undefined ? 'Turso request failed' : `Turso request failed: ${message}`,
+    ),
+  })
+  if (response.bodyKind === 'empty') return {}
+  return response.bodyKind === 'json' ? response.data : { message: response.data }
 }
 
 /** 组织下的资源路径前缀;slug 进路径故必须 encode。 */

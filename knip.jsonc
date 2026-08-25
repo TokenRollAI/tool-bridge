@@ -1,0 +1,56 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema-jsonc.json",
+
+  // 公开包大量 export 由下游消费，不能以仓内引用判定删除。此门只扫描
+  // 可证明的未使用文件/依赖与解析错误，导出收敛需另做 artifact ownership 审计。
+  "include": [
+    "files",
+    "dependencies",
+    "unlisted",
+    "unresolved",
+    "catalog",
+    "catalogReferences"
+  ],
+
+  "workspaces": {
+    ".": {
+      "entry": ["scripts/**/*.{mjs,ts}"],
+      "project": ["scripts/**/*.{mjs,ts}"],
+      // llmdoc 是 AGENTS.md 约定的 agent/CI 工具，不由 package script 直接调用。
+      "ignoreDependencies": ["@tokenroll/llmdoc"]
+    },
+
+    // Deploy Button template 不在 pnpm workspace 内，但是独立发布入口。
+    "template": {
+      "entry": ["scripts/*.mjs"],
+      "project": ["src/**/*.ts", "scripts/*.mjs"]
+    },
+
+    "packages/gateway": {
+      "entry": ["scripts/*.ts"],
+      // app/plugins 被 bundle 进公开产物，其 external 运行时闭包必须由 gateway 申明；
+      // Dashboard 由 vitest config 中的子进程构建；cloudflare:* 是 workerd 虚拟模块。
+      "ignoreDependencies": [
+        "@cfworker/json-schema",
+        "@modelcontextprotocol/client",
+        "@modelcontextprotocol/core",
+        "@tool-bridge/dashboard",
+        "cloudflare"
+      ]
+    },
+
+    "packages/plugins": {
+      "entry": ["scripts/migrate/index.mjs", "scripts/migrate/report.mjs"]
+    },
+
+    "packages/sdk": {
+      // @tool-bridge/app 被 noExternal bundle，但它的 external 运行时闭包仍由 SDK 产物拥有。
+      "ignoreDependencies": ["@cfworker/json-schema", "aws4fetch"]
+    },
+
+    "packages/server": {
+      // 同上：app/plugins 进 server bundle，JSON Schema validator 保持 external。
+      "ignoreDependencies": ["@cfworker/json-schema"]
+    }
+  }
+}

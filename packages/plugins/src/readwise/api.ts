@@ -20,26 +20,21 @@ import type {
   saveDocumentInput,
   updateDocumentInput,
 } from './schema'
+import {
+  compactDefined as compact,
+  integerValue as integer,
+  asJsonObject as record,
+  trimmedText as text,
+} from '../_runtime/jsonValue'
 import { type ProviderContext, requireApiKey } from '../_runtime/plugin'
+import { createProviderHttpClient } from '../_runtime/providerHttp'
 import { upstreamError } from '../_runtime/upstreamError'
-import { guardedFetch } from '../_runtime/guardedFetch'
 
 const SERVICE = 'readwise'
 const API_BASE = 'https://readwise.io/api'
+const http = createProviderHttpClient({ baseUrl: `${API_BASE}/`, service: SERVICE })
 
 type Json = Record<string, unknown>
-
-function text(value: unknown): string | undefined {
-  return typeof value === 'string' ? value.trim() || undefined : undefined
-}
-
-function record(value: unknown): Json | undefined {
-  return typeof value === 'object' && value !== null && !Array.isArray(value) ? value as Json : undefined
-}
-
-function integer(value: unknown): number | undefined {
-  return typeof value === 'number' && Number.isInteger(value) ? value : undefined
-}
 
 function readArray(value: unknown): unknown[] {
   return Array.isArray(value) ? value : []
@@ -72,33 +67,22 @@ interface RequestInput {
 }
 
 async function request(ctx: ProviderContext, input: RequestInput): Promise<unknown> {
-  const url = new URL(`${API_BASE}${input.path}`)
-  for (const [key, value] of Object.entries(input.query ?? {})) {
-    url.searchParams.set(key, value)
-  }
-
-  const response = await guardedFetch(url.toString(), {
+  const response = await http.request({
     method: input.method ?? 'GET',
+    path: input.path,
+    query: Object.entries(input.query ?? {}),
     headers: {
       accept: 'application/json',
       // Readwise 用的是 `Token <key>`,不是 Bearer —— 写成 Bearer 会一直 401。
       authorization: `Token ${requireApiKey(ctx, SERVICE)}`,
-      ...(input.body === undefined ? {} : { 'content-type': 'application/json' }),
     },
-    ...(input.body === undefined ? {} : { body: JSON.stringify(input.body) }),
+    ...(input.body === undefined ? {} : { json: input.body }),
+    invalidJsonMessage: 'Readwise 返回了非法 JSON',
+    mapError: ({ bodyKind, data, status }) => bodyKind === 'invalid-json'
+      ? new TBError('unavailable', 'Readwise 返回了非法 JSON', { retryable: true })
+      : upstreamError(status, errorMessage(data, status)),
   })
-
-  const body = await response.text()
-  let payload: unknown = null
-  if (body.trim() !== '') {
-    try {
-      payload = JSON.parse(body)
-    } catch {
-      throw new TBError('unavailable', 'Readwise 返回了非法 JSON', { retryable: true })
-    }
-  }
-  if (!response.ok) throw upstreamError(response.status, errorMessage(payload, response.status))
-  return payload ?? {}
+  return response.bodyKind === 'empty' ? {} : response.data
 }
 
 /** 顶层响应必须是对象;不是就是上游出问题,不是调用方的错。 */
@@ -106,11 +90,6 @@ function requireRecord(value: unknown, message: string): Json {
   const object = record(value)
   if (object === undefined) throw new TBError('unavailable', message, { retryable: true })
   return object
-}
-
-/** 只保留 undefined 之外的键(上游 `compactJson` 的等价物)。 */
-function compact(input: Json): Json {
-  return Object.fromEntries(Object.entries(input).filter(([, value]) => value !== undefined))
 }
 
 /** 只带有值的项进 query;空串按"没给"处理(上游 `queryParams` 的语义)。 */

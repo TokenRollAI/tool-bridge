@@ -18,7 +18,12 @@ import {
   type ObjectStore,
   TBError,
 } from '@tool-bridge/core'
-import { encodeObjectKey, presignS3Put, presignS3Url } from '@tool-bridge/app'
+import {
+  encodeObjectKey,
+  presignS3Put,
+  presignS3Url,
+  toWebObjectBodyStream,
+} from '@tool-bridge/app'
 import { AwsClient } from 'aws4fetch'
 
 /** R2 S3 兼容端点的 presign 参数(凭证链解析见 app.ts;缺省 = 不提供 presign)。 */
@@ -35,37 +40,8 @@ function toR2Body(body: ObjectBody): ReadableStream | ArrayBuffer | ArrayBufferV
   }
   if (body instanceof ReadableStream) return body
 
-  // core 只要求最小 ObjectBodyStream；非原生实现按 pull 桥接，仍逐块背压、不聚合字节。
-  const reader = body.getReader()
-  let released = false
-  const release = () => {
-    if (released) return
-    released = true
-    reader.releaseLock()
-  }
-  return new ReadableStream<Uint8Array>({
-    async pull(controller) {
-      try {
-        const { done, value } = await reader.read()
-        if (done) {
-          release()
-          controller.close()
-        } else if (value !== undefined) {
-          controller.enqueue(value)
-        }
-      } catch (error) {
-        release()
-        controller.error(error)
-      }
-    },
-    async cancel(reason) {
-      try {
-        await reader.cancel?.(reason)
-      } finally {
-        release()
-      }
-    },
-  })
+  // core 只要求最小 ObjectBodyStream；共享桥接仍逐块背压、不聚合字节。
+  return toWebObjectBodyStream(body)
 }
 
 function onlyIfForPut(opts: ObjectPutOptions | undefined): R2Conditional | Headers | undefined {

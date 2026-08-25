@@ -1,11 +1,5 @@
-import {
-  base64urlEncode,
-  type CallContext,
-  encodeCallContext,
-  HEADER_TB_CONTEXT,
-  HEADER_TB_UPSTREAM_AUTH,
-} from '@tool-bridge/core'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+import { createProviderHarness } from '../support/providerHarness'
 import { createPubmedPlugin } from '../../src/pubmed/index'
 import { pubmedActions } from '../../src/pubmed/schema'
 
@@ -16,39 +10,19 @@ import { pubmedActions } from '../../src/pubmed/schema'
  * 日期区间的 `-` → `/`、以及 EFetch XML 里数值字符引用的**二次解码**(命名实体不能跟着解)。
  */
 
-const PLUGIN_TOKEN = 'tbp_test'
-const ENV = { PLUGIN_TOKEN }
 const API_KEY = 'ncbi_deadbeef'
 const plugin = createPubmedPlugin()
 
-const CALLER: CallContext = {
-  keyId: 'k1',
-  owner: 'agent:tester',
-  scopes: [],
-  traceId: 't1',
+const {
+  call,
+  envelope,
+  sent,
+  stubFetch,
+} = createProviderHarness({
   mountPath: 'research/pubmed',
-  exportId: 'actions',
-}
-
-function envelope(body: unknown, opts: { auth?: string | null } = {}): Promise<Response> {
-  const headers: Record<string, string> = {
-    'authorization': `Bearer ${PLUGIN_TOKEN}`,
-    'content-type': 'application/json',
-    [HEADER_TB_CONTEXT]: encodeCallContext(CALLER),
-  }
-  const auth = opts.auth === undefined ? API_KEY : opts.auth
-  if (auth !== null) {
-    headers[HEADER_TB_UPSTREAM_AUTH] = base64urlEncode(new TextEncoder().encode(auth))
-  }
-  return Promise.resolve(plugin.fetch(
-    new Request('https://plugin.test/', { method: 'POST', headers, body: JSON.stringify(body) }),
-    ENV as never,
-  ))
-}
-
-function call(name: string, args: unknown, opts?: { auth?: string | null }): Promise<Response> {
-  return envelope({ tool: 'Call', arguments: { name, args } }, opts)
-}
+  plugin,
+  upstreamAuth: API_KEY,
+})
 
 interface Route {
   body: string
@@ -60,7 +34,7 @@ interface Route {
  * 再 efetch 取正文),用调用顺序去对响应太脆。
  */
 function mockNcbi(routes: Record<string, Route>): ReturnType<typeof vi.fn> {
-  const fn = vi.fn((request: Request) => {
+  return stubFetch((request: Request) => {
     const { pathname } = new URL(request.url)
     const key = Object.keys(routes).find(candidate => pathname.endsWith(candidate))
     if (key === undefined) {
@@ -72,13 +46,6 @@ function mockNcbi(routes: Record<string, Route>): ReturnType<typeof vi.fn> {
       headers: { 'content-type': 'application/json' },
     }))
   })
-  vi.stubGlobal('fetch', fn)
-  return fn
-}
-
-/** 取上游收到的第 n 个请求(默认第一个)。 */
-function sent(mock: ReturnType<typeof vi.fn>, index = 0): Request {
-  return (mock.mock.calls[index] as [Request])[0]
 }
 
 /**
@@ -170,10 +137,6 @@ function articleSet(pmid: string): string {
     + '<Article><ArticleTitle>T</ArticleTitle></Article>'
     + '</MedlineCitation></PubmedArticle></PubmedArticleSet>'
 }
-
-afterEach(() => {
-  vi.unstubAllGlobals()
-})
 
 describe('契约面', () => {
   it('List 出全部 8 个 action,且都带 Zod 派生的 schema', async () => {

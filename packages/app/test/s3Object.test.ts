@@ -132,4 +132,16 @@ describe('S3 ObjectStore streaming put', () => {
     expect(reads).toBeGreaterThan(0)
     expect(fetcher).toHaveBeenCalledOnce()
   })
+
+  it('HEAD 的 5xx 也不使用 aws4fetch 默认重试', async () => {
+    const fetcher: typeof fetch = vi.fn(async () => new Response(null, { status: 503 }))
+    vi.stubGlobal('fetch', fetcher)
+    const store = createS3ObjectStore(CONFIG, { allowInsecure: false })
+
+    await expect(store.head('store/v1/unavailable')).rejects.toMatchObject({
+      code: 'unavailable',
+      retryable: true,
+    })
+    expect(fetcher).toHaveBeenCalledOnce()
+  })
 })

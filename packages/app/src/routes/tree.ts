@@ -17,6 +17,7 @@ import {
   type TreeNode,
   type TreePath,
 } from '@tool-bridge/core'
+import { treeJsonSchema } from '@tool-bridge/core/protocol'
 import type { AppContext } from '../deps'
 import type { RouteEnv } from './env'
 import { filterListVisible, indexByParent, splitReserved, toEntry } from '../paths'
@@ -83,7 +84,7 @@ export async function handleTree(c: AppContext, env: RouteEnv): Promise<Response
   })
   const rep = negotiate(c.req.header('accept'))
   if (rep === 'json') {
-    return new Response(JSON.stringify(tree), {
+    return new Response(JSON.stringify(treeJsonSchema.parse(tree)), {
       headers: { 'content-type': contentTypeFor('json') },
     })
   }

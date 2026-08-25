@@ -1,16 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { mockJsonResponse, runCli } from './cliHarness'
 import { resetFetch, setFetch } from '../src/http'
-import { runCli } from './cliHarness'
 
 /** 捕获请求并按 body 应答;返回 mock 以断言 URL/body。 */
 function captureFetch(body: unknown, status = 200): ReturnType<typeof vi.fn> {
-  const fn = vi.fn(
-    async () =>
-      new Response(JSON.stringify(body), {
-        status,
-        headers: { 'content-type': 'application/json' },
-      }),
-  )
+  const fn = vi.fn(async (url: string, init?: RequestInit) =>
+    mockJsonResponse(url, init, body, status))
   setFetch(fn as unknown as typeof fetch)
   return fn
 }

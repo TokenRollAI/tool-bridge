@@ -30,12 +30,20 @@ import type {
   listZonesInput,
 } from './schema'
 import type { createDnsRecordInput, updateDnsRecordInput } from './schema.handwritten'
+import {
+  booleanValue as boolean,
+  compactDefined as compact,
+  integerValue as integer,
+  asJsonObject as record,
+  trimmedText as text,
+} from '../_runtime/jsonValue'
+import { createProviderHttpClient, type ProviderQuery } from '../_runtime/providerHttp'
 import { type ProviderContext, requireApiKey } from '../_runtime/plugin'
 import { upstreamError } from '../_runtime/upstreamError'
-import { guardedFetch } from '../_runtime/guardedFetch'
 
 const SERVICE = 'cloudflare_dns'
 const API_BASE = 'https://api.cloudflare.com/client/v4'
+const http = createProviderHttpClient({ baseUrl: `${API_BASE}/`, service: SERVICE })
 
 /** list_accounts 的分页缺省值,照抄上游 `requestCloudflareAccounts`。 */
 const DEFAULT_ACCOUNTS_PAGE = 1
@@ -59,28 +67,9 @@ interface RequestInput {
   query?: Record<string, QueryValue>
 }
 
-/** 上游 `optionalString` 的等价物:去空白后仍非空才算有值。 */
-function text(value: unknown): string | undefined {
-  if (typeof value !== 'string') return undefined
-  const trimmed = value.trim()
-  return trimmed === '' ? undefined : trimmed
-}
-
 /** 上游写请求体里 `typeof x === 'string' ? x : undefined` 的等价物:空串与空白都原样保留。 */
 function rawText(value: unknown): string | undefined {
   return typeof value === 'string' ? value : undefined
-}
-
-function record(value: unknown): Json | undefined {
-  return typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Json) : undefined
-}
-
-function integer(value: unknown): number | undefined {
-  return typeof value === 'number' && Number.isInteger(value) ? value : undefined
-}
-
-function boolean(value: unknown): boolean | undefined {
-  return typeof value === 'boolean' ? value : undefined
 }
 
 /** 出参里 `null` 与"字段缺席"是两回事:前者是上游明确说"这一项是空的"。 */
@@ -92,11 +81,6 @@ function nullableText(value: unknown): string | null | undefined {
 function textArray(value: unknown): string[] | undefined {
   if (!Array.isArray(value)) return undefined
   return value.filter((item): item is string => typeof item === 'string')
-}
-
-/** 丢掉值为 undefined 的键(上游 `compactObject`);`null` 要留住。 */
-function compact(input: Record<string, unknown>): Json {
-  return Object.fromEntries(Object.entries(input).filter(([, value]) => value !== undefined))
 }
 
 /** 契约说好是对象;不是就是上游出问题,不是调用方的错。 */
@@ -120,16 +104,6 @@ function requireText(source: Json, field: string, label: string): string {
   return value
 }
 
-/** 上游 `queryParams`:undefined / null / 空串一律不发。 */
-function buildUrl(path: string, query: Record<string, QueryValue> | undefined): string {
-  const url = new URL(`${API_BASE}${path}`)
-  for (const [key, value] of Object.entries(query ?? {})) {
-    if (value === undefined || value === '') continue
-    url.searchParams.set(key, String(value))
-  }
-  return url.toString()
-}
-
 /** 信封里的错误消息:先 `errors[].message`,再 `messages[].message`,都没有才兜底状态码。 */
 function errorMessage(envelope: Envelope, status: number): string {
   for (const source of [envelope.errors, envelope.messages]) {
@@ -143,42 +117,31 @@ function errorMessage(envelope: Envelope, status: number): string {
 
 async function request(ctx: ProviderContext, input: RequestInput): Promise<Envelope> {
   const hasBody = input.body !== undefined
-  const headers: Record<string, string> = {
-    accept: 'application/json',
-    authorization: `Bearer ${requireApiKey(ctx, SERVICE)}`,
-  }
-  if (hasBody) headers['content-type'] = 'application/json'
-
-  const response = await guardedFetch(buildUrl(input.path, input.query), {
+  const result = await http.request({
+    path: input.path,
     method: input.method ?? 'GET',
-    headers,
-    body: hasBody ? JSON.stringify(input.body) : undefined,
-  })
-
-  const body = await response.text().catch(() => '')
-  let envelope: Envelope | undefined
-  if (body !== '') {
-    try {
-      envelope = requireRecord(JSON.parse(body), 'Cloudflare 响应') as Envelope
-    } catch (error) {
-      if (error instanceof TBError) throw error
-      // 上游把「解析不了」压成一个 success:false 的假信封,再按 HTTP 状态归一 —— 于是
-      // 2xx 上回来一页 HTML 会变成 status 200 的错误。这里改成:2xx 上的非 JSON 归
-      // unavailable(上游/CDN 出问题,可重试),错误响应上的非 JSON 仍按 HTTP 状态归一
-      // (那时状态码比"响应不是 JSON"这句话准得多)。
-      if (response.ok) {
-        throw new TBError('unavailable', 'Cloudflare 返回了非 JSON 响应', { retryable: true })
+    // 上游 `queryParams`:undefined / null / 空串一律不发。
+    query: Object.entries(input.query ?? {})
+      .filter(([, value]) => value !== undefined && value !== '') satisfies ProviderQuery,
+    headers: { accept: 'application/json', authorization: `Bearer ${requireApiKey(ctx, SERVICE)}` },
+    ...(hasBody ? { json: input.body } : {}),
+    invalidJsonMessage: 'Cloudflare 返回了非 JSON 响应',
+    mapError: ({ bodyKind, data, status }) => {
+      if (bodyKind === 'json' && record(data) === undefined) {
+        return new TBError('unavailable', 'Cloudflare 响应不是对象', { retryable: true })
       }
-    }
-  }
-  const result = envelope ?? {}
+      const envelope = bodyKind === 'json' ? data as Envelope : {}
+      return upstreamError(status, errorMessage(envelope, status))
+    },
+  })
+  const envelope = result.data === undefined ? {} : requireRecord(result.data, 'Cloudflare 响应') as Envelope
 
   // 两件事都要看:HTTP 200 + `success: false` 是 Cloudflare 表达失败的常规方式之一。
   // 200 落到公共归一表上是 invalid_argument —— 请求被拒且重试不会变,正是该给的语义。
-  if (!response.ok || result.success === false) {
-    throw upstreamError(response.status, errorMessage(result, response.status))
+  if (envelope.success === false) {
+    throw upstreamError(result.status, errorMessage(envelope, result.status))
   }
-  return result
+  return envelope
 }
 
 function normalizeAccount(value: unknown): Json {

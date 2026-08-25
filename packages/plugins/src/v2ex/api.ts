@@ -38,9 +38,14 @@ import type {
   listTopicRepliesInput,
   setTopicStickyInput,
 } from './schema'
+import {
+  createProviderHttpClient,
+  type ProviderHttpClient,
+  type ProviderHttpRequest,
+} from '../_runtime/providerHttp'
+import { asJsonObject as record, trimmedText as text } from '../_runtime/jsonValue'
 import { type ProviderContext, requireApiKey } from '../_runtime/plugin'
 import { upstreamError } from '../_runtime/upstreamError'
-import { guardedFetch } from '../_runtime/guardedFetch'
 
 const SERVICE = 'v2ex'
 const API_BASE = 'https://www.v2ex.com/api/v2'
@@ -48,19 +53,10 @@ const API_BASE = 'https://www.v2ex.com/api/v2'
 const LEGACY_API_BASE = 'https://www.v2ex.com/api'
 /** 照搬上游的 30s 单请求上限。 */
 const REQUEST_TIMEOUT_MS = 30_000
+const v2Http = createProviderHttpClient({ baseUrl: `${API_BASE}/`, service: SERVICE })
+const legacyHttp = createProviderHttpClient({ baseUrl: `${LEGACY_API_BASE}/`, service: SERVICE })
 
 type Json = Record<string, unknown>
-
-function record(value: unknown): Json | undefined {
-  return typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Json) : undefined
-}
-
-/** 上游 `optionalString` 的等价物:去空白后仍非空才算有值。 */
-function text(value: unknown): string | undefined {
-  if (typeof value !== 'string') return undefined
-  const trimmed = value.trim()
-  return trimmed === '' ? undefined : trimmed
-}
 
 /** 上游回的形状不符合契约 —— 是上游的问题,不是调用方的错。 */
 function invalidResponse(message: string): TBError {
@@ -104,60 +100,32 @@ interface RequestOptions {
   query?: Record<string, number | string | undefined>
 }
 
-/** 读响应体:空体是 `null`(DELETE 会这样),解不开 JSON 就把原文交出去当错误文案。 */
-async function readPayload(response: Response): Promise<unknown> {
-  const raw = await response.text().catch(() => '')
-  if (raw.trim() === '') return null
-  try {
-    return JSON.parse(raw) as unknown
-  } catch {
-    return raw
-  }
-}
-
-async function send(url: URL, init: RequestInit, label: string): Promise<unknown> {
-  let response: Response
-  try {
-    response = await guardedFetch(url.toString(), {
-      ...init,
-      // 不设超时会让一个挂死的端点拖住整个调用;上游同样给了 30s 的独立预算。
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-    })
-  } catch (error) {
-    // guardedFetch 拦下的出站(EgressBlockedError)已经是 TBError,原样冒上去。
-    if (error instanceof TBError) throw error
-    if (error instanceof Error && error.name === 'TimeoutError') {
-      throw upstreamError(504, `${label} request timed out after ${REQUEST_TIMEOUT_MS / 1000} seconds`)
-    }
-    throw upstreamError(
-      502,
-      error instanceof Error ? `${label} request failed: ${error.message}` : `${label} request failed`,
-    )
-  }
-
-  const payload = await readPayload(response)
-  if (!response.ok) throw upstreamError(response.status, errorMessage(payload) ?? 'V2EX request failed')
-  return payload
+async function send(client: ProviderHttpClient, request: ProviderHttpRequest, label: string): Promise<unknown> {
+  const response = await client.request({
+    ...request,
+    timeoutMs: REQUEST_TIMEOUT_MS,
+    invalidJson: 'text',
+    mapError: ({ data, status }) => upstreamError(status, errorMessage(data) ?? 'V2EX request failed'),
+    mapTransportError: ({ kind, message }) => kind === 'timeout'
+      ? upstreamError(504, `${label} request timed out after ${REQUEST_TIMEOUT_MS / 1000} seconds`)
+      : upstreamError(502, message === undefined ? `${label} request failed` : `${label} request failed: ${message}`),
+  })
+  return response.bodyKind === 'empty' ? null : response.data
 }
 
 /** 打一次 API 2.0。凭证走 Bearer 头。 */
 async function request(ctx: ProviderContext, options: RequestOptions): Promise<unknown> {
-  const url = new URL(`${API_BASE}${options.path}`)
-  for (const [key, value] of Object.entries(options.query ?? {})) {
-    // 上游连**空串**也当作"没给",不只是 undefined/null。
-    if (value !== undefined && value !== '') url.searchParams.set(key, String(value))
-  }
-
   const headers: Record<string, string> = {
     accept: 'application/json',
     authorization: `Bearer ${requireApiKey(ctx, SERVICE)}`,
   }
-  if (options.body !== undefined) headers['content-type'] = 'application/json'
-
-  return send(url, {
+  return send(v2Http, {
     method: options.method,
+    path: options.path,
+    // 上游连**空串**也当作"没给",不只是 undefined/null。
+    query: Object.entries(options.query ?? {}).filter(([, value]) => value !== undefined && value !== ''),
     headers,
-    ...(options.body === undefined ? {} : { body: JSON.stringify(options.body) }),
+    ...(options.body === undefined ? {} : { json: options.body }),
   }, `V2EX ${options.path}`)
 }
 
@@ -172,8 +140,8 @@ async function request(ctx: ProviderContext, options: RequestOptions): Promise<u
 async function legacyRequest(ctx: ProviderContext, path: string): Promise<unknown[]> {
   requireApiKey(ctx, SERVICE)
   const payload = await send(
-    new URL(`${LEGACY_API_BASE}${path}`),
-    { method: 'GET', headers: { accept: 'application/json' } },
+    legacyHttp,
+    { method: 'GET', path, headers: { accept: 'application/json' } },
     `V2EX legacy ${path}`,
   )
   // legacy 响应是裸数组,没有信封。

@@ -21,3 +21,12 @@ test('Railway Dockerfile only differs by omitting the unsupported VOLUME instruc
     'shared image behavior must stay identical across generic and Railway Dockerfiles',
   )
 })
+
+test('CLI image compiles the same SDK-aware tsup artifact as the npm binary', async () => {
+  const dockerfile = await readFile(join(root, 'Dockerfile.cli'), 'utf8')
+
+  assert.match(dockerfile, /--filter @tool-bridge\/sdk/)
+  assert.match(dockerfile, /pnpm --filter @tool-bridge\/cli build/)
+  assert.match(dockerfile, /bun build packages\/cli\/dist\/index\.js/)
+  assert.doesNotMatch(dockerfile, /bun build packages\/cli\/src\/index\.ts/)
+})

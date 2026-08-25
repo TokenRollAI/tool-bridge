@@ -22,13 +22,15 @@
  */
 
 import { TBError } from '@tool-bridge/plugin-sdk'
+import { createProviderHttpClient, type ProviderHttpRequest } from '../../_runtime/providerHttp'
 import { type ProviderContext, requireApiKey } from '../../_runtime/plugin'
+import { asJsonObject, compactDefined } from '../../_runtime/jsonValue'
 import { upstreamError } from '../../_runtime/upstreamError'
-import { guardedFetch } from '../../_runtime/guardedFetch'
 
 export const SERVICE = 'gmail'
 
 const API_BASE = 'https://gmail.googleapis.com/gmail/v1'
+const http = createProviderHttpClient({ baseUrl: `${API_BASE}/`, service: SERVICE })
 
 /** 上游 `createContext` 钉死的 userId;入参里的 `userId` 一律忽略。 */
 const USER_ID = 'me'
@@ -50,7 +52,7 @@ export type QueryValue = boolean | number | string | string[] | undefined
 export interface GmailRequest {
   /** JSON 请求体;给了才发 `content-type`(与上游 `if (init.body)` 等价)。 */
   body?: Json
-  method?: string
+  method?: ProviderHttpRequest['method']
   /** `users/me/` 之后的路径段,逐段 encodeURIComponent。 */
   path: readonly string[]
   /** query 参数;数组展开成**重复的同名**参数(labelIds / historyTypes 靠这个表达多值)。 */
@@ -73,9 +75,7 @@ export function normalizeFormat(value: unknown, fallback: string): string {
   return trimmedString(value) || fallback
 }
 
-export function record(value: unknown): Json | undefined {
-  return typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Json) : undefined
-}
+export const record = asJsonObject
 
 /** 契约说好是对象;不是就是上游出问题,不是调用方的错。 */
 export function requireRecord(value: unknown, label: string): Json {
@@ -117,9 +117,7 @@ export function asObject(value: unknown): Json {
 }
 
 /** 丢掉值为 undefined 的键;`null` 要留住。 */
-export function compact(input: Record<string, unknown>): Json {
-  return Object.fromEntries(Object.entries(input).filter(([, value]) => value !== undefined))
-}
+export const compact = compactDefined
 
 /** 上游 `buildLabelMutationPayload`:两个字段恒存在(可以是空数组),不做"没给就不发"。 */
 export function labelMutationPayload(input: { addLabelIds?: string[], removeLabelIds?: string[] }): Json {
@@ -158,19 +156,9 @@ export async function hydrateInBatches<T, TResult>(
   return hydrated
 }
 
-function buildUrl(path: readonly string[], query: Record<string, QueryValue>): string {
+function buildPath(path: readonly string[]): string {
   const segments = path.map(segment => encodeURIComponent(segment)).join('/')
-  const url = new URL(`${API_BASE}/users/${encodeURIComponent(USER_ID)}${segments === '' ? '' : `/${segments}`}`)
-  for (const [key, value] of Object.entries(query)) {
-    if (value === undefined) continue
-    if (Array.isArray(value)) {
-      // labelIds / historyTypes 的多值靠重复同名参数表达,不能拼成逗号串。
-      for (const item of value) url.searchParams.append(key, item)
-      continue
-    }
-    url.searchParams.set(key, String(value))
-  }
-  return url.toString()
+  return `users/${encodeURIComponent(USER_ID)}${segments === '' ? '' : `/${segments}`}`
 }
 
 /** Google 的错误体:`{error: {code, message, errors: [{reason, ...}]}}`,也可能是 `{error: "..."}`。 */
@@ -199,29 +187,23 @@ async function send(ctx: ProviderContext, input: GmailRequest): Promise<{ payloa
   const headers: Record<string, string> = {
     authorization: `Bearer ${requireApiKey(ctx, SERVICE)}`,
   }
-  if (hasBody) headers['content-type'] = 'application/json'
-
-  const response = await guardedFetch(buildUrl(input.path, input.query ?? {}), {
+  const response = await http.request({
     method: input.method ?? 'GET',
+    path: buildPath(input.path),
+    query: Object.entries(input.query ?? {}),
     headers,
-    ...(hasBody ? { body: JSON.stringify(input.body) } : {}),
+    ...(hasBody ? { json: input.body } : {}),
+    invalidJson: 'text',
+    mapError: ({ bodyKind, data, status }) => gmailError(
+      status,
+      bodyKind === 'json' ? data : null,
+    ),
   })
-
-  const body = await response.text()
-  let payload: unknown = null
-  if (body !== '') {
-    try {
-      payload = JSON.parse(body)
-    } catch {
-      // 2xx 上回非 JSON 只能是上游坏了;错误响应回 HTML 错误页(Google 的 502 页面就是)
-      // 很常见,那时按 HTTP 状态归一比报"响应不是 JSON"准,也不用把上游正文回显给调用方。
-      if (response.ok) {
-        throw new TBError('unavailable', 'Gmail 返回了非 JSON 响应', { retryable: true })
-      }
-    }
+  if (response.bodyKind === 'invalid-json') {
+    // 2xx 上回非 JSON 只能是上游坏了；错误响应的非 JSON 正文已在 mapError 中按状态归一。
+    throw new TBError('unavailable', 'Gmail 返回了非 JSON 响应', { retryable: true })
   }
-  if (!response.ok) throw gmailError(response.status, payload)
-  return { payload }
+  return { payload: response.bodyKind === 'empty' ? null : response.data }
 }
 
 /** 上游 `fetchJson`:成功时把响应体交给调用方整形(空体 → `null`,由调用方判契约)。 */

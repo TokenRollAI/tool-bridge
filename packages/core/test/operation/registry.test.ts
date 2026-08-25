@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { z } from 'zod/v4'
 import { OperationRegistry, toToolResult } from '../../src/operation/registry'
 import { isTBError } from '../../src/errors'
@@ -104,6 +104,46 @@ describe('OperationRegistry 调用', () => {
     expect((caught as { code: string }).code).toBe('invalid_argument')
     expect((caught as { message: string }).message).toContain('typed')
     expect((caught as { message: string }).message).toContain('n')
+  })
+
+  it('平台显式 strictObject:未知字段不被静默 strip', async () => {
+    const reg = new OperationRegistry()
+    const handler = vi.fn(({ text }: { text: string }) => text)
+    reg.register('strict', { inputSchema: z.strictObject({ text: z.string() }) }, handler)
+    await expect(reg.call('strict', { text: 'ok', extra: 'nope' }, undefined))
+      .rejects.toSatisfy(error => isTBError(error) && error.code === 'invalid_argument')
+    expect(handler).not.toHaveBeenCalled()
+    expect(reg.get('strict').inputSchema).toMatchObject({ additionalProperties: false })
+  })
+
+  it('尊重作者显式 looseObject/passthrough 的上游扩展字段', async () => {
+    const reg = new OperationRegistry()
+    reg.register('messages', {
+      inputSchema: z.looseObject({
+        model: z.string(),
+        context_management: z.looseObject({ strategy: z.string() }).optional(),
+      }),
+    }, input => input)
+    const input = {
+      model: 'claude',
+      future_top_level: true,
+      context_management: { strategy: 'compact', future_nested: true },
+    }
+    await expect(reg.invoke('messages', input, undefined)).resolves.toEqual(input)
+    expect(reg.get('messages').inputSchema).toMatchObject({ additionalProperties: {} })
+  })
+
+  it('invoke 复用校验但不包 ToolResult', async () => {
+    const reg = new OperationRegistry()
+    reg.register(
+      'raw-result',
+      { inputSchema: z.strictObject({ n: z.number() }) },
+      ({ n }) => ({ doubled: n * 2 }),
+    )
+    await expect(reg.invoke('raw-result', { n: 3 }, undefined)).resolves.toEqual({ doubled: 6 })
+    await expect(reg.call('raw-result', { n: 3 }, undefined)).resolves.toEqual({
+      content: { doubled: 6 },
+    })
   })
 
   it('未声明 schema → 原样透传 args,不校验', async () => {

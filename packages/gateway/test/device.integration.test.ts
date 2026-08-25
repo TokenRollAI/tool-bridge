@@ -129,7 +129,11 @@ describe('DeviceSession DO + /system/device/ws', () => {
       admin({ headers: { accept: 'application/json' } }),
     )
     expect(helpJsonRes.status).toBe(200)
-    const helpJson = (await helpJsonRes.json()) as { cmds: Array<{ name: string, path: string }> }
+    const helpJson = (await helpJsonRes.json()) as {
+      cmds: Array<{ name: string, path: string }>
+      node: { kind: string }
+    }
+    expect(helpJson.node.kind).toBe('device')
     const execSpec = helpJson.cmds.find(cmd => cmd.name === 'exec')
     expect(execSpec).toMatchObject({
       name: 'exec',
@@ -149,6 +153,31 @@ describe('DeviceSession DO + /system/device/ws', () => {
     expect(commandHelp.cmds[0]).toMatchObject({
       name: 'exec',
       path: `/device/${deviceId}/shell/exec`,
+    })
+
+    const fsHelpRes = await SELF.fetch(
+      `https://tb.test/device/${deviceId}/fs/~help`,
+      admin({ headers: { accept: 'application/json' } }),
+    )
+    expect(fsHelpRes.status).toBe(200)
+    const fsHelp = (await fsHelpRes.json()) as {
+      cmds: Array<{ name: string }>
+      node: { kind: string }
+    }
+    expect(fsHelp.node.kind).toBe('context')
+    expect(fsHelp.cmds.map(cmd => cmd.name)).toEqual(['list', 'get', 'search'])
+
+    // readOnly 不只是 Help 隐藏；即使调用方猜测写路径，网关也必须
+    // 在转发设备前 fail-closed。若意外转发，下面 shell 的 nextFrame 也会读到错帧。
+    const deniedWrite = await postJson(
+      `device/${deviceId}/fs/write`,
+      { path: 'blocked.txt', entry: { content: 'blocked', contentType: 'text/plain' } },
+      admin(),
+    )
+    expect(deniedWrite.status).toBe(403)
+    expect(await deniedWrite.json()).toMatchObject({
+      code: 'permission_denied',
+      retryable: false,
     })
 
     const callSeen = nextFrame(ws)

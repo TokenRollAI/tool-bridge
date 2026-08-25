@@ -9,6 +9,7 @@ import {
   encodeDeviceFrame,
   identify,
   NodeRegistryStore,
+  parsePositiveIntEnv,
   PING_FRAME_JSON,
   PONG_FRAME_JSON,
   type StateStore,
@@ -70,12 +71,6 @@ function jsonResponse(value: unknown, status = 200): Response {
 
 function tbErrorResponse(error: TBError): Response {
   return jsonResponse(error.toJSON(), error.httpStatus)
-}
-
-function parsePositiveInt(value: string | undefined, fallback: number): number {
-  if (value === undefined) return fallback
-  const n = Number(value)
-  return Number.isFinite(n) && n > 0 ? Math.floor(n) : fallback
 }
 
 function resultKey(id: string): string {
@@ -190,7 +185,8 @@ export class DeviceSession extends DurableObject<DeviceSessionEnv> {
     }
 
     if (meta.disconnectedAt === undefined) return
-    const reclaimMs = parsePositiveInt(this.env.TB_DEVICE_RECLAIM_SEC, DEFAULT_RECLAIM_SEC) * 1000
+    const reclaimMs
+      = (parsePositiveIntEnv(this.env.TB_DEVICE_RECLAIM_SEC) ?? DEFAULT_RECLAIM_SEC) * 1000
     if (Date.now() - Date.parse(meta.disconnectedAt) < reclaimMs) {
       await this.ctx.storage.setAlarm(Date.parse(meta.disconnectedAt) + reclaimMs)
       return
@@ -381,7 +377,7 @@ export class DeviceSession extends DurableObject<DeviceSessionEnv> {
       activeConnId: undefined,
       disconnectedAt: now,
     })
-    const reclaimSec = parsePositiveInt(this.env.TB_DEVICE_RECLAIM_SEC, DEFAULT_RECLAIM_SEC)
+    const reclaimSec = parsePositiveIntEnv(this.env.TB_DEVICE_RECLAIM_SEC) ?? DEFAULT_RECLAIM_SEC
     await this.ctx.storage.setAlarm(Date.now() + reclaimSec * 1000)
   }
 

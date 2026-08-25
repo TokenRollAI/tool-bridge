@@ -1,3 +1,8 @@
+import {
+  healthResponseSchema,
+  livenessResponseSchema,
+  readinessResponseSchema,
+} from '@tool-bridge/core/protocol'
 /**
  * 树外免认证路由:healthz、`/~ref/<token>` 大对象中转、`/ui` Dashboard 静态资源、
  * 根路径浏览器跳转与 mcp 托管 OAuth 回调。
@@ -50,7 +55,7 @@ async function finishToolAuthorization(opts: {
       codeVerifier: opts.verifier,
       config: exported.oauth,
       encryptionKey: opts.encryptionKey,
-      fetcher: fetch,
+      fetcher: opts.deps.providerOAuthFetch,
       nodePath: opts.node.path,
       now: new Date(),
       origin: opts.origin,
@@ -77,31 +82,33 @@ export function registerPublicRoutes(app: TbHono, env: RouteEnv): void {
   app.get('/healthz', async (c) => {
     const catalog = deps.pluginCatalog
     const digest = await env.pluginCatalogDigest()
-    return c.json({
+    return c.json(healthResponseSchema.parse({
       healthy: true,
       version: deps.version,
       ...(catalog !== undefined && digest !== undefined
         ? { catalog: { count: Object.keys(catalog).length, digest } }
         : {}),
-    })
+    }))
   })
 
   // GET /livez → 恒 200(进程活着即可;k8s liveness 的惯用名)。后端断连不算"死",
   // 那是 /readyz 的职责——liveness 探后端会让编排器在 PG 抖动时错杀健康进程。
-  app.get('/livez', c => c.json({ live: true }))
+  app.get('/livez', c => c.json(livenessResponseSchema.parse({ live: true })))
 
   // GET /readyz → 就绪探测,树外免认证(编排器无 SK)。宿主注入的 readiness 闭包探测
   // 长连接后端并叠加 draining;未注入(Workers/嵌入宿主)恒 200。ready=false → 503,
   // k8s/LB 据此摘流量。报告只含布尔与短语级 detail,不含凭证。
   app.get('/readyz', async (c) => {
     const probe = deps.readiness
-    if (probe === undefined) return c.json({ checks: {}, ready: true })
+    if (probe === undefined) {
+      return c.json(readinessResponseSchema.parse({ checks: {}, ready: true }))
+    }
     try {
-      const report = await probe()
+      const report = readinessResponseSchema.parse(await probe())
       return c.json(report, report.ready ? 200 : 503)
     } catch {
       // 探测器本身抛错 = 未就绪;不泄漏内部错误细节。
-      return c.json({ checks: {}, ready: false }, 503)
+      return c.json(readinessResponseSchema.parse({ checks: {}, ready: false }), 503)
     }
   })
 

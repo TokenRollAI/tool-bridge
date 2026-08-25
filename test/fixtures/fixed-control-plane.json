@@ -1,0 +1,110 @@
+{
+  "error": {
+    "code": "permission_denied",
+    "message": "scope denied",
+    "retryable": false
+  },
+  "feedback": {
+    "at": "2026-08-25T00:00:00.000Z",
+    "by": "agent:fixture",
+    "down": 0,
+    "id": "fb_fixture",
+    "score": 2,
+    "title": "Canonical path",
+    "up": 2
+  },
+  "feedbackDetail": {
+    "at": "2026-08-25T00:00:00.000Z",
+    "by": "agent:fixture",
+    "detail": "Use the canonical command path.",
+    "down": 0,
+    "id": "fb_fixture",
+    "path": "system/status/get",
+    "score": 2,
+    "title": "Canonical path",
+    "up": 2
+  },
+  "health": {
+    "catalog": {
+      "count": 3,
+      "digest": "fixture-digest"
+    },
+    "healthy": true,
+    "version": "0.0.0-fixture"
+  },
+  "help": {
+    "children": [
+      {
+        "description": "System controls",
+        "kind": "directory",
+        "path": "system"
+      }
+    ],
+    "cmds": [
+      {
+        "method": "POST",
+        "name": "get",
+        "path": "/system/status/get",
+        "scope": "read"
+      }
+    ],
+    "htbp": "0.1",
+    "node": {
+      "description": "tool-bridge root",
+      "kind": "directory",
+      "path": ""
+    }
+  },
+  "oauth": {
+    "authorizationUrl": "https://auth.example/authorize?state=fixture",
+    "status": "redirect"
+  },
+  "readiness": {
+    "checks": {
+      "state": {
+        "ok": true
+      }
+    },
+    "ready": true
+  },
+  "registryNode": {
+    "config": {
+      "kind": "context",
+      "provider": "r2"
+    },
+    "createdAt": "2026-08-25T00:00:00.000Z",
+    "description": "Fixture context",
+    "kind": "context",
+    "path": "docs/fixture",
+    "registeredBy": "fixture-key",
+    "updatedAt": "2026-08-25T00:00:00.000Z"
+  },
+  "search": {
+    "cursor": "fixture-cursor",
+    "items": [
+      {
+        "path": "system/status",
+        "tool": {
+          "description": "Get status",
+          "name": "get"
+        }
+      }
+    ]
+  },
+  "tree": {
+    "children": [
+      {
+        "description": "Fixture device",
+        "kind": "device",
+        "path": "devices/fixture",
+        "presence": {
+          "lastSeenAt": "2026-08-25T00:00:00.000Z",
+          "state": "online"
+        }
+      }
+    ],
+    "description": "tool-bridge root",
+    "kind": "directory",
+    "path": ""
+  }
+}

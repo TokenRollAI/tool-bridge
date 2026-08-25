@@ -49,6 +49,8 @@ export interface TestAppOpts {
   pluginBindings?: PluginBindings
   /** 内置集成目录;缺省不注入 → `system/catalog` 回空页(未装内置插件的宿主)。 */
   pluginCatalog?: BuiltinCatalog
+  /** Provider OAuth 出站桩；缺省不注入，以覆盖生产 fail-closed 语义。 */
+  providerOAuthFetch?: typeof fetch
   refThresholdBytes?: number
   refTtlSec?: number
   remote?: Partial<RemoteSettings>
@@ -101,6 +103,7 @@ export async function createTestApp(opts: TestAppOpts = {}): Promise<TestApp> {
   if (opts.device !== undefined) deps.device = opts.device
   if (opts.pluginBindings !== undefined) deps.pluginBindings = opts.pluginBindings
   if (opts.pluginCatalog !== undefined) deps.pluginCatalog = opts.pluginCatalog
+  if (opts.providerOAuthFetch !== undefined) deps.providerOAuthFetch = opts.providerOAuthFetch
   if (opts.refThresholdBytes !== undefined) deps.refThresholdBytes = opts.refThresholdBytes
   if (opts.refTtlSec !== undefined) deps.refTtlSec = opts.refTtlSec
   if (opts.search !== undefined) deps.search = opts.search

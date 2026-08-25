@@ -32,6 +32,16 @@ describe('地址分类', () => {
   it('前导零写法不被当成合法 IPv4(经典绕过手法:010 可能被解析成八进制)', () => {
     expect(isIpAddress('010.0.0.1')).toBe(false)
     expect(classifyIpAddress('010.0.0.1')).toBe('blocked')
+    expect(isIpAddress('::ffff:010.0.0.1')).toBe(false)
+    expect(classifyIpAddress('::ffff:010.0.0.1')).toBe('blocked')
+  })
+
+  it('保留 IPv6 压缩、方括号、zone id 与 v4-compatible/v4-mapped 语义', () => {
+    expect(isIpAddress('[2606:4700:4700::1111]')).toBe(true)
+    expect(classifyIpAddress('fe80::1%eth0')).toBe('blocked')
+    expect(classifyIpAddress('::192.168.1.1')).toBe('blocked')
+    expect(classifyIpAddress('::ffff:8.8.8.8')).toBe('public')
+    expect(classifyIpAddress('2001:db8::1')).toBe('blocked')
   })
 
   it('认不出的输入一律 blocked(fail closed)', () => {
@@ -120,6 +130,103 @@ describe('重定向逐跳校验', () => {
     await guarded('https://api.example.com/start', { method: 'POST', body: 'x' })
     expect(seen).toEqual(['POST', 'GET'])
   })
+
+  it.each([301, 302])('PUT 收到 %s 时保留 method 与 body', async (status) => {
+    const seen: Array<{ body: string, method: string }> = []
+    const guarded = createGuardedFetch({
+      fetch: vi.fn(async (input: Request) => {
+        seen.push({ body: await input.text(), method: input.method })
+        return seen.length === 1
+          ? new Response(null, { status, headers: { location: '/done' } })
+          : new Response('ok', { status: 200 })
+      }) as unknown as typeof fetch,
+    })
+
+    await guarded('https://api.example.com/start', { method: 'PUT', body: 'payload' })
+    expect(seen).toEqual([
+      { body: 'payload', method: 'PUT' },
+      { body: 'payload', method: 'PUT' },
+    ])
+  })
+
+  it('HEAD 收到 303 时仍保留 HEAD', async () => {
+    const seen: string[] = []
+    const guarded = createGuardedFetch({
+      fetch: vi.fn((input: Request) => {
+        seen.push(input.method)
+        return Promise.resolve(seen.length === 1
+          ? new Response(null, { status: 303, headers: { location: '/done' } })
+          : new Response(null, { status: 200 }))
+      }) as unknown as typeof fetch,
+    })
+
+    await guarded('https://api.example.com/start', { method: 'HEAD' })
+    expect(seen).toEqual(['HEAD', 'HEAD'])
+  })
+
+  it('PUT 收到 303 时降级为 GET，并丢弃 body 及其内容头', async () => {
+    const seen: Array<{ body: string, contentType: string | null, method: string }> = []
+    const guarded = createGuardedFetch({
+      fetch: vi.fn(async (input: Request) => {
+        seen.push({
+          body: await input.text(),
+          contentType: input.headers.get('content-type'),
+          method: input.method,
+        })
+        return seen.length === 1
+          ? new Response(null, { status: 303, headers: { location: '/done' } })
+          : new Response('ok', { status: 200 })
+      }) as unknown as typeof fetch,
+    })
+
+    await guarded('https://api.example.com/start', {
+      method: 'PUT',
+      body: 'payload',
+      headers: { 'content-type': 'text/plain' },
+    })
+    expect(seen).toEqual([
+      { body: 'payload', contentType: 'text/plain', method: 'PUT' },
+      { body: '', contentType: null, method: 'GET' },
+    ])
+  })
+
+  it('POST 收到同源 307 时保留 method、body 与 headers', async () => {
+    const seen: Array<{ body: string, header: string | null, method: string, url: string }> = []
+    const guarded = createGuardedFetch({
+      fetch: vi.fn(async (input: Request) => {
+        seen.push({
+          body: await input.text(),
+          header: input.headers.get('x-request-id'),
+          method: input.method,
+          url: input.url,
+        })
+        return seen.length === 1
+          ? new Response(null, { status: 307, headers: { location: '/done' } })
+          : new Response('ok', { status: 200 })
+      }) as unknown as typeof fetch,
+    })
+
+    await guarded('https://api.example.com/start', {
+      method: 'POST',
+      body: 'payload',
+      headers: { 'x-request-id': 'request-1' },
+    })
+
+    expect(seen).toEqual([
+      {
+        body: 'payload',
+        header: 'request-1',
+        method: 'POST',
+        url: 'https://api.example.com/start',
+      },
+      {
+        body: 'payload',
+        header: 'request-1',
+        method: 'POST',
+        url: 'https://api.example.com/done',
+      },
+    ])
+  })
 })
 
 describe('EgressBlockedError 的语义', () => {
@@ -167,7 +274,7 @@ describe('跨源重定向剥凭证', () => {
 
   it('**换 origin 就剥掉 Authorization**(否则 302 一下就把 API key 送给第三方)', async () => {
     const { fetch: transport, hops } = tracer([redirectTo('https://evil.example/steal'), ok])
-    await createGuardedFetch({ fetch: transport })('https://api.legit.example/v1/thing', {
+    await createGuardedFetch({ crossOriginRedirect: 'follow', fetch: transport })('https://api.legit.example/v1/thing', {
       headers: { authorization: 'Bearer SECRET_KEY' },
     })
     expect(hops[0]?.headers.authorization).toBe('Bearer SECRET_KEY')
@@ -176,7 +283,7 @@ describe('跨源重定向剥凭证', () => {
 
   it('自定义密钥头也剥(各家命名不统一,凡名字带 key/token/secret 的一律剥)', async () => {
     const { fetch: transport, hops } = tracer([redirectTo('https://other.example/x'), ok])
-    await createGuardedFetch({ fetch: transport })('https://api.legit.example/v1', {
+    await createGuardedFetch({ crossOriginRedirect: 'follow', fetch: transport })('https://api.legit.example/v1', {
       headers: {
         'x-api-key': 'K',
         'x-subscription-token': 'T',
@@ -191,6 +298,7 @@ describe('跨源重定向剥凭证', () => {
   it('精确声明命名不明显的敏感头,跨源时同样剥掉', async () => {
     const { fetch: transport, hops } = tracer([redirectTo('https://other.example/x'), ok])
     await createGuardedFetch({
+      crossOriginRedirect: 'follow',
       fetch: transport,
       sensitiveHeaders: ['X-Lark-MCP-TAT'],
     })('https://api.legit.example/v1', {
@@ -199,7 +307,7 @@ describe('跨源重定向剥凭证', () => {
     expect(hops[1]?.headers['x-lark-mcp-tat']).toBeUndefined()
   })
 
-  it('敏感请求可配置为拒绝跨源重定向,307 不会转发请求体', async () => {
+  it('默认拒绝跨源重定向,307 不会转发请求体', async () => {
     const seenBodies: string[] = []
     const transport = vi.fn(async (input: Request) => {
       seenBodies.push(await input.text())
@@ -208,7 +316,7 @@ describe('跨源重定向剥凭证', () => {
         headers: { location: 'https://evil.example/steal' },
       })
     }) as unknown as typeof fetch
-    const guarded = createGuardedFetch({ crossOriginRedirect: 'error', fetch: transport })
+    const guarded = createGuardedFetch({ fetch: transport })
 
     await expect(guarded('https://api.legit.example/token', {
       body: JSON.stringify({ app_secret: 'tenant-secret' }),
@@ -235,7 +343,7 @@ describe('跨源重定向剥凭证', () => {
       () => new Response(null, { status: 303, headers: { location: 'https://evil.example/x' } }),
       ok,
     ])
-    await createGuardedFetch({ fetch: transport })('https://api.legit.example/v1', {
+    await createGuardedFetch({ crossOriginRedirect: 'follow', fetch: transport })('https://api.legit.example/v1', {
       method: 'POST',
       body: 'x',
       headers: { authorization: 'Bearer SECRET_KEY' },
@@ -253,7 +361,7 @@ describe('跨源重定向剥凭证', () => {
         ? new Response(null, { status: 302, headers: { location: 'https://other.example/x' } })
         : new Response('ok', { status: 200 }))
     }) as unknown as typeof fetch
-    await createGuardedFetch({ fetch: transport })('https://api.legit.example/v1', {
+    await createGuardedFetch({ crossOriginRedirect: 'follow', fetch: transport })('https://api.legit.example/v1', {
       headers: { accept: 'application/json', authorization: 'Bearer K' },
     })
     expect(secondAccept).toBe('application/json')

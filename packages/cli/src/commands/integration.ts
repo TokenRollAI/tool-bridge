@@ -16,7 +16,7 @@ import { Command } from 'commander'
 import type { NodeConfig, NodeInput, Page, SecretSummary } from '../types'
 import { collect, parsePageOpts, resolveTarget, withGlobalOpts, withPageOpts } from '../args'
 import { deleteNode, parseConfigSpecs, registerNode } from '../registry'
-import { guard, printJson, printLine, table } from '../output'
+import { printJson, printLine, table } from '../output'
 import { confirmDestructive } from '../confirm'
 import { callDirect, CliError } from '../http'
 import { toolAuthCommand } from './tool'
@@ -230,45 +230,43 @@ Examples:
   tb integration add tools/tavily --provider tavily --key-stdin < key.txt`)
     .action(async (opts: CommonOpts & { cursor?: string, limit?: string, search?: string }) => {
       const asJson = Boolean(opts.json)
-      await guard(asJson, async () => {
-        const pageOpts = parsePageOpts(opts)
-        const q = opts.search !== undefined ? String(opts.search).trim() : undefined
-        const result = await callDirect<Page<CatalogListItem>>(
-          resolveTarget(opts), `/system/catalog/${q ? 'search' : 'list'}`,
-          { ...(q ? { q } : {}), ...(pageOpts ? { opts: pageOpts } : {}) },
-        )
-        if (asJson) {
-          printJson(result)
-          return
-        }
-        const items = result.items ?? []
-        if (items.length === 0) {
-          printLine(q ? `(no integration matches "${q}")` : '(no built-in integrations on this host)')
-          return
-        }
-        printLine(table(
-          ['ID', 'KINDS', 'EXPORTS', 'CREDENTIAL', 'CONFIG'],
-          items.map(i => [
-            i.id,
-            i.nodeKinds.join(','),
-            i.exports.join(','),
-            i.exports.map((id) => {
-              const auth = detailsFor(i, id)?.auth
-              if (auth?.kind === 'oauth') return `${id}:oauth`
-              if (auth?.kind === 'none') return `${id}:none`
-              if (auth?.kind === 'fields') return `${id}:${auth.fields.map(f => f.key).join('+')}`
-              return `${id}:api-key${auth?.required === true ? '*' : ''}`
-            }).join(';'),
-            i.exports.map((id) => {
-              const fields = detailsFor(i, id)?.mountConfigFields
-              return fields === undefined
-                ? `${id}:—`
-                : `${id}:${fields.map(f => (f.required === true ? `${f.key}*` : f.key)).join('+')}`
-            }).join(';'),
-          ]),
-        ))
-        if (result.cursor !== undefined) printLine(`\nnext: --cursor ${result.cursor}`)
-      })
+      const pageOpts = parsePageOpts(opts)
+      const q = opts.search !== undefined ? String(opts.search).trim() : undefined
+      const result = await callDirect<Page<CatalogListItem>>(
+        resolveTarget(opts), `/system/catalog/${q ? 'search' : 'list'}`,
+        { ...(q ? { q } : {}), ...(pageOpts ? { opts: pageOpts } : {}) },
+      )
+      if (asJson) {
+        printJson(result)
+        return
+      }
+      const items = result.items ?? []
+      if (items.length === 0) {
+        printLine(q ? `(no integration matches "${q}")` : '(no built-in integrations on this host)')
+        return
+      }
+      printLine(table(
+        ['ID', 'KINDS', 'EXPORTS', 'CREDENTIAL', 'CONFIG'],
+        items.map(i => [
+          i.id,
+          i.nodeKinds.join(','),
+          i.exports.join(','),
+          i.exports.map((id) => {
+            const auth = detailsFor(i, id)?.auth
+            if (auth?.kind === 'oauth') return `${id}:oauth`
+            if (auth?.kind === 'none') return `${id}:none`
+            if (auth?.kind === 'fields') return `${id}:${auth.fields.map(f => f.key).join('+')}`
+            return `${id}:api-key${auth?.required === true ? '*' : ''}`
+          }).join(';'),
+          i.exports.map((id) => {
+            const fields = detailsFor(i, id)?.mountConfigFields
+            return fields === undefined
+              ? `${id}:—`
+              : `${id}:${fields.map(f => (f.required === true ? `${f.key}*` : f.key)).join('+')}`
+          }).join(';'),
+        ]),
+      ))
+      if (result.cursor !== undefined) printLine(`\nnext: --cursor ${result.cursor}`)
     })
 }
 
@@ -298,168 +296,166 @@ Examples:
   tb integration add tools/sentry --provider sentry --credential sentry-oauth-client   # then: tb integration auth tools/sentry`)
     .action(async (pathArg: string, opts: IntegrationAddOpts) => {
       const asJson = Boolean(opts.json)
-      await guard(asJson, async () => {
-        const path = String(pathArg ?? '').trim()
-        if (!path) throw new CliError('tree path is required')
-        const provider = String(opts.provider ?? '').trim()
-        if (!provider) throw new CliError('--provider is required')
-        const exportId = opts.export !== undefined ? String(opts.export).trim() : undefined
-        const target = resolveTarget(opts)
+      const path = String(pathArg ?? '').trim()
+      if (!path) throw new CliError('tree path is required')
+      const provider = String(opts.provider ?? '').trim()
+      if (!provider) throw new CliError('--provider is required')
+      const exportId = opts.export !== undefined ? String(opts.export).trim() : undefined
+      const target = resolveTarget(opts)
 
-        const sources = [
-          opts.key !== undefined ? '--key' : undefined,
-          opts.keyStdin === true ? '--key-stdin' : undefined,
-          opts.field.length > 0 ? '--field' : undefined,
-          opts.credential !== undefined ? '--credential' : undefined,
-        ].filter((s): s is string => s !== undefined)
-        if (sources.length > 1) {
-          throw new CliError(`${sources.join(' / ')} are mutually exclusive`)
+      const sources = [
+        opts.key !== undefined ? '--key' : undefined,
+        opts.keyStdin === true ? '--key-stdin' : undefined,
+        opts.field.length > 0 ? '--field' : undefined,
+        opts.credential !== undefined ? '--credential' : undefined,
+      ].filter((s): s is string => s !== undefined)
+      if (sources.length > 1) {
+        throw new CliError(`${sources.join(' / ')} are mutually exclusive`)
+      }
+
+      const entry = await catalogEntry(target, provider)
+
+      // 目录知道该 export 存在几个:多 export 而没指定,本地就能拦(免一次往返)。
+      if (entry !== undefined && exportId === undefined && entry.exports.length > 1) {
+        throw new CliError(
+          `provider "${provider}" has multiple exports (${entry.exports.join(', ')}); `
+          + 'pick one with --export',
+        )
+      }
+      if (entry !== undefined && exportId !== undefined && !entry.exports.includes(exportId)) {
+        throw new CliError(
+          `provider "${provider}" has no export "${exportId}" (declared: ${entry.exports.join(', ')})`,
+        )
+      }
+      const details = detailsFor(entry, exportId)
+
+      // 目标节点 kind 由**选中 export** 的 profile 决定。多 export 跨 kind 的 provider
+      // (如 notes:actions=tool / notes=context)必须按 exportId 取,否则挂 context export
+      // 会落到默认 'tool' 被平台拒且无解。catalog 查不到 external plugin 时才退回 tool。
+      const nodeKind: 'context' | 'tool'
+        = details?.kind ?? 'tool'
+
+      // 挂载配置在**任何写操作之前**解析并校验:缺必填 baseUrl 就该在这里拒,
+      // 而不是等 secret 已经代建出来才炸(那会留下孤儿 secret)。
+      const providerConfig = parseConfigSpecs(opts.config)
+      assertMountConfig(entry, details, providerConfig)
+
+      if (details?.auth.kind === 'none' && sources.length > 0) {
+        throw new CliError(`provider "${provider}" export "${details.id}" does not accept credentials`)
+      }
+      if (details?.auth.kind === 'single' && details.auth.required && sources.length === 0) {
+        throw new CliError(`provider "${provider}" export "${details.id}" requires a credential`)
+      }
+      if (
+        (details?.auth.kind === 'fields' || details?.auth.kind === 'oauth')
+        && sources.length === 0
+      ) {
+        throw new CliError(`provider "${provider}" export "${details.id}" requires credentials`)
+      }
+
+      const savedCredential = opts.credential
+      let authRef = savedCredential !== undefined ? String(savedCredential).trim() : undefined
+      if (savedCredential !== undefined && authRef === '') {
+        throw new CliError('saved credential name is empty')
+      }
+      let managedCredential: string | undefined
+      let shouldDeleteOnFailure = false
+      let secretFields: string[] | undefined
+
+      if (opts.field.length > 0) {
+        const fields = parseFields(opts.field)
+        if (details?.auth.kind === 'single' || details?.auth.kind === 'none') {
+          throw new CliError(`provider "${provider}" export "${details.id}" does not use --field`)
         }
-
-        const entry = await catalogEntry(target, provider)
-
-        // 目录知道该 export 存在几个:多 export 而没指定,本地就能拦(免一次往返)。
-        if (entry !== undefined && exportId === undefined && entry.exports.length > 1) {
+        assertFieldNames(entry, details, Object.keys(fields))
+        authRef = derivedSecretName(path)
+        shouldDeleteOnFailure = await secretExistence(target, authRef) === 'absent'
+        secretFields = Object.keys(fields).sort()
+        await callDirect(target, '/system/secret/set', {
+          name: authRef,
+          value: encodeCredentialValues(fields),
+        })
+        managedCredential = authRef
+      } else if (opts.key !== undefined || opts.keyStdin === true) {
+        const value = opts.keyStdin === true ? await readStdin() : String(opts.key)
+        if (value === '') throw new CliError('credential value is empty')
+        // 声明了多字段却给单值:平台会在挂载时拒,这里先说清该怎么给。
+        const declaredFields = details?.auth.kind === 'fields' ? details.auth.fields : undefined
+        if (declaredFields !== undefined && declaredFields.length > 1) {
           throw new CliError(
-            `provider "${provider}" has multiple exports (${entry.exports.join(', ')}); `
-            + 'pick one with --export',
+            `provider "${provider}" needs multiple credential fields `
+            + `(${declaredFields.map(f => f.key).join(', ')}); use --field key=value`,
           )
         }
-        if (entry !== undefined && exportId !== undefined && !entry.exports.includes(exportId)) {
-          throw new CliError(
-            `provider "${provider}" has no export "${exportId}" (declared: ${entry.exports.join(', ')})`,
-          )
-        }
-        const details = detailsFor(entry, exportId)
-
-        // 目标节点 kind 由**选中 export** 的 profile 决定。多 export 跨 kind 的 provider
-        // (如 notes:actions=tool / notes=context)必须按 exportId 取,否则挂 context export
-        // 会落到默认 'tool' 被平台拒且无解。catalog 查不到 external plugin 时才退回 tool。
-        const nodeKind: 'context' | 'tool'
-          = details?.kind ?? 'tool'
-
-        // 挂载配置在**任何写操作之前**解析并校验:缺必填 baseUrl 就该在这里拒,
-        // 而不是等 secret 已经代建出来才炸(那会留下孤儿 secret)。
-        const providerConfig = parseConfigSpecs(opts.config)
-        assertMountConfig(entry, details, providerConfig)
-
-        if (details?.auth.kind === 'none' && sources.length > 0) {
-          throw new CliError(`provider "${provider}" export "${details.id}" does not accept credentials`)
-        }
-        if (details?.auth.kind === 'single' && details.auth.required && sources.length === 0) {
-          throw new CliError(`provider "${provider}" export "${details.id}" requires a credential`)
-        }
-        if (
-          (details?.auth.kind === 'fields' || details?.auth.kind === 'oauth')
-          && sources.length === 0
-        ) {
-          throw new CliError(`provider "${provider}" export "${details.id}" requires credentials`)
-        }
-
-        const savedCredential = opts.credential
-        let authRef = savedCredential !== undefined ? String(savedCredential).trim() : undefined
-        if (savedCredential !== undefined && authRef === '') {
-          throw new CliError('saved credential name is empty')
-        }
-        let managedCredential: string | undefined
-        let shouldDeleteOnFailure = false
-        let secretFields: string[] | undefined
-
-        if (opts.field.length > 0) {
-          const fields = parseFields(opts.field)
-          if (details?.auth.kind === 'single' || details?.auth.kind === 'none') {
-            throw new CliError(`provider "${provider}" export "${details.id}" does not use --field`)
-          }
-          assertFieldNames(entry, details, Object.keys(fields))
-          authRef = derivedSecretName(path)
-          shouldDeleteOnFailure = await secretExistence(target, authRef) === 'absent'
-          secretFields = Object.keys(fields).sort()
-          await callDirect(target, '/system/secret/set', {
-            name: authRef,
-            value: encodeCredentialValues(fields),
-          })
-          managedCredential = authRef
-        } else if (opts.key !== undefined || opts.keyStdin === true) {
-          const value = opts.keyStdin === true ? await readStdin() : String(opts.key)
-          if (value === '') throw new CliError('credential value is empty')
-          // 声明了多字段却给单值:平台会在挂载时拒,这里先说清该怎么给。
-          const declaredFields = details?.auth.kind === 'fields' ? details.auth.fields : undefined
-          if (declaredFields !== undefined && declaredFields.length > 1) {
-            throw new CliError(
-              `provider "${provider}" needs multiple credential fields `
-              + `(${declaredFields.map(f => f.key).join(', ')}); use --field key=value`,
-            )
-          }
-          if (details?.auth.kind === 'oauth') {
-            throw new CliError(
-              'oauth credentials need --field clientId=… --field clientSecret=… or --credential',
-            )
-          }
-          authRef = derivedSecretName(path)
-          shouldDeleteOnFailure = await secretExistence(target, authRef) === 'absent'
-          await callDirect(target, '/system/secret/set', { name: authRef, value })
-          managedCredential = authRef
-        }
-
-        const config: NodeConfig = nodeKind === 'context'
-          ? {
-              kind: 'context',
-              provider,
-              ...(exportId ? { export: exportId } : {}),
-              ...(authRef ? { authRef } : {}),
-              ...(providerConfig ? { providerConfig } : {}),
-            } as NodeConfig
-          : {
-              kind: 'tool',
-              provider,
-              ...(exportId ? { export: exportId } : {}),
-              ...(authRef ? { authRef } : {}),
-              ...(providerConfig ? { providerConfig } : {}),
-            } as NodeConfig
-
-        const input: NodeInput = {
-          path,
-          kind: nodeKind,
-          description: opts.description
-            ? String(opts.description)
-            : `${provider} integration at ${path}`,
-          config,
-        }
-
-        let node: Awaited<ReturnType<typeof registerNode>>
-        try {
-          node = await registerNode(target, input)
-        } catch (error) {
-          // 仅确认此前不存在的内部槽位可清理；同名既有/存在性未知的凭证绝不删除。
-          if (managedCredential !== undefined && shouldDeleteOnFailure) {
-            await callDirect(target, '/system/secret/delete', { name: managedCredential }).catch(() => {})
-          }
-          throw error
-        }
-
-        if (asJson) {
-          const visibleConfig = { ...(node.config ?? {}) } as Record<string, unknown>
-          const credential = typeof visibleConfig.authRef === 'string' ? 'managed' : 'none'
-          delete visibleConfig.authRef
-          printJson({
-            node: { ...node, config: visibleConfig, credential },
-            ...(managedCredential !== undefined ? { credentialStored: true } : {}),
-            ...(secretFields !== undefined ? { secretFields } : {}),
-            needsAuthorization: details?.auth.kind === 'oauth',
-          })
-          return
-        }
-        if (managedCredential !== undefined) printLine('credential stored and managed by the platform')
-        printLine(`mounted ${provider} at ${path}`)
-        // 目录说得准就精确提示,说不准(external plugin)才给条件式那句。
         if (details?.auth.kind === 'oauth') {
-          printLine(`next: run \`tb integration auth ${path}\` to authorize ${provider}`)
-        } else if (entry === undefined && authRef !== undefined) {
-          printLine(`note: if this export declares oauth, run \`tb integration auth ${path}\``)
-        } else {
-          printLine(`try: tb help ${path}`)
+          throw new CliError(
+            'oauth credentials need --field clientId=… --field clientSecret=… or --credential',
+          )
         }
-      })
+        authRef = derivedSecretName(path)
+        shouldDeleteOnFailure = await secretExistence(target, authRef) === 'absent'
+        await callDirect(target, '/system/secret/set', { name: authRef, value })
+        managedCredential = authRef
+      }
+
+      const config: NodeConfig = nodeKind === 'context'
+        ? {
+            kind: 'context',
+            provider,
+            ...(exportId ? { export: exportId } : {}),
+            ...(authRef ? { authRef } : {}),
+            ...(providerConfig ? { providerConfig } : {}),
+          } as NodeConfig
+        : {
+            kind: 'tool',
+            provider,
+            ...(exportId ? { export: exportId } : {}),
+            ...(authRef ? { authRef } : {}),
+            ...(providerConfig ? { providerConfig } : {}),
+          } as NodeConfig
+
+      const input: NodeInput = {
+        path,
+        kind: nodeKind,
+        description: opts.description
+          ? String(opts.description)
+          : `${provider} integration at ${path}`,
+        config,
+      }
+
+      let node: Awaited<ReturnType<typeof registerNode>>
+      try {
+        node = await registerNode(target, input)
+      } catch (error) {
+        // 仅确认此前不存在的内部槽位可清理；同名既有/存在性未知的凭证绝不删除。
+        if (managedCredential !== undefined && shouldDeleteOnFailure) {
+          await callDirect(target, '/system/secret/delete', { name: managedCredential }).catch(() => {})
+        }
+        throw error
+      }
+
+      if (asJson) {
+        const visibleConfig = { ...(node.config ?? {}) } as Record<string, unknown>
+        const credential = typeof visibleConfig.authRef === 'string' ? 'managed' : 'none'
+        delete visibleConfig.authRef
+        printJson({
+          node: { ...node, config: visibleConfig, credential },
+          ...(managedCredential !== undefined ? { credentialStored: true } : {}),
+          ...(secretFields !== undefined ? { secretFields } : {}),
+          needsAuthorization: details?.auth.kind === 'oauth',
+        })
+        return
+      }
+      if (managedCredential !== undefined) printLine('credential stored and managed by the platform')
+      printLine(`mounted ${provider} at ${path}`)
+      // 目录说得准就精确提示,说不准(external plugin)才给条件式那句。
+      if (details?.auth.kind === 'oauth') {
+        printLine(`next: run \`tb integration auth ${path}\` to authorize ${provider}`)
+      } else if (entry === undefined && authRef !== undefined) {
+        printLine(`note: if this export declares oauth, run \`tb integration auth ${path}\``)
+      } else {
+        printLine(`try: tb help ${path}`)
+      }
     })
 }
 
@@ -485,49 +481,47 @@ export function integrationLsCommand(): Command {
     .description('List mounted integrations (a projection over the node registry)')
     .action(async (opts: CommonOpts & { cursor?: string, limit?: string }) => {
       const asJson = Boolean(opts.json)
-      await guard(asJson, async () => {
-        const pageOpts = parsePageOpts(opts)
-        const page = await callDirect<Page<{
-          config?: Record<string, unknown>
-          kind: string
-          path: string
-        }>>(
-          resolveTarget(opts), '/system/registry/list',
-          { ...(pageOpts ? { opts: pageOpts } : {}) },
-        )
-        const items = (page.items ?? []).filter((n) => {
-          if (n.kind !== 'tool' && n.kind !== 'context') return false
-          const provider = n.config?.provider
-          return typeof provider === 'string' && provider !== 'r2' && provider !== 's3'
-        })
-        const visibleItems = items.map((node) => {
-          const config = { ...(node.config ?? {}) }
-          const managed = typeof config.authRef === 'string'
-          delete config.authRef
-          return { ...node, config, credential: managed ? 'managed' : 'none' }
-        })
-        if (asJson) {
-          printJson({
-            items: visibleItems,
-            ...(page.cursor !== undefined ? { cursor: page.cursor } : {}),
-          })
-          return
-        }
-        if (items.length === 0) {
-          printLine('(no integrations mounted; see `tb integration catalog`)')
-          return
-        }
-        printLine(table(
-          ['PATH', 'KIND', 'PROVIDER', 'CREDENTIAL'],
-          visibleItems.map(n => [
-            n.path,
-            n.kind,
-            String(n.config?.provider ?? '?'),
-            n.credential,
-          ]),
-        ))
-        if (page.cursor !== undefined) printLine(`\nnext: --cursor ${page.cursor}`)
+      const pageOpts = parsePageOpts(opts)
+      const page = await callDirect<Page<{
+        config?: Record<string, unknown>
+        kind: string
+        path: string
+      }>>(
+        resolveTarget(opts), '/system/registry/list',
+        { ...(pageOpts ? { opts: pageOpts } : {}) },
+      )
+      const items = (page.items ?? []).filter((n) => {
+        if (n.kind !== 'tool' && n.kind !== 'context') return false
+        const provider = n.config?.provider
+        return typeof provider === 'string' && provider !== 'r2' && provider !== 's3'
       })
+      const visibleItems = items.map((node) => {
+        const config = { ...(node.config ?? {}) }
+        const managed = typeof config.authRef === 'string'
+        delete config.authRef
+        return { ...node, config, credential: managed ? 'managed' : 'none' }
+      })
+      if (asJson) {
+        printJson({
+          items: visibleItems,
+          ...(page.cursor !== undefined ? { cursor: page.cursor } : {}),
+        })
+        return
+      }
+      if (items.length === 0) {
+        printLine('(no integrations mounted; see `tb integration catalog`)')
+        return
+      }
+      printLine(table(
+        ['PATH', 'KIND', 'PROVIDER', 'CREDENTIAL'],
+        visibleItems.map(n => [
+          n.path,
+          n.kind,
+          String(n.config?.provider ?? '?'),
+          n.credential,
+        ]),
+      ))
+      if (page.cursor !== undefined) printLine(`\nnext: --cursor ${page.cursor}`)
     })
 }
 
@@ -549,14 +543,12 @@ export function integrationRmCommand(): Command {
     .option('--yes', 'Skip the confirmation prompt')
     .action(async (pathArg: string, opts: CommonOpts & { yes?: boolean }) => {
       const asJson = Boolean(opts.json)
-      await guard(asJson, async () => {
-        const path = String(pathArg ?? '').trim()
-        if (!path) throw new CliError('tree path is required')
-        await confirmDestructive(opts, `Unmount integration at ${path}?`)
-        await deleteNode(resolveTarget(opts), path, ['tool', 'context'])
-        if (asJson) printJson({ ok: true, path })
-        else printLine(`unmounted ${path}`)
-      })
+      const path = String(pathArg ?? '').trim()
+      if (!path) throw new CliError('tree path is required')
+      await confirmDestructive(opts, `Unmount integration at ${path}?`)
+      await deleteNode(resolveTarget(opts), path, ['tool', 'context'])
+      if (asJson) printJson({ ok: true, path })
+      else printLine(`unmounted ${path}`)
     })
 }
 

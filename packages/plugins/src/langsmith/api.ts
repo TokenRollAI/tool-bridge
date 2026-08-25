@@ -39,13 +39,25 @@ import type {
   listProjectsInput,
   listWorkspacesInput,
 } from './schema'
+import {
+  compactDefined as compact,
+  integerValue as int,
+  finiteNumber as num,
+  asJsonObject as record,
+  trimmedText as text,
+} from '../_runtime/jsonValue'
+import {
+  createProviderHttpClient,
+  type ProviderHttpErrorContext,
+  type ProviderQuery,
+} from '../_runtime/providerHttp'
 import { type ProviderContext, requireApiKey } from '../_runtime/plugin'
 import { upstreamError } from '../_runtime/upstreamError'
-import { guardedFetch } from '../_runtime/guardedFetch'
 
 const SERVICE = 'langsmith'
 const WORKSPACES_PATH = '/api/v1/workspaces'
 const DEFAULT_REGION = 'us'
+const http = createProviderHttpClient({ service: SERVICE })
 
 /** LangSmith SaaS 的四个区域各有独立域名 —— 打错区域是 401 而不是空结果。 */
 const REGION_BASE_URLS: Record<string, string> = {
@@ -62,31 +74,6 @@ interface RequestInput {
   method?: 'GET' | 'POST'
   path: string
   query?: Json
-}
-
-/** 上游 `optionalString`:去空白后仍非空才算有值。 */
-function text(value: unknown): string | undefined {
-  if (typeof value !== 'string') return undefined
-  const trimmed = value.trim()
-  return trimmed === '' ? undefined : trimmed
-}
-
-function num(value: unknown): number | undefined {
-  return typeof value === 'number' && Number.isFinite(value) ? value : undefined
-}
-
-/** 上游 `nullableInteger` 的等价物:只认真整数,小数与数字串都算"没有"。 */
-function int(value: unknown): number | undefined {
-  return typeof value === 'number' && Number.isInteger(value) ? value : undefined
-}
-
-function record(value: unknown): Json | undefined {
-  return typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Json) : undefined
-}
-
-/** 上游 `compactObject`:丢掉值为 undefined 的键。query 与 body 共用一份。 */
-function compact(value: Json): Json {
-  return Object.fromEntries(Object.entries(value).filter(([, child]) => child !== undefined))
 }
 
 function configError(message: string): TBError {
@@ -114,19 +101,9 @@ function resolveWorkspaceId(ctx: ProviderContext): string | undefined {
   return text(configured)
 }
 
-async function readPayload(response: Response): Promise<unknown> {
-  const body = await response.text().catch(() => '')
-  if (body.trim() === '') return null
-  try {
-    return JSON.parse(body)
-  } catch {
-    // 解析失败保留原文:错误响应常是纯文本或 HTML,原文比"响应不是 JSON"有用。
-    return body
-  }
-}
-
 /** 错误消息四处之一;拿不到就退回状态行。 */
-function errorMessage(response: Response, payload: unknown): string {
+function errorMessage(context: ProviderHttpErrorContext): string {
+  const payload = context.data
   const fromText = typeof payload === 'string' ? text(payload) : undefined
   const body = record(payload)
   return fromText
@@ -134,49 +111,43 @@ function errorMessage(response: Response, payload: unknown): string {
     ?? text(body?.message)
     ?? text(body?.error)
     ?? text(body?.title)
-    ?? text(response.statusText)
-    ?? `langsmith 返回 HTTP ${response.status}`
+    ?? text(context.statusText)
+    ?? `langsmith 返回 HTTP ${context.status}`
+}
+
+function queryPairs(query: Json | undefined): ProviderQuery {
+  return Object.entries(query ?? {}).flatMap(([key, value]) => {
+    if (value === undefined || value === null) return []
+    // 数组展开成重复的同名参数(full_text_contains 是多片段搜索,拼成逗号串语义就变了)。
+    return Array.isArray(value)
+      ? value.flatMap(item => item === undefined || item === null ? [] : [[key, String(item)] as const])
+      : [[key, String(value)] as const]
+  })
 }
 
 async function request(ctx: ProviderContext, input: RequestInput): Promise<unknown> {
   // 取凭证与解配置放在 try 外:它们抛的是配置错误,不该被下面的传输失败兜底吞成 502。
   const apiKey = requireApiKey(ctx, SERVICE)
-  const url = new URL(input.path, resolveApiBase(ctx))
   const workspaceId = resolveWorkspaceId(ctx)
-
-  for (const [key, value] of Object.entries(input.query ?? {})) {
-    if (value === undefined || value === null) continue
-    // 数组展开成重复的同名参数(full_text_contains 是多片段搜索,拼成逗号串语义就变了)。
-    if (Array.isArray(value)) {
-      for (const item of value) {
-        if (item !== undefined && item !== null) url.searchParams.append(key, String(item))
-      }
-      continue
-    }
-    url.searchParams.set(key, String(value))
-  }
-
-  const headers: Record<string, string> = { 'accept': 'application/json', 'X-Api-Key': apiKey }
-  if (input.body !== undefined) headers['content-type'] = 'application/json'
-  if (workspaceId !== undefined) headers['X-Tenant-Id'] = workspaceId
-
-  let response: Response
-  try {
-    response = await guardedFetch(url.toString(), {
-      method: input.method ?? 'GET',
-      headers,
-      ...(input.body === undefined ? {} : { body: JSON.stringify(input.body) }),
-    })
-  } catch (error) {
-    // 传输层失败必须就地归一:漏出去的裸 Error 会被 plugin-sdk 抹成 500,
-    // 把"上游不通/出网被拦"说成插件自身故障。
-    if (error instanceof TBError) throw error
-    throw upstreamError(502, `langsmith 请求失败: ${error instanceof Error ? error.message : '未知错误'}`)
-  }
-
-  const payload = await readPayload(response)
-  if (!response.ok) throw upstreamError(response.status, errorMessage(response, payload))
-  return payload
+  const result = await http.request({
+    baseUrl: resolveApiBase(ctx),
+    path: input.path,
+    method: input.method ?? 'GET',
+    query: queryPairs(input.query),
+    headers: {
+      'accept': 'application/json',
+      'X-Api-Key': apiKey,
+      ...(workspaceId === undefined ? {} : { 'X-Tenant-Id': workspaceId }),
+    },
+    ...(input.body === undefined ? {} : { json: input.body }),
+    invalidJson: 'text',
+    mapError: context => upstreamError(context.status, errorMessage(context)),
+    mapTransportError: ({ message }) => upstreamError(
+      502,
+      `langsmith 请求失败: ${message ?? '未知错误'}`,
+    ),
+  })
+  return result.data === undefined ? null : result.data
 }
 
 function ensureObject(value: unknown, label: string): Json {

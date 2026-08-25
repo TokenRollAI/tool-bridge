@@ -11,8 +11,8 @@
  * 为什么仍值得存在:漏 bump 的表现是"这一轮发布里某个包静默落后",要到下一轮
  * `release-plan` 才被发现,而那时改动已经合进 main 很久了。当场看见最便宜。
  *
- * 也报**反向**问题:bundle 了 private 包(core/plugins/app)的产物,在那些 private 包
- * 变更时行为会跟着变 —— 那是消费者可感知的,却最容易被忘掉(它们的 src diff 是空的)。
+ * 也报**反向**问题：产物 bundle/alias 了别的 workspace 源码时，上游源码变更会
+ * 改变下游 artifact —— 那是消费者可感知的，却最容易被忘掉。
  */
 
 import { execFileSync } from 'node:child_process'
@@ -23,17 +23,17 @@ import { join } from 'node:path'
 const PUBLIC_PACKAGES = ['app', 'cli', 'dashboard', 'gateway', 'plugin-sdk', 'sdk', 'server']
 
 /**
- * 谁 bundle 了哪些 private 包(tsup 的 noExternal)。private 包变更 → 这些产物的行为变。
- * 与各包 tsup.config.ts 的 noExternal 保持一致。
+ * 谁把哪些 workspace 包的源码 bundle 进公开产物。这里既包括 tsup noExternal，
+ * 也包括 Vite/esbuild source alias；被内联包变更 → 下游产物行为跟着变。
  */
 const BUNDLES = {
   'app': ['core'],
-  'cli': ['core'],
-  'gateway': ['core', 'app'],
+  'cli': ['core', 'sdk'],
+  'gateway': ['core', 'app', 'plugins', 'plugin-sdk'],
   'sdk': ['core', 'app'],
-  'server': ['core', 'app', 'plugins'],
+  'server': ['core', 'app', 'plugins', 'plugin-sdk'],
   'plugin-sdk': ['core'],
-  'dashboard': [],
+  'dashboard': ['sdk'],
 }
 
 const ROOT = join(import.meta.dirname, '..')
@@ -72,7 +72,7 @@ for (const pkg of PUBLIC_PACKAGES) {
   ).version
   const why = srcTouched
     ? 'src 有改动'
-    : `bundle 的 private 包有改动(${bundledTouched.join(', ')})`
+    : `bundle 的 workspace 源码有改动(${bundledTouched.join(', ')})`
   notes.push(`@tool-bridge/${pkg}@${version}:${why},但版本未 bump`)
 }
 

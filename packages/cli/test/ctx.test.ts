@@ -3,18 +3,13 @@ import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { guessContentType, guessUploadContentType, parseMeta } from '../src/commands/ctx'
+import { mockJsonResponse, runCli } from './cliHarness'
 import { resetFetch, setFetch } from '../src/http'
-import { runCli } from './cliHarness'
 
 /** 捕获请求并按 body 应答;返回 mock 以断言 URL/body。 */
 function captureFetch(body: unknown, status = 200): ReturnType<typeof vi.fn> {
-  const fn = vi.fn(
-    async () =>
-      new Response(JSON.stringify(body), {
-        status,
-        headers: { 'content-type': 'application/json' },
-      }),
-  )
+  const fn = vi.fn(async (url: string, init?: RequestInit) =>
+    mockJsonResponse(url, init, body, status))
   setFetch(fn as unknown as typeof fetch)
   return fn
 }
@@ -263,6 +258,28 @@ describe('parseMeta / guessContentType', () => {
 })
 
 describe('tb ctx upload', () => {
+  it.each([undefined, 'store://default/AAAAAAAAAAAAAAAAAAAAAA', 'node://'])(
+    '畸形 Context grant uri=%j 时不发送私有文件',
+    async (uri) => {
+      const dir = mkdtempSync(join(tmpdir(), 'tb-ctx-upload-invalid-'))
+      const file = join(dir, 'private.bin')
+      writeFileSync(file, new Uint8Array([1, 2, 3]))
+      const fn = vi.fn(async () => new Response(JSON.stringify({
+        ...(uri === undefined ? {} : { uri }),
+        method: 'PUT',
+        url: 'https://objects.example/private?signature=secret',
+        headers: { 'content-type': 'application/octet-stream' },
+        expiresAt: '2099-08-24T12:00:00.000Z',
+      }), { status: 200 }))
+      setFetch(fn as unknown as typeof fetch)
+
+      await runCli(['ctx', 'upload', 'ctx/photos', 'private.bin', '--file', file, ...gw, '--json'])
+      expect(fn).toHaveBeenCalledOnce()
+      expect(stdoutText()).toContain('invalid upload grant')
+      expect(process.exitCode).toBe(1)
+    },
+  )
+
   it('先申请 grant，再把文件原始字节直传；输出不泄露签名 URL', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'tb-ctx-upload-'))
     const file = join(dir, 'shot.jpg')
@@ -306,6 +323,8 @@ describe('tb ctx upload', () => {
     const [uploadUrl, uploadInit] = fn.mock.calls[1] as [URL, RequestInit]
     expect(uploadUrl.toString()).toBe(grant.url)
     expect(uploadInit.method).toBe('PUT')
+    expect(uploadInit.redirect).toBe('error')
+    expect(uploadInit.credentials).toBe('omit')
     expect(new Headers(uploadInit.headers).get('authorization')).toBeNull()
     expect(new Headers(uploadInit.headers).get('content-type')).toBe('image/jpeg')
     expect(new Headers(uploadInit.headers).get('if-none-match')).toBe('*')

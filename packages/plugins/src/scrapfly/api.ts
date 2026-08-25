@@ -16,17 +16,23 @@
 import type { z } from 'zod/v4'
 import { TBError } from '@tool-bridge/plugin-sdk'
 import type { getMonitoringMetricsInput, scrapeInput } from './schema'
+import {
+  createProviderHttpClient,
+  type ProviderHttpRequest,
+  type ProviderHttpResult,
+  type ProviderQuery,
+} from '../_runtime/providerHttp'
 import { type ProviderContext, requireApiKey } from '../_runtime/plugin'
 import { upstreamError } from '../_runtime/upstreamError'
-import { guardedFetch } from '../_runtime/guardedFetch'
 
 const SERVICE = 'scrapfly'
 const API_BASE = 'https://api.scrapfly.io'
-const SCRAPE_URL = `${API_BASE}/scrape`
-const METRICS_URL = `${API_BASE}/scrape/monitoring/metrics`
+const SCRAPE_PATH = '/scrape'
+const METRICS_PATH = '/scrape/monitoring/metrics'
 const REQUEST_TIMEOUT_MS = 160_000
 /** 非 JSON 错误体(常是整页 HTML)截断后再回给调用方。 */
 const MAX_ERROR_MESSAGE_LENGTH = 300
+const http = createProviderHttpClient({ baseUrl: `${API_BASE}/`, service: SERVICE })
 
 type Json = Record<string, unknown>
 type QueryValue = boolean | number | string | string[] | undefined
@@ -59,64 +65,58 @@ function errorMessage(body: string, headers: Headers, status: number): string {
   return headers.get('x-scrapfly-reject-code') ?? `Scrapfly 返回 HTTP ${status}`
 }
 
-function buildUrl(base: string, apiKey: string, query: Record<string, QueryValue>): URL {
-  const url = new URL(base)
-  url.searchParams.set('key', apiKey)
+function requestQuery(apiKey: string, query: Record<string, QueryValue>): ProviderQuery {
+  const result: Array<readonly [string, boolean | number | string | undefined]> = [['key', apiKey]]
   for (const [key, value] of Object.entries(query)) {
-    if (value === undefined) continue
     if (Array.isArray(value)) {
-      for (const item of value) url.searchParams.append(`${key}[]`, item)
+      for (const item of value) result.push([`${key}[]`, item])
       continue
     }
-    url.searchParams.set(key, String(value))
+    result.push([key, value])
   }
-  return url
+  return result
 }
 
 async function request(
   ctx: ProviderContext,
-  base: string,
+  path: string,
   query: Record<string, QueryValue>,
-  init: RequestInit,
-): Promise<Response> {
-  const url = buildUrl(base, requireApiKey(ctx, SERVICE), query)
-  let response: Response
-  try {
-    response = await guardedFetch(url.toString(), {
-      ...init,
-      headers: { accept: 'application/json', ...init.headers },
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-    })
-  } catch (error) {
-    if (error instanceof TBError) throw error
-    if (error instanceof Error && error.name === 'TimeoutError') {
-      throw upstreamError(504, `Scrapfly ${REQUEST_TIMEOUT_MS / 1000}s 内没有返回`)
-    }
-    throw new TBError(
-      'unavailable',
-      error instanceof Error ? `Scrapfly 请求失败: ${error.message}` : 'Scrapfly 请求失败',
-      { retryable: true },
-    )
-  }
-  if (!response.ok) {
-    throw upstreamError(
-      response.status,
-      errorMessage(await response.text().catch(() => ''), response.headers, response.status),
-    )
-  }
-  return response
+  init: { body?: BodyInit, headers?: Record<string, string>, method?: ProviderHttpRequest['method'] },
+): Promise<ProviderHttpResult> {
+  return await http.request({
+    path,
+    query: requestQuery(requireApiKey(ctx, SERVICE), query),
+    method: init.method ?? 'GET',
+    headers: { accept: 'application/json', ...init.headers },
+    ...(init.body === undefined ? {} : { body: init.body }),
+    timeoutMs: REQUEST_TIMEOUT_MS,
+    invalidJson: 'text',
+    mapError: ({ bodyKind, data, headers, status }) => upstreamError(
+      status,
+      errorMessage(
+        bodyKind === 'empty' ? '' : bodyKind === 'json' ? JSON.stringify(data) : String(data),
+        headers,
+        status,
+      ),
+    ),
+    mapTransportError: ({ kind, message }) => kind === 'timeout'
+      ? upstreamError(504, `Scrapfly ${REQUEST_TIMEOUT_MS / 1000}s 内没有返回`)
+      : new TBError(
+          'unavailable',
+          message === undefined ? 'Scrapfly 请求失败' : `Scrapfly 请求失败: ${message}`,
+          { retryable: true },
+        ),
+  })
 }
 
-async function readJson(response: Response, label: string): Promise<unknown> {
-  const body = await response.text()
-  if (body.trim() === '') {
+function readJson(response: ProviderHttpResult, label: string): unknown {
+  if (response.bodyKind === 'empty') {
     throw new TBError('unavailable', `${label}返回了空响应体`, { retryable: true })
   }
-  try {
-    return JSON.parse(body) as unknown
-  } catch {
+  if (response.bodyKind !== 'json') {
     throw new TBError('unavailable', `${label}返回了非法 JSON`, { retryable: true })
   }
+  return response.data
 }
 
 function requireRecord(payload: unknown, label: string): Json {
@@ -139,7 +139,7 @@ function headerInt(headers: Headers, name: string): null | number {
 }
 
 /** 计费与拒绝信息只在响应头里,是调用方判断"这次花了多少 / 为什么被拒"的唯一来源。 */
-function responseMetadata(response: Response): Json {
+function responseMetadata(response: Pick<ProviderHttpResult, 'headers' | 'status'>): Json {
   return {
     status_code: response.status,
     api_cost: headerInt(response.headers, 'x-scrapfly-api-cost'),
@@ -172,7 +172,7 @@ export async function scrape(
 
   const response = await request(
     ctx,
-    SCRAPE_URL,
+    SCRAPE_PATH,
     {
       url: input.url,
       country: input.country,
@@ -200,7 +200,7 @@ export async function scrape(
     },
   )
 
-  const payload = requireRecord(await readJson(response, 'Scrapfly 抓取响应'), 'Scrapfly 抓取响应')
+  const payload = requireRecord(readJson(response, 'Scrapfly 抓取响应'), 'Scrapfly 抓取响应')
   return {
     result: requireRecord(payload.result, 'Scrapfly 抓取结果'),
     config: toRecord(payload.config),
@@ -216,7 +216,7 @@ export async function getMonitoringMetrics(
 ): Promise<Json> {
   const response = await request(
     ctx,
-    METRICS_URL,
+    METRICS_PATH,
     {
       aggregation: input.aggregation,
       period: input.period,
@@ -228,7 +228,7 @@ export async function getMonitoringMetrics(
   )
   return {
     metrics: requireRecord(
-      await readJson(response, 'Scrapfly 监控指标响应'),
+      readJson(response, 'Scrapfly 监控指标响应'),
       'Scrapfly 监控指标响应',
     ),
     metadata: responseMetadata(response),

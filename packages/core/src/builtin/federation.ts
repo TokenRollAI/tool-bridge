@@ -6,12 +6,12 @@
  * `list` 输出合并视图(标注 source:env|store,env 条目 removable=false)。
  */
 
-import type { CmdSpec, HelpModel } from '../htbp/model'
+import { z } from 'zod/v4'
 import type { BuiltinModule } from './types'
-import type { TreePath } from '../types'
 import { normalizeAllowHost, type RemoteAllowlistStore } from '../tool/allowlist'
-import { cmdPath, requireString, VOID_ACK, withCommandPaths } from './util'
+import { BuiltinCommandRegistry } from './commandRegistry'
 import { TBError } from '../errors'
+import { VOID_ACK } from './util'
 
 const DESCRIPTION
   = 'Remote federation host allowlist: which hosts kind=remote nodes may connect to (env baseline is read-only; admin only)'
@@ -22,53 +22,6 @@ export interface FederationHost {
   removable: boolean
   source: 'env' | 'store'
   updatedAt?: string
-}
-
-function federationCmds(nodePath: TreePath): CmdSpec[] {
-  const path = cmdPath(nodePath)
-  const cmds: CmdSpec[] = [
-    {
-      name: 'list',
-      method: 'POST',
-      path,
-      h: 'merged allowlist view: env baseline entries (removable=false) plus runtime entries',
-      inputSchema: { type: 'object', properties: {} },
-      returns: 'Page<{ host, source: "env"|"store", removable, updatedAt? }>',
-      scope: 'admin',
-    },
-    {
-      name: 'add',
-      method: 'POST',
-      path,
-      h: 'allow a host (suffix match covers subdomains); takes effect immediately',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          host: {
-            type: 'string',
-            description: 'bare host suffix, e.g. "example.com" — no scheme/port/path',
-          },
-        },
-        required: ['host'],
-      },
-      returns: '{ host, updatedAt } — bare host suffix; no scheme/port/path',
-      scope: 'admin',
-    },
-    {
-      name: 'remove',
-      method: 'POST',
-      path,
-      h: 'remove a runtime-added host; env baseline entries cannot be removed here',
-      inputSchema: {
-        type: 'object',
-        properties: { host: { type: 'string', description: 'bare host suffix as listed' } },
-        required: ['host'],
-      },
-      returns: 'void — env baseline entries are not removable',
-      scope: 'admin',
-    },
-  ]
-  return withCommandPaths(nodePath, cmds)
 }
 
 export interface FederationModuleDeps {
@@ -97,44 +50,61 @@ function mergedView(
   return [...byHost.values()].sort((a, b) => a.host.localeCompare(b.host))
 }
 
+const COMMANDS = new BuiltinCommandRegistry<FederationModuleDeps>('federation', DESCRIPTION)
+  .register(
+    'list',
+    {
+      h: 'merged allowlist view: env baseline entries (removable=false) plus runtime entries',
+      inputSchema: z.strictObject({}),
+      returns: 'Page<{ host, source: "env"|"store", removable, updatedAt? }>',
+      scope: 'admin',
+    },
+    async (_input, { deps }) => ({ items: mergedView(deps.base, await deps.store.list()) }),
+  )
+  .register(
+    'add',
+    {
+      h: 'allow a host (suffix match covers subdomains); takes effect immediately',
+      inputSchema: z.strictObject({
+        host: z.string().min(1).describe(
+          'bare host suffix, e.g. "example.com" — no scheme/port/path',
+        ),
+      }),
+      returns: '{ host, updatedAt } — bare host suffix; no scheme/port/path',
+      scope: 'admin',
+    },
+    async ({ host }, { deps }) => {
+      const normalized = normalizeAllowHost(host)
+      // 已在 env 基线中 → 无需(也不能)增删;明确报错,避免"加了却看不到 store 条目"的困惑。
+      if (deps.base.some(b => b.trim().toLowerCase() === normalized)) {
+        throw new TBError('invalid_argument', `host 已在部署基线(env)中,无需添加:'${normalized}'`)
+      }
+      return await deps.store.add(normalized, deps.now())
+    },
+  )
+  .register(
+    'remove',
+    {
+      h: 'remove a runtime-added host; env baseline entries cannot be removed here',
+      inputSchema: z.strictObject({
+        host: z.string().min(1).describe('bare host suffix as listed'),
+      }),
+      returns: 'void — env baseline entries are not removable',
+      scope: 'admin',
+    },
+    async ({ host }, { deps }) => {
+      const normalized = normalizeAllowHost(host)
+      if (deps.base.some(b => b.trim().toLowerCase() === normalized)) {
+        throw new TBError(
+          'invalid_argument',
+          `env 基线条目不可删除:'${normalized}'(改 TB_REMOTE_ALLOWLIST 并重新部署)`,
+        )
+      }
+      await deps.store.remove(normalized)
+      return VOID_ACK
+    },
+  )
+
 export function createFederationModule(deps: FederationModuleDeps): BuiltinModule {
-  return {
-    module: 'federation',
-    description: DESCRIPTION,
-    help(nodePath: TreePath): HelpModel {
-      return {
-        node: { path: nodePath, kind: 'builtin', description: DESCRIPTION },
-        cmds: federationCmds(nodePath),
-      }
-    },
-    async dispatch(cmd: string, args: Record<string, unknown>): Promise<unknown> {
-      switch (cmd) {
-        case 'list': {
-          const items = mergedView(deps.base, await deps.store.list())
-          return { items }
-        }
-        case 'add': {
-          const host = normalizeAllowHost(requireString(args, 'host'))
-          // 已在 env 基线中 → 无需(也不能)增删;明确报错,避免"加了却看不到 store 条目"的困惑。
-          if (deps.base.some(b => b.trim().toLowerCase() === host)) {
-            throw new TBError('invalid_argument', `host 已在部署基线(env)中,无需添加:'${host}'`)
-          }
-          return await deps.store.add(host, deps.now())
-        }
-        case 'remove': {
-          const host = normalizeAllowHost(requireString(args, 'host'))
-          if (deps.base.some(b => b.trim().toLowerCase() === host)) {
-            throw new TBError(
-              'invalid_argument',
-              `env 基线条目不可删除:'${host}'(改 TB_REMOTE_ALLOWLIST 并重新部署)`,
-            )
-          }
-          await deps.store.remove(host)
-          return VOID_ACK
-        }
-        default:
-          throw new TBError('invalid_argument', `unknown cmd '${cmd}' on system/federation`)
-      }
-    },
-  }
+  return COMMANDS.module(deps)
 }

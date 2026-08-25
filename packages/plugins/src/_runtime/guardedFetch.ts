@@ -32,6 +32,14 @@ const CROSS_ORIGIN_STRIPPED_HEADERS = [
   // 宁可让跨源跳转少带一个无关头,也不能漏带走一个凭证。
 ] as const
 
+/** Fetch 在 redirect-method 改成 GET 时同步删除的 request-body-header。 */
+const REQUEST_BODY_HEADERS = [
+  'content-encoding',
+  'content-language',
+  'content-location',
+  'content-type',
+] as const
+
 /** 名字看起来像凭证的头(各家自定义密钥头没有统一命名)。 */
 function looksLikeCredentialHeader(name: string): boolean {
   return /(?:^|-)(?:api[-_]?key|key|token|secret|auth)(?:$|-)/i.test(name)
@@ -66,7 +74,10 @@ export class EgressBlockedError extends TBError {
 }
 
 export interface GuardedFetchOptions {
-  /** 跨 origin 重定向策略。请求体含凭证时必须用 error,否则 307/308 会原样转发 body。 */
+  /**
+   * 跨 origin 重定向策略。默认 error：请求体和非标准凭证头无法被完整识别，
+   * 只有确认请求不含秘密的调用方才应显式选择 follow。
+   */
   crossOriginRedirect?: 'error' | 'follow'
   /** 底层传输;缺省全局 fetch。测试注入用。 */
   fetch?: typeof fetch
@@ -109,7 +120,7 @@ export function assertPublicHttpUrl(value: string | URL): URL {
  * 注意 `init.redirect` 会被忽略:重定向必须由本函数手动跟随才能逐跳校验。
  */
 export function createGuardedFetch(options: GuardedFetchOptions = {}): typeof fetch {
-  const crossOriginRedirect = options.crossOriginRedirect ?? 'follow'
+  const crossOriginRedirect = options.crossOriginRedirect ?? 'error'
   const maxRedirects = options.maxRedirects ?? MAX_REDIRECTS
   const sensitiveHeaders = new Set(
     (options.sensitiveHeaders ?? []).map(name => name.toLowerCase()),
@@ -129,7 +140,9 @@ export function createGuardedFetch(options: GuardedFetchOptions = {}): typeof fe
       : new Request(url, { ...init, redirect: 'manual' })
 
     for (let hop = 0; ; hop += 1) {
-      const response = await transport(new Request(request, { redirect: 'manual' }))
+      // transport 会消费请求体。先发送 clone，给 307/308 留下仍可转移到下一跳的原请求；
+      // 否则 string/stream body 在第一跳后已 disturbed，无法按 Fetch 语义原样重放。
+      const response = await transport(new Request(request.clone(), { redirect: 'manual' }))
       const location = response.headers.get('location')
       if (response.status < 300 || response.status > 399 || location === null) return response
 
@@ -148,12 +161,23 @@ export function createGuardedFetch(options: GuardedFetchOptions = {}): typeof fe
       const headers = !crossesOrigin
         ? request.headers
         : stripCredentials(request.headers, sensitiveHeaders)
-      // 303,以及「非 GET 收到 301/302」,按 Fetch 规范降级为 GET 且丢弃 body。
-      const downgrade = response.status === 303
-        || ((response.status === 301 || response.status === 302) && request.method !== 'GET')
-      request = downgrade
-        ? new Request(url, { method: 'GET', headers, redirect: 'manual' })
-        : new Request(url, { ...request, headers, redirect: 'manual' })
+      // Fetch redirect-method：301/302 只把 POST 改成 GET；303 把 GET/HEAD 之外的方法
+      // 改成 GET；307/308 始终保留。不能把 PUT 301/302 或 HEAD 303 错降级。
+      const downgrade = ((response.status === 301 || response.status === 302) && request.method === 'POST')
+        || (response.status === 303 && request.method !== 'GET' && request.method !== 'HEAD')
+      if (downgrade) {
+        const redirectedHeaders = new Headers(headers)
+        for (const name of REQUEST_BODY_HEADERS) redirectedHeaders.delete(name)
+        request = new Request(url, { method: 'GET', headers: redirectedHeaders, redirect: 'manual' })
+      } else {
+        // Request 的 method/body 等属性在原型上，不是可展开的 enumerable field；
+        // `{ ...request }` 会静默变成 GET + 空 body。把 Request 作为 WebIDL
+        // RequestInit 转移其完整语义，再只在跨源时覆盖已脱敏 headers。
+        const redirected = new Request(url, request as unknown as RequestInit)
+        request = crossesOrigin
+          ? new Request(redirected, { headers, redirect: 'manual' })
+          : redirected
+      }
     }
   }
 }

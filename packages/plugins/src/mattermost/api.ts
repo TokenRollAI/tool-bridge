@@ -45,14 +45,21 @@ import type {
   listTeamChannelsInput,
   listUserTeamsInput,
 } from './schema'
-import { assertPublicHttpUrl, guardedFetch } from '../_runtime/guardedFetch'
+import {
+  createProviderHttpClient,
+  type ProviderQuery,
+  type ResponseBodyKind,
+} from '../_runtime/providerHttp'
+import { asJsonObject as record, trimmedText as text } from '../_runtime/jsonValue'
 import { type ProviderContext, requireCredential } from '../_runtime/plugin'
+import { assertPublicHttpUrl } from '../_runtime/guardedFetch'
 import { upstreamError } from '../_runtime/upstreamError'
 
 const SERVICE = 'mattermost'
 const API_PATH_PREFIX = '/api/v4'
 /** 照搬上游的 30s 单请求上限。 */
 const REQUEST_TIMEOUT_MS = 30_000
+const http = createProviderHttpClient({ service: SERVICE })
 /** `since` 不能与这些参数同时出现(见文件头第 2 条)。 */
 const SINCE_CONFLICTING_FIELDS = ['page', 'perPage', 'beforePostId', 'afterPostId'] as const
 
@@ -64,16 +71,6 @@ interface MattermostRequest {
   method?: 'GET' | 'POST'
   path: string
   query?: Record<string, QueryValue>
-}
-
-function text(value: unknown): string | undefined {
-  if (typeof value !== 'string') return undefined
-  const trimmed = value.trim()
-  return trimmed === '' ? undefined : trimmed
-}
-
-function record(value: unknown): Json | undefined {
-  return typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Json) : undefined
 }
 
 /** 上游违约(说好是对象/数组却不是)—— 不是调用方的错,归可重试。 */
@@ -136,16 +133,10 @@ function apiBaseUrl(ctx: ProviderContext): string {
   return `${url.toString().replace(/\/$/, '')}${API_PATH_PREFIX}`
 }
 
-/** 空体读成 null;非 JSON 的成功响应是上游违约,非 JSON 的错误响应把原文当消息。 */
-async function readPayload(response: Response): Promise<unknown> {
-  const body = await response.text()
-  if (body === '') return null
-  try {
-    return JSON.parse(body)
-  } catch {
-    if (response.ok) throw invalidResponse('Mattermost 返回了非 JSON 响应')
-    return { message: body }
-  }
+/** 空体读成 null；非 JSON 的错误响应把原文放进 message，保持旧错误 envelope。 */
+function responsePayload(data: unknown, bodyKind: ResponseBodyKind): unknown {
+  if (bodyKind === 'empty') return null
+  return bodyKind === 'invalid-json' ? { message: data } : data
 }
 
 /** Mattermost 的错误消息散在 `message` / `error` / `details` / `id` 四个键上。 */
@@ -159,38 +150,27 @@ function errorMessage(payload: unknown, status: number): string {
 }
 
 async function request(ctx: ProviderContext, input: MattermostRequest): Promise<unknown> {
-  const url = new URL(`${apiBaseUrl(ctx)}${input.path}`)
-  for (const [key, value] of Object.entries(input.query ?? {})) {
-    if (value !== undefined) url.searchParams.set(key, String(value))
-  }
-  const headers: Record<string, string> = {
-    accept: 'application/json',
-    authorization: `Bearer ${requireCredential(ctx, SERVICE, 'apiKey')}`,
-  }
-  if (input.body !== undefined) headers['content-type'] = 'application/json'
-
-  let response: Response
-  try {
-    response = await guardedFetch(url.toString(), {
-      method: input.method ?? 'GET',
-      headers,
-      body: input.body === undefined ? undefined : JSON.stringify(input.body),
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-    })
-  } catch (error) {
-    // 传输层失败必须就地归一:漏出去的裸 Error 会被 plugin-sdk 抹成 "internal plugin error"
-    // 500,把"实例不通/出网被拦"说成插件自身故障。自建实例下这条路径很常走。
-    if (error instanceof TBError) throw error
-    if (error instanceof Error && error.name === 'TimeoutError') {
-      throw upstreamError(504, `Mattermost 请求超时(${REQUEST_TIMEOUT_MS / 1000} 秒)`)
-    }
-    const message = error instanceof Error ? error.message : 'unknown network error'
-    throw upstreamError(502, `Mattermost 请求失败:${message}`)
-  }
-
-  const payload = await readPayload(response)
-  if (!response.ok) throw upstreamError(response.status, errorMessage(payload, response.status))
-  return payload
+  const result = await http.request({
+    baseUrl: `${apiBaseUrl(ctx)}/`,
+    path: input.path,
+    method: input.method ?? 'GET',
+    query: Object.entries(input.query ?? {}) satisfies ProviderQuery,
+    headers: {
+      accept: 'application/json',
+      authorization: `Bearer ${requireCredential(ctx, SERVICE, 'apiKey')}`,
+    },
+    ...(input.body === undefined ? {} : { json: input.body }),
+    timeoutMs: REQUEST_TIMEOUT_MS,
+    invalidJsonMessage: 'Mattermost 返回了非 JSON 响应',
+    mapError: ({ bodyKind, data, status }) => upstreamError(
+      status,
+      errorMessage(responsePayload(data, bodyKind), status),
+    ),
+    mapTransportError: ({ kind, message }) => kind === 'timeout'
+      ? upstreamError(504, `Mattermost 请求超时(${REQUEST_TIMEOUT_MS / 1000} 秒)`)
+      : upstreamError(502, `Mattermost 请求失败:${message ?? 'unknown network error'}`),
+  })
+  return responsePayload(result.data, result.bodyKind)
 }
 
 export async function getCurrentUser(

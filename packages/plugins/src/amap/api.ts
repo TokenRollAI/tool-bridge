@@ -50,12 +50,14 @@ import type {
   searchPlacesPolygonInput,
   weatherInput,
 } from './schema'
+import { booleanValue as boolean, asJsonObject as record, trimmedText as text } from '../_runtime/jsonValue'
+import { createProviderHttpClient, type ProviderQuery } from '../_runtime/providerHttp'
 import { type ProviderContext, requireApiKey } from '../_runtime/plugin'
 import { upstreamError } from '../_runtime/upstreamError'
-import { guardedFetch } from '../_runtime/guardedFetch'
 
 const SERVICE = 'amap'
 const API_BASE = 'https://restapi.amap.com'
+const http = createProviderHttpClient({ baseUrl: API_BASE, service: SERVICE })
 /** 高德对 GET 的 URL 长度上限;超了直接拒。 */
 const MAX_GET_URL_LENGTH = 2000
 
@@ -80,24 +82,8 @@ const INPUT_ERROR_INFOCODES = new Set(['18001', '18002'])
 type Json = Record<string, unknown>
 type QueryValue = boolean | number | string | undefined
 
-/** 上游 `readOptionalString`:非字符串、或去空白后为空,都算缺失。 */
-function text(value: unknown): string | undefined {
-  if (typeof value !== 'string') return undefined
-  const trimmed = value.trim()
-  return trimmed === '' ? undefined : trimmed
-}
-
 function number(value: unknown): number | undefined {
   return typeof value === 'number' ? value : undefined
-}
-
-function boolean(value: unknown): boolean | undefined {
-  return typeof value === 'boolean' ? value : undefined
-}
-
-/** 上游 `readObject`:数组与 null 都不算对象。 */
-function record(value: unknown): Json | undefined {
-  return typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Json) : undefined
 }
 
 /** 上游 `readObjectArray`:非数组兜底成空,数组里的非对象项**丢掉**(不是报错)。 */
@@ -180,29 +166,24 @@ function amapError(status: number, payload: Json): TBError {
  * 回答,看起来像"没有结果"。
  */
 async function amapGet(ctx: ProviderContext, path: string, query: Record<string, QueryValue>): Promise<Json> {
-  const url = buildUrl(path, { ...query, key: requireApiKey(ctx, SERVICE) })
-
-  let response: Response
-  try {
-    response = await guardedFetch(url, { method: 'GET', headers: { accept: 'application/json' } })
-  } catch (error) {
-    // guardedFetch 拦下的出站(EgressBlockedError)已经是 TBError,原样冒上去。
-    if (error instanceof TBError) throw error
-    throw upstreamError(
+  const { data, status } = await http.request({
+    path,
+    method: 'GET',
+    query: Object.entries({ ...query, key: requireApiKey(ctx, SERVICE) }) satisfies ProviderQuery,
+    headers: { accept: 'application/json' },
+    invalidJsonMessage: 'amap 返回了非 JSON 对象响应',
+    mapError: ({ data: payload, status }) => {
+      const body = record(payload)
+      return body === undefined
+        ? new TBError('unavailable', 'amap 返回了非 JSON 对象响应', { retryable: true })
+        : amapError(status, body)
+    },
+    mapTransportError: ({ message }) => upstreamError(
       502,
-      error instanceof Error ? `amap request failed: ${error.message}` : 'amap request failed',
-    )
-  }
-
-  const raw = await response.text().catch(() => '')
-  let payload: Json | undefined
-  if (raw.trim() !== '') {
-    try {
-      payload = record(JSON.parse(raw))
-    } catch {
-      payload = undefined
-    }
-  }
+      message === undefined ? 'amap request failed' : `amap request failed: ${message}`,
+    ),
+  })
+  const payload = record(data)
   if (payload === undefined) {
     // 高德的每一个响应都该是 JSON 对象;不是就说明上游坏了(或者被中间设备劫持了)。
     throw new TBError('unavailable', 'amap 返回了非 JSON 对象响应', { retryable: true })
@@ -210,7 +191,7 @@ async function amapGet(ctx: ProviderContext, path: string, query: Record<string,
 
   // 这是本 provider 最关键的一行:高德用 200 + status:"0" 表达失败,只看 ok 会把
   // 每一次失败都当成空结果返回。
-  if (!response.ok || payload.status !== '1') throw amapError(response.status, payload)
+  if (payload.status !== '1') throw amapError(status, payload)
   return payload
 }
 

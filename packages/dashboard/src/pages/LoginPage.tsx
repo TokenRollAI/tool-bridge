@@ -10,13 +10,13 @@ import {
   X,
 } from 'lucide-react'
 import { useMutation } from '@tanstack/react-query'
+import { useTheme } from 'next-themes'
 import { useState } from 'react'
 import { type ApiError, validateConnection } from '@/lib/api'
 import { useSession } from '@/lib/session-context'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { useTheme } from '@/lib/theme'
 import hero from '@/assets/hero.png'
 
 const FEATURES = [
@@ -50,7 +50,8 @@ function connectionErrorMessage(error: ApiError | null): string {
  */
 export function LoginPage() {
   const { login, profiles, switchTo, removeProfile } = useSession()
-  const [theme, toggleTheme] = useTheme()
+  const { resolvedTheme, setTheme } = useTheme()
+  const isDark = resolvedTheme !== 'light'
   const [baseUrl, setBaseUrl] = useState('')
   const [sk, setSk] = useState('')
   const [name, setName] = useState('default')
@@ -88,8 +89,13 @@ export function LoginPage() {
             HTBP CONTROL PLANE
           </span>
         </div>
-        <Button aria-label="切换主题" onClick={toggleTheme} size="icon-sm" variant="ghost">
-          {theme === 'dark' ? <Sun /> : <Moon />}
+        <Button
+          aria-label="切换主题"
+          onClick={() => setTheme(isDark ? 'light' : 'dark')}
+          size="icon-sm"
+          variant="ghost"
+        >
+          {isDark ? <Sun /> : <Moon />}
         </Button>
       </header>
 

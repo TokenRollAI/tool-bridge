@@ -1,11 +1,5 @@
-import {
-  base64urlEncode,
-  type CallContext,
-  encodeCallContext,
-  HEADER_TB_CONTEXT,
-  HEADER_TB_UPSTREAM_AUTH,
-} from '@tool-bridge/core'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+import { createProviderHarness } from '../support/providerHarness'
 import { createLinearPlugin } from '../../src/linear/index'
 import { linearActions } from '../../src/linear/schema'
 
@@ -16,69 +10,20 @@ import { linearActions } from '../../src/linear/schema'
  * 自动翻页的游标循环与上界、以及 `run_query` 的"不抛错、原样透传"。
  */
 
-const PLUGIN_TOKEN = 'tbp_test'
-const ENV = { PLUGIN_TOKEN }
 const API_KEY = 'lin_api_deadbeef'
 const plugin = createLinearPlugin()
 
-const CALLER: CallContext = {
-  keyId: 'k1',
-  owner: 'agent:tester',
-  scopes: [],
-  traceId: 't1',
+const {
+  call,
+  envelope,
+  mockJson: mockLinear,
+  mockJsonSequence: mockLinearSequence,
+  sent,
+} = createProviderHarness({
   mountPath: 'pm/linear',
-  exportId: 'actions',
-}
-
-function envelope(body: unknown, opts: { auth?: string | null } = {}): Promise<Response> {
-  const headers: Record<string, string> = {
-    'authorization': `Bearer ${PLUGIN_TOKEN}`,
-    'content-type': 'application/json',
-    [HEADER_TB_CONTEXT]: encodeCallContext(CALLER),
-  }
-  const auth = opts.auth === undefined ? API_KEY : opts.auth
-  if (auth !== null) {
-    headers[HEADER_TB_UPSTREAM_AUTH] = base64urlEncode(new TextEncoder().encode(auth))
-  }
-  return Promise.resolve(plugin.fetch(
-    new Request('https://plugin.test/', { method: 'POST', headers, body: JSON.stringify(body) }),
-    ENV as never,
-  ))
-}
-
-function call(name: string, args: unknown, opts?: { auth?: string | null }): Promise<Response> {
-  return envelope({ tool: 'Call', arguments: { name, args } }, opts)
-}
-
-/** 单次 GraphQL 响应。 */
-function mockLinear(status: number, payload: unknown): ReturnType<typeof vi.fn> {
-  const fn = vi.fn(() => Promise.resolve(new Response(JSON.stringify(payload), {
-    status,
-    headers: { 'content-type': 'application/json' },
-  })))
-  vi.stubGlobal('fetch', fn)
-  return fn
-}
-
-/** 按调用顺序逐个回不同的响应(一次 action 打多趟 GraphQL 时用)。 */
-function mockLinearSequence(payloads: unknown[]): ReturnType<typeof vi.fn> {
-  let index = 0
-  const fn = vi.fn(() => {
-    const payload = payloads[Math.min(index, payloads.length - 1)]
-    index += 1
-    return Promise.resolve(new Response(JSON.stringify(payload), {
-      status: 200,
-      headers: { 'content-type': 'application/json' },
-    }))
-  })
-  vi.stubGlobal('fetch', fn)
-  return fn
-}
-
-/** 取第 n 次出站请求(从 0 起)。 */
-function sent(mock: ReturnType<typeof vi.fn>, index = 0): Request {
-  return (mock.mock.calls[index] as [Request])[0]
-}
+  plugin,
+  upstreamAuth: API_KEY,
+})
 
 /** 取第 n 次出站请求的 GraphQL body。 */
 async function sentBody(mock: ReturnType<typeof vi.fn>, index = 0): Promise<{
@@ -89,10 +34,6 @@ async function sentBody(mock: ReturnType<typeof vi.fn>, index = 0): Promise<{
 }
 
 const VIEWER = { id: 'user_me', name: 'Me', displayName: 'me', email: 'me@example.test', active: true }
-
-afterEach(() => {
-  vi.unstubAllGlobals()
-})
 
 describe('契约面', () => {
   it('List 出全部 34 个 action,且都带 Zod 派生的 schema', async () => {

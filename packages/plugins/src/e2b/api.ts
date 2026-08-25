@@ -29,34 +29,19 @@ import type {
   getSandboxInput,
   listSandboxesInput,
 } from './schema'
+import { compactDefined as compact, asJsonObject as record, trimmedText as text } from '../_runtime/jsonValue'
+import { createProviderHttpClient, type ProviderQuery } from '../_runtime/providerHttp'
 import { type ProviderContext, requireApiKey } from '../_runtime/plugin'
 import { upstreamError } from '../_runtime/upstreamError'
-import { guardedFetch } from '../_runtime/guardedFetch'
 
 const SERVICE = 'e2b'
 const API_BASE = 'https://api.e2b.app'
+const http = createProviderHttpClient({ baseUrl: API_BASE, service: SERVICE })
 /** 照搬上游的 30s 单请求上限:沙箱创建偶尔很慢,但挂死比失败更糟。 */
 const REQUEST_TIMEOUT_MS = 30_000
 
 type Json = Record<string, unknown>
 type QueryValue = boolean | number | string | string[] | undefined
-
-function text(value: unknown): string | undefined {
-  if (typeof value !== 'string') return undefined
-  const trimmed = value.trim()
-  return trimmed === '' ? undefined : trimmed
-}
-
-function record(value: unknown): Json | undefined {
-  return typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Json) : undefined
-}
-
-/** 丢掉值为 undefined 的键(上游 `compactObject`);`null` 要留住(`mcp: null` 有语义)。 */
-function compact<T>(input: Record<string, T | undefined>): Record<string, T> {
-  return Object.fromEntries(
-    Object.entries(input).filter(([, value]) => value !== undefined),
-  ) as Record<string, T>
-}
 
 /** 上游 `requiredString`:schema 把这些字段声明成可选,但 executor 断言必填。 */
 function requireText(value: unknown, field: string): string {
@@ -90,16 +75,6 @@ function errorMessage(payload: unknown, status: number): string {
     ?? `E2B request failed with status ${status}`
 }
 
-function buildUrl(path: string, query?: Record<string, QueryValue>): string {
-  const url = new URL(`${API_BASE}${path}`)
-  for (const [key, value] of Object.entries(query ?? {})) {
-    if (value === undefined) continue
-    // 数组 query 拼成一个逗号串:E2B 不认重复的同名参数。
-    url.searchParams.set(key, Array.isArray(value) ? value.join(',') : String(value))
-  }
-  return url.toString()
-}
-
 interface RequestOptions {
   body?: Json
   /** 204 或空 body 时的返回值(上游 `emptySuccess`)。 */
@@ -110,43 +85,25 @@ interface RequestOptions {
 }
 
 async function request(ctx: ProviderContext, options: RequestOptions): Promise<unknown> {
-  const headers: Record<string, string> = {
-    'accept': 'application/json',
-    'x-api-key': requireApiKey(ctx, SERVICE),
-  }
-  if (options.body !== undefined) headers['content-type'] = 'application/json'
-
-  let response: Response
-  try {
-    response = await guardedFetch(buildUrl(options.path, options.query), {
-      method: options.method ?? 'GET',
-      headers,
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-      ...(options.body === undefined ? {} : { body: JSON.stringify(options.body) }),
-    })
-  } catch (error) {
-    // guardedFetch 拦下的出站(EgressBlockedError)已经是 TBError,原样冒上去。
-    if (error instanceof TBError) throw error
-    if (error instanceof Error && error.name === 'TimeoutError') {
-      throw upstreamError(504, `E2B ${REQUEST_TIMEOUT_MS / 1000}s 内没有返回`)
-    }
-    throw upstreamError(502, error instanceof Error ? `E2B request failed: ${error.message}` : 'E2B request failed')
-  }
-
-  const raw = response.status === 204 ? '' : await response.text().catch(() => '')
-  let payload: unknown = raw === '' ? (options.emptySuccess ?? null) : null
-  if (raw !== '') {
-    try {
-      payload = JSON.parse(raw) as unknown
-    } catch {
-      // 错误响应回 HTML 错误页很常见,那时原始文本就是最好的消息;2xx 回非 JSON 只能是上游坏了。
-      if (!response.ok) payload = raw
-      else throw upstreamError(502, 'E2B returned invalid JSON')
-    }
-  }
-
-  if (!response.ok) throw upstreamError(response.status, errorMessage(payload, response.status))
-  return payload
+  const query = Object.entries(options.query ?? {}).map(([key, value]) => [
+    key,
+    // 数组 query 拼成一个逗号串:E2B 不认重复的同名参数。
+    Array.isArray(value) ? value.join(',') : value,
+  ] as const) satisfies ProviderQuery
+  const { data } = await http.request({
+    path: options.path,
+    method: options.method ?? 'GET',
+    query,
+    headers: { 'accept': 'application/json', 'x-api-key': requireApiKey(ctx, SERVICE) },
+    ...(options.body === undefined ? {} : { json: options.body }),
+    timeoutMs: REQUEST_TIMEOUT_MS,
+    invalidJsonMessage: 'E2B returned invalid JSON',
+    mapError: ({ data: payload, status }) => upstreamError(status, errorMessage(payload, status)),
+    mapTransportError: ({ kind, message }) => kind === 'timeout'
+      ? upstreamError(504, `E2B ${REQUEST_TIMEOUT_MS / 1000}s 内没有返回`)
+      : upstreamError(502, message === undefined ? 'E2B request failed' : `E2B request failed: ${message}`),
+  })
+  return data === undefined ? (options.emptySuccess ?? null) : data
 }
 
 /** 列表端点回裸数组;出参 schema 要 `{sandboxes}`,故这层包一次并逐项校形。 */

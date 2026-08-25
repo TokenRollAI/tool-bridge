@@ -18,6 +18,7 @@ import {
   type TbAppDeps,
 } from '@tool-bridge/app'
 import { type MutableSearchIndex, SecretStoreImpl, type StateStore } from '@tool-bridge/core'
+import { createGuardedFetch } from '@tool-bridge/plugins/guarded-fetch'
 import { serve, type ServerType } from '@hono/node-server'
 import postgres, { type Sql } from 'postgres'
 import { mkdirSync } from 'node:fs'
@@ -34,6 +35,8 @@ import { PgStateStore } from './pgStateStore'
 import { DeviceRouter } from './deviceRouter'
 import { resolveUiAssets } from './assets'
 import { DeviceHub } from './deviceHub'
+
+const providerOAuthFetch = createGuardedFetch({ crossOriginRedirect: 'error' })
 
 export interface TbServer {
   app: ReturnType<typeof createTbApp>
@@ -213,6 +216,7 @@ export function createTbServer(config: ServerConfig): TbServer {
   const deps: TbAppDeps = {
     state,
     secrets,
+    providerOAuthFetch,
     version: pkg.version,
     remote: config.remote,
     search,

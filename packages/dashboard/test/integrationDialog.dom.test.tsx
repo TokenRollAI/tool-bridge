@@ -2,6 +2,8 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { CatalogListItem } from '@/lib/types'
 
+const { toastMessages } = vi.hoisted(() => ({ toastMessages: [] as string[] }))
+
 /**
  * `IntegrationDialog` 的**组件级**行为。
  *
@@ -103,7 +105,13 @@ vi.mock('@tanstack/react-query', () => ({
   useQueryClient: () => ({ invalidateQueries: () => {} }),
 }))
 
-vi.mock('sonner', () => ({ toast: { success: () => {}, info: () => {}, error: () => {} } }))
+vi.mock('sonner', () => ({
+  toast: {
+    error: (message: unknown) => toastMessages.push(String(message)),
+    info: (message: unknown) => toastMessages.push(String(message)),
+    success: (message: unknown) => toastMessages.push(String(message)),
+  },
+}))
 
 const { IntegrationDialog } = await import('@/pages/system/forms/IntegrationDialog')
 
@@ -116,7 +124,9 @@ afterEach(() => {
   oauthCalls.length = 0
   failMount = false
   secretNames = ['shared-key']
+  toastMessages.length = 0
   vi.restoreAllMocks()
+  vi.unstubAllGlobals()
 })
 
 /** 打开对话框并选中一个集成。 */
@@ -137,6 +147,7 @@ describe('按 descriptor 生成表单', () => {
     // `secret` 只管遮蔽:baseUrl 明文可见,PAT 遮蔽 —— 但两者都进同一个加密 secret。
     expect(baseUrl.type).toBe('text')
     expect(pat.type).toBe('password')
+    expect(baseUrl.compareDocumentPosition(pat) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0)
   })
 
   it('单值集成:只显示业务凭证，不暴露内部引用名', async () => {
@@ -253,5 +264,22 @@ describe('提交顺序', () => {
     await waitFor(() => expect(screen.getByRole('alert')).toBeDefined())
     expect(screen.getByRole('alert').textContent).toContain('personalAccessToken')
     expect(calls).toEqual([])
+  })
+
+  it('凭证明文不进入 URL、toast 或 localStorage', async () => {
+    const secret = 'tvly-super-secret-value'
+    const setItem = vi.fn()
+    vi.stubGlobal('localStorage', {
+      clear: vi.fn(), getItem: vi.fn(), key: vi.fn(), length: 0, removeItem: vi.fn(), setItem,
+    })
+    await openAndPick('tavily')
+    fireEvent.change(screen.getByLabelText('挂载路径 *'), { target: { value: 'tools/private' } })
+    fireEvent.change(screen.getByLabelText('API key'), { target: { value: secret } })
+    fireEvent.click(screen.getByRole('button', { name: /添加 tavily/ }))
+
+    await waitFor(() => expect(calls.length).toBe(2))
+    expect(window.location.href).not.toContain(secret)
+    expect(toastMessages.join('\n')).not.toContain(secret)
+    expect(setItem.mock.calls.flat().join('\n')).not.toContain(secret)
   })
 })

@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import pkg from '../package.json' with { type: 'json' }
 import { resetFetch, setFetch } from '../src/http'
 import { runMain } from '../src/main'
 import { runCli } from './cliHarness'
@@ -91,6 +92,66 @@ describe('真正的全局参数', () => {
     expect(stdoutText()).toBe('')
     const write = process.stderr.write as unknown as ReturnType<typeof vi.fn>
     expect(write.mock.calls.map(c => String(c[0])).join('')).toContain('--bogus')
+    expect(process.exitCode).toBe(1)
+  })
+
+  it.each([
+    ['root', ['--help']],
+    ['group', ['sk', '--help']],
+    ['leaf', ['sk', 'list', '--help']],
+  ])('%s help 经生产 catch 正常输出并保持退出码 0', async (_label, argv) => {
+    process.exitCode = 1
+    await runCli(argv)
+    expect(stdoutText()).toContain('Usage:')
+    expect(process.exitCode).toBe(0)
+  })
+
+  it('version 经生产 catch 正常输出并保持退出码 0', async () => {
+    process.exitCode = 1
+    await runCli(['--version'])
+    expect(stdoutText().trim()).toBe(pkg.version)
+    expect(process.exitCode).toBe(0)
+  })
+
+  it('未知 action Error 也只由 runMain 统一落地', async () => {
+    const { runDeviceConnection } = await import('../src/deviceRuntime')
+    vi.mocked(runDeviceConnection).mockRejectedValueOnce(new Error('adapter exploded'))
+
+    await runCli([
+      'connect',
+      '--base-url',
+      'https://gw',
+      '--sk',
+      'tbk_x',
+      '--device-id',
+      'd-error',
+      '--json',
+    ])
+
+    expect(JSON.parse(stdoutText())).toEqual({ ok: false, error: 'adapter exploded' })
+    expect(process.exitCode).toBe(1)
+    vi.mocked(runDeviceConnection).mockClear()
+  })
+
+  it('status transport 错误也 reject 到 runMain 根边界', async () => {
+    setFetch(vi.fn(async () => {
+      throw new Error('transport details must not escape')
+    }) as unknown as typeof fetch)
+
+    const result = await runMain([
+      'status',
+      '--base-url',
+      'https://gw',
+      '--json',
+    ], { from: 'user' })
+
+    expect(result).toMatchObject({ ok: false, kind: 'action', code: 'unavailable' })
+    expect(JSON.parse(stdoutText())).toMatchObject({
+      ok: false,
+      code: 'unavailable',
+      error: 'request failed: gateway unavailable',
+    })
+    expect(stdoutText()).not.toContain('transport details')
     expect(process.exitCode).toBe(1)
   })
 })

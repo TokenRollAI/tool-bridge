@@ -52,12 +52,20 @@ import type {
   updateProjectInput,
   verifyProjectDomainInput,
 } from './schema'
+import {
+  booleanValue as bool,
+  compactDefined as compact,
+  finiteNumber as num,
+  asJsonObject as record,
+  trimmedText as text,
+} from '../_runtime/jsonValue'
+import { createProviderHttpClient, type ProviderQuery } from '../_runtime/providerHttp'
 import { type ProviderContext, requireApiKey } from '../_runtime/plugin'
 import { upstreamError } from '../_runtime/upstreamError'
-import { guardedFetch } from '../_runtime/guardedFetch'
 
 const SERVICE = 'vercel'
 const API_BASE = 'https://api.vercel.com'
+const http = createProviderHttpClient({ baseUrl: API_BASE, service: SERVICE })
 
 type Json = Record<string, unknown>
 type QueryValue = boolean | number | string | undefined
@@ -67,33 +75,6 @@ interface RequestInput {
   method?: 'DELETE' | 'GET' | 'PATCH' | 'POST'
   path: string
   query?: Record<string, QueryValue>
-}
-
-/** 上游 `optionalString`:去空白后仍非空才算有值。 */
-function text(value: unknown): string | undefined {
-  if (typeof value !== 'string') return undefined
-  const trimmed = value.trim()
-  return trimmed === '' ? undefined : trimmed
-}
-
-/** 上游 `optionalNumber`:必须已经是有限数字,不做字符串解析。 */
-function num(value: unknown): number | undefined {
-  return typeof value === 'number' && Number.isFinite(value) ? value : undefined
-}
-
-function bool(value: unknown): boolean | undefined {
-  return typeof value === 'boolean' ? value : undefined
-}
-
-function record(value: unknown): Json | undefined {
-  return typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Json) : undefined
-}
-
-/** 丢掉值为 undefined 的键(上游 `compactObject` / `jsonObject`);`null` 与 `0` 留住。 */
-function compact<T>(input: Record<string, T | undefined>): Record<string, T> {
-  return Object.fromEntries(
-    Object.entries(input).filter(([, value]) => value !== undefined),
-  ) as Record<string, T>
 }
 
 /** 上游 `normalizeStringArray`:只保留已经是字符串的项;不是数组则整个字段不透出。 */
@@ -156,49 +137,30 @@ function arrayPayload(payload: unknown, key: string): unknown[] {
  *   —— DELETE 环境变量这类接口可能什么都不回。
  */
 async function request(ctx: ProviderContext, input: RequestInput): Promise<unknown> {
-  const url = new URL(`${API_BASE}${input.path}`)
-  for (const [key, value] of Object.entries(input.query ?? {})) {
-    // 上游 `queryParams` 连空串一起跳过。
-    if (value === undefined || value === '') continue
-    url.searchParams.set(key, String(value))
-  }
-
-  const headers: Record<string, string> = {
-    authorization: `Bearer ${requireApiKey(ctx, SERVICE)}`,
-  }
-  if (input.body !== undefined) headers['content-type'] = 'application/json'
-
-  const response = await guardedFetch(url.toString(), {
+  const hasBody = input.body !== undefined
+  const { data } = await http.request({
+    path: input.path,
     method: input.method ?? 'GET',
-    headers,
-    body: input.body === undefined ? undefined : JSON.stringify(input.body),
+    // 上游 `queryParams` 连空串一起跳过。
+    query: Object.entries(input.query ?? {})
+      .filter(([, value]) => value !== undefined && value !== '') satisfies ProviderQuery,
+    headers: { authorization: `Bearer ${requireApiKey(ctx, SERVICE)}` },
+    ...(hasBody ? { json: input.body } : {}),
+    invalidJsonMessage: 'Vercel 返回了非 JSON 响应',
+    mapError: ({ bodyKind, data: payload, status }) => {
+      // 错误体形如 `{ error: { code, message } }`,少数端点直接把 code/message 放在顶层。
+      // 两者都拿不到时:JSON 体不回显原文(那是整个错误 body,可能带上游内部细节),
+      // 非 JSON 体(HTML 错误页之类)才把原文当消息用 —— 这是上游 readVercelError 的兜底。
+      const body = record(payload) ?? {}
+      const error = record(body.error) ?? {}
+      const message = text(error.message)
+        ?? text(body.message)
+        ?? (bodyKind === 'invalid-json' || bodyKind === 'text' ? text(payload) : undefined)
+        ?? `Vercel 返回 HTTP ${status}`
+      return upstreamError(status, message)
+    },
   })
-
-  const raw = await response.text()
-  let payload: unknown = {}
-  let isJson = true
-  if (raw !== '') {
-    try {
-      payload = JSON.parse(raw)
-    } catch {
-      isJson = false
-    }
-  }
-
-  if (!response.ok) {
-    // 错误体形如 `{ error: { code, message } }`,少数端点直接把 code/message 放在顶层。
-    // 两者都拿不到时:JSON 体不回显原文(那是整个错误 body,可能带上游内部细节),
-    // 非 JSON 体(HTML 错误页之类)才把原文当消息用 —— 这是上游 readVercelError 的兜底。
-    const body = record(payload) ?? {}
-    const error = record(body.error) ?? {}
-    const message = text(error.message)
-      ?? text(body.message)
-      ?? (isJson ? undefined : text(raw))
-      ?? `Vercel 返回 HTTP ${response.status}`
-    throw upstreamError(response.status, message)
-  }
-  if (!isJson) throw new TBError('unavailable', 'Vercel 返回了非 JSON 响应', { retryable: true })
-  return payload
+  return data ?? {}
 }
 
 /** `/v2/user` 与 `/v2/teams/{id}` 的响应可能带一层包装,也可能没有。 */

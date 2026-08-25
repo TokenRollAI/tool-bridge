@@ -169,7 +169,15 @@ export interface ConnectDeviceOptions {
   webSocketFactory: DeviceWebSocketFactory
 }
 
-interface OpenPortableDeviceConnectionOptions {
+/**
+ * Lower-level wire-compatible connection surface for host adapters.
+ *
+ * Prefer {@link connectDevice} for new integrations. This entry preserves the
+ * legacy DeviceExpose wire contract (shell/fs/device nodes) for adapters that
+ * already own provider dispatch, while reusing the same credential, reconnect,
+ * heartbeat, generation and lifecycle supervisor.
+ */
+export interface OpenPortableDeviceConnectionOptions {
   baseUrl: string
   credentialProvider: DeviceCredentialProvider
   deviceId: string

@@ -31,12 +31,14 @@ import type {
   listModelsInput,
   searchInput,
 } from './schema'
+import { createProviderHttpClient, type ResponseBodyKind } from '../_runtime/providerHttp'
+import { asJsonObject as record, trimmedText as text } from '../_runtime/jsonValue'
 import { type ProviderContext, requireApiKey } from '../_runtime/plugin'
 import { upstreamError } from '../_runtime/upstreamError'
-import { guardedFetch } from '../_runtime/guardedFetch'
 
 const SERVICE = 'perplexity'
 const API_BASE = 'https://api.perplexity.ai'
+const http = createProviderHttpClient({ baseUrl: API_BASE, service: SERVICE })
 
 /** embeddings 的 `dimensions` 下限,与模型无关。 */
 const EMBEDDING_MIN_DIMENSIONS = 128
@@ -44,28 +46,15 @@ const EMBEDDING_MIN_DIMENSIONS = 128
 const EMBEDDING_MAX_DIMENSIONS: Record<string, number> = { 'pplx-embed-v1-0.6b': 1024 }
 const EMBEDDING_MAX_DIMENSIONS_FALLBACK = 2560
 
-type Json = Record<string, unknown>
-
-function record(value: unknown): Json | undefined {
-  return typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Json) : undefined
-}
-
-/** 上游 `optionalString` 的等价物:非字符串、或去空白后为空,都算缺失。 */
-function text(value: unknown): string | undefined {
-  if (typeof value !== 'string') return undefined
-  const trimmed = value.trim()
-  return trimmed === '' ? undefined : trimmed
-}
-
 /** Perplexity 的错误体有嵌套与顶层两种形状,消息键还分 message / detail。 */
-function errorMessage(status: number, body: string, payload: unknown): string {
+function errorMessage(status: number, payload: unknown, bodyKind: ResponseBodyKind): string {
   const top = record(payload)
   const nested = record(top?.error)
   return text(nested?.message)
     ?? text(nested?.detail)
     ?? text(top?.message)
     ?? text(top?.detail)
-    ?? text(body)
+    ?? (bodyKind === 'invalid-json' || bodyKind === 'text' ? text(payload) : undefined)
     ?? `perplexity request failed with ${status}`
 }
 
@@ -78,43 +67,23 @@ async function request(
   // 取凭证放在 try 外:它抛的是配置错误,不该被下面的传输失败兜底吞成 502。
   const apiKey = requireApiKey(ctx, SERVICE)
 
-  const headers: Record<string, string> = {
-    accept: 'application/json',
-    authorization: `Bearer ${apiKey}`,
-  }
-  if (method === 'POST') headers['content-type'] = 'application/json'
-
-  let response: Response
-  try {
-    response = await guardedFetch(`${API_BASE}${path}`, {
-      method,
-      headers,
-      // 上游先过一道 `compactObject`;JSON.stringify 本来就丢 undefined 值,故不再重复一遍。
-      body: method === 'POST' ? JSON.stringify(body ?? {}) : undefined,
-    })
-  } catch (error) {
-    // 传输层失败必须就地归一:漏出去的裸 Error 会被 plugin-sdk 抹成 "internal plugin error"
-    // 500,把"上游不通/出网被拦"说成插件自身故障。
-    if (error instanceof TBError) throw error
-    const message = error instanceof Error ? error.message : 'unknown network error'
-    throw upstreamError(502, `perplexity ${method} ${path} failed before receiving response: ${message}`)
-  }
-
-  const raw = await response.text()
-  let payload: unknown = null
-  if (raw !== '') {
-    try {
-      payload = JSON.parse(raw)
-    } catch {
-      // 2xx 上回非 JSON 只能是上游坏了;错误响应上回 HTML 错误页却很常见,那时按 HTTP
-      // 状态归一比报"响应不是 JSON"准得多。
-      if (response.ok) {
-        throw new TBError('unavailable', 'Perplexity 返回了非 JSON 响应', { retryable: true })
-      }
-    }
-  }
-  if (!response.ok) throw upstreamError(response.status, errorMessage(response.status, raw, payload))
-  return payload
+  const { data } = await http.request({
+    path,
+    method,
+    headers: { accept: 'application/json', authorization: `Bearer ${apiKey}` },
+    // 上游先过一道 `compactObject`;JSON.stringify 本来就丢 undefined 值,故不再重复一遍。
+    ...(method === 'POST' ? { json: body ?? {} } : {}),
+    invalidJsonMessage: 'Perplexity 返回了非 JSON 响应',
+    mapError: ({ bodyKind, data: payload, status }) => upstreamError(
+      status,
+      errorMessage(status, payload, bodyKind),
+    ),
+    mapTransportError: ({ message }) => upstreamError(
+      502,
+      `perplexity ${method} ${path} failed before receiving response: ${message ?? 'unknown network error'}`,
+    ),
+  })
+  return data ?? null
 }
 
 /** 连接器只支持非流式:`stream: true` 打过去会回一段没人能消费的 SSE。 */

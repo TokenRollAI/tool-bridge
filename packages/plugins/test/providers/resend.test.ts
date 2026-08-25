@@ -1,11 +1,5 @@
-import {
-  base64urlEncode,
-  type CallContext,
-  encodeCallContext,
-  HEADER_TB_CONTEXT,
-  HEADER_TB_UPSTREAM_AUTH,
-} from '@tool-bridge/core'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
+import { createProviderHarness } from '../support/providerHarness'
 import { createResendPlugin } from '../../src/resend/index'
 
 /**
@@ -13,47 +7,17 @@ import { createResendPlugin } from '../../src/resend/index'
  * 那条 Zod 无法反推进 JSON Schema 的"正文二选一"约束,运行期必须真的拦得住。
  */
 
-const PLUGIN_TOKEN = 'tbp_test'
-const ENV = { PLUGIN_TOKEN }
 const API_KEY = 're_test_key'
 const plugin = createResendPlugin()
 
-const CALLER: CallContext = {
-  keyId: 'k1',
-  owner: 'agent:tester',
-  scopes: [],
-  traceId: 't1',
+const { call: callProvider, mockJson: mockResend } = createProviderHarness({
   mountPath: 'mail/resend',
-  exportId: 'actions',
-}
+  plugin,
+  upstreamAuth: API_KEY,
+})
 
 function call(args: unknown, opts: { auth?: string | null } = {}): Promise<Response> {
-  const headers: Record<string, string> = {
-    'authorization': `Bearer ${PLUGIN_TOKEN}`,
-    'content-type': 'application/json',
-    [HEADER_TB_CONTEXT]: encodeCallContext(CALLER),
-  }
-  const auth = opts.auth === undefined ? API_KEY : opts.auth
-  if (auth !== null) {
-    headers[HEADER_TB_UPSTREAM_AUTH] = base64urlEncode(new TextEncoder().encode(auth))
-  }
-  return Promise.resolve(plugin.fetch(
-    new Request('https://plugin.test/', {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({ tool: 'Call', arguments: { name: 'send_email', args } }),
-    }),
-    ENV as never,
-  ))
-}
-
-function mockResend(status: number, payload: unknown): ReturnType<typeof vi.fn> {
-  const fn = vi.fn(() => Promise.resolve(new Response(JSON.stringify(payload), {
-    status,
-    headers: { 'content-type': 'application/json' },
-  })))
-  vi.stubGlobal('fetch', fn)
-  return fn
+  return callProvider('send_email', args, opts)
 }
 
 const VALID = {
@@ -62,10 +26,6 @@ const VALID = {
   subject: 'Hello',
   html: '<p>Hi</p>',
 }
-
-afterEach(() => {
-  vi.unstubAllGlobals()
-})
 
 describe('resend(手写 schema 豁免路径)', () => {
   it('发送成功:返回 emailId', async () => {

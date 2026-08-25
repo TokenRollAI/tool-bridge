@@ -24,27 +24,28 @@ import type {
   rollbackDeployInput,
   triggerDeployInput,
 } from './schema'
+import {
+  createProviderHttpClient,
+  type ProviderHttpErrorContext,
+  type ProviderHttpRequest,
+  type ProviderHttpResult,
+} from '../_runtime/providerHttp'
 import { type ProviderContext, requireApiKey } from '../_runtime/plugin'
+import { trimmedText as nonEmpty } from '../_runtime/jsonValue'
 import { upstreamError } from '../_runtime/upstreamError'
-import { guardedFetch } from '../_runtime/guardedFetch'
 
 const SERVICE = 'render'
 const API_BASE = 'https://api.render.com/v1'
+const http = createProviderHttpClient({ baseUrl: `${API_BASE}/`, service: SERVICE })
 
 type Json = Record<string, unknown>
 type QueryValue = boolean | number | string | string[] | undefined
 
 interface RequestInput {
   body?: Json
-  method?: string
+  method?: ProviderHttpRequest['method']
   path: string
   query?: Record<string, QueryValue>
-}
-
-/** 上游 `optionalString`:trim 后为空视同没给。 */
-function nonEmpty(value: string | undefined): string | undefined {
-  const trimmed = value?.trim()
-  return trimmed === undefined || trimmed === '' ? undefined : trimmed
 }
 
 /**
@@ -65,14 +66,10 @@ function firstString(...values: unknown[]): string | undefined {
 }
 
 /** Render 的错误体有 `message|error|detail|title`,也有 `errors:[...]`(元素是串或对象)。 */
-async function errorMessage(response: Response): Promise<string> {
-  let payload: unknown
-  try {
-    payload = await response.clone().json()
-  } catch {
-    const text = await response.text().catch(() => '')
-    return text === '' ? `Render 返回 HTTP ${response.status}` : text
-  }
+function errorMessage(context: ProviderHttpErrorContext): string {
+  if (context.bodyKind === 'empty') return `Render 返回 HTTP ${context.status}`
+  if (context.bodyKind !== 'json') return String(context.data)
+  const payload = context.data
   if (payload !== null && typeof payload === 'object' && !Array.isArray(payload)) {
     const object = payload as Json
     const direct = firstString(object.message, object.error, object.detail, object.title)
@@ -87,58 +84,46 @@ async function errorMessage(response: Response): Promise<string> {
       }
     }
   }
-  return `Render 返回 HTTP ${response.status}`
+  return `Render 返回 HTTP ${context.status}`
 }
 
-async function send(ctx: ProviderContext, input: RequestInput): Promise<Response> {
+async function send(ctx: ProviderContext, input: RequestInput): Promise<ProviderHttpResult> {
   const apiKey = requireApiKey(ctx, SERVICE)
-  const url = new URL(`${API_BASE}${input.path}`)
-  for (const [key, value] of Object.entries(input.query ?? {})) {
-    if (value === undefined) continue
-    if (Array.isArray(value)) {
-      // Render 的多值过滤是逗号拼接进一个 query 值,不是重复 key。
-      if (value.length > 0) url.searchParams.set(key, value.join(','))
-      continue
-    }
-    url.searchParams.set(key, String(value))
-  }
-
-  const headers: Record<string, string> = {
-    accept: 'application/json',
-    authorization: `Bearer ${apiKey}`,
-  }
-  if (input.body !== undefined) headers['content-type'] = 'application/json'
-
-  try {
-    return await guardedFetch(url.toString(), {
-      method: input.method ?? 'GET',
-      headers,
-      body: input.body === undefined ? undefined : JSON.stringify(input.body),
-    })
-  } catch (error) {
-    if (error instanceof TBError) throw error
-    throw new TBError(
+  const query = Object.entries(input.query ?? {}).flatMap(([key, value]) => {
+    // Render 的多值过滤是逗号拼接进一个 query 值,不是重复 key。
+    if (Array.isArray(value)) return value.length === 0 ? [] : [[key, value.join(',')] as const]
+    return [[key, value] as const]
+  })
+  return await http.request({
+    method: input.method ?? 'GET',
+    path: input.path,
+    query,
+    headers: {
+      accept: 'application/json',
+      authorization: `Bearer ${apiKey}`,
+    },
+    ...(input.body === undefined ? {} : { json: input.body }),
+    invalidJson: 'text',
+    mapError: context => upstreamError(context.status, errorMessage(context)),
+    mapTransportError: ({ message }) => new TBError(
       'unavailable',
-      error instanceof Error ? `Render 请求失败: ${error.message}` : 'Render 请求失败',
+      message === undefined ? 'Render 请求失败' : `Render 请求失败: ${message}`,
       { retryable: true },
-    )
-  }
+    ),
+  })
 }
 
 async function requestJson<T>(ctx: ProviderContext, input: RequestInput): Promise<T> {
   const response = await send(ctx, input)
-  if (!response.ok) throw upstreamError(response.status, await errorMessage(response))
-  try {
-    return (await response.json()) as T
-  } catch {
+  if (response.bodyKind !== 'json') {
     throw new TBError('unavailable', 'Render 返回了非 JSON 响应', { retryable: true })
   }
+  return response.data as T
 }
 
 /** 生命周期操作(restart/suspend/resume)只看状态码,响应体无意义。 */
 async function requestAck(ctx: ProviderContext, input: RequestInput): Promise<void> {
-  const response = await send(ctx, input)
-  if (!response.ok) throw upstreamError(response.status, await errorMessage(response))
+  await send(ctx, input)
 }
 
 /**
@@ -253,14 +238,12 @@ export async function triggerDeploy(
       ...(input.deployMode === undefined ? {} : { deployMode: input.deployMode }),
     },
   })
-  if (!response.ok) throw upstreamError(response.status, await errorMessage(response))
   // 202 表示已排队但还没有 deploy 对象可返回。
   if (response.status === 202) return { queued: true, serviceId: input.serviceId }
-  try {
-    return (await response.json()) as Json
-  } catch {
+  if (response.bodyKind !== 'json') {
     throw new TBError('unavailable', 'Render 返回了非 JSON 响应', { retryable: true })
   }
+  return response.data as Json
 }
 
 export async function rollbackDeploy(

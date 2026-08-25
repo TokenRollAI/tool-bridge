@@ -21,18 +21,16 @@ import type {
   getLatestRatesInput,
   getTimeseriesRatesInput,
 } from './schema'
+import { createProviderHttpClient, type ProviderQuery } from '../_runtime/providerHttp'
 import { type ProviderContext, requireApiKey } from '../_runtime/plugin'
+import { asJsonObject as record } from '../_runtime/jsonValue'
 import { upstreamError } from '../_runtime/upstreamError'
-import { guardedFetch } from '../_runtime/guardedFetch'
 
 const SERVICE = 'open_exchange_rates'
 const API_BASE = 'https://openexchangerates.org/api'
+const http = createProviderHttpClient({ baseUrl: `${API_BASE}/`, service: SERVICE })
 
 type Json = Record<string, unknown>
-
-function record(value: unknown): Json | undefined {
-  return typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Json) : undefined
-}
 
 function text(value: unknown): string | undefined {
   return typeof value === 'string' && value !== '' ? value : undefined
@@ -57,49 +55,37 @@ async function request(ctx: ProviderContext, input: RequestInput): Promise<Json>
   // get_currencies 不带 app_id 也照样要求配好凭证 —— 与上游的 api_key runtime 一致,
   // 免得"能调通一个 action"给人凭证已配好的错觉。
   const apiKey = requireApiKey(ctx, SERVICE)
-
-  const url = new URL(`${API_BASE}${input.path}`)
-  if (input.includeAppId !== false) url.searchParams.set('app_id', apiKey)
-  for (const [key, value] of Object.entries(input.query ?? {})) {
-    if (value === undefined) continue
-    url.searchParams.set(key, String(value))
-  }
-
-  let response: Response
-  try {
-    response = await guardedFetch(url.toString(), {
-      method: 'GET',
-      headers: { accept: 'application/json' },
-    })
-  } catch (error) {
-    // 传输层失败必须就地归一:漏出去的裸 Error 会被 plugin-sdk 抹成 "internal plugin error"
-    // 500,把"上游不通/出网被拦"说成插件自身故障。
-    throw upstreamError(502, error instanceof Error
-      ? `open_exchange_rates 请求失败: ${error.message}`
-      : 'open_exchange_rates 请求失败')
-  }
-
-  const raw = await response.text().catch(() => '')
-  let payload: unknown = null
-  if (raw !== '') {
-    try {
-      payload = JSON.parse(raw) as unknown
-    } catch {
-      throw upstreamError(502, 'Open Exchange Rates 返回了非法 JSON')
-    }
-  }
-
+  const query: ProviderQuery = [
+    ...(input.includeAppId === false ? [] : [['app_id', apiKey]] as const),
+    ...Object.entries(input.query ?? {}),
+  ]
+  const result = await http.request({
+    path: input.path.replace(/^\//, ''),
+    query,
+    headers: { accept: 'application/json' },
+    invalidJsonMessage: 'Open Exchange Rates 返回了非法 JSON',
+    mapError: ({ bodyKind, data: payload, status }) => bodyKind === 'invalid-json'
+      ? upstreamError(502, 'Open Exchange Rates 返回了非法 JSON')
+      : upstreamError(
+          status,
+          errorMessage(payload) ?? `Open Exchange Rates 返回 HTTP ${status}`,
+        ),
+    mapTransportError: ({ message }) => upstreamError(
+      502,
+      message === undefined
+        ? 'open_exchange_rates 请求失败'
+        : `open_exchange_rates 请求失败: ${message}`,
+    ),
+  })
+  const payload = result.data ?? null
   const body = record(payload)
   const flagged = body?.error === true
-  if (!response.ok || flagged) {
+  if (flagged) {
     // 200 + `{error:true}` 时 HTTP 状态没有信息量,改用 body 里的 `status`。
     // (上游这条路径把 `ProviderRequestError` 的状态设成了 200,是它的 bug;这里不照抄。)
     const embedded = body?.status
-    const status = response.ok
-      ? (typeof embedded === 'number' && embedded >= 400 ? embedded : 502)
-      : response.status
-    throw upstreamError(status, errorMessage(payload)
-      ?? (response.statusText || `Open Exchange Rates 返回 HTTP ${response.status}`))
+    const status = typeof embedded === 'number' && embedded >= 400 ? embedded : 502
+    throw upstreamError(status, errorMessage(payload) ?? `Open Exchange Rates 返回 HTTP ${result.status}`)
   }
 
   if (body === undefined) throw upstreamError(502, 'Open Exchange Rates 返回了非对象响应')

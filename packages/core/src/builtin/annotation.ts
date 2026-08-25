@@ -7,83 +7,17 @@
  * set 校验 path 经 registry 最长前缀 resolve 命中(根路径 '' 放行 = 全树公告)。
  */
 
-import type { AnnotationStore } from '../annotation/store'
+import { z } from 'zod/v4'
 import type { NodeRegistryStore } from '../tree/registry'
-import type { CmdSpec, HelpModel } from '../htbp/model'
-import type { CallContext, TreePath } from '../types'
 import type { BuiltinModule } from './types'
-import { cmdPath, optString, requireString, VOID_ACK, withCommandPaths } from './util'
+import { ANNOTATION_TEXT_MAX, type AnnotationStore } from '../annotation/store'
+import { BuiltinCommandRegistry } from './commandRegistry'
 import { normalizePath } from '../tree/path'
 import { TBError } from '../errors'
+import { VOID_ACK } from './util'
 
 const DESCRIPTION
   = 'Path annotations: admin-curated notes shown in ~help of the annotated path (set / get / remove / list)'
-
-function annotationCmds(nodePath: TreePath): CmdSpec[] {
-  const path = cmdPath(nodePath)
-  const cmds: CmdSpec[] = [
-    {
-      name: 'set',
-      method: 'POST',
-      path,
-      h: 'upsert the note shown in ~help of <path>; empty path = tree-wide notice',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          path: {
-            type: 'string',
-            description: 'tree path (tool sub-paths like "feishu/create-doc" work); "" = tree-wide',
-          },
-          text: { type: 'string', maxLength: 2000, description: 'the note (max 2000 chars)' },
-        },
-        required: ['path', 'text'],
-      },
-      returns: '{ path, text, updatedAt, updatedBy }',
-      scope: 'admin',
-    },
-    {
-      name: 'get',
-      method: 'POST',
-      path,
-      h: 'read the note of one path (not_found if none)',
-      inputSchema: {
-        type: 'object',
-        properties: { path: { type: 'string', description: 'tree path; "" = tree-wide notice' } },
-        required: ['path'],
-      },
-      returns: '{ path, text, updatedAt, updatedBy }',
-      scope: 'read',
-    },
-    {
-      name: 'remove',
-      method: 'POST',
-      path,
-      h: 'remove the note of a path (idempotent)',
-      inputSchema: {
-        type: 'object',
-        properties: { path: { type: 'string', description: 'tree path; "" = tree-wide notice' } },
-        required: ['path'],
-      },
-      returns: 'void',
-      scope: 'admin',
-    },
-    {
-      name: 'list',
-      method: 'POST',
-      path,
-      h: 'all annotated paths (optionally under a prefix)',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          prefix: { type: 'string', description: 'only paths under this prefix' },
-        },
-      },
-      returns: '{ items: Array<{ path, text, updatedAt, updatedBy }> }',
-      scope: 'read',
-    },
-  ]
-  return withCommandPaths(nodePath, cmds)
-}
 
 export interface AnnotationModuleDeps {
   now: () => string
@@ -92,54 +26,70 @@ export interface AnnotationModuleDeps {
   store: AnnotationStore
 }
 
-/** path 必填但允许空串(根 = 全树公告)。 */
-function requireRootablePath(args: Record<string, unknown>): string {
-  const v = args.path
-  if (typeof v !== 'string') {
-    throw new TBError('invalid_argument', 'field \'path\' must be a string')
-  }
-  return v
-}
+const rootablePathSchema = z.string().describe('tree path; "" = tree-wide notice')
+
+const COMMANDS = new BuiltinCommandRegistry<AnnotationModuleDeps>('annotation', DESCRIPTION)
+  .register(
+    'set',
+    {
+      h: 'upsert the note shown in ~help of <path>; empty path = tree-wide notice',
+      inputSchema: z.strictObject({
+        path: z.string().describe(
+          'tree path (tool sub-paths like "feishu/create-doc" work); "" = tree-wide',
+        ),
+        text: z.string().min(1).max(ANNOTATION_TEXT_MAX).describe('the note (max 2000 chars)'),
+      }),
+      returns: '{ path, text, updatedAt, updatedBy }',
+      scope: 'admin',
+    },
+    async ({ path, text }, { call, deps }) => {
+      // 根路径('')= 全树公告,免 resolve;其余须挂在真实节点(或其工具子路径)下。
+      if (normalizePath(path) !== '') await deps.registry.resolve(path)
+      return await deps.store.set(path, text, call.keyId, deps.now())
+    },
+  )
+  .register(
+    'get',
+    {
+      h: 'read the note of one path (not_found if none)',
+      inputSchema: z.strictObject({ path: rootablePathSchema }),
+      returns: '{ path, text, updatedAt, updatedBy }',
+      scope: 'read',
+    },
+    async ({ path }, { deps }) => {
+      const got = await deps.store.get(path)
+      if (got === null) {
+        throw TBError.notFound(`路径无补充说明:'${path === '' ? '/' : path}'`)
+      }
+      return got
+    },
+  )
+  .register(
+    'remove',
+    {
+      h: 'remove the note of a path (idempotent)',
+      inputSchema: z.strictObject({ path: rootablePathSchema }),
+      returns: 'void',
+      scope: 'admin',
+    },
+    async ({ path }, { deps }) => {
+      await deps.store.remove(path)
+      return VOID_ACK
+    },
+  )
+  .register(
+    'list',
+    {
+      h: 'all annotated paths (optionally under a prefix)',
+      inputSchema: z.strictObject({
+        prefix: z.string().optional().describe('only paths under this prefix'),
+      }),
+      returns: '{ items: Array<{ path, text, updatedAt, updatedBy }> }',
+      scope: 'read',
+    },
+    async ({ prefix }, { deps }) => ({ items: await deps.store.list(prefix) }),
+  )
 
 export function createAnnotationModule(deps: AnnotationModuleDeps): BuiltinModule {
-  return {
-    module: 'annotation',
-    description: DESCRIPTION,
-    help(nodePath: TreePath): HelpModel {
-      return {
-        node: { path: nodePath, kind: 'builtin', description: DESCRIPTION },
-        cmds: annotationCmds(nodePath),
-      }
-    },
-    async dispatch(cmd: string, args: Record<string, unknown>, ctx: CallContext): Promise<unknown> {
-      switch (cmd) {
-        case 'set': {
-          const path = requireRootablePath(args)
-          // 根路径('')= 全树公告,免 resolve;其余须挂在真实节点(或其工具子路径)下。
-          if (normalizePath(path) !== '') {
-            await deps.registry.resolve(path)
-          }
-          return await deps.store.set(path, requireString(args, 'text'), ctx.keyId, deps.now())
-        }
-        case 'get': {
-          const path = requireRootablePath(args)
-          const got = await deps.store.get(path)
-          if (got === null) {
-            throw TBError.notFound(`路径无补充说明:'${path === '' ? '/' : path}'`)
-          }
-          return got
-        }
-        case 'remove': {
-          await deps.store.remove(requireRootablePath(args))
-          return VOID_ACK
-        }
-        case 'list': {
-          const prefix = optString(args, 'prefix')
-          return { items: await deps.store.list(prefix) }
-        }
-        default:
-          throw new TBError('invalid_argument', `unknown cmd '${cmd}' on system/annotation`)
-      }
-    },
-  }
+  return COMMANDS.module(deps)
 }

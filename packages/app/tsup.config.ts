@@ -13,8 +13,8 @@ export default defineConfig({
   target: 'es2022',
   platform: 'neutral',
   tsconfig: 'tsconfig.build.json',
-  dts: { resolve: ['@tool-bridge/core'] },
+  dts: { resolve: ['@tool-bridge/core', '@tool-bridge/core/protocol'] },
   clean: true,
   minify: false,
-  noExternal: ['@tool-bridge/core'],
+  noExternal: ['@tool-bridge/core', '@tool-bridge/core/protocol'],
 })

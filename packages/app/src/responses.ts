@@ -17,10 +17,11 @@ import {
   type TreeJson,
   type TreePath,
 } from '@tool-bridge/core'
+import { helpJsonSchema, tbErrorBodySchema } from '@tool-bridge/core/protocol'
 
 /** 把 TBError 渲染为线上响应。 */
 export function tbErrorResponse(err: TBError): Response {
-  return new Response(JSON.stringify(err.toJSON()), {
+  return new Response(JSON.stringify(tbErrorBodySchema.parse(err.toJSON())), {
     status: err.httpStatus,
     headers: { 'content-type': 'application/json; charset=utf-8' },
   })
@@ -72,7 +73,7 @@ export async function runHandler(fn: () => Response | Promise<Response>): Promis
 /** 渲染 HelpModel:按协商表现输出 DSL(text/plain)、JSON 或 Markdown(可读性表现)。 */
 export function renderHelp(model: HelpModel, rep: Representation): Response {
   if (rep === 'json') {
-    return new Response(JSON.stringify(renderHelpJson(model)), {
+    return new Response(JSON.stringify(helpJsonSchema.parse(renderHelpJson(model))), {
       headers: { 'content-type': contentTypeFor('json') },
     })
   }

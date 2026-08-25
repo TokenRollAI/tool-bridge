@@ -10,11 +10,15 @@ import type { z } from 'zod/v4'
 import { TBError } from '@tool-bridge/plugin-sdk'
 import type { generateAltTextInput } from './schema'
 import { type ProviderContext, requireApiKey } from '../_runtime/plugin'
+import { createProviderHttpClient } from '../_runtime/providerHttp'
 import { upstreamError } from '../_runtime/upstreamError'
-import { guardedFetch } from '../_runtime/guardedFetch'
 
 const SERVICE = 'alt_text_generator_ai'
-const BASE_URL = 'https://alttextgeneratorai.com'
+const http = createProviderHttpClient({
+  baseUrl: 'https://alttextgeneratorai.com/',
+  crossOriginRedirect: 'error',
+  service: SERVICE,
+})
 
 /** 上游只回纯文本(有时是一个 JSON 字符串字面量),两种都收。 */
 function unwrapText(body: string): string | undefined {
@@ -33,18 +37,22 @@ export async function generateAltText(
   input: z.infer<typeof generateAltTextInput>,
   ctx: ProviderContext,
 ): Promise<{ altText: string }> {
-  const response = await guardedFetch(`${BASE_URL}/api/wp`, {
+  const apiKey = requireApiKey(ctx, SERVICE)
+  const { data } = await http.request<string>({
+    path: 'api/wp',
     method: 'POST',
-    headers: { 'accept': 'text/plain', 'content-type': 'application/json' },
-    body: JSON.stringify({ image: input.imageUrl ?? '', wpkey: requireApiKey(ctx, SERVICE) }),
+    headers: { accept: 'text/plain' },
+    json: { image: input.imageUrl ?? '', wpkey: apiKey },
+    responseType: 'text',
+    sensitiveValues: [apiKey],
+    mapError: ({ data: body, status }) => upstreamError(
+      status,
+      typeof body === 'string' && body.trim() !== ''
+        ? body.trim()
+        : `Alt Text Generator AI 返回 HTTP ${status}`,
+    ),
   })
-
-  const body = await response.text()
-  if (!response.ok) {
-    throw upstreamError(response.status, body.trim() || `Alt Text Generator AI 返回 HTTP ${response.status}`)
-  }
-
-  const altText = unwrapText(body)
+  const altText = unwrapText(data ?? '')
   if (altText === undefined) {
     throw new TBError('unavailable', 'Alt Text Generator AI 返回了空结果', { retryable: true })
   }

@@ -37,12 +37,14 @@ import type {
   listWorkflowsByPipelineInput,
   triggerPipelineInput,
 } from './schema'
+import { asJsonObject as record, trimmedText as text } from '../_runtime/jsonValue'
 import { type ProviderContext, requireApiKey } from '../_runtime/plugin'
+import { createProviderHttpClient } from '../_runtime/providerHttp'
 import { upstreamError } from '../_runtime/upstreamError'
-import { guardedFetch } from '../_runtime/guardedFetch'
 
 const SERVICE = 'circleci'
 const API_BASE = 'https://circleci.com/api/v2'
+const http = createProviderHttpClient({ baseUrl: `${API_BASE}/`, service: SERVICE })
 
 type Json = Record<string, unknown>
 
@@ -51,17 +53,6 @@ interface RequestInput {
   method?: 'GET' | 'POST'
   path: string
   query?: Record<string, string | undefined>
-}
-
-/** 上游 `optionalString` 的等价物:去空白后仍非空才算有值。 */
-function text(value: unknown): string | undefined {
-  if (typeof value !== 'string') return undefined
-  const trimmed = value.trim()
-  return trimmed === '' ? undefined : trimmed
-}
-
-function record(value: unknown): Json | undefined {
-  return typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Json) : undefined
 }
 
 function trimSlashes(value: string): string {
@@ -117,44 +108,23 @@ function errorMessage(payload: unknown, status: number): string {
   return text(body?.message) ?? text(body?.error) ?? `CircleCI 返回 HTTP ${status}`
 }
 
-function buildUrl(path: string, query: Record<string, string | undefined> | undefined): string {
-  const url = new URL(`${API_BASE}${path}`)
-  for (const [key, value] of Object.entries(query ?? {})) {
-    if (value === undefined || value === '') continue
-    url.searchParams.set(key, value)
-  }
-  return url.toString()
-}
-
 async function request(ctx: ProviderContext, input: RequestInput): Promise<unknown> {
-  const headers: Record<string, string> = {
-    'circle-token': requireApiKey(ctx, SERVICE),
-    'accept': 'application/json',
-  }
-  if (input.body !== undefined) headers['content-type'] = 'application/json'
-
-  const response = await guardedFetch(buildUrl(input.path, input.query), {
+  const { data } = await http.request({
+    path: input.path,
     method: input.method ?? 'GET',
-    headers,
-    body: input.body === undefined ? undefined : JSON.stringify(input.body),
+    query: Object.entries(input.query ?? {}).filter((entry): entry is [string, string] => {
+      const value = entry[1]
+      return value !== undefined && value !== ''
+    }),
+    headers: {
+      'accept': 'application/json',
+      'circle-token': requireApiKey(ctx, SERVICE),
+    },
+    ...(input.body === undefined ? {} : { json: input.body }),
+    invalidJsonMessage: 'CircleCI 返回了非 JSON 响应',
+    mapError: ({ data: payload, status }) => upstreamError(status, errorMessage(payload, status)),
   })
-
-  const body = await response.text()
-  let payload: unknown = {}
-  if (body.trim() !== '') {
-    try {
-      payload = JSON.parse(body)
-    } catch {
-      // 2xx 上回非 JSON 只能是上游坏了;错误响应回 HTML 错误页却很常见,那时按 HTTP
-      // 状态归一比报"响应不是 JSON"准得多。
-      if (response.ok) {
-        throw new TBError('unavailable', 'CircleCI 返回了非 JSON 响应', { retryable: true })
-      }
-      payload = body
-    }
-  }
-  if (!response.ok) throw upstreamError(response.status, errorMessage(payload, response.status))
-  return payload
+  return data ?? {}
 }
 
 export function getCurrentUser(_input: unknown, ctx: ProviderContext): Promise<unknown> {

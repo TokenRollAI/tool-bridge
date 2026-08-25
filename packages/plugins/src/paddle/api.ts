@@ -32,25 +32,20 @@ import type {
   updatePriceInput,
   updateProductInput,
 } from './schema'
+import {
+  createProviderHttpClient,
+  type ProviderHttpErrorContext,
+  type ProviderQuery,
+} from '../_runtime/providerHttp'
+import { trimmedText as text, asJsonObject as toRecord } from '../_runtime/jsonValue'
 import { type ProviderContext, requireApiKey } from '../_runtime/plugin'
 import { upstreamError } from '../_runtime/upstreamError'
-import { guardedFetch } from '../_runtime/guardedFetch'
 
 const SERVICE = 'paddle'
 const API_BASE = 'https://api.paddle.com'
+const http = createProviderHttpClient({ baseUrl: API_BASE, service: SERVICE })
 
 type Json = Record<string, unknown>
-
-function toRecord(value: unknown): Json | undefined {
-  return typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Json) : undefined
-}
-
-/** 上游 `optionalString` 的语义:非空白字符串才算数,且取 trim 后的值。 */
-function text(value: unknown): string | undefined {
-  if (typeof value !== 'string') return undefined
-  const trimmed = value.trim()
-  return trimmed === '' ? undefined : trimmed
-}
 
 /** get_* 的 id 在生成的 schema 里是 optional,但拼进 URL 前必须有值。 */
 function pathSegment(value: string | undefined, field: string): string {
@@ -70,29 +65,17 @@ function setJoined(params: URLSearchParams, key: string, value: readonly unknown
   params.set(key, value.map(String).join(','))
 }
 
-async function readPayload(response: Response): Promise<unknown> {
-  const body = await response.text().catch(() => '')
-  if (body.trim() === '') return null
-  try {
-    return JSON.parse(body) as unknown
-  } catch {
-    // 成功响应体解不开是上游故障;错误响应体常是纯文本,留着当错误消息用。
-    if (response.ok) throw upstreamError(502, 'Paddle returned malformed JSON')
-    return body
-  }
-}
-
-function errorMessage(payload: unknown, response: Response): string {
+function errorMessage(payload: unknown, context: ProviderHttpErrorContext): string {
   const data = toRecord(payload)
   if (data === undefined) {
     return typeof payload === 'string' && payload !== ''
       ? payload
-      : (response.statusText || `Paddle 返回 HTTP ${response.status}`)
+      : (context.statusText || `Paddle 返回 HTTP ${context.status}`)
   }
   const error = toRecord(data.error)
   const message = text(error?.detail) ?? text(error?.message) ?? text(data.message) ?? text(data.error)
   // 上游退回 `response.statusText`,而 statusText 允许是空串 —— `??` 接不住它。
-  return message ?? (response.statusText || `Paddle 返回 HTTP ${response.status}`)
+  return message ?? (context.statusText || `Paddle 返回 HTTP ${context.status}`)
 }
 
 interface RequestInput {
@@ -104,24 +87,20 @@ interface RequestInput {
 }
 
 async function request(ctx: ProviderContext, input: RequestInput): Promise<unknown> {
-  const url = new URL(input.path, API_BASE)
-  for (const [key, value] of input.searchParams ?? []) url.searchParams.set(key, value)
-
-  const headers: Record<string, string> = {
-    accept: 'application/json',
-    authorization: `Bearer ${requireApiKey(ctx, SERVICE)}`,
-  }
-  if (input.body !== undefined) headers['content-type'] = 'application/json'
-  if (input.skipCount === true) headers['skip-count'] = 'true'
-
-  const response = await guardedFetch(url.toString(), {
+  const result = await http.request({
+    path: input.path,
     method: input.method,
-    headers,
-    ...(input.body === undefined ? {} : { body: JSON.stringify(input.body) }),
+    query: [...(input.searchParams ?? [])] satisfies ProviderQuery,
+    headers: {
+      accept: 'application/json',
+      authorization: `Bearer ${requireApiKey(ctx, SERVICE)}`,
+      ...(input.skipCount === true ? { 'skip-count': 'true' } : {}),
+    },
+    ...(input.body === undefined ? {} : { json: input.body }),
+    invalidJsonMessage: 'Paddle returned malformed JSON',
+    mapError: context => upstreamError(context.status, errorMessage(context.data, context)),
   })
-  const payload = await readPayload(response)
-  if (!response.ok) throw upstreamError(response.status, errorMessage(payload, response))
-  return payload
+  return result.data === undefined ? null : result.data
 }
 
 function readMeta(payload: unknown): Json {

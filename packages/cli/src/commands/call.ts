@@ -1,15 +1,15 @@
 import { readFileSync } from 'node:fs'
 import { Command } from 'commander'
 import {
-  apiJson,
   callDirect,
   callDirectText,
   CliError,
   type Target,
+  withClient,
 } from '../http'
 import { collect, resolveTarget, withGlobalOpts } from '../args'
-import { guard, printJson } from '../output'
 import { printMarkdown } from '../markdown'
+import { printJson } from '../output'
 
 /** 从 stdin 读整块内容(`--args-file -`;与 ctx put 的 stdin 读法一致)。 */
 function readStdin(): string {
@@ -120,9 +120,10 @@ export async function attachFeedbackHint(
   if (!FEEDBACK_HINT_CODES.has(err.code)) return
   const cleanPath = nodeUri.replace(/^\/+/, '')
   try {
-    const page = await apiJson<{ items?: Array<{ id: string, score: number, title: string }> }>(
-      { ...target, timeoutMs: Math.min(target.timeoutMs ?? 5000, 5000) },
-      { path: `${nodeUri}/~feedback` },
+    const feedbackTarget = { ...target, timeoutMs: Math.min(target.timeoutMs ?? 5000, 5000) }
+    const page = await withClient(
+      feedbackTarget,
+      async client => await client.feedback.list(cleanPath),
     )
     const items = (page.items ?? []).slice(0, 3)
     if (items.length > 0) {
@@ -195,25 +196,23 @@ Examples:
     )
     .action(async (pathArg: string, argsPositional: string | undefined, opts: CallArgs) => {
       const asJson = Boolean(opts.json)
-      await guard(asJson, async () => {
-        const path = String(pathArg ?? '').trim()
-        if (!path) throw new CliError('command path is required')
+      const path = String(pathArg ?? '').trim()
+      if (!path) throw new CliError('command path is required')
 
-        const callArgs = parseCallArgs(opts.args, opts.argsFile, argsPositional, opts.arg ?? [])
-        const target = resolveTarget(opts)
-        const nodeUri = `/${path.replace(/^\/+|\/+$/g, '')}`
+      const callArgs = parseCallArgs(opts.args, opts.argsFile, argsPositional, opts.arg ?? [])
+      const target = resolveTarget(opts)
+      const nodeUri = `/${path.replace(/^\/+|\/+$/g, '')}`
 
-        try {
-          if (asJson) {
-            printJson(await callDirect<unknown>(target, nodeUri, callArgs))
-          } else {
-            // 人类模式的结果是网关的 markdown 表现:TTY → ANSI 渲染,管道 → 原样。
-            printMarkdown(await callDirectText(target, nodeUri, callArgs))
-          }
-        } catch (err) {
-          await attachFeedbackHint(err, target, nodeUri)
-          throw err
+      try {
+        if (asJson) {
+          printJson(await callDirect<unknown>(target, nodeUri, callArgs))
+        } else {
+          // 人类模式的结果是网关的 markdown 表现:TTY → ANSI 渲染,管道 → 原样。
+          printMarkdown(await callDirectText(target, nodeUri, callArgs))
         }
-      })
+      } catch (err) {
+        await attachFeedbackHint(err, target, nodeUri)
+        throw err
+      }
     })
 }

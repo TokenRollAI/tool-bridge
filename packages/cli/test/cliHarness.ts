@@ -1,31 +1,47 @@
-import type { Command } from 'commander'
-import { buildProgram } from '../src/program'
+import { runMain } from '../src/main'
 
 /**
- * 解析级测试入口:经真实 buildProgram() 走 commander 完整解析。
- * - exitOverride 须逐层应用(commander 不向 addCommand 的子命令继承),
- *   使解析错误(未知 flag / 缺 required / 多余 positional)以异常抛出而非 process.exit。
- * - 静默 commander 自身的 stdout/stderr(错误消息在抛出的 CommanderError.message 里)。
+ * JSON fetch 桩的统一响应构造器。
+ *
+ * `~register` 的生产响应是完整 TreeNode；测试通常只关心 path/kind，因此成功响应
+ * 从请求 NodeInput 补齐 description/config，再让显式 payload 覆盖。错误响应保持原样。
  */
-function overrideExits(cmd: Command): void {
-  cmd.exitOverride()
-  cmd.configureOutput({ writeOut: () => {}, writeErr: () => {} })
-  for (const sub of cmd.commands) overrideExits(sub)
-}
-
-/** 跑一条 tb 命令行(argv 不含 node/脚本名),解析错误抛 CommanderError。 */
-export async function runCli(argv: string[]): Promise<void> {
-  const program = buildProgram()
-  overrideExits(program)
-  await program.parseAsync(argv, { from: 'user' })
-}
-
-/** 断言用:跑一条命令行并捕获解析错误,返回 CommanderError.code(无错误 → null)。 */
-export async function parseError(argv: string[]): Promise<string | null> {
-  try {
-    await runCli(argv)
-    return null
-  } catch (err) {
-    return (err as { code?: string }).code ?? 'unknown'
+export function mockJsonResponse(
+  url: string | URL | Request,
+  init: RequestInit | undefined,
+  payload: unknown,
+  status = 200,
+): Response {
+  let responsePayload = payload
+  if (
+    status >= 200
+    && status < 300
+    && /\/~register(?:[?#]|$)/.test(String(url))
+    && payload !== null
+    && typeof payload === 'object'
+    && !Array.isArray(payload)
+    && typeof init?.body === 'string'
+  ) {
+    const requestPayload = JSON.parse(init.body) as unknown
+    if (requestPayload !== null && typeof requestPayload === 'object' && !Array.isArray(requestPayload)) {
+      responsePayload = { ...requestPayload, ...payload }
+    }
   }
+
+  return new Response(JSON.stringify(responsePayload), {
+    status,
+    headers: { 'content-type': 'application/json' },
+  })
+}
+
+/** 测试 argv 不含 node/脚本名，但错误捕获与生产入口完全相同。 */
+export async function runCli(argv: string[]): Promise<void> {
+  await runMain(argv, { from: 'user' })
+}
+
+/** 断言用：返回生产 catch 捕获的 CommanderError.code。 */
+export async function parseError(argv: string[]): Promise<string | null> {
+  const result = await runMain(argv, { from: 'user' })
+  if (result.ok) return null
+  return result.code ?? 'unknown'
 }

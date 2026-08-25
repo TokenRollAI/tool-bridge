@@ -18,6 +18,9 @@ let tokenResponses: Array<{ body: unknown, status?: number }>
 /** 插件侧看到的 X-TB-Upstream-Auth 明文(证明注入的是 access token)。 */
 let seenUpstreamAuth: string | undefined
 
+/** 测试宿主显式接线；动态取 globalThis.fetch，保留每个用例自己的传输桩。 */
+const testProviderOAuthFetch: typeof fetch = async (input, init) => await globalThis.fetch(input, init)
+
 /** 一个声明了 oauth 的最小 binding(不经 plugin-sdk:app 是宿主中立层)。 */
 function oauthBinding(): (request: Request) => Promise<Response> {
   const json = (value: unknown): Response => new Response(JSON.stringify(value), {
@@ -56,7 +59,12 @@ function oauthBinding(): (request: Request) => Promise<Response> {
   }
 }
 
-async function buildApp(): Promise<ReturnType<typeof createTbApp>> {
+interface BuildAppOpts {
+  /** null 模拟嵌入宿主漏接安全出站通道。 */
+  providerOAuthFetch?: typeof fetch | null
+}
+
+async function buildApp(opts: BuildAppOpts = {}): Promise<ReturnType<typeof createTbApp>> {
   const state = new MemoryStateStore()
   await runBootstrap(state, { adminSk: TEST_ADMIN_SK, requireAdminSk: true })
   return createTbApp({
@@ -64,6 +72,9 @@ async function buildApp(): Promise<ReturnType<typeof createTbApp>> {
     canonicalOrigin: 'https://tb.test',
     encryptionKey: TEST_ENCRYPTION_KEY,
     pluginBindings: new Map([['oauthp', oauthBinding()]]),
+    ...(opts.providerOAuthFetch === null
+      ? {}
+      : { providerOAuthFetch: opts.providerOAuthFetch ?? testProviderOAuthFetch }),
     remote: { allowlist: [], maxHops: 4, allowInsecure: false },
     secrets: new SecretStoreImpl(state, TEST_ENCRYPTION_KEY),
     state,
@@ -88,8 +99,8 @@ async function postJson(
 }
 
 /** 存 client 凭证 + 注册 plugin + 挂载,返回就绪的 app。 */
-async function mountedApp(): Promise<ReturnType<typeof createTbApp>> {
-  const app = await buildApp()
+async function mountedApp(opts: BuildAppOpts = {}): Promise<ReturnType<typeof createTbApp>> {
+  const app = await buildApp(opts)
   expect((await postJson(app, 'system/secret/set', {
     name: 'oauth-client',
     value: encodeCredentialValues({ clientId: 'cid', clientSecret: 'csecret' }),
@@ -158,6 +169,18 @@ function stateOf(authorizationUrl: string): string {
 }
 
 describe('发起授权', () => {
+  it('宿主未注入 OAuth 出站通道时 fail closed，绝不回退 global fetch', async () => {
+    const app = await mountedApp({ providerOAuthFetch: null })
+    const res = await authorize(app)
+    expect(res.status).toBe(503)
+    expect((await res.json()) as unknown).toMatchObject({
+      code: 'unavailable',
+      message: 'Provider OAuth 出站通道未配置',
+      retryable: false,
+    })
+    expect(globalThis.fetch).not.toHaveBeenCalled()
+  })
+
   it('产出跳转 URL,带 PKCE 与正确的 redirect_uri', async () => {
     const app = await mountedApp()
     const res = await authorize(app)
@@ -198,6 +221,19 @@ describe('发起授权', () => {
 })
 
 describe('回调兑换', () => {
+  it('令牌兑换只走宿主注入通道，不会旁路到 global fetch', async () => {
+    const injected = vi.fn(async () => new Response(JSON.stringify({ access_token: 'injected' }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    })) as unknown as typeof fetch
+    const app = await mountedApp({ providerOAuthFetch: injected })
+    const started = (await (await authorize(app)).json()) as { authorizationUrl: string }
+    const res = await callback(app, stateOf(started.authorizationUrl))
+    expect(await res.text()).toContain('已完成授权')
+    expect(injected).toHaveBeenCalledOnce()
+    expect(globalThis.fetch).not.toHaveBeenCalled()
+  })
+
   it('兑换成功后页面提示已授权,且请求带齐 PKCE verifier 与 client 凭证', async () => {
     const app = await mountedApp()
     const started = (await (await authorize(app)).json()) as { authorizationUrl: string }
@@ -222,12 +258,36 @@ describe('回调兑换', () => {
     expect(upstreamCalls.some(r => r.url === TOKEN_URL)).toBe(false)
   })
 
-  it('令牌端点拒绝 → 失败页带出上游消息', async () => {
+  it('令牌端点拒绝 → 只暴露状态码，不回显上游错误体里的秘密', async () => {
     const app = await mountedApp()
     const started = (await (await authorize(app)).json()) as { authorizationUrl: string }
-    tokenResponses = [{ status: 400, body: { error_description: 'code already used' } }]
+    tokenResponses = [{
+      status: 400,
+      body: { error_description: `leaked ${TOKEN_URL} csecret the-code` },
+    }]
     const res = await callback(app, stateOf(started.authorizationUrl))
-    expect(await res.text()).toContain('code already used')
+    const html = await res.text()
+    expect(html).toContain('HTTP 400')
+    expect(html).not.toContain(TOKEN_URL)
+    expect(html).not.toContain('csecret')
+    expect(html).not.toContain('the-code')
+  })
+
+  it('令牌传输异常 → 不回显 URL、请求头或请求体', async () => {
+    let leakedBody = ''
+    const injected = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      leakedBody = String(init?.body ?? '')
+      throw new Error(`transport ${String(input)} ${JSON.stringify(init?.headers)} ${leakedBody}`)
+    }) as unknown as typeof fetch
+    const app = await mountedApp({ providerOAuthFetch: injected })
+    const started = (await (await authorize(app)).json()) as { authorizationUrl: string }
+    const res = await callback(app, stateOf(started.authorizationUrl))
+    const html = await res.text()
+    expect(html).toContain('令牌端点不可达')
+    expect(html).not.toContain(TOKEN_URL)
+    expect(html).not.toContain('csecret')
+    expect(html).not.toContain('the-code')
+    expect(html).not.toContain(leakedBody)
   })
 })
 
@@ -370,6 +430,7 @@ describe('OAuth 与 credentialProbe 叠加', () => {
       canonicalOrigin: 'https://tb.test',
       encryptionKey: TEST_ENCRYPTION_KEY,
       pluginBindings: new Map([['probep', probeBinding(seen)]]),
+      providerOAuthFetch: testProviderOAuthFetch,
       remote: { allowlist: [], maxHops: 4, allowInsecure: false },
       secrets: new SecretStoreImpl(state, TEST_ENCRYPTION_KEY),
       state,
@@ -400,6 +461,7 @@ describe('OAuth 与 credentialProbe 叠加', () => {
       encryptionKey: TEST_ENCRYPTION_KEY,
       // 只声明 oauth(不带 credentialProbe):这样注册能过,才测得到挂载期的行为。
       pluginBindings: new Map([['probep', oauthBinding()]]),
+      providerOAuthFetch: testProviderOAuthFetch,
       remote: { allowlist: [], maxHops: 4, allowInsecure: false },
       secrets: new SecretStoreImpl(state, TEST_ENCRYPTION_KEY),
       state,
@@ -524,6 +586,7 @@ describe('401 触发的自愈(不返回 expires_in 的 provider)', () => {
       canonicalOrigin: 'https://tb.test',
       encryptionKey: TEST_ENCRYPTION_KEY,
       pluginBindings: new Map([['selfheal', binding]]),
+      providerOAuthFetch: testProviderOAuthFetch,
       remote: { allowlist: [], maxHops: 4, allowInsecure: false },
       secrets: new SecretStoreImpl(state, TEST_ENCRYPTION_KEY),
       state,
@@ -611,6 +674,7 @@ describe('401 触发的自愈(不返回 expires_in 的 provider)', () => {
       canonicalOrigin: 'https://tb.test',
       encryptionKey: TEST_ENCRYPTION_KEY,
       pluginBindings: new Map([['deadend', binding]]),
+      providerOAuthFetch: testProviderOAuthFetch,
       remote: { allowlist: [], maxHops: 4, allowInsecure: false },
       secrets: new SecretStoreImpl(state, TEST_ENCRYPTION_KEY),
       state,

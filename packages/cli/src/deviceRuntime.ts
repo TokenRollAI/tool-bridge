@@ -1,20 +1,26 @@
 import {
   type ContextEntryInput,
   type ContextPatch,
+  TBError as CoreTBError,
   createObjectContextProvider,
-  DeviceClient,
-  type DeviceClientState,
   type DeviceExpose,
   type ListOptions,
   type ObjectContextProvider,
-  PING_FRAME_JSON,
   type SearchOptions,
-  TBError,
 } from '@tool-bridge/core'
+import {
+  type DeviceConnection,
+  type DeviceConnectionState,
+  type DeviceWebSocketFactory,
+  deviceWsUrl,
+  openPortableDeviceConnection,
+  TBError,
+} from '@tool-bridge/sdk/device'
 import { createShellExecutor, FsObjectStore } from '@tool-bridge/core/node'
-import ReconnectingWebSocket from 'partysocket/ws'
 import WS, { type ClientOptions } from 'ws'
 import { CliError } from './http'
+
+export { deviceWsUrl }
 
 export interface DeviceConnectionOptions {
   baseUrl: string
@@ -22,260 +28,199 @@ export interface DeviceConnectionOptions {
   expose: DeviceExpose
   mountPath?: string
   onReady?: (mountPath: string) => void
-  onStateChange?: (state: DeviceClientState) => void
+  onStateChange?: (state: DeviceConnectionState) => void
   sk: string
 }
 
-export interface DeviceConnectionHandle {
-  close(): void
-  closed: Promise<void>
-}
+export type DeviceConnectionHandle = DeviceConnection
 
-export function deviceWsUrl(baseUrl: string, deviceId: string): string {
-  const url = new URL(baseUrl)
-  if (url.protocol === 'https:') url.protocol = 'wss:'
-  else if (url.protocol === 'http:') url.protocol = 'ws:'
-  else throw new CliError(`unsupported base URL protocol: ${url.protocol}`)
-  url.pathname = '/system/device/ws'
-  url.search = ''
-  url.searchParams.set('deviceId', deviceId)
-  return url.toString()
-}
-
-function authorizedWebSocket(sk: string): typeof WS {
-  return class AuthorizedWebSocket extends WS {
-    constructor(address: null)
-    constructor(address: string | URL, options?: ClientOptions)
-    constructor(address: string | URL, protocols?: string | string[], options?: ClientOptions)
-    constructor(
-      address: string | URL | null,
-      protocolsOrOptions?: string | string[] | ClientOptions,
-      options?: ClientOptions,
-    ) {
-      if (address === null) {
-        super(address)
-        return
-      }
-      const withAuth = (opts?: ClientOptions): ClientOptions => ({
-        ...(opts ?? {}),
-        headers: { ...(opts?.headers ?? {}), authorization: `Bearer ${sk}` },
-      })
-      if (
-        protocolsOrOptions !== undefined
-        && typeof protocolsOrOptions === 'object'
-        && !Array.isArray(protocolsOrOptions)
-      ) {
-        super(address, withAuth(protocolsOrOptions))
-        return
-      }
-      super(address, protocolsOrOptions, withAuth(options))
+const nodeWebSocketFactory: DeviceWebSocketFactory = {
+  open({ headers, protocols, url }) {
+    const options: ClientOptions = {
+      ...(headers === undefined ? {} : { headers: { ...headers } }),
     }
-  }
+    const socket = protocols === undefined
+      ? new WS(url, options)
+      : new WS(url, typeof protocols === 'string' ? protocols : [...protocols], options)
+    return socket as unknown as WebSocket
+  },
 }
 
-export const HEARTBEAT_INTERVAL_MS = 30_000
-
-export interface HeartbeatSocket {
-  readyState: number
-  reconnect(): void
-  send(data: string): void
+function fsProvider(
+  store: FsObjectStore,
+  mountPath: string,
+  readOnly: boolean,
+): ObjectContextProvider {
+  return createObjectContextProvider(store, {
+    nsPath: `${mountPath}/fs`,
+    readOnly,
+  })
 }
 
-export interface HeartbeatHandle {
-  /** 任何入站帧都算存活证据(pong / call / ready 等)。 */
-  markAlive(): void
-  stop(): void
-}
-
-/**
- * 应用层心跳:每 intervalMs 发一帧 ping(网关 DO 的 setWebSocketAutoResponse 自动应答
- * pong,不唤醒 DO)。空闲 WS 会被 Cloudflare 边缘 ~100s 掐断,且客户端对此毫无感知
- * (半开连接);心跳既保活,又在"上一轮 ping 后无任何入站帧"时主动 reconnect
- * (重连会自动重发 hello 恢复在线)。
- */
-export function startHeartbeat(
-  socket: HeartbeatSocket,
-  intervalMs = HEARTBEAT_INTERVAL_MS,
-): HeartbeatHandle {
-  let alive = true
-  const timer = setInterval(() => {
-    if (socket.readyState !== ReconnectingWebSocket.OPEN) {
-      alive = true // 重连期间不判死链,open 后重新计
-      return
-    }
-    if (!alive) {
-      socket.reconnect()
-      alive = true
-      return
-    }
-    alive = false
-    socket.send(PING_FRAME_JSON)
-  }, intervalMs)
-  return {
-    markAlive: () => {
-      alive = true
-    },
-    stop: () => clearInterval(timer),
-  }
-}
-
-function dispatchFs(
+async function dispatchFs(
   provider: ObjectContextProvider,
   tool: string,
   args: Record<string, unknown>,
 ): Promise<unknown> {
   switch (tool.toLowerCase()) {
     case 'list':
-      return provider.list((args.path as string) ?? '', args.opts as ListOptions | undefined)
+      return await provider.list((args.path as string) ?? '', args.opts as ListOptions | undefined)
     case 'get':
-      return provider.get(args.path as string)
+      return await provider.get(args.path as string)
     case 'write':
       if (typeof args.entry !== 'object' || args.entry === null) {
         throw new TBError('invalid_argument', 'write 需要对象 \'entry\'')
       }
-      return provider.write(args.path as string, args.entry as ContextEntryInput)
+      return await provider.write(args.path as string, args.entry as ContextEntryInput)
     case 'update':
       if (typeof args.patch !== 'object' || args.patch === null) {
         throw new TBError('invalid_argument', 'update 需要对象 \'patch\'')
       }
-      return provider.update(args.path as string, args.patch as ContextPatch)
+      return await provider.update(args.path as string, args.patch as ContextPatch)
     case 'delete':
-      return provider.delete(args.path as string)
+      return await provider.delete(args.path as string)
     case 'search':
-      return provider.search(args.query as string, args.opts as SearchOptions | undefined)
+      return await provider.search(args.query as string, args.opts as SearchOptions | undefined)
     default:
       throw new TBError('invalid_argument', `unknown fs cmd '${tool}'`)
   }
 }
 
-export function startDeviceConnection(opts: DeviceConnectionOptions): DeviceConnectionHandle {
-  const url = deviceWsUrl(opts.baseUrl, opts.deviceId)
-  let fsProvider: ObjectContextProvider | undefined
-  const shell = opts.expose.shell
-    ? createShellExecutor({ allow: opts.expose.shell.allow ?? [] })
-    : undefined
-  const fsStore = opts.expose.fs ? new FsObjectStore(opts.expose.fs.roots) : undefined
+function bridgeCoreError(error: unknown): never {
+  if (error instanceof TBError) throw error
+  if (error instanceof CoreTBError) {
+    throw new TBError(error.code, error.message, { retryable: error.retryable })
+  }
+  throw error
+}
 
-  let rejectClosed: (err: Error) => void = () => {}
-  let resolveClosed: () => void = () => {}
+function cliError(error: unknown): CliError {
+  if (error instanceof CliError) return error
+  if (error instanceof TBError || error instanceof CoreTBError) {
+    return new CliError(error.message, error.code, error.retryable)
+  }
+  return new CliError(error instanceof Error ? error.message : String(error))
+}
+
+export function startDeviceConnection(opts: DeviceConnectionOptions): DeviceConnectionHandle {
+  const shell = opts.expose.shell === undefined
+    ? undefined
+    : createShellExecutor({ allow: opts.expose.shell.allow ?? [] })
+  const store = opts.expose.fs === undefined ? undefined : new FsObjectStore(opts.expose.fs.roots)
+  const readOnly = opts.expose.fs?.readOnly ?? false
+  let activeMountPath = opts.mountPath ?? `device/${opts.deviceId}`
+  let files = store === undefined ? undefined : fsProvider(store, activeMountPath, readOnly)
+
+  let userClosed = false
+  let settled = false
+  let resolveClosed!: () => void
+  let rejectClosed!: (error: Error) => void
   const closed = new Promise<void>((resolve, reject) => {
     resolveClosed = resolve
     rejectClosed = reject
   })
+  const fail = (error: unknown): void => {
+    if (settled || userClosed) return
+    settled = true
+    rejectClosed(cliError(error))
+  }
 
-  const socket = new ReconnectingWebSocket(url, [], {
-    WebSocket: authorizedWebSocket(opts.sk),
-    maxEnqueuedMessages: 10,
-    connectionTimeout: 4000,
-  })
-  const heartbeat = startHeartbeat(socket)
-  closed.then(
-    () => heartbeat.stop(),
-    () => heartbeat.stop(),
-  )
-
-  const client = new DeviceClient({
+  const connection = openPortableDeviceConnection({
+    baseUrl: opts.baseUrl,
     deviceId: opts.deviceId,
-    ...(opts.mountPath !== undefined ? { mountPath: opts.mountPath } : {}),
-    expose: opts.expose,
-    onReady: (mountPath) => {
-      if (fsStore !== undefined) {
-        fsProvider = createObjectContextProvider(fsStore, {
-          nsPath: `${mountPath}/fs`,
-          readOnly: opts.expose.fs?.readOnly ?? false,
-        })
-      }
-      opts.onReady?.(mountPath)
+    expose: async () => opts.expose,
+    mountPath: opts.mountPath,
+    webSocketFactory: nodeWebSocketFactory,
+    credentialProvider: {
+      // SDK 每次 reconnect 都重新调用 prepare；这里不把 Bearer 固化进 WS constructor。
+      prepare: () => ({ headers: { authorization: `Bearer ${opts.sk}` } }),
+      invalidate: error => fail(new TBError(error.code, error.message, {
+        retryable: error.retryable,
+      })),
     },
     onStateChange: opts.onStateChange,
-    onRejected: (error) => {
-      // 先 reject 再 close:partysocket 的 close() 同步派发 close 事件,若先 close,
-      // close listener 的 resolveClosed 会抢先 settle,拒绝被吞(退出码 0 且无输出)。
-      rejectClosed(new CliError(error.message, error.code))
-      socket.close(1008, error.message)
-    },
     handler: async (call) => {
-      // 帧 path 含命令叶子段(如 "shell/exec"、"fs/get"):拆出 mount 与命令。
       const slash = call.path.lastIndexOf('/')
       const mount = slash < 0 ? call.path : call.path.slice(0, slash)
       const cmd = slash < 0 ? '' : call.path.slice(slash + 1)
-      if (mount === 'shell') {
-        if (cmd !== 'exec') throw new TBError('invalid_argument', `unknown shell cmd '${cmd}'`)
-        if (shell === undefined) throw TBError.notFound('shell not exposed')
-        const command = call.arguments.command
-        if (typeof command !== 'string' || command.trim() === '') {
-          throw new TBError('invalid_argument', 'exec 需要字符串 \'command\'')
+      try {
+        if (mount === 'shell') {
+          if (cmd !== 'exec') throw new TBError('invalid_argument', `unknown shell cmd '${cmd}'`)
+          if (shell === undefined) throw TBError.notFound('shell not exposed')
+          const command = call.arguments.command
+          if (typeof command !== 'string' || command.trim() === '') {
+            throw new TBError('invalid_argument', 'exec 需要字符串 \'command\'')
+          }
+          return await shell(command, {
+            ...(typeof call.arguments.cwd === 'string'
+              ? { cwd: call.arguments.cwd }
+              : {}),
+            ...(typeof call.arguments.timeoutMs === 'number'
+              ? { timeoutMs: call.arguments.timeoutMs }
+              : {}),
+          })
         }
-        return shell(command, {
-          ...(typeof call.arguments.cwd === 'string' ? { cwd: call.arguments.cwd } : {}),
-          ...(typeof call.arguments.timeoutMs === 'number'
-            ? { timeoutMs: call.arguments.timeoutMs }
-            : {}),
-        })
+        if (mount === 'fs') {
+          if (files === undefined) throw TBError.notFound('fs not exposed')
+          return await dispatchFs(files, cmd, call.arguments)
+        }
+        throw TBError.notFound(`device path not exposed:'${call.path}'`)
+      } catch (error) {
+        bridgeCoreError(error)
       }
-      if (mount === 'fs') {
-        if (fsProvider === undefined) throw TBError.notFound('fs not exposed')
-        return dispatchFs(fsProvider, cmd, call.arguments)
-      }
-      throw TBError.notFound(`device path not exposed:'${call.path}'`)
     },
   })
 
-  socket.addEventListener('open', () => {
-    client.socketOpened({
-      send: data => socket.send(data),
-      close: code => socket.close(code),
-    })
+  const ready = connection.ready.then((mountPath) => {
+    if (store !== undefined && mountPath !== activeMountPath) {
+      activeMountPath = mountPath
+      files = fsProvider(store, mountPath, readOnly)
+    }
+    opts.onReady?.(mountPath)
+    return mountPath
+  }, (error: unknown) => {
+    fail(error)
+    throw cliError(error)
   })
-  socket.addEventListener('message', (event) => {
-    heartbeat.markAlive()
-    void client.socketMessage(String(event.data))
-  })
-  socket.addEventListener('close', () => {
-    client.socketClosed()
-    if (client.state === 'closed') resolveClosed()
-  })
-  socket.addEventListener('error', (event) => {
-    const message
-      = typeof (event as { message?: unknown }).message === 'string'
-        ? String((event as { message: unknown }).message)
-        : 'ws error'
-    opts.onStateChange?.('reconnecting')
-    if (client.state === 'closed') rejectClosed(new CliError(message))
-  })
+  // runDeviceConnection consumes `closed`; avoid an unhandled parallel ready rejection.
+  ready.catch(() => {})
+  connection.closed.then(() => {
+    if (settled) return
+    settled = true
+    resolveClosed()
+  }, fail)
 
   return {
-    close() {
-      client.close()
-      socket.close(1000, 'closed by user')
-      resolveClosed()
-    },
+    ready,
     closed,
+    get state() {
+      return connection.state
+    },
+    close() {
+      userClosed = true
+      connection.close()
+    },
+    restart() {
+      connection.restart()
+    },
+    resume() {
+      connection.resume()
+    },
+    suspend() {
+      connection.suspend()
+    },
   }
 }
 
 export async function runDeviceConnection(opts: DeviceConnectionOptions): Promise<void> {
   const handle = startDeviceConnection(opts)
-  await new Promise<void>((resolve, reject) => {
-    const stop = () => {
-      process.off('SIGINT', stop)
-      process.off('SIGTERM', stop)
-      handle.close()
-      resolve()
-    }
-    process.once('SIGINT', stop)
-    process.once('SIGTERM', stop)
-    handle.closed.then(
-      () => {
-        process.off('SIGINT', stop)
-        process.off('SIGTERM', stop)
-        resolve()
-      },
-      (err) => {
-        process.off('SIGINT', stop)
-        process.off('SIGTERM', stop)
-        reject(err)
-      },
-    )
-  })
+  const stop = () => handle.close()
+  process.once('SIGINT', stop)
+  process.once('SIGTERM', stop)
+  try {
+    await handle.closed
+  } finally {
+    process.off('SIGINT', stop)
+    process.off('SIGTERM', stop)
+  }
 }

@@ -8,7 +8,7 @@ import {
   withGlobalOpts,
   withPageOpts,
 } from '../args'
-import { guard, printJson, printLine, table } from '../output'
+import { printJson, printLine, table } from '../output'
 import { confirmDestructive } from '../confirm'
 import { callDirect, CliError } from '../http'
 import { parseScope } from '../scope'
@@ -44,26 +44,24 @@ export function skListCommand(): Command {
     .description('List secret keys (hash never returned)')
     .action(async (opts: SkGlobalOpts) => {
       const asJson = Boolean(opts.json)
-      await guard(asJson, async () => {
-        const pageOpts = parsePageOpts(opts)
-        const page = await callDirect<Page<SecretKeyView>>(
-          resolveTarget(opts), '/system/sk/list',
-          Object.keys(pageOpts).length ? { opts: pageOpts } : {},
-        )
-        if (asJson) {
-          printJson(page)
-          return
-        }
-        const rows = (page.items ?? []).map(k => [
-          k.id,
-          k.owner,
-          k.disabled ? 'disabled' : 'active',
-          k.expiresAt ?? '-',
-          scopeSummary(k),
-        ])
-        printLine(table(['ID', 'OWNER', 'STATE', 'EXPIRES', 'SCOPES'], rows))
-        if (page.cursor) printLine(`next cursor: ${page.cursor}`)
-      })
+      const pageOpts = parsePageOpts(opts)
+      const page = await callDirect<Page<SecretKeyView>>(
+        resolveTarget(opts), '/system/sk/list',
+        Object.keys(pageOpts).length ? { opts: pageOpts } : {},
+      )
+      if (asJson) {
+        printJson(page)
+        return
+      }
+      const rows = (page.items ?? []).map(k => [
+        k.id,
+        k.owner,
+        k.disabled ? 'disabled' : 'active',
+        k.expiresAt ?? '-',
+        scopeSummary(k),
+      ])
+      printLine(table(['ID', 'OWNER', 'STATE', 'EXPIRES', 'SCOPES'], rows))
+      if (page.cursor) printLine(`next cursor: ${page.cursor}`)
     })
 }
 
@@ -74,13 +72,11 @@ export function skGetCommand(): Command {
     .argument('<id>', 'Secret key id')
     .action(async (idArg: string, opts: SkGlobalOpts) => {
       const asJson = Boolean(opts.json)
-      await guard(asJson, async () => {
-        const id = String(idArg ?? '').trim()
-        if (!id) throw new CliError('secret key id is required')
-        const key = await callDirect<SecretKeyView>(resolveTarget(opts), '/system/sk/get', { id })
-        if (asJson) printJson(key)
-        else printKey(key)
-      })
+      const id = String(idArg ?? '').trim()
+      if (!id) throw new CliError('secret key id is required')
+      const key = await callDirect<SecretKeyView>(resolveTarget(opts), '/system/sk/get', { id })
+      if (asJson) printJson(key)
+      else printKey(key)
     })
 }
 
@@ -121,43 +117,41 @@ Examples:
     )
     .action(async (opts: SkCreateOpts) => {
       const asJson = Boolean(opts.json)
-      await guard(asJson, async () => {
-        const owner = String(opts.owner ?? '').trim()
-        if (!owner) throw new CliError('--owner is required')
+      const owner = String(opts.owner ?? '').trim()
+      if (!owner) throw new CliError('--owner is required')
 
-        const scopes = opts.scope.map(parseScope)
-        const registerPaths = opts.registerPath
-        // 既无 scope 又无 register-path = 一把什么都做不了的 key。这在人类交互下几乎总是漏给了
-        // --scope,静默签出会让人以为成功了、实际调用全被拒。TTY 下确认一次;--json/脚本放行
-        // (device-only key 合法地可以没有 scope,只靠 register-path)。
-        if (scopes.length === 0 && registerPaths.length === 0 && !asJson) {
-          await confirmDestructive(
-            opts,
-            'No --scope given: this key will be denied every call. Issue it anyway?',
-          )
-        }
-        const input: SecretKeyInput = {
-          owner,
-          scopes,
-          ...(registerPaths.length ? { registerPaths } : {}),
-          ...(opts.expires ? { expiresAt: parseIsoTimestamp(String(opts.expires)) } : {}),
-          ...(opts.description ? { description: String(opts.description) } : {}),
-        }
-
-        const created = await callDirect<SecretKeyCreated>(
-          resolveTarget(opts), '/system/sk/write',
-          input as unknown as Record<string, unknown>,
+      const scopes = opts.scope.map(parseScope)
+      const registerPaths = opts.registerPath
+      // 既无 scope 又无 register-path = 一把什么都做不了的 key。这在人类交互下几乎总是漏给了
+      // --scope,静默签出会让人以为成功了、实际调用全被拒。TTY 下确认一次;--json/脚本放行
+      // (device-only key 合法地可以没有 scope,只靠 register-path)。
+      if (scopes.length === 0 && registerPaths.length === 0 && !asJson) {
+        await confirmDestructive(
+          opts,
+          'No --scope given: this key will be denied every call. Issue it anyway?',
         )
+      }
+      const input: SecretKeyInput = {
+        owner,
+        scopes,
+        ...(registerPaths.length ? { registerPaths } : {}),
+        ...(opts.expires ? { expiresAt: parseIsoTimestamp(String(opts.expires)) } : {}),
+        ...(opts.description ? { description: String(opts.description) } : {}),
+      }
 
-        if (asJson) {
-          printJson(created)
-          return
-        }
-        printLine(`created SK: ${created.key.id} (owner ${created.key.owner})`)
-        printLine('')
-        printLine('!! SECRET (shown once — store it now, it cannot be retrieved again):')
-        printLine(`   ${created.secret}`)
-      })
+      const created = await callDirect<SecretKeyCreated>(
+        resolveTarget(opts), '/system/sk/write',
+        input as unknown as Record<string, unknown>,
+      )
+
+      if (asJson) {
+        printJson(created)
+        return
+      }
+      printLine(`created SK: ${created.key.id} (owner ${created.key.owner})`)
+      printLine('')
+      printLine('!! SECRET (shown once — store it now, it cannot be retrieved again):')
+      printLine(`   ${created.secret}`)
     })
 }
 
@@ -189,34 +183,32 @@ export function skUpdateCommand(): Command {
     .option('--enable', 'Re-enable the key immediately; mutually exclusive with --disable')
     .action(async (idArg: string, opts: SkUpdateOpts) => {
       const asJson = Boolean(opts.json)
-      await guard(asJson, async () => {
-        const id = String(idArg ?? '').trim()
-        if (!id) throw new CliError('secret key id is required')
-        if (opts.disable && opts.enable) {
-          throw new CliError('--disable and --enable are mutually exclusive')
-        }
-        const patch: Record<string, unknown> = {}
-        if (opts.owner !== undefined) {
-          const owner = String(opts.owner).trim()
-          if (!owner) throw new CliError('--owner must not be empty')
-          patch.owner = owner
-        }
-        if (opts.scope !== undefined) patch.scopes = opts.scope.map(parseScope)
-        if (opts.registerPath !== undefined) patch.registerPaths = opts.registerPath
-        if (opts.expires !== undefined) patch.expiresAt = parseIsoTimestamp(String(opts.expires))
-        if (opts.description !== undefined) patch.description = String(opts.description)
-        if (opts.disable) patch.disabled = true
-        if (opts.enable) patch.disabled = false
-        if (Object.keys(patch).length === 0) {
-          throw new CliError('nothing to update: pass at least one patch option')
-        }
-        const key = await callDirect<SecretKeyView>(resolveTarget(opts), '/system/sk/update', {
-          id,
-          patch,
-        })
-        if (asJson) printJson(key)
-        else printKey(key)
+      const id = String(idArg ?? '').trim()
+      if (!id) throw new CliError('secret key id is required')
+      if (opts.disable && opts.enable) {
+        throw new CliError('--disable and --enable are mutually exclusive')
+      }
+      const patch: Record<string, unknown> = {}
+      if (opts.owner !== undefined) {
+        const owner = String(opts.owner).trim()
+        if (!owner) throw new CliError('--owner must not be empty')
+        patch.owner = owner
+      }
+      if (opts.scope !== undefined) patch.scopes = opts.scope.map(parseScope)
+      if (opts.registerPath !== undefined) patch.registerPaths = opts.registerPath
+      if (opts.expires !== undefined) patch.expiresAt = parseIsoTimestamp(String(opts.expires))
+      if (opts.description !== undefined) patch.description = String(opts.description)
+      if (opts.disable) patch.disabled = true
+      if (opts.enable) patch.disabled = false
+      if (Object.keys(patch).length === 0) {
+        throw new CliError('nothing to update: pass at least one patch option')
+      }
+      const key = await callDirect<SecretKeyView>(resolveTarget(opts), '/system/sk/update', {
+        id,
+        patch,
       })
+      if (asJson) printJson(key)
+      else printKey(key)
     })
 }
 
@@ -226,16 +218,14 @@ function skStateCommand(name: 'disable' | 'enable', disabled: boolean): Command 
     .argument('<id>', 'Secret key id')
     .action(async (idArg: string, opts: SkGlobalOpts) => {
       const asJson = Boolean(opts.json)
-      await guard(asJson, async () => {
-        const id = String(idArg ?? '').trim()
-        if (!id) throw new CliError('secret key id is required')
-        const key = await callDirect<SecretKeyView>(resolveTarget(opts), '/system/sk/update', {
-          id,
-          patch: { disabled },
-        })
-        if (asJson) printJson(key)
-        else printLine(`${disabled ? 'disabled' : 'enabled'} SK: ${id}`)
+      const id = String(idArg ?? '').trim()
+      if (!id) throw new CliError('secret key id is required')
+      const key = await callDirect<SecretKeyView>(resolveTarget(opts), '/system/sk/update', {
+        id,
+        patch: { disabled },
       })
+      if (asJson) printJson(key)
+      else printLine(`${disabled ? 'disabled' : 'enabled'} SK: ${id}`)
     })
 }
 
@@ -247,14 +237,12 @@ export function skRmCommand(): Command {
     .option('--yes', 'Skip the confirmation prompt')
     .action(async (idArg: string, opts: SkGlobalOpts) => {
       const asJson = Boolean(opts.json)
-      await guard(asJson, async () => {
-        const id = String(idArg ?? '').trim()
-        if (!id) throw new CliError('secret key id is required')
-        await confirmDestructive(opts, `Revoke SK ${id}? This is irreversible.`)
-        await callDirect(resolveTarget(opts), '/system/sk/delete', { id })
-        if (asJson) printJson({ ok: true, id })
-        else printLine(`revoked SK: ${id}`)
-      })
+      const id = String(idArg ?? '').trim()
+      if (!id) throw new CliError('secret key id is required')
+      await confirmDestructive(opts, `Revoke SK ${id}? This is irreversible.`)
+      await callDirect(resolveTarget(opts), '/system/sk/delete', { id })
+      if (asJson) printJson({ ok: true, id })
+      else printLine(`revoked SK: ${id}`)
     })
 }
 

@@ -76,4 +76,11 @@ describe('builtin secret 模块', () => {
       e => isTBError(e) && e.code === 'unavailable',
     )
   })
+
+  it('顶层与分页对象的未知字段都拒绝', async () => {
+    await expect(mod.dispatch('set', { name: 'k', value: 'v', expose: true }, ctx))
+      .rejects.toSatisfy(e => isTBError(e) && e.code === 'invalid_argument')
+    await expect(mod.dispatch('list', { opts: { limit: 1, filter: 'nope' } }, ctx))
+      .rejects.toSatisfy(e => isTBError(e) && e.code === 'invalid_argument')
+  })
 })

@@ -69,9 +69,14 @@ interface RegisteredOp<TCtx> {
   spec: ToolSpec
 }
 
-/** raw shape → ZodObject;已是 schema 则原样。 */
+/**
+ * raw shape → strict ZodObject；作者显式给出的 Zod schema 保留自身 unknown-key 策略。
+ *
+ * 平台拥有的 builtin/context/skillhub schema 均显式使用 strictObject；plugin/provider
+ * 作者若选择 object/looseObject/passthrough，则属于其上游 wire 契约，注册层不得擅自收紧。
+ */
 function normalizeSchema(input: InputSchemaLike): z.ZodType {
-  return input instanceof z.ZodType ? input : z.object(input)
+  return input instanceof z.ZodType ? input : z.strictObject(input)
 }
 
 /**
@@ -183,18 +188,37 @@ export class OperationRegistry<TCtx = unknown> {
   }
 
   /**
+   * 只执行入参解析，不调用 handler。
+   *
+   * 少数 HTBP 命令由宿主转发到另一执行通道（例如设备 context）；它们仍需复用注册
+   * 真源的 strict schema，但不能在当前进程执行 provider handler。
+   */
+  parse(name: string, args: Record<string, unknown>): unknown {
+    const op = this.ops.get(name)
+    if (op === undefined) throw TBError.notFound(`unknown operation: '${name}'`)
+    if (op.schema === undefined) return args
+    const parsed = op.schema.safeParse(args)
+    if (!parsed.success) throw invalidArgument(name, parsed.error)
+    return parsed.data
+  }
+
+  /**
+   * 校验后调用 handler，保留 handler 的原始返回值。
+   *
+   * builtin 等内部适配层已有自己的 wire 形状，不应被套上 ToolResult；
+   * 它们复用本方法的 Zod 校验和 handler 调度。工具源继续用 {@link call}。
+   */
+  async invoke(name: string, args: Record<string, unknown>, ctx: TCtx): Promise<unknown> {
+    const op = this.ops.get(name)
+    if (op === undefined) throw TBError.notFound(`unknown operation: '${name}'`)
+    return await op.handler(this.parse(name, args), ctx)
+  }
+
+  /**
    * 调用:safeParse 入参(失败 → invalid_argument)、执行 handler、把裸返回值包成 ToolResult。
    * 未声明 schema 的操作原样透传 args。
    */
   async call(name: string, args: Record<string, unknown>, ctx: TCtx): Promise<ToolResult> {
-    const op = this.ops.get(name)
-    if (op === undefined) throw TBError.notFound(`unknown operation: '${name}'`)
-    let input: unknown = args
-    if (op.schema !== undefined) {
-      const parsed = op.schema.safeParse(args)
-      if (!parsed.success) throw invalidArgument(name, parsed.error)
-      input = parsed.data
-    }
-    return toToolResult(await op.handler(input, ctx))
+    return toToolResult(await this.invoke(name, args, ctx))
   }
 }

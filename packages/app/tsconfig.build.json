@@ -3,7 +3,8 @@
   "compilerOptions": {
     "baseUrl": ".",
     "paths": {
-      "@tool-bridge/core": ["../core/src/index.ts"]
+      "@tool-bridge/core": ["../core/src/index.ts"],
+      "@tool-bridge/core/protocol": ["../core/src/protocol/public.ts"]
     }
   },
   "include": ["src"]

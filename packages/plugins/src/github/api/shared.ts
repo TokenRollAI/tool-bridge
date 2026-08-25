@@ -22,15 +22,21 @@
  */
 
 import { TBError } from '@tool-bridge/plugin-sdk'
+import {
+  createProviderHttpClient,
+  type ProviderHttpRequest,
+  type ProviderHttpResult,
+} from '../../_runtime/providerHttp'
+import { asJsonObject, compactDefined, trimmedText } from '../../_runtime/jsonValue'
 import { type ProviderContext, requireApiKey } from '../../_runtime/plugin'
 import { upstreamError } from '../../_runtime/upstreamError'
-import { guardedFetch } from '../../_runtime/guardedFetch'
 
 export const SERVICE = 'github'
 const API_BASE = 'https://api.github.com'
 const API_VERSION = '2022-11-28'
 /** GitHub REST 强制要求 User-Agent,缺了直接 403。上游报的是它自己的名字,这里报我们的。 */
 const USER_AGENT = 'tool-bridge'
+const http = createProviderHttpClient({ baseUrl: `${API_BASE}/`, service: SERVICE })
 
 export type Json = Record<string, unknown>
 export type Query = Record<string, boolean | number | string | undefined>
@@ -44,15 +50,9 @@ export type Query = Record<string, boolean | number | string | undefined>
  *
  * 把后者错写成前者,就会出现"想把 issue 正文清空却发现改不动"这种查不出来的 bug。
  */
-export function text(value: unknown): string | undefined {
-  if (typeof value !== 'string') return undefined
-  const trimmed = value.trim()
-  return trimmed === '' ? undefined : trimmed
-}
+export const text = trimmedText
 
-export function record(value: unknown): Json | undefined {
-  return typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Json) : undefined
-}
+export const record = asJsonObject
 
 /** 上游用 `Array.isArray(x) ? x : []` 兜底,保留:少一族结果比整个调用失败好。 */
 export function objectArray(value: unknown): Json[] {
@@ -119,38 +119,26 @@ export function requireBranchOrTagRef(ref: string): string {
   return ref
 }
 
-function buildUrl(path: string, query: Query | undefined): string {
-  const url = new URL(`${API_BASE}${path}`)
-  for (const [key, value] of Object.entries(query ?? {})) {
-    if (value !== undefined) url.searchParams.set(key, String(value))
-  }
-  return url.toString()
-}
-
-function headers(ctx: ProviderContext, hasJsonBody: boolean): Record<string, string> {
-  const result: Record<string, string> = {
+function headers(ctx: ProviderContext): Record<string, string> {
+  return {
     'accept': 'application/vnd.github+json',
     'authorization': `Bearer ${requireApiKey(ctx, SERVICE)}`,
     'x-github-api-version': API_VERSION,
     'user-agent': USER_AGENT,
   }
-  if (hasJsonBody) result['content-type'] = 'application/json'
-  return result
 }
 
 /** 空 body 读成 `null`(204/205);非 JSON 读成 `{message}`,好让错误页的文字进错误消息。 */
-async function readJson(response: Response): Promise<unknown> {
-  const body = await response.text()
-  if (body === '') return null
-  try {
-    return JSON.parse(body)
-  } catch {
-    return { message: body }
-  }
+function payloadOf(result: Pick<ProviderHttpResult, 'bodyKind' | 'data'>): unknown {
+  if (result.bodyKind === 'empty') return null
+  if (result.bodyKind === 'json') return result.data
+  return { message: String(result.data) }
 }
 
 /** 限流判据:配额头归零、带 retry-after(二级限流),或消息里明说了。 */
-function isRateLimited(response: Response, message: string): boolean {
+type GitHubResponse = Pick<ProviderHttpResult, 'headers' | 'status' | 'statusText'> & { readonly ok: boolean }
+
+function isRateLimited(response: GitHubResponse, message: string): boolean {
   if (response.headers.get('x-ratelimit-remaining') === '0') return true
   if (response.headers.get('retry-after') !== null) return true
   return message.toLowerCase().includes('rate limit')
@@ -176,7 +164,7 @@ function validationDetail(payload: unknown): string | undefined {
   return details.length > 0 ? details.join('; ') : undefined
 }
 
-export function githubError(response: Response, payload: unknown): TBError {
+export function githubError(response: GitHubResponse, payload: unknown): TBError {
   const base = text(record(payload)?.message) ?? `GitHub 返回 HTTP ${response.status}`
   const detail = validationDetail(payload)
   const message = detail === undefined ? base : `${base}(${detail})`
@@ -189,7 +177,7 @@ export function githubError(response: Response, payload: unknown): TBError {
 
 export interface GitHubRequest {
   body?: Json
-  method?: string
+  method?: ProviderHttpRequest['method']
   path: string
   query?: Query
 }
@@ -198,13 +186,35 @@ export interface GitHubRequest {
 export async function requestRaw(
   ctx: ProviderContext,
   input: GitHubRequest,
-): Promise<{ payload: unknown, response: Response }> {
-  const response = await guardedFetch(buildUrl(input.path, input.query), {
+): Promise<{ payload: unknown, response: GitHubResponse }> {
+  const result = await http.request({
     method: input.method ?? 'GET',
-    headers: headers(ctx, input.body !== undefined),
-    body: input.body === undefined ? undefined : JSON.stringify(input.body),
+    path: input.path,
+    query: Object.entries(input.query ?? {}),
+    headers: headers(ctx),
+    ...(input.body === undefined ? {} : { json: input.body }),
+    invalidJson: 'text',
+    // GitHub 有三个 action 用 404 表达 false；其他调用方仍在下面将它映射为错误。
+    acceptStatuses: [404],
+    mapError: context => githubError(
+      {
+        headers: context.headers,
+        ok: false,
+        status: context.status,
+        statusText: context.statusText,
+      },
+      payloadOf(context),
+    ),
   })
-  return { payload: await readJson(response), response }
+  return {
+    payload: payloadOf(result),
+    response: {
+      headers: result.headers,
+      ok: result.status >= 200 && result.status <= 299,
+      status: result.status,
+      statusText: result.statusText,
+    },
+  }
 }
 
 export async function requestJson(ctx: ProviderContext, input: GitHubRequest): Promise<unknown> {
@@ -228,9 +238,7 @@ export async function requestNoContent(ctx: ProviderContext, input: GitHubReques
 }
 
 /** 丢掉值为 undefined 的键(上游 `compactObject`);`null` 要留住。 */
-export function compact(input: Record<string, unknown>): Json {
-  return Object.fromEntries(Object.entries(input).filter(([, value]) => value !== undefined))
-}
+export const compact = compactDefined
 
 /**
  * base64 → UTF-8 文本。解不出来(不是 base64、或不是合法 UTF-8,例如二进制文件)返回

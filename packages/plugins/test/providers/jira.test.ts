@@ -1,13 +1,9 @@
 import {
-  base64urlEncode,
-  type CallContext,
-  encodeCallContext,
   encodeCredentialValues,
-  HEADER_TB_CONTEXT,
-  HEADER_TB_UPSTREAM_AUTH,
 } from '@tool-bridge/core'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { z } from 'zod/v4'
+import { createProviderHarness } from '../support/providerHarness'
 import { createJiraPlugin } from '../../src/jira/index'
 import { jiraActions } from '../../src/jira/schema'
 
@@ -18,8 +14,6 @@ import { jiraActions } from '../../src/jira/schema'
  * 评论正文是纯文本(ADF 要拍平)、以及 create_issue 跟着 self 回查时的目标校验。
  */
 
-const PLUGIN_TOKEN = 'tbp_test'
-const ENV = { PLUGIN_TOKEN }
 const CREDENTIALS = {
   baseUrl: 'https://jira.example.com',
   personalAccessToken: 'pat_deadbeef',
@@ -27,49 +21,30 @@ const CREDENTIALS = {
 const API_BASE = 'https://jira.example.com/rest/api/2'
 const plugin = createJiraPlugin()
 
-const CALLER: CallContext = {
-  keyId: 'k1',
-  owner: 'agent:tester',
-  scopes: [],
-  traceId: 't1',
+const {
+  call,
+  envelope,
+  sent,
+  env: ENV,
+  stubFetch,
+} = createProviderHarness({
   mountPath: 'work/jira',
-  exportId: 'actions',
-}
-
-function envelope(body: unknown, opts: { auth?: string | null } = {}): Promise<Response> {
-  const headers: Record<string, string> = {
-    'authorization': `Bearer ${PLUGIN_TOKEN}`,
-    'content-type': 'application/json',
-    [HEADER_TB_CONTEXT]: encodeCallContext(CALLER),
-  }
-  const auth = opts.auth === undefined ? encodeCredentialValues(CREDENTIALS) : opts.auth
-  if (auth !== null) {
-    headers[HEADER_TB_UPSTREAM_AUTH] = base64urlEncode(new TextEncoder().encode(auth))
-  }
-  return Promise.resolve(plugin.fetch(
-    new Request('https://plugin.test/', { method: 'POST', headers, body: JSON.stringify(body) }),
-    ENV as never,
-  ))
-}
-
-function call(name: string, args: unknown, opts?: { auth?: string | null }): Promise<Response> {
-  return envelope({ tool: 'Call', arguments: { name, args } }, opts)
-}
+  plugin,
+  upstreamAuth: encodeCredentialValues(CREDENTIALS),
+})
 
 function mockJira(status: number, payload: unknown): ReturnType<typeof vi.fn> {
   const body = typeof payload === 'string' ? payload : JSON.stringify(payload)
-  const fn = vi.fn(() => Promise.resolve(new Response(body, {
+  return stubFetch(() => Promise.resolve(new Response(body, {
     status,
     headers: { 'content-type': 'application/json' },
   })))
-  vi.stubGlobal('fetch', fn)
-  return fn
 }
 
 /** 依次回多份响应(create_issue 会打两次上游)。 */
 function mockJiraSequence(...responses: Array<{ payload: unknown, status?: number }>): ReturnType<typeof vi.fn> {
   let index = 0
-  const fn = vi.fn(() => {
+  return stubFetch(() => {
     const next = responses[Math.min(index, responses.length - 1)]!
     index += 1
     return Promise.resolve(new Response(JSON.stringify(next.payload), {
@@ -77,18 +52,7 @@ function mockJiraSequence(...responses: Array<{ payload: unknown, status?: numbe
       headers: { 'content-type': 'application/json' },
     }))
   })
-  vi.stubGlobal('fetch', fn)
-  return fn
 }
-
-/** 取上游收到的第 n 个请求(默认第一个)。 */
-function sent(mock: ReturnType<typeof vi.fn>, index = 0): Request {
-  return (mock.mock.calls[index] as [Request])[0]
-}
-
-afterEach(() => {
-  vi.unstubAllGlobals()
-})
 
 describe('契约面', () => {
   it('List 出全部 7 个 action,且都带 Zod 派生的 schema', async () => {

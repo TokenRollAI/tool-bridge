@@ -61,14 +61,24 @@ import type {
   updatePageMarkdownInput,
 } from './schema'
 import type { createPageInput, movePageInput } from './schema.handwritten'
+import {
+  booleanValue as bool,
+  compactDefined as compact,
+  asJsonObject as record,
+} from '../_runtime/jsonValue'
+import {
+  createProviderHttpClient,
+  type ProviderQuery,
+  type ResponseBodyKind,
+} from '../_runtime/providerHttp'
 import { type ProviderContext, requireApiKey } from '../_runtime/plugin'
 import { upstreamError } from '../_runtime/upstreamError'
-import { guardedFetch } from '../_runtime/guardedFetch'
 
 const SERVICE = 'notion'
 const API_BASE = 'https://api.notion.com/v1'
 /** 上游钉死的 API 版本;Notion 缺这个头一律 400,换版本会改变出参形状。 */
 const NOTION_VERSION = '2026-03-11'
+const http = createProviderHttpClient({ baseUrl: `${API_BASE}/`, service: SERVICE })
 
 type Json = Record<string, unknown>
 type QueryValue = number | string | string[] | undefined
@@ -80,27 +90,13 @@ interface RequestInput {
   query?: Record<string, QueryValue>
 }
 
-/** 上游 `asObject`:只认普通对象(数组与 null 都不算)。 */
-function record(value: unknown): Json | undefined {
-  return typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Json) : undefined
-}
-
 /** 上游 `asNonEmptyString`:**不去空白**,只看长度(照上游,免得改变接受集合)。 */
 function nonEmpty(value: unknown): string | undefined {
   return typeof value === 'string' && value.length > 0 ? value : undefined
 }
 
-function bool(value: unknown): boolean | undefined {
-  return typeof value === 'boolean' ? value : undefined
-}
-
 function array(value: unknown): unknown[] | undefined {
   return Array.isArray(value) ? value : undefined
-}
-
-/** 丢掉值为 undefined 的键(上游 `compactObject`);`null` 要留住。 */
-function compact(input: Record<string, unknown>): Json {
-  return Object.fromEntries(Object.entries(input).filter(([, value]) => value !== undefined))
 }
 
 /** 上游 `providerInputError` 那一族:调用方给的参数组合不成立。 */
@@ -113,52 +109,39 @@ function inputError(message: string): TBError {
  * 上游同时看 `code === 'validation_error'`,但那条分支与默认分支的结果相同(都归 400),
  * 故这里不重复判 —— 归一由公共 `upstreamError` 按状态做。
  */
-function errorMessage(status: number, raw: string): string {
-  if (raw === '') return `notion request failed with ${status}`
-  try {
-    const parsed = record(JSON.parse(raw))
-    return nonEmpty(parsed?.message) ?? nonEmpty(parsed?.error) ?? raw
-  } catch {
-    return raw
+function errorMessage(status: number, payload: unknown, bodyKind: ResponseBodyKind): string {
+  if (bodyKind === 'empty') return `notion request failed with ${status}`
+  if (bodyKind === 'invalid-json' || bodyKind === 'text') {
+    return nonEmpty(payload) ?? `notion request failed with ${status}`
   }
+  const parsed = record(payload)
+  return nonEmpty(parsed?.message)
+    ?? nonEmpty(parsed?.error)
+    ?? JSON.stringify(payload)
+    ?? `notion request failed with ${status}`
 }
 
 async function request(ctx: ProviderContext, input: RequestInput): Promise<Json> {
-  const url = new URL(`${API_BASE}${input.path}`)
-  for (const [key, value] of Object.entries(input.query ?? {})) {
-    if (value === undefined) continue
-    if (Array.isArray(value)) {
-      // filter_properties[] 靠**重复同名参数**表达;空数组在调用处就丢掉了。
-      for (const item of value) url.searchParams.append(key, item)
-      continue
-    }
-    url.searchParams.set(key, String(value))
-  }
-
   const hasBody = input.body !== undefined
-  const response = await guardedFetch(url.toString(), {
+  const { data } = await http.request({
+    path: input.path,
     method: input.method ?? 'GET',
+    // filter_properties[] 靠**重复同名参数**表达;空数组在调用处就丢掉了。
+    query: Object.entries(input.query ?? {}) satisfies ProviderQuery,
     headers: {
       'authorization': `Bearer ${requireApiKey(ctx, SERVICE)}`,
       'notion-version': NOTION_VERSION,
-      ...(hasBody ? { 'content-type': 'application/json' } : {}),
     },
-    body: hasBody ? JSON.stringify(input.body) : undefined,
+    ...(hasBody ? { json: input.body } : {}),
+    invalidJsonMessage: 'Notion 返回了非 JSON 响应',
+    mapError: ({ bodyKind, data: payload, status }) => upstreamError(
+      status,
+      errorMessage(status, payload, bodyKind),
+    ),
   })
-
-  // 正文只读一次:错误路径与成功路径共用这一份(上游读了两次,真 fetch 下会炸)。
-  const raw = await response.text()
-  if (!response.ok) throw upstreamError(response.status, errorMessage(response.status, raw))
   // 空响应体归一成 `{}`(上游 `payload ?? {}`):DELETE 之类的端点可能什么都不回。
-  if (raw === '') return {}
-
-  let payload: unknown
-  try {
-    payload = JSON.parse(raw)
-  } catch {
-    throw new TBError('unavailable', 'Notion 返回了非 JSON 响应', { retryable: true })
-  }
-  const result = record(payload)
+  if (data === undefined) return {}
+  const result = record(data)
   if (result === undefined) {
     throw new TBError('unavailable', 'Notion 返回的不是 JSON 对象', { retryable: true })
   }

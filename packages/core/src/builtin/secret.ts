@@ -5,11 +5,11 @@
  * `list` 只出 name + updatedAt;`resolve` 不出现在 cmd 表(仅供网关内部 Provider 解析引用名)。
  */
 
+import { z } from 'zod/v4'
 import type { SecretStoreImpl } from '../secret/secretStore'
-import type { CmdSpec, HelpModel } from '../htbp/model'
 import type { BuiltinModule } from './types'
-import type { TreePath } from '../types'
-import { cmdPath, LIST_OPTS_SCHEMA, optListOptions, requireString, VOID_ACK, withCommandPaths } from './util'
+import { BuiltinCommandRegistry } from './commandRegistry'
+import { LIST_OPTS_ZOD_SCHEMA, VOID_ACK } from './util'
 import { TBError } from '../errors'
 
 const DESCRIPTION
@@ -28,86 +28,60 @@ function assertUserSecretName(name: string): void {
   }
 }
 
-function secretCmds(nodePath: TreePath): CmdSpec[] {
-  const path = cmdPath(nodePath)
-  const cmds: CmdSpec[] = [
+interface SecretModuleDeps {
+  now: () => string
+  store: SecretStoreImpl
+}
+
+const COMMANDS = new BuiltinCommandRegistry<SecretModuleDeps>('secret', DESCRIPTION)
+  .register(
+    'set',
     {
-      name: 'set',
-      method: 'POST',
-      path,
       h: 'store or rotate a credential under a name; mount configs reference it as authRef',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          name: {
-            type: 'string',
-            description: 'reference name used as authRef in mount configs (":" is reserved)',
-          },
-          value: {
-            type: 'string',
-            description: 'the credential (token / key / JSON); encrypted at rest, never echoed',
-          },
-        },
-        required: ['name', 'value'],
-      },
+      inputSchema: z.strictObject({
+        name: z.string().min(1).describe(
+          'reference name used as authRef in mount configs (":" is reserved)',
+        ),
+        value: z.string().min(1).describe(
+          'the credential (token / key / JSON); encrypted at rest, never echoed',
+        ),
+      }),
       returns: 'void — value never echoed',
       scope: 'admin',
     },
+    async ({ name, value }, { deps }) => {
+      assertUserSecretName(name)
+      await deps.store.set(name, value, deps.now())
+      return VOID_ACK
+    },
+  )
+  .register(
+    'list',
     {
-      name: 'list',
-      method: 'POST',
-      path,
       h: 'list stored credential names (names and timestamps only, never values)',
-      inputSchema: { type: 'object', properties: { opts: LIST_OPTS_SCHEMA } },
+      inputSchema: z.strictObject({ opts: LIST_OPTS_ZOD_SCHEMA.optional() }),
       returns: 'Page<{ name, updatedAt }>',
       scope: 'admin',
     },
+    ({ opts }, { deps }) => deps.store.list(opts),
+  )
+  .register(
+    'delete',
     {
-      name: 'delete',
-      method: 'POST',
-      path,
       h: 'delete a credential; mounts still referencing it will fail to resolve',
-      inputSchema: {
-        type: 'object',
-        properties: { name: { type: 'string', description: 'reference name' } },
-        required: ['name'],
-      },
+      inputSchema: z.strictObject({
+        name: z.string().min(1).describe('reference name'),
+      }),
       returns: 'void',
       scope: 'admin',
     },
-  ]
-  return withCommandPaths(nodePath, cmds)
-}
+    async ({ name }, { deps }) => {
+      assertUserSecretName(name)
+      await deps.store.delete(name)
+      return VOID_ACK
+    },
+  )
 
 export function createSecretModule(store: SecretStoreImpl, now: () => string): BuiltinModule {
-  return {
-    module: 'secret',
-    description: DESCRIPTION,
-    help(nodePath: TreePath): HelpModel {
-      return {
-        node: { path: nodePath, kind: 'builtin', description: DESCRIPTION },
-        cmds: secretCmds(nodePath),
-      }
-    },
-    async dispatch(cmd: string, args: Record<string, unknown>): Promise<unknown> {
-      switch (cmd) {
-        case 'set': {
-          const name = requireString(args, 'name')
-          assertUserSecretName(name)
-          await store.set(name, requireString(args, 'value'), now())
-          return VOID_ACK
-        }
-        case 'list':
-          return store.list(optListOptions(args))
-        case 'delete': {
-          const name = requireString(args, 'name')
-          assertUserSecretName(name)
-          await store.delete(name)
-          return VOID_ACK
-        }
-        default:
-          throw new TBError('invalid_argument', `unknown cmd '${cmd}' on system/secret`)
-      }
-    },
-  }
+  return COMMANDS.module({ store, now })
 }

@@ -1,13 +1,7 @@
-import {
-  base64urlEncode,
-  type CallContext,
-  encodeCallContext,
-  HEADER_TB_CONTEXT,
-  HEADER_TB_UPSTREAM_AUTH,
-} from '@tool-bridge/core'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { createScreenshotFyiPlugin } from '../../src/screenshot_fyi/index'
 import { screenshotFyiActions } from '../../src/screenshot_fyi/schema'
+import { createProviderHarness } from '../support/providerHarness'
 
 /**
  * screenshot.fyi 迁移产物的 wire 级验收。断言都经真实 envelope,不直调内部函数。
@@ -17,59 +11,27 @@ import { screenshotFyiActions } from '../../src/screenshot_fyi/schema'
  * 迁移在这里最容易丢的是 boolean → 'true'/'false' 的显式转换,以及 `false` 被当成缺省丢掉。
  */
 
-const PLUGIN_TOKEN = 'tbp_test'
-const ENV = { PLUGIN_TOKEN }
 const API_KEY = 'sk_screenshot_test'
 const TARGET = 'https://example.com/pricing'
 const plugin = createScreenshotFyiPlugin()
 
-const CALLER: CallContext = {
-  keyId: 'k1',
-  owner: 'agent:tester',
-  scopes: [],
-  traceId: 't1',
+const { call: callProvider, envelope, sent, stubFetch } = createProviderHarness({
   mountPath: 'media/screenshot-fyi',
-  exportId: 'actions',
-}
-
-function envelope(body: unknown, opts: { auth?: string | null } = {}): Promise<Response> {
-  const headers: Record<string, string> = {
-    'authorization': `Bearer ${PLUGIN_TOKEN}`,
-    'content-type': 'application/json',
-    [HEADER_TB_CONTEXT]: encodeCallContext(CALLER),
-  }
-  const auth = opts.auth === undefined ? API_KEY : opts.auth
-  if (auth !== null) {
-    headers[HEADER_TB_UPSTREAM_AUTH] = base64urlEncode(new TextEncoder().encode(auth))
-  }
-  return Promise.resolve(plugin.fetch(
-    new Request('https://plugin.test/', { method: 'POST', headers, body: JSON.stringify(body) }),
-    ENV as never,
-  ))
-}
+  plugin,
+  restoreMocks: true,
+  upstreamAuth: API_KEY,
+})
 
 function call(args: unknown, opts?: { auth?: string | null }): Promise<Response> {
-  return envelope({ tool: 'Call', arguments: { name: 'take_screenshot', args } }, opts)
+  return callProvider('take_screenshot', args, opts)
 }
 
 function mockUpstream(status: number, payload: unknown): ReturnType<typeof vi.fn> {
-  const fn = vi.fn(() => Promise.resolve(new Response(
+  return stubFetch(() => Promise.resolve(new Response(
     typeof payload === 'string' ? payload : JSON.stringify(payload),
     { status, headers: { 'content-type': 'application/json' } },
   )))
-  vi.stubGlobal('fetch', fn)
-  return fn
 }
-
-/** 取上游收到的那个请求。 */
-function sent(mock: ReturnType<typeof vi.fn>): Request {
-  return (mock.mock.calls[0] as [Request])[0]
-}
-
-afterEach(() => {
-  vi.unstubAllGlobals()
-  vi.restoreAllMocks()
-})
 
 describe('契约面', () => {
   it('List 出全部 action,且都带 Zod 派生的 schema', async () => {

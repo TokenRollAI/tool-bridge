@@ -1,8 +1,8 @@
 import { Command } from 'commander'
-import { guard, printJson, printLine, table } from '../output'
+import { printJson, printLine, table } from '../output'
 import { resolveTarget, withGlobalOpts } from '../args'
 import { confirmDestructive } from '../confirm'
-import { apiJson, CliError } from '../http'
+import { CliError, withClient } from '../http'
 
 interface FeedbackGlobalOpts {
   baseUrl?: string
@@ -11,24 +11,13 @@ interface FeedbackGlobalOpts {
   yes?: boolean
 }
 
-/** ~feedback 列表的一行(不含 detail;下钻用 get)。 */
-interface FeedbackView {
-  at: string
-  by: string
-  down: number
-  id: string
-  score: number
-  title: string
-  up: number
-}
-
-/** `/<path>/~feedback[/<id>]` 端点路径(feedback 是 per-path 保留段能力)。 */
-function fbPath(pathArg: string, id?: string): string {
+/** feedback 是 per-path 能力；CLI 先拒绝空路径，编码/保留段由 SDK 权威处理。 */
+function feedbackTarget(pathArg: string): string {
   const p = String(pathArg ?? '')
     .trim()
     .replace(/^\/+|\/+$/g, '')
   if (p === '') throw new CliError('path is required (feedback is per-path)')
-  return id !== undefined ? `/${p}/~feedback/${id}` : `/${p}/~feedback`
+  return p
 }
 
 /** `tb feedback ls <path>` → GET /<path>/~feedback(净分排序;--hidden 含隐藏条目)。 */
@@ -39,24 +28,25 @@ export function feedbackLsCommand(): Command {
     .option('--hidden', 'Also show entries hidden from ~help (score <= -3)')
     .action(async (pathArg: string, opts: FeedbackGlobalOpts & { hidden?: boolean }) => {
       const asJson = Boolean(opts.json)
-      await guard(asJson, async () => {
-        const page = await apiJson<{ items: FeedbackView[] }>(resolveTarget(opts), {
-          path: fbPath(pathArg),
-          ...(opts.hidden ? { query: { hidden: 1 } } : {}),
-        })
-        if (asJson) {
-          printJson(page)
-          return
-        }
-        const rows = (page.items ?? []).map(f => [
-          f.id,
-          String(f.score),
-          f.title,
-          f.by,
-          f.at ? new Date(f.at).toLocaleString() : '-',
-        ])
-        printLine(table(['ID', 'SCORE', 'TITLE', 'BY', 'AT'], rows))
-      })
+      const target = resolveTarget(opts)
+      const page = await withClient(
+        target,
+        async client => await client.feedback.list(feedbackTarget(pathArg), {
+          hidden: opts.hidden,
+        }),
+      )
+      if (asJson) {
+        printJson(page)
+        return
+      }
+      const rows = (page.items ?? []).map(f => [
+        f.id,
+        String(f.score),
+        f.title,
+        f.by,
+        f.at ? new Date(f.at).toLocaleString() : '-',
+      ])
+      printLine(table(['ID', 'SCORE', 'TITLE', 'BY', 'AT'], rows))
     })
 }
 
@@ -68,19 +58,19 @@ export function feedbackGetCommand(): Command {
     .argument('<id>', 'Feedback id (fb_*)')
     .action(async (pathArg: string, idArg: string, opts: FeedbackGlobalOpts) => {
       const asJson = Boolean(opts.json)
-      await guard(asJson, async () => {
-        const entry = await apiJson<FeedbackView & { detail: string }>(resolveTarget(opts), {
-          path: fbPath(pathArg, idArg),
-        })
-        if (asJson) {
-          printJson(entry)
-          return
-        }
-        printLine(`${entry.title}  (score ${entry.score}: +${entry.up}/-${entry.down})`)
-        printLine(`by ${entry.by} at ${entry.at ? new Date(entry.at).toLocaleString() : '-'}`)
-        printLine('')
-        printLine(entry.detail)
-      })
+      const target = resolveTarget(opts)
+      const entry = await withClient(
+        target,
+        async client => await client.feedback.get(feedbackTarget(pathArg), idArg),
+      )
+      if (asJson) {
+        printJson(entry)
+        return
+      }
+      printLine(`${entry.title}  (score ${entry.score}: +${entry.up}/-${entry.down})`)
+      printLine(`by ${entry.by} at ${entry.at ? new Date(entry.at).toLocaleString() : '-'}`)
+      printLine('')
+      printLine(entry.detail)
     })
 }
 
@@ -94,18 +84,16 @@ export function feedbackSubmitCommand(): Command {
     .action(
       async (pathArg: string, opts: FeedbackGlobalOpts & { detail: string, title: string }) => {
         const asJson = Boolean(opts.json)
-        await guard(asJson, async () => {
-          const entry = await apiJson<{ id: string, path: string, title: string }>(
-            resolveTarget(opts),
-            {
-              method: 'POST',
-              path: fbPath(pathArg),
-              body: { title: opts.title, detail: opts.detail },
-            },
-          )
-          if (asJson) printJson(entry)
-          else printLine(`feedback ${entry.id} submitted on ${entry.path}`)
-        })
+        const target = resolveTarget(opts)
+        const entry = await withClient(
+          target,
+          async client => await client.feedback.submit(feedbackTarget(pathArg), {
+            title: opts.title,
+            detail: opts.detail,
+          }),
+        )
+        if (asJson) printJson(entry)
+        else printLine(`feedback ${entry.id} submitted on ${entry.path}`)
       },
     )
 }
@@ -121,19 +109,21 @@ export function feedbackVoteCommand(): Command {
     .argument('<value>', 'up | down | clear')
     .action(async (pathArg: string, idArg: string, valueArg: string, opts: FeedbackGlobalOpts) => {
       const asJson = Boolean(opts.json)
-      await guard(asJson, async () => {
-        const value = String(valueArg ?? '').trim()
-        if (!VOTE_VALUES.includes(value)) {
-          throw new CliError(`value must be one of: ${VOTE_VALUES.join(' | ')}`)
-        }
-        const view = await apiJson<FeedbackView>(resolveTarget(opts), {
-          method: 'POST',
-          path: fbPath(pathArg, idArg),
-          body: { vote: value },
-        })
-        if (asJson) printJson(view)
-        else printLine(`${view.id}: score ${view.score} (+${view.up}/-${view.down})`)
-      })
+      const value = String(valueArg ?? '').trim()
+      if (!VOTE_VALUES.includes(value)) {
+        throw new CliError(`value must be one of: ${VOTE_VALUES.join(' | ')}`)
+      }
+      const target = resolveTarget(opts)
+      const view = await withClient(
+        target,
+        async client => await client.feedback.vote(
+          feedbackTarget(pathArg),
+          idArg,
+          value as 'clear' | 'down' | 'up',
+        ),
+      )
+      if (asJson) printJson(view)
+      else printLine(`${view.id}: score ${view.score} (+${view.up}/-${view.down})`)
     })
 }
 
@@ -146,12 +136,14 @@ export function feedbackRmCommand(): Command {
     .option('--yes', 'Skip the confirmation prompt')
     .action(async (pathArg: string, idArg: string, opts: FeedbackGlobalOpts) => {
       const asJson = Boolean(opts.json)
-      await guard(asJson, async () => {
-        await confirmDestructive(opts, `Remove feedback ${idArg} on ${pathArg}?`)
-        await apiJson(resolveTarget(opts), { method: 'DELETE', path: fbPath(pathArg, idArg) })
-        if (asJson) printJson({ ok: true, id: idArg })
-        else printLine(`feedback ${idArg} removed`)
-      })
+      await confirmDestructive(opts, `Remove feedback ${idArg} on ${pathArg}?`)
+      const target = resolveTarget(opts)
+      await withClient(
+        target,
+        async client => await client.feedback.remove(feedbackTarget(pathArg), idArg),
+      )
+      if (asJson) printJson({ ok: true, id: idArg })
+      else printLine(`feedback ${idArg} removed`)
     })
 }
 

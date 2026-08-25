@@ -47,26 +47,23 @@ import type {
   listDatabasesInput,
   searchInput,
 } from './schema'
-import { assertPublicHttpUrl, guardedFetch } from '../_runtime/guardedFetch'
+import {
+  createProviderHttpClient,
+  type ProviderQuery,
+  type ResponseBodyKind,
+} from '../_runtime/providerHttp'
+import { asJsonObject as record, trimmedText as text } from '../_runtime/jsonValue'
 import { type ProviderContext, requireApiKey } from '../_runtime/plugin'
+import { assertPublicHttpUrl } from '../_runtime/guardedFetch'
 import { upstreamError } from '../_runtime/upstreamError'
 
 const SERVICE = 'metabase'
 const API_PATH_PREFIX = '/api'
 const CURRENT_USER_PATH = '/user/current'
+const http = createProviderHttpClient({ service: SERVICE })
 
 type Json = Record<string, unknown>
 type QueryValue = boolean | number | string | string[] | undefined
-
-function text(value: unknown): string | undefined {
-  if (typeof value !== 'string') return undefined
-  const trimmed = value.trim()
-  return trimmed === '' ? undefined : trimmed
-}
-
-function record(value: unknown): Json | undefined {
-  return typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Json) : undefined
-}
 
 function configError(message: string): TBError {
   return new TBError('invalid_argument', `${SERVICE} 的 ${message}`)
@@ -123,46 +120,30 @@ function errorMessage(payload: unknown, status: number): string {
     ?? `Metabase 返回 HTTP ${status}`
 }
 
+function errorPayload(data: unknown, bodyKind: ResponseBodyKind): unknown {
+  return bodyKind === 'invalid-json' ? { message: data } : data
+}
+
 async function request(ctx: ProviderContext, path: string, query?: Record<string, QueryValue>): Promise<unknown> {
   // 取凭证与解配置放在 try 外:它们抛的是配置错误,不该被下面的传输失败兜底吞成 502。
   const apiKey = requireApiKey(ctx, SERVICE)
-  const url = new URL(`${resolveApiBase(ctx)}${path}`)
-  for (const [key, value] of Object.entries(query ?? {})) {
-    if (value === undefined) continue
-    if (Array.isArray(value)) {
-      // `models` 是多选,展开成重复的同名参数(拼成逗号串 Metabase 不认)。
-      for (const item of value) url.searchParams.append(key, item)
-      continue
-    }
-    url.searchParams.set(key, String(value))
-  }
-
-  let response: Response
-  try {
-    response = await guardedFetch(url.toString(), {
-      method: 'GET',
-      headers: { 'accept': 'application/json', 'x-api-key': apiKey },
-    })
-  } catch (error) {
-    // 传输层失败必须就地归一:漏出去的裸 Error 会被 plugin-sdk 抹成 500,
-    // 把"上游不通/出网被拦"说成插件自身故障。
-    if (error instanceof TBError) throw error
-    throw upstreamError(502, `Metabase 请求失败:${error instanceof Error ? error.message : '未知错误'}`)
-  }
-
-  const raw = await response.text().catch(() => '')
-  let payload: unknown = null
-  if (raw !== '') {
-    try {
-      payload = JSON.parse(raw) as unknown
-    } catch {
-      // 2xx 回非 JSON 只能是上游坏了;错误响应回 HTML/纯文本很常见,那时原文就是最好的消息。
-      if (response.ok) throw upstreamError(502, 'Metabase 返回了非 JSON 响应')
-      payload = { message: raw }
-    }
-  }
-  if (!response.ok) throw upstreamError(response.status, errorMessage(payload, response.status))
-  return payload
+  const result = await http.request({
+    baseUrl: `${resolveApiBase(ctx)}/`,
+    path,
+    // `models` 是多选，数组由薄层展开成重复同名参数。
+    query: Object.entries(query ?? {}) satisfies ProviderQuery,
+    headers: { 'accept': 'application/json', 'x-api-key': apiKey },
+    invalidJsonMessage: 'Metabase 返回了非 JSON 响应',
+    mapError: ({ bodyKind, data, status }) => upstreamError(
+      status,
+      errorMessage(errorPayload(data, bodyKind), status),
+    ),
+    mapTransportError: ({ message }) => upstreamError(
+      502,
+      `Metabase 请求失败:${message ?? '未知错误'}`,
+    ),
+  })
+  return result.data === undefined ? null : result.data
 }
 
 function requireObject(payload: unknown, label: string): Json {

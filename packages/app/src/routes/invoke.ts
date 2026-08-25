@@ -11,7 +11,6 @@ import {
   assertSecretRefUse,
   check,
   contextScopeForCmd,
-  type ContextUploadInput,
   isTBError,
   KEY_PLUGIN,
   negotiate,
@@ -34,8 +33,10 @@ import {
   createContextUploadGrant,
   deviceIdForDeviceFs,
   dispatchContextCmd,
+  dispatchContextUploadCmd,
   dispatchSkillhubCmd,
   localContext,
+  parseContextCmdArgs,
   skillhubProviderFor,
 } from '../contextNodes'
 import {
@@ -55,6 +56,7 @@ import { invalidateToolCache } from '../providers/toolCache'
 import { renderResult, tbErrorResponse } from '../responses'
 import { invalidateProviderOAuth } from '../providerOAuth'
 import { rejectStoreCapabilityBodyFields } from './store'
+import { resolveStoreRequestOrigin } from '../store'
 import { invalidateMcpEra } from '../providers/mcp'
 import { invalidateMcpOAuth } from '../oauth'
 
@@ -169,18 +171,17 @@ export async function handleInvoke(c: AppContext, env: RouteEnv): Promise<Respon
       throw new TBError('permission_denied', `readOnly 挂载拒绝 '${command}'`)
     }
     if (directUpload) {
-      const result = await createContextUploadGrant(
-        node,
-        cfg,
-        deps,
-        args as unknown as ContextUploadInput,
+      const result = await dispatchContextUploadCmd(
+        args,
+        input => createContextUploadGrant(node, cfg, deps, input),
       )
       return renderResult(result, negotiate(c.req.header('accept')))
     }
     if (cfg.provider === 'device-fs') {
+      const forwardedArgs = parseContextCmdArgs(command, args)
       const result = await invokeDevice(deps, deviceIdForDeviceFs(cfg), {
         path: `fs/${command}`,
-        arguments: args,
+        arguments: forwardedArgs,
         context: deviceCallContextFrom(ctx),
       })
       return renderResult(result, negotiate(c.req.header('accept')))
@@ -188,9 +189,10 @@ export async function handleInvoke(c: AppContext, env: RouteEnv): Promise<Respon
     // device 自定义 context 节点:标记命中 → 相对路径转发到设备。
     const contextMarker = deviceMarkerOf(cfg.providerConfig)
     if (cfg.provider !== 'r2' && cfg.provider !== 's3' && contextMarker !== null) {
+      const forwardedArgs = parseContextCmdArgs(command, args)
       const result = await invokeDevice(deps, contextMarker.deviceId, {
         path: `${relativeDevicePath(node.path, contextMarker.mountPath)}/${command}`,
-        arguments: args,
+        arguments: forwardedArgs,
         context: deviceCallContextFrom(ctx),
       })
       return renderResult(result, negotiate(c.req.header('accept')))
@@ -332,7 +334,7 @@ export async function handleInvoke(c: AppContext, env: RouteEnv): Promise<Respon
   let result: unknown
   try {
     result = await mod.dispatch(cmd, args, ctx, {
-      requestOrigin: deps.canonicalOrigin ?? new URL(c.req.url).origin,
+      requestOrigin: resolveStoreRequestOrigin(c.req.url, deps.canonicalOrigin),
     })
   } catch (error) {
     await searchSync?.abort(registryMarker)

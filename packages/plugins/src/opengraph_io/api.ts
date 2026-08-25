@@ -23,36 +23,24 @@ import type {
   scrapeSiteInput,
   scrapeUrlInput,
 } from './schema'
-import { assertPublicHttpUrl, guardedFetch } from '../_runtime/guardedFetch'
+import {
+  compactDefined as compact,
+  integerValue as count,
+  booleanValue as flag,
+  asJsonObject as record,
+  trimmedText as text,
+} from '../_runtime/jsonValue'
+import { createProviderHttpClient, type ProviderQuery } from '../_runtime/providerHttp'
 import { type ProviderContext, requireApiKey } from '../_runtime/plugin'
+import { assertPublicHttpUrl } from '../_runtime/guardedFetch'
 import { upstreamError } from '../_runtime/upstreamError'
 
 const SERVICE = 'opengraph_io'
 const API_BASE = 'https://opengraph.io'
+const http = createProviderHttpClient({ baseUrl: `${API_BASE}/`, service: SERVICE })
 
 type Json = Record<string, unknown>
 type QueryValue = boolean | number | string | undefined
-
-function record(value: unknown): Json | undefined {
-  return typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Json) : undefined
-}
-
-function text(value: unknown): string | undefined {
-  return typeof value === 'string' && value.trim() !== '' ? value.trim() : undefined
-}
-
-function count(value: unknown): number | undefined {
-  return typeof value === 'number' && Number.isInteger(value) ? value : undefined
-}
-
-function flag(value: unknown): boolean | undefined {
-  return typeof value === 'boolean' ? value : undefined
-}
-
-/** 丢掉值为 undefined 的键:上游 `compactObject` 的等价物。 */
-function compact(input: Json): Json {
-  return Object.fromEntries(Object.entries(input).filter(([, value]) => value !== undefined))
-}
 
 function errorMessage(payload: unknown): string {
   if (typeof payload === 'string' && payload.trim() !== '') return payload
@@ -70,38 +58,20 @@ async function request(
   path: string,
   query: Record<string, QueryValue>,
 ): Promise<unknown> {
-  const url = new URL(path, API_BASE)
-  url.searchParams.set('app_id', requireApiKey(ctx, SERVICE))
-  for (const [key, value] of Object.entries(query)) {
-    if (value !== undefined) url.searchParams.set(key, String(value))
-  }
-
-  let response: Response
-  let payload: unknown = null
-  try {
-    response = await guardedFetch(url.toString(), {
-      method: 'GET',
-      headers: { accept: 'application/json' },
-    })
-    const raw = await response.text()
-    // 解析失败就把原文当 payload:OpenGraph.io 的错误体常是纯文本,
-    // 让"非法 JSON"的 502 顶掉真实的 401/429 会丢掉可归类的信息。
-    if (raw !== '') {
-      try {
-        payload = JSON.parse(raw)
-      } catch {
-        payload = raw
-      }
-    }
-  } catch (error) {
-    const message = error instanceof Error
-      ? `OpenGraph.io request failed: ${error.message}`
-      : 'OpenGraph.io request failed'
-    throw upstreamError(502, message)
-  }
-
-  if (!response.ok) throw upstreamError(response.status, errorMessage(payload))
-  return payload
+  const apiKey = requireApiKey(ctx, SERVICE)
+  const requestQuery: ProviderQuery = [['app_id', apiKey], ...Object.entries(query)]
+  const { data } = await http.request({
+    path,
+    query: requestQuery,
+    headers: { accept: 'application/json' },
+    invalidJson: 'text',
+    mapError: ({ data: payload, status }) => upstreamError(status, errorMessage(payload)),
+    mapTransportError: ({ message }) => upstreamError(
+      502,
+      message === undefined ? 'OpenGraph.io request failed' : `OpenGraph.io request failed: ${message}`,
+    ),
+  })
+  return data ?? null
 }
 
 /** `{successful, data}` 信封在时剥掉外层;其余原样。 */

@@ -1,8 +1,8 @@
 import { createInterface } from 'node:readline/promises'
 import { Command } from 'commander'
-import { guard, printJson, printLine } from '../output'
 import { resolveTarget, withGlobalOpts } from '../args'
 import { readConfig, writeConfig } from '../config'
+import { printJson, printLine } from '../output'
 import { apiFetch, CliError } from '../http'
 
 /** 交互式读取一行(仅在缺 flag 且为 TTY 时用;SK 明文回显,见交付说明的偏差项)。 */
@@ -36,33 +36,31 @@ export function loginCommand(): Command {
     .option('--profile <name>', 'Profile name', 'default')
     .action(async (opts: LoginOpts) => {
       const asJson = Boolean(opts.json)
-      await guard(asJson, async () => {
-        const profile = String(opts.profile ?? 'default')
-        let baseUrl = opts.baseUrl ?? process.env.TB_BASE_URL
-        let sk = opts.sk ?? process.env.TB_SK
-        if (!baseUrl && process.stdin.isTTY) baseUrl = await prompt('Gateway base URL: ')
-        if (!sk && process.stdin.isTTY) sk = await prompt('Secret Key (SK): ')
-        if (!baseUrl)
-          throw new CliError('base URL is required (pass --base-url or set TB_BASE_URL)')
-        if (!sk) throw new CliError('SK is required (pass --sk or set TB_SK)')
+      const profile = String(opts.profile ?? 'default')
+      let baseUrl = opts.baseUrl ?? process.env.TB_BASE_URL
+      let sk = opts.sk ?? process.env.TB_SK
+      if (!baseUrl && process.stdin.isTTY) baseUrl = await prompt('Gateway base URL: ')
+      if (!sk && process.stdin.isTTY) sk = await prompt('Secret Key (SK): ')
+      if (!baseUrl)
+        throw new CliError('base URL is required (pass --base-url or set TB_BASE_URL)')
+      if (!sk) throw new CliError('SK is required (pass --sk or set TB_SK)')
 
-        const normalized = baseUrl.replace(/\/+$/, '')
-        const { timeoutMs } = resolveTarget({ timeout: opts.timeout })
-        const res = await apiFetch(
-          { baseUrl: normalized, sk, timeoutMs },
-          { path: '/~help', accept: 'text' },
-        )
-        if (res.status === 401) {
-          throw new CliError('SK rejected by gateway (401): check the key', 'permission_denied')
-        }
+      const normalized = baseUrl.replace(/\/+$/, '')
+      const { timeoutMs } = resolveTarget({ timeout: opts.timeout })
+      const res = await apiFetch(
+        { baseUrl: normalized, sk, timeoutMs },
+        { path: '/~help', accept: 'text' },
+      )
+      if (res.status === 401) {
+        throw new CliError('SK rejected by gateway (401): check the key', 'permission_denied')
+      }
 
-        const config = readConfig()
-        config.profiles[profile] = { baseUrl: normalized, sk }
-        config.current = profile
-        writeConfig(config)
+      const config = readConfig()
+      config.profiles[profile] = { baseUrl: normalized, sk }
+      config.current = profile
+      writeConfig(config)
 
-        if (asJson) printJson({ ok: true, profile, baseUrl: normalized })
-        else printLine(`logged in: profile "${profile}" → ${normalized}`)
-      })
+      if (asJson) printJson({ ok: true, profile, baseUrl: normalized })
+      else printLine(`logged in: profile "${profile}" → ${normalized}`)
     })
 }

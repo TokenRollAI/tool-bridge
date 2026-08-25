@@ -1,11 +1,5 @@
-import {
-  base64urlEncode,
-  type CallContext,
-  encodeCallContext,
-  HEADER_TB_CONTEXT,
-  HEADER_TB_UPSTREAM_AUTH,
-} from '@tool-bridge/core'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+import { createProviderHarness } from '../support/providerHarness'
 import { createTelegramPlugin } from '../../src/telegram/index'
 import { telegramActions } from '../../src/telegram/schema'
 
@@ -16,49 +10,28 @@ import { telegramActions } from '../../src/telegram/schema'
  * 上游只回 `true` 的那条分支。
  */
 
-const PLUGIN_TOKEN = 'tbp_test'
-const ENV = { PLUGIN_TOKEN }
 const BOT_TOKEN = '123456789:AAHdeadbeef'
 const plugin = createTelegramPlugin()
 
-const CALLER: CallContext = {
-  keyId: 'k1',
-  owner: 'agent:tester',
-  scopes: [],
-  traceId: 't1',
+const {
+  call,
+  envelope,
+  sent,
+  env: ENV,
+  stubFetch,
+} = createProviderHarness({
   mountPath: 'chat/telegram',
-  exportId: 'actions',
-}
-
-function envelope(body: unknown, opts: { auth?: string | null } = {}): Promise<Response> {
-  const headers: Record<string, string> = {
-    'authorization': `Bearer ${PLUGIN_TOKEN}`,
-    'content-type': 'application/json',
-    [HEADER_TB_CONTEXT]: encodeCallContext(CALLER),
-  }
-  const auth = opts.auth === undefined ? BOT_TOKEN : opts.auth
-  if (auth !== null) {
-    headers[HEADER_TB_UPSTREAM_AUTH] = base64urlEncode(new TextEncoder().encode(auth))
-  }
-  return Promise.resolve(plugin.fetch(
-    new Request('https://plugin.test/', { method: 'POST', headers, body: JSON.stringify(body) }),
-    ENV as never,
-  ))
-}
-
-function call(name: string, args: unknown, opts?: { auth?: string | null }): Promise<Response> {
-  return envelope({ tool: 'Call', arguments: { name, args } }, opts)
-}
+  plugin,
+  upstreamAuth: BOT_TOKEN,
+})
 
 /** 原样返回给定 body —— 信封式错误、非 JSON 响应这类用它。 */
 function mockRaw(payload: unknown, status = 200, contentType = 'application/json'): ReturnType<typeof vi.fn> {
   const body = typeof payload === 'string' ? payload : JSON.stringify(payload)
-  const fn = vi.fn(() => Promise.resolve(new Response(body, {
+  return stubFetch(() => Promise.resolve(new Response(body, {
     status,
     headers: { 'content-type': contentType },
   })))
-  vi.stubGlobal('fetch', fn)
-  return fn
 }
 
 /** Bot API 的成功信封:`{ ok: true, result }`。 */
@@ -66,17 +39,9 @@ function mockTelegram(result: unknown, opts: { status?: number } = {}): ReturnTy
   return mockRaw({ ok: true, result }, opts.status ?? 200)
 }
 
-function sent(mock: ReturnType<typeof vi.fn>): Request {
-  return (mock.mock.calls[0] as [Request])[0]
-}
-
 async function sentBody(mock: ReturnType<typeof vi.fn>): Promise<unknown> {
   return JSON.parse(await sent(mock).text())
 }
-
-afterEach(() => {
-  vi.unstubAllGlobals()
-})
 
 describe('契约面', () => {
   it('~describe 报单个 tools/v1 export', async () => {

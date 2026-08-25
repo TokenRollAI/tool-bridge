@@ -14,26 +14,21 @@
 
 import type { z } from 'zod/v4'
 import type { takeScreenshotInput } from './schema'
+import { createProviderHttpClient, type ProviderQuery } from '../_runtime/providerHttp'
 import { type ProviderContext, requireApiKey } from '../_runtime/plugin'
+import { trimmedText as text } from '../_runtime/jsonValue'
 import { upstreamError } from '../_runtime/upstreamError'
-import { guardedFetch } from '../_runtime/guardedFetch'
 
 const SERVICE = 'screenshot_fyi'
 const API_BASE = 'https://www.screenshot.fyi'
 const CAPTURE_PATH = '/api/take'
 const REQUEST_TIMEOUT_MS = 30_000
+const http = createProviderHttpClient({ baseUrl: `${API_BASE}/`, service: SERVICE })
 
 function toRecord(value: unknown): Record<string, unknown> | undefined {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : undefined
-}
-
-/** 非空字符串(取 trim 后的值);上游 `optionalString` 的等价物。 */
-function text(value: unknown): string | undefined {
-  if (typeof value !== 'string') return undefined
-  const trimmed = value.trim()
-  return trimmed === '' ? undefined : trimmed
 }
 
 /**
@@ -52,17 +47,6 @@ function errorMessage(payload: unknown, status: number): string {
   return top ?? detail ?? `screenshot.fyi 返回 HTTP ${status}`
 }
 
-/** 空体读成 null 而非报错:上游成功/失败两条路都可能回空体,由各自的调用点判定缺什么。 */
-async function readPayload(response: Response): Promise<unknown> {
-  const body = await response.text()
-  if (body.trim() === '') return null
-  try {
-    return JSON.parse(body) as unknown
-  } catch {
-    throw upstreamError(502, 'screenshot.fyi 返回了非 JSON 响应')
-  }
-}
-
 function buildQuery(input: z.infer<typeof takeScreenshotInput>): Record<string, string> {
   const query: Record<string, string> = { url: input.url }
   if (input.width !== undefined) query.width = String(input.width)
@@ -73,36 +57,28 @@ function buildQuery(input: z.infer<typeof takeScreenshotInput>): Record<string, 
   return query
 }
 
-async function capture(url: URL): Promise<Response> {
-  try {
-    return await guardedFetch(url.toString(), {
-      method: 'GET',
-      headers: { accept: 'application/json' },
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-    })
-  } catch (error) {
-    // 只归一超时。出站策略拦截(EgressBlockedError)等是**永久**拒绝,归到这里会被
-    // 标成 retryable,让调用方对着一个不会变的结果重试。故其余原样上抛。
-    if (error instanceof Error && error.name === 'TimeoutError') {
-      throw upstreamError(504, `screenshot.fyi ${REQUEST_TIMEOUT_MS / 1000}s 内没有返回截图`)
-    }
-    throw error
-  }
-}
-
 export async function takeScreenshot(
   input: z.infer<typeof takeScreenshotInput>,
   ctx: ProviderContext,
 ): Promise<{ url: string }> {
-  const target = new URL(CAPTURE_PATH, API_BASE)
-  target.searchParams.set('accessKey', requireApiKey(ctx, SERVICE))
-  for (const [key, value] of Object.entries(buildQuery(input))) {
-    target.searchParams.set(key, value)
-  }
-
-  const response = await capture(target)
-  const payload = await readPayload(response)
-  if (!response.ok) throw upstreamError(response.status, errorMessage(payload, response.status))
+  const query: ProviderQuery = [
+    ['accessKey', requireApiKey(ctx, SERVICE)],
+    ...Object.entries(buildQuery(input)),
+  ]
+  const response = await http.request({
+    path: CAPTURE_PATH,
+    query,
+    headers: { accept: 'application/json' },
+    timeoutMs: REQUEST_TIMEOUT_MS,
+    invalidJsonMessage: 'screenshot.fyi 返回了非 JSON 响应',
+    mapError: ({ bodyKind, data, status }) => bodyKind === 'invalid-json'
+      ? upstreamError(502, 'screenshot.fyi 返回了非 JSON 响应')
+      : upstreamError(status, errorMessage(bodyKind === 'empty' ? null : data, status)),
+    mapTransportError: ({ kind }) => kind === 'timeout'
+      ? upstreamError(504, `screenshot.fyi ${REQUEST_TIMEOUT_MS / 1000}s 内没有返回截图`)
+      : upstreamError(502, 'screenshot.fyi 请求失败'),
+  })
+  const payload = response.bodyKind === 'empty' ? null : response.data
 
   const screenshotUrl = text(toRecord(payload)?.url)
   if (screenshotUrl === undefined) {

@@ -15,41 +15,21 @@
 import type { z } from 'zod/v4'
 import { TBError } from '@tool-bridge/plugin-sdk'
 import type { addSitemapInput, clearCacheInput, recacheUrlsInput } from './schema'
+import { asJsonObject as record, trimmedText as text } from '../_runtime/jsonValue'
 import { type ProviderContext, requireApiKey } from '../_runtime/plugin'
+import { createProviderHttpClient } from '../_runtime/providerHttp'
 import { upstreamError } from '../_runtime/upstreamError'
-import { guardedFetch } from '../_runtime/guardedFetch'
 
 const SERVICE = 'prerender'
 const API_BASE = 'https://api.prerender.io'
+const http = createProviderHttpClient({ baseUrl: `${API_BASE}/`, service: SERVICE })
 
 type Json = Record<string, unknown>
-
-/** 上游 `optionalString`:非字符串、或去空白后为空,都算缺失。 */
-function text(value: unknown): string | undefined {
-  if (typeof value !== 'string') return undefined
-  const trimmed = value.trim()
-  return trimmed === '' ? undefined : trimmed
-}
-
-function record(value: unknown): Json | undefined {
-  return typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Json) : undefined
-}
 
 function errorMessage(payload: unknown): string | undefined {
   if (typeof payload === 'string') return text(payload)
   const body = record(payload)
   return text(body?.error) ?? text(body?.message) ?? text(body?.status)
-}
-
-/** 空体回 null;JSON 解析不了就把原文当 payload,留给消息提取。 */
-async function readPayload(response: Response): Promise<unknown> {
-  const body = await response.text().catch(() => '')
-  if (body.trim() === '') return null
-  try {
-    return JSON.parse(body) as unknown
-  } catch {
-    return body
-  }
 }
 
 interface RequestInput {
@@ -64,35 +44,24 @@ async function request(
   path: string,
   input: RequestInput,
 ): Promise<{ payload: unknown, status: number }> {
-  // base 末尾补 `/`、path 去掉首 `/`:与上游 buildPrerenderUrl 同构。
-  const url = new URL(path.startsWith('/') ? path.slice(1) : path, `${API_BASE}/`)
-
-  const headers: Record<string, string> = { accept: 'application/json' }
-  if (input.method === 'POST') headers['content-type'] = 'application/json'
-
-  let response: Response
-  try {
-    response = await guardedFetch(url.toString(), {
-      method: input.method,
-      headers,
-      ...(input.body === undefined ? {} : { body: JSON.stringify(input.body) }),
-    })
-  } catch (error) {
-    // 传输层失败必须就地归一:漏出去的裸 Error 会被 plugin-sdk 抹成 500。
-    throw upstreamError(
+  const result = await http.request({
+    path,
+    method: input.method,
+    headers: { accept: 'application/json' },
+    ...(input.body === undefined ? {} : { json: input.body }),
+    acceptStatuses: input.expectedStatuses,
+    invalidJson: 'text',
+    sensitiveValues: [requireApiKey(ctx, SERVICE)],
+    mapError: ({ data: payload, status }) => upstreamError(
+      status,
+      errorMessage(payload) ?? `Prerender 请求失败,HTTP ${status}`,
+    ),
+    mapTransportError: ({ message }) => upstreamError(
       502,
-      error instanceof Error ? `Prerender 请求失败: ${error.message}` : 'Prerender 请求失败',
-    )
-  }
-
-  const payload = await readPayload(response)
-  if (!response.ok && !(input.expectedStatuses ?? []).includes(response.status)) {
-    throw upstreamError(
-      response.status,
-      errorMessage(payload) ?? `Prerender 请求失败,HTTP ${response.status}`,
-    )
-  }
-  return { payload, status: response.status }
+      message === undefined ? 'Prerender 请求失败' : `Prerender 请求失败: ${message}`,
+    ),
+  })
+  return { payload: result.bodyKind === 'empty' ? null : result.data, status: result.status }
 }
 
 function cacheClearStatusPath(apiKey: string): string {

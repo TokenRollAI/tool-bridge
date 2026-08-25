@@ -62,6 +62,8 @@ import type {
   uploadAttachmentInput,
 } from './schema'
 import type { updateMemoInput } from './schema.handwritten'
+import { compactDefined as compact, asJsonObject as record, trimmedText as text } from '../_runtime/jsonValue'
+import { createProviderHttpClient, type ProviderQuery } from '../_runtime/providerHttp'
 import { assertPublicHttpUrl, guardedFetch } from '../_runtime/guardedFetch'
 import { type ProviderContext, requireApiKey } from '../_runtime/plugin'
 import { upstreamError } from '../_runtime/upstreamError'
@@ -73,6 +75,7 @@ const API_SUFFIX = '/api/v1'
 const ATTACHMENT_MAX_BYTES = 20 * 1024 * 1024
 /** `String.fromCharCode(...chunk)` 的分块大小:整块展开会爆调用栈。 */
 const BASE64_CHUNK = 8192
+const http = createProviderHttpClient({ service: SERVICE })
 
 type Collection = 'attachments' | 'memos' | 'users'
 type Json = Record<string, unknown>
@@ -95,29 +98,11 @@ interface Target {
   baseUrl: string
 }
 
-function record(value: unknown): Json | undefined {
-  return typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Json) : undefined
-}
-
-/** 上游 `optionalString` 的等价物:去空白后仍非空才算有值。 */
-function text(value: unknown): string | undefined {
-  if (typeof value !== 'string') return undefined
-  const trimmed = value.trim()
-  return trimmed === '' ? undefined : trimmed
-}
-
 /** 上游 `requiredInputString`:schema 的 `min(n)` 放过纯空白串,必填断言落在这层。 */
 function requireText(value: unknown, field: string): string {
   const result = text(value)
   if (result === undefined) throw new TBError('invalid_argument', `${field} is required.`)
   return result
-}
-
-/** 丢掉值为 undefined 的键(上游 `compactObject`);`null` 要留住(它是"抹掉"的意思)。 */
-function compact<T>(input: Record<string, T | undefined>): Record<string, T> {
-  return Object.fromEntries(
-    Object.entries(input).filter(([, value]) => value !== undefined),
-  ) as Record<string, T>
 }
 
 /** 上游回的形状不符合契约 —— 是上游的问题,不是调用方的错。 */
@@ -199,17 +184,6 @@ function resourcePath(name: string, collection: Collection): string {
   return `/${collection}/${encodeURIComponent(id)}`
 }
 
-/** 空体按 `null`;2xx 上的非 JSON 是上游坏了,错误响应上的非 JSON 则原文当消息用。 */
-function readPayload(response: Response, body: string): unknown {
-  if (body.trim() === '') return null
-  try {
-    return JSON.parse(body)
-  } catch {
-    if (response.ok) throw responseError('Memos returned invalid JSON')
-    return body
-  }
-}
-
 /** Memos 的错误消息就一个 `message` 键(gRPC-gateway 的形状);非 JSON 体则是整段文本。 */
 function errorMessage(payload: unknown): string {
   const direct = text(payload)
@@ -225,34 +199,21 @@ interface RequestInput {
 }
 
 async function request(target: Target, input: RequestInput): Promise<unknown> {
-  const url = new URL(`${target.baseUrl}${input.path}`)
-  for (const [key, value] of Object.entries(input.query ?? {})) {
-    if (value !== undefined) url.searchParams.set(key, String(value))
-  }
-
-  let response: Response
-  let payload: unknown
-  try {
-    response = await guardedFetch(url.toString(), {
-      method: input.method ?? 'GET',
-      headers: {
-        accept: 'application/json',
-        authorization: `Bearer ${target.apiKey}`,
-        ...(input.body === undefined ? {} : { 'content-type': 'application/json' }),
-      },
-      body: input.body === undefined ? undefined : JSON.stringify(input.body),
-    })
-    payload = readPayload(response, await response.text())
-  } catch (error) {
-    // 传输层失败必须就地归一:漏出去的裸 Error 会被 plugin-sdk 抹成 "internal plugin error"
-    // 500。EgressBlockedError 与 responseError 本身是 TBError,原样冒上去。
-    if (error instanceof TBError) throw error
-    const detail = error instanceof Error ? error.message : 'unknown network error'
-    throw upstreamError(502, `Memos ${input.path} request failed: ${detail}`)
-  }
-
-  if (!response.ok) throw upstreamError(response.status, errorMessage(payload))
-  return payload
+  const result = await http.request({
+    baseUrl: `${target.baseUrl}/`,
+    path: input.path,
+    method: input.method ?? 'GET',
+    query: Object.entries(input.query ?? {}) satisfies ProviderQuery,
+    headers: { accept: 'application/json', authorization: `Bearer ${target.apiKey}` },
+    ...(input.body === undefined ? {} : { json: input.body }),
+    invalidJsonMessage: 'Memos returned invalid JSON',
+    mapError: ({ data, status }) => upstreamError(status, errorMessage(data)),
+    mapTransportError: ({ message }) => upstreamError(
+      502,
+      `Memos ${input.path} request failed: ${message ?? 'unknown network error'}`,
+    ),
+  })
+  return result.data === undefined ? null : result.data
 }
 
 /** 上游 `readBoundedResponseBytes`:边读边计数,超限就地掐断,不把整个响应先收下来。 */

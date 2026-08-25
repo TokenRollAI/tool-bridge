@@ -3,29 +3,28 @@
  * 以及注册面的配置校验(含 s3 连通探测)。
  *
  * 语义真源在 core 的 objectProvider / skillhub;这里只负责把宿主注入的 ObjectStore、
- * keyPrefix、$ref 阈值与中转 URL 工厂接上,并把数据面路径的命令叶子映射到 provider 方法。
+ * keyPrefix、$ref 阈值与中转 URL 工厂接上。命令校验与派发由 core 注册真源完成。
  */
 import {
   contextCapabilitiesOf,
-  type ContextEntryInput,
-  type ContextPatch,
   type ContextProvider,
   type ContextUploadGrant,
   type ContextUploadInput,
   createObjectContextProvider,
   createObjectContextUploadGrant,
   createSkillhubProvider,
+  dispatchContextCmd as dispatchContextCmdCore,
+  dispatchContextUploadCmd,
+  dispatchSkillhubCmd as dispatchSkillhubCmdCore,
   isContextExpired,
   isTBError,
-  type ListOptions,
   type NodeConfig,
   NodeRegistryStore,
   type ObjectStore,
+  parseContextCmdArgs,
   PRESIGN_TTL_SEC_DEFAULT,
-  type SearchOptions,
   type SecretStoreImpl,
   type SkillhubProvider,
-  type SkillPublishFile,
   TBError,
   type TreeNode,
   type TreePath,
@@ -35,6 +34,8 @@ import { createS3ObjectStore, type S3StoreConfig } from './providers/s3Object'
 import { assertPluginMountContract, requirePluginExport } from './toolNodes'
 import { assertNoDeviceMarker } from './deviceNodes'
 import { signRefToken } from './refToken'
+
+export { dispatchContextUploadCmd, parseContextCmdArgs }
 
 // ---------- SDK 进程内 Provider ----------
 
@@ -246,29 +247,7 @@ export async function dispatchSkillhubCmd(
   command: string,
   args: Record<string, unknown>,
 ): Promise<unknown> {
-  switch (command.toLowerCase()) {
-    case 'list':
-      return await provider.list(args.opts as ListOptions | undefined)
-    case 'get':
-      return typeof args.file === 'string'
-        ? await provider.get_file(args.id as string, args.file)
-        : await provider.get(args.id as string)
-    case 'search':
-      return await provider.search(args.query as string, args.opts as ListOptions | undefined)
-    case 'publish':
-      if (!Array.isArray(args.files)) {
-        throw new TBError('invalid_argument', 'publish 需要数组 \'files\'')
-      }
-      return await provider.publish({
-        ...(typeof args.id === 'string' ? { id: args.id } : {}),
-        files: args.files as SkillPublishFile[],
-      })
-    case 'remove':
-      return await provider.remove(args.id as string)
-    default:
-      // skillhubScopeForCmd 已挡未知 cmd;此处为类型完备性兜底。
-      throw new TBError('invalid_argument', `unknown cmd '${command}'`)
-  }
+  return await dispatchSkillhubCmdCore(provider, command, args)
 }
 
 /**
@@ -281,40 +260,7 @@ export async function dispatchContextCmd(
   command: string,
   args: Record<string, unknown>,
 ): Promise<unknown> {
-  // 全动词可选:未实现的动词一律按 unknown cmd 拒绝(与"~help 只列真实存在的操作"一致,
-  // 调用方看到的动词表与可调用集合始终吻合)。
-  const unimplemented = (): never => {
-    throw new TBError('invalid_argument', `unknown cmd '${command}'(provider 未实现)`)
-  }
-  switch (command.toLowerCase()) {
-    case 'list':
-      if (provider.list === undefined) return unimplemented()
-      return await provider.list((args.path as string) ?? '', args.opts as ListOptions | undefined)
-    case 'get':
-      if (provider.get === undefined) return unimplemented()
-      return await provider.get(args.path as string)
-    case 'write':
-      if (provider.write === undefined) return unimplemented()
-      if (typeof args.entry !== 'object' || args.entry === null) {
-        throw new TBError('invalid_argument', 'write 需要对象 \'entry\'')
-      }
-      return await provider.write(args.path as string, args.entry as ContextEntryInput)
-    case 'update':
-      if (provider.update === undefined) return unimplemented()
-      if (typeof args.patch !== 'object' || args.patch === null) {
-        throw new TBError('invalid_argument', 'update 需要对象 \'patch\'')
-      }
-      return await provider.update(args.path as string, args.patch as ContextPatch)
-    case 'delete':
-      if (provider.delete === undefined) return unimplemented()
-      return await provider.delete(args.path as string)
-    case 'search':
-      if (provider.search === undefined) return unimplemented()
-      return await provider.search(args.query as string, args.opts as SearchOptions | undefined)
-    default:
-      // contextScopeForCmd 已挡未知 cmd;此处为类型完备性兜底。
-      throw new TBError('invalid_argument', `unknown cmd '${command}'`)
-  }
+  return await dispatchContextCmdCore(provider, command, args)
 }
 
 /** ttl 懒回收单点判定:过期 → 删节点 + not_found;未过期 → 通过。context/skillhub 共用。 */

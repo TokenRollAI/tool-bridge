@@ -8,9 +8,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { type SchemaField, SchemaFields } from '@/components/SchemaFields'
 import { FormSection } from '@/components/FormSection'
-import { Checkbox } from '@/components/ui/checkbox'
-import { Textarea } from '@/components/ui/textarea'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -22,7 +21,121 @@ import {
 } from './registryConfig'
 import { ManagedCredentialFields } from './ManagedCredentialFields'
 import { initialManagedCredential } from './managedCredential'
+import { MountConfigFields } from './MountConfigFields'
 import { CredentialHint } from './CredentialHint'
+
+function textField(
+  key: string,
+  label: string,
+  options: { placeholder?: string, required?: boolean, rows?: number } = {},
+): SchemaField {
+  return {
+    key, label, required: options.required,
+    ui: {
+      'ui:classNames': 'font-mono text-xs',
+      ...(options.placeholder === undefined ? {} : { 'ui:placeholder': options.placeholder }),
+      ...(options.rows === undefined
+        ? {}
+        : { 'ui:widget': 'textarea', 'ui:options': { rows: options.rows } }),
+    },
+  }
+}
+
+const choiceField = (
+  key: string, label: string, options: Array<[value: string, title: string]>,
+): SchemaField => ({
+  key, label, required: true,
+  schema: { type: 'string', oneOf: options.map(([value, title]) => ({ const: value, title })) },
+  ui: { 'ui:classNames': 'font-mono text-xs', 'ui:widget': 'select' },
+})
+
+function RegistrySchemaFields({ fields, idPrefix, onChange, state }: {
+  fields: SchemaField[]
+  idPrefix: string
+  onChange: (next: RegistryMountFormState) => void
+  state: RegistryMountFormState
+}) {
+  return (
+    <SchemaFields
+      fields={fields}
+      idPrefix={idPrefix}
+      onChange={(values) => {
+        const patch: Record<string, unknown> = {}
+        for (const field of fields) {
+          const value = values[field.key]
+          const current = state[field.key as keyof RegistryMountFormState]
+          if (typeof value === typeof current && ['string', 'boolean'].includes(typeof value)) {
+            patch[field.key] = value
+          }
+        }
+        onChange({ ...state, ...patch } as RegistryMountFormState)
+      }}
+      value={state as unknown as Record<string, unknown>}
+    />
+  )
+}
+
+const AUTH_SCHEMES: Array<[string, string]> = [
+  ['bearer', 'Bearer（默认）'], ['raw', '无前缀（原样注入）'], ['custom', '自定义前缀'],
+]
+
+function mcpFields(state: RegistryMountFormState): SchemaField[] {
+  return [
+    textField('mcpUrl', 'url', { placeholder: 'https://mcp.example.com/mcp', required: true }),
+    choiceField('mcpAuthMode', '上游认证', [
+      ['none', '无（公开上游）'], ['authRef', 'authRef — 静态凭证'],
+      ['oauth', 'oauth — 网关托管 OAuth'],
+    ]),
+    ...(state.mcpAuthMode === 'authRef'
+      ? [
+          textField('mcpAuthRef', 'authRef', { required: true }),
+          textField('mcpAuthHeader', 'authHeader（可空）', { placeholder: 'Authorization' }),
+          choiceField('mcpSchemeMode', 'authScheme', AUTH_SCHEMES),
+          ...(state.mcpSchemeMode === 'custom'
+            ? [textField('mcpAuthScheme', '自定义 scheme 前缀', { placeholder: 'Token' })]
+            : []),
+        ]
+      : []),
+    textField('mcpHeadersSpec', '静态 headers（每行 Name=value）', {
+      placeholder: 'X-Lark-MCP-Allowed-Tools=search-doc,fetch-doc',
+      rows: 3,
+    }),
+  ]
+}
+
+function httpFields(state: RegistryMountFormState): SchemaField[] {
+  return [
+    textField('endpoint', 'endpoint', { placeholder: 'https://postman-echo.com', required: true }),
+    textField('toolsJson', 'tools（HttpToolDef[] JSON）', { required: true, rows: 7 }),
+    textField('httpAuthRef', 'authRef（可空）'),
+    textField('authHeader', 'authHeader（可空）', { placeholder: 'Authorization' }),
+    choiceField('httpSchemeMode', 'authScheme', AUTH_SCHEMES),
+    ...(state.httpSchemeMode === 'custom'
+      ? [textField('authScheme', '自定义 scheme 前缀', { placeholder: 'Token' })]
+      : []),
+  ]
+}
+
+const ADVANCED_FIELDS = [
+  textField('prefix', '工具名前缀（纯拼接）', { placeholder: 'gh__' }),
+  textField('hideSpec', 'hide（原名，逗号分隔）', { placeholder: 'dangerous_tool' }),
+  textField('renameSpec', 'rename（每行 from=to）', { rows: 2 }),
+  textField('describeSpec', 'describe（每行 from=描述）', { rows: 2 }),
+]
+const S3_FIELDS = [
+  textField('s3Endpoint', 'endpoint', { placeholder: 'https://….r2.cloudflarestorage.com', required: true }),
+  textField('s3Bucket', 'bucket', { required: true }),
+  textField('s3Region', 'region（可空，缺省 auto）'),
+  textField('ctxAuthRef', 'authRef', { placeholder: 's3-main', required: true }),
+]
+const policyFields = (label: string): SchemaField[] => [
+  textField('ttl', 'ttl 秒（可空，到期整节点回收）', { placeholder: '86400' }),
+  { key: 'readOnly', label, schema: { type: 'boolean' } },
+]
+const REMOTE_FIELDS = [
+  textField('baseUrl', 'baseUrl（须在白名单内）', { placeholder: 'https://tb.example.com', required: true }),
+  textField('skRef', 'skRef（远端 SK 的 authRef，可空）'),
+]
 
 function ExportField({
   id,
@@ -36,37 +149,28 @@ function ExportField({
   value: string
 }) {
   const required = options.length > 1
-  if (options.length === 0) {
-    return (
-      <div className="grid gap-1.5">
-        <Label className="text-xs" htmlFor={id}>
-          export（可空；无 ~describe 缓存时可手填）
-        </Label>
-        <Input className="font-mono text-xs" id={id} onChange={event => onChange(event.target.value)} value={value} />
-      </div>
-    )
-  }
+  const field = options.length === 0
+    ? textField('value', 'export（可空；无 ~describe 缓存时可手填）')
+    : {
+        ...choiceField(
+          'value',
+          required ? 'export（该 plugin 有多个 export）' : 'export（单 export 可留空）',
+          options.map(item => [item.id, `${item.id}${item.description ? ` — ${item.description}` : ''}`]),
+        ),
+        required,
+        ui: {
+          'ui:classNames': 'font-mono text-xs',
+          'ui:placeholder': required ? '选择 export…' : `${options[0]?.id}（默认）`,
+          'ui:widget': 'select',
+        },
+      }
   return (
-    <div className="grid gap-1.5">
-      <Label className="text-xs" htmlFor={id}>
-        export
-        {' '}
-        {required ? '*（该 plugin 有多个 export）' : '（单 export 可留空）'}
-      </Label>
-      <Select onValueChange={onChange} value={value}>
-        <SelectTrigger className="font-mono text-xs" id={id}>
-          <SelectValue placeholder={required ? '选择 export…' : `${options[0]?.id}（默认）`} />
-        </SelectTrigger>
-        <SelectContent>
-          {options.map(item => (
-            <SelectItem className="font-mono text-xs" key={item.id} value={item.id}>
-              {item.id}
-              {item.description ? ` — ${item.description}` : ''}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-    </div>
+    <SchemaFields
+      fields={[field]}
+      idPrefix={id}
+      onChange={next => onChange(typeof next.value === 'string' ? next.value : '')}
+      value={{ value }}
+    />
   )
 }
 
@@ -175,71 +279,12 @@ function PluginMountConfigFields({
     )
   }
   return (
-    <div className="grid gap-2">
-      {fields.map(field => (
-        <div className="grid gap-1.5" key={field.key}>
-          <Label className="text-xs" htmlFor={`plugin-config-${field.key}`}>
-            {field.label ?? field.key}
-            {field.required === true && ' *'}
-          </Label>
-          <Input
-            className="font-mono text-xs"
-            id={`plugin-config-${field.key}`}
-            onChange={event => onChange({ ...value, [field.key]: event.target.value })}
-            value={value[field.key] ?? ''}
-          />
-          {field.description !== undefined && (
-            <p className="text-[11px] text-muted-foreground">{field.description}</p>
-          )}
-        </div>
-      ))}
-    </div>
-  )
-}
-
-function S3Fields({
-  onChange,
-  prefix,
-  state,
-}: {
-  onChange: (next: RegistryMountFormState) => void
-  prefix: string
-  state: RegistryMountFormState
-}) {
-  const update = <K extends keyof RegistryMountFormState>(key: K, value: RegistryMountFormState[K]) =>
-    onChange({ ...state, [key]: value })
-  return (
-    <>
-      <div className="grid gap-3 sm:grid-cols-2">
-        <Field id={`${prefix}-s3-endpoint`} label="endpoint *" onChange={value => update('s3Endpoint', value)} placeholder="https://….r2.cloudflarestorage.com" value={state.s3Endpoint} />
-        <Field id={`${prefix}-s3-bucket`} label="bucket *" onChange={value => update('s3Bucket', value)} value={state.s3Bucket} />
-      </div>
-      <div className="grid gap-3 sm:grid-cols-2">
-        <Field id={`${prefix}-s3-region`} label="region（可空，缺省 auto）" onChange={value => update('s3Region', value)} value={state.s3Region} />
-        <Field id={`${prefix}-auth`} label="authRef *" onChange={value => update('ctxAuthRef', value)} placeholder="s3-main" value={state.ctxAuthRef} />
-      </div>
-    </>
-  )
-}
-
-function ContentPolicyFields({
-  onChange,
-  readOnlyLabel,
-  state,
-}: {
-  onChange: (next: RegistryMountFormState) => void
-  readOnlyLabel: string
-  state: RegistryMountFormState
-}) {
-  return (
-    <div className="grid gap-3 sm:grid-cols-2 sm:items-end">
-      <Field id={`${state.kind}-ttl`} label="ttl 秒（可空，到期整节点回收）" onChange={ttl => onChange({ ...state, ttl })} placeholder="86400" value={state.ttl} />
-      {/* biome-ignore lint/a11y/noLabelWithoutControl: Radix Checkbox 是 label 内可交互控件 */}
-      <label className="flex items-center gap-2 pb-2 text-xs">
-        <Checkbox checked={state.readOnly} onCheckedChange={value => onChange({ ...state, readOnly: value === true })} />
-        {readOnlyLabel}
-      </label>
-    </div>
+    <MountConfigFields
+      fields={fields}
+      idPrefix="plugin-config"
+      onChange={onChange}
+      value={value}
+    />
   )
 }
 
@@ -286,78 +331,12 @@ export function RegistryKindFields({
       >
         {state.kind === 'mcp' && (
           <>
-            <Field
-              id="mcp-url"
-              label="url *（Streamable HTTP）"
-              onChange={value => update('mcpUrl', value)}
-              placeholder="https://mcp.example.com/mcp"
-              value={state.mcpUrl}
+            <RegistrySchemaFields
+              fields={mcpFields(state)}
+              idPrefix="mcp"
+              onChange={onChange}
+              state={state}
             />
-            <div className="grid gap-3 sm:grid-cols-2">
-              <div className="grid gap-1.5">
-                <Label className="text-xs">上游认证</Label>
-                <Select
-                  onValueChange={value => update('mcpAuthMode', value as RegistryMountFormState['mcpAuthMode'])}
-                  value={state.mcpAuthMode}
-                >
-                  <SelectTrigger className="font-mono text-xs"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem className="font-mono text-xs" value="none">无（公开上游）</SelectItem>
-                    <SelectItem className="font-mono text-xs" value="authRef">authRef — 静态凭证</SelectItem>
-                    <SelectItem className="font-mono text-xs" value="oauth">oauth — 网关托管 OAuth</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              {state.mcpAuthMode === 'authRef' && (
-                <Field id="mcp-auth" label="authRef *" onChange={value => update('mcpAuthRef', value)} value={state.mcpAuthRef} />
-              )}
-            </div>
-            {state.mcpAuthMode === 'authRef' && (
-              <div className="grid gap-3 sm:grid-cols-2">
-                <Field
-                  id="mcp-auth-header"
-                  label="authHeader（可空）"
-                  onChange={value => update('mcpAuthHeader', value)}
-                  placeholder="Authorization"
-                  value={state.mcpAuthHeader}
-                />
-                <div className="grid gap-1.5">
-                  <Label className="text-xs">authScheme</Label>
-                  <Select
-                    onValueChange={value => update('mcpSchemeMode', value as RegistryMountFormState['mcpSchemeMode'])}
-                    value={state.mcpSchemeMode}
-                  >
-                    <SelectTrigger className="font-mono text-xs"><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem className="font-mono text-xs" value="bearer">Bearer（默认）</SelectItem>
-                      <SelectItem className="font-mono text-xs" value="raw">无前缀（原样注入）</SelectItem>
-                      <SelectItem className="font-mono text-xs" value="custom">自定义前缀</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-            )}
-            {state.mcpAuthMode === 'authRef' && state.mcpSchemeMode === 'custom' && (
-              <Field
-                id="mcp-auth-scheme"
-                label="自定义 scheme 前缀"
-                onChange={value => update('mcpAuthScheme', value)}
-                placeholder="Token"
-                value={state.mcpAuthScheme}
-              />
-            )}
-            <div className="grid gap-1.5">
-              <Label className="text-xs" htmlFor="mcp-headers">静态 headers（每行 Name=value）</Label>
-              <Textarea
-                className="font-mono text-xs"
-                id="mcp-headers"
-                onChange={event => update('mcpHeadersSpec', event.target.value)}
-                placeholder="X-Lark-MCP-Allowed-Tools=search-doc,fetch-doc"
-                rows={3}
-                spellCheck={false}
-                value={state.mcpHeadersSpec}
-              />
-            </div>
             {state.mcpAuthMode === 'oauth' && (
               <p className="text-[11px] text-muted-foreground">
                 挂载后自动打开上游授权页；token 由网关保管并自动续期。
@@ -367,47 +346,12 @@ export function RegistryKindFields({
         )}
 
         {state.kind === 'http' && (
-          <>
-            <Field
-              id="http-endpoint"
-              label="endpoint *"
-              onChange={value => update('endpoint', value)}
-              placeholder="https://postman-echo.com"
-              value={state.endpoint}
-            />
-            <div className="grid gap-1.5">
-              <Label className="text-xs" htmlFor="http-tools">tools *（HttpToolDef[] JSON）</Label>
-              <Textarea
-                className="font-mono text-xs"
-                id="http-tools"
-                onChange={event => update('toolsJson', event.target.value)}
-                rows={7}
-                spellCheck={false}
-                value={state.toolsJson}
-              />
-            </div>
-            <div className="grid gap-3 sm:grid-cols-3">
-              <Field id="http-auth" label="authRef（可空）" onChange={value => update('httpAuthRef', value)} value={state.httpAuthRef} />
-              <Field id="http-auth-header" label="authHeader（可空）" onChange={value => update('authHeader', value)} placeholder="Authorization" value={state.authHeader} />
-              <div className="grid gap-1.5">
-                <Label className="text-xs">authScheme</Label>
-                <Select
-                  onValueChange={value => update('httpSchemeMode', value as RegistryMountFormState['httpSchemeMode'])}
-                  value={state.httpSchemeMode}
-                >
-                  <SelectTrigger className="font-mono text-xs"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem className="font-mono text-xs" value="bearer">Bearer（默认）</SelectItem>
-                    <SelectItem className="font-mono text-xs" value="raw">无前缀（原样注入）</SelectItem>
-                    <SelectItem className="font-mono text-xs" value="custom">自定义前缀</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-            {state.httpSchemeMode === 'custom' && (
-              <Field id="http-auth-scheme" label="自定义 scheme 前缀" onChange={value => update('authScheme', value)} placeholder="Token" value={state.authScheme} />
-            )}
-          </>
+          <RegistrySchemaFields
+            fields={httpFields(state)}
+            idPrefix="http"
+            onChange={onChange}
+            state={state}
+          />
         )}
 
         {state.kind === 'context' && (
@@ -497,36 +441,50 @@ export function RegistryKindFields({
                 />
               </>
             )}
-            {state.provider === 's3' && <S3Fields onChange={onChange} prefix="ctx" state={state} />}
-            <ContentPolicyFields onChange={onChange} readOnlyLabel="readOnly（拒绝 write/update/delete）" state={state} />
+            {state.provider === 's3' && (
+              <RegistrySchemaFields fields={S3_FIELDS} idPrefix="context-s3" onChange={onChange} state={state} />
+            )}
+            <RegistrySchemaFields
+              fields={policyFields('readOnly（拒绝 write/update/delete）')}
+              idPrefix="context-policy"
+              onChange={onChange}
+              state={state}
+            />
           </>
         )}
 
         {state.kind === 'skillhub' && (
           <>
-            <div className="grid gap-3 sm:grid-cols-2">
-              <div className="grid gap-1.5">
-                <Label className="text-xs">provider</Label>
-                <Select onValueChange={value => update('skillProvider', value as 'r2' | 's3')} value={state.skillProvider}>
-                  <SelectTrigger className="font-mono text-xs"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem className="font-mono text-xs" value="r2">r2（实例自带桶）</SelectItem>
-                    <SelectItem className="font-mono text-xs" value="s3">s3（外部兼容端点）</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <Field id="skill-prefix" label="key 前缀（可空）" onChange={value => update('ctxPrefix', value)} value={state.ctxPrefix} />
-            </div>
-            {state.skillProvider === 's3' && <S3Fields onChange={onChange} prefix="skill" state={state} />}
-            <ContentPolicyFields onChange={onChange} readOnlyLabel="readOnly（隐藏 publish/remove）" state={state} />
+            <RegistrySchemaFields
+              fields={[
+                choiceField('skillProvider', 'provider', [
+                  ['r2', 'r2（实例自带桶）'], ['s3', 's3（外部兼容端点）'],
+                ]),
+                textField('ctxPrefix', 'key 前缀（可空）'),
+              ]}
+              idPrefix="skill-provider"
+              onChange={onChange}
+              state={state}
+            />
+            {state.skillProvider === 's3' && (
+              <RegistrySchemaFields fields={S3_FIELDS} idPrefix="skill-s3" onChange={onChange} state={state} />
+            )}
+            <RegistrySchemaFields
+              fields={policyFields('readOnly（隐藏 publish/remove）')}
+              idPrefix="skill-policy"
+              onChange={onChange}
+              state={state}
+            />
           </>
         )}
 
         {state.kind === 'remote' && (
-          <div className="grid gap-3 sm:grid-cols-2">
-            <Field id="remote-url" label="baseUrl *（须在白名单内）" onChange={value => update('baseUrl', value)} placeholder="https://tb.example.com" value={state.baseUrl} />
-            <Field id="remote-skref" label="skRef（远端 SK 的 authRef，可空）" onChange={value => update('skRef', value)} value={state.skRef} />
-          </div>
+          <RegistrySchemaFields
+            fields={REMOTE_FIELDS}
+            idPrefix="remote"
+            onChange={onChange}
+            state={state}
+          />
         )}
 
         {state.kind === 'tool' && (
@@ -646,20 +604,12 @@ export function RegistryKindFields({
           index="03"
           title="高级虚拟化"
         >
-          <div className="grid gap-3 sm:grid-cols-2">
-            <Field id="virt-prefix" label="工具名前缀（纯拼接）" onChange={value => update('prefix', value)} placeholder="gh__" value={state.prefix} />
-            <Field id="virt-hide" label="hide（原名，逗号分隔）" onChange={value => update('hideSpec', value)} placeholder="dangerous_tool" value={state.hideSpec} />
-          </div>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <div className="grid gap-1.5">
-              <Label className="text-xs" htmlFor="virt-rename">rename（每行 from=to）</Label>
-              <Textarea className="font-mono text-xs" id="virt-rename" onChange={event => update('renameSpec', event.target.value)} rows={2} spellCheck={false} value={state.renameSpec} />
-            </div>
-            <div className="grid gap-1.5">
-              <Label className="text-xs" htmlFor="virt-describe">describe（每行 from=描述）</Label>
-              <Textarea className="font-mono text-xs" id="virt-describe" onChange={event => update('describeSpec', event.target.value)} rows={2} spellCheck={false} value={state.describeSpec} />
-            </div>
-          </div>
+          <RegistrySchemaFields
+            fields={ADVANCED_FIELDS}
+            idPrefix="virtualize"
+            onChange={onChange}
+            state={state}
+          />
         </FormSection>
       )}
     </>

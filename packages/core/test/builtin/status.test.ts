@@ -24,4 +24,10 @@ describe('builtin status 模块', () => {
       e => isTBError(e) && e.code === 'invalid_argument',
     )
   })
+
+  it('无参命令拒绝未知字段', async () => {
+    await expect(mod.dispatch('get', { unexpected: true }, ctx)).rejects.toSatisfy(
+      e => isTBError(e) && e.code === 'invalid_argument',
+    )
+  })
 })

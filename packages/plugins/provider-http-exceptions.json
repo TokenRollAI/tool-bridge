@@ -1,0 +1,89 @@
+{
+  "version": 1,
+  "exceptions": [
+    {
+      "file": "src/convertapi/api.ts",
+      "category": "multipart",
+      "guardedFetchCalls": 1,
+      "reason": "ConvertAPI requires a FormData upload with runtime-generated multipart boundaries."
+    },
+    {
+      "file": "src/dropbox/api.ts",
+      "category": "binary",
+      "guardedFetchCalls": 2,
+      "reason": "Dropbox content endpoints return or accept raw bytes while metadata lives in response/request headers."
+    },
+    {
+      "file": "src/fal_ai/api.ts",
+      "category": "stream",
+      "guardedFetchCalls": 1,
+      "reason": "The remaining fal.ai endpoint is an SSE stream parsed with event-stream semantics."
+    },
+    {
+      "file": "src/feishu_custom_bot/api.ts",
+      "category": "signed",
+      "guardedFetchCalls": 1,
+      "reason": "The webhook adapter signs and size-checks the exact serialized request payload before sending it."
+    },
+    {
+      "file": "src/googledocs/api/shared.ts",
+      "category": "binary",
+      "guardedFetchCalls": 1,
+      "reason": "The shared transport must return an unconsumed Response because export endpoints yield PDF bytes."
+    },
+    {
+      "file": "src/linear/api.ts",
+      "category": "graphql",
+      "guardedFetchCalls": 1,
+      "reason": "Linear uses one GraphQL endpoint and GraphQL error envelopes rather than REST status semantics."
+    },
+    {
+      "file": "src/memos/api.ts",
+      "category": "binary",
+      "guardedFetchCalls": 1,
+      "reason": "The remaining call downloads a caller URL through a bounded streaming reader before attachment upload."
+    },
+    {
+      "file": "src/mistral_ai/api.ts",
+      "category": "mixed",
+      "guardedFetchCalls": 3,
+      "reason": "The remaining paths fetch bounded binary sources and send multipart uploads; JSON actions use providerHttp."
+    },
+    {
+      "file": "src/openai/api.ts",
+      "category": "mixed",
+      "guardedFetchCalls": 2,
+      "reason": "The remaining transport returns audio bytes or sends multipart audio and also streams bounded caller URLs."
+    },
+    {
+      "file": "src/pubmed/api.ts",
+      "category": "mixed",
+      "guardedFetchCalls": 1,
+      "reason": "NCBI uses bounded streaming text, XML payloads, and form-urlencoded POST bodies behind one adapter."
+    },
+    {
+      "file": "src/railway/api.ts",
+      "category": "graphql",
+      "guardedFetchCalls": 1,
+      "reason": "Railway uses one GraphQL endpoint and GraphQL error envelopes rather than REST status semantics."
+    },
+    {
+      "file": "src/stripe/api.ts",
+      "category": "form",
+      "guardedFetchCalls": 1,
+      "reason": "Stripe requires nested bracket form encoding and repeated form keys instead of JSON bodies."
+    },
+    {
+      "file": "src/twilio/api.ts",
+      "category": "form",
+      "guardedFetchCalls": 1,
+      "reason": "Twilio write endpoints require application/x-www-form-urlencoded bodies and Basic authentication."
+    },
+    {
+      "file": "src/uptimerobot/api.ts",
+      "category": "form",
+      "guardedFetchCalls": 1,
+      "reason": "UptimeRobot v2 is a form-urlencoded command API whose failures are returned in HTTP-200 envelopes."
+    }
+  ]
+}

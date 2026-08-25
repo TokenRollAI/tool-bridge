@@ -56,12 +56,23 @@ import type {
   updateCheckitemStateInput,
   updateListInput,
 } from './schema'
+import {
+  booleanValue as boolean,
+  compactDefined as compact,
+  asJsonObject as record,
+  trimmedText as text,
+} from '../_runtime/jsonValue'
+import {
+  createProviderHttpClient,
+  type ProviderHttpErrorContext,
+  type ProviderQuery,
+} from '../_runtime/providerHttp'
 import { type ProviderContext, requireCredential } from '../_runtime/plugin'
 import { upstreamError } from '../_runtime/upstreamError'
-import { guardedFetch } from '../_runtime/guardedFetch'
 
 const SERVICE = 'trello'
 const API_BASE = 'https://api.trello.com/1'
+const http = createProviderHttpClient({ baseUrl: `${API_BASE}/`, service: SERVICE })
 
 /** 调用方不给 `fields` 时各资源发的默认字段表。 */
 const DEFAULT_MEMBER_FIELDS = ['id', 'username', 'fullName']
@@ -70,9 +81,10 @@ const DEFAULT_CARD_FIELDS = ['name', 'desc', 'url', 'shortUrl', 'closed', 'due',
 
 /** `key` 无效与 `token` 无效是两回事,而 Trello 只回一句同样简短的话。 */
 const AUTH_HINTS: Record<string, string> = {
-  'invalid key': 'Trello API key 无效:用 https://trello.com/power-ups/admin 上 Key 一栏的值,'
+  // 不带 scheme：provider HTTP 边界会统一抹掉错误里的完整 URL，避免上游响应携密 URL 泄漏。
+  'invalid key': 'Trello API key 无效:用 trello.com/power-ups/admin 上 Key 一栏的值,'
     + '不是 API Secret,也不是 Atlassian API token',
-  'invalid token': 'Trello API token 无效:在 https://trello.com/power-ups/admin 上 API Key 旁边的'
+  'invalid token': 'Trello API token 无效:在 trello.com/power-ups/admin 上 API Key 旁边的'
     + ' Token 链接里生成',
 }
 
@@ -87,33 +99,13 @@ interface RequestInput {
   query?: Array<[string, QueryValue]>
 }
 
-/** 上游 `readOptionalString`:去空白后仍非空才算有值。 */
-function text(value: unknown): string | undefined {
-  if (typeof value !== 'string') return undefined
-  const trimmed = value.trim()
-  return trimmed === '' ? undefined : trimmed
-}
-
-function record(value: unknown): Json | undefined {
-  return typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Json) : undefined
-}
-
 function number(value: unknown): number | undefined {
   return typeof value === 'number' ? value : undefined
-}
-
-function boolean(value: unknown): boolean | undefined {
-  return typeof value === 'boolean' ? value : undefined
 }
 
 /** 出参里 `null` 与"字段缺席"是两回事:前者是上游明确说"这一项是空的"。 */
 function nullableText(value: unknown): string | null | undefined {
   return value === null ? null : text(value)
-}
-
-/** 丢掉值为 undefined 的键(上游 `compactObject`);`null` 要留住。 */
-function compact(input: Record<string, unknown>): Json {
-  return Object.fromEntries(Object.entries(input).filter(([, value]) => value !== undefined))
 }
 
 /**
@@ -158,56 +150,45 @@ function idList(value: string[] | undefined, field: string): string | undefined 
 }
 
 /** Trello 的错误消息:JSON 体里找三个键,非 JSON 就是正文本身,都没有才兜底状态码。 */
-function errorMessage(response: Response, body: string): string {
-  const fallback = response.statusText !== '' ? response.statusText : `HTTP ${response.status}`
-  if (!(response.headers.get('content-type') ?? '').includes('application/json')) {
-    return body === '' ? fallback : body
+function errorMessage(context: ProviderHttpErrorContext): string {
+  const fallback = context.statusText !== '' ? context.statusText : `HTTP ${context.status}`
+  if (!(context.headers.get('content-type') ?? '').includes('application/json')) {
+    if (context.bodyKind === 'empty') return fallback
+    if (context.bodyKind === 'invalid-json' || context.bodyKind === 'text') {
+      return text(context.data) ?? fallback
+    }
+    return JSON.stringify(context.data) ?? fallback
   }
-  let payload: unknown
-  try {
-    payload = JSON.parse(body)
-  } catch {
-    return fallback
-  }
+  if (context.bodyKind !== 'json') return fallback
   // Trello 的 4xx 常常直接回一个 JSON 字符串字面量,比如 `"invalid token"`。
-  if (typeof payload === 'string') return text(payload) ?? fallback
-  const error = record(payload)
+  if (typeof context.data === 'string') return text(context.data) ?? fallback
+  const error = record(context.data)
   return text(error?.message) ?? text(error?.error) ?? text(error?.detail) ?? fallback
 }
 
 async function request(ctx: ProviderContext, input: RequestInput): Promise<unknown> {
-  const url = new URL(`${API_BASE}${input.path}`)
   // 凭证进 query —— Trello 的设计,换 header 会 401。部署侧要对这两个参数名脱敏。
-  url.searchParams.set('key', requireCredential(ctx, SERVICE, 'apiKey'))
-  url.searchParams.set('token', requireCredential(ctx, SERVICE, 'apiToken'))
-  for (const [key, value] of input.query ?? []) {
-    if (value === undefined || value === null) continue
-    url.searchParams.set(key, String(value))
-  }
-
+  const query: ProviderQuery = [
+    ['key', requireCredential(ctx, SERVICE, 'apiKey')],
+    ['token', requireCredential(ctx, SERVICE, 'apiToken')],
+    ...(input.query ?? []),
+  ]
   const hasBody = input.body !== undefined
-  const headers: Record<string, string> = { accept: 'application/json' }
-  if (hasBody) headers['content-type'] = 'application/json'
-
-  const response = await guardedFetch(url.toString(), {
+  const { data } = await http.request({
+    path: input.path,
     method: input.method ?? 'GET',
-    headers,
-    body: hasBody ? JSON.stringify(input.body) : undefined,
+    query,
+    headers: { accept: 'application/json' },
+    ...(hasBody ? { json: input.body } : {}),
+    invalidJsonMessage: 'Trello 返回了非 JSON 响应',
+    mapError: (context) => {
+      const message = errorMessage(context)
+      // 401/403 说明这份凭证不对;把 Trello 那句过于简短的话换成"该去哪儿拿对的值"。
+      return upstreamError(context.status, AUTH_HINTS[message] ?? message)
+    },
   })
-
-  const body = await response.text().catch(() => '')
-  if (!response.ok) {
-    const message = errorMessage(response, body)
-    // 401/403 说明这份凭证不对;把 Trello 那句过于简短的话换成"该去哪儿拿对的值"。
-    throw upstreamError(response.status, AUTH_HINTS[message] ?? message)
-  }
   // 204 与空体都表示"做完了,没东西回" —— 变更类 action 走的就是这条路。
-  if (response.status === 204 || body === '') return undefined
-  try {
-    return JSON.parse(body)
-  } catch {
-    throw new TBError('unavailable', 'Trello 返回了非 JSON 响应', { retryable: true })
-  }
+  return data
 }
 
 function normalizeMember(payload: unknown): Json {

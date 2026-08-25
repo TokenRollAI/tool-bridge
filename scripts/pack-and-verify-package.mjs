@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
-import { basename, join, resolve } from 'node:path'
+import { basename, join, posix, resolve } from 'node:path'
 import { spawn } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import process from 'node:process'
@@ -68,6 +68,8 @@ export function collectPackedEntryTargets(manifest) {
   collectConditionalTargets(manifest.types, targets)
   collectConditionalTargets(manifest.exports, targets)
   collectConditionalTargets(manifest.bin, targets)
+  // Dashboard 是静态站点包，没有 JS library export；index.html 就是公开入口。
+  if (manifest.name === '@tool-bridge/dashboard') targets.add('./dist/index.html')
   return [...targets].sort()
 }
 
@@ -80,32 +82,100 @@ export function assertPackedEntryTargetsExist(manifest, packedFiles) {
   }
 }
 
-export function assertSdkDeviceArtifact(deviceJs, deviceDts) {
-  const forbiddenRuntime = [
-    ['Node builtin', /(?:from\s+|import\s*)["']node:/],
-    ['process.env', /\bprocess\.env\b/],
-    ['Node ws package', /(?:from\s+|import\s*)["']ws["']/],
-    ['private workspace package', /["']@tool-bridge\/(?:app|core)(?:\/[^"']*)?["']/],
-    ['Hono', /(?:from\s+|import\s*)["']hono(?:\/[^"']*)?["']/],
-  ]
-  for (const [label, pattern] of forbiddenRuntime) {
-    if (pattern.test(deviceJs)) throw new Error(`sdk device artifact contains ${label}`)
-  }
-  if (/\b(?:NodeJS|Buffer)\b/.test(deviceDts)) {
-    throw new Error('sdk device declarations contain Node-only types')
-  }
-  if (/@tool-bridge\/(?:app|core)/.test(deviceDts)) {
-    throw new Error('sdk device declarations reference a private workspace package')
+function collectExternalImports(source) {
+  return [
+    ...source.matchAll(/\bfrom\s+["']([^"']+)["']/g),
+    ...source.matchAll(/\bimport\s+["']([^"']+)["']/g),
+    ...source.matchAll(/\bimport\s*\(\s*["']([^"']+)["']\s*\)/g),
+  ].map(match => match[1]).filter(Boolean)
+}
+
+/**
+ * 从一个 neutral entry 递归收集其相对 import 闭包。声明文件由 tsup 以 `.js`
+ * specifier 指向同名 `.d.ts`，因此 declaration 模式会做一次显式映射。
+ */
+export function collectModuleClosure(entry, sources, declaration = false) {
+  const visited = new Set()
+  const pending = [entry]
+
+  while (pending.length > 0) {
+    const current = pending.pop()
+    if (current === undefined || visited.has(current)) continue
+    const source = sources.get(current)
+    if (source === undefined) throw new Error(`packed module closure is missing ${current}`)
+    visited.add(current)
+
+    for (const specifier of collectExternalImports(source)) {
+      if (!specifier.startsWith('.')) continue
+      let target = posix.normalize(posix.join(posix.dirname(current), specifier))
+      if (declaration && target.endsWith('.js')) target = `${target.slice(0, -3)}.d.ts`
+      if (!sources.has(target)) {
+        throw new Error(`${current} references missing packed module ${target}`)
+      }
+      pending.push(target)
+    }
   }
 
-  const externalImports = [
-    ...deviceJs.matchAll(/\bfrom\s+["']([^"']+)["']/g),
-    ...deviceJs.matchAll(/\bimport\s+["']([^"']+)["']/g),
-  ].map(match => match[1]).filter(Boolean)
+  return [...visited].sort().map(path => sources.get(path)).join('\n')
+}
+
+function assertSdkNeutralArtifact(label, runtimeJs, declarations, allowedExternalImports) {
+  const forbiddenRuntime = [
+    ['Node builtin', /\brequire\s*\(\s*["']node:/],
+    ['process.env', /\bprocess\.env\b/],
+  ]
+  for (const [boundaryLabel, pattern] of forbiddenRuntime) {
+    if (pattern.test(runtimeJs)) {
+      throw new Error(`sdk ${label} artifact contains ${boundaryLabel}`)
+    }
+  }
+  if (/\b(?:NodeJS|Buffer)\b|reference\s+types=["']node["']/.test(declarations)) {
+    throw new Error(`sdk ${label} declarations contain Node-only types`)
+  }
+  if (/@tool-bridge\/(?:app|core)/.test(declarations)) {
+    throw new Error(`sdk ${label} declarations reference a private workspace package`)
+  }
+  if (/\bfrom\s+["']hono(?:\/[^"']*)?["']/.test(declarations)) {
+    throw new Error(`sdk ${label} declarations reference Hono`)
+  }
+
+  const externalImports = collectExternalImports(runtimeJs)
+  if (externalImports.some(specifier => specifier.startsWith('node:'))) {
+    throw new Error(`sdk ${label} artifact contains Node builtin`)
+  }
+  if (externalImports.includes('ws')) {
+    throw new Error(`sdk ${label} artifact contains Node ws package`)
+  }
+  if (externalImports.some(specifier => /^@tool-bridge\/(?:app|core)(?:\/|$)/.test(specifier))) {
+    throw new Error(`sdk ${label} artifact contains private workspace package`)
+  }
+  if (externalImports.some(specifier => /^hono(?:\/|$)/.test(specifier))) {
+    throw new Error(`sdk ${label} artifact contains Hono`)
+  }
   const unexpected = externalImports.filter(specifier =>
-    specifier !== 'partysocket/ws' && !specifier.startsWith('./'))
+    !allowedExternalImports.has(specifier) && !specifier.startsWith('./'))
   if (unexpected.length > 0) {
-    throw new Error(`sdk device artifact has unexpected imports: ${unexpected.join(', ')}`)
+    throw new Error(`sdk ${label} artifact has unexpected imports: ${unexpected.join(', ')}`)
+  }
+}
+
+export function assertSdkDeviceArtifact(deviceJs, deviceDts) {
+  assertSdkNeutralArtifact('device', deviceJs, deviceDts, new Set(['partysocket/ws']))
+}
+
+export function assertSdkStoreArtifact(storeJs, storeDts) {
+  // Core errors and Zod wire parsers are bundled; Store has no runtime external imports.
+  assertSdkNeutralArtifact('store', storeJs, storeDts, new Set())
+}
+
+export function assertSdkClientArtifact(clientJs, clientDts) {
+  // Fixed-control schemas and Zod are bundled; declarations expose plain wire types only.
+  assertSdkNeutralArtifact('client', clientJs, clientDts, new Set())
+  const declarations = clientDts
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/\/\/.*$/gm, '')
+  if (/\bZod[A-Za-z]*\b|from\s+["'](?:zod|\.\/v4\/)/.test(declarations)) {
+    throw new Error('sdk client declarations expose Zod implementation types')
   }
 }
 
@@ -225,9 +295,29 @@ async function verifyPackedArtifacts(tarballPath, manifest) {
   const packedFiles = await listPackedFiles(tarballPath)
   assertPackedEntryTargetsExist(manifest, packedFiles)
   if (manifest.name !== '@tool-bridge/sdk') return
-  const deviceJs = await readPackedFile(tarballPath, 'package/dist/device.js')
-  const deviceDts = await readPackedFile(tarballPath, 'package/dist/device.d.ts')
-  assertSdkDeviceArtifact(deviceJs, deviceDts)
+  const jsSources = new Map()
+  const declarationSources = new Map()
+  for (const path of packedFiles) {
+    if (/^package\/dist\/[^/]+\.js$/.test(path)) {
+      jsSources.set(path, await readPackedFile(tarballPath, path))
+    } else if (/^package\/dist\/[^/]+\.d\.ts$/.test(path)) {
+      declarationSources.set(path, await readPackedFile(tarballPath, path))
+    }
+  }
+  const closure = label => ({
+    declarations: collectModuleClosure(
+      `package/dist/${label}.d.ts`,
+      declarationSources,
+      true,
+    ),
+    runtime: collectModuleClosure(`package/dist/${label}.js`, jsSources),
+  })
+  const device = closure('device')
+  const client = closure('client')
+  const store = closure('store')
+  assertSdkDeviceArtifact(device.runtime, device.declarations)
+  assertSdkClientArtifact(client.runtime, client.declarations)
+  assertSdkStoreArtifact(store.runtime, store.declarations)
 }
 
 function installedBinPath(consumerDir, bin) {
@@ -276,7 +366,13 @@ async function verifyConsumerInstall(tarballPath, manifest, bin) {
         '--eval',
         'const root=await import(\'@tool-bridge/sdk\');'
         + 'const device=await import(\'@tool-bridge/sdk/device\');'
-        + 'if(typeof root.createToolBridge!==\'function\'||typeof device.connectDevice!==\'function\')'
+        + 'const client=await import(\'@tool-bridge/sdk/client\');'
+        + 'const store=await import(\'@tool-bridge/sdk/store\');'
+        + 'if(typeof root.createToolBridge!==\'function\'||typeof device.connectDevice!==\'function\''
+        + '||typeof device.openPortableDeviceConnection!==\'function\''
+        + '||typeof client.createToolBridgeClient!==\'function\''
+        + '||client.fixedControlPlaneOpenApi?.openapi!==\'3.1.0\''
+        + '||typeof store.createStoreClient!==\'function\'||typeof store.parseStoreUri!==\'function\')'
         + 'throw new Error(\'sdk entrypoint smoke failed\')',
       ], { cwd: consumerDir })
     }

@@ -13,8 +13,8 @@ export function printJson(value: unknown): void {
   process.stdout.write(`${JSON.stringify(value, null, 2)}\n`)
 }
 
-/** TBError / 网络错误 → 退出码 1。--json 时输出 `{ok:false,error,code,retryable,…}`。 */
-export function reportError(asJson: boolean, err: unknown): void {
+/** 所有生产入口错误的唯一落点；Commander 可保留自己的非零退出码。 */
+export function reportError(asJson: boolean, err: unknown, exitCode = 1): void {
   const message = err instanceof Error ? err.message : String(err)
   const cli = err instanceof CliError ? err : undefined
   if (asJson) {
@@ -33,16 +33,7 @@ export function reportError(asJson: boolean, err: unknown): void {
     process.stderr.write(`error: ${message}${retry}\n`)
     if (cli?.hint) process.stderr.write(`${cli.hint}\n`)
   }
-  process.exitCode = 1
-}
-
-/** 命令主体包裹:捕获任何抛出并统一落地为退出码 1。 */
-export async function guard(asJson: boolean, fn: () => Promise<void>): Promise<void> {
-  try {
-    await fn()
-  } catch (err) {
-    reportError(asJson, err)
-  }
+  process.exitCode = exitCode > 0 ? exitCode : 1
 }
 
 /** citty 的重复 flag 可能是 string | string[] | undefined,统一成 string[]。 */

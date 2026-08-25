@@ -21,12 +21,12 @@ RUN corepack enable
 
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json ./
 COPY packages ./packages
-# Bun 只需 CLI 的运行时依赖与 core 源码；不下载测试、lint、Workers 等构建无关依赖。
-# core 在 CLI manifest 中是 devDependency（npm 版由 tsup 内联），这里显式链接给 Bun 解析。
-RUN pnpm install --frozen-lockfile --prod --ignore-scripts \
-      --filter @tool-bridge/cli --filter @tool-bridge/core \
-    && mkdir -p packages/cli/node_modules/@tool-bridge \
-    && ln -s /repo/packages/core packages/cli/node_modules/@tool-bridge/core
+# CLI 现在通过 tsup source alias 内联 SDK client/device/store；必须先用与 npm
+# 产物相同的 tsup 路径构建，再让 Bun 编译单文件 dist。只安装该闭包，
+# 不拉 Dashboard/Workers/server 等无关工作区。
+RUN pnpm install --frozen-lockfile --ignore-scripts \
+      --filter @tool-bridge/cli --filter @tool-bridge/core --filter @tool-bridge/sdk \
+    && pnpm --filter @tool-bridge/cli build
 
 ARG TARGETARCH
 RUN test "$(node -p "require('./packages/cli/package.json').version")" = "$TB_VERSION" \
@@ -36,7 +36,7 @@ RUN test "$(node -p "require('./packages/cli/package.json').version")" = "$TB_VE
       *) echo "unsupported TARGETARCH: $TARGETARCH" >&2; exit 1 ;; \
     esac \
     && mkdir -p /out \
-    && bun build packages/cli/src/index.ts \
+    && bun build packages/cli/dist/index.js \
       --compile \
       --minify \
       --target="$bun_target" \

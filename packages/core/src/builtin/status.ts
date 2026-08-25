@@ -6,11 +6,9 @@
  * 该节点即可查健康摘要,不要求 admin(区别于其他 system/* 管理面)。
  */
 
-import type { CmdSpec, HelpModel } from '../htbp/model'
+import { z } from 'zod/v4'
 import type { BuiltinModule } from './types'
-import type { TreePath } from '../types'
-import { cmdPath, withCommandPaths } from './util'
-import { TBError } from '../errors'
+import { BuiltinCommandRegistry } from './commandRegistry'
 
 const DESCRIPTION = 'Gateway health and summary (readable without admin)'
 
@@ -26,34 +24,16 @@ export interface StatusDeps {
   version: () => string
 }
 
-function statusCmds(nodePath: TreePath): CmdSpec[] {
-  return withCommandPaths(nodePath, [
+const COMMANDS = new BuiltinCommandRegistry<StatusDeps>('status', DESCRIPTION)
+  .register(
+    'get',
     {
-      name: 'get',
-      method: 'POST',
-      path: cmdPath(nodePath),
       h: 'health summary: gateway version and node count; no arguments',
-      inputSchema: { type: 'object', properties: {} },
+      inputSchema: z.strictObject({}),
       returns: '{ healthy, version, nodeCount }',
       scope: 'read',
     },
-  ])
-}
-
-export function createStatusModule(deps: StatusDeps): BuiltinModule {
-  return {
-    module: 'status',
-    description: DESCRIPTION,
-    help(nodePath: TreePath): HelpModel {
-      return {
-        node: { path: nodePath, kind: 'builtin', description: DESCRIPTION },
-        cmds: statusCmds(nodePath),
-      }
-    },
-    async dispatch(cmd: string): Promise<unknown> {
-      if (cmd !== 'get') {
-        throw new TBError('invalid_argument', `unknown cmd '${cmd}' on system/status`)
-      }
+    async (_input, { deps }) => {
       const summary: StatusSummary = {
         healthy: true,
         version: deps.version(),
@@ -61,5 +41,8 @@ export function createStatusModule(deps: StatusDeps): BuiltinModule {
       }
       return summary
     },
-  }
+  )
+
+export function createStatusModule(deps: StatusDeps): BuiltinModule {
+  return COMMANDS.module(deps)
 }

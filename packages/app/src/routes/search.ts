@@ -20,6 +20,10 @@ import {
   type TreePath,
   virtualizeTools,
 } from '@tool-bridge/core'
+import {
+  toolSearchPageSchema,
+  toolSearchRequestSchema,
+} from '@tool-bridge/core/protocol'
 import type { TbHono } from '../deps'
 import type { RouteEnv } from './env'
 import { canonicalSearchTools } from '../search/synchronizer'
@@ -75,7 +79,12 @@ export function registerSearchRoute(app: TbHono, env: RouteEnv): void {
       if (opts.cursor !== undefined && typeof opts.cursor !== 'string') {
         throw new TBError('invalid_argument', 'opts.cursor must be a string')
       }
-      const query = body.query.trim()
+      // 手工分支保留既有稳定错误消息；最终仍过共享严格 schema，避免三端形状漂移。
+      const wireRequest = toolSearchRequestSchema.parse({
+        query: body.query,
+        ...(rawOpts === undefined ? {} : { opts }),
+      })
+      const query = wireRequest.query
       await searchSync?.ensureReady()
       const ctx = c.get('ctx')
       const registry = new NodeRegistryStore(c.get('store'))
@@ -164,7 +173,7 @@ export function registerSearchRoute(app: TbHono, env: RouteEnv): void {
       // deny==not_found：空可见页不返回 continuation，避免 cursor 存在性泄露隐藏命中量。
       if (items.length === 0) responseCursor = undefined
       const result = responseCursor === undefined ? { items } : { items, cursor: responseCursor }
-      return new Response(JSON.stringify(result), {
+      return new Response(JSON.stringify(toolSearchPageSchema.parse(result)), {
         headers: { 'content-type': contentTypeFor('json') },
       })
     }),

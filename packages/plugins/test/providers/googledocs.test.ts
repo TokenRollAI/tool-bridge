@@ -1,12 +1,6 @@
-import {
-  base64urlEncode,
-  type CallContext,
-  encodeCallContext,
-  HEADER_TB_CONTEXT,
-  HEADER_TB_UPSTREAM_AUTH,
-} from '@tool-bridge/core'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { createGoogledocsPlugin } from '../../src/googledocs/index'
+import { createProviderHarness } from '../support/providerHarness'
 import { googledocsActions } from '../../src/googledocs/schema'
 
 /**
@@ -17,40 +11,22 @@ import { googledocsActions } from '../../src/googledocs/schema'
  * Drive 搜索的 `q` 拼装与单引号转义、导出 PDF 的 base64、以及 403 的两种含义之别。
  */
 
-const PLUGIN_TOKEN = 'tbp_test'
-const ENV = { PLUGIN_TOKEN }
 const ACCESS_TOKEN = 'ya29.a0AfB_test'
 const DOC_ID = '1AbCdEfGhIjKlMnOpQrStUvWxYz'
 const plugin = createGoogledocsPlugin()
 
-const CALLER: CallContext = {
-  keyId: 'k1',
-  owner: 'agent:tester',
-  scopes: [],
-  traceId: 't1',
+const {
+  call,
+  envelope,
+  sent,
+  sentUrl,
+  env: ENV,
+  stubFetch,
+} = createProviderHarness({
   mountPath: 'docs/google',
-  exportId: 'actions',
-}
-
-function envelope(body: unknown, opts: { auth?: string | null } = {}): Promise<Response> {
-  const headers: Record<string, string> = {
-    'authorization': `Bearer ${PLUGIN_TOKEN}`,
-    'content-type': 'application/json',
-    [HEADER_TB_CONTEXT]: encodeCallContext(CALLER),
-  }
-  const auth = opts.auth === undefined ? ACCESS_TOKEN : opts.auth
-  if (auth !== null) {
-    headers[HEADER_TB_UPSTREAM_AUTH] = base64urlEncode(new TextEncoder().encode(auth))
-  }
-  return Promise.resolve(plugin.fetch(
-    new Request('https://plugin.test/', { method: 'POST', headers, body: JSON.stringify(body) }),
-    ENV as never,
-  ))
-}
-
-function call(name: string, args: unknown, opts?: { auth?: string | null }): Promise<Response> {
-  return envelope({ tool: 'Call', arguments: { name, args } }, opts)
-}
+  plugin,
+  upstreamAuth: ACCESS_TOKEN,
+})
 
 interface Reply {
   /** 原始体;传 `null` 表示无体。 */
@@ -62,7 +38,7 @@ interface Reply {
 /** 按顺序回应出站请求(两趟的 action 会连打两次)。 */
 function mockReplies(...replies: Reply[]): ReturnType<typeof vi.fn> {
   const queue = [...replies]
-  const fn = vi.fn(() => {
+  return stubFetch(() => {
     const reply = queue.shift() ?? { payload: {} }
     const body = reply.body === undefined ? JSON.stringify(reply.payload ?? {}) : reply.body
     return Promise.resolve(new Response(body, {
@@ -70,16 +46,6 @@ function mockReplies(...replies: Reply[]): ReturnType<typeof vi.fn> {
       headers: { 'content-type': 'application/json' },
     }))
   })
-  vi.stubGlobal('fetch', fn)
-  return fn
-}
-
-function sent(mock: ReturnType<typeof vi.fn>, index = 0): Request {
-  return (mock.mock.calls[index] as [Request])[0]
-}
-
-function sentUrl(mock: ReturnType<typeof vi.fn>, index = 0): URL {
-  return new URL(sent(mock, index).url)
 }
 
 /** batchUpdate 的 body 里那一条 request。 */
@@ -87,10 +53,6 @@ async function sentRequests(mock: ReturnType<typeof vi.fn>, index = 0): Promise<
   const body = (await sent(mock, index).json()) as { requests: unknown[] }
   return body.requests
 }
-
-afterEach(() => {
-  vi.unstubAllGlobals()
-})
 
 describe('契约面', () => {
   it('~describe 报成单个 tools/v1 export,oauth 声明与上游端点/scope/授权参数逐字一致', async () => {

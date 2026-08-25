@@ -19,7 +19,7 @@ on:
         type: boolean
         default: true
       packages:
-        description: '限定包(逗号分隔,如 dashboard,server);留空 = 全部待发包'
+        description: '限定/恢复包(逗号分隔);自动补前置,显式包可已发 npm;留空 = 全部 npm 待发包'
         type: string
         default: ''
 
@@ -64,17 +64,10 @@ jobs:
           set -o pipefail
           node scripts/release-plan.mjs | tee plan.txt
           PLAN="$(node scripts/release-plan.mjs --json)"
-          ORDER="$(echo "$PLAN" | node -e "
-            const p = JSON.parse(require('fs').readFileSync(0, 'utf8'))
-            const only = process.env.ONLY.split(',').map(s => s.trim()).filter(Boolean)
-            const order = only.length > 0 ? p.order.filter(x => only.includes(x)) : p.order
-            const unknown = only.filter(x => !p.order.includes(x))
-            if (unknown.length > 0) {
-              console.error('这些包不在待发列表里:' + unknown.join(', '))
-              process.exit(1)
-            }
-            console.log(JSON.stringify(order))
-          ")"
+          # 子集不能直接 filter：server 依赖待发 dashboard 时必须
+          # 自动把 dashboard 加回来，并沿用 release-plan 已验证的拓扑顺序。
+          ORDER="$(printf '%s' "$PLAN" | node scripts/select-release-packages.mjs "$ONLY")"
+          echo "本次实际顺序:$ORDER" | tee -a plan.txt
           echo "order=$ORDER" >> "$GITHUB_OUTPUT"
           if [ "$ORDER" = "[]" ]; then echo "empty=true" >> "$GITHUB_OUTPUT"; fi
         env:
@@ -112,27 +105,42 @@ jobs:
           ORDER: ${{ needs.plan.outputs.order }}
         run: |
           set -euo pipefail
+
+          registry_state() {
+            node scripts/npm-registry-version.mjs "$1" "$2"
+          }
+
           for PKG in $(echo "$ORDER" | node -e "
             console.log(JSON.parse(require('fs').readFileSync(0,'utf8')).join(' '))
           "); do
+            PACKAGE_NAME="$(node -p "require('./packages/$PKG/package.json').name")"
             VERSION="$(node -p "require('./packages/$PKG/package.json').version")"
             TAG="$PKG-v$VERSION"
 
             echo "::group::$TAG"
 
-            if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null 2>&1; then
-              echo "tag $TAG 已存在 —— 跳过(该版本已发过或正在发)"
-              echo "::endgroup::"
-              continue
-            fi
+            # 计划与执行之间 registry 可能已更新；记下精确版本状态。
+            # 不在这里整包 continue：server/CLI 还有镜像产物需要独立恢复。
+            NPM_STATE="$(registry_state "$PACKAGE_NAME" "$VERSION")"
 
             # 记下时刻:下面只认这之后创建的 run。同名 tag 可能被删过重推(发布失败的
             # 既有恢复手法),那些**历史失败 run** 的 headBranch 与新的一模一样,
             # 不按时间过滤会让 `gh run watch --exit-status` 盯上一个早已失败的旧 run。
             SINCE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-            git tag "$TAG"
-            git push origin "$TAG"
-            echo "pushed $TAG at $SINCE"
+            TAG_REF_SHA="$(git ls-remote --tags origin "refs/tags/$TAG" | awk 'NR == 1 { print $1 }')"
+            if [ -n "$TAG_REF_SHA" ]; then
+              TAG_PEELED_SHA="$(git ls-remote --tags origin "refs/tags/$TAG^{}" | awk 'NR == 1 { print $1 }')"
+              TAG_COMMIT_SHA="${TAG_PEELED_SHA:-$TAG_REF_SHA}"
+              if [ "$TAG_COMMIT_SHA" != "$GITHUB_SHA" ]; then
+                echo "tag $TAG 指向 $TAG_COMMIT_SHA，当前 main 是 $GITHUB_SHA；拒绝在旧 tag 上发布新源码" >&2
+                exit 1
+              fi
+              echo "tag $TAG 已存在且指向当前 main，re-dispatch 未完成版本"
+            else
+              git tag "$TAG"
+              git push origin "$TAG"
+              echo "pushed $TAG at $SINCE"
+            fi
 
             # **必须显式 `gh workflow run`,不能指望 tag push 触发。**
             # GitHub 刻意不让用 `GITHUB_TOKEN` 推的 tag 触发其它 workflow(防无限递归),
@@ -147,32 +155,82 @@ jobs:
             # GHCR 镜像),两个都要 dispatch 并等 —— 镜像也是发布物,失败不该被静默放过。
             WORKFLOWS="publish-$PKG.yml"
             if [ "$PKG" = 'server' ]; then WORKFLOWS="$WORKFLOWS publish-docker.yml"; fi
+            RUNS=''
             for WF in $WORKFLOWS; do
+              # 同 tag/同 commit 的成功 run 直接复用；正在跑的则直接 watch，
+              # 避免重复 dispatch 造成两个 npm publish 竞态。历史失败 run 才重发。
+              RUN_STATE="$(gh run list --workflow "$WF" --limit 40 \
+                --json databaseId,headBranch,headSha,status,conclusion \
+                --jq "[.[] | select(.headBranch == \"$TAG\" and .headSha == \"$GITHUB_SHA\")][0] \
+                      | if . == null then \"\" \
+                        else [.databaseId, .status, (.conclusion // \"\")] | @tsv end")"
+              EXISTING_RUN_ID=''
+              EXISTING_RUN_STATUS=''
+              EXISTING_RUN_CONCLUSION=''
+              if [ -n "$RUN_STATE" ]; then
+                IFS=$'\t' read -r EXISTING_RUN_ID EXISTING_RUN_STATUS EXISTING_RUN_CONCLUSION <<< "$RUN_STATE"
+              fi
+
+              if [ "$EXISTING_RUN_STATUS" = 'completed' ] \
+                && [ "$EXISTING_RUN_CONCLUSION" = 'success' ]; then
+                echo "reuse successful $WF run $EXISTING_RUN_ID"
+                continue
+              fi
+              case "$EXISTING_RUN_STATUS" in
+                queued|in_progress|pending|requested|waiting)
+                  echo "reuse active $WF run $EXISTING_RUN_ID"
+                  RUNS="${RUNS:+$RUNS }$EXISTING_RUN_ID"
+                  continue
+                  ;;
+              esac
+
+              # npm 精确版本已存在时，纯 npm workflow 无需再发。
+              # CLI 例外：同一 workflow 还发镜像，且其 npm step 已做幂等跳过。
+              if [ "$NPM_STATE" = 'present' ] \
+                && [ "$WF" = "publish-$PKG.yml" ] \
+                && [ "$PKG" != 'cli' ]; then
+                echo "$PACKAGE_NAME@$VERSION 已在 registry，跳过 $WF"
+                continue
+              fi
+
+              DISPATCHED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
               gh workflow run "$WF" --ref "$TAG"
               echo "dispatched $WF on $TAG"
+              RUN_ID=''
+              for _ in $(seq 1 30); do
+                RUN_ID="$(gh run list --workflow "$WF" --event workflow_dispatch --limit 20 \
+                  --json databaseId,headBranch,headSha,createdAt \
+                  --jq "[.[] | select(.headBranch == \"$TAG\" and .headSha == \"$GITHUB_SHA\" \
+                        and .createdAt >= \"$DISPATCHED_AT\")][0].databaseId // empty")"
+                if [ -n "$RUN_ID" ]; then break; fi
+                sleep 5
+              done
+              if [ -z "$RUN_ID" ]; then
+                echo "等不到 $WF@$TAG 的 run(tag 已推,去 Actions 页查看)" >&2
+                exit 1
+              fi
+              RUNS="${RUNS:+$RUNS }$RUN_ID"
             done
-
-            RUNS=''
-            for _ in $(seq 1 30); do
-              RUNS="$(gh run list --event workflow_dispatch --limit 40 \
-                --json databaseId,headBranch,createdAt,workflowName \
-                --jq "[.[] | select(.headBranch == \"$TAG\" and .createdAt >= \"$SINCE\")] \
-                      | map(.databaseId) | join(\" \")")"
-              # 等齐:server 要两个 run 都出现再往下走。
-              COUNT="$(echo "$RUNS" | wc -w | tr -d ' ')"
-              WANT="$(echo "$WORKFLOWS" | wc -w | tr -d ' ')"
-              if [ "$COUNT" = "$WANT" ]; then break; fi
-              sleep 5
-            done
-            if [ -z "$RUNS" ]; then
-              echo "等不到 $TAG 的 run(tag 已推,去 Actions 页查看)" >&2
-              exit 1
-            fi
 
             for RUN_ID in $RUNS; do
               echo "watching run $RUN_ID"
               gh run watch "$RUN_ID" --exit-status
             done
+
+            # npm publish 成功不等于 registry CDN 已能安装。等精确版本
+            # 可见再发下一包，否则 server 会在 dashboard 传播窗口内失败。
+            REGISTRY_READY=false
+            for _ in $(seq 1 36); do
+              if [ "$(registry_state "$PACKAGE_NAME" "$VERSION")" = 'present' ]; then
+                REGISTRY_READY=true
+                break
+              fi
+              sleep 5
+            done
+            if [ "$REGISTRY_READY" != true ]; then
+              echo "$PACKAGE_NAME@$VERSION 发布 workflow 已成功，但 registry 180s 内仍不可见" >&2
+              exit 1
+            fi
             echo "::endgroup::"
           done
 
@@ -180,4 +238,4 @@ jobs:
         if: always()
         run: |
           echo '## 发布结果见上面各 group' >> "$GITHUB_STEP_SUMMARY"
-          echo '`npm view <pkg> version` 可能有 CDN 传播延迟(实测 91s 后仍 404),等一两分钟再查。' >> "$GITHUB_STEP_SUMMARY"
+          echo '编排器已在每个包后等待 registry 精确版本可见，再继续下一包。' >> "$GITHUB_STEP_SUMMARY"

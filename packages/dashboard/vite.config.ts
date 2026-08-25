@@ -10,7 +10,11 @@ export default defineConfig({
   base: '/ui/',
   plugins: [react(), tailwindcss()],
   resolve: {
-    alias: { '@': path.resolve(import.meta.dirname, './src') },
+    alias: {
+      '@': path.resolve(import.meta.dirname, './src'),
+      '@tool-bridge/sdk/client': path.resolve(import.meta.dirname, '../sdk/src/client/index.ts'),
+      '@tool-bridge/sdk/store': path.resolve(import.meta.dirname, '../sdk/src/store/index.ts'),
+    },
   },
   server: {
     proxy: {

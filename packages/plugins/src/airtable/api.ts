@@ -47,13 +47,21 @@ import type {
   updateRecordsInput,
   updateTableInput,
 } from './schema'
+import {
+  booleanValue as boolean,
+  compactDefined as compact,
+  integerValue as integer,
+  asJsonObject as record,
+  trimmedText as text,
+} from '../_runtime/jsonValue'
+import { createProviderHttpClient, type ProviderHttpErrorContext, type ProviderHttpResult } from '../_runtime/providerHttp'
 import { type ProviderContext, requireApiKey } from '../_runtime/plugin'
 import { upstreamError } from '../_runtime/upstreamError'
-import { guardedFetch } from '../_runtime/guardedFetch'
 
 const SERVICE = 'airtable'
 const API_BASE = 'https://api.airtable.com'
 const BASES_PATH = '/v0/meta/bases'
+const http = createProviderHttpClient({ baseUrl: API_BASE, service: SERVICE })
 /**
  * 超过这个长度就改用 POST 端点。Airtable 自己的 URL 上限更高,留出余量是因为长度要在
  * 拼出完整 URL 后才知道,而重定向、代理都可能再加几个字节。
@@ -64,35 +72,11 @@ type Json = Record<string, unknown>
 /** 有序键值对:同名键会重复出现(`fields[]`),对象表达不了。 */
 type Query = Array<[string, string]>
 
-function record(value: unknown): Json | undefined {
-  return typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Json) : undefined
-}
-
-/** 上游 `optionalString` 的等价物:去空白后仍非空才算有值。 */
-function text(value: unknown): string | undefined {
-  if (typeof value !== 'string') return undefined
-  const trimmed = value.trim()
-  return trimmed === '' ? undefined : trimmed
-}
-
-function boolean(value: unknown): boolean | undefined {
-  return typeof value === 'boolean' ? value : undefined
-}
-
-function integer(value: unknown): number | undefined {
-  return typeof value === 'number' && Number.isInteger(value) ? value : undefined
-}
-
 /** 上游 `requireString`:纯空白能过 Zod 的 `min(1)`,打到上游就是一次必然失败的请求。 */
 function requireText(value: unknown, field: string): string {
   const result = text(value)
   if (result === undefined) throw new TBError('invalid_argument', `${field} is required`)
   return result
-}
-
-/** 上游 `compactObject`:丢掉值为 undefined 的键。 */
-function compact(input: Json): Json {
-  return Object.fromEntries(Object.entries(input).filter(([, value]) => value !== undefined))
 }
 
 /** 契约说好是 JSON 对象;不是就是上游出问题,不是调用方的错。 */
@@ -121,14 +105,6 @@ function buildUrl(path: string, query: Query | undefined): string {
   return url.toString()
 }
 
-function headers(apiKey: string, hasBody: boolean): Record<string, string> {
-  return {
-    accept: 'application/json',
-    authorization: `Bearer ${apiKey}`,
-    ...(hasBody ? { 'content-type': 'application/json' } : {}),
-  }
-}
-
 /** Airtable 的错误体是 `{error:{type, message}}`;网关层的错误可能是纯文本。 */
 function errorMessage(payload: unknown, status: number): string {
   if (typeof payload === 'string' && payload !== '') return payload
@@ -146,46 +122,50 @@ interface RequestInput {
   query?: Query
 }
 
+function responsePayload(result: Pick<ProviderHttpResult, 'bodyKind' | 'data' | 'headers' | 'status'>): unknown {
+  const contentType = result.headers.get('content-type') ?? ''
+  if (contentType.includes('application/json')) {
+    if (result.bodyKind === 'json') return result.data
+    if (result.bodyKind === 'empty' && (result.status === 204 || result.status === 205)) return null
+    throw upstreamError(502, 'airtable response parsing failed: invalid JSON')
+  }
+  if (result.bodyKind === 'empty') return null
+  if (result.bodyKind === 'text') {
+    try {
+      return JSON.parse(String(result.data)) as unknown
+    } catch {
+      return result.data
+    }
+  }
+  return result.data
+}
+
+function mapAirtableError(context: ProviderHttpErrorContext): TBError {
+  try {
+    return upstreamError(context.status, errorMessage(responsePayload(context), context.status))
+  } catch {
+    return upstreamError(502, 'airtable response parsing failed: invalid JSON')
+  }
+}
+
 async function request(ctx: ProviderContext, input: RequestInput): Promise<unknown> {
   // 取凭证放在 try 外:它抛的是配置错误,不该被下面的传输失败兜底吞成 502。
   const apiKey = requireApiKey(ctx, SERVICE)
-
-  let response: Response
-  try {
-    response = await guardedFetch(buildUrl(input.path, input.query), {
-      method: input.method ?? 'GET',
-      headers: headers(apiKey, input.body !== undefined),
-      body: input.body === undefined ? undefined : JSON.stringify(input.body),
-    })
-  } catch (error) {
-    // 传输层失败必须就地归一:漏出去的裸 Error 会被 plugin-sdk 抹成 "internal plugin error"
-    // 500。EgressBlockedError 本身是 TBError(invalid_argument),原样冒上去。
-    if (error instanceof TBError) throw error
-    const detail = error instanceof Error && error.message !== '' ? error.message : 'unknown request error'
-    throw upstreamError(502, `airtable request failed: ${detail}`)
-  }
-
-  const contentType = response.headers.get('content-type') ?? ''
-  const raw = await response.text().catch(() => '')
-  let payload: unknown = null
-  if (contentType.includes('application/json')) {
-    try {
-      payload = JSON.parse(raw)
-    } catch (error) {
-      const detail = error instanceof Error && error.message !== '' ? error.message : 'unknown parsing error'
-      throw upstreamError(502, `airtable response parsing failed: ${detail}`)
-    }
-  } else if (raw !== '') {
-    // 没声明 JSON 也可能是 JSON(Airtable 的错误页偶尔漏带 content-type);解不出来就当文本。
-    try {
-      payload = JSON.parse(raw)
-    } catch {
-      payload = raw
-    }
-  }
-
-  if (!response.ok) throw upstreamError(response.status, errorMessage(payload, response.status))
-  return payload
+  const result = await http.request({
+    path: input.path,
+    method: input.method ?? 'GET',
+    query: input.query,
+    headers: { accept: 'application/json', authorization: `Bearer ${apiKey}` },
+    ...(input.body === undefined ? {} : { json: input.body }),
+    invalidJson: 'text',
+    responseType: 'auto',
+    mapError: mapAirtableError,
+    mapTransportError: ({ message }) => upstreamError(
+      502,
+      `airtable request failed: ${message ?? 'unknown request error'}`,
+    ),
+  })
+  return responsePayload(result)
 }
 
 function recordCollectionPath(input: { baseId?: string, tableIdOrName?: string }): string {

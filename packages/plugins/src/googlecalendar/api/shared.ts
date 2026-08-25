@@ -37,13 +37,21 @@
  */
 
 import { TBError } from '@tool-bridge/plugin-sdk'
+import {
+  createProviderHttpClient,
+  type ProviderHttpErrorContext,
+  type ProviderHttpRequest,
+  type ProviderHttpResult,
+} from '../../_runtime/providerHttp'
+import { asJsonObject, compactDefined, trimmedText } from '../../_runtime/jsonValue'
 import { type ProviderContext, requireApiKey } from '../../_runtime/plugin'
 import { upstreamError } from '../../_runtime/upstreamError'
-import { guardedFetch } from '../../_runtime/guardedFetch'
 
 export const SERVICE = 'googlecalendar'
 export const API_BASE = 'https://www.googleapis.com/calendar/v3'
 const REQUEST_TIMEOUT_MS = 30_000
+const GOOGLE_API_ORIGIN = new URL(API_BASE).origin
+const http = createProviderHttpClient({ baseUrl: `${GOOGLE_API_ORIGIN}/`, service: SERVICE })
 /** 错误消息里最多回显多少上游原文。 */
 const MAX_ERROR_MESSAGE_LENGTH = 500
 
@@ -62,7 +70,7 @@ export type Query = Record<string, string | string[] | undefined>
 export interface CalendarRequest {
   /** 有 body 即默认 POST(同上游);要 PUT/PATCH/DELETE 就显式给 method。 */
   body?: unknown
-  method?: string
+  method?: ProviderHttpRequest['method']
   query?: Query
   /** 本次请求发了 syncToken:410 要改写成"重新全量同步"的指引(见文件头第 2 条)。 */
   syncTokenAware?: boolean
@@ -70,15 +78,9 @@ export interface CalendarRequest {
 }
 
 /** 上游 `optionalString` 的等价物:去空白后仍非空才算有值。 */
-export function text(value: unknown): string | undefined {
-  if (typeof value !== 'string') return undefined
-  const trimmed = value.trim()
-  return trimmed === '' ? undefined : trimmed
-}
+export const text = trimmedText
 
-export function record(value: unknown): Json | undefined {
-  return typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Json) : undefined
-}
+export const record = asJsonObject
 
 /** 契约说好是对象的地方上游回了别的东西 —— 上游违约,不是调用方的错。 */
 export function requireRecord(value: unknown, label: string): Json {
@@ -95,11 +97,7 @@ export function requireRecord(value: unknown, label: string): Json {
  * 泛型透传值类型,好让 `compact({...})` 的结果能直接当 `Query` 用 —— 退化成
  * `Record<string, unknown>` 就得在每个调用处补一次断言。
  */
-export function compact<T>(input: Record<string, T | undefined>): Record<string, T> {
-  return Object.fromEntries(
-    Object.entries(input).filter((entry): entry is [string, T] => entry[1] !== undefined),
-  )
-}
+export const compact = compactDefined
 
 /** 上游 `stringifyBoolean`:布尔进 query 前先变字符串。 */
 export function bool(value: boolean | undefined): string | undefined {
@@ -140,27 +138,21 @@ export function repeated(value: string | string[] | undefined): string | string[
   return items.length > 0 ? items : undefined
 }
 
-function buildUrl(url: string, query: Query | undefined): string {
+function requestTarget(url: string, query: Query | undefined): {
+  path: string
+  query: NonNullable<ProviderHttpRequest['query']>
+} {
   const target = new URL(url)
-  for (const [key, value] of Object.entries(query ?? {})) {
-    if (value === undefined) continue
-    if (Array.isArray(value)) {
-      // 重复同名参数,不能拼成逗号串(见文件头第 3 条)。
-      for (const item of value) target.searchParams.append(key, item)
-      continue
-    }
-    target.searchParams.set(key, value)
+  if (target.origin !== GOOGLE_API_ORIGIN) {
+    throw new TBError('invalid_argument', 'Google Calendar 请求必须保持在 Google API origin')
   }
-  return target.toString()
-}
-
-function headers(ctx: ProviderContext, hasJsonBody: boolean): Record<string, string> {
-  const result: Record<string, string> = {
-    accept: 'application/json',
-    authorization: `Bearer ${requireApiKey(ctx, SERVICE)}`,
+  return {
+    path: target.pathname.replace(/^\/+/, ''),
+    query: [
+      ...target.searchParams.entries(),
+      ...Object.entries(query ?? {}),
+    ],
   }
-  if (hasJsonBody) result['content-type'] = 'application/json'
-  return result
 }
 
 function truncate(value: string): string {
@@ -168,30 +160,28 @@ function truncate(value: string): string {
 }
 
 /** 从 Google 的错误体里取消息与 reason 列表;非 JSON(错误页)就用原文当消息。 */
-async function readError(response: Response): Promise<{ message: string, reasons: string[] }> {
-  const raw = await response.text().catch(() => '')
-  const fallback = `Google Calendar 返回 HTTP ${response.status}`
-  if (raw === '') return { message: fallback, reasons: [] }
+function readError(context: ProviderHttpErrorContext): { message: string, reasons: string[] } {
+  const fallback = `Google Calendar 返回 HTTP ${context.status}`
+  if (context.bodyKind === 'empty') return { message: fallback, reasons: [] }
+  if (context.bodyKind !== 'json') return { message: truncate(String(context.data)), reasons: [] }
 
-  let payload: unknown
-  try {
-    payload = JSON.parse(raw)
-  } catch {
-    return { message: truncate(raw), reasons: [] }
-  }
+  const payload = context.data
   const body = record(payload)
   const error = record(body?.error)
   const reasons = Array.isArray(error?.errors)
     ? error.errors.map(item => text(record(item)?.reason)).filter((item): item is string => item !== undefined)
     : []
   // `error_description` 是令牌端点那一族的字段名(access token 失效时会走到这里)。
-  const message = text(error?.message) ?? text(body?.error_description) ?? truncate(raw)
+  const serialized = JSON.stringify(payload)
+  const message = text(error?.message)
+    ?? text(body?.error_description)
+    ?? (serialized === undefined ? fallback : truncate(serialized))
   return { message, reasons }
 }
 
-async function calendarError(response: Response, syncTokenAware: boolean): Promise<TBError> {
-  const { message, reasons } = await readError(response)
-  if (syncTokenAware && response.status === 410) {
+function calendarError(context: ProviderHttpErrorContext, syncTokenAware: boolean): TBError {
+  const { message, reasons } = readError(context)
+  if (syncTokenAware && context.status === 410) {
     // 归 invalid_argument:能修的是调用方去掉 syncToken 重来一次全量同步,重试同一个
     // 请求永远是同样的 410。
     return new TBError(
@@ -199,49 +189,42 @@ async function calendarError(response: Response, syncTokenAware: boolean): Promi
       `syncToken 已过期,去掉 syncToken 重新做一次全量同步(上游:${message})`,
     )
   }
-  if (response.status === 403 && reasons.some(reason => RATE_LIMIT_REASONS.has(reason))) {
+  if (context.status === 403 && reasons.some(reason => RATE_LIMIT_REASONS.has(reason))) {
     return upstreamError(429, message)
   }
-  return upstreamError(response.status, message)
+  return upstreamError(context.status, message)
 }
 
-async function send(ctx: ProviderContext, input: CalendarRequest): Promise<Response> {
+async function send(ctx: ProviderContext, input: CalendarRequest): Promise<ProviderHttpResult> {
   const hasBody = input.body !== undefined
-  let response: Response
-  try {
-    response = await guardedFetch(buildUrl(input.url, input.query), {
-      method: input.method ?? (hasBody ? 'POST' : 'GET'),
-      headers: headers(ctx, hasBody),
-      body: hasBody ? JSON.stringify(input.body) : undefined,
-      // 不设超时会让一个挂死的端点拖住整个调用;上游同样给了 30s 的独立预算。
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-    })
-  } catch (error) {
-    // 传输层失败必须就地归一:漏出去的裸 Error 会被 plugin-sdk 抹成 "internal plugin error"
-    // 500,把"上游不通/出网被拦"说成插件自身故障。
-    if (error instanceof TBError) throw error
-    if (error instanceof Error && error.name === 'TimeoutError') {
-      throw upstreamError(504, `Google Calendar 请求超时(${REQUEST_TIMEOUT_MS / 1000} 秒)`)
-    }
-    const message = error instanceof Error ? error.message : 'unknown network error'
-    throw upstreamError(502, `Google Calendar 请求失败:${message}`)
-  }
-
-  if (!response.ok) throw await calendarError(response, input.syncTokenAware ?? false)
-  return response
+  const target = requestTarget(input.url, input.query)
+  return await http.request({
+    method: input.method ?? (hasBody ? 'POST' : 'GET'),
+    path: target.path,
+    query: target.query,
+    headers: {
+      accept: 'application/json',
+      authorization: `Bearer ${requireApiKey(ctx, SERVICE)}`,
+    },
+    ...(hasBody ? { json: input.body } : {}),
+    invalidJson: 'text',
+    timeoutMs: REQUEST_TIMEOUT_MS,
+    mapError: context => calendarError(context, input.syncTokenAware ?? false),
+    mapTransportError: ({ kind, message }) => kind === 'timeout'
+      ? upstreamError(504, `Google Calendar 请求超时(${REQUEST_TIMEOUT_MS / 1000} 秒)`)
+      : upstreamError(502, `Google Calendar 请求失败:${message ?? 'unknown network error'}`),
+  })
 }
 
 export async function requestJson(ctx: ProviderContext, input: CalendarRequest): Promise<unknown> {
   const response = await send(ctx, input)
-  const body = await response.text()
-  if (body === '') {
+  if (response.bodyKind === 'empty') {
     throw new TBError('unavailable', 'Google Calendar 在应回 JSON 的地方回了空响应体', { retryable: true })
   }
-  try {
-    return JSON.parse(body)
-  } catch {
+  if (response.bodyKind !== 'json') {
     throw new TBError('unavailable', 'Google Calendar 返回了非 JSON 响应', { retryable: true })
   }
+  return response.data
 }
 
 export async function requestRecord(ctx: ProviderContext, input: CalendarRequest): Promise<Json> {
@@ -250,8 +233,7 @@ export async function requestRecord(ctx: ProviderContext, input: CalendarRequest
 
 /** 期待空响应体的写操作(DELETE / clear):读掉 body 释放连接后丢弃。 */
 export async function requestNoContent(ctx: ProviderContext, input: CalendarRequest): Promise<void> {
-  const response = await send(ctx, input)
-  await response.text().catch(() => '')
+  await send(ctx, input)
 }
 
 /** 上游 `deleteWithSuccess`:删除类 action 的出参统一是 `{ success: true }`。 */

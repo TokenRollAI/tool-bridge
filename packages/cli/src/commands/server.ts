@@ -1,8 +1,8 @@
 import { Command } from 'commander'
 import type { Node, NodeInput, Page, TreeJson } from '../types'
 import { parsePageOpts, resolveTarget, withGlobalOpts, withPageOpts } from '../args'
-import { guard, printJson, printLine, table } from '../output'
-import { apiJson, callDirect, CliError } from '../http'
+import { callDirect, CliError, withClient } from '../http'
+import { printJson, printLine, table } from '../output'
 import { deleteNode, registerNode } from '../registry'
 import { confirmDestructive } from '../confirm'
 
@@ -41,28 +41,26 @@ export function serverAddCommand(): Command {
     .option('--description <text>', 'One-line node description (default: derived from remote URL)')
     .action(async (pathArg: string, opts: ServerAddOpts) => {
       const asJson = Boolean(opts.json)
-      await guard(asJson, async () => {
-        const path = String(pathArg ?? '').trim()
-        if (!path) throw new CliError('tree path is required')
-        const remoteUrl = String(opts.remoteUrl ?? '').trim()
-        if (!remoteUrl) {
-          throw new CliError('--remote-url is required; --base-url selects the gateway')
-        }
-        const skRef = opts.skRef ? String(opts.skRef) : undefined
+      const path = String(pathArg ?? '').trim()
+      if (!path) throw new CliError('tree path is required')
+      const remoteUrl = String(opts.remoteUrl ?? '').trim()
+      if (!remoteUrl) {
+        throw new CliError('--remote-url is required; --base-url selects the gateway')
+      }
+      const skRef = opts.skRef ? String(opts.skRef) : undefined
 
-        const input: NodeInput = {
-          path,
-          kind: 'remote',
-          description: opts.description
-            ? String(opts.description)
-            : `remote HTBP server at ${remoteUrl}`,
-          config: { kind: 'remote', baseUrl: remoteUrl, ...(skRef ? { skRef } : {}) },
-        }
+      const input: NodeInput = {
+        path,
+        kind: 'remote',
+        description: opts.description
+          ? String(opts.description)
+          : `remote HTBP server at ${remoteUrl}`,
+        config: { kind: 'remote', baseUrl: remoteUrl, ...(skRef ? { skRef } : {}) },
+      }
 
-        const node = await registerNode(resolveTarget(opts), input)
-        if (asJson) printJson(node)
-        else printLine(`added remote server at ${path} → ${remoteUrl}`)
-      })
+      const node = await registerNode(resolveTarget(opts), input)
+      if (asJson) printJson(node)
+      else printLine(`added remote server at ${path} → ${remoteUrl}`)
     })
 }
 
@@ -86,62 +84,60 @@ export function serverLsCommand(): Command {
     )
     .action(async (opts: GlobalOpts) => {
       const asJson = Boolean(opts.json)
-      await guard(asJson, async () => {
-        const target = resolveTarget(opts)
-        const pageOpts = parsePageOpts(opts)
-        try {
-          const page = await callDirect<Page<Node>>(
-            target, '/system/registry/list',
-            Object.keys(pageOpts).length ? { opts: pageOpts } : {},
-          )
-          const remotes = (page.items ?? []).filter(n => n.kind === 'remote')
-          if (asJson) {
-            printJson(page.cursor ? { items: remotes, cursor: page.cursor } : { items: remotes })
-            return
-          }
-          if (remotes.length === 0) {
-            printLine(page.cursor ? '(no remote servers on this page)' : '(no remote servers)')
-            if (page.cursor) printLine(`next cursor: ${page.cursor}`)
-            return
-          }
-          const rows = remotes.map(n => [
-            n.path,
-            n.config && n.config.kind === 'remote' ? n.config.baseUrl : '-',
-            n.description ?? '',
-          ])
-          printLine(table(['PATH', 'BASEURL', 'DESCRIPTION'], rows))
-          if (page.cursor) printLine(`next cursor: ${page.cursor}`)
-        } catch (err) {
-          if (!(err instanceof CliError && err.code === 'not_found')) throw err
-          if (Object.keys(pageOpts).length > 0) {
-            throw new CliError(
-              '--limit/--cursor require system/registry visibility; the ~tree fallback cannot paginate',
-            )
-          }
-          // 退化:无 system/registry 可见性 → ~tree 过滤 kind,baseUrl 不可见。
-          const tree = await apiJson<TreeJson>(target, { path: '/~tree', query: { depth: 8 } })
-          const remotes: TreeJson[] = []
-          collectRemotes(tree, remotes)
-          if (asJson) {
-            printJson({
-              items: remotes.map(n => ({
-                path: n.path,
-                kind: n.kind,
-                description: n.description,
-              })),
-            })
-            return
-          }
-          if (remotes.length === 0) {
-            printLine('(no remote servers)')
-            return
-          }
-          const rows = remotes.map(n => [n.path, '(not visible)', n.description ?? ''])
-          printLine(table(['PATH', 'BASEURL', 'DESCRIPTION'], rows))
-          printLine('')
-          printLine('note: baseUrl unavailable via ~tree (no system/registry visibility)')
+      const target = resolveTarget(opts)
+      const pageOpts = parsePageOpts(opts)
+      try {
+        const page = await callDirect<Page<Node>>(
+          target, '/system/registry/list',
+          Object.keys(pageOpts).length ? { opts: pageOpts } : {},
+        )
+        const remotes = (page.items ?? []).filter(n => n.kind === 'remote')
+        if (asJson) {
+          printJson(page.cursor ? { items: remotes, cursor: page.cursor } : { items: remotes })
+          return
         }
-      })
+        if (remotes.length === 0) {
+          printLine(page.cursor ? '(no remote servers on this page)' : '(no remote servers)')
+          if (page.cursor) printLine(`next cursor: ${page.cursor}`)
+          return
+        }
+        const rows = remotes.map(n => [
+          n.path,
+          n.config && n.config.kind === 'remote' ? n.config.baseUrl : '-',
+          n.description ?? '',
+        ])
+        printLine(table(['PATH', 'BASEURL', 'DESCRIPTION'], rows))
+        if (page.cursor) printLine(`next cursor: ${page.cursor}`)
+      } catch (err) {
+        if (!(err instanceof CliError && err.code === 'not_found')) throw err
+        if (Object.keys(pageOpts).length > 0) {
+          throw new CliError(
+            '--limit/--cursor require system/registry visibility; the ~tree fallback cannot paginate',
+          )
+        }
+        // 退化:无 system/registry 可见性 → ~tree 过滤 kind,baseUrl 不可见。
+        const tree = await withClient(target, async client => await client.getTree('', { depth: 8 }))
+        const remotes: TreeJson[] = []
+        collectRemotes(tree, remotes)
+        if (asJson) {
+          printJson({
+            items: remotes.map(n => ({
+              path: n.path,
+              kind: n.kind,
+              description: n.description,
+            })),
+          })
+          return
+        }
+        if (remotes.length === 0) {
+          printLine('(no remote servers)')
+          return
+        }
+        const rows = remotes.map(n => [n.path, '(not visible)', n.description ?? ''])
+        printLine(table(['PATH', 'BASEURL', 'DESCRIPTION'], rows))
+        printLine('')
+        printLine('note: baseUrl unavailable via ~tree (no system/registry visibility)')
+      }
     })
 }
 
@@ -153,14 +149,12 @@ export function serverRmCommand(): Command {
     .option('--yes', 'Skip the confirmation prompt')
     .action(async (pathArg: string, opts: GlobalOpts) => {
       const asJson = Boolean(opts.json)
-      await guard(asJson, async () => {
-        const path = String(pathArg ?? '').trim()
-        if (!path) throw new CliError('tree path is required')
-        await confirmDestructive(opts, `Remove remote server at ${path}?`)
-        await deleteNode(resolveTarget(opts), path, ['remote'])
-        if (asJson) printJson({ ok: true, path })
-        else printLine(`removed remote server: ${path}`)
-      })
+      const path = String(pathArg ?? '').trim()
+      if (!path) throw new CliError('tree path is required')
+      await confirmDestructive(opts, `Remove remote server at ${path}?`)
+      await deleteNode(resolveTarget(opts), path, ['remote'])
+      if (asJson) printJson({ ok: true, path })
+      else printLine(`removed remote server: ${path}`)
     })
 }
 

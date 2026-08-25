@@ -34,12 +34,19 @@ import type {
   updateLinkInput,
   updateTagInput,
 } from './schema'
+import {
+  asJsonObject as asRecord,
+  compactDefined as compact,
+  finiteNumber as optionalNumber,
+  trimmedText as optionalText,
+} from '../_runtime/jsonValue'
+import { createProviderHttpClient, type ProviderQuery } from '../_runtime/providerHttp'
 import { type ProviderContext, requireApiKey } from '../_runtime/plugin'
 import { upstreamError } from '../_runtime/upstreamError'
-import { guardedFetch } from '../_runtime/guardedFetch'
 
 const SERVICE = 'dub'
 const API_BASE = 'https://api.dub.co'
+const http = createProviderHttpClient({ baseUrl: API_BASE, service: SERVICE })
 const LINKS_PATH = '/links'
 const LINKS_INFO_PATH = '/links/info'
 const LINKS_COUNT_PATH = '/links/count'
@@ -81,44 +88,15 @@ interface NormalizedFolder {
   raw: Json
 }
 
-function asRecord(value: unknown): Json | undefined {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-    ? (value as Json)
-    : undefined
-}
-
-/** 上游 `optionalString` 的语义:先 trim,空则视为缺失。 */
-function optionalText(value: unknown): string | undefined {
-  if (typeof value !== 'string') return undefined
-  const trimmed = value.trim()
-  return trimmed === '' ? undefined : trimmed
-}
-
 function nullableText(value: unknown): string | null | undefined {
   return value === null ? null : optionalText(value)
 }
 
-function optionalNumber(value: unknown): number | undefined {
-  return typeof value === 'number' && Number.isFinite(value) ? value : undefined
-}
-
 /** `undefined`/`null`/空串省略;数组按逗号连接(Dub 的 query 约定,不是重复键)。 */
-function appendQuery(url: URL, query: Json): void {
-  for (const [key, value] of Object.entries(query)) {
-    if (value === undefined || value === null || value === '') continue
-    url.searchParams.set(key, Array.isArray(value) ? value.map(String).join(',') : String(value))
-  }
-}
-
-/** 空体回 null,非 JSON 回原文 —— Dub 的错误页有时是纯文本。 */
-async function readPayload(response: Response): Promise<unknown> {
-  const text = await response.text().catch(() => '')
-  if (text.trim() === '') return null
-  try {
-    return JSON.parse(text) as unknown
-  } catch {
-    return text
-  }
+function providerQuery(query: Json): ProviderQuery {
+  return Object.entries(query)
+    .filter(([, value]) => value !== undefined && value !== null && value !== '')
+    .map(([key, value]) => [key, Array.isArray(value) ? value.map(String).join(',') : String(value)] as const)
 }
 
 function errorMessage(payload: unknown): string | undefined {
@@ -138,37 +116,23 @@ interface RequestInput {
 
 async function request(ctx: ProviderContext, path: string, input: RequestInput): Promise<unknown> {
   const apiKey = requireApiKey(ctx, SERVICE)
-  const url = new URL(path, API_BASE)
-  appendQuery(url, input.query ?? {})
-
-  const headers: Record<string, string> = {
-    accept: 'application/json',
-    authorization: `Bearer ${apiKey}`,
-  }
-  if (input.body !== undefined) headers['content-type'] = 'application/json'
-
-  let response: Response
-  let payload: unknown
-  try {
-    response = await guardedFetch(url.toString(), {
-      method: input.method,
-      headers,
-      ...(input.body === undefined ? {} : { body: JSON.stringify(input.body) }),
-    })
-    payload = await readPayload(response)
-  } catch (error) {
-    // 传输层失败必须就地归一:漏出去的裸 Error 会被 plugin-sdk 抹成 "internal plugin error"
-    // 500,把"上游不通/出网被拦"说成插件自身故障,还丢掉唯一有诊断价值的那句消息。
-    throw upstreamError(502, error instanceof Error ? `dub 请求失败: ${error.message}` : 'dub 请求失败')
-  }
-
-  if (!response.ok) {
-    throw upstreamError(
-      response.status,
-      errorMessage(payload) ?? (response.statusText || `dub 返回 HTTP ${response.status}`),
-    )
-  }
-  return payload
+  const { bodyKind, data } = await http.request({
+    path,
+    method: input.method,
+    query: providerQuery(input.query ?? {}),
+    headers: { accept: 'application/json', authorization: `Bearer ${apiKey}` },
+    ...(input.body === undefined ? {} : { json: input.body }),
+    invalidJson: 'text',
+    mapError: ({ data: payload, status, statusText }) => upstreamError(
+      status,
+      errorMessage(payload) ?? (statusText || `dub 返回 HTTP ${status}`),
+    ),
+    mapTransportError: ({ message }) => upstreamError(
+      502,
+      message === undefined ? 'dub 请求失败' : `dub 请求失败: ${message}`,
+    ),
+  })
+  return bodyKind === 'empty' ? null : data
 }
 
 /** 响应里契约要求的字段;取不到是**上游**破了契约,不是调用方的错。 */
@@ -237,15 +201,6 @@ function extractCount(payload: unknown): number {
   const count = optionalNumber(object?.count) ?? optionalNumber(object?.links)
   if (count === undefined) throw upstreamError(502, 'dub count 响应里没有 count')
   return count
-}
-
-/** 丢掉值为 `undefined` 的键;`null` 要留着 —— Dub 用 null 表示"清空该字段"。 */
-function compact(input: Json): Json {
-  const output: Json = {}
-  for (const [key, value] of Object.entries(input)) {
-    if (value !== undefined) output[key] = value
-  }
-  return output
 }
 
 /**

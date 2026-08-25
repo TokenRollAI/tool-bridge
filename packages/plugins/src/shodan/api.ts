@@ -25,19 +25,21 @@ import type {
   reverseDnsLookupInput,
   searchHostsInput,
 } from './schema'
+import {
+  compactDefined as compact,
+  booleanValue as optionalFlag,
+  asJsonObject as record,
+} from '../_runtime/jsonValue'
+import { createProviderHttpClient, type ProviderQuery } from '../_runtime/providerHttp'
 import { type ProviderContext, requireApiKey } from '../_runtime/plugin'
 import { upstreamError } from '../_runtime/upstreamError'
-import { guardedFetch } from '../_runtime/guardedFetch'
 
 const SERVICE = 'shodan'
 const API_BASE = 'https://api.shodan.io'
 const API_INFO_PATH = '/api-info'
+const http = createProviderHttpClient({ baseUrl: `${API_BASE}/`, service: SERVICE })
 
 type Json = Record<string, unknown>
-
-function record(value: unknown): Json | undefined {
-  return typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Json) : undefined
-}
 
 /** 响应字段不符合上游文档的形状 —— 上游契约破了,调用方无从修复。 */
 function invalidResponse(field: string): TBError {
@@ -58,10 +60,6 @@ function optionalCount(value: unknown, field: string): number | undefined {
   return value === undefined ? undefined : requiredCount(value, field)
 }
 
-function optionalFlag(value: unknown): boolean | undefined {
-  return typeof value === 'boolean' ? value : undefined
-}
-
 function objectArray(value: unknown, field: string): Json[] {
   if (!Array.isArray(value) || value.some(item => record(item) === undefined)) throw invalidResponse(field)
   return value as Json[]
@@ -73,11 +71,6 @@ function textArray(value: unknown, field: string): string[] {
     throw invalidResponse(field)
   }
   return (value as string[]).map(item => item.trim())
-}
-
-/** 丢掉值为 undefined 的键:上游 `compactObject` 的等价物。 */
-function compact(input: Json): Json {
-  return Object.fromEntries(Object.entries(input).filter(([, value]) => value !== undefined))
 }
 
 function errorMessage(payload: unknown, status: number): string {
@@ -95,35 +88,23 @@ async function request(
   path: string,
   query: Record<string, boolean | number | string | undefined> = {},
 ): Promise<Json> {
-  const url = new URL(path, API_BASE)
-  for (const [key, value] of Object.entries(query)) {
-    if (value !== undefined) url.searchParams.set(key, String(value))
-  }
-  url.searchParams.set('key', requireApiKey(ctx, SERVICE))
-
-  let response: Response
-  let raw: string
-  try {
-    response = await guardedFetch(url.toString(), { method: 'GET', headers: { accept: 'application/json' } })
-    raw = await response.text()
-  } catch (error) {
-    const message = error instanceof Error ? `Shodan request failed: ${error.message}` : 'Shodan request failed'
-    throw upstreamError(502, message)
-  }
-
-  let payload: unknown = null
-  if (raw !== '') {
-    try {
-      payload = JSON.parse(raw)
-    } catch {
-      // 错误响应允许是纯文本(Shodan 的网关会回 HTML);成功响应不允许。
-      if (response.ok) throw upstreamError(502, 'Shodan returned invalid JSON')
-      payload = raw
-    }
-  }
-
-  if (!response.ok) throw upstreamError(response.status, errorMessage(payload, response.status))
-  const body = record(payload)
+  const requestQuery: ProviderQuery = [
+    ...Object.entries(query),
+    ['key', requireApiKey(ctx, SERVICE)],
+  ]
+  const response = await http.request({
+    path,
+    query: requestQuery,
+    headers: { accept: 'application/json' },
+    invalidJson: 'text',
+    mapError: ({ data, status }) => upstreamError(status, errorMessage(data, status)),
+    mapTransportError: ({ message }) => upstreamError(
+      502,
+      message === undefined ? 'Shodan request failed' : `Shodan request failed: ${message}`,
+    ),
+  })
+  if (response.bodyKind === 'invalid-json') throw upstreamError(502, 'Shodan returned invalid JSON')
+  const body = record(response.bodyKind === 'empty' ? null : response.data)
   if (body === undefined) throw upstreamError(502, 'Shodan returned an invalid JSON response')
   return body
 }

@@ -1,9 +1,10 @@
 /**
  * 宿主注入面与请求期公共类型。
  *
- * 这里只放形状:五个注入点(state / objects / secrets / device / search)、进程内
- * Provider 钩子与解析后的部署配置。行为实现分散在 paths/federation/deviceNodes/
- * toolNodes/contextNodes/helpModel 与 routes/*,装配在 tbApp.ts。
+ * 这里只放形状:五个数据/设备注入点(state / objects / secrets / device / search)、
+ * Provider OAuth 安全出站通道、进程内 Provider 钩子与解析后的部署配置。行为实现
+ * 分散在 paths/federation/deviceNodes/toolNodes/contextNodes/helpModel 与 routes/*,
+ * 装配在 tbApp.ts。
  */
 import type {
   BuiltinCatalog,
@@ -58,7 +59,7 @@ export interface ReadinessReport {
 }
 
 /**
- * tb app 的宿主注入面(五注入点 + 解析后的部署配置)。
+ * tb app 的宿主注入面(数据/设备五注入点 + 安全出站通道 + 解析后的部署配置)。
  * 核心业务逻辑零分叉:Workers 适配层(app.ts)与 SDK(packages/sdk)都注入此形状。
  */
 export interface TbAppDeps {
@@ -98,6 +99,12 @@ export interface TbAppDeps {
    * 那个插件解析不出 export;反之则解析得出但调不动(unavailable)。宿主该两者同源装配。
    */
   pluginCatalog?: BuiltinCatalog
+  /**
+   * Provider OAuth 令牌端点的宿主出站通道。必须由宿主显式注入；缺省时 OAuth
+   * 发起、回调兑换与 access-token 解析全部 fail closed，绝不回退到全局 fetch。
+   * 标准宿主注入逐跳校验且拒绝跨源 body 重定向的 guarded fetch。
+   */
+  providerOAuthFetch?: typeof fetch
   /**
    * 后端连通性探测(GET /readyz;k8s readiness)。宿主注入闭包,自行探测其长连接
    * 后端(PG 池 / Redis)并叠加 draining 状态。缺省 → /readyz 恒 200:请求期绑定

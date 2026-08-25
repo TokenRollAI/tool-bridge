@@ -6,5 +6,5 @@
  * 会把一堆浏览器/构建期全局塞进插件源码的可见范围,得不偿失,故只声明用到的这一个。
  */
 interface ImportMeta {
-  glob: <T>(pattern: string, options: { eager: true }) => Record<string, T>
+  glob: <T>(pattern: string, options: { eager: true, import?: string, query?: string }) => Record<string, T>
 }

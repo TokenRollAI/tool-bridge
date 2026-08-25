@@ -1,11 +1,8 @@
 import {
-  base64urlEncode,
   type CallContext,
-  encodeCallContext,
-  HEADER_TB_CONTEXT,
-  HEADER_TB_UPSTREAM_AUTH,
 } from '@tool-bridge/core'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+import { createProviderHarness } from '../support/providerHarness'
 import { createMetabasePlugin } from '../../src/metabase/index'
 import { metabaseActions } from '../../src/metabase/schema'
 
@@ -16,8 +13,6 @@ import { metabaseActions } from '../../src/metabase/schema'
  * 再加上列表端点"裸数组 or {data:[]}"两种形状都要认。
  */
 
-const PLUGIN_TOKEN = 'tbp_test'
-const ENV = { PLUGIN_TOKEN }
 const API_KEY = 'mb_testdeadbeef'
 const INSTANCE_URL = 'https://metabase.example.com'
 const plugin = createMetabasePlugin()
@@ -39,52 +34,17 @@ interface CallOptions {
   config?: Record<string, unknown> | undefined
 }
 
-function envelope(body: unknown, opts: CallOptions = {}): Promise<Response> {
-  const headers: Record<string, string> = {
-    'authorization': `Bearer ${PLUGIN_TOKEN}`,
-    'content-type': 'application/json',
-    [HEADER_TB_CONTEXT]: encodeCallContext(
-      caller('config' in opts ? opts.config : { instanceUrl: INSTANCE_URL }),
-    ),
-  }
-  const auth = opts.auth === undefined ? API_KEY : opts.auth
-  if (auth !== null) {
-    headers[HEADER_TB_UPSTREAM_AUTH] = base64urlEncode(new TextEncoder().encode(auth))
-  }
-  return Promise.resolve(plugin.fetch(
-    new Request('https://plugin.test/', { method: 'POST', headers, body: JSON.stringify(body) }),
-    ENV as never,
-  ))
-}
-
-function call(name: string, args: unknown, opts?: CallOptions): Promise<Response> {
-  return envelope({ tool: 'Call', arguments: { name, args } }, opts)
-}
-
-function mockMetabase(status: number, payload: unknown): ReturnType<typeof vi.fn> {
-  const fn = vi.fn(() => Promise.resolve(new Response(JSON.stringify(payload), {
-    status,
-    headers: { 'content-type': 'application/json' },
-  })))
-  vi.stubGlobal('fetch', fn)
-  return fn
-}
+const { call, envelope, sent, mockJson: mockMetabase, env: ENV, stubFetch } = createProviderHarness<CallOptions>({
+  caller: opts => caller('config' in opts ? opts.config : { instanceUrl: INSTANCE_URL }),
+  mountPath: 'data/metabase',
+  plugin,
+  upstreamAuth: API_KEY,
+})
 
 /** 直接给一段原始 body(测空体与非 JSON 响应)。 */
 function mockRaw(status: number, body: string | null): ReturnType<typeof vi.fn> {
-  const fn = vi.fn(() => Promise.resolve(new Response(body, { status })))
-  vi.stubGlobal('fetch', fn)
-  return fn
+  return stubFetch(() => Promise.resolve(new Response(body, { status })))
 }
-
-/** 取上游收到的那个请求。 */
-function sent(mock: ReturnType<typeof vi.fn>): Request {
-  return (mock.mock.calls[0] as [Request])[0]
-}
-
-afterEach(() => {
-  vi.unstubAllGlobals()
-})
 
 describe('契约面', () => {
   it('List 出全部 10 个 action,且都带 Zod 派生的 schema', async () => {

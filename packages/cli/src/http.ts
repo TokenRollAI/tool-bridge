@@ -1,16 +1,14 @@
-/**
- * CLI 的 HTTP 层:fetch + Bearer + Accept 内容协商 + TBError 归一。
- *
- * 契约(与网关约定,见任务书):
- * - 认证:`Authorization: Bearer <SK>`;无/无效 → 401 TBError。
- * - `Accept: application/json` → 结构化 JSON;缺省 text/plain(Help DSL 等)。
- * - 错误响应:TBError JSON `{code,message,retryable}` + 对应 HTTP 码。
- *
- * 失败归一集中在两个函数,保证任何失败路径的 CliError 都带 code/retryable
- * (--json 消费者据此判定可否重试,不必对 message 做正则):
- * - errorFromNetwork:fetch/响应体读取抛出的传输层异常(含超时);
- * - errorFromResponse:非 2xx 响应,规范 TBError body 优先,否则按 HTTP status 回退。
- */
+/** CLI 宿主适配：SDK neutral client + CliError/对象直传边界。 */
+import {
+  type ContextUploadGrant,
+  createToolBridgeClient,
+  parseContextUploadGrant as parseSdkContextUploadGrant,
+  PresignedPutError,
+  type PresignedPutGrant,
+  putPresignedObject,
+  type ToolBridgeClient,
+  ToolBridgeClientError,
+} from '@tool-bridge/sdk/client'
 
 /** CLI 错误:携带可选 TBError code/retryable,统一由 output.reportError 落地为退出码 1。 */
 export class CliError extends Error {
@@ -55,14 +53,17 @@ export function resetFetch(): void {
   fetchImpl = globalThis.fetch
 }
 
+/** 共享当前注入的 transport；SDK-backed 命令必须沿用同一个测试/宿主边界。 */
+export function getFetch(): typeof fetch {
+  return fetchImpl
+}
+
 export interface ApiOptions {
   accept?: 'json' | 'text' | 'markdown'
   body?: unknown
-  /** 仅用于协议规定的附加 capability header；Authorization 仍由 Target 权威组装。 */
-  headers?: Record<string, string>
   method?: 'GET' | 'POST' | 'DELETE'
   path: string
-  query?: Record<string, string | number | undefined>
+  query?: Record<string, boolean | number | string | readonly (boolean | number | string)[] | undefined>
 }
 
 export interface ApiResult {
@@ -72,184 +73,100 @@ export interface ApiResult {
   text: string
 }
 
-function buildQuery(query?: ApiOptions['query']): string {
-  if (!query) return ''
-  const parts: string[] = []
-  for (const [k, v] of Object.entries(query)) {
-    if (v !== undefined) parts.push(`${encodeURIComponent(k)}=${encodeURIComponent(String(v))}`)
-  }
-  return parts.length ? `?${parts.join('&')}` : ''
-}
-
 /** 无显式 --timeout 时的单请求等待上限(上游长查询可用 --timeout 加大)。 */
 export const DEFAULT_TIMEOUT_MS = 120_000
 
-/**
- * HTTP 状态 → TBError code(网关不可达或返回非规范错误体时的回退映射)。
- * 与 core `errors.ts` 的 CODE_TO_STATUS 反向对齐;此处不 import core(它是 devDep,
- * 不进 CLI 运行时产物),按同一 7 码契约本地维护。未知状态一律归 internal。
- */
-function codeForStatus(status: number): { code: string, retryable: boolean } {
-  if (status === 400) return { code: 'invalid_argument', retryable: false }
-  if (status === 401 || status === 403) return { code: 'permission_denied', retryable: false }
-  if (status === 404) return { code: 'not_found', retryable: false }
-  if (status === 409) return { code: 'conflict', retryable: false }
-  if (status === 429) return { code: 'rate_limited', retryable: true }
-  // 5xx(除下方细分)与其它未预期状态:服务端侧问题,通常值得重试。
-  if (status === 503 || status === 500) return { code: 'unavailable', retryable: true }
-  if (status >= 500) return { code: 'unavailable', retryable: true }
-  // 其它 4xx:客户端请求被拒,重试无益。
-  return { code: 'internal', retryable: false }
-}
-
-/**
- * 传输层异常(fetch 抛出,非 HTTP 响应)→ CliError,始终带 code/retryable。
- * undici 把底层原因挂在 `err.cause.code`(如 ECONNREFUSED/ENOTFOUND/ECONNRESET):
- * 连接根本没建立的错误按 unavailable(retryable)呈现,让调用方拿到稳定的重试信号,
- * 而不是只能对 'fetch failed' 这种无 code 的裸消息做正则。
- */
-function errorFromNetwork(err: unknown): CliError {
-  if (err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError')) {
-    return new CliError(
-      'request timed out — the upstream may still be processing; retry or raise --timeout',
-      'unavailable',
-      true,
-    )
-  }
-  const cause = (err as { cause?: { code?: unknown } }).cause
-  const causeCode = typeof cause?.code === 'string' ? cause.code : undefined
-  const message = err instanceof Error ? err.message : String(err)
-  const detail = causeCode !== undefined ? `${message} (${causeCode})` : message
-  return new CliError(`request failed: ${detail}`, 'unavailable', true)
-}
-
-/**
- * 非 2xx 响应 → CliError。body 是规范 TBError(`{code,message,retryable}`)时原样采纳;
- * 否则按 HTTP status 回退出 code/retryable(见 codeForStatus),确保任何失败路径都带结构,
- * 消除 `--json` 下 code/retryable 缺键与显式 false 无法区分的问题。
- */
-function errorFromResponse(rawText: string, status: number): CliError {
-  let body: unknown
-  if (rawText) {
-    try {
-      body = JSON.parse(rawText)
-    } catch {
-      // 非 JSON 错误体:落到 status 回退。
-    }
-  }
-  if (
-    body
-    && typeof body === 'object'
-    && 'code' in body
-    && 'message' in body
-    && typeof (body as { message: unknown }).message === 'string'
-  ) {
-    const b = body as { code: unknown, message: string, retryable?: unknown }
-    const retryable = typeof b.retryable === 'boolean' ? b.retryable : undefined
-    return new CliError(b.message, String(b.code), retryable)
-  }
-  const { code, retryable } = codeForStatus(status)
-  return new CliError(`gateway returned HTTP ${status}`, code, retryable)
-}
-
-/** 底层请求:构造 URL/头,执行 fetch;网络错误 → CliError,超时 → retryable CliError。 */
-export async function apiFetch(target: Target, opts: ApiOptions): Promise<ApiResult> {
-  const { baseUrl, sk } = requireTarget(target)
-  const timeoutMs = target.timeoutMs ?? DEFAULT_TIMEOUT_MS
-  const base = baseUrl.replace(/\/+$/, '')
-  const path = opts.path.startsWith('/') ? opts.path : `/${opts.path}`
-  const url = `${base}${path}${buildQuery(opts.query)}`
-
-  const headers: Record<string, string> = {}
-  // 调用者不能借附加 headers 改写普通控制面的身份。
-  for (const [name, value] of Object.entries(opts.headers ?? {})) {
-    if (name.toLowerCase() !== 'authorization') headers[name] = value
-  }
-  if (sk) headers.authorization = `Bearer ${sk}`
-  if (opts.accept === 'json') headers.accept = 'application/json'
-  else if (opts.accept === 'markdown') headers.accept = 'text/markdown'
-  else if (opts.accept === 'text') headers.accept = 'text/plain'
-
-  const init: RequestInit = {
-    method: opts.method ?? 'GET',
-    headers,
-    signal: AbortSignal.timeout(timeoutMs),
-  }
-  if (opts.body !== undefined) {
-    headers['content-type'] = 'application/json'
-    init.body = JSON.stringify(opts.body)
-  }
-
-  let res: Response
-  try {
-    res = await fetchImpl(url, init)
-  } catch (err) {
-    // 超时消息补上实际秒数(errorFromNetwork 不知道 timeoutMs)。
-    if (err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError')) {
-      throw new CliError(
+function clientError(error: unknown, target: Target): CliError {
+  if (error instanceof ToolBridgeClientError) {
+    if (error.kind === 'timeout') {
+      const timeoutMs = target.timeoutMs ?? DEFAULT_TIMEOUT_MS
+      return new CliError(
         `request timed out after ${Math.round(timeoutMs / 1000)}s — the upstream may still be processing; retry or raise --timeout`,
         'unavailable',
         true,
       )
     }
-    throw errorFromNetwork(err)
+    if (error.kind === 'network') {
+      const detail = error.networkCode === undefined ? '' : ` (${error.networkCode})`
+      return new CliError(`request failed: gateway unavailable${detail}`, 'unavailable', true)
+    }
+    return new CliError(
+      error.message,
+      error.code === 'network' ? 'unavailable' : error.code,
+      error.retryable,
+    )
   }
-  // 响应体读取也可能中途断流(TypeError: terminated);与 fetch 抛出同类,按网络失败归一,
-  // 而非让裸 undici 消息逃逸(那样又回到无 code/retryable 的老问题)。
-  let text: string
+  return new CliError('request failed: gateway unavailable', 'unavailable', true)
+}
+
+/** 当前 target 对应的 SDK client；保留 CLI 的 fetch 注入与单请求 timeout 默认。 */
+export function clientForTarget(target: Target): ToolBridgeClient {
+  const { baseUrl, sk } = requireTarget(target)
   try {
-    text = await res.text()
-  } catch (err) {
-    throw errorFromNetwork(err)
-  }
-  return {
-    status: res.status,
-    ok: res.ok,
-    text,
-    contentType: res.headers.get('content-type') ?? '',
+    return createToolBridgeClient({
+      baseUrl,
+      sk,
+      fetcher: fetchImpl,
+      timeoutMs: target.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+    })
+  } catch (error) {
+    throw clientError(error, target)
   }
 }
 
-/** JSON 请求:强制 `Accept: application/json`,成功返回解析结果,失败抛 CliError。 */
+export async function withClient<T>(
+  target: Target,
+  fn: (client: ToolBridgeClient) => Promise<T>,
+): Promise<T> {
+  try {
+    return await fn(clientForTarget(target))
+  } catch (error) {
+    if (error instanceof CliError) throw error
+    throw clientError(error, target)
+  }
+}
+
+/** 底层请求保留非 2xx 原始结果，供 status/login 的既有判定使用。 */
+export async function apiFetch(target: Target, opts: ApiOptions): Promise<ApiResult> {
+  return await withClient(target, async client => await client.raw({
+    path: opts.path,
+    method: opts.method,
+    body: opts.body,
+    query: opts.query,
+    accept: opts.accept === 'json'
+      ? 'application/json'
+      : opts.accept === 'markdown'
+        ? 'text/markdown'
+        : opts.accept === 'text'
+          ? 'text/plain'
+          : undefined,
+  }))
+}
+
 export async function apiJson<T>(target: Target, opts: Omit<ApiOptions, 'accept'>): Promise<T> {
-  const r = await apiFetch(target, { ...opts, accept: 'json' })
-  if (!r.ok) throw errorFromResponse(r.text, r.status)
-  if (!r.text) return undefined as T
-  try {
-    return JSON.parse(r.text) as T
-  } catch {
-    // 2xx 但响应体不是合法 JSON:网关侧异常,值得重试。
-    throw new CliError('invalid JSON response from gateway', 'internal', true)
-  }
+  return await withClient(target, async client => await client.json<T>({
+    ...opts,
+    accept: 'application/json',
+  }))
 }
 
-/**
- * 文本请求(Help DSL / Markdown 等):成功返回原始文本,失败按 TBError/HTTP status 归一。
- * 缺省 `Accept: text/plain`;`accept: 'markdown'` 请求可读 Markdown 表现。
- */
 export async function apiText(
   target: Target,
   opts: Omit<ApiOptions, 'accept'> & { accept?: 'text' | 'markdown' },
 ): Promise<string> {
-  const r = await apiFetch(target, { ...opts, accept: opts.accept ?? 'text' })
-  if (!r.ok) throw errorFromResponse(r.text, r.status)
-  return r.text
+  return await withClient(target, async client => await client.text({
+    ...opts,
+    accept: opts.accept === 'markdown' ? 'text/markdown' : 'text/plain',
+  }))
 }
 
-/** 直连工具调用:`POST /<node>/<tool>`,body 即 arguments 本体(无信封)。 */
+/** 动态 HTBP 直连：完整 path + 裸 arguments，绝不引入静态 envelope。 */
 export async function callDirect<T>(
   target: Target,
   toolPath: string,
   args: Record<string, unknown> = {},
 ): Promise<T> {
-  return apiJson<T>(target, { method: 'POST', path: toolPath, body: args })
-}
-
-export interface PresignedPutGrant {
-  expiresAt: string
-  headers: Record<string, string>
-  method: 'PUT'
-  url: string
+  return await withClient(target, async client => await client.invokeJson<T>(toolPath, args))
 }
 
 /**
@@ -261,194 +178,47 @@ export async function putPresigned(
   body: NonNullable<RequestInit['body']>,
   timeoutMs: number = DEFAULT_TIMEOUT_MS,
 ): Promise<{ etag?: string }> {
-  let url: URL
-  let headers: Headers
   try {
-    url = new URL(grant.url)
-    headers = new Headers(grant.headers)
-  } catch {
-    throw new CliError('gateway returned an invalid upload grant', 'internal', true)
-  }
-  if (
-    grant.method !== 'PUT'
-    || !Number.isFinite(Date.parse(grant.expiresAt))
-    || (url.protocol !== 'https:' && url.protocol !== 'http:')
-    || url.username !== ''
-    || url.password !== ''
-  ) {
-    throw new CliError('gateway returned an invalid upload grant', 'internal', true)
-  }
-  if (Date.parse(grant.expiresAt) <= Date.now()) {
-    throw new CliError('upload grant expired before upload started', 'unavailable', true)
-  }
-
-  let response: Response
-  try {
-    response = await fetchImpl(url, {
-      method: 'PUT',
-      headers,
-      body,
-      signal: AbortSignal.timeout(timeoutMs),
+    return await putPresignedObject(grant, body, {
+      fetcher: fetchImpl,
+      timeoutMs,
     })
-  } catch (err) {
-    if (err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError')) {
+  } catch (error) {
+    if (!(error instanceof PresignedPutError)) throw error
+    if (error.kind === 'invalid') {
+      throw new CliError(error.message, 'internal', true)
+    }
+    if (error.kind === 'expired') {
+      throw new CliError(error.message, 'unavailable', true)
+    }
+    if (error.kind === 'timeout' || error.kind === 'aborted') {
       throw new CliError('object upload timed out', 'unavailable', true)
     }
-    // fetch 的错误消息可能包含完整请求 URL；预签名 query 是 bearer secret，必须脱敏。
-    throw new CliError('object upload request failed', 'unavailable', true)
-  }
-  const etag = response.headers.get('etag')
-  await response.body?.cancel().catch(() => {})
-  if (!response.ok) {
-    if (response.status === 412) {
+    if (error.kind === 'conflict') {
       throw new CliError(
         'object already exists; re-run with --force to overwrite it',
         'conflict',
         false,
       )
     }
-    const retryable = response.status === 408 || response.status === 429 || response.status >= 500
     throw new CliError(
-      `object upload returned HTTP ${response.status}`,
+      error.message,
       'unavailable',
-      retryable,
+      error.retryable,
     )
   }
-  return etag === null ? {} : { etag }
 }
 
-export interface StorePutGrant extends PresignedPutGrant {
-  maxBytes: number
-  objectUri: string
-  transport: 'relay' | 'presigned-put'
-  uploadId: string
-  uploadToken: string
-}
-
-/**
- * Store 上传数据面。relay PUT 额外携带 upload session capability 并返回 ready descriptor；
- * direct PUT 只发送签名 headers，provider body 永不进入错误消息。
- */
-export async function putStoreObject(
-  grant: StorePutGrant,
-  body: NonNullable<RequestInit['body']>,
-  timeoutMs: number = DEFAULT_TIMEOUT_MS,
-): Promise<unknown | undefined> {
-  let url: URL
-  let headers: Headers
+/** Context grant 的 CLI 错误适配；必须在读取/发送本地文件前完成。 */
+export function parseContextUploadGrant(value: unknown): ContextUploadGrant {
   try {
-    url = new URL(grant.url)
-    headers = new Headers(grant.headers)
-    if (grant.transport === 'relay') headers.set('x-tb-store-upload', grant.uploadToken)
-  } catch {
-    throw new CliError('gateway returned an invalid Store upload grant', 'internal', true)
-  }
-  if (
-    grant.method !== 'PUT'
-    || (grant.transport !== 'relay' && grant.transport !== 'presigned-put')
-    || !Number.isSafeInteger(grant.maxBytes)
-    || grant.maxBytes < 1
-    || typeof grant.uploadToken !== 'string'
-    || grant.uploadToken.length === 0
-    || !Number.isFinite(Date.parse(grant.expiresAt))
-    || (url.protocol !== 'https:' && url.protocol !== 'http:')
-    || url.username !== ''
-    || url.password !== ''
-  ) {
-    throw new CliError('gateway returned an invalid Store upload grant', 'internal', true)
-  }
-  if (Date.parse(grant.expiresAt) <= Date.now()) {
-    throw new CliError('Store upload grant expired before upload started', 'unavailable', true)
-  }
-
-  let response: Response
-  try {
-    const init: RequestInit & { duplex?: 'half' } = {
-      method: 'PUT',
-      headers,
-      body,
-      signal: AbortSignal.timeout(timeoutMs),
+    return parseSdkContextUploadGrant(value)
+  } catch (error) {
+    if (error instanceof PresignedPutError) {
+      throw new CliError(error.message, 'internal', true)
     }
-    // Node fetch 对流式 request body 要求 duplex；浏览器会忽略未知的 init 字段。
-    init.duplex = 'half'
-    response = await fetchImpl(url, init)
-  } catch (err) {
-    if (err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError')) {
-      throw new CliError('Store object upload timed out', 'unavailable', true)
-    }
-    throw new CliError('Store object upload request failed', 'unavailable', true)
+    throw error
   }
-
-  if (!response.ok) {
-    await response.body?.cancel().catch(() => {})
-    throw new CliError(
-      `Store object upload returned HTTP ${response.status}`,
-      'unavailable',
-      response.status === 408 || response.status === 429 || response.status >= 500,
-    )
-  }
-  if (grant.transport === 'presigned-put') {
-    await response.body?.cancel().catch(() => {})
-    return undefined
-  }
-  try {
-    return await response.json()
-  } catch {
-    throw new CliError('gateway returned an invalid Store object descriptor', 'internal', true)
-  }
-}
-
-/** Store `$ref` 下载数据面：不携带 Tool Bridge SK/cookie，错误不回显 bearer URL。 */
-export async function fetchStoreRef(
-  ref: string,
-  timeoutMs: number = DEFAULT_TIMEOUT_MS,
-): Promise<Response> {
-  let url: URL
-  try {
-    url = new URL(ref)
-  } catch {
-    throw new CliError('gateway returned an invalid Store read reference', 'internal', true)
-  }
-  if (
-    (url.protocol !== 'https:' && url.protocol !== 'http:')
-    || url.username !== ''
-    || url.password !== ''
-  ) {
-    throw new CliError('gateway returned an invalid Store read reference', 'internal', true)
-  }
-  let response: Response
-  try {
-    response = await fetchImpl(url, {
-      method: 'GET',
-      credentials: 'omit',
-      signal: AbortSignal.timeout(timeoutMs),
-    })
-  } catch (err) {
-    if (err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError')) {
-      throw new CliError('Store object download timed out', 'unavailable', true)
-    }
-    throw new CliError('Store object download request failed', 'unavailable', true)
-  }
-  if (!response.ok) {
-    await response.body?.cancel().catch(() => {})
-    throw new CliError(
-      `Store object download returned HTTP ${response.status}`,
-      'unavailable',
-      response.status === 408 || response.status === 429 || response.status >= 500,
-    )
-  }
-  return response
-}
-
-async function invokeText(target: Target, path: string, body: unknown): Promise<string> {
-  const r = await apiFetch(target, {
-    method: 'POST',
-    path,
-    body,
-    accept: 'markdown',
-  })
-  if (!r.ok) throw errorFromResponse(r.text, r.status)
-  return r.text
 }
 
 /** 直连工具调用(人类模式):body 即 arguments 本体。 */
@@ -457,5 +227,8 @@ export async function callDirectText(
   toolPath: string,
   args: Record<string, unknown> = {},
 ): Promise<string> {
-  return invokeText(target, toolPath, args)
+  return await withClient(
+    target,
+    async client => (await client.invoke(toolPath, args, { accept: 'markdown' })).text,
+  )
 }

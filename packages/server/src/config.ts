@@ -2,18 +2,18 @@
  * Node 宿主的 env 配置面。变量名与语义对齐 CF 宿主(gateway/src/app.ts 的 Env),
  * 仅新增宿主形态相关的 TB_PORT / TB_HOST / TB_DATA_DIR / TB_UI_DIR / TB_DATABASE_URL。
  * 端口额外兜底平台注入的 PORT(PaaS 通行约定)。
- * 解析函数镜像 app.ts 的 allowInsecure / remoteSettingsFromEnv / positiveIntEnv。
+ * Node/Workers 共用字段由 core runtimeEnv Zod schema 解析，本文件只保留 Node 宿主字段。
  */
 
 import type { PluginBindings } from '@tool-bridge/app'
 import {
   type BuiltinCatalog,
-  normalizeCanonicalOrigin,
-  PRESIGN_TTL_SEC_MAX,
+  parseNonNegativeIntEnv,
+  parsePortEnv,
+  parseRuntimeEnv,
 } from '@tool-bridge/core'
 
 const DEFAULT_PORT = 8787
-const DEFAULT_MAX_HOPS = 4
 const DEFAULT_DEVICE_RECLAIM_SEC = 24 * 60 * 60
 const DEFAULT_STORE_CLEANUP_INTERVAL_SEC = 15 * 60
 
@@ -123,56 +123,22 @@ export interface ServerConfig {
   uploadGrantTtlSec?: number
 }
 
-/** 正整数 env 解析;非法/缺省 → undefined。 */
-function positiveIntEnv(value: string | undefined): number | undefined {
-  const n = Number(value)
-  return Number.isFinite(n) && n > 0 ? Math.floor(n) : undefined
-}
-
-/** SigV4 presign TTL 同时钳制到协议上限。 */
-function presignTtlEnv(value: string | undefined): number | undefined {
-  const ttl = positiveIntEnv(value)
-  return ttl === undefined ? undefined : Math.min(ttl, PRESIGN_TTL_SEC_MAX)
-}
-
-/** 端口解析:0 合法(系统分配临时端口,测试用);非法/缺省 → undefined。 */
-function portEnv(value: string | undefined): number | undefined {
-  if (value === undefined || value === '') return undefined
-  const n = Number(value)
-  return Number.isInteger(n) && n >= 0 && n <= 65535 ? n : undefined
-}
-
 export function configFromEnv(env: NodeJS.ProcessEnv = process.env): ServerConfig {
-  const allowInsecure = env.TB_ALLOW_INSECURE_HTTP === 'true'
-  const allowlist = (env.TB_REMOTE_ALLOWLIST ?? '')
-    .split(',')
-    .map(s => s.trim())
-    .filter(s => s.length > 0)
+  const runtime = parseRuntimeEnv(env)
   const config: ServerConfig = {
+    ...runtime,
     // TB_PORT 优先,PORT 兜底:Railway / Fly / Cloud Run / CF Container 等 PaaS 只注入
     // PORT,不认识 TB_PORT —— 不兜底的话容器会监听 8787 而平台探活另一个端口,部署直接失败。
-    port: portEnv(env.TB_PORT) ?? portEnv(env.PORT) ?? DEFAULT_PORT,
+    port: parsePortEnv(env.TB_PORT) ?? parsePortEnv(env.PORT) ?? DEFAULT_PORT,
     host: env.TB_HOST !== undefined && env.TB_HOST.length > 0 ? env.TB_HOST : '0.0.0.0',
     dataDir:
       env.TB_DATA_DIR !== undefined && env.TB_DATA_DIR.length > 0 ? env.TB_DATA_DIR : './data',
-    allowInsecureHttp: allowInsecure,
     allowInsecureBootstrap: env.TB_ALLOW_INSECURE_BOOTSTRAP === 'true',
-    remote: {
-      allowlist,
-      maxHops: positiveIntEnv(env.TB_MAX_HOPS) ?? DEFAULT_MAX_HOPS,
-      ...(env.TB_INSTANCE_ID !== undefined && env.TB_INSTANCE_ID.length > 0
-        ? { instanceId: env.TB_INSTANCE_ID }
-        : {}),
-      allowInsecure,
-    },
-    deviceReclaimSec: positiveIntEnv(env.TB_DEVICE_RECLAIM_SEC) ?? DEFAULT_DEVICE_RECLAIM_SEC,
+    deviceReclaimSec: runtime.deviceReclaimSec ?? DEFAULT_DEVICE_RECLAIM_SEC,
     storeCleanupIntervalSec:
-      positiveIntEnv(env.TB_STORE_CLEANUP_INTERVAL_SEC) ?? DEFAULT_STORE_CLEANUP_INTERVAL_SEC,
-    // 0 合法(立即关停,本地/单机默认);positiveIntEnv 拒 0,故单独解析。
-    shutdownDrainSec: (() => {
-      const n = Number(env.TB_SHUTDOWN_DRAIN_SEC)
-      return Number.isInteger(n) && n >= 0 ? n : 0
-    })(),
+      runtime.storeCleanupIntervalSec ?? DEFAULT_STORE_CLEANUP_INTERVAL_SEC,
+    // 0 合法(立即关停，本地/单机默认)。
+    shutdownDrainSec: parseNonNegativeIntEnv(env.TB_SHUTDOWN_DRAIN_SEC) ?? 0,
   }
   if (env.TB_UI_DIR !== undefined && env.TB_UI_DIR.length > 0) config.uiDir = env.TB_UI_DIR
   if (env.TB_DATABASE_URL !== undefined && env.TB_DATABASE_URL.length > 0) {
@@ -215,50 +181,8 @@ export function configFromEnv(env: NodeJS.ProcessEnv = process.env): ServerConfi
   if (env.TB_BOOTSTRAP_ADMIN_SK !== undefined && env.TB_BOOTSTRAP_ADMIN_SK.length > 0) {
     config.adminSk = env.TB_BOOTSTRAP_ADMIN_SK
   }
-  // fail closed:配置了但非法直接抛(与 Workers 同一真源),不静默回退。
-  const canonicalOrigin = normalizeCanonicalOrigin(env.TB_CANONICAL_ORIGIN)
-  if (canonicalOrigin !== undefined) config.canonicalOrigin = canonicalOrigin
   if (env.TB_SECRET_ENCRYPTION_KEY !== undefined && env.TB_SECRET_ENCRYPTION_KEY.length > 0) {
     config.encryptionKey = env.TB_SECRET_ENCRYPTION_KEY
-  }
-  const ttl = positiveIntEnv(env.TB_TOOL_CACHE_TTL)
-  if (ttl !== undefined) config.toolCacheTtlSec = ttl
-  const refThreshold = positiveIntEnv(env.TB_REF_THRESHOLD_BYTES)
-  if (refThreshold !== undefined) config.refThresholdBytes = refThreshold
-  const refTtl = presignTtlEnv(env.TB_REF_TTL_SEC)
-  if (refTtl !== undefined) config.refTtlSec = refTtl
-  const uploadGrantTtl = presignTtlEnv(env.TB_UPLOAD_GRANT_TTL_SEC)
-  if (uploadGrantTtl !== undefined) config.uploadGrantTtlSec = uploadGrantTtl
-  const storeMaxObjectBytes = positiveIntEnv(env.TB_STORE_MAX_OBJECT_BYTES)
-  if (storeMaxObjectBytes !== undefined) config.storeMaxObjectBytes = storeMaxObjectBytes
-  const storeRelayMaxBytes = positiveIntEnv(env.TB_STORE_RELAY_MAX_BYTES)
-  if (storeRelayMaxBytes !== undefined) config.storeRelayMaxBytes = storeRelayMaxBytes
-  const storeUploadTtlSec = presignTtlEnv(env.TB_STORE_UPLOAD_TTL_SEC)
-  if (storeUploadTtlSec !== undefined) config.storeUploadTtlSec = storeUploadTtlSec
-  const storeShareTtlSec = presignTtlEnv(env.TB_STORE_SHARE_TTL_SEC)
-  if (storeShareTtlSec !== undefined) config.storeShareTtlSec = storeShareTtlSec
-  const storeReadTtlSec = presignTtlEnv(env.TB_STORE_READ_TTL_SEC)
-  if (storeReadTtlSec !== undefined) config.storeReadTtlSec = storeReadTtlSec
-  const storeCallMaxBytes = positiveIntEnv(env.TB_STORE_CALL_MAX_BYTES)
-  if (storeCallMaxBytes !== undefined) config.storeCallMaxBytes = storeCallMaxBytes
-  const storeCallMaxObjectBytes = positiveIntEnv(env.TB_STORE_CALL_MAX_OBJECT_BYTES)
-  if (storeCallMaxObjectBytes !== undefined) {
-    config.storeCallMaxObjectBytes = storeCallMaxObjectBytes
-  }
-  const storeCallMaxObjects = positiveIntEnv(env.TB_STORE_CALL_MAX_OBJECTS)
-  if (storeCallMaxObjects !== undefined) config.storeCallMaxObjects = storeCallMaxObjects
-  const storeCallAllowedContentTypes = (env.TB_STORE_CALL_ALLOWED_CONTENT_TYPES ?? '')
-    .split(',')
-    .map(value => value.trim())
-    .filter(value => value.length > 0)
-  if (storeCallAllowedContentTypes.length > 0) {
-    config.storeCallAllowedContentTypes = storeCallAllowedContentTypes
-  }
-  if (env.TB_STORE_TOKEN_SECRET !== undefined && env.TB_STORE_TOKEN_SECRET.length > 0) {
-    if (env.TB_STORE_TOKEN_SECRET.length < 16) {
-      throw new Error('TB_STORE_TOKEN_SECRET 至少需要 16 个字符')
-    }
-    config.storeTokenSecret = env.TB_STORE_TOKEN_SECRET
   }
   return config
 }

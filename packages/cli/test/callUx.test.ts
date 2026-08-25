@@ -275,7 +275,15 @@ describe('tb call — 失败现场的 ~feedback 提示', () => {
   it('上游错误且该 path 有 feedback → stderr 列 top 条目与下钻命令', async () => {
     const fn = sequenceFetch([
       upstreamDown,
-      { body: { items: [{ id: 'fb_a1', title: 'index does not cover JSON content', score: 4 }] } },
+      { body: { items: [{
+        id: 'fb_a1',
+        title: 'index does not cover JSON content',
+        score: 4,
+        at: '2026-08-25T00:00:00.000Z',
+        by: 'agent:test',
+        up: 4,
+        down: 0,
+      }] } },
     ])
     await runCli(['call', 'logs/sls/query', ...GLOBALS])
     expect(process.exitCode).toBe(1)
@@ -291,7 +299,15 @@ describe('tb call — 失败现场的 ~feedback 提示', () => {
   it('--json 模式:错误输出带 retryable 与结构化 feedback', async () => {
     sequenceFetch([
       upstreamDown,
-      { body: { items: [{ id: 'fb_a1', title: 'known pitfall', score: 2 }] } },
+      { body: { items: [{
+        id: 'fb_a1',
+        title: 'known pitfall',
+        score: 2,
+        at: '2026-08-25T00:00:00.000Z',
+        by: 'agent:test',
+        up: 2,
+        down: 0,
+      }] } },
     ])
     await runCli(['call', 'logs/sls/query', '--json', ...GLOBALS])
     expect(process.exitCode).toBe(1)

@@ -61,7 +61,11 @@ describe('tb feedback(~feedback 保留段端点)', () => {
   })
 
   it('get <path> <id> → GET /<path>/~feedback/<id>;非 json 含 title 与 detail', async () => {
-    const fn = jsonFetch({ ...VIEW, detail: '不传报 invalid_argument' })
+    const fn = jsonFetch({
+      ...VIEW,
+      path: 'feishu/create-doc',
+      detail: '不传报 invalid_argument',
+    })
     await runCli(['feedback', 'get', 'feishu/create-doc', 'fb_a1x9k2', ...gw])
     const [url, init] = fn.mock.calls[0] as [string, RequestInit]
     expect(url).toBe('https://gw/feishu/create-doc/~feedback/fb_a1x9k2')

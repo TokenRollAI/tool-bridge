@@ -7,6 +7,7 @@ import {
   completeCapabilityUpload,
   defaultStoreRuntime,
   relayStoreUpload,
+  resolveStoreRequestOrigin,
   STORE_CALL_CAPABILITY_HEADER,
   STORE_UPLOAD_HEADER,
   storeObjectResponse,
@@ -62,21 +63,6 @@ function uploadId(body: Record<string, unknown>): string {
   return body.uploadId
 }
 
-function origin(c: AppContext, canonicalOrigin?: string): string {
-  let url: URL
-  try {
-    url = new URL(canonicalOrigin ?? c.req.url)
-  } catch {
-    throw new TBError('unavailable', 'request origin is invalid', { retryable: false })
-  }
-  if (
-    (url.protocol !== 'https:' && url.protocol !== 'http:')
-    || url.username !== ''
-    || url.password !== ''
-  ) throw new TBError('unavailable', 'request origin is invalid', { retryable: false })
-  return url.origin
-}
-
 /**
  * Register before the global SK middleware. Missing capability headers call
  * `next()` so the same fixed command paths continue through ordinary auth.
@@ -94,7 +80,7 @@ export function registerStoreCapabilityRoutes(app: TbHono, deps: Parameters<
         deps,
         body as unknown as StoreUploadInput,
         capability,
-        origin(c, deps.canonicalOrigin),
+        resolveStoreRequestOrigin(c.req.url, deps.canonicalOrigin),
       )
       return c.json(result)
     })

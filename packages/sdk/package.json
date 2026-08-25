@@ -1,6 +1,6 @@
 {
   "name": "@tool-bridge/sdk",
-  "version": "0.16.0",
+  "version": "0.17.0",
   "description": "tool-bridge SDK: embed a TB instance (createToolBridge), register local providers, and connect to a remote gateway",
   "type": "module",
   "license": "MIT",
@@ -16,6 +16,18 @@
       "react-native": "./dist/device.js",
       "import": "./dist/device.js",
       "default": "./dist/device.js"
+    },
+    "./client": {
+      "types": "./dist/client.d.ts",
+      "react-native": "./dist/client.js",
+      "import": "./dist/client.js",
+      "default": "./dist/client.js"
+    },
+    "./store": {
+      "types": "./dist/store.d.ts",
+      "react-native": "./dist/store.js",
+      "import": "./dist/store.js",
+      "default": "./dist/store.js"
     }
   },
   "files": [
@@ -35,8 +47,8 @@
     "agent-tools"
   ],
   "scripts": {
-    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.device.json",
-    "build": "tsup && tsup --config tsup.device.config.ts",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.web.json",
+    "build": "tsup && tsup --config tsup.web.config.ts",
     "test": "vitest run"
   },
   "dependencies": {

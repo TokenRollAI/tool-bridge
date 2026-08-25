@@ -55,8 +55,9 @@ jobs:
             exit 1
           fi
 
-      - run: pnpm --filter @tool-bridge/core --filter @tool-bridge/cli typecheck
-      - run: pnpm --filter @tool-bridge/core --filter @tool-bridge/cli test
+      # CLI 通过 tsup source alias 内联 SDK 的 client/device/store 子入口。
+      - run: pnpm --filter @tool-bridge/core --filter @tool-bridge/sdk --filter @tool-bridge/cli typecheck
+      - run: pnpm --filter @tool-bridge/core --filter @tool-bridge/sdk --filter @tool-bridge/cli test
       - run: pnpm --filter @tool-bridge/cli build
 
       - name: Pack and verify npm tarball
@@ -65,8 +66,23 @@ jobs:
             --output-dir "$RUNNER_TEMP/cli" --bin tb)"
           echo "TARBALL=$TARBALL" >> "$GITHUB_ENV"
 
+      # CLI 的同一 workflow 还发 GHCR 镜像。若 npm job 先成功、镜像 job
+      # 后失败，re-dispatch 必须只补镜像，不能再 publish 已存在版本。
+      - id: registry-version
+        name: Check whether exact npm version already exists
+        run: |
+          NAME="$(node -p "require('./packages/cli/package.json').name")"
+          VERSION="$(node -p "require('./packages/cli/package.json').version")"
+          STATE="$(node scripts/npm-registry-version.mjs "$NAME" "$VERSION")"
+          echo "state=$STATE" >> "$GITHUB_OUTPUT"
+
       - name: Publish to npm
+        if: steps.registry-version.outputs.state != 'present'
         run: npm publish "$TARBALL"
+
+      - name: Reuse existing npm version
+        if: steps.registry-version.outputs.state == 'present'
+        run: echo "npm exact version already exists; skip duplicate publish"
 
   publish-image:
     # cli-v* 发布正式版本 + latest；手工 dispatch 只允许覆盖明确标成预览的 edge。

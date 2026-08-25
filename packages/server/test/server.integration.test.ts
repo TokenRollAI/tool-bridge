@@ -5,6 +5,7 @@
  */
 
 import { afterEach, describe, expect, it } from 'vitest'
+import { request as httpRequest } from 'node:http'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -26,17 +27,61 @@ function tmpDataDir(): string {
   return dir
 }
 
-async function startServer(dataDir: string): Promise<{ baseUrl: string, server: TbServer }> {
+async function startServer(
+  dataDir: string,
+  extraEnv: NodeJS.ProcessEnv = {},
+): Promise<{ baseUrl: string, server: TbServer }> {
   const config = configFromEnv({
     TB_PORT: '0',
     TB_HOST: '127.0.0.1',
     TB_DATA_DIR: dataDir,
     TB_BOOTSTRAP_ADMIN_SK: ADMIN_SK,
     TB_SECRET_ENCRYPTION_KEY: ENCRYPTION_KEY,
+    ...extraEnv,
   })
   const server = createTbServer(config)
   const { port } = await server.start()
   return { server, baseUrl: `http://127.0.0.1:${port}` }
+}
+
+async function postJsonWithHost(
+  baseUrl: string,
+  path: string,
+  body: unknown,
+  host: string,
+  headers: Record<string, string> = {},
+): Promise<{ body: unknown, status: number }> {
+  const url = new URL(`${baseUrl}/${path}`)
+  const payload = JSON.stringify(body)
+  return await new Promise((resolve, reject) => {
+    const request = httpRequest({
+      hostname: url.hostname,
+      port: url.port,
+      path: url.pathname,
+      method: 'POST',
+      headers: {
+        'host': host,
+        'authorization': `Bearer ${ADMIN_SK}`,
+        'accept': 'application/json',
+        'content-type': 'application/json',
+        'content-length': Buffer.byteLength(payload),
+        ...headers,
+      },
+    }, (response) => {
+      const chunks: Buffer[] = []
+      response.on('data', chunk => chunks.push(Buffer.from(chunk)))
+      response.once('error', reject)
+      response.once('end', () => {
+        const text = Buffer.concat(chunks).toString('utf8')
+        resolve({
+          body: text === '' ? undefined : JSON.parse(text) as unknown,
+          status: response.statusCode ?? 0,
+        })
+      })
+    })
+    request.once('error', reject)
+    request.end(payload)
+  })
 }
 
 const admin = (extra: RequestInit = {}): RequestInit => ({
@@ -64,6 +109,26 @@ async function postJson(
 }
 
 describe('Node 宿主 HTTP 面', () => {
+  it('TLS 终止代理下用 canonical protocol + 本次 alias host 签 Store URL', async () => {
+    const { server, baseUrl } = await startServer(tmpDataDir(), {
+      TB_CANONICAL_ORIGIN: 'https://canonical.example',
+    })
+    cleanups.push(() => server.close())
+
+    // 真实明文 Node socket：@hono/node-server 会把内部 Request 组装成
+    // http://public-alias.example；X-Forwarded-Proto 不可信且不能参与判断。
+    const created = await postJsonWithHost(
+      baseUrl,
+      'system/store/create_upload',
+      { contentType: 'text/plain', size: 5 },
+      'public-alias.example',
+      { 'x-forwarded-proto': 'http' },
+    )
+    expect(created.status).toBe(200)
+    const grant = created.body as { url: string }
+    expect(new URL(grant.url).origin).toBe('https://public-alias.example')
+  })
+
   it('healthz 免认证;~help 无 SK 401、Admin SK 200(默认 markdown,text/plain 得 DSL)', async () => {
     const { server, baseUrl } = await startServer(tmpDataDir())
     cleanups.push(() => server.close())

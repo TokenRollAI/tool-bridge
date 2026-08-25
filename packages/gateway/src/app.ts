@@ -4,16 +4,16 @@ import {
   ensureBootstrapped,
   parseS3Credentials,
   type PluginBindings,
-  type RemoteSettings,
   type TbAppDeps,
 } from '@tool-bridge/app'
 import {
   type BuiltinCatalog,
-  normalizeCanonicalOrigin,
-  PRESIGN_TTL_SEC_MAX,
+  parseRuntimeEnv,
+  type RuntimeEnvConfig,
   SecretStoreImpl,
   type StateStore,
 } from '@tool-bridge/core'
+import { createGuardedFetch } from '@tool-bridge/plugins/guarded-fetch'
 import { Hono } from 'hono'
 import type { DeviceSession } from './deviceSession'
 import { createR2ObjectStore, type R2PresignCredentials } from './providers/r2Object'
@@ -93,49 +93,16 @@ export interface Env {
   TB_UPLOAD_GRANT_TTL_SEC?: string
 }
 
-/** http:// 上游是否放行(env `TB_ALLOW_INSECURE_HTTP=true`,仅本地开发)。 */
-function allowInsecure(env: Env): boolean {
-  return env.TB_ALLOW_INSECURE_HTTP === 'true'
-}
-
-const DEFAULT_MAX_HOPS = 4
 const SLOW_REQUEST_MS = 500
+const providerOAuthFetch = createGuardedFetch({ crossOriginRedirect: 'error' })
 // Workers 最低公开 plan 的请求 body 上限为 100 MB；保留协议/平台余量。
 const DEFAULT_WORKER_STORE_RELAY_MAX_BYTES = 90 * 1024 * 1024
 
 interface SharedEnvResources {
   pluginBindings?: PluginBindings
+  runtime: RuntimeEnvConfig
   searchSchema?: D1SchemaGate
   stateSchema: D1SchemaGate
-}
-
-/** env → remote 透传配置(TB_REMOTE_ALLOWLIST 逗号分隔;TB_MAX_HOPS 缺省 4)。 */
-function remoteSettingsFromEnv(env: Env): RemoteSettings {
-  const allowlist = (env.TB_REMOTE_ALLOWLIST ?? '')
-    .split(',')
-    .map(s => s.trim())
-    .filter(s => s.length > 0)
-  const hops = Number(env.TB_MAX_HOPS)
-  return {
-    allowlist,
-    maxHops: Number.isFinite(hops) && hops > 0 ? hops : DEFAULT_MAX_HOPS,
-    ...(env.TB_INSTANCE_ID !== undefined && env.TB_INSTANCE_ID.length > 0
-      ? { instanceId: env.TB_INSTANCE_ID }
-      : {}),
-    allowInsecure: allowInsecure(env),
-  }
-}
-
-/** 正整数 env 解析；非法/缺省 → undefined。 */
-function positiveIntEnv(value: string | undefined): number | undefined {
-  const n = Number(value)
-  return Number.isFinite(n) && n > 0 ? Math.floor(n) : undefined
-}
-
-/** SigV4 presign TTL 同时钳制到平台协议上限。 */
-function presignTtlEnv(value: string | undefined): number | undefined {
-  const ttl = positiveIntEnv(value)
-  return ttl === undefined ? undefined : Math.min(ttl, PRESIGN_TTL_SEC_MAX)
 }
 
 /**
@@ -184,66 +151,38 @@ function depsFromEnv(
   env: Env,
   state: StateStore,
   search: D1SearchIndex | undefined,
+  runtime: RuntimeEnvConfig,
 ): TbAppDeps {
   const secrets = new SecretStoreImpl(state, env.TB_SECRET_ENCRYPTION_KEY)
   const objects = memoizeRequestFactory(async () =>
     createR2ObjectStore(env.TB_R2, await r2PresignCredentials(env, secrets)))
+  const {
+    deviceReclaimSec: _deviceReclaimSec,
+    storeCleanupIntervalSec: _storeCleanupIntervalSec,
+    ...appRuntime
+  } = runtime
+  // 这两项属于宿主调度，不进入请求级 TbAppDeps；显式消费以保持其余配置可直接展开。
+  void _deviceReclaimSec
+  void _storeCleanupIntervalSec
   const deps: TbAppDeps = {
+    ...appRuntime,
     state,
     secrets,
+    providerOAuthFetch,
     version: pkg.version,
     ensureReady: () => ensureBootstrapped(state, env),
-    remote: remoteSettingsFromEnv(env),
-    allowInsecureHttp: allowInsecure(env),
     objects,
     device: {
       invoke: (deviceId, req) => env.TB_DEVICE.getByName(deviceId).invoke(req),
       ws: async (deviceId, request) => await env.TB_DEVICE.getByName(deviceId).fetch(request),
     },
     storeRelayMaxBytes:
-      positiveIntEnv(env.TB_STORE_RELAY_MAX_BYTES) ?? DEFAULT_WORKER_STORE_RELAY_MAX_BYTES,
+      runtime.storeRelayMaxBytes ?? DEFAULT_WORKER_STORE_RELAY_MAX_BYTES,
   }
   if (search !== undefined) deps.search = search
   if (env.TB_SECRET_ENCRYPTION_KEY !== undefined) deps.encryptionKey = env.TB_SECRET_ENCRYPTION_KEY
-  const canonicalOrigin = normalizeCanonicalOrigin(env.TB_CANONICAL_ORIGIN)
-  if (canonicalOrigin !== undefined) deps.canonicalOrigin = canonicalOrigin
   const assets = env.ASSETS
   if (assets !== undefined) deps.assets = request => assets.fetch(request)
-  const ttl = positiveIntEnv(env.TB_TOOL_CACHE_TTL)
-  if (ttl !== undefined) deps.toolCacheTtlSec = ttl
-  const refThreshold = positiveIntEnv(env.TB_REF_THRESHOLD_BYTES)
-  if (refThreshold !== undefined) deps.refThresholdBytes = refThreshold
-  const refTtl = presignTtlEnv(env.TB_REF_TTL_SEC)
-  if (refTtl !== undefined) deps.refTtlSec = refTtl
-  const uploadGrantTtl = presignTtlEnv(env.TB_UPLOAD_GRANT_TTL_SEC)
-  if (uploadGrantTtl !== undefined) deps.uploadGrantTtlSec = uploadGrantTtl
-  const storeMaxObjectBytes = positiveIntEnv(env.TB_STORE_MAX_OBJECT_BYTES)
-  if (storeMaxObjectBytes !== undefined) deps.storeMaxObjectBytes = storeMaxObjectBytes
-  const storeUploadTtlSec = presignTtlEnv(env.TB_STORE_UPLOAD_TTL_SEC)
-  if (storeUploadTtlSec !== undefined) deps.storeUploadTtlSec = storeUploadTtlSec
-  const storeShareTtlSec = presignTtlEnv(env.TB_STORE_SHARE_TTL_SEC)
-  if (storeShareTtlSec !== undefined) deps.storeShareTtlSec = storeShareTtlSec
-  const storeReadTtlSec = presignTtlEnv(env.TB_STORE_READ_TTL_SEC)
-  if (storeReadTtlSec !== undefined) deps.storeReadTtlSec = storeReadTtlSec
-  const storeCallMaxBytes = positiveIntEnv(env.TB_STORE_CALL_MAX_BYTES)
-  if (storeCallMaxBytes !== undefined) deps.storeCallMaxBytes = storeCallMaxBytes
-  const storeCallMaxObjectBytes = positiveIntEnv(env.TB_STORE_CALL_MAX_OBJECT_BYTES)
-  if (storeCallMaxObjectBytes !== undefined) {
-    deps.storeCallMaxObjectBytes = storeCallMaxObjectBytes
-  }
-  const storeCallMaxObjects = positiveIntEnv(env.TB_STORE_CALL_MAX_OBJECTS)
-  if (storeCallMaxObjects !== undefined) deps.storeCallMaxObjects = storeCallMaxObjects
-  const allowedContentTypes = (env.TB_STORE_CALL_ALLOWED_CONTENT_TYPES ?? '')
-    .split(',')
-    .map(value => value.trim())
-    .filter(value => value.length > 0)
-  if (allowedContentTypes.length > 0) deps.storeCallAllowedContentTypes = allowedContentTypes
-  if (env.TB_STORE_TOKEN_SECRET !== undefined && env.TB_STORE_TOKEN_SECRET.length > 0) {
-    if (env.TB_STORE_TOKEN_SECRET.length < 16) {
-      throw new Error('TB_STORE_TOKEN_SECRET 至少需要 16 个字符')
-    }
-    deps.storeTokenSecret = env.TB_STORE_TOKEN_SECRET
-  }
   return deps
 }
 
@@ -254,7 +193,7 @@ export async function cleanupDefaultStoreFromEnv(env: Env): Promise<void> {
     metrics,
     schema: createD1StateSchema(env.TB_STATE),
   })
-  await cleanupDefaultStore(depsFromEnv(env, state, undefined))
+  await cleanupDefaultStore(depsFromEnv(env, state, undefined, parseRuntimeEnv(env)))
 }
 
 function withServerTiming(response: Response, metrics: D1RequestMetrics, totalMs: number): Response {
@@ -321,6 +260,7 @@ export function createApp(
       const pluginBindings
         = typeof opts.pluginBindings === 'function' ? opts.pluginBindings(env) : opts.pluginBindings
       shared = {
+        runtime: parseRuntimeEnv(env),
         stateSchema: createD1StateSchema(env.TB_STATE),
         ...(env.TB_SEARCH === undefined
           ? {}
@@ -351,7 +291,7 @@ export function createApp(
           schema: shared.searchSchema,
         })
     const app = createTbApp({
-      ...depsFromEnv(env, state, search),
+      ...depsFromEnv(env, state, search, shared.runtime),
       ...(shared.pluginBindings !== undefined ? { pluginBindings: shared.pluginBindings } : {}),
       ...(opts.pluginCatalog !== undefined ? { pluginCatalog: opts.pluginCatalog } : {}),
     })

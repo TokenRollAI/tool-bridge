@@ -1,11 +1,8 @@
 import {
-  base64urlEncode,
   type CallContext,
-  encodeCallContext,
-  HEADER_TB_CONTEXT,
-  HEADER_TB_UPSTREAM_AUTH,
 } from '@tool-bridge/core'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+import { createProviderHarness } from '../support/providerHarness'
 import { createPosthogPlugin } from '../../src/posthog/index'
 import { posthogActions } from '../../src/posthog/schema'
 
@@ -16,8 +13,6 @@ import { posthogActions } from '../../src/posthog/schema'
  * 批量打标签的体不做 compact,以及 404 的归一口径(与上游有意不同)。
  */
 
-const PLUGIN_TOKEN = 'tbp_test'
-const ENV = { PLUGIN_TOKEN }
 const API_KEY = 'phx_testdeadbeef'
 const BASE_URL = 'https://us.posthog.com'
 const plugin = createPosthogPlugin()
@@ -39,40 +34,25 @@ interface CallOptions {
   config?: Record<string, unknown> | undefined
 }
 
-function envelope(body: unknown, opts: CallOptions = {}): Promise<Response> {
-  const headers: Record<string, string> = {
-    'authorization': `Bearer ${PLUGIN_TOKEN}`,
-    'content-type': 'application/json',
-    [HEADER_TB_CONTEXT]: encodeCallContext(caller('config' in opts ? opts.config : { baseUrl: BASE_URL })),
-  }
-  const auth = opts.auth === undefined ? API_KEY : opts.auth
-  if (auth !== null) {
-    headers[HEADER_TB_UPSTREAM_AUTH] = base64urlEncode(new TextEncoder().encode(auth))
-  }
-  return Promise.resolve(plugin.fetch(
-    new Request('https://plugin.test/', { method: 'POST', headers, body: JSON.stringify(body) }),
-    ENV as never,
-  ))
-}
-
-function call(name: string, args: unknown, opts?: CallOptions): Promise<Response> {
-  return envelope({ tool: 'Call', arguments: { name, args } }, opts)
-}
+const { call, envelope, sent, env: ENV, stubFetch } = createProviderHarness<CallOptions>({
+  caller: opts => caller('config' in opts ? opts.config : { baseUrl: BASE_URL }),
+  mountPath: 'analytics/posthog',
+  plugin,
+  upstreamAuth: API_KEY,
+})
 
 /** 单次响应的打桩。 */
 function mockPosthog(status: number, payload: unknown): ReturnType<typeof vi.fn> {
-  const fn = vi.fn(() => Promise.resolve(new Response(status === 204 ? null : JSON.stringify(payload), {
+  return stubFetch(() => Promise.resolve(new Response(status === 204 ? null : JSON.stringify(payload), {
     status,
     headers: { 'content-type': 'application/json' },
   })))
-  vi.stubGlobal('fetch', fn)
-  return fn
 }
 
 /** 按调用顺序依次返回;organization_id 回退会打两次上游,靠它区分。 */
 function mockSequence(...responses: Array<[number, unknown]>): ReturnType<typeof vi.fn> {
   let index = 0
-  const fn = vi.fn(() => {
+  return stubFetch(() => {
     const [status, payload] = responses[Math.min(index, responses.length - 1)]!
     index += 1
     return Promise.resolve(new Response(JSON.stringify(payload), {
@@ -80,21 +60,11 @@ function mockSequence(...responses: Array<[number, unknown]>): ReturnType<typeof
       headers: { 'content-type': 'application/json' },
     }))
   })
-  vi.stubGlobal('fetch', fn)
-  return fn
-}
-
-function sent(mock: ReturnType<typeof vi.fn>, index = 0): Request {
-  return (mock.mock.calls[index] as [Request])[0]
 }
 
 async function sentBody(mock: ReturnType<typeof vi.fn>, index = 0): Promise<unknown> {
   return JSON.parse(await sent(mock, index).text())
 }
-
-afterEach(() => {
-  vi.unstubAllGlobals()
-})
 
 describe('契约面', () => {
   it('List 出全部 57 个 action,且都带 Zod 派生的 schema', async () => {

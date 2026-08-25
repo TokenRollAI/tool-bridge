@@ -31,7 +31,7 @@ import { Button } from '@/components/ui/button'
 import { isPathSegmentSafe } from '@/lib/path'
 import { cn } from '@/lib/utils'
 
-const SchemaFormRenderer = lazy(() => import('@/components/node/SchemaFormRenderer'))
+const SchemaFormRenderer = lazy(() => import('@/components/SchemaFormRenderer'))
 
 const SCOPE_STYLE: Record<string, string> = {
   read: 'text-sky-400/90 border-sky-400/30',
@@ -352,8 +352,8 @@ export function CmdPanel({
                     >
                       <SchemaFormRenderer
                         formData={formData}
-                        onChange={setFormData}
-                        onSubmit={submit}
+                        onChange={({ formData: next }) => setFormData(next)}
+                        onSubmit={({ formData: next }) => submit(next)}
                         schema={inputSchema as RJSFSchema}
                       >
                         {footer}
