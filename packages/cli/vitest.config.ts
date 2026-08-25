@@ -6,6 +6,8 @@ export default defineConfig({
   resolve: {
     alias: {
       '@tool-bridge/sdk/client': fileURLToPath(new URL('../sdk/src/client/index.ts', import.meta.url)),
+      '@tool-bridge/sdk/device': fileURLToPath(new URL('../sdk/src/device/index.ts', import.meta.url)),
+      '@tool-bridge/sdk/store': fileURLToPath(new URL('../sdk/src/store/index.ts', import.meta.url)),
     },
   },
   test: {

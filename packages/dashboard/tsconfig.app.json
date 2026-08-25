@@ -12,7 +12,11 @@
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "baseUrl": ".",
-    "paths": { "@/*": ["./src/*"] }
+    "paths": {
+      "@/*": ["./src/*"],
+      "@tool-bridge/sdk/client": ["../sdk/src/client/index.ts"],
+      "@tool-bridge/sdk/store": ["../sdk/src/store/index.ts"]
+    }
   },
   "include": ["src"]
 }

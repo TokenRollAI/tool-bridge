@@ -1,7 +1,8 @@
 import { readFile } from 'node:fs/promises'
+import { dirname, join } from 'node:path'
 import assert from 'node:assert/strict'
-import { join } from 'node:path'
 import test from 'node:test'
+import ts from 'typescript'
 import {
   assertPackedEntryTargetsExist,
   assertSdkClientArtifact,
@@ -21,6 +22,53 @@ import { buildReleasePlan } from './release-plan.mjs'
 
 const root = join(import.meta.dirname, '..')
 const publicPackages = ['app', 'cli', 'dashboard', 'gateway', 'plugin-sdk', 'sdk', 'server']
+
+function readTsConfig(relativePath) {
+  const configPath = join(root, relativePath)
+  const loaded = ts.readConfigFile(configPath, ts.sys.readFile)
+  assert.equal(loaded.error, undefined, `failed to read ${relativePath}`)
+  return ts.parseJsonConfigFileContent(
+    loaded.config,
+    ts.sys,
+    dirname(configPath),
+    undefined,
+    configPath,
+  ).options
+}
+
+test('source consumers resolve neutral SDK entries without prebuilt dist', () => {
+  const consumers = [
+    {
+      config: 'packages/cli/tsconfig.json',
+      importer: 'packages/cli/src/deviceRuntime.ts',
+      specifiers: ['client', 'device', 'store'],
+    },
+    {
+      config: 'packages/dashboard/tsconfig.app.json',
+      importer: 'packages/dashboard/src/lib/store.ts',
+      specifiers: ['client', 'store'],
+    },
+  ]
+
+  for (const consumer of consumers) {
+    const options = readTsConfig(consumer.config)
+    for (const subpath of consumer.specifiers) {
+      const specifier = `@tool-bridge/sdk/${subpath}`
+      const resolved = ts.resolveModuleName(
+        specifier,
+        join(root, consumer.importer),
+        options,
+        ts.sys,
+      ).resolvedModule?.resolvedFileName
+      assert.ok(resolved, `${consumer.config} must resolve ${specifier}`)
+      assert.match(
+        resolved.replaceAll('\\', '/'),
+        new RegExp(`/packages/sdk/src/${subpath}/index\\.ts$`),
+        `${consumer.config} must not rely on ignored SDK dist artifacts`,
+      )
+    }
+  }
+})
 
 const releasePlanFixture = {
   order: ['app', 'dashboard', 'gateway', 'server'],

@@ -167,13 +167,23 @@ function requireShort(value: string, field: string, max: number): string {
 }
 
 export class FeedbackStore {
+  private readonly onMutation?: (
+    path: TreePath,
+    entries: readonly FeedbackEntry[],
+  ) => Promise<void>
+
+  private readonly store: StateStore
+
   constructor(
-    private readonly store: StateStore,
-    private readonly onMutation?: (
+    store: StateStore,
+    onMutation?: (
       path: TreePath,
       entries: readonly FeedbackEntry[],
     ) => Promise<void>,
-  ) {}
+  ) {
+    this.onMutation = onMutation
+    this.store = store
+  }
 
   private keyOf(path: TreePath): string {
     return KEY_FEEDBACK + path

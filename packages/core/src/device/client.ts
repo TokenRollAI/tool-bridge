@@ -100,10 +100,12 @@ export class DeviceClient {
   }>()
 
   private readonly maxCached: number
+  private readonly opts: DeviceClientOptions
   private activeGeneration = 0
   private nextGeneration = 0
 
-  constructor(private readonly opts: DeviceClientOptions) {
+  constructor(opts: DeviceClientOptions) {
+    this.opts = opts
     this.maxCached = opts.maxCachedResults ?? DEFAULT_MAX_CACHED_RESULTS
   }
 
