@@ -8,7 +8,8 @@
 
 import { z } from 'zod'
 import { type DeviceExpose, NODE_KINDS, type OwnerRef, type Timestamp, type TreePath } from '../types'
-import { TB_ERROR_CODES, TBError, type TBErrorBody } from '../errors'
+import { tbErrorBodySchema } from '../protocol/errorWire'
+import { TBError, type TBErrorBody } from '../errors'
 
 // ---------- 帧类型(TS 定义为真源) ----------
 
@@ -106,12 +107,6 @@ export type DeviceFrame
     | CancelFrame
 
 // ---------- 结构校验(zod;未知字段剥离,nodes 除外) ----------
-
-const tbErrorBodySchema = z.object({
-  code: z.enum(TB_ERROR_CODES),
-  message: z.string(),
-  retryable: z.boolean(),
-})
 
 /**
  * NodeInput 只做边界校验(path/kind/description),config/virtualize 等经 passthrough

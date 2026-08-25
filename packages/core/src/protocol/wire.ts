@@ -6,67 +6,35 @@
  * 客户端只得到白名单字段；请求 schema 使用 strictObject，防止拼错字段被静默接受。
  */
 import { z } from 'zod'
-import type { FeedbackView as CoreFeedbackView } from '../feedback/store'
+import type {
+  FeedbackView as CoreFeedbackView,
+  FeedbackVote as CoreFeedbackVote,
+} from '../feedback/store'
+import type { Presence as CorePresence, PresenceState as CorePresenceState } from '../device/presence'
 import type { HelpJson as CoreHelpJson } from '../htbp/model'
 import type { ToolSpec as CoreToolSpec } from '../tool/types'
 import type { TreeJson as CoreTreeJson } from '../htbp/tree'
-import type { NodeInput, TreeNode } from '../types'
+import {
+  type Action,
+  ACTIONS,
+  NODE_KINDS,
+  type NodeInput,
+  type NodeKind,
+  type Page,
+  type TreeNode,
+} from '../types'
+export {
+  tbErrorBodySchema,
+  tbErrorCodeSchema,
+  type WireTBErrorBody,
+  type WireTBErrorCode,
+} from './errorWire'
 
-export type WireTBErrorCode
-  = | 'not_found'
-    | 'permission_denied'
-    | 'invalid_argument'
-    | 'conflict'
-    | 'unavailable'
-    | 'rate_limited'
-    | 'internal'
+export const actionSchema: z.ZodType<Action> = z.enum(ACTIONS)
+export const nodeKindSchema: z.ZodType<NodeKind> = z.enum(NODE_KINDS)
 
-export interface WireTBErrorBody {
-  code: WireTBErrorCode
-  message: string
-  retryable: boolean
-}
-
-export const tbErrorCodeSchema: z.ZodType<WireTBErrorCode> = z.enum([
-  'not_found',
-  'permission_denied',
-  'invalid_argument',
-  'conflict',
-  'unavailable',
-  'rate_limited',
-  'internal',
-])
-
-export const tbErrorBodySchema: z.ZodType<WireTBErrorBody> = z.object({
-  code: tbErrorCodeSchema,
-  message: z.string(),
-  retryable: z.boolean(),
-})
-
-export const actionSchema = z.enum(['read', 'write', 'call', 'register', 'admin'])
-export const nodeKindSchema = z.enum([
-  'directory',
-  'mcp',
-  'http',
-  'builtin',
-  'context',
-  'device',
-  'remote',
-  'tool',
-  'skillhub',
-])
-
-export type WireAction = 'read' | 'write' | 'call' | 'register' | 'admin'
-export type WireNodeKind
-  = | 'directory'
-    | 'mcp'
-    | 'http'
-    | 'builtin'
-    | 'context'
-    | 'device'
-    | 'remote'
-    | 'tool'
-    | 'skillhub'
+export type WireAction = Action
+export type WireNodeKind = NodeKind
 
 const nodeInputConfigSchema = z.record(z.string(), z.unknown()).optional().describe(
   'kind-specific config, e.g. mcp: { url, auth?, authRef? } / http: { endpoint, tools } / context: { provider, bucket, … } / remote: { baseUrl, skRef }; credentials go by authRef/skRef name, never inline',
@@ -96,11 +64,8 @@ export const presenceSchema = z.object({
   state: presenceStateSchema,
 })
 
-export type WirePresenceState = 'online' | 'stale' | 'offline'
-export interface WirePresence {
-  lastSeenAt?: string
-  state: WirePresenceState
-}
+export type WirePresenceState = CorePresenceState
+export type WirePresence = CorePresence
 
 export const helpFeedbackItemSchema = z.object({
   id: z.string(),
@@ -187,10 +152,7 @@ export const toolSearchRequestSchema = z.strictObject({
   query: z.string().trim().min(1),
 })
 
-export interface WirePage<T> {
-  cursor?: string
-  items: T[]
-}
+export type WirePage<T> = Page<T>
 export type WireToolSpec = CoreToolSpec
 export interface WireToolSearchItem {
   path: string
@@ -298,7 +260,7 @@ export type WireFeedbackDetail = CoreFeedbackView & { detail: string, path: stri
 export interface WireFeedbackList { items: WireFeedbackView[] }
 export interface WireFeedbackSubmitRequest { detail: string, title: string }
 export interface WireFeedbackSubmitResponse { at?: string, id: string, path: string, title: string }
-export type WireFeedbackVote = 'up' | 'down' | 'clear'
+export type WireFeedbackVote = CoreFeedbackVote
 
 export const oauthAuthorizeRequestSchema = z.strictObject({
   redirectUri: z.string().optional(),

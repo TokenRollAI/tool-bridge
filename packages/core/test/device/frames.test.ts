@@ -7,7 +7,8 @@ import {
   PING_FRAME_JSON,
   PONG_FRAME_JSON,
 } from '../../src/device/frames'
-import { isTBError, TBError } from '../../src/errors'
+import { isTBError, TB_ERROR_CODES, TBError } from '../../src/errors'
+import { tbErrorBodySchema } from '../../src/protocol/errorWire'
 
 /** 执行并返回 TBError code(未抛 → null)。 */
 function codeOf(fn: () => unknown): string | null {
@@ -245,6 +246,28 @@ describe('decode 拒绝非法输入 → invalid_argument', () => {
   it('未知顶层字段被剥离(strip)', () => {
     const decoded = decodeDeviceFrame('{"type":"ready","mountPath":"m","extra":1}')
     expect(decoded).toEqual({ type: 'ready', mountPath: 'm' })
+  })
+})
+
+describe('错误帧与固定控制面错误契约', () => {
+  it('对规范错误码与未知错误码保持相同的接受/拒绝结果', () => {
+    for (const code of [...TB_ERROR_CODES, 'future_error']) {
+      const error = { code, message: `error:${code}`, retryable: false }
+      const protocolAccepted = tbErrorBodySchema.safeParse(error).success
+      const errorFrameAccepted = codeOf(() => decodeDeviceFrame(JSON.stringify({
+        type: 'error',
+        error,
+      }))) === null
+      const resultFrameAccepted = codeOf(() => decodeDeviceFrame(JSON.stringify({
+        type: 'result',
+        id: 'r-error',
+        ok: false,
+        error,
+      }))) === null
+
+      expect(errorFrameAccepted, `error frame:${code}`).toBe(protocolAccepted)
+      expect(resultFrameAccepted, `result frame:${code}`).toBe(protocolAccepted)
+    }
   })
 })
 
