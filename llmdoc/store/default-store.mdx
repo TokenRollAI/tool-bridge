@@ -9,6 +9,8 @@ relations:
     - hosts-deploy/node-docker-and-helm.mdx
 code:
   paths:
+    - packages/core/src/context/objectProvider.ts
+    - packages/core/src/context/objectStore.ts
     - packages/core/src/objectStoreService/**
     - packages/core/src/builtin/store.ts
     - packages/app/src/store.ts
@@ -39,11 +41,16 @@ Context 是有业务语义的命名数据源，负责 `list/get/search/write/...
 |---|---|
 | `StoreService` | 对象身份、owner/producer、upload session、幂等、授权、分享、生命周期与清理 |
 | `StateStore` | 保存对象/session/capability/share 的权威元数据；并发状态转换必须使用 `compareAndSwap` |
-| `ObjectStore` | 保存字节并提供 `put/head/get/delete/list`，可选 `presignPut/presignGet` |
+| `ObjectStore` | 保存字节并提供 `put/head/get/delete/list`；Store direct 只使用可选的 `presignPutExact` |
 | Context | 语义数据源与命名 entry；可以显式保存 `store://` URI，但不是 default Store |
 
-Store 字节使用独立的 `store/v1/...` driver namespace，不重解释既有 Context 对象。`filename` 只是展示
-元数据，不参与 key；object id、upload id 与 driver key 都由服务端生成。
+Store 字节使用保留的 `__tool_bridge_internal__/store/v1/...` driver namespace，不重解释既有 Context
+对象。共享 driver 时由
+Context provider 强制执行 namespace firewall：与保留根重叠的非空 `keyPrefix` 在挂载时 fail closed；空
+prefix 继续兼容桶根挂载，但 list/search 会过滤 Store key，read 以 `not_found` 隐藏，write/update/delete/
+create_upload 明确拒绝。`filename` 只是展示元数据，不参与 key；object id、upload id 与 driver key 都由
+服务端生成。`store/v1/...` 只是未发布预览曾使用的物理路径，不再保留给 Store；已有 Context 的 `store`
+或 `store/v1` prefix 继续正常可读写，稳定 `store://default/...` URI 形状不受物理 root 变更影响。
 
 ## 对象身份与状态
 
@@ -57,13 +64,15 @@ URI 只表示身份，不是 bearer capability；知道 URI 不授予读取权�
 `failed`、`abandoned`、`deleted`，只有 `ready` 可读、可分享和进入 owner 的列表。
 
 - `owner` 是稳定 `OwnerRef`，决定普通管理面的对象级授权，不等同于某次调用使用的 SK `keyId`；SK
-  轮换不会自动改变对象 owner。
+  轮换不会自动改变对象 owner。Store 不再私自增加 255 字符上限，只执行通用 OwnerRef 的非空与控制字符
+  安全校验。
 - `producer` 单独记录实际产出者。普通管理面上传时 owner/producer 都是当前 owner；远程设备调用时
   `owner = caller.owner`，`producer = device:<deviceId>`，并记录 `originCallId`。
 - ready descriptor 返回稳定 URI、MIME、实测 size、owner/producer 与时间等公开元数据，不返回 driver
   key、upload/share token 或签名 URL。
-- 创建请求可声明 size、sha256 checksum、filename 与 owner-scoped `idempotencyKey`。同一 owner、同一
-  key、同一声明会恢复原 session/descriptor；声明矛盾返回 `conflict`。
+- 创建请求可声明 size、sha256 checksum、filename 与 `idempotencyKey`。普通上传在 owner 域恢复同一
+  producer 的同声明 session；call 上传另按 producer + `originCallId` 分域，不能借同 key 恢复普通上传或
+  另一 call 的 session。身份或声明矛盾返回 `conflict`。
 
 StoreService 构造时强制要求 `StateStore.compareAndSwap`；缺 CAS 的自定义状态后端对 Store fail closed，
 不能用进程内锁或 `get→put` 模拟跨副本状态机。capability HMAC key 优先从显式
@@ -90,16 +99,18 @@ grant 视为 secret，不记录 URL、headers 或 token。
 1. **relay**：客户端向 `PUT /~store/uploads/<uploadId>` 流式发送 body，并用
    `x-tb-store-upload` header 携带 upload token。服务端在流中计数、driver 原子落位后，以 CAS 把对象
    推进 `ready`，该 PUT 直接返回 descriptor；正常路径不再额外 complete。
-2. **presigned-put**：driver 能安全签发 PUT 时，字节直接进入 R2/S3。随后客户端以 SK owner 身份，或用
-   `x-tb-store-upload` header，调用 `complete_upload`；服务端 HEAD 校验存在性、实测大小与可用元数据后
-   才推进 `ready`。
+2. **presigned-put**：请求必须声明精确 `size`，且 driver 必须实现 `presignPutExact`，把
+   `Content-Length`、`Content-Type` 与 create-only 条件纳入签名；否则一律走 relay。字节直接进入 R2/S3
+   后，客户端以 SK owner 身份或 `x-tb-store-upload` header 调 `complete_upload`；服务端 HEAD 校验
+   存在性、实测大小与可用元数据后才推进 `ready`。
 
 `complete_upload` 幂等；对已经完成的 session 返回同一 descriptor。relay 也可调用 complete 作崩溃恢复
 确认，但未成功提交字节时会 `conflict`。`abort_upload` 对未完成对象幂等，ready 对象不可 abort。
 
 每次 grant 的 `maxBytes` 是部署上限、transport 上限与 call 配额的有效交集。已知 size 超限在 create
-阶段以 `rate_limited` 拒绝；relay 对未知流逐 chunk 计数，越界即取消并由 driver 清理临时字节。首期只
-支持整对象 single PUT，失败重试会从头发送整个对象。
+阶段以 `rate_limited` 拒绝；未知 size 或只有旧 `presignPut` 的 backend 不具备直传硬限额，必须 relay。
+relay 对未知流逐 chunk 计数，越界即取消并由 driver 清理临时字节。首期只支持整对象 single PUT，失败
+重试会从头发送整个对象。
 
 ## 远程设备调用
 
@@ -115,6 +126,7 @@ grant 视为 secret，不记录 URL、headers 或 token。
 }
 ```
 
+该 token 只存在于 wire/SDK 内部，handler 的 `call.context.upload` 只看到期限与限额，不暴露原始 bearer；
 Device SDK 将它封装为 handler 的 `call.uploadObject(...)`。create 请求用
 `x-tb-store-capability` header；后续 relay/complete 用本次 upload token。call capability 绑定 caller
 owner、device producer、call id、期限、对象数、总字节、单对象大小与 MIME allowlist，只能新建本次
@@ -122,7 +134,8 @@ owner、device producer、call id、期限、对象数、总字节、单对象�
 到期与后台清理是硬兜底。
 
 默认策略是每个 call 最多 4 个对象、单对象 256 MiB、合计 512 MiB、MIME `*/*`；宿主可用
-`TB_STORE_CALL_*` 覆盖。设备侧 `maxBytes/maxObjects` 只用于早拒，服务端 reservation/CAS 才是权威。
+`TB_STORE_CALL_*` 覆盖。设备侧已知 size 只用于早拒，不自行消费对象数/字节额度；服务端
+reservation/CAS 才是权威。
 老网关不下发 capability 时，`call.uploadObject` 明确返回 `unavailable`。
 
 设备也可用普通 HTTP 身份调用顶层 `uploadObject` 做自主上传，此时 owner/producer 都是设备身份。两条
@@ -149,24 +162,30 @@ capability-only create/complete/abort 路由在普通 SK 认证之前匹配；�
 
 | 宿主 | default Store 字节落点 | 上传路径与清理 |
 |---|---|---|
-| Node 单进程 / 单副本容器 | 缺省 `TB_DATA_DIR/objects/store/v1/...`；Docker 常见为 `/data/objects/...` | 本地 FS 流式 relay；启动前清理一次，之后每 `TB_STORE_CLEANUP_INTERVAL_SEC`（缺省 900 秒）清理 |
-| Node HA / 易失容器 | 四项 `TB_OBJECT_STORE_*` 配齐后的共享 S3/R2-compatible driver | 有 signer 时 presigned PUT；半配拒绝启动，多副本不得依赖副本本地盘 |
-| Cloudflare Workers | 必需 `TB_R2` binding | 有 S3 API signer 时 direct；否则 Worker relay 缺省收紧为 90 MiB。源码与 Deploy Button 均用每 15 分钟 Cron Trigger 调 scheduled cleanup |
-| SDK 嵌入宿主 | `ToolBridgeConfig.objects` 必填，可显式使用 `MemoryObjectStore` 做测试/易失开发 | driver 有 presign 则 direct，否则 relay；StateStore 同样必须提供 CAS；无 encryption/store 信任根时才生成持久 fallback |
+| Node 单进程 / 单副本容器 | 缺省 `TB_DATA_DIR/objects/__tool_bridge_internal__/store/v1/...`；Docker 常见根为 `/data/objects/...` | 本地 FS 流式 relay；监听成功后异步首清理，之后每 `TB_STORE_CLEANUP_INTERVAL_SEC`（缺省 900 秒）清理 |
+| Node HA / 易失容器 | 四项 `TB_OBJECT_STORE_*` 配齐后的共享 S3/R2-compatible driver | 已知 size 且 exact signer 可用时 presigned PUT；半配拒绝启动，多副本不得依赖副本本地盘 |
+| Cloudflare Workers | 必需 `TB_R2` binding | 已知 size 且 S3 API exact signer 可用时 direct；否则 Worker relay 缺省收紧为 90 MiB。源码与 Deploy Button 均用每 15 分钟 Cron Trigger 调 scheduled cleanup |
+| SDK 嵌入宿主 | `ToolBridgeConfig.objects` 必填，可显式使用 `MemoryObjectStore` 做测试/易失开发 | driver 有 `presignPutExact` 且请求声明 size 才 direct，否则 relay；StateStore 同样必须提供 CAS；无 encryption/store 信任根时才生成持久 fallback |
 | 旧自定义 `TbAppDeps` 宿主 | `objects` 类型仍可缺省以保持装配兼容 | Help 可发现 `system/store`，实际 Store 调用以 `unavailable` fail closed；应迁移为显式 driver |
 
-Node 的本地 driver 逐块写入同目录随机临时文件，fsync 后以 no-replace 原子落位，并流式读取；filename
-无法影响路径。R2/S3 signer 不可用时 Store 不消失，而是退到 relay 的有效上限。Cloudflare 超过 90 MiB
-的当前路径必须配置 signer/direct；平台仍可能在 Worker 代码运行前返回 request-body 413。
+Node 的本地 driver 把 Store 临时字节集中到独立 staging 目录，逐块写入、fsync 后以 no-replace 原子
+落位，并流式读取；filename 无法影响路径。R2/S3 exact signer 不可用或 size 未知时 Store 不消失，而是
+退到 relay 的有效上限。Cloudflare 超过 90 MiB 的当前路径必须声明精确 size 并配置 signer/direct；平台
+仍可能在 Worker 代码运行前返回 request-body 413。
 
-清理是有界、cursor 分页且进度持久化的宿主任务，不由普通请求顺带触发。它收敛过期 upload/share/call
-capability/idempotency binding、pending/failed/abandoned/deleted 对象、无元数据 driver orphan 与本地
-staging 文件；清理与并发 complete 竞争时必须重新读取状态，不能删除已经 ready 的字节。
+清理是有界、cursor 分页且进度持久化的宿主任务，不由普通请求顺带触发。它只以权威 metadata 收敛过期
+upload/share/call capability、idempotency binding 与 pending/failed/abandoned/deleted 对象；终态记录在
+对应 TTL 安全窗口后 CAS 物理删除，字节删除成功先持久化 `bytesDeletedAt`，后续 tick 不重复外部 DELETE。
+共享 driver 中没有 Store metadata 的对象可能属于 Context，常规清理绝不枚举全树或猜作 orphan；本地
+staging 使用独立目录且每个宿主 tick 只扫一次。未发布预览曾在 `store/v1/**` 留下的 temp 没有可验证的
+Store 归属，文件名本身不足以授权删除，因此自动清理不会扫描旧树；试用过预览的部署只能在人工确认后
+处理残片。清理与并发 complete 竞争时必须重新读取状态，不能删除已经 ready 的字节。
 
 ## SDK、CLI 与 Dashboard
 
-- 通用 SDK 的 `createStoreClient` 提供 upload/stat/list/read/download/share/revokeShare/delete；上传、下载
-  都保持流式，控制面错误会裁剪可疑 URL。
+- 通用 SDK 的 `createStoreClient` 提供 upload/stat/list/read/download/share/revokeShare/delete；管理面的
+  stat/list 保留完整公开 descriptor（owner/producer/originCallId/status 等），上传/下载保持流式，控制面
+  错误会裁剪可疑 URL。Node 原生 fetch 发送 `ReadableStream` 时由 SDK 补 `duplex:'half'`。
 - `@tool-bridge/sdk/device` 提供顶层 `uploadObject` 与 handler 内的 `call.uploadObject`，返回稳定
   descriptor。旧 `uploadContextObject` 已从设备 SDK 删除。
 - CLI 提供 `tb store upload|stat|get|share|revoke-share|rm|list`（`list` alias 为 `ls`）。二进制 get

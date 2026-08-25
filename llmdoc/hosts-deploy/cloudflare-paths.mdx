@@ -101,7 +101,8 @@ gateway 已按请求使用 D1 Sessions API，但**代码接入与数据库启用
 ## Default Store、R2 直传与 CORS
 
 `TB_R2` 是 Cloudflare standard host 的必需 default Store driver；Store 元数据/session 在 D1，字节在 R2 的
-`store/v1/...` namespace。R2 binding 自身不提供 presign。要让 Store/Object Context 直传或既有大对象
+`__tool_bridge_internal__/store/v1/...` namespace；旧 `store/v1` 只属于未发布预览，不再保留给 Store，
+已有同名 Context prefix 继续可用。R2 binding 自身不提供 presign。要让 Store/Object Context 直传或既有大对象
 `$ref` 走 presigned GET，必须同时配置 `TB_R2_S3_ENDPOINT`、`TB_R2_BUCKET`，并把最小权限 R2 API
 凭证存入 SecretStore 保留名 `r2-presign`（或 Wrangler secrets `TB_R2_ACCESS_KEY_ID` /
 `TB_R2_SECRET_ACCESS_KEY`）。
@@ -109,13 +110,15 @@ gateway 已按请求使用 D1 Sessions API，但**代码接入与数据库启用
 没有 signer 时 default Store 仍可用，create 会选择 Worker relay，`TB_STORE_RELAY_MAX_BYTES` 缺省为
 90 MiB（保守低于 Workers 最低公开 plan 的 100 MB request-body limit）。已知 size 超限在 create 阶段
 `rate_limited`；未知/虚报 size 仍可能在 Worker 代码运行前收到平台原生 413。超过有效 relay 上限的对象
-必须配置 signer/direct；direct 使用完整 `TB_STORE_MAX_OBJECT_BYTES` 上限，缺省 256 MiB。平台限制以
+必须配置 signer 且在 create 声明精确 size；Store 只有 `presignPutExact` 把 `Content-Length` 纳入签名时
+才 direct，否则继续 relay。direct 使用完整 `TB_STORE_MAX_OBJECT_BYTES` 上限，缺省 256 MiB。平台限制以
 [Workers limits](https://developers.cloudflare.com/workers/platform/limits/)为准。
 
 Context 写 grant 使用独立的 `TB_UPLOAD_GRANT_TTL_SEC`；Store session/share/read 分别使用
 `TB_STORE_UPLOAD_TTL_SEC`、`TB_STORE_SHARE_TTL_SEC`、`TB_STORE_READ_TTL_SEC`，都缺省 900 秒且最大
 604800 秒。Dashboard direct upload 要求 R2 bucket CORS 精确允许 Dashboard origin、`PUT`、
-`Content-Type` 与 `If-None-Match`，需要读取 etag 时 expose `ETag`；设备与 CLI 不受浏览器 CORS 限制。
+Store grant 返回的 `Content-Type` / `Content-Length` / `If-None-Match`（Context grant 无定长要求），需要
+读取 etag 时 expose `ETag`；设备与 CLI 不受浏览器 CORS 限制。
 
 Workers 没有常驻进程，也不在普通请求中做全局扫描。`deployEntry.ts` 的 scheduled handler 调
 `cleanupDefaultStoreFromEnv`，每 tick 使用短生命周期 D1 session/R2 adapter；清理分页 cursor 持久化在

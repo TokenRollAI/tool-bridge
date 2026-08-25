@@ -7,6 +7,9 @@ relations:
 code:
   paths:
     - packages/core/src/auth/**
+    - packages/core/src/context/objectProvider.ts
+    - packages/core/src/objectStoreService/**
+    - packages/sdk/src/device/**
     - packages/plugin-sdk/**
 ---
 
@@ -40,9 +43,20 @@ code:
   call/upload capability 只进 `x-tb-store-capability` / `x-tb-store-upload` header，相关 body 字段拒绝；
   `~store/refs|shares/<token>` path、presigned URL、headers 与 token 必须在日志/错误/历史中脱敏。无效 bearer、
   跨 owner 和非 ready 对象统一 not_found，避免对象 oracle。
+- Store direct 不是普通 presign 的性能开关：只有请求声明精确 size 且 driver 的 `presignPutExact` 把
+  `Content-Length`、`Content-Type` 与 create-only 条件纳入签名时才允许绕过网关；未知 size、旧
+  `presignPut` 或 signer 失败必须退回受流式硬限额保护的 relay，complete/HEAD 仍做最终校验。
 - Store HMAC key 优先从部署信任根经版本化域分离派生，不把派生 key 写入 StateStore；权威 session/share/
-  call capability 只存 token hash。relay filename 不参与 key，本地 driver 还要用根内检查、no-follow 与
-  原子 no-replace 做第二层路径防护。
+  call capability 只存 token hash。设备 wire 上的 call token 由 SDK 内部消费，handler 的安全 context
+  不暴露原始 bearer；客户端限额只做早拒，服务端 reservation/CAS 才是权威。
+- Context 与 Store 即使复用同一 ObjectStore 也属于不同授权域：`__tool_bridge_internal__/store/v1` 是
+  强制保留根，重叠的非空
+  Context prefix 挂载时 fail closed；空 prefix 挂载必须过滤/隐藏 Store read/list/search，并拒绝
+  write/update/delete/create_upload。旧 `store/v1` 不是授权边界，已有同名 Context prefix 继续可用。
+  Store cleanup 只相信权威 metadata，不把未知 driver key 猜作 orphan。
+- relay filename 不参与 key，本地 driver 还要用根内检查、no-follow 与原子 no-replace 做第二层路径
+  防护。终态对象在 driver DELETE 成功后先 CAS 记录 `bytesDeletedAt`，安全保留窗口后再删除 metadata，
+  避免重复外部删除和无界 tombstone 增长。
 - 配置仓库只保留账户中立模板;Cloudflare account、域名、资源 ID 与登录态在本地 provision 或平台侧管理。
 
 ## 评审规则

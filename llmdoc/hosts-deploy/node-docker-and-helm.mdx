@@ -19,8 +19,8 @@ code:
 
 ## Node 配置边界
 
-- `TB_DATA_DIR` 持有 SQLite(未用 PG 时)和对象数据,应挂载持久卷并限制文件权限。对象存储缺省始终是本地 FS,即使状态在 PG：default Store 字节位于 `TB_DATA_DIR/objects/store/v1/...`（容器缺省 `/data/objects/...`），Context/`$ref` 走同一 driver 的其他 namespace。多实例部署下本地字节不共享(外置见下文 S3 节)。
-- default Store 是标准 Node 装配的必备能力。启动前先执行一次有界 cleanup，随后每 `TB_STORE_CLEANUP_INTERVAL_SEC` 周期执行（缺省 900 秒）；timer 不阻止进程退出，慢 tick 未结束时跳过并发 tick。清理失败只记录固定事件名，不输出 driver key。
+- `TB_DATA_DIR` 持有 SQLite(未用 PG 时)和对象数据,应挂载持久卷并限制文件权限。对象存储缺省始终是本地 FS,即使状态在 PG：default Store 最终字节位于 `TB_DATA_DIR/objects/__tool_bridge_internal__/store/v1/...`（容器缺省对象根 `/data/objects/...`），未落位字节集中在 `TB_DATA_DIR/objects/.tb-store-staging-v1`；Context/`$ref` 走同一 driver 的其他 namespace。多实例部署下本地字节不共享(外置见下文 S3 节)。
+- default Store 是标准 Node 装配的必备能力。端口监听成功后异步执行首次有界 cleanup，随后每 `TB_STORE_CLEANUP_INTERVAL_SEC` 周期执行（缺省 900 秒）；历史数据再多也不阻塞 readiness，timer 不阻止进程退出，慢 tick 未结束时跳过并发 tick。每个 tick 只扫一次独立 staging 目录。自动清理不扫描未发布预览曾使用的 `objects/store/v1/**`：该路径也可能属于 Context，temp 文件名不能证明 Store 归属；试用过预览的部署须人工确认后再处理残片。清理失败只记录固定事件名，不输出 driver key。
 - 首次引导必须设置 `TB_BOOTSTRAP_ADMIN_SK`;缺失时启动默认 fail closed。`TB_ALLOW_INSECURE_BOOTSTRAP=true` 只用于一次性本地开发。
 - `TB_ALLOW_INSECURE_HTTP=true` 只放行本地 HTTP 上游,不应进入公网部署。
 - 反向代理必须保留 WebSocket upgrade、Authorization 和原始 host/proto 语义。
@@ -105,12 +105,21 @@ Railway production 使用平台原生 GitHub source 监听 `main`,并开启 **Wa
 
 ## 平台对象存储(S3 / R2)
 
-配齐 `TB_OBJECT_STORE_ENDPOINT/BUCKET/ACCESS_KEY_ID/SECRET_ACCESS_KEY` 四项即用 S3 兼容端点(`TB_OBJECT_STORE_REGION` 可选,缺省 auto),缺省回退本地 FS。该 driver 同时承载 deployment-level default Store 与对象型 Context，但 Store 固定使用 `store/v1/...` namespace。
+配齐 `TB_OBJECT_STORE_ENDPOINT/BUCKET/ACCESS_KEY_ID/SECRET_ACCESS_KEY` 四项即用 S3 兼容端点(`TB_OBJECT_STORE_REGION` 可选,缺省 auto),缺省回退本地 FS。该 driver 同时承载 deployment-level default Store 与对象型 Context，但 Store 固定使用 `__tool_bridge_internal__/store/v1/...` 保留 namespace；重叠 Context prefix 拒绝挂载，空 prefix 的所有 provider 路径仍会过滤/拒绝 Store key。旧 `store/v1` 只属于未发布预览，不再保留给 Store，已有同名 Context prefix 可继续使用。
 
 - **四项必须齐全,缺一即拒绝启动。** 半套凭证静默回退本地 FS 的错误只在故障时暴露,代价远高于启动即拒。
-- 配上后既有 Context `$ref` 可走 S3 presign，default Store 的 `create_upload` 也优先返回 create-only presigned PUT；direct PUT 后必须 capability-only complete/HEAD 才 ready。Store owner/share read 当前仍使用独立 `~store/refs|shares` relay route，不因 driver 有 presign 就改变公开 wire。本地 FS 的 Store 上传走流式 relay，PUT 成功当次即 ready；Context 本地 FS 仍不声明 `create_upload`。
+- 配上后既有 Context `$ref` 可走 S3 presign。default Store 只有在 create 声明精确 size 时才用
+  `presignPutExact` 返回 create-only presigned PUT，签名 headers 必含 `Content-Length`；未知 size 一律
+  relay。direct PUT 后必须 capability-only complete/HEAD 才 ready。Store owner/share read 当前仍使用独立
+  `~store/refs|shares` relay route，不因 driver 有 presign 就改变公开 wire。本地 FS 的 Store 上传走流式
+  relay，PUT 成功当次即 ready；Context 本地 FS 仍不声明 `create_upload`。
 - `TB_REF_TTL_SEC` 控制下载 `$ref`/presigned GET；`TB_UPLOAD_GRANT_TTL_SEC` 独立控制写 grant，缺省 `min(TB_REF_TTL_SEC, 900)`。两者均钳制在 SigV4 的 `1..604800` 秒范围，放宽慢下载窗口不会把写入窗口一并拉长。
 - Store 配置独立：`TB_STORE_MAX_OBJECT_BYTES`（缺省 256 MiB）、`TB_STORE_RELAY_MAX_BYTES`（Node 缺省跟随前者）、`TB_STORE_UPLOAD_TTL_SEC`、`TB_STORE_SHARE_TTL_SEC`、`TB_STORE_READ_TTL_SEC`，以及 `TB_STORE_CALL_MAX_BYTES/MAX_OBJECT_BYTES/MAX_OBJECTS/ALLOWED_CONTENT_TYPES`。显式 `TB_STORE_TOKEN_SECRET` 至少 16 字符；否则复用 `TB_SECRET_ENCRYPTION_KEY` 作根，经版本化域分离派生且不落 StateStore。两者都缺时才 CAS 生成持久 fallback，正式部署不应依赖该逃生路径。
-- Dashboard 是浏览器客户端，bucket CORS 必须精确允许 Dashboard origin、`PUT` 与签名 headers（缺省为 `Content-Type`、`If-None-Match`）；需要读取 etag 时 expose `ETag`。原生设备与 CLI 不受浏览器 CORS 限制。
+- Dashboard 是浏览器客户端，bucket CORS 必须精确允许 Dashboard origin、`PUT` 与签名 headers（Store
+  direct 为 `Content-Type`、`Content-Length`、`If-None-Match`；Context grant 不含定长要求）；需要读取
+  etag 时 expose `ETag`。原生设备与 CLI 不受浏览器 CORS 限制。
 - 这是**启动期基础设施配置**,不在 Dashboard 里改:运行时换端点会让已写入的 `$ref` 与 `store://default/...` 字节落点失效。按节点用不同存储走 `kind: 'context'` 节点自己的 S3 配置；Store 当前不开放 named driver 热切换。
+- Store cleanup 只遍历 StateStore 的权威记录；driver 中没有对应 metadata 的 key 可能属于 Context，绝不
+  当 orphan 删除。终态字节删除成功后记录 `bytesDeletedAt`，保留窗口后 CAS 删除 metadata，重复 tick
+  不会重复调用外部 DELETE。
 - 与 `TB_DATABASE_URL` 组合即完整无状态形态:换全新容器仍能读回一切,有集成测试覆盖。

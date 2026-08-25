@@ -33,12 +33,14 @@ SDK 的 `ToolBridgeConfig.objects` 已是必填。缺 driver 时 `system/store` 
 开发宿主才用 CAS 在 StateStore 生成持久 fallback。
 
 同一个 `ObjectStore` driver 可同时服务对象型 Context 和 deployment-level Store，但 namespace 与产品语义
-隔离：Context 使用 provider/keyPrefix 的命名 entry，StoreService 只使用服务端生成的 `store/v1/...` key。
-Store 的宿主中立装配集中在 `store.ts`：构造 StoreService、组装 relay/direct grant、签发 owner/share ref、
-下发 device call capability 和执行 cursor cleanup；`routes/store.ts` 只处理 capability-only control/data
-plane。业务路由不得按 Context 配置查 Store 落点。
+隔离：StoreService 只使用服务端生成的 `__tool_bridge_internal__/store/v1/...` key；Context provider 对重叠的非空 keyPrefix
+fail closed，空 prefix 则在 list/search/read/write/update/delete/create_upload 各路径过滤或拒绝保留 key。Store 的宿主中立
+装配集中在 `store.ts`：构造 StoreService、组装 relay/direct grant、签发 owner/share ref、下发 device call
+capability 和执行 cursor cleanup；`routes/store.ts` 只处理 capability-only control/data plane。业务路由不得
+按 Context 配置查 Store 落点，也不能只靠调用方约定隔离共享 driver。未发布预览使用过的 `store/v1`
+不是保留根，既有同名 Context prefix 继续可用。
 
-对象型 R2/S3 context 可在 `ObjectStore.presignPut` 存在时动态声明 `direct-upload`，并以 `create_upload` 为单个 entry 签发定路径、限时 PUT。发现面不是健康探针：S3 能力由实现静态判定，不解析节点 `authRef`；R2 signer 失败只隐藏 Context 的可选能力。对 default Store，signer 失败则选择受宿主 `storeRelayMaxBytes` 约束的 relay；Workers 的对象工厂只在单次请求闭包内 memoize Promise，避免同请求重复解析 signer secret，同时不跨请求持有 I/O 对象。
+对象型 R2/S3 context 可在 `ObjectStore.presignPut` 存在时动态声明 `direct-upload`，并以 `create_upload` 为单个 entry 签发定路径、限时 PUT。发现面不是健康探针：S3 能力由实现静态判定，不解析节点 `authRef`；R2 signer 失败只隐藏 Context 的可选能力。default Store 的边界更严：请求必须声明精确 size，driver 必须提供把 `Content-Length` 纳入签名的 `presignPutExact`，否则选择受宿主 `storeRelayMaxBytes` 约束的 relay；Workers 的对象工厂只在单次请求闭包内 memoize Promise，避免同请求重复解析 signer secret，同时不跨请求持有 I/O 对象。
 
 Context upload grant 的 TTL 与下载 `$ref` TTL 独立，缺省取 `min(refTtlSec, 900)`，SigV4 GET/PUT 均受 604800 秒上限约束。Store upload/share/read 另有独立 `store* TtlSec` 配置，缺省均为 900 秒。`@tool-bridge/sdk/device` 的顶层 `uploadObject` 用 `purpose:'http'` 的设备身份调用 Store；handler 内 `call.uploadObject` 使用网关下发的窄 capability。设备凭证必须带非空 `Authorization` header，不能把仅供 WebSocket 使用的 ticket 当作 HTTP 认证。
 
@@ -49,7 +51,10 @@ bootstrap builtin 清单在 `packages/app/src/bootstrap.ts` 的 `BUILTIN_MODULES
 ## 运行时差异
 
 - 三宿主 StateStore 均为强一致 SQL 后端（Workers=D1、Node=SQLite/PG），SK 吊销即时生效；共享契约测试对拍语义。
-- Store 的全局清理不靠普通请求：Node 在启动前执行一次并启动 interval，Workers 由 scheduled handler/Cron Trigger 调用同一 `cleanupDefaultStore`；cursor 进度持久化在 StateStore。
+- Store 的全局清理不靠普通请求：Node 监听成功后异步执行首轮并启动 interval，Workers 由 scheduled handler/
+  Cron Trigger 调用同一 `cleanupDefaultStore`；cursor 进度持久化在 StateStore。一次宿主 tick 只有第一页执行
+  staging maintenance；StoreService 不枚举 driver 全树或删除无权威 metadata 的对象，终态 metadata 在
+  安全窗口后以 CAS 收敛。
 - Workers 设备会话结果与连接元数据进入 DO storage；Node 部分幂等结果只在进程内。
 - Workers 静态 UI 经 Assets binding，缓存/压缩/条件请求由平台代劳；Node 从 `TB_UI_DIR` 或 dashboard 包读取，由 `server` 的 `uiAssetsFetcher` 自理（hash 资产 immutable、其余 no-cache，内容协商 br/gzip，弱 ETag + 304），不下沉进 core/app。
 - `@tool-bridge/sdk` 是多入口包：根入口的 `engines.node` 与 Node 依赖属于安装/根运行时约束；`@tool-bridge/sdk/device` 的兼容性由独立 neutral JS/d.ts 产物和最终 tarball 模块闭包保证，设备入口不得从包根重新导出。多运行时包的兼容性按子入口产物闭包判定，不按依赖清单猜。

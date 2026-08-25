@@ -49,15 +49,23 @@ pnpm tsx scripts/verify-device.ts
 - 多运行时包的兼容性按**目标子入口的 JS/d.ts 依赖闭包**判定,不按包级 `engines`/`dependencies` 猜测。`ws` 可以继续被 sdk 安装,但不得进入 device 子入口的模块图;JS 与声明文件两条依赖图要同时隔离。
 - 设备核心以 WebSocket factory、credential provider 和显式 suspend/resume 注入宿主差异;RN 第三参数 headers 只存在于薄 adapter。
 - 拍照等二进制产物不新增 WebSocket 二进制帧。网关为每个已鉴权 call 把窄 Store capability 放进
-  `context.upload`(`token/expiresAt/maxBytes/maxObjects`)，SDK 隐藏 token，并向 handler 暴露
+  wire `context.upload`(`token/expiresAt/maxBytes/maxObjects`)。SDK 在进入用户 handler 前删除原始 token，
+  handler 的 `context.upload` 只含期限/限额，并获得
   `call.uploadObject({body,contentType,filename?,size?,checksum?,idempotencyKey?})`。它经普通 HTTP 创建
-  upload session，再按 grant 走 relay 或 R2/S3 direct；result 帧只返回 JSON 可序列化的 ready
-  descriptor/`store://default/...`。owner 是 caller，producer 是 `device:<deviceId>`。
+  upload session；只有 create 携带精确 size 且 backend 能签 `Content-Length` 时走 R2/S3 direct，否则
+  relay。result 帧只返回 JSON 可序列化的 ready descriptor/`store://default/...`。owner 是 caller，
+  producer 是 `device:<deviceId>`。
 - `call.uploadObject` 会把 create capability 放进 `x-tb-store-capability`、把 session capability 放进
   `x-tb-store-upload`，不会塞进 arguments、result 或 URL；网关在 call 结束后撤销 create capability，
-  期限与后台清理兜底。老网关不带 upload 时明确 `unavailable`，不能悄悄退回 Context。
+  期限与后台清理兜底。SDK 只用已知 size 做本地早拒，不在 create 成功前自行递增对象计数；数量/字节
+  reservation 与幂等 replay 以服务端 CAS 为准。call idempotency 还绑定 producer + call id，不能跨 call
+  恢复 session。老网关不带 upload 时明确 `unavailable`，不能悄悄退回 Context。
 - device 子入口也保留顶层 `uploadObject`，使用 `purpose:'http'` 的设备 Bearer 身份做自主 Store 上传。
   旧 `uploadContextObject` 已删除。Context 的 `create_upload`、`tb ctx upload` 与 Dashboard Context upload
   仍保留为管理/authoring 能力，但不再是设备产物入口。
-- 幂等只保留进程内同 call id 去重(handler 获得 id 与协作式 AbortSignal)。当前网关重试不会稳定复用同一个 call id,持久化结果缓存会制造 exactly-once 的错误承诺;跨进程 durable execution 要等端到端 idempotency key 与重放协议完整设计。
+- 上传保持跨运行时流式：浏览器/RN 沿用 Web fetch，Node 原生 fetch 遇到 `ReadableStream` request body
+  时 SDK 内部补 `duplex:'half'`；该运行时细节不进入公开 grant 或设备帧。
+- 设备 handler **执行结果**只保留进程内同 call id 去重(handler 获得 id 与协作式 AbortSignal)，与上面的
+  Store upload session 幂等不是同一件事。当前网关重试不会稳定复用同一个 call id,持久化结果缓存会制造
+  exactly-once 的错误承诺;跨进程 durable execution 要等端到端 idempotency key 与重放协议完整设计。
 - 发布验收不止看 manifest:检查全部条件导出目标、扫描 device 产物的 Node/私有依赖泄漏、从最终 tarball 干净安装并同时 import 两个入口(闸门细节见 [npm-publishing](../release/npm-publishing.mdx))。
