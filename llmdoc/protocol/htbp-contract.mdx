@@ -73,7 +73,7 @@ wire 变更不能只测"手写正确 URL 能调用"。每个受影响 kind 至�
 
 ## 节点
 
-`NodeKind`:directory、mcp、http、builtin、context、device、remote、tool、skillhub。常见配置:mcp(URL、headers、authRef/OAuth、virtualize)、http(base URL、工具定义、认证引用)、tool/context(provider、export?、authRef?、providerConfig?)、remote(baseUrl、skRef;受 host allowlist、Via 环与跳数限制)、device(由设备 hello 代写)、skillhub(R2/S3 技能存储)。
+`NodeKind`:directory、mcp、http、builtin、context、device、remote、tool、skillhub。常见配置:mcp(URL、headers、authRef/OAuth、virtualize)、http(base URL、工具定义、认证引用)、tool/context(provider、export?、authRef?、providerConfig?)、remote(baseUrl、skRef;受 host allowlist、Via 环与跳数限制)、device(由设备 hello 代写)、skillhub(R2/S3 技能存储)。MCP 的 `auth:'oauth'` 可选独立预注册 client 配置 `oauthClient:{clientId,clientSecretRef?}`：缺省仍走 DCR，配置后跳过 DCR；public client 省略 secret ref 并使用 PKCE，confidential client 只引用 SecretStore。`oauthClient` 不复用 bearer `authRef`，也不接受 inline `clientSecret` 或其它未知旁路字段；服务端在 `~register` 与 `system/registry write/update` 两条写入口做同一权威校验。
 
 所有路径先规范化;保留段与保留根在服务端权威拒绝。`virtualize` 的 hide/rename/prefix/describe 只改投影视图,不改上游身份。remote host allowlist 为空时拒绝所有联邦目标;生效集合是部署期 env 基线与 `system/federation` 运行时条目的并集,env 条目不可经 API 删除。remote 出站身份只从自身 `skRef` 解析,不转发本地调用者 SK。
 

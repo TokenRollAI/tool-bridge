@@ -49,6 +49,10 @@ Dashboard 是纯 HTTP 客户端,不 import core。固定控制面 wire 类型与
 
 - 内置集成表单只读 `CatalogListItem.exportDetails`;不保留旧 host 聚合字段 fallback。
 - 新凭证先写 SecretStore,再写 registry;挂载失败只在确认本轮创建了新槽时回滚,不能误删既有凭证。编辑挂载时留空表示沿用现有 `authRef`,因为 SecretStore 不可回读明文。
+- Registry MCP 表单的 OAuth 模式可选预注册 `clientId` 与 `clientSecretRef`：两者都空表示沿用 DCR，只有
+  clientId 表示 PKCE public client，secret ref 非空时必须同时有 clientId 并编译成独立 `oauthClient`，不能落入
+  bearer `authRef`。切离 OAuth 模式时残留 client 字段必须拒绝；挂载成功后继续通过既有 `~authorize` 流程发起
+  网关或 localhost callback，表单与 DOM 测试都断言最终 registry payload，不接触 SecretStore 明文。
 - secret/authRef 不进入调用历史、toast、URL 或人类输出;JSON 管理输出也要裁剪敏感字段。
 - query cache、history 和状态按 profile identity 隔离:queryKey 以 profile 标识为前缀,缓存失效(`useInvalidate`)始终限定当前 profile——不带参失效整个 profile,带域名参数只失效对应域段,绝不跨 profile 失效。
 - 列表超过服务端默认页时必须可继续分页,客户端筛选不能吞 cursor。

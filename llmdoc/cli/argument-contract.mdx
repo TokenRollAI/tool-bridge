@@ -35,6 +35,11 @@ CLI 是公共控制面,不是 API 的宽松包装。修改命令时同时检查�
 - 未知参数、缺值和多余位置参数必须失败,退出码与 stderr 保持可脚本化。
 - 互斥、依赖、默认值和枚举在解析层显式表达;不要把非法组合静默改写。
 - 密钥只从专用 secret 流程进入,不保留隐藏的旧 flag,也不把明文带入普通资源命令。
+- `tb tool mount --kind mcp --auth oauth` 缺省使用 DCR；不支持 DCR 的上游可用
+  `--oauth-client-id <id>` 配置预注册 public client，或再加 `--oauth-client-secret-ref <name>` 配置
+  confidential client。secret-ref 必须依赖 client-id，两者只适用于 MCP OAuth，并与 bearer `--auth-ref` 保持
+  独立；CLI 不提供明文 client-secret 参数。授权仍由后续 `tb tool auth` 发起，`--local` 与网关 callback 共用同一
+  client 配置和 redirect binding。
 - `ctx put` 面向可内联文本/JSON（支持 stdin 与 metadata），`ctx upload` 面向二进制直传；后者缺省条件创建，同名 entry 以 `conflict` 失败，只有显式 `--force` 才请求可覆盖 grant。两条命令的帮助必须互指，避免把直传误解为 `put` 的别名。
 - `tb store` 是部署级对象管理面，与 `ctx` 正交：`upload <file>` 新建 opaque Store 对象，不接收 Context
   path/entry/overwrite；`stat|get|share|rm` 接严格 `store://default/...`，`revoke-share` 接 share id，

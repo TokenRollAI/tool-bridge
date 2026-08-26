@@ -23,8 +23,15 @@ code:
 
 ## 凭证
 
-- 上游密钥只进入 SecretStore;节点记录只含 `authRef`。`providerConfig` 是可回显配置,不得存密钥。
-- OAuth client credential、access/refresh token 分槽处理;挂载、授权和调用各自验证所需状态。
+- 上游密钥只进入 SecretStore；节点记录只含 `authRef` / `skRef` / `oauthClient.clientSecretRef` 等引用。
+  `providerConfig` 与 `oauthClient.clientId` 是可回显配置，不得存密钥；MCP OAuth 不得用 bearer `authRef`
+  承载 client secret，也不得接受 inline `clientSecret`。
+- MCP OAuth 的预注册 client 配置、DCR client 记录、access/refresh grant 分槽处理：预注册 confidential client 每次
+  token 兑换/refresh 都从 SecretStore 解析 secret，public client 无 secret 且必须走 S256 PKCE；静态 client
+  information 不写 OAuth StateStore。grant 绑定 authorization-server issuer、client id 与实际 redirect URI，任一变化
+  都使旧 grant 失效；旧 DCR grant 只有在已存 DCR client 的唯一 redirect URI 可证明时才补 binding。
+- 节点写入口对嵌套 `oauthClient.clientSecretRef` 执行与其它 secret ref 相同的 `system/secret admin` 使用授权，再验证
+  引用可解析；顺序不能反，避免 SecretStore existence oracle。挂载、授权和调用各自验证所需状态。
 - 首次 bootstrap 默认要求部署者提供 Admin SK。Workers 和 SDK fail closed;Node 仅保留显式 `TB_ALLOW_INSECURE_BOOTSTRAP=true` 的本地开发逃生口。
 
 ## 出站
@@ -32,7 +39,8 @@ code:
 - remote、HTTP、MCP、plugin provider 都经过 URL/host/环检测与超时边界。
 - 调用者 SK 不透传上游;只从 `authRef` 解析目标凭证。
 - 内置 plugin 同进程同权,env 白名单和 `guardedFetch` 是代码强制边界。
-- 跨源 redirect 不能携带 Authorization、自定义敏感头或 secret body。
+- 跨源 redirect 不能携带 Authorization、自定义敏感头或 secret body；MCP OAuth token form 请求禁止自动 redirect，
+  避免 authorization code、PKCE verifier、refresh token 或 confidential client secret 被 307/308 重放到新 origin。
 
 ## 存储与日志
 

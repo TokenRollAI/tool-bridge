@@ -24,7 +24,16 @@ MCP 是外部协议兼容面。项目内部历史状态可删，但现代/旧版
 
 - 初次 discovery 先探测服务端能力，再按 era 选择请求形状；不要仅凭版本字符串猜测。
 - 严格 capabilities 用于阻止服务端未声明的能力；未知扩展字段仍按协议的前向兼容规则处理。
-- OAuth 与自定义认证头必须在 redirect 时遵守同源限制，不能把凭据转发给新 origin。
+- MCP 托管 OAuth 缺省仍走 DCR；显式 `oauthClient:{clientId,clientSecretRef?}` 时使用预注册 client 并跳过 DCR。
+  public client 不带 secret 且走 S256 PKCE；confidential client 每次兑换或 refresh 都从 SecretStore 解析
+  `clientSecretRef`，不会把 secret 复制进节点配置或 OAuth StateStore。AS 既无 `registration_endpoint` 又未配置
+  client 时返回不可重试、带 `--oauth-client-id` 指引的 `invalid_argument`，不得默造或复用 client id。
+- access/refresh grant 与 client credential 分槽，grant 绑定 issuer、client id 与授权时实际 redirect URI；任一不兼容
+  即丢弃 grant 并重新授权。升级前无显式 binding 的 DCR grant 只在已存 DCR client 恰有一个 redirect URI 时补齐
+  binding，预注册 client 的无 binding grant 仍 fail closed。授权 state 始终密封实际 redirect URI，并在 callback
+  复核预注册 client 配置及授权响应 issuer，避免授权过程中配置或 canonical origin 变化导致错绑。
+- OAuth 与自定义认证头必须在 redirect 时遵守同源限制，不能把凭据转发给新 origin；OAuth token form 请求固定
+  `redirect:'error'`，authorization code、PKCE verifier、refresh token 或 client secret 不得随 307/308 跨源重放。
 - HTTP 上游默认 HTTPS；本地 stub 需要显式 `TB_ALLOW_INSECURE_HTTP=true`。
 - MCP `tools[].name` 是大小写敏感的上游身份；投影为 HTBP 时，公开命令名按
   [HTBP 调用契约](../protocol/htbp-contract.mdx#调用)规范化为小写，调用再由 reverse map
