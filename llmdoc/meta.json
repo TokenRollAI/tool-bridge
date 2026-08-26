@@ -18,16 +18,16 @@
       "validatedRevision": "a969771d8834b079dad426aa5c82b3739bb49b60"
     },
     "cli/argument-contract.mdx": {
-      "validatedRevision": "a969771d8834b079dad426aa5c82b3739bb49b60"
+      "validatedRevision": "e9fea2c4e78e387e3cbaf9f350446da6927ad974"
     },
     "dashboard/canvas-architecture.mdx": {
       "validatedRevision": "a969771d8834b079dad426aa5c82b3739bb49b60"
     },
     "device/device-daemon.mdx": {
-      "validatedRevision": "a969771d8834b079dad426aa5c82b3739bb49b60"
+      "validatedRevision": "e9fea2c4e78e387e3cbaf9f350446da6927ad974"
     },
     "device/do-websocket-sessions.mdx": {
-      "validatedRevision": "a969771d8834b079dad426aa5c82b3739bb49b60"
+      "validatedRevision": "e9fea2c4e78e387e3cbaf9f350446da6927ad974"
     },
     "hosts-deploy/cloudflare-paths.mdx": {
       "validatedRevision": "a969771d8834b079dad426aa5c82b3739bb49b60"
@@ -45,10 +45,10 @@
       "validatedRevision": "a969771d8834b079dad426aa5c82b3739bb49b60"
     },
     "protocol/htbp-contract.mdx": {
-      "validatedRevision": "a969771d8834b079dad426aa5c82b3739bb49b60"
+      "validatedRevision": "e9fea2c4e78e387e3cbaf9f350446da6927ad974"
     },
     "protocol/security-boundaries.mdx": {
-      "validatedRevision": "a969771d8834b079dad426aa5c82b3739bb49b60"
+      "validatedRevision": "e9fea2c4e78e387e3cbaf9f350446da6927ad974"
     },
     "release/npm-publishing.mdx": {
       "validatedRevision": "a969771d8834b079dad426aa5c82b3739bb49b60"
