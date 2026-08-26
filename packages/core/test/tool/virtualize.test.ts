@@ -11,10 +11,14 @@ const upstream: ToolSpec[] = [
 ]
 
 describe('virtualizeTools', () => {
-  it('无 Virtualize:原样暴露 + 恒等 reverse', () => {
+  it('无 Virtualize:小写公开名 + reverse 保留精确上游名', () => {
     const { exposed, reverse } = virtualizeTools(undefined, upstream)
     expect(exposed.map(t => t.name)).toEqual(['search', 'fetch', 'delete'])
     expect(reverse.get('search')).toBe('search')
+
+    const mixedCase = virtualizeTools(undefined, [{ name: 'GetLiveContext' }])
+    expect(mixedCase.exposed).toEqual([{ name: 'getlivecontext' }])
+    expect(mixedCase.reverse.get('getlivecontext')).toBe('GetLiveContext')
   })
 
   it('hide:剔除,既不在 exposed 也不在 reverse', () => {
@@ -58,6 +62,36 @@ describe('virtualizeTools', () => {
     const { exposed } = virtualizeTools(v, upstream)
     expect(exposed.find(t => t.name === 'find')?.description).toBe('改述')
   })
+
+  it('大小写折叠冲突 fail closed,显式 rename 后可消歧', () => {
+    const collided = [{ name: 'HassTurnOn' }, { name: 'hassturnon' }]
+    try {
+      virtualizeTools(undefined, collided)
+      throw new Error('应抛 invalid_argument')
+    } catch (error) {
+      expect(isTBError(error) && error.code).toBe('invalid_argument')
+      expect(error).toHaveProperty('message', expect.stringMatching(/规范化后冲突.*显式 rename/))
+    }
+
+    const renamed = virtualizeTools({ rename: { HassTurnOn: 'hass_turn_on' } }, collided)
+    expect(renamed.exposed.map(t => t.name)).toEqual(['hass_turn_on', 'hassturnon'])
+    expect(renamed.reverse.get('hass_turn_on')).toBe('HassTurnOn')
+    expect(renamed.reverse.get('hassturnon')).toBe('hassturnon')
+  })
+
+  it('rename/prefix 生成的公开名同样小写化并参与冲突检测', () => {
+    const result = virtualizeTools(
+      { rename: { GetLiveContext: 'LiveContext' }, prefix: 'HA_' },
+      [{ name: 'GetLiveContext' }],
+    )
+    expect(result.exposed[0]?.name).toBe('ha_livecontext')
+    expect(result.reverse.get('ha_livecontext')).toBe('GetLiveContext')
+
+    expect(() => virtualizeTools(
+      { rename: { One: 'Shared', Two: 'shared' } },
+      [{ name: 'One' }, { name: 'Two' }],
+    )).toThrow(/规范化后冲突/)
+  })
 })
 
 describe('resolveUpstreamTool 反查', () => {
@@ -85,6 +119,11 @@ describe('resolveUpstreamTool 反查', () => {
   it('接受预先算好的 reverse Map', () => {
     const { reverse } = virtualizeTools({ prefix: 'ns__' }, upstream)
     expect(resolveUpstreamTool(undefined, reverse, 'ns__fetch')).toBe('fetch')
+  })
+
+  it('CamelCase 上游名由小写公开名反查', () => {
+    expect(resolveUpstreamTool(undefined, [{ name: 'GetLiveContext' }], 'getlivecontext'))
+      .toBe('GetLiveContext')
   })
 
   it('完全未知的名字 → not_found', () => {

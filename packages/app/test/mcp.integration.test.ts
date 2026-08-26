@@ -84,6 +84,44 @@ async function mountMcp(path: string): Promise<void> {
   mountedPaths.push(path)
 }
 
+function stubSimpleMcpUpstream(tools: Array<Record<string, unknown>>): {
+  toolCalls: Array<{ arguments?: unknown, name?: string }>
+} {
+  const toolCalls: Array<{ arguments?: unknown, name?: string }> = []
+  const upstream = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+    const body = JSON.parse(String(init?.body)) as {
+      id?: number | string
+      method: string
+      params?: { arguments?: unknown, name?: string, protocolVersion?: string }
+    }
+    const rpc = (result: unknown, headers: Record<string, string> = {}) =>
+      new Response(JSON.stringify({ jsonrpc: '2.0', id: body.id, result }), {
+        headers: { 'content-type': 'application/json', ...headers },
+      })
+    if (body.method === 'initialize') {
+      return rpc(
+        {
+          protocolVersion: body.params?.protocolVersion ?? '2025-03-26',
+          capabilities: { tools: {} },
+          serverInfo: { name: 'simple-upstream', version: '1.0.0' },
+        },
+        { 'mcp-session-id': 'simple-session' },
+      )
+    }
+    if (body.method === 'notifications/initialized') {
+      return new Response(null, { status: 202 })
+    }
+    if (body.method === 'tools/list') return rpc({ tools })
+    if (body.method === 'tools/call') {
+      toolCalls.push({ name: body.params?.name, arguments: body.params?.arguments })
+      return rpc({ content: [{ type: 'text', text: 'called' }] })
+    }
+    return new Response('unexpected MCP upstream request', { status: 500 })
+  })
+  vi.stubGlobal('fetch', upstream)
+  return { toolCalls }
+}
+
 async function mountContext(path: string): Promise<void> {
   const response = await postJson('system/registry/write', {
     path,
@@ -559,6 +597,74 @@ describe('MCP consumer endpoint', () => {
     } finally {
       await client.close()
     }
+  })
+
+  it('advertises CamelCase upstream tools as callable canonical paths and preserves call identity', async () => {
+    await mountMcp('mcp-round15/camel-case')
+    const { toolCalls } = stubSimpleMcpUpstream([{
+      name: 'GetLiveContext',
+      description: 'Get Home Assistant live context',
+      inputSchema: {
+        type: 'object',
+        properties: { domain: { type: 'string' } },
+      },
+    }])
+
+    const helpResponse = await tb.request(
+      'https://tb.test/mcp-round15/camel-case/~help?schemas=1',
+      admin({ headers: { accept: 'application/json' } }),
+    )
+    expect(helpResponse.status).toBe(200)
+    const help = (await helpResponse.json()) as {
+      cmds: Array<{ name: string, path: string }>
+    }
+    expect(help.cmds).toEqual([
+      expect.objectContaining({
+        name: 'getlivecontext',
+        path: '/mcp-round15/camel-case/getlivecontext',
+      }),
+    ])
+    const advertisedPath = help.cmds[0]?.path
+    expect(advertisedPath).toBeDefined()
+
+    const detailResponse = await tb.request(
+      `https://tb.test${advertisedPath}/~help`,
+      admin({ headers: { accept: 'application/json' } }),
+    )
+    expect(detailResponse.status).toBe(200)
+    await expect(detailResponse.json()).resolves.toMatchObject({
+      node: { path: 'mcp-round15/camel-case/getlivecontext' },
+      cmds: [{ name: 'getlivecontext', path: advertisedPath }],
+    })
+
+    const invokeResponse = await postJson(
+      advertisedPath?.replace(/^\//, '') ?? '',
+      { domain: 'sensor' },
+      admin(),
+    )
+    expect(invokeResponse.status).toBe(200)
+    expect(toolCalls).toEqual([
+      { name: 'GetLiveContext', arguments: { domain: 'sensor' } },
+    ])
+  })
+
+  it('fails discovery when upstream tool names collide after canonicalization', async () => {
+    await mountMcp('mcp-round15/case-collision')
+    stubSimpleMcpUpstream([
+      { name: 'HassTurnOn', inputSchema: { type: 'object' } },
+      { name: 'hassturnon', inputSchema: { type: 'object' } },
+    ])
+
+    const response = await tb.request(
+      'https://tb.test/mcp-round15/case-collision/~help',
+      admin({ headers: { accept: 'application/json' } }),
+    )
+    expect(response.status).toBe(400)
+    await expect(response.json()).resolves.toMatchObject({
+      code: 'invalid_argument',
+      message: expect.stringMatching(/规范化后冲突.*显式 rename/),
+      retryable: false,
+    })
   })
 
   it('remote descendants are localized, schema-complete, and callable through the mount', async () => {

@@ -13,6 +13,7 @@
 
 import type { Virtualize } from '../types'
 import type { ToolSpec } from './types'
+import { canonicalizeSegment } from '../tree/path'
 import { TBError } from '../errors'
 
 export interface VirtualizeResult {
@@ -30,7 +31,9 @@ function virtualName(v: Virtualize, upstreamName: string): string {
 
 /**
  * 应用 Virtualize 到上游工具集,产出对外 `exposed` 与反查 `reverse`。
- * `v` 缺省(无虚拟化)时原样暴露、reverse 为恒等映射。
+ * 对外名是 HTBP 命令段,因此即使 `v` 缺省也必须规范化为小写；`reverse` 始终保留
+ * 上游的精确原名。hide/rename/prefix 后若两个工具折叠到同一公开名则 fail closed，
+ * 避免 ~help 广告出无法稳定反查的命令路径。
  */
 export function virtualizeTools(v: Virtualize | undefined, upstream: ToolSpec[]): VirtualizeResult {
   const exposed: ToolSpec[] = []
@@ -39,7 +42,15 @@ export function virtualizeTools(v: Virtualize | undefined, upstream: ToolSpec[])
 
   for (const tool of upstream) {
     if (hidden.has(tool.name)) continue
-    const name = v ? virtualName(v, tool.name) : tool.name
+    const projectedName = v ? virtualName(v, tool.name) : tool.name
+    const name = canonicalizeSegment(projectedName)
+    const previous = reverse.get(name)
+    if (previous !== undefined) {
+      throw new TBError(
+        'invalid_argument',
+        `工具名 '${previous}' 与 '${tool.name}' 规范化后冲突:'${name}',请显式 rename`,
+      )
+    }
     const description = v?.describe?.[tool.name] ?? tool.description
     exposed.push({ ...tool, name, description })
     reverse.set(name, tool.name)
