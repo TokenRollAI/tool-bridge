@@ -159,6 +159,15 @@ export interface HttpToolDef {
   pathTemplate: string
 }
 
+/**
+ * MCP 托管 OAuth 的预注册客户端。clientId 是可回显标识；机密只允许通过
+ * clientSecretRef 指向 SecretStore，不能直接进入节点 config。
+ */
+export interface McpOAuthClientConfig {
+  clientId: string
+  clientSecretRef?: string
+}
+
 export interface DeviceExpose {
   /** 挂 `<mountPath>/fs` context 节点(file provider);支持多根。 */
   fs?: { readOnly?: boolean, roots: string[] }
@@ -185,7 +194,7 @@ export interface DeviceNodeCmd {
 }
 
 export type NodeConfig
-  /** auth:'oauth' 时凭证由网关托管 OAuth 流程获取(POST /<path>/~authorize 发起),authRef 忽略。 */
+  /** auth:'oauth' 时 grant 由网关托管 OAuth 流程获取(POST /<path>/~authorize 发起),authRef 忽略。 */
   = | {
     auth?: 'oauth'
     /** authRef 凭证注入的头名(默认 Authorization)。 */
@@ -196,6 +205,8 @@ export type NodeConfig
     /** 静态明文请求头(非机密,如上游要求的工具白名单头);authRef 头优先。 */
     headers?: Record<string, string>
     kind: 'mcp'
+    /** 缺省走 DCR；配置后使用预注册 public/confidential client，不尝试 DCR。 */
+    oauthClient?: McpOAuthClientConfig
     url: string
   }
   | {

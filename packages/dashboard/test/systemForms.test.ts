@@ -67,6 +67,55 @@ describe('registry mount config', () => {
     })
   })
 
+  it('MCP OAuth 可配置独立预注册 public/confidential client', () => {
+    expect(buildRegistryConfig(
+      mount({
+        kind: 'mcp',
+        mcpUrl: 'https://ha.example/api/mcp',
+        mcpAuthMode: 'oauth',
+        mcpOAuthClientId: ' ha-client ',
+        mcpOAuthClientSecretRef: ' ha-client-secret ',
+      }),
+      { context: [], tool: [] },
+    )).toEqual({
+      kind: 'mcp',
+      url: 'https://ha.example/api/mcp',
+      auth: 'oauth',
+      oauthClient: { clientId: 'ha-client', clientSecretRef: 'ha-client-secret' },
+    })
+
+    expect(buildRegistryConfig(
+      mount({
+        kind: 'mcp',
+        mcpUrl: 'https://ha.example/api/mcp',
+        mcpAuthMode: 'oauth',
+        mcpOAuthClientId: 'public-client',
+      }),
+      { context: [], tool: [] },
+    )).toMatchObject({ oauthClient: { clientId: 'public-client' } })
+  })
+
+  it('MCP OAuth client secret ref 不能脱离 clientId 或 oauth 模式', () => {
+    expect(() => buildRegistryConfig(
+      mount({
+        kind: 'mcp',
+        mcpUrl: 'https://ha.example/api/mcp',
+        mcpAuthMode: 'oauth',
+        mcpOAuthClientSecretRef: 'ha-client-secret',
+      }),
+      { context: [], tool: [] },
+    )).toThrow('clientId')
+    expect(() => buildRegistryConfig(
+      mount({
+        kind: 'mcp',
+        mcpUrl: 'https://ha.example/api/mcp',
+        mcpAuthMode: 'none',
+        mcpOAuthClientId: 'stale-client',
+      }),
+      { context: [], tool: [] },
+    )).toThrow('只能与 oauth')
+  })
+
   it('逐项校验并规范化 HTTP ToolDef', () => {
     const config = buildRegistryConfig(
       mount({

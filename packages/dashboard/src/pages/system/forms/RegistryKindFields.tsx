@@ -96,6 +96,12 @@ function mcpFields(state: RegistryMountFormState): SchemaField[] {
             : []),
         ]
       : []),
+    ...(state.mcpAuthMode === 'oauth'
+      ? [
+          textField('mcpOAuthClientId', '预注册 clientId（可空；空则使用 DCR）'),
+          textField('mcpOAuthClientSecretRef', 'clientSecretRef（confidential client 可空）'),
+        ]
+      : []),
     textField('mcpHeadersSpec', '静态 headers（每行 Name=value）', {
       placeholder: 'X-Lark-MCP-Allowed-Tools=search-doc,fetch-doc',
       rows: 3,

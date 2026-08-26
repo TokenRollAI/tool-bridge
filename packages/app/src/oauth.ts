@@ -23,14 +23,21 @@
 
 import {
   auth,
-  type OAuthClientInformationFull,
-  type OAuthClientInformationMixed,
+  type OAuthClientInformationContext,
   type OAuthClientMetadata,
   type OAuthClientProvider,
   type OAuthDiscoveryState,
-  type OAuthTokens,
+  type StoredOAuthClientInformation,
+  type StoredOAuthTokens,
 } from '@modelcontextprotocol/client'
-import { base64urlDecode, base64urlEncode, type StateStore, TBError } from '@tool-bridge/core'
+import {
+  base64urlDecode,
+  base64urlEncode,
+  type McpOAuthClientConfig,
+  type SecretStoreImpl,
+  type StateStore,
+  TBError,
+} from '@tool-bridge/core'
 
 /** 回调路径(固定值:DCR 注册的 redirect_uri 尾段;树外免认证,state 即凭证)。 */
 export const OAUTH_CALLBACK_PATH = '/~oauth/callback'
@@ -38,6 +45,14 @@ export const OAUTH_CALLBACK_PATH = '/~oauth/callback'
 const KEY_OAUTH_CLIENT = 'mcpoauth:client:'
 const KEY_OAUTH_TOKENS = 'mcpoauth:token:'
 const KEY_OAUTH_DISCOVERY = 'mcpoauth:as:'
+
+interface OAuthGrantBinding {
+  clientId: string
+  redirectUri: string
+}
+
+/** grant 与 client/redirect 的绑定元数据；不含 client secret。 */
+type StoredMcpOAuthTokens = StoredOAuthTokens & { toolBridgeBinding?: OAuthGrantBinding }
 
 /** 授权跳转 → 回调的时限(state 的 exp);过期一律拒,防 code 重放窗口拉长。 */
 const STATE_TTL_SEC = 600
@@ -49,6 +64,46 @@ export async function invalidateMcpOAuth(store: StateStore, nodePath: string): P
   await store.delete(KEY_OAUTH_DISCOVERY + nodePath)
 }
 
+/**
+ * mcp oauthClient 的服务端权威校验。只接受可回显 clientId 与 SecretStore 引用，
+ * 显式拒绝 clientSecret 等任何旁路字段。
+ */
+export async function assertMcpOAuthConfig(
+  config: unknown,
+  secrets: SecretStoreImpl,
+): Promise<void> {
+  if (config === null || typeof config !== 'object') return
+  const candidate = config as { auth?: unknown, kind?: unknown, oauthClient?: unknown }
+  if (candidate.kind !== 'mcp' || candidate.oauthClient === undefined) return
+  if (candidate.auth !== 'oauth') {
+    throw new TBError('invalid_argument', 'mcp oauthClient 只能与 auth:\'oauth\' 一起使用')
+  }
+  if (candidate.oauthClient === null || typeof candidate.oauthClient !== 'object') {
+    throw new TBError('invalid_argument', 'mcp oauthClient 必须是对象')
+  }
+  const client = candidate.oauthClient as Record<string, unknown>
+  const unknown = Object.keys(client).filter(key => !['clientId', 'clientSecretRef'].includes(key))
+  if (unknown.length > 0) {
+    throw new TBError(
+      'invalid_argument',
+      `mcp oauthClient 不接受字段:${unknown.join(', ')};client secret 必须走 clientSecretRef`,
+    )
+  }
+  if (typeof client.clientId !== 'string' || client.clientId.trim() === '') {
+    throw new TBError('invalid_argument', 'mcp oauthClient.clientId 必须是非空字符串')
+  }
+  if (client.clientSecretRef === undefined) return
+  if (typeof client.clientSecretRef !== 'string' || client.clientSecretRef.trim() === '') {
+    throw new TBError('invalid_argument', 'mcp oauthClient.clientSecretRef 必须是非空字符串')
+  }
+  if (await secrets.resolve(client.clientSecretRef) === undefined) {
+    throw new TBError(
+      'invalid_argument',
+      `OAuth client secret ref '${client.clientSecretRef}' 不存在或无法解密`,
+    )
+  }
+}
+
 /** 需要(重新)交互授权时的统一指引错误(消费端与回调校验共用)。 */
 export function reauthorizeRequired(nodePath: string): TBError {
   return new TBError(
@@ -57,15 +112,32 @@ export function reauthorizeRequired(nodePath: string): TBError {
   )
 }
 
+/**
+ * OAuth token 请求携带 code/verifier/refresh token，confidential client 还可能把 secret
+ * 放在 body/header；禁止 fetch 自动跟随 redirect，避免 307/308 把凭证重放到新 origin。
+ * discovery/DCR 等无 form grant 的请求维持平台 fetch 默认行为。
+ */
+export const mcpOAuthFetch: typeof fetch = (input, init) => {
+  const headers = new Headers(
+    init?.headers ?? (input instanceof Request ? input.headers : undefined),
+  )
+  const tokenRequest = headers.get('content-type')
+    ?.toLowerCase()
+    .startsWith('application/x-www-form-urlencoded') === true
+  return fetch(input, tokenRequest ? { ...init, redirect: 'error' } : init)
+}
+
 // ---------- self-contained state(AES-256-GCM,零存储) ----------
 
 /**
  * state 载荷:p = mcp 节点树路径,v = PKCE code_verifier,exp = 过期时刻(epoch 秒);
- * r = 本次授权用的 redirect_uri(仅非默认网关回调时携带——严格上游只放行 localhost
- * 回调时走 CLI 本地回调通道,token 兑换必须复用同一 redirect_uri)。
+ * r = 本次授权实际使用的 redirect_uri。即便 canonical origin 在授权与回调之间变化，
+ * token 兑换也必须复用发起时的精确值。
  */
 export interface OAuthStatePayload {
   exp: number
+  /** MCP 预注册 client 的非敏感配置绑定；provider OAuth / DCR 路径不设置。 */
+  o?: { i: string, r?: string }
   p: string
   r?: string
   v: string
@@ -118,6 +190,12 @@ export async function openOAuthState(
       || typeof payload.v !== 'string'
       || typeof payload.exp !== 'number'
       || (payload.r !== undefined && typeof payload.r !== 'string')
+      || (payload.o !== undefined && (
+        typeof payload.o !== 'object'
+        || payload.o === null
+        || typeof payload.o.i !== 'string'
+        || (payload.o.r !== undefined && typeof payload.o.r !== 'string')
+      ))
     ) {
       return null
     }
@@ -138,6 +216,8 @@ export interface McpOAuthProviderOpts {
    */
   mode: 'interactive' | 'deny'
   nodePath: string
+  /** 显式预注册 client；缺省继续使用 DCR。 */
+  oauthClient?: McpOAuthClientConfig
   /**
    * 授权流所在网关 origin(redirect_uri = `<origin>/~oauth/callback`)。
    * deny 模式不发起交互,占位 .invalid 域仅用于满足 SDK 的非空判定(交互路径必抛)。
@@ -149,6 +229,8 @@ export interface McpOAuthProviderOpts {
    * 与 state 载荷(兑换必须复用同一 redirect_uri)。
    */
   redirectUri?: string
+  /** confidential client secret 只从这里按引用解析，不进入节点或 OAuth StateStore。 */
+  secrets: SecretStoreImpl
   store: StateStore
 }
 
@@ -174,31 +256,117 @@ export class GatewayMcpOAuthProvider implements OAuthClientProvider {
       redirect_uris: [this.redirectUrl],
       grant_types: ['authorization_code', 'refresh_token'],
       response_types: ['code'],
-      token_endpoint_auth_method: 'none', // public client,PKCE 保护
+      // DCR 与 static public client 都是 PKCE public client；confidential client 由 AS
+      // metadata + client_secret 自动协商 basic/post，不在 metadata 里误声明 none。
+      ...(this.opts.oauthClient?.clientSecretRef === undefined
+        ? { token_endpoint_auth_method: 'none' }
+        : {}),
     }
   }
 
-  async clientInformation(): Promise<OAuthClientInformationMixed | undefined> {
+  async clientInformation(
+    ctx?: OAuthClientInformationContext,
+  ): Promise<StoredOAuthClientInformation | undefined> {
+    const configured = this.opts.oauthClient
+    if (configured !== undefined) {
+      let clientSecret: string | undefined
+      if (configured.clientSecretRef !== undefined) {
+        clientSecret = await this.opts.secrets.resolve(configured.clientSecretRef)
+        if (clientSecret === undefined) {
+          throw new TBError(
+            'unavailable',
+            `OAuth client secret ref '${configured.clientSecretRef}' 不存在或无法解密`,
+            { retryable: false },
+          )
+        }
+      }
+      return {
+        client_id: configured.clientId,
+        ...(clientSecret !== undefined ? { client_secret: clientSecret } : {}),
+        ...(ctx?.issuer !== undefined ? { issuer: ctx.issuer } : {}),
+      }
+    }
     const raw = await this.opts.store.get(KEY_OAUTH_CLIENT + this.opts.nodePath)
     if (raw === null) {
       // 消费端无 client 记录 = 从未授权过 → 直接指引,免得 SDK 用占位 redirect_uri 去 DCR。
       if (this.opts.mode === 'deny') throw reauthorizeRequired(this.opts.nodePath)
       return undefined
     }
-    return raw as OAuthClientInformationMixed
+    return raw as StoredOAuthClientInformation
   }
 
-  async saveClientInformation(info: OAuthClientInformationFull): Promise<void> {
+  async saveClientInformation(info: StoredOAuthClientInformation): Promise<void> {
+    // 预注册 client 的配置与 secret 各有权威来源；绝不把 supplied secret 复制进 StateStore。
+    if (this.opts.oauthClient !== undefined) return
     await this.opts.store.put(KEY_OAUTH_CLIENT + this.opts.nodePath, info)
   }
 
-  async tokens(): Promise<OAuthTokens | undefined> {
+  async tokens(ctx?: OAuthClientInformationContext): Promise<StoredOAuthTokens | undefined> {
     const raw = await this.opts.store.get(KEY_OAUTH_TOKENS + this.opts.nodePath)
-    return raw === null ? undefined : (raw as OAuthTokens)
+    if (raw === null) return undefined
+    const tokens = raw as StoredMcpOAuthTokens
+    const discovery = await this.opts.store.get(KEY_OAUTH_DISCOVERY + this.opts.nodePath) as
+      | OAuthDiscoveryState
+      | null
+    const discoveredIssuer = discovery?.authorizationServerMetadata?.issuer
+    if (
+      discoveredIssuer !== undefined
+      && tokens.issuer !== undefined
+      && tokens.issuer !== discoveredIssuer
+    ) {
+      await this.opts.store.delete(KEY_OAUTH_TOKENS + this.opts.nodePath)
+      return undefined
+    }
+    let binding = tokens.toolBridgeBinding
+    const client = await this.clientInformation(ctx)
+    // 升级前的 DCR token 没有显式绑定；DCR client 记录只注册一个 redirect_uri，可据此
+    // 无损迁移。预注册 client 没有这份证明，缺绑定仍 fail closed。
+    if (
+      binding === undefined
+      && this.opts.oauthClient === undefined
+      && client !== undefined
+      && 'redirect_uris' in client
+      && client.redirect_uris?.length === 1
+    ) {
+      binding = { clientId: client.client_id, redirectUri: client.redirect_uris[0]! }
+      await this.opts.store.put(KEY_OAUTH_TOKENS + this.opts.nodePath, {
+        ...tokens,
+        toolBridgeBinding: binding,
+      } satisfies StoredMcpOAuthTokens)
+    }
+    const bindingMismatch = binding === undefined
+      || client === undefined
+      || binding.clientId !== client.client_id
+      || (this.opts.mode === 'interactive' && binding.redirectUri !== this.redirectUrl)
+    if (bindingMismatch) {
+      await this.opts.store.delete(KEY_OAUTH_TOKENS + this.opts.nodePath)
+      return undefined
+    }
+    return tokens
   }
 
-  async saveTokens(tokens: OAuthTokens): Promise<void> {
-    await this.opts.store.put(KEY_OAUTH_TOKENS + this.opts.nodePath, tokens)
+  async saveTokens(
+    tokens: StoredOAuthTokens,
+    ctx?: OAuthClientInformationContext,
+  ): Promise<void> {
+    const client = await this.clientInformation(ctx)
+    if (client === undefined) throw new TBError('internal', 'OAuth client information missing')
+    const previous = await this.opts.store.get(KEY_OAUTH_TOKENS + this.opts.nodePath) as
+      | StoredMcpOAuthTokens
+      | null
+    const redirectUri = this.opts.mode === 'interactive'
+      ? this.redirectUrl
+      : previous?.toolBridgeBinding?.redirectUri
+        ?? ('redirect_uris' in client && client.redirect_uris?.length === 1
+          ? client.redirect_uris[0]!
+          : undefined)
+    if (redirectUri === undefined) {
+      throw new TBError('permission_denied', 'OAuth grant redirect binding missing; reauthorize')
+    }
+    await this.opts.store.put(KEY_OAUTH_TOKENS + this.opts.nodePath, {
+      ...tokens,
+      toolBridgeBinding: { clientId: client.client_id, redirectUri },
+    } satisfies StoredMcpOAuthTokens)
   }
 
   async saveCodeVerifier(codeVerifier: string): Promise<void> {
@@ -220,13 +388,24 @@ export class GatewayMcpOAuthProvider implements OAuthClientProvider {
   async redirectToAuthorization(authorizationUrl: URL): Promise<void> {
     if (this.opts.mode === 'deny') throw reauthorizeRequired(this.opts.nodePath)
     // 此刻 SDK 已 saveCodeVerifier —— 把 {nodePath, codeVerifier, exp(, redirectUri)} 加密进
-    // state,回调侧解密即得全部续跑状态(零存储,不吃 KV 一致性窗口)。
+    // state,回调侧解密即得全部续跑状态(零存储,不吃 KV 一致性窗口)。redirectUri 始终
+    // 固化发起时实际值，不能在 callback 腿重新从 Host/canonical config 推导。
     const state = await sealOAuthState(
       {
         p: this.opts.nodePath,
         v: this.codeVerifier(),
         exp: Math.floor(Date.now() / 1000) + STATE_TTL_SEC,
-        ...(this.opts.redirectUri !== undefined ? { r: this.opts.redirectUri } : {}),
+        r: this.redirectUrl,
+        ...(this.opts.oauthClient !== undefined
+          ? {
+              o: {
+                i: this.opts.oauthClient.clientId,
+                ...(this.opts.oauthClient.clientSecretRef !== undefined
+                  ? { r: this.opts.oauthClient.clientSecretRef }
+                  : {}),
+              },
+            }
+          : {}),
       },
       this.opts.encryptionKey,
     )
@@ -248,7 +427,12 @@ export class GatewayMcpOAuthProvider implements OAuthClientProvider {
     scope: 'all' | 'client' | 'tokens' | 'verifier' | 'discovery',
   ): Promise<void> {
     const { store, nodePath } = this.opts
-    if (scope === 'all' || scope === 'client') await store.delete(KEY_OAUTH_CLIENT + nodePath)
+    if (
+      (scope === 'all' || scope === 'client')
+      && this.opts.oauthClient === undefined
+    ) {
+      await store.delete(KEY_OAUTH_CLIENT + nodePath)
+    }
     if (scope === 'all' || scope === 'tokens') await store.delete(KEY_OAUTH_TOKENS + nodePath)
     if (scope === 'all' || scope === 'discovery') await store.delete(KEY_OAUTH_DISCOVERY + nodePath)
     if (scope === 'all' || scope === 'verifier') this.verifier = undefined
@@ -260,10 +444,12 @@ export class GatewayMcpOAuthProvider implements OAuthClientProvider {
 export interface McpOAuthFlowOpts {
   encryptionKey: string
   nodePath: string
+  oauthClient?: McpOAuthClientConfig
   /** 当前请求的网关 origin。 */
   origin: string
   /** 显式 redirect_uri(CLI 本地回调通道;仅允许 localhost,startMcpAuthorization 校验)。 */
   redirectUri?: string
+  secrets: SecretStoreImpl
   /** mcp 节点 config.url(资源服务器;discovery 起点)。 */
   serverUrl: string
   store: StateStore
@@ -301,6 +487,14 @@ async function guardOAuth<T>(fn: () => Promise<T>): Promise<T> {
     return await fn()
   } catch (err) {
     if (err instanceof TBError) throw err
+    if (err instanceof Error && /does not support dynamic client registration/i.test(err.message)) {
+      throw new TBError(
+        'invalid_argument',
+        'authorization server 未提供动态客户端注册；请配置预注册 OAuth client'
+        + '(CLI: --oauth-client-id，可选 --oauth-client-secret-ref)',
+        { retryable: false },
+      )
+    }
     throw new TBError(
       'unavailable',
       `OAuth flow failed: ${err instanceof Error ? err.message : String(err)}`,
@@ -318,13 +512,17 @@ async function guardOAuth<T>(fn: () => Promise<T>): Promise<T> {
 export async function startMcpAuthorization(
   opts: McpOAuthFlowOpts,
 ): Promise<StartAuthorizationResult> {
-  if (opts.redirectUri !== undefined) {
-    assertLocalRedirectUri(opts.redirectUri)
+  if (opts.redirectUri !== undefined) assertLocalRedirectUri(opts.redirectUri)
+  const redirectUri = opts.redirectUri ?? `${opts.origin}${OAUTH_CALLBACK_PATH}`
+  // DCR client 与注册时 redirect_uris 绑定；回调通道改变时 client/grant 必须一起作废。
+  // 预注册 client 的 redirect 白名单由 AS 管理，只失效旧 grant，不删除配置。
+  if (opts.oauthClient === undefined) {
     const cached = (await opts.store.get(KEY_OAUTH_CLIENT + opts.nodePath)) as {
       redirect_uris?: string[]
     } | null
-    if (cached !== null && !(cached.redirect_uris ?? []).includes(opts.redirectUri)) {
+    if (cached !== null && !(cached.redirect_uris ?? []).includes(redirectUri)) {
       await opts.store.delete(KEY_OAUTH_CLIENT + opts.nodePath)
+      await opts.store.delete(KEY_OAUTH_TOKENS + opts.nodePath)
     }
   }
   const provider = new GatewayMcpOAuthProvider({
@@ -333,10 +531,12 @@ export async function startMcpAuthorization(
     encryptionKey: opts.encryptionKey,
     mode: 'interactive',
     origin: opts.origin,
+    secrets: opts.secrets,
+    ...(opts.oauthClient !== undefined ? { oauthClient: opts.oauthClient } : {}),
     ...(opts.redirectUri !== undefined ? { redirectUri: opts.redirectUri } : {}),
   })
   return await guardOAuth(async () => {
-    const result = await auth(provider, { serverUrl: opts.serverUrl })
+    const result = await auth(provider, { serverUrl: opts.serverUrl, fetchFn: mcpOAuthFetch })
     if (result === 'AUTHORIZED') return { status: 'authorized' }
     const url = provider.capturedAuthorizationUrl
     if (url === undefined) {
@@ -351,7 +551,11 @@ export async function startMcpAuthorization(
  * 兑换 code → token 落 StateStore。
  */
 export async function finishMcpAuthorization(
-  opts: McpOAuthFlowOpts & { code: string, codeVerifier: string },
+  opts: McpOAuthFlowOpts & {
+    authorizationResponseIssuer?: string
+    code: string
+    codeVerifier: string
+  },
 ): Promise<void> {
   const provider = new GatewayMcpOAuthProvider({
     store: opts.store,
@@ -359,6 +563,8 @@ export async function finishMcpAuthorization(
     encryptionKey: opts.encryptionKey,
     mode: 'interactive',
     origin: opts.origin,
+    secrets: opts.secrets,
+    ...(opts.oauthClient !== undefined ? { oauthClient: opts.oauthClient } : {}),
     ...(opts.redirectUri !== undefined ? { redirectUri: opts.redirectUri } : {}),
   })
   provider.setCodeVerifier(opts.codeVerifier)
@@ -366,6 +572,10 @@ export async function finishMcpAuthorization(
     const result = await auth(provider, {
       serverUrl: opts.serverUrl,
       authorizationCode: opts.code,
+      fetchFn: mcpOAuthFetch,
+      ...(opts.authorizationResponseIssuer !== undefined
+        ? { iss: opts.authorizationResponseIssuer }
+        : {}),
     })
     if (result !== 'AUTHORIZED') {
       throw new TBError('internal', 'authorization did not complete')

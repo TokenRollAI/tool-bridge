@@ -1,6 +1,6 @@
 {
   "name": "@tool-bridge/app",
-  "version": "0.16.1",
+  "version": "0.17.0",
   "description": "Host-neutral HTBP application: assemble the tool-bridge tree on any runtime by injecting state, object, secret, device-channel and search adapters",
   "type": "module",
   "license": "MIT",

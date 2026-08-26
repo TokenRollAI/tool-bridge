@@ -36,6 +36,8 @@ export interface RegistryMountFormState {
   mcpAuthRef: string
   mcpAuthScheme: string
   mcpHeadersSpec: string
+  mcpOAuthClientId: string
+  mcpOAuthClientSecretRef: string
   mcpSchemeMode: AuthSchemeMode
   mcpUrl: string
   path: string
@@ -77,6 +79,8 @@ export const INITIAL_REGISTRY_MOUNT_FORM: RegistryMountFormState = {
   mcpAuthRef: '',
   mcpAuthScheme: '',
   mcpHeadersSpec: '',
+  mcpOAuthClientId: '',
+  mcpOAuthClientSecretRef: '',
   mcpSchemeMode: 'bearer',
   mcpUrl: '',
   path: '',
@@ -341,12 +345,35 @@ export function buildRegistryConfig(
       ) {
         throw new Error('自定义 authScheme 前缀必填')
       }
+      if (state.mcpAuthMode !== 'oauth' && (
+        state.mcpOAuthClientId.trim() !== ''
+        || state.mcpOAuthClientSecretRef.trim() !== ''
+      )) {
+        throw new Error('预注册 OAuth client 只能与 oauth 认证一起使用')
+      }
+      if (
+        state.mcpAuthMode === 'oauth'
+        && state.mcpOAuthClientSecretRef.trim() !== ''
+        && state.mcpOAuthClientId.trim() === ''
+      ) {
+        throw new Error('clientSecretRef 需要同时填写 clientId')
+      }
       const headers = parsePairs(state.mcpHeadersSpec, 'headers')
       return {
         kind: 'mcp',
         url: state.mcpUrl.trim(),
         ...(state.mcpAuthMode === 'authRef' ? { authRef: state.mcpAuthRef.trim() } : {}),
         ...(state.mcpAuthMode === 'oauth' ? { auth: 'oauth' } : {}),
+        ...(state.mcpAuthMode === 'oauth' && state.mcpOAuthClientId.trim() !== ''
+          ? {
+              oauthClient: {
+                clientId: state.mcpOAuthClientId.trim(),
+                ...(state.mcpOAuthClientSecretRef.trim() !== ''
+                  ? { clientSecretRef: state.mcpOAuthClientSecretRef.trim() }
+                  : {}),
+              },
+            }
+          : {}),
         ...(state.mcpAuthMode === 'authRef' && state.mcpAuthHeader.trim()
           ? { authHeader: state.mcpAuthHeader.trim() }
           : {}),

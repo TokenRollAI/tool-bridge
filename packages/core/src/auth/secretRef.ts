@@ -1,7 +1,8 @@
 /**
  * Secret Reference 使用授权。
  *
- * NodeConfig 里的 `authRef`(mcp/http/context/tool/skillhub 上游凭证)与 `skRef`
+ * NodeConfig 里的 `authRef`(mcp/http/context/tool/skillhub 上游凭证)、
+ * `oauthClient.clientSecretRef`(mcp 预注册 OAuth client secret)与 `skRef`
  * (remote 出站凭证)都是对 SecretStore 已有条目的**引用**。凭证由管理员经
  * `system/secret`(admin scope)写入,但注册通道此前只判目标 path 的 register,
  * 不校验写入者是否有权"使用"这些引用——受限注册者据此可把平台已有 Secret 绑进自己
@@ -22,7 +23,7 @@ import { TBError } from '../errors'
 export const SECRET_VAULT_PATH: TreePath = 'system/secret'
 
 /**
- * 从 NodeConfig 抽取其引用的 Secret 名字(authRef / skRef)。
+ * 从 NodeConfig 抽取其引用的 Secret 名字(authRef / oauthClient.clientSecretRef / skRef)。
  * auth:'oauth' 的 mcp 挂载凭证由网关托管 OAuth 流程获取,authRef 被忽略——此时即便
  * 携带 authRef 也不计入(不因忽略字段误触发授权门)。config 非对象 → 空。
  */
@@ -32,12 +33,17 @@ export function secretRefsInConfig(config: unknown): string[] {
     auth?: unknown
     authRef?: unknown
     kind?: unknown
+    oauthClient?: unknown
     skRef?: unknown
   }
   const refs: string[] = []
   // mcp 的 auth:'oauth' 忽略 authRef(见 NodeConfig 注释),不计入授权门。
   const oauthMcp = c.kind === 'mcp' && c.auth === 'oauth'
   if (!oauthMcp && typeof c.authRef === 'string' && c.authRef.length > 0) refs.push(c.authRef)
+  if (oauthMcp && c.oauthClient !== null && typeof c.oauthClient === 'object') {
+    const secretRef = (c.oauthClient as { clientSecretRef?: unknown }).clientSecretRef
+    if (typeof secretRef === 'string' && secretRef.length > 0) refs.push(secretRef)
+  }
   if (typeof c.skRef === 'string' && c.skRef.length > 0) refs.push(c.skRef)
   return refs
 }

@@ -37,7 +37,7 @@ export type WireAction = Action
 export type WireNodeKind = NodeKind
 
 const nodeInputConfigSchema = z.record(z.string(), z.unknown()).optional().describe(
-  'kind-specific config, e.g. mcp: { url, auth?, authRef? } / http: { endpoint, tools } / context: { provider, bucket, … } / remote: { baseUrl, skRef }; credentials go by authRef/skRef name, never inline',
+  'kind-specific config, e.g. mcp: { url, auth?, authRef?, oauthClient?: { clientId, clientSecretRef? } } / http: { endpoint, tools } / context: { provider, bucket, … } / remote: { baseUrl, skRef }; credentials go by SecretStore reference name, never inline',
 )
 const nodeInputVirtualizeSchema = z.strictObject({
   prefix: z.string().optional(),

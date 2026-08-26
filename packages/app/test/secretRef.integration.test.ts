@@ -106,6 +106,54 @@ describe('Secret Reference 使用授权', () => {
     expect(body.message).toContain('victim-http-key')
   })
 
+  it('受限注册者经 ~register 绑定 OAuth clientSecretRef → permission_denied', async () => {
+    await setSecret('victim-oauth-client-secret', 'oauth-secret-value')
+    const sk = await issueRestrictedRegistrant()
+    const res = await postJson(
+      'team/evil-oauth/~register',
+      {
+        path: 'team/evil-oauth',
+        kind: 'mcp',
+        description: 'nested secret ref confused deputy',
+        config: {
+          kind: 'mcp',
+          url: 'https://example.com/mcp',
+          auth: 'oauth',
+          oauthClient: {
+            clientId: 'attacker-client',
+            clientSecretRef: 'victim-oauth-client-secret',
+          },
+        },
+      },
+      bearer(sk),
+    )
+    expect(res.status).toBe(403)
+    expect(((await res.json()) as { message: string }).message)
+      .toContain('victim-oauth-client-secret')
+  })
+
+  it('广权注册者经 system/registry write 绑定 OAuth clientSecretRef → permission_denied', async () => {
+    await setSecret('victim-oauth-client-secret-registry', 'oauth-secret-value')
+    const sk = await issueBroadRegistrant()
+    const res = await postJson('system/registry/write', {
+      path: 'team/evil-oauth-registry',
+      kind: 'mcp',
+      description: 'nested secret ref through registry',
+      config: {
+        kind: 'mcp',
+        url: 'https://example.com/mcp',
+        auth: 'oauth',
+        oauthClient: {
+          clientId: 'attacker-client',
+          clientSecretRef: 'victim-oauth-client-secret-registry',
+        },
+      },
+    }, bearer(sk))
+    expect(res.status).toBe(403)
+    expect(((await res.json()) as { message: string }).message)
+      .toContain('victim-oauth-client-secret-registry')
+  })
+
   it('广权注册者(无 admin)经 update 追加 skRef → permission_denied', async () => {
     await setSecret('victim-update-sk', 'token')
     const sk = await issueBroadRegistrant()

@@ -31,7 +31,8 @@ function parseHeaderSpecs(specs: string[]): Record<string, string> | undefined {
 
 /**
  * `tb tool mount <path>` —— 挂载 mcp / http / plugin 工具源(NodeRegistry.Write via ~register)。
- * mcp:`--kind mcp --url <u> [--auth-ref name | --auth oauth] [--header k=v …]`(oauth 挂载后跑 `tb tool auth`)。
+ * mcp:`--kind mcp --url <u> [--auth-ref name | --auth oauth] [--header k=v …]`(oauth
+ * 挂载后跑 `tb tool auth`;不支持 DCR 的上游可加预注册 client id/secret ref)。
  * http:`--kind http --endpoint <u> --tools-file <json> [--auth-ref name]`。
  * 共用:`--auth-header/--auth-scheme`(凭证头名/前缀,空 scheme 原样注入)、`--description d`
  * 与虚拟化 `--prefix p / --rename from=to / --hide t / --describe from=text`。
@@ -57,6 +58,14 @@ export function toolMountCommand() {
       [],
     )
     .option('--auth <mode>', '[mcp] \'oauth\': gateway-managed OAuth (then run `tb tool auth`)')
+    .option(
+      '--oauth-client-id <id>',
+      '[mcp oauth] pre-registered public/confidential client ID (skips DCR)',
+    )
+    .option(
+      '--oauth-client-secret-ref <name>',
+      '[mcp oauth] SecretStore ref for the pre-registered confidential client secret',
+    )
     .option('--auth-ref <name>', 'SecretStore ref for upstream credential')
     .option('--auth-header <name>', '[mcp/http] auth header name; requires --auth-ref')
     .option(
@@ -86,6 +95,7 @@ Examples:
   tb tool mount docs/context7 --kind mcp --url https://mcp.context7.com/mcp
   tb tool mount jira --kind mcp --url https://mcp.example.com/mcp --auth-ref jira-token
   tb tool mount gh --kind mcp --url https://api.example.com/mcp --auth oauth   # then: tb tool auth gh
+  tb tool mount ha --kind mcp --url https://ha.example.com/api/mcp --auth oauth --oauth-client-id tool-bridge
   tb tool mount weather --kind http --endpoint https://api.weather.com --tools-file tools.json
   tb tool mount notion --kind tool --provider notion-tools --auth-ref notion-token
   tb tool mount feishu --kind tool --provider feishu --export actions
@@ -100,6 +110,12 @@ Examples:
       const authHeader
         = opts.authHeader !== undefined ? String(opts.authHeader).trim() : undefined
       const authScheme = opts.authScheme !== undefined ? String(opts.authScheme) : undefined
+      const oauthClientId = opts.oauthClientId !== undefined
+        ? String(opts.oauthClientId).trim()
+        : undefined
+      const oauthClientSecretRef = opts.oauthClientSecretRef !== undefined
+        ? String(opts.oauthClientSecretRef).trim()
+        : undefined
       if ((authHeader !== undefined || authScheme !== undefined) && !authRef) {
         throw new CliError('--auth-header/--auth-scheme require --auth-ref')
       }
@@ -128,11 +144,33 @@ Examples:
         if (auth === 'oauth' && authRef) {
           throw new CliError('--auth oauth and --auth-ref are mutually exclusive')
         }
+        if ((oauthClientId !== undefined || oauthClientSecretRef !== undefined) && auth !== 'oauth') {
+          throw new CliError('--oauth-client-id/--oauth-client-secret-ref require --auth oauth')
+        }
+        if (oauthClientId !== undefined && oauthClientId === '') {
+          throw new CliError('--oauth-client-id must not be empty')
+        }
+        if (oauthClientSecretRef !== undefined && oauthClientSecretRef === '') {
+          throw new CliError('--oauth-client-secret-ref must not be empty')
+        }
+        if (oauthClientSecretRef !== undefined && oauthClientId === undefined) {
+          throw new CliError('--oauth-client-secret-ref requires --oauth-client-id')
+        }
         config = {
           kind: 'mcp',
           url,
           ...(authRef ? { authRef } : {}),
           ...(auth === 'oauth' ? { auth: 'oauth' as const } : {}),
+          ...(oauthClientId !== undefined
+            ? {
+                oauthClient: {
+                  clientId: oauthClientId,
+                  ...(oauthClientSecretRef !== undefined
+                    ? { clientSecretRef: oauthClientSecretRef }
+                    : {}),
+                },
+              }
+            : {}),
           ...(authHeader ? { authHeader } : {}),
           ...(authScheme !== undefined ? { authScheme } : {}),
           ...(() => {
@@ -146,8 +184,12 @@ Examples:
           || opts.auth !== undefined
           || opts.provider !== undefined
           || opts.export !== undefined
+          || oauthClientId !== undefined
+          || oauthClientSecretRef !== undefined
         ) {
-          throw new CliError('--url/--auth/--provider/--export do not apply to --kind http')
+          throw new CliError(
+            '--url/--auth/--provider/--export/--oauth-client-* do not apply to --kind http',
+          )
         }
         if (opts.header.length > 0) {
           throw new CliError('--header is only supported for --kind mcp')
@@ -177,9 +219,12 @@ Examples:
           || opts.header.length > 0
           || authHeader !== undefined
           || authScheme !== undefined
+          || oauthClientId !== undefined
+          || oauthClientSecretRef !== undefined
         ) {
           throw new CliError(
-            '--url/--endpoint/--tools-file/--auth/--header/--auth-header/--auth-scheme do not apply to --kind tool',
+            '--url/--endpoint/--tools-file/--auth/--header/--auth-header/--auth-scheme/'
+            + '--oauth-client-* do not apply to --kind tool',
           )
         }
         const provider = String(opts.provider ?? '').trim()

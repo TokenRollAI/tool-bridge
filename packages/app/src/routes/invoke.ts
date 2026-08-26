@@ -52,13 +52,13 @@ import { deviceCallContextFrom, deviceMarkerOf, deviceToolMarker, invokeDevice, 
 import { assertRemoteConfigAllowed, remotePassthroughIfMatch, resolveRemoteSettings } from '../federation'
 import { createPluginContextProvider } from '../providers/pluginContext'
 import { assertRegisterPath, decodePath, scopeForCmd } from '../paths'
+import { assertMcpOAuthConfig, invalidateMcpOAuth } from '../oauth'
 import { invalidateToolCache } from '../providers/toolCache'
 import { renderResult, tbErrorResponse } from '../responses'
 import { invalidateProviderOAuth } from '../providerOAuth'
 import { rejectStoreCapabilityBodyFields } from './store'
 import { resolveStoreRequestOrigin } from '../store'
 import { invalidateMcpEra } from '../providers/mcp'
-import { invalidateMcpOAuth } from '../oauth'
 
 // --- POST /<path> 数据面调用 ---
 export async function handleInvoke(c: AppContext, env: RouteEnv): Promise<Response> {
@@ -299,6 +299,8 @@ export async function handleInvoke(c: AppContext, env: RouteEnv): Promise<Respon
     // Secret Reference 使用授权:绑定 authRef/skRef 须持 system/secret admin(注册路径
     // 判定之后、落库之前;delete 无 config 自然放行)。confused-deputy 合入阻断项。
     assertSecretRefUse(ctx.scopes, cfgPatch)
+    // 直接 API/update 与 ~register 同一安全契约：client secret 只能是 SecretStore 引用。
+    await assertMcpOAuthConfig(cfgPatch, deps.secrets)
     // context 配置校验 + s3 连通探测:探测出站网络,须在权限判定之后。
     await assertContextConfig(cfgPatch, deps)
     // skillhub 配置校验(provider r2/s3;s3 连通探测)。

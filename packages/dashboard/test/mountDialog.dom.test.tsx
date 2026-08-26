@@ -144,4 +144,47 @@ describe('高级挂载的内置凭证体验', () => {
       },
     })
   }, 15_000)
+
+  it('MCP OAuth 表单可提交预注册 client id 与 secret ref', async () => {
+    render(
+      <MemoryRouter>
+        <MountDialog existingPaths={[]} />
+      </MemoryRouter>,
+    )
+    fireEvent.click(screen.getByRole('button', { name: /挂载节点/ }))
+    fireEvent.change(await screen.findByLabelText(/^path.*\*$/), {
+      target: { value: 'providers/home-assistant' },
+    })
+    fireEvent.change(screen.getByLabelText(/^描述.*\*$/), { target: { value: 'Home Assistant' } })
+    fireEvent.change(screen.getByLabelText(/^url.*\*$/), {
+      target: { value: 'https://ha.example/api/mcp' },
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: '无（公开上游）' }))
+    fireEvent.click(await screen.findByText('oauth — 网关托管 OAuth'))
+    fireEvent.change(await screen.findByLabelText(/预注册 clientId/), {
+      target: { value: 'ha-client' },
+    })
+    fireEvent.change(screen.getByLabelText(/clientSecretRef/), {
+      target: { value: 'ha-client-secret' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '挂载 providers/home-assistant' }))
+
+    await waitFor(() => expect(calls).toHaveLength(1))
+    expect(calls[0]).toMatchObject({
+      commandPath: 'system/registry/write',
+      args: {
+        path: 'providers/home-assistant',
+        config: {
+          kind: 'mcp',
+          url: 'https://ha.example/api/mcp',
+          auth: 'oauth',
+          oauthClient: {
+            clientId: 'ha-client',
+            clientSecretRef: 'ha-client-secret',
+          },
+        },
+      },
+    })
+  }, 15_000)
 })

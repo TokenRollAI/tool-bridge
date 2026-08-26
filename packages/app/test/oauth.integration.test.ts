@@ -32,12 +32,20 @@ async function postJson(path: string, body: unknown, init: RequestInit = {}): Pr
   })
 }
 
-async function mountOAuthMcp(path: string): Promise<void> {
+async function mountOAuthMcp(
+  path: string,
+  oauthClient?: { clientId: string, clientSecretRef?: string },
+): Promise<void> {
   const res = await postJson('system/registry/write', {
     path,
     kind: 'mcp',
     description: 'oauth mcp',
-    config: { kind: 'mcp', url: 'https://mcp-oauth.test/mcp', auth: 'oauth' },
+    config: {
+      kind: 'mcp',
+      url: 'https://mcp-oauth.test/mcp',
+      auth: 'oauth',
+      ...(oauthClient !== undefined ? { oauthClient } : {}),
+    },
   },
   admin(),
   )
@@ -50,11 +58,19 @@ async function mountOAuthMcp(path: string): Promise<void> {
  * - AS metadata / DCR / token 端点齐备(PKCE S256);
  * - /mcp 端点要求 Bearer ∈ validTokens,否则 401(触发 SDK 刷新/授权)。
  */
-function oauthUpstreamMock(tools: Array<{ description: string, name: string }>) {
+function oauthUpstreamMock(
+  tools: Array<{ description: string, name: string }>,
+  opts: {
+    registration?: boolean
+    staticClient?: { clientId: string, clientSecret?: string }
+  } = {},
+) {
   const validTokens = new Set(['at-1'])
   let tokenIssued = 0
+  let registrationRequests = 0
   const grants: string[] = []
   const tokenRequests: URLSearchParams[] = []
+  const tokenRedirectModes: RequestRedirect[] = []
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const req = input instanceof Request ? input : new Request(String(input), init)
     const url = new URL(req.url)
@@ -71,14 +87,19 @@ function oauthUpstreamMock(tools: Array<{ description: string, name: string }>) 
         issuer: 'https://mcp-oauth.test',
         authorization_endpoint: 'https://mcp-oauth.test/authorize',
         token_endpoint: 'https://mcp-oauth.test/token',
-        registration_endpoint: 'https://mcp-oauth.test/register',
+        ...(opts.registration === false
+          ? {}
+          : { registration_endpoint: 'https://mcp-oauth.test/register' }),
         response_types_supported: ['code'],
         grant_types_supported: ['authorization_code', 'refresh_token'],
         code_challenge_methods_supported: ['S256'],
-        token_endpoint_auth_methods_supported: ['none'],
+        token_endpoint_auth_methods_supported: [
+          opts.staticClient?.clientSecret === undefined ? 'none' : 'client_secret_basic',
+        ],
       })
     }
     if (req.method === 'POST' && url.pathname === '/register') {
+      registrationRequests += 1
       const body = (await req.json()) as { redirect_uris?: string[] }
       return Response.json(
         {
@@ -95,6 +116,19 @@ function oauthUpstreamMock(tools: Array<{ description: string, name: string }>) 
       const params = new URLSearchParams(await req.text())
       grants.push(params.get('grant_type') ?? '')
       tokenRequests.push(params)
+      tokenRedirectModes.push(req.redirect)
+      const expectedClient = opts.staticClient?.clientId ?? 'dcr-client-1'
+      if (opts.staticClient?.clientSecret !== undefined) {
+        if (
+          req.headers.get('authorization') !== `Basic ${btoa(`${expectedClient}:${opts.staticClient.clientSecret}`)}`
+          || params.has('client_secret')
+          || params.has('client_id')
+        ) {
+          return Response.json({ error: 'invalid_client' }, { status: 401 })
+        }
+      } else if (params.get('client_id') !== expectedClient || params.has('client_secret')) {
+        return Response.json({ error: 'invalid_client' }, { status: 401 })
+      }
       if (params.get('grant_type') === 'authorization_code') {
         // PKCE:code_verifier 必须随兑换请求带上(state 加密载荷还原成功的证明)。
         if (!params.get('code_verifier') || params.get('code') !== 'code-ok') {
@@ -159,6 +193,8 @@ function oauthUpstreamMock(tools: Array<{ description: string, name: string }>) 
   return {
     fetchMock,
     grants,
+    get registrationRequests() { return registrationRequests },
+    tokenRedirectModes,
     tokenRequests,
     /** 作废现存 access token(refresh_token 仍有效)→ 下次调用走 401→refresh 自愈。 */
     revokeAccessTokens: () => validTokens.clear(),
@@ -221,6 +257,125 @@ describe('mcp 托管 OAuth:授权全链路(默认离线,上游为 fetch mock)', 
     expect(call.status).toBe(200)
   })
 
+  it('无 DCR 的 AS + 预注册 public client:网关回调 + PKCE 授权成功', async () => {
+    const upstream = oauthUpstreamMock(
+      [{ name: 'query', description: 'run query' }],
+      { registration: false, staticClient: { clientId: 'ha-public-client' } },
+    )
+    vi.stubGlobal('fetch', upstream.fetchMock)
+    await mountOAuthMcp('home/assistant-public', { clientId: 'ha-public-client' })
+
+    const authUrl = await startAuthorize('home/assistant-public')
+    expect(authUrl.searchParams.get('client_id')).toBe('ha-public-client')
+    expect(authUrl.searchParams.get('code_challenge_method')).toBe('S256')
+    expect(upstream.registrationRequests).toBe(0)
+
+    const cb = await callback({ code: 'code-ok', state: authUrl.searchParams.get('state') ?? '' })
+    expect(cb.status).toBe(200)
+    expect(upstream.tokenRequests[0]?.get('client_id')).toBe('ha-public-client')
+    expect(upstream.tokenRequests[0]?.has('client_secret')).toBe(false)
+    expect(upstream.tokenRedirectModes).toEqual(['error'])
+
+    const help = await tb.request(
+      'https://tb.test/home/assistant-public/~help',
+      admin({ headers: { accept: 'text/plain' } }),
+    )
+    expect(help.status).toBe(200)
+  })
+
+  it('无 DCR 的 AS + 预注册 public client:localhost 回调授权成功', async () => {
+    const upstream = oauthUpstreamMock(
+      [{ name: 'query', description: 'run query' }],
+      { registration: false, staticClient: { clientId: 'ha-local-client' } },
+    )
+    vi.stubGlobal('fetch', upstream.fetchMock)
+    await mountOAuthMcp('home/assistant-local', { clientId: 'ha-local-client' })
+
+    const localUri = 'http://127.0.0.1:51337/callback'
+    const start = await postJson(
+      'home/assistant-local/~authorize',
+      { redirectUri: localUri },
+      admin(),
+    )
+    expect(start.status).toBe(200)
+    const authUrl = new URL(((await start.json()) as { authorizationUrl: string }).authorizationUrl)
+    expect(authUrl.searchParams.get('redirect_uri')).toBe(localUri)
+    expect(authUrl.searchParams.get('client_id')).toBe('ha-local-client')
+    expect(upstream.registrationRequests).toBe(0)
+
+    const cb = await callback({ code: 'code-ok', state: authUrl.searchParams.get('state') ?? '' })
+    expect(cb.status).toBe(200)
+    expect(upstream.tokenRequests[0]?.get('redirect_uri')).toBe(localUri)
+    const help = await tb.request('https://tb.test/home/assistant-local/~help', admin())
+    expect(help.status).toBe(200)
+  })
+
+  it('预注册 client 改变 redirect URI 时不复用旧 grant', async () => {
+    const upstream = oauthUpstreamMock([], {
+      registration: false,
+      staticClient: { clientId: 'redirect-bound-client' },
+    })
+    vi.stubGlobal('fetch', upstream.fetchMock)
+    await mountOAuthMcp('home/redirect-bound', { clientId: 'redirect-bound-client' })
+    const gatewayAuth = await startAuthorize('home/redirect-bound')
+    expect((await callback({
+      code: 'code-ok',
+      state: gatewayAuth.searchParams.get('state') ?? '',
+    })).status).toBe(200)
+
+    const localUri = 'http://127.0.0.1:51444/callback'
+    const restart = await postJson(
+      'home/redirect-bound/~authorize',
+      { redirectUri: localUri },
+      admin(),
+    )
+    expect(restart.status).toBe(200)
+    const body = (await restart.json()) as { authorizationUrl?: string, status: string }
+    expect(body.status).toBe('redirect')
+    expect(new URL(body.authorizationUrl ?? '').searchParams.get('redirect_uri')).toBe(localUri)
+  })
+
+  it('预注册 confidential client:secret 只从 SecretStore 解析，兑换与 refresh 均使用 basic', async () => {
+    const clientSecret = 'ha-confidential-secret-value'
+    const upstream = oauthUpstreamMock(
+      [{ name: 'query', description: 'run query' }],
+      {
+        registration: false,
+        staticClient: { clientId: 'ha-confidential-client', clientSecret },
+      },
+    )
+    vi.stubGlobal('fetch', upstream.fetchMock)
+    await tb.secrets.set('ha-oauth-client-secret', clientSecret, new Date().toISOString())
+    await mountOAuthMcp('home/assistant-confidential', {
+      clientId: 'ha-confidential-client',
+      clientSecretRef: 'ha-oauth-client-secret',
+    })
+
+    const authUrl = await startAuthorize('home/assistant-confidential')
+    expect(authUrl.toString()).not.toContain(clientSecret)
+    const cb = await callback({ code: 'code-ok', state: authUrl.searchParams.get('state') ?? '' })
+    expect(cb.status).toBe(200)
+    upstream.revokeAccessTokens()
+
+    const help = await tb.request(
+      'https://tb.test/home/assistant-confidential/~help?refresh=1',
+      admin({ headers: { accept: 'text/plain' } }),
+    )
+    expect(help.status).toBe(200)
+    expect(upstream.grants).toContain('refresh_token')
+    expect(upstream.registrationRequests).toBe(0)
+    expect(upstream.tokenRedirectModes.every(mode => mode === 'error')).toBe(true)
+
+    const storedClient = await tb.state.get('mcpoauth:client:home/assistant-confidential')
+    expect(storedClient).toBeNull()
+    const storedTokens = JSON.stringify(
+      await tb.state.get('mcpoauth:token:home/assistant-confidential'),
+    )
+    expect(storedTokens).not.toContain(clientSecret)
+    const node = await tb.state.get('node:home/assistant-confidential')
+    expect(JSON.stringify(node)).not.toContain(clientSecret)
+  })
+
   it('access token 失效 → 401 触发 SDK 静默 refresh 自愈,不需重新交互授权', async () => {
     const upstream = oauthUpstreamMock([{ name: 'query', description: 'run query' }])
     vi.stubGlobal('fetch', upstream.fetchMock)
@@ -250,6 +405,32 @@ describe('mcp 托管 OAuth:授权全链路(默认离线,上游为 fetch mock)', 
     const res = await postJson('db/bb-re/~authorize', {}, admin())
     expect(res.status).toBe(200)
     expect(((await res.json()) as { status: string }).status).toBe('authorized')
+  })
+
+  it('升级前无 grant binding 的 DCR token 从唯一 redirect_uris 安全迁移', async () => {
+    const upstream = oauthUpstreamMock([{ name: 'query', description: 'run query' }])
+    vi.stubGlobal('fetch', upstream.fetchMock)
+    await mountOAuthMcp('db/dcr-legacy-grant')
+    const authUrl = await startAuthorize('db/dcr-legacy-grant')
+    expect((await callback({
+      code: 'code-ok',
+      state: authUrl.searchParams.get('state') ?? '',
+    })).status).toBe(200)
+
+    const tokenKey = 'mcpoauth:token:db/dcr-legacy-grant'
+    const stored = await tb.state.get(tokenKey) as Record<string, unknown>
+    const legacy = { ...stored }
+    delete legacy.toolBridgeBinding
+    await tb.state.put(tokenKey, legacy)
+
+    const res = await postJson('db/dcr-legacy-grant/~authorize', {}, admin())
+    expect(res.status).toBe(200)
+    expect(((await res.json()) as { status: string }).status).toBe('authorized')
+    expect((await tb.state.get(tokenKey) as Record<string, unknown>).toolBridgeBinding)
+      .toEqual({
+        clientId: 'dcr-client-1',
+        redirectUri: `${CANONICAL_ORIGIN}/~oauth/callback`,
+      })
   })
 
   it('本地回调通道(body.redirectUri = loopback):授权/兑换均复用该 redirect_uri', async () => {
@@ -297,6 +478,81 @@ describe('mcp 托管 OAuth:授权全链路(默认离线,上游为 fetch mock)', 
 })
 
 describe('mcp 托管 OAuth:拒绝路径', () => {
+  it('AS 无 DCR 且未配置预注册 client → actionable invalid_argument', async () => {
+    const upstream = oauthUpstreamMock([], { registration: false })
+    vi.stubGlobal('fetch', upstream.fetchMock)
+    await mountOAuthMcp('home/no-client')
+    const res = await postJson('home/no-client/~authorize', {}, admin())
+    expect(res.status).toBe(400)
+    const body = (await res.json()) as { code: string, message: string }
+    expect(body.code).toBe('invalid_argument')
+    expect(body.message).toContain('--oauth-client-id')
+    expect(upstream.registrationRequests).toBe(0)
+  })
+
+  it('oauthClient 明文 secret/未知字段在落库前被服务端拒绝', async () => {
+    const res = await postJson('system/registry/write', {
+      path: 'home/plaintext-client-secret',
+      kind: 'mcp',
+      description: 'must reject plaintext secret',
+      config: {
+        kind: 'mcp',
+        url: 'https://mcp-oauth.test/mcp',
+        auth: 'oauth',
+        oauthClient: { clientId: 'client-1', clientSecret: 'MUST_NOT_PERSIST' },
+      },
+    }, admin())
+    expect(res.status).toBe(400)
+    expect(((await res.json()) as { message: string }).message).toContain('clientSecretRef')
+    expect(await tb.state.get('node:home/plaintext-client-secret')).toBeNull()
+  })
+
+  it('oauthClient 缺 auth:oauth 或 clientId 为空 → 服务端权威拒绝', async () => {
+    const missingAuth = await postJson('system/registry/write', {
+      path: 'home/client-without-oauth',
+      kind: 'mcp',
+      description: 'invalid oauth client mode',
+      config: {
+        kind: 'mcp',
+        url: 'https://mcp-oauth.test/mcp',
+        oauthClient: { clientId: 'client-1' },
+      },
+    }, admin())
+    expect(missingAuth.status).toBe(400)
+    expect(((await missingAuth.json()) as { message: string }).message).toContain('auth:\'oauth\'')
+
+    const emptyClient = await postJson('system/registry/write', {
+      path: 'home/empty-client-id',
+      kind: 'mcp',
+      description: 'invalid empty client id',
+      config: {
+        kind: 'mcp',
+        url: 'https://mcp-oauth.test/mcp',
+        auth: 'oauth',
+        oauthClient: { clientId: '   ' },
+      },
+    }, admin())
+    expect(emptyClient.status).toBe(400)
+    expect(((await emptyClient.json()) as { message: string }).message).toContain('clientId')
+  })
+
+  it('confidential client 的 secret ref 不存在 → 挂载时 fail closed', async () => {
+    const res = await postJson('system/registry/write', {
+      path: 'home/missing-client-secret',
+      kind: 'mcp',
+      description: 'missing oauth client secret',
+      config: {
+        kind: 'mcp',
+        url: 'https://mcp-oauth.test/mcp',
+        auth: 'oauth',
+        oauthClient: { clientId: 'client-1', clientSecretRef: 'does-not-exist' },
+      },
+    }, admin())
+    expect(res.status).toBe(400)
+    expect(((await res.json()) as { message: string }).message).toContain('does-not-exist')
+    expect(await tb.state.get('node:home/missing-client-secret')).toBeNull()
+  })
+
   it('未授权就调用 → permission_denied,指引 tb tool auth', async () => {
     const upstream = oauthUpstreamMock([{ name: 'query', description: 'run query' }])
     vi.stubGlobal('fetch', upstream.fetchMock)
@@ -314,6 +570,42 @@ describe('mcp 托管 OAuth:拒绝路径', () => {
     await mountOAuthMcp('db/bb-forge')
     const cb = await callback({ code: 'code-ok', state: 'forged.state' })
     expect(cb.status).toBe(400)
+    expect(upstream.grants).not.toContain('authorization_code')
+  })
+
+  it('authorization response 的 iss 改变 → callback fail closed，不兑换 code', async () => {
+    const upstream = oauthUpstreamMock([], {
+      registration: false,
+      staticClient: { clientId: 'issuer-bound-client' },
+    })
+    vi.stubGlobal('fetch', upstream.fetchMock)
+    await mountOAuthMcp('home/issuer-bound', { clientId: 'issuer-bound-client' })
+    const authUrl = await startAuthorize('home/issuer-bound')
+    const cb = await callback({
+      code: 'code-ok',
+      state: authUrl.searchParams.get('state') ?? '',
+      iss: 'https://evil-issuer.test',
+    })
+    expect(cb.status).toBe(400)
+    expect(upstream.grants).not.toContain('authorization_code')
+  })
+
+  it('授权进行中预注册 client 配置改变 → callback 在 token 请求前 fail closed', async () => {
+    const upstream = oauthUpstreamMock([], {
+      registration: false,
+      staticClient: { clientId: 'original-client' },
+    })
+    vi.stubGlobal('fetch', upstream.fetchMock)
+    await mountOAuthMcp('home/client-changed', { clientId: 'original-client' })
+    const authUrl = await startAuthorize('home/client-changed')
+
+    await mountOAuthMcp('home/client-changed', { clientId: 'replacement-client' })
+    const cb = await callback({
+      code: 'code-ok',
+      state: authUrl.searchParams.get('state') ?? '',
+    })
+    expect(cb.status).toBe(400)
+    expect(await cb.text()).toContain('client configuration changed')
     expect(upstream.grants).not.toContain('authorization_code')
   })
 

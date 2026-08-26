@@ -228,15 +228,33 @@ export function registerPublicRoutes(app: TbHono, env: RouteEnv): void {
       if (node.kind !== 'mcp' || node.config?.kind !== 'mcp' || node.config.auth !== 'oauth') {
         return renderOAuthCallbackHtml(false, 'target node is not an OAuth-backed mount')
       }
+      const currentClient = node.config.oauthClient
+      if (
+        (payload.o === undefined) !== (currentClient === undefined)
+        || (payload.o !== undefined && (
+          currentClient?.clientId !== payload.o.i
+          || currentClient.clientSecretRef !== payload.o.r
+        ))
+      ) {
+        return renderOAuthCallbackHtml(
+          false,
+          'OAuth client configuration changed; restart authorization',
+        )
+      }
       try {
         await finishMcpAuthorization({
           store: deps.state,
           encryptionKey: encKey,
           nodePath: payload.p,
           serverUrl: node.config.url,
+          secrets: deps.secrets,
           origin: deps.canonicalOrigin ?? new URL(c.req.url).origin,
           code,
           codeVerifier: payload.v,
+          ...(q.iss !== undefined ? { authorizationResponseIssuer: q.iss } : {}),
+          ...(node.config.oauthClient !== undefined
+            ? { oauthClient: node.config.oauthClient }
+            : {}),
           // 本地回调通道(CLI --local):兑换必须复用授权时的 redirect_uri。
           ...(payload.r !== undefined ? { redirectUri: payload.r } : {}),
         })

@@ -22,10 +22,10 @@ import {
 import type { AppContext } from '../deps'
 import type { RouteEnv } from './env'
 import { assertToolConfig, refreshDynamicSearchNode, requirePluginExport } from '../toolNodes'
+import { assertMcpOAuthConfig, invalidateMcpOAuth, startMcpAuthorization } from '../oauth'
 import { invalidateProviderOAuth, startProviderAuthorization } from '../providerOAuth'
 import { assertRemoteConfigAllowed, resolveRemoteSettings } from '../federation'
 import { assertContextConfig, assertSkillhubConfig } from '../contextNodes'
-import { invalidateMcpOAuth, startMcpAuthorization } from '../oauth'
 import { assertRegisterPath, splitReserved } from '../paths'
 import { invalidateToolCache } from '../providers/toolCache'
 import { invalidateMcpEra } from '../providers/mcp'
@@ -110,6 +110,8 @@ export async function handleRegister(c: AppContext, env: RouteEnv): Promise<Resp
   // Secret Reference 使用授权:绑定 authRef/skRef 须持 system/secret admin(注册路径
   // 判定之后、落库之前)。受限注册者不得引用平台已有 Secret(confused-deputy 合入阻断项)。
   assertSecretRefUse(ctx.scopes, body.config)
+  // 预注册 MCP OAuth client 只允许 clientId + SecretStore 引用；服务端权威拒绝明文 secret。
+  await assertMcpOAuthConfig(body.config, deps.secrets)
   // context 配置校验 + s3 连通探测:探测出站网络,须在权限判定之后。
   await assertContextConfig(body.config, deps)
   // skillhub 配置校验(provider r2/s3;s3 连通探测)。
@@ -186,7 +188,9 @@ export async function handleAuthorize(c: AppContext, env: RouteEnv): Promise<Res
     encryptionKey: encKey,
     nodePath: path,
     serverUrl: node.config.url,
+    secrets: deps.secrets,
     origin: deps.canonicalOrigin ?? new URL(c.req.url).origin,
+    ...(node.config.oauthClient !== undefined ? { oauthClient: node.config.oauthClient } : {}),
     ...(redirectUri !== undefined ? { redirectUri } : {}),
   })
   return new Response(JSON.stringify(oauthAuthorizeResponseSchema.parse(result)), {

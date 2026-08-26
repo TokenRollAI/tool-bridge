@@ -35,6 +35,15 @@ describe('secretRefsInConfig', () => {
     expect(secretRefsInConfig({ kind: 'mcp', url: 'https://x', auth: 'oauth', authRef: 'ignored' })).toEqual([])
   })
 
+  it('mcp 预注册 confidential OAuth client 的 clientSecretRef 计入', () => {
+    expect(secretRefsInConfig({
+      kind: 'mcp',
+      url: 'https://x',
+      auth: 'oauth',
+      oauthClient: { clientId: 'client-1', clientSecretRef: 'mcp-client-secret' },
+    })).toEqual(['mcp-client-secret'])
+  })
+
   it('无引用 / 非对象 / 空串 → 空', () => {
     expect(secretRefsInConfig({ kind: 'context', provider: 'r2' })).toEqual([])
     expect(secretRefsInConfig(null)).toEqual([])
@@ -85,5 +94,16 @@ describe('assertSecretRefUse', () => {
         authRef: 'ignored',
       }),
     ).not.toThrow()
+  })
+
+  it('受限注册者不能绑定 mcp OAuth client secret', () => {
+    expect(() =>
+      assertSecretRefUse(registrantScopes, {
+        kind: 'mcp',
+        url: 'https://x',
+        auth: 'oauth',
+        oauthClient: { clientId: 'client-1', clientSecretRef: 'victim-oauth-secret' },
+      }),
+    ).toThrow(/victim-oauth-secret/)
   })
 })

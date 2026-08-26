@@ -37,6 +37,7 @@ import {
   assertSecureUrl,
   authHeaderFor,
   isTBError,
+  type McpOAuthClientConfig,
   normalizeUpstreamError,
   type SecretStoreImpl,
   type StateStore,
@@ -57,7 +58,7 @@ import {
 } from '@modelcontextprotocol/client'
 import { CfWorkerJsonSchemaValidator } from '@modelcontextprotocol/client/validators/cf-worker'
 import type { UpstreamProvider } from './types'
-import { GatewayMcpOAuthProvider, reauthorizeRequired } from '../oauth'
+import { GatewayMcpOAuthProvider, mcpOAuthFetch, reauthorizeRequired } from '../oauth'
 
 /** mcp 节点 config。auth:'oauth' → 凭证走网关托管 OAuth(oauth.ts),authRef 忽略。 */
 export interface McpConfig {
@@ -69,6 +70,8 @@ export interface McpConfig {
   authScheme?: string
   /** 静态明文请求头(非机密);authRef 凭证头覆盖同名项。 */
   headers?: Record<string, string>
+  /** 预注册 OAuth client；secret 只存引用。缺省继续走 DCR。 */
+  oauthClient?: McpOAuthClientConfig
   url: string
 }
 
@@ -140,7 +143,7 @@ const noStandaloneSseFetch: typeof fetch = (input, init) => {
   if (String(method).toUpperCase() === 'GET' && accept.includes('text/event-stream')) {
     return Promise.resolve(new Response(null, { status: 405, statusText: 'Method Not Allowed' }))
   }
-  return fetch(input, init)
+  return mcpOAuthFetch(input, init)
 }
 
 /** era 判定缓存的存取(key `mcpera:<nodePath>`)。缓存的是协议 era 判定,不是任何调用结果。 */
@@ -388,6 +391,8 @@ export function createMcpProvider(
           nodePath,
           encryptionKey: opts.oauth.encryptionKey,
           mode: 'deny',
+          secrets,
+          ...(config.oauthClient !== undefined ? { oauthClient: config.oauthClient } : {}),
         }),
       }
     }

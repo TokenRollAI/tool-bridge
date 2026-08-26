@@ -70,6 +70,72 @@ describe('tb tool mount --auth oauth', () => {
     expect(process.exitCode).toBe(1)
   })
 
+  it('预注册 public client 写入独立 oauthClient，不复用 authRef', async () => {
+    const fn = captureFetch({ path: 'home/assistant', kind: 'mcp' })
+    await runCli([
+      'tool', 'mount', 'home/assistant', ...base,
+      '--kind', 'mcp',
+      '--url', 'https://ha.example/api/mcp',
+      '--auth', 'oauth',
+      '--oauth-client-id', 'tool-bridge-client',
+    ])
+    const [, init] = fn.mock.calls[0] as [string, RequestInit]
+    const payload = JSON.parse(init.body as string)
+    expect(payload.config).toEqual({
+      kind: 'mcp',
+      url: 'https://ha.example/api/mcp',
+      auth: 'oauth',
+      oauthClient: { clientId: 'tool-bridge-client' },
+    })
+    expect(payload.config.authRef).toBeUndefined()
+    expect(process.exitCode).toBe(0)
+  })
+
+  it('预注册 confidential client 只写 clientSecretRef', async () => {
+    const fn = captureFetch({ path: 'home/assistant', kind: 'mcp' })
+    await runCli([
+      'tool', 'mount', 'home/assistant', ...base,
+      '--kind', 'mcp',
+      '--url', 'https://ha.example/api/mcp',
+      '--auth', 'oauth',
+      '--oauth-client-id', 'tool-bridge-client',
+      '--oauth-client-secret-ref', 'ha-oauth-secret',
+    ])
+    const [, init] = fn.mock.calls[0] as [string, RequestInit]
+    const payload = JSON.parse(init.body as string)
+    expect(payload.config.oauthClient).toEqual({
+      clientId: 'tool-bridge-client',
+      clientSecretRef: 'ha-oauth-secret',
+    })
+    expect(JSON.stringify(payload)).not.toContain('clientSecret"')
+    expect(process.exitCode).toBe(0)
+  })
+
+  it('--oauth-client-secret-ref 缺 client id → 退出码 1,不发请求', async () => {
+    const fn = captureFetch({})
+    await runCli([
+      'tool', 'mount', 'home/assistant', ...base,
+      '--kind', 'mcp',
+      '--url', 'https://ha.example/api/mcp',
+      '--auth', 'oauth',
+      '--oauth-client-secret-ref', 'ha-oauth-secret',
+    ])
+    expect(fn).not.toHaveBeenCalled()
+    expect(process.exitCode).toBe(1)
+  })
+
+  it('--oauth-client-id 缺 --auth oauth → 退出码 1,不发请求', async () => {
+    const fn = captureFetch({})
+    await runCli([
+      'tool', 'mount', 'home/assistant', ...base,
+      '--kind', 'mcp',
+      '--url', 'https://ha.example/api/mcp',
+      '--oauth-client-id', 'tool-bridge-client',
+    ])
+    expect(fn).not.toHaveBeenCalled()
+    expect(process.exitCode).toBe(1)
+  })
+
   it('--auth 非 oauth → 退出码 1,不发请求', async () => {
     const fn = captureFetch({})
     await runCli([
