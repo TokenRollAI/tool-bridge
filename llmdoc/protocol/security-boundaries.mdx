@@ -37,11 +37,27 @@ code:
 
 ## 出站
 
-- remote、HTTP、MCP、plugin provider 都经过 URL/host/环检测与超时边界。
+- remote、HTTP、MCP、plugin provider 都经过各自的 URL/host/环检测边界。generic remote 接受可选
+  AbortSignal 与流式 response byte cap；federated search 及其 nested full-help hydration 都下发逐跳递减的
+  remaining-time budget，并把 child body 限在部署上限内。
 - 调用者 SK 不透传上游;只从 `authRef` 解析目标凭证。
 - 内置 plugin 同进程同权,env 白名单和 `guardedFetch` 是代码强制边界。
 - 跨源 redirect 不能携带 Authorization、自定义敏感头或 secret body；MCP OAuth token form 请求禁止自动 redirect，
   避免 authorization code、PKCE verifier、refresh token 或 confidential client secret 被 307/308 重放到新 origin。
+- generic remote transport 对所有 30x 使用 `redirect:'error'`，不依赖 runtime 的跨源 header stripping，也不允许 same-origin 自动跟随。管理员必须把 `baseUrl` 配成最终 URL。
+- remote `~help/~tree` 成功体是不可信协议数据：先过 strict wire 与 canonical path projector，拒绝编码分隔符、控制字符、过编码、root mismatch、非 direct child 与跨 node command；localized tree 后代重新执行外层 read/call 授权。
+
+## 搜索
+
+- SearchIndex 是可重建召回投影，不是权限真源；每个 hit 都从 canonical state hydrate，并重做 read+call、virtualize 与 effect。compact 只减少上下文，不减少授权检查。
+- effect filter 只消费结构化 canonical effect，不从 prose 猜安全语义；SQL filter 后仍在 hydration 复核，防同步竞态。
+- local cursor v2 虽加密认证并绑定 query/revision/ranking/options，仍不是授权凭据；每页重新鉴权。
+- federated cursor 是固定尺寸随机 opaque handle，StateStore key 只存其 SHA-256。session record 绑定
+  caller key/scopes digest、request、ranking 和每 hop topology，不保存 Authorization、SK 明文、baseUrl 或
+  完整 schema；结构 parser 拒绝 credential/schema 字段。immutable generation 由 CAS 和原子 quota 约束，
+  continuation 每次递归验证 child snapshot，并重新执行当前权限、secret、allowlist 与 canonical hydration。
+- remote 只有声明且当次能解析 `skRef` 才参与联邦。未声明为 `unsupported`，声明但 secret 缺失为
+  `unavailable`，两者均不出站；不可用 remote 不占有限 source slot。终端 caller SK 永不跨 gateway。
 
 ## 存储与日志
 

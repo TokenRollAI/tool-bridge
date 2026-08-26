@@ -36,6 +36,9 @@ Dashboard 是纯 HTTP 客户端,不 import core。固定控制面 wire 类型与
 - `components/node/`:Inspector 内的节点子组件。`CommandWorkspace`(整宽命令目录,点命令开 Dialog)、`CmdPanel`(单条 cmd 调用面板,accordion 折叠行 / dialog 弹窗两态)、`ResultView`、`CliHint`、反馈与 note。`CmdPanel`、实际 `invoke` 与 `CliHint` 共同信任 owner `~help` 返回的 `cmds[].path`——它已是含命令叶子的完整直连路径,除前导斜杠规范化外必须原样传递:不得用 owner path + `cmd.name` 重建、不得另传 `tool`、不得把 body 包成信封,实际 POST 与面板展示的 `tb call`/curl 必须使用同一 command path 和裸 arguments(契约见 [protocol/htbp-contract](../protocol/htbp-contract.mdx))。
 - `components/add-tool/`:「添加工具」向导,按来源分流;不重复造挂载逻辑,内置集成走 `buildIntegrationCalls`、自定义 kind 走 `buildRegistryMountCalls`。`mountDiagnostics.ts` 把真实 `system/registry write` 的失败按 TBError code 归类,不另起与真实挂载不一致的 dry-run 探测。
 - `pages/system/`:SK、secret、registry、plugin、catalog、federation、annotation。`pages/system/forms/`:将表单状态编译成 wire payload 的纯函数。
+- `pages/SearchPage.tsx` 通过 SDK fixed wire 执行 compact search，展示 coverage、effect、source 与 partial
+  状态，并把 federation/matching/minCoverage/pathPrefix/effects 编译集中在 `lib/toolSearch.ts`；UI 不按
+  description 猜 effect，也不在客户端对服务端排序二次打分。
 - `pages/system/StorePage.tsx` 对应 `/manage/store`，是独立 deployment Store 管理面，不属于 canvas/Registry
   tree，也不复用 ContextBrowser。`lib/store.ts` 把 browser File/session 适配到 `@tool-bridge/sdk/store`；
   create→relay/direct PUT→direct complete、descriptor/ref parser 与敏感错误裁剪的真源在 SDK。

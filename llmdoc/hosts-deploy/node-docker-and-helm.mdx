@@ -26,6 +26,10 @@ code:
 - default Store 是标准 Node 装配的必备能力。端口监听成功后异步执行首次有界 cleanup，随后每 `TB_STORE_CLEANUP_INTERVAL_SEC` 周期执行（缺省 900 秒）；历史数据再多也不阻塞 readiness，timer 不阻止进程退出，慢 tick 未结束时跳过并发 tick。每个 tick 只扫一次独立 staging 目录。自动清理不扫描未发布预览曾使用的 `objects/store/v1/**`：该路径也可能属于 Context，temp 文件名不能证明 Store 归属；试用过预览的部署须人工确认后再处理残片。清理失败只记录固定事件名，不输出 driver key。
 - 首次引导必须设置 `TB_BOOTSTRAP_ADMIN_SK`;缺失时启动默认 fail closed。`TB_ALLOW_INSECURE_BOOTSTRAP=true` 只用于一次性本地开发。
 - `TB_ALLOW_INSECURE_HTTP=true` 只放行本地 HTTP 上游,不应进入公网部署。
+- 跨实例联邦搜索必须显式配置稳定、全局唯一的 `TB_INSTANCE_ID`；缺失时 Node 仍提供 local search，但不
+  广告 `search:federated`。`TB_SEARCH_FEDERATION_{CONCURRENCY,DEADLINE_MS,MAX_RESPONSE_BYTES,
+  MAX_SOURCES,MIN_CHILD_WORK_MS,RETURN_RESERVE_MS,SESSION_TTL_SEC}` 可收紧默认 fan-out、时间、body 与
+  session 预算；这些是部署硬上限，下游 header 不能放大。
 - 反向代理必须保留 WebSocket upgrade、Authorization 和原始 Host。Store 数据面 URL 保留本次请求的对外 alias host/port，但 TLS 终止后的内部 Request URL 无法可信地表达 protocol；正式代理部署应设 `TB_CANONICAL_ORIGIN=https://...` 作为 protocol 信任根。服务端故意不信任 `X-Forwarded-Proto`，也不用 canonical host 覆盖客户端 alias；部署回归应通过真实 HTTP socket + Host header 验证这条规则。
 
 ## 健康探针与优雅关停
@@ -43,7 +47,9 @@ code:
 设 `TB_DATABASE_URL` 则 StateStore 与 SearchIndex 都走 PG(共用连接池),缺省回退 `TB_DATA_DIR` 下的 SQLite。两者是独立后端句柄,可分别替换。
 
 - **不需要任何 PG 扩展**,连接角色只要能建表即可(受限托管环境常不给建扩展权限)。
-- 全文检索是纯 `ILIKE` 子串匹配,与 SQLite/D1 的 FTS5-trigram 语义对齐;跨后端等价性由共享黑盒契约 `verifySearchIndexContract` 守住。
+- 工具检索是纯 `ILIKE` 子串匹配；SQLite/D1 对应纯 `LIKE`，三者都不依赖 FTS5/trigram 扩展，并共享
+  logical-term coverage-first 的查询生成契约。跨后端等价性由共享黑盒契约
+  `verifySearchIndexContract` 守住。
 - 故意不建 trigram GIN 索引:候选查询是三列 `OR` + `LIMIT`,规划器在节点上限满载时一律选 Seq Scan,索引从不被用,却让插入慢数倍、表体积大数倍。放宽节点上限时需连同查询形状重新评估。
 - 索引写路径在事务开头取 advisory lock 串行化:容量判定依赖 `COUNT(*)`,无锁时并发 mutation 会各自读到旧计数而突破上限。
 - **切换后端不迁移数据。** 给已运行的 SQLite 实例设上 `TB_DATABASE_URL`,得到的是空 PG 状态,首次启动重新走引导;回滚同理,PG 侧写入不回流。跨后端搬迁需自行导出/导入并重建搜索索引。

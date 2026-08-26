@@ -70,6 +70,24 @@ bootstrap builtin 清单在 `packages/app/src/bootstrap.ts` 的 `BUILTIN_MODULES
 
 ## app 内部代码地图
 
+### Search 与 remote path 投影
+
+`POST /~search` 的本地路径由 `search/localSearch.ts` 执行，默认 compact/best/10。它可批量 over-fetch
+轻量候选，但在出 wire 前必须重新读取 canonical node/tool，重做 read+call、virtualize 与 effect 复核；
+索引不是授权真源。SearchSynchronizer 仍只物化 mcp/http/tool，不索引 remote。
+
+`search/federatedSearch.ts` 是 query-time coordinator：只选择当前 registry 的 direct remote mounts，分片
+source/time budget，要求 child `search:federated` capability，用 portable coverage 做 source-balanced merge，
+严格投影/复核 child hit。`search/federatedSession.ts` 用 StateStore CAS 保存固定尺寸 handle 对应的 immutable
+generation 与原子 quota；内部 child snapshot validation 递归绑定 A→B→C 后代 revision。只有显式
+instanceId + CAS + SearchIndex revision 齐全时才广告 federated capability。
+
+generic remote fetch 固定 `redirect:'error'`，任何 30x 都 fail closed；按调用方提供的 signal/cap 流式
+读取 body，超时或超限取消 reader。remote `~help/~tree` 的成功体不再原样透传：
+`RemotePathProjector` 严格校验 child canonical path、direct descendants 与 command containment，rebase 到
+本地 mount；tree 后代还逐条重做外层 read/call scope。A→B→C 已覆盖 search/help/tree 路径闭环；普通
+call wire 不变。
+
 | 主题 | 路径/符号 |
 |---|---|
 | 宿主注入类型 | `deps.ts` / `TbAppDeps` |
@@ -79,6 +97,7 @@ bootstrap builtin 清单在 `packages/app/src/bootstrap.ts` 的 `BUILTIN_MODULES
 | MCP 上游/入站 | `providers/mcp.ts`、`mcpServer.ts`，见 [mcp-interop.mdx](mcp-interop.mdx) |
 | plugin 调用 | `providers/pluginClient.ts` |
 | remote 联邦 | `providers/remote.ts`、`federation.ts` |
+| 搜索执行与续页 | `search/localSearch.ts`、`search/federatedSearch.ts`、`search/federatedSession.ts` |
 | 搜索索引同步 | `search/synchronizer.ts` |
 | default Store | `store.ts`、`storeRefToken.ts`、`routes/store.ts` |
 | Store external origin | `store.ts` / `resolveStoreRequestOrigin`、`routes/invoke.ts`、`routes/store.ts` |

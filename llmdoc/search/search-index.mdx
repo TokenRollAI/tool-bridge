@@ -25,15 +25,17 @@ registry / provider help
 权限、可见性、virtualize 后的 ToolSpec
 ```
 
-SearchIndex 不是权限真源，也不保存可直接返回的完整权威结果。索引记录只含 path、name、description、feedback、digest/revision 等轻量材料；每次响应仍从 canonical state 复核节点、工具与权限。
+SearchIndex 不是权限真源，也不保存可直接返回的完整权威结果。索引记录只含 path、name、description、effect、feedback、digest/revision 等轻量材料；每次响应仍从 canonical state 复核节点、工具、effect 与权限。effect 只接受结构化的 `read|write|destructive`，其余归一为 `unknown`，不从 prose 猜测。
 
 ## 查询与评分
 
-- 三个 SQL 宿主共用 `prepareToolSearchUnits` 和 `toolSearchCandidateStatement`。D1 与 better-sqlite3 经 `sqliteSearchDialect` 使用 SQLite `LIKE`；PostgreSQL 经 `pgSearchDialect` 使用 `ILIKE` 与 `$n` 占位符。候选单元、召回条件和评分形态只有这一份生成器，方言不另写搜索语义。
-- whitespace term 的原样整词是 tier 4。Han、Hiragana、Katakana、Hangul 的连续 CJK run 还展开为 tier 2 bigram 与 tier 1 单码点；混合 CJK/非 CJK term 另加入各最大连续 script run（tier 2）。相同 escaped pattern 跨 tier 去重，只保留最高 tier。
+- 三个 SQL 宿主共用 `prepareToolSearchQuery` 和 `toolSearchCandidateStatement`。D1 与 better-sqlite3 经 `sqliteSearchDialect` 使用 SQLite `LIKE`；PostgreSQL 经 `pgSearchDialect` 使用 `ILIKE` 与 `$n` 占位符。候选单元、召回条件和评分形态只有这一份生成器，方言不另写搜索语义。
+- 去重后的 whitespace term 是 logical term，并带稳定 `logicalTermId`。整词是 tier 4；CJK run 还展开为 tier 2 bigram 与 tier 1 单码点，混合/超长 term 可展开为 run/chunk，但派生 unit 始终保留原 logical term 身份。
 - 所有 pattern 都沿用 `!` 作为 `ESCAPE`，字面转义 `%`、`_`、`!`。派生单元按 tier 从高到低确定性截断，先牺牲低权兜底。
-- 任一单元命中任一字段即可召回，即 `score > 0`。每个单元只取 `CASE` 中第一个命中的字段，字段权重依次为 name 10、path 5、description 3、feedback 1，再乘该单元的 tier；所有单元贡献求和后按 `score DESC, path, name` 排序。
-- 这是加权总分，不是 term coverage 排序。多单元都命中的结果通常更高，但不保证“覆盖全部 query term”一定压过高权字段上的部分命中。
+- 1–2 字符 ASCII 字母数字 term 不从 path substring 获得 coverage，避免 `on` 偶然命中
+  `contract`、`to` 命中 `tools`；name/description/feedback 仍参与，namespace 约束用 pathPrefix。
+- SQL 先对每个 `(tool, logicalTermId)` 只保留最佳派生 unit×字段分，再按 distinct `matched_term_count DESC`、字段质量总分、path、name 排序。同一原 term 命中多个 unit/字段只增加一次 coverage，因此覆盖更多 query terms 的工具绝对优先。
+- `matching:'best'` 默认只返回当前最高非空 coverage band，cursor 可继续下一档；`matching:'all'` 等价于 coverage floor 1。`minCoverage`、segment-aware `pathPrefix` 与 normalized effects 都在 SQL `LIMIT` 前过滤。
 - keyword search 只做字面子串召回，不翻译、不扩同义词也不做语义映射。例如英文 `send message` 对只有中文字段的工具没有命中保证。
 - SQLite `LIKE` 只对 ASCII 做默认大小写折叠，PostgreSQL `ILIKE` 的 Unicode 折叠更宽；这是保留的宿主差异。共享契约只承诺其共同语义下的排序与召回。
 
@@ -42,7 +44,7 @@ SearchIndex 不是权限真源，也不保存可直接返回的完整权威结�
 D1 是三个 SQL 宿主的共同查询下界，因此 query preparation 统一遵守：
 
 - 原始 whitespace terms 最多 32，规范化 query 最多 1024 字符。
-- 单次候选 SQL 最多 98 个 search units；D1 的 100 bindings 还需给 limit、offset 各留一个。
+- 无 path prefix 时最多 98 个 search units；有 prefix 时最多 97 个 units，再给 prefix、limit、offset 各留一个 binding，D1 最坏仍为 100。
 - 每个 escaped LIKE pattern 最多 50 UTF-8 bytes。超过该限制的非 CJK run 按 code point 贪心切成最大合法连续块；超长 CJK 整词不保留，但仍由合法的 bigram 与单码点单元覆盖。
 
 这些上界各管不同资源，不能互相替代：canonical audit 最多物化 500 个节点；每个节点的索引 JSON 快照最多 20KB；工具行没有“每节点固定条数”上限；98 是单次查询单元上限。benchmark 的某个工具行数或延迟样本不等于 schema 的最坏情况证明，容量或 query unit 边界变化时应重跑 benchmark 并重新评估顺扫形状。
@@ -53,17 +55,34 @@ D1 是三个 SQL 宿主的共同查询下界，因此 query preparation 统一�
 - SQL 后端分三层：`SqlSearchIndex` 持数据库无关编排（replace/rebuild 顺序、material-change、cursor/revision/分页），`SqlSearchDialect` 持方言 SQL（schema、候选查询、固定语句），宿主 `SqlSearchDriver` 只负责数据库原语。D1 与 SQLite 共用 `sqliteSearchDialect`；PG 用 `pgSearchDialect`。
 - 方言必须把返回值归一到 core 契约。postgres.js 把 `bigint`/`COUNT(*)` 返回字符串、`EXISTS` 返回 boolean，不显式转换不会类型报错，而是静默错行为（revision 违反公开类型、空快照 no-op 判定失效并白失效 cursor）。
 - 节点容量判定依赖 `COUNT(*)`，本身不加锁；有并发写的后端须自行串行化 mutation（PG 走事务级 advisory lock）。
-- 默认/上限分页与 root `~search` 的 Page 语义一致；cursor 与 query/mode/revision 绑定，篡改、陈旧或越界 cursor fail closed。
+- Search 专属默认 limit 为 10、最大 200；adapter batch 最大 100。local cursor v2 是 AES-GCM sealed offset，绑定 query、mode、revision、`keyword-v2` ranking epoch，以及 normalized matching/floor/path/effect fingerprint；limit/detail 不改变候选集合，不进入 fingerprint。篡改、旧 revision/ranking/filter 或越界 cursor 都 fail closed。
 
-## Schema v4 与派生状态恢复
+## Schema v5 与派生状态恢复
 
-- 活动派生表是 `tb_search_tools_v4`、`tb_search_meta_v4`、`tb_search_snapshots_v4`。SQLite/D1 不再创建 FTS 虚拟表及其同步触发器；三宿主仍保留 snapshots 容量触发器（PG 另有对应函数）。
-- v4 不读取、迁移或 DROP v3 表。滚动升级期间旧副本可继续使用 v3，新副本只使用 v4；旧表成为静态孤儿，需清理时由部署者在确认所有旧副本退出后手工处理。
-- 新 meta 初始未 seeded 且生成新的 cursor secret。升级后首次搜索的 `ensureReady` 会从 canonical state 全量审计并重建 v4；旧 cursor 因 secret 更换一次性失效，调用方应从无 cursor 的同一 query 重新发起。
+- 活动派生表是 `tb_search_tools_v5`、`tb_search_meta_v5`、`tb_search_snapshots_v5`；tools 的 effect 列有四态 `CHECK`。SQLite/D1 不创建 FTS 虚拟表；三宿主保留 snapshots 容量触发器。
+- v5 不读取、迁移或 DROP v4。新 meta 初始未 seeded 且生成新的 cursor secret，首次 `ensureReady` 从 canonical state 全量审计并重建 v5。旧表是静态孤儿，清理须等旧副本退出；旧 cursor 从无 cursor 的同一 query 重试。
 - registry/provider 变化触发增量重建或 canonical audit。索引失败不能破坏工具调用权威路径；最后已知可用索引可继续服务，但 hydrate 仍会排除已删除或无权节点。
 
 ## 对等验收
 
 直接 API、CLI 与 Dashboard 必须使用同一 query、mode、cursor 语义。窄 SK 验收至少证明：结果非空、属于 admin 集合、严格收窄，并全部落在允许的完整路径段前缀内。可重跑流程见 `scripts/verify-search.ts`。
 
-跨后端等价性由共享黑盒契约 `packages/core/test/search/searchIndex.fixture.ts` 的 `verifySearchIndexContract` 守住：D1、better-sqlite3 与 PostgreSQL 都必须跑同一份断言，覆盖部分命中、字段和 CJK tier 排序、path 命中、LIKE 转义、cursor 失效、容量与 mutation。新增后端时复用它，不要另写一套宽松断言。PG 测试以 `TB_TEST_DATABASE_URL` 门控；完整验收必须提供数据库并确认这组测试没有 skip，否则三宿主等价性没有成立。
+跨后端等价性由共享黑盒契约 `packages/core/test/search/searchIndex.fixture.ts` 的 `verifySearchIndexContract` 守住：D1、better-sqlite3 与 PostgreSQL 必须复用同一断言，覆盖 Issue #107 coverage 排序、best/all/floor、path/effect filter、CJK、LIKE 转义、cursor 约束、容量与 mutation。PG 测试以 `TB_TEST_DATABASE_URL` 门控；完整三宿主验收必须提供数据库并确认没有 skip。
+
+## 递归联邦与 continuation
+
+`POST /~search` 在宿主同时具备显式 `TB_INSTANCE_ID`、原子 `StateStore.compareAndSwap` 和
+revisioned SearchIndex 时广告 `search:federated`；此时无显式选项的新查询默认
+`federation:'recursive'`，旧 local cursor 仍按 local 续页。coordinator 只枚举本 hop 的 direct
+remote mounts，child 再递归自己的 direct mounts；SearchSynchronizer 继续只物化本地
+`mcp|http|tool`，不把 remote catalog 镜像进父索引。
+
+跨 source 不比较 SQL raw score，只先比较协议级 coverage；同 coverage 由 source-balanced
+interleave 和稳定 source path 合并。parent 严格验证 child 的 `keyword-v2` evidence、canonical path、
+source containment 和 hard filters，rebase 后再按 caller 对 localized path 重做 read+call。
+
+联邦 cursor 是固定 37 字符 `fsc1_` opaque handle；StateStore 保存 immutable generation、compact
+pending head、direct child handle 和 topology/request/auth digest，不保存凭证、baseUrl 或 schema。session
+以 CAS 保证重试收敛，并有 record/chain/actor/global 的原子数量与 byte quota。每次续页（包括返回已缓存
+generation）先用内部 snapshot handle 递归验证所有未排除 child 的 topology/revision，使 A→B→C 的 C
+变化也能让 A cursor fail closed；暂时 transport 失败保持同 cursor 可重试。

@@ -58,7 +58,28 @@ builtin、Context 与 Skillhub 的命令使用 `HtbpCommandRegistry` 注册一�
 - 节点本身(无命令段)不可调用,返回 404。命令可寻址:`GET /<nodePath>/<command>/~help`;`~tree` 只列权威注册拓扑,动态命令经 `~help`/`~search` 发现。
 - **`cmds[].path` 是可执行的完整路径,不是 owner 定位或展示提示**。owner 的 `~help` 返回的每条 `cmds[].path` 都已含命令叶子(如 `/device/mac/shell/exec`),消费者必须原样用于 `GET <cmd.path>/~help` 与 `POST <cmd.path>`,除 URL 拼接所需的前导斜杠规范化外不得改写。禁止用 `node.path + cmd.name` 重建命令身份、另传 `tool` 字段,或把 body 包成信封。Dashboard 的 `CmdPanel`/`CliHint`、`tb call` 与 curl 示例共同信任这一个字段,任一处重建都会同时失真。
 - 标识符大小写不敏感、规范化为小写:路径段、命令/工具名、export id、scope pattern 字面段、device 暴露路径。规范化后冲突(上游同时暴露 `Foo`/`foo`)→ `invalid_argument`,不选其一。命令名含 `/`、为空、以 `~` 开头、为 `.`/`..` 一律拒。第三方原始工具名是外部身份,适配器维护 `公开小写名 → 上游原名` 映射。
-- `Page<T>` 为 `{items,cursor?}`,默认 limit 50、最大 200;cursor 只表示继续位置,不是授权凭据。
+- `Page<T>` 为 `{items,cursor?}`，通用默认 limit 50、最大 200；Search 是例外，默认 10、最大 200。cursor 只表示继续位置，不是授权凭据。
+
+### 全局工具搜索
+
+`POST /~search` 是 authenticated、root-only、capability-gated 搜索；`/<remote>/~search` 仍不是公开
+入口，recursive federation 由 root coordinator 逐跳调用 direct remotes。request 为 strict
+`{query,opts?}`，opts 可含 `cursor/detail/effects/federation/limit/matching/minCoverage/mode/pathPrefix`，
+未知字段拒绝。默认 keyword、`matching:'best'`、`detail:'compact'`、limit 10；semantic 必须由宿主声明，
+且当前不能 recursive。
+
+宿主只有同时具备显式 `TB_INSTANCE_ID`、原子 StateStore CAS 与 revisioned SearchIndex 时才广告
+`search:federated`。有该 capability 的新查询默认 recursive；显式 `federation:'local'` 可关闭 fan-out，
+升级前的旧 local cursor 也保持 local。recursive response 的 item 可含 `source:{path}`，部分失败用
+`partial:true` + `sources:[{path,status}]`；status 只用受控枚举，不带 endpoint/credential/raw error。
+
+response 是 `Page<{path,relevance,source?,tool}>`。relevance 强制包含 coverage、matched/total term counts
+与固定 `rankingVersion:'keyword-v2'`；compact 省略 input/output schema 并把 description 限在搜索摘要
+预算内，full 才保留 schema。best 只给当前最高 coverage band，cursor 可进入下一档；all 等价于 full
+coverage。local 空可见页不返回 cursor；federated cursor 是固定 37 字符服务端 session handle，同 cursor
+重试返回相同 generation，并在每页递归验证后代 revision/topology。
+
+MCP `tb_search`、SDK、CLI 与 Dashboard 复用同一 wire；compact 命中后通常用选中工具的 `~help` hydrate schema。需要同页 schema 时显式请求 full/CLI `--schemas`。
 
 ### 两层 wire 不可互相套用
 

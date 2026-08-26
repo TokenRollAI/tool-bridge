@@ -53,6 +53,10 @@ CLI 是公共控制面,不是 API 的宽松包装。修改命令时同时检查�
   `store share`：成功 stdout/JSON 必须交付该次请求产生的短期 `$ref`，否则 share 命令没有可用产物；
   其他 Store 输出继续裁剪 bearer。
 - 删除资源只做命令名承诺的动作,并校验目标 kind:`integration rm` 只卸 tool/context 节点,打到 device 等其它 kind 即拒(走 `deleteNode(target, path, ['tool','context'])`)。集成卸载与密钥删除是两个显式操作。
+- `tb search` 默认请求 compact discovery，`--json` 也不隐式下载 schema；只有 `--schemas` 才映射
+  `detail:'full'`。`--federation local|recursive`、`--matching best|all`、`--min-coverage`、
+  `--path-prefix` 与 repeatable `--effect` 必须原样下发 SDK wire；CLI 只做非法枚举/组合的早拒，不能
+  自己重排或过滤服务端结果。partial source 状态写 stderr warning，JSON page 保持机器可读。
 
 ## 类型契约
 

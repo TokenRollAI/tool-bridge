@@ -96,6 +96,9 @@ gateway 已按请求使用 D1 Sessions API，但**代码接入与数据库启用
   SHA-256；派生 HMAC key 不落 D1。通常无需新增 Store secret，显式 `TB_STORE_TOKEN_SECRET` 只用于独立
   轮换域，且同样必须走 Wrangler secret，不能进入 `vars`。
 - 上游默认只允许 HTTPS;`TB_ALLOW_INSECURE_HTTP=true` 仅供本地验证。
+- 跨实例联邦 search 必须给每个 Worker 部署显式、稳定且全局唯一的 `TB_INSTANCE_ID`；否则仍有 D1
+  local search，但不广告 `search:federated`。`TB_SEARCH_FEDERATION_*` vars 可收紧 source/concurrency、
+  deadline/return reserve、remote body 和 session TTL，具体默认值与 Node/SDK 共用 core parser。
 - 自定义域名、canonical origin 与 OAuth redirect 必须一致;未配置域名时使用 workers.dev/preview 入口。
 
 ## Default Store、R2 直传与 CORS
