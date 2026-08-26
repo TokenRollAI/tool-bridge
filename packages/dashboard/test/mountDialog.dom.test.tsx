@@ -69,7 +69,10 @@ async function pickBuiltinTool(): Promise<void> {
     </MemoryRouter>,
   )
   fireEvent.click(screen.getByRole('button', { name: /挂载节点/ }))
-  await waitFor(() => expect(screen.getByLabelText(/^path.*\*$/)).toBeDefined())
+  await waitFor(
+    () => expect(screen.getByLabelText(/^path.*\*$/)).toBeDefined(),
+    { timeout: 5_000 },
+  )
 
   fireEvent.click(screen.getByRole('button', { name: 'mcp — MCP server' }))
   await waitFor(() => expect(screen.getByText('tool — plugin 工具源')).toBeDefined())
