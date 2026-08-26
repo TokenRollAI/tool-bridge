@@ -53,11 +53,11 @@ describe('SqliteSearchIndex', () => {
     expect(await reopenedState.get('probe:key')).toEqual({ alive: true })
   })
 
-  it('leaves v3 rows orphaned and seeds v4 only from canonical rebuild input', async () => {
+  it('leaves v4 rows orphaned and seeds v5 only from canonical rebuild input', async () => {
     const dbPath = tmpDbPath()
     const legacy = new Database(dbPath)
     legacy.exec(`
-      CREATE TABLE tb_search_tools_v3 (
+      CREATE TABLE tb_search_tools_v4 (
         id INTEGER PRIMARY KEY,
         path TEXT NOT NULL,
         name TEXT NOT NULL,
@@ -67,7 +67,7 @@ describe('SqliteSearchIndex', () => {
       )
     `)
     legacy.prepare(`
-      INSERT INTO tb_search_tools_v3(path, name, description, feedback) VALUES (?, ?, ?, ?)
+      INSERT INTO tb_search_tools_v4(path, name, description, feedback) VALUES (?, ?, ?, ?)
     `).run(
       'legacy/search',
       'legacy_probe',
@@ -90,7 +90,7 @@ describe('SqliteSearchIndex', () => {
     migrated.close()
 
     const orphan = new Database(dbPath, { readonly: true })
-    expect(orphan.prepare('SELECT COUNT(*) AS count FROM tb_search_tools_v3').get())
+    expect(orphan.prepare('SELECT COUNT(*) AS count FROM tb_search_tools_v4').get())
       .toEqual({ count: 1 })
     orphan.close()
 

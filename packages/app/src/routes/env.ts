@@ -21,7 +21,7 @@ export interface RouteEnv {
   builtinsOf: (store: StateStore) => Map<string, BuiltinModule>
   deps: TbAppDeps
   /** 全局工具搜索能力表;未注入索引或未声明 search → 空数组(端点不存在)。 */
-  globalSearchCapabilities: () => Array<'search' | 'search:semantic'>
+  globalSearchCapabilities: () => Array<'search' | 'search:federated' | 'search:semantic'>
   /**
    * 内置目录的目录级 digest(`/healthz` 回显,供三宿主对拍)。
    *
@@ -52,11 +52,18 @@ export function createRouteEnv(deps: TbAppDeps): RouteEnv {
     builtins.set('store', lazyDefaultStoreModule(deps))
     return builtins
   }
-  const globalSearchCapabilities = (): Array<'search' | 'search:semantic'> => {
+  const globalSearchCapabilities = (): Array<
+    'search' | 'search:federated' | 'search:semantic'
+  > => {
     const declared = new Set(deps.search?.capabilities ?? [])
     if (!declared.has('search')) return []
     return [
       'search',
+      ...(deps.remote.instanceId !== undefined
+        && deps.state.compareAndSwap !== undefined
+        && deps.search?.revision !== undefined
+        ? ['search:federated' as const]
+        : []),
       ...(declared.has('search:semantic') ? ['search:semantic' as const] : []),
     ]
   }

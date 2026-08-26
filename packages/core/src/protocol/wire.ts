@@ -129,8 +129,65 @@ export const toolSpecSchema: z.ZodType<CoreToolSpec> = z.object({
   outputSchema: z.unknown().optional(),
 })
 
-export const toolSearchItemSchema = z.object({
+export type WireToolSearchDetail = 'compact' | 'full'
+export type WireToolSearchEffect = 'read' | 'write' | 'destructive' | 'unknown'
+export type WireToolSearchFederation = 'local' | 'recursive'
+export type WireToolSearchMatching = 'best' | 'all'
+export type WireToolSearchSourceStatus
+  = | 'ok'
+    | 'unsupported'
+    | 'timed_out'
+    | 'unavailable'
+    | 'cycle'
+    | 'hop_limit'
+    | 'budget_exhausted'
+    | 'invalid_response'
+export interface WireToolSearchRelevance {
+  coverage: number
+  matchedTermCount: number
+  rankingVersion: 'keyword-v2'
+  totalTermCount: number
+}
+export interface WireToolSearchSource {
+  /** `''` 表示当前 root local source；remote 使用调用方视角下的本地 mount path。 */
+  path: string
+}
+export interface WireToolSearchSourceResult extends WireToolSearchSource {
+  status: WireToolSearchSourceStatus
+}
+
+export const toolSearchRelevanceSchema: z.ZodType<WireToolSearchRelevance> = z.strictObject({
+  coverage: z.number().min(0).max(1),
+  matchedTermCount: z.number().int().nonnegative(),
+  rankingVersion: z.literal('keyword-v2'),
+  totalTermCount: z.number().int().positive(),
+}).refine(value =>
+  value.matchedTermCount <= value.totalTermCount
+  && value.coverage === value.matchedTermCount / value.totalTermCount,
+{ message: 'coverage must equal matchedTermCount / totalTermCount' })
+
+export const toolSearchSourceSchema: z.ZodType<WireToolSearchSource> = z.strictObject({
   path: z.string(),
+})
+
+export const toolSearchSourceResultSchema: z.ZodType<WireToolSearchSourceResult> = z.strictObject({
+  path: z.string(),
+  status: z.enum([
+    'ok',
+    'unsupported',
+    'timed_out',
+    'unavailable',
+    'cycle',
+    'hop_limit',
+    'budget_exhausted',
+    'invalid_response',
+  ]),
+})
+
+export const toolSearchItemSchema = z.strictObject({
+  path: z.string(),
+  relevance: toolSearchRelevanceSchema,
+  source: toolSearchSourceSchema.optional(),
   tool: toolSpecSchema,
 })
 
@@ -141,13 +198,25 @@ export function pageSchema<T extends z.ZodType>(itemSchema: T) {
   })
 }
 
-export const toolSearchPageSchema = pageSchema(toolSearchItemSchema)
+export const toolSearchPageSchema: z.ZodType<WireToolSearchPage> = z.strictObject({
+  cursor: z.string().optional(),
+  items: z.array(toolSearchItemSchema),
+  partial: z.boolean().optional(),
+  snapshot: z.string().optional(),
+  sources: z.array(toolSearchSourceResultSchema).optional(),
+})
 
 export const toolSearchRequestSchema = z.strictObject({
   opts: z.strictObject({
     cursor: z.string().optional(),
+    detail: z.enum(['compact', 'full']).optional(),
+    effects: z.array(z.enum(['read', 'write', 'destructive', 'unknown'])).min(1).optional(),
+    federation: z.enum(['local', 'recursive']).optional(),
     limit: z.number().int().optional(),
+    matching: z.enum(['best', 'all']).optional(),
+    minCoverage: z.number().gt(0).max(1).optional(),
     mode: z.enum(['keyword', 'semantic']).optional(),
+    pathPrefix: z.string().optional(),
   }).optional(),
   query: z.string().trim().min(1),
 })
@@ -156,14 +225,28 @@ export type WirePage<T> = Page<T>
 export type WireToolSpec = CoreToolSpec
 export interface WireToolSearchItem {
   path: string
+  relevance: WireToolSearchRelevance
+  source?: WireToolSearchSource
   tool: WireToolSpec
 }
-export type WireToolSearchPage = WirePage<WireToolSearchItem>
+export interface WireToolSearchPage extends WirePage<WireToolSearchItem> {
+  /** source 状态与 partial 的组合语义由 coordinator 决定；wire 只冻结公开形状。 */
+  partial?: boolean
+  /** 仅供 gateway 间递归验证当前 page 的服务端 session handle。 */
+  snapshot?: string
+  sources?: WireToolSearchSourceResult[]
+}
 export interface WireToolSearchRequest {
   opts?: {
     cursor?: string
+    detail?: WireToolSearchDetail
+    effects?: WireToolSearchEffect[]
+    federation?: WireToolSearchFederation
     limit?: number
+    matching?: WireToolSearchMatching
+    minCoverage?: number
     mode?: 'keyword' | 'semantic'
+    pathPrefix?: string
   }
   query: string
 }

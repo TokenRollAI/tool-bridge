@@ -14,19 +14,41 @@ import {
   NodeRegistryStore,
   TBError,
   type TreeEntry,
+  type TreeJson,
   type TreeNode,
   type TreePath,
 } from '@tool-bridge/core'
 import { treeJsonSchema } from '@tool-bridge/core/protocol'
 import type { AppContext } from '../deps'
 import type { RouteEnv } from './env'
+import {
+  remotePassthroughIfMatch,
+  remotePathProjectorIfMatch,
+  remoteProtocolError,
+  remoteTreeChildren,
+} from '../federation'
 import { filterListVisible, indexByParent, splitReserved, toEntry } from '../paths'
-import { remotePassthroughIfMatch, remoteTreeChildren } from '../federation'
 import { assertContextAlive, pruneExpiredContext } from '../contextNodes'
 import { renderTreeDsl } from '../responses'
 
 /** buildTree 的深度边界免探测 kind:remote 子树由远端自述,本地不代为展开。 */
 const REMOTE_OPAQUE_KINDS = new Set(['remote'])
+
+function renderTree(tree: TreeJson, rep: ReturnType<typeof negotiate>): Response {
+  if (rep === 'json') {
+    return new Response(JSON.stringify(treeJsonSchema.parse(tree)), {
+      headers: { 'content-type': contentTypeFor('json') },
+    })
+  }
+  if (rep === 'dsl') {
+    return new Response(renderTreeDsl(tree), {
+      headers: { 'content-type': contentTypeFor('dsl') },
+    })
+  }
+  return new Response(`\`\`\`text\n${renderTreeDsl(tree)}\`\`\`\n`, {
+    headers: { 'content-type': contentTypeFor('markdown') },
+  })
+}
 
 // --- ~tree(根级与子树)---
 export async function handleTree(c: AppContext, env: RouteEnv): Promise<Response> {
@@ -35,16 +57,26 @@ export async function handleTree(c: AppContext, env: RouteEnv): Promise<Response
   if (path === null) throw TBError.notFound('no such path')
   const ctx = c.get('ctx')
   const store = c.get('store')
+  const rep = negotiate(c.req.header('accept'))
   // 根路径('')免 read 判定(整棵树入口);非根节点需 (path,'read')。
   if (path !== '' && !check(ctx, path, 'read').allow) throw TBError.notFound('not found')
   const registry = new NodeRegistryStore(store)
   const now = new Date().toISOString()
 
-  // remote 透传:非根路径命中 remote 节点(或其后代)→ 改写 ~tree 打到 baseUrl,
-  // 远端返回的子树作为响应(query 如 ?depth 一并带过去)。
+  // remote 成功响应固定取 JSON，逐层校验、rebase 并按本地调用者 scope 重新裁剪；
+  // 错误响应仍原样透传。query（如 depth）由 transport 保留。
   if (path !== '') {
-    const remote = await remotePassthroughIfMatch(c, ctx, registry, path, '~tree', deps)
-    if (remote) return remote
+    const projector = await remotePathProjectorIfMatch(registry, path)
+    if (projector !== null) {
+      const headers = new Headers(c.req.raw.headers)
+      headers.set('accept', 'application/json')
+      const remote = await remotePassthroughIfMatch(c, ctx, registry, path, '~tree', deps, headers)
+      if (remote === null) throw remoteProtocolError('remote ~tree lost its mount owner')
+      if (!remote.ok) return remote
+      const parsed = treeJsonSchema.safeParse(await remote.json().catch(() => null))
+      if (!parsed.success) throw remoteProtocolError('remote ~tree returned invalid JSON')
+      return renderTree(projector.projectTree(parsed.data, path, ctx), rep)
+    }
   }
 
   // 子树根必须真实存在(否则 ~tree 可伪造任意根)。非根 path 不存在 → 404;
@@ -82,19 +114,5 @@ export async function handleTree(c: AppContext, env: RouteEnv): Promise<Response
     opaqueKinds: REMOTE_OPAQUE_KINDS,
     ...(rootEntry !== undefined ? { rootEntry } : {}),
   })
-  const rep = negotiate(c.req.header('accept'))
-  if (rep === 'json') {
-    return new Response(JSON.stringify(treeJsonSchema.parse(tree)), {
-      headers: { 'content-type': contentTypeFor('json') },
-    })
-  }
-  if (rep === 'dsl') {
-    return new Response(renderTreeDsl(tree), {
-      headers: { 'content-type': contentTypeFor('dsl') },
-    })
-  }
-  // markdown(默认):缩进树本身就是文本,包 code fence 防 markdown 渲染吞掉缩进。
-  return new Response(`\`\`\`text\n${renderTreeDsl(tree)}\`\`\`\n`, {
-    headers: { 'content-type': contentTypeFor('markdown') },
-  })
+  return renderTree(tree, rep)
 }

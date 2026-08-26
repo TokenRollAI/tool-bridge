@@ -1,8 +1,13 @@
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, expectTypeOf, it, vi } from 'vitest'
 import {
   createToolBridgeClient,
   fixedControlPlaneOpenApi,
   ToolBridgeClientError,
+  type ToolSearchFederation,
+  type ToolSearchPage,
+  type ToolSearchRequest,
+  type ToolSearchSourceResult,
+  type ToolSearchSourceStatus,
 } from '../../src/client/index'
 import fixture from '../../../../test/fixtures/fixed-control-plane.json'
 
@@ -86,6 +91,172 @@ describe('@tool-bridge/sdk/client', () => {
       kind: 'context',
       description: 'Fixture context',
       config: { kind: 'context', provider: 'r2' },
+    })
+  })
+
+  it('sends every search option unchanged and parses compact relevance without schemas', async () => {
+    const fetcher = vi.fn(async () => json(fixture.search))
+    const client = createToolBridgeClient({
+      baseUrl: 'https://gw.example',
+      sk: 'tbk_search',
+      fetcher: fetcher as typeof fetch,
+    })
+
+    const result = await client.search({
+      query: ' temperature ',
+      opts: {
+        detail: 'compact',
+        effects: ['read', 'unknown'],
+        federation: 'recursive',
+        limit: 10,
+        matching: 'best',
+        minCoverage: 0.75,
+        mode: 'keyword',
+        pathPrefix: 'home/home-assistant',
+      },
+    })
+
+    const [url, init] = fetcher.mock.calls[0] as unknown as [string, RequestInit]
+    expect(url).toBe('https://gw.example/~search')
+    expect(JSON.parse(String(init.body))).toEqual({
+      query: 'temperature',
+      opts: {
+        detail: 'compact',
+        effects: ['read', 'unknown'],
+        federation: 'recursive',
+        limit: 10,
+        matching: 'best',
+        minCoverage: 0.75,
+        mode: 'keyword',
+        pathPrefix: 'home/home-assistant',
+      },
+    })
+    expect(result.items[0]?.relevance).toEqual({
+      coverage: 1,
+      matchedTermCount: 1,
+      rankingVersion: 'keyword-v2',
+      totalTermCount: 1,
+    })
+    expect(result.items[0]?.tool).not.toHaveProperty('inputSchema')
+    expect(result.items[0]?.tool).not.toHaveProperty('outputSchema')
+  })
+
+  it('parses federated source evidence and exposes its public types', async () => {
+    const page = {
+      items: [{
+        path: 'remotes/home/devices/climate',
+        relevance: {
+          coverage: 1,
+          matchedTermCount: 2,
+          rankingVersion: 'keyword-v2',
+          totalTermCount: 2,
+        },
+        source: { path: 'remotes/home' },
+        tool: { name: 'read_temperature' },
+      }],
+      partial: true,
+      sources: [
+        { path: '', status: 'ok' },
+        { path: 'remotes/home', status: 'timed_out' },
+      ],
+    }
+    const fetcher = vi.fn(async () => json(page))
+    const client = createToolBridgeClient({ baseUrl: '', fetcher: fetcher as typeof fetch })
+
+    expect(await client.search({
+      query: 'read temperature',
+      opts: { federation: 'recursive' },
+    })).toEqual(page)
+    expectTypeOf<NonNullable<ToolSearchRequest['opts']>['federation']>()
+      .toEqualTypeOf<ToolSearchFederation | undefined>()
+    expectTypeOf<NonNullable<ToolSearchPage['sources']>[number]>()
+      .toEqualTypeOf<ToolSearchSourceResult>()
+    expectTypeOf<ToolSearchSourceResult['status']>()
+      .toEqualTypeOf<ToolSearchSourceStatus>()
+  })
+
+  it('parses full search schemas and fails closed when relevance is absent', async () => {
+    const relevance = {
+      coverage: 0.5,
+      matchedTermCount: 1,
+      rankingVersion: 'keyword-v2',
+      totalTermCount: 2,
+    } as const
+    const full = {
+      items: [{
+        path: 'home/home-assistant',
+        relevance,
+        tool: {
+          description: 'Read state',
+          inputSchema: {
+            additionalProperties: false,
+            properties: { entityId: { type: 'string' } },
+            required: ['entityId'],
+            type: 'object',
+          },
+          name: 'get_state',
+          outputSchema: {
+            properties: { state: { type: 'string' } },
+            type: 'object',
+          },
+        },
+      }],
+    }
+    const withoutRelevance = {
+      items: [{
+        path: 'home/home-assistant',
+        tool: { name: 'get_state' },
+      }],
+    }
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(json(full))
+      .mockResolvedValueOnce(json(withoutRelevance))
+    const client = createToolBridgeClient({ baseUrl: '', fetcher: fetcher as typeof fetch })
+
+    expect(await client.search({ query: 'state', opts: { detail: 'full' } })).toEqual(full)
+    await expect(client.search({ query: 'state' })).rejects.toMatchObject({
+      code: 'internal',
+      kind: 'protocol',
+      retryable: true,
+    })
+  })
+
+  it.each([
+    { opts: { detail: 'compact' }, query: 'status', unexpected: true },
+    { opts: { detail: 'compact', unexpected: true }, query: 'status' },
+    { opts: { federation: 'direct' }, query: 'status' },
+  ])('rejects unknown search request fields before sending', async (input) => {
+    const fetcher = vi.fn(async () => json(fixture.search))
+    const client = createToolBridgeClient({ baseUrl: '', fetcher: fetcher as typeof fetch })
+
+    await expect(client.search(input as never)).rejects.toMatchObject({
+      code: 'invalid_argument',
+      kind: 'invalid',
+      retryable: false,
+    })
+    expect(fetcher).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    { ...fixture.search, secret: 'must-not-cross' },
+    { ...fixture.search, partial: 'yes' },
+    { ...fixture.search, sources: [{ path: '', status: 'failed' }] },
+    { ...fixture.search, sources: [{ path: '', status: 'ok', rawError: 'secret' }] },
+    {
+      ...fixture.search,
+      items: fixture.search.items.map(item => ({
+        ...item,
+        source: { path: 'remote/home', baseUrl: 'https://secret.example' },
+      })),
+    },
+  ])('fails closed on malformed federated search responses', async (response) => {
+    const fetcher = vi.fn(async () => json(response))
+    const client = createToolBridgeClient({ baseUrl: '', fetcher: fetcher as typeof fetch })
+
+    await expect(client.search({ query: 'status' })).rejects.toMatchObject({
+      code: 'internal',
+      kind: 'protocol',
+      retryable: true,
     })
   })
 

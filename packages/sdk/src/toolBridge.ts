@@ -164,6 +164,9 @@ export function createToolBridge(config: ToolBridgeConfig): ToolBridge {
     remote: {
       allowlist: config.remoteAllowlist ?? [],
       maxHops: config.maxHops ?? DEFAULT_MAX_HOPS,
+      ...(config.federatedSearch !== undefined
+        ? { federatedSearch: config.federatedSearch }
+        : {}),
       ...(config.instanceId !== undefined ? { instanceId: config.instanceId } : {}),
       allowInsecure: config.allowInsecureHttp ?? false,
     },

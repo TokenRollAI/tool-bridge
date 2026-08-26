@@ -33,7 +33,7 @@ class SqliteSearchDriver implements SqlSearchDriver {
 
   insertRecords(records: readonly SerializedToolSearchRecord[]): SqlSearchStatement[] {
     return records.map(record => ({
-      params: [record.path, record.name, record.description, record.feedback],
+      params: [record.path, record.name, record.description, record.effect, record.feedback],
       sql: TOOL_SEARCH_INSERT_SQL,
     }))
   }

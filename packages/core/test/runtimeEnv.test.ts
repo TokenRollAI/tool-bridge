@@ -26,6 +26,13 @@ describe('runtime env Zod parser', () => {
       TB_MAX_HOPS: '6.9',
       TB_REF_TTL_SEC: '999999',
       TB_REMOTE_ALLOWLIST: ' example.com, api.example.net ,,',
+      TB_SEARCH_FEDERATION_CONCURRENCY: '7.9',
+      TB_SEARCH_FEDERATION_DEADLINE_MS: '3100',
+      TB_SEARCH_FEDERATION_MAX_RESPONSE_BYTES: '600000',
+      TB_SEARCH_FEDERATION_MAX_SOURCES: '23',
+      TB_SEARCH_FEDERATION_MIN_CHILD_WORK_MS: '240',
+      TB_SEARCH_FEDERATION_RETURN_RESERVE_MS: '120',
+      TB_SEARCH_FEDERATION_SESSION_TTL_SEC: '420',
       TB_STORE_CALL_ALLOWED_CONTENT_TYPES: 'image/*, application/pdf',
       TB_STORE_CALL_MAX_OBJECTS: '3',
       TB_STORE_TOKEN_SECRET: '0123456789abcdef',
@@ -37,6 +44,15 @@ describe('runtime env Zod parser', () => {
       remote: {
         allowInsecure: true,
         allowlist: ['example.com', 'api.example.net'],
+        federatedSearch: {
+          maxConcurrency: 7,
+          maxResponseBodyBytes: 600_000,
+          maxSources: 23,
+          minChildWorkMs: 240,
+          perHopReturnReserveMs: 120,
+          sessionTtlMs: 420_000,
+          totalDeadlineMs: 3_100,
+        },
         instanceId: 'edge-a',
         maxHops: 6,
       },
@@ -51,5 +67,17 @@ describe('runtime env Zod parser', () => {
       .toThrow(/TB_STORE_TOKEN_SECRET/)
     expect(parseRuntimeEnv({ TB_STORE_CALL_MAX_BYTES: 'bad' }).storeCallMaxBytes)
       .toBeUndefined()
+  })
+
+  it('非法联邦搜索预算不进入配置，由应用层使用安全默认值', () => {
+    expect(parseRuntimeEnv({
+      TB_SEARCH_FEDERATION_CONCURRENCY: '0',
+      TB_SEARCH_FEDERATION_DEADLINE_MS: 'bad',
+      TB_SEARCH_FEDERATION_MAX_RESPONSE_BYTES: '-1',
+      TB_SEARCH_FEDERATION_MAX_SOURCES: '',
+      TB_SEARCH_FEDERATION_MIN_CHILD_WORK_MS: 'NaN',
+      TB_SEARCH_FEDERATION_RETURN_RESERVE_MS: 'Infinity',
+      TB_SEARCH_FEDERATION_SESSION_TTL_SEC: '-20',
+    }).remote.federatedSearch).toEqual({})
   })
 })

@@ -176,6 +176,206 @@ export async function verifySearchIndexContract(
     `${prefix}/rank/feedback`,
   ])
 
+  // effect 只来自显式 ToolSpec.effect；过滤发生在候选 LIMIT 前，read 不会把
+  // 缺标记但 prose 含 read 的 unknown 工具带进来。
+  await index.rebuild([
+    {
+      path: `${prefix}/effects/write`,
+      tool: { name: 'effectprobe', description: 'highest field score', effect: 'write' },
+    },
+    {
+      path: `${prefix}/effects/read`,
+      tool: { name: 'read_effect', description: 'effectprobe', effect: 'read' },
+    },
+    {
+      path: `${prefix}/effects/destructive`,
+      tool: {
+        name: 'destructive_effect',
+        description: 'effectprobe',
+        effect: 'destructive',
+      },
+    },
+    {
+      path: `${prefix}/effects/unknown`,
+      tool: { name: 'unknown_effect', description: 'effectprobe safe read operation' },
+    },
+  ])
+  const readOnly = await candidatePage(index, 'effectprobe', {
+    effects: ['read'],
+    limit: 1,
+  })
+  expect(readOnly.items.map(item => item.name)).toEqual(['read_effect'])
+  expect(readOnly.cursor).toBeUndefined()
+  const unknownOnly = await candidatePage(index, 'effectprobe', { effects: ['unknown'] })
+  expect(unknownOnly.items.map(item => item.name)).toEqual(['unknown_effect'])
+
+  const effectPage = await candidatePage(index, 'effectprobe', {
+    effects: ['unknown', 'read', 'read'],
+    limit: 1,
+  })
+  expect(effectPage.items).toHaveLength(1)
+  expect(effectPage.cursor).toBeTypeOf('string')
+  const effectNext = await candidatePage(index, 'effectprobe', {
+    cursor: effectPage.cursor,
+    effects: ['read', 'unknown'],
+    limit: 1,
+  })
+  expect(new Set([...effectPage.items, ...effectNext.items].map(item => item.name))).toEqual(
+    new Set(['read_effect', 'unknown_effect']),
+  )
+  await expect(index.search('effectprobe', {
+    cursor: effectPage.cursor,
+    effects: ['write'],
+    limit: 1,
+  })).rejects.toMatchObject({ code: 'invalid_argument' })
+
+  // Coverage 是字典序第一维：setter 在 name/path 上的旧字段分更高，但只覆盖
+  // home+temperature；read tool 覆盖四个原始 terms，必须稳定排在前面。
+  await index.rebuild([
+    {
+      path: `${prefix}/home/home-assistant`,
+      tool: {
+        name: 'hass_climate_set_temperature',
+        description: 'Set a target temperature',
+      },
+    },
+    {
+      path: `${prefix}/home/home-assistant`,
+      tool: {
+        name: 'get_live_context',
+        description: 'Read current Home Assistant entity and temperature sensor state',
+      },
+    },
+    {
+      path: `${prefix}/device/phone`,
+      tool: {
+        name: 'location_current',
+        description: 'Read current phone location',
+      },
+    },
+  ])
+  const coverageFirst = await candidatePage(index, 'read current home temperature', { limit: 3 })
+  expect(coverageFirst.items.map(item => item.name)).toEqual(['get_live_context'])
+  expect(coverageFirst.cursor).toBeTypeOf('string')
+  expect(coverageFirst.items.map(item => ({
+    coverage: item.coverage,
+    matchedTermCount: item.matchedTermCount,
+    totalTermCount: item.totalTermCount,
+  }))).toEqual([
+    { coverage: 1, matchedTermCount: 4, totalTermCount: 4 },
+  ])
+  const lowerCoverage = await candidatePage(index, 'read current home temperature', {
+    cursor: coverageFirst.cursor,
+    limit: 3,
+  })
+  expect(lowerCoverage.items.map(item => item.name)).toEqual([
+    'hass_climate_set_temperature',
+    'location_current',
+  ])
+  expect(lowerCoverage.items.map(item => item.coverage)).toEqual([0.5, 0.5])
+  expect(lowerCoverage.cursor).toBeUndefined()
+
+  const allTerms = await candidatePage(index, 'read current home temperature', {
+    matching: 'all',
+  })
+  expect(allTerms.items.map(item => item.name)).toEqual(['get_live_context'])
+  expect(allTerms.cursor).toBeUndefined()
+  const coverageFloor = await candidatePage(index, 'read current home temperature', {
+    minCoverage: 0.75,
+  })
+  expect(coverageFloor.items.map(item => item.name)).toEqual(['get_live_context'])
+  expect(coverageFloor.cursor).toBeUndefined()
+  await expect(index.search('read current home temperature', {
+    cursor: coverageFirst.cursor,
+    matching: 'all',
+  })).rejects.toMatchObject({ code: 'invalid_argument' })
+  await expect(index.search('read current home temperature', {
+    cursor: coverageFirst.cursor,
+    minCoverage: 0.75,
+  })).rejects.toMatchObject({ code: 'invalid_argument' })
+  await expect(index.search('read current home temperature', {
+    cursor: coverageFirst.cursor,
+    pathPrefix: `${prefix}/home`,
+  })).rejects.toMatchObject({ code: 'invalid_argument' })
+  await expect(index.search('read current home temperature', {
+    matching: 'all',
+    minCoverage: 0.5,
+  })).rejects.toMatchObject({ code: 'invalid_argument' })
+
+  await index.rebuild([
+    {
+      path: `${prefix}/home/home-assistant`,
+      tool: { name: 'hass_turn_on', description: 'Turn on a home light' },
+    },
+    {
+      path: `${prefix}/home/home-assistant`,
+      tool: { name: 'hass_turn_off', description: 'Turn off a home light' },
+    },
+    {
+      path: `${prefix}/home/home-assistant`,
+      tool: { name: 'hass_light_set', description: 'Set a home light' },
+    },
+    {
+      path: `${prefix}/todo`,
+      tool: { name: 'todo_get_items', description: 'Read every todo item' },
+    },
+  ])
+  const turnOn = await candidatePage(index, 'turn on home light')
+  expect(turnOn.items.map(item => item.name)).toEqual(['hass_turn_on'])
+  expect(turnOn.items[0]).toMatchObject({
+    coverage: 1,
+    matchedTermCount: 4,
+    totalTermCount: 4,
+  })
+
+  await index.rebuild([
+    {
+      path: `${prefix}/home/home-assistant`,
+      tool: {
+        name: 'hass_cancel_all_timers',
+        description: 'Cancel every timer at home',
+      },
+    },
+    {
+      path: `${prefix}/home/home-assistant`,
+      tool: { name: 'get_date_time', description: 'Read date and time at home' },
+    },
+    {
+      path: `${prefix}/runtime`,
+      tool: { name: 'cancel_run', description: 'Cancel one runtime operation' },
+    },
+  ])
+  const cancelTimers = await candidatePage(index, 'cancel every timer at home')
+  expect(cancelTimers.items.map(item => item.name)).toEqual(['hass_cancel_all_timers'])
+  expect(cancelTimers.items[0]).toMatchObject({
+    coverage: 1,
+    matchedTermCount: 5,
+    totalTermCount: 5,
+  })
+
+  await index.rebuild([
+    {
+      path: `${prefix}/scope/home`,
+      tool: { name: 'prefix_exact', description: 'scoped marker' },
+    },
+    {
+      path: `${prefix}/scope/home/child`,
+      tool: { name: 'prefix_child', description: 'scoped marker' },
+    },
+    {
+      path: `${prefix}/scope/homebrew`,
+      tool: { name: 'prefix_collision', description: 'scoped marker' },
+    },
+  ])
+  const scoped = await candidatePage(index, 'scoped marker', {
+    matching: 'all',
+    pathPrefix: `/${prefix}/scope/home/`,
+  })
+  expect(scoped.items.map(item => item.path)).toEqual([
+    `${prefix}/scope/home`,
+    `${prefix}/scope/home/child`,
+  ])
+
   await index.rebuild([
     {
       path: `${prefix}/cjk/exact`,
@@ -196,6 +396,14 @@ export async function verifySearchIndexContract(
     `${prefix}/cjk/bigram`,
     `${prefix}/cjk/single`,
   ])
+  expect(cjkTiers.items.map(item => ({
+    coverage: item.coverage,
+    matchedTermCount: item.matchedTermCount,
+    totalTermCount: item.totalTermCount,
+  }))).toEqual(Array.from(
+    { length: 3 },
+    () => ({ coverage: 1, matchedTermCount: 1, totalTermCount: 1 }),
+  ))
 
   await index.rebuild([
     {
@@ -227,6 +435,12 @@ export async function verifySearchIndexContract(
   const first = await index.search('catalog', { limit: 200 })
   expect(first.items).toHaveLength(TOOL_SEARCH_BATCH_LIMIT)
   expect(first.cursor).toBeTypeOf('string')
+  const repeatedTerm = await index.search('catalog CATALOG catalog', { limit: 1 })
+  expect(repeatedTerm.items[0]).toMatchObject({
+    coverage: 1,
+    matchedTermCount: 1,
+    totalTermCount: 1,
+  })
   await index.rebuild(bulk)
   await index.remove(`${prefix}/missing`)
   const second = await index.search('catalog', { cursor: first.cursor, limit: 200 })

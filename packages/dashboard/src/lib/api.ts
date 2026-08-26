@@ -6,6 +6,7 @@ import {
   putPresignedObject,
   type ToolBridgeClient,
   ToolBridgeClientError,
+  type ToolSearchRequest,
 } from '@tool-bridge/sdk/client'
 import type { TBErrorBody } from './types'
 
@@ -86,7 +87,7 @@ export async function getTree(conn: Connection, path: string, depth: number, sig
 export async function searchTools(
   conn: Connection,
   query: string,
-  opts: { cursor?: string, limit: number, mode: 'keyword' | 'semantic' },
+  opts: NonNullable<ToolSearchRequest['opts']>,
   signal?: AbortSignal,
 ) {
   return await withClient(conn, async value => await value.search({ query, opts }, { signal }))

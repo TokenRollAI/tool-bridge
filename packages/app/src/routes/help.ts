@@ -12,11 +12,16 @@ import {
   TBError,
   type TreeNode,
 } from '@tool-bridge/core'
+import { helpJsonSchema } from '@tool-bridge/core/protocol'
 import type { AppContext } from '../deps'
 import type { RouteEnv } from './env'
+import {
+  remotePassthroughIfMatch,
+  remotePathProjectorIfMatch,
+  remoteProtocolError,
+} from '../federation'
 import { commandHelpModelFor, helpModelFor } from '../helpModel'
 import { filterListVisible, splitReserved } from '../paths'
-import { remotePassthroughIfMatch } from '../federation'
 import { pruneExpiredContext } from '../contextNodes'
 import { enrichHelp, renderHelp } from '../responses'
 import { toolHelpModelFor } from '../toolNodes'
@@ -49,9 +54,19 @@ export async function handleHelp(c: AppContext, env: RouteEnv): Promise<Response
   // 不可见(read 判不过)→ 404 不泄露存在性(v1 教训:deny==not_found)。
   if (!check(ctx, path, 'read').allow) throw TBError.notFound('not found')
 
-  // remote 透传:命中 remote 节点(或其后代)→ 改写 ~help 打到 baseUrl。
-  const remote = await remotePassthroughIfMatch(c, ctx, registry, path, '~help', deps)
-  if (remote) return remote
+  // remote 成功响应固定取 JSON，经严格 path projector 映射到本地 mount 后再按调用方
+  // 协商的表现渲染。这样 node/cmd path 在每一层 federation 都保持可直接寻址。
+  const projector = await remotePathProjectorIfMatch(registry, path)
+  if (projector !== null) {
+    const headers = new Headers(c.req.raw.headers)
+    headers.set('accept', 'application/json')
+    const remote = await remotePassthroughIfMatch(c, ctx, registry, path, '~help', deps, headers)
+    if (remote === null) throw remoteProtocolError('remote ~help lost its mount owner')
+    if (!remote.ok) return remote
+    const parsed = helpJsonSchema.safeParse(await remote.json().catch(() => null))
+    if (!parsed.success) throw remoteProtocolError('remote ~help returned invalid JSON')
+    return renderHelp(projector.projectHelp(parsed.data, path, ctx), rep)
+  }
 
   const builtins = builtinsOf(store)
   const refresh = c.req.query('refresh') === '1'

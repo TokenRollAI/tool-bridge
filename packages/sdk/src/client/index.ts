@@ -55,9 +55,13 @@ export type {
   WireRegistryNode as RegistryNode,
   WireTBErrorBody as TBErrorBody,
   WireTBErrorCode as TBErrorCode,
+  WireToolSearchFederation as ToolSearchFederation,
   WireToolSearchItem as ToolSearchItem,
   WireToolSearchPage as ToolSearchPage,
   WireToolSearchRequest as ToolSearchRequest,
+  WireToolSearchSource as ToolSearchSource,
+  WireToolSearchSourceResult as ToolSearchSourceResult,
+  WireToolSearchSourceStatus as ToolSearchSourceStatus,
   WireToolSpec as ToolSpec,
   WireTreeJson as TreeJson,
 } from '@tool-bridge/core/protocol'

@@ -124,7 +124,7 @@ suite('PgSearchIndex', () => {
       indexB.replace('contract/pg/race/winner-b', [{ name: 'winner_b' }]),
     ])
     const [row] = await a.unsafe<Array<{ count: number }>>(
-      'SELECT COUNT(*)::int AS count FROM tb_search_snapshots_v4',
+      'SELECT COUNT(*)::int AS count FROM tb_search_snapshots_v5',
     )
     expect(row?.count).toBeLessThanOrEqual(TOOL_SEARCH_AUDIT_NODE_LIMIT)
   })

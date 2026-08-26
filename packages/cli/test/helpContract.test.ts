@@ -94,10 +94,15 @@ describe('CLI help 参数契约', () => {
     expect(help).toContain('--args-file -')
   })
 
-  it('search help 标明 --schemas 只作用于人类模式', () => {
+  it('search help 标明 compact/full 与排名筛选参数', () => {
     const help = fullHelpAt('search')
-    expect(help).toContain('arguments JSON Schema')
-    expect(help).toContain('no effect with --json')
+    expect(help).toContain('default, including --json: compact')
+    expect(help).toContain('--matching <matching>')
+    expect(help).toContain('--federation <scope>')
+    expect(help).toContain('--min-coverage <fraction>')
+    expect(help).toContain('--path-prefix <path>')
+    expect(help).toContain('--effect <effect>')
+    expect(help).toContain('(repeatable)')
   })
 
   it('tree/skill/sk help 标明取值范围与互斥关系', () => {

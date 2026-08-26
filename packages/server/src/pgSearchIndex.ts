@@ -84,7 +84,7 @@ class PgSearchDriver implements SqlSearchDriver {
       records,
       PG_SEARCH_TOOLS_TABLE,
       PG_SEARCH_TOOLS_COLUMNS,
-      record => [record.path, record.name, record.description, record.feedback],
+      record => [record.path, record.name, record.description, record.effect, record.feedback],
     )
   }
 

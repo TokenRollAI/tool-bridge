@@ -37,6 +37,10 @@ const optionalStringSchema = z.string().optional()
 
 const positiveEnvKeys = [
   'TB_DEVICE_RECLAIM_SEC', 'TB_MAX_HOPS', 'TB_REF_THRESHOLD_BYTES', 'TB_REF_TTL_SEC',
+  'TB_SEARCH_FEDERATION_CONCURRENCY', 'TB_SEARCH_FEDERATION_DEADLINE_MS',
+  'TB_SEARCH_FEDERATION_MAX_RESPONSE_BYTES', 'TB_SEARCH_FEDERATION_MAX_SOURCES',
+  'TB_SEARCH_FEDERATION_MIN_CHILD_WORK_MS', 'TB_SEARCH_FEDERATION_RETURN_RESERVE_MS',
+  'TB_SEARCH_FEDERATION_SESSION_TTL_SEC',
   'TB_STORE_CALL_MAX_BYTES', 'TB_STORE_CALL_MAX_OBJECT_BYTES', 'TB_STORE_CALL_MAX_OBJECTS',
   'TB_STORE_CLEANUP_INTERVAL_SEC', 'TB_STORE_MAX_OBJECT_BYTES', 'TB_STORE_READ_TTL_SEC',
   'TB_STORE_RELAY_MAX_BYTES', 'TB_STORE_SHARE_TTL_SEC', 'TB_STORE_UPLOAD_TTL_SEC',
@@ -63,6 +67,15 @@ const runtimeEnvSchema = z.object({
 export interface RuntimeRemoteSettings {
   allowInsecure: boolean
   allowlist: string[]
+  federatedSearch?: {
+    maxConcurrency?: number
+    maxResponseBodyBytes?: number
+    maxSources?: number
+    minChildWorkMs?: number
+    perHopReturnReserveMs?: number
+    sessionTtlMs?: number
+    totalDeadlineMs?: number
+  }
   instanceId?: string
   maxHops: number
 }
@@ -123,6 +136,29 @@ export function parseRuntimeEnv(env: object): RuntimeEnvConfig {
     remote: {
       allowInsecure: allowInsecureHttp,
       allowlist,
+      federatedSearch: {
+        ...(parsed.TB_SEARCH_FEDERATION_CONCURRENCY === undefined
+          ? {}
+          : { maxConcurrency: parsed.TB_SEARCH_FEDERATION_CONCURRENCY }),
+        ...(parsed.TB_SEARCH_FEDERATION_DEADLINE_MS === undefined
+          ? {}
+          : { totalDeadlineMs: parsed.TB_SEARCH_FEDERATION_DEADLINE_MS }),
+        ...(parsed.TB_SEARCH_FEDERATION_MAX_RESPONSE_BYTES === undefined
+          ? {}
+          : { maxResponseBodyBytes: parsed.TB_SEARCH_FEDERATION_MAX_RESPONSE_BYTES }),
+        ...(parsed.TB_SEARCH_FEDERATION_MAX_SOURCES === undefined
+          ? {}
+          : { maxSources: parsed.TB_SEARCH_FEDERATION_MAX_SOURCES }),
+        ...(parsed.TB_SEARCH_FEDERATION_MIN_CHILD_WORK_MS === undefined
+          ? {}
+          : { minChildWorkMs: parsed.TB_SEARCH_FEDERATION_MIN_CHILD_WORK_MS }),
+        ...(parsed.TB_SEARCH_FEDERATION_RETURN_RESERVE_MS === undefined
+          ? {}
+          : { perHopReturnReserveMs: parsed.TB_SEARCH_FEDERATION_RETURN_RESERVE_MS }),
+        ...(parsed.TB_SEARCH_FEDERATION_SESSION_TTL_SEC === undefined
+          ? {}
+          : { sessionTtlMs: parsed.TB_SEARCH_FEDERATION_SESSION_TTL_SEC * 1000 }),
+      },
       maxHops: parsed.TB_MAX_HOPS ?? DEFAULT_MAX_HOPS,
       ...(parsed.TB_INSTANCE_ID ? { instanceId: parsed.TB_INSTANCE_ID } : {}),
     },

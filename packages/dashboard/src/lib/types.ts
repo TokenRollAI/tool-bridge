@@ -13,6 +13,8 @@ export type {
   RegistryNode,
   TBErrorBody,
   ToolSearchItem,
+  ToolSearchPage,
+  ToolSearchRequest,
   ToolSpec,
   TreeJson,
 } from '@tool-bridge/sdk/client'

@@ -5,6 +5,7 @@ import {
   getHealthz,
   getHelp,
   invoke,
+  searchTools,
 } from '../src/lib/api'
 import fixture from '../../../test/fixtures/fixed-control-plane.json'
 
@@ -50,6 +51,57 @@ describe('Dashboard SDK client adapter', () => {
     expect(JSON.parse(String(init.body))).not.toHaveProperty('arguments')
     expect(new Headers(init.headers).get('accept')).toBe('application/json')
     expect(result.json).toEqual({ value: 1 })
+  })
+
+  it('sends the complete search options and accepts compact results without schemas', async () => {
+    const federatedPage = {
+      ...fixture.search,
+      items: fixture.search.items.map(item => ({
+        ...item,
+        source: { path: 'regional/eu' },
+      })),
+      partial: true,
+      sources: [
+        { path: '', status: 'ok' },
+        { path: 'regional/eu', status: 'timed_out' },
+      ],
+    }
+    const fetcher = vi.fn(async () => json(federatedPage))
+    vi.stubGlobal('fetch', fetcher)
+
+    const result = await searchTools(conn, 'status', {
+      detail: 'compact',
+      effects: ['read', 'unknown'],
+      federation: 'recursive',
+      limit: 10,
+      matching: 'best',
+      minCoverage: 0.75,
+      mode: 'keyword',
+      pathPrefix: 'system',
+    })
+
+    const [url, init] = fetcher.mock.calls[0] as unknown as [string, RequestInit]
+    expect(url).toBe('https://gw.example/~search')
+    expect(JSON.parse(String(init.body))).toEqual({
+      query: 'status',
+      opts: {
+        detail: 'compact',
+        effects: ['read', 'unknown'],
+        federation: 'recursive',
+        limit: 10,
+        matching: 'best',
+        minCoverage: 0.75,
+        mode: 'keyword',
+        pathPrefix: 'system',
+      },
+    })
+    expect(result).toEqual(federatedPage)
+    expect(result.items[0]?.tool).not.toHaveProperty('inputSchema')
+    expect(result.items[0]?.source).toEqual({ path: 'regional/eu' })
+    expect(result).toMatchObject({
+      partial: true,
+      sources: [{ path: '', status: 'ok' }, { path: 'regional/eu', status: 'timed_out' }],
+    })
   })
 
   it('localizes network errors, preserves caller AbortError and validates public health', async () => {

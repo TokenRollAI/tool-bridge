@@ -12,7 +12,7 @@ import type {
   SkillDetail,
   SkillFile,
   SkillSummary,
-  ToolSearchItem,
+  ToolSearchPage,
 } from './types'
 import {
   type ApiError,
@@ -35,6 +35,11 @@ import {
   recordInvoke,
   subscribeHistory,
 } from './history'
+import {
+  resolveToolSearchOptions,
+  type ToolSearchOptions,
+  toolSearchQueryKey,
+} from './toolSearch'
 import { useConn, useSession } from './session-context'
 
 /** queryKey 前缀含 profile 标识:切换档案后互不串缓存。 */
@@ -56,17 +61,16 @@ export function useTree(path = '', depth = 8, options?: { enabled?: boolean }) {
 /** root 全局工具搜索；cursor 只作为 pageParam，不混入首屏请求。 */
 export function useToolSearch(
   query: string,
-  mode: 'keyword' | 'semantic' = 'keyword',
-  limit = 50,
+  options: ToolSearchOptions = {},
 ) {
   const conn = useConn()
   const base = useKeyBase()
   const normalized = query.trim()
-  return useInfiniteQuery<Page<ToolSearchItem>>({
-    queryKey: [...base, 'tool-search', normalized, mode, limit],
+  const searchOptions = resolveToolSearchOptions(options)
+  return useInfiniteQuery<ToolSearchPage>({
+    queryKey: toolSearchQueryKey(base, normalized, searchOptions),
     queryFn: ({ pageParam, signal }) => searchTools(conn, normalized, {
-      mode,
-      limit,
+      ...searchOptions,
       ...(typeof pageParam === 'string' ? { cursor: pageParam } : {}),
     }, signal),
     enabled: normalized.length > 0,

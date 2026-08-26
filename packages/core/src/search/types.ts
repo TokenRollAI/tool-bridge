@@ -1,12 +1,11 @@
 import type { ToolSpec } from '../tool/types'
 import {
-  LIST_LIMIT_DEFAULT,
   LIST_LIMIT_MAX,
   type Page,
   type TreePath,
 } from '../types'
 import { base64urlDecode, base64urlEncode } from '../encoding/base64url'
-import { normalizePath, validatePath } from '../tree/path'
+import { canonicalizePath, validatePath } from '../tree/path'
 import { TBError } from '../errors'
 
 declare const TextEncoder: { new (): { encode(input: string): Uint8Array } }
@@ -37,7 +36,7 @@ declare const crypto: {
   }
 }
 
-export type SearchCapability = 'search' | 'search:semantic'
+export type SearchCapability = 'search' | 'search:federated' | 'search:semantic'
 
 /** 单次 adapter 轻量候选查询上限；gateway 可在一个请求内分批扫描。 */
 export const TOOL_SEARCH_BATCH_LIMIT = 100
@@ -70,10 +69,14 @@ export const TOOL_SEARCH_REBUILD_CHUNKS_MAX
 export const TOOL_SEARCH_TERM_LIMIT = 32
 /** D1 单查询 100 个绑定扣除 limit / offset 后可用的搜索单元数。 */
 export const TOOL_SEARCH_UNIT_LIMIT = 98
+/** 搜索专属默认页大小；宽泛 discovery 不继承 tree/list 的 50 条默认值。 */
+export const TOOL_SEARCH_LIMIT_DEFAULT = 10
 /** D1 允许的单个 LIKE pattern UTF-8 字节上限。 */
 export const TOOL_SEARCH_LIKE_PATTERN_BYTES_MAX = 50
 /** 同时约束搜索工作量与 query-bound cursor 长度。 */
 export const TOOL_SEARCH_QUERY_MAX = 1024
+/** keyword 排序 epoch；排序语义变化必须升级，使旧 offset cursor fail closed。 */
+export const TOOL_SEARCH_RANKING_VERSION = 'keyword-v2'
 /** offset cursor 的防御性工作量上限；cursor 不是授权边界。 */
 export const TOOL_SEARCH_CURSOR_OFFSET_MAX = 1_000_000
 
@@ -85,17 +88,45 @@ export interface ToolSearchHit {
 
 /** adapter 返回的轻量候选；resumeOffset 仅在当前请求内传递，不暴露给协议调用方。 */
 export interface ToolSearchCandidate {
+  /** 命中的原始 logical terms / 全部原始 logical terms；不按派生 unit 重复计数。 */
+  coverage: number
+  matchedTermCount: number
   name: string
   path: TreePath
   ref: string
   resumeOffset: number
   revision: number
+  /** 仅供宿主在 canonical hydration 提前截页时续签同一搜索约束，不进入 wire。 */
+  searchOptionsFingerprint?: string
+  totalTermCount: number
 }
+
+export type ToolSearchEffect = 'destructive' | 'read' | 'unknown' | 'write'
+export type ToolSearchMatching = 'all' | 'best'
+/** effect 规范化与 cursor fingerprint 共用的固定顺序。 */
+export const TOOL_SEARCH_EFFECTS: readonly ToolSearchEffect[] = [
+  'read',
+  'write',
+  'destructive',
+  'unknown',
+]
 
 export interface ToolSearchOptions {
   cursor?: string
+  effects?: ToolSearchEffect[]
   limit?: number
+  matching?: ToolSearchMatching
+  minCoverage?: number
   mode?: 'keyword' | 'semantic'
+  pathPrefix?: TreePath
+}
+
+/** 会改变候选集合或分页档位的规范化约束；cursor 必须绑定其完整指纹。 */
+export interface NormalizedToolSearchOptions {
+  effects?: ToolSearchEffect[]
+  matching: ToolSearchMatching
+  minCoverage?: number
+  pathPrefix?: TreePath
 }
 
 /** 宿主提供的全局工具索引；权限和虚拟化仍由 gateway 处理。 */
@@ -106,6 +137,8 @@ export interface SearchIndex {
     candidate: ToolSearchCandidate,
     mode?: 'keyword' | 'semantic',
   ): Promise<string>
+  /** 联邦 continuation 的 topology binding；不实现的自定义 adapter 只能提供 local search。 */
+  revision?(): Promise<number | string>
   search(query: string, opts?: ToolSearchOptions): Promise<Page<ToolSearchCandidate>>
 }
 
@@ -116,19 +149,20 @@ export function assertKeywordToolSearchMode(opts?: ToolSearchOptions): void {
   }
 }
 
-/** Search/List 共用的 default 50 / max 200；非数字 fail closed，超上限静默钳制。 */
+/** Search 使用 default 10 / max 200；非数字 fail closed，超上限静默钳制。 */
 export function normalizeToolSearchLimit(limit: unknown): number {
-  if (limit === undefined) return LIST_LIMIT_DEFAULT
+  if (limit === undefined) return TOOL_SEARCH_LIMIT_DEFAULT
   if (typeof limit !== 'number' || !Number.isFinite(limit) || !Number.isInteger(limit)) {
     throw new TBError('invalid_argument', 'opts.limit 必须是整数')
   }
-  if (limit < 1) return LIST_LIMIT_DEFAULT
+  if (limit < 1) return TOOL_SEARCH_LIMIT_DEFAULT
   return Math.min(limit, LIST_LIMIT_MAX)
 }
 
 /** 索引持久层使用的轻量记录；完整 ToolSpec 只保留摘要，不进入派生数据库。 */
 export interface SerializedToolSearchRecord {
   description: string
+  effect: ToolSearchEffect
   feedback: string
   name: string
   path: TreePath
@@ -157,8 +191,28 @@ export interface MutableSearchIndex extends SearchIndex {
 }
 
 export interface SearchUnit {
+  /** 原始 whitespace term 的稳定位置；其派生 whole/run/bigram/codepoint 共用同一 id。 */
+  logicalTermId: number
   pattern: string
   tier: number
+}
+
+/**
+ * 1–2 字符的 ASCII 字母数字 term 不从 path substring 获得 coverage。
+ *
+ * `on` 命中 `contract/...`、`to` 命中 `tools/...` 这类 mount/path 偶然子串会把
+ * 无关工具抬到 full-coverage 桶；name/description/feedback 仍可表达这些短意图词，
+ * 显式限定 namespace 则应使用 pathPrefix。pattern 只由本模块的 likePattern 产生，
+ * 因此这个判定同时适用于 SQLite、PG 与内存契约实现。
+ */
+export function searchUnitAllowsPath(unit: SearchUnit): boolean {
+  return !/^%[A-Za-z0-9]{1,2}%$/u.test(unit.pattern)
+}
+
+export interface PreparedToolSearchQuery {
+  /** 原始 whitespace terms 数；不能从截断后的 units 反推。 */
+  totalTermCount: number
+  units: SearchUnit[]
 }
 
 function stableDigest(value: unknown): string {
@@ -210,6 +264,9 @@ function serializedRecord(
   }
   const record = {
     description: truncateUtf8(tool.description ?? '', TOOL_SEARCH_DESCRIPTION_BYTES_MAX),
+    effect: TOOL_SEARCH_EFFECTS.includes(tool.effect as ToolSearchEffect)
+      ? tool.effect as ToolSearchEffect
+      : 'unknown',
     feedback,
     name: tool.name,
     path,
@@ -221,6 +278,7 @@ function serializedRecord(
 function jsonPayload(record: SerializedToolSearchRecord): Record<string, unknown> {
   return {
     description: record.description,
+    effect: record.effect,
     feedback: record.feedback,
     name: record.name,
     path: record.path,
@@ -229,10 +287,81 @@ function jsonPayload(record: SerializedToolSearchRecord): Record<string, unknown
 
 /** 把索引路径规范化为 registry 使用的无首尾斜杠形态。 */
 export function normalizeToolSearchPath(path: TreePath): TreePath {
-  const canonical = normalizePath(path)
+  const canonical = canonicalizePath(path)
   const pathError = validatePath(canonical)
   if (pathError !== null) throw pathError
   return canonical
+}
+
+/**
+ * 规范化会改变候选集合/档位的搜索选项。`all` 是 coverage floor=1 的便捷写法，
+ * 因此只接受省略 minCoverage 或显式 1，避免一个请求表达互相冲突的约束。
+ */
+export function normalizeToolSearchOptions(
+  opts?: ToolSearchOptions,
+): NormalizedToolSearchOptions {
+  let effects: ToolSearchEffect[] | undefined
+  if (opts?.effects !== undefined) {
+    if (!Array.isArray(opts.effects) || opts.effects.length === 0) {
+      throw new TBError('invalid_argument', 'opts.effects 必须是非空数组')
+    }
+    const selected = new Set<ToolSearchEffect>()
+    for (const effect of opts.effects) {
+      if (!TOOL_SEARCH_EFFECTS.includes(effect)) {
+        throw new TBError('invalid_argument', `opts.effects 含非法 effect '${String(effect)}'`)
+      }
+      selected.add(effect)
+    }
+    effects = TOOL_SEARCH_EFFECTS.filter(effect => selected.has(effect))
+  }
+  const matching = opts?.matching ?? 'best'
+  if (matching !== 'best' && matching !== 'all') {
+    throw new TBError('invalid_argument', `opts.matching '${String(matching)}' 非法`)
+  }
+
+  let minCoverage = opts?.minCoverage
+  if (
+    minCoverage !== undefined
+    && (
+      typeof minCoverage !== 'number'
+      || !Number.isFinite(minCoverage)
+      || minCoverage <= 0
+      || minCoverage > 1
+    )
+  ) {
+    throw new TBError('invalid_argument', 'opts.minCoverage 必须大于 0 且不超过 1')
+  }
+  if (matching === 'all') {
+    if (minCoverage !== undefined && minCoverage !== 1) {
+      throw new TBError('invalid_argument', 'opts.matching=\'all\' 只允许 minCoverage=1')
+    }
+    minCoverage = 1
+  }
+
+  let pathPrefix: TreePath | undefined
+  if (opts?.pathPrefix !== undefined) {
+    if (typeof opts.pathPrefix !== 'string') {
+      throw new TBError('invalid_argument', 'opts.pathPrefix 必须是路径字符串')
+    }
+    pathPrefix = normalizeToolSearchPath(opts.pathPrefix)
+  }
+  return {
+    ...(effects === undefined ? {} : { effects }),
+    matching,
+    ...(minCoverage === undefined ? {} : { minCoverage }),
+    ...(pathPrefix === undefined ? {} : { pathPrefix }),
+  }
+}
+
+/** cursor 只绑定改变结果集合/档位的选项；limit 是可安全跨页调整的窗口大小。 */
+export function toolSearchOptionsFingerprint(opts?: ToolSearchOptions): string {
+  const normalized = normalizeToolSearchOptions(opts)
+  return stableDigest([
+    normalized.effects ?? null,
+    normalized.matching,
+    normalized.minCoverage ?? null,
+    normalized.pathPrefix ?? null,
+  ])
 }
 
 /** 校验并序列化一个节点的完整 raw ToolSpec 快照；重复工具名 fail closed。 */
@@ -306,6 +435,7 @@ export function toolSearchSnapshotDigest(
       record.path,
       record.name,
       record.description,
+      record.effect,
       record.feedback,
       record.toolDigest,
     ]))
@@ -383,12 +513,16 @@ function addSearchUnit(
   units: Map<string, SearchUnit>,
   value: string,
   tier: number,
+  logicalTermId: number,
 ): boolean {
   const pattern = likePattern(value)
   if (new TextEncoder().encode(pattern).length > TOOL_SEARCH_LIKE_PATTERN_BYTES_MAX) return false
-  const existing = units.get(pattern)
+  // 只在同一个 logical term 内去重。不同原始 term 即使产生相同 pattern，也必须
+  // 保留各自身份，coverage 才能按原始 query term 计算。
+  const key = `${logicalTermId}\0${pattern}`
+  const existing = units.get(key)
   if (existing === undefined || tier > existing.tier) {
-    units.set(pattern, { pattern, tier })
+    units.set(key, { logicalTermId, pattern, tier })
   }
   return true
 }
@@ -398,6 +532,7 @@ function addChunkedSearchUnits(
   units: Map<string, SearchUnit>,
   value: string,
   tier: number,
+  logicalTermId: number,
 ): void {
   let chunk = ''
   for (const codePoint of value) {
@@ -405,56 +540,114 @@ function addChunkedSearchUnits(
       chunk += codePoint
       continue
     }
-    if (chunk.length > 0) addSearchUnit(units, chunk, tier)
+    if (chunk.length > 0) addSearchUnit(units, chunk, tier, logicalTermId)
     chunk = codePoint
   }
-  if (chunk.length > 0) addSearchUnit(units, chunk, tier)
+  if (chunk.length > 0) addSearchUnit(units, chunk, tier, logicalTermId)
 }
 
 /**
  * 把 query 展开为 escaped LIKE 单元：整词优先，CJK bigram 次之，单字兜底。
- * 跨 tier 重复 pattern 只保留最高权重；超限时优先保留高 tier 单元。
+ * 每个派生单元保留其原始 whitespace term id；同一 term 内跨 tier 重复 pattern
+ * 只保留最高权重，跨 term 不合并。超限时至少保留每个 term 的最高 tier 单元，
+ * 其余槽位再按 tier 从高到低填充，避免合法 logical term 从 coverage 分母中失联。
  */
-export function prepareToolSearchUnits(query: string): SearchUnit[] {
-  const terms = normalizeToolSearchQuery(query).split(/\s+/u)
-  if (terms.length > TOOL_SEARCH_TERM_LIMIT) {
+export function prepareToolSearchQuery(
+  query: string,
+  unitLimit = TOOL_SEARCH_UNIT_LIMIT,
+): PreparedToolSearchQuery {
+  if (
+    !Number.isInteger(unitLimit)
+    || unitLimit < 1
+    || unitLimit > TOOL_SEARCH_UNIT_LIMIT
+  ) {
+    throw new TBError('invalid_argument', '工具搜索 unit limit 非法')
+  }
+  const rawTerms = normalizeToolSearchQuery(query).split(/\s+/u)
+  if (rawTerms.length > TOOL_SEARCH_TERM_LIMIT) {
     throw new TBError('invalid_argument', `搜索 query 最多 ${TOOL_SEARCH_TERM_LIMIT} 个 terms`)
+  }
+  // SQLite LIKE 与 PG ILIKE 的共同 case-fold 下界是 ASCII。按该下界去重并保留
+  // 第一次出现的原词作为 pattern；重复/大小写变体不能伪造额外 coverage，同时
+  // 不把 PG 更宽的 Unicode case-fold 强加给 SQLite。
+  const seenTerms = new Set<string>()
+  const terms = rawTerms.filter((term) => {
+    const key = term.replace(/[A-Z]/g, char => char.toLowerCase())
+    if (seenTerms.has(key)) return false
+    seenTerms.add(key)
+    return true
+  })
+  if (terms.length > unitLimit) {
+    throw new TBError('invalid_argument', '工具搜索 unit limit 无法覆盖全部 logical terms')
   }
 
   const units = new Map<string, SearchUnit>()
-  for (const term of terms) {
-    const wholeAdded = addSearchUnit(units, term, 4)
+  for (const [logicalTermId, term] of terms.entries()) {
+    const wholeAdded = addSearchUnit(units, term, 4, logicalTermId)
 
     const runs = scriptRuns(term)
     if (runs.length > 1) {
       for (const run of runs) {
         const value = run.codePoints.join('')
-        if (run.cjk) addSearchUnit(units, value, 2)
-        else addChunkedSearchUnits(units, value, 2)
+        if (run.cjk) addSearchUnit(units, value, 2, logicalTermId)
+        else addChunkedSearchUnits(units, value, 2, logicalTermId)
       }
     } else if (!wholeAdded && runs[0]?.cjk === false) {
-      addChunkedSearchUnits(units, term, 2)
+      addChunkedSearchUnits(units, term, 2, logicalTermId)
     }
     for (const run of runs) {
       if (!run.cjk) continue
       for (let index = 0; index < run.codePoints.length - 1; index += 1) {
-        addSearchUnit(units, run.codePoints.slice(index, index + 2).join(''), 2)
+        addSearchUnit(
+          units,
+          run.codePoints.slice(index, index + 2).join(''),
+          2,
+          logicalTermId,
+        )
       }
-      for (const codePoint of run.codePoints) addSearchUnit(units, codePoint, 1)
+      for (const codePoint of run.codePoints) {
+        addSearchUnit(units, codePoint, 1, logicalTermId)
+      }
     }
   }
 
-  return [...units.values()]
-    .sort((left, right) => right.tier - left.tier)
-    .slice(0, TOOL_SEARCH_UNIT_LIMIT)
+  const ordered = [...units.values()].sort((left, right) => right.tier - left.tier)
+  if (ordered.length <= unitLimit) {
+    return { totalTermCount: terms.length, units: ordered }
+  }
+
+  // term 数最多 32，小于 98-unit 下界：先占住每个 term 的最佳 unit，再用全局
+  // tier 顺序填剩余预算。最后按原顺序投影，保持 SQL/binding 的确定性。
+  const selected = new Set<SearchUnit>()
+  const represented = new Set<number>()
+  for (const unit of ordered) {
+    if (represented.has(unit.logicalTermId)) continue
+    represented.add(unit.logicalTermId)
+    selected.add(unit)
+  }
+  for (const unit of ordered) {
+    if (selected.size >= unitLimit) break
+    selected.add(unit)
+  }
+  return {
+    totalTermCount: terms.length,
+    units: ordered.filter(unit => selected.has(unit)),
+  }
+}
+
+/** 兼容只消费派生 units 的调用点；候选查询应使用 prepareToolSearchQuery 保留分母。 */
+export function prepareToolSearchUnits(query: string): SearchUnit[] {
+  return prepareToolSearchQuery(query).units
 }
 
 interface CursorPayload {
+  f: string
   h: string
+  k: typeof TOOL_SEARCH_RANKING_VERSION
   m: 'keyword' | 'semantic'
   o: number
   r: number
-  v: 1
+  v: 2
 }
 
 // base64url 编解码用 encoding/base64url 统一实现;这里只保留 cursor 语义级校验
@@ -488,19 +681,22 @@ async function cursorCryptoKey(secret: string): Promise<ToolSearchCryptoKey> {
   )
 }
 
-export async function encodeToolSearchCursor(
+async function sealToolSearchCursor(
   query: string,
   mode: 'keyword' | 'semantic',
   revision: number,
   offset: number,
   secret: string,
+  optionsFingerprint: string,
 ): Promise<string> {
   const payload: CursorPayload = {
+    f: optionsFingerprint,
     h: stableDigest(normalizeToolSearchQuery(query)),
+    k: TOOL_SEARCH_RANKING_VERSION,
     m: mode,
     o: offset,
     r: revision,
-    v: 1,
+    v: 2,
   }
   const iv = crypto.getRandomValues(new Uint8Array(12))
   const ciphertext = new Uint8Array(await crypto.subtle.encrypt(
@@ -514,6 +710,24 @@ export async function encodeToolSearchCursor(
   return base64urlEncode(sealed)
 }
 
+export async function encodeToolSearchCursor(
+  query: string,
+  mode: 'keyword' | 'semantic',
+  revision: number,
+  offset: number,
+  secret: string,
+  opts?: ToolSearchOptions,
+): Promise<string> {
+  return await sealToolSearchCursor(
+    query,
+    mode,
+    revision,
+    offset,
+    secret,
+    toolSearchOptionsFingerprint(opts),
+  )
+}
+
 /** 解析并校验 cursor 与本次 query/mode/index revision 的绑定，返回 raw offset。 */
 export async function decodeToolSearchCursor(
   cursor: string | undefined,
@@ -521,6 +735,7 @@ export async function decodeToolSearchCursor(
   mode: 'keyword' | 'semantic',
   revision: number,
   secret: string,
+  opts?: ToolSearchOptions,
 ): Promise<number> {
   if (cursor === undefined) return 0
   let value: unknown
@@ -543,8 +758,10 @@ export async function decodeToolSearchCursor(
   const payload = value as Partial<CursorPayload>
   const keys = Object.keys(payload).sort().join(',')
   if (
-    keys !== 'h,m,o,r,v'
-    || payload.v !== 1
+    keys !== 'f,h,k,m,o,r,v'
+    || payload.v !== 2
+    || payload.k !== TOOL_SEARCH_RANKING_VERSION
+    || payload.f !== toolSearchOptionsFingerprint(opts)
     || payload.h !== stableDigest(normalizeToolSearchQuery(query))
     || payload.m !== mode
     || payload.r !== revision
@@ -555,4 +772,25 @@ export async function decodeToolSearchCursor(
     throw new TBError('invalid_argument', '搜索 cursor 已失效或与当前查询不匹配')
   }
   return payload.o ?? 0
+}
+
+/** 宿主 canonical hydration 截页时，用候选携带的原搜索指纹续签相同约束。 */
+export async function encodeToolSearchCursorForCandidate(
+  query: string,
+  mode: 'keyword' | 'semantic',
+  candidate: ToolSearchCandidate,
+  secret: string,
+): Promise<string> {
+  const fingerprint = candidate.searchOptionsFingerprint ?? toolSearchOptionsFingerprint()
+  if (!/^[a-f0-9]{16}$/.test(fingerprint)) {
+    throw new TBError('invalid_argument', '工具搜索候选的 options fingerprint 非法')
+  }
+  return await sealToolSearchCursor(
+    query,
+    mode,
+    candidate.revision,
+    candidate.resumeOffset,
+    secret,
+    fingerprint,
+  )
 }

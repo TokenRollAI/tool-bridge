@@ -6,6 +6,8 @@
 import {
   type CallContext,
   check,
+  type HelpJson,
+  type HelpModel,
   NodeRegistryStore,
   RemoteAllowlistStore,
   type StateStore,
@@ -16,8 +18,16 @@ import {
   type TreePath,
   validatePath,
 } from '@tool-bridge/core'
+import { treeJsonSchema } from '@tool-bridge/core/protocol'
 import type { AppContext, TbAppDeps } from './deps'
-import { assertRemoteAllowed, passthroughRemote, type RemoteSettings } from './providers/remote'
+import {
+  assertRemoteAllowed,
+  federatedSearchSettings,
+  passthroughRemote,
+  type RemoteSettings,
+} from './providers/remote'
+
+const SEARCH_REMAINING_MS_HEADER = 'x-tb-search-remaining-ms'
 
 export function remoteProtocolError(message: string): TBError {
   return new TBError('unavailable', message, { retryable: false })
@@ -28,35 +38,34 @@ export function canonicalRemotePath(path: string, allowRoot: boolean): TreePath 
   if (path !== path.replace(/^\/+|\/+$/g, '')) {
     throw remoteProtocolError(`remote returned non-canonical path '${path}'`)
   }
+  if (path !== path.toLowerCase()) {
+    throw remoteProtocolError(`remote returned non-canonical path '${path}'`)
+  }
   const invalid = validatePath(path, { allowRoot })
   if (invalid !== null) throw remoteProtocolError(`remote returned invalid path '${path}'`)
   for (const segment of path === '' ? [] : path.split('/')) {
-    let decoded = segment
-    for (let pass = 0; pass < 4; pass++) {
-      if (
-        decoded === '.'
-        || decoded === '..'
-        || decoded.startsWith('~')
-        || decoded.includes('/')
-        || decoded.includes('\\')
-        || [...decoded].some((char) => {
-          const code = char.charCodeAt(0)
-          return code <= 31 || code === 127
-        })
-      ) {
-        throw remoteProtocolError(`remote returned unsafe path segment '${segment}'`)
-      }
-      let next: string
-      try {
-        next = decodeURIComponent(decoded)
-      } catch {
-        throw remoteProtocolError(`remote returned malformed encoded path '${path}'`)
-      }
-      if (next === decoded) break
-      if (pass === 3) {
-        throw remoteProtocolError(`remote returned over-encoded path '${path}'`)
-      }
-      decoded = next
+    if (
+      segment === '.'
+      || segment === '..'
+      || segment.startsWith('~')
+      || segment.includes('\\')
+      || segment.includes('?')
+      || segment.includes('#')
+      || [...segment].some((char) => {
+        const code = char.charCodeAt(0)
+        return code <= 31 || code === 127
+      })
+    ) {
+      throw remoteProtocolError(`remote returned unsafe path segment '${segment}'`)
+    }
+    let decoded: string
+    try {
+      decoded = decodeURIComponent(segment)
+    } catch {
+      throw remoteProtocolError(`remote returned malformed encoded path '${path}'`)
+    }
+    if (decoded !== segment) {
+      throw remoteProtocolError(`remote returned non-canonical encoded path '${path}'`)
     }
   }
   return path
@@ -68,24 +77,131 @@ export function remotePathWithin(nodePath: TreePath, commandPath: TreePath): boo
     || commandPath.startsWith(`${nodePath}/`)
 }
 
-export function localizeRemoteEntry(
-  mountPath: TreePath,
-  remoteParentPath: TreePath,
-  entry: TreeJson,
-): TreeEntry {
-  const rel = canonicalRemotePath(entry.path, false)
-  const parent = rel.split('/').slice(0, -1).join('/')
-  if (parent !== remoteParentPath) {
-    throw remoteProtocolError(`remote ~tree child '${rel}' is not a direct descendant`)
+const CALLABLE_TREE_KINDS = new Set(['device', 'http', 'mcp', 'remote', 'tool'])
+
+function visibleRemotePath(
+  ctx: CallContext,
+  path: TreePath,
+  kind: TreeEntry['kind'],
+): boolean {
+  if (!check(ctx, path, 'read').allow) return false
+  return !CALLABLE_TREE_KINDS.has(kind) || check(ctx, path, 'call').allow
+}
+
+/**
+ * 一个 remote mount 的双向路径投影。child wire path 一律先按不可信输入严格收敛；
+ * local path 只能位于该 mount 内，禁止跨 mount 重建路径。
+ */
+export class RemotePathProjector {
+  constructor(readonly mountPath: TreePath) {
+    const invalid = validatePath(mountPath)
+    if (invalid !== null) throw remoteProtocolError(`invalid remote mount path '${mountPath}'`)
   }
-  const out: TreeEntry = {
-    path: `${mountPath}/${rel}`,
-    kind: entry.kind,
-    description: entry.description,
+
+  childPath(localPath: TreePath): TreePath {
+    if (localPath === this.mountPath) return ''
+    if (!localPath.startsWith(`${this.mountPath}/`)) {
+      throw remoteProtocolError(`local path '${localPath}' escapes remote mount '${this.mountPath}'`)
+    }
+    return localPath.slice(this.mountPath.length + 1)
   }
-  // presence 由上游 ~tree 已派生好,本地原样透传(远端设备的新鲜度以远端时钟为准)。
-  if (entry.presence !== undefined) out.presence = entry.presence
-  return out
+
+  localPath(childPath: string, allowRoot = true): TreePath {
+    const canonical = canonicalRemotePath(childPath, allowRoot)
+    return canonical === '' ? this.mountPath : `${this.mountPath}/${canonical}`
+  }
+
+  private childCommandPath(path: string): TreePath {
+    if (!path.startsWith('/') || path.startsWith('//')) {
+      throw remoteProtocolError(`remote ~help returned invalid command path '${path}'`)
+    }
+    return canonicalRemotePath(path.slice(1), false)
+  }
+
+  projectHelp(
+    help: HelpJson,
+    requestedLocalPath: TreePath,
+    ctx?: CallContext,
+  ): HelpModel {
+    const expectedChildPath = this.childPath(requestedLocalPath)
+    const nodeChildPath = canonicalRemotePath(help.node.path, expectedChildPath === '')
+    if (nodeChildPath !== expectedChildPath) {
+      throw remoteProtocolError(
+        `remote ~help path '${nodeChildPath}' does not match request '${expectedChildPath}'`,
+      )
+    }
+    const nodePath = this.localPath(nodeChildPath, true)
+    const cmds = help.cmds.map((command) => {
+      const childCommandPath = this.childCommandPath(command.path)
+      if (!remotePathWithin(nodeChildPath, childCommandPath)) {
+        throw remoteProtocolError(`remote ~help command '${command.path}' escapes its node`)
+      }
+      return { ...command, path: `/${this.localPath(childCommandPath, false)}` }
+    })
+    const children = help.children?.map((child) => {
+      const childPath = canonicalRemotePath(child.path, false)
+      const parent = childPath.split('/').slice(0, -1).join('/')
+      if (parent !== nodeChildPath) {
+        throw remoteProtocolError(`remote ~help child '${childPath}' is not a direct descendant`)
+      }
+      return { ...child, path: this.localPath(childPath, false) }
+    }).filter(child => ctx === undefined || visibleRemotePath(ctx, child.path, child.kind))
+    return {
+      node: { ...help.node, path: nodePath },
+      cmds,
+      ...(children === undefined ? {} : { children }),
+      ...(help.feedback === undefined ? {} : { feedback: help.feedback }),
+      ...(help.hint === undefined ? {} : { hint: help.hint }),
+      ...(help.note === undefined ? {} : { note: help.note }),
+    }
+  }
+
+  projectTree(tree: TreeJson, requestedLocalPath: TreePath, ctx: CallContext): TreeJson {
+    const expectedChildPath = this.childPath(requestedLocalPath)
+    const rootChildPath = canonicalRemotePath(tree.path, expectedChildPath === '')
+    if (rootChildPath !== expectedChildPath) {
+      throw remoteProtocolError(
+        `remote ~tree path '${rootChildPath}' does not match request '${expectedChildPath}'`,
+      )
+    }
+
+    const walk = (node: TreeJson, childPath: TreePath): TreeJson => {
+      const localPath = this.localPath(childPath, childPath === '')
+      const children = (node.children ?? []).map((child) => {
+        const canonical = canonicalRemotePath(child.path, false)
+        const parent = canonical.split('/').slice(0, -1).join('/')
+        if (parent !== childPath) {
+          throw remoteProtocolError(`remote ~tree child '${canonical}' is not a direct descendant`)
+        }
+        return walk(child, canonical)
+      }).filter(child => visibleRemotePath(ctx, child.path, child.kind))
+      return {
+        path: localPath,
+        kind: node.kind,
+        description: node.description,
+        ...(children.length === 0 ? {} : { children }),
+        ...(node.presence === undefined ? {} : { presence: node.presence }),
+        ...(node.truncated === undefined ? {} : { truncated: node.truncated }),
+      }
+    }
+
+    return walk(tree, rootChildPath)
+  }
+}
+
+export async function remotePathProjectorIfMatch(
+  registry: NodeRegistryStore,
+  treePath: TreePath,
+): Promise<RemotePathProjector | null> {
+  const resolved = await registry.resolve(treePath).catch(() => null)
+  if (
+    resolved === null
+    || resolved.node.kind !== 'remote'
+    || resolved.node.config?.kind !== 'remote'
+  ) {
+    return null
+  }
+  return new RemotePathProjector(resolved.node.path)
 }
 /**
  * 生效的 remote 白名单 = env 基线 ∪ 运行时条目(system/federation 管理)。
@@ -129,6 +245,23 @@ export async function remotePassthroughIfMatch(
   }
   const requestPath = reservedTail === null ? treePath : `${treePath}/${reservedTail}`
   const body = method === 'POST' ? await c.req.text() : undefined
+  const outboundHeaders = new Headers(headers)
+  const searchSettings = federatedSearchSettings(deps.remote)
+  const rawRemaining = outboundHeaders.get(SEARCH_REMAINING_MS_HEADER)
+  const requestedRemaining = rawRemaining !== null && /^\d+$/u.test(rawRemaining)
+    ? Number(rawRemaining)
+    : undefined
+  const remainingMs = requestedRemaining !== undefined
+    && Number.isSafeInteger(requestedRemaining)
+    && requestedRemaining > 0
+    ? Math.min(requestedRemaining, searchSettings.totalDeadlineMs)
+    : undefined
+  if (remainingMs !== undefined) {
+    outboundHeaders.set(
+      SEARCH_REMAINING_MS_HEADER,
+      String(Math.max(1, remainingMs - searchSettings.perHopReturnReserveMs)),
+    )
+  }
   // 必须 await(而非裸 return async promise):裸返回时其 reject 会在链接那一 tick 被
   // workerd/miniflare 误报为 unhandled rejection,即便 runHandler 最终 catch(同 GET 通配注释)。
   return await passthroughRemote({
@@ -138,7 +271,13 @@ export async function remotePassthroughIfMatch(
     requestPath,
     method,
     ...(body !== undefined ? { body } : {}),
-    headers,
+    headers: outboundHeaders,
+    ...(remainingMs === undefined
+      ? {}
+      : {
+          maxResponseBodyBytes: searchSettings.maxResponseBodyBytes,
+          signal: AbortSignal.timeout(remainingMs),
+        }),
     secrets: deps.secrets,
     settings: await resolveRemoteSettings(deps.state, deps.remote),
     requestUrl: c.req.url,
@@ -174,16 +313,14 @@ export async function remoteTreeChildren(
       retryable: resp.status >= 500,
     })
   }
-  const remoteTree = (await resp.json().catch(() => null)) as TreeJson | null
-  if (remoteTree === null) {
+  const rawRemoteTree = await resp.json().catch(() => null)
+  const parsedRemoteTree = treeJsonSchema.safeParse(rawRemoteTree)
+  if (!parsedRemoteTree.success) {
     throw new TBError('unavailable', 'remote ~tree returned invalid JSON', { retryable: false })
   }
-  const remotePath = canonicalRemotePath(remoteTree.path, true)
-  if (remotePath !== resolved.rest) {
-    throw remoteProtocolError(`remote ~tree path '${remotePath}' does not match request`)
-  }
-  return (remoteTree.children ?? []).map(child =>
-    localizeRemoteEntry(resolved.node.path, remotePath, child))
+  const projector = new RemotePathProjector(resolved.node.path)
+  const projected = projector.projectTree(parsedRemoteTree.data, treePath, ctx)
+  return projected.children ?? []
 }
 
 /** 注册 remote 节点时的白名单校验:config.kind==='remote' → baseUrl 必须在白名单内。 */

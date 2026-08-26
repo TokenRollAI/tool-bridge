@@ -16,19 +16,25 @@
  */
 
 import {
+  normalizeToolSearchOptions,
+  prepareToolSearchQuery,
+  TOOL_SEARCH_AUDIT_NODE_LIMIT,
+  TOOL_SEARCH_UNIT_LIMIT,
+} from './types'
+import {
   type SqlSearchDialect,
   TOOL_SEARCH_CAPACITY_MARKER,
   toolSearchCandidateStatement,
 } from './sqlSearchIndex'
-import { prepareToolSearchUnits, TOOL_SEARCH_AUDIT_NODE_LIMIT } from './types'
 
 /** 建表(幂等)。不依赖任何 PG 扩展。 */
 export const PG_SEARCH_SCHEMA_STATEMENTS: readonly string[] = [
-  `CREATE TABLE IF NOT EXISTS tb_search_tools_v4 (
+  `CREATE TABLE IF NOT EXISTS tb_search_tools_v5 (
     id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     path text NOT NULL,
     name text NOT NULL,
     description text NOT NULL DEFAULT '',
+    effect text NOT NULL CHECK (effect IN ('read', 'write', 'destructive', 'unknown')),
     feedback text NOT NULL DEFAULT '',
     UNIQUE(path, name)
   )`,
@@ -36,7 +42,7 @@ export const PG_SEARCH_SCHEMA_STATEMENTS: readonly string[] = [
   // 样本上对单 unit 多列 ILIKE 一律选 Seq Scan；GIN 让写入和体积显著增加却未改善
   // 检索。4000 行只是代表样本，不是严格工具行上限（节点内还受 20KB JSON 约束）；
   // 查询单元数或容量边界变化时，应重跑 searchBench 并重新评估查询形状与索引。
-  `CREATE TABLE IF NOT EXISTS tb_search_meta_v4 (
+  `CREATE TABLE IF NOT EXISTS tb_search_meta_v5 (
     singleton integer PRIMARY KEY CHECK (singleton = 1),
     revision bigint NOT NULL DEFAULT 0,
     seeded integer NOT NULL DEFAULT 0,
@@ -44,29 +50,29 @@ export const PG_SEARCH_SCHEMA_STATEMENTS: readonly string[] = [
   )`,
   // cursor_secret 需 64 hex(32 字节)。两个内置 gen_random_uuid() 去连字符正好 64
   // hex,避免依赖 pgcrypto 的 gen_random_bytes(自托管 PG 未必预装 pgcrypto)。
-  `INSERT INTO tb_search_meta_v4(singleton, revision, seeded, cursor_secret)
+  `INSERT INTO tb_search_meta_v5(singleton, revision, seeded, cursor_secret)
     VALUES (
       1, 0, 0,
       replace(gen_random_uuid()::text, '-', '') || replace(gen_random_uuid()::text, '-', '')
     )
     ON CONFLICT (singleton) DO NOTHING`,
-  `CREATE TABLE IF NOT EXISTS tb_search_snapshots_v4 (
+  `CREATE TABLE IF NOT EXISTS tb_search_snapshots_v5 (
     path text PRIMARY KEY,
     digest text NOT NULL
   )`,
-  `CREATE OR REPLACE FUNCTION tb_search_snapshots_v4_capacity()
+  `CREATE OR REPLACE FUNCTION tb_search_snapshots_v5_capacity()
     RETURNS trigger AS $$
     BEGIN
-      IF (SELECT COUNT(*) FROM tb_search_snapshots_v4) >= ${TOOL_SEARCH_AUDIT_NODE_LIMIT} THEN
+      IF (SELECT COUNT(*) FROM tb_search_snapshots_v5) >= ${TOOL_SEARCH_AUDIT_NODE_LIMIT} THEN
         RAISE EXCEPTION '${TOOL_SEARCH_CAPACITY_MARKER}';
       END IF;
       RETURN NEW;
     END;
     $$ LANGUAGE plpgsql`,
-  `DROP TRIGGER IF EXISTS tb_search_snapshots_v4_capacity_trg ON tb_search_snapshots_v4`,
-  `CREATE TRIGGER tb_search_snapshots_v4_capacity_trg
-    BEFORE INSERT ON tb_search_snapshots_v4
-    FOR EACH ROW EXECUTE FUNCTION tb_search_snapshots_v4_capacity()`,
+  `DROP TRIGGER IF EXISTS tb_search_snapshots_v5_capacity_trg ON tb_search_snapshots_v5`,
+  `CREATE TRIGGER tb_search_snapshots_v5_capacity_trg
+    BEFORE INSERT ON tb_search_snapshots_v5
+    FOR EACH ROW EXECUTE FUNCTION tb_search_snapshots_v5_capacity()`,
 ]
 
 /**
@@ -81,7 +87,7 @@ export const PG_SEARCH_WRITE_LOCK_KEY = 0x7b5ea2c8
 
 /** 单行写 path→digest 快照(位置参数:path, digest);`replace` 内联使用。 */
 export const PG_SEARCH_INSERT_SNAPSHOT_SQL
-  = 'INSERT INTO tb_search_snapshots_v4(path, digest) VALUES ($1, $2)'
+  = 'INSERT INTO tb_search_snapshots_v5(path, digest) VALUES ($1, $2)'
 
 /**
  * 多行 VALUES 批量插入。
@@ -107,14 +113,21 @@ export function pgBulkInsertSql(
 }
 
 /** 索引记录表与列(供批量插入构造)。 */
-export const PG_SEARCH_TOOLS_TABLE = 'tb_search_tools_v4'
-export const PG_SEARCH_TOOLS_COLUMNS = ['path', 'name', 'description', 'feedback'] as const
+export const PG_SEARCH_TOOLS_TABLE = 'tb_search_tools_v5'
+export const PG_SEARCH_TOOLS_COLUMNS = [
+  'path',
+  'name',
+  'description',
+  'effect',
+  'feedback',
+] as const
 /** 快照表与列。 */
-export const PG_SEARCH_SNAPSHOTS_TABLE = 'tb_search_snapshots_v4'
+export const PG_SEARCH_SNAPSHOTS_TABLE = 'tb_search_snapshots_v5'
 export const PG_SEARCH_SNAPSHOTS_COLUMNS = ['path', 'digest'] as const
 /**
- * 单条语句最大行数。PG 绑定参数上限是 65535;4 列时理论上限 16383 行,
- * 取 1000 留足余量(1000 行 × 4 列 = 4000 个参数),同时已把往返摊薄到可忽略。
+ * 单条语句最大行数。PG 绑定参数上限是 65535;当前 tools 5 列时理论上限
+ * 13107 行，取 1000 留足余量(1000 行 × 5 列 = 5000 个参数)，同时已把往返
+ * 摊薄到可忽略。
  */
 export const PG_SEARCH_INSERT_ROWS_MAX = 1000
 
@@ -130,49 +143,59 @@ export const PG_SEARCH_INSERT_ROWS_MAX = 1000
  */
 const META_SQL = `
 SELECT revision::int AS revision, seeded::int AS seeded, cursor_secret
-FROM tb_search_meta_v4 WHERE singleton = 1
+FROM tb_search_meta_v5 WHERE singleton = 1
 `
 const SNAPSHOT_DIGESTS_SQL
-  = 'SELECT path, digest FROM tb_search_snapshots_v4 ORDER BY path'
+  = 'SELECT path, digest FROM tb_search_snapshots_v5 ORDER BY path'
 const PATH_STATE_SQL = `
 SELECT snapshots.digest,
-  EXISTS(SELECT 1 FROM tb_search_tools_v4 WHERE path = $1)::int AS has_tools,
-  (SELECT COUNT(*) FROM tb_search_snapshots_v4)::int AS path_count
+  EXISTS(SELECT 1 FROM tb_search_tools_v5 WHERE path = $1)::int AS has_tools,
+  (SELECT COUNT(*) FROM tb_search_snapshots_v5)::int AS path_count
 FROM (SELECT 1) AS singleton
-LEFT JOIN tb_search_snapshots_v4 AS snapshots ON snapshots.path = $2
+LEFT JOIN tb_search_snapshots_v5 AS snapshots ON snapshots.path = $2
 `
-const PRESENT_SQL = 'SELECT 1 AS present FROM tb_search_tools_v4 WHERE path = $1 LIMIT 1'
+const PRESENT_SQL = 'SELECT 1 AS present FROM tb_search_tools_v5 WHERE path = $1 LIMIT 1'
 const PRESENT_PREFIX_SQL = `
-SELECT 1 AS present FROM tb_search_tools_v4
+SELECT 1 AS present FROM tb_search_tools_v5
 WHERE path = $1 OR substr(path, 1, length($2) + 1) = $3 || '/'
 LIMIT 1
 `
-const DELETE_TOOLS_SQL = 'DELETE FROM tb_search_tools_v4 WHERE path = $1'
-const DELETE_SNAPSHOT_SQL = 'DELETE FROM tb_search_snapshots_v4 WHERE path = $1'
+const DELETE_TOOLS_SQL = 'DELETE FROM tb_search_tools_v5 WHERE path = $1'
+const DELETE_SNAPSHOT_SQL = 'DELETE FROM tb_search_snapshots_v5 WHERE path = $1'
 const DELETE_TOOLS_PREFIX_SQL = `
-DELETE FROM tb_search_tools_v4
+DELETE FROM tb_search_tools_v5
 WHERE path = $1 OR substr(path, 1, length($2) + 1) = $3 || '/'
 `
 const DELETE_SNAPSHOT_PREFIX_SQL = `
-DELETE FROM tb_search_snapshots_v4
+DELETE FROM tb_search_snapshots_v5
 WHERE path = $1 OR substr(path, 1, length($2) + 1) = $3 || '/'
 `
-const DELETE_ALL_TOOLS_SQL = 'DELETE FROM tb_search_tools_v4'
-const DELETE_ALL_SNAPSHOTS_SQL = 'DELETE FROM tb_search_snapshots_v4'
+const DELETE_ALL_TOOLS_SQL = 'DELETE FROM tb_search_tools_v5'
+const DELETE_ALL_SNAPSHOTS_SQL = 'DELETE FROM tb_search_snapshots_v5'
 const BUMP_REVISION_SQL
-  = 'UPDATE tb_search_meta_v4 SET revision = revision + 1 WHERE singleton = 1'
+  = 'UPDATE tb_search_meta_v5 SET revision = revision + 1 WHERE singleton = 1'
 const COMPLETE_REBUILD_SQL
-  = 'UPDATE tb_search_meta_v4 SET seeded = 1, revision = revision + 1 WHERE singleton = 1'
+  = 'UPDATE tb_search_meta_v5 SET seeded = 1, revision = revision + 1 WHERE singleton = 1'
 
 /** Postgres 方言:ILIKE 子串检索,$n 占位符,无扩展依赖。 */
 export const pgSearchDialect: SqlSearchDialect = {
-  candidateStatement: (query, limit, offset) =>
-    toolSearchCandidateStatement(
-      prepareToolSearchUnits(query),
+  candidateStatement: (query, limit, offset, rawConstraints) => {
+    const constraints = normalizeToolSearchOptions(rawConstraints)
+    const prepared = prepareToolSearchQuery(
+      query,
+      constraints.pathPrefix === undefined
+        ? TOOL_SEARCH_UNIT_LIMIT
+        : TOOL_SEARCH_UNIT_LIMIT - 1,
+    )
+    return toolSearchCandidateStatement(
+      prepared.units,
+      prepared.totalTermCount,
       limit,
       offset,
+      constraints,
       { likeOperator: 'ILIKE', placeholder: index => `$${index}` },
-    ),
+    )
+  },
   schemaStatements: PG_SEARCH_SCHEMA_STATEMENTS,
   statements: {
     bumpRevision: BUMP_REVISION_SQL,

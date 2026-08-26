@@ -15,6 +15,12 @@ const adminHeaders = {
   'content-type': 'application/json',
 }
 
+const fullCoverage = {
+  coverage: 1,
+  matchedTermCount: 1,
+  totalTermCount: 1,
+} as const
+
 function emptySearchIndex(
   capabilities: SearchIndex['capabilities'] = ['search'],
 ): SearchIndex & { search: ReturnType<typeof vi.fn> } {
@@ -122,6 +128,7 @@ describe('global ~search protocol', () => {
     const search = vi.fn(async () => ({
       items: [
         {
+          ...fullCoverage,
           name: 'forecast',
           path: 'providers/weather',
           ref: 'visible',
@@ -129,6 +136,7 @@ describe('global ~search protocol', () => {
           revision: 1,
         },
         {
+          ...fullCoverage,
           name: 'internal_forecast',
           path: 'providers/weather',
           ref: 'hidden',
@@ -190,17 +198,35 @@ describe('global ~search protocol', () => {
       items: [
         {
           path: 'providers/weather',
+          relevance: {
+            coverage: 1,
+            matchedTermCount: 1,
+            rankingVersion: 'keyword-v2',
+            totalTermCount: 1,
+          },
           tool: {
             name: 'weather__forecast',
             description: 'Get a weather forecast',
             effect: 'read',
-            inputSchema: { type: 'object' },
           },
         },
       ],
     })
     expect(search).toHaveBeenCalledOnce()
-    expect(search).toHaveBeenCalledWith('weather', { limit: 100, mode: 'keyword' })
+    expect(search).toHaveBeenCalledWith('weather', {
+      limit: 100,
+      matching: 'best',
+      mode: 'keyword',
+    })
+
+    const fullResponse = await postSearch(app, {
+      query: 'weather',
+      opts: { detail: 'full' },
+    })
+    expect(fullResponse.status).toBe(200)
+    await expect(fullResponse.json()).resolves.toMatchObject({
+      items: [{ tool: { inputSchema: { type: 'object' } } }],
+    })
 
     const { secret: readOnlySk } = await new SKRegistryStore(state).write(
       {
@@ -275,7 +301,50 @@ describe('global ~search protocol', () => {
     })
 
     expect(response.status).toBe(200)
-    expect(index.search).toHaveBeenCalledWith('weather', { limit: 100, mode: 'semantic' })
+    expect(index.search).toHaveBeenCalledWith('weather', {
+      limit: 100,
+      matching: 'best',
+      mode: 'semantic',
+    })
+  })
+
+  it('forwards ranking and pre-limit filters while keeping detail at the projection layer', async () => {
+    const index = emptySearchIndex()
+    const { app } = await appWith(index)
+
+    const response = await postSearch(app, {
+      query: 'temperature',
+      opts: {
+        detail: 'full',
+        effects: ['read', 'unknown'],
+        limit: 7,
+        matching: 'all',
+        minCoverage: 1,
+        pathPrefix: 'home/home-assistant',
+      },
+    })
+
+    expect(response.status).toBe(200)
+    expect(index.search).toHaveBeenCalledWith('temperature', {
+      effects: ['read', 'unknown'],
+      limit: 100,
+      matching: 'all',
+      minCoverage: 1,
+      mode: 'keyword',
+      pathPrefix: 'home/home-assistant',
+    })
+    expect((await postSearch(app, {
+      query: 'temperature',
+      opts: { effects: [] },
+    })).status).toBe(400)
+    expect((await postSearch(app, {
+      query: 'temperature',
+      opts: { minCoverage: 0 },
+    })).status).toBe(400)
+    expect((await postSearch(app, {
+      query: 'temperature',
+      opts: { matching: 'all', minCoverage: 0.75 },
+    })).status).toBe(400)
   })
 
   it('over-fetches with bulk registry reads, fills the scoped page and resumes raw cursor', async () => {
@@ -283,6 +352,7 @@ describe('global ~search protocol', () => {
       ...Array.from({ length: 125 }, (_, i) => ({ path: `denied/${i}`, name: `denied_${i}` })),
       ...Array.from({ length: 175 }, (_, i) => ({ path: `allowed/${i}`, name: `allowed_${i}` })),
     ].map((candidate, index) => ({
+      ...fullCoverage,
       ...candidate,
       ref: String(index),
       resumeOffset: index + 1,
@@ -356,6 +426,7 @@ describe('global ~search protocol', () => {
 
   it('does not expose a continuation cursor when every raw match is denied', async () => {
     const candidates = Array.from({ length: 500 }, (_, index) => ({
+      ...fullCoverage,
       name: `private_${index}`,
       path: `private/${index}`,
       ref: String(index),

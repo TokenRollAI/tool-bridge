@@ -100,12 +100,12 @@ describe('D1SearchIndex', () => {
     const index = new D1SearchIndex(searchDb)
     await index.initialized()
     await searchDb.batch([
-      searchDb.prepare('DELETE FROM tb_search_tools_v4'),
-      searchDb.prepare('DELETE FROM tb_search_snapshots_v4'),
-      searchDb.prepare('UPDATE tb_search_meta_v4 SET seeded = 0 WHERE singleton = 1'),
+      searchDb.prepare('DELETE FROM tb_search_tools_v5'),
+      searchDb.prepare('DELETE FROM tb_search_snapshots_v5'),
+      searchDb.prepare('UPDATE tb_search_meta_v5 SET seeded = 0 WHERE singleton = 1'),
       searchDb.prepare(`
-        INSERT INTO tb_search_tools_v4(path, name, description, feedback)
-        VALUES (?, ?, ?, '')
+        INSERT INTO tb_search_tools_v5(path, name, description, effect, feedback)
+        VALUES (?, ?, ?, 'unknown', '')
       `).bind(
         'contract/d1/source-only',
         'legacy_source_probe',
@@ -118,8 +118,8 @@ describe('D1SearchIndex', () => {
     await expect(index.search('legacysourceonly')).resolves.toMatchObject({ items: [] })
 
     await searchDb.prepare(`
-      INSERT INTO tb_search_tools_v4(path, name, description, feedback)
-      VALUES (?, ?, ?, '')
+      INSERT INTO tb_search_tools_v5(path, name, description, effect, feedback)
+      VALUES (?, ?, ?, 'unknown', '')
     `).bind(
       'contract/d1/source-only',
       'legacy_source_probe',
@@ -154,9 +154,9 @@ describe('D1SearchIndex', () => {
     await registry.write(makeNode(alpha, 'partial_alpha'), 'system:test', now)
     await registry.write(makeNode(beta, 'partial_beta'), 'system:test', now)
     await searchDb.batch([
-      searchDb.prepare('DELETE FROM tb_search_tools_v4'),
-      searchDb.prepare('DELETE FROM tb_search_snapshots_v4'),
-      searchDb.prepare('UPDATE tb_search_meta_v4 SET seeded = 0 WHERE singleton = 1'),
+      searchDb.prepare('DELETE FROM tb_search_tools_v5'),
+      searchDb.prepare('DELETE FROM tb_search_snapshots_v5'),
+      searchDb.prepare('UPDATE tb_search_meta_v5 SET seeded = 0 WHERE singleton = 1'),
     ])
 
     const index = new D1SearchIndex(searchDb)
@@ -179,6 +179,22 @@ describe('D1SearchIndex', () => {
       inputSchema: { type: 'object', properties: { day: { type: 'string' } } },
       effect: 'read',
     }
+    const compactTool = {
+      name: tool.name,
+      description: tool.description,
+      effect: tool.effect,
+    }
+    const hit = (matchedTermCount: number) => ({
+      path,
+      relevance: {
+        coverage: 1,
+        matchedTermCount,
+        rankingVersion: 'keyword-v2',
+        totalTermCount: matchedTermCount,
+      },
+      source: { path: '' },
+      tool: compactTool,
+    })
     const register = await SELF.fetch('https://tb.test/system/registry/write', {
       method: 'POST',
       headers: adminHeaders,
@@ -207,7 +223,7 @@ describe('D1SearchIndex', () => {
     expect(describe.status).toBe(200)
     await expect(describe.json()).resolves.toEqual({
       kind: 'directory',
-      capabilities: ['search'],
+      capabilities: ['search', 'search:federated'],
     })
 
     const response = await SELF.fetch('https://tb.test/~search', {
@@ -216,7 +232,7 @@ describe('D1SearchIndex', () => {
       body: JSON.stringify({ query: 'calendar' }),
     })
     expect(response.status).toBe(200)
-    await expect(response.json()).resolves.toEqual({ items: [{ path, tool }] })
+    await expect(response.json()).resolves.toEqual({ items: [hit(1)] })
 
     const shortResponse = await SELF.fetch('https://tb.test/~search', {
       method: 'POST',
@@ -224,7 +240,7 @@ describe('D1SearchIndex', () => {
       body: JSON.stringify({ query: '日程' }),
     })
     expect(shortResponse.status).toBe(200)
-    await expect(shortResponse.json()).resolves.toEqual({ items: [{ path, tool }] })
+    await expect(shortResponse.json()).resolves.toEqual({ items: [hit(1)] })
 
     const intentResponse = await SELF.fetch('https://tb.test/~search', {
       method: 'POST',
@@ -232,7 +248,7 @@ describe('D1SearchIndex', () => {
       body: JSON.stringify({ query: 'create document' }),
     })
     expect(intentResponse.status).toBe(200)
-    await expect(intentResponse.json()).resolves.toEqual({ items: [{ path, tool }] })
+    await expect(intentResponse.json()).resolves.toEqual({ items: [hit(2)] })
 
     const feedback = await SELF.fetch(`https://tb.test/${path}/~feedback`, {
       method: 'POST',
@@ -249,7 +265,7 @@ describe('D1SearchIndex', () => {
       body: JSON.stringify({ query: 'feedbackwireunique' }),
     })
     expect(feedbackSearch.status).toBe(200)
-    await expect(feedbackSearch.json()).resolves.toEqual({ items: [{ path, tool }] })
+    await expect(feedbackSearch.json()).resolves.toEqual({ items: [hit(1)] })
 
     const childFeedback = await SELF.fetch(
       `https://tb.test/${path}/${tool.name}/~feedback`,

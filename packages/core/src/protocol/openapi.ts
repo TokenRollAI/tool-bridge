@@ -18,7 +18,10 @@ import {
   registryNodeSchema,
   tbErrorBodySchema,
   toolSearchPageSchema,
+  toolSearchRelevanceSchema,
   toolSearchRequestSchema,
+  toolSearchSourceResultSchema,
+  toolSearchSourceSchema,
   treeJsonSchema,
 } from './wire'
 
@@ -42,8 +45,11 @@ const schemas = {
   OAuthAuthorizeResponse: oauthAuthorizeResponseSchema,
   Readiness: readinessResponseSchema,
   RegistryNode: registryNodeSchema,
+  SearchRelevance: toolSearchRelevanceSchema,
   SearchRequest: toolSearchRequestSchema,
   SearchResponse: toolSearchPageSchema,
+  SearchSource: toolSearchSourceSchema,
+  SearchSourceResult: toolSearchSourceResultSchema,
   Tree: treeJsonSchema,
 } as const
 

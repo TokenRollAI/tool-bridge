@@ -84,6 +84,12 @@
     "items": [
       {
         "path": "system/status",
+        "relevance": {
+          "coverage": 1,
+          "matchedTermCount": 1,
+          "rankingVersion": "keyword-v2",
+          "totalTermCount": 1
+        },
         "tool": {
           "description": "Get status",
           "name": "get"

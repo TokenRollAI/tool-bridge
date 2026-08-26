@@ -283,6 +283,24 @@ describe('Node 宿主 HTTP 面', () => {
       inputSchema: { type: 'object', properties: { day: { type: 'string' } } },
       effect: 'read',
     }
+    const hit = (
+      hitPath: string,
+      sourceTool: typeof tool,
+      matchedTermCount: number,
+    ) => ({
+      path: hitPath,
+      relevance: {
+        coverage: 1,
+        matchedTermCount,
+        rankingVersion: 'keyword-v2',
+        totalTermCount: matchedTermCount,
+      },
+      tool: {
+        name: sourceTool.name,
+        description: sourceTool.description,
+        effect: sourceTool.effect,
+      },
+    })
     const register = await postJson(
       first.baseUrl,
       'system/registry/write',
@@ -313,17 +331,17 @@ describe('Node 宿主 HTTP 面', () => {
     })
     const initial = await postJson(first.baseUrl, '~search', { query: 'calendar' }, admin())
     expect(initial.status).toBe(200)
-    await expect(initial.json()).resolves.toEqual({ items: [{ path, tool }] })
+    await expect(initial.json()).resolves.toEqual({ items: [hit(path, tool, 1)] })
     await first.server.close()
 
     const second = await startServer(dataDir)
     cleanups.push(() => second.server.close())
     const persisted = await postJson(second.baseUrl, '~search', { query: 'calendar' }, admin())
     expect(persisted.status).toBe(200)
-    await expect(persisted.json()).resolves.toEqual({ items: [{ path, tool }] })
+    await expect(persisted.json()).resolves.toEqual({ items: [hit(path, tool, 1)] })
     const short = await postJson(second.baseUrl, '~search', { query: '日程' }, admin())
     expect(short.status).toBe(200)
-    await expect(short.json()).resolves.toEqual({ items: [{ path, tool }] })
+    await expect(short.json()).resolves.toEqual({ items: [hit(path, tool, 1)] })
 
     const intent = await postJson(
       second.baseUrl,
@@ -332,7 +350,7 @@ describe('Node 宿主 HTTP 面', () => {
       admin(),
     )
     expect(intent.status).toBe(200)
-    await expect(intent.json()).resolves.toEqual({ items: [{ path, tool }] })
+    await expect(intent.json()).resolves.toEqual({ items: [hit(path, tool, 2)] })
 
     const hiddenPath = 'search/wire/sqlite-hidden'
     const hiddenTool = {
@@ -372,8 +390,8 @@ describe('Node 宿主 HTTP 面', () => {
     const adminControlBody = (await adminControl.json()) as { items: unknown[] }
     expect(adminControlBody.items).toHaveLength(2)
     expect(adminControlBody.items).toEqual(expect.arrayContaining([
-      { path, tool },
-      { path: hiddenPath, tool: hiddenTool },
+      hit(path, tool, 2),
+      hit(hiddenPath, hiddenTool, 2),
     ]))
 
     const mint = await postJson(
@@ -394,6 +412,6 @@ describe('Node 宿主 HTTP 面', () => {
       { headers: { authorization: `Bearer ${narrowSk.secret}` } },
     )
     expect(narrowed.status).toBe(200)
-    await expect(narrowed.json()).resolves.toEqual({ items: [{ path, tool }] })
+    await expect(narrowed.json()).resolves.toEqual({ items: [hit(path, tool, 2)] })
   })
 })

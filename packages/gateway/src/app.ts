@@ -60,6 +60,20 @@ export interface Env {
   TB_REMOTE_ALLOWLIST?: string
   /** 纯 LIKE 工具搜索索引；发布包宿主未配置 binding 时不暴露 search capability。 */
   TB_SEARCH?: D1Database
+  /** 联邦搜索并发上限（默认 4）。 */
+  TB_SEARCH_FEDERATION_CONCURRENCY?: string
+  /** 联邦搜索总 deadline 毫秒（默认 2500）。 */
+  TB_SEARCH_FEDERATION_DEADLINE_MS?: string
+  /** 单个远端联邦响应体字节上限（默认 512 KiB）。 */
+  TB_SEARCH_FEDERATION_MAX_RESPONSE_BYTES?: string
+  /** 整棵查询可参与的 source 总数（默认 16）。 */
+  TB_SEARCH_FEDERATION_MAX_SOURCES?: string
+  /** 发起 child 查询所需最小剩余工作时间（默认 200ms）。 */
+  TB_SEARCH_FEDERATION_MIN_CHILD_WORK_MS?: string
+  /** 每跳为响应回传预留的时间（默认 100ms）。 */
+  TB_SEARCH_FEDERATION_RETURN_RESERVE_MS?: string
+  /** 联邦 continuation session TTL 秒（默认 300）。 */
+  TB_SEARCH_FEDERATION_SESSION_TTL_SEC?: string
   TB_SECRET_ENCRYPTION_KEY?: string
   /** 权威 StateStore(D1;ADR-001 从 KV 迁入,强一致 + 原子 putIfAbsent)。 */
   TB_STATE: D1Database
@@ -147,7 +161,7 @@ export function memoizeRequestFactory<T>(
 }
 
 /** Env + 请求级 D1 session → TbAppDeps(D1 SearchIndex 是第五个宿主注入点)。 */
-function depsFromEnv(
+export function depsFromEnv(
   env: Env,
   state: StateStore,
   search: D1SearchIndex | undefined,

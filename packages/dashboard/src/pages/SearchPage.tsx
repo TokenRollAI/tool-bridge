@@ -1,6 +1,7 @@
 import { ArrowUpRight, Loader2, Search, SearchX, X } from 'lucide-react'
 import { type FormEvent, useEffect, useState } from 'react'
 import { Link, useSearchParams } from 'react-router'
+import type { ToolSearchPage } from '@/lib/types'
 import type { ApiError } from '@/lib/api'
 import { PaginationFooter } from '@/components/PaginationFooter'
 import { PageHeader } from '@/components/PageHeader'
@@ -19,19 +20,78 @@ function errorTitle(error: Error): string {
   return '工具搜索失败'
 }
 
+type SourceStatus = NonNullable<ToolSearchPage['sources']>[number]['status']
+type SearchSource = NonNullable<ToolSearchPage['sources']>[number]
+
+const SOURCE_STATUS_LABEL: Record<SourceStatus, string> = {
+  budget_exhausted: '超出搜索预算',
+  cycle: '检测到循环',
+  hop_limit: '超出联邦深度',
+  invalid_response: '响应无效',
+  ok: '正常',
+  timed_out: '超时',
+  unavailable: '暂不可用',
+  unsupported: '不支持搜索',
+}
+
+function sourceName(path: string): string {
+  return path || '本实例'
+}
+
+function PartialSourceSummary({ sources }: { sources: SearchSource[] }) {
+  return (
+    <div
+      aria-live="polite"
+      className="border-b border-amber-500/20 bg-amber-500/[0.06] px-4 py-3 text-xs text-amber-600 dark:text-amber-400"
+      role="status"
+    >
+      <p className="font-medium">部分联邦来源未完成，结果可能不完整。</p>
+      {sources.length > 0 && (
+        <p className="mt-1 font-mono">
+          {sources.map(source => (
+            `${sourceName(source.path)}（${SOURCE_STATUS_LABEL[source.status]}）`
+          )).join('、')}
+        </p>
+      )}
+    </div>
+  )
+}
+
 export function SearchPage() {
   const [params, setParams] = useSearchParams()
   const query = (params.get('q') ?? '').trim()
+  const federationParam = params.get('federation')
+  const federation = federationParam === 'local' || federationParam === 'recursive'
+    ? federationParam
+    : 'auto'
   const [draft, setDraft] = useState(query)
-  const search = useToolSearch(query)
-  const items = search.data?.pages.flatMap(page => page.items) ?? []
+  const search = useToolSearch(query, federation === 'auto' ? {} : { federation })
+  const pages = search.data?.pages ?? []
+  const items = pages.flatMap(page => page.items)
+  const partial = pages.some(page => page.partial === true)
+  const degradedSources = [...new Map(
+    pages
+      .flatMap(page => page.sources ?? [])
+      .filter(source => source.status !== 'ok')
+      .map(source => [source.path, source] as const),
+  ).values()]
 
   useEffect(() => setDraft(query), [query])
 
   const submit = (event: FormEvent) => {
     event.preventDefault()
     const next = draft.trim()
-    setParams(next ? { q: next } : {}, { replace: true })
+    const nextParams = new URLSearchParams()
+    if (next) nextParams.set('q', next)
+    if (federation !== 'auto') nextParams.set('federation', federation)
+    setParams(nextParams, { replace: true })
+  }
+
+  const setFederation = (next: 'auto' | 'local' | 'recursive') => {
+    const nextParams = new URLSearchParams(params)
+    if (next === 'auto') nextParams.delete('federation')
+    else nextParams.set('federation', next)
+    setParams(nextParams, { replace: true })
   }
 
   return (
@@ -66,6 +126,19 @@ export function SearchPage() {
             </Button>
           )}
         </div>
+        <select
+          aria-label="搜索范围"
+          className="h-11 rounded-md border border-input bg-background px-3 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          onChange={(event) => {
+            const value = event.target.value
+            setFederation(value === 'local' || value === 'recursive' ? value : 'auto')
+          }}
+          value={federation}
+        >
+          <option value="auto">自动（网关默认）</option>
+          <option value="recursive">递归联邦</option>
+          <option value="local">仅本实例</option>
+        </select>
         <Button className="h-11 sm:w-28" disabled={!draft.trim()} type="submit">
           <Search />
           搜索
@@ -103,10 +176,14 @@ export function SearchPage() {
                 )
               : items.length === 0
                 ? (
-                    <EmptyState className="m-4" icon={SearchX} title="没有可见的匹配工具" />
+                    <>
+                      {partial && <PartialSourceSummary sources={degradedSources} />}
+                      <EmptyState className="m-4" icon={SearchX} title="没有可见的匹配工具" />
+                    </>
                   )
                 : (
                     <>
+                      {partial && <PartialSourceSummary sources={degradedSources} />}
                       <div className="border-b px-4 py-3">
                         <p aria-live="polite" className="text-xs text-muted-foreground">
                           已加载
@@ -119,8 +196,8 @@ export function SearchPage() {
                         </p>
                       </div>
                       <ul aria-label="工具搜索结果" className="divide-y">
-                        {items.map(({ path, tool }) => (
-                          <li key={`${path}\u0000${tool.name}`}>
+                        {items.map(({ path, relevance, source, tool }) => (
+                          <li key={`${source?.path ?? ''}\u0000${path}\u0000${tool.name}`}>
                             <Link
                               className={cn(
                                 'group grid min-w-0 gap-3 px-4 py-4 transition-colors sm:grid-cols-[minmax(12rem,0.7fr)_minmax(0,1fr)_auto] sm:items-center',
@@ -135,11 +212,30 @@ export function SearchPage() {
                                 <p className="mt-1 truncate font-mono text-[11px] text-primary">
                                   {path}
                                 </p>
+                                <p
+                                  aria-label={`来源 ${sourceName(source?.path ?? '')}`}
+                                  className="mt-1 truncate font-mono text-[10px] text-muted-foreground"
+                                >
+                                  来源 ·
+                                  {' '}
+                                  {sourceName(source?.path ?? '')}
+                                </p>
                               </div>
                               <p className="min-w-0 text-sm leading-5 break-words text-muted-foreground">
                                 {tool.description || '无说明'}
                               </p>
                               <div className="flex items-center gap-2 sm:justify-end">
+                                <span
+                                  aria-label={`关键词覆盖 ${relevance.matchedTermCount}/${relevance.totalTermCount}`}
+                                  className="rounded-sm border px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground"
+                                  title={`覆盖率 ${Math.round(relevance.coverage * 100)}%`}
+                                >
+                                  覆盖
+                                  {' '}
+                                  {relevance.matchedTermCount}
+                                  /
+                                  {relevance.totalTermCount}
+                                </span>
                                 {tool.effect && (
                                   <span className="rounded-sm border px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
                                     {tool.effect}

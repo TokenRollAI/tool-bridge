@@ -9,6 +9,7 @@ export type {
   Presence,
   PresenceState,
   ToolSearchItem,
+  ToolSearchPage,
   ToolSpec,
   TreeJson,
 } from '@tool-bridge/sdk/client'

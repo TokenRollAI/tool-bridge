@@ -8,7 +8,8 @@ import { TEST_ADMIN_SK } from './fixtures'
 // 文件级单实例(对齐原 SELF.fetch 语义:一个文件共享一份持久状态)。
 // 注入索引:/~mcp 只在宿主提供 SearchIndex 时投影 tb_search(gateway 侧对应
 // 可选的 TB_SEARCH binding),缺省不注入就只有 tb_help / tb_list_nodes。
-const tb = await createTestApp({ search: new MemorySearchIndex() })
+const search = new MemorySearchIndex()
+const tb = await createTestApp({ search })
 
 const admin = (extra: RequestInit = {}): RequestInit => ({
   ...extra,
@@ -206,6 +207,13 @@ describe('MCP consumer endpoint', () => {
       method: 'GET',
       pathTemplate: '/calendar',
       inputSchema: { type: 'object', properties: {} },
+    }, {
+      name: 'update_calendar',
+      description: 'controlcatalogunique visible calendar update',
+      effect: 'write',
+      method: 'POST',
+      pathTemplate: '/calendar',
+      inputSchema: { type: 'object', properties: {} },
     }])
     await mountHttpTools('mcp-controls-hidden', [{
       name: 'discover_private',
@@ -230,18 +238,83 @@ describe('MCP consumer endpoint', () => {
         'tb_help',
         'tb_list_nodes',
       ]))
+      expect(listed.tools.find(tool => tool.name === 'tb_search')).toMatchObject({
+        description: expect.stringContaining('compact by default'),
+        inputSchema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            query: { type: 'string', minLength: 1 },
+            mode: { type: 'string', enum: ['keyword', 'semantic'] },
+            limit: { type: 'integer', minimum: 1, maximum: 200 },
+            cursor: { type: 'string', minLength: 1 },
+            detail: { type: 'string', enum: ['compact', 'full'], default: 'compact' },
+            effects: {
+              type: 'array',
+              minItems: 1,
+              items: {
+                type: 'string',
+                enum: ['read', 'write', 'destructive', 'unknown'],
+              },
+            },
+            federation: { type: 'string', enum: ['local', 'recursive'] },
+            matching: { type: 'string', enum: ['best', 'all'] },
+            minCoverage: { type: 'number', exclusiveMinimum: 0, maximum: 1 },
+            pathPrefix: { type: 'string', minLength: 1 },
+          },
+          required: ['query'],
+        },
+      })
 
-      await expect(client.callTool({
+      const compact = await client.callTool({
         name: 'tb_search',
         arguments: { query: 'controlcatalogunique', limit: 20 },
-      })).resolves.toMatchObject({
+      })
+      const compactItems = (compact.structuredContent as {
+        items: Array<{ path: string, tool: { name: string } }>
+      }).items
+      expect(compactItems).toEqual(expect.arrayContaining([expect.objectContaining({
+        path: 'mcp-controls-visible',
+        tool: expect.objectContaining({ name: 'discover_calendar' }),
+      })]))
+      expect(JSON.stringify(compact.structuredContent)).not.toContain('inputSchema')
+
+      const searchCall = vi.spyOn(search, 'search')
+      const full = await client.callTool({
+        name: 'tb_search',
+        arguments: {
+          query: 'controlcatalogunique',
+          detail: 'full',
+          effects: ['read'],
+          federation: 'local',
+          matching: 'all',
+          minCoverage: 1,
+          mode: 'keyword',
+          pathPrefix: 'mcp-controls-visible',
+          limit: 20,
+        },
+      })
+      expect(full).toMatchObject({
         structuredContent: {
           items: [{
             path: 'mcp-controls-visible',
-            tool: { name: 'discover_calendar' },
+            tool: {
+              name: 'discover_calendar',
+              inputSchema: { type: 'object', properties: {} },
+            },
           }],
         },
       })
+      expect(JSON.stringify(full.structuredContent)).not.toContain('update_calendar')
+      expect(searchCall).toHaveBeenCalledWith(
+        'controlcatalogunique',
+        expect.objectContaining({
+          matching: 'all',
+          minCoverage: 1,
+          mode: 'keyword',
+          pathPrefix: 'mcp-controls-visible',
+        }),
+      )
 
       await expect(client.callTool({
         name: 'tb_help',
@@ -267,10 +340,12 @@ describe('MCP consumer endpoint', () => {
         name: 'tb_help',
         arguments: { path: 'mcp-controls-hidden' },
       })).resolves.toMatchObject({ isError: true })
+      searchCall.mockClear()
       await expect(client.callTool({
         name: 'tb_search',
         arguments: { query: 'controlcatalogunique', unexpected: true },
       })).rejects.toThrow(/unexpected|additional/i)
+      expect(searchCall).not.toHaveBeenCalled()
     } finally {
       await client.close()
     }

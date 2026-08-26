@@ -22,21 +22,28 @@ import {
   assertKeywordToolSearchMode,
   decodeToolSearchCursor,
   encodeToolSearchCursor,
+  encodeToolSearchCursorForCandidate,
   type MutableSearchIndex,
+  type NormalizedToolSearchOptions,
   normalizeToolSearchLimit,
+  normalizeToolSearchOptions,
   normalizeToolSearchPath,
   normalizeToolSearchQuery,
-  prepareToolSearchUnits,
+  prepareToolSearchQuery,
   type SearchCapability,
   type SearchUnit,
+  searchUnitAllowsPath,
   type SerializedToolSearchRecord,
   serializeToolSearchDocuments,
   serializeToolSearchSnapshot,
   TOOL_SEARCH_AUDIT_NODE_LIMIT,
   TOOL_SEARCH_BATCH_LIMIT,
+  TOOL_SEARCH_UNIT_LIMIT,
   type ToolSearchCandidate,
   type ToolSearchDocument,
+  type ToolSearchEffect,
   type ToolSearchOptions,
+  toolSearchOptionsFingerprint,
   toolSearchSnapshotDigest,
   toolSearchSnapshotDigests,
   toolSearchSnapshotDigestsEqual,
@@ -48,32 +55,33 @@ import { TBError } from '../errors'
  * `join(';')` 后 exec。容量 trigger 把节点上限压在数据库里,不依赖调用方自觉。
  */
 export const TOOL_SEARCH_SCHEMA_STATEMENTS = [
-  `CREATE TABLE IF NOT EXISTS tb_search_tools_v4 (
+  `CREATE TABLE IF NOT EXISTS tb_search_tools_v5 (
     id INTEGER PRIMARY KEY,
     path TEXT NOT NULL,
     name TEXT NOT NULL,
     description TEXT NOT NULL DEFAULT '',
+    effect TEXT NOT NULL CHECK (effect IN ('read', 'write', 'destructive', 'unknown')),
     feedback TEXT NOT NULL DEFAULT '',
     UNIQUE(path, name)
   )`,
-  `CREATE TABLE IF NOT EXISTS tb_search_meta_v4 (
+  `CREATE TABLE IF NOT EXISTS tb_search_meta_v5 (
     singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
     revision INTEGER NOT NULL DEFAULT 0,
     seeded INTEGER NOT NULL DEFAULT 0,
     cursor_secret TEXT NOT NULL
   )`,
-  `INSERT OR IGNORE INTO tb_search_meta_v4(
+  `INSERT OR IGNORE INTO tb_search_meta_v5(
     singleton, revision, seeded, cursor_secret
   ) VALUES (1, 0, 0, lower(hex(randomblob(32))))`,
-  `CREATE TABLE IF NOT EXISTS tb_search_snapshots_v4 (
+  `CREATE TABLE IF NOT EXISTS tb_search_snapshots_v5 (
     path TEXT PRIMARY KEY,
     digest TEXT NOT NULL
   )`,
-  `CREATE TRIGGER IF NOT EXISTS tb_search_snapshots_v4_capacity
-  BEFORE INSERT ON tb_search_snapshots_v4
+  `CREATE TRIGGER IF NOT EXISTS tb_search_snapshots_v5_capacity
+  BEFORE INSERT ON tb_search_snapshots_v5
   WHEN NOT EXISTS (
-    SELECT 1 FROM tb_search_snapshots_v4 WHERE path = new.path
-  ) AND (SELECT COUNT(*) FROM tb_search_snapshots_v4) >= ${TOOL_SEARCH_AUDIT_NODE_LIMIT}
+    SELECT 1 FROM tb_search_snapshots_v5 WHERE path = new.path
+  ) AND (SELECT COUNT(*) FROM tb_search_snapshots_v5) >= ${TOOL_SEARCH_AUDIT_NODE_LIMIT}
   BEGIN
     SELECT RAISE(ABORT, 'tb_search_path_capacity');
   END`,
@@ -82,67 +90,68 @@ export const TOOL_SEARCH_SCHEMA_STATEMENTS = [
 /** 容量 trigger 的 ABORT 标记;驱动抛出的原始错误里含此串即归一为 rate_limited。 */
 export const TOOL_SEARCH_CAPACITY_MARKER = 'tb_search_path_capacity'
 
-/** 逐条插入(位置参数:path, name, description, feedback)。 */
+/** 逐条插入(位置参数:path, name, description, effect, feedback)。 */
 export const TOOL_SEARCH_INSERT_SQL = `
-INSERT INTO tb_search_tools_v4 (path, name, description, feedback)
-VALUES (?, ?, ?, ?)
+INSERT INTO tb_search_tools_v5 (path, name, description, effect, feedback)
+VALUES (?, ?, ?, ?, ?)
 `
 
 /** JSON1 批量插入(单参数:记录数组的 JSON);给有查询预算的宿主省语句数。 */
 export const TOOL_SEARCH_INSERT_JSON_SQL = `
-INSERT INTO tb_search_tools_v4 (path, name, description, feedback)
+INSERT INTO tb_search_tools_v5 (path, name, description, effect, feedback)
 SELECT
   json_extract(value, '$.path'),
   json_extract(value, '$.name'),
   json_extract(value, '$.description'),
+  json_extract(value, '$.effect'),
   json_extract(value, '$.feedback')
 FROM json_each(?)
 `
 
 /** 逐条写 path→digest 快照(位置参数:path, digest)。 */
 export const TOOL_SEARCH_INSERT_SNAPSHOT_SQL
-  = 'INSERT INTO tb_search_snapshots_v4(path, digest) VALUES (?, ?)'
+  = 'INSERT INTO tb_search_snapshots_v5(path, digest) VALUES (?, ?)'
 
 /** JSON1 批量写快照(单参数:`[path, digest]` 二元组数组的 JSON)。 */
 export const TOOL_SEARCH_INSERT_SNAPSHOT_JSON_SQL = `
-INSERT INTO tb_search_snapshots_v4(path, digest)
+INSERT INTO tb_search_snapshots_v5(path, digest)
 SELECT json_extract(value, '$[0]'), json_extract(value, '$[1]') FROM json_each(?)
 `
 
 const META_SQL
-  = 'SELECT revision, seeded, cursor_secret FROM tb_search_meta_v4 WHERE singleton = 1'
+  = 'SELECT revision, seeded, cursor_secret FROM tb_search_meta_v5 WHERE singleton = 1'
 const SNAPSHOT_DIGESTS_SQL
-  = 'SELECT path, digest FROM tb_search_snapshots_v4 ORDER BY path'
+  = 'SELECT path, digest FROM tb_search_snapshots_v5 ORDER BY path'
 /** replace 的前置探测:一次拿到本 path 的 digest、是否残留 source 行、已用节点数。 */
 const PATH_STATE_SQL = `
 SELECT snapshots.digest,
-  EXISTS(SELECT 1 FROM tb_search_tools_v4 WHERE path = ?) AS has_tools,
-  (SELECT COUNT(*) FROM tb_search_snapshots_v4) AS path_count
+  EXISTS(SELECT 1 FROM tb_search_tools_v5 WHERE path = ?) AS has_tools,
+  (SELECT COUNT(*) FROM tb_search_snapshots_v5) AS path_count
 FROM (SELECT 1) AS singleton
-LEFT JOIN tb_search_snapshots_v4 AS snapshots ON snapshots.path = ?
+LEFT JOIN tb_search_snapshots_v5 AS snapshots ON snapshots.path = ?
 `
-const PRESENT_SQL = 'SELECT 1 AS present FROM tb_search_tools_v4 WHERE path = ? LIMIT 1'
+const PRESENT_SQL = 'SELECT 1 AS present FROM tb_search_tools_v5 WHERE path = ? LIMIT 1'
 const PRESENT_PREFIX_SQL = `
-SELECT 1 AS present FROM tb_search_tools_v4
+SELECT 1 AS present FROM tb_search_tools_v5
 WHERE path = ? OR substr(path, 1, length(?) + 1) = ? || '/'
 LIMIT 1
 `
-const DELETE_TOOLS_SQL = 'DELETE FROM tb_search_tools_v4 WHERE path = ?'
-const DELETE_SNAPSHOT_SQL = 'DELETE FROM tb_search_snapshots_v4 WHERE path = ?'
+const DELETE_TOOLS_SQL = 'DELETE FROM tb_search_tools_v5 WHERE path = ?'
+const DELETE_SNAPSHOT_SQL = 'DELETE FROM tb_search_snapshots_v5 WHERE path = ?'
 const DELETE_TOOLS_PREFIX_SQL = `
-DELETE FROM tb_search_tools_v4
+DELETE FROM tb_search_tools_v5
 WHERE path = ? OR substr(path, 1, length(?) + 1) = ? || '/'
 `
 const DELETE_SNAPSHOT_PREFIX_SQL = `
-DELETE FROM tb_search_snapshots_v4
+DELETE FROM tb_search_snapshots_v5
 WHERE path = ? OR substr(path, 1, length(?) + 1) = ? || '/'
 `
-const DELETE_ALL_TOOLS_SQL = 'DELETE FROM tb_search_tools_v4'
-const DELETE_ALL_SNAPSHOTS_SQL = 'DELETE FROM tb_search_snapshots_v4'
+const DELETE_ALL_TOOLS_SQL = 'DELETE FROM tb_search_tools_v5'
+const DELETE_ALL_SNAPSHOTS_SQL = 'DELETE FROM tb_search_snapshots_v5'
 const BUMP_REVISION_SQL
-  = 'UPDATE tb_search_meta_v4 SET revision = revision + 1 WHERE singleton = 1'
+  = 'UPDATE tb_search_meta_v5 SET revision = revision + 1 WHERE singleton = 1'
 const COMPLETE_REBUILD_SQL
-  = 'UPDATE tb_search_meta_v4 SET seeded = 1, revision = revision + 1 WHERE singleton = 1'
+  = 'UPDATE tb_search_meta_v5 SET seeded = 1, revision = revision + 1 WHERE singleton = 1'
 
 /** 一条待执行语句:SQL 文本 + 按序绑定的参数,不含任何驱动对象。 */
 export interface SqlSearchStatement {
@@ -194,6 +203,7 @@ export interface SqlSearchDialect {
     query: string,
     limit: number,
     offset: number,
+    constraints?: NormalizedToolSearchOptions,
   ): SqlSearchStatement
   /** 建表(幂等),元素不带尾分号。 */
   readonly schemaStatements: readonly string[]
@@ -203,8 +213,10 @@ export interface SqlSearchDialect {
 
 interface CandidateRow {
   id: number
+  matched_term_count: number
   name: string
   path: string
+  total_term_count: number
 }
 
 interface MetaRow {
@@ -250,44 +262,123 @@ export interface ToolSearchSqlSyntax {
   placeholder(index: number): string
 }
 
+/** effect filter 直接写受控 SQL literal，不把用户输入拼进 SQL，也不占 D1 binding。 */
+function toolSearchEffectSql(effect: ToolSearchEffect): string {
+  switch (effect) {
+    case 'read': return '\'read\''
+    case 'write': return '\'write\''
+    case 'destructive': return '\'destructive\''
+    case 'unknown': return '\'unknown\''
+    default: throw new TBError('invalid_argument', `工具搜索 effect '${String(effect)}' 非法`)
+  }
+}
+
 /**
  * 三后端候选查询的唯一 SQL 生成器。
  *
- * 每个查询单元只要命中任意索引字段即可召回；tier 与字段权重相乘后逐单元求和。
- * 高 tier 与高权字段通常靠前，但总分不额外承诺“覆盖全部 term”绝对优先。参数只
- * 包含 escaped LIKE pattern、limit 与 offset，tier 和 SQL syntax 都来自受控常量。
+ * 每个查询单元只要命中任意索引字段即可召回。派生单元先按
+ * `(tool, logicalTermId)` 取最佳 tier×字段权重，因此一个原始 term 无论命中多少
+ * 派生 unit/字段，coverage 都只计一次。最终先按 matched logical terms，再按既有
+ * 字段质量总分排序。pathPrefix 在召回 CTE 内按 segment 过滤，只占一个 binding；
+ * floor 用受控整数直接写入 SQL。无 prefix 时保留 98+2 bindings，有 prefix 时使用
+ * 97 units + prefix + limit/offset，最坏仍不超过 D1 的 100 bindings。
  */
 export function toolSearchCandidateStatement(
   units: readonly SearchUnit[],
+  totalTermCount: number,
   limit: number,
   offset: number,
+  constraints: NormalizedToolSearchOptions,
   syntax: ToolSearchSqlSyntax,
 ): SqlSearchStatement {
+  if (
+    !Number.isInteger(totalTermCount)
+    || totalTermCount < 1
+    || units.some(unit =>
+      !Number.isInteger(unit.logicalTermId)
+      || unit.logicalTermId < 0
+      || unit.logicalTermId >= totalTermCount)
+  ) {
+    throw new TBError('invalid_argument', '工具搜索 logical term 计划非法')
+  }
   const values = units.map((unit, index) =>
-    `(${syntax.placeholder(index + 1)}, ${unit.tier})`).join(', ')
-  const limitParam = syntax.placeholder(units.length + 1)
-  const offsetParam = syntax.placeholder(units.length + 2)
+    `(${unit.logicalTermId}, ${syntax.placeholder(index + 1)}, ${unit.tier}, ${
+      searchUnitAllowsPath(unit) ? 1 : 0
+    })`).join(', ')
+  const hasPrefix = constraints.pathPrefix !== undefined
+  const prefixParam = hasPrefix ? syntax.placeholder(units.length + 1) : undefined
+  const trailingStart = units.length + (hasPrefix ? 2 : 1)
+  const limitParam = syntax.placeholder(trailingStart)
+  const offsetParam = syntax.placeholder(trailingStart + 1)
+  const requiredMatchedTerms = constraints.minCoverage === undefined
+    ? 1
+    : Math.ceil(constraints.minCoverage * totalTermCount)
   const like = syntax.likeOperator
+  const effectLiterals = constraints.effects?.map(toolSearchEffectSql)
+  const prefixCte = hasPrefix
+    ? `, prefix_filter(value) AS (VALUES (${prefixParam}))`
+    : ''
+  const filterPredicates = [
+    ...(hasPrefix
+      ? [
+          `(
+            tools.path = prefix_filter.value
+            OR substr(tools.path, 1, length(prefix_filter.value) + 1)
+              = prefix_filter.value || '/'
+          )`,
+        ]
+      : []),
+    ...(effectLiterals === undefined ? [] : [`tools.effect IN (${effectLiterals.join(', ')})`]),
+  ]
+  const filteredToolsCte = filterPredicates.length > 0
+    ? `,
+      filtered_tools AS (
+        SELECT tools.*
+        FROM tb_search_tools_v5 AS tools
+        ${hasPrefix ? 'CROSS JOIN prefix_filter' : ''}
+        WHERE ${filterPredicates.join('\n          AND ')}
+      )`
+    : ''
+  const candidateTable = filterPredicates.length > 0 ? 'filtered_tools' : 'tb_search_tools_v5'
   return {
-    params: [...units.map(unit => unit.pattern), limit + 1, offset],
+    params: [
+      ...units.map(unit => unit.pattern),
+      ...(hasPrefix ? [constraints.pathPrefix] : []),
+      limit + 1,
+      offset,
+    ],
     sql: `
-      WITH units(pattern, tier) AS (VALUES ${values})
-      SELECT * FROM (
-        SELECT tools.id, tools.path, tools.name,
-          (
-            SELECT COALESCE(SUM(units.tier * CASE
-              WHEN tools.name ${like} units.pattern ESCAPE '!' THEN 10
-              WHEN tools.path ${like} units.pattern ESCAPE '!' THEN 5
-              WHEN tools.description ${like} units.pattern ESCAPE '!' THEN 3
-              WHEN tools.feedback ${like} units.pattern ESCAPE '!' THEN 1
-              ELSE 0
-            END), 0)
-            FROM units
-          ) AS score
-        FROM tb_search_tools_v4 AS tools
-      ) AS scored_tools
-      WHERE score > 0
-      ORDER BY score DESC, path, name
+      WITH units(logical_term_id, pattern, tier, path_allowed) AS (VALUES ${values})${prefixCte}${filteredToolsCte},
+      unit_matches AS (
+        SELECT tools.id, tools.path, tools.name, units.logical_term_id,
+          units.tier * CASE
+            WHEN tools.name ${like} units.pattern ESCAPE '!' THEN 10
+            WHEN units.path_allowed = 1
+              AND tools.path ${like} units.pattern ESCAPE '!' THEN 5
+            WHEN tools.description ${like} units.pattern ESCAPE '!' THEN 3
+            WHEN tools.feedback ${like} units.pattern ESCAPE '!' THEN 1
+            ELSE 0
+          END AS unit_score
+        FROM ${candidateTable} AS tools
+        CROSS JOIN units
+      ),
+      term_matches AS (
+        SELECT id, path, name, logical_term_id, MAX(unit_score) AS term_score
+        FROM unit_matches
+        WHERE unit_score > 0
+        GROUP BY id, path, name, logical_term_id
+      ),
+      scored_tools AS (
+        SELECT id, path, name,
+          CAST(COUNT(*) AS INTEGER) AS matched_term_count,
+          CAST(SUM(term_score) AS INTEGER) AS score
+        FROM term_matches
+        GROUP BY id, path, name
+      )
+      SELECT id, path, name, matched_term_count, ${totalTermCount} AS total_term_count
+      FROM scored_tools
+      WHERE matched_term_count >= ${requiredMatchedTerms}
+      ORDER BY matched_term_count DESC, score DESC, path, name
       LIMIT ${limitParam} OFFSET ${offsetParam}
     `,
   }
@@ -299,6 +390,7 @@ export function toolSearchInsertPayload(
 ): Array<Record<string, unknown>> {
   return records.map(record => ({
     description: record.description,
+    effect: record.effect,
     feedback: record.feedback,
     name: record.name,
     path: record.path,
@@ -307,13 +399,23 @@ export function toolSearchInsertPayload(
 
 /** SQLite 方言:D1 与 better-sqlite3 共用纯 LIKE；占位符是 `?`。 */
 export const sqliteSearchDialect: SqlSearchDialect = {
-  candidateStatement: (query, limit, offset) =>
-    toolSearchCandidateStatement(
-      prepareToolSearchUnits(query),
+  candidateStatement: (query, limit, offset, rawConstraints) => {
+    const constraints = normalizeToolSearchOptions(rawConstraints)
+    const prepared = prepareToolSearchQuery(
+      query,
+      constraints.pathPrefix === undefined
+        ? TOOL_SEARCH_UNIT_LIMIT
+        : TOOL_SEARCH_UNIT_LIMIT - 1,
+    )
+    return toolSearchCandidateStatement(
+      prepared.units,
+      prepared.totalTermCount,
       limit,
       offset,
+      constraints,
       { likeOperator: 'LIKE', placeholder: () => '?' },
-    ),
+    )
+  },
   schemaStatements: TOOL_SEARCH_SCHEMA_STATEMENTS,
   statements: {
     bumpRevision: BUMP_REVISION_SQL,
@@ -374,6 +476,11 @@ export class SqlSearchIndex implements MutableSearchIndex {
   async initialized(): Promise<boolean> {
     await this.driver.ensureSchema()
     return (await this.meta()).seeded === 1
+  }
+
+  async revision(): Promise<number> {
+    await this.driver.ensureSchema()
+    return (await this.meta()).revision
   }
 
   async replace(
@@ -477,6 +584,8 @@ export class SqlSearchIndex implements MutableSearchIndex {
   async search(query: string, opts?: ToolSearchOptions): Promise<Page<ToolSearchCandidate>> {
     assertKeywordToolSearchMode(opts)
     const normalized = normalizeToolSearchQuery(query)
+    const constraints = normalizeToolSearchOptions(opts)
+    const optionsFingerprint = toolSearchOptionsFingerprint(constraints)
     const mode = opts?.mode ?? 'keyword'
     await this.driver.ensureSchema()
     const meta = await this.meta()
@@ -487,20 +596,31 @@ export class SqlSearchIndex implements MutableSearchIndex {
       mode,
       revision,
       meta.cursor_secret,
+      constraints,
     )
     const limit = Math.min(normalizeToolSearchLimit(opts?.limit), TOOL_SEARCH_BATCH_LIMIT)
     const rows = await this.driver.all<CandidateRow>(
-      this.dialect.candidateStatement(normalized, limit, offset),
+      this.dialect.candidateStatement(normalized, limit, offset, constraints),
     )
-    // 多取一条只为判断 hasMore,不进入返回页。
-    const hasMore = rows.length > limit
-    const page = hasMore ? rows.slice(0, limit) : rows
+    // best 每页只暴露当前最高 coverage band；若下一行已降档，cursor 正好落在
+    // band 边界，续页再以剩余结果的最高档开页。all 已由 SQL 收紧为 full coverage。
+    const firstBand = rows[0]?.matched_term_count
+    const bandEnd = constraints.matching === 'best' && firstBand !== undefined
+      ? rows.findIndex(row => row.matched_term_count !== firstBand)
+      : -1
+    const pageLength = bandEnd >= 0 ? Math.min(limit, bandEnd) : Math.min(limit, rows.length)
+    const page = rows.slice(0, pageLength)
+    const hasMore = rows.length > page.length
     const items = page.map((row, index): ToolSearchCandidate => ({
+      coverage: row.matched_term_count / row.total_term_count,
+      matchedTermCount: row.matched_term_count,
       name: row.name,
       path: row.path,
       ref: String(row.id),
       resumeOffset: offset + index + 1,
       revision,
+      searchOptionsFingerprint: optionsFingerprint,
+      totalTermCount: row.total_term_count,
     }))
     const last = items[items.length - 1]
     return hasMore && last !== undefined
@@ -512,6 +632,7 @@ export class SqlSearchIndex implements MutableSearchIndex {
             revision,
             last.resumeOffset,
             meta.cursor_secret,
+            constraints,
           ),
         }
       : { items }
@@ -527,11 +648,10 @@ export class SqlSearchIndex implements MutableSearchIndex {
     if (candidate.revision !== meta.revision) {
       throw new TBError('invalid_argument', '搜索 cursor 已失效')
     }
-    return await encodeToolSearchCursor(
+    return await encodeToolSearchCursorForCandidate(
       query,
       mode,
-      meta.revision,
-      candidate.resumeOffset,
+      candidate,
       meta.cursor_secret,
     )
   }

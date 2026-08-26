@@ -2,13 +2,16 @@ import {
   assertKeywordToolSearchMode,
   decodeToolSearchCursor,
   encodeToolSearchCursor,
+  encodeToolSearchCursorForCandidate,
   type MutableSearchIndex,
   normalizeToolSearchLimit,
+  normalizeToolSearchOptions,
   normalizeToolSearchPath,
   normalizeToolSearchQuery,
   type Page,
-  prepareToolSearchUnits,
+  prepareToolSearchQuery,
   type SearchCapability,
+  searchUnitAllowsPath,
   type SerializedToolSearchRecord,
   serializeToolSearchDocuments,
   serializeToolSearchSnapshot,
@@ -18,6 +21,7 @@ import {
   type ToolSearchCandidate,
   type ToolSearchDocument,
   type ToolSearchOptions,
+  toolSearchOptionsFingerprint,
   toolSearchSnapshotDigest,
   type ToolSpec,
   type TreePath,
@@ -68,24 +72,39 @@ function likePatternLiteral(pattern: string): string {
   return literal.toLowerCase()
 }
 
-/** 部分命中即召回;每个单元只计入权重最高的命中字段。 */
+interface RecordScore {
+  matchedTermCount: number
+  score: number
+}
+
+/**
+ * 每个派生 unit 只计入权重最高的命中字段；同一 logical term
+ * 又只保留最高 unit score，与 SQL `term_matches MAX(unit_score)` 对齐。
+ */
 function scoreRecord(
   record: SerializedToolSearchRecord,
-  units: ReturnType<typeof prepareToolSearchUnits>,
-): number {
+  units: ReturnType<typeof prepareToolSearchQuery>['units'],
+): RecordScore {
   const name = record.name.toLowerCase()
   const path = record.path.toLowerCase()
   const description = record.description.toLowerCase()
   const feedback = record.feedback.toLowerCase()
-  let total = 0
+  const termScores = new Map<number, number>()
   for (const unit of units) {
     const literal = likePatternLiteral(unit.pattern)
-    if (name.includes(literal)) total += unit.tier * 10
-    else if (path.includes(literal)) total += unit.tier * 5
-    else if (description.includes(literal)) total += unit.tier * 3
-    else if (feedback.includes(literal)) total += unit.tier
+    let unitScore = 0
+    if (name.includes(literal)) unitScore = unit.tier * 10
+    else if (searchUnitAllowsPath(unit) && path.includes(literal)) unitScore = unit.tier * 5
+    else if (description.includes(literal)) unitScore = unit.tier * 3
+    else if (feedback.includes(literal)) unitScore = unit.tier
+    if (unitScore > (termScores.get(unit.logicalTermId) ?? 0)) {
+      termScores.set(unit.logicalTermId, unitScore)
+    }
   }
-  return total
+  return {
+    matchedTermCount: termScores.size,
+    score: [...termScores.values()].reduce((total, score) => total + score, 0),
+  }
 }
 
 export class MemorySearchIndex implements MutableSearchIndex {
@@ -96,7 +115,7 @@ export class MemorySearchIndex implements MutableSearchIndex {
   private nextRef = 1
   /** path+name → 稳定 ref(对应 D1 的 rowid)。 */
   private readonly refs = new Map<string, string>()
-  private revision = 0
+  private indexRevision = 0
   private seeded = false
   /** path → 该节点的完整快照(replace 的写入单位是节点,不是单条工具)。 */
   private readonly snapshots = new Map<TreePath, {
@@ -109,14 +128,13 @@ export class MemorySearchIndex implements MutableSearchIndex {
     candidate: ToolSearchCandidate,
     mode: 'keyword' | 'semantic' = 'keyword',
   ): Promise<string> {
-    if (candidate.revision !== this.revision) {
+    if (candidate.revision !== this.indexRevision) {
       throw new TBError('invalid_argument', '搜索 cursor 已失效')
     }
-    return await encodeToolSearchCursor(
+    return await encodeToolSearchCursorForCandidate(
       query,
       mode,
-      candidate.revision,
-      candidate.resumeOffset,
+      candidate,
       this.cursorSecret,
     )
   }
@@ -127,18 +145,27 @@ export class MemorySearchIndex implements MutableSearchIndex {
 
   async rebuild(documents: readonly ToolSearchDocument[]): Promise<void> {
     const records = serializeToolSearchDocuments(documents)
+    const desired = groupByPath(records)
+    if (
+      this.seeded
+      && desired.size === this.snapshots.size
+      && [...desired].every(([path, group]) =>
+        this.snapshots.get(path)?.digest === toolSearchSnapshotDigest(group))
+    ) {
+      return
+    }
     this.snapshots.clear()
-    for (const [path, group] of groupByPath(records)) {
+    for (const [path, group] of desired) {
       this.snapshots.set(path, { digest: toolSearchSnapshotDigest(group), records: group })
     }
     this.seeded = true
-    this.revision += 1
+    this.indexRevision += 1
   }
 
   async remove(path: TreePath): Promise<void> {
     const canonical = normalizeToolSearchPath(path)
     if (!this.snapshots.delete(canonical)) return
-    this.revision += 1
+    this.indexRevision += 1
   }
 
   async removePrefix(path: TreePath): Promise<void> {
@@ -150,7 +177,11 @@ export class MemorySearchIndex implements MutableSearchIndex {
       this.snapshots.delete(key)
       removed = true
     }
-    if (removed) this.revision += 1
+    if (removed) this.indexRevision += 1
+  }
+
+  async revision(): Promise<number> {
+    return this.indexRevision
   }
 
   async replace(
@@ -164,7 +195,7 @@ export class MemorySearchIndex implements MutableSearchIndex {
     if (records.length === 0) {
       if (current === undefined) return
       this.snapshots.delete(canonical)
-      this.revision += 1
+      this.indexRevision += 1
       return
     }
     const digest = toolSearchSnapshotDigest(records)
@@ -174,45 +205,65 @@ export class MemorySearchIndex implements MutableSearchIndex {
       throw new TBError('rate_limited', '工具搜索索引节点容量已满')
     }
     this.snapshots.set(canonical, { digest, records })
-    this.revision += 1
+    this.indexRevision += 1
   }
 
   async search(query: string, opts?: ToolSearchOptions): Promise<Page<ToolSearchCandidate>> {
     assertKeywordToolSearchMode(opts)
     const normalized = normalizeToolSearchQuery(query)
+    const constraints = normalizeToolSearchOptions(opts)
+    const optionsFingerprint = toolSearchOptionsFingerprint(constraints)
     const mode = opts?.mode ?? 'keyword'
-    const revision = this.revision
+    const revision = this.indexRevision
     const offset = await decodeToolSearchCursor(
       opts?.cursor,
       normalized,
       mode,
       revision,
       this.cursorSecret,
+      constraints,
     )
     const limit = Math.min(normalizeToolSearchLimit(opts?.limit), TOOL_SEARCH_BATCH_LIMIT)
 
-    const units = prepareToolSearchUnits(normalized)
+    const prepared = prepareToolSearchQuery(normalized)
+    const requiredMatchedTerms = constraints.minCoverage === undefined
+      ? 1
+      : Math.ceil(constraints.minCoverage * prepared.totalTermCount)
+    const pathPrefix = constraints.pathPrefix
     const matched = [...this.snapshots.values()]
       .flatMap(snapshot => snapshot.records)
-      .map(record => ({ record, score: scoreRecord(record, units) }))
-      .filter(entry => entry.score > 0)
-      // name(10) / path(5) / description(3) / feedback(1) 加权;
-      // 同分按 path、name 稳定排序,保证分页确定。
+      .filter(record =>
+        (pathPrefix === undefined
+          || record.path === pathPrefix
+          || record.path.startsWith(`${pathPrefix}/`))
+        && (constraints.effects === undefined || constraints.effects.includes(record.effect)))
+      .map(record => ({ record, ...scoreRecord(record, prepared.units) }))
+      .filter(entry => entry.matchedTermCount >= requiredMatchedTerms)
+      // distinct logical term coverage 优先，再按 term-best score、path、name 稳定排序。
       .sort((a, b) =>
-        b.score - a.score
+        b.matchedTermCount - a.matchedTermCount
+        || b.score - a.score
         || compare(a.record.path, b.record.path)
         || compare(a.record.name, b.record.name))
-      .map(entry => entry.record)
 
     const window = matched.slice(offset, offset + limit + 1)
-    const hasMore = window.length > limit
-    const page = hasMore ? window.slice(0, limit) : window
-    const items = page.map((record, index): ToolSearchCandidate => ({
-      name: record.name,
-      path: record.path,
-      ref: this.refFor(record),
+    const firstBand = window[0]?.matchedTermCount
+    const bandEnd = constraints.matching === 'best' && firstBand !== undefined
+      ? window.findIndex(entry => entry.matchedTermCount !== firstBand)
+      : -1
+    const pageLength = bandEnd >= 0 ? Math.min(limit, bandEnd) : Math.min(limit, window.length)
+    const page = window.slice(0, pageLength)
+    const hasMore = window.length > page.length
+    const items = page.map((entry, index): ToolSearchCandidate => ({
+      coverage: entry.matchedTermCount / prepared.totalTermCount,
+      matchedTermCount: entry.matchedTermCount,
+      name: entry.record.name,
+      path: entry.record.path,
+      ref: this.refFor(entry.record),
       resumeOffset: offset + index + 1,
       revision,
+      searchOptionsFingerprint: optionsFingerprint,
+      totalTermCount: prepared.totalTermCount,
     }))
     const last = items[items.length - 1]
     if (!hasMore || last === undefined) return { items }
@@ -224,6 +275,7 @@ export class MemorySearchIndex implements MutableSearchIndex {
         revision,
         last.resumeOffset,
         this.cursorSecret,
+        constraints,
       ),
     }
   }

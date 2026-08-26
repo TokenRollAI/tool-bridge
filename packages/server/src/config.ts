@@ -11,6 +11,7 @@ import {
   parseNonNegativeIntEnv,
   parsePortEnv,
   parseRuntimeEnv,
+  type RuntimeRemoteSettings,
 } from '@tool-bridge/core'
 
 const DEFAULT_PORT = 8787
@@ -77,12 +78,7 @@ export interface ServerConfig {
   redisUrl?: string
   refThresholdBytes?: number
   refTtlSec?: number
-  remote: {
-    allowInsecure: boolean
-    allowlist: string[]
-    instanceId?: string
-    maxHops: number
-  }
+  remote: RuntimeRemoteSettings
   /**
    * 本副本标识(TB_REPLICA_ID),路由表的 value。缺省用 hostname —— 容器平台上
    * 每个副本的 hostname 天然唯一;同机多进程需显式区分。

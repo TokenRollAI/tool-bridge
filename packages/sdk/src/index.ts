@@ -27,6 +27,7 @@ export { createToolBridge } from './toolBridge'
 export type {
   Connection,
   ConnectOptions,
+  FederatedSearchConfig,
   SdkConnection,
   ToolBridge,
   ToolBridgeConfig,

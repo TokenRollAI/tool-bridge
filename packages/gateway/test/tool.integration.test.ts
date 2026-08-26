@@ -240,7 +240,6 @@ describe('tool cache → SearchIndex 自动同步', () => {
         tool: {
           name: 'cache_search_probe',
           description: 'uniquecacheprobe tool',
-          inputSchema: { type: 'object' },
         },
       }],
     })
@@ -251,7 +250,7 @@ describe('tool cache → SearchIndex 自动同步', () => {
     ))).toEqual([])
   })
 
-  it('indexes a Feishu-sized MCP catalog while returning complete canonical ToolSpecs', async () => {
+  it('indexes a Feishu-sized MCP catalog while returning compact canonical metadata', async () => {
     const description = `feishucatalogunique ${'长描述'.repeat(2_000)}`
     const tools = Array.from({ length: 8 }, (_, index) => ({
       name: `feishu_large_probe_${index}`,
@@ -276,8 +275,11 @@ describe('tool cache → SearchIndex 自动同步', () => {
     expect(page.items).toHaveLength(8)
     expect(page.items[0]).toMatchObject({
       path: 'ext/search-large-cache',
-      tool: { description, name: 'feishu_large_probe_0' },
+      tool: { name: 'feishu_large_probe_0' },
     })
+    const compactBytes = new TextEncoder().encode(page.items[0]?.tool.description ?? '').length
+    expect(compactBytes).toBeGreaterThan(0)
+    expect(compactBytes).toBeLessThanOrEqual(1024)
   })
 })
 

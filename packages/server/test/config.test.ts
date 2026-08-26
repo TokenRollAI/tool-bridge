@@ -98,6 +98,33 @@ describe('configFromEnv 后端选择', () => {
   })
 })
 
+describe('configFromEnv 联邦搜索', () => {
+  it('把共享 runtime env 解析结果完整注入 remote 配置', () => {
+    expect(configFromEnv({
+      ...base,
+      TB_INSTANCE_ID: 'node-a',
+      TB_SEARCH_FEDERATION_CONCURRENCY: '3',
+      TB_SEARCH_FEDERATION_DEADLINE_MS: '1800',
+      TB_SEARCH_FEDERATION_MAX_RESPONSE_BYTES: '262144',
+      TB_SEARCH_FEDERATION_MAX_SOURCES: '9',
+      TB_SEARCH_FEDERATION_MIN_CHILD_WORK_MS: '150',
+      TB_SEARCH_FEDERATION_RETURN_RESERVE_MS: '80',
+      TB_SEARCH_FEDERATION_SESSION_TTL_SEC: '90',
+    }).remote).toMatchObject({
+      federatedSearch: {
+        maxConcurrency: 3,
+        maxResponseBodyBytes: 262_144,
+        maxSources: 9,
+        minChildWorkMs: 150,
+        perHopReturnReserveMs: 80,
+        sessionTtlMs: 90_000,
+        totalDeadlineMs: 1_800,
+      },
+      instanceId: 'node-a',
+    })
+  })
+})
+
 describe('configFromEnv presign TTL', () => {
   it('下载与上传分别解析，并钳制到 SigV4 七天上限', () => {
     const config = configFromEnv({

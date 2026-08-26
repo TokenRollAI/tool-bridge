@@ -138,7 +138,7 @@ function mcpBridgeFor(c: AppContext, env: RouteEnv, app: TbHono): McpToolBridge 
           invokePath: '/~search',
           mcpName: 'tb_search',
           operation: 'search' as const,
-          description: 'Search visible tools across the Tool Bridge tree.',
+          description: 'Search visible tools across the Tool Bridge tree (compact by default).',
           effect: 'read',
           inputSchema: {
             type: 'object',
@@ -148,6 +148,19 @@ function mcpBridgeFor(c: AppContext, env: RouteEnv, app: TbHono): McpToolBridge 
               mode: { type: 'string', enum: ['keyword', 'semantic'] },
               limit: { type: 'integer', minimum: 1, maximum: 200 },
               cursor: { type: 'string', minLength: 1 },
+              detail: { type: 'string', enum: ['compact', 'full'], default: 'compact' },
+              effects: {
+                type: 'array',
+                minItems: 1,
+                items: {
+                  type: 'string',
+                  enum: ['read', 'write', 'destructive', 'unknown'],
+                },
+              },
+              federation: { type: 'string', enum: ['local', 'recursive'] },
+              matching: { type: 'string', enum: ['best', 'all'] },
+              minCoverage: { type: 'number', exclusiveMinimum: 0, maximum: 1 },
+              pathPrefix: { type: 'string', minLength: 1 },
             },
             required: ['query'],
           },
@@ -374,17 +387,29 @@ function mcpBridgeFor(c: AppContext, env: RouteEnv, app: TbHono): McpToolBridge 
         if (tool.operation === 'search') {
           headers.set('accept', 'application/json')
           headers.set('content-type', 'application/json')
-          const opts = Object.fromEntries(
-            ['mode', 'limit', 'cursor']
-              .filter(key => args[key] !== undefined)
-              .map(key => [key, args[key]]),
-          )
+          const opts = {
+            detail: args.detail ?? 'compact',
+            ...Object.fromEntries(
+              [
+                'mode',
+                'limit',
+                'cursor',
+                'effects',
+                'federation',
+                'matching',
+                'minCoverage',
+                'pathPrefix',
+              ]
+                .filter(key => args[key] !== undefined)
+                .map(key => [key, args[key]]),
+            ),
+          }
           const response = await app.request(new Request(new URL('/~search', c.req.url), {
             method: 'POST',
             headers,
             body: JSON.stringify({
               query: args.query,
-              ...(Object.keys(opts).length === 0 ? {} : { opts }),
+              opts,
             }),
           }))
           return await resultFromResponse(response)

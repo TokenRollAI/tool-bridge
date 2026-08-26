@@ -32,6 +32,17 @@ export interface ToolProviderLike {
  */
 export type ToolSource = OperationRegistry | ToolProviderLike
 
+/** SDK 宿主对联邦搜索施加的部署级硬上限；缺省字段由 app 使用安全默认值。 */
+export interface FederatedSearchConfig {
+  maxConcurrency?: number
+  maxResponseBodyBytes?: number
+  maxSources?: number
+  minChildWorkMs?: number
+  perHopReturnReserveMs?: number
+  sessionTtlMs?: number
+  totalDeadlineMs?: number
+}
+
 /** createToolBridge 配置(标准签名 + SDK 引导扩展,后者见各字段注释)。 */
 export interface ToolBridgeConfig {
   /**
@@ -43,6 +54,8 @@ export interface ToolBridgeConfig {
   allowInsecureHttp?: boolean
   /** secrets 缺省实现的主密钥(base64url 32B);缺省取 env TB_SECRET_ENCRYPTION_KEY。 */
   encryptionKey?: string
+  /** 联邦搜索并发、deadline、响应体与 continuation session 的部署级硬上限。 */
+  federatedSearch?: FederatedSearchConfig
   /** 本实例 X-TB-Via 标识(缺省用入站 host 派生)。 */
   instanceId?: string
   /** X-TB-Via 跳数上限;默认 4。 */
