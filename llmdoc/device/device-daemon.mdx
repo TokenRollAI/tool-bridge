@@ -17,8 +17,9 @@ code:
 
 - 以实际运行设备连接的普通 Linux 用户执行;禁止 `sudo tb daemon ...` 或 root 用户。
 - 先准备只允许目标设备路径 `register` 的最小权限 Device SK;不要复用 Admin SK。
-- `install` 与前台 `tb connect` 共用网关、设备、shell 和文件系统暴露参数(解析在 `commands/connect.ts`)。Shell 默认不允许命令,只有显式 `--allow` 的命令可执行。
+- `install` 与前台 `tb connect` 共用网关、设备、shell、文件系统和 structured command profile 暴露参数(解析在 `commands/connect.ts`)。Shell 默认不允许命令,只有显式 `--allow` 的命令可执行。
 - `--allow '*'` 会按该 Linux 用户的权限开放任意远程 shell 命令。交互终端必须二次确认;非交互环境必须显式传 `--yes`。
+- 可重复 `--command-profile <file>` 暴露预声明的结构化命令;优先配合 `--no-shell` 只开放所需操作。profile 是 strict JSON,设备所有者必须为每条命令固定 executable、argv 模板并显式声明 `read | write | destructive` effect;平台不从命令文本推断安全等级。
 
 ## 安装或更新
 
@@ -26,18 +27,30 @@ code:
 tb daemon install \
   --device-id build-01 \
   --path device/build-01 \
-  --allow git \
-  --allow npm
+  --no-shell \
+  --command-profile ./device-ops.json
 ```
+
+structured command profile v1 的顶层字段是 `version:1`、`path`、`description`、`commands`。每条 command
+固定 `name`、`description`、`executable` 和 `effect`,可用 argv 槽声明 strict 的 string/number/boolean 输入、
+choice、flag、required/multiple,并限制 `cwd`、`timeoutMs`、`maxOutputBytes` 与按名称继承的环境变量。
+未知字段、NUL、规范化后的重名和非法组合在启动进程前拒绝;destructive 命令强制 `confirm:true`,但 confirm
+只是 Help metadata,不代替 gateway scope 或调用者审批纪律。执行恒为 direct argv 的
+`spawn(executable, argv, {shell:false})`;profile 若主动把 shell 程序作为 executable,仍可重新引入 shell 能力。
 
 `install` 会:
 
-1. 把当前解析出的网关、SK、设备标识与 expose 配置冻结到 daemon 专用配置。
+1. 把当前解析出的网关、SK、设备标识、expose 配置与已校验/规范化的 structured command profile 冻结到 daemon 专用配置。服务重启不会重读原 profile 文件,源文件移动或修改也不会静默改变已安装 daemon。
 2. 将配置写入权限 `0600` 的独立文件;systemd unit 和进程 argv 只引用配置路径,不包含 SK。
 3. 安装并启用 systemd user service,同时启用 login linger,使服务不依赖 SSH 登录会话。
 4. restart 服务,并等待当前配置 revision 对应的设备连接进入 `ready` 后才成功返回。
 
 重复执行 `install` 是更新操作:即使服务已经 active 也会 restart,让新配置立即生效。安装、启动或等待 ready 失败时,恢复安装前的配置、状态和 unit;此前已有服务时还会尝试恢复旧服务。
+
+structured child 缺省只继承 HOME/PATH、locale、用户、临时目录和时区等基础环境。`inheritEnv` 保存并解析的是
+本机环境变量名,不是 SecretStore 引用;显式列入 token/云凭证会把值交给 child,当前也没有 secret-aware 输出
+脱敏或执行后清零保证。profile 能执行该设备用户有权运行的任意程序,因此 `0600` 配置、最小 Device SK、
+普通用户运行与对 profile 变更的审查仍是安全下界。
 
 启用 linger 可能需要一次管理员权限。交互安装只会为固定的 `loginctl enable-linger <user>` 操作请求 sudo;不要因此用 sudo 运行整个 `tb daemon`。非交互安装无法启用 linger 时,会给出需要管理员执行的固定命令。
 
@@ -66,8 +79,10 @@ tb daemon uninstall
 - install/restart 以当前 revision 的 `ready` 为成功条件,错误或超时会失败;
 - 重复 install 会 restart,失败更新会恢复旧文件与旧服务;
 - 非 Linux、root 或 sudo 调用被拒绝,`--allow '*'` 需要明确确认;
+- profile strict parse、命令/路径 canonicalization、shell/fs/profile 路径冲突和 direct argv dispatch;
+- install 保存规范化 profile 值而非源文件路径,后续 run 使用冻结值;
 - uninstall 不修改登录 profile,也不承担服务端 SK 吊销。
 
-这些 stub 测试不能证明真实发行环境中的 systemd user bus、linger 跨注销/重启行为、journal 权限或真实网关 WebSocket 注册。需要该级别保证时,在目标 Linux 发行版上以普通用户完成一次真实安装,退出 SSH 或重启后再检查 `tb daemon status` 和服务端设备状态;真实外部资源验证仍遵守每轮最多一次的项目约束。
+这些 stub 测试不能证明真实发行环境中的 systemd user bus、linger 跨注销/重启行为、journal 权限、真实网关 WebSocket 注册或目标 executable 在真实 Linux 上的权限/进程树行为。需要该级别保证时,在目标 Linux 发行版上以普通用户完成一次真实安装,退出 SSH 或重启后再检查 `tb daemon status` 和服务端设备状态;真实外部资源验证仍遵守每轮最多一次的项目约束。
 
 注意:验证工具链本身可能制造假象——曾出现 pnpm 版本包装器让命令"看似执行"的情况。最终验收要用项目锁定的真实 pnpm 并检查退出码,不轻信中间层的成功输出。

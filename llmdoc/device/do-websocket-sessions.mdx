@@ -32,7 +32,25 @@ Cloudflare 设备连接由 Durable Object(`DeviceSession`)持有。正确性不�
 
 设备反向注册的稳定 wire 是 raw WebSocket 上的 core JSON frame，不是 Socket.IO/Engine.IO 协议。Socket.IO client 不能直接连接当前 endpoint；同时更换两端也不会代替 generation、presence、reclaim、call/result/cancel 或 Store capability 这些服务端权威状态机，反而增加第二层协议。因此服务端保留 raw WS；客户端可使用 PartySocket 的 reconnect transport，但不引入 PartyServer/rooms 来重新定义连接归属。
 
-可复用的边界是 `@tool-bridge/sdk/device` 的 portable connection supervisor：它持有 reconnect、heartbeat、credential refresh、suspend/resume 与 call dispatch；Node CLI、React Native 等宿主只注入 WebSocket factory 和凭证 provider。CLI 的 `deviceRuntime.ts` 可保留 shell/FS 处理与 `ws` adapter，不得复制 supervisor 状态机。任何未来协议替换都必须先证明上述安全不变量和 Workers DO hibernation 语义仍可保持，不能只以 rooms/reconnect API 更便利为理由。
+可复用的边界是 `@tool-bridge/sdk/device` 的 portable connection supervisor：它持有 reconnect、heartbeat、credential refresh、suspend/resume 与 call dispatch；Node CLI、React Native 等宿主只注入 WebSocket factory 和凭证 provider。CLI 的 `deviceRuntime.ts` 可保留 shell/FS/structured process dispatch 与 `ws` adapter，不得复制 supervisor 状态机。任何未来协议替换都必须先证明上述安全不变量和 Workers DO hibernation 语义仍可保持，不能只以 rooms/reconnect API 更便利为理由。
+
+## Linux process 暴露与终态
+
+Linux CLI/daemon 的 structured command profile 只是在已有 `DeviceExpose.nodes` 中产生 `kind:'tool'` 节点,
+command metadata 携带 strict input/output schema、设备所有者声明的 effect 与 confirm。wire 继续使用既有
+hello/expose、call、result、cancel,没有增加 operation frame 或另一套调用协议。任意 `shell/exec` 仍保持
+`effect:destructive + confirm:true`,不能按 shell 字符串或命令名启发式降级。
+
+shell 与 structured command 的最终结果保留 `stdout/stderr/exitCode`,并附加
+`startedAt/completedAt`、`outcome: exited | signaled | timed_out`、可选 signal 以及两条输出流各自的截断标志。
+正常非零 exit code 仍是 `outcome:exited`;调用方必须检查 exitCode/outcome,不能把收到 result 当作业务成功。
+timeout 会杀直接 child 并返回 `timed_out`;structured handler 收到协作式 AbortSignal 时也会杀直接 child,
+但没有独立 `cancelled` outcome,也不承诺清理其自行派生的全部 descendants。现有 shell dispatch 没有传入同一
+AbortSignal。
+
+这些字段只在一次同步 device call 收敛后的最终 result 中出现:当前没有公开 `start -> operationId`、
+status/poll/cancel、增量 stdout/stderr、重连恢复或跨宿主持久化 operation store。cancel 仍是协作式提示,
+timeout/cancel/disconnect 后若外部副作用无法从终态证明,调用方必须按 outcome unknown 处理且不得盲目自动重试。
 
 ## 验证
 

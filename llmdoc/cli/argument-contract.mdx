@@ -73,6 +73,17 @@ repeatable collector 防止 wrapper 或依赖升级把推断退化成 `any`。Kn
 
 CLI 只保留 argv、profile/凭证、stdout/stderr 与 Node 宿主适配。固定控制面 HTTP 交给 `@tool-bridge/sdk/client`，Store wire/transport 交给 `@tool-bridge/sdk/store`，设备 reconnect/heartbeat/credential refresh 交给 `@tool-bridge/sdk/device` 的 portable supervisor。`http.ts`、Store commands 与 `deviceRuntime.ts` 是 CLI 语义适配层，不应复制 SDK 中的 wire parser 或连接状态机。
 
+Linux 的 `tb connect` 与 `tb daemon install` 接受可重复 `--command-profile <file>`。CLI 在连接/安装前读取
+JSON,做 strict profile 校验与 HTBP path/name canonicalization,再把每个 profile 投影为既有
+`DeviceExpose.nodes` tool node。structured profile 可与 shell/FS 并存,也可配合 `--no-shell` 成为唯一暴露;
+shell、FS、profile 三者皆空才报 `nothing to expose`。profile path 与保留 `shell`/`fs` 相等或互为父子,
+以及多个 profile path 相等或互为父子,都必须 fail closed。
+
+executable、固定 argv、输入槽展开、cwd 和环境选择是 CLI Node 宿主适配职责,不下沉到 neutral
+`@tool-bridge/sdk/device`。调用输入由 profile 生成 strict schema,运行时只做 direct argv 执行而不接收隐式
+shell 字符串。daemon install 保存已经校验/规范化的 profile 值,而不是源文件路径;restart/run 不重读源文件,
+profile 变更必须重新 install。该冻结行为既避免源文件漂移,也意味着撤销危险 profile 不能只编辑原 JSON。
+
 CLI 在 workspace 内 typecheck、Vitest 与 tsup 三个解析面都必须覆盖实际使用的 neutral SDK 子入口，并直接
 指向对应 source entry；不能让本地历史 `packages/sdk/dist` 代替源码映射。`verify` 不为此预先 build SDK，
 发布产物的 `.d.ts`/JS closure 仍由独立 build/pack 门验证。

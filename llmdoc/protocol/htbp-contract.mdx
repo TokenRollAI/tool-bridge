@@ -109,7 +109,7 @@ Manifest 描述部署:`id`、`protocolVersion:'plugin/v2'`、`endpoint`、`auth`
 
 `endpoint` 是平台到 plugin 的**固定内部传输入口,不是公开 HTBP 命令路径**;调用体保留 `{tool:<plugin 方法>, arguments:<命名参数>}`。公开调用先在 gateway 以完整命令路径和裸 body 完成路由,再由 provider 适配层转换为该内部信封(边界表见[调用](#调用))。
 
-Context 动词全小写且 cmd 名 = provider 方法名:`list`、`get`、`write`、`update`、`delete`、`search`,全部可选,能力由 handler 存在性推导。content 可内联或返回 `$ref`;大对象 URL 须短期有效并受签名/宿主边界保护。skillhub 动词:`list`、`get`(带 `file` 参数取单文件)、`search`、`publish`、`remove`。
+Context 动词全小写且 cmd 名 = provider 方法名:`list`、`get`、`write`、`update`、`delete`、`search`,全部可选,能力由 handler 存在性推导。Help 中 scope 与 effect 分开且都显式投影:`list/get/search` 是 `read/read`, `write/update` 是 `write/write`, `delete` 是 `write/destructive`;只读 provider 只发现前三项。`update` 仍是 content 整体替换/metadata 浅合并,可用单文件 `ifVersion` 乐观并发,不是行/hunk patch,也没有原子多文件 batch。content 可内联或返回 `$ref`;大对象 URL 须短期有效并受签名/宿主边界保护。skillhub 动词:`list`、`get`(带 `file` 参数取单文件)、`search`、`publish`、`remove`。
 
 内置 R2/S3 context 在底层 `ObjectStore.presignPut` 可用且挂载非只读时，额外声明 `direct-upload` capability 与 `POST /<context>/create_upload`（write scope）。请求体为 `{path,contentType,overwrite?}`；响应为 `{uri,method:'PUT',url,headers,expiresAt}`。`path` 经 context entry 规范化后固定到 namespace 的 keyPrefix，返回 headers 必须由上传方原样发送。
 
@@ -160,6 +160,12 @@ originCallId 与生命周期字段，不含 driver key 或 capability。完整�
 ## 设备
 
 设备连 `/system/device/ws?deviceId=...`,hello 声明 expose;服务端验证身份与 `registerPaths` 后代写 `device/<id>/...`。帧集合:hello、ready、error、call、result、ping、pong、cancel。`call` 帧 `path` 相对 mountPath 且**含命令叶子段**,与直连调用一致。PING/PONG 是稳定字面量支持边缘 auto-response;只有当前 generation 进入 ready 后才能执行 call,连接替换后旧 generation 的消息与迟到结果不得污染新连接。
+
+`expose.nodes[].cmds` 可携带 command input/output schema、effect/confirm；Linux structured command
+profile 只是该既有协议面的一个生产者,没有新增 hello 字段族或 device frame。设备所有者声明 effect，平台不会
+从 executable/argv 或 shell 字符串推断；任意 `shell/exec` 继续是 destructive + confirm。process executor
+附加的时间戳、outcome/signal 与输出截断标志仍属于同步 `result` body,不创建公开 operation identity、
+stream/status/cancel/resume 资源。confirm 是发现 metadata,不是 HTBP POST 自带的交互式审批门。
 
 call id 在同一设备进程内用于执行合并与有界结果缓存,不承诺跨进程 exactly-once。cancel 是协作式提示(AbortSignal),不能表述为外部副作用已撤销。call 帧可选 `context`(caller.keyId/owner、traceId、createdAt、expiresAt)由网关鉴权后签发,不接受来自 arguments,故意不含 scopes/SK;授权判定全在网关侧,设备只做审计与限时,`expiresAt` 以网关时间为准。Store 可用时 wire 还带 `context.upload:{token,expiresAt,maxBytes,maxObjects}`:它只允许本次 call 创建受数量/字节/MIME 约束的新对象；SDK 内部消费 token，handler 的 context 只暴露非 secret 限额并通过 `call.uploadObject` 上传，服务端 reservation/CAS 权威记账，返回后网关撤销。token 不得进入 arguments、result 或日志。老网关不带 context/upload 时新设备按缺省降级;老设备 decoder 忽略未知字段。
 
