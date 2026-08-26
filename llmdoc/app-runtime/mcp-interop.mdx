@@ -5,6 +5,7 @@ code:
   paths:
     - packages/app/src/providers/mcp.ts
     - packages/app/src/mcpServer.ts
+    - packages/app/test/mcp.integration.test.ts
 ---
 
 # MCP 上游互操作
@@ -25,6 +26,10 @@ MCP 是外部协议兼容面。项目内部历史状态可删，但现代/旧版
 - 严格 capabilities 用于阻止服务端未声明的能力；未知扩展字段仍按协议的前向兼容规则处理。
 - OAuth 与自定义认证头必须在 redirect 时遵守同源限制，不能把凭据转发给新 origin。
 - HTTP 上游默认 HTTPS；本地 stub 需要显式 `TB_ALLOW_INSECURE_HTTP=true`。
+- MCP `tools[].name` 是大小写敏感的上游身份；投影为 HTBP 时，公开命令名按
+  [HTBP 调用契约](../protocol/htbp-contract.mdx#调用)规范化为小写，调用再由 reverse map
+  精确还原上游原名。多个上游名规范化后碰撞时，发现必须以 `invalid_argument` fail closed，
+  只能用显式 rename 消歧。
 - 错误要归一为稳定 HTBP 错误，但保留足够的上游分类用于排障，不能泄漏 token/headers/body 中的密钥。
 
 ## 验证层次
