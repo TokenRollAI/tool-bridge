@@ -52,6 +52,7 @@ describe('contextHelpModel', () => {
       method: 'POST',
       path: '/ctx/main/write',
       scope: 'write',
+      effect: 'write',
       h: 'create or fully replace an entry (idempotent upsert)',
       inputSchema: {
         type: 'object',

@@ -138,6 +138,17 @@ describe('daemon lifecycle', () => {
         deviceId: 'ubuntu-01',
         mountPath: 'device/ubuntu-01',
         expose: { shell: { allow: ['*'] } },
+        commandProfiles: [{
+          version: 1,
+          path: 'ops/system',
+          description: 'safe operations',
+          commands: [{
+            name: 'system-info',
+            description: 'read system information',
+            executable: '/usr/bin/uname',
+            effect: 'read',
+          }],
+        }],
       },
       deps(runner),
     )
@@ -150,6 +161,7 @@ describe('daemon lifecycle', () => {
       deviceId: 'ubuntu-01',
       mountPath: 'device/ubuntu-01',
       expose: { shell: { allow: ['*'] } },
+      commandProfiles: [expect.objectContaining({ path: 'ops/system' })],
     })
     expect(statSync(paths.config).mode & 0o777).toBe(0o600)
     expect(unit).not.toContain('tbk_device_secret')
@@ -339,6 +351,17 @@ describe('daemon run', () => {
       deviceId: 'd1',
       mountPath: 'device/d1',
       expose: { shell: { allow: ['echo'] } },
+      commandProfiles: [{
+        version: 1,
+        path: 'ops/system',
+        description: 'safe operations',
+        commands: [{
+          name: 'system-info',
+          description: 'read system information',
+          executable: '/usr/bin/uname',
+          effect: 'read',
+        }],
+      }],
     }
     mkdirSync(join(tmp, 'config'), { recursive: true })
     writeFileSync(paths.config, JSON.stringify(config))
@@ -352,6 +375,7 @@ describe('daemon run', () => {
         baseUrl: 'https://tb.example',
         sk: 'tbk_never_in_state',
         deviceId: 'd1',
+        commandProfiles: [expect.objectContaining({ path: 'ops/system' })],
       }),
     )
     const state = readFileSync(paths.state, 'utf8')

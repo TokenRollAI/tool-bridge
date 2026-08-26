@@ -161,11 +161,16 @@ describe('DeviceSession DO + /system/device/ws', () => {
     )
     expect(fsHelpRes.status).toBe(200)
     const fsHelp = (await fsHelpRes.json()) as {
-      cmds: Array<{ name: string }>
+      cmds: Array<{ effect?: string, name: string }>
       node: { kind: string }
     }
     expect(fsHelp.node.kind).toBe('context')
     expect(fsHelp.cmds.map(cmd => cmd.name)).toEqual(['list', 'get', 'search'])
+    expect(fsHelp.cmds.map(cmd => ({ name: cmd.name, effect: cmd.effect }))).toEqual([
+      { name: 'list', effect: 'read' },
+      { name: 'get', effect: 'read' },
+      { name: 'search', effect: 'read' },
+    ])
 
     // readOnly 不只是 Help 隐藏；即使调用方猜测写路径，网关也必须
     // 在转发设备前 fail-closed。若意外转发，下面 shell 的 nextFrame 也会读到错帧。

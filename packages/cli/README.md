@@ -120,6 +120,33 @@ Shell 缺省仍然拒绝所有命令。`--allow '*'` 会把任意 shell 命令�
 传 `--yes`。daemon 配置可被同一用户读取，因此只能使用最小权限 Device SK，绝不能复用 Admin
 SK。Device SK 的注册权限应类似：
 
+需要让 Agent 无确认地执行只读诊断时，不要降低 `shell/exec` 的危险等级。改用结构化命令
+profile，并关闭 arbitrary shell：
+
+```sh
+tb daemon install \
+  --device-id build-01 \
+  --path device/build-01 \
+  --no-shell \
+  --command-profile ./packages/cli/examples/structured-command-profile.json
+```
+
+profile 是 strict JSON，完整示例见
+[`examples/structured-command-profile.json`](./examples/structured-command-profile.json)。每个文件定义
+一个相对设备路径和若干命令；每条命令必须声明 `executable`、`effect` 与描述，`argv` 由固定字符串和
+受类型约束的输入槽组成。输入槽支持 `string` / `number` / `boolean`、`choices`、`required`、
+`multiple` 与固定 `flag`。执行始终使用 `spawn(executable, argv, {shell:false})`；只有 profile 明确把
+shell 本身写成 executable 时才会进入 shell。
+
+可选的 `cwd`、`timeoutMs`、`maxOutputBytes` 与 `inheritEnv` 也是逐命令策略。子进程缺省只继承
+PATH、locale、HOME、USER 等非凭证基础环境；`inheritEnv` 只记录变量名并在执行时取值。它不是
+SecretStore 注入，也不提供输出脱敏，因此不要用它传 token、SK 或密码。`effect:'destructive'` 始终
+强制 `confirm:true`。结果除兼容的 stdout/stderr/exitCode 外，还包含起止时间、
+`outcome`、signal 与两条输出流的截断标记。
+
+`tb connect` 支持同一个可重复的 `--command-profile` 参数。`tb daemon install` 会把已经校验和
+规范化的 profile 冻结到 `0600` daemon 配置，后续重启不再读取原文件。
+
 ```sh
 tb sk create \
   --owner device:build-01 \
@@ -152,7 +179,7 @@ KV/R2/D1、构建部署、验证 `~help`，最后保存本机 profile。Admin SK
 | `tb store upload/ls/stat/get/share/revoke-share/rm` | 管理部署级 default Store；设备产物不需要 Context 挂载 |
 | `tb ctx ls/cat/put/upload/patch/rm/search` | 上下文读写；`upload` 通过限时 PUT 直传二进制 |
 | `tb sk` / `tb secret` | SK 签发/查看/更新/禁用/吊销与上游凭证管理 |
-| `tb connect` | 将本机注册为设备(shell/fs 反向通道) |
+| `tb connect` | 将本机注册为设备(shell/fs/结构化命令反向通道) |
 | `tb daemon install/status/logs/restart/uninstall` | 在 Linux 上持久运行本机设备连接 |
 | `tb device ls` | 设备清单 |
 | `tb skill ls/get/search/publish/rm/mount/unmount` | Agent Skill 仓库 |

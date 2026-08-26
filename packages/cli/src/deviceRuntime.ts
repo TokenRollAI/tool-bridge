@@ -16,7 +16,12 @@ import {
   openPortableDeviceConnection,
   TBError,
 } from '@tool-bridge/sdk/device'
-import { createShellExecutor, FsObjectStore } from '@tool-bridge/core/node'
+import {
+  createShellExecutor,
+  createStructuredCommandRuntime,
+  FsObjectStore,
+  type StructuredCommandProfile,
+} from '@tool-bridge/core/node'
 import WS, { type ClientOptions } from 'ws'
 import { CliError } from './http'
 
@@ -24,6 +29,7 @@ export { deviceWsUrl }
 
 export interface DeviceConnectionOptions {
   baseUrl: string
+  commandProfiles?: StructuredCommandProfile[]
   deviceId: string
   expose: DeviceExpose
   mountPath?: string
@@ -108,6 +114,25 @@ export function startDeviceConnection(opts: DeviceConnectionOptions): DeviceConn
     : createShellExecutor({ allow: opts.expose.shell.allow ?? [] })
   const store = opts.expose.fs === undefined ? undefined : new FsObjectStore(opts.expose.fs.roots)
   const readOnly = opts.expose.fs?.readOnly ?? false
+  const structured = new Map<string, ReturnType<typeof createStructuredCommandRuntime>>()
+  for (const profile of opts.commandProfiles ?? []) {
+    const runtime = createStructuredCommandRuntime(profile)
+    if (
+      runtime.path === 'shell'
+      || runtime.path.startsWith('shell/')
+      || runtime.path === 'fs'
+      || runtime.path.startsWith('fs/')
+    ) {
+      throw new CliError(`structured command path '${runtime.path}' conflicts with shell/fs`)
+    }
+    if ([...structured.keys()].some(path =>
+      path === runtime.path
+      || path.startsWith(`${runtime.path}/`)
+      || runtime.path.startsWith(`${path}/`))) {
+      throw new CliError(`structured command path '${runtime.path}' conflicts with another profile`)
+    }
+    structured.set(runtime.path, runtime)
+  }
   let activeMountPath = opts.mountPath ?? `device/${opts.deviceId}`
   let files = store === undefined ? undefined : fsProvider(store, activeMountPath, readOnly)
 
@@ -163,6 +188,10 @@ export function startDeviceConnection(opts: DeviceConnectionOptions): DeviceConn
         if (mount === 'fs') {
           if (files === undefined) throw TBError.notFound('fs not exposed')
           return await dispatchFs(files, cmd, call.arguments)
+        }
+        const structuredCommand = structured.get(mount)
+        if (structuredCommand !== undefined) {
+          return await structuredCommand.invoke(cmd, call.arguments, { signal: call.signal })
         }
         throw TBError.notFound(`device path not exposed:'${call.path}'`)
       } catch (error) {

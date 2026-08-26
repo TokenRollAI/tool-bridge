@@ -1,9 +1,9 @@
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { buildExpose, readCommandProfiles } from '../src/commands/connect'
 import { normalizeDeviceId, resolveDeviceId } from '../src/deviceId'
-import { buildExpose } from '../src/commands/connect'
 import { deviceWsUrl } from '../src/deviceRuntime'
 import { resetFetch, setFetch } from '../src/http'
 import { configPath } from '../src/config'
@@ -79,6 +79,61 @@ describe('device runtime helpers', () => {
     expect(buildExpose({ shell: false, fs: '/tmp' })).toEqual({
       fs: { roots: ['/tmp'], readOnly: false },
     })
+  })
+
+  it('structured command profile 投影为显式 effect 的 device tool 节点', () => {
+    if (tmpConfig === undefined) throw new Error('missing temp config')
+    const file = join(tmpConfig, 'ops.json')
+    writeFileSync(file, JSON.stringify({
+      version: 1,
+      path: 'ops/system',
+      description: 'safe system inspection',
+      commands: [{
+        name: 'system-info',
+        description: 'read system information',
+        executable: '/usr/bin/uname',
+        argv: ['-a'],
+        effect: 'read',
+      }],
+    }))
+    const profiles = readCommandProfiles([file])
+    expect(buildExpose({ shell: false }, profiles)).toEqual({
+      nodes: [{
+        path: 'ops/system',
+        kind: 'tool',
+        description: 'safe system inspection',
+        cmds: [expect.objectContaining({
+          name: 'system-info',
+          effect: 'read',
+          inputSchema: expect.objectContaining({ additionalProperties: false }),
+        })],
+      }],
+    })
+  })
+
+  it('profile 与 shell/fs/另一 profile 的路径冲突 fail closed', () => {
+    if (tmpConfig === undefined) throw new Error('missing temp config')
+    const writeProfile = (name: string, path: string) => {
+      const file = join(tmpConfig!, name)
+      writeFileSync(file, JSON.stringify({
+        version: 1,
+        path,
+        description: path,
+        commands: [{
+          name: 'get',
+          description: 'get',
+          executable: '/usr/bin/true',
+          effect: 'read',
+        }],
+      }))
+      return file
+    }
+    expect(() => readCommandProfiles([writeProfile('shell.json', 'shell/status')]))
+      .toThrow('conflicts with reserved \'shell\'')
+    expect(() => readCommandProfiles([
+      writeProfile('parent.json', 'ops'),
+      writeProfile('child.json', 'ops/system'),
+    ])).toThrow('conflicts with \'ops\'')
   })
 })
 

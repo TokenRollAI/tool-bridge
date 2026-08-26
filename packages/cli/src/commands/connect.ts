@@ -1,5 +1,12 @@
 import type { DeviceExpose } from '@tool-bridge/core'
+import {
+  createStructuredCommandRuntime,
+  parseStructuredCommandProfile,
+  type StructuredCommandProfile,
+} from '@tool-bridge/core/node'
 import { Command, type OptionValues } from 'commander'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { collect, resolveTarget, withGlobalOpts } from '../args'
 import { asArray, printJson, printLine } from '../output'
 import { runDeviceConnection } from '../deviceRuntime'
@@ -9,6 +16,7 @@ import { CliError } from '../http'
 export interface ConnectArgs {
   allow?: string | string[]
   baseUrl?: string
+  commandProfile?: string | string[]
   deviceId?: string
   fs?: string | string[]
   fsReadonly?: boolean
@@ -23,6 +31,7 @@ export interface ConnectArgs {
 
 export interface PreparedConnect {
   baseUrl: string
+  commandProfiles?: StructuredCommandProfile[]
   deviceId: string
   expose: DeviceExpose
   mountPath?: string
@@ -43,7 +52,47 @@ export function withDeviceConnectionGlobalOpts<
   return configured
 }
 
-export function buildExpose(args: ConnectArgs): DeviceExpose {
+function pathsConflict(left: string, right: string): boolean {
+  return left === right || left.startsWith(`${right}/`) || right.startsWith(`${left}/`)
+}
+
+export function readCommandProfiles(files: readonly string[]): StructuredCommandProfile[] {
+  const profiles = files.map((file) => {
+    const path = resolve(file)
+    let value: unknown
+    try {
+      value = JSON.parse(readFileSync(path, 'utf8'))
+    } catch (error) {
+      throw new CliError(`cannot read command profile "${path}": ${(error as Error).message}`)
+    }
+    try {
+      return parseStructuredCommandProfile(value)
+    } catch (error) {
+      throw new CliError(`invalid command profile "${path}": ${(error as Error).message}`)
+    }
+  })
+  for (let index = 0; index < profiles.length; index++) {
+    const profile = profiles[index]!
+    for (const reserved of ['shell', 'fs']) {
+      if (pathsConflict(profile.path, reserved)) {
+        throw new CliError(`command profile path '${profile.path}' conflicts with reserved '${reserved}'`)
+      }
+    }
+    for (let other = 0; other < index; other++) {
+      if (pathsConflict(profile.path, profiles[other]!.path)) {
+        throw new CliError(
+          `command profile path '${profile.path}' conflicts with '${profiles[other]!.path}'`,
+        )
+      }
+    }
+  }
+  return profiles
+}
+
+export function buildExpose(
+  args: ConnectArgs,
+  commandProfiles: readonly StructuredCommandProfile[] = [],
+): DeviceExpose {
   const expose: DeviceExpose = {}
   if (args.shell !== false) {
     expose.shell = { allow: asArray(args.allow) }
@@ -52,8 +101,21 @@ export function buildExpose(args: ConnectArgs): DeviceExpose {
   if (roots.length > 0) {
     expose.fs = { roots, readOnly: Boolean(args.fsReadonly) }
   }
-  if (expose.shell === undefined && expose.fs === undefined) {
-    throw new CliError('nothing to expose: omit --no-shell or pass --fs')
+  if (commandProfiles.length > 0) {
+    expose.nodes = commandProfiles.map((profile) => {
+      const runtime = createStructuredCommandRuntime(profile)
+      return {
+        path: runtime.path,
+        kind: 'tool',
+        description: runtime.description,
+        cmds: runtime.cmds,
+      }
+    })
+  }
+  if (expose.shell === undefined && expose.fs === undefined && expose.nodes === undefined) {
+    throw new CliError(
+      'nothing to expose: omit --no-shell, pass --fs, or pass --command-profile',
+    )
   }
   return expose
 }
@@ -81,12 +143,14 @@ export function prepareConnect(args: ConnectArgs): PreparedConnect {
   }
   if (!target.sk) throw new CliError('missing SK: pass --sk, set TB_SK, or run tb login')
   const deviceId = resolveDeviceId(args.deviceId ? String(args.deviceId) : undefined)
-  const expose = buildExpose(args)
+  const commandProfiles = readCommandProfiles(asArray(args.commandProfile))
+  const expose = buildExpose(args, commandProfiles)
   return {
     baseUrl: target.baseUrl,
     sk: target.sk,
     deviceId,
     expose,
+    ...(commandProfiles.length > 0 ? { commandProfiles } : {}),
     ...(args.path ? { mountPath: String(args.path) } : {}),
   }
 }
@@ -111,7 +175,7 @@ export async function runConnect(args: ConnectArgs): Promise<void> {
 export function connectCommand() {
   return withDeviceConnectionGlobalOpts(new Command('connect'))
     .description(
-      'Connect this machine as a device (long-running; exposes shell and/or fs on the tree)',
+      'Connect this machine as a device (long-running; exposes shell, fs, and/or structured commands)',
     )
     .argument('[url]', 'Gateway base URL (mutually exclusive with --base-url)')
     .option('--device-id <id>', 'Override stable local device id')
@@ -124,6 +188,12 @@ export function connectCommand() {
     )
     .option('--fs <root>', 'Expose local filesystem root (repeatable)', collect, [])
     .option('--fs-readonly', 'Expose fs as read-only; requires at least one --fs', false)
+    .option(
+      '--command-profile <file>',
+      'Expose a strict structured-command JSON profile (repeatable; direct argv, no implicit shell)',
+      collect,
+      [],
+    )
     .option('--no-shell', 'Do not expose shell; mutually exclusive with --allow')
     .addHelpText(
       'after',
@@ -131,6 +201,7 @@ export function connectCommand() {
 Examples:
   tb connect --allow git --allow npm            # shell restricted to git/npm
   tb connect --no-shell --fs ~/projects --fs-readonly
+  tb connect --no-shell --command-profile ./device-ops.json
   tb connect --path device/build-01 --allow '*'   # full shell (trusted machines only)`,
     )
     .action(async (url, opts) => {

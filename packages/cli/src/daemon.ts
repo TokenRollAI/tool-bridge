@@ -1,3 +1,4 @@
+import type { StructuredCommandProfile } from '@tool-bridge/core/node'
 import type { DeviceExpose } from '@tool-bridge/core'
 import {
   chmodSync,
@@ -19,6 +20,7 @@ export const DAEMON_SERVICE = 'tool-bridge-device.service'
 
 export interface DaemonConfig {
   baseUrl: string
+  commandProfiles?: StructuredCommandProfile[]
   deviceId: string
   expose: DeviceExpose
   mountPath?: string
@@ -58,6 +60,7 @@ export type ProcessRunner = (
 
 export interface DaemonInstallInput {
   baseUrl: string
+  commandProfiles?: StructuredCommandProfile[]
   deviceId: string
   expose: DeviceExpose
   mountPath?: string
@@ -114,6 +117,7 @@ function assertDaemonConfig(value: unknown): asserts value is DaemonConfig {
     || typeof value.deviceId !== 'string'
     || typeof value.revision !== 'string'
     || !isRecord(value.expose)
+    || (value.commandProfiles !== undefined && !Array.isArray(value.commandProfiles))
     || (value.mountPath !== undefined && typeof value.mountPath !== 'string')) {
     throw new CliError('invalid daemon config')
   }
@@ -375,6 +379,7 @@ export async function installDaemon(
     sk: input.sk,
     deviceId: input.deviceId,
     expose: input.expose,
+    ...(input.commandProfiles !== undefined ? { commandProfiles: input.commandProfiles } : {}),
     ...(input.mountPath !== undefined ? { mountPath: input.mountPath } : {}),
   }
   const linger = await requiredRun(
@@ -498,6 +503,7 @@ export async function runDaemon(configPath: string): Promise<void> {
       sk: config.sk,
       deviceId: config.deviceId,
       expose: config.expose,
+      ...(config.commandProfiles !== undefined ? { commandProfiles: config.commandProfiles } : {}),
       ...(config.mountPath !== undefined ? { mountPath: config.mountPath } : {}),
       onReady: mountPath => update('ready', { mountPath }),
       onStateChange: (state) => {

@@ -293,6 +293,76 @@ describe('SDK device supervisor 的 Node adapter', () => {
     await handle.closed
   })
 
+  it('structured command 直传 argv 执行并返回机器可读终态', async () => {
+    const profile = {
+      version: 1 as const,
+      path: 'ops/system',
+      description: 'safe operations',
+      commands: [{
+        name: 'echo-value',
+        description: 'echo one argv value',
+        executable: process.execPath,
+        effect: 'read' as const,
+        argv: [
+          '-e',
+          'process.stdout.write(process.argv[1])',
+          { input: 'value', required: true },
+        ],
+      }],
+    }
+    const handle = startDeviceConnection({
+      baseUrl: 'https://gw.example',
+      sk: 'tbk_x',
+      deviceId: 'd-structured',
+      commandProfiles: [profile],
+      expose: {
+        nodes: [{
+          path: profile.path,
+          kind: 'tool',
+          description: profile.description,
+          cmds: [{ name: 'echo-value', effect: 'read' }],
+        }],
+      },
+    })
+    await vi.waitFor(() => expect(FakeWs.instances).toHaveLength(1))
+    const socket = FakeWs.instances[0]
+    socket?.dispatch('open', {})
+    socket?.dispatch('message', {
+      data: JSON.stringify({ type: 'ready', mountPath: 'device/d-structured' }),
+    })
+    await handle.ready
+    socket?.sent.splice(0)
+    socket?.dispatch('message', {
+      data: JSON.stringify({
+        type: 'call',
+        id: 'structured-1',
+        path: 'ops/system/echo-value',
+        arguments: { value: 'hello; exit 7' },
+      }),
+    })
+    await vi.waitFor(() => expect(socket?.sent).toHaveLength(1))
+    const result = JSON.parse(socket?.sent[0] ?? '') as Record<string, unknown>
+    expect(result).toMatchObject({
+      type: 'result',
+      id: 'structured-1',
+      ok: true,
+      value: {
+        stdout: 'hello; exit 7',
+        stderr: '',
+        exitCode: 0,
+        outcome: 'exited',
+        stdoutTruncated: false,
+        stderrTruncated: false,
+      },
+    })
+    expect(result.value).toMatchObject({
+      startedAt: expect.any(String),
+      completedAt: expect.any(String),
+    })
+    handle.close()
+    await handle.closed
+  })
+
   it('心跳 timer unref；一轮无入站帧后由 SDK supervisor 主动重连', async () => {
     const unref = vi.fn()
     let tick: (() => void) | undefined

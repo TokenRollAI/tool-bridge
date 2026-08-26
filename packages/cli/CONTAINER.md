@@ -98,6 +98,8 @@ docker stop tb-device
 - Device SK 只授予所需的注册路径和动作。
 - 使用重复的 `--allow <command>` 建立最小 Shell 白名单；`--allow '*'` 只适用于完全可信机器。
 - 不需要 Shell 时使用 `--no-shell`。
+- 只读/写入操作优先通过 `--command-profile <file>` 暴露固定 executable + argv；容器需只读挂载
+  profile 文件，且启动命令应同时使用 `--no-shell`。
 - 文件挂载优先使用宿主机的 `:ro` 和 CLI 的 `--fs-readonly` 双重只读限制。
 
 ## Kubernetes Sidecar

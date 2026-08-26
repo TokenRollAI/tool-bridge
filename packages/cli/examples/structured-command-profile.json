@@ -1,0 +1,40 @@
+{
+  "version": 1,
+  "path": "ops/system",
+  "description": "Predeclared Linux system operations",
+  "commands": [
+    {
+      "name": "system-info",
+      "description": "Read kernel and architecture information",
+      "executable": "/usr/bin/uname",
+      "argv": ["-a"],
+      "effect": "read"
+    },
+    {
+      "name": "disk-usage",
+      "description": "Read disk usage for a selected mount",
+      "executable": "/usr/bin/df",
+      "argv": [
+        "-h",
+        {
+          "input": "mount",
+          "description": "Approved mount path",
+          "choices": ["/", "/var/lib/docker"],
+          "required": true
+        }
+      ],
+      "effect": "read",
+      "timeoutMs": 10000,
+      "maxOutputBytes": 262144
+    },
+    {
+      "name": "restart-home-assistant",
+      "description": "Restart the predeclared Home Assistant service",
+      "executable": "/usr/bin/systemctl",
+      "argv": ["restart", "home-assistant.service"],
+      "effect": "destructive",
+      "confirm": true,
+      "timeoutMs": 30000
+    }
+  ]
+}

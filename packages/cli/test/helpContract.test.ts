@@ -44,6 +44,8 @@ describe('CLI help 参数契约', () => {
     expect(help).toContain('mutually exclusive with --no-shell')
     expect(help).toContain('mutually exclusive with --allow')
     expect(help).toContain('requires at least one --fs')
+    expect(help).toContain('--command-profile <file>')
+    expect(help).toContain('direct argv, no implicit shell')
   })
 
   it('daemon install 复用 connect 安全参数，内部 run 入口不出现在 help', () => {
@@ -51,6 +53,7 @@ describe('CLI help 参数契约', () => {
     expect(install).toContain('persistent systemd user service')
     expect(install).toContain('mutually exclusive with --no-shell')
     expect(install).toContain('requires at least one --fs')
+    expect(install).toContain('--command-profile <file>')
     expect(install).toContain('private 0600 daemon config')
     expect(install).toContain('--yes')
     expect(install).toContain('trusted machines only')

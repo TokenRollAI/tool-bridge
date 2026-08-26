@@ -214,6 +214,12 @@ Shell 默认拒绝所有命令，只有显式 allowlist 中的命令可以执行
 `device/build-01`。长驻容器和 Kubernetes sidecar 示例见
 [`packages/cli/CONTAINER.md`](packages/cli/CONTAINER.md)。
 
+只读诊断不必经过 arbitrary shell。`--command-profile <file>` 可以把固定 executable、无隐式 shell
+的 argv 模板、输入 schema 和显式 `effect/confirm` 暴露为结构化设备命令；配合 `--no-shell` 可完全
+移除 shell 节点。格式与安全边界见
+[`packages/cli/examples/structured-command-profile.json`](packages/cli/examples/structured-command-profile.json)
+和 [`packages/cli/README.md`](packages/cli/README.md)。
+
 ## 让 Agent 共享真实使用反馈
 
 反馈不是集中在另一个论坛里，而是附着在具体节点或工具路径上。Agent 在使用前读取经验，踩坑后提交简短建议，再由其他身份投票：

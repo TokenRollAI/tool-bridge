@@ -52,6 +52,7 @@ export const contextCommands = new HtbpCommandRegistry<ContextCommandTarget>()
       }),
       returns: 'Page<ContextEntryMeta>',
       scope: 'read',
+      effect: 'read',
     },
     ({ opts, path }, { provider }) => provider!.list!(path ?? '', opts),
   )
@@ -64,6 +65,7 @@ export const contextCommands = new HtbpCommandRegistry<ContextCommandTarget>()
       }),
       returns: 'ContextEntry',
       scope: 'read',
+      effect: 'read',
     },
     ({ path }, { provider }) => provider!.get!(path),
   )
@@ -77,6 +79,7 @@ export const contextCommands = new HtbpCommandRegistry<ContextCommandTarget>()
       }),
       returns: 'ContextEntryMeta',
       scope: 'write',
+      effect: 'write',
     },
     ({ entry, path }, { provider }) =>
       provider!.write!(path, entry as ContextEntryInput),
@@ -91,6 +94,7 @@ export const contextCommands = new HtbpCommandRegistry<ContextCommandTarget>()
       }),
       returns: 'ContextEntryMeta',
       scope: 'write',
+      effect: 'write',
     },
     ({ patch, path }, { provider }) => provider!.update!(path, patch as ContextPatch),
   )
@@ -116,6 +120,7 @@ export const contextCommands = new HtbpCommandRegistry<ContextCommandTarget>()
       }),
       returns: 'Page<ContextEntryMeta>',
       scope: 'read',
+      effect: 'read',
     },
     ({ opts, query }, { provider }) =>
       provider!.search!(query, opts as SearchOptions | undefined),

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { resetFetch, setFetch } from '../src/http'
@@ -144,6 +144,51 @@ describe('tb connect:--allow / --fs 可重复', () => {
     expect(vi.mocked(runDeviceConnection)).toHaveBeenCalledWith(
       expect.objectContaining({ expose: { shell: { allow: ['echo', 'git'] } } }),
     )
+  })
+
+  it('--command-profile 可重复并允许完全关闭 arbitrary shell', async () => {
+    if (tmpConfig === undefined) throw new Error('missing temp config')
+    const profile = (file: string, path: string, command: string) => {
+      const target = join(tmpConfig!, file)
+      writeFileSync(target, JSON.stringify({
+        version: 1,
+        path,
+        description: path,
+        commands: [{
+          name: command,
+          description: command,
+          executable: '/usr/bin/true',
+          effect: 'read',
+        }],
+      }))
+      return target
+    }
+    await runCli([
+      'connect',
+      '--base-url',
+      'https://gw',
+      '--sk',
+      'tbk_x',
+      '--device-id',
+      'd-profiles',
+      '--no-shell',
+      '--command-profile',
+      profile('system.json', 'ops/system', 'info'),
+      '--command-profile',
+      profile('docker.json', 'ops/docker', 'status'),
+    ])
+    expect(vi.mocked(runDeviceConnection)).toHaveBeenCalledWith(expect.objectContaining({
+      expose: {
+        nodes: [
+          expect.objectContaining({ path: 'ops/system', cmds: [expect.objectContaining({ effect: 'read' })] }),
+          expect.objectContaining({ path: 'ops/docker', cmds: [expect.objectContaining({ effect: 'read' })] }),
+        ],
+      },
+      commandProfiles: [
+        expect.objectContaining({ path: 'ops/system' }),
+        expect.objectContaining({ path: 'ops/docker' }),
+      ],
+    }))
   })
 })
 

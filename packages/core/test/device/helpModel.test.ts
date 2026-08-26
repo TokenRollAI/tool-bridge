@@ -4,7 +4,7 @@ import {
   deviceFsHelpModel,
   deviceShellHelpModel,
 } from '../../src/device/helpModel'
-import { renderHelpDsl } from '../../src/htbp/helpDsl'
+import { renderHelpDsl, renderHelpJson } from '../../src/htbp/helpDsl'
 
 describe('deviceShellHelpModel(shell 契约)', () => {
   it('单 cmd exec:effect destructive + confirm,scope call,签名与返回', () => {
@@ -23,7 +23,7 @@ describe('deviceShellHelpModel(shell 契约)', () => {
       scope: 'call',
       effect: 'destructive',
       confirm: true,
-      returns: '{ stdout, stderr, exitCode }',
+      returns: '{ stdout, stderr, exitCode, startedAt, completedAt, outcome, signal?, stdoutTruncated, stderrTruncated }',
     })
     expect(exec?.inputSchema).toMatchObject({
       required: ['command'],
@@ -72,6 +72,30 @@ describe('deviceFsHelpModel(复用 context 静态 help)', () => {
     ])
     const readOnly = deviceFsHelpModel(node, { readOnly: true })
     expect(readOnly.cmds.map(c => c.name)).toEqual(['list', 'get', 'search'])
+  })
+
+  it('运行时 Help JSON/DSL 显式发出每个文件命令的 effect', () => {
+    const model = deviceFsHelpModel({ path: 'device/d1/fs', description: '设备文件' })
+    const expected = {
+      list: 'read',
+      get: 'read',
+      write: 'write',
+      update: 'write',
+      delete: 'destructive',
+      search: 'read',
+    }
+
+    const json = renderHelpJson(model)
+    expect(Object.fromEntries(json.cmds.map(command => [command.name, command.effect])))
+      .toEqual(expected)
+
+    const dslEffects: Record<string, string> = {}
+    let command = ''
+    for (const line of renderHelpDsl(model).split('\n')) {
+      if (line.startsWith('cmd ')) command = line.split(' ')[1] ?? ''
+      if (line.startsWith('  effect ')) dslEffects[command] = line.slice('  effect '.length)
+    }
+    expect(dslEffects).toEqual(expected)
   })
 })
 

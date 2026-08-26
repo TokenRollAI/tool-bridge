@@ -6,4 +6,6 @@
  */
 
 export * from './fsObjectStore'
+export * from './processExecution'
 export * from './shellExecutor'
+export * from './structuredCommand'

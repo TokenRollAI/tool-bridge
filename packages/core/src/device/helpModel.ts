@@ -34,7 +34,7 @@ export function deviceShellHelpModel(
         timeoutMs: { type: 'number', description: 'kill the command after this many ms' },
       },
     },
-    returns: '{ stdout, stderr, exitCode }',
+    returns: '{ stdout, stderr, exitCode, startedAt, completedAt, outcome, signal?, stdoutTruncated, stderrTruncated }',
     scope: 'call',
     effect: 'destructive',
     confirm: true,

@@ -1,6 +1,7 @@
 /**
  * 设备侧 shell executor(shell 契约):spawn(shell:true) 执行整条 command,
- * 聚合 { stdout, stderr, exitCode }。执行前必过 isCommandAllowed(白名单),不过 →
+ * 聚合兼容的 { stdout, stderr, exitCode } 与机器可读终态。执行前必过
+ * isCommandAllowed(白名单),不过 →
  * TBError permission_denied(判定在设备侧执行前完成)。
  *
  * 有界缓冲:stdout/stderr 各上限 SHELL_OUTPUT_LIMIT_BYTES,超出截断加标记(v1 教训:
@@ -9,8 +10,15 @@
  */
 
 import { spawn as nodeSpawn } from 'node:child_process'
+import {
+  executeProcess,
+  type ProcessExecutionResult,
+  type SpawnedProcess,
+} from './processExecution'
 import { describeAllow, isCommandAllowed } from '../device/shellAllow'
 import { TBError } from '../errors'
+
+export type { SpawnedProcess } from './processExecution'
 
 /** 单流输出上限(1MiB);超出截断。 */
 export const SHELL_OUTPUT_LIMIT_BYTES = 1024 * 1024
@@ -24,25 +32,11 @@ export const SHELL_EXEC_DEFAULT_TIMEOUT_MS = 55_000
 /** 超时被 SIGKILL 时的 exitCode(GNU timeout 约定)。 */
 export const SHELL_TIMEOUT_EXIT_CODE = 124
 
-export interface ShellExecResult {
-  exitCode: number
-  stderr: string
-  stdout: string
-}
+export type ShellExecResult = ProcessExecutionResult
 
 export interface ShellExecOptions {
   cwd?: string
   timeoutMs?: number
-}
-
-/** 注入用最小子进程面(node:child_process 的 ChildProcess 结构兼容)。 */
-export interface SpawnedProcess {
-  kill(signal?: 'SIGKILL'): void
-  on(event: 'close', cb: (code: number | null, signal: string | null) => void): void
-  on(event: 'exit', cb: (code: number | null, signal: string | null) => void): void
-  on(event: 'error', cb: (err: Error) => void): void
-  stderr: { on(event: 'data', cb: (chunk: Uint8Array | string) => void): void } | null
-  stdout: { on(event: 'data', cb: (chunk: Uint8Array | string) => void): void } | null
 }
 
 export type SpawnFn = (command: string, opts: { cwd?: string, shell: true }) => SpawnedProcess
@@ -60,37 +54,6 @@ export interface ShellExecutorOptions {
 
 export type ShellExecutor = (command: string, opts?: ShellExecOptions) => Promise<ShellExecResult>
 
-/** 有界收集器:超上限丢弃后续字节并记截断。 */
-class BoundedBuffer {
-  private chunks: Buffer[] = []
-  private size = 0
-  truncated = false
-
-  constructor(private readonly limit: number) {}
-
-  push(chunk: Uint8Array | string): void {
-    const buf = typeof chunk === 'string' ? Buffer.from(chunk) : Buffer.from(chunk)
-    const remain = this.limit - this.size
-    if (remain <= 0) {
-      this.truncated = true
-      return
-    }
-    if (buf.byteLength > remain) {
-      this.chunks.push(buf.subarray(0, remain))
-      this.size = this.limit
-      this.truncated = true
-      return
-    }
-    this.chunks.push(buf)
-    this.size += buf.byteLength
-  }
-
-  text(): string {
-    const text = Buffer.concat(this.chunks).toString('utf8')
-    return this.truncated ? `${text}\n[output truncated at ${this.limit} bytes]` : text
-  }
-}
-
 export function createShellExecutor(opts: ShellExecutorOptions = {}): ShellExecutor {
   const spawn: SpawnFn = opts.spawn ?? ((command, spawnOpts) => nodeSpawn(command, spawnOpts))
   const limit = opts.maxOutputBytes ?? SHELL_OUTPUT_LIMIT_BYTES
@@ -104,43 +67,13 @@ export function createShellExecutor(opts: ShellExecutorOptions = {}): ShellExecu
       )
     }
     const timeoutMs = execOpts.timeoutMs ?? defaultTimeoutMs
-    return new Promise<ShellExecResult>((resolvePromise, rejectPromise) => {
-      const child = spawn(command, { shell: true, cwd: execOpts.cwd })
-      const stdout = new BoundedBuffer(limit)
-      const stderr = new BoundedBuffer(limit)
-      child.stdout?.on('data', chunk => stdout.push(chunk))
-      child.stderr?.on('data', chunk => stderr.push(chunk))
-      let settled = false
-      let timedOut = false
-      const timer = setTimeout(() => {
-        timedOut = true
-        child.kill('SIGKILL')
-      }, timeoutMs)
-      const settle = (code: number | null) => {
-        if (settled) return
-        settled = true
-        clearTimeout(timer)
-        const suffix = timedOut ? `\n[timeout: killed after ${timeoutMs}ms (SIGKILL)]` : ''
-        resolvePromise({
-          stdout: stdout.text(),
-          stderr: stderr.text() + suffix,
-          exitCode: timedOut ? SHELL_TIMEOUT_EXIT_CODE : (code ?? -1),
-        })
-      }
-
-      child.on('error', (err) => {
-        if (settled) return
-        settled = true
-        clearTimeout(timer)
-        rejectPromise(new TBError('internal', `spawn 失败:${err.message}`))
-      })
-      // 正常路径等 'close'(stdio 排空,输出完整)。超时被杀后改等 'exit' 立即结算:
-      // shell:true 下 sh 可能 fork 而非 exec,SIGKILL 只杀 shell,孙进程仍握着
-      // stdout/stderr 管道,'close' 会拖到孙进程自然退出(v1 教训:CI 上直接撞测试超时)。
-      child.on('close', code => settle(code))
-      child.on('exit', (code) => {
-        if (timedOut) settle(code)
-      })
-    })
+    return executeProcess(
+      () => spawn(command, { shell: true, cwd: execOpts.cwd }),
+      {
+        timeoutMs,
+        maxOutputBytes: limit,
+        timeoutExitCode: SHELL_TIMEOUT_EXIT_CODE,
+      },
+    )
   }
 }

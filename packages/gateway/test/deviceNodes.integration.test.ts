@@ -112,6 +112,8 @@ describe('expose.nodes 自定义节点转发', () => {
     const help = await helpRes.text()
     expect(help).toContain('cmd echo POST')
     expect(help).toContain('scope call')
+    expect(help).toContain('effect read')
+    expect(help).not.toContain('confirm')
     expect(help).toContain('原样返回入参')
 
     // 工具级 ~help:全量 spec 来自注册时缓存的 cmds,不打设备。

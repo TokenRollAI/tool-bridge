@@ -25,7 +25,19 @@ afterAll(async () => {
 describe('真实 spawn(shell:true)', () => {
   it('echo → stdout 聚合,exitCode 0', async () => {
     const exec = createShellExecutor({ allow: ['echo'] })
-    expect(await exec('echo hi')).toEqual({ stdout: 'hi\n', stderr: '', exitCode: 0 })
+    const result = await exec('echo hi')
+    expect(result).toMatchObject({
+      stdout: 'hi\n',
+      stderr: '',
+      exitCode: 0,
+      outcome: 'exited',
+      stdoutTruncated: false,
+      stderrTruncated: false,
+    })
+    expect(Date.parse(result.startedAt)).not.toBeNaN()
+    expect(Date.parse(result.completedAt)).not.toBeNaN()
+    expect(result.completedAt >= result.startedAt).toBe(true)
+    expect(result).not.toHaveProperty('signal')
   })
 
   it('stderr 与非零 exitCode 保真(allow *)', async () => {
@@ -45,6 +57,8 @@ describe('真实 spawn(shell:true)', () => {
     const exec = createShellExecutor({ allow: ['sleep'] })
     const result = await exec('sleep 5', { timeoutMs: 100 })
     expect(result.exitCode).toBe(SHELL_TIMEOUT_EXIT_CODE)
+    expect(result.outcome).toBe('timed_out')
+    expect(result.signal).toBe('SIGKILL')
     expect(result.stderr).toContain('[timeout: killed after 100ms (SIGKILL)]')
   })
 })
@@ -104,6 +118,8 @@ describe('有界缓冲与失败路径(注入 spawn)', () => {
     emit('close', 0, null)
     const result = await pending
     expect(result.stdout).toBe('abcdefgh\n[output truncated at 8 bytes]')
+    expect(result.stdoutTruncated).toBe(true)
+    expect(result.stderrTruncated).toBe(false)
     expect(result.exitCode).toBe(0)
     expect(SHELL_OUTPUT_LIMIT_BYTES).toBe(1024 * 1024)
   })
@@ -114,6 +130,18 @@ describe('有界缓冲与失败路径(注入 spawn)', () => {
     const pending = exec('boom')
     emit('error', new Error('ENOENT: no such cwd'))
     await expect(pending).rejects.toMatchObject({ code: 'internal' })
+  })
+
+  it('非超时信号终止 → outcome signaled + signal,保留 exitCode -1', async () => {
+    const { child, emit } = fakeProcess()
+    const exec = createShellExecutor({ allow: ['*'], spawn: () => child })
+    const pending = exec('interrupted')
+    emit('close', null, 'SIGTERM')
+    await expect(pending).resolves.toMatchObject({
+      exitCode: -1,
+      outcome: 'signaled',
+      signal: 'SIGTERM',
+    })
   })
 
   it('缺省超时常量:略低于网关 60s', () => {

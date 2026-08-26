@@ -79,6 +79,12 @@ function daemonInstallCommand() {
     )
     .option('--fs <root>', 'Expose local filesystem root (repeatable)', collect, [])
     .option('--fs-readonly', 'Expose fs as read-only; requires at least one --fs', false)
+    .option(
+      '--command-profile <file>',
+      'Expose a strict structured-command JSON profile (repeatable; direct argv, no implicit shell)',
+      collect,
+      [],
+    )
     .option('--no-shell', 'Do not expose shell; mutually exclusive with --allow')
     .option('--yes', 'Confirm persistent arbitrary command execution when --allow "*" is used')
     .addHelpText(
@@ -90,6 +96,7 @@ The resolved gateway/SK are frozen in a private 0600 daemon config; the unit nev
 Examples:
   tb daemon install --allow git --allow npm
   tb daemon install --path device/build-01 --allow '*' --yes  # trusted machines only
+  tb daemon install --no-shell --command-profile ./device-ops.json
   tb daemon install --no-shell --fs ~/projects --fs-readonly`,
     )
     .action(async (url, opts) => {
