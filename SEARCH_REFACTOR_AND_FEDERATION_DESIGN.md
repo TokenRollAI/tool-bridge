@@ -326,15 +326,15 @@ CAS/revision 和 SQL 行为；真实三实例 A→B→C HTTP 链在 app integrat
 
 | 包 | 版本 |
 | --- | ---: |
-| `@tool-bridge/app` | 0.17.0 |
-| `@tool-bridge/cli` | 0.26.0 |
-| `@tool-bridge/dashboard` | 0.24.0 |
-| `@tool-bridge/gateway` | 0.22.0 |
-| `@tool-bridge/sdk` | 0.18.0 |
-| `@tool-bridge/server` | 0.18.0 |
+| `@tool-bridge/app` | 0.18.0 |
+| `@tool-bridge/cli` | 0.28.0 |
+| `@tool-bridge/dashboard` | 0.25.0 |
+| `@tool-bridge/gateway` | 0.23.0 |
+| `@tool-bridge/sdk` | 0.19.0 |
+| `@tool-bridge/server` | 0.19.0 |
 
-`core` 和 `plugins` 为 private，不单独发布。当前工作树不提交、不打 tag、不推送；tag 必须
-等待合入 main 后再按发布流程逐个执行。
+`core` 和 `plugins` 为 private，不单独发布。本分支只提交并推送代码，不打 tag；tag 必须等待
+合入 main 后再按发布流程逐个执行。
 
 需要在 release note 明示：
 
