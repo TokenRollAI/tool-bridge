@@ -144,6 +144,12 @@ SecretStore 注入，也不提供输出脱敏，因此不要用它传 token、SK
 强制 `confirm:true`。结果除兼容的 stdout/stderr/exitCode 外，还包含起止时间、
 `outcome`、signal 与两条输出流的截断标记。
 
+逐命令可选 `delivery:'mailbox'|'both'`：`mailbox` 只接受持久化交付，`both` 同时接受实时调用；
+不填保持 realtime。调用仍统一使用 `tb call <完整命令路径>`：`--delivery mailbox` 直接入队，
+`--delivery fallback` 先尝试 realtime，只在网关确认尚未 dispatch 时安全入队。发送后的断线或
+超时不会再次入队。设备侧消费需要 SDK 的 durable journal；一个 deviceId 同时运行多个安装不在
+当前幂等保证内。
+
 `tb connect` 支持同一个可重复的 `--command-profile` 参数。`tb daemon install` 会把已经校验和
 规范化的 profile 冻结到 `0600` daemon 配置，后续重启不再读取原文件。
 
@@ -174,7 +180,7 @@ KV/R2/D1、构建部署、验证 `~help`，最后保存本机 profile。Admin SK
 | `tb init cloudflare` | 从源码仓库初始化、部署并验证 Cloudflare Worker |
 | `tb login` / `tb whoami` / `tb use` | 档案管理(多网关/多 SK 切换) |
 | `tb ls` / `tb tree` / `tb help <path>` | 浏览工具树与节点文档 |
-| `tb call <path>/<command> '{…}'` | 调用任意已挂载工具/命令(直连,body 即 arguments) |
+| `tb call <path>/<command> '{…}'` | 调用任意命令；设备命令可用 `--delivery mailbox\|fallback` |
 | `tb tool mount/rm` · `tb server add/ls/rm` | 挂载 HTTP/MCP/plugin 上游与远端 HTBP 服务 |
 | `tb store upload/ls/stat/get/share/revoke-share/rm` | 管理部署级 default Store；设备产物不需要 Context 挂载 |
 | `tb ctx ls/cat/put/upload/patch/rm/search` | 上下文读写；`upload` 通过限时 PUT 直传二进制 |
@@ -182,6 +188,7 @@ KV/R2/D1、构建部署、验证 `~help`，最后保存本机 profile。Admin SK
 | `tb connect` | 将本机注册为设备(shell/fs/结构化命令反向通道) |
 | `tb daemon install/status/logs/restart/uninstall` | 在 Linux 上持久运行本机设备连接 |
 | `tb device ls` | 设备清单 |
+| `tb device op ls/get/cancel` | 持久化设备操作的查询与取消；创建统一走 `tb call --delivery` |
 | `tb skill ls/get/search/publish/rm/mount/unmount` | Agent Skill 仓库 |
 | `tb federation` / `tb note` / `tb feedback` | 联邦白名单、路径注解与使用反馈 |
 | `tb plugin register/list/get/update/health/rm` | 插件注册表与探活 |

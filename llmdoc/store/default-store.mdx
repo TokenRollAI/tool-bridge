@@ -3,6 +3,7 @@ description: 部署级 default Store 的当前契约：稳定对象身份、上�
 kind: architecture
 relations:
   related:
+    - device/durable-mailbox.mdx
     - protocol/htbp-contract.mdx
     - device/do-websocket-sessions.mdx
     - hosts-deploy/cloudflare-paths.mdx
@@ -16,7 +17,8 @@ code:
     - packages/app/src/store.ts
     - packages/app/src/routes/store.ts
     - packages/sdk/src/store/**
-    - packages/sdk/src/device/**
+    - packages/sdk/src/device/storeUpload.ts
+    - packages/sdk/test/storeUpload.test.ts
     - packages/cli/src/commands/store.ts
     - packages/dashboard/src/lib/store.ts
     - packages/dashboard/src/lib/store-queries.ts
@@ -142,6 +144,10 @@ reservation/CAS 才是权威。
 
 设备也可用普通 HTTP 身份调用顶层 `uploadObject` 做自主上传，此时 owner/producer 都是设备身份。两条
 路径最终只把 descriptor/`store://` URI 放进 result，绝不返回上传 capability。
+
+Durable Mailbox operation 当前不继承 realtime call-scoped capability：Mailbox handler 的
+`uploadObject` 明确 `unavailable`。需要持久任务产出对象时，设备只能在独立业务步骤使用顶层设备身份
+上传并自行管理关联；不能把 realtime token 延长、持久化或重放到 Mailbox lease。
 
 ## 读取、分享与管理
 

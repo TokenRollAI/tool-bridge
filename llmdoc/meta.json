@@ -58,6 +58,9 @@
     },
     "store/default-store.mdx": {
       "validatedRevision": "84a9103a331035191bab68e4613edd2c3835fed3"
+    },
+    "device/durable-mailbox.mdx": {
+      "validatedRevision": null
     }
   },
   "convergence": {

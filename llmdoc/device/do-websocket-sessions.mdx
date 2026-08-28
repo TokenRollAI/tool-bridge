@@ -3,15 +3,29 @@ description: 设备会话的服务端与客户端边界:DO WebSocket 休眠、pr
 kind: guide
 relations:
   related:
+    - device/durable-mailbox.mdx
     - store/default-store.mdx
 code:
   paths:
-    - packages/core/src/device/**
+    - packages/core/src/device/client.ts
+    - packages/core/src/device/frames.ts
+    - packages/core/src/device/helpModel.ts
+    - packages/core/src/device/presence.ts
+    - packages/core/src/device/session.ts
+    - packages/core/src/device/shellAllow.ts
     - packages/gateway/src/deviceSession.ts
     - packages/server/src/deviceHub.ts
     - packages/server/src/deviceRouter.ts
-    - packages/sdk/src/device/**
+    - packages/sdk/src/device/connection.ts
+    - packages/sdk/src/device/storeUpload.ts
     - packages/cli/src/deviceRuntime.ts
+    - packages/core/test/device/client.test.ts
+    - packages/core/test/device/frames.test.ts
+    - packages/core/test/device/helpModel.test.ts
+    - packages/core/test/device/presence.test.ts
+    - packages/core/test/device/session.test.ts
+    - packages/core/test/device/shellAllow.test.ts
+    - packages/sdk/test/device.test.ts
 ---
 
 # 设备会话:DO 休眠、presence 与 SDK device
@@ -34,6 +48,16 @@ Cloudflare 设备连接由 Durable Object(`DeviceSession`)持有。正确性不�
 
 可复用的边界是 `@tool-bridge/sdk/device` 的 portable connection supervisor：它持有 reconnect、heartbeat、credential refresh、suspend/resume 与 call dispatch；Node CLI、React Native 等宿主只注入 WebSocket factory 和凭证 provider。CLI 的 `deviceRuntime.ts` 可保留 shell/FS/structured process dispatch 与 `ws` adapter，不得复制 supervisor 状态机。任何未来协议替换都必须先证明上述安全不变量和 Workers DO hibernation 语义仍可保持，不能只以 rooms/reconnect API 更便利为理由。
 
+## Durable Mailbox 与 WebSocket 的分界
+
+Mailbox 是独立的 pull-only operation authority，详见
+[Durable Device Mailbox](./durable-mailbox.mdx)。本 guide 只拥有 realtime frame、presence、socket
+generation 与 connection supervisor；当前没有 Mailbox WS hint，Device SDK 的 hello/handler/frame 也没有
+为 Mailbox 增加另一条 WS 协议。普通 command POST 的 `~delivery` 可选择 realtime、mailbox 或 fallback；
+fallback 仅在本节 realtime 生命周期明确给出 `not_dispatched` 时转入队，`completed` 或 `unknown` 不入队。
+claim/lease/journal/cleanup 仍不经过本节 WebSocket 状态机，而由现有 pull processor 与 installation-local
+durable journal 处理；单一 device credential 只有一个活跃安装仍是幂等语义前提。
+
 ## Linux process 暴露与终态
 
 Linux CLI/daemon 的 structured command profile 只是在已有 `DeviceExpose.nodes` 中产生 `kind:'tool'` 节点,
@@ -48,9 +72,10 @@ timeout 会杀直接 child 并返回 `timed_out`;structured handler 收到协作
 但没有独立 `cancelled` outcome,也不承诺清理其自行派生的全部 descendants。现有 shell dispatch 没有传入同一
 AbortSignal。
 
-这些字段只在一次同步 device call 收敛后的最终 result 中出现:当前没有公开 `start -> operationId`、
-status/poll/cancel、增量 stdout/stderr、重连恢复或跨宿主持久化 operation store。cancel 仍是协作式提示,
-timeout/cancel/disconnect 后若外部副作用无法从终态证明,调用方必须按 outcome unknown 处理且不得盲目自动重试。
+这些字段只在一次同步 device call 收敛后的最终 result 中出现；同步路径仍没有 `start -> operationId`、
+status/poll、增量 stdout/stderr 或重连恢复。另行选择 mailbox delivery 时才产生公开 operation，并且只保存
+最终 JSON result/error，不把 stdout/stderr 改造成流。两条路径的 cancel 都是协作式提示；副作用无法从
+终态证明时不得盲目自动重试。
 
 ## 验证
 
@@ -90,7 +115,8 @@ pnpm tsx scripts/verify-device.ts
   仍保留为管理/authoring 能力，但不再是设备产物入口。
 - 上传保持跨运行时流式：浏览器/RN 沿用 Web fetch，Node 原生 fetch 遇到 `ReadableStream` request body
   时 SDK 内部补 `duplex:'half'`；该运行时细节不进入公开 grant 或设备帧。
-- 设备 handler **执行结果**只保留进程内同 call id 去重(handler 获得 id 与协作式 AbortSignal)，与上面的
-  Store upload session 幂等不是同一件事。当前网关重试不会稳定复用同一个 call id,持久化结果缓存会制造
-  exactly-once 的错误承诺;跨进程 durable execution 要等端到端 idempotency key 与重放协议完整设计。
+- realtime handler **执行结果**仍只保留进程内同 call id 去重(handler 获得 id 与协作式 AbortSignal)，与
+  Store upload session、Mailbox journal 都不是同一件事。Mailbox 通过公开 operation id、lease 与宿主注入的
+  durable journal 单独提供重启恢复；当前 Mailbox handler 的 `uploadObject` 明确 unavailable，不能借用
+  realtime call-scoped Store capability。
 - 发布验收不止看 manifest:检查全部条件导出目标、扫描 device 产物的 Node/私有依赖泄漏、从最终 tarball 干净安装并同时 import 两个入口(闸门细节见 [npm-publishing](../release/npm-publishing.mdx))。

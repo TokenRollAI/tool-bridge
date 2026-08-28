@@ -1,6 +1,9 @@
 ---
 description: Node/Docker/Helm 宿主全指南:探针与关停、SQLite/PG、default Store、本地/S3 对象存储、Compose/Helm、PaaS 与 Redis 多副本路由。
 kind: guide
+relations:
+  related:
+    - device/durable-mailbox.mdx
 code:
   paths:
     - .github/workflows/ci.yml
@@ -24,6 +27,10 @@ code:
 
 - `TB_DATA_DIR` 持有 SQLite(未用 PG 时)和对象数据,应挂载持久卷并限制文件权限。对象存储缺省始终是本地 FS,即使状态在 PG：default Store 最终字节位于 `TB_DATA_DIR/objects/__tool_bridge_internal__/store/v1/...`（容器缺省对象根 `/data/objects/...`），未落位字节集中在 `TB_DATA_DIR/objects/.tb-store-staging-v1`；Context/`$ref` 走同一 driver 的其他 namespace。多实例部署下本地字节不共享(外置见下文 S3 节)。
 - default Store 是标准 Node 装配的必备能力。端口监听成功后异步执行首次有界 cleanup，随后每 `TB_STORE_CLEANUP_INTERVAL_SEC` 周期执行（缺省 900 秒）；历史数据再多也不阻塞 readiness，timer 不阻止进程退出，慢 tick 未结束时跳过并发 tick。每个 tick 只扫一次独立 staging 目录。自动清理不扫描未发布预览曾使用的 `objects/store/v1/**`：该路径也可能属于 Context，temp 文件名不能证明 Store 归属；试用过预览的部署须人工确认后再处理残片。清理失败只记录固定事件名，不输出 driver key。
+- Durable device Mailbox 以 `TB_SECRET_ENCRYPTION_KEY` 和原子 StateStore CAS 为启用前提。裸 Node
+  进程缺该 env 时仍可启动并使用其它能力，但 Mailbox route fail closed 且 maintenance 跳过它；生产
+  Compose/Helm 模板把 encryption root 与 Admin SK 一样作为必填 secret。Mailbox 与 Store 共用
+  `TB_STORE_CLEANUP_INTERVAL_SEC` timer 和 in-flight guard，但使用自己的持久 cleanup cursor；每个 tick 收敛过期 operation 与超过 retention 的终态记录。
 - 首次引导必须设置 `TB_BOOTSTRAP_ADMIN_SK`;缺失时启动默认 fail closed。`TB_ALLOW_INSECURE_BOOTSTRAP=true` 只用于一次性本地开发。
 - `TB_ALLOW_INSECURE_HTTP=true` 只放行本地 HTTP 上游,不应进入公网部署。
 - 跨实例联邦搜索必须显式配置稳定、全局唯一的 `TB_INSTANCE_ID`；缺失时 Node 仍提供 local search，但不
@@ -75,6 +82,8 @@ pnpm compose:pg:down
 - `--profile ha`:双 gateway(`TB_REPLICA_ID` 显式 a/b)+ Redis 路由 + Caddy LB。是**单机** HA 参考栈,机器仍是单点;真多副本走 Helm。
 - 双副本共享 default Store 与 `$ref` 对象要求配 `TB_OBJECT_STORE_*`;compose 无渲染期校验,只能靠注释提醒(Helm 有硬校验)。
 - gateway healthcheck 打 `/readyz`(非 `/healthz`):后端断连时容器转 unhealthy,`restart: unless-stopped` + LB 依赖才有意义。
+- `.env` 必须生成并注入 32-byte base64url `TB_SECRET_ENCRYPTION_KEY`；它既是 SecretStore 根，也是
+  Mailbox 派生独立 HKDF 子密钥的根。Compose 不接受留空后静默禁用 Mailbox。
 
 ## Kubernetes(deploy/helm/tool-bridge)
 
@@ -86,6 +95,8 @@ Helm chart 按后端配置自动推断形态,无独立 mode 开关:
 - `TB_REPLICA_ID` 用 `fieldRef: metadata.name`;探针三分工 `/healthz`(startup)、`/livez`(liveness)、`/readyz`(readiness);`terminationGracePeriodSeconds` 要盖过 `shutdownDrainSec` + 排空时间。
 - Ingress 接设备 WebSocket 必须放长 proxy 读写超时(示例见 `examples/values-ha.yaml`)。
 - chart 不打包 PG/Redis,只留 values 接线点;信任根生产建议走 `secrets.existingSecret`,不写明文 values。
+- chart 要求 Secret 含 `TB_SECRET_ENCRYPTION_KEY`（或由 `secrets.encryptionKey` 渲染）；缺失在
+  `helm template` 阶段失败。该要求不仅服务 SecretStore，也是 Mailbox payload/result 可持久化的部署前提。
 
 ## 容器 PaaS(Railway / Fly / Cloud Run / CF Container)
 
@@ -99,6 +110,8 @@ Railway production 使用平台原生 GitHub source 监听 `main`,并开启 **Wa
 
 - **ObjectStore 缺省是容器本地 FS**,default Store/`$ref` 大对象在没有持久卷时随容器重建丢失、多副本互不可见;配 `TB_OBJECT_STORE_*` 外置。
 - **设备 WebSocket 多副本需配 `TB_REDIS_URL`**;不配时设备只连在一个副本上,调用打到别的副本会误判离线。
+- **Mailbox pull 不依赖 Redis/WebSocket 路由**：claim/renew/complete 只依赖共享 PG StateStore；但多副本
+  Node 本来就要求 PG，且设备 realtime 通道仍按上一条配置 Redis。
 - **首次引导需要 `TB_BOOTSTRAP_ADMIN_SK`**,缺失 fail closed,平台上表现为容器反复重启。
 
 结论:**PG + S3 + Redis 三者配齐即可多副本横向扩容**;只配 PG + S3 是单副本无状态形态。
