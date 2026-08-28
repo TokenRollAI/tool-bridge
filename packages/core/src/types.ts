@@ -120,6 +120,8 @@ export interface TreeNode {
   createdAt: Timestamp
   /** 一句话;上级 ~help 列子节点时展示。 */
   description: string
+  /** 仅设备挂载根:hello 中声明的稳定设备身份。由设备注册流程写入,不接受普通 NodeInput。 */
+  deviceId?: string
   kind: NodeKind
   /** 仅 device:最近一次观察到设备存活(hello / 心跳 / 成功调用)的时刻。缺省表示从未观察或旧数据;
    *  freshness 判定见 device/presence.ts。写路径专用,不经普通注册面。 */
@@ -177,6 +179,9 @@ export interface DeviceExpose {
   shell?: { allow?: string[], description?: string }
 }
 
+/** 设备命令的投递声明；缺省等价 realtime，mailbox/both 才允许显式 enqueue。 */
+export type DeviceCommandDelivery = 'realtime' | 'mailbox' | 'both'
+
 /**
  * expose.nodes 元素:NodeInput + 可选工具表 `cmds`(ToolSpec 形状,
  * SDK 随注册上送;网关存入代写节点的 providerConfig 作 `~help` 数据源,不新增帧类型)。
@@ -186,6 +191,7 @@ export type DeviceNodeInput = NodeInput & { cmds?: DeviceNodeCmd[] }
 /** 设备自定义节点随注册上送的单条工具元数据(与 tool/types.ts 的 ToolSpec 同形)。 */
 export interface DeviceNodeCmd {
   confirm?: boolean
+  delivery?: DeviceCommandDelivery
   description?: string
   effect?: string
   inputSchema?: unknown
@@ -256,7 +262,7 @@ export type NodeConfig
 
 export type NodeInput = Omit<
   TreeNode,
-  'registeredBy' | 'online' | 'lastSeenAt' | 'createdAt' | 'updatedAt'
+  'registeredBy' | 'online' | 'lastSeenAt' | 'deviceId' | 'createdAt' | 'updatedAt'
 >
 
 /** 自动物化中间 directory 的 registeredBy 标记。 */

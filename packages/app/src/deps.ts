@@ -10,6 +10,7 @@ import type {
   BuiltinCatalog,
   CallContext,
   ContextProvider,
+  DeviceCallAttempt,
   DeviceCallContext,
   ObjectStore,
   SearchIndex,
@@ -34,8 +35,8 @@ export interface DeviceInvokeRequest {
 
 /** 设备通道宿主(CF = DeviceSession DO / Docker = ws)。 */
 export interface DeviceChannel {
-  /** HTTP→WS 调用转发:结果为 DeviceCallResult 形状(设备侧 result 帧)。 */
-  invoke(deviceId: string, req: DeviceInvokeRequest): Promise<unknown>
+  /** HTTP→WS 调用转发，并显式报告是否已 dispatch，供安全 Mailbox fallback 判定。 */
+  invoke(deviceId: string, req: DeviceInvokeRequest): Promise<DeviceCallAttempt>
   /** WS 升级请求转交(/system/device/ws)。 */
   ws(deviceId: string, request: Request): Promise<Response>
 }

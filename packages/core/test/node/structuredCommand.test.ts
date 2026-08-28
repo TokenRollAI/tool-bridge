@@ -17,6 +17,7 @@ const PROFILE: StructuredCommandProfile = {
       description: 'read kernel information',
       executable: '/usr/bin/uname',
       effect: 'read',
+      delivery: 'both',
       inheritEnv: ['DEVICE_REGION'],
       argv: [
         '-s',
@@ -91,11 +92,12 @@ describe('structured command runtime', () => {
     expect(runtime).toMatchObject({ path: 'ops/system', description: 'safe system inspection' })
     expect(runtime.cmds.map(command => ({
       name: command.name,
+      delivery: command.delivery,
       effect: command.effect,
       confirm: command.confirm,
     }))).toEqual([
-      { name: 'system-info', effect: 'read', confirm: undefined },
-      { name: 'restart-service', effect: 'destructive', confirm: true },
+      { name: 'system-info', delivery: 'both', effect: 'read', confirm: undefined },
+      { name: 'restart-service', delivery: undefined, effect: 'destructive', confirm: true },
     ])
     expect(runtime.cmds[0]?.inputSchema).toMatchObject({
       type: 'object',

@@ -37,6 +37,7 @@ function cmdSection(cmd: CmdSpec, index: boolean): string[] {
   // 唯一调用形态:直连 `POST <path>`(path 含命令/工具叶子段),body 即 arguments 本体。
   lines.push(`- Invoke: \`POST ${cmd.path}\` with body \`{...arguments}\``)
   lines.push(`- Required scope: \`${cmd.scope}\``)
+  if (cmd.delivery !== undefined) lines.push(`- Delivery: \`${cmd.delivery}\``)
   if (cmd.effect !== undefined) {
     lines.push(
       `- Effect: \`${cmd.effect}\`${cmd.confirm ? ' — **ask the user to confirm before calling**' : ''}`,

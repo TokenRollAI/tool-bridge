@@ -5,8 +5,8 @@
 import {
   type CallContext,
   DEVICE_CALL_TIMEOUT_MS,
+  type DeviceCallAttempt,
   type DeviceCallContext,
-  type DeviceCallResult,
   TBError,
   type TBErrorBody,
   type ToolSpec,
@@ -30,34 +30,55 @@ export function requireDevice(deps: TbAppDeps): DeviceChannel {
   return deps.device
 }
 
-export async function invokeDevice(
+/**
+ * 与 invokeDevice 相同的 realtime 尝试，但保留宿主对 dispatch 的权威认知。
+ * Mailbox fallback 只能消费 not_dispatched；unknown 必须原样收敛为歧义错误。
+ */
+export async function attemptDevice(
   deps: TbAppDeps,
   deviceId: string,
   req: { arguments: Record<string, unknown>, context?: DeviceCallContext, path: string },
-): Promise<unknown> {
+): Promise<DeviceCallAttempt> {
   const id = crypto.randomUUID()
   const upload = req.context === undefined
     ? null
     : await issueDeviceCallUpload(deps, deviceId, id, req.context)
-  let body: DeviceCallResult
+  let attempt: DeviceCallAttempt
   try {
-    body = (await requireDevice(deps).invoke(deviceId, {
+    attempt = await requireDevice(deps).invoke(deviceId, {
       id,
       path: req.path,
       arguments: req.arguments,
       ...(req.context === undefined ? {} : { context: upload?.context ?? req.context }),
-    })) as DeviceCallResult
+    })
   } finally {
     // A returned/cancelled call must not leave its create capability replayable.
     // Revocation is best effort: expiry remains the hard backstop and cleanup
     // will converge state even if the call's final network hop failed.
     await upload?.revoke().catch(() => {})
   }
-  if (!body || !('ok' in body)) {
+  if (
+    attempt === null
+    || typeof attempt !== 'object'
+    || !['completed', 'not_dispatched', 'unknown'].includes(attempt.disposition)
+    || attempt.result === null
+    || typeof attempt.result !== 'object'
+    || !('ok' in attempt.result)
+    || (attempt.disposition !== 'completed' && attempt.result.ok !== false)
+  ) {
     throw new TBError('unavailable', 'device session returned invalid result')
   }
-  if (body.ok) return body.value
-  throw tbErrorFromBody(body.error)
+  return attempt
+}
+
+export async function invokeDevice(
+  deps: TbAppDeps,
+  deviceId: string,
+  req: { arguments: Record<string, unknown>, context?: DeviceCallContext, path: string },
+): Promise<unknown> {
+  const attempt = await attemptDevice(deps, deviceId, req)
+  if (attempt.result.ok) return attempt.result.value
+  throw tbErrorFromBody(attempt.result.error)
 }
 
 /**

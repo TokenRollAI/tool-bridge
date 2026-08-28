@@ -68,6 +68,7 @@ export function renderHelpDsl(model: HelpModel): string {
     if (cmd.outputSchema !== undefined) lines.push(`  result ${JSON.stringify(cmd.outputSchema)}`)
     if (cmd.returns !== undefined) lines.push(...attrLines('returns', cmd.returns))
     lines.push(`  scope ${cmd.scope}`)
+    if (cmd.delivery !== undefined) lines.push(`  delivery ${cmd.delivery}`)
     if (cmd.effect !== undefined) lines.push(`  effect ${cmd.effect}`)
     if (cmd.confirm) lines.push('  confirm')
   }
@@ -108,6 +109,7 @@ export function renderHelpJson(model: HelpModel): HelpJson {
     if (cmd.inputSchema !== undefined) out.inputSchema = cmd.inputSchema
     if (cmd.outputSchema !== undefined) out.outputSchema = cmd.outputSchema
     if (cmd.returns !== undefined) out.returns = cmd.returns
+    if (cmd.delivery !== undefined) out.delivery = cmd.delivery
     if (cmd.effect !== undefined) out.effect = cmd.effect
     if (cmd.confirm) out.confirm = cmd.confirm
     return out

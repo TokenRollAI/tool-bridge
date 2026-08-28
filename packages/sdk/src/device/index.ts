@@ -23,6 +23,16 @@ export type {
   PreparedDeviceCredential,
   ReactNativeWebSocketConstructor,
 } from './connection'
+export {
+  createDeviceMailboxProcessor,
+  type DeviceMailboxDrainResult,
+  type DeviceMailboxProcessor,
+  type DeviceMailboxProcessorOptions,
+  type DeviceMailboxPullResult,
+  type DeviceOperationJournal,
+  type DeviceOperationJournalEntry,
+  type DeviceOperationJournalState,
+} from './mailbox'
 
 export { uploadObject } from './storeUpload'
 export type {

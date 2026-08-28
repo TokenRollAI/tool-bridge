@@ -35,6 +35,8 @@ export interface ChildRef {
 export interface CmdSpec {
   /** 危险操作需二次确认(HTBP 属性表可选)。 */
   confirm?: boolean
+  /** 设备命令投递能力；缺省 realtime-only。 */
+  delivery?: 'realtime' | 'mailbox' | 'both'
   /** 副作用描述(HTBP 属性表可选)。 */
   effect?: string
   /** 工具级一句话描述(`h` 行,定型;mcp/http 工具的上游 description 落此)。 */
@@ -91,6 +93,7 @@ export interface HelpJson {
   children?: Array<{ description: string, kind: NodeKind, path: TreePath }>
   cmds: Array<{
     confirm?: boolean
+    delivery?: 'realtime' | 'mailbox' | 'both'
     effect?: string
     /** 工具级一句话描述(`h`,定型)。 */
     h?: string

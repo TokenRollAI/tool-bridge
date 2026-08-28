@@ -1,6 +1,7 @@
 import {
   checkRegisterPath,
   decodeDeviceFrame,
+  type DeviceCallAttempt,
   type DeviceCallRequest,
   type DeviceCallResult,
   type DeviceExpose,
@@ -381,16 +382,22 @@ export class DeviceSession extends DurableObject<DeviceSessionEnv> {
     await this.ctx.storage.setAlarm(Date.now() + reclaimSec * 1000)
   }
 
-  async invoke(req: DeviceCallRequest): Promise<DeviceCallResult> {
+  async invoke(req: DeviceCallRequest): Promise<DeviceCallAttempt> {
     const cached = await this.ctx.storage.get<DeviceCallResult>(resultKey(req.id))
-    if (cached !== undefined) return cached
+    if (cached !== undefined) return { disposition: 'completed', result: cached }
 
     const ws = await this.activeSocket()
     if (ws === null) {
-      return { ok: false, error: TBError.deviceOffline().toJSON() }
+      return {
+        disposition: 'not_dispatched',
+        result: { ok: false, error: TBError.deviceOffline().toJSON() },
+      }
     }
     const session = await this.sessionFor(ws)
-    return await new Promise<DeviceCallResult>(resolve => session.call(req, resolve))
+    return await new Promise<DeviceCallAttempt>(resolve => session.call(
+      req,
+      (result, disposition) => resolve({ disposition, result }),
+    ))
   }
 
   /**

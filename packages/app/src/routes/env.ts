@@ -8,10 +8,12 @@ import {
   type BuiltinModule,
   catalogSetDigest,
   createBuiltins,
+  type DeviceMailboxService,
   type StateStore,
 } from '@tool-bridge/core'
 import type { TbAppDeps } from '../deps'
 import { isMutableSearchIndex, SearchSynchronizer } from '../search/synchronizer'
+import { createDeviceMailboxService } from '../deviceMailbox'
 import { lazyDefaultStoreModule } from '../store'
 import { buildDeps } from '../bootstrap'
 
@@ -22,6 +24,8 @@ export interface RouteEnv {
   deps: TbAppDeps
   /** 全局工具搜索能力表;未注入索引或未声明 search → 空数组(端点不存在)。 */
   globalSearchCapabilities: () => Array<'search' | 'search:federated' | 'search:semantic'>
+  /** Durable mailbox authority; lazy so deployments without the encryption root keep other routes. */
+  mailbox: () => DeviceMailboxService
   /**
    * 内置目录的目录级 digest(`/healthz` 回显,供三宿主对拍)。
    *
@@ -75,5 +79,10 @@ export function createRouteEnv(deps: TbAppDeps): RouteEnv {
     catalogDigest ??= catalogSetDigest(catalog)
     return catalogDigest
   }
-  return { builtinsOf, deps, globalSearchCapabilities, pluginCatalogDigest, searchSync }
+  let mailboxInstance: DeviceMailboxService | undefined
+  const mailbox = (): DeviceMailboxService => {
+    mailboxInstance ??= createDeviceMailboxService(deps)
+    return mailboxInstance
+  }
+  return { builtinsOf, deps, globalSearchCapabilities, mailbox, pluginCatalogDigest, searchSync }
 }

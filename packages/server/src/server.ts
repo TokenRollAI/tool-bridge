@@ -11,6 +11,7 @@
 import type * as http from 'node:http'
 import {
   cleanupDefaultStore,
+  cleanupDeviceMailbox,
   createS3ObjectStore,
   createTbApp,
   type ReadinessReport,
@@ -262,15 +263,19 @@ export function createTbServer(config: ServerConfig): TbServer {
   const app = createTbApp(deps)
 
   let server: ServerType | undefined
-  let storeCleanupTimer: NodeJS.Timeout | undefined
-  let storeCleanupInFlight = false
-  const runStoreCleanup = async (): Promise<void> => {
-    if (storeCleanupInFlight) return
-    storeCleanupInFlight = true
+  let maintenanceTimer: NodeJS.Timeout | undefined
+  let maintenanceInFlight = false
+  const runMaintenance = async (): Promise<void> => {
+    if (maintenanceInFlight) return
+    maintenanceInFlight = true
     try {
       await cleanupDefaultStore(deps)
+      // Mailbox is an opt-in capability whose explicit deployment prerequisite
+      // is the existing encryption root. Deployments without it keep running,
+      // but never advertise or serve mailbox operations.
+      if (deps.encryptionKey !== undefined) await cleanupDeviceMailbox(deps)
     } finally {
-      storeCleanupInFlight = false
+      maintenanceInFlight = false
     }
   }
   const reportStoreCleanupFailure = (): void => {
@@ -279,11 +284,11 @@ export function createTbServer(config: ServerConfig): TbServer {
   }
   const scheduleStoreCleanup = (): void => {
     // 首次 cleanup 在端口就绪后异步执行；历史对象多时不得阻塞 readiness。
-    void runStoreCleanup().catch(reportStoreCleanupFailure)
-    storeCleanupTimer = setInterval(() => {
-      void runStoreCleanup().catch(reportStoreCleanupFailure)
+    void runMaintenance().catch(reportStoreCleanupFailure)
+    maintenanceTimer = setInterval(() => {
+      void runMaintenance().catch(reportStoreCleanupFailure)
     }, config.storeCleanupIntervalSec * 1000)
-    storeCleanupTimer.unref?.()
+    maintenanceTimer.unref?.()
   }
   return {
     app,
@@ -320,9 +325,9 @@ export function createTbServer(config: ServerConfig): TbServer {
       // HTTP 排空、关后端。反过来(旧序:先杀 hub)会出现"设备通道已死、HTTP 还在收
       // 新请求"的窗口——期间到达的设备调用一律误报离线。
       draining = true
-      if (storeCleanupTimer !== undefined) {
-        clearInterval(storeCleanupTimer)
-        storeCleanupTimer = undefined
+      if (maintenanceTimer !== undefined) {
+        clearInterval(maintenanceTimer)
+        maintenanceTimer = undefined
       }
       let closed: Promise<void> | undefined
       if (server !== undefined) {

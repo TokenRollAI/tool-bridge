@@ -479,7 +479,10 @@ describe('default Store control/data plane', () => {
             headers: grant.headers,
             body: new Uint8Array([1, 2, 3, 4]),
           })
-          return { ok: true, value: await ready.json() }
+          return {
+            disposition: 'completed' as const,
+            result: { ok: true as const, value: await ready.json() },
+          }
         },
       },
     }

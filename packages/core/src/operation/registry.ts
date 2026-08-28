@@ -40,6 +40,8 @@ export type InferInput<S>
 export interface OperationSpec<S extends InputSchemaLike | undefined = undefined> {
   /** 危险操作二次确认。 */
   confirm?: boolean
+  /** 设备命令的可用投递通道；普通 operation 通常省略。 */
+  delivery?: ToolSpec['delivery']
   /** 一句话描述(进 `~help` 的 h 行)。 */
   description?: string
   /** 副作用标记:read / write / destructive。 */
@@ -152,6 +154,7 @@ export class OperationRegistry<TCtx = unknown> {
     const schema = spec.inputSchema !== undefined ? normalizeSchema(spec.inputSchema) : undefined
     const toolSpec: ToolSpec = { name }
     if (spec.description !== undefined) toolSpec.description = spec.description
+    if (spec.delivery !== undefined) toolSpec.delivery = spec.delivery
     if (spec.effect !== undefined) toolSpec.effect = spec.effect
     if (spec.confirm !== undefined) toolSpec.confirm = spec.confirm
     if (schema !== undefined) toolSpec.inputSchema = toJsonSchema(schema)

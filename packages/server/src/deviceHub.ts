@@ -19,7 +19,7 @@ import type * as http from 'node:http'
 import {
   checkRegisterPath,
   decodeDeviceFrame,
-  type DeviceCallResult,
+  type DeviceCallAttempt,
   DeviceGatewaySession,
   encodeDeviceFrame,
   identify,
@@ -42,7 +42,7 @@ import type { DeviceRouter } from './deviceRouter'
 export type DeviceLocalCall = (
   deviceId: string,
   req: DeviceInvokeRequest,
-) => Promise<DeviceCallResult>
+) => Promise<DeviceCallAttempt>
 
 export const DEVICE_WS_PATH = '/system/device/ws'
 const KEY_DEVICE_META = 'devicemeta:'
@@ -149,9 +149,12 @@ export class DeviceHub {
    * 本地没有但配了 router → 问路由表并转发给持有者副本(socket 不可序列化,
    * 只能把调用送到 socket 所在进程)。都没有 → deviceOffline。
    */
-  async invoke(deviceId: string, req: DeviceInvokeRequest): Promise<unknown> {
+  async invoke(deviceId: string, req: DeviceInvokeRequest): Promise<DeviceCallAttempt> {
     if (this.activeByDevice.has(deviceId)) return await this.invokeLocal(deviceId, req)
-    const offline: DeviceCallResult = { ok: false, error: TBError.deviceOffline().toJSON() }
+    const offline: DeviceCallAttempt = {
+      disposition: 'not_dispatched',
+      result: { ok: false, error: TBError.deviceOffline().toJSON() },
+    }
     if (this.router === undefined) return offline
     return (await this.router.forward(deviceId, req)) ?? offline
   }
@@ -162,8 +165,11 @@ export class DeviceHub {
    * router 收到转发来的调用时回调这里 —— **不能**回调 `invoke`:本地连接刚断时
    * 那会再次查路由并转发,在两个副本间弹来弹去。这里没有连接就直接 offline。
    */
-  private async invokeLocal(deviceId: string, req: DeviceInvokeRequest): Promise<DeviceCallResult> {
-    const offline: DeviceCallResult = { ok: false, error: TBError.deviceOffline().toJSON() }
+  private async invokeLocal(deviceId: string, req: DeviceInvokeRequest): Promise<DeviceCallAttempt> {
+    const offline: DeviceCallAttempt = {
+      disposition: 'not_dispatched',
+      result: { ok: false, error: TBError.deviceOffline().toJSON() },
+    }
     const conn = this.activeByDevice.get(deviceId)
     if (conn === undefined) return offline
     // 重验:凭据有效 + keyId 一致 + 用 hello 落库同一个 checkRegisterPath 复核该 SK 现在
@@ -192,7 +198,10 @@ export class DeviceHub {
       return offline
     }
     if (this.activeByDevice.get(deviceId) !== conn) return offline
-    return await new Promise<DeviceCallResult>(resolve => conn.session.call(req, resolve))
+    return await new Promise<DeviceCallAttempt>(resolve => conn.session.call(
+      req,
+      (result, disposition) => resolve({ disposition, result }),
+    ))
   }
 
   /** DeviceChannel.ws:Node 宿主的升级在 http 层处理,永不应命中此路由。 */

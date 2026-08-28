@@ -145,10 +145,15 @@ describe('call 与 requestId 幂等', () => {
   it('call → 下发 call 帧;result → 回调调用方并入幂等表', () => {
     const { session, sent, stored } = readySession()
     const got: DeviceCallResult[] = []
-    session.call(REQ, r => got.push(r))
+    const dispositions: string[] = []
+    session.call(REQ, (r, disposition) => {
+      got.push(r)
+      dispositions.push(disposition)
+    })
     expect(sent).toEqual([{ type: 'call', ...REQ }])
     session.handleFrame({ type: 'result', id: 'r1', ok: true, value: 'out' })
     expect(got).toEqual([{ ok: true, value: 'out' }])
+    expect(dispositions).toEqual(['completed'])
     expect(stored).toEqual([['r1', { ok: true, value: 'out' }]])
   })
 
@@ -237,7 +242,11 @@ describe('超时语义(60s → unavailable retryable + cancel 帧)', () => {
   it('到期:调用方收 unavailable(retryable:true),设备收 cancel 帧', () => {
     const { session, sent, timers } = readySession()
     const got: DeviceCallResult[] = []
-    session.call(REQ, r => got.push(r))
+    const dispositions: string[] = []
+    session.call(REQ, (r, disposition) => {
+      got.push(r)
+      dispositions.push(disposition)
+    })
     timers[0]?.cb()
     expect(got).toEqual([
       {
@@ -245,6 +254,7 @@ describe('超时语义(60s → unavailable retryable + cancel 帧)', () => {
         error: expect.objectContaining({ code: 'unavailable', retryable: true }),
       },
     ])
+    expect(dispositions).toEqual(['unknown'])
     expect(sent.at(-1)).toEqual({ type: 'cancel', id: 'r1' })
   })
 
@@ -293,9 +303,17 @@ describe('心跳与断线', () => {
     const { session } = readySession()
     session.dispose()
     const got: DeviceCallResult[] = []
-    session.call({ id: 'rx', path: 'shell/exec', arguments: {} }, r => got.push(r))
+    const dispositions: string[] = []
+    session.call(
+      { id: 'rx', path: 'shell/exec', arguments: {} },
+      (r, disposition) => {
+        got.push(r)
+        dispositions.push(disposition)
+      },
+    )
     expect(got).toEqual([
       { ok: false, error: expect.objectContaining({ code: 'unavailable', retryable: true }) },
     ])
+    expect(dispositions).toEqual(['not_dispatched'])
   })
 })
