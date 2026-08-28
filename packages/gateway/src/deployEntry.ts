@@ -1,5 +1,10 @@
 import { BUILTIN_CATALOG, builtinPluginBindings, type BuiltinPluginEnv } from '@tool-bridge/plugins'
-import { cleanupDefaultStoreFromEnv, createApp, type Env } from './app'
+import {
+  cleanupDefaultStoreFromEnv,
+  cleanupDeviceMailboxFromEnv,
+  createApp,
+  type Env,
+} from './app'
 
 export { createApp, type Env } from './app'
 export { DeviceSession } from './deviceSession'
@@ -40,7 +45,12 @@ const app = createApp({
 const handler: ExportedHandler<Env> = {
   fetch: (request, env, ctx) => app.fetch(request, env, ctx),
   scheduled: (_controller, env, ctx) => {
-    ctx.waitUntil(cleanupDefaultStoreFromEnv(env).catch(() => {
+    ctx.waitUntil((async (): Promise<void> => {
+      await Promise.all([
+        cleanupDefaultStoreFromEnv(env),
+        cleanupDeviceMailboxFromEnv(env),
+      ])
+    })().catch(() => {
       // Store errors may carry internal driver detail; scheduled logs keep a fixed safe shape.
       console.warn(JSON.stringify({ event: 'tool_bridge_store_cleanup_failed' }))
       throw new Error('Store cleanup failed')

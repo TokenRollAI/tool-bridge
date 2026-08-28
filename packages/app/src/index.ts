@@ -46,7 +46,6 @@ export {
   type ReadinessReport,
   type TbAppDeps,
 } from './deps'
-
 // --- 设备反向注册:hello 校验与落库的单一真源 ---
 // 宿主胶水(DO / Node ws)只负责传输,协议行为改这里,防两宿主树形态漂移。
 export {
@@ -56,6 +55,12 @@ export {
   type HelloAcceptance,
   processDeviceHello,
 } from './deviceHello'
+
+export {
+  cleanupDeviceMailbox,
+  type CleanupDeviceMailboxOptions,
+  createDeviceMailboxService,
+} from './deviceMailbox'
 
 // --- 无状态 /~mcp 投影(把 HTBP 树暴露成 MCP server)---
 export {

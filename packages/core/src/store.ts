@@ -13,6 +13,7 @@
  *   sys:bootstrapped  → true(Admin SK 引导幂等标志)
  *   annotation:<path> → { text, updatedAt, updatedBy }(管理员 Path 补充说明)
  *   feedback:<path>   → FeedbackEntry[](Agent 使用反馈,单 key 整存)
+ *   deviceop:<sha256(deviceId)>:<operationId> → DeviceOperationRecord(revision CAS,密文 payload/result)
  *   store:object:<id>  → StoreObject(revision CAS)
  *   store:upload:<id>  → UploadSession(revision CAS)
  *   store:call-capability:<id> → CallUploadCapability(token 仅存 hash)

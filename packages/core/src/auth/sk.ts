@@ -124,7 +124,11 @@ export type SKUpdatePatch = Partial<SecretKeyInput> & { disabled?: boolean }
  * sk:i:<id> → sha256hex(管理面二级索引)。
  */
 export class SKRegistryStore {
-  constructor(private readonly store: StateStore) {}
+  private readonly store: StateStore
+
+  constructor(store: StateStore) {
+    this.store = store
+  }
 
   private async recordById(id: string): Promise<SecretKey | null> {
     const hash = await this.store.get(KEY_SK_ID + id)

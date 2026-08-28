@@ -11,6 +11,8 @@
 export interface ToolSpec {
   /** 危险操作二次确认;进 `~help` 的 confirm 行。 */
   confirm?: boolean
+  /** 仅 device-backed tool 使用；mailbox/both 表示 invoke 可选择持久化交付。 */
+  delivery?: 'realtime' | 'mailbox' | 'both'
   /** 一句话描述;进 `~help` 的 `h` 行。上游可能不带 → 可缺省。 */
   description?: string
   /** 副作用标记(read/write/destructive);进 `~help` 的 effect 行。 */

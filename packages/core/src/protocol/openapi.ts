@@ -1,6 +1,16 @@
 /** OpenAPI 3.1 artifact，组件 schema 直接由固定控制面的 Zod 真源生成。 */
 import { z } from 'zod'
 import {
+  deviceOperationClaimRequestSchema,
+  deviceOperationClaimResponseSchema,
+  deviceOperationCompleteRequestSchema,
+  deviceOperationDetailSchema,
+  deviceOperationIdentityRequestSchema,
+  deviceOperationListRequestSchema,
+  deviceOperationListResponseSchema,
+  deviceOperationRenewRequestSchema,
+  deviceOperationRenewResponseSchema,
+  deviceOperationSummarySchema,
   feedbackDetailSchema,
   feedbackListSchema,
   feedbackRemoveResponseSchema,
@@ -29,6 +39,16 @@ type JsonObject = Record<string, unknown>
 
 const schemaRegistry = z.registry<{ id: string }>()
 const schemas = {
+  DeviceOperationClaimRequest: deviceOperationClaimRequestSchema,
+  DeviceOperationClaimResponse: deviceOperationClaimResponseSchema,
+  DeviceOperationCompleteRequest: deviceOperationCompleteRequestSchema,
+  DeviceOperationDetail: deviceOperationDetailSchema,
+  DeviceOperationIdentityRequest: deviceOperationIdentityRequestSchema,
+  DeviceOperationListRequest: deviceOperationListRequestSchema,
+  DeviceOperationListResponse: deviceOperationListResponseSchema,
+  DeviceOperationRenewRequest: deviceOperationRenewRequestSchema,
+  DeviceOperationRenewResponse: deviceOperationRenewResponseSchema,
+  DeviceOperationSummary: deviceOperationSummarySchema,
   Error: tbErrorBodySchema,
   FeedbackDetail: feedbackDetailSchema,
   FeedbackList: feedbackListSchema,
@@ -278,20 +298,82 @@ export const fixedControlPlaneOpenApi = {
         'x-tool-bridge-greedy-path': true,
       },
     },
+    '/~device/operations/get': {
+      post: {
+        operationId: 'getDeviceOperation',
+        security: bearerSecurity,
+        requestBody: { required: true, content: jsonContent('DeviceOperationIdentityRequest') },
+        responses: { 200: jsonResponse('Device operation detail', 'DeviceOperationDetail'), ...errorResponses },
+      },
+    },
+    '/~device/operations/list': {
+      post: {
+        operationId: 'listDeviceOperations',
+        security: bearerSecurity,
+        requestBody: { required: true, content: jsonContent('DeviceOperationListRequest') },
+        responses: { 200: jsonResponse('Visible device operation page', 'DeviceOperationListResponse'), ...errorResponses },
+      },
+    },
+    '/~device/operations/cancel': {
+      post: {
+        operationId: 'cancelDeviceOperation',
+        security: bearerSecurity,
+        requestBody: { required: true, content: jsonContent('DeviceOperationIdentityRequest') },
+        responses: { 200: jsonResponse('Cancelled or cancellation-requested operation', 'DeviceOperationDetail'), ...errorResponses },
+      },
+    },
+    '/~device/mailbox/claim': {
+      post: {
+        operationId: 'claimDeviceOperation',
+        security: bearerSecurity,
+        requestBody: { required: true, content: jsonContent('DeviceOperationClaimRequest') },
+        responses: { 200: jsonResponse('Claimed operation or next scan cursor', 'DeviceOperationClaimResponse'), ...errorResponses },
+      },
+    },
+    '/~device/mailbox/renew': {
+      post: {
+        operationId: 'renewDeviceOperation',
+        security: bearerSecurity,
+        requestBody: { required: true, content: jsonContent('DeviceOperationRenewRequest') },
+        responses: { 200: jsonResponse('Renewed operation lease', 'DeviceOperationRenewResponse'), ...errorResponses },
+      },
+    },
+    '/~device/mailbox/complete': {
+      post: {
+        operationId: 'completeDeviceOperation',
+        security: bearerSecurity,
+        requestBody: { required: true, content: jsonContent('DeviceOperationCompleteRequest') },
+        responses: { 200: jsonResponse('Terminal device operation', 'DeviceOperationDetail'), ...errorResponses },
+      },
+    },
     '/{commandPath}': {
       post: {
         'operationId': 'invoke',
         'security': bearerSecurity,
-        'parameters': [{
-          in: 'path',
-          name: 'commandPath',
-          required: true,
-          schema: { type: 'string' },
-          description: 'Complete HTBP command path, including the command/tool leaf.',
-        }],
+        'parameters': [
+          {
+            in: 'path',
+            name: 'commandPath',
+            required: true,
+            schema: { type: 'string' },
+            description: 'Complete HTBP command path, including the command/tool leaf.',
+          },
+          {
+            in: 'query',
+            name: 'ttlSeconds',
+            schema: { type: 'integer', minimum: 1 },
+            description: 'Mailbox operation TTL; used only when ~delivery can enqueue.',
+          },
+          {
+            in: 'header',
+            name: 'x-tb-idempotency-key',
+            schema: { type: 'string', minLength: 1, maxLength: 255 },
+            description: 'Mailbox retry key; used only when ~delivery can enqueue.',
+          },
+        ],
         'requestBody': {
           required: true,
-          description: 'Raw command arguments; there is no {tool, arguments} envelope.',
+          description: 'Raw command arguments plus the reserved optional ~delivery control.',
           content: { 'application/json': { schema: {} } },
         },
         'responses': {
@@ -302,6 +384,7 @@ export const fixedControlPlaneOpenApi = {
               'text/markdown': { schema: { type: 'string' } },
             },
           },
+          202: jsonResponse('Durably accepted device operation', 'DeviceOperationDetail'),
           ...errorResponses,
         },
         'x-tool-bridge-greedy-path': true,

@@ -19,7 +19,7 @@
  */
 
 import type { DeviceInvokeRequest } from '@tool-bridge/app'
-import { type DeviceCallResult, TBError } from '@tool-bridge/core'
+import { type DeviceCallAttempt, TBError } from '@tool-bridge/core'
 
 /** 路由条目 TTL;续期周期取其 1/3,保证正常情况下不会因抖动过期。 */
 export const DEVICE_ROUTE_TTL_SEC = 30
@@ -43,7 +43,7 @@ export interface DeviceForwardCall {
 /** 转发回执。 */
 export interface DeviceForwardReply {
   correlationId: string
-  result: DeviceCallResult
+  result: DeviceCallAttempt
 }
 
 /**
@@ -68,7 +68,7 @@ export interface DeviceRouterBackend {
 
 /** 等待中的跨副本调用。 */
 interface PendingForward {
-  resolve: (result: DeviceCallResult) => void
+  resolve: (result: DeviceCallAttempt) => void
   timer: ReturnType<typeof setTimeout>
 }
 
@@ -90,7 +90,7 @@ export class DeviceRouter {
     private readonly opts: {
       forwardTimeoutMs?: number
       /** 收到转发来的调用时,在本副本执行(本地无该连接则返回 offline)。 */
-      onLocalCall: (deviceId: string, req: DeviceInvokeRequest) => Promise<DeviceCallResult>
+      onLocalCall: (deviceId: string, req: DeviceInvokeRequest) => Promise<DeviceCallAttempt>
       ttlSec?: number
     },
   ) {}
@@ -136,7 +136,7 @@ export class DeviceRouter {
    * 把调用转发给持有该设备的副本并等结果。
    * 无人持有 → null(调用方按 deviceOffline 处理)。
    */
-  async forward(deviceId: string, req: DeviceInvokeRequest): Promise<DeviceCallResult | null> {
+  async forward(deviceId: string, req: DeviceInvokeRequest): Promise<DeviceCallAttempt | null> {
     const owner = await this.backend.lookupRoute(deviceId)
     if (owner === null) return null
     // 路由指向自己却走到这里 = 本地连接刚断但条目未过期,按离线处理。
@@ -148,11 +148,17 @@ export class DeviceRouter {
       replyTo: this.replicaId,
       req,
     }
-    return await new Promise<DeviceCallResult>((resolve) => {
+    return await new Promise<DeviceCallAttempt>((resolve) => {
       const timer = setTimeout(() => {
         this.pending.delete(correlationId)
-        // 持有者副本可能已崩溃;超时按离线返回,而不是永久挂起 HTTP 请求。
-        resolve({ ok: false, error: new TBError('unavailable', '设备调用转发超时').toJSON() })
+        // 请求可能已经到达持有者并写入 socket，超时只能保守归 unknown。
+        resolve({
+          disposition: 'unknown',
+          result: {
+            ok: false,
+            error: new TBError('unavailable', '设备调用转发超时').toJSON(),
+          },
+        })
       }, this.opts.forwardTimeoutMs ?? DEVICE_FORWARD_TIMEOUT_MS)
       timer.unref?.()
       this.pending.set(correlationId, { resolve, timer })
@@ -164,8 +170,11 @@ export class DeviceRouter {
           this.pending.delete(correlationId)
           clearTimeout(waiter.timer)
           waiter.resolve({
-            ok: false,
-            error: new TBError('unavailable', '设备调用转发失败').toJSON(),
+            disposition: 'unknown',
+            result: {
+              ok: false,
+              error: new TBError('unavailable', '设备调用转发失败').toJSON(),
+            },
           })
         })
     })
@@ -176,7 +185,13 @@ export class DeviceRouter {
     this.renewTimer = undefined
     for (const [, waiter] of this.pending) {
       clearTimeout(waiter.timer)
-      waiter.resolve({ ok: false, error: new TBError('unavailable', '网关正在关闭').toJSON() })
+      waiter.resolve({
+        disposition: 'unknown',
+        result: {
+          ok: false,
+          error: new TBError('unavailable', '网关正在关闭').toJSON(),
+        },
+      })
     }
     this.pending.clear()
     await Promise.all([...this.owned].map(async id => await this.release(id)))
@@ -205,11 +220,17 @@ export class DeviceRouter {
       return
     }
     if (typeof call?.correlationId !== 'string' || typeof call?.replyTo !== 'string') return
-    let result: DeviceCallResult
+    let result: DeviceCallAttempt
     try {
       result = await this.opts.onLocalCall(call.deviceId, call.req)
     } catch {
-      result = { ok: false, error: new TBError('internal', '设备调用执行失败').toJSON() }
+      result = {
+        disposition: 'unknown',
+        result: {
+          ok: false,
+          error: new TBError('internal', '设备调用执行失败').toJSON(),
+        },
+      }
     }
     const reply: DeviceForwardReply = { correlationId: call.correlationId, result }
     await this.backend

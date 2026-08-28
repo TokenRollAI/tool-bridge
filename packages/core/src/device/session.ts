@@ -21,6 +21,20 @@ export const DEVICE_REJECT_CLOSE_CODE = 1008
 
 export type DeviceCallResult = { ok: true, value: unknown } | { error: TBErrorBody, ok: false }
 
+/**
+ * 网关对一次 realtime 尝试的权威认知。
+ *
+ * - completed:设备明确返回 result（成功或业务错误）；
+ * - not_dispatched:call 帧确定没有交给设备，可安全改走 Mailbox；
+ * - unknown:call 帧已经发送或可能已经发送，但结果未收敛，不能自动重试/入队。
+ */
+export type DeviceCallDisposition = 'completed' | 'not_dispatched' | 'unknown'
+
+export interface DeviceCallAttempt {
+  disposition: DeviceCallDisposition
+  result: DeviceCallResult
+}
+
 export type CancelTimer = () => void
 /** 时间注入:到期回调 + 返回取消函数(生产 = setTimeout/clearTimeout,单测 = 假时钟)。 */
 export type SetTimer = (cb: () => void, ms: number) => CancelTimer
@@ -44,7 +58,7 @@ export interface DeviceSessionOptions {
 
 interface PendingCall {
   cancelTimer: CancelTimer
-  waiters: Array<(result: DeviceCallResult) => void>
+  waiters: Array<(result: DeviceCallResult, disposition: DeviceCallDisposition) => void>
 }
 
 export interface DeviceCallRequest {
@@ -146,10 +160,13 @@ export class DeviceGatewaySession {
    * 发起调用:结果经 done 回调(幂等回放可能同步回调)。
    * 重复 id:已有结果 → 立即以首次结果应答;in-flight → 挂同一待决项,不重复下发。
    */
-  call(req: DeviceCallRequest, done: (result: DeviceCallResult) => void): void {
+  call(
+    req: DeviceCallRequest,
+    done: (result: DeviceCallResult, disposition: DeviceCallDisposition) => void,
+  ): void {
     const cached = this.results.get(req.id)
     if (cached !== undefined) {
-      done(cached)
+      done(cached, 'completed')
       return
     }
     const inflight = this.pending.get(req.id)
@@ -158,19 +175,29 @@ export class DeviceGatewaySession {
       return
     }
     if (this.phase_ !== 'ready') {
-      done({ ok: false, error: TBError.deviceOffline().toJSON() })
+      done({ ok: false, error: TBError.deviceOffline().toJSON() }, 'not_dispatched')
       return
     }
     const cancelTimer = this.opts.setTimer(() => this.onCallTimeout(req.id), this.timeoutMs)
     this.pending.set(req.id, { waiters: [done], cancelTimer })
-    this.io.send({
-      type: 'call',
-      id: req.id,
-      path: req.path,
-      arguments: req.arguments,
-      // undefined 经 JSON.stringify 丢弃:老网关不带 context 时帧形状不变。
-      ...(req.context !== undefined ? { context: req.context } : {}),
-    })
+    try {
+      this.io.send({
+        type: 'call',
+        id: req.id,
+        path: req.path,
+        arguments: req.arguments,
+        // undefined 经 JSON.stringify 丢弃:老网关不带 context 时帧形状不变。
+        ...(req.context !== undefined ? { context: req.context } : {}),
+      })
+    } catch {
+      this.pending.delete(req.id)
+      cancelTimer()
+      // send 抛错无法证明底层没有写出任何字节，保守归 unknown。
+      done({
+        ok: false,
+        error: new TBError('unavailable', '设备调用发送失败', { retryable: true }).toJSON(),
+      }, 'unknown')
+    }
   }
 
   /** 幂等表回放种子(DO 从 ctx.storage 恢复时用);已有同 id 结果则忽略。 */
@@ -193,7 +220,7 @@ export class DeviceGatewaySession {
     }
     for (const entry of entries) {
       entry.cancelTimer()
-      for (const waiter of entry.waiters) waiter(result)
+      for (const waiter of entry.waiters) waiter(result, 'unknown')
     }
   }
 
@@ -209,7 +236,7 @@ export class DeviceGatewaySession {
     if (entry === undefined) return // 超时后迟到的 result:仅入幂等表
     this.pending.delete(id)
     entry.cancelTimer()
-    for (const waiter of entry.waiters) waiter(result)
+    for (const waiter of entry.waiters) waiter(result, 'completed')
   }
 
   private onCallTimeout(id: string): void {
@@ -223,6 +250,6 @@ export class DeviceGatewaySession {
         retryable: true,
       }).toJSON(),
     }
-    for (const waiter of entry.waiters) waiter(result)
+    for (const waiter of entry.waiters) waiter(result, 'unknown')
   }
 }

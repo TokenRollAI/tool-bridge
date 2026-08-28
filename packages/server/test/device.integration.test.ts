@@ -214,9 +214,9 @@ describe('DeviceHub 全链路', () => {
     })
 
     const req = { id: 'fixed-id-1', path: 'shell/exec', arguments: {} }
-    const first = (await server.deviceHub.invoke('dev2', req)) as { ok: boolean, value: unknown }
-    const second = (await server.deviceHub.invoke('dev2', req)) as { ok: boolean, value: unknown }
-    expect(first).toEqual({ ok: true, value: { n: 1 } })
+    const first = await server.deviceHub.invoke('dev2', req)
+    const second = await server.deviceHub.invoke('dev2', req)
+    expect(first).toEqual({ disposition: 'completed', result: { ok: true, value: { n: 1 } } })
     expect(second).toEqual(first)
     expect(callFrames).toBe(1)
   })
@@ -228,9 +228,9 @@ describe('DeviceHub 全链路', () => {
       id: 'x',
       path: 'shell/exec',
       arguments: {},
-    })) as { error?: { code: string }, ok: boolean }
-    expect(res.ok).toBe(false)
-    expect(res.error?.code).toBe('unavailable')
+    }))
+    expect(res.disposition).toBe('not_dispatched')
+    expect(res.result).toMatchObject({ ok: false, error: { code: 'unavailable' } })
   })
 
   it('invoke 认证 await 期间同 deviceId 被新连接顶替 → 不向旧连接下发', async () => {
@@ -281,7 +281,7 @@ describe('DeviceHub 全链路', () => {
       id: 'replace-race',
       path: 'shell/exec',
       arguments: { command: 'echo should-not-reach-stale' },
-    }) as Promise<{ error?: { code: string }, ok: boolean }>
+    })
     await identifyBlocked
 
     const replacement = await connectDevice(wsBase, deviceId, { autoReply: false })
@@ -294,7 +294,10 @@ describe('DeviceHub 全链路', () => {
 
     releaseIdentify()
     const result = await invoke
-    expect(result).toMatchObject({ ok: false, error: { code: 'unavailable' } })
+    expect(result).toMatchObject({
+      disposition: 'not_dispatched',
+      result: { ok: false, error: { code: 'unavailable' } },
+    })
     expect(staleCalls).toBe(0)
     expect(replacementCalls).toBe(0)
 

@@ -116,6 +116,7 @@ export type DeviceFrame
 const deviceNodeCmdSchema = z
   .object({
     name: z.string().min(1),
+    delivery: z.enum(['realtime', 'mailbox', 'both']).optional(),
     description: z.string().optional(),
     inputSchema: z.unknown().optional(),
     outputSchema: z.unknown().optional(),

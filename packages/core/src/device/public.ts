@@ -18,3 +18,4 @@ export {
 } from '../types'
 export * from './client'
 export * from './frames'
+export * from './mailbox'

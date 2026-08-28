@@ -17,6 +17,10 @@ import {
   handleFeedbackGet,
   handleFeedbackPost,
 } from './routes/feedback'
+import {
+  handleDeviceMailboxControl,
+  handleDeviceMailboxData,
+} from './routes/deviceMailbox'
 import { runHandler, tbErrorResponse, withSecurityHeaders } from './responses'
 import { handleAuthorize, handleRegister } from './routes/register'
 import { handleDescribe, handleSkill } from './routes/describe'
@@ -123,6 +127,13 @@ export function createTbApp(deps: TbAppDeps): Hono<{ Variables: Vars }> {
     await runHandler(async () => {
       const segs = new URL(c.req.url).pathname.replace(/\/+$/, '').split('/')
       const last = segs.pop() ?? ''
+      const pathname = new URL(c.req.url).pathname.replace(/\/+$/, '')
+      if (pathname.startsWith('/~device/operations/')) {
+        return await handleDeviceMailboxControl(c, env)
+      }
+      if (pathname.startsWith('/~device/mailbox/')) {
+        return await handleDeviceMailboxData(c, env)
+      }
       if (last === '~register') return await handleRegister(c, env)
       if (last === '~authorize') return await handleAuthorize(c, env)
       if (last === '~feedback' || segs[segs.length - 1] === '~feedback') {

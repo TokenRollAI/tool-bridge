@@ -15,6 +15,13 @@ import type { HelpJson as CoreHelpJson } from '../htbp/model'
 import type { ToolSpec as CoreToolSpec } from '../tool/types'
 import type { TreeJson as CoreTreeJson } from '../htbp/tree'
 import {
+  type DeviceOperationClaim as CoreDeviceOperationClaim,
+  type DeviceOperationDetail as CoreDeviceOperationDetail,
+  type DeviceOperationState as CoreDeviceOperationState,
+  type DeviceOperationSummary as CoreDeviceOperationSummary,
+  DEVICE_OPERATION_STATES,
+} from '../device/mailbox'
+import {
   type Action,
   ACTIONS,
   NODE_KINDS,
@@ -23,12 +30,13 @@ import {
   type Page,
   type TreeNode,
 } from '../types'
+import { tbErrorBodySchema } from './errorWire'
 export {
-  tbErrorBodySchema,
   tbErrorCodeSchema,
   type WireTBErrorBody,
   type WireTBErrorCode,
 } from './errorWire'
+export { tbErrorBodySchema }
 
 export const actionSchema: z.ZodType<Action> = z.enum(ACTIONS)
 export const nodeKindSchema: z.ZodType<NodeKind> = z.enum(NODE_KINDS)
@@ -81,6 +89,7 @@ export const helpChildSchema = z.object({
 
 export const helpCommandSchema = z.object({
   confirm: z.boolean().optional(),
+  delivery: z.enum(['realtime', 'mailbox', 'both']).optional(),
   effect: z.string().optional(),
   h: z.string().optional(),
   inputSchema: z.unknown().optional(),
@@ -122,6 +131,7 @@ export type WireTreeJson = CoreTreeJson
 
 export const toolSpecSchema: z.ZodType<CoreToolSpec> = z.object({
   confirm: z.boolean().optional(),
+  delivery: z.enum(['realtime', 'mailbox', 'both']).optional(),
   description: z.string().optional(),
   effect: z.string().optional(),
   inputSchema: z.unknown().optional(),
@@ -251,6 +261,132 @@ export interface WireToolSearchRequest {
   query: string
 }
 
+// ---------- Durable device mailbox ----------
+
+export const deviceOperationStateSchema: z.ZodType<CoreDeviceOperationState> = z.enum(
+  DEVICE_OPERATION_STATES,
+)
+
+const deviceOperationCallerSchema = z.object({
+  keyId: z.string().min(1),
+  owner: z.string().min(1),
+})
+
+const deviceOperationSummaryShape = {
+  attempt: z.number().int().nonnegative(),
+  caller: deviceOperationCallerSchema,
+  cancelRequestedAt: z.iso.datetime({ offset: true }).optional(),
+  commandId: z.string().min(1),
+  createdAt: z.iso.datetime({ offset: true }),
+  deviceId: z.string().min(1),
+  executionMayHaveOccurred: z.boolean(),
+  expiresAt: z.iso.datetime({ offset: true }),
+  leaseUntil: z.iso.datetime({ offset: true }).optional(),
+  mountPath: z.string().min(1),
+  operationId: z.string().min(1),
+  state: deviceOperationStateSchema,
+  targetPath: z.string().min(1),
+  terminalAt: z.iso.datetime({ offset: true }).optional(),
+  traceId: z.string().min(1),
+  updatedAt: z.iso.datetime({ offset: true }),
+}
+
+export const deviceOperationSummarySchema: z.ZodType<CoreDeviceOperationSummary> = z.object(
+  deviceOperationSummaryShape,
+)
+export const deviceOperationDetailSchema: z.ZodType<CoreDeviceOperationDetail> = z.object({
+  ...deviceOperationSummaryShape,
+  error: tbErrorBodySchema.optional(),
+  result: z.json().optional(),
+})
+
+export const deviceOperationListRequestSchema = z.strictObject({
+  deviceId: z.string().min(1),
+  opts: z.strictObject({
+    cursor: z.string().min(1).optional(),
+    limit: z.number().int().positive().optional(),
+    states: z.array(deviceOperationStateSchema).min(1).optional(),
+  }).optional(),
+})
+export const deviceOperationListResponseSchema = pageSchema(deviceOperationSummarySchema)
+
+export const deviceOperationIdentityRequestSchema = z.strictObject({
+  deviceId: z.string().min(1),
+  operationId: z.string().min(1),
+})
+
+export const deviceOperationClaimRequestSchema = z.strictObject({
+  cursor: z.string().min(1).optional(),
+  deviceId: z.string().min(1),
+  limit: z.number().int().positive().optional(),
+})
+export const deviceOperationClaimSchema: z.ZodType<CoreDeviceOperationClaim> = z.object({
+  arguments: z.record(z.string(), z.json()),
+  attempt: z.number().int().positive(),
+  caller: deviceOperationCallerSchema,
+  cancelRequestedAt: z.iso.datetime({ offset: true }).optional(),
+  commandId: z.string().min(1),
+  createdAt: z.iso.datetime({ offset: true }),
+  expiresAt: z.iso.datetime({ offset: true }),
+  leaseId: z.string().min(1),
+  leaseUntil: z.iso.datetime({ offset: true }),
+  operationId: z.string().min(1),
+  path: z.string().min(1),
+  targetPath: z.string().min(1),
+  traceId: z.string().min(1),
+})
+export const deviceOperationClaimResponseSchema = z.object({
+  cursor: z.string().optional(),
+  operation: deviceOperationClaimSchema.optional(),
+  serverNow: z.iso.datetime({ offset: true }),
+})
+
+const deviceOperationLeaseShape = {
+  deviceId: z.string().min(1),
+  leaseId: z.string().min(1),
+  operationId: z.string().min(1),
+}
+export const deviceOperationRenewRequestSchema = z.strictObject(deviceOperationLeaseShape)
+export const deviceOperationRenewResponseSchema = z.object({
+  cancelRequestedAt: z.iso.datetime({ offset: true }).optional(),
+  leaseUntil: z.iso.datetime({ offset: true }),
+  serverNow: z.iso.datetime({ offset: true }),
+})
+export const deviceOperationCompleteRequestSchema = z.discriminatedUnion('outcome', [
+  z.strictObject({
+    ...deviceOperationLeaseShape,
+    outcome: z.literal('succeeded'),
+    result: z.json(),
+  }),
+  z.strictObject({
+    ...deviceOperationLeaseShape,
+    error: tbErrorBodySchema,
+    outcome: z.literal('rejected'),
+  }),
+  z.strictObject({
+    ...deviceOperationLeaseShape,
+    error: tbErrorBodySchema,
+    outcome: z.literal('failed'),
+  }),
+  z.strictObject({
+    ...deviceOperationLeaseShape,
+    error: tbErrorBodySchema.optional(),
+    outcome: z.literal('result_unknown'),
+  }),
+])
+
+export type WireDeviceOperationState = CoreDeviceOperationState
+export type WireDeviceOperationSummary = CoreDeviceOperationSummary
+export type WireDeviceOperationDetail = CoreDeviceOperationDetail
+export type WireDeviceOperationClaim = CoreDeviceOperationClaim
+export type WireDeviceOperationListRequest = z.infer<typeof deviceOperationListRequestSchema>
+export type WireDeviceOperationIdentityRequest = z.infer<typeof deviceOperationIdentityRequestSchema>
+export type WireDeviceOperationClaimRequest = z.infer<typeof deviceOperationClaimRequestSchema>
+export type WireDeviceOperationClaimResponse = z.infer<typeof deviceOperationClaimResponseSchema>
+export type WireDeviceOperationRenewRequest = z.infer<typeof deviceOperationRenewRequestSchema>
+export type WireDeviceOperationRenewResponse = z.infer<typeof deviceOperationRenewResponseSchema>
+export type WireDeviceOperationCompleteRequest = z.infer<typeof deviceOperationCompleteRequestSchema>
+
 /**
  * 管理面 system/registry 的存储态投影。config/virtualize 的具体写入联合仍由
  * core NodeInput 权威校验；固定 wire 只对白名单顶层字段与 discriminator 做门禁。
@@ -259,6 +395,7 @@ export const registryNodeSchema = z.object({
   config: z.record(z.string(), z.unknown()).optional(),
   createdAt: z.string().optional(),
   description: z.string(),
+  deviceId: z.string().optional(),
   kind: nodeKindSchema,
   lastSeenAt: z.string().optional(),
   online: z.boolean().optional(),
@@ -288,6 +425,7 @@ export interface WireRegistryNode {
   config?: Record<string, unknown>
   createdAt?: string
   description: string
+  deviceId?: string
   kind: WireNodeKind
   lastSeenAt?: string
   online?: boolean

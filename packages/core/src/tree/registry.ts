@@ -217,7 +217,7 @@ export class NodeRegistryStore {
     node: NodeInput,
     registeredBy: string,
     now: Timestamp,
-    opts: { lastSeenAt?: Timestamp, online?: boolean } = {},
+    opts: { deviceId?: string, lastSeenAt?: Timestamp, online?: boolean } = {},
   ): Promise<TreeNode> {
     const invalid = validatePath(node.path)
     if (invalid) throw invalid
@@ -245,6 +245,7 @@ export class NodeRegistryStore {
       description: node.description,
       ...(node.config !== undefined ? { config: node.config } : {}),
       ...(node.virtualize !== undefined ? { virtualize: node.virtualize } : {}),
+      ...(opts.deviceId !== undefined ? { deviceId: opts.deviceId } : {}),
       ...(opts.online !== undefined ? { online: opts.online } : {}),
       ...(opts.lastSeenAt !== undefined ? { lastSeenAt: opts.lastSeenAt } : {}),
       registeredBy,

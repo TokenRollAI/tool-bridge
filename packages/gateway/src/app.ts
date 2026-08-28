@@ -1,5 +1,6 @@
 import {
   cleanupDefaultStore,
+  cleanupDeviceMailbox,
   createTbApp,
   ensureBootstrapped,
   parseS3Credentials,
@@ -208,6 +209,17 @@ export async function cleanupDefaultStoreFromEnv(env: Env): Promise<void> {
     schema: createD1StateSchema(env.TB_STATE),
   })
   await cleanupDefaultStore(depsFromEnv(env, state, undefined, parseRuntimeEnv(env)))
+}
+
+/** Workers Cron mailbox maintenance; absent encryption root means capability is disabled. */
+export async function cleanupDeviceMailboxFromEnv(env: Env): Promise<void> {
+  if (env.TB_SECRET_ENCRYPTION_KEY === undefined) return
+  const metrics = new D1RequestMetrics()
+  const state = new D1StateStore(env.TB_STATE.withSession('first-primary'), {
+    metrics,
+    schema: createD1StateSchema(env.TB_STATE),
+  })
+  await cleanupDeviceMailbox(depsFromEnv(env, state, undefined, parseRuntimeEnv(env)))
 }
 
 function withServerTiming(response: Response, metrics: D1RequestMetrics, totalMs: number): Response {

@@ -28,6 +28,7 @@ function toolToCmd(nodePath: TreePath, tool: ToolSpec, index: boolean): CmdSpec 
   if (tool.description !== undefined) {
     cmd.h = index ? summarizeOneLine(tool.description) : tool.description
   }
+  if (tool.delivery !== undefined) cmd.delivery = tool.delivery
   if (!index && tool.inputSchema !== undefined) cmd.inputSchema = tool.inputSchema
   if (!index && tool.outputSchema !== undefined) cmd.outputSchema = tool.outputSchema
   if (tool.effect !== undefined) cmd.effect = tool.effect

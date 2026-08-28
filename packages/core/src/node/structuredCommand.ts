@@ -47,6 +47,8 @@ export interface StructuredCommandDefinition {
   argv?: StructuredCommandArgvItem[]
   confirm?: boolean
   cwd?: string
+  /** 缺省 realtime；mailbox-only 命令不接受同步 invoke。 */
+  delivery?: 'realtime' | 'mailbox' | 'both'
   description: string
   effect: StructuredCommandEffect
   executable: string
@@ -130,6 +132,7 @@ const commandSchema = z.strictObject({
   argv: z.array(z.union([z.string(), argumentSchema])).optional(),
   cwd: z.string().min(1).optional(),
   effect: z.enum(['read', 'write', 'destructive']),
+  delivery: z.enum(['realtime', 'mailbox', 'both']).optional(),
   confirm: z.boolean().optional(),
   timeoutMs: z.number().int().positive().max(SHELL_EXEC_DEFAULT_TIMEOUT_MS).optional(),
   maxOutputBytes: z.number().int().positive().max(STRUCTURED_COMMAND_MAX_OUTPUT_BYTES).optional(),
@@ -311,6 +314,7 @@ export function createStructuredCommandRuntime(
       definition.name,
       {
         description: definition.description,
+        ...(definition.delivery !== undefined ? { delivery: definition.delivery } : {}),
         effect: definition.effect,
         ...(definition.confirm !== undefined ? { confirm: definition.confirm } : {}),
         inputSchema: inputSchema(definition),

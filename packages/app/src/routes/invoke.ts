@@ -1,6 +1,7 @@
 /**
  * `POST /<nodePath>/<command>`:数据面调用总入口。唯一形态——命令是节点下的虚拟叶子,
- * body 即 arguments 本体,无 `{tool, arguments}` 信封。resolve 得到 {节点, 命令段};
+ * body 是 arguments 本体加可选保留 `~delivery`,无 `{tool, arguments}` 信封。resolve 得到
+ * {节点, 命令段};
  * 命令段必须恰一段(非空、不含 '/'),节点本身不可调用(404)。
  *
  * 一个 handler 覆盖全部可调用 kind,分支顺序即语义优先级:remote 透传 → device 自定义
@@ -48,7 +49,20 @@ import {
   requirePluginExport,
   upstreamTools,
 } from '../toolNodes'
-import { deviceCallContextFrom, deviceMarkerOf, deviceToolMarker, invokeDevice, relativeDevicePath } from '../deviceNodes'
+import {
+  attemptDevice,
+  deviceCallContextFrom,
+  deviceMarkerOf,
+  deviceToolMarker,
+  invokeDevice,
+  relativeDevicePath,
+  tbErrorFromBody,
+} from '../deviceNodes'
+import {
+  deviceOperationTtlSeconds,
+  enqueueDeviceCommand,
+  mailboxJsonObject,
+} from './deviceMailbox'
 import { assertRemoteConfigAllowed, remotePassthroughIfMatch, resolveRemoteSettings } from '../federation'
 import { createPluginContextProvider } from '../providers/pluginContext'
 import { assertRegisterPath, decodePath, scopeForCmd } from '../paths'
@@ -79,7 +93,8 @@ export async function handleInvoke(c: AppContext, env: RouteEnv): Promise<Respon
     if (remote) return remote
   }
 
-  // 唯一调用形态:`POST /<nodePath>/<command>`,body 即 arguments 本体(无 {tool,arguments} 信封)。
+  // 唯一调用形态:`POST /<nodePath>/<command>`,body 是 arguments + 保留调用控制
+  // (无 {tool,arguments} 信封)。
   // 最长前缀 resolve 得到所属节点与剩余段;剩余段即命令名,必须恰一段(不为空、不含 '/')。
   // 节点本身(rest='')不可调用——必须带命令段。可见性/授权判在**节点路径**(决策:授权只到节点)。
   const resolved = await registry.resolve(raw).catch(() => null)
@@ -90,31 +105,123 @@ export async function handleInvoke(c: AppContext, env: RouteEnv): Promise<Respon
   const command = resolved.rest
   // 节点不可见 → 404(隐藏存在性),判在节点路径。
   if (!check(ctx, node.path, 'read').allow) throw TBError.notFound('not found')
+  const toolMarker = deviceToolMarker(node)
 
-  // 调用体恒为裸 arguments 对象(可空);命令名来自路径叶子段。
+  type InvokeDelivery = 'fallback' | 'mailbox' | 'realtime'
+  interface InvokeRequest {
+    arguments: Record<string, unknown>
+    delivery: InvokeDelivery
+    explicitDelivery: boolean
+  }
+  let invokeRequest: Promise<InvokeRequest> | undefined
+  // body 仍是 arguments 本体；`~delivery` 是唯一保留的调用控制字段，进入 handler 前剥离。
+  const readInvokeRequest = async (): Promise<InvokeRequest> => {
+    if (invokeRequest !== undefined) return await invokeRequest
+    invokeRequest = (async () => {
+      const parsed = toolMarker === null
+        ? (await c.req.json().catch(() => null)) as unknown
+        : await mailboxJsonObject(c, { allowEmpty: true })
+      if (parsed !== null && (typeof parsed !== 'object' || Array.isArray(parsed))) {
+        throw new TBError('invalid_argument', 'body must be a JSON object (command arguments)')
+      }
+      const raw = { ...((parsed ?? {}) as Record<string, unknown>) }
+      const unknownControls = Object.keys(raw).filter(
+        key => key.startsWith('~') && key !== '~delivery',
+      )
+      if (unknownControls.length > 0) {
+        throw new TBError(
+          'invalid_argument',
+          `unknown invocation control '${unknownControls[0]}'`,
+        )
+      }
+      const rawDelivery = raw['~delivery']
+      delete raw['~delivery']
+      if (
+        rawDelivery !== undefined
+        && rawDelivery !== 'realtime'
+        && rawDelivery !== 'mailbox'
+        && rawDelivery !== 'fallback'
+      ) {
+        throw new TBError(
+          'invalid_argument',
+          '\'~delivery\' must be one of realtime, mailbox, fallback',
+        )
+      }
+      return {
+        arguments: raw,
+        delivery: rawDelivery ?? 'realtime',
+        explicitDelivery: rawDelivery !== undefined,
+      }
+    })()
+    return await invokeRequest
+  }
   const readInvokeBody = async (): Promise<Record<string, unknown>> => {
-    const parsed = (await c.req.json().catch(() => null)) as unknown
-    if (parsed !== null && (typeof parsed !== 'object' || Array.isArray(parsed))) {
-      throw new TBError('invalid_argument', 'body must be a JSON object (command arguments)')
+    const request = await readInvokeRequest()
+    if (request.explicitDelivery) {
+      throw new TBError(
+        'invalid_argument',
+        '\'~delivery\' is only supported by device-backed tool commands',
+      )
     }
-    return (parsed ?? {}) as Record<string, unknown>
+    return request.arguments
   }
 
   // --- device 自定义 tool 节点:providerConfig 标记 → 帧协议 call 转发。 ---
   // 须先于 mcp/http/tool 通用分支:provider 是设备本地保留 id(如 '@local'),不是 plugin。
-  const toolMarker = deviceToolMarker(node)
   if (toolMarker !== null) {
     if (!check(ctx, node.path, 'call').allow) {
       throw new TBError('permission_denied', `no scope grants 'call' on '${node.path}'`)
     }
-    const args = await readInvokeBody()
-    const result = await invokeDevice(deps, toolMarker.deviceId, {
+    const declared = toolMarker.cmds?.find(item => item.name.toLowerCase() === command)
+    if (toolMarker.cmds !== undefined && declared === undefined) throw TBError.notFound('not found')
+    const request = await readInvokeRequest()
+    const capability = declared?.delivery ?? 'realtime'
+    const canRealtime = capability === 'realtime' || capability === 'both'
+    const canMailbox = capability === 'mailbox' || capability === 'both'
+    if (request.delivery === 'realtime' && !canRealtime) {
+      throw new TBError('invalid_argument', 'device command does not support realtime delivery')
+    }
+    if (request.delivery === 'mailbox' && !canMailbox) {
+      throw new TBError('invalid_argument', 'device command does not support mailbox delivery')
+    }
+    if (request.delivery === 'fallback' && !canMailbox) {
+      throw new TBError('invalid_argument', 'device command does not support mailbox fallback')
+    }
+    const ttlSeconds = request.delivery === 'realtime'
+      ? undefined
+      : deviceOperationTtlSeconds(new URL(c.req.url))
+    const enqueue = async (): Promise<Response> => await enqueueDeviceCommand(c, env, {
+      arguments: request.arguments,
+      command,
+      marker: toolMarker,
+      node,
+      ...(ttlSeconds === undefined ? {} : { ttlSeconds }),
+    })
+    if (request.delivery === 'mailbox' || !canRealtime) return await enqueue()
+    if (request.delivery === 'fallback' && deps.device === undefined) return await enqueue()
+
+    const attempt = await attemptDevice(deps, toolMarker.deviceId, {
       // 帧 path 含命令叶子段:<mount 相对路径>/<命令>。
       path: `${relativeDevicePath(node.path, toolMarker.mountPath)}/${command}`,
-      arguments: args,
+      arguments: request.arguments,
       context: deviceCallContextFrom(ctx),
     })
-    return renderResult(result, negotiate(c.req.header('accept')))
+    if (attempt.disposition === 'not_dispatched' && request.delivery === 'fallback') {
+      return await enqueue()
+    }
+    if (attempt.result.ok) {
+      const response = renderResult(attempt.result.value, negotiate(c.req.header('accept')))
+      response.headers.set('x-tb-delivery', 'realtime')
+      return response
+    }
+    if (attempt.disposition === 'unknown' && request.delivery === 'fallback') {
+      throw new TBError(
+        attempt.result.error.code,
+        `${attempt.result.error.message}; delivery outcome is unknown and was not enqueued`,
+        { retryable: false },
+      )
+    }
+    throw tbErrorFromBody(attempt.result.error)
   }
 
   // --- mcp/http/tool 上游工具调用:scope 恒 'call';虚拟名反查上游真名再调 Provider。 ---
