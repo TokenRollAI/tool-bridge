@@ -8,7 +8,8 @@
       "description": "Read kernel and architecture information",
       "executable": "/usr/bin/uname",
       "argv": ["-a"],
-      "effect": "read"
+      "effect": "read",
+      "delivery": "both"
     },
     {
       "name": "disk-usage",

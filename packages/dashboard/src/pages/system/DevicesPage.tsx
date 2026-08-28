@@ -26,6 +26,8 @@ import {
   PRESENCE_STALE_AFTER_MS,
   PRESENCE_TONE,
 } from '@/lib/presence'
+import { DeviceMailboxPanel } from '@/components/device/DeviceMailboxPanel'
+import { mailboxTargetForRegistryNode } from '@/lib/deviceMailbox'
 import { PaginationFooter } from '@/components/PaginationFooter'
 import { PresenceBadge } from '@/components/PresenceBadge'
 import { CopyButton } from '@/components/CopyButton'
@@ -323,6 +325,13 @@ export function DevicesPage() {
           />
         )}
       </section>
+
+      <DeviceMailboxPanel
+        targets={devices.flatMap(({ node }) => {
+          const target = mailboxTargetForRegistryNode(node)
+          return target === null ? [] : [target]
+        })}
+      />
 
       <div className="mt-4 rounded-lg border border-dashed bg-muted/10 px-4 py-3 text-xs leading-5 text-muted-foreground">
         <p>

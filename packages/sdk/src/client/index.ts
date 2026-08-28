@@ -34,6 +34,10 @@ export { fixedControlPlaneOpenApi } from '@tool-bridge/core/protocol'
 export type { FixedControlPlaneOpenApi } from '@tool-bridge/core/protocol'
 export type {
   WireAction as Action,
+  WireDeviceOperationDetail as DeviceOperationDetail,
+  WireDeviceOperationListRequest as DeviceOperationListRequest,
+  WireDeviceOperationState as DeviceOperationState,
+  WireDeviceOperationSummary as DeviceOperationSummary,
   WireFeedbackDetail as FeedbackDetail,
   WireFeedbackList as FeedbackList,
   WireFeedbackSubmitRequest as FeedbackSubmitRequest,

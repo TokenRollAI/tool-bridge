@@ -11,8 +11,8 @@
     "check": "tsc --noEmit"
   },
   "dependencies": {
-    "@tool-bridge/dashboard": "^0.25.0",
-    "@tool-bridge/gateway": "^0.23.0"
+    "@tool-bridge/dashboard": "^0.26.0",
+    "@tool-bridge/gateway": "^0.24.0"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20260818.1",
@@ -22,7 +22,7 @@
   "cloudflare": {
     "bindings": {
       "TB_STATE": {
-        "description": "Authoritative state (D1): node tree config, SecretKey hashes, encrypted secrets, plugin manifests."
+        "description": "Authoritative state (D1): node tree config, SecretKey hashes, encrypted secrets, durable device operations, plugin manifests."
       },
       "TB_SEARCH": {
         "description": "Tool-search index (D1, same database): weighted LIKE backing for `~search`."
@@ -37,7 +37,7 @@
         "description": "Required. Generate once with `node -e \"console.log('tbk_'+require('crypto').randomBytes(32).toString('base64url'))\"`, save it in a password manager, and paste it here."
       },
       "TB_SECRET_ENCRYPTION_KEY": {
-        "description": "Required. SecretStore root key; generate with `node -e \"console.log(require('crypto').randomBytes(32).toString('base64url'))\"`."
+        "description": "Required. SecretStore and durable device Mailbox encryption root key; generate with `node -e \"console.log(require('crypto').randomBytes(32).toString('base64url'))\"`."
       }
     }
   }

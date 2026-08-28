@@ -8,8 +8,8 @@ import {
   withClient,
 } from '../http'
 import { collect, resolveTarget, withGlobalOpts } from '../args'
+import { printJson, printLine } from '../output'
 import { printMarkdown } from '../markdown'
-import { printJson } from '../output'
 
 /** 从 stdin 读整块内容(`--args-file -`;与 ctx put 的 stdin 读法一致)。 */
 function readStdin(): string {
@@ -167,6 +167,9 @@ export function callCommand() {
       collect,
       [],
     )
+    .option('--delivery <mode>', 'Device delivery: realtime, mailbox, or fallback')
+    .option('--idempotency-key <key>', 'Mailbox retry key (mailbox/fallback only)')
+    .option('--ttl <seconds>', 'Mailbox operation expiry in seconds (mailbox/fallback only)')
     .addHelpText(
       'after',
       `
@@ -192,13 +195,64 @@ Examples:
       const callArgs = parseCallArgs(opts.args, opts.argsFile, argsPositional, opts.arg ?? [])
       const target = resolveTarget(opts)
       const nodeUri = `/${path.replace(/^\/+|\/+$/g, '')}`
+      const rawDelivery = opts.delivery === undefined ? undefined : String(opts.delivery)
+      if (
+        rawDelivery !== undefined
+        && rawDelivery !== 'realtime'
+        && rawDelivery !== 'mailbox'
+        && rawDelivery !== 'fallback'
+      ) throw new CliError('--delivery must be realtime, mailbox, or fallback')
+      const delivery = rawDelivery as 'fallback' | 'mailbox' | 'realtime' | undefined
+      const ttl = opts.ttl === undefined ? undefined : Number(opts.ttl)
+      if (ttl !== undefined && (!Number.isSafeInteger(ttl) || ttl < 1)) {
+        throw new CliError('--ttl must be a positive integer')
+      }
+      if (
+        (ttl !== undefined || opts.idempotencyKey !== undefined)
+        && delivery !== 'mailbox'
+        && delivery !== 'fallback'
+      ) {
+        throw new CliError('--ttl and --idempotency-key require --delivery mailbox or fallback')
+      }
+      const deliveryOpts = delivery === undefined
+        ? undefined
+        : {
+            delivery,
+            ...(opts.idempotencyKey === undefined
+              ? {}
+              : { idempotencyKey: String(opts.idempotencyKey) }),
+            ...(ttl === undefined ? {} : { ttlSeconds: ttl }),
+          }
 
       try {
         if (asJson) {
-          printJson(await callDirect<unknown>(target, nodeUri, callArgs))
+          if (deliveryOpts === undefined) {
+            printJson(await callDirect<unknown>(target, nodeUri, callArgs))
+          } else {
+            printJson(await withClient(
+              target,
+              async client => await client.invokeJson(nodeUri, callArgs, deliveryOpts),
+            ))
+          }
         } else {
-          // 人类模式的结果是网关的 markdown 表现:TTY → ANSI 渲染,管道 → 原样。
-          printMarkdown(await callDirectText(target, nodeUri, callArgs))
+          if (deliveryOpts === undefined) {
+            // 人类模式的结果是网关的 markdown 表现:TTY → ANSI 渲染,管道 → 原样。
+            printMarkdown(await callDirectText(target, nodeUri, callArgs))
+          } else {
+            const response = await withClient(
+              target,
+              async client => await client.invoke(nodeUri, callArgs, {
+                accept: 'markdown',
+                ...deliveryOpts,
+              }),
+            )
+            if (response.status === 202) {
+              const operation = JSON.parse(response.text) as { operationId?: string, state?: string }
+              printLine(`queued ${operation.operationId ?? 'operation'} (${operation.state ?? 'queued'})`)
+            } else {
+              printMarkdown(response.text)
+            }
+          }
         }
       } catch (err) {
         await attachFeedbackHint(err, target, nodeUri)

@@ -18,21 +18,38 @@ function sq(s: string): string {
 export function CliHint({
   commandPath,
   args,
+  delivery,
+  idempotencyKey,
+  ttlSeconds,
 }: {
   args: unknown
   commandPath: string
+  delivery?: 'fallback' | 'mailbox' | 'realtime'
+  idempotencyKey?: string
+  ttlSeconds?: number
 }) {
   const [open, setOpen] = useState(false)
   const { active } = useSession()
   const base = active?.baseUrl || window.location.origin
 
-  const argsJson = JSON.stringify(args ?? {})
-  const argsFlag = argsJson === '{}' ? '' : ` --args ${sq(argsJson)}`
-  const tb = `tb call ${commandPath}${argsFlag}`
+  const argsJson = JSON.stringify({
+    ...((args ?? {}) as Record<string, unknown>),
+    ...(delivery === undefined ? {} : { '~delivery': delivery }),
+  })
+  const deliveryFlags = delivery === undefined
+    ? ''
+    : ` --delivery ${delivery}${ttlSeconds === undefined ? '' : ` --ttl ${ttlSeconds}`}${idempotencyKey === undefined ? '' : ` --idempotency-key ${sq(idempotencyKey)}`}`
+  const tbArgsJson = JSON.stringify(args ?? {})
+  const tbArgsFlag = tbArgsJson === '{}' ? '' : ` --args ${sq(tbArgsJson)}`
+  const tb = `tb call ${commandPath}${tbArgsFlag}${deliveryFlags}`
+  const url = `${base}/${commandPath}${ttlSeconds === undefined ? '' : `?ttlSeconds=${ttlSeconds}`}`
   const curl = [
-    `curl -X POST ${sq(`${base}/${commandPath}`)}`,
+    `curl -X POST ${sq(url)}`,
     `-H "Authorization: Bearer $TB_SK"`,
     `-H 'Content-Type: application/json'`,
+    ...(idempotencyKey === undefined
+      ? []
+      : [`-H ${sq(`X-TB-Idempotency-Key: ${idempotencyKey}`)}`]),
     `-d ${sq(argsJson)}`,
   ].join(' \\\n  ')
 

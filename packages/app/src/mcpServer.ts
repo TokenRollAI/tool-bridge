@@ -29,6 +29,7 @@ import { CallToolResultSchema, ToolSchema } from '@modelcontextprotocol/core'
 
 export interface McpBridgeTool {
   confirm?: boolean
+  delivery?: 'both' | 'mailbox' | 'realtime'
   description?: string
   effect?: string
   identity: string
@@ -127,17 +128,43 @@ function assertSchemaShape(value: unknown, path: string, depth = 0): void {
   }
 }
 
-function inputSchemaOf(raw: unknown): Tool['inputSchema'] {
-  if (raw === undefined) return { type: 'object', properties: {} }
-  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) {
+function inputSchemaOf(
+  raw: unknown,
+  delivery?: McpBridgeTool['delivery'],
+): Tool['inputSchema'] {
+  if (raw === undefined && delivery === undefined) return { type: 'object', properties: {} }
+  const source = raw ?? { type: 'object', properties: {} }
+  if (source === null || typeof source !== 'object' || Array.isArray(source)) {
     throw new Error('MCP tool inputSchema must be a JSON Schema object')
   }
-  const schema = raw as Record<string, unknown>
+  const schema = source as Record<string, unknown>
   if (schema.type !== undefined && schema.type !== 'object') {
     throw new Error('MCP tool inputSchema root type must be object')
   }
   assertSchemaShape(schema, 'inputSchema')
-  return { ...schema, type: 'object' } as Tool['inputSchema']
+  if (delivery !== 'mailbox' && delivery !== 'both') {
+    return { ...schema, type: 'object' } as Tool['inputSchema']
+  }
+  const properties = schema.properties
+  if (properties !== undefined && (
+    properties === null
+    || typeof properties !== 'object'
+    || Array.isArray(properties)
+  )) throw new Error('MCP tool inputSchema properties must be an object')
+  return {
+    ...schema,
+    type: 'object',
+    properties: {
+      ...((properties ?? {}) as Record<string, unknown>),
+      '~delivery': {
+        type: 'string',
+        enum: delivery === 'both'
+          ? ['realtime', 'mailbox', 'fallback']
+          : ['mailbox', 'fallback'],
+        description: 'Tool Bridge delivery policy; fallback prefers realtime and queues only when dispatch definitely did not occur.',
+      },
+    },
+  } as Tool['inputSchema']
 }
 
 function annotationsOf(tool: McpBridgeTool): ToolAnnotations | undefined {
@@ -174,7 +201,7 @@ async function projectTools(
         : `${bridge.description}\n\nHTBP ${bridge.invokePath}`
       let inputSchema: Tool['inputSchema']
       try {
-        inputSchema = inputSchemaOf(bridge.inputSchema)
+        inputSchema = inputSchemaOf(bridge.inputSchema, bridge.delivery)
       } catch {
         throw new ProtocolError(ProtocolErrorCode.InternalError,
           `invalid input schema for '${bridge.sourcePath}/${bridge.toolName}'`,

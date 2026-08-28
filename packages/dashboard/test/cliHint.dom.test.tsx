@@ -46,4 +46,27 @@ describe('CliHint 直连命令提示', () => {
     expect(text).not.toContain('tbk_secret_must_not_render')
     expect(text).toContain('$TB_SK')
   })
+
+  it('把 fallback 作为同一次调用的保留控制参数呈现', () => {
+    render(
+      <SessionContext.Provider value={session}>
+        <CliHint
+          args={{ text: 'hello' }}
+          commandPath="device/phone/tools/mail/send"
+          delivery="fallback"
+          idempotencyKey="agent-task-1"
+          ttlSeconds={300}
+        />
+      </SessionContext.Provider>,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: /等价 CLI \/ curl/ }))
+    const text = screen.getByText('tb', { selector: 'span' }).parentElement?.parentElement
+      ?.textContent ?? ''
+    expect(text).toContain('--delivery fallback --ttl 300')
+    expect(text).toContain('--idempotency-key')
+    expect(text).toContain('?ttlSeconds=300')
+    expect(text).toContain('"~delivery":"fallback"')
+    expect(text).not.toContain('~enqueue')
+  })
 })

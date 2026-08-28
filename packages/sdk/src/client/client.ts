@@ -1,4 +1,8 @@
 import {
+  deviceOperationDetailSchema,
+  deviceOperationIdentityRequestSchema,
+  deviceOperationListRequestSchema,
+  deviceOperationListResponseSchema,
   feedbackDetailSchema,
   feedbackListSchema,
   feedbackRemoveResponseSchema,
@@ -18,6 +22,9 @@ import {
   toolSearchPageSchema,
   toolSearchRequestSchema,
   treeJsonSchema,
+  type WireDeviceOperationDetail,
+  type WireDeviceOperationListRequest,
+  type WireDeviceOperationSummary,
   type WireFeedbackDetail,
   type WireFeedbackList,
   type WireFeedbackSubmitRequest,
@@ -85,6 +92,8 @@ export interface ClientRequestOptions {
   /** false 用于 health/liveness/readiness；缺省 true。 */
   authenticated?: boolean
   body?: unknown
+  /** Durable device delivery retry key; emitted only in the dedicated fixed header. */
+  idempotencyKey?: string
   method?: 'DELETE' | 'GET' | 'POST'
   path: string
   query?: Record<string, ClientQueryValue>
@@ -107,9 +116,25 @@ export interface ClientResponseSchema<T> {
 
 export interface ClientInvokeResult {
   contentType: string
+  /** 网关实际选择的设备交付通道；非设备调用缺省。 */
+  delivery?: 'mailbox' | 'realtime'
   json?: unknown
   ms: number
+  status: number
   text: string
+}
+
+export type InvokeDelivery = 'fallback' | 'mailbox' | 'realtime'
+
+export type ClientDeliveryResult<T>
+  = | { delivery: 'mailbox', operation: WireDeviceOperationDetail }
+    | { delivery: 'realtime', result: T }
+
+export interface InvokeDeliveryOptions {
+  delivery: InvokeDelivery
+  idempotencyKey?: string
+  signal?: AbortSignal
+  ttlSeconds?: number
 }
 
 export interface GetHelpOptions {
@@ -122,6 +147,22 @@ export interface GetHelpTextOptions extends GetHelpOptions {
 }
 
 export interface ToolBridgeClient {
+  deviceOperations: {
+    cancel(
+      deviceId: string,
+      operationId: string,
+      opts?: { signal?: AbortSignal },
+    ): Promise<WireDeviceOperationDetail>
+    get(
+      deviceId: string,
+      operationId: string,
+      opts?: { signal?: AbortSignal },
+    ): Promise<WireDeviceOperationDetail>
+    list(
+      input: WireDeviceOperationListRequest,
+      opts?: { signal?: AbortSignal },
+    ): Promise<{ cursor?: string, items: WireDeviceOperationSummary[] }>
+  }
   feedback: {
     get(path: string, id: string, opts?: { signal?: AbortSignal }): Promise<WireFeedbackDetail>
     list(
@@ -150,8 +191,19 @@ export interface ToolBridgeClient {
   invoke(
     commandPath: string,
     args?: unknown,
-    opts?: { accept?: 'json' | 'markdown', signal?: AbortSignal },
+    opts?: {
+      accept?: 'json' | 'markdown'
+      delivery?: InvokeDelivery
+      idempotencyKey?: string
+      signal?: AbortSignal
+      ttlSeconds?: number
+    },
   ): Promise<ClientInvokeResult>
+  invokeJson<T = unknown>(
+    commandPath: string,
+    args: unknown,
+    opts: InvokeDeliveryOptions & { schema?: ClientResponseSchema<T> },
+  ): Promise<ClientDeliveryResult<T>>
   invokeJson<T = unknown>(
     commandPath: string,
     args?: unknown,
@@ -278,6 +330,30 @@ function invalidRequest(): ToolBridgeClientError {
     false,
     'invalid',
   )
+}
+
+function argumentsWithDelivery(args: unknown, delivery: InvokeDelivery | undefined): unknown {
+  if (delivery === undefined) return args ?? {}
+  const value = args ?? {}
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) throw invalidRequest()
+  if (Object.prototype.hasOwnProperty.call(value, '~delivery')) throw invalidRequest()
+  return { ...(value as Record<string, unknown>), '~delivery': delivery }
+}
+
+function validateInvokeDeliveryOptions(opts: {
+  delivery?: InvokeDelivery
+  idempotencyKey?: string
+  ttlSeconds?: number
+}): void {
+  if (
+    (opts.idempotencyKey !== undefined || opts.ttlSeconds !== undefined)
+    && opts.delivery !== 'mailbox'
+    && opts.delivery !== 'fallback'
+  ) throw invalidRequest()
+  if (
+    opts.ttlSeconds !== undefined
+    && (!Number.isSafeInteger(opts.ttlSeconds) || opts.ttlSeconds < 1)
+  ) throw invalidRequest()
 }
 
 function encodeTreePath(path: string): string {
@@ -446,6 +522,14 @@ export function createToolBridgeClient(options: ToolBridgeClientOptions): ToolBr
       if (sk !== undefined) headers.set('authorization', `Bearer ${sk}`)
       if (request.accept !== undefined) headers.set('accept', request.accept)
       if (request.body !== undefined) headers.set('content-type', 'application/json')
+      if (request.idempotencyKey !== undefined) {
+        if (
+          request.idempotencyKey.length < 1
+          || request.idempotencyKey.length > 255
+          || /[\r\n\0]/.test(request.idempotencyKey)
+        ) throw invalidRequest()
+        headers.set('x-tb-idempotency-key', request.idempotencyKey)
+      }
     } catch {
       throw invalidRequest()
     }
@@ -582,20 +666,34 @@ export function createToolBridgeClient(options: ToolBridgeClientOptions): ToolBr
   const invoke = async (
     commandPath: string,
     args: unknown = {},
-    opts: { accept?: 'json' | 'markdown', signal?: AbortSignal } = {},
+    opts: {
+      accept?: 'json' | 'markdown'
+      delivery?: InvokeDelivery
+      idempotencyKey?: string
+      signal?: AbortSignal
+      ttlSeconds?: number
+    } = {},
   ): Promise<ClientInvokeResult> => {
+    validateInvokeDeliveryOptions(opts)
     const started = Date.now()
     const response = await requestRaw({
       method: 'POST',
       path: `/${encodeTreePath(commandPath)}`,
-      body: args ?? {},
+      body: argumentsWithDelivery(args, opts.delivery),
       accept: opts.accept === 'markdown' ? 'text/markdown' : 'application/json',
+      ...(opts.idempotencyKey === undefined ? {} : { idempotencyKey: opts.idempotencyKey }),
+      ...(opts.ttlSeconds === undefined ? {} : { query: { ttlSeconds: opts.ttlSeconds } }),
       signal: opts.signal,
     }, true)
     if (!response.ok) throw responseError(response, responseSecrets.get(response) ?? [])
     const result: ClientInvokeResult = {
       contentType: response.contentType,
+      ...(response.headers.get('x-tb-delivery') === 'mailbox'
+        || response.headers.get('x-tb-delivery') === 'realtime'
+        ? { delivery: response.headers.get('x-tb-delivery') as 'mailbox' | 'realtime' }
+        : {}),
       ms: Math.round(Date.now() - started),
+      status: response.status,
       text: response.text,
     }
     if (response.contentType.includes('application/json')) {
@@ -611,13 +709,40 @@ export function createToolBridgeClient(options: ToolBridgeClientOptions): ToolBr
   const invokeJson = async <T = unknown>(
     commandPath: string,
     args: unknown = {},
-    opts: { schema?: ClientResponseSchema<T>, signal?: AbortSignal } = {},
-  ): Promise<T> => await requestJson<T>({
-    method: 'POST',
-    path: `/${encodeTreePath(commandPath)}`,
-    body: args ?? {},
-    signal: opts.signal,
-  }, opts.schema, true)
+    opts: {
+      delivery?: InvokeDelivery
+      idempotencyKey?: string
+      schema?: ClientResponseSchema<T>
+      signal?: AbortSignal
+      ttlSeconds?: number
+    } = {},
+  ): Promise<ClientDeliveryResult<T> | T> => {
+    validateInvokeDeliveryOptions(opts)
+    const response = await requestRaw({
+      method: 'POST',
+      path: `/${encodeTreePath(commandPath)}`,
+      body: argumentsWithDelivery(args, opts.delivery),
+      ...(opts.idempotencyKey === undefined ? {} : { idempotencyKey: opts.idempotencyKey }),
+      ...(opts.ttlSeconds === undefined ? {} : { query: { ttlSeconds: opts.ttlSeconds } }),
+      signal: opts.signal,
+      accept: 'application/json',
+    }, true)
+    if (!response.ok) throw responseError(response, responseSecrets.get(response) ?? [])
+    const value = parseJson(response.text)
+    if (opts.delivery !== undefined) {
+      if (response.status === 202) {
+        return {
+          delivery: 'mailbox',
+          operation: parsed(value, deviceOperationDetailSchema),
+        }
+      }
+      return {
+        delivery: 'realtime',
+        result: opts.schema === undefined ? value as T : parsed(value, opts.schema),
+      }
+    }
+    return opts.schema === undefined ? value as T : parsed(value, opts.schema)
+  }
 
   const getReadiness = async (opts: { signal?: AbortSignal } = {}): Promise<WireReadinessResponse> => {
     const response = await raw({ path: '/readyz', authenticated: false, signal: opts.signal })
@@ -631,6 +756,35 @@ export function createToolBridgeClient(options: ToolBridgeClientOptions): ToolBr
     text,
     invoke,
     invokeJson,
+    deviceOperations: {
+      async get(deviceId, operationId, opts = {}) {
+        const body = parseRequest({ deviceId, operationId }, deviceOperationIdentityRequestSchema)
+        return await json({
+          method: 'POST',
+          path: '/~device/operations/get',
+          body,
+          signal: opts.signal,
+        }, deviceOperationDetailSchema)
+      },
+      async list(input, opts = {}) {
+        const body = parseRequest(input, deviceOperationListRequestSchema)
+        return await json({
+          method: 'POST',
+          path: '/~device/operations/list',
+          body,
+          signal: opts.signal,
+        }, deviceOperationListResponseSchema)
+      },
+      async cancel(deviceId, operationId, opts = {}) {
+        const body = parseRequest({ deviceId, operationId }, deviceOperationIdentityRequestSchema)
+        return await json({
+          method: 'POST',
+          path: '/~device/operations/cancel',
+          body,
+          signal: opts.signal,
+        }, deviceOperationDetailSchema)
+      },
+    },
     async getHelp(path = '', opts = {}) {
       return await requestJson({
         path: reservedPath(path, '~help'),

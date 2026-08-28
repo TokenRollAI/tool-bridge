@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   ApiError,
+  deviceOperationCancel,
+  deviceOperationList,
   feedbackGet,
   getHealthz,
   getHelp,
@@ -24,6 +26,65 @@ afterEach(() => {
 })
 
 describe('Dashboard SDK client adapter', () => {
+  it('uses invoke delivery plus fixed operation management paths', async () => {
+    const operation = {
+      attempt: 0,
+      caller: { keyId: 'sk_caller', owner: 'team-a' },
+      commandId: 'op_1',
+      createdAt: '2026-08-28T08:00:00.000Z',
+      deviceId: 'devices/edge-1',
+      executionMayHaveOccurred: false,
+      expiresAt: '2026-08-29T08:00:00.000Z',
+      mountPath: 'devices/edge-1',
+      operationId: 'op_1',
+      state: 'queued',
+      targetPath: 'devices/edge-1/shell/run now',
+      traceId: 'trace_1',
+      updatedAt: '2026-08-28T08:00:00.000Z',
+    }
+    const fetcher = vi.fn(async (url: string) => json(
+      url.endsWith('/~device/operations/list') ? { items: [operation] } : operation,
+      url.includes('/devices/edge-1/shell/run%20now') ? 202 : 200,
+    ))
+    vi.stubGlobal('fetch', fetcher)
+
+    await expect(invoke(
+      conn,
+      'devices/edge-1/shell/run now',
+      { command: 'uptime' },
+      'json',
+      { delivery: 'mailbox', idempotencyKey: 'deploy-42', ttlSeconds: 90 },
+    )).resolves.toMatchObject({ status: 202, json: operation })
+    const [enqueueUrl, enqueueInit] = fetcher.mock.calls[0] as unknown as [string, RequestInit]
+    expect(enqueueUrl).toBe(
+      'https://gw.example/devices/edge-1/shell/run%20now?ttlSeconds=90',
+    )
+    expect(JSON.parse(String(enqueueInit.body))).toEqual({
+      '~delivery': 'mailbox',
+      'command': 'uptime',
+    })
+    expect(new Headers(enqueueInit.headers).get('x-tb-idempotency-key')).toBe('deploy-42')
+
+    await expect(deviceOperationList(conn, 'devices/edge-1', {
+      limit: 20,
+      states: ['queued', 'claimed'],
+    })).resolves.toEqual({ items: [operation] })
+    const [listUrl, listInit] = fetcher.mock.calls[1] as unknown as [string, RequestInit]
+    expect(listUrl).toBe('https://gw.example/~device/operations/list')
+    expect(JSON.parse(String(listInit.body))).toEqual({
+      deviceId: 'devices/edge-1',
+      opts: { limit: 20, states: ['queued', 'claimed'] },
+    })
+
+    await deviceOperationCancel(conn, 'devices/edge-1', 'op_1')
+    const [cancelUrl, cancelInit] = fetcher.mock.calls[2] as unknown as [string, RequestInit]
+    expect(cancelUrl).toBe('https://gw.example/~device/operations/cancel')
+    expect(JSON.parse(String(cancelInit.body))).toEqual({
+      deviceId: 'devices/edge-1',
+      operationId: 'op_1',
+    })
+  })
+
   it('validates/whitelists fixed help and keeps Dashboard Bearer transport', async () => {
     const fetcher = vi.fn(async () => json({ ...fixture.help, credential: 'must-not-cross' }))
     vi.stubGlobal('fetch', fetcher)

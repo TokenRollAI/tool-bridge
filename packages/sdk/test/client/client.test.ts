@@ -94,6 +94,83 @@ describe('@tool-bridge/sdk/client', () => {
     })
   })
 
+  it('uses invoke delivery and fixed device operation management routes', async () => {
+    const operation = {
+      attempt: 0,
+      caller: { keyId: 'sk-caller', owner: 'agent:alice' },
+      commandId: 'dop_AAAAAAAAAAAAAAAAAAAAAAAA',
+      createdAt: '2026-08-28T00:00:00.000Z',
+      deviceId: 'phone-1',
+      executionMayHaveOccurred: false,
+      expiresAt: '2026-08-29T00:00:00.000Z',
+      mountPath: 'device/phone-1',
+      operationId: 'dop_AAAAAAAAAAAAAAAAAAAAAAAA',
+      state: 'queued',
+      targetPath: 'device/phone-1/tools/mail/send',
+      traceId: 'trace-1',
+      updatedAt: '2026-08-28T00:00:00.000Z',
+    }
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(json(operation, 202))
+      .mockResolvedValueOnce(json(operation))
+      .mockResolvedValueOnce(json({ items: [operation] }))
+      .mockResolvedValueOnce(json({ ...operation, state: 'cancelled', terminalAt: operation.updatedAt }))
+    const client = createToolBridgeClient({
+      baseUrl: 'https://gw.example',
+      sk: 'tbk_device_ops',
+      fetcher: fetcher as typeof fetch,
+    })
+
+    expect(await client.invokeJson(
+      'device/phone-1/tools/mail/send',
+      { text: 'hello' },
+      { delivery: 'mailbox', idempotencyKey: 'retry-1', ttlSeconds: 300 },
+    )).toMatchObject({ delivery: 'mailbox', operation: { state: 'queued' } })
+    await client.deviceOperations.get('phone-1', operation.operationId)
+    await client.deviceOperations.list({
+      deviceId: 'phone-1',
+      opts: { states: ['queued'], limit: 10 },
+    })
+    await client.deviceOperations.cancel('phone-1', operation.operationId)
+
+    const calls = fetcher.mock.calls as unknown as Array<[string, RequestInit]>
+    expect(calls.map(call => call[0])).toEqual([
+      'https://gw.example/device/phone-1/tools/mail/send?ttlSeconds=300',
+      'https://gw.example/~device/operations/get',
+      'https://gw.example/~device/operations/list',
+      'https://gw.example/~device/operations/cancel',
+    ])
+    expect(new Headers(calls[0]?.[1].headers).get('x-tb-idempotency-key')).toBe('retry-1')
+    expect(JSON.parse(String(calls[0]?.[1].body))).toEqual({
+      '~delivery': 'mailbox',
+      'text': 'hello',
+    })
+    expect(JSON.parse(String(calls[2]?.[1].body))).toEqual({
+      deviceId: 'phone-1',
+      opts: { states: ['queued'], limit: 10 },
+    })
+  })
+
+  it('returns a discriminated realtime result for explicit fallback delivery', async () => {
+    const fetcher = vi.fn(async () => json({ delivered: true }))
+    const client = createToolBridgeClient({
+      baseUrl: 'https://gw.example',
+      sk: 'tbk_delivery',
+      fetcher: fetcher as typeof fetch,
+    })
+
+    await expect(client.invokeJson(
+      'device/phone-1/tools/mail/send',
+      { text: 'hello' },
+      { delivery: 'fallback' },
+    )).resolves.toEqual({ delivery: 'realtime', result: { delivered: true } })
+    const [, init] = fetcher.mock.calls[0] as unknown as [string, RequestInit]
+    expect(JSON.parse(String(init.body))).toEqual({
+      '~delivery': 'fallback',
+      'text': 'hello',
+    })
+  })
+
   it('sends every search option unchanged and parses compact relevance without schemas', async () => {
     const fetcher = vi.fn(async () => json(fixture.search))
     const client = createToolBridgeClient({
