@@ -94,6 +94,7 @@ describe('device runtime helpers', () => {
         executable: '/usr/bin/uname',
         argv: ['-a'],
         effect: 'read',
+        delivery: 'both',
       }],
     }))
     const profiles = readCommandProfiles([file])
@@ -104,6 +105,7 @@ describe('device runtime helpers', () => {
         description: 'safe system inspection',
         cmds: [expect.objectContaining({
           name: 'system-info',
+          delivery: 'both',
           effect: 'read',
           inputSchema: expect.objectContaining({ additionalProperties: false }),
         })],
@@ -179,5 +181,126 @@ describe('tb device ls', () => {
     // 本地化渲染依赖时区,用同一转换求期望值而非硬编码字面量。
     expect(lines[1]).toContain(new Date(lastSeenAt).toLocaleString())
     expect(lines[2]).toContain('-')
+  })
+})
+
+const operation = {
+  operationId: 'dop_AAAAAAAAAAAAAAAAAAAAAAAA',
+  commandId: 'dop_AAAAAAAAAAAAAAAAAAAAAAAA',
+  deviceId: 'phone-1',
+  mountPath: 'device/phone-1',
+  targetPath: 'device/phone-1/tools/mail/send',
+  caller: { keyId: 'caller-key', owner: 'agent:alice' },
+  traceId: 'trace-1',
+  createdAt: '2026-08-28T00:00:00.000Z',
+  updatedAt: '2026-08-28T00:00:00.000Z',
+  expiresAt: '2026-08-29T00:00:00.000Z',
+  state: 'queued',
+  attempt: 0,
+  executionMayHaveOccurred: false,
+}
+
+describe('tb device durable operations', () => {
+  it('call delivery reuses argument parsing and sends mailbox controls once', async () => {
+    const fn = captureFetch(operation, 202)
+    await runCli([
+      'call',
+      'device/phone-1/tools/mail/send',
+      '--arg',
+      'text=hello',
+      '--delivery',
+      'mailbox',
+      '--ttl',
+      '300',
+      '--idempotency-key',
+      'retry-1',
+      '--json',
+      '--base-url',
+      'https://gw',
+      '--sk',
+      'tbk_x',
+    ])
+    const [url, init] = fn.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe(
+      'https://gw/device/phone-1/tools/mail/send?ttlSeconds=300',
+    )
+    expect(JSON.parse(String(init.body))).toEqual({ '~delivery': 'mailbox', 'text': 'hello' })
+    expect(new Headers(init.headers).get('x-tb-idempotency-key')).toBe('retry-1')
+    expect(stdoutText()).toContain(operation.operationId)
+  })
+
+  it('op ls sends pagination/state filters and explains claimed-expired ambiguity', async () => {
+    const expired = {
+      ...operation,
+      state: 'expired',
+      attempt: 1,
+      executionMayHaveOccurred: true,
+      terminalAt: operation.updatedAt,
+    }
+    const fn = captureFetch({ items: [expired], cursor: 'next' })
+    await runCli([
+      'device',
+      'op',
+      'ls',
+      'phone-1',
+      '--state',
+      'expired',
+      '--limit',
+      '10',
+      '--base-url',
+      'https://gw',
+      '--sk',
+      'tbk_x',
+    ])
+    const [url, init] = fn.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe('https://gw/~device/operations/list')
+    expect(JSON.parse(String(init.body))).toEqual({
+      deviceId: 'phone-1',
+      opts: { limit: 10, states: ['expired'] },
+    })
+    expect(stdoutText()).toContain('may-have-run')
+    expect(stdoutText()).toContain('next cursor: next')
+  })
+
+  it('op get/cancel use fixed management routes', async () => {
+    const get = captureFetch(operation)
+    await runCli([
+      'device', 'op', 'get', 'phone-1', operation.operationId,
+      '--json', '--base-url', 'https://gw', '--sk', 'tbk_x',
+    ])
+    expect(get.mock.calls[0]?.[0]).toBe('https://gw/~device/operations/get')
+    expect(JSON.parse(String((get.mock.calls[0]?.[1] as RequestInit).body))).toEqual({
+      deviceId: 'phone-1',
+      operationId: operation.operationId,
+    })
+
+    const cancel = captureFetch({
+      ...operation,
+      state: 'cancelled',
+      cancelRequestedAt: operation.updatedAt,
+      terminalAt: operation.updatedAt,
+    })
+    await runCli([
+      'device', 'op', 'cancel', 'phone-1', operation.operationId,
+      '--json', '--base-url', 'https://gw', '--sk', 'tbk_x',
+    ])
+    expect(cancel.mock.calls[0]?.[0]).toBe('https://gw/~device/operations/cancel')
+  })
+
+  it('rejects invalid state/ttl before sending', async () => {
+    const fn = captureFetch({ items: [] })
+    await runCli([
+      'device', 'op', 'ls', 'phone-1', '--state', 'unknown',
+      '--base-url', 'https://gw', '--sk', 'tbk_x',
+    ])
+    expect(process.exitCode).toBe(1)
+    expect(fn).not.toHaveBeenCalled()
+    process.exitCode = 0
+    await runCli([
+      'device', 'enqueue', 'device/phone-1/tools/mail/send', '--ttl', '0',
+      '--base-url', 'https://gw', '--sk', 'tbk_x',
+    ])
+    expect(process.exitCode).toBe(1)
+    expect(fn).not.toHaveBeenCalled()
   })
 })

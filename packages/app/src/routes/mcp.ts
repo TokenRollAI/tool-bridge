@@ -50,6 +50,7 @@ const mcpCommand = (
   nodeDescription: string,
   command: {
     confirm?: boolean
+    delivery?: 'both' | 'mailbox' | 'realtime'
     effect?: string
     h?: string
     inputSchema?: unknown
@@ -72,6 +73,7 @@ const mcpCommand = (
     invokePath,
     description: command.h ?? nodeDescription,
     ...(command.inputSchema !== undefined ? { inputSchema: command.inputSchema } : {}),
+    ...(command.delivery !== undefined ? { delivery: command.delivery } : {}),
     ...(command.effect !== undefined ? { effect: command.effect } : {}),
     ...(command.confirm === true ? { confirm: true } : {}),
   }
@@ -91,6 +93,7 @@ const toolSpecCommand = (
     ...(providerBacked ? { providerBacked: true } : {}),
     description: tool.description ?? node.description,
     ...(tool.inputSchema !== undefined ? { inputSchema: tool.inputSchema } : {}),
+    ...(tool.delivery !== undefined ? { delivery: tool.delivery } : {}),
     ...(tool.effect !== undefined ? { effect: tool.effect } : {}),
     ...(tool.confirm === true ? { confirm: true } : {}),
   }
@@ -479,7 +482,15 @@ function mcpBridgeFor(c: AppContext, env: RouteEnv, app: TbHono): McpToolBridge 
       const response = await app.request(
         new Request(url, { method: 'POST', headers, body: JSON.stringify(args) }),
       )
-      return await resultFromResponse(response)
+      const result = await resultFromResponse(response)
+      if (args['~delivery'] !== undefined && response.ok) {
+        return {
+          content: response.status === 202
+            ? { delivery: 'mailbox', operation: result.content }
+            : { delivery: 'realtime', result: result.content },
+        }
+      }
+      return result
     },
   }
 }

@@ -3,6 +3,9 @@ import type { Action } from '@tool-bridge/sdk/client'
 /** 固定控制面 wire 类型来自 SDK public artifact，不再由 Dashboard 手抄。 */
 export type {
   Action,
+  DeviceOperationDetail,
+  DeviceOperationState,
+  DeviceOperationSummary,
   FeedbackView,
   HelpCommand as HelpCmd,
   HelpJson,

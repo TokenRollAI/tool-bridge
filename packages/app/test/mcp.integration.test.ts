@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { mcpToolIdentity, mcpToolName, processDeviceHello } from '../src/index'
 import { connectModernMcpClient, connectTestMcpClient } from './mcpClient'
-import { mcpToolIdentity, mcpToolName } from '../src/index'
 import { createTestApp, TEST_VERSION } from './harness'
 import { MemorySearchIndex } from './memorySearchIndex'
 import { TEST_ADMIN_SK } from './fixtures'
@@ -384,6 +384,66 @@ describe('MCP consumer endpoint', () => {
       const listed = await client.listTools() as Record<string, unknown>
       expect(listed).not.toHaveProperty('ttlMs')
       expect(listed).not.toHaveProperty('cacheScope')
+    } finally {
+      await client.close()
+    }
+  })
+
+  it('projects ~delivery and performs one MCP fallback call without a second enqueue tool', async () => {
+    const deviceSk = await issueSk({
+      owner: 'device:mcp-mailbox',
+      scopes: [{ pattern: 'device/**', actions: ['read', 'call', 'register'] }],
+    })
+    await processDeviceHello({
+      authorization: `Bearer ${deviceSk}`,
+      deviceIdHint: 'mcp-mailbox',
+      hello: {
+        deviceId: 'mcp-mailbox',
+        expose: {
+          nodes: [{
+            path: 'tools/mail',
+            kind: 'tool',
+            description: 'mail',
+            cmds: [{
+              name: 'send',
+              delivery: 'both',
+              inputSchema: {
+                type: 'object',
+                additionalProperties: false,
+                properties: { text: { type: 'string' } },
+                required: ['text'],
+              },
+            }],
+          }],
+        },
+      },
+      store: tb.state,
+    })
+    const client = await connectTestMcpClient(
+      'https://tb.test/~mcp',
+      TEST_ADMIN_SK,
+      (input, init) => tb.request(input, init),
+    )
+    try {
+      const listed = await client.listTools()
+      const command = listed.tools.find(
+        tool => tool._meta?.['io.tool-bridge/path'] === 'device/mcp-mailbox/tools/mail',
+      )
+      expect(command?.inputSchema).toMatchObject({
+        additionalProperties: false,
+        properties: {
+          'text': { type: 'string' },
+          '~delivery': { enum: ['realtime', 'mailbox', 'fallback'] },
+        },
+      })
+      const result = await client.callTool({
+        name: command?.name ?? '',
+        arguments: { '~delivery': 'fallback', 'text': 'hello' },
+      })
+      expect(result.structuredContent).toMatchObject({
+        delivery: 'mailbox',
+        operation: { state: 'queued', targetPath: 'device/mcp-mailbox/tools/mail/send' },
+      })
     } finally {
       await client.close()
     }

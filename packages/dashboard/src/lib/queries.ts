@@ -4,6 +4,7 @@ import type {
   CatalogListItem,
   ContextEntry,
   ContextEntryMeta,
+  DeviceOperationState,
   FederationHost,
   Page,
   PluginManifest,
@@ -16,6 +17,9 @@ import type {
 } from './types'
 import {
   type ApiError,
+  deviceOperationCancel,
+  deviceOperationGet,
+  deviceOperationList,
   feedbackGet,
   feedbackList,
   getHealthz,
@@ -128,6 +132,9 @@ export interface InvokeInput {
   args: unknown
   /** 完整命令路径(含命令/工具叶子段,如 `docs/ctx7/resolve` 或 `system/status/get`)。 */
   commandPath: string
+  delivery?: 'fallback' | 'mailbox' | 'realtime'
+  idempotencyKey?: string
+  ttlSeconds?: number
 }
 
 /** 完整命令路径拆成历史记录的 {节点 path, 命令 tool}(末段 = 命令名,仅供历史展示)。 */
@@ -141,6 +148,8 @@ function splitCommand(commandPath: string): { path: string, tool: string } {
 /** 数据面调用(变更型;成功后由调用方决定失效哪些查询)。全部调用落 per-profile 历史。 */
 export function useInvoke() {
   const conn = useConn()
+  const qc = useQueryClient()
+  const base = useKeyBase()
   const { active } = useSession()
   const scope = active ? historyScope(active) : ''
   return useMutation<InvokeResult, Error, InvokeInput>({
@@ -148,15 +157,37 @@ export function useInvoke() {
     // 结果供 UI 展示;reset/卸载后最多保留 1s(而非默认 5min)。不用 0,
     // 避免长调用 pending 期卸载 observer 后 query-core 持续重排 0ms GC timer。
     gcTime: 1_000,
-    mutationFn: ({ commandPath, args, accept }) =>
-      invoke(conn, commandPath, args, accept ?? 'json'),
-    onSuccess: (r, { commandPath }) =>
+    mutationFn: ({ commandPath, args, accept, delivery, idempotencyKey, ttlSeconds }) =>
+      invoke(conn, commandPath, args, accept ?? 'json', {
+        ...(delivery === undefined ? {} : { delivery }),
+        ...(idempotencyKey === undefined ? {} : { idempotencyKey }),
+        ...(ttlSeconds === undefined ? {} : { ttlSeconds }),
+      }),
+    onSuccess: (r, { commandPath }) => {
       recordInvoke(scope, {
         ...splitCommand(commandPath),
         ok: true,
         ms: r.ms,
         at: new Date().toISOString(),
-      }),
+      })
+      if (
+        r.status === 202
+        && r.json !== null
+        && typeof r.json === 'object'
+        && typeof (r.json as { deviceId?: unknown }).deviceId === 'string'
+      ) {
+        const operation = r.json as { deviceId: string, operationId?: unknown }
+        void qc.invalidateQueries({
+          queryKey: [...base, 'device-operations', operation.deviceId],
+        })
+        if (typeof operation.operationId === 'string') {
+          qc.setQueryData(
+            [...base, 'device-operation', operation.deviceId, operation.operationId],
+            operation,
+          )
+        }
+      }
+    },
     onError: (e, { commandPath }) =>
       recordInvoke(scope, {
         ...splitCommand(commandPath),
@@ -318,6 +349,51 @@ export function useRegistryList(prefix?: string) {
     'system/registry',
     prefix ? { prefix } : {},
   )
+}
+
+// ---- Durable device mailbox（pull-only；不依赖设备当前在线）----
+
+export function useDeviceOperations(
+  deviceId: string,
+  states?: DeviceOperationState[],
+) {
+  const conn = useConn()
+  const base = useKeyBase()
+  return useInfiniteQuery({
+    queryKey: [...base, 'device-operations', deviceId, states ?? []],
+    queryFn: ({ pageParam, signal }) => deviceOperationList(conn, deviceId, {
+      limit: 50,
+      ...(typeof pageParam === 'string' ? { cursor: pageParam } : {}),
+      ...(states && states.length > 0 ? { states } : {}),
+      signal,
+    }),
+    enabled: deviceId !== '',
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: last => last.cursor,
+  })
+}
+
+export function useDeviceOperationDetail(deviceId: string, operationId: string | null) {
+  const conn = useConn()
+  const base = useKeyBase()
+  return useQuery({
+    queryKey: [...base, 'device-operation', deviceId, operationId ?? ''],
+    queryFn: ({ signal }) => deviceOperationGet(conn, deviceId, operationId ?? '', signal),
+    enabled: deviceId !== '' && operationId !== null,
+  })
+}
+
+export function useCancelDeviceOperation(deviceId: string) {
+  const conn = useConn()
+  const qc = useQueryClient()
+  const base = useKeyBase()
+  return useMutation({
+    mutationFn: (operationId: string) => deviceOperationCancel(conn, deviceId, operationId),
+    onSuccess: result => Promise.all([
+      qc.invalidateQueries({ queryKey: [...base, 'device-operations', deviceId] }),
+      qc.setQueryData([...base, 'device-operation', deviceId, result.operationId], result),
+    ]),
+  })
 }
 
 export function useStatus() {

@@ -105,10 +105,60 @@ export async function invoke(
   commandPath: string,
   args: unknown,
   accept: 'json' | 'markdown' = 'json',
+  opts: {
+    delivery?: 'fallback' | 'mailbox' | 'realtime'
+    idempotencyKey?: string
+    ttlSeconds?: number
+  } = {},
 ): Promise<InvokeResult> {
   return await withClient(
     conn,
-    async value => await value.invoke(commandPath, args ?? {}, { accept }),
+    async value => await value.invoke(commandPath, args ?? {}, { accept, ...opts }),
+  )
+}
+
+// --- Durable device mailbox operation 管理面（创建统一走 invoke 的 ~delivery）---
+
+export async function deviceOperationList(
+  conn: Connection,
+  deviceId: string,
+  opts: {
+    cursor?: string
+    limit?: number
+    signal?: AbortSignal
+    states?: Array<import('./types').DeviceOperationState>
+  } = {},
+) {
+  const { signal, ...page } = opts
+  return await withClient(
+    conn,
+    async value => await value.deviceOperations.list(
+      { deviceId, ...(Object.keys(page).length === 0 ? {} : { opts: page }) },
+      { signal },
+    ),
+  )
+}
+
+export async function deviceOperationGet(
+  conn: Connection,
+  deviceId: string,
+  operationId: string,
+  signal?: AbortSignal,
+) {
+  return await withClient(
+    conn,
+    async value => await value.deviceOperations.get(deviceId, operationId, { signal }),
+  )
+}
+
+export async function deviceOperationCancel(
+  conn: Connection,
+  deviceId: string,
+  operationId: string,
+) {
+  return await withClient(
+    conn,
+    async value => await value.deviceOperations.cancel(deviceId, operationId),
   )
 }
 

@@ -29,6 +29,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Textarea } from '@/components/ui/textarea'
 import { Button } from '@/components/ui/button'
 import { isPathSegmentSafe } from '@/lib/path'
+import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
 
 const SchemaFormRenderer = lazy(() => import('@/components/SchemaFormRenderer'))
@@ -127,6 +128,7 @@ export function CmdPanel({
   const segmentSafe = isPathSegmentSafe(cmd.name)
   const lazyNeeded = segmentSafe && lazySchema && cmd.inputSchema === undefined
   const toolHelp = useToolHelp(path, cmd.name, lazyNeeded && effectiveOpen)
+  const deliveryCapability = cmd.delivery ?? toolHelp.data?.cmds[0]?.delivery ?? 'realtime'
   const inputSchema = cmd.inputSchema ?? toolHelp.data?.cmds[0]?.inputSchema
   const hasSchema = inputSchema !== undefined && typeof inputSchema === 'object'
   // rjsf 渲染不了的形状(如缺 items 的 array)直接落 JSON 编辑,避免表单区出现错误文本。
@@ -138,6 +140,12 @@ export function CmdPanel({
   )
   const [rawErr, setRawErr] = useState<string | null>(null)
   const [accept, setAccept] = useState<'markdown' | 'json'>('markdown')
+  const [delivery, setDelivery] = useState<'fallback' | 'mailbox' | 'realtime'>(
+    deliveryCapability === 'mailbox' ? 'mailbox' : 'realtime',
+  )
+  const [deliveryError, setDeliveryError] = useState<string | null>(null)
+  const [idempotencyKey, setIdempotencyKey] = useState('')
+  const [ttl, setTtl] = useState('')
   const [pendingArgs, setPendingArgs] = useState<unknown | null>(null)
   const invoke = useInvoke()
   const invalidate = useInvalidate()
@@ -162,9 +170,29 @@ export function CmdPanel({
     else setRawArgs(JSON.stringify(skeletonFromSchema(inputSchema), null, 2))
   }, [lazyNeeded, inputSchema, rawArgs, formData])
 
+  useEffect(() => {
+    if (deliveryCapability === 'mailbox') setDelivery('mailbox')
+    if (deliveryCapability === 'realtime') setDelivery('realtime')
+  }, [deliveryCapability])
+
   const doInvoke = async (args: unknown) => {
+    const ttlSeconds = ttl.trim() === '' ? undefined : Number(ttl)
+    if (ttlSeconds !== undefined && (!Number.isSafeInteger(ttlSeconds) || ttlSeconds < 1)) {
+      setDeliveryError('TTL 必须是正整数秒数')
+      return
+    }
+    setDeliveryError(null)
     try {
-      await invoke.mutateAsync({ commandPath, args, accept })
+      await invoke.mutateAsync({
+        commandPath,
+        args,
+        accept,
+        ...(deliveryCapability === 'realtime' ? {} : { delivery }),
+        ...(delivery === 'realtime' || idempotencyKey.trim() === ''
+          ? {}
+          : { idempotencyKey: idempotencyKey.trim() }),
+        ...(delivery === 'realtime' || ttlSeconds === undefined ? {} : { ttlSeconds }),
+      })
       if (MUTATING.test(cmd.name)) await invalidate()
     } catch {
       // Mutation 错误由 useInvoke 保留给 ResultView；这里吞掉 Promise rejection，
@@ -219,6 +247,54 @@ export function CmdPanel({
           </SelectItem>
         </SelectContent>
       </Select>
+      {deliveryCapability !== 'realtime' && (
+        <>
+          <label className="text-xs text-muted-foreground sm:ml-2" htmlFor={`${acceptId}-delivery`}>
+            Delivery
+          </label>
+          <Select
+            onValueChange={value => setDelivery(value as typeof delivery)}
+            value={delivery}
+          >
+            <SelectTrigger
+              className="h-8 w-32 font-mono text-xs"
+              id={`${acceptId}-delivery`}
+              size="sm"
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {deliveryCapability === 'both' && (
+                <SelectItem className="font-mono text-xs" value="realtime">realtime</SelectItem>
+              )}
+              {deliveryCapability === 'both' && (
+                <SelectItem className="font-mono text-xs" value="fallback">fallback</SelectItem>
+              )}
+              <SelectItem className="font-mono text-xs" value="mailbox">mailbox</SelectItem>
+            </SelectContent>
+          </Select>
+          {delivery !== 'realtime' && (
+            <>
+              <Input
+                aria-label="Mailbox TTL seconds"
+                className="h-8 w-24 font-mono text-xs"
+                min="1"
+                onChange={event => setTtl(event.target.value)}
+                placeholder="TTL"
+                type="number"
+                value={ttl}
+              />
+              <Input
+                aria-label="Mailbox idempotency key"
+                className="h-8 min-w-36 flex-1 font-mono text-xs sm:max-w-56"
+                onChange={event => setIdempotencyKey(event.target.value)}
+                placeholder="idempotency key"
+                value={idempotencyKey}
+              />
+            </>
+          )}
+        </>
+      )}
       {formFriendly && (
         <Button
           className="text-xs text-muted-foreground sm:ml-auto"
@@ -378,7 +454,17 @@ export function CmdPanel({
                     </div>
                   )}
 
-            <CliHint args={currentArgs} commandPath={commandPath} />
+            {deliveryError && <p className="mt-2 text-xs text-destructive">{deliveryError}</p>}
+
+            <CliHint
+              args={currentArgs}
+              commandPath={commandPath}
+              delivery={deliveryCapability === 'realtime' ? undefined : delivery}
+              idempotencyKey={delivery === 'realtime' || idempotencyKey.trim() === ''
+                ? undefined
+                : idempotencyKey.trim()}
+              ttlSeconds={delivery === 'realtime' || ttl.trim() === '' ? undefined : Number(ttl)}
+            />
 
             <ResultView
               className="mt-5"

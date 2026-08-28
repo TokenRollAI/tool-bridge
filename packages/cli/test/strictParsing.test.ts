@@ -112,6 +112,9 @@ describe('未知 flag 必须报错(事故回归)', () => {
       ['daemon', 'uninstall', '--bogus'],
       ['daemon', '_run', '--config', '/tmp/device.json', '--bogus'],
       ['device', 'ls', '--bogus'],
+      ['device', 'op', 'ls', 'd', '--bogus'],
+      ['device', 'op', 'get', 'd', 'dop_x', '--bogus'],
+      ['device', 'op', 'cancel', 'd', 'dop_x', '--bogus'],
       ['mount', 'fs', '/tmp', '--bogus'],
       ['plugin', 'register', '--file', 'f', '--bogus'],
       ['plugin', 'list', '--bogus'],
@@ -136,10 +139,18 @@ describe('未知 flag 必须报错(事故回归)', () => {
           ? leafPaths(child, [...prefix, child.name()])
           : [[...prefix, child.name()].join(' ')],
       )
-    const groups = new Set(program.commands.filter(c => c.commands.length > 0).map(c => c.name()))
-    const covered = cases.map(argv =>
-      groups.has(argv[0] ?? '') ? `${argv[0]} ${argv[1]}` : String(argv[0]),
-    )
+    const covered = cases.map((argv) => {
+      let command = program
+      const names: string[] = []
+      for (const token of argv) {
+        const child = command.commands.find(candidate =>
+          candidate.name() === token || candidate.aliases().includes(token))
+        if (child === undefined) break
+        names.push(child.name())
+        command = child
+      }
+      return names.join(' ')
+    })
     expect(new Set(covered)).toEqual(new Set(leafPaths(program)))
     for (const argv of cases) {
       expect(await parseError(argv), `argv: ${argv.join(' ')}`).toBe('commander.unknownOption')

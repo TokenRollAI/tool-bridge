@@ -1,6 +1,6 @@
 {
   "name": "@tool-bridge/cli",
-  "version": "0.28.0",
+  "version": "0.29.0",
   "description": "tb — Tool Bridge CLI: one gateway for HTBP/MCP/HTTP tools, contexts, and device shells",
   "type": "module",
   "license": "MIT",

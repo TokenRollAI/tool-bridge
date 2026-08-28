@@ -1,8 +1,24 @@
+import type {
+  DeviceOperationDetail,
+  DeviceOperationState,
+  DeviceOperationSummary,
+} from '@tool-bridge/sdk/client'
 import { Command } from 'commander'
 import type { Node, Page } from '../types'
-import { parsePageOpts, resolveTarget, withGlobalOpts, withPageOpts } from '../args'
+import { collect, parsePageOpts, resolveTarget, withGlobalOpts, withPageOpts } from '../args'
+import { callDirect, CliError, withClient } from '../http'
 import { printJson, printLine, table } from '../output'
-import { callDirect } from '../http'
+
+const OPERATION_STATES = new Set<DeviceOperationState>([
+  'queued',
+  'claimed',
+  'succeeded',
+  'rejected',
+  'failed',
+  'result_unknown',
+  'cancelled',
+  'expired',
+])
 
 function deviceIdFromPath(path: string): string {
   const parts = path.split('/')
@@ -54,8 +70,122 @@ export function deviceLsCommand() {
     })
 }
 
+function states(values: readonly string[]): DeviceOperationState[] | undefined {
+  if (values.length === 0) return undefined
+  const unique = [...new Set(values)]
+  for (const value of unique) {
+    if (!OPERATION_STATES.has(value as DeviceOperationState)) {
+      throw new CliError(`invalid --state '${value}'`)
+    }
+  }
+  return unique as DeviceOperationState[]
+}
+
+function executionMeaning(operation: DeviceOperationSummary): string {
+  if (operation.state === 'expired' && operation.executionMayHaveOccurred) {
+    return 'may-have-run'
+  }
+  if (operation.state === 'result_unknown') return 'started/result-unknown'
+  return '-'
+}
+
+function printOperationList(page: { cursor?: string, items: DeviceOperationSummary[] }): void {
+  if (page.items.length === 0) {
+    printLine(page.cursor ? '(no visible operations on this page)' : '(no device operations)')
+  } else {
+    printLine(table(
+      ['OPERATION_ID', 'STATE', 'TARGET', 'ATTEMPT', 'UPDATED', 'EXECUTION'],
+      page.items.map(operation => [
+        operation.operationId,
+        operation.state,
+        operation.targetPath,
+        String(operation.attempt),
+        operation.updatedAt,
+        executionMeaning(operation),
+      ]),
+    ))
+  }
+  if (page.cursor) printLine(`next cursor: ${page.cursor}`)
+}
+
+function printOperation(operation: DeviceOperationDetail): void {
+  printLine(table(
+    ['FIELD', 'VALUE'],
+    [
+      ['operationId', operation.operationId],
+      ['deviceId', operation.deviceId],
+      ['state', operation.state],
+      ['target', operation.targetPath],
+      ['attempt', String(operation.attempt)],
+      ['createdAt', operation.createdAt],
+      ['expiresAt', operation.expiresAt],
+      ['updatedAt', operation.updatedAt],
+      ['execution', executionMeaning(operation)],
+      ...(operation.cancelRequestedAt === undefined
+        ? []
+        : [['cancelRequestedAt', operation.cancelRequestedAt]]),
+    ],
+  ))
+  if (operation.state === 'expired' && operation.executionMayHaveOccurred) {
+    printLine('warning: this operation was claimed before expiry and may have executed')
+  }
+  if (operation.error !== undefined) printLine(`error: ${operation.error.code}: ${operation.error.message}`)
+  if (operation.result !== undefined) printLine(`result: ${JSON.stringify(operation.result)}`)
+}
+
+export function deviceOperationListCommand() {
+  return withPageOpts(withGlobalOpts(new Command('ls')))
+    .alias('list')
+    .description('List durable operations for one device')
+    .argument('<device-id>', 'Device identifier')
+    .option('--state <state>', 'Filter by operation state (repeatable)', collect, [])
+    .action(async (deviceIdArg, opts) => {
+      const deviceId = String(deviceIdArg ?? '').trim()
+      if (deviceId === '') throw new CliError('device id is required')
+      const pageOpts = parsePageOpts(opts)
+      const selected = states(opts.state ?? [])
+      const page = await withClient(resolveTarget(opts), async client =>
+        await client.deviceOperations.list({
+          deviceId,
+          ...(
+            Object.keys(pageOpts).length === 0 && selected === undefined
+              ? {}
+              : { opts: { ...pageOpts, ...(selected === undefined ? {} : { states: selected }) } }
+          ),
+        }))
+      if (opts.json) printJson(page)
+      else printOperationList(page)
+    })
+}
+
+function deviceOperationReadCommand(command: 'get' | 'cancel') {
+  return withGlobalOpts(new Command(command))
+    .description(command === 'get' ? 'Show one durable device operation' : 'Cancel or request cancellation')
+    .argument('<device-id>', 'Device identifier')
+    .argument('<operation-id>', 'Operation identifier')
+    .action(async (deviceIdArg, operationIdArg, opts) => {
+      const deviceId = String(deviceIdArg ?? '').trim()
+      const operationId = String(operationIdArg ?? '').trim()
+      if (deviceId === '' || operationId === '') throw new CliError('device id and operation id are required')
+      const operation = await withClient(resolveTarget(opts), async client => command === 'get'
+        ? await client.deviceOperations.get(deviceId, operationId)
+        : await client.deviceOperations.cancel(deviceId, operationId))
+      if (opts.json) printJson(operation)
+      else printOperation(operation)
+    })
+}
+
+export function deviceOperationCommand() {
+  return new Command('op')
+    .description('Inspect and cancel durable device operations')
+    .addCommand(deviceOperationListCommand())
+    .addCommand(deviceOperationReadCommand('get'))
+    .addCommand(deviceOperationReadCommand('cancel'))
+}
+
 export function deviceCommand() {
   return new Command('device')
     .description('Manage reverse-connected devices')
     .addCommand(deviceLsCommand())
+    .addCommand(deviceOperationCommand())
 }
