@@ -4,6 +4,8 @@ kind: architecture
 relations:
   requires:
     - protocol/htbp-contract.mdx
+  related:
+    - device/durable-mailbox.mdx
 code:
   paths:
     - packages/core/src/auth/**
@@ -34,6 +36,15 @@ code:
   引用可解析；顺序不能反，避免 SecretStore existence oracle。挂载、授权和调用各自验证所需状态。
 - 首次 bootstrap 默认要求部署者提供 Admin SK。Workers 和 SDK fail closed;Node 仅保留显式 `TB_ALLOW_INSECURE_BOOTSTRAP=true` 的本地开发逃生口。
 - Linux structured command 的 child 缺省只继承基础环境白名单;显式 `inheritEnv` 只是按名称复制本机 daemon 环境,不是 SecretStore 引用解析,也不提供输出 secret redaction、执行后清零或到期保证。不得把 token/云凭证列入 profile 环境策略,也不得把 fixed executable/argv 当作 secret 通道。
+- Device Mailbox 的 caller 权限在 enqueue 时快照：该次 call 授权成功后，caller SK 后续吊销不会自动取消
+  operation；caller owner 或含命令叶子的完整 targetPath admin 才能查询/取消。这是 durable work 的显式授权语义，不得把
+  claim 时重新校验原 caller 误当成更安全的默认。设备侧相反：claim/renew/complete 每次都走正常 HTTP
+  Bearer 鉴权，并复核当前 credential keyId、registerPaths/mount 权限与 operation binding；设备 credential
+  revoke/rotate 后旧 session/lease 不能继续推进。
+- Device `fallback` 只能以 realtime 生命周期的显式 dispatch certainty 为依据：`not_dispatched` 才允许
+  创建 operation；设备已返回业务错误属于 `completed`，可能写出 call frame 或已发送但未收敛属于
+  `unknown`，两者都不得入队。禁止从 TBError code、HTTP status 或 retryable 猜测发送事实；`unknown` 对
+  调用方固定为不可重试，避免同一副作用被 realtime 与 Mailbox 各执行一次。
 
 ## 出站
 
@@ -74,6 +85,15 @@ code:
 - Store HMAC key 优先从部署信任根经版本化域分离派生，不把派生 key 写入 StateStore；权威 session/share/
   call capability 只存 token hash。设备 wire 上的 call token 由 SDK 内部消费，handler 的安全 context
   不暴露原始 bearer；客户端限额只做早拒，服务端 reservation/CAS 才是权威。
+- Device Mailbox 把 arguments 与 terminal result/error 以 AES-GCM 加密后写 StateStore，AAD 绑定
+  operation id 与字段；AES key 从 `TB_SECRET_ENCRYPTION_KEY` 经 Mailbox 专属 HKDF salt/info 派生，不直接
+  复用 SecretStore 的“只进不出”对象或 Store HMAC key。该保护只是 **at-rest encryption**，不是 E2E：
+  gateway enqueue/claim/complete 时会在内存中处理明文，claim 经 TLS 回给设备。缺部署 encryption root 或
+  缺 StateStore CAS 时 Mailbox fail closed；密钥轮换必须先设计既有 ciphertext 迁移，不能直接替换根后
+  期待旧 operation 可读。
+- Mailbox operation 的 payload、result/error 不进入 URL、日志、toast 或浏览器持久缓存；公开 summary
+  只含 caller 快照、target、traceId、状态与时间。设备 installation journal 可保存 completion 用于重放，
+  因而必须由宿主提供真正 durable 且受本机权限保护的存储，并按 expiresAt 清理。
 - Context 与 Store 即使复用同一 ObjectStore 也属于不同授权域：`__tool_bridge_internal__/store/v1` 是
   强制保留根，重叠的非空
   Context prefix 挂载时 fail closed；空 prefix 挂载必须过滤/隐藏 Store read/list/search，并拒绝

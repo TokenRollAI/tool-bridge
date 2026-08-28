@@ -5,6 +5,7 @@ code:
   paths:
     - packages/app/src/providers/mcp.ts
     - packages/app/src/mcpServer.ts
+    - packages/app/src/routes/mcp.ts
     - packages/app/test/mcp.integration.test.ts
 ---
 
@@ -19,6 +20,18 @@ MCP 是外部协议兼容面。项目内部历史状态可删，但现代/旧版
 - 工具清单进入 `toolcache:<nodePath>`；工具调用结果永不缓存。
 - 不复用上游 session，不存在 `mcpsession` 或 `forceFresh` 控制面。
 - 入站 `/~mcp` 是无状态适配器，不依赖 `Mcp-Session-Id`。
+
+### 入站 device delivery 投影
+
+入站 `/~mcp` 不为 Mailbox 暴露第二个 enqueue tool。对 metadata `delivery:'both'` 的设备工具，input schema
+增加 `~delivery` enum `realtime|mailbox|fallback`；mailbox-only 工具只投影 `mailbox|fallback`；realtime-only
+工具不增加该字段。MCP call 携带的 `~delivery` 原样进入同一个普通 command POST，复用 app 的授权、能力
+检查与 dispatch certainty，而不是在 MCP adapter 里再实现 fallback。
+
+显式 delivery 的成功结果保持可判别：HTTP 200/realtime 投影为
+`{delivery:'realtime',result}`，HTTP 202/mailbox 投影为 `{delivery:'mailbox',operation}`。`fallback` 只在
+gateway 明确判断 `not_dispatched` 时入队；设备业务错误属于 completed，unknown 也不入队。这样一次 MCP
+工具调用即可请求 fallback，同时避免 Agent 在 MCP 层 call 失败后再猜测是否 enqueue。
 
 ## 互操作边界
 

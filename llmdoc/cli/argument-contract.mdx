@@ -4,6 +4,8 @@ kind: guide
 relations:
   requires:
     - protocol/htbp-contract.mdx
+  related:
+    - device/durable-mailbox.mdx
 code:
   paths:
     - knip.jsonc
@@ -19,9 +21,13 @@ code:
     - packages/cli/src/http.ts
     - packages/cli/src/deviceRuntime.ts
     - packages/cli/src/commands/**
+    - packages/cli/examples/structured-command-profile.json
+    - packages/cli/test/device.test.ts
+    - packages/cli/test/strictParsing.test.ts
     - packages/sdk/src/client/**
     - packages/sdk/src/store/**
-    - packages/sdk/src/device/**
+    - packages/sdk/src/device/connection.ts
+    - packages/sdk/src/device/storeUpload.ts
 ---
 
 # CLI 参数契约检查
@@ -44,6 +50,14 @@ CLI 是公共控制面,不是 API 的宽松包装。修改命令时同时检查�
 - `tb store` 是部署级对象管理面，与 `ctx` 正交：`upload <file>` 新建 opaque Store 对象，不接收 Context
   path/entry/overwrite；`stat|get|share|rm` 接严格 `store://default/...`，`revoke-share` 接 share id，
   `list`/`ls` cursor 分页。帮助必须明确“命名语义 entry 用 `tb ctx upload`”，不能让两类上传互相冒充。
+- `tb call <cmd.path> --delivery realtime|mailbox|fallback` 是统一 device invoke 入口，arguments 继续复用
+  inline JSON/`--args-file`/repeatable `--arg` 解析，并只发送一次普通 command POST。`--ttl` 必须为正整数，
+  `--idempotency-key` 是 caller-owner scoped Mailbox 重试键；两者都只允许配 `mailbox|fallback`。CLI 不在
+  realtime 失败后执行第二条 enqueue 命令，fallback 是否入队完全由 gateway 的 dispatch certainty 决定。
+- `tb device op ls|get|cancel` 是 operation 管理面：ls 按 deviceId 分页并可 repeatable `--state` 过滤，
+  get/cancel 同时要求 deviceId 与 operationId。人类输出必须区分
+  `result_unknown = 已开始/结果未知` 与 `expired + executionMayHaveOccurred = 可能执行过`，避免把 expired
+  误写成安全未执行；`--json` 保留完整固定 wire。
 - `store upload` 从文件 stat 得到 size，流式发送，并按 grant 自动选择 relay/direct；relay PUT 返回
   descriptor，direct 才调用 capability-only complete。`--idempotency-key` 是 owner-scoped create 重试
   key，不是覆盖路径。文件 size 大于当次 `maxBytes` 时在本地早拒，服务端仍做权威限额。
@@ -109,6 +123,11 @@ CLI 在 workspace 内 typecheck、Vitest 与 tsup 三个解析面都必须覆盖
 Store 的当前对等面是 `system/store`、上述 `tb store` 命令与 Dashboard `/manage/store`。Device SDK 的
 `call.uploadObject` 是设备数据面，不要求 CLI 模拟 call capability，但最终仍消费同一 create/relay/direct
 状态机。
+
+Durable Mailbox 的对等面是普通 command POST 的 `~delivery` + `/~device/operations/*`、
+`tb call --delivery ...` + `tb device op`，以及 Dashboard CmdPanel 的统一 invoke 与 Devices 页的
+operation panel。`/~device/mailbox/*` 是设备 credential 数据面，由
+`@tool-bridge/sdk/device` pull processor 消费，不要求 CLI 伪装设备 lease 客户端。
 
 如果 Dashboard 或 API 能完成而 CLI 无法表达,就是管理旁路。若某能力有意只属于一个入口,应在契约中说明原因。
 

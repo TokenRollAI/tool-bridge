@@ -3,6 +3,7 @@ description: HTBP 当前协议契约:表示协商、唯一调用形态、节点�
 kind: reference
 relations:
   related:
+    - device/durable-mailbox.mdx
     - protocol/security-boundaries.mdx
 code:
   paths:
@@ -12,6 +13,12 @@ code:
     - packages/core/src/builtin/**
     - packages/core/src/operation/**
     - packages/core/src/protocol/**
+    - packages/core/src/htbp/helpDsl.ts
+    - packages/core/src/htbp/helpMarkdown.ts
+    - packages/core/src/htbp/model.ts
+    - packages/core/src/node/structuredCommand.ts
+    - packages/core/src/tool/mcpSchema.ts
+    - packages/core/src/tool/types.ts
     - packages/core/src/tool/virtualize.ts
     - packages/core/src/device/frames.ts
     - packages/core/test/device/frames.test.ts
@@ -47,6 +54,9 @@ builtin、Context 与 Skillhub 的命令使用 `HtbpCommandRegistry` 注册一�
 - `GET /<path>/~help`:默认 Markdown;`Accept: text/plain` 返回 Help DSL;`Accept: application/json` 返回 Help JSON。
 - `GET /<path>/~tree?depth=N`:经身份可见性裁剪的树。`POST /~search`:仅当宿主声明 search capability 时存在。
 - `GET|POST|DELETE /<path>/~feedback[/<id>]`:具体路径的使用反馈、投票与管理;不是集中 builtin。
+- `POST /<command>`:唯一 invoke 入口；设备命令可在 arguments 顶层携带保留 `~delivery` 选择 realtime、
+  mailbox 或 certainty-gated fallback，没有独立 `~enqueue` 路由。
+- `POST /~device/operations/get|list|cancel`:调用方的 operation 管理面;`POST /~device/mailbox/claim|renew|complete` 是设备 Bearer 数据面。
 - `PUT /~store/uploads/<uploadId>` 与 `GET /~store/refs|shares/<token>` 是 Store 的 bearer 数据面,不是 Registry 节点;精确授权见[Store](#store)。
 - `ALL /~mcp`:把当前身份可见工具投影为 MCP server。`GET /healthz`:公开健康信息,不证明认证数据面可用。
 - 错误统一 `{code,message,retryable}`;主要 code:not_found、permission_denied、invalid_argument、conflict、unavailable、rate_limited、internal。
@@ -54,7 +64,7 @@ builtin、Context 与 Skillhub 的命令使用 `HtbpCommandRegistry` 注册一�
 
 ## 调用
 
-- 唯一形态:`POST /<nodePath>/<command>`,body 即 arguments 本体。命令是节点下的**虚拟叶子**(不写 Registry),对一切可调用 kind 一视同仁;没有 `{tool, arguments}` 信封。
+- 唯一形态:`POST /<nodePath>/<command>`,body 即 arguments 本体。命令是节点下的**虚拟叶子**(不写 Registry),对一切可调用 kind 一视同仁;没有 `{tool, arguments}` 信封。设备 backed tool 可在该对象顶层增加唯一保留控制字段 `~delivery:'realtime'|'mailbox'|'fallback'`；handler 前会剥离它，未显式填写时缺省 realtime。非设备命令显式使用该字段、任意命令携带其它 `~*` 控制字段，均以 `invalid_argument` 拒绝。
 - 节点本身(无命令段)不可调用,返回 404。命令可寻址:`GET /<nodePath>/<command>/~help`;`~tree` 只列权威注册拓扑,动态命令经 `~help`/`~search` 发现。
 - **`cmds[].path` 是可执行的完整路径,不是 owner 定位或展示提示**。owner 的 `~help` 返回的每条 `cmds[].path` 都已含命令叶子(如 `/device/mac/shell/exec`),消费者必须原样用于 `GET <cmd.path>/~help` 与 `POST <cmd.path>`,除 URL 拼接所需的前导斜杠规范化外不得改写。禁止用 `node.path + cmd.name` 重建命令身份、另传 `tool` 字段,或把 body 包成信封。Dashboard 的 `CmdPanel`/`CliHint`、`tb call` 与 curl 示例共同信任这一个字段,任一处重建都会同时失真。
 - 标识符大小写不敏感、规范化为小写:路径段、命令/工具名、export id、scope pattern 字面段、device 暴露路径。规范化后冲突(上游同时暴露 `Foo`/`foo`)→ `invalid_argument`,不选其一。命令名含 `/`、为空、以 `~` 开头、为 `.`/`..` 一律拒。第三方原始工具名是外部身份,适配器维护 `公开小写名 → 上游原名` 映射。
@@ -182,6 +192,10 @@ originCallId 与生命周期字段，不含 driver key 或 capability。完整�
 
 设备连 `/system/device/ws?deviceId=...`,hello 声明 expose;服务端验证身份与 `registerPaths` 后代写 `device/<id>/...`。帧集合:hello、ready、error、call、result、ping、pong、cancel。`call` 帧 `path` 相对 mountPath 且**含命令叶子段**,与直连调用一致。PING/PONG 是稳定字面量支持边缘 auto-response;只有当前 generation 进入 ready 后才能执行 call,连接替换后旧 generation 的消息与迟到结果不得污染新连接。
 
+设备根的 Registry/TreeNode wire 还携带系统代写的原始 `deviceId`；它与规范化的树 `path`/mountPath 是
+不同身份，客户端不得从 `device/<segment>` 路径反解析或把 mount path 当 deviceId。该字段只由设备注册
+链路写入，普通 Registry 写入不能伪造。
+
 `expose.nodes[].cmds` 可携带 command input/output schema、effect/confirm；Linux structured command
 profile 只是该既有协议面的一个生产者,没有新增 hello 字段族或 device frame。设备所有者声明 effect，平台不会
 从 executable/argv 或 shell 字符串推断；任意 `shell/exec` 继续是 destructive + confirm。process executor
@@ -191,6 +205,51 @@ stream/status/cancel/resume 资源。confirm 是发现 metadata,不是 HTBP POST
 call id 在同一设备进程内用于执行合并与有界结果缓存,不承诺跨进程 exactly-once。cancel 是协作式提示(AbortSignal),不能表述为外部副作用已撤销。call 帧可选 `context`(caller.keyId/owner、traceId、createdAt、expiresAt)由网关鉴权后签发,不接受来自 arguments,故意不含 scopes/SK;授权判定全在网关侧,设备只做审计与限时,`expiresAt` 以网关时间为准。Store 可用时 wire 还带 `context.upload:{token,expiresAt,maxBytes,maxObjects}`:它只允许本次 call 创建受数量/字节/MIME 约束的新对象；SDK 内部消费 token，handler 的 context 只暴露非 secret 限额并通过 `call.uploadObject` 上传，服务端 reservation/CAS 权威记账，返回后网关撤销。token 不得进入 arguments、result 或日志。老网关不带 context/upload 时新设备按缺省降级;老设备 decoder 忽略未知字段。
 
 设备在线状态是三态 `presence: { state: 'online'|'stale'|'offline', lastSeenAt? }`:存储层 `online` 位结合 `lastSeenAt` 在投影时派生,online 但心跳超时降级 stale。presence 只是发现提示,可路由性以宿主活动 socket 为准;wire 派生只发生在树/help 投影处,读路径不回写权威状态。`@tool-bridge/sdk/device` 安全作者面只声明可路由回设备的 tool/context 节点;移动端默认前台实时在线,后台任务属于另一个异步队列/推送能力。
+
+### Durable Mailbox
+
+本节只冻结公开 wire；authority、journal 与 failure semantics 见
+[Durable Device Mailbox](../device/durable-mailbox.mdx)。
+
+设备 command metadata 的 `delivery:'realtime'|'mailbox'|'both'` 描述能力，缺省 `realtime`；请求
+`~delivery:'realtime'|'mailbox'|'fallback'` 描述本次调用 policy，缺省也是 realtime。这是两个独立层次：
+mailbox-only 命令拒绝 realtime，realtime-only 命令拒绝 mailbox/fallback，`both` 接受全部三种 policy。
+metadata 随既有 hello `expose.nodes[].cmds` 上送，不新增 WebSocket frame。Mailbox 是 pull-only 补充通道：
+没有 APNs/FCM、没有 WebSocket `mailbox_available` hint。
+
+调用继续使用 `POST /<cmds[].path>?ttlSeconds=...` 与裸 arguments，只在顶层加入 `~delivery`。`mailbox`
+直接入队；`fallback` 对 both 命令先尝试 realtime，只有 gateway/host 明确证明 call frame 未分发
+(`not_dispatched`)才入队，对 mailbox-only 命令则直接入队。设备明确返回成功或业务错误都属于
+`completed`，不入队；已发送或可能已发送但结果未收敛属于 `unknown`，绝不入队，并返回不可重试错误。
+fallback 必须以 dispatch disposition 这类生命周期事实为依据，不能从 error code、HTTP status 或
+`retryable` 推断——同一 `unavailable` 可能发生在发送前，也可能发生在可能写出 frame 之后。
+
+进入 Mailbox 分支仍在命令 owner 路径执行 read 可见性和 call 授权，只接受设备代写且能力含
+`mailbox` 的命令。可选 `x-tb-idempotency-key` 在 caller owner + device + target 域绑定重试；同 key 但
+payload、设备 credential、相对 path 或 TTL 不同返回 conflict。成功返回 HTTP 202、持久 operation detail
+与 `x-tb-delivery: mailbox`；realtime 成功返回 HTTP 200 与 `x-tb-delivery: realtime`。入队时保存 caller
+`{keyId,owner}`、`traceId`，并把 `targetPath` 保存为含命令叶子的完整 command path；之后 caller SK 吊销
+不会自动撤销已入队操作，owner 或该完整 targetPath 的 admin 可经管理面 cancel。arguments 与
+terminal result/error 分别按 canonical JSON 计算，单份上限 256 KiB；相关 Mailbox HTTP 请求体也在解析
+前做有界读取，不能用超大 JSON 绕过持久 payload 限额。
+
+公开状态为 `queued → claimed → succeeded|rejected|failed|result_unknown`，服务端还可产生
+`cancelled|expired`。claim 以短 lease 串行竞争，lease 到期可由同 credential 重新 claim 并增加 attempt；
+claimed cancel 只是记录请求，设备在 claim/renew 观察并协作停止，不能证明外部副作用已撤销。设备只有在
+持有有效 lease 时才能 renew/complete，且 claim/renew/complete 每次都使用正常设备 HTTP Bearer 鉴权，
+复核当前 keyId、mount 注册权限与 credential binding；revoke/rotate 后旧 lease 不再可推进。设备执行前还要
+重验当前 expose，handler 消失或 delivery 不再含 mailbox 时提交 `rejected`。
+
+`result_unknown` 只由设备提交，表示 journal 已证明执行开始但结果无法恢复。operation 到 `expiresAt` 后
+服务端可把 queued/claimed 收敛为 `expired`；若此前为 claimed，`executionMayHaveOccurred:true` 表示
+“未证明执行过，但可能已经执行”，与 result_unknown 不同。调用方对两种歧义终态都不得在缺少业务幂等
+保证时盲目重试。
+
+`POST /~device/operations/get|list|cancel` 只向 operation caller owner 或完整 targetPath admin 暴露；
+不可见以 not_found 隐藏。list 在服务端做授权感知的续页扫描，隐藏 operation 既不进入 items，也不能通过
+raw storage cursor 泄漏 identity；一页可见结果不足时仍可返回安全 continuation。设备数据面 `claim` 返回
+serverNow、lease 与解密 arguments，`renew` 返回新的 lease 期限及 cancel 请求，`complete` 只接受
+succeeded/rejected/failed/result_unknown 四种设备终态；同 lease 的完全相同 completion 可幂等重放。
 
 ## CLI 契约
 

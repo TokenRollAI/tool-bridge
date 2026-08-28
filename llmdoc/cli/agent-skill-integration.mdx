@@ -1,9 +1,11 @@
 ---
-description: 公开 Agent Skill(tool-bridge-skill 仓库)的 ownership 边界、Agent 运行时流程、feedback 使用纪律、变更联动清单与验收方法。
+description: 公开 Agent Skill(tool-bridge-skill 仓库)的 ownership 边界、Agent realtime/Mailbox 流程、feedback 使用纪律、变更联动与验收方法。
 kind: guide
 relations:
   requires:
     - cli/argument-contract.mdx
+  related:
+    - device/durable-mailbox.mdx
 code:
   paths:
     - packages/cli/src/commands/**
@@ -27,6 +29,18 @@ code:
 - **Discovery path:** 能力未知时先 `tb search --json`。结果唯一、字段信息足够且确认是无副作用只读调用时直接 call;Search capability 不存在时才逐级使用 `tb tree`、`tb ls`。字段缺失、命中歧义、路径陌生或历史上易失败,以及任何写入、破坏性或需确认操作,才下钻工具级 `~help`,以 `cmds[].path`、schema、effect、confirm 和 scope 决定调用方式与确认边界。
 - **Recovery path:** call 失败、超时、schema 合法但结果异常或上游行为不一致时,优先消费 CLI 随错误附带的 hint/feedback。只 `get` 最相关的一条;没有有效提示,或为了提交新反馈而去重时,才 `feedback ls`。应用已验证 workaround 后通常最多安全复验一次,副作用结果未知时不自动重试。
 
+设备命令还必须区分运行时 capability metadata 与调用 policy：`delivery:realtime|mailbox|both` 描述命令能
+走哪些通道，`tb call --delivery realtime|mailbox|fallback <cmds[].path>` 选择本次策略，缺省 realtime。
+已知完整 path/schema/delivery 且需要兼顾在线与离线时，一次 `tb call --delivery fallback` 即可；对 `both`
+命令 gateway 先尝试 realtime，只在明确 `not_dispatched` 时入队，对 mailbox-only 命令则直接入队。不能由
+Agent 在同步失败后再发第二条请求猜测 enqueue；completed（包括设备业务错误）和 unknown 都不入队，unknown
+还固定不可重试。effect/confirm 与用户授权边界不因 delivery 改变。
+
+能力未知时先 `tb search --json`，唯一命中且 metadata 足够才 `search → call --delivery fallback`，否则按
+既有规则下钻 help。返回 mailbox operation identity 后默认结束当前同步流程，不启动固定间隔轮询；只有
+用户目标当下确实需要状态/终态时，按需做一次 `tb device op get <deviceId> <operationId>`。后续
+claim/complete 是设备侧协议，不计入 Agent 工具调用预算，也不由 Agent 模拟。
+
 调用结果若含 `store://default/...`，它只是对象身份：Agent 用 `tb store stat/get` 读取当前 owner 的对象，
 只有用户明确要求把文件交给外部受众时才用 `tb store share` 创建短期 bearer，并把成功输出当 secret
 立即交付；用完可 `revoke-share`。普通设备产物不要求搜索或挂载 Context，只有明确 author 到命名语义
@@ -40,12 +54,19 @@ entry 时才用 `tb ctx upload`。
 
 - 已知只读路径为一次 `call`。
 - 未知只读能力为 `search + call`;首次使用某个认证上下文最多再加一次 `whoami`。
+- 已知设备路径为一次 `call --delivery fallback`；未知能力的最短路径为
+  `search + call --delivery fallback`。首次认证仍只按上文可多一次 `whoami`，mutating/confirm 命令仍可
+  按需多一次 help 与用户确认。
+- operation 状态读取与 enqueue 解耦：只有确有当前结果需求时才增加一次 `device op get`，不把“直到终态”
+  的固定 polling 往返写进 Agent 默认预算。
 - mutating 调用按需增加一次 `help` 与用户确认。
 - 异常恢复通常最多增加一次相关 `feedback get` 和一次安全复验;无有效附带提示时才用 `feedback ls` 扩大检索。
 
 ## 安全下界
 
 - `effect:write`、`effect:destructive` 或 `confirm:true` 的调用遵守用户确认边界;超时后的副作用结果按未知处理,不自动重试。
+- Mailbox 的 `result_unknown` 与 `expired + executionMayHaveOccurred:true` 都是执行歧义，不自动 call、enqueue
+  或重试；只有业务幂等已被独立证明且用户授权后，才能创建新的执行。
 - 404 同时表示不存在或对当前身份不可见,不通过探测猜隐藏路径,也不为此索要 Admin SK。
 - SK 不进入 prompt、命令参数、日志、源码、临时产物或 feedback;自动化从 Secret 注入 `TB_SK`。
 - Store upload grant、read/share `$ref` 与 presigned URL 也不进入 prompt、日志、feedback 或持久任务
@@ -56,13 +77,15 @@ entry 时才用 `tb ctx upload`。
 
 ## 变更联动
 
-以下四类变化需要同轮检查 Agent Skill:
+以下变化需要同轮检查 Agent Skill:
 
 - `tb` 的目标配置、发现、help、call 或 feedback 命令语义变化;
 - Help JSON 的调用路径、effect、confirm、scope、feedback 字段变化;
 - 权限、404 可见性、错误码或安全边界变化;
 - Agent 推荐工作流不再能从运行时自描述完成。
 - `tb store` 命令、`store://` 结果或 Store/Context 选择语义变化。
+- `delivery` discovery、`tb call --delivery`、`tb device op`、operation 状态或 Mailbox 重试/轮询边界变化；
+  CLI 与公开 Skill 必须同轮联动，不能出现 CLI 已统一 invoke 而 Skill 仍教两步 call/enqueue 的漂移。
 
 只更新 Skill 中稳定的流程与边界,不复制版本号或动态 catalog。公共教程若展示安装或连接步骤,也要同步评估;面向开发 agent 的内部实现细节仍留在本仓库 llmdoc。
 
@@ -73,5 +96,11 @@ entry 时才用 `tb ctx upload`。
 1. 已知只读路径在 target 已验证后直接 `call`,并断言没有冗余 discovery、help 或 feedback 命令。
 2. 未知只读能力覆盖 `search --json → call`;首次 target 可在前面出现且只出现一次 `whoami`。
 3. 用确定性的首次失败覆盖 `call failure → attached feedback get → 安全复验`,并断言无反馈写入授权时不执行 vote/submit。
+4. 已知 mailbox-capable path 覆盖单次 `call --delivery fallback`，断言无第二条 enqueue 请求、不固定轮询；
+   只有测试目标要求当前终态时才允许随后出现一次 `device op get`。
+5. 未知 mailbox 能力覆盖 `search --json → call --delivery fallback`；分别以 completed 业务错误、
+   `not_dispatched`、unknown 与 `result_unknown`/claimed-expired fixture 断言只有明确未分发会入队，其余不
+   自动 retry。真实跨层 fixture 的 discovery + invoke + claim + complete + get 共五次 HTTP，其中后三步
+   的 claim/complete 属设备协议，get 只在当前结果确有需要时发生。
 
 异常测试不能只在 prompt 里写"可能失败";若 Agent 首次调用自然成功,只证明成功路径,必须通过无真实资源的可控故障注入重测。测试还应断言恢复通常不超过一次 workaround retry,且副作用不明时不重试。最后以 Skill 仓库 GitHub Actions 的 discovery 校验为远端证据。

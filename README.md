@@ -220,6 +220,35 @@ Shell 默认拒绝所有命令，只有显式 allowlist 中的命令可以执行
 [`packages/cli/examples/structured-command-profile.json`](packages/cli/examples/structured-command-profile.json)
 和 [`packages/cli/README.md`](packages/cli/README.md)。
 
+### 给暂时离线的设备延迟交付
+
+结构化设备命令可以在 profile 中声明 `"delivery": "mailbox"`（仅入队）或
+`"delivery": "both"`（实时调用与 Mailbox 都支持）；不声明仍是原来的 realtime 行为。调用方仍然
+只调用完整命令路径，通过同一次 invoke 的 delivery 策略选择直接入队，或先实时、确定未 dispatch
+时再安全 fallback：
+
+```sh
+tb call device/build-01/ops/system/system-info \
+  --args '{}' \
+  --delivery fallback \
+  --idempotency-key inspect-build-01-20260828 \
+  --ttl 3600
+
+tb device op ls build-01
+tb device op get build-01 <operation-id>
+tb device op cancel build-01 <operation-id>
+```
+
+Mailbox 是 pull-only 的持久化执行账本：网关先落库，设备用
+`@tool-bridge/sdk/device` 主动 claim / renew / complete；它不会用 APNs、FCM 唤醒设备。fallback
+只在网关确认 realtime 尚未 dispatch 时入队；发送后的断线/超时属于执行歧义，不会再次入队。
+`TB_SECRET_ENCRYPTION_KEY` 是启用 Mailbox 的部署前提；参数与结果使用
+独立 HKDF 子密钥做静态加密，但不是端到端加密，网关在授权后的 claim/complete 路径仍会处理明文。
+
+`result_unknown` 表示设备确认已经开始执行但结果无法恢复；claimed 操作过期则为 `expired` 且标记
+“可能已执行”。两者都不能在没有业务幂等保障时盲目重试。MVP 的执行幂等依赖设备安装本地的持久
+journal，并以一个 deviceId 只有一个活跃安装为前提。
+
 ## 让 Agent 共享真实使用反馈
 
 反馈不是集中在另一个论坛里，而是附着在具体节点或工具路径上。Agent 在使用前读取经验，踩坑后提交简短建议，再由其他身份投票：

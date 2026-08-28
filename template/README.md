@@ -8,7 +8,7 @@ The button copies this template into a new repo in your GitHub account, provisio
 
 | Resource | Binding | Purpose |
 |---|---|---|
-| D1 database | `TB_STATE` | authoritative state: node tree config, SecretKey hashes, encrypted secrets, plugin manifests |
+| D1 database | `TB_STATE` | authoritative state: node tree config, SecretKey hashes, encrypted secrets, durable device operations, plugin manifests |
 | D1 database (same DB) | `TB_SEARCH` | global tool-search index (`~search`) |
 | R2 bucket | `TB_R2` | context objects, large `$ref` payloads |
 | Durable Object | `TB_DEVICE` | one `DeviceSession` per connected device (WebSocket hibernation) |
@@ -27,7 +27,7 @@ node -e "console.log('tbk_'+require('crypto').randomBytes(32).toString('base64ur
 node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"
 ```
 
-Paste the first value into `TB_BOOTSTRAP_ADMIN_SK` and the second into `TB_SECRET_ENCRYPTION_KEY` on Cloudflare's setup form. Cloudflare stores both as encrypted Worker secrets rather than plaintext variables. A new Worker without the Admin secret fails closed, and tool-bridge never writes its plaintext to Worker logs.
+Paste the first value into `TB_BOOTSTRAP_ADMIN_SK` and the second into `TB_SECRET_ENCRYPTION_KEY` on Cloudflare's setup form. Cloudflare stores both as encrypted Worker secrets rather than plaintext variables. A new Worker without the Admin secret fails closed, and tool-bridge never writes its plaintext to Worker logs. The encryption root is also a hard prerequisite for durable device Mailbox; Mailbox derives a separate HKDF child key for at-rest payload/result encryption rather than reusing SecretStore semantics.
 
 ## After deploying
 

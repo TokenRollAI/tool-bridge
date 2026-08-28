@@ -146,6 +146,50 @@ await saveStableReference(uploaded.uri) // 只保存 store://default/...；不�
 
 移动端默认只承诺 App 前台实时在线。`SecureStore`、`AppState`、SQLite 和原生 executor 由应用选择，SDK 不直接依赖 React Native 或 Expo。当前原生 RN adapter 使用第三参数注入 WebSocket upgrade headers；浏览器/RN Web 若不能设置 header，需要网关短期 ticket 能力。
 
+### Durable Mailbox（显式拉取）
+
+需要在设备下次运行时补做任务的命令，把 expose 中对应 cmd 的 `delivery` 设为 `mailbox` 或
+`both`，再用同一份 expose 与 handler 创建 pull processor：
+
+调用方不需要第二个 enqueue API；在普通 invoke 上声明一次交付策略：
+
+```ts
+const outcome = await client.invokeJson(
+  'device/phone-01/tools/mail/send',
+  { text: 'hello' },
+  { delivery: 'fallback', idempotencyKey: 'agent-task-1', ttlSeconds: 3600 },
+)
+// outcome: {delivery:'realtime', result} | {delivery:'mailbox', operation}
+```
+
+`fallback` 只在网关确认 call 帧尚未 dispatch 时入队；发送后的断线或超时不会产生第二次执行。
+
+```ts
+import { createDeviceMailboxProcessor } from '@tool-bridge/sdk/device'
+
+const mailbox = createDeviceMailboxProcessor({
+  baseUrl: 'https://your-gateway.example.com',
+  deviceId: 'phone-01',
+  credentialProvider,
+  expose: () => currentExpose, // 执行前重新读取；被移除或改回 realtime 的命令会 rejected
+  handler: runNativeTool,
+  journal: sqliteBackedJournal, // get/put/remove；put 必须在返回前真正持久化
+})
+
+// 由 App 启动、网络恢复或自己的调度器触发；SDK 不会偷偷启动后台轮询。
+const { processed } = await mailbox.drain({ maxOperations: 20 })
+```
+
+processor 在调用 handler 前先把 `executing` 写入 journal；若进程在执行中崩溃，重启后只提交
+`result_unknown`，不会再次执行。handler 完成后先持久化 terminal completion，再提交给网关，故
+网络失败可以安全重放 complete。journal 实现应按 entry 的 `expiresAt` 清理；内存 Map 不满足该
+契约。
+
+当前幂等边界以一个 deviceId 对应一个活跃安装为前提：两个安装的本地 journal 无法互相观察，使用
+同一设备凭证并发消费属于未定义行为。Mailbox 也不唤醒被系统停止的 App；它与 WebSocket realtime
+通道互补，而不是 APNs/FCM 的替代实现。设备每次 claim/renew/complete 都重新准备 HTTP Bearer，
+credential revoke/rotate 会立即阻止后续 lease 操作。
+
 `uploadObject` 不增加 WebSocket 二进制帧：它调用 `system/store/create_upload` 后按 grant 选择
 网关 relay 或 R2/S3 presigned PUT，最终只返回稳定 `store://default/...` descriptor。远程 call
 优先使用 `call.uploadObject`；老网关没有 call capability 时该方法会明确返回 `unavailable`，不会
@@ -184,7 +228,7 @@ const tb = createToolBridge({
 | `state`(必填) | 树配置 / SK / manifest 的存取 |
 | `objects`(必填) | default Store 的字节存储，也供对象型 Context 使用；生产必须注入持久 FS、R2、S3 或自定义 driver，`MemoryObjectStore` 只适合测试/易失开发 |
 | `uploadGrantTtlSec?` | `create_upload` 写 grant 的有效期秒，缺省 900、最大 604800；与下载 `$ref` TTL 独立 |
-| `secrets?` | 上游凭证;缺省 = 基于 state 的加密存储,主密钥 `encryptionKey` 或 env `TB_SECRET_ENCRYPTION_KEY`,皆无则 secret 能力禁用(Set 返回 unavailable) |
+| `secrets?` | 上游凭证;缺省 = 基于 state 的加密存储,主密钥 `encryptionKey` 或 env `TB_SECRET_ENCRYPTION_KEY`,皆无则 secret 能力禁用(Set 返回 unavailable)，durable device Mailbox 也 fail closed |
 | `reservedRoots?` / `remoteAllowlist?` / `maxHops?` | 追加保留根 / remote 白名单(空 = 拒一切 remote)/ Via 跳数上限(默认 4) |
 
 ## License
