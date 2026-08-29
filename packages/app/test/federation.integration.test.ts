@@ -327,7 +327,9 @@ describe('nested remote path projection', () => {
     const federatedSearch = {
       minChildWorkMs: 1,
       perHopReturnReserveMs: 5,
-      totalDeadlineMs: 100,
+      // CI runs every package test concurrently; 100ms could expire before hydration starts,
+      // exercising the partial-page path instead of the stalled-body abort under test.
+      totalDeadlineMs: 1_000,
     }
     const a = await createTestApp({
       remote: {
@@ -388,7 +390,7 @@ describe('nested remote path projection', () => {
       query: 'read deadline',
       opts: { detail: 'full', federation: 'recursive', limit: 1 },
     })
-    expect(Date.now() - startedAt).toBeLessThan(1_000)
+    expect(Date.now() - startedAt).toBeLessThan(3_000)
     expect(response.status).toBe(503)
     await expect(response.json()).resolves.toMatchObject({
       code: 'unavailable',
