@@ -393,6 +393,10 @@ test('SDK device artifact rejects Node runtime and private type leakage', () => 
     () => assertSdkDeviceArtifact('export {}', 'type X = import("@tool-bridge/core").TreePath'),
     /private workspace package/,
   )
+  assert.throws(
+    () => assertSdkDeviceArtifact('export {}', 'import * as z from "./v4/classic/external.cjs"'),
+    /Zod implementation types/,
+  )
 })
 
 test('SDK Store artifact is fully bundled and rejects host-only leakage', () => {
