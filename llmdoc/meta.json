@@ -12,16 +12,16 @@
       "validatedRevision": "aeab8bac5155197a1e626b229cd0d52d7340fcfb"
     },
     "architecture.mdx": {
-      "validatedRevision": "aeab8bac5155197a1e626b229cd0d52d7340fcfb"
+      "validatedRevision": "b9e6bb26e2a1f6f442412a91ee0ed9b0e2afd1a5"
     },
     "cli/agent-skill-integration.mdx": {
       "validatedRevision": "aeab8bac5155197a1e626b229cd0d52d7340fcfb"
     },
     "cli/argument-contract.mdx": {
-      "validatedRevision": "aeab8bac5155197a1e626b229cd0d52d7340fcfb"
+      "validatedRevision": "b9e6bb26e2a1f6f442412a91ee0ed9b0e2afd1a5"
     },
     "dashboard/canvas-architecture.mdx": {
-      "validatedRevision": "aeab8bac5155197a1e626b229cd0d52d7340fcfb"
+      "validatedRevision": "b9e6bb26e2a1f6f442412a91ee0ed9b0e2afd1a5"
     },
     "device/device-daemon.mdx": {
       "validatedRevision": "aeab8bac5155197a1e626b229cd0d52d7340fcfb"
@@ -45,13 +45,13 @@
       "validatedRevision": "aeab8bac5155197a1e626b229cd0d52d7340fcfb"
     },
     "protocol/htbp-contract.mdx": {
-      "validatedRevision": "aeab8bac5155197a1e626b229cd0d52d7340fcfb"
+      "validatedRevision": "b9e6bb26e2a1f6f442412a91ee0ed9b0e2afd1a5"
     },
     "protocol/security-boundaries.mdx": {
-      "validatedRevision": "aeab8bac5155197a1e626b229cd0d52d7340fcfb"
+      "validatedRevision": "b9e6bb26e2a1f6f442412a91ee0ed9b0e2afd1a5"
     },
     "release/npm-publishing.mdx": {
-      "validatedRevision": "aeab8bac5155197a1e626b229cd0d52d7340fcfb"
+      "validatedRevision": "b9e6bb26e2a1f6f442412a91ee0ed9b0e2afd1a5"
     },
     "search/search-index.mdx": {
       "validatedRevision": "aeab8bac5155197a1e626b229cd0d52d7340fcfb"
@@ -60,7 +60,7 @@
       "validatedRevision": "aeab8bac5155197a1e626b229cd0d52d7340fcfb"
     },
     "device/durable-mailbox.mdx": {
-      "validatedRevision": "aeab8bac5155197a1e626b229cd0d52d7340fcfb"
+      "validatedRevision": "b9e6bb26e2a1f6f442412a91ee0ed9b0e2afd1a5"
     }
   },
   "convergence": {
