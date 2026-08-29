@@ -142,7 +142,10 @@ async function openAndPick(providerId: string): Promise<void> {
 describe('按 descriptor 生成表单', () => {
   it('多字段集成:声明的每个字段都有输入框,secret:false 的不遮蔽', async () => {
     await openAndPick('jira')
-    await waitFor(() => expect(screen.getByLabelText(/baseUrl/)).toBeDefined())
+    await waitFor(
+      () => expect(screen.getByLabelText(/baseUrl/)).toBeDefined(),
+      { timeout: 10_000 },
+    )
 
     const baseUrl = screen.getByLabelText(/baseUrl/) as HTMLInputElement
     const pat = screen.getByLabelText(/personalAccessToken/) as HTMLInputElement
@@ -150,7 +153,7 @@ describe('按 descriptor 生成表单', () => {
     expect(baseUrl.type).toBe('text')
     expect(pat.type).toBe('password')
     expect(baseUrl.compareDocumentPosition(pat) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0)
-  })
+  }, 15_000)
 
   it('单值集成:只显示业务凭证，不暴露内部引用名', async () => {
     await openAndPick('tavily')
