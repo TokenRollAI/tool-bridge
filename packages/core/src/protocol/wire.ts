@@ -300,14 +300,24 @@ export const deviceOperationDetailSchema: z.ZodType<CoreDeviceOperationDetail> =
   result: z.json().optional(),
 })
 
-export const deviceOperationListRequestSchema = z.strictObject({
-  deviceId: z.string().min(1),
-  opts: z.strictObject({
-    cursor: z.string().min(1).optional(),
-    limit: z.number().int().positive().optional(),
-    states: z.array(deviceOperationStateSchema).min(1).optional(),
-  }).optional(),
-})
+export interface WireDeviceOperationListRequest {
+  deviceId: string
+  opts?: {
+    cursor?: string
+    limit?: number
+    states?: CoreDeviceOperationState[]
+  }
+}
+
+export const deviceOperationListRequestSchema: z.ZodType<WireDeviceOperationListRequest>
+  = z.strictObject({
+    deviceId: z.string().min(1),
+    opts: z.strictObject({
+      cursor: z.string().min(1).optional(),
+      limit: z.number().int().positive().optional(),
+      states: z.array(deviceOperationStateSchema).min(1).optional(),
+    }).optional(),
+  })
 export const deviceOperationListResponseSchema = pageSchema(deviceOperationSummarySchema)
 
 export const deviceOperationIdentityRequestSchema = z.strictObject({
@@ -379,7 +389,6 @@ export type WireDeviceOperationState = CoreDeviceOperationState
 export type WireDeviceOperationSummary = CoreDeviceOperationSummary
 export type WireDeviceOperationDetail = CoreDeviceOperationDetail
 export type WireDeviceOperationClaim = CoreDeviceOperationClaim
-export type WireDeviceOperationListRequest = z.infer<typeof deviceOperationListRequestSchema>
 export type WireDeviceOperationIdentityRequest = z.infer<typeof deviceOperationIdentityRequestSchema>
 export type WireDeviceOperationClaimRequest = z.infer<typeof deviceOperationClaimRequestSchema>
 export type WireDeviceOperationClaimResponse = z.infer<typeof deviceOperationClaimResponseSchema>

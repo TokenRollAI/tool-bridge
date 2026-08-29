@@ -138,6 +138,12 @@ function assertSdkNeutralArtifact(label, runtimeJs, declarations, allowedExterna
   if (/\bfrom\s+["']hono(?:\/[^"']*)?["']/.test(declarations)) {
     throw new Error(`sdk ${label} declarations reference Hono`)
   }
+  const declarationCode = declarations
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/\/\/.*$/gm, '')
+  if (/\bZod[A-Za-z]*\b|from\s+["'](?:zod|\.\/v4\/)/.test(declarationCode)) {
+    throw new Error(`sdk ${label} declarations expose Zod implementation types`)
+  }
 
   const externalImports = collectExternalImports(runtimeJs)
   if (externalImports.some(specifier => specifier.startsWith('node:'))) {
@@ -171,12 +177,6 @@ export function assertSdkStoreArtifact(storeJs, storeDts) {
 export function assertSdkClientArtifact(clientJs, clientDts) {
   // Fixed-control schemas and Zod are bundled; declarations expose plain wire types only.
   assertSdkNeutralArtifact('client', clientJs, clientDts, new Set())
-  const declarations = clientDts
-    .replace(/\/\*[\s\S]*?\*\//g, '')
-    .replace(/\/\/.*$/gm, '')
-  if (/\bZod[A-Za-z]*\b|from\s+["'](?:zod|\.\/v4\/)/.test(declarations)) {
-    throw new Error('sdk client declarations expose Zod implementation types')
-  }
 }
 
 export function parseCliArguments(argv) {
