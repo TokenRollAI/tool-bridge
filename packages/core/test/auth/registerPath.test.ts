@@ -253,4 +253,41 @@ describe('checkRegisterPath(反向注册路径规则)', () => {
       if (!r.allow) expect(r.error.code).toBe('invalid_argument')
     })
   })
+
+  describe('大小写折叠:与 canonicalizePath/scope 判定同口径(落库恒小写)', () => {
+    it('反例:大写保留根(System/x)不得绕过守卫——落库会折叠到 system/x', () => {
+      const r = checkRegisterPath({ sk: sk(), targetPath: 'System/x', action: 'write' })
+      expect(r.allow).toBe(false)
+      if (!r.allow) expect(r.error.code).toBe('permission_denied')
+    })
+
+    it('反例:部署追加的 reservedRoots 声明为大写时同样生效', () => {
+      const r = checkRegisterPath({
+        sk: sk(),
+        targetPath: 'custom/x',
+        action: 'write',
+        reservedRoots: ['Custom'],
+      })
+      expect(r.allow).toBe(false)
+      if (!r.allow) expect(r.error.code).toBe('permission_denied')
+    })
+
+    it('正例:registerPaths 声明大写(Docs)仍匹配小写目标,不静默全拒', () => {
+      const r = checkRegisterPath({
+        sk: sk({ registerPaths: ['Docs'] }),
+        targetPath: 'docs/readme',
+        action: 'write',
+      })
+      expect(r.allow).toBe(true)
+    })
+
+    it('正例:大写目标落在小写 registerPaths 前缀之内', () => {
+      const r = checkRegisterPath({
+        sk: sk({ registerPaths: ['docs'] }),
+        targetPath: 'Docs/Readme',
+        action: 'write',
+      })
+      expect(r.allow).toBe(true)
+    })
+  })
 })

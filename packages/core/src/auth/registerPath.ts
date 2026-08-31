@@ -12,6 +12,7 @@
  */
 
 import { RESERVED_ROOTS, type SecretKey, SYSTEM_AUTO, type TreePath } from '../types'
+import { segments } from '../tree/path'
 import { checkScopes } from './scope'
 import { TBError } from '../errors'
 
@@ -27,7 +28,12 @@ export interface CheckRegisterPathInput {
 
 export type CheckRegisterPathResult = { allow: true } | { allow: false, error: TBError }
 
-const segments = (path: string): string[] => path.split('/').filter(s => s.length > 0)
+/**
+ * 段拆分复用 tree/path(与 registry/scope 同源),并在此**单点**小写折叠:
+ * 落库经 canonicalizePath 折小写、scope 判定亦折叠,本模块若字面比较,
+ * 大写输入可绕过保留根守卫、大写 registerPaths 声明则静默全拒。
+ */
+const foldedSegments = (path: string): string[] => segments(path).map(seg => seg.toLowerCase())
 
 /** target 的段序列以 prefix 的段序列为前缀(段级,含相等)。 */
 function isUnderPrefix(target: string[], prefix: string[]): boolean {
@@ -42,7 +48,7 @@ const deny = (message: string): CheckRegisterPathResult => ({
 
 export function checkRegisterPath(input: CheckRegisterPathInput): CheckRegisterPathResult {
   const { sk, targetPath, existing, reservedRoots = [] } = input
-  const target = segments(targetPath)
+  const target = foldedSegments(targetPath)
 
   // 保留段:~ 开头段不可作普通路径段(输入非法,先判)。
   if (target.some(seg => seg.startsWith('~'))) {
@@ -54,13 +60,13 @@ export function checkRegisterPath(input: CheckRegisterPathInput): CheckRegisterP
 
   if (sk.registerPaths !== undefined) {
     // a:声明后必须落在某前缀之下。
-    const ok = sk.registerPaths.some(p => isUnderPrefix(target, segments(p)))
+    const ok = sk.registerPaths.some(p => isUnderPrefix(target, foldedSegments(p)))
     if (!ok) {
       return deny(`path '${targetPath}' is outside declared registerPaths`)
     }
   } else {
     // b:未声明 → 拒保留根。
-    const roots = new Set([...RESERVED_ROOTS, ...reservedRoots])
+    const roots = new Set([...RESERVED_ROOTS, ...reservedRoots.map(r => r.toLowerCase())])
     const head = target[0]
     if (head !== undefined && roots.has(head)) {
       return deny(`cannot register under reserved root '${head}'`)
