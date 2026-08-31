@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { Readable } from 'node:stream'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { parseArgEntries, parseCallArgs } from '../src/commands/call'
@@ -8,21 +9,19 @@ import { resolveTarget } from '../src/args'
 import { runCli } from './cliHarness'
 
 /**
- * `--args-file -` 走 `readFileSync(0)`(ctx put 同款 stdin 读法),进程内无法替换 fd 0,
- * 因此在这里给 node:fs 装一个只拦 fd 0 的透传 mock;其余路径仍走真实 fs。
+ * `--args-file -` 走 stdin 唯一底层实现(process.stdin 异步迭代,见 src/stdin.ts),
+ * 测试用临时替换 process.stdin 的方式注入内容(plugin.test.ts 同款)。
  */
-let stdinText: string | undefined
-
-vi.mock('node:fs', async (importOriginal) => {
-  const mod = await importOriginal<typeof import('node:fs')>()
-  return {
-    ...mod,
-    readFileSync: (target: unknown, ...rest: unknown[]) =>
-      target === 0 && stdinText !== undefined
-        ? stdinText
-        : (mod.readFileSync as (...a: unknown[]) => unknown)(target, ...rest),
+function withStdin(content: string): () => void {
+  const original = process.stdin
+  Object.defineProperty(process, 'stdin', {
+    value: Readable.from([Buffer.from(content, 'utf8')]),
+    configurable: true,
+  })
+  return () => {
+    Object.defineProperty(process, 'stdin', { value: original, configurable: true })
   }
-})
+}
 
 /**
  * 本轮 Agent 体验修复的回归面:
@@ -103,10 +102,10 @@ describe('tb call — positional JSON arguments', () => {
     expect(written(process.stdout)).toContain('mutually exclusive')
   })
 
-  it('parseCallArgs 三源互斥;positional 优先级与 --args 等价', () => {
-    expect(() => parseCallArgs('{}', undefined, '{}')).toThrow(/mutually exclusive/)
-    expect(() => parseCallArgs(undefined, '/tmp/x.json', '{}')).toThrow(/mutually exclusive/)
-    expect(parseCallArgs(undefined, undefined, '{"a":1}')).toEqual({ a: 1 })
+  it('parseCallArgs 三源互斥;positional 优先级与 --args 等价', async () => {
+    await expect(parseCallArgs('{}', undefined, '{}')).rejects.toThrow(/mutually exclusive/)
+    await expect(parseCallArgs(undefined, '/tmp/x.json', '{}')).rejects.toThrow(/mutually exclusive/)
+    expect(await parseCallArgs(undefined, undefined, '{"a":1}')).toEqual({ a: 1 })
   })
 })
 
@@ -183,14 +182,14 @@ describe('tb call — --arg k=v 扁平参数', () => {
     expect(() => parseArgEntries(['   =v'])).toThrow(/empty key/)
   })
 
-  it('--arg 与 positional / --args / --args-file 互斥', () => {
-    expect(() => parseCallArgs(undefined, undefined, '{"a":1}', ['b=2'])).toThrow(
+  it('--arg 与 positional / --args / --args-file 互斥', async () => {
+    await expect(parseCallArgs(undefined, undefined, '{"a":1}', ['b=2'])).rejects.toThrow(
       /mutually exclusive/,
     )
-    expect(() => parseCallArgs('{"a":1}', undefined, undefined, ['b=2'])).toThrow(
+    await expect(parseCallArgs('{"a":1}', undefined, undefined, ['b=2'])).rejects.toThrow(
       /mutually exclusive/,
     )
-    expect(() => parseCallArgs(undefined, '/tmp/x.json', undefined, ['b=2'])).toThrow(
+    await expect(parseCallArgs(undefined, '/tmp/x.json', undefined, ['b=2'])).rejects.toThrow(
       /mutually exclusive/,
     )
   })
@@ -211,8 +210,8 @@ describe('tb call — --arg k=v 扁平参数', () => {
     expect(written(process.stdout)).toContain('mutually exclusive')
   })
 
-  it('无 --arg 时不影响缺省 {}', () => {
-    expect(parseCallArgs(undefined, undefined, undefined, [])).toEqual({})
+  it('无 --arg 时不影响缺省 {}', async () => {
+    expect(await parseCallArgs(undefined, undefined, undefined, [])).toEqual({})
   })
 })
 
@@ -227,40 +226,51 @@ describe('tb call — --args-file', () => {
   })
 
   afterEach(() => {
-    stdinText = undefined
     rmSync(tmp, { recursive: true, force: true })
     Object.defineProperty(process.stdin, 'isTTY', { value: wasTTY, configurable: true })
   })
 
   it('`-` → 从 stdin 读整块 JSON', async () => {
-    stdinText = '{"libraryName":"react"}\n'
-    const fn = sequenceFetch([{ body: { ok: true } }])
-    await runCli(['call', 'docs/ctx7/resolve', '--args-file', '-', '--json', ...GLOBALS])
-    const [, init] = fn.mock.calls[0] as unknown as [string, RequestInit]
-    expect(JSON.parse(init.body as string)).toEqual({ libraryName: 'react' })
-    expect(process.exitCode).toBe(0)
+    const restore = withStdin('{"libraryName":"react"}\n')
+    try {
+      const fn = sequenceFetch([{ body: { ok: true } }])
+      await runCli(['call', 'docs/ctx7/resolve', '--args-file', '-', '--json', ...GLOBALS])
+      const [, init] = fn.mock.calls[0] as unknown as [string, RequestInit]
+      expect(JSON.parse(init.body as string)).toEqual({ libraryName: 'react' })
+      expect(process.exitCode).toBe(0)
+    } finally {
+      restore()
+    }
   })
 
-  it('stdin 为空 → 沿用"空 → {}"语义', () => {
-    stdinText = '\n  \n'
-    expect(parseCallArgs(undefined, '-')).toEqual({})
+  it('stdin 为空 → 沿用"空 → {}"语义', async () => {
+    const restore = withStdin('\n  \n')
+    try {
+      expect(await parseCallArgs(undefined, '-')).toEqual({})
+    } finally {
+      restore()
+    }
   })
 
-  it('stdin 非法 JSON → arguments must be valid JSON', () => {
-    stdinText = 'not-json'
-    expect(() => parseCallArgs(undefined, '-')).toThrow(/arguments must be valid JSON/)
+  it('stdin 非法 JSON → arguments must be valid JSON', async () => {
+    const restore = withStdin('not-json')
+    try {
+      await expect(parseCallArgs(undefined, '-')).rejects.toThrow(/arguments must be valid JSON/)
+    } finally {
+      restore()
+    }
   })
 
-  it('stdin 是 TTY(没接管道)→ 直接拒绝而不是挂住', () => {
+  it('stdin 是 TTY(没接管道)→ 直接拒绝而不是挂住', async () => {
     Object.defineProperty(process.stdin, 'isTTY', { value: true, configurable: true })
-    expect(() => parseCallArgs(undefined, '-')).toThrow(/pipe the arguments JSON via stdin/)
+    await expect(parseCallArgs(undefined, '-')).rejects.toThrow(/pipe the arguments JSON via stdin/)
   })
 
-  it('普通文件路径不受 `-` 分支影响', () => {
+  it('普通文件路径不受 `-` 分支影响', async () => {
     const file = join(tmp, 'args.json')
     writeFileSync(file, '{"a":1}')
-    expect(parseCallArgs(undefined, file)).toEqual({ a: 1 })
-    expect(() => parseCallArgs(undefined, join(tmp, 'missing.json'))).toThrow(
+    expect(await parseCallArgs(undefined, file)).toEqual({ a: 1 })
+    await expect(parseCallArgs(undefined, join(tmp, 'missing.json'))).rejects.toThrow(
       /cannot read --args-file/,
     )
   })

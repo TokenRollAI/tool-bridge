@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { Command } from 'commander'
+import { collect, parseKeyValueSpecs, parsePositiveInt, resolveTarget, withGlobalOpts } from '../args'
 import {
   callDirect,
   callDirectText,
@@ -7,18 +8,9 @@ import {
   type Target,
   withClient,
 } from '../http'
-import { collect, resolveTarget, withGlobalOpts } from '../args'
 import { printJson, printLine } from '../output'
 import { printMarkdown } from '../markdown'
-
-/** 从 stdin 读整块内容(`--args-file -`;与 ctx put 的 stdin 读法一致)。 */
-function readStdin(): string {
-  try {
-    return readFileSync(0, 'utf8')
-  } catch (err) {
-    throw new CliError(`cannot read stdin: ${(err as Error).message}`)
-  }
-}
+import { readStdinRaw } from '../stdin'
 
 /**
  * `--arg k=v` 的值类型规则(**保守的标量解析**,只认四类字面量):
@@ -44,27 +36,24 @@ function parseArgScalar(raw: string): unknown {
  * key 为空 → CliError;重复 key 后者覆盖前者(与 shell 里追加覆盖的直觉一致)。
  */
 export function parseArgEntries(entries: readonly string[]): Record<string, unknown> {
-  const args: Record<string, unknown> = {}
-  for (const entry of entries) {
-    const at = entry.indexOf('=')
-    if (at < 0) throw new CliError(`invalid --arg "${entry}": expected "key=value"`)
-    const key = entry.slice(0, at).trim()
-    if (!key) throw new CliError(`invalid --arg "${entry}": empty key`)
-    args[key] = parseArgScalar(entry.slice(at + 1))
-  }
-  return args
+  const raw = parseKeyValueSpecs(entries, {
+    allowEmptyValue: true,
+    flag: '--arg',
+    onDuplicate: 'last-wins',
+  })
+  return Object.fromEntries(Object.entries(raw).map(([key, value]) => [key, parseArgScalar(value)]))
 }
 
 /**
  * 解析 positional JSON / `--args` / `--args-file` / 可重复 `--arg k=v` 为 arguments 对象。
  * 四源互斥(缺省 `{}`);`--args-file -` 从 stdin 读整块 JSON。
  */
-export function parseCallArgs(
+export async function parseCallArgs(
   argsStr?: string,
   argsFile?: string,
   positional?: string,
   argEntries: readonly string[] = [],
-): Record<string, unknown> {
+): Promise<Record<string, unknown>> {
   const given = [
     positional !== undefined ? 'positional JSON' : null,
     argsStr !== undefined ? '--args' : null,
@@ -80,7 +69,7 @@ export function parseCallArgs(
     if (process.stdin.isTTY) {
       throw new CliError('pipe the arguments JSON via stdin when using --args-file -')
     }
-    raw = readStdin()
+    raw = await readStdinRaw()
   } else if (argsFile !== undefined) {
     try {
       raw = readFileSync(argsFile, 'utf8')
@@ -192,7 +181,7 @@ Examples:
       const path = String(pathArg ?? '').trim()
       if (!path) throw new CliError('command path is required')
 
-      const callArgs = parseCallArgs(opts.args, opts.argsFile, argsPositional, opts.arg ?? [])
+      const callArgs = await parseCallArgs(opts.args, opts.argsFile, argsPositional, opts.arg ?? [])
       const target = resolveTarget(opts)
       const nodeUri = `/${path.replace(/^\/+|\/+$/g, '')}`
       const rawDelivery = opts.delivery === undefined ? undefined : String(opts.delivery)
@@ -203,10 +192,7 @@ Examples:
         && rawDelivery !== 'fallback'
       ) throw new CliError('--delivery must be realtime, mailbox, or fallback')
       const delivery = rawDelivery as 'fallback' | 'mailbox' | 'realtime' | undefined
-      const ttl = opts.ttl === undefined ? undefined : Number(opts.ttl)
-      if (ttl !== undefined && (!Number.isSafeInteger(ttl) || ttl < 1)) {
-        throw new CliError('--ttl must be a positive integer')
-      }
+      const ttl = parsePositiveInt(opts.ttl, '--ttl')
       if (
         (ttl !== undefined || opts.idempotencyKey !== undefined)
         && delivery !== 'mailbox'

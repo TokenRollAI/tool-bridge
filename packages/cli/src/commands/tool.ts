@@ -8,24 +8,20 @@ import {
   parseToolsFile,
   registerNode,
 } from '../registry'
-import { collect, resolveTarget, withGlobalOpts } from '../args'
+import { collect, parseKeyValueSpecs, resolveTarget, withGlobalOpts } from '../args'
 import { apiFetch, CliError, withClient } from '../http'
 import { printJson, printLine } from '../output'
 import { confirmDestructive } from '../confirm'
 
 /** 可重复 `--header Name=value` → headers 对象;空数组返回 undefined(不塞空对象)。 */
 function parseHeaderSpecs(specs: string[]): Record<string, string> | undefined {
-  const headers: Record<string, string> = {}
-  for (const spec of specs) {
-    const idx = spec.indexOf('=')
-    if (idx < 0) {
-      throw new CliError(`invalid --header "${spec}": expected "Name=value"`)
-    }
-    const name = spec.slice(0, idx).trim()
-    const value = spec.slice(idx + 1).trim()
-    if (!name || !value) throw new CliError(`invalid --header "${spec}": empty name/value`)
-    headers[name] = value
-  }
+  const headers = parseKeyValueSpecs(specs, {
+    expected: '"Name=value"',
+    flag: '--header',
+    keyLabel: 'name',
+    onDuplicate: 'last-wins',
+    trimValue: true,
+  })
   return Object.keys(headers).length ? headers : undefined
 }
 

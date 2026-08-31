@@ -2,9 +2,9 @@ import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join, relative, sep } from 'node:path'
 import { Command } from 'commander'
 import type { Node, NodeConfig, NodeInput, Page } from '../types'
-import { parsePageOpts, resolveTarget, withGlobalOpts, withPageOpts } from '../args'
+import { parsePageOpts, parsePositiveInt, resolveTarget, withGlobalOpts, withPageOpts } from '../args'
+import { deleteNode, parseObjectStorageMountOpts, registerNode } from '../registry'
 import { printJson, printLine, table } from '../output'
-import { deleteNode, registerNode } from '../registry'
 import { confirmDestructive } from '../confirm'
 import { callDirect, CliError } from '../http'
 
@@ -44,15 +44,6 @@ interface SkillDetail extends SkillSummary {
 
 interface SkillFile extends SkillFileMeta {
   content: string | unknown
-}
-
-function parsePositiveInt(value: unknown, flag: string): number | undefined {
-  if (value === undefined || value === '') return undefined
-  const n = Number(value)
-  if (!Number.isInteger(n) || n <= 0) {
-    throw new CliError(`${flag} must be a positive integer`)
-  }
-  return n
 }
 
 /** 人类模式:skill 目录按行列出(id / name / description)。 */
@@ -306,27 +297,14 @@ export function skillMountCommand() {
         const prefix = opts.prefix ? String(opts.prefix) : undefined
         const ttl = parsePositiveInt(opts.ttl, '--ttl')
 
-        let providerConfig: Record<string, unknown> | undefined
-        if (provider === 'r2') {
-          if (opts.endpoint || opts.bucket || opts.region || authRef) {
-            throw new CliError('--endpoint/--bucket/--region/--auth-ref only apply to s3')
-          }
-          if (prefix) providerConfig = { prefix }
-        } else if (provider === 's3') {
-          const endpoint = String(opts.endpoint ?? '').trim()
-          if (!endpoint) throw new CliError('--endpoint is required for --provider s3')
-          const bucket = String(opts.bucket ?? '').trim()
-          if (!bucket) throw new CliError('--bucket is required for --provider s3')
-          if (!authRef) throw new CliError('--auth-ref is required for --provider s3')
-          providerConfig = {
-            endpoint,
-            bucket,
-            ...(opts.region ? { region: String(opts.region) } : {}),
-            ...(prefix ? { prefix } : {}),
-          }
-        } else {
-          throw new CliError(`invalid --provider "${provider}"; valid: r2, s3`)
-        }
+        // r2/s3 的互斥与必填校验同 ctx mount(共用实现);skillhub 只认这两个 provider。
+        const providerConfig = parseObjectStorageMountOpts(provider, {
+          authRef,
+          bucket: opts.bucket,
+          endpoint: opts.endpoint,
+          prefix,
+          region: opts.region,
+        })
 
         const config: NodeConfig = {
           kind: 'skillhub',

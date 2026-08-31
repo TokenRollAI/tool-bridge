@@ -9,12 +9,13 @@ import {
 import { createReadStream, createWriteStream, openSync, statSync, unlinkSync } from 'node:fs'
 import { Readable, Transform } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
-import { basename, extname } from 'node:path'
+import { basename } from 'node:path'
 import { Command } from 'commander'
 import { once } from 'node:events'
-import { parsePageOpts, resolveTarget, withGlobalOpts, withPageOpts } from '../args'
+import { parsePageOpts, parsePositiveInt, resolveTarget, withGlobalOpts, withPageOpts } from '../args'
 import { CliError, DEFAULT_TIMEOUT_MS, getFetch, requireTarget } from '../http'
 import { printJson, printLine, table } from '../output'
+import { guessContentType } from '../contentType'
 import { confirmDestructive } from '../confirm'
 
 interface GlobalOpts {
@@ -106,33 +107,6 @@ async function useStore<T>(
     return await operation(runtime.client)
   } catch (error) {
     throw asCliError(error, runtime.timeoutMs)
-  }
-}
-
-function positiveInt(value: unknown, flag: string): number | undefined {
-  if (value === undefined) return undefined
-  const n = Number(value)
-  if (!Number.isSafeInteger(n) || n < 1) throw new CliError(`${flag} must be a positive integer`)
-  return n
-}
-
-function guessContentType(file: string): string {
-  switch (extname(file).toLowerCase()) {
-    case '.jpg':
-    case '.jpeg': return 'image/jpeg'
-    case '.png': return 'image/png'
-    case '.webp': return 'image/webp'
-    case '.gif': return 'image/gif'
-    case '.mp4': return 'video/mp4'
-    case '.mov': return 'video/quicktime'
-    case '.webm': return 'video/webm'
-    case '.mp3': return 'audio/mpeg'
-    case '.wav': return 'audio/wav'
-    case '.json': return 'application/json'
-    case '.pdf': return 'application/pdf'
-    case '.md': return 'text/markdown'
-    case '.txt': return 'text/plain'
-    default: return 'application/octet-stream'
   }
 }
 
@@ -275,7 +249,7 @@ export function storeShareCommand() {
     .action(async (uriArg, opts) => {
       const asJson = Boolean(opts.json)
       const uri = requireStoreUri(uriArg)
-      const ttlSec = positiveInt(opts.ttl, '--ttl')
+      const ttlSec = parsePositiveInt(opts.ttl, '--ttl')
       const share = await useStore(opts, async client => await client.share(uri, {
         ...(ttlSec === undefined ? {} : { ttlSec }),
       }))

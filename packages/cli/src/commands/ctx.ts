@@ -1,18 +1,21 @@
 import { readFileSync } from 'node:fs'
-import { extname } from 'node:path'
 import { Command } from 'commander'
 import type { ContextEntry, ContextEntryMeta, NodeConfig, NodeInput, Page } from '../types'
 import {
   collect,
+  parseKeyValueSpecs,
   parsePageOpts,
+  parsePositiveInt,
   resolveTarget,
   withGlobalOpts,
   withPageOpts,
 } from '../args'
 import { callDirect, CliError, parseContextUploadGrant, putPresigned } from '../http'
-import { deleteNode, parseConfigSpecs, registerNode } from '../registry'
+import { deleteNode, parseObjectStorageMountOpts, registerNode } from '../registry'
+import { guessContentType as guessFileContentType } from '../contentType'
 import { asArray, printJson, printLine, table } from '../output'
 import { confirmDestructive } from '../confirm'
+import { readStdinRaw } from '../stdin'
 
 /**
  * `tb ctx *` —— Context Layer 命令族。
@@ -27,63 +30,23 @@ function nsUri(ns: string): string {
 
 /** 解析可重复 `--meta k=v` 为 Record;无 `=` → CliError。无任何项返回 undefined。 */
 export function parseMeta(specs: unknown): Record<string, string> | undefined {
-  const meta: Record<string, string> = {}
-  for (const spec of asArray(specs)) {
-    const idx = spec.indexOf('=')
-    if (idx < 0) throw new CliError(`invalid --meta "${spec}": expected "key=value"`)
-    const key = spec.slice(0, idx).trim()
-    if (!key) throw new CliError(`invalid --meta "${spec}": empty key`)
-    meta[key] = spec.slice(idx + 1)
-  }
+  // 值不 trim 且允许空:metadata 的值可能刻意为空或含边缘空白。
+  const meta = parseKeyValueSpecs(asArray(specs), {
+    allowEmptyValue: true,
+    flag: '--meta',
+    onDuplicate: 'last-wins',
+  })
   return Object.keys(meta).length ? meta : undefined
 }
 
-/** 按文件扩展名猜 contentType(--content/stdin 缺省 text/plain)。 */
+/** 文本写入通道(ctx put)的 contentType:--content/stdin 缺省 text/plain,未知扩展名仍视为文本。 */
 export function guessContentType(file?: string): string {
-  if (!file) return 'text/plain'
-  switch (extname(file).toLowerCase()) {
-    case '.md':
-      return 'text/markdown'
-    case '.json':
-      return 'application/json'
-    case '.txt':
-      return 'text/plain'
-    default:
-      return 'text/plain'
-  }
+  return file ? guessFileContentType(file, 'text/plain') : 'text/plain'
 }
 
-/** 二进制直传的媒体类型推断；未知扩展名不冒充文本。 */
+/** 二进制直传的媒体类型推断;未知扩展名不冒充文本。 */
 export function guessUploadContentType(file: string): string {
-  switch (extname(file).toLowerCase()) {
-    case '.jpg':
-    case '.jpeg':
-      return 'image/jpeg'
-    case '.png':
-      return 'image/png'
-    case '.webp':
-      return 'image/webp'
-    case '.gif':
-      return 'image/gif'
-    case '.json':
-      return 'application/json'
-    case '.md':
-      return 'text/markdown'
-    case '.txt':
-      return 'text/plain'
-    default:
-      return 'application/octet-stream'
-  }
-}
-
-/** 可选正整数 flag(--limit/--ttl)。 */
-function parsePositiveInt(value: unknown, flag: string): number | undefined {
-  if (value === undefined || value === '') return undefined
-  const n = Number(value)
-  if (!Number.isInteger(n) || n <= 0) {
-    throw new CliError(`${flag} must be a positive integer`)
-  }
-  return n
+  return guessFileContentType(file)
 }
 
 function readContentFile(file: string): string {
@@ -99,14 +62,6 @@ function readBinaryFile(file: string): Buffer {
     return readFileSync(file)
   } catch (err) {
     throw new CliError(`cannot read --file "${file}": ${(err as Error).message}`)
-  }
-}
-
-function readStdin(): string {
-  try {
-    return readFileSync(0, 'utf8')
-  } catch (err) {
-    throw new CliError(`cannot read stdin: ${(err as Error).message}`)
   }
 }
 
@@ -222,7 +177,7 @@ export function ctxPutCommand() {
         else if (file) content = readContentFile(file)
         else {
           if (process.stdin.isTTY) throw new CliError('pass --content/--file or pipe content via stdin')
-          content = readStdin()
+          content = await readStdinRaw()
         }
         const contentType = opts.contentType
           ? String(opts.contentType)
@@ -428,39 +383,20 @@ export function ctxMountCommand() {
         const prefix = opts.prefix ? String(opts.prefix) : undefined
         const ttl = parsePositiveInt(opts.ttl, '--ttl')
 
-        let providerConfig: Record<string, unknown> | undefined
-        if (provider === 'r2') {
-          if (opts.endpoint || opts.bucket || opts.region || authRef) {
-            throw new CliError('--endpoint/--bucket/--region/--auth-ref only apply to s3')
-          }
-          if (opts.config.length > 0) {
-            throw new CliError('--config only applies to plugin providers')
-          }
-          if (prefix) providerConfig = { prefix }
-        } else if (provider === 's3') {
-          const endpoint = String(opts.endpoint ?? '').trim()
-          if (!endpoint) throw new CliError('--endpoint is required for --provider s3')
-          const bucket = String(opts.bucket ?? '').trim()
-          if (!bucket) throw new CliError('--bucket is required for --provider s3')
-          if (!authRef) throw new CliError('--auth-ref is required for --provider s3')
-          if (opts.config.length > 0) {
-            throw new CliError('--config only applies to plugin providers')
-          }
-          providerConfig = {
-            endpoint,
-            bucket,
-            ...(opts.region ? { region: String(opts.region) } : {}),
-            ...(prefix ? { prefix } : {}),
-          }
-        } else {
-          if (opts.endpoint || opts.bucket || opts.region || prefix) {
-            throw new CliError(
-              '--endpoint/--bucket/--region/--prefix are not supported for plugin providers',
-            )
-          }
-          // plugin context 的非密钥挂载配置(baseUrl / workspace 之类)。
-          providerConfig = parseConfigSpecs(opts.config)
-        }
+        // r2/s3 的互斥与必填校验同 skill mount(共用实现);plugin provider 的
+        // 非密钥挂载配置(baseUrl / workspace 之类)由 --config 进 providerConfig。
+        const providerConfig = parseObjectStorageMountOpts(
+          provider,
+          {
+            authRef,
+            bucket: opts.bucket,
+            config: opts.config,
+            endpoint: opts.endpoint,
+            prefix,
+            region: opts.region,
+          },
+          { allowPlugin: true },
+        )
 
         const exportId = String(opts.export ?? '').trim()
         if (exportId && (provider === 'r2' || provider === 's3')) {

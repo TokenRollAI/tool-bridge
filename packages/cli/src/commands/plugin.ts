@@ -5,6 +5,7 @@ import { parsePageOpts, resolveTarget, withGlobalOpts, withPageOpts } from '../a
 import { printJson, printLine, table } from '../output'
 import { confirmDestructive } from '../confirm'
 import { callDirect, CliError } from '../http'
+import { readStdinRaw } from '../stdin'
 
 /**
  * `tb plugin` → builtin `system/plugin`(PluginRegistry;全部需 admin)。
@@ -12,30 +13,15 @@ import { callDirect, CliError } from '../http'
  * 线格式类型仅本文件使用,故就地定义(不进 types.ts)。
  */
 
-/** `~describe` 里的一个 export(plugin/v2:「提供什么」在 export 上,不在 manifest 上)。 */
-export interface PluginExport {
-  capabilities?: string[]
-  description?: string
-  id: string
-  methods?: string[]
-  profile: 'tools/v1' | 'context/v1'
-}
-
-export interface PluginManifest {
-  auth: { kind: 'platform-token' } | { kind: 'bearer', secretRef: string }
-  enabled: boolean
-  endpoint: string
-  /** 注册时缓存的 `~describe.exports`(挂载 `--export` 从这里选)。 */
-  exports: PluginExport[]
-  healthPath: string
-  id: string
-  protocolVersion: string
-}
-
-/** Write/Update 返回:manifest + pluginToken(auth=platform-token 时仅该次响应出现一次)。 */
-export interface PluginRegistration extends PluginManifest {
-  pluginToken?: string
-}
+/**
+ * manifest/registration 形状来自 core(PluginView 含注册时缓存的 `~describe.exports`)。
+ * PluginHealth 是 health cmd 的 CLI 宽松视图(按需探活,失败时字段缺省)。
+ */
+export type {
+  PluginView as PluginManifest,
+  PluginRegistration,
+} from '@tool-bridge/core'
+import type { PluginView as PluginManifest, PluginRegistration } from '@tool-bridge/core'
 
 /** health cmd 返回(探活:独立 key,按需刷新)。 */
 export interface PluginHealth {
@@ -49,13 +35,6 @@ function exportsSummary(m: Pick<PluginManifest, 'exports'>): string {
   return m.exports.map(e => `${e.id}:${e.profile}`).join(', ')
 }
 
-/** 从 stdin 读取全部内容(`--file -`;与 secret set 的 stdin 语义一致)。 */
-async function readStdin(): Promise<string> {
-  const chunks: Buffer[] = []
-  for await (const c of process.stdin) chunks.push(c as Buffer)
-  return Buffer.concat(chunks).toString('utf8')
-}
-
 /** 读 manifest 文件(`-` = stdin)并解析为对象;不做字段校验(契约校验在网关)。 */
 async function readManifest(file: string): Promise<Record<string, unknown>> {
   let raw: string
@@ -63,7 +42,7 @@ async function readManifest(file: string): Promise<Record<string, unknown>> {
     if (process.stdin.isTTY) {
       throw new CliError('pipe the manifest via stdin when using --file -')
     }
-    raw = await readStdin()
+    raw = await readStdinRaw()
   } else {
     try {
       raw = await readFile(file, 'utf8')

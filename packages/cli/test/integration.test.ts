@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { Readable } from 'node:stream'
 import { integrationAddCommand } from '../src/commands/integration'
 import { mockJsonResponse, runCli } from './cliHarness'
 import { resetFetch, setFetch } from '../src/http'
@@ -12,6 +13,18 @@ import { resetFetch, setFetch } from '../src/http'
 
 interface Call { body: unknown, url: string }
 interface FetchRoute { body: unknown, match: RegExp, status?: number, tool?: string }
+
+/** 临时把 process.stdin 换成给定内容的可读流(测 `--key-stdin`;plugin.test.ts 同款)。 */
+function withStdin(content: string): () => void {
+  const original = process.stdin
+  Object.defineProperty(process, 'stdin', {
+    value: Readable.from([Buffer.from(content, 'utf8')]),
+    configurable: true,
+  })
+  return () => {
+    Object.defineProperty(process, 'stdin', { value: original, configurable: true })
+  }
+}
 
 /** 按 URL 路由的桩:catalog 查询与后续写操作用同一个 fetch。 */
 function routedFetch(routes: FetchRoute[]): Call[] {
@@ -213,6 +226,73 @@ describe('tb integration add', () => {
     await runCli(['integration', 'add', 'tools/jira', '--provider', 'jira', '--key', 'x', ...base])
     expect(process.exitCode).not.toBe(0)
     expect(bodyOf(calls, /~register/)).toBeUndefined()
+  })
+
+  /** 与 `tb secret set --field` 统一后的语义:重复 key 是笔误 → 本地拒(此前静默覆盖)。 */
+  it('--field 重复 key → 本地拒', async () => {
+    const calls = routedFetch([catalogOf([JIRA])])
+    await runCli([
+      'integration',
+      'add',
+      'tools/jira',
+      '--provider',
+      'jira',
+      '--field',
+      'baseUrl=https://a',
+      '--field',
+      'baseUrl=https://b',
+      '--field',
+      'personalAccessToken=pat',
+      ...base,
+    ])
+    expect(process.exitCode).not.toBe(0)
+    expect(bodyOf(calls, /system\/secret/)).toBeUndefined()
+    expect(bodyOf(calls, /~register/)).toBeUndefined()
+  })
+
+  /** 统一后允许空值(与 secret set 对齐;此前本地拒),空串原样进凭证对象。 */
+  it('--field 值可为空:原样写入,不本地拒', async () => {
+    const calls = routedFetch([catalogOf([JIRA])])
+    await runCli([
+      'integration',
+      'add',
+      'tools/jira',
+      '--provider',
+      'jira',
+      '--field',
+      'baseUrl=',
+      '--field',
+      'personalAccessToken=pat',
+      ...base,
+    ])
+    expect(process.exitCode).toBe(0)
+    const secret = bodyOf(calls, /system\/secret/, 'set')
+    expect(JSON.parse(secret.value)).toEqual({ baseUrl: '', personalAccessToken: 'pat' })
+  })
+
+  /** 统一后的凭证 stdin 语义:只去一个尾随换行(兼容 \r\n),不整体 trim。 */
+  it('--key-stdin 保留首尾空格,只剥离一个尾随换行', async () => {
+    const restore = withStdin(' spaced-key \n')
+    try {
+      const calls = routedFetch([catalogOf([TAVILY])])
+      await runCli(['integration', 'add', 'tools/tavily', '--provider', 'tavily', '--key-stdin', ...base])
+      expect(process.exitCode).toBe(0)
+      expect(bodyOf(calls, /system\/secret/, 'set').value).toBe(' spaced-key ')
+    } finally {
+      restore()
+    }
+  })
+
+  it('--key-stdin 兼容 \\r\\n 行尾', async () => {
+    const restore = withStdin('crlf-key\r\n')
+    try {
+      const calls = routedFetch([catalogOf([TAVILY])])
+      await runCli(['integration', 'add', 'tools/tavily', '--provider', 'tavily', '--key-stdin', ...base])
+      expect(process.exitCode).toBe(0)
+      expect(bodyOf(calls, /system\/secret/, 'set').value).toBe('crlf-key')
+    } finally {
+      restore()
+    }
   })
 
   it('--credential 复用已保存凭证:不代建,内部自动绑定', async () => {
