@@ -12,9 +12,9 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { execFileSync } from 'node:child_process'
 import process from 'node:process'
 import { join } from 'node:path'
-import { fingerprintProvider, NORMALIZE_VERSION } from './fingerprint.mjs'
+import { normalize, NORMALIZE_VERSION } from './normalizeSchema.mjs'
+import { fingerprintProvider } from './fingerprint.mjs'
 import { emitSchemaModule } from './emit.mjs'
-import { normalize } from './parity.mjs'
 
 const [sourceRoot, ...services] = process.argv.slice(2)
 if (!sourceRoot || services.length === 0) {

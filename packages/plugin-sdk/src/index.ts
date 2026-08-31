@@ -68,6 +68,13 @@ import {
  * 语义会在传输层丢失 —— 这是写样例 plugin 时暴露出来的缺口。
  */
 export { TBError }
+/**
+ * 同理导出错误的判别与归一原语:plugin 包装上游(MCP 转发、自建传输)时需要
+ * `isTBError` 识别已归一的错误、`normalizeUpstreamError` 把传输/协议错误压进七码。
+ * 不从这里导出,plugin 就只能运行时依赖 `@tool-bridge/core` —— 而 core 是平台内部件,
+ * 不是插件作者面的一部分。
+ */
+export { isTBError, normalizeUpstreamError } from '@tool-bridge/core'
 export type { ToolResult, ToolSpec } from '@tool-bridge/core'
 
 /** 平台传给 handler 的调用上下文。 */

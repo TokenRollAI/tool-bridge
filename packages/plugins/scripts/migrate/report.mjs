@@ -1,7 +1,8 @@
 /** 迁移可行性探针:对给定 provider 跑 schema 生成 + 等价比对,只报告不落盘。 */
 import process from 'node:process'
-import { normalize, toJsonSchema } from './parity.mjs'
+import { normalize } from './normalizeSchema.mjs'
 import { toZod } from './jsonSchemaToZod.mjs'
+import { toJsonSchema } from './parity.mjs'
 import { firstDiff } from './diff.mjs'
 
 const [sourceRoot, ...services] = process.argv.slice(2)

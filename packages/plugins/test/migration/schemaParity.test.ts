@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { z } from 'zod/v4'
+import { normalize, NORMALIZE_VERSION } from '../../scripts/migrate/normalizeSchema.mjs'
 import RAW_FINGERPRINTS from '../../migration-fingerprints.json'
 
 /**
@@ -10,9 +11,9 @@ import RAW_FINGERPRINTS from '../../migration-fingerprints.json'
  * 把"翻译有没有改变接受集合"变成 CI 里的机器判定。有人手改了生成的 schema 想收紧或放宽,
  * 就必须在 handwritten.json 里显式登记 —— **漂移只能是声明过的,不能是意外的**。
  *
- * 比对前过 normalize,每条规则都是可论证保语义的(理由见各自位置)。normalize 与
- * `scripts/migrate/parity.mjs` 必须保持一致 —— 生成指纹与校验指纹用的是同一套规则,
- * 两边漂了会让全部指纹无故失配(此时 `normalizeVersion` 该 +1 并重新生成)。
+ * 比对前过 normalize,规则与生成指纹的 scripts/migrate 共用同一份
+ * `normalizeSchema.mjs`(纯 .mjs + 声明文件,不引 Node 类型);改了规则该
+ * `NORMALIZE_VERSION` +1 并重新生成全部指纹。
  *
  * 指纹存在**一份** `migration-fingerprints.json`(不是每个 provider 目录各一个):后者会让
  * 每次迁移都在 `src/<service>/` 里多出一个与业务代码无关的文件。"哪些 provider 是迁移产物"
@@ -44,12 +45,6 @@ const FINGERPRINTS: {
   providers: Record<string, { actions: Record<string, ActionFingerprint> }>
 } = RAW_FINGERPRINTS
 
-const SAFE_INT_MAX = 9007199254740991
-const SAFE_INT_MIN = -9007199254740991
-
-/** 与 scripts/migrate/fingerprint.mjs 生成指纹时的 normalize 规则版本对齐。 */
-const NORMALIZE_VERSION = 1
-
 const SCHEMAS = import.meta.glob<Record<string, unknown>>('../../src/*/schema.ts', { eager: true })
 const HANDWRITTEN = import.meta.glob<{ actions: string[] }>('../../src/*/handwritten.json', { eager: true })
 
@@ -71,45 +66,6 @@ function actionsOf(service: string): Record<string, ActionSpec> {
   return table as Record<string, ActionSpec>
 }
 
-/** `true` 与 `{}` 在 JSON Schema 里都表示"任意值"。 */
-function isAnySchema(value: unknown): boolean {
-  return value === true
-    || (typeof value === 'object' && value !== null && Object.keys(value).length === 0)
-}
-
-function normalize(schema: unknown): unknown {
-  if (Array.isArray(schema)) return schema.map(normalize)
-  if (schema === null || typeof schema !== 'object') return schema
-
-  const record = schema as Record<string, unknown>
-  const isInteger = record.type === 'integer'
-  const out: Record<string, unknown> = {}
-  for (const name of Object.keys(record).sort()) {
-    const value = record[name]
-    if (name === '$schema') continue
-    // required 的顺序不影响接受集合。
-    if (name === 'required' && Array.isArray(value)) {
-      out[name] = [...value].sort()
-      continue
-    }
-    // 上游写 additionalProperties:true,Zod 的 looseObject 写 {} —— 同义。
-    if (name === 'additionalProperties' && isAnySchema(value)) continue
-    // 空 `properties: {}` 一个属性都没声明,不构成约束;是 Zod 反推 record 型的固定产物。
-    if (name === 'properties' && typeof value === 'object' && value !== null
-      && Object.keys(value).length === 0) continue
-    // z.record 会显式写 propertyNames:{type:'string'};JSON 对象的键本来只能是字符串。
-    if (name === 'propertyNames' && JSON.stringify(value) === '{"type":"string"}') continue
-    // z.email()/z.url() 除 format 外还带自校验正则。两边都在表达同一格式约束,差别是
-    // 迁移后 Zod 会**真的执行**校验(上游走 rawInputSchema 时平台根本不校验)。
-    if (name === 'pattern' && typeof record.format === 'string') continue
-    // z.int() 强制 JS 安全整数范围;该范围外 number 本就无法精确表示。
-    if (isInteger && name === 'maximum' && value === SAFE_INT_MAX) continue
-    if (isInteger && name === 'minimum' && value === SAFE_INT_MIN) continue
-    out[name] = normalize(value)
-  }
-  return out
-}
-
 async function sha256(text: string): Promise<string> {
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text))
   return [...new Uint8Array(digest)].map(byte => byte.toString(16).padStart(2, '0')).join('')
@@ -123,7 +79,7 @@ it('至少有一个迁移产物(否则本闸门是空转的绿灯)', () => {
   expect(migrated.length).toBeGreaterThan(0)
 })
 
-it('指纹清单的归一化规则版本与本测试一致(改了 normalize 须重新生成全部指纹)', () => {
+it('指纹清单的归一化规则版本与 normalize 模块一致(改了 normalize 须 +1 并重新生成全部指纹)', () => {
   expect(FINGERPRINTS.normalizeVersion).toBe(NORMALIZE_VERSION)
 })
 

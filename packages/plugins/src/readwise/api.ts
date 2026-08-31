@@ -20,20 +20,18 @@ import type {
   saveDocumentInput,
   updateDocumentInput,
 } from './schema'
+import type { ProviderContext } from '../_runtime/plugin'
 import {
   compactDefined as compact,
   integerValue as integer,
   asJsonObject as record,
   trimmedText as text,
 } from '../_runtime/jsonValue'
-import { type ProviderContext, requireApiKey } from '../_runtime/plugin'
-import { createProviderHttpClient } from '../_runtime/providerHttp'
+import { createAuthedClient } from '../_runtime/authedClient'
 import { upstreamError } from '../_runtime/upstreamError'
 
 const SERVICE = 'readwise'
 const API_BASE = 'https://readwise.io/api'
-const http = createProviderHttpClient({ baseUrl: `${API_BASE}/`, service: SERVICE })
-
 type Json = Record<string, unknown>
 
 function readArray(value: unknown): unknown[] {
@@ -59,6 +57,17 @@ function errorMessage(payload: unknown, status: number): string {
   return `Readwise request failed with status ${status}`
 }
 
+const http = createAuthedClient({
+  baseUrl: `${API_BASE}/`,
+  service: SERVICE,
+  // Readwise 用的是 `Token <key>`,不是 Bearer —— 写成 Bearer 会一直 401。
+  auth: { kind: 'token' },
+  headers: { accept: 'application/json' },
+  mapError: ({ bodyKind, data, status }) => bodyKind === 'invalid-json'
+    ? new TBError('unavailable', 'Readwise 返回了非法 JSON', { retryable: true })
+    : upstreamError(status, errorMessage(data, status)),
+})
+
 interface RequestInput {
   body?: unknown
   method?: 'GET' | 'PATCH' | 'POST'
@@ -67,20 +76,12 @@ interface RequestInput {
 }
 
 async function request(ctx: ProviderContext, input: RequestInput): Promise<unknown> {
-  const response = await http.request({
+  const response = await http.request(ctx, {
     method: input.method ?? 'GET',
     path: input.path,
     query: Object.entries(input.query ?? {}),
-    headers: {
-      accept: 'application/json',
-      // Readwise 用的是 `Token <key>`,不是 Bearer —— 写成 Bearer 会一直 401。
-      authorization: `Token ${requireApiKey(ctx, SERVICE)}`,
-    },
     ...(input.body === undefined ? {} : { json: input.body }),
     invalidJsonMessage: 'Readwise 返回了非法 JSON',
-    mapError: ({ bodyKind, data, status }) => bodyKind === 'invalid-json'
-      ? new TBError('unavailable', 'Readwise 返回了非法 JSON', { retryable: true })
-      : upstreamError(status, errorMessage(data, status)),
   })
   return response.bodyKind === 'empty' ? {} : response.data
 }

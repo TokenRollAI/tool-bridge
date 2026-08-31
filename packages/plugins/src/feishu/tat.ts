@@ -12,7 +12,7 @@
  *   会话空列表防御:凡纠错路径都绕开缓存读)。
  */
 
-import { TBError } from '@tool-bridge/core'
+import { TBError } from '@tool-bridge/plugin-sdk'
 import { createGuardedFetch } from '../_runtime/guardedFetch'
 
 export const DEFAULT_AUTH_URL
