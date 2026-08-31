@@ -67,4 +67,24 @@ describe('checkAllowlist(host 后缀白名单)', () => {
   it('无 host 的 URL → 拒', () => {
     expect(checkAllowlist('not-a-url', ['example.com'])).toBe(false)
   })
+
+  describe('反斜杠与 WHATWG URL 语义对齐(白名单 bypass 防御)', () => {
+    it('伪 userinfo:https://evil.com\\@allowed.com 真实 fetch 发往 evil.com → 拒', () => {
+      // WHATWG 对 special scheme 把 '\' 当 '/':host 是 evil.com,'@allowed.com' 落入 path。
+      // 若手写解析不在 '\' 截断,会剥 userinfo 后误判 host 为 allowed.com 放行。
+      expect(checkAllowlist('https://evil.com\\@allowed.com/x', ['allowed.com'])).toBe(false)
+    })
+
+    it('合法 host 后接反斜杠 path:host 判定仍与真实 fetch 一致 → 通过', () => {
+      expect(checkAllowlist('https://allowed.com\\@evil.com/x', ['allowed.com'])).toBe(true)
+    })
+
+    it('scheme 后用反斜杠(https:\\\\evil.com)不构成 scheme://authority → 拒(fail closed)', () => {
+      expect(checkAllowlist('https:\\\\allowed.com/x', ['allowed.com'])).toBe(false)
+    })
+  })
+
+  it('真实 userinfo 剥离后按 host 匹配', () => {
+    expect(checkAllowlist('https://user:pw@api.example.com/x', ['example.com'])).toBe(true)
+  })
 })
