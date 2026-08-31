@@ -54,9 +54,14 @@ export function rewriteRemotePath(
 /**
  * 从 URL 取 host(小写,去 userinfo/端口)。core 无运行时全局(不用 `URL`),用字符串解析;
  * 无 scheme://authority 结构 → undefined。
+ *
+ * '\' 必须与 '/' 同为 authority 终结符:WHATWG URL 对 special scheme(http/https)把 '\'
+ * 当 '/',宿主的真实 fetch 会在 '\' 处截断 host。若此处不截断,
+ * `https://evil.com\@allowed.com/` 会被剥 userinfo 后误判为 allowed.com 放行,
+ * 而请求实际发往 evil.com——白名单被两套解析器的语义差异架空。
  */
 function hostOf(url: string): string | undefined {
-  const m = /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\/([^/?#]*)/.exec(url)
+  const m = /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\/([^/?#\\]*)/.exec(url)
   if (m === null) return undefined
   let authority = m[1] ?? ''
   const at = authority.lastIndexOf('@')
