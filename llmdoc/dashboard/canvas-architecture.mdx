@@ -1,5 +1,5 @@
 ---
-description: Dashboard 架构:纯 HTTP 客户端边界、canvas 分层、独立 default Store 页面、profile 隔离缓存与性能约束。
+description: Dashboard 架构:纯 HTTP 客户端边界、canvas 分层、离线设备可发现性、独立 default Store 页面、profile 隔离缓存与性能约束。
 kind: architecture
 relations:
   related:
@@ -13,6 +13,7 @@ code:
     - packages/dashboard/src/lib/queries.ts
     - packages/dashboard/src/lib/store.ts
     - packages/dashboard/src/lib/store-queries.ts
+    - packages/dashboard/src/lib/presence.ts
     - packages/dashboard/src/lib/types.ts
     - packages/dashboard/src/components/SchemaFields.tsx
     - packages/dashboard/src/components/SchemaFormRenderer.tsx
@@ -24,7 +25,9 @@ code:
     - packages/dashboard/src/pages/**
     - packages/dashboard/test/integrationDialog.dom.test.tsx
     - packages/dashboard/test/mountDialog.dom.test.tsx
+    - packages/dashboard/test/presence.test.ts
     - packages/dashboard/test/structuredForms.dom.test.tsx
+    - packages/dashboard/test/treeGraph.test.ts
     - packages/sdk/src/client/**
     - packages/sdk/src/store/**
 ---
@@ -76,7 +79,7 @@ Dashboard 是纯 HTTP 客户端,不 import core。固定控制面 wire 类型与
 - 列表超过服务端默认页时必须可继续分页,客户端筛选不能吞 cursor。
 - 画布保留 HTBP 的唯一 `/` 总根语义:领域路径 `path: ''` 继续用于路由与数据查询,React Flow 使用独立的非空 `ROOT_NODE_ID`;单根、可见性与边完整性由纯图函数测试固定。
 - 画布选中态由 URL 驱动(`/nodes/<path>`,BrowserRouter basename `/ui`):命令面板跳转、deep-link、前进后退都要能定位节点并开对应 Inspector,`/` 不选中(全景)。命令叶和搜索生成的 `?tool=<command>` 必须由 `NodeInspector` 消费,切到调用 tab 并由 `CommandWorkspace` 打开对应命令;切换路径或 URL 状态时 Inspector 整体 remount,不跨节点残留 tab/表单状态。
-- 画布只渲染"已加载 + 已展开"的节点:truncated/remote 子树按需懒加载,offline 设备节点进入布局前剪掉,节点总数超阈值时默认只展根层——这三条 TreeNav 既有性能边界不能丢。
+- 画布只渲染"已加载 + 已展开"的节点:truncated/remote 子树按需懒加载,节点总数超阈值时默认只展根层。规模控制依赖懒加载、折叠和节点阈值,不得再通过删除 offline 设备降噪。presence 只描述 realtime 当前是否可路由,只影响状态呈现与 realtime 提示；offline 设备及其已声明命令仍须可发现、可选中,mailbox-capable command 仍可从统一 invoke 面入队。
 - `~tree` 只承载实体节点;命令是用户点击 owner 的独立开关后,复用节点级 `~help` query 投影出的「owner → 命令叶」虚拟子树,不增加 commandGroup 中转或二次折叠。虚拟角色与图 ID 必须独立,不复用实体节点的 `childCount`、挂载权限或 `expanded`;每个 owner 在画布最多直接展示 10 条命令,超出部分统一进入 Inspector 的可筛选完整目录。只订阅用户已打开且当前可见的 owner;真实树折叠使 owner 不可见时停止 observer,不留虚拟节点或悬边。
 - 每个 profile 首次产生可见布局时只自动执行一次 fit view;之后展开/收起实体树、显隐命令或切换选中都不得重置用户的平移与缩放。重置只通过"适应视图"显式触发。
 - React Flow 节点适配必须传递 dagre 产出的 `width` / `height`,避免 MiniMap 矩形退化。React Flow `colorMode` 与 Dashboard 主题同步;MiniMap 的背景、mask、节点 fill/stroke 使用显式高对比 SVG 配色,不盲用卡片的暗色 token,且与画布底部操作提示分区布局、不互相遮挡。

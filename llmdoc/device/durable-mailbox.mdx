@@ -7,6 +7,7 @@ relations:
   related:
     - protocol/security-boundaries.mdx
     - device/do-websocket-sessions.mdx
+    - device/device-daemon.mdx
     - hosts-deploy/state-store-decision.mdx
     - hosts-deploy/cloudflare-paths.mdx
     - hosts-deploy/node-docker-and-helm.mdx
@@ -24,6 +25,8 @@ code:
     - packages/server/src/deviceRouter.ts
     - packages/sdk/src/client/client.ts
     - packages/sdk/src/device/mailbox.ts
+    - packages/cli/src/deviceRuntime.ts
+    - packages/cli/src/deviceMailboxJournal.ts
     - packages/cli/src/commands/call.ts
     - packages/dashboard/src/components/node/CmdPanel.tsx
     - packages/dashboard/src/components/node/CliHint.tsx
@@ -36,6 +39,7 @@ code:
     - packages/sdk/test/deviceMailbox.test.ts
     - packages/sdk/test/deviceMailbox.e2e.test.ts
     - packages/cli/test/device.test.ts
+    - packages/cli/test/deviceRuntimeMailbox.test.ts
     - packages/dashboard/test/api.test.ts
     - packages/dashboard/test/cliHint.dom.test.tsx
 ---
@@ -47,6 +51,8 @@ Mailbox 是离线设备的 durable operation ledger：调用方在普通 command
 没有 APNs/FCM、WS hint、隐式后台轮询，也不会把任意 realtime 错误自动转成 operation。
 WebSocket/presence/generation 归
 [设备会话](./do-websocket-sessions.mdx)；固定 wire 与路径归 [HTBP 契约](../protocol/htbp-contract.mdx)。
+Presence 只表示 realtime 当前是否可路由,不是设备身份或 Mailbox 能力的可见性条件；offline 设备及其
+mailbox-capable command 仍须可发现并允许入队。
 
 ## 能力与公开面
 
@@ -142,6 +148,23 @@ SDK 强制宿主注入真正 durable、installation-local 的 journal；内存 M
 同时跑在多台机器时 journal 不共享，lease 接管可能重复副作用，行为未定义。当前协议没有 installation
 identity 或全局 exactly-once 承诺。
 
+## Host adapter 接入清单
+
+`createDeviceMailboxProcessor` 是 pull-only primitive,不会自行启动 timer、监听 WebSocket ready 或注册进程
+退出钩子。公开 SDK 已提供 processor 不等于某个 CLI/daemon 宿主已经交付 Mailbox 消费；host adapter 必须
+同时完成以下接线：
+
+- 只在 expose 中确有 `mailbox|both` command 时创建 processor,并注入 installation-local durable journal；
+- realtime 与 Mailbox 复用同一份 live expose 和 handler,使权限、命令移除与业务执行语义不分叉；
+- 初次连接及每次重连进入 `ready` 时各触发一次 `drain`,把该 installation 的 queued operation 主动收敛；
+- stop/close 与 suspend 时 abort 当前 drain,让 handler、续租和协作式取消沿同一 signal 停止；resume 后等待
+  下一次 `ready` 再 drain；
+- 将非 abort 的 drain 错误暴露给宿主日志/事件面,不得把失败伪装成已消费。
+
+Node CLI adapter 使用本地文件 journal：按 gateway origin + deviceId 摘要隔离 installation 目录,目录/entry
+分别限制为 `0700`/`0600`；entry 通过临时文件 fsync、atomic rename、目录 fsync 落盘,从而让 `executing`
+barrier 真正先于 handler。过期 entry 可清理；损坏的 executing/terminal 记录不得静默删除,否则可能重复副作用。
+
 ## Agent/Device 快路径与跨层验收
 
 跨层契约测试经 `createTbApp` 的真实 host-neutral Hono request pipeline（in-process fetch）固定一条完整
@@ -150,6 +173,10 @@ claim 后 complete，Agent 最后 get operation，共五次 HTTP request。它�
 SDK client 与 processor，证明普通 command arguments、调用 policy 和两侧数据面可以衔接；不覆盖 Node
 listener、socket 或真实网络。已缓存完整 path/delivery 的 Agent 可跳过 help，只需一次工具调用即可发起
 fallback；结果不需要同步返回时也可省略 get。claim/complete 是设备侧协议，默认流程不增加固定 polling。
+
+外层 adapter 还要分别固定两条用户可达 seam：Dashboard 保留 offline device→command invoke；CLI 每次
+reconnect ready→drain→claim/共享 handler/complete。只断言 app helper 可入队或 mock processor 被创建,
+不能证明离线投递闭环已经交付。
 
 同一小邮箱 fixture 还把权威存储工作量守在三次 CAS、两次 prefix list 与不超过二十次 point get；这些是
 防止一次快路径退化为无界扫描的回归预算，只适用于该固定 fixture，不是生产延迟或任意 mailbox 大小的
