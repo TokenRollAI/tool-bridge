@@ -137,6 +137,7 @@ async function assertRegisterPath(
   registry: NodeRegistryStore,
   ctx: CallContext,
   targetPath: TreePath,
+  reservedRoots: string[] | undefined,
 ): Promise<void> {
   if (!check(ctx, targetPath, 'register').allow) {
     throw new TBError('permission_denied', `no scope grants 'register' on '${targetPath}'`)
@@ -156,6 +157,7 @@ async function assertRegisterPath(
     targetPath,
     action: 'write',
     existing,
+    ...(reservedRoots !== undefined ? { reservedRoots } : {}),
   })
   if (!res.allow) throw res.error
 }
@@ -165,6 +167,11 @@ export async function processDeviceHello(opts: {
   deviceIdHint: string
   hello: DeviceHello
   now?: string
+  /**
+   * 部署配置追加的保留根(TbAppDeps.reservedRoots)。设备 hello 是第三条 NodeConfig
+   * 写入口,须与 `~register` / system/registry 同权:缺省即仅内置 RESERVED_ROOTS。
+   */
+  reservedRoots?: string[]
   search?: MutableSearchIndex
   store: StateStore
 }): Promise<HelloAcceptance> {
@@ -186,7 +193,7 @@ export async function processDeviceHello(opts: {
   const inputs = nodesForHello(mountPath, hello.deviceId, hello.expose)
   const registry = new NodeRegistryStore(store)
   for (const input of inputs) {
-    await assertRegisterPath(registry, authCtx, input.path)
+    await assertRegisterPath(registry, authCtx, input.path, opts.reservedRoots)
     // Secret Reference 使用授权:设备 hello 是第三条 NodeConfig 写入口,`expose.nodes` 的
     // config 由设备端提供且帧 schema 是 passthrough——不设门则持 register 的设备 SK 可挂
     // 带 authRef/skRef 的节点(如 provider:'s3' + 他人 authRef、kind:'remote' + 他人 skRef),

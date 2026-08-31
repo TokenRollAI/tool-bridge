@@ -114,6 +114,7 @@ function assertCanManage(ctx: AppContext['var']['ctx'], operation: DeviceOperati
 async function assertCurrentDeviceCredential(
   c: AppContext,
   target: DeviceOperationAuthorizationTarget,
+  reservedRoots: string[] | undefined,
 ): Promise<void> {
   const ctx = c.get('ctx')
   if (ctx.keyId !== target.deviceKeyId) {
@@ -134,6 +135,7 @@ async function assertCurrentDeviceCredential(
       ...(ctx.registerPaths === undefined ? {} : { registerPaths: ctx.registerPaths }),
     },
     targetPath: target.mountPath,
+    ...(reservedRoots === undefined ? {} : { reservedRoots }),
   })
   if (!allowed.allow) throw allowed.error
 }
@@ -256,7 +258,7 @@ export async function handleDeviceMailboxData(c: AppContext, env: RouteEnv): Pro
   const mailbox = env.mailbox()
   const ctx = c.get('ctx')
   const authorize = async (target: DeviceOperationAuthorizationTarget): Promise<void> =>
-    await assertCurrentDeviceCredential(c, target)
+    await assertCurrentDeviceCredential(c, target, env.deps.reservedRoots)
 
   if (path === '/~device/mailbox/claim') {
     const input = parseBody(deviceOperationClaimRequestSchema, body)
