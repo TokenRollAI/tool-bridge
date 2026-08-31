@@ -3,6 +3,7 @@ import {
   type DeviceExpose,
   type DeviceNodeCmd,
   type DeviceNodeInput,
+  dispatchContextCmd,
   isReadOnlyProvider,
   type NodeInput,
   NodeRegistryStore,
@@ -16,7 +17,6 @@ import {
 } from '@tool-bridge/core'
 import {
   createTbApp,
-  dispatchContextCmd,
   runBootstrap,
   type TbAppDeps,
   type UpstreamProvider,

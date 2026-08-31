@@ -15,7 +15,9 @@ export default defineConfig({
   target: 'es2020',
   tsconfig: 'tsconfig.web.json',
   dts: {
-    resolve: ['@tool-bridge/core/device', '@tool-bridge/core/protocol', 'zod'],
+    // core 主入口仅供 /client 的 type-only 视图类型内联(builtin/system 管理面形状);
+    // 运行时依赖仍只有 core/device 与 core/protocol 两个子入口。
+    resolve: ['@tool-bridge/core', '@tool-bridge/core/device', '@tool-bridge/core/protocol', 'zod'],
   },
   clean: false,
   minify: false,
