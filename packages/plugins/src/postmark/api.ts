@@ -32,15 +32,14 @@ import type {
   sendEmailWithTemplateInput,
   validateTemplateInput,
 } from './schema'
+import type { ProviderQuery } from '../_runtime/providerHttp'
+import type { ProviderContext } from '../_runtime/plugin'
 import { compactDefined as compact, asJsonObject as record, trimmedText as text } from '../_runtime/jsonValue'
-import { createProviderHttpClient, type ProviderQuery } from '../_runtime/providerHttp'
-import { type ProviderContext, requireApiKey } from '../_runtime/plugin'
+import { createAuthedClient } from '../_runtime/authedClient'
 import { upstreamError } from '../_runtime/upstreamError'
 
 const SERVICE = 'postmark'
 const API_BASE = 'https://api.postmarkapp.com'
-const http = createProviderHttpClient({ baseUrl: API_BASE, service: SERVICE })
-
 type Json = Record<string, unknown>
 type QueryValue = boolean | number | string | undefined
 
@@ -89,6 +88,20 @@ function postmarkError(status: number, payload: Json): TBError {
   return upstreamError(status, message)
 }
 
+const http = createAuthedClient({
+  baseUrl: API_BASE,
+  service: SERVICE,
+  auth: { kind: 'header', name: 'x-postmark-server-token' },
+  headers: { accept: 'application/json' },
+  // ErrorCode 码表比 HTTP 状态准(见文件头),整段覆写而不用标准键序提取。
+  mapError: ({ bodyKind, data: payload, status }) => postmarkError(
+    status,
+    bodyKind === 'json'
+      ? record(payload) ?? {}
+      : (bodyKind === 'empty' ? {} : { Message: payload }),
+  ),
+})
+
 interface RequestInput {
   body?: unknown
   method?: 'GET' | 'POST' | 'PUT'
@@ -97,22 +110,12 @@ interface RequestInput {
 }
 
 async function request(ctx: ProviderContext, input: RequestInput): Promise<unknown> {
-  const { data } = await http.request({
+  const { data } = await http.request(ctx, {
     path: input.path,
     method: input.method ?? 'GET',
     query: Object.entries(input.query ?? {}) satisfies ProviderQuery,
-    headers: {
-      'accept': 'application/json',
-      'x-postmark-server-token': requireApiKey(ctx, SERVICE),
-    },
     ...(input.body === undefined ? {} : { json: input.body }),
     invalidJsonMessage: 'Postmark 返回了非 JSON 响应',
-    mapError: ({ bodyKind, data: payload, status }) => postmarkError(
-      status,
-      bodyKind === 'json'
-        ? record(payload) ?? {}
-        : (bodyKind === 'empty' ? {} : { Message: payload }),
-    ),
   })
   if (data === undefined) throw responseError('Postmark 返回了非 JSON 响应')
   return data

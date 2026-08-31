@@ -23,18 +23,31 @@
 import type { z } from 'zod/v4'
 import { TBError } from '@tool-bridge/plugin-sdk'
 import type { answerInput, findSimilarInput, getContentsInput, searchInput } from './schema'
+import type { ProviderContext } from '../_runtime/plugin'
 import {
   asJsonObject as asRecord,
   compactDefined as compact,
   trimmedText as optionalText,
 } from '../_runtime/jsonValue'
-import { type ProviderContext, requireApiKey } from '../_runtime/plugin'
-import { createProviderHttpClient } from '../_runtime/providerHttp'
+import { createAuthedClient } from '../_runtime/authedClient'
 import { upstreamError } from '../_runtime/upstreamError'
 
 const SERVICE = 'exa'
 const API_BASE = 'https://api.exa.ai'
-const http = createProviderHttpClient({ baseUrl: API_BASE, service: SERVICE })
+const http = createAuthedClient({
+  baseUrl: API_BASE,
+  service: SERVICE,
+  auth: { kind: 'header', name: 'x-api-key' },
+  headers: { accept: 'application/json' },
+  errorMessage: {
+    keys: ['error', 'message', 'detail'],
+    fallback: (status, statusText) => statusText || `exa 返回 HTTP ${status}`,
+  },
+  mapTransportError: ({ message }) => upstreamError(
+    502,
+    message === undefined ? 'exa 请求失败' : `exa 请求失败: ${message}`,
+  ),
+})
 const SEARCH_PATH = '/search'
 const CONTENTS_PATH = '/contents'
 const ANSWER_PATH = '/answer'
@@ -42,29 +55,12 @@ const FIND_SIMILAR_PATH = '/findSimilar'
 
 type Json = Record<string, unknown>
 
-function errorMessage(payload: unknown): string | undefined {
-  if (typeof payload === 'string') return optionalText(payload)
-  const object = asRecord(payload)
-  if (object === undefined) return undefined
-  return optionalText(object.error) ?? optionalText(object.message) ?? optionalText(object.detail)
-}
-
 async function request(ctx: ProviderContext, path: string, body: Json): Promise<unknown> {
-  const apiKey = requireApiKey(ctx, SERVICE)
-  const { bodyKind, data } = await http.request({
+  const { bodyKind, data } = await http.request(ctx, {
     path,
     method: 'POST',
-    headers: { 'accept': 'application/json', 'x-api-key': apiKey },
     json: body,
     invalidJson: 'text',
-    mapError: ({ data: payload, status, statusText }) => upstreamError(
-      status,
-      errorMessage(payload) ?? (statusText || `exa 返回 HTTP ${status}`),
-    ),
-    mapTransportError: ({ message }) => upstreamError(
-      502,
-      message === undefined ? 'exa 请求失败' : `exa 请求失败: ${message}`,
-    ),
   })
   // 2xx 空体按 `{}` 处理(上游如此);2xx 回非 JSON 则是上游破了契约。
   if (bodyKind === 'empty') return {}

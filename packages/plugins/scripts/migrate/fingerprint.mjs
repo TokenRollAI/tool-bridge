@@ -36,9 +36,6 @@ export async function fingerprintAction(action, normalize) {
   }
 }
 
-/** 归一化规则版本:改了 parity.mjs 的 normalize 就该 +1,提示全部指纹需重新对齐。 */
-export const NORMALIZE_VERSION = 1
-
 /** 一个 provider 的指纹条目(进全局清单的 providers[service])。 */
 export async function fingerprintProvider(provider, normalize) {
   const actions = {}

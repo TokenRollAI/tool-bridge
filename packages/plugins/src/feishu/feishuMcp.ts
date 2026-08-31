@@ -14,7 +14,7 @@ import {
   StreamableHTTPError,
 } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 import { CfWorkerJsonSchemaValidator } from '@modelcontextprotocol/sdk/validation/cfworker'
-import { isTBError, normalizeUpstreamError, TBError } from '@tool-bridge/core'
+import { isTBError, normalizeUpstreamError, TBError } from '@tool-bridge/plugin-sdk'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { createGuardedFetch } from '../_runtime/guardedFetch'
 
