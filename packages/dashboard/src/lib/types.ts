@@ -1,5 +1,3 @@
-import type { Action } from '@tool-bridge/sdk/client'
-
 /** 固定控制面 wire 类型来自 SDK public artifact，不再由 Dashboard 手抄。 */
 export type {
   Action,
@@ -22,196 +20,37 @@ export type {
   TreeJson,
 } from '@tool-bridge/sdk/client'
 
-export const ACTIONS: readonly Action[] = ['read', 'write', 'call', 'register', 'admin']
-
-export interface Scope {
-  actions: Action[]
-  /** 默认 allow;deny 优先于一切 allow。 */
-  effect?: 'allow' | 'deny'
-  /** 树路径 glob:"**" | "docs/**"。 */
-  pattern: string
-}
-
-/** system/sk 返回的 SecretKey(无 hash)。 */
-export interface SecretKeyInfo {
-  createdAt?: string
-  description?: string
-  disabled?: boolean
-  expiresAt?: string
-  id: string
-  owner: string
-  registerPaths?: string[]
-  scopes: Scope[]
-}
-
-/** system/federation list 的一行:remote 联邦 host 白名单合并视图。 */
-export interface FederationHost {
-  host: string
-  removable: boolean
-  source: 'env' | 'store'
-  updatedAt?: string
-}
-
-/** system/plugin 的 manifest（plugin/manifest.ts + builtin/plugin.ts 的 PluginView 契约手抄）。 */
-export type PluginProfile = 'tools/v1' | 'context/v1'
-
-/** `~describe` 里的一个 export：plugin/v2 把「提供什么」从部署身份移到了 export 上。 */
 /**
- * 多字段凭证的一个字段声明(来自 plugin 的 `~describe`,注册时缓存进 manifest)。
- *
- * **`secret` 只管展示,不管通道**:声明了 `credentialFields` 的 export,它的**全部**字段
- * 都进 authRef 指向的那个 secret(运行时 `parseCredentialValues` 就是这个口径)。
- * `secret: false` 的含义仅是"这个值不敏感,输入框不必遮蔽" —— 比如 baseUrl。
- *
- * 曾按它把字段分流进 providerConfig,那是个真 bug:照分流后的引导操作,挂载必被拒
- * (8 个 provider 中招)。非凭证的挂载配置该由 export 独立声明,不混在凭证字段里。
+ * builtin/system 管理面视图类型同样来自 SDK(真源在 core,经 /client 型别出口内联)。
+ * 此前 Dashboard 手抄一份——契约理解漂移曾造成 credentialFields 分流的真 bug
+ * (8 个 provider 中招),现在漂移在编译期暴露。
+ * 命名差异:Dashboard 历史上把含 exports 的注册视图叫 PluginManifest(core 的
+ * PluginView)、把 SK 投影叫 SecretKeyInfo(core 的 SecretKeyView),别名保持消费面不变。
  */
-export interface PluginCredentialField {
-  description?: string
-  key: string
-  label?: string
-  required?: boolean
-  /** 仅控制输入是否遮蔽;不影响存储通道。 */
-  secret?: boolean
-}
+export { ACTIONS } from '@tool-bridge/sdk/client'
+export type {
+  CatalogExportAuth,
+  CatalogExportDetails,
+  CatalogListItem,
+  ContextEntry,
+  ContextEntryMeta,
+  FederationHost,
+  PluginCredentialField,
+  PluginExport,
+  PluginExportAuth,
+  PluginView as PluginManifest,
+  PluginMountConfigField,
+  PluginProfile,
+  PluginRegistration,
+  Scope,
+  SecretKeyView as SecretKeyInfo,
+  SkillDetail,
+  SkillFile,
+  SkillSummary,
+} from '@tool-bridge/sdk/client'
+import type { PluginHealthRecord } from '@tool-bridge/sdk/client'
 
-/**
- * 非凭证挂载配置的字段声明(providerConfig,如 baseUrl / region)。
- *
- * 与 {@link PluginCredentialField} 是两条通道:凭证进加密的 SecretStore,这里的值明文进
- * 节点记录(`system/registry get` 会回显)。**故没有 `secret` 字段** —— 密钥永远走
- * credentialFields。`required` 缺省视为非必填(providerConfig "有就用、没有走默认")。
- */
-export interface PluginMountConfigField {
-  description?: string
-  key: string
-  label?: string
-  required?: boolean
-}
-
-export type PluginExportAuth
-  = | { kind: 'none' }
-    | { description?: string, kind: 'single', label?: string, required?: boolean }
-
-export interface PluginExport {
-  /** 明确声明无凭证/单值凭证；与 oauth/credentialFields 三选一。 */
-  auth?: PluginExportAuth
-  capabilities?: string[]
-  /** 该 export 需要的多字段凭证;缺省表示单值 API key(或不需要凭证)。 */
-  credentialFields?: PluginCredentialField[]
-  /** 挂载时平台会用真实凭证空参调一次这个只读工具,当场判定凭证可用。 */
-  credentialProbe?: string
-  description?: string
+/** system/plugin health cmd 返回(按需探活;id 由调用侧拼接展示)。 */
+export interface PluginHealth extends Pick<PluginHealthRecord, 'checkedAt' | 'healthy'> {
   id: string
-  methods?: string[]
-  /** 该 export 挂载时需要的非凭证配置(如 baseUrl);缺省表示无需额外配置。 */
-  mountConfigFields?: PluginMountConfigField[]
-  /** 声明了它就走平台托管的 OAuth2 授权码流程(与 credentialFields/Probe 互斥)。 */
-  oauth?: {
-    authorizationUrl: string
-    scopes?: string[]
-    tokenUrl: string
-  }
-  profile: PluginProfile
-}
-
-export interface PluginManifest {
-  auth: { kind: 'platform-token' } | { kind: 'bearer', secretRef: string }
-  enabled: boolean
-  /** https:// 或 `binding:<name>`。 */
-  endpoint: string
-  /** 注册时缓存的 `~describe.exports`（挂载时 config.export 从中选）。 */
-  exports: PluginExport[]
-  /** 如 "/healthz";必须以 '/' 开头。 */
-  healthPath: string
-  id: string
-  /** 传输协议版本；当前仅 "plugin/v2"。 */
-  protocolVersion: string
-}
-
-/**
- * 内置集成目录的一项(`system/catalog` list/search;对等 `tb integration catalog`)。
- *
- * 这是**挂载向导的数据源**:它直接回答"能挂成什么 kind、有哪几个 export、要填哪些凭证
- * 字段、要不要再授权一步",故表单可以从它生成而不必让用户去翻插件源码。
- *
- * 内置集成**不落库**；目录项与它的代码是同一份构建产物。
- */
-export interface CatalogListItem {
-  description?: string
-  /** descriptor 指纹(升级检测/三宿主对拍)。 */
-  digest: string
-  /** 每个 export 的精确 auth/config/kind 契约；挂载逻辑的唯一真源。 */
-  exportDetails: Record<string, CatalogExportDetails>
-  /** 可挂载的 export id;长度 > 1 时挂载必须显式选一个。 */
-  exports: string[]
-  id: string
-  nodeKinds: Array<'context' | 'tool'>
-}
-
-export type CatalogExportAuth
-  = | { fields: PluginCredentialField[], kind: 'fields' }
-    | { kind: 'none' }
-    | { kind: 'oauth' }
-    | { description?: string, kind: 'single', label?: string, required: boolean }
-
-export interface CatalogExportDetails {
-  auth: CatalogExportAuth
-  description?: string
-  id: string
-  kind: 'context' | 'tool'
-  mountConfigFields?: PluginMountConfigField[]
-}
-
-/** write/update 返回:pluginToken 仅该次响应出现一次(auth=platform-token 时)。 */
-export interface PluginRegistration extends PluginManifest {
-  pluginToken?: string
-}
-
-/** system/plugin health cmd 返回(按需探活)。 */
-export interface PluginHealth {
-  checkedAt: string
-  healthy: boolean
-  id: string
-}
-
-/** context 条目元数据(ContextEntryMeta)。 */
-export interface ContextEntryMeta {
-  contentType: string
-  metadata: Record<string, string>
-  size?: number
-  updatedAt: string
-  /** node://<namespace-path>/<entry-path>。 */
-  uri: string
-  version: string
-}
-
-/** context 条目(含内容;大对象 content = { $ref })。 */
-export interface ContextEntry extends ContextEntryMeta {
-  content: string | unknown
-}
-
-/** skillhub 目录条目摘要(list/search 返回的 SkillSummary)。 */
-export interface SkillSummary {
-  description: string
-  id: string
-  name: string
-  updatedAt?: string
-  version?: string
-}
-
-/** skillhub 技能内文件(get{id,file} 返回;大对象 content = { $ref })。 */
-export interface SkillFile {
-  content?: string | { $ref: string }
-  contentType: string
-  path: string
-  size?: number
-  version: string
-}
-
-/** skillhub 技能详情(get{id} 返回:SKILL.md 正文 + 文件清单)。 */
-export interface SkillDetail extends SkillSummary {
-  /** SKILL.md 正文(YAML frontmatter + Markdown)。 */
-  content: string
-  files: SkillFile[]
 }

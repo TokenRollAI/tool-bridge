@@ -70,6 +70,7 @@ export function DevicesPage() {
     .map(node => ({
       node,
       presence: derivePresence({
+        now: new Date().toISOString(),
         online: node.online,
         ...(node.lastSeenAt !== undefined ? { lastSeenAt: node.lastSeenAt } : {}),
       }),

@@ -37,10 +37,12 @@ import {
 } from '@/components/ui/select'
 import { useCtxEntries, useCtxEntry, useCtxUpload, useInvalidate, useInvoke } from '@/lib/queries'
 import { ConfirmAction } from '@/components/ConfirmAction'
+import { humanSize, humanTime, refOf } from '@/lib/format'
 import { CopyButton } from '@/components/CopyButton'
 import { EmptyState } from '@/components/EmptyState'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Textarea } from '@/components/ui/textarea'
+import { useDebounced } from '@/lib/useDebounced'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -52,42 +54,6 @@ import { cn } from '@/lib/utils'
 function relPath(uri: string, nodePath: string): string {
   const prefix = `node://${nodePath}/`
   return uri.startsWith(prefix) ? uri.slice(prefix.length) : uri.replace(/^node:\/\//, '')
-}
-
-function humanSize(n?: number): string {
-  if (n === undefined) return '—'
-  if (n < 1024) return `${n} B`
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KiB`
-  return `${(n / (1024 * 1024)).toFixed(2)} MiB`
-}
-
-function humanTime(iso: string): string {
-  const t = Date.parse(iso)
-  if (Number.isNaN(t)) return iso
-  const diff = Date.now() - t
-  if (diff < 60_000) return '刚刚'
-  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)} 分钟前`
-  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)} 小时前`
-  return new Date(t).toLocaleString()
-}
-
-/** 大对象条目:content 是 { $ref } 而非内联。 */
-function refOf(content: unknown): string | null {
-  if (typeof content === 'object' && content !== null && '$ref' in content) {
-    const v = (content as { $ref: unknown }).$ref
-    return typeof v === 'string' ? v : null
-  }
-  return null
-}
-
-/** 300ms 防抖(前缀/搜索输入 → 查询参数)。 */
-function useDebounced(value: string): string {
-  const [v, setV] = useState(value)
-  useEffect(() => {
-    const t = setTimeout(() => setV(value), 300)
-    return () => clearTimeout(t)
-  }, [value])
-  return v
 }
 
 function entryText(entry: ContextEntry): string {

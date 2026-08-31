@@ -1,9 +1,9 @@
 import { useCallback, useMemo, useRef, useState } from 'react'
 import { useQueries } from '@tanstack/react-query'
 import type { HelpCmd, TreeJson } from '@/lib/types'
-import { useConn, useSession } from '@/lib/session-context'
+import { useKeyBase, useTree } from '@/lib/queries'
+import { useConn } from '@/lib/session-context'
 import { getHelp, getTree } from '@/lib/api'
-import { useTree } from '@/lib/queries'
 import { mergeLoadedCanvasTree } from './treeGraph'
 
 /**
@@ -65,9 +65,8 @@ export interface CanvasCommands {
  */
 export function useCanvasCommands(ownerPaths: ReadonlySet<string>): CanvasCommands {
   const conn = useConn()
-  const { active, revision } = useSession()
+  const base = useKeyBase()
   const paths = useMemo(() => [...ownerPaths].sort(), [ownerPaths])
-  const base = ['tb', active?.id ?? '', active?.baseUrl ?? '', revision] as const
   const results = useQueries({
     queries: paths.map(path => ({
       queryKey: [...base, 'help', path] as const,
@@ -107,7 +106,7 @@ export function useCanvasTree(
   lazyPaths: ReadonlyMap<string, boolean>,
 ): CanvasTree {
   const conn = useConn()
-  const { active, revision } = useSession()
+  const base = useKeyBase()
   const root = useTree('', ROOT_DEPTH)
 
   // 只保留当前仍展开的显式懒加载入口；折叠时停止订阅，缓存仍由 Query 保留。
@@ -117,7 +116,6 @@ export function useCanvasTree(
       .map(([path, remote]) => ({ path, remote }))
   }, [expanded, lazyPaths])
 
-  const base = ['tb', active?.id ?? '', active?.baseUrl ?? '', revision] as const
   const subtrees = useQueries({
     queries: truncatedExpanded.map(({ path, remote }) => ({
       queryKey: [...base, 'tree', path, remote ? LAZY_DEPTH_REMOTE : LAZY_DEPTH_LOCAL] as const,

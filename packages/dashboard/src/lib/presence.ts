@@ -1,43 +1,17 @@
 /**
- * device presence 的客户端派生(镜像 core 的 `device/presence.ts`,dashboard 不 import core)。
+ * device presence 的三态派生:实现来自 SDK /client(真源 core `device/presence.ts`,
+ * 此前 dashboard 手抄一份镜像靠注释同步,现在同一实现)。
  *
  * 两个数据源要分清:
  * - `~tree`(TreeJson)已由宿主投影好 `presence`,直接读 `presence.state`,**不要**在这里重算。
  * - `system/registry`(RegistryNode)是存储态,只有裸 `online` + `lastSeenAt`,要三态就过这里。
  *
- * 这里用浏览器时钟对比服务端 `lastSeenAt`,存在时钟漂移;因此 TTL 与 core 保持一致而不收紧,
- * 且判据只用于**展示**(把"看似 online 实则久无心跳"标为 stale),不作为任何操作的前置条件。
+ * 浏览器时钟对比服务端 `lastSeenAt` 存在时钟漂移;判据只用于**展示**(把"看似 online
+ * 实则久无心跳"标为 stale),不作为任何操作的前置条件。
  */
+export { derivePresence, PRESENCE_STALE_AFTER_MS } from '@tool-bridge/sdk/client'
 
-import type { Presence, PresenceState } from './types'
-
-/**
- * 存活观察 TTL,与 core 的 `PRESENCE_STALE_AFTER_MS` 对齐(设备心跳 30s 的 3 倍)。
- * 改动要同轮跟随 core,否则同一台设备在 ~tree 与设备页显示不同状态。
- */
-export const PRESENCE_STALE_AFTER_MS = 90_000
-
-/**
- * 由存储态(online + lastSeenAt)派生三态 presence。语义与 core 的 `derivePresence` 一致:
- * online 非真 → offline(仍带出 lastSeenAt 供展示"最后在线于");online 为真但无法证明新鲜
- * (缺 lastSeenAt / 不可解析 / 超 TTL)→ stale。
- */
-export function derivePresence(input: {
-  lastSeenAt?: string
-  now?: number
-  online?: boolean
-  staleAfterMs?: number
-}): Presence {
-  const lastSeenAt = input.lastSeenAt
-  const base = lastSeenAt !== undefined ? { lastSeenAt } : {}
-  if (input.online !== true) return { state: 'offline', ...base }
-  if (lastSeenAt === undefined) return { state: 'stale', ...base }
-  const seenMs = Date.parse(lastSeenAt)
-  const nowMs = input.now ?? Date.now()
-  if (!Number.isFinite(seenMs)) return { state: 'stale', ...base }
-  const ttl = input.staleAfterMs ?? PRESENCE_STALE_AFTER_MS
-  return { state: nowMs - seenMs <= ttl ? 'online' : 'stale', ...base }
-}
+import type { PresenceState } from './types'
 
 /** 人类可读的状态文案(与 CLI / ~help 的 state 字面量一致,不做本地化以便和日志对照)。 */
 export const PRESENCE_LABEL: Record<PresenceState, string> = {
