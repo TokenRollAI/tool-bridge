@@ -15,13 +15,6 @@ import { Link } from 'react-router'
 import { toast } from 'sonner'
 import type { RegistryNode } from '@/lib/types'
 import {
-  useIntegrationCatalog,
-  useInvalidate,
-  useInvoke,
-  useOAuthAuthorize,
-  useRegistryList,
-} from '@/lib/queries'
-import {
   Dialog,
   DialogContent,
   DialogDescription,
@@ -36,6 +29,12 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import {
+  useIntegrationCatalog,
+  useInvalidate,
+  useInvoke,
+  useRegistryList,
+} from '@/lib/queries'
 import { AddToolWizard } from '@/components/add-tool/AddToolWizard'
 import { PaginationFooter } from '@/components/PaginationFooter'
 import { PresenceBadge } from '@/components/PresenceBadge'
@@ -51,6 +50,7 @@ import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { encodeTreePath } from '@/lib/path'
 import { cn } from '@/lib/utils'
+import { useOAuthFollowUp } from './forms/mountOrchestration'
 import { showsAuthorizeAction } from './forms/registryConfig'
 import { MountDialog } from './forms/MountDialog'
 
@@ -180,7 +180,7 @@ export function RegistryPage() {
   const list = useRegistryList()
   const catalog = useIntegrationCatalog()
   const invoke = useInvoke()
-  const oauth = useOAuthAuthorize()
+  const oauthFollowUp = useOAuthFollowUp()
   const invalidate = useInvalidate()
   const [kindFilter, setKindFilter] = useState<KindFilter>('all')
   const [search, setSearch] = useState('')
@@ -206,6 +206,7 @@ export function RegistryPage() {
 
   // auth:'oauth' 挂载的授权入口(对等 tb tool auth):redirect → 新标签打开 AS 授权页。
   // 严格上游(DCR 只放行 localhost 回调,如 Bytebase)→ 指引 CLI --local 通道。
+  // 收尾实现与挂载对话框共用 useOAuthFollowUp。
   //
   // 两类节点走这个入口:auth:'oauth' 的 mcp 挂载,以及 export 声明了 oauth 的 plugin
   // tool 挂载(provider 型托管流程,两者是两套机制、共用 `~authorize`)。
@@ -214,26 +215,7 @@ export function RegistryPage() {
   // 非 oauth 的 export 会回 invalid_argument 并说清原因(register.ts 的分派同此判据:
   // 先按 kind 分派,再由 authorizeToolNode 查 export)。让按钮在少数情况下点了报错,
   // 好过让 oauth 型 tool 挂载**完全没有入口**(那是管理旁路)。
-  const authorize = (path: string) => {
-    oauth.mutate(path, {
-      onSuccess: (r) => {
-        if (r.status === 'authorized') {
-          toast.success(`${path} 已授权(凭证有效)`)
-          return
-        }
-        if (r.authorizationUrl) {
-          window.open(r.authorizationUrl, '_blank', 'noopener')
-          toast.info('已打开授权页,完成授权后即可调用')
-        }
-      },
-      onError: e =>
-        toast.error(
-          /redirect/i.test(e.message)
-            ? `该上游只允许 localhost 回调,请用 CLI 完成授权:tb tool auth ${path} --local`
-            : e.message,
-        ),
-    })
-  }
+  const authorize = (path: string) => oauthFollowUp.start(path, 'tb tool auth')
 
   const mounted = (list.data?.items ?? []).filter(
     n => n.path !== 'system' && !n.path.startsWith('system/'),
@@ -451,6 +433,7 @@ export function RegistryPage() {
                                 : (
                                     <PresenceBadge
                                       state={derivePresence({
+                                        now: new Date().toISOString(),
                                         online: node.online,
                                         ...(node.lastSeenAt !== undefined
                                           ? { lastSeenAt: node.lastSeenAt }
@@ -464,7 +447,7 @@ export function RegistryPage() {
                                 {showsAuthorizeAction(node) && (
                                   <Button
                                     aria-label={`授权 ${node.path}`}
-                                    disabled={oauth.isPending}
+                                    disabled={oauthFollowUp.isPending}
                                     onClick={() => authorize(node.path)}
                                     size="icon-sm"
                                     title="OAuth 授权"

@@ -241,13 +241,6 @@ export function useInvalidate() {
   }
 }
 
-/** 使树与节点级缓存失效(挂载/卸载/SK 变更后);profile 范围。 */
-export function useInvalidateTree() {
-  const qc = useQueryClient()
-  const base = useKeyBase()
-  return () => qc.invalidateQueries({ queryKey: base })
-}
-
 // ---- system/* 结构化便捷查询(管理视图消费;与通用调用同一数据面)----
 
 /**

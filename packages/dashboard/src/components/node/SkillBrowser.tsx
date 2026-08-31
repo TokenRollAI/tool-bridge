@@ -15,7 +15,7 @@ import { useEffect, useState } from 'react'
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { toast } from 'sonner'
-import type { HelpCmd, SkillDetail, SkillFile } from '@/lib/types'
+import type { HelpCmd, SkillDetail } from '@/lib/types'
 import {
   Dialog,
   DialogContent,
@@ -26,51 +26,16 @@ import {
 } from '@/components/ui/dialog'
 import { useInvalidate, useInvoke, useSkill, useSkillFile, useSkills } from '@/lib/queries'
 import { ConfirmAction } from '@/components/ConfirmAction'
+import { humanSize, humanTime, refOf } from '@/lib/format'
 import { CopyButton } from '@/components/CopyButton'
 import { EmptyState } from '@/components/EmptyState'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Textarea } from '@/components/ui/textarea'
+import { useDebounced } from '@/lib/useDebounced'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { cn } from '@/lib/utils'
-
-function humanSize(n?: number): string {
-  if (n === undefined) return '—'
-  if (n < 1024) return `${n} B`
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KiB`
-  return `${(n / (1024 * 1024)).toFixed(2)} MiB`
-}
-
-function humanTime(iso?: string): string {
-  if (!iso) return '—'
-  const t = Date.parse(iso)
-  if (Number.isNaN(t)) return iso
-  const diff = Date.now() - t
-  if (diff < 60_000) return '刚刚'
-  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)} 分钟前`
-  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)} 小时前`
-  return new Date(t).toLocaleString()
-}
-
-/** 大对象文件:content 是 { $ref } 而非内联。 */
-function refOf(content: SkillFile['content']): string | null {
-  if (typeof content === 'object' && content !== null && '$ref' in content) {
-    const v = content.$ref
-    return typeof v === 'string' ? v : null
-  }
-  return null
-}
-
-/** 300ms 防抖(搜索输入 → 查询参数)。 */
-function useDebounced(value: string): string {
-  const [v, setV] = useState(value)
-  useEffect(() => {
-    const t = setTimeout(() => setV(value), 300)
-    return () => clearTimeout(t)
-  }, [value])
-  return v
-}
 
 /** 详情只在桌面常驻；移动端继续使用 Dialog，避免隐藏的 Portal 意外打开。 */
 function useDesktopLayout(): boolean {

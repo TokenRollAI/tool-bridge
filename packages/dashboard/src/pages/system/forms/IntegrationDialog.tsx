@@ -10,7 +10,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from '@/components/ui/dialog'
-import { useIntegrationCatalog, useInvalidate, useInvoke, useOAuthAuthorize, useSecretList } from '@/lib/queries'
+import { useIntegrationCatalog, useInvalidate, useSecretList } from '@/lib/queries'
 import { Button } from '@/components/ui/button'
 import {
   buildIntegrationCalls,
@@ -19,6 +19,7 @@ import {
   type IntegrationFormState,
   integrationPlan,
 } from './integrationPlan'
+import { useMountOrchestrator, useOAuthFollowUp } from './mountOrchestration'
 import { CatalogIntegrationFields } from './CatalogIntegrationFields'
 
 /**
@@ -39,8 +40,8 @@ export function IntegrationDialog({
   defaultProvider?: string
   trigger?: ReactNode
 }) {
-  const invoke = useInvoke()
-  const oauth = useOAuthAuthorize()
+  const orchestrator = useMountOrchestrator()
+  const oauthFollowUp = useOAuthFollowUp()
   const invalidate = useInvalidate()
   const catalog = useIntegrationCatalog()
   const secrets = useSecretList()
@@ -62,26 +63,10 @@ export function IntegrationDialog({
       return
     }
 
-    let shouldDeleteOnFailure = false
-    try {
-      // 先写凭证再挂载:挂载时平台会用凭证跑 credentialProbe,顺序反了探针必失败。
-      if (calls.secret !== undefined) {
-        const knownSecret = (secrets.data?.items ?? []).some(item => item.name === calls.secret!.name)
-        // secret set 是 upsert。只有列表已完整加载且确认名字此前不存在，失败时才可删除；
-        // 否则可能把同名的既有凭证当成“本轮新建”误删。
-        shouldDeleteOnFailure = secrets.data !== undefined && !secrets.hasNextPage && !knownSecret
-        await invoke.mutateAsync({ commandPath: 'system/secret/set', args: calls.secret })
-      }
-      await invoke.mutateAsync({ commandPath: 'system/registry/write', args: calls.mount })
-    } catch (error) {
-      // 仅清理由本轮创建的 secret;复用已有凭证不动。即使回滚失败也保留原挂载错误。
-      if (shouldDeleteOnFailure && calls.secret !== undefined) {
-        await invoke.mutateAsync({
-          commandPath: 'system/secret/delete',
-          args: { name: calls.secret.name },
-        }).catch(() => {})
-      }
-      setErr((error as Error).message)
+    // 编排链(先凭证后挂载)与"新建才可删"的回滚判据在 useMountOrchestrator 里(唯一一份)。
+    const result = await orchestrator.execute(calls)
+    if (!result.ok) {
+      setErr(result.error.message)
       return
     }
 
@@ -90,28 +75,11 @@ export function IntegrationDialog({
     setErr(null)
     setForm({ ...INITIAL_INTEGRATION_FORM, path: '' })
     invalidate()
-    if (calls.needsAuthorize) {
-      oauth.mutate(calls.mount.path, {
-        onSuccess: (result) => {
-          if (result.status === 'authorized') {
-            toast.success(`${calls.mount.path} 已授权`)
-          } else if (result.authorizationUrl) {
-            window.open(result.authorizationUrl, '_blank', 'noopener')
-            toast.info('已打开授权页,完成后即可调用')
-          }
-        },
-        onError: error =>
-          toast.error(
-            /redirect/i.test(error.message)
-              ? `该上游只允许 localhost 回调,请用 CLI:tb integration auth ${calls.mount.path} --local`
-              : `发起授权失败:${error.message}`,
-          ),
-      })
-    }
+    if (calls.needsAuthorize) oauthFollowUp.start(calls.mount.path, 'tb integration auth')
   }
 
   const changeOpen = (next: boolean) => {
-    if (invoke.isPending) return
+    if (orchestrator.isPending) return
     setOpen(next)
     if (next) {
       setErr(null)
@@ -142,7 +110,7 @@ export function IntegrationDialog({
       </DialogTrigger>
       <DialogContent
         className="top-0 right-0 bottom-0 left-auto flex h-dvh max-h-none w-full max-w-full translate-x-0 translate-y-0 flex-col gap-0 rounded-none border-y-0 border-r-0 p-0 sm:max-w-3xl"
-        showCloseButton={!invoke.isPending}
+        showCloseButton={!orchestrator.isPending}
       >
         <DialogHeader className="border-b px-5 py-5 sm:px-7">
           <DialogTitle className="pr-8 text-lg">添加集成</DialogTitle>
@@ -180,9 +148,9 @@ export function IntegrationDialog({
         </div>
 
         <DialogFooter className="border-t bg-background px-5 py-4 sm:px-7">
-          <Button disabled={invoke.isPending || form.provider === ''} onClick={submit}>
-            {invoke.isPending && <Loader2 className="animate-spin" />}
-            {invoke.isPending ? '正在写入' : `添加 ${form.provider || '集成'}`}
+          <Button disabled={orchestrator.isPending || form.provider === ''} onClick={submit}>
+            {orchestrator.isPending && <Loader2 className="animate-spin" />}
+            {orchestrator.isPending ? '正在写入' : `添加 ${form.provider || '集成'}`}
           </Button>
         </DialogFooter>
       </DialogContent>

@@ -14,8 +14,6 @@ import {
 import {
   useIntegrationCatalog,
   useInvalidate,
-  useInvoke,
-  useOAuthAuthorize,
   usePluginList,
   useSecretList,
 } from '@/lib/queries'
@@ -32,6 +30,7 @@ import {
   type MountKind,
   type RegistryMountFormState,
 } from './registryConfig'
+import { useMountOrchestrator, useOAuthFollowUp } from './mountOrchestration'
 import { RegistryKindFields } from './RegistryKindFields'
 
 const MOUNT_KINDS: MountKind[] = ['mcp', 'http', 'context', 'skillhub', 'remote', 'tool']
@@ -83,8 +82,8 @@ export function MountDialog({
   /** null 表示仅由受控 open 打开，不渲染触发按钮。 */
   trigger?: ReactNode | null
 }) {
-  const invoke = useInvoke()
-  const oauth = useOAuthAuthorize()
+  const orchestrator = useMountOrchestrator()
+  const oauthFollowUp = useOAuthFollowUp()
   const invalidate = useInvalidate()
   const plugins = usePluginList()
   const catalog = useIntegrationCatalog()
@@ -133,27 +132,11 @@ export function MountDialog({
       return
     }
 
-    let shouldDeleteOnFailure = false
-    try {
-      if (calls.secret !== undefined) {
-        const knownSecret = (secrets.data?.items ?? []).some(item => item.name === calls.secret!.name)
-        // secret set 是 upsert。替换/轮换已有槽时不能删除；列表未完整加载时也不能
-        // 把“当前页没看到”当成“不存在”。只有确认是新路径的新槽才清理孤儿。
-        shouldDeleteOnFailure = !isReplacement
-          && secrets.data !== undefined
-          && !secrets.hasNextPage
-          && !knownSecret
-        await invoke.mutateAsync({ commandPath: 'system/secret/set', args: calls.secret })
-      }
-      await invoke.mutateAsync({ commandPath: 'system/registry/write', args: calls.mount })
-    } catch (error) {
-      if (shouldDeleteOnFailure && calls.secret !== undefined) {
-        await invoke.mutateAsync({
-          commandPath: 'system/secret/delete',
-          args: { name: calls.secret.name },
-        }).catch(() => {})
-      }
-      setErr((error as Error).message)
+    // 替换/轮换已有槽时不允许失败回滚删除凭证 —— 原节点可能仍引用同名 secret;
+    // "新建才可删"的完整判据在 useMountOrchestrator 里(唯一一份)。
+    const result = await orchestrator.execute(calls, { allowRollback: !isReplacement })
+    if (!result.ok) {
+      setErr(result.error.message)
       return
     }
 
@@ -174,28 +157,11 @@ export function MountDialog({
       ? form.mcpAuthMode === 'oauth'
       : form.kind === 'tool'
         && credentialPlanFor(toolExportOptions, form.toolExport).kind === 'oauth'
-    if (needsOAuth) {
-      oauth.mutate(mounted, {
-        onSuccess: (result) => {
-          if (result.status === 'authorized') {
-            toast.success(`${mounted} 已授权（凭证有效）`)
-          } else if (result.authorizationUrl) {
-            window.open(result.authorizationUrl, '_blank', 'noopener')
-            toast.info('已打开授权页，完成授权后即可调用')
-          }
-        },
-        onError: error =>
-          toast.error(
-            /redirect/i.test(error.message)
-              ? `该上游只允许 localhost 回调，请用 CLI 完成授权：tb tool auth ${mounted} --local`
-              : `发起授权失败：${error.message}`,
-          ),
-      })
-    }
+    if (needsOAuth) oauthFollowUp.start(mounted, 'tb tool auth')
   }
 
   const changeOpen = (next: boolean) => {
-    if (invoke.isPending) return
+    if (orchestrator.isPending) return
     if (controlledOpen === undefined) setInternalOpen(next)
     onOpenChange?.(next)
     if (next) {
@@ -224,7 +190,7 @@ export function MountDialog({
       )}
       <DialogContent
         className="top-0 right-0 bottom-0 left-auto flex h-dvh max-h-none w-full max-w-full translate-x-0 translate-y-0 flex-col gap-0 rounded-none border-y-0 border-r-0 p-0 sm:max-w-3xl"
-        showCloseButton={!invoke.isPending}
+        showCloseButton={!orchestrator.isPending}
       >
         <DialogHeader className="border-b px-5 py-5 sm:px-7">
           <DialogTitle className="pr-8 text-lg">
@@ -245,7 +211,7 @@ export function MountDialog({
               title="基础身份"
             >
               <SchemaFields
-                disabled={invoke.isPending}
+                disabled={orchestrator.isPending}
                 fields={MOUNT_IDENTITY_FIELDS}
                 idPrefix="mount-identity"
                 onChange={next => setForm(current => ({
@@ -297,9 +263,9 @@ export function MountDialog({
         </div>
 
         <DialogFooter className="border-t bg-background px-5 py-4 sm:px-7">
-          <Button disabled={invoke.isPending} onClick={() => void submit()}>
-            {invoke.isPending && <Loader2 className="animate-spin" />}
-            {invoke.isPending
+          <Button disabled={orchestrator.isPending} onClick={() => void submit()}>
+            {orchestrator.isPending && <Loader2 className="animate-spin" />}
+            {orchestrator.isPending
               ? '正在写入'
               : isReplacement || mayReplaceUnloaded
                 ? `确认写入 ${form.path.trim() || form.kind}`
