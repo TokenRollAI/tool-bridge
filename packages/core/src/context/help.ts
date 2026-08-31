@@ -35,8 +35,8 @@ export function contextHelpModel(
   return contextCommands.helpModel(
     { path: node.path, kind: 'context', description: node.description },
     (command) => {
-      // create_upload 是宿主按 driver 能力追加的扩展，不进基础动词表。
-      if (command.name === 'create_upload') return false
+      // 宿主专属扩展(hostOnly,如 create_upload)由宿主按 driver 能力追加,不进基础动词表。
+      if (contextCommands.isHostOnly(command.name)) return false
       if (opts.methods !== undefined && !opts.methods.has(command.name)) return false
       return opts.readOnly !== true || command.scope === 'read'
     },

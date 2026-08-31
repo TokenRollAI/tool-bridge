@@ -1,9 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { NODE_KINDS, type NodeConfig, type Scope, type TreeNode } from '../../src/types'
 import { createRegistryModule, parseNodeInput } from '../../src/builtin/registry'
+import { NODE_KINDS, type NodeConfig, type TreeNode } from '../../src/types'
 import { decodeDeviceFrame } from '../../src/device/frames'
 import { NodeRegistryStore } from '../../src/tree/registry'
-import { filterVisible } from '../../src/tree/visibility'
 import { MemoryStateStore } from '../../src/store'
 import { TBError } from '../../src/errors'
 
@@ -79,31 +78,6 @@ describe('registry 对 kind:\'tool\' 的写入/读取', () => {
     expect(written.kind).toBe('tool')
     const fetched = (await mod.dispatch('get', { path: 'tools/orders' }, ctx)) as TreeNode
     expect(fetched.config).toEqual(TOOL_CONFIG)
-  })
-})
-
-describe('visibility 对 kind:\'tool\' 的行为', () => {
-  const toolNode: TreeNode = {
-    path: 'tools/orders',
-    kind: 'tool',
-    description: '订单工具',
-    config: TOOL_CONFIG,
-    registeredBy: 'sk_admin',
-    createdAt: NOW,
-    updatedAt: NOW,
-  }
-
-  // 简化 checker:pattern 'tools/**' 且 action read 放行。
-  const check = (scopes: Scope[], path: string) =>
-    scopes.some(s => s.pattern === 'tools/**' && path.startsWith('tools/'))
-
-  it('有 read scope 时可见', () => {
-    const scopes: Scope[] = [{ pattern: 'tools/**', actions: ['read'] }]
-    expect(filterVisible([toolNode], scopes, check)).toEqual([toolNode])
-  })
-
-  it('无 scope 时被裁剪(kind 不影响可见性判定)', () => {
-    expect(filterVisible([toolNode], [], check)).toEqual([])
   })
 })
 

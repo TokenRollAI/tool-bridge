@@ -30,6 +30,15 @@ export function base64urlEncode(bytes: Uint8Array): string {
   return out
 }
 
+/**
+ * 字节序列 → **标准** base64(`+/` 字母表、含 `=` 填充;如 HTTP Basic 认证要求)。
+ * 复用上面的唯一 6-bit 分组实现,仅做字母表替换与补齐填充——不再第二份手写位运算。
+ */
+export function base64Encode(bytes: Uint8Array): string {
+  const url = base64urlEncode(bytes).replaceAll('-', '+').replaceAll('_', '/')
+  return url + '='.repeat((4 - (url.length % 4)) % 4)
+}
+
 /** base64url(无填充)→ 字节序列;非法字符或非法长度(len%4===1)抛 Error。 */
 export function base64urlDecode(input: string): Uint8Array {
   if (input.length % 4 === 1 || !/^[A-Za-z0-9_-]*$/.test(input)) {

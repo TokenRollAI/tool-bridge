@@ -25,6 +25,11 @@ export const HTBP_LIST_OPTIONS_SCHEMA = z.strictObject({
 export interface HtbpCommandSpec<S extends InputSchemaLike | undefined = undefined>
   extends Omit<OperationSpec<S>, 'description' | 'rawInputSchema'> {
   h: string
+  /**
+   * 宿主按能力追加的扩展命令(如 context 的 create_upload):不进基础动词表、
+   * 不走通用 provider dispatch,由宿主在具备底层能力时显式装配。缺省 false。
+   */
+  hostOnly?: boolean
   returns?: string
   scope: Action
 }
@@ -38,6 +43,7 @@ export type HtbpCommandHandler<
 ) => unknown | Promise<unknown>
 
 interface CommandMetadata {
+  hostOnly?: boolean
   returns?: string
   scope: Action
 }
@@ -52,7 +58,7 @@ export class HtbpCommandRegistry<TContext> {
     spec: HtbpCommandSpec<S>,
     handler: HtbpCommandHandler<S, TContext>,
   ): this {
-    const { h, returns, scope, ...operationSpec } = spec
+    const { h, hostOnly, returns, scope, ...operationSpec } = spec
     this.operations.register(
       name,
       { ...operationSpec, description: h } as OperationSpec<S>,
@@ -60,6 +66,7 @@ export class HtbpCommandRegistry<TContext> {
     )
     this.metadata.set(name, {
       scope,
+      ...(hostOnly !== undefined ? { hostOnly } : {}),
       ...(returns !== undefined ? { returns } : {}),
     })
     return this
@@ -75,6 +82,11 @@ export class HtbpCommandRegistry<TContext> {
 
   scopeFor(name: string): Action | undefined {
     return this.metadata.get(name)?.scope
+  }
+
+  /** 该命令是否宿主专属扩展(见 {@link HtbpCommandSpec.hostOnly});未注册按 false。 */
+  isHostOnly(name: string): boolean {
+    return this.metadata.get(name)?.hostOnly === true
   }
 
   commandSpecs(nodePath: TreePath): CmdSpec[] {

@@ -1,5 +1,7 @@
 /** Web-standard、宿主中立的预签名 PUT 安全原语。 */
 
+import { validTimeout } from '../shared/transport'
+
 export interface PresignedPutGrant {
   expiresAt: string
   headers: Record<string, string>
@@ -53,13 +55,6 @@ function forbiddenPlatformHeader(name: string): boolean {
     || lower === 'cookie2'
     || lower === 'proxy-authorization'
     || lower.startsWith('x-tb-')
-}
-
-function validTimeout(value: number | undefined): value is number {
-  return value !== undefined
-    && Number.isInteger(value)
-    && value > 0
-    && value <= 2_147_483_647
 }
 
 export function parsePresignedPutGrant(value: unknown): PresignedPutGrant {

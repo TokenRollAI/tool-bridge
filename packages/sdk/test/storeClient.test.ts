@@ -363,4 +363,60 @@ describe('createStoreClient', () => {
     await expect(store.stat(URI)).rejects.toMatchObject({ code: 'internal' })
     await expect(store.list()).rejects.toMatchObject({ code: 'internal' })
   })
+
+  it('非规范错误 body 走共享 status fallback：404 归一为 not_found 非重试', async () => {
+    const fetcher: typeof fetch = vi.fn(async () =>
+      new Response('gone', { status: 404, headers: { 'content-type': 'text/plain' } }))
+    const store = createStoreClient({ baseUrl: 'https://tb.example', sk: 'secret', fetcher })
+    await expect(store.stat(URI)).rejects.toMatchObject({
+      code: 'not_found',
+      retryable: false,
+    })
+  })
+
+  it('timeoutMs：请求超时归一为 retryable unavailable，非法值创建即拒', async () => {
+    const fetcher: typeof fetch = vi.fn(async (_input, init) =>
+      await new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener('abort', () =>
+          reject(new DOMException('aborted', 'AbortError')))
+      }))
+    const store = createStoreClient({
+      baseUrl: 'https://tb.example',
+      sk: 'secret',
+      fetcher,
+      timeoutMs: 20,
+    })
+    await expect(store.stat(URI)).rejects.toMatchObject({
+      code: 'unavailable',
+      retryable: true,
+      message: 'Store request timed out',
+    })
+    expect(() => createStoreClient({
+      baseUrl: 'https://tb.example',
+      sk: 'secret',
+      timeoutMs: 0,
+    })).toThrowError(/timeoutMs/)
+  })
+
+  it('timeoutMs 配置下调用方主动 abort 仍按 abort 透传，不误报超时', async () => {
+    const fetcher: typeof fetch = vi.fn(async (_input, init) =>
+      await new Promise<Response>((_resolve, reject) => {
+        if (init?.signal?.aborted) {
+          reject(new DOMException('aborted', 'AbortError'))
+          return
+        }
+        init?.signal?.addEventListener('abort', () =>
+          reject(new DOMException('aborted', 'AbortError')))
+      }))
+    const store = createStoreClient({
+      baseUrl: 'https://tb.example',
+      sk: 'secret',
+      fetcher,
+      timeoutMs: 5_000,
+    })
+    const controller = new AbortController()
+    const pending = store.stat(URI, { signal: controller.signal })
+    controller.abort()
+    await expect(pending).rejects.toMatchObject({ name: 'AbortError' })
+  })
 })

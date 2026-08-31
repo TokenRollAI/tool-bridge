@@ -14,13 +14,8 @@
 import type { OwnerRef, Timestamp, TreePath } from '../types'
 import { normalizePath, validatePath } from '../tree/path'
 import { KEY_FEEDBACK, type StateStore } from '../store'
+import { crypto, TextEncoder } from '../webGlobals'
 import { TBError } from '../errors'
-
-/** WebCrypto 全局(Workers 与 Node ≥19 均有);core 不引宿主类型,按 sk.ts 惯例局部声明。 */
-declare const crypto: {
-  getRandomValues<T extends Uint8Array>(array: T): T
-}
-declare const TextEncoder: { new (): { encode(input: string): Uint8Array } }
 
 /** 一条反馈。up/down 是投票人集合(每身份一票、可改票的真源);净分为派生值不落库。 */
 export interface FeedbackEntry {

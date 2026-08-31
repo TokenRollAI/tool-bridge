@@ -35,29 +35,13 @@ import {
   type OwnerRef,
   type Timestamp,
 } from '../types'
+import { normalizeContentType } from '../context/contentType'
 import { normalizeExpiresAt, sha256Hex } from '../auth/sk'
 import { base64urlEncode } from '../encoding/base64url'
+import { crypto, TextEncoder } from '../webGlobals'
 import { parseStoreUri, storeUri } from './uri'
 import { TBError } from '../errors'
 import { omit } from '../omit'
-
-declare const crypto: {
-  getRandomValues(array: Uint8Array): Uint8Array
-  subtle: {
-    digest(algorithm: string, data: Uint8Array): Promise<ArrayBuffer>
-    importKey(
-      format: 'raw',
-      keyData: Uint8Array,
-      algorithm: { hash: string, name: 'HMAC' },
-      extractable: false,
-      usages: ['sign'],
-    ): Promise<unknown>
-    sign(algorithm: 'HMAC', key: unknown, data: Uint8Array): Promise<ArrayBuffer>
-  }
-}
-declare class TextEncoder {
-  encode(input?: string): Uint8Array
-}
 
 export const KEY_STORE_OBJECT = 'store:object:'
 export const KEY_STORE_UPLOAD = 'store:upload:'
@@ -285,19 +269,6 @@ function normalizeTimestamp(value: unknown, field: string): Timestamp {
   }
 }
 
-function normalizeContentType(value: unknown): string {
-  if (
-    typeof value !== 'string'
-    || value.trim() === ''
-    || value.length > 255
-    || !value.includes('/')
-    || /[\r\n\0]/.test(value)
-  ) {
-    throw new TBError('invalid_argument', 'contentType 不合法')
-  }
-  return value.trim().toLowerCase()
-}
-
 function normalizeChecksum(value: unknown): StoreChecksum | undefined {
   if (value === undefined) return undefined
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
@@ -315,7 +286,7 @@ function normalizeChecksum(value: unknown): StoreChecksum | undefined {
 }
 
 function normalizeUploadInput(input: StoreUploadInput): NormalizedUploadInput {
-  const contentType = normalizeContentType(input?.contentType)
+  const contentType = normalizeContentType(input?.contentType, 'contentType 不合法')
   let filename: string | undefined
   if (input.filename !== undefined) {
     if (
@@ -378,7 +349,7 @@ function normalizeContentTypePattern(value: unknown): string {
     const prefix = value.slice(0, -1)
     if (prefix.length > 1 && !/[\r\n\0]/.test(value)) return value.toLowerCase()
   }
-  return normalizeContentType(value)
+  return normalizeContentType(value, 'contentType 不合法')
 }
 
 function descriptorOf(object: StoreObject): StoreObjectDescriptor {
@@ -420,11 +391,16 @@ export class StoreService {
   private readonly uploadTtlSec: number
   private readonly cas: NonNullable<StateStore['compareAndSwap']>
 
+  private readonly state: StateStore
+  private readonly objects: ObjectStore
+
   constructor(
-    private readonly state: StateStore,
-    private readonly objects: ObjectStore,
+    state: StateStore,
+    objects: ObjectStore,
     opts: StoreServiceOptions,
   ) {
+    this.state = state
+    this.objects = objects
     if (state.compareAndSwap === undefined) {
       throw new TBError('unavailable', 'StoreService 要求 StateStore.compareAndSwap', {
         retryable: false,

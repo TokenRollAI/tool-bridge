@@ -16,10 +16,10 @@ import { contextCommands } from './commands'
 
 export type ContextMethod = keyof ContextProvider
 
-/** 数据面 provider 动词全集；名称和 scope 均由命令注册真源派生。 */
+/** 数据面 provider 动词全集；名称和 scope 均由命令注册真源派生(宿主专属扩展不算)。 */
 export const CONTEXT_METHODS: readonly ContextMethod[] = contextCommands
   .names()
-  .filter(name => name !== 'create_upload') as ContextMethod[]
+  .filter(name => !contextCommands.isHostOnly(name)) as ContextMethod[]
 
 /** 写动词(判定只读用)。 */
 export const CONTEXT_WRITE_METHODS: readonly ContextMethod[] = CONTEXT_METHODS

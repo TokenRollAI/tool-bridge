@@ -6,10 +6,8 @@
  * 流与 body 用最小结构类型声明,与 Workers / Node 的全局 ReadableStream 结构兼容。
  */
 
+import { TextDecoder, TextEncoder } from '../webGlobals'
 import { TBError } from '../errors'
-
-declare const TextEncoder: { new (): { encode(input: string): Uint8Array } }
-declare const TextDecoder: { new (): { decode(input: Uint8Array): string } }
 
 /** 最小读流(结构兼容全局 ReadableStream<Uint8Array>)。 */
 export interface ObjectBodyStream {
@@ -191,7 +189,11 @@ export class MemoryObjectStore implements ObjectStore {
   private m = new Map<string, StoredObject>()
   private seq = 0
 
-  constructor(private now: () => string = () => new Date().toISOString()) {}
+  private now: () => string
+
+  constructor(now: () => string = () => new Date().toISOString()) {
+    this.now = now
+  }
 
   async head(key: string): Promise<ObjectMeta | null> {
     return this.m.get(key)?.meta ?? null

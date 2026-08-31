@@ -24,6 +24,7 @@ export * from './device/mailbox'
 export * from './device/presence'
 export * from './device/session'
 export * from './device/shellAllow'
+export { base64urlDecode, base64urlEncode } from './encoding/base64url'
 export {
   isTBError,
   statusForCode,

@@ -95,8 +95,6 @@ export interface PreparedDeviceCredential {
   /** WebSocket upgrade 请求头；RN 原生 adapter 可注入 Authorization。 */
   headers?: Readonly<Record<string, string>>
   protocols?: string | readonly string[]
-  /** 为短期 ticket 等未来认证形态预留；缺省使用标准 device WS URL。 */
-  url?: string
 }
 
 export interface DeviceCredentialProvider {
@@ -257,23 +255,17 @@ export function deviceWsUrl(baseUrl: string, deviceId: string): string {
   return url.toString()
 }
 
+/** 连接一律使用内部构造的标准 device WS URL;凭证只贡献 headers/protocols。 */
 function validateCredential(
   credential: PreparedDeviceCredential,
-  fallbackUrl: string,
+  url: string,
 ): PreparedDeviceCredential & { url: string } {
-  const url = new URL(credential.url ?? fallbackUrl)
-  if (url.protocol !== 'ws:' && url.protocol !== 'wss:') {
-    throw new TBError('invalid_argument', 'device credential URL must use ws: or wss:')
-  }
-  if (url.username !== '' || url.password !== '') {
-    throw new TBError('invalid_argument', 'device credential URL must not contain userinfo')
-  }
   for (const [name, value] of Object.entries(credential.headers ?? {})) {
     if (name.includes('\r') || name.includes('\n') || value.includes('\r') || value.includes('\n')) {
       throw new TBError('invalid_argument', 'device credential headers contain a newline')
     }
   }
-  return { ...credential, url: url.toString() }
+  return { ...credential, url }
 }
 
 function portableExpose(expose: DeviceClientExpose): WireDeviceExpose {

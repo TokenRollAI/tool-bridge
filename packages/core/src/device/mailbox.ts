@@ -9,52 +9,13 @@
 
 import type { OwnerRef, Timestamp, TreePath } from '../types'
 import type { StateStore } from '../store'
+// WebCrypto/TextEncoder are runtime globals in Workers and supported Node
+// versions. Core's non-DOM tsconfig intentionally does not declare them; the
+// shared minimum portable surface lives in webGlobals.ts.
+import { crypto, TextDecoder, TextEncoder, type WebCryptoKey } from '../webGlobals'
 import { base64urlDecode, base64urlEncode } from '../encoding/base64url'
 import { TBError, type TBErrorBody } from '../errors'
 import { sha256Hex } from '../auth/sk'
-
-// WebCrypto/TextEncoder are runtime globals in Workers and supported Node
-// versions. Core's non-DOM tsconfig intentionally does not declare them, so
-// keep the minimum portable surface local instead of importing node:crypto.
-interface MailboxCryptoKey { readonly type: string }
-interface MailboxSubtleCrypto {
-  decrypt(
-    algorithm: { additionalData: Uint8Array, iv: Uint8Array, name: 'AES-GCM' },
-    key: MailboxCryptoKey,
-    data: Uint8Array,
-  ): Promise<ArrayBuffer>
-  deriveKey(
-    algorithm: {
-      hash: 'SHA-256'
-      info: Uint8Array
-      name: 'HKDF'
-      salt: Uint8Array
-    },
-    baseKey: MailboxCryptoKey,
-    derivedKeyType: { length: 256, name: 'AES-GCM' },
-    extractable: false,
-    keyUsages: Array<'decrypt' | 'encrypt'>,
-  ): Promise<MailboxCryptoKey>
-  digest(algorithm: 'SHA-256', data: Uint8Array): Promise<ArrayBuffer>
-  encrypt(
-    algorithm: { additionalData: Uint8Array, iv: Uint8Array, name: 'AES-GCM' },
-    key: MailboxCryptoKey,
-    data: Uint8Array,
-  ): Promise<ArrayBuffer>
-  importKey(
-    format: 'raw',
-    keyData: Uint8Array,
-    algorithm: 'HKDF',
-    extractable: false,
-    keyUsages: Array<'deriveKey'>,
-  ): Promise<MailboxCryptoKey>
-}
-declare const crypto: {
-  getRandomValues(array: Uint8Array): Uint8Array
-  subtle: MailboxSubtleCrypto
-}
-declare const TextEncoder: { new (): { encode(input: string): Uint8Array } }
-declare const TextDecoder: { new (): { decode(input: ArrayBuffer | Uint8Array): string } }
 
 export const KEY_DEVICE_OPERATION = 'deviceop:'
 
@@ -449,7 +410,7 @@ async function stateKey(deviceId: string, operationId: string): Promise<string> 
 
 class DeviceMailboxCipher {
   private readonly root: Uint8Array
-  private keyPromise?: Promise<MailboxCryptoKey>
+  private keyPromise?: Promise<WebCryptoKey>
 
   constructor(masterKey: string) {
     let decoded: Uint8Array
@@ -464,7 +425,7 @@ class DeviceMailboxCipher {
     this.root = decoded
   }
 
-  private key(): Promise<MailboxCryptoKey> {
+  private key(): Promise<WebCryptoKey> {
     this.keyPromise ??= (async () => {
       const rootKey = await crypto.subtle.importKey('raw', this.root, 'HKDF', false, ['deriveKey'])
       return await crypto.subtle.deriveKey(

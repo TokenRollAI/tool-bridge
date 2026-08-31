@@ -11,22 +11,7 @@ import type { Action } from '../types'
 import { BuiltinCommandRegistry } from './commandRegistry'
 import { LIST_OPTS_ZOD_SCHEMA } from './util'
 
-export const STORE_COMMANDS = [
-  'create_upload',
-  'complete_upload',
-  'abort_upload',
-  'stat',
-  'read',
-  'share',
-  'revoke_share',
-  'delete',
-  'list',
-] as const
-
-export type StoreCommand = typeof STORE_COMMANDS[number]
-
-export interface StoreModuleCallbacks {
-  /** relay URL / direct signed request 的 wire 组装由宿主完成。 */
+export interface StoreModuleCallbacks { /** relay URL / direct signed request 的 wire 组装由宿主完成。 */
   createUpload(
     start: StoreUploadStart,
     runtime: BuiltinDispatchRuntime | undefined,

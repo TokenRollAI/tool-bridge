@@ -21,12 +21,15 @@ import {
   uploadObject,
   type UploadObjectInput,
 } from './upload'
+import { validTimeout } from '../shared/transport'
 
 export interface StoreClientOptions {
   baseUrl: string
   fetcher?: typeof fetch
   /** Raw Tool Bridge SK, resolved again for every control request to allow rotation. */
   sk: string | (() => Promise<string> | string)
+  /** 单次请求默认超时；缺省不创建 SDK timer。与固定控制面 client 的 timeoutMs 同语义。 */
+  timeoutMs?: number
   /** Additional exact origins allowed to host gateway-issued Store bearer URLs. */
   trustedRefOrigins?: readonly string[]
 }
@@ -88,6 +91,31 @@ function parseTrustedOrigins(value: unknown): string[] {
 
 export function createStoreClient(options: StoreClientOptions): StoreClient {
   const fetcher = resolveStoreFetcher(options.fetcher)
+  if (options.timeoutMs !== undefined && !validTimeout(options.timeoutMs)) {
+    throw new TBError('invalid_argument', 'Store client timeoutMs is invalid')
+  }
+  /**
+   * timeoutMs 与调用方 signal 组合成单一 signal;超时中止在此边界重分类为
+   * retryable unavailable(内部各链路把一切 abort 当调用方中止透传,不足以区分)。
+   */
+  const guarded = async <T>(
+    callerSignal: AbortSignal | undefined,
+    run: (signal: AbortSignal | undefined) => Promise<T>,
+  ): Promise<T> => {
+    if (options.timeoutMs === undefined) return await run(callerSignal)
+    const timeoutSignal = AbortSignal.timeout(options.timeoutMs)
+    const signal = callerSignal === undefined
+      ? timeoutSignal
+      : AbortSignal.any([callerSignal, timeoutSignal])
+    try {
+      return await run(signal)
+    } catch (error) {
+      if (timeoutSignal.aborted && callerSignal?.aborted !== true) {
+        throw new TBError('unavailable', 'Store request timed out', { retryable: true })
+      }
+      throw error
+    }
+  }
   const controlOrigin = new URL(storeCommandUrl(options.baseUrl, 'read')).origin
   const trustedRefOrigins = new Set([
     controlOrigin,
@@ -151,81 +179,86 @@ export function createStoreClient(options: StoreClientOptions): StoreClient {
 
   return {
     async upload(input) {
-      return await uploadObject({
+      return await guarded(input.signal, async signal => await uploadObject({
         ...input,
+        ...(signal === undefined ? {} : { signal }),
         baseUrl: options.baseUrl,
         deviceId: 'store-client',
         fetcher,
         credentialProvider: {
           prepare: async () => ({ headers: { authorization: `Bearer ${await resolveSk()}` } }),
         },
-      })
+      }))
     },
     async stat(uri, opts) {
       const expectedUri = parseStoreUri(uri)
-      return parseStoreClientObjectDescriptor(
-        await control('stat', { uri: expectedUri }, opts?.signal),
+      return await guarded(opts?.signal, async signal => parseStoreClientObjectDescriptor(
+        await control('stat', { uri: expectedUri }, signal),
         expectedUri,
-      )
+      ))
     },
     async list(opts = {}) {
       const { signal, ...pageOpts } = opts
-      return parseStoreListPage(await control('list', { opts: pageOpts }, signal))
+      return await guarded(signal, async composed =>
+        parseStoreListPage(await control('list', { opts: pageOpts }, composed)))
     },
     async read(uri, opts) {
       const expectedUri = parseStoreUri(uri)
-      return validateRef(parseStoreReadGrant(
-        await control('read', { uri: expectedUri }, opts?.signal),
+      return await guarded(opts?.signal, async signal => validateRef(parseStoreReadGrant(
+        await control('read', { uri: expectedUri }, signal),
         expectedUri,
-      ), 'refs')
+      ), 'refs'))
     },
     async download(uri, opts) {
       const expectedUri = parseStoreUri(uri)
-      const grant = validateRef(parseStoreReadGrant(
-        await control('read', { uri: expectedUri }, opts?.signal),
-        expectedUri,
-      ), 'refs')
-      if (Date.parse(grant.expiresAt) <= Date.now()) {
-        throw new TBError('internal', 'gateway returned an expired Store read grant', {
-          retryable: true,
-        })
-      }
-      try {
-        const response = await fetcher(grant.$ref, {
-          credentials: 'omit',
-          redirect: 'error',
-          signal: opts?.signal,
-        })
-        if (response.ok) return response
-        await response.body?.cancel()
-        throw new TBError('unavailable', `Store download returned HTTP ${response.status}`, {
-          retryable: response.status === 408 || response.status === 429 || response.status >= 500,
-        })
-      } catch (error) {
-        if (error instanceof TBError) throw error
-        if (opts?.signal?.aborted || (error instanceof Error && error.name === 'AbortError')) {
-          throw error
+      return await guarded(opts?.signal, async (signal) => {
+        const grant = validateRef(parseStoreReadGrant(
+          await control('read', { uri: expectedUri }, signal),
+          expectedUri,
+        ), 'refs')
+        if (Date.parse(grant.expiresAt) <= Date.now()) {
+          throw new TBError('internal', 'gateway returned an expired Store read grant', {
+            retryable: true,
+          })
         }
-        // The raw fetch error can contain the bearer URL; never forward it.
-        throw new TBError('unavailable', 'Store download failed', { retryable: true })
-      }
+        try {
+          const response = await fetcher(grant.$ref, {
+            credentials: 'omit',
+            redirect: 'error',
+            signal,
+          })
+          if (response.ok) return response
+          await response.body?.cancel()
+          throw new TBError('unavailable', `Store download returned HTTP ${response.status}`, {
+            retryable: response.status === 408 || response.status === 429 || response.status >= 500,
+          })
+        } catch (error) {
+          if (error instanceof TBError) throw error
+          if (signal?.aborted || (error instanceof Error && error.name === 'AbortError')) {
+            throw error
+          }
+          // The raw fetch error can contain the bearer URL; never forward it.
+          throw new TBError('unavailable', 'Store download failed', { retryable: true })
+        }
+      })
     },
     async share(uri, opts) {
       const expectedUri = parseStoreUri(uri)
-      return validateRef(parseStoreShareGrant(await control('share', {
-        uri: expectedUri,
-        ...(opts?.ttlSec === undefined ? {} : { ttlSec: opts.ttlSec }),
-      }, opts?.signal), expectedUri), 'shares')
+      return await guarded(opts?.signal, async signal =>
+        validateRef(parseStoreShareGrant(await control('share', {
+          uri: expectedUri,
+          ...(opts?.ttlSec === undefined ? {} : { ttlSec: opts.ttlSec }),
+        }, signal), expectedUri), 'shares'))
     },
     async revokeShare(shareId, opts) {
       if (!validShareId(shareId)) {
         throw new TBError('invalid_argument', 'Store shareId must be non-empty')
       }
-      await control('revoke_share', { shareId }, opts?.signal)
+      await guarded(opts?.signal, async signal => await control('revoke_share', { shareId }, signal))
     },
     async delete(uri, opts) {
       const expectedUri = parseStoreUri(uri)
-      await control('delete', { uri: expectedUri }, opts?.signal)
+      await guarded(opts?.signal, async signal => await control('delete', { uri: expectedUri }, signal))
     },
   }
 }

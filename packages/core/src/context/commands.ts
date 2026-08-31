@@ -129,6 +129,8 @@ export const contextCommands = new HtbpCommandRegistry<ContextCommandTarget>()
     'create_upload',
     {
       h: 'create a short-lived, path-scoped direct-upload grant; persist the returned uri, not url',
+      // 宿主专属扩展:仅在底层具备直传签名能力时由宿主装配,不进基础动词表。
+      hostOnly: true,
       inputSchema: z.strictObject({
         path: z.string().describe('target entry path inside the namespace'),
         contentType: z.string().describe('media type signed into the PUT request'),
@@ -159,7 +161,7 @@ export function parseContextCmdArgs(
   args: Record<string, unknown>,
 ): Record<string, unknown> {
   const normalized = command.toLowerCase()
-  if (!contextCommands.has(normalized) || normalized === 'create_upload') {
+  if (!contextCommands.has(normalized) || contextCommands.isHostOnly(normalized)) {
     throw new TBError('invalid_argument', `unknown cmd '${command}'`)
   }
   return contextCommands.parse(normalized, args) as Record<string, unknown>
@@ -172,7 +174,7 @@ export async function dispatchContextCmd(
   args: Record<string, unknown>,
 ): Promise<unknown> {
   const normalized = command.toLowerCase()
-  if (!contextCommands.has(normalized) || normalized === 'create_upload') {
+  if (!contextCommands.has(normalized) || contextCommands.isHostOnly(normalized)) {
     throw new TBError('invalid_argument', `unknown cmd '${command}'`)
   }
   const method = normalized as keyof ContextProvider

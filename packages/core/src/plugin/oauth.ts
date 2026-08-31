@@ -12,6 +12,7 @@
  */
 
 import { z } from 'zod'
+import { base64Encode } from '../encoding/base64url'
 import { TBError } from '../errors'
 
 /** 令牌端点的客户端认证方式。 */
@@ -109,20 +110,12 @@ function encodeForm(entries: ReadonlyMap<string, string>): string {
   return [...entries].map(([key, value]) => `${encode(key)}=${encode(value)}`).join('&')
 }
 
-/** ASCII → base64(core 无 DOM lib,不能用 btoa;Basic 认证的输入已被 encodeURIComponent 收成 ASCII)。 */
+/**
+ * ASCII → 标准 base64(core 无 DOM lib,不能用 btoa;Basic 认证的输入已被
+ * encodeURIComponent 收成 ASCII,charCodeAt 即字节)。编码实现统一在 encoding/base64url。
+ */
 function base64(ascii: string): string {
-  const table = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
-  let out = ''
-  for (let i = 0; i < ascii.length; i += 3) {
-    const a = ascii.charCodeAt(i)
-    const b = i + 1 < ascii.length ? ascii.charCodeAt(i + 1) : Number.NaN
-    const c = i + 2 < ascii.length ? ascii.charCodeAt(i + 2) : Number.NaN
-    out += table[a >> 2]
-    out += table[((a & 0x03) << 4) | (Number.isNaN(b) ? 0 : b >> 4)]
-    out += Number.isNaN(b) ? '=' : table[((b & 0x0F) << 2) | (Number.isNaN(c) ? 0 : c >> 6)]
-    out += Number.isNaN(c) ? '=' : table[c & 0x3F]
-  }
-  return out
+  return base64Encode(Uint8Array.from(ascii, char => char.charCodeAt(0)))
 }
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {

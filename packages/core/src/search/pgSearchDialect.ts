@@ -4,7 +4,8 @@
  *
  * 与 SQLite 方言的结构性差异:
  *
- * - 占位符是 `$1..$n`(SQLite 是 `?`),故不能直接复用 SQLite 的 SQL 常量。
+ * - 占位符是 `$1..$n`(SQLite 是 `?`),固定语句与 SQLite 共用 toolSearchFixedStatements
+ *   模板,仅注入占位符与 `::int` 归一两处差异。
  * - 检索用 `ILIKE` 做 Unicode 大小写折叠；查询单元、部分命中召回和加权评分 SQL
  *   与 SQLite 共用同一个生成器。不用 tsvector/trigram 索引：在节点上限约束下
  *   Seq Scan 已是最优，依据见 schema 里的实测注释。
@@ -16,16 +17,17 @@
  */
 
 import {
+  type SqlSearchDialect,
+  TOOL_SEARCH_CAPACITY_MARKER,
+  toolSearchCandidateStatement,
+  toolSearchFixedStatements,
+} from './sqlSearchIndex'
+import {
   normalizeToolSearchOptions,
   prepareToolSearchQuery,
   TOOL_SEARCH_AUDIT_NODE_LIMIT,
   TOOL_SEARCH_UNIT_LIMIT,
 } from './types'
-import {
-  type SqlSearchDialect,
-  TOOL_SEARCH_CAPACITY_MARKER,
-  toolSearchCandidateStatement,
-} from './sqlSearchIndex'
 
 /** 建表(幂等)。不依赖任何 PG 扩展。 */
 export const PG_SEARCH_SCHEMA_STATEMENTS: readonly string[] = [
@@ -85,9 +87,26 @@ export const PG_SEARCH_SCHEMA_STATEMENTS: readonly string[] = [
  */
 export const PG_SEARCH_WRITE_LOCK_KEY = 0x7b5ea2c8
 
+/**
+ * 固定语句:模板与 SQLite 共用 toolSearchFixedStatements,这里只注入两处真实差异
+ * ——`$n` 占位符与数值列 `::int` 归一。
+ *
+ * `::int` 务必保留:postgres.js 把 `bigint` 与 `COUNT(*)` 返回为**字符串**、`EXISTS`
+ * 返回 **boolean**,而 core 的 MetaRow/PathStateRow 契约要求 number。不转的后果不是
+ * 类型报错而是静默错行为:
+ *   - `ToolSearchCandidate.revision` 运行时变字符串,违反公开类型;
+ *   - `current.has_tools === 0` 对 boolean `false` 永不成立,空快照 no-op 判定失效,
+ *     重复 `replace(path, [])` 会白 bump revision 并失效所有既有 cursor。
+ * revision 用 ::int:核心只做相等比较,且 4 字节整型对索引代数足够(溢出前需 21 亿次
+ * mutation);超出即回绕仍只影响 cursor 失效判定,不损坏权威数据。
+ */
+const PG_FIXED_STATEMENTS = toolSearchFixedStatements({
+  castInt: expr => `${expr}::int`,
+  placeholder: index => `$${index}`,
+})
+
 /** 单行写 path→digest 快照(位置参数:path, digest);`replace` 内联使用。 */
-export const PG_SEARCH_INSERT_SNAPSHOT_SQL
-  = 'INSERT INTO tb_search_snapshots_v5(path, digest) VALUES ($1, $2)'
+export const PG_SEARCH_INSERT_SNAPSHOT_SQL = PG_FIXED_STATEMENTS.insertSnapshot
 
 /**
  * 多行 VALUES 批量插入。
@@ -131,52 +150,6 @@ export const PG_SEARCH_SNAPSHOTS_COLUMNS = ['path', 'digest'] as const
  */
 export const PG_SEARCH_INSERT_ROWS_MAX = 1000
 
-/**
- * 类型归一(务必保留 ::int 转换):postgres.js 把 `bigint` 与 `COUNT(*)` 返回为
- * **字符串**、`EXISTS` 返回 **boolean**,而 core 的 MetaRow/PathStateRow 契约要求
- * number。不转的后果不是类型报错而是静默错行为:
- *   - `ToolSearchCandidate.revision` 运行时变字符串,违反公开类型;
- *   - `current.has_tools === 0` 对 boolean `false` 永不成立,空快照 no-op 判定失效,
- *     重复 `replace(path, [])` 会白 bump revision 并失效所有既有 cursor。
- * revision 用 ::int:核心只做相等比较,且 4 字节整型对索引代数足够(溢出前需 21 亿次
- * mutation);超出即回绕仍只影响 cursor 失效判定,不损坏权威数据。
- */
-const META_SQL = `
-SELECT revision::int AS revision, seeded::int AS seeded, cursor_secret
-FROM tb_search_meta_v5 WHERE singleton = 1
-`
-const SNAPSHOT_DIGESTS_SQL
-  = 'SELECT path, digest FROM tb_search_snapshots_v5 ORDER BY path'
-const PATH_STATE_SQL = `
-SELECT snapshots.digest,
-  EXISTS(SELECT 1 FROM tb_search_tools_v5 WHERE path = $1)::int AS has_tools,
-  (SELECT COUNT(*) FROM tb_search_snapshots_v5)::int AS path_count
-FROM (SELECT 1) AS singleton
-LEFT JOIN tb_search_snapshots_v5 AS snapshots ON snapshots.path = $2
-`
-const PRESENT_SQL = 'SELECT 1 AS present FROM tb_search_tools_v5 WHERE path = $1 LIMIT 1'
-const PRESENT_PREFIX_SQL = `
-SELECT 1 AS present FROM tb_search_tools_v5
-WHERE path = $1 OR substr(path, 1, length($2) + 1) = $3 || '/'
-LIMIT 1
-`
-const DELETE_TOOLS_SQL = 'DELETE FROM tb_search_tools_v5 WHERE path = $1'
-const DELETE_SNAPSHOT_SQL = 'DELETE FROM tb_search_snapshots_v5 WHERE path = $1'
-const DELETE_TOOLS_PREFIX_SQL = `
-DELETE FROM tb_search_tools_v5
-WHERE path = $1 OR substr(path, 1, length($2) + 1) = $3 || '/'
-`
-const DELETE_SNAPSHOT_PREFIX_SQL = `
-DELETE FROM tb_search_snapshots_v5
-WHERE path = $1 OR substr(path, 1, length($2) + 1) = $3 || '/'
-`
-const DELETE_ALL_TOOLS_SQL = 'DELETE FROM tb_search_tools_v5'
-const DELETE_ALL_SNAPSHOTS_SQL = 'DELETE FROM tb_search_snapshots_v5'
-const BUMP_REVISION_SQL
-  = 'UPDATE tb_search_meta_v5 SET revision = revision + 1 WHERE singleton = 1'
-const COMPLETE_REBUILD_SQL
-  = 'UPDATE tb_search_meta_v5 SET seeded = 1, revision = revision + 1 WHERE singleton = 1'
-
 /** Postgres 方言:ILIKE 子串检索,$n 占位符,无扩展依赖。 */
 export const pgSearchDialect: SqlSearchDialect = {
   candidateStatement: (query, limit, offset, rawConstraints) => {
@@ -197,20 +170,5 @@ export const pgSearchDialect: SqlSearchDialect = {
     )
   },
   schemaStatements: PG_SEARCH_SCHEMA_STATEMENTS,
-  statements: {
-    bumpRevision: BUMP_REVISION_SQL,
-    completeRebuild: COMPLETE_REBUILD_SQL,
-    deleteAllSnapshots: DELETE_ALL_SNAPSHOTS_SQL,
-    deleteAllTools: DELETE_ALL_TOOLS_SQL,
-    deleteSnapshot: DELETE_SNAPSHOT_SQL,
-    deleteSnapshotPrefix: DELETE_SNAPSHOT_PREFIX_SQL,
-    deleteTools: DELETE_TOOLS_SQL,
-    deleteToolsPrefix: DELETE_TOOLS_PREFIX_SQL,
-    insertSnapshot: PG_SEARCH_INSERT_SNAPSHOT_SQL,
-    meta: META_SQL,
-    pathState: PATH_STATE_SQL,
-    present: PRESENT_SQL,
-    presentPrefix: PRESENT_PREFIX_SQL,
-    snapshotDigests: SNAPSHOT_DIGESTS_SQL,
-  },
+  statements: PG_FIXED_STATEMENTS,
 }

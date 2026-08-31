@@ -44,6 +44,7 @@ import {
   type WireToolSearchRequest,
   type WireTreeJson,
 } from '@tool-bridge/core/protocol'
+import { statusFallback, validTimeout } from '../shared/transport'
 
 export type ClientErrorKind = 'http' | 'invalid' | 'network' | 'protocol' | 'timeout'
 
@@ -393,19 +394,6 @@ function queryString(query?: ClientRequestOptions['query']): string {
   return value === '' ? '' : value
 }
 
-function statusFallback(status: number): { code: WireTBErrorCode, retryable: boolean } {
-  if (status === 400 || status === 422) return { code: 'invalid_argument', retryable: false }
-  if (status === 401 || status === 403) return { code: 'permission_denied', retryable: false }
-  if (status === 404) return { code: 'not_found', retryable: false }
-  if (status === 409) return { code: 'conflict', retryable: false }
-  if (status === 429) return { code: 'rate_limited', retryable: true }
-  // 规范 500 TBError body 仍保留其 internal code；仅非规范 fallback 沿用 CLI 的
-  // unavailable/retryable 兼容语义。
-  if (status === 500) return { code: 'unavailable', retryable: true }
-  if (status >= 500) return { code: 'unavailable', retryable: true }
-  return { code: 'internal', retryable: false }
-}
-
 function redacted(value: string, secrets: readonly string[]): string {
   let result = value
   for (const secret of secrets) {
@@ -467,15 +455,6 @@ function responseError(
     fallback.retryable,
     'http',
   )
-}
-
-function validTimeout(value: number | undefined): value is number {
-  // Node timers above signed 32-bit max are silently clamped to 1ms; keep the
-  // Web-standard client deterministic across Node and browser hosts.
-  return value !== undefined
-    && Number.isInteger(value)
-    && value > 0
-    && value <= 2_147_483_647
 }
 
 /** 建立 Web-standard、宿主中立的 Tool Bridge 固定控制面 client。 */
