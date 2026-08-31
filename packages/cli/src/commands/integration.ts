@@ -11,77 +11,22 @@
  * `tb tool mount` / `tb ctx mount` 保留(树面的动词仍是 mount,协议不变)。
  */
 
-import { encodeCredentialValues } from '@tool-bridge/core'
+import {
+  type CatalogExportDetails,
+  type CatalogListItem,
+  encodeCredentialValues,
+} from '@tool-bridge/core'
 import { Command } from 'commander'
 import type { NodeConfig, NodeInput, Page, SecretSummary } from '../types'
-import { collect, parsePageOpts, resolveTarget, withGlobalOpts, withPageOpts } from '../args'
+import { collect, parseFieldSpecs, parsePageOpts, resolveTarget, withGlobalOpts, withPageOpts } from '../args'
 import { deleteNode, parseConfigSpecs, registerNode } from '../registry'
 import { printJson, printLine, table } from '../output'
 import { confirmDestructive } from '../confirm'
+import { readStdinCredential } from '../stdin'
 import { callDirect, CliError } from '../http'
 import { toolAuthCommand } from './tool'
 
-/** system/catalog 的列表项(core builtin/catalog 的 CatalogListItem)。 */
-interface CatalogListItem {
-  description?: string
-  digest: string
-  exportDetails: Record<string, CatalogExportDetails>
-  exports: string[]
-  id: string
-  nodeKinds: Array<'context' | 'tool'>
-}
-
-interface CatalogCredentialField {
-  description?: string
-  key: string
-  label?: string
-  required?: boolean
-  secret?: boolean
-}
-
-interface CatalogMountConfigField {
-  description?: string
-  key: string
-  label?: string
-  required?: boolean
-}
-
-type CatalogExportAuth
-  = | { fields: CatalogCredentialField[], kind: 'fields' }
-    | { kind: 'none' }
-    | { kind: 'oauth' }
-    | { description?: string, kind: 'single', label?: string, required: boolean }
-
-interface CatalogExportDetails {
-  auth: CatalogExportAuth
-  description?: string
-  id: string
-  kind: 'context' | 'tool'
-  mountConfigFields?: CatalogMountConfigField[]
-}
-
 type SecretExistence = 'absent' | 'exists' | 'unknown'
-
-/** 读 stdin 全量(单值凭证的推荐通道:不进 shell history、不进 ps 输出)。 */
-async function readStdin(): Promise<string> {
-  const chunks: Buffer[] = []
-  for await (const chunk of process.stdin) chunks.push(chunk as Buffer)
-  return Buffer.concat(chunks).toString('utf8').trim()
-}
-
-/** `--field k=v` → 字段表(与 `tb secret set --field` 同一解析规则)。 */
-function parseFields(specs: string[]): Record<string, string> {
-  const out: Record<string, string> = {}
-  for (const spec of specs) {
-    const idx = spec.indexOf('=')
-    if (idx < 0) throw new CliError(`invalid --field "${spec}": expected "key=value"`)
-    const key = spec.slice(0, idx).trim()
-    const value = spec.slice(idx + 1)
-    if (!key || !value) throw new CliError(`invalid --field "${spec}": empty key/value`)
-    out[key] = value
-  }
-  return out
-}
 
 /**
  * 取该 provider 的目录项。**尽力而为**:catalog 只覆盖内置插件,external plugin 不在里面,
@@ -344,7 +289,8 @@ Examples:
       let secretFields: string[] | undefined
 
       if (opts.field.length > 0) {
-        const fields = parseFields(opts.field)
+        // 与 `tb secret set --field` 同一解析(重复 key 报错、允许空值、不 trim)。
+        const fields = parseFieldSpecs(opts.field)
         if (details?.auth.kind === 'single' || details?.auth.kind === 'none') {
           throw new CliError(`provider "${provider}" export "${details.id}" does not use --field`)
         }
@@ -358,7 +304,8 @@ Examples:
         })
         managedCredential = authRef
       } else if (opts.key !== undefined || opts.keyStdin === true) {
-        const value = opts.keyStdin === true ? await readStdin() : String(opts.key)
+        // stdin 凭证只去一个尾随换行,不整体 trim(与 secret set 对齐;首尾空白可能有意义)。
+        const value = opts.keyStdin === true ? await readStdinCredential() : String(opts.key)
         if (value === '') throw new CliError('credential value is empty')
         // 声明了多字段却给单值:平台会在挂载时拒,这里先说清该怎么给。
         const declaredFields = details?.auth.kind === 'fields' ? details.auth.fields : undefined
@@ -386,14 +333,14 @@ Examples:
             ...(exportId ? { export: exportId } : {}),
             ...(authRef ? { authRef } : {}),
             ...(providerConfig ? { providerConfig } : {}),
-          } as NodeConfig
+          }
         : {
             kind: 'tool',
             provider,
             ...(exportId ? { export: exportId } : {}),
             ...(authRef ? { authRef } : {}),
             ...(providerConfig ? { providerConfig } : {}),
-          } as NodeConfig
+          }
 
       const input: NodeInput = {
         path,

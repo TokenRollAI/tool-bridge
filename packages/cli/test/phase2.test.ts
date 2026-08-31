@@ -437,14 +437,14 @@ describe('tb call', () => {
 })
 
 describe('parseCallArgs', () => {
-  it('缺省 {}', () => {
-    expect(parseCallArgs(undefined, undefined)).toEqual({})
+  it('缺省 {}', async () => {
+    expect(await parseCallArgs(undefined, undefined)).toEqual({})
   })
-  it('--args 与 --args-file 互斥', () => {
-    expect(() => parseCallArgs('{}', '/tmp/x.json')).toThrow(/mutually exclusive/)
+  it('--args 与 --args-file 互斥', async () => {
+    await expect(parseCallArgs('{}', '/tmp/x.json')).rejects.toThrow(/mutually exclusive/)
   })
-  it('非对象 JSON → CliError', () => {
-    expect(() => parseCallArgs('[1,2]', undefined)).toThrow(/JSON object/)
+  it('非对象 JSON → CliError', async () => {
+    await expect(parseCallArgs('[1,2]', undefined)).rejects.toThrow(/JSON object/)
   })
 })
 

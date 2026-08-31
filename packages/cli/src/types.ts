@@ -1,5 +1,21 @@
 import type { RegistryNode } from '@tool-bridge/sdk/client'
-import type { Scope } from './scope'
+
+/**
+ * builtin/system 管理面视图与 NodeConfig 形状直接来自 core(经依赖 bundle,单一真源)。
+ * 此前 CLI 手抄一份且已实际漂移(tool 变体缺 export/providerConfig,靠 as 断言压制)。
+ * SecretSummary 是 core `SecretEntrySummary` 的既有 CLI 命名。
+ */
+export type {
+  ContextEntry,
+  ContextEntryMeta,
+  HttpToolDef,
+  NodeConfig,
+  SecretKeyCreated,
+  SecretKeyInput,
+  SecretKeyView,
+  SecretEntrySummary as SecretSummary,
+  Virtualize,
+} from '@tool-bridge/core'
 
 /** 固定 HTBP wire 类型来自 SDK public artifact，不再由 CLI 手抄。 */
 export type {
@@ -13,98 +29,13 @@ export type {
   ToolSpec,
   TreeJson,
 } from '@tool-bridge/sdk/client'
+import type { NodeConfig, Virtualize } from '@tool-bridge/core'
 
-/** SecretKey 投影(hash 永不出网关)。 */
-export interface SecretKeyView {
-  createdAt?: string
-  description?: string
-  disabled?: boolean
-  expiresAt?: string
-  id: string
-  owner: string
-  registerPaths?: string[]
-  scopes: Scope[]
-}
-
-export interface SecretKeyInput {
-  description?: string
-  expiresAt?: string
-  owner: string
-  registerPaths?: string[]
-  scopes: Scope[]
-}
-
-/** SKRegistry.Write 返回:密钥投影 + 明文(仅此一次)。 */
-export interface SecretKeyCreated {
-  key: SecretKeyView
-  secret: string
-}
-
-export interface SecretSummary {
-  name: string
-  updatedAt?: string
-}
-
+/** whoami 的宽松健康视图(system/status/get 返回的 StatusSummary 子集,探测失败时字段缺省)。 */
 export interface StatusView {
   healthy?: boolean
   version?: string
 }
-
-/** 工具虚拟化(mcp/http 适用)。 */
-export interface Virtualize {
-  describe?: Record<string, string>
-  hide?: string[]
-  prefix?: string
-  rename?: Record<string, string>
-}
-
-/** http Provider 的单个工具定义。 */
-export interface HttpToolDef {
-  description: string
-  effect?: 'read' | 'write' | 'destructive'
-  inputSchema?: unknown
-  method: 'GET' | 'POST' | 'PUT' | 'DELETE'
-  name: string
-  pathTemplate: string
-}
-
-/** NodeConfig 按 kind(CLI 构造 mcp/http/remote/context/skillhub 形状)。 */
-export type NodeConfig
-  = | {
-    auth?: 'oauth'
-    authHeader?: string
-    authRef?: string
-    authScheme?: string
-    headers?: Record<string, string>
-    kind: 'mcp'
-    url: string
-  }
-  | {
-    authHeader?: string
-    authRef?: string
-    authScheme?: string
-    endpoint: string
-    kind: 'http'
-    tools: HttpToolDef[]
-  }
-  | { authRef?: string, kind: 'tool', provider: string }
-  | { baseUrl: string, kind: 'remote', skRef?: string }
-  | {
-    authRef?: string
-    kind: 'context'
-    provider: string
-    providerConfig?: Record<string, unknown>
-    readOnly?: boolean
-    ttl?: number
-  }
-  | {
-    authRef?: string
-    kind: 'skillhub'
-    provider: string
-    providerConfig?: Record<string, unknown>
-    readOnly?: boolean
-    ttl?: number
-  }
 
 /**
  * Node 投影(NodeRegistry.List/Get 返回;CLI 只取渲染所需字段)。
@@ -114,21 +45,6 @@ export interface Node extends Omit<RegistryNode, 'config' | 'description' | 'vir
   config?: NodeConfig
   description?: string
   virtualize?: Virtualize
-}
-
-/** context entry 元数据(ContextProvider List/Write/Update 返回)。 */
-export interface ContextEntryMeta {
-  contentType: string
-  metadata: Record<string, string>
-  size?: number
-  updatedAt: string
-  uri: string
-  version: string
-}
-
-/** context entry 全量(Get 返回;大对象 content = { $ref: <预签名 URL> })。 */
-export interface ContextEntry extends ContextEntryMeta {
-  content: string | unknown
 }
 
 /** NodeInput = Omit<Node,'registeredBy'|'online'|'lastSeenAt'|'createdAt'|'updatedAt'>。 */

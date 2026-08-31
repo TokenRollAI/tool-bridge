@@ -1,17 +1,11 @@
 import { CliError } from './http'
 
 /**
- * SK Scope 与动作。CLI 本地镜像线格式,不依赖 core。
+ * SK Scope 与动作:类型与常量表来自 core(经依赖 bundle,单一真源)。
+ * 此前 CLI 手抄一份"以免依赖 core",但 CLI 早已在多处 import core,手抄只剩漂移风险。
  */
-export type Action = 'read' | 'write' | 'call' | 'register' | 'admin'
-
-export interface Scope {
-  actions: Action[]
-  effect?: 'allow' | 'deny'
-  pattern: string
-}
-
-const ACTIONS: readonly Action[] = ['read', 'write', 'call', 'register', 'admin']
+export { type Action, ACTIONS, type Scope } from '@tool-bridge/core'
+import { type Action, ACTIONS, type Scope } from '@tool-bridge/core'
 
 /**
  * 解析 `--scope` 字符串 `"pattern:actions"` → Scope。

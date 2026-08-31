@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs'
 import type { HttpToolDef, Node, NodeInput, Virtualize } from './types'
 import { callDirect, CliError, type Target, withClient } from './http'
+import { parseKeyValueSpecs } from './args'
 import { asArray } from './output'
 
 /**
@@ -63,33 +64,27 @@ export function buildVirtualize(args: {
   const prefix = args.prefix ? String(args.prefix) : undefined
   if (prefix) v.prefix = prefix
 
-  const rename: Record<string, string> = {}
-  for (const spec of asArray(args.rename)) {
-    const idx = spec.indexOf('=')
-    if (idx < 0) {
-      throw new CliError(`invalid --rename "${spec}": expected "from=to" e.g. "old__name=new"`)
-    }
-    const from = spec.slice(0, idx).trim()
-    const to = spec.slice(idx + 1).trim()
-    if (!from || !to) throw new CliError(`invalid --rename "${spec}": empty from/to`)
-    rename[from] = to
-  }
+  const rename = parseKeyValueSpecs(asArray(args.rename), {
+    expected: '"from=to" e.g. "old__name=new"',
+    flag: '--rename',
+    keyLabel: 'from',
+    onDuplicate: 'last-wins',
+    trimValue: true,
+    valueLabel: 'to',
+  })
   if (Object.keys(rename).length) v.rename = rename
 
   const hide = asArray(args.hide)
   if (hide.length) v.hide = hide
 
-  const describe: Record<string, string> = {}
-  for (const spec of asArray(args.describe)) {
-    const idx = spec.indexOf('=')
-    if (idx < 0) {
-      throw new CliError(`invalid --describe "${spec}": expected "from=text"`)
-    }
-    const from = spec.slice(0, idx).trim()
-    const text = spec.slice(idx + 1).trim()
-    if (!from || !text) throw new CliError(`invalid --describe "${spec}": empty from/text`)
-    describe[from] = text
-  }
+  const describe = parseKeyValueSpecs(asArray(args.describe), {
+    expected: '"from=text"',
+    flag: '--describe',
+    keyLabel: 'from',
+    onDuplicate: 'last-wins',
+    trimValue: true,
+    valueLabel: 'text',
+  })
   if (Object.keys(describe).length) v.describe = describe
 
   return Object.keys(v).length ? v : undefined
@@ -140,18 +135,71 @@ function validateToolDef(t: unknown, i: number): HttpToolDef {
  * 密钥不走这里:它明文进节点记录,任何对该节点有 read 的 SK 都看得见。凭证走 --auth-ref。
  */
 export function parseConfigSpecs(specs: string[]): Record<string, string> | undefined {
-  const config: Record<string, string> = {}
-  for (const spec of specs) {
-    const idx = spec.indexOf('=')
-    if (idx < 0) {
-      throw new CliError(`invalid --config "${spec}": expected "key=value"`)
-    }
-    const key = spec.slice(0, idx).trim()
-    const value = spec.slice(idx + 1).trim()
-    if (!key || !value) throw new CliError(`invalid --config "${spec}": empty key/value`)
-    config[key] = value
-  }
+  const config = parseKeyValueSpecs(specs, {
+    flag: '--config',
+    onDuplicate: 'last-wins',
+    trimValue: true,
+  })
   return Object.keys(config).length ? config : undefined
+}
+
+/**
+ * r2/s3 对象存储挂载的共用参数面(ctx mount 与 skill mount 的 provider 分支逐行同构,收敛于此):
+ * - r2:平台自带桶,拒绝 --endpoint/--bucket/--region/--auth-ref;providerConfig 只含可选 prefix。
+ * - s3:--endpoint/--bucket/--auth-ref 必填,region/prefix 可选。
+ * - 其余 provider:allowPlugin(ctx mount)时走 plugin 分支(拒 r2/s3 专用 flag,
+ *   --config → providerConfig);否则直接拒(skill mount 只认 r2/s3)。
+ * 返回 providerConfig(空则 undefined,不塞空对象);authRef 的落位仍由调用方组装。
+ */
+export function parseObjectStorageMountOpts(
+  provider: string,
+  opts: {
+    authRef?: string
+    bucket?: unknown
+    config?: string[]
+    endpoint?: unknown
+    prefix?: string
+    region?: unknown
+  },
+  { allowPlugin = false }: { allowPlugin?: boolean } = {},
+): Record<string, unknown> | undefined {
+  const { authRef, prefix } = opts
+  const configSpecs = opts.config ?? []
+  if (provider === 'r2') {
+    if (opts.endpoint || opts.bucket || opts.region || authRef) {
+      throw new CliError('--endpoint/--bucket/--region/--auth-ref only apply to s3')
+    }
+    if (configSpecs.length > 0) {
+      throw new CliError('--config only applies to plugin providers')
+    }
+    return prefix ? { prefix } : undefined
+  }
+  if (provider === 's3') {
+    const endpoint = String(opts.endpoint ?? '').trim()
+    if (!endpoint) throw new CliError('--endpoint is required for --provider s3')
+    const bucket = String(opts.bucket ?? '').trim()
+    if (!bucket) throw new CliError('--bucket is required for --provider s3')
+    if (!authRef) throw new CliError('--auth-ref is required for --provider s3')
+    if (configSpecs.length > 0) {
+      throw new CliError('--config only applies to plugin providers')
+    }
+    return {
+      endpoint,
+      bucket,
+      ...(opts.region ? { region: String(opts.region) } : {}),
+      ...(prefix ? { prefix } : {}),
+    }
+  }
+  if (!allowPlugin) {
+    throw new CliError(`invalid --provider "${provider}"; valid: r2, s3`)
+  }
+  if (opts.endpoint || opts.bucket || opts.region || prefix) {
+    throw new CliError(
+      '--endpoint/--bucket/--region/--prefix are not supported for plugin providers',
+    )
+  }
+  // plugin context 的非密钥挂载配置(baseUrl / workspace 之类)。
+  return parseConfigSpecs(configSpecs)
 }
 
 /** 从文件读取并校验 HttpToolDef[](--kind http 的工具集数据源)。 */

@@ -99,6 +99,79 @@ export function collect(value: string, previous: string[]): string[] {
 }
 
 /**
+ * 可重复 "key=value" flag 的统一解析器 —— 收敛此前散在 8 个命令里的 indexOf('=') 手写副本。
+ * 只按第一个 `=` 切分(value 可含 `=`);key 一律 trim 且必填。其余语义由调用方显式声明:
+ * - trimValue:标识符/URL 类值(--rename/--config/--header)→ true;
+ *   凭证与元数据类值的空白可能有意义(--field/--meta/--arg)→ false。
+ * - allowEmptyValue:false 时空值与空 key 合并成一条 "empty <k>/<v>" 措辞报错。
+ * - onDuplicate:'error' 报错;'last-wins' 后者覆盖(与 shell 里追加覆盖的直觉一致)。
+ * - expected/keyLabel/valueLabel:错误措辞沿用各 flag 的既有叫法(from=to、Name=value …)。
+ */
+export function parseKeyValueSpecs(
+  specs: readonly string[],
+  options: {
+    allowEmptyValue?: boolean
+    expected?: string
+    flag: string
+    keyLabel?: string
+    onDuplicate: 'error' | 'last-wins'
+    trimValue?: boolean
+    valueLabel?: string
+  },
+): Record<string, string> {
+  const {
+    allowEmptyValue = false,
+    expected = '"key=value"',
+    flag,
+    keyLabel = 'key',
+    onDuplicate,
+    trimValue = false,
+    valueLabel = 'value',
+  } = options
+  const out: Record<string, string> = {}
+  for (const spec of specs) {
+    const idx = spec.indexOf('=')
+    if (idx < 0) throw new CliError(`invalid ${flag} "${spec}": expected ${expected}`)
+    const key = spec.slice(0, idx).trim()
+    const raw = spec.slice(idx + 1)
+    const value = trimValue ? raw.trim() : raw
+    if (!key || (!allowEmptyValue && !value)) {
+      throw new CliError(
+        `invalid ${flag} "${spec}": empty ${allowEmptyValue ? keyLabel : `${keyLabel}/${valueLabel}`}`,
+      )
+    }
+    if (onDuplicate === 'error' && Object.hasOwn(out, key)) {
+      throw new CliError(`duplicate ${flag} key '${key}'`)
+    }
+    out[key] = value
+  }
+  return out
+}
+
+/**
+ * `--field k=v` → 多字段凭证表。secret set 与 integration add 共用同一个 flag,
+ * 此前两份同名实现语义相左(一边重复报错/允许空值,一边静默覆盖/空值报错),
+ * 统一为:重复 key 报错、允许空值、值不 trim —— 凭证里的空白可能是有意义的,
+ * 而同一 key 给两遍多半是笔误,静默覆盖会吞掉真实凭证。
+ */
+export function parseFieldSpecs(specs: readonly string[]): Record<string, string> {
+  return parseKeyValueSpecs(specs, { allowEmptyValue: true, flag: '--field', onDuplicate: 'error' })
+}
+
+/**
+ * 可选正整数 flag(--ttl 等)。语义取此前 4 份副本中最严的一档:
+ * 正整数且 Number.isSafeInteger(超出安全整数范围的秒数无意义,静默透传更糟)。
+ */
+export function parsePositiveInt(value: unknown, flag: string): number | undefined {
+  if (value === undefined) return undefined
+  const n = Number(value)
+  if (!Number.isSafeInteger(n) || n < 1) {
+    throw new CliError(`${flag} must be a positive integer`)
+  }
+  return n
+}
+
+/**
  * 解析 base URL / SK,优先级(高→低):
  * 1. 显式 flag `--base-url`/`--sk`
  * 2. 环境变量 `TB_BASE_URL`/`TB_SK`

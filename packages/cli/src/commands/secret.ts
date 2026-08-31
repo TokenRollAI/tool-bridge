@@ -1,35 +1,11 @@
 import { encodeCredentialValues } from '@tool-bridge/core'
 import { Command } from 'commander'
 import type { Page, SecretSummary } from '../types'
-import { parsePageOpts, resolveTarget, withGlobalOpts, withPageOpts } from '../args'
+import { parseFieldSpecs, parsePageOpts, resolveTarget, withGlobalOpts, withPageOpts } from '../args'
 import { printJson, printLine, table } from '../output'
 import { confirmDestructive } from '../confirm'
+import { readStdinCredential } from '../stdin'
 import { callDirect, CliError } from '../http'
-
-/** 从 stdin 读取全部内容(去掉尾随换行)——用于 secret set 避免值进 shell history。 */
-async function readStdin(): Promise<string> {
-  const chunks: Buffer[] = []
-  for await (const c of process.stdin) chunks.push(c as Buffer)
-  return Buffer.concat(chunks).toString('utf8').replace(/\n$/, '')
-}
-
-/**
- * `--field k=v` → 字段表。多字段凭证(plugin 的 `credentialFields`)用它写入,
- * 落库形态是一个 JSON 对象;单值凭证仍走 --value/stdin。
- */
-function parseFields(entries: readonly string[]): Record<string, string> {
-  const values: Record<string, string> = {}
-  for (const entry of entries) {
-    const at = entry.indexOf('=')
-    if (at <= 0) throw new CliError(`--field must be key=value, got '${entry}'`)
-    const key = entry.slice(0, at).trim()
-    if (key === '') throw new CliError(`--field must be key=value, got '${entry}'`)
-    if (key in values) throw new CliError(`duplicate --field key '${key}'`)
-    // 值不 trim:凭证里的空白可能是有意义的。
-    values[key] = entry.slice(at + 1)
-  }
-  return values
-}
 
 /**
  * `tb secret set --name <n> [--value <v> | --field k=v ...]` → SecretStore.Set(system/secret)。
@@ -60,19 +36,20 @@ export function secretSetCommand() {
 
       let value: string
       if (fields.length > 0) {
-        value = encodeCredentialValues(parseFields(fields))
+        // 多字段凭证(plugin 的 `credentialFields`)经 --field 写入,落库形态是一个 JSON 对象。
+        value = encodeCredentialValues(parseFieldSpecs(fields))
       } else if (opts.value !== undefined) {
         value = opts.value
       } else {
         if (process.stdin.isTTY) {
           throw new CliError('provide --value, --field, or pipe the secret via stdin')
         }
-        value = await readStdin()
+        value = await readStdinCredential()
       }
 
       await callDirect(resolveTarget(opts), '/system/secret/set', { name, value })
       // 只回名字与字段名,**不回显值**(字段名不是机密,能帮用户确认写对了哪几个)。
-      const written = fields.length > 0 ? Object.keys(parseFields(fields)).sort() : undefined
+      const written = fields.length > 0 ? Object.keys(parseFieldSpecs(fields)).sort() : undefined
       if (asJson) printJson({ ok: true, name, ...(written === undefined ? {} : { fields: written }) })
       else printLine(`set secret: ${name}${written === undefined ? '' : ` (fields: ${written.join(', ')})`}`)
     })

@@ -241,12 +241,14 @@ describe('parseMeta / guessContentType', () => {
     expect(() => parseMeta(['bad'])).toThrow(/key=value/)
   })
 
-  it('扩展名映射:.md/.json/.txt/其他/无文件', () => {
+  it('扩展名映射:.md/.json/.txt/其他/无文件;并集表让 .pdf 也被识别', () => {
     expect(guessContentType('a.md')).toBe('text/markdown')
     expect(guessContentType('a.json')).toBe('application/json')
     expect(guessContentType('a.txt')).toBe('text/plain')
     expect(guessContentType('a.bin')).toBe('text/plain')
     expect(guessContentType(undefined)).toBe('text/plain')
+    // put 是文本通道,但已知的非文本扩展名照实标注(此前一律谎报 text/plain)。
+    expect(guessContentType('doc.pdf')).toBe('application/pdf')
   })
 
   it('直传媒体类型识别常见图片，未知扩展名回退 octet-stream', () => {
@@ -254,6 +256,9 @@ describe('parseMeta / guessContentType', () => {
     expect(guessUploadContentType('shot.png')).toBe('image/png')
     expect(guessUploadContentType('shot.webp')).toBe('image/webp')
     expect(guessUploadContentType('raw.bin')).toBe('application/octet-stream')
+    // 与 store upload 共用同一张表:.pdf/.mp4 等不再落到 octet-stream。
+    expect(guessUploadContentType('doc.pdf')).toBe('application/pdf')
+    expect(guessUploadContentType('clip.mp4')).toBe('video/mp4')
   })
 })
 
