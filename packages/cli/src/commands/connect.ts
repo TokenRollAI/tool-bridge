@@ -164,6 +164,10 @@ export async function runConnect(args: ConnectArgs): Promise<void> {
       if (asJson) printJson({ event: 'ready', deviceId: prepared.deviceId, mountPath })
       else printLine(`connected ${prepared.deviceId} -> ${mountPath}`)
     },
+    onMailboxError: (error) => {
+      if (asJson) printJson({ event: 'mailbox_error', error: error.message })
+      else process.stderr.write(`device mailbox: ${error.message}\n`)
+    },
     onStateChange: (state) => {
       if (asJson) printJson({ event: 'state', state })
       else if (state !== 'ready') printLine(`device state: ${state}`)

@@ -9,7 +9,7 @@
  * 且判据只用于**展示**(把"看似 online 实则久无心跳"标为 stale),不作为任何操作的前置条件。
  */
 
-import type { Presence, PresenceState, TreeJson } from './types'
+import type { Presence, PresenceState } from './types'
 
 /**
  * 存活观察 TTL,与 core 的 `PRESENCE_STALE_AFTER_MS` 对齐(设备心跳 30s 的 3 倍)。
@@ -48,7 +48,7 @@ export const PRESENCE_LABEL: Record<PresenceState, string> = {
 
 /** presence 状态的中文说明(仅用于 title / 辅助文案)。 */
 export const PRESENCE_HINT: Record<PresenceState, string> = {
-  offline: '连接已拆除，调用会返回可重试的 503',
+  offline: '连接已拆除；实时调用会失败，支持 Mailbox 的命令仍可入队',
   online: '连接活跃且近期有心跳',
   stale: '连接位仍为真，但已久无心跳；很可能不可路由',
 }
@@ -64,28 +64,4 @@ export const PRESENCE_TONE: Record<PresenceState, string> = {
   offline: 'bg-muted/20 text-muted-foreground',
   online: 'border-ok/35 bg-ok/[0.045] text-ok',
   stale: 'border-warn/35 bg-warn/[0.05] text-warn',
-}
-
-/**
- * 节点是否进导航树。抽成纯函数是因为三态化后这条判据最容易写错:
- * 旧版 `online !== false` 在 `presence` 下会恒真(字段名都变了),把已离线设备放回树上。
- *
- * 只剪 `offline`(确认已拆除连接)。`stale` 保留 —— 连接位仍为真、可能只是心跳丢了几拍,
- * 剪掉会让用户在"设备还在但树上消失"时无从下手;行内用琥珀点提示即可。
- * 非 device 节点没有 presence,一律保留。
- */
-export function isTreeVisiblePresence(presence: Presence | undefined): boolean {
-  return presence?.state !== 'offline'
-}
-
-/**
- * 递归剪掉 `~tree` 里 presence 为 offline 的子树(设备管理页仍可见全部)。
- * 放在 lib 而非组件里,因为递归 + 三态判据是本次改动的回归风险点,要能被 node 测试直接断言。
- */
-export function pruneOfflineNodes(nodes: TreeJson[]): TreeJson[] {
-  return nodes
-    .filter(node => isTreeVisiblePresence(node.presence))
-    .map(node =>
-      node.children ? { ...node, children: pruneOfflineNodes(node.children) } : node,
-    )
 }

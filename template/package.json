@@ -11,7 +11,7 @@
     "check": "tsc --noEmit"
   },
   "dependencies": {
-    "@tool-bridge/dashboard": "^0.26.0",
+    "@tool-bridge/dashboard": "^0.26.1",
     "@tool-bridge/gateway": "^0.24.0"
   },
   "devDependencies": {

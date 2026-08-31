@@ -7,6 +7,7 @@ import {
   countLoadedNodes,
   type DagreModule,
   layoutGraph,
+  mergeLoadedCanvasTree,
   ROOT_NODE_ID,
   type TreeNodeLike,
 } from '../src/canvas/treeGraph'
@@ -86,6 +87,53 @@ describe('buildGraph 总根与可见性', () => {
     const remote = nodes.find(n => n.id === 'remote/peer')
     expect(remote?.data.truncated).toBe(true)
     expect(edges.filter(e => e.source === 'remote/peer')).toHaveLength(0)
+  })
+
+  it('保留 offline 设备与后代，支持发现并调用 Mailbox command', () => {
+    const device: TreeNodeLike[] = [{
+      path: 'device/phone-1',
+      kind: 'directory',
+      description: 'phone',
+      presence: { state: 'offline' },
+      children: [{
+        path: 'device/phone-1/tools/mail',
+        kind: 'tool',
+        description: 'mail',
+        children: [],
+      }],
+    }]
+    const { nodes } = buildGraph(device, {
+      expanded: new Set(['', 'device/phone-1']),
+    })
+    expect(nodes.map(node => node.id)).toEqual(expect.arrayContaining([
+      'device/phone-1',
+      'device/phone-1/tools/mail',
+    ]))
+    expect(nodes.find(node => node.id === 'device/phone-1')?.data.presence)
+      .toEqual({ state: 'offline' })
+  })
+
+  it('根树与懒加载 graft 都不按 offline presence 裁剪', () => {
+    const offline: TreeNodeLike = {
+      path: 'device/phone-1',
+      kind: 'directory',
+      description: 'phone',
+      presence: { state: 'offline' },
+      truncated: true,
+      children: [],
+    }
+    const loaded = new Map([['device/phone-1', [{
+      path: 'device/phone-1/tools/mail',
+      kind: 'tool' as const,
+      description: 'mail',
+      presence: { state: 'offline' as const },
+    }]]])
+    const projected = mergeLoadedCanvasTree([offline], loaded)
+    expect(projected[0]?.path).toBe('device/phone-1')
+    expect(projected[0]?.children?.[0]).toMatchObject({
+      path: 'device/phone-1/tools/mail',
+      presence: { state: 'offline' },
+    })
   })
 })
 

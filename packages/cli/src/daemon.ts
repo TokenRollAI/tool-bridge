@@ -505,6 +505,7 @@ export async function runDaemon(configPath: string): Promise<void> {
       expose: config.expose,
       ...(config.commandProfiles !== undefined ? { commandProfiles: config.commandProfiles } : {}),
       ...(config.mountPath !== undefined ? { mountPath: config.mountPath } : {}),
+      onMailboxError: error => process.stderr.write(`device mailbox: ${error.message}\n`),
       onReady: mountPath => update('ready', { mountPath }),
       onStateChange: (state) => {
         if (state === 'reconnecting') update('reconnecting', { mountPath: config.mountPath })

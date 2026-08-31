@@ -3,14 +3,17 @@ import {
   type ContextPatch,
   TBError as CoreTBError,
   createObjectContextProvider,
+  type DeviceAbortSignal,
   type DeviceExpose,
   type ListOptions,
   type ObjectContextProvider,
   type SearchOptions,
 } from '@tool-bridge/core'
 import {
+  createDeviceMailboxProcessor,
   type DeviceConnection,
   type DeviceConnectionState,
+  type DeviceCredentialProvider,
   type DeviceWebSocketFactory,
   deviceWsUrl,
   openPortableDeviceConnection,
@@ -23,6 +26,7 @@ import {
   type StructuredCommandProfile,
 } from '@tool-bridge/core/node'
 import WS, { type ClientOptions } from 'ws'
+import { createFileDeviceOperationJournal } from './deviceMailboxJournal'
 import { CliError } from './http'
 
 export { deviceWsUrl }
@@ -33,6 +37,7 @@ export interface DeviceConnectionOptions {
   deviceId: string
   expose: DeviceExpose
   mountPath?: string
+  onMailboxError?: (error: Error) => void
   onReady?: (mountPath: string) => void
   onStateChange?: (state: DeviceConnectionState) => void
   sk: string
@@ -136,6 +141,45 @@ export function startDeviceConnection(opts: DeviceConnectionOptions): DeviceConn
   let activeMountPath = opts.mountPath ?? `device/${opts.deviceId}`
   let files = store === undefined ? undefined : fsProvider(store, activeMountPath, readOnly)
 
+  const handler = async (call: {
+    arguments: Record<string, unknown>
+    path: string
+    signal: DeviceAbortSignal
+  }): Promise<unknown> => {
+    const slash = call.path.lastIndexOf('/')
+    const mount = slash < 0 ? call.path : call.path.slice(0, slash)
+    const cmd = slash < 0 ? '' : call.path.slice(slash + 1)
+    try {
+      if (mount === 'shell') {
+        if (cmd !== 'exec') throw new TBError('invalid_argument', `unknown shell cmd '${cmd}'`)
+        if (shell === undefined) throw TBError.notFound('shell not exposed')
+        const command = call.arguments.command
+        if (typeof command !== 'string' || command.trim() === '') {
+          throw new TBError('invalid_argument', 'exec 需要字符串 \'command\'')
+        }
+        return await shell(command, {
+          ...(typeof call.arguments.cwd === 'string'
+            ? { cwd: call.arguments.cwd }
+            : {}),
+          ...(typeof call.arguments.timeoutMs === 'number'
+            ? { timeoutMs: call.arguments.timeoutMs }
+            : {}),
+        })
+      }
+      if (mount === 'fs') {
+        if (files === undefined) throw TBError.notFound('fs not exposed')
+        return await dispatchFs(files, cmd, call.arguments)
+      }
+      const structuredCommand = structured.get(mount)
+      if (structuredCommand !== undefined) {
+        return await structuredCommand.invoke(cmd, call.arguments, { signal: call.signal })
+      }
+      throw TBError.notFound(`device path not exposed:'${call.path}'`)
+    } catch (error) {
+      bridgeCoreError(error)
+    }
+  }
+
   let userClosed = false
   let settled = false
   let resolveClosed!: () => void
@@ -149,6 +193,59 @@ export function startDeviceConnection(opts: DeviceConnectionOptions): DeviceConn
     settled = true
     rejectClosed(cliError(error))
   }
+  const connectionControl: { close?: () => void } = {}
+  const credentialProvider: DeviceCredentialProvider = {
+    // SDK 每次 reconnect/HTTP claim 都重新调用 prepare；不把 Bearer 固化进 transport。
+    prepare: () => ({ headers: { authorization: `Bearer ${opts.sk}` } }),
+    invalidate: (error) => {
+      fail(new TBError(error.code, error.message, { retryable: error.retryable }))
+      // WS rejection 的 SDK handler 会在 invalidate 返回后保留权威错误并自行关闭；延后一拍
+      // 可避免同步 close 把它覆盖成 user close，同时让独立 HTTP claim 的 401 也能关掉 socket。
+      queueMicrotask(() => connectionControl.close?.())
+    },
+  }
+  const mailboxNodes = (opts.expose.nodes ?? [])
+    .filter(node => node.kind === 'tool')
+    .map(node => ({
+      path: node.path,
+      kind: 'tool' as const,
+      description: node.description,
+      ...(node.cmds === undefined ? {} : { cmds: node.cmds }),
+    }))
+  const hasMailboxCommands = mailboxNodes.some(node =>
+    node.cmds?.some(command => command.delivery === 'mailbox' || command.delivery === 'both'),
+  )
+  const mailbox = hasMailboxCommands
+    ? createDeviceMailboxProcessor({
+        baseUrl: opts.baseUrl,
+        credentialProvider,
+        deviceId: opts.deviceId,
+        expose: { nodes: mailboxNodes },
+        handler,
+        journal: createFileDeviceOperationJournal({
+          baseUrl: opts.baseUrl,
+          deviceId: opts.deviceId,
+        }),
+      })
+    : undefined
+  let mailboxDrain: Promise<void> | undefined
+  let mailboxDrainController: AbortController | undefined
+  const drainMailbox = (): void => {
+    if (mailbox === undefined || mailboxDrain !== undefined) return
+    const controller = new AbortController()
+    mailboxDrainController = controller
+    mailboxDrain = mailbox.drain({ signal: controller.signal })
+      .then(() => {})
+      .catch((error: unknown) => {
+        if (!controller.signal.aborted) {
+          opts.onMailboxError?.(error instanceof Error ? error : new Error(String(error)))
+        }
+      })
+      .finally(() => {
+        mailboxDrain = undefined
+        if (mailboxDrainController === controller) mailboxDrainController = undefined
+      })
+  }
 
   const connection = openPortableDeviceConnection({
     baseUrl: opts.baseUrl,
@@ -156,50 +253,14 @@ export function startDeviceConnection(opts: DeviceConnectionOptions): DeviceConn
     expose: async () => opts.expose,
     mountPath: opts.mountPath,
     webSocketFactory: nodeWebSocketFactory,
-    credentialProvider: {
-      // SDK 每次 reconnect 都重新调用 prepare；这里不把 Bearer 固化进 WS constructor。
-      prepare: () => ({ headers: { authorization: `Bearer ${opts.sk}` } }),
-      invalidate: error => fail(new TBError(error.code, error.message, {
-        retryable: error.retryable,
-      })),
+    credentialProvider,
+    onStateChange: (state) => {
+      opts.onStateChange?.(state)
+      if (state === 'ready') drainMailbox()
     },
-    onStateChange: opts.onStateChange,
-    handler: async (call) => {
-      const slash = call.path.lastIndexOf('/')
-      const mount = slash < 0 ? call.path : call.path.slice(0, slash)
-      const cmd = slash < 0 ? '' : call.path.slice(slash + 1)
-      try {
-        if (mount === 'shell') {
-          if (cmd !== 'exec') throw new TBError('invalid_argument', `unknown shell cmd '${cmd}'`)
-          if (shell === undefined) throw TBError.notFound('shell not exposed')
-          const command = call.arguments.command
-          if (typeof command !== 'string' || command.trim() === '') {
-            throw new TBError('invalid_argument', 'exec 需要字符串 \'command\'')
-          }
-          return await shell(command, {
-            ...(typeof call.arguments.cwd === 'string'
-              ? { cwd: call.arguments.cwd }
-              : {}),
-            ...(typeof call.arguments.timeoutMs === 'number'
-              ? { timeoutMs: call.arguments.timeoutMs }
-              : {}),
-          })
-        }
-        if (mount === 'fs') {
-          if (files === undefined) throw TBError.notFound('fs not exposed')
-          return await dispatchFs(files, cmd, call.arguments)
-        }
-        const structuredCommand = structured.get(mount)
-        if (structuredCommand !== undefined) {
-          return await structuredCommand.invoke(cmd, call.arguments, { signal: call.signal })
-        }
-        throw TBError.notFound(`device path not exposed:'${call.path}'`)
-      } catch (error) {
-        bridgeCoreError(error)
-      }
-    },
+    handler,
   })
-
+  connectionControl.close = () => connection.close()
   const ready = connection.ready.then((mountPath) => {
     if (store !== undefined && mountPath !== activeMountPath) {
       activeMountPath = mountPath
@@ -227,6 +288,7 @@ export function startDeviceConnection(opts: DeviceConnectionOptions): DeviceConn
     },
     close() {
       userClosed = true
+      mailboxDrainController?.abort()
       connection.close()
     },
     restart() {
@@ -236,6 +298,7 @@ export function startDeviceConnection(opts: DeviceConnectionOptions): DeviceConn
       connection.resume()
     },
     suspend() {
+      mailboxDrainController?.abort()
       connection.suspend()
     },
   }
@@ -249,6 +312,7 @@ export async function runDeviceConnection(opts: DeviceConnectionOptions): Promis
   try {
     await handle.closed
   } finally {
+    handle.close()
     process.off('SIGINT', stop)
     process.off('SIGTERM', stop)
   }
