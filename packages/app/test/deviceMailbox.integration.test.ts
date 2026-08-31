@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest'
+import { NodeRegistryStore } from '@tool-bridge/core'
+import { describe, expect, it, vi } from 'vitest'
 import { processDeviceHello, type TbAppDeps } from '../src/index'
 import { createTestApp, type TestApp } from './harness'
 import { TEST_ADMIN_SK } from './fixtures'
@@ -82,6 +83,44 @@ async function mountedMailboxApp(deviceChannel?: TbAppDeps['device']): Promise<{
 }
 
 describe('durable device mailbox routes', () => {
+  it('keeps an offline device command discoverable and enqueues fallback', async () => {
+    const invoke = vi.fn(async () => ({
+      disposition: 'not_dispatched' as const,
+      result: {
+        ok: false as const,
+        error: { code: 'unavailable' as const, message: 'device offline', retryable: true },
+      },
+    }))
+    const { tb, caller } = await mountedMailboxApp({
+      ws: async () => new Response(null, { status: 501 }),
+      invoke,
+    })
+    await new NodeRegistryStore(tb.state).setOnline(
+      'device/phone-1',
+      false,
+      new Date().toISOString(),
+    )
+
+    const help = await tb.request('https://tb.test/device/phone-1/tools/mail/~help', {
+      headers: { authorization: `Bearer ${caller.secret}`, accept: 'application/json' },
+    })
+    expect(help.status).toBe(200)
+
+    const response = await postJson(
+      tb,
+      'device/phone-1/tools/mail/send',
+      { '~delivery': 'fallback', 'text': 'after reconnect' },
+      caller.secret,
+    )
+    expect(invoke).toHaveBeenCalledOnce()
+    expect(response.status).toBe(202)
+    expect(response.headers.get('x-tb-delivery')).toBe('mailbox')
+    expect(await response.json()).toMatchObject({
+      state: 'queued',
+      targetPath: 'device/phone-1/tools/mail/send',
+    })
+  })
+
   it('discovers delivery and executes fallback -> claim -> renew -> complete -> get', async () => {
     const { tb, device, caller } = await mountedMailboxApp()
     const help = await tb.request('https://tb.test/device/phone-1/tools/mail/~help', {

@@ -2,9 +2,9 @@ import { useCallback, useMemo, useRef, useState } from 'react'
 import { useQueries } from '@tanstack/react-query'
 import type { HelpCmd, TreeJson } from '@/lib/types'
 import { useConn, useSession } from '@/lib/session-context'
-import { pruneOfflineNodes } from '@/lib/presence'
 import { getHelp, getTree } from '@/lib/api'
 import { useTree } from '@/lib/queries'
+import { mergeLoadedCanvasTree } from './treeGraph'
 
 /**
  * 画布的数据编排:根树 depth=1 常驻,展开某个 truncated 分支时按需拉它的子树,
@@ -48,7 +48,7 @@ export interface CanvasTree {
   /** 某个 truncated 分支是否正在懒加载(画布上转圈)。 */
   loadingPaths: ReadonlySet<string>
   refetchRoot: () => void
-  /** 已剪掉 offline 的根子节点数组(buildGraph 的输入)。 */
+  /** 已加载的根子节点数组(buildGraph 的输入，含 offline 设备以支持 Mailbox)。 */
   roots: TreeJson[]
 }
 
@@ -130,7 +130,7 @@ export function useCanvasTree(
     const map = new Map<string, TreeJson[]>()
     truncatedExpanded.forEach(({ path }, i) => {
       const data = subtrees[i]?.data
-      if (data) map.set(path, pruneOfflineNodes(localizeSubtree(data, path)))
+      if (data) map.set(path, localizeSubtree(data, path))
     })
     return map
   }, [truncatedExpanded, subtrees])
@@ -144,16 +144,10 @@ export function useCanvasTree(
   }, [truncatedExpanded, subtrees])
 
   // 把懒加载结果就地合并回根树。
-  const roots = useMemo(() => {
-    const graft = (node: TreeJson): TreeJson => {
-      const loaded = loadedByPath.get(node.path)
-      if (loaded !== undefined) {
-        return { ...node, children: loaded.map(graft) }
-      }
-      return node.children ? { ...node, children: node.children.map(graft) } : node
-    }
-    return pruneOfflineNodes(root.data?.children ?? []).map(graft)
-  }, [root.data, loadedByPath])
+  const roots = useMemo(
+    () => mergeLoadedCanvasTree(root.data?.children ?? [], loadedByPath),
+    [root.data, loadedByPath],
+  )
 
   const refetchRoot = useCallback(() => void root.refetch(), [root])
 

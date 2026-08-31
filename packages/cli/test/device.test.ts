@@ -1,7 +1,8 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { createFileDeviceOperationJournal } from '../src/deviceMailboxJournal'
 import { buildExpose, readCommandProfiles } from '../src/commands/connect'
 import { normalizeDeviceId, resolveDeviceId } from '../src/deviceId'
 import { deviceWsUrl } from '../src/deviceRuntime'
@@ -136,6 +137,36 @@ describe('device runtime helpers', () => {
       writeProfile('parent.json', 'ops'),
       writeProfile('child.json', 'ops/system'),
     ])).toThrow('conflicts with \'ops\'')
+  })
+
+  it('Mailbox journal 跨实例持久化 executing barrier，并使用私有权限', async () => {
+    if (tmpConfig === undefined) throw new Error('missing temp config')
+    const operationId = 'dop_AAAAAAAAAAAAAAAAAAAAAAAA'
+    const entry = {
+      operationId,
+      state: 'executing' as const,
+      expiresAt: '2099-01-01T00:00:00.000Z',
+      updatedAt: '2026-08-31T00:00:00.000Z',
+    }
+    await createFileDeviceOperationJournal({
+      baseUrl: 'https://gateway.example',
+      deviceId: 'device-1',
+    }).put(entry)
+
+    const restarted = createFileDeviceOperationJournal({
+      baseUrl: 'https://gateway.example',
+      deviceId: 'device-1',
+    })
+    expect(await restarted.get(operationId)).toEqual(entry)
+
+    const root = join(tmpConfig, 'tool-bridge', 'device-mailbox')
+    const installation = join(root, readdirSync(root)[0]!)
+    const file = join(installation, readdirSync(installation)[0]!)
+    expect(statSync(installation).mode & 0o777).toBe(0o700)
+    expect(statSync(file).mode & 0o777).toBe(0o600)
+
+    await restarted.remove(operationId)
+    expect(await restarted.get(operationId)).toBeNull()
   })
 })
 

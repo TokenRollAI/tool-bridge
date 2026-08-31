@@ -6,7 +6,7 @@
  *
  * 三条硬边界(与 TreeNav 的性能约束对齐,不能因为换成画布就丢):
  * - 只渲染"已加载 + 已展开"的节点;truncated/remote 子树按需懒加载,不在这里强行铺开。
- * - offline 设备节点由 `pruneOfflineNodes` 在进入前剪掉(调用方负责)。
+ * - offline 设备仍保留在图中，让 Mailbox-capable 命令可发现、可入队。
  * - 自适应展开:节点总数超过阈值时默认只展根层,避免一次性布局数百节点卡顿。
  */
 
@@ -86,6 +86,19 @@ export interface TreeNodeLike {
   path: string
   presence?: Presence
   truncated?: boolean
+}
+
+/** 把已加载的懒分支接回根树；presence 只随节点透传，不参与可见性裁剪。 */
+export function mergeLoadedCanvasTree<T extends { children?: T[], path: string }>(
+  roots: readonly T[],
+  loadedByPath: ReadonlyMap<string, T[]>,
+): T[] {
+  const graft = (node: T): T => {
+    const loaded = loadedByPath.get(node.path)
+    if (loaded !== undefined) return { ...node, children: loaded.map(graft) }
+    return node.children ? { ...node, children: node.children.map(graft) } : node
+  }
+  return roots.map(graft)
 }
 
 /** `~help.cmds` 投影到画布所需的最小形状。 */
