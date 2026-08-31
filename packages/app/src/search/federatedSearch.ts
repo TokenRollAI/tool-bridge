@@ -19,7 +19,6 @@ import {
   type StateStore,
   TBError,
   TOOL_SEARCH_AUDIT_NODE_LIMIT,
-  TOOL_SEARCH_DESCRIPTION_BYTES_MAX,
   TOOL_SEARCH_PAGE_BYTES,
   TOOL_SEARCH_RANKING_VERSION,
   type ToolSpec,
@@ -53,6 +52,7 @@ import {
 } from '../providers/remote'
 import { canonicalSearchTools, type SearchSynchronizer } from './synchronizer'
 import { executeLocalSearch } from './localSearch'
+import { compactSearchTool } from './compactTool'
 
 const HEADER_REMAINING_MS = 'x-tb-search-remaining-ms'
 const HEADER_SESSION_TTL_MS = 'x-tb-search-session-ttl-ms'
@@ -145,24 +145,7 @@ function continuationSourceError(error: unknown): TBError {
 }
 
 function compactItem(item: WireToolSearchItem): WireToolSearchItem {
-  const tool = { ...item.tool }
-  delete tool.inputSchema
-  delete tool.outputSchema
-  if (tool.description !== undefined) {
-    const encoder = new TextEncoder()
-    if (encoder.encode(tool.description).length > TOOL_SEARCH_DESCRIPTION_BYTES_MAX) {
-      let description = ''
-      let bytes = 0
-      for (const char of tool.description) {
-        const size = encoder.encode(char).length
-        if (bytes + size > TOOL_SEARCH_DESCRIPTION_BYTES_MAX) break
-        description += char
-        bytes += size
-      }
-      tool.description = description
-    }
-  }
-  return { ...item, tool }
+  return { ...item, tool: compactSearchTool(item.tool) }
 }
 
 function normalizedEffect(effect: unknown): 'destructive' | 'read' | 'unknown' | 'write' {

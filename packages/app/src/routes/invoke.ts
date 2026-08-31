@@ -9,13 +9,16 @@
  * device shell → context/skillhub 动词 → builtin。可见性(read→404)与授权统一判在**节点路径**。
  */
 import {
-  assertSecretRefUse,
   check,
   contextScopeForCmd,
+  dispatchContextCmd,
+  dispatchContextUploadCmd,
+  dispatchSkillhubCmd,
   isTBError,
   KEY_PLUGIN,
   negotiate,
   NodeRegistryStore,
+  parseContextCmdArgs,
   type PluginManifest,
   resolveUpstreamTool,
   skillhubScopeForCmd,
@@ -27,29 +30,6 @@ import type { SearchDirtyMarker } from '../search/synchronizer'
 import type { AppContext } from '../deps'
 import type { RouteEnv } from './env'
 import {
-  assertContextAlive,
-  assertContextConfig,
-  assertSkillhubConfig,
-  contextProviderFor,
-  createContextUploadGrant,
-  deviceIdForDeviceFs,
-  dispatchContextCmd,
-  dispatchContextUploadCmd,
-  dispatchSkillhubCmd,
-  localContext,
-  parseContextCmdArgs,
-  skillhubProviderFor,
-} from '../contextNodes'
-import {
-  assertToolConfig,
-  mountCallContext,
-  providerFor,
-  refreshDynamicSearchNode,
-  refreshDynamicToolCache,
-  requirePluginExport,
-  upstreamTools,
-} from '../toolNodes'
-import {
   attemptDevice,
   deviceCallContextFrom,
   deviceMarkerOf,
@@ -59,20 +39,33 @@ import {
   tbErrorFromBody,
 } from '../deviceNodes'
 import {
+  assertContextAlive,
+  contextProviderFor,
+  createContextUploadGrant,
+  deviceIdForDeviceFs,
+  localContext,
+  skillhubProviderFor,
+} from '../contextNodes'
+import {
+  mountCallContext,
+  providerFor,
+  refreshDynamicSearchNode,
+  refreshDynamicToolCache,
+  requirePluginExport,
+  upstreamTools,
+} from '../toolNodes'
+import {
   deviceOperationTtlSeconds,
   enqueueDeviceCommand,
   mailboxJsonObject,
 } from './deviceMailbox'
-import { assertRemoteConfigAllowed, remotePassthroughIfMatch, resolveRemoteSettings } from '../federation'
+import { assertNodeConfigMutation, invalidateNodeDerivedState } from '../registryMutation'
 import { createPluginContextProvider } from '../providers/pluginContext'
-import { assertRegisterPath, decodePath, scopeForCmd } from '../paths'
-import { assertMcpOAuthConfig, invalidateMcpOAuth } from '../oauth'
-import { invalidateToolCache } from '../providers/toolCache'
 import { renderResult, tbErrorResponse } from '../responses'
-import { invalidateProviderOAuth } from '../providerOAuth'
 import { rejectStoreCapabilityBodyFields } from './store'
+import { remotePassthroughIfMatch } from '../federation'
 import { resolveStoreRequestOrigin } from '../store'
-import { invalidateMcpEra } from '../providers/mcp'
+import { decodePath, scopeForCmd } from '../paths'
 
 // --- POST /<path> 数据面调用 ---
 export async function handleInvoke(c: AppContext, env: RouteEnv): Promise<Response> {
@@ -234,7 +227,7 @@ export async function handleInvoke(c: AppContext, env: RouteEnv): Promise<Respon
     }
     const args = await readInvokeBody()
     const provider = await providerFor(node, ctx, deps)
-    const tools = await upstreamTools(node, provider, deps, false, new Date().toISOString())
+    const tools = await upstreamTools(node, provider, deps, false, new Date().toISOString(), searchSync)
     const upstreamName = resolveUpstreamTool(node.virtualize, tools, command)
     const result = await provider.call(upstreamName, args)
     // MCP RPC 业务错误(result.isError)是正常返回值(HTTP 200),按协商渲染其 content。
@@ -387,34 +380,22 @@ export async function handleInvoke(c: AppContext, env: RouteEnv): Promise<Respon
     if (targetPath === undefined) {
       throw new TBError('invalid_argument', 'field \'path\' must be a string')
     }
-    // 挂载/更新 remote 节点时校验 baseUrl 白名单(注册时即拒)。
     const cfgPatch
       = cmd === 'write'
         ? args.config
         : cmd === 'update'
           ? (args.patch as { config?: unknown } | undefined)?.config
           : undefined
-    // 挂载/更新 remote 节点时校验 baseUrl 白名单(注册时即拒;env 基线 ∪ 运行时条目)。
-    assertRemoteConfigAllowed(cfgPatch, await resolveRemoteSettings(store, deps.remote))
-    await assertRegisterPath(
-      registry,
+    // 与 ~register 共享的安全链(remote 白名单 → 注册路径 → SecretRef → 各 kind 校验),
+    // "两通道同权"由 registryMutation.ts 的单点实现保证。
+    await assertNodeConfigMutation({
+      action: cmd === 'delete' ? 'delete' : 'write',
+      config: cfgPatch,
       ctx,
-      targetPath,
-      cmd === 'delete' ? 'delete' : 'write',
       deps,
-    )
-    // Secret Reference 使用授权:绑定 authRef/skRef 须持 system/secret admin(注册路径
-    // 判定之后、落库之前;delete 无 config 自然放行)。confused-deputy 合入阻断项。
-    assertSecretRefUse(ctx.scopes, cfgPatch)
-    // 直接 API/update 与 ~register 同一安全契约：client secret 只能是 SecretStore 引用。
-    await assertMcpOAuthConfig(cfgPatch, deps.secrets)
-    // context 配置校验 + s3 连通探测:探测出站网络,须在权限判定之后。
-    await assertContextConfig(cfgPatch, deps)
-    // skillhub 配置校验(provider r2/s3;s3 连通探测)。
-    await assertSkillhubConfig(cfgPatch, deps)
-    // kind:'tool' 挂载校验:provider 必须是已注册且启用的 tool-provider plugin;
-    // export 声明了 credentialProbe 且配了 authRef 时,再用该凭证真实探一次。
-    await assertToolConfig(cfgPatch, deps, ctx, targetPath)
+      registry,
+      targetPath,
+    })
     registryTarget = targetPath
   }
   if (registryTarget !== undefined && (cmd === 'write' || cmd === 'update')) {
@@ -453,22 +434,16 @@ export async function handleInvoke(c: AppContext, env: RouteEnv): Promise<Respon
   }
   // 注册变更 → 失效该节点工具缓存 + mcp 会话/两套 OAuth 令牌(Write/Update/Delete 触发失效)。
   if (registryTarget !== undefined) {
-    await invalidateToolCache(store, registryTarget)
-    await invalidateMcpEra(store, registryTarget)
-    await invalidateMcpOAuth(store, registryTarget)
-    await invalidateProviderOAuth(store, registryTarget)
+    await invalidateNodeDerivedState(store, registryTarget)
     await searchSync?.reconcileNodeQuietly(registryTarget, { marker: registryMarker })
     const current = await registry.get(registryTarget).catch(() => null)
-    if (current !== null && await refreshDynamicSearchNode(current, ctx, deps)) {
+    if (current !== null && await refreshDynamicSearchNode(current, ctx, deps, searchSync)) {
       await searchSync?.abort(registryMarker)
     }
   }
   const pluginEmptyPaths: TreePath[] = []
   for (const mount of pluginMounts) {
-    await invalidateToolCache(store, mount.node.path)
-    await invalidateMcpEra(store, mount.node.path)
-    await invalidateMcpOAuth(store, mount.node.path)
-    await invalidateProviderOAuth(store, mount.node.path)
+    await invalidateNodeDerivedState(store, mount.node.path)
     const providerId = mount.node.config?.kind === 'tool'
       ? mount.node.config.provider
       : ''

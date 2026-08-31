@@ -9,6 +9,7 @@ import {
   contentTypeFor,
   CONTEXT_CAPABILITIES,
   CONTEXT_DIRECT_UPLOAD_CAPABILITY,
+  contextCapabilitiesOf,
   NodeRegistryStore,
   SKILLHUB_CAPABILITIES,
   TBError,
@@ -19,7 +20,6 @@ import type { RouteEnv } from './env'
 import {
   assertContextAlive,
   contextDirectUploadAvailable,
-  localCapabilities,
   localContext,
 } from '../contextNodes'
 import { remotePassthroughIfMatch } from '../federation'
@@ -80,7 +80,7 @@ export async function handleDescribe(c: AppContext, env: RouteEnv): Promise<Resp
         || deviceMarkerOf(cfg.providerConfig) !== null
         ? CONTEXT_CAPABILITIES
         : local !== null
-          ? localCapabilities(local)
+          ? contextCapabilitiesOf(local)
           : (
               await requirePluginExport(deps, cfg.provider, 'context', 'context', cfg.export)
             ).export.capabilities ?? []

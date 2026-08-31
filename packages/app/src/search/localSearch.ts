@@ -17,7 +17,6 @@ import {
   type StateStore,
   TBError,
   TOOL_SEARCH_BATCH_LIMIT,
-  TOOL_SEARCH_DESCRIPTION_BYTES_MAX,
   TOOL_SEARCH_PAGE_BYTES,
   TOOL_SEARCH_WORK_LIMIT,
   type ToolSearchCandidate,
@@ -29,6 +28,7 @@ import {
   virtualizeTools,
 } from '@tool-bridge/core'
 import { canonicalSearchTools, type SearchSynchronizer } from './synchronizer'
+import { compactSearchTool } from './compactTool'
 
 function normalizedEffect(effect: unknown): ToolSearchEffect {
   return effect === 'read' || effect === 'write' || effect === 'destructive'
@@ -37,25 +37,7 @@ function normalizedEffect(effect: unknown): ToolSearchEffect {
 }
 
 function projectSearchTool(tool: ToolSpec, detail: WireToolSearchDetail): ToolSpec {
-  if (detail === 'full') return tool
-  const compact = { ...tool }
-  delete compact.inputSchema
-  delete compact.outputSchema
-  if (compact.description !== undefined) {
-    const encoder = new TextEncoder()
-    if (encoder.encode(compact.description).length > TOOL_SEARCH_DESCRIPTION_BYTES_MAX) {
-      let description = ''
-      let bytes = 0
-      for (const char of compact.description) {
-        const size = encoder.encode(char).length
-        if (bytes + size > TOOL_SEARCH_DESCRIPTION_BYTES_MAX) break
-        description += char
-        bytes += size
-      }
-      compact.description = description
-    }
-  }
-  return compact
+  return detail === 'full' ? tool : compactSearchTool(tool)
 }
 
 export interface LocalSearchDeps {

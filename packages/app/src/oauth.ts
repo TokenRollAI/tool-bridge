@@ -54,8 +54,9 @@ interface OAuthGrantBinding {
 /** grant 与 client/redirect 的绑定元数据；不含 client secret。 */
 type StoredMcpOAuthTokens = StoredOAuthTokens & { toolBridgeBinding?: OAuthGrantBinding }
 
-/** 授权跳转 → 回调的时限(state 的 exp);过期一律拒,防 code 重放窗口拉长。 */
-const STATE_TTL_SEC = 600
+/** 授权跳转 → 回调的时限(state 的 exp);过期一律拒,防 code 重放窗口拉长。
+ * mcp 与 provider 两条流程共用(providerOAuth.ts 导入)——时限语义一致,不各持一份。 */
+export const STATE_TTL_SEC = 600
 
 /** 删除某节点的全部 OAuth 记录(节点删除时调用;client/token/discovery 一体作废)。 */
 export async function invalidateMcpOAuth(store: StateStore, nodePath: string): Promise<void> {

@@ -17,7 +17,6 @@
 import type { Duplex } from 'node:stream'
 import type * as http from 'node:http'
 import {
-  checkRegisterPath,
   decodeDeviceFrame,
   type DeviceCallAttempt,
   DeviceGatewaySession,
@@ -32,8 +31,11 @@ import {
 import {
   assertDeviceId,
   type DeviceInvokeRequest,
+  deviceSearchCapacityWarning,
+  markDeviceDisconnected,
   processDeviceHello,
-  SearchSynchronizer,
+  reclaimDeviceSubtree,
+  reverifyDeviceAuthority,
 } from '@tool-bridge/app'
 import { type WebSocket, WebSocketServer } from 'ws'
 import type { DeviceRouter } from './deviceRouter'
@@ -172,27 +174,19 @@ export class DeviceHub {
     }
     const conn = this.activeByDevice.get(deviceId)
     if (conn === undefined) return offline
-    // 重验:凭据有效 + keyId 一致 + 用 hello 落库同一个 checkRegisterPath 复核该 SK 现在
-    // 仍能注册 mountPath(scope 与 registerPaths 事后收紧都失效)。mountPath 未设 = hello
-    // 未完成,按未授权拒绝(安全判定默认分支必须是拒)。identify 是异步 I/O,期间可能有新
-    // 连接顶替本设备,故重验后复核 activeByDevice 仍是本连接,避免调用发给已被取代的旧连接。
-    const authCtx = await identify(this.store, conn.authorization, new Date().toISOString())
-    const authorized
-      = authCtx !== null
-        && authCtx.keyId === conn.keyId
-        && conn.mountPath !== undefined
-        && checkRegisterPath({
-          sk: {
-            scopes: authCtx.scopes,
-            id: authCtx.keyId,
-            ...(authCtx.registerPaths !== undefined
-              ? { registerPaths: authCtx.registerPaths }
-              : {}),
-          },
-          targetPath: conn.mountPath,
-          action: 'write',
-          existing: null,
-        }).allow
+    // 重验走宿主中立 reverifyDeviceAuthority(凭据有效 + keyId 一致 + hello 落库同一个
+    // checkRegisterPath 复核该 SK 现在仍能注册 mountPath,scope 与 registerPaths 事后收紧
+    // 都失效)。keyId/mountPath 未设 = hello 未完成,按未授权拒绝(安全判定默认分支必须
+    // 是拒)。identify 是异步 I/O,期间可能有新连接顶替本设备,故重验后复核 activeByDevice
+    // 仍是本连接,避免调用发给已被取代的旧连接。
+    const authorized = conn.keyId !== undefined
+      && conn.mountPath !== undefined
+      && await reverifyDeviceAuthority({
+        store: this.store,
+        authorization: conn.authorization,
+        keyId: conn.keyId,
+        mountPath: conn.mountPath,
+      })
     if (!authorized) {
       conn.session.reject(TBError.unauthenticated())
       return offline
@@ -230,11 +224,11 @@ export class DeviceHub {
           // 按"此刻断线"起算回收,并同步把 registry 的 online 翻 false——否则树会一直谎报
           // online 直到 24h reclaim 删子树。
           const now = new Date().toISOString()
-          try {
-            await new NodeRegistryStore(this.store).setOnline(meta.mountPath, false, now)
-          } catch {
-            // 节点可能已被管理面删除;只更新 meta 即可。
-          }
+          await markDeviceDisconnected({
+            mountPath: meta.mountPath,
+            now,
+            registry: new NodeRegistryStore(this.store),
+          })
           await this.store.put(KEY_DEVICE_META + meta.deviceId, { ...meta, disconnectedAt: now })
           this.scheduleReclaim(meta.deviceId, this.reclaimSec * 1000)
         } else {
@@ -350,9 +344,7 @@ export class DeviceHub {
       ...(this.search === undefined ? {} : { search: this.search }),
     })
     if (!searchIndexed) {
-      console.warn(
-        `[tool-bridge] device '${conn.deviceId}' mounted at ${mountPath} but its tools are NOT in the search index: registry exceeds the tool-search capacity (TOOL_SEARCH_AUDIT_NODE_LIMIT). The device is callable but won't appear in \`tb search\` until capacity frees up.`,
-      )
+      console.warn(deviceSearchCapacityWarning(conn.deviceId, mountPath))
     }
     const meta: DeviceMeta = { deviceId: conn.deviceId, mountPath, keyId, connectedAt: now }
     await this.store.put(KEY_DEVICE_META + conn.deviceId, meta)
@@ -380,11 +372,11 @@ export class DeviceHub {
     const raw = await this.store.get(KEY_DEVICE_META + conn.deviceId)
     if (!isDeviceMeta(raw)) return
     const now = new Date().toISOString()
-    try {
-      await new NodeRegistryStore(this.store).setOnline(raw.mountPath, false, now)
-    } catch {
-      // 节点可能已被管理面删除;只更新 meta 即可。
-    }
+    await markDeviceDisconnected({
+      mountPath: raw.mountPath,
+      now,
+      registry: new NodeRegistryStore(this.store),
+    })
     await this.store.put(KEY_DEVICE_META + conn.deviceId, { ...raw, disconnectedAt: now })
     this.scheduleReclaim(conn.deviceId, this.reclaimSec * 1000)
   }
@@ -422,16 +414,12 @@ export class DeviceHub {
     }
     const raw = await this.store.get(KEY_DEVICE_META + deviceId)
     if (!isDeviceMeta(raw)) return
-    const searchSync = this.search === undefined
-      ? undefined
-      : new SearchSynchronizer(this.store, this.search)
-    const marker = await searchSync?.markSubtree(raw.mountPath)
-    try {
-      await new NodeRegistryStore(this.store).deleteSubtree(raw.mountPath)
-    } catch {
-      // 已被外部清理时,meta 仍要删。
-    }
-    await searchSync?.removeSubtreeQuietly(raw.mountPath, marker)
+    await reclaimDeviceSubtree({
+      mountPath: raw.mountPath,
+      registry: new NodeRegistryStore(this.store),
+      ...(this.search === undefined ? {} : { search: this.search }),
+      state: this.store,
+    })
     await this.store.delete(KEY_DEVICE_META + deviceId)
   }
 

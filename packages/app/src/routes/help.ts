@@ -28,7 +28,7 @@ import { toolHelpModelFor } from '../toolNodes'
 
 // --- ~help(根级与节点)---
 export async function handleHelp(c: AppContext, env: RouteEnv): Promise<Response> {
-  const { builtinsOf, deps } = env
+  const { builtinsOf, deps, searchSync } = env
   const path = splitReserved(new URL(c.req.url).pathname, '~help')
   if (path === null) throw TBError.notFound('no such path')
   const ctx = c.get('ctx')
@@ -79,11 +79,12 @@ export async function handleHelp(c: AppContext, env: RouteEnv): Promise<Response
     // 非注册路径:命令级 ~help(两级披露)。命令是节点下的虚拟叶子:
     // - mcp/http/tool 上游工具:toolHelpModelFor 命中缓存工具表(不额外打上游);
     // - builtin/context/skillhub/device shell:resolve 到父节点,取其 HelpModel 里的单条 cmd。
-    const toolModel = await toolHelpModelFor(c, ctx, registry, path, deps)
+    const toolModel = await toolHelpModelFor(c, ctx, registry, path, deps, searchSync)
     if (toolModel !== null) return renderHelp(await enrichHelp(toolModel, path, store), rep)
     const cmdModel = await commandHelpModelFor(registry, ctx, builtins, deps, path, {
       refresh,
       schemas,
+      searchSync,
     })
     if (cmdModel !== null) return renderHelp(await enrichHelp(cmdModel, path, store), rep)
     throw TBError.notFound('not found')
@@ -92,6 +93,7 @@ export async function handleHelp(c: AppContext, env: RouteEnv): Promise<Response
     refresh,
     schemas,
     now: new Date().toISOString(),
+    searchSync,
   })
   return renderHelp(await enrichHelp(model, path, store), rep)
 }

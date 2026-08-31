@@ -27,6 +27,7 @@ import {
   TBError,
 } from '@tool-bridge/core'
 import type { TbAppDeps } from './deps'
+import { positiveInt, runCursorCleanup } from './cursorCleanup'
 import { toWebObjectBodyStream } from './objectBodyStream'
 import { signStoreRefToken } from './storeRefToken'
 
@@ -61,14 +62,6 @@ export interface CleanupDefaultStoreOptions {
 interface CleanupProgress {
   cursors: StoreCleanupCursors
   revision: number
-}
-
-function positiveInt(value: number | undefined, fallback: number, field: string): number {
-  const actual = value ?? fallback
-  if (!Number.isSafeInteger(actual) || actual < 1) {
-    throw new TBError('invalid_argument', `${field} must be a positive integer`)
-  }
-  return actual
 }
 
 function randomSecret(): string {
@@ -506,6 +499,8 @@ function addCleanupResult(target: StoreCleanupResult, page: StoreCleanupResult):
 /**
  * One bounded host cleanup tick. Cursor progress is itself CAS-protected and
  * durable, so later pages are not starved across Cron/Node timer invocations.
+ * 编排骨架与 device Mailbox 共用(cursorCleanup.ts);此处只保留 Store 的持久进度
+ * 形状({cursors,revision})、页参数与结果聚合。
  */
 export async function cleanupDefaultStore(
   deps: TbAppDeps,
@@ -515,48 +510,28 @@ export async function cleanupDefaultStore(
   const store = await defaultStoreRuntime(deps)
   const maxPages = Math.min(positiveInt(opts.maxPages, 8, 'maxPages'), 64)
   const limit = opts.limit === undefined ? undefined : positiveInt(opts.limit, 200, 'limit')
-  const rawProgress = await deps.state.get(KEY_STORE_CLEANUP_PROGRESS)
-  let progress = rawProgress === null ? null : cleanupProgress(rawProgress)
-  let cursors = progress?.cursors
   const aggregate = emptyCleanupResult()
 
-  for (let pageNumber = 0; pageNumber < maxPages; pageNumber++) {
-    const page = await store.service.cleanup({
-      ...(limit === undefined ? {} : { limit }),
-      ...(cursors === undefined ? {} : { cursors }),
-      // staging 不使用权威状态 cursor；同一 host tick 只运行一次，避免
-      // maxPages 内重复扫描同一 driver maintenance 范围。
-      runDriverMaintenance: pageNumber === 0,
-    })
-    addCleanupResult(aggregate, page)
-    if (page.cursors === undefined) {
-      if (progress !== null) {
-        await deps.state.compareAndSwap!(
-          KEY_STORE_CLEANUP_PROGRESS,
-          progress.revision,
-          null,
-        )
-      }
-      return aggregate
-    }
-
-    const next: CleanupProgress = {
-      cursors: page.cursors,
-      revision: (progress?.revision ?? 0) + 1,
-    }
-    const advanced = await deps.state.compareAndSwap!(
-      KEY_STORE_CLEANUP_PROGRESS,
-      progress?.revision ?? null,
-      next,
-    )
-    if (!advanced) {
-      // Another cleaner advanced the durable cursor. Work is idempotent; do
-      // not overwrite the winner or continue from stale progress.
-      return aggregate
-    }
-    progress = next
-    cursors = next.cursors
-  }
-
+  const cursors = await runCursorCleanup<StoreCleanupCursors>({
+    encodeProgress: progress => ({ cursors: progress.cursor, revision: progress.revision }),
+    maxPages,
+    parseProgress: (value) => {
+      const progress = cleanupProgress(value)
+      return { cursor: progress.cursors, revision: progress.revision }
+    },
+    progressKey: KEY_STORE_CLEANUP_PROGRESS,
+    runPage: async (cursor, pageNumber) => {
+      const page = await store.service.cleanup({
+        ...(limit === undefined ? {} : { limit }),
+        ...(cursor === undefined ? {} : { cursors: cursor }),
+        // staging 不使用权威状态 cursor；同一 host tick 只运行一次，避免
+        // maxPages 内重复扫描同一 driver maintenance 范围。
+        runDriverMaintenance: pageNumber === 0,
+      })
+      addCleanupResult(aggregate, page)
+      return page.cursors
+    },
+    state: deps.state,
+  })
   return { ...aggregate, ...(cursors === undefined ? {} : { cursors }) }
 }

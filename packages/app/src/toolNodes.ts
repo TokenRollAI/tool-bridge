@@ -24,12 +24,8 @@ import {
   type TreePath,
   virtualizeTools,
 } from '@tool-bridge/core'
+import type { SearchDirtyMarker, SearchSynchronizer } from './search/synchronizer'
 import type { UpstreamProvider } from './providers/types'
-import {
-  isMutableSearchIndex,
-  type SearchDirtyMarker,
-  SearchSynchronizer,
-} from './search/synchronizer'
 import { type AppContext, type TbAppDeps, TOOL_CACHE_TTL_DEFAULT } from './deps'
 import { assertNoDeviceMarker, deviceToolMarker } from './deviceNodes'
 import { createHttpProvider, type HttpConfig } from './providers/http'
@@ -38,31 +34,35 @@ import { createPluginToolProvider } from './providers/pluginTool'
 import { resolveProviderAccessToken } from './providerOAuth'
 import { getTools } from './providers/toolCache'
 
-/** 取上游工具集:mcp/tool 走 `toolcache:<path>` 缓存(TTL + refresh);http 从 config 直接生成。 */
+/**
+ * 取上游工具集:mcp/tool 走 `toolcache:<path>` 缓存(TTL + refresh);http 从 config 直接生成。
+ *
+ * `searchSync` 必填:fresh list 落缓存的同时要同步派生搜索状态,漏传即静默漂移,
+ * 所以不给缺省——路由层传 env.searchSync(装配期单例;索引不可写宿主为 undefined)。
+ */
 export function upstreamTools(
   node: TreeNode,
   provider: UpstreamProvider,
   deps: TbAppDeps,
   refresh: boolean,
   now: string,
+  searchSync: SearchSynchronizer | undefined,
 ): Promise<ToolSpec[]> {
   if (node.kind === 'mcp' || node.kind === 'tool') {
-    const sync = isMutableSearchIndex(deps.search)
-      ? new SearchSynchronizer(deps.state, deps.search)
-      : undefined
     let marker: SearchDirtyMarker | undefined
     return getTools(deps.state, node.path, () => provider.list(), {
       refresh,
       ttl: deps.toolCacheTtlSec ?? TOOL_CACHE_TTL_DEFAULT,
       now,
-      ...(sync === undefined
+      ...(searchSync === undefined
         ? {}
         : {
             beforeFresh: async () => {
-              marker = await sync.markNode(node.path)
+              marker = await searchSync.markNode(node.path)
             },
-            onFreshError: async () => await sync.abort(marker),
-            onFresh: async tools => await sync.reconcileNodeQuietly(node.path, { marker, tools }),
+            onFreshError: async () => await searchSync.abort(marker),
+            onFresh: async tools =>
+              await searchSync.reconcileNodeQuietly(node.path, { marker, tools }),
           }),
     })
   }
@@ -279,11 +279,12 @@ export async function refreshDynamicSearchNode(
   node: TreeNode,
   ctx: CallContext,
   deps: TbAppDeps,
+  searchSync: SearchSynchronizer | undefined,
 ): Promise<boolean> {
   if ((node.kind !== 'mcp' && node.kind !== 'tool') || deviceToolMarker(node) !== null) return false
   try {
     const provider = await providerFor(node, ctx, deps)
-    await upstreamTools(node, provider, deps, true, new Date().toISOString())
+    await upstreamTools(node, provider, deps, true, new Date().toISOString(), searchSync)
     return true
   } catch {
     // Canonical registry mutation remains successful; marker keeps derived search repairable.
@@ -317,6 +318,7 @@ export async function toolHelpModelFor(
   registry: NodeRegistryStore,
   path: TreePath,
   deps: TbAppDeps,
+  searchSync: SearchSynchronizer | undefined,
 ): Promise<HelpModel | null> {
   let resolved: { node: TreeNode, rest: string }
   try {
@@ -342,7 +344,7 @@ export async function toolHelpModelFor(
   }
   const provider = await providerFor(node, ctx, deps)
   const refresh = c.req.query('refresh') === '1'
-  const raw = await upstreamTools(node, provider, deps, refresh, new Date().toISOString())
+  const raw = await upstreamTools(node, provider, deps, refresh, new Date().toISOString(), searchSync)
   const { exposed } = virtualizeTools(node.virtualize, raw)
   const tool = exposed.find(t => t.name === rest)
   if (tool === undefined) return null

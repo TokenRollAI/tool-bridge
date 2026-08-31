@@ -21,9 +21,10 @@ import {
   TBError,
   type TreeNode,
 } from '@tool-bridge/core'
-import type { AppContext } from '../deps'
+import type { AppContext, TbHono } from '../deps'
 import type { RouteEnv } from './env'
 import { type DeviceNodeMarker, relativeDevicePath } from '../deviceNodes'
+import { runHandler } from '../responses'
 
 export const DEVICE_MAILBOX_IDEMPOTENCY_HEADER = 'x-tb-idempotency-key'
 const DEVICE_MAILBOX_HTTP_BODY_BYTES = 272 * 1024
@@ -176,126 +177,144 @@ export async function enqueueDeviceCommand(
   return response
 }
 
-export async function handleDeviceMailboxControl(c: AppContext, env: RouteEnv): Promise<Response> {
-  const path = new URL(c.req.url).pathname.replace(/\/+$/, '')
-  const body = await mailboxJsonObject(c)
-  const mailbox = env.mailbox()
-  const ctx = c.get('ctx')
-  if (path === '/~device/operations/get') {
-    const input = parseBody(deviceOperationIdentityRequestSchema, body)
-    const result = await mailbox.get(input.deviceId, input.operationId)
-    assertCanManage(ctx, result)
-    return c.json(deviceOperationDetailSchema.parse(result))
-  }
-  if (path === '/~device/operations/list') {
-    const input = parseBody(deviceOperationListRequestSchema, body)
-    const limit = Math.min(
-      input.opts?.limit ?? DEVICE_MAILBOX_LIST_LIMIT_DEFAULT,
-      DEVICE_MAILBOX_LIST_LIMIT_MAX,
-    )
-    let cursor = input.opts?.cursor
-    const items: DeviceOperationSummary[] = []
-    // 底层 cursor 来自每设备的完整 keyspace，不能在过滤隐藏记录后原样回传，否则即使
-    // items=[] 也会泄漏其他 owner 的记录数量。每次 raw page 不大于剩余可见容量，保证
-    // resume cursor 永远位于最后一条已返回记录之后，不跳过可见 operation。
-    while (items.length < limit) {
-      const previous = cursor
-      const page = await mailbox.list({
-        deviceId: input.deviceId,
-        limit: limit - items.length,
-        ...(cursor === undefined ? {} : { cursor }),
-        ...(input.opts?.states === undefined ? {} : { states: input.opts.states }),
-      })
-      items.push(...page.items.filter(item => canManage(ctx, item)))
-      cursor = page.cursor
-      if (cursor === undefined) {
-        return c.json(deviceOperationListResponseSchema.parse({ items }))
-      }
-      if (cursor === previous) {
-        throw new TBError('internal', 'device mailbox list cursor did not advance')
-      }
-    }
+// ---------- 控制面(调用方管理自己发起的 operation;可见性按发起者/admin 裁剪)----------
 
-    const resumeCursor = cursor
-    if (resumeCursor === undefined) {
-      return c.json(deviceOperationListResponseSchema.parse({ items }))
-    }
-    // 只有确认后面还有至少一条当前调用方可见的记录才暴露续页信号。探测可以按大页
-    // 前进；真正的下一页仍从 resumeCursor 开始，因此不会吞掉被探测到的记录。
-    let probeCursor: string | undefined = resumeCursor
-    while (probeCursor !== undefined) {
-      const previous: string = probeCursor
-      const page = await mailbox.list({
-        deviceId: input.deviceId,
-        cursor: probeCursor,
-        limit: DEVICE_MAILBOX_LIST_LIMIT_MAX,
-        ...(input.opts?.states === undefined ? {} : { states: input.opts.states }),
-      })
-      if (page.items.some(item => canManage(ctx, item))) {
-        return c.json(deviceOperationListResponseSchema.parse({ items, cursor: resumeCursor }))
-      }
-      probeCursor = page.cursor
-      if (probeCursor === previous) {
-        throw new TBError('internal', 'device mailbox list cursor did not advance')
-      }
-    }
-    return c.json(deviceOperationListResponseSchema.parse({ items }))
-  }
-  if (path === '/~device/operations/cancel') {
-    const input = parseBody(deviceOperationIdentityRequestSchema, body)
-    const current = await mailbox.get(input.deviceId, input.operationId)
-    assertCanManage(ctx, current)
-    return c.json(deviceOperationDetailSchema.parse(
-      await mailbox.cancel(input.deviceId, input.operationId),
-    ))
-  }
-  throw TBError.notFound('no such path')
+async function getOperation(c: AppContext, env: RouteEnv): Promise<Response> {
+  const input = parseBody(deviceOperationIdentityRequestSchema, await mailboxJsonObject(c))
+  const result = await env.mailbox().get(input.deviceId, input.operationId)
+  assertCanManage(c.get('ctx'), result)
+  return c.json(deviceOperationDetailSchema.parse(result))
 }
 
-export async function handleDeviceMailboxData(c: AppContext, env: RouteEnv): Promise<Response> {
-  const path = new URL(c.req.url).pathname.replace(/\/+$/, '')
-  const body = await mailboxJsonObject(c)
+async function listOperations(c: AppContext, env: RouteEnv): Promise<Response> {
+  const input = parseBody(deviceOperationListRequestSchema, await mailboxJsonObject(c))
   const mailbox = env.mailbox()
   const ctx = c.get('ctx')
-  const authorize = async (target: DeviceOperationAuthorizationTarget): Promise<void> =>
-    await assertCurrentDeviceCredential(c, target, env.deps.reservedRoots)
-
-  if (path === '/~device/mailbox/claim') {
-    const input = parseBody(deviceOperationClaimRequestSchema, body)
-    return c.json(deviceOperationClaimResponseSchema.parse(await mailbox.claim({
-      ...input,
-      deviceKeyId: ctx.keyId,
-      authorize,
-    })))
-  }
-  if (path === '/~device/mailbox/renew') {
-    const input = parseBody(deviceOperationRenewRequestSchema, body)
-    return c.json(deviceOperationRenewResponseSchema.parse(await mailbox.renew({
-      ...input,
-      deviceKeyId: ctx.keyId,
-      authorize,
-    })))
-  }
-  if (path === '/~device/mailbox/complete') {
-    const input = parseBody(deviceOperationCompleteRequestSchema, body)
-    let completion: DeviceOperationCompletion
-    if (input.outcome === 'succeeded') {
-      completion = { outcome: 'succeeded', result: input.result }
-    } else if (input.outcome === 'result_unknown') {
-      completion = {
-        outcome: 'result_unknown',
-        ...(input.error === undefined ? {} : { error: input.error }),
-      }
-    } else {
-      completion = { outcome: input.outcome, error: input.error }
-    }
-    return c.json(deviceOperationDetailSchema.parse(await mailbox.complete({
+  const limit = Math.min(
+    input.opts?.limit ?? DEVICE_MAILBOX_LIST_LIMIT_DEFAULT,
+    DEVICE_MAILBOX_LIST_LIMIT_MAX,
+  )
+  let cursor = input.opts?.cursor
+  const items: DeviceOperationSummary[] = []
+  // 底层 cursor 来自每设备的完整 keyspace，不能在过滤隐藏记录后原样回传，否则即使
+  // items=[] 也会泄漏其他 owner 的记录数量。每次 raw page 不大于剩余可见容量，保证
+  // resume cursor 永远位于最后一条已返回记录之后，不跳过可见 operation。
+  while (items.length < limit) {
+    const previous = cursor
+    const page = await mailbox.list({
       deviceId: input.deviceId,
-      operationId: input.operationId,
-      leaseId: input.leaseId,
-      deviceKeyId: ctx.keyId,
-      authorize,
-    }, completion)))
+      limit: limit - items.length,
+      ...(cursor === undefined ? {} : { cursor }),
+      ...(input.opts?.states === undefined ? {} : { states: input.opts.states }),
+    })
+    items.push(...page.items.filter(item => canManage(ctx, item)))
+    cursor = page.cursor
+    if (cursor === undefined) {
+      return c.json(deviceOperationListResponseSchema.parse({ items }))
+    }
+    if (cursor === previous) {
+      throw new TBError('internal', 'device mailbox list cursor did not advance')
+    }
   }
-  throw TBError.notFound('no such path')
+
+  const resumeCursor = cursor
+  if (resumeCursor === undefined) {
+    return c.json(deviceOperationListResponseSchema.parse({ items }))
+  }
+  // 只有确认后面还有至少一条当前调用方可见的记录才暴露续页信号。探测可以按大页
+  // 前进；真正的下一页仍从 resumeCursor 开始，因此不会吞掉被探测到的记录。
+  let probeCursor: string | undefined = resumeCursor
+  while (probeCursor !== undefined) {
+    const previous: string = probeCursor
+    const page = await mailbox.list({
+      deviceId: input.deviceId,
+      cursor: probeCursor,
+      limit: DEVICE_MAILBOX_LIST_LIMIT_MAX,
+      ...(input.opts?.states === undefined ? {} : { states: input.opts.states }),
+    })
+    if (page.items.some(item => canManage(ctx, item))) {
+      return c.json(deviceOperationListResponseSchema.parse({ items, cursor: resumeCursor }))
+    }
+    probeCursor = page.cursor
+    if (probeCursor === previous) {
+      throw new TBError('internal', 'device mailbox list cursor did not advance')
+    }
+  }
+  return c.json(deviceOperationListResponseSchema.parse({ items }))
+}
+
+async function cancelOperation(c: AppContext, env: RouteEnv): Promise<Response> {
+  const input = parseBody(deviceOperationIdentityRequestSchema, await mailboxJsonObject(c))
+  const mailbox = env.mailbox()
+  const current = await mailbox.get(input.deviceId, input.operationId)
+  assertCanManage(c.get('ctx'), current)
+  return c.json(deviceOperationDetailSchema.parse(
+    await mailbox.cancel(input.deviceId, input.operationId),
+  ))
+}
+
+// ---------- 数据面(设备凭证拉取/续租/回执;每次都重验凭证与 mount 授权)----------
+
+function deviceAuthorize(
+  c: AppContext,
+  env: RouteEnv,
+): (target: DeviceOperationAuthorizationTarget) => Promise<void> {
+  return async target => await assertCurrentDeviceCredential(c, target, env.deps.reservedRoots)
+}
+
+async function claimOperations(c: AppContext, env: RouteEnv): Promise<Response> {
+  const input = parseBody(deviceOperationClaimRequestSchema, await mailboxJsonObject(c))
+  return c.json(deviceOperationClaimResponseSchema.parse(await env.mailbox().claim({
+    ...input,
+    deviceKeyId: c.get('ctx').keyId,
+    authorize: deviceAuthorize(c, env),
+  })))
+}
+
+async function renewLeases(c: AppContext, env: RouteEnv): Promise<Response> {
+  const input = parseBody(deviceOperationRenewRequestSchema, await mailboxJsonObject(c))
+  return c.json(deviceOperationRenewResponseSchema.parse(await env.mailbox().renew({
+    ...input,
+    deviceKeyId: c.get('ctx').keyId,
+    authorize: deviceAuthorize(c, env),
+  })))
+}
+
+async function completeOperation(c: AppContext, env: RouteEnv): Promise<Response> {
+  const input = parseBody(deviceOperationCompleteRequestSchema, await mailboxJsonObject(c))
+  let completion: DeviceOperationCompletion
+  if (input.outcome === 'succeeded') {
+    completion = { outcome: 'succeeded', result: input.result }
+  } else if (input.outcome === 'result_unknown') {
+    completion = {
+      outcome: 'result_unknown',
+      ...(input.error === undefined ? {} : { error: input.error }),
+    }
+  } else {
+    completion = { outcome: input.outcome, error: input.error }
+  }
+  return c.json(deviceOperationDetailSchema.parse(await env.mailbox().complete({
+    deviceId: input.deviceId,
+    operationId: input.operationId,
+    leaseId: input.leaseId,
+    deviceKeyId: c.get('ctx').keyId,
+    authorize: deviceAuthorize(c, env),
+  }, completion)))
+}
+
+/**
+ * mailbox 六条端点都是三段字面量固定路径,直接注册为固定路由(Hono 只有
+ * `/:path{.*}/~x` 具名后缀形式对 3+ 段不匹配,字面量路由没有这个限制),
+ * 不再挤在 POST 通配里做 startsWith 分派。注册顺序:auth 中间件之后、POST 通配之前。
+ * 未知 /~device/** 子路径落入通配,由 handleInvoke 的保留段校验拒绝(同码 404)。
+ */
+export function registerDeviceMailboxRoutes(app: TbHono, env: RouteEnv): void {
+  app.post('/~device/operations/get', c => runHandler(async () => await getOperation(c, env)))
+  app.post('/~device/operations/list', c => runHandler(async () => await listOperations(c, env)))
+  app.post('/~device/operations/cancel', c =>
+    runHandler(async () => await cancelOperation(c, env)))
+  app.post('/~device/mailbox/claim', c => runHandler(async () => await claimOperations(c, env)))
+  app.post('/~device/mailbox/renew', c => runHandler(async () => await renewLeases(c, env)))
+  app.post('/~device/mailbox/complete', c =>
+    runHandler(async () => await completeOperation(c, env)))
 }

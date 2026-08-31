@@ -1,7 +1,8 @@
 /**
  * provider 型 OAuth2 的托管流程(I/O 层;纯逻辑在 core `plugin/oauth.ts`)。
  *
- * 与 mcp 那条(`oauth.ts`)的分工:两者共用 state 密封(`sealOAuthState`/`openOAuthState`)
+ * 与 mcp 那条(`oauth.ts`)的分工:两者共用 state 密封(`sealOAuthState`/`openOAuthState`)、
+ * 回调端点(`OAUTH_CALLBACK_PATH`,靠 state 里的标记区分流程)、state 时限(`STATE_TTL_SEC`)
  * 与回调页渲染,但**流程本身分开** —— mcp 靠 MCP SDK 的 `auth()` 做 discovery + DCR,
  * 这条的端点是 plugin 在 `~describe` 里声明的已知值、client 凭证是用户自己注册后存进
  * SecretStore 的。合并只会让两边都长出对方不需要的分支。
@@ -13,7 +14,8 @@
  * 与其他上游凭证同一通道 —— 插件不知道也不需要知道它是 OAuth 换来的。
  */
 
-import { buildAuthorizationUrl,
+import { base64urlEncode,
+  buildAuthorizationUrl,
   buildTokenRequest,
   isTBError,
   OAUTH_CLIENT_FIELDS,
@@ -25,15 +27,9 @@ import { buildAuthorizationUrl,
   shouldRefresh,
   type StateStore,
   TBError } from '@tool-bridge/core'
-import { sealOAuthState } from './oauth'
+import { OAUTH_CALLBACK_PATH, sealOAuthState, STATE_TTL_SEC } from './oauth'
 
 const KEY_TOKENS = 'puoauth:token:'
-
-/** 授权跳转 → 回调的时限(与 mcp 那条一致:过期一律拒,不给 code 重放留窗口)。 */
-const STATE_TTL_SEC = 600
-
-/** 平台自持的回调路径(与 mcp 共用一个端点,靠 state 里的标记区分流程)。 */
-export const PROVIDER_OAUTH_CALLBACK_PATH = '/~oauth/callback'
 
 /** 删除某挂载的令牌(节点卸载时调用)。 */
 export async function invalidateProviderOAuth(store: StateStore, nodePath: string): Promise<void> {
@@ -150,17 +146,11 @@ async function requestTokens(opts: {
 
 // ---------- PKCE ----------
 
-function base64url(bytes: Uint8Array): string {
-  let binary = ''
-  for (const byte of bytes) binary += String.fromCharCode(byte)
-  return btoa(binary).replaceAll('+', '-').replaceAll('/', '_').replaceAll('=', '')
-}
-
 /** 生成 PKCE 对(S256)。 */
 async function createPkce(): Promise<{ challenge: string, verifier: string }> {
-  const verifier = base64url(crypto.getRandomValues(new Uint8Array(32)))
+  const verifier = base64urlEncode(crypto.getRandomValues(new Uint8Array(32)))
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier))
-  return { verifier, challenge: base64url(new Uint8Array(digest)) }
+  return { verifier, challenge: base64urlEncode(new Uint8Array(digest)) }
 }
 
 // ---------- 流程编排 ----------
@@ -236,7 +226,7 @@ export async function startProviderAuthorization(
     authorizationUrl: buildAuthorizationUrl({
       config: opts.config,
       clientId: client.clientId,
-      redirectUri: opts.origin + PROVIDER_OAUTH_CALLBACK_PATH,
+      redirectUri: opts.origin + OAUTH_CALLBACK_PATH,
       state,
       ...(pkce === undefined ? {} : { codeChallenge: pkce.challenge }),
     }),
@@ -254,7 +244,7 @@ export async function finishProviderAuthorization(opts: ProviderAuthorizeOpts & 
     config: opts.config,
     fetcher,
     now: opts.now,
-    grant: { code: opts.code, redirectUri: opts.origin + PROVIDER_OAUTH_CALLBACK_PATH },
+    grant: { code: opts.code, redirectUri: opts.origin + OAUTH_CALLBACK_PATH },
     ...(opts.codeVerifier === '' ? {} : { codeVerifier: opts.codeVerifier }),
     ...client,
   })
