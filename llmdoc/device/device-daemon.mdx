@@ -1,12 +1,19 @@
 ---
-description: tb daemon 的 Linux systemd user service 生命周期:安装即更新、SK 进 0600 私有配置、ready 等待、失败回滚,以及 stub 测试与真实发行版验证的边界。
+description: tb daemon 的 Linux systemd user service 生命周期:安装更新、ready 后 Mailbox drain、installation-local journal、失败回滚与验证边界。
 kind: guide
+relations:
+  related:
+    - device/do-websocket-sessions.mdx
+    - device/durable-mailbox.mdx
 code:
   paths:
     - packages/cli/src/daemon.ts
     - packages/cli/src/commands/daemon.ts
     - packages/cli/src/commands/connect.ts
+    - packages/cli/src/deviceRuntime.ts
+    - packages/cli/src/deviceMailboxJournal.ts
     - packages/cli/test/daemon.test.ts
+    - packages/cli/test/deviceRuntimeMailbox.test.ts
 ---
 
 # Linux 设备 daemon
@@ -47,6 +54,21 @@ choice、flag、required/multiple,并限制 `cwd`、`timeoutMs`、`maxOutputByte
 
 重复执行 `install` 是更新操作:即使服务已经 active 也会 restart,让新配置立即生效。安装、启动或等待 ready 失败时,恢复安装前的配置、状态和 unit;此前已有服务时还会尝试恢复旧服务。
 
+## Mailbox 消费生命周期
+
+`tb connect` 与 daemon 共用 `deviceRuntime` adapter。Device SDK 的 Mailbox processor 不自启；CLI 只在
+expose 含 `mailbox|both` command 时显式创建 processor,并让 realtime 与 Mailbox 复用同一份 live expose
+和 handler。初次连接及网络闪断后的每次 `ready` 都触发一次 `drain`；它不是常驻 polling timer。
+
+CLI journal 是 installation-local 文件状态,按 gateway origin + deviceId 摘要隔离在本机配置目录下；目录和
+entry 权限分别为 `0700`/`0600`。`put` 以 fsync 临时文件、atomic rename、再 fsync 目录完成,保证 handler
+前的 `executing` barrier 跨进程崩溃持久化；过期 entry 会回收,损坏的 executing/terminal entry 必须保留,
+后续读取 fail closed,不能因无法解析就删除后重跑 handler。
+
+close/进程停止与 suspend 都 abort 当前 drain；resume 后由新的 `ready` 再启动 drain。非 abort 的 Mailbox
+错误进入前台 JSON/标准错误或 daemon journal,不能把 processor 失败当成连接已完成消费。完整状态机、lease
+与 journal replay 语义见 [durable-mailbox](./durable-mailbox.mdx)。
+
 structured child 缺省只继承 HOME/PATH、locale、用户、临时目录和时区等基础环境。`inheritEnv` 保存并解析的是
 本机环境变量名,不是 SecretStore 引用;显式列入 token/云凭证会把值交给 child,当前也没有 secret-aware 输出
 脱敏或执行后清零保证。profile 能执行该设备用户有权运行的任意程序,因此 `0600` 配置、最小 Device SK、
@@ -81,6 +103,9 @@ tb daemon uninstall
 - 非 Linux、root 或 sudo 调用被拒绝,`--allow '*'` 需要明确确认;
 - profile strict parse、命令/路径 canonicalization、shell/fs/profile 路径冲突和 direct argv dispatch;
 - install 保存规范化 profile 值而非源文件路径,后续 run 使用冻结值;
+- mailbox-capable expose 才创建 processor,初次及每次重连 `ready` 都 drain,并复用 realtime handler;
+- installation-local 文件 journal 的 gateway/device 隔离、权限、durable write、过期 GC 与损坏 entry 保留;
+- close/suspend abort 当前 drain,resume 等待下一次 `ready`,非 abort 错误进入 CLI/daemon 日志;
 - uninstall 不修改登录 profile,也不承担服务端 SK 吊销。
 
 这些 stub 测试不能证明真实发行环境中的 systemd user bus、linger 跨注销/重启行为、journal 权限、真实网关 WebSocket 注册或目标 executable 在真实 Linux 上的权限/进程树行为。需要该级别保证时,在目标 Linux 发行版上以普通用户完成一次真实安装,退出 SSH 或重启后再检查 `tb daemon status` 和服务端设备状态;真实外部资源验证仍遵守每轮最多一次的项目约束。
