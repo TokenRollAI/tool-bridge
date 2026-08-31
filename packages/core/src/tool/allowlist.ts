@@ -38,7 +38,11 @@ export function normalizeAllowHost(raw: string): string {
 
 /** StateStore 支撑的运行时白名单存储。 */
 export class RemoteAllowlistStore {
-  constructor(private readonly store: StateStore) {}
+  private readonly store: StateStore
+
+  constructor(store: StateStore) {
+    this.store = store
+  }
 
   /** 读全部运行时条目(缺省/脏值 → 空数组);按 host 升序稳定输出。 */
   async list(): Promise<AllowlistEntry[]> {

@@ -87,26 +87,13 @@ export interface HelpModel {
 /**
  * `Accept: application/json` 时 `~help` 的响应形状(规范性)。
  * 字段与 DSL 一一对应,不多不少——JSON 是 DSL 的机器可读形态。
+ * `cmds`/`children` 直接从内部模型的 {@link CmdSpec}/{@link ChildRef} 派生:
+ * JSON 表现逐字段承载同一形状,派生而非复刻,杜绝两处平行维护漂移。
  */
 export interface HelpJson {
   /** directory 节点携带。 */
-  children?: Array<{ description: string, kind: NodeKind, path: TreePath }>
-  cmds: Array<{
-    confirm?: boolean
-    delivery?: 'realtime' | 'mailbox' | 'both'
-    effect?: string
-    /** 工具级一句话描述(`h`,定型)。 */
-    h?: string
-    /** arguments 的 JSON Schema(不含 {tool,arguments} 信封)。 */
-    inputSchema?: unknown
-    method: 'POST'
-    name: string
-    /** 返回值的 JSON Schema,对应 DSL 的 `result` 行(有值才出现)。 */
-    outputSchema?: unknown
-    path: string
-    returns?: string
-    scope: Action
-  }>
+  children?: ChildRef[]
+  cmds: CmdSpec[]
   /** Agent feedback 默认区块,对应 DSL 的 `feedback` 块(有条目才出现)。 */
   feedback?: HelpFeedbackItem[]
   /** 下一步指引,对应 DSL 的 `hint` 行(有值才出现)。 */

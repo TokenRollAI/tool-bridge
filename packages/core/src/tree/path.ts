@@ -53,7 +53,8 @@ export function canonicalizeSegment(seg: string): string {
  *
  * 这是路径进入 registry、resolve、scope 判定、search key 前的唯一入口:
  * 存储侧只见小写路径,故大小写不同的输入天然折叠到同一节点。折叠导致的重复
- * (上游同时暴露 Foo 与 foo)由调用方在物化/列举点检测并拒绝(见 assertNoCollision)。
+ * (上游同时暴露 Foo 与 foo)在各物化/列举点拒绝:MCP 适配器(app/mcpServer)对
+ * 公开名冲突直接报错,device 的 deviceHello 物化经 {@link assertNoCollision} 拒绝。
  */
 export function canonicalizePath(path: string): TreePath {
   const norm = normalizePath(path)

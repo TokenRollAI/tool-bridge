@@ -28,11 +28,13 @@ export type BuiltinCommandHandler<
 /** 绑定 module 名、描述和宿主依赖，底层命令定义由通用注册表持有。 */
 export class BuiltinCommandRegistry<TDeps>
   extends HtbpCommandRegistry<BuiltinCommandContext<TDeps>> {
-  constructor(
-    private readonly moduleName: string,
-    private readonly moduleDescription: string,
-  ) {
+  private readonly moduleName: string
+  private readonly moduleDescription: string
+
+  constructor(moduleName: string, moduleDescription: string) {
     super()
+    this.moduleName = moduleName
+    this.moduleDescription = moduleDescription
   }
 
   help(nodePath: TreePath) {

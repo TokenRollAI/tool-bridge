@@ -11,11 +11,9 @@
 
 import { z } from 'zod'
 import { base64urlDecode, base64urlEncode } from '../encoding/base64url'
+import { TextDecoder, TextEncoder } from '../webGlobals'
 import { ACTIONS, type CallContext } from '../types'
 import { TBError } from '../errors'
-
-declare const TextEncoder: { new (): { encode(input: string): Uint8Array } }
-declare const TextDecoder: { new (): { decode(input: Uint8Array): string } }
 
 /** 平台 → Plugin 的调用上下文 header。 */
 export const HEADER_TB_CONTEXT = 'X-TB-Context'

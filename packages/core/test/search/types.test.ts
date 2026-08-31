@@ -7,7 +7,6 @@ import {
   normalizeToolSearchOptions,
   PG_SEARCH_SCHEMA_STATEMENTS,
   prepareToolSearchQuery,
-  prepareToolSearchUnits,
   searchUnitAllowsPath,
   serializeToolSearchDocuments,
   serializeToolSearchSnapshot,
@@ -28,6 +27,9 @@ import {
 } from '../../src'
 import { sqliteSearchDialect } from '../../src/search/sqlSearchIndex'
 import { base64urlEncode } from '../../src/encoding/base64url'
+
+/** 兼容层 prepareToolSearchUnits 已删;units 断言统一走权威 API 取派生单元。 */
+const unitsOf = (query: string) => prepareToolSearchQuery(query).units
 
 declare const TextEncoder: { new (): { encode(input: string): Uint8Array } }
 interface TestCryptoKey { readonly type: string }
@@ -256,7 +258,7 @@ describe('SearchIndex mutation contract', () => {
   })
 
   it('expands CJK terms into whole-word, bigram and single-code-point tiers', () => {
-    expect(prepareToolSearchUnits(' 发送信件 ')).toEqual([
+    expect(unitsOf(' 发送信件 ')).toEqual([
       { logicalTermId: 0, pattern: '%发送信件%', tier: 4 },
       { logicalTermId: 0, pattern: '%发送%', tier: 2 },
       { logicalTermId: 0, pattern: '%送信%', tier: 2 },
@@ -269,14 +271,14 @@ describe('SearchIndex mutation contract', () => {
   })
 
   it('adds maximal script runs for mixed terms and recognizes Han, kana and Hangul', () => {
-    expect(prepareToolSearchUnits('tb发送')).toEqual([
+    expect(unitsOf('tb发送')).toEqual([
       { logicalTermId: 0, pattern: '%tb发送%', tier: 4 },
       { logicalTermId: 0, pattern: '%tb%', tier: 2 },
       { logicalTermId: 0, pattern: '%发送%', tier: 2 },
       { logicalTermId: 0, pattern: '%发%', tier: 1 },
       { logicalTermId: 0, pattern: '%送%', tier: 1 },
     ])
-    expect(prepareToolSearchUnits('日 かな カナ 한글')).toEqual([
+    expect(unitsOf('日 かな カナ 한글')).toEqual([
       { logicalTermId: 0, pattern: '%日%', tier: 4 },
       { logicalTermId: 1, pattern: '%かな%', tier: 4 },
       { logicalTermId: 2, pattern: '%カナ%', tier: 4 },
@@ -291,13 +293,13 @@ describe('SearchIndex mutation contract', () => {
   })
 
   it('deduplicates patterns within each logical term and escapes LIKE metacharacters', () => {
-    expect(prepareToolSearchUnits('日程 日')).toEqual([
+    expect(unitsOf('日程 日')).toEqual([
       { logicalTermId: 0, pattern: '%日程%', tier: 4 },
       { logicalTermId: 1, pattern: '%日%', tier: 4 },
       { logicalTermId: 0, pattern: '%日%', tier: 1 },
       { logicalTermId: 0, pattern: '%程%', tier: 1 },
     ])
-    expect(prepareToolSearchUnits('%_!')).toEqual([
+    expect(unitsOf('%_!')).toEqual([
       { logicalTermId: 0, pattern: '%!%!_!!%', tier: 4 },
     ])
   })
@@ -310,9 +312,9 @@ describe('SearchIndex mutation contract', () => {
   })
 
   it('does not let short ASCII terms earn coverage from incidental path substrings', () => {
-    const [short] = prepareToolSearchUnits('on')
-    const [longer] = prepareToolSearchUnits('home')
-    const [cjk] = prepareToolSearchUnits('日')
+    const [short] = unitsOf('on')
+    const [longer] = unitsOf('home')
+    const [cjk] = unitsOf('日')
     expect(short === undefined || longer === undefined || cjk === undefined).toBe(false)
     expect(searchUnitAllowsPath(short!)).toBe(false)
     expect(searchUnitAllowsPath(longer!)).toBe(true)
@@ -320,25 +322,25 @@ describe('SearchIndex mutation contract', () => {
   })
 
   it('validates query boundaries and the whitespace term limit', () => {
-    expect(() => prepareToolSearchUnits('   ')).toThrowError(TBError)
-    expect(() => prepareToolSearchUnits('calendar\0private')).toThrowError(TBError)
-    expect(() => prepareToolSearchUnits('x'.repeat(TOOL_SEARCH_QUERY_MAX + 1)))
+    expect(() => unitsOf('   ')).toThrowError(TBError)
+    expect(() => unitsOf('calendar\0private')).toThrowError(TBError)
+    expect(() => unitsOf('x'.repeat(TOOL_SEARCH_QUERY_MAX + 1)))
       .toThrowError(TBError)
     const tooManyShortTerms = Array.from(
       { length: TOOL_SEARCH_TERM_LIMIT + 1 },
       () => 'a',
     ).join(' ')
-    expect(() => prepareToolSearchUnits(tooManyShortTerms)).toThrowError(TBError)
+    expect(() => unitsOf(tooManyShortTerms)).toThrowError(TBError)
   })
 
   it('keeps every LIKE pattern within the D1 byte and binding budgets', () => {
     const longAscii = `%_!${'abcdefghijklmnop'.repeat(8)}`
-    const asciiUnits = prepareToolSearchUnits(longAscii)
+    const asciiUnits = unitsOf(longAscii)
     const longCjk = Array.from(
       { length: 70 },
       (_, index) => String.fromCodePoint(0x4E00 + index),
     ).join('')
-    const cjkUnits = prepareToolSearchUnits(longCjk)
+    const cjkUnits = unitsOf(longCjk)
     const unscoped = sqliteSearchDialect.candidateStatement(longCjk, 10, 0)
     const scoped = sqliteSearchDialect.candidateStatement(
       longCjk,
@@ -378,8 +380,8 @@ describe('SearchIndex mutation contract', () => {
       { length: 3 },
       (_, codePointIndex) => String.fromCodePoint(0x4E00 + termIndex * 3 + codePointIndex),
     ).join('')).join(' ')
-    const first = prepareToolSearchUnits(query)
-    const second = prepareToolSearchUnits(query)
+    const first = unitsOf(query)
+    const second = unitsOf(query)
 
     expect(first).toHaveLength(TOOL_SEARCH_UNIT_LIMIT)
     expect(first).toEqual(second)

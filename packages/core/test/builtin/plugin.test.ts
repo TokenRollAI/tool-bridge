@@ -10,7 +10,8 @@ import {
   pluginTokenSecretName,
 } from '../../src/builtin/plugin'
 import { KEY_PLUGIN, KEY_PLUGIN_HEALTH, KEY_PLUGIN_META, MemoryStateStore } from '../../src/store'
-import { base64urlEncode, SecretStoreImpl } from '../../src/secret/secretStore'
+import { SecretStoreImpl } from '../../src/secret/secretStore'
+import { base64urlEncode } from '../../src/encoding/base64url'
 import { SKRegistryStore } from '../../src/auth/sk'
 import { isTBError } from '../../src/errors'
 

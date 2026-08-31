@@ -15,6 +15,7 @@ import {
   resolvePluginExport,
 } from './contract'
 import { KEY_PLUGIN, KEY_PLUGIN_META } from '../store'
+import { crypto, TextEncoder } from '../webGlobals'
 import { type PluginManifest } from './manifest'
 import { TBError } from '../errors'
 
@@ -43,13 +44,6 @@ export function canonicalCatalogJson(value: unknown): string {
   }
   return JSON.stringify(normalize(value))
 }
-
-// core 是 lib: ["ES2023"](无 DOM):Web 标准全局按本仓惯例就地声明最小形状,
-// 与 secretStore.ts / envelope.ts 同姿势。
-declare const crypto: {
-  subtle: { digest(algorithm: string, data: Uint8Array): Promise<ArrayBuffer> }
-}
-declare const TextEncoder: { new (): { encode(input: string): Uint8Array } }
 
 /**
  * canonical JSON 的 sha256(hex 小写)。用 WebCrypto 而非 node:crypto —— 生成脚本、

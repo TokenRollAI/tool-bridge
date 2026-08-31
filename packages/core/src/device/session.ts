@@ -77,10 +77,12 @@ export class DeviceGatewaySession {
   private readonly pending = new Map<string, PendingCall>()
   private readonly timeoutMs: number
 
-  constructor(
-    private readonly io: DeviceSessionIo,
-    private readonly opts: DeviceSessionOptions,
-  ) {
+  private readonly io: DeviceSessionIo
+  private readonly opts: DeviceSessionOptions
+
+  constructor(io: DeviceSessionIo, opts: DeviceSessionOptions) {
+    this.io = io
+    this.opts = opts
     this.timeoutMs = opts.timeoutMs ?? DEVICE_CALL_TIMEOUT_MS
   }
 

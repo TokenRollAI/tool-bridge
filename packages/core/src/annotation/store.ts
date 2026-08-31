@@ -33,7 +33,11 @@ export function normalizeAnnotationPath(path: string): TreePath {
 }
 
 export class AnnotationStore {
-  constructor(private readonly store: StateStore) {}
+  private readonly store: StateStore
+
+  constructor(store: StateStore) {
+    this.store = store
+  }
 
   private keyOf(path: TreePath): string {
     return KEY_ANNOTATION + path

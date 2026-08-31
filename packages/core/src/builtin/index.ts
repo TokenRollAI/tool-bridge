@@ -2,7 +2,7 @@
  * builtin 装配:把基础模块与宿主可选模块组装为 `module → BuiltinModule` 映射。
  *
  * 存储实例(SKRegistryStore / SecretStoreImpl / NodeRegistryStore)由网关注入并复用;
- * status 的 nodeCount 经翻页统计 registry 全量节点(当前树规模小,可接受)。
+ * status 的 nodeCount 经单趟全树扫描统计 registry 全量节点(当前树规模小,可接受)。
  */
 
 import type { RemoteAllowlistStore } from '../tool/allowlist'
@@ -20,7 +20,6 @@ import { createFederationModule } from './federation'
 import { createRegistryModule } from './registry'
 import { createSecretModule } from './secret'
 import { createStatusModule } from './status'
-import { LIST_LIMIT_MAX } from '../types'
 import { createSkModule } from './sk'
 
 export interface BuiltinDeps {
@@ -57,19 +56,13 @@ export interface BuiltinDeps {
   visibility?: ScopeChecker
 }
 
-/** 翻页统计 registry 全量节点数(status.nodeCount)。 */
+/**
+ * 全树节点数(status.nodeCount)。`subtree('')` 一趟扫描即全量;此前按 `list` 翻页
+ * 统计,而 `list` 每页都内部全扫再切片,整体 O(N²/页)。不用 `rootSnapshot`:它按
+ * 派生索引预算(500)截断,计数会失真。
+ */
 async function countNodes(registry: NodeRegistryStore): Promise<number> {
-  let count = 0
-  let cursor: string | undefined
-  do {
-    const page: { cursor?: string, items: unknown[] } = await registry.list(undefined, {
-      limit: LIST_LIMIT_MAX,
-      ...(cursor !== undefined ? { cursor } : {}),
-    })
-    count += page.items.length
-    cursor = page.cursor
-  } while (cursor)
-  return count
+  return (await registry.subtree('')).length
 }
 
 /** 构造 module 名 → BuiltinModule 映射；可选模块只在宿主提供依赖时装配。 */
@@ -110,18 +103,15 @@ export function createBuiltins(deps: BuiltinDeps): Map<string, BuiltinModule> {
   return modules
 }
 
+export { type AnnotationModuleDeps } from './annotation'
 export {
-  type AnnotationModuleDeps,
-  createAnnotationModule,
-} from './annotation'
-export { type CatalogListItem, type CatalogModuleDeps, createCatalogModule } from './catalog'
+  type CatalogExportAuth,
+  type CatalogExportDetails,
+  type CatalogListItem,
+  type CatalogModuleDeps,
+} from './catalog'
+export { type FederationHost, type FederationModuleDeps } from './federation'
 export {
-  createFederationModule,
-  type FederationHost,
-  type FederationModuleDeps,
-} from './federation'
-export {
-  createPluginModule,
   type PluginHealthRecord,
   type PluginModuleDeps,
   type PluginProbeResult,
@@ -129,14 +119,10 @@ export {
   pluginTokenSecretName,
   type PluginView,
 } from './plugin'
-export { createRegistryModule, parseNodeInput } from './registry'
-export { createSecretModule } from './secret'
-export { createSkModule } from './sk'
-export { createStatusModule, type StatusDeps, type StatusSummary } from './status'
+export { parseNodeInput } from './registry'
+export { type StatusDeps, type StatusSummary } from './status'
 export {
   createStoreModule,
-  STORE_COMMANDS,
-  type StoreCommand,
   type StoreModuleCallbacks,
   type StoreModuleDeps,
   storeScopeForCmd,

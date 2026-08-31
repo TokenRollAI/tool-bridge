@@ -21,6 +21,7 @@ import type {
   DeviceClientExpose,
   DeviceCredentialProvider,
 } from './connection'
+import { credentialHeadersFrom, statusFallback } from '../shared/transport'
 
 export type DeviceOperationJournalState = 'discovered' | 'executing' | 'terminal'
 
@@ -106,24 +107,7 @@ function endpoint(base: URL, path: string): string {
 }
 
 function credentialHeaders(value: Awaited<ReturnType<DeviceCredentialProvider['prepare']>>): Headers {
-  let headers: Headers
-  try {
-    headers = new Headers(value.headers)
-  } catch {
-    throw invalidProcessor('device mailbox HTTP credential headers are invalid')
-  }
-  const authorization = headers.get('authorization')
-  if (authorization === null || authorization.trim() === '') {
-    throw invalidProcessor('device mailbox HTTP credential requires Authorization')
-  }
-  for (const name of headers.keys()) {
-    if (
-      name === 'cookie'
-      || name === 'cookie2'
-      || name === 'proxy-authorization'
-      || name.startsWith('x-tb-')
-    ) throw invalidProcessor(`device mailbox credential cannot set reserved header '${name}'`)
-  }
+  const headers = credentialHeadersFrom(value.headers, 'device mailbox HTTP credential')
   headers.set('accept', 'application/json')
   headers.set('content-type', 'application/json')
   return headers
@@ -274,9 +258,8 @@ export function createDeviceMailboxProcessor(opts: DeviceMailboxProcessorOptions
       const body = known.success
         ? known.data
         : {
-            code: response.status === 401 ? 'permission_denied' as const : 'unavailable' as const,
+            ...statusFallback(response.status),
             message: `device mailbox returned HTTP ${response.status}`,
-            retryable: response.status >= 500,
           }
       if (response.status === 401) opts.credentialProvider.invalidate?.(body)
       throw stableError(body, response.status)

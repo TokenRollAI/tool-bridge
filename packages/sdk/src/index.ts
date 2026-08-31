@@ -13,16 +13,18 @@ export type {
   UploadObjectInput,
   UploadObjectOptions,
 } from './device/storeUpload'
-export { createStoreClient } from './storeClient'
+export { createStoreClient } from './store/client'
 export type {
   StoreClient,
-  StoreClientObjectDescriptor,
   StoreClientOptions,
   StoreListOptions,
+} from './store/client'
+export type {
+  StoreClientObjectDescriptor,
   StoreListPage,
   StoreReadGrant,
   StoreShareGrant,
-} from './storeClient'
+} from './store/wire'
 export { createToolBridge } from './toolBridge'
 export type {
   Connection,

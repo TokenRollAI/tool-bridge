@@ -2,8 +2,7 @@
  * SecretKey 签发 / 认证 / SKRegistry。
  *
  * 纯逻辑内核:不 import 任何 Workers / Node 专属 API。WebCrypto 全局(`crypto`、
- * `TextEncoder`)在 Workers 与 Node18+ 均可用;core 不引入 @cloudflare/workers-types
- * 或 @types/node,故在此声明所需最小子集(仅类型,运行时用真实全局)。
+ * `TextEncoder`)经 webGlobals.ts 统一承接(core 不引宿主类型)。
  */
 
 import { z } from 'zod'
@@ -19,17 +18,9 @@ import {
 } from '../types'
 import { KEY_SK_HASH, KEY_SK_ID, type StateStore } from '../store'
 import { base64urlEncode } from '../encoding/base64url'
+import { crypto, TextEncoder } from '../webGlobals'
 import { TBError } from '../errors'
 import { omit } from '../omit'
-
-declare const crypto: {
-  getRandomValues(array: Uint8Array): Uint8Array
-  randomUUID(): string
-  subtle: { digest(algorithm: string, data: Uint8Array): Promise<ArrayBuffer> }
-}
-declare class TextEncoder {
-  encode(input?: string): Uint8Array
-}
 
 const SECRET_PREFIX = 'tbk_'
 const BEARER_PREFIX = 'Bearer '
@@ -85,8 +76,20 @@ export async function mintKey(
   return { key, secret }
 }
 
+/**
+ * SK 对外投影(hash 永不出网关)。SKRegistry List/Get/Update 与 write 返回的 key
+ * 都是这个形状;CLI/Dashboard 经 SDK 消费同一命名,不再各自手抄。
+ */
+export type SecretKeyView = Omit<SecretKey, 'hash'>
+
+/** SKRegistry.Write 返回:密钥投影 + 明文(仅此一次)。 */
+export interface SecretKeyCreated {
+  key: SecretKeyView
+  secret: string
+}
+
 /** 投影:剥离 hash(hash 永不出网关)。 */
-export function projectKey(key: SecretKey): Omit<SecretKey, 'hash'> {
+export function projectKey(key: SecretKey): SecretKeyView {
   return omit(key, 'hash')
 }
 
@@ -141,10 +144,20 @@ export class SKRegistryStore {
     const listOpts: { cursor?: string, limit: number } = { limit: clampLimit(opts?.limit) }
     if (opts?.cursor !== undefined) listOpts.cursor = opts.cursor
     const page = await this.store.list(KEY_SK_ID, listOpts)
+    const hashes = page.items
+      .map(({ value }) => value)
+      .filter((value): value is string => typeof value === 'string')
+    // getMany 单次上限 100 keys(store.ts 契约),一页最多 LIST_LIMIT_MAX=200 → 分块批量读。
+    const records = new Map<string, unknown>()
+    for (let i = 0; i < hashes.length; i += 100) {
+      const chunk = await this.store.getMany(
+        hashes.slice(i, i + 100).map(hash => KEY_SK_HASH + hash),
+      )
+      for (const [key, value] of chunk) records.set(key, value)
+    }
     const items: Array<Omit<SecretKey, 'hash'>> = []
-    for (const { value } of page.items) {
-      if (typeof value !== 'string') continue
-      const rec = await this.store.get(KEY_SK_HASH + value)
+    for (const hash of hashes) {
+      const rec = records.get(KEY_SK_HASH + hash)
       if (rec) items.push(projectKey(rec as SecretKey))
     }
     return page.cursor !== undefined ? { items, cursor: page.cursor } : { items }

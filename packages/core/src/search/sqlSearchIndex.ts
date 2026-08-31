@@ -108,50 +108,11 @@ SELECT
 FROM json_each(?)
 `
 
-/** 逐条写 path→digest 快照(位置参数:path, digest)。 */
-export const TOOL_SEARCH_INSERT_SNAPSHOT_SQL
-  = 'INSERT INTO tb_search_snapshots_v5(path, digest) VALUES (?, ?)'
-
 /** JSON1 批量写快照(单参数:`[path, digest]` 二元组数组的 JSON)。 */
 export const TOOL_SEARCH_INSERT_SNAPSHOT_JSON_SQL = `
 INSERT INTO tb_search_snapshots_v5(path, digest)
 SELECT json_extract(value, '$[0]'), json_extract(value, '$[1]') FROM json_each(?)
 `
-
-const META_SQL
-  = 'SELECT revision, seeded, cursor_secret FROM tb_search_meta_v5 WHERE singleton = 1'
-const SNAPSHOT_DIGESTS_SQL
-  = 'SELECT path, digest FROM tb_search_snapshots_v5 ORDER BY path'
-/** replace 的前置探测:一次拿到本 path 的 digest、是否残留 source 行、已用节点数。 */
-const PATH_STATE_SQL = `
-SELECT snapshots.digest,
-  EXISTS(SELECT 1 FROM tb_search_tools_v5 WHERE path = ?) AS has_tools,
-  (SELECT COUNT(*) FROM tb_search_snapshots_v5) AS path_count
-FROM (SELECT 1) AS singleton
-LEFT JOIN tb_search_snapshots_v5 AS snapshots ON snapshots.path = ?
-`
-const PRESENT_SQL = 'SELECT 1 AS present FROM tb_search_tools_v5 WHERE path = ? LIMIT 1'
-const PRESENT_PREFIX_SQL = `
-SELECT 1 AS present FROM tb_search_tools_v5
-WHERE path = ? OR substr(path, 1, length(?) + 1) = ? || '/'
-LIMIT 1
-`
-const DELETE_TOOLS_SQL = 'DELETE FROM tb_search_tools_v5 WHERE path = ?'
-const DELETE_SNAPSHOT_SQL = 'DELETE FROM tb_search_snapshots_v5 WHERE path = ?'
-const DELETE_TOOLS_PREFIX_SQL = `
-DELETE FROM tb_search_tools_v5
-WHERE path = ? OR substr(path, 1, length(?) + 1) = ? || '/'
-`
-const DELETE_SNAPSHOT_PREFIX_SQL = `
-DELETE FROM tb_search_snapshots_v5
-WHERE path = ? OR substr(path, 1, length(?) + 1) = ? || '/'
-`
-const DELETE_ALL_TOOLS_SQL = 'DELETE FROM tb_search_tools_v5'
-const DELETE_ALL_SNAPSHOTS_SQL = 'DELETE FROM tb_search_snapshots_v5'
-const BUMP_REVISION_SQL
-  = 'UPDATE tb_search_meta_v5 SET revision = revision + 1 WHERE singleton = 1'
-const COMPLETE_REBUILD_SQL
-  = 'UPDATE tb_search_meta_v5 SET seeded = 1, revision = revision + 1 WHERE singleton = 1'
 
 /** 一条待执行语句:SQL 文本 + 按序绑定的参数,不含任何驱动对象。 */
 export interface SqlSearchStatement {
@@ -185,6 +146,70 @@ export interface SqlSearchStatements {
   /** 全量快照 digest,按 path 升序。 */
   readonly snapshotDigests: string
 }
+
+/** 固定语句共同真源的方言注入面。 */
+export interface ToolSearchFixedStatementSyntax {
+  /**
+   * 数值列归一装饰(缺省原样输出)。PG 方言必须给 `::int`——postgres.js 把
+   * `bigint`/`COUNT(*)` 返回**字符串**、`EXISTS` 返回 **boolean**,不归一不是类型
+   * 报错而是静默错行为(公开类型被违反、空快照 no-op 判定失效),详见 pgSearchDialect。
+   */
+  castInt?: (expr: string) => string
+  /** 占位符语法(SQLite `?` / PG `$n`)。 */
+  placeholder(index: number): string
+}
+
+/**
+ * 14 条固定语句的唯一模板。此前 SQLite 与 PG 方言各持一份逐字平行的副本,任何
+ * 一侧改动都得靠人工纪律同步;现统一由此生成,方言只注入两处真实差异:占位符
+ * 语法与数值列归一(`castInt`)。
+ */
+export function toolSearchFixedStatements(
+  syntax: ToolSearchFixedStatementSyntax,
+): SqlSearchStatements {
+  const p = (index: number): string => syntax.placeholder(index)
+  const int = syntax.castInt ?? ((expr: string) => expr)
+  return {
+    bumpRevision: 'UPDATE tb_search_meta_v5 SET revision = revision + 1 WHERE singleton = 1',
+    completeRebuild:
+      'UPDATE tb_search_meta_v5 SET seeded = 1, revision = revision + 1 WHERE singleton = 1',
+    deleteAllSnapshots: 'DELETE FROM tb_search_snapshots_v5',
+    deleteAllTools: 'DELETE FROM tb_search_tools_v5',
+    deleteSnapshot: `DELETE FROM tb_search_snapshots_v5 WHERE path = ${p(1)}`,
+    deleteSnapshotPrefix: `
+DELETE FROM tb_search_snapshots_v5
+WHERE path = ${p(1)} OR substr(path, 1, length(${p(2)}) + 1) = ${p(3)} || '/'
+`,
+    deleteTools: `DELETE FROM tb_search_tools_v5 WHERE path = ${p(1)}`,
+    deleteToolsPrefix: `
+DELETE FROM tb_search_tools_v5
+WHERE path = ${p(1)} OR substr(path, 1, length(${p(2)}) + 1) = ${p(3)} || '/'
+`,
+    insertSnapshot: `INSERT INTO tb_search_snapshots_v5(path, digest) VALUES (${p(1)}, ${p(2)})`,
+    meta: `SELECT ${int('revision')} AS revision, ${int('seeded')} AS seeded, cursor_secret `
+      + 'FROM tb_search_meta_v5 WHERE singleton = 1',
+    // replace 的前置探测:一次拿到本 path 的 digest、是否残留 source 行、已用节点数。
+    pathState: `
+SELECT snapshots.digest,
+  ${int(`EXISTS(SELECT 1 FROM tb_search_tools_v5 WHERE path = ${p(1)})`)} AS has_tools,
+  ${int('(SELECT COUNT(*) FROM tb_search_snapshots_v5)')} AS path_count
+FROM (SELECT 1) AS singleton
+LEFT JOIN tb_search_snapshots_v5 AS snapshots ON snapshots.path = ${p(2)}
+`,
+    present: `SELECT 1 AS present FROM tb_search_tools_v5 WHERE path = ${p(1)} LIMIT 1`,
+    presentPrefix: `
+SELECT 1 AS present FROM tb_search_tools_v5
+WHERE path = ${p(1)} OR substr(path, 1, length(${p(2)}) + 1) = ${p(3)} || '/'
+LIMIT 1
+`,
+    snapshotDigests: 'SELECT path, digest FROM tb_search_snapshots_v5 ORDER BY path',
+  }
+}
+
+const SQLITE_FIXED_STATEMENTS = toolSearchFixedStatements({ placeholder: () => '?' })
+
+/** 逐条写 path→digest 快照(位置参数:path, digest)。 */
+export const TOOL_SEARCH_INSERT_SNAPSHOT_SQL = SQLITE_FIXED_STATEMENTS.insertSnapshot
 
 /**
  * SQL 方言:把与具体引擎绑定的 SQL 文本从数据库无关的编排里分出来。
@@ -417,22 +442,7 @@ export const sqliteSearchDialect: SqlSearchDialect = {
     )
   },
   schemaStatements: TOOL_SEARCH_SCHEMA_STATEMENTS,
-  statements: {
-    bumpRevision: BUMP_REVISION_SQL,
-    completeRebuild: COMPLETE_REBUILD_SQL,
-    deleteAllSnapshots: DELETE_ALL_SNAPSHOTS_SQL,
-    deleteAllTools: DELETE_ALL_TOOLS_SQL,
-    deleteSnapshot: DELETE_SNAPSHOT_SQL,
-    deleteSnapshotPrefix: DELETE_SNAPSHOT_PREFIX_SQL,
-    deleteTools: DELETE_TOOLS_SQL,
-    deleteToolsPrefix: DELETE_TOOLS_PREFIX_SQL,
-    insertSnapshot: TOOL_SEARCH_INSERT_SNAPSHOT_SQL,
-    meta: META_SQL,
-    pathState: PATH_STATE_SQL,
-    present: PRESENT_SQL,
-    presentPrefix: PRESENT_PREFIX_SQL,
-    snapshotDigests: SNAPSHOT_DIGESTS_SQL,
-  },
+  statements: SQLITE_FIXED_STATEMENTS,
 }
 
 export class SqlSearchIndex implements MutableSearchIndex {
@@ -440,10 +450,13 @@ export class SqlSearchIndex implements MutableSearchIndex {
 
   protected readonly dialect: SqlSearchDialect
 
+  protected readonly driver: SqlSearchDriver
+
   constructor(
-    protected readonly driver: SqlSearchDriver,
+    driver: SqlSearchDriver,
     dialect: SqlSearchDialect = sqliteSearchDialect,
   ) {
+    this.driver = driver
     this.dialect = dialect
   }
 

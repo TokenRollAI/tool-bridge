@@ -1,8 +1,8 @@
 import {
-  TB_ERROR_CODES,
   TBError,
   type TBErrorBody,
 } from '@tool-bridge/core/device'
+import { parseTbErrorBody, statusFallback } from '../shared/transport'
 
 export function resolveStoreFetcher(fetcher?: typeof fetch): typeof fetch {
   const resolved = fetcher ?? globalThis.fetch
@@ -32,15 +32,6 @@ export function storeCommandUrl(baseUrl: string, command: string): string {
   return url.toString()
 }
 
-function validErrorBody(value: unknown): value is TBErrorBody {
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false
-  const body = value as Record<string, unknown>
-  return typeof body.code === 'string'
-    && (TB_ERROR_CODES as readonly string[]).includes(body.code)
-    && typeof body.message === 'string'
-    && typeof body.retryable === 'boolean'
-}
-
 function errorFromBody(body: TBErrorBody, status: number): TBError | null {
   try {
     return new TBError(body.code, body.message, {
@@ -52,18 +43,11 @@ function errorFromBody(body: TBErrorBody, status: number): TBError | null {
   }
 }
 
+/** 无规范 TBError body 时按共享 status 映射归一;消息保持 status-only,不回显未识别 body。 */
 function fallbackErrorBody(status: number): TBErrorBody {
-  if (status === 401 || status === 403) {
-    return {
-      code: 'permission_denied',
-      message: `gateway returned HTTP ${status}`,
-      retryable: false,
-    }
-  }
   return {
-    code: 'internal',
+    ...statusFallback(status),
     message: `gateway returned an invalid TBError response (HTTP ${status})`,
-    retryable: true,
   }
 }
 
@@ -106,10 +90,11 @@ export async function tbResponseError(
     }
     // A status-only fallback cannot echo signed URLs from an unrecognized body.
   }
-  const body = validErrorBody(decoded) && errorFromBody(decoded, response.status) !== null
+  const known = parseTbErrorBody(decoded)
+  const body = known !== undefined && errorFromBody(known, response.status) !== null
     ? {
-        ...decoded,
-        message: sanitizedGatewayMessage(decoded.message, response.status, sensitiveValues),
+        ...known,
+        message: sanitizedGatewayMessage(known.message, response.status, sensitiveValues),
       }
     : fallbackErrorBody(response.status)
   const error = errorFromBody(body, response.status)
@@ -118,11 +103,7 @@ export async function tbResponseError(
   const fallback = fallbackErrorBody(response.status)
   return {
     body: fallback,
-    error: new TBError(
-      'internal',
-      `gateway returned an invalid TBError response (HTTP ${response.status})`,
-      { retryable: true },
-    ),
+    error: new TBError(fallback.code, fallback.message, { retryable: fallback.retryable }),
   }
 }
 

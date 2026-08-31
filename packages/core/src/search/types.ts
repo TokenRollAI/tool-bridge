@@ -1,4 +1,5 @@
 import type { ToolSpec } from '../tool/types'
+import { crypto, TextDecoder, TextEncoder, type WebCryptoKey } from '../webGlobals'
 import {
   LIST_LIMIT_MAX,
   type Page,
@@ -7,34 +8,6 @@ import {
 import { base64urlDecode, base64urlEncode } from '../encoding/base64url'
 import { canonicalizePath, validatePath } from '../tree/path'
 import { TBError } from '../errors'
-
-declare const TextEncoder: { new (): { encode(input: string): Uint8Array } }
-declare const TextDecoder: {
-  new (label?: string, options?: { fatal?: boolean }): { decode(input: Uint8Array): string }
-}
-interface ToolSearchCryptoKey { readonly type: string }
-declare const crypto: {
-  getRandomValues(array: Uint8Array): Uint8Array
-  subtle: {
-    decrypt(
-      algorithm: { iv: Uint8Array, name: 'AES-GCM' },
-      key: ToolSearchCryptoKey,
-      data: Uint8Array,
-    ): Promise<ArrayBuffer>
-    encrypt(
-      algorithm: { iv: Uint8Array, name: 'AES-GCM' },
-      key: ToolSearchCryptoKey,
-      data: Uint8Array,
-    ): Promise<ArrayBuffer>
-    importKey(
-      format: 'raw',
-      keyData: Uint8Array,
-      algorithm: { name: 'AES-GCM' },
-      extractable: false,
-      keyUsages: Array<'decrypt' | 'encrypt'>,
-    ): Promise<ToolSearchCryptoKey>
-  }
-}
 
 export type SearchCapability = 'search' | 'search:federated' | 'search:semantic'
 
@@ -635,11 +608,6 @@ export function prepareToolSearchQuery(
   }
 }
 
-/** 兼容只消费派生 units 的调用点；候选查询应使用 prepareToolSearchQuery 保留分母。 */
-export function prepareToolSearchUnits(query: string): SearchUnit[] {
-  return prepareToolSearchQuery(query).units
-}
-
 interface CursorPayload {
   f: string
   h: string
@@ -671,7 +639,7 @@ function cursorSecretBytes(secret: string): Uint8Array {
   return new Uint8Array(secret.match(/.{2}/g)?.map(value => Number.parseInt(value, 16)) ?? [])
 }
 
-async function cursorCryptoKey(secret: string): Promise<ToolSearchCryptoKey> {
+async function cursorCryptoKey(secret: string): Promise<WebCryptoKey> {
   return await crypto.subtle.importKey(
     'raw',
     cursorSecretBytes(secret),

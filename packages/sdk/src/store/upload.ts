@@ -17,6 +17,7 @@ import {
   uploadRequestInit,
 } from './transport'
 import { PresignedPutError, putPresignedObject } from '../client/presignedPut'
+import { credentialHeadersFrom } from '../shared/transport'
 
 export interface PreparedStoreCredential {
   headers?: Readonly<Record<string, string>>
@@ -86,33 +87,7 @@ function safeHeaderToken(value: unknown): value is string {
 function httpCredentialHeaders(
   credential: Awaited<ReturnType<StoreCredentialProvider['prepare']>>,
 ): Headers {
-  let headers: Headers
-  try {
-    headers = new Headers(credential.headers)
-  } catch {
-    throw new TBError('invalid_argument', 'device HTTP credential headers are invalid')
-  }
-  const authorization = headers.get('authorization')
-  if (authorization === null || authorization.trim() === '') {
-    throw new TBError(
-      'invalid_argument',
-      'device HTTP credential must include a non-empty Authorization header',
-    )
-  }
-  for (const name of headers.keys()) {
-    if (
-      name === 'cookie'
-      || name === 'cookie2'
-      || name === 'proxy-authorization'
-      || name.startsWith('x-tb-')
-    ) {
-      throw new TBError(
-        'invalid_argument',
-        `device HTTP credential cannot set reserved header '${name}'`,
-      )
-    }
-  }
-  return headers
+  return credentialHeadersFrom(credential.headers, 'device HTTP credential')
 }
 
 function bodyByteLength(body: NonNullable<RequestInit['body']>): number | undefined {

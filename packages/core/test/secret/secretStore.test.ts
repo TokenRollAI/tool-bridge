@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { base64urlDecode, base64urlEncode, SecretStoreImpl } from '../../src/secret/secretStore'
+import { base64urlDecode, base64urlEncode } from '../../src/encoding/base64url'
+import { SecretStoreImpl } from '../../src/secret/secretStore'
 import { KEY_SECRET, MemoryStateStore } from '../../src/store'
 
 // 纯 WebCrypto 环境:core 的 tsconfig 不含 DOM 类型,此处以最小声明补齐 crypto。

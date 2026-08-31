@@ -46,7 +46,11 @@ function byPath(a: TreeNode, b: TreeNode): number {
 }
 
 export class NodeRegistryStore {
-  constructor(private readonly store: StateStore) {}
+  private readonly store: StateStore
+
+  constructor(store: StateStore) {
+    this.store = store
+  }
 
   private keyOf(path: string): string {
     return KEY_NODE + path

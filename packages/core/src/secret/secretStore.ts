@@ -6,7 +6,7 @@
  * 信任根不自举存储(spec-digest)。主密钥缺失/格式非法时能力禁用:Set 抛 unavailable。
  *
  * 纯逻辑,仅依赖 WebCrypto(core 无宿主依赖)。`crypto` / `TextEncoder` / `TextDecoder`
- * 在 Workers 与 Node 20+ 均为全局;此处以模块作用域最小声明补齐类型(不改 tsconfig、不污染全局)。
+ * 在 Workers 与 Node 20+ 均为全局;类型经 webGlobals.ts 统一承接(不改 tsconfig、不污染全局)。
  */
 
 import {
@@ -16,50 +16,19 @@ import {
   type Page,
   type Timestamp,
 } from '../types'
+import { crypto, TextDecoder, TextEncoder, type WebCryptoKey } from '../webGlobals'
+import { base64urlDecode, base64urlEncode } from '../encoding/base64url'
 import { KEY_SECRET, type StateStore } from '../store'
+// ---------- base64url 编解码(统一实现见 encoding/base64url,公开面由 index 直接导出) ----------
 import { TBError } from '../errors'
 
-// ---------- 最小 WebCrypto 类型声明(模块作用域) ----------
-
-type Aes256GcmKeyBytes = ArrayBuffer | Uint8Array
-
-interface MinimalCryptoKey {
-  readonly type: string
-}
-
-interface MinimalSubtleCrypto {
-  decrypt(
-    algorithm: { iv: Uint8Array, name: 'AES-GCM' },
-    key: MinimalCryptoKey,
-    data: Aes256GcmKeyBytes,
-  ): Promise<ArrayBuffer>
-  encrypt(
-    algorithm: { iv: Uint8Array, name: 'AES-GCM' },
-    key: MinimalCryptoKey,
-    data: Aes256GcmKeyBytes,
-  ): Promise<ArrayBuffer>
-  importKey(
-    format: 'raw',
-    keyData: Aes256GcmKeyBytes,
-    algorithm: { name: 'AES-GCM' },
-    extractable: boolean,
-    keyUsages: Array<'encrypt' | 'decrypt'>,
-  ): Promise<MinimalCryptoKey>
-}
-
-declare const crypto: {
-  getRandomValues(array: Uint8Array): Uint8Array
-  subtle: MinimalSubtleCrypto
-}
-declare const TextEncoder: { new (): { encode(input: string): Uint8Array } }
-declare const TextDecoder: { new (): { decode(input: ArrayBuffer | Uint8Array): string } }
-
-// ---------- base64url 编解码(统一实现见 encoding/base64url,经 index 重导出保持公开面) ----------
-
-export { base64urlDecode, base64urlEncode } from '../encoding/base64url'
-import { base64urlDecode, base64urlEncode } from '../encoding/base64url'
-
 // ---------- 存储记录形状 ----------
+
+/** system/secret list 的一行(名字与时间戳,永不含值);CLI/Dashboard 经 SDK 消费同一命名。 */
+export interface SecretEntrySummary {
+  name: string
+  updatedAt: Timestamp
+}
 
 /** StateStore 中 `secret:<name>` 的落盘值——只存密文,绝不含明文。 */
 interface StoredSecret {
@@ -108,7 +77,7 @@ export class SecretStoreImpl {
   /** 32 字节主密钥;undefined 表示 unavailable 态。 */
   private readonly keyBytes: Uint8Array | undefined
   /** 惰性导入的 CryptoKey(仅可用时);首次加解密时创建并缓存。 */
-  private importedKey: Promise<MinimalCryptoKey> | undefined
+  private importedKey: Promise<WebCryptoKey> | undefined
 
   /**
    * @param masterKey base64url 编码的 32 字节(TB_SECRET_ENCRYPTION_KEY);
@@ -137,7 +106,7 @@ export class SecretStoreImpl {
     return this.keyBytes !== undefined
   }
 
-  private key(): Promise<MinimalCryptoKey> {
+  private key(): Promise<WebCryptoKey> {
     if (this.keyBytes === undefined) {
       // 调用方(set/resolve)已先行处理 unavailable;此处仅为类型收窄兜底。
       throw new TBError('unavailable', 'secret store master key is not configured')
@@ -181,7 +150,7 @@ export class SecretStoreImpl {
    * 枚举 secret 元数据。**绝不返回明文/密文**——只出 name + updatedAt(只进不出)。
    * limit 默认 50、上限 200 钳制。
    */
-  async list(opts?: ListOptions): Promise<Page<{ name: string, updatedAt: Timestamp }>> {
+  async list(opts?: ListOptions): Promise<Page<SecretEntrySummary>> {
     const limit = Math.min(opts?.limit ?? LIST_LIMIT_DEFAULT, LIST_LIMIT_MAX)
     const { items, cursor } = await this.store.list(KEY_SECRET, { cursor: opts?.cursor, limit })
     return {

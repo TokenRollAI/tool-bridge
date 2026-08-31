@@ -19,6 +19,7 @@ import type {
 import { type ObjectBody, type ObjectMeta, type ObjectStore, readStreamBytes, readStreamText } from './objectStore'
 import { LIST_LIMIT_DEFAULT, LIST_LIMIT_MAX, type ListOptions, type Page, type TreePath } from '../types'
 import { DEFAULT_STORE_DRIVER_KEY_ROOT } from '../objectStoreService/types'
+import { normalizeContentType } from './contentType'
 import { normalizePath } from '../tree/path'
 import { normalizeEntryPath } from './path'
 import { TBError } from '../errors'
@@ -156,15 +157,10 @@ export async function createObjectContextUploadGrant(
   if (unknownKeys.length > 0) {
     throw new TBError('invalid_argument', `create_upload 含未知字段:${unknownKeys.join(',')}`)
   }
-  if (
-    typeof input?.contentType !== 'string'
-    || input.contentType.trim() === ''
-    || input.contentType.length > 255
-    || !input.contentType.includes('/')
-    || /[\r\n\0]/.test(input.contentType)
-  ) {
-    throw new TBError('invalid_argument', 'create_upload 需要合法的 \'contentType\'')
-  }
+  const contentType = normalizeContentType(
+    input?.contentType,
+    'create_upload 需要合法的 \'contentType\'',
+  )
   const nsPath = normalizePath(opts.nsPath)
   const entryPath = normalizeEntryPath(input.path)
   const key = `${keyPrefixBare === '' ? '' : `${keyPrefixBare}/`}${entryPath}`
@@ -173,7 +169,6 @@ export async function createObjectContextUploadGrant(
     throw new TBError('unavailable', '对象存储未配置直传签名能力', { retryable: false })
   }
   const ttlSec = assertPresignTtlSec(opts.uploadGrantTtlSec ?? PRESIGN_TTL_SEC_DEFAULT)
-  const contentType = input.contentType.trim()
   // 先取时间再签名：对外宣告的期限宁可略早，绝不晚于底层签名的真实期限。
   const expiresAt = new Date(Date.now() + ttlSec * 1000).toISOString()
   const signed = await store.presignPut(key, ttlSec, {
