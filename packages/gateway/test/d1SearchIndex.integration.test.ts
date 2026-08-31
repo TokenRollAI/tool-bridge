@@ -1,6 +1,6 @@
 import {
   NodeRegistryStore,
-  prepareToolSearchUnits,
+  prepareToolSearchQuery,
   sqliteSearchDialect,
   TOOL_SEARCH_AUDIT_NODE_LIMIT,
   TOOL_SEARCH_LIKE_PATTERN_BYTES_MAX,
@@ -37,7 +37,7 @@ describe('D1SearchIndex', () => {
       { length: 80 },
       (_, index) => String.fromCodePoint(0x4E00 + index),
     ).join('')
-    const units = prepareToolSearchUnits(query)
+    const units = prepareToolSearchQuery(query).units
     const statement = sqliteSearchDialect.candidateStatement(query, 10, 0)
     const encoder = new TextEncoder()
 

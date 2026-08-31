@@ -9,7 +9,7 @@ import {
   type Action,
   check,
   DEFAULT_MAX_NODES,
-  type HelpJson,
+  type HelpModel,
   MAX_TREE_DEPTH,
   NodeRegistryStore,
   resolveUpstreamTool,
@@ -21,11 +21,11 @@ import {
   validatePath,
   virtualizeTools,
 } from '@tool-bridge/core'
+import { helpJsonSchema } from '@tool-bridge/core/protocol'
 import type { RouteEnv } from './env'
 import {
-  canonicalRemotePath,
   remotePassthroughIfMatch,
-  remotePathWithin,
+  remotePathProjectorIfMatch,
   remoteProtocolError,
   remoteTreeChildren,
 } from '../federation'
@@ -99,35 +99,13 @@ const toolSpecCommand = (
   }
 }
 
-/** Rebase a remote HelpJson command path onto its local federation mount. */
-const remoteCommand = (
-  localNodePath: TreePath,
-  model: HelpJson,
-  command: HelpJson['cmds'][number],
-): McpBridgeTool => {
-  const remoteNodePath = model.node.path.replace(/^\/+|\/+$/g, '')
-  const remoteCommandPath = command.path.replace(/^\/+|\/+$/g, '')
-  if (
-    remoteCommandPath !== remoteNodePath
-    && !remoteCommandPath.startsWith(`${remoteNodePath}/`)
-  ) {
-    throw new TBError('unavailable', 'remote ~help returned a command outside its node')
-  }
-  const suffix = remoteCommandPath.slice(remoteNodePath.length)
-  // 完整命令路径 rebase 到本地联邦挂载点;命令是虚拟叶子,直连调用(无信封)。
-  return mcpCommand(localNodePath, model.node.description, {
-    ...command,
-    path: `/${localNodePath}${suffix}`,
-  })
-}
-
 /**
  * 当次请求的 MCP 投影桥:list 现算可见工具集,call 回灌本 app 的 HTTP 面(或直连 Provider)。
  *
  * `app` 必须是装配中的同一实例——回灌走 `app.request`,才能复用鉴权中间件与全部路由语义。
  */
 function mcpBridgeFor(c: AppContext, env: RouteEnv, app: TbHono): McpToolBridge {
-  const { builtinsOf, deps, globalSearchCapabilities } = env
+  const { builtinsOf, deps, globalSearchCapabilities, searchSync } = env
   const ctx = c.get('ctx')
   const registry = new NodeRegistryStore(c.get('store'))
   let remoteRequests = 0
@@ -217,8 +195,15 @@ function mcpBridgeFor(c: AppContext, env: RouteEnv, app: TbHono): McpToolBridge 
     }
   }
 
-  const remoteHelp = async (path: TreePath): Promise<HelpJson> => {
+  // remote 成功响应固定取 JSON,经权威 RemotePathProjector.projectHelp 严格收敛并 rebase
+  // 到本地挂载(与 ~help 路由同一实现):node path 匹配、命令 containment、children 直接
+  // 后代校验与可见性裁剪都在投影里,返回的 HelpModel 已是本地完整路径。
+  const remoteHelp = async (path: TreePath): Promise<HelpModel> => {
     takeRemoteRequest()
+    const projector = await remotePathProjectorIfMatch(registry, path)
+    if (projector === null) {
+      throw remoteProtocolError(`remote ~help path '${path}' lost its mount owner`)
+    }
     const headers = new Headers(c.req.raw.headers)
     headers.set('accept', 'application/json')
     const response = await remotePassthroughIfMatch(
@@ -233,28 +218,11 @@ function mcpBridgeFor(c: AppContext, env: RouteEnv, app: TbHono): McpToolBridge 
     if (response === null || !response.ok) {
       throw new TBError('unavailable', `remote ~help failed for '${path}'`, { retryable: true })
     }
-    const model = (await response.json().catch(() => null)) as HelpJson | null
-    if (model === null || !Array.isArray(model.cmds) || typeof model.node?.path !== 'string') {
+    const parsed = helpJsonSchema.safeParse(await response.json().catch(() => null))
+    if (!parsed.success) {
       throw new TBError('unavailable', `remote ~help returned invalid JSON for '${path}'`)
     }
-    const owner = await registry.resolve(path).catch(() => null)
-    if (owner?.node.kind !== 'remote') {
-      throw remoteProtocolError(`remote ~help path '${path}' lost its mount owner`)
-    }
-    const modelPath = canonicalRemotePath(model.node.path, true)
-    if (modelPath !== owner.rest) {
-      throw remoteProtocolError(`remote ~help path '${modelPath}' does not match request`)
-    }
-    for (const command of model.cmds) {
-      if (!command.path.startsWith('/') || command.path.startsWith('//')) {
-        throw remoteProtocolError(`remote ~help returned invalid command path '${command.path}'`)
-      }
-      const commandPath = canonicalRemotePath(command.path.slice(1), true)
-      if (!remotePathWithin(modelPath, commandPath)) {
-        throw remoteProtocolError(`remote ~help command '${command.path}' escapes its node`)
-      }
-    }
-    return model
+    return projector.projectHelp(parsed.data, path, ctx)
   }
 
   const remotePaths = async (root: TreePath): Promise<TreePath[]> => {
@@ -306,14 +274,13 @@ function mcpBridgeFor(c: AppContext, env: RouteEnv, app: TbHono): McpToolBridge 
           for (const command of model.cmds) {
             if (check(ctx, path, command.scope).allow) {
               let detailed = command
+              // 投影后 command.path 已是 `/<本地完整命令路径>`;缺 schema 且非节点自身时
+              // 直接对该路径再取一次工具级 ~help(两级披露的细节级)。
               if (command.inputSchema === undefined && command.path !== `/${model.node.path}`) {
-                const remoteNodePath = model.node.path.replace(/^\/+|\/+$/g, '')
-                const remoteCommandPath = command.path.replace(/^\/+|\/+$/g, '')
-                const detailPath = `${path}${remoteCommandPath.slice(remoteNodePath.length)}`
-                const detail = await remoteHelp(detailPath)
+                const detail = await remoteHelp(command.path.replace(/^\/+/, ''))
                 detailed = detail.cmds.find(item => item.name === command.name) ?? command
               }
-              result.push(remoteCommand(path, model, detailed))
+              result.push(mcpCommand(path, model.node.description, detailed))
             }
           }
         }
@@ -334,7 +301,7 @@ function mcpBridgeFor(c: AppContext, env: RouteEnv, app: TbHono): McpToolBridge 
       ) {
         if (!check(ctx, node.path, 'call').allow) continue
         const provider = await providerFor(node, ctx, deps)
-        const raw = await upstreamTools(node, provider, deps, false, now)
+        const raw = await upstreamTools(node, provider, deps, false, now, searchSync)
         const { exposed } = virtualizeTools(node.virtualize, raw)
         result.push(...exposed.map(tool => toolSpecCommand(node, tool, true)))
         continue
@@ -344,6 +311,7 @@ function mcpBridgeFor(c: AppContext, env: RouteEnv, app: TbHono): McpToolBridge 
         includeDirectUpload: check(ctx, node.path, 'write').allow,
         refresh: false,
         now,
+        searchSync,
       })
       for (const command of model.cmds) {
         if (check(ctx, node.path, command.scope).allow) {
@@ -461,7 +429,7 @@ function mcpBridgeFor(c: AppContext, env: RouteEnv, app: TbHono): McpToolBridge 
           throw TBError.notFound('not found')
         }
         const provider = await providerFor(node, ctx, deps)
-        const raw = await upstreamTools(node, provider, deps, false, new Date().toISOString())
+        const raw = await upstreamTools(node, provider, deps, false, new Date().toISOString(), searchSync)
         const upstreamName = resolveUpstreamTool(node.virtualize, raw, tool.toolName)
         const result: ToolResult = await provider.call(upstreamName, args)
         return {

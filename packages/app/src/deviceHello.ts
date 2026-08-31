@@ -1,4 +1,5 @@
 import {
+  assertNoCollision,
   assertSecretRefUse,
   type CallContext,
   check,
@@ -99,6 +100,10 @@ function customNodeInput(mountPath: TreePath, deviceId: string, raw: DeviceNodeI
 }
 
 function nodesForHello(mountPath: TreePath, deviceId: string, expose: DeviceExpose): NodeInput[] {
+  // 冲突集必须取**折叠前**的原始拼接路径:parseNodeInput 已把路径折成小写,折叠产物上
+  // 检测不到 'Foo' 与 'foo' 的差异——不设门则同一 hello 里后写者静默胜出(含自定义节点
+  // 撞内置 shell/fs)。相同拼写重复仍放行(天然折叠到同一节点,后写胜出与现状一致)。
+  const rawTargets: string[] = [mountPath]
   const nodes: NodeInput[] = [
     {
       path: mountPath,
@@ -107,6 +112,7 @@ function nodesForHello(mountPath: TreePath, deviceId: string, expose: DeviceExpo
     },
   ]
   if (expose.shell !== undefined) {
+    rawTargets.push(joinTreePath(mountPath, 'shell'))
     nodes.push({
       path: joinTreePath(mountPath, 'shell'),
       kind: 'device',
@@ -115,6 +121,7 @@ function nodesForHello(mountPath: TreePath, deviceId: string, expose: DeviceExpo
     })
   }
   if (expose.fs !== undefined) {
+    rawTargets.push(joinTreePath(mountPath, 'fs'))
     nodes.push({
       path: joinTreePath(mountPath, 'fs'),
       kind: 'context',
@@ -128,8 +135,10 @@ function nodesForHello(mountPath: TreePath, deviceId: string, expose: DeviceExpo
     })
   }
   for (const raw of expose.nodes ?? []) {
+    rawTargets.push(joinTreePath(mountPath, raw.path))
     nodes.push(customNodeInput(mountPath, deviceId, raw))
   }
+  assertNoCollision(rawTargets, `设备 '${deviceId}' 的 expose 路径`)
   return nodes
 }
 

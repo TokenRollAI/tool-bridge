@@ -1,5 +1,4 @@
 import {
-  checkRegisterPath,
   decodeDeviceFrame,
   type DeviceCallAttempt,
   type DeviceCallRequest,
@@ -8,7 +7,6 @@ import {
   type DeviceFrame,
   DeviceGatewaySession,
   encodeDeviceFrame,
-  identify,
   NodeRegistryStore,
   parsePositiveIntEnv,
   PING_FRAME_JSON,
@@ -19,9 +17,12 @@ import {
 } from '@tool-bridge/core'
 import {
   assertDeviceId,
+  deviceSearchCapacityWarning,
   ensureBootstrapped,
+  markDeviceDisconnected,
   processDeviceHello,
-  SearchSynchronizer,
+  reclaimDeviceSubtree,
+  reverifyDeviceAuthority,
 } from '@tool-bridge/app'
 import { DurableObject } from 'cloudflare:workers'
 import type { D1SchemaGate } from './d1Runtime'
@@ -192,19 +193,13 @@ export class DeviceSession extends DurableObject<DeviceSessionEnv> {
       await this.ctx.storage.setAlarm(Date.parse(meta.disconnectedAt) + reclaimMs)
       return
     }
-    const registry = await this.registry()
-    const state = this.stateStore()
     const search = this.searchIndex()
-    const searchSync = search === undefined
-      ? undefined
-      : new SearchSynchronizer(state, search)
-    const marker = await searchSync?.markSubtree(meta.mountPath)
-    try {
-      await registry.deleteSubtree(meta.mountPath)
-    } catch {
-      // 已被外部清理时,DO 本地状态仍可回收。
-    }
-    await searchSync?.removeSubtreeQuietly(meta.mountPath, marker)
+    await reclaimDeviceSubtree({
+      mountPath: meta.mountPath,
+      registry: await this.registry(),
+      ...(search === undefined ? {} : { search }),
+      state: this.stateStore(),
+    })
     await this.ctx.storage.deleteAll()
   }
 
@@ -309,9 +304,7 @@ export class DeviceSession extends DurableObject<DeviceSessionEnv> {
         : { search }),
     })
     if (!searchIndexed) {
-      console.warn(
-        `[tool-bridge] device '${hello.deviceId}' mounted at ${mountPath} but its tools are NOT in the search index: registry exceeds the tool-search capacity (TOOL_SEARCH_AUDIT_NODE_LIMIT). The device is callable but won't appear in tool search until capacity frees up.`,
-      )
+      console.warn(deviceSearchCapacityWarning(hello.deviceId, mountPath))
     }
     await this.ctx.storage.put<DeviceMeta>(META_KEY, {
       deviceId: hello.deviceId,
@@ -367,12 +360,11 @@ export class DeviceSession extends DurableObject<DeviceSessionEnv> {
     // 已被新连接顶替(activeConnId 变更)或已回收:本条旧连接的收尾无操作。
     if (meta === undefined || meta.deviceId !== deviceId || meta.activeConnId !== connId) return
     const now = new Date().toISOString()
-    const registry = await this.registry()
-    try {
-      await registry.setOnline(meta.mountPath, false, now)
-    } catch {
-      // 节点可能已被管理面删除;只更新 DO 状态即可。
-    }
+    await markDeviceDisconnected({
+      mountPath: meta.mountPath,
+      now,
+      registry: await this.registry(),
+    })
     await this.ctx.storage.put<DeviceMeta>(META_KEY, {
       ...meta,
       activeConnId: undefined,
@@ -402,29 +394,18 @@ export class DeviceSession extends DurableObject<DeviceSessionEnv> {
 
   /**
    * 连接代际 + 授权重验(invoke/唤醒热路径共用)。跨 KV await(identify)后连接可能被
-   * 替换,故:①identify 前后都以传入的 connId 为准比对;②不仅校验凭据有效与 keyId 一致,
-   * 还用 hello 落库时同一个 `checkRegisterPath` 复核该 SK **现在**仍能注册该 mountPath。
-   * existing 传 null:此处判的是"现在还能不能注册",不是占用冲突。
+   * 替换,故:①identify 前后都以传入的 connId 为准比对;②凭据/keyId/注册授权的业务重验
+   * 走宿主中立 reverifyDeviceAuthority(与 hello 落库同一个 checkRegisterPath)。
    * 通过 → true;否则 → false(调用方按失效处理)。
    */
   private async reverifyConn(meta: DeviceMeta, attachment: SocketAttachment): Promise<boolean> {
     if (attachment.connId !== meta.activeConnId) return false
-    const authCtx = await identify(
-      this.stateStore(),
-      attachment.authorization,
-      new Date().toISOString(),
-    )
-    if (authCtx === null || authCtx.keyId !== meta.keyId) return false
-    return checkRegisterPath({
-      sk: {
-        scopes: authCtx.scopes,
-        id: authCtx.keyId,
-        ...(authCtx.registerPaths !== undefined ? { registerPaths: authCtx.registerPaths } : {}),
-      },
-      targetPath: meta.mountPath,
-      action: 'write',
-      existing: null,
-    }).allow
+    return await reverifyDeviceAuthority({
+      store: this.stateStore(),
+      authorization: attachment.authorization,
+      keyId: meta.keyId,
+      mountPath: meta.mountPath,
+    })
   }
 
   /**

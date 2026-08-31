@@ -17,11 +17,8 @@ import {
   handleFeedbackGet,
   handleFeedbackPost,
 } from './routes/feedback'
-import {
-  handleDeviceMailboxControl,
-  handleDeviceMailboxData,
-} from './routes/deviceMailbox'
 import { runHandler, tbErrorResponse, withSecurityHeaders } from './responses'
+import { registerDeviceMailboxRoutes } from './routes/deviceMailbox'
 import { handleAuthorize, handleRegister } from './routes/register'
 import { handleDescribe, handleSkill } from './routes/describe'
 import { registerStoreCapabilityRoutes } from './routes/store'
@@ -77,6 +74,7 @@ export function createTbApp(deps: TbAppDeps): Hono<{ Variables: Vars }> {
 
   registerMcpRoute(app, env)
   registerSearchRoute(app, env)
+  registerDeviceMailboxRoutes(app, env)
 
   // WS /system/device/ws?deviceId=<id> → 设备通道宿主(CF:每 deviceId 一个 DeviceSession DO)。
   // deviceId 同时在 hello 帧中出现;通道侧会校验二者一致,以满足设备帧契约。
@@ -122,18 +120,12 @@ export function createTbApp(deps: TbAppDeps): Hono<{ Variables: Vars }> {
   )
 
   // POST 通配分派:末段为 ~register → 反向注册;~authorize → OAuth 发起;~feedback(末段或
-  // 倒数第二段)→ 反馈提交/投票;否则数据面调用。
+  // 倒数第二段)→ 反馈提交/投票;否则数据面调用。mailbox 六条固定路径已在
+  // registerDeviceMailboxRoutes 注册,先于通配匹配。
   app.post('/*', async c =>
     await runHandler(async () => {
       const segs = new URL(c.req.url).pathname.replace(/\/+$/, '').split('/')
       const last = segs.pop() ?? ''
-      const pathname = new URL(c.req.url).pathname.replace(/\/+$/, '')
-      if (pathname.startsWith('/~device/operations/')) {
-        return await handleDeviceMailboxControl(c, env)
-      }
-      if (pathname.startsWith('/~device/mailbox/')) {
-        return await handleDeviceMailboxData(c, env)
-      }
       if (last === '~register') return await handleRegister(c, env)
       if (last === '~authorize') return await handleAuthorize(c, env)
       if (last === '~feedback' || segs[segs.length - 1] === '~feedback') {

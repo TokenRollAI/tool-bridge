@@ -95,13 +95,6 @@ export interface Env {
   /** 显式 Store token 根密钥；缺省在 D1 原子生成并持久化。 */
   TB_STORE_TOKEN_SECRET?: string
   TB_STORE_UPLOAD_TTL_SEC?: string
-  /** opt-in 集成测试:真实 MCP echo server 的 URL(仅测试注入)。 */
-  TB_TEST_MCP_URL?: string
-  TB_TEST_S3_ACCESS_KEY_ID?: string
-  TB_TEST_S3_BUCKET?: string
-  /** opt-in 集成测试:S3 兼容端点与凭证(仅测试注入)。 */
-  TB_TEST_S3_ENDPOINT?: string
-  TB_TEST_S3_SECRET_ACCESS_KEY?: string
   /** mcp 工具缓存 TTL 秒(默认 300)。 */
   TB_TOOL_CACHE_TTL?: string
   /** create_upload 写入 grant 有效期秒；缺省 min(TB_REF_TTL_SEC, 900)。 */

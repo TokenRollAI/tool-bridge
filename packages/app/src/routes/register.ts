@@ -6,7 +6,6 @@
  * (confused-deputy 阻断项)。
  */
 import {
-  assertSecretRefUse,
   check,
   contentTypeFor,
   NodeRegistryStore,
@@ -21,14 +20,11 @@ import {
 } from '@tool-bridge/core/protocol'
 import type { AppContext } from '../deps'
 import type { RouteEnv } from './env'
-import { assertToolConfig, refreshDynamicSearchNode, requirePluginExport } from '../toolNodes'
-import { assertMcpOAuthConfig, invalidateMcpOAuth, startMcpAuthorization } from '../oauth'
-import { invalidateProviderOAuth, startProviderAuthorization } from '../providerOAuth'
-import { assertRemoteConfigAllowed, resolveRemoteSettings } from '../federation'
-import { assertContextConfig, assertSkillhubConfig } from '../contextNodes'
-import { assertRegisterPath, splitReserved } from '../paths'
-import { invalidateToolCache } from '../providers/toolCache'
-import { invalidateMcpEra } from '../providers/mcp'
+import { assertNodeConfigMutation, invalidateNodeDerivedState } from '../registryMutation'
+import { refreshDynamicSearchNode, requirePluginExport } from '../toolNodes'
+import { startProviderAuthorization } from '../providerOAuth'
+import { startMcpAuthorization } from '../oauth'
+import { splitReserved } from '../paths'
 
 /**
  * provider 型 OAuth 的发起段(kind:'tool' 且 export 声明了 `oauth`)。
@@ -100,25 +96,19 @@ export async function handleRegister(c: AppContext, env: RouteEnv): Promise<Resp
   }
   // 复用与 system/registry write 相同的 NodeInput 校验(kind/description 必填、kind 枚举合法)。
   const body = parseNodeInput(raw)
-  // 挂载 remote 节点时校验 baseUrl 白名单(注册时即拒;env 基线 ∪ 运行时条目)。
-  assertRemoteConfigAllowed(body.config, await resolveRemoteSettings(store, deps.remote))
-  // register 判定 + 注册路径规则(含 existing 查询)。
+  // 通道 scope 判定在先(register);其后与 system/registry write 共享同一条安全链
+  // (remote 白名单 → 注册路径 → SecretRef → 各 kind 校验),单点实现见 registryMutation.ts。
   if (!check(ctx, path, 'register').allow) {
     throw new TBError('permission_denied', `no scope grants 'register' on '${path}'`)
   }
-  await assertRegisterPath(registry, ctx, body.path, 'write', deps)
-  // Secret Reference 使用授权:绑定 authRef/skRef 须持 system/secret admin(注册路径
-  // 判定之后、落库之前)。受限注册者不得引用平台已有 Secret(confused-deputy 合入阻断项)。
-  assertSecretRefUse(ctx.scopes, body.config)
-  // 预注册 MCP OAuth client 只允许 clientId + SecretStore 引用；服务端权威拒绝明文 secret。
-  await assertMcpOAuthConfig(body.config, deps.secrets)
-  // context 配置校验 + s3 连通探测:探测出站网络,须在权限判定之后。
-  await assertContextConfig(body.config, deps)
-  // skillhub 配置校验(provider r2/s3;s3 连通探测)。
-  await assertSkillhubConfig(body.config, deps)
-  // kind:'tool' 挂载校验:provider 必须是已注册且启用的 tool-provider plugin;
-  // export 声明了 credentialProbe 且配了 authRef 时,再用该凭证真实探一次(出站,故在权限判定之后)。
-  await assertToolConfig(body.config, deps, ctx, body.path)
+  await assertNodeConfigMutation({
+    action: 'write',
+    config: body.config,
+    ctx,
+    deps,
+    registry,
+    targetPath: body.path,
+  })
   await searchSync?.ensureSeeded()
   const now = new Date().toISOString()
   const marker = await searchSync?.markNode(body.path)
@@ -130,12 +120,9 @@ export async function handleRegister(c: AppContext, env: RouteEnv): Promise<Resp
     throw error
   }
   // 注册变更 → 失效该节点工具缓存 + mcp 会话/两套 OAuth 令牌。
-  await invalidateToolCache(store, body.path)
-  await invalidateMcpEra(store, body.path)
-  await invalidateMcpOAuth(store, body.path)
-  await invalidateProviderOAuth(store, body.path)
+  await invalidateNodeDerivedState(store, body.path)
   await searchSync?.reconcileNodeQuietly(body.path, { marker })
-  if (await refreshDynamicSearchNode(node, ctx, deps)) await searchSync?.abort(marker)
+  if (await refreshDynamicSearchNode(node, ctx, deps, searchSync)) await searchSync?.abort(marker)
   return new Response(JSON.stringify(registryNodeSchema.parse(node)), {
     headers: { 'content-type': contentTypeFor('json') },
   })

@@ -37,7 +37,7 @@ export {
 } from './bootstrap'
 
 // --- 应用装配面(宿主接线的主入口)---
-export { dispatchContextCmd, parseS3Credentials } from './contextNodes'
+export { parseS3Credentials } from './contextNodes'
 
 export {
   type DeviceChannel,
@@ -55,6 +55,14 @@ export {
   type HelloAcceptance,
   processDeviceHello,
 } from './deviceHello'
+
+// --- 设备连接生命周期(重验/断线/回收)的宿主中立编排 ---
+export {
+  deviceSearchCapacityWarning,
+  markDeviceDisconnected,
+  reclaimDeviceSubtree,
+  reverifyDeviceAuthority,
+} from './deviceLifecycle'
 
 export {
   cleanupDeviceMailbox,

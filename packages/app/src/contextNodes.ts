@@ -6,22 +6,17 @@
  * keyPrefix、$ref 阈值与中转 URL 工厂接上。命令校验与派发由 core 注册真源完成。
  */
 import {
-  contextCapabilitiesOf,
   type ContextProvider,
   type ContextUploadGrant,
   type ContextUploadInput,
   createObjectContextProvider,
   createObjectContextUploadGrant,
   createSkillhubProvider,
-  dispatchContextCmd as dispatchContextCmdCore,
-  dispatchContextUploadCmd,
-  dispatchSkillhubCmd as dispatchSkillhubCmdCore,
   isContextExpired,
   isTBError,
   type NodeConfig,
   NodeRegistryStore,
   type ObjectStore,
-  parseContextCmdArgs,
   PRESIGN_TTL_SEC_DEFAULT,
   type SecretStoreImpl,
   type SkillhubProvider,
@@ -35,8 +30,6 @@ import { assertPluginMountContract, requirePluginExport } from './toolNodes'
 import { assertNoDeviceMarker } from './deviceNodes'
 import { signRefToken } from './refToken'
 
-export { dispatchContextUploadCmd, parseContextCmdArgs }
-
 // ---------- SDK 进程内 Provider ----------
 
 /** 按节点路径查 SDK 进程内 ContextProvider(未注入/未命中 → null)。 */
@@ -44,13 +37,6 @@ export function localContext(deps: TbAppDeps, node: TreeNode): ContextProvider |
   return deps.locals?.context?.(node.path) ?? null
 }
 
-/**
- * 进程内 Provider 的 capabilities:按 handler 存在性推导(~describe/~help 共用)。
- * 推导真源在 core `context/capabilities.ts`,与 `~help` 的动词过滤同源,避免两处漂移。
- */
-export function localCapabilities(provider: ContextProvider): string[] {
-  return contextCapabilitiesOf(provider)
-}
 // ---------- context 节点 ----------
 
 export type ContextConfig = Extract<NodeConfig, { kind: 'context' }>
@@ -172,26 +158,31 @@ export async function createContextUploadGrant(
   }, input)
 }
 
+/** context/skillhub provider 共用的对象存储 opts 形状(core 两个工厂的公共子集)。 */
+interface ObjectProviderAssembly {
+  keyPrefix: string
+  nsPath: TreePath
+  presignTtlSec?: number
+  readOnly: boolean
+  refThresholdBytes?: number
+  relayRefUrl?: (key: string) => Promise<string>
+}
+
 /**
- * context 节点的 ContextProvider 装配:四动词语义在 core objectProvider,这里只注入
- * ObjectStore、keyPrefix、$ref 阈值/有效期与 /~ref 中转 URL 工厂(presign 凭证缺省时生效)。
+ * context 与 skillhub 装配共用的 opts 组装:$ref 阈值/有效期与 /~ref 中转 URL 工厂
+ * (token 密钥派生自 TB_SECRET_ENCRYPTION_KEY;密钥缺省则不提供——presign 也缺时
+ * core 对大对象 Get 报 unavailable)。keyPrefix 语义两侧不同,由调用方传入。
  */
-export async function contextProviderFor(
+function objectProviderOpts(
   node: TreeNode,
-  cfg: ContextConfig,
+  keyPrefix: string,
+  readOnly: boolean,
   deps: TbAppDeps,
   requestUrl: string,
-): Promise<ContextProvider> {
-  const objects = await contextObjectStoreFor(cfg, deps)
-  const opts: Parameters<typeof createObjectContextProvider>[1] = {
-    nsPath: node.path,
-    keyPrefix: contextKeyPrefix(cfg, node.path),
-    readOnly: cfg.readOnly ?? false,
-  }
+): ObjectProviderAssembly {
+  const opts: ObjectProviderAssembly = { nsPath: node.path, keyPrefix, readOnly }
   if (deps.refThresholdBytes !== undefined) opts.refThresholdBytes = deps.refThresholdBytes
   if (deps.refTtlSec !== undefined) opts.presignTtlSec = deps.refTtlSec
-  // /~ref 中转 URL 工厂:token 密钥派生自 TB_SECRET_ENCRYPTION_KEY;密钥缺省则不提供
-  // (presign 也缺时 core 对大对象 Get 报 unavailable)。
   const encKey = deps.encryptionKey
   if (encKey !== undefined) {
     const origin = new URL(requestUrl).origin
@@ -201,7 +192,27 @@ export async function contextProviderFor(
       return `${origin}/~ref/${await signRefToken({ p: node.path, k: key, exp }, encKey)}`
     }
   }
-  return createObjectContextProvider(objects, opts)
+  return opts
+}
+
+/**
+ * context 节点的 ContextProvider 装配:四动词语义在 core objectProvider,这里只注入
+ * ObjectStore 与共用 opts(objectProviderOpts)。
+ */
+export async function contextProviderFor(
+  node: TreeNode,
+  cfg: ContextConfig,
+  deps: TbAppDeps,
+  requestUrl: string,
+): Promise<ContextProvider> {
+  const objects = await contextObjectStoreFor(cfg, deps)
+  return createObjectContextProvider(objects, objectProviderOpts(
+    node,
+    contextKeyPrefix(cfg, node.path),
+    cfg.readOnly ?? false,
+    deps,
+    requestUrl,
+  ))
 }
 
 /** skillhub 的 keyPrefix:共桶隔离,r2 默认 `skills/<nodePath>`,s3 默认整桶。 */
@@ -212,8 +223,9 @@ export function skillhubKeyPrefix(cfg: SkillhubConfig, nodePath: TreePath): stri
 }
 
 /**
- * skillhub 节点的 SkillhubProvider 装配:底层对象存储与 $ref 中转 URL 工厂与 context 同源,
- * 只是 keyPrefix 落在 `skills/<path>` 且叠加 skill 单位语义(core skillhub/provider)。
+ * skillhub 节点的 SkillhubProvider 装配:底层对象存储与共用 opts 与 context 同源
+ * (objectProviderOpts),只是 keyPrefix 落在 `skills/<path>` 且叠加 skill 单位语义
+ * (core skillhub/provider)。
  */
 export async function skillhubProviderFor(
   node: TreeNode,
@@ -222,45 +234,13 @@ export async function skillhubProviderFor(
   requestUrl: string,
 ): Promise<SkillhubProvider> {
   const objects = await contextObjectStoreFor(cfg, deps)
-  const opts: Parameters<typeof createSkillhubProvider>[1] = {
-    nsPath: node.path,
-    keyPrefix: skillhubKeyPrefix(cfg, node.path),
-    readOnly: cfg.readOnly ?? false,
-  }
-  if (deps.refThresholdBytes !== undefined) opts.refThresholdBytes = deps.refThresholdBytes
-  if (deps.refTtlSec !== undefined) opts.presignTtlSec = deps.refTtlSec
-  const encKey = deps.encryptionKey
-  if (encKey !== undefined) {
-    const origin = new URL(requestUrl).origin
-    const relayTtlSec = deps.refTtlSec ?? PRESIGN_TTL_SEC_DEFAULT
-    opts.relayRefUrl = async (key) => {
-      const exp = Math.floor(Date.now() / 1000) + relayTtlSec
-      return `${origin}/~ref/${await signRefToken({ p: node.path, k: key, exp }, encKey)}`
-    }
-  }
-  return createSkillhubProvider(objects, opts)
-}
-
-/** 数据面路径的命令叶子 → SkillhubProvider 方法派发;入参精细校验由 provider 承担。 */
-export async function dispatchSkillhubCmd(
-  provider: SkillhubProvider,
-  command: string,
-  args: Record<string, unknown>,
-): Promise<unknown> {
-  return await dispatchSkillhubCmdCore(provider, command, args)
-}
-
-/**
- * 数据面路径的命令叶子 → ContextProvider 方法派发;入参精细校验由 provider 承担。
- * 可选方法(Search/Delete)未实现(plugin 未在 capabilities 声明)→ 按 unknown cmd 拒
- * (未声明的可选方法平台永不调用)。SDK 设备侧 handler 派发同形复用(导出)。
- */
-export async function dispatchContextCmd(
-  provider: ContextProvider,
-  command: string,
-  args: Record<string, unknown>,
-): Promise<unknown> {
-  return await dispatchContextCmdCore(provider, command, args)
+  return createSkillhubProvider(objects, objectProviderOpts(
+    node,
+    skillhubKeyPrefix(cfg, node.path),
+    cfg.readOnly ?? false,
+    deps,
+    requestUrl,
+  ))
 }
 
 /** ttl 懒回收单点判定:过期 → 删节点 + not_found;未过期 → 通过。context/skillhub 共用。 */

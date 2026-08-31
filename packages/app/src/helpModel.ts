@@ -25,6 +25,7 @@ import {
   type TreeNode,
   virtualizeTools,
 } from '@tool-bridge/core'
+import type { SearchSynchronizer } from './search/synchronizer'
 import type { TbAppDeps } from './deps'
 import {
   assertContextAlive,
@@ -53,6 +54,8 @@ export async function helpModelFor(
     now: string
     refresh: boolean
     schemas?: boolean
+    /** env.searchSync 单例(mcp/tool fresh list 时同步派生索引);必填防漏传静默漂移。 */
+    searchSync: SearchSynchronizer | undefined
   },
 ): Promise<HelpModel> {
   // schemas=1:节点级 `~help` 直接内联每个工具的全量 inputSchema(关闭两级披露的
@@ -100,7 +103,7 @@ export async function helpModelFor(
   }
   if (node.kind === 'mcp' || node.kind === 'http' || node.kind === 'tool') {
     const provider = await providerFor(node, ctx, deps)
-    const raw = await upstreamTools(node, provider, deps, opts.refresh, opts.now)
+    const raw = await upstreamTools(node, provider, deps, opts.refresh, opts.now, opts.searchSync)
     const { exposed } = virtualizeTools(node.virtualize, raw)
     // 默认索引形态(两级披露):不含 inputSchema,全量 spec 走工具级 ~help;
     // schemas=1 时 index=false,节点级即内联全量 schema。
@@ -193,7 +196,7 @@ export async function commandHelpModelFor(
   builtins: Map<string, BuiltinModule>,
   deps: TbAppDeps,
   path: TreeNode['path'],
-  opts: { refresh: boolean, schemas?: boolean },
+  opts: { refresh: boolean, schemas?: boolean, searchSync: SearchSynchronizer | undefined },
 ): Promise<HelpModel | null> {
   const resolved = await registry.resolve(path).catch(() => null)
   if (resolved === null || resolved.rest === '' || resolved.rest.includes('/')) return null
@@ -214,6 +217,7 @@ export async function commandHelpModelFor(
     refresh: opts.refresh,
     schemas: true,
     now: new Date().toISOString(),
+    searchSync: opts.searchSync,
   })
   const cmd = full.cmds.find(c => c.name === command)
   if (cmd === undefined) return null

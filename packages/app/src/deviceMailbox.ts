@@ -6,6 +6,7 @@ import {
   TBError,
 } from '@tool-bridge/core'
 import type { TbAppDeps } from './deps'
+import { type CursorCleanupProgress, positiveInt, runCursorCleanup } from './cursorCleanup'
 
 export const KEY_DEVICE_MAILBOX_CLEANUP_PROGRESS = 'sys:device-mailbox-cleanup-progress:v1'
 
@@ -14,20 +15,7 @@ export interface CleanupDeviceMailboxOptions {
   maxPages?: number
 }
 
-interface CleanupProgress {
-  cursor: string
-  revision: number
-}
-
-function positiveInt(value: number | undefined, fallback: number, field: string): number {
-  const actual = value ?? fallback
-  if (!Number.isSafeInteger(actual) || actual < 1) {
-    throw new TBError('invalid_argument', `${field} must be a positive integer`)
-  }
-  return actual
-}
-
-function parseProgress(value: unknown): CleanupProgress {
+function parseProgress(value: unknown): CursorCleanupProgress<string> {
   if (
     typeof value !== 'object'
     || value === null
@@ -36,14 +24,18 @@ function parseProgress(value: unknown): CleanupProgress {
     || !Number.isSafeInteger((value as { revision?: unknown }).revision)
     || ((value as { revision: number }).revision < 1)
   ) throw new TBError('internal', 'device mailbox cleanup progress is invalid')
-  return value as CleanupProgress
+  return value as CursorCleanupProgress<string>
 }
 
 export function createDeviceMailboxService(deps: TbAppDeps): DeviceMailboxService {
   return new DeviceMailboxService(deps.state, deps.encryptionKey)
 }
 
-/** One bounded host tick with a CAS-protected durable cursor. */
+/**
+ * One bounded host tick with a CAS-protected durable cursor.
+ * 编排骨架与 default Store 共用(cursorCleanup.ts);此处只保留 Mailbox 的持久进度
+ * 形状({cursor,revision})、页参数与结果聚合。
+ */
 export async function cleanupDeviceMailbox(
   deps: TbAppDeps,
   opts: CleanupDeviceMailboxOptions = {},
@@ -55,37 +47,25 @@ export async function cleanupDeviceMailbox(
   const mailbox = createDeviceMailboxService(deps)
   const maxPages = Math.min(positiveInt(opts.maxPages, 8, 'maxPages'), 64)
   const limit = Math.min(positiveInt(opts.limit, 200, 'limit'), 200)
-  const raw = await deps.state.get(KEY_DEVICE_MAILBOX_CLEANUP_PROGRESS)
-  let progress = raw === null ? null : parseProgress(raw)
-  let cursor = progress?.cursor
   const aggregate: DeviceMailboxCleanupResult = { deleted: 0, expired: 0, scanned: 0 }
 
-  for (let pageNumber = 0; pageNumber < maxPages; pageNumber++) {
-    const page = await mailbox.cleanup({ limit, ...(cursor === undefined ? {} : { cursor }) })
-    aggregate.deleted += page.deleted
-    aggregate.expired += page.expired
-    aggregate.scanned += page.scanned
-    if (page.cursor === undefined) {
-      if (progress !== null) {
-        await deps.state.compareAndSwap(
-          KEY_DEVICE_MAILBOX_CLEANUP_PROGRESS,
-          progress.revision,
-          null,
-        )
-      }
-      return aggregate
-    }
-    const next: CleanupProgress = {
-      cursor: page.cursor,
-      revision: (progress?.revision ?? 0) + 1,
-    }
-    if (!(await deps.state.compareAndSwap(
-      KEY_DEVICE_MAILBOX_CLEANUP_PROGRESS,
-      progress?.revision ?? null,
-      next,
-    ))) return aggregate
-    progress = next
-    cursor = next.cursor
-  }
+  const cursor = await runCursorCleanup<string>({
+    // {cursor,revision} 即持久形状,原样落库。
+    encodeProgress: progress => progress,
+    maxPages,
+    parseProgress,
+    progressKey: KEY_DEVICE_MAILBOX_CLEANUP_PROGRESS,
+    runPage: async (pageCursor) => {
+      const page = await mailbox.cleanup({
+        limit,
+        ...(pageCursor === undefined ? {} : { cursor: pageCursor }),
+      })
+      aggregate.deleted += page.deleted
+      aggregate.expired += page.expired
+      aggregate.scanned += page.scanned
+      return page.cursor
+    },
+    state: deps.state,
+  })
   return { ...aggregate, ...(cursor === undefined ? {} : { cursor }) }
 }
