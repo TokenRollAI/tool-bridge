@@ -7,7 +7,7 @@ import { CliError, withClient } from '../http'
 const SEARCH_EFFECTS = ['read', 'write', 'destructive', 'unknown'] as const
 const SEARCH_FEDERATION = ['local', 'recursive'] as const
 const SEARCH_MATCHING = ['best', 'all'] as const
-const SEARCH_MODES = ['keyword', 'semantic'] as const
+const SEARCH_MODES = ['keyword'] as const
 
 function parseChoice<const Values extends readonly string[]>(
   value: unknown,
@@ -88,7 +88,7 @@ export function searchCommand() {
   return withPageOpts(withGlobalOpts(new Command('search')))
     .description('Search callable tools across the gateway')
     .argument('<query>', 'Tool name, description, or feedback query')
-    .option('--mode <mode>', 'Search mode: keyword | semantic (default keyword)')
+    .option('--mode <mode>', 'Search mode: keyword (default keyword)')
     .option('--federation <scope>', 'Search scope: local | recursive')
     .option('--matching <matching>', 'Keyword matching: best | all (default best)')
     .option('--min-coverage <fraction>', 'Minimum query-term coverage in (0, 1]')

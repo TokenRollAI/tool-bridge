@@ -9,7 +9,12 @@ import { base64urlDecode, base64urlEncode } from '../encoding/base64url'
 import { canonicalizePath, validatePath } from '../tree/path'
 import { TBError } from '../errors'
 
-export type SearchCapability = 'search' | 'search:federated' | 'search:semantic'
+/**
+ * pre-launch 收口:曾预留 'search:semantic' 全链路(wire/cursor/CLI/Dashboard 穿透)
+ * 但仓内从无任何 SearchIndex 声明或实现,唯一作用是被拒绝——已整链删除。
+ * 语义检索将来作为新 capability + 新 mode 一并落地,不留空档字段。
+ */
+export type SearchCapability = 'search' | 'search:federated'
 
 /** 单次 adapter 轻量候选查询上限；gateway 可在一个请求内分批扫描。 */
 export const TOOL_SEARCH_BATCH_LIMIT = 100
@@ -90,7 +95,7 @@ export interface ToolSearchOptions {
   limit?: number
   matching?: ToolSearchMatching
   minCoverage?: number
-  mode?: 'keyword' | 'semantic'
+  mode?: 'keyword'
   pathPrefix?: TreePath
 }
 
@@ -108,14 +113,14 @@ export interface SearchIndex {
   cursorFor(
     query: string,
     candidate: ToolSearchCandidate,
-    mode?: 'keyword' | 'semantic',
+    mode?: 'keyword',
   ): Promise<string>
   /** 联邦 continuation 的 topology binding；不实现的自定义 adapter 只能提供 local search。 */
   revision?(): Promise<number | string>
   search(query: string, opts?: ToolSearchOptions): Promise<Page<ToolSearchCandidate>>
 }
 
-/** 仅声明 keyword capability 的 adapter 在 JS runtime 也须拒绝 semantic/未知 mode。 */
+/** keyword 是唯一 mode;JS runtime 侧仍拒未知值(wire 层 zod 已拒,防绕过 schema 直调)。 */
 export function assertKeywordToolSearchMode(opts?: ToolSearchOptions): void {
   if (opts?.mode !== undefined && opts.mode !== 'keyword') {
     throw new TBError('invalid_argument', `SearchIndex 不支持 mode '${String(opts.mode)}'`)
@@ -612,7 +617,7 @@ interface CursorPayload {
   f: string
   h: string
   k: typeof TOOL_SEARCH_RANKING_VERSION
-  m: 'keyword' | 'semantic'
+  m: 'keyword'
   o: number
   r: number
   v: 2
@@ -651,7 +656,7 @@ async function cursorCryptoKey(secret: string): Promise<WebCryptoKey> {
 
 async function sealToolSearchCursor(
   query: string,
-  mode: 'keyword' | 'semantic',
+  mode: 'keyword',
   revision: number,
   offset: number,
   secret: string,
@@ -680,7 +685,7 @@ async function sealToolSearchCursor(
 
 export async function encodeToolSearchCursor(
   query: string,
-  mode: 'keyword' | 'semantic',
+  mode: 'keyword',
   revision: number,
   offset: number,
   secret: string,
@@ -700,7 +705,7 @@ export async function encodeToolSearchCursor(
 export async function decodeToolSearchCursor(
   cursor: string | undefined,
   query: string,
-  mode: 'keyword' | 'semantic',
+  mode: 'keyword',
   revision: number,
   secret: string,
   opts?: ToolSearchOptions,
@@ -745,7 +750,7 @@ export async function decodeToolSearchCursor(
 /** 宿主 canonical hydration 截页时，用候选携带的原搜索指纹续签相同约束。 */
 export async function encodeToolSearchCursorForCandidate(
   query: string,
-  mode: 'keyword' | 'semantic',
+  mode: 'keyword',
   candidate: ToolSearchCandidate,
   secret: string,
 ): Promise<string> {

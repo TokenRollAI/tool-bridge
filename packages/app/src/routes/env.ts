@@ -23,7 +23,7 @@ export interface RouteEnv {
   builtinsOf: (store: StateStore) => Map<string, BuiltinModule>
   deps: TbAppDeps
   /** 全局工具搜索能力表;未注入索引或未声明 search → 空数组(端点不存在)。 */
-  globalSearchCapabilities: () => Array<'search' | 'search:federated' | 'search:semantic'>
+  globalSearchCapabilities: () => Array<'search' | 'search:federated'>
   /** Durable mailbox authority; lazy so deployments without the encryption root keep other routes. */
   mailbox: () => DeviceMailboxService
   /**
@@ -56,9 +56,7 @@ export function createRouteEnv(deps: TbAppDeps): RouteEnv {
     builtins.set('store', lazyDefaultStoreModule(deps))
     return builtins
   }
-  const globalSearchCapabilities = (): Array<
-    'search' | 'search:federated' | 'search:semantic'
-  > => {
+  const globalSearchCapabilities = (): Array<'search' | 'search:federated'> => {
     const declared = new Set(deps.search?.capabilities ?? [])
     if (!declared.has('search')) return []
     return [
@@ -68,7 +66,6 @@ export function createRouteEnv(deps: TbAppDeps): RouteEnv {
         && deps.search?.revision !== undefined
         ? ['search:federated' as const]
         : []),
-      ...(declared.has('search:semantic') ? ['search:semantic' as const] : []),
     ]
   }
   // 惰性 + 记忆化:装配期不付 sha256 的代价(冷启动路径),首个 healthz 之后复用。

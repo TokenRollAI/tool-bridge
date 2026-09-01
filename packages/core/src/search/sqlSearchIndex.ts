@@ -654,7 +654,7 @@ export class SqlSearchIndex implements MutableSearchIndex {
   async cursorFor(
     query: string,
     candidate: ToolSearchCandidate,
-    mode: 'keyword' | 'semantic' = 'keyword',
+    mode: 'keyword' = 'keyword',
   ): Promise<string> {
     await this.driver.ensureSchema()
     const meta = await this.meta()

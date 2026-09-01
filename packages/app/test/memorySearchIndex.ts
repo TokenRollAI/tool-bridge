@@ -126,7 +126,7 @@ export class MemorySearchIndex implements MutableSearchIndex {
   async cursorFor(
     query: string,
     candidate: ToolSearchCandidate,
-    mode: 'keyword' | 'semantic' = 'keyword',
+    mode: 'keyword' = 'keyword',
   ): Promise<string> {
     if (candidate.revision !== this.indexRevision) {
       throw new TBError('invalid_argument', '搜索 cursor 已失效')

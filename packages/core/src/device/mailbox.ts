@@ -46,7 +46,6 @@ export interface DeviceOperationSummary {
   attempt: number
   caller: DeviceOperationCaller
   cancelRequestedAt?: Timestamp
-  commandId: string
   createdAt: Timestamp
   deviceId: string
   executionMayHaveOccurred: boolean
@@ -71,7 +70,6 @@ export interface DeviceOperationClaim {
   attempt: number
   caller: DeviceOperationCaller
   cancelRequestedAt?: Timestamp
-  commandId: string
   createdAt: Timestamp
   expiresAt: Timestamp
   leaseId: string
@@ -177,7 +175,6 @@ interface DeviceOperationRecord {
   callerKeyId: string
   callerOwner: OwnerRef
   cancelRequestedAt?: Timestamp
-  commandId: string
   completedLeaseId?: string
   createdAt: Timestamp
   deviceId: string
@@ -272,7 +269,6 @@ function parseRecord(value: unknown): DeviceOperationRecord {
       || !Number.isSafeInteger(raw.revision)
       || (raw.revision as number) < 1
       || !nonEmpty(raw.operationId)
-      || raw.commandId !== raw.operationId
       || !nonEmpty(raw.deviceId)
       || !nonEmpty(raw.deviceKeyId)
       || !nonEmpty(raw.mountPath)
@@ -300,7 +296,6 @@ function parseRecord(value: unknown): DeviceOperationRecord {
       v: 1,
       revision: raw.revision as number,
       operationId: raw.operationId,
-      commandId: raw.commandId,
       deviceId: raw.deviceId,
       deviceKeyId: raw.deviceKeyId,
       mountPath: raw.mountPath,
@@ -547,7 +542,6 @@ export class DeviceMailboxService {
   private summary(record: DeviceOperationRecord): DeviceOperationSummary {
     return {
       operationId: record.operationId,
-      commandId: record.commandId,
       deviceId: record.deviceId,
       mountPath: record.mountPath,
       targetPath: record.targetPath,
@@ -685,7 +679,6 @@ export class DeviceMailboxService {
       v: 1,
       revision: 1,
       operationId,
-      commandId: operationId,
       deviceId: input.deviceId,
       deviceKeyId: input.deviceKeyId,
       mountPath: input.mountPath,
@@ -795,7 +788,6 @@ export class DeviceMailboxService {
         ...(page.cursor === undefined ? {} : { cursor: page.cursor }),
         operation: {
           operationId: next.operationId,
-          commandId: next.commandId,
           targetPath: next.targetPath,
           path: next.path,
           arguments: payload.arguments,

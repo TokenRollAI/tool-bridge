@@ -475,7 +475,8 @@ describe('SearchIndex mutation contract', () => {
   it('keeps the adapter mode contract narrow and fails closed at runtime', () => {
     expect(() => assertKeywordToolSearchMode()).not.toThrow()
     expect(() => assertKeywordToolSearchMode({ mode: 'keyword' })).not.toThrow()
-    expect(() => assertKeywordToolSearchMode({ mode: 'semantic' })).toThrowError(TBError)
+    expect(() => assertKeywordToolSearchMode({ mode: 'semantic' } as unknown as ToolSearchOptions))
+      .toThrowError(TBError)
     expect(() => assertKeywordToolSearchMode({ mode: 'regex' } as unknown as ToolSearchOptions))
       .toThrowError(TBError)
   })
