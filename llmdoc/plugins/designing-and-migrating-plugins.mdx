@@ -1,5 +1,5 @@
 ---
-description: 设计新 plugin 与迁移旧 connector 的可重跑流程:descriptor 规则、运行时安全下界、迁移四步与三道闸门。
+description: 设计新 plugin 与迁移旧 connector 的可重跑流程:descriptor 规则、provider HTTP 分类与例外审核、schema normalizer 单一真源及三道闸门。
 kind: guide
 relations:
   requires:
@@ -8,6 +8,8 @@ code:
   paths:
     - packages/plugin-sdk/src/index.ts
     - packages/plugins/src/registry.ts
+    - packages/plugins/src/_runtime/authedClient.ts
+    - packages/plugins/scripts/migrate/normalizeSchema.mjs
     - packages/plugins/migration-fingerprints.json
     - packages/plugins/test/migration/**
 ---
@@ -35,9 +37,17 @@ code:
 ## 迁移流程
 
 1. 固定旧 connector 的工具名、描述、输入/输出 schema 和关键错误语义。
-2. 实现 provider 的 schema、client、handler 和 descriptor；通用传输放 runtime，不在每个 provider 重写。
+2. 实现 provider 的 schema、client、handler 和 descriptor；通用传输放 runtime，不在每个 provider 重写。普通单值/header 认证与常规错误体使用 `createAuthedClient`；需要业务错误码、字段级或传输特例时声明 `mapError` / `mapTransportError`，不回到手写认证和通用错误映射。
 3. 生成 catalog，并更新 `migration-fingerprints.json`。
 4. 删除旧 connector 入口，验证三道闸门。
+
+HTTP 抽象选择按权威与失败模型，不按 provider 名单：
+
+- `createAuthedClient` 只声明常见 auth header 与错误消息提取，底层仍必经 `createProviderHttpClient` / `guardedFetch`。`errorMessage` 与整段 `mapError` 互斥，冲突要在 client 构造时失败。
+- query/path/body auth、GraphQL `200` 内的 errors、raw streaming/协议升级等无法由该层正确表达的情形保留受审例外。直接 `guardedFetch` 还必须登记例外清单，不得退化为裸 `fetch`。
+- provider 作者需要 `TBError`、`isTBError` 或 `normalizeUpstreamError` 时从 public `@tool-bridge/plugin-sdk` 导入，不建立对 private core 的运行时依赖。
+
+迁移的 schema 形状规则只由 `scripts/migrate/normalizeSchema.mjs` 拥有，迁移执行器与 parity/report 只 import 它；不得在生成、比对两侧各写一份 normalizer。
 
 三道闸门：
 
