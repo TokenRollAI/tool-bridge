@@ -6,61 +6,61 @@
   },
   "documents": {
     "app-runtime/host-neutral-assembly.mdx": {
-      "validatedRevision": "aeab8bac5155197a1e626b229cd0d52d7340fcfb"
+      "validatedRevision": "a00072442e0eca0a0495ae25fbf49032d126b8b6"
     },
     "app-runtime/mcp-interop.mdx": {
-      "validatedRevision": "aeab8bac5155197a1e626b229cd0d52d7340fcfb"
+      "validatedRevision": "a00072442e0eca0a0495ae25fbf49032d126b8b6"
     },
     "architecture.mdx": {
-      "validatedRevision": "b9e6bb26e2a1f6f442412a91ee0ed9b0e2afd1a5"
+      "validatedRevision": "a00072442e0eca0a0495ae25fbf49032d126b8b6"
     },
     "cli/agent-skill-integration.mdx": {
-      "validatedRevision": "aeab8bac5155197a1e626b229cd0d52d7340fcfb"
+      "validatedRevision": "a00072442e0eca0a0495ae25fbf49032d126b8b6"
     },
     "cli/argument-contract.mdx": {
-      "validatedRevision": "b9e6bb26e2a1f6f442412a91ee0ed9b0e2afd1a5"
+      "validatedRevision": "a00072442e0eca0a0495ae25fbf49032d126b8b6"
     },
     "dashboard/canvas-architecture.mdx": {
-      "validatedRevision": "b9e6bb26e2a1f6f442412a91ee0ed9b0e2afd1a5"
+      "validatedRevision": "a00072442e0eca0a0495ae25fbf49032d126b8b6"
     },
     "device/device-daemon.mdx": {
-      "validatedRevision": "aeab8bac5155197a1e626b229cd0d52d7340fcfb"
+      "validatedRevision": "a00072442e0eca0a0495ae25fbf49032d126b8b6"
     },
     "device/do-websocket-sessions.mdx": {
-      "validatedRevision": "aeab8bac5155197a1e626b229cd0d52d7340fcfb"
+      "validatedRevision": "a00072442e0eca0a0495ae25fbf49032d126b8b6"
     },
     "hosts-deploy/cloudflare-paths.mdx": {
-      "validatedRevision": "aeab8bac5155197a1e626b229cd0d52d7340fcfb"
+      "validatedRevision": "a00072442e0eca0a0495ae25fbf49032d126b8b6"
     },
     "hosts-deploy/node-docker-and-helm.mdx": {
-      "validatedRevision": "aeab8bac5155197a1e626b229cd0d52d7340fcfb"
+      "validatedRevision": "a00072442e0eca0a0495ae25fbf49032d126b8b6"
     },
     "hosts-deploy/state-store-decision.mdx": {
       "validatedRevision": "aeab8bac5155197a1e626b229cd0d52d7340fcfb"
     },
     "plugins/designing-and-migrating-plugins.mdx": {
-      "validatedRevision": "aeab8bac5155197a1e626b229cd0d52d7340fcfb"
+      "validatedRevision": "a00072442e0eca0a0495ae25fbf49032d126b8b6"
     },
     "plugins/plugin-runtime.mdx": {
-      "validatedRevision": "aeab8bac5155197a1e626b229cd0d52d7340fcfb"
+      "validatedRevision": "a00072442e0eca0a0495ae25fbf49032d126b8b6"
     },
     "protocol/htbp-contract.mdx": {
-      "validatedRevision": "b9e6bb26e2a1f6f442412a91ee0ed9b0e2afd1a5"
+      "validatedRevision": "a00072442e0eca0a0495ae25fbf49032d126b8b6"
     },
     "protocol/security-boundaries.mdx": {
-      "validatedRevision": "b9e6bb26e2a1f6f442412a91ee0ed9b0e2afd1a5"
+      "validatedRevision": "a00072442e0eca0a0495ae25fbf49032d126b8b6"
     },
     "release/npm-publishing.mdx": {
-      "validatedRevision": "b9e6bb26e2a1f6f442412a91ee0ed9b0e2afd1a5"
+      "validatedRevision": "a00072442e0eca0a0495ae25fbf49032d126b8b6"
     },
     "search/search-index.mdx": {
-      "validatedRevision": "aeab8bac5155197a1e626b229cd0d52d7340fcfb"
+      "validatedRevision": "a00072442e0eca0a0495ae25fbf49032d126b8b6"
     },
     "store/default-store.mdx": {
-      "validatedRevision": "aeab8bac5155197a1e626b229cd0d52d7340fcfb"
+      "validatedRevision": "a00072442e0eca0a0495ae25fbf49032d126b8b6"
     },
     "device/durable-mailbox.mdx": {
-      "validatedRevision": "b9e6bb26e2a1f6f442412a91ee0ed9b0e2afd1a5"
+      "validatedRevision": "a00072442e0eca0a0495ae25fbf49032d126b8b6"
     }
   },
   "convergence": {
