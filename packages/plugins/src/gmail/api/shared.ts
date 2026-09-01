@@ -22,16 +22,15 @@
  */
 
 import { TBError } from '@tool-bridge/plugin-sdk'
-import { createProviderHttpClient, type ProviderHttpRequest } from '../../_runtime/providerHttp'
-import { type ProviderContext, requireApiKey } from '../../_runtime/plugin'
+import type { ProviderHttpRequest } from '../../_runtime/providerHttp'
+import type { ProviderContext } from '../../_runtime/plugin'
 import { asJsonObject, compactDefined } from '../../_runtime/jsonValue'
+import { createAuthedClient } from '../../_runtime/authedClient'
 import { upstreamError } from '../../_runtime/upstreamError'
 
 export const SERVICE = 'gmail'
 
 const API_BASE = 'https://gmail.googleapis.com/gmail/v1'
-const http = createProviderHttpClient({ baseUrl: `${API_BASE}/`, service: SERVICE })
-
 /** 上游 `createContext` 钉死的 userId;入参里的 `userId` 一律忽略。 */
 const USER_ID = 'me'
 
@@ -182,22 +181,26 @@ function gmailError(status: number, payload: unknown): TBError {
   return upstreamError(status, message)
 }
 
+// 不配静态头:上游只发 authorization(与有体时的 content-type),**不发 accept**(见文件头)。
+// 错误消息只认 JSON 体(bodyKind 门控)且 403 限流要改判 429,故整段 mapError。
+const http = createAuthedClient({
+  baseUrl: `${API_BASE}/`,
+  service: SERVICE,
+  auth: { kind: 'bearer' },
+  mapError: ({ bodyKind, data, status }) => gmailError(
+    status,
+    bodyKind === 'json' ? data : null,
+  ),
+})
+
 async function send(ctx: ProviderContext, input: GmailRequest): Promise<{ payload: unknown }> {
   const hasBody = input.body !== undefined
-  const headers: Record<string, string> = {
-    authorization: `Bearer ${requireApiKey(ctx, SERVICE)}`,
-  }
-  const response = await http.request({
+  const response = await http.request(ctx, {
     method: input.method ?? 'GET',
     path: buildPath(input.path),
     query: Object.entries(input.query ?? {}),
-    headers,
     ...(hasBody ? { json: input.body } : {}),
     invalidJson: 'text',
-    mapError: ({ bodyKind, data, status }) => gmailError(
-      status,
-      bodyKind === 'json' ? data : null,
-    ),
   })
   if (response.bodyKind === 'invalid-json') {
     // 2xx 上回非 JSON 只能是上游坏了；错误响应的非 JSON 正文已在 mapError 中按状态归一。

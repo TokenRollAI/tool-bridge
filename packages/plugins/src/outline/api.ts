@@ -46,15 +46,24 @@ import {
   asJsonObject as record,
   trimmedText as text,
 } from '../_runtime/jsonValue'
-import { createProviderHttpClient, type ResponseBodyKind } from '../_runtime/providerHttp'
 import { type ProviderContext, requireApiKey } from '../_runtime/plugin'
 import { assertPublicHttpUrl } from '../_runtime/guardedFetch'
+import { createAuthedClient } from '../_runtime/authedClient'
 import { upstreamError } from '../_runtime/upstreamError'
 
 const SERVICE = 'outline'
 /** 没配 `providerConfig.baseUrl` 时的云端地址。 */
 const CLOUD_API_BASE = 'https://app.getoutline.com/api'
-const http = createProviderHttpClient({ service: SERVICE })
+const http = createAuthedClient({
+  service: SERVICE,
+  auth: { kind: 'bearer' },
+  headers: { accept: 'application/json' },
+  errorMessage: {
+    // Outline 的错误消息在 `message` / `error` / `status` 三处之一。
+    keys: ['message', 'error', 'status'],
+    fallback: status => `outline request failed with status ${status}`,
+  },
+})
 
 type Json = Record<string, unknown>
 
@@ -112,35 +121,15 @@ function resolveApiBase(ctx: ProviderContext): string {
   return normalized.endsWith('/api') ? normalized : `${normalized}/api`
 }
 
-/** Outline 的错误消息在 `message` / `error` / `status` 三处之一。 */
-function errorMessage(status: number, payload: unknown): string {
-  const body = record(payload)
-  return text(body?.message)
-    ?? text(body?.error)
-    ?? text(body?.status)
-    ?? `outline request failed with status ${status}`
-}
-
-function errorPayload(data: unknown, bodyKind: ResponseBodyKind): unknown {
-  return bodyKind === 'invalid-json' && typeof data === 'string'
-    ? { message: data.trim() }
-    : data
-}
-
 async function request(ctx: ProviderContext, path: string, body: Json = {}): Promise<unknown> {
-  // 取凭证与解析 baseUrl 放在 try 外:它们抛的是配置错误,不该被下面的传输失败兜底吞成 502。
-  const apiKey = requireApiKey(ctx, SERVICE)
-  const result = await http.request({
+  // 先取凭证再解析 baseUrl:保持迁移前的报错次序(凭证缺失优先于 baseUrl 配置错误)。
+  requireApiKey(ctx, SERVICE)
+  const result = await http.request(ctx, {
     baseUrl: `${resolveApiBase(ctx)}/`,
     path,
     method: 'POST',
-    headers: { accept: 'application/json', authorization: `Bearer ${apiKey}` },
     json: body,
     invalidJsonMessage: 'outline 返回了非 JSON 响应',
-    mapError: ({ bodyKind, data, status }) => upstreamError(
-      status,
-      errorMessage(status, errorPayload(data, bodyKind)),
-    ),
     mapTransportError: ({ message }) => upstreamError(
       502,
       `outline ${path} failed before receiving response: ${message ?? 'unknown network error'}`,

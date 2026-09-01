@@ -47,6 +47,8 @@ import type {
   updateRecordsInput,
   updateTableInput,
 } from './schema'
+import type { ProviderHttpErrorContext, ProviderHttpResult } from '../_runtime/providerHttp'
+import type { ProviderContext } from '../_runtime/plugin'
 import {
   booleanValue as boolean,
   compactDefined as compact,
@@ -54,14 +56,12 @@ import {
   asJsonObject as record,
   trimmedText as text,
 } from '../_runtime/jsonValue'
-import { createProviderHttpClient, type ProviderHttpErrorContext, type ProviderHttpResult } from '../_runtime/providerHttp'
-import { type ProviderContext, requireApiKey } from '../_runtime/plugin'
+import { createAuthedClient } from '../_runtime/authedClient'
 import { upstreamError } from '../_runtime/upstreamError'
 
 const SERVICE = 'airtable'
 const API_BASE = 'https://api.airtable.com'
 const BASES_PATH = '/v0/meta/bases'
-const http = createProviderHttpClient({ baseUrl: API_BASE, service: SERVICE })
 /**
  * 超过这个长度就改用 POST 端点。Airtable 自己的 URL 上限更高,留出余量是因为长度要在
  * 拼出完整 URL 后才知道,而重定向、代理都可能再加几个字节。
@@ -148,22 +148,26 @@ function mapAirtableError(context: ProviderHttpErrorContext): TBError {
   }
 }
 
+const http = createAuthedClient({
+  baseUrl: API_BASE,
+  service: SERVICE,
+  auth: { kind: 'bearer' },
+  headers: { accept: 'application/json' },
+  mapError: mapAirtableError,
+  mapTransportError: ({ message }) => upstreamError(
+    502,
+    `airtable request failed: ${message ?? 'unknown request error'}`,
+  ),
+})
+
 async function request(ctx: ProviderContext, input: RequestInput): Promise<unknown> {
-  // 取凭证放在 try 外:它抛的是配置错误,不该被下面的传输失败兜底吞成 502。
-  const apiKey = requireApiKey(ctx, SERVICE)
-  const result = await http.request({
+  const result = await http.request(ctx, {
     path: input.path,
     method: input.method ?? 'GET',
     query: input.query,
-    headers: { accept: 'application/json', authorization: `Bearer ${apiKey}` },
     ...(input.body === undefined ? {} : { json: input.body }),
     invalidJson: 'text',
     responseType: 'auto',
-    mapError: mapAirtableError,
-    mapTransportError: ({ message }) => upstreamError(
-      502,
-      `airtable request failed: ${message ?? 'unknown request error'}`,
-    ),
   })
   return responsePayload(result)
 }

@@ -67,6 +67,7 @@ import type {
   updateDataSourceInput,
   updateFolderInput,
 } from './schema'
+import type { ProviderQuery } from '../_runtime/providerHttp'
 import {
   booleanValue as boolean,
   compactDefined as compact,
@@ -74,9 +75,9 @@ import {
   asJsonObject as record,
   trimmedText as text,
 } from '../_runtime/jsonValue'
-import { createProviderHttpClient, type ProviderQuery } from '../_runtime/providerHttp'
 import { type ProviderContext, requireApiKey } from '../_runtime/plugin'
 import { assertPublicHttpUrl } from '../_runtime/guardedFetch'
+import { createAuthedClient } from '../_runtime/authedClient'
 import { upstreamError } from '../_runtime/upstreamError'
 
 const SERVICE = 'grafana'
@@ -93,7 +94,20 @@ const API_GROUPS = {
   folders: 'folder.grafana.app',
 } as const
 const API_VERSION_CACHE_MAX = 256
-const http = createProviderHttpClient({ service: SERVICE })
+const http = createAuthedClient({
+  service: SERVICE,
+  auth: { kind: 'bearer' },
+  headers: { accept: 'application/json' },
+  // Grafana 的错误消息在 `message` / `error` / `detail` / `title` 之一,或整个体就是一段文本。
+  errorMessage: {
+    keys: ['message', 'error', 'detail', 'title'],
+    fallback: (status, statusText) => text(statusText) ?? `Grafana request failed with ${status}`,
+  },
+  mapTransportError: ({ message }) => upstreamError(
+    502,
+    `Grafana request failed: ${message ?? 'unknown network error'}`,
+  ),
+})
 
 type AppResource = keyof typeof API_GROUPS
 type Json = Record<string, unknown>
@@ -106,10 +120,10 @@ type QueryValue = boolean | number | string | undefined
  */
 const apiVersionCache = new Map<string, string>()
 
-/** 这次调用要打的实例与用的凭证。 */
+/** 这次调用要打的实例;凭证由 authed client 在每次请求时注入。 */
 interface Target {
-  apiKey: string
   baseUrl: string
+  ctx: ProviderContext
 }
 
 /** 上游 `requireString`:schema 没标 required(或 `min(1)` 放过纯空白)的字段,断言落在这层。 */
@@ -186,17 +200,11 @@ function resolveBaseUrl(ctx: ProviderContext): string {
 }
 
 function resolveTarget(ctx: ProviderContext): Target {
-  // 两者都抛配置错误,放在传输 try 外面,不该被 502 兜底吞掉。
-  return { apiKey: requireApiKey(ctx, SERVICE), baseUrl: resolveBaseUrl(ctx) }
-}
-
-/** Grafana 的错误消息在 `message` / `error` / `detail` / `title` 之一,或整个体就是一段文本。 */
-function errorMessage(payload: unknown, status: number, statusText: string): string {
-  const direct = text(payload)
-  if (direct !== undefined) return direct
-  const fields = record(payload)
-  const message = text(fields?.message) ?? text(fields?.error) ?? text(fields?.detail) ?? text(fields?.title)
-  return message ?? text(statusText) ?? `Grafana request failed with ${status}`
+  // 两者都抛配置错误,放在传输 try 外面,不该被 502 兜底吞掉。凭证缺失(unavailable)
+  // 要先于 baseUrl 配置错误报出 —— 保持迁移前 resolveTarget 的求值顺序;头本身仍由
+  // authed client 在请求时注入。
+  requireApiKey(ctx, SERVICE)
+  return { baseUrl: resolveBaseUrl(ctx), ctx }
 }
 
 interface RequestInput {
@@ -213,23 +221,14 @@ async function request(target: Target, input: RequestInput): Promise<unknown> {
     ...Object.entries(input.query ?? {}),
     ...Object.entries(input.multiValueQuery ?? {}),
   ]
-  const result = await http.request({
+  const result = await http.request(target.ctx, {
     // 尾斜杠保住实例部署上下文路径(`/grafana`)；薄层再强制 path 不得换 origin。
     baseUrl: `${target.baseUrl}/`,
     path: input.path,
     method: input.method,
     query,
-    headers: { accept: 'application/json', authorization: `Bearer ${target.apiKey}` },
     ...(input.body === undefined ? {} : { json: input.body }),
     invalidJson: 'text',
-    mapError: ({ data, status, statusText }) => upstreamError(
-      status,
-      errorMessage(data, status, statusText),
-    ),
-    mapTransportError: ({ message }) => upstreamError(
-      502,
-      `Grafana request failed: ${message ?? 'unknown network error'}`,
-    ),
   })
   return result.data === undefined ? null : result.data
 }

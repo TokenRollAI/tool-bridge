@@ -24,19 +24,18 @@ import type {
   rollbackDeployInput,
   triggerDeployInput,
 } from './schema'
-import {
-  createProviderHttpClient,
-  type ProviderHttpErrorContext,
-  type ProviderHttpRequest,
-  type ProviderHttpResult,
+import type {
+  ProviderHttpErrorContext,
+  ProviderHttpRequest,
+  ProviderHttpResult,
 } from '../_runtime/providerHttp'
-import { type ProviderContext, requireApiKey } from '../_runtime/plugin'
+import type { ProviderContext } from '../_runtime/plugin'
 import { trimmedText as nonEmpty } from '../_runtime/jsonValue'
+import { createAuthedClient } from '../_runtime/authedClient'
 import { upstreamError } from '../_runtime/upstreamError'
 
 const SERVICE = 'render'
 const API_BASE = 'https://api.render.com/v1'
-const http = createProviderHttpClient({ baseUrl: `${API_BASE}/`, service: SERVICE })
 
 type Json = Record<string, unknown>
 type QueryValue = boolean | number | string | string[] | undefined
@@ -87,29 +86,32 @@ function errorMessage(context: ProviderHttpErrorContext): string {
   return `Render 返回 HTTP ${context.status}`
 }
 
+const http = createAuthedClient({
+  baseUrl: `${API_BASE}/`,
+  service: SERVICE,
+  auth: { kind: 'bearer' },
+  headers: { accept: 'application/json' },
+  // errors 数组与 bodyKind 分叉(非 JSON 原文 String 化不 trim),标准键序提取表达不了,整段覆写。
+  mapError: context => upstreamError(context.status, errorMessage(context)),
+  mapTransportError: ({ message }) => new TBError(
+    'unavailable',
+    message === undefined ? 'Render 请求失败' : `Render 请求失败: ${message}`,
+    { retryable: true },
+  ),
+})
+
 async function send(ctx: ProviderContext, input: RequestInput): Promise<ProviderHttpResult> {
-  const apiKey = requireApiKey(ctx, SERVICE)
   const query = Object.entries(input.query ?? {}).flatMap(([key, value]) => {
     // Render 的多值过滤是逗号拼接进一个 query 值,不是重复 key。
     if (Array.isArray(value)) return value.length === 0 ? [] : [[key, value.join(',')] as const]
     return [[key, value] as const]
   })
-  return await http.request({
+  return await http.request(ctx, {
     method: input.method ?? 'GET',
     path: input.path,
     query,
-    headers: {
-      accept: 'application/json',
-      authorization: `Bearer ${apiKey}`,
-    },
     ...(input.body === undefined ? {} : { json: input.body }),
     invalidJson: 'text',
-    mapError: context => upstreamError(context.status, errorMessage(context)),
-    mapTransportError: ({ message }) => new TBError(
-      'unavailable',
-      message === undefined ? 'Render 请求失败' : `Render 请求失败: ${message}`,
-      { retryable: true },
-    ),
   })
 }
 

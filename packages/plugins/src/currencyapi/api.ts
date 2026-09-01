@@ -19,23 +19,30 @@ import type {
   getLatestRatesInput,
   getSupportedCurrenciesInput,
 } from './schema'
-import { asJsonObject as record, trimmedText as text } from '../_runtime/jsonValue'
-import { type ProviderContext, requireApiKey } from '../_runtime/plugin'
-import { createProviderHttpClient } from '../_runtime/providerHttp'
+import type { ProviderContext } from '../_runtime/plugin'
+import { asJsonObject as record } from '../_runtime/jsonValue'
+import { createAuthedClient } from '../_runtime/authedClient'
 import { upstreamError } from '../_runtime/upstreamError'
 
 const SERVICE = 'currencyapi'
 const API_BASE = 'https://api.currencyapi.com'
-const http = createProviderHttpClient({ baseUrl: `${API_BASE}/`, service: SERVICE })
+const http = createAuthedClient({
+  baseUrl: `${API_BASE}/`,
+  service: SERVICE,
+  auth: { kind: 'header', name: 'apikey' },
+  headers: { accept: 'application/json' },
+  errorMessage: {
+    keys: ['message', 'error.message'],
+    fallback: status => `currencyapi request failed with ${status || 500}`,
+  },
+  mapTransportError: ({ message }) => upstreamError(
+    502,
+    message === undefined ? 'currencyapi request failed' : `currencyapi request failed: ${message}`,
+  ),
+})
 
 type Json = Record<string, unknown>
 type QueryValue = number | string | undefined
-
-function errorMessage(payload: unknown): string | undefined {
-  if (typeof payload === 'string') return text(payload)
-  const body = record(payload)
-  return text(body?.message) ?? text(record(body?.error)?.message)
-}
 
 function requireObject(value: unknown, field: string): Json {
   const body = record(value)
@@ -45,20 +52,10 @@ function requireObject(value: unknown, field: string): Json {
 }
 
 async function request(ctx: ProviderContext, path: string, query?: Record<string, QueryValue>): Promise<Json> {
-  const apiKey = requireApiKey(ctx, SERVICE)
-  const { data } = await http.request({
+  const { data } = await http.request(ctx, {
     path,
     query: Object.entries(query ?? {}),
-    headers: { accept: 'application/json', apikey: apiKey },
     invalidJson: 'text',
-    mapError: ({ data: payload, status }) => upstreamError(
-      status,
-      errorMessage(payload) ?? `currencyapi request failed with ${status || 500}`,
-    ),
-    mapTransportError: ({ message }) => upstreamError(
-      502,
-      message === undefined ? 'currencyapi request failed' : `currencyapi request failed: ${message}`,
-    ),
   })
   return requireObject(data ?? null, 'payload')
 }

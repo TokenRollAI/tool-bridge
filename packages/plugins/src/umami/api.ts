@@ -35,14 +35,28 @@ import type {
   listEventsInput,
   listWebsitesInput,
 } from './schema'
+import type { ProviderContext } from '../_runtime/plugin'
 import { asJsonObject as asRecord, trimmedText as optionalText } from '../_runtime/jsonValue'
-import { type ProviderContext, requireApiKey } from '../_runtime/plugin'
-import { createProviderHttpClient } from '../_runtime/providerHttp'
+import { createAuthedClient } from '../_runtime/authedClient'
 import { upstreamError } from '../_runtime/upstreamError'
 
 const SERVICE = 'umami'
 const API_BASE = 'https://api.umami.is'
-const http = createProviderHttpClient({ baseUrl: `${API_BASE}/`, service: SERVICE })
+const http = createAuthedClient({
+  baseUrl: `${API_BASE}/`,
+  service: SERVICE,
+  auth: { kind: 'bearer' },
+  headers: { accept: 'application/json' },
+  errorMessage: {
+    // 错误消息藏在 `error`(字符串或对象)与 `message` 三处之一,纯文本体则整段拿来用。
+    keys: ['error', 'error.message', 'message'],
+    fallback: (status, statusText) => statusText || `umami 返回 HTTP ${status}`,
+  },
+  mapTransportError: ({ message }) => upstreamError(
+    502,
+    message === undefined ? 'umami 请求失败' : `umami 请求失败: ${message}`,
+  ),
+})
 
 type Json = Record<string, unknown>
 type Query = Record<string, string | undefined>
@@ -74,34 +88,11 @@ function requiredText(value: unknown, field: string): string {
   return text
 }
 
-/** 错误消息藏在 `error`(字符串或对象)与 `message` 三处之一,纯文本体则整段拿来用。 */
-function errorMessage(payload: unknown): string | undefined {
-  if (typeof payload === 'string') return optionalText(payload)
-  const body = asRecord(payload)
-  if (body === undefined) return undefined
-  return optionalText(body.error)
-    ?? optionalText(asRecord(body.error)?.message)
-    ?? optionalText(body.message)
-}
-
 async function request(ctx: ProviderContext, path: string, query: Query = {}): Promise<unknown> {
-  const apiKey = requireApiKey(ctx, SERVICE)
-  const response = await http.request({
+  const response = await http.request(ctx, {
     path,
     query: Object.entries(query),
-    headers: {
-      accept: 'application/json',
-      authorization: `Bearer ${apiKey}`,
-    },
     invalidJson: 'text',
-    mapError: ({ data, status, statusText }) => upstreamError(
-      status,
-      errorMessage(data) ?? (statusText || `umami 返回 HTTP ${status}`),
-    ),
-    mapTransportError: ({ message }) => upstreamError(
-      502,
-      message === undefined ? 'umami 请求失败' : `umami 请求失败: ${message}`,
-    ),
   })
   if (response.bodyKind === 'invalid-json') throw upstreamError(502, 'umami 返回了非 JSON 响应')
   return response.bodyKind === 'empty' ? null : response.data

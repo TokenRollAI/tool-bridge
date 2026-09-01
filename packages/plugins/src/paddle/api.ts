@@ -32,18 +32,17 @@ import type {
   updatePriceInput,
   updateProductInput,
 } from './schema'
-import {
-  createProviderHttpClient,
-  type ProviderHttpErrorContext,
-  type ProviderQuery,
+import type {
+  ProviderHttpErrorContext,
+  ProviderQuery,
 } from '../_runtime/providerHttp'
+import type { ProviderContext } from '../_runtime/plugin'
 import { trimmedText as text, asJsonObject as toRecord } from '../_runtime/jsonValue'
-import { type ProviderContext, requireApiKey } from '../_runtime/plugin'
+import { createAuthedClient } from '../_runtime/authedClient'
 import { upstreamError } from '../_runtime/upstreamError'
 
 const SERVICE = 'paddle'
 const API_BASE = 'https://api.paddle.com'
-const http = createProviderHttpClient({ baseUrl: API_BASE, service: SERVICE })
 
 type Json = Record<string, unknown>
 
@@ -78,6 +77,15 @@ function errorMessage(payload: unknown, context: ProviderHttpErrorContext): stri
   return message ?? (context.statusText || `Paddle 返回 HTTP ${context.status}`)
 }
 
+const http = createAuthedClient({
+  baseUrl: API_BASE,
+  service: SERVICE,
+  auth: { kind: 'bearer' },
+  headers: { accept: 'application/json' },
+  // string 错误体原样透出且**不 trim** —— 与标准提取的 trim 语义不同,整段覆写。
+  mapError: context => upstreamError(context.status, errorMessage(context.data, context)),
+})
+
 interface RequestInput {
   body?: Json
   method: 'GET' | 'PATCH' | 'POST'
@@ -87,18 +95,13 @@ interface RequestInput {
 }
 
 async function request(ctx: ProviderContext, input: RequestInput): Promise<unknown> {
-  const result = await http.request({
+  const result = await http.request(ctx, {
     path: input.path,
     method: input.method,
     query: [...(input.searchParams ?? [])] satisfies ProviderQuery,
-    headers: {
-      accept: 'application/json',
-      authorization: `Bearer ${requireApiKey(ctx, SERVICE)}`,
-      ...(input.skipCount === true ? { 'skip-count': 'true' } : {}),
-    },
+    ...(input.skipCount === true ? { headers: { 'skip-count': 'true' } } : {}),
     ...(input.body === undefined ? {} : { json: input.body }),
     invalidJsonMessage: 'Paddle returned malformed JSON',
-    mapError: context => upstreamError(context.status, errorMessage(context.data, context)),
   })
   return result.data === undefined ? null : result.data
 }

@@ -1,13 +1,13 @@
 import type { z } from 'zod/v4'
 import { TBError } from '@tool-bridge/plugin-sdk'
 import type { sendEmailInput } from './schema.handwritten'
-import { asJsonObject, createProviderHttpClient, nonEmptyText } from '../_runtime/providerHttp'
-import { type ProviderContext, requireApiKey } from '../_runtime/plugin'
+import type { ProviderContext } from '../_runtime/plugin'
+import { asJsonObject, nonEmptyText } from '../_runtime/providerHttp'
+import { createAuthedClient } from '../_runtime/authedClient'
 import { upstreamError } from '../_runtime/upstreamError'
 
 const SERVICE = 'resend'
 const AUTH_ERROR_NAMES = new Set(['invalid_api_key', 'missing_api_key'])
-const http = createProviderHttpClient({ baseUrl: 'https://api.resend.com/', service: SERVICE })
 
 function payloadOf(data: unknown): Record<string, unknown> {
   return asJsonObject(data) ?? (typeof data === 'string' ? { message: data } : {})
@@ -24,14 +24,21 @@ function resendError(status: number, data: unknown): TBError {
     : upstreamError(status, message)
 }
 
+const http = createAuthedClient({
+  baseUrl: 'https://api.resend.com/',
+  service: SERVICE,
+  auth: { kind: 'bearer' },
+  // 错误码表(invalid_api_key 等改判 permission_denied),整段覆写而不用标准键序提取。
+  mapError: ({ data: payload, status }) => resendError(status, payload),
+})
+
 export async function sendEmail(
   input: z.infer<typeof sendEmailInput>,
   ctx: ProviderContext,
 ): Promise<{ emailId: string }> {
-  const { data } = await http.request({
+  const { data } = await http.request(ctx, {
     path: 'emails',
     method: 'POST',
-    headers: { authorization: `Bearer ${requireApiKey(ctx, SERVICE)}` },
     json: {
       from: input.from,
       to: input.to,
@@ -40,7 +47,6 @@ export async function sendEmail(
       ...(input.text === undefined ? {} : { text: input.text }),
     },
     invalidJson: 'text',
-    mapError: ({ data: payload, status }) => resendError(status, payload),
   })
 
   const emailId = nonEmptyText(payloadOf(data).id)

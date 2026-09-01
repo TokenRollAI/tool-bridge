@@ -51,8 +51,8 @@ import type {
   searchPapersInput,
   searchSnippetsInput,
 } from './schema'
-import { type ProviderContext, requireApiKey } from '../_runtime/plugin'
-import { createProviderHttpClient } from '../_runtime/providerHttp'
+import type { ProviderContext } from '../_runtime/plugin'
+import { type AuthedClient, createAuthedClient } from '../_runtime/authedClient'
 import { asJsonObject as record } from '../_runtime/jsonValue'
 import { upstreamError } from '../_runtime/upstreamError'
 
@@ -60,11 +60,6 @@ const SERVICE = 'semantic_scholar'
 const GRAPH_BASE = 'https://api.semanticscholar.org/graph/v1'
 const RECOMMENDATIONS_BASE = 'https://api.semanticscholar.org/recommendations/v1'
 const REQUEST_TIMEOUT_MS = 30_000
-const graphHttp = createProviderHttpClient({ baseUrl: `${GRAPH_BASE}/`, service: SERVICE })
-const recommendationsHttp = createProviderHttpClient({
-  baseUrl: `${RECOMMENDATIONS_BASE}/`,
-  service: SERVICE,
-})
 
 type Json = Record<string, unknown>
 type Family = 'graph' | 'recommendations'
@@ -163,21 +158,14 @@ function errorMessage(payload: unknown, status: number): string {
     ?? `Semantic Scholar 返回 HTTP ${status}`
 }
 
-async function request(ctx: ProviderContext, input: S2Request): Promise<unknown> {
-  const headers: Record<string, string> = {
-    'accept': 'application/json',
-    'x-api-key': requireApiKey(ctx, SERVICE),
-  }
-  const http = input.family === 'graph' ? graphHttp : recommendationsHttp
-  const response = await http.request({
-    method: input.method,
-    path: input.path,
-    query: Object.entries(input.params ?? {}),
-    headers,
-    // 上游对 POST 一律发 body(没给就发 `{}`),保留:batch 端点不接受空请求。
-    ...(input.method === 'POST' ? { json: input.body ?? {} } : {}),
-    timeoutMs: REQUEST_TIMEOUT_MS,
-    invalidJsonMessage: 'Semantic Scholar 返回了非 JSON 响应',
+/** 两个 API family 各一个 client,除 base URL 外配置完全相同。 */
+function s2Client(baseUrl: string): AuthedClient {
+  return createAuthedClient({
+    baseUrl,
+    service: SERVICE,
+    auth: { kind: 'header', name: 'x-api-key' },
+    headers: { accept: 'application/json' },
+    // invalid-json 与常规错误体走不同分支,标准键序提取表达不了,整段覆写。
     mapError: ({ bodyKind, data, status }) => bodyKind === 'invalid-json'
       ? new TBError('unavailable', 'Semantic Scholar 返回了非 JSON 响应', { retryable: true })
       // 429 走公共归一表 → rate_limited + retryable(限速是这个 provider 的常态,见文件头)。
@@ -185,6 +173,22 @@ async function request(ctx: ProviderContext, input: S2Request): Promise<unknown>
     mapTransportError: ({ kind, message }) => kind === 'timeout'
       ? upstreamError(504, `Semantic Scholar 请求超时(${REQUEST_TIMEOUT_MS / 1000} 秒)`)
       : upstreamError(502, `Semantic Scholar 请求失败:${message ?? 'unknown network error'}`),
+  })
+}
+
+const graphHttp = s2Client(`${GRAPH_BASE}/`)
+const recommendationsHttp = s2Client(`${RECOMMENDATIONS_BASE}/`)
+
+async function request(ctx: ProviderContext, input: S2Request): Promise<unknown> {
+  const http = input.family === 'graph' ? graphHttp : recommendationsHttp
+  const response = await http.request(ctx, {
+    method: input.method,
+    path: input.path,
+    query: Object.entries(input.params ?? {}),
+    // 上游对 POST 一律发 body(没给就发 `{}`),保留:batch 端点不接受空请求。
+    ...(input.method === 'POST' ? { json: input.body ?? {} } : {}),
+    timeoutMs: REQUEST_TIMEOUT_MS,
+    invalidJsonMessage: 'Semantic Scholar 返回了非 JSON 响应',
   })
   return response.bodyKind === 'empty' ? null : response.data
 }

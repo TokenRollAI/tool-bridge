@@ -43,6 +43,7 @@ import type {
   listProjectsInput,
   searchIssuesInput,
 } from './schema'
+import type { ResponseBodyKind } from '../_runtime/providerHttp'
 import {
   booleanValue as boolean,
   compactDefined as compact,
@@ -50,16 +51,14 @@ import {
   asJsonObject as record,
   trimmedText as text,
 } from '../_runtime/jsonValue'
-import { createProviderHttpClient, type ResponseBodyKind } from '../_runtime/providerHttp'
 import { type ProviderContext, requireCredential } from '../_runtime/plugin'
 import { assertPublicHttpUrl } from '../_runtime/guardedFetch'
+import { createAuthedClient } from '../_runtime/authedClient'
 import { upstreamError } from '../_runtime/upstreamError'
 
 const SERVICE = 'jira'
 /** 上游显式补的分页默认值。 */
 const DEFAULT_LIMIT = 50
-const http = createProviderHttpClient({ service: SERVICE })
-
 /** 每个 issue 至少要回的字段,叠加调用方的 includeFields。 */
 const DEFAULT_ISSUE_FIELD_IDS = [
   'summary',
@@ -187,6 +186,20 @@ function responsePayload(data: unknown, bodyKind: ResponseBodyKind): unknown {
   return bodyKind === 'invalid-json' ? { message: data } : data
 }
 
+// PAT 在多字段凭证里(baseUrl + personalAccessToken),不走 upstreamAuth 单值通道,故 custom。
+const http = createAuthedClient({
+  service: SERVICE,
+  auth: {
+    kind: 'custom',
+    headers: ctx => ({ authorization: `Bearer ${requireCredential(ctx, SERVICE, 'personalAccessToken')}` }),
+  },
+  headers: { accept: 'application/json' },
+  mapError: ({ bodyKind, data, status }) => upstreamError(
+    status,
+    errorMessage(responsePayload(data, bodyKind)),
+  ),
+})
+
 interface RequestOptions {
   body?: Json
   method?: 'GET' | 'POST'
@@ -197,21 +210,13 @@ interface RequestOptions {
 /** 返回上游 JSON 的原值(可能是数组,如 DC 的 `/project`)。 */
 async function requestValue(ctx: ProviderContext, options: RequestOptions): Promise<unknown> {
   const baseUrl = apiBaseUrl(ctx)
-  const result = await http.request({
+  const result = await http.request(ctx, {
     baseUrl,
     // create_issue 会跟随 Jira 返回的 self；buildUrl 先锁定 origin 与 REST API path 前缀。
     path: buildUrl(baseUrl, options.path, options.query),
     method: options.method ?? (options.body === undefined ? 'GET' : 'POST'),
-    headers: {
-      accept: 'application/json',
-      authorization: `Bearer ${requireCredential(ctx, SERVICE, 'personalAccessToken')}`,
-    },
     ...(options.body === undefined ? {} : { json: options.body }),
     invalidJson: 'text',
-    mapError: ({ bodyKind, data, status }) => upstreamError(
-      status,
-      errorMessage(responsePayload(data, bodyKind)),
-    ),
   })
   return responsePayload(result.data, result.bodyKind)
 }

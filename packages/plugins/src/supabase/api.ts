@@ -61,14 +61,14 @@ import type {
   updateProjectApiKeyInput,
   upsertProjectSecretsInput,
 } from './schema'
+import type { ProviderQuery } from '../_runtime/providerHttp'
+import type { ProviderContext } from '../_runtime/plugin'
 import { compactDefined as compact, asJsonObject as record, trimmedText as text } from '../_runtime/jsonValue'
-import { createProviderHttpClient, type ProviderQuery } from '../_runtime/providerHttp'
-import { type ProviderContext, requireApiKey } from '../_runtime/plugin'
+import { createAuthedClient } from '../_runtime/authedClient'
 import { upstreamError } from '../_runtime/upstreamError'
 
 const SERVICE = 'supabase'
 const API_BASE = 'https://api.supabase.com/v1'
-const http = createProviderHttpClient({ baseUrl: `${API_BASE}/`, service: SERVICE })
 
 /** project 状态的已知取值;上游出现新状态时归一成 UNKNOWN 而不是原样透出。 */
 const PROJECT_STATUSES = new Set([
@@ -167,23 +167,26 @@ function errorMessage(status: number, payload: unknown): string {
     ?? `supabase request failed with ${status}`
 }
 
+const http = createAuthedClient({
+  baseUrl: `${API_BASE}/`,
+  service: SERVICE,
+  auth: { kind: 'bearer' },
+  headers: { accept: 'application/json' },
+  mapError: ({ data: payload, status }) => upstreamError(
+    status,
+    errorMessage(status, typeof payload === 'string' ? { message: payload } : payload),
+  ),
+})
+
 async function request(ctx: ProviderContext, input: RequestInput): Promise<unknown> {
   const hasBody = input.body !== undefined
-  const { data } = await http.request({
+  const { data } = await http.request(ctx, {
     path: input.path,
     method: input.method ?? 'GET',
     // health 的 services 靠**重复同名参数**表达;statuses 那种逗号串在调用处就拼好了。
     query: Object.entries(input.query ?? {}) satisfies ProviderQuery,
-    headers: {
-      accept: 'application/json',
-      authorization: `Bearer ${requireApiKey(ctx, SERVICE)}`,
-    },
     ...(hasBody ? { json: input.body } : {}),
     invalidJsonMessage: 'malformed supabase response: malformed supabase json response',
-    mapError: ({ data: payload, status }) => upstreamError(
-      status,
-      errorMessage(status, typeof payload === 'string' ? { message: payload } : payload),
-    ),
   })
   const payload = data ?? null
   if (payload === null && input.allowEmpty !== true) throw malformed('empty body')

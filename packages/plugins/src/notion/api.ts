@@ -60,25 +60,21 @@ import type {
   updatePageInput,
   updatePageMarkdownInput,
 } from './schema'
+import type { ProviderQuery, ResponseBodyKind } from '../_runtime/providerHttp'
 import type { createPageInput, movePageInput } from './schema.handwritten'
+import type { ProviderContext } from '../_runtime/plugin'
 import {
   booleanValue as bool,
   compactDefined as compact,
   asJsonObject as record,
 } from '../_runtime/jsonValue'
-import {
-  createProviderHttpClient,
-  type ProviderQuery,
-  type ResponseBodyKind,
-} from '../_runtime/providerHttp'
-import { type ProviderContext, requireApiKey } from '../_runtime/plugin'
+import { createAuthedClient } from '../_runtime/authedClient'
 import { upstreamError } from '../_runtime/upstreamError'
 
 const SERVICE = 'notion'
 const API_BASE = 'https://api.notion.com/v1'
 /** 上游钉死的 API 版本;Notion 缺这个头一律 400,换版本会改变出参形状。 */
 const NOTION_VERSION = '2026-03-11'
-const http = createProviderHttpClient({ baseUrl: `${API_BASE}/`, service: SERVICE })
 
 type Json = Record<string, unknown>
 type QueryValue = number | string | string[] | undefined
@@ -121,23 +117,28 @@ function errorMessage(status: number, payload: unknown, bodyKind: ResponseBodyKi
     ?? `notion request failed with ${status}`
 }
 
+const http = createAuthedClient({
+  baseUrl: `${API_BASE}/`,
+  service: SERVICE,
+  auth: { kind: 'bearer' },
+  headers: { 'notion-version': NOTION_VERSION },
+  // 提取**不 trim**(nonEmpty)且兜底走 JSON.stringify —— 与标准 errorMessage 的 trim 语义
+  // 不同,整段覆写。
+  mapError: ({ bodyKind, data: payload, status }) => upstreamError(
+    status,
+    errorMessage(status, payload, bodyKind),
+  ),
+})
+
 async function request(ctx: ProviderContext, input: RequestInput): Promise<Json> {
   const hasBody = input.body !== undefined
-  const { data } = await http.request({
+  const { data } = await http.request(ctx, {
     path: input.path,
     method: input.method ?? 'GET',
     // filter_properties[] 靠**重复同名参数**表达;空数组在调用处就丢掉了。
     query: Object.entries(input.query ?? {}) satisfies ProviderQuery,
-    headers: {
-      'authorization': `Bearer ${requireApiKey(ctx, SERVICE)}`,
-      'notion-version': NOTION_VERSION,
-    },
     ...(hasBody ? { json: input.body } : {}),
     invalidJsonMessage: 'Notion 返回了非 JSON 响应',
-    mapError: ({ bodyKind, data: payload, status }) => upstreamError(
-      status,
-      errorMessage(status, payload, bodyKind),
-    ),
   })
   // 空响应体归一成 `{}`(上游 `payload ?? {}`):DELETE 之类的端点可能什么都不回。
   if (data === undefined) return {}

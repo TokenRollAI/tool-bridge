@@ -54,15 +54,15 @@ import type {
   updateSectionInput,
   updateTaskInput,
 } from './schema'
+import type { ProviderQuery } from '../_runtime/providerHttp'
+import type { ProviderContext } from '../_runtime/plugin'
 import { compactDefined as compact, asJsonObject as record, trimmedText as text } from '../_runtime/jsonValue'
-import { createProviderHttpClient, type ProviderQuery } from '../_runtime/providerHttp'
-import { type ProviderContext, requireApiKey } from '../_runtime/plugin'
+import { createAuthedClient } from '../_runtime/authedClient'
 import { upstreamError } from '../_runtime/upstreamError'
 
 const SERVICE = 'todoist'
 const API_BASE = 'https://api.todoist.com/api/v1'
 const USER_PATH = '/user'
-const http = createProviderHttpClient({ baseUrl: `${API_BASE}/`, service: SERVICE })
 
 type Json = Record<string, unknown>
 type QueryValue = number | string | string[] | undefined
@@ -113,6 +113,17 @@ function errorMessage(status: number, payload: unknown): string {
   return `todoist request failed with ${status}`
 }
 
+const http = createAuthedClient({
+  baseUrl: `${API_BASE}/`,
+  service: SERVICE,
+  auth: { kind: 'bearer' },
+  headers: { accept: 'application/json' },
+  mapError: ({ data, status }) => upstreamError(
+    status,
+    errorMessage(status, typeof data === 'string' ? { message: data } : data),
+  ),
+})
+
 async function request(ctx: ProviderContext, input: RequestInput): Promise<unknown> {
   const hasBody = input.body !== undefined
   const query = Object.entries(input.query ?? {}).map(([key, value]) => [
@@ -120,20 +131,12 @@ async function request(ctx: ProviderContext, input: RequestInput): Promise<unkno
     // 多值参数(list_tasks 的 ids)是**逗号串**,不是重复的同名参数。
     Array.isArray(value) ? value.join(',') : value,
   ] as const) satisfies ProviderQuery
-  const { data } = await http.request({
+  const { data } = await http.request(ctx, {
     path: input.path,
     method: input.method ?? 'GET',
     query,
-    headers: {
-      accept: 'application/json',
-      authorization: `Bearer ${requireApiKey(ctx, SERVICE)}`,
-    },
     ...(hasBody ? { json: input.body } : {}),
     invalidJsonMessage: 'Todoist 返回了非 JSON 响应',
-    mapError: ({ data, status }) => upstreamError(
-      status,
-      errorMessage(status, typeof data === 'string' ? { message: data } : data),
-    ),
   })
   return data ?? {}
 }

@@ -26,16 +26,16 @@ import type {
   getUserBalanceInput,
   listModelsInput,
 } from './schema'
+import type { ProviderHttpErrorContext, ResponseBodyKind } from '../_runtime/providerHttp'
+import type { ProviderContext } from '../_runtime/plugin'
 import { compactDefined as compact, asJsonObject as record, trimmedText as text } from '../_runtime/jsonValue'
-import { createProviderHttpClient, type ResponseBodyKind } from '../_runtime/providerHttp'
-import { type ProviderContext, requireApiKey } from '../_runtime/plugin'
+import { createAuthedClient } from '../_runtime/authedClient'
 import { upstreamError } from '../_runtime/upstreamError'
 
 const SERVICE = 'deepseek'
 const API_BASE = 'https://api.deepseek.com'
 /** Anthropic 兼容面挂在同一域名的子路径下,但认证头与 OpenAI 兼容面不同。 */
 const ANTHROPIC_API_PREFIX = '/anthropic'
-const http = createProviderHttpClient({ baseUrl: API_BASE, service: SERVICE })
 
 type Json = Record<string, unknown>
 
@@ -50,6 +50,28 @@ function errorMessage(payload: unknown, bodyKind: ResponseBodyKind, status: numb
     ?? fallback
 }
 
+function mapDeepseekError({ bodyKind, data: payload, status }: ProviderHttpErrorContext): TBError {
+  return upstreamError(status, errorMessage(payload, bodyKind, status))
+}
+
+/** OpenAI 兼容面:认证走 `authorization: Bearer`。 */
+const openaiHttp = createAuthedClient({
+  baseUrl: API_BASE,
+  service: SERVICE,
+  auth: { kind: 'bearer' },
+  headers: { 'content-type': 'application/json' },
+  mapError: mapDeepseekError,
+})
+
+/** Anthropic 兼容面:同一把 key,认证头换成 `x-api-key` —— 发错头是 401,两个 client 不能合并。 */
+const anthropicHttp = createAuthedClient({
+  baseUrl: `${API_BASE}${ANTHROPIC_API_PREFIX}/`,
+  service: SERVICE,
+  auth: { kind: 'header', name: 'x-api-key' },
+  headers: { 'content-type': 'application/json' },
+  mapError: mapDeepseekError,
+})
+
 /** SSE 在这条链路上没有承载,给 true 直接拒绝而不是静默降级成非流式。 */
 function assertStreamingDisabled(input: { stream?: boolean }): void {
   if (input.stream === true) {
@@ -58,7 +80,7 @@ function assertStreamingDisabled(input: { stream?: boolean }): void {
 }
 
 interface RequestOptions {
-  /** true 走 Anthropic 兼容面:换 base URL,并把认证头从 authorization 换成 x-api-key。 */
+  /** true 走 Anthropic 兼容面:换 client(base URL 与认证头都不同)。 */
   anthropic?: boolean
   body?: Json
   method?: 'GET' | 'POST'
@@ -66,21 +88,12 @@ interface RequestOptions {
 }
 
 async function request(ctx: ProviderContext, options: RequestOptions): Promise<unknown> {
-  const apiKey = requireApiKey(ctx, SERVICE)
-  const headers: Record<string, string> = options.anthropic === true
-    ? { 'content-type': 'application/json', 'x-api-key': apiKey }
-    : { 'authorization': `Bearer ${apiKey}`, 'content-type': 'application/json' }
-
-  const { data } = await http.request({
-    path: `${options.anthropic === true ? ANTHROPIC_API_PREFIX : ''}${options.path}`,
+  const client = options.anthropic === true ? anthropicHttp : openaiHttp
+  const { data } = await client.request(ctx, {
+    path: options.path,
     method: options.method ?? 'GET',
-    headers,
     ...(options.body === undefined ? {} : { json: options.body }),
     invalidJsonMessage: 'deepseek returned malformed JSON',
-    mapError: ({ bodyKind, data: payload, status }) => upstreamError(
-      status,
-      errorMessage(payload, bodyKind, status),
-    ),
   })
   if (data === undefined) throw upstreamError(502, 'deepseek returned malformed JSON')
   return data

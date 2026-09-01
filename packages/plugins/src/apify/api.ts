@@ -22,15 +22,14 @@ import type {
   getRunInput,
   runActorInput,
 } from './schema'
-import { type ProviderContext, requireApiKey } from '../_runtime/plugin'
-import { createProviderHttpClient } from '../_runtime/providerHttp'
+import type { ProviderContext } from '../_runtime/plugin'
 import { asJsonObject as asRecord } from '../_runtime/jsonValue'
+import { createAuthedClient } from '../_runtime/authedClient'
 import { upstreamError } from '../_runtime/upstreamError'
 
 const SERVICE = 'apify'
 const API_BASE = 'https://api.apify.com'
 const CURRENT_USER_PATH = '/v2/users/me'
-const http = createProviderHttpClient({ baseUrl: `${API_BASE}/`, service: SERVICE })
 
 type Json = Record<string, unknown>
 
@@ -54,6 +53,21 @@ function errorMessage(payload: unknown, status: number): string {
     ?? `Apify request failed with status ${status}`
 }
 
+const http = createAuthedClient({
+  baseUrl: `${API_BASE}/`,
+  service: SERVICE,
+  auth: { kind: 'bearer' },
+  headers: { accept: 'application/json' },
+  mapError: ({ bodyKind, data: payload, status }) => bodyKind === 'invalid-json'
+    ? new TBError('unavailable', 'Apify 返回了非 JSON 响应', { retryable: true })
+    : upstreamError(status, errorMessage(payload, status)),
+  mapTransportError: ({ message }) => new TBError(
+    'unavailable',
+    message === undefined ? 'Apify 请求失败' : `Apify 请求失败: ${message}`,
+    { retryable: true },
+  ),
+})
+
 /**
  * 生成的 schema 把 get_actor 的 actorId 标成了 optional(上游 action 定义如此),
  * 但上游 handler 一律 `requiredString(...)`。在本地挡住,免得拼出 `/acts/undefined`。
@@ -66,24 +80,12 @@ function requiredId(value: string | undefined, field: string): string {
 }
 
 async function request(ctx: ProviderContext, path: string, init: RequestInput = {}): Promise<unknown> {
-  const { data } = await http.request({
+  const { data } = await http.request(ctx, {
     path,
     method: init.method ?? 'GET',
     query: Object.entries(init.query ?? {}),
-    headers: {
-      accept: 'application/json',
-      authorization: `Bearer ${requireApiKey(ctx, SERVICE)}`,
-    },
     ...(init.body === undefined ? {} : { json: init.body }),
     invalidJsonMessage: 'Apify 返回了非 JSON 响应',
-    mapError: ({ bodyKind, data: payload, status }) => bodyKind === 'invalid-json'
-      ? new TBError('unavailable', 'Apify 返回了非 JSON 响应', { retryable: true })
-      : upstreamError(status, errorMessage(payload, status)),
-    mapTransportError: ({ message }) => new TBError(
-      'unavailable',
-      message === undefined ? 'Apify 请求失败' : `Apify 请求失败: ${message}`,
-      { retryable: true },
-    ),
   })
   return data ?? null
 }

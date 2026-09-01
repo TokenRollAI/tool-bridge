@@ -12,18 +12,17 @@ import type {
   updateUserInput,
   updateUserMetadataInput,
 } from './schema'
+import type { ProviderContext } from '../_runtime/plugin'
 import {
   asJsonObject,
-  createProviderHttpClient,
   type JsonObject,
   nonEmptyText,
   type ProviderQuery,
 } from '../_runtime/providerHttp'
-import { type ProviderContext, requireApiKey } from '../_runtime/plugin'
+import { createAuthedClient } from '../_runtime/authedClient'
 import { upstreamError } from '../_runtime/upstreamError'
 
 const SERVICE = 'clerk'
-const http = createProviderHttpClient({ baseUrl: 'https://api.clerk.com/v1/', service: SERVICE })
 
 interface RequestInput {
   body?: JsonObject
@@ -42,25 +41,28 @@ function errorMessage(payload: unknown): string | undefined {
   return nonEmptyText(body.message) ?? nonEmptyText(body.error)
 }
 
+const http = createAuthedClient({
+  baseUrl: 'https://api.clerk.com/v1/',
+  service: SERVICE,
+  auth: { kind: 'bearer' },
+  headers: { accept: 'application/json' },
+  mapError: ({ data: payload, status }) => upstreamError(
+    status,
+    errorMessage(payload) ?? `clerk 返回 HTTP ${status}`,
+  ),
+  mapTransportError: ({ message }) => upstreamError(
+    502,
+    message === undefined ? 'clerk 请求失败' : `clerk 请求失败: ${message}`,
+  ),
+})
+
 async function request(ctx: ProviderContext, path: string, input: RequestInput): Promise<unknown> {
-  const { data } = await http.request({
+  const { data } = await http.request(ctx, {
     path,
     method: input.method,
     query: input.query,
-    headers: {
-      accept: 'application/json',
-      authorization: `Bearer ${requireApiKey(ctx, SERVICE)}`,
-    },
     ...(input.body === undefined ? {} : { json: input.body }),
     invalidJson: 'text',
-    mapError: ({ data: payload, status }) => upstreamError(
-      status,
-      errorMessage(payload) ?? `clerk 返回 HTTP ${status}`,
-    ),
-    mapTransportError: ({ message }) => upstreamError(
-      502,
-      message === undefined ? 'clerk 请求失败' : `clerk 请求失败: ${message}`,
-    ),
   })
   return data ?? {}
 }

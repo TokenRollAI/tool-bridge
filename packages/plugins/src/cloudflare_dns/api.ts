@@ -30,6 +30,8 @@ import type {
   listZonesInput,
 } from './schema'
 import type { createDnsRecordInput, updateDnsRecordInput } from './schema.handwritten'
+import type { ProviderQuery } from '../_runtime/providerHttp'
+import type { ProviderContext } from '../_runtime/plugin'
 import {
   booleanValue as boolean,
   compactDefined as compact,
@@ -37,13 +39,11 @@ import {
   asJsonObject as record,
   trimmedText as text,
 } from '../_runtime/jsonValue'
-import { createProviderHttpClient, type ProviderQuery } from '../_runtime/providerHttp'
-import { type ProviderContext, requireApiKey } from '../_runtime/plugin'
+import { createAuthedClient } from '../_runtime/authedClient'
 import { upstreamError } from '../_runtime/upstreamError'
 
 const SERVICE = 'cloudflare_dns'
 const API_BASE = 'https://api.cloudflare.com/client/v4'
-const http = createProviderHttpClient({ baseUrl: `${API_BASE}/`, service: SERVICE })
 
 /** list_accounts 的分页缺省值,照抄上游 `requestCloudflareAccounts`。 */
 const DEFAULT_ACCOUNTS_PAGE = 1
@@ -115,24 +115,30 @@ function errorMessage(envelope: Envelope, status: number): string {
   return `Cloudflare 返回 HTTP ${status}`
 }
 
+const http = createAuthedClient({
+  baseUrl: `${API_BASE}/`,
+  service: SERVICE,
+  auth: { kind: 'bearer' },
+  headers: { accept: 'application/json' },
+  mapError: ({ bodyKind, data, status }) => {
+    if (bodyKind === 'json' && record(data) === undefined) {
+      return new TBError('unavailable', 'Cloudflare 响应不是对象', { retryable: true })
+    }
+    const envelope = bodyKind === 'json' ? data as Envelope : {}
+    return upstreamError(status, errorMessage(envelope, status))
+  },
+})
+
 async function request(ctx: ProviderContext, input: RequestInput): Promise<Envelope> {
   const hasBody = input.body !== undefined
-  const result = await http.request({
+  const result = await http.request(ctx, {
     path: input.path,
     method: input.method ?? 'GET',
     // 上游 `queryParams`:undefined / null / 空串一律不发。
     query: Object.entries(input.query ?? {})
       .filter(([, value]) => value !== undefined && value !== '') satisfies ProviderQuery,
-    headers: { accept: 'application/json', authorization: `Bearer ${requireApiKey(ctx, SERVICE)}` },
     ...(hasBody ? { json: input.body } : {}),
     invalidJsonMessage: 'Cloudflare 返回了非 JSON 响应',
-    mapError: ({ bodyKind, data, status }) => {
-      if (bodyKind === 'json' && record(data) === undefined) {
-        return new TBError('unavailable', 'Cloudflare 响应不是对象', { retryable: true })
-      }
-      const envelope = bodyKind === 'json' ? data as Envelope : {}
-      return upstreamError(status, errorMessage(envelope, status))
-    },
   })
   const envelope = result.data === undefined ? {} : requireRecord(result.data, 'Cloudflare 响应') as Envelope
 

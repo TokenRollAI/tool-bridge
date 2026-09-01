@@ -44,16 +44,15 @@ import type {
   stopMachineInput,
   waitForMachineInput,
 } from './schema'
-import { createProviderHttpClient, type ProviderQuery, type ResponseBodyKind } from '../_runtime/providerHttp'
+import type { ProviderQuery, ResponseBodyKind } from '../_runtime/providerHttp'
+import type { ProviderContext } from '../_runtime/plugin'
 import { compactDefined as compact, asJsonObject as record, trimmedText as text } from '../_runtime/jsonValue'
-import { type ProviderContext, requireApiKey } from '../_runtime/plugin'
+import { createAuthedClient } from '../_runtime/authedClient'
 import { upstreamError } from '../_runtime/upstreamError'
 
 const SERVICE = 'fly'
 /** 末尾斜杠是必需的:`new URL('apps', base)` 靠它把 `/v1` 保住而不是替换掉。 */
 const API_BASE = 'https://api.machines.dev/v1/'
-const http = createProviderHttpClient({ baseUrl: API_BASE, service: SERVICE })
-
 type Json = Record<string, unknown>
 type QueryValue = boolean | number | string | undefined
 
@@ -108,6 +107,19 @@ function errorMessage(payload: unknown, status: number): string {
   return `Fly.io request failed with status ${status}`
 }
 
+const http = createAuthedClient({
+  baseUrl: API_BASE,
+  service: SERVICE,
+  auth: { kind: 'bearer' },
+  headers: { accept: 'application/json' },
+  // 错误消息要先过 flyPayload 二次解析(content-type 不可信),不是标准键序提取。
+  mapError: context => upstreamError(
+    context.status,
+    errorMessage(flyPayload(context.data, context.bodyKind, context.headers), context.status),
+  ),
+  mapTransportError: ({ message }) => upstreamError(502, message ?? 'Fly.io request failed'),
+})
+
 interface RequestInput {
   body?: Json
   /** false 表示成功响应没有可消费的 JSON 体(生命周期动作),不要求非空。 */
@@ -118,23 +130,15 @@ interface RequestInput {
 }
 
 async function request(ctx: ProviderContext, input: RequestInput): Promise<unknown> {
-  // 取凭证放在 try 外:它抛的是配置错误,不该被下面的传输失败兜底吞成 502。
-  const apiKey = requireApiKey(ctx, SERVICE)
-  const result = await http.request({
+  const result = await http.request(ctx, {
     path: input.path,
     method: input.method,
     // 空串与 undefined 同等对待:Fly 把 `?region=` 当成真的按空 region 过滤。
     query: Object.entries(input.query ?? {})
       .filter(([, value]) => value !== undefined && value !== '') satisfies ProviderQuery,
-    headers: { accept: 'application/json', authorization: `Bearer ${apiKey}` },
     ...(input.body === undefined ? {} : { json: input.body }),
     invalidJson: 'text',
     responseType: 'auto',
-    mapError: context => upstreamError(
-      context.status,
-      errorMessage(flyPayload(context.data, context.bodyKind, context.headers), context.status),
-    ),
-    mapTransportError: ({ message }) => upstreamError(502, message ?? 'Fly.io request failed'),
   })
   const payload = flyPayload(result.data, result.bodyKind, result.headers)
   if (input.expectJson === false) return payload

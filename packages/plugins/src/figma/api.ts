@@ -50,14 +50,25 @@ import type {
   renderImagesInput,
 } from './schema'
 import type { updateDevResourcesInput } from './schema.handwritten'
+import type { ProviderQuery } from '../_runtime/providerHttp'
+import type { ProviderContext } from '../_runtime/plugin'
 import { compactDefined as compact, asJsonObject as record, trimmedText as text } from '../_runtime/jsonValue'
-import { createProviderHttpClient, type ProviderQuery } from '../_runtime/providerHttp'
-import { type ProviderContext, requireApiKey } from '../_runtime/plugin'
-import { upstreamError } from '../_runtime/upstreamError'
+import { createAuthedClient } from '../_runtime/authedClient'
 
 const SERVICE = 'figma'
 const API_BASE = 'https://api.figma.com'
-const http = createProviderHttpClient({ baseUrl: API_BASE, service: SERVICE })
+const http = createAuthedClient({
+  baseUrl: API_BASE,
+  service: SERVICE,
+  auth: { kind: 'header', name: 'x-figma-token' },
+  headers: { accept: 'application/json' },
+  // Figma 的错误消息散在六个位置,按上游的顺序找。payload 是纯文本时它本身就是消息。
+  errorMessage: {
+    keys: ['message', 'err', 'error', 'status', 'error.message', 'error.detail'],
+    fallback: status => `Figma 返回 HTTP ${status}`,
+  },
+  mapTransportError: () => new TBError('unavailable', 'Figma 请求失败', { retryable: true }),
+})
 
 type Json = Record<string, unknown>
 type QueryValue = boolean | number | string | undefined
@@ -107,35 +118,15 @@ function requireArray(value: unknown, label: string): unknown[] {
   return value
 }
 
-/** Figma 的错误消息散在六个位置,按上游的顺序找。payload 是纯文本时它本身就是消息。 */
-function errorMessage(payload: unknown, status: number): string {
-  if (typeof payload === 'string') return text(payload) ?? `Figma 返回 HTTP ${status}`
-  const body = record(payload)
-  const error = record(body?.error)
-  return text(body?.message)
-    ?? text(body?.err)
-    ?? text(body?.error)
-    ?? text(body?.status)
-    ?? text(error?.message)
-    ?? text(error?.detail)
-    ?? `Figma 返回 HTTP ${status}`
-}
-
 async function request(ctx: ProviderContext, input: RequestInput): Promise<unknown> {
   const hasBody = input.body !== undefined
-  const { data } = await http.request({
+  const { data } = await http.request(ctx, {
     path: input.path,
     method: input.method ?? 'GET',
     query: Object.entries(input.query ?? {}) satisfies ProviderQuery,
-    headers: {
-      'accept': 'application/json',
-      'x-figma-token': requireApiKey(ctx, SERVICE),
-    },
     ...(hasBody ? { json: input.body } : {}),
     // Figma 的错误消息有时是纯文本；成功响应也保留旧实现的原文 payload 语义。
     invalidJson: 'text',
-    mapError: ({ data: payload, status }) => upstreamError(status, errorMessage(payload, status)),
-    mapTransportError: () => new TBError('unavailable', 'Figma 请求失败', { retryable: true }),
   })
   return data ?? null
 }

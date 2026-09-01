@@ -24,14 +24,13 @@ import type {
   updateOrganizationMembershipInput,
   updateUserInput,
 } from './schema'
-import { type ProviderContext, requireApiKey } from '../_runtime/plugin'
-import { createProviderHttpClient } from '../_runtime/providerHttp'
+import type { ProviderContext } from '../_runtime/plugin'
 import { compactDefined as compact } from '../_runtime/jsonValue'
+import { createAuthedClient } from '../_runtime/authedClient'
 import { upstreamError } from '../_runtime/upstreamError'
 
 const SERVICE = 'workos'
 const API_BASE = 'https://api.workos.com'
-const http = createProviderHttpClient({ baseUrl: `${API_BASE}/`, service: SERVICE })
 
 type Json = Record<string, unknown>
 type QueryValue = boolean | number | string | string[] | undefined
@@ -49,41 +48,42 @@ function errorMessage(payload: Json, status: number): string {
   return `WorkOS 返回 HTTP ${status}`
 }
 
+const http = createAuthedClient({
+  baseUrl: `${API_BASE}/`,
+  service: SERVICE,
+  auth: { kind: 'bearer' },
+  headers: { accept: 'application/json' },
+  mapError: ({ bodyKind, data, status }) => {
+    if (bodyKind === 'invalid-json') {
+      return new TBError('unavailable', 'WorkOS 返回了非法 JSON', { retryable: true })
+    }
+    const payload = bodyKind === 'empty'
+      ? {}
+      : data !== null && typeof data === 'object' && !Array.isArray(data)
+        ? data as Json
+        : undefined
+    return payload === undefined
+      ? new TBError('unavailable', 'WorkOS 返回的不是 JSON 对象', { retryable: true })
+      : upstreamError(status, errorMessage(payload, status))
+  },
+  mapTransportError: ({ message }) => new TBError(
+    'unavailable',
+    message === undefined ? 'WorkOS 请求失败' : `WorkOS 请求失败: ${message}`,
+    { retryable: true },
+  ),
+})
+
 async function request(
   ctx: ProviderContext,
   input: { body?: Json, method: 'GET' | 'POST' | 'PUT', path: string, query?: Record<string, QueryValue> },
 ): Promise<Json> {
-  const apiKey = requireApiKey(ctx, SERVICE)
-  const headers: Record<string, string> = {
-    accept: 'application/json',
-    authorization: `Bearer ${apiKey}`,
-  }
-  const response = await http.request({
+  const response = await http.request(ctx, {
     method: input.method,
     path: input.path,
     // 多值过滤是重复同名键(与 Render 的逗号拼接不同)。
     query: Object.entries(input.query ?? {}),
-    headers,
     ...(input.body === undefined ? {} : { json: input.body }),
     invalidJsonMessage: 'WorkOS 返回了非法 JSON',
-    mapError: ({ bodyKind, data, status }) => {
-      if (bodyKind === 'invalid-json') {
-        return new TBError('unavailable', 'WorkOS 返回了非法 JSON', { retryable: true })
-      }
-      const payload = bodyKind === 'empty'
-        ? {}
-        : data !== null && typeof data === 'object' && !Array.isArray(data)
-          ? data as Json
-          : undefined
-      return payload === undefined
-        ? new TBError('unavailable', 'WorkOS 返回的不是 JSON 对象', { retryable: true })
-        : upstreamError(status, errorMessage(payload, status))
-    },
-    mapTransportError: ({ message }) => new TBError(
-      'unavailable',
-      message === undefined ? 'WorkOS 请求失败' : `WorkOS 请求失败: ${message}`,
-      { retryable: true },
-    ),
   })
   const payload = response.bodyKind === 'empty'
     ? {}

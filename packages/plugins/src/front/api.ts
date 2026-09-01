@@ -15,31 +15,35 @@ import type {
   listContactsInput,
   updateContactInput,
 } from './schema'
+import type { ProviderContext } from '../_runtime/plugin'
 import { asJsonObject as record, trimmedText as text } from '../_runtime/jsonValue'
-import { type ProviderContext, requireApiKey } from '../_runtime/plugin'
-import { createProviderHttpClient } from '../_runtime/providerHttp'
+import { createAuthedClient } from '../_runtime/authedClient'
 import { upstreamError } from '../_runtime/upstreamError'
 
 const SERVICE = 'front'
 const API_BASE = 'https://api2.frontapp.com'
 /** 上游对 Front 设的请求超时;超时与"上游不通"要分开归一(504 vs 502)。 */
 const REQUEST_TIMEOUT_MS = 15_000
-const http = createProviderHttpClient({ baseUrl: `${API_BASE}/`, service: SERVICE })
+const http = createAuthedClient({
+  baseUrl: `${API_BASE}/`,
+  service: SERVICE,
+  auth: { kind: 'bearer' },
+  headers: { accept: 'application/json' },
+  // Front 的错误体形状不止一种,四个候选键按上游顺序取第一个有文本的。
+  errorMessage: {
+    keys: ['message', '_error', 'error', 'error.message'],
+    fallback: status => `front 返回 HTTP ${status}`,
+  },
+  mapTransportError: ({ kind, message }) => kind === 'timeout'
+    ? upstreamError(504, 'front 请求超时')
+    : upstreamError(502, message === undefined ? 'front 请求失败' : `front 请求失败: ${message}`),
+})
 
 type Json = Record<string, unknown>
 
 interface FrontContactHandle {
   handle: string
   source: string
-}
-
-/** Front 的错误体形状不止一种,四个候选键按上游顺序取第一个有文本的。 */
-function errorMessage(payload: unknown): string | undefined {
-  if (typeof payload === 'string') return text(payload)
-  const body = record(payload)
-  if (body === undefined) return undefined
-  const nested = record(body.error)
-  return text(body.message) ?? text(body._error) ?? text(body.error) ?? text(nested?.message)
 }
 
 interface RequestInput {
@@ -50,28 +54,19 @@ interface RequestInput {
 }
 
 async function request(ctx: ProviderContext, path: string, input: RequestInput): Promise<unknown> {
-  const apiKey = requireApiKey(ctx, SERVICE)
   const query: Array<[string, number | string]> = []
   for (const [key, value] of input.query ?? []) {
     // 上游 setOptionalSearchParam 只认非空字符串与数字,其余(含空串)静默跳过。
     if (typeof value === 'string' && value !== '') query.push([key, value])
     else if (typeof value === 'number') query.push([key, value])
   }
-  const { data } = await http.request({
+  const { data } = await http.request(ctx, {
     path,
     method: input.method,
     query,
-    headers: { accept: 'application/json', authorization: `Bearer ${apiKey}` },
     ...(input.body === undefined ? {} : { json: input.body }),
     timeoutMs: REQUEST_TIMEOUT_MS,
     invalidJson: 'text',
-    mapError: ({ data: payload, status }) => upstreamError(
-      status,
-      errorMessage(payload) ?? `front 返回 HTTP ${status}`,
-    ),
-    mapTransportError: ({ kind, message }) => kind === 'timeout'
-      ? upstreamError(504, 'front 请求超时')
-      : upstreamError(502, message === undefined ? 'front 请求失败' : `front 请求失败: ${message}`),
   })
   return data ?? {}
 }

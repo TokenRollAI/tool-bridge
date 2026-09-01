@@ -43,14 +43,28 @@ import type {
   listLocationsInput,
   listOrganizationsInput,
 } from './schema'
+import type { ProviderContext } from '../_runtime/plugin'
 import { compactDefined as compact, asJsonObject as record, trimmedText as text } from '../_runtime/jsonValue'
-import { type ProviderContext, requireApiKey } from '../_runtime/plugin'
-import { createProviderHttpClient } from '../_runtime/providerHttp'
+import { createAuthedClient } from '../_runtime/authedClient'
 import { upstreamError } from '../_runtime/upstreamError'
 
 const SERVICE = 'turso'
 const API_BASE = 'https://api.turso.tech'
-const http = createProviderHttpClient({ baseUrl: `${API_BASE}/`, service: SERVICE })
+const http = createAuthedClient({
+  baseUrl: `${API_BASE}/`,
+  service: SERVICE,
+  auth: { kind: 'bearer' },
+  headers: { accept: 'application/json' },
+  errorMessage: {
+    // Turso 的错误消息散落在五六个键里,按上游的顺序找。
+    keys: ['message', 'error', 'detail', 'title', 'error.message', 'error.detail'],
+    fallback: status => `Turso request failed with ${status}`,
+  },
+  mapTransportError: ({ message }) => upstreamError(
+    502,
+    message === undefined ? 'Turso request failed' : `Turso request failed: ${message}`,
+  ),
+})
 
 type Json = Record<string, unknown>
 type Method = 'DELETE' | 'GET' | 'POST'
@@ -125,21 +139,6 @@ function singleResource(payload: unknown, keys: string[]): Json {
   return normalizeResource(fields)
 }
 
-/** Turso 的错误消息散落在五六个键里,按上游的顺序找。 */
-function errorMessage(payload: unknown, status: number): string {
-  const direct = text(payload)
-  if (direct !== undefined) return direct
-  const fields = record(payload)
-  const nested = record(fields?.error)
-  const message = text(fields?.message)
-    ?? text(fields?.error)
-    ?? text(fields?.detail)
-    ?? text(fields?.title)
-    ?? text(nested?.message)
-    ?? text(nested?.detail)
-  return message ?? `Turso request failed with ${status}`
-}
-
 interface RequestInput {
   body?: Json
   method: Method
@@ -147,26 +146,11 @@ interface RequestInput {
 }
 
 async function request(ctx: ProviderContext, input: RequestInput): Promise<unknown> {
-  // 取凭证放在 try 外:它抛的是配置错误,不该被下面的传输失败兜底吞成 502。
-  const apiKey = requireApiKey(ctx, SERVICE)
-
-  const response = await http.request({
+  const response = await http.request(ctx, {
     method: input.method,
     path: input.path,
-    headers: {
-      accept: 'application/json',
-      authorization: `Bearer ${apiKey}`,
-    },
     ...(input.body === undefined ? {} : { json: input.body }),
     invalidJson: 'text',
-    mapError: ({ bodyKind, data, status }) => upstreamError(
-      status,
-      errorMessage(bodyKind === 'empty' ? {} : bodyKind === 'json' ? data : { message: data }, status),
-    ),
-    mapTransportError: ({ message }) => upstreamError(
-      502,
-      message === undefined ? 'Turso request failed' : `Turso request failed: ${message}`,
-    ),
   })
   if (response.bodyKind === 'empty') return {}
   return response.bodyKind === 'json' ? response.data : { message: response.data }

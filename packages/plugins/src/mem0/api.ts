@@ -35,15 +35,13 @@ import type {
   searchMemoriesInput,
   updateMemoryInput,
 } from './schema'
+import type { ProviderContext } from '../_runtime/plugin'
 import { compactDefined as compact, asJsonObject as record, trimmedText as text } from '../_runtime/jsonValue'
-import { type ProviderContext, requireApiKey } from '../_runtime/plugin'
-import { createProviderHttpClient } from '../_runtime/providerHttp'
+import { createAuthedClient } from '../_runtime/authedClient'
 import { upstreamError } from '../_runtime/upstreamError'
 
 const SERVICE = 'mem0'
 const API_BASE = 'https://api.mem0.ai'
-const http = createProviderHttpClient({ baseUrl: `${API_BASE}/`, service: SERVICE })
-
 type Json = Record<string, unknown>
 type QueryValue = number | string | undefined
 
@@ -82,19 +80,22 @@ function errorMessage(value: unknown, status: number): string {
   return `Mem0 返回 HTTP ${status}`
 }
 
+// Token 而非 Bearer —— Mem0 用的是 DRF 的 TokenAuthentication。
+const http = createAuthedClient({
+  baseUrl: `${API_BASE}/`,
+  service: SERVICE,
+  auth: { kind: 'token' },
+  headers: { accept: 'application/json' },
+  mapError: ({ data, status }) => upstreamError(status, errorMessage(data, status)),
+})
+
 function execute(ctx: ProviderContext, input: RequestInput) {
-  return http.request({
+  return http.request(ctx, {
     path: input.path,
     method: input.method ?? 'GET',
     query: Object.entries(input.query ?? {}),
-    headers: {
-      accept: 'application/json',
-      // Token 而非 Bearer —— Mem0 用的是 DRF 的 TokenAuthentication。
-      authorization: `Token ${requireApiKey(ctx, SERVICE)}`,
-    },
     ...(input.body === undefined ? {} : { json: input.body }),
     invalidJson: 'text',
-    mapError: ({ data, status }) => upstreamError(status, errorMessage(data, status)),
   })
 }
 

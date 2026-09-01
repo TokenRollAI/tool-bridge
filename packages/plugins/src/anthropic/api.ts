@@ -9,7 +9,7 @@
  *
  * 三处上游细节决定了这里的形状:
  * - 每个请求都必须带 `anthropic-version` 头,漏了会被上游以 400 拒;它是 API 契约的一部分,
- *   不是可选优化项,故钉死在 `headers()` 里。
+ *   不是可选优化项,故钉死在 client 的静态头里。
  * - `create_message` 的请求体是**整个入参原样透传**(上游 `compactObject(input)`),
  *   schema 侧也是 `looseObject` —— 新出的 Anthropic 字段无须改代码即可用。
  * - `get_model` 的 `model_id` 在上游 schema 里没声明 required,executor 里却有 `requiredString`
@@ -32,16 +32,31 @@ import type {
   getModelInput,
   listModelsInput,
 } from './schema'
-import { compactDefined as compact, asJsonObject as record, trimmedText as text } from '../_runtime/jsonValue'
-import { type ProviderContext, requireApiKey } from '../_runtime/plugin'
-import { createProviderHttpClient } from '../_runtime/providerHttp'
+import type { ProviderContext } from '../_runtime/plugin'
+import { compactDefined as compact, trimmedText as text } from '../_runtime/jsonValue'
+import { createAuthedClient } from '../_runtime/authedClient'
 import { upstreamError } from '../_runtime/upstreamError'
 
 const SERVICE = 'anthropic'
 const API_BASE = 'https://api.anthropic.com'
 /** 上游 API 的版本契约:每个请求都要带,值变了就是换了一套响应形状。 */
 const API_VERSION = '2023-06-01'
-const http = createProviderHttpClient({ baseUrl: `${API_BASE}/`, service: SERVICE })
+const http = createAuthedClient({
+  baseUrl: `${API_BASE}/`,
+  service: SERVICE,
+  auth: { kind: 'header', name: 'x-api-key' },
+  // content-type 不分 method 全量带,与迁移前的头集合一致(GET 也发)。
+  headers: {
+    'accept': 'application/json',
+    'anthropic-version': API_VERSION,
+    'content-type': 'application/json',
+  },
+  // Anthropic 的错误体是 `{type, error:{type, message}}`;网关层的错误可能是纯文本。
+  errorMessage: {
+    keys: ['error.message'],
+    fallback: status => `anthropic request failed with ${status}`,
+  },
+})
 
 type Json = Record<string, unknown>
 
@@ -52,22 +67,6 @@ function requireText(value: unknown, field: string): string {
   return result
 }
 
-function headers(apiKey: string): Record<string, string> {
-  return {
-    'accept': 'application/json',
-    'anthropic-version': API_VERSION,
-    'content-type': 'application/json',
-    'x-api-key': apiKey,
-  }
-}
-
-/** Anthropic 的错误体是 `{type, error:{type, message}}`;网关层的错误可能是纯文本。 */
-function errorMessage(status: number, payload: unknown): string {
-  const fallback = `anthropic request failed with ${status}`
-  const nested = record(record(payload)?.error)
-  return text(nested?.message) ?? text(payload) ?? fallback
-}
-
 interface RequestInput {
   body?: Json
   method?: 'GET' | 'POST'
@@ -76,16 +75,13 @@ interface RequestInput {
 }
 
 async function request(ctx: ProviderContext, input: RequestInput): Promise<unknown> {
-  const apiKey = requireApiKey(ctx, SERVICE)
   const method = input.method ?? 'GET'
-  const { data } = await http.request({
+  const { data } = await http.request(ctx, {
     path: input.path,
     method,
     query: Object.entries(input.query ?? {}),
-    headers: headers(apiKey),
     ...(input.body === undefined ? {} : { json: input.body }),
     invalidJsonMessage: 'anthropic returned malformed JSON',
-    mapError: ({ data: payload, status }) => upstreamError(status, errorMessage(status, payload)),
     mapTransportError: ({ message }) => upstreamError(
       502,
       `anthropic ${method} ${input.path} failed before receiving response: ${message ?? 'unknown network error'}`,

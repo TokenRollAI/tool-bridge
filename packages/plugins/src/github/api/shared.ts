@@ -22,13 +22,13 @@
  */
 
 import { TBError } from '@tool-bridge/plugin-sdk'
-import {
-  createProviderHttpClient,
-  type ProviderHttpRequest,
-  type ProviderHttpResult,
+import type {
+  ProviderHttpRequest,
+  ProviderHttpResult,
 } from '../../_runtime/providerHttp'
+import type { ProviderContext } from '../../_runtime/plugin'
 import { asJsonObject, compactDefined, trimmedText } from '../../_runtime/jsonValue'
-import { type ProviderContext, requireApiKey } from '../../_runtime/plugin'
+import { createAuthedClient } from '../../_runtime/authedClient'
 import { upstreamError } from '../../_runtime/upstreamError'
 
 export const SERVICE = 'github'
@@ -36,7 +36,6 @@ const API_BASE = 'https://api.github.com'
 const API_VERSION = '2022-11-28'
 /** GitHub REST 强制要求 User-Agent,缺了直接 403。上游报的是它自己的名字,这里报我们的。 */
 const USER_AGENT = 'tool-bridge'
-const http = createProviderHttpClient({ baseUrl: `${API_BASE}/`, service: SERVICE })
 
 export type Json = Record<string, unknown>
 export type Query = Record<string, boolean | number | string | undefined>
@@ -119,15 +118,6 @@ export function requireBranchOrTagRef(ref: string): string {
   return ref
 }
 
-function headers(ctx: ProviderContext): Record<string, string> {
-  return {
-    'accept': 'application/vnd.github+json',
-    'authorization': `Bearer ${requireApiKey(ctx, SERVICE)}`,
-    'x-github-api-version': API_VERSION,
-    'user-agent': USER_AGENT,
-  }
-}
-
 /** 空 body 读成 `null`(204/205);非 JSON 读成 `{message}`,好让错误页的文字进错误消息。 */
 function payloadOf(result: Pick<ProviderHttpResult, 'bodyKind' | 'data'>): unknown {
   if (result.bodyKind === 'empty') return null
@@ -175,6 +165,27 @@ export function githubError(response: GitHubResponse, payload: unknown): TBError
   return upstreamError(response.status, message)
 }
 
+const http = createAuthedClient({
+  baseUrl: `${API_BASE}/`,
+  service: SERVICE,
+  auth: { kind: 'bearer' },
+  headers: {
+    'accept': 'application/vnd.github+json',
+    'x-github-api-version': API_VERSION,
+    'user-agent': USER_AGENT,
+  },
+  // 403 双职分账 + 422 validation 摘要,整段覆写而不用标准键序提取。
+  mapError: context => githubError(
+    {
+      headers: context.headers,
+      ok: false,
+      status: context.status,
+      statusText: context.statusText,
+    },
+    payloadOf(context),
+  ),
+})
+
 export interface GitHubRequest {
   body?: Json
   method?: ProviderHttpRequest['method']
@@ -187,24 +198,14 @@ export async function requestRaw(
   ctx: ProviderContext,
   input: GitHubRequest,
 ): Promise<{ payload: unknown, response: GitHubResponse }> {
-  const result = await http.request({
+  const result = await http.request(ctx, {
     method: input.method ?? 'GET',
     path: input.path,
     query: Object.entries(input.query ?? {}),
-    headers: headers(ctx),
     ...(input.body === undefined ? {} : { json: input.body }),
     invalidJson: 'text',
     // GitHub 有三个 action 用 404 表达 false；其他调用方仍在下面将它映射为错误。
     acceptStatuses: [404],
-    mapError: context => githubError(
-      {
-        headers: context.headers,
-        ok: false,
-        status: context.status,
-        statusText: context.statusText,
-      },
-      payloadOf(context),
-    ),
   })
   return {
     payload: payloadOf(result),

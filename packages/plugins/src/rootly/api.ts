@@ -19,19 +19,18 @@ import type {
   listServicesInput,
   listTeamsInput,
 } from './schema'
+import type { ProviderContext } from '../_runtime/plugin'
 import {
   compactDefined as compact,
   trimmedText as text,
   asJsonObject as toRecord,
 } from '../_runtime/jsonValue'
-import { type ProviderContext, requireApiKey } from '../_runtime/plugin'
-import { createProviderHttpClient } from '../_runtime/providerHttp'
+import { createAuthedClient } from '../_runtime/authedClient'
 import { upstreamError } from '../_runtime/upstreamError'
 
 const SERVICE = 'rootly'
 const API_BASE = 'https://api.rootly.com/v1'
 const JSON_API_CONTENT_TYPE = 'application/vnd.api+json'
-const http = createProviderHttpClient({ baseUrl: `${API_BASE}/`, service: SERVICE })
 
 type Json = Record<string, unknown>
 
@@ -48,24 +47,27 @@ function errorMessage(payload: unknown, status: number): string {
   return text(first?.detail) ?? text(first?.title) ?? `Rootly request failed with ${status}`
 }
 
+const http = createAuthedClient({
+  baseUrl: `${API_BASE}/`,
+  service: SERVICE,
+  auth: { kind: 'bearer' },
+  headers: { 'accept': JSON_API_CONTENT_TYPE, 'content-type': JSON_API_CONTENT_TYPE },
+  // JSON:API 的消息在 `errors[0].detail/title`,非 JSON 体还要包成同形再提取,整段覆写。
+  mapError: ({ bodyKind, data, status }) => upstreamError(
+    status,
+    errorMessage(bodyKind === 'json' ? data : { errors: [{ detail: data }] }, status),
+  ),
+})
+
 async function requestJson(
   ctx: ProviderContext,
   path: string,
   query: Record<string, string>,
 ): Promise<unknown> {
-  const response = await http.request({
+  const response = await http.request(ctx, {
     path,
     query: Object.entries(query),
-    headers: {
-      'accept': JSON_API_CONTENT_TYPE,
-      'authorization': `Bearer ${requireApiKey(ctx, SERVICE)}`,
-      'content-type': JSON_API_CONTENT_TYPE,
-    },
     invalidJson: 'text',
-    mapError: ({ bodyKind, data, status }) => upstreamError(
-      status,
-      errorMessage(bodyKind === 'json' ? data : { errors: [{ detail: data }] }, status),
-    ),
   })
   if (response.bodyKind === 'empty') return {}
   if (response.bodyKind !== 'json') throw upstreamError(502, 'Rootly returned invalid JSON')

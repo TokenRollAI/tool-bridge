@@ -45,19 +45,16 @@ import type {
   updateVectorInput,
   upsertVectorsInput,
 } from './schema'
+import type { ProviderQuery } from '../_runtime/providerHttp'
+import type { ProviderContext } from '../_runtime/plugin'
 import { compactDefined as compact, asJsonObject as record, trimmedText as text } from '../_runtime/jsonValue'
-import {
-  createProviderHttpClient,
-  type ProviderQuery,
-} from '../_runtime/providerHttp'
-import { type ProviderContext, requireApiKey } from '../_runtime/plugin'
+import { createAuthedClient } from '../_runtime/authedClient'
 import { upstreamError } from '../_runtime/upstreamError'
 
 const SERVICE = 'pinecone'
 const CONTROL_API_BASE = 'https://api.pinecone.io'
 /** 响应形状按它协商,值变了就是换了一套契约。 */
 const API_VERSION = '2026-04'
-const http = createProviderHttpClient({ service: SERVICE })
 
 type Json = Record<string, unknown>
 type QueryValue = string | string[] | undefined
@@ -104,15 +101,6 @@ function requireIndexHost(value: unknown): string {
   return parsed.origin
 }
 
-function headers(apiKey: string, hasBody: boolean): Record<string, string> {
-  return {
-    'accept': 'application/json',
-    'api-key': apiKey,
-    'x-pinecone-api-version': API_VERSION,
-    ...(hasBody ? { 'content-type': 'application/json' } : {}),
-  }
-}
-
 function errorMessage(payload: unknown, status: number): string {
   if (typeof payload === 'string') {
     const message = text(payload)
@@ -122,6 +110,20 @@ function errorMessage(payload: unknown, status: number): string {
   const message = text(fields?.message) ?? text(record(fields?.error)?.message)
   return message ?? `Pinecone request failed with status ${status}`
 }
+
+const http = createAuthedClient({
+  service: SERVICE,
+  auth: { kind: 'header', name: 'api-key' },
+  // 每个请求都带 `x-pinecone-api-version`,它决定响应形状,不是可选优化项。
+  headers: { 'accept': 'application/json', 'x-pinecone-api-version': API_VERSION },
+  mapError: ({ bodyKind, data, status }) => bodyKind === 'invalid-json'
+    ? upstreamError(502, 'Pinecone returned invalid JSON')
+    : upstreamError(status, errorMessage(data, status)),
+  mapTransportError: ({ message }) => upstreamError(
+    502,
+    message === undefined ? 'Pinecone request failed' : `Pinecone request failed: ${message}`,
+  ),
+})
 
 interface RequestInput {
   /** 缺省走控制面;数据面由 `indexHost` 决定。 */
@@ -133,24 +135,13 @@ interface RequestInput {
 }
 
 async function request(ctx: ProviderContext, input: RequestInput): Promise<unknown> {
-  // 取凭证放在 try 外:它抛的是配置错误,不该被下面的传输失败兜底吞成 502。
-  const apiKey = requireApiKey(ctx, SERVICE)
-
-  const result = await http.request({
+  const result = await http.request(ctx, {
     baseUrl: `${(input.baseUrl ?? CONTROL_API_BASE).replace(/\/+$/, '')}/`,
     path: input.path,
     method: input.method,
     query: Object.entries(input.query ?? {}) satisfies ProviderQuery,
-    headers: headers(apiKey, input.body !== undefined),
     ...(input.body === undefined ? {} : { json: compactDeep(input.body) }),
     invalidJsonMessage: 'Pinecone returned invalid JSON',
-    mapError: ({ bodyKind, data, status }) => bodyKind === 'invalid-json'
-      ? upstreamError(502, 'Pinecone returned invalid JSON')
-      : upstreamError(status, errorMessage(data, status)),
-    mapTransportError: ({ message }) => upstreamError(
-      502,
-      message === undefined ? 'Pinecone request failed' : `Pinecone request failed: ${message}`,
-    ),
   })
   return result.data === undefined ? {} : result.data
 }

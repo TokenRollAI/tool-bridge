@@ -31,6 +31,10 @@ import type {
   searchContentInput,
   updatePageInput,
 } from './schema'
+import type {
+  ProviderHttpErrorContext,
+  ProviderQuery,
+} from '../_runtime/providerHttp'
 import {
   booleanValue as boolean,
   compactDefined as compact,
@@ -38,12 +42,8 @@ import {
   asJsonObject as record,
   trimmedText as text,
 } from '../_runtime/jsonValue'
-import {
-  createProviderHttpClient,
-  type ProviderHttpErrorContext,
-  type ProviderQuery,
-} from '../_runtime/providerHttp'
 import { type ProviderContext, requireCredential } from '../_runtime/plugin'
+import { createAuthedClient } from '../_runtime/authedClient'
 import { upstreamError } from '../_runtime/upstreamError'
 
 const SERVICE = 'confluence'
@@ -51,7 +51,6 @@ const SERVICE = 'confluence'
 const REQUEST_TIMEOUT_MS = 30_000
 /** 上游显式补的分页默认值,不是 Confluence 的服务端默认。 */
 const DEFAULT_LIMIT = 25
-const http = createProviderHttpClient({ service: SERVICE })
 
 type Json = Record<string, unknown>
 type QueryValue = number | string | undefined
@@ -110,6 +109,17 @@ function errorMessage(payload: unknown, context: ProviderHttpErrorContext): stri
     ?? text(context.statusText) ?? 'Confluence request failed'
 }
 
+const http = createAuthedClient({
+  service: SERVICE,
+  // base URL 由 siteUrl 现算,client 级不配;每次请求逐个传(见 request)。
+  auth: { kind: 'custom', headers: ctx => ({ authorization: basicAuthHeader(ctx) }) },
+  headers: { accept: 'application/json' },
+  mapError: context => upstreamError(context.status, errorMessage(context.data, context)),
+  mapTransportError: ({ kind, message }) => kind === 'timeout'
+    ? upstreamError(504, `Confluence request timed out after ${REQUEST_TIMEOUT_MS / 1000} seconds`)
+    : upstreamError(502, message === undefined ? 'Confluence request failed' : `Confluence request failed: ${message}`),
+})
+
 interface RequestOptions {
   body?: Json
   method: 'GET' | 'POST' | 'PUT'
@@ -118,19 +128,14 @@ interface RequestOptions {
 }
 
 async function request(ctx: ProviderContext, options: RequestOptions): Promise<unknown> {
-  const result = await http.request({
+  const result = await http.request(ctx, {
     baseUrl: `${siteBaseUrl(ctx)}/`,
     path: options.path,
     method: options.method,
     query: Object.entries(options.query ?? {}) satisfies ProviderQuery,
-    headers: { accept: 'application/json', authorization: basicAuthHeader(ctx) },
     ...(options.body === undefined ? {} : { json: options.body }),
     timeoutMs: REQUEST_TIMEOUT_MS,
     invalidJson: 'text',
-    mapError: context => upstreamError(context.status, errorMessage(context.data, context)),
-    mapTransportError: ({ kind, message }) => kind === 'timeout'
-      ? upstreamError(504, `Confluence request timed out after ${REQUEST_TIMEOUT_MS / 1000} seconds`)
-      : upstreamError(502, message === undefined ? 'Confluence request failed' : `Confluence request failed: ${message}`),
   })
   // 旧实现把空正文读成 null；不要让薄层内部的 undefined 漂到公开输出。
   return result.data === undefined ? null : result.data

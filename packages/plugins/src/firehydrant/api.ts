@@ -20,14 +20,13 @@ import type {
   listIncidentsInput,
   listServicesInput,
 } from './schema'
+import type { ProviderContext } from '../_runtime/plugin'
 import { compactDefined as compact, asJsonObject as record, trimmedText as text } from '../_runtime/jsonValue'
-import { type ProviderContext, requireApiKey } from '../_runtime/plugin'
-import { createProviderHttpClient } from '../_runtime/providerHttp'
+import { createAuthedClient } from '../_runtime/authedClient'
 import { upstreamError } from '../_runtime/upstreamError'
 
 const SERVICE = 'firehydrant'
 const API_BASE = 'https://api.firehydrant.io/v1'
-const http = createProviderHttpClient({ baseUrl: `${API_BASE}/`, service: SERVICE })
 
 type Json = Record<string, unknown>
 
@@ -59,21 +58,23 @@ function errorMessage(payload: unknown, status: number): string {
   return `FireHydrant request failed with status ${status}`
 }
 
+const http = createAuthedClient({
+  baseUrl: `${API_BASE}/`,
+  service: SERVICE,
+  auth: { kind: 'bearer' },
+  headers: { 'accept': 'application/json', 'content-type': 'application/json' },
+  mapError: ({ bodyKind, data: payload, status }) => bodyKind === 'invalid-json'
+    ? new TBError('unavailable', 'FireHydrant 返回了非法 JSON', { retryable: true })
+    : upstreamError(status, errorMessage(payload, status)),
+})
+
 async function request(ctx: ProviderContext, input: RequestInput): Promise<unknown> {
-  const { data } = await http.request({
+  const { data } = await http.request(ctx, {
     path: input.path,
     method: input.method ?? 'GET',
     query: Object.entries(input.query ?? {}),
-    headers: {
-      'accept': 'application/json',
-      'authorization': `Bearer ${requireApiKey(ctx, SERVICE)}`,
-      'content-type': 'application/json',
-    },
     ...(input.body === undefined ? {} : { json: input.body }),
     invalidJsonMessage: 'FireHydrant 返回了非法 JSON',
-    mapError: ({ bodyKind, data: payload, status }) => bodyKind === 'invalid-json'
-      ? new TBError('unavailable', 'FireHydrant 返回了非法 JSON', { retryable: true })
-      : upstreamError(status, errorMessage(payload, status)),
   })
   return data ?? {}
 }

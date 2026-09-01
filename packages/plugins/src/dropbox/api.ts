@@ -68,6 +68,7 @@ import type {
   searchFilesInput,
   uploadFileInput,
 } from './schema'
+import type { ProviderHttpErrorContext } from '../_runtime/providerHttp'
 import {
   booleanValue as bool,
   compactDefined as compact,
@@ -75,8 +76,8 @@ import {
   asJsonObject as record,
   trimmedText as text,
 } from '../_runtime/jsonValue'
-import { createProviderHttpClient, type ProviderHttpErrorContext } from '../_runtime/providerHttp'
 import { type ProviderContext, requireApiKey } from '../_runtime/plugin'
+import { createAuthedClient } from '../_runtime/authedClient'
 import { bytesToBase64 } from '../_runtime/responseBytes'
 import { upstreamError } from '../_runtime/upstreamError'
 import { guardedFetch } from '../_runtime/guardedFetch'
@@ -86,7 +87,7 @@ const SERVICE = 'dropbox'
 const API_BASE = 'https://api.dropboxapi.com/2'
 /** 内容面:上传下载,参数走 Dropbox-API-Arg 头。 */
 const CONTENT_BASE = 'https://content.dropboxapi.com/2'
-const http = createProviderHttpClient({ baseUrl: `${API_BASE}/`, service: SERVICE })
+const http = createAuthedClient({ baseUrl: `${API_BASE}/`, service: SERVICE, auth: { kind: 'bearer' } })
 /** 单请求上传上限。超过要走 upload_session(上游第一版没做,这里同样不做)。 */
 const MAX_SIMPLE_UPLOAD_BYTES = 150 * 1024 * 1024
 const DEFAULT_MIME_TYPE = 'application/octet-stream'
@@ -212,6 +213,7 @@ async function readError(response: Response, fallback: string): Promise<TBError>
 
 // ── 出站 ────────────────────────────────────────────────────────────────────────
 
+/** RPC 面的认证由 client 承载;这个 helper 只服务 content 面的 raw 通道。 */
 function authHeader(ctx: ProviderContext): string {
   return `Bearer ${requireApiKey(ctx, SERVICE)}`
 }
@@ -240,12 +242,12 @@ async function rpc(
   options: { allowEmptyResponse?: boolean, body?: Json } = {},
 ): Promise<Json> {
   const hasBody = options.body !== undefined
-  const result = await http.request({
+  const result = await http.request(ctx, {
     path: route,
     method: 'POST',
-    headers: { authorization: authHeader(ctx) },
     ...(hasBody ? { json: options.body } : {}),
     invalidJsonMessage: 'Dropbox 返回了非 JSON 响应',
+    // fallback 文案含 route,只能逐请求给。
     mapError: context => rpcError(context, `Dropbox ${route} 调用失败`),
   })
   if (result.bodyKind === 'empty') {

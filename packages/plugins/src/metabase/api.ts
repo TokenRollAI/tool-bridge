@@ -47,21 +47,19 @@ import type {
   listDatabasesInput,
   searchInput,
 } from './schema'
-import {
-  createProviderHttpClient,
-  type ProviderQuery,
-  type ResponseBodyKind,
+import type {
+  ProviderQuery,
+  ResponseBodyKind,
 } from '../_runtime/providerHttp'
 import { asJsonObject as record, trimmedText as text } from '../_runtime/jsonValue'
 import { type ProviderContext, requireApiKey } from '../_runtime/plugin'
 import { assertPublicHttpUrl } from '../_runtime/guardedFetch'
+import { createAuthedClient } from '../_runtime/authedClient'
 import { upstreamError } from '../_runtime/upstreamError'
 
 const SERVICE = 'metabase'
 const API_PATH_PREFIX = '/api'
 const CURRENT_USER_PATH = '/user/current'
-const http = createProviderHttpClient({ service: SERVICE })
-
 type Json = Record<string, unknown>
 type QueryValue = boolean | number | string | string[] | undefined
 
@@ -124,24 +122,30 @@ function errorPayload(data: unknown, bodyKind: ResponseBodyKind): unknown {
   return bodyKind === 'invalid-json' ? { message: data } : data
 }
 
+const http = createAuthedClient({
+  service: SERVICE,
+  auth: { kind: 'header', name: 'x-api-key' },
+  headers: { accept: 'application/json' },
+  mapError: ({ bodyKind, data, status }) => upstreamError(
+    status,
+    errorMessage(errorPayload(data, bodyKind), status),
+  ),
+  mapTransportError: ({ message }) => upstreamError(
+    502,
+    `Metabase 请求失败:${message ?? '未知错误'}`,
+  ),
+})
+
 async function request(ctx: ProviderContext, path: string, query?: Record<string, QueryValue>): Promise<unknown> {
-  // 取凭证与解配置放在 try 外:它们抛的是配置错误,不该被下面的传输失败兜底吞成 502。
-  const apiKey = requireApiKey(ctx, SERVICE)
-  const result = await http.request({
+  // 凭证检查先于解配置:缺凭证要优先于 instanceUrl 配错报出来(与迁移前的取值顺序一致);
+  // helper 到打上游前才真正注入,这里只是提前触发同一个 fail closed。
+  requireApiKey(ctx, SERVICE)
+  const result = await http.request(ctx, {
     baseUrl: `${resolveApiBase(ctx)}/`,
     path,
     // `models` 是多选，数组由薄层展开成重复同名参数。
     query: Object.entries(query ?? {}) satisfies ProviderQuery,
-    headers: { 'accept': 'application/json', 'x-api-key': apiKey },
     invalidJsonMessage: 'Metabase 返回了非 JSON 响应',
-    mapError: ({ bodyKind, data, status }) => upstreamError(
-      status,
-      errorMessage(errorPayload(data, bodyKind), status),
-    ),
-    mapTransportError: ({ message }) => upstreamError(
-      502,
-      `Metabase 请求失败:${message ?? '未知错误'}`,
-    ),
   })
   return result.data === undefined ? null : result.data
 }

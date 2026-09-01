@@ -38,12 +38,9 @@ import type {
   listTopicRepliesInput,
   setTopicStickyInput,
 } from './schema'
-import {
-  createProviderHttpClient,
-  type ProviderHttpClient,
-  type ProviderHttpRequest,
-} from '../_runtime/providerHttp'
+import type { ProviderHttpRequest } from '../_runtime/providerHttp'
 import { asJsonObject as record, trimmedText as text } from '../_runtime/jsonValue'
+import { type AuthedClient, createAuthedClient } from '../_runtime/authedClient'
 import { type ProviderContext, requireApiKey } from '../_runtime/plugin'
 import { upstreamError } from '../_runtime/upstreamError'
 
@@ -53,8 +50,6 @@ const API_BASE = 'https://www.v2ex.com/api/v2'
 const LEGACY_API_BASE = 'https://www.v2ex.com/api'
 /** 照搬上游的 30s 单请求上限。 */
 const REQUEST_TIMEOUT_MS = 30_000
-const v2Http = createProviderHttpClient({ baseUrl: `${API_BASE}/`, service: SERVICE })
-const legacyHttp = createProviderHttpClient({ baseUrl: `${LEGACY_API_BASE}/`, service: SERVICE })
 
 type Json = Record<string, unknown>
 
@@ -92,6 +87,31 @@ function envelopeError(payload: unknown): TBError {
   return new TBError('invalid_argument', errorMessage(payload) ?? 'V2EX request failed')
 }
 
+const v2Http = createAuthedClient({
+  baseUrl: `${API_BASE}/`,
+  service: SERVICE,
+  auth: { kind: 'bearer' },
+  headers: { accept: 'application/json' },
+  mapError: ({ data, status }) => upstreamError(status, errorMessage(data) ?? 'V2EX request failed'),
+})
+const legacyHttp = createAuthedClient({
+  baseUrl: `${LEGACY_API_BASE}/`,
+  service: SERVICE,
+  // legacy API **不带 Authorization** —— 上游这条路径压根不调 `buildV2exHeaders`,加上 Bearer
+  // 也没用。但仍然先 `requireApiKey`:上游整个 provider 的 authType 是 `api_key`,没配凭证时
+  // 连 context 都建不起来,这两个 action 一样调不通。这里保留那道闸 —— 否则"配了才能用"
+  // 会因为迁移悄悄变成"这两个不用配",挂载语义就不一致了。
+  auth: {
+    kind: 'custom',
+    headers: (ctx) => {
+      requireApiKey(ctx, SERVICE)
+      return {}
+    },
+  },
+  headers: { accept: 'application/json' },
+  mapError: ({ data, status }) => upstreamError(status, errorMessage(data) ?? 'V2EX request failed'),
+})
+
 interface RequestOptions {
   /** JSON 请求体;给了它就带 content-type。 */
   body?: Json
@@ -100,12 +120,16 @@ interface RequestOptions {
   query?: Record<string, number | string | undefined>
 }
 
-async function send(client: ProviderHttpClient, request: ProviderHttpRequest, label: string): Promise<unknown> {
-  const response = await client.request({
+async function send(
+  client: AuthedClient,
+  ctx: ProviderContext,
+  request: ProviderHttpRequest,
+  label: string,
+): Promise<unknown> {
+  const response = await client.request(ctx, {
     ...request,
     timeoutMs: REQUEST_TIMEOUT_MS,
     invalidJson: 'text',
-    mapError: ({ data, status }) => upstreamError(status, errorMessage(data) ?? 'V2EX request failed'),
     mapTransportError: ({ kind, message }) => kind === 'timeout'
       ? upstreamError(504, `${label} request timed out after ${REQUEST_TIMEOUT_MS / 1000} seconds`)
       : upstreamError(502, message === undefined ? `${label} request failed` : `${label} request failed: ${message}`),
@@ -115,33 +139,21 @@ async function send(client: ProviderHttpClient, request: ProviderHttpRequest, la
 
 /** 打一次 API 2.0。凭证走 Bearer 头。 */
 async function request(ctx: ProviderContext, options: RequestOptions): Promise<unknown> {
-  const headers: Record<string, string> = {
-    accept: 'application/json',
-    authorization: `Bearer ${requireApiKey(ctx, SERVICE)}`,
-  }
-  return send(v2Http, {
+  return send(v2Http, ctx, {
     method: options.method,
     path: options.path,
     // 上游连**空串**也当作"没给",不只是 undefined/null。
     query: Object.entries(options.query ?? {}).filter(([, value]) => value !== undefined && value !== ''),
-    headers,
     ...(options.body === undefined ? {} : { json: options.body }),
   }, `V2EX ${options.path}`)
 }
 
-/**
- * 打一次 legacy API。**不带 Authorization** —— 上游这条路径压根不调 `buildV2exHeaders`,
- * 加上 Bearer 也没用。
- *
- * 但仍然先 `requireApiKey`:上游整个 provider 的 authType 是 `api_key`,没配凭证时
- * 连 context 都建不起来,这两个 action 一样调不通。这里保留那道闸 —— 否则"配了才能用"
- * 会因为迁移悄悄变成"这两个不用配",挂载语义就不一致了。
- */
+/** 打一次 legacy API。不带 Authorization 但保留凭证闸,见 `legacyHttp` 的 auth 声明。 */
 async function legacyRequest(ctx: ProviderContext, path: string): Promise<unknown[]> {
-  requireApiKey(ctx, SERVICE)
   const payload = await send(
     legacyHttp,
-    { method: 'GET', path, headers: { accept: 'application/json' } },
+    ctx,
+    { method: 'GET', path },
     `V2EX legacy ${path}`,
   )
   // legacy 响应是裸数组,没有信封。
