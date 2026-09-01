@@ -1085,9 +1085,6 @@ export async function executeFederatedSearch(
       'recursive search requires explicit TB_INSTANCE_ID and atomic StateStore CAS',
     )
   }
-  if ((input.request.opts?.mode ?? 'keyword') !== 'keyword') {
-    throw new TBError('invalid_argument', 'semantic search cannot use recursive federation')
-  }
   const wireOpts = input.request.opts ?? {}
   const constraints = normalizeToolSearchOptions({
     ...(wireOpts.effects === undefined ? {} : { effects: wireOpts.effects }),

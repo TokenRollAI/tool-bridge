@@ -216,7 +216,7 @@ export const toolSearchPageSchema: z.ZodType<WireToolSearchPage> = z.strictObjec
   sources: z.array(toolSearchSourceResultSchema).optional(),
 })
 
-export const toolSearchRequestSchema = z.strictObject({
+export const toolSearchRequestSchema: z.ZodType<WireToolSearchRequest> = z.strictObject({
   opts: z.strictObject({
     cursor: z.string().optional(),
     detail: z.enum(['compact', 'full']).optional(),
@@ -225,7 +225,7 @@ export const toolSearchRequestSchema = z.strictObject({
     limit: z.number().int().optional(),
     matching: z.enum(['best', 'all']).optional(),
     minCoverage: z.number().gt(0).max(1).optional(),
-    mode: z.enum(['keyword', 'semantic']).optional(),
+    mode: z.enum(['keyword']).optional(),
     pathPrefix: z.string().optional(),
   }).optional(),
   query: z.string().trim().min(1),
@@ -255,7 +255,7 @@ export interface WireToolSearchRequest {
     limit?: number
     matching?: WireToolSearchMatching
     minCoverage?: number
-    mode?: 'keyword' | 'semantic'
+    mode?: 'keyword'
     pathPrefix?: string
   }
   query: string
@@ -276,7 +276,6 @@ const deviceOperationSummaryShape = {
   attempt: z.number().int().nonnegative(),
   caller: deviceOperationCallerSchema,
   cancelRequestedAt: z.iso.datetime({ offset: true }).optional(),
-  commandId: z.string().min(1),
   createdAt: z.iso.datetime({ offset: true }),
   deviceId: z.string().min(1),
   executionMayHaveOccurred: z.boolean(),
@@ -335,7 +334,6 @@ export const deviceOperationClaimSchema: z.ZodType<CoreDeviceOperationClaim> = z
   attempt: z.number().int().positive(),
   caller: deviceOperationCallerSchema,
   cancelRequestedAt: z.iso.datetime({ offset: true }).optional(),
-  commandId: z.string().min(1),
   createdAt: z.iso.datetime({ offset: true }),
   expiresAt: z.iso.datetime({ offset: true }),
   leaseId: z.string().min(1),
@@ -505,7 +503,7 @@ export type WireOAuthAuthorizeResponse
   = | { status: 'authorized' }
     | { authorizationUrl: string, status: 'redirect' }
 
-export const healthResponseSchema = z.object({
+export const healthResponseSchema: z.ZodType<WireHealthResponse> = z.object({
   catalog: z.object({
     count: z.number().int().nonnegative(),
     digest: z.string(),
@@ -513,8 +511,8 @@ export const healthResponseSchema = z.object({
   healthy: z.boolean(),
   version: z.string(),
 })
-export const livenessResponseSchema = z.object({ live: z.boolean() })
-export const readinessResponseSchema = z.object({
+export const livenessResponseSchema: z.ZodType<WireLivenessResponse> = z.object({ live: z.boolean() })
+export const readinessResponseSchema: z.ZodType<WireReadinessResponse> = z.object({
   checks: z.record(z.string(), z.object({
     detail: z.string().optional(),
     ok: z.boolean(),

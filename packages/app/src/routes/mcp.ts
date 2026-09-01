@@ -126,7 +126,7 @@ function mcpBridgeFor(c: AppContext, env: RouteEnv, app: TbHono): McpToolBridge 
             additionalProperties: false,
             properties: {
               query: { type: 'string', minLength: 1 },
-              mode: { type: 'string', enum: ['keyword', 'semantic'] },
+              mode: { type: 'string', enum: ['keyword'] },
               limit: { type: 'integer', minimum: 1, maximum: 200 },
               cursor: { type: 'string', minLength: 1 },
               detail: { type: 'string', enum: ['compact', 'full'], default: 'compact' },

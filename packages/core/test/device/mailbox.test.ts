@@ -66,7 +66,6 @@ describe('DeviceMailboxService', () => {
     const { state, mailbox, enqueue } = fixture()
     const queued = await enqueue()
     expect(queued.state).toBe('queued')
-    expect(queued.commandId).toBe(queued.operationId)
 
     const rows = await state.list('deviceop:')
     expect(rows.items).toHaveLength(1)

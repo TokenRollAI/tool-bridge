@@ -140,7 +140,9 @@ export async function verifySearchIndexContract(
   await expect(candidatePage(index, 'rebuilt')).resolves.toMatchObject({
     items: [{ path: alpha, name: 'rebuilt_tool' }],
   })
-  await expect(index.search('rebuilt', { mode: 'semantic' })).rejects.toMatchObject({
+  await expect(
+    index.search('rebuilt', { mode: 'semantic' } as unknown as ToolSearchOptions),
+  ).rejects.toMatchObject({
     code: 'invalid_argument',
   })
   await expect(index.search('rebuilt', { mode: 'regex' } as unknown as ToolSearchOptions))

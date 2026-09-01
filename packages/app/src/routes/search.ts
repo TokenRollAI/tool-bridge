@@ -82,13 +82,6 @@ export function registerSearchRoute(app: TbHono, env: RouteEnv): void {
         )
       }
       const request = requestWithNormalizedLimit(parsed.data)
-      const mode = request.opts?.mode ?? 'keyword'
-      if (mode === 'semantic' && !capabilities.includes('search:semantic')) {
-        throw new TBError(
-          'invalid_argument',
-          'search mode \'semantic\' requires capability \'search:semantic\'',
-        )
-      }
 
       const explicitFederation = request.opts?.federation
       const cursor = request.opts?.cursor
@@ -106,9 +99,6 @@ export function registerSearchRoute(app: TbHono, env: RouteEnv): void {
           'invalid_argument',
           'recursive search requires capability \'search:federated\'',
         )
-      }
-      if (federation === 'recursive' && mode === 'semantic') {
-        throw new TBError('invalid_argument', 'semantic search cannot use recursive federation')
       }
       const normalizedRequest: WireToolSearchRequest = {
         ...request,

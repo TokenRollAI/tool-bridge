@@ -217,7 +217,6 @@ describe('tb device ls', () => {
 
 const operation = {
   operationId: 'dop_AAAAAAAAAAAAAAAAAAAAAAAA',
-  commandId: 'dop_AAAAAAAAAAAAAAAAAAAAAAAA',
   deviceId: 'phone-1',
   mountPath: 'device/phone-1',
   targetPath: 'device/phone-1/tools/mail/send',

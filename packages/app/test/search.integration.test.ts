@@ -269,7 +269,6 @@ describe('global ~search protocol', () => {
     expect(semantic.status).toBe(400)
     await expect(semantic.json()).resolves.toMatchObject({
       code: 'invalid_argument',
-      message: expect.stringContaining('search:semantic'),
     })
 
     const unknown = await postSearch(app, {
@@ -291,8 +290,8 @@ describe('global ~search protocol', () => {
     expect(index.search).not.toHaveBeenCalled()
   })
 
-  it('accepts semantic mode only when the implementation declares it', async () => {
-    const index = emptySearchIndex(['search', 'search:semantic'])
+  it('rejects the removed semantic mode at the wire schema (keyword only)', async () => {
+    const index = emptySearchIndex(['search'])
     const { app } = await appWith(index)
 
     const response = await postSearch(app, {
@@ -300,12 +299,8 @@ describe('global ~search protocol', () => {
       opts: { mode: 'semantic' },
     })
 
-    expect(response.status).toBe(200)
-    expect(index.search).toHaveBeenCalledWith('weather', {
-      limit: 100,
-      matching: 'best',
-      mode: 'semantic',
-    })
+    expect(response.status).toBe(400)
+    expect(index.search).not.toHaveBeenCalled()
   })
 
   it('forwards ranking and pre-limit filters while keeping detail at the projection layer', async () => {

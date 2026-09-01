@@ -12,7 +12,6 @@ const LEASE_UNTIL = '2026-08-28T00:01:00.000Z'
 
 const claim = {
   operationId: OPERATION_ID,
-  commandId: OPERATION_ID,
   targetPath: 'device/phone-1/tools/mail/send',
   path: 'tools/mail/send',
   arguments: { text: 'hello' },
@@ -28,7 +27,6 @@ const claim = {
 function detail(state: 'succeeded' | 'rejected' | 'failed' | 'result_unknown', extra = {}) {
   return {
     operationId: OPERATION_ID,
-    commandId: OPERATION_ID,
     deviceId: 'phone-1',
     mountPath: 'device/phone-1',
     targetPath: 'device/phone-1/tools/mail/send',

@@ -98,7 +98,6 @@ describe('@tool-bridge/sdk/client', () => {
     const operation = {
       attempt: 0,
       caller: { keyId: 'sk-caller', owner: 'agent:alice' },
-      commandId: 'dop_AAAAAAAAAAAAAAAAAAAAAAAA',
       createdAt: '2026-08-28T00:00:00.000Z',
       deviceId: 'phone-1',
       executionMayHaveOccurred: false,

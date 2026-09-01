@@ -30,7 +30,6 @@ describe('Dashboard SDK client adapter', () => {
     const operation = {
       attempt: 0,
       caller: { keyId: 'sk_caller', owner: 'team-a' },
-      commandId: 'op_1',
       createdAt: '2026-08-28T08:00:00.000Z',
       deviceId: 'devices/edge-1',
       executionMayHaveOccurred: false,
