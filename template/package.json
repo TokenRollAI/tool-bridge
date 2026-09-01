@@ -11,8 +11,8 @@
     "check": "tsc --noEmit"
   },
   "dependencies": {
-    "@tool-bridge/dashboard": "^0.26.1",
-    "@tool-bridge/gateway": "^0.24.0"
+    "@tool-bridge/dashboard": "^0.27.0",
+    "@tool-bridge/gateway": "^0.25.0"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20260818.1",
