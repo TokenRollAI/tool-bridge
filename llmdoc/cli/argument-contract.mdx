@@ -1,5 +1,5 @@
 ---
-description: tb CLI 参数契约:解析/客户端/服务端三层检查、default Store 命令、三入口对等与破坏性确认门。
+description: tb CLI 参数契约:解析/客户端/服务端三层检查、keyword-only search、credential stdin/repeatable field 语义、三入口对等与确认门。
 kind: guide
 relations:
   requires:
@@ -18,7 +18,12 @@ code:
     - packages/cli/src/main.ts
     - packages/cli/src/program.ts
     - packages/cli/src/confirm.ts
+    - packages/cli/src/contentType.ts
     - packages/cli/src/http.ts
+    - packages/cli/src/registry.ts
+    - packages/cli/src/scope.ts
+    - packages/cli/src/stdin.ts
+    - packages/cli/src/types.ts
     - packages/cli/src/deviceRuntime.ts
     - packages/cli/src/commands/**
     - packages/cli/examples/structured-command-profile.json
@@ -41,6 +46,7 @@ CLI 是公共控制面,不是 API 的宽松包装。修改命令时同时检查�
 - 未知参数、缺值和多余位置参数必须失败,退出码与 stderr 保持可脚本化。
 - 互斥、依赖、默认值和枚举在解析层显式表达;不要把非法组合静默改写。
 - 密钥只从专用 secret 流程进入,不保留隐藏的旧 flag,也不把明文带入普通资源命令。
+- `tb secret set --field` 与 `tb integration add --field` 共用同一个 `key=value` 解析契约：key trim 后必填，value 可为空、不 trim 且可包含后续 `=`，重复 key 拒绝而不是静默后写覆盖。单值凭证从 `secret set` stdin 或 `integration --key-stdin` 读取时只剥一个尾随 `\n`/一组 `\r\n`，其余首尾和内部空白都保留；普通 content/JSON stdin 则原样保留。
 - `tb tool mount --kind mcp --auth oauth` 缺省使用 DCR；不支持 DCR 的上游可用
   `--oauth-client-id <id>` 配置预注册 public client，或再加 `--oauth-client-secret-ref <name>` 配置
   confidential client。secret-ref 必须依赖 client-id，两者只适用于 MCP OAuth，并与 bearer `--auth-ref` 保持
@@ -67,7 +73,7 @@ CLI 是公共控制面,不是 API 的宽松包装。修改命令时同时检查�
   `store share`：成功 stdout/JSON 必须交付该次请求产生的短期 `$ref`，否则 share 命令没有可用产物；
   其他 Store 输出继续裁剪 bearer。
 - 删除资源只做命令名承诺的动作,并校验目标 kind:`integration rm` 只卸 tool/context 节点,打到 device 等其它 kind 即拒(走 `deleteNode(target, path, ['tool','context'])`)。集成卸载与密钥删除是两个显式操作。
-- `tb search` 默认请求 compact discovery，`--json` 也不隐式下载 schema；只有 `--schemas` 才映射
+- `tb search` 的 `--mode` 当前只接受 `keyword`；这是全局工具搜索 wire，不是可透传 `semantic` 的预留参数。Context provider 命令的 search mode 是另一协议面，不能用它扩宽 `tb search`。`tb search` 默认请求 compact discovery，`--json` 也不隐式下载 schema；只有 `--schemas` 才映射
   `detail:'full'`。`--federation local|recursive`、`--matching best|all`、`--min-coverage`、
   `--path-prefix` 与 repeatable `--effect` 必须原样下发 SDK wire；CLI 只做非法枚举/组合的早拒，不能
   自己重排或过滤服务端结果。partial source 状态写 stderr warning，JSON page 保持机器可读。
@@ -89,7 +95,7 @@ repeatable collector 防止 wrapper 或依赖升级把推断退化成 `any`。Kn
 
 `runMain` 包围根 `program.parseAsync`，是生产 CLI 唯一错误边界。Commander 解析错误和 action reject 都在此统一进入 `reportError`；每个 `.action()` 不得再包一层 guard/catch，否则会重复书写退出码、JSON 模式和敏感错误裁剪。`tb status` 的 target/transport 失败也必须 reject 到该边界，不能自行输出后 return success；帮助/版本的 Commander 提前退出仍在根边界被识别为成功。
 
-CLI 只保留 argv、profile/凭证、stdout/stderr 与 Node 宿主适配。固定控制面 HTTP 交给 `@tool-bridge/sdk/client`，Store wire/transport 交给 `@tool-bridge/sdk/store`，设备 reconnect/heartbeat/credential refresh 交给 `@tool-bridge/sdk/device` 的 portable supervisor。`http.ts`、Store commands 与 `deviceRuntime.ts` 是 CLI 语义适配层，不应复制 SDK 中的 wire parser 或连接状态机。
+CLI 只保留 argv、profile/凭证、stdout/stderr 与 Node 宿主适配。固定控制面 HTTP 交给 `@tool-bridge/sdk/client`，Store wire/transport 交给 `@tool-bridge/sdk/store`，设备 reconnect/heartbeat/credential refresh 交给 `@tool-bridge/sdk/device` 的 portable supervisor。固定 wire 与 builtin/system view 的 public consumer 出口位于 SDK `/client`；CLI 不维护平行 shape，必须直接复用 SDK 出口或会被 CLI bundle 的 core 真源类型。`http.ts`、Store commands 与 `deviceRuntime.ts` 是 CLI 语义适配层，不应复制 SDK 中的 wire parser 或连接状态机。
 
 Linux 的 `tb connect` 与 `tb daemon install` 接受可重复 `--command-profile <file>`。CLI 在连接/安装前读取
 JSON,做 strict profile 校验与 HTBP path/name canonicalization,再把每个 profile 投影为既有

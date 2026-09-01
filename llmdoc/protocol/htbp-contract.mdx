@@ -1,5 +1,5 @@
 ---
-description: HTBP 当前协议契约:表示协商、唯一调用形态、节点与权限模型、builtin、Store、plugin/v2、Context 与设备帧。实现导航,不替代 ~help 运行时自描述。
+description: HTBP 当前协议契约:唯一调用形态、keyword-only 全局工具搜索、节点/权限、builtin、Store、plugin/v2、Context 与设备帧;不替代 ~help 运行时自描述。
 kind: reference
 relations:
   related:
@@ -26,6 +26,10 @@ code:
     - packages/core/test/tool/virtualize.test.ts
     - packages/core/src/context/objectProvider.ts
     - packages/core/src/context/objectStore.ts
+    - packages/core/src/context/capabilities.ts
+    - packages/core/src/context/commands.ts
+    - packages/core/src/context/contentType.ts
+    - packages/core/src/context/help.ts
     - packages/core/src/objectStoreService/**
     - packages/app/src/store.ts
     - packages/app/src/routes/**
@@ -75,8 +79,8 @@ builtin、Context 与 Skillhub 的命令使用 `HtbpCommandRegistry` 注册一�
 `POST /~search` 是 authenticated、root-only、capability-gated 搜索；`/<remote>/~search` 仍不是公开
 入口，recursive federation 由 root coordinator 逐跳调用 direct remotes。request 为 strict
 `{query,opts?}`，opts 可含 `cursor/detail/effects/federation/limit/matching/minCoverage/mode/pathPrefix`，
-未知字段拒绝。默认 keyword、`matching:'best'`、`detail:'compact'`、limit 10；semantic 必须由宿主声明，
-且当前不能 recursive。
+未知字段拒绝。默认 keyword、`matching:'best'`、`detail:'compact'`、limit 10；`mode` 若出现只能是
+`keyword`，`semantic` 在 strict wire schema 处直接拒绝。Context provider 命令的 `search` mode 是独立协议面，不会扩大全局 `/~search` 的值域或 capability 集合。
 
 宿主只有同时具备显式 `TB_INSTANCE_ID`、原子 StateStore CAS 与 revisioned SearchIndex 时才广告
 `search:federated`。有该 capability 的新查询默认 recursive；显式 `federation:'local'` 可关闭 fan-out，
@@ -142,7 +146,7 @@ Manifest 描述部署:`id`、`protocolVersion:'plugin/v2'`、`endpoint`、`auth`
 
 Context 动词全小写且 cmd 名 = provider 方法名:`list`、`get`、`write`、`update`、`delete`、`search`,全部可选,能力由 handler 存在性推导。Help 中 scope 与 effect 分开且都显式投影:`list/get/search` 是 `read/read`, `write/update` 是 `write/write`, `delete` 是 `write/destructive`;只读 provider 只发现前三项。`update` 仍是 content 整体替换/metadata 浅合并,可用单文件 `ifVersion` 乐观并发,不是行/hunk patch,也没有原子多文件 batch。content 可内联或返回 `$ref`;大对象 URL 须短期有效并受签名/宿主边界保护。skillhub 动词:`list`、`get`(带 `file` 参数取单文件)、`search`、`publish`、`remove`。
 
-内置 R2/S3 context 在底层 `ObjectStore.presignPut` 可用且挂载非只读时，额外声明 `direct-upload` capability 与 `POST /<context>/create_upload`（write scope）。请求体为 `{path,contentType,overwrite?}`；响应为 `{uri,method:'PUT',url,headers,expiresAt}`。`path` 经 context entry 规范化后固定到 namespace 的 keyPrefix，返回 headers 必须由上传方原样发送。
+内置 R2/S3 context 在底层 `ObjectStore.presignPut` 可用且挂载非只读时，额外声明 `direct-upload` capability 与 `POST /<context>/create_upload`（write scope）。请求体为 `{path,contentType,overwrite?}`；响应为 `{uri,method:'PUT',url,headers,expiresAt}`。`contentType` 经共享 MIME 边界验证后 trim 并规范为小写，与 Store 上传使用同一实现；`path` 经 context entry 规范化后固定到 namespace 的 keyPrefix，返回 headers 必须由上传方原样发送。
 
 `overwrite` 缺省 `false`，此时 `If-None-Match: *` 与 `Content-Type` 一同进入签名；目标已存在时对象存储返回 412，CLI、Dashboard 与 Device SDK 统一映射为 `conflict`。只有显式 `overwrite:true` 才签发可替换对象的 PUT。grant URL 是短期 bearer secret：缺省 grant 可重复发送但只有首次创建成功，可覆盖 grant 在失效前可能重复覆盖；调用方只应持久化稳定 `node://...` URI。上传 body 直接到对象存储，不新增设备帧，也不经过 Context `write` 的 JSON 通道。
 

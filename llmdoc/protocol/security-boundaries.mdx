@@ -1,5 +1,5 @@
 ---
-description: 认证可见性、凭证分槽、出站边界与日志脱敏的安全不变量,以及安全评审的 fail-closed 规则。
+description: 安全边界:register path/reserved roots/device hello 同权、remote allowlist 的 WHATWG backslash/SSRF 解析、凭证分槽、可见性与脱敏的 fail-closed 不变量。
 kind: architecture
 relations:
   requires:
@@ -11,6 +11,12 @@ code:
     - packages/core/src/auth/**
     - packages/core/src/context/objectProvider.ts
     - packages/core/src/objectStoreService/**
+    - packages/core/src/secret/secretStore.ts
+    - packages/core/src/tool/allowlist.ts
+    - packages/core/src/tool/remote.ts
+    - packages/app/src/deviceHello.ts
+    - packages/app/src/deviceLifecycle.ts
+    - packages/app/src/registryMutation.ts
     - packages/sdk/src/device/**
     - packages/plugin-sdk/**
 ---
@@ -21,7 +27,9 @@ code:
 
 - SK 明文只在签发时出现一次,持久层只存 hash;disabled、delete、expiry 都视为失效。三宿主权威状态均为强一致 SQL 后端,吊销即时生效。
 - scope 按路径和 action 判断,deny 优先。无权看到的路径返回 404,避免通过 403 枚举树结构。
-- `registerPaths` 限制设备/反向注册位置;异步认证后必须复核 active connection generation,防旧连接越权完成调用。
+- `registerPaths` 限制设备/反向注册位置。target path、`registerPaths` 与内置/部署追加 `reservedRoots` 都以 canonical lowercase segment 比较，大小写不得成为绕过或静默全拒的差异。异步认证后还必须复核 active connection generation,防旧连接越权完成调用。
+- `system/registry` 和 `~register` 各自先做通道 scope 判定，随后共用 `registryMutation.ts` 的 `assertNodeConfigMutation` 完成 register/root、secret ref、OAuth/config 与出站探测顺序。device hello 因输入形状不同由 `deviceHello.ts` 编排，但必须执行同一 register/root 约束，并在小写折叠后的 expose 路径冲突上 fail closed。
+- Workers/Node 的 hello、调用前 device authority recheck 及 Mailbox claim/renew/complete 重验都必须携带同一部署 `reservedRoots`；不得让 WebSocket 或 Mailbox 成为绕过普通注册面的第三条通道。跨宿主的重验/断线/回收业务序列由 `deviceLifecycle.ts` 拥有，宿主只持有连接代际与调度。
 
 ## 凭证
 
@@ -51,6 +59,7 @@ code:
 - remote、HTTP、MCP、plugin provider 都经过各自的 URL/host/环检测边界。generic remote 接受可选
   AbortSignal 与流式 response byte cap；federated search 及其 nested full-help hydration 都下发逐跳递减的
   remaining-time budget，并把 child body 限在部署上限内。
+- remote allowlist 的 authority 解析必须与 WHATWG Fetch 的 special-URL 语义同形：反斜杠 `\` 与 `/` 一样终止 authority，不能把 `\@allowed-host` 误判为真实主机；像 `https:\\host` 这类不符合项目绝对 HTTPS URL 形状的输入必须 fail closed。先用与实际 fetch 一致的 parser 得到 hostname，再应用部署/运行时 allowlist，不得手切字符串猜 authority。
 - 调用者 SK 不透传上游;只从 `authRef` 解析目标凭证。
 - 内置 plugin 同进程同权,env 白名单和 `guardedFetch` 是代码强制边界。
 - 跨源 redirect 不能携带 Authorization、自定义敏感头或 secret body；MCP OAuth token form 请求禁止自动 redirect，

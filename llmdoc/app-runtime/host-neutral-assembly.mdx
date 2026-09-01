@@ -1,5 +1,5 @@
 ---
-description: app 包的宿主中立装配:TbAppDeps 注入面、default Store、builtin 模块清单、Workers 与 Node 的运行时差异及代码地图。
+description: app 包的宿主中立装配:TbAppDeps 注入面、registry mutation/device lifecycle/cursor cleanup 共享 owner、Workers 与 Node 的运行时边界。
 kind: architecture
 relations:
   related:
@@ -68,6 +68,12 @@ Store relay/ref/share URL 必须与当次控制请求的 external origin 一致�
 ## builtin 装配
 
 bootstrap builtin 清单在 `packages/app/src/bootstrap.ts` 的 `BUILTIN_MODULES`：sk、secret、registry、status、plugin、catalog、federation、annotation、store。Store module 由 `createRouteEnv` 追加为惰性实例；`~feedback` 是保留端点，不是 builtin 模块。
+
+## 跨宿主共享 owner
+
+- `registryMutation.ts` 是 `system/registry write|update|delete` 与 `~register` 两条 HTTP 节点变更通道的共享安全链：各路由自己先判定 scope，再共用 `assertNodeConfigMutation` 的注册路径、secret reference、OAuth/config 与出站探测顺序。写入后由 `invalidateNodeDerivedState` 整体失效工具缓存、MCP era 与两类 OAuth 记录，路由不得各自拼链或漏掉派生状态。第三条异构写入通道 device hello 保留在 `deviceHello.ts`，但共享同一注册/保留根权威。
+- `deviceLifecycle.ts` 单点拥有 Workers DO 与 Node DeviceHub 共用的凭证/注册权限重验、断线下线、子树回收顺序与 search capacity 告警。宿主只保留 DO alarm 或 Node timer/sweep、活跃连接代际判定与各自 meta 存储，不复制业务序列。
+- `cursorCleanup.ts` 拥有 default Store 与 Device Mailbox 共用的“读持久进度 → 有界分页 → CAS 推进/输家停止 → 全轮结束清进度”骨架；两个领域各自拥有 cursor 编码和单页状态转换，Node/Workers 仍只负责何时触发 tick。
 
 ## 运行时差异
 
