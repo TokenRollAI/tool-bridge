@@ -24,7 +24,25 @@ const httpsUrl = z.string().url().refine(
   'OAuth 端点必须是 https(授权码与令牌不得走明文)',
 )
 
-export const pluginOAuthSchema = z.object({
+/**
+ * provider 型 OAuth2 的声明。
+ *
+ * client_id / client_secret **不在这里** —— 它们是每个部署自己的应用凭证,走
+ * `authRef` 指向的 secret(多字段:`clientId` + `clientSecret`),与其他上游凭证同一通道。
+ */
+export interface PluginOAuth {
+  authorizationParams?: Record<string, string>
+  authorizationUrl: string
+  clientAuth?: OAuthClientAuthMethod
+  pkce?: boolean
+  refreshUrl?: string
+  responseEnvelope?: string
+  scopes?: string[]
+  scopeSeparator?: ' ' | ','
+  tokenUrl: string
+}
+
+export const pluginOAuthSchema: z.ZodType<PluginOAuth> = z.object({
   /** 浏览器跳转的授权端点。 */
   authorizationUrl: httpsUrl,
   /** 兑换 code / 刷新令牌的端点。 */
@@ -50,14 +68,6 @@ export const pluginOAuthSchema = z.object({
   /** PKCE:缺省启用(S256)。个别老 provider 不支持,置 false。 */
   pkce: z.boolean().optional(),
 })
-
-/**
- * provider 型 OAuth2 的声明。
- *
- * client_id / client_secret **不在这里** —— 它们是每个部署自己的应用凭证,走
- * `authRef` 指向的 secret(多字段:`clientId` + `clientSecret`),与其他上游凭证同一通道。
- */
-export type PluginOAuth = z.infer<typeof pluginOAuthSchema>
 
 /** 授权流程需要的两个客户端字段(存在 authRef 指向的 secret 里)。 */
 export const OAUTH_CLIENT_FIELDS = [
