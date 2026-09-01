@@ -20,16 +20,14 @@ import { TBError } from '@tool-bridge/plugin-sdk'
 import { assertPublicHttpUrl, guardedFetch } from '../_runtime/guardedFetch'
 import { type ProviderContext, requireApiKey } from '../_runtime/plugin'
 import { readBoundedResponseBytes } from '../_runtime/responseBytes'
-import { createProviderHttpClient } from '../_runtime/providerHttp'
 import { asJsonObject as toRecord } from '../_runtime/jsonValue'
+import { createAuthedClient } from '../_runtime/authedClient'
 import { upstreamError } from '../_runtime/upstreamError'
 
 const SERVICE = 'mistral_ai'
 const API_BASE = 'https://api.mistral.ai'
 /** 从 file.url 拉取上传源时的字节上限,照搬上游。 */
 const MAX_REMOTE_UPLOAD_BYTES = 100 * 1024 * 1024
-const http = createProviderHttpClient({ baseUrl: API_BASE, service: SERVICE })
-
 type Json = Record<string, unknown>
 type Method = 'DELETE' | 'GET' | 'PATCH' | 'POST' | 'PUT'
 
@@ -178,6 +176,25 @@ const SPECS: Record<string, ActionSpec> = {
 function text(value: unknown): string | undefined {
   return typeof value === 'string' && value !== '' ? value : undefined
 }
+
+// JSON 通道:`content-type` 恒发(上游如此,GET 也带);multipart 通道不经它,见 authHeaders。
+// 422 与上游一致压成 400,但**不压 404**(见 assertOk 的说明);rawText 参与兜底,故整段 mapError。
+const http = createAuthedClient({
+  baseUrl: API_BASE,
+  service: SERVICE,
+  auth: { kind: 'bearer' },
+  headers: { 'content-type': 'application/json' },
+  mapError: ({ data, rawText, status }) => {
+    const payload = toRecord(data)
+    const fallback = `mistral_ai request failed with ${status}`
+    const message = text(payload?.detail)
+      ?? text(payload?.message)
+      ?? text(payload?.error)
+      ?? text(rawText)
+      ?? fallback
+    return upstreamError(status === 422 ? 400 : (status || 502), message)
+  },
+})
 
 /** 递归剔掉 `undefined`;上游 `compactJson` 的等价物(Mistral 把显式 null 当"清空")。 */
 function compactJson(value: unknown): unknown {
@@ -358,10 +375,9 @@ async function resolveUpload(remaining: Json): Promise<UploadSource> {
   }
 }
 
-function authHeaders(ctx: ProviderContext, json: boolean): Record<string, string> {
-  const headers: Record<string, string> = { authorization: `Bearer ${requireApiKey(ctx, SERVICE)}` }
-  if (json) headers['content-type'] = 'application/json'
-  return headers
+/** multipart 通道(raw guardedFetch)自己拼认证头;JSON 通道由 authedClient 承载。 */
+function authHeaders(ctx: ProviderContext): Record<string, string> {
+  return { authorization: `Bearer ${requireApiKey(ctx, SERVICE)}` }
 }
 
 async function executeJson(spec: ActionSpec, input: Json, ctx: ProviderContext): Promise<unknown> {
@@ -369,23 +385,12 @@ async function executeJson(spec: ActionSpec, input: Json, ctx: ProviderContext):
   const sendsBody = spec.method === 'POST' || spec.method === 'PUT' || spec.method === 'PATCH'
     || (spec.method === 'DELETE' && spec.bodyOnDelete === true)
 
-  const result = await http.request({
+  const result = await http.request(ctx, {
     path: url,
     method: spec.method,
-    headers: authHeaders(ctx, true),
     ...(sendsBody ? { json: compactJson(remaining) } : {}),
     responseType: 'auto',
     invalidJsonMessage: 'mistral_ai returned malformed JSON',
-    mapError: ({ data, rawText, status }) => {
-      const payload = toRecord(data)
-      const fallback = `mistral_ai request failed with ${status}`
-      const message = text(payload?.detail)
-        ?? text(payload?.message)
-        ?? text(payload?.error)
-        ?? text(rawText)
-        ?? fallback
-      return upstreamError(status === 422 ? 400 : (status || 502), message)
-    },
   })
   // 204 没有 body,但删除类 action 的出参 schema 要一个 `{deleted:true}`。
   if (result.status === 204) return { deleted: true }
@@ -403,7 +408,7 @@ async function executeMultipart(spec: ActionSpec, input: Json, ctx: ProviderCont
 
   const response = await guardedFetch(url, {
     method: spec.method,
-    headers: authHeaders(ctx, false),
+    headers: authHeaders(ctx),
     body: form,
   })
   await assertOk(response)
@@ -453,7 +458,7 @@ async function executeAudioTranscription(
 
   const response = await guardedFetch(url, {
     method: spec.method,
-    headers: authHeaders(ctx, false),
+    headers: authHeaders(ctx),
     body: form,
   })
   await assertOk(response)

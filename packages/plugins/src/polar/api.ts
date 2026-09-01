@@ -35,14 +35,14 @@ import type {
   listProductsInput,
   listSubscriptionsInput,
 } from './schema'
-import { createProviderHttpClient, type ProviderQuery, type QueryScalar } from '../_runtime/providerHttp'
+import type { ProviderQuery, QueryScalar } from '../_runtime/providerHttp'
+import type { ProviderContext } from '../_runtime/plugin'
 import { asJsonObject as record, trimmedText as text } from '../_runtime/jsonValue'
-import { type ProviderContext, requireApiKey } from '../_runtime/plugin'
+import { createAuthedClient } from '../_runtime/authedClient'
 import { upstreamError } from '../_runtime/upstreamError'
 
 const SERVICE = 'polar'
 const API_BASE = 'https://api.polar.sh/v1'
-const http = createProviderHttpClient({ baseUrl: `${API_BASE}/`, service: SERVICE })
 
 type Json = Record<string, unknown>
 
@@ -114,20 +114,24 @@ function errorDetail(payload: unknown): string | undefined {
   return text(body.message) ?? text(body.error) ?? text(body.title)
 }
 
+const http = createAuthedClient({
+  baseUrl: `${API_BASE}/`,
+  service: SERVICE,
+  auth: { kind: 'bearer' },
+  headers: { accept: 'application/json' },
+  // detail 可能是 FastAPI 校验错误数组(取 `detail[0].msg`),标准键序提取表达不了,整段覆写。
+  mapError: ({ data: payload, status }) => upstreamError(
+    status,
+    errorDetail(payload) ?? `Polar 返回 HTTP ${status}`,
+  ),
+})
+
 async function request(ctx: ProviderContext, path: string, query?: ProviderQuery): Promise<unknown> {
-  const { data } = await http.request({
+  const { data } = await http.request(ctx, {
     path,
     method: 'GET',
     query,
-    headers: {
-      accept: 'application/json',
-      authorization: `Bearer ${requireApiKey(ctx, SERVICE)}`,
-    },
     invalidJsonMessage: 'Polar 返回了非 JSON 响应',
-    mapError: ({ data: payload, status }) => upstreamError(
-      status,
-      errorDetail(payload) ?? `Polar 返回 HTTP ${status}`,
-    ),
   })
   return data ?? null
 }

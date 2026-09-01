@@ -19,14 +19,13 @@ import type {
   listTokensInput,
   setUserDucklingConfigInput,
 } from './schema'
+import type { ProviderContext } from '../_runtime/plugin'
 import { compactDefined as compact, asJsonObject as record, trimmedText as text } from '../_runtime/jsonValue'
-import { type ProviderContext, requireApiKey } from '../_runtime/plugin'
-import { createProviderHttpClient } from '../_runtime/providerHttp'
+import { createAuthedClient } from '../_runtime/authedClient'
 import { upstreamError } from '../_runtime/upstreamError'
 
 const SERVICE = 'mother_duck'
 const API_BASE = 'https://api.motherduck.com'
-const http = createProviderHttpClient({ baseUrl: `${API_BASE}/`, service: SERVICE })
 
 type Json = Record<string, unknown>
 
@@ -35,6 +34,24 @@ function errorMessage(payload: unknown): string | undefined {
   if (body === undefined) return undefined
   return text(body.message) ?? text(body.error) ?? text(body.code)
 }
+
+const http = createAuthedClient({
+  baseUrl: `${API_BASE}/`,
+  service: SERVICE,
+  auth: { kind: 'bearer' },
+  headers: { accept: 'application/json' },
+  // invalid-json 错误体按**原文不 trim**透出 —— 标准 errorMessage 的 trim 语义接不住,整段覆写。
+  mapError: ({ bodyKind, data, status }) => upstreamError(
+    status,
+    bodyKind === 'invalid-json' && typeof data === 'string'
+      ? data
+      : (errorMessage(data) ?? `MotherDuck 请求失败,HTTP ${status}`),
+  ),
+  mapTransportError: ({ message }) => upstreamError(
+    502,
+    message === undefined ? 'MotherDuck 请求失败' : `MotherDuck 请求失败: ${message}`,
+  ),
+})
 
 function isEmpty(payload: unknown): boolean {
   const object = record(payload)
@@ -49,23 +66,11 @@ interface RequestInput {
 }
 
 async function request(ctx: ProviderContext, path: string, input: RequestInput = {}): Promise<unknown> {
-  const apiKey = requireApiKey(ctx, SERVICE)
-  const result = await http.request({
+  const result = await http.request(ctx, {
     path,
     method: input.method ?? 'GET',
-    headers: { accept: 'application/json', authorization: `Bearer ${apiKey}` },
     ...(input.body === undefined ? {} : { json: input.body }),
     invalidJson: 'text',
-    mapError: ({ bodyKind, data, status }) => upstreamError(
-      status,
-      bodyKind === 'invalid-json' && typeof data === 'string'
-        ? data
-        : (errorMessage(data) ?? `MotherDuck 请求失败,HTTP ${status}`),
-    ),
-    mapTransportError: ({ message }) => upstreamError(
-      502,
-      message === undefined ? 'MotherDuck 请求失败' : `MotherDuck 请求失败: ${message}`,
-    ),
   })
   const payload = result.bodyKind === 'empty'
     ? {}

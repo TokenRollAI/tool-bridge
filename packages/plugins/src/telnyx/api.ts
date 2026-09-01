@@ -21,14 +21,13 @@ import type {
   retrieveMessagingProfileInput,
   sendMessageInput,
 } from './schema'
+import type { ProviderContext } from '../_runtime/plugin'
 import { trimmedText as text, asJsonObject as toRecord } from '../_runtime/jsonValue'
-import { type ProviderContext, requireApiKey } from '../_runtime/plugin'
-import { createProviderHttpClient } from '../_runtime/providerHttp'
+import { createAuthedClient } from '../_runtime/authedClient'
 import { upstreamError } from '../_runtime/upstreamError'
 
 const SERVICE = 'telnyx'
 const API_BASE = 'https://api.telnyx.com/v2'
-const http = createProviderHttpClient({ baseUrl: `${API_BASE}/`, service: SERVICE })
 
 type Json = Record<string, unknown>
 
@@ -51,6 +50,20 @@ function errorMessage(payload: unknown, status: number, statusText: string): str
   return message ?? (statusText || `Telnyx 返回 HTTP ${status}`)
 }
 
+const http = createAuthedClient({
+  baseUrl: `${API_BASE}/`,
+  service: SERVICE,
+  auth: { kind: 'bearer' },
+  headers: { accept: 'application/json' },
+  mapError: ({ bodyKind, data, status, statusText }) => bodyKind === 'invalid-json'
+    ? upstreamError(status === 429 ? 429 : 502, 'Telnyx 返回了非 JSON 响应')
+    : upstreamError(status, errorMessage(bodyKind === 'empty' ? null : data, status, statusText)),
+  mapTransportError: ({ message }) => upstreamError(
+    502,
+    message === undefined ? 'telnyx request failed' : `telnyx request failed: ${message}`,
+  ),
+})
+
 interface RequestInput {
   body?: Json
   method?: 'GET' | 'POST'
@@ -59,28 +72,16 @@ interface RequestInput {
 }
 
 async function request(ctx: ProviderContext, path: string, input: RequestInput = {}): Promise<Json> {
-  const headers: Record<string, string> = {
-    accept: 'application/json',
-    authorization: `Bearer ${requireApiKey(ctx, SERVICE)}`,
-  }
-  const response = await http.request({
+  const response = await http.request(ctx, {
     method: input.method ?? 'GET',
     path,
     // 空串不进 query:Telnyx 会把 `filter[name]=` 读成"匹配空名字",而调用方省略一个
     // 可选筛选时想要的是"不筛选"。
     query: (input.query ?? []).filter(([, value]) => value !== undefined && value !== null && value !== ''),
-    headers,
     // JSON.stringify 自己会丢掉值为 undefined 的键,故不必复制上游的 removeUndefined;
     // 但 null 必须留住 —— schema 允许 sendAt 显式传 null,那是要发给 Telnyx 的值。
     ...(input.body === undefined ? {} : { json: input.body }),
     invalidJsonMessage: 'Telnyx 返回了非 JSON 响应',
-    mapError: ({ bodyKind, data, status, statusText }) => bodyKind === 'invalid-json'
-      ? upstreamError(status === 429 ? 429 : 502, 'Telnyx 返回了非 JSON 响应')
-      : upstreamError(status, errorMessage(bodyKind === 'empty' ? null : data, status, statusText)),
-    mapTransportError: ({ message }) => upstreamError(
-      502,
-      message === undefined ? 'telnyx request failed' : `telnyx request failed: ${message}`,
-    ),
   })
   const record = toRecord(response.bodyKind === 'empty' ? null : response.data)
   if (record === undefined) {

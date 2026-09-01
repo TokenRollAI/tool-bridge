@@ -34,13 +34,12 @@ import type {
 } from './schema'
 import { asJsonObject as record, trimmedText as text } from '../_runtime/jsonValue'
 import { type ProviderContext, requireCredential } from '../_runtime/plugin'
-import { createProviderHttpClient } from '../_runtime/providerHttp'
+import { createAuthedClient } from '../_runtime/authedClient'
 import { upstreamError } from '../_runtime/upstreamError'
 
 const SERVICE = 'upstash_redis'
 /** 只认官方端点:凭证决定出站目标,不能放行任意主机。 */
 const HOSTNAME_SUFFIX = '.upstash.io'
-const http = createProviderHttpClient({ service: SERVICE })
 
 type Json = Record<string, unknown>
 type CommandArgument = number | string
@@ -118,18 +117,23 @@ function unwrap(payload: unknown): unknown {
   return body.result
 }
 
+const http = createAuthedClient({
+  service: SERVICE,
+  auth: {
+    kind: 'custom',
+    headers: ctx => ({ authorization: `Bearer ${requireCredential(ctx, SERVICE, 'restToken')}` }),
+  },
+  headers: { accept: 'application/json' },
+  mapError: ({ data, rawText, status }) => commandError(status, data, rawText ?? ''),
+})
+
 async function command(ctx: ProviderContext, args: readonly CommandArgument[]): Promise<unknown> {
-  const result = await http.request({
+  const result = await http.request(ctx, {
     baseUrl: restUrl(ctx),
     path: '/',
     method: 'POST',
-    headers: {
-      accept: 'application/json',
-      authorization: `Bearer ${requireCredential(ctx, SERVICE, 'restToken')}`,
-    },
     json: args,
     invalidJsonMessage: 'Upstash Redis 返回了非 JSON 响应',
-    mapError: ({ data, rawText, status }) => commandError(status, data, rawText ?? ''),
   })
   return unwrap(result.data)
 }

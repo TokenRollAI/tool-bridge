@@ -17,14 +17,13 @@
 import type { z } from 'zod/v4'
 import { TBError } from '@tool-bridge/plugin-sdk'
 import type { imageSearchInput, newsSearchInput, videoSearchInput, webSearchInput } from './schema'
+import type { ProviderContext } from '../_runtime/plugin'
 import { compactDefined as compact, asJsonObject as record, trimmedText as text } from '../_runtime/jsonValue'
-import { type ProviderContext, requireApiKey } from '../_runtime/plugin'
-import { createProviderHttpClient } from '../_runtime/providerHttp'
+import { createAuthedClient } from '../_runtime/authedClient'
 import { upstreamError } from '../_runtime/upstreamError'
 
 const SERVICE = 'brave_search'
 const API_BASE = 'https://api.search.brave.com'
-const http = createProviderHttpClient({ baseUrl: `${API_BASE}/`, service: SERVICE })
 
 type Json = Record<string, unknown>
 type QueryValue = boolean | number | string | string[] | undefined
@@ -82,17 +81,21 @@ function braveSearchError(status: number, payload: unknown): TBError {
   return upstreamError(status, message)
 }
 
+const http = createAuthedClient({
+  baseUrl: `${API_BASE}/`,
+  service: SERVICE,
+  auth: { kind: 'header', name: 'x-subscription-token' },
+  headers: { accept: 'application/json' },
+  // 稳定错误码码表比 HTTP 状态准,整段覆写而不用标准键序提取。
+  mapError: ({ data: payload, status }) => braveSearchError(status, payload),
+})
+
 async function request(ctx: ProviderContext, path: string, query: Record<string, QueryValue>): Promise<unknown> {
-  const { data } = await http.request({
+  const { data } = await http.request(ctx, {
     path,
     method: 'GET',
     query: Object.entries(query),
-    headers: {
-      'accept': 'application/json',
-      'x-subscription-token': requireApiKey(ctx, SERVICE),
-    },
     invalidJsonMessage: 'Brave Search 返回了非 JSON 响应',
-    mapError: ({ data: payload, status }) => braveSearchError(status, payload),
   })
   return data ?? null
 }

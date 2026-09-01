@@ -18,14 +18,13 @@
 import type { z } from 'zod/v4'
 import { TBError } from '@tool-bridge/plugin-sdk'
 import type { globalSearchInput, hotListInput, zhidaInput, zhihuSearchInput } from './schema'
+import type { ProviderContext } from '../_runtime/plugin'
 import { asJsonObject as asRecord, trimmedText as optionalText } from '../_runtime/jsonValue'
-import { type ProviderContext, requireApiKey } from '../_runtime/plugin'
-import { createProviderHttpClient } from '../_runtime/providerHttp'
+import { createAuthedClient } from '../_runtime/authedClient'
 import { upstreamError } from '../_runtime/upstreamError'
 
 const SERVICE = 'zhihu'
 const API_BASE = 'https://developer.zhihu.com'
-const http = createProviderHttpClient({ baseUrl: `${API_BASE}/`, service: SERVICE })
 
 /** 知乎业务码 → 用于归一的 HTTP 状态。上游的口径,照搬;表外的非 0 码一律当上游故障。 */
 const CODE_STATUS: Record<number, number> = {
@@ -49,6 +48,21 @@ function errorMessage(payload: unknown): string | undefined {
     ?? optionalText(nested?.message)
 }
 
+const http = createAuthedClient({
+  baseUrl: `${API_BASE}/`,
+  service: SERVICE,
+  auth: { kind: 'bearer' },
+  // 上游对 GET 也发 content-type。无 body 时它没有意义,但照搬以免改变打给上游的请求形状。
+  headers: { 'content-type': 'application/json' },
+  mapError: ({ bodyKind, data, status }) => bodyKind === 'invalid-json'
+    ? upstreamError(502, '知乎返回了非法 JSON')
+    : upstreamError(status, errorMessage(data) ?? `知乎请求失败(HTTP ${status})`),
+  mapTransportError: ({ message }) => upstreamError(
+    502,
+    message === undefined ? '知乎请求失败' : `知乎请求失败: ${message}`,
+  ),
+})
+
 interface RequestInput {
   body?: Json
   method?: 'GET' | 'POST'
@@ -57,26 +71,13 @@ interface RequestInput {
 }
 
 async function request(ctx: ProviderContext, input: RequestInput): Promise<unknown> {
-  const apiKey = requireApiKey(ctx, SERVICE)
-  const response = await http.request({
+  const response = await http.request(ctx, {
     method: input.method ?? 'GET',
     path: input.path,
     query: Object.entries(input.query ?? {}).map(([key, value]) => [key, value === undefined ? undefined : String(value)]),
-    headers: {
-      'authorization': `Bearer ${apiKey}`,
-      // 上游对 GET 也发这个头。无 body 时它没有意义,但照搬以免改变打给上游的请求形状。
-      'content-type': 'application/json',
-      'x-request-timestamp': String(Math.floor(Date.now() / 1000)),
-    },
+    headers: { 'x-request-timestamp': String(Math.floor(Date.now() / 1000)) },
     ...(input.body === undefined ? {} : { json: input.body }),
     invalidJsonMessage: '知乎返回了非法 JSON',
-    mapError: ({ bodyKind, data, status }) => bodyKind === 'invalid-json'
-      ? upstreamError(502, '知乎返回了非法 JSON')
-      : upstreamError(status, errorMessage(data) ?? `知乎请求失败(HTTP ${status})`),
-    mapTransportError: ({ message }) => upstreamError(
-      502,
-      message === undefined ? '知乎请求失败' : `知乎请求失败: ${message}`,
-    ),
   })
   const payload = response.bodyKind === 'empty' ? {} : response.data
 

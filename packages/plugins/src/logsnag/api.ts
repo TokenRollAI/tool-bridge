@@ -1,11 +1,19 @@
 import type { z } from 'zod/v4'
 import type { identifyUserInput, mutateInsightInput, publishEventInput, publishInsightInput } from './schema'
-import { createProviderHttpClient, messageFrom } from '../_runtime/providerHttp'
-import { type ProviderContext, requireApiKey } from '../_runtime/plugin'
-import { upstreamError } from '../_runtime/upstreamError'
+import type { ProviderContext } from '../_runtime/plugin'
+import { createAuthedClient } from '../_runtime/authedClient'
 
 const SERVICE = 'logsnag'
-const http = createProviderHttpClient({ baseUrl: 'https://api.logsnag.com/v1/', service: SERVICE })
+const http = createAuthedClient({
+  baseUrl: 'https://api.logsnag.com/v1/',
+  service: SERVICE,
+  auth: { kind: 'bearer' },
+  headers: { accept: 'application/json' },
+  errorMessage: {
+    keys: ['message', 'error', 'detail'],
+    fallback: status => `LogSnag request failed with ${status}`,
+  },
+})
 
 interface LogsnagResult {
   ok: true
@@ -19,20 +27,12 @@ async function request(
   body: Record<string, unknown>,
   ctx: ProviderContext,
 ): Promise<LogsnagResult> {
-  const result = await http.request({
+  const result = await http.request(ctx, {
     path,
     method,
-    headers: {
-      accept: 'application/json',
-      authorization: `Bearer ${requireApiKey(ctx, SERVICE)}`,
-    },
     json: body,
     responseType: 'auto',
     invalidJson: 'text',
-    mapError: ({ data, status }) => upstreamError(
-      status,
-      messageFrom(data, ['message', 'error', 'detail'], `LogSnag request failed with ${status}`),
-    ),
   })
   return {
     ok: true,

@@ -34,19 +34,19 @@ import type {
   updateLinkInput,
   updateTagInput,
 } from './schema'
+import type { ProviderQuery } from '../_runtime/providerHttp'
+import type { ProviderContext } from '../_runtime/plugin'
 import {
   asJsonObject as asRecord,
   compactDefined as compact,
   finiteNumber as optionalNumber,
   trimmedText as optionalText,
 } from '../_runtime/jsonValue'
-import { createProviderHttpClient, type ProviderQuery } from '../_runtime/providerHttp'
-import { type ProviderContext, requireApiKey } from '../_runtime/plugin'
+import { createAuthedClient } from '../_runtime/authedClient'
 import { upstreamError } from '../_runtime/upstreamError'
 
 const SERVICE = 'dub'
 const API_BASE = 'https://api.dub.co'
-const http = createProviderHttpClient({ baseUrl: API_BASE, service: SERVICE })
 const LINKS_PATH = '/links'
 const LINKS_INFO_PATH = '/links/info'
 const LINKS_COUNT_PATH = '/links/count'
@@ -100,6 +100,8 @@ function providerQuery(query: Json): ProviderQuery {
 }
 
 function errorMessage(payload: unknown): string | undefined {
+  // string 错误体**不 trim**、空串也原样透出(`'' ?? fallback` 仍是 `''`)—— 与标准
+  // errorMessage 的 trim 语义不同,故整段保留 mapError。
   if (typeof payload === 'string') return payload
   const object = asRecord(payload)
   if (object === undefined) return undefined
@@ -108,6 +110,21 @@ function errorMessage(payload: unknown): string | undefined {
     ?? optionalText(object.error)
 }
 
+const http = createAuthedClient({
+  baseUrl: API_BASE,
+  service: SERVICE,
+  auth: { kind: 'bearer' },
+  headers: { accept: 'application/json' },
+  mapError: ({ data: payload, status, statusText }) => upstreamError(
+    status,
+    errorMessage(payload) ?? (statusText || `dub 返回 HTTP ${status}`),
+  ),
+  mapTransportError: ({ message }) => upstreamError(
+    502,
+    message === undefined ? 'dub 请求失败' : `dub 请求失败: ${message}`,
+  ),
+})
+
 interface RequestInput {
   body?: Json
   method: 'DELETE' | 'GET' | 'PATCH' | 'POST'
@@ -115,22 +132,12 @@ interface RequestInput {
 }
 
 async function request(ctx: ProviderContext, path: string, input: RequestInput): Promise<unknown> {
-  const apiKey = requireApiKey(ctx, SERVICE)
-  const { bodyKind, data } = await http.request({
+  const { bodyKind, data } = await http.request(ctx, {
     path,
     method: input.method,
     query: providerQuery(input.query ?? {}),
-    headers: { accept: 'application/json', authorization: `Bearer ${apiKey}` },
     ...(input.body === undefined ? {} : { json: input.body }),
     invalidJson: 'text',
-    mapError: ({ data: payload, status, statusText }) => upstreamError(
-      status,
-      errorMessage(payload) ?? (statusText || `dub 返回 HTTP ${status}`),
-    ),
-    mapTransportError: ({ message }) => upstreamError(
-      502,
-      message === undefined ? 'dub 请求失败' : `dub 请求失败: ${message}`,
-    ),
   })
   return bodyKind === 'empty' ? null : data
 }

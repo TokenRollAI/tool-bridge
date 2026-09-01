@@ -31,14 +31,22 @@ import type {
   listModelsInput,
   searchInput,
 } from './schema'
-import { createProviderHttpClient, type ResponseBodyKind } from '../_runtime/providerHttp'
-import { asJsonObject as record, trimmedText as text } from '../_runtime/jsonValue'
-import { type ProviderContext, requireApiKey } from '../_runtime/plugin'
+import type { ProviderContext } from '../_runtime/plugin'
+import { createAuthedClient } from '../_runtime/authedClient'
 import { upstreamError } from '../_runtime/upstreamError'
 
 const SERVICE = 'perplexity'
 const API_BASE = 'https://api.perplexity.ai'
-const http = createProviderHttpClient({ baseUrl: API_BASE, service: SERVICE })
+const http = createAuthedClient({
+  baseUrl: API_BASE,
+  service: SERVICE,
+  auth: { kind: 'bearer' },
+  headers: { accept: 'application/json' },
+  errorMessage: {
+    keys: ['error.message', 'error.detail', 'message', 'detail'],
+    fallback: status => `perplexity request failed with ${status}`,
+  },
+})
 
 /** embeddings 的 `dimensions` 下限,与模型无关。 */
 const EMBEDDING_MIN_DIMENSIONS = 128
@@ -46,38 +54,19 @@ const EMBEDDING_MIN_DIMENSIONS = 128
 const EMBEDDING_MAX_DIMENSIONS: Record<string, number> = { 'pplx-embed-v1-0.6b': 1024 }
 const EMBEDDING_MAX_DIMENSIONS_FALLBACK = 2560
 
-/** Perplexity 的错误体有嵌套与顶层两种形状,消息键还分 message / detail。 */
-function errorMessage(status: number, payload: unknown, bodyKind: ResponseBodyKind): string {
-  const top = record(payload)
-  const nested = record(top?.error)
-  return text(nested?.message)
-    ?? text(nested?.detail)
-    ?? text(top?.message)
-    ?? text(top?.detail)
-    ?? (bodyKind === 'invalid-json' || bodyKind === 'text' ? text(payload) : undefined)
-    ?? `perplexity request failed with ${status}`
-}
-
 async function request(
   ctx: ProviderContext,
   method: 'GET' | 'POST',
   path: string,
   body?: unknown,
 ): Promise<unknown> {
-  // 取凭证放在 try 外:它抛的是配置错误,不该被下面的传输失败兜底吞成 502。
-  const apiKey = requireApiKey(ctx, SERVICE)
-
-  const { data } = await http.request({
+  const { data } = await http.request(ctx, {
     path,
     method,
-    headers: { accept: 'application/json', authorization: `Bearer ${apiKey}` },
     // 上游先过一道 `compactObject`;JSON.stringify 本来就丢 undefined 值,故不再重复一遍。
     ...(method === 'POST' ? { json: body ?? {} } : {}),
     invalidJsonMessage: 'Perplexity 返回了非 JSON 响应',
-    mapError: ({ bodyKind, data: payload, status }) => upstreamError(
-      status,
-      errorMessage(status, payload, bodyKind),
-    ),
+    // 消息里带着本次的 method/path,只能逐请求给,不能挪到 client 级。
     mapTransportError: ({ message }) => upstreamError(
       502,
       `perplexity ${method} ${path} failed before receiving response: ${message ?? 'unknown network error'}`,

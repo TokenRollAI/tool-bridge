@@ -54,15 +54,15 @@ import type {
   listOrganizationSentryAppsInput,
   updateIssueInput,
 } from './schema'
+import type { ProviderQuery } from '../_runtime/providerHttp'
+import type { ProviderContext } from '../_runtime/plugin'
 import { compactDefined as compact, asJsonObject as record } from '../_runtime/jsonValue'
-import { createProviderHttpClient, type ProviderQuery } from '../_runtime/providerHttp'
-import { type ProviderContext, requireApiKey } from '../_runtime/plugin'
+import { createAuthedClient } from '../_runtime/authedClient'
 import { upstreamError } from '../_runtime/upstreamError'
 
 const SERVICE = 'sentry'
 /** 尾斜杠是刻意的:见文件头注释,path 用相对形式拼在它后面。 */
 const API_BASE = 'https://sentry.io/api/0/'
-const http = createProviderHttpClient({ baseUrl: API_BASE, service: SERVICE })
 
 type Json = Record<string, unknown>
 type QueryValue = boolean | number | string | Array<number | string> | undefined
@@ -157,6 +157,25 @@ function errorMessage(payload: unknown, status: number): string {
     ?? `Sentry 返回 HTTP ${status}`
 }
 
+const http = createAuthedClient({
+  baseUrl: API_BASE,
+  service: SERVICE,
+  auth: { kind: 'bearer' },
+  headers: { accept: 'application/json' },
+  mapError: ({ bodyKind, data, headers, status }) => {
+    // Sentry 只认可 application/json；HTML 与其它媒体类型不能被当成错误消息。
+    const payload = headers.get('content-type')?.includes('application/json') === true
+      && bodyKind === 'json'
+      ? data
+      : null
+    return upstreamError(status, errorMessage(payload, status))
+  },
+  mapTransportError: ({ message }) => upstreamError(
+    502,
+    `Sentry 请求失败:${message ?? '未知错误'}`,
+  ),
+})
+
 interface RequestOptions {
   body?: Json
   method?: 'GET' | 'PUT'
@@ -169,29 +188,15 @@ interface SentryResponse {
 }
 
 async function request(ctx: ProviderContext, path: string, options: RequestOptions = {}): Promise<SentryResponse> {
-  const token = requireApiKey(ctx, SERVICE)
-  const result = await http.request({
+  const result = await http.request(ctx, {
     // path 不带前导斜杠 —— 见文件头注释,否则 /api/0 前缀会被整段吃掉。
     path,
     method: options.method ?? 'GET',
     // 多值过滤器(environment / project / field …)展开成重复的同名参数。
     query: Object.entries(options.query ?? {}) satisfies ProviderQuery,
-    headers: { accept: 'application/json', authorization: `Bearer ${token}` },
     ...(options.body === undefined ? {} : { json: options.body }),
     invalidJson: 'text',
     responseType: 'auto',
-    mapError: ({ bodyKind, data, headers, status }) => {
-      // Sentry 只认可 application/json；HTML 与其它媒体类型不能被当成错误消息。
-      const payload = headers.get('content-type')?.includes('application/json') === true
-        && bodyKind === 'json'
-        ? data
-        : null
-      return upstreamError(status, errorMessage(payload, status))
-    },
-    mapTransportError: ({ message }) => upstreamError(
-      502,
-      `Sentry 请求失败:${message ?? '未知错误'}`,
-    ),
   })
   const payload = result.headers.get('content-type')?.includes('application/json') === true
     && result.bodyKind === 'json'

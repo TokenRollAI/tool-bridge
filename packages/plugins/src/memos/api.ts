@@ -61,12 +61,13 @@ import type {
   setMemoAttachmentsInput,
   uploadAttachmentInput,
 } from './schema'
+import type { ProviderQuery } from '../_runtime/providerHttp'
 import type { updateMemoInput } from './schema.handwritten'
 import { compactDefined as compact, asJsonObject as record, trimmedText as text } from '../_runtime/jsonValue'
-import { createProviderHttpClient, type ProviderQuery } from '../_runtime/providerHttp'
 import { bytesToBase64, readBoundedResponseBytes } from '../_runtime/responseBytes'
 import { assertPublicHttpUrl, guardedFetch } from '../_runtime/guardedFetch'
 import { type ProviderContext, requireApiKey } from '../_runtime/plugin'
+import { createAuthedClient } from '../_runtime/authedClient'
 import { upstreamError } from '../_runtime/upstreamError'
 
 const SERVICE = 'memos'
@@ -74,7 +75,16 @@ const SERVICE = 'memos'
 const API_SUFFIX = '/api/v1'
 /** 附件下载上限(上游同值)。插件与网关同进程,这个上限是内存保护,不是礼貌。 */
 const ATTACHMENT_MAX_BYTES = 20 * 1024 * 1024
-const http = createProviderHttpClient({ service: SERVICE })
+const http = createAuthedClient({
+  service: SERVICE,
+  auth: { kind: 'bearer' },
+  headers: { accept: 'application/json' },
+  // Memos 的错误消息就一个 `message` 键(gRPC-gateway 的形状);非 JSON 体则是整段文本。
+  errorMessage: {
+    keys: ['message'],
+    fallback: () => 'Memos request failed',
+  },
+})
 
 type Collection = 'attachments' | 'memos' | 'users'
 type Json = Record<string, unknown>
@@ -90,12 +100,6 @@ const UPDATE_MASKS: ReadonlyArray<readonly [string, string]> = [
   ['createTime', 'create_time'],
   ['location', 'location'],
 ]
-
-/** 这次调用要打的实例与用的凭证。 */
-interface Target {
-  apiKey: string
-  baseUrl: string
-}
 
 /** 上游 `requiredInputString`:schema 的 `min(n)` 放过纯空白串,必填断言落在这层。 */
 function requireText(value: unknown, field: string): string {
@@ -162,9 +166,12 @@ function resolveBaseUrl(ctx: ProviderContext): string {
   return normalized.endsWith(API_SUFFIX) ? normalized : `${normalized}${API_SUFFIX}`
 }
 
-function resolveTarget(ctx: ProviderContext): Target {
-  // 两者都抛配置错误,放在传输 try 外面,不该被 502 兜底吞掉。
-  return { apiKey: requireApiKey(ctx, SERVICE), baseUrl: resolveBaseUrl(ctx) }
+function resolveTarget(ctx: ProviderContext): string {
+  // 凭证检查先于解配置:缺凭证要优先于 baseUrl 配错报出来(与迁移前的取值顺序一致)。
+  // helper 到打上游前才真正注入凭证,这里只是提前触发同一个 fail closed;两者都抛
+  // 配置错误,先于传输发生,不会被 502 兜底吞掉。
+  requireApiKey(ctx, SERVICE)
+  return resolveBaseUrl(ctx)
 }
 
 /**
@@ -183,13 +190,6 @@ function resourcePath(name: string, collection: Collection): string {
   return `/${collection}/${encodeURIComponent(id)}`
 }
 
-/** Memos 的错误消息就一个 `message` 键(gRPC-gateway 的形状);非 JSON 体则是整段文本。 */
-function errorMessage(payload: unknown): string {
-  const direct = text(payload)
-  if (direct !== undefined) return direct
-  return text(record(payload)?.message) ?? 'Memos request failed'
-}
-
 interface RequestInput {
   body?: Json
   method?: Method
@@ -197,16 +197,14 @@ interface RequestInput {
   query?: Record<string, QueryValue>
 }
 
-async function request(target: Target, input: RequestInput): Promise<unknown> {
-  const result = await http.request({
-    baseUrl: `${target.baseUrl}/`,
+async function request(ctx: ProviderContext, input: RequestInput): Promise<unknown> {
+  const result = await http.request(ctx, {
+    baseUrl: `${resolveTarget(ctx)}/`,
     path: input.path,
     method: input.method ?? 'GET',
     query: Object.entries(input.query ?? {}) satisfies ProviderQuery,
-    headers: { accept: 'application/json', authorization: `Bearer ${target.apiKey}` },
     ...(input.body === undefined ? {} : { json: input.body }),
     invalidJsonMessage: 'Memos returned invalid JSON',
-    mapError: ({ data, status }) => upstreamError(status, errorMessage(data)),
     mapTransportError: ({ message }) => upstreamError(
       502,
       `Memos ${input.path} request failed: ${message ?? 'unknown network error'}`,
@@ -253,7 +251,7 @@ async function downloadAttachment(fileUrl: string, declaredType: string | undefi
 }
 
 export async function createMemo(input: z.infer<typeof createMemoInput>, ctx: ProviderContext): Promise<Json> {
-  const payload = await request(resolveTarget(ctx), {
+  const payload = await request(ctx, {
     method: 'POST',
     path: '/memos',
     // memoId 是**query** 参数而不是 body 字段(Memos 的 AIP 风格:资源 id 走 query)。
@@ -270,7 +268,7 @@ export async function createMemo(input: z.infer<typeof createMemoInput>, ctx: Pr
 }
 
 export async function listMemos(input: z.infer<typeof listMemosInput>, ctx: ProviderContext): Promise<Json> {
-  const payload = requireResponseObject(await request(resolveTarget(ctx), {
+  const payload = requireResponseObject(await request(ctx, {
     path: '/memos',
     query: compact({
       pageSize: input.pageSize,
@@ -290,7 +288,7 @@ export async function listMemos(input: z.infer<typeof listMemosInput>, ctx: Prov
 
 export async function getMemo(input: z.infer<typeof getMemoInput>, ctx: ProviderContext): Promise<Json> {
   const path = resourcePath(requireText(input.name, 'name'), 'memos')
-  const payload = await request(resolveTarget(ctx), { path })
+  const payload = await request(ctx, { path })
   return { memo: requireResponseObject(payload, 'get memo') }
 }
 
@@ -305,7 +303,7 @@ export async function updateMemo(input: z.infer<typeof updateMemoInput>, ctx: Pr
     throw new TBError('invalid_argument', 'Provide at least one memo field to update.')
   }
 
-  const payload = await request(resolveTarget(ctx), {
+  const payload = await request(ctx, {
     method: 'PATCH',
     path: resourcePath(name, 'memos'),
     query: { updateMask: updateMask.join(',') },
@@ -324,7 +322,7 @@ export async function updateMemo(input: z.infer<typeof updateMemoInput>, ctx: Pr
 
 export async function deleteMemo(input: z.infer<typeof deleteMemoInput>, ctx: ProviderContext): Promise<Json> {
   const name = requireText(input.name, 'name')
-  await request(resolveTarget(ctx), {
+  await request(ctx, {
     method: 'DELETE',
     path: resourcePath(name, 'memos'),
     query: compact({ force: input.force }),
@@ -336,9 +334,10 @@ export async function uploadAttachment(
   input: z.infer<typeof uploadAttachmentInput>,
   ctx: ProviderContext,
 ): Promise<Json> {
-  const target = resolveTarget(ctx)
+  // 凭证与实例地址先于下载校验:没配好就不该去打第三方 URL(与迁移前 resolveTarget 先行一致)。
+  resolveTarget(ctx)
   const source = await downloadAttachment(requireText(input.fileUrl, 'fileUrl'), text(input.type))
-  const payload = await request(target, {
+  const payload = await request(ctx, {
     method: 'POST',
     path: '/attachments',
     query: compact({ attachmentId: text(input.attachmentId) }),
@@ -356,7 +355,7 @@ export async function listAttachments(
   input: z.infer<typeof listAttachmentsInput>,
   ctx: ProviderContext,
 ): Promise<Json> {
-  const payload = requireResponseObject(await request(resolveTarget(ctx), {
+  const payload = requireResponseObject(await request(ctx, {
     path: '/attachments',
     query: compact({
       pageSize: input.pageSize,
@@ -373,7 +372,7 @@ export async function listAttachments(
 
 export async function getAttachment(input: z.infer<typeof getAttachmentInput>, ctx: ProviderContext): Promise<Json> {
   const path = resourcePath(requireText(input.name, 'name'), 'attachments')
-  const payload = await request(resolveTarget(ctx), { path })
+  const payload = await request(ctx, { path })
   return { attachment: requireResponseObject(payload, 'get attachment') }
 }
 
@@ -382,7 +381,7 @@ export async function deleteAttachment(
   ctx: ProviderContext,
 ): Promise<Json> {
   const name = requireText(input.name, 'name')
-  await request(resolveTarget(ctx), { method: 'DELETE', path: resourcePath(name, 'attachments') })
+  await request(ctx, { method: 'DELETE', path: resourcePath(name, 'attachments') })
   return { deleted: true, name }
 }
 
@@ -391,7 +390,7 @@ export async function listMemoAttachments(
   ctx: ProviderContext,
 ): Promise<Json> {
   const name = requireText(input.name, 'name')
-  const payload = requireResponseObject(await request(resolveTarget(ctx), {
+  const payload = requireResponseObject(await request(ctx, {
     path: `${resourcePath(name, 'memos')}/attachments`,
     query: compact({ pageSize: input.pageSize, pageToken: text(input.pageToken) }),
   }), 'list memo attachments')
@@ -411,7 +410,7 @@ export async function setMemoAttachments(
   // 而不是让 Memos 收下一半再报错(这个 PATCH 是整集合替换,半成品状态最难善后)。
   for (const attachmentName of attachmentNames) resourcePath(attachmentName, 'attachments')
 
-  await request(resolveTarget(ctx), {
+  await request(ctx, {
     method: 'PATCH',
     path: `${resourcePath(name, 'memos')}/attachments`,
     body: { name, attachments: attachmentNames.map(attachmentName => ({ name: attachmentName })) },
@@ -423,12 +422,12 @@ export async function getCurrentUser(
   _input: z.infer<typeof getCurrentUserInput>,
   ctx: ProviderContext,
 ): Promise<Json> {
-  const payload = requireResponseObject(await request(resolveTarget(ctx), { path: '/auth/me' }), 'get current user')
+  const payload = requireResponseObject(await request(ctx, { path: '/auth/me' }), 'get current user')
   return { user: requireResponseObject(payload.user, 'get current user') }
 }
 
 export async function listUsers(input: z.infer<typeof listUsersInput>, ctx: ProviderContext): Promise<Json> {
-  const payload = requireResponseObject(await request(resolveTarget(ctx), {
+  const payload = requireResponseObject(await request(ctx, {
     path: '/users',
     query: compact({
       pageSize: input.pageSize,
@@ -445,7 +444,7 @@ export async function listUsers(input: z.infer<typeof listUsersInput>, ctx: Prov
 
 export async function getUser(input: z.infer<typeof getUserInput>, ctx: ProviderContext): Promise<Json> {
   const path = resourcePath(requireText(input.name, 'name'), 'users')
-  const payload = await request(resolveTarget(ctx), {
+  const payload = await request(ctx, {
     path,
     query: compact({ readMask: text(input.readMask) }),
   })

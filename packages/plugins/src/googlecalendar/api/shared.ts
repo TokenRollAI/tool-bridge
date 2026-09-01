@@ -37,21 +37,20 @@
  */
 
 import { TBError } from '@tool-bridge/plugin-sdk'
-import {
-  createProviderHttpClient,
-  type ProviderHttpErrorContext,
-  type ProviderHttpRequest,
-  type ProviderHttpResult,
+import type {
+  ProviderHttpErrorContext,
+  ProviderHttpRequest,
+  ProviderHttpResult,
 } from '../../_runtime/providerHttp'
+import type { ProviderContext } from '../../_runtime/plugin'
 import { asJsonObject, compactDefined, trimmedText } from '../../_runtime/jsonValue'
-import { type ProviderContext, requireApiKey } from '../../_runtime/plugin'
+import { createAuthedClient } from '../../_runtime/authedClient'
 import { upstreamError } from '../../_runtime/upstreamError'
 
 export const SERVICE = 'googlecalendar'
 export const API_BASE = 'https://www.googleapis.com/calendar/v3'
 const REQUEST_TIMEOUT_MS = 30_000
 const GOOGLE_API_ORIGIN = new URL(API_BASE).origin
-const http = createProviderHttpClient({ baseUrl: `${GOOGLE_API_ORIGIN}/`, service: SERVICE })
 /** 错误消息里最多回显多少上游原文。 */
 const MAX_ERROR_MESSAGE_LENGTH = 500
 
@@ -195,24 +194,28 @@ function calendarError(context: ProviderHttpErrorContext, syncTokenAware: boolea
   return upstreamError(context.status, message)
 }
 
+const http = createAuthedClient({
+  baseUrl: `${GOOGLE_API_ORIGIN}/`,
+  service: SERVICE,
+  auth: { kind: 'bearer' },
+  headers: { accept: 'application/json' },
+  mapTransportError: ({ kind, message }) => kind === 'timeout'
+    ? upstreamError(504, `Google Calendar 请求超时(${REQUEST_TIMEOUT_MS / 1000} 秒)`)
+    : upstreamError(502, `Google Calendar 请求失败:${message ?? 'unknown network error'}`),
+})
+
 async function send(ctx: ProviderContext, input: CalendarRequest): Promise<ProviderHttpResult> {
   const hasBody = input.body !== undefined
   const target = requestTarget(input.url, input.query)
-  return await http.request({
+  return await http.request(ctx, {
     method: input.method ?? (hasBody ? 'POST' : 'GET'),
     path: target.path,
     query: target.query,
-    headers: {
-      accept: 'application/json',
-      authorization: `Bearer ${requireApiKey(ctx, SERVICE)}`,
-    },
     ...(hasBody ? { json: input.body } : {}),
     invalidJson: 'text',
     timeoutMs: REQUEST_TIMEOUT_MS,
+    // 410 的 syncToken 解读随每次请求走(见文件头第 2 条),故 mapError 只能逐请求给。
     mapError: context => calendarError(context, input.syncTokenAware ?? false),
-    mapTransportError: ({ kind, message }) => kind === 'timeout'
-      ? upstreamError(504, `Google Calendar 请求超时(${REQUEST_TIMEOUT_MS / 1000} 秒)`)
-      : upstreamError(502, `Google Calendar 请求失败:${message ?? 'unknown network error'}`),
   })
 }
 

@@ -38,16 +38,16 @@ import type {
   listBlogsInput,
   listPagesInput,
 } from './schema'
-import { createProviderHttpClient, type ProviderQuery } from '../_runtime/providerHttp'
+import type { ProviderQuery } from '../_runtime/providerHttp'
 import { asJsonObject as record, trimmedText as text } from '../_runtime/jsonValue'
 import { type ProviderContext, requireCredential } from '../_runtime/plugin'
+import { createAuthedClient } from '../_runtime/authedClient'
 import { upstreamError } from '../_runtime/upstreamError'
 
 const SERVICE = 'shopify'
 /** 上游钉死的 REST 版本;换版本会改变出参形状,不随调用方走。 */
 const REST_API_VERSION = '2026-04'
 const MYSHOPIFY_SUFFIX = '.myshopify.com'
-const http = createProviderHttpClient({ service: SERVICE })
 
 type Json = Record<string, unknown>
 
@@ -162,29 +162,34 @@ function pageInfoForRel(linkHeader: string | null, rel: 'next' | 'previous'): st
   return null
 }
 
+const http = createAuthedClient({
+  service: SERVICE,
+  auth: {
+    kind: 'custom',
+    headers: ctx => ({ 'x-shopify-access-token': requireCredential(ctx, SERVICE, 'apiKey') }),
+  },
+  headers: { accept: 'application/json' },
+  mapError: ({ data, status }) => {
+    const detail = errorDetail(data)
+    return upstreamError(
+      status,
+      detail === undefined
+        ? `Shopify REST 返回 HTTP ${status}`
+        : `Shopify REST 返回 HTTP ${status}: ${detail}`,
+    )
+  },
+})
+
 async function request(
   ctx: ProviderContext,
   path: string,
   query?: Record<string, string>,
 ): Promise<RestResult> {
-  const result = await http.request({
+  const result = await http.request(ctx, {
     baseUrl: `https://${shopHost(ctx)}/admin/api/${REST_API_VERSION}/`,
     path,
     query: Object.entries(query ?? {}) satisfies ProviderQuery,
-    headers: {
-      'accept': 'application/json',
-      'x-shopify-access-token': requireCredential(ctx, SERVICE, 'apiKey'),
-    },
     invalidJsonMessage: 'Shopify REST 返回了非 JSON 响应',
-    mapError: ({ data, status }) => {
-      const detail = errorDetail(data)
-      return upstreamError(
-        status,
-        detail === undefined
-          ? `Shopify REST 返回 HTTP ${status}`
-          : `Shopify REST 返回 HTTP ${status}: ${detail}`,
-      )
-    },
   })
 
   return {

@@ -39,10 +39,11 @@ import type {
   listInputItemsInput,
   listModelsInput,
 } from './schema'
+import type { ProviderHttpErrorContext } from '../_runtime/providerHttp'
 import { bytesToBase64 as encodeBase64, readBoundedResponseBytes } from '../_runtime/responseBytes'
-import { createProviderHttpClient, type ProviderHttpErrorContext } from '../_runtime/providerHttp'
 import { assertPublicHttpUrl, guardedFetch } from '../_runtime/guardedFetch'
 import { type ProviderContext, requireApiKey } from '../_runtime/plugin'
+import { createAuthedClient } from '../_runtime/authedClient'
 import { trimmedText as text } from '../_runtime/jsonValue'
 import { upstreamError } from '../_runtime/upstreamError'
 
@@ -51,7 +52,6 @@ const API_BASE = 'https://api.openai.com/v1'
 /** OpenAI 音频接口本身的上限,提前挡住可以省掉一次 25 MB 的无效上传。 */
 const AUDIO_SOURCE_MAX_BYTES = 25 * 1024 * 1024
 const AUDIO_SOURCE_FETCH_TIMEOUT_MS = 30_000
-const http = createProviderHttpClient({ baseUrl: `${API_BASE}/`, service: SERVICE })
 
 type Json = Record<string, unknown>
 
@@ -160,22 +160,30 @@ function errorMessageFromContext(context: ProviderHttpErrorContext): string {
   return context.rawText?.trim() || fallback
 }
 
+/** JSON 通道走这个 client;multipart 与音频字节响应仍走上面的 rawRequest(guardedFetch)。 */
+const http = createAuthedClient({
+  baseUrl: `${API_BASE}/`,
+  service: SERVICE,
+  auth: { kind: 'bearer' },
+  headers: { accept: 'application/json' },
+  // 提取不 trim 且兜底回显 rawText 原文,标准键序提取表达不了,整段覆写。
+  mapError: context => upstreamError(context.status, errorMessageFromContext(context)),
+  mapTransportError: ({ message }) => upstreamError(
+    502,
+    `openai request failed before receiving response: ${message ?? 'unknown network error'}`,
+  ),
+})
+
 async function jsonRequest(ctx: ProviderContext, input: RequestInput): Promise<unknown> {
   if (input.body instanceof FormData) {
     throw new TBError('internal', 'openai jsonRequest cannot send multipart data')
   }
-  const method = input.method ?? 'GET'
-  const result = await http.request({
+  const result = await http.request(ctx, {
     path: input.path,
-    method,
-    headers: input.headers ?? baseHeaders(requireApiKey(ctx, SERVICE)),
+    method: input.method ?? 'GET',
+    headers: input.headers,
     ...(input.body === undefined ? {} : { json: input.body }),
     invalidJsonMessage: 'OpenAI 返回了非 JSON 响应',
-    mapError: context => upstreamError(context.status, errorMessageFromContext(context)),
-    mapTransportError: ({ message }) => upstreamError(
-      502,
-      `openai request failed before receiving response: ${message ?? 'unknown network error'}`,
-    ),
   })
   return result.data
 }

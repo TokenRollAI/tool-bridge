@@ -31,14 +31,27 @@
  */
 
 import { TBError } from '@tool-bridge/plugin-sdk'
+import type { ProviderContext } from '../_runtime/plugin'
 import { asJsonObject as asRecord, trimmedText as optionalText } from '../_runtime/jsonValue'
-import { type ProviderContext, requireApiKey } from '../_runtime/plugin'
-import { createProviderHttpClient } from '../_runtime/providerHttp'
+import { createAuthedClient } from '../_runtime/authedClient'
 import { upstreamError } from '../_runtime/upstreamError'
 
 const SERVICE = 'pipedrive'
 const API_BASE = 'https://api.pipedrive.com'
-const http = createProviderHttpClient({ baseUrl: `${API_BASE}/`, service: SERVICE })
+const http = createAuthedClient({
+  baseUrl: `${API_BASE}/`,
+  service: SERVICE,
+  auth: { kind: 'header', name: 'x-api-token' },
+  headers: { accept: 'application/json' },
+  errorMessage: {
+    keys: ['error', 'error_info', 'message', 'statusText'],
+    fallback: (status, statusText) => statusText || `pipedrive 返回 HTTP ${status}`,
+  },
+  mapTransportError: ({ message }) => upstreamError(
+    502,
+    message === undefined ? 'pipedrive 请求失败' : `pipedrive 请求失败: ${message}`,
+  ),
+})
 
 type Json = Record<string, unknown>
 type Method = 'DELETE' | 'GET' | 'PATCH' | 'POST'
@@ -164,6 +177,7 @@ function buildBody(operation: Operation, input: Json): Json {
   return body
 }
 
+/** 信封式失败(2xx + `success:false`)的消息提取;非 2xx 的标准提取由 client 声明承担。 */
 function errorMessage(payload: unknown): string | undefined {
   if (typeof payload === 'string') return optionalText(payload)
   const record = asRecord(payload)
@@ -175,27 +189,13 @@ function errorMessage(payload: unknown): string | undefined {
 }
 
 async function request(ctx: ProviderContext, operation: Operation, input: Json): Promise<Json> {
-  const apiKey = requireApiKey(ctx, SERVICE)
   const hasBody = operation.method === 'POST' || operation.method === 'PATCH'
-  const headers: Record<string, string> = {
-    'accept': 'application/json',
-    'x-api-token': apiKey,
-  }
-  const response = await http.request({
+  const response = await http.request(ctx, {
     method: operation.method,
     path: buildPath(operation, input),
-    headers,
     ...(operation.method === 'GET' ? { query: Object.entries(buildQuery(operation, input)) } : {}),
     ...(hasBody ? { json: buildBody(operation, input) } : {}),
     invalidJson: 'text',
-    mapError: ({ data, status, statusText }) => upstreamError(
-      status,
-      errorMessage(data) ?? (statusText || `pipedrive 返回 HTTP ${status}`),
-    ),
-    mapTransportError: ({ message }) => upstreamError(
-      502,
-      message === undefined ? 'pipedrive 请求失败' : `pipedrive 请求失败: ${message}`,
-    ),
   })
 
   // 空体(DELETE 常见)按空信封处理;非 JSON 或非对象则是上游破了契约。

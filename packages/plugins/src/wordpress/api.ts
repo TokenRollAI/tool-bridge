@@ -59,16 +59,16 @@ import type {
   updatePageInput,
   updatePostInput,
 } from './schema'
-import {
-  createProviderHttpClient,
-  type ProviderHttpErrorContext,
-  type ProviderHttpResult,
-  type ProviderQuery,
-  type ResponseBodyKind,
+import type {
+  ProviderHttpErrorContext,
+  ProviderHttpResult,
+  ProviderQuery,
+  ResponseBodyKind,
 } from '../_runtime/providerHttp'
 import { compactDefined as compact, asJsonObject as record, trimmedText as text } from '../_runtime/jsonValue'
 import { type ProviderContext, requireCredential } from '../_runtime/plugin'
 import { assertPublicHttpUrl } from '../_runtime/guardedFetch'
+import { createAuthedClient } from '../_runtime/authedClient'
 import { upstreamError } from '../_runtime/upstreamError'
 
 const SERVICE = 'wordpress'
@@ -77,7 +77,6 @@ const API_PATH = 'wp-json/wp/v2'
 const REST_ROOT_SUFFIXES = ['/wp-json/wp/v2', '/wp-json']
 /** 上游凭证校验打的端点,也是本 provider 的 `get_current_user`。 */
 const CURRENT_USER_PATH = '/users/me'
-const http = createProviderHttpClient({ service: SERVICE })
 
 type Json = Record<string, unknown>
 type QueryValue = boolean | number | string | readonly (number | string)[] | undefined
@@ -184,24 +183,29 @@ function jsonPayload(data: unknown, bodyKind: ResponseBodyKind): unknown {
   return bodyKind === 'json' ? data : null
 }
 
+const http = createAuthedClient({
+  service: SERVICE,
+  auth: { kind: 'custom', headers: ctx => ({ authorization: basicAuthHeader(ctx) }) },
+  headers: { accept: 'application/json' },
+  mapError: context => upstreamError(
+    context.status || 502,
+    errorMessage(jsonPayload(context.data, context.bodyKind), context),
+  ),
+  mapTransportError: ({ message }) => upstreamError(
+    502,
+    message === undefined ? 'WordPress request failed' : `WordPress request failed: ${message}`,
+  ),
+})
+
 async function requestResponse(ctx: ProviderContext, options: RequestOptions): Promise<ProviderHttpResult> {
-  return http.request({
+  return http.request(ctx, {
     baseUrl: `${apiBaseUrl(ctx)}/`,
     path: options.path,
     method: options.method ?? 'GET',
     query: queryPairs(options.query),
-    headers: { accept: 'application/json', authorization: basicAuthHeader(ctx) },
     ...(options.body === undefined ? {} : { json: options.body }),
     // 上游 response.json().catch(() => null)：成功或错误上的非 JSON 都按 null。
     invalidJson: 'text',
-    mapError: context => upstreamError(
-      context.status || 502,
-      errorMessage(jsonPayload(context.data, context.bodyKind), context),
-    ),
-    mapTransportError: ({ message }) => upstreamError(
-      502,
-      message === undefined ? 'WordPress request failed' : `WordPress request failed: ${message}`,
-    ),
   })
 }
 

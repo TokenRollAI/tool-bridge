@@ -32,14 +32,13 @@ import type {
   listZdrEndpointsInput,
 } from './schema'
 import type { createCoinbaseChargeInput } from './schema.handwritten'
+import type { ProviderContext } from '../_runtime/plugin'
 import { compactDefined as compact, asJsonObject as record, trimmedText as text } from '../_runtime/jsonValue'
-import { type ProviderContext, requireApiKey } from '../_runtime/plugin'
-import { createProviderHttpClient } from '../_runtime/providerHttp'
+import { createAuthedClient } from '../_runtime/authedClient'
 import { upstreamError } from '../_runtime/upstreamError'
 
 const SERVICE = 'openrouter'
 const API_BASE = 'https://openrouter.ai/api/v1'
-const http = createProviderHttpClient({ baseUrl: `${API_BASE}/`, service: SERVICE })
 
 /** 这两个入参是请求**头**的来源,不进请求体。 */
 const HEADER_INPUT_KEYS = ['httpReferer', 'xTitle'] as const
@@ -103,15 +102,28 @@ function errorMessage(payload: unknown): string | undefined {
   return text(record(body.error)?.message) ?? text(body.message)
 }
 
+const http = createAuthedClient({
+  baseUrl: `${API_BASE}/`,
+  service: SERVICE,
+  auth: { kind: 'bearer' },
+  // 非 JSON 错误体**不回显原文**(bodyKind 门控),与标准提取的 string 取文语义不同,整段覆写。
+  mapError: ({ bodyKind, data, status }) => upstreamError(
+    status,
+    bodyKind === 'json'
+      ? errorMessage(data) ?? `OpenRouter 返回 HTTP ${status}`
+      : `OpenRouter 返回 HTTP ${status}`,
+  ),
+})
+
 async function request(ctx: ProviderContext, input: RequestInput): Promise<Json> {
   const hasBody = input.body !== undefined
-  const headers = new Headers({ authorization: `Bearer ${requireApiKey(ctx, SERVICE)}` })
+  const headers = new Headers()
   const referer = text(input.headerSource?.httpReferer)
   const title = text(input.headerSource?.xTitle)
   if (referer !== undefined) headers.set('HTTP-Referer', referer)
   if (title !== undefined) headers.set('X-Title', title)
 
-  const response = await http.request({
+  const response = await http.request(ctx, {
     method: input.method ?? 'GET',
     path: input.path,
     query: Object.entries(input.query ?? {}),
@@ -119,12 +131,6 @@ async function request(ctx: ProviderContext, input: RequestInput): Promise<Json>
     ...(hasBody ? { json: compact(input.body ?? {}) } : {}),
     responseType: 'json',
     invalidJson: 'text',
-    mapError: ({ bodyKind, data, status }) => upstreamError(
-      status,
-      bodyKind === 'json'
-        ? errorMessage(data) ?? `OpenRouter 返回 HTTP ${status}`
-        : `OpenRouter 返回 HTTP ${status}`,
-    ),
   })
 
   const contentType = response.headers.get('content-type') ?? ''

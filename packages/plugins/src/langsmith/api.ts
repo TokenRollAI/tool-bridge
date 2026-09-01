@@ -39,6 +39,7 @@ import type {
   listProjectsInput,
   listWorkspacesInput,
 } from './schema'
+import type { ProviderQuery } from '../_runtime/providerHttp'
 import {
   compactDefined as compact,
   integerValue as int,
@@ -46,18 +47,27 @@ import {
   asJsonObject as record,
   trimmedText as text,
 } from '../_runtime/jsonValue'
-import {
-  createProviderHttpClient,
-  type ProviderHttpErrorContext,
-  type ProviderQuery,
-} from '../_runtime/providerHttp'
 import { type ProviderContext, requireApiKey } from '../_runtime/plugin'
+import { createAuthedClient } from '../_runtime/authedClient'
 import { upstreamError } from '../_runtime/upstreamError'
 
 const SERVICE = 'langsmith'
 const WORKSPACES_PATH = '/api/v1/workspaces'
 const DEFAULT_REGION = 'us'
-const http = createProviderHttpClient({ service: SERVICE })
+const http = createAuthedClient({
+  service: SERVICE,
+  auth: { kind: 'header', name: 'X-Api-Key' },
+  headers: { accept: 'application/json' },
+  // 错误消息四处之一;拿不到就退回状态行。
+  errorMessage: {
+    keys: ['detail', 'message', 'error', 'title'],
+    fallback: (status, statusText) => text(statusText) ?? `langsmith 返回 HTTP ${status}`,
+  },
+  mapTransportError: ({ message }) => upstreamError(
+    502,
+    `langsmith 请求失败: ${message ?? '未知错误'}`,
+  ),
+})
 
 /** LangSmith SaaS 的四个区域各有独立域名 —— 打错区域是 401 而不是空结果。 */
 const REGION_BASE_URLS: Record<string, string> = {
@@ -101,20 +111,6 @@ function resolveWorkspaceId(ctx: ProviderContext): string | undefined {
   return text(configured)
 }
 
-/** 错误消息四处之一;拿不到就退回状态行。 */
-function errorMessage(context: ProviderHttpErrorContext): string {
-  const payload = context.data
-  const fromText = typeof payload === 'string' ? text(payload) : undefined
-  const body = record(payload)
-  return fromText
-    ?? text(body?.detail)
-    ?? text(body?.message)
-    ?? text(body?.error)
-    ?? text(body?.title)
-    ?? text(context.statusText)
-    ?? `langsmith 返回 HTTP ${context.status}`
-}
-
 function queryPairs(query: Json | undefined): ProviderQuery {
   return Object.entries(query ?? {}).flatMap(([key, value]) => {
     if (value === undefined || value === null) return []
@@ -126,26 +122,19 @@ function queryPairs(query: Json | undefined): ProviderQuery {
 }
 
 async function request(ctx: ProviderContext, input: RequestInput): Promise<unknown> {
-  // 取凭证与解配置放在 try 外:它们抛的是配置错误,不该被下面的传输失败兜底吞成 502。
-  const apiKey = requireApiKey(ctx, SERVICE)
+  // 凭证检查先于解配置:缺凭证要优先于 region 配错报出来(与迁移前的取值顺序一致);
+  // helper 到打上游前才真正注入,这里只是提前触发同一个 fail closed。
+  requireApiKey(ctx, SERVICE)
   const workspaceId = resolveWorkspaceId(ctx)
-  const result = await http.request({
+  const result = await http.request(ctx, {
     baseUrl: resolveApiBase(ctx),
     path: input.path,
     method: input.method ?? 'GET',
     query: queryPairs(input.query),
-    headers: {
-      'accept': 'application/json',
-      'X-Api-Key': apiKey,
-      ...(workspaceId === undefined ? {} : { 'X-Tenant-Id': workspaceId }),
-    },
+    // 一个 API key 能看到多个 workspace 时,靠 `X-Tenant-Id` 指定用哪个。
+    ...(workspaceId === undefined ? {} : { headers: { 'X-Tenant-Id': workspaceId } }),
     ...(input.body === undefined ? {} : { json: input.body }),
     invalidJson: 'text',
-    mapError: context => upstreamError(context.status, errorMessage(context)),
-    mapTransportError: ({ message }) => upstreamError(
-      502,
-      `langsmith 请求失败: ${message ?? '未知错误'}`,
-    ),
   })
   return result.data === undefined ? null : result.data
 }

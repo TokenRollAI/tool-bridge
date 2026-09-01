@@ -29,16 +29,30 @@ import type {
   getSandboxInput,
   listSandboxesInput,
 } from './schema'
+import type { ProviderQuery } from '../_runtime/providerHttp'
+import type { ProviderContext } from '../_runtime/plugin'
 import { compactDefined as compact, asJsonObject as record, trimmedText as text } from '../_runtime/jsonValue'
-import { createProviderHttpClient, type ProviderQuery } from '../_runtime/providerHttp'
-import { type ProviderContext, requireApiKey } from '../_runtime/plugin'
+import { createAuthedClient } from '../_runtime/authedClient'
 import { upstreamError } from '../_runtime/upstreamError'
 
 const SERVICE = 'e2b'
 const API_BASE = 'https://api.e2b.app'
-const http = createProviderHttpClient({ baseUrl: API_BASE, service: SERVICE })
 /** 照搬上游的 30s 单请求上限:沙箱创建偶尔很慢,但挂死比失败更糟。 */
 const REQUEST_TIMEOUT_MS = 30_000
+const http = createAuthedClient({
+  baseUrl: API_BASE,
+  service: SERVICE,
+  auth: { kind: 'header', name: 'x-api-key' },
+  headers: { accept: 'application/json' },
+  // E2B 的错误文案:纯文本 body 直接用,JSON 则依次看 message / error / detail。
+  errorMessage: {
+    keys: ['message', 'error', 'detail'],
+    fallback: status => `E2B request failed with status ${status}`,
+  },
+  mapTransportError: ({ kind, message }) => kind === 'timeout'
+    ? upstreamError(504, `E2B ${REQUEST_TIMEOUT_MS / 1000}s 内没有返回`)
+    : upstreamError(502, message === undefined ? 'E2B request failed' : `E2B request failed: ${message}`),
+})
 
 type Json = Record<string, unknown>
 type QueryValue = boolean | number | string | string[] | undefined
@@ -64,17 +78,6 @@ function stringArray(value: unknown): string[] | undefined {
   return items.length > 0 ? items : undefined
 }
 
-/** E2B 的错误文案:纯文本 body 直接用,JSON 则依次看 message / error / detail。 */
-function errorMessage(payload: unknown, status: number): string {
-  if (typeof payload === 'string') {
-    const trimmed = payload.trim()
-    if (trimmed !== '') return trimmed
-  }
-  const body = record(payload)
-  return text(body?.message) ?? text(body?.error) ?? text(body?.detail)
-    ?? `E2B request failed with status ${status}`
-}
-
 interface RequestOptions {
   body?: Json
   /** 204 或空 body 时的返回值(上游 `emptySuccess`)。 */
@@ -90,18 +93,13 @@ async function request(ctx: ProviderContext, options: RequestOptions): Promise<u
     // 数组 query 拼成一个逗号串:E2B 不认重复的同名参数。
     Array.isArray(value) ? value.join(',') : value,
   ] as const) satisfies ProviderQuery
-  const { data } = await http.request({
+  const { data } = await http.request(ctx, {
     path: options.path,
     method: options.method ?? 'GET',
     query,
-    headers: { 'accept': 'application/json', 'x-api-key': requireApiKey(ctx, SERVICE) },
     ...(options.body === undefined ? {} : { json: options.body }),
     timeoutMs: REQUEST_TIMEOUT_MS,
     invalidJsonMessage: 'E2B returned invalid JSON',
-    mapError: ({ data: payload, status }) => upstreamError(status, errorMessage(payload, status)),
-    mapTransportError: ({ kind, message }) => kind === 'timeout'
-      ? upstreamError(504, `E2B ${REQUEST_TIMEOUT_MS / 1000}s 内没有返回`)
-      : upstreamError(502, message === undefined ? 'E2B request failed' : `E2B request failed: ${message}`),
   })
   return data === undefined ? (options.emptySuccess ?? null) : data
 }

@@ -92,20 +92,16 @@ import type {
   updateInsightInput,
   updatePropertyDefinitionInput,
 } from './schema'
-import {
-  createProviderHttpClient,
-  type ProviderQuery,
-  type ResponseBodyKind,
-} from '../_runtime/providerHttp'
+import type { ProviderQuery, ResponseBodyKind } from '../_runtime/providerHttp'
 import { booleanValue as bool, compactDefined as compact } from '../_runtime/jsonValue'
 import { type ProviderContext, requireApiKey } from '../_runtime/plugin'
 import { assertPublicHttpUrl } from '../_runtime/guardedFetch'
+import { createAuthedClient } from '../_runtime/authedClient'
 import { upstreamError } from '../_runtime/upstreamError'
 
 const SERVICE = 'posthog'
 /** 当前用户接口;既是 `get_current_user`,也是 organization_id 推断与凭证探针的落点。 */
 const CURRENT_USER_PATH = '/api/users/@me/'
-const http = createProviderHttpClient({ service: SERVICE })
 
 type Json = Record<string, unknown>
 type QueryValue = boolean | number | string | null | undefined
@@ -248,15 +244,11 @@ function resolveBaseUrl(ctx: ProviderContext): string {
   return `${parsed.origin}${path}`
 }
 
-interface Auth {
-  baseUrl: string
-  token: string
-}
-
-function resolveAuth(ctx: ProviderContext): Auth {
+/** 每次调用要打的实例地址;凭证头由 authed client 在请求时注入。 */
+function resolveAuth(ctx: ProviderContext): string {
   // 先取凭证:缺 authRef 是最常见的配置错,先报它比先报 baseUrl 更指得准。
-  const token = requireApiKey(ctx, SERVICE)
-  return { baseUrl: resolveBaseUrl(ctx), token }
+  requireApiKey(ctx, SERVICE)
+  return resolveBaseUrl(ctx)
 }
 
 /**
@@ -274,27 +266,33 @@ function responsePayload(data: unknown, bodyKind: ResponseBodyKind): unknown {
   return bodyKind === 'json' ? data : undefined
 }
 
+const http = createAuthedClient({
+  service: SERVICE,
+  auth: { kind: 'bearer' },
+  // 迁移前 GET 也带 content-type,保留真实 wire。
+  headers: { 'content-type': 'application/json' },
+  // DRF 的 attr 要拼进消息尾巴,标准键序提取表达不了,整段覆写。
+  mapError: ({ bodyKind, data, status }) => posthogError(
+    status,
+    bodyKind === 'json' ? data : undefined,
+    bodyKind === 'empty' ? `${SERVICE} 返回 HTTP ${status}` : String(data),
+  ),
+  mapTransportError: ({ message }) => new TBError(
+    'unavailable',
+    `${SERVICE} 请求失败:${message ?? 'undefined'}`,
+    { retryable: true },
+  ),
+})
+
 async function request(ctx: ProviderContext, options: RequestOptions): Promise<unknown> {
-  const auth = resolveAuth(ctx)
-  const result = await http.request({
-    baseUrl: `${auth.baseUrl}/`,
+  const baseUrl = resolveAuth(ctx)
+  const result = await http.request(ctx, {
+    baseUrl: `${baseUrl}/`,
     path: options.path,
     method: options.method ?? 'GET',
     query: Object.entries(options.query ?? {}) satisfies ProviderQuery,
-    // 迁移前 GET 也带 content-type，保留真实 wire。
-    headers: { 'authorization': `Bearer ${auth.token}`, 'content-type': 'application/json' },
     ...(options.body === undefined ? {} : { json: options.body }),
     invalidJson: 'text',
-    mapError: ({ bodyKind, data, status }) => posthogError(
-      status,
-      bodyKind === 'json' ? data : undefined,
-      bodyKind === 'empty' ? `${SERVICE} 返回 HTTP ${status}` : String(data),
-    ),
-    mapTransportError: ({ message }) => new TBError(
-      'unavailable',
-      `${SERVICE} 请求失败:${message ?? 'undefined'}`,
-      { retryable: true },
-    ),
   })
   // 空体是正常成功形态:204 之外,PATCH/DELETE 也常回 200 空体。上游在这里落 `{}`,
   // 整形函数据此产出 `{deleted:true, ...}`,不能当成"响应不是 JSON"报故障。

@@ -28,12 +28,11 @@ import type {
 } from './schema'
 import { finiteNumber as numeric, asJsonObject as record, trimmedText as text } from '../_runtime/jsonValue'
 import { type ProviderContext, requireApiKey } from '../_runtime/plugin'
-import { createProviderHttpClient } from '../_runtime/providerHttp'
+import { createAuthedClient } from '../_runtime/authedClient'
 import { upstreamError } from '../_runtime/upstreamError'
 
 const SERVICE = 'unsplash'
 const API_BASE = 'https://api.unsplash.com'
-const http = createProviderHttpClient({ baseUrl: `${API_BASE}/`, service: SERVICE })
 
 type Json = Record<string, unknown>
 type QueryValue = number | string | undefined
@@ -85,21 +84,23 @@ function errorMessage(payload: unknown): string | undefined {
   return text(body.error) ?? text(body.message)
 }
 
+const http = createAuthedClient({
+  baseUrl: `${API_BASE}/`,
+  service: SERVICE,
+  // Unsplash 自有的方案名,不是 Bearer。
+  auth: { kind: 'custom', headers: ctx => ({ authorization: `Client-ID ${requireApiKey(ctx, SERVICE)}` }) },
+  headers: { 'accept': 'application/json', 'accept-version': 'v1' },
+  mapError: ({ bodyKind, data, status }) => upstreamError(
+    status,
+    errorMessage(bodyKind === 'json' ? data : null) ?? `Unsplash 返回 HTTP ${status}`,
+  ),
+})
+
 async function request(ctx: ProviderContext, path: string, query: Record<string, QueryValue> = {}): Promise<unknown> {
-  const response = await http.request({
+  const response = await http.request(ctx, {
     path,
     query: Object.entries(query),
-    headers: {
-      'accept': 'application/json',
-      // Unsplash 自有的方案名,不是 Bearer。
-      'authorization': `Client-ID ${requireApiKey(ctx, SERVICE)}`,
-      'accept-version': 'v1',
-    },
     invalidJson: 'text',
-    mapError: ({ bodyKind, data, status }) => upstreamError(
-      status,
-      errorMessage(bodyKind === 'json' ? data : null) ?? `Unsplash 返回 HTTP ${status}`,
-    ),
   })
   if (response.bodyKind === 'invalid-json') {
     throw new TBError('unavailable', 'Unsplash 返回了非 JSON 响应', { retryable: true })

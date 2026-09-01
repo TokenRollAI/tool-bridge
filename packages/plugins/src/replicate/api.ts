@@ -36,16 +36,24 @@ import type {
   listModelVersionsInput,
   listPredictionsInput,
 } from './schema'
+import type { ProviderContext } from '../_runtime/plugin'
 import { compactDefined as compact, asJsonObject as record, trimmedText as text } from '../_runtime/jsonValue'
-import { type ProviderContext, requireApiKey } from '../_runtime/plugin'
-import { createProviderHttpClient } from '../_runtime/providerHttp'
-import { upstreamError } from '../_runtime/upstreamError'
+import { createAuthedClient } from '../_runtime/authedClient'
 
 const SERVICE = 'replicate'
 const API_BASE = 'https://api.replicate.com'
 /** 上游 credentialValidators 打的也是这个端点。 */
 const ACCOUNT_PATH = '/v1/account'
-const http = createProviderHttpClient({ baseUrl: `${API_BASE}/`, service: SERVICE })
+const http = createAuthedClient({
+  baseUrl: `${API_BASE}/`,
+  service: SERVICE,
+  auth: { kind: 'bearer' },
+  headers: { accept: 'application/json' },
+  errorMessage: {
+    keys: ['detail', 'title'],
+    fallback: status => `Replicate 返回 HTTP ${status}`,
+  },
+})
 
 type Json = Record<string, unknown>
 
@@ -88,23 +96,14 @@ function segment(value: string | undefined, field: string): string {
  *   错误响应上回纯文本仍照上游用法,当成错误消息(见下面的 detail)。
  */
 async function request(ctx: ProviderContext, input: RequestInput): Promise<unknown> {
-  const headers: Record<string, string> = {
-    accept: 'application/json',
-    authorization: `Bearer ${requireApiKey(ctx, SERVICE)}`,
-    ...input.headers,
-  }
-  const response = await http.request({
+  const response = await http.request(ctx, {
     method: input.method ?? 'GET',
     path: input.path,
     // 上游这里连空串一起跳过(空的 created_after 打出去会被上游当成非法时间戳)。
     query: Object.entries(input.query ?? {}).filter(([, value]) => value !== undefined && value !== ''),
-    headers,
+    headers: input.headers,
     ...(input.body === undefined ? {} : { json: input.body }),
     invalidJson: 'text',
-    mapError: ({ bodyKind, data, status }) => {
-      const body = bodyKind === 'json' ? record(data) ?? {} : { detail: data }
-      return upstreamError(status, text(body.detail) ?? text(body.title) ?? `Replicate 返回 HTTP ${status}`)
-    },
   })
   // 空体记成 `{}`(上游语义:cancel 之类可能不回内容)。
   if (response.bodyKind === 'empty') return {}

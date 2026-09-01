@@ -45,21 +45,20 @@ import type {
   listTeamChannelsInput,
   listUserTeamsInput,
 } from './schema'
-import {
-  createProviderHttpClient,
-  type ProviderQuery,
-  type ResponseBodyKind,
+import type {
+  ProviderQuery,
+  ResponseBodyKind,
 } from '../_runtime/providerHttp'
 import { asJsonObject as record, trimmedText as text } from '../_runtime/jsonValue'
 import { type ProviderContext, requireCredential } from '../_runtime/plugin'
 import { assertPublicHttpUrl } from '../_runtime/guardedFetch'
+import { createAuthedClient } from '../_runtime/authedClient'
 import { upstreamError } from '../_runtime/upstreamError'
 
 const SERVICE = 'mattermost'
 const API_PATH_PREFIX = '/api/v4'
 /** 照搬上游的 30s 单请求上限。 */
 const REQUEST_TIMEOUT_MS = 30_000
-const http = createProviderHttpClient({ service: SERVICE })
 /** `since` 不能与这些参数同时出现(见文件头第 2 条)。 */
 const SINCE_CONFLICTING_FIELDS = ['page', 'perPage', 'beforePostId', 'afterPostId'] as const
 
@@ -149,26 +148,32 @@ function errorMessage(payload: unknown, status: number): string {
     ?? `Mattermost 返回 HTTP ${status}`
 }
 
+// PAT 在多字段凭证里(apiKey + instanceUrl),不走 upstreamAuth 单值通道,故 custom。
+const http = createAuthedClient({
+  service: SERVICE,
+  auth: {
+    kind: 'custom',
+    headers: ctx => ({ authorization: `Bearer ${requireCredential(ctx, SERVICE, 'apiKey')}` }),
+  },
+  headers: { accept: 'application/json' },
+  mapError: ({ bodyKind, data, status }) => upstreamError(
+    status,
+    errorMessage(responsePayload(data, bodyKind), status),
+  ),
+  mapTransportError: ({ kind, message }) => kind === 'timeout'
+    ? upstreamError(504, `Mattermost 请求超时(${REQUEST_TIMEOUT_MS / 1000} 秒)`)
+    : upstreamError(502, `Mattermost 请求失败:${message ?? 'unknown network error'}`),
+})
+
 async function request(ctx: ProviderContext, input: MattermostRequest): Promise<unknown> {
-  const result = await http.request({
+  const result = await http.request(ctx, {
     baseUrl: `${apiBaseUrl(ctx)}/`,
     path: input.path,
     method: input.method ?? 'GET',
     query: Object.entries(input.query ?? {}) satisfies ProviderQuery,
-    headers: {
-      accept: 'application/json',
-      authorization: `Bearer ${requireCredential(ctx, SERVICE, 'apiKey')}`,
-    },
     ...(input.body === undefined ? {} : { json: input.body }),
     timeoutMs: REQUEST_TIMEOUT_MS,
     invalidJsonMessage: 'Mattermost 返回了非 JSON 响应',
-    mapError: ({ bodyKind, data, status }) => upstreamError(
-      status,
-      errorMessage(responsePayload(data, bodyKind), status),
-    ),
-    mapTransportError: ({ kind, message }) => kind === 'timeout'
-      ? upstreamError(504, `Mattermost 请求超时(${REQUEST_TIMEOUT_MS / 1000} 秒)`)
-      : upstreamError(502, `Mattermost 请求失败:${message ?? 'unknown network error'}`),
   })
   return responsePayload(result.data, result.bodyKind)
 }

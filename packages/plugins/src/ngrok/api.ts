@@ -7,19 +7,27 @@ import type {
   listTunnelSessionsInput,
   listTunnelsInput,
 } from './schema'
+import type { ProviderContext } from '../_runtime/plugin'
 import {
   asJsonObject,
-  createProviderHttpClient,
   type JsonObject,
-  messageFrom,
   nonEmptyText,
   type ProviderQuery,
 } from '../_runtime/providerHttp'
-import { type ProviderContext, requireApiKey } from '../_runtime/plugin'
+import { createAuthedClient } from '../_runtime/authedClient'
 import { upstreamError } from '../_runtime/upstreamError'
 
 const SERVICE = 'ngrok'
-const http = createProviderHttpClient({ baseUrl: 'https://api.ngrok.com/', service: SERVICE })
+const http = createAuthedClient({
+  baseUrl: 'https://api.ngrok.com/',
+  service: SERVICE,
+  auth: { kind: 'bearer' },
+  headers: { 'accept': 'application/json', 'ngrok-version': '2' },
+  errorMessage: {
+    keys: ['msg', 'message', 'error'],
+    fallback: status => `ngrok request failed with ${status}`,
+  },
+})
 
 interface ListQuery {
   before_id?: string
@@ -32,20 +40,7 @@ async function request(
   path: string,
   query?: ProviderQuery,
 ): Promise<JsonObject> {
-  const { data } = await http.request({
-    path,
-    query,
-    headers: {
-      'accept': 'application/json',
-      'authorization': `Bearer ${requireApiKey(ctx, SERVICE)}`,
-      'ngrok-version': '2',
-    },
-    invalidJson: 'text',
-    mapError: ({ data: payload, status }) => upstreamError(
-      status,
-      messageFrom(payload, ['msg', 'message', 'error'], `ngrok request failed with ${status}`),
-    ),
-  })
+  const { data } = await http.request(ctx, { path, query, invalidJson: 'text' })
   const result = asJsonObject(data)
   if (result === undefined) throw upstreamError(502, 'ngrok response was not a JSON object')
   return result

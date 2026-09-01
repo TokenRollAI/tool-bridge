@@ -33,9 +33,10 @@ import type {
   queueGetStatusInput,
   queueGetStatusStreamInput,
 } from './schema'
+import type { ProviderQuery } from '../_runtime/providerHttp'
 import { compactDefined as compact, asJsonObject as record, trimmedText as text } from '../_runtime/jsonValue'
-import { createProviderHttpClient, type ProviderQuery } from '../_runtime/providerHttp'
 import { type ProviderContext, requireApiKey } from '../_runtime/plugin'
+import { createAuthedClient } from '../_runtime/authedClient'
 import { upstreamError } from '../_runtime/upstreamError'
 import { guardedFetch } from '../_runtime/guardedFetch'
 
@@ -44,7 +45,6 @@ const SERVICE = 'fal_ai'
 const PLATFORM_BASE = 'https://api.fal.ai'
 /** 队列面:排队请求的状态/结果/取消。 */
 const QUEUE_BASE = 'https://queue.fal.run'
-const http = createProviderHttpClient({ service: SERVICE })
 
 type Json = Record<string, unknown>
 type QueryValue = number | string | string[] | undefined
@@ -133,29 +133,34 @@ function errorMessage(payload: unknown, status: number): string {
 }
 
 /**
- * 发一次请求并解出 JSON。
+ * 认证走 `Authorization: Key <FAL_KEY>`(非 Bearer,helper 无此头型,走 custom);
+ * `content-type` 恒发(上游如此,GET 也带)。错误消息只认 JSON 体(bodyKind 门控:
+ * 非 JSON 错误体一律退状态兜底,不读文本),故整段保留 mapError。
  *
  * **有意偏离上游**的一处:上游把 404 与 422 一并压成 400。本仓库的 `upstreamError` 是
  * 1300 个 provider 共用的归一表,404 归 `not_found` —— "模型/请求 id 不存在"和"参数非法"
  * 对调用方是两件事,压成一码后 agent 无从区分。422 两边都是 `invalid_argument`,无差异。
  */
+const http = createAuthedClient({
+  service: SERVICE,
+  auth: { kind: 'custom', headers: ctx => ({ authorization: `Key ${requireApiKey(ctx, SERVICE)}` }) },
+  headers: { 'content-type': 'application/json' },
+  mapError: ({ bodyKind, data, status }) => upstreamError(
+    status,
+    errorMessage(bodyKind === 'json' ? data : null, status),
+  ),
+})
+
+/** 发一次请求并解出 JSON。两个 host 由调用点按面选择,逐请求传 baseUrl。 */
 async function request(ctx: ProviderContext, input: RequestInput): Promise<unknown> {
-  const result = await http.request({
+  const result = await http.request(ctx, {
     baseUrl: input.base,
     path: input.path,
     method: input.method ?? (input.body === undefined ? 'GET' : 'POST'),
     query: Object.entries(input.query ?? {}) satisfies ProviderQuery,
-    headers: {
-      'authorization': `Key ${requireApiKey(ctx, SERVICE)}`,
-      'content-type': 'application/json',
-      ...input.headers,
-    },
+    ...(input.headers === undefined ? {} : { headers: input.headers }),
     ...(input.body === undefined ? {} : { json: input.body }),
     invalidJsonMessage: 'fal.ai 返回了非 JSON 响应',
-    mapError: ({ bodyKind, data, status }) => upstreamError(
-      status,
-      errorMessage(bodyKind === 'json' ? data : null, status),
-    ),
   })
   return result.data === undefined ? null : result.data
 }

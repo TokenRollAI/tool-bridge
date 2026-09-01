@@ -37,14 +37,23 @@ import type {
   listWorkflowsByPipelineInput,
   triggerPipelineInput,
 } from './schema'
+import type { ProviderContext } from '../_runtime/plugin'
 import { asJsonObject as record, trimmedText as text } from '../_runtime/jsonValue'
-import { type ProviderContext, requireApiKey } from '../_runtime/plugin'
-import { createProviderHttpClient } from '../_runtime/providerHttp'
-import { upstreamError } from '../_runtime/upstreamError'
+import { createAuthedClient } from '../_runtime/authedClient'
 
 const SERVICE = 'circleci'
 const API_BASE = 'https://circleci.com/api/v2'
-const http = createProviderHttpClient({ baseUrl: `${API_BASE}/`, service: SERVICE })
+const http = createAuthedClient({
+  baseUrl: `${API_BASE}/`,
+  service: SERVICE,
+  auth: { kind: 'header', name: 'circle-token' },
+  headers: { accept: 'application/json' },
+  // 错误消息:正文是纯串就用它,否则取 message、再退回 error。
+  errorMessage: {
+    keys: ['message', 'error'],
+    fallback: status => `CircleCI 返回 HTTP ${status}`,
+  },
+})
 
 type Json = Record<string, unknown>
 
@@ -98,31 +107,16 @@ function orgSlug(value: string): string {
   return normalizeSlug(value, 'orgSlug', false)
 }
 
-/** 错误消息:正文是纯串就用它,否则取 message、再退回 error。 */
-function errorMessage(payload: unknown, status: number): string {
-  if (typeof payload === 'string') {
-    const trimmed = payload.trim()
-    if (trimmed !== '') return trimmed
-  }
-  const body = record(payload)
-  return text(body?.message) ?? text(body?.error) ?? `CircleCI 返回 HTTP ${status}`
-}
-
 async function request(ctx: ProviderContext, input: RequestInput): Promise<unknown> {
-  const { data } = await http.request({
+  const { data } = await http.request(ctx, {
     path: input.path,
     method: input.method ?? 'GET',
     query: Object.entries(input.query ?? {}).filter((entry): entry is [string, string] => {
       const value = entry[1]
       return value !== undefined && value !== ''
     }),
-    headers: {
-      'accept': 'application/json',
-      'circle-token': requireApiKey(ctx, SERVICE),
-    },
     ...(input.body === undefined ? {} : { json: input.body }),
     invalidJsonMessage: 'CircleCI 返回了非 JSON 响应',
-    mapError: ({ data: payload, status }) => upstreamError(status, errorMessage(payload, status)),
   })
   return data ?? {}
 }

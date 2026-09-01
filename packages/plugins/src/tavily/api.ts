@@ -7,18 +7,29 @@ import type {
   mapInput,
   searchInput,
 } from './schema'
+import type { ProviderContext } from '../_runtime/plugin'
 import {
   asJsonObject,
-  createProviderHttpClient,
   type JsonObject,
-  messageFrom,
 } from '../_runtime/providerHttp'
-import { type ProviderContext, requireApiKey } from '../_runtime/plugin'
+import { createAuthedClient } from '../_runtime/authedClient'
 import { upstreamError } from '../_runtime/upstreamError'
 
 const SERVICE = 'tavily'
 const REQUEST_TIMEOUT_MS = 30_000
-const http = createProviderHttpClient({ baseUrl: 'https://api.tavily.com/', service: SERVICE })
+const http = createAuthedClient({
+  baseUrl: 'https://api.tavily.com/',
+  service: SERVICE,
+  auth: { kind: 'bearer' },
+  headers: { accept: 'application/json' },
+  errorMessage: {
+    keys: ['detail', 'error', 'message'],
+    fallback: status => `Tavily 返回 HTTP ${status}`,
+  },
+  mapTransportError: ({ kind, message }) => kind === 'timeout'
+    ? upstreamError(504, `Tavily ${REQUEST_TIMEOUT_MS / 1000}s 内没有返回`)
+    : upstreamError(502, message === undefined ? 'Tavily 请求失败' : `Tavily 请求失败:${message}`),
+})
 
 interface RequestOptions {
   body?: JsonObject
@@ -27,23 +38,12 @@ interface RequestOptions {
 }
 
 async function request(ctx: ProviderContext, options: RequestOptions): Promise<JsonObject> {
-  const { data } = await http.request({
+  const { data } = await http.request(ctx, {
     path: options.path,
     method: options.method,
-    headers: {
-      accept: 'application/json',
-      authorization: `Bearer ${requireApiKey(ctx, SERVICE)}`,
-    },
     ...(options.body === undefined ? {} : { json: options.body }),
     timeoutMs: REQUEST_TIMEOUT_MS,
     invalidJsonMessage: 'Tavily 返回了非 JSON 响应',
-    mapError: ({ data: payload, status }) => upstreamError(
-      status,
-      messageFrom(payload, ['detail', 'error', 'message'], `Tavily 返回 HTTP ${status}`),
-    ),
-    mapTransportError: ({ kind, message }) => kind === 'timeout'
-      ? upstreamError(504, `Tavily ${REQUEST_TIMEOUT_MS / 1000}s 内没有返回`)
-      : upstreamError(502, message === undefined ? 'Tavily 请求失败' : `Tavily 请求失败:${message}`),
   })
 
   if (data === undefined) return {}

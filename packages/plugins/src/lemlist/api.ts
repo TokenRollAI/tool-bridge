@@ -20,12 +20,11 @@ import type {
 } from './schema'
 import { compactDefined as compact, asJsonObject as record, trimmedText as text } from '../_runtime/jsonValue'
 import { type ProviderContext, requireApiKey } from '../_runtime/plugin'
-import { createProviderHttpClient } from '../_runtime/providerHttp'
+import { createAuthedClient } from '../_runtime/authedClient'
 import { upstreamError } from '../_runtime/upstreamError'
 
 const SERVICE = 'lemlist'
 const API_BASE = 'https://api.lemlist.com/api'
-const http = createProviderHttpClient({ baseUrl: `${API_BASE}/`, service: SERVICE })
 
 type Json = Record<string, unknown>
 
@@ -46,38 +45,37 @@ function basicAuthHeader(apiKey: string): string {
   return `Basic ${btoa(binary)}`
 }
 
-function errorMessage(payload: unknown): string | undefined {
-  if (typeof payload === 'string') return text(payload)
-  const body = record(payload)
-  if (body === undefined) return undefined
-  return text(body.message) ?? text(body.error) ?? text(body.reason)
-}
+const http = createAuthedClient({
+  baseUrl: `${API_BASE}/`,
+  service: SERVICE,
+  // Basic(用户名留空、key 当密码)不在 helper 的三种头型里,自己拼。
+  auth: { kind: 'custom', headers: ctx => ({ authorization: basicAuthHeader(requireApiKey(ctx, SERVICE)) }) },
+  headers: { accept: 'application/json' },
+  errorMessage: {
+    keys: ['message', 'error', 'reason'],
+    fallback: status => `lemlist 请求失败,HTTP ${status}`,
+  },
+  mapTransportError: ({ message }) => upstreamError(
+    502,
+    message === undefined ? 'lemlist 请求失败' : `lemlist 请求失败: ${message}`,
+  ),
+})
 
 async function request(
   ctx: ProviderContext,
   path: string,
   query: Record<string, unknown> = {},
 ): Promise<unknown> {
-  const apiKey = requireApiKey(ctx, SERVICE)
   const pairs: Array<[string, number | string]> = []
   for (const [key, value] of Object.entries(query)) {
     if (typeof value === 'number' || (typeof value === 'string' && value !== '')) {
       pairs.push([key, value])
     }
   }
-  const { data } = await http.request({
+  const { data } = await http.request(ctx, {
     path,
     query: pairs,
-    headers: { accept: 'application/json', authorization: basicAuthHeader(apiKey) },
     invalidJson: 'text',
-    mapError: ({ data: payload, status }) => upstreamError(
-      status,
-      errorMessage(payload) ?? `lemlist 请求失败,HTTP ${status}`,
-    ),
-    mapTransportError: ({ message }) => upstreamError(
-      502,
-      message === undefined ? 'lemlist 请求失败' : `lemlist 请求失败: ${message}`,
-    ),
   })
   return data ?? null
 }
