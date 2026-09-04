@@ -1,0 +1,66 @@
+---
+description: S3 后端管理：不可变 backendId、active 默认指针、Context 固定绑定、credential generation、真实能力探测与 socket DNS 安全。
+kind: architecture
+relations:
+  related:
+    - store/default-store.mdx
+    - hosts-deploy/maintenance-and-keys.mdx
+code:
+  paths:
+    - packages/app/src/helpModel.ts
+    - packages/core/src/context/objectStore.ts
+    - packages/server/src/storageManager.ts
+    - packages/server/src/s3Objects.ts
+    - packages/server/src/s3Network.ts
+    - packages/server/src/s3Probe.ts
+    - packages/core/src/builtin/management.ts
+    - packages/core/src/managedConfig.ts
+    - packages/core/src/objectStoreService/repository.ts
+    - packages/server/src/pgStateStore.ts
+    - packages/server/src/pgStoreRepository.ts
+    - packages/app/src/contextNodes.ts
+    - packages/app/src/registryMutation.ts
+    - packages/core/src/context/objectProvider.ts
+    - packages/core/src/context/path.ts
+    - packages/cli/src/commands/management.ts
+    - packages/cli/src/commands/ctx.ts
+    - packages/cli/src/commands/skillhub.ts
+    - packages/dashboard/src/pages/system/StorageBackendsPage.tsx
+    - packages/dashboard/src/pages/system/forms/StorageConnectionFields.tsx
+    - packages/dashboard/src/pages/system/forms/storageConnection.ts
+    - packages/server/test/s3ObjectStore.integration.test.ts
+    - packages/server/test/managedSecurity.test.ts
+---
+
+
+# S3 后端身份与能力
+
+`StorageManager` 持有部署级后端记录、active 指针与凭证 generation；S3 SDK 只处理字节，不决定对象 owner、授权、配额或 ready 状态。默认 Compose 对象服务为 SeaweedFS，自定义 endpoint 使用同一通用能力验证，不提供厂商专属预设。
+
+## 后端身份不可变
+
+后端创建后 `backendId`、endpoint、bucket、region 不可改写。`system/storage write` 创建新身份，test 验证该 revision，activate 同时比较 backend revision 与 active revision。两名管理员竞争激活只能一个成功，未经全部检查且 cleanup 成功的后端不能激活。
+
+对象与上传 session 在创建时固定 backendId；PG `beginUpload` 锁定 active 指针，竞争切换时重取候选而不留半条 metadata。上传完成、旧下载、分享和 cleanup 均解析记录所属后端，新 active 只影响未来新建对象。后端有 active/object/session/Context 外键引用时不能删除。切换默认不是迁移：当前没有搬桶、重写旧对象身份或后台自动迁移工作流。
+
+平台 Context/skillhub 使用 `provider:'storage'`，注册时显式选择 backendId 或固定当时 active；后续更新未提供新身份时保留旧绑定，解析失败不能 fallback。`PgStateStore` 在节点写入同一事务维护 Context 引用，不能只在 UI 记一个字段。Context 的 direct S3 provider 另有独立连接与 authRef，不被 active 指针悄悄接管。
+
+## 凭证与可见性
+
+后端 credential 使用独立的内部 authRef 指向加密 SecretStore。普通节点/registry 只保存非敏感身份配置，storage view 只回配置状态、generation、revision 与验证结果，不回 access key、secret 或内部 authRef。
+
+凭证轮换只改凭证，不改位置。先用新凭证跑真实能力探测，再 CAS 发布新 authRef/generation；失败或 revision 输家不能替换活动凭证。解析每次读取权威 generation，driver cache 以 id+generation 为 key；旧缓存不是放宽吊销/凭证策略的理由。旧加密凭证保留用于在途/恢复，当前没有自动清除旧 generation 的完整生命周期承诺。
+
+## 官方 SDK 与网络安全
+
+Node 使用官方 AWS S3 SDK，配置 path-style、禁自动 redirect、单次尝试，不在 app 手写 REST/XML/SigV4。adapter 仍负责 TB 的 streaming cap、deadline、ETag/metadata/error 归一；上传源报错必须同时 abort HTTP 请求，不能只停止读源却挂住连接。
+
+自定义 endpoint 默认只接受安全 HTTPS origin，拒绝 path/query/userinfo 和危险地址。仅部署 installer 固定的 exact internalOrigin 可使用内网/HTTP；网页表单无权扩大此例外。连 socket 的 DNS lookup 再校验真实地址，阻止 save-time DNS 检查后的 rebinding；metadata/link-local/multicast/unspecified 即使在内网例外中也拒绝。重定向不携凭证跟随。
+
+## 探测与传输边界
+
+test 在随机隔离 namespace 执行真实 PUT/HEAD/GET/DELETE、metadata、空/流式对象、特殊字符 key、分页 continuation，并以并发 `If-None-Match` / `If-Match` 写证明对象服务的原子条件语义。错误 ETag 必須拒绝，probe cleanup 是激活条件之一。`HEAD → PUT` 不能模拟原子 compare-and-set；HTTP mock 或能创建 bucket 不构成兼容证据。
+
+标准 Node driver 当前不提供 presign，因此 default Store 使用流式 relay，平台 S3 Context 不广告可选 direct-upload。core/neutral Store client 仍定义严格 exact-size direct 契约供显式能力 driver 使用，但未实现的浏览器 CORS/直传不能标记已交付。当前是 single PUT，无 multipart/resumable。
+
+API、`tb storage` 与 Dashboard 存储后端页提供同权 list/get/add/test/activate/credential update/delete。Context CLI 的 backend 选择与 Dashboard 字段必须落到相同注册 payload；普通 SK 不因拥有 registry read/write 就获得后端管理权限。对字节资源的真实验证每轮有界，保留脱敏证据；不得把 probe namespace 或签名 URL 写入日志。

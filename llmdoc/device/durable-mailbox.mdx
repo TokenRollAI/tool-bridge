@@ -1,26 +1,28 @@
 ---
-description: 统一 device delivery 下 durable pull-only Mailbox 的调用策略、authority、状态/租约、journal barrier、执行歧义与宿主清理边界。
+description: >-
+  统一 device delivery 下 durable pull-only Mailbox 的调用策略、authority、状态/租约、journal
+  barrier、执行歧义与宿主清理边界。
 kind: architecture
 relations:
   requires:
     - protocol/htbp-contract.mdx
   related:
     - protocol/security-boundaries.mdx
-    - device/do-websocket-sessions.mdx
+    - device/websocket-sessions.mdx
     - device/device-daemon.mdx
     - hosts-deploy/state-store-decision.mdx
-    - hosts-deploy/cloudflare-paths.mdx
     - hosts-deploy/node-docker-and-helm.mdx
 code:
   paths:
     - packages/core/src/device/mailbox.ts
+    - packages/core/src/device/mailboxRepository.ts
+    - packages/server/src/pgMailboxRepository.ts
     - packages/core/src/device/session.ts
     - packages/app/src/deviceMailbox.ts
     - packages/app/src/routes/deviceMailbox.ts
     - packages/app/src/routes/invoke.ts
     - packages/app/src/mcpServer.ts
     - packages/app/src/routes/mcp.ts
-    - packages/gateway/src/deviceSession.ts
     - packages/server/src/deviceHub.ts
     - packages/server/src/deviceRouter.ts
     - packages/sdk/src/client/client.ts
@@ -43,14 +45,13 @@ code:
     - packages/dashboard/test/api.test.ts
     - packages/dashboard/test/cliHint.dom.test.tsx
 ---
-
 # Durable Device Mailbox
 
 Mailbox 是离线设备的 durable operation ledger：调用方在普通 command invoke 上显式选择 `mailbox` 或
 `fallback`，设备在自己的运行时机主动 pull。它不是 FIFO queue、系统推送或 WebSocket 会话的替代品；
 没有 APNs/FCM、WS hint、隐式后台轮询，也不会把任意 realtime 错误自动转成 operation。
 WebSocket/presence/generation 归
-[设备会话](./do-websocket-sessions.mdx)；固定 wire 与路径归 [HTBP 契约](../protocol/htbp-contract.mdx)。
+[设备会话](websocket-sessions.mdx)；固定 wire 与路径归 [HTBP 契约](../protocol/htbp-contract.mdx)。
 Presence 只表示 realtime 当前是否可路由,不是设备身份或 Mailbox 能力的可见性条件；offline 设备及其
 mailbox-capable command 仍须可发现并允许入队。
 
@@ -84,20 +85,11 @@ mountPath 且含命令叶子。Registry 的系统写入 `deviceId` 是数据面�
 
 ## Authority、存储与加密
 
-StateStore 是 operation authority。每条记录独占
-`deviceop:<sha256(deviceId)>:<operationId>`，所有 mutation 使用 `compareAndSwap`；缺 CAS 时 Mailbox
-fail closed。记录的 device/caller/target/trace/时间/状态元数据是明文，arguments 与 terminal
-result/error 分字段 AES-256-GCM 加密，AAD 绑定 operation id 与字段。
+`MailboxRepository` 是 operation authority；标准宿主用 `PgMailboxRepository`，不再把 operation 写成通用 KV key。device/caller/target/trace/时间/状态元数据明文保存，arguments 与 terminal result/error 分字段 AES-GCM 加密，AAD 绑定 operation id 与字段，ciphertext 带 keyId。
 
-AES key 从 32-byte base64url `TB_SECRET_ENCRYPTION_KEY` 经 Mailbox 专属 HKDF-SHA256 salt/info 派生，
-不复用 SecretStore 的“只进不出”对象或 Store capability HMAC 域。这只是 at-rest encryption，不是 E2E：
-gateway enqueue/claim/get/complete 时持有明文，传输仍依赖 HTTPS。当前没有 key version/keyring/migration；
-根必须跨 rollout 稳定，直接轮换会让 retained operation 无法解密。
+密钥由部署 encryption keyring 经 Mailbox 专属 HKDF 域派生，不复用 SecretStore ciphertext 或 Store HMAC 域。这是 at-rest encryption，不是 E2E，服务端处理调用时仍持明文。新写用 active key；旧数据按 keyId 解密，重加密与退役通过 [维护工作流](../hosts-deploy/maintenance-and-keys.mdx) 执行，缺未知 keyId 时 fail closed。
 
-arguments 与 terminal result/error 分别按 canonical JSON 限为 256 KiB，Mailbox HTTP body 也在 JSON
-解析前有界读取。pending cap 按 device 前缀扫描后近似判定，并发 enqueue 可小幅突破；该扫描还会经过
-retention 内的历史终态，因此总成本不受 pending cap 保证。claim 单请求按 page 有界，CAS loser 在同页
-继续找下一条。operation key 按随机/幂等摘要排序，当前不承诺 FIFO。
+payload/result 各自按 canonical JSON 有硬上限，HTTP 解析前也有界读取。PG enqueue 用每设备事务锁保护 pending 计数和幂等插入，因此并发也不突破上限；claim 查询按 device/key/state/TTL 筛选，候选授权后以 revision 和 lease 条件更新。随机/幂等摘要顺序不承诺 FIFO，CAS 输家继续同页候选。
 
 ## 状态、lease 与执行歧义
 
@@ -128,7 +120,7 @@ queued cancel 保证 handler 尚未由该 operation 启动；claimed cancel/Abor
 进入 Mailbox 分支当次执行 node read + call，并快照 caller `{keyId,owner}` 与 `traceId`。之后 caller SK 的
 disabled/delete/expiry 不撤销 operation；这是授权快照。caller owner 的另一个 SK 或完整 targetPath 上的
 admin 可 get/list/cancel。单条无权访问按 not_found 隐藏；list 做授权感知扫描，隐藏记录不进入 items，也
-不通过 raw StateStore cursor 暴露 identity/数量。
+不通过 raw repository cursor 暴露 identity/数量。
 
 operation 还绑定 enqueue 时设备节点的 `registeredBy` keyId。claim/renew/complete 每次都走普通 HTTP
 Bearer；SDK 每次调用 `credentialProvider.prepare({purpose:'http'})`，服务端同时复核当前 ctx.keyId、
@@ -169,7 +161,7 @@ barrier 真正先于 handler。过期 entry 可清理；损坏的 executing/term
 
 跨层契约测试经 `createTbApp` 的真实 host-neutral Hono request pipeline（in-process fetch）固定一条完整
 发现驱动闭环：Agent 读取 command help 后以一次 unified invoke 请求 `fallback`，gateway 入队，Device
-claim 后 complete，Agent 最后 get operation，共五次 HTTP request。它跨过真实认证、路由、StateStore、
+claim 后 complete，Agent 最后 get operation，共五次 HTTP request。它跨过真实认证、路由、领域仓库、
 SDK client 与 processor，证明普通 command arguments、调用 policy 和两侧数据面可以衔接；不覆盖 Node
 listener、socket 或真实网络。已缓存完整 path/delivery 的 Agent 可跳过 help，只需一次工具调用即可发起
 fallback；结果不需要同步返回时也可省略 get。claim/complete 是设备侧协议，默认流程不增加固定 polling。
@@ -178,19 +170,8 @@ fallback；结果不需要同步返回时也可省略 get。claim/complete 是�
 reconnect ready→drain→claim/共享 handler/complete。只断言 app helper 可入队或 mock processor 被创建,
 不能证明离线投递闭环已经交付。
 
-同一小邮箱 fixture 还把权威存储工作量守在三次 CAS、两次 prefix list 与不超过二十次 point get；这些是
-防止一次快路径退化为无界扫描的回归预算，只适用于该固定 fixture，不是生产延迟或任意 mailbox 大小的
-性能 SLA。wall-clock 数字受机器与 CI 噪声影响，不进入稳定契约。
-
 ## 宿主清理
 
-core cleanup 把到总 TTL 的非终态 CAS 为 expired，并在 terminal retention 后 CAS delete。app wrapper
-使用独立持久 cursor `sys:device-mailbox-cleanup-progress:v1`，每 tick 有界分页，不由普通请求触发全局扫描。
+core cleanup 对到总 TTL 的非终态做条件更新为 expired，在 terminal retention 后删除；app 以独立持久 cursor 有界分页。Node 与 Store 共用 maintenance timer/in-flight guard，周期取已应用 `storeCleanupIntervalSec`。清理不由普通请求扫描全局 operation，也不触碰设备 installation journal。
 
-- Node 在监听成功后异步首轮，随后与 Store 共用 `TB_STORE_CLEANUP_INTERVAL_SEC` timer/in-flight guard；
-  缺 encryption root 时跳过 Mailbox。
-- Workers 的既有 Cron scheduled handler 同 tick 清 Store 与 Mailbox，使用短生命周期 D1 first-primary
-  session；不需要第二个 cron、R2 scan 或 DeviceSession DO。
-
-Compose/Helm/Deploy template 必须把 encryption root 当 Mailbox 部署前提。后端切换不迁移 operation；
-Node SQLite→PG 或部署到新 D1 时得到独立空 ledger，不能把它当透明 failover。
+数据库迁移必须保留 operation、加密 keyring 和 instanceId，切地址本身不是迁移。设备本地 journal 继续留在设备：它保护 handler 前的 durable executing barrier，不能迁成服务端 S3 或可丢弃内存。完整数据库与根恢复见 [维护与密钥](../hosts-deploy/maintenance-and-keys.mdx)。

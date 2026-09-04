@@ -1,5 +1,5 @@
 ---
-description: 设备会话的服务端与客户端边界:app 共享 device lifecycle/authority recheck、DO/Node 调度与连接代际、presence 三态及 SDK device neutral 约束。
+description: Node 设备 WebSocket 会话与 Redis 路由：device authority recheck、连接代际、presence 三态和 neutral SDK supervisor。
 kind: guide
 relations:
   related:
@@ -7,6 +7,7 @@ relations:
     - store/default-store.mdx
 code:
   paths:
+    - packages/core/src/node/fsObjectStore.ts
     - packages/core/src/device/client.ts
     - packages/core/src/device/frames.ts
     - packages/core/src/device/helpModel.ts
@@ -16,7 +17,6 @@ code:
     - packages/core/src/device/shellAllow.ts
     - packages/app/src/deviceHello.ts
     - packages/app/src/deviceLifecycle.ts
-    - packages/gateway/src/deviceSession.ts
     - packages/server/src/deviceHub.ts
     - packages/server/src/deviceRouter.ts
     - packages/sdk/src/device/connection.ts
@@ -30,33 +30,27 @@ code:
     - packages/core/test/device/shellAllow.test.ts
     - packages/sdk/test/device.test.ts
 ---
+# Node 设备会话、presence 与 SDK device
 
-# 设备会话:DO 休眠、presence 与 SDK device
-
-Cloudflare 设备连接由 Durable Object(`DeviceSession`)持有。正确性不只包括"能连上",还包括对象被回收后能恢复会话归属并继续转发。Node 宿主的对应实现是 `deviceHub.ts`/`deviceRouter.ts`(多副本 Redis 路由见 [node-docker-and-helm](../hosts-deploy/node-docker-and-helm.mdx))。
+Node 的 `DeviceHub` 持有活 WebSocket、连接 generation 与本进程 call 去重；`DeviceRouter` 提供可选 Redis 跨副本路由。PG registry 保留设备与发现信息，重启后设备需重连，不能把持久 registry online 位当成活 socket 或持久执行结果。
 
 ## 不变量
 
-- 设备帧使用 core 的稳定 codec(`packages/core/src/device/frames.ts`);ping/pong 字面量由共享常量产生。
-- DO 使用 WebSocket auto-response 处理 heartbeat,避免仅为 pong 唤醒对象。
-- 当前活动连接标识写入 DO storage;对象恢复时从 storage 重建必要状态,不依赖旧内存。
-- D1 state store(registry)里的 online 位不是活连接租约;真正发送以 DO 内活动 socket 为准。发现面不再只凭这个位:节点带 `lastSeenAt`(hello 与 alarm 心跳巡检写入),`~tree`/`~help`/`device ls` 投影时经 `derivePresence` 结合 TTL 把过期的 online 降级为 `stale`——避免树谎报 online 而调用返回 offline。
-- auto-response 应答 ping/pong **不唤醒对象**,故心跳无法在收到 pong 时写 state store。改由周期 alarm 巡检:有活连接时读 `getWebSocketAutoResponseTimestamp(ws)` 回写 `lastSeenAt` 并重排 alarm;无活连接且已断线时才执行 reclaim。同一个 alarm 多用途,靠 `meta.activeConnId` 是否存在分流。
-- 投影是只读降级:读路径按 `lastSeenAt` 把 online 显示为 stale,但**绝不回写** `setOnline(false)`(权威状态只由连接生命周期写)。
-- close/error、替换连接和过期状态都必须清理,且不得让旧连接覆盖新连接(generation guard)。Node 宿主启动 `sweepOrphans` 的崩溃态分支(meta 无 disconnectedAt 却无活连接)也要同步把 registry online 翻 false,不能只排 reclaim。
-
-`packages/app/src/deviceLifecycle.ts` 是 Workers `DeviceSession` 与 Node `DeviceHub` 的共享业务 lifecycle owner：调用/唤醒前重验凭证 keyId、当前 `registerPaths` 与部署追加的 reserved roots，断线时下线 registry，回收时以“先标记 search 脏 → 删 canonical 子树 → 清索引”顺序收敛。`deviceHello.ts` 拥有异构 hello/expose 写入，规范化后的路径冲突必须在落库前拒绝。DO/server 只拥有 alarm/timer、active connection identity/generation 和各自 meta 存储；不得重新实现共享权限或回收序列。
+- 设备帧使用 core 稳定 codec，ping/pong 字面量由共享常量产生；socket 生命周期驱动心跳与在线状态。
+- `lastSeenAt` 与 TTL 只在发现投影中把过期 online 降级为 stale，读路径绝不回写下线；权威 online 由连接生命周期维护。
+- close/error、替换连接、孤儿清扫与回收都须有 generation guard，旧连接不得覆盖新连接。启动 sweep 发现没有活 socket 的崩溃态时同步下线 registry。
+- `deviceLifecycle.ts` 统一调用前 keyId/registerPaths/保留根重验、断线下线和“先标记 search 脏 → 删 canonical 子树 → 清索引”的回收顺序。`deviceHello.ts` 在落库前拒绝规范化路径冲突，DeviceHub 不复制这些安全链。
 
 ## 为什么保留 raw WebSocket
 
 设备反向注册的稳定 wire 是 raw WebSocket 上的 core JSON frame，不是 Socket.IO/Engine.IO 协议。Socket.IO client 不能直接连接当前 endpoint；同时更换两端也不会代替 generation、presence、reclaim、call/result/cancel 或 Store capability 这些服务端权威状态机，反而增加第二层协议。因此服务端保留 raw WS；客户端可使用 PartySocket 的 reconnect transport，但不引入 PartyServer/rooms 来重新定义连接归属。
 
-可复用的边界是 `@tool-bridge/sdk/device` 的 portable connection supervisor：它持有 reconnect、heartbeat、credential refresh、suspend/resume 与 call dispatch；Node CLI、React Native 等宿主只注入 WebSocket factory 和凭证 provider。CLI 的 `deviceRuntime.ts` 可保留 shell/FS/structured process dispatch 与 `ws` adapter，不得复制 supervisor 状态机。任何未来协议替换都必须先证明上述安全不变量和 Workers DO hibernation 语义仍可保持，不能只以 rooms/reconnect API 更便利为理由。
+可复用的边界是 `@tool-bridge/sdk/device` 的 portable connection supervisor：它持有 reconnect、heartbeat、credential refresh、suspend/resume 与 call dispatch；Node CLI、React Native 等宿主只注入 WebSocket factory 和凭证 provider。CLI 的 `deviceRuntime.ts` 可保留 shell/FS/structured process dispatch 与 `ws` adapter，不得复制 supervisor 状态机。任何未来协议替换都必须先证明上述连接代际、权限和执行歧义不变量仍可保持，不能只以 rooms/reconnect API 更便利为理由。
 
 ## Durable Mailbox 与 WebSocket 的分界
 
 Mailbox 是独立的 pull-only operation authority，详见
-[Durable Device Mailbox](./durable-mailbox.mdx)。本 guide 只拥有 realtime frame、presence、socket
+[Durable Device Mailbox](durable-mailbox.mdx)。本 guide 只拥有 realtime frame、presence、socket
 generation 与 connection supervisor；当前没有 Mailbox WS hint，Device SDK 的 hello/handler/frame 也没有
 为 Mailbox 增加另一条 WS 协议。普通 command POST 的 `~delivery` 可选择 realtime、mailbox 或 fallback；
 fallback 仅在本节 realtime 生命周期明确给出 `not_dispatched` 时转入队，`completed` 或 `unknown` 不入队。
@@ -84,18 +78,7 @@ status/poll、增量 stdout/stderr 或重连恢复。另行选择 mailbox delive
 
 ## 验证
 
-普通 Miniflare 测试能覆盖帧、路由和状态转换,但不能证明真实边缘发生过 eviction。真实环境验证使用:
-
-```bash
-TB_BASE_URL=https://example.invalid \
-TB_ADMIN_SK=... \
-TB_VERIFY_HIBERNATION=1 \
-pnpm tsx scripts/verify-device.ts
-```
-
-脚本会跨越足够长的空闲窗口后再次调用。该验证消耗真实部署,只在明确授权后执行;一次成功的时间数字不是长期 SLA,也不应固化进文档。
-
-若失败,分别检查设备端 heartbeat、DO storage 的连接归属、state store 的 presence 记录和调用端超时,不要用增加重试掩盖状态恢复错误。
+共享帧/业务单测验证协议，Node listener + 真实 socket 测试验证注册、重连、presence、旧连接拒绝和 realtime 调用；多副本另用真实 Redis 验证路由与断连。`scripts/verify-device.ts` 是可授权的部署 smoke，不用固定等待或重试掩盖 generation/回收错误。真实服务证据与本地集成测试分开记录。
 
 ## SDK device 运行时边界
 
@@ -107,13 +90,13 @@ pnpm tsx scripts/verify-device.ts
   wire `context.upload`(`token/expiresAt/maxBytes/maxObjects`)。SDK 在进入用户 handler 前删除原始 token，
   handler 的 `context.upload` 只含期限/限额，并获得
   `call.uploadObject({body,contentType,filename?,size?,checksum?,idempotencyKey?})`。它经普通 HTTP 创建
-  upload session；只有 create 携带精确 size 且 backend 能签 `Content-Length` 时走 R2/S3 direct，否则
+  upload session；只有 create 携带精确 size 且 backend 能签 `Content-Length` 时走 S3 direct，否则
   relay。result 帧只返回 JSON 可序列化的 ready descriptor/`store://default/...`。owner 是 caller，
   producer 是 `device:<deviceId>`。
 - `call.uploadObject` 会把 create capability 放进 `x-tb-store-capability`、把 session capability 放进
   `x-tb-store-upload`，不会塞进 arguments、result 或 URL；网关在 call 结束后撤销 create capability，
   期限与后台清理兜底。SDK 只用已知 size 做本地早拒，不在 create 成功前自行递增对象计数；数量/字节
-  reservation 与幂等 replay 以服务端 CAS 为准。call idempotency 还绑定 producer + call id，不能跨 call
+  reservation 与幂等 replay 以服务端领域事务为准。call idempotency 还绑定 producer + call id，不能跨 call
   恢复 session。老网关不带 upload 时明确 `unavailable`，不能悄悄退回 Context。
 - device 子入口也保留顶层 `uploadObject`，使用 `purpose:'http'` 的设备 Bearer 身份做自主 Store 上传。
   旧 `uploadContextObject` 已删除。Context 的 `create_upload`、`tb ctx upload` 与 Dashboard Context upload

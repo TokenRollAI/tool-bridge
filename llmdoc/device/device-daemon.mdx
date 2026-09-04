@@ -1,9 +1,11 @@
 ---
-description: tb daemon 的 Linux systemd user service 生命周期:安装更新、ready 后 Mailbox drain、installation-local journal、失败回滚与验证边界。
+description: >-
+  tb daemon 的 Linux systemd user service 生命周期:安装更新、ready 后 Mailbox
+  drain、installation-local journal、失败回滚与验证边界。
 kind: guide
 relations:
   related:
-    - device/do-websocket-sessions.mdx
+    - device/websocket-sessions.mdx
     - device/durable-mailbox.mdx
 code:
   paths:
@@ -15,10 +17,9 @@ code:
     - packages/cli/test/daemon.test.ts
     - packages/cli/test/deviceRuntimeMailbox.test.ts
 ---
-
 # Linux 设备 daemon
 
-`tb daemon` 是 Linux 本机设备连接的生命周期入口,适用于需要在 SSH 退出、网络闪断或机器重启后继续在线的设备。当前只支持 systemd user service。会话与在线状态的服务端语义见 [do-websocket-sessions](./do-websocket-sessions.mdx)。
+`tb daemon` 是 Linux 本机设备连接的生命周期入口,适用于需要在 SSH 退出、网络闪断或机器重启后继续在线的设备。当前只支持 systemd user service。会话与在线状态的服务端语义见 [websocket-sessions](websocket-sessions.mdx)。
 
 ## 前置条件
 
@@ -67,7 +68,7 @@ entry 权限分别为 `0700`/`0600`。`put` 以 fsync 临时文件、atomic rena
 
 close/进程停止与 suspend 都 abort 当前 drain；resume 后由新的 `ready` 再启动 drain。非 abort 的 Mailbox
 错误进入前台 JSON/标准错误或 daemon journal,不能把 processor 失败当成连接已完成消费。完整状态机、lease
-与 journal replay 语义见 [durable-mailbox](./durable-mailbox.mdx)。
+与 journal replay 语义见 [durable-mailbox](durable-mailbox.mdx)。
 
 structured child 缺省只继承 HOME/PATH、locale、用户、临时目录和时区等基础环境。`inheritEnv` 保存并解析的是
 本机环境变量名,不是 SecretStore 引用;显式列入 token/云凭证会把值交给 child,当前也没有 secret-aware 输出

@@ -1,51 +1,42 @@
 ---
-description: tool-bridge 的产品模型、包依赖方向、SDK neutral 子入口共享 transport/类型权威、宿主注入面与全仓工程公约;跨 topic 的总入口。
+description: Tool Bridge 自托管产品模型、Node/PG/S3 包边界、neutral SDK 与工程选型公约；跨 topic 总入口。
 kind: architecture
 relations:
   related:
-    - device/durable-mailbox.mdx
+    - hosts-deploy/managed-configuration.mdx
     - protocol/htbp-contract.mdx
     - protocol/security-boundaries.mdx
 code:
   paths:
     - package.json
-    - knip.jsonc
     - pnpm-workspace.yaml
+    - knip.jsonc
     - packages/core/src/types.ts
     - packages/core/src/errors.ts
-    - packages/core/src/feedback/store.ts
-    - packages/core/src/operation/**
-    - packages/core/src/protocol/**
     - packages/core/src/webGlobals.ts
-    - packages/app/src/bootstrap.ts
+    - packages/core/tsconfig.json
+    - packages/dashboard/tsconfig.app.json
     - packages/sdk/src/index.ts
-    - packages/sdk/src/client/**
-    - packages/sdk/src/store/**
-    - packages/sdk/src/device/**
-    - packages/sdk/src/shared/transport.ts
+    - packages/sdk/src/types.ts
     - packages/sdk/src/toolBridge.ts
+    - packages/sdk/src/shared/transport.ts
+    - packages/sdk/src/client/index.ts
+    - packages/sdk/src/device/index.ts
+    - packages/sdk/src/store/index.ts
     - packages/sdk/tsconfig.web.json
     - packages/sdk/tsup.web.config.ts
-    - packages/cli/tsconfig.json
-    - packages/cli/vitest.config.ts
-    - packages/dashboard/tsconfig.app.json
-    - packages/plugins/src/_runtime/providerHttp.ts
-    - scripts/pack-and-verify-package.mjs
-    - scripts/package-release.test.mjs
-    - scripts/select-release-packages.mjs
 ---
+
 
 # tool-bridge 整体架构
 
 tool-bridge 把工具、上下文、设备与远端服务组织成一棵受权限约束的 HTBP 树。调用方通过统一的 `~help`、`~tree`、`~search` 发现能力,invoke 以唯一形态 `POST /<nodePath>/<command>` 调用：body 是 arguments 本体，设备命令可另带保留顶层控制字段 `~delivery: realtime|mailbox|fallback`，没有第二个 enqueue URL 或 `{tool,arguments}` 信封。命令是节点下的虚拟叶子,标识符大小写不敏感、规范化为小写。HTTP、CLI(`tb`)、Dashboard、`/~mcp` 投影与 Agent Skill 是同一控制面的五个入口。
 
-项目处于 pre-launch 开发期,无正式生产环境;共享或临时部署只用于验证。项目内部旧预览形状可直接删除,不留兼容 flag;外部协议互操作(MCP era、Help DSL 未知项忽略、S3 兼容)与安全下界不可删。
+项目的标准宿主只有 Node 自托管服务，默认完整 Compose 栈由应用、PostgreSQL 与 S3 兼容对象服务组成，Redis 是可选的跨副本设备路由设施。业务逻辑不依赖部署平台；Railway 等平台只负责运行容器、网络和持久卷。
 
-已接受的目标是只支持 self-hosted，以完整 Docker Compose 提供本地运行和自行部署。实施阶段将完全移除 Cloudflare 专属宿主、适配器、工具、模板及部署文档，包括 Workers、D1、Durable Objects 与 R2 专属集成，不保留次级适配或旧版支持线；通用 S3 兼容能力和共享设备协议、安全及执行语义继续保留。当前代码中的 Cloudflare 支持尚未删除，下文包职责与宿主说明仍描述当前实现。
+PostgreSQL 是权威状态的唯一生产数据库；服务端不提供 SQLite、部署级文件 ObjectStore 或旧配置导入。无数据库的全新启动只提供受本机配对保护的安装面；已初始化实例故障进入恢复态，不重新开放匿名安装。既有数据格式与旧环境变量不属于受支持迁移面。设备暴露本地目录与 installation journal 仍是设备端能力，不属于被删除的服务端对象存储。
 
-SQLite 退役已获认可：目标是移除 Node 服务的 SQLite 运行后端及对应公开导出，减少长期维护的后端分支；当前实现仍为 Node SQLite/PG 与 Workers D1。S3 替换部署级文件对象后端、Dashboard/API/CLI 管理通用对象后端属于规划能力，尚未实现；默认对象服务仍待验证选型。分阶段目标、未决选型与验收条件见仓库内的 `docs/self-hosted-architecture-refactor.md`。
-
-配置的已接受目标是让全部现有产品环境变量设置均可经 Dashboard、API 与 CLI 操作，默认 Compose 无需手填环境变量。运行配置以 PostgreSQL 为权威；数据库之外只保留解决 PG 地址、加密根和首次配对的最小 bootstrap 文件/secret。启动或部署设置必须明确重启要求，或由受限本地安装器执行 apply；业务容器不挂载 Docker socket。该配置管理面尚未实现，不把启动信任根伪装成可即时生效的普通运行配置。
+运行配置以 PG 为权威，数据库地址、实例身份、加密/签名根与首次配对状态留在受保护的最小 bootstrap 目录。配置、后端、维护与部署任务均有 API、CLI 和 Dashboard 入口；保存 desired revision 与实际应用成功是两件事。部署 apply 由业务容器外的受限本地执行器完成，业务容器不持有 Docker socket。详见 [受管理配置](hosts-deploy/managed-configuration.mdx)。
 
 ## 依赖方向与包职责
 
@@ -54,35 +45,32 @@ core
   ↑
 app ← plugins
   ↑       ↑
-gateway  plugin-sdk
-server
+server   plugin-sdk
 sdk (根入口 Node 22+;./client、./store、./device 为 neutral 子入口)
 CLI / Dashboard ──> sdk neutral entries ──HTTP──> app contract
 ```
 
-- `core`:类型、授权、树、store、builtin 纯逻辑、plugin/search 协议，以及 CAS 驱动的 durable device Mailbox
-  状态机；固定控制面 Zod wire/OpenAPI 与 HTBP 命令注册表也在此维护,不碰网络、环境变量、运行时资源。
-- `app`:Hono 路由、发现/调用、provider 编排、宿主注入面;不含 Wrangler/SQLite/专属启动。
-- `gateway`(Workers)与 `server`(Node)只装配运行时适配器,不复制业务分支、不改写共享协议语义。
+- `core`:类型、授权、树、store、builtin 纯逻辑、plugin/search 协议，以及 Store/Mailbox 的领域契约与 durable device 状态机；固定控制面 Zod wire/OpenAPI 与 HTBP 命令注册表也在此维护,不碰网络、环境变量、运行时资源。
+- `app`:Hono 路由、发现/调用、provider 编排、宿主注入面;不包含数据库驱动、S3 SDK 或专属启动。
+- `server` 装配 PG 领域仓库、官方 S3 SDK、Node WebSocket、bootstrap 和受管理维护；业务路由与协议语义仍归 app/core。
 - `sdk`:根入口嵌入 app 并以 Node ws 反向连接;`./client`、`./store`、`./device` 是面向 Web 标准宿主的 neutral 产物,不得反向触达 app、Node ws、`node:*` 或根入口。三个子入口的 HTTP 底层共用 `shared/transport.ts`:它是 TBError body、非规范错误体的 status fallback、credential header 与 timeout 边界的单一权威，各 client 只保留自己的上下文措辞和脱敏策略。`./client` 另是 builtin/system 管理视图类型、`ACTIONS` 与 presence 派生的 public consumer 出口；真源仍在 private core，公开消费者不应手抄。`./device` 同时提供实时 supervisor 与显式 pull-only Mailbox processor，后者要求宿主注入 durable journal；CLI/Dashboard 对固定控制面、Store 与设备连接的复用都应停在这些子入口。
 - `plugin-sdk`:descriptor、OperationRegistry、envelope、受控出站;`plugins`:内置 provider 源码 + 生成 catalog + 迁移闸门。
 - `cli`:严格 argv 与脚本输出,不是服务端唯一校验层;`dashboard`:消费同一 HTTP 契约,不 import core。
-- `core` 与 `plugins` 是 private workspace 包,其余七个是 public artifact;发布判断按 artifact ownership,不沿依赖图机械 bump。
+- `core` 与 `plugins` 是 private workspace 包,其余六个是 public artifact;发布判断按 artifact ownership,不沿依赖图机械 bump。
 
 ## 宿主注入面
 
-`TbAppDeps` 基础注入点:`state: StateStore`、`objects?`、`secrets`、`device?: DeviceChannel`、`search?: SearchIndex`,另有 assets、remote、plugin catalog/bindings、本地 provider 与缓存/安全配置。`objects` 在 app 只为旧自定义宿主保持 optional；Node/Workers 标准宿主始终注入，SDK `ToolBridgeConfig.objects` 必填，以保证 deployment-level default Store。Store 权威状态要求 `StateStore.compareAndSwap`，缺 CAS fail closed。`DeviceChannel` 是 app 当前消费的真实接口,不要把未实现的 SDK `DeviceTransport` 当成现状。三宿主 StateStore 均为强一致 SQL 后端(Workers=D1、Node=SQLite/PG),SK 吊销即时生效,共享契约测试对拍语义。
+`TbAppDeps` 把通用状态 `StateStore`、字节 `ObjectStore`、`SecretStore`、实时 `DeviceChannel` 与派生 `SearchIndex` 分开注入。Store/Mailbox 的权威元数据另外要求 `StoreRepository` / `MailboxRepository`；不能把普通 KV CAS 或内存锁伪装为生产领域事务。SDK 根入口需显式提供依赖，缺领域依赖时相关能力 fail closed，内存替身只用于测试与明确的易失嵌入场景。
 
-Mailbox 复用 `state` 与部署 `encryptionKey`，不增加消息队列或推送基础设施；缺 encryption root/CAS 时该
-能力 fail closed。它与 `DeviceChannel` 解耦：WebSocket 负责 realtime call，Mailbox operation 经 HTTP
-claim/renew/complete 主动消费。`fallback` 是调用方显式 policy：只在 realtime dispatch 被宿主明确判定为
-`not_dispatched` 时入队；已完成（含设备业务错误）或可能已分发但结果未知时绝不创建第二次执行。
+标准 Node 装配用 `PgStateStore` 保存节点、SK、加密 secret 等通用记录，领域仓库维护对象/上传/配额和设备 operation，S3 只保存字节。对象、上传与平台 Context 固定绑定不可变 `backendId`；active 后端只影响新建操作，不迁移旧数据。SK 吊销每次读权威记录即时生效，Redis/搜索/缓存不能成为授权真源。
+
+Mailbox 与 WebSocket 解耦：前者经 HTTP 主动 claim/renew/complete，后者只负责 realtime call。`fallback` 仅在宿主明确判定 `not_dispatched` 时入队；已完成（含设备业务错误）或可能分发但结果未知时绝不创建第二次执行。加密数据使用带 keyId 的 keyring，轮换、重加密和旧根退役归 [维护与密钥](hosts-deploy/maintenance-and-keys.mdx)。
 
 节点 kind 唯一清单在 `packages/core/src/types.ts` 的 `NODE_KINDS`;bootstrap builtin 清单在 `packages/app/src/bootstrap.ts` 的 `BUILTIN_MODULES`;不在文档手抄数量。
 
 ## 外部仓库边界
 
-- 公共站点 `TokenRollAI/tool-bridge-site`(Cloudflare Pages Git Integration);Agent Skill 仓库 `TokenRollAI/tool-bridge-skill`。
+- 公共站点 `TokenRollAI/tool-bridge-site`;Agent Skill 仓库 `TokenRollAI/tool-bridge-skill`。
 - 动态事实的真源优先级:实例运行时(`~help`/`~describe`)> 对应版本代码 > 公共教程;skill 与站点不静态复制实例工具目录。
 
 ## 工程公约
@@ -93,15 +81,22 @@ claim/renew/complete 主动消费。`fallback` 是调用方显式 policy：只�
 4. 真实外部资源(云部署、真实上游)验证每轮最多一次且需明确授权;证据留 PR/CI,不写进 llmdoc。
 5. llmdoc 不记录精确版本、测试数、URL、资源 ID、登录态;精确计数从当前工作树实查。代码是行为真源,实现与文档冲突时同轮修文档。
 6. deny 优先、不可见路径返回 404;secret/SK 不进日志、URL、argv、toast、feedback 或 llmdoc。
-7. wrangler 与配置模板保持账户中立;真实账户与资源 ID 由 provision 回填,不提交。
+7. 部署模板不携带真实连接串、资源 ID 或密钥；产品配置真源在 schema/PG，平台信任根留在受保护 bootstrap。
 8. 发布校验和发布必须消费同一个 tarball;registry 元数据存在、tarball 可安装、bin 可执行是三个独立证据。
 9. `.llmdoc-tmp/` 是可丢弃调查缓存,复用前重新核对,不从稳定文档链接。
 10. 重复实现是引入组件的必要条件,不是充分条件:新依赖必须同时证明运行时相容、安全语义不退化和最终产物净收益。普通 provider JSON HTTP 复用仓库薄层,不因为引入通用 HTTP 库而放开 retry、redirect 或裸 `fetch`。
 11. workspace 内消费 SDK neutral 子入口时，typecheck/test/bundle 的 resolver 都必须显式落到对应 source
     entry，不能依赖 gitignored `dist`。`pnpm verify` 保持无 build 副作用；发布声明与 tarball 则由独立强制
     build/pack 门验证。source-resolution 回归必须在本地已有 dist 时仍能识别错误解析目标。
+    neutral 消费者会沿 source 映射检查 core；共享源码必须满足下游的 erasableSyntaxOnly，不能只在 Node
+    包 typecheck 通过后判定可发布。core 自身启用同一约束，让 parameter property 等需要运行时转换的
+    TypeScript 语法在真源包先失败；构造器使用显式字段声明与赋值。
 12. private core 被 bundle 进每个 public 产物各一份,`@tool-bridge/sdk` 根入口与 neutral 子入口又是两次构建,同一进程可同时存在多个 `TBError` 类。识别 TBError 只能用 `isTBError`:它按基类构造器写入的 `Symbol.for` 品牌加 wire 形状判定,子类(如 `EgressBlockedError`)同样通过;任何包都不得用 `instanceof TBError` 做识别——跨副本恒为 false,会把已归一的错误降级成 `internal` 500。识别通过后为统一 `toJSON` 路径把外来副本重建成本地类是另一回事。`isTBError` 由 core、`plugin-sdk`、`sdk` 根入口及 `./store`、`./device` 子入口导出。
 
 ## Topic 导航
 
-契约与安全见 `protocol/`;宿主装配与 provider 编排见 `app-runtime/`;部署级 default Store 当前契约见 `store/`;搜索索引见 `search/`;插件见 `plugins/`;设备 realtime 会话见 `device/do-websocket-sessions.mdx`，durable pull ledger 见 `device/durable-mailbox.mdx`;部署与宿主产物见 `hosts-deploy/`;CLI 契约见 `cli/`;Dashboard 见 `dashboard/`;发布与验证纪律见 `release/`。
+契约与安全见 `protocol/`;宿主装配与 provider 编排见 `app-runtime/`;部署级 default Store 当前契约见 `store/`;搜索索引见 `search/`;插件见 `plugins/`;设备 realtime 会话见 `device/websocket-sessions.mdx`，durable pull ledger 见 `device/durable-mailbox.mdx`;部署与宿主产物见 `hosts-deploy/`;CLI 契约见 `cli/`;Dashboard 见 `dashboard/`;发布与验证纪律见 `release/`。
+
+## 基础设施选型约定
+
+HTTP 路由使用 Hono，运行时和 wire 校验使用 zod，Node S3 使用官方 AWS SDK，PostgreSQL 使用现有 postgres 驱动，CLI 使用 commander。bootstrap 的原子文件写与跨进程锁分别使用 write-file-atomic 与 proper-lockfile，数据库搬迁使用 pg_dump/pg_restore。不可另造路由、签名、argv、重试或持久化框架；新增组件必须先核验成熟实现，并证明保留安全/失败语义和最终产物净收益。

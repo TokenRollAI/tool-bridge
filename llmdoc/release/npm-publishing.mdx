@@ -1,8 +1,21 @@
 ---
-description: npm 发布与打包闸门:七公开包与 artifact ownership bump 判断、0.x 版本规则、pack-and-verify 同一 tarball 原则、协议扫描与 registry 复验、tag/workflow 纪律。
+description: >-
+  npm 发布与打包闸门:公开包与 artifact ownership bump 判断、0.x 版本规则、pack-and-verify 同一
+  tarball 原则、协议扫描与 registry 复验、tag/workflow 纪律。
 kind: guide
+relations:
+  related:
+    - device/websocket-sessions.mdx
 code:
   paths:
+    - packages/plugins/package.json
+    - packages/core/package.json
+    - packages/server/package.json
+    - packages/sdk/package.json
+    - packages/plugin-sdk/package.json
+    - packages/dashboard/package.json
+    - packages/cli/package.json
+    - packages/app/package.json
     - scripts/pack-and-verify-package.mjs
     - scripts/check-version-bumps.mjs
     - scripts/release-plan.mjs
@@ -11,15 +24,25 @@ code:
     - scripts/package-release.test.mjs
     - packages/sdk/tsconfig.web.json
     - packages/sdk/tsup.web.config.ts
-    - packages/*/tsup.config.ts
+    - packages/app/tsup.config.ts
+    - packages/cli/tsup.config.ts
+    - packages/plugin-sdk/tsup.config.ts
+    - packages/sdk/tsup.config.ts
+    - packages/server/tsup.config.ts
     - .github/workflows/release.yml
-    - .github/workflows/**
+    - .github/workflows/ci.yml
+    - .github/workflows/publish-app.yml
+    - .github/workflows/publish-cli.yml
+    - .github/workflows/publish-sdk.yml
+    - .github/workflows/publish-plugin-sdk.yml
+    - .github/workflows/publish-server.yml
+    - .github/workflows/publish-docker.yml
+    - .github/workflows/publish-dashboard.yml
     - pnpm-workspace.yaml
 ---
-
 # npm 版本与发布
 
-公开包共有七个:`app`、`cli`、`dashboard`、`gateway`、`plugin-sdk`、`sdk`、`server`。`core` 与 `plugins` 是 private,其代码由公开产物消费或打包。
+公开包为 `app`、`cli`、`dashboard`、`plugin-sdk`、`sdk`、`server`。`core` 与 `plugins` 是 private,其代码由公开产物消费或打包。
 
 ## 是否 bump
 
@@ -37,7 +60,7 @@ code:
 6. 一次只推一个 tag,等待对应 workflow;不要批量 push tags。
 7. 用 `npm view` 确认 registry 元数据后,再下载 registry 中的精确版本 tarball,重复干净安装与烟测。
 
-Dashboard 若嵌入 server/gateway 产物,应先发布它依赖的包,再发布承载最终产物的包。
+Dashboard 若嵌入 server 产物,应先发布它依赖的包,再发布承载最终产物的包。
 
 ## 可恢复发布编排
 
@@ -54,7 +77,7 @@ Dashboard 若嵌入 server/gateway 产物,应先发布它依赖的包,再发布�
 
 ## 三种独立证据
 
-来自一次真实故障(CLI 0.17.0 发布后 `npm install -g` 报 `EUNSUPPORTEDPROTOCOL`,tarball 依赖里残留 `catalog:` 协议)的教训:
+发布故障形成的工程下界:
 
 - **registry 元数据存在 ≠ tarball 可被 npm 安装 ≠ 安装后的 bin 可执行**,三者是独立证据,任何一项都不能替代另一项。`npm view <pkg> version` 只证明第一项。
 - 本地 tarball 验收与 registry 实际产物验收是两道独立闸门;发布后仍须从 registry tarball 复验协议、干净安装与 bin 烟测。
@@ -64,9 +87,9 @@ Dashboard 若嵌入 server/gateway 产物,应先发布它依赖的包,再发布�
 - 所有公开包统一用 `node scripts/pack-and-verify-package.mjs packages/<pkg> --output-dir <dir>` 打包和验证;CLI 额外传 `--bin tb`。
 - 默认模式通过 `pnpm pack` 生成确切 tarball、扫描 packed manifest,并在仓库外创建干净 npm 消费者安装;CLI 还执行 `tb --version` 与 `tb --help`(可安装不足以证明 bin 契约正常)。
 - `files`、exports、bin、types 与 `publishConfig` 必须指向构建后真实存在的文件。
-- 多入口包必须递归检查 `exports` 的全部条件目标(包括 `types`、`import`、`react-native`),不能只验证 `main`。`@tool-bridge/sdk/client`、`/store`、`/device` 的 JS/d.ts 都必须从各自入口递归扫描最终 tarball shared closure：不得引用 `node:*`、Node `ws`、Hono、`process.env`、private workspace 包或 Node-only 声明类型；干净消费者同时 import 根入口和三个 neutral 子入口(设备边界背景见 [do-websocket-sessions](../device/do-websocket-sessions.mdx))。
+- 多入口包必须递归检查 `exports` 的全部条件目标(包括 `types`、`import`、`react-native`),不能只验证 `main`。`@tool-bridge/sdk/client`、`/store`、`/device` 的 JS/d.ts 都必须从各自入口递归扫描最终 tarball shared closure：不得引用 `node:*`、Node `ws`、Hono、`process.env`、private workspace 包或 Node-only 声明类型；干净消费者同时 import 根入口和三个 neutral 子入口(设备边界背景见 [websocket-sessions](../device/websocket-sessions.mdx))。
 - 解包最终 packed tarball,检查其中 `package.json` 的 `dependencies`、`optionalDependencies` 与 `peerDependencies`;不得残留 `catalog:`、`workspace:` 或其他 npm 不支持的工作区协议。只检查仓库源码 manifest 会漏掉未改写的占位符。
-- 除 Dashboard(静态站点,hash 资产由浏览器加载)外,每个公开包 packed `dist/**/*.js`(含 code-splitting chunk 与懒加载的 provider 文件)中的裸 `import`/`import()` specifier 都必须是 Node 内建(`node:` 前缀或裸内建名)、`cloudflare:*`,或归一到 `dependencies`/`optionalDependencies`/`peerDependencies` 已声明的包;bundler 内联 CJS 后残留在 shim 里的 `require("...")` 字符串故意不计。这是 tsup `external` 与 manifest 漂移的唯一机器闸门,由此**公开包 tsup config 的每个 `external` 条目都必须出现在本包运行时依赖字段**。教训:server 曾把 `@modelcontextprotocol/sdk`(v1)留在 `external` 却未声明依赖,被 bundle 的 feishu provider 懒 import 它时,`tsx src/main.ts` 能从 plugins 的 node_modules 解析而掩盖问题,`pnpm --prod deploy` 产出的 Docker 镜像与 npm 安装产物却在首次加载 feishu 时 `ERR_MODULE_NOT_FOUND`;修复是删掉该 external 让 v1 sdk 随产物 bundle(与 gateway/full 同形)。
+- 除 Dashboard(静态站点,hash 资产由浏览器加载)外,每个公开包 packed `dist/**/*.js`(含 code-splitting chunk 与懒加载的 provider 文件)中的裸 `import`/`import()` specifier 都必须是 Node 内建(`node:` 前缀或裸内建名)，或归一到 `dependencies`/`optionalDependencies`/`peerDependencies` 已声明的包;bundler 内联 CJS 后残留在 shim 里的 `require("...")` 字符串故意不计。这是 tsup `external` 与 manifest 漂移的唯一机器闸门,由此**公开包 tsup config 的每个 `external` 条目都必须出现在本包运行时依赖字段**。教训:server 曾把 `@modelcontextprotocol/sdk`(v1)留在 `external` 却未声明依赖,被 bundle 的 feishu provider 懒 import 它时,`tsx src/main.ts` 能从 plugins 的 node_modules 解析而掩盖问题,`pnpm --prod deploy` 产出的 Docker 镜像与 npm 安装产物却在首次加载 feishu 时 `ERR_MODULE_NOT_FOUND`;修复是删掉该 external 让 v1 sdk 随产物 bundle。
 - CI 在全仓 build 后复用同一脚本并传 `--skip-install`,只跳过干净消费者安装,packed manifest 协议闸门与上述产物闭包/裸 import 闸门照常执行,因此 external 漂移在合入前即可捕获:合入前的 workspace 依赖版本可能尚未发布到 registry,不能把这类不可安装误判为 tarball 协议错误。publish workflow 不得跳过干净安装。
 - **publish workflow 必须捕获脚本返回的 tarball 路径,并把同一个文件交给 `npm publish`**;校验后重新打包会留下产物漂移窗口——"校验的"和"发布的"必须是同一个 tarball。
 - 声明文件可能跨包引用私有源码,不能只依赖 monorepo typecheck。
@@ -74,3 +97,5 @@ Dashboard 若嵌入 server/gateway 产物,应先发布它依赖的包,再发布�
 - 发布失败时修复后重建、重验;不要复用已经推送且不可回收的 npm 版本。
 
 不要在 llmdoc 记录某次发布的 latest、digest 或传播耗时;这些属于 registry、tag 与 CI 证据。
+
+删除宿主、SQLite 导出、旧配置入口，或改为受保护安装/领域仓库注入，都属于既有消费者可感知的 0.x minor 变化。提交与 PR 必须明确行为变化和新部署前提，不能统称 patch 修复；旧内部预览数据没有保留/导入承诺。

@@ -3,8 +3,10 @@ description: MCP 上游互操作指南:modern/legacy era 协商与缓存键、�
 kind: guide
 code:
   paths:
+    - packages/plugins/src/feishu/feishuMcp.ts
     - packages/app/src/providers/mcp.ts
     - packages/app/src/mcpServer.ts
+    - packages/app/src/jsonSchemaValidator.ts
     - packages/app/src/routes/mcp.ts
     - packages/app/test/mcp.integration.test.ts
 ---
@@ -47,7 +49,7 @@ gateway 明确判断 `not_dispatched` 时入队；设备业务错误属于 compl
   复核预注册 client 配置及授权响应 issuer，避免授权过程中配置或 canonical origin 变化导致错绑。
 - OAuth 与自定义认证头必须在 redirect 时遵守同源限制，不能把凭据转发给新 origin；OAuth token form 请求固定
   `redirect:'error'`，authorization code、PKCE verifier、refresh token 或 client secret 不得随 307/308 跨源重放。
-- HTTP 上游默认 HTTPS；本地 stub 需要显式 `TB_ALLOW_INSECURE_HTTP=true`。
+- HTTP 上游默认 HTTPS；本地测试 stub 只由显式嵌入配置 allowInsecureHttp 放行；受管理部署不提供旧 env 开关。
 - MCP `tools[].name` 是大小写敏感的上游身份；投影为 HTBP 时，公开命令名按
   [HTBP 调用契约](../protocol/htbp-contract.mdx#调用)规范化为小写，调用再由 reverse map
   精确还原上游原名。多个上游名规范化后碰撞时，发现必须以 `invalid_argument` fail closed，
@@ -57,8 +59,12 @@ gateway 明确判断 `not_dispatched` 时入队；设备业务错误属于 compl
 ## 验证层次
 
 1. provider 单测：era 探测、TTL、能力约束、错误映射。
-2. app/gateway 集成：`~help`、单工具披露、envelope 调用、缓存命中。
+2. app/server 集成：`~help`、单工具披露、envelope 调用、缓存命中。
 3. consumer E2E：用真实 MCP client 连接 `/~mcp`，验证初始化、发现与调用。
 4. 真实上游仅在明确提供 URL/凭据时运行 `pnpm verify:mcp`。
 
 注意：不要为了单个失常服务端加入无边界 fallback。先确认它是协议时代差异还是上游 bug，再把兼容限制在 provider 层并加回归测试。
+
+JSON Schema runtime validation 使用 MCP SDK 官方 AJV adapter。不同上游 schema 即使复用同一 $id 也必须隔离 compiler，避免缓存把工具 A 的 schema 误当成工具 B；方言按 schema 声明分派，不能以删除旧校验器为由跳过校验。验证 adapter 只在服务端 app，neutral SDK 不引用 AJV/Node 实现。
+
+Feishu 插件的官方远程 MCP bridge 是独立 provider 适配边界：它按应用身份缓存自己的上游 session，在明确 session-invalid 信号时重握手；不能把 app 通用 MCP 的“不复用 session”规则机械套到它。其 v1 transport 也显式注入相同的官方 AJV 校验语义，每 schema 独立 compiler。

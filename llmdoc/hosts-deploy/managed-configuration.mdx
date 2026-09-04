@@ -1,0 +1,61 @@
+---
+description: 无数据库安装、首次配对与 bootstrap 身份、PG 运行配置 revision 和每副本生效状态；安装与恢复 API/CLI/Dashboard 的信任边界。
+kind: architecture
+relations:
+  related:
+    - hosts-deploy/maintenance-and-keys.mdx
+    - store/storage-backends.mdx
+    - hosts-deploy/node-docker-and-helm.mdx
+code:
+  paths:
+    - packages/server/src/server.ts
+    - packages/core/src/managedConfig.ts
+    - packages/core/src/builtin/management.ts
+    - packages/server/src/main.ts
+    - packages/server/src/bootstrapState.ts
+    - packages/server/src/managedServer.ts
+    - packages/server/src/admin.ts
+    - packages/server/src/config.ts
+    - packages/server/src/configManager.ts
+    - packages/server/test/managedServer.test.ts
+    - packages/server/test/managedSecurity.test.ts
+    - packages/sdk/src/client/management.ts
+    - packages/cli/src/commands/management.ts
+    - packages/dashboard/src/pages/SetupPage.tsx
+    - packages/dashboard/src/pages/system/ConfigPage.tsx
+    - packages/dashboard/src/pages/system/forms/configSchema.ts
+---
+
+
+# 安装、bootstrap 与受管理配置
+
+标准可执行入口 `main.ts` 只读取平台监听端口与 bootstrap 位置；产品设置由 PG 的 `RuntimeConfig` 管理，不存在环境变量覆盖的第二权威。显式 `createTbServer(ServerConfig)` 是程序化嵌入 API，不能当作可执行服务仍支持旧 env 的证据。
+
+## 无 PG 安装与故障恢复
+
+managed 外层 Hono listener 在 PG 未配置或故障时仍可服务静态安装界面与 `~setup`。`/~setup/status` 只返回安装阶段/实例身份/是否需要配对；defaults、configure 和 recover 都要求 `x-tb-setup-token`。本机管理员经 `tool-bridge-admin pair|recover` 或 `tb setup pair` 获得短期凭证，token 只经本机文件/受控输出交付，不出现在服务日志、URL 或匿名默认值响应里。
+
+bootstrap 使用受保护目录、owner-only 文件、write-file-atomic 的 fsync 原子替换及 proper-lockfile 跨进程排他。核心资料相互区分：
+
+- identity 是实例身份；bootstrap 保存阶段、revision、数据库/Redis 连接和受信任内网 S3 origin。
+- keys 保存加密与签名 keyring、独立 OAuth key 和初始 Admin SK；PG 只保存必要 hash/加密数据。
+- initialized 标记关闭初始安装；pairing 保存 mode、实例绑定、hash 和到期，完成后移除。
+- installer defaults 提供默认 PG/S3 服务和独立数据库管理员连接；API 只投影已配置状态和非敏感地址。
+
+初始化先持久 identity/root，再进入 setup/installing；并发安装必须串行。发现 identity 但 bootstrap 不完整，或已初始化实例 PG 不可达时，只能进入恢复，绝不新生成一个匿名可接管实例。PG 的 `tb_instance` 与 bootstrap 身份不符拒绝连接；已初始化实例也拒绝空库。恢复需单独本机 recovery 配对，可提供同实例 key backup；它不会重新开放初始安装或生成新的用户树。
+
+默认 Compose installer 自动生成 PG 与 S3 的独立凭证，创建应用数据库角色与桶，用户配对后可接受默认服务而不手填 `.env`。自定义服务通过同一 setup 结构提交连接。安装是否成功以 prepare、schema/后端验证、持久 initialized 和 `/readyz` 为准，监听成功或表单提交成功不足以证明业务已就绪。
+
+## PG 配置 revision 与真正生效
+
+`core/managedConfig.ts` 的 strict `runtimeConfigSchema` 统一声明所有运行设置：canonical origin、remote allowlist/跳数、缓存、Context/ref、Store 大小/MIME/TTL、设备回收、清理调度、联邦搜索预算与关停排空。运行时 schema、builtin Help、SDK/CLI 和 Dashboard 表单必须同步，未知字段直接拒绝。
+
+`system/config` 的 get/schema/validate/update/apply 与 `tb config`、Dashboard 设置页对等。update 只用 expectedRevision 保存 desired snapshot；apply 取得 PG 租约，重建运行资源成功后才发布 applied revision/effective snapshot。失败保留上次成功状态并给出脱敏 lastError；并发修改不覆盖未知的新 revision，租约过期允许重新尝试。
+
+每副本本地应用串行，报告自己的 appliedRevision；请求前向 PG 同步已成功发布的 revision，因此不能把 Redis 通知丢失解释成永久使用旧配置。请求持一个不可变快照，旧请求自然完成；限额变更不会改写已发 upload/call grant。调度器、设备权限巡检等有实际资源影响的设置必须走 onApply，不能仅改变响应 JSON。
+
+## 权限与跨入口
+
+安装使用本机配对权威；初始化后的 config/storage/deployment/maintenance/keys 使用对应规范 system 路径的 admin 权限与脱敏审计。普通 SK 的路径 write 不能越过这条管理权限。Dashboard 的禁用按钮只是反馈，服务端仍权威拒绝；CLI secret 输入用文件/stdin，不用 argv。
+
+数据库、Redis、加密根、签名根不是 runtime settings。它们分别进入 [维护工作流](./maintenance-and-keys.mdx)；对象 endpoint/bucket 使用 [后端身份管理](../store/storage-backends.mdx)。镜像、端口、资源限制、卷由外部部署 agent 执行，见 [Node 部署](./node-docker-and-helm.mdx)。
