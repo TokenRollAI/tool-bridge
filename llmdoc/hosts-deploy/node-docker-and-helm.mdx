@@ -6,6 +6,7 @@ relations:
     - device/durable-mailbox.mdx
 code:
   paths:
+    - .env.example
     - .github/workflows/ci.yml
     - packages/server/src/**
     - packages/server/test/server.integration.test.ts
@@ -16,6 +17,7 @@ code:
     - Dockerfile.cli
     - docker-compose.yml
     - scripts/deploy-change-filter.mjs
+    - scripts/deploy-change-filter.test.mjs
     - scripts/dockerfile-contract.test.mjs
 ---
 
@@ -106,7 +108,7 @@ Railway Metal 不接受 Dockerfile 的 `VOLUME` 指令,因此 Railway service va
 
 `Dockerfile.cli` 是第三个、用途不同的公开 artifact：它把 `tb` 编译为独立 Bun 二进制，不是服务镜像副本。CLI 现在复用 SDK client/store/device，因此镜像必须先构建与 npm CLI 相同的 SDK-aware tsup artifact，再编译 `packages/cli/dist/index.js`；不得绕过该入口直接编译 `src/index.ts`。`test:dockerfile` 同时固定两份服务 Dockerfile 的唯一差异与 CLI 镜像的这条产物闭包。
 
-Railway production 使用平台原生 GitHub source 监听 `main`,并开启 **Wait for CI/check suites**:只有对应 main commit 的检查全绿后才开始部署。Watch Paths 只覆盖共享/Server/Dashboard/插件运行时代码、构建清单与 `Dockerfile.railway` 等真实运行时依赖,文档或 CLI/SDK-only 变化不应触发生产重建;路径边界与 `.github/workflows/ci.yml`、`scripts/deploy-change-filter.mjs` 同步维护。首次接线必须等交付这套闸门的 PR 合入 `main` 后再连接 production service,不得在 PR 合入前提前监听 `main`;构建入口仍由 `RAILWAY_DOCKERFILE_PATH=Dockerfile.railway` 指定。原生链路不可用时用 Railway CLI 手动部署作为 fallback,不要回补一套旧 Config-as-Code。
+Railway production 使用平台原生 GitHub Source 监听 `main`,并开启 **Wait for CI/check suites**:只有对应 main commit 的检查全绿后才开始部署。仓库的 CI workflow 只产出 verify/build checks,不执行部署；实际部署由 Railway 在检查通过后自行触发。Wait for CI 只能依赖 provider-neutral 的 verify/build checks；任何宿主专属的外部部署结果都不得进入另一个宿主的发布门禁。Watch Paths 只覆盖共享/Server/Dashboard/插件运行时代码、构建清单与 `Dockerfile.railway` 等真实运行时依赖,文档或 CLI/SDK-only 变化不应触发生产重建；路径边界与 `scripts/deploy-change-filter.mjs` 保持一致,后者是可审阅、可测试的同形判定,不由 CI 调用部署。Cloudflare 自动部署已移除,不再与 Railway 共用这套 check suite。首次接线必须等交付这套闸门的 PR 合入 `main` 后再连接 production service,不得在 PR 合入前提前监听 `main`;构建入口仍由 `RAILWAY_DOCKERFILE_PATH=Dockerfile.railway` 指定。原生链路不可用时用 Railway CLI 手动部署作为 fallback,不要回补一套旧 Config-as-Code。
 
 - **ObjectStore 缺省是容器本地 FS**,default Store/`$ref` 大对象在没有持久卷时随容器重建丢失、多副本互不可见;配 `TB_OBJECT_STORE_*` 外置。
 - **设备 WebSocket 多副本需配 `TB_REDIS_URL`**;不配时设备只连在一个副本上,调用打到别的副本会误判离线。
