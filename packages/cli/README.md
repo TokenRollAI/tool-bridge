@@ -160,24 +160,10 @@ tb sk create \
   --register-path device/build-01
 ```
 
-从 tool-bridge 源码仓库首次部署到 Cloudflare，可直接运行：
-
-```sh
-git clone https://github.com/TokenRollAI/tool-bridge && cd tool-bridge
-pnpm install
-tb init cloudflare --repo .
-```
-
-向导会登录/选择 Cloudflare 账户、生成并注入 Admin SK 与 SecretStore 主密钥、幂等创建
-KV/R2/D1、构建部署、验证 `~help`，最后保存本机 profile。Admin SK 只显示一次；请立即存入
-密码管理器。CI 使用 `--account-id <id> --yes`，自定义域使用 `--domain tb.example.com`。
-发现同名 Worker 时，向导必须先用对应 `--profile` 验证成功，且不会覆盖既有 Admin SK。
-
 ## 常用命令
 
 | 命令 | 用途 |
 |---|---|
-| `tb init cloudflare` | 从源码仓库初始化、部署并验证 Cloudflare Worker |
 | `tb login` / `tb whoami` / `tb use` | 档案管理(多网关/多 SK 切换) |
 | `tb ls` / `tb tree` / `tb help <path>` | 浏览工具树与节点文档 |
 | `tb call <path>/<command> '{…}'` | 调用任意命令；设备命令可用 `--delivery mailbox\|fallback` |
@@ -230,3 +216,58 @@ Node.js >= 22。
 ## License
 
 MIT
+
+## 自托管安装、配置与维护
+
+默认从 Dashboard 的 `/ui/setup` 完成安装。CLI 对等入口如下；配对凭证来自部署主机本地命令，不是长期 Admin SK：
+
+```sh
+# 在部署主机生成短效配对凭证（目录对应服务的 bootstrap 卷）
+umask 077
+tb setup pair --directory /data/bootstrap > pairing-token
+
+# 内置 PostgreSQL/S3 凭证由安装器管理，输入空对象即可使用内置服务
+printf '{}' | tb setup configure --base-url http://127.0.0.1:8787 --token-file ./pairing-token --file -
+```
+
+安装完成响应中的管理员密钥只用于此次交付，请保存后用 `tb login` 建立档案。Compose 部署使用
+`docker compose exec -T app node /app/dist/admin.js pair` 生成配对凭证。
+
+| 能力 | CLI |
+|---|---|
+| 配置字段与实际生效状态 | `tb config schema/get/status` |
+| 校验与保存运行设置 | `tb config validate --file settings.json`；`tb config update --revision <当前版本> --file settings.json` |
+| 应用已保存设置 | `tb config apply --revision <已保存版本>` |
+| 存储后端与实际能力验证 | `tb storage list/get`；`tb storage add --file backend.json`；`tb storage test <id> --revision <版本>` |
+| 切换新上传目标 | `tb storage activate <id> --revision <后端版本> --active-revision <默认指针版本>` |
+| 轮换存储凭证 | `tb storage update <id> --revision <版本> --file credential.json` |
+| 删除无引用后端 | `tb storage rm <id> --revision <版本>` |
+| 读取与提交部署设置 | `tb deployment get/status/schema`；`tb deployment update --revision <版本> --file deployment.json` |
+| 启动受限本机执行器 | `tb deployment agent --compose ./docker-compose.yml` |
+| 数据库/Redis 维护状态 | `tb maintenance status` |
+| 迁移至空 PostgreSQL | `tb maintenance database --revision <版本> --instance-id <实例ID> --file database.json` |
+| 数据库凭证轮换 | `tb maintenance rotate-database-credentials --revision <版本> --instance-id <实例ID> --file credential.json` |
+| 更换或停用 Redis | `tb maintenance redis --revision <版本> --file redis.json`（停用使用 `{"redisUrl":null}`） |
+| 密钥状态与轮换 | `tb keys status`；`tb keys rotate --target encryption\|signing --revision <版本>` |
+| 继续有界重加密任务 | `tb keys resume <job-id>` |
+| 退役无引用的旧根 | `tb keys retire <key-id> --target encryption\|signing --revision <版本>` |
+| 导出恢复密钥备份 | `tb keys backup --out ./key-backup.json`（新建 `0600` 文件，绝不打印密钥） |
+
+运行设置文件只包含 `tb config get` 响应的 `desired` 字段。保存后检查新 revision，再显式 apply。
+存储后端文件为 `{name,connection:{endpoint,bucket,region?,accessKeyId,secretAccessKey}}`；凭证轮换文件
+为 `{accessKeyId,secretAccessKey}`。密码与完整数据库/Redis URL 只从文件或 stdin 读取，不能放到 argv。
+数据库登录轮换文件可额外提供 `databaseAdminUrl`，仅用于本次角色切换；内置数据库自动使用受保护的管理凭证。
+
+部署执行器只更新显式选择的 Compose 文件中的 `app` 服务，使用固定镜像、端口和挂载操作。
+新数据目录必须为空且位于 Compose 文件目录下；执行器会停止应用、复制原 bootstrap、恢复私有权限，
+然后重建并验证实例身份。健康检查失败会恢复旧 Compose。UI 挂载目录必须包含 `index.html` 与 `assets`。
+
+已初始化实例的恢复使用独立配对模式与 HTTP 入口，不会重新创建管理员：
+
+```sh
+tb setup pair --recovery --directory /data/bootstrap > recovery-token
+tb setup recover --base-url http://127.0.0.1:8787 --token-file recovery-token \
+  --file recovery-connections.json --backup-file key-backup.json
+```
+
+根文件完好时可省略 `--backup-file`。恢复会核对备份与当前实例身份；普通 `setup configure` 不接受备份。

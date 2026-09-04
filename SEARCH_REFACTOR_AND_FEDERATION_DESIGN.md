@@ -302,7 +302,7 @@ cursor 重试；安全、拓扑、revision 或协议不一致则返回 non-retry
 - Issue #107 三条复现 query：读取温度、开灯、取消全部 timer；
 - 覆盖更多 distinct terms 的候选不能被字段分反超；
 - CJK unit 不重复增加 coverage；
-- D1、better-sqlite3、PostgreSQL 共用 keyword-v2 fixture；
+- PostgreSQL 使用 keyword-v2 fixture；
 - local compact/full、filter、cursor binding、virtualize rename 分页与重试；
 - HTTP、MCP、SDK、CLI、Dashboard 契约和展示；
 - remote 所有 30x fail closed、stream body cap 和 abort；
@@ -329,7 +329,6 @@ CAS/revision 和 SQL 行为；真实三实例 A→B→C HTTP 链在 app integrat
 | `@tool-bridge/app` | 0.18.0 |
 | `@tool-bridge/cli` | 0.28.0 |
 | `@tool-bridge/dashboard` | 0.25.0 |
-| `@tool-bridge/gateway` | 0.23.0 |
 | `@tool-bridge/sdk` | 0.19.0 |
 | `@tool-bridge/server` | 0.19.0 |
 

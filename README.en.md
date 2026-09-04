@@ -14,12 +14,11 @@ An agent only needs a BaseURL and a Secret Key to discover capabilities, read th
 [![npm: sdk](https://img.shields.io/npm/v/@tool-bridge/sdk?label=%40tool-bridge%2Fsdk)](https://www.npmjs.com/package/@tool-bridge/sdk)
 [![license](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
-[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/TokenRollAI/tool-bridge/tree/main/template)
 
 </div>
 
 > [!IMPORTANT]
-> tool-bridge is currently in **pre-launch** development. Cloudflare, Node/Docker, the SDK, CLI, and Dashboard already form complete working flows, but there is no formal production environment or stability SLA yet. It is ready for self-hosted evaluation, internal integrations, and development; read the release notes and back up your data before upgrading.
+> tool-bridge is currently in **pre-launch** development. Node/Docker, the SDK, CLI, and Dashboard already form complete working flows, but there is no formal production environment or stability SLA yet. It is ready for self-hosted evaluation, internal integrations, and development; read the release notes and back up your data before upgrading.
 
 ## What is tool-bridge?
 
@@ -126,7 +125,7 @@ The skill verifies the target, searches or browses progressively, reads the tool
 |---|---|---|
 | Connect existing tools | MCP, declarative HTTP, built-in integrations, external plugins | Give agents one discovery and invocation surface |
 | Store device artifacts and attachments | Deployment default Store, SDK, CLI, Dashboard | Upload photos, video, or audio, keep a stable URI, and create short-lived shares |
-| Manage context and skills | R2, S3, Node file object storage, plugin contexts, Skillhub | Read, write, and search documents and objects; publish and fetch Agent Skills |
+| Manage context and skills | S3, device file object storage, plugin contexts, Skillhub | Read, write, and search documents and objects; publish and fetch Agent Skills |
 | Connect local machines | `tb connect`, SDK `connect()` | Dial out from a private network and expose allowlisted shell, files, or local functions |
 | Share usage experience | Per-path `~feedback`, CLI, Dashboard | Show later agents verified pitfalls and recommendations before they call a tool |
 | Federate teams | Remote nodes, `system/federation` | Mount another HTBP tree without sharing the local caller's credentials |
@@ -134,9 +133,8 @@ The skill verifies the target, searches or browses progressively, reads the tool
 
 ### Upload device artifacts and ordinary attachments
 
-Every standard deployment includes a default Store that is independent from Context. Node/Docker stores
-it on the `/data` volume, while Cloudflare uses the R2 bucket created during deployment. A device does not
-need a Context mount before uploading a photo, video, or recording:
+Every standard deployment includes a default Store independent from Context, backed by an S3-compatible
+object service. A device does not need a Context mount before uploading a photo, video, or recording:
 
 ```sh
 tb store upload ./capture.jpg --json
@@ -244,31 +242,11 @@ Federation fails closed by default: an empty host allowlist permits no remote, H
 | Shape | State / objects / devices | Replicas | Best fit |
 |---|---|---|---|
 | **Docker (single container)** | SQLite + local filesystem + in-process WebSocket | 1 | Self-hosting, private networks, quick evaluation |
-| **Docker Compose** | PostgreSQL (+ optional S3/R2, Redis) | 1–2 (one machine) | Single-machine production, incl. an HA reference stack — see [`deploy/compose/`](deploy/compose/docker-compose.yml) |
-| **Kubernetes (Helm)** | PostgreSQL + S3/R2 + Redis → stateless multi-replica; or SQLite + PVC single replica | 1–N | Multi-replica production with rolling updates — see [`deploy/helm/tool-bridge/`](deploy/helm/tool-bridge) |
-| **Cloudflare Workers** | D1 + R2 + Durable Objects | serverless | Edge deployment, low operations, long-lived device connections |
-| **Embedded SDK** | Caller-injected stores and providers | — | Register local functions inside your own Node/Workers application |
+| **Docker Compose** | PostgreSQL (+ optional S3, Redis) | 1–2 (one machine) | Single-machine production, incl. an HA reference stack — see [`deploy/compose/`](deploy/compose/docker-compose.yml) |
+| **Kubernetes (Helm)** | PostgreSQL + S3 + Redis → stateless multi-replica; or SQLite + PVC single replica | 1–N | Multi-replica production with rolling updates — see [`deploy/helm/tool-bridge/`](deploy/helm/tool-bridge) |
+| **Embedded SDK** | Caller-injected stores and providers | — | Register local functions inside your own Node application |
 
-Horizontal scaling formula for the Node host: **PostgreSQL (`TB_DATABASE_URL`) + S3/R2 (`TB_OBJECT_STORE_*`) + Redis (`TB_REDIS_URL`) together make it a stateless multi-replica deployment**; with only the first two it is a single-replica stateless shape (containers can be recreated freely, but do not scale out). The Helm chart rejects dangerous combinations (such as `replicas>1 + SQLite`) at render time. Health probes: `/livez` (liveness), `/readyz` (readiness: backend connectivity plus early traffic removal during graceful shutdown), `/healthz` (version and catalog digest).
-
-### Cloudflare Workers
-
-The fastest entry point is the Deploy Button at the top of this page. Generate and save `TB_BOOTSTRAP_ADMIN_SK` and `TB_SECRET_ENCRYPTION_KEY` first. The template requests both before the first build so a gateway is never started without its trust roots. See [`template/README.md`](template/README.md) for the complete flow.
-
-For a full deployment from a source checkout, use the CLI wizard:
-
-```sh
-git clone https://github.com/TokenRollAI/tool-bridge
-cd tool-bridge
-pnpm install
-npm install -g @tool-bridge/cli
-
-tb init cloudflare --repo .
-```
-
-The wizard logs into and selects an account, generates trust roots, provisions R2/D1, builds and deploys, verifies `~help`, and saves a local profile. Use `--account-id <id> --yes` in non-interactive environments and `--domain tb.example.com` for a custom domain.
-
-After deployment, enable **Read Replication** under `D1 → <database> → Settings` in the Cloudflare Dashboard. The gateway already uses request-scoped D1 Sessions (State and Search start on primary; later reads may use replicas that satisfy the session bookmark) and enables Smart Placement by default. Without database replication the behavior remains correct, but queries still run on primary. Use the response `Server-Timing` header and `tool_bridge_slow_request` Workers Logs events to separate D1 network wait, SQL execution, and application/upstream time.
+Horizontal scaling formula for the Node host: **PostgreSQL (`TB_DATABASE_URL`) + S3 (`TB_OBJECT_STORE_*`) + Redis (`TB_REDIS_URL`) together make it a stateless multi-replica deployment**; with only the first two it is a single-replica stateless shape (containers can be recreated freely, but do not scale out). The Helm chart rejects dangerous combinations (such as `replicas>1 + SQLite`) at render time. Health probes: `/livez` (liveness), `/readyz` (readiness: backend connectivity plus early traffic removal during graceful shutdown), `/healthz` (version and catalog digest).
 
 ### Embed in your own application
 
@@ -281,7 +259,7 @@ import { createToolBridge, MemoryObjectStore, MemoryStateStore } from '@tool-bri
 
 const tb = createToolBridge({
   state: new MemoryStateStore(),
-  // Store is required. Memory is only for examples/tests; use persistent FS, R2, or S3 in production.
+  // Store is required. Memory is only for examples/tests; use persistent S3 or a custom driver in production.
   objects: new MemoryObjectStore(),
   adminSk: process.env.TB_BOOTSTRAP_ADMIN_SK!,
 })
@@ -302,7 +280,7 @@ See [`packages/sdk/README.md`](packages/sdk/README.md) for a Node HTTP server, r
 - Invisible paths return 404 from `~help`, `~tree`, and invocation, avoiding existence leaks.
 - Upstream credentials enter the write-only SecretStore. Node config, logs, and read-only management responses do not reveal secret values.
 - Built-in plugins share the gateway's process privileges and use controlled outbound access. External plugins are descriptor- and health-checked during registration.
-- Authoritative state is strongly consistent on every host (Workers = D1, Node = SQLite/PG); SK revocation takes effect immediately.
+- PostgreSQL is the authoritative state backend for standard deployments; SK revocation takes effect immediately.
 
 Example: issue a least-privilege SK.
 
@@ -320,8 +298,7 @@ tb sk create \
 | `packages/core` | Pure tree, auth, protocol, store, and builtin logic |
 | `packages/app` | Host-neutral Hono application and provider orchestration |
 | `packages/server` | Node/SQLite/filesystem/WebSocket host |
-| `packages/gateway` | Cloudflare D1/R2/DO/Assets host |
-| `packages/cli` | `tb` CLI, device connection, and Cloudflare initialization |
+| `packages/cli` | `tb` CLI, device connection, and deployment management |
 | `packages/dashboard` | Web management UI over the public API |
 | `packages/sdk` | Embedded instance, local providers, and reverse connection |
 | `packages/plugin-sdk` / `packages/plugins` | Plugin author contract and built-in integrations |
