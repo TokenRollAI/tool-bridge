@@ -25,12 +25,34 @@ code:
     - packages/cli/src/stdin.ts
     - packages/cli/src/types.ts
     - packages/cli/src/deviceRuntime.ts
-    - packages/cli/src/commands/**
+    - packages/cli/src/commands/call.ts
+    - packages/cli/src/commands/help.ts
+    - packages/cli/src/commands/search.ts
+    - packages/cli/src/commands/tree.ts
+    - packages/cli/src/commands/ls.ts
+    - packages/cli/src/commands/status.ts
+    - packages/cli/src/commands/store.ts
+    - packages/cli/src/commands/device.ts
+    - packages/cli/src/commands/feedback.ts
+    - packages/cli/src/commands/tool.ts
+    - packages/cli/src/commands/ctx.ts
+    - packages/cli/src/commands/integration.ts
+    - packages/cli/src/commands/management.ts
+    - packages/cli/src/commands/keys.ts
+    - packages/cli/src/commands/maintenance.ts
+    - packages/cli/src/commands/deployment.ts
+    - packages/cli/src/commands/skillhub.ts
+    - packages/cli/src/commands/connect.ts
+    - packages/cli/src/commands/daemon.ts
+    - packages/cli/src/commands/login.ts
     - packages/cli/examples/structured-command-profile.json
     - packages/cli/test/device.test.ts
     - packages/cli/test/strictParsing.test.ts
-    - packages/sdk/src/client/**
-    - packages/sdk/src/store/**
+    - packages/sdk/src/client/client.ts
+    - packages/sdk/src/client/management.ts
+    - packages/sdk/src/store/client.ts
+    - packages/sdk/src/store/upload.ts
+    - packages/sdk/src/store/wire.ts
     - packages/sdk/src/device/connection.ts
     - packages/sdk/src/device/storeUpload.ts
 ---
@@ -146,3 +168,9 @@ operation panel。`/~device/mailbox/*` 是设备 credential 数据面，由
 5. 涉及 wire 字段时,同轮更新 core、app、CLI、Dashboard 和协议文档。
 
 帮助文本只描述当前路径,不保留 migration 文案;项目尚未上线,旧命令直接删除而不是长期隐藏。
+
+## 自托管管理命令
+
+`tb setup` 提供本机 pair、status、defaults、configure、recover，安装不依赖 Admin SK，配对凭证从专用文件输入；完成后经明确成功输出交付一次性 Admin SK，用户再保存到 profile。`tb config` 区分 validate/update/apply，`tb storage` 区分 add/test/activate/credential update，`tb maintenance` 和 `tb keys` 对应专项维护。管理命令有 expected revision 的必须下发并处理冲突，不静默重读后覆盖。
+
+PG/S3 连接串、替换密码和 credential 只走文件/stdin；keys backup 写新建 owner-only 文件，不打印密钥。`tb deployment agent` 是单本机 Compose 服务的固定子命令执行器，与普通 API 客户端权限分开，源码安全边界见部署 guide。平台 Context/skillhub 的 --backend-id 编译成 provider:storage 的固定身份；无旧 r2 alias 或 CF init。

@@ -3,16 +3,23 @@ description: 插件运行时:三种 plugin 来源、exportDetails 契约、creat
 kind: architecture
 code:
   paths:
-    - packages/plugins/**
-    - packages/plugin-sdk/src/index.ts
-    - packages/core/src/builtin/plugin.ts
-    - packages/core/src/builtin/catalog.ts
-    - packages/core/src/plugin/**
+    - packages/plugins/src/registry.ts
+    - packages/plugins/src/_runtime/plugin.ts
     - packages/plugins/src/_runtime/authedClient.ts
     - packages/plugins/src/_runtime/providerHttp.ts
     - packages/plugins/src/_runtime/guardedFetch.ts
     - packages/plugins/src/_runtime/ipPolicy.ts
+    - packages/plugins/src/_runtime/responseBytes.ts
     - packages/plugins/provider-http-exceptions.json
+    - packages/plugin-sdk/src/index.ts
+    - packages/core/src/builtin/plugin.ts
+    - packages/core/src/builtin/catalog.ts
+    - packages/core/src/plugin/oauth.ts
+    - packages/core/src/plugin/envelope.ts
+    - packages/core/src/plugin/credential.ts
+    - packages/core/src/plugin/contract.ts
+    - packages/core/src/plugin/catalog.ts
+    - packages/core/src/plugin/manifest.ts
     - packages/plugins/test/runtime/providerHttpPolicy.test.ts
 ---
 
@@ -65,7 +72,7 @@ code:
 - `createAuthedClient` 是声明层：它把 bearer/token/named-header/custom 认证与常规错误消息提取参数化。header 合并顺序固定为 static < request < auth，因而调用方不能覆盖凭证；缺 `authRef` 在任何上游请求前 fail closed。标准 `errorMessage` 与整段 `mapError` 互斥，非常规业务错误才声明 `mapError` / `mapTransportError`。
 - `createProviderHttpClient` 是传输层：它统一 query/body、响应解码、status/传输错误调度、deadline、redirect 与 secret 脱敏，并作为进入 `guardedFetch` 的唯一普通入口。它不提供隐式重试：每次请求只执行一次(`retry=0`)。deadline 覆盖 fetch 和异步 response body 消费，不能在收到 headers 后就停止计时；同步 `JSON.parse` 仍在请求操作解决前执行，但 JavaScript timer 无法抢占它，不把这描述成可中断的 CPU wall-clock 上限。
 
-`guardedFetch` 仍是 provider 唯一出站安全边界：初始 URL 和每一跳 redirect 都重做协议/IP 字面量策略，跨源剥离凭证、默认 fail closed。redirect method/body 必须遵循 Fetch 语义：301/302 只把 POST 改为 GET，303 把 GET/HEAD 以外的方法改为 GET 并删除 body headers，307/308 保留 method/body。IP 库只替换地址 grammar，不替换仓库的禁止网段政策。Node/Workers 不共享一致的 DNS 解析门禁，本层故意不检查域名解析结果；DNS rebinding 由部署侧出网策略阻断，不得把 IP 字面量校验误表述为完整 DNS SSRF 防线。
+`guardedFetch` 仍是 provider 唯一出站安全边界：初始 URL 和每一跳 redirect 都重做协议/IP 字面量策略，跨源剥离凭证、默认 fail closed。redirect method/body 必须遵循 Fetch 语义：301/302 只把 POST 改为 GET，303 把 GET/HEAD 以外的方法改为 GET 并删除 body headers，307/308 保留 method/body。IP 库只替换地址 grammar，不替换仓库的禁止网段政策。provider guardedFetch 本层不检查域名解析结果；DNS rebinding 由部署侧出网策略阻断，不得把 IP 字面量校验误表述为完整 DNS SSRF 防线。
 
 只有流式、协议升级、MCP 会话、签名握手或其他薄层确实无法表达的边界才能保留直接 `guardedFetch`；每个例外都必须在 `provider-http-exceptions.json` 按文件/类别/原因登记，并由策略测试同时拒绝未登记调用和已失效 allowlist。登记范围覆盖 `src/<provider>/**` 下任意源文件（只排除 `_runtime/` 薄层本身与 registry/catalog 生成物），不按 `api.ts` 之类文件名猜哪些是 transport；共享 `guardedFetch(` 直调与 `createGuardedFetch(` 工厂实例化都计入 raw 出站点数，二者都要精确登记——曾因只匹配 `api.ts` 而漏掉 feishu 的 `tat.ts` 与 `feishuMcp.ts`。普通 provider 不得自行恢复裸 `fetch`、retry 或另一套错误映射。
 

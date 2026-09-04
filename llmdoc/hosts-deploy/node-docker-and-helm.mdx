@@ -1,151 +1,82 @@
 ---
-description: Node/Docker/Helm 宿主全指南:探针与关停、SQLite/PG、default Store、本地/S3 对象存储、Compose/Helm、PaaS 与 Redis 多副本路由。
+description: Node/Compose/Railway/Helm 自托管部署：零 env 安装、PG/S3 持久卷、探针排空、受限 deployment agent 与 Redis 多副本路由。
 kind: guide
 relations:
   related:
-    - device/durable-mailbox.mdx
+    - hosts-deploy/managed-configuration.mdx
+    - hosts-deploy/maintenance-and-keys.mdx
+    - device/websocket-sessions.mdx
 code:
   paths:
-    - .env.example
-    - .github/workflows/ci.yml
-    - packages/server/src/**
-    - packages/server/test/server.integration.test.ts
-    - packages/app/src/store.ts
-    - deploy/**
+    - scripts/compose-snapshot.mjs
+    - packages/server/src/server.ts
+    - packages/server/src/main.ts
+    - packages/server/src/managedServer.ts
+    - packages/server/src/assets.ts
+    - packages/server/src/deviceRouter.ts
+    - packages/server/src/deploymentManager.ts
+    - packages/core/src/deployment.ts
+    - packages/core/src/builtin/deployment.ts
+    - packages/cli/src/deploymentAgent.ts
+    - packages/cli/src/commands/deployment.ts
+    - packages/dashboard/src/pages/system/DeploymentPage.tsx
+    - packages/server/test/globalSetup.ts
+    - packages/server/test/helpers/infra.ts
     - Dockerfile
     - Dockerfile.railway
-    - Dockerfile.cli
     - docker-compose.yml
-    - scripts/deploy-change-filter.mjs
-    - scripts/deploy-change-filter.test.mjs
+    - deploy/compose/docker-compose.yml
+    - deploy/helm/tool-bridge/values.yaml
+    - deploy/helm/tool-bridge/templates/deployment.yaml
+    - deploy/helm/tool-bridge/templates/statefulset.yaml
     - scripts/dockerfile-contract.test.mjs
+    - scripts/deploy-change-filter.mjs
+    - scripts/test/infra.mjs
 ---
 
-# Node、Docker 与 Compose/Helm
 
-`@tool-bridge/app` 承担宿主中立业务;`@tool-bridge/server` 为 Node 装配状态存储(SQLite 或 PostgreSQL)、文件对象存储、WebSocket 与 HTTP 监听。它不是 Cloudflare gateway 的兼容壳。Cloudflare 专属的 R2/D1、Durable Object 与 Wrangler 配置不得下沉进 server;Node 的 SQLite/PG/文件语义也不得反向泄漏进 app。
+# Node 自托管部署
 
-## Node 配置边界
+标准交付是单个 Node 应用进程加 PostgreSQL 与通用 S3 兼容对象服务。Redis 可选，仅服务跨副本设备路由；数据库、S3 和 bootstrap 都必须持久保存。默认完整 Compose 不需手填 `.env`，首次通过本机配对完成安装；产品配置边界见 [受管理配置](./managed-configuration.mdx)。
 
-- `TB_DATA_DIR` 持有 SQLite(未用 PG 时)和对象数据,应挂载持久卷并限制文件权限。对象存储缺省始终是本地 FS,即使状态在 PG：default Store 最终字节位于 `TB_DATA_DIR/objects/__tool_bridge_internal__/store/v1/...`（容器缺省对象根 `/data/objects/...`），未落位字节集中在 `TB_DATA_DIR/objects/.tb-store-staging-v1`；Context/`$ref` 走同一 driver 的其他 namespace。多实例部署下本地字节不共享(外置见下文 S3 节)。
-- default Store 是标准 Node 装配的必备能力。端口监听成功后异步执行首次有界 cleanup，随后每 `TB_STORE_CLEANUP_INTERVAL_SEC` 周期执行（缺省 900 秒）；历史数据再多也不阻塞 readiness，timer 不阻止进程退出，慢 tick 未结束时跳过并发 tick。每个 tick 只扫一次独立 staging 目录。自动清理不扫描未发布预览曾使用的 `objects/store/v1/**`：该路径也可能属于 Context，temp 文件名不能证明 Store 归属；试用过预览的部署须人工确认后再处理残片。清理失败只记录固定事件名，不输出 driver key。
-- Durable device Mailbox 以 `TB_SECRET_ENCRYPTION_KEY` 和原子 StateStore CAS 为启用前提。裸 Node
-  进程缺该 env 时仍可启动并使用其它能力，但 Mailbox route fail closed 且 maintenance 跳过它；生产
-  Compose/Helm 模板把 encryption root 与 Admin SK 一样作为必填 secret。Mailbox 与 Store 共用
-  `TB_STORE_CLEANUP_INTERVAL_SEC` timer 和 in-flight guard，但使用自己的持久 cleanup cursor；每个 tick 收敛过期 operation 与超过 retention 的终态记录。
-- 首次引导必须设置 `TB_BOOTSTRAP_ADMIN_SK`;缺失时启动默认 fail closed。`TB_ALLOW_INSECURE_BOOTSTRAP=true` 只用于一次性本地开发。
-- `TB_ALLOW_INSECURE_HTTP=true` 只放行本地 HTTP 上游,不应进入公网部署。
-- 跨实例联邦搜索必须显式配置稳定、全局唯一的 `TB_INSTANCE_ID`；缺失时 Node 仍提供 local search，但不
-  广告 `search:federated`。`TB_SEARCH_FEDERATION_{CONCURRENCY,DEADLINE_MS,MAX_RESPONSE_BYTES,
-  MAX_SOURCES,MIN_CHILD_WORK_MS,RETURN_RESERVE_MS,SESSION_TTL_SEC}` 可收紧默认 fan-out、时间、body 与
-  session 预算；这些是部署硬上限，下游 header 不能放大。
-- 反向代理必须保留 WebSocket upgrade、Authorization 和原始 Host。Store 数据面 URL 保留本次请求的对外 alias host/port，但 TLS 终止后的内部 Request URL 无法可信地表达 protocol；正式代理部署应设 `TB_CANONICAL_ORIGIN=https://...` 作为 protocol 信任根。服务端故意不信任 `X-Forwarded-Proto`，也不用 canonical host 覆盖客户端 alias；部署回归应通过真实 HTTP socket + Host header 验证这条规则。
+## Compose 与镜像
 
-## 健康探针与优雅关停
+根 `docker-compose.yml` 用于本地构建，`deploy/compose/docker-compose.yml` 使用已发布镜像。默认栈包含独立 init、PG、SeaweedFS、init-bucket 与 app；镜像版本/摘要以清单为准，不在知识里手抄。init 自动生成应用/管理员数据库凭证和 S3 installer/应用凭证，最小权限文件分别只挂到需要的服务。app 只拿 bootstrap 卷，不挂 Docker socket；对象字节只在对象服务的数据卷。
 
-三个免认证端点分工明确,k8s 探针按此接线:
+首次启动检查 init 完成、PG/S3 可用、受保护配对、setup ready 与业务授权调用。`/healthz` 在安装态仍能成功，这是为了让安装面存活；不能把 Docker HEALTHCHECK healthy 当作安装已经完成。首次安装、重新构建应用和重启 PG/S3 是不同验收，必须分别证明身份、配置和对象字节仍可恢复。`down` 与删卷重置不同，清空卷必须是明确的数据丢弃操作。
 
-- `/livez` → 恒 200(进程存活;liveness)。后端断连**不算死**——liveness 探后端会让编排器在 PG 抖动时错杀健康进程。
-- `/readyz` → 就绪探测:Node 宿主逐后端连通性检查(PG `SELECT 1`、Redis `PING`,各限时 1s)+ draining 状态;任一不通或 draining → 503,编排器摘流量。SQLite/FS 无长连接可断,checks 为空恒 200。Workers/嵌入宿主未注入探测器,恒 200。
-- `/healthz` → 版本 + catalog digest(三宿主对拍用),容器 HEALTHCHECK 用它。
+正式镜像同时携带应用、Dashboard 和官方 PG dump/restore 客户端，运行用户无 root 权限；installer 的初始化容器才执行所需 owner 设置。镜像构建不得依赖宿主已存在 dist，Node 二进制与运行基础镜像也必须匹配。runtime 基于 Node slim，安装官方 PGDG client 工具，不继承数据库 server 镜像及其隐式 VOLUME。
 
-关停顺序(SIGTERM):置 draining(`/readyz` 立即 503)→ 等 `TB_SHUTDOWN_DRAIN_SEC` 秒(缺省 0;k8s 建议 5–10)→ 停止接受新连接、既有请求跑完 → 终止设备 WS → 关后端。镜像不写死 `ENV TB_PORT`,平台注入的 `PORT` 真实生效,HEALTHCHECK 同步读 `TB_PORT ?? PORT ?? 8787`。
+## 探针、反向代理与关停
 
-## PostgreSQL 后端
+- `/livez` 证明进程存活，PG 抖动不能触发 liveness 杀进程。
+- `/healthz` 返回版本、实例和安装状态，适合进程/安装面检查。
+- `/readyz` 在业务未初始化、恢复、维护或 draining 时返回 503；运行态检查 PG、已配置 Redis 与 active S3。需要摘流量的编排器使用 readiness。
 
-设 `TB_DATABASE_URL` 则 StateStore 与 SearchIndex 都走 PG(共用连接池),缺省回退 `TB_DATA_DIR` 下的 SQLite。两者是独立后端句柄,可分别替换。
+平台仅可注入 `PORT` 与受保护 bootstrap 位置；业务设置在 PG。代理须保留 Host、Authorization 与 WebSocket upgrade。TLS 在代理终止时，`canonicalOrigin` 是 Store URL protocol 的信任根，对外 alias host/port 仍取当次请求；不信任客户端 `X-Forwarded-Proto`。
 
-- **不需要任何 PG 扩展**,连接角色只要能建表即可(受限托管环境常不给建扩展权限)。
-- 工具检索是纯 `ILIKE` 子串匹配；SQLite/D1 对应纯 `LIKE`，三者都不依赖 FTS5/trigram 扩展，并共享
-  logical-term coverage-first 的查询生成契约。跨后端等价性由共享黑盒契约
-  `verifySearchIndexContract` 守住。
-- 故意不建 trigram GIN 索引:候选查询是三列 `OR` + `LIMIT`,规划器在节点上限满载时一律选 Seq Scan,索引从不被用,却让插入慢数倍、表体积大数倍。放宽节点上限时需连同查询形状重新评估。
-- 索引写路径在事务开头取 advisory lock 串行化:容量判定依赖 `COUNT(*)`,无锁时并发 mutation 会各自读到旧计数而突破上限。
-- **切换后端不迁移数据。** 给已运行的 SQLite 实例设上 `TB_DATABASE_URL`,得到的是空 PG 状态,首次启动重新走引导;回滚同理,PG 侧写入不回流。跨后端搬迁需自行导出/导入并重建搜索索引。
+SIGTERM 先标记 draining，让 readiness 立即失败；按有效 shutdownDrainSec 排空，再关闭 listener、等待既有请求与清理任务、终止设备连接和后端。维护操作排空不把自己的调用算成待完成业务请求，否则会等待自身死锁。慢 cleanup tick 不并发重入，首轮在监听后异步执行，不让历史 metadata 扫描阻塞就绪。
 
-## Compose 开发栈(根目录 docker-compose.yml)
+## 受限部署执行器
 
-```bash
-pnpm compose:up      # SQLite 后端(默认栈,127.0.0.1:8787)
-pnpm compose:smoke
-pnpm compose:down
-pnpm compose:pg:up   # postgres + gateway-pg(127.0.0.1:8788),pg profile
-pnpm compose:pg:smoke
-pnpm compose:pg:down
-```
+`system/deployment`、`tb deployment` 与 Dashboard 管理 desired revision、observed/effective 配置、agent presence 和 job 状态。保存设置不会直接执行 Docker。管理员在部署主机运行 `tb deployment agent`，明确选定一个 Compose 文件和 `app` 服务，执行器只接受 schema 中的镜像、published 端口/绑定地址和受限目录设置。
 
-两条栈是**两套独立数据**:PG 栈不带 `/data` 卷里的树、SK 与 secret,自己重新引导。`smoke` 全程走 HTTP、与状态后端无关,两边共用同一套断言——这正是后端对等的验收方式。`pnpm compose:reset` 会删除**两条栈**的所有卷,运行前先确认目标只是本地开发状态。Compose 默认值仅用于本机闭环,不是部署模板。
+agent 比较 Compose 声明与实际容器观察，校验实例身份，领取带期限的 job lease，然后执行固定 Docker 子命令。目录必须 realpath 位于选定 Compose 目录内；拒绝 symlink 越界和 Docker socket。bootstrap 目录迁移先停 app，复制持久文件并设安全权限；它不搬 PG 或 S3 数据。应用后检查实例和 UI，再提交 receipt；失败恢复旧 Compose 并验证旧实例。健康成功但 receipt 不可确认时明确暴露歧义，不能宣称任务已完成或立即自动重试。
 
-## 生产 Compose(deploy/compose/)
+该执行器目前是单本机 Compose app 的受限管理器，不是任意 shell/远程部署系统，不自动操纵 Railway 或 Kubernetes 配置。平台变更由平台 CLI/编排器操作，数据库/根轮换由 [专项维护](./maintenance-and-keys.mdx) 处理。
 
-`deploy/compose/docker-compose.yml` 是生产参考栈,与 dev compose 是两回事:无测试装置,secret 全部 `:?required`(缺失时 compose 启动前报错,不会起一个 fail-closed 循环重启的容器),PG 用标准 `postgres:16`。
+## Railway 与 Helm
 
-- `--profile default`:gateway + postgres 单副本。
-- `--profile ha`:双 gateway(`TB_REPLICA_ID` 显式 a/b)+ Redis 路由 + Caddy LB。是**单机** HA 参考栈,机器仍是单点;真多副本走 Helm。
-- 双副本共享 default Store 与 `$ref` 对象要求配 `TB_OBJECT_STORE_*`;compose 无渲染期校验,只能靠注释提醒(Helm 有硬校验)。
-- gateway healthcheck 打 `/readyz`(非 `/healthz`):后端断连时容器转 unhealthy,`restart: unless-stopped` + LB 依赖才有意义。
-- `.env` 必须生成并注入 32-byte base64url `TB_SECRET_ENCRYPTION_KEY`；它既是 SecretStore 根，也是
-  Mailbox 派生独立 HKDF 子密钥的根。Compose 不接受留空后静默禁用 Mailbox。
+Railway 使用 `Dockerfile.railway`；由于平台构建器约束，镜像不声明 VOLUME，由平台把持久卷挂在 `/data`。平台提供的数据库/对象服务连接经受保护 setup/defaults 输入，不引回旧 env-only 产品配置。新实例、已有实例恢复、数据库角色权限和 S3 内网 origin 都必须按实际平台核验，不从“容器部署成功”推导生产闭环成功。
 
-## Kubernetes(deploy/helm/tool-bridge)
+Helm chart 部署同一 managed 服务，PG/S3 由外部供应，用户仍先配对初始化。单副本 bootstrap PVC 是默认；多副本须使用同一 initialized bootstrap 的共享卷和共享 PG/S3，并显式配置 Redis。不要把每个 Pod 的独立 setup/root 当成同一实例。
 
-Helm chart 按后端配置自动推断形态,无独立 mode 开关:
+## 多副本设备路由
 
-- **standalone**(缺省,`postgres.url` 空):StatefulSet + RWO PVC,副本恒 1。用 StatefulSet 而非 Deployment+PVC 是为避免 RWO 卷上滚动更新的"新 Pod 等旧 Pod 释放卷"死锁。
-- **HA**(`postgres.url` + `objectStore.*` 配齐):无状态 Deployment,`/data` 用 emptyDir,`maxUnavailable: 0` 滚动;`replicaCount > 1` 还必须配 `redis.url`。
-- 危险组合(`replicas>1 + SQLite`、objectStore 半配、standalone 开 HPA、缺信任根)在 `helm template` 渲染期 `fail`,与运行时 fail-closed 语义对齐——坏栈根本部署不出去。
-- `TB_REPLICA_ID` 用 `fieldRef: metadata.name`;探针三分工 `/healthz`(startup)、`/livez`(liveness)、`/readyz`(readiness);`terminationGracePeriodSeconds` 要盖过 `shutdownDrainSec` + 排空时间。
-- Ingress 接设备 WebSocket 必须放长 proxy 读写超时(示例见 `examples/values-ha.yaml`)。
-- chart 不打包 PG/Redis,只留 values 接线点;信任根生产建议走 `secrets.existingSecret`,不写明文 values。
-- chart 要求 Secret 含 `TB_SECRET_ENCRYPTION_KEY`（或由 `secrets.encryptionKey` 渲染）；缺失在
-  `helm template` 阶段失败。该要求不仅服务 SecretStore，也是 Mailbox payload/result 可持久化的部署前提。
+Node DeviceHub 保有本副本活 socket，DeviceRouter 通过 Redis 路由到持有连接的副本。registry presence 是可见性提示，不是 socket 归属权威；跨副本调用的 `completed|not_dispatched|unknown` 仍遵守单次执行语义。Redis 中断会使路由不可用，不能退成“在线但随便发到本地”。
 
-## 容器 PaaS(Railway / Fly / Cloud Run / CF Container)
+服务器以 PG replica lease 注册活跃副本；没有 Redis 时拒绝启动第二个活跃副本，key maintenance fence 也会阻止不安全新副本加入。多副本运行与停写维护是独立能力：密钥/数据库维护应先停其它副本，不提供透明零停机切库或根轮换承诺。
 
-镜像是单容器 + `EXPOSE 8787`,配 PG 后不需要持久卷存状态。端口取 `TB_PORT ?? PORT ?? 8787`;`TB_CANONICAL_ORIGIN` 把 OAuth `redirect_uri` 钉在规范域名,并为 TLS 终止后的 Store URL 提供可信 protocol。多域名接入仍保留当次 Host alias，不把所有 grant 改写到 canonical host。三个限制:
+## 部署验证
 
-Railway Metal 不接受 Dockerfile 的 `VOLUME` 指令,因此 Railway service variables 必须设置 `RAILWAY_DOCKERFILE_PATH=Dockerfile.railway`。根 `Dockerfile` 仍是 Fly/Cloud Run/CF Container 等平台的通用入口并保留 `VOLUME /data`;`Dockerfile.railway` 只省略这一条指令,其余镜像行为由 `pnpm test:dockerfile` 保证严格同形。使用本地 SQLite 或 FS 对象存储时,还必须在 Railway 把 Volume **运行时**挂载到 `/data`(平台不会因 Dockerfile 注释自动创建卷);PG + S3/R2 的无状态形态可以不挂卷。不要为选择 Dockerfile 新增已废弃的 `railway.json`/`railway.toml`;若未来要把完整 Railway 项目纳入声明式管理,另行评估新 IaC。
-
-`Dockerfile.cli` 是第三个、用途不同的公开 artifact：它把 `tb` 编译为独立 Bun 二进制，不是服务镜像副本。CLI 现在复用 SDK client/store/device，因此镜像必须先构建与 npm CLI 相同的 SDK-aware tsup artifact，再编译 `packages/cli/dist/index.js`；不得绕过该入口直接编译 `src/index.ts`。`test:dockerfile` 同时固定两份服务 Dockerfile 的唯一差异与 CLI 镜像的这条产物闭包。
-
-Railway production 使用平台原生 GitHub Source 监听 `main`,并开启 **Wait for CI/check suites**:只有对应 main commit 的检查全绿后才开始部署。仓库的 CI workflow 只产出 verify/build checks,不执行部署；实际部署由 Railway 在检查通过后自行触发。Wait for CI 只能依赖 provider-neutral 的 verify/build checks；任何宿主专属的外部部署结果都不得进入另一个宿主的发布门禁。Watch Paths 只覆盖共享/Server/Dashboard/插件运行时代码、构建清单与 `Dockerfile.railway` 等真实运行时依赖,文档或 CLI/SDK-only 变化不应触发生产重建；路径边界与 `scripts/deploy-change-filter.mjs` 保持一致,后者是可审阅、可测试的同形判定,不由 CI 调用部署。Cloudflare 自动部署已移除,不再与 Railway 共用这套 check suite。首次接线必须等交付这套闸门的 PR 合入 `main` 后再连接 production service,不得在 PR 合入前提前监听 `main`;构建入口仍由 `RAILWAY_DOCKERFILE_PATH=Dockerfile.railway` 指定。原生链路不可用时用 Railway CLI 手动部署作为 fallback,不要回补一套旧 Config-as-Code。
-
-- **ObjectStore 缺省是容器本地 FS**,default Store/`$ref` 大对象在没有持久卷时随容器重建丢失、多副本互不可见;配 `TB_OBJECT_STORE_*` 外置。
-- **设备 WebSocket 多副本需配 `TB_REDIS_URL`**;不配时设备只连在一个副本上,调用打到别的副本会误判离线。
-- **Mailbox pull 不依赖 Redis/WebSocket 路由**：claim/renew/complete 只依赖共享 PG StateStore；但多副本
-  Node 本来就要求 PG，且设备 realtime 通道仍按上一条配置 Redis。
-- **首次引导需要 `TB_BOOTSTRAP_ADMIN_SK`**,缺失 fail closed,平台上表现为容器反复重启。
-
-结论:**PG + S3 + Redis 三者配齐即可多副本横向扩容**;只配 PG + S3 是单副本无状态形态。
-
-## 多副本设备通道(Redis)
-
-设备的 WebSocket 是**活 socket**,只存在于接受它的那个进程里。副本 B 收到打给"连在 A 上的设备"的调用时,必须把调用**转发**给 A 再收回结果。`TB_REDIS_URL` 启用路由表 + pub/sub 转发;`TB_REPLICA_ID` 缺省用 hostname,同机多进程必须显式给。
-
-- **路由表**(Redis string + 30s TTL,周期续期):`deviceId → 持有者副本 ID`,副本崩溃后条目自动过期。
-- **转发**(pub/sub):call 发往持有者频道,result 回发起方回执频道,`correlationId` 关联;有独立超时兜底。
-- **本副本持有连接时完全不经这条路**,单副本部署零额外开销、不用配 Redis。
-- **回收保护**:`reclaim` 会 `deleteSubtree`(删数据)。多副本下"本副本没有该连接"不等于"设备离线",回收前必须查全局路由;`sweepOrphans` 同理。路由查不通时保守跳过——宁可晚删,不可错删。
-
-对照 Cloudflare 宿主:那边用 Durable Object,天然"每设备一个单点"(见 [do-websocket-sessions](../device/do-websocket-sessions.mdx));本机制是 Node 多副本的等价物。
-
-## 平台对象存储(S3 / R2)
-
-配齐 `TB_OBJECT_STORE_ENDPOINT/BUCKET/ACCESS_KEY_ID/SECRET_ACCESS_KEY` 四项即用 S3 兼容端点(`TB_OBJECT_STORE_REGION` 可选,缺省 auto),缺省回退本地 FS。该 driver 同时承载 deployment-level default Store 与对象型 Context，但 Store 固定使用 `__tool_bridge_internal__/store/v1/...` 保留 namespace；重叠 Context prefix 拒绝挂载，空 prefix 的所有 provider 路径仍会过滤/拒绝 Store key。旧 `store/v1` 只属于未发布预览，不再保留给 Store，已有同名 Context prefix 可继续使用。
-
-- **四项必须齐全,缺一即拒绝启动。** 半套凭证静默回退本地 FS 的错误只在故障时暴露,代价远高于启动即拒。
-- 配上后既有 Context `$ref` 可走 S3 presign。default Store 只有在 create 声明精确 size 时才用
-  `presignPutExact` 返回 create-only presigned PUT，签名 headers 必含 `Content-Length`；未知 size 一律
-  relay。direct PUT 后必须 capability-only complete/HEAD 才 ready。Store owner/share read 当前仍使用独立
-  `~store/refs|shares` relay route，不因 driver 有 presign 就改变公开 wire。本地 FS 的 Store 上传走流式
-  relay，PUT 成功当次即 ready；Context 本地 FS 仍不声明 `create_upload`。
-- `TB_REF_TTL_SEC` 控制下载 `$ref`/presigned GET；`TB_UPLOAD_GRANT_TTL_SEC` 独立控制写 grant，缺省 `min(TB_REF_TTL_SEC, 900)`。两者均钳制在 SigV4 的 `1..604800` 秒范围，放宽慢下载窗口不会把写入窗口一并拉长。
-- Store 配置独立：`TB_STORE_MAX_OBJECT_BYTES`（缺省 256 MiB）、`TB_STORE_RELAY_MAX_BYTES`（Node 缺省跟随前者）、`TB_STORE_UPLOAD_TTL_SEC`、`TB_STORE_SHARE_TTL_SEC`、`TB_STORE_READ_TTL_SEC`，以及 `TB_STORE_CALL_MAX_BYTES/MAX_OBJECT_BYTES/MAX_OBJECTS/ALLOWED_CONTENT_TYPES`。显式 `TB_STORE_TOKEN_SECRET` 至少 16 字符；否则复用 `TB_SECRET_ENCRYPTION_KEY` 作根，经版本化域分离派生且不落 StateStore。两者都缺时才 CAS 生成持久 fallback，正式部署不应依赖该逃生路径。
-- Dashboard 是浏览器客户端，bucket CORS 必须精确允许 Dashboard origin、`PUT` 与签名 headers（Store
-  direct 为 `Content-Type`、`Content-Length`、`If-None-Match`；Context grant 不含定长要求）；需要读取
-  etag 时 expose `ETag`。原生设备与 CLI 不受浏览器 CORS 限制。
-- 这是**启动期基础设施配置**,不在 Dashboard 里改:运行时换端点会让已写入的 `$ref` 与 `store://default/...` 字节落点失效。按节点用不同存储走 `kind: 'context'` 节点自己的 S3 配置；Store 当前不开放 named driver 热切换。
-- Store cleanup 只遍历 StateStore 的权威记录；driver 中没有对应 metadata 的 key 可能属于 Context，绝不
-  当 orphan 删除。终态字节删除成功后记录 `bytesDeletedAt`，保留窗口后 CAS 删除 metadata，重复 tick
-  不会重复调用外部 DELETE。
-- 与 `TB_DATABASE_URL` 组合即完整无状态形态:换全新容器仍能读回一切,有集成测试覆盖。
+`pnpm verify` 与 `pnpm turbo run build` 是工程底线；测试基础设施自动创建隔离的本地 PG/S3/Redis，缺少外部 env 不再静默跳过关键后端验证。真实 Compose 验收还要覆盖零 env 配对、重建/重启、后端持久性、部署端口/目录/镜像实际生效和失败回滚。真实平台验收只在授权范围内执行，每轮最多一次消耗真实资源并留脱敏证据；测试计数、运行 URL 与资源 ID 不写入 llmdoc。

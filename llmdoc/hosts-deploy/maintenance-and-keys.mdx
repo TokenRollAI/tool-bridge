@@ -1,0 +1,73 @@
+---
+description: 数据库停写迁移、Redis 切换、数据库角色轮换与加密/签名 keyring：维护租约、可恢复重加密、引用退役及配对备份恢复。
+kind: guide
+relations:
+  requires:
+    - hosts-deploy/managed-configuration.mdx
+  related:
+    - hosts-deploy/state-store-decision.mdx
+code:
+  paths:
+    - scripts/compose-snapshot.mjs
+    - scripts/compose-restore.mjs
+    - scripts/compose-backup.mjs
+    - packages/core/src/keyManagement.ts
+    - packages/core/src/maintenance.ts
+    - packages/core/src/secret/keyring.ts
+    - packages/core/src/secret/secretStore.ts
+    - packages/core/src/builtin/keys.ts
+    - packages/core/src/builtin/maintenance.ts
+    - packages/server/src/keyManager.ts
+    - packages/server/src/pgKeyRotation.ts
+    - packages/server/src/maintenanceManager.ts
+    - packages/server/src/managedServer.ts
+    - packages/app/src/refToken.ts
+    - packages/app/src/storeRefToken.ts
+    - packages/cli/src/commands/keys.ts
+    - packages/cli/src/commands/maintenance.ts
+    - packages/dashboard/src/pages/system/KeysPage.tsx
+    - packages/dashboard/src/pages/system/MaintenancePage.tsx
+    - packages/server/test/keyManager.test.ts
+    - packages/server/test/maintenanceManager.test.ts
+---
+
+
+# 专项维护、密钥轮换与恢复
+
+数据库连接、Redis 路由、加密根和签名根关系到既有持久数据，不是普通配置热更新。`system/maintenance` / `system/keys`、`tb maintenance` / `tb keys` 和 Dashboard 对等提供状态与显式操作；只有对应规范 system 路径的 admin 可以调用。SQL 不可达或根文件损坏时使用本机 recovery 配对，不依赖失效的业务鉴权。
+
+## 数据库与 Redis
+
+数据库迁移使用官方 `pg_dump`/`pg_restore`，要求目标不同且为空、源 instanceId 与调用期望相符、bootstrap revision 未变。先停业务写入，再导出、单事务恢复并检查实例身份与所有业务表数量；只有目标 runtime prepare 成功后才提交 bootstrap 连接指针。失败保留原指针并恢复原 runtime，目标上失败残留由维护者检查，不能自动覆盖未知目标数据。表数量检查不是内容校验或完整灾备证明，操作前仍须独立备份并保留恢复演练证据。
+
+Maintenance journal 在受保护 bootstrap 中记录动作、阶段和脱敏结果，不保存密码或连接串；独占锁防止本机两项维护交错。临时 dump 仅 owner 可读，处理后删除。执行 dump/restore 的宿主必须安装与数据库兼容的官方客户端工具；业务 schema 不使用 PG 扩展。
+
+数据库凭证轮换要求独立管理员连接到同一数据库。以新专用 login 继承旧角色权限/设置，验证实际新连接，提交指针后禁用旧 login；失败阶段按实际提交状态恢复。共享 superuser、replication 或 BYPASSRLS 身份不允许自动退役。不能假定普通 CREATEROLE 应用角色就有权限安全替换自己；管理员凭证只从受保护 installer defaults 或该次 secret 输入进入。
+
+Redis 更换前执行真实读写和 pub/sub 探测；验证并停旧路由后才切换连接，失败恢复旧 runtime。`redisUrl:null` 是显式禁用，不是连接失败 fallback。Redis 不承载权限/operation 唯一状态，但更换会中断实时路由，需要设备重连。
+
+## 加密根与签名根
+
+加密/签名是两个独立 keyring，ciphertext/token 带 keyId（ref token 的 wire 用 kid）。新写只用 active key，旧根保留用于读存量；OAuth 使用独立稳定 key。密钥材料只在 protected keys 文件和显式 secret backup 中，PG 维护任务只保存 job、cursor、租约和引用计数。
+
+加密 rotate 先原子持久新根、更新 bootstrap revision，再运行有界重加密：SecretStore → Mailbox → 引用复核。中断后用 resume 按持久 cursor 重试；若根已切但创建 job 前崩溃，status 能从残留旧 keyId 引用重建任务。单条重加密仍做 revision 条件更新，不能覆盖并发数据。旧加密根有引用时禁止 retire，未完成任务禁止再 rotate。
+
+签名 rotate 默认保留旧 token 的有效窗口，旧根只有期限窗口结束且 upload/share/call 引用为零时才能退役。显式 revokeExisting 会撤销在途上传、call/share 并去掉旧签名根；既有 ref 随旧 kid 无法验证而失效。该选择会改变已有授权行为，CLI/UI 必须明确表达，不能当无影响换钥。
+
+key mutation 同时持本机排他锁和 PG maintenance fence；存在其它有效副本 lease 时拒绝，新副本注册也服从 fence。操作需要停止其它副本并准备维护窗口，不能宣传为透明在线多副本轮换。re-encryption 分页成功不等于任务完成，最终以引用复核和状态 completed 为准。
+
+## 备份与本机恢复
+
+`keys backup` 是显式 secret 导出，包含实例身份、加密/签名 keyring、独立 OAuth key 与签名退役窗口；它不是完整 PG/S3 备份，也不包含新的 Admin SK。CLI 写新建的 owner-only 文件，Dashboard 以专门下载交付，不进 toast/日志/localStorage。普通 status 只返回 keyId、active、引用与 job 状态。
+
+恢复时先以本机 admin utility 签发 recovery token，经受保护 setup 恢复面提交 PG 连接及必要的同实例 key backup；backup 身份不匹配直接拒绝。更换数据库地址不能绕过 `tb_instance` 身份或接入空数据库。保护 identity/bootstrap、PG 备份与 S3 字节三者：只恢复其中一个不构成完整业务恢复。
+
+## 默认 Compose 的完整物理快照
+
+仓库的 compose-backup/compose-restore 脚本是本机运维工具，与 keys backup 或在线切库不同。它们只接受默认单副本 Compose 布局，核对 project/service/volume 标签、无外部挂载、镜像身份和 bootstrap instanceId；先停止 app 与 PG/S3，确认 PG 正常退出，再归档 bootstrap、PG、S3 和两组凭证卷。归档与 metadata 限 owner 读取，校验 SHA-256/大小且拒绝链接、越界路径和特殊文件，最后恢复源项目原运行状态。
+
+restore 只接受不同于源和默认项目的显式隔离 project，要求 --replace；先核对原 Compose 版本和各镜像的精确 identity/架构，不能把 PG 物理卷跨任意版本复制。修改前快照目标，恢复后校验 instanceId 与 ready；失败还原目标，若回滚也失败则保持停止并保留人工恢复资料。它不包含其它外部数据库、自定义 S3 或 Redis，不替代 Railway 的平台备份方案。成功恢复状态仍需独立读业务记录和对象来证明目标内容。
+
+## 验收与停止条件
+
+本地真实 PG/Redis 测试应覆盖备份恢复、提交失败保留旧指针、不同实例/非空目标拒绝、新旧角色连接验证、重加密中断与 resume、旧 token 策略和缺 keyId fail closed。单元 mock 只能证明编排分支；发布前还要做目标平台的备份/恢复演练。多副本停写、根文件可恢复性或目标内容无法证明时，停止维护，不用重试掩盖执行状态未知。

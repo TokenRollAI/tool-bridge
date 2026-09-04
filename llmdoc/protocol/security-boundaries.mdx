@@ -8,17 +8,29 @@ relations:
     - device/durable-mailbox.mdx
 code:
   paths:
-    - packages/core/src/auth/**
+    - packages/server/src/bootstrapState.ts
+    - packages/server/src/s3Network.ts
+    - packages/core/src/node/fsObjectStore.ts
+    - packages/core/src/auth/authorizer.ts
+    - packages/core/src/auth/registerPath.ts
+    - packages/core/src/auth/scope.ts
+    - packages/core/src/auth/secretRef.ts
+    - packages/core/src/auth/sk.ts
     - packages/core/src/context/objectProvider.ts
-    - packages/core/src/objectStoreService/**
+    - packages/core/src/objectStoreService/service.ts
+    - packages/core/src/objectStoreService/types.ts
+    - packages/core/src/objectStoreService/repository.ts
+    - packages/core/src/objectStoreService/uri.ts
     - packages/core/src/secret/secretStore.ts
     - packages/core/src/tool/allowlist.ts
     - packages/core/src/tool/remote.ts
     - packages/app/src/deviceHello.ts
     - packages/app/src/deviceLifecycle.ts
     - packages/app/src/registryMutation.ts
-    - packages/sdk/src/device/**
-    - packages/plugin-sdk/**
+    - packages/sdk/src/device/connection.ts
+    - packages/sdk/src/device/mailbox.ts
+    - packages/sdk/src/device/storeUpload.ts
+    - packages/plugin-sdk/src/index.ts
 ---
 
 # 安全边界
@@ -29,7 +41,7 @@ code:
 - scope 按路径和 action 判断,deny 优先。无权看到的路径返回 404,避免通过 403 枚举树结构。
 - `registerPaths` 限制设备/反向注册位置。target path、`registerPaths` 与内置/部署追加 `reservedRoots` 都以 canonical lowercase segment 比较，大小写不得成为绕过或静默全拒的差异。异步认证后还必须复核 active connection generation,防旧连接越权完成调用。
 - `system/registry` 和 `~register` 各自先做通道 scope 判定，随后共用 `registryMutation.ts` 的 `assertNodeConfigMutation` 完成 register/root、secret ref、OAuth/config 与出站探测顺序。device hello 因输入形状不同由 `deviceHello.ts` 编排，但必须执行同一 register/root 约束，并在小写折叠后的 expose 路径冲突上 fail closed。
-- Workers/Node 的 hello、调用前 device authority recheck 及 Mailbox claim/renew/complete 重验都必须携带同一部署 `reservedRoots`；不得让 WebSocket 或 Mailbox 成为绕过普通注册面的第三条通道。跨宿主的重验/断线/回收业务序列由 `deviceLifecycle.ts` 拥有，宿主只持有连接代际与调度。
+- Node 的 hello、调用前 device authority recheck 及 Mailbox claim/renew/complete 重验都必须携带同一部署 `reservedRoots`；不得让 WebSocket 或 Mailbox 成为绕过普通注册面的第三条通道。共享的重验/断线/回收业务序列由 `deviceLifecycle.ts` 拥有，宿主只持有连接代际与调度。
 
 ## 凭证
 
@@ -42,7 +54,7 @@ code:
   都使旧 grant 失效；旧 DCR grant 只有在已存 DCR client 的唯一 redirect URI 可证明时才补 binding。
 - 节点写入口对嵌套 `oauthClient.clientSecretRef` 执行与其它 secret ref 相同的 `system/secret admin` 使用授权，再验证
   引用可解析；顺序不能反，避免 SecretStore existence oracle。挂载、授权和调用各自验证所需状态。
-- 首次 bootstrap 默认要求部署者提供 Admin SK。Workers 和 SDK fail closed;Node 仅保留显式 `TB_ALLOW_INSECURE_BOOTSTRAP=true` 的本地开发逃生口。
+- 标准 Node 的首次安装自动生成稳定根和 Admin SK，只有持本机短期配对凭证才能配置；已有 identity/initialized 的故障实例只走 recovery，不重新匿名安装。SDK 嵌入者显式提供初始 Admin SK，没有不安全引导开关。
 - Linux structured command 的 child 缺省只继承基础环境白名单;显式 `inheritEnv` 只是按名称复制本机 daemon 环境,不是 SecretStore 引用解析,也不提供输出 secret redaction、执行后清零或到期保证。不得把 token/云凭证列入 profile 环境策略,也不得把 fixed executable/argv 当作 secret 通道。
 - Device Mailbox 的 caller 权限在 enqueue 时快照：该次 call 授权成功后，caller SK 后续吊销不会自动取消
   operation；caller owner 或含命令叶子的完整 targetPath admin 才能查询/取消。这是 durable work 的显式授权语义，不得把
@@ -81,7 +93,7 @@ code:
 
 ## 存储与日志
 
-- 派生投影(presence、缓存、搜索索引)的 TTL/降级防御、DO hibernation 恢复和 stale generation guard 属于安全下界,不是可删的历史兼容。
+- 派生投影(presence、缓存、搜索索引)的 TTL/降级防御、stale generation guard 和崩溃后孤儿下线 属于安全下界,不是可删的历史兼容。
 - 日志、错误、调用历史、URL、CLI argv 与一次性验证输出都不得回显 secret、Admin SK、OAuth token 或含敏感 args 的 payload。
 - Presigned GET/PUT URL 本身是 bearer secret：客户端错误不得回显 fetch 原始 URL 或对象存储响应体，成功结果只持久化稳定 `node://` URI。写 grant 缺省把 `If-None-Match: *` 纳入签名以阻止静默覆盖，只有显式 `overwrite` 才扩大到可替换对象。
 - Store 的 `store://default/...` 同样只是稳定身份，不是 capability；读取仍需 owner `read` 或短期 share。
@@ -91,27 +103,21 @@ code:
 - Store direct 不是普通 presign 的性能开关：只有请求声明精确 size 且 driver 的 `presignPutExact` 把
   `Content-Length`、`Content-Type` 与 create-only 条件纳入签名时才允许绕过网关；未知 size、旧
   `presignPut` 或 signer 失败必须退回受流式硬限额保护的 relay，complete/HEAD 仍做最终校验。
-- Store HMAC key 优先从部署信任根经版本化域分离派生，不把派生 key 写入 StateStore；权威 session/share/
+- Store HMAC key 优先由独立签名 keyring 的 active 根经版本化域分离派生，不把派生 key 写入 StateStore；权威 session/share/
   call capability 只存 token hash。设备 wire 上的 call token 由 SDK 内部消费，handler 的安全 context
-  不暴露原始 bearer；客户端限额只做早拒，服务端 reservation/CAS 才是权威。
-- Device Mailbox 把 arguments 与 terminal result/error 以 AES-GCM 加密后写 StateStore，AAD 绑定
-  operation id 与字段；AES key 从 `TB_SECRET_ENCRYPTION_KEY` 经 Mailbox 专属 HKDF salt/info 派生，不直接
-  复用 SecretStore 的“只进不出”对象或 Store HMAC key。该保护只是 **at-rest encryption**，不是 E2E：
-  gateway enqueue/claim/complete 时会在内存中处理明文，claim 经 TLS 回给设备。缺部署 encryption root 或
-  缺 StateStore CAS 时 Mailbox fail closed；密钥轮换必须先设计既有 ciphertext 迁移，不能直接替换根后
-  期待旧 operation 可读。
+  不暴露原始 bearer；客户端限额只做早拒，服务端领域事务 reservation 才是权威。
+- Device Mailbox 把 arguments 与 terminal result/error 以 AES-GCM 加密后写领域仓库，AAD 绑定 operation id 与字段，keyId 指向 encryption keyring；Mailbox HKDF 域不与 SecretStore/Store HMAC 混同。服务端处理时仍持明文，这是 at-rest 而非 E2E。缺仓库或有效密钥 fail closed；重加密任务和旧根退役必须通过受保护维护与引用复核。
 - Mailbox operation 的 payload、result/error 不进入 URL、日志、toast 或浏览器持久缓存；公开 summary
   只含 caller 快照、target、traceId、状态与时间。设备 installation journal 可保存 completion 用于重放，
   因而必须由宿主提供真正 durable 且受本机权限保护的存储，并按 expiresAt 清理。
 - Context 与 Store 即使复用同一 ObjectStore 也属于不同授权域：`__tool_bridge_internal__/store/v1` 是
   强制保留根，重叠的非空
-  Context prefix 挂载时 fail closed；空 prefix 挂载必须过滤/隐藏 Store read/list/search，并拒绝
-  write/update/delete/create_upload。旧 `store/v1` 不是授权边界，已有同名 Context prefix 继续可用。
+  Context prefix 挂载时 fail closed；空 prefix 挂载必须过滤/隐藏 Store read/list/search，并拒绝 write/update/delete/create_upload。
   Store cleanup 只相信权威 metadata，不把未知 driver key 猜作 orphan。
-- relay filename 不参与 key，本地 driver 还要用根内检查、no-follow 与原子 no-replace 做第二层路径
-  防护。终态对象在 driver DELETE 成功后先 CAS 记录 `bytesDeletedAt`，安全保留窗口后再删除 metadata，
-  避免重复外部删除和无界 tombstone 增长。
-- 配置仓库只保留账户中立模板;Cloudflare account、域名、资源 ID 与登录态在本地 provision 或平台侧管理。
+- relay filename 不参与 key；字节 driver 必须实施真实 create-only 条件写、流式大小/期限限制。终态对象在 DELETE 成功后先条件记录 bytesDeletedAt，再按安全窗口删除 metadata。
+- storage/config/deployment/maintenance/keys 要求对应规范 system 路径的 admin；普通路径 write 不是管理权限。S3 凭证只进加密内部 secret，不回显 authRef/明文；不可变 backendId 和 FK 防止切换时旧数据漂移。
+- S3 的实际 socket DNS 检查和 exact 内网 origin 例外归 Node adapter，不能把该能力推导成所有 provider HTTP 都有 DNS pinning。业务容器不持 Docker socket，外部 agent 只能执行指定 Compose app 的受限 schema。
+- 配置模板不携真实资源 ID、域名、登录态与密钥。PG 之外的 bootstrap/root 文件和显式备份也属于 secret；API status 只投影非敏感状态。
 
 ## 评审规则
 

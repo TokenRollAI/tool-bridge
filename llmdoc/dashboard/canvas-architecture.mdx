@@ -6,10 +6,27 @@ relations:
     - device/durable-mailbox.mdx
 code:
   paths:
-    - packages/dashboard/src/canvas/**
-    - packages/dashboard/src/components/node/**
-    - packages/dashboard/src/components/add-tool/**
+    - packages/dashboard/src/canvas/WorkspaceShell.tsx
+    - packages/dashboard/src/canvas/CanvasPage.tsx
+    - packages/dashboard/src/canvas/TreeCanvas.tsx
+    - packages/dashboard/src/canvas/CanvasNode.tsx
+    - packages/dashboard/src/canvas/NodeInspector.tsx
+    - packages/dashboard/src/canvas/treeGraph.ts
+    - packages/dashboard/src/canvas/useCanvasTree.ts
+    - packages/dashboard/src/components/node/CommandWorkspace.tsx
+    - packages/dashboard/src/components/node/CmdPanel.tsx
+    - packages/dashboard/src/components/node/CliHint.tsx
+    - packages/dashboard/src/components/node/ContextBrowser.tsx
+    - packages/dashboard/src/components/node/SkillBrowser.tsx
+    - packages/dashboard/src/components/node/ResultView.tsx
+    - packages/dashboard/src/components/add-tool/AddToolWizard.tsx
+    - packages/dashboard/src/components/add-tool/addToolSources.ts
+    - packages/dashboard/src/components/add-tool/useMountRunner.ts
+    - packages/dashboard/src/components/add-tool/mountDiagnostics.ts
     - packages/dashboard/src/lib/api.ts
+    - packages/dashboard/src/lib/management.ts
+    - packages/dashboard/src/App.tsx
+    - packages/dashboard/src/components/layout/navigation.ts
     - packages/dashboard/src/lib/queries.ts
     - packages/dashboard/src/lib/store.ts
     - packages/dashboard/src/lib/store-queries.ts
@@ -18,18 +35,37 @@ code:
     - packages/dashboard/src/components/SchemaFields.tsx
     - packages/dashboard/src/components/SchemaFormRenderer.tsx
     - packages/dashboard/src/components/DashboardThemeProvider.tsx
-    - packages/dashboard/src/components/node/CmdPanel.tsx
-    - packages/dashboard/src/components/node/CliHint.tsx
     - packages/dashboard/src/components/device/DeviceMailboxPanel.tsx
     - packages/dashboard/src/lib/deviceMailbox.ts
-    - packages/dashboard/src/pages/**
+    - packages/dashboard/src/pages/LoginPage.tsx
+    - packages/dashboard/src/pages/SetupPage.tsx
+    - packages/dashboard/src/pages/SearchPage.tsx
+    - packages/dashboard/src/pages/system/StorePage.tsx
+    - packages/dashboard/src/pages/system/DevicesPage.tsx
+    - packages/dashboard/src/pages/system/RegistryPage.tsx
+    - packages/dashboard/src/pages/system/ConfigPage.tsx
+    - packages/dashboard/src/pages/system/DeploymentPage.tsx
+    - packages/dashboard/src/pages/system/MaintenancePage.tsx
+    - packages/dashboard/src/pages/system/KeysPage.tsx
+    - packages/dashboard/src/pages/system/StorageBackendsPage.tsx
+    - packages/dashboard/src/pages/system/forms/configSchema.ts
+    - packages/dashboard/src/pages/system/forms/registryConfig.ts
+    - packages/dashboard/src/pages/system/forms/storageConnection.ts
+    - packages/dashboard/src/pages/system/forms/mountOrchestration.ts
+    - packages/dashboard/src/pages/system/forms/MountDialog.tsx
+    - packages/dashboard/src/pages/system/forms/IntegrationDialog.tsx
+    - packages/dashboard/src/pages/system/forms/RegistryKindFields.tsx
+    - packages/dashboard/src/pages/system/forms/StorageConnectionFields.tsx
     - packages/dashboard/test/integrationDialog.dom.test.tsx
     - packages/dashboard/test/mountDialog.dom.test.tsx
     - packages/dashboard/test/presence.test.ts
     - packages/dashboard/test/structuredForms.dom.test.tsx
     - packages/dashboard/test/treeGraph.test.ts
-    - packages/sdk/src/client/**
-    - packages/sdk/src/store/**
+    - packages/sdk/src/client/client.ts
+    - packages/sdk/src/client/management.ts
+    - packages/sdk/src/store/client.ts
+    - packages/sdk/src/store/upload.ts
+    - packages/sdk/src/store/wire.ts
 ---
 
 # Dashboard 画布架构
@@ -43,7 +79,6 @@ Dashboard 是纯 HTTP 客户端,不 import core。固定控制面 wire 类型与
 - `lib/session*`:profile、认证、连接上下文。
 - `canvas/`:工作区骨架与画布。`WorkspaceShell`(顶栏 + 库务栏 + Outlet)、`CanvasPage`(index 与 `/nodes/*` 同一组件:左画布 + 右 Inspector 抽屉,选中态由 URL 驱动)、`TreeCanvas`(React Flow 渲染)、`NodeInspector`(选中节点后右侧滑出,原样复用 node 子组件)。`treeGraph.ts` / `useCanvasTree.ts` 是无 DOM 的纯逻辑(工作树→图布局、展开集合、按需懒加载合并),性能边界:root depth=1、本地 lazy=1、remote lazy=3。
 - 节点动作 ownership:`CanvasNode` 只展示并上报语义动作,`TreeCanvas` 编排展开、懒加载与选中,`CanvasPage` 持有挂载/卸载 mutation 及确认交互;可操作性在图 view model 层统一派生。
-- `components/node/`:Inspector 内的节点子组件。`CommandWorkspace`(整宽命令目录,点命令开 Dialog)、`CmdPanel`(单条 cmd 调用面板,accordion 折叠行 / dialog 弹窗两态)、`ResultView`、`CliHint`、反馈与 note。`CmdPanel`、实际 `invoke` 与 `CliHint` 共同信任 owner `~help` 返回的 `cmds[].path`——它已是含命令叶子的完整直连路径,除前导斜杠规范化外必须原样传递:不得用 owner path + `cmd.name` 重建、不得另传 `tool`、不得把 body 包成信封,实际 POST 与面板展示的 `tb call`/curl 必须使用同一 command path 和裸 arguments(契约见 [protocol/htbp-contract](../protocol/htbp-contract.mdx))。
 - `components/node/`:Inspector 内的节点子组件。`CommandWorkspace`(整宽命令目录,点命令开 Dialog)、`CmdPanel`(单条 cmd 调用面板,accordion 折叠行 / dialog 弹窗两态)、`ResultView`、`CliHint`、反馈与 note。`CmdPanel`、实际 `invoke` 与 `CliHint` 共同信任 owner `~help` 返回的 `cmds[].path`——它已是含命令叶子的完整直连路径,除前导斜杠规范化外必须原样传递:不得用 owner path + `cmd.name` 重建、不得另传 `tool`、不得把 body 包成信封。设备 command metadata 的 `delivery` 只决定可选 policy；CmdPanel、SDK invoke 与 CliHint 统一在同一次普通 POST / `tb call` 中加入顶层 `~delivery`，不生成第二个 enqueue URL。
 - `components/add-tool/`:「添加工具」向导,按来源分流;不重复造挂载逻辑,内置集成走 `buildIntegrationCalls`、自定义 kind 走 `buildRegistryMountCalls`。`mountDiagnostics.ts` 把真实 `system/registry write` 的失败按 TBError code 归类,不另起与真实挂载不一致的 dry-run 探测。真正的 secret→registry→条件回滚链由 `pages/system/forms/mountOrchestration.ts` 单点持有，`useMountRunner`、`MountDialog` 与 `IntegrationDialog` 只负责表单/交互适配。
 - `pages/system/`:SK、secret、registry、plugin、catalog、federation、annotation。`pages/system/forms/`:将表单状态编译成 wire payload 的纯函数。
@@ -87,7 +122,7 @@ Dashboard 是纯 HTTP 客户端,不 import core。固定控制面 wire 类型与
 - "最近调用"是当前浏览器按 profile 与 gateway 隔离的本地历史,不是服务端全局审计;任何展示都必须明示"本机/当前 profile"边界。
 - Store 页面支持本地文件上传、当前 owner 的 ready 列表、stat、下载、创建/撤销短期 share 和删除。上传
   读取 grant 的 `maxBytes`，relay PUT 直接消费 descriptor，presigned PUT 后用 `x-tb-store-upload` 调
-  complete；不能假设所有 R2 部署都有 signer。
+  complete；标准 Node S3 部署目前只提供 relay，不把通用 client 分支当作 signer 已存在。
 - `store://` URI 可进表格/详情/复制面，它只是稳定身份；upload token、headers、presigned URL 与 read/
   share `$ref` 是 bearer secret。share `$ref` 只在用户明确创建后进入受控复制按钮，不写 toast、调用历史
   或浏览器 URL；下载 `$ref` 立即用于隐藏 anchor 后丢弃。错误文案固定，不回显服务端可疑 URL。
@@ -112,3 +147,9 @@ Dashboard 是纯 HTTP 客户端,不 import core。固定控制面 wire 类型与
 ## 验证
 
 功能收尾至少覆盖:桌面/移动/矮屏滚动,键盘与 Escape,首屏和交互后的请求形状,localStorage 无敏感参数,分页后的计数/筛选,Store relay/direct 与敏感值处理,以及当前构建的 `/ui` deep-link/asset 行为。静态 class 审查或单张截图不构成交互证据。
+
+## 安装与实例管理
+
+SetupPage 在登录前按 ~setup/status 判断安装/恢复，用本机配对 token 读取脱敏 defaults、提交连接并接收首次 Admin SK；已初始化 PG 故障不能回退为匿名安装。运行管理页分别消费 Config、StorageBackends、Deployment、Maintenance、Keys 的同一 SDK client 契约，使用受控字段表单，不提供可绕过 schema 的任意配置回写。
+
+配置页区分 desired、effective、revision、appliedRevision 与失败；保存之后显式 apply。后端页区分新增身份、能力 test、activate 和 credential rotation，位置不可直接编辑。部署页面显示 agent 状态与任务结果，未连接执行器时不能显示已应用。维护/密钥页展示真实 job、引用与风险操作；密钥备份仅经明确下载交付，secret 与配对 token 不写 toast、history、localStorage 或 URL。精确运行配置字段由 schema 生成，共享纯表单函数固定最终 payload。

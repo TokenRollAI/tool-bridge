@@ -1,53 +1,44 @@
 ---
-description: 各宿主部署与状态存储总览:Cloudflare 全面 D1、单库双 binding、putIfAbsent/CAS、Store fail-closed 与 ADR-001。
+description: PostgreSQL 唯一权威数据库：通用 StateStore 与 Store/Mailbox 窄领域仓库、JSONB 约束/事务、准确配额、lease 和 SDK 注入边界。
 kind: reference
 relations:
   related:
+    - store/default-store.mdx
     - device/durable-mailbox.mdx
+    - hosts-deploy/maintenance-and-keys.mdx
 code:
   paths:
-    - packages/gateway/wrangler.jsonc
-    - template/wrangler.jsonc
-    - packages/gateway/src/d1StateStore.ts
-    - packages/server/src/sqliteStateStore.ts
-    - packages/server/src/pgStateStore.ts
     - packages/core/src/store.ts
+    - packages/server/src/pgStateStore.ts
+    - packages/core/src/objectStoreService/repository.ts
+    - packages/core/src/device/mailboxRepository.ts
+    - packages/server/src/pgStoreRepository.ts
+    - packages/server/src/pgMailboxRepository.ts
+    - packages/server/test/pgDomainRepositories.test.ts
 ---
 
-# 部署形态与状态存储决策
 
-## 部署形态总览
+# PostgreSQL 权威状态与领域仓库
 
-| 形态 | 入口 | 适配器 |
+标准 Node 服务只支持 PostgreSQL。删除旧宿主与数据库适配是运行契约变化：未初始化实例进入安装面，已初始化实例不能把数据库缺失或故障解释成全新空实例。数据库的 `tb_instance` 身份必须与受保护 bootstrap 一致，切库只通过显式维护流程。
+
+## 存储责任
+
+| 边界 | 权威内容 | 约束 |
 |---|---|---|
-| Cloudflare Deploy Button 模板 | `template/src/index.ts` | D1(TB_STATE/TB_SEARCH)、R2 default Store、Durable Objects、Static Assets、Cron;含 D1 Search |
-| Cloudflare Workers(源码部署) | `packages/gateway/src/deployEntry.ts` | D1(TB_STATE/TB_SEARCH)、R2 default Store、Durable Objects、Static Assets、Cron |
-| Node / Docker | `packages/server` | SQLite 或 PostgreSQL、文件或 S3 对象存储、ws、静态 Dashboard |
-| 嵌入式 SDK | `packages/sdk` | Node 22+;调用方注入 StateStore、ObjectStore、SecretStore 与本地 provider;当前不提供 SearchIndex 注入 |
-| 应用层库 | `packages/app` | 不绑定具体运行时,由宿主注入依赖 |
+| `PgStateStore` | 节点、SK、加密 secret、通用配置/派生进度 | JSON KV 提供原子的 putIfAbsent/CAS；不缓存 SK 吊销 |
+| `PgStoreRepository` | 对象、上传、幂等、call reservation、share、后端引用 | 多记录转换属于命名领域操作，事务不接受网络回调 |
+| `PgMailboxRepository` | durable operation 与 lease | pending 配额与 enqueue 同事务，领取/完成按身份、revision 和租约条件更新 |
+| `PgSearchIndex` | 可重建搜索候选与 cursor revision | 不是授权真源，响应前仍 hydrate canonical state |
+| S3 | 对象字节与条件写 | backendId 固定，字节成功不等于业务对象已 ready |
+| Redis | 跨副本设备路由与瞬时通知 | 不保存唯一权限、operation 结果或对象元数据 |
 
-KV 已从 Cloudflare 宿主全面撤出(gateway 与 template 的 wrangler 配置均无 `kv_namespaces`)。Deploy Button 模板消费 `@tool-bridge/gateway/full`,与源码部署是同一个产品形态,不是缩水模板。宿主共享 app/core 的行为,但存储一致性、设备会话持久性、Search 和静态资源托管存在明确适配差异。
+领域仓库采用受类型约束的 JSONB 记录，加 generated columns、外键、唯一约束与查询索引。它没有引入通用 ORM/事务 DSL，也未把所有业务字段机械拆成列。选择标准 SQL 事务是为了保护实际跨记录不变量，并保留 core 的业务语义；新增原子操作应继续明确命名，不向 core 暴露数据库句柄或 transaction callback。
 
-## 跨宿主状态存储事实
+Store `beginUpload` 在同一事务内绑定幂等身份、读取并锁定 active 后端、锁定 call capability 预留额度，再创建对象/会话；失败全部回滚。`finishUpload` 与 `terminateUpload` 同时推进对象/会话，旧 revision 或竞争终态不会覆盖 ready。owner 列表用 owner/status/id 索引，不再先扫全量对象后过滤。
 
-- 三宿主 StateStore(D1/SQLite/PG)收敛到同一 SQL 语义,共享契约测试对拍。
-- StateStore 契约含可选原子原语 `putIfAbsent`,三宿主均原子实现;bootstrap Admin SK 铸造以 hash key winner-takes-all 去重,多副本并发冷启动不产生重复 sk 索引。
-- StateStore 还含 `compareAndSwap(key, expectedRevision, value)`；D1/SQLite/PG 与内存实现都原子对拍。
-  它对旧自定义 StateStore 的类型兼容仍是 optional，但 deployment-level StoreService 与 durable device
-  Mailbox 都将它视为硬依赖：对象/session/call capability/share/idempotency、operation lease/终态的跨副本
-  状态转换缺 CAS 时以 `unavailable` fail closed，不能退化成 `get→put`。
-- Mailbox 使用 `deviceop:<sha256(deviceId)>:<operationId>` 每 operation 一 key，arguments/result 另行加密；
-  list/claim 复用前缀 cursor 分页，claim CAS 竞争失败会在同一页继续尝试下一条。每设备 pending cap 由
-  enqueue 前的前缀扫描提供，是并发 enqueue 下的近似上限而非事务计数器；该取舍避免引入单 device 热点 aggregate
-  key，不能在文档或监控中宣称绝对不超限。
-- Node 宿主 SQLite/PG 是双后端,切换不迁移数据(细节见 [node-docker-and-helm](./node-docker-and-helm.mdx))。
-- SDK 内嵌与 Node server 使用同一引导下界:首次启动没有显式 Admin SK 就拒绝继续。设备通道由宿主装配的 `DeviceChannel` 提供,不存在可配置但未实现的公共 `DeviceTransport`。
+Mailbox enqueue 用每设备 advisory transaction lock 保护准确 pending 计数及幂等插入。claim 候选先由 core 复核权限，PG 条件更新再次确认 immutable device/key 身份、revision、总 TTL 与可领取状态；renew/complete 再比较 leaseId 和未过期 lease。它不是 FIFO，也不承诺跨设备安装的 exactly-once。
 
-## ADR-001 决策摘要(accepted,已实施)
+Schema 创建/升级使用受 advisory lock 保护的 PG 事务；失败阻止业务就绪。新部署没有旧 KV/SQLite 导入、双写或兼容 keyspace。SDK 嵌入者必须显式注入所需领域仓库；测试内存实现不是生产持久层。
 
-Cloudflare 宿主的权威状态从 KV 迁到 D1(`d1StateStore.ts`):
-
-- **单 D1 库、两个 binding**:TB_STATE(权威状态:节点树、SK 哈希、加密 secret、plugin manifest、feedback)与 TB_SEARCH(派生工具搜索索引)指向同一个库。binding 表达用途、库表达存储位置——将来要拆库只动配置不动代码;共库省一个云资源、省 provision 步骤,而分库唯一的实质理由(search rebuild 与认证热路径写竞争)在控制面网关的真实量级下可忽略。
-- **迁移动机**:KV 最终一致带来撤销传播窗口、无 CAS/事务(`putIfAbsent` 无法实现)、list/get 幽灵、逐 key 读放大。迁 D1 后撤销即时生效。
-- **零迁移成本的原因**:pre-launch 窗口——旧预览状态不作为兼容目标,切换即新部署重新引导,不需要 KV→D1 数据迁移工具。正式上线后这个窗口关闭。
-- 认证热路径延迟(D1 回源 vs KV 边缘命中)是唯一实质代价。原始缓解候选是 per-isolate 短 TTL(5–15s)内存缓存加负缓存禁用,**没有实施**——它会把吊销即时性重新降为 TTL 上界,等于放弃迁移动机本身。实际改用请求级 `first-primary` Sessions + Smart Placement(见 [cloudflare-paths](./cloudflare-paths.mdx))。若将来重新引入鉴权缓存,必须作为明确的安全语义变化重新决策。真实延迟数字属于部署验收证据,不固化进文档。
+详见 [Default Store](../store/default-store.mdx)、[Mailbox](../device/durable-mailbox.mdx)、[数据库维护](./maintenance-and-keys.mdx)。
