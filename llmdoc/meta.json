@@ -30,10 +30,10 @@
       "validatedRevision": "cd9af1c6a10382a689f6ebf545c2e24a83997df6"
     },
     "hosts-deploy/cloudflare-paths.mdx": {
-      "validatedRevision": "cd9af1c6a10382a689f6ebf545c2e24a83997df6"
+      "validatedRevision": "7a95689821229679c9e481af42243dd831936e74"
     },
     "hosts-deploy/node-docker-and-helm.mdx": {
-      "validatedRevision": "cd9af1c6a10382a689f6ebf545c2e24a83997df6"
+      "validatedRevision": "7a95689821229679c9e481af42243dd831936e74"
     },
     "hosts-deploy/state-store-decision.mdx": {
       "validatedRevision": "cd9af1c6a10382a689f6ebf545c2e24a83997df6"
@@ -51,7 +51,7 @@
       "validatedRevision": "cd9af1c6a10382a689f6ebf545c2e24a83997df6"
     },
     "release/npm-publishing.mdx": {
-      "validatedRevision": "cd9af1c6a10382a689f6ebf545c2e24a83997df6"
+      "validatedRevision": "7a95689821229679c9e481af42243dd831936e74"
     },
     "search/search-index.mdx": {
       "validatedRevision": "cd9af1c6a10382a689f6ebf545c2e24a83997df6"
