@@ -1,7 +1,9 @@
 import {
   DEFAULT_STORE_DRIVER_KEY_ROOT,
+  MemoryMailboxRepository,
   MemoryObjectStore,
   MemoryStateStore,
+  MemoryStoreRepository,
   type ObjectStore,
   SecretStoreImpl,
   type StateStore,
@@ -434,7 +436,7 @@ describe('default Store control/data plane', () => {
 
   it('设备 call 内 capability 绑定 caller/device/额度，result 后立即 revoke', async () => {
     const state = new MemoryStateStore()
-    await runBootstrap(state, { adminSk: TEST_ADMIN_SK, requireAdminSk: true })
+    await runBootstrap(state, { adminSk: TEST_ADMIN_SK })
     const objects = new MemoryObjectStore()
     const secrets = new SecretStoreImpl(state, TEST_ENCRYPTION_KEY)
     const appRef: { current?: ReturnType<typeof createTbApp> } = {}
@@ -444,6 +446,9 @@ describe('default Store control/data plane', () => {
       allowInsecureHttp: false,
       canonicalOrigin: 'https://canonical.test',
       objects: () => objects,
+      storeRepository: new MemoryStoreRepository(),
+      mailboxRepository: new MemoryMailboxRepository(),
+      storeBackends: { defaultBackend: async () => ({ id: 'test', objects }), resolveBackend: async () => objects },
       remote: TEST_REMOTE,
       secrets,
       state,
@@ -538,7 +543,7 @@ describe('Store token secret and legacy host isolation', () => {
     expect(values[0]).toHaveLength(64)
   })
 
-  it('缺 CAS 的旧 StateStore 仅让 Store fail closed，不拖垮其他 builtin', async () => {
+  it('缺显式 StoreRepository 仅让 Store fail closed，不拖垮其他 builtin', async () => {
     const backing = new MemoryStateStore()
     const legacy: StateStore = {
       delete: key => backing.delete(key),
@@ -548,7 +553,7 @@ describe('Store token secret and legacy host isolation', () => {
       put: (key, value) => backing.put(key, value),
       putIfAbsent: (key, value) => backing.putIfAbsent!(key, value),
     }
-    await runBootstrap(legacy, { adminSk: TEST_ADMIN_SK, requireAdminSk: true })
+    await runBootstrap(legacy, { adminSk: TEST_ADMIN_SK })
     const deps: TbAppDeps = {
       allowInsecureHttp: false,
       objects: () => new MemoryObjectStore(),
@@ -605,34 +610,6 @@ describe('Store token secret and legacy host isolation', () => {
       expect(tb.objects === undefined
         ? []
         : (await tb.objects.list(`${DEFAULT_STORE_DRIVER_KEY_ROOT}/`)).items).toHaveLength(0)
-    } finally {
-      vi.useRealTimers()
-    }
-  })
-
-  it('同一 cleanup tick 翻多页时只执行一次 driver maintenance', async () => {
-    vi.useFakeTimers()
-    vi.setSystemTime(new Date('2030-01-01T00:00:00.000Z'))
-    try {
-      class MaintenanceStore extends MemoryObjectStore {
-        cleanupCalls = 0
-
-        async cleanupStaging(): Promise<number> {
-          this.cleanupCalls++
-          return 0
-        }
-      }
-      const objects = new MaintenanceStore()
-      const tb = await createTestApp({ objects, storeUploadTtlSec: 1 })
-      for (let i = 0; i < 3; i++) {
-        await createRelay(tb, {
-          contentType: 'application/octet-stream',
-          idempotencyKey: `maintenance-${i}`,
-        })
-      }
-      vi.advanceTimersByTime(1_100)
-      await cleanupDefaultStore(tb.deps, { limit: 1, maxPages: 8 })
-      expect(objects.cleanupCalls).toBe(1)
     } finally {
       vi.useRealTimers()
     }

@@ -15,7 +15,7 @@
  *
  * **刻意不收 action 表**。求值 tools `List` 也能成功(98/99,唯一失败的 feishu 是
  * proxyTools 要真实凭证),但那份产物 2.49 MiB —— 与 `src/<name>/schema.ts` 是同一份数据
- * 的第二个副本,而工具表运行时本就走 `toolcache:<path>`。收进来只会让仓库和 Worker bundle
+ * 的第二个副本,而工具表运行时本就走 `toolcache:<path>`。收进来只会让仓库和服务 bundle
  * 各多背 2.5 MiB,且任何一行 description 改动都会翻动 digest。
  */
 

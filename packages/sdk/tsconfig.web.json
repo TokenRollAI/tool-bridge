@@ -6,7 +6,9 @@
     "paths": {
       "@tool-bridge/core": ["../core/src/index.ts"],
       "@tool-bridge/core/device": ["../core/src/device/public.ts"],
-      "@tool-bridge/core/protocol": ["../core/src/protocol/public.ts"]
+      "@tool-bridge/core/protocol": ["../core/src/protocol/public.ts"],
+      "@tool-bridge/core/management": ["../core/src/managedConfig.ts"],
+      "@tool-bridge/core/deployment": ["../core/src/deployment.ts"]
     },
     "types": []
   },

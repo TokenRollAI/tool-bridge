@@ -123,10 +123,10 @@ describe('tb ctx cat', () => {
       version: 'v9',
       updatedAt: '2026-07-07T00:00:00Z',
       metadata: {},
-      content: { $ref: 'https://r2.example/presigned?sig=abc' },
+      content: { $ref: 'https://storage.example/presigned?sig=abc' },
     })
     await runCli(['ctx', 'cat', 'ctx/notes', 'big.bin', ...gw])
-    expect(stdoutText()).toBe('https://r2.example/presigned?sig=abc\n')
+    expect(stdoutText()).toBe('https://storage.example/presigned?sig=abc\n')
     const stderr = process.stderr.write as unknown as ReturnType<typeof vi.fn>
     const err = stderr.mock.calls.map(c => String(c[0])).join('')
     expect(err).toMatch(/large object, download via URL/)
@@ -140,7 +140,7 @@ describe('tb ctx cat', () => {
       version: 'v9',
       updatedAt: '2026-07-07T00:00:00Z',
       metadata: {},
-      content: { $ref: 'https://r2.example/presigned?sig=abc' },
+      content: { $ref: 'https://storage.example/presigned?sig=abc' },
     }
     captureFetch(entry)
     await runCli(['ctx', 'cat', 'ctx/notes', 'big.bin', ...gw, '--json'])
@@ -495,14 +495,14 @@ describe('tb ctx search', () => {
 })
 
 describe('tb ctx mount', () => {
-  it('r2 → ~register,config {kind:context,provider:r2,providerConfig:{prefix},readOnly,ttl}', async () => {
+  it('storage → ~register,config {kind:context,provider:storage,providerConfig:{prefix},readOnly,ttl}', async () => {
     const fn = captureFetch({ path: 'ctx/notes', kind: 'context' })
     await runCli([
       'ctx',
       'mount',
       'ctx/notes',
       '--provider',
-      'r2',
+      'storage',
       '--description',
       'team notes',
       '--prefix',
@@ -523,7 +523,7 @@ describe('tb ctx mount', () => {
       description: 'team notes',
       config: {
         kind: 'context',
-        provider: 'r2',
+        provider: 'storage',
         providerConfig: { prefix: 'notes/' },
         readOnly: true,
         ttl: 3600,
@@ -532,11 +532,11 @@ describe('tb ctx mount', () => {
     expect(process.exitCode).toBe(0)
   })
 
-  it('r2 无 --prefix → 不带 providerConfig', async () => {
+  it('storage 无 --prefix → 不带 providerConfig', async () => {
     const fn = captureFetch({ path: 'ctx/notes', kind: 'context' })
-    await runCli(['ctx', 'mount', 'ctx/notes', '--provider', 'r2', ...gw, '--json'])
+    await runCli(['ctx', 'mount', 'ctx/notes', '--provider', 'storage', ...gw, '--json'])
     const [, init] = fn.mock.calls[0] as [string, RequestInit]
-    expect(JSON.parse(init.body as string).config).toEqual({ kind: 'context', provider: 'r2' })
+    expect(JSON.parse(init.body as string).config).toEqual({ kind: 'context', provider: 'storage' })
   })
 
   it('s3 → providerConfig {endpoint,bucket,region,prefix} + authRef', async () => {

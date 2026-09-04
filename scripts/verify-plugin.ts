@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url'
  * 端到端验证示例 context-provider 的注册→挂载→四动词消费→调试清单 1~6→注销。
  *
  * 流程:
- *   1. 起 stub-provider 子进程(packages/gateway/scripts/stub-provider.ts;或设
+ *   1. 起 stub-provider 子进程(scripts/test/stub-provider.ts;或设
  *      TB_TEST_PLUGIN_URL 用预先起好的实例,此时跳过 spawn 与 token 钉扎);
  *   2. `tb plugin register --file <manifest>` → 断言契约校验通过、pluginToken 仅注册
  *      响应出现一次(list/get 不回显);
@@ -24,7 +24,7 @@ import { fileURLToPath } from 'node:url'
  *   7. teardown(幂等):unmount + `tb plugin rm` + 杀子进程。
  *
  * 用法:先起本地网关(须放行 http 出站与固定 Admin SK):
- *   `cd packages/gateway && wrangler dev --var TB_ALLOW_INSECURE_HTTP:true --var TB_BOOTSTRAP_ADMIN_SK:$TB_SK`
+ *   `TB_ALLOW_INSECURE_HTTP=true TB_BOOTSTRAP_ADMIN_SK=$TB_SK pnpm --filter @tool-bridge/server dev`
  * 再 `TB_BASE_URL=http://127.0.0.1:8787 TB_SK=tbk_... pnpm tsx scripts/verify-plugin.ts`
  * (需先 `pnpm --filter @tool-bridge/cli build` 产出 CLI dist。)
  *
@@ -58,7 +58,7 @@ if (!existsSync(CLI)) {
 
 const TSX = fileURLToPath(new URL('../node_modules/.bin/tsx', import.meta.url))
 const STUB_SCRIPT = fileURLToPath(
-  new URL('../packages/gateway/scripts/stub-provider.ts', import.meta.url),
+  new URL('./test/stub-provider.ts', import.meta.url),
 )
 const STUB_PORT = Number(process.env.STUB_PROVIDER_PORT ?? 39004)
 /** 预先起好的 stub(生产验收时的公网部署);未设则本地 spawn + token 钉扎。 */
@@ -284,7 +284,7 @@ async function main(): Promise<void> {
     })
 
     // 5) 挂载:NodeRegistry.Write{kind:'context', provider:<plugin-id>, export:'entries'}。
-    //    tb ctx mount 只收 r2|s3(内置 provider),plugin 挂载走管理面 system/registry。
+    //    plugin 挂载走管理面 system/registry。
     await step('挂载 plugin-backed context 节点', async () => {
       await cliJson([
         'call',

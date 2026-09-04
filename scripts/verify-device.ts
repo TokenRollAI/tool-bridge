@@ -22,8 +22,6 @@ import { fileURLToPath } from 'node:url'
  *
  * 用法:`TB_BASE_URL=https://... TB_SK=tbk_... pnpm tsx scripts/verify-device.ts`
  *   (需先 `pnpm --filter @tool-bridge/cli build` 产出 CLI dist。)
- * 可选:`TB_VERIFY_HIBERNATION=1` 追加跨休眠窗口用例(空闲 155s 后再调用,验证 DO
- *   hibernation 唤醒恢复,见 llmdoc/guides/do-websocket-hibernation.md;总时长 +~3min)。
  *
  * **消耗生产资源**:真实设备注册 + SK 签发/吊销,故只在显式运行时跑,不进 `pnpm verify`。
  * 退出码:0=全过;1=任一断言失败或超时。
@@ -56,7 +54,6 @@ const READY_TIMEOUT_MS = 30_000
 const REJECT_TIMEOUT_MS = 30_000
 const CLI_TIMEOUT_MS = 90_000 // 设备调用超时 60s(DEVICE_CALL_TIMEOUT_MS)+ 余量
 const SK_PROPAGATION_TIMEOUT_MS = 60_000 // KV 官方传播窗口上限(同 verify-revocation)
-const HIBERNATION_IDLE_MS = 155_000 // 边缘空闲掐断 ~100s + DO 休眠,>150s 才算跨窗口
 
 const sleep = (ms: number): Promise<void> => new Promise(r => setTimeout(r, ms))
 
@@ -315,17 +312,6 @@ async function main(): Promise<void> {
       )
       console.log('ok  ② fs cat → 读到临时文件真实内容')
     })
-
-    // 3+) opt-in:跨休眠窗口调用(hibernation 唤醒恢复,guides/do-websocket-hibernation.md)。
-    if (process.env.TB_VERIFY_HIBERNATION === '1') {
-      await step('①+ 跨休眠窗口 shell exec', async () => {
-        console.log(`..  hibernation 用例:空闲 ${HIBERNATION_IDLE_MS / 1000}s 后再调用`)
-        await sleep(HIBERNATION_IDLE_MS)
-        const again = await callShell(deviceId, 'echo hi-p4-hib')
-        assert.match(again.stdout, /hi-p4-hib/, '跨休眠窗口 stdout 预期含 hi-p4-hib')
-        console.log('ok  ①+ 跨休眠窗口(≥150s 空闲)shell exec 仍成功')
-      })
-    }
 
     // 4) 断言③:同 deviceId 新连接顶替旧连接;新连接使用不同 shell allow 作为路由标记。
     await step('③ 同 deviceId 连接替换', async () => {

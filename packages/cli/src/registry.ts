@@ -144,17 +144,18 @@ export function parseConfigSpecs(specs: string[]): Record<string, string> | unde
 }
 
 /**
- * r2/s3 对象存储挂载的共用参数面(ctx mount 与 skill mount 的 provider 分支逐行同构,收敛于此):
- * - r2:平台自带桶,拒绝 --endpoint/--bucket/--region/--auth-ref;providerConfig 只含可选 prefix。
+ * storage/s3 对象存储挂载的共用参数面(ctx mount 与 skill mount 的 provider 分支逐行同构,收敛于此):
+ * - storage:平台自带桶,拒绝 --endpoint/--bucket/--region/--auth-ref;providerConfig 只含可选 prefix。
  * - s3:--endpoint/--bucket/--auth-ref 必填,region/prefix 可选。
- * - 其余 provider:allowPlugin(ctx mount)时走 plugin 分支(拒 r2/s3 专用 flag,
- *   --config → providerConfig);否则直接拒(skill mount 只认 r2/s3)。
+ * - 其余 provider:allowPlugin(ctx mount)时走 plugin 分支(拒 storage/s3 专用 flag,
+ *   --config → providerConfig);否则直接拒(skill mount 只认 storage/s3)。
  * 返回 providerConfig(空则 undefined,不塞空对象);authRef 的落位仍由调用方组装。
  */
 export function parseObjectStorageMountOpts(
   provider: string,
   opts: {
     authRef?: string
+    backendId?: unknown
     bucket?: unknown
     config?: string[]
     endpoint?: unknown
@@ -165,15 +166,17 @@ export function parseObjectStorageMountOpts(
 ): Record<string, unknown> | undefined {
   const { authRef, prefix } = opts
   const configSpecs = opts.config ?? []
-  if (provider === 'r2') {
+  if (provider === 'storage') {
     if (opts.endpoint || opts.bucket || opts.region || authRef) {
       throw new CliError('--endpoint/--bucket/--region/--auth-ref only apply to s3')
     }
     if (configSpecs.length > 0) {
       throw new CliError('--config only applies to plugin providers')
     }
-    return prefix ? { prefix } : undefined
+    const backendId = typeof opts.backendId === 'string' ? opts.backendId.trim() : ''
+    return prefix || backendId ? { ...(prefix ? { prefix } : {}), ...(backendId ? { backendId } : {}) } : undefined
   }
+  if (opts.backendId !== undefined) throw new CliError('--backend-id only applies to storage')
   if (provider === 's3') {
     const endpoint = String(opts.endpoint ?? '').trim()
     if (!endpoint) throw new CliError('--endpoint is required for --provider s3')
@@ -191,7 +194,7 @@ export function parseObjectStorageMountOpts(
     }
   }
   if (!allowPlugin) {
-    throw new CliError(`invalid --provider "${provider}"; valid: r2, s3`)
+    throw new CliError(`invalid --provider "${provider}"; valid: storage, s3`)
   }
   if (opts.endpoint || opts.bucket || opts.region || prefix) {
     throw new CliError(

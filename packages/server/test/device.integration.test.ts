@@ -1,16 +1,16 @@
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { mkdtempSync, rmSync } from 'node:fs'
 /**
  * DeviceHub 集成测试:真实 http + ws 客户端全链路(帧手写,不依赖 SDK)。
  * 覆盖:升级认证(无/错 SK 401 且树零污染)、hello→挂树 online→HTTP 调用→result 回传、
  * requestId 幂等、断线→online:false→短 reclaim 子树删除、崩溃重启孤儿回收、
  * 回收窗口内重连不误删。
  */
-
-import { afterEach, describe, expect, it, vi } from 'vitest'
-import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { WebSocket } from 'ws'
-import { configFromEnv, createTbServer, type TbServer } from '../src'
+import { createTbServer, type TbServer } from '../src'
+import { testServerConfig } from './helpers/server'
 
 const ADMIN_SK = 'tbk_server_test_admin_00000000'
 const ENCRYPTION_KEY = '3ZwpbBkSrp3eT9ylcZedfN33yq9fJLlmeusH98qNbt8'
@@ -33,13 +33,13 @@ async function startServer(
   dataDir: string,
   reclaimSec = 60,
 ): Promise<{ baseUrl: string, server: TbServer, wsBase: string }> {
-  const config = configFromEnv({
-    TB_PORT: '0',
-    TB_HOST: '127.0.0.1',
-    TB_DATA_DIR: dataDir,
-    TB_BOOTSTRAP_ADMIN_SK: ADMIN_SK,
-    TB_SECRET_ENCRYPTION_KEY: ENCRYPTION_KEY,
-    TB_DEVICE_RECLAIM_SEC: String(reclaimSec),
+  const config = await testServerConfig({
+    port: 0,
+    host: '127.0.0.1',
+    dataDir: dataDir,
+    adminSk: ADMIN_SK,
+    encryptionKey: ENCRYPTION_KEY,
+    deviceReclaimSec: reclaimSec,
   })
   const server = createTbServer(config)
   const { port } = await server.start()

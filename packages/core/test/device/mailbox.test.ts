@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest'
 import {
   base64urlEncode,
   DeviceMailboxService,
-  MemoryStateStore,
+  type MailboxRepository,
+  MemoryMailboxRepository,
   TBError,
 } from '../../src/index'
 
@@ -15,7 +16,7 @@ function sequenceRandom(): (length: number) => Uint8Array {
 }
 
 function fixture(opts: ConstructorParameters<typeof DeviceMailboxService>[2] = {}) {
-  const state = new MemoryStateStore()
+  const state = new MemoryMailboxRepository()
   let now = START
   const mailbox = new DeviceMailboxService(state, ENCRYPTION_KEY, {
     now: () => now,
@@ -44,18 +45,9 @@ function fixture(opts: ConstructorParameters<typeof DeviceMailboxService>[2] = {
 }
 
 describe('DeviceMailboxService', () => {
-  it('requires CAS and a valid deployment encryption root', () => {
-    const state = new MemoryStateStore()
-    const withoutCas = {
-      get: state.get.bind(state),
-      getMany: state.getMany.bind(state),
-      put: state.put.bind(state),
-      delete: state.delete.bind(state),
-      list: state.list.bind(state),
-    }
-    expect(() => new DeviceMailboxService(withoutCas, ENCRYPTION_KEY)).toThrowError(
-      /compareAndSwap/,
-    )
+  it('requires domain atomic operations and a valid deployment encryption root', () => {
+    const state = new MemoryMailboxRepository()
+    expect(() => new DeviceMailboxService({} as MailboxRepository, ENCRYPTION_KEY)).toThrowError(/MailboxRepository/)
     expect(() => new DeviceMailboxService(state, undefined)).toThrowError(
       /TB_SECRET_ENCRYPTION_KEY/,
     )
@@ -67,7 +59,7 @@ describe('DeviceMailboxService', () => {
     const queued = await enqueue()
     expect(queued.state).toBe('queued')
 
-    const rows = await state.list('deviceop:')
+    const rows = await state.list({ limit: 100 })
     expect(rows.items).toHaveLength(1)
     const persisted = JSON.stringify(rows.items[0]?.value)
     expect(persisted).not.toContain('plaintext-must-not-persist')
@@ -200,7 +192,7 @@ describe('DeviceMailboxService', () => {
     expect(await mailbox.cleanup({ limit: 1 })).toMatchObject({ expired: 1, scanned: 1 })
     advance(1_001)
     expect(await mailbox.cleanup({ limit: 1 })).toMatchObject({ deleted: 1, scanned: 1 })
-    expect((await state.list('deviceop:')).items).toHaveLength(0)
+    expect((await state.list({ limit: 100 })).items).toHaveLength(0)
   })
 
   it('rejects completion with an inactive lease', async () => {

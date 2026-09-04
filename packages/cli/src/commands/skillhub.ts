@@ -269,18 +269,19 @@ export function skillRmCommand() {
 
 /**
  * `tb skill mount <path>` —— 挂载一个 skillhub(NodeRegistry.Write{kind:'skillhub'} via ~register)。
- * provider 缺省 r2(平台自带桶,无需外部凭证);s3 需 --endpoint/--bucket/--auth-ref。
+ * provider 缺省 storage(平台自带桶,无需外部凭证);s3 需 --endpoint/--bucket/--auth-ref。
  */
 export function skillMountCommand() {
   return withGlobalOpts(new Command('mount'))
-    .description('Mount a skillhub (r2 by default; s3 optional)')
+    .description('Mount a skillhub (storage by default; s3 optional)')
     .argument('<path>', 'Tree path to mount at')
-    .option('--provider <provider>', 'Storage provider: r2 | s3 (default r2)')
+    .option('--provider <provider>', 'Storage provider: storage | s3 (default storage)')
     .option('--description <desc>', 'One-line node description (default: auto-generated)')
     .option('--auth-ref <ref>', 'SecretStore ref for credentials ([s3] required)')
     .option('--read-only', 'Reject write verbs (Publish/Remove)')
     .option('--ttl <seconds>', 'Node TTL in seconds (expired node is reclaimed)')
     .option('--prefix <prefix>', 'Key prefix inside the bucket')
+    .option('--backend-id <id>', '[storage] bind this backend (default: current active backend)')
     .option('--endpoint <url>', '[s3] S3-compatible endpoint URL')
     .option('--bucket <bucket>', '[s3] bucket name')
     .option('--region <region>', '[s3] region')
@@ -292,14 +293,15 @@ export function skillMountCommand() {
         const asJson = Boolean(opts.json)
         const path = String(pathArg ?? '').trim()
         if (!path) throw new CliError('tree path is required')
-        const provider = String(opts.provider ?? 'r2').trim()
+        const provider = String(opts.provider ?? 'storage').trim()
         const authRef = opts.authRef ? String(opts.authRef) : undefined
         const prefix = opts.prefix ? String(opts.prefix) : undefined
         const ttl = parsePositiveInt(opts.ttl, '--ttl')
 
-        // r2/s3 的互斥与必填校验同 ctx mount(共用实现);skillhub 只认这两个 provider。
+        // storage/s3 的互斥与必填校验同 ctx mount(共用实现);skillhub 只认这两个 provider。
         const providerConfig = parseObjectStorageMountOpts(provider, {
           authRef,
+          backendId: opts.backendId,
           bucket: opts.bucket,
           endpoint: opts.endpoint,
           prefix,
@@ -352,7 +354,7 @@ export function skillCommand() {
       'after',
       `
 Examples:
-  tb skill mount skills/team                       # r2, no external credentials
+  tb skill mount skills/team                       # storage, no external credentials
   tb skill publish skills/team ./my-skill-dir      # dir must contain SKILL.md
   tb skill ls skills/team
   tb skill get skills/team my-skill --out ~/.claude/skills/my-skill

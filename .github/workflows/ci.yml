@@ -21,41 +21,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
-    # Postgres 后端(StateStore + SearchIndex)的测试在缺 TB_TEST_DATABASE_URL 时
-    # 自我 skip。没有这个 service,PG 的 SQL 语法、驱动返回类型归一(bigint/EXISTS)与真实
-    # 装配即使全部损坏,PR 仍会全绿 —— 故这里必须起库,让那组测试成为硬闸门。
-    # 用 pgvector 镜像(而非 postgres:16)是为 Phase 3 的 pgvector 语义搜索留出同一环境;
-    # 当前后端本身不依赖任何扩展。
-    services:
-      postgres:
-        image: pgvector/pgvector:pg16
-        env:
-          POSTGRES_PASSWORD: tb
-          POSTGRES_DB: toolbridge
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 10
-
-      # 多副本设备通道的跨副本转发测试要真 Redis:socket 不可序列化,那组测试是
-      # 唯一能证明"设备连在副本 A、调用打到副本 B 也通"的手段,不能靠 mock。
-      redis:
-        image: redis:7-alpine
-        ports:
-          - 6379:6379
-        options: >-
-          --health-cmd "redis-cli ping"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 10
-
-    env:
-      TB_TEST_DATABASE_URL: postgres://postgres:tb@localhost:5432/toolbridge
-      TB_TEST_REDIS_URL: redis://localhost:6379
-
+    # Server globalSetup starts isolated PostgreSQL/S3/Redis containers and fails if Docker is unavailable.
     steps:
       - uses: actions/checkout@v4
 
@@ -67,24 +33,6 @@ jobs:
           cache: pnpm
 
       - run: pnpm install --frozen-lockfile
-
-      # 断言 PG 测试真的在跑:靠 env 生效的自我 skip 一旦静默失效(变量拼错、service 没起来),
-      # 整组 PG 覆盖会无声消失且 CI 依然全绿。这里在 verify 之前先钉死"未被 skip"。
-      - name: Assert Postgres suites are not skipped
-        run: |
-          pnpm --filter @tool-bridge/server exec vitest run \
-            test/pgStateStore.test.ts test/pgSearchIndex.test.ts test/pgServer.e2e.test.ts \
-            test/deviceRouter.integration.test.ts \
-            --reporter=json --outputFile="$RUNNER_TEMP/pg-tests.json"
-          node -e '
-            const r = require(process.env.RUNNER_TEMP + "/pg-tests.json");
-            const skipped = r.numPendingTests + r.numTodoTests;
-            if (r.numTotalTests === 0 || skipped > 0) {
-              console.error(`PG 测试未全部执行: total=${r.numTotalTests} skipped=${skipped}`);
-              process.exit(1);
-            }
-            console.log(`PG 测试全部执行: ${r.numPassedTests}/${r.numTotalTests}`);
-          '
 
       - run: pnpm verify
 
@@ -98,7 +46,7 @@ jobs:
       # publish workflow。两处复用同一个 verifier,避免 pack 路径再次分叉。
       - name: Verify packed public package manifests
         run: |
-          for PKG in app cli dashboard gateway plugin-sdk sdk server; do
+          for PKG in app cli dashboard plugin-sdk sdk server; do
             node scripts/pack-and-verify-package.mjs "packages/$PKG" \
               --output-dir "$RUNNER_TEMP/$PKG" --skip-install
           done
@@ -135,10 +83,9 @@ jobs:
           set -e
           fails=(
             "-f examples/values-standalone.yaml --set replicaCount=3"
-            "-f examples/values-ha.yaml --set redis.url="
-            "-f examples/values-ha.yaml --set objectStore.secretAccessKey="
-            "-f examples/values-standalone.yaml --set secrets.bootstrapAdminSk="
-            "-f examples/values-standalone.yaml --set autoscaling.enabled=true"
+            "-f examples/values-ha.yaml --set bootstrap.shared=false"
+            "-f examples/values-ha.yaml --set bootstrap.existingClaim="
+            "--set replicaCount=0"
           )
           for args in "${fails[@]}"; do
             if helm template tb . $args >/dev/null 2>&1; then
@@ -147,17 +94,8 @@ jobs:
             fi
           done
 
-      - name: Compose config (both profiles) + required-var check
-        working-directory: deploy/compose
-        env:
-          TB_BOOTSTRAP_ADMIN_SK: tbk_ci_syntax_check
-          TB_SECRET_ENCRYPTION_KEY: ci_syntax_check
-          TB_PG_PASSWORD: ci_syntax_check
+      - name: Zero-env Compose configuration
         run: |
-          docker compose --profile default config >/dev/null
-          docker compose --profile ha config >/dev/null
-          # 必填缺失必须在启动前报错(而不是起一个 fail closed 循环重启的容器)。
-          if env -u TB_BOOTSTRAP_ADMIN_SK docker compose --profile default config >/dev/null 2>&1; then
-            echo "缺 TB_BOOTSTRAP_ADMIN_SK 未被拒绝" >&2
-            exit 1
-          fi
+          docker compose config --quiet
+          docker compose -f deploy/compose/docker-compose.yml config --quiet
+          docker compose --profile replicas config --quiet

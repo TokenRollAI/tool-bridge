@@ -1,36 +1,19 @@
-/**
- * 平台对象存储 = S3/R2 兼容端点的集成测试。
- *
- * 证明 TB_OBJECT_STORE_* 配上后,context 的 `$ref` 大对象真落在 S3 而非容器本地 FS
- * —— 这是容器无状态横向扩容的前提(FS 落点多副本互不可见、容器重建即丢)。
- * 断言不只看 HTTP 通,还直接查 dataDir 下没有对象文件、且 S3 里确实有 key。
- *
- * 需要一个 S3 兼容端点(设 TB_TEST_S3_ENDPOINT 等);缺省整组 skip。本地可用 MinIO:
- *
- *   docker run -d --name tb-minio -p 9000:9000 \
- *     -e MINIO_ROOT_USER=tbminio -e MINIO_ROOT_PASSWORD=tbminio123 \
- *     minio/minio server /data
- */
-
+import { ListObjectsV2Command, S3Client } from '@aws-sdk/client-s3'
 import { mkdtempSync, readdirSync, rmSync } from 'node:fs'
 import { afterEach, describe, expect, it } from 'vitest'
-import { AwsClient } from 'aws4fetch'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import postgres from 'postgres'
-import { configFromEnv, createTbServer, type TbServer } from '../src'
+import type { ServerConfig } from '../src/config'
+import { testS3Config, testServerConfig } from './helpers/server'
+import { createTbServer, type TbServer } from '../src'
+import { probeS3ObjectStore } from '../src/s3Probe'
 
 const ADMIN_SK = 'tbk_server_test_admin_00000000'
 const ENCRYPTION_KEY = '3ZwpbBkSrp3eT9ylcZedfN33yq9fJLlmeusH98qNbt8'
 
-const ENDPOINT = process.env.TB_TEST_S3_ENDPOINT
-const BUCKET = process.env.TB_TEST_S3_BUCKET
-const ACCESS_KEY_ID = process.env.TB_TEST_S3_ACCESS_KEY_ID
-const SECRET_ACCESS_KEY = process.env.TB_TEST_S3_SECRET_ACCESS_KEY
-const ready = [ENDPOINT, BUCKET, ACCESS_KEY_ID, SECRET_ACCESS_KEY].every(
-  v => v !== undefined && v.length > 0,
-)
-const suite = ready ? describe : describe.skip
+const { endpoint: ENDPOINT, bucket: BUCKET, accessKeyId: ACCESS_KEY_ID, secretAccessKey: SECRET_ACCESS_KEY } = testS3Config()
+const suite = describe
 
 const cleanups: Array<() => Promise<void> | void> = []
 
@@ -46,20 +29,14 @@ function tmpDataDir(): string {
 
 async function startServer(
   dataDir: string,
-  extraEnv: Record<string, string> = {},
+  extraEnv: Partial<ServerConfig> = {},
 ): Promise<{ baseUrl: string, server: TbServer }> {
-  const config = configFromEnv({
-    TB_PORT: '0',
-    TB_HOST: '127.0.0.1',
-    TB_DATA_DIR: dataDir,
-    TB_BOOTSTRAP_ADMIN_SK: ADMIN_SK,
-    TB_SECRET_ENCRYPTION_KEY: ENCRYPTION_KEY,
-    // MinIO 是本地 http 端点,需显式放行不安全出站。
-    TB_ALLOW_INSECURE_HTTP: 'true',
-    TB_OBJECT_STORE_ENDPOINT: ENDPOINT as string,
-    TB_OBJECT_STORE_BUCKET: BUCKET as string,
-    TB_OBJECT_STORE_ACCESS_KEY_ID: ACCESS_KEY_ID as string,
-    TB_OBJECT_STORE_SECRET_ACCESS_KEY: SECRET_ACCESS_KEY as string,
+  const config = await testServerConfig({
+    port: 0,
+    host: '127.0.0.1',
+    dataDir,
+    adminSk: ADMIN_SK,
+    encryptionKey: ENCRYPTION_KEY,
     ...extraEnv,
   })
   const server = createTbServer(config)
@@ -84,7 +61,7 @@ async function mountNamespace(baseUrl: string, path: string): Promise<Response> 
     path,
     kind: 'context',
     description: 's3-backed platform objects',
-    config: { kind: 'context', provider: 'r2' },
+    config: { kind: 'context', provider: 'storage' },
   })
 }
 
@@ -100,21 +77,23 @@ async function ctxCall(
 
 /** 直接向 S3 列举,确认对象真在桶里(绕开被测服务自己的读路径)。 */
 async function listBucket(prefix: string): Promise<string[]> {
-  const client = new AwsClient({
-    accessKeyId: ACCESS_KEY_ID as string,
-    secretAccessKey: SECRET_ACCESS_KEY as string,
-    service: 's3',
-    region: 'auto',
+  const client = new S3Client({
+    credentials: { accessKeyId: ACCESS_KEY_ID, secretAccessKey: SECRET_ACCESS_KEY },
+    endpoint: ENDPOINT, region: 'us-east-1', forcePathStyle: true, maxAttempts: 1,
   })
-  const base = (ENDPOINT as string).replace(/\/+$/, '')
-  const url = `${base}/${BUCKET}?list-type=2&prefix=${encodeURIComponent(prefix)}`
-  const response = await client.fetch(url)
-  expect(response.status).toBe(200)
-  const xml = await response.text()
-  return [...xml.matchAll(/<Key>([^<]+)<\/Key>/g)].map(m => m[1] as string)
+  try {
+    const result = await client.send(new ListObjectsV2Command({ Bucket: BUCKET, Prefix: prefix }))
+    return (result.Contents ?? []).flatMap(item => item.Key ? [item.Key] : [])
+  } finally { client.destroy() }
 }
 
 suite('平台对象存储 = S3 兼容端点', () => {
+  it('real S3 contract probe validates every required capability and cleans its namespace', async () => {
+    const result = await probeS3ObjectStore(testS3Config(), { internalOrigin: ENDPOINT })
+    expect(Object.values(result.checks).every(Boolean)).toBe(true)
+    expect(result.cleanupSucceeded).toBe(true)
+  })
+
   it('context 四动词往返,对象落在 S3 而非本地 dataDir', async () => {
     const dataDir = tmpDataDir()
     const { server, baseUrl } = await startServer(dataDir)
@@ -144,9 +123,9 @@ suite('平台对象存储 = S3 兼容端点', () => {
     expect(after.status).toBe(404)
   })
 
-  it('超阈值大对象 → $ref 用 S3 presign 直连,不经网关中转', async () => {
+  it('超阈值大对象 → $ref 经网关鉴权中转', async () => {
     const { server, baseUrl } = await startServer(tmpDataDir(), {
-      TB_REF_THRESHOLD_BYTES: '16',
+      refThresholdBytes: 16,
     })
     cleanups.push(async () => await server.close())
     expect((await mountNamespace(baseUrl, 'ctxs3/big')).status).toBe(200)
@@ -162,24 +141,14 @@ suite('平台对象存储 = S3 兼容端点', () => {
     const entry = (await get.json()) as { content: { $ref?: string } }
     const refUrl = entry.content.$ref ?? ''
 
-    // S3 后端支持 presign,故 $ref 指向对象存储自身而非 /~ref 中转 ——
-    // 这正是外置对象存储的收益:大对象下载不再穿过网关进程。
-    expect(refUrl).not.toContain('/~ref/')
-    expect(refUrl).toContain(BUCKET as string)
+    expect(refUrl).toContain('/~ref/')
+    expect(new URL(refUrl).origin).toBe(baseUrl)
 
     const download = await fetch(refUrl)
     expect(download.status).toBe(200)
     expect(await download.text()).toBe(bigContent)
   })
 
-  /**
-   * 对象内容不随容器本地卷消失。
-   *
-   * 注意 dataDir 复用是**必要**的:它同时装着 SQLite 状态(节点注册表)。换新 dataDir
-   * 会让 `ctxs3/persist` 这个节点本身不存在而返回 404 —— 那验证的是状态存储,不是
-   * 对象存储。要让状态也无状态化得配 TB_DATABASE_URL(见 pgServer.e2e)。
-   * 这里只隔离对象存储这一个变量:同一状态、进程重启,对象仍在 S3。
-   */
   it('进程重启后对象仍可读(对象不在容器进程内)', async () => {
     const dataDir = tmpDataDir()
     const first = await startServer(dataDir)
@@ -199,12 +168,7 @@ suite('平台对象存储 = S3 兼容端点', () => {
     expect(readdirSync(dataDir)).not.toContain('objects')
   })
 
-  /**
-   * 真正的"容器重建后一切都在":状态在 PG + 对象在 S3,两者都外置。
-   * 这是横向扩容/无状态部署的完整形态,需要同时配 TB_DATABASE_URL 才有意义,
-   * 故额外门控在 PG 可用时才跑。
-   */
-  it.runIf(process.env.TB_TEST_DATABASE_URL !== undefined)(
+  it(
     '状态在 PG + 对象在 S3 时,换全新 dataDir 仍能读回',
     async () => {
       const databaseUrl = process.env.TB_TEST_DATABASE_URL as string
@@ -218,7 +182,7 @@ suite('平台对象存储 = S3 兼容端点', () => {
         await admin.unsafe(`DROP SCHEMA IF EXISTS ${schema} CASCADE`)
         await admin.end({ timeout: 5 })
       })
-      const pgEnv = { TB_DATABASE_URL: url.toString() }
+      const pgEnv = { databaseUrl: url.toString() }
 
       const first = await startServer(tmpDataDir(), pgEnv)
       expect((await mountNamespace(first.baseUrl, 'ctxs3/stateless')).status).toBe(200)

@@ -1,9 +1,7 @@
 .env
-.dev.vars
 .DS_Store
 node_modules/
 dist/
-.wrangler/
 .llmdoc-tmp/
 *.log
 .playwright-mcp/

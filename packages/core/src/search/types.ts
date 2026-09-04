@@ -22,34 +22,19 @@ export const TOOL_SEARCH_BATCH_LIMIT = 100
 export const TOOL_SEARCH_WORK_LIMIT = 400
 /** 每次 canonical audit 最多读取的 registry 节点数；与 ~tree 的全树预算对齐。 */
 export const TOOL_SEARCH_AUDIT_NODE_LIMIT = 500
-/** 单节点可索引 JSON1 快照上限；超额节点不影响 canonical 工具调用，只从派生索引排除。 */
+/** 单节点可索引 JSON 快照上限；超额节点不影响 canonical 工具调用，只从派生索引排除。 */
 export const TOOL_SEARCH_NODE_JSON_BYTES_MAX = 20_000
 /** 单个工具进入全文索引的 description 上限；完整 ToolSpec 仍由 canonical state 返回。 */
 export const TOOL_SEARCH_DESCRIPTION_BYTES_MAX = 1_024
-/** 单页 canonical ToolSpec JSON 上限，避免大 schema 放大 Worker 内存。 */
+/** 单页 canonical ToolSpec JSON 上限，避免大 schema 放大宿主内存。 */
 export const TOOL_SEARCH_PAGE_BYTES = 4 * 1024 * 1024
-/** D1 adapter 的单参数 JSON1 array 上限；core 统一校验以保持 SQLite 对等。 */
-export const TOOL_SEARCH_RECORD_JSON_BYTES_MAX = 1_800_000
-/** 500 节点最坏 source + path/digest snapshot 所需 JSON1 块数上界。 */
-const TOOL_SEARCH_SNAPSHOT_RECORD_BYTES_MAX
-  = TOOL_SEARCH_NODE_JSON_BYTES_MAX + 256
-const TOOL_SEARCH_SOURCE_CHUNKS_MAX = Math.ceil(
-  TOOL_SEARCH_AUDIT_NODE_LIMIT * TOOL_SEARCH_NODE_JSON_BYTES_MAX
-  / (TOOL_SEARCH_RECORD_JSON_BYTES_MAX - TOOL_SEARCH_NODE_JSON_BYTES_MAX),
-)
-const TOOL_SEARCH_SNAPSHOT_CHUNKS_MAX = Math.ceil(
-  TOOL_SEARCH_AUDIT_NODE_LIMIT * TOOL_SEARCH_SNAPSHOT_RECORD_BYTES_MAX
-  / (TOOL_SEARCH_RECORD_JSON_BYTES_MAX - TOOL_SEARCH_SNAPSHOT_RECORD_BYTES_MAX),
-)
-export const TOOL_SEARCH_REBUILD_CHUNKS_MAX
-  = TOOL_SEARCH_SOURCE_CHUNKS_MAX + TOOL_SEARCH_SNAPSHOT_CHUNKS_MAX
 /** 搜索查询最多接受的 whitespace terms。 */
 export const TOOL_SEARCH_TERM_LIMIT = 32
-/** D1 单查询 100 个绑定扣除 limit / offset 后可用的搜索单元数。 */
+/** 限制单次召回工作量；保留现有 98 个派生搜索单元预算。 */
 export const TOOL_SEARCH_UNIT_LIMIT = 98
 /** 搜索专属默认页大小；宽泛 discovery 不继承 tree/list 的 50 条默认值。 */
 export const TOOL_SEARCH_LIMIT_DEFAULT = 10
-/** D1 允许的单个 LIKE pattern UTF-8 字节上限。 */
+/** 单个 LIKE pattern 的 UTF-8 字节预算；限制模式匹配成本。 */
 export const TOOL_SEARCH_LIKE_PATTERN_BYTES_MAX = 50
 /** 同时约束搜索工作量与 query-bound cursor 长度。 */
 export const TOOL_SEARCH_QUERY_MAX = 1024
@@ -181,7 +166,7 @@ export interface SearchUnit {
  * `on` 命中 `contract/...`、`to` 命中 `tools/...` 这类 mount/path 偶然子串会把
  * 无关工具抬到 full-coverage 桶；name/description/feedback 仍可表达这些短意图词，
  * 显式限定 namespace 则应使用 pathPrefix。pattern 只由本模块的 likePattern 产生，
- * 因此这个判定同时适用于 SQLite、PG 与内存契约实现。
+ * 因此 PG 与内存契约实现使用同一判定。
  */
 export function searchUnitAllowsPath(unit: SearchUnit): boolean {
   return !/^%[A-Za-z0-9]{1,2}%$/u.test(unit.pattern)
@@ -367,7 +352,7 @@ export function serializeToolSearchSnapshot(
   if (snapshotBytes > TOOL_SEARCH_NODE_JSON_BYTES_MAX) {
     throw new TBError(
       'rate_limited',
-      `工具索引节点 '${canonical}' 的 JSON1 快照过大(${snapshotBytes} > ${TOOL_SEARCH_NODE_JSON_BYTES_MAX} bytes)`,
+      `工具索引节点 '${canonical}' 的 JSON 快照过大(${snapshotBytes} > ${TOOL_SEARCH_NODE_JSON_BYTES_MAX} bytes)`,
     )
   }
   return records
@@ -545,9 +530,8 @@ export function prepareToolSearchQuery(
   if (rawTerms.length > TOOL_SEARCH_TERM_LIMIT) {
     throw new TBError('invalid_argument', `搜索 query 最多 ${TOOL_SEARCH_TERM_LIMIT} 个 terms`)
   }
-  // SQLite LIKE 与 PG ILIKE 的共同 case-fold 下界是 ASCII。按该下界去重并保留
-  // 第一次出现的原词作为 pattern；重复/大小写变体不能伪造额外 coverage，同时
-  // 不把 PG 更宽的 Unicode case-fold 强加给 SQLite。
+  // Logical term 去重固定使用 ASCII case-fold，并保留第一次出现的原词。
+  // 该规则属于既有 keyword-v2 排序契约，不随数据库 Unicode 折叠规则变化。
   const seenTerms = new Set<string>()
   const terms = rawTerms.filter((term) => {
     const key = term.replace(/[A-Z]/g, char => char.toLowerCase())

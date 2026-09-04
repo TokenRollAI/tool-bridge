@@ -1,5 +1,5 @@
 /**
- * 飞书官方远程 MCP 的 plugin(CF Worker,自部署后注册进 tool-bridge)。
+ * 飞书官方远程 MCP 的 plugin(进程内或独立 Node/HTTP 服务)。
  *
  * 解决的问题:飞书 TAT 凭证约 2h 过期,直接以 kind:mcp 挂载须人工 `tb secret set` 续期;
  * 本 plugin 按需换发并缓存 TAT(tat.ts),上游 401 时强制重换发重试一次——对平台侧
@@ -18,7 +18,7 @@
  * plugin 无凭证即不可用:公网可达的 endpoint 即使 PLUGIN_TOKEN 泄漏,也拿不到任何
  * 飞书凭证;同一部署可服务多个不同凭证的挂载(TAT 缓存按 app_id 键控)。
  *
- * env(wrangler secret / vars):
+ * env(宿主提供的配置与密钥):
  *   PLUGIN_TOKEN                      — 平台 pluginToken(secret;未配置时仅要求 Bearer 非空)
  *   FEISHU_ALLOWED_TOOLS              — 工具白名单(vars,逗号分隔;飞书无此头恒回空列表)
  *   FEISHU_MCP_URL / FEISHU_AUTH_URL  — 端点 override(vars,可缺省)
@@ -68,7 +68,7 @@ function credentialOf(ctx: PluginCallContext<Env>): FeishuCredential {
   return { app_id: values.app_id!, app_secret: values.app_secret! }
 }
 
-/** 飞书 annotations → ToolSpec.effect(与 gateway providers/mcp.ts 同规则)。 */
+/** 飞书 annotations → ToolSpec.effect(与 app providers/mcp.ts 同规则)。 */
 function toSpec(t: FeishuTool): ToolSpec {
   const spec: ToolSpec = { name: t.name }
   if (t.description !== undefined) spec.description = t.description

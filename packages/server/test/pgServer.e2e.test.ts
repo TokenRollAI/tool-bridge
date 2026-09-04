@@ -1,3 +1,4 @@
+import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 /**
  * PG 后端的端到端装配验收:用 TB_DATABASE_URL 起真实 createTbServer,经 HTTP 注册
  * 节点并走 `~search`,证明 PgStateStore + PgSearchIndex 在真实装配下贯通
@@ -5,16 +6,16 @@
  *
  * 需要真实 PG(设 TB_TEST_DATABASE_URL);缺省整组 skip。
  */
-
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { mkdtempSync, rmSync } from 'node:fs'
 import postgres, { type Sql } from 'postgres'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createTbServer, type TbServer } from '../src/server'
+import { testServerConfig } from './helpers/server'
 
 const DATABASE_URL = process.env.TB_TEST_DATABASE_URL
-const suite = DATABASE_URL === undefined ? describe.skip : describe
+if (!DATABASE_URL) throw new Error('PG integration fixture was not initialized')
+const suite = describe
 const SCHEMA = 'tb_e2e_server'
 const ADMIN_SK = 'tb_sk_e2e_pg_admin_key_000000000000'
 
@@ -30,7 +31,6 @@ const headers = {
 }
 
 beforeAll(async () => {
-  if (DATABASE_URL === undefined) return
   // 独立 schema,避免污染 public;search_path 保留 public 兜底内置函数解析。
   admin = postgres(DATABASE_URL, { max: 2, onnotice: () => {} })
   await admin.unsafe(`DROP SCHEMA IF EXISTS ${SCHEMA} CASCADE`)
@@ -38,18 +38,17 @@ beforeAll(async () => {
   dataDir = mkdtempSync(join(tmpdir(), 'tb-e2e-pg-'))
   const url = new URL(DATABASE_URL)
   url.searchParams.set('options', `-c search_path=${SCHEMA},public`)
-  server = createTbServer({
+  server = createTbServer(await testServerConfig({
     port: 0,
     host: '127.0.0.1',
     dataDir,
     databaseUrl: url.toString(),
     adminSk: ADMIN_SK,
-    allowInsecureBootstrap: false,
     allowInsecureHttp: true,
     remote: { allowlist: [], maxHops: 4, allowInsecure: true },
     deviceReclaimSec: 86_400,
     storeCleanupIntervalSec: 900,
-  })
+  }))
   const { port } = await server.start()
   base = `http://127.0.0.1:${port}`
 }, 60_000)

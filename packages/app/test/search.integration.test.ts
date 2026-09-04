@@ -36,7 +36,7 @@ async function appWith(search?: SearchIndex): Promise<{
   state: MemoryStateStore
 }> {
   const state = new MemoryStateStore()
-  await runBootstrap(state, { adminSk: TEST_ADMIN_SK, requireAdminSk: true })
+  await runBootstrap(state, { adminSk: TEST_ADMIN_SK })
   return {
     app: createTbApp({
       allowInsecureHttp: false,

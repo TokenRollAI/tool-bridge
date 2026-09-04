@@ -1,12 +1,3 @@
-/**
- * SDK 集成测试:createToolBridge + registerTool(本地函数工具)
- * → @hono/node-server 起本地 HTTP → ~help 可见工具、POST 调用成功;registerContext 同理;
- * secret 禁用语义;reservedRoots 生效。
- *
- * conformance 测试法(v1 借鉴):断言全部经 HTTP wire(fetch),不直捣内部对象——
- * SDK 与 curl 等价。
- */
-
 import {
   MemoryObjectStore,
   MemoryStateStore,
@@ -16,10 +7,19 @@ import {
   type ToolResult,
   type ToolSpec,
 } from '@tool-bridge/core'
+/**
+ * SDK 集成测试:createToolBridge + registerTool(本地函数工具)
+ * → @hono/node-server 起本地 HTTP → ~help 可见工具、POST 调用成功;registerContext 同理;
+ * secret 禁用语义;reservedRoots 生效。
+ *
+ * conformance 测试法(v1 借鉴):断言全部经 HTTP wire(fetch),不直捣内部对象——
+ * SDK 与 curl 等价。
+ */
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { serve } from '@hono/node-server'
 import { z } from 'zod/v4'
 import { createToolBridge, type ToolBridge } from '../src'
+import { testPersistence } from './domainFixtures'
 
 const ADMIN_SK = 'tbk_sdk_test_admin_0000000000'
 const ENCRYPTION_KEY = '3ZwpbBkSrp3eT9ylcZedfN33yq9fJLlmeusH98qNbt8'
@@ -110,7 +110,7 @@ interface Harness {
 async function startHarness(config?: { encryptionKey?: string, objects?: ObjectStore }): Promise<Harness> {
   const tb = createToolBridge({
     state: new MemoryStateStore(),
-    objects: config?.objects ?? new MemoryObjectStore(),
+    ...testPersistence(config?.objects ?? new MemoryObjectStore()),
     adminSk: ADMIN_SK,
     ...(config?.encryptionKey !== undefined ? { encryptionKey: config.encryptionKey } : {}),
   })
@@ -263,14 +263,14 @@ describe('createToolBridge:本地 HTTP(@hono/node-server)', () => {
     expect(await describeRes.json()).toEqual({ kind: 'context', capabilities: [] })
   })
 
-  it('r2 平台 provider 走注入的 objects(MemoryObjectStore)', async () => {
+  it('storage 平台 provider 走注入的 objects(MemoryObjectStore)', async () => {
     const mount = await call(h, 'system/registry/write', {
       method: 'POST',
       body: JSON.stringify({
         path: 'docs/mem',
         kind: 'context',
         description: '内存对象桶',
-        config: { kind: 'context', provider: 'r2' },
+        config: { kind: 'context', provider: 'storage' },
       }),
     })
     expect(mount.status).toBe(200)
@@ -305,7 +305,7 @@ describe('createToolBridge:本地 HTTP(@hono/node-server)', () => {
 })
 
 describe('createToolBridge:对象直传注入面', () => {
-  it('objects.presignPut 让嵌入式 SDK 的 r2 context 暴露 create_upload', async () => {
+  it('objects.presignPut 让嵌入式 SDK 的 storage context 暴露 create_upload', async () => {
     const objects = new MemoryObjectStore() as ObjectStore
     const presignPut = vi.fn(async (
       key: string,
@@ -328,7 +328,7 @@ describe('createToolBridge:对象直传注入面', () => {
           path: 'photos',
           kind: 'context',
           description: 'device photos',
-          config: { kind: 'context', provider: 'r2' },
+          config: { kind: 'context', provider: 'storage' },
         }),
       })).status).toBe(200)
 
@@ -360,7 +360,7 @@ describe('createToolBridge:配置语义', () => {
     try {
       const tb = createToolBridge({
         state: new MemoryStateStore(),
-        objects: new MemoryObjectStore(),
+        ...testPersistence(new MemoryObjectStore()),
         adminSk: ADMIN_SK,
       })
       const res = await tb.fetch(
@@ -385,7 +385,7 @@ describe('createToolBridge:配置语义', () => {
   it('reservedRoots 生效:追加保留根下注册被拒', async () => {
     const tb = createToolBridge({
       state: new MemoryStateStore(),
-      objects: new MemoryObjectStore(),
+      ...testPersistence(new MemoryObjectStore()),
       adminSk: ADMIN_SK,
       reservedRoots: ['corp'],
     })
@@ -417,10 +417,10 @@ describe('createToolBridge:配置语义', () => {
     expect(ok.status).toBe(200)
   })
 
-  it('objects 注入后同时供默认 Store 与 r2 Context 使用', async () => {
+  it('objects 注入后同时供默认 Store 与 storage Context 使用', async () => {
     const tb = createToolBridge({
       state: new MemoryStateStore(),
-      objects: new MemoryObjectStore(),
+      ...testPersistence(new MemoryObjectStore()),
       adminSk: ADMIN_SK,
     })
     const headers = {
@@ -433,16 +433,16 @@ describe('createToolBridge:配置语义', () => {
         method: 'POST',
         headers,
         body: JSON.stringify({
-          path: 'docs/r2',
+          path: 'docs/storage',
           kind: 'context',
           description: 'shared objects',
-          config: { kind: 'context', provider: 'r2' },
+          config: { kind: 'context', provider: 'storage' },
         }),
       }),
     )
     expect(mount.status).toBe(200)
     const res = await tb.fetch(
-      new Request('http://tb.local/docs/r2/list', {
+      new Request('http://tb.local/docs/storage/list', {
         method: 'POST',
         headers,
         body: JSON.stringify({ path: '' }),
@@ -455,7 +455,7 @@ describe('createToolBridge:配置语义', () => {
   it('SDK 不提供网关侧 device 宿主 → /system/device/ws 501', async () => {
     const tb = createToolBridge({
       state: new MemoryStateStore(),
-      objects: new MemoryObjectStore(),
+      ...testPersistence(new MemoryObjectStore()),
       adminSk: ADMIN_SK,
     })
     const res = await tb.fetch(

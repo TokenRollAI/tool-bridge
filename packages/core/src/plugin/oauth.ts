@@ -12,6 +12,7 @@
  */
 
 import { z } from 'zod'
+import { URL, URLSearchParams } from '../webGlobals'
 import { base64Encode } from '../encoding/base64url'
 import { TBError } from '../errors'
 
@@ -20,8 +21,11 @@ export const OAUTH_CLIENT_AUTH_METHODS = ['client_secret_basic', 'client_secret_
 export type OAuthClientAuthMethod = (typeof OAUTH_CLIENT_AUTH_METHODS)[number]
 
 const httpsUrl = z.string().url().refine(
-  value => value.startsWith('https://'),
-  'OAuth 端点必须是 https(授权码与令牌不得走明文)',
+  (value) => {
+    const url = new URL(value)
+    return url.protocol === 'https:' && !url.hash && !url.username && !url.password
+  },
+  'OAuth 端点必须是 HTTPS，且不能含 fragment 或 URL 凭证',
 )
 
 /**
@@ -116,8 +120,7 @@ export function shouldRefresh(tokens: OAuthTokenSet, now: Date): boolean {
 
 /** `application/x-www-form-urlencoded` 编码(空格为 `+`,与 URLSearchParams 一致)。 */
 function encodeForm(entries: ReadonlyMap<string, string>): string {
-  const encode = (raw: string): string => encodeURIComponent(raw).replaceAll('%20', '+')
-  return [...entries].map(([key, value]) => `${encode(key)}=${encode(value)}`).join('&')
+  return new URLSearchParams([...entries]).toString()
 }
 
 /**
@@ -152,33 +155,26 @@ export function buildAuthorizationUrl(opts: {
   redirectUri: string
   state: string
 }): string {
-  // 手写 query 拼接而不用 URLSearchParams:core 是纯逻辑层(tsconfig `types: []`、无 DOM lib),
-  // 不依赖任何宿主 API —— 这条约束保证同一份逻辑在 Workers/Node/Deno 下行为一致。
-  const params: Array<[string, string]> = []
-  // 静态参数先入,协议参数后入 —— 同名时后者胜,authorizationParams 不能覆盖协议语义。
-  for (const [key, value] of Object.entries(opts.config.authorizationParams ?? {})) {
-    params.push([key, value])
+  const url = new URL(opts.config.authorizationUrl)
+  if (url.protocol !== 'https:' || url.hash || url.username || url.password) {
+    throw new TBError('invalid_argument', 'OAuth 授权端点必须是 HTTPS，且不能含 fragment 或 URL 凭证')
   }
-  params.push(['response_type', 'code'])
-  params.push(['client_id', opts.clientId])
-  params.push(['redirect_uri', opts.redirectUri])
-  params.push(['state', opts.state])
+  const protocolParams = new Set(['response_type', 'client_id', 'redirect_uri', 'state', 'scope', 'code_challenge', 'code_challenge_method'])
+  for (const name of protocolParams) url.searchParams.delete(name)
+  for (const [name, value] of Object.entries(opts.config.authorizationParams ?? {})) {
+    if (!protocolParams.has(name)) url.searchParams.set(name, value)
+  }
+  url.searchParams.set('response_type', 'code')
+  url.searchParams.set('client_id', opts.clientId)
+  url.searchParams.set('redirect_uri', opts.redirectUri)
+  url.searchParams.set('state', opts.state)
   const scopes = opts.config.scopes ?? []
-  if (scopes.length > 0) {
-    params.push(['scope', scopes.join(opts.config.scopeSeparator ?? ' ')])
-  }
+  if (scopes.length) url.searchParams.set('scope', scopes.join(opts.config.scopeSeparator ?? ' '))
   if (opts.codeChallenge !== undefined) {
-    params.push(['code_challenge', opts.codeChallenge])
-    params.push(['code_challenge_method', 'S256'])
+    url.searchParams.set('code_challenge', opts.codeChallenge)
+    url.searchParams.set('code_challenge_method', 'S256')
   }
-
-  // 后入的同名参数覆盖先入的。
-  const merged = new Map<string, string>()
-  for (const [key, value] of params) merged.set(key, value)
-
-  const base = opts.config.authorizationUrl
-  const joiner = base.includes('?') ? '&' : '?'
-  return base + joiner + encodeForm(merged)
+  return url.toString()
 }
 
 /** 令牌请求的 body 与 headers(按 clientAuth 决定 client 凭证放哪)。 */

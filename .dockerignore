@@ -3,9 +3,7 @@
 **/node_modules
 **/dist
 **/binary
-**/.wrangler
 .env
-.dev.vars
 *.log
 .llmdoc-tmp
 .claude
@@ -13,7 +11,6 @@
 .playwright-mcp
 llmdoc
 archive
-scripts
 Dockerfile
 .dockerignore
 .github

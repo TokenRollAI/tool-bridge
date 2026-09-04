@@ -402,7 +402,7 @@ export function integrationAuthCommand() {
  * `tb integration ls` —— **实例视图**:已挂载的集成有哪些。
  *
  * 不是新的权威表:它就是 `system/registry list` 按"kind 是 tool/context 且 config.provider
- * 不是内置 r2/s3"过滤出来的投影。一个 instance = 一次挂载,身份 = 节点 path。
+ * 不是内置 storage/s3"过滤出来的投影。一个 instance = 一次挂载,身份 = 节点 path。
  */
 export function integrationLsCommand() {
   return withPageOpts(withGlobalOpts(new Command('ls')))
@@ -421,7 +421,7 @@ export function integrationLsCommand() {
       const items = (page.items ?? []).filter((n) => {
         if (n.kind !== 'tool' && n.kind !== 'context') return false
         const provider = n.config?.provider
-        return typeof provider === 'string' && provider !== 'r2' && provider !== 's3'
+        return typeof provider === 'string' && provider !== 'storage' && provider !== 's3'
       })
       const visibleItems = items.map((node) => {
         const config = { ...(node.config ?? {}) }

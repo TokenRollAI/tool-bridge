@@ -679,14 +679,14 @@ describe('tb integration catalog', () => {
 })
 
 describe('tb integration ls', () => {
-  it('过滤出 plugin 型挂载,r2/s3 与非 tool/context 节点不算集成', async () => {
+  it('过滤出 plugin 型挂载,storage/s3 与非 tool/context 节点不算集成', async () => {
     routedFetch([{
       match: /system\/registry/,
       body: {
         items: [
           { path: 'tools/tavily', kind: 'tool', config: { provider: 'tavily', authRef: 'a' } },
           { path: 'ctx/docs', kind: 'context', config: { provider: 'notion' } },
-          { path: 'ctx/files', kind: 'context', config: { provider: 'r2' } },
+          { path: 'ctx/files', kind: 'context', config: { provider: 'storage' } },
           { path: 'srv/peer', kind: 'remote', config: { provider: 'x' } },
           { path: 'system', kind: 'directory' },
         ],

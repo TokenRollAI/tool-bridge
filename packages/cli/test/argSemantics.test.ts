@@ -361,7 +361,7 @@ describe('条件参数与挂载语义', () => {
     expect(process.exitCode).toBe(1)
 
     process.exitCode = 0
-    await runCli(['ctx', 'mount', 'ctx/x', '--provider', 'r2', '--auth-ref', 'unused', ...gw])
+    await runCli(['ctx', 'mount', 'ctx/x', '--provider', 'storage', '--auth-ref', 'unused', ...gw])
     expect(fn).not.toHaveBeenCalled()
     expect(process.exitCode).toBe(1)
   })
@@ -503,10 +503,10 @@ describe('plugin export 挂载参数(v2)', () => {
     expect(config.export).toBe('documents')
   })
 
-  it('--export 对 r2/s3 无意义 → 本地拒绝,不发请求', async () => {
+  it('--export 对 storage/s3 无意义 → 本地拒绝,不发请求', async () => {
     const fn = jsonFetch({ ok: true })
     await runCli([
-      'ctx', 'mount', 'docs', '--provider', 'r2', '--export', 'x', '--description', 'd', ...gw,
+      'ctx', 'mount', 'docs', '--provider', 'storage', '--export', 'x', '--description', 'd', ...gw,
     ])
     expect(fn).not.toHaveBeenCalled()
     expect(process.exitCode).toBe(1)

@@ -12,13 +12,14 @@
 import {
   assertSecretRefUse,
   type CallContext,
+  isTBError,
   type NodeRegistryStore,
   type StateStore,
   type TreePath,
 } from '@tool-bridge/core'
 import type { TbAppDeps } from './deps'
+import { assertContextConfig, assertSkillhubConfig, bindPlatformStorageConfig } from './contextNodes'
 import { assertRemoteConfigAllowed, resolveRemoteSettings } from './federation'
-import { assertContextConfig, assertSkillhubConfig } from './contextNodes'
 import { assertMcpOAuthConfig, invalidateMcpOAuth } from './oauth'
 import { invalidateToolCache } from './providers/toolCache'
 import { invalidateProviderOAuth } from './providerOAuth'
@@ -45,9 +46,16 @@ export async function assertNodeConfigMutation(opts: {
   assertSecretRefUse(ctx.scopes, config)
   // mcp oauthClient 的服务端权威校验:client secret 只能是 SecretStore 引用。
   await assertMcpOAuthConfig(config, deps.secrets)
+  if (action === 'write') {
+    const previous = await registry.get(targetPath).catch((error: unknown) => {
+      if (!isTBError(error) || error.code !== 'not_found') throw error
+      return undefined
+    })
+    await bindPlatformStorageConfig(config, previous?.config, deps)
+  }
   // context 配置校验 + s3 连通探测:探测出站网络,须在权限判定之后。
   await assertContextConfig(config, deps)
-  // skillhub 配置校验(provider r2/s3;s3 连通探测)。
+  // skillhub 配置校验(provider storage/s3;s3 连通探测)。
   await assertSkillhubConfig(config, deps)
   // kind:'tool' 挂载校验:provider 必须是已注册且启用的 tool-provider plugin;
   // export 声明了 credentialProbe 且配了 authRef 时,再用该凭证真实探一次(出站)。

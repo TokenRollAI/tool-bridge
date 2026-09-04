@@ -2,11 +2,11 @@
  * SecretStore:上游凭证的"只进不出"加密保管。
  *
  * 值经 AES-256-GCM 加密后写入注入的 StateStore(key 布局 `secret:<name>`,store.ts)。
- * 主密钥 `TB_SECRET_ENCRYPTION_KEY` 是部署期 env-only 的 base64url(32 字节)——
- * 信任根不自举存储(spec-digest)。主密钥缺失/格式非法时能力禁用:Set 抛 unavailable。
+ * 版本化加密根由宿主受保护 bootstrap keyring 注入，密文保存 keyId 与 revision。
+ * 信任根不存入被其加密的数据库；缺失/格式非法时能力禁用。
  *
  * 纯逻辑,仅依赖 WebCrypto(core 无宿主依赖)。`crypto` / `TextEncoder` / `TextDecoder`
- * 在 Workers 与 Node 20+ 均为全局;类型经 webGlobals.ts 统一承接(不改 tsconfig、不污染全局)。
+ * 在支持的 JavaScript/Node 运行时均为全局;类型经 webGlobals.ts 统一承接(不改 tsconfig、不污染全局)。
  */
 
 import {
@@ -17,6 +17,7 @@ import {
   type Timestamp,
 } from '../types'
 import { crypto, TextDecoder, TextEncoder, type WebCryptoKey } from '../webGlobals'
+import { type EncryptionKeyring, validateEncryptionKeyring } from './keyring'
 import { base64urlDecode, base64urlEncode } from '../encoding/base64url'
 import { KEY_SECRET, type StateStore } from '../store'
 // ---------- base64url 编解码(统一实现见 encoding/base64url,公开面由 index 直接导出) ----------
@@ -31,21 +32,25 @@ export interface SecretEntrySummary {
 }
 
 /** StateStore 中 `secret:<name>` 的落盘值——只存密文,绝不含明文。 */
-interface StoredSecret {
+export interface StoredSecret {
   /** AES-256-GCM 密文(含 GCM tag,base64url)。 */
   ciphertext: string
   /** 每次 Set 随机生成的 12 字节 IV(base64url)。 */
   iv: string
+  keyId: string
+  revision: number
   updatedAt: Timestamp
 }
 
 const AES_GCM_IV_BYTES = 12
-const MASTER_KEY_BYTES = 32
 
 function isStoredSecret(value: unknown): value is StoredSecret {
   return (
     typeof value === 'object'
     && value !== null
+    && typeof (value as StoredSecret).keyId === 'string'
+    && Number.isSafeInteger((value as StoredSecret).revision)
+    && (value as StoredSecret).revision > 0
     && typeof (value as StoredSecret).iv === 'string'
     && typeof (value as StoredSecret).ciphertext === 'string'
     && typeof (value as StoredSecret).updatedAt === 'string'
@@ -74,50 +79,48 @@ function assertValidName(name: string): void {
  */
 export class SecretStoreImpl {
   private readonly store: StateStore
-  /** 32 字节主密钥;undefined 表示 unavailable 态。 */
-  private readonly keyBytes: Uint8Array | undefined
-  /** 惰性导入的 CryptoKey(仅可用时);首次加解密时创建并缓存。 */
-  private importedKey: Promise<WebCryptoKey> | undefined
+  private readonly keyring: EncryptionKeyring | undefined
+  private readonly importedKeys = new Map<string, Promise<WebCryptoKey>>()
 
-  /**
-   * @param masterKey base64url 编码的 32 字节(TB_SECRET_ENCRYPTION_KEY);
-   *   undefined / 解码失败 / 长度非 32 → 实例处于 unavailable 态。
-   */
-  constructor(store: StateStore, masterKey: string | undefined) {
+  constructor(store: StateStore, keys: EncryptionKeyring | string | undefined) {
     this.store = store
-    this.keyBytes = SecretStoreImpl.decodeMasterKey(masterKey)
-  }
-
-  private static decodeMasterKey(masterKey: string | undefined): Uint8Array | undefined {
-    if (masterKey === undefined) {
-      return undefined
-    }
-    let decoded: Uint8Array
     try {
-      decoded = base64urlDecode(masterKey)
+      this.keyring = keys === undefined ? undefined : validateEncryptionKeyring(keys)
     } catch {
-      return undefined
+      this.keyring = undefined
     }
-    return decoded.length === MASTER_KEY_BYTES ? decoded : undefined
   }
 
-  /** secret 能力是否可用(主密钥有效)。 */
-  get available(): boolean {
-    return this.keyBytes !== undefined
+  get available(): boolean { return this.keyring !== undefined }
+
+  private key(id: string): Promise<WebCryptoKey> {
+    const root = this.keyring?.keys[id]
+    if (root === undefined) throw new TBError('unavailable', 'secret encryption key is unavailable')
+    let key = this.importedKeys.get(id)
+    if (key === undefined) {
+      key = crypto.subtle.importKey('raw', base64urlDecode(root), { name: 'AES-GCM' }, false, ['encrypt', 'decrypt'])
+      this.importedKeys.set(id, key)
+    }
+    return key
   }
 
-  private key(): Promise<WebCryptoKey> {
-    if (this.keyBytes === undefined) {
-      // 调用方(set/resolve)已先行处理 unavailable;此处仅为类型收窄兜底。
-      throw new TBError('unavailable', 'secret store master key is not configured')
-    }
-    if (this.importedKey === undefined) {
-      this.importedKey = crypto.subtle.importKey('raw', this.keyBytes, { name: 'AES-GCM' }, false, [
-        'encrypt',
-        'decrypt',
-      ])
-    }
-    return this.importedKey
+  private async encrypt(name: string, value: string, now: Timestamp, revision: number): Promise<StoredSecret> {
+    const keyId = this.keyring?.activeKeyId
+    if (keyId === undefined) throw new TBError('unavailable', 'secret store master key is not configured', { retryable: false })
+    const iv = crypto.getRandomValues(new Uint8Array(AES_GCM_IV_BYTES))
+    const ciphertext = await crypto.subtle.encrypt(
+      { name: 'AES-GCM', iv, additionalData: new TextEncoder().encode(`tb:secret:${name}:${keyId}`) },
+      await this.key(keyId), new TextEncoder().encode(value),
+    )
+    return { keyId, revision, iv: base64urlEncode(iv), ciphertext: base64urlEncode(new Uint8Array(ciphertext)), updatedAt: now }
+  }
+
+  private async decrypt(name: string, record: StoredSecret): Promise<string> {
+    const plaintext = await crypto.subtle.decrypt(
+      { name: 'AES-GCM', iv: base64urlDecode(record.iv), additionalData: new TextEncoder().encode(`tb:secret:${name}:${record.keyId}`) },
+      await this.key(record.keyId), base64urlDecode(record.ciphertext),
+    )
+    return new TextDecoder().decode(plaintext)
   }
 
   /**
@@ -126,24 +129,17 @@ export class SecretStoreImpl {
    */
   async set(name: string, value: string, now: Timestamp): Promise<void> {
     assertValidName(name)
-    if (this.keyBytes === undefined) {
-      throw new TBError('unavailable', 'secret store unavailable: master key not configured', {
-        retryable: false,
-      })
+    if (!this.available || this.store.compareAndSwap === undefined) {
+      throw new TBError('unavailable', 'secret store requires an encryption key and atomic writes', { retryable: false })
     }
-    const iv = crypto.getRandomValues(new Uint8Array(AES_GCM_IV_BYTES))
-    const plaintext = new TextEncoder().encode(value)
-    const ciphertext = await crypto.subtle.encrypt(
-      { name: 'AES-GCM', iv },
-      await this.key(),
-      plaintext,
-    )
-    const record: StoredSecret = {
-      iv: base64urlEncode(iv),
-      ciphertext: base64urlEncode(new Uint8Array(ciphertext)),
-      updatedAt: now,
+    for (let attempt = 0; attempt < 16; attempt++) {
+      const current = await this.store.get(`${KEY_SECRET}${name}`)
+      if (current !== null && !isStoredSecret(current)) throw new TBError('internal', 'secret ciphertext is invalid')
+      const revision = current === null ? 1 : (current as StoredSecret).revision + 1
+      const record = await this.encrypt(name, value, now, revision)
+      if (await this.store.compareAndSwap(`${KEY_SECRET}${name}`, current === null ? null : revision - 1, record)) return
     }
-    await this.store.put(`${KEY_SECRET}${name}`, record)
+    throw new TBError('conflict', 'secret changed concurrently')
   }
 
   /**
@@ -182,20 +178,24 @@ export class SecretStoreImpl {
    * 各 Provider(remote/mcp/http/pluginClient)均按此实现。
    */
   async resolve(name: string): Promise<string | undefined> {
-    if (this.keyBytes === undefined) {
-      return undefined
-    }
+    if (!this.available) return undefined
     const record = await this.store.get(`${KEY_SECRET}${name}`)
-    if (!isStoredSecret(record)) {
-      return undefined
+    if (!isStoredSecret(record)) return undefined
+    return this.decrypt(name, record)
+  }
+
+  /** Bounded, resumable re-encryption. Concurrent credential replacement wins over stale ciphertext. */
+  async reencryptPage(opts: { cursor?: string, limit?: number } = {}): Promise<{ changed: number, cursor?: string }> {
+    if (!this.keyring || !this.store.compareAndSwap) throw new TBError('unavailable', 'secret re-encryption is unavailable')
+    const page = await this.store.list(KEY_SECRET, { ...opts, limit: Math.min(opts.limit ?? 100, 200) })
+    let changed = 0
+    for (const item of page.items) {
+      if (!isStoredSecret(item.value)) throw new TBError('internal', 'secret ciphertext is invalid')
+      if (item.value.keyId === this.keyring.activeKeyId) continue
+      const name = item.key.slice(KEY_SECRET.length)
+      const next = await this.encrypt(name, await this.decrypt(name, item.value), item.value.updatedAt, item.value.revision + 1)
+      if (await this.store.compareAndSwap(item.key, item.value.revision, next)) changed++
     }
-    const iv = base64urlDecode(record.iv)
-    const ciphertext = base64urlDecode(record.ciphertext)
-    const plaintext = await crypto.subtle.decrypt(
-      { name: 'AES-GCM', iv },
-      await this.key(),
-      ciphertext,
-    )
-    return new TextDecoder().decode(plaintext)
+    return { changed, ...(page.cursor === undefined ? {} : { cursor: page.cursor }) }
   }
 }

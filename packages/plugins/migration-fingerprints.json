@@ -390,55 +390,6 @@
         }
       }
     },
-    "cloudflare_dns": {
-      "displayName": "Cloudflare DNS",
-      "authTypes": [
-        "api_key",
-        "oauth2"
-      ],
-      "actions": {
-        "list_accounts": {
-          "description": "39f0271123acc3923beb5d40b0905981871c2c225e11acede64795a8ac6f653a",
-          "inputSchema": "60863e2f1f0066e6f771f9685ca38c9586461e5bc04b3e0f80f637831ee5987f",
-          "outputSchema": "5ea8dfaf88c107cf66f90ace75a0947e5845fb790d08eea6490c6e27ed740a72"
-        },
-        "list_zones": {
-          "description": "2e139458eb0b18ca2c4fdd52e77bf007f3bf1e42c881d9a991f75c38e40bf925",
-          "inputSchema": "fca7d6ae3fcd02e0388dfb51daa7a88a9bed16b318f52f3133be13fc328b4812",
-          "outputSchema": "c678d5cb050045f239103905900516c4bb885c5139c2f8854428ce7ee740ee3f"
-        },
-        "get_zone": {
-          "description": "6b7de45b433136d753434aecf8502f308200c9a029177c96b970074f03b6e047",
-          "inputSchema": "19424d43c730294c29f31720e29e16d48122ca5288a3eef5bc2f9a6561d8bbe1",
-          "outputSchema": "d3614fcac8b91f683368242a612e690a7edb1a08c898c5bb0bf47ef18d02108a"
-        },
-        "list_dns_records": {
-          "description": "542064cd58268963295900db1969fe0146d6f67356161473d58ea935c2d14b1c",
-          "inputSchema": "11e96625ad8d97bc2d3ec8345f0289eeefb857bf86f8fdeab7b8d75ae3d9b2cb",
-          "outputSchema": "29184d79113466b38892b472902ee17db69a4a26cc5aae1daa492106a2e9d57d"
-        },
-        "get_dns_record": {
-          "description": "ffcdee1411c39c08880994830b7552aaa2d883292caf2b3c7f8d9476e112e1b1",
-          "inputSchema": "ccdf2300acf406af2822a50eee97dc7694f147471854255255b78781be26ace9",
-          "outputSchema": "f99399350a83ecf2ebbbff8ad6911ff1d6ebf245cc18cec594cc18f98c8efd30"
-        },
-        "create_dns_record": {
-          "description": "7644a57e242a452531f45c2fcc4e2c09d5ab81209c441f2fbc9fcf8acbdd25c5",
-          "inputSchema": "251197c34660ee7cd6db9c12c9cd196d502d7047853c4c4dc95b2997270223d1",
-          "outputSchema": "f99399350a83ecf2ebbbff8ad6911ff1d6ebf245cc18cec594cc18f98c8efd30"
-        },
-        "update_dns_record": {
-          "description": "c1572b9bcc3c90b858f21540b8bce6864dbeb6b381c74c9be337d6ac8f1e9afd",
-          "inputSchema": "c61e1de3ca076e813b677a2d613d8f638ac936d6f47e9cf666795db9bb898f27",
-          "outputSchema": "f99399350a83ecf2ebbbff8ad6911ff1d6ebf245cc18cec594cc18f98c8efd30"
-        },
-        "delete_dns_record": {
-          "description": "0c942a6a0b121b8508b2731f88f1b7c08adc90c66160e99e6d056e7dec693896",
-          "inputSchema": "ccdf2300acf406af2822a50eee97dc7694f147471854255255b78781be26ace9",
-          "outputSchema": "1972bdccc1724fe998f2e7f484ffaaad17404e2c7127d0df94663225cd8d1383"
-        }
-      }
-    },
     "cohere": {
       "displayName": "Cohere",
       "authTypes": [

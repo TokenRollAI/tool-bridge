@@ -1,9 +1,9 @@
 /**
  * ObjectStore:对象存储抽象。
  *
- * r2(R2 binding)、s3(aws4fetch)与单测内存实现共用此接口;ContextProvider 的
+ * Node S3、设备本地目录与单测内存实现共用此接口;ContextProvider 的
  * 四动词语义全部落在 objectProvider.ts,后端只做本接口适配。core 无 DOM lib:
- * 流与 body 用最小结构类型声明,与 Workers / Node 的全局 ReadableStream 结构兼容。
+ * 流与 body 用最小结构类型声明,与标准 ReadableStream 结构兼容。
  */
 
 import { TextDecoder, TextEncoder } from '../webGlobals'
@@ -54,7 +54,7 @@ export interface ObjectListOptions {
 
 export interface ObjectListResult {
   cursor?: string
-  /** 文件与折叠前缀按字典序混排(与 R2/S3 行为一致)。 */
+  /** 文件与折叠前缀按字典序混排(与 S3/S3 行为一致)。 */
   items: Array<ObjectMeta | { prefix: string }>
 }
 
@@ -80,11 +80,6 @@ export interface ObjectPresignPutExactOptions extends ObjectPresignPutOptions {
 }
 
 export interface ObjectStore {
-  /**
-   * 可选宿主钩子：清理 prefix 下早于 olderThan 的未落位 staging 临时文件。
-   * staging 不进入 list，且命名/mtime 属于 driver 私有实现；返回实际删除数量。
-   */
-  cleanupStaging?(prefix: string, olderThan: string): Promise<number>
   /** 幂等:不存在静默。 */
   delete(key: string): Promise<void>
   get(key: string): Promise<{ body: ObjectBodyStream, meta: ObjectMeta } | null>
@@ -139,7 +134,7 @@ export async function readStreamText(stream: ObjectBodyStream): Promise<string> 
  * 收敛成**独立 ArrayBuffer 支撑**的视图。
  *
  * TS 5.7 起 Uint8Array 按后备 buffer 泛型化,而标准 `BodyInit`(fetch)拒收
- * SharedArrayBuffer 支撑的视图——其内容可能在传输途中被并发改写。s3/r2 这类
+ * SharedArrayBuffer 支撑的视图——其内容可能在传输途中被并发改写。s3/storage 这类
  * 把字节直接交给 fetch 的 ObjectStore 因此需要这条更强的保证(Workers 类型
  * 恰好宽松放过,宿主中立层按标准 DOM 类型编译时才报出来)。
  * 常规输入零拷贝(只重建视图),仅 shared 输入拷贝一份。

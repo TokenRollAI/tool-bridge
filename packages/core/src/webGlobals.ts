@@ -43,6 +43,15 @@ interface WebSubtleCrypto {
   sign(algorithm: 'HMAC', key: WebCryptoKey, data: Uint8Array): Promise<ArrayBuffer>
 }
 
+interface WebUrlSearchParams {
+  delete(name: string): void
+  get(name: string): string | null
+  getAll(name: string): string[]
+  has(name: string): boolean
+  set(name: string, value: string): void
+  toString(): string
+}
+
 interface WebGlobals {
   crypto: {
     getRandomValues<T extends Uint8Array>(array: T): T
@@ -53,10 +62,21 @@ interface WebGlobals {
     decode(input: ArrayBuffer | Uint8Array): string
   }
   TextEncoder: new () => { encode(input: string): Uint8Array }
+  URL: new (value: string) => {
+    hash: string
+    password: string
+    protocol: string
+    searchParams: WebUrlSearchParams
+    toString(): string
+    username: string
+  }
+  URLSearchParams: new (entries: [string, string][]) => WebUrlSearchParams
 }
 
 const g = globalThis as unknown as WebGlobals
 
+export const URL = g.URL
+export const URLSearchParams = g.URLSearchParams
 export const crypto = g.crypto
 export const TextDecoder = g.TextDecoder
 export const TextEncoder = g.TextEncoder

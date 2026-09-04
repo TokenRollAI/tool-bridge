@@ -19,7 +19,7 @@ let upstream: ReturnType<typeof vi.fn>
 
 async function appWithClerk(): Promise<ReturnType<typeof createTbApp>> {
   const state = new MemoryStateStore()
-  await runBootstrap(state, { adminSk: TEST_ADMIN_SK, requireAdminSk: true })
+  await runBootstrap(state, { adminSk: TEST_ADMIN_SK })
   return createTbApp({
     allowInsecureHttp: false,
     pluginBindings: new Map([
@@ -202,7 +202,7 @@ describe('多字段凭证的挂载校验', () => {
     setSecret: (value: string) => Promise<Response>
   }> {
     const state = new MemoryStateStore()
-    await runBootstrap(state, { adminSk: TEST_ADMIN_SK, requireAdminSk: true })
+    await runBootstrap(state, { adminSk: TEST_ADMIN_SK })
     const app = createTbApp({
       allowInsecureHttp: false,
       pluginBindings: new Map([['mf', multiFieldBinding()]]),
@@ -308,7 +308,7 @@ describe('平台核验探针形状', () => {
 
   async function mountWith(tool: Record<string, unknown>): Promise<Response> {
     const state = new MemoryStateStore()
-    await runBootstrap(state, { adminSk: TEST_ADMIN_SK, requireAdminSk: true })
+    await runBootstrap(state, { adminSk: TEST_ADMIN_SK })
     const app = createTbApp({
       allowInsecureHttp: false,
       pluginBindings: new Map([['shape', shapeBinding(tool)]]),

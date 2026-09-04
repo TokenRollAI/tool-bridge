@@ -18,6 +18,26 @@ export type {
 } from './client'
 
 export {
+  createSetupClient,
+  parseConfigUpdate,
+  parseRuntimeConfig,
+  parseSetupInput,
+  parseStorageRotate,
+  parseStorageWrite,
+} from './management'
+export type {
+  ConfigStatus,
+  RecoveryInput,
+  RecoveryResult,
+  RuntimeConfig,
+  SetupDefaults,
+  SetupInput,
+  SetupResult,
+  SetupStatus,
+  StorageBackendView,
+} from './management'
+
+export {
   parseContextUploadGrant,
   parsePresignedPutGrant,
   PresignedPutError,
@@ -29,7 +49,6 @@ export type {
   PresignedPutGrant,
   PutPresignedOptions,
 } from './presignedPut'
-
 /**
  * builtin/system 管理面视图类型的唯一对外出口(真源在 core;core 是 private 包,
  * CLI/Dashboard 经此消费,不再各自手抄 PluginManifest/CatalogListItem/SecretKeyView 等)。
@@ -43,6 +62,11 @@ export type {
   ContextEntryMeta,
   FederationHost,
   HttpToolDef,
+  KeyBackup,
+  KeyStatus,
+  KeyTarget,
+  MaintenanceJournal,
+  MaintenanceStatus,
   NodeConfig,
   PluginCredentialField,
   PluginExport,
@@ -65,6 +89,9 @@ export type {
   StatusSummary,
   Virtualize,
 } from '@tool-bridge/core'
+
+export type { DeploymentClaim, DeploymentJobView, DeploymentSettings, DeploymentStatus } from '@tool-bridge/core/deployment'
+
 /**
  * device presence 三态派生(存储态 online+lastSeenAt → offline/stale/online 投影)。
  * `~tree` 已由宿主投影好 presence 直接读;`system/registry` 的存储态要三态就过这里。
@@ -74,10 +101,10 @@ export {
   type DerivePresenceInput,
   PRESENCE_STALE_AFTER_MS,
 } from '@tool-bridge/core/device'
+
 export { fixedControlPlaneOpenApi } from '@tool-bridge/core/protocol'
 
 export type { FixedControlPlaneOpenApi } from '@tool-bridge/core/protocol'
-
 export type {
   WireAction as Action,
   WireDeviceOperationDetail as DeviceOperationDetail,

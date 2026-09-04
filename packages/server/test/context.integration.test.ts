@@ -1,13 +1,14 @@
-/**
- * context 平台对象存储集成测试(fs-backed 'r2' provider 落点):四动词 + Delete 循环、
- * 重启持久、小阈值触发 $ref → /~ref 免 SK 中转下载。
- */
-
 import { afterEach, describe, expect, it } from 'vitest'
 import { mkdtempSync, rmSync } from 'node:fs'
+/**
+ * context 平台对象存储集成测试(S3-backed 'storage' provider 落点):四动词 + Delete 循环、
+ * 重启持久、小阈值触发 $ref → /~ref 免 SK 中转下载。
+ */
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { configFromEnv, createTbServer, type TbServer } from '../src'
+import type { ServerConfig } from '../src/config'
+import { createTbServer, type TbServer } from '../src'
+import { testServerConfig } from './helpers/server'
 
 const ADMIN_SK = 'tbk_server_test_admin_00000000'
 const ENCRYPTION_KEY = '3ZwpbBkSrp3eT9ylcZedfN33yq9fJLlmeusH98qNbt8'
@@ -26,14 +27,14 @@ function tmpDataDir(): string {
 
 async function startServer(
   dataDir: string,
-  extraEnv: Record<string, string> = {},
+  extraEnv: Partial<ServerConfig> = {},
 ): Promise<{ baseUrl: string, server: TbServer }> {
-  const config = configFromEnv({
-    TB_PORT: '0',
-    TB_HOST: '127.0.0.1',
-    TB_DATA_DIR: dataDir,
-    TB_BOOTSTRAP_ADMIN_SK: ADMIN_SK,
-    TB_SECRET_ENCRYPTION_KEY: ENCRYPTION_KEY,
+  const config = await testServerConfig({
+    port: 0,
+    host: '127.0.0.1',
+    dataDir: dataDir,
+    adminSk: ADMIN_SK,
+    encryptionKey: ENCRYPTION_KEY,
     ...extraEnv,
   })
   const server = createTbServer(config)
@@ -71,8 +72,8 @@ async function mountNamespace(baseUrl: string, path: string): Promise<Response> 
     {
       path,
       kind: 'context',
-      description: 'fs-backed namespace',
-      config: { kind: 'context', provider: 'r2' },
+      description: 'S3-backed namespace',
+      config: { kind: 'context', provider: 'storage' },
     },
     admin(),
   )
@@ -88,7 +89,7 @@ async function ctxCall(
   return postJson(baseUrl, `${path}/${command}`, args, admin())
 }
 
-describe('context 平台对象存储(fs-backed)', () => {
+describe('context 平台对象存储(S3-backed)', () => {
   it('~register 挂载 → Write→List→Get→Update→Delete 全循环', async () => {
     const { server, baseUrl } = await startServer(tmpDataDir())
     cleanups.push(() => server.close())
@@ -145,7 +146,7 @@ describe('context 平台对象存储(fs-backed)', () => {
 
   it('超阈值大对象 → content.$ref 走 /~ref 免 SK 中转,内容一致', async () => {
     const { server, baseUrl } = await startServer(tmpDataDir(), {
-      TB_REF_THRESHOLD_BYTES: '16',
+      refThresholdBytes: 16,
     })
     cleanups.push(() => server.close())
     expect((await mountNamespace(baseUrl, 'ctxtest/big')).status).toBe(200)

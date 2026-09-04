@@ -55,14 +55,14 @@ export const ADD_SOURCES: readonly AddSource[] = [
   {
     kind: 'context',
     title: 'Context 存储',
-    blurb: '挂一个存储 namespace(R2 / S3 / provider),用于读写上下文条目。',
+    blurb: '挂一个存储 namespace(S3 / S3 / provider),用于读写上下文条目。',
     icon: Database,
     mountKind: 'context',
   },
   {
     kind: 'skillhub',
     title: 'Skill 目录',
-    blurb: '挂一个 Agent 技能目录(R2 / S3)。',
+    blurb: '挂一个 Agent 技能目录(S3 / S3)。',
     icon: Boxes,
     mountKind: 'skillhub',
   },

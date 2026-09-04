@@ -1,5 +1,6 @@
 import {
   type ContextProvider,
+  DEFAULT_MAX_HOPS,
   type DeviceExpose,
   type DeviceNodeCmd,
   type DeviceNodeInput,
@@ -38,8 +39,6 @@ const LOCAL_PROVIDER_ID = '@local'
 
 /** SDK 代写节点的 registeredBy 标记(与 'system:boot'/'system:auto' 同一命名空间)。 */
 const REGISTERED_BY_SDK = 'system:sdk'
-
-const DEFAULT_MAX_HOPS = 4
 
 type Registration
   = | { kind: 'tool', meta?: Partial<NodeInput>, path: TreePath, provider: ToolProviderLike }
@@ -120,7 +119,7 @@ export function createToolBridge(config: ToolBridgeConfig): ToolBridge {
   const state = config.state
   const secrets
     = config.secrets
-      ?? new SecretStoreImpl(state, config.encryptionKey ?? process.env.TB_SECRET_ENCRYPTION_KEY)
+      ?? new SecretStoreImpl(state, config.encryptionKey)
 
   // 进程内 provider 表(Q14:register* 同步登记;NodeRegistry 写延迟到首次 fetch/connect 前)。
   const registrations = new Map<TreePath, Registration>()
@@ -139,7 +138,7 @@ export function createToolBridge(config: ToolBridgeConfig): ToolBridge {
   let bootstrapped: Promise<void> | undefined
   const ensureReady = async (): Promise<void> => {
     if (bootstrapped === undefined) {
-      const adminSk = config.adminSk ?? process.env.TB_BOOTSTRAP_ADMIN_SK
+      const adminSk = config.adminSk
       bootstrapped = runBootstrap(state, adminSk !== undefined ? { adminSk } : {}).catch((err) => {
         bootstrapped = undefined
         throw err
@@ -186,9 +185,17 @@ export function createToolBridge(config: ToolBridgeConfig): ToolBridge {
   if (config.pluginBindings !== undefined) deps.pluginBindings = config.pluginBindings
   if (config.pluginCatalog !== undefined) deps.pluginCatalog = config.pluginCatalog
   if (config.providerOAuthFetch !== undefined) deps.providerOAuthFetch = config.providerOAuthFetch
+  if (config.storeRepository) deps.storeRepository = config.storeRepository
+  if (config.storeBackends) deps.storeBackends = config.storeBackends
+  if (config.mailboxRepository) deps.mailboxRepository = config.mailboxRepository
   const objects = config.objects
   deps.objects = () => objects
-  const encryptionKey = config.encryptionKey ?? process.env.TB_SECRET_ENCRYPTION_KEY
+  deps.defaultObjectBackend = async () => ({ id: 'embedded', objects })
+  deps.objectStoreForBackend = (id) => {
+    if (id !== 'embedded') throw TBError.notFound('Storage backend not found')
+    return objects
+  }
+  const encryptionKey = config.encryptionKey
   if (encryptionKey !== undefined) deps.encryptionKey = encryptionKey
   if (config.uploadGrantTtlSec !== undefined) {
     deps.uploadGrantTtlSec = config.uploadGrantTtlSec

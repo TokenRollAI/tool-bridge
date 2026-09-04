@@ -249,7 +249,7 @@ export type NodeConfig
     providerConfig?: Record<string, unknown>
   }
   /** skillhub:与 context 同形的内容型 kind,存 Agent Skill(每 skill = <id>/SKILL.md + 若干文本文件)。
-   *  底层复用 context 的对象存储(provider r2 用平台自带桶,无需外部凭证;s3 需 authRef)。 */
+   *  底层复用 context 的对象存储(provider storage 用平台自带桶,无需外部凭证;s3 需 authRef)。 */
   | {
     authRef?: string
     kind: 'skillhub'

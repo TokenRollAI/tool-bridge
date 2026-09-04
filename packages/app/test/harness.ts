@@ -1,11 +1,14 @@
 import {
   type BuiltinCatalog,
+  MemoryMailboxRepository,
   MemoryObjectStore,
   MemoryStateStore,
+  MemoryStoreRepository,
   type ObjectStore,
   type SearchIndex,
   SecretStoreImpl,
   type StateStore,
+  TBError,
 } from '@tool-bridge/core'
 import { createTbApp, type PluginBindings, type RemoteSettings, runBootstrap, type TbAppDeps } from '../src/index'
 import { TEST_ADMIN_SK, TEST_ENCRYPTION_KEY } from './fixtures'
@@ -13,12 +16,9 @@ import { TEST_ADMIN_SK, TEST_ENCRYPTION_KEY } from './fixtures'
 /**
  * Node 宿主下的中立层测试装配。
  *
- * 语义对齐 `packages/gateway/test` 的 `SELF.fetch`:那边一个测试文件共享一个 Worker
- * 实例与一份持久 KV,故这里也按**文件级单实例**用(模块顶层 `await createTestApp()`),
- * 用例之间状态累积。需要隔离的用例自己再建一个。
- *
- * remote 白名单与 instanceId 取值与 gateway `vitest.config.ts` 注入的 miniflare
- * bindings 一致(`example.com` / `tb-test-instance`),同一批断言两边可直接对照。
+ * 模块顶层 `await createTestApp()` 创建文件级 app 实例，用例之间可共享内存状态。
+ * 需要独立状态的用例显式创建新实例。真实 Node socket、PG 与 S3 行为由 server 套件覆盖。
+ * remote 白名单与 instanceId 使用下方固定值，避免依赖本机部署配置。
  */
 
 /**
@@ -35,12 +35,12 @@ export const TEST_REMOTE: RemoteSettings = {
 }
 
 export interface TestAppOpts {
-  /** 放行 http:// 上游(对应 gateway 的 TB_ALLOW_INSECURE_HTTP)。 */
+  /** 显式放行测试中的 http:// 上游。 */
   allowInsecureHttp?: boolean
-  /** Static Assets 桩(缺省不注入 → /ui 404;真资源接线由 gateway 的 ui 套件覆盖)。 */
+  /** 静态资源桩；缺省不注入 → /ui 404，真实资源接线由 server UI 套件覆盖。 */
   assets?: (request: Request) => Promise<Response>
   canonicalOrigin?: string
-  /** 设备通道桩(缺省不注入 → device 能力禁用;真 DO 行为由 gateway 套件覆盖)。 */
+  /** 设备通道桩；缺省不注入 → device 能力禁用，真实 WebSocket 由 server 套件覆盖。 */
   device?: TbAppDeps['device']
   /** 缺省注入 MemoryObjectStore;传 null 则不注入(模拟宿主无对象存储)。 */
   objects?: ObjectStore | null
@@ -82,7 +82,7 @@ export interface TestApp {
 /** 引导 + 装配一个中立层实例;Admin SK 固定为 TEST_ADMIN_SK。 */
 export async function createTestApp(opts: TestAppOpts = {}): Promise<TestApp> {
   const state = new MemoryStateStore()
-  await runBootstrap(state, { adminSk: TEST_ADMIN_SK, requireAdminSk: true })
+  await runBootstrap(state, { adminSk: TEST_ADMIN_SK })
   const secrets = new SecretStoreImpl(state, TEST_ENCRYPTION_KEY)
   const objects = opts.objects === null
     ? undefined
@@ -95,9 +95,20 @@ export async function createTestApp(opts: TestAppOpts = {}): Promise<TestApp> {
     secrets,
     state,
     version: TEST_VERSION,
+    storeRepository: new MemoryStoreRepository(),
+    mailboxRepository: new MemoryMailboxRepository(),
   }
   if (opts.objectsFactory !== undefined) deps.objects = opts.objectsFactory
   else if (objects !== undefined) deps.objects = () => objects
+  if (deps.objects) {
+    const resolve = deps.objects
+    deps.defaultObjectBackend = async () => ({ id: 'test-backend', objects: await resolve() })
+    deps.storeBackends = { defaultBackend: deps.defaultObjectBackend, resolveBackend: async () => resolve() }
+    deps.objectStoreForBackend = (id) => {
+      if (id !== 'test-backend') throw TBError.notFound('Storage backend not found')
+      return resolve()
+    }
+  }
   if (opts.assets !== undefined) deps.assets = opts.assets
   if (opts.canonicalOrigin !== undefined) deps.canonicalOrigin = opts.canonicalOrigin
   if (opts.device !== undefined) deps.device = opts.device

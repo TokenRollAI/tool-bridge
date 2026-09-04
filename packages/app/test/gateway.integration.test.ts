@@ -52,10 +52,10 @@ describe('GET /healthz(树外免认证)', () => {
   })
 })
 
-describe('Worker 首次引导凭证', () => {
+describe('显式首次引导凭证', () => {
   it('要求预置 Admin SK 时缺省值 fail closed,不写引导标志', async () => {
     const store = new MemoryStateStore()
-    await expect(runBootstrap(store, { requireAdminSk: true })).rejects.toMatchObject({
+    await expect(runBootstrap(store, {})).rejects.toMatchObject({
       code: 'unavailable',
     })
     expect(await store.get(KEY_BOOTSTRAPPED)).toBeNull()

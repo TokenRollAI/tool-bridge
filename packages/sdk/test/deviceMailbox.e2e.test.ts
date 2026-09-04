@@ -1,5 +1,5 @@
+import { MemoryMailboxRepository, MemoryStateStore, SecretStoreImpl } from '@tool-bridge/core'
 import { createTbApp, processDeviceHello, runBootstrap } from '@tool-bridge/app'
-import { MemoryStateStore, SecretStoreImpl } from '@tool-bridge/core'
 import { describe, expect, it, vi } from 'vitest'
 import {
   createDeviceMailboxProcessor,
@@ -100,7 +100,7 @@ interface IssuedKey {
 describe('server Agent -> gateway -> Device SDK mailbox', () => {
   it('completes the local durable round trip with five HTTP requests on the discovery path', async () => {
     const state = new CountingStateStore()
-    await runBootstrap(state, { adminSk: ADMIN_SK, requireAdminSk: true })
+    await runBootstrap(state, { adminSk: ADMIN_SK })
     const app = createTbApp({
       allowInsecureHttp: false,
       encryptionKey: ENCRYPTION_KEY,
@@ -113,6 +113,7 @@ describe('server Agent -> gateway -> Device SDK mailbox', () => {
       secrets: new SecretStoreImpl(state, ENCRYPTION_KEY),
       state,
       version: 'test',
+      mailboxRepository: new MemoryMailboxRepository(),
     })
     const requests: Array<{ authorization: string | null, method: string, path: string }> = []
     const fetcher: typeof fetch = async (input, init) => {
@@ -219,10 +220,11 @@ describe('server Agent -> gateway -> Device SDK mailbox', () => {
     expect(requests.filter(({ authorization }) => authorization === `Bearer ${device.secret}`))
       .toHaveLength(2)
     // 小邮箱快路径的存储成本基线：enqueue/claim/complete 各一次 CAS，cap 与 claim
-    // 各一次前缀扫描。get 包含五次 Bearer 鉴权和 registry/operation 精确读取，保留
+    // Domain repositories own the ledger; StateStore has no operation mutations/scans.
+    // get 包含五次 Bearer 鉴权和 registry 精确读取，保留
     // 小幅实现余量，但防止无意引入数量级回归。
-    expect(state.counts.compareAndSwap).toBe(3)
-    expect(state.counts.list).toBe(2)
+    expect(state.counts.compareAndSwap).toBe(0)
+    expect(state.counts.list).toBe(0)
     expect(state.counts.get).toBeLessThanOrEqual(20)
   })
 })

@@ -24,8 +24,7 @@ import {
   type TreeNode,
   type TreePath,
 } from '@tool-bridge/core'
-import type { TbAppDeps } from './deps'
-import { createS3ObjectStore, type S3StoreConfig } from './providers/s3Object'
+import type { S3StoreConfig, TbAppDeps } from './deps'
 import { assertPluginMountContract, requirePluginExport } from './toolNodes'
 import { assertNoDeviceMarker } from './deviceNodes'
 import { signRefToken } from './refToken'
@@ -97,27 +96,49 @@ export async function s3StoreConfig(
   }
 }
 
-/** providerConfig.prefix(共桶隔离);缺省 r2 按节点路径隔离,s3 为空(整桶即 namespace)。 */
+/** Bind platform nodes once. Configuration updates preserve the original backend. */
+export async function bindPlatformStorageConfig(config: unknown, previous: unknown, deps: TbAppDeps): Promise<void> {
+  if (!config || typeof config !== 'object') return
+  const cfg = config as ObjectNodeConfig
+  if (!['context', 'skillhub'].includes(cfg.kind) || cfg.provider !== 'storage') return
+  let backendId = cfg.providerConfig?.backendId
+  if (backendId === undefined && previous && typeof previous === 'object') {
+    const prior = previous as ObjectNodeConfig
+    if (prior.kind === cfg.kind && prior.provider === 'storage') backendId = prior.providerConfig?.backendId
+  }
+  if (backendId === undefined) {
+    if (!deps.defaultObjectBackend) throw new TBError('unavailable', 'Default storage backend is not configured')
+    backendId = (await deps.defaultObjectBackend()).id
+  }
+  if (typeof backendId !== 'string' || !backendId.trim()) throw new TBError('invalid_argument', 'Storage backendId must be a non-empty string')
+  if (!deps.objectStoreForBackend) throw new TBError('unavailable', 'Storage backend resolver is not configured')
+  await deps.objectStoreForBackend(backendId)
+  cfg.providerConfig = { ...cfg.providerConfig, backendId }
+}
+
+/** providerConfig.prefix(共桶隔离);缺省 storage 按节点路径隔离,s3 为空(整桶即 namespace)。 */
 export function contextKeyPrefix(cfg: ContextConfig, nodePath: TreePath): string {
   const prefix = (cfg.providerConfig as { prefix?: unknown } | undefined)?.prefix
   if (typeof prefix === 'string') return prefix
-  return cfg.provider === 'r2' ? `ctx/${nodePath}` : ''
+  return cfg.provider === 'storage' ? `ctx/${nodePath}` : ''
 }
 
-/** 按 config.provider 构造底层 ObjectStore('r2' = 宿主注入的平台对象存储)。 */
+async function createHostS3Store(cfg: ObjectNodeConfig, deps: TbAppDeps): Promise<ObjectStore> {
+  if (!deps.s3Objects) throw new TBError('unavailable', 'S3 object adapter not configured')
+  return await deps.s3Objects(await s3StoreConfig(cfg, deps.secrets))
+}
+
+/** 按 config.provider 构造底层 ObjectStore('storage' = 宿主注入的平台对象存储)。 */
 export async function contextObjectStoreFor(cfg: ObjectNodeConfig, deps: TbAppDeps): Promise<ObjectStore> {
-  if (cfg.provider === 'r2') {
-    if (deps.objects === undefined) {
-      throw new TBError('unavailable', 'object store not configured(objects 未注入)', {
-        retryable: false,
-      })
+  if (cfg.provider === 'storage') {
+    const backendId = cfg.providerConfig?.backendId
+    if (typeof backendId !== 'string' || !backendId || !deps.objectStoreForBackend) {
+      throw new TBError('unavailable', 'Context storage backend binding is missing')
     }
-    return await deps.objects()
+    return await deps.objectStoreForBackend(backendId)
   }
   if (cfg.provider === 's3') {
-    return createS3ObjectStore(await s3StoreConfig(cfg, deps.secrets), {
-      allowInsecure: deps.allowInsecureHttp,
-    })
+    return createHostS3Store(cfg, deps)
   }
   throw TBError.unimplemented(`context provider '${cfg.provider}' not implemented yet`)
 }
@@ -127,10 +148,9 @@ export async function contextDirectUploadAvailable(
   cfg: ObjectNodeConfig,
   deps: TbAppDeps,
 ): Promise<boolean> {
-  // S3 store 的 presignPut 是实现固有能力；发现面只描述协议支持，不应为健康探测
-  // 解析每节点 authRef。凭证缺失/损坏仍由实际 create_upload 调用 fail closed。
-  if (cfg.provider === 's3') return true
-
+  // Custom S3 endpoints use gateway relay until their complete browser wire
+  // contract has been verified; discovery never resolves their credentials.
+  if (cfg.provider === 's3') return false
   try {
     return (await contextObjectStoreFor(cfg, deps)).presignPut !== undefined
   } catch {
@@ -140,7 +160,7 @@ export async function contextDirectUploadAvailable(
   }
 }
 
-/** 为内置 r2/s3 context 签发定路径 PUT；不经过 ContextProvider 的 JSON 内容接口。 */
+/** 为内置 storage/s3 context 签发定路径 PUT；不经过 ContextProvider 的 JSON 内容接口。 */
 export async function createContextUploadGrant(
   node: TreeNode,
   cfg: ContextConfig,
@@ -189,7 +209,7 @@ function objectProviderOpts(
     const relayTtlSec = deps.refTtlSec ?? PRESIGN_TTL_SEC_DEFAULT
     opts.relayRefUrl = async (key) => {
       const exp = Math.floor(Date.now() / 1000) + relayTtlSec
-      return `${origin}/~ref/${await signRefToken({ p: node.path, k: key, exp }, encKey)}`
+      return `${origin}/~ref/${await signRefToken({ p: node.path, k: key, exp }, deps.storeTokenKeyring ?? encKey)}`
     }
   }
   return opts
@@ -215,11 +235,11 @@ export async function contextProviderFor(
   ))
 }
 
-/** skillhub 的 keyPrefix:共桶隔离,r2 默认 `skills/<nodePath>`,s3 默认整桶。 */
+/** skillhub 的 keyPrefix:共桶隔离,storage 默认 `skills/<nodePath>`,s3 默认整桶。 */
 export function skillhubKeyPrefix(cfg: SkillhubConfig, nodePath: TreePath): string {
   const prefix = (cfg.providerConfig as { prefix?: unknown } | undefined)?.prefix
   if (typeof prefix === 'string') return prefix
-  return cfg.provider === 'r2' ? `skills/${nodePath}` : ''
+  return cfg.provider === 'storage' ? `skills/${nodePath}` : ''
 }
 
 /**
@@ -277,16 +297,16 @@ export async function pruneExpiredContext(
 }
 /**
  * 注册/更新 context 节点时的配置校验(注册时即拒):
- * provider = r2|s3 或已注册且启用的 context-provider plugin id;
+ * provider = storage|s3 或已注册且启用的 context-provider plugin id;
  * s3 必填 endpoint/bucket/authRef,且做一次浅 list 连通探测(D8)——失败 →
- * unavailable(retryable);r2 与 plugin 不探测(plugin 在 PluginRegistry.Write 时已探活)。
+ * unavailable(retryable);storage 与 plugin 不探测(plugin 在 PluginRegistry.Write 时已探活)。
  */
 export async function assertContextConfig(config: unknown, deps: TbAppDeps): Promise<void> {
   if (config === null || typeof config !== 'object') return
   if ((config as { kind?: unknown }).kind !== 'context') return
   assertNoDeviceMarker(config)
   const cfg = config as ContextConfig
-  if (cfg.provider !== 'r2' && cfg.provider !== 's3') {
+  if (cfg.provider !== 'storage' && cfg.provider !== 's3') {
     // plugin 挂载:不存在/kind 不符/禁用 → invalid_argument(device-fs 由网关代写、
     // SDK '@local' 由 registerContext 内部通道落库,均不经注册面)。
     // 传 deps 而不是 deps.state:内置 binding 插件未注册时在这里自动补齐(免手工注册)。
@@ -302,9 +322,7 @@ export async function assertContextConfig(config: unknown, deps: TbAppDeps): Pro
   }
   if (cfg.provider === 's3') {
     // 结构/凭证/https 校验失败 → invalid_argument(store 构造抛出)。
-    const store = createS3ObjectStore(await s3StoreConfig(cfg, deps.secrets), {
-      allowInsecure: deps.allowInsecureHttp,
-    })
+    const store = await createHostS3Store(cfg, deps)
     try {
       await store.list(contextKeyPrefix(cfg, ''), { limit: 1 })
     } catch (err) {
@@ -315,23 +333,21 @@ export async function assertContextConfig(config: unknown, deps: TbAppDeps): Pro
 }
 
 /**
- * 注册/更新 skillhub 节点时的配置校验:provider 仅 r2|s3(本期不支持 plugin/device);
- * s3 做一次浅 list 连通探测(与 context 同则),r2 用平台桶不探测。
+ * 注册/更新 skillhub 节点时的配置校验:provider 仅 storage|s3(本期不支持 plugin/device);
+ * s3 做一次浅 list 连通探测(与 context 同则),storage 用平台桶不探测。
  */
 export async function assertSkillhubConfig(config: unknown, deps: TbAppDeps): Promise<void> {
   if (config === null || typeof config !== 'object') return
   if ((config as { kind?: unknown }).kind !== 'skillhub') return
   const cfg = config as SkillhubConfig
-  if (cfg.provider !== 'r2' && cfg.provider !== 's3') {
+  if (cfg.provider !== 'storage' && cfg.provider !== 's3') {
     throw new TBError(
       'invalid_argument',
-      `skillhub provider 仅支持 'r2' 或 's3',收到 '${cfg.provider}'`,
+      `skillhub provider 仅支持 'storage' 或 's3',收到 '${cfg.provider}'`,
     )
   }
   if (cfg.provider === 's3') {
-    const store = createS3ObjectStore(await s3StoreConfig(cfg, deps.secrets), {
-      allowInsecure: deps.allowInsecureHttp,
-    })
+    const store = await createHostS3Store(cfg, deps)
     try {
       await store.list(skillhubKeyPrefix(cfg, ''), { limit: 1 })
     } catch (err) {

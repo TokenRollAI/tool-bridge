@@ -342,15 +342,15 @@ export function ctxRmCommand() {
 }
 
 /**
- * `tb ctx mount <path> --provider r2|s3` —— 挂载 context namespace
+ * `tb ctx mount <path> --provider storage|s3` —— 挂载 context namespace
  * (NodeRegistry.Write{kind:'context'} via ~register;tool.ts mount 同通道)。
- * providerConfig:r2 `{prefix?}`;s3 `{endpoint,bucket,region?,prefix?}` 且 --auth-ref 必填。
+ * providerConfig:storage `{prefix?}`;s3 `{endpoint,bucket,region?,prefix?}` 且 --auth-ref 必填。
  */
 export function ctxMountCommand() {
   return withGlobalOpts(new Command('mount'))
-    .description('Mount a context namespace (r2, s3, or a context-provider plugin)')
+    .description('Mount a context namespace (storage, s3, or a context-provider plugin)')
     .argument('<path>', 'Tree path to mount at')
-    .requiredOption('--provider <provider>', 'Provider: r2 | s3 | <context-provider plugin id>')
+    .requiredOption('--provider <provider>', 'Provider: storage | s3 | <context-provider plugin id>')
     .option('--description <desc>', 'One-line node description (default: auto-generated)')
     .option('--auth-ref <ref>', 'SecretStore credential ref ([s3] required; [plugin] optional)')
     .option(
@@ -359,7 +359,8 @@ export function ctxMountCommand() {
     )
     .option('--read-only', 'Reject write verbs (Write/Update/Delete)')
     .option('--ttl <seconds>', 'Node TTL in seconds (expired node is reclaimed)')
-    .option('--prefix <prefix>', '[r2/s3] key prefix inside the bucket')
+    .option('--prefix <prefix>', '[storage/s3] key prefix inside the bucket')
+    .option('--backend-id <id>', '[storage] bind this backend (default: current active backend)')
     .option('--endpoint <url>', '[s3] S3-compatible endpoint URL')
     .option('--bucket <bucket>', '[s3] bucket name')
     .option('--region <region>', '[s3] region')
@@ -383,12 +384,13 @@ export function ctxMountCommand() {
         const prefix = opts.prefix ? String(opts.prefix) : undefined
         const ttl = parsePositiveInt(opts.ttl, '--ttl')
 
-        // r2/s3 的互斥与必填校验同 skill mount(共用实现);plugin provider 的
+        // storage/s3 的互斥与必填校验同 skill mount(共用实现);plugin provider 的
         // 非密钥挂载配置(baseUrl / workspace 之类)由 --config 进 providerConfig。
         const providerConfig = parseObjectStorageMountOpts(
           provider,
           {
             authRef,
+            backendId: opts.backendId,
             bucket: opts.bucket,
             config: opts.config,
             endpoint: opts.endpoint,
@@ -399,7 +401,7 @@ export function ctxMountCommand() {
         )
 
         const exportId = String(opts.export ?? '').trim()
-        if (exportId && (provider === 'r2' || provider === 's3')) {
+        if (exportId && (provider === 'storage' || provider === 's3')) {
           throw new CliError('--export only applies to plugin providers')
         }
         const config: NodeConfig = {
@@ -449,7 +451,7 @@ export function ctxCommand() {
       'after',
       `
 Examples:
-  tb ctx mount notes --provider r2 --description "team notes"
+  tb ctx mount notes --provider storage --description "team notes"
   tb ctx put notes meeting/2026-07.md --file ./notes.md
   tb ctx upload photos camera/shot.jpg --file ./shot.jpg
   tb ctx cat notes meeting/2026-07.md

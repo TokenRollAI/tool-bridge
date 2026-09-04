@@ -14,7 +14,6 @@ import js from '@eslint/js'
 export default [
   globalIgnores([
     '**/dist/',
-    '**/.wrangler/',
     '**/.wxt/',
     '**/.output/',
     '**/node_modules/',

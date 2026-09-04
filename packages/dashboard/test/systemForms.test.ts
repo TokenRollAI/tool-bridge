@@ -192,11 +192,11 @@ describe('registry mount config', () => {
 
   it('对齐 context、skillhub 与 plugin export 选择规则', () => {
     expect(buildRegistryConfig(
-      mount({ kind: 'context', provider: 'r2', ctxPrefix: 'docs/', ttl: '60', readOnly: true }),
+      mount({ kind: 'context', provider: 'storage', ctxPrefix: 'docs/', ttl: '60', readOnly: true }),
       { context: [], tool: [] },
     )).toEqual({
       kind: 'context',
-      provider: 'r2',
+      provider: 'storage',
       providerConfig: { prefix: 'docs/' },
       readOnly: true,
       ttl: 60,

@@ -1,4 +1,5 @@
 import type { ObjectBody, ObjectPresignedPut } from '../context/objectStore'
+import type { StoreTokenKeyring } from '../secret/keyring'
 import type { OwnerRef, Timestamp, URI } from '../types'
 
 export const DEFAULT_STORE_NAME = 'default' as const
@@ -16,8 +17,9 @@ export interface StoreChecksum {
   value: string
 }
 
-/** StateStore 内的权威对象记录；driverKey 绝不进入公开 descriptor。 */
+/** StoreRepository 内的权威对象记录；driverKey 绝不进入公开 descriptor。 */
 export interface StoreObject {
+  backendId: string
   /** terminal object 的 driver 字节已完成幂等删除；cleanup 以此避免每轮重复 DELETE。 */
   bytesDeletedAt?: Timestamp
   checksum?: StoreChecksum
@@ -42,8 +44,9 @@ export interface StoreObject {
   uploadId: string
 }
 
-/** 每个上传会话都有独立 bearer；StateStore 只保存其 sha256。 */
+/** 每个上传会话都有独立 bearer；StoreRepository 只保存其 sha256。 */
 export interface UploadSession {
+  backendId: string
   capabilityHash: string
   completedAt?: Timestamp
   contentType: string
@@ -55,6 +58,8 @@ export interface UploadSession {
   maxBytes: number
   objectId: string
   revision: number
+  revokedAt?: Timestamp
+  signingKeyId: string
   status: UploadSessionStatus
   /** 进入 completed/aborted/expired/failed 的时间，作为幂等保留窗口起点。 */
   terminalAt?: Timestamp
@@ -76,6 +81,7 @@ export interface CallUploadCapability {
   reservations: Array<{ maxBytes: number, objectId: string }>
   reservedBytes: number
   revision: number
+  signingKeyId: string
   status: CallUploadCapabilityStatus
   /** 进入 revoked/expired 的时间；exhausted 仍须保留到 expiresAt 供幂等 replay。 */
   terminalAt?: Timestamp
@@ -90,6 +96,7 @@ export interface ShareGrant {
   id: string
   objectId: string
   revision: number
+  signingKeyId: string
   status: ShareGrantStatus
   /** 进入 revoked/expired 的时间，作为撤销传播后的安全保留窗口起点。 */
   terminalAt?: Timestamp
@@ -177,7 +184,6 @@ export interface StoreCleanupResult {
   /** 存在时宿主必须把它传给下一次 cleanup，直到缺省；避免大规模记录饿死。 */
   cursors?: StoreCleanupCursors
   deletedBytes: number
-  deletedStaging: number
   expiredCallCapabilities: number
   expiredIdempotencyBindings: number
   expiredShares: number
@@ -196,8 +202,6 @@ export interface StoreCleanupOptions {
   cursors?: StoreCleanupCursors
   /** 每类权威记录单步最多扫描多少条；缺省 200。 */
   limit?: number
-  /** 一次宿主 cleanup tick 只在第一页运行 staging 等非分页 driver 维护；缺省 true。 */
-  runDriverMaintenance?: boolean
 }
 
 export interface StoreServiceOptions {
@@ -206,7 +210,8 @@ export interface StoreServiceOptions {
   /** relay 数据面受宿主 request-body 上限约束；缺省与 maxObjectBytes 相同。 */
   relayMaxBytes?: number
   shareTtlSec?: number
-  tokenSecret: string
+  tokenKeyring?: StoreTokenKeyring
+  tokenSecret?: string
   uploadTtlSec?: number
 }
 

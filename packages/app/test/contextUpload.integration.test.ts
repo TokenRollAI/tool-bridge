@@ -18,7 +18,7 @@ const adminHeaders = {
   'accept': 'application/json',
 }
 
-async function mountR2(
+async function mountStorage(
   request: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>,
   path: string,
   extra: Record<string, unknown> = {},
@@ -30,7 +30,7 @@ async function mountR2(
       path,
       kind: 'context',
       description: 'camera uploads',
-      config: { kind: 'context', provider: 'r2', ...extra },
+      config: { kind: 'context', provider: 'storage', ...extra },
     }),
   })
   expect(response.status).toBe(200)
@@ -45,7 +45,7 @@ describe('context create_upload', () => {
       opts: ObjectPresignPutOptions,
     ) => ({
       method: 'PUT' as const,
-      url: `https://r2-upload.test/${encodeURIComponent(key)}?ttl=${ttlSec}&secret=redacted`,
+      url: `https://storage-upload.test/${encodeURIComponent(key)}?ttl=${ttlSec}&secret=redacted`,
       headers: {
         'content-type': opts.contentType,
         ...(opts.ifNoneMatch === undefined ? {} : { 'if-none-match': opts.ifNoneMatch }),
@@ -53,7 +53,7 @@ describe('context create_upload', () => {
     }))
     store.presignPut = presignPut
     const tb = await createTestApp({ objects: store, refTtlSec: 60 })
-    await mountR2(tb.request, 'camera/photos')
+    await mountStorage(tb.request, 'camera/photos')
 
     const help = await tb.request('https://tb.test/camera/photos/~help', {
       headers: adminHeaders,
@@ -97,12 +97,12 @@ describe('context create_upload', () => {
     const store = new MemoryObjectStore() as ObjectStore
     const presignPut = vi.fn(async () => ({
       method: 'PUT' as const,
-      url: 'https://r2-upload.test/replace',
+      url: 'https://storage-upload.test/replace',
       headers: { 'content-type': 'image/jpeg' },
     }))
     store.presignPut = presignPut
     const tb = await createTestApp({ objects: store })
-    await mountR2(tb.request, 'camera/replace')
+    await mountStorage(tb.request, 'camera/replace')
 
     const response = await tb.request('https://tb.test/camera/replace/create_upload', {
       method: 'POST',
@@ -123,12 +123,12 @@ describe('context create_upload', () => {
     const store = new MemoryObjectStore() as ObjectStore
     const presignPut = vi.fn(async () => ({
       method: 'PUT' as const,
-      url: 'https://r2-upload.test/strict',
+      url: 'https://storage-upload.test/strict',
       headers: {},
     }))
     store.presignPut = presignPut
     const tb = await createTestApp({ objects: store })
-    await mountR2(tb.request, 'camera/strict')
+    await mountStorage(tb.request, 'camera/strict')
 
     const response = await tb.request('https://tb.test/camera/strict/create_upload', {
       method: 'POST',
@@ -148,7 +148,7 @@ describe('context create_upload', () => {
     const store = new MemoryObjectStore() as ObjectStore
     const presignPut = vi.fn(async () => ({
       method: 'PUT' as const,
-      url: 'https://r2-upload.test/ttl',
+      url: 'https://storage-upload.test/ttl',
       headers: {},
     }))
     store.presignPut = presignPut
@@ -157,7 +157,7 @@ describe('context create_upload', () => {
       refTtlSec: 86_400,
       uploadGrantTtlSec: 120,
     })
-    await mountR2(tb.request, 'camera/ttl')
+    await mountStorage(tb.request, 'camera/ttl')
 
     const response = await tb.request('https://tb.test/camera/ttl/create_upload', {
       method: 'POST',
@@ -174,12 +174,12 @@ describe('context create_upload', () => {
     const defaultStore = new MemoryObjectStore() as ObjectStore
     const defaultPresignPut = vi.fn(async () => ({
       method: 'PUT' as const,
-      url: 'https://r2-upload.test/default-ttl',
+      url: 'https://storage-upload.test/default-ttl',
       headers: {},
     }))
     defaultStore.presignPut = defaultPresignPut
     const defaultTb = await createTestApp({ objects: defaultStore, refTtlSec: 86_400 })
-    await mountR2(defaultTb.request, 'camera/default-ttl')
+    await mountStorage(defaultTb.request, 'camera/default-ttl')
     const defaultResponse = await defaultTb.request(
       'https://tb.test/camera/default-ttl/create_upload',
       {
@@ -198,7 +198,7 @@ describe('context create_upload', () => {
 
   it('无 PUT signer 时不宣告能力，显式调用返回 unavailable', async () => {
     const tb = await createTestApp({ objects: new MemoryObjectStore() })
-    await mountR2(tb.request, 'camera/no-signer')
+    await mountStorage(tb.request, 'camera/no-signer')
 
     const help = await tb.request('https://tb.test/camera/no-signer/~help', {
       headers: adminHeaders,
@@ -219,8 +219,9 @@ describe('context create_upload', () => {
     const objectsFactory = vi.fn(async (): Promise<ObjectStore> => {
       throw new Error('secret decrypt failed')
     })
-    const tb = await createTestApp({ objectsFactory })
-    await mountR2(tb.request, 'camera/broken-signer')
+    const tb = await createTestApp()
+    await mountStorage(tb.request, 'camera/broken-signer')
+    tb.deps.objectStoreForBackend = objectsFactory
 
     const help = await tb.request('https://tb.test/camera/broken-signer/~help', {
       headers: adminHeaders,
@@ -240,7 +241,7 @@ describe('context create_upload', () => {
     expect(objectsFactory).toHaveBeenCalledTimes(2)
   })
 
-  it('S3 能力发现不解析节点 authRef', async () => {
+  it('S3 relay 不广告直传，能力发现不解析节点 authRef', async () => {
     const tb = await createTestApp()
     const resolve = vi.spyOn(tb.secrets, 'resolve')
     const deps: TbAppDeps = {
@@ -260,7 +261,7 @@ describe('context create_upload', () => {
       },
     }
 
-    await expect(contextDirectUploadAvailable(cfg, deps)).resolves.toBe(true)
+    await expect(contextDirectUploadAvailable(cfg, deps)).resolves.toBe(false)
     expect(resolve).not.toHaveBeenCalled()
   })
 
@@ -268,7 +269,7 @@ describe('context create_upload', () => {
     const store = new MemoryObjectStore() as ObjectStore
     store.presignPut = async () => ({ method: 'PUT', url: 'https://upload.test', headers: {} })
     const tb = await createTestApp({ objects: store })
-    await mountR2(tb.request, 'camera/read-only', { readOnly: true })
+    await mountStorage(tb.request, 'camera/read-only', { readOnly: true })
 
     const help = await tb.request('https://tb.test/camera/read-only/~help', {
       headers: adminHeaders,

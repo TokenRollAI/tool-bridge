@@ -1,17 +1,15 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import {
+import type { BeginStoreUpload, StoreRepository } from '../../src/objectStoreService/repository'
+import { backend,
   KEY_STORE_CALL_CAPABILITY,
   KEY_STORE_IDEMPOTENCY,
   KEY_STORE_OBJECT,
   KEY_STORE_SHARE,
-  KEY_STORE_UPLOAD,
-  StoreService,
-} from '../../src/objectStoreService/service'
-import {
-  DEFAULT_STORE_DRIVER_KEY_ROOT,
+  KEY_STORE_UPLOAD, StoreTestRepository } from './fixtures'
+import { DEFAULT_STORE_DRIVER_KEY_ROOT,
   type StoreObject,
-} from '../../src/objectStoreService/types'
-import { MemoryStateStore, type StateStore } from '../../src/store'
+  type UploadSession } from '../../src/objectStoreService/types'
+import { StoreService } from '../../src/objectStoreService/service'
 import { MemoryObjectStore } from '../../src/context/objectStore'
 import { isTBError, TBError } from '../../src/errors'
 
@@ -26,15 +24,15 @@ function codeIs(code: string) {
 
 describe('StoreService', () => {
   let now: string
-  let state: MemoryStateStore
+  let state: StoreTestRepository
   let objects: MemoryObjectStore
   let service: StoreService
 
   beforeEach(() => {
     now = '2026-08-25T00:00:00.000Z'
-    state = new MemoryStateStore()
+    state = new StoreTestRepository()
     objects = new MemoryObjectStore(() => now)
-    service = new StoreService(state, objects, {
+    service = new StoreService(state, backend(objects), {
       tokenSecret: TOKEN_SECRET,
       now: () => now,
       maxObjectBytes: 1024,
@@ -43,17 +41,9 @@ describe('StoreService', () => {
     })
   })
 
-  it('缺少跨副本 CAS 的 StateStore fail closed', () => {
-    const noCas: StateStore = {
-      get: key => state.get(key),
-      getMany: keys => state.getMany(keys),
-      put: (key, value) => state.put(key, value),
-      putIfAbsent: (key, value) => state.putIfAbsent(key, value),
-      delete: key => state.delete(key),
-      list: (prefix, opts) => state.list(prefix, opts),
-    }
-    expect(() => new StoreService(noCas, objects, { tokenSecret: TOKEN_SECRET }))
-      .toThrowError(/compareAndSwap/)
+  it('缺少领域原子操作的 repository fail closed', () => {
+    expect(() => new StoreService({} as StoreRepository, backend(objects), { tokenSecret: TOKEN_SECRET }))
+      .toThrowError(/StoreRepository/)
   })
 
   it('持久化记录只容忍未知新字段，已知时间/配额/状态字段损坏一律 fail closed', async () => {
@@ -121,7 +111,7 @@ describe('StoreService', () => {
   })
 
   it('upload/share capability TTL 有七天硬上限', async () => {
-    expect(() => new StoreService(state, objects, {
+    expect(() => new StoreService(state, backend(objects), {
       tokenSecret: TOKEN_SECRET,
       uploadTtlSec: 604_801,
     })).toThrowError(/uploadTtlSec/)
@@ -187,25 +177,21 @@ describe('StoreService', () => {
     }, { owner: OWNER })).rejects.toSatisfy(codeIs('conflict'))
   })
 
-  it('begin 的 session CAS 已落地但响应丢失时，幂等 replay 恢复同一外部身份', async () => {
-    class LostSessionAckState extends MemoryStateStore {
+  it('beginUpload 事务已提交但响应丢失时，幂等 replay 恢复同一外部身份', async () => {
+    class LostSessionAckState extends StoreTestRepository {
       loseAck = true
 
-      override async compareAndSwap(
-        key: string,
-        expectedRevision: number | null,
-        value: unknown | null,
-      ): Promise<boolean> {
-        const written = await super.compareAndSwap(key, expectedRevision, value)
-        if (this.loseAck && written && key.startsWith(KEY_STORE_UPLOAD)) {
+      override async beginUpload(input: BeginStoreUpload) {
+        const result = await super.beginUpload(input)
+        if (this.loseAck) {
           this.loseAck = false
-          throw new Error('session CAS acknowledgement lost')
+          throw new Error('upload transaction acknowledgement lost')
         }
-        return written
+        return result
       }
     }
     const replayState = new LostSessionAckState()
-    const replayService = new StoreService(replayState, objects, {
+    const replayService = new StoreService(replayState, backend(objects), {
       tokenSecret: TOKEN_SECRET,
       now: () => now,
       maxObjectBytes: 1024,
@@ -217,7 +203,7 @@ describe('StoreService', () => {
       idempotencyKey: 'lost-session-ack',
     }
     await expect(replayService.beginUpload(input, { owner: OWNER }))
-      .rejects.toThrow('session CAS acknowledgement lost')
+      .rejects.toThrow('upload transaction acknowledgement lost')
     const pending = (await replayState.list(KEY_STORE_OBJECT)).items[0]?.value as StoreObject
 
     const replay = await replayService.beginUpload(input, { owner: OWNER })
@@ -340,7 +326,7 @@ describe('StoreService', () => {
   })
 
   it('超限 create 不占住 idempotency key，修正声明后可立即重试', async () => {
-    const limited = new StoreService(state, objects, {
+    const limited = new StoreService(state, backend(objects), {
       tokenSecret: TOKEN_SECRET,
       now: () => now,
       maxObjectBytes: 100,
@@ -385,7 +371,7 @@ describe('StoreService', () => {
   })
 
   it('relayMaxBytes 独立收紧 relay，不把部署平台上限误当作 direct 上限', async () => {
-    const limited = new StoreService(new MemoryStateStore(), new MemoryObjectStore(), {
+    const limited = new StoreService(new StoreTestRepository(), backend(new MemoryObjectStore()), {
       tokenSecret: TOKEN_SECRET,
       now: () => now,
       maxObjectBytes: 100,
@@ -403,9 +389,9 @@ describe('StoreService', () => {
   })
 
   it('无 Content-Length 的 relay 流逐 chunk 限额，越界立即 cancel 且不留最终对象', async () => {
-    const limitedState = new MemoryStateStore()
+    const limitedState = new StoreTestRepository()
     const limitedObjects = new MemoryObjectStore(() => now)
-    const limited = new StoreService(limitedState, limitedObjects, {
+    const limited = new StoreService(limitedState, backend(limitedObjects), {
       tokenSecret: TOKEN_SECRET,
       now: () => now,
       maxObjectBytes: 5,
@@ -480,87 +466,21 @@ describe('StoreService', () => {
     expect(object).toMatchObject({ owner: OWNER, producer: DEVICE, originCallId: 'call-123' })
   })
 
-  it('并发 call begin 的 relay contender 不继承 direct reservation 上限', async () => {
-    class ReservationRaceState extends MemoryStateStore {
-      readonly reservationWritten: Promise<void>
-      private pause = true
-      private releaseReservation!: () => void
-      private signalReservation!: () => void
-
-      constructor() {
-        super()
-        this.reservationWritten = new Promise(resolve => this.signalReservation = resolve)
-      }
-
-      resumeDirect(): void {
-        this.releaseReservation()
-      }
-
-      override async compareAndSwap(
-        key: string,
-        expectedRevision: number | null,
-        value: unknown | null,
-      ): Promise<boolean> {
-        const reservations = (value as { reservations?: unknown[] } | null)?.reservations
-        if (
-          this.pause
-          && key.startsWith(KEY_STORE_CALL_CAPABILITY)
-          && expectedRevision !== null
-          && reservations?.length === 1
-        ) {
-          this.pause = false
-          const written = await super.compareAndSwap(key, expectedRevision, value)
-          this.signalReservation()
-          await new Promise<void>(resolve => this.releaseReservation = resolve)
-          return written
-        }
-        return await super.compareAndSwap(key, expectedRevision, value)
-      }
-    }
-    class SplitSignerStore extends MemoryObjectStore {
-      calls = 0
-
-      async presignPutExact(key: string, _ttlSec: number, opts: { contentLength: number }) {
-        this.calls++
-        if (this.calls > 1) throw new Error('signer temporarily unavailable')
-        return {
-          method: 'PUT' as const,
-          url: `https://objects.invalid/${key}`,
-          headers: { 'Content-Length': String(opts.contentLength), 'If-None-Match': '*' },
-        }
-      }
-    }
-    const raceState = new ReservationRaceState()
-    const raceObjects = new SplitSignerStore(() => now)
-    const raceService = new StoreService(raceState, raceObjects, {
-      tokenSecret: TOKEN_SECRET,
-      now: () => now,
-      maxObjectBytes: 100,
-      relayMaxBytes: 5,
+  it('并发 call begin 的配额判定与对象/session 创建同原子边界', async () => {
+    const issued = await service.issueCallUploadCapability({
+      owner: OWNER, producer: DEVICE, callId: 'quota-race', expiresAt: '2026-08-25T00:05:00.000Z',
+      maxObjects: 1, maxBytes: 6, maxObjectBytes: 6, allowedContentTypes: ['video/*'],
     })
-    const issued = await raceService.issueCallUploadCapability({
-      owner: OWNER,
-      producer: DEVICE,
-      callId: 'reservation-race',
-      expiresAt: '2026-08-25T00:05:00.000Z',
-      maxObjects: 2,
-      maxBytes: 100,
-      maxObjectBytes: 100,
-      allowedContentTypes: ['video/*'],
-    })
-    const input = { contentType: 'video/mp4', size: 6, idempotencyKey: 'same-race' }
-    const directPending = raceService.beginCallUpload(input, issued.token)
-    await raceState.reservationWritten
-    await expect(raceService.beginCallUpload(input, issued.token))
+    const results = await Promise.allSettled(Array.from({ length: 8 }, () =>
+      service.beginCallUpload({ contentType: 'video/mp4', size: 6 }, issued.token)))
+    expect(results.filter(result => result.status === 'fulfilled')).toHaveLength(1)
+    expect((await state.list(KEY_STORE_OBJECT)).items).toHaveLength(1)
+    expect((await state.list(KEY_STORE_UPLOAD)).items).toHaveLength(1)
+    const accepted = results.find(result => result.status === 'fulfilled')
+    if (accepted?.status !== 'fulfilled') throw new Error('missing upload')
+    await service.commitRelayUpload({ uploadToken: accepted.value.uploadToken, body: '123456' })
+    await expect(service.beginCallUpload({ contentType: 'video/mp4', size: 1 }, issued.token))
       .rejects.toSatisfy(codeIs('rate_limited'))
-    raceState.resumeDirect()
-
-    await expect(directPending).resolves.toMatchObject({
-      transport: 'presigned-put',
-      maxBytes: 6,
-    })
-    expect(raceObjects.calls).toBe(2)
-    expect((await raceState.list(KEY_STORE_UPLOAD)).items).toHaveLength(1)
   })
 
   it('call capability 拒绝 MIME、篡改与过期 token', async () => {
@@ -639,6 +559,7 @@ describe('StoreService', () => {
       const record: StoreObject = {
         id,
         store: 'default',
+        backendId: 'test',
         driverKey: `${DEFAULT_STORE_DRIVER_KEY_ROOT}/${id.slice(0, 2)}/${id}`,
         uploadId: `upload-${id}`,
         status: 'ready',
@@ -678,9 +599,9 @@ describe('StoreService', () => {
   })
 
   it.each(['ready', 'abandoned'] as const)(
-    'complete×abort 的 object CAS winner=%s 决定唯一终态',
+    'complete×abort 的领域事务 winner=%s 决定唯一终态',
     async (winner) => {
-      class CompleteAbortRaceState extends MemoryStateStore {
+      class CompleteAbortRaceState extends StoreTestRepository {
         private readonly winnerDone: Promise<void>
         private releaseWinner!: () => void
 
@@ -689,30 +610,23 @@ describe('StoreService', () => {
           this.winnerDone = new Promise(resolve => this.releaseWinner = resolve)
         }
 
-        override async compareAndSwap(
-          key: string,
-          expectedRevision: number | null,
-          value: unknown | null,
-        ): Promise<boolean> {
-          const status = (value as { status?: unknown } | null)?.status
-          if (
-            key.startsWith(KEY_STORE_OBJECT)
-            && expectedRevision === 1
-            && (status === 'ready' || status === 'abandoned')
-          ) {
-            if (status === winner) {
-              const won = await super.compareAndSwap(key, expectedRevision, value)
-              this.releaseWinner()
-              return won
-            }
-            await this.winnerDone
-          }
-          return await super.compareAndSwap(key, expectedRevision, value)
+        override async finishUpload(object: StoreObject, session: UploadSession) {
+          if (winner !== 'ready') await this.winnerDone
+          const result = await super.finishUpload(object, session)
+          if (winner === 'ready') this.releaseWinner()
+          return result
+        }
+
+        override async terminateUpload(object: StoreObject, session: UploadSession) {
+          if (winner !== 'abandoned') await this.winnerDone
+          const result = await super.terminateUpload(object, session)
+          if (winner === 'abandoned') this.releaseWinner()
+          return result
         }
       }
       const raceState = new CompleteAbortRaceState()
       const raceObjects = new MemoryObjectStore(() => now)
-      const raceService = new StoreService(raceState, raceObjects, {
+      const raceService = new StoreService(raceState, backend(raceObjects), {
         tokenSecret: TOKEN_SECRET,
         now: () => now,
         maxObjectBytes: 1024,
@@ -742,7 +656,7 @@ describe('StoreService', () => {
   )
 
   it('delete×read/share：已线性化的读取快照可返回，之后访问与新 share 均不可用', async () => {
-    class DeleteBeforeShareState extends MemoryStateStore {
+    class DeleteBeforeShareState extends StoreTestRepository {
       beforeShareCreate?: () => Promise<void>
 
       override async compareAndSwap(
@@ -760,7 +674,7 @@ describe('StoreService', () => {
     }
     const raceState = new DeleteBeforeShareState()
     const raceObjects = new MemoryObjectStore(() => now)
-    const raceService = new StoreService(raceState, raceObjects, {
+    const raceService = new StoreService(raceState, backend(raceObjects), {
       tokenSecret: TOKEN_SECRET,
       now: () => now,
       uploadTtlSec: 60,
@@ -831,9 +745,9 @@ describe('StoreService', () => {
         await super.delete(key)
       }
     }
-    const cleanupState = new MemoryStateStore()
+    const cleanupState = new StoreTestRepository()
     const cleanupObjects = new CountingStore(() => now)
-    const cleanupService = new StoreService(cleanupState, cleanupObjects, {
+    const cleanupService = new StoreService(cleanupState, backend(cleanupObjects), {
       tokenSecret: TOKEN_SECRET,
       now: () => now,
       uploadTtlSec: 60,
@@ -887,8 +801,8 @@ describe('StoreService', () => {
     expect((await cleanupState.list(KEY_STORE_IDEMPOTENCY)).items).toHaveLength(0)
   })
 
-  it('complete 在 object ready 与 session completed 之间遇 cleanup，最终仍收敛 completed', async () => {
-    class CompleteCleanupRaceState extends MemoryStateStore {
+  it('complete 事务提交后的响应延迟不会让 cleanup 将 ready 过期', async () => {
+    class CompleteCleanupRaceState extends StoreTestRepository {
       readonly completePaused: Promise<void>
       private pause = true
       private releaseComplete!: () => void
@@ -903,29 +817,20 @@ describe('StoreService', () => {
         this.releaseComplete()
       }
 
-      override async compareAndSwap(
-        key: string,
-        expectedRevision: number | null,
-        value: unknown | null,
-      ): Promise<boolean> {
-        const status = (value as { status?: unknown } | null)?.status
-        if (
-          this.pause
-          && key.startsWith(KEY_STORE_UPLOAD)
-          && expectedRevision !== null
-          && status === 'completed'
-        ) {
+      override async finishUpload(object: StoreObject, session: UploadSession) {
+        const result = await super.finishUpload(object, session)
+        if (this.pause) {
           this.pause = false
           this.signalPaused()
           await new Promise<void>(resolve => this.releaseComplete = resolve)
         }
-        return await super.compareAndSwap(key, expectedRevision, value)
+        return result
       }
     }
 
     const raceState = new CompleteCleanupRaceState()
     const raceObjects = new MemoryObjectStore(() => now)
-    const raceService = new StoreService(raceState, raceObjects, {
+    const raceService = new StoreService(raceState, backend(raceObjects), {
       tokenSecret: TOKEN_SECRET,
       now: () => now,
       uploadTtlSec: 60,
@@ -935,12 +840,13 @@ describe('StoreService', () => {
       size: 4,
     }, { owner: OWNER })
     const object = (await raceState.list(KEY_STORE_OBJECT)).items[0]?.value as StoreObject
+    now = '2026-08-25T00:00:30.000Z'
     const completing = raceService.commitRelayUpload({
       uploadToken: start.uploadToken,
       body: 'data',
     })
     await raceState.completePaused
-    now = '2026-08-25T00:02:00.000Z'
+    now = '2026-08-25T00:01:01.000Z'
     const cleaned = await raceService.cleanup()
     raceState.resumeComplete()
     const ready = await completing
@@ -954,7 +860,9 @@ describe('StoreService', () => {
   })
 
   it('cleanup 返回各前缀 cursor，小页循环不会让后续过期记录饿死', async () => {
-    for (let i = 0; i < 3; i++) {
+    for (let i = 0;
+      i < 3;
+      i++) {
       await service.beginUpload({ contentType: 'text/plain' }, { owner: OWNER })
     }
     now = '2026-08-25T00:02:00.000Z'
@@ -968,24 +876,18 @@ describe('StoreService', () => {
     expect(expiredUploads).toBe(3)
   })
 
-  it('cleanup 可仅首页调用 staging hook，保留无 metadata driver 对象并释放幂等 key', async () => {
+  it('cleanup 只清理由领域 metadata 授权的对象并释放幂等 key', async () => {
     class CleanupAwareStore extends MemoryObjectStore {
-      cleanupArgs?: { olderThan: string, prefix: string }
       listCalls = 0
-
-      async cleanupStaging(prefix: string, olderThan: string): Promise<number> {
-        this.cleanupArgs = { prefix, olderThan }
-        return 2
-      }
 
       override async list(prefix: string) {
         this.listCalls++
         return super.list(prefix)
       }
     }
-    const cleanupState = new MemoryStateStore()
+    const cleanupState = new StoreTestRepository()
     const cleanupObjects = new CleanupAwareStore(() => now)
-    const cleanupService = new StoreService(cleanupState, cleanupObjects, {
+    const cleanupService = new StoreService(cleanupState, backend(cleanupObjects), {
       tokenSecret: TOKEN_SECRET,
       now: () => now,
       uploadTtlSec: 60,
@@ -1001,20 +903,10 @@ describe('StoreService', () => {
     now = '2026-08-25T00:02:00.000Z'
     const cleaned = await cleanupService.cleanup()
     expect(cleaned).toMatchObject({
-      deletedStaging: 2,
       expiredIdempotencyBindings: 1,
-    })
-    expect(cleanupObjects.cleanupArgs).toEqual({
-      prefix: `${DEFAULT_STORE_DRIVER_KEY_ROOT}/`,
-      olderThan: '2026-08-25T00:01:00.000Z',
     })
     expect(await cleanupObjects.head(orphanKey)).not.toBeNull()
     expect(cleanupObjects.listCalls).toBe(0)
-
-    cleanupObjects.cleanupArgs = undefined
-    const continuation = await cleanupService.cleanup({ runDriverMaintenance: false })
-    expect(continuation.deletedStaging).toBe(0)
-    expect(cleanupObjects.cleanupArgs).toBeUndefined()
 
     const retried = await cleanupService.beginUpload({
       contentType: 'text/plain',
@@ -1061,7 +953,7 @@ describe('StoreService direct upload', () => {
       }
     }
     const objects = new LegacyPresigningStore()
-    const service = new StoreService(new MemoryStateStore(), objects, {
+    const service = new StoreService(new StoreTestRepository(), backend(objects), {
       tokenSecret: TOKEN_SECRET,
       maxObjectBytes: 100,
       relayMaxBytes: 5,
@@ -1093,7 +985,7 @@ describe('StoreService direct upload', () => {
       }
     }
     const objects = new FlakySignerStore()
-    const service = new StoreService(new MemoryStateStore(), objects, {
+    const service = new StoreService(new StoreTestRepository(), backend(objects), {
       tokenSecret: TOKEN_SECRET,
       maxObjectBytes: 100,
       relayMaxBytes: 5,
@@ -1112,7 +1004,7 @@ describe('StoreService direct upload', () => {
   })
 
   it('presigned PUT 必须 complete/HEAD，且并发 complete 幂等返回同 descriptor', async () => {
-    const state = new MemoryStateStore()
+    const state = new StoreTestRepository()
     class PresigningStore extends MemoryObjectStore {
       exactLengths: number[] = []
 
@@ -1129,7 +1021,7 @@ describe('StoreService direct upload', () => {
       }
     }
     const objects = new PresigningStore(() => '2026-08-25T00:00:00.000Z')
-    const service = new StoreService(state, objects, {
+    const service = new StoreService(state, backend(objects), {
       tokenSecret: TOKEN_SECRET,
       now: () => '2026-08-25T00:00:00.000Z',
       maxObjectBytes: 100,
@@ -1166,25 +1058,16 @@ describe('StoreService direct upload', () => {
     expect(left.checksum).toBeUndefined()
   })
 
-  it('direct 字节已落地但 ready metadata CAS 暂态失败时原地重试，不删除可恢复字节', async () => {
-    class FalseOnceReadyState extends MemoryStateStore {
+  it('direct 字节已落地但 ready metadata 事务暂态失败时原地重试，不删除可恢复字节', async () => {
+    class FalseOnceReadyState extends StoreTestRepository {
       failed = false
 
-      override async compareAndSwap(
-        key: string,
-        expectedRevision: number | null,
-        value: unknown | null,
-      ): Promise<boolean> {
-        if (
-          !this.failed
-          && key.startsWith(KEY_STORE_OBJECT)
-          && expectedRevision !== null
-          && (value as { status?: unknown } | null)?.status === 'ready'
-        ) {
+      override async finishUpload(object: StoreObject, session: UploadSession) {
+        if (!this.failed) {
           this.failed = true
-          return false
+          return null
         }
-        return await super.compareAndSwap(key, expectedRevision, value)
+        return super.finishUpload(object, session)
       }
     }
     class DirectStore extends MemoryObjectStore {
@@ -1198,7 +1081,7 @@ describe('StoreService direct upload', () => {
     }
     const state = new FalseOnceReadyState()
     const objects = new DirectStore(() => '2026-08-25T00:00:00.000Z')
-    const service = new StoreService(state, objects, {
+    const service = new StoreService(state, backend(objects), {
       tokenSecret: TOKEN_SECRET,
       now: () => '2026-08-25T00:00:00.000Z',
       maxObjectBytes: 100,

@@ -3,11 +3,11 @@ import { TEST_ADMIN_SK } from './fixtures'
 import { createTestApp } from './harness'
 
 // 文件级单实例(对齐原 SELF.fetch 语义:一个文件共享一份持久状态)。
-// skillhub 的 `provider: 'r2'` 是协议层的"平台对象存储"名,实现由宿主注入 ——
-// 这里注入 MemoryObjectStore 即可,R2 binding 本身的行为不在这一层。
+// skillhub 的 `provider: 'storage'` 是协议层的"平台对象存储"名,实现由宿主注入 ——
+// 这里注入 MemoryObjectStore 即可,S3 binding 本身的行为不在这一层。
 const tb = await createTestApp()
 
-// skillhub 集成测试(默认套件只依赖 miniflare 本地 R2 binding,无外部网络):
+// skillhub 集成测试(默认套件只依赖 miniflare 本地 S3 binding,无外部网络):
 // ~register 挂载 → Publish(多文件)→ List(目录来自 frontmatter)→ Get(SKILL.md 内联 + 清单)
 // → GetFile → Search → Remove;含缺 SKILL.md/缺 name·description 拒绝、readOnly、窄 scope 权限、
 // ~help / ~describe。
@@ -41,7 +41,7 @@ async function issueSk(input: unknown): Promise<string> {
   return ((await res.json()) as { secret: string }).secret
 }
 
-/** admin 经 ~register 挂 r2 skillhub。 */
+/** admin 经 ~register 挂 storage skillhub。 */
 async function mountHub(path: string, extra: Record<string, unknown> = {}): Promise<Response> {
   return postJson(
     `${path}/~register`,
@@ -49,7 +49,7 @@ async function mountHub(path: string, extra: Record<string, unknown> = {}): Prom
       path,
       kind: 'skillhub',
       description: 'skill hub',
-      config: { kind: 'skillhub', provider: 'r2', ...extra },
+      config: { kind: 'skillhub', provider: 'storage', ...extra },
     },
     admin(),
   )

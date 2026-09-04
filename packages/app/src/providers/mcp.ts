@@ -56,9 +56,9 @@ import {
   StreamableHTTPClientTransport,
   UnauthorizedError,
 } from '@modelcontextprotocol/client'
-import { CfWorkerJsonSchemaValidator } from '@modelcontextprotocol/client/validators/cf-worker'
 import type { UpstreamProvider } from './types'
 import { GatewayMcpOAuthProvider, mcpOAuthFetch, reauthorizeRequired } from '../oauth'
+import { ToolJsonSchemaValidator } from '../jsonSchemaValidator'
 
 /** mcp 节点 config。auth:'oauth' → 凭证走网关托管 OAuth(oauth.ts),authRef 忽略。 */
 export interface McpConfig {
@@ -285,14 +285,13 @@ async function withUpstream<T>(
       ...(auth.headers !== undefined ? { requestInit: { headers: auth.headers } } : {}),
     })
 
-  // SDK 默认的 Ajv 校验器经 new Function 编译 schema,workerd 禁 eval——上游工具一旦声明
-  // outputSchema,tools/list 阶段就会抛 "Code generation from strings disallowed"。
-  // 换 SDK 自带的 @cfworker/json-schema 解释执行实现。
+  // The official AJV validator preserves declared schema dialects; each tool
+  // gets an isolated compiler so untrusted $id values cannot alias schemas.
   const makeClient = (probing: boolean): Client =>
     new Client(
       { name: 'tool-bridge', version: '0.0.0' },
       {
-        jsonSchemaValidator: new CfWorkerJsonSchemaValidator(),
+        jsonSchemaValidator: new ToolJsonSchemaValidator(),
         // 空工具列表是我们踩过的事故;能力门落空要响亮失败,不要静默回空。
         enforceStrictCapabilities: true,
         ...(probing ? { versionNegotiation: { mode: 'auto' as const } } : {}),

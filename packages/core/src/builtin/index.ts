@@ -111,6 +111,7 @@ export {
   type CatalogModuleDeps,
 } from './catalog'
 export { type FederationHost, type FederationModuleDeps } from './federation'
+export * from './keys'
 export {
   type PluginHealthRecord,
   type PluginModuleDeps,

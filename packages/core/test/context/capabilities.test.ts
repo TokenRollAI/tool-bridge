@@ -74,7 +74,7 @@ describe('~help 只展示真实存在的操作', () => {
     expect(names).toEqual(['get', 'list', 'write'])
   })
 
-  it('methods 缺省 → 沿用全动词表(内置 r2/s3 与 plugin 分支的既有行为不变)', () => {
+  it('methods 缺省 → 沿用全动词表(内置 storage/s3 与 plugin 分支的既有行为不变)', () => {
     const names = contextHelpModel(node, {}).cmds.map(c => c.name)
     expect(names).toContain('list')
     expect(names).toContain('write')

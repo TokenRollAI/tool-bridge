@@ -9,19 +9,38 @@
 import type {
   BuiltinCatalog,
   CallContext,
+  ConfigManagement,
   ContextProvider,
+  DeploymentManagement,
   DeviceCallAttempt,
   DeviceCallContext,
+  EncryptionKeyring,
+  KeyManagement,
+  MailboxRepository,
+  MaintenanceManagement,
   ObjectStore,
   SearchIndex,
   SecretStoreImpl,
   StateStore,
+  StorageManagement,
+  StoreBackendResolver,
+  StoreRepository,
+  StoreTokenKeyring,
   TreePath,
 } from '@tool-bridge/core'
 import type { Context, Hono } from 'hono'
 import type { PluginBindings } from './providers/pluginClient'
 import type { UpstreamProvider } from './providers/types'
 import type { RemoteSettings } from './providers/remote'
+
+/** Node S3 adapter configuration; this data type has no host dependencies. */
+export interface S3StoreConfig {
+  accessKeyId: string
+  bucket: string
+  endpoint: string
+  region?: string
+  secretAccessKey: string
+}
 
 /** 帧协议 call 转发的入参(id 由调用点生成,幂等键)。 */
 export interface DeviceInvokeRequest {
@@ -33,7 +52,7 @@ export interface DeviceInvokeRequest {
   path: string
 }
 
-/** 设备通道宿主(CF = DeviceSession DO / Docker = ws)。 */
+/** 宿主提供的设备通道，标准 Node 服务使用 WebSocket。 */
 export interface DeviceChannel {
   /** HTTP→WS 调用转发，并显式报告是否已 dispatch，供安全 Mailbox fallback 判定。 */
   invoke(deviceId: string, req: DeviceInvokeRequest): Promise<DeviceCallAttempt>
@@ -61,30 +80,41 @@ export interface ReadinessReport {
 
 /**
  * tb app 的宿主注入面(数据/设备五注入点 + 安全出站通道 + 解析后的部署配置)。
- * 核心业务逻辑零分叉:Workers 适配层(app.ts)与 SDK(packages/sdk)都注入此形状。
+ * Node 服务与嵌入式 SDK 共用此形状，业务规则由 app 层统一执行。
  */
 export interface TbAppDeps {
+  adminAudit?: (event: { action: string, actor: string, id: string, outcome: 'started' | 'succeeded' | 'failed' }) => Promise<void>
   /** 放行 http:// 上游(仅本地开发)。 */
   allowInsecureHttp: boolean
-  /** Dashboard 静态资源(Workers Static Assets);缺省 → /ui 404。 */
+  /** Dashboard 静态资源处理器；缺省 → /ui 404。 */
   assets?: (request: Request) => Promise<Response>
   /**
    * 规范网关 origin(如 `https://tool-bridge.example.com`)。配置后,OAuth 的
    * redirect_uri 钉在此规范值上,而非每请求动态取 origin——防止实例经多域名
-   * (自定义域 + *.workers.dev 等)访问时,授权 code 在不同域名间被互换。
+   * (例如公开域名与内网域名)访问时，授权 code 在不同域名间被互换。
    * 缺省 → 回退到请求期 origin(单域名部署行为不变)。
    */
   canonicalOrigin?: string
+  configManagement?: ConfigManagement
+  /** Snapshot the active backend for binding a newly mounted platform Context. */
+  defaultObjectBackend?: () => Promise<{ id: string, objects: ObjectStore }>
+  deploymentManagement?: DeploymentManagement
   /** 设备通道;缺省 → device 能力禁用。 */
   device?: DeviceChannel
   /** $ref 中转 token 签名密钥(TB_SECRET_ENCRYPTION_KEY);缺省 → /~ref 404、大对象走 presign 或 unavailable。 */
   encryptionKey?: string
+  encryptionKeyring?: EncryptionKeyring
   /** 认证前的实例就绪钩子(引导/延迟注册 flush);每请求调用,幂等由宿主保证。 */
   ensureReady?: () => Promise<void>
+  keyManagement?: KeyManagement
   /** SDK 进程内 Provider 表(缺省无)。 */
   locals?: LocalProviderHooks
-  /** context 平台对象存储('r2' provider 的落点);缺省 → 该 provider unavailable。 */
+  mailboxRepository?: MailboxRepository
+  maintenanceManagement?: MaintenanceManagement
+  /** context 平台对象存储('storage' provider 的落点);缺省 → 该 provider unavailable。 */
   objects?: () => Promise<ObjectStore> | ObjectStore
+  /** Resolve an immutable backend identity; never substitute the active backend. */
+  objectStoreForBackend?: (backendId: string) => Promise<ObjectStore> | ObjectStore
   /**
    * 进程内插件装配表(binding 名 → fetch handler)。manifest.endpoint 为
    * `binding:<name>` 的插件经此直调,零网络跳;未装配的 binding 注册/调用报 unavailable。
@@ -93,7 +123,7 @@ export interface TbAppDeps {
   /**
    * 内置插件目录(descriptor)。**编译期常量**,由 `@tool-bridge/plugins` 的
    * `catalog.generated.ts` 求值生成 —— 内置插件的目录项与它的代码是同一份构建产物,
-   * 故不会陈旧、也不落库(见 `llmdoc/architecture/plugin-runtime.md`)。
+   * 故不会陈旧、也不落库(见 `llmdoc/plugins/plugin-runtime.mdx`)。
    *
    * 与 {@link pluginBindings} **是一对**:catalog 说"声明了什么"(挂载校验、选 export、
    * 列凭证字段),bindings 说"代码在哪"(实际调用)。装配了 binding 却没给 catalog,
@@ -108,8 +138,8 @@ export interface TbAppDeps {
   providerOAuthFetch?: typeof fetch
   /**
    * 后端连通性探测(GET /readyz;k8s readiness)。宿主注入闭包,自行探测其长连接
-   * 后端(PG 池 / Redis)并叠加 draining 状态。缺省 → /readyz 恒 200:请求期绑定
-   * 宿主(Workers 的 KV/D1/R2)无"断连"态,嵌入宿主自理。
+   * 后端(PG 池 / Redis)并叠加 draining 状态。标准服务必须注入；嵌入式宿主
+   * 自行承担后端就绪检查，缺省未注入时 /readyz 返回 200。
    */
   readiness?: () => Promise<ReadinessReport>
   /** context Get 的 $ref 内联阈值(字节,缺省 1 MiB)。 */
@@ -120,10 +150,14 @@ export interface TbAppDeps {
   remote: RemoteSettings
   /** 追加保留根路径(在内置保留根之外额外声明)。 */
   reservedRoots?: string[]
+  /** Host-owned S3 implementation. No signing or Node transport enters app. */
+  s3Objects?: (config: S3StoreConfig) => Promise<ObjectStore> | ObjectStore
   /** 全局工具搜索索引；缺省或未声明 search capability 时 /~search 不存在。 */
   search?: SearchIndex
   secrets: SecretStoreImpl
   state: StateStore
+  storageManagement?: StorageManagement
+  storeBackends?: StoreBackendResolver
   /** call capability 允许的 MIME pattern；缺省 `*\/*`。 */
   storeCallAllowedContentTypes?: string[]
   /** 单次 device call 的聚合上传字节预算。 */
@@ -138,8 +172,10 @@ export interface TbAppDeps {
   storeReadTtlSec?: number
   /** relay transport 的有效 request-body 上限；direct 不受此值收紧。 */
   storeRelayMaxBytes?: number
+  storeRepository?: StoreRepository
   /** 短期 share 的缺省有效期秒。 */
   storeShareTtlSec?: number
+  storeTokenKeyring?: StoreTokenKeyring
   /** Store capability HMAC secret；缺省由 StateStore 原子生成并持久化。 */
   storeTokenSecret?: string
   /** Store upload session 有效期秒。 */

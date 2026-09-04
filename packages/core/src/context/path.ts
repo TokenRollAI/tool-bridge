@@ -2,7 +2,7 @@
  * Context entry 路径规范化与穿越拒绝(规范性:解析后必须仍在根内)。
  *
  * entry 路径是 namespace 内的相对路径('/' 分隔),与树路径(tree/path.ts)是两套
- * 规则:树路径拒绝保留段,entry 路径拒绝穿越。实现在 core,r2/s3 与
+ * 规则:树路径拒绝保留段,entry 路径拒绝穿越。实现在 core,storage/s3 与
  * file provider 复用同一份判定。
  */
 

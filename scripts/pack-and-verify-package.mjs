@@ -140,7 +140,7 @@ export function packageNameOf(specifier) {
 }
 
 /**
- * 闭包内允许出现的裸 import:Node 内建(含 `node:` 前缀)、平台内建(`cloudflare:`)、
+ * 闭包内允许出现的裸 import:Node 内建(含 `node:` 前缀)、
  * 以及 manifest 的 runtime dependency 字段里声明过的包。
  */
 function declaredRuntimeDependencies(manifest) {
@@ -151,10 +151,6 @@ function declaredRuntimeDependencies(manifest) {
   return names
 }
 
-function isPlatformBuiltin(specifier) {
-  return specifier.startsWith('cloudflare:') || isBuiltin(specifier)
-}
-
 /**
  * 找出 packed JS 闭包里"留 external 却没声明依赖"的裸 import。
  *
@@ -162,7 +158,7 @@ function isPlatformBuiltin(specifier) {
  * 从 server 的 dependencies 删掉但 external 没删,后来 plugins 进 noExternal 又把该 import 带回闭包 ——
  * 开发用 tsx 能从 plugins 的 node_modules 解析到,`pnpm --prod deploy` 出来的 Docker 镜像与
  * npm 消费者在首次加载那个 provider 时才 MODULE_NOT_FOUND;当时的 pack 校验只看 manifest 与
- * sdk neutral 子入口,server/gateway/cli/app 的闭包完全没检查。
+ * sdk neutral 子入口,server/cli/app 的闭包完全没检查。
  *
  * 只看 ESM `import`/动态 `import()`;bundler 把 CJS 依赖内联成 `__commonJS` 工厂时,产物里残留的
  * `require("...")` 是字符串或已被 shim 的调用,不构成运行时解析。
@@ -173,7 +169,7 @@ export function findUndeclaredRuntimeImports(manifest, jsSources) {
   for (const [path, source] of jsSources) {
     for (const specifier of collectExternalImports(source)) {
       if (specifier.startsWith('.') || specifier.startsWith('/')) continue
-      if (isPlatformBuiltin(specifier)) continue
+      if (isBuiltin(specifier)) continue
       const name = packageNameOf(specifier)
       if (declared.has(name)) continue
       if (!undeclared.has(name)) undeclared.set(name, new Set())

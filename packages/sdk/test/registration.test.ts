@@ -1,11 +1,3 @@
-/**
- * 注册语义保真:本地落库与 connect 上报共用同一个 NodeInput 构造(nodeInputOf)。
- *
- * 回归动机:上报侧曾硬编码 config、丢掉 virtualize 与 readOnly,导致「本地跑正常、
- * 连上远程后 ~help 与权限都变了」。本文件在 wire 层断言本地侧的构造结果;上报侧由
- * 「两条路径共用同一函数」这一结构性保证覆盖(真实远端链路见 opt-in connect.remote)。
- */
-
 import {
   MemoryObjectStore,
   MemoryStateStore,
@@ -13,9 +5,17 @@ import {
   type ToolResult,
   type ToolSpec,
 } from '@tool-bridge/core'
+/**
+ * 注册语义保真:本地落库与 connect 上报共用同一个 NodeInput 构造(nodeInputOf)。
+ *
+ * 回归动机:上报侧曾硬编码 config、丢掉 virtualize 与 readOnly,导致「本地跑正常、
+ * 连上远程后 ~help 与权限都变了」。本文件在 wire 层断言本地侧的构造结果;上报侧由
+ * 「两条路径共用同一函数」这一结构性保证覆盖(真实远端链路见 opt-in connect.remote)。
+ */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { serve } from '@hono/node-server'
 import { createToolBridge, type ToolBridge } from '../src'
+import { testPersistence } from './domainFixtures'
 
 const ADMIN_SK = 'tbk_sdk_reg_admin_00000000000'
 
@@ -43,7 +43,7 @@ let tb: ToolBridge
 beforeAll(async () => {
   tb = createToolBridge({
     state: new MemoryStateStore(),
-    objects: new MemoryObjectStore(),
+    ...testPersistence(new MemoryObjectStore()),
     adminSk: ADMIN_SK,
   })
   tb.registerContext('readonly-notes', readOnlyNotes(), { description: '只读笔记' })

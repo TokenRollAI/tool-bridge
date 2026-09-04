@@ -24,7 +24,7 @@ import { join } from 'node:path'
 import { npmRegistrySnapshot } from './npm-registry-version.mjs'
 
 /** 可发布包(private 的 core/plugins 由各产物 bundle,不单独发)。 */
-export const PUBLIC_PACKAGES = ['app', 'cli', 'dashboard', 'gateway', 'plugin-sdk', 'sdk', 'server']
+export const PUBLIC_PACKAGES = ['app', 'cli', 'dashboard', 'plugin-sdk', 'sdk', 'server']
 
 /**
  * 发布顺序的硬约束:`依赖 → 依赖它的包`。

@@ -95,9 +95,16 @@ function rejectUpgrade(socket: Duplex, error: TBError): void {
 }
 
 export class DeviceHub {
+  private attachedServer: http.Server | undefined
+  private readonly upgradeHandler = (req: http.IncomingMessage, socket: Duplex, head: Buffer): void => {
+    this.handleUpgrade(req, socket, head).catch((err) => {
+      rejectUpgrade(socket, isTBError(err) ? err : new TBError('internal', 'upgrade failed'))
+    })
+  }
+
   private readonly store: StateStore
   private readonly search: MutableSearchIndex | undefined
-  private readonly reclaimSec: number
+  private reclaimSec: number
   private readonly wss = new WebSocketServer({ noServer: true })
   private readonly activeByDevice = new Map<string, Conn>()
   private readonly connections = new Set<Conn>()
@@ -125,6 +132,14 @@ export class DeviceHub {
     this.heartbeat.unref?.()
   }
 
+  async setReclaimSec(value: number): Promise<void> {
+    if (value === this.reclaimSec) return
+    this.reclaimSec = value
+    for (const timer of this.reclaimTimers.values()) clearTimeout(timer)
+    this.reclaimTimers.clear()
+    await this.sweepOrphans()
+  }
+
   /**
    * 启动多副本路由(订阅本副本频道 + 路由续期)。单副本时是 no-op。
    * 必须在开始服务前完成:订阅没建好时转发进来的调用会丢。
@@ -135,14 +150,9 @@ export class DeviceHub {
 
   /** 挂到 http.Server 的 'upgrade' 事件(仅处理 DEVICE_WS_PATH,其余 404)。 */
   attach(server: http.Server): void {
-    server.on('upgrade', (req, socket, head) => {
-      this.handleUpgrade(req, socket, head).catch((err) => {
-        rejectUpgrade(
-          socket,
-          isTBError(err) ? err : new TBError('internal', 'upgrade failed'),
-        )
-      })
-    })
+    this.attachedServer?.off('upgrade', this.upgradeHandler)
+    this.attachedServer = server
+    server.on('upgrade', this.upgradeHandler)
   }
 
   /**
@@ -243,6 +253,8 @@ export class DeviceHub {
   }
 
   async close(): Promise<void> {
+    this.attachedServer?.off('upgrade', this.upgradeHandler)
+    this.attachedServer = undefined
     if (this.heartbeat !== undefined) clearInterval(this.heartbeat)
     this.heartbeat = undefined
     for (const timer of this.reclaimTimers.values()) clearTimeout(timer)

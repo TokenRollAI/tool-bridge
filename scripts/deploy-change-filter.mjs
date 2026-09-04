@@ -13,6 +13,7 @@ const sharedBuildFiles = new Set([
   'pnpm-workspace.yaml',
   'tsconfig.base.json',
   'turbo.json',
+  'scripts/precompress.mjs',
 ])
 
 const sharedRuntimePrefixes = [

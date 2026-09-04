@@ -1,7 +1,7 @@
 {
   "name": "@tool-bridge/dashboard",
-  "version": "0.27.1",
-  "description": "tool-bridge dashboard as prebuilt static assets (Vite build output in dist/), serve via Workers Static Assets or any static host",
+  "version": "0.28.0",
+  "description": "Tool Bridge self-hosted Dashboard as prebuilt static assets",
   "type": "module",
   "license": "MIT",
   "files": [
@@ -17,7 +17,7 @@
   ],
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build",
+    "build": "tsc -b && vite build && node ../../scripts/precompress.mjs dist",
     "test": "vitest run",
     "typecheck": "tsc -b --noEmit",
     "preview": "vite preview"

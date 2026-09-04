@@ -45,7 +45,7 @@ describe('secretRefsInConfig', () => {
   })
 
   it('无引用 / 非对象 / 空串 → 空', () => {
-    expect(secretRefsInConfig({ kind: 'context', provider: 'r2' })).toEqual([])
+    expect(secretRefsInConfig({ kind: 'context', provider: 'storage' })).toEqual([])
     expect(secretRefsInConfig(null)).toEqual([])
     expect(secretRefsInConfig('nope')).toEqual([])
     expect(secretRefsInConfig({ kind: 'http', endpoint: 'https://x', tools: [], authRef: '' })).toEqual([])
@@ -58,7 +58,7 @@ describe('secretRefsInConfig', () => {
 
 describe('assertSecretRefUse', () => {
   it('无引用 → 放行(任何身份)', () => {
-    expect(() => assertSecretRefUse(registrantScopes, { kind: 'context', provider: 'r2' })).not.toThrow()
+    expect(() => assertSecretRefUse(registrantScopes, { kind: 'context', provider: 'storage' })).not.toThrow()
   })
 
   it('admin(**)绑定引用 → 放行', () => {

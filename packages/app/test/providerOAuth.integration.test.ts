@@ -66,7 +66,7 @@ interface BuildAppOpts {
 
 async function buildApp(opts: BuildAppOpts = {}): Promise<ReturnType<typeof createTbApp>> {
   const state = new MemoryStateStore()
-  await runBootstrap(state, { adminSk: TEST_ADMIN_SK, requireAdminSk: true })
+  await runBootstrap(state, { adminSk: TEST_ADMIN_SK })
   return createTbApp({
     allowInsecureHttp: false,
     canonicalOrigin: 'https://tb.test',
@@ -424,7 +424,7 @@ describe('OAuth 与 credentialProbe 叠加', () => {
   it('**契约层拒绝这个组合**(注册就失败,不留矛盾的声明)', async () => {
     const seen: { auth?: string } = {}
     const state = new MemoryStateStore()
-    await runBootstrap(state, { adminSk: TEST_ADMIN_SK, requireAdminSk: true })
+    await runBootstrap(state, { adminSk: TEST_ADMIN_SK })
     const app = createTbApp({
       allowInsecureHttp: false,
       canonicalOrigin: 'https://tb.test',
@@ -454,7 +454,7 @@ describe('OAuth 与 credentialProbe 叠加', () => {
   it('**即便注册通过,挂载也不把 client secret 发给插件**(纵深防线)', async () => {
     const seen: { auth?: string } = {}
     const state = new MemoryStateStore()
-    await runBootstrap(state, { adminSk: TEST_ADMIN_SK, requireAdminSk: true })
+    await runBootstrap(state, { adminSk: TEST_ADMIN_SK })
     const app = createTbApp({
       allowInsecureHttp: false,
       canonicalOrigin: 'https://tb.test',
@@ -580,7 +580,7 @@ describe('401 触发的自愈(不返回 expires_in 的 provider)', () => {
     }) as unknown as typeof fetch)
 
     const state = new MemoryStateStore()
-    await runBootstrap(state, { adminSk: TEST_ADMIN_SK, requireAdminSk: true })
+    await runBootstrap(state, { adminSk: TEST_ADMIN_SK })
     const app = createTbApp({
       allowInsecureHttp: false,
       canonicalOrigin: 'https://tb.test',
@@ -668,7 +668,7 @@ describe('401 触发的自愈(不返回 expires_in 的 provider)', () => {
     }) as unknown as typeof fetch)
 
     const state = new MemoryStateStore()
-    await runBootstrap(state, { adminSk: TEST_ADMIN_SK, requireAdminSk: true })
+    await runBootstrap(state, { adminSk: TEST_ADMIN_SK })
     const app = createTbApp({
       allowInsecureHttp: false,
       canonicalOrigin: 'https://tb.test',

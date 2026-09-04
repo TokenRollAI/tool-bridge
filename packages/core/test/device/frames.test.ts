@@ -49,7 +49,7 @@ describe('encode/decode 往返', () => {
     { type: 'result', id: 'r1', ok: true, value: { stdout: 'hi\n', stderr: '', exitCode: 0 } },
     {
       type: 'result',
-      id: 'r2',
+      id: 'storage',
       ok: false,
       error: { code: 'unavailable', message: 'down', retryable: true },
     },

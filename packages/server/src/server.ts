@@ -1,36 +1,34 @@
-/**
- * createTbServer:Node 宿主装配(对位 gateway/src/app.ts 的 depsFromEnv)。
- *
- * StateStore/SearchIndex 后端二选一:给 TB_DATABASE_URL 走 Postgres,
- * 否则走 dataDir 下的 SQLite。ObjectStore 始终是 fs。HTTP 用 @hono/node-server;
- * 引导在 start() 时直调宿主中立 runBootstrap(Node 有真实启动点,不需要 Workers 的
- * per-request once,故不注入 deps.ensureReady)。设备通道(DeviceHub)与 /ui 静态托管
- * 由后续装配点注入(deps.device / deps.assets)。
- */
-
 import type * as http from 'node:http'
+import {
+  type MutableSearchIndex,
+  type RuntimeConfig,
+  runtimeConfigSchema,
+  SecretStoreImpl,
+  type StateStore,
+  TBError,
+} from '@tool-bridge/core'
 import {
   cleanupDefaultStore,
   cleanupDeviceMailbox,
-  createS3ObjectStore,
   createTbApp,
   type ReadinessReport,
   runBootstrap,
   type TbAppDeps,
 } from '@tool-bridge/app'
-import { type MutableSearchIndex, SecretStoreImpl, type StateStore } from '@tool-bridge/core'
 import { createGuardedFetch } from '@tool-bridge/plugins/guarded-fetch'
 import { serve, type ServerType } from '@hono/node-server'
 import postgres, { type Sql } from 'postgres'
-import { mkdirSync } from 'node:fs'
-import { hostname } from 'node:os'
-import { join } from 'node:path'
-import type { ServerConfig } from './config'
+import { randomUUID } from 'node:crypto'
+import { Hono } from 'hono'
+import { runtimeAppSettings, type ServerConfig } from './config'
 import { RedisDeviceRouterBackend } from './redisDeviceRouter'
+import { PgMailboxRepository } from './pgMailboxRepository'
+import { DeploymentManager } from './deploymentManager'
+import { PgStoreRepository } from './pgStoreRepository'
 import pkg from '../package.json' with { type: 'json' }
-import { SqliteSearchIndex } from './sqliteSearchIndex'
-import { SqliteStateStore } from './sqliteStateStore'
-import { createDataObjectStore } from './objects'
+import { StorageManager } from './storageManager'
+import { createS3ObjectStore } from './s3Objects'
+import { ConfigManager } from './configManager'
 import { PgSearchIndex } from './pgSearchIndex'
 import { PgStateStore } from './pgStateStore'
 import { DeviceRouter } from './deviceRouter'
@@ -40,10 +38,12 @@ import { DeviceHub } from './deviceHub'
 const providerOAuthFetch = createGuardedFetch({ crossOriginRedirect: 'error' })
 
 export interface TbServer {
-  app: ReturnType<typeof createTbApp>
+  app: Hono
   close(): Promise<void>
   deviceHub: DeviceHub
+  prepare(): Promise<void>
   search: MutableSearchIndex
+  settings: ConfigManager
   /** 引导(幂等)+ 孤儿设备回收排程 + 监听;返回实际端口(config.port=0 时由系统分配)。 */
   start(): Promise<{ port: number }>
   /**
@@ -53,110 +53,44 @@ export interface TbServer {
    */
   startDraining(): void
   state: StateStore
-}
-
-/**
- * 单个后端资源的生命周期句柄。
- *
- * state 与 search 各自独立成一个 —— 它们是**两个**注入点,不该被绑成"全 PG / 全
- * SQLite"两条路:那样就没法组合"PG 状态 + 外部搜索引擎"或"SQLite 状态 + PG 搜索"。
- * `SqlSearchDialect` 只是 SQL 实现之间的复用层,不是后端选择的边界。
- */
-interface BackendResource<T> {
-  close: () => Promise<void>
-  /** 异步建表等就绪动作;必须早于任何读写(SQLite 构造时已建好,故为 no-op)。 */
-  ensureReady: () => Promise<void>
-  /** 连通性探测(/readyz);缺省 = 无长连接可断(SQLite 进程内文件),恒视为 ok。 */
-  ping?: () => Promise<void>
-  value: T
-}
-
-/** 共享一个 PG 连接池的 state + search(同库时只开一个池)。 */
-function pgBackends(databaseUrl: string): {
-  search: BackendResource<MutableSearchIndex>
-  state: BackendResource<StateStore>
-} {
-  const sql: Sql = postgres(databaseUrl, { onnotice: () => {} })
-  const state = new PgStateStore(sql)
-  const search = new PgSearchIndex(sql)
-  // 池由两者共用:只在 state 侧关闭,search 侧不重复 end()。
-  return {
-    state: {
-      value: state,
-      ensureReady: async () => await state.ensureSchema(),
-      ping: async () => {
-        await sql`SELECT 1`
-      },
-      close: async () => await sql.end({ timeout: 5 }),
-    },
-    search: {
-      value: search,
-      ensureReady: async () => {
-        await search.initialized()
-      },
-      close: async () => {},
-    },
-  }
-}
-
-function sqliteStateBackend(dataDir: string): BackendResource<StateStore> {
-  const store = new SqliteStateStore(join(dataDir, 'state.sqlite3'))
-  return {
-    value: store,
-    ensureReady: async () => {},
-    close: async () => store.close(),
-  }
-}
-
-function sqliteSearchBackend(dataDir: string): BackendResource<MutableSearchIndex> {
-  const index = new SqliteSearchIndex(join(dataDir, 'state.sqlite3'))
-  return {
-    value: index,
-    ensureReady: async () => {},
-    close: async () => index.close(),
-  }
-}
-
-/**
- * 按 config 解析出 state 与 search 两个后端。
- *
- * 当前组合:同一个 `TB_DATABASE_URL` 同时驱动两者(共用连接池),或都落在 dataDir
- * 的 SQLite。两者已各自独立,后续接外部搜索引擎(OpenSearch/Meili 等)只需在 search
- * 侧加分支,不动 state 侧。
- */
-function resolveBackends(config: ServerConfig): {
-  search: BackendResource<MutableSearchIndex>
-  state: BackendResource<StateStore>
-} {
-  if (config.databaseUrl !== undefined) return pgBackends(config.databaseUrl)
-  const state = sqliteStateBackend(config.dataDir)
-  try {
-    return { search: sqliteSearchBackend(config.dataDir), state }
-  } catch (error) {
-    // search 构造失败不能泄漏已开的 state 句柄(SQLite 打开会真的持有文件)。
-    // close() 的 rejection 必须就地吞掉:这里已在抛原始错误的路上,
-    // 悬空的 Promise 会变成 unhandled rejection 污染其它测试/进程。
-    state.close().catch(() => {})
-    throw error
-  }
+  storage: StorageManager
 }
 
 export function createTbServer(config: ServerConfig): TbServer {
-  mkdirSync(config.dataDir, { recursive: true })
-  const backends = resolveBackends(config)
-  const state = backends.state.value
-  const search = backends.search.value
-  const secrets = new SecretStoreImpl(state, config.encryptionKey)
-  // 部署级对象存储(default Store 与对象 Context 共用):配了 S3/R2 就用它
-  // (可无状态横向扩容、支持 presign 直连),
-  // 否则回退 dataDir 下的本地 FS(单副本;容器重建即丢)。
-  const objects = config.objectStore === undefined
-    ? createDataObjectStore(config.dataDir)
-    : createS3ObjectStore(config.objectStore, { allowInsecure: config.allowInsecureHttp })
+  if (!config.databaseUrl)
+    throw new TBError(
+      'unavailable',
+      'PostgreSQL must be configured before starting business services',
+    )
+  const sql: Sql = postgres(config.databaseUrl, {
+    onnotice: () => {},
+    connect_timeout: 5,
+  })
+  const state = new PgStateStore(sql)
+  const search = new PgSearchIndex(sql)
+  const secrets = new SecretStoreImpl(
+    state,
+    config.encryptionKeyring ?? config.encryptionKey,
+  )
+  if (!secrets.available)
+    throw new TBError('unavailable', 'a valid encryption root is required')
+  const replicaId = config.replicaId ?? randomUUID()
+  const deployment = new DeploymentManager(
+    sql,
+    config.instanceId ?? 'embedded',
+  )
+  const storeRepository = new PgStoreRepository(sql)
+  const mailboxRepository = new PgMailboxRepository(sql)
+  const storage = new StorageManager(sql, secrets, {
+    ...(config.internalS3Origin
+      ? { internalOrigin: config.internalS3Origin }
+      : {}),
+  })
   // Redis backend 提出来单独持有:readiness 探测要 ping 它,不能埋在 router 工厂闭包里。
-  const redisBackend = config.redisUrl === undefined
-    ? undefined
-    : new RedisDeviceRouterBackend(config.redisUrl)
+  const redisBackend
+    = config.redisUrl === undefined
+      ? undefined
+      : new RedisDeviceRouterBackend(config.redisUrl)
   const hub = new DeviceHub({
     store: state,
     search,
@@ -165,11 +99,8 @@ export function createTbServer(config: ServerConfig): TbServer {
     ...(redisBackend === undefined
       ? {}
       : {
-          router: onLocalCall => new DeviceRouter(
-            config.replicaId ?? hostname(),
-            redisBackend,
-            { onLocalCall },
-          ),
+          router: onLocalCall =>
+            new DeviceRouter(replicaId, redisBackend, { onLocalCall }),
         }),
   })
 
@@ -177,19 +108,24 @@ export function createTbServer(config: ServerConfig): TbServer {
   let draining = false
 
   /** 单项探测:限时 1s——探针不能反过来拖垮进程(PG 挂起时探测也会挂起)。 */
-  const probeOne = async (fn: () => Promise<void>): Promise<{ detail?: string, ok: boolean }> => {
+  const probeOne = async (
+    fn: () => Promise<void>,
+  ): Promise<{ detail?: string, ok: boolean }> => {
     let timer: NodeJS.Timeout | undefined
     try {
       await Promise.race([
         fn(),
         new Promise<never>((_, reject) => {
-          timer = setTimeout(() => reject(new Error('timeout after 1000ms')), 1000)
+          timer = setTimeout(
+            () => reject(new Error('timeout after 1000ms')),
+            1000,
+          )
           timer.unref?.()
         }),
       ])
       return { ok: true }
-    } catch (err) {
-      return { ok: false, detail: err instanceof Error ? err.message : 'probe failed' }
+    } catch {
+      return { ok: false, detail: 'dependency unavailable' }
     } finally {
       if (timer !== undefined) clearTimeout(timer)
     }
@@ -198,23 +134,40 @@ export function createTbServer(config: ServerConfig): TbServer {
   const readiness = async (): Promise<ReadinessReport> => {
     const checks: ReadinessReport['checks'] = {}
     const probes: Array<Promise<void>> = []
-    const statePing = backends.state.ping
+    const statePing = async () => {
+      await sql`SELECT 1`
+    }
     if (statePing !== undefined) {
-      probes.push(probeOne(statePing).then((r) => {
-        checks.state = r
-      }))
+      probes.push(
+        probeOne(statePing).then((r) => {
+          checks.state = r
+        }),
+      )
     }
     if (redisBackend !== undefined) {
-      probes.push(probeOne(async () => await redisBackend.ping()).then((r) => {
-        checks.redis = r
-      }))
+      probes.push(
+        probeOne(async () => await redisBackend.ping()).then((r) => {
+          checks.redis = r
+        }),
+      )
     }
+    probes.push(
+      probeOne(async () => {
+        const backend = await storage.defaultBackend()
+        await backend.objects.head('__tool_bridge_internal__/health')
+      }).then((result) => {
+        checks.objects = result
+      }),
+    )
     await Promise.all(probes)
     if (draining) checks.draining = { ok: false, detail: 'shutting down' }
-    return { checks, ready: !draining && Object.values(checks).every(c => c.ok) }
+    return {
+      checks,
+      ready: !draining && Object.values(checks).every(c => c.ok),
+    }
   }
 
-  const deps: TbAppDeps = {
+  let deps: TbAppDeps = {
     state,
     secrets,
     providerOAuthFetch,
@@ -222,34 +175,67 @@ export function createTbServer(config: ServerConfig): TbServer {
     remote: config.remote,
     search,
     allowInsecureHttp: config.allowInsecureHttp,
-    objects: () => objects,
+    objects: async () => (await storage.defaultBackend()).objects,
+    defaultObjectBackend: () => storage.defaultBackend(),
+    objectStoreForBackend: id => storage.resolveBackend(id),
+    storeBackends: storage,
+    storeRepository,
+    mailboxRepository,
+    storageManagement: storage,
+    deploymentManagement: deployment,
+    ...(config.adminAudit ? { adminAudit: config.adminAudit } : {}),
+    ...(config.maintenanceManagement
+      ? { maintenanceManagement: config.maintenanceManagement }
+      : {}),
+    ...(config.keyManagement ? { keyManagement: config.keyManagement } : {}),
+    s3Objects: connection =>
+      createS3ObjectStore(connection, {
+        ...(config.internalS3Origin
+          ? { internalOrigin: config.internalS3Origin }
+          : {}),
+      }),
     device: hub,
     readiness,
   }
-  if (config.encryptionKey !== undefined) deps.encryptionKey = config.encryptionKey
-  if (config.pluginBindings !== undefined) deps.pluginBindings = config.pluginBindings
-  if (config.pluginCatalog !== undefined) deps.pluginCatalog = config.pluginCatalog
+  if (config.encryptionKey !== undefined)
+    deps.encryptionKey = config.oauthKey ?? config.encryptionKey
+  if (config.encryptionKeyring)
+    deps.encryptionKeyring = config.encryptionKeyring
+  if (config.storeTokenKeyring)
+    deps.storeTokenKeyring = config.storeTokenKeyring
+  if (config.pluginBindings !== undefined)
+    deps.pluginBindings = config.pluginBindings
+  if (config.pluginCatalog !== undefined)
+    deps.pluginCatalog = config.pluginCatalog
   // 规范 origin(与 Workers app.ts 对等):给出即钉死 OAuth redirect_uri。
-  if (config.canonicalOrigin !== undefined) deps.canonicalOrigin = config.canonicalOrigin
+  if (config.canonicalOrigin !== undefined)
+    deps.canonicalOrigin = config.canonicalOrigin
   const assets = resolveUiAssets(config.uiDir)
   if (assets !== undefined) deps.assets = assets
-  if (config.toolCacheTtlSec !== undefined) deps.toolCacheTtlSec = config.toolCacheTtlSec
-  if (config.refThresholdBytes !== undefined) deps.refThresholdBytes = config.refThresholdBytes
+  if (config.toolCacheTtlSec !== undefined)
+    deps.toolCacheTtlSec = config.toolCacheTtlSec
+  if (config.refThresholdBytes !== undefined)
+    deps.refThresholdBytes = config.refThresholdBytes
   if (config.refTtlSec !== undefined) deps.refTtlSec = config.refTtlSec
   if (config.uploadGrantTtlSec !== undefined) {
     deps.uploadGrantTtlSec = config.uploadGrantTtlSec
   }
-  if (config.storeTokenSecret !== undefined) deps.storeTokenSecret = config.storeTokenSecret
+  if (config.storeTokenSecret !== undefined)
+    deps.storeTokenSecret = config.storeTokenSecret
   if (config.storeMaxObjectBytes !== undefined) {
     deps.storeMaxObjectBytes = config.storeMaxObjectBytes
   }
   if (config.storeRelayMaxBytes !== undefined) {
     deps.storeRelayMaxBytes = config.storeRelayMaxBytes
   }
-  if (config.storeUploadTtlSec !== undefined) deps.storeUploadTtlSec = config.storeUploadTtlSec
-  if (config.storeShareTtlSec !== undefined) deps.storeShareTtlSec = config.storeShareTtlSec
-  if (config.storeReadTtlSec !== undefined) deps.storeReadTtlSec = config.storeReadTtlSec
-  if (config.storeCallMaxBytes !== undefined) deps.storeCallMaxBytes = config.storeCallMaxBytes
+  if (config.storeUploadTtlSec !== undefined)
+    deps.storeUploadTtlSec = config.storeUploadTtlSec
+  if (config.storeShareTtlSec !== undefined)
+    deps.storeShareTtlSec = config.storeShareTtlSec
+  if (config.storeReadTtlSec !== undefined)
+    deps.storeReadTtlSec = config.storeReadTtlSec
+  if (config.storeCallMaxBytes !== undefined)
+    deps.storeCallMaxBytes = config.storeCallMaxBytes
   if (config.storeCallMaxObjectBytes !== undefined) {
     deps.storeCallMaxObjectBytes = config.storeCallMaxObjectBytes
   }
@@ -260,60 +246,235 @@ export function createTbServer(config: ServerConfig): TbServer {
     deps.storeCallAllowedContentTypes = config.storeCallAllowedContentTypes
   }
 
-  const app = createTbApp(deps)
-
   let server: ServerType | undefined
   let maintenanceTimer: NodeJS.Timeout | undefined
-  let maintenanceInFlight = false
+  let maintenancePromise: Promise<void> | undefined
+  let replicaTimer: NodeJS.Timeout | undefined
+  let heartbeatInFlight: Promise<void> = Promise.resolve()
+  let applied: RuntimeConfig | undefined
   const runMaintenance = async (): Promise<void> => {
-    if (maintenanceInFlight) return
-    maintenanceInFlight = true
-    try {
-      await cleanupDefaultStore(deps)
-      // Mailbox is an opt-in capability whose explicit deployment prerequisite
-      // is the existing encryption root. Deployments without it keep running,
-      // but never advertise or serve mailbox operations.
-      if (deps.encryptionKey !== undefined) await cleanupDeviceMailbox(deps)
-    } finally {
-      maintenanceInFlight = false
-    }
+    if (maintenancePromise) return maintenancePromise
+    const snapshot = deps
+    maintenancePromise = (async () => {
+      await cleanupDefaultStore(snapshot)
+      if (snapshot.encryptionKey !== undefined)
+        await cleanupDeviceMailbox(snapshot)
+    })().finally(() => {
+      maintenancePromise = undefined
+    })
+    return maintenancePromise
   }
   const reportStoreCleanupFailure = (): void => {
     // 固定事件名，不把可能含 driver key 的底层错误写进日志。
     console.warn(JSON.stringify({ event: 'tool_bridge_store_cleanup_failed' }))
   }
-  const scheduleStoreCleanup = (): void => {
+  function scheduleStoreCleanup(): void {
     // 首次 cleanup 在端口就绪后异步执行；历史对象多时不得阻塞 readiness。
     void runMaintenance().catch(reportStoreCleanupFailure)
-    maintenanceTimer = setInterval(() => {
-      void runMaintenance().catch(reportStoreCleanupFailure)
-    }, config.storeCleanupIntervalSec * 1000)
+    maintenanceTimer = setInterval(
+      () => {
+        void runMaintenance().catch(reportStoreCleanupFailure)
+      },
+      (applied?.storeCleanupIntervalSec ?? config.storeCleanupIntervalSec)
+      * 1000,
+    )
     maintenanceTimer.unref?.()
+  }
+  let currentApp = createTbApp(deps)
+  const settings = new ConfigManager(sql, async (next) => {
+    if (applied?.deviceReclaimSec !== next.deviceReclaimSec)
+      await hub.setReclaimSec(next.deviceReclaimSec)
+    deps = {
+      ...deps,
+      ...runtimeAppSettings(next, config.instanceId),
+      configManagement: settings,
+    }
+    currentApp = createTbApp(deps)
+    const reschedule
+      = applied?.storeCleanupIntervalSec !== next.storeCleanupIntervalSec
+    applied = next
+    if (maintenanceTimer && reschedule) {
+      clearInterval(maintenanceTimer)
+      maintenanceTimer = undefined
+      scheduleStoreCleanup()
+    }
+  })
+  deps.configManagement = settings
+  currentApp = createTbApp(deps)
+  let activeRequests = 0
+  const drainWaiters: Array<() => void> = []
+  const app = new Hono()
+  app.all('*', async (c) => {
+    const path = new URL(c.req.url).pathname
+    if (
+      !['/healthz', '/livez', '/readyz'].includes(path)
+      && !path.startsWith('/ui')
+    ) {
+      try {
+        const fenced
+          = await sql`SELECT 1 FROM tb_runtime_maintenance WHERE id=1 AND owner_replica_id<>${replicaId} AND expires_at>now()`
+        if (fenced.length)
+          return c.json(
+            {
+              code: 'unavailable',
+              message: 'protected maintenance in progress',
+            },
+            503,
+          )
+        await settings.sync()
+      } catch {
+        return c.json(
+          {
+            code: 'unavailable',
+            message: 'configuration authority unavailable',
+          },
+          503,
+        )
+      }
+    }
+    const snapshot = currentApp
+    const maintenanceRequest
+      = path.startsWith('/system/maintenance/')
+        || path.startsWith('/system/keys/')
+    if (!maintenanceRequest) activeRequests++
+    try {
+      return await snapshot.fetch(c.req.raw)
+    } finally {
+      if (!maintenanceRequest && --activeRequests === 0)
+        for (const done of drainWaiters.splice(0)) done()
+    }
+  })
+
+  let prepared: Promise<void> | undefined
+  const prepare = async (): Promise<void> => {
+    prepared ??= (async () => {
+      await state.ensureSchema()
+      await sql`CREATE TABLE IF NOT EXISTS tb_runtime_replicas (
+        replica_id text PRIMARY KEY, instance_id text NOT NULL, expires_at timestamptz NOT NULL
+      )`
+      await sql`CREATE TABLE IF NOT EXISTS tb_runtime_maintenance (
+        id integer PRIMARY KEY CHECK(id=1), owner_replica_id text NOT NULL, expires_at timestamptz NOT NULL
+      )`
+      const heartbeat = async () => {
+        await sql.begin(async (tx) => {
+          await tx`SELECT pg_advisory_xact_lock(7283022)`
+          const fence
+            = await tx`SELECT 1 FROM tb_runtime_maintenance WHERE id=1 AND owner_replica_id<>${replicaId} AND expires_at>now()`
+          if (fence.length)
+            throw new TBError(
+              'unavailable',
+              'another replica is performing protected maintenance',
+            )
+          const others
+            = await tx`SELECT 1 FROM tb_runtime_replicas WHERE instance_id=${config.instanceId ?? 'embedded'} AND replica_id<>${replicaId} AND expires_at>now()`
+          if (others.length && !config.redisUrl)
+            throw new TBError(
+              'unavailable',
+              'multiple replicas require a configured Redis device router',
+            )
+          await tx`INSERT INTO tb_runtime_replicas(replica_id,instance_id,expires_at)
+          VALUES(${replicaId},${config.instanceId ?? 'embedded'},now()+interval '60 seconds')
+          ON CONFLICT(replica_id) DO UPDATE SET expires_at=excluded.expires_at`
+        })
+      }
+      await heartbeat()
+      replicaTimer = setInterval(() => {
+        heartbeatInFlight = heartbeatInFlight.then(heartbeat).catch(() => {})
+      }, 15000)
+      replicaTimer.unref()
+
+      await storeRepository.ensureSchema()
+      await state.ensureContextReferencesSchema()
+      await mailboxRepository.ensureSchema()
+      await deployment.ensureSchema()
+      await sql`CREATE TABLE IF NOT EXISTS tb_admin_audit (
+        id text PRIMARY KEY, actor text NOT NULL, action text NOT NULL, outcome text NOT NULL,
+        created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now()
+      )`
+      await search.initialized()
+      await settings.ensureSchema(
+        config.managedSettings
+        ?? runtimeConfigSchema.parse(
+          Object.fromEntries(
+            Object.keys(runtimeConfigSchema.shape)
+              .filter(key => key in config)
+              .map(key => [key, config[key as keyof ServerConfig]]),
+          ),
+        ),
+      )
+      await runBootstrap(state, {
+        management: true,
+        additionalModules: [
+          ...(config.maintenanceManagement ? ['maintenance'] : []),
+          ...(config.keyManagement ? ['keys'] : []),
+        ],
+        ...(config.adminSk ? { adminSk: config.adminSk } : {}),
+      })
+      const backends = (await storage.list()).items
+      let active = backends.find(backend => backend.active)
+      if (!active && config.objectStore) {
+        const connection = {
+          ...config.objectStore,
+          region: config.objectStore.region ?? 'us-east-1',
+        }
+        const existing = backends.find(
+          backend =>
+            backend.endpoint === new URL(connection.endpoint).origin
+            && backend.bucket === connection.bucket
+            && backend.region === connection.region,
+        )
+        const tested = existing
+          ? await storage.update({
+              id: existing.id,
+              expectedRevision: existing.revision,
+              accessKeyId: connection.accessKeyId,
+              secretAccessKey: connection.secretAccessKey,
+            })
+          : await (async () => {
+              const created = await storage.write({
+                name: 'Default S3',
+                connection,
+              })
+              return storage.test({
+                id: created.id,
+                expectedRevision: created.revision,
+              })
+            })()
+        active = await storage.activate({
+          id: tested.id,
+          expectedRevision: tested.revision,
+          expectedActiveRevision: 0,
+        })
+      }
+      if (!active)
+        throw new TBError('unavailable', 'no active storage backend')
+      // A failed later capability probe blocks new uploads, but management remains reachable.
+      await storage.resolveBackend(active.id)
+      await hub.startRouter()
+      await settings.sync()
+      await hub.sweepOrphans()
+      scheduleStoreCleanup()
+    })()
+    await prepared
   }
   return {
     app,
+    settings,
+    storage,
+    prepare,
     search,
     state,
     deviceHub: hub,
     async start(): Promise<{ port: number }> {
-      // 两个后端各自就绪(PG 建表 / SQLite no-op);state 必须早于 runBootstrap 的读写。
-      await backends.state.ensureReady()
-      await backends.search.ensureReady()
-      // 多副本路由必须在开始服务前订阅完成,否则早期转发调用会丢。
-      await hub.startRouter()
-      // fail closed:缺 TB_BOOTSTRAP_ADMIN_SK 时默认拒绝启动(不随机生成 Admin SK 写 stdout);
-      // 仅 TB_ALLOW_INSECURE_BOOTSTRAP=true 的本地/一次性开发保留旧的随机生成+打印一次路径。
-      await runBootstrap(state, {
-        ...(config.adminSk !== undefined ? { adminSk: config.adminSk } : {}),
-        requireAdminSk: !config.allowInsecureBootstrap,
-      })
-      await hub.sweepOrphans()
+      await prepare()
       return await new Promise((resolve) => {
-        server = serve({ fetch: app.fetch, port: config.port, hostname: config.host }, (info) => {
-          // 并发 tick 直接跳过，避免慢后端堆积 cleanup 扫描。
-          scheduleStoreCleanup()
-          resolve({ port: info.port })
-        })
+        server = serve(
+          { fetch: app.fetch, port: config.port, hostname: config.host },
+          (info) => {
+            // 并发 tick 直接跳过，避免慢后端堆积 cleanup 扫描。
+            resolve({ port: info.port })
+          },
+        )
         hub.attach(server as http.Server)
       })
     },
@@ -334,16 +495,24 @@ export function createTbServer(config: ServerConfig): TbServer {
         const s = server
         closed = new Promise<void>((resolve, reject) => {
           s.close(err => (err ? reject(err) : resolve()))
-        })
+        });
         // keep-alive 空闲连接会让 close 永远等不完;设备 WS 由 hub.close() 终止。
-        ;(s as http.Server).closeIdleConnections?.()
+        (s as http.Server).closeIdleConnections?.()
       }
       await hub.close()
+      if (activeRequests > 0)
+        await new Promise<void>(resolve => drainWaiters.push(resolve))
+      await maintenancePromise?.catch(() => {})
+      if (replicaTimer) clearInterval(replicaTimer)
+      await heartbeatInFlight
+      await sql`DELETE FROM tb_runtime_replicas WHERE replica_id=${replicaId}`.catch(
+        () => {},
+      )
       if (closed !== undefined) await closed
       server = undefined
       // search 先关(可能依赖 state 侧的连接池),再关 state。
-      await backends.search.close()
-      await backends.state.close()
+      storage.close()
+      await sql.end({ timeout: 5 })
     },
   }
 }

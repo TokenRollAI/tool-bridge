@@ -1,19 +1,12 @@
-{{/*
-standalone 形态(SQLite / 本地对象):StatefulSet + PVC,副本数恒 1
-(validate 已拒绝 >1)。用 StatefulSet 而非 Deployment+PVC:RWO 卷上滚动更新
-不会出现"新 Pod 等旧 Pod 释放卷"的死锁,替换顺序由控制器保证。
-*/}}
 {{- include "tool-bridge.validate" . -}}
-{{- if not (include "tool-bridge.stateless" .) }}
+{{- if not .Values.bootstrap.existingClaim }}
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
   name: {{ include "tool-bridge.fullname" . }}
-  labels:
-    {{- include "tool-bridge.labels" . | nindent 4 }}
 spec:
-  replicas: {{ .Values.replicaCount }}
   serviceName: {{ include "tool-bridge.fullname" . }}
+  replicas: 1
   selector:
     matchLabels:
       {{- include "tool-bridge.selectorLabels" . | nindent 6 }}
@@ -21,24 +14,37 @@ spec:
     metadata:
       labels:
         {{- include "tool-bridge.selectorLabels" . | nindent 8 }}
-        {{- with .Values.podLabels }}
-        {{- toYaml . | nindent 8 }}
-        {{- end }}
-      {{- with .Values.podAnnotations }}
-      annotations:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
     spec:
-      {{- include "tool-bridge.podSpec" . | nindent 6 }}
+      securityContext:
+        fsGroup: 1000
+      containers:
+        - name: app
+          image: {{ include "tool-bridge.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            runAsUser: 1000
+            runAsNonRoot: true
+          ports:
+            - name: http
+              containerPort: 8787
+          volumeMounts:
+            - name: bootstrap
+              mountPath: /data
+          livenessProbe:
+            httpGet: { path: /livez, port: http }
+          readinessProbe:
+            httpGet: { path: /readyz, port: http }
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
   volumeClaimTemplates:
     - metadata:
-        name: data
+        name: bootstrap
       spec:
-        accessModes: ["ReadWriteOnce"]
-        {{- if .Values.persistence.storageClass }}
-        storageClassName: {{ .Values.persistence.storageClass | quote }}
+        accessModes: [ReadWriteOnce]
+        {{- if .Values.bootstrap.storageClass }}
+        storageClassName: {{ .Values.bootstrap.storageClass | quote }}
         {{- end }}
         resources:
           requests:
-            storage: {{ .Values.persistence.size }}
+            storage: {{ .Values.bootstrap.size }}
 {{- end }}

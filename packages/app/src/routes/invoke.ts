@@ -259,7 +259,7 @@ export async function handleInvoke(c: AppContext, env: RouteEnv): Promise<Respon
     const args = await readInvokeBody()
     const scope = contextScopeForCmd(command)
     const directUpload = command === 'create_upload'
-    if (scope === null || (directUpload && cfg.provider !== 'r2' && cfg.provider !== 's3')) {
+    if (scope === null || (directUpload && cfg.provider !== 'storage' && cfg.provider !== 's3')) {
       throw new TBError('invalid_argument', `unknown cmd '${command}' on '${node.path}'`)
     }
     // 节点可见性(read→404)已在上方统一判过;这里按 cmd 的 read/write scope 判 403。
@@ -288,7 +288,7 @@ export async function handleInvoke(c: AppContext, env: RouteEnv): Promise<Respon
     }
     // device 自定义 context 节点:标记命中 → 相对路径转发到设备。
     const contextMarker = deviceMarkerOf(cfg.providerConfig)
-    if (cfg.provider !== 'r2' && cfg.provider !== 's3' && contextMarker !== null) {
+    if (cfg.provider !== 'storage' && cfg.provider !== 's3' && contextMarker !== null) {
       const forwardedArgs = parseContextCmdArgs(command, args)
       const result = await invokeDevice(deps, contextMarker.deviceId, {
         path: `${relativeDevicePath(node.path, contextMarker.mountPath)}/${command}`,
@@ -297,14 +297,14 @@ export async function handleInvoke(c: AppContext, env: RouteEnv): Promise<Respon
       })
       return renderResult(result, negotiate(c.req.header('accept')))
     }
-    if (cfg.provider !== 'r2' && cfg.provider !== 's3') {
+    if (cfg.provider !== 'storage' && cfg.provider !== 's3') {
       // SDK 进程内 context Provider(registerContext):按节点路径查本实例表。
       const local = localContext(deps, node)
       if (local !== null) {
         const result = await dispatchContextCmd(local, command, args)
         return renderResult(result, negotiate(c.req.header('accept')))
       }
-      // plugin-backed context:provider 非 r2/s3 视为 plugin id,
+      // plugin-backed context:provider 非 storage/s3 视为 plugin id,
       // 经 envelope 转发;plugin 不存在/禁用/kind 不符 → invalid_argument。
       const { manifest, export: exported } = await requirePluginExport(
         deps,
@@ -373,6 +373,10 @@ export async function handleInvoke(c: AppContext, env: RouteEnv): Promise<Respon
     throw new TBError('permission_denied', `no scope grants '${spec.scope}' on '${node.path}'`)
   }
 
+  if (spec.scope === 'admin' && !check(ctx, `system/${node.config.module}`, 'admin').allow) {
+    throw new TBError('permission_denied', 'builtin administration requires permission on its canonical system path')
+  }
+
   // registry 模块的 write/update/delete 额外过注册路径规则(资源 = arguments.path)。
   let registryTarget: string | undefined
   if (node.config.module === 'registry' && ['write', 'update', 'delete'].includes(cmd)) {
@@ -421,12 +425,18 @@ export async function handleInvoke(c: AppContext, env: RouteEnv): Promise<Respon
   const registryMarker = registryTarget === undefined
     ? undefined
     : await searchSync?.markNode(registryTarget)
+  const audited = ['config', 'storage', 'deployment', 'maintenance', 'keys'].includes(node.config.module)
+    && !['get', 'list', 'status', 'schema', 'validate', 'claim'].includes(cmd)
+  const audit = audited ? { id: crypto.randomUUID(), actor: ctx.keyId, action: `${node.path}/${cmd}` } : undefined
+  if (audit) await deps.adminAudit?.({ ...audit, outcome: 'started' })
   let result: unknown
   try {
     result = await mod.dispatch(cmd, args, ctx, {
       requestOrigin: resolveStoreRequestOrigin(c.req.url, deps.canonicalOrigin),
     })
+    if (audit) await deps.adminAudit?.({ ...audit, outcome: 'succeeded' })
   } catch (error) {
+    if (audit) await deps.adminAudit?.({ ...audit, outcome: 'failed' }).catch(() => {})
     await searchSync?.abort(registryMarker)
     await Promise.all(pluginMounts.map(async mount => await searchSync?.abort(mount.marker)))
     if (isTBError(error)) return tbErrorResponse(error)

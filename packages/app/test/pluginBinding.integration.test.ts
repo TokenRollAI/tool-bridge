@@ -28,7 +28,7 @@ function bindingsWithNotesPlugin(): PluginBindings {
 
 async function appWithBindings(): Promise<ReturnType<typeof createTbApp>> {
   const state = new MemoryStateStore()
-  await runBootstrap(state, { adminSk: TEST_ADMIN_SK, requireAdminSk: true })
+  await runBootstrap(state, { adminSk: TEST_ADMIN_SK })
   return createTbApp({
     allowInsecureHttp: false,
     pluginBindings: bindingsWithNotesPlugin(),
@@ -151,7 +151,7 @@ describe('binding 传输的超时', () => {
   it('**binding handler 收到的 Request 带 signal**', async () => {
     let seenSignal: AbortSignal | null | undefined
     const state = new MemoryStateStore()
-    await runBootstrap(state, { adminSk: TEST_ADMIN_SK, requireAdminSk: true })
+    await runBootstrap(state, { adminSk: TEST_ADMIN_SK })
     const app = createTbApp({
       allowInsecureHttp: false,
       pluginBindings: new Map([['probe', (request: Request) => {
@@ -217,7 +217,7 @@ describe('内置 binding 插件免注册', () => {
    */
   async function appWithBuiltins(): Promise<ReturnType<typeof createTbApp>> {
     const state = new MemoryStateStore()
-    await runBootstrap(state, { adminSk: TEST_ADMIN_SK, requireAdminSk: true })
+    await runBootstrap(state, { adminSk: TEST_ADMIN_SK })
     return createTbApp({
       allowInsecureHttp: false,
       pluginBindings: builtinPluginBindings({}, { include: ['notes'] }),
@@ -295,7 +295,7 @@ describe('内置 binding 插件免注册', () => {
    */
   it('只给 bindings 不给 catalog → 解析不出 export(装配失配是可见的)', async () => {
     const state = new MemoryStateStore()
-    await runBootstrap(state, { adminSk: TEST_ADMIN_SK, requireAdminSk: true })
+    await runBootstrap(state, { adminSk: TEST_ADMIN_SK })
     const app = createTbApp({
       allowInsecureHttp: false,
       pluginBindings: builtinPluginBindings({}, { include: ['notes'] }),

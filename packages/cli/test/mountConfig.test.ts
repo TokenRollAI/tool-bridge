@@ -167,9 +167,9 @@ describe('tb ctx mount --config', () => {
     })
   })
 
-  it('r2 / s3 用 --config → 本地拒(它们的配置有专用 flag)', async () => {
+  it('storage / s3 用 --config → 本地拒(它们的配置有专用 flag)', async () => {
     for (const argv of [
-      ['ctx', 'mount', 'x', '--provider', 'r2', '--config', 'a=b'],
+      ['ctx', 'mount', 'x', '--provider', 'storage', '--config', 'a=b'],
       [
         'ctx',
         'mount',

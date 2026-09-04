@@ -1,210 +1,95 @@
-# Local development only. Defaults below are deterministic test fixtures, not production secrets.
-# The production image remains the root Dockerfile's final single-container stage.
+name: tool-bridge
 
-name: ${COMPOSE_PROJECT_NAME:-tool-bridge-dev}
-
-x-dev-image: &dev-image
-  image: tool-bridge-compose-dev:local
-  pull_policy: never
-
-x-healthcheck: &healthcheck
-  interval: 2s
-  timeout: 2s
-  retries: 30
-  start_period: 5s
+x-app-image: &app-image
+  image: tool-bridge:local
+  build:
+    context: .
+    dockerfile: Dockerfile
 
 services:
-  # 状态后端 = SQLite(/data 卷)。默认栈,不需要 postgres 服务。
-  gateway:
-    image: tool-bridge-compose-gateway:local
-    build:
-      context: .
-      dockerfile: Dockerfile
-    init: true
-    environment:
-      TB_ALLOW_INSECURE_HTTP: 'true'
-      TB_BOOTSTRAP_ADMIN_SK: ${TB_COMPOSE_ADMIN_SK:-tbk_compose_admin_000000000000}
-      TB_SECRET_ENCRYPTION_KEY: ${TB_COMPOSE_ENCRYPTION_KEY:-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA}
-    ports:
-      - '127.0.0.1:${TB_COMPOSE_GATEWAY_PORT:-8787}:8787'
+  init:
+    <<: *app-image
+    user: '0:0'
+    restart: 'no'
+    command: [node, /app/dist/admin.js, init]
     volumes:
-      - gateway-data:/data
-    healthcheck:
-      <<: *healthcheck
-      test:
-        - CMD
-        - node
-        - -e
-        - "fetch('http://127.0.0.1:8787/healthz').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"
-
-  # 状态后端 = Postgres。`--profile pg` 才启用:
-  #
-  #   docker compose --profile pg up -d --build       # 起 postgres + gateway-pg
-  #   docker compose --profile pg run --rm smoke-pg   # 同一份 smoke 打到 PG 栈
-  #
-  # 用独立宿主端口(默认 8788),故可与 SQLite 栈同时运行、互不抢端口 —— 想对照两个
-  # 后端的行为时很方便。注意两者是**两套独立数据**:PG 栈不会带上 /data 卷里的树、
-  # SK 与 secret,会自己重新走一次引导。
-  gateway-pg:
-    image: tool-bridge-compose-gateway:local
-    build:
-      context: .
-      dockerfile: Dockerfile
-    init: true
-    profiles:
-      - pg
-    depends_on:
-      postgres:
-        condition: service_healthy
-    environment:
-      TB_ALLOW_INSECURE_HTTP: 'true'
-      TB_BOOTSTRAP_ADMIN_SK: ${TB_COMPOSE_ADMIN_SK:-tbk_compose_admin_000000000000}
-      TB_SECRET_ENCRYPTION_KEY: ${TB_COMPOSE_ENCRYPTION_KEY:-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA}
-      TB_DATABASE_URL: postgres://${TB_COMPOSE_PG_USER:-toolbridge}:${TB_COMPOSE_PG_PASSWORD:-toolbridge}@postgres:5432/${TB_COMPOSE_PG_DB:-toolbridge}
-    ports:
-      # 独立端口:与 SQLite 栈(8787)并存不冲突。
-      - '127.0.0.1:${TB_COMPOSE_GATEWAY_PG_PORT:-8788}:8787'
-    volumes:
-      # 状态在 PG,但 ObjectStore 始终是本地 FS —— $ref 大对象仍需要这个卷。
-      - gateway-pg-objects:/data
-    healthcheck:
-      <<: *healthcheck
-      start_period: 10s
-      test:
-        - CMD
-        - node
-        - -e
-        - "fetch('http://127.0.0.1:8787/healthz').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"
+      - bootstrap:/data
+      - pg-secrets:/secrets/postgres
+      - s3-secrets:/secrets/s3
 
   postgres:
-    # 与 CI 及本地验证同一镜像。当前后端不需要任何扩展(检索是纯 ILIKE),
-    # 用 pgvector 变体只是为后续 pgvector 语义搜索留同一环境。
-    image: pgvector/pgvector:pg16
-    profiles:
-      - pg
+    image: postgres:18.4-bookworm
+    restart: unless-stopped
+    depends_on:
+      init:
+        condition: service_completed_successfully
     environment:
-      POSTGRES_USER: ${TB_COMPOSE_PG_USER:-toolbridge}
-      POSTGRES_PASSWORD: ${TB_COMPOSE_PG_PASSWORD:-toolbridge}
-      POSTGRES_DB: ${TB_COMPOSE_PG_DB:-toolbridge}
-    expose:
-      - '5432'
+      POSTGRES_USER: postgres
+      POSTGRES_DB: toolbridge
+      POSTGRES_PASSWORD_FILE: /run/tb-postgres/password
     volumes:
-      - postgres-data:/var/lib/postgresql/data
+      - postgres-data:/var/lib/postgresql
+      - pg-secrets:/run/tb-postgres:ro
+      - pg-secrets:/docker-entrypoint-initdb.d:ro
     healthcheck:
-      <<: *healthcheck
-      test:
-        - CMD-SHELL
-        - pg_isready -U ${TB_COMPOSE_PG_USER:-toolbridge} -d ${TB_COMPOSE_PG_DB:-toolbridge}
+      test: [CMD-SHELL, 'pg_isready -U postgres -d toolbridge']
+      interval: 5s
+      timeout: 3s
+      retries: 12
 
-  upstream:
-    <<: *dev-image
-    build:
-      context: .
-      dockerfile: Dockerfile
-      target: build
-    init: true
-    command:
-      - /repo/node_modules/.bin/tsx
-      - /repo/packages/gateway/scripts/echo-mcp.ts
-    environment:
-      ECHO_MCP_APP_ID: ${TB_COMPOSE_APP_ID:-compose-app}
-      ECHO_MCP_APP_SECRET: ${TB_COMPOSE_APP_SECRET:-compose-secret}
-      ECHO_MCP_HOST: 0.0.0.0
-      ECHO_MCP_PORT: '39001'
-      ECHO_MCP_REQUIRE_FEISHU_AUTH: '1'
-      ECHO_MCP_TAT: ${TB_COMPOSE_TAT:-compose-tat}
-    expose:
-      - '39001'
-    healthcheck:
-      <<: *healthcheck
-      test:
-        - CMD
-        - node
-        - -e
-        - "fetch('http://127.0.0.1:39001/healthz').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"
-
-  plugin:
-    <<: *dev-image
-    init: true
+  objects:
+    image: chrislusf/seaweedfs:4.45@sha256:fc9f76fa993ad69966ffeb2f65d0318fcae39c6f8e20cf68ef7b3a5cb97769e5
+    restart: unless-stopped
     depends_on:
-      upstream:
-        condition: service_healthy
-    # 内置插件按"外挂 HTTP plugin"形态起本地服务(packages/plugins/scripts/serve.ts),
-    # 三跳链路继续验证外挂通道;进程内 binding 通道由 gateway 测试覆盖。
-    command:
-      - /repo/node_modules/.bin/tsx
-      - /repo/packages/plugins/scripts/serve.ts
-    environment:
-      TB_PLUGIN_NAME: feishu
-      PORT: '8788'
-      PLUGIN_TOKEN: ${TB_COMPOSE_PLUGIN_TOKEN:-tbp_compose_dev_token}
-      FEISHU_ALLOWED_TOOLS: echo
-      FEISHU_AUTH_URL: http://upstream:39001/auth
-      FEISHU_MCP_URL: http://upstream:39001/mcp
-    expose:
-      - '8788'
-    healthcheck:
-      <<: *healthcheck
-      start_period: 10s
-      test:
-        - CMD
-        - node
-        - -e
-        - "fetch('http://127.0.0.1:8788/healthz').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"
+      init:
+        condition: service_completed_successfully
+    command: [server, -ip=objects, -ip.bind=0.0.0.0, -master.peers=objects:9333, -master.telemetry=false, -s3, -s3.config=/run/tb-s3/s3.json, -dir=/data, -volume.max=32, -master.volumeSizeLimitMB=1024]
+    volumes:
+      - objects-data:/data
+      - s3-secrets:/run/tb-s3:ro
 
-  smoke:
-    <<: *dev-image
-    init: true
+  init-bucket:
+    <<: *app-image
+    user: '0:0'
     restart: 'no'
-    profiles:
-      - smoke
     depends_on:
-      gateway:
-        condition: service_healthy
-      plugin:
-        condition: service_healthy
-      upstream:
-        condition: service_healthy
-    command:
-      - /repo/node_modules/.bin/tsx
-      - /repo/packages/gateway/scripts/compose-smoke.ts
-    environment:
-      TB_COMPOSE_ADMIN_SK: ${TB_COMPOSE_ADMIN_SK:-tbk_compose_admin_000000000000}
-      TB_COMPOSE_APP_ID: ${TB_COMPOSE_APP_ID:-compose-app}
-      TB_COMPOSE_APP_SECRET: ${TB_COMPOSE_APP_SECRET:-compose-secret}
-      TB_COMPOSE_GATEWAY_URL: http://gateway:8787
-      TB_COMPOSE_PLUGIN_TOKEN: ${TB_COMPOSE_PLUGIN_TOKEN:-tbp_compose_dev_token}
-      TB_COMPOSE_PLUGIN_URL: http://plugin:8788
-      TB_COMPOSE_UPSTREAM_URL: http://upstream:39001
+      objects:
+        condition: service_started
+    command: [node, /app/dist/admin.js, init-bucket]
+    volumes:
+      - s3-secrets:/secrets/s3:ro
 
-  # 同一份 smoke,只把目标指向 PG 后端的 gateway —— smoke 全程走 HTTP,
-  # 与状态后端无关,所以两条栈能共用同一套断言(这正是后端对等的验收方式)。
-  smoke-pg:
-    <<: *dev-image
+  app:
+    <<: *app-image
     init: true
-    restart: 'no'
-    profiles:
-      - pg
+    restart: unless-stopped
     depends_on:
-      gateway-pg:
-        condition: service_healthy
-      plugin:
-        condition: service_healthy
-      upstream:
-        condition: service_healthy
-    command:
-      - /repo/node_modules/.bin/tsx
-      - /repo/packages/gateway/scripts/compose-smoke.ts
-    environment:
-      TB_COMPOSE_ADMIN_SK: ${TB_COMPOSE_ADMIN_SK:-tbk_compose_admin_000000000000}
-      TB_COMPOSE_APP_ID: ${TB_COMPOSE_APP_ID:-compose-app}
-      TB_COMPOSE_APP_SECRET: ${TB_COMPOSE_APP_SECRET:-compose-secret}
-      TB_COMPOSE_GATEWAY_URL: http://gateway-pg:8787
-      TB_COMPOSE_PLUGIN_TOKEN: ${TB_COMPOSE_PLUGIN_TOKEN:-tbp_compose_dev_token}
-      TB_COMPOSE_PLUGIN_URL: http://plugin:8788
-      TB_COMPOSE_UPSTREAM_URL: http://upstream:39001
+      init:
+        condition: service_completed_successfully
+    ports:
+      - '127.0.0.1:8787:8787'
+    volumes:
+      - bootstrap:/data
+    healthcheck:
+      test: [CMD, node, -e, "fetch('http://127.0.0.1:8787/healthz').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  redis:
+    image: redis:8.10.1-alpine
+    profiles: [replicas]
+    restart: unless-stopped
+    command: [redis-server, --appendonly, 'no']
+    healthcheck:
+      test: [CMD, redis-cli, ping]
+      interval: 5s
+      timeout: 3s
+      retries: 12
 
 volumes:
-  gateway-data:
-  gateway-pg-objects:
+  bootstrap:
   postgres-data:
+  objects-data:
+  pg-secrets:
+  s3-secrets:

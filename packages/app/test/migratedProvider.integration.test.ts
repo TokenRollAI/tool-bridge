@@ -22,7 +22,7 @@ let upstream: ReturnType<typeof vi.fn>
 
 async function appWithPlugin(): Promise<ReturnType<typeof createTbApp>> {
   const state = new MemoryStateStore()
-  await runBootstrap(state, { adminSk: TEST_ADMIN_SK, requireAdminSk: true })
+  await runBootstrap(state, { adminSk: TEST_ADMIN_SK })
   return createTbApp({
     allowInsecureHttp: false,
     // env 每次调用才读 pluginToken(注册后才有值),故用转发闭包而非提前装配。

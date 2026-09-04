@@ -5,15 +5,15 @@
  *   `X-Lark-MCP-Allowed-Tools: <逗号分隔白名单>`(缺失时上游 tools/list 恒回空列表)。
  * - 会话:上游签发的 Mcp-Session-Id 缓存在 isolate 内存;失效信号(400/404)→ 清缓存
  *   完整重握手一次。凭证过期(401)由调用方(index.ts)强制重换发 TAT 后重试。
- * - workerd 禁 eval,JSON Schema 校验用 SDK 自带的 @cfworker/json-schema 解释执行实现
- *   (同 gateway providers/mcp.ts 的坑)。
+ * - 官方 AJV validator 执行外部 JSON Schema；每个 schema 独立编译，避免不同工具
+ *   复用 $id 时污染校验缓存。
  */
 
 import {
   StreamableHTTPClientTransport,
   StreamableHTTPError,
 } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
-import { CfWorkerJsonSchemaValidator } from '@modelcontextprotocol/sdk/validation/cfworker'
+import { AjvJsonSchemaValidator } from '@modelcontextprotocol/client/validators/ajv'
 import { isTBError, normalizeUpstreamError, TBError } from '@tool-bridge/plugin-sdk'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { createGuardedFetch } from '../_runtime/guardedFetch'
@@ -95,7 +95,11 @@ async function withSession<T>(
   const makeClient = (): Client =>
     new Client(
       { name: 'tb-plugin-feishu', version: '0.1.0' },
-      { jsonSchemaValidator: new CfWorkerJsonSchemaValidator() },
+      { jsonSchemaValidator: {
+        getValidator<T>(schema: Parameters<AjvJsonSchemaValidator['getValidator']>[0]) {
+          return new AjvJsonSchemaValidator().getValidator<T>(schema)
+        },
+      } },
     )
 
   const runFresh = async (): Promise<T> => {

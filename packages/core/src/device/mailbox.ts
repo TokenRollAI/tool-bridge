@@ -1,23 +1,21 @@
 /**
  * Durable device mailbox authority.
  *
- * Each operation owns one StateStore key and all mutable transitions use the
- * store's atomic compareAndSwap primitive. Arguments and terminal data are
+ * A domain repository atomically owns quota, candidate claims and valid-lease completion. Arguments and terminal data are
  * encrypted with a mailbox-specific HKDF child key; the deployment root is
  * never persisted and this is deliberately at-rest rather than E2E encryption.
  */
 
 import type { OwnerRef, Timestamp, TreePath } from '../types'
-import type { StateStore } from '../store'
-// WebCrypto/TextEncoder are runtime globals in Workers and supported Node
+import type { MailboxRepository } from './mailboxRepository'
+import { type EncryptionKeyring, validateEncryptionKeyring } from '../secret/keyring'
+// WebCrypto/TextEncoder are runtime globals in supported JavaScript/Node
 // versions. Core's non-DOM tsconfig intentionally does not declare them; the
 // shared minimum portable surface lives in webGlobals.ts.
 import { crypto, TextDecoder, TextEncoder, type WebCryptoKey } from '../webGlobals'
 import { base64urlDecode, base64urlEncode } from '../encoding/base64url'
 import { TBError, type TBErrorBody } from '../errors'
 import { sha256Hex } from '../auth/sk'
-
-export const KEY_DEVICE_OPERATION = 'deviceop:'
 
 export const DEVICE_OPERATION_STATES = [
   'queued',
@@ -164,13 +162,14 @@ export interface DeviceMailboxServiceOptions {
   terminalRetentionSeconds?: number
 }
 
-interface EncryptedMailboxValue {
+export interface EncryptedMailboxValue {
   ciphertext: string
   iv: string
+  keyId: string
   v: 1
 }
 
-interface DeviceOperationRecord {
+export interface DeviceOperationRecord {
   attempt: number
   callerKeyId: string
   callerOwner: OwnerRef
@@ -204,7 +203,7 @@ const DEFAULT_LEASE_SECONDS = 60
 const DEFAULT_MAX_PAYLOAD_BYTES = 256 * 1024
 const DEFAULT_MAX_PENDING_PER_DEVICE = 1_000
 const DEFAULT_TERMINAL_RETENTION_SECONDS = 7 * 24 * 60 * 60
-const MAX_CAS_ATTEMPTS = 8
+const MAX_REVISION_ATTEMPTS = 8
 const LIST_LIMIT_DEFAULT = 50
 const LIST_LIMIT_MAX = 200
 const HKDF_SALT = new TextEncoder().encode('tool-bridge:device-mailbox:v1')
@@ -254,10 +253,10 @@ function parseEncrypted(value: unknown): EncryptedMailboxValue {
     || Array.isArray(value)
   ) throw new Error('invalid encrypted value')
   const raw = value as Record<string, unknown>
-  if (raw.v !== 1 || !nonEmpty(raw.iv) || !nonEmpty(raw.ciphertext)) {
+  if (raw.v !== 1 || !nonEmpty(raw.keyId) || !nonEmpty(raw.iv) || !nonEmpty(raw.ciphertext)) {
     throw new Error('invalid encrypted value')
   }
-  return { v: 1, iv: raw.iv, ciphertext: raw.ciphertext }
+  return { v: 1, keyId: raw.keyId as string, iv: raw.iv, ciphertext: raw.ciphertext }
 }
 
 function parseRecord(value: unknown): DeviceOperationRecord {
@@ -392,59 +391,44 @@ async function deterministicOperationId(binding: string): Promise<string> {
   return `dop_${base64urlEncode((await digestBytes(binding)).slice(0, 18))}`
 }
 
-async function devicePrefix(deviceId: string): Promise<string> {
-  return `${KEY_DEVICE_OPERATION}${await sha256Hex(deviceId)}:`
-}
-
-async function stateKey(deviceId: string, operationId: string): Promise<string> {
-  if (!/^dop_[A-Za-z0-9_-]{24}$/.test(operationId)) {
-    throw new TBError('invalid_argument', 'operationId is invalid')
-  }
-  return await devicePrefix(deviceId) + operationId
-}
-
 class DeviceMailboxCipher {
-  private readonly root: Uint8Array
-  private keyPromise?: Promise<WebCryptoKey>
+  readonly keyring: EncryptionKeyring
+  private readonly keys = new Map<string, Promise<WebCryptoKey>>()
 
-  constructor(masterKey: string) {
-    let decoded: Uint8Array
-    try {
-      decoded = base64urlDecode(masterKey)
-    } catch {
-      throw mailboxUnavailable('device mailbox encryption key is invalid')
-    }
-    if (decoded.length !== 32) {
-      throw mailboxUnavailable('device mailbox encryption key is invalid')
-    }
-    this.root = decoded
+  constructor(input: EncryptionKeyring | string) {
+    this.keyring = validateEncryptionKeyring(input)
   }
 
-  private key(): Promise<WebCryptoKey> {
-    this.keyPromise ??= (async () => {
-      const rootKey = await crypto.subtle.importKey('raw', this.root, 'HKDF', false, ['deriveKey'])
-      return await crypto.subtle.deriveKey(
-        { name: 'HKDF', hash: 'SHA-256', salt: HKDF_SALT, info: HKDF_INFO },
-        rootKey,
-        { name: 'AES-GCM', length: 256 },
-        false,
-        ['encrypt', 'decrypt'],
-      )
-    })()
-    return this.keyPromise
+  private key(id: string): Promise<WebCryptoKey> {
+    const root = this.keyring.keys[id]
+    if (root === undefined) throw mailboxUnavailable('mailbox encryption key is unavailable')
+    let key = this.keys.get(id)
+    if (key === undefined) {
+      key = (async () => {
+        const rootKey = await crypto.subtle.importKey('raw', base64urlDecode(root), 'HKDF', false, ['deriveKey'])
+        return await crypto.subtle.deriveKey(
+          { name: 'HKDF', hash: 'SHA-256', salt: HKDF_SALT, info: HKDF_INFO }, rootKey,
+          { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt'],
+        )
+      })()
+      this.keys.set(id, key)
+    }
+    return key
   }
 
   async encrypt(operationId: string, field: 'payload' | 'terminal', value: unknown): Promise<EncryptedMailboxValue> {
+    const keyId = this.keyring.activeKeyId
     const plaintext = canonicalJson(value)
     const iv = crypto.getRandomValues(new Uint8Array(12))
-    const additionalData = new TextEncoder().encode(`tool-bridge:device-mailbox:v1:${operationId}:${field}`)
+    const additionalData = new TextEncoder().encode(`tool-bridge:device-mailbox:v1:${operationId}:${field}:${keyId}`)
     const ciphertext = await crypto.subtle.encrypt(
       { name: 'AES-GCM', iv, additionalData },
-      await this.key(),
+      await this.key(keyId),
       new TextEncoder().encode(plaintext),
     )
     return {
       v: 1,
+      keyId,
       iv: base64urlEncode(iv),
       ciphertext: base64urlEncode(new Uint8Array(ciphertext)),
     }
@@ -455,10 +439,10 @@ class DeviceMailboxCipher {
       const iv = base64urlDecode(value.iv)
       const ciphertext = base64urlDecode(value.ciphertext)
       if (iv.length !== 12) throw new Error('invalid iv')
-      const additionalData = new TextEncoder().encode(`tool-bridge:device-mailbox:v1:${operationId}:${field}`)
+      const additionalData = new TextEncoder().encode(`tool-bridge:device-mailbox:v1:${operationId}:${field}:${value.keyId}`)
       const plaintext = await crypto.subtle.decrypt(
         { name: 'AES-GCM', iv, additionalData },
-        await this.key(),
+        await this.key(value.keyId),
         ciphertext,
       )
       return JSON.parse(new TextDecoder().decode(plaintext)) as T
@@ -469,7 +453,6 @@ class DeviceMailboxCipher {
 }
 
 export class DeviceMailboxService {
-  private readonly cas: NonNullable<StateStore['compareAndSwap']>
   private readonly cipher: DeviceMailboxCipher
   private readonly defaultTtlSeconds: number
   private readonly leaseSeconds: number
@@ -478,22 +461,22 @@ export class DeviceMailboxService {
   private readonly maxTtlSeconds: number
   private readonly now: () => number
   private readonly randomBytes: (length: number) => Uint8Array
-  private readonly state: StateStore
   private readonly terminalRetentionSeconds: number
 
+  private readonly repository: MailboxRepository
+
   constructor(
-    state: StateStore,
-    encryptionRoot: string | undefined,
+    repository: MailboxRepository,
+    encryptionRoot: EncryptionKeyring | string | undefined,
     opts: DeviceMailboxServiceOptions = {},
   ) {
-    if (state.compareAndSwap === undefined) {
-      throw mailboxUnavailable('device mailbox requires StateStore.compareAndSwap')
+    this.repository = repository
+    if (typeof repository?.enqueue !== 'function' || typeof repository.claimNext !== 'function') {
+      throw mailboxUnavailable('device mailbox requires an explicit MailboxRepository')
     }
     if (encryptionRoot === undefined) {
       throw mailboxUnavailable('device mailbox requires TB_SECRET_ENCRYPTION_KEY')
     }
-    this.cas = state.compareAndSwap.bind(state)
-    this.state = state
     this.cipher = new DeviceMailboxCipher(encryptionRoot)
     this.defaultTtlSeconds = positiveInteger(
       opts.defaultTtlSeconds,
@@ -529,8 +512,11 @@ export class DeviceMailboxService {
   }
 
   private async read(deviceId: string, operationId: string): Promise<{ key: string, record: DeviceOperationRecord }> {
-    const key = await stateKey(deviceId, operationId)
-    const value = await this.state.get(key)
+    if (!/^dop_[A-Za-z0-9_-]{24}$/.test(operationId)) {
+      throw new TBError('invalid_argument', 'operationId is invalid')
+    }
+    const key = operationId
+    const value = await this.repository.get(key)
     if (value === null) throw TBError.notFound('device operation not found')
     const record = parseRecord(value)
     if (record.deviceId !== deviceId || record.operationId !== operationId) {
@@ -577,7 +563,7 @@ export class DeviceMailboxService {
 
   private async expireRecord(key: string, record: DeviceOperationRecord): Promise<DeviceOperationRecord> {
     let current = record
-    for (let attempt = 0; attempt < MAX_CAS_ATTEMPTS; attempt++) {
+    for (let attempt = 0; attempt < MAX_REVISION_ATTEMPTS; attempt++) {
       if (isTerminal(current.state) || Date.parse(current.expiresAt) > this.now()) return current
       const now = this.nowIso()
       const next: DeviceOperationRecord = {
@@ -588,36 +574,12 @@ export class DeviceMailboxService {
         terminalAt: now,
         executionMayHaveOccurred: current.state === 'claimed',
       }
-      if (await this.cas(key, current.revision, next)) return next
-      const winner = await this.state.get(key)
+      if (await this.repository.compare(key, current.revision, next)) return next
+      const winner = await this.repository.get(key)
       if (winner === null) throw TBError.notFound('device operation not found')
       current = parseRecord(winner)
     }
     throw new TBError('unavailable', 'device operation expiry is busy', { retryable: true })
-  }
-
-  private async enforcePendingCap(deviceId: string): Promise<void> {
-    const prefix = await devicePrefix(deviceId)
-    let cursor: string | undefined
-    let pending = 0
-    do {
-      const page = await this.state.list(prefix, {
-        limit: LIST_LIMIT_MAX,
-        ...(cursor === undefined ? {} : { cursor }),
-      })
-      for (const item of page.items) {
-        let record = parseRecord(item.value)
-        if (record.deviceId !== deviceId) continue
-        record = await this.expireRecord(item.key, record)
-        if (!isTerminal(record.state)) pending++
-        if (pending >= this.maxPendingPerDevice) {
-          throw new TBError('rate_limited', 'device mailbox pending limit reached', {
-            retryable: true,
-          })
-        }
-      }
-      cursor = page.cursor
-    } while (cursor !== undefined)
   }
 
   async enqueue(input: DeviceOperationEnqueueInput): Promise<DeviceOperationDetail> {
@@ -657,10 +619,10 @@ export class DeviceMailboxService {
           path: input.path,
           ttlSeconds,
         }))
-    const key = await stateKey(input.deviceId, operationId)
+    const key = operationId
 
     if (binding !== undefined) {
-      const existing = await this.state.get(key)
+      const existing = await this.repository.get(key)
       if (existing !== null) {
         const record = parseRecord(existing)
         if (
@@ -673,7 +635,6 @@ export class DeviceMailboxService {
       }
     }
 
-    await this.enforcePendingCap(input.deviceId)
     const now = this.nowIso()
     const record: DeviceOperationRecord = {
       v: 1,
@@ -696,17 +657,7 @@ export class DeviceMailboxService {
       payload: await this.cipher.encrypt(operationId, 'payload', { arguments: input.arguments }),
       ...(fingerprint === undefined ? {} : { idempotencyFingerprint: fingerprint }),
     }
-    if (await this.cas(key, null, record)) return await this.detail(record)
-    if (binding === undefined) {
-      throw new TBError('conflict', 'device operation id collision', { retryable: true })
-    }
-    const winner = await this.state.get(key)
-    if (winner === null) throw new TBError('conflict', 'device operation enqueue conflicted')
-    const existing = parseRecord(winner)
-    if (existing.idempotencyFingerprint !== fingerprint) {
-      throw new TBError('conflict', 'idempotency key is bound to another operation')
-    }
-    return await this.detail(existing)
+    return this.detail(await this.repository.enqueue(record, this.maxPendingPerDevice, now))
   }
 
   async get(deviceId: string, operationId: string): Promise<DeviceOperationDetail> {
@@ -720,7 +671,8 @@ export class DeviceMailboxService {
     if (states !== undefined && [...states].some(state => !isState(state))) {
       throw new TBError('invalid_argument', 'states contains an invalid operation state')
     }
-    const page = await this.state.list(await devicePrefix(input.deviceId), {
+    const page = await this.repository.list({
+      deviceId: input.deviceId,
       limit,
       ...(input.cursor === undefined ? {} : { cursor: input.cursor }),
     })
@@ -737,7 +689,10 @@ export class DeviceMailboxService {
 
   async claim(input: DeviceOperationClaimInput): Promise<DeviceOperationClaimPage> {
     const serverNow = this.nowIso()
-    const page = await this.state.list(await devicePrefix(input.deviceId), {
+    const page = await this.repository.list({
+      deviceId: input.deviceId,
+      claimableBy: input.deviceKeyId,
+      now: serverNow,
       limit: clampLimit(input.limit),
       ...(input.cursor === undefined ? {} : { cursor: input.cursor }),
     })
@@ -769,8 +724,8 @@ export class DeviceMailboxService {
         leaseUntil,
         updatedAt: serverNow,
       }
-      // A CAS loser must continue through the same page instead of returning empty.
-      if (!(await this.cas(item.key, record.revision, next))) continue
+      // A lost conditional claim continues through the eligible page.
+      if (!(await this.repository.claimNext(next, record.revision, this.nowIso()))) continue
       const payload = await this.cipher.decrypt<{ arguments: Record<string, unknown> }>(
         record.operationId,
         'payload',
@@ -830,8 +785,8 @@ export class DeviceMailboxService {
   }
 
   async renew(input: DeviceOperationLeaseInput): Promise<DeviceOperationRenewResult> {
-    for (let attempt = 0; attempt < MAX_CAS_ATTEMPTS; attempt++) {
-      const { key, record } = await this.activeLease(input)
+    for (let attempt = 0; attempt < MAX_REVISION_ATTEMPTS; attempt++) {
+      const { record } = await this.activeLease(input)
       const serverNow = this.nowIso()
       const leaseUntil = new Date(Math.min(
         this.now() + this.leaseSeconds * 1_000,
@@ -843,7 +798,7 @@ export class DeviceMailboxService {
         leaseUntil,
         updatedAt: serverNow,
       }
-      if (await this.cas(key, record.revision, next)) {
+      if (await this.repository.renew(next, record.revision, this.nowIso())) {
         return {
           serverNow,
           leaseUntil,
@@ -869,7 +824,7 @@ export class DeviceMailboxService {
         retryable: false,
       })
     }
-    for (let attempt = 0; attempt < MAX_CAS_ATTEMPTS; attempt++) {
+    for (let attempt = 0; attempt < MAX_REVISION_ATTEMPTS; attempt++) {
       const current = await this.read(input.deviceId, input.operationId)
       let record = await this.expireRecord(current.key, current.record)
       if (record.deviceKeyId !== input.deviceKeyId) {
@@ -912,13 +867,13 @@ export class DeviceMailboxService {
         completedLeaseId: input.leaseId,
         updatedAt: now,
       }
-      if (await this.cas(active.key, record.revision, next)) return await this.detail(next)
+      if (await this.repository.complete(next, record.revision, this.nowIso())) return await this.detail(next)
     }
     throw new TBError('unavailable', 'device operation completion is busy', { retryable: true })
   }
 
   async cancel(deviceId: string, operationId: string): Promise<DeviceOperationDetail> {
-    for (let attempt = 0; attempt < MAX_CAS_ATTEMPTS; attempt++) {
+    for (let attempt = 0; attempt < MAX_REVISION_ATTEMPTS; attempt++) {
       const current = await this.read(deviceId, operationId)
       const record = await this.expireRecord(current.key, current.record)
       if (isTerminal(record.state) || record.cancelRequestedAt !== undefined) {
@@ -940,13 +895,30 @@ export class DeviceMailboxService {
             cancelRequestedAt: now,
             updatedAt: now,
           }
-      if (await this.cas(current.key, record.revision, next)) return await this.detail(next)
+      if (await this.repository.compare(current.key, record.revision, next)) return await this.detail(next)
     }
     throw new TBError('unavailable', 'device operation cancellation is busy', { retryable: true })
   }
 
+  /** Re-encrypt only unchanged ledger revisions; concurrent lease/terminal transitions retain authority. */
+  async reencryptPage(opts: { cursor?: string, limit?: number } = {}): Promise<{ changed: number, cursor?: string }> {
+    const page = await this.repository.list({ ...opts, limit: clampLimit(opts.limit) })
+    let changed = 0
+    for (const item of page.items) {
+      const record = parseRecord(item.value)
+      const keyId = this.cipher.keyring.activeKeyId
+      if (record.payload.keyId === keyId && (record.terminalData === undefined || record.terminalData.keyId === keyId)) continue
+      const payload = await this.cipher.encrypt(record.operationId, 'payload', await this.cipher.decrypt(record.operationId, 'payload', record.payload))
+      const terminalData = record.terminalData === undefined ? undefined : await this.cipher.encrypt(record.operationId, 'terminal', await this.cipher.decrypt(record.operationId, 'terminal', record.terminalData))
+      const next = { ...record, payload, revision: record.revision + 1,
+        ...(terminalData === undefined ? {} : { terminalData }) }
+      if (await this.repository.compare(record.operationId, record.revision, next)) changed++
+    }
+    return { changed, ...(page.cursor === undefined ? {} : { cursor: page.cursor }) }
+  }
+
   async cleanup(opts: { cursor?: string, limit?: number } = {}): Promise<DeviceMailboxCleanupResult> {
-    const page = await this.state.list(KEY_DEVICE_OPERATION, {
+    const page = await this.repository.list({
       limit: clampLimit(opts.limit),
       ...(opts.cursor === undefined ? {} : { cursor: opts.cursor }),
     })
@@ -968,7 +940,7 @@ export class DeviceMailboxService {
         isTerminal(record.state)
         && record.terminalAt !== undefined
         && Date.parse(record.terminalAt) + this.terminalRetentionSeconds * 1_000 <= this.now()
-        && await this.cas(item.key, record.revision, null)
+        && await this.repository.compare(item.key, record.revision, null)
       ) deleted++
     }
     return {

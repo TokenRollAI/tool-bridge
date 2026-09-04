@@ -24,8 +24,8 @@ import {
   type ToolAnnotations,
   WebStandardStreamableHTTPServerTransport,
 } from '@modelcontextprotocol/server'
-import { CfWorkerJsonSchemaValidator } from '@modelcontextprotocol/server/validators/cf-worker'
 import { CallToolResultSchema, ToolSchema } from '@modelcontextprotocol/core'
+import { ToolJsonSchemaValidator } from './jsonSchemaValidator'
 
 export interface McpBridgeTool {
   confirm?: boolean
@@ -178,12 +178,12 @@ function annotationsOf(tool: McpBridgeTool): ToolAnnotations | undefined {
 interface ProjectedTool {
   bridge: McpBridgeTool
   tool: Tool
-  validateInput: ReturnType<CfWorkerJsonSchemaValidator['getValidator']>
+  validateInput: ReturnType<ToolJsonSchemaValidator['getValidator']>
 }
 
 async function projectTools(
   source: McpBridgeTool[],
-  validator: CfWorkerJsonSchemaValidator,
+  validator: ToolJsonSchemaValidator,
 ): Promise<ProjectedTool[]> {
   const unique = new Map<string, McpBridgeTool>()
   for (const tool of source) {
@@ -229,7 +229,7 @@ async function projectTools(
         // 而 getValidator 要 Record<string, JSONSchema>——SDK 自身两侧类型不咬合。运行时
         // 无碍(非法 schema 由 getValidator 抛出,下面 catch 兜住),故在此单点收窄。
         validateInput = validator.getValidator(
-          parsed.data.inputSchema as Parameters<CfWorkerJsonSchemaValidator['getValidator']>[0],
+          parsed.data.inputSchema as Parameters<ToolJsonSchemaValidator['getValidator']>[0],
         )
       } catch {
         throw new ProtocolError(ProtocolErrorCode.InternalError,
@@ -267,7 +267,7 @@ function contentOf(value: unknown): CallToolResult['content'] {
  * 现算的(projectTools),属文档所称的 advanced use case,故继续用低阶 API。
  */
 function buildMcpServer(version: string, bridge: McpToolBridge, listTtlMs: number): Server {
-  const validator = new CfWorkerJsonSchemaValidator()
+  const validator = new ToolJsonSchemaValidator()
   const server = new Server(
     { name: 'tool-bridge', version },
     {

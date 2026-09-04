@@ -7,7 +7,12 @@
  * 仅依赖 WebCrypto(Workers 全局),无第三方依赖。
  */
 
-import { base64urlDecode, base64urlEncode } from '@tool-bridge/core'
+import {
+  base64urlDecode,
+  base64urlEncode,
+  type StoreTokenKeyring,
+  validateStoreTokenKeyring,
+} from '@tool-bridge/core'
 
 /** token 载荷:p = context 节点树路径,k = 底层对象 key,exp = 过期时刻(epoch 秒)。 */
 export interface RefTokenPayload {
@@ -28,17 +33,28 @@ async function hmacKey(secret: string): Promise<CryptoKey> {
     'SHA-256',
     new TextEncoder().encode(`tb-ref-token:${secret}`),
   )
-  return crypto.subtle.importKey('raw', digest, { name: 'HMAC', hash: 'SHA-256' }, false, [
-    'sign',
-    'verify',
-  ])
+  return crypto.subtle.importKey(
+    'raw',
+    digest,
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign', 'verify'],
+  )
 }
 
-export async function signRefToken(payload: RefTokenPayload, secret: string): Promise<string> {
-  const body = base64urlEncode(new TextEncoder().encode(JSON.stringify(payload)))
+export async function signRefToken(
+  payload: RefTokenPayload,
+  secret: string | StoreTokenKeyring,
+): Promise<string> {
+  const ring = validateStoreTokenKeyring(secret)
+  const body = base64urlEncode(
+    new TextEncoder().encode(
+      JSON.stringify({ ...payload, kid: ring.activeKeyId }),
+    ),
+  )
   const mac = await crypto.subtle.sign(
     'HMAC',
-    await hmacKey(secret),
+    await hmacKey(ring.keys[ring.activeKeyId]!),
     new TextEncoder().encode(body),
   )
   return `${body}.${base64urlEncode(new Uint8Array(mac))}`
@@ -47,11 +63,23 @@ export async function signRefToken(payload: RefTokenPayload, secret: string): Pr
 /** 验签 + 结构校验;任何失败(格式/签名/形状)→ null。过期判定留给调用方(便于测钟)。 */
 export async function verifyRefToken(
   token: string,
-  secret: string,
+  secret: string | StoreTokenKeyring,
 ): Promise<RefTokenPayload | null> {
   const dot = token.indexOf('.')
   if (dot <= 0) return null
   const body = token.slice(0, dot)
+  const ring = validateStoreTokenKeyring(secret)
+  let kid: string
+  try {
+    kid = (
+      JSON.parse(new TextDecoder().decode(base64urlDecode(body))) as {
+        kid: string
+      }
+    ).kid
+  } catch {
+    return null
+  }
+  if (!Object.hasOwn(ring.keys, kid)) return null
   let sig: Uint8Array
   try {
     sig = base64urlDecode(token.slice(dot + 1))
@@ -60,14 +88,16 @@ export async function verifyRefToken(
   }
   const ok = await crypto.subtle.verify(
     'HMAC',
-    await hmacKey(secret),
+    await hmacKey(ring.keys[kid]!),
     // Node 的 WebCrypto 类型要求 Uint8Array<ArrayBuffer>;base64urlDecode 的产物满足但类型面是 ArrayBufferLike。
     sig as Uint8Array<ArrayBuffer>,
     new TextEncoder().encode(body),
   )
   if (!ok) return null
   try {
-    const payload = JSON.parse(new TextDecoder().decode(base64urlDecode(body))) as RefTokenPayload
+    const payload = JSON.parse(
+      new TextDecoder().decode(base64urlDecode(body)),
+    ) as RefTokenPayload
     if (
       typeof payload.p !== 'string'
       || typeof payload.k !== 'string'
@@ -75,7 +105,7 @@ export async function verifyRefToken(
     ) {
       return null
     }
-    return payload
+    return { exp: payload.exp, p: payload.p, k: payload.k }
   } catch {
     return null
   }

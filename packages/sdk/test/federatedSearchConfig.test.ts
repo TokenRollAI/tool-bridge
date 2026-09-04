@@ -1,6 +1,7 @@
 import type { TbAppDeps } from '@tool-bridge/app'
 import { MemoryObjectStore, MemoryStateStore } from '@tool-bridge/core'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { testPersistence } from './domainFixtures'
 
 const { createTbAppSpy } = vi.hoisted(() => ({
   createTbAppSpy: vi.fn((deps: unknown) => {
@@ -32,7 +33,7 @@ describe('SDK 联邦搜索宿主配置', () => {
     createToolBridge({
       adminSk: 'tbk_test_admin_key_0000000000',
       federatedSearch,
-      objects: new MemoryObjectStore(),
+      ...testPersistence(new MemoryObjectStore()),
       state: new MemoryStateStore(),
     })
 
