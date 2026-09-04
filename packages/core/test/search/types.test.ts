@@ -17,15 +17,12 @@ import {
   TOOL_SEARCH_LIMIT_DEFAULT,
   TOOL_SEARCH_NODE_JSON_BYTES_MAX,
   TOOL_SEARCH_QUERY_MAX,
-  TOOL_SEARCH_REBUILD_CHUNKS_MAX,
-  TOOL_SEARCH_SCHEMA_STATEMENTS,
   TOOL_SEARCH_TERM_LIMIT,
   TOOL_SEARCH_UNIT_LIMIT,
-  toolSearchInsertPayload,
   type ToolSearchOptions,
   toolSearchSnapshotDigest,
 } from '../../src'
-import { sqliteSearchDialect } from '../../src/search/sqlSearchIndex'
+import { pgSearchCandidateStatement } from '../../src/search/pgSearchSql'
 import { base64urlEncode } from '../../src/encoding/base64url'
 
 /** 兼容层 prepareToolSearchUnits 已删;units 断言统一走权威 API 取派生单元。 */
@@ -81,17 +78,15 @@ async function legacyV1Cursor(secret: string): Promise<string> {
 }
 
 describe('SearchIndex mutation contract', () => {
-  it('uses isolated v5 schemas with a constrained effect column on SQLite and Postgres', () => {
-    for (const statements of [TOOL_SEARCH_SCHEMA_STATEMENTS, PG_SEARCH_SCHEMA_STATEMENTS]) {
-      const schema = statements.join('\n')
-      expect(schema).toContain('tb_search_tools_v5')
-      expect(schema).toContain('tb_search_meta_v5')
-      expect(schema).toContain('tb_search_snapshots_v5')
-      expect(schema).toMatch(
-        /effect (?:TEXT|text) NOT NULL CHECK \(effect IN \('read', 'write', 'destructive', 'unknown'\)\)/u,
-      )
-      expect(schema).not.toContain('tb_search_tools_v4')
-    }
+  it('uses isolated PostgreSQL v5 schemas with a constrained effect column', () => {
+    const schema = PG_SEARCH_SCHEMA_STATEMENTS.join('\n')
+    expect(schema).toContain('tb_search_tools_v5')
+    expect(schema).toContain('tb_search_meta_v5')
+    expect(schema).toContain('tb_search_snapshots_v5')
+    expect(schema).toMatch(
+      /effect (?:TEXT|text) NOT NULL CHECK \(effect IN \('read', 'write', 'destructive', 'unknown'\)\)/u,
+    )
+    expect(schema).not.toContain('tb_search_tools_v4')
   })
 
   it('uses a search-specific default limit while preserving the global max', () => {
@@ -176,13 +171,6 @@ describe('SearchIndex mutation contract', () => {
       'unknown',
       'unknown',
     ])
-    expect(toolSearchInsertPayload(records).map(record => record.effect)).toEqual([
-      'read',
-      'write',
-      'destructive',
-      'unknown',
-      'unknown',
-    ])
     const [unknownRecord] = serializeToolSearchSnapshot('providers/effects', [{ name: 'probe' }])
     if (unknownRecord === undefined) throw new Error('missing serialized effect fixture')
     expect(toolSearchSnapshotDigest([unknownRecord])).not.toBe(toolSearchSnapshotDigest([{
@@ -209,7 +197,6 @@ describe('SearchIndex mutation contract', () => {
       { length: 500 },
       (_, index) => ({ name: `node_capacity_${index}_${'x'.repeat(64)}` }),
     ))).toThrowError(TBError)
-    expect(TOOL_SEARCH_REBUILD_CHUNKS_MAX).toBeLessThanOrEqual(20)
   })
 
   it('truncates long descriptions without rejecting the complete canonical ToolSpec', () => {
@@ -333,7 +320,7 @@ describe('SearchIndex mutation contract', () => {
     expect(() => unitsOf(tooManyShortTerms)).toThrowError(TBError)
   })
 
-  it('keeps every LIKE pattern within the D1 byte and binding budgets', () => {
+  it('keeps every LIKE pattern within the bounded pattern and query parameter budgets', () => {
     const longAscii = `%_!${'abcdefghijklmnop'.repeat(8)}`
     const asciiUnits = unitsOf(longAscii)
     const longCjk = Array.from(
@@ -341,8 +328,8 @@ describe('SearchIndex mutation contract', () => {
       (_, index) => String.fromCodePoint(0x4E00 + index),
     ).join('')
     const cjkUnits = unitsOf(longCjk)
-    const unscoped = sqliteSearchDialect.candidateStatement(longCjk, 10, 0)
-    const scoped = sqliteSearchDialect.candidateStatement(
+    const unscoped = pgSearchCandidateStatement(longCjk, 10, 0)
+    const scoped = pgSearchCandidateStatement(
       longCjk,
       10,
       0,

@@ -1,7 +1,8 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    "types": []
+    "types": [],
+    "erasableSyntaxOnly": true
   },
   "include": ["src", "test"],
   "exclude": ["src/node", "test/node"]

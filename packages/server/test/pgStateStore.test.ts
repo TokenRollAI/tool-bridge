@@ -12,13 +12,13 @@ import postgres, { type Sql } from 'postgres'
 import { PgStateStore } from '../src/pgStateStore'
 
 const DATABASE_URL = process.env.TB_TEST_DATABASE_URL
-const suite = DATABASE_URL === undefined ? describe.skip : describe
+if (!DATABASE_URL) throw new Error('PG integration fixture was not initialized')
+const suite = describe
 
 let sql: Sql
 const cleanups: Array<() => Promise<void>> = []
 
 beforeAll(async () => {
-  if (DATABASE_URL === undefined) return
   sql = postgres(DATABASE_URL, { max: 4, onnotice: () => {} })
 })
 

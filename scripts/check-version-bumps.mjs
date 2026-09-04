@@ -20,7 +20,7 @@ import { readFileSync } from 'node:fs'
 import process from 'node:process'
 import { join } from 'node:path'
 
-const PUBLIC_PACKAGES = ['app', 'cli', 'dashboard', 'gateway', 'plugin-sdk', 'sdk', 'server']
+const PUBLIC_PACKAGES = ['app', 'cli', 'dashboard', 'plugin-sdk', 'sdk', 'server']
 
 /**
  * 谁把哪些 workspace 包的源码 bundle 进公开产物。这里既包括 tsup noExternal，
@@ -29,7 +29,6 @@ const PUBLIC_PACKAGES = ['app', 'cli', 'dashboard', 'gateway', 'plugin-sdk', 'sd
 const BUNDLES = {
   'app': ['core'],
   'cli': ['core', 'sdk'],
-  'gateway': ['core', 'app', 'plugins', 'plugin-sdk'],
   'sdk': ['core', 'app'],
   'server': ['core', 'app', 'plugins', 'plugin-sdk'],
   'plugin-sdk': ['core'],

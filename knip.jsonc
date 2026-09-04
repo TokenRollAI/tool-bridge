@@ -20,25 +20,6 @@
       "ignoreDependencies": ["@tokenroll/llmdoc"]
     },
 
-    // Deploy Button template 不在 pnpm workspace 内，但是独立发布入口。
-    "template": {
-      "entry": ["scripts/*.mjs"],
-      "project": ["src/**/*.ts", "scripts/*.mjs"]
-    },
-
-    "packages/gateway": {
-      "entry": ["scripts/*.ts"],
-      // app/plugins 被 bundle 进公开产物，其 external 运行时闭包必须由 gateway 申明；
-      // Dashboard 由 vitest config 中的子进程构建；cloudflare:* 是 workerd 虚拟模块。
-      "ignoreDependencies": [
-        "@cfworker/json-schema",
-        "@modelcontextprotocol/client",
-        "@modelcontextprotocol/core",
-        "@tool-bridge/dashboard",
-        "cloudflare"
-      ]
-    },
-
     "packages/plugins": {
       "entry": ["scripts/migrate/index.mjs", "scripts/migrate/report.mjs"]
     },

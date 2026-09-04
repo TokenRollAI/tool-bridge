@@ -72,7 +72,7 @@ describe('@tool-bridge/sdk/client', () => {
       path: 'docs/fixture',
       kind: 'context',
       description: 'Fixture context',
-      config: { kind: 'context', provider: 'r2' },
+      config: { kind: 'context', provider: 'storage' },
     })).toEqual(fixture.registryNode)
     const calls = fetcher.mock.calls as unknown as Array<[string, RequestInit]>
     expect(calls.map(call => call[0])).toEqual([
@@ -90,7 +90,7 @@ describe('@tool-bridge/sdk/client', () => {
       path: 'docs/fixture',
       kind: 'context',
       description: 'Fixture context',
-      config: { kind: 'context', provider: 'r2' },
+      config: { kind: 'context', provider: 'storage' },
     })
   })
 

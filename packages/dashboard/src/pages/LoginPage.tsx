@@ -9,9 +9,11 @@ import {
   Sun,
   X,
 } from 'lucide-react'
+import { createSetupClient, type SetupStatus } from '@tool-bridge/sdk/client'
 import { useMutation } from '@tanstack/react-query'
+import { useEffect, useState } from 'react'
 import { useTheme } from 'next-themes'
-import { useState } from 'react'
+import { Link } from 'react-router'
 import { type ApiError, validateConnection } from '@/lib/api'
 import { useSession } from '@/lib/session-context'
 import { Button } from '@/components/ui/button'
@@ -55,6 +57,16 @@ export function LoginPage() {
   const [baseUrl, setBaseUrl] = useState('')
   const [sk, setSk] = useState('')
   const [name, setName] = useState('default')
+  const [setupState, setSetupState] = useState<SetupStatus['state'] | null>(null)
+  useEffect(() => {
+    let active = true
+    void createSetupClient({ baseUrl: '' }).status().then((value) => {
+      if (active) setSetupState(value.state)
+    }).catch(() => undefined)
+    return () => {
+      active = false
+    }
+  }, [])
 
   const mutation = useMutation({
     mutationFn: async () => {
@@ -99,6 +111,12 @@ export function LoginPage() {
         </Button>
       </header>
 
+      {setupState && setupState !== 'ready' && (
+        <div className="relative z-10 mx-auto flex max-w-3xl items-center justify-between gap-4 rounded-lg border border-primary/30 bg-card p-4 text-sm">
+          <p>{setupState === 'recovery' ? '此实例需要恢复，请检查部署状态。' : '此实例尚未完成安装，请先配对配置服务。'}</p>
+          <Button asChild size="sm"><Link to="/setup">{setupState === 'recovery' ? '查看恢复说明' : '开始安装'}</Link></Button>
+        </div>
+      )}
       <main className="relative z-10 mx-auto grid min-h-[calc(100svh-4rem)] w-full max-w-7xl items-center gap-12 px-5 py-8 sm:px-8 lg:grid-cols-[minmax(0,1.08fr)_minmax(22rem,0.72fr)] lg:px-12 lg:py-12">
         <section aria-labelledby="login-product-title" className="hidden min-w-0 lg:block">
           <p className="text-xs font-semibold tracking-[0.2em] text-primary uppercase">

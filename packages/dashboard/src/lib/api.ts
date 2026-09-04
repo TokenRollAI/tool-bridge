@@ -26,7 +26,7 @@ export class ApiError extends Error {
 }
 
 export interface Connection {
-  /** 网关 BaseURL;'' = 同源(生产形态:Dashboard 与 gateway 同 Worker)。 */
+  /** 网关 BaseURL;'' = 同源(生产形态:Dashboard 与 Node API 同源)。 */
   baseUrl: string
   sk: string
 }
@@ -207,7 +207,7 @@ export async function uploadContextObject(
         error.retryable,
       )
     }
-    throw new ApiError('network', 0, '对象存储直传失败：请检查网络与 R2/S3 CORS 配置', true)
+    throw new ApiError('network', 0, '对象存储直传失败：请检查网络与 S3 CORS 配置', true)
   }
 }
 

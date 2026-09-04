@@ -2,7 +2,7 @@
  * 通用对象存储 ContextProvider(四动词 + Search/Delete)。
  *
  * 全部动词语义(幂等 Write / Update not_found / ifVersion conflict / readOnly 拒写 /
- * $ref 阈值判定 / keyword Search)集中在此——r2、s3 与 file
+ * $ref 阈值判定 / keyword Search)集中在此——storage、s3 与 file
  * 只提供 ObjectStore 适配,不各自复刻语义。version = 对象 etag。
  */
 
@@ -125,7 +125,7 @@ export interface ObjectContextUploadGrantOptions {
  * 对象存储 provider 的具体形态:**六个动词全实现**。
  *
  * `ContextProvider` 本身是全可选的(作者写多少算多少),但一个具体实现可以把自己
- * 收紧成完全体 —— 消费方(网关 r2/s3 分支、单测)据此免去逐个判空。
+ * 收紧成完全体 —— 消费方(网关 storage/s3 分支、单测)据此免去逐个判空。
  */
 export type ObjectContextProvider = Required<ContextProvider>
 

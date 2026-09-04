@@ -9,7 +9,6 @@ test('共享运行时代码触发 Railway', () => {
 
 test('只有 Node 宿主代码触发 Railway', () => {
   assert.equal(railwayDeploymentNeeded(['packages/server/src/index.ts']), true)
-  assert.equal(railwayDeploymentNeeded(['packages/gateway/src/deployEntry.ts']), false)
 })
 
 test('部署入口变化会触发首轮部署', () => {
@@ -20,7 +19,7 @@ test('部署入口变化会触发首轮部署', () => {
 test('纯文档与无关客户端变化不会部署', () => {
   assert.equal(railwayDeploymentNeeded([
     './README.md',
-    'llmdoc/hosts-deploy/cloudflare-paths.mdx',
+    'llmdoc/hosts-deploy/node-docker-and-helm.mdx',
     'packages/cli/src/index.ts',
     '',
   ]), false)

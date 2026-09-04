@@ -1,10 +1,4 @@
-/**
- * PgSearchIndex 契约测试:跑与 D1/better-sqlite3 同一份黑盒契约
- * (verifySearchIndexContract),证明 PG 后端行为对等。
- *
- * 需要真实 PG(设 TB_TEST_DATABASE_URL);缺省整组 skip。每个用例独立 schema 隔离。
- */
-
+/** Real PostgreSQL search contract, capacity races and numeric result normalization. */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { TOOL_SEARCH_AUDIT_NODE_LIMIT } from '@tool-bridge/core'
 import postgres, { type Sql } from 'postgres'
@@ -12,13 +6,13 @@ import { verifySearchIndexContract } from '../../core/test/search/searchIndex.fi
 import { PgSearchIndex } from '../src/pgSearchIndex'
 
 const DATABASE_URL = process.env.TB_TEST_DATABASE_URL
-const suite = DATABASE_URL === undefined ? describe.skip : describe
+if (!DATABASE_URL) throw new Error('PG integration fixture was not initialized')
+const suite = describe
 
 let sql: Sql
 const cleanups: Array<() => Promise<void>> = []
 
 beforeAll(async () => {
-  if (DATABASE_URL === undefined) return
   sql = postgres(DATABASE_URL, { max: 4, onnotice: () => {} })
 })
 
@@ -51,7 +45,7 @@ suite('PgSearchIndex', () => {
   })
 
   // 回归:postgres.js 把 bigint/COUNT 返回为字符串、EXISTS 返回 boolean。
-  // 若 dialect 丢掉 ::int 归一,下面两条会分别暴露"公开类型被违反"与"no-op 判定失效"。
+  // 若 SQL 丢掉 ::int 归一,下面两条会分别暴露"公开类型被违反"与"no-op 判定失效"。
   it('revision 归一为 number(公开 ToolSearchCandidate 契约)', async () => {
     const index = await freshIndex('revtype')
     await index.rebuild([{

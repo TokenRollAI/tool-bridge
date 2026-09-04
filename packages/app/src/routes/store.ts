@@ -120,7 +120,7 @@ export function registerStoreCapabilityRoutes(app: TbHono, deps: Parameters<
     runHandler(async () => {
       await deps.ensureReady?.()
       const store = await defaultStoreRuntime(deps)
-      const payload = await verifyStoreRefToken(c.req.param('token'), store.tokenSecret)
+      const payload = await verifyStoreRefToken(c.req.param('token'), store.tokenKeyring)
       if (payload === null || payload.exp * 1000 <= Date.now()) {
         throw TBError.notFound('not found')
       }
@@ -132,7 +132,7 @@ export function registerStoreCapabilityRoutes(app: TbHono, deps: Parameters<
       } catch (error) {
         hideCapabilityFailure(error)
       }
-      return await storeObjectResponse(store.objects, object)
+      return await storeObjectResponse(await store.backends.resolveBackend(object.backendId), object)
     }),
   )
 
@@ -151,7 +151,7 @@ export function registerStoreCapabilityRoutes(app: TbHono, deps: Parameters<
       } catch (error) {
         hideCapabilityFailure(error)
       }
-      return await storeObjectResponse(store.objects, object)
+      return await storeObjectResponse(await store.backends.resolveBackend(object.backendId), object)
     }),
   )
 }

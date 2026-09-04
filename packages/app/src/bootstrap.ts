@@ -20,22 +20,6 @@ import {
 } from '@tool-bridge/core'
 import { fetchPluginContract, type PluginBindings, probePlugin } from './providers/pluginClient'
 
-interface BootstrapEnv {
-  TB_BOOTSTRAP_ADMIN_SK?: string
-  TB_SECRET_ENCRYPTION_KEY?: string
-}
-
-/**
- * Admin SK 引导 + 内置节点物化(先引导 Admin SK,再物化内置节点)。
- *
- * Workers 无启动钩子,故在首个请求时惰性执行;模块级 promise 防并发重入(单 isolate 内
- * 只跑一次真正的引导逻辑)。幂等标志 KEY_BOOTSTRAPPED 存在即整体跳过(E2E-1③ 重跑不重复
- * 输出 Admin SK 明文)。
- *
- * 首次引导默认必须提供 TB_BOOTSTRAP_ADMIN_SK(sha256 后入库),不把最高权限凭证
- * 写入持久日志。Node server 仅在显式开发逃生配置下允许随机生成。
- */
-
 /** 引导时注册的内置节点(system directory + builtin;feedback 走 ~feedback 保留段,非 builtin)。 */
 const BUILTIN_MODULES = [
   'sk',
@@ -59,9 +43,12 @@ const BUILTIN_DESCRIPTIONS: Record<string, string> = {
   federation: 'Remote federation host allowlist',
   annotation: 'Admin notes shown in ~help of any path',
   store: 'Deployment-level private object Store',
+  config: 'Instance settings and apply status',
+  deployment: 'Local deployment executor and apply status',
+  maintenance: 'Database and service maintenance',
+  keys: 'Encryption and signing key lifecycle',
+  storage: 'Storage backend configuration and validation',
 }
-
-let bootstrapOnce: Promise<void> | undefined
 
 /**
  * 用固定明文签发 Admin SK(便于部署自动化);hash 入库,不生成随机明文。
@@ -95,7 +82,7 @@ async function mintAdminWithPlaintext(
  * 补挂新加入的内置节点(如 system/plugin)。只写缺失节点(get miss → write),
  * 不覆盖既有节点——避免每个 isolate 冷启动都重写状态,也不动管理面改过的描述。
  */
-async function ensureBuiltinNodes(registry: NodeRegistryStore, now: string): Promise<void> {
+async function ensureBuiltinNodes(registry: NodeRegistryStore, now: string, management: boolean, additionalModules: string[]): Promise<void> {
   const ensure = async (node: NodeInput): Promise<void> => {
     try {
       await registry.get(node.path)
@@ -104,7 +91,7 @@ async function ensureBuiltinNodes(registry: NodeRegistryStore, now: string): Pro
     }
   }
   await ensure({ path: 'system', kind: 'directory', description: 'Platform admin' })
-  for (const module of BUILTIN_MODULES) {
+  for (const module of [...BUILTIN_MODULES, ...(management ? ['config', 'storage', 'deployment'] : []), ...additionalModules]) {
     await ensure({
       path: `system/${module}`,
       kind: 'builtin',
@@ -117,43 +104,19 @@ async function ensureBuiltinNodes(registry: NodeRegistryStore, now: string): Pro
 async function doBootstrap(
   store: StateStore,
   adminSk: string | undefined,
-  requireAdminSk: boolean,
+  management = false,
+  additionalModules: string[] = [],
 ): Promise<void> {
   const now = new Date().toISOString()
   const bootstrapped = (await store.get(KEY_BOOTSTRAPPED)) !== null
 
-  // 1) Admin SK(仅首次引导):Workers 要求预置;Node/SDK 兼容路径可随机生成并显示一次。
   if (!bootstrapped) {
-    const sk = new SKRegistryStore(store)
-    if (adminSk !== undefined && adminSk.length > 0) {
-      await mintAdminWithPlaintext(store, adminSk, now)
-      console.log('[tool-bridge] bootstrapped: Admin SK = <provided via TB_BOOTSTRAP_ADMIN_SK>')
-    } else {
-      if (requireAdminSk) {
-        // 宿主中立文案:两个宿主的修复方式都写清楚(Workers 无 wrapper 补指引,
-        // 此消息会直接作为 HTTP TBError 返回;Node/Docker 另由 server main.ts 追加说明)。
-        throw new TBError(
-          'unavailable',
-          'first bootstrap requires TB_BOOTSTRAP_ADMIN_SK '
-          + '(Workers: `wrangler secret put TB_BOOTSTRAP_ADMIN_SK`; Node/Docker: set the env var)',
-          { retryable: false },
-        )
-      }
-      const { secret } = await sk.write(adminBootstrapInput(), now)
-      // 随机路径下明文只能在此处展示一次(不输出即永久丢失);但 console 日志会进
-      // `wrangler tail` 与 Cloudflare Dashboard,任何有账户访问权者可读到。故显式告警,
-      // 引导部署者改用 TB_BOOTSTRAP_ADMIN_SK 预置(该路径不落明文日志)。
-      console.warn(
-        '[tool-bridge] SECURITY: a random Admin SK was generated and printed to the log below. '
-        + 'Worker logs are visible via `wrangler tail` and the Cloudflare dashboard — capture this '
-        + 'value now, then rotate it, or redeploy with TB_BOOTSTRAP_ADMIN_SK set to avoid plaintext logs.',
-      )
-      console.log(`[tool-bridge] bootstrapped: Admin SK (shown once) = ${secret}`)
-    }
+    if (!adminSk) throw new TBError('unavailable', 'first bootstrap requires an explicitly supplied admin credential', { retryable: false })
+    await mintAdminWithPlaintext(store, adminSk, now)
   }
 
   // 2) 内置节点:system directory + 各 builtin;已引导实例也幂等 ensure(Q15)。
-  await ensureBuiltinNodes(new NodeRegistryStore(store), now)
+  await ensureBuiltinNodes(new NodeRegistryStore(store), now, management, additionalModules)
 
   // 3) 幂等标志(Admin SK 引导不重复;E2E-1③ 重跑不重复输出明文)。
   if (!bootstrapped) await store.put(KEY_BOOTSTRAPPED, true)
@@ -165,26 +128,9 @@ async function doBootstrap(
  */
 export function runBootstrap(
   store: StateStore,
-  opts?: { adminSk?: string, requireAdminSk?: boolean },
+  opts?: { additionalModules?: string[], adminSk?: string, management?: boolean },
 ): Promise<void> {
-  return doBootstrap(store, opts?.adminSk, opts?.requireAdminSk ?? true)
-}
-
-/**
- * 首个请求时惰性引导(幂等 + 并发安全)。返回后 store 已就绪。
- * env 传入以取 TB_BOOTSTRAP_ADMIN_SK / TB_SECRET_ENCRYPTION_KEY(后者供 secret 能力)。
- */
-export function ensureBootstrapped(store: StateStore, env: BootstrapEnv): Promise<void> {
-  if (bootstrapOnce === undefined) {
-    // Workers 日志会被账户成员与日志系统读取:新实例必须显式预置 Admin SK,禁止把
-    // 随机生成的最高权限凭证写入 console。已引导实例不再需要保留该 env secret。
-    bootstrapOnce = doBootstrap(store, env.TB_BOOTSTRAP_ADMIN_SK, true).catch((err) => {
-      // 引导失败:重置 once 以便下个请求重试(避免永久卡死)。
-      bootstrapOnce = undefined
-      throw err
-    })
-  }
-  return bootstrapOnce
+  return doBootstrap(store, opts?.adminSk, opts?.management ?? false, opts?.additionalModules ?? [])
 }
 
 /** builtin 装配入参(宿主解析后注入;不吃 Workers Env)。 */
@@ -227,9 +173,4 @@ export function buildDeps(opts: BuiltinAssemblyOpts): BuiltinDeps {
     // 不该多一个恒空的节点(引导仍会建 system/catalog 节点,但 dispatch 回空页)。
     catalog: { catalog: () => opts.pluginCatalog ?? {} },
   }
-}
-
-/** 测试辅助:重置模块级 once(每个测试 isolate 独立,一般无需;导出以备用)。 */
-export function resetBootstrapForTest(): void {
-  bootstrapOnce = undefined
 }

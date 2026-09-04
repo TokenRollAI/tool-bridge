@@ -23,7 +23,6 @@ export const BUILTIN_PLUGIN_LOADERS: Record<string, () => Promise<BuiltinPluginM
   brave_search: () => import('./brave_search/index') as Promise<BuiltinPluginModule>,
   circleci: () => import('./circleci/index') as Promise<BuiltinPluginModule>,
   clerk: () => import('./clerk/index') as Promise<BuiltinPluginModule>,
-  cloudflare_dns: () => import('./cloudflare_dns/index') as Promise<BuiltinPluginModule>,
   cohere: () => import('./cohere/index') as Promise<BuiltinPluginModule>,
   confluence: () => import('./confluence/index') as Promise<BuiltinPluginModule>,
   convertapi: () => import('./convertapi/index') as Promise<BuiltinPluginModule>,

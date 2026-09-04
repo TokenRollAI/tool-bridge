@@ -14,8 +14,7 @@
  * 本副本自己持有连接时**完全不经这里**(DeviceHub 先查本地 Map),故单副本部署零额外
  * 开销、也不需要配 Redis。
  *
- * 与 CF 宿主的对照:那边用 Durable Object,天然"每设备一个单点",不存在这个问题。
- * 本模块是 Node 多副本的等价物。
+ * 本模块为多副本 Node 服务提供统一的连接所有权与跨进程转发。
  */
 
 import type { DeviceInvokeRequest } from '@tool-bridge/app'

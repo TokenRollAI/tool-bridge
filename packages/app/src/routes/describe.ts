@@ -72,9 +72,9 @@ export async function handleDescribe(c: AppContext, env: RouteEnv): Promise<Resp
     // device 自定义 context 节点(带转发标记)回固定表;
     // SDK 进程内 Provider 按可选方法实现存在性推导。
     const cfg = node.config
-    const local = cfg.provider !== 'r2' && cfg.provider !== 's3' ? localContext(deps, node) : null
+    const local = cfg.provider !== 'storage' && cfg.provider !== 's3' ? localContext(deps, node) : null
     let capabilities
-      = cfg.provider === 'r2'
+      = cfg.provider === 'storage'
         || cfg.provider === 's3'
         || cfg.provider === 'device-fs'
         || deviceMarkerOf(cfg.providerConfig) !== null
@@ -85,7 +85,7 @@ export async function handleDescribe(c: AppContext, env: RouteEnv): Promise<Resp
               await requirePluginExport(deps, cfg.provider, 'context', 'context', cfg.export)
             ).export.capabilities ?? []
     if (
-      (cfg.provider === 'r2' || cfg.provider === 's3')
+      (cfg.provider === 'storage' || cfg.provider === 's3')
       && cfg.readOnly !== true
       && await contextDirectUploadAvailable(cfg, deps)
     ) {

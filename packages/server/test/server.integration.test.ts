@@ -1,16 +1,17 @@
+import { afterEach, describe, expect, it } from 'vitest'
+import { request as httpRequest } from 'node:http'
 /**
  * Node 宿主集成测试:真实 http(port 0)全 wire 断言(与 curl 等价,不直捣内部对象)。
  * 覆盖:healthz / 认证 / ~help / ~register 挂树 / 重启同 dataDir 数据持久(User Case #4
- * 核心断言)/ SK 吊销即时生效(SQLite 强一致,无 KV 最终一致窗口)。
+ * 核心断言)/ SK 吊销即时生效(PG 强一致)。
  */
-
-import { afterEach, describe, expect, it } from 'vitest'
-import { request as httpRequest } from 'node:http'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { configFromEnv, createTbServer, type TbServer } from '../src'
+import type { ServerConfig } from '../src/config'
 import pkg from '../package.json' with { type: 'json' }
+import { createTbServer, type TbServer } from '../src'
+import { testServerConfig } from './helpers/server'
 
 const ADMIN_SK = 'tbk_server_test_admin_00000000'
 const ENCRYPTION_KEY = '3ZwpbBkSrp3eT9ylcZedfN33yq9fJLlmeusH98qNbt8'
@@ -29,14 +30,14 @@ function tmpDataDir(): string {
 
 async function startServer(
   dataDir: string,
-  extraEnv: NodeJS.ProcessEnv = {},
+  extraEnv: Partial<ServerConfig> = {},
 ): Promise<{ baseUrl: string, server: TbServer }> {
-  const config = configFromEnv({
-    TB_PORT: '0',
-    TB_HOST: '127.0.0.1',
-    TB_DATA_DIR: dataDir,
-    TB_BOOTSTRAP_ADMIN_SK: ADMIN_SK,
-    TB_SECRET_ENCRYPTION_KEY: ENCRYPTION_KEY,
+  const config = await testServerConfig({
+    port: 0,
+    host: '127.0.0.1',
+    dataDir: dataDir,
+    adminSk: ADMIN_SK,
+    encryptionKey: ENCRYPTION_KEY,
     ...extraEnv,
   })
   const server = createTbServer(config)
@@ -111,7 +112,7 @@ async function postJson(
 describe('Node 宿主 HTTP 面', () => {
   it('TLS 终止代理下用 canonical protocol + 本次 alias host 签 Store URL', async () => {
     const { server, baseUrl } = await startServer(tmpDataDir(), {
-      TB_CANONICAL_ORIGIN: 'https://canonical.example',
+      canonicalOrigin: 'https://canonical.example',
     })
     cleanups.push(() => server.close())
 
@@ -168,10 +169,10 @@ describe('Node 宿主 HTTP 面', () => {
     expect(live.status).toBe(200)
     expect(await live.json()).toEqual({ live: true })
 
-    // SQLite 无长连接后端可断:checks 为空、ready true。
+    // PG 连接是真实 readiness 依赖。
     const ready = await fetch(`${baseUrl}/readyz`)
     expect(ready.status).toBe(200)
-    expect(await ready.json()).toEqual({ checks: {}, ready: true })
+    expect(await ready.json()).toEqual({ checks: { objects: { ok: true }, state: { ok: true } }, ready: true })
 
     server.startDraining()
     const drainingReady = await fetch(`${baseUrl}/readyz`)

@@ -128,7 +128,7 @@ async function mountContext(path: string): Promise<void> {
     path,
     kind: 'context',
     description: `${path} context`,
-    config: { kind: 'context', provider: 'r2' },
+    config: { kind: 'context', provider: 'storage' },
   },
   admin(),
   )
@@ -527,7 +527,7 @@ describe('MCP consumer endpoint', () => {
     const objectsFactory = vi.fn(async () => {
       throw new Error('must not resolve object signer')
     })
-    const isolated = await createTestApp({ objectsFactory })
+    const isolated = await createTestApp()
     const register = await isolated.request('https://tb.test/mcp-read/context/~register', {
       method: 'POST',
       headers: {
@@ -539,10 +539,11 @@ describe('MCP consumer endpoint', () => {
         path: 'mcp-read/context',
         kind: 'context',
         description: 'read-only caller view',
-        config: { kind: 'context', provider: 'r2' },
+        config: { kind: 'context', provider: 'storage' },
       }),
     })
     expect(register.status).toBe(200)
+    isolated.deps.objectStoreForBackend = objectsFactory
     const skResponse = await isolated.request('https://tb.test/system/sk/write', {
       method: 'POST',
       headers: {

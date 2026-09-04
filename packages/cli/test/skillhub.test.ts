@@ -127,7 +127,7 @@ describe('tb skill publish', () => {
 })
 
 describe('tb skill mount', () => {
-  it('默认 provider r2 → ~register kind skillhub', async () => {
+  it('默认 provider storage → ~register kind skillhub', async () => {
     const fn = captureFetch({ path: 'skills/team', kind: 'skillhub' })
     await runCli(['skill', 'mount', 'skills/team', '--description', 'team skills', ...gw, '--json'])
     const [url, init] = fn.mock.calls[0] as [string, RequestInit]
@@ -136,7 +136,7 @@ describe('tb skill mount', () => {
       path: 'skills/team',
       kind: 'skillhub',
       description: 'team skills',
-      config: { kind: 'skillhub', provider: 'r2' },
+      config: { kind: 'skillhub', provider: 'storage' },
     })
   })
 

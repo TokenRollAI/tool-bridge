@@ -71,7 +71,7 @@ describe('CLI help 参数契约', () => {
 
     const ctxHelp = commandAt('ctx', 'mount').helpInformation()
     expect(ctxHelp).toContain('[s3] required; [plugin] optional')
-    expect(ctxHelp).toContain('[r2/s3] key prefix')
+    expect(ctxHelp).toContain('[storage/s3] key prefix')
     expect(ctxHelp).toContain('One-line node description (default: auto-generated)')
 
     const serverHelp = fullHelpAt('server', 'add')

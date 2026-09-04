@@ -9,13 +9,13 @@ import {
   shouldRefresh,
 } from '../../src/plugin/oauth'
 import { isTBError } from '../../src/errors'
+import { URL } from '../../src/webGlobals'
 
 /**
  * provider 型 OAuth2 的纯逻辑。这些函数的产物直接决定跳转 URL 与令牌请求长什么样,
  * 错一个参数名就是"授权流程走不通"或"凭证发错地方",故边界逐条钉。
  *
- * 断言用手写的 query 解析而不是 `URL`/`URLSearchParams`:core 的 tsconfig 是 `types: []`
- * 且无 DOM lib(纯逻辑层不依赖宿主 API)—— 被测代码守这条线,测试也守。
+ * Web URL 运行时类型经 webGlobals 注入，不引入 Node 或 DOM 编译依赖。
  */
 
 /** `a=1&b=2` → Map(解 form 编码:`+` 是空格)。 */
@@ -293,5 +293,31 @@ describe('过期判定', () => {
 
   it('没有 expiresAt → 不主动刷新(靠 401 触发)', () => {
     expect(shouldRefresh({ accessToken: 'at', tokenType: 'Bearer' }, NOW)).toBe(false)
+  })
+})
+
+describe('OAuth URL standard query composition', () => {
+  it('preserves extra query fields and replaces every duplicate protocol parameter', () => {
+    const result = buildAuthorizationUrl({
+      config: {
+        authorizationUrl: 'https://provider.test/authorize?tenant=team&state=old&state=older&client_id=stale&scope=admin&code_challenge=stale',
+        tokenUrl: 'https://provider.test/token',
+        authorizationParams: { state: 'cannot-override', prompt: 'consent' },
+      },
+      clientId: 'real-client', redirectUri: 'https://gateway.test/callback?kept=true', state: 'correct-state',
+    })
+    const params = new URL(result).searchParams
+    expect(params.get('tenant')).toBe('team')
+    expect(params.get('prompt')).toBe('consent')
+    expect(params.getAll('state')).toEqual(['correct-state'])
+    expect(params.getAll('client_id')).toEqual(['real-client'])
+    expect(params.has('scope')).toBe(false)
+    expect(params.has('code_challenge')).toBe(false)
+  })
+
+  it('rejects fragments in declaration and direct URL construction', () => {
+    const config = { authorizationUrl: 'https://provider.test/authorize#fragment', tokenUrl: 'https://provider.test/token' }
+    expect(pluginOAuthSchema.safeParse(config).success).toBe(false)
+    expect(() => buildAuthorizationUrl({ config, clientId: 'client', redirectUri: 'https://gateway.test/callback', state: 'state' })).toThrow()
   })
 })

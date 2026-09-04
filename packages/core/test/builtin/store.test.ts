@@ -1,9 +1,10 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import type { CallContext } from '../../src/types'
+import { MemoryStoreRepository } from '../../src/objectStoreService/memoryRepository'
 import { createStoreModule, storeScopeForCmd } from '../../src/builtin/store'
 import { StoreService } from '../../src/objectStoreService/service'
 import { MemoryObjectStore } from '../../src/context/objectStore'
-import { MemoryStateStore } from '../../src/store'
+import { backend } from '../objectStoreService/fixtures'
 import { isTBError } from '../../src/errors'
 
 const ctx: CallContext = {
@@ -19,7 +20,7 @@ describe('builtin store 模块', () => {
   let mod: ReturnType<typeof createStoreModule>
 
   beforeEach(() => {
-    service = new StoreService(new MemoryStateStore(), new MemoryObjectStore(), {
+    service = new StoreService(new MemoryStoreRepository(), backend(new MemoryObjectStore()), {
       tokenSecret: 'builtin-store-token-secret-value',
       now: () => '2026-08-25T00:00:00.000Z',
     })

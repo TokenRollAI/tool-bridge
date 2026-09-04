@@ -3,9 +3,7 @@ import type {
   ObjectBody,
   ObjectBodyStream,
   ObjectMeta,
-  ObjectStore,
 } from '../context/objectStore'
-import type { StateStore } from '../store'
 import {
   type CallUploadCapability,
   DEFAULT_STORE_DRIVER_KEY_ROOT,
@@ -29,12 +27,14 @@ import {
   type StoreUploadStart,
   type UploadSession,
 } from './types'
+import { assertUploadBinding, type StoreIdempotencyBinding as IdempotencyBinding, type StoreBackendResolver, type StoreRecords, type StoreRepository } from './repository'
 import {
   LIST_LIMIT_DEFAULT,
   LIST_LIMIT_MAX,
   type OwnerRef,
   type Timestamp,
 } from '../types'
+import { type StoreTokenKeyring, validateStoreTokenKeyring } from '../secret/keyring'
 import { normalizeContentType } from '../context/contentType'
 import { normalizeExpiresAt, sha256Hex } from '../auth/sk'
 import { base64urlEncode } from '../encoding/base64url'
@@ -43,16 +43,10 @@ import { parseStoreUri, storeUri } from './uri'
 import { isTBError, TBError } from '../errors'
 import { omit } from '../omit'
 
-export const KEY_STORE_OBJECT = 'store:object:'
-export const KEY_STORE_UPLOAD = 'store:upload:'
-export const KEY_STORE_CALL_CAPABILITY = 'store:call-capability:'
-export const KEY_STORE_SHARE = 'store:share:'
-export const KEY_STORE_IDEMPOTENCY = 'store:idempotency:'
-
 const UPLOAD_TTL_SEC_DEFAULT = 15 * 60
 const SHARE_TTL_SEC_DEFAULT = 15 * 60
 const MAX_OBJECT_BYTES_DEFAULT = 256 * 1024 * 1024
-const MAX_CAS_ATTEMPTS = 32
+const MAX_REVISION_ATTEMPTS = 32
 const CAPABILITY_TTL_SEC_MAX = 7 * 24 * 60 * 60
 const TOKEN_PREFIX = {
   call: 'tbc',
@@ -61,25 +55,6 @@ const TOKEN_PREFIX = {
 } as const
 
 type TokenDomain = keyof typeof TOKEN_PREFIX
-
-interface IdempotencyBinding {
-  createdAt: Timestamp
-  domain: 'call' | 'owner'
-  expiresAt: Timestamp
-  fingerprint: string
-  objectId: string
-  originCallId?: string
-  owner: OwnerRef
-  producer: OwnerRef
-  revision: number
-  uploadId: string
-}
-
-interface ResolvedIdempotencyBinding {
-  binding: IdempotencyBinding
-  created: boolean
-  key?: string
-}
 
 interface NormalizedUploadInput {
   checksum?: StoreChecksum
@@ -126,6 +101,7 @@ function stateParser<T>(kind: string, shape: z.ZodRawShape): (value: unknown) =>
 }
 
 const parseObject = stateParser<StoreObject>('object', {
+  backendId: persistedId,
   bytesDeletedAt: persistedTimestamp.optional(),
   checksum: persistedChecksum.optional(),
   contentType: z.string().min(1),
@@ -148,6 +124,9 @@ const parseObject = stateParser<StoreObject>('object', {
   uploadId: persistedId,
 })
 const parseSessionRecord = stateParser<UploadSession>('upload session', {
+  revokedAt: persistedTimestamp.optional(),
+  signingKeyId: persistedId,
+  backendId: persistedId,
   capabilityHash: persistedHash,
   completedAt: persistedTimestamp.optional(),
   contentType: z.string().min(1),
@@ -163,6 +142,7 @@ const parseSessionRecord = stateParser<UploadSession>('upload session', {
   transport: z.enum(['relay', 'presigned-put']),
 })
 const parseCallCapabilityRecord = stateParser<CallUploadCapability>('call capability', {
+  signingKeyId: persistedId,
   allowedContentTypes: z.array(z.string().min(1)).min(1),
   callId: persistedId,
   createdAt: persistedTimestamp,
@@ -183,6 +163,7 @@ const parseCallCapabilityRecord = stateParser<CallUploadCapability>('call capabi
   tokenHash: persistedHash,
 })
 const parseShare = stateParser<ShareGrant>('share grant', {
+  signingKeyId: persistedId,
   createdAt: persistedTimestamp,
   createdBy: persistedOwner,
   expiresAt: persistedTimestamp,
@@ -334,15 +315,6 @@ function constantTimeEqual(left: string, right: string): boolean {
   return diff === 0
 }
 
-function contentTypeAllowed(contentType: string, patterns: string[]): boolean {
-  return patterns.some((pattern) => {
-    const normalized = pattern.toLowerCase()
-    if (normalized === '*/*') return true
-    if (normalized.endsWith('/*')) return contentType.startsWith(normalized.slice(0, -1))
-    return normalized === contentType
-  })
-}
-
 function normalizeContentTypePattern(value: unknown): string {
   if (value === '*/*') return value
   if (typeof value === 'string' && value.endsWith('/*')) {
@@ -379,38 +351,29 @@ function descriptorOf(object: StoreObject): StoreObjectDescriptor {
 /**
  * 部署级 default Store 的宿主中立状态机。
  *
- * StateStore 保存权威元数据，ObjectStore 只保存字节。所有竞争状态转换都依赖
- * compareAndSwap；缺失 CAS 的自定义 StateStore 会在构造时 fail closed。
+ * StoreRepository owns atomic metadata transitions; immutable backend identities select byte storage.
  */
 export class StoreService {
   private readonly maxObjectBytes: number
   private readonly now: () => Timestamp
   private readonly relayMaxBytes: number
   private readonly shareTtlSec: number
-  private readonly tokenSecret: string
+  private readonly tokenKeyring: StoreTokenKeyring
   private readonly uploadTtlSec: number
-  private readonly cas: NonNullable<StateStore['compareAndSwap']>
-
-  private readonly state: StateStore
-  private readonly objects: ObjectStore
+  private readonly repository: StoreRepository
+  private readonly backends: StoreBackendResolver
 
   constructor(
-    state: StateStore,
-    objects: ObjectStore,
+    repository: StoreRepository,
+    backends: StoreBackendResolver,
     opts: StoreServiceOptions,
   ) {
-    this.state = state
-    this.objects = objects
-    if (state.compareAndSwap === undefined) {
-      throw new TBError('unavailable', 'StoreService 要求 StateStore.compareAndSwap', {
-        retryable: false,
-      })
+    this.repository = repository
+    this.backends = backends
+    if (typeof repository?.beginUpload !== 'function' || typeof repository.finishUpload !== 'function') {
+      throw new TBError('unavailable', 'StoreService 要求显式 StoreRepository 原子领域存储')
     }
-    if (typeof opts?.tokenSecret !== 'string' || opts.tokenSecret.length < 16) {
-      throw new TBError('invalid_argument', 'Store tokenSecret 至少需要 16 个字符')
-    }
-    this.cas = state.compareAndSwap.bind(state)
-    this.tokenSecret = opts.tokenSecret
+    this.tokenKeyring = validateStoreTokenKeyring(opts.tokenKeyring ?? opts.tokenSecret ?? '')
     this.now = opts.now ?? (() => new Date().toISOString())
     this.maxObjectBytes = requirePositiveInt(
       opts.maxObjectBytes ?? MAX_OBJECT_BYTES_DEFAULT,
@@ -430,15 +393,16 @@ export class StoreService {
     )
   }
 
-  /** 所有已存在记录的 CAS 共用 revision 期望，并拒绝错误的版本跃迁。 */
+  /** 单记录条件更新共用 revision 期望，并拒绝错误的版本跃迁。 */
   private async compareRecord<T extends { revision: number }>(
+    records: StoreRecords<T>,
     key: string,
     current: T,
     next: T | null,
   ): Promise<boolean> {
     if (next !== null && next.revision !== current.revision + 1)
       throw stateCorrupt('revision transition')
-    return await this.cas(key, current.revision, next)
+    return await records.compare(key, current.revision, next)
   }
 
   async issueCallUploadCapability(
@@ -466,6 +430,7 @@ export class StoreService {
     const id = this.randomId()
     const token = await this.tokenFor('call', id)
     const capability: CallUploadCapability = {
+      signingKeyId: this.tokenKeyring.activeKeyId,
       id,
       revision: 1,
       tokenHash: await sha256Hex(token),
@@ -482,7 +447,7 @@ export class StoreService {
       reservedBytes: 0,
       createdAt: now,
     }
-    if (!await this.cas(`${KEY_STORE_CALL_CAPABILITY}${id}`, null, capability)) {
+    if (!await this.repository.callCapabilities.compare(id, null, capability)) {
       throw new TBError('conflict', 'call capability id 冲突')
     }
     return { capability: omit(capability, 'tokenHash'), token }
@@ -490,9 +455,10 @@ export class StoreService {
 
   async verifyCallUploadCapability(token: string): Promise<CallUploadCapability> {
     const id = this.tokenId(token, 'call')
-    const raw = await this.state.get(`${KEY_STORE_CALL_CAPABILITY}${id}`)
+    const raw = await this.repository.callCapabilities.get(id)
     if (raw === null) throw new TBError('permission_denied', 'call upload capability 无效')
     const capability = parseCallCapability(raw)
+    if (!Object.hasOwn(this.tokenKeyring.keys, capability.signingKeyId)) throw new TBError('permission_denied', 'Store capability signing key 已撤销')
     await this.assertTokenHash(token, capability.tokenHash, 'call upload capability 无效')
     if (Date.parse(capability.expiresAt) <= Date.parse(this.nowIso())) {
       await this.expireCallCapability(capability)
@@ -506,8 +472,8 @@ export class StoreService {
 
   async revokeCallUploadCapability(token: string): Promise<void> {
     const id = this.tokenId(token, 'call')
-    for (let attempt = 0; attempt < MAX_CAS_ATTEMPTS; attempt++) {
-      const raw = await this.state.get(`${KEY_STORE_CALL_CAPABILITY}${id}`)
+    for (let attempt = 0; attempt < MAX_REVISION_ATTEMPTS; attempt++) {
+      const raw = await this.repository.callCapabilities.get(id)
       if (raw === null) throw new TBError('permission_denied', 'call upload capability 无效')
       const capability = parseCallCapability(raw)
       await this.assertTokenHash(token, capability.tokenHash, 'call upload capability 无效')
@@ -518,7 +484,7 @@ export class StoreService {
         terminalAt: this.nowIso(),
         revision: capability.revision + 1,
       }
-      if (await this.compareRecord(`${KEY_STORE_CALL_CAPABILITY}${capability.id}`, capability, next)) {
+      if (await this.compareRecord(this.repository.callCapabilities, capability.id, capability, next)) {
         return
       }
     }
@@ -546,9 +512,11 @@ export class StoreService {
 
   async verifyUploadToken(token: string): Promise<UploadSession> {
     const id = this.tokenId(token, 'upload')
-    const raw = await this.state.get(`${KEY_STORE_UPLOAD}${id}`)
+    const raw = await this.repository.uploads.get(id)
     if (raw === null) throw new TBError('permission_denied', 'upload capability 无效')
     const session = parseSession(raw)
+    if (!Object.hasOwn(this.tokenKeyring.keys, session.signingKeyId)) throw new TBError('permission_denied', 'Store capability signing key 已撤销')
+    if (session.revokedAt !== undefined) throw new TBError('permission_denied', 'upload capability 已撤销')
     await this.assertTokenHash(token, session.capabilityHash, 'upload capability 无效')
     if (Date.parse(session.expiresAt) <= Date.parse(this.nowIso())) {
       if (session.status !== 'completed') await this.expireUpload(session)
@@ -569,7 +537,6 @@ export class StoreService {
     }
     const object = await this.requireObject(session.objectId)
     if (object.status === 'ready') {
-      await this.completeSessionBestEffort(session)
       return descriptorOf(object)
     }
     if (object.status !== 'pending') {
@@ -578,18 +545,18 @@ export class StoreService {
 
     let meta: ObjectMeta
     try {
-      meta = await this.objects.put(object.driverKey, this.boundedBody(input.body, session.maxBytes), {
+      meta = await (await this.backends.resolveBackend(object.backendId)).put(object.driverKey, this.boundedBody(input.body, session.maxBytes), {
         contentType: object.contentType,
         ifNoneMatch: '*',
       })
     } catch (error) {
       if (isTBError(error) && error.code === 'conflict') {
-        const existing = await this.objects.head(object.driverKey)
+        const existing = await (await this.backends.resolveBackend(object.backendId)).head(object.driverKey)
         if (existing === null) throw error
         meta = existing
       } else {
         if (isTBError(error) && error.code === 'rate_limited') {
-          await this.objects.delete(object.driverKey)
+          await (await this.backends.resolveBackend(object.backendId)).delete(object.driverKey)
           await this.failUpload(session, object)
         }
         throw error
@@ -598,7 +565,7 @@ export class StoreService {
     try {
       this.assertObserved(session, meta)
     } catch (error) {
-      await this.objects.delete(object.driverKey)
+      await (await this.backends.resolveBackend(object.backendId)).delete(object.driverKey)
       await this.failUpload(session, object)
       throw error
     }
@@ -629,7 +596,6 @@ export class StoreService {
   ): Promise<StoreObjectDescriptor> {
     if (session.status === 'completed' || object.status === 'ready') {
       if (object.status !== 'ready') return descriptorOf(await this.requireObject(object.id))
-      await this.completeSessionBestEffort(session)
       return descriptorOf(object)
     }
     if (Date.parse(session.expiresAt) <= Date.parse(this.nowIso())) {
@@ -642,12 +608,12 @@ export class StoreService {
     if (object.status !== 'pending') {
       throw new TBError('conflict', `对象状态不允许 complete:${object.status}`)
     }
-    const meta = await this.objects.head(object.driverKey)
+    const meta = await (await this.backends.resolveBackend(object.backendId)).head(object.driverKey)
     if (meta === null) throw new TBError('conflict', '直传对象尚不存在')
     try {
       this.assertObserved(session, meta)
     } catch (error) {
-      await this.objects.delete(object.driverKey)
+      await (await this.backends.resolveBackend(object.backendId)).delete(object.driverKey)
       await this.failUpload(session, object)
       throw error
     }
@@ -673,35 +639,9 @@ export class StoreService {
     sessionInput: UploadSession,
     objectInput: StoreObject,
   ): Promise<{ ok: true }> {
-    let object = objectInput
-    let session = sessionInput
-    if (object.status === 'ready' || session.status === 'completed') {
-      throw new TBError('conflict', 'ready 对象不能 abort')
-    }
-    if (object.status === 'pending') {
-      const next: StoreObject = {
-        ...object,
-        status: 'abandoned',
-        updatedAt: this.nowIso(),
-        revision: object.revision + 1,
-      }
-      if (await this.compareRecord(`${KEY_STORE_OBJECT}${object.id}`, object, next)) object = next
-      else object = await this.requireObject(object.id)
-    }
+    const object = await this.terminateUpload(sessionInput, objectInput, 'aborted')
     if (object.status === 'ready') throw new TBError('conflict', 'ready 对象不能 abort')
-    if (session.status === 'created') {
-      const terminalAt = this.nowIso()
-      const next: UploadSession = {
-        ...session,
-        status: 'aborted',
-        terminalAt,
-        revision: session.revision + 1,
-      }
-      if (await this.compareRecord(`${KEY_STORE_UPLOAD}${session.id}`, session, next)) session = next
-      else session = await this.requireSession(session.id)
-    }
-    if (session.status === 'completed') throw new TBError('conflict', 'ready 对象不能 abort')
-    await this.objects.delete(object.driverKey)
+    await (await this.backends.resolveBackend(object.backendId)).delete(object.driverKey)
     await this.markBytesDeleted(object.id, object.driverKey)
     return { ok: true }
   }
@@ -727,28 +667,14 @@ export class StoreService {
   async list(owner: OwnerRef, opts: StoreListOptions = {}): Promise<StoreListPage> {
     const wantedOwner = requireOwner(owner)
     const limit = Math.min(Math.max(1, opts.limit ?? LIST_LIMIT_DEFAULT), LIST_LIMIT_MAX)
-    const page = await this.state.list(KEY_STORE_OBJECT, {
-      limit: Math.min(LIST_LIMIT_MAX, limit * 4),
-      ...(opts.cursor !== undefined ? { cursor: opts.cursor } : {}),
-    })
-    const items: StoreObjectDescriptor[] = []
-    for (let index = 0; index < page.items.length; index++) {
-      const item = page.items[index]
-      if (item === undefined) continue
-      const object = parseObject(item.value)
-      if (object.owner !== wantedOwner || object.status !== 'ready') continue
-      items.push(descriptorOf(object))
-      if (items.length >= limit) {
-        const hasUnscanned = index < page.items.length - 1 || page.cursor !== undefined
-        return hasUnscanned ? { items, cursor: item.key } : { items }
-      }
-    }
-    return page.cursor !== undefined ? { items, cursor: page.cursor } : { items }
+    const page = await this.repository.listReadyObjects(wantedOwner, { ...opts, limit })
+    return { items: page.items.map(value => descriptorOf(parseObject(value))),
+      ...(page.cursor === undefined ? {} : { cursor: page.cursor }) }
   }
 
   async delete(uri: string, actor: { admin?: boolean, owner: OwnerRef }): Promise<{ ok: true }> {
     const { objectId } = parseStoreUri(uri)
-    for (let attempt = 0; attempt < MAX_CAS_ATTEMPTS; attempt++) {
+    for (let attempt = 0; attempt < MAX_REVISION_ATTEMPTS; attempt++) {
       const object = await this.requireObject(objectId)
       if (!actor.admin && object.owner !== actor.owner) {
         throw new TBError('not_found', 'Store 对象不存在')
@@ -760,8 +686,8 @@ export class StoreService {
         updatedAt: this.nowIso(),
         revision: object.revision + 1,
       }
-      if (!await this.compareRecord(`${KEY_STORE_OBJECT}${object.id}`, object, next)) continue
-      await this.objects.delete(object.driverKey)
+      if (!await this.compareRecord(this.repository.objects, object.id, object, next)) continue
+      await (await this.backends.resolveBackend(object.backendId)).delete(object.driverKey)
       await this.markBytesDeleted(object.id, object.driverKey)
       return { ok: true }
     }
@@ -779,6 +705,7 @@ export class StoreService {
     const id = this.randomId()
     const token = await this.tokenFor('share', id)
     const grant: ShareGrant = {
+      signingKeyId: this.tokenKeyring.activeKeyId,
       id,
       objectId: object.id,
       tokenHash: await sha256Hex(token),
@@ -788,7 +715,7 @@ export class StoreService {
       expiresAt: this.afterSeconds(now, ttl),
       revision: 1,
     }
-    if (!await this.cas(`${KEY_STORE_SHARE}${id}`, null, grant)) {
+    if (!await this.repository.shares.compare(id, null, grant)) {
       throw new TBError('conflict', 'share id 冲突')
     }
     return { shareId: id, token, uri: storeUri(object.id), expiresAt: grant.expiresAt }
@@ -796,9 +723,10 @@ export class StoreService {
 
   async verifyShareToken(token: string, expectedUri?: string): Promise<ShareGrant> {
     const id = this.tokenId(token, 'share')
-    const raw = await this.state.get(`${KEY_STORE_SHARE}${id}`)
+    const raw = await this.repository.shares.get(id)
     if (raw === null) throw new TBError('permission_denied', 'share capability 无效')
     const grant = parseShare(raw)
+    if (!Object.hasOwn(this.tokenKeyring.keys, grant.signingKeyId)) throw new TBError('permission_denied', 'Store capability signing key 已撤销')
     await this.assertTokenHash(token, grant.tokenHash, 'share capability 无效')
     if (expectedUri !== undefined && parseStoreUri(expectedUri).objectId !== grant.objectId) {
       throw new TBError('permission_denied', 'share capability 与对象不匹配')
@@ -815,8 +743,8 @@ export class StoreService {
 
   async revokeShare(shareId: string, actor: OwnerRef): Promise<{ ok: true }> {
     const owner = requireOwner(actor)
-    for (let attempt = 0; attempt < MAX_CAS_ATTEMPTS; attempt++) {
-      const raw = await this.state.get(`${KEY_STORE_SHARE}${shareId}`)
+    for (let attempt = 0; attempt < MAX_REVISION_ATTEMPTS; attempt++) {
+      const raw = await this.repository.shares.get(shareId)
       if (raw === null) throw new TBError('not_found', 'share grant 不存在')
       const grant = parseShare(raw)
       const object = await this.requireObject(grant.objectId)
@@ -828,7 +756,7 @@ export class StoreService {
         terminalAt: this.nowIso(),
         revision: grant.revision + 1,
       }
-      if (await this.compareRecord(`${KEY_STORE_SHARE}${grant.id}`, grant, next)) {
+      if (await this.compareRecord(this.repository.shares, grant.id, grant, next)) {
         return { ok: true }
       }
     }
@@ -837,7 +765,7 @@ export class StoreService {
 
   /**
    * 宿主定时器/Cron 调用的幂等清理步。终态记录先保留一个 capability TTL 窗口，
-   * 再以 CAS 物理删除；无 metadata 的 driver 对象可能属于 legacy Context，绝不猜测为 orphan。
+   * 再以版本条件物理删除；无 metadata 的 driver 对象可能属于 Context，绝不猜测为 orphan。
    * 返回 cursor 时宿主必须续调，直到 cursor 缺省。
    */
   async cleanup(opts: StoreCleanupOptions = {}): Promise<StoreCleanupResult> {
@@ -846,24 +774,16 @@ export class StoreService {
       expiredUploads: 0,
       abandonedObjects: 0,
       deletedBytes: 0,
-      deletedStaging: 0,
       expiredCallCapabilities: 0,
       expiredIdempotencyBindings: 0,
       expiredShares: 0,
     }
     const now = this.nowIso()
     const nowMs = Date.parse(now)
-    const olderThan = new Date(nowMs - this.uploadTtlSec * 1000).toISOString()
-    if (opts.runDriverMaintenance !== false && this.objects.cleanupStaging !== undefined) {
-      result.deletedStaging = await this.objects.cleanupStaging(
-        `${DEFAULT_STORE_DRIVER_KEY_ROOT}/`,
-        olderThan,
-      )
-    }
 
     const uploads = opts.cursors?.uploads === null
       ? { items: [] }
-      : await this.state.list(KEY_STORE_UPLOAD, {
+      : await this.repository.uploads.list({
           limit: pageLimit,
           ...(opts.cursors?.uploads !== undefined ? { cursor: opts.cursors.uploads } : {}),
         })
@@ -871,23 +791,23 @@ export class StoreService {
       let session = parseSession(item.value)
       if (session.status === 'created' && Date.parse(session.expiresAt) <= nowMs) {
         await this.expireUpload(session)
-        const currentRaw = await this.state.get(item.key)
+        const currentRaw = await this.repository.uploads.get(item.key)
         if (currentRaw === null) continue
         session = parseSession(currentRaw)
-        // expire CAS 输给并发 complete 时 current 是 completed，不能误报或回收。
+        // expire 事务输给并发 complete 时 current 是 completed，不能误报或回收。
         if (session.status === 'expired') result.expiredUploads++
       }
       if (
         this.uploadSessionIsTerminal(session)
         && this.retentionElapsed(this.uploadSessionTerminalAt(session), this.uploadTtlSec, nowMs)
       ) {
-        await this.compareRecord(item.key, session, null)
+        await this.compareRecord(this.repository.uploads, item.key, session, null)
       }
     }
 
     const shares = opts.cursors?.shares === null
       ? { items: [] }
-      : await this.state.list(KEY_STORE_SHARE, {
+      : await this.repository.shares.list({
           limit: pageLimit,
           ...(opts.cursors?.shares !== undefined ? { cursor: opts.cursors.shares } : {}),
         })
@@ -895,7 +815,7 @@ export class StoreService {
       let grant = parseShare(item.value)
       if (grant.status === 'active' && Date.parse(grant.expiresAt) <= nowMs) {
         await this.expireShare(grant)
-        const currentRaw = await this.state.get(item.key)
+        const currentRaw = await this.repository.shares.get(item.key)
         if (currentRaw === null) continue
         grant = parseShare(currentRaw)
         if (grant.status === 'expired') result.expiredShares++
@@ -904,13 +824,13 @@ export class StoreService {
         grant.status !== 'active'
         && this.retentionElapsed(grant.terminalAt ?? grant.expiresAt, this.shareTtlSec, nowMs)
       ) {
-        await this.compareRecord(item.key, grant, null)
+        await this.compareRecord(this.repository.shares, item.key, grant, null)
       }
     }
 
     const capabilities = opts.cursors?.callCapabilities === null
       ? { items: [] }
-      : await this.state.list(KEY_STORE_CALL_CAPABILITY, {
+      : await this.repository.callCapabilities.list({
           limit: pageLimit,
           ...(opts.cursors?.callCapabilities !== undefined
             ? { cursor: opts.cursors.callCapabilities }
@@ -923,7 +843,7 @@ export class StoreService {
         && Date.parse(capability.expiresAt) <= nowMs
       ) {
         await this.expireCallCapability(capability)
-        const currentRaw = await this.state.get(item.key)
+        const currentRaw = await this.repository.callCapabilities.get(item.key)
         if (currentRaw === null) continue
         capability = parseCallCapability(currentRaw)
         if (capability.status === 'expired') result.expiredCallCapabilities++
@@ -936,13 +856,13 @@ export class StoreService {
           nowMs,
         )
       ) {
-        await this.compareRecord(item.key, capability, null)
+        await this.compareRecord(this.repository.callCapabilities, item.key, capability, null)
       }
     }
 
     const idempotencyBindings = opts.cursors?.idempotencyBindings === null
       ? { items: [] }
-      : await this.state.list(KEY_STORE_IDEMPOTENCY, {
+      : await this.repository.idempotencyBindings.list({
           limit: pageLimit,
           ...(opts.cursors?.idempotencyBindings !== undefined
             ? { cursor: opts.cursors.idempotencyBindings }
@@ -951,14 +871,14 @@ export class StoreService {
     for (const item of idempotencyBindings.items) {
       const binding = parseIdempotencyBinding(item.value)
       if (Date.parse(binding.expiresAt) > nowMs) continue
-      if (await this.compareRecord(item.key, binding, null)) {
+      if (await this.compareRecord(this.repository.idempotencyBindings, item.key, binding, null)) {
         result.expiredIdempotencyBindings++
       }
     }
 
     const objectRecords = opts.cursors?.objects === null
       ? { items: [] }
-      : await this.state.list(KEY_STORE_OBJECT, {
+      : await this.repository.objects.list({
           limit: pageLimit,
           ...(opts.cursors?.objects !== undefined ? { cursor: opts.cursors.objects } : {}),
         })
@@ -972,10 +892,10 @@ export class StoreService {
           updatedAt: now,
           revision: object.revision + 1,
         }
-        if (await this.compareRecord(`${KEY_STORE_OBJECT}${object.id}`, object, deleted)) {
+        if (await this.compareRecord(this.repository.objects, object.id, object, deleted)) {
           object = deleted
         } else {
-          const currentRaw = await this.state.get(item.key)
+          const currentRaw = await this.repository.objects.get(item.key)
           if (currentRaw === null) continue
           object = parseObject(currentRaw)
         }
@@ -983,7 +903,7 @@ export class StoreService {
         object.status === 'pending'
         && Date.parse(object.updatedAt) + this.uploadTtlSec * 1000 <= nowMs
       ) {
-        const sessionRaw = await this.state.get(`${KEY_STORE_UPLOAD}${object.uploadId}`)
+        const sessionRaw = await this.repository.uploads.get(object.uploadId)
         const session = sessionRaw === null ? undefined : parseSession(sessionRaw)
         const uploadEnded = session === undefined
           || session.status !== 'created'
@@ -995,21 +915,21 @@ export class StoreService {
             updatedAt: now,
             revision: object.revision + 1,
           }
-          if (await this.compareRecord(`${KEY_STORE_OBJECT}${object.id}`, object, abandoned)) {
+          if (await this.compareRecord(this.repository.objects, object.id, object, abandoned)) {
             object = abandoned
             result.abandonedObjects++
           } else {
-            const currentRaw = await this.state.get(item.key)
+            const currentRaw = await this.repository.objects.get(item.key)
             if (currentRaw === null) continue
             object = parseObject(currentRaw)
           }
         }
       }
       if (this.objectIsTerminal(object) && object.bytesDeletedAt === undefined) {
-        await this.objects.delete(object.driverKey)
+        await (await this.backends.resolveBackend(object.backendId)).delete(object.driverKey)
         result.deletedBytes++
         await this.markBytesDeleted(object.id, object.driverKey)
-        const currentRaw = await this.state.get(item.key)
+        const currentRaw = await this.repository.objects.get(item.key)
         if (currentRaw === null) continue
         object = parseObject(currentRaw)
       }
@@ -1018,7 +938,7 @@ export class StoreService {
         && object.bytesDeletedAt !== undefined
         && this.retentionElapsed(object.bytesDeletedAt, this.uploadTtlSec, nowMs)
       ) {
-        await this.compareRecord(item.key, object, null)
+        await this.compareRecord(this.repository.objects, item.key, object, null)
       }
     }
 
@@ -1036,236 +956,96 @@ export class StoreService {
     input: NormalizedUploadInput,
     identity: UploadIdentity,
   ): Promise<StoreUploadStart> {
-    // 全局硬上限在创建 idempotency binding 前拒绝，非法声明不能占住 key。
+    const now = this.nowIso()
+    const domain = identity.originCallId === undefined ? 'owner' : 'call'
+    const binding: IdempotencyBinding = {
+      owner: identity.owner, producer: identity.producer, domain,
+      objectId: this.randomId(), uploadId: this.randomId(),
+      fingerprint: await sha256Hex(JSON.stringify([input.contentType, input.filename ?? null,
+        input.size ?? null, input.checksum ?? null])),
+      createdAt: now, expiresAt: this.afterSeconds(now, this.uploadTtlSec), revision: 1,
+      ...(identity.originCallId !== undefined ? { originCallId: identity.originCallId } : {}),
+    }
+    const bindingId = input.idempotencyKey === undefined
+      ? undefined
+      : [
+          await sha256Hex(identity.owner), domain,
+          await sha256Hex(JSON.stringify([domain, ...(domain === 'call' ? [identity.producer, identity.originCallId] : [])])),
+          await sha256Hex(input.idempotencyKey),
+        ].join(':')
+    if (bindingId !== undefined) {
+      const previousRaw = await this.repository.idempotencyBindings.get(bindingId)
+      if (previousRaw !== null) {
+        const previous = parseIdempotencyBinding(previousRaw)
+        assertUploadBinding(previous, binding, now)
+        return this.startFor(await this.requireSession(previous.uploadId))
+      }
+    }
     if (input.size !== undefined && input.size > this.maxObjectBytes) {
       throw new TBError('rate_limited', `对象超过部署上限 ${this.maxObjectBytes} bytes`)
     }
-    const resolved = await this.resolveBinding(identity, input)
-    const binding = resolved.binding
-    const existingRaw = await this.state.get(`${KEY_STORE_UPLOAD}${binding.uploadId}`)
-    if (existingRaw !== null) {
-      const existing = parseSession(existingRaw)
-      if (existing.objectId !== binding.objectId) throw stateCorrupt('idempotent upload')
-      this.assertBindingObject(binding, await this.requireObject(binding.objectId))
-      return this.startFor(existing)
-    }
-
-    const now = this.nowIso()
-    const driverKey = this.driverKey(binding.objectId)
-    let transport: UploadSession['transport'] = 'relay'
-    let effectiveMaxBytes = this.relayMaxBytes
-    let signedRequest: StoreUploadStart['signedRequest']
-    if (input.size !== undefined && this.objects.presignPutExact !== undefined) {
-      try {
-        signedRequest = await this.objects.presignPutExact(driverKey, this.uploadTtlSec, {
-          contentType: input.contentType,
-          contentLength: input.size,
-          ifNoneMatch: '*',
-        })
-        transport = 'presigned-put'
-        effectiveMaxBytes = this.maxObjectBytes
-      } catch {
-        // signer 临时不可用时，宿主仍可用 relay；effective body limit 由上层收紧 maxBytes。
-      }
-    }
-    let maxBytes = effectiveMaxBytes
-    if (identity.callCapabilityToken !== undefined) {
-      try {
-        maxBytes = await this.reserveCallCapability(
-          identity.callCapabilityToken,
-          binding.objectId,
-          input,
-          effectiveMaxBytes,
-        )
-      } catch (error) {
-        await this.releaseFreshBinding(resolved)
-        throw error
-      }
-    }
-    if (input.size !== undefined && input.size > maxBytes) {
-      await this.releaseFreshBinding(resolved)
-      throw new TBError('rate_limited', `对象超过本次上传上限 ${maxBytes} bytes`)
-    }
-    const object: StoreObject = {
-      id: binding.objectId,
-      store: DEFAULT_STORE_NAME,
-      driverKey,
-      uploadId: binding.uploadId,
-      status: 'pending',
-      owner: binding.owner,
-      producer: binding.producer,
-      contentType: input.contentType,
-      createdAt: now,
-      updatedAt: now,
-      revision: 1,
-      ...(input.filename !== undefined ? { filename: input.filename } : {}),
-      ...(input.size !== undefined ? { expectedSize: input.size } : {}),
-      ...(input.checksum !== undefined ? { expectedChecksum: input.checksum } : {}),
-      ...(binding.originCallId !== undefined ? { originCallId: binding.originCallId } : {}),
-    }
-    const uploadToken = await this.tokenFor('upload', binding.uploadId)
-    const session: UploadSession = {
-      id: binding.uploadId,
-      objectId: object.id,
-      status: 'created',
-      capabilityHash: await sha256Hex(uploadToken),
-      transport,
-      contentType: input.contentType,
-      maxBytes,
-      expiresAt: this.afterSeconds(now, this.uploadTtlSec),
-      createdAt: now,
-      revision: 1,
-      ...(input.size !== undefined ? { expectedSize: input.size } : {}),
-      ...(input.checksum !== undefined ? { expectedChecksum: input.checksum } : {}),
-    }
-    const objectCreated = await this.cas(`${KEY_STORE_OBJECT}${object.id}`, null, object)
-    if (!objectCreated) {
-      const current = await this.requireObject(object.id)
-      if (
-        current.owner !== object.owner
-        || current.producer !== object.producer
-        || current.originCallId !== object.originCallId
-        || current.uploadId !== object.uploadId
-        || current.contentType !== object.contentType
-      ) {
-        throw new TBError('conflict', 'Store object id 冲突')
-      }
-    }
-    if (!await this.cas(`${KEY_STORE_UPLOAD}${session.id}`, null, session)) {
-      const current = await this.requireSession(session.id)
-      if (current.objectId !== object.id) throw new TBError('conflict', 'upload id 冲突')
-      this.assertBindingObject(binding, await this.requireObject(current.objectId))
-      return this.startFor(current)
-    }
-    return {
-      uploadId: session.id,
-      objectUri: storeUri(object.id),
-      uploadToken,
-      transport,
-      expiresAt: session.expiresAt,
-      maxBytes,
-      alreadyCompleted: false,
-      ...(signedRequest !== undefined ? { signedRequest } : {}),
-    }
-  }
-
-  private async resolveBinding(
-    identity: UploadIdentity,
-    input: NormalizedUploadInput,
-  ): Promise<ResolvedIdempotencyBinding> {
-    const now = this.nowIso()
-    const domain = identity.originCallId === undefined ? 'owner' : 'call'
-    const fresh = (): IdempotencyBinding => ({
-      owner: identity.owner,
-      producer: identity.producer,
-      domain,
-      objectId: this.randomId(),
-      uploadId: this.randomId(),
-      fingerprint: '',
-      createdAt: now,
-      expiresAt: this.afterSeconds(now, this.uploadTtlSec),
-      revision: 1,
-      ...(identity.originCallId !== undefined ? { originCallId: identity.originCallId } : {}),
-    })
-    if (input.idempotencyKey === undefined) return { binding: fresh(), created: false }
-    const fingerprint = await sha256Hex(JSON.stringify([
-      input.contentType,
-      input.filename ?? null,
-      input.size ?? null,
-      input.checksum ?? null,
-    ]))
-    const ownerHash = await sha256Hex(identity.owner)
-    const scopeHash = await sha256Hex(JSON.stringify([
-      domain,
-      ...(domain === 'call' ? [identity.producer, identity.originCallId] : []),
-    ]))
-    const keyHash = await sha256Hex(input.idempotencyKey)
-    const key = `${KEY_STORE_IDEMPOTENCY}${ownerHash}:${domain}:${scopeHash}:${keyHash}`
-    const candidate = { ...fresh(), fingerprint }
-    if (await this.cas(key, null, candidate)) return { binding: candidate, created: true, key }
-    const raw = await this.state.get(key)
-    if (raw === null) throw new TBError('conflict', 'idempotency binding 并发创建冲突')
-    const existing = parseIdempotencyBinding(raw)
-    if (!this.bindingMatchesIdentity(existing, identity) || existing.fingerprint !== fingerprint) {
-      throw new TBError('conflict', 'idempotencyKey 已绑定到不同上传声明')
-    }
-    if (Date.parse(existing.expiresAt) <= Date.parse(now)) {
-      throw new TBError('conflict', 'idempotencyKey 对应的 upload session 已过期')
-    }
-    return { binding: existing, created: false, key }
-  }
-
-  private async releaseFreshBinding(resolved: ResolvedIdempotencyBinding): Promise<void> {
-    if (!resolved.created || resolved.key === undefined) return
-    // 只释放本次刚创建且还没有 session 的 binding；并发 winner 已开始落 session
-    // 时保留绑定，让同 key 重试恢复同一对象。
-    if (await this.state.get(`${KEY_STORE_UPLOAD}${resolved.binding.uploadId}`) !== null) return
-    await this.compareRecord(resolved.key, resolved.binding, null)
-  }
-
-  private async reserveCallCapability(
-    token: string,
-    objectId: string,
-    input: NormalizedUploadInput,
-    transportMaxBytes: number,
-  ): Promise<number> {
-    for (let attempt = 0; attempt < MAX_CAS_ATTEMPTS; attempt++) {
-      const capability = await this.verifyCallUploadCapability(token)
-      const previous = capability.reservations.find(r => r.objectId === objectId)
-      if (previous !== undefined) {
-        // 并发 begin 可能一次拿到 direct signer、另一次退回 relay；重放不能继承更宽的
-        // direct reservation 后再把 relay session 以该上限落库。
-        const replayMaxBytes = Math.min(previous.maxBytes, transportMaxBytes)
-        if (input.size !== undefined && input.size > replayMaxBytes) {
-          throw new TBError(
-            'rate_limited',
-            `对象超过本次上传上限 ${replayMaxBytes} bytes`,
-          )
+    const capability = identity.callCapabilityToken === undefined
+      ? undefined
+      : {
+          id: this.tokenId(identity.callCapabilityToken, 'call'), tokenHash: await sha256Hex(identity.callCapabilityToken),
         }
-        return replayMaxBytes
+    const uploadToken = await this.tokenFor('upload', binding.uploadId)
+    for (let attempt = 0; attempt < MAX_REVISION_ATTEMPTS; attempt++) {
+      const backend = await this.backends.defaultBackend()
+      const driverKey = this.driverKey(binding.objectId)
+      let transport: UploadSession['transport'] = 'relay'
+      let maxBytes = this.relayMaxBytes
+      let signedRequest: StoreUploadStart['signedRequest']
+      // Signing is outside the DB transaction. beginUpload rechecks the active backend identity.
+      if (input.size !== undefined && backend.objects.presignPutExact !== undefined) {
+        try {
+          signedRequest = await backend.objects.presignPutExact(driverKey, this.uploadTtlSec, {
+            contentType: input.contentType, contentLength: input.size, ifNoneMatch: '*',
+          })
+          transport = 'presigned-put'
+          maxBytes = this.maxObjectBytes
+        } catch { /* A backend without an exact signer uses bounded relay. */ }
       }
-      if (capability.status !== 'active') {
-        throw new TBError('rate_limited', 'call upload capability 配额已耗尽')
+      if (input.size !== undefined && input.size > maxBytes) {
+        throw new TBError('rate_limited', `对象超过本次上传上限 ${maxBytes} bytes`)
       }
-      if (!contentTypeAllowed(input.contentType, capability.allowedContentTypes)) {
-        throw new TBError('permission_denied', `call 不允许上传 ${input.contentType}`)
+      const object: StoreObject = {
+        id: binding.objectId, backendId: backend.id, store: DEFAULT_STORE_NAME, driverKey,
+        uploadId: binding.uploadId, status: 'pending', owner: binding.owner, producer: binding.producer,
+        contentType: input.contentType, createdAt: now, updatedAt: now, revision: 1,
+        ...(input.filename !== undefined ? { filename: input.filename } : {}),
+        ...(input.size !== undefined ? { expectedSize: input.size } : {}),
+        ...(input.checksum !== undefined ? { expectedChecksum: input.checksum } : {}),
+        ...(binding.originCallId !== undefined ? { originCallId: binding.originCallId } : {}),
       }
-      if (capability.reservations.length >= capability.maxObjects) {
-        throw new TBError('rate_limited', 'call upload object 数量已达上限')
+      const session: UploadSession = {
+        signingKeyId: this.tokenKeyring.activeKeyId,
+        id: binding.uploadId, backendId: backend.id, objectId: object.id, status: 'created',
+        capabilityHash: await sha256Hex(uploadToken), transport, contentType: input.contentType,
+        maxBytes, expiresAt: binding.expiresAt, createdAt: now, revision: 1,
+        ...(input.size !== undefined ? { expectedSize: input.size } : {}),
+        ...(input.checksum !== undefined ? { expectedChecksum: input.checksum } : {}),
       }
-      const remaining = capability.maxBytes - capability.reservedBytes
-      const maxBytes = Math.min(
-        capability.maxObjectBytes,
-        input.size ?? capability.maxObjectBytes,
-        remaining,
-        transportMaxBytes,
-      )
-      if (maxBytes < 1 || (input.size !== undefined && input.size > maxBytes)) {
-        throw new TBError('rate_limited', 'call upload bytes 配额不足')
+      const result = await this.repository.beginUpload({ object, session, now,
+        ...(capability === undefined ? {} : { capability }),
+        ...(bindingId === undefined ? {} : { binding: { id: bindingId, record: binding } }) })
+      if (result === 'backend_changed') continue
+      if (result.session.id === session.id) {
+        return { uploadId: session.id, objectUri: storeUri(object.id), uploadToken, transport,
+          expiresAt: session.expiresAt, maxBytes: result.session.maxBytes, alreadyCompleted: false,
+          ...(signedRequest === undefined ? {} : { signedRequest }) }
       }
-      const reservations = [...capability.reservations, { objectId, maxBytes }]
-      const reservedBytes = capability.reservedBytes + maxBytes
-      const exhausted = reservations.length >= capability.maxObjects
-        || reservedBytes >= capability.maxBytes
-      const next: CallUploadCapability = {
-        ...capability,
-        reservations,
-        reservedBytes,
-        status: exhausted ? 'exhausted' : 'active',
-        revision: capability.revision + 1,
-      }
-      if (await this.compareRecord(`${KEY_STORE_CALL_CAPABILITY}${capability.id}`, capability, next))
-        return maxBytes
+      return this.startFor(parseSession(result.session))
     }
-    throw new TBError('conflict', 'call upload capability 并发消费冲突')
+    throw new TBError('conflict', '默认存储后端正在切换，请重试')
   }
 
   private async startFor(session: UploadSession): Promise<StoreUploadStart> {
+    if (session.revokedAt !== undefined) throw new TBError('conflict', 'upload capability 已撤销')
     const object = await this.requireObject(session.objectId)
-    const uploadToken = await this.tokenFor('upload', session.id)
+    const uploadToken = await this.tokenFor('upload', session.id, session.signingKeyId)
     // object 是生命周期权威；complete 已线性化但 session 收敛落后时仍返回同 descriptor。
     if (object.status === 'ready') {
-      await this.completeSessionBestEffort(session)
       return {
         uploadId: session.id,
         objectUri: storeUri(object.id),
@@ -1288,10 +1068,11 @@ export class StoreService {
     let signedRequest: StoreUploadStart['signedRequest']
     if (session.transport === 'presigned-put') {
       if (session.expectedSize === undefined) throw stateCorrupt('direct upload size')
-      if (this.objects.presignPutExact === undefined) {
+      const objects = await this.backends.resolveBackend(object.backendId)
+      if (objects.presignPutExact === undefined) {
         throw new TBError('unavailable', 'direct upload signer 当前不可用', { retryable: true })
       }
-      signedRequest = await this.objects.presignPutExact(
+      signedRequest = await objects.presignPutExact(
         object.driverKey,
         Math.max(1, Math.floor(remainingMs / 1000)),
         {
@@ -1311,28 +1092,6 @@ export class StoreService {
       alreadyCompleted: false,
       ...(signedRequest !== undefined ? { signedRequest } : {}),
     }
-  }
-
-  private bindingMatchesIdentity(binding: IdempotencyBinding, identity: UploadIdentity): boolean {
-    if (binding.owner !== identity.owner) return false
-    if (binding.domain === 'owner') {
-      return identity.originCallId === undefined
-        && binding.originCallId === undefined
-        && binding.producer === identity.producer
-    }
-    return identity.originCallId !== undefined
-      && binding.producer === identity.producer
-      && binding.originCallId === identity.originCallId
-  }
-
-  private assertBindingObject(binding: IdempotencyBinding, object: StoreObject): void {
-    if (
-      object.id !== binding.objectId
-      || object.uploadId !== binding.uploadId
-      || object.owner !== binding.owner
-      || object.producer !== binding.producer
-      || object.originCallId !== binding.originCallId
-    ) throw stateCorrupt('idempotent upload identity')
   }
 
   private uploadSessionIsTerminal(session: UploadSession): boolean {
@@ -1358,8 +1117,8 @@ export class StoreService {
 
   /** driver DELETE 成功后持久化证据；后续 cleanup 只收 tombstone，不再重复外部 DELETE。 */
   private async markBytesDeleted(objectId: string, expectedDriverKey: string): Promise<void> {
-    for (let attempt = 0; attempt < MAX_CAS_ATTEMPTS; attempt++) {
-      const raw = await this.state.get(`${KEY_STORE_OBJECT}${objectId}`)
+    for (let attempt = 0; attempt < MAX_REVISION_ATTEMPTS; attempt++) {
+      const raw = await this.repository.objects.get(objectId)
       if (raw === null) return
       const object = parseObject(raw)
       if (object.driverKey !== expectedDriverKey) throw stateCorrupt('object driver key')
@@ -1369,7 +1128,7 @@ export class StoreService {
         bytesDeletedAt: this.nowIso(),
         revision: object.revision + 1,
       }
-      if (await this.compareRecord(`${KEY_STORE_OBJECT}${object.id}`, object, next)) return
+      if (await this.compareRecord(this.repository.objects, object.id, object, next)) return
     }
     throw new TBError('conflict', 'Store 对象字节删除状态并发更新冲突')
   }
@@ -1474,14 +1233,13 @@ export class StoreService {
       && meta.metadata?.['checksum-sha256']?.toLowerCase() === sessionInput.expectedChecksum.value
       ? sessionInput.expectedChecksum
       : undefined
-    for (let attempt = 0; attempt < MAX_CAS_ATTEMPTS; attempt++) {
+    for (let attempt = 0; attempt < MAX_REVISION_ATTEMPTS; attempt++) {
       const object = await this.requireObject(sessionInput.objectId)
       if (object.status === 'ready') {
-        await this.completeSessionBestEffort(await this.requireSession(sessionInput.id))
         return descriptorOf(object)
       }
       if (object.status !== 'pending') {
-        await this.objects.delete(object.driverKey)
+        await (await this.backends.resolveBackend(object.backendId)).delete(object.driverKey)
         await this.markBytesDeleted(object.id, object.driverKey)
         const detail = attempt === 0 ? '状态不允许 ready' : '并发状态冲突'
         throw new TBError('conflict', `对象${detail}:${object.status}`)
@@ -1497,86 +1255,46 @@ export class StoreService {
         revision: object.revision + 1,
         ...(actualChecksum !== undefined ? { checksum: actualChecksum } : {}),
       }
-      if (!await this.compareRecord(`${KEY_STORE_OBJECT}${object.id}`, object, ready)) continue
-      await this.completeSessionBestEffort(await this.requireSession(sessionInput.id))
-      return descriptorOf(ready)
+      const session = await this.requireSession(sessionInput.id)
+      const result = await this.repository.finishUpload(ready, {
+        ...session, status: 'completed', completedAt: now, terminalAt: now,
+        revision: session.revision + 1,
+      })
+      if (result === null) continue
+      return descriptorOf(parseObject(result))
     }
-    // CAS 可能因高竞争或后端暂态失败返回 false；没有终态 winner 时字节仍可供重试 complete。
+    // 事务可能因版本竞争或后端暂态失败返回空；没有终态 winner 时字节仍可供重试 complete。
     throw new TBError('conflict', '对象并发状态冲突:pending')
   }
 
-  private async completeSessionBestEffort(sessionInput: UploadSession): Promise<void> {
-    for (let attempt = 0; attempt < MAX_CAS_ATTEMPTS; attempt++) {
-      const session = await this.requireSession(sessionInput.id)
-      if (session.status === 'completed' || session.status !== 'created') return
-      const completedAt = this.nowIso()
-      const next: UploadSession = {
-        ...session,
-        status: 'completed',
-        completedAt,
-        terminalAt: completedAt,
-        revision: session.revision + 1,
-      }
-      if (await this.compareRecord(`${KEY_STORE_UPLOAD}${session.id}`, session, next)) return
+  private async terminateUpload(
+    sessionInput: UploadSession,
+    objectInput: StoreObject,
+    status: 'aborted' | 'expired' | 'failed',
+  ): Promise<StoreObject> {
+    let object = objectInput
+    let session = sessionInput
+    for (let attempt = 0; attempt < MAX_REVISION_ATTEMPTS; attempt++) {
+      if (object.status === 'ready' || session.status !== 'created') return object
+      const now = this.nowIso()
+      const nextObject: StoreObject = { ...object,
+        status: status === 'failed' ? 'failed' : 'abandoned', updatedAt: now,
+        revision: object.revision + 1 }
+      const nextSession: UploadSession = { ...session, status, terminalAt: now, revision: session.revision + 1 }
+      if (await this.repository.terminateUpload(nextObject, nextSession)) return nextObject
+      object = await this.requireObject(object.id)
+      session = await this.requireSession(session.id)
     }
+    throw new TBError('conflict', 'upload 终态转换并发冲突')
   }
 
   private async failUpload(session: UploadSession, object: StoreObject): Promise<void> {
-    const terminalAt = this.nowIso()
-    if (object.status === 'pending') {
-      const failed: StoreObject = {
-        ...object,
-        status: 'failed',
-        bytesDeletedAt: terminalAt,
-        updatedAt: terminalAt,
-        revision: object.revision + 1,
-      }
-      await this.compareRecord(`${KEY_STORE_OBJECT}${object.id}`, object, failed)
-    }
-    if (session.status === 'created') {
-      const failed: UploadSession = {
-        ...session,
-        status: 'failed',
-        terminalAt,
-        revision: session.revision + 1,
-      }
-      await this.compareRecord(`${KEY_STORE_UPLOAD}${session.id}`, session, failed)
-    }
+    await this.terminateUpload(session, object, 'failed')
     await this.markBytesDeleted(object.id, object.driverKey)
   }
 
   private async expireUpload(session: UploadSession): Promise<void> {
-    if (session.status !== 'created') return
-    let object = await this.requireObject(session.objectId)
-    if (object.status === 'pending') {
-      const abandoned: StoreObject = {
-        ...object,
-        status: 'abandoned',
-        updatedAt: this.nowIso(),
-        revision: object.revision + 1,
-      }
-      if (await this.compareRecord(`${KEY_STORE_OBJECT}${object.id}`, object, abandoned)) {
-        object = abandoned
-      } else {
-        object = await this.requireObject(object.id)
-      }
-    }
-    // complete 赢得 object CAS 时把 session 收敛为 completed；cleanup 不能产生 ready/expired。
-    if (object.status === 'ready') {
-      await this.completeSessionBestEffort(session)
-      return
-    }
-    // CAS 暂态失败但没有 terminal winner：保留 created，下一次 cleanup 重试。
-    if (object.status === 'pending') return
-    const current = await this.requireSession(session.id)
-    if (current.status !== 'created') return
-    const next: UploadSession = {
-      ...current,
-      status: 'expired',
-      terminalAt: this.nowIso(),
-      revision: current.revision + 1,
-    }
-    await this.compareRecord(`${KEY_STORE_UPLOAD}${current.id}`, current, next)
+    await this.terminateUpload(session, await this.requireObject(session.objectId), 'expired')
   }
 
   private async expireCallCapability(capability: CallUploadCapability): Promise<void> {
@@ -1587,7 +1305,7 @@ export class StoreService {
       terminalAt: this.nowIso(),
       revision: capability.revision + 1,
     }
-    await this.compareRecord(`${KEY_STORE_CALL_CAPABILITY}${capability.id}`, capability, next)
+    await this.compareRecord(this.repository.callCapabilities, capability.id, capability, next)
   }
 
   private async expireShare(grant: ShareGrant): Promise<void> {
@@ -1598,17 +1316,17 @@ export class StoreService {
       terminalAt: this.nowIso(),
       revision: grant.revision + 1,
     }
-    await this.compareRecord(`${KEY_STORE_SHARE}${grant.id}`, grant, next)
+    await this.compareRecord(this.repository.shares, grant.id, grant, next)
   }
 
   private async requireObject(id: string): Promise<StoreObject> {
-    const raw = await this.state.get(`${KEY_STORE_OBJECT}${id}`)
+    const raw = await this.repository.objects.get(id)
     if (raw === null) throw new TBError('not_found', 'Store 对象不存在')
     return parseObject(raw)
   }
 
   private async requireSession(id: string): Promise<UploadSession> {
-    const raw = await this.state.get(`${KEY_STORE_UPLOAD}${id}`)
+    const raw = await this.repository.uploads.get(id)
     if (raw === null) throw new TBError('not_found', 'upload session 不存在')
     return parseSession(raw)
   }
@@ -1629,11 +1347,13 @@ export class StoreService {
     return match[1]
   }
 
-  private async tokenFor(domain: TokenDomain, id: string): Promise<string> {
+  private async tokenFor(domain: TokenDomain, id: string, signingKeyId = this.tokenKeyring.activeKeyId): Promise<string> {
+    const root = this.tokenKeyring.keys[signingKeyId]
+    if (root === undefined) throw new TBError('unavailable', 'Store signing key is unavailable')
     const encoder = new TextEncoder()
     const key = await crypto.subtle.importKey(
       'raw',
-      encoder.encode(this.tokenSecret),
+      encoder.encode(root),
       { name: 'HMAC', hash: 'SHA-256' },
       false,
       ['sign'],

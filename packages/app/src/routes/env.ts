@@ -8,6 +8,11 @@ import {
   type BuiltinModule,
   catalogSetDigest,
   createBuiltins,
+  createConfigModule,
+  createDeploymentModule,
+  createKeysModule,
+  createMaintenanceModule,
+  createStorageModule,
   type DeviceMailboxService,
   type StateStore,
 } from '@tool-bridge/core'
@@ -54,6 +59,11 @@ export function createRouteEnv(deps: TbAppDeps): RouteEnv {
       }),
     )
     builtins.set('store', lazyDefaultStoreModule(deps))
+    if (deps.configManagement) builtins.set('config', createConfigModule(deps.configManagement))
+    if (deps.deploymentManagement) builtins.set('deployment', createDeploymentModule(deps.deploymentManagement))
+    if (deps.maintenanceManagement) builtins.set('maintenance', createMaintenanceModule(deps.maintenanceManagement))
+    if (deps.keyManagement) builtins.set('keys', createKeysModule(deps.keyManagement))
+    if (deps.storageManagement) builtins.set('storage', createStorageModule(deps.storageManagement))
     return builtins
   }
   const globalSearchCapabilities = (): Array<'search' | 'search:federated'> => {

@@ -1,14 +1,14 @@
 /**
  * PgStateStore:postgres.js 实现的 StateStore(自托管 Node 宿主的 PG 后端)。
  *
- * 与 SqliteStateStore 同形:单表 kv(key text primary key, value jsonb),值以
+ * 通用状态以单表 kv(key text primary key, value jsonb)保存,值以
  * JSON 存取,强一致。list 用 key 范围扫描(>= prefix AND < successor(prefix)),
  * 不用 LIKE——key 里的路径段可含 '_'/'%',通配符转义是坑。
  *
  * 关键差异——排序 collation:PG 默认按 libc locale 排序,`<` 与 `ORDER BY` 的
- * 顺序会和 JS(UTF-16 code unit)/SQLite(UTF-8 字节)不一致,直接让前缀范围扫描和
+ * 顺序会和 JS(UTF-16 code unit)不一致,直接让前缀范围扫描和
  * cursor 分页错行漏行。故 key 列显式 `COLLATE "C"`(纯字节序),与 core
- * MemoryStateStore / SqliteStateStore 的 cursor 语义对齐。防御性地对返回行再做
+ * MemoryStateStore 的 cursor 语义对齐。防御性地对返回行再做
  * startsWith 过滤。
  */
 
@@ -18,6 +18,7 @@ import { prefixUpperBound, type StateStore } from '@tool-bridge/core'
 const DEFAULT_LIST_LIMIT = 1000
 
 export class PgStateStore implements StateStore {
+  private contextRefsEnabled = false
   constructor(private readonly sql: Sql) {}
 
   /** 建表(幂等)。key COLLATE "C" 是字节序正确性的前提,不能省。 */
@@ -28,6 +29,15 @@ export class PgStateStore implements StateStore {
         value jsonb NOT NULL
       )
     `
+  }
+
+  async ensureContextReferencesSchema(): Promise<void> {
+    await this.sql`CREATE TABLE IF NOT EXISTS tb_context_storage_refs (
+      node_key text COLLATE "C" PRIMARY KEY REFERENCES tb_kv(key) ON DELETE CASCADE,
+      backend_id text NOT NULL REFERENCES tb_storage_backends(id)
+    )`
+    await this.sql`CREATE INDEX IF NOT EXISTS tb_context_storage_backend ON tb_context_storage_refs(backend_id)`
+    this.contextRefsEnabled = true
   }
 
   async get(key: string): Promise<unknown | null> {
@@ -54,11 +64,21 @@ export class PgStateStore implements StateStore {
   }
 
   async put(key: string, value: unknown): Promise<void> {
-    // value 走 sql.json:postgres.js 按 jsonb 绑定,不经字符串拼接。
-    await this.sql`
-      INSERT INTO tb_kv (key, value) VALUES (${key}, ${this.sql.json(value as never)})
-      ON CONFLICT (key) DO UPDATE SET value = excluded.value
-    `
+    const config = (value as { config?: { kind?: string, provider?: string, providerConfig?: { backendId?: string } } })?.config
+    if (this.contextRefsEnabled && key.startsWith('node:')) {
+      await this.sql.begin(async (sql) => {
+        await sql`INSERT INTO tb_kv(key,value) VALUES(${key},${sql.json(value as never)})
+          ON CONFLICT(key) DO UPDATE SET value=excluded.value`
+        if (config?.provider === 'storage' && (config.kind === 'context' || config.kind === 'skillhub')) {
+          if (!config.providerConfig?.backendId) throw new Error('storage Context requires an immutable backendId')
+          await sql`INSERT INTO tb_context_storage_refs(node_key,backend_id) VALUES(${key},${config.providerConfig.backendId})
+            ON CONFLICT(node_key) DO UPDATE SET backend_id=excluded.backend_id`
+        } else await sql`DELETE FROM tb_context_storage_refs WHERE node_key=${key}`
+      })
+      return
+    }
+    await this.sql`INSERT INTO tb_kv(key,value) VALUES(${key},${this.sql.json(value as never)})
+      ON CONFLICT(key) DO UPDATE SET value=excluded.value`
   }
 
   async compareAndSwap(

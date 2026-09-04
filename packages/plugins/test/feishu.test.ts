@@ -10,12 +10,7 @@ import { clearSessionCache } from '../src/feishu/feishuMcp'
 import { createFeishuPlugin } from '../src/feishu/index'
 import { clearTatCache } from '../src/feishu/tat'
 
-/**
- * 原 plugins/feishu 的 workerd(vitest-pool-workers)集成测试,随"内置插件 =
- * 单包源码文件夹"重构移植为纯 Node vitest:SELF.fetch 换成直调 plugin.fetch
- * (同一 fetch 契约),miniflare bindings 换成显式 ENV 对象。断言原样保留——
- * 这正是"重构没有偷偷改契约"的证据。
- */
+/** Node 集成测试通过 plugin.fetch 和显式 ENV 验证真实 HTTP 契约。 */
 const ENV = {
   FEISHU_ALLOWED_TOOLS: 'create-doc,fetch-doc',
   PLUGIN_TOKEN: 'tbp_test_token',
@@ -30,7 +25,7 @@ const SELF = {
 
 // plugin-feishu 集成测试:契约面 / envelope 鉴权 / 凭证经 X-TB-Upstream-Auth 传入 /
 // TAT 换发缓存 / 401 强制重换发 / Allowed-Tools 头透传。飞书换发接口与 MCP 上游全部
-// fetch mock,默认离线确定性。测试与 Worker 同 isolate(vitest-pool-workers):可直接清模块级缓存。
+// fetch mock,默认离线确定性。测试与插件同进程，可直接清模块级缓存。
 //
 // 协议面(健康检查 / ~describe / ~help / envelope / 鉴权 / 去重 / 凭证解包)现由
 // @tool-bridge/plugin-sdk 提供;这里断言的是**经 wire 的实际行为**,所以重写前后

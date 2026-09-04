@@ -1,6 +1,6 @@
 {
   "name": "@tool-bridge/app",
-  "version": "0.20.1",
+  "version": "0.21.0",
   "description": "Host-neutral HTBP application: assemble the tool-bridge tree on any runtime by injecting state, object, secret, device-channel and search adapters",
   "type": "module",
   "license": "MIT",
@@ -35,11 +35,9 @@
     "build": "tsup"
   },
   "dependencies": {
-    "@cfworker/json-schema": "catalog:",
     "@modelcontextprotocol/client": "catalog:",
     "@modelcontextprotocol/core": "catalog:",
     "@modelcontextprotocol/server": "catalog:",
-    "aws4fetch": "catalog:",
     "hono": "catalog:"
   },
   "devDependencies": {

@@ -1,3 +1,5 @@
+import { afterEach, describe, expect, it } from 'vitest'
+import { mkdtempSync, rmSync } from 'node:fs'
 /**
  * 多副本设备通道:跨副本调用转发的集成测试。
  *
@@ -9,21 +11,19 @@
  * 状态必须共享:两副本各持一份 SQLite 的话,设备节点在 B 上根本不存在,
  * 那验证的是状态存储而不是调用路由。
  */
-
-import { afterEach, describe, expect, it } from 'vitest'
-import { mkdtempSync, rmSync } from 'node:fs'
 import postgres, { type Sql } from 'postgres'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Redis } from 'ioredis'
 import { WebSocket } from 'ws'
-import { configFromEnv, createTbServer, DEVICE_WS_PATH, type TbServer } from '../src'
+import { createTbServer, DEVICE_WS_PATH, type TbServer } from '../src'
+import { testServerConfig } from './helpers/server'
 
 const ADMIN_SK = 'tbk_router_test_admin_00000000'
 const ENCRYPTION_KEY = '3ZwpbBkSrp3eT9ylcZedfN33yq9fJLlmeusH98qNbt8'
 const REDIS_URL = process.env.TB_TEST_REDIS_URL
 const DATABASE_URL = process.env.TB_TEST_DATABASE_URL
-const suite = REDIS_URL !== undefined && DATABASE_URL !== undefined ? describe : describe.skip
+const suite = describe
 const SCHEMA = 'tb_router_test'
 
 const cleanups: Array<() => Promise<void> | void> = []
@@ -46,15 +46,15 @@ interface Replica {
 
 /** 起一个副本;replicaId 显式给 —— 同机两进程 hostname 相同,缺省值区分不开。 */
 async function startReplica(replicaId: string, databaseUrl: string): Promise<Replica> {
-  const config = configFromEnv({
-    TB_PORT: '0',
-    TB_HOST: '127.0.0.1',
-    TB_DATA_DIR: tmpDataDir(),
-    TB_BOOTSTRAP_ADMIN_SK: ADMIN_SK,
-    TB_SECRET_ENCRYPTION_KEY: ENCRYPTION_KEY,
-    TB_DATABASE_URL: databaseUrl,
-    TB_REDIS_URL: REDIS_URL as string,
-    TB_REPLICA_ID: replicaId,
+  const config = await testServerConfig({
+    port: 0,
+    host: '127.0.0.1',
+    dataDir: tmpDataDir(),
+    adminSk: ADMIN_SK,
+    encryptionKey: ENCRYPTION_KEY,
+    databaseUrl: databaseUrl,
+    redisUrl: REDIS_URL as string,
+    replicaId: replicaId,
   })
   const server = createTbServer(config)
   const { port } = await server.start()
@@ -227,16 +227,16 @@ suite('多副本回收安全', () => {
     await connectDevice(a.wsBase, deviceId, 'a')
 
     // B 以 1 秒回收起,且启动时会 sweepOrphans:它看到 devicemeta 却本地无连接。
-    const bConfig = configFromEnv({
-      TB_PORT: '0',
-      TB_HOST: '127.0.0.1',
-      TB_DATA_DIR: tmpDataDir(),
-      TB_BOOTSTRAP_ADMIN_SK: ADMIN_SK,
-      TB_SECRET_ENCRYPTION_KEY: ENCRYPTION_KEY,
-      TB_DATABASE_URL: databaseUrl,
-      TB_REDIS_URL: REDIS_URL as string,
-      TB_REPLICA_ID: 'replica-br',
-      TB_DEVICE_RECLAIM_SEC: '1',
+    const bConfig = await testServerConfig({
+      port: 0,
+      host: '127.0.0.1',
+      dataDir: tmpDataDir(),
+      adminSk: ADMIN_SK,
+      encryptionKey: ENCRYPTION_KEY,
+      databaseUrl: databaseUrl,
+      redisUrl: REDIS_URL as string,
+      replicaId: 'replica-br',
+      deviceReclaimSec: 1,
     })
     const b = createTbServer(bConfig)
     const { port } = await b.start()

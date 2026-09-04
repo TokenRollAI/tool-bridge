@@ -10,7 +10,7 @@
  * FS 无用户 metadata:meta.metadata 恒 {},put 的 metadata 不持久化。contentType 不落盘,
  * 由扩展名推断(objectProvider.isInlineable 只内联 text/* 与 application/json,文本扩展名
  * 必须产出 text/* mime,否则设备 fs 的 Get 一律走 $ref → 无 presign/relay 时 503);
- * put 传入的 contentType 同样不持久化,读回以扩展名推断为准(与 r2/s3 的差异见文件语义)。
+ * put 传入的 contentType 同样不持久化,读回以扩展名推断为准(与 storage/s3 的差异见文件语义)。
  */
 
 import { mkdir, readdir, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises'

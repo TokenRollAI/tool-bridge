@@ -1,5 +1,5 @@
+import { Navigate, Route, Routes, useLocation } from 'react-router'
 import { lazy, type ReactNode, Suspense } from 'react'
-import { Navigate, Route, Routes } from 'react-router'
 import { useSession } from '@/lib/session-context'
 
 // 路由级拆包:登录门不再下载 RJSF/AJV 与千行管理表单;进入某页时才加载对应能力。
@@ -38,6 +38,16 @@ const StorePage = lazy(() =>
   import('@/pages/system/StorePage').then(module => ({ default: module.StorePage })),
 )
 
+const SetupPage = lazy(() => import('@/pages/SetupPage').then(module => ({ default: module.SetupPage })))
+const ConfigPage = lazy(() => import('@/pages/system/ConfigPage').then(module => ({ default: module.ConfigPage })))
+const StorageBackendsPage = lazy(() => import('@/pages/system/StorageBackendsPage').then(module => ({ default: module.StorageBackendsPage })))
+
+const DeploymentPage = lazy(() => import('@/pages/system/DeploymentPage').then(module => ({ default: module.DeploymentPage })))
+
+const MaintenancePage = lazy(() => import('@/pages/system/MaintenancePage').then(module => ({ default: module.MaintenancePage })))
+
+const KeysPage = lazy(() => import('@/pages/system/KeysPage').then(module => ({ default: module.KeysPage })))
+
 function AppBooting() {
   return (
     <div className="grid h-svh place-items-center bg-background text-foreground">
@@ -68,6 +78,8 @@ function DeferredPage({ children }: { children: ReactNode }) {
 
 export default function App() {
   const { conn } = useSession()
+  const location = useLocation()
+  if (location.pathname === '/setup') return <Suspense fallback={<AppBooting />}><SetupPage /></Suspense>
   if (!conn) {
     return (
       <Suspense fallback={<AppBooting />}>
@@ -79,6 +91,11 @@ export default function App() {
     <Suspense fallback={<AppBooting />}>
       <Routes>
         <Route element={<WorkspaceShell />}>
+          <Route element={<DeferredPage><KeysPage /></DeferredPage>} path="manage/keys" />
+          <Route element={<DeferredPage><MaintenancePage /></DeferredPage>} path="manage/maintenance" />
+          <Route element={<DeferredPage><DeploymentPage /></DeferredPage>} path="manage/deployment" />
+          <Route element={<DeferredPage><ConfigPage /></DeferredPage>} path="manage/settings/config" />
+          <Route element={<DeferredPage><StorageBackendsPage /></DeferredPage>} path="manage/storage" />
           <Route
             element={(
               <DeferredPage>

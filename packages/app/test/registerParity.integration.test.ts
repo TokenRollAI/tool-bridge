@@ -76,7 +76,7 @@ describe('注册面两通道同权(system/registry write ≡ ~register)', () => 
     expect(register.error).toEqual(registry.error)
   })
 
-  it('skillhub provider 非 r2/s3:两入口同样拒绝', async () => {
+  it('skillhub provider 非 storage/s3:两入口同样拒绝', async () => {
     const tb = await createTestApp()
     const node = {
       path: 'parity/skillhub',

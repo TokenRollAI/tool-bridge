@@ -94,7 +94,7 @@ describe('SecretStoreImpl(可用态)', () => {
     expect(dump).not.toContain(plaintext)
     // 落盘记录形状:iv + ciphertext + updatedAt,无 value/plaintext 字段。
     const raw = await state.get(`${KEY_SECRET}leaky`)
-    expect(Object.keys(raw as object).sort()).toEqual(['ciphertext', 'iv', 'updatedAt'])
+    expect(Object.keys(raw as object).sort()).toEqual(['ciphertext', 'iv', 'keyId', 'revision', 'updatedAt'])
   })
 
   it('IV 随机性:同值两次 set 密文不同', async () => {

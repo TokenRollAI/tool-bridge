@@ -1,45 +1,28 @@
-# tool-bridge 自部署镜像(User Case #4):单容器拉起同一棵 HTBP 树,/data 卷持久。
-#
-# 多阶段:全量 bookworm 构建(better-sqlite3 无 prebuild 时可编译;不用 alpine——
-# musl 无官方 prebuild)→ slim 运行时。pnpm legacy deploy 会为 workspace
-# dashboard 保留指向构建目录的链接,因此将 dist 显式复制到 final image。
-#
-# 用法:
-#   docker build -t tool-bridge .
-#   docker run -d -p 8787:8787 -v tbdata:/data \
-#     -e TB_BOOTSTRAP_ADMIN_SK=<admin-sk> \
-#     -e TB_SECRET_ENCRYPTION_KEY=<base64url 32B> tool-bridge
-#   （缺少 Admin SK 时默认 fail closed;仅显式不安全开发模式允许随机生成。）
-
+# Node self-hosted service and local installer. PostgreSQL and S3 own persistent data.
 FROM node:22-bookworm AS build
 WORKDIR /repo
 RUN corepack enable
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json ./
 COPY packages ./packages
+COPY scripts ./scripts
 RUN pnpm install --frozen-lockfile
 RUN pnpm --filter @tool-bridge/dashboard build
 RUN pnpm --filter @tool-bridge/server build
-# 隔离 prod 部署:server 包 + 生产依赖(含 dashboard dist)→ /out
-# (--legacy:不启用 inject-workspace-packages,workspace 依赖按 pack 规则复制)
 RUN pnpm --filter @tool-bridge/server --prod deploy --legacy /out
 
-# 不设 TB_PORT:让 config.ts 的 `TB_PORT ?? PORT ?? 8787` 兜底链生效——PaaS(Railway/
-# Fly/Cloud Run/CF Container)只注入 PORT,写死 TB_PORT 会把平台端口摁死,容器监听 8787
-# 而平台探活另一个端口,部署直接失败。缺省仍是 8787(DEFAULT_PORT),行为不变。
 FROM node:22-bookworm-slim
-ENV NODE_ENV=production \
-    TB_DATA_DIR=/data \
-    TB_HOST=0.0.0.0 \
-    TB_UI_DIR=/app/dashboard
+# Official PostgreSQL client tools provide backup/migration without running a database here.
+RUN apt-get update && apt-get install -y --no-install-recommends postgresql-common ca-certificates \
+    && /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y \
+    && apt-get update && apt-get install -y --no-install-recommends postgresql-client-18 \
+    && apt-get clean
+ENV NODE_ENV=production TB_BOOTSTRAP_DIR=/data/bootstrap
 COPY --from=build /out /app
 COPY --from=build /repo/packages/dashboard/dist /app/dashboard
 RUN mkdir -p /data && chown node:node /data
 USER node
-# Railway 使用 Dockerfile.railway；契约测试保证两份文件除下一行的平台差异外完全同形。
 VOLUME /data
-# EXPOSE 仅文档性质、不支持变量;默认端口 8787,平台注入 PORT 时以运行时监听为准。
 EXPOSE 8787
-# healthcheck 读与 config.ts 同一套 env(TB_PORT ?? PORT ?? 8787),端口被平台覆盖时不误报。
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s \
-  CMD node -e "const p=process.env.TB_PORT||process.env.PORT||8787;fetch('http://127.0.0.1:'+p+'/healthz').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"
+  CMD node -e "const p=process.env.PORT||8787;fetch('http://127.0.0.1:'+p+'/healthz').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"
 CMD ["node", "/app/dist/main.js"]

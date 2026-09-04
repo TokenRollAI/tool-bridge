@@ -34,7 +34,7 @@ async function candidatePage(
   return await index.search(query, opts)
 }
 
-/** D1 与 better-sqlite3 共用的 MutableSearchIndex 一致性断言。 */
+/** MutableSearchIndex 的业务一致性断言；由真实 PostgreSQL driver 执行。 */
 export async function verifySearchIndexContract(
   index: MutableSearchIndex,
   prefix: string,

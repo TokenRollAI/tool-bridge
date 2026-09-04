@@ -21,6 +21,7 @@ export interface RegistryMountFormState {
   authScheme: string
   baseUrl: string
   ctxAuthRef: string
+  ctxBackendId: string
   ctxCredential: ManagedCredentialFormState
   ctxExport: string
   ctxPrefix: string
@@ -49,7 +50,7 @@ export interface RegistryMountFormState {
   s3Bucket: string
   s3Endpoint: string
   s3Region: string
-  skillProvider: 'r2' | 's3'
+  skillProvider: 'storage' | 's3'
   skRef: string
   toolAuthRef: string
   toolCredential: ManagedCredentialFormState
@@ -66,6 +67,7 @@ export const INITIAL_REGISTRY_MOUNT_FORM: RegistryMountFormState = {
   ctxAuthRef: '',
   ctxCredential: initialManagedCredential(),
   ctxExport: '',
+  ctxBackendId: '',
   ctxPrefix: '',
   describeSpec: '',
   description: '',
@@ -86,13 +88,13 @@ export const INITIAL_REGISTRY_MOUNT_FORM: RegistryMountFormState = {
   path: '',
   pluginConfig: {},
   prefix: '',
-  provider: 'r2',
+  provider: 'storage',
   readOnly: false,
   renameSpec: '',
   s3Bucket: '',
   s3Endpoint: '',
   s3Region: '',
-  skillProvider: 'r2',
+  skillProvider: 'storage',
   skRef: '',
   toolAuthRef: '',
   toolCredential: initialManagedCredential(),
@@ -433,12 +435,15 @@ export function buildRegistryConfig(
           ...(ttl !== undefined ? { ttl } : {}),
         }
       }
-      if (state.provider === 'r2') {
+      if (state.provider === 'storage') {
         return {
           kind: 'context',
-          provider: 'r2',
-          ...(state.ctxPrefix.trim()
-            ? { providerConfig: { prefix: state.ctxPrefix.trim() } }
+          provider: 'storage',
+          ...(state.ctxPrefix.trim() || state.ctxBackendId.trim()
+            ? { providerConfig: {
+                ...(state.ctxPrefix.trim() ? { prefix: state.ctxPrefix.trim() } : {}),
+                ...(state.ctxBackendId.trim() ? { backendId: state.ctxBackendId.trim() } : {}),
+              } }
             : {}),
           ...(state.readOnly ? { readOnly: true } : {}),
           ...(ttl !== undefined ? { ttl } : {}),
@@ -484,9 +489,12 @@ export function buildRegistryConfig(
       }
       return {
         kind: 'skillhub',
-        provider: 'r2',
-        ...(state.ctxPrefix.trim()
-          ? { providerConfig: { prefix: state.ctxPrefix.trim() } }
+        provider: 'storage',
+        ...(state.ctxPrefix.trim() || state.ctxBackendId.trim()
+          ? { providerConfig: {
+              ...(state.ctxPrefix.trim() ? { prefix: state.ctxPrefix.trim() } : {}),
+              ...(state.ctxBackendId.trim() ? { backendId: state.ctxBackendId.trim() } : {}),
+            } }
           : {}),
         ...(state.readOnly ? { readOnly: true } : {}),
         ...(ttl !== undefined ? { ttl } : {}),
@@ -563,7 +571,7 @@ export function existingManagedAuthRef(
     const after = effectiveExportId(exports.tool, state.toolExport)
     return before === after ? config.authRef : undefined
   }
-  if (state.kind === 'context' && state.provider !== 'r2' && state.provider !== 's3') {
+  if (state.kind === 'context' && state.provider !== 'storage' && state.provider !== 's3') {
     if (config.provider !== state.provider) return undefined
     const before = typeof config.export === 'string'
       ? config.export
@@ -608,7 +616,7 @@ export function buildRegistryMountCalls(
     secret = binding.secret
   } else if (
     state.kind === 'context'
-    && state.provider !== 'r2'
+    && state.provider !== 'storage'
     && state.provider !== 's3'
     && options.contextBuiltin
   ) {

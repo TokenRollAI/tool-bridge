@@ -13,6 +13,7 @@ import {
   type ObjectStore,
   type OwnerRef,
   type StateStore,
+  type StoreBackendResolver,
   type StoreCleanupCursors,
   type StoreCleanupResult,
   type StoreModuleDeps,
@@ -21,6 +22,7 @@ import {
   StoreService,
   type StoreServiceOptions,
   type StoreShareResult,
+  type StoreTokenKeyring,
   type StoreUploadInput,
   type StoreUploadStart,
   storeUri,
@@ -42,8 +44,9 @@ const STORE_CALL_MAX_OBJECT_BYTES_DEFAULT = 256 * 1024 * 1024
 const STORE_CALL_MAX_BYTES_DEFAULT = 512 * 1024 * 1024
 
 export interface DefaultStoreRuntime {
-  objects: ObjectStore
+  backends: StoreBackendResolver
   service: StoreService
+  tokenKeyring: StoreTokenKeyring
   tokenSecret: string
 }
 
@@ -133,19 +136,21 @@ function serviceOptions(deps: TbAppDeps, tokenSecret: string): StoreServiceOptio
 }
 
 export async function defaultStoreRuntime(deps: TbAppDeps): Promise<DefaultStoreRuntime> {
-  if (deps.objects === undefined) {
-    throw new TBError('unavailable', 'default Store object driver is not configured', {
-      retryable: false,
-    })
+  if (!deps.storeRepository || !deps.storeBackends) {
+    throw new TBError('unavailable', 'default Store requires a domain repository and backend resolver', { retryable: false })
   }
-  const [objects, tokenSecret] = await Promise.all([
-    deps.objects(),
-    storeTokenSecret(deps.state, deps.storeTokenSecret ?? deps.encryptionKey),
-  ])
+  const tokenKeyring: StoreTokenKeyring = deps.storeTokenKeyring
+    ? {
+        activeKeyId: deps.storeTokenKeyring.activeKeyId,
+        keys: Object.fromEntries(await Promise.all(Object.entries(deps.storeTokenKeyring.keys).map(async ([id, root]) => [id, await derivedTokenSecret(root)]))),
+      }
+    : { activeKeyId: 'k1', keys: { k1: await storeTokenSecret(deps.state, deps.storeTokenSecret ?? deps.encryptionKey) } }
+  const tokenSecret = tokenKeyring.keys[tokenKeyring.activeKeyId]!
   return {
-    objects,
+    backends: deps.storeBackends,
     tokenSecret,
-    service: new StoreService(deps.state, objects, serviceOptions(deps, tokenSecret)),
+    tokenKeyring,
+    service: new StoreService(deps.storeRepository, deps.storeBackends, { ...serviceOptions(deps, tokenSecret), tokenKeyring }),
   }
 }
 
@@ -400,7 +405,7 @@ export async function issueDeviceCallUpload(
 ): Promise<DeviceCallUploadIssue | null> {
   // Embedded legacy hosts may intentionally omit the Store. Standard hosts
   // always inject it and therefore always get the call-scoped capability.
-  if (deps.objects === undefined) return null
+  if (!deps.storeRepository || !deps.storeBackends) return null
   const store = await defaultStoreRuntime(deps)
   const maxObjects = positiveInt(
     deps.storeCallMaxObjects,
@@ -478,7 +483,6 @@ function emptyCleanupResult(): StoreCleanupResult {
   return {
     abandonedObjects: 0,
     deletedBytes: 0,
-    deletedStaging: 0,
     expiredCallCapabilities: 0,
     expiredIdempotencyBindings: 0,
     expiredShares: 0,
@@ -489,7 +493,6 @@ function emptyCleanupResult(): StoreCleanupResult {
 function addCleanupResult(target: StoreCleanupResult, page: StoreCleanupResult): void {
   target.abandonedObjects += page.abandonedObjects
   target.deletedBytes += page.deletedBytes
-  target.deletedStaging += page.deletedStaging
   target.expiredCallCapabilities += page.expiredCallCapabilities
   target.expiredIdempotencyBindings += page.expiredIdempotencyBindings
   target.expiredShares += page.expiredShares
@@ -498,7 +501,7 @@ function addCleanupResult(target: StoreCleanupResult, page: StoreCleanupResult):
 
 /**
  * One bounded host cleanup tick. Cursor progress is itself CAS-protected and
- * durable, so later pages are not starved across Cron/Node timer invocations.
+ * durable, so later pages are not starved across Node maintenance invocations.
  * 编排骨架与 device Mailbox 共用(cursorCleanup.ts);此处只保留 Store 的持久进度
  * 形状({cursors,revision})、页参数与结果聚合。
  */
@@ -520,13 +523,10 @@ export async function cleanupDefaultStore(
       return { cursor: progress.cursors, revision: progress.revision }
     },
     progressKey: KEY_STORE_CLEANUP_PROGRESS,
-    runPage: async (cursor, pageNumber) => {
+    runPage: async (cursor) => {
       const page = await store.service.cleanup({
         ...(limit === undefined ? {} : { limit }),
         ...(cursor === undefined ? {} : { cursors: cursor }),
-        // staging 不使用权威状态 cursor；同一 host tick 只运行一次，避免
-        // maxPages 内重复扫描同一 driver maintenance 范围。
-        runDriverMaintenance: pageNumber === 0,
       })
       addCleanupResult(aggregate, page)
       return page.cursors

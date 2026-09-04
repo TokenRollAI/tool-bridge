@@ -1,24 +1,14 @@
-/**
- * PgSearchIndex:postgres.js 驱动的 SearchIndex(ILIKE 子串检索)。
- *
- * 方言(SQL 文本、$n 占位符、ILIKE 检索)在 core 的 pgSearchDialect;
- * 本文件只吸收 postgres.js 的驱动差异:全异步、写入走 sql.begin() 事务、多行 VALUES
- * 批量插入(PG 无 D1 的 50 查询预算,故不实现 assertInsertBudget)。
- *
- * 不需要任何 PG 扩展:检索是纯 ILIKE,cursor_secret 用内置 gen_random_uuid()。
- * 因此连接角色无需建扩展权限(受限托管环境常不给),只要能建表。
- */
-
+/** PostgreSQL driver: transactions and bounded VALUES batches; search SQL is owned by core/pgSearchSql. */
 import type { Sql } from 'postgres'
 import {
   PG_SEARCH_INSERT_ROWS_MAX,
+  PG_SEARCH_SCHEMA_STATEMENTS,
   PG_SEARCH_SNAPSHOTS_COLUMNS,
   PG_SEARCH_SNAPSHOTS_TABLE,
   PG_SEARCH_TOOLS_COLUMNS,
   PG_SEARCH_TOOLS_TABLE,
   PG_SEARCH_WRITE_LOCK_KEY,
   pgBulkInsertSql,
-  pgSearchDialect,
   type SerializedToolSearchRecord,
   type SqlSearchDriver,
   SqlSearchIndex,
@@ -38,7 +28,7 @@ class PgSearchDriver implements SqlSearchDriver {
   private async initializeSchema(): Promise<void> {
     try {
       await this.sql.begin(async (tx) => {
-        for (const ddl of pgSearchDialect.schemaStatements) {
+        for (const ddl of PG_SEARCH_SCHEMA_STATEMENTS) {
           await tx.unsafe(ddl)
         }
       })
@@ -115,6 +105,6 @@ class PgSearchDriver implements SqlSearchDriver {
 /** Node 自托管宿主的 postgres.js SearchIndex。 */
 export class PgSearchIndex extends SqlSearchIndex {
   constructor(sql: Sql) {
-    super(new PgSearchDriver(sql), pgSearchDialect)
+    super(new PgSearchDriver(sql))
   }
 }

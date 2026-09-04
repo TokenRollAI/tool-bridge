@@ -1,13 +1,13 @@
 import type { PluginBindings } from '@tool-bridge/app'
-import { type BuiltinCatalog,
-  type ContextProvider,
-  type DeviceClientState,
-  type DeviceExpose,
+import { type BuiltinCatalog, type ContextProvider, type DeviceClientState, type DeviceExpose,
+  type MailboxRepository,
   type NodeInput,
   type ObjectStore,
   type OperationRegistry,
   type SecretStoreImpl,
   type StateStore,
+  type StoreBackendResolver,
+  type StoreRepository,
   type ToolResult,
   type ToolSpec,
   type TreePath } from '@tool-bridge/core'
@@ -46,18 +46,18 @@ export interface FederatedSearchConfig {
 /** createToolBridge 配置(标准签名 + SDK 引导扩展,后者见各字段注释)。 */
 export interface ToolBridgeConfig {
   /**
-   * Admin SK 明文(引导时 sha256 入库,与 gateway TB_BOOTSTRAP_ADMIN_SK 同语义);
-   * 缺省取 env TB_BOOTSTRAP_ADMIN_SK；首次引导时两者皆无则拒绝启动。
+   * Admin SK 明文(引导时 sha256 入库)，首次引导必须显式注入。
    */
   adminSk?: string
   /** 放行 http:// 上游(仅本地开发)。 */
   allowInsecureHttp?: boolean
-  /** secrets 缺省实现的主密钥(base64url 32B);缺省取 env TB_SECRET_ENCRYPTION_KEY。 */
+  /** secrets 的显式主密钥(base64url 32B)；不读取宿主环境变量。 */
   encryptionKey?: string
   /** 联邦搜索并发、deadline、响应体与 continuation session 的部署级硬上限。 */
   federatedSearch?: FederatedSearchConfig
   /** 本实例 X-TB-Via 标识(缺省用入站 host 派生)。 */
   instanceId?: string
+  mailboxRepository?: MailboxRepository
   /** X-TB-Via 跳数上限;默认 4。 */
   maxHops?: number
   /**
@@ -81,13 +81,13 @@ export interface ToolBridgeConfig {
    * Provider OAuth 时必须显式注入，并负责逐跳出站策略与跨源 body 重定向保护。
    */
   providerOAuthFetch?: typeof fetch
-
-  // ---- 以下为 SDK 引导扩展(标准签名未列) ----
-
   /** remote baseUrl 的 host 后缀白名单;空/缺省 = 拒绝一切 remote 注册。 */
   remoteAllowlist?: string[]
   /** 追加保留根路径。 */
   reservedRoots?: string[]
+
+  // ---- 以下为 SDK 引导扩展(标准签名未列) ----
+
   /**
    * 上游凭证;缺省实现 = 基于 state 的加密存储,主密钥取
    * config.encryptionKey 或 env TB_SECRET_ENCRYPTION_KEY——两者皆无 →
@@ -96,6 +96,8 @@ export interface ToolBridgeConfig {
   secrets?: SecretStoreImpl
   /** 树配置 / SK / manifest 的存取(宿主注入;内存宿主可用 MemoryStateStore)。 */
   state: StateStore
+  storeBackends?: StoreBackendResolver
+  storeRepository?: StoreRepository
   /** create_upload 写入 grant 有效期秒；缺省 900，最大 604800。 */
   uploadGrantTtlSec?: number
 }

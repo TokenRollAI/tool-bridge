@@ -24,7 +24,7 @@ import { npmRegistrySnapshot, npmRegistryVersionState } from './npm-registry-ver
 import { buildReleasePlan } from './release-plan.mjs'
 
 const root = join(import.meta.dirname, '..')
-const publicPackages = ['app', 'cli', 'dashboard', 'gateway', 'plugin-sdk', 'sdk', 'server']
+const publicPackages = ['app', 'cli', 'dashboard', 'plugin-sdk', 'sdk', 'server']
 
 function readTsConfig(relativePath) {
   const configPath = join(root, relativePath)
@@ -74,22 +74,22 @@ test('source consumers resolve neutral SDK entries without prebuilt dist', () =>
 })
 
 const releasePlanFixture = {
-  order: ['app', 'dashboard', 'gateway', 'server'],
+  order: ['app', 'dashboard', 'cli', 'server'],
   packages: [
     { pkg: 'app', deps: [], needsPublish: true },
     { pkg: 'dashboard', deps: [], needsPublish: true },
-    { pkg: 'gateway', deps: [], needsPublish: true },
+    { pkg: 'cli', deps: [], needsPublish: true },
     { pkg: 'server', deps: ['dashboard'], needsPublish: true },
   ],
 }
 
 test('release package selection closes pending prerequisites in topological order', () => {
-  assert.deepEqual(parseRequestedPackages(' server,server , gateway '), ['server', 'gateway'])
+  assert.deepEqual(parseRequestedPackages(' server,server , cli '), ['server', 'cli'])
   assert.deepEqual(selectReleasePackages(releasePlanFixture, ''), releasePlanFixture.order)
   assert.deepEqual(selectReleasePackages(releasePlanFixture, 'server'), ['dashboard', 'server'])
   assert.deepEqual(
-    selectReleasePackages(releasePlanFixture, 'server,gateway'),
-    ['dashboard', 'gateway', 'server'],
+    selectReleasePackages(releasePlanFixture, 'server,cli'),
+    ['dashboard', 'cli', 'server'],
   )
 })
 
@@ -444,7 +444,7 @@ test('SDK client artifact is neutral and declarations do not leak Zod internals'
   )
 })
 
-test('packed JS may only import Node/platform builtins and declared runtime dependencies', () => {
+test('packed JS may only import Node builtins and declared runtime dependencies', () => {
   const manifest = {
     name: '@tool-bridge/server',
     dependencies: { 'better-sqlite3': '^12', 'hono': '^4', '@hono/node-server': '^1' },
@@ -478,21 +478,25 @@ test('packed JS importing an undeclared package fails with the offending files',
   )
 })
 
-test('runtime import gate treats cloudflare: and node: as builtins and normalizes subpaths', () => {
+test('runtime import gate allows Node builtins and normalizes subpaths', () => {
   assert.equal(packageNameOf('@modelcontextprotocol/sdk/client/index.js'), '@modelcontextprotocol/sdk')
   assert.equal(packageNameOf('hono/quick'), 'hono')
   assert.equal(packageNameOf('ws'), 'ws')
-  const manifest = { name: '@tool-bridge/gateway', dependencies: {} }
+  const manifest = { name: '@tool-bridge/server', dependencies: {} }
   const sources = new Map([
-    ['package/dist/full.js', 'import { DurableObject } from "cloudflare:workers"; import { Buffer } from "node:buffer"; import "./x.js"'],
+    ['package/dist/full.js', 'import { Buffer } from "node:buffer"; import "./x.js"'],
   ])
   assert.deepEqual(findUndeclaredRuntimeImports(manifest, sources), [])
+  const unsupported = new Map([
+    ['package/dist/index.js', 'import "cloudflare:workers"'],
+  ])
+  assert.throws(() => assertRuntimeImportsDeclared(manifest, unsupported), /cloudflare:workers/)
 })
 
 test('runtime import gate ignores import examples inside bundled JSDoc and line comments', () => {
   // 回归:MCP SDK 的 validation 模块在 JSDoc 里写了 `import { Ajv } from 'ajv'` 用法示例,
-  // 被 bundle 进 gateway/server 的 feishu chunk 后曾被误报为未声明依赖。
-  const manifest = { name: '@tool-bridge/gateway', dependencies: { hono: '^4' } }
+  // 被 bundle 进 server 的 feishu chunk 后曾被误报为未声明依赖。
+  const manifest = { name: '@tool-bridge/server', dependencies: { hono: '^4' } }
   const sources = new Map([
     ['package/dist/feishu-XYZ.js', [
       '/**',
@@ -577,10 +581,6 @@ const publishValidationClosures = {
   'dashboard': {
     test: ['core', 'sdk', 'dashboard'],
     typecheck: ['core', 'sdk', 'dashboard'],
-  },
-  'gateway': {
-    test: ['core', 'app', 'plugin-sdk', 'plugins', 'gateway'],
-    typecheck: ['core', 'app', 'plugin-sdk', 'plugins', 'gateway'],
   },
   'plugin-sdk': {
     // plugins 是最大契约消费者，只加入 test，不是 SDK 产物闭包。

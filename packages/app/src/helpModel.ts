@@ -130,7 +130,7 @@ export async function helpModelFor(
     if (deviceMarkerOf(node.config.providerConfig) !== null) {
       return contextHelpModel(node, { readOnly: node.config.readOnly ?? false })
     }
-    if (node.config.provider !== 'r2' && node.config.provider !== 's3') {
+    if (node.config.provider !== 'storage' && node.config.provider !== 's3') {
       const local = localContext(deps, node)
       if (local !== null) {
         // SDK 进程内 Provider:动词表 = 真实实现的 handler;无任何写动词即自动只读

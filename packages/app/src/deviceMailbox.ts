@@ -28,7 +28,8 @@ function parseProgress(value: unknown): CursorCleanupProgress<string> {
 }
 
 export function createDeviceMailboxService(deps: TbAppDeps): DeviceMailboxService {
-  return new DeviceMailboxService(deps.state, deps.encryptionKey)
+  if (!deps.mailboxRepository) throw new TBError('unavailable', 'mailbox requires a domain repository')
+  return new DeviceMailboxService(deps.mailboxRepository, deps.encryptionKeyring ?? deps.encryptionKey)
 }
 
 /**

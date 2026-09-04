@@ -12,10 +12,9 @@ import {
   Client as ModernClient,
   StreamableHTTPClientTransport as ModernTransport,
 } from '@modelcontextprotocol/client'
-import { CfWorkerJsonSchemaValidator as ModernValidator } from '@modelcontextprotocol/client/validators/cf-worker'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
-import { CfWorkerJsonSchemaValidator } from '@modelcontextprotocol/sdk/validation/cfworker'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
+import { ToolJsonSchemaValidator } from '../src/jsonSchemaValidator'
 
 export async function connectTestMcpClient(
   endpoint: string,
@@ -24,7 +23,7 @@ export async function connectTestMcpClient(
 ): Promise<Client> {
   const client = new Client(
     { name: 'tool-bridge-test', version: '0.0.0' },
-    { jsonSchemaValidator: new CfWorkerJsonSchemaValidator() },
+    { jsonSchemaValidator: new ToolJsonSchemaValidator() },
   )
   const transport = new StreamableHTTPClientTransport(new URL(endpoint), {
     // initialized 后 SDK 会探测可选长驻 SSE GET；workerd 测试 harness 不允许悬挂
@@ -54,7 +53,7 @@ export async function connectModernMcpClient(
   const client = new ModernClient(
     { name: 'tool-bridge-test-modern', version: '0.0.0' },
     {
-      jsonSchemaValidator: new ModernValidator(),
+      jsonSchemaValidator: new ToolJsonSchemaValidator(),
       versionNegotiation: { mode: { pin: '2026-07-28' } },
     },
   )

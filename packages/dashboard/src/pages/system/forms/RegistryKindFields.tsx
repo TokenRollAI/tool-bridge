@@ -129,9 +129,9 @@ const ADVANCED_FIELDS = [
   textField('describeSpec', 'describe（每行 from=描述）', { rows: 2 }),
 ]
 const S3_FIELDS = [
-  textField('s3Endpoint', 'endpoint', { placeholder: 'https://….r2.cloudflarestorage.com', required: true }),
+  textField('s3Endpoint', 'endpoint', { placeholder: 'https://s3.example.com', required: true }),
   textField('s3Bucket', 'bucket', { required: true }),
-  textField('s3Region', 'region（可空，缺省 auto）'),
+  textField('s3Region', 'region（可空，缺省 us-east-1）'),
   textField('ctxAuthRef', 'authRef', { placeholder: 's3-main', required: true }),
 ]
 const policyFields = (label: string): SchemaField[] => [
@@ -381,7 +381,7 @@ export function RegistryKindFields({
                 >
                   <SelectTrigger className="font-mono text-xs"><SelectValue /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem className="font-mono text-xs" value="r2">r2（实例自带桶）</SelectItem>
+                    <SelectItem className="font-mono text-xs" value="storage">storage（实例自带桶）</SelectItem>
                     <SelectItem className="font-mono text-xs" value="s3">s3（外部兼容端点）</SelectItem>
                     {contextPlugins.map(plugin => (
                       <SelectItem className="font-mono text-xs" key={plugin.id} value={plugin.id}>
@@ -392,11 +392,14 @@ export function RegistryKindFields({
                   </SelectContent>
                 </Select>
               </div>
-              {(state.provider === 'r2' || state.provider === 's3') && (
+              {(state.provider === 'storage' || state.provider === 's3') && (
                 <Field id="ctx-prefix" label="key 前缀（可空）" onChange={value => update('ctxPrefix', value)} value={state.ctxPrefix} />
               )}
             </div>
-            {state.provider !== 'r2' && state.provider !== 's3' && (
+            {state.provider === 'storage' && (
+              <Field id="ctx-backend-id" label="存储后端 ID（留空绑定当前默认）" onChange={value => update('ctxBackendId', value)} value={state.ctxBackendId} />
+            )}
+            {state.provider !== 'storage' && state.provider !== 's3' && (
               <>
                 <ExportField
                   id="ctx-export"
@@ -464,7 +467,7 @@ export function RegistryKindFields({
             <RegistrySchemaFields
               fields={[
                 choiceField('skillProvider', 'provider', [
-                  ['r2', 'r2（实例自带桶）'], ['s3', 's3（外部兼容端点）'],
+                  ['storage', 'storage（实例自带桶）'], ['s3', 's3（外部兼容端点）'],
                 ]),
                 textField('ctxPrefix', 'key 前缀（可空）'),
               ]}
@@ -472,6 +475,9 @@ export function RegistryKindFields({
               onChange={onChange}
               state={state}
             />
+            {state.skillProvider === 'storage' && (
+              <Field id="skill-backend-id" label="存储后端 ID（留空绑定当前默认）" onChange={value => update('ctxBackendId', value)} value={state.ctxBackendId} />
+            )}
             {state.skillProvider === 's3' && (
               <RegistrySchemaFields fields={S3_FIELDS} idPrefix="skill-s3" onChange={onChange} state={state} />
             )}

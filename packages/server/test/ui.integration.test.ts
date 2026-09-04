@@ -1,14 +1,15 @@
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { afterEach, describe, expect, it } from 'vitest'
+import { brotliCompressSync, gzipSync } from 'node:zlib'
 /**
  * /ui 静态托管集成测试(fixture 目录,不依赖 dashboard 构建产物)。
  * 覆盖:index/资产 200 与 contentType、深链 SPA 回退、路径穿越 404、
  * 显式 TB_UI_DIR 无效 → 无 UI(/ui 404 优雅降级)、GET / HTML 协商 302 → /ui/。
  */
-
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
-import { afterEach, describe, expect, it } from 'vitest'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { configFromEnv, createTbServer, type TbServer } from '../src'
+import { createTbServer, type TbServer } from '../src'
+import { testServerConfig } from './helpers/server'
 
 const ADMIN_SK = 'tbk_server_test_admin_00000000'
 const ENCRYPTION_KEY = '3ZwpbBkSrp3eT9ylcZedfN33yq9fJLlmeusH98qNbt8'
@@ -33,18 +34,21 @@ function makeUiFixture(): string {
   const dir = tmpDir('tb-ui-')
   writeFileSync(join(dir, 'index.html'), '<!doctype html><title>tb-ui-fixture</title>')
   mkdirSync(join(dir, 'assets'), { recursive: true })
-  writeFileSync(join(dir, 'assets', 'app.js'), `console.log("fixture");${'//pad\n'.repeat(400)}`)
+  const body = `console.log("fixture");${'//pad\n'.repeat(400)}`
+  writeFileSync(join(dir, 'assets', 'app.js'), body)
+  writeFileSync(join(dir, 'assets', 'app.js.br'), brotliCompressSync(body))
+  writeFileSync(join(dir, 'assets', 'app.js.gz'), gzipSync(body))
   return dir
 }
 
 async function startServer(uiDir: string): Promise<{ baseUrl: string, server: TbServer }> {
-  const config = configFromEnv({
-    TB_PORT: '0',
-    TB_HOST: '127.0.0.1',
-    TB_DATA_DIR: tmpDir('tb-uidata-'),
-    TB_BOOTSTRAP_ADMIN_SK: ADMIN_SK,
-    TB_SECRET_ENCRYPTION_KEY: ENCRYPTION_KEY,
-    TB_UI_DIR: uiDir,
+  const config = await testServerConfig({
+    port: 0,
+    host: '127.0.0.1',
+    dataDir: tmpDir('tb-uidata-'),
+    adminSk: ADMIN_SK,
+    encryptionKey: ENCRYPTION_KEY,
+    uiDir: uiDir,
   })
   const server = createTbServer(config)
   const { port } = await server.start()
@@ -106,7 +110,21 @@ describe('/ui 静态托管', () => {
       headers: { 'if-none-match': etag as string, 'accept-encoding': 'identity' },
     })
     expect(revalidate.status).toBe(304)
+    expect(revalidate.headers.get('vary')).toContain('Accept-Encoding')
+    expect(revalidate.headers.get('cache-control')).toContain('immutable')
     expect(await revalidate.text()).toBe('')
+
+    const explicitlyRefused = await fetch(`${baseUrl}/ui/assets/app.js`, { headers: { 'accept-encoding': '*;q=1, br;q=0, gzip;q=0' } })
+    expect(explicitlyRefused.status).toBe(200)
+    expect(explicitlyRefused.headers.get('content-encoding')).toBeNull()
+    expect(await explicitlyRefused.text()).toContain('fixture')
+    const preferredGzip = await fetch(`${baseUrl}/ui/assets/app.js`, { headers: { 'accept-encoding': 'br;q=0.1, gzip;q=0.9, identity;q=0.01' } })
+    expect(preferredGzip.headers.get('content-encoding')).toBe('gzip')
+    const refused = await fetch(`${baseUrl}/ui/assets/app.js`, { headers: { 'accept-encoding': '*;q=0, identity;q=0' } })
+    expect(refused.status).toBe(406)
+    const head = await fetch(`${baseUrl}/ui/assets/app.js`, { method: 'HEAD', headers: { 'accept-encoding': 'identity' } })
+    expect(head.headers.get('etag')).toBe(etag)
+    expect(await head.text()).toBe('')
   })
 
   it('GET /(Accept html)→ 302 /ui/;TB_UI_DIR 无效 → /ui 404 优雅降级', async () => {

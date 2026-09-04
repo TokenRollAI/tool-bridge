@@ -7,7 +7,9 @@
     ".": "./src/index.ts",
     "./device": "./src/device/public.ts",
     "./node": "./src/node/index.ts",
-    "./protocol": "./src/protocol/public.ts"
+    "./protocol": "./src/protocol/public.ts",
+    "./management": "./src/managedConfig.ts",
+    "./deployment": "./src/deployment.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.node.json",
