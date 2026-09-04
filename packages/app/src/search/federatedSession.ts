@@ -8,6 +8,7 @@
  */
 import {
   base64urlEncode,
+  isTBError,
   sha256Hex,
   type StateStore,
   TBError,
@@ -245,7 +246,7 @@ function parseRecord(value: unknown): AnySessionRecord {
       topologyDigest: value.topologyDigest,
     }) as AnySessionRecord
   } catch (error) {
-    if (error instanceof TBError) throw error
+    if (isTBError(error)) throw error
     throw corruptSession()
   }
 }

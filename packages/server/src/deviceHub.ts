@@ -22,6 +22,7 @@ import {
   DeviceGatewaySession,
   encodeDeviceFrame,
   identify,
+  isTBError,
   type MutableSearchIndex,
   NodeRegistryStore,
   type StateStore,
@@ -138,7 +139,7 @@ export class DeviceHub {
       this.handleUpgrade(req, socket, head).catch((err) => {
         rejectUpgrade(
           socket,
-          err instanceof TBError ? err : new TBError('internal', 'upgrade failed'),
+          isTBError(err) ? err : new TBError('internal', 'upgrade failed'),
         )
       })
     })
@@ -295,7 +296,7 @@ export class DeviceHub {
         close: code => ws.close(code),
         onHello: (hello) => {
           this.acceptHello(conn, hello).catch((err) => {
-            conn.session.reject(err instanceof TBError ? err : new TBError('internal', 'hello 失败'))
+            conn.session.reject(isTBError(err) ? err : new TBError('internal', 'hello 失败'))
           })
         },
       },
@@ -321,7 +322,7 @@ export class DeviceHub {
       try {
         conn.session.handleFrame(decodeDeviceFrame(data.toString()))
       } catch (err) {
-        conn.session.reject(err instanceof TBError ? err : new TBError('invalid_argument', '非法帧'))
+        conn.session.reject(isTBError(err) ? err : new TBError('invalid_argument', '非法帧'))
       }
     })
     ws.on('close', () => {

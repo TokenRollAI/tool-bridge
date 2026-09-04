@@ -49,6 +49,7 @@ export {
   type ContextUploadInput,
   type DeviceClientState,
   type DeviceExpose,
+  isTBError,
   type ListOptions,
   MemoryObjectStore,
   MemoryStateStore,

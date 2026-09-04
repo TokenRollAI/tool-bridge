@@ -33,4 +33,4 @@ export type {
   StoreUploadGrant,
   StoreUri,
 } from './wire'
-export { TBError } from '@tool-bridge/core/device'
+export { isTBError, TBError } from '@tool-bridge/core/device'

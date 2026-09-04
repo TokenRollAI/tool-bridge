@@ -9,6 +9,7 @@ import {
   type CallContext,
   check,
   checkVia,
+  isTBError,
   NodeRegistryStore,
   type NormalizedToolSearchOptions,
   normalizeToolSearchOptions,
@@ -115,7 +116,7 @@ function isPrefix(prefix: TreePath, path: TreePath): boolean {
 }
 
 function controlledStatus(error: unknown): WireToolSearchSourceStatus {
-  if (error instanceof TBError) {
+  if (isTBError(error)) {
     if (error.message.includes('环')) return 'cycle'
     if (error.message.includes('跳数')) return 'hop_limit'
     if (error.message.includes('aborted')) return 'timed_out'
@@ -137,7 +138,7 @@ function invalidContinuation(): TBError {
 }
 
 function continuationSourceError(error: unknown): TBError {
-  if (error instanceof TBError) {
+  if (isTBError(error)) {
     if (error.code === 'invalid_argument') return error
     if (error.message.includes('source work budget exhausted')) return invalidContinuation()
   }
@@ -876,7 +877,7 @@ async function computePage(
         await assertFederatedCapability(deps, input, node, headers, deadline)
         return null
       } catch (error) {
-        const status = error instanceof TBError && error.message.includes('unsupported')
+        const status = isTBError(error) && error.message.includes('unsupported')
           ? 'unsupported' as const
           : controlledStatus(error)
         return { error, source, status }
@@ -886,7 +887,7 @@ async function computePage(
   for (const failure of capabilityFailures) {
     if (failure === null) continue
     if (!initial) {
-      if (failure.error instanceof TBError && failure.error.code === 'invalid_argument') {
+      if (isTBError(failure.error) && failure.error.code === 'invalid_argument') {
         throw failure.error
       }
       throw failure.status === 'unsupported'
@@ -1205,7 +1206,7 @@ export async function executeFederatedSearch(
         requestDigest,
       }) as SessionRecord
     } catch (error) {
-      if (!(error instanceof TBError) || error.code !== 'invalid_argument') throw error
+      if (!isTBError(error) || error.code !== 'invalid_argument') throw error
     }
     if (next !== undefined) assertNextRecord(current, next, digest)
     const cachedNext = next !== undefined

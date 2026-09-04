@@ -30,7 +30,7 @@
  */
 
 import type { z } from 'zod/v4'
-import { TBError } from '@tool-bridge/plugin-sdk'
+import { isTBError, TBError } from '@tool-bridge/plugin-sdk'
 import type {
   getMessageInput,
   listMessagesInput,
@@ -112,7 +112,7 @@ async function request(ctx: ProviderContext, options: RequestOptions): Promise<u
     })
   } catch (error) {
     // guardedFetch 拦下的出站(EgressBlockedError)已经是 TBError,原样冒上去。
-    if (error instanceof TBError) throw error
+    if (isTBError(error)) throw error
     throw upstreamError(
       502,
       error instanceof Error ? `Twilio request failed: ${error.message}` : 'Twilio request failed',

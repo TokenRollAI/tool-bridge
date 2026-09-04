@@ -65,7 +65,8 @@ Dashboard 若嵌入 server/gateway 产物,应先发布它依赖的包,再发布�
 - `files`、exports、bin、types 与 `publishConfig` 必须指向构建后真实存在的文件。
 - 多入口包必须递归检查 `exports` 的全部条件目标(包括 `types`、`import`、`react-native`),不能只验证 `main`。`@tool-bridge/sdk/client`、`/store`、`/device` 的 JS/d.ts 都必须从各自入口递归扫描最终 tarball shared closure：不得引用 `node:*`、Node `ws`、Hono、`process.env`、private workspace 包或 Node-only 声明类型；干净消费者同时 import 根入口和三个 neutral 子入口(设备边界背景见 [do-websocket-sessions](../device/do-websocket-sessions.mdx))。
 - 解包最终 packed tarball,检查其中 `package.json` 的 `dependencies`、`optionalDependencies` 与 `peerDependencies`;不得残留 `catalog:`、`workspace:` 或其他 npm 不支持的工作区协议。只检查仓库源码 manifest 会漏掉未改写的占位符。
-- CI 在全仓 build 后复用同一脚本并传 `--skip-install`,只保留 packed manifest 协议闸门:合入前的 workspace 依赖版本可能尚未发布到 registry,不能把这类不可安装误判为 tarball 协议错误。publish workflow 不得跳过干净安装。
+- 除 Dashboard(静态站点,hash 资产由浏览器加载)外,每个公开包 packed `dist/**/*.js`(含 code-splitting chunk 与懒加载的 provider 文件)中的裸 `import`/`import()` specifier 都必须是 Node 内建(`node:` 前缀或裸内建名)、`cloudflare:*`,或归一到 `dependencies`/`optionalDependencies`/`peerDependencies` 已声明的包;bundler 内联 CJS 后残留在 shim 里的 `require("...")` 字符串故意不计。这是 tsup `external` 与 manifest 漂移的唯一机器闸门,由此**公开包 tsup config 的每个 `external` 条目都必须出现在本包运行时依赖字段**。教训:server 曾把 `@modelcontextprotocol/sdk`(v1)留在 `external` 却未声明依赖,被 bundle 的 feishu provider 懒 import 它时,`tsx src/main.ts` 能从 plugins 的 node_modules 解析而掩盖问题,`pnpm --prod deploy` 产出的 Docker 镜像与 npm 安装产物却在首次加载 feishu 时 `ERR_MODULE_NOT_FOUND`;修复是删掉该 external 让 v1 sdk 随产物 bundle(与 gateway/full 同形)。
+- CI 在全仓 build 后复用同一脚本并传 `--skip-install`,只跳过干净消费者安装,packed manifest 协议闸门与上述产物闭包/裸 import 闸门照常执行,因此 external 漂移在合入前即可捕获:合入前的 workspace 依赖版本可能尚未发布到 registry,不能把这类不可安装误判为 tarball 协议错误。publish workflow 不得跳过干净安装。
 - **publish workflow 必须捕获脚本返回的 tarball 路径,并把同一个文件交给 `npm publish`**;校验后重新打包会留下产物漂移窗口——"校验的"和"发布的"必须是同一个 tarball。
 - 声明文件可能跨包引用私有源码,不能只依赖 monorepo typecheck。
 - 版本字符串若编译进产物,必须在 bump 后重建并搜索实际入口。

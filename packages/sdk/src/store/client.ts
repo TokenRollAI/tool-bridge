@@ -1,4 +1,4 @@
-import { TBError } from '@tool-bridge/core/device'
+import { isTBError, TBError } from '@tool-bridge/core/device'
 import {
   parseStoreClientObjectDescriptor,
   parseStoreListPage,
@@ -233,7 +233,7 @@ export function createStoreClient(options: StoreClientOptions): StoreClient {
             retryable: response.status === 408 || response.status === 429 || response.status >= 500,
           })
         } catch (error) {
-          if (error instanceof TBError) throw error
+          if (isTBError(error)) throw error
           if (signal?.aborted || (error instanceof Error && error.name === 'AbortError')) {
             throw error
           }

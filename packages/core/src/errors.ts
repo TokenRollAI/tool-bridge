@@ -66,6 +66,12 @@ export function statusForCode(code: TBErrorCode): number {
   return CODE_TO_STATUS[code]
 }
 
+/**
+ * 跨 bundle 品牌。`Symbol.for` 走全局 symbol registry,不同 core 副本得到同一个 symbol;
+ * 版本后缀让将来不兼容的形状变更可以刻意断开识别。
+ */
+const TB_ERROR_BRAND = Symbol.for('tool-bridge.TBError.v1')
+
 export interface TBErrorOptions {
   /**
    * HTTP 状态覆盖:仅用于两个特例——
@@ -79,6 +85,11 @@ export interface TBErrorOptions {
 
 /**
  * 平台错误。既是抛掷用的 Error,也承载线上呈现所需的 `httpStatus` 与 body。
+ *
+ * 实例带不可枚举的 `Symbol.for` 品牌:private core 被 bundle 进每个 public 产物各自一份,同进程里
+ * 可能同时存在多个 `TBError` 类(如 `@tool-bridge/sdk` 根入口与 `./store` 子入口分两次构建)。
+ * `instanceof` 在跨副本时恒为 false,会把已归一的错误降级成 `internal` 500;识别统一走
+ * `isTBError`,它只看品牌与线上形状,不看原型链。
  */
 export class TBError extends Error {
   readonly code: TBErrorCode
@@ -88,6 +99,12 @@ export class TBError extends Error {
   constructor(code: TBErrorCode, message: string, options: TBErrorOptions = {}) {
     super(message)
     this.name = 'TBError'
+    Object.defineProperty(this, TB_ERROR_BRAND, {
+      configurable: false,
+      enumerable: false,
+      value: true,
+      writable: false,
+    })
     const retryable = options.retryable ?? false
     if (retryable && !RETRYABLE_CODES.has(code)) {
       throw new Error(`TBError: retryable=true not allowed for code '${code}'`)
@@ -130,7 +147,21 @@ export class TBError extends Error {
   }
 }
 
-/** 判断任意值是否为 TBError 实例(网关 onError 中区分已知/未知错误)。 */
+/**
+ * 判断任意值是否为 TBError(网关 onError 中区分已知/未知错误)。
+ *
+ * 不用 `instanceof`:同进程可能载入多份 core(每个 public 产物各 bundle 一份),跨副本
+ * `instanceof` 恒为 false。这里按品牌 symbol + 线上形状识别,任何副本构造的 TBError 都算。
+ * 返回的类型守卫仍是本副本的 `TBError`,`code/message/retryable/httpStatus/toJSON` 契约一致。
+ */
 export function isTBError(value: unknown): value is TBError {
-  return value instanceof TBError
+  if (typeof value !== 'object' || value === null) return false
+  if ((value as { [TB_ERROR_BRAND]?: unknown })[TB_ERROR_BRAND] !== true) return false
+  const candidate = value as Partial<TBError>
+  return typeof candidate.code === 'string'
+    && TB_ERROR_CODES.includes(candidate.code)
+    && typeof candidate.message === 'string'
+    && typeof candidate.retryable === 'boolean'
+    && typeof candidate.httpStatus === 'number'
+    && typeof candidate.toJSON === 'function'
 }

@@ -21,7 +21,7 @@
  */
 
 import type { z } from 'zod/v4'
-import { TBError } from '@tool-bridge/plugin-sdk'
+import { isTBError, TBError } from '@tool-bridge/plugin-sdk'
 import type { listEventsAllCalendarsInput } from '../schema'
 import {
   API_BASE,
@@ -178,7 +178,7 @@ function buildSummaryItem(event: Json): Json | undefined {
 
 /** 单个日历读失败时写进 `errorsByCalendar` 的形状(上游 `mapCalendarError`)。 */
 function mapCalendarError(error: unknown): CalendarIssue {
-  if (!(error instanceof TBError)) {
+  if (!isTBError(error)) {
     return { code: 'provider_error', message: error instanceof Error ? error.message : String(error) }
   }
   if (error.code === 'rate_limited') return { code: 'rate_limited', message: error.message }
@@ -189,7 +189,7 @@ function mapCalendarError(error: unknown): CalendarIssue {
 }
 
 function isUnauthenticated(error: unknown): boolean {
-  return error instanceof TBError && error.code === 'permission_denied' && error.httpStatus === 401
+  return isTBError(error) && error.code === 'permission_denied' && error.httpStatus === 401
 }
 
 /** 翻完 calendarList 的所有页,拿到当前用户可见(未隐藏、未删除)的日历。 */
@@ -325,7 +325,7 @@ export async function listEventsAllCalendars(
       if (isUnauthenticated(error)) throw error
       const mapped = mapCalendarError(error)
       errorsByCalendar[calendar.calendarId] = mapped
-      firstRecoverableError ??= error instanceof TBError ? error : upstreamError(502, mapped.message)
+      firstRecoverableError ??= isTBError(error) ? error : upstreamError(502, mapped.message)
     }
   }
 

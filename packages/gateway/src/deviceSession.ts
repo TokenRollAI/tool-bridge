@@ -7,6 +7,7 @@ import {
   type DeviceFrame,
   DeviceGatewaySession,
   encodeDeviceFrame,
+  isTBError,
   NodeRegistryStore,
   parsePositiveIntEnv,
   PING_FRAME_JSON,
@@ -146,7 +147,7 @@ export class DeviceSession extends DurableObject<DeviceSessionEnv> {
       }
       throw TBError.notFound('not found')
     } catch (err) {
-      if (err instanceof TBError) return tbErrorResponse(err)
+      if (isTBError(err)) return tbErrorResponse(err)
       return tbErrorResponse(new TBError('internal', 'internal error'))
     }
   }
@@ -159,7 +160,7 @@ export class DeviceSession extends DurableObject<DeviceSessionEnv> {
         = typeof message === 'string' ? message : new TextDecoder().decode(new Uint8Array(message))
       frame = decodeDeviceFrame(text)
     } catch (err) {
-      session.reject(err instanceof TBError ? err : new TBError('invalid_argument', '非法帧'))
+      session.reject(isTBError(err) ? err : new TBError('invalid_argument', '非法帧'))
       return
     }
     session.handleFrame(frame)
@@ -263,7 +264,7 @@ export class DeviceSession extends DurableObject<DeviceSessionEnv> {
         onHello: (hello) => {
           this.ctx.waitUntil(
             this.acceptHello(ws, session, hello).catch((err) => {
-              session.reject(err instanceof TBError ? err : new TBError('internal', 'hello 失败'))
+              session.reject(isTBError(err) ? err : new TBError('internal', 'hello 失败'))
             }),
           )
         },

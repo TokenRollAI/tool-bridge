@@ -27,7 +27,7 @@ import {
   type ObjectStore,
 } from '../context/objectStore'
 import { normalizeEntryPath } from '../context/path'
-import { TBError } from '../errors'
+import { isTBError, TBError } from '../errors'
 
 function isErrnoCode(e: unknown, code: string): boolean {
   return typeof e === 'object' && e !== null && (e as { code?: unknown }).code === code
@@ -210,7 +210,7 @@ export class FsObjectStore implements ObjectStore {
           if (!st.isFile()) continue
           files.push({ key, meta: this.metaOf(key, st) })
         } catch (e) {
-          if (e instanceof TBError || isErrnoCode(e, 'ENOENT')) continue
+          if (isTBError(e) || isErrnoCode(e, 'ENOENT')) continue
           throw e
         }
       }
@@ -282,7 +282,7 @@ export class FsObjectStore implements ObjectStore {
         if (real !== rootReal && !real.startsWith(rootReal + sep)) throw escapeError(key)
         return
       } catch (e) {
-        if (e instanceof TBError) throw e
+        if (isTBError(e)) throw e
         if (!isErrnoCode(e, 'ENOENT')) throw e
         const parent = dirname(probe)
         if (parent === probe) throw escapeError(key) // 走到文件系统根仍不存在:异常兜底

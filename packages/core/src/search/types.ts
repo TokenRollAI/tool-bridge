@@ -7,7 +7,7 @@ import {
 } from '../types'
 import { base64urlDecode, base64urlEncode } from '../encoding/base64url'
 import { canonicalizePath, validatePath } from '../tree/path'
-import { TBError } from '../errors'
+import { isTBError, TBError } from '../errors'
 
 /**
  * pre-launch 收口:曾预留 'search:semantic' 全链路(wire/cursor/CLI/Dashboard 穿透)
@@ -722,7 +722,7 @@ export async function decodeToolSearchCursor(
     )
     value = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(new Uint8Array(plaintext)))
   } catch (error) {
-    if (error instanceof TBError) throw error
+    if (isTBError(error)) throw error
     throw new TBError('invalid_argument', '搜索 cursor 格式非法')
   }
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {

@@ -1,4 +1,4 @@
-import { MemoryStateStore, TBError } from '@tool-bridge/core'
+import { isTBError, MemoryStateStore } from '@tool-bridge/core'
 import { describe, expect, it } from 'vitest'
 import { processDeviceHello, runBootstrap } from '../src/index'
 import { TEST_ADMIN_SK } from './fixtures'
@@ -33,7 +33,7 @@ describe('processDeviceHello × 部署追加保留根', () => {
       reservedRoots: ['internal'],
     })
     await expect(attempt).rejects.toSatisfy(
-      err => err instanceof TBError && err.code === 'permission_denied',
+      err => isTBError(err) && err.code === 'permission_denied',
     )
     expect(await store.get('node:internal/phone')).toBeNull()
   })

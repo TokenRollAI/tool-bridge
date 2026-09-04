@@ -20,6 +20,18 @@
       "reason": "The remaining fal.ai endpoint is an SSE stream parsed with event-stream semantics."
     },
     {
+      "file": "src/feishu/feishuMcp.ts",
+      "category": "mcp",
+      "guardedFetchCalls": 1,
+      "reason": "Feishu MCP is a Streamable HTTP JSON-RPC session driven by the MCP SDK client; the guarded transport is injected into the SDK, not a JSON REST call."
+    },
+    {
+      "file": "src/feishu/tat.ts",
+      "category": "signed",
+      "guardedFetchCalls": 1,
+      "reason": "Tenant access token exchange posts app_secret in the body with cross-origin redirects forbidden and caches per app_id; it is a credential handshake, not a provider action."
+    },
+    {
       "file": "src/feishu_custom_bot/api.ts",
       "category": "signed",
       "guardedFetchCalls": 1,
