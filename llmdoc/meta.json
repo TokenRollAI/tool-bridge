@@ -6,13 +6,13 @@
   },
   "documents": {
     "app-runtime/host-neutral-assembly.mdx": {
-      "validatedRevision": "cd9af1c6a10382a689f6ebf545c2e24a83997df6"
+      "validatedRevision": "b0ea4be6b851c63cfc3f026f2abcc1edf8519091"
     },
     "app-runtime/mcp-interop.mdx": {
       "validatedRevision": "cd9af1c6a10382a689f6ebf545c2e24a83997df6"
     },
     "architecture.mdx": {
-      "validatedRevision": "cd9af1c6a10382a689f6ebf545c2e24a83997df6"
+      "validatedRevision": "b0ea4be6b851c63cfc3f026f2abcc1edf8519091"
     },
     "cli/agent-skill-integration.mdx": {
       "validatedRevision": "cd9af1c6a10382a689f6ebf545c2e24a83997df6"
@@ -36,7 +36,7 @@
       "validatedRevision": "7a95689821229679c9e481af42243dd831936e74"
     },
     "hosts-deploy/state-store-decision.mdx": {
-      "validatedRevision": "cd9af1c6a10382a689f6ebf545c2e24a83997df6"
+      "validatedRevision": "b0ea4be6b851c63cfc3f026f2abcc1edf8519091"
     },
     "plugins/designing-and-migrating-plugins.mdx": {
       "validatedRevision": "cd9af1c6a10382a689f6ebf545c2e24a83997df6"
@@ -54,7 +54,7 @@
       "validatedRevision": "7a95689821229679c9e481af42243dd831936e74"
     },
     "search/search-index.mdx": {
-      "validatedRevision": "cd9af1c6a10382a689f6ebf545c2e24a83997df6"
+      "validatedRevision": "b0ea4be6b851c63cfc3f026f2abcc1edf8519091"
     },
     "store/default-store.mdx": {
       "validatedRevision": "cd9af1c6a10382a689f6ebf545c2e24a83997df6"
