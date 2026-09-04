@@ -1,66 +1,66 @@
 {
   "schema": "llmdoc.meta/v3",
   "baseline": {
-    "revision": "b91d8d58f8a1eb8f1074005b5262e38ed34f7217",
-    "verifiedAt": "2026-09-01T08:00:53.111Z"
+    "revision": "cd9af1c6a10382a689f6ebf545c2e24a83997df6",
+    "verifiedAt": "2026-09-04T10:51:32.014Z"
   },
   "documents": {
     "app-runtime/host-neutral-assembly.mdx": {
-      "validatedRevision": "b91d8d58f8a1eb8f1074005b5262e38ed34f7217"
+      "validatedRevision": "cd9af1c6a10382a689f6ebf545c2e24a83997df6"
     },
     "app-runtime/mcp-interop.mdx": {
-      "validatedRevision": "b91d8d58f8a1eb8f1074005b5262e38ed34f7217"
+      "validatedRevision": "cd9af1c6a10382a689f6ebf545c2e24a83997df6"
     },
     "architecture.mdx": {
-      "validatedRevision": "b91d8d58f8a1eb8f1074005b5262e38ed34f7217"
+      "validatedRevision": "cd9af1c6a10382a689f6ebf545c2e24a83997df6"
     },
     "cli/agent-skill-integration.mdx": {
-      "validatedRevision": "b91d8d58f8a1eb8f1074005b5262e38ed34f7217"
+      "validatedRevision": "cd9af1c6a10382a689f6ebf545c2e24a83997df6"
     },
     "cli/argument-contract.mdx": {
-      "validatedRevision": "b91d8d58f8a1eb8f1074005b5262e38ed34f7217"
+      "validatedRevision": "cd9af1c6a10382a689f6ebf545c2e24a83997df6"
     },
     "dashboard/canvas-architecture.mdx": {
-      "validatedRevision": "b91d8d58f8a1eb8f1074005b5262e38ed34f7217"
+      "validatedRevision": "cd9af1c6a10382a689f6ebf545c2e24a83997df6"
     },
     "device/device-daemon.mdx": {
-      "validatedRevision": "b91d8d58f8a1eb8f1074005b5262e38ed34f7217"
+      "validatedRevision": "cd9af1c6a10382a689f6ebf545c2e24a83997df6"
     },
     "device/do-websocket-sessions.mdx": {
-      "validatedRevision": "b91d8d58f8a1eb8f1074005b5262e38ed34f7217"
+      "validatedRevision": "cd9af1c6a10382a689f6ebf545c2e24a83997df6"
     },
     "hosts-deploy/cloudflare-paths.mdx": {
-      "validatedRevision": "b91d8d58f8a1eb8f1074005b5262e38ed34f7217"
+      "validatedRevision": "cd9af1c6a10382a689f6ebf545c2e24a83997df6"
     },
     "hosts-deploy/node-docker-and-helm.mdx": {
-      "validatedRevision": "b91d8d58f8a1eb8f1074005b5262e38ed34f7217"
+      "validatedRevision": "cd9af1c6a10382a689f6ebf545c2e24a83997df6"
     },
     "hosts-deploy/state-store-decision.mdx": {
-      "validatedRevision": "b91d8d58f8a1eb8f1074005b5262e38ed34f7217"
+      "validatedRevision": "cd9af1c6a10382a689f6ebf545c2e24a83997df6"
     },
     "plugins/designing-and-migrating-plugins.mdx": {
-      "validatedRevision": "b91d8d58f8a1eb8f1074005b5262e38ed34f7217"
+      "validatedRevision": "cd9af1c6a10382a689f6ebf545c2e24a83997df6"
     },
     "plugins/plugin-runtime.mdx": {
-      "validatedRevision": "b91d8d58f8a1eb8f1074005b5262e38ed34f7217"
+      "validatedRevision": "cd9af1c6a10382a689f6ebf545c2e24a83997df6"
     },
     "protocol/htbp-contract.mdx": {
-      "validatedRevision": "b91d8d58f8a1eb8f1074005b5262e38ed34f7217"
+      "validatedRevision": "cd9af1c6a10382a689f6ebf545c2e24a83997df6"
     },
     "protocol/security-boundaries.mdx": {
-      "validatedRevision": "b91d8d58f8a1eb8f1074005b5262e38ed34f7217"
+      "validatedRevision": "cd9af1c6a10382a689f6ebf545c2e24a83997df6"
     },
     "release/npm-publishing.mdx": {
-      "validatedRevision": "b91d8d58f8a1eb8f1074005b5262e38ed34f7217"
+      "validatedRevision": "cd9af1c6a10382a689f6ebf545c2e24a83997df6"
     },
     "search/search-index.mdx": {
-      "validatedRevision": "b91d8d58f8a1eb8f1074005b5262e38ed34f7217"
+      "validatedRevision": "cd9af1c6a10382a689f6ebf545c2e24a83997df6"
     },
     "store/default-store.mdx": {
-      "validatedRevision": "b91d8d58f8a1eb8f1074005b5262e38ed34f7217"
+      "validatedRevision": "cd9af1c6a10382a689f6ebf545c2e24a83997df6"
     },
     "device/durable-mailbox.mdx": {
-      "validatedRevision": "b91d8d58f8a1eb8f1074005b5262e38ed34f7217"
+      "validatedRevision": "cd9af1c6a10382a689f6ebf545c2e24a83997df6"
     }
   },
   "convergence": {
