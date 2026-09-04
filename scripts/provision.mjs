@@ -13,7 +13,7 @@ import { readFileSync, writeFileSync } from 'node:fs'
  *    仓库里那份 wrangler.jsonc 因此保持中立(无账户 id、无域名),谁 clone 都能直接用。
  *
  * 用成熟 CLI(wrangler)完成,不手写 CF API 调用。凭据走 wrangler OAuth
- * 或 CLOUDFLARE_API_TOKEN(见 .env)。CI 对已经 provision 的 production 设置
+ * 或 CLOUDFLARE_API_TOKEN(见 .env)。已有资源的手工部署可设置
  * TB_PROVISION_CONFIG_ONLY=true + TB_PROVISION_D1_DATABASE_ID,只回填中立配置,不再管理资源。
  */
 import { execFileSync } from 'node:child_process'
