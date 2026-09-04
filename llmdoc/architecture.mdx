@@ -41,9 +41,11 @@ tool-bridge 把工具、上下文、设备与远端服务组织成一棵受权�
 
 项目处于 pre-launch 开发期,无正式生产环境;共享或临时部署只用于验证。项目内部旧预览形状可直接删除,不留兼容 flag;外部协议互操作(MCP era、Help DSL 未知项忽略、S3 兼容)与安全下界不可删。
 
-长期产品优先级是 self-hosted：本地运行与用户自行部署始终是架构和交付主线，优先提供完整的 Docker Compose 部署体验。Cloudflare 是次级适配目标，后续选型与抽象以自托管需求为先；这项优先级不表示现有 Cloudflare 支持已移除或存储实现已迁移。
+已接受的目标是只支持 self-hosted，以完整 Docker Compose 提供本地运行和自行部署。实施阶段将完全移除 Cloudflare 专属宿主、适配器、工具、模板及部署文档，包括 Workers、D1、Durable Objects 与 R2 专属集成，不保留次级适配或旧版支持线；通用 S3 兼容能力和共享设备协议、安全及执行语义继续保留。当前代码中的 Cloudflare 支持尚未删除，下文包职责与宿主说明仍描述当前实现。
 
-SQLite 退役已获认可：目标是移除 Node 服务的 SQLite 运行后端及对应公开导出，减少长期维护的后端分支；当前实现仍为 Node SQLite/PG 与 Workers D1。分阶段目标、未决选型与验收条件见仓库内的 `docs/self-hosted-architecture-refactor.md`。S3 替换部署级文件对象后端、Dashboard 配置 R2 属于规划能力，尚未实现；默认对象服务仍待验证选型。
+SQLite 退役已获认可：目标是移除 Node 服务的 SQLite 运行后端及对应公开导出，减少长期维护的后端分支；当前实现仍为 Node SQLite/PG 与 Workers D1。S3 替换部署级文件对象后端、Dashboard/API/CLI 管理通用对象后端属于规划能力，尚未实现；默认对象服务仍待验证选型。分阶段目标、未决选型与验收条件见仓库内的 `docs/self-hosted-architecture-refactor.md`。
+
+配置的已接受目标是让全部现有产品环境变量设置均可经 Dashboard、API 与 CLI 操作，默认 Compose 无需手填环境变量。运行配置以 PostgreSQL 为权威；数据库之外只保留解决 PG 地址、加密根和首次配对的最小 bootstrap 文件/secret。启动或部署设置必须明确重启要求，或由受限本地安装器执行 apply；业务容器不挂载 Docker socket。该配置管理面尚未实现，不把启动信任根伪装成可即时生效的普通运行配置。
 
 ## 依赖方向与包职责
 
