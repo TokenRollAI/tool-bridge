@@ -14,12 +14,11 @@ Agent 只需要一个 BaseURL 和一个 Secret Key，就能发现能力、阅读
 [![npm: sdk](https://img.shields.io/npm/v/@tool-bridge/sdk?label=%40tool-bridge%2Fsdk)](https://www.npmjs.com/package/@tool-bridge/sdk)
 [![license](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
-[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/TokenRollAI/tool-bridge/tree/main/template)
 
 </div>
 
 > [!IMPORTANT]
-> tool-bridge 目前处于 **pre-launch** 开发阶段。Cloudflare、Node/Docker、SDK、CLI 和 Dashboard 已能组成完整使用闭环，但项目尚无正式生产环境，也暂不承诺稳定性 SLA。现在适合自托管试用、内部集成和参与开发；升级前请阅读发布说明并保留数据备份。
+> tool-bridge 目前处于 **pre-launch** 开发阶段。Node/Docker、SDK、CLI 和 Dashboard 已能组成完整使用闭环，但项目尚无正式生产环境，也暂不承诺稳定性 SLA。现在适合自托管试用、内部集成和参与开发；升级前请阅读发布说明并保留数据备份。
 
 ## tool-bridge 是什么
 
@@ -126,7 +125,7 @@ Skill 会先验证目标，再搜索或逐级浏览、读取工具级 schema 与
 |---|---|---|
 | 接入已有工具 | MCP、声明式 HTTP、内置集成、外部 Plugin | 给 Agent 提供统一发现与调用入口 |
 | 存储设备产物和附件 | 部署自带的 default Store、SDK、CLI、Dashboard | 上传照片/视频/录音，获得稳定 URI，并按需短期分享 |
-| 管理上下文与技能 | R2、S3、Node 文件对象存储、Plugin Context、Skillhub | 统一读写、搜索文档与对象，发布和获取 Agent Skill |
+| 管理上下文与技能 | S3、设备文件对象存储、Plugin Context、Skillhub | 统一读写、搜索文档与对象，发布和获取 Agent Skill |
 | 接入本地机器 | `tb daemon install`、`tb connect`、SDK `connect()` | 从内网主动连接，按白名单暴露 shell、文件或本地函数 |
 | 共享使用经验 | 每个路径的 `~feedback`、CLI、Dashboard | 让后续 Agent 在调用前看到已验证的坑和建议 |
 | 联邦多个团队 | remote 节点、`system/federation` | 把另一棵 HTBP 树挂成子树，不共享本地调用者凭据 |
@@ -134,8 +133,8 @@ Skill 会先验证目标，再搜索或逐级浏览、读取工具级 schema 与
 
 ### 上传设备产物与普通附件
 
-每个标准部署都自带一个与 Context 独立的 default Store。Node/Docker 默认写入 `/data` 卷，
-Cloudflare 默认写入部署时创建的 R2 bucket；设备拍照、视频和录音不需要先挂载 Context：
+每个标准部署都自带一个与 Context 独立的 default Store，通过 S3 兼容服务存储对象。
+设备拍照、视频和录音不需要先挂载 Context：
 
 ```sh
 tb store upload ./capture.jpg --json
@@ -188,8 +187,7 @@ tb ctx upload ctx/docs photos/shot.jpg --file ./shot.jpg
 文件二进制直接发送到对象存储；网关只看到 `{path, contentType, overwrite?}`。缺省上传会用
 条件 PUT 拒绝覆盖同名对象，只有 CLI `--force` 或 Dashboard 二次确认才允许替换。
 命令输出的是可长期保存的 `node://...` URI，不会打印临时上传
-URL。Cloudflare R2 宿主需额外配置 presign 凭证；从 Dashboard 直传时还要为 Dashboard
-origin 配置 bucket CORS。
+URL。从 Dashboard 直传时还要为 Dashboard origin 配置 bucket CORS。
 
 完整参数以 `tb <command> --help` 和 [`packages/cli/README.md`](packages/cli/README.md) 为准。
 
@@ -293,31 +291,11 @@ tb help teams/team-b/tools/search
 | 形态 | 状态 / 对象 / 设备 | 副本 | 适合场景 |
 |---|---|---|---|
 | **Docker 单容器** | SQLite + 本地文件系统 + 进程内 WebSocket | 1 | 自托管、内网、快速验证 |
-| **Docker Compose** | PostgreSQL(+ 可选 S3/R2、Redis) | 1–2(单机) | 单机生产、含 HA 参考栈,见 [`deploy/compose/`](deploy/compose/docker-compose.yml) |
-| **Kubernetes(Helm)** | PostgreSQL + S3/R2 + Redis → 无状态多副本;或 SQLite + PVC 单副本 | 1–N | 多副本生产、滚动更新,见 [`deploy/helm/tool-bridge/`](deploy/helm/tool-bridge) |
-| **Cloudflare Workers** | D1 + R2 + Durable Objects | serverless | 边缘部署、低运维、设备长连接 |
-| **嵌入式 SDK** | 由调用方注入 store/provider | — | 在自己的 Node/Workers 应用里注册本地函数 |
+| **Docker Compose** | PostgreSQL(+ 可选 S3、Redis) | 1–2(单机) | 单机生产、含 HA 参考栈,见 [`deploy/compose/`](deploy/compose/docker-compose.yml) |
+| **Kubernetes(Helm)** | PostgreSQL + S3 + Redis → 无状态多副本;或 SQLite + PVC 单副本 | 1–N | 多副本生产、滚动更新,见 [`deploy/helm/tool-bridge/`](deploy/helm/tool-bridge) |
+| **嵌入式 SDK** | 由调用方注入 store/provider | — | 在自己的 Node 应用里注册本地函数 |
 
-Node 宿主的横向扩容公式:**PG(`TB_DATABASE_URL`)+ S3/R2(`TB_OBJECT_STORE_*`)+ Redis(`TB_REDIS_URL`)三件配齐即无状态多副本**;只配前两件是"容器可随意重建、但别扩副本"的单副本无状态形态。Helm chart 会在渲染期直接拒绝危险组合(如 `replicas>1 + SQLite`)。健康探针:`/livez`(liveness)、`/readyz`(readiness,探后端连通 + 优雅关停时提前摘流量)、`/healthz`(版本与 catalog 对拍)。
-
-### Cloudflare Workers
-
-最快入口是页面顶部的 Deploy Button。部署前先生成并保存 `TB_BOOTSTRAP_ADMIN_SK` 与 `TB_SECRET_ENCRYPTION_KEY`，模板会在首次构建前要求填写，避免先启动一个没有信任根的实例。完整说明见 [`template/README.md`](template/README.md)。
-
-从源码 checkout 部署完整形态时，推荐使用 CLI 向导：
-
-```sh
-git clone https://github.com/TokenRollAI/tool-bridge
-cd tool-bridge
-pnpm install
-npm install -g @tool-bridge/cli
-
-tb init cloudflare --repo .
-```
-
-向导负责登录/选择账户、生成 trust roots、创建 R2/D1、构建部署、验证 `~help` 并保存本机 profile。非交互环境使用 `--account-id <id> --yes`，自定义域使用 `--domain tb.example.com`。
-
-部署完成后还要在 Cloudflare Dashboard 的 `D1 → <数据库> → Settings` 打开 **Read Replication**。gateway 已按请求使用 D1 Sessions（State/Search 首读 primary，后续读可使用满足 bookmark 的副本）并默认启用 Smart Placement；若数据库未开复制，行为仍正确但查询仍由 primary 服务。响应里的 `Server-Timing` 与 Workers Logs 的 `tool_bridge_slow_request` 可区分 D1 网络等待、SQL 时间和应用/上游耗时。
+Node 宿主的横向扩容公式:**PG(`TB_DATABASE_URL`)+ S3(`TB_OBJECT_STORE_*`)+ Redis(`TB_REDIS_URL`)三件配齐即无状态多副本**;只配前两件是"容器可随意重建、但别扩副本"的单副本无状态形态。Helm chart 会在渲染期直接拒绝危险组合(如 `replicas>1 + SQLite`)。健康探针:`/livez`(liveness)、`/readyz`(readiness,探后端连通 + 优雅关停时提前摘流量)、`/healthz`(版本与 catalog 对拍)。
 
 ### 嵌入自己的应用
 
@@ -330,7 +308,7 @@ import { createToolBridge, MemoryObjectStore, MemoryStateStore } from '@tool-bri
 
 const tb = createToolBridge({
   state: new MemoryStateStore(),
-  // Store 是必备部署能力；内存 driver 仅适合示例/测试，生产请注入持久 FS、R2 或 S3。
+  // Store 是必备部署能力；内存 driver 仅适合示例/测试，生产请注入持久 S3 或自定义 driver。
   objects: new MemoryObjectStore(),
   adminSk: process.env.TB_BOOTSTRAP_ADMIN_SK!,
 })
@@ -351,7 +329,7 @@ Node HTTP server、反向连接和自定义 store 说明见 [`packages/sdk/READM
 - 不可见路径在 `~help`、`~tree` 和调用中返回 404，避免泄露节点是否存在。
 - 上游密钥进入只写 SecretStore；节点配置、日志和只读管理响应不返回密钥值。
 - 内置 Plugin 与网关同进程同权，并使用受控出站；外部 Plugin 在注册时校验 descriptor 和健康状态。
-- 三宿主的权威状态均为强一致后端(Workers=D1、Node=SQLite/PG),SK 吊销即时生效。
+- PostgreSQL 是标准部署的权威状态后端，SK 吊销即时生效。
 
 签发最小权限 SK 的示例：
 
@@ -369,8 +347,7 @@ tb sk create \
 | `packages/core` | 树、授权、协议、store、builtin 等纯逻辑 |
 | `packages/app` | 宿主中立的 Hono 应用与 provider 编排 |
 | `packages/server` | Node/SQLite/文件/WebSocket 宿主 |
-| `packages/gateway` | Cloudflare D1/R2/DO/Assets 宿主 |
-| `packages/cli` | `tb` CLI、设备连接与 Cloudflare 初始化 |
+| `packages/cli` | `tb` CLI、设备连接与部署管理 |
 | `packages/dashboard` | 使用公开 API 的 Web 管理面 |
 | `packages/sdk` | 嵌入式实例、本地 provider 与反向连接 |
 | `packages/plugin-sdk` / `packages/plugins` | Plugin 作者契约与内置集成 |

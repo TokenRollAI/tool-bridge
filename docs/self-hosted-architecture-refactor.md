@@ -2,7 +2,11 @@
 
 日期：2026-09-05。
 
-状态：**设计与实施计划，尚未完成实现迁移。** 文中的目标接口、命令与部署形态均为拟议设计；当前行为以代码和 llmdoc 的现状说明为准。
+状态：**自托管主线已实现，正在本轮 PR 完成验证与审阅；尚未合并或发布。** 下文保留原始设计与验收边界，当前接口与部署行为以代码和 llmdoc 为准。
+
+本轮按使用方的追加决定收敛：没有需要保留的旧实例数据，因此删除 Cloudflare、SQLite、部署级文件对象后端和旧环境变量兼容，不交付旧 SQLite/FS/环境变量迁移器。Railway 平台配置继续通过其 CLI 管理，不扩展 Dashboard 的平台部署适配器。默认 S3 已选用通过实测的 SeaweedFS，标准驱动采用网关 relay；直传、自动对象搬迁与后续搜索一致性调整不作为本轮承诺。
+
+已经落地 PG Store/Mailbox 领域事务、固定后端身份、安装/恢复配对、版本化配置与三入口管理、密钥轮换和受限 Compose 执行器。验证记录见 [本轮验收记录](./self-hosted-refactor-validation.md)。
 
 本文承接 [开源组件替代审计](./open-source-replacement-audit.md)，更新其中的部署前提与优先级，不沿用历史行数或删码估算作为本轮承诺。目标是减少长期维护的实现与部署分支，同时保留 Tool Bridge 的权限、工具发现和设备执行语义。
 
@@ -437,10 +441,10 @@ P1 原型可以放在可删除的实验目录，不能在通过上述条件前�
 
 首轮优先 A/B/C。存储身份未落地前不开放后端切换；部署执行与恢复未验证前，不把“表单能保存”当成配置功能完成。
 
-## 13. 本文交付时的证据与未完成项
+## 13. 实施状态与边界
 
-已完成：现有架构/代码核查、关键边界确认、候选组件官方资料核验、重构与验收计划。
+本轮实现和验收记录见 [self-hosted-refactor-validation.md](./self-hosted-refactor-validation.md)。原第 9 节旧数据迁移与第 10 节逐阶段迁移工具要求已被本轮“不保留旧数据、不维护兼容”的决定取代；新的 PG→PG 维护与默认 Compose 快照恢复仍作为运维能力保留。
 
-尚未完成：Cloudflare 代码/历史内容删除、SQLite 删除、PG 领域表迁移、S3 SDK 替换、默认对象服务部署、无 `.env` 安装向导、全量 Dashboard 配置、部署设置执行器、真实 S3 验证及备份恢复演练。本文不代表这些实施结果，也不授权自动发布或删除任何现有数据。
+后续项包括固定 API 生成、搜索/connector 选型试验、S3 direct/multipart 与对象后端自动搬迁。本轮没有放宽联邦搜索快照、权限、设备未知结果或幂等契约，也没有声称已部署 Railway 或完成 npm 发布。
 
-相关当前契约：[整体架构](../llmdoc/architecture.mdx)、[Node 部署](../llmdoc/hosts-deploy/node-docker-and-helm.mdx)、[Default Store](../llmdoc/store/default-store.mdx)、[Mailbox](../llmdoc/device/durable-mailbox.mdx)、[安全边界](../llmdoc/protocol/security-boundaries.mdx)。
+当前契约：[整体架构](../llmdoc/architecture.mdx)、[Node 部署](../llmdoc/hosts-deploy/node-docker-and-helm.mdx)、[Default Store](../llmdoc/store/default-store.mdx)、[Mailbox](../llmdoc/device/durable-mailbox.mdx)、[安全边界](../llmdoc/protocol/security-boundaries.mdx)。

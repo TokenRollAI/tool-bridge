@@ -27,7 +27,7 @@
 
 ## 改了可发布包就要发版本
 
-`packages/*` 里**非 private** 的包(当前:`app` / `cli` / `dashboard` / `gateway`
+`packages/*` 里**非 private** 的包(当前:`app` / `cli` / `dashboard`
 / `plugin-sdk` / `sdk` / `server`;`core` 与 `plugins` 是 private,不发布)一旦有改动,
 同轮就要 bump 版本并打 tag 推送 —— 不要留给"下次一起发"。
 
@@ -42,7 +42,7 @@
 
 ```bash
 # 看哪些包的 src 有改动
-for p in app cli dashboard gateway plugin-sdk sdk server; do
+for p in app cli dashboard plugin-sdk sdk server; do
   git diff main..HEAD --stat -- "packages/$p/src" | tail -1 | sed "s|^|$p |"
 done
 ```
@@ -67,7 +67,7 @@ done
    ```bash
    git tag <pkg>-v<版本> && git push origin <pkg>-v<版本>
    ```
-   tag 前缀:`app-` / `cli-` / `dashboard-` / `gateway-` / `plugin-sdk-` / `sdk-` / `server-`
+   tag 前缀:`app-` / `cli-` / `dashboard-` / `plugin-sdk-` / `sdk-` / `server-`
 5. **一次只推一个 tag** —— `git push origin tag1 tag2` 不触发 tag workflows(实测四 tag 同推零触发)
 6. 发布后复查:`npm view <pkg> version`。**刚发完可能仍报 E404**(registry CDN 传播延迟,
    实测 91 秒后仍 404),等一两分钟再查,或直接看 `npm view <pkg> time.created`
