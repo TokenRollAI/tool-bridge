@@ -1,10 +1,10 @@
 import {
   createStoreClient,
+  isTBError,
   parseStoreUri,
   type StoreClient,
   type StoreListPage,
   type StoreUri,
-  TBError,
 } from '@tool-bridge/sdk/store'
 import { createReadStream, createWriteStream, openSync, statSync, unlinkSync } from 'node:fs'
 import { Readable, Transform } from 'node:stream'
@@ -53,7 +53,7 @@ function withRequestTimeout(fetcher: typeof fetch, timeoutMs: number): typeof fe
 
 function asCliError(error: unknown, timeoutMs?: number): Error {
   if (error instanceof CliError) return error
-  if (error instanceof TBError) {
+  if (isTBError(error)) {
     return new CliError(error.message, error.code, error.retryable)
   }
   if (

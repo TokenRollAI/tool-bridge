@@ -45,7 +45,7 @@
  */
 
 import type { z } from 'zod/v4'
-import { TBError } from '@tool-bridge/plugin-sdk'
+import { isTBError, TBError } from '@tool-bridge/plugin-sdk'
 import type {
   createMemoInput,
   deleteAttachmentInput,
@@ -238,7 +238,7 @@ async function downloadAttachment(fileUrl: string, declaredType: string | undefi
   try {
     response = await guardedFetch(fileUrl, { method: 'GET' })
   } catch (error) {
-    if (error instanceof TBError) throw error
+    if (isTBError(error)) throw error
     const detail = error instanceof Error ? error.message : 'unknown network error'
     throw upstreamError(502, `failed to fetch fileUrl: ${detail}`)
   }

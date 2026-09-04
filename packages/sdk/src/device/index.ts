@@ -47,6 +47,7 @@ export {
   decodeDeviceFrame,
   deviceErrorFrame,
   encodeDeviceFrame,
+  isTBError,
   PING_FRAME_JSON,
   PONG_FRAME_JSON,
   TBError,

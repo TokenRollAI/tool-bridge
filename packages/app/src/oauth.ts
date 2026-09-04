@@ -33,6 +33,7 @@ import {
 import {
   base64urlDecode,
   base64urlEncode,
+  isTBError,
   type McpOAuthClientConfig,
   type SecretStoreImpl,
   type StateStore,
@@ -487,7 +488,7 @@ async function guardOAuth<T>(fn: () => Promise<T>): Promise<T> {
   try {
     return await fn()
   } catch (err) {
-    if (err instanceof TBError) throw err
+    if (isTBError(err)) throw err
     if (err instanceof Error && /does not support dynamic client registration/i.test(err.message)) {
       throw new TBError(
         'invalid_argument',

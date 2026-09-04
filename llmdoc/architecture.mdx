@@ -93,6 +93,7 @@ claim/renew/complete 主动消费。`fallback` 是调用方显式 policy：只�
 11. workspace 内消费 SDK neutral 子入口时，typecheck/test/bundle 的 resolver 都必须显式落到对应 source
     entry，不能依赖 gitignored `dist`。`pnpm verify` 保持无 build 副作用；发布声明与 tarball 则由独立强制
     build/pack 门验证。source-resolution 回归必须在本地已有 dist 时仍能识别错误解析目标。
+12. private core 被 bundle 进每个 public 产物各一份,`@tool-bridge/sdk` 根入口与 neutral 子入口又是两次构建,同一进程可同时存在多个 `TBError` 类。识别 TBError 只能用 `isTBError`:它按基类构造器写入的 `Symbol.for` 品牌加 wire 形状判定,子类(如 `EgressBlockedError`)同样通过;任何包都不得用 `instanceof TBError` 做识别——跨副本恒为 false,会把已归一的错误降级成 `internal` 500。识别通过后为统一 `toJSON` 路径把外来副本重建成本地类是另一回事。`isTBError` 由 core、`plugin-sdk`、`sdk` 根入口及 `./store`、`./device` 子入口导出。
 
 ## Topic 导航
 

@@ -42,7 +42,7 @@
  */
 
 import type { z } from 'zod/v4'
-import { TBError } from '@tool-bridge/plugin-sdk'
+import { isTBError, TBError } from '@tool-bridge/plugin-sdk'
 import type {
   createAttachmentInput,
   createCommentReactionInput,
@@ -465,7 +465,7 @@ async function graphqlRequest(
   } catch (error) {
     // 传输层失败必须就地归一:漏出去的裸 Error 会被 plugin-sdk 抹成 "internal plugin error"
     // 500,把"上游不通/出网被拦"说成插件自身故障,还丢掉唯一有诊断价值的那句消息。
-    if (error instanceof TBError) throw error
+    if (isTBError(error)) throw error
     throw upstreamError(502, error instanceof Error ? `linear 请求失败: ${error.message}` : 'linear 请求失败')
   }
 

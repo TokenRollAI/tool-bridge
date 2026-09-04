@@ -45,7 +45,7 @@
  * - 上游用 `node:buffer` 做 base64,这里换成 `btoa`(分块喂)—— 插件要能在 Workers 里跑。
  */
 
-import { TBError } from '@tool-bridge/plugin-sdk'
+import { isTBError, TBError } from '@tool-bridge/plugin-sdk'
 import { type ProviderContext, requireApiKey } from '../../_runtime/plugin'
 import { asJsonObject, compactDefined } from '../../_runtime/jsonValue'
 import { bytesToBase64 } from '../../_runtime/responseBytes'
@@ -257,7 +257,7 @@ export async function send(ctx: ProviderContext, input: DocsRequest): Promise<Re
   } catch (error) {
     // 传输层失败必须就地归一:漏出去的裸 Error 会被 plugin-sdk 抹成 "internal plugin error"
     // 500,把"上游不通/出网被拦"说成插件自身故障。
-    if (error instanceof TBError) throw error
+    if (isTBError(error)) throw error
     if (error instanceof Error && error.name === 'TimeoutError') {
       throw upstreamError(504, `Google Docs 请求超时(${REQUEST_TIMEOUT_MS / 1000} 秒)`)
     }

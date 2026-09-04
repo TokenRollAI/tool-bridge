@@ -17,6 +17,7 @@ import {
   type DeviceOperationAuthorizationTarget,
   type DeviceOperationCompletion,
   type DeviceOperationSummary,
+  isTBError,
   NodeRegistryStore,
   TBError,
   type TreeNode,
@@ -65,7 +66,7 @@ export async function mailboxJsonObject(
       }
       raw += decoder.decode()
     } catch (cause) {
-      if (cause instanceof TBError) throw cause
+      if (isTBError(cause)) throw cause
       throw invalidRequest('body must be valid UTF-8 JSON')
     }
   }

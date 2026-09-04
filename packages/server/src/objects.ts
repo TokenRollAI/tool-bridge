@@ -10,6 +10,7 @@
 
 import {
   DEFAULT_STORE_DRIVER_KEY_ROOT,
+  isTBError,
   normalizeEntryPath,
   type ObjectBody,
   type ObjectBodyStream,
@@ -131,7 +132,7 @@ async function assertAncestorInRoot(root: string, full: string, key: string): Pr
       }
       return
     } catch (error) {
-      if (error instanceof TBError) throw error
+      if (isTBError(error)) throw error
       if (!isErrnoCode(error, 'ENOENT')) throw error
       const parent = dirname(probe)
       if (parent === probe) {

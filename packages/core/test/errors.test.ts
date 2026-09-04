@@ -119,6 +119,61 @@ describe('isTBError', () => {
     expect(isTBError(TBError.notFound())).toBe(true)
     expect(isTBError(new Error('x'))).toBe(false)
     expect(isTBError({ code: 'not_found' })).toBe(false)
+    expect(isTBError(null)).toBe(false)
+    expect(isTBError('not_found')).toBe(false)
+  })
+
+  it('子类实例仍被识别(品牌在基类构造器写入)', () => {
+    class Blocked extends TBError {
+      constructor() {
+        super('invalid_argument', 'blocked')
+        this.name = 'Blocked'
+      }
+    }
+    expect(isTBError(new Blocked())).toBe(true)
+  })
+
+  it('识别另一份 core 副本构造的 TBError(跨 bundle 品牌),不依赖 instanceof', () => {
+    // 模拟第二份 bundle:同名 symbol、同线上形状,但不是本副本的类。
+    const foreign = Object.assign(new Error('foreign'), {
+      code: 'conflict' as const,
+      retryable: false,
+      httpStatus: 409,
+      toJSON() {
+        return { code: 'conflict' as const, message: 'foreign', retryable: false }
+      },
+    })
+    Object.defineProperty(foreign, Symbol.for('tool-bridge.TBError.v1'), {
+      value: true,
+      enumerable: false,
+    })
+    expect(foreign instanceof TBError).toBe(false)
+    expect(isTBError(foreign)).toBe(true)
+  })
+
+  it('只有品牌但形状不合法的对象被拒绝', () => {
+    const forged = Object.assign(new Error('forged'), {
+      [Symbol.for('tool-bridge.TBError.v1')]: true,
+      code: 'made_up',
+      retryable: false,
+      httpStatus: 500,
+      toJSON: () => ({}),
+    })
+    expect(isTBError(forged)).toBe(false)
+    const noBrand = Object.assign(new Error('nobrand'), {
+      code: 'conflict',
+      retryable: false,
+      httpStatus: 409,
+      toJSON: () => ({}),
+    })
+    expect(isTBError(noBrand)).toBe(false)
+  })
+
+  it('品牌不可枚举、不进入 toJSON 线上 body', () => {
+    const e = new TBError('conflict', 'x')
+    expect(Object.keys(e)).not.toContain(Symbol.for('tool-bridge.TBError.v1').toString())
+    expect(JSON.stringify(e)).toBe(JSON.stringify({ code: 'conflict', message: 'x', retryable: false }))
+    expect(Object.getOwnPropertySymbols(e)).toContain(Symbol.for('tool-bridge.TBError.v1'))
   })
 })
 

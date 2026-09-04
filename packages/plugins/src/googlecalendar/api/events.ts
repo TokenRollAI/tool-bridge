@@ -23,7 +23,7 @@
  */
 
 import type { z } from 'zod/v4'
-import { TBError } from '@tool-bridge/plugin-sdk'
+import { isTBError, TBError } from '@tool-bridge/plugin-sdk'
 import type {
   createEventInput,
   deleteEventInput,
@@ -251,7 +251,7 @@ export async function deleteEvent(input: z.infer<typeof deleteEventInput>, ctx: 
     })
   } catch (error) {
     // 见文件头第 3 条:删除幂等,"已经不在了"也算删成功。
-    if (error instanceof TBError && error.code === 'not_found') return { success: true }
+    if (isTBError(error) && error.code === 'not_found') return { success: true }
     throw error
   }
   return { success: true }

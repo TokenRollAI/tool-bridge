@@ -1,7 +1,17 @@
 import {
+  createDeviceMailboxProcessor,
+  type DeviceConnection,
+  type DeviceConnectionState,
+  type DeviceCredentialProvider,
+  type DeviceWebSocketFactory,
+  deviceWsUrl,
+  isTBError,
+  openPortableDeviceConnection,
+  TBError,
+} from '@tool-bridge/sdk/device'
+import {
   type ContextEntryInput,
   type ContextPatch,
-  TBError as CoreTBError,
   createObjectContextProvider,
   type DeviceAbortSignal,
   type DeviceExpose,
@@ -9,16 +19,6 @@ import {
   type ObjectContextProvider,
   type SearchOptions,
 } from '@tool-bridge/core'
-import {
-  createDeviceMailboxProcessor,
-  type DeviceConnection,
-  type DeviceConnectionState,
-  type DeviceCredentialProvider,
-  type DeviceWebSocketFactory,
-  deviceWsUrl,
-  openPortableDeviceConnection,
-  TBError,
-} from '@tool-bridge/sdk/device'
 import {
   createShellExecutor,
   createStructuredCommandRuntime,
@@ -97,17 +97,22 @@ async function dispatchFs(
   }
 }
 
+/**
+ * handler 里可能同时冒出 `@tool-bridge/core/node`(shell/fs/structured)与 `@tool-bridge/sdk/device`
+ * 两条来源的 TBError;CLI 从源码 alias 打包时它们是同一个类,npm 消费 SDK 时则是两份 core 副本。
+ * `isTBError` 按品牌识别所有副本,再统一重建为本地 SDK 的 TBError,让后续 `toJSON()` 走同一条路。
+ */
 function bridgeCoreError(error: unknown): never {
-  if (error instanceof TBError) throw error
-  if (error instanceof CoreTBError) {
-    throw new TBError(error.code, error.message, { retryable: error.retryable })
-  }
-  throw error
+  if (!isTBError(error)) throw error
+  // 类型守卫把 error 标成本副本的 TBError,但运行时可能是另一份 core 的实例;
+  // 先按 unknown 判原型再决定是否重建,避免 TS 把 else 分支收窄成 never。
+  if ((error as unknown) instanceof TBError) throw error
+  throw new TBError(error.code, error.message, { retryable: error.retryable })
 }
 
 function cliError(error: unknown): CliError {
   if (error instanceof CliError) return error
-  if (error instanceof TBError || error instanceof CoreTBError) {
+  if (isTBError(error)) {
     return new CliError(error.message, error.code, error.retryable)
   }
   return new CliError(error instanceof Error ? error.message : String(error))

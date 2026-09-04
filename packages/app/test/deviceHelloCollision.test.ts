@@ -1,4 +1,4 @@
-import { MemoryStateStore, TBError } from '@tool-bridge/core'
+import { isTBError, MemoryStateStore } from '@tool-bridge/core'
 import { describe, expect, it } from 'vitest'
 import { processDeviceHello, runBootstrap } from '../src/index'
 import { TEST_ADMIN_SK } from './fixtures'
@@ -33,7 +33,7 @@ describe('processDeviceHello × 小写折叠冲突', () => {
   it('expose.nodes 大小写折叠冲突 → invalid_argument,任何节点都不落库', async () => {
     const store = await seededStore()
     await expect(helloWith(store, { nodes: [node('Foo'), node('foo')] })).rejects.toSatisfy(
-      err => err instanceof TBError && err.code === 'invalid_argument',
+      err => isTBError(err) && err.code === 'invalid_argument',
     )
     expect(await store.get('node:device/phone')).toBeNull()
     expect(await store.get('node:device/phone/foo')).toBeNull()
@@ -46,7 +46,7 @@ describe('processDeviceHello × 小写折叠冲突', () => {
       nodes: [node('Shell')],
     })
     await expect(attempt).rejects.toSatisfy(
-      err => err instanceof TBError && err.code === 'invalid_argument',
+      err => isTBError(err) && err.code === 'invalid_argument',
     )
     expect(await store.get('node:device/phone/shell')).toBeNull()
   })

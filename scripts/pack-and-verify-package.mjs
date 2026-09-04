@@ -4,6 +4,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { basename, join, posix, resolve } from 'node:path'
 import { spawn } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
+import { isBuiltin } from 'node:module'
 import process from 'node:process'
 import { tmpdir } from 'node:os'
 
@@ -82,11 +83,24 @@ export function assertPackedEntryTargetsExist(manifest, packedFiles) {
   }
 }
 
+/**
+ * 去掉块注释与整行注释后再找 import。bundle 进来的第三方库常在 JSDoc 里写
+ * `import { X } from 'some-pkg'` 用法示例(如 MCP SDK 的 ajv validator 说明),
+ * 不剥注释会把它们误判成运行时裸 import。只剥以行首(可带缩进)开始的 `//` 行,
+ * 避免误伤字符串里的 `https://`。
+ */
+function stripComments(source) {
+  return source
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/^[ \t]*\/\/.*$/gm, '')
+}
+
 function collectExternalImports(source) {
+  const code = stripComments(source)
   return [
-    ...source.matchAll(/\bfrom\s+["']([^"']+)["']/g),
-    ...source.matchAll(/\bimport\s+["']([^"']+)["']/g),
-    ...source.matchAll(/\bimport\s*\(\s*["']([^"']+)["']\s*\)/g),
+    ...code.matchAll(/\bfrom\s+["']([^"']+)["']/g),
+    ...code.matchAll(/\bimport\s+["']([^"']+)["']/g),
+    ...code.matchAll(/\bimport\s*\(\s*["']([^"']+)["']\s*\)/g),
   ].map(match => match[1]).filter(Boolean)
 }
 
@@ -117,6 +131,69 @@ export function collectModuleClosure(entry, sources, declaration = false) {
   }
 
   return [...visited].sort().map(path => sources.get(path)).join('\n')
+}
+
+/** 把 import specifier 归一到 npm 包名:`@scope/name/sub/path` → `@scope/name`,`pkg/sub` → `pkg`。 */
+export function packageNameOf(specifier) {
+  const parts = specifier.split('/')
+  return specifier.startsWith('@') ? parts.slice(0, 2).join('/') : parts[0]
+}
+
+/**
+ * 闭包内允许出现的裸 import:Node 内建(含 `node:` 前缀)、平台内建(`cloudflare:`)、
+ * 以及 manifest 的 runtime dependency 字段里声明过的包。
+ */
+function declaredRuntimeDependencies(manifest) {
+  const names = new Set()
+  for (const field of RUNTIME_DEPENDENCY_FIELDS) {
+    for (const name of Object.keys(manifest[field] ?? {})) names.add(name)
+  }
+  return names
+}
+
+function isPlatformBuiltin(specifier) {
+  return specifier.startsWith('cloudflare:') || isBuiltin(specifier)
+}
+
+/**
+ * 找出 packed JS 闭包里"留 external 却没声明依赖"的裸 import。
+ *
+ * 这是 tsup `external` 与 `package.json` 漂移的唯一机器闸门:曾有一次 `@modelcontextprotocol/sdk`
+ * 从 server 的 dependencies 删掉但 external 没删,后来 plugins 进 noExternal 又把该 import 带回闭包 ——
+ * 开发用 tsx 能从 plugins 的 node_modules 解析到,`pnpm --prod deploy` 出来的 Docker 镜像与
+ * npm 消费者在首次加载那个 provider 时才 MODULE_NOT_FOUND;当时的 pack 校验只看 manifest 与
+ * sdk neutral 子入口,server/gateway/cli/app 的闭包完全没检查。
+ *
+ * 只看 ESM `import`/动态 `import()`;bundler 把 CJS 依赖内联成 `__commonJS` 工厂时,产物里残留的
+ * `require("...")` 是字符串或已被 shim 的调用,不构成运行时解析。
+ */
+export function findUndeclaredRuntimeImports(manifest, jsSources) {
+  const declared = declaredRuntimeDependencies(manifest)
+  const undeclared = new Map()
+  for (const [path, source] of jsSources) {
+    for (const specifier of collectExternalImports(source)) {
+      if (specifier.startsWith('.') || specifier.startsWith('/')) continue
+      if (isPlatformBuiltin(specifier)) continue
+      const name = packageNameOf(specifier)
+      if (declared.has(name)) continue
+      if (!undeclared.has(name)) undeclared.set(name, new Set())
+      undeclared.get(name).add(path)
+    }
+  }
+  return [...undeclared.entries()]
+    .map(([name, paths]) => ({ name, paths: [...paths].sort() }))
+    .sort((a, b) => a.name.localeCompare(b.name))
+}
+
+export function assertRuntimeImportsDeclared(manifest, jsSources) {
+  const undeclared = findUndeclaredRuntimeImports(manifest, jsSources)
+  if (undeclared.length === 0) return
+  const details = undeclared
+    .map(({ name, paths }) => `${name} (${paths.join(', ')})`)
+    .join('; ')
+  throw new Error(
+    `${manifest.name} packed JS imports packages missing from its runtime dependencies: ${details}`,
+  )
 }
 
 function assertSdkNeutralArtifact(label, runtimeJs, declarations, allowedExternalImports) {
@@ -294,16 +371,21 @@ async function readPackedFile(tarballPath, path) {
 async function verifyPackedArtifacts(tarballPath, manifest) {
   const packedFiles = await listPackedFiles(tarballPath)
   assertPackedEntryTargetsExist(manifest, packedFiles)
-  if (manifest.name !== '@tool-bridge/sdk') return
   const jsSources = new Map()
   const declarationSources = new Map()
   for (const path of packedFiles) {
-    if (/^package\/dist\/[^/]+\.js$/.test(path)) {
+    if (/^package\/dist\/(?:.+\/)?[^/]+\.(?:m?js)$/.test(path)) {
       jsSources.set(path, await readPackedFile(tarballPath, path))
     } else if (/^package\/dist\/[^/]+\.d\.ts$/.test(path)) {
       declarationSources.set(path, await readPackedFile(tarballPath, path))
     }
   }
+  // 每个 public 包的全部 packed JS(含 code-splitting 的 chunk 与懒加载 provider 文件)
+  // 都不得 import 未声明的包;Dashboard 是静态站点,hash 资产由浏览器加载,不适用。
+  if (manifest.name !== '@tool-bridge/dashboard') {
+    assertRuntimeImportsDeclared(manifest, jsSources)
+  }
+  if (manifest.name !== '@tool-bridge/sdk') return
   const closure = label => ({
     declarations: collectModuleClosure(
       `package/dist/${label}.d.ts`,

@@ -40,7 +40,7 @@ import { normalizeExpiresAt, sha256Hex } from '../auth/sk'
 import { base64urlEncode } from '../encoding/base64url'
 import { crypto, TextEncoder } from '../webGlobals'
 import { parseStoreUri, storeUri } from './uri'
-import { TBError } from '../errors'
+import { isTBError, TBError } from '../errors'
 import { omit } from '../omit'
 
 export const KEY_STORE_OBJECT = 'store:object:'
@@ -262,7 +262,7 @@ function normalizeTimestamp(value: unknown, field: string): Timestamp {
   try {
     return normalizeExpiresAt(value)
   } catch (error) {
-    if (error instanceof TBError && error.code === 'invalid_argument') {
+    if (isTBError(error) && error.code === 'invalid_argument') {
       throw new TBError('invalid_argument', `${field} 必须是带时区的 ISO 8601 timestamp`)
     }
     throw error
@@ -583,12 +583,12 @@ export class StoreService {
         ifNoneMatch: '*',
       })
     } catch (error) {
-      if (error instanceof TBError && error.code === 'conflict') {
+      if (isTBError(error) && error.code === 'conflict') {
         const existing = await this.objects.head(object.driverKey)
         if (existing === null) throw error
         meta = existing
       } else {
-        if (error instanceof TBError && error.code === 'rate_limited') {
+        if (isTBError(error) && error.code === 'rate_limited') {
           await this.objects.delete(object.driverKey)
           await this.failUpload(session, object)
         }

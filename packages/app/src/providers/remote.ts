@@ -16,6 +16,7 @@ import {
   assertSecureUrl,
   checkAllowlist,
   checkVia,
+  isTBError,
   normalizeUpstreamError,
   parseVia,
   rewriteRemotePath,
@@ -98,7 +99,7 @@ async function readRemoteResponseBody(
       chunks.push(result.value)
     }
   } catch (error) {
-    if (error instanceof TBError) throw error
+    if (isTBError(error)) throw error
     if (isAbortError(error, signal)) throw remoteAbortError()
     throw normalizeUpstreamError({
       kind: 'network',

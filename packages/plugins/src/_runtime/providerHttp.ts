@@ -1,4 +1,4 @@
-import { TBError } from '@tool-bridge/plugin-sdk'
+import { isTBError, TBError } from '@tool-bridge/plugin-sdk'
 import { createGuardedFetch, type GuardedFetchOptions } from './guardedFetch'
 import { upstreamError } from './upstreamError'
 
@@ -374,7 +374,7 @@ export function createProviderHttpClient(options: ProviderHttpClientOptions): Pr
         } catch (error) {
           // response.text() 在原生 fetch 中可能先因 signal abort 抛错并被 readResponse
           // 归一成 TBError；只要 deadline 已触发，仍必须稳定归类为 timeout。
-          if (error instanceof TBError && signal?.aborted !== true) throw error
+          if (isTBError(error) && signal?.aborted !== true) throw error
           const kind = signal?.aborted === true ? 'timeout' : 'network'
           const rawMessage = error instanceof Error ? error.message : undefined
           const context: ProviderHttpTransportErrorContext = {

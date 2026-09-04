@@ -5,12 +5,15 @@ import test from 'node:test'
 import ts from 'typescript'
 import {
   assertPackedEntryTargetsExist,
+  assertRuntimeImportsDeclared,
   assertSdkClientArtifact,
   assertSdkDeviceArtifact,
   assertSdkStoreArtifact,
   collectModuleClosure,
   collectPackedEntryTargets,
+  findUndeclaredRuntimeImports,
   findUnsupportedRuntimeDependencySpecs,
+  packageNameOf,
   parseCliArguments,
 } from './pack-and-verify-package.mjs'
 import {
@@ -439,6 +442,78 @@ test('SDK client artifact is neutral and declarations do not leak Zod internals'
     () => assertSdkClientArtifact('import "node:fs"', 'export {}'),
     /Node builtin/,
   )
+})
+
+test('packed JS may only import Node/platform builtins and declared runtime dependencies', () => {
+  const manifest = {
+    name: '@tool-bridge/server',
+    dependencies: { 'better-sqlite3': '^12', 'hono': '^4', '@hono/node-server': '^1' },
+    optionalDependencies: { ioredis: '^6' },
+  }
+  const ok = new Map([
+    ['package/dist/main.js', 'import "./chunk-a.js"; import Database from "better-sqlite3"; import { serve } from "@hono/node-server"'],
+    ['package/dist/chunk-a.js', 'import { readFile } from "node:fs/promises"; import { join } from "path"; import Redis from "ioredis"; export {}'],
+    ['package/dist/feishu-XYZ.js', 'import { Hono } from "hono/quick"; const lazy = () => import("./chunk-a.js")'],
+  ])
+  assert.deepEqual(findUndeclaredRuntimeImports(manifest, ok), [])
+  assert.doesNotThrow(() => assertRuntimeImportsDeclared(manifest, ok))
+})
+
+test('packed JS importing an undeclared package fails with the offending files', () => {
+  // 回归:server 曾把 @modelcontextprotocol/sdk 留 external 却未声明依赖,
+  // 被 bundle 的 feishu provider 在 Docker/npm 产物里首次加载即 MODULE_NOT_FOUND。
+  const manifest = { name: '@tool-bridge/server', dependencies: { hono: '^4' } }
+  const sources = new Map([
+    ['package/dist/main.js', 'import { Hono } from "hono"'],
+    ['package/dist/feishu-ABC.js', 'import { Client } from "@modelcontextprotocol/sdk/client/index.js"'],
+    ['package/dist/chunk-DEF.js', 'import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js"; import z from "zod"'],
+  ])
+  assert.deepEqual(findUndeclaredRuntimeImports(manifest, sources), [
+    { name: '@modelcontextprotocol/sdk', paths: ['package/dist/chunk-DEF.js', 'package/dist/feishu-ABC.js'] },
+    { name: 'zod', paths: ['package/dist/chunk-DEF.js'] },
+  ])
+  assert.throws(
+    () => assertRuntimeImportsDeclared(manifest, sources),
+    /@tool-bridge\/server packed JS imports packages missing from its runtime dependencies: @modelcontextprotocol\/sdk \(package\/dist\/chunk-DEF\.js, package\/dist\/feishu-ABC\.js\); zod \(package\/dist\/chunk-DEF\.js\)/,
+  )
+})
+
+test('runtime import gate treats cloudflare: and node: as builtins and normalizes subpaths', () => {
+  assert.equal(packageNameOf('@modelcontextprotocol/sdk/client/index.js'), '@modelcontextprotocol/sdk')
+  assert.equal(packageNameOf('hono/quick'), 'hono')
+  assert.equal(packageNameOf('ws'), 'ws')
+  const manifest = { name: '@tool-bridge/gateway', dependencies: {} }
+  const sources = new Map([
+    ['package/dist/full.js', 'import { DurableObject } from "cloudflare:workers"; import { Buffer } from "node:buffer"; import "./x.js"'],
+  ])
+  assert.deepEqual(findUndeclaredRuntimeImports(manifest, sources), [])
+})
+
+test('runtime import gate ignores import examples inside bundled JSDoc and line comments', () => {
+  // 回归:MCP SDK 的 validation 模块在 JSDoc 里写了 `import { Ajv } from 'ajv'` 用法示例,
+  // 被 bundle 进 gateway/server 的 feishu chunk 后曾被误报为未声明依赖。
+  const manifest = { name: '@tool-bridge/gateway', dependencies: { hono: '^4' } }
+  const sources = new Map([
+    ['package/dist/feishu-XYZ.js', [
+      '/**',
+      ' * Example:',
+      ' * import { AjvJsonSchemaValidator } from \'@modelcontextprotocol/sdk/validation/ajv\';',
+      ' * import { Ajv } from \'ajv\';',
+      ' */',
+      '  // import addFormats from \'ajv-formats\'',
+      'import { Hono } from "hono"',
+      'const url = "https://example.com" // not an import',
+    ].join('\n')],
+  ])
+  assert.deepEqual(findUndeclaredRuntimeImports(manifest, sources), [])
+})
+
+test('runtime import gate ignores commonjs require strings left inside bundled shims', () => {
+  const manifest = { name: '@tool-bridge/server', dependencies: {} }
+  const sources = new Map([
+    ['package/dist/chunk.js', 'equal.code = \'require("ajv/dist/runtime/equal").default\'; const x = require("ajv-formats/dist/formats")'],
+  ])
+  assert.deepEqual(findUndeclaredRuntimeImports(manifest, sources), [])
 })
 
 test('--bin cannot be combined with --skip-install', () => {

@@ -1,11 +1,11 @@
 import {
   createStoreClient,
+  isTBError,
   type StoreClientObjectDescriptor,
   type StoreListOptions,
   type StoreListPage,
   type StoreReadGrant,
   type StoreShareGrant,
-  TBError,
   type StoreObjectDescriptor as UploadedStoreObjectDescriptor,
 } from '@tool-bridge/sdk/store'
 import { ApiError, type Connection } from './api'
@@ -60,7 +60,7 @@ async function withApiError<T>(run: () => Promise<T>): Promise<T> {
   try {
     return await run()
   } catch (error) {
-    if (error instanceof TBError) {
+    if (isTBError(error)) {
       const status = Number.isSafeInteger(error.httpStatus) ? error.httpStatus : 500
       throw new ApiError(error.code, status, error.message, error.retryable)
     }
