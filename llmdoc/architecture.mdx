@@ -43,6 +43,8 @@ tool-bridge 把工具、上下文、设备与远端服务组织成一棵受权�
 
 长期产品优先级是 self-hosted：本地运行与用户自行部署始终是架构和交付主线，优先提供完整的 Docker Compose 部署体验。Cloudflare 是次级适配目标，后续选型与抽象以自托管需求为先；这项优先级不表示现有 Cloudflare 支持已移除或存储实现已迁移。
 
+SQLite 退役已获认可：目标是移除 Node 服务的 SQLite 运行后端及对应公开导出，减少长期维护的后端分支；当前实现仍为 Node SQLite/PG 与 Workers D1。分阶段目标、未决选型与验收条件见仓库内的 `docs/self-hosted-architecture-refactor.md`。S3 替换部署级文件对象后端、Dashboard 配置 R2 属于规划能力，尚未实现；默认对象服务仍待验证选型。
+
 ## 依赖方向与包职责
 
 ```text
