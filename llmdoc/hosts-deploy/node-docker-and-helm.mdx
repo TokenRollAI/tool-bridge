@@ -1,5 +1,5 @@
 ---
-description: Node/Compose/Railway/Helm 自托管部署：零 env 安装、PG/S3 持久卷、探针排空、受限 deployment agent 与 Redis 多副本路由。
+description: Node/Compose/Railway/Helm 自托管部署：零 env 安装、PG/S3 持久卷、探针与响应流排空、受限 deployment agent 与 Redis 多副本路由。
 kind: guide
 relations:
   related:
@@ -12,6 +12,10 @@ code:
     - packages/core/src/managedConfig.ts
     - scripts/compose-snapshot.mjs
     - packages/server/src/server.ts
+    - packages/server/src/responseLifecycle.ts
+    - packages/server/test/responseLifecycle.test.ts
+    - packages/server/src/pgMaintenanceFence.ts
+    - packages/server/test/managedLifecycle.test.ts
     - packages/server/src/main.ts
     - packages/server/src/managedServer.ts
     - packages/server/src/assets.ts
@@ -20,6 +24,7 @@ code:
     - packages/core/src/deployment.ts
     - packages/core/src/builtin/deployment.ts
     - packages/cli/src/deploymentAgent.ts
+    - packages/cli/test/deploymentAgent.test.ts
     - packages/cli/src/commands/deployment.ts
     - packages/dashboard/src/pages/system/DeploymentPage.tsx
     - packages/server/test/globalSetup.ts
@@ -57,13 +62,19 @@ code:
 
 平台仅可注入 `PORT` 与受保护 bootstrap 位置；业务设置在 PG。代理须保留 Host、Authorization 与 WebSocket upgrade。TLS 在代理终止时，`canonicalOrigin` 是 Store URL protocol 的信任根，对外 alias host/port 仍取当次请求；不信任客户端 `X-Forwarded-Proto`。
 
-SIGTERM 先标记 draining，让 readiness 立即失败；按有效 shutdownDrainSec 排空，再关闭 listener、等待既有请求与清理任务、终止设备连接和后端。维护操作排空不把自己的调用算成待完成业务请求，否则会等待自身死锁。慢 cleanup tick 不并发重入，首轮在监听后异步执行，不让历史 metadata 扫描阻塞就绪。
+SIGTERM 经 managed shutdown 先标记 draining，让 readiness 立即失败；等待本副本已成功应用的 `shutdownDrainSec` 后关闭 listener 并完成请求、设备与后台工作排空。等待窗口仍可承接编排器尚未摘除的流量；pending 配置不改变该窗口；维护 quiesce 暂时移除 business 时仍用此前已应用的窗口，读取时长不能再依赖 PG 可达。main 必须调用这一实际生命周期入口，不能绕过等待直接 close。
+
+所有实际 HTTP 请求都进入排空计数，响应头返回不代表请求完成。`responseLifecycle.ts` 将释放延至 body 完成、取消清理结束或上游错误；保持背压、不预取，并在消费者暂停时也处理上游错误。只有执行 quiesce 的当前维护调用能通过 AsyncLocalStorage 释放自身一次；不得按原始 URL 前缀猜调用归属，编码、大小写和别名不能改变该规则。
+
+`TbServer.close` 复用同一个 closePromise，但必须先释放当前维护调用，再复用已经开始的关停，避免彼此等待。managed listener 排空后还要关闭维护途中 reload 出的最终 runtime，不能让进程退出遗留其登记。正常请求、响应流与后台工作结束后才释放 runtime 登记和共享锁。慢 cleanup tick 不重入，首轮在监听后异步执行。
 
 ## 受限部署执行器
 
 `system/deployment`、`tb deployment` 与 Dashboard 管理 desired revision、observed/effective 配置、agent presence 和 job 状态。保存设置不会直接执行 Docker。管理员在部署主机运行 `tb deployment agent`，明确选定一个 Compose 文件和 `app` 服务，执行器只接受 schema 中的镜像、published 端口/绑定地址和受限目录设置。
 
-agent 比较 Compose 声明与实际容器观察，校验实例身份，领取带期限的 job lease，然后执行固定 Docker 子命令。目录必须 realpath 位于选定 Compose 目录内；拒绝 symlink 越界和 Docker socket。bootstrap 目录迁移先停 app，复制持久文件并设安全权限；它不搬 PG 或 S3 数据。应用后检查实例和 UI，再提交 receipt；失败恢复旧 Compose 并验证旧实例。健康成功但 receipt 不可确认时明确暴露歧义，不能宣称任务已完成或立即自动重试。
+agent 比较 Compose 声明与实际容器观察，校验实例身份并领取 job lease，然后执行固定 Docker 子命令。目录必须 realpath 位于选定 Compose 目录内；拒绝 symlink 越界和 Docker socket。bootstrap 目录迁移先停 app，复制持久文件并设安全权限，不搬 PG/S3 数据。省略 `uiDirectory` 表示恢复镜像内 Dashboard，必须删除固定目标 `/app/dashboard` 的旧 mount，而非继续保留旧目录；其它挂载保持原义。
+
+应用后除实例和 UI 健康检查，还要 inspect 真实容器并逐字段比较镜像、端口、绑定地址和可选目录，吻合才能提交成功 receipt。未配置 UI 目录时该 mount target 必须不存在；named volume、tmpfs 或缺 source 的 UI 覆盖不能投影成“未配置”，无法可靠移除的继承挂载必须拒绝并回滚。Docker Desktop 的主机路径只允许与预期路径精确对应的 `/host_mnt` 归一，不得宽松剥前缀掩盖错误挂载。失败恢复旧 Compose 并验证旧实例；健康成功但 receipt 未确认时明确暴露歧义，不直接重试。
 
 该执行器目前是单本机 Compose app 的受限管理器，不是任意 shell/远程部署系统，不自动操纵 Railway 或 Kubernetes 配置。平台变更由平台 CLI/编排器操作，数据库/根轮换由 [专项维护](./maintenance-and-keys.mdx) 处理。
 
@@ -90,8 +101,8 @@ Helm chart 部署同一 managed 服务，PG/S3 由外部供应，用户仍先配
 
 Node DeviceHub 保有本副本活 socket，DeviceRouter 通过 Redis 路由到持有连接的副本。registry presence 是可见性提示，不是 socket 归属权威；跨副本调用的 `completed|not_dispatched|unknown` 仍遵守单次执行语义。Redis 中断会使路由不可用，不能退成“在线但随便发到本地”。
 
-服务器以 PG replica lease 注册活跃副本；没有 Redis 时拒绝启动第二个活跃副本，key maintenance fence 也会阻止不安全新副本加入。多副本运行与停写维护是独立能力：密钥/数据库维护应先停其它副本，不提供透明零停机切库或根轮换承诺。
+服务器以 PG replica registry 和共享 session lock 登记 runtime；没有 Redis 时拒绝启动第二个活跃副本，持久数据库 fence 与 key maintenance fence 也阻止不安全登记。多副本运行与停写维护不同：维护要求其它副本正常 drain 并删除登记，过期 heartbeat 或断开的 session 都不能替代该证明；崩溃残留走 [离线恢复边界](./maintenance-and-keys.mdx)。
 
 ## 部署验证
 
-`pnpm verify` 与 `pnpm turbo run build` 是工程底线；测试基础设施自动创建隔离的本地 PG/S3/Redis，缺少外部 env 不再静默跳过关键后端验证。真实 Compose 验收还要覆盖零 env 配对、重建/重启、后端持久性、部署端口/目录/镜像实际生效和失败回滚。真实平台验收只在授权范围内执行，每轮最多一次消耗真实资源并留脱敏证据；测试计数、运行 URL 与资源 ID 不写入 llmdoc。
+`pnpm verify` 与 `pnpm turbo run build` 是工程底线，不能替代生命周期验收：关停设置用真实子进程 SIGTERM 与未结束请求验证；维护从实际编码/别名 HTTP 入口进入，并与阻塞写入、并发 SIGTERM 组合验证写入完成和最终登记清空；真实慢响应验证 body 完成/取消/错误前的计数与背压；可选目录清空核对实际 Compose mount 与镜像内 UI。后端测试使用隔离本地 PG/S3/Redis，先完成 server.close 再删除 schema，不能为错误 teardown 顺序削弱生产租约 guard；缺 env 不静默跳过；部署还需验证持久性和失败回滚。真实平台验证遵守授权与每轮一次资源约束，证据留在验收记录，不把运行 URL、资源 ID 或测试次数写入知识。

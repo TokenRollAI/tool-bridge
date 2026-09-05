@@ -1,5 +1,5 @@
 ---
-description: 数据库停写迁移、Redis 切换、数据库角色轮换与加密/签名 keyring：维护租约、可恢复重加密、引用退役及配对备份恢复。
+description: 数据库迁移的唯一可写权威与持久 fence、失联副本离线恢复、Redis/角色切换、keyring 同锁重加密和引用退役。
 kind: guide
 relations:
   requires:
@@ -20,6 +20,8 @@ code:
     - packages/server/src/keyManager.ts
     - packages/server/src/pgKeyRotation.ts
     - packages/server/src/maintenanceManager.ts
+    - packages/server/src/pgMaintenanceFence.ts
+    - packages/server/test/pgMaintenanceFence.test.ts
     - packages/server/src/managedServer.ts
     - packages/app/src/refToken.ts
     - packages/app/src/storeRefToken.ts
@@ -38,7 +40,11 @@ code:
 
 ## 数据库与 Redis
 
-数据库迁移使用官方 `pg_dump`/`pg_restore`，要求目标不同且为空、源 instanceId 与调用期望相符、bootstrap revision 未变。先停业务写入，再导出、单事务恢复并检查实例身份与所有业务表数量；只有目标 runtime prepare 成功后才提交 bootstrap 连接指针。失败保留原指针并恢复原 runtime，目标上失败残留由维护者检查，不能自动覆盖未知目标数据。表数量检查不是内容校验或完整灾备证明，操作前仍须独立备份并保留恢复演练证据。
+数据库迁移使用官方 `pg_dump`/`pg_restore`，要求目标不同且为空、源 instanceId 与调用期望相符、bootstrap revision 未变。本机排他锁之外，PG 先建立不会因进程崩溃或 TTL 自动消失的 `copying` fence，禁止其它 runtime 登记；本机排空后再导出、单事务恢复并校验实例身份和业务表数量。dump 携带 fence，但不复制瞬时 runtime registry 行。表数量检查不是停写证明、内容校验或完整灾备证明。
+
+切换前把源标成永久 `retired`，再准备目标 runtime 并提交 bootstrap 指针；只有确认目标成为权威后才移除目标的复制 fence。源即使以原协调者身份重启也不能写。失败的恢复副本必须保持 `discarded`；它也不能因重启或超时自行成为可写实例。
+
+restore 或 bootstrap 写入报错可能意味着“已提交但确认丢失”。仅在确认 bootstrap 仍指向原 revision/源库，且目标为空或已可靠标成 discarded 后，才能清除源 fence 并恢复源 runtime。指针已切目标、读取指针失败、目标保护状态无法确认时，不得盲目恢复源；保留保护状态并进入本机离线恢复，不能靠重试或等待超时解封。
 
 Maintenance journal 在受保护 bootstrap 中记录动作、阶段和脱敏结果，不保存密码或连接串；独占锁防止本机两项维护交错。临时 dump 仅 owner 可读，处理后删除。执行 dump/restore 的宿主必须安装与数据库兼容的官方客户端工具；业务 schema 不使用 PG 扩展。
 
@@ -50,11 +56,11 @@ Redis 更换前执行真实读写和 pub/sub 探测；验证并停旧路由后�
 
 加密/签名是两个独立 keyring，ciphertext/token 带 keyId（ref token 的 wire 用 kid）。新写只用 active key，旧根保留用于读存量；OAuth 使用独立稳定 key。密钥材料只在 protected keys 文件和显式 secret backup 中，PG 维护任务只保存 job、cursor、租约和引用计数。
 
-加密 rotate 先原子持久新根、更新 bootstrap revision，再运行有界重加密：SecretStore → Mailbox → 引用复核。中断后用 resume 按持久 cursor 重试；若根已切但创建 job 前崩溃，status 能从残留旧 keyId 引用重建任务。单条重加密仍做 revision 条件更新，不能覆盖并发数据。旧加密根有引用时禁止 retire，未完成任务禁止再 rotate。
+加密 rotate 先原子持久新根、更新 bootstrap revision，再运行有界重加密：SecretStore → Mailbox → 引用复核。中断后用 resume 按持久 cursor 重试；若根已切但创建 job 前崩溃，status 能从残留旧 keyId 引用重建任务。status 因此不是纯读：读取 bootstrap/keyring 快照与恢复 job 必须和 rotate/resume/retire 使用同一本机 exclusive 锁，不能依据锁外旧快照创建反向任务。单条重加密仍做 revision 条件更新；旧加密根有引用时禁止 retire，未完成任务禁止再 rotate。
 
 签名 rotate 默认保留旧 token 的有效窗口，旧根只有期限窗口结束且 upload/share/call 引用为零时才能退役。显式 revokeExisting 会撤销在途上传、call/share 并去掉旧签名根；既有 ref 随旧 kid 无法验证而失效。该选择会改变已有授权行为，CLI/UI 必须明确表达，不能当无影响换钥。
 
-key mutation 同时持本机排他锁和 PG maintenance fence；存在其它有效副本 lease 时拒绝，新副本注册也服从 fence。操作需要停止其它副本并准备维护窗口，不能宣传为透明在线多副本轮换。re-encryption 分页成功不等于任务完成，最终以引用复核和状态 completed 为准。
+数据库迁移与 key mutation 都拒绝本实例任何 foreign runtime registry 行，包括 heartbeat 已过期的行。故障探测不等于排空：只有请求、设备和后台工作正常结束后，runtime 才删除自身登记；崩溃残留要求显式离线协调，不能按 TTL 擅自删行解锁。runtime 持有的 shared session lock 是第二道并发检查；驱动可在失联后重连，不能仅凭锁消失证明旧工作已停止。key mutation 还持有专用 maintenance fence，新登记也服从它；不存在透明在线多副本根轮换。重加密最终以引用复核和 completed 为准。异常退出的登记或永久 fence 会继续阻止维护或启动；这是维持唯一权威的可用性取舍，当前没有按失联时间自动解封的恢复路径。
 
 ## 备份与本机恢复
 
@@ -70,4 +76,4 @@ restore 只接受不同于源和默认项目的显式隔离 project，要求 --r
 
 ## 验收与停止条件
 
-本地真实 PG/Redis 测试应覆盖备份恢复、提交失败保留旧指针、不同实例/非空目标拒绝、新旧角色连接验证、重加密中断与 resume、旧 token 策略和缺 keyId fail closed。单元 mock 只能证明编排分支；发布前还要做目标平台的备份/恢复演练。多副本停写、根文件可恢复性或目标内容无法证明时，停止维护，不用重试掩盖执行状态未知。
+本地真实 PG/Redis 验证除连接、备份、身份和密钥策略外，要在持久写边界分别注入“写前失败”和“提交后确认丢失”，检查恢复后唯一可写数据库，不能只断言 error/status 或行数相等。status/rotate 竞争测试必须保留 exclusive 的真实序列语义，在快照与提交边界引入竞争者；直接执行回调的空锁替身不能证明并发安全。缺少正常 drain 证据、根可恢复性或目标保护状态时停止维护，保留现场作离线恢复。

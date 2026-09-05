@@ -35,14 +35,14 @@ code:
 
 managed 外层 Hono listener 在 PG 未配置或故障时仍可服务静态安装界面与 `~setup`。`/~setup/status` 只返回安装阶段/实例身份/是否需要配对；defaults、configure 和 recover 都要求 `x-tb-setup-token`。本机管理员经 `tool-bridge-admin pair|recover` 或 `tb setup pair` 获得短期凭证，token 只经本机文件/受控输出交付，不出现在服务日志、URL 或匿名默认值响应里。
 
-bootstrap 使用受保护目录、owner-only 文件、write-file-atomic 的 fsync 原子替换及 proper-lockfile 跨进程排他。核心资料相互区分：
+bootstrap 使用受保护目录、owner-only 文件、write-file-atomic 的 fsync 原子替换及 proper-lockfile 跨进程排他。锁获取的 ELOCKED 在该边界统一映射为领域 conflict，并发 setup 返回 HTTP 409；上层不能依赖原始库错误穿透。核心资料相互区分：
 
 - identity 是实例身份；bootstrap 保存阶段、revision、数据库/Redis 连接和受信任内网 S3 origin。
 - keys 保存加密与签名 keyring、独立 OAuth key 和初始 Admin SK；PG 只保存必要 hash/加密数据。
 - initialized 标记关闭初始安装；pairing 保存 mode、实例绑定、hash 和到期，完成后移除。
 - installer defaults 提供默认 PG/S3 服务和独立数据库管理员连接；API 只投影已配置状态和非敏感地址。
 
-初始化先持久 identity/root，再进入 setup/installing；并发安装必须串行。发现 identity 但 bootstrap 不完整，或已初始化实例 PG 不可达时，只能进入恢复，绝不新生成一个匿名可接管实例。PG 的 `tb_instance` 与 bootstrap 身份不符拒绝连接；已初始化实例也拒绝空库。恢复需单独本机 recovery 配对，可提供同实例 key backup；它不会重新开放初始安装或生成新的用户树。
+初始化先持久 identity/root，再进入 setup/installing；并发安装必须串行。`initialized` marker 比 bootstrap 中的阶段更权威：完成安装时先写 marker，后写最终 bootstrap；后一写中断时，启动和配对授权都必须返回 initialized，不能把残留 installing 当成新安装。发现 identity 但 bootstrap 不完整，或已初始化实例 PG 不可达时，只能进入恢复，绝不新生成一个匿名可接管实例。PG 的 `tb_instance` 与 bootstrap 身份不符拒绝连接；恢复凭证也不能授权已初始化实例接入空库或制造替代根。恢复需单独本机 recovery 配对，可提供同实例 key backup。
 
 默认 Compose installer 自动生成 PG 与 S3 的独立凭证，创建应用数据库角色与桶，用户配对后可接受默认服务而不手填 `.env`。自定义服务通过同一 setup 结构提交连接。安装是否成功以 prepare、schema/后端验证、持久 initialized 和 `/readyz` 为准，监听成功或表单提交成功不足以证明业务已就绪。
 

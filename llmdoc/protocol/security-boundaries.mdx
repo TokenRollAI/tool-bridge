@@ -37,7 +37,7 @@ code:
 
 ## 身份与可见性
 
-- SK 明文只在签发时出现一次,持久层只存 hash;disabled、delete、expiry 都视为失效。三宿主权威状态均为强一致 SQL 后端,吊销即时生效。
+- SK 明文只在签发时出现一次,持久层只存 hash;disabled、delete、expiry 都视为失效。标准 Node 的权威状态来自 PostgreSQL，吊销即时生效。
 - scope 按路径和 action 判断,deny 优先。无权看到的路径返回 404,避免通过 403 枚举树结构。
 - `registerPaths` 限制设备/反向注册位置。target path、`registerPaths` 与内置/部署追加 `reservedRoots` 都以 canonical lowercase segment 比较，大小写不得成为绕过或静默全拒的差异。异步认证后还必须复核 active connection generation,防旧连接越权完成调用。
 - `system/registry` 和 `~register` 各自先做通道 scope 判定，随后共用 `registryMutation.ts` 的 `assertNodeConfigMutation` 完成 register/root、secret ref、OAuth/config 与出站探测顺序。device hello 因输入形状不同由 `deviceHello.ts` 编排，但必须执行同一 register/root 约束，并在小写折叠后的 expose 路径冲突上 fail closed。
