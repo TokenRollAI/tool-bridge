@@ -1,21 +1,39 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import type { ReactNode } from 'react'
+import { cleanup, fireEvent, render as renderUI, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { MemoryRouter } from 'react-router'
+import { MemoryRouter, Route, Routes } from 'react-router'
+import { SessionContext, type SessionState } from '@/lib/session-context'
 
 const mocks = vi.hoisted(() => ({
   useToolSearch: vi.fn(),
+  useHelp: vi.fn(),
 }))
 
 vi.mock('@/lib/queries', () => ({
   useToolSearch: mocks.useToolSearch,
+  useHelp: mocks.useHelp,
+  useToolHelp: () => ({ isPending: false, isError: false }),
+  useInvoke: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useInvalidate: () => vi.fn(),
 }))
 
 import { SearchPage } from '../src/pages/SearchPage'
+import { ToolPage } from '../src/pages/ToolPage'
+
+const session: SessionState = { active: { id: 'search-tests', name: '测试', baseUrl: '', sk: 'test' }, revision: 1, profiles: [], conn: null, login: vi.fn(), logout: vi.fn(), removeProfile: vi.fn(), switchTo: vi.fn() }
+function render(ui: ReactNode) {
+  return renderUI(<SessionContext.Provider value={session}>{ui}</SessionContext.Provider>)
+}
 
 describe('SearchPage relevance', () => {
-  afterEach(cleanup)
+  afterEach(() => {
+    cleanup()
+    vi.unstubAllGlobals()
+  })
 
   beforeEach(() => {
+    vi.stubGlobal('localStorage', { getItem: () => null, setItem: vi.fn() })
+    mocks.useHelp.mockReturnValue({ data: { node: { kind: 'tool' }, cmds: [{ name: 'get_live_context', path: 'home/home-assistant/get_live_context', scope: 'read' }] }, isPending: false, isError: false })
     mocks.useToolSearch.mockReturnValue({
       data: {
         pages: [{
@@ -104,5 +122,22 @@ describe('SearchPage relevance', () => {
     expect(screen.getByRole('status').textContent).toContain('regional/us（暂不可用）')
     expect(screen.getByText('没有可见的匹配工具')).toBeTruthy()
     expect(screen.queryByText(/private upstream URL/)).toBeNull()
+  })
+
+  it('搜索结果直达真实调用页，返回保留关键词与联邦筛选', () => {
+    render(
+      <MemoryRouter initialEntries={['/search?q=current&federation=recursive']}>
+        <Routes>
+          <Route element={<SearchPage />} path="/search" />
+          <Route element={<ToolPage />} path="/tools/*" />
+        </Routes>
+      </MemoryRouter>,
+    )
+    fireEvent.click(screen.getByRole('link', { name: /get_live_context/ }))
+    expect(mocks.useHelp).toHaveBeenCalledWith('home/home-assistant')
+    expect(screen.getByLabelText('arguments JSON')).toBeTruthy()
+    fireEvent.click(screen.getByRole('link', { name: '返回搜索结果' }))
+    expect((screen.getByLabelText('工具搜索关键词') as HTMLInputElement).value).toBe('current')
+    expect((screen.getByLabelText('搜索范围') as HTMLSelectElement).value).toBe('recursive')
   })
 })

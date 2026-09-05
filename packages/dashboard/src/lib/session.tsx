@@ -1,6 +1,7 @@
 import { type ReactNode, useCallback, useMemo, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { type Profile, type ProfileInput, SessionContext, type SessionState } from './session-context'
+import { clearProfileFavorites } from './favorites'
 import { clearProfileHistory } from './history'
 
 const PROFILES_KEY = 'tb.profiles'
@@ -83,7 +84,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     (name: string) => {
       const removed = profiles.find(p => p.name === name)
       const next = profiles.filter(p => p.name !== name)
-      if (removed) clearProfileHistory(removed.id)
+      if (removed) {
+        clearProfileHistory(removed.id)
+        clearProfileFavorites(removed.id)
+      }
       persist(next, activeName === name ? (next[0]?.name ?? null) : activeName)
     },
     [profiles, activeName, persist],

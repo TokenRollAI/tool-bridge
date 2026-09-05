@@ -34,14 +34,6 @@ import { cn } from '@/lib/utils'
 
 const SchemaFormRenderer = lazy(() => import('@/components/SchemaFormRenderer'))
 
-const SCOPE_STYLE: Record<string, string> = {
-  read: 'text-sky-400/90 border-sky-400/30',
-  write: 'text-amber-400/90 border-amber-400/30',
-  call: 'text-emerald-400/90 border-emerald-400/30',
-  register: 'text-violet-400/90 border-violet-400/30',
-  admin: 'text-rose-400/90 border-rose-400/30',
-}
-
 /** 变更型 tool 名 → 调用成功后失效该 profile 的全部查询(树/列表可能已变)。 */
 const MUTATING = /^(write|update|delete|set|rm|remove|unmount|mount)$/i
 
@@ -59,13 +51,13 @@ function parseShellAllow(h: string): { allow: string[] | 'all' | 'none', lead: s
   return { lead, allow: body.split(/[,,]\s*/).filter(Boolean) }
 }
 
-function CmdDoc({ h }: { h: string }) {
+function CmdDoc({ h, standalone = false }: { h: string, standalone?: boolean }) {
   const parsed = parseShellAllow(h)
   if (!parsed) {
-    return <p className="w-full text-xs text-muted-foreground sm:ml-auto sm:w-auto">{h}</p>
+    return <p className={cn('w-full text-sm leading-6 text-muted-foreground', !standalone && 'sm:ml-auto sm:w-auto')}>{h}</p>
   }
   return (
-    <div className="flex w-full flex-wrap items-center gap-1.5 text-xs text-muted-foreground sm:ml-auto sm:w-auto">
+    <div className={cn('flex w-full flex-wrap items-center gap-1.5 text-sm text-muted-foreground', !standalone && 'sm:ml-auto sm:w-auto')}>
       {parsed.lead && (
         <span>
           {parsed.lead}
@@ -116,11 +108,12 @@ export function CmdPanel({
   defaultOpen?: boolean
   lazySchema?: boolean
   path: string
-  variant?: 'accordion' | 'dialog'
+  variant?: 'accordion' | 'dialog' | 'page'
 }) {
   const [open, setOpen] = useState(defaultOpen)
   // dialog(弹窗)用"常开大编辑器"形态,DialogContent 已提供外框;accordion 仍是可折叠行。
-  const dialog = variant === 'dialog'
+  const page = variant === 'page'
+  const dialog = variant !== 'accordion'
   const effectiveOpen = dialog || open
   // 唯一调用形态:~help 宣告的 cmd.path 是完整命令路径(含命令/工具叶子段),
   // 直接 POST 到它,body 即 arguments。
@@ -185,6 +178,7 @@ export function CmdPanel({
     try {
       await invoke.mutateAsync({
         commandPath,
+        historyIdentity: { path, tool: cmd.name },
         args,
         accept,
         ...(deliveryCapability === 'realtime' ? {} : { delivery }),
@@ -220,6 +214,7 @@ export function CmdPanel({
       className={cn(
         'mt-4 flex flex-wrap items-center gap-2 border-t pt-3',
         dialog && 'mt-5 pt-4',
+        page && 'sticky bottom-0 z-10 bg-card pb-2',
       )}
     >
       <Button
@@ -232,7 +227,7 @@ export function CmdPanel({
         调用
       </Button>
       <label className="text-xs text-muted-foreground sm:ml-2" htmlFor={acceptId}>
-        Accept
+        结果格式
       </label>
       <Select onValueChange={v => setAccept(v as 'markdown' | 'json')} value={accept}>
         <SelectTrigger className="h-8 w-32 font-mono text-xs" id={acceptId} size="sm">
@@ -250,7 +245,7 @@ export function CmdPanel({
       {deliveryCapability !== 'realtime' && (
         <>
           <label className="text-xs text-muted-foreground sm:ml-2" htmlFor={`${acceptId}-delivery`}>
-            Delivery
+            执行方式
           </label>
           <Select
             onValueChange={value => setDelivery(value as typeof delivery)}
@@ -337,30 +332,27 @@ export function CmdPanel({
         <header className={cn(dialog && 'shrink-0')}>
           {dialog
             ? (
-                <div className="flex min-w-0 flex-col gap-2">
+                <div className={cn('flex min-w-0 flex-col gap-2', page && 'mb-5')}>
                   <div className="flex min-w-0 flex-wrap items-center gap-2">
-                    <span className="font-mono text-lg text-foreground sm:text-xl">{cmd.name}</span>
+                    {!page && <span className="font-mono text-lg text-foreground sm:text-xl">{cmd.name}</span>}
                     <span
-                      className={cn(
-                        'inline-flex items-center rounded-md border px-2 font-mono text-[10px] leading-5 uppercase',
-                        SCOPE_STYLE[cmd.scope] ?? SCOPE_STYLE.read,
-                      )}
+                      className="inline-flex items-center rounded-md border bg-muted/35 px-2 text-xs leading-5 text-muted-foreground"
                     >
-                      {cmd.scope}
+                      {{ read: '读取', write: '写入', call: '执行', register: '注册', admin: '管理' }[cmd.scope]}
                     </span>
-                    {cmd.effect && (
-                      <span className="inline-flex items-center gap-1 rounded-md border border-warn/40 bg-warn/5 px-2 font-mono text-[10px] leading-5 text-warn">
+                    {cmd.effect && cmd.effect !== cmd.scope && (
+                      <span className="inline-flex items-center gap-1 rounded-md border border-warn/40 bg-warn/5 px-2 text-xs leading-5 text-warn">
                         {cmd.effect === 'destructive' && <TriangleAlert className="size-2.5" />}
-                        {cmd.effect}
+                        {{ read: '读取操作', write: '写入操作', destructive: '破坏性操作' }[cmd.effect] ?? cmd.effect}
                       </span>
                     )}
                     {cmd.confirm && (
-                      <span className="inline-flex items-center rounded-md border border-destructive/40 bg-destructive/5 px-2 font-mono text-[10px] leading-5 text-destructive">
-                        confirm
+                      <span className="inline-flex items-center rounded-md border border-destructive/40 bg-destructive/5 px-2 text-xs leading-5 text-destructive">
+                        需要确认
                       </span>
                     )}
                   </div>
-                  {cmd.h && <CmdDoc h={cmd.h} />}
+                  {cmd.h && <CmdDoc h={cmd.h} standalone={dialog} />}
                 </div>
               )
             : (
@@ -382,105 +374,120 @@ export function CmdPanel({
                     />
                     <span className="font-mono text-sm text-foreground">{cmd.name}</span>
                     <span
-                      className={cn(
-                        'inline-flex items-center rounded-sm border px-1.5 font-mono text-[10px] leading-4',
-                        SCOPE_STYLE[cmd.scope] ?? SCOPE_STYLE.read,
-                      )}
+                      className="inline-flex items-center rounded-md border bg-muted/35 px-2 text-xs leading-5 text-muted-foreground"
                     >
-                      {cmd.scope}
+                      {{ read: '读取', write: '写入', call: '执行', register: '注册', admin: '管理' }[cmd.scope]}
                     </span>
-                    {cmd.effect && (
+                    {cmd.effect && cmd.effect !== cmd.scope && (
                       <span className="inline-flex items-center gap-1 rounded-sm border border-warn/40 px-1.5 font-mono text-[10px] leading-4 text-warn">
                         {cmd.effect === 'destructive' && <TriangleAlert className="size-2.5" />}
-                        {cmd.effect}
+                        {{ read: '读取操作', write: '写入操作', destructive: '破坏性操作' }[cmd.effect] ?? cmd.effect}
                       </span>
                     )}
                     {cmd.confirm && (
                       <span className="inline-flex items-center rounded-sm border border-destructive/40 px-1.5 font-mono text-[10px] leading-4 text-destructive">
-                        confirm
+                        需要确认
                       </span>
                     )}
-                    {cmd.h && <CmdDoc h={cmd.h} />}
+                    {cmd.h && <CmdDoc h={cmd.h} standalone={dialog} />}
                   </button>
                 </CollapsibleTrigger>
               )}
         </header>
 
-        <CollapsibleContent className={cn(dialog && 'min-h-0 flex-1 overflow-y-auto')}>
-          <div className={cn('min-w-0 px-3 py-3 sm:px-4', dialog && 'px-1 py-4')}>
-            {lazyNeeded && toolHelp.isPending
-              ? (
-                  <div className="grid gap-2">
-                    <Skeleton className="h-8 w-full" />
-                    <Skeleton className="h-8 w-2/3" />
-                  </div>
-                )
-              : mode === 'form' && hasSchema
+        <CollapsibleContent className={cn(dialog && !page && 'min-h-0 flex-1 overflow-y-auto')}>
+          <div className={cn('min-w-0', page && 'grid items-start gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]')}>
+            <div className={cn('min-w-0 px-3 py-3 sm:px-4', dialog && 'px-1 py-4', page && 'rounded-xl border bg-card p-5 sm:p-6')}>
+              {page && <h2 className="mb-5 text-base font-semibold">输入参数</h2>}
+              {lazyNeeded && toolHelp.isPending
                 ? (
-                    <Suspense
-                      fallback={(
-                        <div aria-label="正在加载表单引擎" className="grid gap-2" role="status">
-                          <Skeleton className="h-9 w-full" />
-                          <Skeleton className="h-9 w-5/6" />
-                          <Skeleton className="h-8 w-32" />
+                    <div className="grid gap-2">
+                      <Skeleton className="h-8 w-full" />
+                      <Skeleton className="h-8 w-2/3" />
+                    </div>
+                  )
+                : lazyNeeded && toolHelp.isError
+                  ? (
+                      <div className="rounded-lg border border-destructive/25 p-4 text-sm" role="alert">
+                        <p>无法加载此命令的参数说明，请重试后再调用。</p>
+                        <Button className="mt-3" onClick={() => void toolHelp.refetch()} size="sm" variant="outline">重新加载参数</Button>
+                      </div>
+                    )
+                  : mode === 'form' && hasSchema
+                    ? (
+                        <Suspense
+                          fallback={(
+                            <div aria-label="正在加载表单引擎" className="grid gap-2" role="status">
+                              <Skeleton className="h-9 w-full" />
+                              <Skeleton className="h-9 w-5/6" />
+                              <Skeleton className="h-8 w-32" />
+                            </div>
+                          )}
+                        >
+                          <SchemaFormRenderer
+                            formData={formData}
+                            onChange={({ formData: next }) => setFormData(next)}
+                            onSubmit={({ formData: next }) => submit(next)}
+                            schema={inputSchema as RJSFSchema}
+                          >
+                            {footer}
+                          </SchemaFormRenderer>
+                        </Suspense>
+                      )
+                    : (
+                        <div>
+                          <Textarea
+                            aria-label="arguments JSON"
+                            className={cn(
+                              'font-mono text-xs',
+                              dialog && 'min-h-56 rounded-xl bg-background/55',
+                            )}
+                            onChange={e => setRawArgs(e.target.value)}
+                            rows={dialog ? 10 : 5}
+                            spellCheck={false}
+                            value={rawArgs}
+                          />
+                          {rawErr && <p className="mt-1 text-xs text-destructive">{rawErr}</p>}
+                          {footer}
                         </div>
                       )}
-                    >
-                      <SchemaFormRenderer
-                        formData={formData}
-                        onChange={({ formData: next }) => setFormData(next)}
-                        onSubmit={({ formData: next }) => submit(next)}
-                        schema={inputSchema as RJSFSchema}
-                      >
-                        {footer}
-                      </SchemaFormRenderer>
-                    </Suspense>
-                  )
-                : (
-                    <div>
-                      <Textarea
-                        aria-label="arguments JSON"
-                        className={cn(
-                          'font-mono text-xs',
-                          dialog && 'min-h-56 rounded-xl bg-background/55',
-                        )}
-                        onChange={e => setRawArgs(e.target.value)}
-                        rows={dialog ? 10 : 5}
-                        spellCheck={false}
-                        value={rawArgs}
-                      />
-                      {rawErr && <p className="mt-1 text-xs text-destructive">{rawErr}</p>}
-                      {footer}
-                    </div>
-                  )}
 
-            {deliveryError && <p className="mt-2 text-xs text-destructive">{deliveryError}</p>}
+              {deliveryError && <p className="mt-2 text-xs text-destructive">{deliveryError}</p>}
 
-            <CliHint
-              args={currentArgs}
-              commandPath={commandPath}
-              delivery={deliveryCapability === 'realtime' ? undefined : delivery}
-              idempotencyKey={delivery === 'realtime' || idempotencyKey.trim() === ''
-                ? undefined
-                : idempotencyKey.trim()}
-              ttlSeconds={delivery === 'realtime' || ttl.trim() === '' ? undefined : Number(ttl)}
-            />
-
-            <ResultView
-              className="mt-5"
-              error={(invoke.error as ApiError | null) ?? null}
-              result={invoke.data}
-            />
-            {!invoke.data && !invoke.error && dialog && (
-              <div className="mt-5 grid min-h-32 place-items-center rounded-xl border border-dashed bg-background/25 px-5 py-8 text-center">
-                <div>
-                  <p className="text-sm font-medium text-foreground/80">等待调用结果</p>
-                  <p className="mt-1.5 max-w-sm text-xs leading-5 text-muted-foreground">
-                    填写参数并执行后，响应、耗时以及复制和下载操作会显示在这里。
-                  </p>
+              <CliHint
+                args={currentArgs}
+                commandPath={commandPath}
+                delivery={deliveryCapability === 'realtime' ? undefined : delivery}
+                idempotencyKey={delivery === 'realtime' || idempotencyKey.trim() === ''
+                  ? undefined
+                  : idempotencyKey.trim()}
+                ttlSeconds={delivery === 'realtime' || ttl.trim() === '' ? undefined : Number(ttl)}
+              />
+            </div>
+            <div aria-label="调用结果" className={cn('min-w-0', page && 'min-h-80 rounded-xl border bg-card p-5 sm:p-6 lg:sticky lg:top-6')}>
+              {page && <h2 className="mb-5 text-base font-semibold">执行结果</h2>}
+              {invoke.isPending && (
+                <p className="mb-4 flex items-center gap-2 text-sm text-muted-foreground" role="status">
+                  <Loader2 className="size-4 animate-spin" />
+                  正在执行，请稍候…
+                </p>
+              )}
+              <ResultView
+                className={page ? '' : 'mt-5 px-3 sm:px-4'}
+                error={(invoke.error as ApiError | null) ?? null}
+                result={invoke.data}
+              />
+              {!invoke.data && !invoke.error && !invoke.isPending && dialog && (
+                <div className="mt-5 grid min-h-32 place-items-center px-5 py-8 text-center">
+                  <div>
+                    <p className="text-sm font-medium text-foreground/80">等待调用结果</p>
+                    <p className="mt-1.5 max-w-sm text-xs leading-5 text-muted-foreground">
+                      填写参数并执行后，响应、耗时以及复制和下载操作会显示在这里。
+                    </p>
+                  </div>
                 </div>
-              </div>
-            )}
+              )}
+            </div>
           </div>
         </CollapsibleContent>
 

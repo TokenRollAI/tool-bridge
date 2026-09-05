@@ -497,7 +497,7 @@ export function PluginsPage() {
           </>
         )}
         eyebrow="CONTROL PLANE / PROVIDERS"
-        title="Plugin"
+        title="插件"
       />
 
       {/*

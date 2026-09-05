@@ -1,6 +1,6 @@
 {
   "name": "@tool-bridge/dashboard",
-  "version": "0.28.0",
+  "version": "0.29.0",
   "description": "Tool Bridge self-hosted Dashboard as prebuilt static assets",
   "type": "module",
   "license": "MIT",

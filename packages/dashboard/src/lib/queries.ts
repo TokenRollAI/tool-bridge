@@ -133,6 +133,8 @@ export interface InvokeInput {
   /** 完整命令路径(含命令/工具叶子段,如 `docs/ctx7/resolve` 或 `system/status/get`)。 */
   commandPath: string
   delivery?: 'fallback' | 'mailbox' | 'realtime'
+  /** 仅用于本机最近使用的入口身份，不发送到网关。 */
+  historyIdentity?: { path: string, tool: string }
   idempotencyKey?: string
   ttlSeconds?: number
 }
@@ -163,9 +165,9 @@ export function useInvoke() {
         ...(idempotencyKey === undefined ? {} : { idempotencyKey }),
         ...(ttlSeconds === undefined ? {} : { ttlSeconds }),
       }),
-    onSuccess: (r, { commandPath }) => {
+    onSuccess: (r, { commandPath, historyIdentity }) => {
       recordInvoke(scope, {
-        ...splitCommand(commandPath),
+        ...(historyIdentity ?? splitCommand(commandPath)),
         ok: true,
         ms: r.ms,
         at: new Date().toISOString(),
@@ -188,9 +190,9 @@ export function useInvoke() {
         }
       }
     },
-    onError: (e, { commandPath }) =>
+    onError: (e, { commandPath, historyIdentity }) =>
       recordInvoke(scope, {
-        ...splitCommand(commandPath),
+        ...(historyIdentity ?? splitCommand(commandPath)),
         ok: false,
         code: (e as ApiError).code ?? 'internal',
         ms: 0,

@@ -415,7 +415,7 @@ export function SkPage() {
           </>
         )}
         eyebrow="AUTH / ACCESS CONTROL"
-        title="Secret Key"
+        title="访问密钥"
       />
 
       <section aria-label="Secret Key 状态概览" className="mt-6 grid gap-3 sm:grid-cols-3">

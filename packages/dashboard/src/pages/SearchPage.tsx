@@ -1,16 +1,17 @@
 import { ArrowUpRight, Loader2, Search, SearchX, X } from 'lucide-react'
+import { Link, useLocation, useSearchParams } from 'react-router'
 import { type FormEvent, useEffect, useState } from 'react'
-import { Link, useSearchParams } from 'react-router'
 import type { ToolSearchPage } from '@/lib/types'
 import type { ApiError } from '@/lib/api'
+import { FavoriteToolButton } from '@/components/FavoriteToolButton'
 import { PaginationFooter } from '@/components/PaginationFooter'
 import { PageHeader } from '@/components/PageHeader'
 import { EmptyState } from '@/components/EmptyState'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Button } from '@/components/ui/button'
+import { toolHref } from '@/lib/toolNavigation'
 import { Input } from '@/components/ui/input'
 import { useToolSearch } from '@/lib/queries'
-import { encodeTreePath } from '@/lib/path'
 import { cn } from '@/lib/utils'
 
 function errorTitle(error: Error): string {
@@ -59,6 +60,7 @@ function PartialSourceSummary({ sources }: { sources: SearchSource[] }) {
 
 export function SearchPage() {
   const [params, setParams] = useSearchParams()
+  const location = useLocation()
   const query = (params.get('q') ?? '').trim()
   const federationParam = params.get('federation')
   const federation = federationParam === 'local' || federationParam === 'recursive'
@@ -95,8 +97,8 @@ export function SearchPage() {
   }
 
   return (
-    <div className="mx-auto w-full max-w-6xl px-4 py-5 sm:px-6 sm:py-7 lg:px-8 lg:py-8">
-      <PageHeader eyebrow="DISCOVERY" title="工具搜索" />
+    <div className="workspace-page">
+      <PageHeader actions={<Button asChild variant="outline"><Link to="/tools">浏览工具连接</Link></Button>} description="搜索可见命令，直接打开表单开始使用。" title="工具搜索" />
 
       <form className="mt-6 flex min-w-0 flex-col gap-2 sm:flex-row" onSubmit={submit}>
         <div className="relative min-w-0 flex-1">
@@ -197,24 +199,25 @@ export function SearchPage() {
                       </div>
                       <ul aria-label="工具搜索结果" className="divide-y">
                         {items.map(({ path, relevance, source, tool }) => (
-                          <li key={`${source?.path ?? ''}\u0000${path}\u0000${tool.name}`}>
+                          <li className="flex min-w-0 items-center" key={`${source?.path ?? ''}\u0000${path}\u0000${tool.name}`}>
                             <Link
                               className={cn(
-                                'group grid min-w-0 gap-3 px-4 py-4 transition-colors sm:grid-cols-[minmax(12rem,0.7fr)_minmax(0,1fr)_auto] sm:items-center',
+                                'group grid min-w-0 flex-1 gap-3 px-4 py-4 transition-colors sm:grid-cols-[minmax(12rem,0.7fr)_minmax(0,1fr)_auto] sm:items-center',
                                 'hover:bg-secondary/45 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring focus-visible:outline-none',
                               )}
-                              to={`/nodes/${encodeTreePath(path)}?tool=${encodeURIComponent(tool.name)}`}
+                              state={{ from: `${location.pathname}${location.search}` }}
+                              to={toolHref(path, tool.name)}
                             >
                               <div className="min-w-0">
                                 <p className="truncate font-mono text-sm font-medium text-foreground">
                                   {tool.name}
                                 </p>
-                                <p className="mt-1 truncate font-mono text-[11px] text-primary">
+                                <p className="mt-1 truncate text-xs text-primary">
                                   {path}
                                 </p>
                                 <p
                                   aria-label={`来源 ${sourceName(source?.path ?? '')}`}
-                                  className="mt-1 truncate font-mono text-[10px] text-muted-foreground"
+                                  className="mt-1 truncate text-xs text-muted-foreground"
                                 >
                                   来源 ·
                                   {' '}
@@ -227,7 +230,7 @@ export function SearchPage() {
                               <div className="flex items-center gap-2 sm:justify-end">
                                 <span
                                   aria-label={`关键词覆盖 ${relevance.matchedTermCount}/${relevance.totalTermCount}`}
-                                  className="rounded-sm border px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground"
+                                  className="rounded-sm border px-1.5 py-0.5 text-xs text-muted-foreground"
                                   title={`覆盖率 ${Math.round(relevance.coverage * 100)}%`}
                                 >
                                   覆盖
@@ -237,13 +240,13 @@ export function SearchPage() {
                                   {relevance.totalTermCount}
                                 </span>
                                 {tool.effect && (
-                                  <span className="rounded-sm border px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
-                                    {tool.effect}
+                                  <span className="rounded-sm border px-1.5 py-0.5 text-xs text-muted-foreground">
+                                    {tool.effect === 'read' ? '读取' : tool.effect === 'write' ? '写入' : tool.effect}
                                   </span>
                                 )}
                                 {tool.confirm === true && (
-                                  <span className="rounded-sm border border-amber-500/25 bg-amber-500/[0.06] px-1.5 py-0.5 font-mono text-[10px] text-amber-500">
-                                    confirm
+                                  <span className="rounded-sm border border-amber-500/25 bg-amber-500/[0.06] px-1.5 py-0.5 text-xs text-amber-500">
+                                    需要确认
                                   </span>
                                 )}
                                 <ArrowUpRight
@@ -252,6 +255,7 @@ export function SearchPage() {
                                 />
                               </div>
                             </Link>
+                            <div className="pr-3"><FavoriteToolButton path={path} tool={tool.name} /></div>
                           </li>
                         ))}
                       </ul>

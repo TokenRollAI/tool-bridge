@@ -1,4 +1,4 @@
-import { Navigate, Route, Routes, useLocation } from 'react-router'
+import { Navigate, Route, Routes, useLocation, useSearchParams } from 'react-router'
 import { lazy, type ReactNode, Suspense } from 'react'
 import { useSession } from '@/lib/session-context'
 
@@ -13,6 +13,15 @@ const LoginPage = lazy(() =>
 const CanvasPage = lazy(() =>
   import('@/canvas/CanvasPage').then(module => ({ default: module.CanvasPage })),
 )
+const WorkspacePage = lazy(() => import('@/pages/WorkspacePage').then(module => ({ default: module.WorkspacePage })))
+const ToolsPage = lazy(() => import('@/pages/ToolsPage').then(module => ({ default: module.ToolsPage })))
+const ToolPage = lazy(() => import('@/pages/ToolPage').then(module => ({ default: module.ToolPage })))
+
+function ToolsIndex() {
+  const [params] = useSearchParams()
+  return params.has('tool') ? <ToolPage /> : <ToolsPage />
+}
+
 const SearchPage = lazy(() =>
   import('@/pages/SearchPage').then(module => ({ default: module.SearchPage })),
 )
@@ -53,7 +62,7 @@ function AppBooting() {
     <div className="grid h-svh place-items-center bg-background text-foreground">
       <div className="flex items-center gap-3 font-mono text-xs text-muted-foreground">
         <span className="size-2 animate-pulse rounded-full bg-primary shadow-[0_0_12px_var(--primary)]" />
-        control plane / loading
+        正在打开工作区
       </div>
     </div>
   )
@@ -91,6 +100,9 @@ export default function App() {
     <Suspense fallback={<AppBooting />}>
       <Routes>
         <Route element={<WorkspaceShell />}>
+          <Route element={<DeferredPage><ToolsIndex /></DeferredPage>} path="tools" />
+          <Route element={<DeferredPage><ToolPage /></DeferredPage>} path="tools/*" />
+          <Route element={<DeferredPage><CanvasPage /></DeferredPage>} path="canvas" />
           <Route element={<DeferredPage><KeysPage /></DeferredPage>} path="manage/keys" />
           <Route element={<DeferredPage><MaintenancePage /></DeferredPage>} path="manage/maintenance" />
           <Route element={<DeferredPage><DeploymentPage /></DeferredPage>} path="manage/deployment" />
@@ -115,7 +127,7 @@ export default function App() {
           <Route
             element={(
               <DeferredPage>
-                <CanvasPage />
+                <WorkspacePage />
               </DeferredPage>
             )}
             index

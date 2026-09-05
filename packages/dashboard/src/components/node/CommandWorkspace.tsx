@@ -1,21 +1,14 @@
 import { ChevronRight, Search, TerminalSquare, TriangleAlert } from 'lucide-react'
+import { useLocation, useNavigate } from 'react-router'
 import { useMemo, useState } from 'react'
 import type { HelpCmd } from '@/lib/types'
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
+import { safeToolReturnPath, toolHref } from '@/lib/toolNavigation'
 import { CmdPanel } from '@/components/node/CmdPanel'
 import { cn } from '@/lib/utils'
 
-const SCOPE_STYLE: Record<string, string> = {
-  read: 'border-sky-400/25 bg-sky-400/8 text-sky-400',
-  write: 'border-amber-400/25 bg-amber-400/8 text-amber-400',
-  call: 'border-emerald-400/25 bg-emerald-400/8 text-emerald-400',
-  register: 'border-violet-400/25 bg-violet-400/8 text-violet-400',
-  admin: 'border-rose-400/25 bg-rose-400/8 text-rose-400',
-}
-
 /**
- * 节点调用工作区:左侧选择/筛选命令,右侧只挂载当前命令的编辑器。
- * 切换命令会 remount CmdPanel,避免参数、返回值或 mutation 状态跨工具残留。
+ * 命令目录打开独立调用页；旧 ?tool 深链接继续在 Inspector 内自动打开弹窗。
  */
 export function CommandWorkspace({
   path,
@@ -28,6 +21,8 @@ export function CommandWorkspace({
   lazySchema: boolean
   path: string
 }) {
+  const navigate = useNavigate()
+  const location = useLocation()
   const [query, setQuery] = useState('')
   // 点击命令即在弹窗里打开调用编辑器(而不是再挤一个侧栏列)。null = 关闭。
   const [openTool, setOpenTool] = useState<string | null>(
@@ -56,10 +51,10 @@ export function CommandWorkspace({
           </span>
           <div className="min-w-0">
             <h2 className="text-sm font-medium">命令目录</h2>
-            <p className="font-mono text-[10px] text-muted-foreground">
+            <p className="text-xs text-muted-foreground">
               {cmds.length}
               {' '}
-              COMMANDS
+              个命令
             </p>
           </div>
         </div>
@@ -80,7 +75,7 @@ export function CommandWorkspace({
               value={query}
             />
             {query && (
-              <span className="absolute top-1/2 right-2.5 -translate-y-1/2 font-mono text-[10px] text-muted-foreground">
+              <span className="absolute top-1/2 right-2.5 -translate-y-1/2 text-xs text-muted-foreground">
                 {visible.length}
               </span>
             )}
@@ -88,7 +83,7 @@ export function CommandWorkspace({
         )}
       </div>
 
-      <div className="max-h-[26rem] overflow-y-auto p-2">
+      <div className="p-2">
         {visible.length === 0
           ? (
               <div className="px-3 py-8 text-center text-xs text-muted-foreground">
@@ -104,7 +99,9 @@ export function CommandWorkspace({
                     'focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none',
                   )}
                   key={cmd.name}
-                  onClick={() => setOpenTool(cmd.name)}
+                  onClick={() => navigate(toolHref(path, cmd.name), {
+                    state: { from: safeToolReturnPath(`${location.pathname}${location.search}`) },
+                  })}
                   type="button"
                 >
                   <span className="min-w-0 flex-1">
@@ -112,23 +109,18 @@ export function CommandWorkspace({
                       <span className="min-w-0 flex-1 truncate font-mono text-[13px]">
                         {cmd.name}
                       </span>
-                      <span
-                        className={cn(
-                          'shrink-0 rounded-md border px-1.5 font-mono text-[9px] leading-4 uppercase',
-                          SCOPE_STYLE[cmd.scope] ?? SCOPE_STYLE.read,
-                        )}
-                      >
+                      <span className="shrink-0 rounded-md border bg-muted/35 px-2 py-0.5 text-xs text-muted-foreground">
                         {cmd.scope}
                       </span>
                     </span>
                     {cmd.h && (
-                      <span className="mt-1 line-clamp-2 block pr-1 text-[11px] leading-4 text-muted-foreground">
+                      <span className="mt-1.5 line-clamp-2 block pr-1 text-sm leading-5 text-muted-foreground">
                         {cmd.h}
                       </span>
                     )}
                     {(cmd.effect || cmd.confirm) && (
-                      <span className="mt-1 flex items-center gap-1.5 font-mono text-[9px] text-warn">
-                        {cmd.effect === 'destructive' && <TriangleAlert className="size-2.5" />}
+                      <span className="mt-1.5 flex items-center gap-1.5 text-xs text-muted-foreground">
+                        {cmd.effect === 'destructive' && <TriangleAlert className="size-3.5 text-warn" />}
                         {[cmd.effect, cmd.confirm ? 'confirm' : undefined]
                           .filter(Boolean)
                           .join(' · ')}

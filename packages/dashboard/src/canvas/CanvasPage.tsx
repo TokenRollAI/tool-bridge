@@ -86,7 +86,7 @@ export function CanvasPage() {
     (path: string) => navigate(`/nodes/${encodeTreePath(path)}`),
     [navigate],
   )
-  const close = useCallback(() => navigate('/'), [navigate])
+  const close = useCallback(() => navigate('/canvas'), [navigate])
   const openCommand = useCallback(
     (path: string, commandName: string) => {
       navigate(`/nodes/${encodeTreePath(path)}?tool=${encodeURIComponent(commandName)}`)
@@ -100,7 +100,7 @@ export function CanvasPage() {
   const onUnmounted = useCallback(
     (path: string) => {
       const parent = parentPath(path)
-      navigate(parent === '' ? '/' : `/nodes/${encodeTreePath(parent)}`)
+      navigate(parent === '' ? '/canvas' : `/nodes/${encodeTreePath(parent)}`)
     },
     [navigate],
   )
