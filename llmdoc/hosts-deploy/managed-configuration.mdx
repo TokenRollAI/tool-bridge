@@ -58,4 +58,4 @@ bootstrap 使用受保护目录、owner-only 文件、write-file-atomic 的 fsyn
 
 安装使用本机配对权威；初始化后的 config/storage/deployment/maintenance/keys 使用对应规范 system 路径的 admin 权限与脱敏审计。普通 SK 的路径 write 不能越过这条管理权限。Dashboard 的禁用按钮只是反馈，服务端仍权威拒绝；CLI secret 输入用文件/stdin，不用 argv。
 
-数据库、Redis、加密根、签名根不是 runtime settings。它们分别进入 [维护工作流](./maintenance-and-keys.mdx)；对象 endpoint/bucket 使用 [后端身份管理](../store/storage-backends.mdx)。镜像、端口、资源限制、卷由外部部署 agent 执行，见 [Node 部署](./node-docker-and-helm.mdx)。
+数据库、Redis、加密根、签名根不是 runtime settings。它们分别进入 [维护工作流](./maintenance-and-keys.mdx)；对象 endpoint/bucket 使用 [后端身份管理](../store/storage-backends.mdx)。镜像、端口与受限目录变更由本机 Compose deployment agent 执行；Railway 的卷权限、私网信任与 loopback 安装规则见 [Node 部署](./node-docker-and-helm.mdx)。

@@ -8,6 +8,8 @@ relations:
     - device/websocket-sessions.mdx
 code:
   paths:
+    - packages/server/src/bootstrapState.ts
+    - packages/core/src/managedConfig.ts
     - scripts/compose-snapshot.mjs
     - packages/server/src/server.ts
     - packages/server/src/main.ts
@@ -68,6 +70,19 @@ agent 比较 Compose 声明与实际容器观察，校验实例身份，领取�
 ## Railway 与 Helm
 
 Railway 使用 `Dockerfile.railway`；由于平台构建器约束，镜像不声明 VOLUME，由平台把持久卷挂在 `/data`。平台提供的数据库/对象服务连接经受保护 setup/defaults 输入，不引回旧 env-only 产品配置。新实例、已有实例恢复、数据库角色权限和 S3 内网 origin 都必须按实际平台核验，不从“容器部署成功”推导生产闭环成功。
+
+平台挂载的 `/data` 可能由 root 拥有；应用必须同时能写 `/data` 和 `/data/bootstrap`。`proper-lockfile` 会在被锁目录旁创建 `/data/bootstrap.lock`，只修改 bootstrap 子目录 owner 仍会在初始化身份之前失败，并表现为恢复态。受限平台启动阶段先以 root 设置两目录的 owner/mode，再降权运行应用：
+
+```sh
+install -d -m 700 -o 1000 -g 1000 /data /data/bootstrap &&
+  exec setpriv --reuid=node --regid=node --init-groups node /app/dist/main.js
+```
+
+启动阶段需要已获得 root 权限；最终 Node 进程仍以应用用户运行，不以放宽目录权限或长期 root 运行绕过锁文件要求。
+
+私网 S3 的信任锚必须由本机写入权限为 `0600` 的 `install-defaults.json`，以 `storage.endpoint` 固定允许的 exact origin；公开 setup body 无权授予内网例外。独立 `databaseAdminUrl` 也属于该受保护文件，不能塞入公开 setup 请求。经容器 loopback 完成安装时，请求 body 必须显式带 `settings.canonicalOrigin` 的公网 HTTPS origin：只写 `defaults.settings` 会被 setup schema 生成的默认 settings 覆盖。setup 响应的 `baseUrl` 是请求 origin，此时仍为 loopback；交付客户端 profile 时应使用实际公网 origin。
+
+Railway 私网的 SeaweedFS 使用 IPv6 监听 `-ip.bind=::`，`-ip` 与 `-master.peers` 使用稳定私网 DNS 名称。沿用 Compose 已验证的固定镜像和 `volume.max=32`；该值是逻辑卷槽上限，不是托管磁盘的 GB 数。内部 metadata 集合也占卷槽，按物理卷容量随意缩小该值会让业务桶无法写入；创建桶成功不能证明剩余卷槽足以写对象。
 
 Helm chart 部署同一 managed 服务，PG/S3 由外部供应，用户仍先配对初始化。单副本 bootstrap PVC 是默认；多副本须使用同一 initialized bootstrap 的共享卷和共享 PG/S3，并显式配置 Redis。不要把每个 Pod 的独立 setup/root 当成同一实例。
 
