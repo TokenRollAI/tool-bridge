@@ -1,5 +1,5 @@
 ---
-description: S3 后端管理：不可变 backendId、active 默认指针、Context 固定绑定、credential generation、真实能力探测与 socket DNS 安全。
+description: S3 后端管理：不可变 backendId、active 默认指针、Context 固定绑定、credential generation、未知长度上传的临时磁盘与 deadline、真实能力探测及 socket DNS 安全。
 kind: architecture
 relations:
   related:
@@ -29,6 +29,8 @@ code:
     - packages/dashboard/src/pages/system/forms/StorageConnectionFields.tsx
     - packages/dashboard/src/pages/system/forms/storageConnection.ts
     - packages/server/test/s3ObjectStore.integration.test.ts
+    - packages/server/test/s3Objects.test.ts
+    - packages/server/test/s3Probe.test.ts
     - packages/server/test/managedSecurity.test.ts
 ---
 
@@ -61,6 +63,14 @@ Node 使用官方 AWS S3 SDK，配置 path-style、禁自动 redirect、单次�
 
 test 在随机隔离 namespace 执行真实 PUT/HEAD/GET/DELETE、metadata、空/流式对象、特殊字符 key、分页 continuation，并以并发 `If-None-Match` / `If-Match` 写证明对象服务的原子条件语义。错误 ETag 必須拒绝，probe cleanup 是激活条件之一。`HEAD → PUT` 不能模拟原子 compare-and-set；HTTP mock 或能创建 bucket 不构成兼容证据。
 
+分页检查使用独立子 namespace 与成功写入的预期集合，不能把其他检查的失败写入尝试当作分页缺失；cleanup 则仍清理所有尝试过的 key，包括写入后才报错的对象。
+
+能力检查失败时，服务端 console 只记录固定检查名与严格白名单归一的原因；任意异常消息、cause、key、endpoint 和凭证均不能回显。返回的布尔检查结果仍决定激活资格，诊断用于区分检查语义失败与传输异常，不替代真实兼容验证。
+
 标准 Node driver 当前不提供 presign，因此 default Store 使用流式 relay，平台 S3 Context 不广告可选 direct-upload。core/neutral Store client 仍定义严格 exact-size direct 契约供显式能力 driver 使用，但未实现的浏览器 CORS/直传不能标记已交付。当前是 single PUT，无 multipart/resumable。
+
+未知长度的上传流先以背压写入系统临时目录，完整接收后按真实 `Content-Length` 执行 single PUT，保留原子条件头。这样避免把整份对象缓存在进程堆上；byte cap 在接收过程中执行，同一个 deadline 覆盖暂存、PUT 与确认 HEAD。临时目录与文件权限分别为 `0700`、`0600`，正常完成或错误退出均清理；进程崩溃后的磁盘回收仍需部署环境承担。
+
+这条路径需要可写且容量足够的临时磁盘，并增加完整接收后才能开始远端上传的等待。临时文件是传输暂存，不是部署级本地 ObjectStore；持久对象仍由绑定的 S3 后端保存。兼容判断继续以当前部署的真实全项探测为准，不能从单项布尔失败推定厂商能力或唯一根因。
 
 API、`tb storage` 与 Dashboard 存储后端页提供同权 list/get/add/test/activate/credential update/delete。Context CLI 的 backend 选择与 Dashboard 字段必须落到相同注册 payload；普通 SK 不因拥有 registry read/write 就获得后端管理权限。对字节资源的真实验证每轮有界，保留脱敏证据；不得把 probe namespace 或签名 URL 写入日志。
