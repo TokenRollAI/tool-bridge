@@ -23,14 +23,17 @@ export function reportError(asJson: boolean, err: unknown, exitCode = 1): void {
         ok: false,
         error: message,
         code: cli?.code,
+        kind: cli?.kind,
+        outcome: cli?.outcome,
         retryable: cli?.retryable,
         hint: cli?.hint,
         feedback: cli?.feedback,
       })}\n`,
     )
   } else {
-    const retry = cli?.retryable === true ? ' (retryable — try again)' : ''
-    process.stderr.write(`error: ${message}${retry}\n`)
+    const code = cli?.code === undefined ? '' : ` [${cli.code}]`
+    process.stderr.write(`error${code}: ${message}\n`)
+    if (cli?.retryable !== undefined) process.stderr.write(`retryable: ${cli.retryable ? 'yes' : 'no'}\n`)
     if (cli?.hint) process.stderr.write(`${cli.hint}\n`)
   }
   process.exitCode = exitCode > 0 ? exitCode : 1
