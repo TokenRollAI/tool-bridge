@@ -15,9 +15,14 @@ import {
   type ObjectStore,
   TBError,
 } from '@tool-bridge/core'
+import { createReadStream, createWriteStream } from 'node:fs'
 import { NodeHttpHandler } from '@smithy/node-http-handler'
+import { finished, pipeline } from 'node:stream/promises'
 /** Official AWS SDK protocol adapter, deliberately confined to the Node host. */
 import { Readable, Transform } from 'node:stream'
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { s3Network, type S3NetworkOptions } from './s3Network'
 
 export interface S3ObjectStoreOptions extends S3NetworkOptions {
@@ -94,10 +99,11 @@ function bounded(source: Readable, maxBytes: number): Readable {
   return output
 }
 
-function uploadBody(
+async function uploadBody(
   body: ObjectBody,
   maxBytes: number,
-): { body: Buffer | Readable, length?: number } {
+  signal: AbortSignal,
+): Promise<{ body: Buffer | Readable, dispose(): Promise<void>, length: number }> {
   if (
     typeof body === 'string'
     || body instanceof Uint8Array
@@ -110,16 +116,39 @@ function uploadBody(
           ? Buffer.from(body)
           : Buffer.from(body.buffer, body.byteOffset, body.byteLength)
     if (value.length > maxBytes) throw limitError()
-    return { body: value, length: value.length }
+    return { body: value, length: value.length, dispose: async () => {} }
   }
   const reader = body.getReader()
+  let total = 0
+  let complete = false
+  let cancelRequested = false
+  const cancel = () => {
+    if (complete || cancelRequested) return
+    cancelRequested = true
+    void reader.cancel?.(signal.reason).catch(() => {})
+  }
+  async function readNext() {
+    signal.throwIfAborted()
+    let onAbort: () => void = () => {}
+    const aborted = new Promise<never>((_, reject) => {
+      onAbort = () => {
+        cancel()
+        reject(signal.reason)
+      }
+      signal.addEventListener('abort', onAbort, { once: true })
+    })
+    try {
+      return await Promise.race([reader.read(), aborted])
+    } finally {
+      // A shared, never-resolved abort promise would retain a reaction per chunk.
+      signal.removeEventListener('abort', onAbort)
+    }
+  }
   const stream = Readable.from(
     (async function* () {
-      let complete = false
-      let total = 0
       try {
         for (;;) {
-          const { done, value } = await reader.read()
+          const { done, value } = await readNext()
           if (done) {
             complete = true
             break
@@ -130,17 +159,37 @@ function uploadBody(
           yield value
         }
       } finally {
-        if (!complete) await reader.cancel?.().catch(() => {})
-        reader.releaseLock()
+        cancel()
       }
     })(),
     { objectMode: false, highWaterMark: 64 * 1024 },
   )
-  // Ensure cancellation reaches a reader whose read() is still pending.
-  stream.on('close', () => {
-    void reader.cancel?.().catch(() => {})
-  })
-  return { body: stream }
+  let directory: string | undefined
+  try {
+    // Use an exact Content-Length instead of relying on unknown-length chunked
+    // PUT support. Spool with backpressure rather than buffering maxBytes in RAM.
+    directory = await mkdtemp(join(tmpdir(), 'tb-s3-upload-'))
+    const path = join(directory, 'body')
+    await pipeline(stream, createWriteStream(path, { flags: 'wx', mode: 0o600 }), { signal })
+    const file = createReadStream(path)
+    const uploadDirectory = directory
+    return {
+      body: file,
+      length: total,
+      async dispose() {
+        file.destroy()
+        await finished(file, { cleanup: true }).catch(() => {})
+        await rm(uploadDirectory, { recursive: true, force: true })
+      },
+    }
+  } catch (error) {
+    stream.destroy()
+    if (directory) await rm(directory, { recursive: true, force: true })
+    throw error
+  } finally {
+    cancel()
+    reader.releaseLock()
+  }
 }
 
 export function createS3ObjectStore(
@@ -237,20 +286,21 @@ export function createS3ObjectStore(
     }
   }
 
-  const head = async (key: string): Promise<ObjectMeta | null> => {
+  const head = async (key: string, signal?: AbortSignal): Promise<ObjectMeta | null> => {
     try {
-      return await run('HEAD', async signal =>
+      const execute = async (signal: AbortSignal) =>
         meta(
           key,
           await client.send(
             new HeadObjectCommand({ Bucket: config.bucket, Key: key }),
             { abortSignal: signal },
           ),
-        ),
-      )
+        )
+      return signal ? await execute(signal) : await run('HEAD', execute)
     } catch (error) {
-      if (isTBError(error) && error.code === 'not_found') return null
-      throw error
+      const normalized = s3Error('HEAD', error)
+      if (normalized.code === 'not_found') return null
+      throw normalized
     }
   }
 
@@ -298,51 +348,45 @@ export function createS3ObjectStore(
           'invalid_argument',
           'S3 conditional write modes are mutually exclusive',
         )
-      const upload = uploadBody(body, maxBytes)
-      let bodyError: Error | undefined
-      const uploadController = new AbortController()
-      if (upload.body instanceof Readable)
-        upload.body.on('error', (error) => {
-          bodyError = error
-          uploadController.abort()
-        })
-      try {
-        await run('PUT', signal =>
-          client.send(
-            new PutObjectCommand({
-              Bucket: config.bucket,
-              Key: key,
-              Body: upload.body,
-              ContentLength: upload.length,
-              ContentType: opts?.contentType,
-              Metadata: opts?.metadata,
-              IfNoneMatch: opts?.ifNoneMatch,
-              IfMatch:
+      return run('PUT', async (signal) => {
+        const upload = await uploadBody(body, maxBytes, signal)
+        const uploadController = new AbortController()
+        if (upload.body instanceof Readable)
+          upload.body.on('error', () => uploadController.abort())
+        try {
+          try {
+            await client.send(
+              new PutObjectCommand({
+                Bucket: config.bucket,
+                Key: key,
+                Body: upload.body,
+                ContentLength: upload.length,
+                ContentType: opts?.contentType,
+                Metadata: opts?.metadata,
+                IfNoneMatch: opts?.ifNoneMatch,
+                IfMatch:
                 opts?.ifMatchEtag !== undefined
                   ? `"${opts.ifMatchEtag}"`
                   : undefined,
-            }),
-            { abortSignal: AbortSignal.any([signal, uploadController.signal]) },
-          ),
-        )
-      } catch (error) {
-        if (bodyError && isTBError(bodyError)) throw bodyError
-        if (
-          opts?.ifMatchEtag !== undefined
-          && isTBError(error)
-          && error.code === 'not_found'
-        )
-          throw new TBError('conflict', 'S3 PUT condition failed')
-        throw error
-      } finally {
-        if (upload.body instanceof Readable) upload.body.destroy()
-      }
-      const stored = await head(key)
-      if (!stored)
-        throw new TBError('unavailable', 'S3 PUT was not observable by HEAD', {
-          retryable: true,
-        })
-      return stored
+              }),
+              { abortSignal: AbortSignal.any([signal, uploadController.signal]) },
+            )
+          } catch (error) {
+            const normalized = s3Error('PUT', error)
+            if (opts?.ifMatchEtag !== undefined && normalized.code === 'not_found')
+              throw new TBError('conflict', 'S3 PUT condition failed')
+            throw normalized
+          }
+          const stored = await head(key, signal)
+          if (!stored)
+            throw new TBError('unavailable', 'S3 PUT was not observable by HEAD', {
+              retryable: true,
+            })
+          return stored
+        } finally {
+          await upload.dispose()
+        }
+      })
     },
     async delete(key) {
       try {

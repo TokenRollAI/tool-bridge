@@ -8,6 +8,15 @@ export interface S3ProbeResult {
   cleanupSucceeded: boolean
 }
 
+function diagnosticReason(error: unknown): string {
+  if (!isTBError(error)) return 'unexpected_error'
+  // TBError can also originate from an upload source. Only known adapter messages
+  // are safe; never log arbitrary messages, causes, keys, endpoints or credentials.
+  const normalized = /^(?:S3 (?:PUT|HEAD|GET|LIST|DELETE) (?:failed(?: \([1-5]\d{2}\))?|was denied|object not found|condition failed)|S3 GET deadline exceeded|S3 PUT was not observable by HEAD)$/.exec(error.message)
+  // JS $ also matches before a final newline, so require a complete match.
+  return normalized?.[0] === error.message ? error.message : 'operation_failed'
+}
+
 /** Destructive only inside a fresh, unguessable probe namespace in the selected bucket. */
 export async function probeS3ObjectStore(
   config: S3StoreConfig,
@@ -40,11 +49,15 @@ export async function probeS3ObjectStore(
     name: string,
     run: () => Promise<boolean>,
   ): Promise<void> {
+    let reason = 'unexpected_result'
     try {
       checks[name] = await run()
-    } catch {
+    } catch (error) {
       checks[name] = false
+      reason = diagnosticReason(error)
     }
+    if (!checks[name])
+      console.warn('S3 capability probe check failed', { check: name, reason })
   }
   async function read(name: string): Promise<string | undefined> {
     const object = await store.get(name)
@@ -161,11 +174,20 @@ export async function probeS3ObjectStore(
       return true
     })
     await check('pagination', async () => {
+      // Other checks may fail before or after their PUT reaches the backend.
+      // Keep listing expectations independent from the cleanup attempt ledger.
+      const paginationPrefix = `${prefix}pagination/`
+      const expected = new Set<string>()
+      for (let index = 0; index < 5; index++) {
+        const target = key(`pagination/item-${index}`)
+        await store.put(target, `page-${index}`, { ifNoneMatch: '*' })
+        expected.add(target)
+      }
       const found = new Set<string>()
       const cursors = new Set<string>()
       let cursor: string | undefined
       do {
-        const page = await store.list(prefix, { cursor, limit: 2 })
+        const page = await store.list(paginationPrefix, { cursor, limit: 2 })
         for (const item of page.items) {
           if (!('key' in item) || found.has(item.key)) return false
           found.add(item.key)
@@ -177,8 +199,8 @@ export async function probeS3ObjectStore(
         }
       } while (cursor)
       return (
-        found.size === keys.size
-        && [...keys].every(item => found.has(item))
+        found.size === expected.size
+        && [...expected].every(item => found.has(item))
         && cursors.size > 0
       )
     })
