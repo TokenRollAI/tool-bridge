@@ -13,25 +13,24 @@ import { MountDialog } from '@/pages/system/forms/MountDialog'
 import { useIntegrationCatalog } from '@/lib/queries'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
+import { type MountCompletion, MountCompletionActions, MountCompletionSummary } from './MountCompletion'
 import { ADD_SOURCES, type AddSource, availablePresets } from './addToolSources'
 import { CatalogConfigStep } from './CatalogConfigStep'
 
 type WizardStep = 'source' | 'catalog-config'
 
 function WizardBody({
-  step,
-  setStep,
   defaultPath,
   onClose,
 }: {
   defaultPath?: string
   onClose: () => void
-  setStep: (step: WizardStep) => void
-  step: WizardStep
 }) {
+  const [step, setStep] = useState<WizardStep>('source')
   const navigate = useNavigate()
   const catalog = useIntegrationCatalog()
   const [selectedProvider, setSelectedProvider] = useState<string>('')
+  const [completion, setCompletion] = useState<MountCompletion | null>(null)
 
   const catalogIds = useMemo(
     () => new Set((catalog.data ?? []).map(item => item.id)),
@@ -55,6 +54,17 @@ function WizardBody({
   const openPreset = (provider: string) => {
     setSelectedProvider(provider)
     setStep('catalog-config')
+  }
+
+  if (completion) {
+    return (
+      <>
+        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-6 sm:px-6">
+          <MountCompletionSummary result={completion} />
+        </div>
+        <MountCompletionActions onDone={onClose} result={completion} />
+      </>
+    )
   }
 
   if (step === 'catalog-config') {
@@ -131,6 +141,7 @@ function WizardBody({
                   {...(defaultPath !== undefined ? { defaultPath } : {})}
                   existingPaths={[]}
                   key={source.kind}
+                  onComplete={setCompletion}
                   trigger={<button type="button">{card}</button>}
                 />
               )
@@ -158,41 +169,46 @@ function WizardBody({
 export function AddToolWizard({
   trigger,
   defaultPath,
+  open: controlledOpen,
+  onOpenChange,
 }: {
   defaultPath?: string
-  trigger?: ReactNode
+  onOpenChange?: (open: boolean) => void
+  open?: boolean
+  trigger?: ReactNode | null
 }) {
-  const [open, setOpen] = useState(false)
-  const [step, setStep] = useState<WizardStep>('source')
-
-  const close = () => {
-    setOpen(false)
-    // 关闭动画后复位,避免看到步骤闪回。
-    setTimeout(() => setStep('source'), 200)
+  const [internalOpen, setInternalOpen] = useState(false)
+  const open = controlledOpen ?? internalOpen
+  const changeOpen = (next: boolean) => {
+    if (controlledOpen === undefined) setInternalOpen(next)
+    onOpenChange?.(next)
   }
+  const close = () => changeOpen(false)
 
   return (
-    <Dialog onOpenChange={next => (next ? setOpen(true) : close())} open={open}>
-      <DialogTrigger asChild>
-        {trigger ?? (
-          <Button size="sm">
-            <Plus />
-            添加工具
-          </Button>
-        )}
-      </DialogTrigger>
+    <Dialog onOpenChange={changeOpen} open={open}>
+      {trigger !== null && (
+        <DialogTrigger asChild>
+          {trigger ?? (
+            <Button size="sm">
+              <Plus />
+              添加工具
+            </Button>
+          )}
+        </DialogTrigger>
+      )}
       <DialogContent
-        className="top-0 right-0 bottom-0 left-auto flex h-dvh max-h-none w-full max-w-full translate-x-0 translate-y-0 flex-col gap-0 rounded-none border-y-0 border-r-0 p-0 sm:max-w-2xl"
+        className="top-0 right-0 bottom-0 left-auto flex h-auto max-h-none w-full max-w-full translate-x-0 translate-y-0 flex-col gap-0 rounded-none border-y-0 border-r-0 p-0 sm:max-w-2xl"
         showCloseButton
       >
-        <DialogHeader className="border-b px-5 py-4 sm:px-6">
+        <DialogHeader className="shrink-0 border-b px-5 py-4 sm:px-6">
           <DialogTitle className="text-lg">添加工具</DialogTitle>
           <DialogDescription>
-            从来源开始:内置集成一站式挂载,自定义类型走通用挂载器。
+            选择工具来源，完成连接配置，然后查看可以使用的工具。
           </DialogDescription>
         </DialogHeader>
 
-        <WizardBody defaultPath={defaultPath} onClose={close} setStep={setStep} step={step} />
+        <WizardBody defaultPath={defaultPath} onClose={close} />
       </DialogContent>
     </Dialog>
   )
