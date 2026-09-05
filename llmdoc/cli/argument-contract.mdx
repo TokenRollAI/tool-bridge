@@ -184,6 +184,10 @@ CLI 在 workspace 内 typecheck、Vitest 与 tsup 三个解析面都必须覆盖
 | 直接 API / HTBP | 权限、状态码、响应形状与错误码 |
 | `tb` CLI | 参数可达、帮助文本、stdout/stderr、退出码 |
 | Dashboard | 字段来源、校验、敏感值处理与成功后刷新 |
+| MCP | 固定入口按需发现、完整路径调用、目标授权、结果与 device operation 语义 |
+
+CLI、Dashboard、MCP 的对等以网关工具使用能力为边界。远程 MCP 不要求模拟 CLI 的本机文件、daemon、
+安装和 localhost 配对；固定入口与验收约束见 [MCP 入口](../app-runtime/mcp-interop.mdx)。
 
 Store 的当前对等面是 `system/store`、上述 `tb store` 命令与 Dashboard `/manage/store`。Device SDK 的
 `call.uploadObject` 是设备数据面，不要求 CLI 模拟 call capability，但最终仍消费同一 create/relay/direct
