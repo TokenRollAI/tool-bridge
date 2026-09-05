@@ -122,14 +122,15 @@ function fileSize(file: string): number {
 
 function printObjects(page: StoreListPage): void {
   if (page.items.length === 0) {
-    printLine('(no Store objects)')
+    printLine('(no Store objects on this page)')
+    if (page.cursor) printLine(`more pages available; next cursor: ${page.cursor}`)
     return
   }
   printLine(table(
     ['URI', 'SIZE', 'TYPE', 'READY'],
     page.items.map(item => [item.uri, String(item.size), item.contentType, item.readyAt]),
   ))
-  if (page.cursor) printLine(`next cursor: ${page.cursor}`)
+  if (page.cursor) printLine(`more pages available; next cursor: ${page.cursor}`)
 }
 
 async function writeResponse(response: Response, out: string | undefined): Promise<number> {

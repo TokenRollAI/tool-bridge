@@ -1,17 +1,19 @@
 import {
+  type ConfigStatus,
   createSetupClient,
   parseConfigUpdate,
   parseRuntimeConfig,
   parseStorageRotate,
   parseStorageWrite,
+  type RuntimeConfig,
 } from '@tool-bridge/sdk/client'
 import { readFile } from 'node:fs/promises'
 import { spawn } from 'node:child_process'
 import { Command } from 'commander'
 import { callDirect, CliError, getFetch, requireTarget } from '../http'
 import { resolveTarget, withGlobalOpts } from '../args'
+import { printJson, printLine, table } from '../output'
 import { readStdinRaw } from '../stdin'
-import { printJson } from '../output'
 
 async function readInput(file: string): Promise<unknown> {
   if (file === '-' && process.stdin.isTTY) throw new CliError('provide JSON through stdin or --file <path>')
@@ -33,29 +35,75 @@ function revision(value: string): number {
   return Number(value)
 }
 
+function printConfigStatus(status: ConfigStatus): void {
+  const descriptions: Record<ConfigStatus['state'], string> = {
+    applied: 'saved settings are effective on the responding replica',
+    pending: 'saved revision is not yet effective on the responding replica',
+    applying: 'configuration application is in progress',
+    failed: 'configuration application has an error',
+  }
+  printLine(`State: ${status.state} — ${descriptions[status.state]}`)
+  printLine(`Desired revision (saved): ${status.revision}`)
+  printLine(`Effective revision (responding replica): ${status.appliedRevision === 0 ? 'none confirmed' : status.appliedRevision}`)
+  if (status.lastError) printLine(`Last application error: ${status.lastError}`)
+  if (status.appliedRevision === 0) printLine('Reported effective settings below are not confirmed as applied on this replica.')
+  const keys = [...new Set([...Object.keys(status.desired), ...Object.keys(status.effective)])] as Array<keyof RuntimeConfig>
+  printLine(table(
+    ['Setting', 'Desired (saved)', 'Reported effective'],
+    keys.map(key => [key, JSON.stringify(status.desired[key]) ?? '(not reported)', JSON.stringify(status.effective[key]) ?? '(not reported)']),
+  ))
+}
+
 export function configCommand() {
   const command = new Command('config').description('Manage instance settings and their applied revision (admin)')
-  for (const name of ['schema', 'get', 'status'] as const) {
+  command.addCommand(withGlobalOpts(new Command('schema'))
+    .description('Read the runtime settings JSON Schema')
+    .action(async opts => printJson(await callDirect(resolveTarget(opts), '/system/config/schema'))))
+  for (const name of ['get', 'status'] as const) {
     command.addCommand(withGlobalOpts(new Command(name))
       .description(`${name} instance configuration`)
-      .action(async opts => printJson(await callDirect(resolveTarget(opts), `/system/config/${name}`))))
+      .action(async (opts) => {
+        const result = await callDirect<ConfigStatus>(resolveTarget(opts), `/system/config/${name}`)
+        if (opts.json) printJson(result)
+        else printConfigStatus(result)
+      }))
   }
   command.addCommand(withGlobalOpts(new Command('validate'))
     .description('Validate runtime settings without saving')
     .option('--file <path>', 'JSON file; - reads stdin', '-')
-    .action(async opts => printJson(await callDirect(resolveTarget(opts), '/system/config/validate', parseRuntimeConfig(await readInput(opts.file))))))
+    .action(async (opts) => {
+      const settings = await callDirect<RuntimeConfig>(resolveTarget(opts), '/system/config/validate', parseRuntimeConfig(await readInput(opts.file)))
+      if (opts.json) printJson(settings)
+      else {
+        printLine('Configuration is valid; no settings were saved or applied.')
+        printLine('Validated settings (including defaults):')
+        printJson(settings)
+      }
+    }))
   command.addCommand(withGlobalOpts(new Command('update'))
     .description('Save desired runtime settings; run apply separately')
     .requiredOption('--revision <number>', 'Current configuration revision', revision)
     .option('--file <path>', 'Runtime settings JSON file; - reads stdin', '-')
     .action(async (opts) => {
       const payload = parseConfigUpdate({ expectedRevision: opts.revision, settings: await readInput(opts.file) })
-      printJson(await callDirect(resolveTarget(opts), '/system/config/update', payload))
+      const result = await callDirect<ConfigStatus>(resolveTarget(opts), '/system/config/update', payload)
+      if (opts.json) printJson(result)
+      else {
+        printLine('Configuration update saved; this command does not apply settings.')
+        printConfigStatus(result)
+      }
     }))
   command.addCommand(withGlobalOpts(new Command('apply'))
     .description('Apply the saved revision and report effective settings')
     .requiredOption('--revision <number>', 'Saved configuration revision', revision)
-    .action(async opts => printJson(await callDirect(resolveTarget(opts), '/system/config/apply', { expectedRevision: opts.revision }))))
+    .action(async (opts) => {
+      const result = await callDirect<ConfigStatus>(resolveTarget(opts), '/system/config/apply', { expectedRevision: opts.revision })
+      if (opts.json) printJson(result)
+      else {
+        printLine(`Apply result for requested revision ${opts.revision}:`)
+        printConfigStatus(result)
+      }
+    }))
   return command
 }
 

@@ -108,7 +108,7 @@ describe('tb search', () => {
     expect(output).toContain('3/4')
     expect(output).toContain('write')
     expect(output).toContain('Create a calendar event')
-    expect(output).toContain('next cursor: c2')
+    expect(output).toContain('more pages available; next cursor: c2')
   })
 
   it('partial 状态写 stderr，JSON stdout 保持完整 federation evidence', async () => {
@@ -239,7 +239,41 @@ describe('tb search', () => {
   it('无结果时 --schemas 不追加任何段', async () => {
     jsonFetch({ items: [] })
     await runCli(['search', 'calendar', '--schemas', ...gateway])
-    expect(written(process.stdout)).toBe('(no visible tools found)\n')
+    expect(written(process.stdout)).toBe('(no visible tools on this page)\n')
+  })
+
+  it.each([
+    { partial: false, cursor: 'next' },
+    { partial: true, cursor: 'next' },
+    { partial: true, cursor: undefined },
+  ])('空页保留分页与不完整状态: %j', async ({ partial, cursor }) => {
+    const page = { items: [], partial, ...(cursor === undefined ? {} : { cursor }) }
+    const fn = jsonFetch(page)
+
+    await runCli(['search', 'calendar', '--schemas', ...gateway])
+
+    const output = written(process.stdout)
+    expect(output).toContain('no visible tools on this page')
+    expect(output.includes('search results are incomplete')).toBe(partial)
+    expect(output.includes('more pages available; next cursor: next')).toBe(cursor !== undefined)
+    expect(fn).toHaveBeenCalledOnce()
+    expect(process.exitCode).toBe(0)
+  })
+
+  it('不完整空页的 JSON 保留原始 wire 与 cursor', async () => {
+    const page = {
+      items: [],
+      cursor: 'next',
+      partial: true,
+      sources: [{ path: 'remotes/work', status: 'timed_out' }],
+    }
+    const fn = jsonFetch(page)
+
+    await runCli(['search', 'calendar', '--json', ...gateway])
+
+    expect(JSON.parse(written(process.stdout))).toEqual(page)
+    expect(written(process.stderr)).toContain('partial search results')
+    expect(fn).toHaveBeenCalledOnce()
   })
 
   it('非法枚举、覆盖率、路径与 limit 都在请求前拒绝', async () => {

@@ -34,6 +34,28 @@ afterEach(() => {
 })
 
 describe('tb ctx ls', () => {
+  it.each([undefined, 'next'])('空页仅描述当前页且保留 cursor: %s', async (cursor) => {
+    const page = { items: [], ...(cursor === undefined ? {} : { cursor }) }
+    const fn = captureFetch(page)
+
+    await runCli(['ctx', 'ls', 'ctx/notes', ...gw])
+
+    expect(stdoutText()).toContain('(no entries on this page)')
+    expect(stdoutText().includes('more pages available; next cursor: next')).toBe(cursor !== undefined)
+    expect(fn).toHaveBeenCalledOnce()
+    expect(process.exitCode).toBe(0)
+  })
+
+  it('空页的 JSON 保留原始 wire 与 cursor', async () => {
+    const page = { items: [], cursor: 'next' }
+    const fn = captureFetch(page)
+
+    await runCli(['ctx', 'ls', 'ctx/notes', '--json', ...gw])
+
+    expect(JSON.parse(stdoutText())).toEqual(page)
+    expect(fn).toHaveBeenCalledOnce()
+  })
+
   it('无 prefix → List{path:""},不带 opts', async () => {
     const fn = captureFetch({ items: [] })
     await runCli(['ctx', 'ls', 'ctx/notes', ...gw, '--json'])
@@ -87,12 +109,14 @@ describe('tb ctx ls', () => {
           metadata: {},
         },
       ],
+      cursor: 'next',
     })
     await runCli(['ctx', 'ls', 'ctx/notes', ...gw])
     const printed = stdoutText()
     expect(printed).toContain('node://ctx/notes/a.md')
     expect(printed).toContain('12')
     expect(printed).toContain('2026-07-07T00:00:00Z')
+    expect(printed).toContain('more pages available; next cursor: next')
     expect(process.exitCode).toBe(0)
   })
 })

@@ -141,6 +141,47 @@ describe('tb store upload', () => {
 })
 
 describe('tb store management', () => {
+  it.each([undefined, 'next'])('空页仅描述当前页且保留 cursor: %s', async (cursor) => {
+    const page = { items: [], ...(cursor === undefined ? {} : { cursor }) }
+    const fetcher = vi.fn(async () => new Response(JSON.stringify(page), { status: 200 }))
+    setFetch(fetcher as typeof fetch)
+
+    await runCli(['store', 'list', ...gw])
+
+    const stdout = vi.mocked(process.stdout.write).mock.calls.map(call => String(call[0])).join('')
+    expect(stdout).toContain('(no Store objects on this page)')
+    expect(stdout.includes('more pages available; next cursor: next')).toBe(cursor !== undefined)
+    expect(fetcher).toHaveBeenCalledOnce()
+    expect(process.exitCode).toBe(0)
+  })
+
+  it('空页的 JSON 保留原始 wire 与 cursor', async () => {
+    const page = { items: [], cursor: 'next' }
+    const fetcher = vi.fn(async () => new Response(JSON.stringify(page), { status: 200 }))
+    setFetch(fetcher as typeof fetch)
+
+    await runCli(['store', 'list', '--json', ...gw])
+
+    const stdout = vi.mocked(process.stdout.write).mock.calls.map(call => String(call[0])).join('')
+    expect(JSON.parse(stdout)).toEqual(page)
+    expect(fetcher).toHaveBeenCalledOnce()
+  })
+
+  it('非空页也说明还有分页，且不泄漏 Store capability', async () => {
+    const fetcher = vi.fn(async () => new Response(JSON.stringify({
+      items: [READY], cursor: 'next',
+    }), { status: 200 }))
+    setFetch(fetcher as typeof fetch)
+
+    await runCli(['store', 'list', ...gw])
+
+    const stdout = vi.mocked(process.stdout.write).mock.calls.map(call => String(call[0])).join('')
+    expect(stdout).toContain(READY.uri)
+    expect(stdout).toContain('more pages available; next cursor: next')
+    expect(stdout).not.toContain('must-not-escape')
+    expect(fetcher).toHaveBeenCalledOnce()
+  })
+
   it('本地使用 SDK 的严格 Store URI parser，短 object id 不触发请求', async () => {
     const fetcher = vi.fn()
     setFetch(fetcher as typeof fetch)
