@@ -4,8 +4,10 @@ import { mkdtemp, readFile, rm, unlink } from 'node:fs/promises'
 import postgres, { type Sql } from 'postgres'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { testS3Config, testServerConfig } from './helpers/server'
 import { PgStoreRepository } from '../src/pgStoreRepository'
 import { BootstrapStateStore } from '../src/bootstrapState'
+import { createManagedServer } from '../src/managedServer'
 import { StorageManager } from '../src/storageManager'
 import { ConfigManager } from '../src/configManager'
 import { PgStateStore } from '../src/pgStateStore'
@@ -162,6 +164,22 @@ suite('managed configuration concurrency and failure truth (real PG)', () => {
 })
 
 describe('bootstrap interrupted-write safety', () => {
+  it('reports local lock contention as a domain conflict without entering the operation', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'tb-bootstrap-lock-'))
+    try {
+      const holder = new BootstrapStateStore(directory)
+      const contender = new BootstrapStateStore(directory)
+      let entered = false
+      await holder.exclusive(async () => {
+        await expect(contender.exclusive(async () => {
+          entered = true
+        })).rejects.toMatchObject({ code: 'conflict', message: 'another local maintenance operation is running' })
+      })
+      expect(entered).toBe(false)
+      await expect(contender.exclusive(async () => 'acquired')).resolves.toBe('acquired')
+    } finally { await rm(directory, { recursive: true, force: true }) }
+  })
+
   it.each(['identity.json', 'keys.json'])('local recovery preserves identity and existing keys after %s acknowledgement is lost', async (failedFile) => {
     const directory = await mkdtemp(join(tmpdir(), 'tb-bootstrap-crash-'))
     class FailAfterWrite extends BootstrapStateStore {
@@ -200,7 +218,44 @@ describe('bootstrap interrupted-write safety', () => {
       expect((await recovery.initialize()).phase).toBe('initialized')
       await expect(recovery.authorize(oldToken, 'setup')).rejects.toMatchObject({ code: 'permission_denied' })
       await expect(recovery.createLocalPairing('setup')).rejects.toMatchObject({ code: 'permission_denied' })
+      const recoveryToken = await recovery.createLocalPairing('recovery')
+      expect((await recovery.authorize(recoveryToken, 'recovery')).phase).toBe('initialized')
     } finally { await rm(directory, { recursive: true, force: true }) }
+  })
+
+  it('recovery refuses an empty database after initialized marker persistence interrupts installing', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'tb-bootstrap-recovery-empty-'))
+    let server: Awaited<ReturnType<typeof createManagedServer>> | undefined
+    let target: Sql | undefined
+    try {
+      const store = new BootstrapStateStore(directory)
+      const initial = await store.initialize()
+      const config = await testServerConfig({ dataDir: directory })
+      await store.write('bootstrap.json', { ...initial, phase: 'installing' })
+      await store.write('initialized.json', { instanceId: initial.instanceId })
+      await store.write('install-defaults.json', { storage: testS3Config() })
+      const keysBefore = await store.read('keys.json')
+      const token = await store.createLocalPairing('recovery')
+      server = await createManagedServer({ directory, host: '127.0.0.1', port: 0 })
+      const base = `http://127.0.0.1:${(await server.start()).port}`
+      const response = await fetch(base + '/~setup/recover', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-tb-setup-token': token },
+        body: JSON.stringify({ databaseUrl: config.databaseUrl }),
+      })
+      expect(response.status).toBe(409)
+      expect(await response.json()).toMatchObject({ code: 'conflict', message: 'initialized instance cannot attach an empty database' })
+      target = postgres(config.databaseUrl, { max: 1, onnotice: () => {} })
+      const [identity] = await target<{ table_name: string | null }[]>`SELECT to_regclass('tb_instance')::text AS table_name`
+      expect(identity?.table_name).toBeNull()
+      expect(await store.read('keys.json')).toEqual(keysBefore)
+      expect(await store.state()).toEqual({ ...initial, phase: 'installing' })
+      expect((await fetch(base + '/readyz')).status).toBe(503)
+    } finally {
+      await server?.close()
+      await target?.end({ timeout: 1 })
+      await rm(directory, { recursive: true, force: true })
+    }
   })
 
   it('initialized recovery never manufactures replacement roots after key/state loss', async () => {

@@ -5,6 +5,7 @@ import {
 import { randomBytes, randomUUID } from 'node:crypto'
 import postgres, { type Sql } from 'postgres'
 import type { BootstrapSecrets } from './bootstrapState'
+import { ensureRuntimeCoordinationSchema } from './pgMaintenanceFence'
 import { type KeyRotationJob, PgKeyRotation } from './pgKeyRotation'
 import { PgMailboxRepository } from './pgMailboxRepository'
 import { PgStateStore } from './pgStateStore'
@@ -43,13 +44,7 @@ export class KeyManager implements KeyManagement {
   }
 
   private async ensure(sql: Sql): Promise<void> {
-    await sql.begin(async (tx) => {
-      await tx`SELECT pg_advisory_xact_lock(7283022)`
-      await tx`CREATE TABLE IF NOT EXISTS tb_runtime_replicas (
-      replica_id text PRIMARY KEY, instance_id text NOT NULL, expires_at timestamptz NOT NULL)`
-      await tx`CREATE TABLE IF NOT EXISTS tb_runtime_maintenance (
-      id integer PRIMARY KEY CHECK(id=1), owner_replica_id text NOT NULL, expires_at timestamptz NOT NULL)`
-    })
+    await ensureRuntimeCoordinationSchema(sql)
   }
 
   private rotation(sql: Sql, keys: BootstrapSecrets): PgKeyRotation {
@@ -58,6 +53,12 @@ export class KeyManager implements KeyManagement {
   }
 
   async status(): Promise<KeyStatus> {
+    // Status repairs a missing rotation job, so its snapshot and repair must
+    // serialize with key-file writes just like explicit key mutations.
+    return this.hooks.exclusive(() => this.statusUnderLock())
+  }
+
+  private async statusUnderLock(): Promise<KeyStatus> {
     const snapshot = await this.hooks.readSnapshot()
     const keys = await this.hooks.readKeys()
     const sql = this.connect(snapshot.databaseUrl)
@@ -107,19 +108,21 @@ export class KeyManager implements KeyManagement {
         await sql.begin(async (tx) => {
           // Server replica registration uses this same lock and refuses a foreign active fence.
           await tx`SELECT pg_advisory_xact_lock(7283022)`
+          // Expiry is failure detection, not evidence that old requests drained.
           const others = await tx`SELECT replica_id FROM tb_runtime_replicas
-            WHERE instance_id=${snapshot.instanceId} AND replica_id<>${snapshot.replicaId} AND expires_at>now()`
+            WHERE instance_id=${snapshot.instanceId} AND replica_id<>${snapshot.replicaId}`
           if (others.length > 0) throw new TBError('conflict', 'key maintenance requires stopping all other replicas')
-          const [fence] = await tx<{ owner_replica_id: string }[]>`SELECT owner_replica_id FROM tb_runtime_maintenance WHERE id=1 AND expires_at>now()`
-          if (fence && fence.owner_replica_id !== snapshot.replicaId) throw new TBError('conflict', 'another instance maintenance operation is running')
-          await tx`INSERT INTO tb_runtime_maintenance(id,owner_replica_id,expires_at)
-            VALUES(1,${snapshot.replicaId},now()+interval '90 seconds')
-            ON CONFLICT(id) DO UPDATE SET owner_replica_id=excluded.owner_replica_id,expires_at=excluded.expires_at`
+          const [fence] = await tx<{ owner_replica_id: string, purpose: string }[]>`SELECT owner_replica_id,purpose FROM tb_runtime_maintenance WHERE id=1 AND expires_at>now()`
+          if (fence && (fence.purpose === 'database' || fence.owner_replica_id !== snapshot.replicaId)) throw new TBError('conflict', 'another instance maintenance operation is running')
+          await tx`INSERT INTO tb_runtime_maintenance(id,owner_replica_id,expires_at,purpose,phase,operation_id)
+            VALUES(1,${snapshot.replicaId},now()+interval '90 seconds','keys','active',NULL)
+            ON CONFLICT(id) DO UPDATE SET owner_replica_id=excluded.owner_replica_id,expires_at=excluded.expires_at,
+              purpose=excluded.purpose,phase=excluded.phase,operation_id=excluded.operation_id`
         })
         heartbeat = setInterval(() => {
           renewal = renewal.then(async () => {
             await sql`UPDATE tb_runtime_maintenance SET expires_at=now()+interval '90 seconds'
-              WHERE id=1 AND owner_replica_id=${snapshot.replicaId}`
+              WHERE id=1 AND owner_replica_id=${snapshot.replicaId} AND purpose='keys'`
           })
           // Surface failure at the next boundary; do not create an unhandled rejection.
           void renewal.catch(() => {})
@@ -136,7 +139,7 @@ export class KeyManager implements KeyManagement {
         try {
           await renewal
         } finally {
-          await sql`DELETE FROM tb_runtime_maintenance WHERE id=1 AND owner_replica_id=${snapshot.replicaId}`.catch(() => {})
+          await sql`DELETE FROM tb_runtime_maintenance WHERE id=1 AND owner_replica_id=${snapshot.replicaId} AND purpose='keys'`.catch(() => {})
           await sql.end({ timeout: 5 })
           await quiet?.resume()
         }

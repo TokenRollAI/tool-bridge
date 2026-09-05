@@ -48,8 +48,8 @@ const program = new Command('tool-bridge-server')
     const shutdown = () => {
       if (stopping) return
       stopping = true
-      server.startDraining()
-      void server.close().then(
+      console.log(JSON.stringify({ event: 'tool_bridge_draining' }))
+      void server.shutdown().then(
         () => process.exit(0),
         () => process.exit(1),
       )

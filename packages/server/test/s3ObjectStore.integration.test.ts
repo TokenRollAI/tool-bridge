@@ -18,7 +18,8 @@ const suite = describe
 const cleanups: Array<() => Promise<void> | void> = []
 
 afterEach(async () => {
-  for (const fn of cleanups.splice(0)) await fn()
+  // The database remains authoritative until every runtime has released its lease.
+  for (const fn of cleanups.splice(0).reverse()) await fn()
 })
 
 function tmpDataDir(): string {

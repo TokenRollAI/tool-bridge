@@ -274,7 +274,7 @@ describe('Node 宿主 HTTP 面', () => {
     expect(count2).toBe(count1)
   })
 
-  it('注入 SQLite SearchIndex，真实 HTTP 搜索并跨重启持久', async () => {
+  it('使用 PG SearchIndex，真实 HTTP 搜索并跨重启持久', async () => {
     const dataDir = tmpDataDir()
     const first = await startServer(dataDir)
     const path = 'search/wire/sqlite'

@@ -13,11 +13,17 @@ import { promisify } from 'node:util'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Redis } from 'ioredis'
+import {
+  acquireDatabaseMigrationFence,
+  type DatabaseMigrationFence,
+  finishMigrationTarget,
+} from './pgMaintenanceFence'
 
 export interface MaintenanceSnapshot {
   databaseUrl: string
   instanceId: string
   redisUrl?: string
+  replicaId: string
   revision: number
 }
 export interface MaintenanceHooks {
@@ -128,7 +134,7 @@ async function identity(sql: Sql, expected: string): Promise<void> {
 async function tableCounts(sql: Sql): Promise<Record<string, string>> {
   const tables = await sql<
     { tablename: string }[]
-  >`SELECT tablename FROM pg_catalog.pg_tables WHERE schemaname='public' AND left(tablename,3)='tb_' ORDER BY tablename`
+  >`SELECT tablename FROM pg_catalog.pg_tables WHERE schemaname='public' AND left(tablename,3)='tb_' AND tablename<>'tb_runtime_replicas' ORDER BY tablename`
   const counts: Record<string, string> = {}
   for (const table of tables) {
     const rows = await sql<
@@ -137,6 +143,27 @@ async function tableCounts(sql: Sql): Promise<Record<string, string>> {
     counts[table.tablename] = rows[0]!.count
   }
   return counts
+}
+
+async function closeMigrationResources(
+  source: Sql,
+  target: Sql,
+  fence: DatabaseMigrationFence | undefined,
+  directory: string | undefined,
+): Promise<void> {
+  const cleanup = await Promise.allSettled([
+    (async () => {
+      try {
+        await fence?.releaseLock()
+      } finally {
+        await source.end({ timeout: 5 })
+      }
+    })(),
+    target.end({ timeout: 5 }),
+    directory ? rm(directory, { recursive: true, force: true }) : Promise.resolve(),
+  ])
+  if (cleanup.some(result => result.status === 'rejected'))
+    throw new TBError('unavailable', 'Database migration cleanup failed; inspect the protected local recovery state')
 }
 
 export class MaintenanceManager implements MaintenanceManagement {
@@ -264,6 +291,11 @@ export class MaintenanceManager implements MaintenanceManagement {
         const target = sqlClient(input.databaseUrl)
         let resume: (() => Promise<void>) | undefined
         let directory: string | undefined
+        const operationId = randomUUID()
+        let fence: DatabaseMigrationFence | undefined
+        let restoreStarted = false
+        let commitStarted = false
+        let committed = false
         try {
           await identity(source, snapshot.instanceId)
           const [targetInventory] = await target<
@@ -274,8 +306,14 @@ export class MaintenanceManager implements MaintenanceManagement {
               'invalid_argument',
               'Target database must be empty; existing data is never replaced',
             )
+          fence = await acquireDatabaseMigrationFence(source, {
+            instanceId: snapshot.instanceId,
+            replicaId: snapshot.replicaId,
+            operationId,
+          })
           await step('quiescing')
           resume = (await this.hooks.quiesce()).resume
+          await fence.drain()
           await identity(source, snapshot.instanceId)
           const counts = await tableCounts(source)
           directory = await mkdtemp(join(tmpdir(), 'tb-db-migration-'))
@@ -289,6 +327,7 @@ export class MaintenanceManager implements MaintenanceManagement {
               '--format=custom',
               '--no-owner',
               '--no-privileges',
+              '--exclude-table-data=public.tb_runtime_replicas',
               '--file',
               archive,
             ],
@@ -296,6 +335,7 @@ export class MaintenanceManager implements MaintenanceManagement {
           )
           await chmod(archive, 0o600)
           await step('restoring')
+          restoreStarted = true
           await this.command(
             'pg_restore',
             [
@@ -318,15 +358,47 @@ export class MaintenanceManager implements MaintenanceManagement {
               'Restored database table counts do not match; original database retained',
             )
           await step('committing')
+          // The source must never reopen after the bootstrap changes, even after a crash.
+          await fence.retire()
+          commitStarted = true
           await this.hooks.commit({
             expectedRevision: snapshot.revision,
             databaseUrl: input.databaseUrl,
           })
+          committed = true
           resume = undefined
+          await finishMigrationTarget(target, operationId, true)
+        } catch (error) {
+          if (commitStarted && !committed) {
+            // A write/transport error after the bootstrap rename has an unknown outcome.
+            // Re-read the authority before deciding whether the old runtime may resume.
+            let current: MaintenanceSnapshot
+            try {
+              current = await this.hooks.readSnapshot()
+            } catch {
+              resume = undefined
+              throw new TBError('unavailable', 'Database migration outcome is unknown; both databases remain fenced for local recovery')
+            }
+            if (current.databaseUrl === input.databaseUrl && current.revision > snapshot.revision) {
+              committed = true
+              resume = undefined
+            } else if (current.databaseUrl !== snapshot.databaseUrl || current.revision !== snapshot.revision) {
+              resume = undefined
+              throw new TBError('unavailable', 'Database authority changed during migration; protected local recovery is required')
+            }
+          }
+          if (fence && !committed) {
+            try {
+              if (restoreStarted) await finishMigrationTarget(target, operationId, false)
+              await fence.rollback()
+            } catch {
+              resume = undefined
+              throw new TBError('unavailable', 'Database migration rollback could not be verified; the source remains fenced for local recovery')
+            }
+          }
+          throw error
         } finally {
-          await source.end({ timeout: 5 })
-          await target.end({ timeout: 5 })
-          if (directory) await rm(directory, { recursive: true, force: true })
+          await closeMigrationResources(source, target, fence, directory)
           await resume?.()
         }
       },

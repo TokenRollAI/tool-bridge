@@ -8,7 +8,7 @@ import { mkdtempSync, rmSync } from 'node:fs'
  * 这是"横向扩容"真正要证明的事,单副本测试无论如何覆盖不到。
  *
  * 需要 Redis(TB_TEST_REDIS_URL)+ PG(TB_TEST_DATABASE_URL);缺任一整组 skip。
- * 状态必须共享:两副本各持一份 SQLite 的话,设备节点在 B 上根本不存在,
+ * 状态必须共享:两副本若各持独立数据库,设备节点在 B 上根本不存在,
  * 那验证的是状态存储而不是调用路由。
  */
 import postgres, { type Sql } from 'postgres'
@@ -29,7 +29,8 @@ const SCHEMA = 'tb_router_test'
 const cleanups: Array<() => Promise<void> | void> = []
 
 afterEach(async () => {
-  for (const fn of cleanups.splice(0)) await fn()
+  // Drain runtimes and their leases before dropping the shared database schema.
+  for (const fn of cleanups.splice(0).reverse()) await fn()
 })
 
 function tmpDataDir(): string {
