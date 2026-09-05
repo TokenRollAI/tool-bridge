@@ -2,7 +2,7 @@
 
 日期：2026-09-05。
 
-状态：**自托管主线已实现，正在本轮 PR 完成验证与审阅；尚未合并或发布。** 下文保留原始设计与验收边界，当前接口与部署行为以代码和 llmdoc 为准。
+状态：**自托管主线已实现，本地与 GitHub CI 验证通过，已按追加授权部署 Railway 并通过线上验收；PR 待审阅，尚未合并或发布 npm。** 下文保留原始设计与验收边界，当前接口与部署行为以代码和 llmdoc 为准。
 
 本轮按使用方的追加决定收敛：没有需要保留的旧实例数据，因此删除 Cloudflare、SQLite、部署级文件对象后端和旧环境变量兼容，不交付旧 SQLite/FS/环境变量迁移器。Railway 平台配置继续通过其 CLI 管理，不扩展 Dashboard 的平台部署适配器。默认 S3 已选用通过实测的 SeaweedFS，标准驱动采用网关 relay；直传、自动对象搬迁与后续搜索一致性调整不作为本轮承诺。
 
@@ -445,6 +445,6 @@ P1 原型可以放在可删除的实验目录，不能在通过上述条件前�
 
 本轮实现和验收记录见 [self-hosted-refactor-validation.md](./self-hosted-refactor-validation.md)。原第 9 节旧数据迁移与第 10 节逐阶段迁移工具要求已被本轮“不保留旧数据、不维护兼容”的决定取代；新的 PG→PG 维护与默认 Compose 快照恢复仍作为运维能力保留。
 
-后续项包括固定 API 生成、搜索/connector 选型试验、S3 direct/multipart 与对象后端自动搬迁。本轮没有放宽联邦搜索快照、权限、设备未知结果或幂等契约，也没有声称已部署 Railway 或完成 npm 发布。
+后续项包括固定 API 生成、搜索/connector 选型试验、S3 direct/multipart 与对象后端自动搬迁。本轮没有放宽联邦搜索快照、权限、设备未知结果或幂等契约。Railway 部署及重启持久性验证已完成；npm 发布仍等待 PR 合并后按发布流程执行。
 
 当前契约：[整体架构](../llmdoc/architecture.mdx)、[Node 部署](../llmdoc/hosts-deploy/node-docker-and-helm.mdx)、[Default Store](../llmdoc/store/default-store.mdx)、[Mailbox](../llmdoc/device/durable-mailbox.mdx)、[安全边界](../llmdoc/protocol/security-boundaries.mdx)。
