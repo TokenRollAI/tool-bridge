@@ -1,0 +1,17 @@
+name: Setup CI
+description: Install the pinned workspace toolchain and dependencies
+outputs:
+  node-version:
+    description: Exact Node version used to isolate task caches
+    value: ${{ steps.node.outputs.node-version }}
+runs:
+  using: composite
+  steps:
+    - uses: pnpm/action-setup@v4
+    - uses: actions/setup-node@v4
+      id: node
+      with:
+        node-version: 22
+        cache: pnpm
+    - run: pnpm install --frozen-lockfile
+      shell: bash

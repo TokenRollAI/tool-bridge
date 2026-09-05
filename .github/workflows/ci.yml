@@ -1,6 +1,5 @@
-# 主干与 PR 的测试门:与本地 `pnpm verify` 同一条验收链
-# (typecheck → lint → 单测 → 集成测试)。发布 workflow 只在打 tag 时跑,
-# 这里补上"合入前必须全绿"的缺口。
+# 主干与 PR 保留 pnpm verify 的全部验收项,在独立 runner 上并行执行。
+# verify 是统一总闸门;任何检查失败、取消或意外跳过都不能通过。
 name: ci
 
 on:
@@ -16,33 +15,93 @@ concurrency:
 permissions:
   contents: read
 
-jobs:
-  verify:
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
+env:
+  TURBO_CACHE_DIR: .turbo/cache
 
-    # Server globalSetup starts isolated PostgreSQL/S3/Redis containers and fails if Docker is unavailable.
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-
-      - uses: pnpm/action-setup@v4
-
-      - uses: actions/setup-node@v4
         with:
-          node-version: 22
-          cache: pnpm
+          # 版本提醒需要 PR merge-base,不能用默认 shallow checkout 静默跳过。
+          fetch-depth: 0
 
-      - run: pnpm install --frozen-lockfile
+      - uses: ./.github/actions/setup-ci
+        id: setup
 
-      - run: pnpm verify
+      # 只复用确定性的类型检查/构建任务,测试每次真实执行。
+      # 根配置与 scripts(含 Dashboard precompress)也参与外层 key;
+      # 包源码和依赖闭包由 Turbo 自身的 task hash 再判断是否命中。
+      - uses: actions/cache@v4
+        with:
+          path: .turbo/cache
+          key: turbo-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.setup.outputs.node-version }}-${{ github.job }}-${{ hashFiles('pnpm-lock.yaml', 'pnpm-workspace.yaml', 'package.json', 'turbo.json', 'tsconfig*.json', 'eslint.config.mjs', 'scripts/**', '.github/actions/**', '.github/workflows/ci.yml') }}-${{ github.sha }}
+          restore-keys: |
+            turbo-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.setup.outputs.node-version }}-${{ github.job }}-${{ hashFiles('pnpm-lock.yaml', 'pnpm-workspace.yaml', 'package.json', 'turbo.json', 'tsconfig*.json', 'eslint.config.mjs', 'scripts/**', '.github/actions/**', '.github/workflows/ci.yml') }}-
+
+      - run: pnpm typecheck
         env:
-          # Each Vitest package already runs a worker pool. Sharing the runner
-          # between several pools starves DOM timers and creates false timeouts.
           TURBO_CONCURRENCY: '1'
 
-      # verify 不含 build:tsup/dts 的断裂(如 dts.resolve 配错、external 清单漂移)
-      # 只在发布 workflow 里才暴露,届时 tag 已推、版本已定,返工代价高。
-      # 全量 build 约 6s,在这里当闸门最便宜。
+      - run: pnpm lint
+
+      # 包外的发布、Dockerfile、部署过滤与 Compose 快照回归同样是硬闸门。
+      - name: Repository contract tests
+        run: node --test scripts/*.test.mjs
+
+      # public artifact ownership 仍由人判断,机器仅提醒。
+      - name: Warn on unbumped public packages
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_REF: origin/${{ github.base_ref }}
+        run: node scripts/check-version-bumps.mjs "$BASE_REF"
+
+  test-unit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-ci
+
+      # 每台 runner 只跑一个包的 Vitest pool,防止 DOM timers 因 CPU 争用超时。
+      # 直接跑源码测试:类型检查已由 quality 承担,不在每个 runner 重算 ^typecheck。
+      # 排除集成测试包而非穷举单测包,新增 workspace 包会自动进入此闸门。
+      - name: Unit tests
+        run: >-
+          pnpm --recursive --workspace-concurrency=1
+          --filter '!@tool-bridge/app' --filter '!@tool-bridge/server' test
+
+  test-integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-ci
+
+      # Server globalSetup starts isolated PostgreSQL/S3/Redis containers and fails if Docker is unavailable.
+      - name: Integration tests
+        run: >-
+          pnpm --recursive --workspace-concurrency=1
+          --filter @tool-bridge/app --filter @tool-bridge/server test
+
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-ci
+        id: setup
+
+      - uses: actions/cache@v4
+        with:
+          path: .turbo/cache
+          key: turbo-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.setup.outputs.node-version }}-${{ github.job }}-${{ hashFiles('pnpm-lock.yaml', 'pnpm-workspace.yaml', 'package.json', 'turbo.json', 'tsconfig*.json', 'eslint.config.mjs', 'scripts/**', '.github/actions/**', '.github/workflows/ci.yml') }}-${{ github.sha }}
+          restore-keys: |
+            turbo-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.setup.outputs.node-version }}-${{ github.job }}-${{ hashFiles('pnpm-lock.yaml', 'pnpm-workspace.yaml', 'package.json', 'turbo.json', 'tsconfig*.json', 'eslint.config.mjs', 'scripts/**', '.github/actions/**', '.github/workflows/ci.yml') }}-
+
+      # 声明与最终产物必须过闸;命中缓存时 Turbo 恢复同一 task hash 的 dist。
       - run: pnpm turbo run build
 
       # 合入前检查所有 public package 的最终 tarball manifest。这里故意跳过仓库外安装:
@@ -55,13 +114,17 @@ jobs:
               --output-dir "$RUNNER_TEMP/$PKG" --skip-install
           done
 
-      # public 包的 src 改了却没 bump 版本 → 提醒(不拦)。
-      # 为什么是 warning 而不是 error:哪些包该 bump 是 public artifact ownership 的判断
-      # (改的是内部实现还是外部契约),机器判不了;但"改了 src 而版本没动"值得当场看见 ——
-      # 漏 bump 的表现是发布轮次里一个包静默落后,下次才发现。
-      - name: Warn on unbumped public packages
-        if: github.event_name == 'pull_request'
-        run: node scripts/check-version-bumps.mjs "origin/${{ github.base_ref }}"
+  verify:
+    if: ${{ always() }}
+    needs: [quality, test-unit, test-integration, build, deploy-artifacts]
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    steps:
+      - name: Require every validation job to succeed
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          echo "$RESULTS" | jq -e 'all(.[]; .result == "success")'
 
   # 部署产物是纯声明文件,没有测试兜底 —— 模板语法错、危险组合校验失效只会在用户
   # helm install 时暴露。这里把 lint、双形态渲染与负向用例(必须 fail 的组合真的 fail)
