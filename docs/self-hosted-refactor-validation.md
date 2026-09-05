@@ -1,6 +1,6 @@
 # 自托管重构验收记录
 
-日期：2026-09-05。范围：本轮实现与 PR；尚未合并、部署 Railway 或发布 npm。
+日期：2026-09-05。范围：本轮实现、PR 与追加授权的 Railway 部署；尚未合并或发布 npm。
 
 ## 工程检查
 
@@ -14,9 +14,9 @@
 | Docker 镜像 | 从干净构建上下文成功构建，使用 Node 22 slim 与官方 PostgreSQL 18 客户端。 |
 | Helm/Compose | Helm lint、双形态渲染以及零环境变量 Compose 解析通过。 |
 
-## 实服务验证
+## 本地实服务验证
 
-所有下列数据验证均使用本地隔离环境，没有读取或写入现有 Railway 数据。
+本节数据验证均使用本地隔离环境，没有读取或写入现有 Railway 数据。
 
 - PostgreSQL：同幂等键竞争、配额临界竞争、事务中断回滚、双消费者领取、旧租约拒绝、重复完成与未知执行结果。
 - S3：实际 SeaweedFS 条件写、并发 create-only 仅一胜、错误 ETag 拒绝、LIST 分页与特殊 key、空对象、流式限额、请求中断与重启持久化。
@@ -29,6 +29,17 @@
 - Compose 执行器：宿主端口、实际镜像、数据目录、UI 目录均完成实际重建；占用目标端口时恢复原 Compose 和服务，生效 revision 不前进。
 
 默认五卷快照的冷恢复已在全新隔离项目通过：保留实例身份、原管理员凭证和 registry 节点，恢复后的完整 HTTP 对象下载与源 SHA-256 一致。实测发现 S3 开始监听、HEAD 成功不等于数据卷已注册，因此恢复脚本的完成门禁已经增加实际对象数据读取，不能仅凭 `/healthz` 报告成功。
+
+## Railway 部署验收
+
+PR #132 的源码 `8cd8dfc` 已经由 Railway 重新构建并部署至 [Dashboard](https://tb.pdjjq.org/ui/)，GitHub CI 的 verify（包括构建与六个发布包检查）和 deploy-artifacts 均通过。部署使用既有 PostgreSQL 服务中的独立新库及非 superuser 应用角色，新建 bootstrap 卷与私网 SeaweedFS 服务/持久卷；未执行旧数据迁移。
+
+- `/healthz` 报告 Server 0.22.0，setup 为 ready，`/readyz` 的 PG 与 S3 检查通过；Dashboard 产物版本 0.28.0。
+- canonicalOrigin 与实际公网 HTTPS 域名一致，期望/生效配置 revision 一致，只有一个经过能力检查的 active S3 后端；匿名管理请求被拒绝。
+- PID 1 为 UID 1000 的 Node；`/data` 与 `/data/bootstrap` 权限 0700，bootstrap 文件均为 UID 1000、0600。管理员凭据安全保存于本机受保护文件，没有写入提交或服务日志。
+- 通过 public SDK 上传 262144 字节对象并完整下载。重启应用与 S3 后，实例身份、原管理员凭据、配置和后端不变，再次完整下载的 SHA-256 仍为 `3a5fbaeb748163a6d4f19ebde8f34f0f0ff3737f48a5f0ea8787edeaed9fccc5`，随后删除验收对象。
+
+部署期间发现并修正两项配置问题：Railway 的 root 挂载需要同时赋予应用用户 bootstrap **父目录**写权限，以创建旁置锁；SeaweedFS 逻辑卷上限不能按物理卷 GB 数设成 4，否则内部元数据会耗尽槽位，导致业务桶写入失败。安装能力门禁确实拦截了失败，修正后沿用同一实例身份完成安装，移除了未启用的失败探测记录。此次是一次线上交付验收，失败准备步骤与最终成功结果均保留在本机脱敏证据中。
 
 ## 发布与保留边界
 
