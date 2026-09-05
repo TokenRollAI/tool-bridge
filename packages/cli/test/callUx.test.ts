@@ -27,7 +27,7 @@ function withStdin(content: string): () => void {
  * 本轮 Agent 体验修复的回归面:
  * - `tb call` 第二 positional 直接当 arguments JSON(误写 `--json '{...}'` 也自然工作);
  * - `--arg k=v` 扁平标量与 `--args-file -`(stdin)两条便利入口,及与整块 JSON 的四源互斥;
- * - 失败现场的 ~feedback 提示(有条目列 top、无条目引导 submit、拉取失败静默);
+ * - 失败现场的 ~feedback 提示(有条目列 top、无条目不加提示、拉取失败静默);
  * - retryable 呈现与 `--timeout` 解析。
  */
 
@@ -300,7 +300,8 @@ describe('tb call — 失败现场的 ~feedback 提示', () => {
     // 第二请求打到该 path 的 ~feedback
     expect(String(fn.mock.calls[1]?.[0])).toBe('https://gw/logs/sls/query/~feedback')
     const stderr = written(process.stderr)
-    expect(stderr).toContain('(retryable — try again)')
+    expect(stderr).toContain('retryable: yes')
+    expect(stderr).not.toContain('try again')
     expect(stderr).toContain('known pitfalls from other agents')
     expect(stderr).toContain('fb_a1 (+4) "index does not cover JSON content"')
     expect(stderr).toContain('tb feedback get logs/sls/query')
@@ -330,11 +331,13 @@ describe('tb call — 失败现场的 ~feedback 提示', () => {
     })
   })
 
-  it('无 feedback 条目 → 引导 submit(把踩坑经验留给下一个 agent)', async () => {
+  it('无 feedback 条目 → 只保留实际错误，不追加无助于理解结果的提交提示', async () => {
     sequenceFetch([upstreamDown, { body: { items: [] } }])
     await runCli(['call', 'logs/sls/query', ...GLOBALS])
     expect(process.exitCode).toBe(1)
-    expect(written(process.stderr)).toContain('tb feedback submit logs/sls/query')
+    expect(written(process.stderr)).toContain('upstream unavailable: timed out')
+    expect(written(process.stderr)).not.toContain('hint:')
+    expect(written(process.stderr)).not.toContain('tb feedback submit')
   })
 
   it('feedback 拉取失败 → 静默,主错误照常呈现', async () => {
@@ -357,6 +360,23 @@ describe('tb call — 失败现场的 ~feedback 提示', () => {
 })
 
 describe('--timeout 解析(resolveTarget)', () => {
+  it.each([false, true])('lost response after call stays unknown and never retries (json=%s)', async (asJson) => {
+    const fetcher = sequenceFetch([new Error('connection lost after dispatch'), { body: { items: [] } }])
+    await runCli(['call', 'tools/mail/send', ...(asJson ? ['--json'] : []), ...GLOBALS])
+    const output = written(asJson ? process.stdout : process.stderr)
+    expect(output).toContain('outcome is unknown')
+    expect(output).not.toContain('try again')
+    expect(output).not.toContain('connection lost after dispatch')
+    if (asJson) {
+      const result = JSON.parse(output)
+      expect(result).toMatchObject({ ok: false, code: 'unavailable', kind: 'network', outcome: 'unknown' })
+      expect(result).not.toHaveProperty('retryable')
+      expect(written(process.stderr)).toBe('')
+    } else expect(written(process.stdout)).toBe('')
+    expect(fetcher.mock.calls.filter(call => String(call[0]) === 'https://gw/tools/mail/send')).toHaveLength(1)
+    expect(process.exitCode).toBe(1)
+  })
+
   it('秒 → 毫秒;支持小数', () => {
     expect(resolveTarget({ baseUrl: 'https://gw', timeout: '30' }).timeoutMs).toBe(30_000)
     expect(resolveTarget({ baseUrl: 'https://gw', timeout: '2.5' }).timeoutMs).toBe(2500)

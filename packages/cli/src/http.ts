@@ -1,5 +1,6 @@
 /** CLI 宿主适配：SDK neutral client + CliError/对象直传边界。 */
 import {
+  type ClientErrorKind,
   type ContextUploadGrant,
   createToolBridgeClient,
   parseContextUploadGrant as parseSdkContextUploadGrant,
@@ -13,8 +14,10 @@ import {
 /** CLI 错误:携带可选 TBError code/retryable,统一由 output.reportError 落地为退出码 1。 */
 export class CliError extends Error {
   readonly code?: string
-  /** TBError 的 retryable 语义(true → 呈现"try again"提示);本地错误缺席。 */
+  /** 服务端的 retryable 标记；传输失败无法判断重试安全性，留空。 */
   readonly retryable?: boolean
+  kind?: ClientErrorKind
+  outcome?: 'unknown'
   /** 附加提示(如 ~feedback 已知坑),reportError 在主错误后落地。 */
   hint?: string
   /** 该 path 的 feedback 头部条目(--json 时结构化输出)。 */
@@ -76,27 +79,37 @@ export interface ApiResult {
 /** 无显式 --timeout 时的单请求等待上限(上游长查询可用 --timeout 加大)。 */
 export const DEFAULT_TIMEOUT_MS = 120_000
 
+function uncertainResponse(message: string, code: string, kind: ClientErrorKind): CliError {
+  const error = new CliError(`${message}; the operation outcome is unknown. Check its state before retrying`, code)
+  error.kind = kind
+  error.outcome = 'unknown'
+  return error
+}
+
 function clientError(error: unknown, target: Target): CliError {
   if (error instanceof ToolBridgeClientError) {
     if (error.kind === 'timeout') {
       const timeoutMs = target.timeoutMs ?? DEFAULT_TIMEOUT_MS
-      return new CliError(
-        `request timed out after ${Math.round(timeoutMs / 1000)}s — the upstream may still be processing; retry or raise --timeout`,
+      return uncertainResponse(
+        `request timed out after ${timeoutMs / 1000}s; no result was received`,
         'unavailable',
-        true,
+        'timeout',
       )
     }
     if (error.kind === 'network') {
       const detail = error.networkCode === undefined ? '' : ` (${error.networkCode})`
-      return new CliError(`request failed: gateway unavailable${detail}`, 'unavailable', true)
+      return uncertainResponse(`request failed: no complete response received${detail}`, 'unavailable', 'network')
     }
-    return new CliError(
+    if (error.kind === 'protocol') return uncertainResponse(error.message, error.code, 'protocol')
+    const cli = new CliError(
       error.message,
       error.code === 'network' ? 'unavailable' : error.code,
       error.retryable,
     )
+    cli.kind = error.kind
+    return cli
   }
-  return new CliError('request failed: gateway unavailable', 'unavailable', true)
+  return uncertainResponse('request failed: no complete response received', 'unavailable', 'network')
 }
 
 /** 当前 target 对应的 SDK client；保留 CLI 的 fetch 注入与单请求 timeout 默认。 */

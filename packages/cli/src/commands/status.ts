@@ -36,12 +36,13 @@ export function statusCommand() {
       }
 
       const parsed = (typeof body === 'object' && body !== null ? body : {}) as HealthzBody
-      const healthy = res.ok && parsed.healthy === true
+      const healthy = typeof parsed.healthy === 'boolean' ? res.ok && parsed.healthy : null
 
       if (asJson) {
         process.stdout.write(
           `${JSON.stringify({
-            ok: res.ok,
+            ok: healthy === true,
+            httpOk: res.ok,
             status: res.status,
             healthy,
             url,
@@ -51,7 +52,8 @@ export function statusCommand() {
         )
       } else {
         process.stdout.write(`endpoint: ${url}\n`)
-        process.stdout.write(`status:   ${res.status} (${healthy ? 'healthy' : 'unhealthy'})\n`)
+        process.stdout.write(`http:     ${res.status}\n`)
+        process.stdout.write(`health:   ${healthy === null ? 'unknown (response did not report a valid health state)' : healthy ? 'healthy' : 'unhealthy'}\n`)
         if (parsed.version) process.stdout.write(`version:  ${parsed.version}\n`)
       }
 

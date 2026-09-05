@@ -149,7 +149,9 @@ describe('真正的全局参数', () => {
     expect(JSON.parse(stdoutText())).toMatchObject({
       ok: false,
       code: 'unavailable',
-      error: 'request failed: gateway unavailable',
+      error: expect.stringContaining('request failed: no complete response received'),
+      kind: 'network',
+      outcome: 'unknown',
     })
     expect(stdoutText()).not.toContain('transport details')
     expect(process.exitCode).toBe(1)

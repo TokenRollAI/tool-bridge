@@ -52,7 +52,7 @@ describe('apiFetch 构造请求', () => {
     expect(JSON.parse(init.body as string)).toEqual({ a: 1 })
   })
 
-  it('网络错误 → CliError,带 unavailable/retryable(不再是无 code 的裸消息)', async () => {
+  it('网络错误 → 结果未知，不承诺可安全重试', async () => {
     setFetch(
       vi.fn(async () => {
         throw new Error('fetch failed')
@@ -61,7 +61,9 @@ describe('apiFetch 构造请求', () => {
     await expect(apiFetch(TARGET, { path: '/x' })).rejects.toMatchObject({
       message: expect.stringMatching(/request failed/),
       code: 'unavailable',
-      retryable: true,
+      retryable: undefined,
+      kind: 'network',
+      outcome: 'unknown',
     })
   })
 
@@ -74,7 +76,9 @@ describe('apiFetch 构造请求', () => {
     await expect(apiFetch(TARGET, { path: '/x' })).rejects.toMatchObject({
       message: expect.stringMatching(/ECONNREFUSED/),
       code: 'unavailable',
-      retryable: true,
+      retryable: undefined,
+      kind: 'network',
+      outcome: 'unknown',
     })
   })
 
@@ -89,7 +93,9 @@ describe('apiFetch 构造请求', () => {
     )
     await expect(apiFetch(TARGET, { path: '/x' })).rejects.toMatchObject({
       code: 'unavailable',
-      retryable: true,
+      retryable: undefined,
+      kind: 'network',
+      outcome: 'unknown',
     })
   })
 })
@@ -148,18 +154,20 @@ describe('apiJson TBError 归一', () => {
     })
   })
 
-  it('2xx 但响应体非法 JSON → internal/retryable', async () => {
+  it('2xx 但响应体非法 JSON → internal，业务结果未知', async () => {
     mockOnce('not json', { status: 200, headers: { 'content-type': 'application/json' } })
     await expect(apiJson(TARGET, { path: '/x' })).rejects.toMatchObject({
       message: expect.stringMatching(/invalid JSON/),
       code: 'internal',
-      retryable: true,
+      retryable: undefined,
+      kind: 'protocol',
+      outcome: 'unknown',
     })
   })
 })
 
 describe('apiFetch 超时', () => {
-  it('timeoutMs 到点 → retryable CliError(unavailable),message 提示 --timeout', async () => {
+  it('timeoutMs 到点 → 精确时长、结果未知，不建议直接重试', async () => {
     setFetch(
       vi.fn(
         (_url: string, init: RequestInit) =>
@@ -170,8 +178,10 @@ describe('apiFetch 超时', () => {
     )
     await expect(apiFetch({ ...TARGET, timeoutMs: 30 }, { path: '/x' })).rejects.toMatchObject({
       code: 'unavailable',
-      retryable: true,
-      message: expect.stringMatching(/timed out .* --timeout/),
+      retryable: undefined,
+      kind: 'timeout',
+      outcome: 'unknown',
+      message: expect.stringContaining('timed out after 0.03s; no result was received'),
     })
   })
 

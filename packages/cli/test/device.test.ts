@@ -209,8 +209,8 @@ describe('tb device ls', () => {
     await runCli(['device', 'ls', '--base-url', 'https://gw', '--sk', 'tbk_x'])
     const lines = stdoutText().split('\n')
     expect(lines[0]).toContain('LAST_SEEN')
-    // 本地化渲染依赖时区,用同一转换求期望值而非硬编码字面量。
-    expect(lines[1]).toContain(new Date(lastSeenAt).toLocaleString())
+    expect(lines[0]).toContain('RECORDED_ONLINE')
+    expect(lines[1]).toContain(lastSeenAt)
     expect(lines[2]).toContain('-')
   })
 })
@@ -231,6 +231,67 @@ const operation = {
 }
 
 describe('tb device durable operations', () => {
+  it.each([
+    { state: 'queued', meaning: 'waiting for the device to claim it' },
+    { state: 'claimed', meaning: 'completion not reported' },
+    { state: 'succeeded', meaning: 'device reported success', result: { value: 42 } },
+  ])('202 presents the actual $state state, including an existing idempotent result', async ({ state, meaning, result }) => {
+    const value = { ...operation, state, ...(result === undefined ? {} : { result }) }
+    const fetcher = captureFetch(value, 202)
+    await runCli(['call', operation.targetPath, '--delivery', 'fallback', '--base-url', 'https://gw'])
+    expect(stdoutText()).toContain(`state: ${state}`)
+    expect(stdoutText()).toContain(meaning)
+    expect(stdoutText()).toContain(operation.deviceId)
+    expect(stdoutText()).toContain(operation.operationId)
+    expect(stdoutText()).toContain(operation.targetPath)
+    expect(stdoutText()).toContain(operation.expiresAt)
+    if (result !== undefined) expect(stdoutText()).toContain(JSON.stringify(result))
+    if (state !== 'queued') expect(stdoutText()).not.toContain('queued')
+    expect(fetcher).toHaveBeenCalledOnce()
+    expect(process.exitCode).toBe(0)
+  })
+
+  it('invalid 202 never fabricates a queued operation', async () => {
+    captureFetch({ operationId: 'incomplete' }, 202)
+    await runCli(['call', operation.targetPath, '--delivery', 'mailbox', '--base-url', 'https://gw'])
+    expect(stdoutText()).toBe('')
+    const error = vi.mocked(process.stderr.write).mock.calls.map(call => String(call[0])).join('')
+    expect(error).toContain('invalid device operation')
+    expect(error).toContain('outcome is unknown')
+    expect(error).not.toContain('try again')
+    expect(process.exitCode).toBe(1)
+  })
+
+  it.each([
+    { state: 'cancelled', executionMayHaveOccurred: false, meaning: 'cancelled before execution' },
+    { state: 'claimed', executionMayHaveOccurred: true, meaning: 'cancellation requested; execution may still continue' },
+    { state: 'succeeded', executionMayHaveOccurred: true, meaning: 'device reported success' },
+  ])('cancel reports $state without implying that a running operation stopped', async ({ state, executionMayHaveOccurred, meaning }) => {
+    const value = { ...operation, state, executionMayHaveOccurred, cancelRequestedAt: operation.updatedAt }
+    const fetcher = captureFetch(value)
+    await runCli(['device', 'op', 'cancel', operation.deviceId, operation.operationId, '--base-url', 'https://gw'])
+    expect(stdoutText()).toContain(`state: ${state} (${meaning})`)
+    if (state !== 'cancelled') expect(stdoutText()).not.toContain('cancelled before execution')
+    expect(fetcher).toHaveBeenCalledOnce()
+    expect(process.exitCode).toBe(0)
+  })
+
+  it.each([
+    { state: 'result_unknown', executionMayHaveOccurred: true },
+    { state: 'expired', executionMayHaveOccurred: true },
+  ])('$state preserves execution uncertainty in text and the original JSON record', async (fields) => {
+    const value = { ...operation, ...fields, attempt: 1 }
+    captureFetch(value)
+    const argv = ['device', 'op', 'get', operation.deviceId, operation.operationId, '--base-url', 'https://gw']
+    await runCli(argv)
+    expect(stdoutText()).toContain('result unknown')
+    expect(stdoutText()).toContain('check the business result before retrying')
+    expect(stdoutText()).not.toContain('started/result-unknown')
+    vi.mocked(process.stdout.write).mockClear()
+    await runCli([...argv, '--json'])
+    expect(JSON.parse(stdoutText())).toEqual(value)
+  })
+
   it('call delivery reuses argument parsing and sends mailbox controls once', async () => {
     const fn = captureFetch(operation, 202)
     await runCli([
@@ -288,7 +349,7 @@ describe('tb device durable operations', () => {
       deviceId: 'phone-1',
       opts: { limit: 10, states: ['expired'] },
     })
-    expect(stdoutText()).toContain('may-have-run')
+    expect(stdoutText()).toContain('may have executed, result unknown')
     expect(stdoutText()).toContain('next cursor: next')
   })
 

@@ -1,11 +1,11 @@
 import type {
-  DeviceOperationDetail,
   DeviceOperationState,
   DeviceOperationSummary,
 } from '@tool-bridge/sdk/client'
 import { Command } from 'commander'
 import type { Node, Page } from '../types'
 import { collect, parsePageOpts, resolveTarget, withGlobalOpts, withPageOpts } from '../args'
+import { operationMeaning, printDeviceOperation } from '../deviceOutput'
 import { callDirect, CliError, withClient } from '../http'
 import { printJson, printLine, table } from '../output'
 
@@ -56,12 +56,12 @@ export function deviceLsCommand() {
       // 能被看出来。
       printLine(
         table(
-          ['DEVICE_ID', 'PATH', 'ONLINE', 'LAST_SEEN', 'DESCRIPTION'],
+          ['DEVICE_ID', 'PATH', 'RECORDED_ONLINE', 'LAST_SEEN', 'DESCRIPTION'],
           devices.map(n => [
             deviceIdFromPath(n.path),
             n.path,
             n.online ? 'yes' : 'no',
-            n.lastSeenAt ? new Date(n.lastSeenAt).toLocaleString() : '-',
+            n.lastSeenAt ?? '-',
             n.description ?? '',
           ]),
         ),
@@ -81,56 +81,23 @@ function states(values: readonly string[]): DeviceOperationState[] | undefined {
   return unique as DeviceOperationState[]
 }
 
-function executionMeaning(operation: DeviceOperationSummary): string {
-  if (operation.state === 'expired' && operation.executionMayHaveOccurred) {
-    return 'may-have-run'
-  }
-  if (operation.state === 'result_unknown') return 'started/result-unknown'
-  return '-'
-}
-
 function printOperationList(page: { cursor?: string, items: DeviceOperationSummary[] }): void {
   if (page.items.length === 0) {
     printLine(page.cursor ? '(no visible operations on this page)' : '(no device operations)')
   } else {
     printLine(table(
-      ['OPERATION_ID', 'STATE', 'TARGET', 'ATTEMPT', 'UPDATED', 'EXECUTION'],
+      ['OPERATION_ID', 'STATE', 'TARGET', 'CLAIM_ATTEMPTS', 'UPDATED', 'MEANING'],
       page.items.map(operation => [
         operation.operationId,
         operation.state,
         operation.targetPath,
         String(operation.attempt),
         operation.updatedAt,
-        executionMeaning(operation),
+        operationMeaning(operation),
       ]),
     ))
   }
   if (page.cursor) printLine(`next cursor: ${page.cursor}`)
-}
-
-function printOperation(operation: DeviceOperationDetail): void {
-  printLine(table(
-    ['FIELD', 'VALUE'],
-    [
-      ['operationId', operation.operationId],
-      ['deviceId', operation.deviceId],
-      ['state', operation.state],
-      ['target', operation.targetPath],
-      ['attempt', String(operation.attempt)],
-      ['createdAt', operation.createdAt],
-      ['expiresAt', operation.expiresAt],
-      ['updatedAt', operation.updatedAt],
-      ['execution', executionMeaning(operation)],
-      ...(operation.cancelRequestedAt === undefined
-        ? []
-        : [['cancelRequestedAt', operation.cancelRequestedAt]]),
-    ],
-  ))
-  if (operation.state === 'expired' && operation.executionMayHaveOccurred) {
-    printLine('warning: this operation was claimed before expiry and may have executed')
-  }
-  if (operation.error !== undefined) printLine(`error: ${operation.error.code}: ${operation.error.message}`)
-  if (operation.result !== undefined) printLine(`result: ${JSON.stringify(operation.result)}`)
 }
 
 export function deviceOperationListCommand() {
@@ -171,7 +138,7 @@ function deviceOperationReadCommand(command: 'get' | 'cancel') {
         ? await client.deviceOperations.get(deviceId, operationId)
         : await client.deviceOperations.cancel(deviceId, operationId))
       if (opts.json) printJson(operation)
-      else printOperation(operation)
+      else printDeviceOperation(operation)
     })
 }
 

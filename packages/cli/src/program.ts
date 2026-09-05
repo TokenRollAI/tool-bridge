@@ -68,14 +68,14 @@ export function buildProgram() {
       'tool-bridge CLI — one gateway for tools, context stores and devices.\nStart with `tb login`, explore with `tb ls` / `tb help <path>`, invoke with `tb call <path>`.\nGlobal options work before, between, or after subcommands.',
     )
     .helpCommand(false)
-  // 尾部引导:把 feedback 变成 Agent 的使用习惯(用前查经验、踩坑后回馈)。
+  // Feedback 是按需的排障入口；不保证每个路径都有记录，也不是每次调用的前置步骤。
   program.addHelpText(
     'after',
     `
-Agent feedback — every path carries experience from other agents:
-  before using a tool:   tb feedback ls <path>    (top entries also show up in \`tb help <path>\`)
-  hit a pitfall:         tb feedback submit <path> --title "<short summary>" --detail "<how to avoid>"
-  rate what helped you:  tb feedback vote <path> <id> up|down`,
+Operational feedback (when troubleshooting):
+  inspect recorded advice: tb feedback ls <path>    (when available, also included in \`tb help <path>\`)
+  record a finding:        tb feedback submit <path> --title "<short summary>" --detail "<observed issue or verified remedy>"
+  rate recorded advice:    tb feedback vote <path> <id> up|down`,
   )
   program.addCommand(keysCommand())
   program.addCommand(maintenanceCommand())

@@ -1,3 +1,4 @@
+import { deviceOperationDetailSchema } from '@tool-bridge/core/protocol'
 import { readFileSync } from 'node:fs'
 import { Command } from 'commander'
 import { collect, parseKeyValueSpecs, parsePositiveInt, resolveTarget, withGlobalOpts } from '../args'
@@ -8,6 +9,7 @@ import {
   type Target,
   withClient,
 } from '../http'
+import { printDeviceOperation } from '../deviceOutput'
 import { printJson, printLine } from '../output'
 import { printMarkdown } from '../markdown'
 import { readStdinRaw } from '../stdin'
@@ -121,8 +123,6 @@ export async function attachFeedbackHint(
         `hint: known pitfalls from other agents — details: tb feedback get ${cleanPath} <id>`,
         ...items.map(f => `  - ${f.id} (${f.score >= 0 ? '+' : ''}${f.score}) "${f.title}"`),
       ].join('\n')
-    } else {
-      err.hint = `hint: no known pitfalls recorded for this path yet — if you figure this out, help the next agent:\n  tb feedback submit ${cleanPath} --title "<short summary>" --detail "<how to avoid>"`
     }
   } catch {
     // hint 拉取失败不影响主错误报告
@@ -136,7 +136,8 @@ export async function attachFeedbackHint(
  * `tb call system/status/get`、`tb call docs/context7/resolve-library-id`。
  * arguments 四种给法互斥:第二 positional(裸 JSON)/ `--args` / `--args-file`(`-` = stdin)/
  * 可重复 `--arg k=v`(扁平标量,见 parseArgScalar)。
- * 默认人类模式:markdown 原样打印;`--json`:输出原始 JSON。TBError → stderr + exit 1。
+ * 默认人类模式呈现 Markdown/operation；`--json` 保留原结果或显式 delivery 的 SDK 返回。
+ * 错误经根边界落地：文本到 stderr，JSON 到 stdout，均 exit 1。
  */
 export function callCommand() {
   return withGlobalOpts(new Command('call'))
@@ -233,8 +234,15 @@ Examples:
               }),
             )
             if (response.status === 202) {
-              const operation = JSON.parse(response.text) as { operationId?: string, state?: string }
-              printLine(`queued ${operation.operationId ?? 'operation'} (${operation.state ?? 'queued'})`)
+              const operation = deviceOperationDetailSchema.safeParse(response.json)
+              if (!operation.success) {
+                const error = new CliError('gateway returned an invalid device operation; the request outcome is unknown', 'internal')
+                error.kind = 'protocol'
+                error.outcome = 'unknown'
+                throw error
+              }
+              printLine('delivery: mailbox')
+              printDeviceOperation(operation.data)
             } else {
               printMarkdown(response.text)
             }
