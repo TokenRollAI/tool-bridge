@@ -2,7 +2,7 @@ import type { LucideIcon } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { cn } from '@/lib/utils'
 
-/** 空态统一形制:虚线框 + 图标 + 引导文案(可带操作)。 */
+/** 空态统一形制:安静的面板 + 图标 + 引导文案(可带操作)。 */
 export function EmptyState({
   icon: Icon,
   title,
@@ -22,7 +22,7 @@ export function EmptyState({
   return (
     <div
       className={cn(
-        'flex flex-col items-center rounded-lg border border-dashed bg-muted/10 px-6 py-10 text-center',
+        'flex flex-col items-center rounded-lg border bg-card px-6 py-10 text-center',
         tone === 'danger' && 'border-destructive/35 bg-destructive/[0.035]',
         className,
       )}
@@ -30,7 +30,7 @@ export function EmptyState({
     >
       <div
         className={cn(
-          'grid size-10 place-items-center rounded-md border bg-background/70 text-muted-foreground',
+          'grid size-10 place-items-center rounded-xl bg-secondary/60 text-muted-foreground',
           tone === 'danger' && 'border-destructive/30 text-destructive',
         )}
       >
@@ -38,7 +38,7 @@ export function EmptyState({
       </div>
       <p className="mt-3 text-sm font-medium">{title}</p>
       {children && (
-        <div className="mt-1 max-w-md text-xs leading-5 text-muted-foreground">{children}</div>
+        <div className="mt-1 max-w-md text-sm leading-6 text-muted-foreground">{children}</div>
       )}
       {action && <div className="mt-4 flex flex-wrap justify-center gap-2">{action}</div>}
     </div>

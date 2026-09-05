@@ -1,242 +1,129 @@
-import { Command, GitBranch, Menu, Moon, Search, Sun } from 'lucide-react'
+import { ChevronDown, Menu, Moon, PanelLeftClose, PanelLeftOpen, Plus, Search, Settings, Sun } from 'lucide-react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useTheme } from 'next-themes'
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
+import { type ManageLink, RESOURCE_LINKS, SETTINGS_LINKS, WORKSPACE_LINKS } from '@/components/layout/navigation'
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
-import { MANAGE_LINKS } from '@/components/layout/navigation'
+import { AddToolWizard } from '@/components/add-tool/AddToolWizard'
 import { CommandPalette } from '@/components/CommandPalette'
-import { useHealthz, useStatus } from '@/lib/queries'
 import { useSession } from '@/lib/session-context'
 import { Button } from '@/components/ui/button'
+import { useHealthz } from '@/lib/queries'
 import { cn } from '@/lib/utils'
 
 const isMac = typeof navigator !== 'undefined' && /Mac/.test(navigator.platform)
 
-function healthDot(healthy: boolean | undefined, error: boolean): string {
-  if (error) return 'bg-destructive'
-  if (healthy) return 'bg-ok shadow-[0_0_7px_var(--ok)]'
-  return 'bg-warn'
-}
-
-function healthText(healthy: boolean | undefined, error: boolean): string {
-  if (error) return '网关不可达'
-  if (healthy) return '网关运行正常'
-  return '正在检查网关'
-}
-
-/** 顶栏:品牌 + 全局搜索/跳转 + 健康 + 主题 + profile。 */
-function TopBar({
-  onOpenPalette,
-  onToggleRail,
-}: {
-  onOpenPalette: () => void
-  onToggleRail: () => void
-}) {
-  const health = useHealthz()
-  const status = useStatus()
-  const { resolvedTheme, setTheme } = useTheme()
-  const isDark = resolvedTheme !== 'light'
-  const navigate = useNavigate()
+function ConnectionMenu() {
   const { active, profiles, switchTo, logout } = useSession()
-  const healthy = health.data?.healthy
-
+  const navigate = useNavigate()
+  const health = useHealthz()
+  const status = health.isError ? '网关不可达' : health.data?.healthy ? '网关运行正常' : '正在检查网关'
   return (
-    <header className="flex h-14 shrink-0 items-center gap-2 border-b bg-panel px-3">
-      <Button
-        aria-label="切换库务导航"
-        className="lg:hidden"
-        onClick={onToggleRail}
-        size="icon-sm"
-        variant="ghost"
-      >
-        <Menu />
-      </Button>
-      <NavLink className="flex items-center gap-2" to="/">
-        <img alt="" className="size-6 dark:invert" src="/ui/icon-light.png" />
-        <span className="hidden font-mono text-sm tracking-tight sm:inline">
-          tool
-          <span className="text-primary">-</span>
-          bridge
-        </span>
-      </NavLink>
-
-      <button
-        className={cn(
-          'ml-2 hidden h-9 min-w-64 flex-1 items-center gap-2 rounded-lg border bg-background/60 px-3 text-left text-sm text-muted-foreground sm:flex',
-          'hover:border-primary/40 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none',
-        )}
-        onClick={onOpenPalette}
-        type="button"
-      >
-        <Search className="size-4" />
-        <span className="flex-1">搜索节点、页面、动作…</span>
-        <kbd className="rounded border bg-card px-1.5 font-mono text-[10px]">
-          {isMac ? '⌘K' : 'Ctrl K'}
-        </kbd>
-      </button>
-
-      <div className="ml-auto flex items-center gap-1">
-        <Button aria-label="工具搜索" asChild size="icon-sm" variant="ghost">
-          <NavLink to="/search">
-            <Search />
-          </NavLink>
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button aria-label="连接档案" className="max-w-44 gap-2" variant="ghost">
+          <span aria-label={status} className={cn('size-2 shrink-0 rounded-full', health.isError ? 'bg-destructive' : health.data?.healthy ? 'bg-ok' : 'bg-warn')} role="img" title={status} />
+          <span className="hidden truncate sm:inline">{active?.name ?? '连接档案'}</span>
+          <ChevronDown className="size-3.5" />
         </Button>
-        <Button
-          aria-label="全局跳转"
-          className="sm:hidden"
-          onClick={onOpenPalette}
-          size="icon-sm"
-          variant="ghost"
-        >
-          <Command />
-        </Button>
-
-        <span
-          aria-label={healthText(healthy, health.isError)}
-          className={cn('mx-1 size-2 shrink-0 rounded-full', healthDot(healthy, health.isError))}
-          role="img"
-          title={
-            health.data?.version
-              ? `${healthText(healthy, health.isError)} · v${health.data.version} · ${status.data?.nodeCount ?? '—'} 节点`
-              : healthText(healthy, health.isError)
-          }
-        />
-
-        <Button
-          aria-label="切换主题"
-          onClick={() => setTheme(isDark ? 'light' : 'dark')}
-          size="icon-sm"
-          variant="ghost"
-        >
-          {isDark ? <Sun /> : <Moon />}
-        </Button>
-
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <button
-              aria-label="连接档案"
-              className="grid size-8 place-items-center rounded-lg border bg-background/60 font-mono text-[10px] font-medium hover:border-primary/40 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-              type="button"
-            >
-              {(active?.name ?? '--').slice(0, 2).toUpperCase()}
-            </button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-60">
-            <DropdownMenuLabel>
-              <span className="block text-xs">连接档案</span>
-              <span className="mt-0.5 block truncate font-mono text-[10px] font-normal text-muted-foreground">
-                {active?.baseUrl || window.location.origin}
-              </span>
-            </DropdownMenuLabel>
-            <DropdownMenuSeparator />
-            {profiles.map(profile => (
-              <DropdownMenuItem
-                className="font-mono text-xs"
-                key={profile.id}
-                onClick={() => {
-                  switchTo(profile.name)
-                  navigate('/')
-                }}
-              >
-                <span className="truncate">{profile.name}</span>
-                {profile.id === active?.id && <span className="ml-auto text-primary">●</span>}
-              </DropdownMenuItem>
-            ))}
-            <DropdownMenuSeparator />
-            <DropdownMenuItem onClick={logout} variant="destructive">
-              退出登录
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-      </div>
-    </header>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-64">
+        <DropdownMenuLabel>
+          当前连接
+          <span className="mt-1 block truncate text-xs font-normal text-muted-foreground">{active?.baseUrl || window.location.origin}</span>
+        </DropdownMenuLabel>
+        <DropdownMenuSeparator />
+        {profiles.map(profile => (
+          <DropdownMenuItem
+            key={profile.id}
+            onClick={() => {
+              switchTo(profile.name)
+              navigate('/')
+            }}
+          >
+            <span className="truncate">{profile.name}</span>
+            {profile.id === active?.id && <span className="ml-auto text-xs text-muted-foreground">当前</span>}
+          </DropdownMenuItem>
+        ))}
+        <DropdownMenuSeparator />
+        <DropdownMenuItem onClick={logout} variant="destructive">退出登录</DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
   )
 }
 
-function RailLink({
-  to,
-  label,
-  icon,
-  collapsed,
-  exact,
-}: {
-  collapsed: boolean
-  exact?: boolean
-  icon: React.ReactNode
-  label: string
-  to: string
-}) {
+function RailLink({ item, collapsed }: { collapsed: boolean, item: ManageLink }) {
+  const location = useLocation()
+  const { icon: Icon, label, to } = item
+  const related = (to === '/tools' && location.pathname === '/search') || (to === '/canvas' && location.pathname.startsWith('/nodes/'))
   const link = (
     <NavLink
-      className={({ isActive }) =>
-        cn(
-          'flex h-9 items-center gap-2.5 rounded-lg px-2.5 text-sm text-foreground/80 transition-colors',
-          'hover:bg-secondary/60 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none',
-          isActive && 'bg-primary/12 font-medium text-primary',
-          collapsed && 'justify-center px-0',
-        )}
-      end={exact}
+      aria-label={label}
+      className={({ isActive }) => cn('flex min-h-10 items-center gap-3 rounded-lg px-3 text-sm text-muted-foreground transition-colors hover:bg-secondary/60 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none', (isActive || related) && 'bg-secondary font-medium text-foreground', collapsed && 'justify-center px-0')}
+      end={to === '/'}
       to={to}
     >
-      {icon}
+      <Icon className="size-4 shrink-0" strokeWidth={1.75} />
       {!collapsed && <span className="truncate">{label}</span>}
     </NavLink>
   )
-  if (!collapsed) return link
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>{link}</TooltipTrigger>
-      <TooltipContent side="right" sideOffset={8}>
-        {label}
-      </TooltipContent>
-    </Tooltip>
-  )
+  return collapsed
+    ? (
+        <Tooltip>
+          <TooltipTrigger asChild>{link}</TooltipTrigger>
+          <TooltipContent side="right">{label}</TooltipContent>
+        </Tooltip>
+      )
+    : link
 }
 
-/** 左侧库务栏:画布入口 + 管理页。桌面常驻(可折叠成图标),移动经抽屉。 */
-function ManageRail({ collapsed }: { collapsed: boolean }) {
+function Navigation({ collapsed }: { collapsed: boolean }) {
+  const location = useLocation()
+  const inSettings = SETTINGS_LINKS.some(item => item.to === location.pathname)
+  const [settingsOpen, setSettingsOpen] = useState(inSettings)
+  useEffect(() => {
+    if (inSettings) setSettingsOpen(true)
+  }, [inSettings])
   return (
     <TooltipProvider delayDuration={200}>
-      <nav aria-label="库务导航" className="flex h-full flex-col gap-1 p-2">
-        <RailLink collapsed={collapsed} exact icon={<GitBranch className="size-4" />} label="能力树" to="/" />
-        <div className="my-1 h-px bg-border/70" />
-        <p
-          className={cn(
-            'px-2 pt-1 pb-0.5 font-mono text-[9px] tracking-[0.16em] text-muted-foreground/70 uppercase',
-            collapsed && 'text-center',
-          )}
-        >
-          {collapsed ? '库' : '库务管理'}
-        </p>
-        {MANAGE_LINKS.map(({ to, label, icon: Icon }) => (
-          <RailLink collapsed={collapsed} icon={<Icon className="size-4" />} key={to} label={label} to={to} />
-        ))}
+      <nav aria-label="工作区导航" className="flex flex-col gap-1 px-3 py-4">
+        {WORKSPACE_LINKS.map(item => <RailLink collapsed={collapsed} item={item} key={item.to} />)}
+        <div className="my-4 border-t" />
+        {!collapsed && <p className="mb-2 px-3 text-xs text-muted-foreground">资源管理</p>}
+        {RESOURCE_LINKS.map(item => <RailLink collapsed={collapsed} item={item} key={item.to} />)}
+        <div className="my-3 border-t" />
+        {collapsed
+          ? <RailLink collapsed item={SETTINGS_LINKS[0]!} />
+          : (
+              <>
+                <button aria-controls="workspace-settings" aria-expanded={settingsOpen} className="flex min-h-10 items-center gap-3 rounded-lg px-3 text-sm text-muted-foreground hover:bg-secondary/60 hover:text-foreground" onClick={() => setSettingsOpen(value => !value)} type="button">
+                  <Settings className="size-4" />
+                  实例管理
+                  <ChevronDown className={cn('ml-auto size-3.5 transition-transform', settingsOpen && 'rotate-180')} />
+                </button>
+                <div hidden={!settingsOpen} id="workspace-settings">{SETTINGS_LINKS.map(item => <RailLink collapsed={false} item={item} key={item.to} />)}</div>
+              </>
+            )}
       </nav>
     </TooltipProvider>
   )
 }
 
-/**
- * 新工作区骨架:顶栏 + 左侧库务栏 + 主内容(画布 / 管理页经 Outlet)。
- * 取代旧的三栏 AppShell。画布与 Inspector 由 CanvasPage(index 路由)承载。
- */
 export function WorkspaceShell() {
+  const paletteTrigger = useRef<HTMLButtonElement>(null)
   const [paletteOpen, setPaletteOpen] = useState(false)
+  const [addOpen, setAddOpen] = useState(false)
   const [railCollapsed, setRailCollapsed] = useState(false)
   const [mobileRailOpen, setMobileRailOpen] = useState(false)
+  const { resolvedTheme, setTheme } = useTheme()
   const location = useLocation()
+  const { active, revision } = useSession()
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k' && !addOpen && (!document.querySelector('[role=dialog]') || paletteOpen)) {
         event.preventDefault()
         setMobileRailOpen(false)
         setPaletteOpen(open => !open)
@@ -244,66 +131,77 @@ export function WorkspaceShell() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [])
-
+  }, [addOpen, paletteOpen])
   useEffect(() => {
     setMobileRailOpen(false)
-  }, [location.pathname])
+  }, [location.pathname, location.search])
+  useEffect(() => {
+    setPaletteOpen(false)
+    setAddOpen(false)
+  }, [revision])
 
   return (
-    <div className="flex h-svh flex-col overflow-hidden">
-      <TopBar
-        onOpenPalette={() => {
-          setMobileRailOpen(false)
-          setPaletteOpen(true)
-        }}
-        onToggleRail={() => setMobileRailOpen(open => !open)}
-      />
-
-      <div className="flex min-h-0 flex-1">
-        <aside
-          className={cn(
-            'hidden shrink-0 border-r bg-panel transition-[width] lg:block',
-            railCollapsed ? 'w-14' : 'w-52',
-          )}
-        >
-          <div className="flex h-full flex-col">
-            <div className="min-h-0 flex-1 overflow-y-auto">
-              <ManageRail collapsed={railCollapsed} />
-            </div>
-            <button
-              className="flex h-9 items-center justify-center border-t text-xs text-muted-foreground hover:bg-secondary/50 hover:text-foreground"
-              onClick={() => setRailCollapsed(c => !c)}
-              title={railCollapsed ? '展开侧栏' : '收起侧栏'}
-              type="button"
-            >
-              {railCollapsed ? '»' : '« 收起'}
-            </button>
-          </div>
-        </aside>
-
-        {mobileRailOpen && (
-          <div className="fixed inset-0 z-40 lg:hidden">
-            <button
-              aria-label="关闭导航"
-              className="absolute inset-0 bg-black/50"
-              onClick={() => setMobileRailOpen(false)}
-              type="button"
-            />
-            <aside className="absolute inset-y-0 left-0 w-56 border-r bg-panel shadow-2xl">
-              <ManageRail collapsed={false} />
-            </aside>
-          </div>
-        )}
-
-        {/* 纵向可滚动:管理页是长文档需要滚动;画布页自身用 h-full 精确占满,
-            不产生溢出故不会出现滚动条,ReactFlow 的滚轮缩放也不受影响。 */}
-        <main className="min-h-0 min-w-0 flex-1 overflow-y-auto">
-          <Outlet />
-        </main>
+    <div className="flex h-svh overflow-hidden bg-background">
+      <aside className={cn('hidden shrink-0 flex-col border-r bg-panel lg:flex', railCollapsed ? 'w-16' : 'w-56')}>
+        <NavLink aria-label="Tool Bridge 工作台" className="flex h-16 shrink-0 items-center gap-2.5 border-b px-5" to="/">
+          <img alt="" className="size-6 shrink-0 dark:invert" src="/ui/icon-light.png" />
+          {!railCollapsed && <span className="text-sm font-semibold tracking-tight">tool-bridge</span>}
+        </NavLink>
+        <div className="min-h-0 flex-1 overflow-y-auto"><Navigation collapsed={railCollapsed} /></div>
+        <button aria-label={railCollapsed ? '展开侧栏' : '收起侧栏'} className="flex h-12 shrink-0 items-center gap-3 border-t px-5 text-xs text-muted-foreground hover:text-foreground" onClick={() => setRailCollapsed(value => !value)} type="button">
+          {railCollapsed
+            ? <PanelLeftOpen className="size-4" />
+            : (
+                <>
+                  <PanelLeftClose className="size-4" />
+                  收起侧栏
+                </>
+              )}
+        </button>
+      </aside>
+      <div className="flex min-w-0 flex-1 flex-col">
+        <header className="flex min-h-16 shrink-0 items-center gap-2 border-b px-3 sm:gap-3 sm:px-6">
+          <Button aria-label="打开导航" className="lg:hidden" onClick={() => setMobileRailOpen(true)} size="icon" variant="ghost"><Menu /></Button>
+          <button aria-label="搜索工具、设备或操作" className="flex min-h-10 min-w-0 flex-1 items-center gap-2 rounded-lg px-2 text-sm text-muted-foreground hover:bg-secondary/50 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none" onClick={() => setPaletteOpen(true)} ref={paletteTrigger} type="button">
+            <Search className="size-4 shrink-0" />
+            <span className="truncate text-left">搜索工具、设备或操作…</span>
+            <kbd className="ml-auto hidden rounded border px-1.5 text-xs md:inline">{isMac ? '⌘ K' : 'Ctrl K'}</kbd>
+          </button>
+          <AddToolWizard
+            key={`${active?.id}:${revision}:add`}
+            onOpenChange={setAddOpen}
+            open={addOpen}
+            trigger={(
+              <Button aria-label="添加工具">
+                <Plus />
+                <span className="hidden sm:inline">添加工具</span>
+              </Button>
+            )}
+          />
+          <Button aria-label="切换主题" onClick={() => setTheme(resolvedTheme === 'light' ? 'dark' : 'light')} size="icon" variant="ghost">{resolvedTheme === 'light' ? <Moon /> : <Sun />}</Button>
+          <ConnectionMenu />
+        </header>
+        <main className="min-h-0 min-w-0 flex-1 overflow-y-auto" key={`${active?.id}:${active?.baseUrl}:${revision}`}><Outlet /></main>
       </div>
-
-      <CommandPalette onOpenChange={setPaletteOpen} open={paletteOpen} />
+      <Dialog onOpenChange={setMobileRailOpen} open={mobileRailOpen}>
+        <DialogContent className="inset-y-0 left-0 flex h-auto max-h-none w-64 max-w-[85vw] translate-x-0 translate-y-0 flex-col gap-0 rounded-none border-y-0 border-l-0 bg-panel p-0 sm:max-w-64">
+          <DialogHeader className="shrink-0 border-b p-5 text-left">
+            <DialogTitle>tool-bridge</DialogTitle>
+            <DialogDescription className="sr-only">工作区与管理页面导航</DialogDescription>
+          </DialogHeader>
+          <div className="min-h-0 flex-1 overflow-y-auto"><Navigation collapsed={false} /></div>
+        </DialogContent>
+      </Dialog>
+      <CommandPalette
+        key={`${active?.id}:${revision}`}
+        onAddTool={() => setAddOpen(true)}
+        onCloseAutoFocus={(event) => {
+          event.preventDefault()
+          if (!addOpen) paletteTrigger.current?.focus()
+        }}
+        onOpenChange={setPaletteOpen}
+        open={paletteOpen}
+      />
     </div>
   )
 }

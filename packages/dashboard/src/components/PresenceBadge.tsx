@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react'
 import { Wifi, WifiLow, WifiOff } from 'lucide-react'
 import type { PresenceState } from '@/lib/types'
-import { PRESENCE_HINT, PRESENCE_LABEL, PRESENCE_TONE } from '@/lib/presence'
+import { PRESENCE_HINT, PRESENCE_TONE } from '@/lib/presence'
 import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
 
@@ -24,12 +24,12 @@ export function PresenceBadge({
 }) {
   return (
     <Badge
-      className={cn('font-mono text-[10px]', PRESENCE_TONE[state], className)}
+      className={cn('text-xs', PRESENCE_TONE[state], className)}
       title={PRESENCE_HINT[state]}
       variant="outline"
     >
       {PRESENCE_ICON[state]}
-      {PRESENCE_LABEL[state]}
+      {{ online: '在线', stale: '疑似失联', offline: '离线' }[state]}
     </Badge>
   )
 }

@@ -255,7 +255,7 @@ export function StorePage() {
         )}
         description="部署级私有对象存储。设备产物与普通附件不需要挂载 Context，也不暴露 bucket key 或磁盘路径。"
         eyebrow="SYSTEM / STORE"
-        title="Default Store"
+        title="文件存储"
       />
 
       <section className="mt-6 grid gap-3 rounded-xl border bg-card/55 p-4 lg:grid-cols-[minmax(0,1fr)_12rem_auto] lg:items-end">

@@ -19,12 +19,11 @@ import { useSession } from '@/lib/session-context'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import hero from '@/assets/hero.png'
 
 const FEATURES = [
-  { icon: Network, label: '渐进发现', text: '从 /~help 开始，按需展开能力树' },
-  { icon: Boxes, label: '统一调用', text: '工具、Context 与设备共用入口' },
-  { icon: ShieldCheck, label: '最小权限', text: 'Secret Key 只开放所需路径和动作' },
+  { icon: Network, label: '找到工具', text: '搜索可用能力，直接开始使用' },
+  { icon: Boxes, label: '连接设备', text: '把电脑上的工具带入工作区' },
+  { icon: ShieldCheck, label: '管理访问', text: '为每个连接设置合适的权限' },
 ] as const
 
 function endpointLabel(baseUrl: string): string {
@@ -83,12 +82,6 @@ export function LoginPage() {
 
   return (
     <div className="relative h-svh overflow-x-hidden overflow-y-auto bg-panel">
-      {/* 与画布同一套克制的双色品牌光晕铺底,替代此前的网格 + 硬光斑。 */}
-      <div
-        aria-hidden
-        className="pointer-events-none absolute inset-0 [background-image:radial-gradient(48rem_32rem_at_12%_-8%,color-mix(in_oklch,var(--brand-from)_10%,transparent),transparent_60%),radial-gradient(42rem_32rem_at_100%_108%,color-mix(in_oklch,var(--brand-to)_9%,transparent),transparent_55%)]"
-      />
-
       <header className="relative z-10 flex h-16 items-center justify-between px-5 sm:px-8 lg:px-12">
         <div className="flex items-center gap-3">
           <img alt="" className="size-7 dark:invert" src="/ui/icon-light.png" />
@@ -97,9 +90,7 @@ export function LoginPage() {
             <span className="text-primary">-</span>
             bridge
           </span>
-          <span className="hidden rounded-sm border px-1.5 py-0.5 text-[10px] font-semibold tracking-wider text-muted-foreground sm:inline">
-            HTBP CONTROL PLANE
-          </span>
+
         </div>
         <Button
           aria-label="切换主题"
@@ -120,17 +111,17 @@ export function LoginPage() {
       <main className="relative z-10 mx-auto grid min-h-[calc(100svh-4rem)] w-full max-w-7xl items-center gap-12 px-5 py-8 sm:px-8 lg:grid-cols-[minmax(0,1.08fr)_minmax(22rem,0.72fr)] lg:px-12 lg:py-12">
         <section aria-labelledby="login-product-title" className="hidden min-w-0 lg:block">
           <p className="text-xs font-semibold tracking-[0.2em] text-primary uppercase">
-            One tree. One gateway.
+            你的工具工作台
           </p>
           <h1
-            className="mt-4 max-w-2xl text-4xl leading-[1.08] font-semibold tracking-[-0.04em] xl:text-5xl"
+            className="mt-4 max-w-2xl text-4xl leading-tight font-semibold tracking-tight"
             id="login-product-title"
           >
-            让每一个 Agent，
-            <span className="text-muted-foreground">都能安全地找到并使用组织能力。</span>
+            工具与设备，
+            <span className="block text-muted-foreground">在一处顺手使用。</span>
           </h1>
           <p className="mt-5 max-w-xl text-base leading-7 text-muted-foreground">
-            用一个 Secret Key 连接自描述的 HTBP 树，在同一控制面管理工具、上下文、设备与联邦服务。
+            连接你的网关，找到需要的工具，继续上次的工作。
           </p>
 
           <div className="mt-9 grid max-w-2xl grid-cols-3 gap-6">
@@ -143,26 +134,20 @@ export function LoginPage() {
             ))}
           </div>
 
-          <div aria-hidden className="absolute bottom-5 left-[42%] opacity-45 xl:bottom-3">
-            {/* hero.png 的挤出面烘焙了紫色;用 hue-rotate 移到品牌琥珀色,
-                线稿/白色面因饱和度近 0 不受影响。 */}
-            <img alt="" className="w-40 [filter:hue-rotate(145deg)_saturate(1.15)] xl:w-48" src={hero} />
-          </div>
         </section>
 
         <section aria-labelledby="login-title" className="mx-auto w-full max-w-md">
           <div className="glass-raised relative overflow-hidden rounded-xl p-5 sm:p-7">
-            <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-primary to-transparent" />
 
             <div className="mb-6">
               <div className="mb-4 grid size-10 place-items-center rounded-lg border bg-primary/[0.07] text-primary">
                 <KeyRound className="size-4.5" />
               </div>
               <h2 className="text-xl font-semibold tracking-[-0.02em]" id="login-title">
-                接入网关
+                打开工作区
               </h2>
               <p className="mt-1.5 text-sm leading-6 text-muted-foreground">
-                恢复已有档案，或验证一条新的 HTBP 连接。
+                继续使用已有连接，或添加一个新网关。
               </p>
             </div>
 
@@ -172,7 +157,7 @@ export function LoginPage() {
                   <h3 className="text-xs font-medium" id="saved-profile-title">
                     继续使用
                   </h3>
-                  <span className="rounded-full bg-secondary px-2 py-0.5 font-mono text-[10px] text-muted-foreground">
+                  <span className="rounded-full bg-secondary px-2 py-0.5 text-xs text-muted-foreground">
                     {profiles.length}
                     {' '}
                     个本地档案
@@ -198,7 +183,7 @@ export function LoginPage() {
                           <span className="block truncate font-mono text-xs text-foreground">
                             {profile.name}
                           </span>
-                          <span className="mt-0.5 block truncate text-[11px] text-muted-foreground">
+                          <span className="mt-0.5 block truncate text-xs text-muted-foreground">
                             {endpointLabel(profile.baseUrl)}
                           </span>
                         </span>
@@ -230,7 +215,7 @@ export function LoginPage() {
                 <h3 className="text-xs font-medium" id="new-connection-title">
                   {profiles.length > 0 ? '添加新连接' : '建立第一条连接'}
                 </h3>
-                <span className="font-mono text-[10px] text-muted-foreground">GET /~help</span>
+
               </div>
 
               <form
@@ -248,7 +233,7 @@ export function LoginPage() {
                     </span>
                     <span className="min-w-0 flex-1">
                       <span className="block text-xs font-medium">当前网关</span>
-                      <span className="mt-0.5 block truncate font-mono text-[10px] text-muted-foreground">
+                      <span className="mt-0.5 block truncate text-xs text-muted-foreground">
                         {window.location.origin}
                       </span>
                     </span>
@@ -270,8 +255,8 @@ export function LoginPage() {
 
                 <div className="grid gap-1.5">
                   <div className="flex items-center justify-between gap-3">
-                    <Label htmlFor="baseUrl">其它 BaseURL</Label>
-                    <span className="text-[11px] text-muted-foreground">可选 · 适用于远程网关</span>
+                    <Label htmlFor="baseUrl">其他网关地址</Label>
+                    <span className="text-xs text-muted-foreground">可选 · 适用于远程网关</span>
                   </div>
                   <Input
                     autoComplete="url"
@@ -289,7 +274,7 @@ export function LoginPage() {
                 </div>
 
                 <div className="grid gap-1.5">
-                  <Label htmlFor="sk">Secret Key</Label>
+                  <Label htmlFor="sk">访问密钥（Secret Key）</Label>
                   <Input
                     aria-describedby={error ? 'connection-note login-error' : 'connection-note'}
                     aria-invalid={Boolean(error)}
@@ -321,12 +306,7 @@ export function LoginPage() {
                     }}
                     value={name}
                   />
-                  <p className="text-[11px] text-muted-foreground">
-                    对应
-                    {' '}
-                    <code className="font-mono">tb --profile</code>
-                    ；同名档案会被更新。
-                  </p>
+                  <p className="text-xs text-muted-foreground">为连接起一个易辨认的名称；同名档案会被更新。</p>
                 </div>
 
                 <div
@@ -342,7 +322,7 @@ export function LoginPage() {
                       )}
                   <p
                     aria-live="polite"
-                    className="min-w-0 text-[11px] leading-5 text-muted-foreground"
+                    className="min-w-0 text-xs leading-5 text-muted-foreground"
                   >
                     {mutation.isPending
                       ? (
@@ -380,15 +360,15 @@ export function LoginPage() {
                   type="submit"
                 >
                   {mutation.isPending ? <Loader2 className="animate-spin" /> : <KeyRound />}
-                  {mutation.isPending ? '正在验证…' : '验证并接入'}
+                  {mutation.isPending ? '正在验证…' : '连接工作区'}
                   {!mutation.isPending && <ArrowRight className="ml-auto" />}
                 </Button>
               </form>
             </section>
           </div>
 
-          <p className="mt-5 text-center font-mono text-[11px] text-muted-foreground">
-            fetch-compatible · self-describing · credential-scoped
+          <p className="mt-5 text-center font-mono text-xs text-muted-foreground">
+            凭据仅保存在当前浏览器，请在受信任的设备上使用。
           </p>
         </section>
       </main>

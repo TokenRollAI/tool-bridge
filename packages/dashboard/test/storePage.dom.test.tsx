@@ -77,7 +77,7 @@ afterEach(() => {
 describe('StorePage', () => {
   it('独立展示 Store 对象、owner/producer，并通过 stat dialog 查看元数据', async () => {
     render(<StorePage />)
-    expect(screen.getByRole('heading', { name: 'Default Store' })).toBeTruthy()
+    expect(screen.getByRole('heading', { name: '文件存储' })).toBeTruthy()
     expect(screen.getByText('capture.jpg')).toBeTruthy()
     expect(screen.getByText('user:alice')).toBeTruthy()
     expect(screen.getByText('device:camera-01')).toBeTruthy()

@@ -366,7 +366,7 @@ export function FederationPage() {
         actions={<AddHostDialog />}
         description="控制 kind=remote 节点可以连接的 HTBP 主机；空白名单意味着拒绝全部联邦出站。"
         eyebrow="NETWORK / FEDERATION"
-        title="联邦出站边界"
+        title="联邦连接"
       />
 
       <section className="mt-6 overflow-hidden rounded-xl border border-primary/20 bg-card/65">

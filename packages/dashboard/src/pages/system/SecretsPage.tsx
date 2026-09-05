@@ -333,7 +333,7 @@ export function SecretsPage() {
         )}
         description="把上游凭证留在网关信任边界内；业务节点只保存 authRef，不接触凭证明文。"
         eyebrow="AUTH / CREDENTIAL VAULT"
-        title="凭证保管"
+        title="服务凭证"
       />
 
       <section

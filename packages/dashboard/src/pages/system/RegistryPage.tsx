@@ -258,7 +258,7 @@ export function RegistryPage() {
         )}
         description="把 MCP、HTTP、Plugin、Context 与远端 HTBP 服务挂入统一能力树，并集中查看连接与认证边界。"
         eyebrow="SYSTEM / REGISTRY"
-        title="节点注册"
+        title="工具连接"
       />
 
       <div className="mt-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
