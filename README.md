@@ -12,6 +12,7 @@ Agent 只需要一个 BaseURL 和一个 Secret Key，就能发现能力、阅读
 
 [![npm: cli](https://img.shields.io/npm/v/@tool-bridge/cli?label=%40tool-bridge%2Fcli)](https://www.npmjs.com/package/@tool-bridge/cli)
 [![npm: sdk](https://img.shields.io/npm/v/@tool-bridge/sdk?label=%40tool-bridge%2Fsdk)](https://www.npmjs.com/package/@tool-bridge/sdk)
+[![Railway](https://img.shields.io/badge/Railway-Quick_Deploy-0B0D0E?logo=railway)](#railway)
 [![license](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
 
@@ -49,25 +50,20 @@ Agent / CLI / Dashboard / MCP client
 
 ## 快速开始：本地运行一个网关
 
-下面使用 Node/Docker 宿主。它把状态存到 SQLite，把对象存到 `/data`，适合先完成一个本地闭环。
+默认 Docker Compose 栈包含应用、PostgreSQL 和 S3 兼容对象存储。需要安装 Docker（含 Compose）；安装器会自动生成基础设施凭证。
 
-### 1. 生成信任根并启动
-
-需要 Node.js 22+ 来生成两个随机值；请保存 Admin SK，丢失后无法从网关中读回。
+### 1. 启动并配对实例
 
 ```sh
-export TB_ADMIN_SK="$(node -e "console.log('tbk_'+require('crypto').randomBytes(32).toString('base64url'))")"
-export TB_ENCRYPTION_KEY="$(node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))")"
-
-docker run -d --name tool-bridge \
-  -p 127.0.0.1:8787:8787 \
-  -v tool-bridge-data:/data \
-  -e TB_BOOTSTRAP_ADMIN_SK="$TB_ADMIN_SK" \
-  -e TB_SECRET_ENCRYPTION_KEY="$TB_ENCRYPTION_KEY" \
-  ghcr.io/tokenrollai/tool-bridge:latest
+git clone https://github.com/TokenRollAI/tool-bridge.git
+cd tool-bridge
+docker compose up -d --build
+docker compose exec -T app node /app/dist/admin.js pair
 ```
 
-生产部署应通过平台的 Secret 机制注入这两个值，不要把它们写进镜像、仓库或共享脚本。
+打开 [http://127.0.0.1:8787/ui/setup](http://127.0.0.1:8787/ui/setup)，输入一次性配对凭证，使用内置数据库和对象存储完成安装。将安装成功后显示的 Admin SK 保存到密码管理器，后续登录时使用。PostgreSQL、对象存储和 bootstrap 身份/密钥分别保存在 Docker 持久卷中。
+
+希望直接托管到云上？跳到 [Railway 快速部署](#railway)。
 
 ### 2. 用 CLI 登录、发现和调用
 
@@ -82,9 +78,11 @@ tb call system/status/get                  # 调用节点上的 get 命令
 
 部署包含 Dashboard，可直接打开 [http://127.0.0.1:8787/ui](http://127.0.0.1:8787/ui)。Dashboard 使用同一套公开 API，SK 只保存在浏览器本地。
 
-不使用 CLI 也可以直接 fetch：
+不使用 CLI 也可以直接 fetch：先把保存的 Admin SK 读入临时变量（Bash）：
 
-```sh
+```bash
+read -rsp "Admin SK: " TB_ADMIN_SK; echo
+
 curl -H "Authorization: Bearer $TB_ADMIN_SK" \
   http://127.0.0.1:8787/~help
 
@@ -240,7 +238,7 @@ tb device op cancel build-01 <operation-id>
 Mailbox 是 pull-only 的持久化执行账本：网关先落库，设备用
 `@tool-bridge/sdk/device` 主动 claim / renew / complete；它不会用 APNs、FCM 唤醒设备。fallback
 只在网关确认 realtime 尚未 dispatch 时入队；发送后的断线/超时属于执行歧义，不会再次入队。
-`TB_SECRET_ENCRYPTION_KEY` 是启用 Mailbox 的部署前提；参数与结果使用
+Mailbox 使用安装时生成并持久保存在 bootstrap 中的加密根；参数与结果使用
 独立 HKDF 子密钥做静态加密，但不是端到端加密，网关在授权后的 claim/complete 路径仍会处理明文。
 
 `result_unknown` 表示设备确认已经开始执行但结果无法恢复；claimed 操作过期则为 `expired` 且标记
@@ -288,14 +286,62 @@ tb help teams/team-b/tools/search
 
 ## 部署与嵌入
 
-| 形态 | 状态 / 对象 / 设备 | 副本 | 适合场景 |
+| 形态 | 状态 / 对象 | 副本 | 适合场景 |
 |---|---|---|---|
-| **Docker 单容器** | SQLite + 本地文件系统 + 进程内 WebSocket | 1 | 自托管、内网、快速验证 |
-| **Docker Compose** | PostgreSQL(+ 可选 S3、Redis) | 1–2(单机) | 单机生产、含 HA 参考栈,见 [`deploy/compose/`](deploy/compose/docker-compose.yml) |
-| **Kubernetes(Helm)** | PostgreSQL + S3 + Redis → 无状态多副本;或 SQLite + PVC 单副本 | 1–N | 多副本生产、滚动更新,见 [`deploy/helm/tool-bridge/`](deploy/helm/tool-bridge) |
+| **Docker Compose** | PostgreSQL + S3 + bootstrap 持久卷 | 默认 1 | 本地试用、自托管，见 [`docker-compose.yml`](docker-compose.yml) |
+| **Railway** | PostgreSQL + S3 + `/data` 持久卷 | 1 | 云上托管，见[下方快速部署](#railway) |
+| **Kubernetes（Helm）** | PostgreSQL + S3 + bootstrap 持久化；多副本另配 Redis | 1–N | 集群部署，见 [`deploy/helm/tool-bridge/`](deploy/helm/tool-bridge) |
 | **嵌入式 SDK** | 由调用方注入 store/provider | — | 在自己的 Node 应用里注册本地函数 |
 
-Node 宿主的横向扩容公式:**PG(`TB_DATABASE_URL`)+ S3(`TB_OBJECT_STORE_*`)+ Redis(`TB_REDIS_URL`)三件配齐即无状态多副本**;只配前两件是"容器可随意重建、但别扩副本"的单副本无状态形态。Helm chart 会在渲染期直接拒绝危险组合(如 `replicas>1 + SQLite`)。健康探针:`/livez`(liveness)、`/readyz`(readiness,探后端连通 + 优雅关停时提前摘流量)、`/healthz`(版本与 catalog 对拍)。
+PostgreSQL 保存权威状态，S3 保存对象字节；bootstrap 中的实例身份和密钥也必须持久保存。业务配置通过安装流程及 API/CLI/Dashboard 管理，不再使用旧的 `TB_DATABASE_URL` / `TB_OBJECT_STORE_*` 环境变量。多副本还需要共享已初始化的 bootstrap 存储并配置 Redis。
+
+<a id="railway"></a>
+
+### 快速部署到 Railway
+
+使用仓库现有的 [`Dockerfile.railway`](Dockerfile.railway) 构建，最后在浏览器中完成安装。需要一个 PostgreSQL 服务，以及一个**已创建、支持 path-style URL、可通过公网 HTTPS endpoint 访问的 S3 桶**。这套单副本部署不需要 Redis。S3 endpoint 只填 origin，不带 bucket、路径或 query；凭证需允许读写、删除及条件写入，以通过安装探测。下文的 `your-domain.up.railway.app` 请替换为实际域名。
+
+1. 打开 [Railway 新建项目](https://railway.com/new)，添加 PostgreSQL，再从 `TokenRollAI/tool-bridge` 添加 GitHub 应用服务（必要时先 Fork）。应用的 Root Directory 保持仓库根目录。
+2. 部署应用前，为它添加挂载到 `/data` 的持久卷，并配置：
+
+   | 设置 | 值 |
+   |---|---|
+   | 环境变量 `RAILWAY_DOCKERFILE_PATH` | `Dockerfile.railway` |
+   | 环境变量 `RAILWAY_RUN_UID` | `0`（下面的启动命令会降权） |
+   | 环境变量 `TB_BOOTSTRAP_DIR` | `/data/bootstrap` |
+   | Healthcheck Path | `/healthz` |
+   | Replicas | `1` |
+
+   将 **Start Command** 设为：
+
+   ```sh
+   /bin/sh -c 'install -d -m 700 -o 1000 -g 1000 /data /data/bootstrap && exec setpriv --reuid=node --regid=node --init-groups node /app/dist/main.js'
+   ```
+
+   这会先设置挂载目录的所有者，再以 `node` 用户运行应用；两个目录都需要可写，bootstrap 锁才能正常创建。应用自动读取 Railway 的 `PORT`，Build Command 留空。
+3. 部署后，通过 **Settings → Networking → Generate Domain** 获取应用的公网 HTTPS 地址。目标端口使用应用的 `PORT`（未设置时默认 `8787`）。
+4. 使用应用服务的 **Copy SSH Command** 进入部署容器（需安装 [Railway CLI](https://docs.railway.com/cli/ssh)），执行：
+
+   ```sh
+   if [ "$(id -u)" = 0 ]; then
+     setpriv --reuid=node --regid=node --init-groups node /app/dist/admin.js pair
+   else
+     node /app/dist/admin.js pair
+   fi
+   ```
+
+   打开 `https://your-domain.up.railway.app/ui/setup`，粘贴一次性配对凭证；填写 PostgreSQL 服务的私网 `DATABASE_URL`、S3 endpoint/bucket/region/access key/secret key，并在“公开访问地址”中填入应用的公网 HTTPS origin。Redis 留空。这些凭证通过受保护的安装页提交，不作为应用环境变量配置。
+5. 完成安装并保存 Admin SK，确认 `https://your-domain.up.railway.app/readyz` 返回 HTTP 200，然后在本机连接：
+
+   ```sh
+   npm install -g @tool-bridge/cli
+   tb login --base-url https://your-domain.up.railway.app
+   tb call system/status/get
+   ```
+
+`/healthz` 在安装前也可能成功，业务就绪以 `/readyz` 为准。重新部署时保留 `/data`、PostgreSQL 和 S3 数据；以上挂卷方案保持单副本。
+
+当前 S3 客户端使用 path-style URL，新建 [Railway Storage Bucket](https://docs.railway.com/storage-buckets) 使用 virtual-hosted URL，选用前需确认兼容性。私网 S3 endpoint 需要受保护的 `install-defaults.json`，见[部署指南](llmdoc/hosts-deploy/node-docker-and-helm.mdx)。平台配置参考：[环境变量](https://docs.railway.com/variables/reference)、[持久卷](https://docs.railway.com/volumes/reference)、[启动命令](https://docs.railway.com/deployments/start-command)。
 
 ### 嵌入自己的应用
 
