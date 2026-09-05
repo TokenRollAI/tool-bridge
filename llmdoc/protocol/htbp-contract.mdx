@@ -97,7 +97,7 @@ builtin、Context 与 Skillhub 的命令使用 `HtbpCommandRegistry` 注册一�
   mailbox 或 certainty-gated fallback，没有独立 `~enqueue` 路由。
 - `POST /~device/operations/get|list|cancel`:调用方的 operation 管理面;`POST /~device/mailbox/claim|renew|complete` 是设备 Bearer 数据面。
 - `PUT /~store/uploads/<uploadId>` 与 `GET /~store/refs|shares/<token>` 是 Store 的 bearer 数据面,不是 Registry 节点;精确授权见[Store](#store)。
-- `ALL /~mcp`:把当前身份可见工具投影为 MCP server。`GET /healthz`:公开健康信息,不证明认证数据面可用。
+- `ALL /~mcp`:提供固定发现、帮助、按路径调用与 device operation 入口，不全量投影业务工具；目标仍按当前身份授权，详见 [MCP 入口](../app-runtime/mcp-interop.mdx)。`GET /healthz`:公开健康信息,不证明认证数据面可用。
 - 错误统一 `{code,message,retryable}`;主要 code:not_found、permission_denied、invalid_argument、conflict、unavailable、rate_limited、internal。
 - 未知 Help DSL 行与未知可选 capability 应忽略(协议演进能力);安全字段和未知写入参数不得静默忽略。
 

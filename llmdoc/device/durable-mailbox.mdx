@@ -22,6 +22,7 @@ code:
     - packages/app/src/routes/deviceMailbox.ts
     - packages/app/src/routes/invoke.ts
     - packages/app/src/mcpServer.ts
+    - packages/app/src/mcpInvoke.ts
     - packages/app/src/routes/mcp.ts
     - packages/server/src/deviceHub.ts
     - packages/server/src/deviceRouter.ts
@@ -60,12 +61,13 @@ mailbox-capable command 仍须可发现并允许入队。
 设备 command metadata 的 `delivery` 描述能力：缺省 `realtime`，`mailbox` 只支持 durable 入队，`both`
 同时支持 realtime 与 Mailbox。请求 body 的保留 `~delivery` 则是每次调用的 policy：缺省 `realtime`，
 可选 `realtime|mailbox|fallback`。两层不能混同；metadata 随既有 hello command metadata 进入 Help
-JSON/DSL/Markdown、structured profile 与 MCP 投影，不增加 frame 类型。
+JSON/DSL/Markdown 与 structured profile；MCP 通过 `tb_help` 按需披露，不增加 frame 类型或逐工具 schema 投影。
 
 | 面 | 入口 | 责任 |
 |---|---|---|
 | caller invoke | `POST /<完整 command path>` | arguments 顶层可带 `~delivery`；TTL 在 query，幂等键在 header |
 | caller 管理 | `POST /~device/operations/get|list|cancel` | owner/admin 查询、分页与取消 |
+| MCP caller | `tb_call` + `tb_device_operations` | 同一 delivery、TTL、幂等键与 operation 管理语义，见 [MCP 入口](../app-runtime/mcp-interop.mdx) |
 | device 数据 | `POST /~device/mailbox/claim|renew|complete` | Bearer 鉴权、lease 与四种设备终态 |
 | SDK device | `createDeviceMailboxProcessor` | 宿主显式调用 `pullOnce`/`drain`；不自启 timer |
 
@@ -81,7 +83,7 @@ fallback 的判断必须消费 `DeviceCallDisposition` 这类 dispatch certainty
 
 每条 operation 的 `targetPath` 是含命令叶子的完整 command identity；设备内部执行 `path` 则保持相对
 mountPath 且含命令叶子。Registry 的系统写入 `deviceId` 是数据面原始身份，不能从规范化 mount path
-反推。Dashboard/CLI 的便利校验都不替代服务端对 device-backed command 与 `delivery` 的权威复核。
+反推。Dashboard/CLI/MCP 的便利校验都不替代服务端对 device-backed command 与 `delivery` 的权威复核。
 
 ## Authority、存储与加密
 

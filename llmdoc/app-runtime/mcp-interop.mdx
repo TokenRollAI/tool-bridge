@@ -1,17 +1,26 @@
 ---
-description: MCP 上游互操作指南:modern/legacy era 协商与缓存键、入站 /~mcp 无状态适配、互操作安全边界与四层验证。
+description: MCP 固定入口与按需发现调用、CLI 能力对等、目标 schema 与结果保真、modern/legacy 上游互操作及入站客户端验证。
 kind: guide
+relations:
+  requires:
+    - protocol/htbp-contract.mdx
+  related:
+    - device/durable-mailbox.mdx
+    - cli/argument-contract.mdx
 code:
   paths:
     - packages/plugins/src/feishu/feishuMcp.ts
     - packages/app/src/providers/mcp.ts
     - packages/app/src/mcpServer.ts
+    - packages/app/src/mcpInvoke.ts
     - packages/app/src/jsonSchemaValidator.ts
     - packages/app/src/routes/mcp.ts
     - packages/app/test/mcp.integration.test.ts
+    - packages/app/test/mcpArguments.test.ts
+    - scripts/verify-mcp.ts
 ---
 
-# MCP 上游互操作
+# MCP 入口与上游互操作
 
 MCP 是外部协议兼容面。项目内部历史状态可删，但现代/旧版 MCP 服务端的真实差异必须保留。
 
@@ -23,17 +32,47 @@ MCP 是外部协议兼容面。项目内部历史状态可删，但现代/旧版
 - 不复用上游 session，不存在 `mcpsession` 或 `forceFresh` 控制面。
 - 入站 `/~mcp` 是无状态适配器，不依赖 `Mcp-Session-Id`。
 
-### 入站 device delivery 投影
+## 入站固定入口与 CLI 对等
 
-入站 `/~mcp` 不为 Mailbox 暴露第二个 enqueue tool。对 metadata `delivery:'both'` 的设备工具，input schema
-增加 `~delivery` enum `realtime|mailbox|fallback`；mailbox-only 工具只投影 `mailbox|fallback`；realtime-only
-工具不增加该字段。MCP call 携带的 `~delivery` 原样进入同一个普通 command POST，复用 app 的授权、能力
-检查与 dispatch certainty，而不是在 MCP adapter 里再实现 fallback。
+`/~mcp` 只暴露网关固定能力，业务工具按完整 HTBP command path 发现和调用。`tools/list` 不访问上游、
+不遍历可见工具树，也不因挂载数量或路径长度增长；有 search capability 才广告 `tb_search`。固定入口
+仍逐请求认证，窄 SK 不靠缩减入口名表达权限，而在发现与调用目标时执行同一可见性和 scope 检查。
+
+| MCP 入口 | 对应 CLI | 契约 |
+|---|---|---|
+| `tb_search` | `tb search` | 复用全局搜索选项，默认 compact，选中后按需取 schema |
+| `tb_help` | `tb help` | 浏览节点或完整命令，取得参数、权限、副作用与 delivery metadata |
+| `tb_list_nodes` | `tb ls` / `tb tree` | 按路径与有界深度浏览，不要求 search capability |
+| `tb_call` | `tb call` | `{path,args,delivery?,ttlSeconds?,idempotencyKey?}`，args 缺省空对象 |
+| `tb_device_operations` | `tb device op` | 顶层 `action: list|get|cancel`，其余参数按 action 校验 |
+
+发现返回的 `cmds[].path` 是调用身份，直接放进 `tb_call.path`；已知路径与契约时可直接调用。路径不是 URL
+或 shell 命令。工具、Context、Skill 和可调用的 `system/*` 管理命令复用既有 handler 与权威授权，MCP 不
+新增权限旁路。对等范围是网关工具使用能力；本机文件读写、daemon、安装与 localhost 配对属于 CLI 宿主
+职责，不要求远程 MCP 模拟。
+
+调用只解析目标 owner：本地先按 Registry 最长前缀解析，remote 只读取选定命令的 help；需要上游清单时
+只读取目标 provider，不能为一次调用枚举其他节点。仅编译、校验选定命令的 schema；目标 schema 畸形时
+fail closed，但无关工具的畸形 schema 不能阻塞入口发现或合法调用。设备未声明 `cmds` 时仍允许与 CLI
+一致的已知 realtime 路径；显式空清单表示没有命令，不得编造 schema 或绕过 allowlist。
+
+MCP 上游调用复用 provider 执行路径，保留原生内容块、`structuredContent` 与 `isError`；不能先经普通
+HTTP JSON 响应再重建而丢失图片或业务错误。其他命令继续复用普通 HTBP 执行入口与错误语义。通用调用
+和 operation 管理可包含写入或取消，入口 annotation 不能统一标为只读；目标 effect/confirm 从 help 读取，
+权限由服务端判定。
+
+### Device delivery 与 operation 闭环
+
+`tb_call` 的 `delivery` 转成普通 command POST 的 `~delivery`，TTL 与幂等键分别进入既有 query/header；
+后两者只允许显式 `mailbox|fallback`。参数控制层不修改业务 schema，也不投影第二套设备工具或 enqueue
+入口。app 权威复核 command delivery 能力并执行 dispatch certainty，MCP adapter 不自行实现 fallback。
 
 显式 delivery 的成功结果保持可判别：HTTP 200/realtime 投影为
 `{delivery:'realtime',result}`，HTTP 202/mailbox 投影为 `{delivery:'mailbox',operation}`。`fallback` 只在
 gateway 明确判断 `not_dispatched` 时入队；设备业务错误属于 completed，unknown 也不入队。这样一次 MCP
 工具调用即可请求 fallback，同时避免 Agent 在 MCP 层 call 失败后再猜测是否 enqueue。
+返回的 operation 通过 `tb_device_operations` 查询、分页或取消，复用 owner/admin 授权。设备身份必须使用
+原始 `deviceId`；claimed cancel 只是协作式请求，result_unknown 或可能执行过的 expired 都不证明重试安全。
 
 ## 互操作边界
 
@@ -59,9 +98,14 @@ gateway 明确判断 `not_dispatched` 时入队；设备业务错误属于 compl
 ## 验证层次
 
 1. provider 单测：era 探测、TTL、能力约束、错误映射。
-2. app/server 集成：`~help`、单工具披露、envelope 调用、缓存命中。
-3. consumer E2E：用真实 MCP client 连接 `/~mcp`，验证初始化、发现与调用。
+2. app/server 集成：`~help`、单工具披露、完整命令路径与裸 arguments 调用、缓存命中。
+3. consumer E2E：用真实 MCP client 连接 `/~mcp`，验证 modern/legacy、固定入口，以及 help 返回路径直接
+   进入 tb_call 的闭环；窄 SK 仍看到固定入口，但发现隐藏越权目标、已知越权路径调用被拒。
 4. 真实上游仅在明确提供 URL/凭据时运行 `pnpm verify:mcp`。
+
+排查连接先区分入站 `/~mcp` 与出站 MCP provider。CLI 经 HTBP 调用上游成功不能替代入站消费者验证；
+官方 SDK 成功也不能证明尚未复现的用户客户端链路兼容。验收还须证明工具目录规模有界、入口发现不访问
+上游、无关上游故障与 schema 错误被隔离，以及设备 delivery/operation 与原生 MCP 结果语义完整。
 
 注意：不要为了单个失常服务端加入无边界 fallback。先确认它是协议时代差异还是上游 bug，再把兼容限制在 provider 层并加回归测试。
 
