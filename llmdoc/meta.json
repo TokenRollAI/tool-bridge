@@ -1,72 +1,72 @@
 {
   "schema": "llmdoc.meta/v3",
   "baseline": {
-    "revision": "2b45dc99c607f59351d214845fe8e0c6b912f478",
-    "verifiedAt": "2026-09-05T10:25:14.636Z"
+    "revision": "fca74657f159c6a41b0a58abceb44243f025af5d",
+    "verifiedAt": "2026-09-05T22:53:32.455Z"
   },
   "documents": {
     "app-runtime/host-neutral-assembly.mdx": {
-      "validatedRevision": "2b45dc99c607f59351d214845fe8e0c6b912f478"
+      "validatedRevision": "fca74657f159c6a41b0a58abceb44243f025af5d"
     },
     "app-runtime/mcp-interop.mdx": {
-      "validatedRevision": "2b45dc99c607f59351d214845fe8e0c6b912f478"
+      "validatedRevision": "fca74657f159c6a41b0a58abceb44243f025af5d"
     },
     "architecture.mdx": {
-      "validatedRevision": "2b45dc99c607f59351d214845fe8e0c6b912f478"
+      "validatedRevision": "fca74657f159c6a41b0a58abceb44243f025af5d"
     },
     "cli/agent-skill-integration.mdx": {
-      "validatedRevision": "84ac05d579c5a179cd7120e7c32f1581fc3b69e2"
+      "validatedRevision": "fca74657f159c6a41b0a58abceb44243f025af5d"
     },
     "cli/argument-contract.mdx": {
-      "validatedRevision": "84ac05d579c5a179cd7120e7c32f1581fc3b69e2"
+      "validatedRevision": "fca74657f159c6a41b0a58abceb44243f025af5d"
     },
     "dashboard/canvas-architecture.mdx": {
-      "validatedRevision": "41c39bccb8055f2d3bffa904b5cc2e30c0b43c5b"
+      "validatedRevision": "fca74657f159c6a41b0a58abceb44243f025af5d"
     },
     "device/device-daemon.mdx": {
-      "validatedRevision": "2b45dc99c607f59351d214845fe8e0c6b912f478"
+      "validatedRevision": "fca74657f159c6a41b0a58abceb44243f025af5d"
     },
     "device/websocket-sessions.mdx": {
-      "validatedRevision": "2b45dc99c607f59351d214845fe8e0c6b912f478"
+      "validatedRevision": "fca74657f159c6a41b0a58abceb44243f025af5d"
     },
     "hosts-deploy/node-docker-and-helm.mdx": {
-      "validatedRevision": "2b45dc99c607f59351d214845fe8e0c6b912f478"
+      "validatedRevision": "fca74657f159c6a41b0a58abceb44243f025af5d"
     },
     "hosts-deploy/state-store-decision.mdx": {
-      "validatedRevision": "2b45dc99c607f59351d214845fe8e0c6b912f478"
+      "validatedRevision": "fca74657f159c6a41b0a58abceb44243f025af5d"
     },
     "plugins/designing-and-migrating-plugins.mdx": {
-      "validatedRevision": "2b45dc99c607f59351d214845fe8e0c6b912f478"
+      "validatedRevision": "fca74657f159c6a41b0a58abceb44243f025af5d"
     },
     "plugins/plugin-runtime.mdx": {
-      "validatedRevision": "2b45dc99c607f59351d214845fe8e0c6b912f478"
+      "validatedRevision": "fca74657f159c6a41b0a58abceb44243f025af5d"
     },
     "protocol/htbp-contract.mdx": {
-      "validatedRevision": "2b45dc99c607f59351d214845fe8e0c6b912f478"
+      "validatedRevision": "fca74657f159c6a41b0a58abceb44243f025af5d"
     },
     "protocol/security-boundaries.mdx": {
-      "validatedRevision": "2b45dc99c607f59351d214845fe8e0c6b912f478"
+      "validatedRevision": "fca74657f159c6a41b0a58abceb44243f025af5d"
     },
     "release/npm-publishing.mdx": {
-      "validatedRevision": "2b45dc99c607f59351d214845fe8e0c6b912f478"
+      "validatedRevision": "fca74657f159c6a41b0a58abceb44243f025af5d"
     },
     "search/search-index.mdx": {
-      "validatedRevision": "2b45dc99c607f59351d214845fe8e0c6b912f478"
+      "validatedRevision": "fca74657f159c6a41b0a58abceb44243f025af5d"
     },
     "store/default-store.mdx": {
-      "validatedRevision": "2b45dc99c607f59351d214845fe8e0c6b912f478"
+      "validatedRevision": "fca74657f159c6a41b0a58abceb44243f025af5d"
     },
     "device/durable-mailbox.mdx": {
-      "validatedRevision": "84ac05d579c5a179cd7120e7c32f1581fc3b69e2"
+      "validatedRevision": "fca74657f159c6a41b0a58abceb44243f025af5d"
     },
     "hosts-deploy/managed-configuration.mdx": {
-      "validatedRevision": "2b45dc99c607f59351d214845fe8e0c6b912f478"
+      "validatedRevision": "fca74657f159c6a41b0a58abceb44243f025af5d"
     },
     "hosts-deploy/maintenance-and-keys.mdx": {
-      "validatedRevision": "2b45dc99c607f59351d214845fe8e0c6b912f478"
+      "validatedRevision": "fca74657f159c6a41b0a58abceb44243f025af5d"
     },
     "store/storage-backends.mdx": {
-      "validatedRevision": "69eeb627035f9dc6501a316638a137bec986a8d5"
+      "validatedRevision": "fca74657f159c6a41b0a58abceb44243f025af5d"
     }
   },
   "convergence": {
