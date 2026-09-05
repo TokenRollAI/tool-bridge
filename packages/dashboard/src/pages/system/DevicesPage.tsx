@@ -277,7 +277,7 @@ export function DevicesPage() {
                     <TableHeader>
                       <TableRow>
                         <TableHead>设备路径</TableHead>
-                        <TableHead className="w-28">会话状态</TableHead>
+                        <TableHead className="hidden w-28 sm:table-cell">会话状态</TableHead>
                         <TableHead className="hidden md:table-cell">能力说明</TableHead>
                         <TableHead className="hidden w-44 lg:table-cell">最近活动</TableHead>
                         <TableHead className="w-28">
@@ -292,19 +292,20 @@ export function DevicesPage() {
                             <div className="flex items-center gap-2 sm:gap-3">
                               <span
                                 className={cn(
-                                  'grid size-8 shrink-0 place-items-center rounded-md border',
+                                  'hidden size-8 shrink-0 place-items-center rounded-md border sm:grid',
                                   PRESENCE_TONE[presence.state],
                                 )}
                               >
                                 <Cpu className="size-3.5" />
                               </span>
                               <div className="min-w-0">
-                                <Link className="block max-w-36 truncate font-mono text-xs text-foreground hover:underline sm:max-w-64 sm:text-sm" to={`/nodes/${encodeTreePath(device.path)}?tab=invoke`}>{device.path}</Link>
-                                <p className="mt-0.5 text-[11px] text-muted-foreground">设备</p>
+                                <Link className="block max-w-32 truncate font-mono text-xs text-foreground hover:underline sm:max-w-64 sm:text-sm" to={`/nodes/${encodeTreePath(device.path)}?tab=invoke`}>{device.path}</Link>
+                                <p className="mt-0.5 hidden text-xs text-muted-foreground sm:block">设备</p>
+                                <div className="mt-1.5 sm:hidden"><PresenceBadge state={presence.state} /></div>
                               </div>
                             </div>
                           </TableCell>
-                          <TableCell>
+                          <TableCell className="hidden sm:table-cell">
                             <PresenceBadge state={presence.state} />
                           </TableCell>
                           <TableCell className="hidden max-w-80 whitespace-normal md:table-cell">
