@@ -35,6 +35,10 @@ jobs:
       - run: pnpm install --frozen-lockfile
 
       - run: pnpm verify
+        env:
+          # Each Vitest package already runs a worker pool. Sharing the runner
+          # between several pools starves DOM timers and creates false timeouts.
+          TURBO_CONCURRENCY: '1'
 
       # verify 不含 build:tsup/dts 的断裂(如 dts.resolve 配错、external 清单漂移)
       # 只在发布 workflow 里才暴露,届时 tag 已推、版本已定,返工代价高。
