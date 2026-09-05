@@ -9,8 +9,8 @@
  *
  * **缓存提示(SEP-2549)**:`tools/list` 结果携带 `ttlMs`/`cacheScope`。SDK 只在 modern
  * 编解码器上填充这两个字段,2025 响应的线上形状完全不变,故无需按 era 分叉。
- * `cacheScope` 恒为 `private`:本网关的工具清单经调用方 scope 过滤(见 tbApp 的
- * Authorizer.Check),对共享中间层可缓存等同于跨身份泄露目录。
+ * `cacheScope` 恒为 `private`:入口按部署能力裁剪,每次请求仍独立鉴权。
+ * 业务工具目录只通过 tb_search / tb_help 按需读取,不进入 tools/list。
  */
 
 import {
@@ -25,56 +25,15 @@ import {
   WebStandardStreamableHTTPServerTransport,
 } from '@modelcontextprotocol/server'
 import { CallToolResultSchema, ToolSchema } from '@modelcontextprotocol/core'
+import { isTBError, type ToolResult, type ToolSpec } from '@tool-bridge/core'
 import { ToolJsonSchemaValidator } from './jsonSchemaValidator'
 
-export interface McpBridgeTool {
-  confirm?: boolean
-  delivery?: 'both' | 'mailbox' | 'realtime'
-  description?: string
-  effect?: string
-  identity: string
-  inputSchema?: unknown
-  invokePath: string
-  mcpName?: string
-  operation?: 'help' | 'listNodes' | 'search'
-  providerBacked?: boolean
-  sourcePath: string
-  toolName: string
-}
+/** Only the fixed gateway entry points are MCP tools; command paths stay in arguments. */
+export type McpBridgeTool = ToolSpec
 
 export interface McpToolBridge {
-  call(tool: McpBridgeTool, args: Record<string, unknown>): Promise<{
-    content: unknown
-    isError?: boolean
-    structuredContent?: Record<string, unknown>
-  }>
+  call(tool: McpBridgeTool, args: Record<string, unknown>): Promise<ToolResult>
   list(): Promise<McpBridgeTool[]>
-}
-
-function hex(bytes: Uint8Array): string {
-  return [...bytes].map(byte => byte.toString(16).padStart(2, '0')).join('')
-}
-
-/** Length-unambiguous identity for an HTBP invocation tuple (direct command path + tool name). */
-export function mcpToolIdentity(invokePath: string, toolName: string): string {
-  return JSON.stringify([invokePath, toolName])
-}
-
-/** MCP-safe encoding; long identities retain a readable prefix plus collision-resistant SHA-256. */
-export async function mcpToolName(identity: string): Promise<string> {
-  const encoded = [...new TextEncoder().encode(identity)]
-    .map((byte) => {
-      const char = String.fromCharCode(byte)
-      if (/[A-Za-z0-9.-]/.test(char)) return char
-      if (char === '_') return '__'
-      return `_${byte.toString(16).padStart(2, '0')}`
-    })
-    .join('')
-  const prefixed = `tb_${encoded}`
-  if (prefixed.length <= 128) return prefixed
-
-  const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(identity)))
-  return `tb_${encoded.slice(0, 60)}_${hex(digest)}`
 }
 
 /** JSON Schema 2020-12 里取「单个子 schema」的关键字。 */
@@ -97,8 +56,8 @@ const MAX_SCHEMA_DEPTH = 32
  *
  * 存在的理由:v2 的 `ToolSchema` 把 `inputSchema.properties` 放宽成
  * `Record<string, JSONValue>`,`{ properties: { value: 'not-a-schema' } }` 能过 parse;
- * cfworker 编译时也不报错,反而把那条属性当作无约束——即 `validateInput` 对它静默放行。
- * 两道防线同时失效会让畸形上游 schema 变成调用路径上的 fail-open,故在投影处显式关死。
+ * SDK 的 AJV adapter 默认关闭 meta-schema 校验。这里保留结构与深度边界,
+ * 具体方言和关键字语义仍由官方 adapter 校验,不把畸形 schema 当成无约束输入。
  */
 function assertSchemaShape(value: unknown, path: string, depth = 0): void {
   if (typeof value === 'boolean') return
@@ -108,7 +67,12 @@ function assertSchemaShape(value: unknown, path: string, depth = 0): void {
   if (depth >= MAX_SCHEMA_DEPTH) throw new Error(`JSON Schema nested too deeply at '${path}'`)
   const schema = value as Record<string, unknown>
   for (const key of SUBSCHEMA_KEYS) {
-    if (schema[key] !== undefined) assertSchemaShape(schema[key], `${path}/${key}`, depth + 1)
+    const sub = schema[key]
+    // Older JSON Schema dialects use an array-valued items for tuples. The SDK
+    // chooses the dialect and rejects this form for 2020-12 itself.
+    if (key === 'items' && Array.isArray(sub)) {
+      sub.forEach((item, i) => assertSchemaShape(item, `${path}/items/${i}`, depth + 1))
+    } else if (sub !== undefined) assertSchemaShape(sub, `${path}/${key}`, depth + 1)
   }
   for (const key of SUBSCHEMA_MAP_KEYS) {
     const map = schema[key]
@@ -130,10 +94,9 @@ function assertSchemaShape(value: unknown, path: string, depth = 0): void {
 
 function inputSchemaOf(
   raw: unknown,
-  delivery?: McpBridgeTool['delivery'],
 ): Tool['inputSchema'] {
-  if (raw === undefined && delivery === undefined) return { type: 'object', properties: {} }
-  const source = raw ?? { type: 'object', properties: {} }
+  if (raw === undefined) return { type: 'object', properties: {} }
+  const source = raw
   if (source === null || typeof source !== 'object' || Array.isArray(source)) {
     throw new Error('MCP tool inputSchema must be a JSON Schema object')
   }
@@ -142,29 +105,26 @@ function inputSchemaOf(
     throw new Error('MCP tool inputSchema root type must be object')
   }
   assertSchemaShape(schema, 'inputSchema')
-  if (delivery !== 'mailbox' && delivery !== 'both') {
-    return { ...schema, type: 'object' } as Tool['inputSchema']
+  return { ...schema, type: 'object' } as Tool['inputSchema']
+}
+
+function inputValidator(raw: unknown, path: string) {
+  try {
+    // The MCP SDK's Tool schema permits JSONValue properties; the shape check above
+    // narrows them to JSON Schemas before passing them to its official AJV adapter.
+    return new ToolJsonSchemaValidator().getValidator(
+      inputSchemaOf(raw) as Parameters<ToolJsonSchemaValidator['getValidator']>[0],
+    )
+  } catch {
+    throw new ProtocolError(ProtocolErrorCode.InternalError, `invalid input schema for '${path}'`)
   }
-  const properties = schema.properties
-  if (properties !== undefined && (
-    properties === null
-    || typeof properties !== 'object'
-    || Array.isArray(properties)
-  )) throw new Error('MCP tool inputSchema properties must be an object')
-  return {
-    ...schema,
-    type: 'object',
-    properties: {
-      ...((properties ?? {}) as Record<string, unknown>),
-      '~delivery': {
-        type: 'string',
-        enum: delivery === 'both'
-          ? ['realtime', 'mailbox', 'fallback']
-          : ['mailbox', 'fallback'],
-        description: 'Tool Bridge delivery policy; fallback prefers realtime and queues only when dispatch definitely did not occur.',
-      },
-    },
-  } as Tool['inputSchema']
+}
+
+/** Use the existing SDK AJV adapter, compiling only the selected command's schema. */
+export function validateMcpArguments(raw: unknown, args: Record<string, unknown>, path: string): void {
+  const validate = inputValidator(raw, path)
+  const result = validate(args)
+  if (!result.valid) throw new ProtocolError(ProtocolErrorCode.InvalidParams, result.errorMessage)
 }
 
 function annotationsOf(tool: McpBridgeTool): ToolAnnotations | undefined {
@@ -181,72 +141,26 @@ interface ProjectedTool {
   validateInput: ReturnType<ToolJsonSchemaValidator['getValidator']>
 }
 
-async function projectTools(
-  source: McpBridgeTool[],
-  validator: ToolJsonSchemaValidator,
-): Promise<ProjectedTool[]> {
-  const unique = new Map<string, McpBridgeTool>()
-  for (const tool of source) {
-    if (unique.has(tool.identity)) {
-      throw new ProtocolError(ProtocolErrorCode.InternalError, 'duplicate HTBP tool identity')
-    }
-    unique.set(tool.identity, tool)
-  }
-  const projected = await Promise.all(
-    [...unique.values()].map(async (bridge) => {
-      const name = bridge.mcpName ?? await mcpToolName(bridge.identity)
-      const annotations = annotationsOf(bridge)
-      const description = bridge.description === undefined
-        ? `HTBP ${bridge.invokePath}`
-        : `${bridge.description}\n\nHTBP ${bridge.invokePath}`
-      let inputSchema: Tool['inputSchema']
-      try {
-        inputSchema = inputSchemaOf(bridge.inputSchema, bridge.delivery)
-      } catch {
-        throw new ProtocolError(ProtocolErrorCode.InternalError,
-          `invalid input schema for '${bridge.sourcePath}/${bridge.toolName}'`,
-        )
-      }
-      const candidate = {
-        name,
-        description,
-        inputSchema,
-        _meta: {
-          'io.tool-bridge/path': bridge.sourcePath,
-          'io.tool-bridge/command': bridge.toolName,
-        },
-        ...(annotations !== undefined ? { annotations } : {}),
-      }
-      const parsed = ToolSchema.safeParse(candidate)
-      if (!parsed.success) {
-        throw new ProtocolError(ProtocolErrorCode.InternalError,
-          `invalid tool metadata for '${bridge.sourcePath}/${bridge.toolName}'`,
-        )
-      }
-      let validateInput: ProjectedTool['validateInput']
-      try {
-        // ToolSchema 把 inputSchema.properties 定为 Record<string, JSONValue>(含 null),
-        // 而 getValidator 要 Record<string, JSONSchema>——SDK 自身两侧类型不咬合。运行时
-        // 无碍(非法 schema 由 getValidator 抛出,下面 catch 兜住),故在此单点收窄。
-        validateInput = validator.getValidator(
-          parsed.data.inputSchema as Parameters<ToolJsonSchemaValidator['getValidator']>[0],
-        )
-      } catch {
-        throw new ProtocolError(ProtocolErrorCode.InternalError,
-          `invalid input schema for '${bridge.sourcePath}/${bridge.toolName}'`,
-        )
-      }
-      return { bridge, tool: parsed.data, validateInput }
-    }),
-  )
+function projectTools(source: McpBridgeTool[]): ProjectedTool[] {
   const names = new Set<string>()
-  for (const item of projected) {
-    if (names.has(item.tool.name)) {
+  return source.map((bridge) => {
+    if (names.has(bridge.name)) {
       throw new ProtocolError(ProtocolErrorCode.InternalError, 'MCP tool name collision')
     }
-    names.add(item.tool.name)
-  }
-  return projected.sort((a, b) => a.tool.name.localeCompare(b.tool.name))
+    names.add(bridge.name)
+    const annotations = annotationsOf(bridge)
+    const validateInput = inputValidator(bridge.inputSchema, bridge.name)
+    const parsed = ToolSchema.safeParse({
+      name: bridge.name,
+      description: bridge.description,
+      inputSchema: inputSchemaOf(bridge.inputSchema),
+      ...(annotations === undefined ? {} : { annotations }),
+    })
+    if (!parsed.success) {
+      throw new ProtocolError(ProtocolErrorCode.InternalError, `invalid tool metadata for '${bridge.name}'`)
+    }
+    return { bridge, tool: parsed.data, validateInput }
+  }).sort((a, b) => a.tool.name.localeCompare(b.tool.name))
 }
 
 function contentOf(value: unknown): CallToolResult['content'] {
@@ -258,14 +172,7 @@ function contentOf(value: unknown): CallToolResult['content'] {
   return [{ type: 'text', text }]
 }
 
-/**
- * 造一个只服务本次请求的 Server。工厂形态是 `createMcpHandler` 的要求:modern 与
- * legacy 两条腿各自取一个新实例,互不共享状态。
- *
- * `Server`(低阶 API)在 v2 标了 deprecated,推荐 `McpServer`——但那套是围绕
- * `registerTool` 的静态注册设计的,而本网关的工具集是每请求从 HTBP 树按调用方权限
- * 现算的(projectTools),属文档所称的 advanced use case,故继续用低阶 API。
- */
+/** Fixed gateway tools are assembled per authenticated request, for both MCP eras. */
 function buildMcpServer(version: string, bridge: McpToolBridge, listTtlMs: number): Server {
   const validator = new ToolJsonSchemaValidator()
   const server = new Server(
@@ -277,12 +184,13 @@ function buildMcpServer(version: string, bridge: McpToolBridge, listTtlMs: numbe
       cacheHints: { 'tools/list': { ttlMs: listTtlMs, cacheScope: 'private' } },
     },
   )
+  let projected: Promise<ProjectedTool[]> | undefined
+  const tools = () => projected ??= bridge.list().then(projectTools)
   server.setRequestHandler('tools/list', async () => ({
-    tools: (await projectTools(await bridge.list(), validator)).map(item => item.tool),
+    tools: (await tools()).map(item => item.tool),
   }))
   server.setRequestHandler('tools/call', async (rpc) => {
-    const projected = await projectTools(await bridge.list(), validator)
-    const selected = projected.find(item => item.tool.name === rpc.params.name)
+    const selected = (await tools()).find(item => item.tool.name === rpc.params.name)
     if (selected === undefined) {
       throw new ProtocolError(ProtocolErrorCode.InvalidParams, 'tool not found')
     }
@@ -291,9 +199,15 @@ function buildMcpServer(version: string, bridge: McpToolBridge, listTtlMs: numbe
     if (!validation.valid) {
       throw new ProtocolError(ProtocolErrorCode.InvalidParams, validation.errorMessage)
     }
-    const result = await bridge.call(selected.bridge, args)
+    let result: ToolResult
+    try {
+      result = await bridge.call(selected.bridge, args)
+    } catch (error) {
+      if (!isTBError(error)) throw error
+      result = { content: error.toJSON(), isError: true }
+    }
     const candidate = {
-      content: contentOf(result.content),
+      content: contentOf(result.contentBlocks ?? result.content),
       ...(result.isError === true ? { isError: true } : {}),
       ...(result.structuredContent !== undefined
         ? { structuredContent: result.structuredContent }

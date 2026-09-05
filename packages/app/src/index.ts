@@ -50,8 +50,6 @@ export {
   handleMcpRequest,
   type McpBridgeTool,
   type McpToolBridge,
-  mcpToolIdentity,
-  mcpToolName,
 } from './mcpServer'
 // --- mcp 上游的托管 OAuth 授权码流程 ---
 export {

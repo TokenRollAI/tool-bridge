@@ -1,13 +1,13 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { mcpToolIdentity, mcpToolName, processDeviceHello } from '../src/index'
 import { connectModernMcpClient, connectTestMcpClient } from './mcpClient'
 import { createTestApp, TEST_VERSION } from './harness'
 import { MemorySearchIndex } from './memorySearchIndex'
+import { processDeviceHello } from '../src/index'
 import { TEST_ADMIN_SK } from './fixtures'
 
 // 文件级单实例(对齐原 SELF.fetch 语义:一个文件共享一份持久状态)。
 // 注入索引:/~mcp 只在宿主提供 SearchIndex 时投影 tb_search(gateway 侧对应
-// 可选的 TB_SEARCH binding),缺省不注入就只有 tb_help / tb_list_nodes。
+// 可选的 TB_SEARCH binding)，其余固定入口不依赖动态工具目录。
 const search = new MemorySearchIndex()
 const tb = await createTestApp({ search })
 
@@ -39,11 +39,12 @@ async function issueSk(input: unknown): Promise<string> {
   return ((await response.json()) as { secret: string }).secret
 }
 
-async function mountHttpTools(path: string, tools: unknown[]): Promise<void> {
+async function mountHttpTools(path: string, tools: unknown[], virtualize?: Record<string, unknown>): Promise<void> {
   const response = await postJson('system/registry/write', {
     path,
     kind: 'http',
     description: `${path} tools`,
+    ...(virtualize === undefined ? {} : { virtualize }),
     config: {
       kind: 'http',
       endpoint: 'https://mcp-exit-upstream.test',
@@ -233,34 +234,20 @@ describe('MCP consumer endpoint', () => {
 
     try {
       const listed = await client.listTools()
-      expect(listed.tools.map(tool => tool.name)).toEqual(expect.arrayContaining([
-        'tb_search',
-        'tb_help',
-        'tb_list_nodes',
-      ]))
+      expect(listed.tools.map(tool => tool.name).sort()).toEqual([
+        'tb_call', 'tb_device_operations', 'tb_help', 'tb_list_nodes', 'tb_search',
+      ])
+      expect(listed.tools.find(tool => tool.name === 'tb_call')?.annotations).toMatchObject({
+        readOnlyHint: false, destructiveHint: true,
+      })
       expect(listed.tools.find(tool => tool.name === 'tb_search')).toMatchObject({
         description: expect.stringContaining('compact by default'),
         inputSchema: {
-          type: 'object',
-          additionalProperties: false,
+          type: 'object', additionalProperties: false,
           properties: {
             query: { type: 'string', minLength: 1 },
             mode: { type: 'string', enum: ['keyword'] },
-            limit: { type: 'integer', minimum: 1, maximum: 200 },
-            cursor: { type: 'string', minLength: 1 },
-            detail: { type: 'string', enum: ['compact', 'full'], default: 'compact' },
-            effects: {
-              type: 'array',
-              minItems: 1,
-              items: {
-                type: 'string',
-                enum: ['read', 'write', 'destructive', 'unknown'],
-              },
-            },
-            federation: { type: 'string', enum: ['local', 'recursive'] },
-            matching: { type: 'string', enum: ['best', 'all'] },
-            minCoverage: { type: 'number', exclusiveMinimum: 0, maximum: 1 },
-            pathPrefix: { type: 'string', minLength: 1 },
+            detail: { type: 'string', enum: ['compact', 'full'] },
           },
           required: ['query'],
         },
@@ -353,6 +340,9 @@ describe('MCP consumer endpoint', () => {
 
   it('serves the 2026-07-28 era without a handshake and caches tools/list privately', async () => {
     await mountHttp('mcp-modern/basic')
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ hello: 'modern' }), {
+      headers: { 'content-type': 'application/json' },
+    })))
     const client = await connectModernMcpClient(
       'https://tb.test/~mcp',
       TEST_ADMIN_SK,
@@ -367,6 +357,9 @@ describe('MCP consumer endpoint', () => {
       const cacheable = listed as unknown as { cacheScope?: string, ttlMs?: number }
       expect(cacheable.cacheScope).toBe('private')
       expect(cacheable.ttlMs).toBe(300_000)
+      await expect(client.callTool({
+        name: 'tb_call', arguments: { path: '/mcp-modern/basic/greet', args: { name: 'modern' } },
+      })).resolves.toMatchObject({ structuredContent: { hello: 'modern' } })
     } finally {
       await client.close()
     }
@@ -389,7 +382,7 @@ describe('MCP consumer endpoint', () => {
     }
   })
 
-  it('projects ~delivery and performs one MCP fallback call without a second enqueue tool', async () => {
+  it('preserves delivery, TTL, idempotency and operation lifecycle through fixed tools', async () => {
     const deviceSk = await issueSk({
       owner: 'device:mcp-mailbox',
       scopes: [{ pattern: 'device/**', actions: ['read', 'call', 'register'] }],
@@ -426,30 +419,171 @@ describe('MCP consumer endpoint', () => {
     )
     try {
       const listed = await client.listTools()
-      const command = listed.tools.find(
-        tool => tool._meta?.['io.tool-bridge/path'] === 'device/mcp-mailbox/tools/mail',
-      )
-      expect(command?.inputSchema).toMatchObject({
-        additionalProperties: false,
-        properties: {
-          'text': { type: 'string' },
-          '~delivery': { enum: ['realtime', 'mailbox', 'fallback'] },
-        },
-      })
-      const result = await client.callTool({
-        name: command?.name ?? '',
-        arguments: { '~delivery': 'fallback', 'text': 'hello' },
-      })
+      expect(listed.tools.map(tool => tool.name)).toContain('tb_device_operations')
+      const input = {
+        path: '/device/mcp-mailbox/tools/mail/send',
+        args: { text: 'hello' },
+        delivery: 'fallback',
+        ttlSeconds: 300,
+        idempotencyKey: 'mcp-send-1',
+      }
+      for (const invalid of [
+        { path: input.path, args: { 'text': 'hello', '~delivery': 'mailbox' }, delivery: 'mailbox' },
+        { path: input.path, args: { text: 'hello' }, ttlSeconds: 30 },
+        { path: input.path, args: { text: 'hello' }, delivery: 'realtime', idempotencyKey: 'bad-policy' },
+        { path: input.path, args: { 'text': 'hello', '~delivery': 'mailbox' }, ttlSeconds: 30 },
+      ]) {
+        await expect(client.callTool({ name: 'tb_call', arguments: invalid })).resolves.toMatchObject({
+          isError: true, structuredContent: { code: 'invalid_argument' },
+        })
+      }
+      await expect(client.callTool({
+        name: 'tb_device_operations', arguments: { action: 'list', deviceId: 'mcp-mailbox' },
+      })).resolves.toMatchObject({ structuredContent: { items: [] } })
+      const result = await client.callTool({ name: 'tb_call', arguments: input })
       expect(result.structuredContent).toMatchObject({
         delivery: 'mailbox',
         operation: { state: 'queued', targetPath: 'device/mcp-mailbox/tools/mail/send' },
+      })
+      const operation = (result.structuredContent as {
+        operation: { createdAt: string, expiresAt: string, operationId: string }
+      }).operation
+      expect(Date.parse(operation.expiresAt) - Date.parse(operation.createdAt)).toBe(300_000)
+      await expect(client.callTool({ name: 'tb_call', arguments: input })).resolves.toMatchObject({
+        structuredContent: { operation: { operationId: operation.operationId } },
+      })
+      await expect(client.callTool({
+        name: 'tb_device_operations',
+        arguments: { action: 'list', deviceId: 'mcp-mailbox', states: ['queued'], limit: 1 },
+      })).resolves.toMatchObject({
+        structuredContent: { items: [expect.objectContaining({ operationId: operation.operationId })] },
+      })
+      await expect(client.callTool({
+        name: 'tb_device_operations',
+        arguments: { action: 'get', deviceId: 'mcp-mailbox', operationId: operation.operationId },
+      })).resolves.toMatchObject({ structuredContent: { state: 'queued' } })
+      await expect(client.callTool({
+        name: 'tb_device_operations',
+        arguments: { action: 'cancel', deviceId: 'mcp-mailbox', operationId: operation.operationId },
+      })).resolves.toMatchObject({ structuredContent: { state: 'cancelled' } })
+      await expect(client.callTool({
+        name: 'tb_device_operations',
+        arguments: { action: 'get', deviceId: 'mcp-mailbox', operationId: operation.operationId },
+      })).resolves.toMatchObject({ structuredContent: { state: 'cancelled' } })
+      await expect(client.callTool({
+        name: 'tb_call', arguments: { ...input, args: { text: 'changed' } },
+      })).resolves.toMatchObject({ isError: true })
+      await expect(client.callTool({
+        name: 'tb_call', arguments: { path: input.path, args: { 'text': 'raw-control', '~delivery': 'mailbox' } },
+      })).resolves.toMatchObject({
+        structuredContent: { delivery: 'mailbox', operation: { state: 'queued' } },
       })
     } finally {
       await client.close()
     }
   })
 
-  it('tools/list clips by command scope and tools/call reuses the HTBP provider path', async () => {
+  it.each(['completed', 'unknown'] as const)(
+    'does not enqueue or repeat a fallback call after %s dispatch', async (disposition) => {
+      const invoke = vi.fn(async () => disposition === 'completed'
+        ? { disposition, result: { ok: true as const, value: { delivered: true } } }
+        : {
+            disposition,
+            result: {
+              ok: false as const,
+              error: { code: 'unavailable' as const, message: 'connection lost', retryable: true },
+            },
+          })
+      const isolated = await createTestApp({ device: {
+        ws: async () => new Response(null, { status: 501 }), invoke,
+      } })
+      await processDeviceHello({
+        authorization: `Bearer ${TEST_ADMIN_SK}`,
+        deviceIdHint: 'mcp-dispatch',
+        hello: { deviceId: 'mcp-dispatch', expose: { nodes: [{
+          path: 'tools/mail', kind: 'tool', description: 'mail',
+          cmds: [{ name: 'send', delivery: 'both', inputSchema: { type: 'object', properties: {} } }],
+        }] } },
+        store: isolated.state,
+      })
+      const client = await connectTestMcpClient('https://tb.test/~mcp', TEST_ADMIN_SK,
+        (input, init) => isolated.request(input, init))
+      try {
+        const result = await client.callTool({
+          name: 'tb_call', arguments: {
+            path: '/device/mcp-dispatch/tools/mail/send', args: {}, delivery: 'fallback',
+          },
+        })
+        expect(invoke).toHaveBeenCalledTimes(1)
+        if (disposition === 'completed') {
+          expect(result).toMatchObject({ structuredContent: { delivery: 'realtime', result: { delivered: true } } })
+        } else {
+          expect(result).toMatchObject({
+            isError: true,
+            structuredContent: { code: 'unavailable', retryable: false, message: expect.stringContaining('was not enqueued') },
+          })
+        }
+        await expect(client.callTool({
+          name: 'tb_device_operations', arguments: { action: 'list', deviceId: 'mcp-dispatch' },
+        })).resolves.toMatchObject({ structuredContent: { items: [] } })
+      } finally {
+        await client.close()
+      }
+    },
+  )
+
+  it('calls a known realtime device path without descriptors while preserving explicit allowlists and scope', async () => {
+    const invoke = vi.fn(async () => ({
+      disposition: 'completed' as const, result: { ok: true as const, value: { invoked: true } },
+    }))
+    const isolated = await createTestApp({ device: {
+      ws: async () => new Response(null, { status: 501 }), invoke,
+    } })
+    await processDeviceHello({
+      authorization: `Bearer ${TEST_ADMIN_SK}`,
+      deviceIdHint: 'mcp-dynamic',
+      hello: { deviceId: 'mcp-dynamic', expose: { nodes: [
+        { path: 'tools/dynamic', kind: 'tool', description: 'runtime command without metadata' },
+        { path: 'tools/empty', kind: 'tool', description: 'explicit empty allowlist', cmds: [] },
+        { path: 'tools/declared', kind: 'tool', description: 'explicit allowlist', cmds: [{ name: 'other' }] },
+      ] } },
+      store: isolated.state,
+    })
+    const issued = await isolated.request('https://tb.test/system/sk/write', {
+      method: 'POST',
+      headers: { ...admin().headers, 'content-type': 'application/json', 'accept': 'application/json' },
+      body: JSON.stringify({ owner: 'agent:mcp-dynamic-reader', scopes: [{ pattern: 'device/**', actions: ['read'] }] }),
+    })
+    expect(issued.status).toBe(200)
+    const { secret } = await issued.json() as { secret: string }
+    const reader = await connectTestMcpClient('https://tb.test/~mcp', secret,
+      (input, init) => isolated.request(input, init))
+    const caller = await connectTestMcpClient('https://tb.test/~mcp', TEST_ADMIN_SK,
+      (input, init) => isolated.request(input, init))
+    try {
+      const path = '/device/mcp-dynamic/tools/dynamic/known'
+      await expect(reader.callTool({ name: 'tb_call', arguments: { path, args: {} } })).resolves.toMatchObject({ isError: true })
+      expect(invoke).not.toHaveBeenCalled()
+      await expect(caller.callTool({ name: 'tb_call', arguments: { path, args: { payload: 'known' } } })).resolves.toMatchObject({
+        structuredContent: { invoked: true },
+      })
+      expect(invoke).toHaveBeenCalledTimes(1)
+      await expect(caller.callTool({
+        name: 'tb_call', arguments: { path, args: {}, delivery: 'mailbox' },
+      })).resolves.toMatchObject({ isError: true, structuredContent: { code: 'invalid_argument' } })
+      for (const target of ['empty', 'declared']) {
+        await expect(caller.callTool({
+          name: 'tb_call', arguments: { path: `/device/mcp-dynamic/tools/${target}/known`, args: {} },
+        })).resolves.toMatchObject({ isError: true, structuredContent: { code: 'not_found' } })
+      }
+      expect(invoke).toHaveBeenCalledTimes(1)
+    } finally {
+      await reader.close()
+      await caller.close()
+    }
+  })
+
+  it('discovers a selected command and enforces its schema and scope before calling', async () => {
     await mountHttp('mcp-round15/allowed')
     await mountHttp('mcp-round15/read-only')
     await mountContext('mcp-round15/context')
@@ -475,43 +609,34 @@ describe('MCP consumer endpoint', () => {
       (input, init) => tb.request(input, init),
     )
     try {
-      const listed = await client.listTools()
-      const allowed = listed.tools.find(
-        tool => tool._meta?.['io.tool-bridge/path'] === 'mcp-round15/allowed',
-      )
-      expect(allowed).toMatchObject({
-        description: expect.stringContaining('greet through mcp-round15/allowed'),
-        inputSchema: {
-          type: 'object',
-          properties: { name: { type: 'string' } },
-          required: ['name'],
-        },
-        _meta: { 'io.tool-bridge/command': 'greet' },
+      const help = await client.callTool({
+        name: 'tb_help', arguments: { path: '/mcp-round15/allowed', schemas: true },
       })
-      expect(
-        listed.tools.some(
-          tool => tool._meta?.['io.tool-bridge/path'] === 'mcp-round15/read-only',
-        ),
-      ).toBe(false)
-      const contextCommands = listed.tools
-        .filter(tool => tool._meta?.['io.tool-bridge/path'] === 'mcp-round15/context')
-        .map(tool => tool._meta?.['io.tool-bridge/command'])
-      expect(contextCommands).toContain('list')
-      expect(contextCommands).not.toContain('write')
-
+      const command = (help.structuredContent as {
+        cmds: Array<{ inputSchema: unknown, path: string }>
+      }).cmds[0]
+      expect(command).toMatchObject({
+        path: '/mcp-round15/allowed/greet',
+        inputSchema: {
+          type: 'object', properties: { name: { type: 'string' } }, required: ['name'],
+        },
+      })
       await expect(client.callTool({
-        name: allowed?.name ?? '',
-        arguments: {},
+        name: 'tb_call', arguments: { path: command?.path, args: {} },
       })).rejects.toThrow(/name|required/i)
       await expect(client.callTool({
-        name: allowed?.name ?? '',
-        arguments: { name: 42 },
+        name: 'tb_call', arguments: { path: command?.path, args: { name: 42 } },
       })).rejects.toThrow(/name|string/i)
+      await expect(client.callTool({
+        name: 'tb_call', arguments: { path: '/mcp-round15/read-only/greet', args: { name: 'blocked' } },
+      })).resolves.toMatchObject({ isError: true })
+      await expect(client.callTool({
+        name: 'tb_call', arguments: { path: '/mcp-round15/context/write', args: { path: 'x', entry: { content: 'blocked', contentType: 'text/plain' } } },
+      })).resolves.toMatchObject({ isError: true })
       expect(upstream).not.toHaveBeenCalled()
 
       const called = await client.callTool({
-        name: allowed?.name ?? '',
-        arguments: { name: 'Ada' },
+        name: 'tb_call', arguments: { path: command?.path, args: { name: 'Ada' } },
       })
       expect(called).toMatchObject({
         content: [{ type: 'text', text: expect.stringContaining('hello Ada') }],
@@ -520,6 +645,76 @@ describe('MCP consumer endpoint', () => {
       expect(upstream).toHaveBeenCalledTimes(1)
     } finally {
       await client.close()
+    }
+  })
+
+  it('preserves Context, Skill and builtin authorization including read-only mounts', async () => {
+    const skillFiles = [{ path: 'SKILL.md', content: '---\nname: mcp-skill\ndescription: Test skill.\n---\n# Skill\n' }]
+    const cases = [
+      { kind: 'context', write: 'write', args: { path: 'entry', entry: { content: 'stored', contentType: 'text/plain' } } },
+      { kind: 'skillhub', write: 'publish', args: { id: 'mcp-skill', files: skillFiles } },
+    ] as const
+    for (const item of cases) {
+      for (const readOnly of [false, true]) {
+        const path = `mcp-access/${item.kind}${readOnly ? '-ro' : ''}`
+        const mounted = await postJson('system/registry/write', {
+          path, kind: item.kind, description: 'permission contract',
+          config: { kind: item.kind, provider: 'storage', readOnly },
+        }, admin())
+        expect(mounted.status).toBe(200)
+        mountedPaths.push(path)
+      }
+    }
+    const readerSk = await issueSk({
+      owner: 'agent:mcp-access-reader',
+      scopes: [
+        { pattern: 'mcp-access/**', actions: ['read'] },
+        { pattern: 'system/annotation', actions: ['read', 'write', 'call'] },
+      ],
+    })
+    const reader = await connectTestMcpClient('https://tb.test/~mcp', readerSk,
+      (input, init) => tb.request(input, init))
+    const writer = await connectTestMcpClient('https://tb.test/~mcp', TEST_ADMIN_SK,
+      (input, init) => tb.request(input, init))
+    try {
+      for (const item of cases) {
+        const path = `/mcp-access/${item.kind}`
+        await expect(reader.callTool({
+          name: 'tb_call', arguments: { path: `${path}/list`, args: {} },
+        })).resolves.toMatchObject({ structuredContent: { items: [] } })
+        await expect(reader.callTool({
+          name: 'tb_call', arguments: { path: `${path}/${item.write}`, args: item.args },
+        })).resolves.toMatchObject({ isError: true })
+        await expect(writer.callTool({
+          name: 'tb_call', arguments: { path: `${path}/list`, args: {} },
+        })).resolves.toMatchObject({ structuredContent: { items: [] } })
+        const written = await writer.callTool({
+          name: 'tb_call', arguments: { path: `${path}/${item.write}`, args: item.args },
+        })
+        expect(written.isError).not.toBe(true)
+        const listed = await reader.callTool({ name: 'tb_call', arguments: { path: `${path}/list`, args: {} } })
+        expect((listed.structuredContent as { items: unknown[] }).items).toHaveLength(1)
+        await expect(writer.callTool({
+          name: 'tb_call', arguments: { path: `${path}-ro/${item.write}`, args: item.args },
+        })).resolves.toMatchObject({ isError: true })
+        await expect(writer.callTool({
+          name: 'tb_call', arguments: { path: `${path}-ro/list`, args: {} },
+        })).resolves.toMatchObject({ structuredContent: { items: [] } })
+      }
+      const annotation = { path: 'mcp-access/context', text: 'requires admin' }
+      await expect(reader.callTool({
+        name: 'tb_call', arguments: { path: '/system/annotation/set', args: annotation },
+      })).resolves.toMatchObject({ isError: true })
+      await expect(writer.callTool({
+        name: 'tb_call', arguments: { path: '/system/annotation/set', args: annotation },
+      })).resolves.toMatchObject({ structuredContent: { text: 'requires admin' } })
+      await expect(reader.callTool({
+        name: 'tb_call', arguments: { path: '/system/annotation/get', args: { path: annotation.path } },
+      })).resolves.toMatchObject({ structuredContent: { text: 'requires admin' } })
+    } finally {
+      await postJson('system/annotation/remove', { path: 'mcp-access/context' }, admin())
+      await reader.close()
+      await writer.close()
     }
   })
 
@@ -565,18 +760,16 @@ describe('MCP consumer endpoint', () => {
     )
     try {
       const listed = await client.listTools()
-      const commands = listed.tools
-        .filter(tool => tool._meta?.['io.tool-bridge/path'] === 'mcp-read/context')
-        .map(tool => tool._meta?.['io.tool-bridge/command'])
-      expect(commands).toContain('list')
-      expect(commands).not.toContain('create_upload')
+      expect(listed.tools.map(tool => tool.name).sort()).toEqual([
+        'tb_call', 'tb_device_operations', 'tb_help', 'tb_list_nodes',
+      ])
       expect(objectsFactory).not.toHaveBeenCalled()
     } finally {
       await client.close()
     }
   })
 
-  it('reconnects with a narrow SK to shrink the exact tool set and reject stale names', async () => {
+  it('keeps fixed tool names while a narrower identity rejects previously visible command paths', async () => {
     await mountHttp('mcp-round16/allowed')
     await mountHttp('mcp-round16/admin-only')
     const upstream = vi.fn(async () =>
@@ -590,23 +783,12 @@ describe('MCP consumer endpoint', () => {
       TEST_ADMIN_SK,
       (input, init) => tb.request(input, init),
     )
-    let adminOnlyName = ''
-    let allowedName = ''
+    let adminNames: string[] = []
     try {
-      const listed = await adminClient.listTools()
-      const phasePaths = listed.tools
-        .filter(tool => String(tool._meta?.['io.tool-bridge/path']).startsWith('mcp-round16/'))
-        .map(tool => String(tool._meta?.['io.tool-bridge/path']))
-        .sort()
-      expect(phasePaths).toEqual(['mcp-round16/admin-only', 'mcp-round16/allowed'])
-      adminOnlyName = listed.tools.find(
-        tool => tool._meta?.['io.tool-bridge/path'] === 'mcp-round16/admin-only',
-      )?.name ?? ''
-      allowedName = listed.tools.find(
-        tool => tool._meta?.['io.tool-bridge/path'] === 'mcp-round16/allowed',
-      )?.name ?? ''
-      expect(adminOnlyName).not.toBe('')
-      expect(allowedName).not.toBe('')
+      adminNames = (await adminClient.listTools()).tools.map(tool => tool.name)
+      await expect(adminClient.callTool({
+        name: 'tb_help', arguments: { path: '/mcp-round16/admin-only/greet' },
+      })).resolves.toMatchObject({ structuredContent: { cmds: [{ path: '/mcp-round16/admin-only/greet' }] } })
     } finally {
       await adminClient.close()
     }
@@ -621,24 +803,15 @@ describe('MCP consumer endpoint', () => {
       (input, init) => tb.request(input, init),
     )
     try {
-      const listed = await narrowClient.listTools()
-      const phaseTools = listed.tools.filter(
-        tool => String(tool._meta?.['io.tool-bridge/path']).startsWith('mcp-round16/'),
-      )
-      expect(phaseTools.map(tool => tool._meta?.['io.tool-bridge/path'])).toEqual([
-        'mcp-round16/allowed',
-      ])
-      expect(phaseTools[0]?.name).toBe(allowedName)
-
+      expect((await narrowClient.listTools()).tools.map(tool => tool.name)).toEqual(adminNames)
       await expect(narrowClient.callTool({
-        name: adminOnlyName,
-        arguments: { name: 'forbidden' },
-      })).rejects.toThrow(/tool not found/i)
+        name: 'tb_call',
+        arguments: { path: '/mcp-round16/admin-only/greet', args: { name: 'forbidden' } },
+      })).resolves.toMatchObject({ isError: true })
       expect(upstream).not.toHaveBeenCalled()
-
       await expect(narrowClient.callTool({
-        name: allowedName,
-        arguments: { name: 'permitted' },
+        name: 'tb_call',
+        arguments: { path: '/mcp-round16/allowed/greet', args: { name: 'permitted' } },
       })).resolves.toMatchObject({ structuredContent: { ok: true } })
       expect(upstream).toHaveBeenCalledTimes(1)
     } finally {
@@ -646,7 +819,7 @@ describe('MCP consumer endpoint', () => {
     }
   })
 
-  it('invalid provider schemas fail closed before they reach an MCP client', async () => {
+  it('invalid provider schemas fail closed only when that command is selected', async () => {
     await mountHttpTools('mcp-round15/invalid-schema', [
       {
         name: 'broken',
@@ -654,14 +827,69 @@ describe('MCP consumer endpoint', () => {
         pathTemplate: '/broken',
         inputSchema: { type: 'object', properties: { value: 'not-a-schema' } },
       },
+      {
+        name: 'healthy', method: 'POST', pathTemplate: '/healthy',
+        inputSchema: { type: 'object', properties: {} },
+      },
     ])
+    const upstream = vi.fn(async () => new Response(JSON.stringify({ ok: true }), {
+      headers: { 'content-type': 'application/json' },
+    }))
+    vi.stubGlobal('fetch', upstream)
     const client = await connectTestMcpClient(
       'https://tb.test/~mcp',
       TEST_ADMIN_SK,
       (input, init) => tb.request(input, init),
     )
     try {
-      await expect(client.listTools()).rejects.toThrow(/invalid tool metadata|invalid input schema/i)
+      await expect(client.listTools()).resolves.toMatchObject({ tools: expect.any(Array) })
+      await expect(client.callTool({
+        name: 'tb_help', arguments: { path: '/mcp-round15/invalid-schema/healthy' },
+      })).resolves.toMatchObject({ structuredContent: { cmds: [{ path: '/mcp-round15/invalid-schema/healthy' }] } })
+      await expect(client.callTool({
+        name: 'tb_call', arguments: { path: '/mcp-round15/invalid-schema/healthy', args: {} },
+      })).resolves.toMatchObject({ structuredContent: { ok: true } })
+      expect(upstream).toHaveBeenCalledTimes(1)
+      await expect(client.callTool({
+        name: 'tb_call', arguments: { path: '/mcp-round15/invalid-schema/broken', args: {} },
+      })).rejects.toThrow(/invalid tool metadata|invalid input schema/i)
+      expect(upstream).toHaveBeenCalledTimes(1)
+    } finally {
+      await client.close()
+    }
+  })
+
+  it('honors virtualized names and hidden tools when resolving a selected command', async () => {
+    await mountHttpTools('mcp-virtualized', [{
+      name: 'original', method: 'POST', pathTemplate: '/original',
+      inputSchema: { type: 'object', properties: {} },
+    }, {
+      name: 'secret', method: 'POST', pathTemplate: '/secret',
+      inputSchema: { type: 'object', properties: {} },
+    }], { rename: { original: 'public' }, hide: ['secret'] })
+    const upstream = vi.fn(async (input: RequestInfo | URL) => {
+      expect(String(input)).toContain('/original')
+      return new Response(JSON.stringify({ ok: true }), {
+        headers: { 'content-type': 'application/json' },
+      })
+    })
+    vi.stubGlobal('fetch', upstream)
+    const client = await connectTestMcpClient('https://tb.test/~mcp', TEST_ADMIN_SK,
+      (input, init) => tb.request(input, init))
+    try {
+      await expect(client.callTool({
+        name: 'tb_help', arguments: { path: '/mcp-virtualized' },
+      })).resolves.toMatchObject({ structuredContent: { cmds: [{ path: '/mcp-virtualized/public' }] } })
+      for (const name of ['original', 'secret']) {
+        await expect(client.callTool({
+          name: 'tb_call', arguments: { path: `/mcp-virtualized/${name}`, args: {} },
+        })).resolves.toMatchObject({ isError: true })
+      }
+      expect(upstream).not.toHaveBeenCalled()
+      await expect(client.callTool({
+        name: 'tb_call', arguments: { path: '/mcp-virtualized/public', args: {} },
+      })).resolves.toMatchObject({ structuredContent: { ok: true } })
+      expect(upstream).toHaveBeenCalledTimes(1)
     } finally {
       await client.close()
     }
@@ -717,11 +945,9 @@ describe('MCP consumer endpoint', () => {
       (input, init) => tb.request(input, init),
     )
     try {
-      const listed = await client.listTools()
-      const tool = listed.tools.find(
-        item => item._meta?.['io.tool-bridge/path'] === 'mcp-round15/native-result',
-      )
-      const called = await client.callTool({ name: tool?.name ?? '', arguments: {} })
+      const called = await client.callTool({
+        name: 'tb_call', arguments: { path: '/mcp-round15/native-result/fail-richly', args: {} },
+      })
       expect(called).toMatchObject({
         content: [
           { type: 'text', text: 'upstream rejected the operation' },
@@ -746,42 +972,29 @@ describe('MCP consumer endpoint', () => {
       },
     }])
 
-    const helpResponse = await tb.request(
-      'https://tb.test/mcp-round15/camel-case/~help?schemas=1',
-      admin({ headers: { accept: 'application/json' } }),
-    )
-    expect(helpResponse.status).toBe(200)
-    const help = (await helpResponse.json()) as {
-      cmds: Array<{ name: string, path: string }>
+    const client = await connectTestMcpClient('https://tb.test/~mcp', TEST_ADMIN_SK,
+      (input, init) => tb.request(input, init))
+    try {
+      const help = await client.callTool({
+        name: 'tb_help', arguments: { path: '/mcp-round15/camel-case', format: 'json' },
+      })
+      const commands = (help.structuredContent as { cmds: Array<{ name: string, path: string }> }).cmds
+      expect(commands).toEqual([
+        expect.objectContaining({ name: 'getlivecontext', path: '/mcp-round15/camel-case/getlivecontext' }),
+      ])
+      const advertisedPath = commands[0]?.path
+      await expect(client.callTool({
+        name: 'tb_help', arguments: { path: advertisedPath },
+      })).resolves.toMatchObject({
+        structuredContent: { cmds: [{ name: 'getlivecontext', path: advertisedPath }] },
+      })
+      await client.callTool({
+        name: 'tb_call', arguments: { path: advertisedPath, args: { domain: 'sensor' } },
+      })
+      expect(toolCalls).toEqual([{ name: 'GetLiveContext', arguments: { domain: 'sensor' } }])
+    } finally {
+      await client.close()
     }
-    expect(help.cmds).toEqual([
-      expect.objectContaining({
-        name: 'getlivecontext',
-        path: '/mcp-round15/camel-case/getlivecontext',
-      }),
-    ])
-    const advertisedPath = help.cmds[0]?.path
-    expect(advertisedPath).toBeDefined()
-
-    const detailResponse = await tb.request(
-      `https://tb.test${advertisedPath}/~help`,
-      admin({ headers: { accept: 'application/json' } }),
-    )
-    expect(detailResponse.status).toBe(200)
-    await expect(detailResponse.json()).resolves.toMatchObject({
-      node: { path: 'mcp-round15/camel-case/getlivecontext' },
-      cmds: [{ name: 'getlivecontext', path: advertisedPath }],
-    })
-
-    const invokeResponse = await postJson(
-      advertisedPath?.replace(/^\//, '') ?? '',
-      { domain: 'sensor' },
-      admin(),
-    )
-    expect(invokeResponse.status).toBe(200)
-    expect(toolCalls).toEqual([
-      { name: 'GetLiveContext', arguments: { domain: 'sensor' } },
-    ])
   })
 
   it('fails discovery when upstream tool names collide after canonicalization', async () => {
@@ -880,21 +1093,15 @@ describe('MCP consumer endpoint', () => {
       (input, init) => tb.request(input, init),
     )
     try {
-      const listed = await client.listTools()
-      const remote = listed.tools.find(
-        tool => tool._meta?.['io.tool-bridge/path'] === 'mcp-round15/peer/alpha',
-      )
-      expect(remote).toMatchObject({
-        inputSchema: {
-          type: 'object',
-          properties: { text: { type: 'string' } },
-          required: ['text'],
-        },
-        _meta: { 'io.tool-bridge/command': 'echo' },
+      await client.listTools()
+      expect(remoteFetch).not.toHaveBeenCalled()
+      const help = await client.callTool({
+        name: 'tb_help', arguments: { path: '/mcp-round15/peer/alpha/echo' },
       })
+      const command = (help.structuredContent as { cmds: Array<{ path: string }> }).cmds[0]
+      expect(command?.path).toBe('/mcp-round15/peer/alpha/echo')
       const called = await client.callTool({
-        name: remote?.name ?? '',
-        arguments: { text: 'remote' },
+        name: 'tb_call', arguments: { path: command?.path, args: { text: 'remote' } },
       })
       expect(called).toMatchObject({ structuredContent: { echoed: 'remote' } })
       expect(
@@ -916,19 +1123,17 @@ describe('MCP consumer endpoint', () => {
       (input, init) => tb.request(input, init),
     )
     try {
-      const listed = await noCallClient.listTools()
-      expect(
-        listed.tools.some(
-          tool => tool._meta?.['io.tool-bridge/path'] === 'mcp-round15/peer/alpha',
-        ),
-      ).toBe(false)
+      await noCallClient.listTools()
+      await expect(noCallClient.callTool({
+        name: 'tb_call', arguments: { path: '/mcp-round15/peer/alpha/echo', args: { text: 'blocked' } },
+      })).resolves.toMatchObject({ isError: true })
       expect(remoteFetch).toHaveBeenCalledTimes(before)
     } finally {
       await noCallClient.close()
     }
   })
 
-  it('local longest-prefix nodes override remote descendants in the projected tree', async () => {
+  it('resolves the local longest-prefix command without exploring its remote parent', async () => {
     await mountRemote('mcp-round15/override')
     await mountHttp('mcp-round15/override/alpha')
     const remoteFetch = vi.fn(async (input: RequestInfo | URL) => {
@@ -962,19 +1167,19 @@ describe('MCP consumer endpoint', () => {
       (input, init) => tb.request(input, init),
     )
     try {
-      const listed = await client.listTools()
-      const overridden = listed.tools.filter(
-        tool => tool._meta?.['io.tool-bridge/path'] === 'mcp-round15/override/alpha',
-      )
-      expect(overridden).toHaveLength(1)
-      expect(overridden[0]?._meta?.['io.tool-bridge/command']).toBe('greet')
-      expect(remoteFetch).toHaveBeenCalledTimes(2)
+      await client.listTools()
+      await expect(client.callTool({
+        name: 'tb_help', arguments: { path: '/mcp-round15/override/alpha/greet' },
+      })).resolves.toMatchObject({
+        structuredContent: { cmds: [{ path: '/mcp-round15/override/alpha/greet', name: 'greet' }] },
+      })
+      expect(remoteFetch).not.toHaveBeenCalled()
     } finally {
       await client.close()
     }
   })
 
-  it('fails closed within a fixed remote discovery request budget', async () => {
+  it('does not walk a wide remote tree when listing fixed tools', async () => {
     await mountRemote('mcp-round15/budget')
     const remoteFetch = vi.fn(async (input: RequestInfo | URL) => {
       const path = new URL(String(input)).pathname
@@ -997,8 +1202,8 @@ describe('MCP consumer endpoint', () => {
       (input, init) => tb.request(input, init),
     )
     try {
-      await expect(client.listTools()).rejects.toThrow()
-      expect(remoteFetch.mock.calls.length).toBeLessThanOrEqual(32)
+      await expect(client.listTools()).resolves.toMatchObject({ tools: expect.any(Array) })
+      expect(remoteFetch).not.toHaveBeenCalled()
     } finally {
       await client.close()
     }
@@ -1023,7 +1228,11 @@ describe('MCP consumer endpoint', () => {
         (input, init) => tb.request(input, init),
       )
       try {
-        await expect(client.listTools()).rejects.toThrow()
+        await client.listTools()
+        expect(remoteFetch).not.toHaveBeenCalled()
+        await expect(client.callTool({
+          name: 'tb_list_nodes', arguments: { path: 'mcp-round15/path-escape' },
+        })).resolves.toMatchObject({ isError: true })
         expect(remoteFetch).toHaveBeenCalledTimes(1)
       } finally {
         await client.close()
@@ -1031,14 +1240,76 @@ describe('MCP consumer endpoint', () => {
     },
   )
 
-  it('flat names are collision-safe, client-compatible, and length bounded', async () => {
-    const slash = await mcpToolName(mcpToolIdentity('/a', 'b\0c'))
-    const shiftedNul = await mcpToolName(mcpToolIdentity('/a\0b', 'c'))
-    const escapedLiteral = await mcpToolName(mcpToolIdentity('/a_2Fb', 'c'))
-    const long = await mcpToolName(mcpToolIdentity(`/${'很长'.repeat(100)}`, '工具'))
-    expect(slash).not.toBe(shiftedNul)
-    expect(slash).not.toBe(escapedLiteral)
-    expect(long).toMatch(/^[A-Za-z0-9._-]{1,128}$/)
-    expect(long).toHaveLength(128)
+  it('keeps a bounded tool catalog despite long paths and an unavailable unrelated upstream', async () => {
+    const path = `mcp-on-demand/${'long'.repeat(30)}`
+    await mountHttp(path)
+    await mountMcp('mcp-on-demand/offline')
+    const upstream = vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).includes('round15-mcp-upstream')) throw new Error('unrelated upstream offline')
+      return new Response(JSON.stringify({ ok: true }), { headers: { 'content-type': 'application/json' } })
+    })
+    vi.stubGlobal('fetch', upstream)
+    const client = await connectTestMcpClient('https://tb.test/~mcp', TEST_ADMIN_SK,
+      (input, init) => tb.request(input, init))
+    try {
+      const listed = await client.listTools()
+      expect(listed.tools.map(tool => tool.name).sort()).toEqual([
+        'tb_call', 'tb_device_operations', 'tb_help', 'tb_list_nodes', 'tb_search',
+      ])
+      expect(JSON.stringify(listed)).not.toContain(path)
+      expect(upstream).not.toHaveBeenCalled()
+      await expect(client.callTool({
+        name: 'tb_help', arguments: { path: `/${path}/greet` },
+      })).resolves.toMatchObject({ structuredContent: { cmds: [{ path: `/${path}/greet` }] } })
+      expect(upstream).not.toHaveBeenCalled()
+      await expect(client.callTool({
+        name: 'tb_call', arguments: { path: `/${path}/greet`, args: { name: 'healthy' } },
+      })).resolves.toMatchObject({ structuredContent: { ok: true } })
+      expect(upstream).toHaveBeenCalledTimes(1)
+    } finally {
+      await client.close()
+    }
   })
+
+  it.each(['a\\b', 'a%2fb'])(
+    'preserves logical path segment %s without redirecting writes to another node', async (segment) => {
+      const path = `mcp-path/${segment}`
+      await mountContext(path)
+      await mountContext('mcp-path/a/b')
+      const client = await connectTestMcpClient('https://tb.test/~mcp', TEST_ADMIN_SK,
+        (input, init) => tb.request(input, init))
+      try {
+        await expect(client.callTool({ name: 'tb_help', arguments: { path } })).resolves.toMatchObject({
+          structuredContent: { node: { path } },
+        })
+        const result = await client.callTool({
+          name: 'tb_call', arguments: { path: `/${path}/write`, args: { path: 'entry', entry: { content: 'exact target', contentType: 'text/plain' } } },
+        })
+        expect(result.isError).not.toBe(true)
+        await expect(client.callTool({
+          name: 'tb_call', arguments: { path: `/${path}/get`, args: { path: 'entry' } },
+        })).resolves.toMatchObject({ structuredContent: { content: 'exact target' } })
+        await expect(client.callTool({
+          name: 'tb_call', arguments: { path: '/mcp-path/a/b/list', args: {} },
+        })).resolves.toMatchObject({ structuredContent: { items: [] } })
+      } finally {
+        await client.close()
+      }
+    },
+  )
+
+  it.each(['/~mcp', '/~device/mailbox/claim', 'https://example.com/steal', '/a/../system/sk/write'])(
+    'rejects a non-command tb_call target %s', async (path) => {
+      const upstream = vi.fn()
+      vi.stubGlobal('fetch', upstream)
+      const client = await connectTestMcpClient('https://tb.test/~mcp', TEST_ADMIN_SK,
+        (input, init) => tb.request(input, init))
+      try {
+        await expect(client.callTool({ name: 'tb_call', arguments: { path, args: {} } })).resolves.toMatchObject({ isError: true })
+        expect(upstream).not.toHaveBeenCalled()
+      } finally {
+        await client.close()
+      }
+    },
+  )
 })
