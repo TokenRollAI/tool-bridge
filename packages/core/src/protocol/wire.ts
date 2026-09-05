@@ -216,18 +216,20 @@ export const toolSearchPageSchema: z.ZodType<WireToolSearchPage> = z.strictObjec
   sources: z.array(toolSearchSourceResultSchema).optional(),
 })
 
+export const toolSearchOptionsSchema = z.strictObject({
+  cursor: z.string().optional(),
+  detail: z.enum(['compact', 'full']).optional(),
+  effects: z.array(z.enum(['read', 'write', 'destructive', 'unknown'])).min(1).optional(),
+  federation: z.enum(['local', 'recursive']).optional(),
+  limit: z.number().int().optional(),
+  matching: z.enum(['best', 'all']).optional(),
+  minCoverage: z.number().gt(0).max(1).optional(),
+  mode: z.enum(['keyword']).optional(),
+  pathPrefix: z.string().optional(),
+})
+
 export const toolSearchRequestSchema: z.ZodType<WireToolSearchRequest> = z.strictObject({
-  opts: z.strictObject({
-    cursor: z.string().optional(),
-    detail: z.enum(['compact', 'full']).optional(),
-    effects: z.array(z.enum(['read', 'write', 'destructive', 'unknown'])).min(1).optional(),
-    federation: z.enum(['local', 'recursive']).optional(),
-    limit: z.number().int().optional(),
-    matching: z.enum(['best', 'all']).optional(),
-    minCoverage: z.number().gt(0).max(1).optional(),
-    mode: z.enum(['keyword']).optional(),
-    pathPrefix: z.string().optional(),
-  }).optional(),
+  opts: toolSearchOptionsSchema.optional(),
   query: z.string().trim().min(1),
 })
 

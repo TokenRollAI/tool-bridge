@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 
 /**
  * MCP 生产出口验收:官方 SDK initialize 后完成 tools/list + tools/call,再以窄 SK
- * 重连并验证工具集收窄、旧的 admin-only 工具名不可调用。
+ * 重连并验证固定入口一致、help/search 隐藏越权目标、已知 admin 路径不可调用。
  *
  * 用法:
  * `TB_BASE_URL=https://... TB_SK=tbk_... TB_MCP_NARROW_SK=tbk_... pnpm verify:mcp`
@@ -13,7 +13,9 @@ import assert from 'node:assert/strict'
  * 钉住 2026-07-28——拿不到就响亮失败,用于确认新协议确实已上线。
  *
  * 默认调用只读的 system/registry:list。可用 TB_MCP_PATH、TB_MCP_COMMAND 与
- * TB_MCP_ARGS(JSON object)选择另一项无副作用工具。窄 SK 默认须允许
+ * TB_MCP_ARGS(JSON object)选择另一项无副作用工具；该目标必须对窄 SK 不可见。
+ * 实际调用路径只取实时 help 的 cmds[].path，不从 PATH/COMMAND 重建。
+ * 窄 SK 默认须允许
  * system/status:get,也可用 TB_MCP_NARROW_PATH / _COMMAND / _ARGS 改写。
  * 本脚本不创建或修改生产资源。
  */
@@ -49,8 +51,49 @@ async function connect(endpoint: URL, sk: string): Promise<Client> {
   return client
 }
 
-function toolMeta(tool: { _meta?: Record<string, unknown> }, key: string): unknown {
-  return tool._meta?.[key]
+const ENTRY_POINTS = ['tb_call', 'tb_device_operations', 'tb_help', 'tb_list_nodes', 'tb_search'].sort()
+
+type McpResult = Awaited<ReturnType<Client['callTool']>>
+
+function resultObject(result: McpResult, label: string): Record<string, unknown> {
+  const text = Array.isArray(result.content)
+    ? result.content.find(block => block.type === 'text')?.text
+    : undefined
+  const value: unknown = result.structuredContent ?? (typeof text === 'string' ? JSON.parse(text) : undefined)
+  assert.ok(value !== null && typeof value === 'object' && !Array.isArray(value), `${label} must return a JSON object`)
+  return value as Record<string, unknown>
+}
+
+function assertSucceeded(result: McpResult, label: string): void {
+  assert.notEqual(result.isError, true, `${label} returned isError=true`)
+  assert.ok(Array.isArray(result.content) && result.content.length > 0, `${label} returned empty content`)
+}
+
+async function commandPath(client: Client, path: string, command: string): Promise<string> {
+  const result = await client.callTool({ name: 'tb_help', arguments: { path, tool: command } })
+  assertSucceeded(result, `tb_help ${path}:${command}`)
+  const help = resultObject(result, 'tb_help')
+  assert.ok(Array.isArray(help.cmds), 'tb_help.cmds must be an array')
+  const selected = help.cmds.find((item: unknown) =>
+    item !== null && typeof item === 'object' && (item as { name?: unknown }).name === command,
+  ) as { path?: unknown } | undefined
+  assert.ok(selected, `tb_help did not describe ${path}:${command}`)
+  assert.ok(typeof selected.path === 'string' && selected.path.length > 0, 'tb_help command must have a complete path')
+  return selected.path
+}
+
+async function assertDenied(client: Client, name: string, args: Record<string, unknown>): Promise<void> {
+  let result: McpResult
+  try {
+    result = await client.callTool({ name, arguments: args })
+  } catch (error) {
+    // SDK eras can represent a rejected invocation as an RPC error or isError content.
+    assert.match(error instanceof Error ? error.message : String(error), /not[_ ]found|permission[_ ]denied|no scope/i)
+    return
+  }
+  assert.equal(result.isError, true, `${name} must reject the narrow identity`)
+  const body = resultObject(result, `${name} denial`)
+  assert.ok(body.code === 'not_found' || body.code === 'permission_denied', `${name} must fail because of visibility or scope`)
 }
 
 async function main(): Promise<void> {
@@ -77,27 +120,21 @@ async function main(): Promise<void> {
   )
   const endpoint = new URL(`${baseUrl}/~mcp`)
   const adminClient = await connect(endpoint, adminSk)
-  let adminNames = new Set<string>()
+  let adminCommandPath = ''
   try {
     const listed = await adminClient.listTools()
-    assert.ok(listed.tools.length > 0, 'admin tools/list must return at least one tool')
-    adminNames = new Set(listed.tools.map(tool => tool.name))
-    const selected = listed.tools.find(tool =>
-      toolMeta(tool, 'io.tool-bridge/path') === callPath
-      && toolMeta(tool, 'io.tool-bridge/command') === callCommand,
-    )
-    assert.ok(selected, `tools/list did not expose ${callPath}:${callCommand}`)
-
-    const called = await adminClient.callTool({ name: selected.name, arguments: callArguments })
-    assert.notEqual(called.isError, true, `${callPath}:${callCommand} returned isError=true`)
-    assert.ok(
-      Array.isArray(called.content) && called.content.length > 0,
-      `${callPath}:${callCommand} returned empty content`,
-    )
+    assert.deepEqual(listed.tools.map(tool => tool.name).sort(), ENTRY_POINTS, 'admin must expose only the fixed MCP entry points')
+    assertSucceeded(await adminClient.callTool({ name: 'tb_list_nodes', arguments: { depth: 1 } }), 'admin tb_list_nodes')
+    adminCommandPath = await commandPath(adminClient, callPath, callCommand)
+    const called = await adminClient.callTool({ name: 'tb_call', arguments: { path: adminCommandPath, args: callArguments } })
+    assertSucceeded(called, `admin tb_call ${adminCommandPath}`)
+    const searched = await adminClient.callTool({ name: 'tb_search', arguments: { query: callCommand, pathPrefix: callPath } })
+    assertSucceeded(searched, 'admin tb_search')
+    assert.ok(Array.isArray(resultObject(searched, 'admin tb_search').items), 'admin search must return items')
     console.log(
       `ok  admin ${adminClient.getProtocolEra() ?? 'unknown'} era`
       + ` (${adminClient.getNegotiatedProtocolVersion() ?? 'unknown'})`
-      + ` → tools/list (${listed.tools.length}) → tools/call ${callPath}:${callCommand}`,
+      + ` → fixed tools/list (${listed.tools.length}) → help/search → tb_call ${adminCommandPath}`,
     )
   } finally {
     await adminClient.close()
@@ -106,45 +143,21 @@ async function main(): Promise<void> {
   const narrowClient = await connect(endpoint, narrowSk)
   try {
     const listed = await narrowClient.listTools()
-    const narrowNames = new Set(listed.tools.map(tool => tool.name))
-    assert.ok(narrowNames.size > 0, 'narrow tools/list must expose at least one allowed tool')
-    assert.ok(
-      narrowNames.size < adminNames.size,
-      `narrow tools/list must shrink: admin=${adminNames.size}, narrow=${narrowNames.size}`,
-    )
-    for (const name of narrowNames) {
-      assert.ok(adminNames.has(name), `narrow tools/list exposed non-admin tool '${name}'`)
-    }
-    const narrowSelected = listed.tools.find(tool =>
-      toolMeta(tool, 'io.tool-bridge/path') === narrowCallPath
-      && toolMeta(tool, 'io.tool-bridge/command') === narrowCallCommand,
-    )
-    assert.ok(
-      narrowSelected,
-      `narrow tools/list did not expose ${narrowCallPath}:${narrowCallCommand}`,
-    )
+    assert.deepEqual(listed.tools.map(tool => tool.name).sort(), ENTRY_POINTS, 'narrow identity keeps the same fixed MCP entry points')
+    const narrowCommandPath = await commandPath(narrowClient, narrowCallPath, narrowCallCommand)
     const narrowCalled = await narrowClient.callTool({
-      name: narrowSelected.name,
-      arguments: narrowCallArguments,
+      name: 'tb_call',
+      arguments: { path: narrowCommandPath, args: narrowCallArguments },
     })
-    assert.notEqual(
-      narrowCalled.isError,
-      true,
-      `${narrowCallPath}:${narrowCallCommand} returned isError=true`,
-    )
-    assert.ok(
-      Array.isArray(narrowCalled.content) && narrowCalled.content.length > 0,
-      `${narrowCallPath}:${narrowCallCommand} returned empty content`,
-    )
-    const adminOnlyCallCandidate = [...adminNames].find(name => !narrowNames.has(name)) ?? ''
-    assert.notEqual(adminOnlyCallCandidate, '', 'expected at least one admin-only tool')
-    await assert.rejects(
-      narrowClient.callTool({ name: adminOnlyCallCandidate, arguments: {} }),
-      /tool not found/i,
-    )
+    assertSucceeded(narrowCalled, `narrow tb_call ${narrowCommandPath}`)
+    await assertDenied(narrowClient, 'tb_help', { path: adminCommandPath })
+    const searched = await narrowClient.callTool({ name: 'tb_search', arguments: { query: callCommand, pathPrefix: callPath } })
+    assertSucceeded(searched, 'narrow tb_search')
+    assert.deepEqual(resultObject(searched, 'narrow tb_search').items, [], 'search must hide the forbidden target subtree')
+    await assertDenied(narrowClient, 'tb_call', { path: adminCommandPath, args: callArguments })
     console.log(
-      `ok  narrow reconnect → tools/list shrank ${adminNames.size} → ${narrowNames.size}`
-      + ` → tools/call ${narrowCallPath}:${narrowCallCommand}; stale call rejected`,
+      `ok  narrow reconnect → fixed tools/list (${listed.tools.length})`
+      + ` → tb_call ${narrowCommandPath}; help/search hidden and known forbidden path rejected`,
     )
   } finally {
     await narrowClient.close()

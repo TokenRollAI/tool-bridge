@@ -1,6 +1,6 @@
 {
   "name": "@tool-bridge/app",
-  "version": "0.21.0",
+  "version": "0.22.0",
   "description": "Host-neutral HTBP application: assemble the tool-bridge tree on any runtime by injecting state, object, secret, device-channel and search adapters",
   "type": "module",
   "license": "MIT",
@@ -38,7 +38,8 @@
     "@modelcontextprotocol/client": "catalog:",
     "@modelcontextprotocol/core": "catalog:",
     "@modelcontextprotocol/server": "catalog:",
-    "hono": "catalog:"
+    "hono": "catalog:",
+    "zod": "catalog:"
   },
   "devDependencies": {
     "@modelcontextprotocol/sdk": "catalog:",
@@ -46,8 +47,7 @@
     "@tool-bridge/plugins": "workspace:*",
     "tsup": "catalog:",
     "typescript": "catalog:",
-    "vitest": "catalog:",
-    "zod": "catalog:"
+    "vitest": "catalog:"
   },
   "repository": {
     "type": "git",
