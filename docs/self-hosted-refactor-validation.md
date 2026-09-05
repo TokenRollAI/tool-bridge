@@ -6,8 +6,8 @@
 
 | 检查 | 结果 |
 | --- | --- |
-| `pnpm verify` | 通过：全仓 typecheck、ESLint、全部测试，无 skipped/todo。最后一轮复用已通过的 Turbo 缓存；Server 112 项与根脚本实际重新执行。 |
-| `pnpm turbo run build` | 6 个构建任务全部通过，该轮无缓存命中；包括 neutral JS/DTS、Dashboard 预压缩和服务端产物。 |
+| `pnpm verify` | 通过：全仓 typecheck、ESLint、全部测试，无 skipped/todo。review 修复最后一轮 Server 138 项与根脚本实际重新执行，其余复用已通过的 Turbo 缓存；CLI 共 398 项。 |
+| `pnpm turbo run build` | 6 个构建任务全部通过；review 修改的 CLI/Server 实际重建，其余 4 项复用缓存。最初架构重构已另跑过无缓存全构建。 |
 | 六个 public 包 `pack-and-verify-package --skip-install` | 全部通过 tarball manifest、协议/依赖与入口检查。由于本轮 workspace 版本尚未发布，单包 registry 安装留给合并后的发布流程。 |
 | 仓库外联合安装 | 六个被审阅的 tarball 在全新临时项目中联合 npm 安装成功；所有库/neutral 入口可 import，CLI、Server、admin 的版本与 help 命令通过。 |
 | 产物内版本 | app 0.21.0、CLI 0.31.0、Dashboard 0.28.0、SDK 0.23.0、Server/admin 0.22.0 已从重建入口或产物验证。plugin-sdk 无自身契约改动，不机械 bump。 |
@@ -30,9 +30,30 @@
 
 默认五卷快照的冷恢复已在全新隔离项目通过：保留实例身份、原管理员凭证和 registry 节点，恢复后的完整 HTTP 对象下载与源 SHA-256 一致。实测发现 S3 开始监听、HEAD 成功不等于数据卷已注册，因此恢复脚本的完成门禁已经增加实际对象数据读取，不能仅凭 `/healthz` 报告成功。
 
+## Review 回归
+
+review 的六项问题全部复现并修复：
+
+| 问题 | 修复和验证 |
+| --- | --- |
+| 数据库迁移分叉 | 检查所有其他副本登记，复制/退役/失败目标保留持久屏障；真实 PG 覆盖导出后的同一行更新、过期登记、锁连接被终止、恢复/提交确认丢失以及新副本注册竞争。 |
+| 管理路径自等待 | 使用实际异步请求上下文，仅排除维护调用自身；真实可执行进程验证百分号编码、大小写和别名路径，其他在途写仍须完成。 |
+| 中断安装恢复空库 | recovery 授权以 initialized 标记为准；同一故障状态修复前空库恢复 200、修复后 409，且不改变原密钥或创建目标实例表。 |
+| status 与换钥并发 | 状态快照和任务修复也取得独占锁；真实 PG 定序回归不再产生反向旧 key 任务，保留崩溃后任务恢复能力。锁竞争返回 conflict。 |
+| 关停设置未生效 | 真实 SIGTERM 验证已应用 2 秒窗口生效、未应用的 10 秒不生效，窗口内业务继续服务；并发维护重载后最后一个 runtime 也被正常关闭。 |
+| 清除 UI 仍残留挂载 | 移除固定 UI 目标挂载，并核对实际容器；真实 Compose 验证镜像 HTML 恢复，以及继承 bind/named volume 残留时拒绝成功回执并回滚。 |
+
+独立复核进一步补充了真实慢 HTTP 流验证：请求要保持到正文完成、取消清理或错误，不能在返回响应头时就退出排空计数。测试覆盖背压、取消和异常，避免维护截断 S3 下载。全仓验证还暴露旧夹具先删库后关闭服务的问题，已按逆序释放修正；没有吞掉生产租约错误来让测试变绿。
+
+共享 CI runner 曾出现原有 Dashboard 表单用例的 5 秒超时；原样用例本地 76ms、全套 162 项通过。保留原测试、交互断言和超时，只在 CI 限制 Turbo 包级并行，避免多个已经自行并行的 Vitest 进程池叠加争抢资源。
+
+明确取舍：过期登记不代表旧进程已经排空，PostgreSQL reserved 连接重连也不代表仍持有原 advisory lock。崩溃遗留的副本登记、持久维护屏障或无法确认的迁移结果需要离线确认与恢复；不能通过 TTL 自动恢复旧库写入。完整修复保留在本 PR 尚未发布的 CLI 0.31.0、Server 0.22.0 中。
+
 ## Railway 部署验收
 
 PR #132 的源码 `8cd8dfc` 已经由 Railway 重新构建并部署至 [Dashboard](https://tb.pdjjq.org/ui/)，GitHub CI 的 verify（包括构建与六个发布包检查）和 deploy-artifacts 均通过。部署使用既有 PostgreSQL 服务中的独立新库及非 superuser 应用角色，新建 bootstrap 卷与私网 SeaweedFS 服务/持久卷；未执行旧数据迁移。
+
+review 修复版 `de844e1` 随后部署到同一应用服务，没有重新初始化数据库、bootstrap 或 S3。一次只读线上验收确认同一 instanceId、原 Admin Key 与本地 CLI 认证成功，配置仍为 applied、原 active backend 验证状态正常，`/readyz` 通过；容器内也确认加载了新关停入口，密钥文件仍为 UID 1000/0600。并发换钥和迁移故障测试仅在本地隔离环境执行，没有对生产做这些破坏性操作。
 
 - `/healthz` 报告 Server 0.22.0，setup 为 ready，`/readyz` 的 PG 与 S3 检查通过；Dashboard 产物版本 0.28.0。
 - canonicalOrigin 与实际公网 HTTPS 域名一致，期望/生效配置 revision 一致，只有一个经过能力检查的 active S3 后端；匿名管理请求被拒绝。
