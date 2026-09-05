@@ -2,15 +2,14 @@ import {
   ArrowRight,
   Clock3,
   Cpu,
-  ExternalLink,
+  Plus,
   RefreshCw,
   ShieldCheck,
-  Terminal,
   Wifi,
   WifiLow,
   WifiOff,
 } from 'lucide-react'
-import { Link } from 'react-router'
+import { Link, useSearchParams } from 'react-router'
 import { useState } from 'react'
 import {
   Table,
@@ -20,10 +19,10 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import {
   derivePresence,
   PRESENCE_HINT,
-  PRESENCE_STALE_AFTER_MS,
   PRESENCE_TONE,
 } from '@/lib/presence'
 import { DeviceMailboxPanel } from '@/components/device/DeviceMailboxPanel'
@@ -58,6 +57,16 @@ function formatActivity(value?: string): string {
  */
 export function DevicesPage() {
   const list = useRegistryList('device')
+  const [searchParams, setSearchParams] = useSearchParams()
+  const connectOpen = searchParams.get('connect') === '1'
+  const changeConnectOpen = (open: boolean) => {
+    setSearchParams((current) => {
+      const next = new URLSearchParams(current)
+      if (open) next.set('connect', '1')
+      else next.delete('connect')
+      return next
+    }, { replace: true })
+  }
   const { active } = useSession()
   const [refreshedAt, setRefreshedAt] = useState<number | null>(null)
   const baseUrl = active?.baseUrl || window.location.origin
@@ -91,77 +100,89 @@ export function DevicesPage() {
     <div className="mx-auto max-w-7xl px-4 py-5 sm:px-6 sm:py-6 lg:px-8 lg:py-8">
       <PageHeader
         actions={(
-          <Button
-            disabled={list.isRefetching}
-            onClick={() => void refresh()}
-            size="sm"
-            type="button"
-            variant="outline"
-          >
-            <RefreshCw className={cn(list.isRefetching && 'animate-spin')} />
-            {list.isRefetching ? '正在刷新' : '刷新状态'}
-          </Button>
+          <>
+            <Button
+              disabled={list.isRefetching}
+              onClick={() => void refresh()}
+              size="sm"
+              type="button"
+              variant="outline"
+            >
+              <RefreshCw className={cn(list.isRefetching && 'animate-spin')} />
+              {list.isRefetching ? '正在刷新' : '刷新状态'}
+            </Button>
+            <Button onClick={() => changeConnectOpen(true)} size="sm">
+              <Plus />
+              连接设备
+            </Button>
+          </>
         )}
-        description="查看反向注册机器的实时会话状态，并把新设备安全接入同一棵能力树。"
-        eyebrow="SYSTEM / DEVICES"
-        title="设备接入"
+        description="查看设备状态、打开已注册工具，管理离线任务。"
+        title="设备"
       />
 
-      <section className="mt-6 overflow-hidden rounded-xl border bg-card/70">
-        <div className="grid gap-5 p-5 lg:grid-cols-[minmax(0,1fr)_minmax(360px,0.85fr)] lg:items-center lg:p-6">
-          <div className="min-w-0">
-            <div className="flex items-center gap-2 text-primary">
-              <span className="grid size-9 place-items-center rounded-lg border border-primary/20 bg-primary/8">
-                <Terminal className="size-4" />
-              </span>
-              <p className="text-xs font-semibold tracking-[0.14em] uppercase">Connect a device</p>
+      <Dialog onOpenChange={changeConnectOpen} open={connectOpen}>
+        <DialogContent className="overflow-y-auto sm:max-w-xl">
+          <DialogHeader>
+            <DialogTitle>连接设备</DialogTitle>
+            <DialogDescription>在目标机器运行连接命令，把设备工具接入当前网关。</DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-5 py-2">
+            <div className="min-w-0">
+              <p className="mt-1.5 max-w-2xl text-sm leading-6 text-muted-foreground">
+                在目标机器执行命令，保持进程运行。连接成功后，设备声明的 shell / fs
+                工具将出现在设备列表与能力树中。
+              </p>
+              <div className="mt-4 flex flex-wrap gap-x-5 gap-y-2 text-xs text-muted-foreground">
+                <span className="inline-flex items-center gap-1.5">
+                  <ShieldCheck className="size-3.5 text-ok" />
+                  需要具备 register 权限的 SK
+                </span>
+                <Link
+                  className="inline-flex items-center gap-1 text-foreground underline decoration-border underline-offset-4 hover:text-primary"
+                  onClick={() => changeConnectOpen(false)}
+                  to="/manage/sk"
+                >
+                  管理 Secret Key
+                  <ArrowRight className="size-3" />
+                </Link>
+              </div>
             </div>
-            <h2 className="mt-4 text-lg font-semibold tracking-tight">让内网机器主动连接网关</h2>
-            <p className="mt-1.5 max-w-2xl text-sm leading-6 text-muted-foreground">
-              在目标机器执行命令，保持进程运行。连接成功后，设备声明的 shell / fs
-              能力会出现在左侧能力树中。
-            </p>
-            <div className="mt-4 flex flex-wrap gap-x-5 gap-y-2 text-xs text-muted-foreground">
-              <span className="inline-flex items-center gap-1.5">
-                <ShieldCheck className="size-3.5 text-ok" />
-                需要具备 register 权限的 SK
-              </span>
-              <Link
-                className="inline-flex items-center gap-1 text-foreground underline decoration-border underline-offset-4 hover:text-primary"
-                to="/manage/sk"
-              >
-                管理 Secret Key
-                <ArrowRight className="size-3" />
-              </Link>
+
+            <div className="min-w-0 rounded-lg border bg-background/75 p-3 shadow-[inset_0_1px_0_color-mix(in_oklch,var(--foreground)_5%,transparent)]">
+              <div className="mb-2 flex items-center justify-between gap-3">
+                <span className="font-mono text-[10px] tracking-[0.12em] text-muted-foreground uppercase">
+                  连接命令
+                </span>
+                <CopyButton label="复制 connect 命令" value={connectCmd} />
+              </div>
+              <code className="block overflow-x-auto rounded-md bg-muted/35 px-3 py-3 font-mono text-xs leading-5 whitespace-nowrap text-foreground">
+                {connectCmd}
+              </code>
+              <p className="mt-2 text-[11px] leading-5 text-muted-foreground">
+                登录档案中的 SK 会由 CLI 提示输入或读取本机配置，不会写入这条命令。
+              </p>
             </div>
           </div>
+          <Button onClick={() => {
+            changeConnectOpen(false)
+            void refresh()
+          }}
+          >
+            已运行命令，刷新设备列表
+          </Button>
+        </DialogContent>
+      </Dialog>
 
-          <div className="min-w-0 rounded-lg border bg-background/75 p-3 shadow-[inset_0_1px_0_color-mix(in_oklch,var(--foreground)_5%,transparent)]">
-            <div className="mb-2 flex items-center justify-between gap-3">
-              <span className="font-mono text-[10px] tracking-[0.12em] text-muted-foreground uppercase">
-                Terminal
-              </span>
-              <CopyButton label="复制 connect 命令" value={connectCmd} />
-            </div>
-            <code className="block overflow-x-auto rounded-md bg-muted/35 px-3 py-3 font-mono text-xs leading-5 whitespace-nowrap text-foreground">
-              {connectCmd}
-            </code>
-            <p className="mt-2 text-[11px] leading-5 text-muted-foreground">
-              登录档案中的 SK 会由 CLI 提示输入或读取本机配置，不会写入这条命令。
-            </p>
-          </div>
-        </div>
-      </section>
-
-      <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <div className="rounded-lg border bg-card/55 p-4">
+      <div className="mt-6 grid grid-cols-2 gap-px overflow-hidden rounded-xl border bg-border sm:grid-cols-4">
+        <div className="bg-card p-4">
           <div className="flex items-center justify-between gap-3">
             <span className="text-xs text-muted-foreground">已加载设备</span>
             <Cpu className="size-4 text-muted-foreground" />
           </div>
           <p className="mt-2 font-mono text-2xl font-semibold tabular-nums">{devices.length}</p>
         </div>
-        <div className="rounded-lg border border-ok/20 bg-ok/[0.035] p-4">
+        <div className="bg-card p-4">
           <div className="flex items-center justify-between gap-3">
             <span className="text-xs text-muted-foreground">在线会话</span>
             <Wifi className="size-4 text-ok" />
@@ -170,7 +191,7 @@ export function DevicesPage() {
             {counts.online}
           </p>
         </div>
-        <div className="rounded-lg border border-warn/20 bg-warn/[0.035] p-4">
+        <div className="bg-card p-4">
           <div className="flex items-center justify-between gap-3">
             <span className="text-xs text-muted-foreground" title={PRESENCE_HINT.stale}>
               疑似失联
@@ -181,7 +202,7 @@ export function DevicesPage() {
             {counts.stale}
           </p>
         </div>
-        <div className="rounded-lg border bg-card/55 p-4">
+        <div className="bg-card p-4">
           <div className="flex items-center justify-between gap-3">
             <span className="text-xs text-muted-foreground">离线保留</span>
             <WifiOff className="size-4 text-muted-foreground" />
@@ -237,19 +258,29 @@ export function DevicesPage() {
               )
             : devices.length === 0
               ? (
-                  <EmptyState className="m-4" icon={Cpu} title="还没有设备接入">
-                    <p>在目标机器上运行上方 connect 命令，shell / fs 将自动挂上能力树。</p>
+                  <EmptyState
+                    action={(
+                      <Button onClick={() => changeConnectOpen(true)} size="sm">
+                        <Plus />
+                        连接第一台设备
+                      </Button>
+                    )}
+                    className="m-4"
+                    icon={Cpu}
+                    title="还没有设备接入"
+                  >
+                    <p>连接一台电脑或服务器，即可在这里查看和使用它声明的工具。</p>
                   </EmptyState>
                 )
               : (
-                  <Table className="min-w-[760px]">
+                  <Table>
                     <TableHeader>
                       <TableRow>
                         <TableHead>设备路径</TableHead>
                         <TableHead className="w-28">会话状态</TableHead>
-                        <TableHead>能力说明</TableHead>
-                        <TableHead className="w-44">最近活动</TableHead>
-                        <TableHead className="w-16">
+                        <TableHead className="hidden md:table-cell">能力说明</TableHead>
+                        <TableHead className="hidden w-44 lg:table-cell">最近活动</TableHead>
+                        <TableHead className="w-28">
                           <span className="sr-only">操作</span>
                         </TableHead>
                       </TableRow>
@@ -258,7 +289,7 @@ export function DevicesPage() {
                       {devices.map(({ node: device, presence }) => (
                         <TableRow key={device.path}>
                           <TableCell>
-                            <div className="flex min-w-52 items-center gap-3">
+                            <div className="flex items-center gap-2 sm:gap-3">
                               <span
                                 className={cn(
                                   'grid size-8 shrink-0 place-items-center rounded-md border',
@@ -268,15 +299,15 @@ export function DevicesPage() {
                                 <Cpu className="size-3.5" />
                               </span>
                               <div className="min-w-0">
-                                <p className="font-mono text-xs text-foreground">{device.path}</p>
-                                <p className="mt-0.5 text-[11px] text-muted-foreground">device namespace</p>
+                                <Link className="block max-w-36 truncate font-mono text-xs text-foreground hover:underline sm:max-w-64 sm:text-sm" to={`/nodes/${encodeTreePath(device.path)}?tab=invoke`}>{device.path}</Link>
+                                <p className="mt-0.5 text-[11px] text-muted-foreground">设备</p>
                               </div>
                             </div>
                           </TableCell>
                           <TableCell>
                             <PresenceBadge state={presence.state} />
                           </TableCell>
-                          <TableCell className="max-w-80 whitespace-normal">
+                          <TableCell className="hidden max-w-80 whitespace-normal md:table-cell">
                             <p className="line-clamp-2 text-xs leading-5 text-muted-foreground">
                               {device.description || '设备通过反向通道注册的能力集合'}
                             </p>
@@ -287,7 +318,7 @@ export function DevicesPage() {
                             updatedAt 只能表示"注册信息最后一次改动",拿它当活跃度会低报。
                             旧数据没有 lastSeenAt 时回落到 updatedAt。
                           */}
-                          <TableCell title={presence.lastSeenAt ?? device.updatedAt}>
+                          <TableCell className="hidden lg:table-cell" title={presence.lastSeenAt ?? device.updatedAt}>
                             <p className="font-mono text-xs text-foreground">
                               {formatActivity(presence.lastSeenAt ?? device.updatedAt)}
                             </p>
@@ -303,11 +334,12 @@ export function DevicesPage() {
                             <Button
                               aria-label={`打开 ${device.path}`}
                               asChild
-                              size="icon-sm"
+                              size="sm"
                               variant="ghost"
                             >
-                              <Link to={`/nodes/${encodeTreePath(device.path)}`}>
-                                <ExternalLink />
+                              <Link to={`/nodes/${encodeTreePath(device.path)}?tab=invoke`}>
+                                查看工具
+                                <ArrowRight className="hidden sm:block" />
                               </Link>
                             </Button>
                           </TableCell>
@@ -334,21 +366,10 @@ export function DevicesPage() {
         })}
       />
 
-      <div className="mt-4 rounded-lg border border-dashed bg-muted/10 px-4 py-3 text-xs leading-5 text-muted-foreground">
-        <p>
-          普通 registry delete 只允许删除叶节点，不支持递归删除带 shell / fs
-          后代的设备根，因此此页不会提供必然失败的“清理设备”按钮。 offline
-          仅表示当前会话不可用，调用会返回可重试的 503。
-        </p>
-        <p className="mt-1.5">
-          stale 表示连接位仍为真但已超过
-          {' '}
-          {Math.round(PRESENCE_STALE_AFTER_MS / 1000)}
-          {' '}
-          秒没有存活观察（心跳丢失、进程被杀或连接半开），调用很可能失败；重连后会自动回到
-          online。
-        </p>
-      </div>
+      <p className="mt-4 text-xs leading-5 text-muted-foreground">
+        离线设备的工具仍可查看。支持离线投递的命令可排队等待设备上线；实时调用需要在线会话。
+        疑似失联表示近期未收到存活信号，设备重连后将自动恢复状态。
+      </p>
     </div>
   )
 }

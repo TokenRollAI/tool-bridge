@@ -2,19 +2,22 @@ import { useCallback, useState } from 'react'
 import type { IntegrationCalls } from '@/pages/system/forms/integrationPlan'
 import { useMountOrchestrator } from '@/pages/system/forms/mountOrchestration'
 import { useInvalidate, useOAuthAuthorize } from '@/lib/queries'
+import type { MountCompletion } from './MountCompletion'
 import { diagnoseMountError, initialMountSteps, type MountStep } from './mountDiagnostics'
 
 export interface MountRunState {
+  authorization: MountCompletion['authorization']
   /** 授权步骤产生的 URL(需用户在新标签完成)。 */
   authorizationUrl: string | null
   mountedPath: string | null
   running: boolean
   steps: MountStep[]
-  /** 全部成功后为 true(挂载路径供 UI 展示"打开节点")。 */
+  /** Registry 写入成功，不代表授权完成或已验证所有命令。 */
   succeeded: boolean
 }
 
 const IDLE: MountRunState = {
+  authorization: 'not-required',
   steps: [],
   running: false,
   succeeded: false,
@@ -82,16 +85,21 @@ export function useMountRunner() {
       await invalidate()
 
       if (calls.needsAuthorize) {
+        setState(prev => ({ ...prev, authorization: 'pending' }))
         patchStep('authorize', { state: 'running' })
         try {
           const auth = await oauth.mutateAsync(calls.mount.path)
           if (auth.status === 'authorized') {
+            setState(prev => ({ ...prev, authorization: 'authorized' }))
             patchStep('authorize', { state: 'done' })
           } else if (auth.authorizationUrl) {
             patchStep('authorize', { state: 'done' })
             setState(prev => ({ ...prev, authorizationUrl: auth.authorizationUrl ?? null }))
+          } else {
+            patchStep('authorize', { state: 'pending' })
           }
         } catch (error) {
+          setState(prev => ({ ...prev, authorization: 'failed' }))
           // 授权失败不回滚挂载:节点已挂好,授权可稍后在节点上重试。
           patchStep('authorize', {
             state: 'failed',

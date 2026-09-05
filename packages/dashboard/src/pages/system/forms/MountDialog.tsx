@@ -1,6 +1,7 @@
 import { Loader2, Plus, TriangleAlert } from 'lucide-react'
 import { type ReactNode, useMemo, useState } from 'react'
 import { toast } from 'sonner'
+import type { MountCompletion } from '@/components/add-tool/MountCompletion'
 import type { RegistryNode } from '@/lib/types'
 import {
   Dialog,
@@ -14,6 +15,7 @@ import {
 import {
   useIntegrationCatalog,
   useInvalidate,
+  useOAuthAuthorize,
   usePluginList,
   useSecretList,
 } from '@/lib/queries'
@@ -70,6 +72,7 @@ export function MountDialog({
   trigger,
   open: controlledOpen,
   onOpenChange,
+  onComplete,
 }: {
   /** 打开时预选的 kind(向导按来源分流时用);缺省 mcp。 */
   defaultKind?: MountKind
@@ -77,6 +80,7 @@ export function MountDialog({
   existingNodes?: RegistryNode[]
   existingPaths: string[]
   hasUnloadedPaths?: boolean
+  onComplete?: (result: MountCompletion) => void
   onOpenChange?: (open: boolean) => void
   open?: boolean
   /** null 表示仅由受控 open 打开，不渲染触发按钮。 */
@@ -84,6 +88,8 @@ export function MountDialog({
 }) {
   const orchestrator = useMountOrchestrator()
   const oauthFollowUp = useOAuthFollowUp()
+  const oauth = useOAuthAuthorize()
+  const [finishing, setFinishing] = useState(false)
   const invalidate = useInvalidate()
   const plugins = usePluginList()
   const catalog = useIntegrationCatalog()
@@ -148,20 +154,41 @@ export function MountDialog({
           ? `已写入挂载 ${mounted}`
           : `已挂载 ${mounted}`,
     )
-    if (controlledOpen === undefined) setInternalOpen(false)
-    onOpenChange?.(false)
-    setErr(null)
-    setForm({ ...INITIAL_REGISTRY_MOUNT_FORM, path: '' })
     invalidate()
     const needsOAuth = form.kind === 'mcp'
       ? form.mcpAuthMode === 'oauth'
       : form.kind === 'tool'
         && credentialPlanFor(toolExportOptions, form.toolExport).kind === 'oauth'
-    if (needsOAuth) oauthFollowUp.start(mounted, 'tb tool auth')
+    if (onComplete) {
+      const completion: MountCompletion = {
+        authorization: needsOAuth ? 'pending' : 'not-required',
+        path: mounted,
+      }
+      if (needsOAuth) {
+        setFinishing(true)
+        try {
+          const auth = await oauth.mutateAsync(mounted)
+          completion.authorization = auth.status === 'authorized' ? 'authorized' : 'pending'
+          completion.authorizationUrl = auth.status === 'authorized' ? null : auth.authorizationUrl ?? null
+        } catch {
+          // Registry 已写入；授权 follow-up 失败绝不触发凭证回滚。
+          completion.authorization = 'failed'
+        } finally {
+          setFinishing(false)
+        }
+      }
+      onComplete(completion)
+    } else if (needsOAuth) {
+      oauthFollowUp.start(mounted, 'tb tool auth')
+    }
+    if (controlledOpen === undefined) setInternalOpen(false)
+    onOpenChange?.(false)
+    setErr(null)
+    setForm({ ...INITIAL_REGISTRY_MOUNT_FORM, path: '' })
   }
 
   const changeOpen = (next: boolean) => {
-    if (orchestrator.isPending) return
+    if (orchestrator.isPending || finishing) return
     if (controlledOpen === undefined) setInternalOpen(next)
     onOpenChange?.(next)
     if (next) {
@@ -190,16 +217,14 @@ export function MountDialog({
       )}
       <DialogContent
         className="top-0 right-0 bottom-0 left-auto flex h-dvh max-h-none w-full max-w-full translate-x-0 translate-y-0 flex-col gap-0 rounded-none border-y-0 border-r-0 p-0 sm:max-w-3xl"
-        showCloseButton={!orchestrator.isPending}
+        showCloseButton={!orchestrator.isPending && !finishing}
       >
         <DialogHeader className="border-b px-5 py-5 sm:px-7">
           <DialogTitle className="pr-8 text-lg">
             {isReplacement ? '替换现有节点' : '挂载节点'}
           </DialogTitle>
           <DialogDescription>
-            <code className="font-mono text-xs">system/registry write</code>
-            {' '}
-            是 upsert：同 path 会替换原记录。切换 kind 会保留各分支草稿。
+            配置工具的类型、路径与连接方式。同一路径已存在时，将替换原有连接配置。
           </DialogDescription>
         </DialogHeader>
 
@@ -211,7 +236,7 @@ export function MountDialog({
               title="基础身份"
             >
               <SchemaFields
-                disabled={orchestrator.isPending}
+                disabled={orchestrator.isPending || finishing}
                 fields={MOUNT_IDENTITY_FIELDS}
                 idPrefix="mount-identity"
                 onChange={next => setForm(current => ({
@@ -263,13 +288,15 @@ export function MountDialog({
         </div>
 
         <DialogFooter className="border-t bg-background px-5 py-4 sm:px-7">
-          <Button disabled={orchestrator.isPending} onClick={() => void submit()}>
-            {orchestrator.isPending && <Loader2 className="animate-spin" />}
-            {orchestrator.isPending
-              ? '正在写入'
-              : isReplacement || mayReplaceUnloaded
-                ? `确认写入 ${form.path.trim() || form.kind}`
-                : `挂载 ${form.path.trim() || form.kind}`}
+          <Button disabled={orchestrator.isPending || finishing} onClick={() => void submit()}>
+            {(orchestrator.isPending || finishing) && <Loader2 className="animate-spin" />}
+            {finishing
+              ? '正在发起授权'
+              : orchestrator.isPending
+                ? '正在写入'
+                : isReplacement || mayReplaceUnloaded
+                  ? `确认写入 ${form.path.trim() || form.kind}`
+                  : `挂载 ${form.path.trim() || form.kind}`}
           </Button>
         </DialogFooter>
       </DialogContent>

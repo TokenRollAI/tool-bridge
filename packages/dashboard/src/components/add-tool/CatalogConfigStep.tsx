@@ -1,5 +1,4 @@
-import { ArrowLeft, CheckCircle2, ExternalLink, Loader2, Rocket } from 'lucide-react'
-import { Link } from 'react-router'
+import { ArrowLeft, Loader2, Rocket } from 'lucide-react'
 import { useState } from 'react'
 import type { CatalogListItem } from '@/lib/types'
 import {
@@ -12,7 +11,7 @@ import {
 import { CatalogIntegrationFields } from '@/pages/system/forms/CatalogIntegrationFields'
 import { Button } from '@/components/ui/button'
 import { useSecretList } from '@/lib/queries'
-import { encodeTreePath } from '@/lib/path'
+import { MountCompletionActions, MountCompletionSummary } from './MountCompletion'
 import { INTEGRATION_PRESETS } from './addToolSources'
 import { MountStepsView } from './MountStepsView'
 import { useMountRunner } from './useMountRunner'
@@ -20,13 +19,11 @@ import { useMountRunner } from './useMountRunner'
 /** 挂载编排的结果视图:步骤时间线 + 成功/失败收尾。 */
 function MountRunView({
   runner,
-  provider,
   onRetry,
   onDone,
 }: {
   onDone: () => void
   onRetry: () => void
-  provider: string
   runner: ReturnType<typeof useMountRunner>
 }) {
   const { state } = runner
@@ -35,18 +32,13 @@ function MountRunView({
       <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5 sm:px-6">
         {state.succeeded
           ? (
-              <div className="mb-5 flex items-start gap-3 rounded-xl border border-ok/30 bg-ok/[0.04] px-4 py-3.5">
-                <CheckCircle2 className="mt-0.5 size-5 shrink-0 text-ok" />
-                <div className="min-w-0">
-                  <p className="text-sm font-medium">
-                    {provider}
-                    {' '}
-                    挂载成功
-                  </p>
-                  <p className="mt-0.5 font-mono text-xs text-muted-foreground">
-                    {state.mountedPath}
-                  </p>
-                </div>
+              <div className="mb-5">
+                <MountCompletionSummary result={{
+                  authorization: state.authorization,
+                  authorizationUrl: state.authorizationUrl,
+                  path: state.mountedPath ?? '',
+                }}
+                />
               </div>
             )
           : state.running
@@ -62,42 +54,24 @@ function MountRunView({
 
         <MountStepsView steps={state.steps} />
 
-        {state.authorizationUrl && (
-          <a
-            className="mt-4 inline-flex items-center gap-1.5 rounded-lg border border-primary/30 bg-primary/[0.06] px-3 py-2 text-xs text-primary hover:bg-primary/10"
-            href={state.authorizationUrl}
-            rel="noopener noreferrer"
-            target="_blank"
-          >
-            <ExternalLink className="size-3.5" />
-            打开授权页完成授权
-          </a>
-        )}
       </div>
 
-      <div className="flex gap-2 border-t bg-background px-5 py-4 sm:px-6">
-        {state.succeeded
-          ? (
-              <>
-                <Button asChild className="flex-1" variant="outline">
-                  <Link onClick={onDone} to={`/nodes/${encodeTreePath(state.mountedPath ?? '')}`}>
-                    打开节点
-                  </Link>
-                </Button>
-                <Button className="flex-1" onClick={onDone}>完成</Button>
-              </>
-            )
-          : !state.running
-              ? (
-                  <>
-                    <Button className="flex-1" onClick={onRetry} variant="outline">
-                      返回修改
-                    </Button>
-                    <Button className="flex-1" onClick={onDone} variant="ghost">关闭</Button>
-                  </>
-                )
-              : null}
-      </div>
+      {state.succeeded
+        ? (
+            <MountCompletionActions
+              onDone={onDone}
+              result={{
+                authorization: state.authorization,
+                path: state.mountedPath ?? '',
+              }}
+            />
+          )
+        : !state.running && (
+            <div className="flex gap-2 border-t px-5 py-4 sm:px-6">
+              <Button className="flex-1" onClick={onRetry} variant="outline">返回修改</Button>
+              <Button className="flex-1" onClick={onDone} variant="ghost">关闭</Button>
+            </div>
+          )}
     </>
   )
 }
@@ -156,7 +130,7 @@ export function CatalogConfigStep({
   // 挂载编排进行中或已出结果:展示可见步骤视图。
   if (runner.state.steps.length > 0) {
     return (
-      <MountRunView onDone={onDone} onRetry={runner.reset} provider={form.provider} runner={runner} />
+      <MountRunView onDone={onDone} onRetry={runner.reset} runner={runner} />
     )
   }
 
