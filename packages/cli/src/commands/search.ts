@@ -62,7 +62,10 @@ function printPartialNotice(page: ToolSearchPage): void {
 
 function printSearchPage(page: ToolSearchPage, withSchemas = false): void {
   if (page.items.length === 0) {
-    printLine('(no visible tools found)')
+    printLine(page.partial === true
+      ? '(no visible tools on this page; search results are incomplete)'
+      : '(no visible tools on this page)')
+    if (page.cursor) printLine(`more pages available; next cursor: ${page.cursor}`)
     return
   }
   printLine(
@@ -80,7 +83,7 @@ function printSearchPage(page: ToolSearchPage, withSchemas = false): void {
     ),
   )
   if (withSchemas) printSearchSchemas(page)
-  if (page.cursor) printLine(`next cursor: ${page.cursor}`)
+  if (page.cursor) printLine(`more pages available; next cursor: ${page.cursor}`)
 }
 
 /** `tb search <query>` —— 在当前 SK 可见且可调用的全局工具中检索。 */

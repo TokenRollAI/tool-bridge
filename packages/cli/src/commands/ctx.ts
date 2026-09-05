@@ -69,7 +69,8 @@ function readBinaryFile(file: string): Buffer {
 function printEntries(page: Page<ContextEntryMeta>): void {
   const items = page.items ?? []
   if (items.length === 0) {
-    printLine('(no entries)')
+    printLine('(no entries on this page)')
+    if (page.cursor) printLine(`more pages available; next cursor: ${page.cursor}`)
     return
   }
   const rows = items.map(m => [
@@ -78,7 +79,7 @@ function printEntries(page: Page<ContextEntryMeta>): void {
     m.updatedAt ?? '',
   ])
   printLine(table(['URI', 'SIZE', 'UPDATED'], rows))
-  if (page.cursor) printLine(`next cursor: ${page.cursor}`)
+  if (page.cursor) printLine(`more pages available; next cursor: ${page.cursor}`)
 }
 
 /** `tb ctx ls <ns> [prefix]` —— 浅层列表(ContextProvider.List)。 */
