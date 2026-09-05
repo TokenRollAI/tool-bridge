@@ -1,9 +1,9 @@
+import { mkdir, mkdtemp, realpath, rm, symlink } from 'node:fs/promises'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { mkdir, mkdtemp, rm, symlink } from 'node:fs/promises'
+import { parse, stringify } from 'yaml'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { parse } from 'yaml'
-import { approvedDirectory, updatedCompose } from '../src/deploymentAgent'
+import { approvedDirectory, observedSettings, updatedCompose } from '../src/deploymentAgent'
 
 let directory: string
 beforeEach(async () => {
@@ -39,5 +39,47 @@ describe('restricted Compose changes', () => {
     await Promise.all([mkdir(data), mkdir(ui)])
     const next = await updatedCompose('services:\n  app:\n    image: old:image\n', { image: 'new:image', hostPort: 8788, bindAddress: '127.0.0.1', stateDirectory: data, uiDirectory: ui }, {}, directory)
     expect(parse(next).services.app.volumes).toMatchObject([{ target: '/data', type: 'bind' }, { target: '/app/dashboard', type: 'bind', read_only: true }])
+  })
+  it.each([false, true])('omitting uiDirectory removes the old UI mount and preserves unrelated mounts (state bind: %s)', async (stateBind) => {
+    const dataPath = join(directory, 'data')
+    await mkdir(dataPath)
+    const data = await realpath(dataPath)
+    const dataMount = stateBind
+      ? { type: 'bind', source: data, target: '/data' }
+      : { type: 'volume', source: 'bootstrap', target: '/data' }
+    const uiMount = { type: 'bind', source: join(directory, 'old-ui'), target: '/app/dashboard', read_only: true }
+    const unrelatedMount = { type: 'bind', source: join(directory, 'logs'), target: '/logs', read_only: true, bind: { propagation: 'rprivate' } }
+    const service = { image: 'old:image', volumes: [dataMount, uiMount, unrelatedMount] }
+    const source = stringify({ services: { app: service } })
+    const next = await updatedCompose(source, {
+      image: 'new:image', hostPort: 8788, bindAddress: '127.0.0.1', ...(stateBind ? { stateDirectory: data } : {}),
+    }, service, directory)
+    expect(parse(next).services.app.volumes).toEqual([dataMount, unrelatedMount])
+  })
+  it('normalizes a Docker Desktop mount only when it identifies the expected host directory', () => {
+    const expected = { image: 'new:image', hostPort: 8788, bindAddress: '127.0.0.1' as const, uiDirectory: '/Users/operator/custom-ui' }
+    const service = {
+      image: expected.image,
+      ports: [{ target: 8787, published: '8788', host_ip: '127.0.0.1' }],
+      volumes: [{ type: 'bind', source: '/host_mnt/Users/operator/custom-ui', target: '/app/dashboard' }],
+    }
+    expect(observedSettings(service, expected, 'darwin')).toEqual(expected)
+    expect(observedSettings(service, expected, 'linux').uiDirectory).toBe(service.volumes[0]?.source)
+    expect(observedSettings(service, { ...expected, uiDirectory: '/Users/operator/another-ui' }, 'darwin').uiDirectory)
+      .toBe(service.volumes[0]?.source)
+    const imageSettings = { image: expected.image, hostPort: expected.hostPort, bindAddress: expected.bindAddress }
+    expect(observedSettings(service, imageSettings, 'darwin')).not.toEqual(imageSettings)
+    expect(observedSettings({ ...service, volumes: [] }, imageSettings, 'darwin')).toEqual(imageSettings)
+  })
+  it.each(['volume', 'tmpfs'])('rejects an actual %s UI mount instead of projecting it as the image UI', (type) => {
+    const service = {
+      image: 'new:image',
+      ports: [{ target: 8787, published: '8788', host_ip: '127.0.0.1' }],
+      volumes: [{ type, source: 'hidden-ui', target: '/app/dashboard' }],
+    }
+    const imageSettings = { image: 'new:image', hostPort: 8788, bindAddress: '127.0.0.1' as const }
+    expect(() => observedSettings(service, imageSettings)).toThrow('UI overrides must be bind mounts')
+    expect(() => observedSettings(service, { ...imageSettings, uiDirectory: '/Users/operator/ui' }))
+      .toThrow('UI overrides must be bind mounts')
   })
 })

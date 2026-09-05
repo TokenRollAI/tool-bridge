@@ -22,18 +22,32 @@ async function docker(args: string[], cwd: string, timeout = 180000): Promise<st
     })
   })
 }
-function observedSettings(service: ComposeService): DeploymentSettings {
+function hostMountSource(source: string | undefined, expected: string | undefined, platform: string): string | undefined {
+  // Docker Desktop can report the Linux VM path; normalize only an exact expected host path.
+  return platform === 'darwin' && expected !== undefined && source === `/host_mnt${expected}` ? expected : source
+}
+export function observedSettings(service: ComposeService, expected?: DeploymentSettings, platform = process.platform): DeploymentSettings {
   const port = service.ports?.find(value => Number(value.target) === 8787)
   if (!service.image || !port || !Number.isInteger(Number(port.published))) throw new CliError('Compose app must declare its image and published port for container port 8787')
   if (service.volumes?.some(volume => /docker\.sock/.test(`${volume.source ?? ''} ${volume.target}`))) throw new CliError('the app service must not mount the Docker socket')
   const state = service.volumes?.find(value => value.target === '/data' && value.type === 'bind')
-  const ui = service.volumes?.find(value => value.target === '/app/dashboard' && value.type === 'bind')
+  const ui = service.volumes?.find(value => value.target === '/app/dashboard')
+  if (ui && (ui.type !== 'bind' || !ui.source)) throw new CliError('UI overrides must be bind mounts with a source directory')
+  const stateSource = hostMountSource(state?.source, expected?.stateDirectory, platform)
+  const uiSource = hostMountSource(ui?.source, expected?.uiDirectory, platform)
   return {
     image: service.image, hostPort: Number(port.published), bindAddress: port.host_ip === '127.0.0.1' ? '127.0.0.1' : '0.0.0.0',
-    ...(state?.source ? { stateDirectory: state.source } : {}), ...(ui?.source ? { uiDirectory: ui.source } : {}),
+    ...(stateSource ? { stateDirectory: stateSource } : {}), ...(uiSource ? { uiDirectory: uiSource } : {}),
   }
 }
-async function runningSettings(compose: string, cwd: string): Promise<DeploymentSettings> {
+function settingsMatch(expected: DeploymentSettings, observed: DeploymentSettings): boolean {
+  return expected.image === observed.image
+    && expected.hostPort === observed.hostPort
+    && expected.bindAddress === observed.bindAddress
+    && expected.stateDirectory === observed.stateDirectory
+    && expected.uiDirectory === observed.uiDirectory
+}
+async function runningSettings(compose: string, cwd: string, expected: DeploymentSettings): Promise<DeploymentSettings> {
   const id = (await docker(['compose', '-f', compose, 'ps', '-q', 'app'], cwd)).trim()
   if (!/^[a-f0-9]{12,64}$/.test(id)) throw new CliError('the deployment agent requires exactly one running app container')
   const containers = JSON.parse(await docker(['inspect', '--type', 'container', id], cwd)) as Array<{
@@ -48,7 +62,7 @@ async function runningSettings(compose: string, cwd: string): Promise<Deployment
     image: container.Config.Image,
     ports: [{ target: 8787, published: binding.HostPort, host_ip: binding.HostIp }],
     volumes: container.Mounts.map(mount => ({ type: mount.Type, source: mount.Source, target: mount.Destination })),
-  })
+  }, expected)
 }
 export async function approvedDirectory(value: string, root: string): Promise<string> {
   const approvedRoot = await realpath(root)
@@ -62,8 +76,11 @@ export async function updatedCompose(source: string, settings: DeploymentSetting
   if (document.errors.length || !document.hasIn(['services', 'app'])) throw new CliError('invalid Compose document or missing app service')
   document.setIn(['services', 'app', 'image'], settings.image)
   document.setIn(['services', 'app', 'ports'], [{ target: 8787, published: String(settings.hostPort), host_ip: settings.bindAddress, protocol: 'tcp' }])
-  if (settings.stateDirectory || settings.uiDirectory) {
-    const volumes = [...service.volumes ?? []]
+  const currentVolumes = service.volumes ?? []
+  const clearUiMount = settings.uiDirectory === undefined && currentVolumes.some(volume => volume.target === '/app/dashboard')
+  if (settings.stateDirectory || settings.uiDirectory || clearUiMount) {
+    // An omitted UI directory selects the image's bundled Dashboard. Keep all other mounts.
+    const volumes = currentVolumes.filter(volume => !clearUiMount || volume.target !== '/app/dashboard')
     for (const [directory, target] of [[settings.stateDirectory, '/data'], [settings.uiDirectory, '/app/dashboard']] as const) {
       if (!directory) continue
       const sourcePath = await approvedDirectory(directory, root)
@@ -140,6 +157,9 @@ async function applyJob(job: DeploymentClaim, source: string, config: ComposeSer
     const ui = await getFetch()(`${nextBaseUrl}/ui/`, { redirect: 'error', signal: AbortSignal.timeout(5000) })
     if (!ui.ok || !ui.headers.get('content-type')?.includes('text/html')) throw new CliError('Dashboard failed after deployment')
     await ui.body?.cancel()
+    if (!settingsMatch(job.desired, await runningSettings(compose, cwd, job.desired))) {
+      throw new CliError('running app does not match the requested deployment settings')
+    }
   } catch {
     if (changed || stoppedForCopy) {
       try {
@@ -185,8 +205,8 @@ export async function runDeploymentAgent(options: AgentOptions): Promise<void> {
       const config = JSON.parse(raw) as ComposeConfig
       if (!config.services?.app) throw new CliError('Compose app service is missing')
       const configured = observedSettings(config.services.app)
-      const observed = await runningSettings(compose, cwd)
-      if (JSON.stringify(configured) !== JSON.stringify(observed)) throw new CliError('Compose settings differ from the running app; reconcile them before connecting the agent')
+      const observed = await runningSettings(compose, cwd, configured)
+      if (!settingsMatch(configured, observed)) throw new CliError('Compose settings differ from the running app; reconcile them before connecting the agent')
       await health(`http://127.0.0.1:${observed.hostPort}`, status.instanceId)
       const claim = await callDirect<{ job: DeploymentClaim | null }>(target, '/system/deployment/claim', { agentId, instanceId: status.instanceId, observed })
       if (claim.job) {
