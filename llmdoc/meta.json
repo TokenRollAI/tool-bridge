@@ -15,10 +15,10 @@
       "validatedRevision": "2b45dc99c607f59351d214845fe8e0c6b912f478"
     },
     "cli/agent-skill-integration.mdx": {
-      "validatedRevision": "02fca70d0d4ccca088fc4c44a908243b96eda5aa"
+      "validatedRevision": "84ac05d579c5a179cd7120e7c32f1581fc3b69e2"
     },
     "cli/argument-contract.mdx": {
-      "validatedRevision": "2b45dc99c607f59351d214845fe8e0c6b912f478"
+      "validatedRevision": "84ac05d579c5a179cd7120e7c32f1581fc3b69e2"
     },
     "dashboard/canvas-architecture.mdx": {
       "validatedRevision": "41c39bccb8055f2d3bffa904b5cc2e30c0b43c5b"
@@ -57,7 +57,7 @@
       "validatedRevision": "2b45dc99c607f59351d214845fe8e0c6b912f478"
     },
     "device/durable-mailbox.mdx": {
-      "validatedRevision": "2b45dc99c607f59351d214845fe8e0c6b912f478"
+      "validatedRevision": "84ac05d579c5a179cd7120e7c32f1581fc3b69e2"
     },
     "hosts-deploy/managed-configuration.mdx": {
       "validatedRevision": "2b45dc99c607f59351d214845fe8e0c6b912f478"
