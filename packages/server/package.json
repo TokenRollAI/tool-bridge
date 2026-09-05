@@ -1,6 +1,6 @@
 {
   "name": "@tool-bridge/server",
-  "version": "0.22.0",
+  "version": "0.22.1",
   "description": "Self-hosted Tool Bridge Node server with PostgreSQL, S3 object storage and WebSocket device channels",
   "type": "module",
   "license": "MIT",

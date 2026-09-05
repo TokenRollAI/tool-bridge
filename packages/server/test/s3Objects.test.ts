@@ -3,9 +3,12 @@ import {
   type IncomingMessage,
   type ServerResponse,
 } from 'node:http'
-import { afterEach, describe, expect, it } from 'vitest'
-import { readStreamBytes } from '@tool-bridge/core'
+import { bytesToObjectStream, readStreamBytes } from '@tool-bridge/core'
+import { mkdtemp, readdir, rm, stat } from 'node:fs/promises'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { once } from 'node:events'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import {
   createS3ObjectStore,
   type S3ObjectStoreOptions,
@@ -15,7 +18,15 @@ import { assertS3Address } from '../src/s3Network'
 const cleanup: Array<() => Promise<void> | void> = []
 afterEach(async () => {
   for (const close of cleanup.splice(0).reverse()) await close()
+  vi.unstubAllEnvs()
 })
+
+async function uploadTempDirectory() {
+  const directory = await mkdtemp(join(tmpdir(), 'tb-test-upload-'))
+  vi.stubEnv(process.platform === 'win32' ? 'TEMP' : 'TMPDIR', directory)
+  cleanup.push(() => rm(directory, { recursive: true, force: true }))
+  return directory
+}
 
 async function fixture(
   handler: (request: IncomingMessage, response: ServerResponse) => void,
@@ -178,9 +189,12 @@ describe('Node S3 wire and network policy', () => {
   })
 
   it('bounds streamed uploads and cancels the source', async () => {
+    const directory = await uploadTempDirectory()
     let cancelled = false
+    let calls = 0
     const { store } = await fixture(
       (request, response) => {
+        calls++
         request.resume()
         request.on('end', () => response.end())
       },
@@ -198,6 +212,188 @@ describe('Node S3 wire and network policy', () => {
       }),
     ).rejects.toMatchObject({ code: 'invalid_argument' })
     expect(cancelled).toBe(true)
+    expect(calls).toBe(0)
+    expect(await readdir(directory)).toEqual([])
+  })
+
+  it('sends unknown-length streams as an exact-length single PUT with atomic conditions', async () => {
+    const directory = await uploadTempDirectory()
+    const payload = Buffer.from('多块 streamed content '.repeat(100))
+    const requests: string[] = []
+    let received = Buffer.alloc(0)
+    let headers: IncomingMessage['headers'] = {}
+    let duringUpload: Promise<void> | undefined
+    const { store } = await fixture((request, response) => {
+      requests.push(request.method!)
+      if (request.method === 'HEAD') {
+        response.writeHead(200, { 'content-length': payload.length, 'etag': '"stored"' })
+        response.end()
+        return
+      }
+      headers = request.headers
+      duringUpload = (async () => {
+        const [name] = await readdir(directory)
+        expect(name).toMatch(/^tb-s3-upload-/)
+        if (!name) throw new Error('upload did not spool to a private directory')
+        const path = join(directory, name)
+        if (process.platform !== 'win32') {
+          expect((await stat(path)).mode & 0o777).toBe(0o700)
+          expect((await stat(join(path, 'body'))).mode & 0o777).toBe(0o600)
+        }
+        expect((await stat(join(path, 'body'))).size).toBe(payload.length)
+      })()
+      const chunks: Buffer[] = []
+      request.on('data', chunk => chunks.push(chunk))
+      request.on('end', () => {
+        received = Buffer.concat(chunks)
+        void duringUpload!.then(() => response.end(), () => {
+          response.writeHead(500)
+          response.end()
+        })
+      })
+    })
+    let offset = 0
+    const result = await store.put('stream', {
+      getReader: () => ({
+        read: async () => {
+          if (offset === payload.length) return { done: true }
+          const value = payload.subarray(offset, Math.min(offset + 7, payload.length))
+          offset += value.length
+          return { done: false, value }
+        },
+        releaseLock() {},
+      }),
+    }, { ifNoneMatch: '*', contentType: 'text/plain', metadata: { purpose: 'stream-test' } })
+    await duringUpload
+    expect(requests).toEqual(['PUT', 'HEAD'])
+    expect(headers['content-length']).toBe(String(payload.length))
+    expect(headers['transfer-encoding']).toBeUndefined()
+    expect(headers['if-none-match']).toBe('*')
+    expect(headers['content-type']).toBe('text/plain')
+    expect(headers['x-amz-meta-purpose']).toBe('stream-test')
+    expect(received).toEqual(payload)
+    expect(result.size).toBe(payload.length)
+    expect(await readdir(directory)).toEqual([])
+  })
+
+  it('keeps streamed conditional failures atomic and removes the spool file', async () => {
+    const directory = await uploadTempDirectory()
+    let calls = 0
+    let match: string | undefined
+    const { store } = await fixture((request, response) => {
+      calls++
+      match = request.headers['if-match']
+      request.resume()
+      request.on('end', () => xmlError(response, 412))
+    })
+    await expect(store.put('existing', bytesToObjectStream(new Uint8Array([1, 2])), {
+      ifMatchEtag: 'old-etag',
+    })).rejects.toMatchObject({ code: 'conflict' })
+    expect(match).toBe('"old-etag"')
+    expect(calls).toBe(1)
+    expect(await readdir(directory)).toEqual([])
+  })
+
+  it('uploads an empty stream with Content-Length zero', async () => {
+    const directory = await uploadTempDirectory()
+    let length: string | undefined
+    const { store } = await fixture((request, response) => {
+      if (request.method === 'PUT') {
+        length = request.headers['content-length']
+        request.resume()
+        request.on('end', () => response.end())
+      } else {
+        response.writeHead(200, { 'content-length': '0', 'etag': '"empty"' })
+        response.end()
+      }
+    })
+    expect((await store.put('empty', bytesToObjectStream(new Uint8Array()))).size).toBe(0)
+    expect(length).toBe('0')
+    expect(await readdir(directory)).toEqual([])
+  })
+
+  it('does not send partial bytes or leak source errors when a stream fails', async () => {
+    const directory = await uploadTempDirectory()
+    let calls = 0
+    const { store } = await fixture((_request, response) => {
+      calls++
+      response.end()
+    })
+    let reads = 0
+    const cancel = vi.fn(async () => {})
+    const releaseLock = vi.fn()
+    await expect(store.put('failed', {
+      getReader: () => ({
+        read: async () => {
+          if (reads++) throw new Error('test-secret upstream-private-host')
+          return { done: false, value: new Uint8Array([1, 2, 3]) }
+        },
+        cancel,
+        releaseLock,
+      }),
+    })).rejects.toMatchObject({ code: 'unavailable', message: 'S3 PUT failed' })
+    expect(calls).toBe(0)
+    expect(cancel).toHaveBeenCalledOnce()
+    expect(releaseLock).toHaveBeenCalledOnce()
+    expect(await readdir(directory)).toEqual([])
+  })
+
+  it('times out a pending source read, cancels it and removes temporary bytes', async () => {
+    const directory = await uploadTempDirectory()
+    let calls = 0
+    const { store } = await fixture((_request, response) => {
+      calls++
+      response.end()
+    }, { requestTimeoutMs: 100 })
+    let reads = 0
+    const cancel = vi.fn(async () => {})
+    const releaseLock = vi.fn()
+    await expect(store.put('stalled', {
+      getReader: () => ({
+        read: async () => reads++
+          ? new Promise<{ done: boolean }>(() => {})
+          : { done: false, value: new Uint8Array([1]) },
+        cancel,
+        releaseLock,
+      }),
+    })).rejects.toMatchObject({ code: 'unavailable' })
+    expect(calls).toBe(0)
+    expect(cancel).toHaveBeenCalledOnce()
+    expect(releaseLock).toHaveBeenCalledOnce()
+    expect(await readdir(directory)).toEqual([])
+  })
+
+  it('uses the remaining upload deadline for HEAD and cleans up when it expires', async () => {
+    const directory = await uploadTempDirectory()
+    let headStarted = false
+    const { store } = await fixture((request, response) => {
+      if (request.method === 'PUT') {
+        request.resume()
+        request.on('end', () => response.end())
+      } else {
+        headStarted = true
+        // This would finish within a fresh request timeout, but not within the
+        // time remaining after the slow source was consumed.
+        const timer = setTimeout(() => {
+          response.writeHead(200, { 'content-length': '1', 'etag': '"stored"' })
+          response.end()
+        }, 200)
+        response.on('close', () => clearTimeout(timer))
+      }
+    }, { requestTimeoutMs: 300 })
+    let reads = 0
+    await expect(store.put('head-timeout', {
+      getReader: () => ({
+        read: async () => {
+          if (reads++) return { done: true }
+          await new Promise(resolve => setTimeout(resolve, 200))
+          return { done: false, value: new Uint8Array([1]) }
+        },
+        releaseLock() {},
+      }),
+    })).rejects.toMatchObject({ code: 'unavailable' })
+    expect(headStarted).toBe(true)
+    expect(await readdir(directory)).toEqual([])
   })
 
   it('bounds streamed downloads without buffering the whole response', async () => {
