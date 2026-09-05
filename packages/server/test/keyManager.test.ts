@@ -48,11 +48,27 @@ suite('administrator key lifecycle (real PG)', () => {
     let now = new Date('2026-09-05T00:00:00.000Z')
     let paused = false
     let reloads = 0
+    let lockHeld = false
+    let exclusiveTail = Promise.resolve()
     const instanceId = randomUUID()
     const replicaId = randomUUID()
     const hooks: KeyManagementHooks = {
       readSnapshot: async () => ({ databaseUrl: databaseUrl as string, instanceId, replicaId, revision }),
-      exclusive: async run => run(),
+      exclusive: async (run) => {
+        const previous = exclusiveTail
+        let release!: () => void
+        exclusiveTail = new Promise<void>((resolve) => {
+          release = resolve
+        })
+        await previous
+        lockHeld = true
+        try {
+          return await run()
+        } finally {
+          lockHeld = false
+          release()
+        }
+      },
       quiesce: async () => {
         paused = true
         return { resume: async () => {
@@ -72,7 +88,7 @@ suite('administrator key lifecycle (real PG)', () => {
     const objects = new MemoryObjectStore(() => now.toISOString())
     const resolver = { defaultBackend: async () => ({ id: 'objects', objects }), resolveBackend: async () => objects }
     return { manager, hooks, sql, state, storeRepository, mailboxRepository, instanceId, replicaId,
-      keys: () => keys, revision: () => revision, paused: () => paused, reloads: () => reloads,
+      keys: () => keys, revision: () => revision, paused: () => paused, reloads: () => reloads, lockHeld: () => lockHeld,
       advance: (milliseconds: number) => {
         now = new Date(now.getTime() + milliseconds)
       },
@@ -119,6 +135,52 @@ suite('administrator key lifecycle (real PG)', () => {
     expect(f.keys().storeTokenKeyring.keys.s1).toBeUndefined()
   })
 
+  it('a concurrent status snapshot cannot recover a backwards job during the first encryption rotation', async () => {
+    const f = await fixture()
+    await f.secret().set('upstream', 'preserved-secret', '2026-09-05T00:00:00.000Z')
+    const readKeys = f.hooks.readKeys
+    let firstRead = true
+    let rotating: Promise<void> | undefined
+    f.hooks.readKeys = async () => {
+      const snapshot = await readKeys()
+      if (firstRead) {
+        firstRead = false
+        // Schedule rotation at the exact snapshot boundary. When status owns the
+        // bootstrap lock it queues; an unlocked read permits it to finish first.
+        rotating = (async () => {
+          let rotated = await f.manager.rotate({ expectedRevision: 1, target: 'encryption' })
+          const jobId = rotated.jobId!
+          for (let i = 0; i < 5 && rotated.jobs.find(row => row.id === jobId)?.status !== 'completed'; i++) {
+            rotated = await f.manager.resume({ jobId })
+          }
+          expect(rotated.jobs.find(row => row.id === jobId)?.status).toBe('completed')
+        })()
+        if (!f.lockHeld()) await rotating
+      }
+      return snapshot
+    }
+    await f.manager.status()
+    await rotating
+    const jobs = await f.sql<{ status: string, target_key_id: string }[]>`SELECT target_key_id,status FROM tb_key_rotation_jobs`
+    expect(jobs).toEqual([{ target_key_id: f.keys().keyring.activeKeyId, status: 'completed' }])
+    expect(await f.secret().resolve('upstream')).toBe('preserved-secret')
+    await expect(f.manager.rotate({ expectedRevision: f.revision(), target: 'encryption' })).resolves.toHaveProperty('jobId')
+  })
+
+  it('status still recovers a job when the active root was persisted before job creation', async () => {
+    const f = await fixture()
+    await f.secret().set('upstream', 'preserved-secret', '2026-09-05T00:00:00.000Z')
+    const keys = await f.hooks.readKeys()
+    keys.keyring = { activeKeyId: 'recovered', keys: { ...keys.keyring.keys, recovered: base64urlEncode(new Uint8Array(32).fill(41)) } }
+    await f.hooks.exclusive(() => f.hooks.writeKeys(keys))
+    let status = await f.manager.status()
+    expect(status.jobs).toMatchObject([{ targetKeyId: 'recovered', status: 'running' }])
+    const jobId = status.jobs[0]!.id
+    for (let i = 0; i < 5 && status.jobs[0]?.status !== 'completed'; i++) status = await f.manager.resume({ jobId })
+    expect(status.jobs[0]?.status).toBe('completed')
+    expect(await f.secret().resolve('upstream')).toBe('preserved-secret')
+  })
+
   it('explicit revoke invalidates pending/completed grants and even a late old-runtime grant', async () => {
     const f = await fixture()
     const oldRuntime = f.store()
@@ -134,14 +196,18 @@ suite('administrator key lifecycle (real PG)', () => {
     expect(f.keys().storeTokenKeyring.keys.s1).toBeUndefined()
   })
 
-  it('refuses a live second replica and rejects stale revisions before changing roots', async () => {
+  it.each([60, -60])('refuses an undrained replica whose lease expires in %s seconds and rejects stale revisions', async (expiresInSec) => {
     const f = await fixture()
     await f.manager.status()
-    await f.sql`INSERT INTO tb_runtime_replicas(replica_id,instance_id,expires_at) VALUES('other',${f.instanceId},now()+interval '60 seconds')`
+    const keysBefore = structuredClone(f.keys())
+    // The registry row alone must block mutation: this fixture holds no runtime session lock.
+    await f.sql`INSERT INTO tb_runtime_replicas(replica_id,instance_id,expires_at) VALUES('other',${f.instanceId},now()+${expiresInSec}::integer*interval '1 second')`
     await expect(f.manager.rotate({ expectedRevision: 1, target: 'encryption' })).rejects.toMatchObject({ code: 'conflict' })
     expect(f.revision()).toBe(1)
+    expect(f.keys()).toEqual(keysBefore)
     expect(f.paused()).toBe(false)
     expect((await f.sql`SELECT id FROM tb_runtime_maintenance`)).toHaveLength(0)
+    expect((await f.sql`SELECT replica_id FROM tb_runtime_replicas`)).toEqual([{ replica_id: 'other' }])
     await expect(f.manager.rotate({ expectedRevision: 0, target: 'signing' })).rejects.toMatchObject({ code: 'conflict' })
   })
 
@@ -151,5 +217,17 @@ suite('administrator key lifecycle (real PG)', () => {
     expect(backup).toMatchObject({ version: 1, instanceId: f.instanceId, keyring: f.keys().keyring })
     expect(JSON.stringify(backup)).not.toContain('DO-NOT-BACKUP-ADMIN')
     expect(JSON.stringify(await f.manager.status())).not.toContain(f.keys().keyring.keys.k1)
+  })
+
+  it.each(['copying', 'retired', 'discarded'])('key mutation preserves a same-owner database %s fence', async (phase) => {
+    const f = await fixture()
+    await f.manager.status()
+    await f.sql`INSERT INTO tb_runtime_maintenance(id,owner_replica_id,expires_at,purpose,phase,operation_id)
+      VALUES(1,${f.replicaId},'infinity','database',${phase},'migration')`
+    await expect(f.manager.rotate({ expectedRevision: 1, target: 'encryption' })).rejects.toMatchObject({ code: 'conflict' })
+    expect(f.revision()).toBe(1)
+    expect(f.paused()).toBe(false)
+    expect(await f.sql`SELECT purpose,phase,operation_id FROM tb_runtime_maintenance`)
+      .toEqual([{ purpose: 'database', phase, operation_id: 'migration' }])
   })
 })

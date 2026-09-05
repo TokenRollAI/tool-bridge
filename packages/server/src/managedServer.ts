@@ -12,6 +12,7 @@ import {
 } from '@tool-bridge/core'
 import { BUILTIN_CATALOG, builtinPluginBindings } from '@tool-bridge/plugins'
 import { serve, type ServerType } from '@hono/node-server'
+import { setTimeout as delay } from 'node:timers/promises'
 import { secureHeaders } from 'hono/secure-headers'
 import { serveUiAssets } from '@tool-bridge/app'
 import { bodyLimit } from 'hono/body-limit'
@@ -47,6 +48,9 @@ export async function createManagedServer(options: ManagedServerOptions) {
   let business: TbServer | undefined
   let listener: ServerType | undefined
   let maintaining = false
+  let draining = false
+  let shutdownPromise: Promise<void> | undefined
+  let lastShutdownDrainSec = 0
   let actualPort = options.port ?? 8787
   const replicaId = randomUUID()
   const assets = resolveUiAssets(options.uiDir)
@@ -163,6 +167,7 @@ export async function createManagedServer(options: ManagedServerOptions) {
     }
     await business?.close()
     business = candidate
+    if (draining) business.startDraining()
     if (listener) business.deviceHub.attach(listener as http.Server)
   }
 
@@ -177,6 +182,7 @@ export async function createManagedServer(options: ManagedServerOptions) {
         )
       return {
         revision: current.revision,
+        replicaId,
         instanceId: current.instanceId,
         databaseUrl: current.databaseUrl,
         ...(current.redisUrl ? { redisUrl: current.redisUrl } : {}),
@@ -188,9 +194,10 @@ export async function createManagedServer(options: ManagedServerOptions) {
     writeJournal: journal => store.write('maintenance.json', journal),
     quiesce: async () => {
       const previous = state
+      lastShutdownDrainSec = business?.shutdownDrainSec ?? lastShutdownDrainSec
       maintaining = true
       business?.startDraining()
-      await business?.close()
+      await business?.close({ excludeCurrentRequest: true })
       business = undefined
       return {
         resume: async () => {
@@ -454,6 +461,26 @@ export async function createManagedServer(options: ManagedServerOptions) {
       503,
     )
   })
+  const startDraining = (): void => {
+    draining = true
+    business?.startDraining()
+  }
+  const close = async (): Promise<void> => {
+    const closed = listener
+      ? new Promise<void>((resolve, reject) => {
+          listener!.close(error => (error ? reject(error) : resolve()));
+          (listener as http.Server).closeIdleConnections?.()
+        })
+      : Promise.resolve()
+    const previous = business
+    await previous?.close()
+    await closed
+    // An admitted maintenance request can finish a reload while the listener drains.
+    // Close that final runtime as well, before its durable registration is abandoned.
+    if (business !== previous) await business?.close()
+    listener = undefined
+    business = undefined
+  }
   return {
     app,
     store,
@@ -474,18 +501,17 @@ export async function createManagedServer(options: ManagedServerOptions) {
         listener.once('error', reject)
       })
     },
-    startDraining(): void {
-      business?.startDraining()
-    },
-    async close(): Promise<void> {
-      const closed = listener
-        ? new Promise<void>((resolve, reject) => {
-            listener!.close(error => (error ? reject(error) : resolve()));
-            (listener as http.Server).closeIdleConnections?.()
-          })
-        : Promise.resolve()
-      await business?.close()
-      await closed
+    startDraining,
+    close,
+    shutdown(): Promise<void> {
+      shutdownPromise ??= (async () => {
+        startDraining()
+        // Read the successfully applied local snapshot; shutdown cannot wait on PG.
+        const seconds = business?.shutdownDrainSec ?? lastShutdownDrainSec
+        if (seconds > 0) await delay(seconds * 1000)
+        await close()
+      })()
+      return shutdownPromise
     },
   }
 }

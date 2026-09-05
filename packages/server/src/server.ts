@@ -17,15 +17,18 @@ import {
 } from '@tool-bridge/app'
 import { createGuardedFetch } from '@tool-bridge/plugins/guarded-fetch'
 import { serve, type ServerType } from '@hono/node-server'
+import { AsyncLocalStorage } from 'node:async_hooks'
 import postgres, { type Sql } from 'postgres'
 import { randomUUID } from 'node:crypto'
 import { Hono } from 'hono'
+import { acquireRuntimeLease, assertRuntimeAuthority, type RuntimeLease } from './pgMaintenanceFence'
 import { runtimeAppSettings, type ServerConfig } from './config'
 import { RedisDeviceRouterBackend } from './redisDeviceRouter'
 import { PgMailboxRepository } from './pgMailboxRepository'
 import { DeploymentManager } from './deploymentManager'
 import { PgStoreRepository } from './pgStoreRepository'
 import pkg from '../package.json' with { type: 'json' }
+import { trackResponseBody } from './responseLifecycle'
 import { StorageManager } from './storageManager'
 import { createS3ObjectStore } from './s3Objects'
 import { ConfigManager } from './configManager'
@@ -39,16 +42,17 @@ const providerOAuthFetch = createGuardedFetch({ crossOriginRedirect: 'error' })
 
 export interface TbServer {
   app: Hono
-  close(): Promise<void>
+  close(options?: { excludeCurrentRequest?: boolean }): Promise<void>
   deviceHub: DeviceHub
   prepare(): Promise<void>
   search: MutableSearchIndex
   settings: ConfigManager
+  readonly shutdownDrainSec: number
   /** 引导(幂等)+ 孤儿设备回收排程 + 监听;返回实际端口(config.port=0 时由系统分配)。 */
   start(): Promise<{ port: number }>
   /**
    * 进入 draining:/readyz 立即转 503(编排器摘流量),但继续服务既有与新到请求。
-   * SIGTERM 处理器先调它、等一拍(TB_SHUTDOWN_DRAIN_SEC)再 close(),避免 k8s
+   * SIGTERM 处理器先调它、等已应用的 shutdownDrainSec 再 close(),避免 k8s
    * endpoint 摘除传播期间仍被路由过来的请求吃闭门羹。幂等。
    */
   startDraining(): void
@@ -303,83 +307,61 @@ export function createTbServer(config: ServerConfig): TbServer {
   currentApp = createTbApp(deps)
   let activeRequests = 0
   const drainWaiters: Array<() => void> = []
+  const requestContext = new AsyncLocalStorage<{ release(): void }>()
   const app = new Hono()
   app.all('*', async (c) => {
-    const path = new URL(c.req.url).pathname
-    if (
-      !['/healthz', '/livez', '/readyz'].includes(path)
-      && !path.startsWith('/ui')
-    ) {
+    activeRequests++
+    let released = false
+    const request = {
+      release: () => {
+        if (released) return
+        released = true
+        if (--activeRequests === 0)
+          for (const done of drainWaiters.splice(0)) done()
+      },
+    }
+    return requestContext.run(request, async () => {
       try {
-        const fenced
-          = await sql`SELECT 1 FROM tb_runtime_maintenance WHERE id=1 AND owner_replica_id<>${replicaId} AND expires_at>now()`
-        if (fenced.length)
-          return c.json(
-            {
-              code: 'unavailable',
-              message: 'protected maintenance in progress',
-            },
-            503,
-          )
-        await settings.sync()
-      } catch {
-        return c.json(
-          {
-            code: 'unavailable',
-            message: 'configuration authority unavailable',
-          },
-          503,
-        )
+        const path = new URL(c.req.url).pathname
+        if (
+          !['/healthz', '/livez', '/readyz'].includes(path)
+          && !path.startsWith('/ui')
+        ) {
+          try {
+            await assertRuntimeAuthority(sql, replicaId)
+            await settings.sync()
+          } catch {
+            return trackResponseBody(c.json(
+              {
+                code: 'unavailable',
+                message: 'configuration authority unavailable',
+              },
+              503,
+            ), request.release)
+          }
+        }
+        const snapshot = currentApp
+        return trackResponseBody(await snapshot.fetch(c.req.raw), request.release)
+      } catch (error) {
+        request.release()
+        throw error
       }
-    }
-    const snapshot = currentApp
-    const maintenanceRequest
-      = path.startsWith('/system/maintenance/')
-        || path.startsWith('/system/keys/')
-    if (!maintenanceRequest) activeRequests++
-    try {
-      return await snapshot.fetch(c.req.raw)
-    } finally {
-      if (!maintenanceRequest && --activeRequests === 0)
-        for (const done of drainWaiters.splice(0)) done()
-    }
+    })
   })
 
   let prepared: Promise<void> | undefined
+  let runtimeLease: RuntimeLease | undefined
+  let closePromise: Promise<void> | undefined
   const prepare = async (): Promise<void> => {
     prepared ??= (async () => {
       await state.ensureSchema()
-      await sql`CREATE TABLE IF NOT EXISTS tb_runtime_replicas (
-        replica_id text PRIMARY KEY, instance_id text NOT NULL, expires_at timestamptz NOT NULL
-      )`
-      await sql`CREATE TABLE IF NOT EXISTS tb_runtime_maintenance (
-        id integer PRIMARY KEY CHECK(id=1), owner_replica_id text NOT NULL, expires_at timestamptz NOT NULL
-      )`
-      const heartbeat = async () => {
-        await sql.begin(async (tx) => {
-          await tx`SELECT pg_advisory_xact_lock(7283022)`
-          const fence
-            = await tx`SELECT 1 FROM tb_runtime_maintenance WHERE id=1 AND owner_replica_id<>${replicaId} AND expires_at>now()`
-          if (fence.length)
-            throw new TBError(
-              'unavailable',
-              'another replica is performing protected maintenance',
-            )
-          const others
-            = await tx`SELECT 1 FROM tb_runtime_replicas WHERE instance_id=${config.instanceId ?? 'embedded'} AND replica_id<>${replicaId} AND expires_at>now()`
-          if (others.length && !config.redisUrl)
-            throw new TBError(
-              'unavailable',
-              'multiple replicas require a configured Redis device router',
-            )
-          await tx`INSERT INTO tb_runtime_replicas(replica_id,instance_id,expires_at)
-          VALUES(${replicaId},${config.instanceId ?? 'embedded'},now()+interval '60 seconds')
-          ON CONFLICT(replica_id) DO UPDATE SET expires_at=excluded.expires_at`
-        })
-      }
-      await heartbeat()
+      runtimeLease = await acquireRuntimeLease(sql, {
+        instanceId: config.instanceId ?? 'embedded',
+        replicaId,
+        redisConfigured: config.redisUrl !== undefined,
+      })
       replicaTimer = setInterval(() => {
-        heartbeatInFlight = heartbeatInFlight.then(heartbeat).catch(() => {})
+        heartbeatInFlight = heartbeatInFlight.then(() => runtimeLease?.heartbeat()).catch(() => {})
       }, 15000)
       replicaTimer.unref()
 
@@ -481,38 +463,49 @@ export function createTbServer(config: ServerConfig): TbServer {
     startDraining(): void {
       draining = true
     },
-    async close(): Promise<void> {
+    get shutdownDrainSec(): number {
+      return applied?.shutdownDrainSec ?? config.shutdownDrainSec ?? 0
+    },
+    async close(options): Promise<void> {
+      // The caller is identified by its actual async request, after dispatch/auth,
+      // not by an encoded URL prefix or a particular management entry point.
+      if (options?.excludeCurrentRequest) requestContext.getStore()?.release()
+      return closePromise ??= (async () => {
       // 顺序即关停语义:先停止接受新连接(既有请求继续跑完),再终止设备 WS,最后等
       // HTTP 排空、关后端。反过来(旧序:先杀 hub)会出现"设备通道已死、HTTP 还在收
       // 新请求"的窗口——期间到达的设备调用一律误报离线。
-      draining = true
-      if (maintenanceTimer !== undefined) {
-        clearInterval(maintenanceTimer)
-        maintenanceTimer = undefined
-      }
-      let closed: Promise<void> | undefined
-      if (server !== undefined) {
-        const s = server
-        closed = new Promise<void>((resolve, reject) => {
-          s.close(err => (err ? reject(err) : resolve()))
-        });
-        // keep-alive 空闲连接会让 close 永远等不完;设备 WS 由 hub.close() 终止。
-        (s as http.Server).closeIdleConnections?.()
-      }
-      await hub.close()
-      if (activeRequests > 0)
-        await new Promise<void>(resolve => drainWaiters.push(resolve))
-      await maintenancePromise?.catch(() => {})
-      if (replicaTimer) clearInterval(replicaTimer)
-      await heartbeatInFlight
-      await sql`DELETE FROM tb_runtime_replicas WHERE replica_id=${replicaId}`.catch(
-        () => {},
-      )
-      if (closed !== undefined) await closed
-      server = undefined
-      // search 先关(可能依赖 state 侧的连接池),再关 state。
-      storage.close()
-      await sql.end({ timeout: 5 })
+        draining = true
+        if (maintenanceTimer !== undefined) {
+          clearInterval(maintenanceTimer)
+          maintenanceTimer = undefined
+        }
+        let closed: Promise<void> | undefined
+        if (server !== undefined) {
+          const s = server
+          closed = new Promise<void>((resolve, reject) => {
+            s.close(err => (err ? reject(err) : resolve()))
+          });
+          // keep-alive 空闲连接会让 close 永远等不完;设备 WS 由 hub.close() 终止。
+          (s as http.Server).closeIdleConnections?.()
+        }
+        await hub.close()
+        if (activeRequests > 0)
+          await new Promise<void>(resolve => drainWaiters.push(resolve))
+        await maintenancePromise?.catch(() => {})
+        if (replicaTimer) clearInterval(replicaTimer)
+        await heartbeatInFlight
+        try {
+          await runtimeLease?.release()
+        } finally {
+          try {
+            if (closed !== undefined) await closed
+          } finally {
+            server = undefined
+            storage.close()
+            await sql.end({ timeout: 5 })
+          }
+        }
+      })()
     },
   }
 }

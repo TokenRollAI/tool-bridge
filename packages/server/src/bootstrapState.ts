@@ -54,6 +54,11 @@ export class BootstrapStateStore {
       retries,
       stale: 60000,
       update: 10000,
+    }).catch((error: unknown) => {
+      if ((error as NodeJS.ErrnoException).code === 'ELOCKED') {
+        throw new TBError('conflict', 'another local maintenance operation is running')
+      }
+      throw error
     })
     try {
       return await run()
@@ -231,7 +236,9 @@ export class BootstrapStateStore {
         'a valid local pairing credential is required',
       )
     }
-    return state
+    // finish() persists this marker before the final bootstrap write. Recovery
+    // must retain its stronger phase if that second write was interrupted.
+    return initialized ? { ...state, phase: 'initialized' } : state
   }
 
   async finish(state: BootstrapState): Promise<void> {
