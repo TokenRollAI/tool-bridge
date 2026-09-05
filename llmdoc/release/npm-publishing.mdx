@@ -1,7 +1,7 @@
 ---
 description: >-
   npm 发布与打包闸门:公开包与 artifact ownership bump 判断、0.x 版本规则、pack-and-verify 同一
-  tarball 原则、协议扫描与 registry 复验、tag/workflow 纪律。
+  tarball 原则、协议扫描与 registry 复验、tag/workflow 纪律、PR CI 并行验收与缓存边界。
 kind: guide
 relations:
   related:
@@ -31,6 +31,7 @@ code:
     - packages/server/tsup.config.ts
     - .github/workflows/release.yml
     - .github/workflows/ci.yml
+    - .github/actions/setup-ci/action.yml
     - .github/workflows/publish-app.yml
     - .github/workflows/publish-cli.yml
     - .github/workflows/publish-sdk.yml
@@ -61,6 +62,18 @@ code:
 7. 用 `npm view` 确认 registry 元数据后,再下载 registry 中的精确版本 tarball,重复干净安装与烟测。
 
 Dashboard 若嵌入 server 产物,应先发布它依赖的包,再发布承载最终产物的包。
+
+## PR CI 验收与缓存边界
+
+CI 可以把类型检查/lint、单元测试、集成测试和 build/pack 放到独立 runner 并行执行,但必须保留
+`pnpm verify` 的全部验收项,包括根目录 `scripts/*.test.mjs`。统一 `verify` 检查名作为总闸门,
+只在所有验证 job(含部署产物)都成功时通过;失败、取消或意外跳过都必须拒绝。
+
+并行边界在 runner 之间;每台测试 runner 内仍按包串行,避免多个 Vitest pool 争抢 CPU 导致 DOM
+定时器超时。测试每次真实执行,不复用跨 run 的测试结果。类型检查与构建可复用 Turbo task 缓存,
+但外层缓存必须隔离工具链、根配置与根脚本变化,再由 Turbo 的源码和依赖闭包 hash 判断任务命中;
+仅依赖 lockfile 的缓存键会漏掉根脚本影响最终产物的变化。共享 setup action 负责一致的 Node/pnpm
+与 frozen-lockfile 安装,其变更也必须使任务缓存失效。
 
 ## 可恢复发布编排
 
