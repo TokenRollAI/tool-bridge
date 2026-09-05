@@ -1,5 +1,5 @@
 ---
-description: tb CLI 参数契约:解析/客户端/服务端三层检查、keyword-only search、credential stdin/repeatable field 语义、三入口对等与确认门。
+description: tb CLI 参数与返回契约:三层检查、健康状态与退出码、传输失败结果未知、分页完整性、配置保存/生效、credential 输入与三入口对等。
 kind: guide
 relations:
   requires:
@@ -20,6 +20,8 @@ code:
     - packages/cli/src/confirm.ts
     - packages/cli/src/contentType.ts
     - packages/cli/src/http.ts
+    - packages/cli/src/output.ts
+    - packages/cli/src/deviceOutput.ts
     - packages/cli/src/registry.ts
     - packages/cli/src/scope.ts
     - packages/cli/src/stdin.ts
@@ -47,6 +49,7 @@ code:
     - packages/cli/src/commands/login.ts
     - packages/cli/examples/structured-command-profile.json
     - packages/cli/test/device.test.ts
+    - packages/cli/test/status.test.ts
     - packages/cli/test/strictParsing.test.ts
     - packages/sdk/src/client/client.ts
     - packages/sdk/src/client/management.ts
@@ -57,7 +60,7 @@ code:
     - packages/sdk/src/device/storeUpload.ts
 ---
 
-# CLI 参数契约检查
+# CLI 参数与返回契约检查
 
 CLI 是公共控制面,不是 API 的宽松包装。修改命令时同时检查三层:解析层、客户端语义层、服务端权限层;任一层缺失都会产生管理旁路或误导性帮助。wire 层面的命令契约(builtin 命令表、错误码、Help 模型)以 [protocol/htbp-contract](../protocol/htbp-contract.mdx) 为准,本文只覆盖 CLI 侧的评审纪律。
 
@@ -84,8 +87,8 @@ CLI 是公共控制面,不是 API 的宽松包装。修改命令时同时检查�
   realtime 失败后执行第二条 enqueue 命令，fallback 是否入队完全由 gateway 的 dispatch certainty 决定。
 - `tb device op ls|get|cancel` 是 operation 管理面：ls 按 deviceId 分页并可 repeatable `--state` 过滤，
   get/cancel 同时要求 deviceId 与 operationId。人类输出必须区分
-  `result_unknown = 已开始/结果未知` 与 `expired + executionMayHaveOccurred = 可能执行过`，避免把 expired
-  误写成安全未执行；`--json` 保留完整固定 wire。
+  `result_unknown = 可能已开始/结果未知` 与 `expired + executionMayHaveOccurred = 可能执行过`，避免把
+  journal barrier 当成副作用已发生的证明，或把 expired 误写成安全未执行；`--json` 保留完整固定 wire。
 - `store upload` 从文件 stat 得到 size，流式发送，并按 grant 自动选择 relay/direct；relay PUT 返回
   descriptor，direct 才调用 capability-only complete。`--idempotency-key` 是 owner-scoped create 重试
   key，不是覆盖路径。文件 size 大于当次 `maxBytes` 时在本地早拒，服务端仍做权威限额。
@@ -99,6 +102,33 @@ CLI 是公共控制面,不是 API 的宽松包装。修改命令时同时检查�
   `detail:'full'`。`--federation local|recursive`、`--matching best|all`、`--min-coverage`、
   `--path-prefix` 与 repeatable `--effect` 必须原样下发 SDK wire；CLI 只做非法枚举/组合的早拒，不能
   自己重排或过滤服务端结果。partial source 状态写 stderr warning，JSON page 保持机器可读。
+
+## 返回语义
+
+CLI 输出只能声明当前证据能证明的结果。人类文本与 JSON 必须同义，区分请求成功、业务终态和结果未知；
+不能用 HTTP 成功、operation identity 或本页为空替代业务判断。任意工具结果与既有控制面 JSON 保持原义，
+可读性说明放在人类输出中，不为统一外观给业务数据增加通用包装。
+
+- `tb status` 的 `ok` 表示 HTTP 成功且响应明确报告健康，与退出码成功条件一致；`httpOk` 单独表示
+  HTTP 成功。缺少合法 boolean 健康字段时 `healthy:null`，文本为 unknown，退出失败；不能宣称不健康
+  或仅凭 HTTP 200 报健康。原始响应保留在 `body` 供判断。
+- CLI 传输超时、断连或协议解析失败只证明没有取得可靠结果，不证明请求未执行。统一错误保留 `kind`，
+  这类结果标记 `outcome:'unknown'`，不自行补 `retryable:true`；服务端 HTTP 错误仍保留其 retryable
+  声明。文本呈现错误码与明确的重试标记，但不能把可重试机械改写成无条件“再试一次”。
+- `tb call` 的 Mailbox 受理结果与 `tb device op get|cancel` 共用状态解释，以 operation 实际 `state`
+  为准；HTTP 202 也可能返回幂等命中的既有终态，不能固定写 queued。固定 operation 必须复用权威
+  schema 验证，不从缺失字段猜默认状态。claimed 后的取消仅表示已请求取消，不能报告执行已停止；
+  claim attempts 也不等于 handler 执行次数。
+- 分页输出的空结果仅限定当前页；有 cursor 时即使 items 为空也必须显示后续页信号。搜索的 partial
+  与分页是独立维度，不能将不完整搜索说成全局无匹配，也不能丢弃 partial source warning。
+- `tb config` 文本区分 desired（已保存）与 responding replica 的 effective；validate 不保存，update
+  不应用，apply 返回后仍按 state/appliedRevision 判断。未确认 applied revision 时不能把报告的
+  effective 值当成已生效；`--json` 保持服务端原 shape。
+- 错误附带的 feedback 只展示实际返回的条目。空反馈不自动追加 submit 邀请，避免将结果诊断变成无关任务。
+
+评审须覆盖同一响应在文本、JSON、退出码上的含义，尤其是 HTTP 成功但健康未知、结果未知、取消未完成、
+空页带 cursor 与配置保存未生效。普通工具业务失败仍属于其自身返回契约，不能由 CLI 猜测任意 payload
+的业务状态来重写退出码。
 
 ## 类型契约
 
