@@ -108,6 +108,7 @@ export async function invoke(
   opts: {
     delivery?: 'fallback' | 'mailbox' | 'realtime'
     idempotencyKey?: string
+    signal?: AbortSignal
     ttlSeconds?: number
   } = {},
 ): Promise<InvokeResult> {

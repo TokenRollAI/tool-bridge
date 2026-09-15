@@ -3,9 +3,12 @@ import { useLocation, useNavigate } from 'react-router'
 import { useMemo, useState } from 'react'
 import type { HelpCmd } from '@/lib/types'
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
+import { useProcessSessionCommands } from '@/lib/useProcessSessionCommands'
 import { safeToolReturnPath, toolHref } from '@/lib/toolNavigation'
 import { CmdPanel } from '@/components/node/CmdPanel'
+import { sessionCommands } from '@/lib/deviceSession'
 import { cn } from '@/lib/utils'
+import { DeviceSessionPanel } from './DeviceSessionPanel'
 
 /**
  * 命令目录打开独立调用页；旧 ?tool 深链接继续在 Inspector 内自动打开弹窗。
@@ -21,6 +24,7 @@ export function CommandWorkspace({
   lazySchema: boolean
   path: string
 }) {
+  const sessionCmds = useProcessSessionCommands(path, cmds)
   const navigate = useNavigate()
   const location = useLocation()
   const [query, setQuery] = useState('')
@@ -38,6 +42,8 @@ export function CommandWorkspace({
   }, [cmds, query])
 
   const active = openTool ? cmds.find(cmd => cmd.name === openTool) : undefined
+
+  if (sessionCommands(sessionCmds)) return <DeviceSessionPanel cmds={sessionCmds} />
 
   return (
     <section

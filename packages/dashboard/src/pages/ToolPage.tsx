@@ -1,10 +1,13 @@
 import { Link, useLocation, useParams, useSearchParams } from 'react-router'
 import { ArrowLeft, ArrowUpRight, TerminalSquare } from 'lucide-react'
+import { useProcessSessionCommands } from '@/lib/useProcessSessionCommands'
+import { DeviceSessionPanel } from '@/components/node/DeviceSessionPanel'
 import { CommandWorkspace } from '@/components/node/CommandWorkspace'
 import { FavoriteToolButton } from '@/components/FavoriteToolButton'
 import { decodeTreePath, encodeTreePath } from '@/lib/path'
 import { safeToolReturnPath } from '@/lib/toolNavigation'
 import { CmdPanel } from '@/components/node/CmdPanel'
+import { sessionCommands } from '@/lib/deviceSession'
 import { EmptyState } from '@/components/EmptyState'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useSession } from '@/lib/session-context'
@@ -20,6 +23,7 @@ export function ToolPage() {
   const path = decodeTreePath(splat).replace(/\/+$/, '')
   const tool = params.get('tool')
   const help = useHelp(path)
+  const sessionCmds = useProcessSessionCommands(path, help.data?.cmds ?? [])
   const command = help.data?.cmds.find(cmd => cmd.name === tool)
   const from = safeToolReturnPath((location.state as { from?: unknown } | null)?.from)
   const returnLabel = from.startsWith('/search')
@@ -74,17 +78,19 @@ export function ToolPage() {
             )
           : tool && !command
             ? <EmptyState icon={TerminalSquare} title="此命令已不可用">该工具的命令或访问权限已改变，请返回工具列表重新选择。</EmptyState>
-            : command
-              ? (
-                  <CmdPanel
-                    cmd={command}
-                    key={`${active?.id}:${active?.baseUrl}:${revision}:${path}:${command.name}`}
-                    lazySchema={help.data?.node.kind === 'mcp' || help.data?.node.kind === 'http'}
-                    path={path}
-                    variant="page"
-                  />
-                )
-              : <CommandWorkspace cmds={help.data?.cmds ?? []} lazySchema={false} path={path} />}
+            : sessionCommands(sessionCmds)
+              ? <DeviceSessionPanel cmds={sessionCmds} />
+              : command
+                ? (
+                    <CmdPanel
+                      cmd={command}
+                      key={`${active?.id}:${active?.baseUrl}:${revision}:${path}:${command.name}`}
+                      lazySchema={help.data?.node.kind === 'mcp' || help.data?.node.kind === 'http'}
+                      path={path}
+                      variant="page"
+                    />
+                  )
+                : <CommandWorkspace cmds={help.data?.cmds ?? []} lazySchema={false} path={path} />}
     </div>
   )
 }
