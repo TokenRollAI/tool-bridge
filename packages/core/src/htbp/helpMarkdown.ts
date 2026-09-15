@@ -75,6 +75,11 @@ export function renderHelpMarkdown(model: HelpModel): string {
   if (model.node.description.trim() !== '') {
     out.push(model.node.description.trim(), '')
   }
+  if (model.deviceContext !== undefined) {
+    out.push('## Device context', '')
+    out.push('Last reported environment (self-reported; presence does not refresh this snapshot):', '')
+    out.push('```json', JSON.stringify(model.deviceContext, null, 2), '```', '')
+  }
   if (model.hint !== undefined) {
     out.push(`> **Next step**: ${collapseToOneLine(model.hint)}`, '')
   }

@@ -17,6 +17,7 @@ describe('isCommandAllowed:[\'*\'] 全放行', () => {
   it('含元字符也放行(复合命令由用户显式授权)', () => {
     expect(isCommandAllowed('echo hi; rm -rf /', ['*'])).toBe(true)
     expect(isCommandAllowed('cat a | grep b > c', ['*'])).toBe(true)
+    expect(isCommandAllowed('echo first\nprintf second', ['*'])).toBe(true)
   })
   it('\'*\' 混在列表里不算全放行(仅单值)', () => {
     expect(isCommandAllowed('anything', ['*', 'echo'])).toBe(false)
@@ -54,6 +55,10 @@ describe('isCommandAllowed:argv[0] basename 精确匹配', () => {
 describe('isCommandAllowed:非 [\'*\'] 时元字符直接拒', () => {
   const injections = [
     'echo hi; rm -rf /',
+    'echo safe\nprintf second-command',
+    'echo safe\r\nprintf second-command',
+    'echo safe\rprintf second-command',
+    'echo "quoted\nnewline"',
     'echo a | cat',
     'echo a & whoami',
     'echo $(whoami)',

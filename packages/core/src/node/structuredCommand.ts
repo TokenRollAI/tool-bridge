@@ -5,6 +5,7 @@
 
 import { spawn as nodeSpawn } from 'node:child_process'
 import { z } from 'zod/v4'
+import type { ProcessSessionBinding } from './processSessions'
 import type { DeviceAbortSignal } from '../device/client'
 import type { ToolSpec } from '../tool/types'
 import {
@@ -56,6 +57,8 @@ export interface StructuredCommandDefinition {
   inheritEnv?: string[]
   maxOutputBytes?: number
   name: string
+  /** Opt-in session tool; path is relative to the device mount. */
+  session?: { maxRuntimeMs?: number, path: string }
   timeoutMs?: number
 }
 
@@ -82,6 +85,7 @@ export interface StructuredCommandRuntime {
   ): Promise<ProcessExecutionResult>
   path: string
   profile: StructuredCommandProfile
+  sessionBindings: ProcessSessionBinding[]
 }
 
 export interface StructuredCommandRuntimeOptions {
@@ -137,6 +141,10 @@ const commandSchema = z.strictObject({
   timeoutMs: z.number().int().positive().max(SHELL_EXEC_DEFAULT_TIMEOUT_MS).optional(),
   maxOutputBytes: z.number().int().positive().max(STRUCTURED_COMMAND_MAX_OUTPUT_BYTES).optional(),
   inheritEnv: z.array(envNameSchema).optional(),
+  session: z.strictObject({
+    path: z.string().min(1),
+    maxRuntimeMs: z.number().int().positive().max(86_400_000).optional(),
+  }).optional(),
 })
 const profileSchema = z.strictObject({
   version: z.literal(STRUCTURED_COMMAND_PROFILE_VERSION),
@@ -216,9 +224,23 @@ export function parseStructuredCommandProfile(value: unknown): StructuredCommand
       ...raw,
       name,
       argv,
+      ...(raw.session === undefined
+        ? {}
+        : { session: {
+            ...raw.session, path: canonicalizePath(raw.session.path),
+          } }),
       ...(raw.effect === 'destructive' ? { confirm: true } : {}),
     }
   })
+  const paths = [path, ...commands.flatMap(command => command.session === undefined ? [] : [command.session.path])]
+  for (const [index, candidate] of paths.entries()) {
+    if (candidate === '') throw invalidProfile('session path must not be root')
+    for (const previous of paths.slice(0, index)) {
+      if (candidate === previous || candidate.startsWith(`${previous}/`) || previous.startsWith(`${candidate}/`)) {
+        throw invalidProfile(`session path '${candidate}' conflicts with '${previous}'`)
+      }
+    }
+  }
   return {
     version: STRUCTURED_COMMAND_PROFILE_VERSION,
     path,
@@ -350,6 +372,23 @@ export function createStructuredCommandRuntime(
     path: profile.path,
     description: profile.description,
     cmds: registry.list(),
+    sessionBindings: profile.commands.flatMap(definition => definition.session === undefined
+      ? []
+      : [{
+          path: definition.session.path,
+          description: `${definition.description} (process sessions; ${definition.cwd === undefined ? 'daemon working directory' : 'fixed profile working directory'})`,
+          effect: definition.effect,
+          ...(definition.confirm === undefined ? {} : { confirm: definition.confirm }),
+          ...(definition.session.maxRuntimeMs === undefined ? {} : { maxRuntimeMs: definition.session.maxRuntimeMs }),
+          inputSchema: inputSchema(definition),
+          prepare: (args: Record<string, unknown>) => ({
+            executable: definition.executable,
+            argv: argvFor(definition, args),
+            ...(definition.cwd === undefined ? {} : { cwd: definition.cwd }),
+            env: environmentFor(definition, sourceEnv),
+            shell: false,
+          }),
+        }]),
     async invoke(command, args, invokeOpts = {}) {
       const name = canonicalizeSegment(command)
       return await registry.invoke(name, args, invokeOpts) as ProcessExecutionResult

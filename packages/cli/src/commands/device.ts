@@ -8,6 +8,7 @@ import { collect, parsePageOpts, resolveTarget, withGlobalOpts, withPageOpts } f
 import { operationMeaning, printDeviceOperation } from '../deviceOutput'
 import { callDirect, CliError, withClient } from '../http'
 import { printJson, printLine, table } from '../output'
+import { deviceSessionCommand } from './deviceSession'
 
 const OPERATION_STATES = new Set<DeviceOperationState>([
   'queued',
@@ -155,4 +156,5 @@ export function deviceCommand() {
     .description('Manage reverse-connected devices')
     .addCommand(deviceLsCommand())
     .addCommand(deviceOperationCommand())
+    .addCommand(deviceSessionCommand())
 }

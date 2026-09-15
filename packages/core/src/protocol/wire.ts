@@ -24,12 +24,14 @@ import {
 import {
   type Action,
   ACTIONS,
+  type DeviceEnvironment,
   NODE_KINDS,
   type NodeInput,
   type NodeKind,
   type Page,
   type TreeNode,
 } from '../types'
+import { deviceEnvironmentSchema } from '../device/environment'
 import { tbErrorBodySchema } from './errorWire'
 export {
   tbErrorCodeSchema,
@@ -101,9 +103,16 @@ export const helpCommandSchema = z.object({
   scope: actionSchema,
 })
 
+export const deviceContextSchema = z.strictObject({
+  environment: deviceEnvironmentSchema,
+  reportedAt: z.iso.datetime({ offset: true }),
+  presence: presenceSchema.optional(),
+})
+
 export const helpJsonSchema: z.ZodType<CoreHelpJson> = z.object({
   children: z.array(helpChildSchema).optional(),
   cmds: z.array(helpCommandSchema),
+  deviceContext: deviceContextSchema.optional(),
   feedback: z.array(helpFeedbackItemSchema).optional(),
   hint: z.string().optional(),
   htbp: z.string(),
@@ -405,6 +414,8 @@ export const registryNodeSchema = z.object({
   createdAt: z.string().optional(),
   description: z.string(),
   deviceId: z.string().optional(),
+  deviceEnvironment: deviceEnvironmentSchema.optional(),
+  deviceReportedAt: z.iso.datetime({ offset: true }).optional(),
   kind: nodeKindSchema,
   lastSeenAt: z.string().optional(),
   online: z.boolean().optional(),
@@ -434,7 +445,9 @@ export interface WireRegistryNode {
   config?: Record<string, unknown>
   createdAt?: string
   description: string
+  deviceEnvironment?: DeviceEnvironment
   deviceId?: string
+  deviceReportedAt?: string
   kind: WireNodeKind
   lastSeenAt?: string
   online?: boolean

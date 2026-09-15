@@ -10,6 +10,8 @@
  */
 
 import { spawn as nodeSpawn } from 'node:child_process'
+import { z } from 'zod/v4'
+import type { ProcessSessionBinding } from './processSessions'
 import {
   executeProcess,
   type ProcessExecutionResult,
@@ -75,5 +77,33 @@ export function createShellExecutor(opts: ShellExecutorOptions = {}): ShellExecu
         timeoutExitCode: SHELL_TIMEOUT_EXIT_CODE,
       },
     )
+  }
+}
+
+/** Explicit session sibling of shell/exec; never widens the configured allowlist. */
+export function createShellSessionBinding(path: string, allow?: string[]): ProcessSessionBinding {
+  return {
+    path,
+    description: 'Shell process sessions; uses the shell allowlist and daemon working directory unless cwd is supplied',
+    effect: 'destructive',
+    confirm: true,
+    inputSchema: z.strictObject({
+      command: z.string().min(1).refine(value => !value.includes('\0'), 'must not contain NUL'),
+      cwd: z.string().min(1).refine(value => !value.includes('\0'), 'must not contain NUL').optional(),
+    }),
+    prepare: (input) => {
+      const command = input.command as string
+      if (!isCommandAllowed(command, allow)) {
+        throw new TBError('permission_denied', 'command not in shell allowlist')
+      }
+      return {
+        executable: command,
+        argv: [],
+        shell: true,
+        env: Object.fromEntries(['HOME', 'PATH', 'LANG', 'LC_ALL', 'LC_CTYPE', 'TMPDIR', 'USER', 'LOGNAME', 'TZ']
+          .flatMap(name => process.env[name] === undefined ? [] : [[name, process.env[name]!]])),
+        ...(input.cwd === undefined ? {} : { cwd: input.cwd as string }),
+      }
+    },
   }
 }

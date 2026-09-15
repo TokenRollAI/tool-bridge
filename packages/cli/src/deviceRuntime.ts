@@ -1,5 +1,6 @@
 import {
   createDeviceMailboxProcessor,
+  type DeviceCallContext,
   type DeviceConnection,
   type DeviceConnectionState,
   type DeviceCredentialProvider,
@@ -20,12 +21,14 @@ import {
   type SearchOptions,
 } from '@tool-bridge/core'
 import {
+  createProcessSessionManager,
   createShellExecutor,
   createStructuredCommandRuntime,
   FsObjectStore,
   type StructuredCommandProfile,
 } from '@tool-bridge/core/node'
 import WS, { type ClientOptions } from 'ws'
+import { assertDeviceSessionPaths, deviceSessionBindings, sessionExposeNodes } from './deviceSessions'
 import { createFileDeviceOperationJournal } from './deviceMailboxJournal'
 import { CliError } from './http'
 
@@ -40,6 +43,7 @@ export interface DeviceConnectionOptions {
   onMailboxError?: (error: Error) => void
   onReady?: (mountPath: string) => void
   onStateChange?: (state: DeviceConnectionState) => void
+  shellSessionPath?: string
   sk: string
 }
 
@@ -143,11 +147,39 @@ export function startDeviceConnection(opts: DeviceConnectionOptions): DeviceConn
     }
     structured.set(runtime.path, runtime)
   }
+  const bindings = deviceSessionBindings(opts.commandProfiles ?? [], opts.shellSessionPath, opts.expose.shell)
+  const sessionPaths = new Set(bindings.map(binding => binding.path))
+  const customPaths = (opts.expose.nodes ?? []).map(node => node.path)
+    .filter(path => !sessionPaths.has(path) && !structured.has(path))
+  assertDeviceSessionPaths(opts.commandProfiles ?? [], bindings, customPaths)
+  const sessions = createProcessSessionManager()
+  for (const binding of bindings) sessions.register(binding)
+  const expose: DeviceExpose = {
+    ...opts.expose,
+    environment: {
+      platform: process.platform === 'linux' || process.platform === 'darwin' || process.platform === 'win32'
+        ? process.platform
+        : 'other',
+      arch: process.arch,
+      runtime: typeof process.versions.bun === 'string' ? 'bun' : 'node',
+      runtimeVersion: process.versions.bun ?? process.versions.node,
+      ...(bindings.length === 0 ? {} : { runtimeId: sessions.runtimeId }),
+    },
+    ...(bindings.length === 0
+      ? {}
+      : { nodes: [
+          ...(opts.expose.nodes ?? []).filter(node => !sessionPaths.has(node.path)),
+          ...sessionExposeNodes(bindings),
+        ] }),
+  }
+  let sessionCleanup: Promise<void> | undefined
+  const cleanupSessions = (): Promise<void> => sessionCleanup ??= sessions.close()
   let activeMountPath = opts.mountPath ?? `device/${opts.deviceId}`
   let files = store === undefined ? undefined : fsProvider(store, activeMountPath, readOnly)
 
   const handler = async (call: {
     arguments: Record<string, unknown>
+    context?: DeviceCallContext
     path: string
     signal: DeviceAbortSignal
   }): Promise<unknown> => {
@@ -155,6 +187,12 @@ export function startDeviceConnection(opts: DeviceConnectionOptions): DeviceConn
     const mount = slash < 0 ? call.path : call.path.slice(0, slash)
     const cmd = slash < 0 ? '' : call.path.slice(slash + 1)
     try {
+      if (sessionPaths.has(mount)) {
+        return await sessions.invoke(mount, cmd, call.arguments, {
+          ...(call.context === undefined ? {} : { caller: call.context.caller }),
+          signal: call.signal,
+        })
+      }
       if (mount === 'shell') {
         if (cmd !== 'exec') throw new TBError('invalid_argument', `unknown shell cmd '${cmd}'`)
         if (shell === undefined) throw TBError.notFound('shell not exposed')
@@ -196,7 +234,10 @@ export function startDeviceConnection(opts: DeviceConnectionOptions): DeviceConn
   const fail = (error: unknown): void => {
     if (settled || userClosed) return
     settled = true
-    rejectClosed(cliError(error))
+    void cleanupSessions().then(
+      () => rejectClosed(cliError(error)),
+      cleanupError => rejectClosed(cliError(cleanupError)),
+    )
   }
   const connectionControl: { close?: () => void } = {}
   const credentialProvider: DeviceCredentialProvider = {
@@ -255,7 +296,7 @@ export function startDeviceConnection(opts: DeviceConnectionOptions): DeviceConn
   const connection = openPortableDeviceConnection({
     baseUrl: opts.baseUrl,
     deviceId: opts.deviceId,
-    expose: async () => opts.expose,
+    expose: async () => expose,
     mountPath: opts.mountPath,
     webSocketFactory: nodeWebSocketFactory,
     credentialProvider,
@@ -282,7 +323,7 @@ export function startDeviceConnection(opts: DeviceConnectionOptions): DeviceConn
   connection.closed.then(() => {
     if (settled) return
     settled = true
-    resolveClosed()
+    void cleanupSessions().then(resolveClosed, error => rejectClosed(cliError(error)))
   }, fail)
 
   return {
@@ -294,6 +335,7 @@ export function startDeviceConnection(opts: DeviceConnectionOptions): DeviceConn
     close() {
       userClosed = true
       mailboxDrainController?.abort()
+      void cleanupSessions().catch(fail)
       connection.close()
     },
     restart() {

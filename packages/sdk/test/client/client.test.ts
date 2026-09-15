@@ -94,6 +94,19 @@ describe('@tool-bridge/sdk/client', () => {
     })
   })
 
+  it.each(['online', 'stale', 'offline'] as const)('preserves %s device context through getHelp parsing', async (state) => {
+    const deviceContext = {
+      environment: { platform: 'linux', runtime: 'node', runtimeVersion: '22.12.0', runtimeId: 'runtime-1' },
+      reportedAt: '2026-09-15T00:00:00.000Z',
+      presence: { state, lastSeenAt: '2026-09-15T00:01:00.000Z' },
+    }
+    const client = createToolBridgeClient({
+      baseUrl: 'https://gw.example', sk: 'tbk_fixture',
+      fetcher: (async () => json({ ...fixture.help, deviceContext })) as typeof fetch,
+    })
+    expect((await client.getHelp('device/build')).deviceContext).toEqual(deviceContext)
+  })
+
   it('uses invoke delivery and fixed device operation management routes', async () => {
     const operation = {
       attempt: 0,

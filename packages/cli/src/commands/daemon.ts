@@ -85,6 +85,7 @@ function daemonInstallCommand() {
       collect,
       [],
     )
+    .option('--shell-session-path <path>', 'Opt in to Linux shell process sessions at this relative device path')
     .option('--no-shell', 'Do not expose shell; mutually exclusive with --allow')
     .option('--yes', 'Confirm persistent arbitrary command execution when --allow "*" is used')
     .addHelpText(

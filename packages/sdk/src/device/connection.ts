@@ -9,6 +9,8 @@ import {
   type DeviceCallContext as CoreDeviceCallContext,
   type DeviceCallHandler as CoreDeviceCallHandler,
   DeviceClient,
+  type DeviceEnvironment,
+  deviceEnvironmentSchema,
   type DeviceNodeCmd,
   normalizePath,
   PING_FRAME_JSON,
@@ -61,6 +63,7 @@ export interface DeviceNodeDefinition {
 }
 
 export interface DeviceClientExpose {
+  environment?: DeviceEnvironment
   nodes: readonly DeviceNodeDefinition[]
 }
 
@@ -273,6 +276,7 @@ function portableExpose(expose: DeviceClientExpose): WireDeviceExpose {
     throw new TBError('invalid_argument', 'device expose.nodes 至少需要一个节点')
   }
   return {
+    ...(expose.environment === undefined ? {} : { environment: deviceEnvironmentSchema.parse(expose.environment) }),
     nodes: expose.nodes.map((node) => {
       if (node.kind !== 'tool' && node.kind !== 'context') {
         throw new TBError('invalid_argument', 'device 节点只支持 tool/context')

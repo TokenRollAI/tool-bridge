@@ -56,6 +56,7 @@ function attrLines(key: string, value: string): string[] {
 export function renderHelpDsl(model: HelpModel): string {
   const lines: string[] = [HTBP_HELP_HEADER]
   lines.push(nodeLine(model.node.path, model.node.kind, model.node.description))
+  if (model.deviceContext !== undefined) lines.push(`deviceContext ${JSON.stringify(model.deviceContext)}`)
   if (model.hint !== undefined) lines.push(`hint ${collapseToOneLine(model.hint)}`)
   if (model.note !== undefined) lines.push(`note "${collapseToOneLine(model.note)}"`)
   for (const cmd of model.cmds) {
@@ -119,6 +120,7 @@ export function renderHelpJson(model: HelpModel): HelpJson {
     node: { path: model.node.path, kind: model.node.kind, description: model.node.description },
     cmds,
   }
+  if (model.deviceContext !== undefined) json.deviceContext = model.deviceContext
   if (model.hint !== undefined) json.hint = model.hint
   if (model.note !== undefined) json.note = model.note
   if (model.feedback !== undefined && model.feedback.length > 0) {

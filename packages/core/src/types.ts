@@ -120,8 +120,11 @@ export interface TreeNode {
   createdAt: Timestamp
   /** 一句话;上级 ~help 列子节点时展示。 */
   description: string
+  /** 设备最后一次 hello 的环境快照；仅网关写入，不作为权限依据。 */
+  deviceEnvironment?: DeviceEnvironment
   /** 仅设备挂载根:hello 中声明的稳定设备身份。由设备注册流程写入,不接受普通 NodeInput。 */
   deviceId?: string
+  deviceReportedAt?: Timestamp
   kind: NodeKind
   /** 仅 device:最近一次观察到设备存活(hello / 心跳 / 成功调用)的时刻。缺省表示从未观察或旧数据;
    *  freshness 判定见 device/presence.ts。写路径专用,不经普通注册面。 */
@@ -170,7 +173,18 @@ export interface McpOAuthClientConfig {
   clientSecretRef?: string
 }
 
+/** 有界的设备自报环境；禁止自动携带路径、环境变量或凭据。 */
+export interface DeviceEnvironment {
+  arch?: string
+  platform: 'darwin' | 'linux' | 'win32' | 'android' | 'ios' | 'other'
+  runtime?: 'node' | 'bun' | 'react-native' | 'other'
+  runtimeId?: string
+  runtimeVersion?: string
+}
+
 export interface DeviceExpose {
+  /** 宿主显式提供，neutral SDK 不采集本机信息。 */
+  environment?: DeviceEnvironment
   /** 挂 `<mountPath>/fs` context 节点(file provider);支持多根。 */
   fs?: { readOnly?: boolean, roots: string[] }
   /** SDK 自定义节点(路径相对 mountPath)。 */
@@ -262,7 +276,7 @@ export type NodeConfig
 
 export type NodeInput = Omit<
   TreeNode,
-  'registeredBy' | 'online' | 'lastSeenAt' | 'deviceId' | 'createdAt' | 'updatedAt'
+  'registeredBy' | 'online' | 'lastSeenAt' | 'deviceId' | 'deviceEnvironment' | 'deviceReportedAt' | 'createdAt' | 'updatedAt'
 >
 
 /** 自动物化中间 directory 的 registeredBy 标记。 */

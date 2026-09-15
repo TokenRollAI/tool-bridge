@@ -6,9 +6,9 @@
  * directory(mountPath)节点:description 呈现三态 presence(online/stale/offline)。
  */
 
+import type { DeviceEnvironment, Timestamp, TreePath } from '../types'
 import type { ChildRef, CmdSpec, HelpModel } from '../htbp/model'
 import type { Presence } from './presence'
-import type { TreePath } from '../types'
 import { contextHelpModel, type ContextHelpOptions } from '../context/help'
 import { cmdPath, withCommandPaths } from '../builtin/util'
 import { describeAllow } from './shellAllow'
@@ -57,7 +57,7 @@ export function deviceFsHelpModel(
 
 /** `<mountPath>` directory 节点的 ~help;description 附三态 presence(online/stale/offline)。 */
 export function deviceDirectoryHelpModel(
-  node: { description: string, path: TreePath, presence: Presence },
+  node: { description: string, environment?: DeviceEnvironment, path: TreePath, presence: Presence, reportedAt?: Timestamp },
   children: ChildRef[] = [],
 ): HelpModel {
   return {
@@ -68,5 +68,11 @@ export function deviceDirectoryHelpModel(
     },
     cmds: [],
     children,
+    ...(node.environment === undefined || node.reportedAt === undefined
+      ? {}
+      : {
+          deviceContext: { environment: node.environment, reportedAt: node.reportedAt, presence: node.presence },
+          hint: `Environment is the last hello report (${node.presence.state}); inspect authorized child ~help for commands, execution limits and session recovery rules.`,
+        }),
   }
 }

@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
   createShellExecutor,
+  createShellSessionBinding,
   SHELL_EXEC_DEFAULT_TIMEOUT_MS,
   SHELL_OUTPUT_LIMIT_BYTES,
   SHELL_TIMEOUT_EXIT_CODE,
@@ -75,6 +76,15 @@ describe('白名单前置判定(执行前完成)', () => {
       expect(isTBError(e) && e.message).toContain('allowed commands: echo')
     }
     expect(spawn).not.toHaveBeenCalled()
+  })
+
+  it.each(['echo safe\nprintf second-command', 'echo safe\r\nprintf second-command'])('rejects multiple shell lines before either execution path: %s', async (command) => {
+    const spawn = vi.fn()
+    const exec = createShellExecutor({ allow: ['echo'], spawn: spawn as unknown as SpawnFn })
+    await expect(exec(command)).rejects.toMatchObject({ code: 'permission_denied' })
+    expect(spawn).not.toHaveBeenCalled()
+    expect(() => createShellSessionBinding('sessions/shell', ['echo']).prepare({ command }))
+      .toThrow('command not in shell allowlist')
   })
 
   it('缺省 allow = [] → 一切拒(与默认拒对齐)', async () => {

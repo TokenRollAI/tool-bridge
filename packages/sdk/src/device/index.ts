@@ -55,6 +55,7 @@ export {
 export type {
   CallFrame,
   CancelFrame,
+  DeviceEnvironment,
   DeviceFrame,
   DeviceNodeCmd,
   ErrorFrame,

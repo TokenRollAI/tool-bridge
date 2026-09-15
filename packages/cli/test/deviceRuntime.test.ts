@@ -222,6 +222,9 @@ describe('SDK device supervisor 的 Node adapter', () => {
       expose: {
         shell: { allow: ['echo'], description: 'CI shell' },
         fs: { roots: [root], readOnly: true },
+        environment: { platform: process.platform, arch: process.arch,
+          runtime: typeof process.versions.bun === 'string' ? 'bun' : 'node',
+          runtimeVersion: process.versions.bun ?? process.versions.node },
       },
     }])
     socket?.dispatch('message', {

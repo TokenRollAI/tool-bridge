@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "path": "ops/demo",
+  "description": "A one-minute process session example (requires node on the device PATH)",
+  "commands": [
+    {
+      "name": "wait",
+      "description": "Print a start message and complete after one minute",
+      "executable": "node",
+      "argv": [
+        "-e",
+        "console.log('started'); setTimeout(() => console.log('completed'), 60000)"
+      ],
+      "effect": "read",
+      "session": {
+        "path": "sessions/demo",
+        "maxRuntimeMs": 120000
+      }
+    }
+  ]
+}
