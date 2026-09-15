@@ -1,0 +1,136 @@
+---
+description: Linux Device 长命令进程会话：显式 profile/session 配置、runtime 与 owner/path 隔离、start 去重、增量日志、stop 清理及 CLI/Dashboard 契约验收。
+kind: architecture
+relations:
+  requires:
+    - device/websocket-sessions.mdx
+  related:
+    - device/device-daemon.mdx
+    - device/durable-mailbox.mdx
+    - app-runtime/mcp-interop.mdx
+code:
+  paths:
+    - packages/core/src/device/processSessionContract.ts
+    - packages/core/src/node/processSessions.ts
+    - packages/core/src/node/structuredCommand.ts
+    - packages/core/src/node/shellExecutor.ts
+    - packages/cli/examples/process-session-profile.json
+    - packages/cli/src/deviceSessions.ts
+    - packages/cli/src/deviceRuntime.ts
+    - packages/cli/src/commands/deviceSession.ts
+    - packages/sdk/src/client/index.ts
+    - packages/sdk/src/client/processSessions.ts
+    - packages/dashboard/src/components/node/DeviceSessionPanel.tsx
+    - packages/dashboard/src/lib/deviceSession.ts
+    - packages/dashboard/src/lib/useProcessSessionCommands.ts
+    - packages/dashboard/test/deviceSessionDiscovery.dom.test.tsx
+    - packages/core/test/node/processSessions.test.ts
+    - packages/cli/test/deviceRuntime.test.ts
+    - packages/cli/test/deviceSession.test.ts
+    - packages/cli/test/deviceSessions.test.ts
+    - packages/dashboard/test/deviceSession.dom.test.tsx
+    - packages/app/test/contracts/processSessionCoverage.test.ts
+---
+# Device 长命令进程会话
+
+进程会话由 Linux CLI/daemon 的本次 runtime 持有，以普通 Device tool 的 `start/list/observe/stop` 暴露。
+它解决长命令在一次调用返回后继续运行、按需读取日志和显式停止的问题；没有 stdin、PTY、文件编辑、任务计划
+或 daemon 重启恢复。执行器只在 Node 边界 `core/node`；portable schema 留在 `core/device`，公共消费者经
+`@tool-bridge/sdk/client` 获取，不能为读取结果把 Node 进程依赖带入 neutral SDK 或 Dashboard。
+SDK 的公开 `processSession*Schema` 名称提供 plain `ProcessSessionParser<T>`：仅暴露 parse/safeParse 与业务
+结果类型，内部复用 core 真源校验器，不向消费者导出 Zod 实现类型。不能直接 re-export core Zod 实例，
+否则 workspace typecheck 可通过而最终 `.d.ts` 仍泄漏内部验证器依赖；必须检查最终 tarball 声明闭包。
+
+## 显式暴露与权限
+
+structured profile 的单条 `commands[].session: {path, maxRuntimeMs?}` 选择加入会话，`path` 相对设备挂载根。
+它与同步命令共享固定 executable、argv 输入 schema、cwd 和环境继承规则；会话超时和日志预算独立于同步
+`timeoutMs/maxOutputBytes`。原同步入口继续等待最终结果，不因 opt-in 改为返回 session。
+
+任意 shell 会话另须 `--shell-session-path <path>`，并要求已有 shell exposure；复用同一 allowlist，固定
+`effect:destructive + confirm:true`，不扩大命令权限。**升级行为变化**：受限 allowlist 现在在执行前拒绝含
+LF/CR 的任何输入，包括引号内换行，防止首条允许命令后借换行追加执行；显式单值 `['*']` 仍允许复合
+命令。同步 shell 与 session 共用这道检查。session、profile、shell、fs 与自定义节点之间的相等或
+祖先/后代路径冲突在安装和运行时均拒绝。daemon 冻结已校验配置，修改源 profile 后必须重新 install。
+
+`start` 继承绑定命令的 effect/confirm，`list/observe` 为 read，`stop` 为 write；四者只广告 realtime。
+HTTP、MCP、CLI 和 Dashboard 复用相同命令和网关授权，不新增 operation 或第二套 WS frame。
+网关每次先执行当前 scope 检查；设备再按可信 `caller.owner + session path` 隔离会话，无 caller context 时
+fail closed。另一 owner 的 session 对 observe/stop 返回 not_found；同一 owner 的不同 SK 也必须仍有调用权限。
+
+## 安装与调用示例
+
+随 CLI 发布的 `packages/cli/examples/process-session-profile.json` 是可直接
+检查的最小配置：固定调用设备 PATH 中的 node，输出 started，约一分钟后输出 completed；不接受任意程序
+或 shell 输入。设备端以普通 Linux 用户和最小 register Device SK 配好目标后，在仓库根可执行：
+
+```sh
+tb daemon install --device-id session-demo --path device/session-demo --no-shell \
+  --command-profile packages/cli/examples/process-session-profile.json
+```
+
+调用方另使用具有该节点 read/call 权限的认证上下文；本机 daemon 安装凭据不应拿来扩大调用权限。
+
+```sh
+tb device session start device/session-demo/sessions/demo '{}' --json
+tb device session list device/session-demo/sessions/demo --json
+tb device session observe device/session-demo/sessions/demo <session-id> --follow
+# 需要主动停止时，使用 start/list 返回的同一 session-id：
+tb device session stop device/session-demo/sessions/demo <session-id>
+```
+
+示例应调用 sessions/demo 的 start；ops/demo/wait 仍是原同步入口，受同步超时限制，不用于验证长命令。
+未指定 cwd 时使用 daemon 工作目录；profile 显式配置 cwd 才固定到该目录，不能从 profile 文件位置推断。
+
+## 身份、启动与丢响应恢复
+
+一次 runtime 创建唯一 `runtimeId`，网络断开、重连或暂停观察不会销毁它持有的 child；连接永久 close 与设备
+进程退出走统一清理。daemon 重启生成新 runtime，旧 sessionId、日志与去重记录失效，不是 durable Mailbox。
+
+调用方先 `list` 取得 runtimeId 和设备时间，再提交 `expectedRuntimeId`、`requestId`、`startBefore` 与绑定命令
+`input`。runtime 不符则拒绝；startBefore 必须落在设备当前时间之后的短接收窗口内，防止旧请求晚到重新执行。
+超时限制不能超过绑定上限。去重键为本 runtime 内的 `path + owner + requestId`，相同有效输入复用原会话，
+不同输入或执行时限返回 conflict；并发重复请求等待同一次 spawn 被接受。终态记录保留期间不会早于已接受的
+重放窗口删除去重证据；活动数和保留数均有硬上限，满额拒绝新启动。
+
+start 丢响应或超时后，通过 `list --request-id` 查原请求，不生成新 requestId 盲目重启。空页或 not_found
+可能来自保留到期、runtime 重启或权限变化，不能证明命令未执行。去重只保证本 runtime 的有界重放，不承诺
+跨设备重启的 exactly-once；业务副作用仍须按结果未知处理。
+
+## 日志、终态与停止
+
+`observe` 返回 stdout/stderr 标记的纯文本 chunks、nextCursor、gap 和 droppedBytes。cursor 是两个输出流
+合并后的 UTF-8 字节位置，每个观察者独立持有；不是行号、数组下标或字符数。续读必须用返回的 nextCursor，
+不能自行按字符串长度推进。每条流的字节预算与总体片段数都有界，截断时 gap 明示日志不完整。
+waitMs 只作有界 long-poll；取消观察只释放等待者，不向 child 发送终止信号。终态响应仍可能带未读日志，
+消费者必须读到 cursor 不再前进，不能看到 exited 就丢弃最后几页。
+
+进程状态区分 running、stopping 与 stopped/exited/timed_out。非零 exitCode 仍可为 exited，调用方必须检查
+exitCode/signal；返回 session 或成功 HTTP 状态不等于业务成功。显式 stop、运行时限和 runtime close 对进程组
+先 SIGTERM，再升级 SIGKILL；leader 退出后仍处理继承管道或继续运行的同组 descendants。信号失败保持
+stopping 并返回清理未确认错误，不把请求停止伪装成已停止。主动 setsid 脱离组的进程不在该进程组保证内；
+安装的 systemd unit 另以 control-group 清理作为宿主兜底。
+
+日志可能包含命令自行输出的敏感数据，不承诺自动脱敏。CLI 文本输出去掉终端控制序列，JSON 保留原始文本；
+Dashboard 以文本呈现并限制缓存，不解释 HTML 或把日志当终端指令。
+
+## 消费者与验收
+
+`tb device session start/list/observe/stop` 使用完整会话节点路径；observe --follow 的 Ctrl-C 只退出观察。
+它与 `tb daemon logs` 的服务日志不同。Dashboard 先从默认不含 schema 的节点 Help index 筛选四命令候选，
+只有缺少 start inputSchema 的候选才按需获取单条 start Help；按 name/path 匹配后仅补 inputSchema，保留
+当前授权 index 的 identity/effect/confirm。必填 expectedRuntimeId 契约确认后才呈现会话面板，不全局展开
+schema，详情失败或仅同名普通命令不能误识别。面板支持列表、requestId 查找、增量日志和显式停止；关闭
+页面或观察不会停止设备进程。需要确认的 start/stop
+仍按目标 Help metadata 执行确认边界，变更这些契约时 CLI、Dashboard 与公开 Agent Skill 同轮评估。
+
+契约门禁把真实 Help 广告的命令集与实际执行场景逐一比较，再经 app HTTP 管线调用并用实际 outputSchema
+校验返回值；只登记名称、mock 返回值或复制 schema 不构成覆盖。真实 MCP client 还须验证同一 owner、同一
+handler 及最小有效输入，尤其省略默认参数；通用规则见 [MCP 验证层次](../app-runtime/mcp-interop.mdx#验证层次)。
+Dashboard 发现测试必须从真实 SDK parser 消费的 schema-free index 开始，再按单命令 Help 返回详情；
+直接注入 full Help 会掩盖生产入口缺字段，不能证明面板实际可达。
+
+runtime 测试覆盖重复启动、owner/path 隔离、超时/进程组清理、独立 cursor 与截断；CLI/runtime seam 覆盖
+reconnect 保留与永久 close 清理；消费者测试覆盖取消观察、未知启动结果及终态日志排空。Linux 普通用户的
+真实进程测试只能证明对应进程行为，不能替代真实 systemd user bus、linger、强杀 daemon 或整机重启验收。
+需要这些部署保证时，按 [daemon 验证边界](device-daemon.mdx#验证边界)另留真实环境证据。

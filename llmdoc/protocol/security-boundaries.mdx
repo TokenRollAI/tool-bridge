@@ -1,5 +1,5 @@
 ---
-description: 安全边界:register path/reserved roots/device hello 同权、remote allowlist 的 WHATWG backslash/SSRF 解析、凭证分槽、可见性与脱敏的 fail-closed 不变量。
+description: 安全边界:register path/reserved roots/device hello 同权、remote allowlist 的 WHATWG backslash/SSRF 解析、shell allowlist 换行 LF/CR 拒绝、凭证分槽、可见性与脱敏的 fail-closed 不变量。
 kind: architecture
 relations:
   requires:
@@ -8,6 +8,9 @@ relations:
     - device/durable-mailbox.mdx
 code:
   paths:
+    - packages/core/src/device/shellAllow.ts
+    - packages/core/test/device/shellAllow.test.ts
+    - packages/core/test/node/shellExecutor.test.ts
     - packages/server/src/bootstrapState.ts
     - packages/server/src/s3Network.ts
     - packages/core/src/node/fsObjectStore.ts
@@ -58,6 +61,7 @@ code:
 - 节点写入口对嵌套 `oauthClient.clientSecretRef` 执行与其它 secret ref 相同的 `system/secret admin` 使用授权，再验证
   引用可解析；顺序不能反，避免 SecretStore existence oracle。挂载、授权和调用各自验证所需状态。
 - 标准 Node 的首次安装自动生成稳定根和 Admin SK，只有持本机短期配对凭证才能配置；已有 identity/initialized 的故障实例只走 recovery，不重新匿名安装。SDK 嵌入者显式提供初始 Admin SK，没有不安全引导开关。
+- **升级行为变化**：共享 shell allowlist 在受限列表下拒绝 LF/CR，即使换行位于引号内也拒绝；此前仅匹配首条允许命令而可用换行追加执行的输入，现在在同步 shell 与 shell session 的 spawn 前返回 permission_denied。显式单值 `['*']` 仍允许复合命令，不应将它误写成同等约束。
 - Linux structured command 的 child 缺省只继承基础环境白名单;显式 `inheritEnv` 只是按名称复制本机 daemon 环境,不是 SecretStore 引用解析,也不提供输出 secret redaction、执行后清零或到期保证。不得把 token/云凭证列入 profile 环境策略,也不得把 fixed executable/argv 当作 secret 通道。
 - Device Mailbox 的 caller 权限在 enqueue 时快照：该次 call 授权成功后，caller SK 后续吊销不会自动取消
   operation；caller owner 或含命令叶子的完整 targetPath admin 才能查询/取消。这是 durable work 的显式授权语义，不得把

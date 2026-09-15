@@ -110,6 +110,11 @@ CLI 是公共控制面,不是 API 的宽松包装。修改命令时同时检查�
   `--path-prefix` 与 repeatable `--effect` 必须原样下发 SDK wire；CLI 只做非法枚举/组合的早拒，不能
   自己重排或过滤服务端结果。partial source 状态写 stderr warning，JSON page 保持机器可读。
 
+进程会话另用 `tb device session start/list/observe/stop` 消费普通 realtime command：start 包装绑定 input，
+以设备 list 返回的 runtimeId/时间建立接收窗口；丢响应保留 requestId，observe --follow 的中断只退出观察。
+它不复用 `tb device op` 的 durable operation 身份，也不是 `tb daemon logs` 的服务日志；完整边界见
+[Device 进程会话](../device/process-sessions.mdx)。
+
 ## 返回语义
 
 CLI 输出只能声明当前证据能证明的结果。人类文本与 JSON 必须同义，区分请求成功、业务终态和结果未知；

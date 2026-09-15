@@ -25,8 +25,9 @@ code:
 
 - 以实际运行设备连接的普通 Linux 用户执行;禁止 `sudo tb daemon ...` 或 root 用户。
 - 先准备只允许目标设备路径 `register` 的最小权限 Device SK;不要复用 Admin SK。
-- `install` 与前台 `tb connect` 共用网关、设备、shell、文件系统和 structured command profile 暴露参数(解析在 `commands/connect.ts`)。Shell 默认不允许命令,只有显式 `--allow` 的命令可执行。
-- `--allow '*'` 会按该 Linux 用户的权限开放任意远程 shell 命令。交互终端必须二次确认;非交互环境必须显式传 `--yes`。
+- `install` 与前台 `tb connect` 共用网关、设备、shell、文件系统和 structured command profile 与显式进程会话暴露参数(解析在 `commands/connect.ts`)。Shell 默认不允许命令,只有显式 `--allow` 的命令可执行。
+- **升级行为变化**：受限 `--allow` 现在拒绝任何含 LF/CR 的命令，包括引号内换行；同步 shell 和显式 shell session 均在 spawn 前检查。此前可通过换行追加第二条命令的输入不再被接受。
+- `--allow '*'` 仍允许含换行的复合命令，会按该 Linux 用户的权限开放任意远程 shell 命令。交互终端必须二次确认;非交互环境必须显式传 `--yes`。
 - 可重复 `--command-profile <file>` 暴露预声明的结构化命令;优先配合 `--no-shell` 只开放所需操作。profile 是 strict JSON,设备所有者必须为每条命令固定 executable、argv 模板并显式声明 `read | write | destructive` effect;平台不从命令文本推断安全等级。
 
 ## 安装或更新
@@ -54,6 +55,17 @@ choice、flag、required/multiple,并限制 `cwd`、`timeoutMs`、`maxOutputByte
 4. restart 服务,并等待当前配置 revision 对应的设备连接进入 `ready` 后才成功返回。
 
 重复执行 `install` 是更新操作:即使服务已经 active 也会 restart,让新配置立即生效。安装、启动或等待 ready 失败时,恢复安装前的配置、状态和 unit;此前已有服务时还会尝试恢复旧服务。
+
+## 进程会话生命周期
+
+profile 的单条 `commands[].session` 或 shell 的 `--shell-session-path` 显式启用长命令会话，具体配置与
+恢复边界见 [Device 进程会话](process-sessions.mdx)。两者与 profile 一起冻结在 daemon 配置中；会话路径
+冲突必须同时通过安装解析和运行时装配校验，不能只信任配置来源。
+
+会话 manager 归一次 deviceRuntime 所有，重连不重建、不因单次 call 或 observe 被取消而停止 child。
+永久 close、连接初始化失败和正常进程退出统一等待 manager 清理，清理失败必须暴露；daemon restart
+生成新 runtime，旧会话和日志不可恢复。systemd unit 明确使用 control-group、停止时限与最终 SIGKILL
+兜底，设备进程内的 stop/timeout 仍独立完成进程组清理，不能靠 unit 配置替代运行时状态机。
 
 ## Mailbox 消费生命周期
 
