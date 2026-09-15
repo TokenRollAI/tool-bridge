@@ -17,6 +17,7 @@ code:
     - packages/app/src/routes/mcp.ts
     - packages/app/test/mcp.integration.test.ts
     - packages/app/test/mcpArguments.test.ts
+    - packages/app/test/contracts/processSessionCoverage.test.ts
     - scripts/verify-mcp.ts
 ---
 
@@ -102,6 +103,12 @@ gateway 明确判断 `not_dispatched` 时入队；设备业务错误属于 compl
 3. consumer E2E：用真实 MCP client 连接 `/~mcp`，验证 modern/legacy、固定入口，以及 help 返回路径直接
    进入 tb_call 的闭环；窄 SK 仍看到固定入口，但发现隐藏越权目标、已知越权路径调用被拒。
 4. 真实上游仅在明确提供 URL/凭据时运行 `pnpm verify:mcp`。
+
+多入口共用 handler 不保证输入契约等价：Zod 默认值或 transform 可能使生成的 JSON Schema 描述输出，
+而 HTTP handler 接受的是输入；MCP 的 schema 前置校验会在到达 handler 前拒绝原本合法的省略字段。
+对含默认/可选参数的公开能力，用同一最小有效输入经真实 HTTP 与 MCP client 调用，覆盖空对象或仅必填字段；
+Help/schema 相同和 output 校验都不能替代这一步，也不能靠测试补齐可选值掩盖入口差异。修复须明确 input
+schema 与 handler 默认行为各自的职责，不要求一律禁用 default，也不将局部 optional 修复宣称为全仓生成器修复。
 
 排查连接先区分入站 `/~mcp` 与出站 MCP provider。CLI 经 HTBP 调用上游成功不能替代入站消费者验证；
 官方 SDK 成功也不能证明尚未复现的用户客户端链路兼容。验收还须证明工具目录规模有界、入口发现不访问

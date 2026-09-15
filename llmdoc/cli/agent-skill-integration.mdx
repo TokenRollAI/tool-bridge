@@ -69,6 +69,12 @@ Mailbox 使用 `operation` 中的 `deviceId`、`operationId` 与 `state`，不�
 用户目标当下确实需要状态/终态时，按需做一次 `tb device op get <deviceId> <operationId>`。后续
 claim/complete 是设备侧协议，不计入 Agent 工具调用预算，也不由 Agent 模拟。
 
+设备根 Help 的 deviceContext 是最后一次 hello 自报环境，需连同 reportedAt/presence 判断新鲜度，不为确认
+平台先执行 shell 探测，也不把该摘要当成实时状态或授权依据。显式广告的进程会话用
+`tb device session start/list/observe/stop`；网络重连可继续观察，daemon 重启使旧会话失效。start 结果未知时
+按 requestId 查原会话，不盲目重新启动；取消 observe 不停止进程。它与上面的 Mailbox 恢复和默认不轮询
+规则有独立生命周期，详见 [进程会话](../device/process-sessions.mdx)。
+
 调用结果若含 `store://default/...`，它只是对象身份,不是访问凭证：Agent 用 `tb store stat/get` 读取当前 owner 的对象，
 只有用户明确要求把文件交给外部受众时才用 `tb store share` 创建短期 bearer，并把成功输出当 secret
 立即交付；用完可 `revoke-share`。普通设备产物不要求搜索或挂载 Context。需要 author 命名语义 entry

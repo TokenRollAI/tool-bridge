@@ -1,13 +1,21 @@
 ---
-description: Node 设备 WebSocket 会话与 Redis 路由：device authority recheck、连接代际、presence 三态和 neutral SDK supervisor。
+description: Node 设备 WebSocket 会话与 Redis 路由：device authority recheck、连接代际、presence 三态、Device 环境摘要与 neutral SDK supervisor。
 kind: guide
 relations:
   related:
+    - device/process-sessions.mdx
     - device/durable-mailbox.mdx
     - store/default-store.mdx
 code:
   paths:
     - packages/core/src/node/fsObjectStore.ts
+    - packages/core/src/device/environment.ts
+    - packages/app/src/helpModel.ts
+    - packages/app/src/federation.ts
+    - packages/core/src/htbp/helpDsl.ts
+    - packages/core/src/htbp/helpMarkdown.ts
+    - packages/core/src/protocol/wire.ts
+    - packages/app/test/deviceContext.integration.test.ts
     - packages/core/src/device/client.ts
     - packages/core/src/device/frames.ts
     - packages/core/src/device/helpModel.ts
@@ -28,6 +36,8 @@ code:
     - packages/core/test/device/presence.test.ts
     - packages/core/test/device/session.test.ts
     - packages/core/test/device/shellAllow.test.ts
+    - packages/sdk/src/device/index.ts
+    - packages/sdk/test/client/client.test.ts
     - packages/sdk/test/device.test.ts
 ---
 # Node 设备会话、presence 与 SDK device
@@ -46,6 +56,18 @@ Node 的 `DeviceHub` 持有活 WebSocket、连接 generation 与本进程 call �
 设备反向注册的稳定 wire 是 raw WebSocket 上的 core JSON frame，不是 Socket.IO/Engine.IO 协议。Socket.IO client 不能直接连接当前 endpoint；同时更换两端也不会代替 generation、presence、reclaim、call/result/cancel 或 Store capability 这些服务端权威状态机，反而增加第二层协议。因此服务端保留 raw WS；客户端可使用 PartySocket 的 reconnect transport，但不引入 PartyServer/rooms 来重新定义连接归属。
 
 可复用的边界是 `@tool-bridge/sdk/device` 的 portable connection supervisor：它持有 reconnect、heartbeat、credential refresh、suspend/resume 与 call dispatch；Node CLI、React Native 等宿主只注入 WebSocket factory 和凭证 provider。CLI 的 `deviceRuntime.ts` 可保留 shell/FS/structured process dispatch 与 `ws` adapter，不得复制 supervisor 状态机。任何未来协议替换都必须先证明上述连接代际、权限和执行歧义不变量仍可保持，不能只以 rooms/reconnect API 更便利为理由。
+
+## Device 环境摘要
+
+`DeviceExpose.environment` 是宿主显式提供的有界自报快照，只接受 platform、arch、runtime、runtimeVersion
+与 runtimeId；neutral SDK 不自动探测机器信息。CLI 在运行时装配平台/架构/运行时版本，只有启用进程会话
+才加入对应 runtimeId。任意环境变量、凭据、用户目录或自由形状元数据不属于该 schema。
+
+hello codec、SDK 与 app 入口均校验 allowlist。网关只在设备根写入系统字段 deviceEnvironment/deviceReportedAt，
+普通 NodeInput 无权设置；后续 hello 未提供 environment 时不沿用旧快照。根节点 Help 以 deviceContext 提供
+environment、reportedAt 与当前派生 presence，JSON/DSL/Markdown、SDK wire 与联邦投影保留同一语义。
+心跳只更新 presence，不刷新环境报告时间；offline/stale 下可见的是最后报告，不能将其当作实时探测或权限依据。
+根摘要只提示下钻已授权子节点 Help，不为获取执行限制遍历全部命令或额外执行 uname/pwd。
 
 ## Durable Mailbox 与 WebSocket 的分界
 
@@ -71,10 +93,11 @@ timeout 会杀直接 child 并返回 `timed_out`;structured handler 收到协作
 但没有独立 `cancelled` outcome,也不承诺清理其自行派生的全部 descendants。现有 shell dispatch 没有传入同一
 AbortSignal。
 
-这些字段只在一次同步 device call 收敛后的最终 result 中出现；同步路径仍没有 `start -> operationId`、
-status/poll、增量 stdout/stderr 或重连恢复。另行选择 mailbox delivery 时才产生公开 operation，并且只保存
-最终 JSON result/error，不把 stdout/stderr 改造成流。两条路径的 cancel 都是协作式提示；副作用无法从
-终态证明时不得盲目自动重试。
+这些字段只在一次同步 device call 收敛后的最终 result 中出现，同步入口不返回可观察的 session。
+显式 opt-in 的 [进程会话](process-sessions.mdx)另以普通 start/list/observe/stop 命令提供本 runtime 内的
+长命令与增量日志；网络重连保留、daemon 重启失效，其进程组清理不同于上面的同步 child 语义。
+Mailbox delivery 则产生独立 durable operation，只保存最终 JSON result/error，不把 stdout/stderr 改造成流。
+三者不能互相推断恢复与取消保证；副作用无法从终态证明时不得盲目自动重试。
 
 ## 验证
 
