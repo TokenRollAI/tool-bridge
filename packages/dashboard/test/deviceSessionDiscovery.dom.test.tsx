@@ -55,7 +55,9 @@ describe('progressive process-session discovery through real SDK help parser', (
   it.each(['page', 'workspace'] as const)('%s hydrates only start detail from the schema-free command index', async (surface) => {
     const fn = fetcher()
     mount(surface)
-    await screen.findByRole('region', { name: '设备进程会话' })
+    // Two asynchronous Help requests plus a React render are a behavioral check,
+    // not a one-second latency benchmark on a contended developer machine.
+    await screen.findByRole('region', { name: '设备进程会话' }, { timeout: 5000 })
     await screen.findByText(/本页没有可见会话/)
     const helpUrls = fn.mock.calls.map(call => String(call[0])).filter(url => url.includes('~help'))
     expect(helpUrls).toContain(`https://fixture.invalid/${path}/start/~help`)
