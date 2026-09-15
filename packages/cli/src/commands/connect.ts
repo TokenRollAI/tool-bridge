@@ -7,6 +7,7 @@ import {
 import { Command, type OptionValues } from 'commander'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
+import { assertDeviceSessionPaths, deviceSessionBindings, sessionExposeNodes } from '../deviceSessions'
 import { collect, resolveTarget, withGlobalOpts } from '../args'
 import { asArray, printJson, printLine } from '../output'
 import { runDeviceConnection } from '../deviceRuntime'
@@ -24,6 +25,7 @@ export interface ConnectArgs {
   path?: string
   /** `--no-shell` → false;缺省(undefined)= 暴露 shell。 */
   shell?: boolean
+  shellSessionPath?: string
   sk?: string
   timeout?: string
   url?: string
@@ -35,6 +37,7 @@ export interface PreparedConnect {
   deviceId: string
   expose: DeviceExpose
   mountPath?: string
+  shellSessionPath?: string
   sk: string
 }
 
@@ -112,6 +115,9 @@ export function buildExpose(
       }
     })
   }
+  const bindings = deviceSessionBindings(commandProfiles, args.shellSessionPath, expose.shell)
+  assertDeviceSessionPaths(commandProfiles, bindings)
+  if (bindings.length > 0) expose.nodes = [...(expose.nodes ?? []), ...sessionExposeNodes(bindings)]
   if (expose.shell === undefined && expose.fs === undefined && expose.nodes === undefined) {
     throw new CliError(
       'nothing to expose: omit --no-shell, pass --fs, or pass --command-profile',
@@ -148,6 +154,7 @@ export function prepareConnect(args: ConnectArgs): PreparedConnect {
   return {
     baseUrl: target.baseUrl,
     sk: target.sk,
+    ...(args.shellSessionPath === undefined ? {} : { shellSessionPath: args.shellSessionPath }),
     deviceId,
     expose,
     ...(commandProfiles.length > 0 ? { commandProfiles } : {}),
@@ -198,6 +205,7 @@ export function connectCommand() {
       collect,
       [],
     )
+    .option('--shell-session-path <path>', 'Opt in to Linux shell process sessions at this relative device path')
     .option('--no-shell', 'Do not expose shell; mutually exclusive with --allow')
     .addHelpText(
       'after',

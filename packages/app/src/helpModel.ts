@@ -79,7 +79,13 @@ export async function helpModelFor(
         now: opts.now,
       })
       return deviceDirectoryHelpModel(
-        { path: node.path, description: node.description, presence },
+        {
+          path: node.path,
+          description: node.description,
+          presence,
+          ...(node.deviceEnvironment === undefined ? {} : { environment: node.deviceEnvironment }),
+          ...(node.deviceReportedAt === undefined ? {} : { reportedAt: node.deviceReportedAt }),
+        },
         children.map(n => ({ path: n.path, kind: n.kind, description: n.description })),
       )
     }

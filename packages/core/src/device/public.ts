@@ -11,12 +11,14 @@ export {
 } from '../errors'
 export { normalizePath, validatePath } from '../tree/path'
 export {
+  type DeviceEnvironment,
   type DeviceExpose,
   type DeviceNodeCmd,
   type DeviceNodeInput,
   type TreePath,
 } from '../types'
 export * from './client'
+export * from './environment'
 export * from './frames'
 // mailbox 是 server 侧权威(DeviceMailboxService 等),不属于设备客户端窄入口;
 // 只显式导出设备执行侧真实消费的完成载荷类型。
@@ -29,3 +31,12 @@ export {
   PRESENCE_STALE_AFTER_MS,
   type PresenceState,
 } from './presence'
+export type {
+  ProcessSessionChunk,
+  ProcessSessionList,
+  ProcessSessionObservation,
+  ProcessSessionState,
+  ProcessSessionSummary,
+} from './processSessionContract'
+
+export { processSessionListSchema, processSessionObservationSchema, processSessionSummarySchema } from './processSessionContract'

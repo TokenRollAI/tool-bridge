@@ -10,6 +10,7 @@
  */
 
 import {
+  type DeviceEnvironment,
   LIST_LIMIT_DEFAULT,
   LIST_LIMIT_MAX,
   type ListOptions,
@@ -221,7 +222,7 @@ export class NodeRegistryStore {
     node: NodeInput,
     registeredBy: string,
     now: Timestamp,
-    opts: { deviceId?: string, lastSeenAt?: Timestamp, online?: boolean } = {},
+    opts: { deviceEnvironment?: DeviceEnvironment, deviceId?: string, deviceReportedAt?: Timestamp, lastSeenAt?: Timestamp, online?: boolean } = {},
   ): Promise<TreeNode> {
     const invalid = validatePath(node.path)
     if (invalid) throw invalid
@@ -250,6 +251,8 @@ export class NodeRegistryStore {
       ...(node.config !== undefined ? { config: node.config } : {}),
       ...(node.virtualize !== undefined ? { virtualize: node.virtualize } : {}),
       ...(opts.deviceId !== undefined ? { deviceId: opts.deviceId } : {}),
+      ...(opts.deviceEnvironment !== undefined ? { deviceEnvironment: opts.deviceEnvironment } : {}),
+      ...(opts.deviceReportedAt !== undefined ? { deviceReportedAt: opts.deviceReportedAt } : {}),
       ...(opts.online !== undefined ? { online: opts.online } : {}),
       ...(opts.lastSeenAt !== undefined ? { lastSeenAt: opts.lastSeenAt } : {}),
       registeredBy,

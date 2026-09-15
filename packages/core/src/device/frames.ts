@@ -9,6 +9,7 @@
 import { z } from 'zod'
 import { type DeviceExpose, NODE_KINDS, type OwnerRef, type Timestamp, type TreePath } from '../types'
 import { tbErrorBodySchema } from '../protocol/errorWire'
+import { deviceEnvironmentSchema } from './environment'
 import { TBError, type TBErrorBody } from '../errors'
 
 // ---------- 帧类型(TS 定义为真源) ----------
@@ -135,6 +136,7 @@ const nodeInputSchema = z
   .passthrough()
 
 const deviceExposeSchema = z.object({
+  environment: deviceEnvironmentSchema.optional(),
   shell: z
     .object({
       description: z.string().optional(),

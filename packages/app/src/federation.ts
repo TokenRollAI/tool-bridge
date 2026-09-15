@@ -150,6 +150,7 @@ export class RemotePathProjector {
       node: { ...help.node, path: nodePath },
       cmds,
       ...(children === undefined ? {} : { children }),
+      ...(help.deviceContext === undefined ? {} : { deviceContext: help.deviceContext }),
       ...(help.feedback === undefined ? {} : { feedback: help.feedback }),
       ...(help.hint === undefined ? {} : { hint: help.hint }),
       ...(help.note === undefined ? {} : { note: help.note }),

@@ -4,6 +4,7 @@ import {
   type CallContext,
   check,
   checkRegisterPath,
+  deviceEnvironmentSchema,
   type DeviceExpose,
   type DeviceNodeInput,
   identify,
@@ -199,6 +200,12 @@ export async function processDeviceHello(opts: {
   }
   if (hello.expose.fs !== undefined) assertFsRoots(hello.expose.fs.roots)
 
+  const environment = hello.expose.environment === undefined
+    ? undefined
+    : deviceEnvironmentSchema.safeParse(hello.expose.environment)
+  if (environment !== undefined && !environment.success) {
+    throw new TBError('invalid_argument', 'device environment contains invalid or unsupported fields')
+  }
   const inputs = nodesForHello(mountPath, hello.deviceId, hello.expose)
   const registry = new NodeRegistryStore(store)
   for (const input of inputs) {
@@ -226,7 +233,12 @@ export async function processDeviceHello(opts: {
         authCtx.keyId,
         now,
         input.path === mountPath
-          ? { deviceId: hello.deviceId, online: true, lastSeenAt: now }
+          ? {
+              deviceId: hello.deviceId,
+              online: true,
+              lastSeenAt: now,
+              ...(environment === undefined ? {} : { deviceEnvironment: environment.data, deviceReportedAt: now }),
+            }
           : {},
       )
     } catch (error) {

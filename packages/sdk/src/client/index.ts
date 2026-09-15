@@ -102,9 +102,19 @@ export {
   PRESENCE_STALE_AFTER_MS,
 } from '@tool-bridge/core/device'
 
+export type {
+  ProcessSessionChunk,
+  ProcessSessionList,
+  ProcessSessionObservation,
+  ProcessSessionState,
+  ProcessSessionSummary,
+} from '@tool-bridge/core/device'
+
+export { processSessionListSchema, processSessionObservationSchema, processSessionSummarySchema } from '@tool-bridge/core/device'
 export { fixedControlPlaneOpenApi } from '@tool-bridge/core/protocol'
 
 export type { FixedControlPlaneOpenApi } from '@tool-bridge/core/protocol'
+
 export type {
   WireAction as Action,
   WireDeviceOperationDetail as DeviceOperationDetail,

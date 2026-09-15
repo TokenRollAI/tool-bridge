@@ -6,7 +6,15 @@
  * 不各自持有数据,故两种表现不可能字段漂移。
  */
 
-import type { Action, NodeKind, TreePath } from '../types'
+import type { Action, DeviceEnvironment, NodeKind, Timestamp, TreePath } from '../types'
+import type { Presence } from '../device/presence'
+
+/** Last hello snapshot; presence is derived separately from the current connection. */
+export interface DeviceContext {
+  environment: DeviceEnvironment
+  presence?: Presence
+  reportedAt: Timestamp
+}
 
 /** ~help 默认 feedback 区块的单条形态(只露 id+title+score,详情经 system/feedback get 下钻)。 */
 export interface HelpFeedbackItem {
@@ -61,6 +69,7 @@ export interface HelpModel {
   /** directory 节点携带:上级/自身 `~help` 列出的子节点。 */
   children?: ChildRef[]
   cmds: CmdSpec[]
+  deviceContext?: DeviceContext
   /**
    * Agent feedback 默认区块(该 path 头部可见条目,网关 ~help 注入;空数组不注入)。
    * DSL 渲染为 `feedback` 头行 + 缩进条目行(未知行忽略通道);JSON 同名字段;Markdown Feedback 节。
@@ -94,6 +103,7 @@ export interface HelpJson {
   /** directory 节点携带。 */
   children?: ChildRef[]
   cmds: CmdSpec[]
+  deviceContext?: DeviceContext
   /** Agent feedback 默认区块,对应 DSL 的 `feedback` 块(有条目才出现)。 */
   feedback?: HelpFeedbackItem[]
   /** 下一步指引,对应 DSL 的 `hint` 行(有值才出现)。 */

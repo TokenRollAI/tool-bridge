@@ -121,6 +121,22 @@ describe('@tool-bridge/sdk/device neutral connection', () => {
     await connection.closed
   })
 
+  it('neutral device API preserves explicitly supplied environment in hello', async () => {
+    const harness = factoryHarness()
+    const environment = { platform: 'ios' as const, arch: 'arm64', runtime: 'react-native' as const, runtimeVersion: '0.82.0' }
+    const connection = connectDevice({
+      baseUrl: 'https://tb.example', deviceId: 'phone-context',
+      expose: { environment, nodes: [{ path: 'camera', kind: 'tool', description: 'camera' }] },
+      credentialProvider: { prepare: () => ({ headers: {} }) },
+      webSocketFactory: harness.factory, handler: async () => null,
+    })
+    const socket = await connectAttempt(harness, 1)
+    socket.open()
+    expect(helloFrames(socket)[0]).toMatchObject({ expose: { environment } })
+    connection.close()
+    await connection.closed
+  })
+
   it('注入 RN transport 与 Authorization，完成 hello/ready/call/result', async () => {
     const harness = factoryHarness()
     const calls: unknown[] = []

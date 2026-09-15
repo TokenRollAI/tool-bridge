@@ -3,12 +3,12 @@
  *
  * 规则:allow 缺省/空数组 = 拒绝一切(默认拒);单值 ['*'] = 放行全部;其余对 command
  * 做 shell-word 切分取 argv[0] 的 basename,与条目精确匹配;白名单非 ['*'] 时 command
- * 含 shell 元字符(; | & $( 反引号 > <)→ 直接拒——不封元字符则 `echo hi; rm -rf`
+ * 含 shell 元字符(; | & $( 反引号 > < 换行)→ 直接拒——不封元字符则 `echo hi; rm -rf`
  * 可绕过任何 argv[0] 判定。判定在设备侧执行前完成(shellExecutor 调用本函数)。
  */
 
 /** 单字符元字符;`$(` 是双字符序列,单独判。 */
-const SHELL_METACHARS = [';', '|', '&', '`', '>', '<'] as const
+const SHELL_METACHARS = [';', '|', '&', '`', '>', '<', '\n', '\r'] as const
 
 function hasShellMetachar(command: string): boolean {
   if (command.includes('$(')) return true

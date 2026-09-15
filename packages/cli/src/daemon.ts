@@ -25,6 +25,7 @@ export interface DaemonConfig {
   expose: DeviceExpose
   mountPath?: string
   revision: string
+  shellSessionPath?: string
   sk: string
   version: 1
 }
@@ -64,6 +65,7 @@ export interface DaemonInstallInput {
   deviceId: string
   expose: DeviceExpose
   mountPath?: string
+  shellSessionPath?: string
   sk: string
 }
 
@@ -116,6 +118,7 @@ function assertDaemonConfig(value: unknown): asserts value is DaemonConfig {
     || typeof value.sk !== 'string'
     || typeof value.deviceId !== 'string'
     || typeof value.revision !== 'string'
+    || (value.shellSessionPath !== undefined && typeof value.shellSessionPath !== 'string')
     || !isRecord(value.expose)
     || (value.commandProfiles !== undefined && !Array.isArray(value.commandProfiles))
     || (value.mountPath !== undefined && typeof value.mountPath !== 'string')) {
@@ -183,6 +186,9 @@ ExecStart=${command}
 Restart=always
 RestartSec=5s
 KillSignal=SIGTERM
+KillMode=control-group
+TimeoutStopSec=15s
+SendSIGKILL=yes
 
 [Install]
 WantedBy=default.target
@@ -379,6 +385,7 @@ export async function installDaemon(
     sk: input.sk,
     deviceId: input.deviceId,
     expose: input.expose,
+    ...(input.shellSessionPath === undefined ? {} : { shellSessionPath: input.shellSessionPath }),
     ...(input.commandProfiles !== undefined ? { commandProfiles: input.commandProfiles } : {}),
     ...(input.mountPath !== undefined ? { mountPath: input.mountPath } : {}),
   }
@@ -503,6 +510,7 @@ export async function runDaemon(configPath: string): Promise<void> {
       sk: config.sk,
       deviceId: config.deviceId,
       expose: config.expose,
+      ...(config.shellSessionPath === undefined ? {} : { shellSessionPath: config.shellSessionPath }),
       ...(config.commandProfiles !== undefined ? { commandProfiles: config.commandProfiles } : {}),
       ...(config.mountPath !== undefined ? { mountPath: config.mountPath } : {}),
       onMailboxError: error => process.stderr.write(`device mailbox: ${error.message}\n`),
