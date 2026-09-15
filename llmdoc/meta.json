@@ -6,28 +6,28 @@
   },
   "documents": {
     "app-runtime/host-neutral-assembly.mdx": {
-      "validatedRevision": "fca74657f159c6a41b0a58abceb44243f025af5d"
+      "validatedRevision": "b7c8bc5f595b8e1c781a92f8a1d95bfda78a17dc"
     },
     "app-runtime/mcp-interop.mdx": {
-      "validatedRevision": "5663a7eb6df73c18085dec8f01053523f73beeb6"
+      "validatedRevision": "b7c8bc5f595b8e1c781a92f8a1d95bfda78a17dc"
     },
     "architecture.mdx": {
-      "validatedRevision": "fca74657f159c6a41b0a58abceb44243f025af5d"
+      "validatedRevision": "b7c8bc5f595b8e1c781a92f8a1d95bfda78a17dc"
     },
     "cli/agent-skill-integration.mdx": {
-      "validatedRevision": "fca74657f159c6a41b0a58abceb44243f025af5d"
+      "validatedRevision": "b7c8bc5f595b8e1c781a92f8a1d95bfda78a17dc"
     },
     "cli/argument-contract.mdx": {
-      "validatedRevision": "5663a7eb6df73c18085dec8f01053523f73beeb6"
+      "validatedRevision": "b7c8bc5f595b8e1c781a92f8a1d95bfda78a17dc"
     },
     "dashboard/canvas-architecture.mdx": {
-      "validatedRevision": "fca74657f159c6a41b0a58abceb44243f025af5d"
+      "validatedRevision": "b7c8bc5f595b8e1c781a92f8a1d95bfda78a17dc"
     },
     "device/device-daemon.mdx": {
-      "validatedRevision": "fca74657f159c6a41b0a58abceb44243f025af5d"
+      "validatedRevision": "b7c8bc5f595b8e1c781a92f8a1d95bfda78a17dc"
     },
     "device/websocket-sessions.mdx": {
-      "validatedRevision": "fca74657f159c6a41b0a58abceb44243f025af5d"
+      "validatedRevision": "b7c8bc5f595b8e1c781a92f8a1d95bfda78a17dc"
     },
     "hosts-deploy/node-docker-and-helm.mdx": {
       "validatedRevision": "fca74657f159c6a41b0a58abceb44243f025af5d"
@@ -42,13 +42,13 @@
       "validatedRevision": "fca74657f159c6a41b0a58abceb44243f025af5d"
     },
     "protocol/htbp-contract.mdx": {
-      "validatedRevision": "5663a7eb6df73c18085dec8f01053523f73beeb6"
+      "validatedRevision": "b7c8bc5f595b8e1c781a92f8a1d95bfda78a17dc"
     },
     "protocol/security-boundaries.mdx": {
-      "validatedRevision": "5663a7eb6df73c18085dec8f01053523f73beeb6"
+      "validatedRevision": "b7c8bc5f595b8e1c781a92f8a1d95bfda78a17dc"
     },
     "release/npm-publishing.mdx": {
-      "validatedRevision": "5663a7eb6df73c18085dec8f01053523f73beeb6"
+      "validatedRevision": "b7c8bc5f595b8e1c781a92f8a1d95bfda78a17dc"
     },
     "search/search-index.mdx": {
       "validatedRevision": "fca74657f159c6a41b0a58abceb44243f025af5d"
@@ -57,7 +57,7 @@
       "validatedRevision": "fca74657f159c6a41b0a58abceb44243f025af5d"
     },
     "device/durable-mailbox.mdx": {
-      "validatedRevision": "5663a7eb6df73c18085dec8f01053523f73beeb6"
+      "validatedRevision": "b7c8bc5f595b8e1c781a92f8a1d95bfda78a17dc"
     },
     "hosts-deploy/managed-configuration.mdx": {
       "validatedRevision": "fca74657f159c6a41b0a58abceb44243f025af5d"
@@ -66,10 +66,10 @@
       "validatedRevision": "fca74657f159c6a41b0a58abceb44243f025af5d"
     },
     "store/storage-backends.mdx": {
-      "validatedRevision": "fca74657f159c6a41b0a58abceb44243f025af5d"
+      "validatedRevision": "b7c8bc5f595b8e1c781a92f8a1d95bfda78a17dc"
     },
     "device/process-sessions.mdx": {
-      "validatedRevision": null
+      "validatedRevision": "b7c8bc5f595b8e1c781a92f8a1d95bfda78a17dc"
     }
   },
   "convergence": {
