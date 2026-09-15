@@ -49,6 +49,8 @@ export type {
   PresignedPutGrant,
   PutPresignedOptions,
 } from './presignedPut'
+export { processSessionListSchema, processSessionObservationSchema, type ProcessSessionParser, processSessionSummarySchema } from './processSessions'
+
 /**
  * builtin/system 管理面视图类型的唯一对外出口(真源在 core;core 是 private 包,
  * CLI/Dashboard 经此消费,不再各自手抄 PluginManifest/CatalogListItem/SecretKeyView 等)。
@@ -109,8 +111,6 @@ export type {
   ProcessSessionState,
   ProcessSessionSummary,
 } from '@tool-bridge/core/device'
-
-export { processSessionListSchema, processSessionObservationSchema, processSessionSummarySchema } from '@tool-bridge/core/device'
 export { fixedControlPlaneOpenApi } from '@tool-bridge/core/protocol'
 
 export type { FixedControlPlaneOpenApi } from '@tool-bridge/core/protocol'
