@@ -21,6 +21,8 @@ An agent only needs a BaseURL and a Secret Key to discover capabilities, read th
 > [!IMPORTANT]
 > tool-bridge is currently in **pre-launch** development. Node/Docker, the SDK, CLI, and Dashboard already form complete working flows, but there is no formal production environment or stability SLA yet. It is ready for self-hosted evaluation, internal integrations, and development; read the release notes and back up your data before upgrading.
 
+**Getting around:** [Quick start](#quick-start-run-a-gateway-locally) · [Browser Dashboard](#browser-dashboard) · [Mobile app](#mobile-app) · [Agent integration](#let-an-agent-use-tool-bridge-directly) · [Use cases](#what-you-can-use-today) · [Deployment](#deploy-or-embed)
+
 ## What is tool-bridge?
 
 tool-bridge is the reference implementation of [HTBP (HTTP ToolBridge Protocol)](https://github.com/TokenRollAI/HTBP). It projects capabilities spread across MCP servers, HTTP APIs, object stores, local machines, and other gateways into one tree:
@@ -95,6 +97,86 @@ curl -X POST \
 
 `~help` returns Markdown by default. Send `Accept: text/plain` for the compact Help DSL, or `Accept: application/json` for a structured representation with JSON Schema.
 
+## Browser Dashboard
+
+After installing a gateway, open `<gateway-url>/ui`; no separate desktop client is needed. The Dashboard and `tb` CLI use the same permissions. Tools hidden from the current SK remain hidden in the browser.
+
+![Browser capability tree with the device branch expanded to show connected computers and phones](docs/screenshots/dashboard-capability-tree.png)
+
+### Connect to your gateway
+
+1. Open your own Dashboard, for example `http://127.0.0.1:8787/ui`.
+2. Keep the same-origin connection to use the current gateway. For another instance, fill in “其他网关地址” (other gateway address), such as `https://gateway.example.com`, without `/ui`.
+3. Enter your Secret Key, give the connection profile a recognizable name, and click “连接工作区” (connect to workspace).
+
+<details>
+<summary>View the browser connection page</summary>
+
+![Dashboard connection page with gateway selection, Secret Key input, and connection profile](docs/screenshots/dashboard-login.png)
+
+</details>
+
+Connection profiles and SKs are saved in the current browser, so use a trusted device. Favorites and recent tools are also local to the current connection; they do not sync across browsers. Recent history stores tool entry points, not arguments or results. Screenshots show the Chinese interface.
+
+### Find a tool and make your first call
+
+1. Browse “工具” (tools), or use the top search bar (`⌘K` / `Ctrl+K`) to find a command.
+2. Open the command, read its description and parameter requirements, fill in the form, and click “调用” (invoke). Inspect the response and elapsed time on the page.
+3. Expand “等价 CLI / curl” to move the same call into a terminal or script. Favorite the tool to find it on the workspace next time.
+
+On a fresh installation, start with the `get` command under `system/status` to read gateway status. The equivalent CLI steps are:
+
+```sh
+tb help system/status
+tb call system/status/get
+```
+
+### Add tools, explore the tree, and manage devices
+
+| Goal | Dashboard action |
+|---|---|
+| Connect a third-party tool | Click “添加工具” (add tool), choose a built-in integration, MCP Server, or HTTP endpoint, and follow the setup form; OAuth integrations also require authorization |
+| Explore the hierarchy | Open “能力树” (capability tree), expand directories, and select a node to inspect its description and commands |
+| Check a computer or phone connection | Open “设备” (devices) to check status; “连接设备” provides connection guidance |
+| Upload, download, or share attachments | Use “文件存储” (file storage) to upload files, copy stable URIs, or create short-lived shares |
+| Scope an agent's access | Issue a path- and action-scoped SK in “访问密钥” (access keys); manage upstream credentials separately in “服务凭证” (service credentials) |
+
+![Browser devices page showing session status and tool entry points for two Linux computers and one phone](docs/screenshots/dashboard-devices.png)
+
+These browser screenshots show a configured instance. Your directories, devices, and available actions depend on what you connect and the current SK's permissions.
+
+Offline devices may remain in the tree. Whether a command can run or accept delayed delivery depends on its current contract and device state; see the [device SDK's Durable Mailbox guide](packages/sdk/README.md#durable-mailbox显式拉取).
+
+## Mobile app
+
+The mobile app separates reading content from agents and managing the phone into two tabs. These real usage screenshots show the inbox on the left and device connection and authorization status on the right.
+
+<table>
+  <tr>
+    <th>Inbox: reports and messages</th>
+    <th>Device: connection and authorization</th>
+  </tr>
+  <tr>
+    <td align="center"><img src="docs/screenshots/mobile-inbox.jpg" alt="Mobile inbox with daily reports, message search, and all/unread filters" width="300" /></td>
+    <td align="center"><img src="docs/screenshots/mobile-device.jpg" alt="Mobile device page with device ID, gateway connection status, and connection and authorization settings" width="300" /></td>
+  </tr>
+</table>
+
+### Read agent reports
+
+Open “信箱” (inbox) to browse report titles and previews. Search for a message or switch to “未读” (unread) to focus on unread content. The screenshot shows release updates and daily news reports, illustrating how outputs from different agents can share one reading surface.
+
+### Check the phone's connection and authorization
+
+1. Open “设备” (device) to check the current device ID and gateway connection state. The ID lets agents identify this phone.
+2. Use “连接配置” (connection settings) to check the target gateway. The phone must be able to reach it; `127.0.0.1` on a phone points to the phone itself, not a gateway running on your computer.
+3. Review the invocation mode in “授权与安全” (authorization and security). “直接调用” (direct invocation) is enabled in this screenshot; that is this device's setting at capture time. System permissions and device restrictions still apply, and an emergency disable option is available.
+4. Check the device in the browser's device page, then let the agent discover its actual exposed commands through live `~help`.
+
+The mobile **inbox** is a message-reading interface for people. **Durable Mailbox**, described below, is the gateway's persistent execution ledger for device commands. They serve different purposes, and Mailbox itself does not wake an app stopped by the operating system.
+
+Gateway addresses, device IDs, and messages in the screenshots are illustrative; use your own connection settings. Refer to the mobile app's release notes for installation and platform availability; this repository does not distribute mobile app installers.
+
 ## Let an agent use tool-bridge directly
 
 The public [`tool-bridge` Agent Skill](https://github.com/TokenRollAI/tool-bridge-skill) installs into compatible agents such as Codex, Claude Code, Cursor, and OpenCode. It does not store a static catalog for one gateway. Instead, it teaches the agent to discover the current gateway through `~search`, `~tree`, and `~help` at runtime:
@@ -128,6 +210,37 @@ The skill verifies the target, searches or browses progressively, reads the tool
 | Share usage experience | Per-path `~feedback`, CLI, Dashboard | Show later agents verified pitfalls and recommendations before they call a tool |
 | Federate teams | Remote nodes, `system/federation` | Mount another HTBP tree without sharing the local caller's credentials |
 | Support MCP clients | `/<base>/~mcp` | Project the current identity's visible tools as an MCP server |
+
+### Ask an agent to inspect phones and Linux devices
+
+After connecting devices, running `tb login`, and installing the Agent Skill, try requests such as:
+
+```text
+Use the tb CLI to tell me the current status of my devices.
+Inspect my two Linux devices using read-only checks. Summarize load, memory, disk usage, and failed services.
+```
+
+The agent discovers devices and commands before reading the status exposed by each device. To start from a terminal:
+
+```sh
+tb device ls
+tb tree device --depth 2
+# Replace <device-path> with an actual path returned above
+tb help <device-path>
+```
+
+These actual conversation screenshots show a computer and phone status summary, including phone battery, network, and runtime state, followed by a comparison of two Linux machines. Results describe those devices at capture time; a fresh installation does not expose all these commands by default.
+
+![Agent using the tb CLI to summarize computer and Android phone connectivity, battery, and network state](docs/screenshots/agent-device-status.png)
+
+<details>
+<summary>View the read-only inspection of two Linux devices</summary>
+
+![Agent comparing load, memory, disk usage, and failed services on two Linux devices](docs/screenshots/agent-linux-inspection.png)
+
+</details>
+
+The Linux example uses the devices' authorized `shell/exec` capability. A newly connected device denies all shell commands until an explicit allowlist is configured; a structured command profile can instead expose fixed diagnostics. Phone commands depend on the app's actual declarations, system permissions, and device authorization. Agents should read live `~help` rather than infer command paths from screenshots.
 
 ### Upload device artifacts and ordinary attachments
 
@@ -343,7 +456,7 @@ tb sk create \
 |---|---|
 | `packages/core` | Pure tree, auth, protocol, store, and builtin logic |
 | `packages/app` | Host-neutral Hono application and provider orchestration |
-| `packages/server` | Node/SQLite/filesystem/WebSocket host |
+| `packages/server` | Node/PostgreSQL/S3/WebSocket host |
 | `packages/cli` | `tb` CLI, device connection, and deployment management |
 | `packages/dashboard` | Web management UI over the public API |
 | `packages/sdk` | Embedded instance, local providers, and reverse connection |
@@ -360,7 +473,7 @@ pnpm verify              # typecheck + lint + test
 pnpm turbo run build     # also required after changing public packages, deps, or build config
 ```
 
-The local Compose flow starts the Node gateway, a real plugin Worker, and an authenticated mock MCP upstream:
+The local Compose stack starts the Node gateway, PostgreSQL, and S3-compatible object storage:
 
 ```sh
 pnpm compose:up
@@ -368,7 +481,7 @@ pnpm compose:smoke
 pnpm compose:down
 ```
 
-Code and generated artifacts are the source of truth for behavior. Start at [`llmdoc/index.md`](llmdoc/index.md) for architecture boundaries, protocol contracts, deployment, and verification guides.
+Code and generated artifacts are the source of truth for behavior. Start at [`llmdoc/architecture.mdx`](llmdoc/architecture.mdx) for architecture boundaries, protocol contracts, deployment, and verification guides.
 
 ## License
 

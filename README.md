@@ -21,6 +21,8 @@ Agent 只需要一个 BaseURL 和一个 Secret Key，就能发现能力、阅读
 > [!IMPORTANT]
 > tool-bridge 目前处于 **pre-launch** 开发阶段。Node/Docker、SDK、CLI 和 Dashboard 已能组成完整使用闭环，但项目尚无正式生产环境，也暂不承诺稳定性 SLA。现在适合自托管试用、内部集成和参与开发；升级前请阅读发布说明并保留数据备份。
 
+**使用导航：** [快速开始](#快速开始本地运行一个网关) · [浏览器 Dashboard](#浏览器-dashboard) · [手机 App](#手机-app) · [Agent 接入](#让-agent-直接使用-tool-bridge) · [使用场景](#现在可以怎么用) · [部署](#部署与嵌入)
+
 ## tool-bridge 是什么
 
 tool-bridge 是 [HTBP（HTTP ToolBridge Protocol）](https://github.com/TokenRollAI/HTBP)的参考实现。它把原本分散在 MCP server、HTTP API、对象存储、本地机器和其他网关里的能力投影到同一棵树上：
@@ -95,6 +97,86 @@ curl -X POST \
 
 `~help` 默认返回 Markdown；使用 `Accept: text/plain` 可获得紧凑 Help DSL，使用 `Accept: application/json` 可获得包含 JSON Schema 的结构化描述。
 
+## 浏览器 Dashboard
+
+安装网关后，打开 `<网关地址>/ui` 即可使用，无需单独安装桌面客户端。Dashboard 与 `tb` CLI 使用同一套权限：当前 SK 看不到的工具，也不会因为进入浏览器就变得可见。
+
+![浏览器能力树：从网关根目录展开设备分支，浏览已接入的电脑和手机](docs/screenshots/dashboard-capability-tree.png)
+
+### 连接你的网关
+
+1. 打开自己部署的 Dashboard，例如 `http://127.0.0.1:8787/ui`。
+2. 使用当前网关时，保留同源连接；连接另一套实例时，填写「其他网关地址」，例如 `https://gateway.example.com`，不带 `/ui`。
+3. 输入访问密钥（Secret Key），为连接填写易辨认的档案名，再点击「连接工作区」。连接成功后进入工作台。
+
+<details>
+<summary>查看浏览器连接页</summary>
+
+![浏览器 Dashboard 连接页：选择网关、输入访问密钥并保存连接档案](docs/screenshots/dashboard-login.png)
+
+</details>
+
+连接档案和 SK 保存在当前浏览器，请在受信任设备上使用。收藏与最近使用也只属于本机的当前连接，不会同步到其他浏览器；最近使用保留工具入口，不保存调用参数和结果。
+
+### 找到工具，完成第一次调用
+
+1. 进入「工具」逐级浏览，或使用顶部搜索（`⌘K` / `Ctrl+K`）查找命令。
+2. 打开命令，阅读说明与参数要求，填写表单后点击「调用」，在页面中查看响应和耗时。
+3. 展开「等价 CLI / curl」，把同一次调用迁移到终端或脚本；点击收藏，下次从工作台直接进入。
+
+刚安装的实例可以先打开 `system/status` 下的 `get` 命令，读取网关状态。对应的 CLI 操作是：
+
+```sh
+tb help system/status
+tb call system/status/get
+```
+
+### 添加工具、浏览能力树与管理设备
+
+| 想做什么 | Dashboard 操作 |
+|---|---|
+| 接入第三方工具 | 点击「添加工具」，选择内置集成、MCP Server 或 HTTP 端点，按向导填写配置；需要 OAuth 的集成还需完成授权 |
+| 查看工具之间的层级关系 | 打开「能力树」，展开目录，选中节点查看说明和命令 |
+| 查看电脑或手机是否连接 | 打开「设备」查看设备状态；「连接设备」提供接入引导 |
+| 上传、下载或分享附件 | 在「文件存储」中上传文件、复制稳定 URI，或创建短期分享 |
+| 给 Agent 分配访问范围 | 在「访问密钥」中签发按路径和动作限制的 SK；第三方服务的上游凭证在「服务凭证」中管理 |
+
+![浏览器设备页：集中查看两台 Linux 电脑和一台手机的会话状态，并进入各设备工具](docs/screenshots/dashboard-devices.png)
+
+以上浏览器截图来自一个已配置的实例；你的目录、设备和可见操作取决于实际接入内容与当前 SK 权限。
+
+设备离线后仍可能保留在能力树中。是否可以调用、是否支持延迟交付，要以命令当前声明的能力和设备状态为准，详见[离线设备交付](#给暂时离线的设备延迟交付)。
+
+## 手机 App
+
+手机端把「查看 Agent 发来的内容」和「管理这台设备」放在两个页签中。下面是实际使用截图：左侧是信箱，右侧是设备连接与授权状态。
+
+<table>
+  <tr>
+    <th>信箱：集中查看报告与消息</th>
+    <th>设备：确认连接与授权状态</th>
+  </tr>
+  <tr>
+    <td align="center"><img src="docs/screenshots/mobile-inbox.jpg" alt="手机 App 信箱页，展示日报消息、搜索框和全部／未读筛选" width="300" /></td>
+    <td align="center"><img src="docs/screenshots/mobile-device.jpg" alt="手机 App 设备页，展示设备 ID、已连接网关以及连接配置和授权与安全入口" width="300" /></td>
+  </tr>
+</table>
+
+### 查看 Agent 报告
+
+进入「信箱」，从消息标题和摘要浏览 Agent 发来的日报、更新汇总等内容；用搜索框查找消息，或切换「未读」筛选待处理内容。截图展示了版本动态与每日资讯报告：可以把不同 Agent 的产出集中到一个阅读入口。
+
+### 确认手机连接与授权
+
+1. 进入「设备」，查看当前设备 ID 和网关连接状态。设备 ID 用于让 Agent 识别这台手机。
+2. 通过「连接配置」检查连接目标。手机需要能访问该网关；手机上的 `127.0.0.1` 指向手机自身，不能用它连接电脑上运行的网关。
+3. 在「授权与安全」中检查调用模式。截图中的「直接调用」已开启，这是该设备当时的设置；系统权限与设备限制仍然有效，也可以紧急停用。
+4. 回到浏览器的「设备」页确认设备状态，让 Agent 通过实时 `~help` 发现该设备实际开放的命令。
+
+手机 App 的「信箱」是面向人的消息阅读界面；下文的 **Durable Mailbox** 是网关为设备命令提供的持久化执行账本。两者用途不同，Mailbox 本身也不会唤醒被系统停止的 App。
+
+截图中的网关地址、设备 ID 和消息仅用于展示，请使用自己的连接配置。手机 App 的安装包与平台支持请以其发布说明为准，本仓库不提供手机 App 安装包。
+
 ## 让 Agent 直接使用 tool-bridge
 
 公开的 [`tool-bridge` Agent Skill](https://github.com/TokenRollAI/tool-bridge-skill) 可以安装到 Codex、Claude Code、Cursor、OpenCode 等兼容 Agent。它不会保存某个实例的静态工具清单，而是让 Agent 从当前网关的 `~search`、`~tree` 与 `~help` 实时发现能力：
@@ -128,6 +210,37 @@ Skill 会先验证目标，再搜索或逐级浏览、读取工具级 schema 与
 | 共享使用经验 | 每个路径的 `~feedback`、CLI、Dashboard | 让后续 Agent 在调用前看到已验证的坑和建议 |
 | 联邦多个团队 | remote 节点、`system/federation` | 把另一棵 HTBP 树挂成子树，不共享本地调用者凭据 |
 | 兼容 MCP 客户端 | `/<base>/~mcp` | 将当前身份可见的工具投影为 MCP server |
+
+### 让 Agent 检查手机与 Linux 设备
+
+接入设备、完成 `tb login` 并安装 Agent Skill 后，可以直接提出这样的请求：
+
+```text
+使用 tb CLI 告诉我现在的设备状态。
+看看我的两台 Linux 设备的运行情况，只做只读检查，汇总负载、内存、磁盘和异常服务。
+```
+
+Agent 先发现设备与命令，再按当前设备开放的能力读取状态。你也可以从终端开始：
+
+```sh
+tb device ls
+tb tree device --depth 2
+# 将 <设备路径> 替换为上一步返回的实际路径
+tb help <设备路径>
+```
+
+下面是两次实际对话截图：第一张汇总电脑和手机的在线状态，并读取手机电量、网络与运行状态；第二张对比两台 Linux 的资源使用和异常服务。具体结果来自截图当时的设备状态，不代表默认安装就开放这些命令。
+
+![Agent 通过 tb CLI 查询电脑和 Android 手机状态，汇总在线状态、电量与网络](docs/screenshots/agent-device-status.png)
+
+<details>
+<summary>展开查看：两台 Linux 设备的只读巡检</summary>
+
+![Agent 对比两台 Linux 设备的负载、内存、磁盘和异常服务，并给出待检查项](docs/screenshots/agent-linux-inspection.png)
+
+</details>
+
+Linux 巡检示例使用设备已授权的 `shell/exec`；新接入设备的 shell 默认拒绝所有命令，需要明确 allowlist，也可以使用结构化命令 profile 暴露固定诊断能力。手机命令以 App 实际声明、系统权限和设备授权为准；Agent 应读取实时 `~help`，不能从截图猜测命令路径。
 
 ### 上传设备产物与普通附件
 
@@ -392,7 +505,7 @@ tb sk create \
 |---|---|
 | `packages/core` | 树、授权、协议、store、builtin 等纯逻辑 |
 | `packages/app` | 宿主中立的 Hono 应用与 provider 编排 |
-| `packages/server` | Node/SQLite/文件/WebSocket 宿主 |
+| `packages/server` | Node/PostgreSQL/S3/WebSocket 宿主 |
 | `packages/cli` | `tb` CLI、设备连接与部署管理 |
 | `packages/dashboard` | 使用公开 API 的 Web 管理面 |
 | `packages/sdk` | 嵌入式实例、本地 provider 与反向连接 |
@@ -409,7 +522,7 @@ pnpm verify              # typecheck + lint + test
 pnpm turbo run build     # 修改可发布包、依赖或打包配置时还必须执行
 ```
 
-本地 Compose 闭环会启动 Node gateway、真实 plugin Worker 和受认证的 mock MCP 上游：
+本地 Compose 栈会启动 Node gateway、PostgreSQL 和 S3 兼容对象存储：
 
 ```sh
 pnpm compose:up
@@ -417,7 +530,7 @@ pnpm compose:smoke
 pnpm compose:down
 ```
 
-代码与生成产物是行为真源。架构边界、协议契约、部署和验证指南从 [`llmdoc/index.md`](llmdoc/index.md) 开始阅读。
+代码与生成产物是行为真源。架构边界、协议契约、部署和验证指南从 [`llmdoc/architecture.mdx`](llmdoc/architecture.mdx) 开始阅读。
 
 ## License
 
