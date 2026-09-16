@@ -536,6 +536,19 @@ pnpm compose:down
 
 代码与生成产物是行为真源。架构边界、协议契约、部署和验证指南从 [`llmdoc/architecture.mdx`](llmdoc/architecture.mdx) 开始阅读。
 
+## 项目支持
+
+<table>
+<tbody>
+<tr>
+<td align="center">
+<a href="https://linux.do"><img src="./docs/assets/linux-do.png" alt="LINUX DO" width="120"></a>
+<br><sub>社区支持</sub>
+</td>
+</tr>
+</tbody>
+</table>
+
 ## License
 
 [MIT](LICENSE)
