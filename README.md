@@ -149,6 +149,10 @@ tb call system/status/get
 
 ## 手机 App
 
+**[App 源码仓库](https://github.com/TokenRollAI/tool-bridge-mobile) · [下载 Android 预览版 APK](https://github.com/TokenRollAI/tool-bridge-mobile/releases)**
+
+在 Releases 中选择所需版本，从 Assets 下载 `.apk` 安装包；平台支持和安装说明以 App 仓库及对应发布说明为准。
+
 手机端把「查看 Agent 发来的内容」和「管理这台设备」放在两个页签中。下面是实际使用截图：左侧是信箱，右侧是设备连接与授权状态。
 
 <table>
@@ -175,7 +179,7 @@ tb call system/status/get
 
 手机 App 的「信箱」是面向人的消息阅读界面；下文的 **Durable Mailbox** 是网关为设备命令提供的持久化执行账本。两者用途不同，Mailbox 本身也不会唤醒被系统停止的 App。
 
-截图中的网关地址、设备 ID 和消息仅用于展示，请使用自己的连接配置。手机 App 的安装包与平台支持请以其发布说明为准，本仓库不提供手机 App 安装包。
+截图中的网关地址、设备 ID 和消息仅用于展示，请使用自己的连接配置。
 
 ## 让 Agent 直接使用 tool-bridge
 

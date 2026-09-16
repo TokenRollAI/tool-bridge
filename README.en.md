@@ -149,6 +149,10 @@ Offline devices may remain in the tree. Whether a command can run or accept dela
 
 ## Mobile app
 
+**[App source repository](https://github.com/TokenRollAI/tool-bridge-mobile) · [Download the Android preview APK](https://github.com/TokenRollAI/tool-bridge-mobile/releases)**
+
+Choose a version on the Releases page and download the `.apk` installer from Assets. See the app repository and the corresponding release notes for platform support and installation instructions.
+
 The mobile app separates reading content from agents and managing the phone into two tabs. These real usage screenshots show the inbox on the left and device connection and authorization status on the right.
 
 <table>
@@ -175,7 +179,7 @@ Open “信箱” (inbox) to browse report titles and previews. Search for a mes
 
 The mobile **inbox** is a message-reading interface for people. **Durable Mailbox**, described below, is the gateway's persistent execution ledger for device commands. They serve different purposes, and Mailbox itself does not wake an app stopped by the operating system.
 
-Gateway addresses, device IDs, and messages in the screenshots are illustrative; use your own connection settings. Refer to the mobile app's release notes for installation and platform availability; this repository does not distribute mobile app installers.
+Gateway addresses, device IDs, and messages in the screenshots are illustrative; use your own connection settings.
 
 ## Let an agent use tool-bridge directly
 
