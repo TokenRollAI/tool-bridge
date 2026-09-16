@@ -487,6 +487,19 @@ pnpm compose:down
 
 Code and generated artifacts are the source of truth for behavior. Start at [`llmdoc/architecture.mdx`](llmdoc/architecture.mdx) for architecture boundaries, protocol contracts, deployment, and verification guides.
 
+## Project support
+
+<table>
+<tbody>
+<tr>
+<td align="center">
+<a href="https://linux.do"><img src="./docs/assets/linux-do.png" alt="LINUX DO" width="120"></a>
+<br><sub>Community support</sub>
+</td>
+</tr>
+</tbody>
+</table>
+
 ## License
 
 [MIT](LICENSE)
