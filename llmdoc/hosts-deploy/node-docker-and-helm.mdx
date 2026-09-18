@@ -1,5 +1,5 @@
 ---
-description: Node/Compose/Railway/Helm 自托管部署：零 env 安装、PG/S3 持久卷、探针与响应流排空、受限 deployment agent 与 Redis 多副本路由。
+description: Node/Compose/Railway/Helm 自托管部署：GHCR 单文件部署与显式源码构建、零 env 安装、PG/S3 持久卷、探针与响应流排空、受限 deployment agent 与 Redis 多副本路由。
 kind: guide
 relations:
   related:
@@ -32,6 +32,7 @@ code:
     - Dockerfile
     - Dockerfile.railway
     - docker-compose.yml
+    - docker-compose.build.yml
     - deploy/compose/docker-compose.yml
     - deploy/helm/tool-bridge/values.yaml
     - deploy/helm/tool-bridge/templates/deployment.yaml
@@ -48,7 +49,9 @@ code:
 
 ## Compose 与镜像
 
-根 `docker-compose.yml` 用于本地构建，`deploy/compose/docker-compose.yml` 使用已发布镜像。默认栈包含独立 init、PG、SeaweedFS、init-bucket 与 app；镜像版本/摘要以清单为准，不在知识里手抄。init 自动生成应用/管理员数据库凭证和 S3 installer/应用凭证，最小权限文件分别只挂到需要的服务。app 只拿 bootstrap 卷，不挂 Docker socket；对象字节只在对象服务的数据卷。
+根 `docker-compose.yml` 与 `deploy/compose/docker-compose.yml` 都默认使用 GHCR 已发布镜像，单独下载清单即可部署，不依赖源码或宿主构建产物。源码开发须显式叠加 `docker-compose.build.yml`，让 app、init 与 init-bucket 使用同一本地构建镜像，避免应用与安装器版本混用；默认启动命令不触发源码构建。
+
+默认栈包含独立 init、PG、SeaweedFS、init-bucket 与 app；镜像版本/摘要以清单为准，不在知识里手抄。init 自动生成应用/管理员数据库凭证和 S3 installer/应用凭证，最小权限文件分别只挂到需要的服务。app 只拿 bootstrap 卷，不挂 Docker socket；对象字节只在对象服务的数据卷。
 
 首次启动检查 init 完成、PG/S3 可用、受保护配对、setup ready 与业务授权调用。`/healthz` 在安装态仍能成功，这是为了让安装面存活；不能把 Docker HEALTHCHECK healthy 当作安装已经完成。首次安装、重新构建应用和重启 PG/S3 是不同验收，必须分别证明身份、配置和对象字节仍可恢复。`down` 与删卷重置不同，清空卷必须是明确的数据丢弃操作。
 
