@@ -76,6 +76,16 @@ docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
 
 Both the root Compose file and [`deploy/compose/docker-compose.yml`](deploy/compose/docker-compose.yml) default to a pinned GHCR image. Source builds require the explicit [`docker-compose.build.yml`](docker-compose.build.yml) override.
 
+To restart the full stack, use the following sequence so the app waits for a healthy PostgreSQL service and completed bucket initialization. Restarting all services simultaneously can put the app into recovery mode while the database is still starting:
+
+```sh
+docker compose stop app
+docker compose stop postgres objects
+docker compose up -d
+```
+
+To restart only the app, use `docker compose restart app`. If the app entered recovery mode during dependency startup, restart it after the dependencies are ready to reconnect to the existing instance.
+
 ### 2. Log in, discover, and invoke with the CLI
 
 ```sh

@@ -76,6 +76,16 @@ docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
 
 根目录与 [`deploy/compose/docker-compose.yml`](deploy/compose/docker-compose.yml) 均默认使用固定版本的 GHCR 镜像；源码构建需要显式叠加 [`docker-compose.build.yml`](docker-compose.build.yml)。
 
+重启整套服务时，使用以下顺序，让应用在 PostgreSQL 健康、对象桶初始化完成后启动；直接同时 `restart` 全部服务可能使应用因数据库尚未就绪进入恢复态：
+
+```sh
+docker compose stop app
+docker compose stop postgres objects
+docker compose up -d
+```
+
+仅重启应用可用 `docker compose restart app`。如果依赖服务启动期间应用已进入恢复态，待依赖就绪后重启应用即可重新连接原实例。
+
 ### 2. 用 CLI 登录、发现和调用
 
 ```sh
