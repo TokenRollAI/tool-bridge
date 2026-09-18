@@ -166,3 +166,4 @@ jobs:
           docker compose config --quiet
           docker compose -f deploy/compose/docker-compose.yml config --quiet
           docker compose --profile replicas config --quiet
+          docker compose -f docker-compose.yml -f docker-compose.build.yml config --quiet

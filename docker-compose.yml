@@ -1,10 +1,7 @@
 name: tool-bridge
 
 x-app-image: &app-image
-  image: tool-bridge:local
-  build:
-    context: .
-    dockerfile: Dockerfile
+  image: ghcr.io/tokenrollai/tool-bridge:0.22.0
 
 services:
   init:

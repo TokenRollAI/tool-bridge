@@ -52,20 +52,29 @@ Agent / CLI / Dashboard / MCP client
 
 ## 快速开始：本地运行一个网关
 
-默认 Docker Compose 栈包含应用、PostgreSQL 和 S3 兼容对象存储。需要安装 Docker（含 Compose）；安装器会自动生成基础设施凭证。
+默认 Docker Compose 栈使用 GHCR 预构建应用镜像，包含 PostgreSQL 和 S3 兼容对象存储。只需安装 Docker（含 Compose）并下载一份 Compose 文件，无需克隆源码或本地构建；安装器会自动生成基础设施凭证。
 
 ### 1. 启动并配对实例
 
 ```sh
-git clone https://github.com/TokenRollAI/tool-bridge.git
+mkdir -p tool-bridge
 cd tool-bridge
-docker compose up -d --build
+curl -fsSL https://raw.githubusercontent.com/TokenRollAI/tool-bridge/main/docker-compose.yml -o docker-compose.yml
+docker compose up -d
 docker compose exec -T app node /app/dist/admin.js pair
 ```
 
 打开 [http://127.0.0.1:8787/ui/setup](http://127.0.0.1:8787/ui/setup)，输入一次性配对凭证，使用内置数据库和对象存储完成安装。将安装成功后显示的 Admin SK 保存到密码管理器，后续登录时使用。PostgreSQL、对象存储和 bootstrap 身份/密钥分别保存在 Docker 持久卷中。
 
 希望直接托管到云上？跳到 [Railway 快速部署](#railway)。
+
+需要从源码构建时，克隆本仓库并在仓库根目录运行：
+
+```sh
+docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
+```
+
+根目录与 [`deploy/compose/docker-compose.yml`](deploy/compose/docker-compose.yml) 均默认使用固定版本的 GHCR 镜像；源码构建需要显式叠加 [`docker-compose.build.yml`](docker-compose.build.yml)。
 
 ### 2. 用 CLI 登录、发现和调用
 

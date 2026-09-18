@@ -1,0 +1,14 @@
+# 源码开发时显式叠加：docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
+x-local-build: &local-build
+  image: tool-bridge:local
+  build:
+    context: .
+    dockerfile: Dockerfile
+
+services:
+  init:
+    <<: *local-build
+  init-bucket:
+    <<: *local-build
+  app:
+    <<: *local-build
