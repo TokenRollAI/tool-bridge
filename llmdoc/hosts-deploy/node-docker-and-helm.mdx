@@ -55,6 +55,8 @@ code:
 
 首次启动检查 init 完成、PG/S3 可用、受保护配对、setup ready 与业务授权调用。`/healthz` 在安装态仍能成功，这是为了让安装面存活；不能把 Docker HEALTHCHECK healthy 当作安装已经完成。首次安装、重新构建应用和重启 PG/S3 是不同验收，必须分别证明身份、配置和对象字节仍可恢复。`down` 与删卷重置不同，清空卷必须是明确的数据丢弃操作。
 
+正常 `docker compose up` 在 PostgreSQL 健康、init 与 init-bucket 成功完成后才启动 app。整组重启须先完整停止 app，使 runtime 登记和租约在 PG 可达时释放，再停止 PG/S3，最后通过 `up` 恢复依赖顺序。不能从这些启动闸门推导任意并发 `restart` 或 Docker daemon 重启都能自动恢复：应用启动失败会进入 recovery，不会自动重试 launch；依赖就绪后须重启 app，并重新核验原实例身份、权限、配置与对象字节。
+
 正式镜像同时携带应用、Dashboard 和官方 PG dump/restore 客户端，运行用户无 root 权限；installer 的初始化容器才执行所需 owner 设置。镜像构建不得依赖宿主已存在 dist，Node 二进制与运行基础镜像也必须匹配。runtime 基于 Node slim，安装官方 PGDG client 工具，不继承数据库 server 镜像及其隐式 VOLUME。
 
 ## 探针、反向代理与关停
@@ -107,5 +109,7 @@ Node DeviceHub 保有本副本活 socket，DeviceRouter 通过 Redis 路由到�
 服务器以 PG replica registry 和共享 session lock 登记 runtime；没有 Redis 时拒绝启动第二个活跃副本，持久数据库 fence 与 key maintenance fence 也阻止不安全登记。多副本运行与停写维护不同：维护要求其它副本正常 drain 并删除登记，过期 heartbeat 或断开的 session 都不能替代该证明；崩溃残留走 [离线恢复边界](./maintenance-and-keys.mdx)。
 
 ## 部署验证
+
+预构建镜像部署须以 Registry 的实际产物核验所选标签存在且支持目标平台，通过检查 manifest 或实际拉取取得证据。Compose 配置解析、源码测试与发布 workflow 成功记录都不能替代产物核验；拉取成功仍须分别验收初始化、业务功能与持久性，不能据此宣称部署闭环完成。
 
 `pnpm verify` 与 `pnpm turbo run build` 是工程底线，不能替代生命周期验收：关停设置用真实子进程 SIGTERM 与未结束请求验证；维护从实际编码/别名 HTTP 入口进入，并与阻塞写入、并发 SIGTERM 组合验证写入完成和最终登记清空；真实慢响应验证 body 完成/取消/错误前的计数与背压；可选目录清空核对实际 Compose mount 与镜像内 UI。后端测试使用隔离本地 PG/S3/Redis，先完成 server.close 再删除 schema，不能为错误 teardown 顺序削弱生产租约 guard；缺 env 不静默跳过；部署还需验证持久性和失败回滚。真实平台验证遵守授权与每轮一次资源约束，证据留在验收记录，不把运行 URL、资源 ID 或测试次数写入知识。
