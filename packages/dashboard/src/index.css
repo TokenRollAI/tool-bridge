@@ -10,87 +10,81 @@
 
 @custom-variant dark (&:is(.dark *));
 
-/* 工作台统一语义主题：中性实底、清晰文字层次、少量品牌黄。 */
 :root {
-  /* 黑 / 白 / 黄 三色体系。中性面近乎无彩(极低 chroma、微暖 hue 85),
-     强调只走黄色家族:文字/图标用可读的深金(--primary),实底填充用亮黄(--brand)。 */
-  --background: oklch(0.99 0.002 85);
-  --foreground: oklch(0.2 0.004 75);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.2 0.004 75);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.2 0.004 75);
-  /* 文字/图标强调:深金,在白底上对比达标(不可用亮黄做前景)。 */
-  --primary: oklch(0.49 0.1 78);
-  --primary-foreground: oklch(0.2 0.02 70);
-  --secondary: oklch(0.955 0.004 85);
-  --secondary-foreground: oklch(0.3 0.006 75);
-  --muted: oklch(0.955 0.004 85);
-  --muted-foreground: oklch(0.5 0.008 75);
-  --accent: oklch(0.95 0.03 90);
-  --accent-foreground: oklch(0.32 0.04 70);
-  --destructive: oklch(0.57 0.2 27);
-  --destructive-foreground: oklch(0.99 0 0);
-  --border: oklch(0.9 0.004 85);
-  --input: oklch(0.87 0.004 85);
-  --ring: oklch(0.49 0.1 78);
-  --radius: 0.75rem;
-  --ok: oklch(0.62 0.15 165);
-  --warn: oklch(0.51 0.12 55);
-  /* 应用框架层级:activity rail → resource explorer → workspace → raised card。 */
-  --rail: oklch(0.955 0.004 85);
-  --panel: oklch(0.975 0.003 88);
-  --panel-raised: oklch(1 0 0);
-
-  /* 品牌渐变端点(亮黄→暖金)。仅用于 CTA 实底/强调条,始终配深色文字。 */
-  --brand-from: oklch(0.86 0.17 92);
-  --brand-to: oklch(0.8 0.16 72);
-  /* 玻璃表面:半透明底 + 描边 + 高光 + 景深投影。浅色主题下用近白高透。 */
-  --glass-bg: color-mix(in oklch, var(--card) 72%, transparent);
-  --glass-border: color-mix(in oklch, var(--foreground) 12%, transparent);
-  --glass-highlight: color-mix(in oklch, white 60%, transparent);
-  --glass-shadow: 0 8px 32px -12px oklch(0.35 0.01 80 / 0.24);
-  --glass-blur: 10px;
-  /* 品牌发光(hover/active/焦点强调用;克制)。 */
-  --glow-brand: 0 0 18px -8px color-mix(in oklch, var(--brand-from) 55%, transparent);
+  --background: #FFFFFF;
+  --panel: #F6F6F8;
+  --rail: #F6F6F8;
+  --card: #FFFFFF;
+  --popover: #FFFFFF;
+  --panel-raised: #EEEEF2;
+  --foreground: #09090B;
+  --card-foreground: #09090B;
+  --popover-foreground: #09090B;
+  --primary: #09090B;
+  --primary-foreground: #FFFFFF;
+  --secondary: #EFEFF3;
+  --secondary-foreground: #09090B;
+  --muted: #EFEFF3;
+  --muted-foreground: #52525B;
+  --accent: #E4E4EA;
+  --accent-foreground: #09090B;
+  --border: #E4E4E8;
+  --input: #6D6D78;
+  --ring: #8A5A00;
+  --ok: #146C43;
+  --ok-soft: #E8F6EE;
+  --warn: #8A5A00;
+  --warn-soft: #FFF4D1;
+  --destructive: #B92534;
+  --destructive-foreground: #FFFFFF;
+  --destructive-soft: #FFF0F2;
+  --signal: #8A5A00;
+  --signal-soft: #FFF4D1;
+  --info: #0369A1;
+  --info-soft: #E8F4FD;
+  --ink-3: #686872;
+  --tone-subtle: #F7F7F9;
+  --edge-strong: #D4D4DC;
+  --radius: 0.5rem;
+  --scrim: #09090B73;
 }
 
 .dark {
-  /* 黑底 + 亮黄强调。中性面走近乎无彩的暖灰(hue 80),纯黑不用死黑(0)以留层次。 */
-  --background: oklch(0.165 0.003 80);
-  --foreground: oklch(0.92 0.004 85);
-  --card: oklch(0.195 0.004 80);
-  --card-foreground: oklch(0.92 0.004 85);
-  --popover: oklch(0.185 0.004 80);
-  --popover-foreground: oklch(0.92 0.004 85);
-  /* 深色下亮黄做前景可读,直接用品牌黄。 */
-  --primary: oklch(0.85 0.16 90);
-  --primary-foreground: oklch(0.18 0.03 80);
-  --secondary: oklch(0.255 0.005 80);
-  --secondary-foreground: oklch(0.9 0.004 85);
-  --muted: oklch(0.245 0.005 80);
-  --muted-foreground: oklch(0.68 0.008 82);
-  --accent: oklch(0.3 0.04 88);
-  --accent-foreground: oklch(0.9 0.08 92);
-  --destructive: oklch(0.64 0.2 27);
-  --destructive-foreground: oklch(0.99 0 0);
-  --border: oklch(0.29 0.005 80);
-  --input: oklch(0.31 0.006 80);
-  --ring: oklch(0.85 0.16 90);
-  --ok: oklch(0.74 0.16 165);
-  --warn: oklch(0.8 0.14 80);
-  --rail: oklch(0.11 0.003 80);
-  --panel: oklch(0.145 0.003 80);
-  --panel-raised: oklch(0.21 0.005 80);
-
-  --brand-from: oklch(0.87 0.17 92);
-  --brand-to: oklch(0.8 0.16 72);
-  --glass-bg: color-mix(in oklch, var(--card) 58%, transparent);
-  --glass-border: color-mix(in oklch, white 12%, transparent);
-  --glass-highlight: color-mix(in oklch, white 14%, transparent);
-  --glass-shadow: 0 12px 40px -14px oklch(0 0 0 / 0.5);
-  --glass-blur: 12px;
-  --glow-brand: 0 0 20px -6px color-mix(in oklch, var(--brand-from) 50%, transparent);
+  --background: #09090B;
+  --panel: #101013;
+  --rail: #101013;
+  --card: #16161A;
+  --popover: #16161A;
+  --panel-raised: #1E1E24;
+  --foreground: #F4F4F6;
+  --card-foreground: #F4F4F6;
+  --popover-foreground: #F4F4F6;
+  --primary: #F4F4F6;
+  --primary-foreground: #09090B;
+  --secondary: #1E1E24;
+  --secondary-foreground: #F4F4F6;
+  --muted: #1E1E24;
+  --muted-foreground: #B4B4BC;
+  --accent: #292932;
+  --accent-foreground: #F4F4F6;
+  --border: #242429;
+  --input: #8C8C96;
+  --ring: #F5C451;
+  --ok: #6EE7A8;
+  --ok-soft: #13291E;
+  --warn: #F5C451;
+  --warn-soft: #2A2210;
+  --destructive: #FF9DA6;
+  --destructive-foreground: #2B0B12;
+  --destructive-soft: #381D23;
+  --signal: #F5C451;
+  --signal-soft: #2A2210;
+  --info: #7DD3FC;
+  --info-soft: #12283A;
+  --ink-3: #8A8A94;
+  --tone-subtle: #141418;
+  --edge-strong: #383842;
+  --scrim: #000000B8;
 }
 
 @theme inline {
@@ -117,12 +111,21 @@
   --color-warn: var(--warn);
   --color-panel: var(--panel);
   --color-panel-raised: var(--panel-raised);
-  --color-brand-from: var(--brand-from);
-  --color-brand-to: var(--brand-to);
+  --color-signal: var(--signal);
+  --color-signal-soft: var(--signal-soft);
+  --color-ok-soft: var(--ok-soft);
+  --color-warn-soft: var(--warn-soft);
+  --color-destructive-soft: var(--destructive-soft);
+  --color-info: var(--info);
+  --color-info-soft: var(--info-soft);
+  --color-tone-subtle: var(--tone-subtle);
+  --color-edge-strong: var(--edge-strong);
+  --color-ink-3: var(--ink-3);
+  --color-scrim: var(--scrim);
   --radius-sm: calc(var(--radius) - 4px);
-  --radius-md: calc(var(--radius) - 2px);
+  --radius-md: var(--radius);
   --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) + 4px);
+  --radius-xl: 14px;
   --font-sans: 'IBM Plex Sans Variable', ui-sans-serif, system-ui, sans-serif;
   --font-mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', monospace;
 }
@@ -165,34 +168,32 @@
   }
 }
 
-/* 旧页面共享类收敛到同一套不透明面板，保留类名以兼容现有表单。 */
-.glass,
-.glass-raised {
-  background: var(--card);
-  border: 1px solid var(--border);
-}
-
-.glass-raised {
-  box-shadow: 0 8px 32px -16px oklch(0 0 0 / 0.2);
-}
-
-.text-brand { color: var(--primary); }
-.bg-brand { background: var(--brand-from); }
-.tb-canvas { background-color: var(--panel); }
+.tb-canvas { background-color: var(--background); }
 
 @layer components {
   .workspace-page {
     @apply mx-auto w-full max-w-7xl px-4 py-6 sm:px-7 lg:px-10 lg:py-9;
   }
-  .workspace-shortcut {
-    @apply flex min-h-12 min-w-0 items-center gap-3 rounded-lg border bg-card px-4 py-3 text-sm font-medium transition-colors hover:bg-secondary/50 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none;
-  }
+}
+
+/* RJSF 自带 shadcn 样式；危险操作与字段沿用同一主题契约。 */
+.tb-schema-form .bg-destructive {
+  background-color: var(--destructive);
+  color: var(--destructive-foreground);
+}
+
+.tb-schema-form :is(input, textarea, [role="combobox"]):focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
 }
 
 /* 触屏扩大真实交互目标，不改变桌面信息密度。 */
 @media (pointer: coarse) {
   [data-slot="button"],
-  [data-slot="command-item"] { min-height: 44px; }
+  [data-slot="command-item"] { min-height: 48px; }
+  [data-slot="select-trigger"],
+  [data-slot="input"] { min-height: 48px; }
+  [data-size^="icon"] { min-width: 48px; }
   [data-slot="input"],
   [data-slot="textarea"],
   select { font-size: 16px; }
@@ -216,7 +217,7 @@
 /* 选中节点的连线加重,呼应 Inspector 焦点。 */
 .tb-canvas .react-flow__edge.selected .react-flow__edge-path,
 .tb-canvas .react-flow__edge:focus .react-flow__edge-path {
-  stroke: var(--primary);
+  stroke: var(--signal);
 }
 
 @media (prefers-reduced-motion: reduce) {
