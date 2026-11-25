@@ -6,73 +6,73 @@
   },
   "documents": {
     "app-runtime/host-neutral-assembly.mdx": {
-      "validatedRevision": "b7c8bc5f595b8e1c781a92f8a1d95bfda78a17dc"
+      "validatedRevision": "fbd9c512008b08799ea79bf2a64f2daf73df55cd"
     },
     "app-runtime/mcp-interop.mdx": {
-      "validatedRevision": "b7c8bc5f595b8e1c781a92f8a1d95bfda78a17dc"
+      "validatedRevision": "fbd9c512008b08799ea79bf2a64f2daf73df55cd"
     },
     "architecture.mdx": {
-      "validatedRevision": "b7c8bc5f595b8e1c781a92f8a1d95bfda78a17dc"
+      "validatedRevision": "fbd9c512008b08799ea79bf2a64f2daf73df55cd"
     },
     "cli/agent-skill-integration.mdx": {
-      "validatedRevision": "b7c8bc5f595b8e1c781a92f8a1d95bfda78a17dc"
+      "validatedRevision": "fbd9c512008b08799ea79bf2a64f2daf73df55cd"
     },
     "cli/argument-contract.mdx": {
-      "validatedRevision": "b7c8bc5f595b8e1c781a92f8a1d95bfda78a17dc"
+      "validatedRevision": "fbd9c512008b08799ea79bf2a64f2daf73df55cd"
     },
     "dashboard/canvas-architecture.mdx": {
-      "validatedRevision": "b7c8bc5f595b8e1c781a92f8a1d95bfda78a17dc"
+      "validatedRevision": "fbd9c512008b08799ea79bf2a64f2daf73df55cd"
     },
     "device/device-daemon.mdx": {
-      "validatedRevision": "b7c8bc5f595b8e1c781a92f8a1d95bfda78a17dc"
+      "validatedRevision": "fbd9c512008b08799ea79bf2a64f2daf73df55cd"
     },
     "device/websocket-sessions.mdx": {
-      "validatedRevision": "b7c8bc5f595b8e1c781a92f8a1d95bfda78a17dc"
+      "validatedRevision": "fbd9c512008b08799ea79bf2a64f2daf73df55cd"
     },
     "hosts-deploy/node-docker-and-helm.mdx": {
-      "validatedRevision": "8ee80df623c5e8917dd1f0235fca4e026be72a1a"
+      "validatedRevision": "fbd9c512008b08799ea79bf2a64f2daf73df55cd"
     },
     "hosts-deploy/state-store-decision.mdx": {
-      "validatedRevision": "fca74657f159c6a41b0a58abceb44243f025af5d"
+      "validatedRevision": "fbd9c512008b08799ea79bf2a64f2daf73df55cd"
     },
     "plugins/designing-and-migrating-plugins.mdx": {
-      "validatedRevision": "fca74657f159c6a41b0a58abceb44243f025af5d"
+      "validatedRevision": "fbd9c512008b08799ea79bf2a64f2daf73df55cd"
     },
     "plugins/plugin-runtime.mdx": {
-      "validatedRevision": "fca74657f159c6a41b0a58abceb44243f025af5d"
+      "validatedRevision": "fbd9c512008b08799ea79bf2a64f2daf73df55cd"
     },
     "protocol/htbp-contract.mdx": {
-      "validatedRevision": "b7c8bc5f595b8e1c781a92f8a1d95bfda78a17dc"
+      "validatedRevision": "fbd9c512008b08799ea79bf2a64f2daf73df55cd"
     },
     "protocol/security-boundaries.mdx": {
-      "validatedRevision": "b7c8bc5f595b8e1c781a92f8a1d95bfda78a17dc"
+      "validatedRevision": "fbd9c512008b08799ea79bf2a64f2daf73df55cd"
     },
     "release/npm-publishing.mdx": {
-      "validatedRevision": "b7c8bc5f595b8e1c781a92f8a1d95bfda78a17dc"
+      "validatedRevision": "fbd9c512008b08799ea79bf2a64f2daf73df55cd"
     },
     "search/search-index.mdx": {
-      "validatedRevision": "fca74657f159c6a41b0a58abceb44243f025af5d"
+      "validatedRevision": "fbd9c512008b08799ea79bf2a64f2daf73df55cd"
     },
     "store/default-store.mdx": {
       "validatedRevision": "fca74657f159c6a41b0a58abceb44243f025af5d"
     },
     "device/durable-mailbox.mdx": {
-      "validatedRevision": "b7c8bc5f595b8e1c781a92f8a1d95bfda78a17dc"
+      "validatedRevision": "fbd9c512008b08799ea79bf2a64f2daf73df55cd"
     },
     "hosts-deploy/managed-configuration.mdx": {
-      "validatedRevision": "fca74657f159c6a41b0a58abceb44243f025af5d"
+      "validatedRevision": "fbd9c512008b08799ea79bf2a64f2daf73df55cd"
     },
     "hosts-deploy/maintenance-and-keys.mdx": {
-      "validatedRevision": "fca74657f159c6a41b0a58abceb44243f025af5d"
+      "validatedRevision": "fbd9c512008b08799ea79bf2a64f2daf73df55cd"
     },
     "store/storage-backends.mdx": {
       "validatedRevision": "b7c8bc5f595b8e1c781a92f8a1d95bfda78a17dc"
     },
     "device/process-sessions.mdx": {
-      "validatedRevision": "54ff238d969dd5700f3ecb64c890f077f826e864"
+      "validatedRevision": "fbd9c512008b08799ea79bf2a64f2daf73df55cd"
     },
     "events/durable-topics.mdx": {
-      "validatedRevision": null
+      "validatedRevision": "fbd9c512008b08799ea79bf2a64f2daf73df55cd"
     }
   },
   "convergence": {
