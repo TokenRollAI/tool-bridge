@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises'
 import { Command } from 'commander'
 import type { Page } from '../types'
+import { pluginDevCommand, pluginDevWorkerCommand, pluginInitCommand } from './pluginAuthor'
 import { parsePageOpts, resolveTarget, withGlobalOpts, withPageOpts } from '../args'
 import { printJson, printLine, table } from '../output'
 import { confirmDestructive } from '../confirm'
@@ -21,7 +22,7 @@ export type {
   PluginView as PluginManifest,
   PluginRegistration,
 } from '@tool-bridge/core'
-import type { PluginView as PluginManifest, PluginRegistration } from '@tool-bridge/core'
+import type { PluginView as PluginManifest, PluginRegistration, PluginUpgradePreview } from '@tool-bridge/core'
 
 /** health cmd 返回(探活:独立 key,按需刷新)。 */
 export interface PluginHealth {
@@ -141,6 +142,14 @@ export function pluginGetCommand() {
       printLine(`auth:             ${m.auth?.kind ?? '-'}`)
       printLine(`healthPath:       ${m.healthPath}`)
       printLine(`state:            ${m.enabled ? 'enabled' : 'disabled'}`)
+      if (m.distribution) {
+        for (const label of ['active', 'previous', 'rolledBackFrom'] as const) {
+          const release = m.distribution[label]
+          if (!release) continue
+          printLine(`${label}: ${release.version}  ${release.source}  ${release.digest}`)
+          if (release.image) printLine(`image: ${release.image}`)
+        }
+      }
       // v2:「提供什么」在 export 上 —— 逐个列出,并给出它对应的挂载命令
       // (profile 决定挂成哪种节点,用户不必自己换算)。
       printLine('exports:')
@@ -234,9 +243,48 @@ export function pluginRmCommand() {
     })
 }
 
+async function changeRelease(action: string, opts: Parameters<typeof resolveTarget>[0] & { json?: boolean }, input: Record<string, unknown>) {
+  const result = await callDirect<PluginManifest>(resolveTarget(opts), '/system/plugin/' + action, input)
+  if (opts.json) printJson(result)
+  else printLine(`${result.id}  ${result.distribution?.active.version}  ${result.endpoint}`)
+}
+
 export function pluginCommand() {
   return new Command('plugin')
-    .description('Manage plugins (system/plugin; admin scope)')
+    .description('Develop local plugins and manage registered plugins')
+    .addCommand(pluginInitCommand())
+    .addCommand(pluginDevCommand())
+    .addCommand(pluginDevWorkerCommand(), { hidden: true })
+    .addCommand(withGlobalOpts(new Command('install'), 600)
+      .description('Install an HTTPS manifest, npm version page, GitHub Release page, npm:name@version or github:owner/repo@tag')
+      .argument('<source>')
+      .requiredOption('--secret-ref <name>', 'Existing plugin bearer secret')
+      .option('--origin <url>', 'Approved HTTPS origin for hosted endpoints')
+      .action((source, opts) => changeRelease('install', opts, { source, secretRef: opts.secretRef, origin: opts.origin })))
+    .addCommand(withGlobalOpts(new Command('preview'), 600)
+      .description('Preview export changes and affected mounts; OCI starts or reuses the candidate without switching traffic')
+      .argument('<id>').argument('[source]')
+      .action(async (id, source, opts) => {
+        const result = await callDirect<PluginUpgradePreview>(resolveTarget(opts), '/system/plugin/preview', { id, source })
+        if (opts.json) return printJson(result)
+        printLine(`${result.id}: ${result.currentVersion} → ${result.candidateVersion}`)
+        printLine(`Added exports: ${result.addedExports.join(', ') || '-'}`)
+        printLine(`Removed exports: ${result.removedExports.join(', ') || '-'}`)
+        printLine(`Changed exports: ${result.changedExports.join(', ') || '-'}`)
+        printLine(`Affected mounts: ${result.affectedMounts.join(', ') || '-'}`)
+        printLine(`Incompatible mounts: ${result.incompatibleMounts.join(', ') || '-'}`)
+        if (result.requiresRunner) printLine('The runner started or reused the candidate for this preview.')
+        printLine(`Candidate digest: ${result.candidateDigest}`)
+      }))
+    .addCommand(withGlobalOpts(new Command('upgrade'), 600).alias('refresh')
+      .description('Check and activate a release (defaults to the current source)')
+      .argument('<id>').argument('[source]')
+      .option('--digest <sha256>', 'Require the candidate digest returned by preview')
+      .action((id, source, opts) => changeRelease('upgrade', opts, { id, source, candidateDigest: opts.digest })))
+    .addCommand(withGlobalOpts(new Command('rollback'), 600)
+      .description('Check and restore the previous release')
+      .argument('<id>').option('--digest <sha256>', 'Restore this exact saved manifest digest')
+      .action((id, opts) => changeRelease('rollback', opts, { id, digest: opts.digest })))
     .addCommand(pluginRegisterCommand())
     .addCommand(pluginListCommand())
     .addCommand(pluginGetCommand())

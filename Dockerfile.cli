@@ -6,10 +6,10 @@
 #
 # 多架构发布:
 #   docker buildx build --platform linux/amd64,linux/arm64 \
-#     -f Dockerfile.cli -t ghcr.io/tokenrollai/tool-bridge-cli:0.14.0 --push .
+#     -f Dockerfile.cli -t ghcr.io/tokenrollai/tool-bridge-cli:0.34.0 --push .
 
 ARG BUN_VERSION=1.3.14
-ARG TB_VERSION=0.14.0
+ARG TB_VERSION=0.34.0
 FROM --platform=$BUILDPLATFORM oven/bun:${BUN_VERSION}-alpine AS bun
 
 FROM --platform=$BUILDPLATFORM node:22-alpine AS build
@@ -21,11 +21,11 @@ RUN corepack enable
 
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json ./
 COPY packages ./packages
-# CLI 现在通过 tsup source alias 内联 SDK client/device/store；必须先用与 npm
+# CLI 通过 tsup 内联 SDK client/device/store 和插件开发网关。先用与 npm
 # 产物相同的 tsup 路径构建，再让 Bun 编译单文件 dist。只安装该闭包，
 # 不拉 Dashboard/Workers/server 等无关工作区。
 RUN pnpm install --frozen-lockfile --ignore-scripts \
-      --filter @tool-bridge/cli --filter @tool-bridge/core --filter @tool-bridge/sdk \
+      --filter @tool-bridge/cli --filter @tool-bridge/core --filter @tool-bridge/sdk --filter @tool-bridge/app \
     && pnpm --filter @tool-bridge/cli build
 
 ARG TARGETARCH
@@ -38,6 +38,7 @@ RUN test "$(node -p "require('./packages/cli/package.json').version")" = "$TB_VE
     && mkdir -p /out \
     && bun build packages/cli/dist/index.js \
       --compile \
+      --compile-autoload-package-json \
       --minify \
       --target="$bun_target" \
       --outfile=/out/tb

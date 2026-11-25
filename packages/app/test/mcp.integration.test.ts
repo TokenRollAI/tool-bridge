@@ -74,16 +74,23 @@ async function mountHttp(path: string): Promise<void> {
 }
 
 async function mountMcp(path: string): Promise<void> {
-  const response = await postJson('system/registry/write', {
-    path,
-    kind: 'mcp',
-    description: `${path} MCP`,
-    config: { kind: 'mcp', url: 'https://round15-mcp-upstream.test/mcp' },
-  },
-  admin(),
-  )
-  expect(response.status).toBe(200)
-  mountedPaths.push(path)
+  // Registration warms the dynamic catalog before each scenario installs its upstream.
+  // Model an offline provider here without making DNS/network calls to the reserved .test host.
+  const probe = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => new Response(null, { status: 503 }))
+  try {
+    const response = await postJson('system/registry/write', {
+      path,
+      kind: 'mcp',
+      description: `${path} MCP`,
+      config: { kind: 'mcp', url: 'https://round15-mcp-upstream.test/mcp' },
+    },
+    admin(),
+    )
+    expect(response.status).toBe(200)
+    mountedPaths.push(path)
+  } finally {
+    probe.mockRestore()
+  }
 }
 
 function stubSimpleMcpUpstream(tools: Array<Record<string, unknown>>): {

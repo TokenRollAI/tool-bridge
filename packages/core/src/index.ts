@@ -40,6 +40,7 @@ export {
   type TBErrorCode,
   type TBErrorOptions,
 } from './errors'
+export * from './events'
 export * from './feedback/store'
 export * from './htbp/helpDsl'
 export * from './htbp/helpMarkdown'
@@ -58,8 +59,10 @@ export * from './plugin/contract'
 export * from './plugin/credential'
 export * from './plugin/dedupe'
 export * from './plugin/envelope'
+export * from './plugin/eventSource'
 export * from './plugin/manifest'
 export * from './plugin/oauth'
+export * from './plugin/release'
 export * from './runtimeConfig'
 export * from './search/pgSearchSql'
 export * from './search/sqlSearchIndex'

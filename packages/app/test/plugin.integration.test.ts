@@ -278,8 +278,12 @@ describe('system/plugin 注册全流程', () => {
       'delete',
       'get',
       'health',
+      'install',
       'list',
+      'preview',
+      'rollback',
       'update',
+      'upgrade',
       'write',
     ])
     expect(json.cmds.every(c => c.scope === 'admin')).toBe(true)

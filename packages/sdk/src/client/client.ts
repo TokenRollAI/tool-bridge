@@ -3,6 +3,14 @@ import {
   deviceOperationIdentityRequestSchema,
   deviceOperationListRequestSchema,
   deviceOperationListResponseSchema,
+  type EventPublishInput,
+  eventPublishSchema,
+  type EventReadInput,
+  type EventReadResult,
+  eventReadResultSchema,
+  eventReadSchema,
+  type EventReceipt,
+  eventReceiptSchema,
   feedbackDetailSchema,
   feedbackListSchema,
   feedbackRemoveResponseSchema,
@@ -163,6 +171,11 @@ export interface ToolBridgeClient {
       input: WireDeviceOperationListRequest,
       opts?: { signal?: AbortSignal },
     ): Promise<{ cursor?: string, items: WireDeviceOperationSummary[] }>
+  }
+  events: {
+    create(path: string, description?: string, opts?: { signal?: AbortSignal }): Promise<WireRegistryNode>
+    publish(path: string, input: EventPublishInput, opts?: { signal?: AbortSignal }): Promise<EventReceipt>
+    read(path: string, input?: EventReadInput, opts?: { signal?: AbortSignal }): Promise<EventReadResult>
   }
   feedback: {
     get(path: string, id: string, opts?: { signal?: AbortSignal }): Promise<WireFeedbackDetail>
@@ -729,12 +742,33 @@ export function createToolBridgeClient(options: ToolBridgeClientOptions): ToolBr
     return parsed(parseJson(response.text), readinessResponseSchema)
   }
 
+  const registerNode: ToolBridgeClient['registerNode'] = async (input, opts = {}) => {
+    const body = parseRequest(input, nodeInputSchema) as WireNodeInput
+    return await requestJson({
+      method: 'POST',
+      path: reservedPath(body.path, '~register'),
+      body,
+      signal: opts.signal,
+    }, registryNodeSchema, true)
+  }
+
   return {
     raw,
     json,
     text,
     invoke,
     invokeJson,
+    events: {
+      create: (path, description = 'Event topic', opts) => registerNode({ path: path.trim().replace(/^\/+|\/+$/g, '').toLowerCase(), kind: 'topic', description }, opts),
+      publish: (path, input, opts = {}) => requestJson({
+        method: 'POST', path: `/${encodeTreePath(path)}/publish`,
+        body: parseRequest(input, eventPublishSchema), signal: opts.signal,
+      }, eventReceiptSchema, true),
+      read: (path, input = {}, opts = {}) => requestJson({
+        method: 'POST', path: `/${encodeTreePath(path)}/read`,
+        body: parseRequest(input, eventReadSchema), signal: opts.signal,
+      }, eventReadResultSchema, true),
+    },
     deviceOperations: {
       async get(deviceId, operationId, opts = {}) {
         const body = parseRequest({ deviceId, operationId }, deviceOperationIdentityRequestSchema)
@@ -790,15 +824,7 @@ export function createToolBridgeClient(options: ToolBridgeClientOptions): ToolBr
       const body = parseRequest(input, toolSearchRequestSchema)
       return await json({ method: 'POST', path: '/~search', body, signal: opts.signal }, toolSearchPageSchema)
     },
-    async registerNode(input, opts = {}) {
-      const body = parseRequest(input, nodeInputSchema) as WireNodeInput
-      return await requestJson({
-        method: 'POST',
-        path: reservedPath(body.path, '~register'),
-        body,
-        signal: opts.signal,
-      }, registryNodeSchema, true)
-    },
+    registerNode,
     async startOAuthAuthorization(path, input = {}, opts = {}) {
       const body = parseRequest(input, oauthAuthorizeRequestSchema)
       return await requestJson({

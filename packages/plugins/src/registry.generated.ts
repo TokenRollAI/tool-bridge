@@ -44,6 +44,7 @@ export const BUILTIN_PLUGIN_LOADERS: Record<string, () => Promise<BuiltinPluginM
   geocodio: () => import('./geocodio/index') as Promise<BuiltinPluginModule>,
   ghost: () => import('./ghost/index') as Promise<BuiltinPluginModule>,
   github: () => import('./github/index') as Promise<BuiltinPluginModule>,
+  github_events: () => import('./github_events/index') as Promise<BuiltinPluginModule>,
   gmail: () => import('./gmail/index') as Promise<BuiltinPluginModule>,
   googlecalendar: () => import('./googlecalendar/index') as Promise<BuiltinPluginModule>,
   googledocs: () => import('./googledocs/index') as Promise<BuiltinPluginModule>,

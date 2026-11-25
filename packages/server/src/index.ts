@@ -10,15 +10,17 @@ export {
 export { type KeyManagementHooks, KeyManager } from './keyManager'
 export { type MaintenanceHooks, MaintenanceManager } from './maintenanceManager'
 export { createManagedServer, type ManagedServerOptions } from './managedServer'
+export { PgEventRepository } from './pgEventRepository'
 export { PgKeyRotation } from './pgKeyRotation'
 export { PgMailboxRepository } from './pgMailboxRepository'
 export { PgSearchIndex } from './pgSearchIndex'
 export { PgStateStore } from './pgStateStore'
 export { PgStoreRepository } from './pgStoreRepository'
 export { RedisDeviceRouterBackend } from './redisDeviceRouter'
-export { createS3ObjectStore, type S3ObjectStore, type S3ObjectStoreOptions } from './s3Objects'
 
+export { createS3ObjectStore, type S3ObjectStore, type S3ObjectStoreOptions } from './s3Objects'
 export { probeS3ObjectStore, type S3ProbeResult } from './s3Probe'
+
 export { createTbServer, type TbServer } from './server'
 
 export { StorageManager } from './storageManager'

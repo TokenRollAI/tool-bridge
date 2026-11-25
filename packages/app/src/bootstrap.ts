@@ -18,7 +18,8 @@ import {
   type StateStore,
   TBError,
 } from '@tool-bridge/core'
-import { fetchPluginContract, type PluginBindings, probePlugin } from './providers/pluginClient'
+import { fetchPluginContract, type PluginBindings, probePlugin, verifyReleaseAuth } from './providers/pluginClient'
+import { resolvePluginRelease } from './providers/pluginRelease'
 
 /** 引导时注册的内置节点(system directory + builtin;feedback 走 ~feedback 保留段,非 builtin)。 */
 const BUILTIN_MODULES = [
@@ -141,6 +142,7 @@ export interface BuiltinAssemblyOpts {
   pluginBindings?: PluginBindings
   /** 内置插件目录 descriptor;`system/catalog` 的数据源(只读)。 */
   pluginCatalog?: BuiltinCatalog
+  preparePluginImage?: import('@tool-bridge/core').PreparePluginImage
   /** remote 联邦白名单的 env 基线(TB_REMOTE_ALLOWLIST 解析后;供 system/federation list 标注不可删)。 */
   remoteAllowlistBase: string[]
   secrets: SecretStoreImpl
@@ -161,6 +163,9 @@ export function buildDeps(opts: BuiltinAssemblyOpts): BuiltinDeps {
     // plugin 模块:探活/契约抓取的 I/O 回调在此注入,core 保持无 I/O。
     plugin: {
       store: opts.store,
+      resolveRelease: resolvePluginRelease,
+      verifyReleaseAuth: manifest => verifyReleaseAuth(manifest, opts.secrets),
+      prepareImage: opts.preparePluginImage,
       probe: manifest => probePlugin(manifest, opts.pluginBindings),
       fetchContract: manifest => fetchPluginContract(manifest, opts.pluginBindings),
       allowInsecureHttp: opts.allowInsecureHttp,

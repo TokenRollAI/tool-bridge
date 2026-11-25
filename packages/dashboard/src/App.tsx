@@ -13,6 +13,7 @@ const LoginPage = lazy(() =>
 const CanvasPage = lazy(() =>
   import('@/canvas/CanvasPage').then(module => ({ default: module.CanvasPage })),
 )
+const EventsPage = lazy(() => import('@/pages/EventsPage').then(module => ({ default: module.EventsPage })))
 const WorkspacePage = lazy(() => import('@/pages/WorkspacePage').then(module => ({ default: module.WorkspacePage })))
 const ToolsPage = lazy(() => import('@/pages/ToolsPage').then(module => ({ default: module.ToolsPage })))
 const ToolPage = lazy(() => import('@/pages/ToolPage').then(module => ({ default: module.ToolPage })))
@@ -105,6 +106,7 @@ export default function App() {
           <Route element={<DeferredPage><CanvasPage /></DeferredPage>} path="canvas" />
           <Route element={<DeferredPage><KeysPage /></DeferredPage>} path="manage/keys" />
           <Route element={<DeferredPage><MaintenancePage /></DeferredPage>} path="manage/maintenance" />
+          <Route element={<DeferredPage><EventsPage /></DeferredPage>} path="events" />
           <Route element={<DeferredPage><DeploymentPage /></DeferredPage>} path="manage/deployment" />
           <Route element={<DeferredPage><ConfigPage /></DeferredPage>} path="manage/settings/config" />
           <Route element={<DeferredPage><StorageBackendsPage /></DeferredPage>} path="manage/storage" />

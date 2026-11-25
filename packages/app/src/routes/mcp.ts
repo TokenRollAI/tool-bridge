@@ -9,6 +9,7 @@ import type { RouteEnv } from './env'
 import { invokeMcpTarget, mcpPath, mcpRequest, mcpResponse } from '../mcpInvoke'
 import { type AppContext, type TbHono, TOOL_CACHE_TTL_DEFAULT } from '../deps'
 import { handleMcpRequest, type McpToolBridge } from '../mcpServer'
+import { mcpTopicResources } from '../mcpTopics'
 import { runHandler } from '../responses'
 
 const callInput = z.strictObject({
@@ -98,6 +99,7 @@ function mcpBridgeFor(c: AppContext, env: RouteEnv, app: TbHono): McpToolBridge 
   })
 
   return {
+    ...(env.deps.eventRepository ? { topics: mcpTopicResources(c, env.deps.eventRepository, env.deps.eventStreamShutdown) } : {}),
     list: async () => operations.list(),
     call: async (tool, args) => operations.call(tool.name, args, undefined),
   }

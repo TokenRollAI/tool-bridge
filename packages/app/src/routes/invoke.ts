@@ -9,6 +9,7 @@
  * device shell → context/skillhub 动词 → builtin。可见性(read→404)与授权统一判在**节点路径**。
  */
 import {
+  canonicalCatalogJson,
   check,
   contextScopeForCmd,
   dispatchContextCmd,
@@ -19,7 +20,9 @@ import {
   negotiate,
   NodeRegistryStore,
   parseContextCmdArgs,
+  type PluginDescribe,
   type PluginManifest,
+  type PluginView,
   resolveUpstreamTool,
   skillhubScopeForCmd,
   TBError,
@@ -62,10 +65,12 @@ import {
 import { assertNodeConfigMutation, invalidateNodeDerivedState } from '../registryMutation'
 import { createPluginContextProvider } from '../providers/pluginContext'
 import { renderResult, tbErrorResponse } from '../responses'
+import { invalidateToolCache } from '../providers/toolCache'
 import { rejectStoreCapabilityBodyFields } from './store'
 import { remotePassthroughIfMatch } from '../federation'
 import { resolveStoreRequestOrigin } from '../store'
 import { decodePath, scopeForCmd } from '../paths'
+import { invokeEvent } from '../events'
 
 // --- POST /<path> 数据面调用 ---
 export async function handleInvoke(c: AppContext, env: RouteEnv): Promise<Response> {
@@ -98,6 +103,7 @@ export async function handleInvoke(c: AppContext, env: RouteEnv): Promise<Respon
   const command = resolved.rest
   // 节点不可见 → 404(隐藏存在性),判在节点路径。
   if (!check(ctx, node.path, 'read').allow) throw TBError.notFound('not found')
+  if (node.kind === 'topic') return invokeEvent(c, deps.eventRepository, node.path, command)
   const toolMarker = deviceToolMarker(node)
 
   type InvokeDelivery = 'fallback' | 'mailbox' | 'realtime'
@@ -387,6 +393,7 @@ export async function handleInvoke(c: AppContext, env: RouteEnv): Promise<Respon
     // "两通道同权"由 registryMutation.ts 的单点实现保证。
     await assertNodeConfigMutation({
       action: cmd === 'delete' ? 'delete' : 'write',
+      kind: cmd === 'write' ? args.kind : (args.patch as { kind?: unknown } | undefined)?.kind,
       config: cfgPatch,
       ctx,
       deps,
@@ -399,19 +406,21 @@ export async function handleInvoke(c: AppContext, env: RouteEnv): Promise<Respon
     await searchSync?.ensureSeeded()
   }
 
+  async function markMounts(pluginId: string) {
+    const mounts = (await registry.subtree('')).filter(candidate => (
+      candidate.kind === 'tool' && candidate.config?.kind === 'tool' && candidate.config.provider === pluginId
+    ))
+    return Promise.all(mounts.map(async node => ({ marker: await searchSync?.markNode(node.path), node })))
+  }
+  const pluginChange = node.config.module === 'plugin'
+  const releaseSwitch = pluginChange && ['upgrade', 'rollback'].includes(cmd)
   let pluginMounts: Array<{ marker?: SearchDirtyMarker, node: TreeNode }> = []
-  if (node.config.module === 'plugin' && ['write', 'update', 'delete'].includes(cmd)) {
-    const pluginId = typeof args.id === 'string' ? args.id : undefined
-    if (pluginId !== undefined) {
-      const mounts = (await registry.subtree('')).filter(candidate => (
-        candidate.kind === 'tool'
-        && candidate.config?.kind === 'tool'
-        && candidate.config.provider === pluginId
-      ))
-      pluginMounts = await Promise.all(mounts.map(async candidate => ({
-        marker: await searchSync?.markNode(candidate.path),
-        node: candidate,
-      })))
+  let priorDescriptor: PluginDescribe | undefined
+  if (pluginChange && typeof args.id === 'string' && ['write', 'update', 'delete', 'upgrade', 'rollback'].includes(cmd)) {
+    pluginMounts = await markMounts(args.id)
+    if (releaseSwitch && pluginMounts.length) {
+      const prior = await store.get(KEY_PLUGIN + args.id) as { describe?: PluginDescribe } | null
+      priorDescriptor = prior?.describe
     }
   }
 
@@ -444,9 +453,16 @@ export async function handleInvoke(c: AppContext, env: RouteEnv): Promise<Respon
       await searchSync?.abort(registryMarker)
     }
   }
+  if (pluginChange && cmd === 'install') pluginMounts = await markMounts((result as PluginView).id)
+  // Preserve mounted OAuth grants when the same exports retain the same OAuth contract.
+  function oauthContracts(exports: PluginDescribe['exports']) {
+    return canonicalCatalogJson(Object.fromEntries(exports.filter(e => e.oauth).map(e => [e.id, e.oauth])))
+  }
+  const preserveGrants = priorDescriptor && oauthContracts(priorDescriptor.exports) === oauthContracts((result as PluginView).exports)
   const pluginEmptyPaths: TreePath[] = []
   for (const mount of pluginMounts) {
-    await invalidateNodeDerivedState(store, mount.node.path)
+    if (preserveGrants) await invalidateToolCache(store, mount.node.path)
+    else await invalidateNodeDerivedState(store, mount.node.path)
     const providerId = mount.node.config?.kind === 'tool'
       ? mount.node.config.provider
       : ''

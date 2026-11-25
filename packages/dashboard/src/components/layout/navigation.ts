@@ -1,4 +1,4 @@
-import { Blocks, Boxes, Cpu, Database, GitBranch, Globe, HardDrive, KeySquare, LayoutDashboard, type LucideIcon, Plug2, Settings, ShieldEllipsis } from 'lucide-react'
+import { Blocks, Boxes, Cpu, Database, GitBranch, Globe, HardDrive, KeySquare, LayoutDashboard, type LucideIcon, Plug2, Radio, Settings, ShieldEllipsis } from 'lucide-react'
 
 export interface ManageLink {
   icon: LucideIcon
@@ -11,6 +11,7 @@ export const WORKSPACE_LINKS: readonly ManageLink[] = [
   { to: '/', label: '工作台', shortLabel: '工作台', icon: LayoutDashboard },
   { to: '/tools', label: '工具', shortLabel: '工具', icon: Blocks },
   { to: '/manage/devices', label: '设备', shortLabel: '设备', icon: Cpu },
+  { to: '/events', label: '事件', shortLabel: '事件', icon: Radio },
   { to: '/canvas', label: '能力树', shortLabel: '能力树', icon: GitBranch },
 ]
 

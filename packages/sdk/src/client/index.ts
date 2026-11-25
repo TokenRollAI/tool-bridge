@@ -71,6 +71,7 @@ export type {
   MaintenanceStatus,
   NodeConfig,
   PluginCredentialField,
+  PluginEventSource,
   PluginExport,
   PluginExportAuth,
   PluginHealthRecord,
@@ -78,6 +79,7 @@ export type {
   PluginMountConfigField,
   PluginProfile,
   PluginRegistration,
+  PluginUpgradePreview,
   PluginView,
   Scope,
   SecretEntrySummary,
@@ -155,3 +157,6 @@ export type {
 
 /** Action 枚举常量表(运行时值,经 protocol 出口)。 */
 export { ACTIONS } from '@tool-bridge/core/protocol'
+
+export type { EventEnvelope, EventPublishInput, EventReadInput, EventReadResult, EventReceipt } from '@tool-bridge/core/protocol'
+export { EVENT_MAX_WAIT_MS } from '@tool-bridge/core/protocol'

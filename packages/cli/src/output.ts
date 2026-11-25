@@ -14,11 +14,11 @@ export function printJson(value: unknown): void {
 }
 
 /** 所有生产入口错误的唯一落点；Commander 可保留自己的非零退出码。 */
-export function reportError(asJson: boolean, err: unknown, exitCode = 1): void {
+export function reportError(asJson: boolean, err: unknown, exitCode = 1, jsonStream: NodeJS.WritableStream = process.stdout): void {
   const message = err instanceof Error ? err.message : String(err)
   const cli = err instanceof CliError ? err : undefined
   if (asJson) {
-    process.stdout.write(
+    jsonStream.write(
       `${JSON.stringify({
         ok: false,
         error: message,

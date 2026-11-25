@@ -36,7 +36,7 @@ function client(conn: Connection): ToolBridgeClient {
 }
 
 /** SDK 错误只在这里映射一次；TanStack Query 的调用方取消保持原 AbortError。 */
-async function withClient<T>(
+export async function withClient<T>(
   conn: Connection,
   fn: (value: ToolBridgeClient) => Promise<T>,
 ): Promise<T> {

@@ -52,10 +52,11 @@ export async function runMain(
         parsedJsonMode(program),
         new CliError(message, error.code),
         error.exitCode,
+        program.args[0] === 'sub' ? process.stderr : process.stdout,
       )
       return { ok: false, kind: 'commander', code: error.code }
     }
-    reportError(parsedJsonMode(program), error)
+    reportError(parsedJsonMode(program), error, 1, program.args[0] === 'sub' ? process.stderr : process.stdout)
     return {
       ok: false,
       kind: 'action',

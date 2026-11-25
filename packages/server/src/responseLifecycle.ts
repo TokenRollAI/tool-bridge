@@ -1,5 +1,5 @@
 /** Keep an admitted request alive while its response still owns an upstream stream. */
-export function trackResponseBody(response: Response, release: () => void): Response {
+export function trackResponseBody(response: Response, release: () => void, signal?: AbortSignal): Response {
   if (!response.body) {
     release()
     return response
@@ -14,9 +14,11 @@ export function trackResponseBody(response: Response, release: () => void): Resp
   }
   let finished = false
   let cancelled = false
+  let abort: (() => void) | undefined
   const finish = () => {
     if (finished) return
     finished = true
+    if (abort) signal?.removeEventListener('abort', abort)
     try {
       reader.releaseLock()
     } finally {
@@ -25,6 +27,15 @@ export function trackResponseBody(response: Response, release: () => void): Resp
   }
   const body = new ReadableStream<Uint8Array>({
     start(controller) {
+      // A client may disconnect before the HTTP adapter starts pulling this response.
+      abort = () => {
+        if (finished || cancelled) return
+        cancelled = true
+        controller.close()
+        void reader.cancel(signal?.reason).catch(() => {}).finally(finish)
+      }
+      if (signal?.aborted) abort()
+      else signal?.addEventListener('abort', abort, { once: true })
       // Upstream errors must release even while the consumer is applying backpressure.
       void reader.closed.catch((error: unknown) => {
         if (finished || cancelled) return

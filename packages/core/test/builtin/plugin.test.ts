@@ -80,8 +80,12 @@ describe('builtin plugin 模块', () => {
       'delete',
       'get',
       'health',
+      'install',
       'list',
+      'preview',
+      'rollback',
       'update',
+      'upgrade',
       'write',
     ])
     expect(help.cmds.every(c => c.scope === 'admin')).toBe(true)

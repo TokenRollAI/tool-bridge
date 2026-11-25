@@ -177,6 +177,10 @@ tb sk create \
 | `tb device op ls/get/cancel` | 持久化设备操作的查询与取消；创建统一走 `tb call --delivery` |
 | `tb skill ls/get/search/publish/rm/mount/unmount` | Agent Skill 仓库 |
 | `tb federation` / `tb note` / `tb feedback` | 联邦白名单、路径注解与使用反馈 |
+| `tb device session run/wait` | 运行已经绑定的设备进程，可用 `run --follow` 跟随日志，使用会话 ID 再次等待退出 |
+| `tb topic create` · `tb pub/sub/wait` | 创建主题、发布 JSON、持续订阅、等待下一条事件 |
+| `tb plugin init/dev` | 创建示例项目并运行支持热重载的本地开发网关 |
+| `tb plugin install/preview/upgrade/rollback` | 安装发布清单、预览导出与挂载变更、切换或恢复版本 |
 | `tb plugin register/list/get/update/health/rm` | 插件注册表与探活 |
 
 `tb ctx put` 面向可内联的文本/JSON，支持 stdin 与 `--meta`；`tb ctx upload` 面向大文件或

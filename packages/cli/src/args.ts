@@ -17,14 +17,17 @@ export function withGlobalOpts<
   Args extends unknown[],
   Opts extends OptionValues,
   GlobalOpts extends OptionValues,
->(cmd: Command<Args, Opts, GlobalOpts>) {
+>(cmd: Command<Args, Opts, GlobalOpts>, defaultTimeoutSeconds?: number) {
   return cmd
     .option('--json', 'Output parseable JSON', false)
     .option('--base-url <url>', 'Gateway base URL (default: $TB_BASE_URL or config profile)')
     .option('--sk <sk>', 'Secret Key (default: $TB_SK or config profile)')
     .option(
       '--timeout <seconds>',
-      'Per-request HTTP wait limit in seconds (default: 120; not for long-running commands)',
+      defaultTimeoutSeconds === undefined
+        ? 'Per-request HTTP wait limit in seconds (default: 120; not for long-running commands)'
+        : 'Per-request HTTP wait limit in seconds, including pulling and preparing a candidate',
+      defaultTimeoutSeconds?.toString(),
     )
 }
 

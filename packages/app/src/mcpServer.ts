@@ -26,6 +26,7 @@ import {
 } from '@modelcontextprotocol/server'
 import { CallToolResultSchema, ToolSchema } from '@modelcontextprotocol/core'
 import { isTBError, type ToolResult, type ToolSpec } from '@tool-bridge/core'
+import type { McpTopicResources } from './mcpTopics'
 import { ToolJsonSchemaValidator } from './jsonSchemaValidator'
 
 /** Only the fixed gateway entry points are MCP tools; command paths stay in arguments. */
@@ -34,6 +35,7 @@ export type McpBridgeTool = ToolSpec
 export interface McpToolBridge {
   call(tool: McpBridgeTool, args: Record<string, unknown>): Promise<ToolResult>
   list(): Promise<McpBridgeTool[]>
+  topics?: McpTopicResources
 }
 
 /** JSON Schema 2020-12 里取「单个子 schema」的关键字。 */
@@ -178,12 +180,27 @@ function buildMcpServer(version: string, bridge: McpToolBridge, listTtlMs: numbe
   const server = new Server(
     { name: 'tool-bridge', version },
     {
-      capabilities: { tools: {} },
+      capabilities: { tools: {}, ...(bridge.topics ? { resources: { subscribe: true } } : {}) },
       jsonSchemaValidator: validator,
       // SEP-2549:仅 modern 编解码器消费,2025 响应不受影响。private 见文件头说明。
       cacheHints: { 'tools/list': { ttlMs: listTtlMs, cacheScope: 'private' } },
     },
   )
+  if (bridge.topics) {
+    const topics = bridge.topics
+    server.setRequestHandler('resources/list', async () => ({ resources: [] }))
+    server.setRequestHandler('resources/templates/list', async () => ({
+      resourceTemplates: [{ uriTemplate: 'tb-event://topics/{+path}', name: 'Tool Bridge event topic', mimeType: 'application/json' }],
+    }))
+    server.setRequestHandler('resources/read', async ({ params }) => {
+      try {
+        const value = await topics.read(params.uri)
+        return { contents: [{ uri: params.uri, mimeType: 'application/json', text: JSON.stringify(value) }] }
+      } catch {
+        throw new ProtocolError(ProtocolErrorCode.InvalidParams, 'event resource is unavailable')
+      }
+    })
+  }
   let projected: Promise<ProjectedTool[]> | undefined
   const tools = () => projected ??= bridge.list().then(projectTools)
   server.setRequestHandler('tools/list', async () => ({
@@ -251,17 +268,32 @@ export async function handleMcpRequest(
 ): Promise<Response> {
   if (await isLegacyRequest(request)) {
     // 2025 系:完全沿用迁移前的形态——单 JSON 响应,无会话,不开 SSE。
-    const server = buildMcpServer(version, bridge, listTtlMs)
+    const server = buildMcpServer(version, { list: bridge.list, call: bridge.call }, listTtlMs)
     const transport = new WebStandardStreamableHTTPServerTransport({ enableJsonResponse: true })
     await server.connect(transport)
     return await transport.handleRequest(request)
   }
+  let closeListen = () => {}
+  const listen = request.headers.get('mcp-method') === 'subscriptions/listen'
+    ? await bridge.topics?.prepareListen(request, () => closeListen())
+    : undefined
   const handler = createMcpHandler(() => buildMcpServer(version, bridge, listTtlMs), {
     // 不消费服务端主动消息流,固定单 JSON 响应;keepAlive 无流可保活,关掉免起定时器。
     responseMode: 'json',
-    keepAliveMs: 0,
+    keepAliveMs: listen ? 15_000 : 0,
+    ...(listen ? { bus: listen.bus } : {}),
     // legacy 已在上面接走,这条腿只服务 modern;误判到此即响亮报错,不静默降级。
     legacy: 'reject',
   })
-  return await handler.fetch(request)
+  closeListen = () => {
+    void handler.close()
+  }
+  try {
+    const response = await handler.fetch(request)
+    if (!response.headers.get('content-type')?.includes('text/event-stream')) listen?.release()
+    return response
+  } catch (error) {
+    listen?.release()
+    throw error
+  }
 }

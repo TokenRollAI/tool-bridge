@@ -15,10 +15,12 @@ import type {
   DeviceCallAttempt,
   DeviceCallContext,
   EncryptionKeyring,
+  EventRepository,
   KeyManagement,
   MailboxRepository,
   MaintenanceManagement,
   ObjectStore,
+  PreparePluginImage,
   SearchIndex,
   SecretStoreImpl,
   StateStore,
@@ -106,6 +108,8 @@ export interface TbAppDeps {
   encryptionKeyring?: EncryptionKeyring
   /** 认证前的实例就绪钩子(引导/延迟注册 flush);每请求调用,幂等由宿主保证。 */
   ensureReady?: () => Promise<void>
+  eventRepository?: EventRepository
+  eventStreamShutdown?: AbortSignal
   keyManagement?: KeyManagement
   /** SDK 进程内 Provider 表(缺省无)。 */
   locals?: LocalProviderHooks
@@ -130,6 +134,7 @@ export interface TbAppDeps {
    * 那个插件解析不出 export;反之则解析得出但调不动(unavailable)。宿主该两者同源装配。
    */
   pluginCatalog?: BuiltinCatalog
+  preparePluginImage?: PreparePluginImage
   /**
    * Provider OAuth 令牌端点的宿主出站通道。必须由宿主显式注入；缺省时 OAuth
    * 发起、回调兑换与 access-token 解析全部 fail closed，绝不回退到全局 fetch。

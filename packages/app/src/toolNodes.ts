@@ -88,8 +88,8 @@ export function upstreamTools(
 export async function requirePluginExport(
   from: Pick<TbAppDeps, 'pluginCatalog' | 'state'>,
   id: string,
-  nodeKind: 'tool' | 'context',
-  what: 'context' | 'tool',
+  nodeKind: 'tool' | 'context' | 'topic',
+  what: 'context' | 'tool' | 'topic',
   exportId?: string,
 ): Promise<{ export: PluginExport, manifest: PluginManifest }> {
   const resolved = await resolveIntegration(

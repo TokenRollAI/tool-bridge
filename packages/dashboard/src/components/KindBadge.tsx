@@ -4,6 +4,7 @@ import { cn } from '@/lib/utils'
 
 /** kind → 视觉编码(单一色相点缀,等宽小写,工业标签风)。 */
 const KIND_STYLE: Record<NodeKind, string> = {
+  topic: 'text-cyan-400/90 border-cyan-400/30',
   directory: 'text-muted-foreground border-border',
   builtin: 'text-sky-400/90 border-sky-400/30',
   mcp: 'text-violet-400/90 border-violet-400/30',

@@ -107,7 +107,7 @@ export function integrationPlan(entry: CatalogListItem | undefined, exportId = '
 export function defaultMountPath(entry: CatalogListItem | undefined): string {
   if (entry === undefined) return ''
   const kind = entry.nodeKinds.length === 1 ? entry.nodeKinds[0]! : 'tool'
-  return `${kind === 'context' ? 'notes' : 'tools'}/${entry.id}`
+  return `${kind === 'context' ? 'notes' : kind === 'topic' ? 'events' : 'tools'}/${entry.id}`
 }
 
 export interface IntegrationCalls {
@@ -115,7 +115,7 @@ export interface IntegrationCalls {
   mount: {
     config: Record<string, unknown>
     description: string
-    kind: 'context' | 'tool'
+    kind: 'context' | 'tool' | 'topic'
     path: string
   }
   /** 挂载后是否要引导 OAuth 授权。 */
@@ -156,7 +156,7 @@ export function buildIntegrationCalls(
   // kind 由**选中 export** 决定:跨 kind 的多 export provider(notes:actions=tool /
   // notes=context)挂 context export 时不能落到默认 'tool'(平台会拒且用户无参数可救)。
   // external plugin 不在 catalog 时退回 tool；目录项始终按选中 export 决定 kind。
-  const nodeKind: 'context' | 'tool'
+  const nodeKind: 'context' | 'tool' | 'topic'
     = (exportId !== '' ? entry?.exportDetails[exportId]?.kind : undefined)
       ?? (entry?.exports.length === 1 ? entry.exportDetails[entry.exports[0]!]?.kind : undefined)
       ?? 'tool'
@@ -175,7 +175,7 @@ export function buildIntegrationCalls(
   const config: Record<string, unknown> = {
     kind: nodeKind,
     provider,
-    ...(exportId !== '' ? { export: exportId } : {}),
+    ...(exportId !== '' || nodeKind === 'topic' ? { export: exportId || entry?.exports[0] } : {}),
     ...(authRef !== undefined ? { authRef } : {}),
   }
   const providerConfig: Record<string, string> = {}

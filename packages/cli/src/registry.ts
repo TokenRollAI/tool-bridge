@@ -26,16 +26,18 @@ export async function deleteNode(
   target: Target,
   path: string,
   expectedKinds?: readonly string[],
+  validate?: (node: Node) => void,
 ): Promise<void> {
   try {
-    if (expectedKinds !== undefined) {
+    if (expectedKinds || validate) {
       const node = await callDirect<Node>(target, '/system/registry/get', { path })
-      if (!expectedKinds.includes(node.kind)) {
+      if (expectedKinds && !expectedKinds.includes(node.kind)) {
         throw new CliError(
           `node '${path}' is kind '${node.kind}', expected ${expectedKinds.join(' | ')}`,
           'invalid_argument',
         )
       }
+      validate?.(node)
     }
     await callDirect(target, '/system/registry/delete', { path })
   } catch (err) {

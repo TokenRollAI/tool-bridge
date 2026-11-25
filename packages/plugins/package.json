@@ -19,11 +19,12 @@
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.node.json"
   },
   "dependencies": {
+    "@modelcontextprotocol/client": "catalog:",
     "@modelcontextprotocol/sdk": "catalog:",
+    "@octokit/webhooks-methods": "6.0.0",
     "@tool-bridge/plugin-sdk": "workspace:*",
     "ipaddr.js": "2.5.0",
-    "zod": "catalog:",
-    "@modelcontextprotocol/client": "catalog:"
+    "zod": "catalog:"
   },
   "devDependencies": {
     "@hono/node-server": "catalog:",

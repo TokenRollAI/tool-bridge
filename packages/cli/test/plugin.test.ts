@@ -254,3 +254,21 @@ describe('TBError 透出', () => {
     expect(process.exitCode).toBe(1)
   })
 })
+
+describe('tb plugin release commands', () => {
+  it.each([
+    ['install', ['https://pub.example/r.json', '--secret-ref', 'transport'], 'install', { source: 'https://pub.example/r.json', secretRef: 'transport' }],
+    ['upgrade', ['sample', 'npm:pkg@2.0.0'], 'upgrade', { id: 'sample', source: 'npm:pkg@2.0.0' }],
+    ['preview', ['sample', 'npm:pkg@2.0.0'], 'preview', { id: 'sample', source: 'npm:pkg@2.0.0' }],
+    ['upgrade', ['sample', '--digest', 'sha256:' + 'a'.repeat(64)], 'upgrade', { id: 'sample', candidateDigest: 'sha256:' + 'a'.repeat(64) }],
+    ['refresh', ['sample'], 'upgrade', { id: 'sample' }],
+    ['rollback', ['sample'], 'rollback', { id: 'sample' }],
+  ] as const)('%s uses the admin builtin with the supplied source', async (cmd, args, action, body) => {
+    const fn = jsonFetch(manifest)
+    await runCli(['plugin', cmd, ...args, ...gw, '--json'])
+    const [url, init] = (fn.mock.calls as unknown as [string, RequestInit][])[0]!
+    expect(String(url)).toBe('https://gw/system/plugin/' + action)
+    expect(JSON.parse(String(init.body))).toEqual(body)
+    expect(JSON.parse(stdoutText())).toEqual(manifest)
+  })
+})

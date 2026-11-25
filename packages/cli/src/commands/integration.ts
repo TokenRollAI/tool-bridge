@@ -208,6 +208,7 @@ export function integrationAddCommand() {
     .argument('<path>', 'Tree path to mount at')
     .requiredOption('--provider <id>', 'Integration id (see `tb integration catalog`)')
     .option('--export <id>', 'Which export to mount (required when the provider has more than one)')
+    .option('--kind <kind>', 'Mount kind for an external export: tool, context or topic')
     .option('--key <value>', 'Single-value credential (prefer --key-stdin: argv is world-readable)')
     .option('--key-stdin', 'Read the single-value credential from stdin')
     .option('--field <key=value>', 'One field of a multi-field credential (repeatable)', collect, [])
@@ -258,8 +259,15 @@ Examples:
       // 目标节点 kind 由**选中 export** 的 profile 决定。多 export 跨 kind 的 provider
       // (如 notes:actions=tool / notes=context)必须按 exportId 取,否则挂 context export
       // 会落到默认 'tool' 被平台拒且无解。catalog 查不到 external plugin 时才退回 tool。
-      const nodeKind: 'context' | 'tool'
-        = details?.kind ?? 'tool'
+      const requestedKind = opts.kind as string | undefined
+      if (requestedKind !== undefined && !['tool', 'context', 'topic'].includes(requestedKind)) {
+        throw new CliError('invalid integration kind')
+      }
+      if (details && requestedKind && details.kind !== requestedKind) throw new CliError('selected export has a different kind')
+      const nodeKind = details?.kind ?? requestedKind as 'context' | 'tool' | 'topic' | undefined ?? 'tool'
+      if (nodeKind === 'topic' && (!(exportId ?? details?.id) || !sources.length)) {
+        throw new CliError('event sources require an export and a signing credential')
+      }
 
       // 挂载配置在**任何写操作之前**解析并校验:缺必填 baseUrl 就该在这里拒,
       // 而不是等 secret 已经代建出来才炸(那会留下孤儿 secret)。
@@ -326,21 +334,23 @@ Examples:
         managedCredential = authRef
       }
 
-      const config: NodeConfig = nodeKind === 'context'
-        ? {
-            kind: 'context',
-            provider,
-            ...(exportId ? { export: exportId } : {}),
-            ...(authRef ? { authRef } : {}),
-            ...(providerConfig ? { providerConfig } : {}),
-          }
-        : {
-            kind: 'tool',
-            provider,
-            ...(exportId ? { export: exportId } : {}),
-            ...(authRef ? { authRef } : {}),
-            ...(providerConfig ? { providerConfig } : {}),
-          }
+      const config: NodeConfig = nodeKind === 'topic'
+        ? { kind: 'topic', provider, export: (exportId ?? details?.id)!, authRef: authRef! }
+        : nodeKind === 'context'
+          ? {
+              kind: 'context',
+              provider,
+              ...(exportId ? { export: exportId } : {}),
+              ...(authRef ? { authRef } : {}),
+              ...(providerConfig ? { providerConfig } : {}),
+            }
+          : {
+              kind: 'tool',
+              provider,
+              ...(exportId ? { export: exportId } : {}),
+              ...(authRef ? { authRef } : {}),
+              ...(providerConfig ? { providerConfig } : {}),
+            }
 
       const input: NodeInput = {
         path,
@@ -419,7 +429,7 @@ export function integrationLsCommand() {
         { ...(pageOpts ? { opts: pageOpts } : {}) },
       )
       const items = (page.items ?? []).filter((n) => {
-        if (n.kind !== 'tool' && n.kind !== 'context') return false
+        if (n.kind !== 'tool' && n.kind !== 'context' && n.kind !== 'topic') return false
         const provider = n.config?.provider
         return typeof provider === 'string' && provider !== 'storage' && provider !== 's3'
       })
@@ -460,13 +470,13 @@ export function integrationLsCommand() {
  * (admin)—— 能装不能卸是权限面的不对称。这里仍走管理面(协议未变),但把它放进同一个
  * 命令族,并在 404 时给出可操作提示。凭证生命周期仍由 `tb secret` 显式管理。
  *
- * **kind 守卫**:集成挂载只会产生 tool/context 节点(见 add 的 nodeKind),卸载必须限定这两类。
+ * **kind 守卫**:集成可挂载 tool、context 及有来源绑定的 topic。
  * 此前直打 `system/registry delete` 无校验,`tb integration rm device/build-01` 会误删设备节点。
  * 走 deleteNode 先 get 校验 kind,越界即拒。
  */
 export function integrationRmCommand() {
   return withGlobalOpts(new Command('rm'))
-    .description('Unmount an integration (tool/context nodes only)')
+    .description('Unmount a tool, context or plugin event source')
     .argument('<path>', 'Mounted integration path')
     .option('--yes', 'Skip the confirmation prompt')
     .action(async (pathArg, opts) => {
@@ -474,7 +484,10 @@ export function integrationRmCommand() {
       const path = String(pathArg ?? '').trim()
       if (!path) throw new CliError('tree path is required')
       await confirmDestructive(opts, `Unmount integration at ${path}?`)
-      await deleteNode(resolveTarget(opts), path, ['tool', 'context'])
+      await deleteNode(resolveTarget(opts), path, ['tool', 'context', 'topic'], (node) => {
+        if (node.kind === 'topic' && node.config?.kind !== 'topic')
+          throw new CliError('This topic has no integration mounted.', 'invalid_argument')
+      })
       if (asJson) printJson({ ok: true, path })
       else printLine(`unmounted ${path}`)
     })

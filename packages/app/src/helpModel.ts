@@ -15,6 +15,7 @@ import {
   deviceDirectoryHelpModel,
   deviceFsHelpModel,
   deviceShellHelpModel,
+  eventCommands,
   type HelpModel,
   isReadOnlyProvider,
   NodeRegistryStore,
@@ -61,6 +62,12 @@ export async function helpModelFor(
   // schemas=1:节点级 `~help` 直接内联每个工具的全量 inputSchema(关闭两级披露的
   // 索引形态),让 agent 在一次往返里拿到可调用契约,省掉逐工具下钻。只影响 mcp/http/
   // tool 与 device tool 节点(其余 kind 本就在节点级带全量 schema)。
+  if (node.kind === 'topic') {
+    return eventCommands.helpModel(
+      { path: node.path, kind: node.kind, description: node.description },
+      cmd => node.config === undefined || cmd.scope === 'read',
+    )
+  }
   const index = opts.schemas !== true
   if (node.kind === 'builtin' && node.config?.kind === 'builtin') {
     const mod = builtins.get(node.config.module)
@@ -212,6 +219,7 @@ export async function commandHelpModelFor(
   if (
     !(
       node.kind === 'builtin'
+      || node.kind === 'topic'
       || node.kind === 'context'
       || node.kind === 'skillhub'
       || (node.kind === 'device' && node.config?.kind === 'device')

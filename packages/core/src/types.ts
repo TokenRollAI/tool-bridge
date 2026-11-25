@@ -92,7 +92,8 @@ export interface SecretKeyInput {
 // ---------- Tree ----------
 
 export type NodeKind
-  = | 'directory'
+  = | 'topic'
+    | 'directory'
     | 'mcp'
     | 'http'
     | 'builtin'
@@ -103,6 +104,7 @@ export type NodeKind
     | 'skillhub'
 
 export const NODE_KINDS: readonly NodeKind[] = [
+  'topic',
   'directory',
   'mcp',
   'http',
@@ -237,6 +239,7 @@ export type NodeConfig
     kind: 'http'
     tools: HttpToolDef[]
   }
+  | { authRef: string, export: string, kind: 'topic', provider: string }
   | { kind: 'builtin', module: string }
   | {
     authRef?: string

@@ -54,7 +54,7 @@ function declaredContentLength(response: Response): number | undefined {
   return Number.isSafeInteger(parsed) ? parsed : Number.POSITIVE_INFINITY
 }
 
-async function readRemoteResponseBody(
+export async function readRemoteResponseBody(
   response: Response,
   maxBytes: number | undefined,
   signal: AbortSignal | undefined,

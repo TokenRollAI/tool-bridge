@@ -512,6 +512,17 @@ test('runtime import gate ignores import examples inside bundled JSDoc and line 
   assert.deepEqual(findUndeclaredRuntimeImports(manifest, sources), [])
 })
 
+test('runtime import gate distinguishes scaffold source from executable template expressions', () => {
+  const js = [
+    'const example = `import { createPlugin } from "@tool-bridge/plugin-sdk"',
+    'import "example-dependency"`',
+    'const interpolated = `value ${import("real-dependency")}`',
+  ].join('\n')
+  assert.deepEqual(findUndeclaredRuntimeImports({}, new Map([['cli.js', js]])), [
+    { name: 'real-dependency', paths: ['cli.js'] },
+  ])
+})
+
 test('runtime import gate ignores commonjs require strings left inside bundled shims', () => {
   const manifest = { name: '@tool-bridge/server', dependencies: {} }
   const sources = new Map([

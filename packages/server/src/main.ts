@@ -28,6 +28,7 @@ const program = new Command('tool-bridge-server')
       throw new Error('port must be a valid TCP port')
     const server = await createManagedServer({
       directory: opts.directory,
+      pluginRunnerSocket: process.env.TB_PLUGIN_RUNNER_SOCKET,
       ...(existsSync('/app/dashboard/index.html')
         ? { uiDir: '/app/dashboard' }
         : {}),
