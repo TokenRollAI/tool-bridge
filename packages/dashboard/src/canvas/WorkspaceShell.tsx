@@ -24,7 +24,7 @@ function ConnectionMenu() {
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <Button aria-label="连接档案" className="max-w-44 gap-2" variant="ghost">
-          <span aria-label={status} className={cn('size-2 shrink-0 rounded-full', health.isError ? 'bg-destructive' : health.data?.healthy ? 'bg-ok' : 'bg-warn')} role="img" title={status} />
+          <span aria-label={status} className={cn('size-2 shrink-0 rounded-full', health.isError ? 'bg-destructive' : health.data?.healthy ? 'bg-ok' : 'bg-muted-foreground')} role="img" title={status} />
           <span className="hidden truncate sm:inline">{active?.name ?? '连接档案'}</span>
           <ChevronDown className="size-3.5" />
         </Button>
@@ -61,7 +61,7 @@ function RailLink({ item, collapsed }: { collapsed: boolean, item: ManageLink })
   const link = (
     <NavLink
       aria-label={label}
-      className={({ isActive }) => cn('flex min-h-10 items-center gap-3 rounded-lg px-3 text-sm text-muted-foreground transition-colors hover:bg-secondary/60 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none', (isActive || related) && 'bg-secondary font-medium text-foreground', collapsed && 'justify-center px-0')}
+      className={({ isActive }) => cn('flex min-h-12 items-center lg:min-h-9 gap-3 rounded-lg px-3 text-sm text-muted-foreground transition-colors hover:bg-secondary/60 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none', (isActive || related) && 'bg-accent font-semibold text-foreground', collapsed && 'justify-center px-0')}
       end={to === '/'}
       to={to}
     >
@@ -98,7 +98,7 @@ function Navigation({ collapsed }: { collapsed: boolean }) {
           ? <RailLink collapsed item={SETTINGS_LINKS[0]!} />
           : (
               <>
-                <button aria-controls="workspace-settings" aria-expanded={settingsOpen} className="flex min-h-10 items-center gap-3 rounded-lg px-3 text-sm text-muted-foreground hover:bg-secondary/60 hover:text-foreground" onClick={() => setSettingsOpen(value => !value)} type="button">
+                <button aria-controls="workspace-settings" aria-expanded={settingsOpen} className="flex min-h-12 items-center lg:min-h-9 gap-3 rounded-lg px-3 text-sm text-muted-foreground hover:bg-secondary/60 hover:text-foreground" onClick={() => setSettingsOpen(value => !value)} type="button">
                   <Settings className="size-4" />
                   实例管理
                   <ChevronDown className={cn('ml-auto size-3.5 transition-transform', settingsOpen && 'rotate-180')} />
@@ -112,6 +112,7 @@ function Navigation({ collapsed }: { collapsed: boolean }) {
 }
 
 export function WorkspaceShell() {
+  const navigationTrigger = useRef<HTMLButtonElement>(null)
   const paletteTrigger = useRef<HTMLButtonElement>(null)
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [addOpen, setAddOpen] = useState(false)
@@ -142,10 +143,10 @@ export function WorkspaceShell() {
 
   return (
     <div className="flex h-svh overflow-hidden bg-background">
-      <aside className={cn('hidden shrink-0 flex-col border-r bg-panel lg:flex', railCollapsed ? 'w-16' : 'w-56')}>
-        <NavLink aria-label="Tool Bridge 工作台" className="flex h-16 shrink-0 items-center gap-2.5 border-b px-5" to="/">
+      <aside className={cn('hidden shrink-0 flex-col border-r bg-panel lg:flex', railCollapsed ? 'w-14' : 'w-[220px]')}>
+        <NavLink aria-label="Tool Bridge 工作台" className="flex h-[52px] shrink-0 items-center gap-2.5 px-4" to="/">
           <img alt="" className="size-6 shrink-0 dark:invert" src="/ui/icon-light.png" />
-          {!railCollapsed && <span className="text-sm font-semibold tracking-tight">tool-bridge</span>}
+          {!railCollapsed && <span className="text-sm font-semibold tracking-tight">Tool Bridge</span>}
         </NavLink>
         <div className="min-h-0 flex-1 overflow-y-auto"><Navigation collapsed={railCollapsed} /></div>
         <button aria-label={railCollapsed ? '展开侧栏' : '收起侧栏'} className="flex h-12 shrink-0 items-center gap-3 border-t px-5 text-xs text-muted-foreground hover:text-foreground" onClick={() => setRailCollapsed(value => !value)} type="button">
@@ -160,9 +161,9 @@ export function WorkspaceShell() {
         </button>
       </aside>
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="flex min-h-16 shrink-0 items-center gap-2 border-b px-3 sm:gap-3 sm:px-6">
-          <Button aria-label="打开导航" className="lg:hidden" onClick={() => setMobileRailOpen(true)} size="icon" variant="ghost"><Menu /></Button>
-          <button aria-label="搜索工具、设备或操作" className="flex min-h-10 min-w-0 flex-1 items-center gap-2 rounded-lg px-2 text-sm text-muted-foreground hover:bg-secondary/50 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none" onClick={() => setPaletteOpen(true)} ref={paletteTrigger} type="button">
+        <header className="flex min-h-[52px] shrink-0 items-center gap-2 border-b px-3 sm:gap-3 sm:px-6">
+          <Button aria-label="打开导航" className="lg:hidden" onClick={() => setMobileRailOpen(true)} ref={navigationTrigger} size="icon" variant="ghost"><Menu /></Button>
+          <button aria-label="搜索工具、设备或操作" className="mr-auto flex h-9 min-w-0 flex-1 items-center gap-2 rounded-md bg-secondary px-3 sm:max-w-[340px] text-sm text-muted-foreground hover:bg-secondary/50 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none" onClick={() => setPaletteOpen(true)} ref={paletteTrigger} type="button">
             <Search className="size-4 shrink-0" />
             <span className="truncate text-left">搜索工具、设备或操作…</span>
             <kbd className="ml-auto hidden rounded border px-1.5 text-xs md:inline">{isMac ? '⌘ K' : 'Ctrl K'}</kbd>
@@ -172,7 +173,7 @@ export function WorkspaceShell() {
             onOpenChange={setAddOpen}
             open={addOpen}
             trigger={(
-              <Button aria-label="添加工具">
+              <Button aria-label="添加工具" size="sm" variant="secondary">
                 <Plus />
                 <span className="hidden sm:inline">添加工具</span>
               </Button>
@@ -184,9 +185,15 @@ export function WorkspaceShell() {
         <main className="min-h-0 min-w-0 flex-1 overflow-y-auto" key={`${active?.id}:${active?.baseUrl}:${revision}`}><Outlet /></main>
       </div>
       <Dialog onOpenChange={setMobileRailOpen} open={mobileRailOpen}>
-        <DialogContent className="inset-y-0 left-0 flex h-auto max-h-none w-64 max-w-[85vw] translate-x-0 translate-y-0 flex-col gap-0 rounded-none border-y-0 border-l-0 bg-panel p-0 sm:max-w-64">
+        <DialogContent
+          className="inset-y-0 left-0 flex h-auto max-h-none w-64 max-w-[85vw] translate-x-0 translate-y-0 flex-col gap-0 rounded-none border-y-0 border-l-0 bg-panel p-0 sm:max-w-64"
+          onCloseAutoFocus={(event) => {
+            event.preventDefault()
+            navigationTrigger.current?.focus()
+          }}
+        >
           <DialogHeader className="shrink-0 border-b p-5 text-left">
-            <DialogTitle>tool-bridge</DialogTitle>
+            <DialogTitle>Tool Bridge</DialogTitle>
             <DialogDescription className="sr-only">工作区与管理页面导航</DialogDescription>
           </DialogHeader>
           <div className="min-h-0 flex-1 overflow-y-auto"><Navigation collapsed={false} /></div>

@@ -87,7 +87,7 @@ function MetricCard({
   value: number
 }) {
   return (
-    <div className="rounded-lg border bg-card/55 p-4">
+    <div className="border-t py-5">
       <div className="flex items-center justify-between gap-3 text-xs text-muted-foreground">
         <span>{label}</span>
         <Icon className="size-4" />
@@ -120,7 +120,7 @@ function HostLayer({
   title: string
 }) {
   return (
-    <section className="overflow-hidden rounded-lg border bg-card/45">
+    <section className="min-w-0">
       <div className="flex min-h-20 items-start gap-3 border-b px-4 py-4">
         <span className="grid size-8 shrink-0 place-items-center rounded-md border bg-background/65 text-muted-foreground">
           <Icon className="size-3.5" />
@@ -369,14 +369,14 @@ export function FederationPage() {
         title="联邦连接"
       />
 
-      <section className="mt-6 overflow-hidden rounded-xl border border-primary/20 bg-card/65">
+      <section className="mt-6 min-w-0">
         <div className="grid gap-5 p-5 lg:grid-cols-[minmax(0,1.2fr)_minmax(320px,0.8fr)] lg:items-center lg:p-6">
           <div className="flex min-w-0 gap-4">
-            <span className="grid size-10 shrink-0 place-items-center rounded-lg border border-primary/25 bg-primary/8 text-primary">
+            <span className="grid size-10 shrink-0 place-items-center rounded-lg border border-edge-strong bg-primary/8 text-foreground">
               <ShieldAlert className="size-4.5" />
             </span>
             <div className="min-w-0">
-              <p className="text-xs font-semibold tracking-[0.14em] text-primary uppercase">
+              <p className="text-xs font-semibold tracking-[0.14em] text-foreground uppercase">
                 SSRF guardrail
               </p>
               <h2 className="mt-1.5 text-lg font-semibold tracking-tight">
@@ -409,7 +409,7 @@ export function FederationPage() {
 
       {list.isPending
         ? (
-            <div className="mt-4 grid gap-3 rounded-lg border bg-card/45 p-4">
+            <div className="mt-4 grid gap-3 border-t py-5">
               <Skeleton className="h-12 w-full" />
               <Skeleton className="h-12 w-5/6" />
             </div>

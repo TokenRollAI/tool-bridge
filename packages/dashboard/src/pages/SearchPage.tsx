@@ -213,7 +213,7 @@ export function SearchPage() {
                                 <p className="truncate font-mono text-sm font-medium text-foreground">
                                   {tool.name}
                                 </p>
-                                <p className="mt-1 truncate text-xs text-primary">
+                                <p className="mt-1 truncate text-xs text-foreground">
                                   {path}
                                 </p>
                                 <p
@@ -252,7 +252,7 @@ export function SearchPage() {
                                 )}
                                 <ArrowUpRight
                                   aria-hidden="true"
-                                  className="size-4 text-muted-foreground transition-colors group-hover:text-primary"
+                                  className="size-4 text-muted-foreground transition-colors group-hover:text-foreground"
                                 />
                               </div>
                             </Link>

@@ -12,7 +12,7 @@ import {
 import { Handle, type NodeProps, Position } from '@xyflow/react'
 import { memo, type MouseEvent } from 'react'
 import { KIND_ICON } from '@/components/kind-icon'
-import { PRESENCE_TONE } from '@/lib/presence'
+import { OnlineDot } from '@/components/KindBadge'
 import { cn } from '@/lib/utils'
 import {
   COMMAND_NODE_HEIGHT,
@@ -21,19 +21,6 @@ import {
   NODE_HEIGHT,
   NODE_WIDTH,
 } from './treeGraph'
-
-/** kind → 左侧色带(与 KindBadge / TreeNav 同一套色相编码)。 */
-const KIND_ACCENT: Record<string, string> = {
-  directory: 'bg-muted-foreground/40',
-  builtin: 'bg-sky-400',
-  mcp: 'bg-violet-400',
-  http: 'bg-teal-400',
-  remote: 'bg-fuchsia-400',
-  context: 'bg-emerald-400',
-  skillhub: 'bg-indigo-400',
-  device: 'bg-amber-400',
-  tool: 'bg-rose-400',
-}
 
 export type CanvasNodeAction
   = | 'add'
@@ -68,22 +55,16 @@ function runAction(
  */
 function TreeCanvasNode({ data, selected }: NodeProps) {
   const node = data as InteractiveFlowNodeData
-  const { icon: Icon, className: iconClass } = KIND_ICON[node.kind] ?? KIND_ICON.directory
+  const Icon = KIND_ICON[node.kind] ?? KIND_ICON.directory
   const expandable = node.childCount > 0 || node.truncated
-  const presenceTone = node.presence ? PRESENCE_TONE[node.presence.state] : null
   const pathLabel = node.path === '' ? '能力总树' : node.path
 
   return (
     <div
       aria-label={`${pathLabel}，${node.description || '无描述'}`}
       className={cn(
-        'group relative flex overflow-hidden rounded-xl border bg-card text-left shadow-sm transition-all',
-        'hover:-translate-y-0.5 hover:border-primary/50 hover:shadow-md',
-        selected
-          ? 'border-primary ring-2 ring-primary/35'
-          : node.remoteScope
-            ? 'border-fuchsia-400/30'
-            : 'border-border',
+        'group relative flex overflow-hidden rounded-[14px] border bg-panel text-left transition-colors',
+        selected ? 'border-signal ring-1 ring-signal' : 'border-edge-strong hover:border-input',
       )}
       style={{ width: NODE_WIDTH, height: NODE_HEIGHT }}
     >
@@ -94,21 +75,8 @@ function TreeCanvasNode({ data, selected }: NodeProps) {
         type="target"
       />
 
-      <span
-        aria-hidden
-        className={cn(
-          'h-full w-1 shrink-0',
-          KIND_ACCENT[node.kind] ?? KIND_ACCENT.directory,
-        )}
-      />
-
       <div className="flex min-w-0 flex-1 items-center gap-2.5 px-2.5 py-2">
-        <span
-          className={cn(
-            'grid size-8 shrink-0 place-items-center rounded-lg border bg-background/70',
-            iconClass,
-          )}
-        >
+        <span className="shrink-0 text-muted-foreground">
           <Icon className="size-4" strokeWidth={1.75} />
         </span>
 
@@ -118,16 +86,11 @@ function TreeCanvasNode({ data, selected }: NodeProps) {
               {node.label}
             </span>
             {node.remoteScope && node.kind === 'remote' && (
-              <span className="shrink-0 rounded border border-fuchsia-400/30 px-1 font-mono text-[8px] leading-3 text-fuchsia-400">
+              <span className="shrink-0 px-1 font-mono text-[8px] leading-3 text-muted-foreground">
                 REMOTE
               </span>
             )}
-            {presenceTone && (
-              <span
-                className={cn('size-2 shrink-0 rounded-full', presenceTone)}
-                title={node.presence?.state}
-              />
-            )}
+            <OnlineDot state={node.presence?.state} />
           </div>
 
           <p
@@ -149,7 +112,7 @@ function TreeCanvasNode({ data, selected }: NodeProps) {
           </div>
         </div>
 
-        <div className="nodrag nowheel grid shrink-0 grid-cols-3 gap-0.5 border-l pl-1.5">
+        <div className="nodrag nowheel grid shrink-0 grid-cols-3 gap-0.5 pl-1">
           {expandable && (
             <button
               aria-expanded={node.expanded}
@@ -162,7 +125,7 @@ function TreeCanvasNode({ data, selected }: NodeProps) {
               type="button"
             >
               {node.loading
-                ? <Loader2 className="size-3.5 animate-spin text-primary" />
+                ? <Loader2 className="size-3.5 animate-spin text-foreground" />
                 : (
                     <ChevronRight
                       className={cn('size-3.5 transition-transform', node.expanded && 'rotate-90')}
@@ -172,7 +135,7 @@ function TreeCanvasNode({ data, selected }: NodeProps) {
           )}
           <button
             aria-label={`查看 ${pathLabel} 详情`}
-            className="grid size-6 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-secondary hover:text-primary focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+            className="grid size-6 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
             onClick={event => runAction(event, node, 'inspect')}
             title="查看详情"
             type="button"
@@ -185,8 +148,8 @@ function TreeCanvasNode({ data, selected }: NodeProps) {
               aria-label={node.commandsOpen ? `隐藏 ${pathLabel} 的命令` : `显示 ${pathLabel} 的命令`}
               className={cn(
                 'grid size-6 place-items-center rounded-md text-muted-foreground transition-colors',
-                'hover:bg-amber-400/10 hover:text-amber-400 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none',
-                node.commandsOpen && 'bg-amber-400/10 text-amber-400',
+                'hover:bg-secondary hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none',
+                node.commandsOpen && 'bg-secondary text-foreground',
                 node.commandError && 'text-destructive',
               )}
               disabled={node.commandLoading}
@@ -204,7 +167,7 @@ function TreeCanvasNode({ data, selected }: NodeProps) {
           {node.canMountChild && (
             <button
               aria-label={`在 ${pathLabel} 下挂载节点`}
-              className="grid size-6 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-primary/10 hover:text-primary focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+              className="grid size-6 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-primary/10 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
               onClick={event => runAction(event, node, 'add')}
               title="挂载子节点"
               type="button"
@@ -245,22 +208,18 @@ function CommandCanvasNode({ node }: { node: InteractiveFlowNodeData }) {
   return (
     <div
       aria-label={`${pathLabel}，${node.description}`}
-      className={cn(
-        'group relative flex overflow-hidden rounded-xl border text-left shadow-sm transition-all',
-        'border-amber-400/25 bg-card/90 hover:-translate-y-0.5 hover:border-amber-400/55 hover:shadow-md',
-      )}
+      className="group relative flex overflow-hidden rounded-[14px] border border-edge-strong bg-panel text-left transition-colors hover:border-input"
       style={{ width: COMMAND_NODE_WIDTH, height: COMMAND_NODE_HEIGHT }}
     >
       <Handle
-        className="!size-1.5 !border-0 !bg-amber-400/65"
+        className="!size-1.5 !border-0 !bg-input"
         isConnectable={false}
         position={Position.Left}
         type="target"
       />
-      <span aria-hidden className="h-full w-1 shrink-0 bg-amber-400" />
 
       <div className="flex min-w-0 flex-1 items-center gap-2.5 px-2.5 py-2">
-        <span className="grid size-8 shrink-0 place-items-center rounded-lg border border-amber-400/25 bg-amber-400/[0.06] text-amber-400">
+        <span className="grid size-8 shrink-0 place-items-center text-muted-foreground">
           {isOverflow ? <ArrowUpRight className="size-4" /> : <TerminalSquare className="size-4" />}
         </span>
         <div className="min-w-0 flex-1">
@@ -273,7 +232,7 @@ function CommandCanvasNode({ node }: { node: InteractiveFlowNodeData }) {
               ? <span>完整目录</span>
               : (
                   <>
-                    <span className="uppercase text-amber-400">{node.commandScope}</span>
+                    <span className="uppercase text-foreground">{node.commandScope}</span>
                     {node.commandEffect && <span>{node.commandEffect}</span>}
                     {node.commandConfirm && (
                       <span className="inline-flex items-center gap-0.5 text-warn">
@@ -288,7 +247,7 @@ function CommandCanvasNode({ node }: { node: InteractiveFlowNodeData }) {
 
         <button
           aria-label={isOverflow ? `查看 ${node.path} 的完整命令目录` : `调用 ${node.commandName}`}
-          className="nodrag nowheel grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-amber-400/10 hover:text-amber-400 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+          className="nodrag nowheel grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
           onClick={event => runAction(event, node, action)}
           title={isOverflow ? '查看完整命令目录' : '打开调用面板'}
           type="button"

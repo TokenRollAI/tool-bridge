@@ -61,10 +61,10 @@ describe('process session controls', () => {
     fireEvent.click(await screen.findByRole('button', { name: /runtime:session/ }))
     await waitFor(() => expect(mocks.invoke.mock.calls.some(call => String(call[1]).endsWith('/observe'))).toBe(true))
     const firstSignal = mocks.invoke.mock.calls.find(call => String(call[1]).endsWith('/observe'))?.[4].signal as AbortSignal
-    fireEvent.click(screen.getByRole('button', { name: '暂停日志' }))
+    fireEvent.click(screen.getByRole('button', { name: '停止观察' }))
     expect(firstSignal.aborted).toBe(true)
     expect(mocks.invoke.mock.calls.some(call => String(call[1]).endsWith('/stop'))).toBe(false)
-    fireEvent.click(screen.getByRole('button', { name: '停止进程' }))
+    fireEvent.click(screen.getByRole('button', { name: '终止远程进程' }))
     await screen.findByText('正在停止，尚未确认退出')
     fireEvent.click(screen.getByRole('button', { name: '继续读取日志' }))
     const calls = mocks.invoke.mock.calls.filter(call => String(call[1]).endsWith('/observe'))

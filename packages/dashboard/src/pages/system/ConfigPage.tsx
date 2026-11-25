@@ -39,7 +39,7 @@ function ConfigEditor({ status, schema, refresh }: { refresh: () => Promise<unkn
   }
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-center gap-3 rounded-lg border bg-card p-4 text-sm">
+      <div className="flex flex-wrap items-center gap-3 border-b py-4 text-sm">
         <Badge variant="outline">{status.state}</Badge>
         <span>
           期望版本
@@ -56,16 +56,33 @@ function ConfigEditor({ status, schema, refresh }: { refresh: () => Promise<unkn
       </div>
       {status.lastError && <p className="text-sm text-destructive" role="alert">上次应用失败，请检查服务状态后重试。</p>}
       {changed.length > 0 && (
-        <section className="rounded-lg border p-4 text-sm">
+        <section className="py-2 text-sm">
           <h2 className="font-medium">等待生效的字段</h2>
-          <ul className="mt-2 space-y-1 text-muted-foreground">{changed.map(field => <li key={field.key}>{field.label}</li>)}</ul>
+          <table className="mt-3 w-full table-fixed text-left text-sm">
+            <thead className="text-xs text-muted-foreground">
+              <tr>
+                <th className="py-2">字段</th>
+                <th>期望值</th>
+                <th>生效值</th>
+              </tr>
+            </thead>
+            <tbody>
+              {changed.map(field => (
+                <tr className="border-t" key={field.key}>
+                  <th className="py-2 pr-2 font-normal">{field.label}</th>
+                  <td className="break-all pr-2 font-mono text-xs">{JSON.stringify(status.desired[field.key as keyof typeof status.desired])}</td>
+                  <td className="break-all font-mono text-xs">{JSON.stringify(status.effective[field.key as keyof typeof status.effective])}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </section>
       )}
-      <section className="rounded-xl border bg-card p-4 sm:p-6">
+      <section className="border-t py-5">
         <h2 className="mb-5 text-lg font-semibold">运行设置</h2>
         <SchemaFields disabled={busy} fields={fields} idPrefix="runtime-config" onChange={setSettings} value={settings} />
         <div className="mt-6 flex flex-wrap items-center gap-3 border-t pt-4">
-          <Button disabled={busy} onClick={() => void run('update')}>
+          <Button disabled={busy} onClick={() => void run('update')} variant={status.state === 'applied' ? 'default' : 'secondary'}>
             <Save />
             保存配置
           </Button>

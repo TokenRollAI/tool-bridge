@@ -1,17 +1,14 @@
 import {
   Ban,
   Check,
-  Clock3,
   Copy,
   KeyRound,
   KeySquare,
   Loader2,
   Plus,
   Search,
-  ShieldCheck,
   ShieldOff,
   Trash2,
-  UserRound,
 } from 'lucide-react'
 import { useState } from 'react'
 import { toast } from 'sonner'
@@ -72,40 +69,6 @@ function formatDate(value: string) {
   return date.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
 }
 
-function StatusMetric({
-  icon: Icon,
-  label,
-  value,
-  description,
-  tone,
-}: {
-  description: string
-  icon: typeof ShieldCheck
-  label: string
-  tone: 'ok' | 'warn' | 'danger'
-  value: number
-}) {
-  const toneClass = {
-    ok: 'border-ok/25 bg-ok/[0.045] text-ok',
-    warn: 'border-warn/25 bg-warn/[0.045] text-warn',
-    danger: 'border-destructive/25 bg-destructive/[0.04] text-destructive',
-  }[tone]
-  return (
-    <div className="flex items-center gap-3 rounded-xl border bg-card/70 px-4 py-3.5">
-      <div className={`grid size-9 shrink-0 place-items-center rounded-lg border ${toneClass}`}>
-        <Icon aria-hidden="true" className="size-4" />
-      </div>
-      <div className="min-w-0 flex-1">
-        <div className="flex items-baseline justify-between gap-3">
-          <p className="text-xs font-medium text-muted-foreground">{label}</p>
-          <p className="font-mono text-xl font-medium tabular-nums">{value}</p>
-        </div>
-        <p className="mt-0.5 truncate text-[11px] text-muted-foreground">{description}</p>
-      </div>
-    </div>
-  )
-}
-
 function ScopeGroup({
   label,
   scopes,
@@ -119,7 +82,7 @@ function ScopeGroup({
   return (
     <div className="flex items-start gap-2">
       <span
-        className={`mt-0.5 w-12 shrink-0 font-mono text-[9px] tracking-[0.12em] ${danger ? 'text-destructive' : 'text-ok'}`}
+        className={`mt-0.5 w-12 shrink-0 font-mono text-[9px] tracking-[0.12em] ${danger ? 'text-destructive' : 'text-muted-foreground'}`}
       >
         {label}
       </span>
@@ -135,10 +98,10 @@ function ScopeGroup({
                 occurrences.set(baseKey, occurrence)
                 return (
                   <span
-                    className={`inline-flex items-center overflow-hidden rounded-md border text-[10px] ${
+                    className={`inline-flex max-w-full flex-wrap items-center break-all rounded-md border text-[10px] ${
                       danger
                         ? 'border-destructive/25 bg-destructive/[0.04]'
-                        : 'border-ok/20 bg-ok/[0.035]'
+                        : 'border-border bg-tone-subtle'
                     }`}
                     key={`${baseKey}:${occurrence}`}
                   >
@@ -159,18 +122,18 @@ function ScopeSummary({ scopes, registerPaths }: { registerPaths?: string[], sco
   const allow = scopes.filter(scope => scope.effect !== 'deny')
   const deny = scopes.filter(scope => scope.effect === 'deny')
   return (
-    <div className="grid min-w-[360px] gap-2.5">
+    <div className="grid min-w-0 gap-2.5">
       <ScopeGroup label="ALLOW" scopes={allow} />
       {deny.length > 0 && <ScopeGroup danger label="DENY" scopes={deny} />}
       {registerPaths && registerPaths.length > 0 && (
         <div className="flex items-start gap-2">
-          <span className="mt-0.5 w-12 shrink-0 font-mono text-[9px] tracking-[0.12em] text-primary">
+          <span className="mt-0.5 w-12 shrink-0 font-mono text-[9px] tracking-[0.12em] text-foreground">
             REGISTER
           </span>
           <div className="flex flex-wrap gap-1">
             {registerPaths.map(path => (
               <code
-                className="rounded border border-primary/25 bg-primary/[0.06] px-1.5 py-0.5 font-mono text-[10px] text-primary"
+                className="rounded border border-edge-strong bg-primary/[0.06] px-1.5 py-0.5 font-mono text-[10px] text-foreground"
                 key={path}
               >
                 {path}
@@ -414,38 +377,19 @@ export function SkPage() {
             。
           </>
         )}
-        eyebrow="AUTH / ACCESS CONTROL"
         title="访问密钥"
       />
 
-      <section aria-label="Secret Key 状态概览" className="mt-6 grid gap-3 sm:grid-cols-3">
-        <StatusMetric
-          description="可通过 scope 授权"
-          icon={ShieldCheck}
-          label="有效"
-          tone="ok"
-          value={statusCounts.active}
-        />
-        <StatusMetric
-          description="保留记录但拒绝访问"
-          icon={ShieldOff}
-          label="已禁用"
-          tone="danger"
-          value={statusCounts.disabled}
-        />
-        <StatusMetric
-          description="生命周期已经结束"
-          icon={Clock3}
-          label="已过期"
-          tone="warn"
-          value={statusCounts.expired}
-        />
-      </section>
+      {!list.isPending && !list.isError && (
+        <p aria-label="Secret Key 状态概览" className="mt-6 text-sm text-muted-foreground">
+          {`已加载 ${all.length} 把 · 有效 ${statusCounts.active} · 已禁用 ${statusCounts.disabled} · 已过期 ${statusCounts.expired}`}
+        </p>
+      )}
 
-      <section aria-label="SK 列表" className="mt-6 overflow-hidden rounded-xl border bg-card/70">
+      <section aria-label="SK 列表" className="mt-6 min-w-0">
         <div className="flex flex-col gap-3 border-b bg-muted/10 px-4 py-3.5 xl:flex-row xl:items-center xl:justify-between">
           <div className="flex min-w-0 items-center gap-3">
-            <div className="grid size-8 shrink-0 place-items-center rounded-md border bg-background text-primary">
+            <div className="grid size-8 shrink-0 place-items-center rounded-md border bg-background text-foreground">
               <KeySquare aria-hidden="true" className="size-4" />
             </div>
             <div className="min-w-0">
@@ -550,12 +494,12 @@ export function SkPage() {
                 )
               : (
                   <div className="overflow-x-auto">
-                    <Table className="min-w-[1040px]">
+                    <Table className="w-full">
                       <TableHeader>
                         <TableRow className="bg-muted/15">
                           <TableHead className="w-[270px]">身份与用途</TableHead>
-                          <TableHead>权限边界</TableHead>
-                          <TableHead className="w-[170px]">生命周期</TableHead>
+                          <TableHead className="hidden md:table-cell">权限边界</TableHead>
+                          <TableHead className="hidden w-[170px] lg:table-cell">生命周期</TableHead>
                           <TableHead className="w-[100px]">状态</TableHead>
                           <TableHead className="w-[92px]">
                             <span className="sr-only">操作</span>
@@ -569,9 +513,6 @@ export function SkPage() {
                             <TableRow className="group align-top" key={sk.id}>
                               <TableCell className="py-4">
                                 <div className="flex items-start gap-3">
-                                  <div className="mt-0.5 grid size-8 shrink-0 place-items-center rounded-md border bg-muted/20 text-muted-foreground">
-                                    <UserRound aria-hidden="true" className="size-3.5" />
-                                  </div>
                                   <div className="min-w-0">
                                     <p className="truncate font-mono text-sm font-medium">{sk.owner}</p>
                                     <p className="mt-1 line-clamp-2 text-xs leading-5 text-muted-foreground">
@@ -585,70 +526,91 @@ export function SkPage() {
                                   </div>
                                 </div>
                               </TableCell>
-                              <TableCell className="py-4">
-                                <ScopeSummary registerPaths={sk.registerPaths} scopes={sk.scopes} />
+                              <TableCell className="hidden py-4 md:table-cell">
+                                {sk.scopes.length}
+                                {' '}
+                                条规则
                               </TableCell>
-                              <TableCell className="py-4">
+                              <TableCell className="hidden py-4 lg:table-cell">
                                 <Lifecycle sk={sk} status={status} />
                               </TableCell>
                               <TableCell className="py-4">
                                 <StatusBadge status={status} />
                               </TableCell>
                               <TableCell className="py-4">
-                                <div className="flex justify-end gap-1">
-                                  {sk.disabled
-                                    ? (
-                                        // 启用是恢复访问，非破坏性，直接点击。
-                                        <Button
-                                          aria-label="启用"
-                                          disabled={invoke.isPending}
-                                          onClick={() => { void setDisabled(sk, false).catch(() => {}) }}
-                                          size="icon-sm"
-                                          title="启用"
-                                          variant="ghost"
-                                        >
-                                          <Check />
-                                        </Button>
-                                      )
-                                    : (
-                                        // 禁用会立即拒绝该 SK 的所有请求，与吊销的确认标准对齐。
-                                        <ConfirmAction
-                                          actionLabel="禁用"
-                                          description={<p>禁用后该 SK 的所有请求会立即被拒绝（引用它的 Agent/设备随即断开）。可随时重新启用。</p>}
-                                          onConfirm={async () => { await setDisabled(sk, true) }}
-                                          title={`禁用 ${sk.id}?`}
-                                          trigger={(
+                                <Dialog>
+                                  <DialogTrigger asChild>
+                                    <Button aria-label={`查看 ${sk.owner} 的密钥详情`} size="sm" variant="ghost">详情</Button>
+                                  </DialogTrigger>
+                                  <DialogContent className="inset-y-0 right-0 left-auto flex h-svh max-h-svh w-full max-w-full translate-x-0 translate-y-0 flex-col overflow-y-auto rounded-none border-y-0 bg-panel sm:max-w-[420px]">
+                                    <DialogHeader>
+                                      <DialogTitle>{sk.owner}</DialogTitle>
+                                      <DialogDescription>{sk.description || '访问密钥详情'}</DialogDescription>
+                                    </DialogHeader>
+                                    <code className="break-all text-xs">{sk.id}</code>
+                                    <StatusBadge status={status} />
+                                    <h3 className="mt-3 text-sm font-semibold">权限边界</h3>
+                                    <ScopeSummary registerPaths={sk.registerPaths} scopes={sk.scopes} />
+                                    <Lifecycle sk={sk} status={status} />
+                                    <div className="mt-3 flex gap-2 border-t pt-4">
+                                      {sk.disabled
+                                        ? (
+                                      // 启用是恢复访问，非破坏性，直接点击。
                                             <Button
-                                              aria-label="禁用"
+                                              aria-label="启用"
                                               disabled={invoke.isPending}
-                                              size="icon-sm"
-                                              title="禁用"
+                                              onClick={() => { void setDisabled(sk, false).catch(() => {}) }}
+                                              size="sm"
+                                              title="启用"
                                               variant="ghost"
                                             >
-                                              <Ban />
+                                              <Check />
+                                              启用
                                             </Button>
+                                          )
+                                        : (
+                                      // 禁用会立即拒绝该 SK 的所有请求，与吊销的确认标准对齐。
+                                            <ConfirmAction
+                                              actionLabel="禁用"
+                                              description={<p>禁用后该 SK 的所有请求会立即被拒绝（引用它的 Agent/设备随即断开）。可随时重新启用。</p>}
+                                              onConfirm={async () => { await setDisabled(sk, true) }}
+                                              title={`禁用 ${sk.id}?`}
+                                              trigger={(
+                                                <Button
+                                                  aria-label="禁用"
+                                                  disabled={invoke.isPending}
+                                                  size="sm"
+                                                  title="禁用"
+                                                  variant="ghost"
+                                                >
+                                                  <Ban />
+                                                  禁用
+                                                </Button>
+                                              )}
+                                            />
                                           )}
-                                        />
-                                      )}
-                                  <ConfirmAction
-                                    actionLabel="吊销并删除"
-                                    description={
-                                      <p>删除后当前区域通常很快拒绝该 SK；CF KV 向其它边缘传播常需约 60 秒，且可能更久。此操作不可撤销。</p>
-                                    }
-                                    onConfirm={() => remove(sk)}
-                                    title={`吊销并删除 ${sk.id}?`}
-                                    trigger={(
-                                      <Button
-                                        aria-label="吊销并删除"
-                                        size="icon-sm"
-                                        title="吊销并删除"
-                                        variant="ghost"
-                                      >
-                                        <Trash2 className="text-destructive" />
-                                      </Button>
-                                    )}
-                                  />
-                                </div>
+                                      <ConfirmAction
+                                        actionLabel="吊销并删除"
+                                        description={
+                                          <p>删除后当前区域通常很快拒绝该 SK；CF KV 向其它边缘传播常需约 60 秒，且可能更久。此操作不可撤销。</p>
+                                        }
+                                        onConfirm={() => remove(sk)}
+                                        title={`吊销并删除 ${sk.id}?`}
+                                        trigger={(
+                                          <Button
+                                            aria-label="吊销并删除"
+                                            size="sm"
+                                            title="吊销并删除"
+                                            variant="ghost"
+                                          >
+                                            <Trash2 className="text-destructive" />
+                                            吊销
+                                          </Button>
+                                        )}
+                                      />
+                                    </div>
+                                  </DialogContent>
+                                </Dialog>
                               </TableCell>
                             </TableRow>
                           )
@@ -671,7 +633,7 @@ export function SkPage() {
       <Dialog open={issued !== null}>
         <DialogContent className="p-4 sm:p-6" showCloseButton={false}>
           <DialogHeader>
-            <div className="mb-1 grid size-10 place-items-center rounded-lg border border-primary/30 bg-primary/10 text-primary">
+            <div className="mb-1 grid size-10 place-items-center rounded-lg border border-edge-strong bg-primary/10 text-foreground">
               <KeyRound aria-hidden="true" className="size-5" />
             </div>
             <DialogTitle className="text-base">SK 已签发，明文仅显示这一次</DialogTitle>

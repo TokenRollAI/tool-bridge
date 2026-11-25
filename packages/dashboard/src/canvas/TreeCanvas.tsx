@@ -51,23 +51,8 @@ export interface CanvasActionTarget {
   path: string
 }
 
-/** MiniMap 只画矩形，用稳定高对比色编码角色/kind，不能复用暗色卡片 token。 */
 function minimapNodeColor(node: Node): string {
-  const data = node.data as unknown as FlowNodeData
-  if (node.selected || data.virtualRoot) return '#facc15'
-  if (data.role !== 'tree') return '#f59e0b'
-  if (data.remoteScope) return '#d946ef'
-  const colors: Partial<Record<FlowNodeData['kind'], string>> = {
-    builtin: '#38bdf8',
-    context: '#34d399',
-    device: '#fbbf24',
-    directory: '#94a3b8',
-    http: '#2dd4bf',
-    mcp: '#a78bfa',
-    skillhub: '#818cf8',
-    tool: '#fb7185',
-  }
-  return colors[data.kind] ?? '#94a3b8'
+  return node.selected ? 'var(--signal)' : 'var(--ink-3)'
 }
 
 function CanvasInner({
@@ -201,10 +186,10 @@ function CanvasInner({
       type: 'smoothstep',
       animated: false,
       style: e.relation === 'commands'
-        ? { stroke: '#f59e0b', strokeDasharray: '3 3', strokeWidth: 1.5 }
+        ? { stroke: 'var(--input)', strokeDasharray: '3 3', strokeWidth: 1.5 }
         : e.remoteScope
-          ? { stroke: 'var(--color-brand-to)', strokeDasharray: '4 3', strokeWidth: 1.5 }
-          : { stroke: 'var(--border)', strokeWidth: 1.5 },
+          ? { stroke: 'var(--input)', strokeDasharray: '4 3', strokeWidth: 1.5 }
+          : { stroke: 'var(--input)', strokeWidth: 1.5 },
     }))
     return { nodes: rfNodes, edges: rfEdges }
   }, [
@@ -252,7 +237,7 @@ function CanvasInner({
     return (
       <div className="grid h-full place-items-center">
         <div className="flex items-center gap-2.5 text-sm text-muted-foreground">
-          <RefreshCw className="size-4 animate-spin text-primary" />
+          <RefreshCw className="size-4 animate-spin text-foreground" />
           正在加载工作树…
         </div>
       </div>
@@ -295,19 +280,19 @@ function CanvasInner({
     >
       <Background color="var(--border)" gap={22} variant={BackgroundVariant.Dots} />
       <Controls
-        className="!rounded-lg !border !bg-card !shadow-md [&_button]:!border-border [&_button]:!bg-card [&_button:hover]:!bg-accent [&_button_svg]:!fill-foreground"
+        className="!rounded-lg !border !bg-card !shadow-none [&_button]:!border-border [&_button]:!bg-card [&_button:hover]:!bg-accent [&_button_svg]:!fill-foreground"
         showInteractive={false}
       />
       <MiniMap
         ariaLabel="能力树导航缩略图"
         bgColor="var(--card)"
-        className="!rounded-xl !border !border-border !shadow-lg max-sm:!hidden"
+        className="!rounded-xl !border !border-border !shadow-none max-sm:!hidden"
         maskColor="rgb(2 6 23 / 0.28)"
-        maskStrokeColor="var(--primary)"
+        maskStrokeColor="var(--input)"
         maskStrokeWidth={1.25}
         nodeBorderRadius={6}
         nodeColor={minimapNodeColor}
-        nodeStrokeColor="rgb(15 23 42 / 0.72)"
+        nodeStrokeColor="var(--input)"
         nodeStrokeWidth={1}
         pannable
         style={{ width: 176, height: 112 }}

@@ -147,7 +147,7 @@ function RegistryMetric({
   value: number
 }) {
   return (
-    <div className="rounded-lg border bg-card/55 p-4">
+    <div className="border-t py-5">
       <div className="flex items-center justify-between gap-3 text-xs text-muted-foreground">
         <span>{label}</span>
         <Icon className="size-4" />
@@ -278,7 +278,7 @@ export function RegistryPage() {
         <RegistryMetric detail="联邦 HTBP" icon={Globe2} label="Remote" value={remoteCount} />
       </div>
 
-      <section className="mt-4 overflow-hidden rounded-lg border bg-card/45">
+      <section className="mt-4 min-w-0">
         <div className="flex flex-col gap-3 border-b p-3 sm:flex-row sm:items-center sm:justify-between sm:px-4">
           <div className="flex max-w-full overflow-x-auto rounded-md border bg-background/60">
             {KIND_FILTERS.map((kind) => {
@@ -288,7 +288,7 @@ export function RegistryPage() {
                   className={cn(
                     'min-h-8 border-r px-3 font-mono text-[10px] whitespace-nowrap last:border-r-0',
                     kindFilter === kind
-                      ? 'bg-primary/10 text-primary shadow-[inset_0_-2px_var(--primary)]'
+                      ? 'bg-primary/10 text-foreground shadow-[inset_0_-2px_var(--primary)]'
                       : 'text-muted-foreground hover:bg-muted/40 hover:text-foreground',
                   )}
                   key={kind}

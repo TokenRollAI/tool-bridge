@@ -54,13 +54,35 @@ describe('工作台到工具调用', () => {
   it('收藏链接直接消费实时 help，打开空表单而非自动重放，并能返回工作台', () => {
     toggleFavorite(historyScope(session.active!), tool)
     render(app())
-    expect(screen.getByText('收藏 · 本机 / 当前连接档案')).toBeTruthy()
+    expect(screen.getByText('收藏和最近调用仅保存在本机，按当前连接档案显示。')).toBeTruthy()
     fireEvent.click(within(screen.getByRole('region', { name: '常用工具' })).getByRole('link', { name: /forecast/ }))
     expect(mocks.useHelp).toHaveBeenCalledWith('team/weather')
     expect((screen.getByLabelText('arguments JSON') as HTMLTextAreaElement).value).toBe('{}')
     expect(mocks.invoke).not.toHaveBeenCalled()
     fireEvent.click(screen.getByRole('link', { name: '返回工作台' }))
     expect(screen.getByRole('heading', { name: '工作台' })).toBeTruthy()
+  })
+
+  it('切换投递策略保留草稿，非法有效期仅阻止队列投递', () => {
+    mocks.useHelp.mockReturnValue({ data: { node: { kind: 'tool' }, cmds: [{ name: 'forecast', path: '/actual/weather/forecast', scope: 'read', delivery: 'both' }] } })
+    toggleFavorite(historyScope(session.active!), tool)
+    render(app())
+    fireEvent.click(within(screen.getByRole('region', { name: '常用工具' })).getByRole('link', { name: /forecast/ }))
+    fireEvent.change(screen.getByLabelText('arguments JSON'), { target: { value: '{"city":"杭州"}' } })
+    fireEvent.click(screen.getByRole('radio', { name: 'mailbox' }))
+    fireEvent.change(screen.getByLabelText('Mailbox TTL seconds'), { target: { value: '0' } })
+    fireEvent.click(screen.getByRole('button', { name: '调用' }))
+    expect(screen.getByRole('alert').textContent).toMatch(/正整数/)
+    expect(mocks.invoke).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('radio', { name: 'realtime' }))
+    fireEvent.click(screen.getByRole('button', { name: '调用' }))
+    expect(mocks.invoke).toHaveBeenCalledExactlyOnceWith({
+      commandPath: 'actual/weather/forecast',
+      historyIdentity: tool,
+      args: { city: '杭州' },
+      accept: 'markdown',
+      delivery: 'realtime',
+    })
   })
 
   it('最近使用按命令去重，失权后提供明确反馈而不打开旧表单', () => {

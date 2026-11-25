@@ -38,6 +38,7 @@ afterEach(() => {
 describe('设备工作台', () => {
   it('首屏保留离线设备、工具入口与分页，按真实 deviceId 传递邮箱目标', () => {
     page()
+    expect(screen.getByLabelText('已加载设备摘要').textContent).toBe('已加载 1 台 · 在线 0 · 疑似失联 0 · 离线 1')
     expect(screen.queryByRole('dialog')).toBeNull()
     expect(screen.getByRole('link', { name: '打开 device/laptop' }).getAttribute('href')).toBe('/nodes/device/laptop?tab=invoke')
     expect(screen.getByTestId('mailbox').textContent).toContain('raw:laptop')

@@ -115,7 +115,7 @@ function SharePanel({
   share: StoreShareGrant
 }) {
   return (
-    <section className="mt-4 rounded-lg border border-primary/25 bg-primary/[0.035] p-4">
+    <section className="mt-4 rounded-lg border border-edge-strong bg-primary/[0.035] p-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
           <p className="text-sm font-medium">短期分享已创建</p>
@@ -258,7 +258,7 @@ export function StorePage() {
         title="文件存储"
       />
 
-      <section className="mt-6 grid gap-3 rounded-xl border bg-card/55 p-4 lg:grid-cols-[minmax(0,1fr)_12rem_auto] lg:items-end">
+      <section className="mt-6 grid gap-3 border-t py-5 lg:grid-cols-[minmax(0,1fr)_12rem_auto] lg:items-end">
         <div>
           <label className="text-xs font-medium" htmlFor="share-ttl">分享有效期（秒）</label>
           <Input
@@ -292,7 +292,7 @@ export function StorePage() {
 
       {share && <SharePanel onRevoke={revokeShare} revoking={revoke.isPending} share={share} />}
 
-      <section className="mt-4 overflow-hidden rounded-xl border bg-card/55">
+      <section className="mt-4 min-w-0">
         {list.isPending && (
           <div className="space-y-2 p-4">
             <Skeleton className="h-10 w-full" />

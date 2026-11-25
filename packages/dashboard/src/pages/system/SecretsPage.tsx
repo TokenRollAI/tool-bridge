@@ -167,7 +167,7 @@ function SetSecretDialog({
         showCloseButton={!invoke.isPending}
       >
         <DialogHeader className="border-b px-5 py-5 sm:px-6">
-          <div className="mb-1 grid size-10 place-items-center rounded-lg border border-primary/25 bg-primary/[0.07] text-primary">
+          <div className="mb-1 grid size-10 place-items-center rounded-lg border border-edge-strong bg-primary/[0.07] text-foreground">
             {isRotation ? <RefreshCw className="size-5" /> : <LockKeyhole className="size-5" />}
           </div>
           <DialogTitle>
@@ -372,11 +372,11 @@ export function SecretsPage() {
 
       <section
         aria-label="凭证引用列表"
-        className="mt-6 overflow-hidden rounded-xl border bg-card/70"
+        className="mt-6 min-w-0"
       >
         <div className="flex flex-col gap-3 border-b bg-muted/10 px-4 py-3.5 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex min-w-0 items-center gap-3">
-            <div className="grid size-8 shrink-0 place-items-center rounded-md border bg-background text-primary">
+            <div className="grid size-8 shrink-0 place-items-center rounded-md border bg-background text-foreground">
               <LockKeyhole aria-hidden="true" className="size-4" />
             </div>
             <div className="min-w-0">

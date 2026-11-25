@@ -169,7 +169,7 @@ export function CmdPanel({
   }, [deliveryCapability])
 
   const doInvoke = async (args: unknown) => {
-    const ttlSeconds = ttl.trim() === '' ? undefined : Number(ttl)
+    const ttlSeconds = delivery === 'realtime' || ttl.trim() === '' ? undefined : Number(ttl)
     if (ttlSeconds !== undefined && (!Number.isSafeInteger(ttlSeconds) || ttlSeconds < 1)) {
       setDeliveryError('TTL 必须是正整数秒数')
       return
@@ -214,18 +214,9 @@ export function CmdPanel({
       className={cn(
         'mt-4 flex flex-wrap items-center gap-2 border-t pt-3',
         dialog && 'mt-5 pt-4',
-        page && 'sticky bottom-0 z-10 bg-card pb-2',
+        page && 'pb-2',
       )}
     >
-      <Button
-        disabled={invoke.isPending}
-        onClick={mode === 'json' ? submitRaw : undefined}
-        size="sm"
-        type={mode === 'form' ? 'submit' : 'button'}
-      >
-        {invoke.isPending ? <Loader2 className="animate-spin" /> : <Play />}
-        调用
-      </Button>
       <label className="text-xs text-muted-foreground sm:ml-2" htmlFor={acceptId}>
         结果格式
       </label>
@@ -244,37 +235,41 @@ export function CmdPanel({
       </Select>
       {deliveryCapability !== 'realtime' && (
         <>
-          <label className="text-xs text-muted-foreground sm:ml-2" htmlFor={`${acceptId}-delivery`}>
-            执行方式
-          </label>
-          <Select
-            onValueChange={value => setDelivery(value as typeof delivery)}
-            value={delivery}
-          >
-            <SelectTrigger
-              className="h-8 w-32 font-mono text-xs"
-              id={`${acceptId}-delivery`}
-              size="sm"
-            >
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {deliveryCapability === 'both' && (
-                <SelectItem className="font-mono text-xs" value="realtime">realtime</SelectItem>
-              )}
-              {deliveryCapability === 'both' && (
-                <SelectItem className="font-mono text-xs" value="fallback">fallback</SelectItem>
-              )}
-              <SelectItem className="font-mono text-xs" value="mailbox">mailbox</SelectItem>
-            </SelectContent>
-          </Select>
+          {deliveryCapability === 'both'
+            ? (
+                <fieldset className="flex flex-wrap gap-1 rounded-md bg-secondary p-1">
+                  <legend className="sr-only">执行方式</legend>
+                  {(['realtime', 'mailbox', 'fallback'] as const).map(policy => (
+                    <label className="relative cursor-pointer" key={policy}>
+                      <input
+                        checked={delivery === policy}
+                        className="peer sr-only"
+                        name={`${acceptId}-delivery`}
+                        onChange={() => {
+                          setDelivery(policy)
+                          setDeliveryError(null)
+                        }}
+                        type="radio"
+                        value={policy}
+                      />
+                      <span className="inline-flex min-h-8 items-center rounded-sm px-2 font-mono text-xs text-muted-foreground peer-checked:bg-accent peer-checked:font-semibold peer-checked:text-foreground peer-focus-visible:ring-2 peer-focus-visible:ring-ring pointer-coarse:min-h-12">{policy}</span>
+                    </label>
+                  ))}
+                </fieldset>
+              )
+            : <span className="text-xs text-muted-foreground">执行方式 · mailbox</span>}
           {delivery !== 'realtime' && (
             <>
               <Input
+                aria-describedby={deliveryError ? `${acceptId}-ttl-error` : undefined}
+                aria-invalid={Boolean(deliveryError)}
                 aria-label="Mailbox TTL seconds"
                 className="h-8 w-24 font-mono text-xs"
                 min="1"
-                onChange={event => setTtl(event.target.value)}
+                onChange={(event) => {
+                  setTtl(event.target.value)
+                  setDeliveryError(null)
+                }}
                 placeholder="TTL"
                 type="number"
                 value={ttl}
@@ -315,6 +310,16 @@ export function CmdPanel({
           {mode === 'form' ? 'JSON 编辑' : '表单编辑'}
         </Button>
       )}
+      {deliveryError && <p className="basis-full text-xs text-destructive" id={`${acceptId}-ttl-error`} role="alert">{deliveryError}</p>}
+      <Button
+        disabled={invoke.isPending}
+        onClick={mode === 'json' ? submitRaw : undefined}
+        size="sm"
+        type={mode === 'form' ? 'submit' : 'button'}
+      >
+        {invoke.isPending ? <Loader2 className="animate-spin" /> : <Play />}
+        调用
+      </Button>
     </div>
   )
 
@@ -396,8 +401,8 @@ export function CmdPanel({
         </header>
 
         <CollapsibleContent className={cn(dialog && !page && 'min-h-0 flex-1 overflow-y-auto')}>
-          <div className={cn('min-w-0', page && 'grid items-start gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]')}>
-            <div className={cn('min-w-0 px-3 py-3 sm:px-4', dialog && 'px-1 py-4', page && 'rounded-xl border bg-card p-5 sm:p-6')}>
+          <div className={cn('min-w-0', page && 'grid items-start gap-6 lg:gap-x-10 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]')}>
+            <div className={cn('min-w-0 px-3 py-3 sm:px-4', dialog && 'px-1 py-4', page && 'px-0 sm:px-0')}>
               {page && <h2 className="mb-5 text-base font-semibold">输入参数</h2>}
               {lazyNeeded && toolHelp.isPending
                 ? (
@@ -452,19 +457,8 @@ export function CmdPanel({
                         </div>
                       )}
 
-              {deliveryError && <p className="mt-2 text-xs text-destructive">{deliveryError}</p>}
-
-              <CliHint
-                args={currentArgs}
-                commandPath={commandPath}
-                delivery={deliveryCapability === 'realtime' ? undefined : delivery}
-                idempotencyKey={delivery === 'realtime' || idempotencyKey.trim() === ''
-                  ? undefined
-                  : idempotencyKey.trim()}
-                ttlSeconds={delivery === 'realtime' || ttl.trim() === '' ? undefined : Number(ttl)}
-              />
             </div>
-            <div aria-label="调用结果" className={cn('min-w-0', page && 'min-h-80 rounded-xl border bg-card p-5 sm:p-6 lg:sticky lg:top-6')}>
+            <div aria-label="调用结果" className={cn('min-w-0', page && 'border-t pt-4 lg:border-t-0')}>
               {page && <h2 className="mb-5 text-base font-semibold">执行结果</h2>}
               {invoke.isPending && (
                 <p className="mb-4 flex items-center gap-2 text-sm text-muted-foreground" role="status">
@@ -487,6 +481,17 @@ export function CmdPanel({
                   </div>
                 </div>
               )}
+            </div>
+            <div className={cn('min-w-0', page && 'lg:col-span-2')}>
+              <CliHint
+                args={currentArgs}
+                commandPath={commandPath}
+                delivery={deliveryCapability === 'realtime' ? undefined : delivery}
+                idempotencyKey={delivery === 'realtime' || idempotencyKey.trim() === ''
+                  ? undefined
+                  : idempotencyKey.trim()}
+                ttlSeconds={delivery === 'realtime' || ttl.trim() === '' ? undefined : Number(ttl)}
+              />
             </div>
           </div>
         </CollapsibleContent>

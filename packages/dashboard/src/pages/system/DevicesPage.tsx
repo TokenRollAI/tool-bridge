@@ -5,8 +5,6 @@ import {
   Plus,
   RefreshCw,
   ShieldCheck,
-  Wifi,
-  WifiLow,
   WifiOff,
 } from 'lucide-react'
 import { Link, useSearchParams } from 'react-router'
@@ -20,11 +18,6 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import {
-  derivePresence,
-  PRESENCE_HINT,
-  PRESENCE_TONE,
-} from '@/lib/presence'
 import { DeviceMailboxPanel } from '@/components/device/DeviceMailboxPanel'
 import { mailboxTargetForRegistryNode } from '@/lib/deviceMailbox'
 import { PaginationFooter } from '@/components/PaginationFooter'
@@ -34,6 +27,7 @@ import { EmptyState } from '@/components/EmptyState'
 import { PageHeader } from '@/components/PageHeader'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useSession } from '@/lib/session-context'
+import { derivePresence } from '@/lib/presence'
 import { Button } from '@/components/ui/button'
 import { useRegistryList } from '@/lib/queries'
 import { encodeTreePath } from '@/lib/path'
@@ -139,7 +133,7 @@ export function DevicesPage() {
                   需要具备 register 权限的 SK
                 </span>
                 <Link
-                  className="inline-flex items-center gap-1 text-foreground underline decoration-border underline-offset-4 hover:text-primary"
+                  className="inline-flex items-center gap-1 text-foreground underline decoration-border underline-offset-4 hover:text-foreground"
                   onClick={() => changeConnectOpen(false)}
                   to="/manage/sk"
                 >
@@ -149,14 +143,14 @@ export function DevicesPage() {
               </div>
             </div>
 
-            <div className="min-w-0 rounded-lg border bg-background/75 p-3 shadow-[inset_0_1px_0_color-mix(in_oklch,var(--foreground)_5%,transparent)]">
+            <div className="min-w-0 py-2">
               <div className="mb-2 flex items-center justify-between gap-3">
                 <span className="font-mono text-[10px] tracking-[0.12em] text-muted-foreground uppercase">
                   连接命令
                 </span>
                 <CopyButton label="复制 connect 命令" value={connectCmd} />
               </div>
-              <code className="block overflow-x-auto rounded-md bg-muted/35 px-3 py-3 font-mono text-xs leading-5 whitespace-nowrap text-foreground">
+              <code className="block overflow-x-auto rounded-md bg-tone-subtle px-3 py-3 font-mono text-xs leading-5 whitespace-nowrap text-foreground">
                 {connectCmd}
               </code>
               <p className="mt-2 text-[11px] leading-5 text-muted-foreground">
@@ -174,44 +168,13 @@ export function DevicesPage() {
         </DialogContent>
       </Dialog>
 
-      <div className="mt-6 grid grid-cols-2 gap-px overflow-hidden rounded-xl border bg-border sm:grid-cols-4">
-        <div className="bg-card p-4">
-          <div className="flex items-center justify-between gap-3">
-            <span className="text-xs text-muted-foreground">已加载设备</span>
-            <Cpu className="size-4 text-muted-foreground" />
-          </div>
-          <p className="mt-2 font-mono text-2xl font-semibold tabular-nums">{devices.length}</p>
-        </div>
-        <div className="bg-card p-4">
-          <div className="flex items-center justify-between gap-3">
-            <span className="text-xs text-muted-foreground">在线会话</span>
-            <Wifi className="size-4 text-ok" />
-          </div>
-          <p className="mt-2 font-mono text-2xl font-semibold text-ok tabular-nums">
-            {counts.online}
-          </p>
-        </div>
-        <div className="bg-card p-4">
-          <div className="flex items-center justify-between gap-3">
-            <span className="text-xs text-muted-foreground" title={PRESENCE_HINT.stale}>
-              疑似失联
-            </span>
-            <WifiLow className="size-4 text-warn" />
-          </div>
-          <p className="mt-2 font-mono text-2xl font-semibold text-warn tabular-nums">
-            {counts.stale}
-          </p>
-        </div>
-        <div className="bg-card p-4">
-          <div className="flex items-center justify-between gap-3">
-            <span className="text-xs text-muted-foreground">离线保留</span>
-            <WifiOff className="size-4 text-muted-foreground" />
-          </div>
-          <p className="mt-2 font-mono text-2xl font-semibold tabular-nums">{counts.offline}</p>
-        </div>
-      </div>
+      {!list.isPending && !list.isError && devices.length > 0 && (
+        <p aria-label="已加载设备摘要" className="mt-5 text-sm text-muted-foreground tabular-nums">
+          {`已加载 ${devices.length} 台 · 在线 ${counts.online} · 疑似失联 ${counts.stale} · 离线 ${counts.offline}`}
+        </p>
+      )}
 
-      <section className="mt-4 overflow-hidden rounded-lg border bg-card/45">
+      <section className="mt-4 min-w-0">
         <div className="flex min-h-12 flex-wrap items-center justify-between gap-3 border-b px-4 py-3">
           <div>
             <h2 className="text-sm font-semibold">设备会话</h2>
@@ -260,7 +223,7 @@ export function DevicesPage() {
               ? (
                   <EmptyState
                     action={(
-                      <Button onClick={() => changeConnectOpen(true)} size="sm">
+                      <Button onClick={() => changeConnectOpen(true)} size="sm" variant="secondary">
                         <Plus />
                         连接第一台设备
                       </Button>
@@ -290,14 +253,6 @@ export function DevicesPage() {
                         <TableRow key={device.path}>
                           <TableCell>
                             <div className="flex items-center gap-2 sm:gap-3">
-                              <span
-                                className={cn(
-                                  'hidden size-8 shrink-0 place-items-center rounded-md border sm:grid',
-                                  PRESENCE_TONE[presence.state],
-                                )}
-                              >
-                                <Cpu className="size-3.5" />
-                              </span>
                               <div className="min-w-0">
                                 <Link className="block max-w-32 truncate font-mono text-xs text-foreground hover:underline sm:max-w-64 sm:text-sm" to={`/nodes/${encodeTreePath(device.path)}?tab=invoke`}>{device.path}</Link>
                                 <p className="mt-0.5 hidden text-xs text-muted-foreground sm:block">设备</p>
@@ -349,7 +304,7 @@ export function DevicesPage() {
                     </TableBody>
                   </Table>
                 )}
-        {!list.isPending && !list.isError && (
+        {!list.isPending && !list.isError && (devices.length > 0 || Boolean(list.hasNextPage)) && (
           <PaginationFooter
             count={devices.length}
             hasNextPage={Boolean(list.hasNextPage)}
