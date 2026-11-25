@@ -1,5 +1,5 @@
 import {
-  base64urlEncode, createEncryptionKeyring, DeviceMailboxService, MemoryObjectStore, SecretStoreImpl, type StoreBackendResolver,
+  base64urlEncode, createEncryptionKeyring, DeviceMailboxService, MemoryObjectStore, NodeRegistryStore, SecretStoreImpl, type StoreBackendResolver,
   type StoreObject, StoreService,
 } from '@tool-bridge/core'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
@@ -72,6 +72,17 @@ suite('PostgreSQL domain authority (real connections)', () => {
       caller: { keyId: 'caller-key', owner: 'agent:owner' }, traceId: 'trace',
       ...(idempotencyKey === undefined ? {} : { idempotencyKey }) })
   }
+
+  it('persists an acknowledged metadata edit and a simultaneous heartbeat on the same node', async () => {
+    const registry = new NodeRegistryStore(new PgStateStore(sql))
+    const timestamp = new Date().toISOString()
+    await registry.write({ path: 'devices/qa', kind: 'directory', description: 'old' }, 'owner', timestamp)
+    await Promise.all([
+      registry.update('devices/qa', { description: 'new' }, timestamp),
+      registry.touchSeen('devices/qa', timestamp),
+    ])
+    expect(await registry.get('devices/qa')).toMatchObject({ description: 'new', lastSeenAt: timestamp })
+  })
 
   it('concurrent same-key begin produces one object/session/binding and stable upload token', async () => {
     const results = await Promise.all(Array.from({ length: 12 }, () => store.beginUpload(

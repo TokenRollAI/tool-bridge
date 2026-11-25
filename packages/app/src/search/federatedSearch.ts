@@ -1007,7 +1007,8 @@ function visibleSourceStatuses(
   delete rest.partial
   delete rest.sources
   const sources = rawSources?.filter(source =>
-    check(ctx, source.path, 'read').allow && check(ctx, source.path, 'call').allow)
+    (source.path === '' && source.status === 'index_capacity')
+    || (check(ctx, source.path, 'read').allow && check(ctx, source.path, 'call').allow))
   const partial = sources?.some(source => source.status !== 'ok') === true
   return {
     ...rest,
@@ -1118,7 +1119,7 @@ export async function executeFederatedSearch(
   if (viaError !== null) throw viaError
 
   const settings = federatedSearchSettings(deps.remote)
-  await input.searchSync?.ensureReady()
+  const audited = await input.searchSync?.ensureSnapshot()
   if (input.search.revision === undefined) {
     throw new TBError('invalid_argument', 'recursive search requires a revisioned search index')
   }
@@ -1136,7 +1137,7 @@ export async function executeFederatedSearch(
   const sessionStore = new FederatedSearchSessionStore(input.state)
   const plan = prepareToolSearchQuery(input.request.query)
   const registry = new NodeRegistryStore(input.state)
-  const snapshot = await registry.rootSnapshot(TOOL_SEARCH_AUDIT_NODE_LIMIT)
+  const snapshot = audited ?? await registry.rootSnapshot(TOOL_SEARCH_AUDIT_NODE_LIMIT)
   const allDirect = directRemoteNodes(snapshot.items)
   const eligibleRemotes = allDirect.filter((node) => {
     const relation = childPrefixFor(node.path, input.request.opts?.pathPrefix)
@@ -1167,6 +1168,7 @@ export async function executeFederatedSearch(
   const topologyNodes = snapshot.items.filter(node =>
     check(input.ctx, node.path, 'read').allow && check(input.ctx, node.path, 'call').allow)
   const digest = await topologyDigest(topologyNodes, includeLocal, localRevision, {
+    capacityExceeded: snapshot.truncated,
     allowInsecure: transportSettings.allowInsecure,
     allowlist: [...transportSettings.allowlist].sort(),
     availableRemotes: participatingRemotes.map(node => node.path),
@@ -1286,7 +1288,7 @@ export async function executeFederatedSearch(
   for (const node of participatingRemotes.slice(availableRemoteSlots)) {
     initialExcluded.push({ path: node.path, status: 'budget_exhausted' })
   }
-  if (snapshot.truncated) initialExcluded.push({ path: '', status: 'budget_exhausted' })
+  if (snapshot.truncated) initialExcluded.push({ path: '', status: 'index_capacity' })
   const allocations = selectedRemotes.map((_node, index) => {
     const base = selectedRemotes.length === 0 ? 0 : Math.floor(availableRemoteSlots / selectedRemotes.length)
     const extra = index < (availableRemoteSlots % Math.max(1, selectedRemotes.length)) ? 1 : 0

@@ -36,7 +36,7 @@ describe('PostgreSQL runtime and migration fencing', () => {
   it('serializes replica admission and migration acquisition so both cannot succeed', async () => {
     const { sql, instanceId } = await fixture()
     const [runtime, migration] = await Promise.allSettled([
-      acquireRuntimeLease(sql, { instanceId, replicaId: 'joining-replica', redisConfigured: true }),
+      acquireRuntimeLease(sql, { instanceId, replicaId: 'joining-replica', redisUrl: 'redis://fixture' }),
       acquireDatabaseMigrationFence(sql, { instanceId, replicaId: 'maintenance-owner', operationId: randomUUID() }),
     ])
     try {
@@ -62,7 +62,7 @@ describe('PostgreSQL runtime and migration fencing', () => {
   it('namespaces lifetime locks by schema and releases the runtime registry idempotently', async () => {
     const first = await fixture()
     const second = await fixture()
-    const runtime = await acquireRuntimeLease(first.sql, { instanceId: first.instanceId, replicaId: 'first-schema', redisConfigured: true })
+    const runtime = await acquireRuntimeLease(first.sql, { instanceId: first.instanceId, replicaId: 'first-schema', redisUrl: 'redis://fixture' })
     const migration = await acquireDatabaseMigrationFence(second.sql, {
       instanceId: second.instanceId, replicaId: 'second-schema', operationId: randomUUID(),
     })
@@ -89,7 +89,7 @@ describe('PostgreSQL runtime and migration fencing', () => {
     await fence.drain()
     await fence.releaseLock()
     expect((await sql`SELECT expires_at::text AS expiry FROM tb_runtime_maintenance`)[0]?.expiry).toBe('infinity')
-    await expect(acquireRuntimeLease(sql, { instanceId, replicaId: 'restarted-process', redisConfigured: true }))
+    await expect(acquireRuntimeLease(sql, { instanceId, replicaId: 'restarted-process', redisUrl: 'redis://fixture' }))
       .rejects.toMatchObject({ code: 'unavailable' })
     await expect(acquireDatabaseMigrationFence(sql, { instanceId, replicaId: 'new-maintenance', operationId: randomUUID() }))
       .rejects.toMatchObject({ code: 'conflict' })
@@ -97,7 +97,7 @@ describe('PostgreSQL runtime and migration fencing', () => {
 
   it('losing the reserved backend and expiring its registration does not authorize migration', async () => {
     const { sql, instanceId } = await fixture()
-    const runtime = await acquireRuntimeLease(sql, { instanceId, replicaId: 'lost-session', redisConfigured: true })
+    const runtime = await acquireRuntimeLease(sql, { instanceId, replicaId: 'lost-session', redisUrl: 'redis://fixture' })
     try {
       const [held] = await sql<{ pid: number }[]>`SELECT pid FROM pg_locks
         WHERE locktype='advisory' AND mode='ShareLock' AND granted

@@ -239,7 +239,8 @@ export class NodeRegistryStore {
           createdAt: now,
           updatedAt: now,
         }
-        await this.store.put(this.keyOf(parent), dir)
+        if (this.store.putIfAbsent) await this.store.putIfAbsent(this.keyOf(parent), dir)
+        else await this.store.put(this.keyOf(parent), dir)
       }
     }
 
@@ -263,56 +264,54 @@ export class NodeRegistryStore {
     return full
   }
 
-  /** 部分更新(patch);不存在 → not_found;path 不可改。 */
+  private async editExisting(path: TreePath, edit: (node: TreeNode) => TreeNode): Promise<TreeNode | null> {
+    const key = this.keyOf(path)
+    if (this.store.updateNode) return this.store.updateNode(key, edit)
+    // Existing embedded stores can opt into atomic edits without changing their adapter contract.
+    const node = await this.read(path)
+    if (!node) return null
+    const next = edit(node)
+    await this.store.put(key, next)
+    return next
+  }
+
+  /** Apply partial configuration edits to the same row that carries device presence. */
   async update(path: TreePath, patch: Partial<NodeInput>, now: Timestamp): Promise<TreeNode> {
     const norm = canonicalizePath(path)
-    const existing = await this.read(norm)
-    if (!existing) throw new TBError('not_found', `节点不存在:'${norm}'`)
     if (patch.path !== undefined && canonicalizePath(patch.path) !== norm) {
       throw new TBError('invalid_argument', 'path 不可通过 Update 变更')
     }
-    const merged: TreeNode = {
-      ...existing,
-      ...(patch.kind !== undefined ? { kind: patch.kind } : {}),
-      ...(patch.description !== undefined ? { description: patch.description } : {}),
-      ...(patch.config !== undefined ? { config: patch.config } : {}),
-      ...(patch.virtualize !== undefined ? { virtualize: patch.virtualize } : {}),
-      path: norm,
-      updatedAt: now,
-    }
-    assertKindConfig(merged)
-    await this.store.put(this.keyOf(norm), merged)
-    return merged
-  }
-
-  /**
-   * 设备生命周期专用:更新节点 online 状态,不存在 → not_found。
-   * online 翻 true 时视为一次存活观察,同步把 `lastSeenAt` 刷到 now;翻 false 时保留原
-   * `lastSeenAt`(用于展示"最后在线于")。
-   */
-  async setOnline(path: TreePath, online: boolean, now: Timestamp): Promise<TreeNode> {
-    const norm = canonicalizePath(path)
-    const existing = await this.read(norm)
-    if (!existing) throw new TBError('not_found', `节点不存在:'${norm}'`)
-    const updated: TreeNode = {
-      ...existing,
-      online,
-      ...(online ? { lastSeenAt: now } : {}),
-      updatedAt: now,
-    }
-    await this.store.put(this.keyOf(norm), updated)
+    const updated = await this.editExisting(norm, (current) => {
+      const next = {
+        ...current,
+        ...(patch.kind !== undefined ? { kind: patch.kind } : {}),
+        ...(patch.description !== undefined ? { description: patch.description } : {}),
+        ...(patch.config !== undefined ? { config: patch.config } : {}),
+        ...(patch.virtualize !== undefined ? { virtualize: patch.virtualize } : {}),
+        updatedAt: now,
+      }
+      assertKindConfig(next)
+      return next
+    })
+    if (!updated) throw new TBError('not_found', `节点不存在:'${norm}'`)
     return updated
   }
 
-  /**
-   * 设备心跳专用:只把 `lastSeenAt` 刷到 now,不改 online 也不动 updatedAt(心跳不是元数据变更,
-   * 不该扰动 updatedAt 的语义)。节点不存在时静默返回——心跳晚于节点删除是正常竞态,不报错。
-   */
-  async touchSeen(path: TreePath, now: Timestamp): Promise<void> {
+  async setOnline(path: TreePath, online: boolean, now: Timestamp): Promise<TreeNode> {
     const norm = canonicalizePath(path)
-    const existing = await this.read(norm)
-    if (!existing) return
-    await this.store.put(this.keyOf(norm), { ...existing, lastSeenAt: now })
+    const updated = await this.editExisting(norm, current => ({
+      ...current, online, updatedAt: now,
+      ...(online ? { lastSeenAt: now } : {}),
+    }))
+    if (!updated) throw new TBError('not_found', `节点不存在:'${norm}'`)
+    return updated
+  }
+
+  async touchSeen(path: TreePath, now: Timestamp): Promise<void> {
+    await this.editExisting(canonicalizePath(path), current => ({
+      ...current,
+      lastSeenAt: current.lastSeenAt && current.lastSeenAt > now ? current.lastSeenAt : now,
+    }))
   }
 
   /**

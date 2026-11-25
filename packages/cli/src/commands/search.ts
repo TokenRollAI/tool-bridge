@@ -53,7 +53,9 @@ function printPartialNotice(page: ToolSearchPage): void {
   if (page.partial !== true) return
   const failures = page.sources
     ?.filter(source => source.status !== 'ok')
-    .map(source => `${source.path || '(local)'}=${source.status}`)
+    .map(source => source.status === 'index_capacity'
+      ? `${source.path || '(local)'}: registry exceeds search capacity; using last indexed results`
+      : `${source.path || '(local)'}=${source.status}`)
   const detail = failures === undefined || failures.length === 0
     ? ''
     : ` (${failures.join(', ')})`

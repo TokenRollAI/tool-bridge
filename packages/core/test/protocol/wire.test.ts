@@ -302,6 +302,7 @@ describe('fixed control-plane wire source', () => {
         'unavailable',
         'cycle',
         'hop_limit',
+        'index_capacity',
         'budget_exhausted',
         'invalid_response',
       ],

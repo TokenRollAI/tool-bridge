@@ -1,9 +1,10 @@
 /** Real PostgreSQL search contract, capacity races and numeric result normalization. */
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { TOOL_SEARCH_AUDIT_NODE_LIMIT } from '@tool-bridge/core'
 import postgres, { type Sql } from 'postgres'
 import { verifySearchIndexContract } from '../../core/test/search/searchIndex.fixture'
 import { PgSearchIndex } from '../src/pgSearchIndex'
+import { PgStateStore } from '../src/pgStateStore'
 
 const DATABASE_URL = process.env.TB_TEST_DATABASE_URL
 if (!DATABASE_URL) throw new Error('PG integration fixture was not initialized')
@@ -39,6 +40,48 @@ async function freshIndex(tag: string): Promise<PgSearchIndex> {
 }
 
 suite('PgSearchIndex', () => {
+  it('reuses canonical snapshots, serializes rebuilds with writes, and recovers after overflow', async () => {
+    const schema = 'tb_search_input_test'
+    await sql.unsafe(`DROP SCHEMA IF EXISTS ${schema} CASCADE`)
+    await sql.unsafe(`CREATE SCHEMA ${schema}`)
+    const a = postgres(DATABASE_URL!, { max: 3, connection: { search_path: schema } })
+    const b = postgres(DATABASE_URL!, { max: 2, connection: { search_path: schema } })
+    cleanups.push(async () => {
+      await Promise.all([a.end(), b.end()])
+      await sql.unsafe(`DROP SCHEMA IF EXISTS ${schema} CASCADE`)
+    })
+    const state = new PgStateStore(a)
+    await state.ensureSchema()
+    const index = new PgSearchIndex(a)
+    await index.enableCanonicalAudit()
+    const node = { path: 'probe', kind: 'tool', description: 'before' }
+    await state.put('node:probe', node)
+    const build = vi.fn(async (nodes: readonly { description: string, path: string }[]) =>
+      nodes.map(n => ({ path: n.path, tool: { name: 'probe', description: n.description } })))
+    await Promise.all(Array.from({ length: 8 }, () => index.auditCanonical!(build)))
+    expect(build).toHaveBeenCalledTimes(1)
+    await a`UPDATE tb_kv SET value=jsonb_set(value,'{lastSeenAt}','"heartbeat"') WHERE key='node:probe'`
+    await index.auditCanonical!(build)
+    expect(build).toHaveBeenCalledTimes(1)
+    await new PgStateStore(b).put('node:probe', { ...node, description: 'during' })
+    let write: Promise<void> | undefined
+    await index.auditCanonical!(async (nodes) => {
+      write = new PgStateStore(b).put('node:probe', { ...node, description: 'after' })
+      await vi.waitFor(async () => expect((await a`SELECT 1 FROM pg_stat_activity WHERE wait_event_type='Lock' AND query LIKE '%INSERT INTO tb_kv(key,value)%'`).length).toBeGreaterThan(0))
+      return build(nodes)
+    })
+    await write
+    await index.auditCanonical!(build)
+    expect((await index.search('after')).items).toHaveLength(1)
+    const revision = await index.revision()
+    await a`INSERT INTO tb_kv(key,value) SELECT 'node:overflow/'||n,jsonb_build_object('path','overflow/'||n,'kind','directory') FROM generate_series(1,500) n`
+    expect((await index.auditCanonical!(build)).truncated).toBe(true)
+    expect(await index.revision()).toBe(revision)
+    await a`DELETE FROM tb_kv WHERE key>='node:overflow/' AND key<'node:overflow0'`
+    expect((await index.auditCanonical!(build)).truncated).toBe(false)
+    expect((await index.search('after')).items).toHaveLength(1)
+  })
+
   it('satisfies the shared LIKE search mutation contract', async () => {
     const index = await freshIndex('contract')
     await verifySearchIndexContract(index, 'contract/pg')

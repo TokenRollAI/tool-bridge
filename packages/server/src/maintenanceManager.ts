@@ -15,6 +15,7 @@ import { join } from 'node:path'
 import { Redis } from 'ioredis'
 import {
   acquireDatabaseMigrationFence,
+  acquireRedisSwitchFence,
   type DatabaseMigrationFence,
   finishMigrationTarget,
 } from './pgMaintenanceFence'
@@ -90,6 +91,58 @@ function connection(value: string): URL {
   }
   return result
 }
+async function probeRedis(redisUrl: string): Promise<void> {
+  let url: URL
+  try {
+    url = new URL(redisUrl)
+  } catch {
+    throw new TBError('invalid_argument', 'Redis URL is invalid')
+  }
+  if (!['redis:', 'rediss:'].includes(url.protocol))
+    throw new TBError(
+      'invalid_argument',
+      'Redis URL must use redis or rediss',
+    )
+  const options = {
+    connectTimeout: 5000,
+    commandTimeout: 5000,
+    retryStrategy: () => null,
+    lazyConnect: true,
+  }
+  const publisher = new Redis(redisUrl, options)
+  const subscriber = new Redis(redisUrl, options)
+  publisher.on('error', () => {})
+  subscriber.on('error', () => {})
+  const key = `tb:maintenance:${randomUUID()}`
+  try {
+    await Promise.all([publisher.connect(), subscriber.connect()])
+    await publisher.ping()
+    await publisher.set(key, 'probe', 'EX', 30, 'NX')
+    if ((await publisher.get(key)) !== 'probe')
+      throw new TBError(
+        'unavailable',
+        'Redis read/write validation failed',
+      )
+    await subscriber.subscribe(key)
+    const notified = new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(
+        () => reject(new Error('Redis pubsub deadline exceeded')),
+        5000,
+      )
+      subscriber.once('message', (channel, value) => {
+        clearTimeout(timer)
+        if (channel === key && value === 'probe') resolve()
+        else reject(new Error('Redis notification mismatch'))
+      })
+    })
+    await Promise.all([publisher.publish(key, 'probe'), notified])
+  } finally {
+    await publisher.del(key).catch(() => {})
+    subscriber.disconnect()
+    publisher.disconnect()
+  }
+}
+
 function sqlClient(url: string): Sql {
   return postgres(url, {
     max: 2,
@@ -412,69 +465,48 @@ export class MaintenanceManager implements MaintenanceManagement {
       'redis',
       input.expectedRevision,
       async (snapshot, step) => {
-        if (input.redisUrl) {
-          let url: URL
-          try {
-            url = new URL(input.redisUrl)
-          } catch {
-            throw new TBError('invalid_argument', 'Redis URL is invalid')
-          }
-          if (!['redis:', 'rediss:'].includes(url.protocol))
-            throw new TBError(
-              'invalid_argument',
-              'Redis URL must use redis or rediss',
-            )
-          const options = {
-            connectTimeout: 5000,
-            commandTimeout: 5000,
-            retryStrategy: () => null,
-            lazyConnect: true,
-          }
-          const publisher = new Redis(input.redisUrl, options)
-          const subscriber = new Redis(input.redisUrl, options)
-          publisher.on('error', () => {})
-          subscriber.on('error', () => {})
-          const key = `tb:maintenance:${randomUUID()}`
-          try {
-            await Promise.all([publisher.connect(), subscriber.connect()])
-            await publisher.ping()
-            await publisher.set(key, 'probe', 'EX', 30, 'NX')
-            if ((await publisher.get(key)) !== 'probe')
-              throw new TBError(
-                'unavailable',
-                'Redis read/write validation failed',
-              )
-            await subscriber.subscribe(key)
-            const notified = new Promise<void>((resolve, reject) => {
-              const timer = setTimeout(
-                () => reject(new Error('Redis pubsub deadline exceeded')),
-                5000,
-              )
-              subscriber.once('message', (channel, value) => {
-                clearTimeout(timer)
-                if (channel === key && value === 'probe') resolve()
-                else reject(new Error('Redis notification mismatch'))
-              })
-            })
-            await Promise.all([publisher.publish(key, 'probe'), notified])
-          } finally {
-            await publisher.del(key).catch(() => {})
-            subscriber.disconnect()
-            publisher.disconnect()
-          }
-        }
-        await step('quiescing')
-        const lease = await this.hooks.quiesce()
-        let committed = false
+        const sql = sqlClient(snapshot.databaseUrl)
+        let fence: Awaited<ReturnType<typeof acquireRedisSwitchFence>> | undefined
+        let resume: (() => Promise<void>) | undefined
+        let commitStarted = false
+        let staged = false
         try {
+          await identity(sql, snapshot.instanceId)
+          fence = await acquireRedisSwitchFence(sql, { ...snapshot, operationId: randomUUID() })
+          if (input.redisUrl) await probeRedis(input.redisUrl)
+          await step('quiescing')
+          resume = (await this.hooks.quiesce()).resume
+          await fence.drain()
+          await fence.setRouter(snapshot.redisUrl, input.redisUrl)
+          staged = true
+          await fence.releaseLock()
           await step('committing')
-          await this.hooks.commit({
-            expectedRevision: snapshot.revision,
-            redisUrl: input.redisUrl,
-          })
-          committed = true
+          commitStarted = true
+          await this.hooks.commit({ expectedRevision: snapshot.revision, redisUrl: input.redisUrl })
+          resume = undefined
+          await fence.finish()
+        } catch (error) {
+          // A failed filesystem write may have committed. Inspect durable bootstrap
+          // before deciding which router can safely accept new replicas.
+          if (fence) {
+            await fence.releaseLock()
+            if (commitStarted) {
+              const current = await this.hooks.readSnapshot()
+              if (current.revision > snapshot.revision && current.redisUrl === (input.redisUrl ?? undefined)) {
+                await fence.finish()
+                throw error
+              }
+              if (current.revision !== snapshot.revision || current.redisUrl !== snapshot.redisUrl) {
+                throw new TBError('unavailable', 'Redis switch outcome is unknown; runtime admission remains fenced')
+              }
+            }
+            if (staged) await fence.setRouter(input.redisUrl, snapshot.redisUrl, true)
+            await resume?.()
+            await fence.finish()
+          }
+          throw error
         } finally {
-          if (!committed) await lease.resume()
+          await sql.end({ timeout: 3 })
         }
       },
     )

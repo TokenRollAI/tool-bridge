@@ -212,7 +212,7 @@ describe('database and Redis maintenance with real services', () => {
     let oldRuntime: RuntimeLease | undefined
     let nextRuntime: RuntimeLease | undefined
     try {
-      oldRuntime = await acquireRuntimeLease(sourceSql, { instanceId: source.id, replicaId, redisConfigured: true })
+      oldRuntime = await acquireRuntimeLease(sourceSql, { instanceId: source.id, replicaId, redisUrl: 'redis://fixture' })
       const quiet = control.value.quiesce
       control.value.quiesce = async () => {
         await oldRuntime!.release()
@@ -221,9 +221,9 @@ describe('database and Redis maintenance with real services', () => {
       const commit = control.value.commit
       control.value.commit = async (input) => {
         // Real target prepare must be allowed while the copied fence still exists.
-        nextRuntime = await acquireRuntimeLease(targetSql, { instanceId: source.id, replicaId, redisConfigured: true })
+        nextRuntime = await acquireRuntimeLease(targetSql, { instanceId: source.id, replicaId, redisUrl: 'redis://fixture' })
         await expect(assertRuntimeAuthority(sourceSql, replicaId)).rejects.toMatchObject({ code: 'unavailable' })
-        await expect(acquireRuntimeLease(sourceSql, { instanceId: source.id, replicaId: 'source-restarted', redisConfigured: true }))
+        await expect(acquireRuntimeLease(sourceSql, { instanceId: source.id, replicaId: 'source-restarted', redisUrl: 'redis://fixture' }))
           .rejects.toMatchObject({ code: 'unavailable' })
         return commit(input)
       }
@@ -232,7 +232,7 @@ describe('database and Redis maintenance with real services', () => {
         runCommand: async (program, args, env) => {
           if (program === 'pg_dump') {
             attemptedStartup = true
-            await expect(acquireRuntimeLease(sourceSql, { instanceId: source.id, replicaId: 'racing-startup', redisConfigured: true }))
+            await expect(acquireRuntimeLease(sourceSql, { instanceId: source.id, replicaId: 'racing-startup', redisUrl: 'redis://fixture' }))
               .rejects.toMatchObject({ code: 'unavailable' })
             await expect(assertRuntimeAuthority(sourceSql, 'racing-startup')).rejects.toMatchObject({ code: 'unavailable' })
             expect((await sourceSql`SELECT expires_at::text AS expiry FROM tb_runtime_maintenance`)[0]?.expiry).toBe('infinity')
@@ -246,7 +246,7 @@ describe('database and Redis maintenance with real services', () => {
       expect((await sourceSql`SELECT phase,expires_at::text AS expiry FROM tb_runtime_maintenance`)[0])
         .toMatchObject({ phase: 'retired', expiry: 'infinity' })
       expect(await targetSql`SELECT 1 FROM tb_runtime_maintenance`).toHaveLength(0)
-      const newReplica = await acquireRuntimeLease(targetSql, { instanceId: source.id, replicaId: 'target-next-replica', redisConfigured: true })
+      const newReplica = await acquireRuntimeLease(targetSql, { instanceId: source.id, replicaId: 'target-next-replica', redisUrl: 'redis://fixture' })
       await newReplica.release()
       await targetSql`UPDATE tb_values SET value='new authority write' WHERE id=1`
       expect((await sourceSql`SELECT value FROM tb_values WHERE id=1`)[0]?.value).toBe('保留密文和内容')
@@ -263,7 +263,7 @@ describe('database and Redis maintenance with real services', () => {
     const sql = postgres(source.url, { max: 3, onnotice: () => {} })
     let other: RuntimeLease | undefined
     try {
-      other = await acquireRuntimeLease(sql, { instanceId: source.id, replicaId: 'silent-but-live', redisConfigured: true })
+      other = await acquireRuntimeLease(sql, { instanceId: source.id, replicaId: 'silent-but-live', redisUrl: 'redis://fixture' })
       await sql`UPDATE tb_runtime_replicas SET expires_at=now()-interval '1 second' WHERE replica_id='silent-but-live'`
       const control = hooks({ databaseUrl: source.url, instanceId: source.id, revision: 1 })
       let commandCalled = false
@@ -336,10 +336,10 @@ describe('database and Redis maintenance with real services', () => {
     const oldSql = postgres(source.url, { max: 3, onnotice: () => {} })
     const copiedSql = postgres(target, { max: 3, onnotice: () => {} })
     try {
-      const oldRuntime = await acquireRuntimeLease(oldSql, { instanceId: source.id, replicaId: 'source-recovery', redisConfigured: true })
+      const oldRuntime = await acquireRuntimeLease(oldSql, { instanceId: source.id, replicaId: 'source-recovery', redisUrl: 'redis://fixture' })
       await oldRuntime.release()
       expect((await copiedSql`SELECT phase FROM tb_runtime_maintenance`)[0]?.phase).toBe('discarded')
-      await expect(acquireRuntimeLease(copiedSql, { instanceId: source.id, replicaId: 'uncommitted-clone', redisConfigured: true }))
+      await expect(acquireRuntimeLease(copiedSql, { instanceId: source.id, replicaId: 'uncommitted-clone', redisUrl: 'redis://fixture' }))
         .rejects.toMatchObject({ code: 'unavailable' })
     } finally {
       await oldSql.end({ timeout: 1 })
@@ -421,6 +421,83 @@ describe('database and Redis maintenance with real services', () => {
         .redisConfigured,
     ).toBe(false)
   })
+  it('requires graceful drain for Redis A→B, fences racing starts and rejects stale A after commit', async () => {
+    const source = await sourceDatabase()
+    const sql = postgres(source.url, { max: 8 })
+    const old = 'redis://previous-router'
+    const next = process.env.TB_TEST_REDIS_URL!
+    const owner = { instanceId: source.id, replicaId: 'owner' }
+    const control = hooks({ ...owner, databaseUrl: source.url, redisUrl: old, revision: 1 })
+    const manager = new MaintenanceManager(control.value)
+    let first: RuntimeLease | undefined
+    let other: RuntimeLease | undefined
+    let replacement: RuntimeLease | undefined
+    let joined: RuntimeLease | undefined
+    try {
+      first = await acquireRuntimeLease(sql, { ...owner, redisUrl: old })
+      other = await acquireRuntimeLease(sql, { ...owner, replicaId: 'other', redisUrl: old })
+      await sql`UPDATE tb_runtime_replicas SET expires_at=now()-interval '1 minute' WHERE replica_id='other'`
+      await expect(manager.redis({ expectedRevision: 1, redisUrl: next })).rejects.toMatchObject({ code: 'conflict' })
+      expect(control.phases).toEqual([])
+      await other.release()
+      const quiesce = control.value.quiesce
+      control.value.quiesce = async () => {
+        await expect(acquireRuntimeLease(sql, { ...owner, replicaId: 'joining', redisUrl: old })).rejects.toMatchObject({ code: 'unavailable' })
+        await first!.release()
+        return quiesce()
+      }
+      const commit = control.value.commit
+      control.value.commit = async (input) => {
+        await expect(acquireRuntimeLease(sql, { ...owner, replicaId: 'joining', redisUrl: next })).rejects.toMatchObject({ code: 'unavailable' })
+        replacement = await acquireRuntimeLease(sql, { ...owner, redisUrl: next })
+        return commit(input)
+      }
+      await manager.redis({ expectedRevision: 1, redisUrl: next })
+      await expect(acquireRuntimeLease(sql, { ...owner, replicaId: 'stale', redisUrl: old })).rejects.toMatchObject({ code: 'conflict' })
+      await expect(sql`INSERT INTO tb_runtime_replicas(replica_id,instance_id,expires_at) VALUES('legacy',${source.id},now())`)
+        .rejects.toThrow('router configuration')
+      joined = await acquireRuntimeLease(sql, { ...owner, replicaId: 'joining', redisUrl: next })
+      expect(control.phases).toEqual(['stopped', 'committed'])
+    } finally {
+      await joined?.release()
+      await replacement?.release()
+      await other?.release()
+      await first?.release()
+      await sql.end({ timeout: 2 })
+    }
+  })
+
+  it('restores the previous router before resuming when bootstrap commit fails', async () => {
+    const source = await sourceDatabase()
+    const sql = postgres(source.url, { max: 4 })
+    const redisUrl = 'redis://previous'
+    const args = { instanceId: source.id, replicaId: 'owner', redisUrl }
+    const control = hooks({ ...args, databaseUrl: source.url, revision: 1 })
+    let runtime: RuntimeLease | undefined
+    try {
+      runtime = await acquireRuntimeLease(sql, args)
+      control.value.quiesce = async () => {
+        await runtime!.release()
+        return {
+          resume: async () => {
+            runtime = await acquireRuntimeLease(sql, args)
+          },
+        }
+      }
+      control.value.commit = async () => {
+        throw new Error('bootstrap file write failed')
+      }
+      await expect(new MaintenanceManager(control.value).redis({ expectedRevision: 1, redisUrl: null })).rejects.toThrow()
+      await runtime.heartbeat()
+      expect(await sql`SELECT 1 FROM tb_runtime_maintenance WHERE id=1`).toHaveLength(0)
+      const joined = await acquireRuntimeLease(sql, { ...args, replicaId: 'other' })
+      await joined.release()
+    } finally {
+      await runtime?.release()
+      await sql.end({ timeout: 2 })
+    }
+  })
+
   it('a shared superuser login is never auto-retired', async () => {
     const source = await sourceDatabase()
     const control = hooks({

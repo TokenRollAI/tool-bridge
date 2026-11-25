@@ -25,6 +25,7 @@ type SourceStatus = NonNullable<ToolSearchPage['sources']>[number]['status']
 type SearchSource = NonNullable<ToolSearchPage['sources']>[number]
 
 const SOURCE_STATUS_LABEL: Record<SourceStatus, string> = {
+  index_capacity: '注册节点超过搜索容量，显示上次索引结果',
   budget_exhausted: '超出搜索预算',
   cycle: '检测到循环',
   hop_limit: '超出联邦深度',
@@ -46,7 +47,7 @@ function PartialSourceSummary({ sources }: { sources: SearchSource[] }) {
       className="border-b border-amber-500/20 bg-amber-500/[0.06] px-4 py-3 text-xs text-amber-600 dark:text-amber-400"
       role="status"
     >
-      <p className="font-medium">部分联邦来源未完成，结果可能不完整。</p>
+      <p className="font-medium">{sources.some(source => source.status === 'index_capacity') ? '搜索索引已达容量上限，部分工具可能尚未收录。' : '部分联邦来源未完成，结果可能不完整。'}</p>
       {sources.length > 0 && (
         <p className="mt-1 font-mono">
           {sources.map(source => (

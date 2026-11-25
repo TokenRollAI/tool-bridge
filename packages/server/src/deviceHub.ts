@@ -104,6 +104,8 @@ export class DeviceHub {
 
   private readonly store: StateStore
   private readonly search: MutableSearchIndex | undefined
+  private readonly publishedReclaimSec?: () => Promise<number>
+  private resweepRequired = false
   private reclaimSec: number
   private readonly wss = new WebSocketServer({ noServer: true })
   private readonly activeByDevice = new Map<string, Conn>()
@@ -115,6 +117,7 @@ export class DeviceHub {
 
   constructor(opts: {
     heartbeatMs?: number
+    publishedReclaimSec?: () => Promise<number>
     reclaimSec: number
     /** 多副本部署的调用路由工厂;拿到 onLocalCall 回调后构造(避免循环依赖)。 */
     router?: (onLocalCall: DeviceLocalCall) => DeviceRouter
@@ -123,6 +126,7 @@ export class DeviceHub {
   }) {
     this.store = opts.store
     this.search = opts.search
+    this.publishedReclaimSec = opts.publishedReclaimSec
     this.reclaimSec = opts.reclaimSec
     this.router = opts.router?.(
       async (deviceId, req) => await this.invokeLocal(deviceId, req),
@@ -133,11 +137,13 @@ export class DeviceHub {
   }
 
   async setReclaimSec(value: number): Promise<void> {
-    if (value === this.reclaimSec) return
+    if (value === this.reclaimSec && !this.resweepRequired) return
+    this.resweepRequired = true
     this.reclaimSec = value
     for (const timer of this.reclaimTimers.values()) clearTimeout(timer)
     this.reclaimTimers.clear()
     await this.sweepOrphans()
+    this.resweepRequired = false
   }
 
   /**
@@ -426,7 +432,14 @@ export class DeviceHub {
       }
     }
     const raw = await this.store.get(KEY_DEVICE_META + deviceId)
-    if (!isDeviceMeta(raw)) return
+    if (!isDeviceMeta(raw) || !raw.disconnectedAt) return
+    const retentionSec = await (this.publishedReclaimSec?.() ?? this.reclaimSec)
+    const remaining = Date.parse(raw.disconnectedAt) + retentionSec * 1000 - Date.now()
+    if (remaining > 0) {
+      this.scheduleReclaim(deviceId, remaining)
+      return
+    }
+    if (this.activeByDevice.has(deviceId)) return
     await reclaimDeviceSubtree({
       mountPath: raw.mountPath,
       registry: new NodeRegistryStore(this.store),

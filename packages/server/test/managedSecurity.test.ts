@@ -53,6 +53,25 @@ suite('managed configuration concurrency and failure truth (real PG)', () => {
     expect(row?.effective.maxHops).toBe(4)
   })
 
+  it('never activates device reclamation for a revision whose publication fails', async () => {
+    const retention: number[] = []
+    const manager = new ConfigManager(sql, async () => {}, async (settings) => {
+      retention.push(settings.deviceReclaimSec)
+    })
+    await manager.ensureSchema()
+    await manager.sync()
+    await manager.update({ expectedRevision: 1, settings: runtimeConfigSchema.parse({ deviceReclaimSec: 1 }) })
+    await sql`ALTER TABLE tb_runtime_config ADD CONSTRAINT test_reject_publication CHECK (applied_revision=1)`
+    try {
+      await expect(manager.apply({ expectedRevision: 2 })).rejects.toThrow()
+      expect(retention).toEqual([86400])
+    } finally {
+      await sql`ALTER TABLE tb_runtime_config DROP CONSTRAINT test_reject_publication`
+    }
+    await manager.apply({ expectedRevision: 2 })
+    expect(retention).toEqual([86400, 1])
+  })
+
   it('concurrent administrators cannot overwrite the same expected revision', async () => {
     const manager = new ConfigManager(sql, async () => {})
     await manager.ensureSchema()
