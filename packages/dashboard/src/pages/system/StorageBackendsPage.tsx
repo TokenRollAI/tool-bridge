@@ -72,7 +72,7 @@ export function StorageBackendsPage() {
         title="存储后端"
       />
       {editing && (
-        <section className="rounded-xl border bg-card p-4 sm:p-6">
+        <section className="border-t py-5">
           <h2 className="mb-4 text-lg font-semibold">{editing === 'new' ? '新建 S3 后端' : `轮换凭证 · ${editing.name}`}</h2>
           {editing === 'new' && (
             <div className="mb-4 grid gap-2">
@@ -94,7 +94,7 @@ export function StorageBackendsPage() {
       {backends.isPending && <p role="status">正在读取存储后端…</p>}
       <div className="grid gap-4 lg:grid-cols-2">
         {backends.data?.items.map(backend => (
-          <section className="min-w-0 rounded-xl border bg-card p-5" key={backend.id}>
+          <section className="min-w-0 border-t py-5" key={backend.id}>
             <div className="flex flex-wrap items-center gap-2">
               <h2 className="text-lg font-semibold">{backend.name}</h2>
               {backend.active && <Badge>新上传默认</Badge>}

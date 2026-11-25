@@ -130,7 +130,7 @@ export function CommandPalette({ open, onOpenChange, onAddTool, onCloseAutoFocus
             <CommandSeparator />
             <CommandGroup heading="连接与设备">
               {nodes.map((node) => {
-                const { icon: Icon } = KIND_ICON[node.kind] ?? KIND_ICON.directory
+                const Icon = KIND_ICON[node.kind] ?? KIND_ICON.directory
                 return (
                   <CommandItem key={node.path} onSelect={() => go(`/tools?path=${encodeURIComponent(node.path)}`)} value={`node:${node.path}`}>
                     <Icon />

@@ -54,10 +54,11 @@ export function CliHint({
   ].join(' \\\n  ')
 
   return (
-    <div className="mt-4 min-w-0 max-w-full rounded-lg border border-dashed bg-background/20 px-3 py-2.5">
+    <div className="mt-2 min-w-0 max-w-full rounded-md bg-tone-subtle px-3 py-2">
       <button
+        aria-expanded={open}
         className={cn(
-          'inline-flex w-full items-center gap-1.5 text-left font-mono text-[11px] text-muted-foreground/75',
+          'inline-flex w-full items-center gap-1.5 text-left font-mono text-[11px] text-muted-foreground',
           'hover:text-foreground',
         )}
         onClick={() => setOpen(v => !v)}
@@ -74,10 +75,10 @@ export function CliHint({
             { label: 'curl', cmd: curl },
           ].map(({ label, cmd }) => (
             <div
-              className="grid min-w-0 max-w-full grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-1 rounded-lg border bg-background/60 sm:gap-1.5"
+              className="grid min-w-0 max-w-full grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-1 border-t sm:gap-1.5"
               key={label}
             >
-              <span className="shrink-0 border-r px-2 py-1.5 font-mono text-[10px] text-primary/80">
+              <span className="shrink-0 border-r px-2 py-1.5 font-mono text-[10px] text-foreground/80">
                 {label}
               </span>
               <pre className="min-w-0 max-w-full self-center overflow-x-auto px-1 py-1.5 font-mono text-[11px] leading-relaxed whitespace-pre-wrap break-all">

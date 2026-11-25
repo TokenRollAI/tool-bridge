@@ -84,14 +84,14 @@ function WizardBody({
       {presets.length > 0 && (
         <section className="mb-6">
           <div className="mb-2.5 flex items-center gap-2">
-            <Sparkles className="size-4 text-primary" />
+            <Sparkles className="size-4 text-foreground" />
             <h3 className="text-sm font-medium">常用集成</h3>
             <span className="text-[11px] text-muted-foreground">一键预填,填好凭证即可</span>
           </div>
           <div className="grid gap-2 sm:grid-cols-2">
             {presets.map(preset => (
               <button
-                className="flex items-center gap-3 rounded-xl border bg-card/50 px-3.5 py-3 text-left transition-colors hover:border-primary/45 hover:bg-secondary/40"
+                className="flex items-center gap-3 rounded-xl border bg-card/50 px-3.5 py-3 text-left transition-colors hover:border-edge-strong hover:bg-secondary/40"
                 key={preset.provider}
                 onClick={() => openPreset(preset.provider)}
                 type="button"
@@ -115,8 +115,8 @@ function WizardBody({
           {ADD_SOURCES.map((source) => {
             const Icon = source.icon
             const card = (
-              <span className="group flex w-full items-center gap-3 rounded-xl border bg-card/40 px-4 py-3 text-left transition-colors hover:border-primary/45 hover:bg-secondary/40">
-                <span className="grid size-9 shrink-0 place-items-center rounded-lg border bg-background/70 text-muted-foreground group-hover:text-primary">
+              <span className="group flex w-full items-center gap-3 rounded-xl border bg-card/40 px-4 py-3 text-left transition-colors hover:border-edge-strong hover:bg-secondary/40">
+                <span className="grid size-9 shrink-0 place-items-center rounded-lg border bg-background/70 text-muted-foreground group-hover:text-foreground">
                   <Icon className="size-4" />
                 </span>
                 <span className="min-w-0 flex-1">
@@ -130,7 +130,7 @@ function WizardBody({
                     {source.blurb}
                   </span>
                 </span>
-                <ArrowRight className="size-4 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5 group-hover:text-primary" />
+                <ArrowRight className="size-4 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5 group-hover:text-foreground" />
               </span>
             )
             // 自定义 kind 直接用 MountDialog 的 trigger(预选 kind);catalog/plugin 走 pickSource。

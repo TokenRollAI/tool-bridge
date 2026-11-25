@@ -31,7 +31,7 @@ function DeploymentEditor({ status, schema, refresh }: { refresh: () => Promise<
   const effective = status.effective
   return (
     <div className="space-y-6">
-      <section className="rounded-xl border bg-card p-5">
+      <section className="border-t py-5">
         <div className="flex flex-wrap gap-4 text-sm">
           <span>
             状态：
@@ -77,7 +77,7 @@ function DeploymentEditor({ status, schema, refresh }: { refresh: () => Promise<
         </section>
       )}
       {effective && (
-        <section className="rounded-xl border bg-card p-5">
+        <section className="border-t py-5">
           <h2 className="mb-5 text-lg font-semibold">应用部署设置</h2>
           <SchemaFields disabled={busy || running} fields={configSchemaFields(schema)} idPrefix="deployment" onChange={setSettings} value={settings} />
           <p className="mt-4 text-sm text-muted-foreground">新数据目录必须为空。执行器会停止应用并复制原实例引导数据、保留密钥与权限；实例身份不一致或健康检查失败时恢复旧配置。修改访问端口后，请通过新端口重新打开管理界面。</p>

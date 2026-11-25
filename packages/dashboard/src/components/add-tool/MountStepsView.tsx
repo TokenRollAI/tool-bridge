@@ -6,7 +6,7 @@ import type { MountStep, StepState } from './mountDiagnostics'
 function StepIcon({ state }: { state: StepState }) {
   switch (state) {
     case 'running':
-      return <Loader2 className="size-4 animate-spin text-primary" />
+      return <Loader2 className="size-4 animate-spin text-foreground" />
     case 'done':
       return <Check className="size-4 text-ok" />
     case 'failed':

@@ -159,10 +159,10 @@ function SessionPanel({ commands }: { commands: NonNullable<ReturnType<typeof se
   }
 
   return (
-    <section aria-label="设备进程会话" className="min-w-0 space-y-4 rounded-xl border bg-card p-4">
+    <section aria-label="设备进程会话" className="min-w-0 space-y-4 py-2">
       <header>
         <h2 className="font-semibold">设备进程会话</h2>
-        <p className="mt-1 text-sm text-muted-foreground">长命令可持续运行。关闭页面或暂停日志只停止查看；停止进程需显式操作。断线可恢复，daemon 重启后会话失效。</p>
+        <p className="mt-1 text-sm text-muted-foreground">长命令可持续运行。关闭页面或停止观察后，进程继续运行。断线可恢复，daemon 重启后会话失效。</p>
       </header>
       <div className="space-y-2">
         <label className="text-sm" htmlFor={inputId}>命令输入（JSON）</label>
@@ -201,7 +201,7 @@ function SessionPanel({ commands }: { commands: NonNullable<ReturnType<typeof se
           </p>
           <div className="space-y-2">
             {page.items.map(item => (
-              <button className="flex w-full min-w-0 flex-wrap justify-between gap-2 rounded border p-3 text-left text-sm" disabled={busy} key={item.sessionId} onClick={() => choose(item)} type="button">
+              <button className="flex w-full min-w-0 flex-wrap justify-between gap-2 border-b py-3 text-left hover:bg-tone-subtle text-sm" disabled={busy} key={item.sessionId} onClick={() => choose(item)} type="button">
                 <span className="min-w-0 break-all font-mono">{item.sessionId}</span>
                 <span>{stateLabel[item.state]}</span>
               </button>
@@ -219,18 +219,22 @@ function SessionPanel({ commands }: { commands: NonNullable<ReturnType<typeof se
             {selected.exitCode !== undefined ? ` · 退出码 ${selected.exitCode}` : ''}
             {selected.signal ? ` · ${selected.signal}` : ''}
           </p>
-          <div className="flex flex-wrap gap-2">
-            <Button onClick={() => setFollowing(value => !value)} variant="outline">{following ? '暂停日志' : '继续读取日志'}</Button>
-            <Button disabled={busy || !running(selected.state)} onClick={() => submit('stop')} variant="destructive">停止进程</Button>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button onClick={() => setFollowing(value => !value)} variant="outline">{following ? '停止观察' : '继续读取日志'}</Button>
+
           </div>
           {readError && <p className="text-sm text-destructive" role="alert">{readError}</p>}
           {gap && <p className="text-sm text-warn">设备日志已发生截断，以下内容不完整。</p>}
           <p className="text-xs text-muted-foreground">
-            当前游标：
+            当前字节游标：
             {cursor.current}
             。页面仅保留最近约 100 万字符；日志按纯文本显示。
           </p>
-          <pre aria-label="会话日志" className="max-h-96 min-h-24 overflow-auto rounded border bg-background p-3 font-mono text-xs whitespace-pre-wrap break-all">{logs || '暂无日志'}</pre>
+          <pre aria-label="会话日志" className="max-h-96 min-h-24 overflow-auto rounded-md bg-tone-subtle p-4 font-mono text-xs whitespace-pre-wrap break-all">{logs || '暂无日志'}</pre>
+          <div className="flex items-center gap-3 border-t pt-3">
+            <Button disabled={busy || !running(selected.state)} onClick={() => submit('stop')} variant="outline">终止远程进程</Button>
+            <span className="text-xs text-muted-foreground">结束设备上运行的任务</span>
+          </div>
         </div>
       )}
       <AlertDialog onOpenChange={open => !open && setPending(null)} open={pending !== null}>
@@ -238,7 +242,7 @@ function SessionPanel({ commands }: { commands: NonNullable<ReturnType<typeof se
           <AlertDialogHeader>
             <AlertDialogTitle>
               确认
-              {pending === 'stop' ? '停止进程' : '启动会话'}
+              {pending === 'stop' ? '终止远程进程' : '启动会话'}
             </AlertDialogTitle>
             <AlertDialogDescription>
               此命令要求确认。操作类型：

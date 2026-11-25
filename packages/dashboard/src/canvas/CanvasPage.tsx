@@ -1,13 +1,11 @@
 import { useNavigate, useParams, useSearchParams } from 'react-router'
-import { GitBranch, Plus } from 'lucide-react'
 import { useCallback, useState } from 'react'
+import { GitBranch } from 'lucide-react'
 import { toast } from 'sonner'
-import { AddToolWizard } from '@/components/add-tool/AddToolWizard'
 import { MountDialog } from '@/pages/system/forms/MountDialog'
 import { decodeTreePath, encodeTreePath } from '@/lib/path'
 import { ConfirmAction } from '@/components/ConfirmAction'
 import { useInvalidate, useInvoke } from '@/lib/queries'
-import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { type CanvasActionTarget, TreeCanvas } from './TreeCanvas'
 import { NodeInspector } from './NodeInspector'
@@ -30,11 +28,11 @@ function CanvasBreadcrumb({
       aria-label="当前能力树路径"
       className="flex min-w-0 items-center gap-1 overflow-x-auto font-mono text-[11px]"
     >
-      <GitBranch className="size-3.5 shrink-0 text-primary" />
+      <GitBranch className="size-3.5 shrink-0 text-foreground" />
       <button
         className={cn(
           'shrink-0 rounded px-1.5 py-1 transition-colors hover:bg-secondary hover:text-foreground',
-          selectedPath === '' ? 'bg-primary/10 text-primary' : 'text-muted-foreground',
+          selectedPath === '' ? 'bg-signal-soft text-signal' : 'text-muted-foreground',
         )}
         onClick={() => onNavigate('')}
         type="button"
@@ -50,7 +48,7 @@ function CanvasBreadcrumb({
             <button
               className={cn(
                 'rounded px-1.5 py-1 transition-colors hover:bg-secondary hover:text-foreground',
-                active ? 'bg-primary/10 text-primary' : 'text-muted-foreground',
+                active ? 'bg-signal-soft text-signal' : 'text-muted-foreground',
               )}
               onClick={() => onNavigate(path)}
               type="button"
@@ -130,7 +128,7 @@ export function CanvasPage() {
   const open = selectedPath !== null
 
   return (
-    <div className="relative flex h-full min-h-0 bg-panel">
+    <div className="relative flex h-full min-h-0 bg-background">
       <div className={cn('relative h-full min-w-0 flex-1', open && 'hidden lg:block')}>
         <TreeCanvas
           onAddChild={setMountTarget}
@@ -141,29 +139,17 @@ export function CanvasPage() {
           selectedPath={selectedPath}
         />
 
-        <div className="absolute top-3 left-3 z-10 flex max-w-[calc(100%-5.5rem)] items-center gap-2 rounded-xl border bg-card/95 p-1.5 shadow-md backdrop-blur-sm">
-          <AddToolWizard
-            trigger={(
-              <Button className="shrink-0" size="sm">
-                <Plus />
-                <span className="hidden sm:inline">添加工具</span>
-              </Button>
-            )}
-          />
-          <span aria-hidden className="h-5 w-px shrink-0 bg-border" />
+        <div className="absolute top-3 left-3 z-10 flex max-w-[calc(100%-5.5rem)] items-center gap-2 rounded-md bg-background p-1.5">
           <CanvasBreadcrumb onNavigate={select} selectedPath={selectedPath} />
         </div>
 
-        <div className="pointer-events-none absolute bottom-3 left-14 z-10 hidden rounded-lg border bg-card/90 px-2.5 py-1.5 text-[10px] whitespace-nowrap text-muted-foreground shadow-sm xl:block">
-          点击卡片查看详情 · 节点右侧可展开子树、命令或管理挂载
-        </div>
       </div>
 
       {open && (
         <aside
           className={cn(
-            'flex h-full w-full flex-col border-l bg-panel shadow-xl',
-            'lg:w-[min(38rem,46vw)] lg:shrink-0',
+            'flex h-full w-full flex-col border-l bg-panel',
+            'lg:w-[420px] lg:shrink-0',
           )}
         >
           <NodeInspector

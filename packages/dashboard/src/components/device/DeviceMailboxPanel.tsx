@@ -61,10 +61,10 @@ const STATE_LABEL: Record<DeviceOperationState, string> = {
 
 const STATE_TONE: Record<DeviceOperationState, string> = {
   cancelled: 'border-muted-foreground/25 text-muted-foreground',
-  claimed: 'border-primary/30 bg-primary/5 text-primary',
+  claimed: 'border-edge-strong bg-primary/5 text-foreground',
   expired: 'border-warn/30 bg-warn/5 text-warn',
   failed: 'border-destructive/30 bg-destructive/5 text-destructive',
-  queued: 'border-info/30 bg-info/5 text-info',
+  queued: 'border-transparent bg-secondary text-secondary-foreground',
   rejected: 'border-destructive/30 bg-destructive/5 text-destructive',
   result_unknown: 'border-warn/30 bg-warn/5 text-warn',
   succeeded: 'border-ok/30 bg-ok/5 text-ok',
@@ -86,14 +86,14 @@ function OperationStateBadge({ state }: { state: DeviceOperationState }) {
 function AmbiguityNotice({ operation }: { operation: DeviceOperationDetail }) {
   if (operation.state === 'result_unknown') {
     return (
-      <div className="rounded-md border border-warn/30 bg-warn/5 p-3 text-xs leading-5 text-warn">
+      <div className="rounded-md bg-warn-soft p-3 text-xs leading-5 text-warn">
         设备已确认命令开始执行，但无法恢复结果；不要在没有业务幂等保障时直接重试。
       </div>
     )
   }
   if (operation.state === 'expired' && operation.executionMayHaveOccurred) {
     return (
-      <div className="rounded-md border border-warn/30 bg-warn/5 p-3 text-xs leading-5 text-warn">
+      <div className="rounded-md bg-warn-soft p-3 text-xs leading-5 text-warn">
         租约期间设备失联且操作过期：服务端无法证明它是否执行过，业务副作用可能已经发生。
       </div>
     )
@@ -153,7 +153,7 @@ function OperationDetailDialog({
                   )}
                 </div>
                 <AmbiguityNotice operation={operation} />
-                <dl className="grid gap-x-5 gap-y-3 rounded-md border bg-muted/10 p-4 sm:grid-cols-[8rem_minmax(0,1fr)]">
+                <dl className="grid gap-x-5 gap-y-3 py-3 sm:grid-cols-[8rem_minmax(0,1fr)]">
                   <dt className="text-muted-foreground">目标命令</dt>
                   <dd className="break-all font-mono text-xs">{operation.targetPath}</dd>
                   <dt className="text-muted-foreground">设备</dt>
@@ -182,7 +182,7 @@ function OperationDetailDialog({
                 {operation.result !== undefined && (
                   <div>
                     <p className="mb-2 text-xs font-medium">结果</p>
-                    <pre className="max-h-72 overflow-auto rounded-md border bg-muted/20 p-3 font-mono text-xs whitespace-pre-wrap break-words">
+                    <pre className="max-h-72 overflow-auto rounded-md bg-tone-subtle p-3 font-mono text-xs whitespace-pre-wrap break-words">
                       {JSON.stringify(operation.result, null, 2)}
                     </pre>
                   </div>
@@ -261,7 +261,7 @@ function MailboxTable({
             <TableRow key={operation.operationId}>
               <TableCell>
                 <button
-                  className="max-w-52 truncate font-mono text-xs hover:text-primary hover:underline"
+                  className="max-w-52 truncate font-mono text-xs hover:text-foreground hover:underline"
                   onClick={() => onSelect(operation.operationId)}
                   type="button"
                 >
@@ -320,7 +320,7 @@ export function DeviceMailboxPanel({ targets }: { targets: DeviceMailboxTarget[]
   }, [deviceId, targets])
 
   return (
-    <section className="mt-4 overflow-hidden rounded-lg border bg-card/45">
+    <section className="mt-8 min-w-0">
       <div className="flex min-h-12 flex-wrap items-center justify-between gap-3 border-b px-4 py-3">
         <div>
           <h2 className="text-sm font-semibold">Durable Mailbox</h2>

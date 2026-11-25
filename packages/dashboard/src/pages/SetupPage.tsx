@@ -80,31 +80,31 @@ export function SetupPage() {
     }
   }
   return (
-    <main className="min-h-svh bg-background px-4 py-8 text-foreground sm:py-12">
+    <main className="h-svh overflow-y-auto bg-background px-4 py-8 text-foreground sm:py-12">
       <div className="mx-auto max-w-3xl space-y-6">
-        <Link className="font-mono text-sm text-primary" to="/">tool-bridge</Link>
+        <Link className="font-mono text-sm text-foreground" to="/">Tool Bridge</Link>
         <header className="space-y-3">
-          <ShieldCheck className="size-9 text-primary" />
-          <h1 className="text-3xl font-semibold">安装你的 Tool Bridge</h1>
+          <ShieldCheck className="size-6 text-muted-foreground" />
+          <h1 className="text-2xl font-semibold">安装你的 Tool Bridge</h1>
           <p className="text-sm leading-6 text-muted-foreground">连接持久化服务并创建管理员。内置服务的凭证由安装器管理。</p>
         </header>
         {error && <p className="rounded-lg border border-destructive/40 p-4 text-sm text-destructive" role="alert">{error}</p>}
         {!status && !error && <p role="status">正在读取安装状态…</p>}
         {status?.state === 'recovery' && (
-          <section className="rounded-xl border p-6">
+          <section className="border-t py-6">
             <h2 className="font-semibold">实例需要恢复</h2>
             <p className="mt-2 text-sm text-muted-foreground">已初始化实例无法重新安装。请从部署控制台检查数据库、持久卷和根密钥，再恢复服务。</p>
           </section>
         )}
         {status?.state === 'ready' && !result && (
-          <section className="rounded-xl border p-6">
+          <section className="border-t py-6">
             <p>实例已安装完成。</p>
             <Button asChild className="mt-4"><Link to="/">前往登录</Link></Button>
           </section>
         )}
         {status?.state === 'installing' && !result && <p role="status">安装正在执行，请等待完成后刷新状态。</p>}
         {(status?.state === 'setup' || recovering) && !result && !defaults && (
-          <section className="space-y-4 rounded-xl border bg-card p-5 sm:p-6">
+          <section className="space-y-4 border-t py-5">
             <h2 className="text-lg font-semibold">1. 配对实例</h2>
             <p className="text-sm leading-6 text-muted-foreground">在部署主机执行以下命令读取一次性配对凭证，然后粘贴到此处。</p>
             <code className="block overflow-x-auto rounded-md bg-muted p-3 text-xs">
@@ -124,7 +124,7 @@ export function SetupPage() {
           </section>
         )}
         {defaults && !result && (
-          <section className="space-y-6 rounded-xl border bg-card p-5 sm:p-6">
+          <section className="space-y-6 border-t py-5">
             <h2 className="text-lg font-semibold">2. 配置服务</h2>
             {defaults.databaseConfigured && (
               <label className="flex items-center gap-2 text-sm">
@@ -206,7 +206,7 @@ export function SetupPage() {
           </section>
         )}
         {result && (
-          <section className="space-y-4 rounded-xl border border-primary/40 bg-card p-5 sm:p-6">
+          <section className="space-y-4 border-t py-5">
             <h2 className="text-xl font-semibold">{recovering ? '恢复完成' : '安装完成'}</h2>
             {result.adminSk
               ? (

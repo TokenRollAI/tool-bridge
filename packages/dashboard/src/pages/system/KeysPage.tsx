@@ -50,7 +50,7 @@ export function KeysPage() {
     if (!ring || !status.data) return null
     const revision = status.data.revision
     return (
-      <section className="space-y-4 rounded-xl border bg-card p-5">
+      <section className="space-y-4 border-t py-5">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h2 className="text-lg font-semibold">{title}</h2>
           <ConfirmAction actionLabel="开始轮换" description={<p>{target === 'encryption' ? '创建新根密钥并启动有界重加密任务。旧根在没有引用前继续保留。' : revoke ? '所有现有上传与分享令牌将立即失效。' : '旧签名根至少保留七天，现有令牌在原有效期内继续可用。'}</p>} onConfirm={() => run('rotate', { expectedRevision: revision, target, ...(target === 'signing' && revoke ? { revokeExisting: true } : {}) })} title={`轮换${title}？`} trigger={<Button disabled={busy} size="sm">轮换</Button>} />
@@ -91,7 +91,7 @@ export function KeysPage() {
       {keySection('encryption', '加密根')}
       {keySection('signing', '签名根')}
       {(status.data?.jobs.length ?? 0) > 0 && (
-        <section className="space-y-4 rounded-xl border bg-card p-5">
+        <section className="space-y-4 border-t py-5">
           <h2 className="text-lg font-semibold">轮换任务</h2>
           {status.data?.jobs.map(job => (
             <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border p-3 text-sm" key={job.id}>

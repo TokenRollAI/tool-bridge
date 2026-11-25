@@ -849,7 +849,7 @@ export function ContextBrowser({ path, cmds }: { cmds: HelpCmd[], path: string }
                               <span
                                 className={cn(
                                   'grid size-8 shrink-0 place-items-center rounded-lg border bg-background/75',
-                                  isDir ? 'text-primary' : 'text-sky-400',
+                                  isDir ? 'text-foreground' : 'text-sky-400',
                                 )}
                               >
                                 <EntryIcon className="size-4" />

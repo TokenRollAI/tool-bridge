@@ -52,7 +52,7 @@ export function CommandWorkspace({
     >
       <div className="border-b px-3.5 py-3.5">
         <div className="flex items-center gap-2">
-          <span className="grid size-8 place-items-center rounded-lg border bg-background/70 text-primary">
+          <span className="grid size-8 place-items-center rounded-lg border bg-background/70 text-foreground">
             <TerminalSquare className="size-4" />
           </span>
           <div className="min-w-0">
@@ -71,7 +71,7 @@ export function CommandWorkspace({
               aria-label="筛选命令"
               className={cn(
                 'h-9 w-full rounded-lg border bg-background/60 pr-8 pl-8 font-mono text-xs',
-                'placeholder:text-muted-foreground/65 focus:border-primary/55 focus:ring-2 focus:ring-ring/35 focus:outline-none',
+                'placeholder:text-muted-foreground/65 focus:border-edge-strong focus:ring-2 focus:ring-ring/35 focus:outline-none',
               )}
               onChange={event => setQuery(event.target.value)}
               onKeyDown={(event) => {

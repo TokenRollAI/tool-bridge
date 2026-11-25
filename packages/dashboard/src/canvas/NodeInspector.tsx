@@ -40,9 +40,9 @@ function ChildList({
   path: string
 }) {
   return (
-    <section className="rounded-xl border bg-card/40 p-3">
+    <section className="py-1">
       <div className="mb-2.5 flex items-center gap-2">
-        <GitBranch className="size-4 text-primary" />
+        <GitBranch className="size-4 text-foreground" />
         <h3 className="text-sm font-medium">子节点</h3>
       </div>
       <div className="grid gap-1.5">
@@ -51,7 +51,7 @@ function ChildList({
           const target = path === '' ? ch.path : `${path}/${name}`
           return (
             <button
-              className="flex min-w-0 items-center gap-2.5 rounded-lg border bg-background/50 px-3 py-2 text-left transition-colors hover:border-primary/40 hover:bg-secondary/40"
+              className="flex min-w-0 items-center gap-2.5 border-b px-1 py-2 text-left transition-colors hover:border-border hover:bg-secondary/40"
               key={ch.path}
               onClick={() => onNavigate(target)}
               type="button"
@@ -86,7 +86,7 @@ function InspectorFrame({
     <div className="flex h-full min-h-0 flex-col bg-panel">
       <header className="flex shrink-0 items-start gap-3 border-b px-5 py-4">
         {icon && (
-          <span className="grid size-10 shrink-0 place-items-center rounded-xl border bg-background/70 shadow-sm">
+          <span className="grid size-10 shrink-0 place-items-center ">
             {icon}
           </span>
         )}
@@ -100,7 +100,7 @@ function InspectorFrame({
             className="mt-1 flex min-w-0 items-center gap-1 overflow-hidden font-mono text-[10px] text-muted-foreground"
             title={`/${path}`}
           >
-            <span className="shrink-0 text-primary">/</span>
+            <span className="shrink-0 text-foreground">/</span>
             {path.split('/').filter(Boolean).map((part, index) => (
               <span className="flex min-w-0 items-center gap-1" key={`${part}-${index}`}>
                 {index > 0 && <span className="shrink-0 opacity-55">/</span>}
@@ -199,7 +199,7 @@ export function NodeInspector({
   const isContext = node.kind === 'context'
   const isSkillhub = node.kind === 'skillhub'
   const hasBrowser = isContext || isSkillhub
-  const { icon: NodeIcon, className: nodeIconClass } = KIND_ICON[node.kind] ?? KIND_ICON.directory
+  const NodeIcon = KIND_ICON[node.kind] ?? KIND_ICON.directory
   const isSystem = node.kind === 'builtin' || path === 'system' || path.startsWith('system/')
   const canMountChild = !isSystem
   const canUnmountSelf = path !== '' && !isSystem
@@ -210,7 +210,7 @@ export function NodeInspector({
 
   return (
     <InspectorFrame
-      icon={<NodeIcon className={cn('size-5', nodeIconClass)} strokeWidth={1.7} />}
+      icon={<NodeIcon className="size-5 text-muted-foreground" strokeWidth={1.7} />}
       kind={node.kind}
       onClose={onClose}
       path={path}
@@ -222,21 +222,21 @@ export function NodeInspector({
             {node.description || '该节点没有提供说明。'}
           </p>
           <div className="mt-3 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
-            <span className="inline-flex items-center gap-1.5 rounded-md border bg-card px-2 py-1 font-mono">
-              <TerminalSquare className="size-3 text-primary" />
+            <span className="inline-flex items-center gap-1.5 py-1 font-mono">
+              <TerminalSquare className="size-3 text-foreground" />
               {cmds.length}
               {' 命令'}
             </span>
-            <span className="inline-flex items-center gap-1.5 rounded-md border bg-card px-2 py-1 font-mono">
-              <GitBranch className="size-3 text-primary" />
+            <span className="inline-flex items-center gap-1.5 py-1 font-mono">
+              <GitBranch className="size-3 text-foreground" />
               {children?.length ?? 0}
               {' 子节点'}
             </span>
             <span
-              className="inline-flex items-center gap-1.5 rounded-md border bg-card px-2 py-1 font-mono"
+              className="inline-flex items-center gap-1.5 py-1 font-mono"
               title="只统计此浏览器、当前连接档案最近保存的 50 次调用"
             >
-              <Activity className="size-3 text-primary" />
+              <Activity className="size-3 text-foreground" />
               本机调用
               {' '}
               {nodeHistory.length}

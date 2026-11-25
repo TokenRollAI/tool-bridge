@@ -107,7 +107,7 @@ export function RegisterPluginDialog({
         <div className="grid gap-3">
           <section className="rounded-lg border bg-card/30">
             <div className="flex items-start gap-3 border-b px-4 py-3">
-              <span className="mt-0.5 font-mono text-[10px] text-primary">00</span>
+              <span className="mt-0.5 font-mono text-[10px] text-foreground">00</span>
               <div>
                 <h3 className="text-xs font-medium">Identity</h3>
                 <p className="mt-0.5 text-[10px] leading-5 text-muted-foreground">

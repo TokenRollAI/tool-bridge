@@ -99,7 +99,7 @@ function PluginHealthCell({ state, onProbe }: { onProbe: () => void, state?: Hea
   if (state.state === 'probing') {
     return (
       <div className="flex items-center gap-2 text-xs text-muted-foreground" role="status">
-        <Loader2 className="size-3.5 animate-spin text-primary" />
+        <Loader2 className="size-3.5 animate-spin text-foreground" />
         正在请求 health endpoint…
       </div>
     )
@@ -279,7 +279,7 @@ function PluginDetailsDialog({
 
         <section className="rounded-lg border">
           <div className="flex items-start gap-3 border-b px-4 py-3">
-            <span className="grid size-8 shrink-0 place-items-center rounded-md bg-primary/[0.07] text-primary">
+            <span className="grid size-8 shrink-0 place-items-center rounded-md bg-primary/[0.07] text-foreground">
               <ShieldCheck className="size-4" />
             </span>
             <div>
@@ -291,7 +291,7 @@ function PluginDetailsDialog({
           </div>
           <ol className="grid gap-0 divide-y text-xs">
             <li className="flex gap-3 px-4 py-3">
-              <span className="font-mono text-[10px] text-primary">01</span>
+              <span className="font-mono text-[10px] text-foreground">01</span>
               <span>
                 <span className="font-medium">Health probe</span>
                 <span className="mt-0.5 block font-mono text-[10px] text-muted-foreground break-all">
@@ -302,7 +302,7 @@ function PluginDetailsDialog({
               </span>
             </li>
             <li className="flex gap-3 px-4 py-3">
-              <span className="font-mono text-[10px] text-primary">02</span>
+              <span className="font-mono text-[10px] text-foreground">02</span>
               <span>
                 <span className="font-medium">Describe match</span>
                 <span className="mt-0.5 block text-[10px] leading-5 text-muted-foreground">
@@ -313,7 +313,7 @@ function PluginDetailsDialog({
               </span>
             </li>
             <li className="flex gap-3 px-4 py-3">
-              <span className="font-mono text-[10px] text-primary">03</span>
+              <span className="font-mono text-[10px] text-foreground">03</span>
               <span className="min-w-0">
                 <span className="font-medium">Exports</span>
                 <span className="mt-1.5 grid gap-1.5">
@@ -351,7 +351,7 @@ function PluginDetailsDialog({
         </section>
 
         <details className="rounded-lg border px-4 py-3 text-xs">
-          <summary className="cursor-pointer font-medium outline-none focus-visible:text-primary">
+          <summary className="cursor-pointer font-medium outline-none focus-visible:text-foreground">
             查看原始 Manifest JSON
           </summary>
           <pre className="mt-3 max-h-56 overflow-auto rounded-md bg-muted/30 p-3 font-mono text-[10px] leading-5 whitespace-pre-wrap break-all text-muted-foreground">
@@ -531,8 +531,8 @@ export function PluginsPage() {
         <BuiltinCatalog />
       </section>
 
-      <section className="mt-6 flex flex-col gap-3 rounded-lg border bg-card/45 px-4 py-3.5 sm:flex-row sm:items-center">
-        <span className="grid size-9 shrink-0 place-items-center rounded-md border bg-background/70 text-primary">
+      <section className="mt-6 flex flex-col gap-3 border-b py-3.5 sm:flex-row sm:items-center">
+        <span className="grid size-9 shrink-0 place-items-center rounded-md border bg-background/70 text-foreground">
           <FileCheck2 className="size-4" />
         </span>
         <div className="min-w-0 flex-1">
@@ -565,7 +565,7 @@ export function PluginsPage() {
         )}
       </section>
 
-      <div className="mt-4 overflow-hidden rounded-lg border bg-card/30">
+      <div className="mt-4 min-w-0">
         {list.isPending
           ? (
               <div className="grid gap-3 p-4">
@@ -614,12 +614,12 @@ export function PluginsPage() {
                           <TableCell className="whitespace-normal">
                             <div className="flex min-w-0 items-center gap-1">
                               <button
-                                className="group/details flex min-w-0 items-center gap-1 text-left font-mono text-xs font-medium text-foreground outline-none hover:text-primary focus-visible:text-primary focus-visible:underline"
+                                className="group/details flex min-w-0 items-center gap-1 text-left font-mono text-xs font-medium text-foreground outline-none hover:text-foreground focus-visible:text-foreground focus-visible:underline"
                                 onClick={() => openDetails(plugin)}
                                 type="button"
                               >
                                 <span className="truncate">{plugin.id}</span>
-                                <ChevronRight className="size-3.5 shrink-0 text-muted-foreground transition-transform group-hover/details:translate-x-0.5 group-hover/details:text-primary" />
+                                <ChevronRight className="size-3.5 shrink-0 text-muted-foreground transition-transform group-hover/details:translate-x-0.5 group-hover/details:text-foreground" />
                               </button>
                               <CopyButton
                                 className="opacity-60 hover:opacity-100"
@@ -811,7 +811,7 @@ export function PluginsPage() {
         >
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-base">
-              <KeyRound className="size-4 text-primary" />
+              <KeyRound className="size-4 text-foreground" />
               Plugin Token — 仅显示这一次
             </DialogTitle>
             <DialogDescription>

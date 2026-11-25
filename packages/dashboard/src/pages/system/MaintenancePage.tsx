@@ -48,7 +48,7 @@ export function MaintenancePage() {
       <PageHeader description="管理数据库迁移、登录凭证与 Redis。维护时暂停受影响的业务，验证完成后再切换。" title="数据库与连接维护" />
       {status.isError && <p role="alert">读取维护状态失败，需要管理员权限。</p>}
       {status.data && (
-        <section className="rounded-xl border bg-card p-5 text-sm">
+        <section className="border-t py-5 text-sm">
           <h2 className="font-semibold">当前数据库</h2>
           <p className="mt-2 break-all">
             {status.data.database.user}
@@ -82,7 +82,7 @@ export function MaintenancePage() {
       )}
       {error && <p className="text-sm text-destructive" role="alert">{error}</p>}
       {notice && <p className="text-sm text-ok" role="status">{notice}</p>}
-      <section className="space-y-4 rounded-xl border bg-card p-5">
+      <section className="space-y-4 border-t py-5">
         <h2 className="text-lg font-semibold">迁移 PostgreSQL</h2>
         <p className="text-sm text-muted-foreground">目标必须是空数据库。服务会停写、备份、迁移并核对实例身份；失败保留原连接。</p>
         <div className="grid gap-2">
@@ -91,7 +91,7 @@ export function MaintenancePage() {
         </div>
         <ConfirmAction actionLabel="停写并迁移" description={<p>迁移期间业务暂时不可用。开始前请确认目标数据库为空并有足够空间。</p>} onConfirm={() => run('database', { databaseUrl })} title="开始数据库迁移？" trigger={<Button disabled={blocked || !databaseUrl}>开始迁移</Button>} />
       </section>
-      <section className="space-y-4 rounded-xl border bg-card p-5">
+      <section className="space-y-4 border-t py-5">
         <h2 className="text-lg font-semibold">轮换数据库登录凭证</h2>
         <p className="text-sm text-muted-foreground">创建并验证新的登录身份后停用旧登录，数据库内容保持不变。</p>
         <div className="grid gap-2">
@@ -105,7 +105,7 @@ export function MaintenancePage() {
         </div>
         <ConfirmAction actionLabel="验证并轮换" description={<p>保存新密码后继续。旧登录将停用，所有服务副本需使用新凭证重新连接。</p>} onConfirm={() => run('rotate_database_credentials', { password, ...(databaseAdminUrl ? { databaseAdminUrl } : {}) })} title="轮换数据库凭证？" trigger={<Button disabled={blocked || password.length < 24}>轮换凭证</Button>} />
       </section>
-      <section className="space-y-4 rounded-xl border bg-card p-5">
+      <section className="space-y-4 border-t py-5">
         <h2 className="text-lg font-semibold">Redis 连接</h2>
         <p className="text-sm text-muted-foreground">用于设备跨副本路由。停用前先确保服务只有一个副本。</p>
         <label className="flex items-center gap-2 text-sm">

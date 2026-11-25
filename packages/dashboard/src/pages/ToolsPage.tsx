@@ -70,12 +70,12 @@ export function ToolsPage() {
               <>
                 {tree.data?.description && <p className="mb-5 text-sm text-muted-foreground">{tree.data.description}</p>}
                 {(tree.data?.children ?? []).length > 0 && (
-                  <section aria-label="工具连接" className="mb-7 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                  <section aria-label="工具连接" className="mb-7 divide-y">
                     {tree.data?.children?.map((node) => {
-                      const { icon: Icon } = KIND_ICON[node.kind] ?? KIND_ICON.directory
+                      const Icon = KIND_ICON[node.kind] ?? KIND_ICON.directory
                       return (
-                        <Link className="flex min-w-0 items-start gap-3 rounded-xl border bg-card p-4 hover:border-input focus-visible:ring-2 focus-visible:ring-ring" key={node.path} to={`/tools?path=${encodeURIComponent(node.path)}`}>
-                          <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-secondary/60"><Icon className="size-4 text-muted-foreground" /></span>
+                        <Link className="flex min-w-0 items-start gap-3 py-3 hover:bg-tone-subtle focus-visible:ring-2 focus-visible:ring-ring" key={node.path} to={`/tools?path=${encodeURIComponent(node.path)}`}>
+                          <span className="mt-1 shrink-0"><Icon className="size-4 text-muted-foreground" /></span>
                           <div className="min-w-0 flex-1">
                             <p className="truncate text-sm font-medium">{node.path.split('/').at(-1) || '/'}</p>
                             <p className="mt-1 line-clamp-2 text-xs leading-5 text-muted-foreground">{node.description || '打开查看可用工具'}</p>

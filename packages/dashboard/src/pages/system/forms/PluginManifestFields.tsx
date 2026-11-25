@@ -132,8 +132,8 @@ export function PluginManifestFields({
               </p>
             )
           : (
-              <div className="flex items-start gap-2.5 rounded-md border border-primary/20 bg-primary/[0.045] px-3 py-2.5">
-                <KeyRound className="mt-0.5 size-3.5 shrink-0 text-primary" />
+              <div className="flex items-start gap-2.5 rounded-md border border-edge-strong bg-primary/[0.045] px-3 py-2.5">
+                <KeyRound className="mt-0.5 size-3.5 shrink-0 text-foreground" />
                 <p className="text-[10px] leading-5 text-muted-foreground">
                   注册成功，或从 bearer 切换到 platform-token 后，Token
                   只在该次响应显示。页面会阻止关闭，直到你明确确认已保存。
