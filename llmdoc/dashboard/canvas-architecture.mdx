@@ -106,6 +106,7 @@ Dashboard 是纯 HTTP 客户端,不 import core。固定控制面 wire 类型与
 - `DeviceSessionPanel` 是进程会话的消费者，`ToolPage` 与 `CommandWorkspace` 共用，不能只凭 start/stop 名称猜测能力。`useProcessSessionCommands` 先从无 schema 的 index 筛选四命令候选，再按需获取 start Help 并仅合并同 name/path 的 inputSchema；保留 index 的 identity/effect/confirm，不全局展开 schema。必填 runtime marker 确认后才显示面板，详情失败不能靠名称猜测。取消观察或卸载页面只 abort 读取，不隐式 stop；启动结果未知时保留 requestId，日志按字节 cursor 续读并显示 gap。发现测试须通过真实 SDK parser 覆盖 schema-free index → 单命令详情，不能只注入 full Help。设备侧身份、终态与跨入口验收归 [进程会话](../device/process-sessions.mdx)。
 - `components/add-tool/`:「添加工具」向导,通过受控 open/onOpenChange 供全局入口复用，也支持自带 trigger，按来源分流;不重复造挂载逻辑,内置集成走 `buildIntegrationCalls`、自定义 kind 走 `buildRegistryMountCalls`。`mountDiagnostics.ts` 把真实 `system/registry write` 的失败按 TBError code 归类,不另起与真实挂载不一致的 dry-run 探测。真正的 secret→registry→条件回滚链由 `pages/system/forms/mountOrchestration.ts` 单点持有，`useMountRunner`、`MountDialog` 与 `IntegrationDialog` 只负责表单/交互适配。
 - `pages/system/`:SK、secret、registry、plugin、catalog、federation、annotation。`pages/system/forms/`:将表单状态编译成 wire payload 的纯函数。
+- `/events` 按 topic 路径创建、发布、等待或跟随。事件游标留在当前观察，发现 gap 时由用户显式选择从最早可用位置继续。插件管理页的升级预览显示可读的受影响挂载，确认时回传候选摘要。语义分别见 [事件主题](../events/durable-topics.mdx) 与 [插件分发](../plugins/plugin-runtime.mdx#分发预览与回滚)。
 - `pages/SearchPage.tsx` 通过 SDK fixed wire 执行 compact search，展示 coverage、effect、source 与 partial
   状态，并把 federation/matching/minCoverage/pathPrefix/effects 编译集中在 `lib/toolSearch.ts`；UI 不按
   description 猜 effect，也不在客户端对服务端排序二次打分。`CommandPalette` 复用同一服务端命令搜索，关闭 cmdk 客户端过滤；本地页面/操作/节点匹配与服务端命令结果保持各自语义，partial 和失败不能呈现为完整成功。

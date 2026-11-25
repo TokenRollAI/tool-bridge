@@ -50,7 +50,7 @@ code:
 
 Mailbox 是离线设备的 durable operation ledger：调用方在普通 command invoke 上显式选择 `mailbox` 或
 `fallback`，设备在自己的运行时机主动 pull。它不是 FIFO queue、系统推送或 WebSocket 会话的替代品；
-没有 APNs/FCM、WS hint、隐式后台轮询，也不会把任意 realtime 错误自动转成 operation。
+没有 APNs/FCM 或 WS hint。Node CLI 在设备 ready 后主动持续拉取，只有明确未分发的 realtime fallback 才会入队。
 WebSocket/presence/generation 归
 [设备会话](websocket-sessions.mdx)；固定 wire 与路径归 [HTBP 契约](../protocol/htbp-contract.mdx)。
 Presence 只表示 realtime 当前是否可路由,不是设备身份或 Mailbox 能力的可见性条件；offline 设备及其
@@ -150,14 +150,14 @@ identity 或全局 exactly-once 承诺。
 
 - 只在 expose 中确有 `mailbox|both` command 时创建 processor,并注入 installation-local durable journal；
 - realtime 与 Mailbox 复用同一份 live expose 和 handler,使权限、命令移除与业务执行语义不分叉；
-- 初次连接及每次重连进入 `ready` 时各触发一次 `drain`,把该 installation 的 queued operation 主动收敛；
-- stop/close 与 suspend 时 abort 当前 drain,让 handler、续租和协作式取消沿同一 signal 停止；resume 后等待
-  下一次 `ready` 再 drain；
+- ready 后启动有界、串行的 drain 循环，队列暂空后仍需安排后续拉取；stop/close 或宿主显式 suspend 时取消定时器，并按宿主生命周期 abort 当前 drain；
 - 将非 abort 的 drain 错误暴露给宿主日志/事件面,不得把失败伪装成已消费。
 
 Node CLI adapter 使用本地文件 journal：按 gateway origin + deviceId 摘要隔离 installation 目录,目录/entry
 分别限制为 `0700`/`0600`；entry 通过临时文件 fsync、atomic rename、目录 fsync 落盘,从而让 `executing`
 barrier 真正先于 handler。过期 entry 可清理；损坏的 executing/terminal 记录不得静默删除,否则可能重复副作用。
+
+Node CLI 在初次及每次重新 ready 时触发拉取。每批最多 50 条，满批立即续拉，空闲或普通失败后约 15 秒再拉。临时 WS 断开暂停新批次，正在处理的 HTTP lease 允许继续。永久关闭或运行失败会中止在途 drain。SDK 消费器保持显式 pull 接口，其他宿主自行决定何时拉取。
 
 ## Agent/Device 快路径与跨层验收
 
@@ -166,10 +166,10 @@ barrier 真正先于 handler。过期 entry 可清理；损坏的 executing/term
 claim 后 complete，Agent 最后 get operation，共五次 HTTP request。它跨过真实认证、路由、领域仓库、
 SDK client 与 processor，证明普通 command arguments、调用 policy 和两侧数据面可以衔接；不覆盖 Node
 listener、socket 或真实网络。已缓存完整 path/delivery 的 Agent 可跳过 help，只需一次工具调用即可发起
-fallback；结果不需要同步返回时也可省略 get。claim/complete 是设备侧协议，默认流程不增加固定 polling。
+fallback；结果不需要同步返回时也可省略 get。调用方查询和设备侧主动 claim/complete 分开调度。
 
 外层 adapter 还要分别固定两条用户可达 seam：Dashboard 保留 offline device→command invoke；CLI 每次
-reconnect ready→drain→claim/共享 handler/complete。只断言 app helper 可入队或 mock processor 被创建,
+ready→drain→claim/共享 handler/complete，并覆盖初次空队列后新到的 operation。只断言 app helper 可入队或 mock processor 被创建,
 不能证明离线投递闭环已经交付。
 
 ## 宿主清理

@@ -1,5 +1,5 @@
 ---
-description: 插件运行时:三种 plugin 来源、exportDetails 契约、createAuthedClient auth header/error mapping 声明层、provider HTTP 传输安全层与密钥边界。
+description: 插件运行时、plugin release 安装/预览/升级/回滚、OCI 隔离运行器、exportDetails 与 provider 传输安全边界。
 kind: architecture
 code:
   paths:
@@ -20,13 +20,21 @@ code:
     - packages/core/src/plugin/contract.ts
     - packages/core/src/plugin/catalog.ts
     - packages/core/src/plugin/manifest.ts
+    - packages/core/src/plugin/release.ts
+    - packages/core/src/builtin/pluginDistribution.ts
+    - packages/app/src/providers/pluginClient.ts
+    - packages/app/src/providers/pluginRelease.ts
+    - packages/server/src/pluginRunner.ts
+    - packages/server/src/pluginRunnerClient.ts
+    - packages/cli/src/commands/plugin.ts
+    - packages/dashboard/src/pages/system/forms/PluginReleaseDialog.tsx
     - packages/plugins/test/runtime/providerHttpPolicy.test.ts
     - packages/dashboard/src/pages/system/PluginsPage.tsx
 ---
 
 # 插件运行时
 
-## 三种来源
+## 插件来源
 
 内置 plugin 与外部 plugin 共用 `plugin/v2` descriptor 和 envelope，但控制面不同：
 
@@ -34,6 +42,7 @@ code:
 |---|---|---|---|
 | 内置 | 构建期生成的 `BUILTIN_CATALOG` | `system/catalog`，直接挂载 | 不写 StateStore 注册记录 |
 | 外部 HTTP(S) | 注册时抓取并校验 `/~describe` | `system/plugin` 注册后挂载 | manifest/meta/health 落 StateStore |
+| 分发 release | 固定清单和候选端点实际返回的 `/~describe` | 安装已托管服务，或由独立运行器准备批准的 OCI 镜像 | 活动 release 与注册 descriptor 同时切换 |
 | 自定义进程内 binding | 宿主显式装配 handler；可按外部注册流程接入 | `binding:<name>` | 只用于宿主自定义，不替代内置 catalog |
 
 `pluginBindings` 说明代码在哪里，`pluginCatalog` 说明它导出什么；标准宿主从 `@tool-bridge/plugins` 同源装配两者。只给一半会得到"能解析不能调用"或"有代码但无法选择 export"。
@@ -56,7 +65,7 @@ code:
 - 节点只保存 `authRef`；SecretStore 保存明文。
 - 单值、多字段与 OAuth client 凭证是互斥形态。
 - 非敏感挂载配置进入 `providerConfig`，会被 registry get 回显；密钥不得混入。
-- plugin 与网关同进程同权，内置 handler 的 env 必须经 `narrowPluginEnv` 白名单收窄。
+- 内置和自定义进程内 binding 与网关同进程同权，内置 handler 的 env 必须经 `narrowPluginEnv` 白名单收窄。托管及 OCI release 通过外部 HTTPS 端点调用。
 - plugin 出站必须用 `guardedFetch`；自定义敏感头或 secret body 遇跨源 redirect 应拒绝。
 - 未配置 `PLUGIN_TOKEN` 的外部托管 plugin 必须 fail closed；进程内模式由宿主明确标记。
 
@@ -65,6 +74,20 @@ code:
 同名显式注册记录优先于内置 catalog，允许部署者用自己的实现覆盖内置项。内置项的普通流程不注册、不探活、不写 meta；删除内置节点后，读 `~help` 也不得偷偷把注册状态写回来。
 
 删除/更新 catalog 或 wire 字段时，core、CLI、Dashboard 与 app 集成测试必须同轮改；旧预览客户端不在兼容范围。
+
+## 分发、预览与回滚
+
+`tb plugin install <source> --secret-ref <name>` 首次建立分发注册。`tb-plugin-release/v1` 选择版本独占的 HTTPS endpoint 或完整 OCI 镜像摘要。可从 HTTPS JSON、固定版本 npm 元数据中的 `toolBridgePlugin`，或固定 GitHub Release 的 `tool-bridge-plugin.json` 资产读取清单。安装仅消费清单和已部署制品。托管 endpoint 要匹配批准的 HTTPS origin，npm/GitHub 来源首次安装托管版时显式传 `--origin`。插件传输 bearer 与挂载使用的上游凭据分别保存和授权。
+
+用 `tb plugin preview <id> [source] --json` 查看 export 变化和当前可读挂载的兼容情况，确认后执行 `tb plugin upgrade <id> [source] --digest <candidateDigest>`。预览会探活、校验 descriptor 和 `HEAD /~auth` 的正反 bearer 验证，OCI 预览可以启动候选容器。由操作者决定如何处理 `incompatibleMounts`，切换不会自动迁移这些挂载。确认摘要绑定注册修订、固定来源、清单、端点与 descriptor，任一项变化须重新预览。省略来源时保留当前来源，`refresh` 是 `upgrade` 的别名。手工注册使用 `plugin update`。
+
+切换以注册修订做 CAS，失败保留活动注册。分发升级保持同 id、托管模式和 bearer 引用，新制品使用独立端点。同版本已知摘要不能被替换。`tb plugin rollback <id> [--digest <sha256>]` 复检并恢复唯一保留的上一版，指定的是已保存清单摘要。成功回滚后同目标可重试。CLI 与 Dashboard 复用 `system/plugin` 管理命令，使用已有传输 secret 还须通过 `system/secret` admin。挂载缓存和 OAuth 授权按变更失效，兼容的 OAuth 声明保留授权。
+
+### OCI 隔离运行器
+
+部署管理员在网关进程之外启动 `tool-bridge-admin plugin-runner`。运行器只接收本地 Unix socket 请求，按管理员许可表匹配插件 id 和镜像摘要，由许可表提供固定端口、反代 endpoint、独立 bridge 和 token 文件。本机没有批准的镜像时，运行器可按摘要拉取。网关只挂接运行器 socket，使用 `TB_PLUGIN_RUNNER_SOCKET` 指定路径。容器以非 root 运行，根文件系统只读，移除 capabilities 并限制 CPU、内存与进程数。出网和 DNS 边界由部署策略约束。
+
+保留上一版运行器条目、镜像与反代端点，才能复检回滚。预览、失败或卸载后候选容器由宿主管理员确认使用情况后回收。端口、文件权限、反代与配置示例见 `deploy/compose/plugin-runner.md`。
 
 ## 普通 provider HTTP
 

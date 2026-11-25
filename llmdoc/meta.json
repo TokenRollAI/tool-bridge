@@ -70,6 +70,9 @@
     },
     "device/process-sessions.mdx": {
       "validatedRevision": "54ff238d969dd5700f3ecb64c890f077f826e864"
+    },
+    "events/durable-topics.mdx": {
+      "validatedRevision": null
     }
   },
   "convergence": {

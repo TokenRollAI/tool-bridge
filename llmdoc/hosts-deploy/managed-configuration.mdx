@@ -51,9 +51,9 @@ bootstrap 使用受保护目录、owner-only 文件、write-file-atomic 的 fsyn
 
 `core/managedConfig.ts` 的 strict `runtimeConfigSchema` 统一声明所有运行设置：canonical origin、remote allowlist/跳数、缓存、Context/ref、Store 大小/MIME/TTL、设备回收、清理调度、联邦搜索预算与关停排空。运行时 schema、builtin Help、SDK/CLI 和 Dashboard 表单必须同步，未知字段直接拒绝。
 
-`system/config` 的 get/schema/validate/update/apply 与 `tb config`、Dashboard 设置页对等。update 只用 expectedRevision 保存 desired snapshot；apply 取得 PG 租约，重建运行资源成功后才发布 applied revision/effective snapshot。失败保留上次成功状态并给出脱敏 lastError；并发修改不覆盖未知的新 revision，租约过期允许重新尝试。
+`system/config` 的 get/schema/validate/update/apply 与 `tb config`、Dashboard 设置页对等。update 用 expectedRevision 保存 desired snapshot。apply 取得 PG 租约，先准备请求运行时，再发布 applied revision 和 effective snapshot。发布前失败保留上次成功状态，并给出脱敏 lastError。并发修改不覆盖未知的新 revision，租约过期允许重新尝试。
 
-每副本本地应用串行，报告自己的 appliedRevision；请求前向 PG 同步已成功发布的 revision，因此不能把 Redis 通知丢失解释成永久使用旧配置。请求持一个不可变快照，旧请求自然完成；限额变更不会改写已发 upload/call grant。调度器、设备权限巡检等有实际资源影响的设置必须走 onApply，不能仅改变响应 JSON。
+每副本本地应用串行，请求前从 PG 同步已发布 revision。请求持不可变快照，旧请求自然完成，已发 upload/call grant 保留原有边界。设备子树回收与维护周期在发布后才激活。发布后本地激活失败会报告本地需恢复，后续同步可重试该 revision。回收执行前独立读取持久 effective 保留期，防止仍未同步的新副本配置被旧 timer 提前执行。
 
 ## 权限与跨入口
 

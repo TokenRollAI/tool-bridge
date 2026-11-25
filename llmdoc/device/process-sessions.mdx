@@ -1,5 +1,5 @@
 ---
-description: Linux Device 长命令进程会话：显式 profile/session 配置、runtime 与 owner/path 隔离、start 去重、增量日志、stop 清理及 CLI/Dashboard 契约验收。
+description: Linux Device 长命令进程会话：profile/session、runtime 与 owner/path 隔离、CLI run/wait 退出码、增量日志与 stop 清理。
 kind: architecture
 relations:
   requires:
@@ -72,14 +72,17 @@ tb daemon install --device-id session-demo --path device/session-demo --no-shell
 调用方另使用具有该节点 read/call 权限的认证上下文；本机 daemon 安装凭据不应拿来扩大调用权限。
 
 ```sh
+tb device session run device/session-demo/sessions/demo '{}' --follow
+# 也可以分别启动、查找与观察：
 tb device session start device/session-demo/sessions/demo '{}' --json
 tb device session list device/session-demo/sessions/demo --json
+tb device session wait device/session-demo/sessions/demo <session-id> --json
 tb device session observe device/session-demo/sessions/demo <session-id> --follow
 # 需要主动停止时，使用 start/list 返回的同一 session-id：
 tb device session stop device/session-demo/sessions/demo <session-id>
 ```
 
-示例应调用 sessions/demo 的 start；ops/demo/wait 仍是原同步入口，受同步超时限制，不用于验证长命令。
+示例调用 `sessions/demo` 会话节点。`ops/demo/wait` 是同一程序的同步工具入口，受同步超时限制。
 未指定 cwd 时使用 daemon 工作目录；profile 显式配置 cwd 才固定到该目录，不能从 profile 文件位置推断。
 
 ## 身份、启动与丢响应恢复
@@ -116,7 +119,11 @@ Dashboard 以文本呈现并限制缓存，不解释 HTML 或把日志当终端�
 
 ## 消费者与验收
 
-`tb device session start/list/observe/stop` 使用完整会话节点路径；observe --follow 的 Ctrl-C 只退出观察。
+`tb device session run` 启动一次，立即在 stderr 打印含 path、sessionId、requestId、runtimeId 的恢复信息，再等待终态。`wait` 等待已知 session。二者默认只输出终态，`run --follow` 还跟随 stdout/stderr，JSON 跟随模式逐行输出观察页。它们都是对已有 `start/list/observe` 的客户端编排。
+
+`run` 和 `wait` 返回设备进程退出码，运行超时为 `124`，已知信号为 `128 + 信号编号`，其余无退出码终态为 `1`。进入观察后 Ctrl-C 返回 `130` 并解除等待，远端进程继续运行。网络错误保留恢复提示，可用 `observe --cursor ... --follow` 续读，或用 `wait` 取终态。需要结束进程时显式 `stop`。
+
+所有 `tb device session` 子命令使用完整会话节点路径。`observe --follow` 的 Ctrl-C 只退出观察。
 它与 `tb daemon logs` 的服务日志不同。Dashboard 先从默认不含 schema 的节点 Help index 筛选四命令候选，
 只有缺少 start inputSchema 的候选才按需获取单条 start Help；按 name/path 匹配后仅补 inputSchema，保留
 当前授权 index 的 identity/effect/confirm。必填 expectedRuntimeId 契约确认后才呈现会话面板，不全局展开

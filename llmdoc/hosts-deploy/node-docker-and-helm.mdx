@@ -69,9 +69,9 @@ code:
 
 SIGTERM 经 managed shutdown 先标记 draining，让 readiness 立即失败；等待本副本已成功应用的 `shutdownDrainSec` 后关闭 listener 并完成请求、设备与后台工作排空。等待窗口仍可承接编排器尚未摘除的流量；pending 配置不改变该窗口；维护 quiesce 暂时移除 business 时仍用此前已应用的窗口，读取时长不能再依赖 PG 可达。main 必须调用这一实际生命周期入口，不能绕过等待直接 close。
 
-所有实际 HTTP 请求都进入排空计数，响应头返回不代表请求完成。`responseLifecycle.ts` 将释放延至 body 完成、取消清理结束或上游错误；保持背压、不预取，并在消费者暂停时也处理上游错误。只有执行 quiesce 的当前维护调用能通过 AsyncLocalStorage 释放自身一次；不得按原始 URL 前缀猜调用归属，编码、大小写和别名不能改变该规则。
+所有实际 HTTP 请求都进入排空计数。`responseLifecycle.ts` 将释放延至 body 完成、取消清理结束或上游错误，保持背压并在消费者暂停时也处理上游错误。客户端断开会主动取消上游响应流，即使 HTTP adapter 尚未开始消费该响应。只有执行 quiesce 的当前维护调用能通过 AsyncLocalStorage 释放自身一次；不得按原始 URL 前缀猜调用归属，编码、大小写和别名不能改变该规则。
 
-`TbServer.close` 复用同一个 closePromise，但必须先释放当前维护调用，再复用已经开始的关停，避免彼此等待。managed listener 排空后还要关闭维护途中 reload 出的最终 runtime，不能让进程退出遗留其登记。正常请求、响应流与后台工作结束后才释放 runtime 登记和共享锁。慢 cleanup tick 不重入，首轮在监听后异步执行。
+`TbServer.close` 复用同一个 closePromise，但必须先释放当前维护调用，再复用已经开始的关停，避免彼此等待。开始关闭 runtime 时主动终止 MCP 事件订阅，并拒绝新订阅，排空无需等 SSE 的自然期限。managed listener 排空后还要关闭维护途中 reload 出的最终 runtime，不能让进程退出遗留其登记。正常请求、响应流与后台工作结束后才释放 runtime 登记和共享锁。慢 cleanup tick 不重入，首轮在监听后异步执行。
 
 ## 受限部署执行器
 
@@ -106,7 +106,7 @@ Helm chart 部署同一 managed 服务，PG/S3 由外部供应，用户仍先配
 
 Node DeviceHub 保有本副本活 socket，DeviceRouter 通过 Redis 路由到持有连接的副本。registry presence 是可见性提示，不是 socket 归属权威；跨副本调用的 `completed|not_dispatched|unknown` 仍遵守单次执行语义。Redis 中断会使路由不可用，不能退成“在线但随便发到本地”。
 
-服务器以 PG replica registry 和共享 session lock 登记 runtime；没有 Redis 时拒绝启动第二个活跃副本，持久数据库 fence 与 key maintenance fence 也阻止不安全登记。多副本运行与停写维护不同：维护要求其它副本正常 drain 并删除登记，过期 heartbeat 或断开的 session 都不能替代该证明；崩溃残留走 [离线恢复边界](./maintenance-and-keys.mdx)。
+服务器以 PG replica registry 和共享 session lock 登记 runtime。没有 Redis 时拒绝启动第二个活跃副本。已配置的副本须和 PG 记录的活动路由身份一致，调整 Redis 需要同时协调所有副本。受保护维护要求其它副本正常 drain 并删除登记，过期 heartbeat 或断开的 session 都不能替代该证明。崩溃残留走 [离线恢复边界](./maintenance-and-keys.mdx)。
 
 ## 部署验证
 
