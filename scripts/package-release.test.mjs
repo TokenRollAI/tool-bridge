@@ -658,7 +658,9 @@ test('release workflow closes package prerequisites and safely resumes existing 
   assert.match(workflow, /gh run list --workflow "\$WF"/)
   assert.match(workflow, /\.headSha == \\"\$GITHUB_SHA\\"/)
   assert.match(workflow, /REGISTRY_READY=false/)
-  assert.match(workflow, /registry 180s 内仍不可见/)
+  assert.match(workflow, /REGISTRY_WAIT_SECONDS=600/)
+  assert.match(workflow, /while \(\( SECONDS < DEADLINE \)\); do/)
+  assert.match(workflow, /registry \$\{REGISTRY_WAIT_SECONDS\}s 内仍不可见/)
   assert.doesNotMatch(workflow, /tag \$TAG 已存在[^\n]*跳过/)
 })
 
