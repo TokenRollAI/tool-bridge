@@ -99,6 +99,12 @@ export function createTbServer(config: ServerConfig): TbServer {
     store: state,
     search,
     reclaimSec: config.deviceReclaimSec,
+    publishedReclaimSec: async () => {
+      const [row] = await sql<{ seconds: number }[]>`SELECT (effective->>'deviceReclaimSec')::integer AS seconds
+        FROM tb_runtime_config WHERE id=1`
+      if (!row) throw new Error('no effective device retention')
+      return row.seconds
+    },
     // 配了 Redis 才启用多副本路由;缺省单副本,设备调用恒走本地 socket。
     ...(redisBackend === undefined
       ? {}
@@ -286,14 +292,14 @@ export function createTbServer(config: ServerConfig): TbServer {
   }
   let currentApp = createTbApp(deps)
   const settings = new ConfigManager(sql, async (next) => {
-    if (applied?.deviceReclaimSec !== next.deviceReclaimSec)
-      await hub.setReclaimSec(next.deviceReclaimSec)
     deps = {
       ...deps,
       ...runtimeAppSettings(next, config.instanceId),
       configManagement: settings,
     }
     currentApp = createTbApp(deps)
+  }, async (next) => {
+    await hub.setReclaimSec(next.deviceReclaimSec)
     const reschedule
       = applied?.storeCleanupIntervalSec !== next.storeCleanupIntervalSec
     applied = next
@@ -358,7 +364,7 @@ export function createTbServer(config: ServerConfig): TbServer {
       runtimeLease = await acquireRuntimeLease(sql, {
         instanceId: config.instanceId ?? 'embedded',
         replicaId,
-        redisConfigured: config.redisUrl !== undefined,
+        redisUrl: config.redisUrl,
       })
       replicaTimer = setInterval(() => {
         heartbeatInFlight = heartbeatInFlight.then(() => runtimeLease?.heartbeat()).catch(() => {})
@@ -373,7 +379,7 @@ export function createTbServer(config: ServerConfig): TbServer {
         id text PRIMARY KEY, actor text NOT NULL, action text NOT NULL, outcome text NOT NULL,
         created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now()
       )`
-      await search.initialized()
+      await search.enableCanonicalAudit()
       await settings.ensureSchema(
         config.managedSettings
         ?? runtimeConfigSchema.parse(

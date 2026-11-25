@@ -8,6 +8,7 @@ import {
 import { describe, expect, it, vi } from 'vitest'
 import { TEST_ADMIN_SK, TEST_ENCRYPTION_KEY } from './fixtures'
 import { createTbApp, runBootstrap } from '../src/index'
+import { MemorySearchIndex } from './memorySearchIndex'
 
 const adminHeaders = {
   'accept': 'application/json',
@@ -83,6 +84,23 @@ async function postRegistry(
 }
 
 describe('global ~search protocol', () => {
+  it('serves its last index with an explicit capacity status and recovers when the tree shrinks', async () => {
+    const { app, state } = await appWith(new MemorySearchIndex())
+    const path = 'stable-tool'
+    await postRegistry(app, { path, kind: 'http', description: 'lookup', config: {
+      kind: 'http', endpoint: 'https://fixture.test', tools: [{ method: 'GET', name: 'lookup', pathTemplate: '/' }],
+    } })
+    const search = async () => (await postSearch(app, { query: 'lookup' })).json()
+    expect((await search()).items).toHaveLength(1)
+    const extra = Array.from({ length: 501 }, (_, i) => `capacity-${i}`)
+    await Promise.all(extra.map(path => state.put(`node:${path}`, { path, kind: 'directory' })))
+    expect(await search()).toMatchObject({ items: [{ path }], partial: true, sources: [{ path: '', status: 'index_capacity' }] })
+    await state.delete(`node:${path}`)
+    expect((await search()).items).toEqual([])
+    await Promise.all(extra.map(path => state.delete(`node:${path}`)))
+    expect(await search()).toEqual({ items: [] })
+  })
+
   it('does not impose search-only capacity limits when no index is injected', async () => {
     const { app, state } = await appWith()
     const path = `${Array.from({ length: 40 }, () => 'deep').join('/')}/provider`

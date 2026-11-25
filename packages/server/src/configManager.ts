@@ -18,8 +18,24 @@ export class ConfigManager implements ConfigManagement {
   private localRevision = 0
   private localEffective: RuntimeConfig | undefined
   private localError: string | undefined
+  private committedRevision = 0
   private serial: Promise<unknown> = Promise.resolve()
-  constructor(private readonly sql: Sql, private readonly onApply: (settings: RuntimeConfig) => Promise<void>) {}
+  constructor(
+    private readonly sql: Sql,
+    private readonly onApply: (settings: RuntimeConfig) => Promise<void>,
+    private readonly onPublished?: (settings: RuntimeConfig) => Promise<void>,
+  ) {}
+
+  private async activatePublished(settings: RuntimeConfig, revision: number): Promise<void> {
+    if (revision === this.committedRevision) return
+    try {
+      await this.onPublished?.(settings)
+      this.committedRevision = revision
+    } catch {
+      this.localError = 'published runtime configuration requires local recovery'
+      throw new TBError('unavailable', this.localError)
+    }
+  }
 
   async ensureSchema(defaults = runtimeConfigSchema.parse({})): Promise<void> {
     await this.sql.begin(async (sql) => {
@@ -77,6 +93,7 @@ export class ConfigManager implements ConfigManagement {
       if (this.localRevision !== revision || this.localError !== undefined) {
         await this.install(runtimeConfigSchema.parse(row.effective), revision)
       }
+      await this.activatePublished(this.localEffective!, revision)
     })
   }
 
@@ -132,6 +149,7 @@ export class ConfigManager implements ConfigManagement {
           applied_revision=${row.revision},apply_token=NULL,applying_revision=NULL,lease_until=NULL,last_error=NULL
           WHERE id=1 AND apply_token=${token}`
         if (published.count === 0) throw new TBError('conflict', 'configuration application lease changed')
+        await this.activatePublished(this.localEffective!, Number(row.revision))
         return this.get()
       } catch (error) {
         await this.sql`UPDATE tb_runtime_config SET apply_token=NULL,applying_revision=NULL,lease_until=NULL,

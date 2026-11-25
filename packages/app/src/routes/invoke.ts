@@ -207,13 +207,6 @@ export async function handleInvoke(c: AppContext, env: RouteEnv): Promise<Respon
       response.headers.set('x-tb-delivery', 'realtime')
       return response
     }
-    if (attempt.disposition === 'unknown' && request.delivery === 'fallback') {
-      throw new TBError(
-        attempt.result.error.code,
-        `${attempt.result.error.message}; delivery outcome is unknown and was not enqueued`,
-        { retryable: false },
-      )
-    }
     throw tbErrorFromBody(attempt.result.error)
   }
 

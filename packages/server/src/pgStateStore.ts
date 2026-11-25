@@ -12,10 +12,25 @@
  * startsWith 过滤。
  */
 
-import type { Sql } from 'postgres'
-import { prefixUpperBound, type StateStore } from '@tool-bridge/core'
+import type { ISql, Sql } from 'postgres'
+import { prefixUpperBound, type StateStore, TBError, type TreeNode } from '@tool-bridge/core'
 
 const DEFAULT_LIST_LIMIT = 1000
+
+export async function readPgValues(sql: ISql, keys: readonly string[]): Promise<Map<string, unknown>> {
+  const unique = [...new Set(keys)]
+  if (unique.length === 0) return new Map()
+  const rows = await sql<{ key: string, value: unknown }[]>`
+    SELECT key, value FROM tb_kv WHERE key = ANY(${sql.array(unique)})
+  `
+  // `= ANY` 行序不保证;按输入 key 首次出现顺序构建 Map,与 MemoryStateStore 对齐。
+  const byKey = new Map(rows.map(row => [row.key, row.value]))
+  const out = new Map<string, unknown>()
+  for (const key of unique) {
+    if (byKey.has(key)) out.set(key, byKey.get(key))
+  }
+  return out
+}
 
 export class PgStateStore implements StateStore {
   private contextRefsEnabled = false
@@ -49,36 +64,54 @@ export class PgStateStore implements StateStore {
   }
 
   async getMany(keys: readonly string[]): Promise<Map<string, unknown>> {
-    const unique = [...new Set(keys)]
-    if (unique.length === 0) return new Map()
-    const rows = await this.sql<{ key: string, value: unknown }[]>`
-      SELECT key, value FROM tb_kv WHERE key = ANY(${this.sql.array(unique)})
-    `
-    // `= ANY` 行序不保证;按输入 key 首次出现顺序构建 Map,与 MemoryStateStore 对齐。
-    const byKey = new Map(rows.map(row => [row.key, row.value]))
-    const out = new Map<string, unknown>()
-    for (const key of unique) {
-      if (byKey.has(key)) out.set(key, byKey.get(key))
+    return readPgValues(this.sql, keys)
+  }
+
+  private async upsert(sql: ISql, key: string, value: unknown): Promise<void> {
+    try {
+      await sql`INSERT INTO tb_kv(key,value) VALUES(${key},${sql.json(value as never)})
+        ON CONFLICT(key) DO UPDATE SET value=excluded.value`
+    } catch (error) {
+      // A concurrent registry writer can occupy the path after the app checked it.
+      if ((error as { code?: string }).code === 'TB409') throw new TBError('conflict', 'topic path is occupied')
+      throw error
     }
-    return out
   }
 
   async put(key: string, value: unknown): Promise<void> {
-    const config = (value as { config?: { kind?: string, provider?: string, providerConfig?: { backendId?: string } } })?.config
+    const config = (value as Partial<TreeNode>)?.config
     if (this.contextRefsEnabled && key.startsWith('node:')) {
       await this.sql.begin(async (sql) => {
-        await sql`INSERT INTO tb_kv(key,value) VALUES(${key},${sql.json(value as never)})
-          ON CONFLICT(key) DO UPDATE SET value=excluded.value`
-        if (config?.provider === 'storage' && (config.kind === 'context' || config.kind === 'skillhub')) {
-          if (!config.providerConfig?.backendId) throw new Error('storage Context requires an immutable backendId')
-          await sql`INSERT INTO tb_context_storage_refs(node_key,backend_id) VALUES(${key},${config.providerConfig.backendId})
-            ON CONFLICT(node_key) DO UPDATE SET backend_id=excluded.backend_id`
-        } else await sql`DELETE FROM tb_context_storage_refs WHERE node_key=${key}`
+        await this.upsert(sql, key, value)
+        await this.syncContextReference(sql, key, config)
       })
       return
     }
-    await this.sql`INSERT INTO tb_kv(key,value) VALUES(${key},${this.sql.json(value as never)})
-      ON CONFLICT(key) DO UPDATE SET value=excluded.value`
+    await this.upsert(this.sql, key, value)
+  }
+
+  private async syncContextReference(sql: ISql, key: string, config: TreeNode['config']): Promise<void> {
+    if (config && (config.kind === 'context' || config.kind === 'skillhub') && config.provider === 'storage') {
+      const backendId = config.providerConfig?.backendId
+      if (typeof backendId !== 'string' || !backendId) throw new Error('storage Context requires an immutable backendId')
+      await sql`INSERT INTO tb_context_storage_refs(node_key,backend_id) VALUES(${key},${backendId})
+        ON CONFLICT(node_key) DO UPDATE SET backend_id=excluded.backend_id`
+    } else {
+      await sql`DELETE FROM tb_context_storage_refs WHERE node_key=${key}`
+    }
+  }
+
+  async updateNode(key: string, edit: (current: TreeNode) => TreeNode): Promise<TreeNode | null> {
+    return this.sql.begin(async (tx) => {
+      const [row] = await tx<{ value: TreeNode }[]>`SELECT value FROM tb_kv WHERE key=${key} FOR UPDATE`
+      if (!row) return null
+      const next = edit(row.value)
+      await tx`UPDATE tb_kv SET value=${tx.json(next as never)} WHERE key=${key}`
+      if (this.contextRefsEnabled && next.config !== row.value.config) {
+        await this.syncContextReference(tx, key, next.config)
+      }
+      return next
+    })
   }
 
   async compareAndSwap(

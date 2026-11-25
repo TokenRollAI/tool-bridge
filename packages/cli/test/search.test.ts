@@ -32,6 +32,13 @@ afterEach(() => {
 })
 
 describe('tb search', () => {
+  it('reports last-known-good capacity separately from JSON output', async () => {
+    jsonFetch({ items: [], partial: true, sources: [{ path: '', status: 'index_capacity' }] })
+    await runCli(['search', 'calendar', '--json', ...gateway])
+    expect(written(process.stderr)).toContain('registry exceeds search capacity')
+    expect(JSON.parse(written(process.stdout)).sources[0].status).toBe('index_capacity')
+  })
+
   it('POST /~search 并转发 compact discovery 选项', async () => {
     const fn = jsonFetch({ items: [], cursor: 'next' })
     await runCli([

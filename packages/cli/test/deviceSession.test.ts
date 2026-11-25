@@ -44,6 +44,31 @@ describe('device process session CLI', () => {
     expect(fetcher).toHaveBeenCalledTimes(3)
   })
 
+  it('run follows the original process through its last page and returns the device exit code', async () => {
+    const done = { ...summary, state: 'exited', exitCode: 7, gap: false, droppedBytes: 0, nextCursor: 5 }
+    const fetcher = transport((url, input) => {
+      if (url.endsWith('/~help')) return help
+      if (url.endsWith('/list')) return list
+      if (url.endsWith('/start')) return { ...summary, requestId: input.requestId }
+      return { ...done, chunks: input.cursor === 0 ? [{ seq: 1, stream: 'stdout', text: 'done!' }] : [] }
+    })
+    await runCli(['device', 'session', 'run', path, '--follow', ...gateway])
+    expect(fetcher.mock.calls.filter(([url]) => String(url).endsWith('/start'))).toHaveLength(1)
+    expect(vi.mocked(process.stderr.write).mock.calls[0]?.[0]).toContain(summary.sessionId)
+    expect(output()).toContain('done!')
+    expect(process.exitCode).toBe(7)
+  })
+
+  it('wait reads an existing terminal state without restarting it or printing private logs', async () => {
+    const fetcher = transport(() => ({ ...summary, state: 'exited', exitCode: 3,
+      chunks: [{ seq: 1, stream: 'stdout', text: 'private' }], nextCursor: 7, gap: false, droppedBytes: 0 }))
+    await runCli(['device', 'session', 'wait', path, summary.sessionId, '--json', ...gateway])
+    expect(fetcher).toHaveBeenCalledOnce()
+    expect(output()).not.toContain('private')
+    expect(JSON.parse(output())).toMatchObject({ state: 'exited', exitCode: 3 })
+    expect(process.exitCode).toBe(3)
+  })
+
   it('lost start response retains its original request id and never retries', async () => {
     let requestId = ''
     const fetcher = transport((url, body) => {

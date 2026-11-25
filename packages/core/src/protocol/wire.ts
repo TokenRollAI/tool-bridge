@@ -159,6 +159,7 @@ export type WireToolSearchSourceStatus
     | 'unavailable'
     | 'cycle'
     | 'hop_limit'
+    | 'index_capacity'
     | 'budget_exhausted'
     | 'invalid_response'
 export interface WireToolSearchRelevance {
@@ -198,6 +199,7 @@ export const toolSearchSourceResultSchema: z.ZodType<WireToolSearchSourceResult>
     'unavailable',
     'cycle',
     'hop_limit',
+    'index_capacity',
     'budget_exhausted',
     'invalid_response',
   ]),

@@ -68,6 +68,16 @@ export async function attemptDevice(
   ) {
     throw new TBError('unavailable', 'device session returned invalid result')
   }
+  if (attempt.disposition === 'unknown' && !attempt.result.ok) {
+    return {
+      disposition: 'unknown',
+      result: { ok: false, error: {
+        ...attempt.result.error,
+        message: `${attempt.result.error.message}; delivery outcome is unknown and was not enqueued`,
+        retryable: false,
+      } },
+    }
+  }
   return attempt
 }
 

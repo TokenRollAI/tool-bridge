@@ -66,7 +66,7 @@ export async function executeLocalSearch(
     ...(wireOpts.pathPrefix === undefined ? {} : { pathPrefix: wireOpts.pathPrefix }),
   })
   const indexOptions: ToolSearchOptions = { mode, ...constraints }
-  await searchSync?.ensureReady()
+  const snapshot = await searchSync?.ensureSnapshot()
   const registry = new NodeRegistryStore(state)
   const selected: Array<{ candidate: ToolSearchCandidate, node: TreeNode }> = []
   const workLimit = Math.min(
@@ -175,5 +175,9 @@ export async function executeLocalSearch(
   }
   // deny==not_found：空可见页不返回 continuation，避免 cursor 存在性泄露隐藏命中量。
   if (items.length === 0) responseCursor = undefined
-  return responseCursor === undefined ? { items } : { items, cursor: responseCursor }
+  return {
+    items,
+    ...(responseCursor === undefined ? {} : { cursor: responseCursor }),
+    ...(snapshot?.truncated ? { partial: true, sources: [{ path: '', status: 'index_capacity' as const }] } : {}),
+  }
 }

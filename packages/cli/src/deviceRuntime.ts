@@ -274,22 +274,36 @@ export function startDeviceConnection(opts: DeviceConnectionOptions): DeviceConn
         }),
       })
     : undefined
-  let mailboxDrain: Promise<void> | undefined
+  let mailboxOnline = false
+  let mailboxWake: NodeJS.Timeout | undefined
   let mailboxDrainController: AbortController | undefined
+  const stopMailbox = (): void => {
+    mailboxOnline = false
+    clearTimeout(mailboxWake)
+    mailboxDrainController?.abort()
+  }
   const drainMailbox = (): void => {
-    if (mailbox === undefined || mailboxDrain !== undefined) return
+    clearTimeout(mailboxWake)
+    if (!mailboxOnline || !mailbox || mailboxDrainController) return
     const controller = new AbortController()
     mailboxDrainController = controller
-    mailboxDrain = mailbox.drain({ signal: controller.signal })
-      .then(() => {})
+    const batchSize = 50
+    let nextPollMs = 15_000
+    void mailbox.drain({ signal: controller.signal, maxOperations: batchSize })
+      .then(({ processed }) => {
+        if (processed === batchSize) nextPollMs = 0
+      })
       .catch((error: unknown) => {
         if (!controller.signal.aborted) {
           opts.onMailboxError?.(error instanceof Error ? error : new Error(String(error)))
         }
       })
       .finally(() => {
-        mailboxDrain = undefined
-        if (mailboxDrainController === controller) mailboxDrainController = undefined
+        mailboxDrainController = undefined
+        if (mailboxOnline && !userClosed && !settled) {
+          mailboxWake = setTimeout(drainMailbox, controller.signal.aborted ? 0 : nextPollMs)
+          mailboxWake.unref()
+        }
       })
   }
 
@@ -302,7 +316,14 @@ export function startDeviceConnection(opts: DeviceConnectionOptions): DeviceConn
     credentialProvider,
     onStateChange: (state) => {
       opts.onStateChange?.(state)
-      if (state === 'ready') drainMailbox()
+      if (state === 'ready') {
+        mailboxOnline = true
+        drainMailbox()
+      } else {
+        // The HTTP lease is independent of transient WebSocket reconnection.
+        mailboxOnline = false
+        clearTimeout(mailboxWake)
+      }
     },
     handler,
   })
@@ -321,6 +342,7 @@ export function startDeviceConnection(opts: DeviceConnectionOptions): DeviceConn
   // runDeviceConnection consumes `closed`; avoid an unhandled parallel ready rejection.
   ready.catch(() => {})
   connection.closed.then(() => {
+    stopMailbox()
     if (settled) return
     settled = true
     void cleanupSessions().then(resolveClosed, error => rejectClosed(cliError(error)))
@@ -334,7 +356,7 @@ export function startDeviceConnection(opts: DeviceConnectionOptions): DeviceConn
     },
     close() {
       userClosed = true
-      mailboxDrainController?.abort()
+      stopMailbox()
       void cleanupSessions().catch(fail)
       connection.close()
     },
@@ -345,7 +367,7 @@ export function startDeviceConnection(opts: DeviceConnectionOptions): DeviceConn
       connection.resume()
     },
     suspend() {
-      mailboxDrainController?.abort()
+      stopMailbox()
       connection.suspend()
     },
   }

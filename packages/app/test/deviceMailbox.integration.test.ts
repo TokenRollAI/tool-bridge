@@ -275,7 +275,7 @@ describe('durable device mailbox routes', () => {
     expect(await response.json()).toEqual({ delivered: 'now' })
   })
 
-  it('does not enqueue when fallback delivery becomes unknown after dispatch', async () => {
+  it.each(['fallback', 'realtime'])('does not advise repeating an unresolved %s delivery', async (delivery) => {
     const { tb, caller } = await mountedMailboxApp({
       ws: async () => new Response(null, { status: 501 }),
       invoke: async () => ({
@@ -289,7 +289,7 @@ describe('durable device mailbox routes', () => {
     const response = await postJson(
       tb,
       'device/phone-1/tools/mail/send',
-      { '~delivery': 'fallback', 'text': 'maybe' },
+      { '~delivery': delivery, 'text': 'maybe' },
       caller.secret,
     )
     expect(response.status).toBe(503)

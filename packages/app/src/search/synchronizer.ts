@@ -1,4 +1,5 @@
 import {
+  type BuildSearchDocuments,
   effectFor,
   type FeedbackEntry,
   isTBError,
@@ -7,6 +8,7 @@ import {
   NodeRegistryStore,
   normalizeToolSearchPath,
   parseFeedbackEntries,
+  type SearchRegistrySnapshot,
   selectFeedbackSearchText,
   serializeToolSearchSnapshot,
   type StateStore,
@@ -97,8 +99,8 @@ function documentsFor(path: TreePath, tools: readonly ToolSpec[], feedback: stri
 
 /**
  * StateStore 是 canonical state，SearchIndex 是可重建派生状态。mutation 前写 dirty marker，
- * 热同步成功后清除；每次搜索仍重做幂等 canonical 快照审计。KV 没有传播完成的硬确认，
- * marker 只能帮助失败诊断，不能成为派生状态最终收敛的唯一触发器。
+ * embedded KV 热同步成功后清除；每次搜索仍审计快照以处理延迟传播。标准 PG
+ * 由同事务的输入 revision 驱动单次重建，共用的快照也供递归查询发现 remote。
  */
 export class SearchSynchronizer {
   private readonly registry: NodeRegistryStore
@@ -121,7 +123,7 @@ export class SearchSynchronizer {
       kind,
       path: canonical,
     }
-    await this.state.put(marker.key, marker)
+    if (!this.search.auditCanonical) await this.state.put(marker.key, marker)
     return marker
   }
 
@@ -134,7 +136,7 @@ export class SearchSynchronizer {
   }
 
   async abort(marker: SearchDirtyMarker | undefined): Promise<void> {
-    if (marker !== undefined && marker.expectedDigest === undefined) {
+    if (!this.search.auditCanonical && marker !== undefined && marker.expectedDigest === undefined) {
       await this.state.delete(marker.key)
     }
   }
@@ -223,6 +225,13 @@ export class SearchSynchronizer {
       tools?: readonly ToolSpec[]
     } = {},
   ): Promise<void> {
+    if (this.search.auditCanonical) return // The canonical write itself advanced the PG revision.
+    const root = await this.registry.rootSnapshot(TOOL_SEARCH_AUDIT_NODE_LIMIT)
+    if (root.truncated) {
+      // 正式索引在 overflow 期间保持 last-known-good；新 canonical 节点仍可正常调用。
+      await this.finishMarker(opts.marker)
+      return
+    }
     const canonical = normalizeToolSearchPath(path)
     const node = await this.registry.get(canonical).catch(() => null)
     if (node === null || !toolNode(node)) {
@@ -240,12 +249,6 @@ export class SearchSynchronizer {
     if (tools.length === 0) {
       await this.commitMarker(opts.marker, null)
       await this.search.remove(canonical)
-      await this.finishMarker(opts.marker)
-      return
-    }
-    const root = await this.registry.rootSnapshot(TOOL_SEARCH_AUDIT_NODE_LIMIT)
-    if (root.truncated) {
-      // 正式索引在 overflow 期间保持 last-known-good；新 canonical 节点仍可正常调用。
       await this.finishMarker(opts.marker)
       return
     }
@@ -281,23 +284,15 @@ export class SearchSynchronizer {
     }
   }
 
-  async rebuildAll(
-    markers: readonly SearchDirtyMarker[] = [],
-    opts: {
-      authoritativeEmpty?: readonly TreePath[]
-      canonicalNodes?: readonly TreeNode[]
-    } = {},
-  ): Promise<boolean> {
-    const snapshot = opts.canonicalNodes === undefined
-      ? await this.registry.rootSnapshot(TOOL_SEARCH_AUDIT_NODE_LIMIT)
-      : { items: [...opts.canonicalNodes], truncated: false }
-    // KV 无跨 isolate CAS。容量竞态溢出时保留 last-known-good，不能让可操纵的
-    // 字典序前 N 个节点替换全局索引；marker 同样保留，待 canonical 恢复后再审计。
-    if (snapshot.truncated) return false
-    const nodes = snapshot.items.filter(toolNode)
-    const authoritativeEmpty = new Set(opts.authoritativeEmpty ?? [])
+  private async documents(
+    canonicalNodes: readonly TreeNode[],
+    getMany: Parameters<BuildSearchDocuments>[1],
+    emptyPaths: readonly TreePath[] = [],
+  ): Promise<ToolSearchDocument[]> {
+    const nodes = canonicalNodes.filter(toolNode)
+    const authoritativeEmpty = new Set(emptyPaths)
     const keys = nodes.flatMap(node => [KEY_FEEDBACK + node.path, toolCacheKey(node.path)])
-    const values = await this.state.getMany(keys)
+    const values = await getMany(keys)
     const documents: ToolSearchDocument[] = []
     for (const node of nodes) {
       if (authoritativeEmpty.has(node.path)) continue
@@ -315,6 +310,27 @@ export class SearchSynchronizer {
       if (this.indexableRecords(node.path, tools, feedback) === null) continue
       documents.push(...documentsFor(node.path, tools, feedback))
     }
+    return documents
+  }
+
+  async rebuildAll(
+    markers: readonly SearchDirtyMarker[] = [],
+    opts: {
+      authoritativeEmpty?: readonly TreePath[]
+      canonicalNodes?: readonly TreeNode[]
+    } = {},
+  ): Promise<boolean> {
+    if (this.search.auditCanonical) {
+      const snapshot = await this.search.auditCanonical((nodes, read) => this.documents(nodes, read))
+      return !snapshot.truncated
+    }
+    const snapshot = opts.canonicalNodes === undefined
+      ? await this.registry.rootSnapshot(TOOL_SEARCH_AUDIT_NODE_LIMIT)
+      : { items: [...opts.canonicalNodes], truncated: false }
+    // KV 无跨 isolate CAS。容量竞态溢出时保留 last-known-good，不能让可操纵的
+    // 字典序前 N 个节点替换全局索引；marker 同样保留，待 canonical 恢复后再审计。
+    if (snapshot.truncated) return false
+    const documents = await this.documents(snapshot.items, keys => this.state.getMany(keys), opts.authoritativeEmpty)
     await this.search.rebuild(documents)
     // Marker 只是有界审计提示；canonical 若仍是 KV 旧视图，下一次 search 的
     // 无条件快照审计会再次纠正索引。
@@ -324,21 +340,27 @@ export class SearchSynchronizer {
     return true
   }
 
-  /** 每次搜索前审计 canonical 快照；同快照 rebuild 不 bump revision。 */
-  async ensureReady(): Promise<void> {
-    // 先做 501 个节点的有界探针，不能先让不可信 marker 数量放大扫描成本。
-    const snapshot = await this.registry.rootSnapshot(TOOL_SEARCH_AUDIT_NODE_LIMIT)
-    if (snapshot.truncated) {
-      if (await this.search.initialized()) return
-      throw new TBError('rate_limited', 'registry 超出工具搜索 canonical audit 容量')
+  /** Embedded stores without a transactionally maintained revision must audit on every read. */
+  async ensureSnapshot(): Promise<SearchRegistrySnapshot> {
+    if (this.search.auditCanonical) {
+      return this.search.auditCanonical((nodes, read) => this.documents(nodes, read))
     }
-    const dirty = await this.dirtyMarkers()
-    await this.rebuildAll(dirty, { canonicalNodes: snapshot.items })
+    const snapshot = await this.registry.rootSnapshot(TOOL_SEARCH_AUDIT_NODE_LIMIT)
+    if (!snapshot.truncated) await this.rebuildAll(await this.dirtyMarkers(), { canonicalNodes: snapshot.items })
+    return snapshot
+  }
+
+  async ensureReady(): Promise<void> {
+    await this.ensureSnapshot()
   }
 
   /** 首次 registry/device mutation 前建立 last-known-good，避免并发溢出抢在首次 seed 前。 */
   async ensureSeeded(): Promise<void> {
     if (await this.search.initialized()) return
+    if (this.search.auditCanonical) {
+      await this.ensureSnapshot()
+      return
+    }
     if (this.seedPromise === undefined) {
       this.seedPromise = (async () => {
         if (!await this.rebuildAll()) {
@@ -355,6 +377,8 @@ export class SearchSynchronizer {
 
   async removeSubtreeQuietly(path: TreePath, marker?: SearchDirtyMarker): Promise<void> {
     try {
+      if (this.search.auditCanonical) return
+      if ((await this.registry.rootSnapshot(TOOL_SEARCH_AUDIT_NODE_LIMIT)).truncated) return
       const canonical = normalizeToolSearchPath(path)
       if ((await this.registry.subtree(canonical)).length === 0) {
         await this.commitMarker(marker, null)

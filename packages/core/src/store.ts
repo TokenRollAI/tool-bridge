@@ -20,6 +20,11 @@
  *   store:share:<id>   → ShareGrant(token 仅存 hash)
  */
 
+import type { TreeNode } from './types'
+
+/** A synchronous node edit. Storage holds the row stable until the edit commits. */
+export type NodeEdit = (current: TreeNode) => TreeNode
+
 export interface StateStore {
   /**
    * 可选原子 compare-and-swap 原语，供带 `revision` 的权威记录做跨副本状态转换。
@@ -50,6 +55,7 @@ export interface StateStore {
    * 可选而非必选:必选会破坏 SDK 消费者已实现的自定义 StateStore。
    */
   putIfAbsent?(key: string, value: unknown): Promise<boolean>
+  updateNode?(key: string, edit: NodeEdit): Promise<TreeNode | null>
 }
 
 export const KEY_SK_HASH = 'sk:h:'
@@ -100,6 +106,14 @@ export function prefixUpperBound(prefix: string): string | undefined {
 /** 进程内存实现:单测与 SDK 内嵌宿主用。 */
 export class MemoryStateStore implements StateStore {
   private m = new Map<string, unknown>()
+
+  async updateNode(key: string, edit: NodeEdit): Promise<TreeNode | null> {
+    const current = this.m.get(key) as TreeNode | undefined
+    if (current === undefined) return null
+    const next = edit(current)
+    this.m.set(key, next)
+    return next
+  }
 
   async compareAndSwap(
     key: string,

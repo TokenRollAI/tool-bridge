@@ -1,10 +1,11 @@
 import type { ToolSpec } from '../tool/types'
-import { crypto, TextDecoder, TextEncoder, type WebCryptoKey } from '../webGlobals'
 import {
   LIST_LIMIT_MAX,
   type Page,
+  type TreeNode,
   type TreePath,
 } from '../types'
+import { crypto, TextDecoder, TextEncoder, type WebCryptoKey } from '../webGlobals'
 import { base64urlDecode, base64urlEncode } from '../encoding/base64url'
 import { canonicalizePath, validatePath } from '../tree/path'
 import { isTBError, TBError } from '../errors'
@@ -141,7 +142,17 @@ export interface ToolSearchDocument extends ToolSearchHit {
  * 可变索引的宿主契约。写入单位是节点快照，避免逐条 upsert 遗留已删除工具；
  * rebuild 用于首次 seed 与运维修复，removePrefix 用于设备子树回收。
  */
+export interface SearchRegistrySnapshot {
+  items: TreeNode[]
+  truncated: boolean
+}
+export type BuildSearchDocuments = (
+  nodes: readonly TreeNode[], getMany: (keys: readonly string[]) => Promise<Map<string, unknown>>,
+) => Promise<ToolSearchDocument[]>
+
 export interface MutableSearchIndex extends SearchIndex {
+  /** Optional for hosts sharing a transaction between canonical state and the index. */
+  auditCanonical?(build: BuildSearchDocuments): Promise<SearchRegistrySnapshot>
   initialized(): Promise<boolean>
   rebuild(documents: readonly ToolSearchDocument[]): Promise<void>
   remove(path: TreePath): Promise<void>

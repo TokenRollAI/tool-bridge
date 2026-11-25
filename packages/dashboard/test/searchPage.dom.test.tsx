@@ -91,6 +91,16 @@ describe('SearchPage relevance', () => {
     expect(mocks.useToolSearch).toHaveBeenLastCalledWith('current', { federation: 'recursive' })
   })
 
+  it('names the registry capacity limit when the local index cannot include new tools', () => {
+    mocks.useToolSearch.mockReturnValue({
+      data: { pages: [{ items: [], partial: true, sources: [{ path: '', status: 'index_capacity' }] }] },
+      fetchNextPage: vi.fn(), hasNextPage: false, isError: false, isFetching: false,
+      isFetchingNextPage: false, isPending: false, refetch: vi.fn(),
+    })
+    render(<MemoryRouter initialEntries={['/search?q=current']}><SearchPage /></MemoryRouter>)
+    expect(screen.getByRole('status').textContent).toContain('本实例（注册节点超过搜索容量，显示上次索引结果）')
+  })
+
   it('shows a controlled partial summary even when no source returned a tool', () => {
     mocks.useToolSearch.mockReturnValue({
       data: {

@@ -147,7 +147,15 @@ describe('runtime-owned process sessions', () => {
 
   it('close cleans the process group including a descendant and invalidates the runtime', async () => {
     const value = manager()
-    const session = await start(value, 'const {spawn}=require(\'node:child_process\');const child=spawn(process.execPath,[\'-e\',\'setInterval(()=>{},1000)\'],{stdio:\'ignore\'});process.stdout.write(String(child.pid));setInterval(()=>{},1000)')
+    // Signal a ready process group. Let the leader reap the descendant before it exits.
+    const session = await start(value, `
+      const { spawn } = require('node:child_process')
+      const child = spawn(process.execPath, ['-e', "process.stdout.write('ready'); setInterval(() => {}, 1000)"],
+        { stdio: ['ignore', 'pipe', 'ignore'] })
+      process.on('SIGTERM', () => {})
+      child.once('exit', () => process.exit(0))
+      child.stdout.once('data', () => process.stdout.write(String(child.pid)))
+    `)
     let output = await observe(value, session.sessionId, { waitMs: 1000 })
     if (output.chunks.length === 0) output = await observe(value, session.sessionId, { waitMs: 1000 })
     const descendantPid = Number(output.chunks.map(chunk => chunk.text).join(''))
