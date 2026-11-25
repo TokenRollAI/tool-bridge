@@ -27,15 +27,9 @@ export const PRESENCE_HINT: Record<PresenceState, string> = {
   stale: '连接位仍为真，但已久无心跳；很可能不可路由',
 }
 
-/**
- * presence 三态的边框/底色/字色 token。放在 lib 而非组件文件里,是因为 stale 的琥珀在
- * 徽标、图标框和统计卡三处都要一致 —— 分散写会漂移。
- *
- * stale 走 warn 色相:它和 offline 的处置完全不同(offline 是"确认已拆除、等重连",
- * stale 是"树上还在但很可能打不通"),不能共用同一片灰。
- */
+/** 设备存在状态的共享圆点色。 */
 export const PRESENCE_TONE: Record<PresenceState, string> = {
-  offline: 'bg-muted/20 text-muted-foreground',
-  online: 'border-ok/35 bg-ok/[0.045] text-ok',
-  stale: 'border-warn/35 bg-warn/[0.05] text-warn',
+  offline: 'bg-muted-foreground',
+  online: 'bg-ok',
+  stale: 'bg-warn',
 }

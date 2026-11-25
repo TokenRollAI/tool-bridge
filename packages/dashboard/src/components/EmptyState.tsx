@@ -22,16 +22,16 @@ export function EmptyState({
   return (
     <div
       className={cn(
-        'flex flex-col items-center rounded-lg border bg-card px-6 py-10 text-center',
-        tone === 'danger' && 'border-destructive/35 bg-destructive/[0.035]',
+        'flex flex-col items-start py-5 text-left',
+        tone === 'danger' && 'border-l-2 border-destructive pl-4',
         className,
       )}
       role={tone === 'danger' ? 'alert' : undefined}
     >
       <div
         className={cn(
-          'grid size-10 place-items-center rounded-xl bg-secondary/60 text-muted-foreground',
-          tone === 'danger' && 'border-destructive/30 text-destructive',
+          'text-muted-foreground',
+          tone === 'danger' && 'text-destructive',
         )}
       >
         <Icon className="size-4.5" strokeWidth={1.5} />

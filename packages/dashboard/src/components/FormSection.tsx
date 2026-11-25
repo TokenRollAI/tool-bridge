@@ -14,7 +14,7 @@ export function FormSection({
   return (
     <section className="overflow-hidden rounded-lg border bg-card/45">
       <div className="flex items-start gap-3 border-b bg-muted/10 px-4 py-3.5">
-        <span className="grid size-7 shrink-0 place-items-center rounded-md border bg-background font-mono text-[10px] text-primary">
+        <span className="grid size-7 shrink-0 place-items-center rounded-md border bg-background font-mono text-[10px] text-foreground">
           {index}
         </span>
         <div>

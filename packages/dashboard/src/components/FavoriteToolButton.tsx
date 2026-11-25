@@ -19,7 +19,7 @@ export function FavoriteToolButton({ path, tool }: { path: string, tool: string 
       title={selected ? '取消收藏' : '收藏到工作台'}
       variant="ghost"
     >
-      <Star className={cn(selected && 'fill-primary/20 text-primary')} />
+      <Star className={cn(selected && 'fill-primary/20 text-foreground')} />
     </Button>
   )
 }

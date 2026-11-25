@@ -1,15 +1,7 @@
-import type { ReactNode } from 'react'
-import { Wifi, WifiLow, WifiOff } from 'lucide-react'
 import type { PresenceState } from '@/lib/types'
-import { PRESENCE_HINT, PRESENCE_TONE } from '@/lib/presence'
-import { Badge } from '@/components/ui/badge'
+import { PRESENCE_HINT } from '@/lib/presence'
 import { cn } from '@/lib/utils'
-
-const PRESENCE_ICON: Record<PresenceState, ReactNode> = {
-  offline: <WifiOff />,
-  online: <Wifi />,
-  stale: <WifiLow />,
-}
+import { OnlineDot } from './KindBadge'
 
 /**
  * device presence 徽标。取 `state` 而非布尔:`~tree` 已给投影好的 presence,
@@ -23,13 +15,9 @@ export function PresenceBadge({
   state: PresenceState
 }) {
   return (
-    <Badge
-      className={cn('text-xs', PRESENCE_TONE[state], className)}
-      title={PRESENCE_HINT[state]}
-      variant="outline"
-    >
-      {PRESENCE_ICON[state]}
+    <span className={cn('inline-flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground', className)} title={PRESENCE_HINT[state]}>
+      <OnlineDot state={state} />
       {{ online: '在线', stale: '疑似失联', offline: '离线' }[state]}
-    </Badge>
+    </span>
   )
 }
