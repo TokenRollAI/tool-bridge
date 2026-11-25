@@ -447,7 +447,10 @@ describe('MCP consumer endpoint', () => {
       await expect(client.callTool({
         name: 'tb_device_operations', arguments: { action: 'list', deviceId: 'mcp-mailbox' },
       })).resolves.toMatchObject({ structuredContent: { items: [] } })
-      const result = await client.callTool({ name: 'tb_call', arguments: input })
+      // Verify the supplied TTL against a fixed enqueue time across the HTTP and MCP layers.
+      const enqueueTime = Date.now()
+      const clock = vi.spyOn(Date, 'now').mockReturnValue(enqueueTime)
+      const result = await client.callTool({ name: 'tb_call', arguments: input }).finally(() => clock.mockRestore())
       expect(result.structuredContent).toMatchObject({
         delivery: 'mailbox',
         operation: { state: 'queued', targetPath: 'device/mcp-mailbox/tools/mail/send' },
@@ -455,7 +458,8 @@ describe('MCP consumer endpoint', () => {
       const operation = (result.structuredContent as {
         operation: { createdAt: string, expiresAt: string, operationId: string }
       }).operation
-      expect(Date.parse(operation.expiresAt) - Date.parse(operation.createdAt)).toBe(300_000)
+      expect(Date.parse(operation.createdAt)).toBe(enqueueTime)
+      expect(Date.parse(operation.expiresAt)).toBe(enqueueTime + 300_000)
       await expect(client.callTool({ name: 'tb_call', arguments: input })).resolves.toMatchObject({
         structuredContent: { operation: { operationId: operation.operationId } },
       })
