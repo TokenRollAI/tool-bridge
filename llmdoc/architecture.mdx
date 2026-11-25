@@ -7,6 +7,7 @@ relations:
     - protocol/htbp-contract.mdx
     - protocol/security-boundaries.mdx
     - device/process-sessions.mdx
+    - events/durable-topics.mdx
 code:
   paths:
     - package.json
@@ -31,7 +32,7 @@ code:
 
 # tool-bridge 整体架构
 
-tool-bridge 把工具、上下文、设备与远端服务组织成一棵受权限约束的 HTBP 树。调用方通过统一的 `~help`、`~tree`、`~search` 发现能力,invoke 以唯一形态 `POST /<nodePath>/<command>` 调用：body 是 arguments 本体，设备命令可另带保留顶层控制字段 `~delivery: realtime|mailbox|fallback`，没有第二个 enqueue URL 或 `{tool,arguments}` 信封。命令是节点下的虚拟叶子,标识符大小写不敏感、规范化为小写。HTTP、CLI(`tb`)、Dashboard、`/~mcp` 投影与 Agent Skill 是同一控制面的五个入口。
+tool-bridge 把工具、上下文、设备、事件主题与远端服务组织成一棵受权限约束的 HTBP 树。调用方通过统一的 `~help`、`~tree`、`~search` 发现能力,invoke 以唯一形态 `POST /<nodePath>/<command>` 调用：body 是 arguments 本体，设备命令可另带保留顶层控制字段 `~delivery: realtime|mailbox|fallback`，没有第二个 enqueue URL 或 `{tool,arguments}` 信封。命令是节点下的虚拟叶子,标识符大小写不敏感、规范化为小写。HTTP、CLI(`tb`)、Dashboard、`/~mcp` 投影与 Agent Skill 是同一控制面的五个入口。
 
 项目的标准宿主只有 Node 自托管服务，默认完整 Compose 栈由应用、PostgreSQL 与 S3 兼容对象服务组成，Redis 是可选的跨副本设备路由设施。业务逻辑不依赖部署平台；Railway 等平台只负责运行容器、网络和持久卷。
 
@@ -62,7 +63,7 @@ CLI / Dashboard ──> sdk neutral entries ──HTTP──> app contract
 
 ## 宿主注入面
 
-`TbAppDeps` 把通用状态 `StateStore`、字节 `ObjectStore`、`SecretStore`、实时 `DeviceChannel` 与派生 `SearchIndex` 分开注入。Store/Mailbox 的权威元数据另外要求 `StoreRepository` / `MailboxRepository`；不能把普通 KV CAS 或内存锁伪装为生产领域事务。SDK 根入口需显式提供依赖，缺领域依赖时相关能力 fail closed，内存替身只用于测试与明确的易失嵌入场景。
+`TbAppDeps` 把通用状态 `StateStore`、字节 `ObjectStore`、`SecretStore`、实时 `DeviceChannel` 与派生 `SearchIndex` 分开注入。Store、Mailbox 与事件分别依赖 `StoreRepository`、`MailboxRepository`、`EventRepository`。嵌入宿主需显式提供所需领域依赖，内存替身只用于测试与明确的易失嵌入场景。
 
 标准 Node 装配用 `PgStateStore` 保存节点、SK、加密 secret 等通用记录，领域仓库维护对象/上传/配额和设备 operation，S3 只保存字节。对象、上传与平台 Context 固定绑定不可变 `backendId`；active 后端只影响新建操作，不迁移旧数据。SK 吊销每次读权威记录即时生效，Redis/搜索/缓存不能成为授权真源。
 
@@ -98,6 +99,8 @@ Mailbox 与 WebSocket 解耦：前者经 HTTP 主动 claim/renew/complete，后�
 ## Topic 导航
 
 契约与安全见 `protocol/`;宿主装配与 provider 编排见 `app-runtime/`;部署级 default Store 当前契约见 `store/`;搜索索引见 `search/`;插件见 `plugins/`;设备 realtime 会话见 `device/websocket-sessions.mdx`，durable pull ledger 见 `device/durable-mailbox.mdx`;部署与宿主产物见 `hosts-deploy/`;CLI 契约见 `cli/`;Dashboard 见 `dashboard/`;发布与验证纪律见 `release/`。
+
+事件主题的发布、游标续读和 webhook 见 [持久事件主题](events/durable-topics.mdx)。
 
 ## 基础设施选型约定
 

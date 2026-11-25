@@ -1,0 +1,59 @@
+---
+description: "PG 持久事件 topic、pub/sub/wait 游标与保留、events/v1 GitHub webhook 验签及 MCP 更新通知。"
+kind: architecture
+relations:
+  related:
+    - protocol/htbp-contract.mdx
+    - app-runtime/mcp-interop.mdx
+    - plugins/plugin-runtime.mdx
+    - hosts-deploy/state-store-decision.mdx
+code:
+  paths:
+    - packages/core/src/events.ts
+    - packages/core/src/protocol/eventWire.ts
+    - packages/core/src/plugin/eventSource.ts
+    - packages/app/src/events.ts
+    - packages/app/src/helpModel.ts
+    - packages/app/src/registryMutation.ts
+    - packages/app/src/routes/eventWebhook.ts
+    - packages/app/src/mcpTopics.ts
+    - packages/server/src/pgEventRepository.ts
+    - packages/cli/src/commands/events.ts
+    - packages/cli/src/commands/integration.ts
+    - packages/sdk/src/client/client.ts
+    - packages/dashboard/src/pages/EventsPage.tsx
+    - packages/plugins/src/github_events/index.ts
+    - packages/server/test/events.integration.test.ts
+    - packages/server/test/eventSources.integration.test.ts
+---
+
+# 持久事件主题
+
+`kind:topic` 是注册树中有独立生命周期的事件流。标准 Node 网关用 PostgreSQL 持久化事件、幂等回执和主题代际。主题注册与代际在同一数据库事务里变化。删除、重建或修改来源绑定会开始新代际，旧游标不能跨代接续。嵌入宿主须装配 `EventRepository` 才能启用主题数据面。设备 hello 不接受 topic。
+
+## 发布、追读与等待
+
+```sh
+tb topic create project/builds
+tb sub project/builds
+tb pub project/builds --type build.completed --data-file result.json --idempotency-key build-42
+tb wait project/builds --after "$cursor" --timeout 30s
+```
+
+先启动订阅再发布，或者从此前保存的游标恢复。主题管理需要目标路径 `admin` 和常规注册权限。普通 topic 发现 `publish` 和 `read`，分别要求主题路径的 `write` 和 `read` scope。发布也须通过主题可见性检查。直接 HTTP 使用 `POST /<topic>/publish` 与 `POST /<topic>/read`，或使用 SDK `client.events.create/publish/read`。Dashboard 的 Events 页提供主题入口。绑定来源的主题只向调用方披露 `read`，即使持有 `write` 也不能手动追加。
+
+普通主题卸载走 Registry delete，例如 `tb call system/registry/delete '{"path":"project/builds"}'`。绑定来源的主题也可用 `tb integration rm <path>` 卸载。卸载同时移除该主题的持久事件和回执。
+
+- 省略 `after` 时从当前尾部开始。需要后续追读时保存 `nextCursor`，流式消费者也可在处理成功后保存该条事件的 `cursor`。读取游标绑定主题、代际和精确 `type` 过滤条件。发布回执的游标适用于无过滤的读取。
+- `tb sub` 每行输出一个 JSON 事件，可用 `--after` 续读。`tb wait` 返回首条匹配事件或结束信息，超时退出 `2`。两者发现 `gap` 都退出 `3`。`gap.earliestCursor` 可用来显式从最早可用位置继续，已丢数据由调用方决定如何补偿。读取不会领取、确认或删除事件，多消费者各自推进游标。
+- 单次读取最多 100 条，服务端 long poll 最多 30 秒。同一 key 跨副本最多同时 8 个等待。单条事件上限 16 KiB，每主题最多保留 4,096 条且可读窗口至多 24 小时。发布成功表示记录已提交。24 小时内同一主题代际、同一发布 key 的幂等键与相同内容复用首个回执，内容变化返回 `conflict`。回执可比被容量淘汰的事件活得更久。
+
+PG `LISTEN/NOTIFY` 只唤醒读取者，事件内容和读取位置始终从 PG 取得。long poll 在快照前监听、定期复查持久记录，并在响应前复核权限，因此丢失通知不丢已提交事件。MCP 提供同一主题的更新提示与回读入口，见 [MCP 事件主题](../app-runtime/mcp-interop.mdx#事件主题通知)。
+
+## Events/v1 与 GitHub webhook
+
+以 `tb integration add project/github --provider github_events --export pushes --credential github-hook` 挂载内置 GitHub 来源。`github-hook` 是 SecretStore 中与 GitHub webhook 一致的签名 secret，绑定还需要 `system/secret` admin。GitHub webhook 配置 JSON、Push events 和目标 `https://<gateway>/~hooks/project/github`。订阅使用 `tb sub project/github --type github.push`。
+
+`events/v1` 是 `plugin/v2` 的 export profile。`plugin.events` 声明允许转发给 verifier 的 header 和可入库的事件类型、版本与 data schema。ingress 接受至多 256 KiB 的 UTF-8 body，只交给 verifier 原始文本与声明的 headers。签名校验通过后，网关校验规范事件及其幂等键，在入库事务里复核当前来源绑定。验证器可返回 `null` 接受握手，成功或幂等重放返回 204。公开响应隐藏 verifier 内部错误与凭据。
+
+GitHub 来源验证 `X-Hub-Signature-256`，已签名的 ping 不入库。push 按 `github.push` v1 保存 `repository`、`ref`、`after`，其重投幂等键由已签名的原始正文导出。外部来源可在 `tb integration add` 显式指定 `--kind topic --export <id>`，签名凭据仍用独立的 `authRef`。

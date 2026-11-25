@@ -1,10 +1,11 @@
 ---
-description: PostgreSQL 唯一权威数据库：通用 StateStore 与 Store/Mailbox 窄领域仓库、JSONB 约束/事务、准确配额、lease 和 SDK 注入边界。
+description: PostgreSQL 唯一权威数据库：通用 StateStore 与 Store/Mailbox/Events 领域仓库、事务、配额、lease 和宿主注入边界。
 kind: reference
 relations:
   related:
     - store/default-store.mdx
     - device/durable-mailbox.mdx
+    - events/durable-topics.mdx
     - hosts-deploy/maintenance-and-keys.mdx
 code:
   paths:
@@ -26,9 +27,10 @@ code:
 
 | 边界 | 权威内容 | 约束 |
 |---|---|---|
-| `PgStateStore` | 节点、SK、加密 secret、通用配置/派生进度 | JSON KV 提供原子的 putIfAbsent/CAS；不缓存 SK 吊销 |
+| `PgStateStore` | 节点、SK、加密 secret、通用配置/派生进度 | JSON KV 提供原子的 putIfAbsent/CAS，Registry patch 与设备 presence 使用行级更新 |
 | `PgStoreRepository` | 对象、上传、幂等、call reservation、share、后端引用 | 多记录转换属于命名领域操作，事务不接受网络回调 |
 | `PgMailboxRepository` | durable operation 与 lease | pending 配额与 enqueue 同事务，领取/完成按身份、revision 和租约条件更新 |
+| `PgEventRepository` | 主题代际、事件与幂等回执 | 代际与 Registry binding 同事务维护，通知仅提示查阅 PG |
 | `PgSearchIndex` | 可重建搜索候选与 cursor revision | 不是授权真源，响应前仍 hydrate canonical state |
 | S3 | 对象字节与条件写 | backendId 固定，字节成功不等于业务对象已 ready |
 | Redis | 跨副本设备路由与瞬时通知 | 不保存唯一权限、operation 结果或对象元数据 |
@@ -41,4 +43,4 @@ Mailbox enqueue 用每设备 advisory transaction lock 保护准确 pending 计�
 
 Schema 创建/升级使用受 advisory lock 保护的 PG 事务；失败阻止业务就绪。新部署没有旧 KV/SQLite 导入、双写或兼容 keyspace。SDK 嵌入者必须显式注入所需领域仓库；测试内存实现不是生产持久层。
 
-详见 [Default Store](../store/default-store.mdx)、[Mailbox](../device/durable-mailbox.mdx)、[数据库维护](./maintenance-and-keys.mdx)。
+详见 [Default Store](../store/default-store.mdx)、[Mailbox](../device/durable-mailbox.mdx)、[持久事件主题](../events/durable-topics.mdx)、[数据库维护](./maintenance-and-keys.mdx)。

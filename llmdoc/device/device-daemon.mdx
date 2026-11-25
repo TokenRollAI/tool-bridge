@@ -71,14 +71,14 @@ profile 的单条 `commands[].session` 或 shell 的 `--shell-session-path` 显�
 
 `tb connect` 与 daemon 共用 `deviceRuntime` adapter。Device SDK 的 Mailbox processor 不自启；CLI 只在
 expose 含 `mailbox|both` command 时显式创建 processor,并让 realtime 与 Mailbox 复用同一份 live expose
-和 handler。初次连接及网络闪断后的每次 `ready` 都触发一次 `drain`；它不是常驻 polling timer。
+和 handler。初次连接和每次重连 ready 后启动串行的有界 `drain`。只要仍 ready，队列暂空后也会继续拉取，因此上线后才入队的操作无需等下次重连。
 
 CLI journal 是 installation-local 文件状态,按 gateway origin + deviceId 摘要隔离在本机配置目录下；目录和
 entry 权限分别为 `0700`/`0600`。`put` 以 fsync 临时文件、atomic rename、再 fsync 目录完成,保证 handler
 前的 `executing` barrier 跨进程崩溃持久化；过期 entry 会回收,损坏的 executing/terminal entry 必须保留,
 后续读取 fail closed,不能因无法解析就删除后重跑 handler。
 
-close/进程停止与 suspend 都 abort 当前 drain；resume 后由新的 `ready` 再启动 drain。非 abort 的 Mailbox
+临时断线暂停新批次，在途 HTTP lease 继续处理。永久 close 或进程停止取消轮询并 abort 当前 drain。非 abort 的 Mailbox
 错误进入前台 JSON/标准错误或 daemon journal,不能把 processor 失败当成连接已完成消费。完整状态机、lease
 与 journal replay 语义见 [durable-mailbox](durable-mailbox.mdx)。
 

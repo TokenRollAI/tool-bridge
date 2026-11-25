@@ -104,7 +104,8 @@ CLI 是公共控制面,不是 API 的宽松包装。修改命令时同时检查�
 - Store capability、签名 URL、headers 与 token 不进入错误/stderr。唯一例外是用户明确执行
   `store share`：成功 stdout/JSON 必须交付该次请求产生的短期 `$ref`，否则 share 命令没有可用产物；
   其他 Store 输出继续裁剪 bearer。
-- 删除资源只做命令名承诺的动作,并校验目标 kind:`integration rm` 只卸 tool/context 节点,打到 device 等其它 kind 即拒(走 `deleteNode(target, path, ['tool','context'])`)。集成卸载与密钥删除是两个显式操作。
+- `tb integration rm` 可卸 tool、Context 和已绑定来源的 topic，普通 topic 与 device 会被目标校验拒绝。卸载集成与删除密钥仍是两个显式操作。
+- `tb topic create`、`tb pub`、`tb sub` 与顶层 `tb wait` 使用 [事件游标与退出码](../events/durable-topics.mdx#发布追读与等待)。`tb device session wait` 使用设备进程终态与退出码，见 [进程会话](../device/process-sessions.mdx#消费者与验收)。
 - `tb search` 的 `--mode` 当前只接受 `keyword`；这是全局工具搜索 wire，不是可透传 `semantic` 的预留参数。Context provider 命令的 search mode 是另一协议面，不能用它扩宽 `tb search`。`tb search` 默认请求 compact discovery，`--json` 也不隐式下载 schema；只有 `--schemas` 才映射
   `detail:'full'`。`--federation local|recursive`、`--matching best|all`、`--min-coverage`、
   `--path-prefix` 与 repeatable `--effect` 必须原样下发 SDK wire；CLI 只做非法枚举/组合的早拒，不能

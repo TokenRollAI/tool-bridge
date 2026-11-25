@@ -316,6 +316,23 @@ tb ctx cat ctx/docs notes/readme.md
 
 Use `tb <command> --help` and [`packages/cli/README.md`](packages/cli/README.md) for the complete command surface.
 
+### Develop, install and upgrade a plugin
+
+Run `tb plugin init my-plugin`, then run `npm install --ignore-scripts` and `tb plugin dev` in that directory. In a second terminal, run the printed `source` command and try `tb call dev/actions/greet '{"name":"Ada"}'`. Saving a valid change reloads the local gateway and preserves its session key.
+
+The production gateway accepts HTTPS release manifests, exact npm versions and GitHub Releases containing a plugin manifest. Installation registers the plugin. Mount an export to make it visible in the tree. Use `tb plugin preview` to see which mounts an upgrade affects. [Deployment guide](deploy/compose/plugin-runner.md)
+
+### Subscribe to events
+
+Create a topic with `tb topic create project/builds`. Run `tb sub project/builds` in one terminal, then publish an event from another.
+
+```sh
+printf '%s\n' '{"build":42}' > build.json
+tb pub project/builds --type build.finished --data-file build.json
+```
+
+Use `tb wait project/builds --type build.finished --timeout 30s` to wait for the next matching event. Pass a saved cursor with `--after` to resume. You can also follow and publish from the Dashboard Events page.
+
 ### Connect a local machine to the tree
 
 `tb connect` opens an outbound WebSocket from the machine, so the gateway never needs inbound access to the private network. The shell denies every command by default; only explicitly allowlisted commands can run:

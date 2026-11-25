@@ -1,5 +1,5 @@
 ---
-description: MCP 固定入口与按需发现调用、CLI 能力对等、目标 schema 与结果保真、modern/legacy 上游互操作及入站客户端验证。
+description: MCP 固定入口与按需发现调用、事件资源 SSE 通知与空闲订阅权限复核、目标 schema 和结果保真、modern/legacy 互操作。
 kind: guide
 relations:
   requires:
@@ -12,6 +12,7 @@ code:
     - packages/plugins/src/feishu/feishuMcp.ts
     - packages/app/src/providers/mcp.ts
     - packages/app/src/mcpServer.ts
+    - packages/app/src/mcpTopics.ts
     - packages/app/src/mcpInvoke.ts
     - packages/app/src/jsonSchemaValidator.ts
     - packages/app/src/routes/mcp.ts
@@ -74,6 +75,14 @@ gateway 明确判断 `not_dispatched` 时入队；设备业务错误属于 compl
 工具调用即可请求 fallback，同时避免 Agent 在 MCP 层 call 失败后再猜测是否 enqueue。
 返回的 operation 通过 `tb_device_operations` 查询、分页或取消，复用 owner/admin 授权。设备身份必须使用
 原始 `deviceId`；claimed cancel 只是协作式请求，result_unknown 或可能执行过的 expired 都不证明重试安全。
+
+## 事件主题通知
+
+装配事件仓库的 `/~mcp` 在 2026-07-28 modern 协议提供 `tb-event://topics/{+path}` 资源模板。已知 topic 路径可直接构造 URI，路径段分别编码。`resources/list` 保持空列表，`resources/read` 返回 `{path,cursor,readCommand}`，其中 cursor 位于当前尾部。2025 兼容入口继续使用单次 JSON 响应。
+
+以 `subscriptions/listen` 打开 SSE，在 `notifications.resourceSubscriptions` 传入 1–16 个主题 URI。每个网关副本对同一 key 最多保留 8 个活跃流，单流最长 10 分钟。网关在发送更新前即时复核相应主题的 read 权限，空闲时每 15 秒复核所有订阅主题。权限失效、主题消失或网关关停时会关闭流。
+
+`notifications/resources/updated` 只带 URI，可以合并或丢失。客户端持久化自己的游标，连接或重连后用 `tb_call` 调给定 `readCommand` 补读，之后收到提示继续读取。长时间无提示仍可按需补读。游标、保留和 gap 规则归 [持久事件主题](../events/durable-topics.mdx)。
 
 ## 互操作边界
 

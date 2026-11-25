@@ -1,5 +1,5 @@
 ---
-description: 设计新 plugin 与迁移旧 connector 的可重跑流程:descriptor 规则、provider HTTP 分类与例外审核、schema normalizer 单一真源及三道闸门。
+description: tb plugin init/dev 本地开发与热重载、plugin descriptor 规则、旧 connector 迁移与等价/形状/wire 闸门。
 kind: guide
 relations:
   requires:
@@ -7,6 +7,10 @@ relations:
 code:
   paths:
     - packages/plugin-sdk/src/index.ts
+    - packages/cli/src/commands/pluginAuthor.ts
+    - packages/cli/src/plugin-dev/session.ts
+    - packages/cli/src/plugin-dev/gateway.ts
+    - packages/cli/src/plugin-dev/worker.ts
     - packages/plugins/src/registry.ts
     - packages/plugins/src/_runtime/authedClient.ts
     - packages/plugins/scripts/migrate/normalizeSchema.mjs
@@ -16,7 +20,20 @@ code:
 
 # Plugin 设计与迁移
 
-先读 [plugin-runtime.mdx](plugin-runtime.mdx)。plugin 和宿主同进程同权，安全边界必须由运行时保证，不能依赖 provider 作者自觉。
+先读 [插件运行时](plugin-runtime.mdx)。内置 plugin 与 gateway 同进程同权。外部分发和本地 dev 各有进程边界，适用各自的运行限制。
+
+## 本地开发与热重载
+
+```sh
+tb plugin init notes
+cd notes
+npm install --ignore-scripts
+tb plugin dev
+```
+
+`init` 生成 Node 项目、宿主入口、Dockerfile 和 release 清单示例。`dev` 按 `package.json#main` 加载默认导出的 `fetch(request, env)`，启动独立 loopback 网关。按输出在第二个终端执行 `source`，从私有临时文件取得当前会话 URL 和 SK，再用 `tb tree dev`、`tb help dev/actions` 和 `tb call dev/actions/greet '{"name":"Ada"}'` 验证。会话退出清理凭据文件。已发布项目需要把示例清单中的地址和版本替换为真实制品。
+
+无必填凭据和挂载配置的 tool/Context 自动挂在 `dev/<export-id>`。其余 tool/Context 用 `--provider dev --export <id>` 手动挂载，保存后会重建挂载，网关的会话凭据与 secrets 在内存中保留。热重载先验证候选，失败时上一版继续服务。修改依赖后需重启。events export 需有事件仓库的网关绑定并验证。开发 worker 使用收窄后的环境，仍以本机用户权限执行，只加载可信源码。
 
 ## descriptor 规则
 
@@ -25,6 +42,7 @@ code:
 - 密钥写入 SecretStore，由节点 `authRef` 引用；`providerConfig` 只放会被管理面回显的非敏感配置。
 - `~describe` 必须纯内存、无凭证、无网络，以便生成 catalog。
 - 内置 plugin 同时提供 handler binding 与 catalog 描述；标准宿主直接挂载，不写运行时注册记录。
+- Webhook 来源用 `plugin.events` 声明 `events/v1`、签名 header 与事件 schema，验签与入库边界见 [持久事件主题](../events/durable-topics.mdx#eventsv1-与-github-webhook)。
 
 ## 运行时下界
 

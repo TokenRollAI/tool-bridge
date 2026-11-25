@@ -26,6 +26,8 @@ code:
     - packages/app/src/deviceHello.ts
     - packages/app/src/deviceLifecycle.ts
     - packages/server/src/deviceHub.ts
+    - packages/core/src/tree/registry.ts
+    - packages/server/src/pgStateStore.ts
     - packages/server/src/deviceRouter.ts
     - packages/sdk/src/device/connection.ts
     - packages/sdk/src/device/storeUpload.ts
@@ -47,9 +49,11 @@ Node 的 `DeviceHub` 持有活 WebSocket、连接 generation 与本进程 call �
 ## 不变量
 
 - 设备帧使用 core 稳定 codec，ping/pong 字面量由共享常量产生；socket 生命周期驱动心跳与在线状态。
-- `lastSeenAt` 与 TTL 只在发现投影中把过期 online 降级为 stale，读路径绝不回写下线；权威 online 由连接生命周期维护。
+- `lastSeenAt` 与 TTL 只在发现投影中把过期 online 降级为 stale，读路径绝不回写下线。Node 的 WS pong 以原子行更新单调推进 `lastSeenAt`，保留在线位、配置与 `updatedAt`。晚于删除的心跳不会重建节点，心跳也不会使搜索审计快照失效。
 - close/error、替换连接、孤儿清扫与回收都须有 generation guard，旧连接不得覆盖新连接。启动 sweep 发现没有活 socket 的崩溃态时同步下线 registry。
-- `deviceLifecycle.ts` 统一调用前 keyId/registerPaths/保留根重验、断线下线和“先标记 search 脏 → 删 canonical 子树 → 清索引”的回收顺序。`deviceHello.ts` 在落库前拒绝规范化路径冲突，DeviceHub 不复制这些安全链。
+- `deviceLifecycle.ts` 统一调用前 keyId/registerPaths/保留根重验、断线下线和回收。先删除权威子树，再收敛派生索引。标准 Node 在写事务内推进搜索输入 revision，缺少该能力的宿主使用 dirty marker。`deviceHello.ts` 在落库前拒绝规范化路径冲突。
+
+设备回收以断线时间与 PG 已发布的 `deviceReclaimSec` 决定到期。配置发布后，副本重新安排已有定时器。定时器真正删除前仍查已发布值，延长后的保留窗会重新排期。只有仍有断线记录且没有活连接才继续，多副本路由查询失败时跳过当次删除。配置的发布与本地应用见 [受管理配置](../hosts-deploy/managed-configuration.mdx#pg-配置-revision-与真正生效)。
 
 ## 为什么保留 raw WebSocket
 

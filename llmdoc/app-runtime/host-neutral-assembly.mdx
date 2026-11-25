@@ -5,6 +5,7 @@ relations:
   related:
     - hosts-deploy/managed-configuration.mdx
     - device/durable-mailbox.mdx
+    - events/durable-topics.mdx
     - store/storage-backends.mdx
 code:
   paths:
@@ -39,7 +40,7 @@ code:
 
 ## 注入与 fail closed
 
-`TbAppDeps` 的基础依赖是 `state`、`secrets`、可选 `objects`、`device` 和 `search`。需要 Store 的宿主另注入 `storeRepository` 与 `storeBackends`；Mailbox 另需 `mailboxRepository` 与加密根/keyring。optional 表达可选能力，不是旧宿主兼容承诺；缺少领域依赖时相关功能 `unavailable`，不能退回 KV 或内存锁模拟事务。
+`TbAppDeps` 的基础依赖是 `state`、`secrets`、可选 `objects`、`device` 和 `search`。需要 Store 的宿主另注入 `storeRepository` 与 `storeBackends`，Mailbox 另需 `mailboxRepository` 与加密根/keyring。持久 topic、webhook ingress 和 MCP 事件资源由 `eventRepository` 启用。缺少领域依赖时相应能力不开放，宿主不能用普通 KV 或内存锁模拟领域事务。
 
 S3 类型 `S3StoreConfig` 可留在 app；实际 SDK/transport 由宿主 `s3Objects` 工厂提供。平台 `provider:'storage'` Context 使用 `defaultObjectBackend` 在注册时绑定 backendId，后续从 `objectStoreForBackend` 解析原身份，找不到不能偷偷用 active。直接 S3 Context 仍是显式独立连接；标准 Node AWS driver 没有 presigner，因此不广告 `direct-upload`，Context 二进制直传能力不能凭“配置了 S3”推断。
 

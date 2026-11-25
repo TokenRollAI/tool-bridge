@@ -1,14 +1,17 @@
 ---
-description: 全局工具搜索的 keyword-only 派生索引架构:`search`/`search:federated` capability、PG SQL/编排/driver 分工、canonical hydrate、cursor 和 PG 契约。
+description: 全局工具搜索的 keyword-only 派生索引、PG canonical revision 审计、index_capacity 部分结果、联邦与 cursor 契约。
 kind: architecture
 code:
   paths:
     - packages/core/src/search/types.ts
     - packages/core/src/search/sqlSearchIndex.ts
     - packages/core/src/search/pgSearchSql.ts
+    - packages/core/src/protocol/wire.ts
     - packages/core/test/search/searchIndex.fixture.ts
     - packages/server/src/pgSearchIndex.ts
     - packages/app/src/search/synchronizer.ts
+    - packages/app/src/search/localSearch.ts
+    - packages/app/src/search/federatedSearch.ts
 ---
 
 # 全局工具搜索
@@ -51,7 +54,7 @@ query preparation 为控制一次查询与候选物化成本保留明确硬上�
 ## 分层与一致性
 
 - 全局 Tool Search adapter 的 capability 集只有 `search` 与可选 `search:federated`；当前 query mode 固定为 `keyword`，wire 传入 `semantic` 在 strict schema 处拒绝。Context provider 的 search mode 是另一协议面，不属于该 capability 集。未来若实现 semantic，必须以新 capability + 新 wire 值与真实 adapter 同轮交付，不保留空档字段。
-- `SqlSearchIndex` 持 replace/rebuild、material-change、cursor/revision/分页编排；`pgSearchSql.ts` 统一 PG DDL、ILIKE 候选与固定 SQL；Node `SqlSearchDriver` 只提供数据库原语。没有可选方言参数、默认 SQLite 或后端特有查询预算钩子。
+- `SqlSearchIndex` 持 replace/rebuild、material-change、cursor/revision/分页编排。`pgSearchSql.ts` 统一搜索表 DDL、ILIKE 候选与固定 SQL。Node 的 `PgSearchIndex` 负责 PG canonical 输入快照的事务审计。
 - PG SQL 必须把返回值归一到 core 契约。postgres.js 把 `bigint`/`COUNT(*)` 返回字符串、`EXISTS` 返回 boolean，不显式转换不会类型报错，而是静默错行为（revision 违反公开类型、空快照 no-op 判定失效并白失效 cursor）。
 - 节点容量判定依赖 `COUNT(*)`，本身不加锁；有并发写的后端须自行串行化 mutation（PG 走事务级 advisory lock）。
 - Search 专属默认 limit 为 10、最大 200；adapter batch 最大 100。local cursor v2 是 AES-GCM sealed offset，绑定 query、固定 `keyword` mode、revision、`keyword-v2` ranking epoch，以及 normalized matching/floor/path/effect fingerprint；limit/detail 不改变候选集合，不进入 fingerprint。篡改、旧 revision/ranking/filter 或越界 cursor 都 fail closed。保留 mode 绑定是 cursor 版本化防御，不表示当前存在可插拔 semantic adapter。
@@ -59,8 +62,9 @@ query preparation 为控制一次查询与候选物化成本保留明确硬上�
 ## Schema v5 与派生状态恢复
 
 - 活动派生表是 `tb_search_tools_v5`、`tb_search_meta_v5`、`tb_search_snapshots_v5`；tools 的 effect 列有四态 `CHECK`。PG 保留 snapshots 容量触发器，不需要扩展。
-- 新 meta 初始未 seeded 且生成 cursor secret，首次 ensureReady 从 canonical state 全量审计重建。索引是派生数据，不提供旧数据库导入或双写；cursor 失效后从无 cursor 的同一 query 重试。
-- registry/provider 变化触发增量重建或 canonical audit。索引失败不能破坏工具调用权威路径；最后已知可用索引可继续服务，但 hydrate 仍会排除已删除或无权节点。
+- 标准 Node 用 PG 输入 revision 标识 Registry、工具清单和 feedback 的已提交变化。单纯 `lastSeenAt` 或清单缓存续期不推进 revision。相同 revision 在副本内复用已审计的树快照，发生变更时在同一事务中读取权威输入并重建派生表。索引查询的 cursor revision 仍由实际索引内容变化推进，cursor 失效时重发同一查询并省略 cursor。
+- 根快照超出 canonical audit 容量时保留最后可用索引，避免按路径取前 N 条并覆盖完整投影。local 与 recursive 搜索通过 `partial:true` 和根来源 `index_capacity` 提示覆盖受限。复核仍过滤已删除或越权结果，正常调用继续访问权威节点。未提供事务 revision 的嵌入宿主仍需逐次审计。
+- 联邦续页绑定容量状态。即使库里的索引内容因溢出保持原样，进入或退出容量受限状态也会使旧联邦游标失效。
 
 ## 对等验收
 

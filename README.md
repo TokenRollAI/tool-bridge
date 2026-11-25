@@ -325,6 +325,23 @@ URL。从 Dashboard 直传时还要为 Dashboard origin 配置 bucket CORS。
 
 完整参数以 `tb <command> --help` 和 [`packages/cli/README.md`](packages/cli/README.md) 为准。
 
+### 开发、安装和升级插件
+
+用 `tb plugin init my-plugin` 生成可运行的示例。在目录里执行 `npm install --ignore-scripts` 和 `tb plugin dev`，再在另一个终端运行它打印的 `source` 命令。现在可以调用 `tb call dev/actions/greet '{"name":"Ada"}'`。修改源码后，开发网关会自动载入通过检查的版本，已有终端继续使用同一把密钥。
+
+生产网关接受托管清单、固定 npm 版本和附带清单的 GitHub Release。安装会注册插件，挂载以后，调用方才会在树上看到它。升级前可用 `tb plugin preview` 查看受影响的挂载。镜像部署和凭证配置见[插件分发指南](deploy/compose/plugin-runner.md)。
+
+### 订阅事件
+
+先用 `tb topic create project/builds` 创建主题。在一个终端运行 `tb sub project/builds`，再从另一个终端发布事件。
+
+```sh
+printf '%s\n' '{"build":42}' > build.json
+tb pub project/builds --type build.finished --data-file build.json
+```
+
+只需要等一次时，用 `tb wait project/builds --type build.finished --timeout 30s` 等下一条匹配事件。已有游标可用 `--after` 续读。Dashboard 的「事件」页面也能跟随和发布。
+
 ### 把本地机器接入树
 
 Linux + systemd 上优先用 `tb daemon install`：它会安装用户级服务、启用 login linger、开机
