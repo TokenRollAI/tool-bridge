@@ -223,7 +223,10 @@ jobs:
             # npm publish 成功不等于 registry CDN 已能安装。等精确版本
             # 可见再发下一包，否则 server 会在 dashboard 传播窗口内失败。
             REGISTRY_READY=false
-            for _ in $(seq 1 36); do
+            # npm 已接受的版本可能要数分钟才进入安装索引。
+            REGISTRY_WAIT_SECONDS=600
+            DEADLINE=$((SECONDS + REGISTRY_WAIT_SECONDS))
+            while (( SECONDS < DEADLINE )); do
               if [ "$(registry_state "$PACKAGE_NAME" "$VERSION")" = 'present' ]; then
                 REGISTRY_READY=true
                 break
@@ -231,7 +234,7 @@ jobs:
               sleep 5
             done
             if [ "$REGISTRY_READY" != true ]; then
-              echo "$PACKAGE_NAME@$VERSION 发布 workflow 已成功，但 registry 180s 内仍不可见" >&2
+              echo "$PACKAGE_NAME@$VERSION 发布 workflow 已成功，但 registry ${REGISTRY_WAIT_SECONDS}s 内仍不可见" >&2
               exit 1
             fi
             echo "::endgroup::"
