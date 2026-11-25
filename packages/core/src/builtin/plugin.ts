@@ -21,6 +21,7 @@ import { z } from 'zod/v4'
 import type { SecretStoreImpl } from '../secret/secretStore'
 import type { SKRegistryStore } from '../auth/sk'
 import type { BuiltinModule } from './types'
+import { createDistribution, type Distribution, type DistributionDeps, installInput, type ManagedPlugin, manifestOf, previewInput, upgradeInput } from './pluginDistribution'
 import { type PluginDescribe, type PluginExport, validatePluginContract } from '../plugin/contract'
 import { KEY_PLUGIN, KEY_PLUGIN_HEALTH, KEY_PLUGIN_META, type StateStore } from '../store'
 import {
@@ -34,8 +35,8 @@ import {
 } from '../plugin/manifest'
 import { BuiltinCommandRegistry } from './commandRegistry'
 import { LIST_OPTS_ZOD_SCHEMA, VOID_ACK } from './util'
+import { assertSecretRefUse } from '../auth/secretRef'
 import { TBError } from '../errors'
-import { omit } from '../omit'
 
 const DESCRIPTION
   = 'Plugin registry: register / probe external tool & context providers, then mount them via system/registry (admin only)'
@@ -62,11 +63,7 @@ export interface PluginHealthRecord {
  * `plugin:<id>` 的落盘形状:规范 manifest + 平台内部的 tokenSkId
  * (platform-token 所 mint SK 的 id,供换发/注销时吊销)。get/list 投影时剥离。
  */
-type StoredPlugin = PluginManifest & { tokenSkId?: string }
-
-function projectManifest(record: StoredPlugin): PluginManifest {
-  return omit(record, 'tokenSkId')
-}
+type StoredPlugin = PluginManifest & Partial<ManagedPlugin> & { tokenSkId?: string }
 
 /**
  * 管理面投影:manifest + 注册时缓存的 `~describe.exports`。
@@ -78,6 +75,7 @@ function projectManifest(record: StoredPlugin): PluginManifest {
  * 不另起真源。注册记录缺 meta 属于损坏状态，读操作响亮失败。
  */
 export interface PluginView extends PluginManifest {
+  distribution?: Distribution
   exports: PluginExport[]
 }
 
@@ -86,7 +84,7 @@ export interface PluginRegistration extends PluginView {
   pluginToken?: string
 }
 
-export interface PluginModuleDeps {
+export interface PluginModuleDeps extends DistributionDeps {
   /** 放行 http:// endpoint(仅本地开发;宿主按 env `TB_ALLOW_INSECURE_HTTP=true` 注入)。 */
   allowInsecureHttp?: boolean
   /** 抓 `/~describe`(带 Accept: application/json);失败抛 TBError(原样透传)。 */
@@ -101,7 +99,7 @@ export interface PluginModuleDeps {
   store: StateStore
 }
 
-interface PluginCommandService {
+interface PluginCommandService extends ReturnType<typeof createDistribution> {
   get(id: string): Promise<unknown>
   health(id: string): Promise<unknown>
   list(opts?: { cursor?: string, limit?: number }): Promise<unknown>
@@ -138,6 +136,25 @@ const pluginPatchSchema = z.strictObject({
 }).describe('fields to change; same shape as write, all optional')
 
 const COMMANDS = new BuiltinCommandRegistry<PluginCommandService>('plugin', DESCRIPTION)
+  .register('install', {
+    h: 'Install a hosted or digest-pinned release after validating its candidate',
+    scope: 'admin', inputSchema: installInput, returns: 'PluginView',
+  }, (input, { deps, call }) => {
+    assertSecretRefUse(call.scopes, { authRef: input.secretRef })
+    return deps.install(input, call.keyId)
+  })
+  .register('preview', {
+    h: 'Preview export changes and readable mounts without switching traffic; a pinned OCI candidate is started or reused',
+    scope: 'admin', inputSchema: previewInput, returns: 'PluginUpgradePreview',
+  }, (input, { deps, call }) => deps.preview(input, call.scopes, call.keyId))
+  .register('upgrade', {
+    h: 'Validate and switch to a new release, or refresh the current release',
+    scope: 'admin', inputSchema: upgradeInput, returns: 'PluginView',
+  }, (input, { deps, call }) => deps.upgrade(input, call.scopes, call.keyId))
+  .register('rollback', {
+    h: 'Check and restore the previous installed release',
+    scope: 'admin', inputSchema: z.strictObject({ id: pluginIdSchema, digest: z.string().regex(/^sha256:[0-9a-f]{64}$/).optional() }), returns: 'PluginView',
+  }, ({ id, digest }, { deps, call }) => deps.rollback(id, call.scopes, digest))
   .register(
     'list',
     {
@@ -225,7 +242,7 @@ export function createPluginModule(deps: PluginModuleDeps): BuiltinModule {
 
   /** manifest + `pluginmeta:<id>` 里缓存的 exports。 */
   async function view(record: StoredPlugin): Promise<PluginView> {
-    const describe = (await store.get(KEY_PLUGIN_META + record.id)) as PluginDescribe | null
+    const describe = record.describe ?? (await store.get(KEY_PLUGIN_META + record.id)) as PluginDescribe | null
     if (describe === null) {
       throw new TBError(
         'unavailable',
@@ -233,7 +250,7 @@ export function createPluginModule(deps: PluginModuleDeps): BuiltinModule {
         { retryable: false },
       )
     }
-    return { ...projectManifest(record), exports: describe.exports }
+    return { ...manifestOf(record), exports: describe.exports, ...(record.distribution ? { distribution: record.distribution } : {}) }
   }
 
   /** 吊销上一代 platform-token(换发/注销/切到 bearer 时;SK 删除幂等)。 */
@@ -279,6 +296,7 @@ export function createPluginModule(deps: PluginModuleDeps): BuiltinModule {
 
     // platform-token:mint SK(owner plugin:<id>,scopes 空)+ 明文存保留名;重注册换发并吊销上一代。
     const existing = await read(manifest.id)
+    if (existing?.distribution) throw new TBError('conflict', 'use plugin upgrade for an installed release')
     if (existing) await revokeToken(existing)
     let pluginToken: string | undefined
     let tokenSkId: string | undefined
@@ -299,7 +317,11 @@ export function createPluginModule(deps: PluginModuleDeps): BuiltinModule {
       ...manifest,
       ...(tokenSkId !== undefined ? { tokenSkId } : {}),
     }
-    await store.put(KEY_PLUGIN + manifest.id, record)
+    if (!existing && store.putIfAbsent) {
+      if (!await store.putIfAbsent(KEY_PLUGIN + manifest.id, record)) throw new TBError('conflict', 'plugin registered concurrently')
+    } else {
+      await store.put(KEY_PLUGIN + manifest.id, record)
+    }
 
     return {
       ...manifest,
@@ -316,7 +338,14 @@ export function createPluginModule(deps: PluginModuleDeps): BuiltinModule {
     if (patch.id !== undefined && patch.id !== id) {
       throw new TBError('invalid_argument', 'id 不可通过 update 变更')
     }
-    const prev = projectManifest(existing)
+    if (existing.distribution) {
+      if (Object.keys(patch).some(k => k !== 'enabled'))
+        throw new TBError('invalid_argument', 'use plugin upgrade to change an installed release')
+      const record = { ...existing, enabled: typeof patch.enabled === 'boolean' ? patch.enabled : existing.enabled, revision: existing.revision! + 1 }
+      if (!await store.compareAndSwap?.(KEY_PLUGIN + id, existing.revision!, record)) throw new TBError('conflict', 'plugin changed')
+      return view(record)
+    }
+    const prev = manifestOf(existing)
     // merge 后整体重校验(protocolVersion 合法性、endpoint https 强制照旧生效)。
     const merged = parsePluginManifest(
       { ...prev, ...patch },
@@ -380,6 +409,10 @@ export function createPluginModule(deps: PluginModuleDeps): BuiltinModule {
   async function remove(id: string): Promise<void> {
     const existing = await read(id)
     if (!existing) return // 幂等静默(与 sk.delete 同语义)
+    if (existing.distribution) {
+      if (!await store.compareAndSwap?.(KEY_PLUGIN + id, existing.revision!, null)) throw new TBError('conflict', 'plugin changed')
+      return
+    }
     await revokeToken(existing)
     await store.delete(KEY_PLUGIN + id)
     await store.delete(KEY_PLUGIN_HEALTH + id)
@@ -387,6 +420,7 @@ export function createPluginModule(deps: PluginModuleDeps): BuiltinModule {
   }
 
   return COMMANDS.module({
+    ...createDistribution(deps),
     async list(opts) {
       const listOpts: { cursor?: string, limit: number } = { limit: clampLimit(opts?.limit) }
       if (opts?.cursor !== undefined) listOpts.cursor = opts.cursor
@@ -403,7 +437,12 @@ export function createPluginModule(deps: PluginModuleDeps): BuiltinModule {
     update,
     remove,
     async health(id) {
-      const manifest = projectManifest(await require(id))
+      const installed = await require(id)
+      if (installed.distribution) {
+        const { healthy } = await deps.probe(installed)
+        return { id, healthy, checkedAt: now() }
+      }
+      const manifest = manifestOf(installed)
       const record = await probeAndRecord(manifest)
       return { id, healthy: record.healthy, checkedAt: record.checkedAt }
     },

@@ -717,7 +717,18 @@ describe('tb integration rm', () => {
     expect(bodies.some(b => b.name !== undefined)).toBe(false)
   })
 
-  it('拒绝卸载非 tool/context 节点(误删 device 节点的护栏)', async () => {
+  it.each([true, false])('only unmounts a topic with a bound event source (bound=%s)', async (bound) => {
+    const path = 'project/builds'
+    const topic = { path, kind: 'topic', ...(bound ? { config: { kind: 'topic', provider: 'github_events', export: 'pushes', authRef: 'signing' } } : {}) }
+    const calls = routedFetch([
+      { match: /system\/registry/, tool: 'get', body: topic },
+      { match: /system\/registry/, tool: 'delete', body: { ok: true } },
+    ])
+    await runCli(['integration', 'rm', path, ...base])
+    expect(calls.some(c => c.url.endsWith('/delete'))).toBe(bound)
+  })
+
+  it('拒绝卸载非集成节点(误删 device 节点的护栏)', async () => {
     const calls = routedFetch([
       { match: /system\/registry/, tool: 'get', body: { path: 'device/build-01', kind: 'device' } },
       { match: /system\/registry/, tool: 'delete', body: { ok: true } },

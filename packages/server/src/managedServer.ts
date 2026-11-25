@@ -36,6 +36,7 @@ import { KeyManager } from './keyManager'
 export interface ManagedServerOptions {
   directory: string
   host?: string
+  pluginRunnerSocket?: string
   port?: number
   uiDir?: string
 }
@@ -157,6 +158,7 @@ export async function createManagedServer(options: ManagedServerOptions) {
       },
       pluginBindings: builtinPluginBindings({}),
       pluginCatalog: BUILTIN_CATALOG,
+      pluginRunnerSocket: options.pluginRunnerSocket,
       ...(options.uiDir ? { uiDir: options.uiDir } : {}),
     })
     try {

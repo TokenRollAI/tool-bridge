@@ -25,6 +25,8 @@ import { acquireRuntimeLease, assertRuntimeAuthority, type RuntimeLease } from '
 import { runtimeAppSettings, type ServerConfig } from './config'
 import { RedisDeviceRouterBackend } from './redisDeviceRouter'
 import { PgMailboxRepository } from './pgMailboxRepository'
+import { pluginRunnerClient } from './pluginRunnerClient'
+import { PgEventRepository } from './pgEventRepository'
 import { DeploymentManager } from './deploymentManager'
 import { PgStoreRepository } from './pgStoreRepository'
 import pkg from '../package.json' with { type: 'json' }
@@ -84,6 +86,8 @@ export function createTbServer(config: ServerConfig): TbServer {
     config.instanceId ?? 'embedded',
   )
   const storeRepository = new PgStoreRepository(sql)
+  const eventRepository = new PgEventRepository(sql)
+  const eventStreamShutdown = new AbortController()
   const mailboxRepository = new PgMailboxRepository(sql)
   const storage = new StorageManager(sql, secrets, {
     ...(config.internalS3Origin
@@ -181,6 +185,7 @@ export function createTbServer(config: ServerConfig): TbServer {
     state,
     secrets,
     providerOAuthFetch,
+    ...(config.pluginRunnerSocket ? { preparePluginImage: pluginRunnerClient(config.pluginRunnerSocket) } : {}),
     version: pkg.version,
     remote: config.remote,
     search,
@@ -191,6 +196,8 @@ export function createTbServer(config: ServerConfig): TbServer {
     storeBackends: storage,
     storeRepository,
     mailboxRepository,
+    eventRepository,
+    eventStreamShutdown: eventStreamShutdown.signal,
     storageManagement: storage,
     deploymentManagement: deployment,
     ...(config.adminAudit ? { adminAudit: config.adminAudit } : {}),
@@ -266,6 +273,7 @@ export function createTbServer(config: ServerConfig): TbServer {
     if (maintenancePromise) return maintenancePromise
     const snapshot = deps
     maintenancePromise = (async () => {
+      await eventRepository.cleanup()
       await cleanupDefaultStore(snapshot)
       if (snapshot.encryptionKey !== undefined)
         await cleanupDeviceMailbox(snapshot)
@@ -343,11 +351,11 @@ export function createTbServer(config: ServerConfig): TbServer {
                 message: 'configuration authority unavailable',
               },
               503,
-            ), request.release)
+            ), request.release, c.req.raw.signal)
           }
         }
         const snapshot = currentApp
-        return trackResponseBody(await snapshot.fetch(c.req.raw), request.release)
+        return trackResponseBody(await snapshot.fetch(c.req.raw), request.release, c.req.raw.signal)
       } catch (error) {
         request.release()
         throw error
@@ -373,6 +381,7 @@ export function createTbServer(config: ServerConfig): TbServer {
 
       await storeRepository.ensureSchema()
       await state.ensureContextReferencesSchema()
+      await eventRepository.ensureSchema()
       await mailboxRepository.ensureSchema()
       await deployment.ensureSchema()
       await sql`CREATE TABLE IF NOT EXISTS tb_admin_audit (
@@ -481,6 +490,7 @@ export function createTbServer(config: ServerConfig): TbServer {
       // HTTP 排空、关后端。反过来(旧序:先杀 hub)会出现"设备通道已死、HTTP 还在收
       // 新请求"的窗口——期间到达的设备调用一律误报离线。
         draining = true
+        eventStreamShutdown.abort()
         if (maintenanceTimer !== undefined) {
           clearInterval(maintenanceTimer)
           maintenanceTimer = undefined
@@ -508,7 +518,7 @@ export function createTbServer(config: ServerConfig): TbServer {
           } finally {
             server = undefined
             storage.close()
-            await sql.end({ timeout: 5 })
+            await eventRepository.close().finally(() => sql.end({ timeout: 5 }))
           }
         }
       })()

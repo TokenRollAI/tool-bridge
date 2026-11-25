@@ -11,13 +11,17 @@ export default defineConfig({
   format: ['esm'],
   target: 'node22',
   clean: true,
+  splitting: false,
   minify: false,
   noExternal: [
+    '@hono/node-server',
+    '@tool-bridge/app',
     '@tool-bridge/core',
     '@tool-bridge/sdk',
     '@tool-bridge/sdk/client',
     '@tool-bridge/sdk/device',
     '@tool-bridge/sdk/store',
+    'chokidar',
   ],
   // CLI 是单文件产物。workspace 内直接从 SDK 源入口打包，避免把 SDK
   // 已内联的 core/zod 产物再嵌一遍；源码仍只能通过同一公开子入口导入。

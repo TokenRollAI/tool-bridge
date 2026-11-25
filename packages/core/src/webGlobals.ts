@@ -64,6 +64,7 @@ interface WebGlobals {
   TextEncoder: new () => { encode(input: string): Uint8Array }
   URL: new (value: string) => {
     hash: string
+    origin: string
     password: string
     protocol: string
     searchParams: WebUrlSearchParams

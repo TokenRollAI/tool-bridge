@@ -85,6 +85,7 @@ function joinTreePath(base: TreePath, rel: string): TreePath {
 function customNodeInput(mountPath: TreePath, deviceId: string, raw: DeviceNodeInput): NodeInput {
   const { cmds, ...rest } = raw
   const input = parseNodeInput({ ...rest, path: joinTreePath(mountPath, raw.path) })
+  if (input.kind === 'topic') throw new TBError('invalid_argument', 'devices cannot register event topics')
   const marker = { deviceId, mountPath, ...(cmds !== undefined ? { cmds } : {}) }
   if (input.kind === 'tool') {
     const base

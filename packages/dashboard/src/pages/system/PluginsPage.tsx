@@ -19,7 +19,7 @@ import {
 import { type ReactNode, useRef, useState } from 'react'
 import { Link } from 'react-router'
 import { toast } from 'sonner'
-import type { PluginExport, PluginHealth, PluginManifest } from '@/lib/types'
+import type { PluginExport, PluginHealth, PluginManifest, PluginProfile } from '@/lib/types'
 import {
   Dialog,
   DialogContent,
@@ -46,10 +46,15 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { EditPluginDialog, RegisterPluginDialog } from './forms/PluginFormDialogs'
+import { PluginReleaseDialog } from './forms/PluginReleaseDialog'
 import { BuiltinCatalog } from './BuiltinCatalog'
 
 /** profile → 挂载成哪种树节点（与 core NODE_KIND_BY_PROFILE 同一张表）。 */
-const NODE_KIND_BY_PROFILE = { 'tools/v1': 'tool', 'context/v1': 'context' } as const
+const NODE_KIND_BY_PROFILE = {
+  'tools/v1': 'tool',
+  'context/v1': 'context',
+  'events/v1': 'topic',
+} satisfies Record<PluginProfile, 'tool' | 'context' | 'topic'>
 
 /** export 徽标：`<id> · <profile>`。 */
 function ExportBadges({ exports }: { exports: PluginExport[] }) {
@@ -181,11 +186,13 @@ function PluginDetailsDialog({
   error,
   onClose,
   onEdit,
+  onReleaseApplied,
 }: {
   error?: string
   loading: boolean
   onClose: () => void
   onEdit: () => void
+  onReleaseApplied: (plugin: PluginManifest) => Promise<void>
   plugin: PluginManifest
 }) {
   const exports = plugin.exports ?? []
@@ -359,6 +366,9 @@ function PluginDetailsDialog({
               <ArrowUpRight />
             </Link>
           </Button>
+          {plugin.distribution && !loading && (
+            <PluginReleaseDialog onApplied={onReleaseApplied} plugin={plugin} />
+          )}
           <Button onClick={onEdit}>
             <Pencil />
             编辑 Manifest
@@ -385,7 +395,7 @@ export function PluginsPage() {
   const [changingEnabled, setChangingEnabled] = useState<string | null>(null)
   const [health, setHealth] = useState<Record<string, HealthView>>({})
 
-  // plugin 启用/禁用/注销会改变工具树的解析结果,故一并失效 tree/help;仍限当前 profile。
+  // 插件的可用状态和版本会影响能力树与帮助内容，按当前 profile 一起刷新。
   const refresh = () => invalidate('plugin-list', 'tree', 'help', 'helpMarkdown')
   const clearHealth = (id: string) => {
     setHealth((current) => {
@@ -394,6 +404,12 @@ export function PluginsPage() {
       delete next[id]
       return next
     })
+  }
+
+  const releaseApplied = async (plugin: PluginManifest) => {
+    setInspecting(current => current?.id === plugin.id ? plugin : current)
+    clearHealth(plugin.id)
+    await refresh()
   }
 
   const setEnabled = async (plugin: PluginManifest, enabled: boolean) => {
@@ -430,24 +446,29 @@ export function PluginsPage() {
   }
 
   const probe = async (plugin: PluginManifest) => {
-    setHealth(current => ({ ...current, [plugin.id]: { state: 'probing' } }))
+    const probing = { state: 'probing' } as const
+    setHealth(current => ({ ...current, [plugin.id]: probing }))
     try {
       const response = await invoke.mutateAsync({
         commandPath: 'system/plugin/health',
         args: { id: plugin.id },
       })
-      setHealth(current => ({
-        ...current,
-        [plugin.id]: { state: 'result', data: response.json as PluginHealth },
-      }))
+      setHealth(current => current[plugin.id] !== probing
+        ? current
+        : ({
+            ...current,
+            [plugin.id]: { state: 'result', data: response.json as PluginHealth },
+          }))
     } catch (error) {
-      setHealth(current => ({
-        ...current,
-        [plugin.id]: {
-          state: 'error',
-          message: error instanceof Error ? error.message : 'Plugin 健康检查失败',
-        },
-      }))
+      setHealth(current => current[plugin.id] !== probing
+        ? current
+        : ({
+            ...current,
+            [plugin.id]: {
+              state: 'error',
+              message: error instanceof Error ? error.message : 'Plugin 健康检查失败',
+            },
+          }))
     }
   }
 
@@ -479,21 +500,22 @@ export function PluginsPage() {
   return (
     <div className="mx-auto w-full max-w-7xl px-4 py-5 sm:px-6 sm:py-6 lg:px-8 lg:py-8">
       <PageHeader
-        actions={<RegisterPluginDialog onRegistered={id => clearHealth(id)} onToken={setToken} />}
+        actions={(
+          <>
+            <PluginReleaseDialog onApplied={releaseApplied} />
+            <RegisterPluginDialog onRegistered={id => clearHealth(id)} onToken={setToken} />
+          </>
+        )}
         description={(
           <>
-            注册自定义 Provider，验证远端契约，再到
+            从发布源安装插件，也可以手动注册已有服务。要把插件导出加到能力树，请前往
             <Link
               className="mx-1 text-foreground underline underline-offset-3"
               to="/manage/registry"
             >
               节点注册
             </Link>
-            将它挂上能力树。管理能力与
-            {' '}
-            <code className="font-mono text-xs">tb plugin</code>
-            {' '}
-            命令面保持对等。
+            挂载。
           </>
         )}
         eyebrow="CONTROL PLANE / PROVIDERS"
@@ -570,8 +592,8 @@ export function PluginsPage() {
               )
             : items.length === 0
               ? (
-                  <EmptyState className="border-0" icon={Plug2} title="还没有注册任何 Plugin">
-                    <p>先注册实现 tool-provider 或 context-provider 契约的服务，再把它挂载成节点。</p>
+                  <EmptyState className="border-0" icon={Plug2} title="还没有已注册的插件">
+                    <p>从发布源安装插件，或手动注册已有服务。</p>
                   </EmptyState>
                 )
               : (
@@ -605,6 +627,9 @@ export function PluginsPage() {
                                 value={plugin.id}
                               />
                             </div>
+                            {plugin.distribution && (
+                              <p className="mt-1 font-mono text-xs text-muted-foreground">{plugin.distribution.active.version}</p>
+                            )}
                             <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
                               <ExportBadges exports={plugin.exports} />
                             </div>
@@ -761,6 +786,7 @@ export function PluginsPage() {
             closeDetails()
             setEditing(snapshot)
           }}
+          onReleaseApplied={releaseApplied}
           plugin={inspecting}
         />
       )}

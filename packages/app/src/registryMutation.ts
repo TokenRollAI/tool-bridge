@@ -12,19 +12,22 @@
 import {
   assertSecretRefUse,
   type CallContext,
+  check,
+  eventBindingSchema,
   isTBError,
   type NodeRegistryStore,
   type StateStore,
+  TBError,
   type TreePath,
 } from '@tool-bridge/core'
 import type { TbAppDeps } from './deps'
 import { assertContextConfig, assertSkillhubConfig, bindPlatformStorageConfig } from './contextNodes'
+import { assertPluginMountContract, assertToolConfig, requirePluginExport } from './toolNodes'
 import { assertRemoteConfigAllowed, resolveRemoteSettings } from './federation'
 import { assertMcpOAuthConfig, invalidateMcpOAuth } from './oauth'
 import { invalidateToolCache } from './providers/toolCache'
 import { invalidateProviderOAuth } from './providerOAuth'
 import { invalidateMcpEra } from './providers/mcp'
-import { assertToolConfig } from './toolNodes'
 import { assertRegisterPath } from './paths'
 
 export async function assertNodeConfigMutation(opts: {
@@ -33,6 +36,7 @@ export async function assertNodeConfigMutation(opts: {
   config: unknown
   ctx: CallContext
   deps: TbAppDeps
+  kind?: unknown
   registry: NodeRegistryStore
   targetPath: TreePath
 }): Promise<void> {
@@ -46,11 +50,30 @@ export async function assertNodeConfigMutation(opts: {
   assertSecretRefUse(ctx.scopes, config)
   // mcp oauthClient 的服务端权威校验:client secret 只能是 SecretStore 引用。
   await assertMcpOAuthConfig(config, deps.secrets)
+  const previous = await registry.get(targetPath).catch((error: unknown) => {
+    if (!isTBError(error) || error.code !== 'not_found') throw error
+    return undefined
+  })
+  if (opts.kind === 'topic' || previous?.kind === 'topic') {
+    if (!check(ctx, targetPath, 'admin').allow) throw new TBError('permission_denied', 'topic administration requires admin on the topic')
+    if (previous && opts.kind !== undefined && opts.kind !== previous.kind) {
+      throw new TBError('conflict', 'unmount the existing node before changing a topic binding')
+    }
+    if (action === 'write' && (opts.kind ?? previous?.kind) === 'topic') {
+      if (!deps.eventRepository) throw new TBError('unavailable', 'event repository is unavailable')
+      if (opts.kind === 'topic' && previous?.config !== undefined && config === undefined) {
+        throw new TBError('conflict', 'path is occupied by a bound event source')
+      }
+      if (config !== undefined) {
+        const parsed = eventBindingSchema.safeParse(config)
+        if (!parsed.success) throw new TBError('invalid_argument', 'invalid event source binding')
+        const binding = parsed.data
+        const { export: descriptor } = await requirePluginExport(deps, binding.provider, 'topic', 'topic', binding.export)
+        await assertPluginMountContract(descriptor, binding, deps)
+      }
+    }
+  }
   if (action === 'write') {
-    const previous = await registry.get(targetPath).catch((error: unknown) => {
-      if (!isTBError(error) || error.code !== 'not_found') throw error
-      return undefined
-    })
     await bindPlatformStorageConfig(config, previous?.config, deps)
   }
   // context 配置校验 + s3 连通探测:探测出站网络,须在权限判定之后。

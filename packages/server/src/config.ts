@@ -21,6 +21,7 @@ export interface ServerConfig extends Partial<RuntimeConfig> {
   objectStore?: S3StoreConfig
   pluginBindings?: PluginBindings
   pluginCatalog?: BuiltinCatalog
+  pluginRunnerSocket?: string
   port: number
   redisUrl?: string
   remote: RuntimeRemoteSettings

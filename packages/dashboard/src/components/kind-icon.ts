@@ -7,6 +7,7 @@ import {
   Globe,
   type LucideIcon,
   Plug,
+  Radio,
   Waypoints,
   Wrench,
 } from 'lucide-react'
@@ -14,6 +15,7 @@ import type { NodeKind } from '@/lib/types'
 
 /** kind → 图标 + 色相(与 KIND_STYLE 同一套色相编码;树导航与命令面板共用)。 */
 export const KIND_ICON: Record<NodeKind, { className: string, icon: LucideIcon }> = {
+  topic: { icon: Radio, className: 'text-cyan-400/80' },
   directory: { icon: Folder, className: 'text-muted-foreground/70' },
   builtin: { icon: Blocks, className: 'text-sky-400/80' },
   mcp: { icon: Plug, className: 'text-violet-400/80' },

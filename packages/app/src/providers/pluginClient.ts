@@ -29,6 +29,7 @@ import {
   TBError,
   type TBErrorCode,
 } from '@tool-bridge/core'
+import { readRemoteResponseBody } from './remote'
 
 /** 单次探活/抓取/调用超时(默认 30s)。 */
 const PLUGIN_TIMEOUT_MS = 30_000
@@ -84,6 +85,7 @@ async function pluginFetch(
   if (name === undefined) {
     return await fetch(resolvePluginEndpoint(manifest) + path, {
       ...init,
+      ...('distribution' in manifest ? { redirect: 'error' as const } : {}),
       signal: AbortSignal.timeout(PLUGIN_TIMEOUT_MS),
     })
   }
@@ -98,6 +100,16 @@ async function pluginFetch(
     ...init,
     signal: AbortSignal.timeout(PLUGIN_TIMEOUT_MS),
   }))
+}
+
+async function lifecycleJson(manifest: PluginManifest, response: Response): Promise<unknown> {
+  if (!('distribution' in manifest)) return response.json().catch(() => null)
+  try {
+    const bytes = await readRemoteResponseBody(response, 256 * 1024, AbortSignal.timeout(PLUGIN_TIMEOUT_MS))
+    return JSON.parse(new TextDecoder().decode(bytes))
+  } catch {
+    return null
+  }
 }
 
 /** GET {endpoint}{healthPath} → { healthy: true };网络失败/binding 未装配按 unhealthy 报告。 */
@@ -115,7 +127,7 @@ export async function probePlugin(
     return { healthy: false, detail: err instanceof Error ? err.message : String(err) }
   }
   if (!resp.ok) return { healthy: false, detail: `HTTP ${resp.status}` }
-  const body = (await resp.json().catch(() => null)) as { healthy?: unknown } | null
+  const body = (await lifecycleJson(manifest, resp)) as { healthy?: unknown } | null
   if (body?.healthy !== true) return { healthy: false, detail: 'body 非 {healthy:true}' }
   return { healthy: true }
 }
@@ -155,12 +167,32 @@ export async function fetchPluginContract(
   bindings?: PluginBindings,
 ): Promise<{ describe: unknown }> {
   const describeResp = await fetchLifecycle(manifest, bindings, '~describe')
-  const describe = (await describeResp.json().catch(() => null)) as unknown
+  const describe = (await lifecycleJson(manifest, describeResp)) as unknown
   if (describe === null) {
     throw new TBError('invalid_argument', `plugin '${manifest.id}' 的 ~describe 非 JSON`)
   }
   // v2 起不再抓 ~help:export 在 describe 里自报 methods,少一次上游往返。
   return { describe }
+}
+
+// This handshake never invokes a business method or includes mount/upstream credentials.
+export async function verifyReleaseAuth(manifest: PluginManifest, secrets: SecretStoreImpl): Promise<void> {
+  if (manifest.auth.kind !== 'bearer') throw new TBError('invalid_argument', 'installed plugins require a bearer secret')
+  const token = await secrets.resolve(manifest.auth.secretRef)
+  if (!token) throw new TBError('invalid_argument', 'plugin bearer secret unavailable')
+  const endpoint = resolvePluginEndpoint(manifest) + '/~auth'
+  const probe = (headers: Record<string, string>) => fetch(endpoint, {
+    method: 'HEAD', redirect: 'error', headers, signal: AbortSignal.timeout(PLUGIN_TIMEOUT_MS),
+  })
+  try {
+    // The negative control also rejects a plugin configured to accept any nonempty bearer.
+    const denied = await probe({ authorization: 'Bearer tb-probe-' + crypto.randomUUID() })
+    if (denied.status !== 401 && denied.status !== 403) throw new Error()
+    const accepted = await probe({ authorization: 'Bearer ' + token })
+    if (accepted.status !== 204 || accepted.headers.get('x-tb-plugin-auth') !== 'plugin/v2') throw new Error()
+  } catch {
+    throw new TBError('unavailable', 'candidate failed the HEAD /~auth bearer check')
+  }
 }
 
 export interface PluginCallOptions {

@@ -1,4 +1,5 @@
 import { Command, type CommandUnknownOpts } from 'commander'
+import { pubCommand, subCommand, topicCommand, waitCommand } from './commands/events'
 import { configCommand, setupCommand, storageCommand } from './commands/management'
 import { integrationCommand } from './commands/integration'
 import { maintenanceCommand } from './commands/maintenance'
@@ -98,6 +99,10 @@ Operational feedback (when troubleshooting):
   program.addCommand(helpCommand())
   program.addCommand(toolCommand())
   program.addCommand(serverCommand())
+  program.addCommand(topicCommand())
+  program.addCommand(pubCommand())
+  program.addCommand(subCommand())
+  program.addCommand(waitCommand())
   program.addCommand(callCommand())
   program.addCommand(ctxCommand())
   program.addCommand(storeCommand())

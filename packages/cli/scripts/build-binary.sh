@@ -18,5 +18,6 @@ mkdir -p "$tb_package_dir/binary"
 cd "$tb_build_dir"
 bun build "$tb_package_dir/dist/index.js" \
   --compile \
+  --compile-autoload-package-json \
   --minify \
   --outfile "$tb_package_dir/binary/tb"

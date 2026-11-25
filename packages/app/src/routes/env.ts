@@ -53,6 +53,7 @@ export function createRouteEnv(deps: TbAppDeps): RouteEnv {
         secrets: deps.secrets,
         version: deps.version,
         allowInsecureHttp: deps.allowInsecureHttp,
+        preparePluginImage: deps.preparePluginImage,
         remoteAllowlistBase: deps.remote.allowlist,
         ...(deps.pluginBindings !== undefined ? { pluginBindings: deps.pluginBindings } : {}),
         ...(deps.pluginCatalog !== undefined ? { pluginCatalog: deps.pluginCatalog } : {}),

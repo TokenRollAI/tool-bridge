@@ -61,6 +61,7 @@ import {
   type ToolSpec,
   toToolResult,
 } from '@tool-bridge/core'
+import { z } from 'zod/v4'
 
 /**
  * 作者面必需的错误原语:handler 里 `throw TBError.notFound(...)` 即得到平台归一后的
@@ -205,8 +206,23 @@ interface ProxyToolsExportState<Env> {
   kind: 'proxyTools'
 }
 
+export interface EventHandlers<Env> {
+  description?: string
+  headers: string[]
+  types: Record<string, { schema: z.ZodType, version: number }>
+  /** Verify the original signed UTF-8 body before parsing it. Null acknowledges a signed, ignored event. */
+  verify: (input: { headers: Record<string, string>, rawBody: string }, ctx: PluginCallContext<Env>) =>
+  Promise<{ data: unknown, idempotencyKey: string, subject?: string, type: string } | null>
+}
+interface EventExportState<Env> {
+  handlers: EventHandlers<Env>
+  id: string
+  kind: 'events'
+}
+
 type ExportState<Env>
-  = | ContextExportState<Env>
+  = | EventExportState<Env>
+    | ContextExportState<Env>
     | ProxyToolsExportState<Env>
     | ToolsExportState<Env>
 
@@ -270,6 +286,7 @@ export interface ToolsExport<Env> {
 export interface Plugin<Env = unknown> {
   /** 声明一个 context export(handler 全可选)。 */
   context: (id: string, handlers: ContextHandlers<Env>) => Plugin<Env>
+  events: (id: string, handlers: EventHandlers<Env>) => Plugin<Env>
   /** Worker/Deno/Bun 入口。 */
   fetch: (request: Request, env: Env) => Promise<Response>
   /** 声明一个**代理型** tools export(工具表来自上游,运行时枚举)。 */
@@ -307,7 +324,7 @@ function contextVerbs<Env>(handlers: ContextHandlers<Env>): string[] {
  */
 function helpCmds<Env>(state: ExportState<Env>): Array<{ name: string }> {
   if (state.kind === 'tools') return state.registry.list()
-  if (state.kind === 'proxyTools') return []
+  if (state.kind === 'events' || state.kind === 'proxyTools') return []
   return contextVerbs(state.handlers).map(name => ({ name }))
 }
 
@@ -329,6 +346,14 @@ export function createPlugin<Env = unknown>(opts: CreatePluginOptions<Env> = {})
       exports: [...exports.values()].map((state) => {
         // 代理型与静态 tools 对外**同一形状**:export 是什么由 profile 说了算,
         // 至于工具表是声明期写死还是运行时枚举,是 plugin 的内部实现,平台不必知道。
+        if (state.kind === 'events') {
+          const { handlers } = state
+          return { id: state.id, profile: 'events/v1', description: handlers.description,
+            auth: { kind: 'single', label: 'Webhook signing secret', required: true },
+            eventSource: { headers: handlers.headers, types: Object.entries(handlers.types).map(([type, definition]) => ({
+              type, version: definition.version, dataSchema: z.toJSONSchema(definition.schema),
+            })) } }
+        }
         if (state.kind === 'tools' || state.kind === 'proxyTools') {
           return {
             id: state.id,
@@ -546,7 +571,7 @@ export function createPlugin<Env = unknown>(opts: CreatePluginOptions<Env> = {})
     const upstreamAuth = decodeUpstreamAuth(request)
     // 声明了多字段凭证就在这里解析一次:每个 handler 各自 JSON.parse 一遍是重复劳动,
     // 且各写各的校验会让"缺字段"的报错措辞不一致。解析失败 → invalid_argument(配置错)。
-    const credentialFields = state.kind === 'context' ? undefined : state.credentialFields
+    const credentialFields = state.kind === 'tools' || state.kind === 'proxyTools' ? state.credentialFields : undefined
     const ctx: PluginCallContext<Env> = {
       env,
       caller,
@@ -561,6 +586,18 @@ export function createPlugin<Env = unknown>(opts: CreatePluginOptions<Env> = {})
 
     const requestId = request.headers.get(HEADER_TB_REQUEST_ID)
     const run = async (): Promise<unknown> => {
+      if (state.kind === 'events') {
+        if (call.tool !== 'Verify' || !ctx.upstreamAuth) throw TBError.unauthenticated()
+        const parsed = z.strictObject({
+          rawBody: z.string(), headers: z.record(z.string(), z.string()),
+        }).safeParse(call.arguments)
+        if (!parsed.success) throw new TBError('invalid_argument', 'invalid webhook envelope')
+        const verified = await state.handlers.verify(parsed.data, ctx)
+        if (verified === null) return null
+        const definition = Object.hasOwn(state.handlers.types, verified.type) && state.handlers.types[verified.type]
+        if (!definition) throw new TBError('invalid_argument', 'undeclared webhook event type')
+        return { ...verified, data: definition.schema.parse(verified.data), schemaVersion: definition.version }
+      }
       if (state.kind === 'tools') return await dispatchTools(state, call.tool, call.arguments, ctx)
       if (state.kind === 'proxyTools') {
         return await dispatchProxyTools(state, call.tool, call.arguments, ctx)
@@ -573,6 +610,11 @@ export function createPlugin<Env = unknown>(opts: CreatePluginOptions<Env> = {})
   }
 
   const plugin: Plugin<Env> = {
+    events(id, handlers) {
+      assertFreshId(id)
+      exports.set(id, { id, kind: 'events', handlers })
+      return plugin
+    },
     tools(id, meta) {
       assertFreshId(id)
       const state: ToolsExportState<Env> = {
@@ -715,6 +757,10 @@ export function createPlugin<Env = unknown>(opts: CreatePluginOptions<Env> = {})
     async fetch(request, env) {
       try {
         const url = new URL(request.url)
+        if (request.method === 'HEAD' && url.pathname === '/~auth') {
+          assertAuthorized(request, env)
+          return new Response(null, { status: 204, headers: { 'X-TB-Plugin-Auth': 'plugin/v2' } })
+        }
         if (request.method === 'GET') {
           if (url.pathname === healthPath) return json({ healthy: true })
           if (url.pathname === '/~describe') return json(describe())

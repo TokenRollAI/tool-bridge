@@ -13,6 +13,7 @@
 import { z } from 'zod/v4'
 import type { PluginCredentialField, PluginExport, PluginMountConfigField } from '../plugin/contract'
 import type { BuiltinCatalog, BuiltinCatalogEntry } from '../plugin/catalog'
+import type { PluginEventSource } from '../plugin/eventSource'
 import type { BuiltinModule } from './types'
 import { BuiltinCommandRegistry } from './commandRegistry'
 import { LIST_OPTS_ZOD_SCHEMA } from './util'
@@ -42,7 +43,7 @@ export interface CatalogListItem {
   exports: string[]
   id: string
   /** 这些 export 能挂成什么 kind 的节点。 */
-  nodeKinds: Array<'tool' | 'context'>
+  nodeKinds: Array<'tool' | 'context' | 'topic'>
 }
 
 export type CatalogExportAuth
@@ -54,14 +55,16 @@ export type CatalogExportAuth
 export interface CatalogExportDetails {
   auth: CatalogExportAuth
   description?: string
+  eventSource?: PluginEventSource
   id: string
-  kind: 'tool' | 'context'
+  kind: 'tool' | 'context' | 'topic'
   mountConfigFields?: PluginMountConfigField[]
 }
 
-const NODE_KIND_BY_PROFILE: Record<string, 'tool' | 'context'> = {
+const NODE_KIND_BY_PROFILE: Record<string, 'tool' | 'context' | 'topic'> = {
   'tools/v1': 'tool',
   'context/v1': 'context',
+  'events/v1': 'topic',
 }
 
 function projectExportAuth(exported: PluginExport): CatalogExportAuth {
@@ -88,7 +91,7 @@ function projectExportAuth(exported: PluginExport): CatalogExportAuth {
 
 function projectListItem(entry: BuiltinCatalogEntry): CatalogListItem {
   const exports = entry.describe.exports
-  const kinds = new Set<'tool' | 'context'>()
+  const kinds = new Set<'tool' | 'context' | 'topic'>()
   const exportDetails: Record<string, CatalogExportDetails> = {}
   for (const e of exports) {
     const kind = NODE_KIND_BY_PROFILE[e.profile]
@@ -98,6 +101,7 @@ function projectListItem(entry: BuiltinCatalogEntry): CatalogListItem {
         id: e.id,
         kind,
         auth: projectExportAuth(e),
+        ...(e.eventSource ? { eventSource: e.eventSource } : {}),
         ...(e.description !== undefined ? { description: e.description } : {}),
         ...(e.mountConfigFields !== undefined
           ? { mountConfigFields: e.mountConfigFields }

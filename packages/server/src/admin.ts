@@ -8,12 +8,24 @@ import { join } from 'node:path'
 import pRetry from 'p-retry'
 import pkg from '../package.json' with { type: 'json' }
 import { BootstrapStateStore } from './bootstrapState'
+import { servePluginRunner } from './pluginRunner'
 
 const program = new Command('tool-bridge-admin')
   .version(pkg.version)
   .description(
     'Local installation and recovery; requires access to the protected bootstrap directory',
   )
+program.command('plugin-runner')
+  .description('Serve locally approved immutable plugin containers on a protected Unix socket')
+  .requiredOption('--policy <file>', 'Operator-owned JSON release allowlist')
+  .requiredOption('--socket <path>', 'Private control socket in an operator-owned directory')
+  .action(async (opts: { policy: string, socket: string }) => {
+    process.umask(0o117)
+    const server = await servePluginRunner(opts.policy, opts.socket)
+    const stop = () => server.close()
+    process.once('SIGINT', stop)
+    process.once('SIGTERM', stop)
+  })
 for (const mode of ['pair', 'recover'] as const) {
   program
     .command(mode)

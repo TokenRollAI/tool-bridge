@@ -38,11 +38,12 @@ function invalidRequest(message: string): TBError {
 
 export async function mailboxJsonObject(
   c: AppContext,
-  opts: { allowEmpty?: boolean } = {},
+  opts: { allowEmpty?: boolean, maxBytes?: number } = {},
 ): Promise<Record<string, unknown>> {
+  const maxBytes = opts.maxBytes ?? DEVICE_MAILBOX_HTTP_BODY_BYTES
   const declaredLength = Number(c.req.header('content-length'))
-  if (Number.isFinite(declaredLength) && declaredLength > DEVICE_MAILBOX_HTTP_BODY_BYTES) {
-    throw new TBError('rate_limited', 'device mailbox request body is too large', {
+  if (Number.isFinite(declaredLength) && declaredLength > maxBytes) {
+    throw new TBError('rate_limited', 'request body is too large', {
       retryable: false,
     })
   }
@@ -56,9 +57,9 @@ export async function mailboxJsonObject(
         const chunk = await reader.read()
         if (chunk.done) break
         received += chunk.value.byteLength
-        if (received > DEVICE_MAILBOX_HTTP_BODY_BYTES) {
+        if (received > maxBytes) {
           await reader.cancel().catch(() => {})
-          throw new TBError('rate_limited', 'device mailbox request body is too large', {
+          throw new TBError('rate_limited', 'request body is too large', {
             retryable: false,
           })
         }

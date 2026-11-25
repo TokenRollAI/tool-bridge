@@ -103,6 +103,7 @@ export async function handleRegister(c: AppContext, env: RouteEnv): Promise<Resp
   }
   await assertNodeConfigMutation({
     action: 'write',
+    kind: body.kind,
     config: body.config,
     ctx,
     deps,

@@ -125,8 +125,8 @@ function builtinManifestOf(id: string): PluginManifest {
 export function resolveBuiltinExport(
   catalog: BuiltinCatalog,
   id: string,
-  nodeKind: 'tool' | 'context',
-  what: 'context' | 'tool',
+  nodeKind: 'tool' | 'context' | 'topic',
+  what: 'context' | 'tool' | 'topic',
   exportId?: string,
 ): ResolvedIntegration {
   const entry = catalog[id]
@@ -149,18 +149,18 @@ export function resolveBuiltinExport(
 export async function resolveExternalExport(
   store: ReadOnlyStore,
   id: string,
-  nodeKind: 'tool' | 'context',
-  what: 'context' | 'tool',
+  nodeKind: 'tool' | 'context' | 'topic',
+  what: 'context' | 'tool' | 'topic',
   exportId?: string,
 ): Promise<ResolvedIntegration> {
-  const manifest = (await store.get(KEY_PLUGIN + id)) as PluginManifest | null
+  const manifest = (await store.get(KEY_PLUGIN + id)) as (PluginManifest & { describe?: PluginDescribe }) | null
   if (manifest === null) {
     throw new TBError('invalid_argument', `未知 ${what} provider:'${id}'`)
   }
   if (manifest.enabled !== true) {
     throw new TBError('invalid_argument', `plugin '${id}' 已禁用`)
   }
-  const describe = (await store.get(KEY_PLUGIN_META + id)) as PluginDescribe | null
+  const describe = manifest.describe ?? (await store.get(KEY_PLUGIN_META + id)) as PluginDescribe | null
   if (describe === null) {
     throw new TBError('invalid_argument', `plugin '${id}' 缺少 ~describe 缓存,请重新注册`)
   }
@@ -184,8 +184,8 @@ export async function resolveIntegration(
   store: ReadOnlyStore,
   catalog: BuiltinCatalog,
   id: string,
-  nodeKind: 'tool' | 'context',
-  what: 'context' | 'tool',
+  nodeKind: 'tool' | 'context' | 'topic',
+  what: 'context' | 'tool' | 'topic',
   exportId?: string,
 ): Promise<ResolvedIntegration> {
   const manifest = (await store.get(KEY_PLUGIN + id)) as PluginManifest | null

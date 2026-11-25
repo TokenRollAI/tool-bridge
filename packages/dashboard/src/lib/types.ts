@@ -42,6 +42,7 @@ export type {
   PluginMountConfigField,
   PluginProfile,
   PluginRegistration,
+  PluginUpgradePreview,
   Scope,
   SecretKeyView as SecretKeyInfo,
   SkillDetail,

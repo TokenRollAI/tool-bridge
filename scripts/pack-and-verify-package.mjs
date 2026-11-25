@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url'
 import { isBuiltin } from 'node:module'
 import process from 'node:process'
 import { tmpdir } from 'node:os'
+import ts from 'typescript'
 
 const RUNTIME_DEPENDENCY_FIELDS = [
   'dependencies',
@@ -83,25 +84,10 @@ export function assertPackedEntryTargetsExist(manifest, packedFiles) {
   }
 }
 
-/**
- * 去掉块注释与整行注释后再找 import。bundle 进来的第三方库常在 JSDoc 里写
- * `import { X } from 'some-pkg'` 用法示例(如 MCP SDK 的 ajv validator 说明),
- * 不剥注释会把它们误判成运行时裸 import。只剥以行首(可带缩进)开始的 `//` 行,
- * 避免误伤字符串里的 `https://`。
- */
-function stripComments(source) {
-  return source
-    .replace(/\/\*[\s\S]*?\*\//g, '')
-    .replace(/^[ \t]*\/\/.*$/gm, '')
-}
-
+// Scan actual ESM and declaration imports, including import() inside template expressions.
+// Raw scaffold text and bundled documentation can contain complete example modules.
 function collectExternalImports(source) {
-  const code = stripComments(source)
-  return [
-    ...code.matchAll(/\bfrom\s+["']([^"']+)["']/g),
-    ...code.matchAll(/\bimport\s+["']([^"']+)["']/g),
-    ...code.matchAll(/\bimport\s*\(\s*["']([^"']+)["']\s*\)/g),
-  ].map(match => match[1]).filter(Boolean)
+  return ts.preProcessFile(source, true, false).importedFiles.map(file => file.fileName)
 }
 
 /**

@@ -584,3 +584,15 @@ describe('进程内 binding 跳过 token 校验', () => {
     expect((await call({ PLUGIN_TOKEN: 'tok' }, 'Bearer tok')).status).toBe(200)
   })
 })
+
+it('HEAD /~auth checks the transport bearer without invoking any export', async () => {
+  const plugin = createPlugin<{ token?: string }>({ token: env => env.token })
+  const head = (bearer: string, token?: string) => plugin.fetch(new Request('https://plugin.test/~auth', {
+    method: 'HEAD', headers: { authorization: 'Bearer ' + bearer },
+  }), { token })
+  expect((await head('wrong', 'expected')).status).toBe(401)
+  expect((await head('anything')).status).toBe(503)
+  const ok = await head('expected', 'expected')
+  expect(ok.status).toBe(204)
+  expect(ok.headers.get('x-tb-plugin-auth')).toBe('plugin/v2')
+})

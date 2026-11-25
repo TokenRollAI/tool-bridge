@@ -8,8 +8,7 @@
  *
  * 回答两个每轮发布都要手工回答一遍的问题:
  * 1. 哪些 public 包的本地精确版本尚未存在于 registry(= 待发);
- * 2. 按什么顺序发(唯一硬约束:`server` 的 regular dep 是 `@tool-bridge/dashboard`,
- *    `pnpm pack` 会把 `workspace:*` 改写成具体版本 —— dashboard 没发,server 装不上);
+ * 2. 按什么顺序发，确保打包依赖和插件模板引用的精确版本已经可安装。
  *
  * 之所以值得一个脚本:这两问此前靠人对着 `npm view` 逐包比,而漏判的代价不对称 ——
  * npm 版本号**不可回收**,发错一个就只能再 bump 一版。
@@ -29,10 +28,9 @@ export const PUBLIC_PACKAGES = ['app', 'cli', 'dashboard', 'plugin-sdk', 'sdk', 
 /**
  * 发布顺序的硬约束:`依赖 → 依赖它的包`。
  *
- * 只有一条真约束(server→dashboard)。其余包互不依赖(它们各自 bundle core/app),
- * 顺序随意 —— 故这里不硬编一张全序表,只声明偏序,让拓扑排序去定顺序。
+ * server 安装需要 dashboard；CLI 初始化插件的模板还会安装本轮的 plugin-sdk。
  */
-const MUST_PRECEDE = [['dashboard', 'server']]
+const MUST_PRECEDE = [['dashboard', 'server'], ['plugin-sdk', 'cli']]
 
 const ROOT = join(import.meta.dirname, '..')
 
@@ -82,7 +80,7 @@ export async function buildReleasePlan({
       published: snapshot.latest,
       needsPublish: !snapshot.versions.has(local),
       firstRelease: !snapshot.exists,
-      deps: workspaceDeps(manifest),
+      deps: [...new Set([...workspaceDeps(manifest), ...MUST_PRECEDE.filter(([, after]) => after === pkg).map(([before]) => before)])],
       tag: `${pkg}-v${local}`,
     }
   }))

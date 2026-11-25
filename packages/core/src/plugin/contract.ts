@@ -22,19 +22,21 @@
 
 import { z } from 'zod'
 import type { PluginManifest } from './manifest'
+import { eventSourceSchema, type PluginEventSource } from './eventSource'
 import { type PluginOAuth, pluginOAuthSchema } from './oauth'
 import { CONTEXT_METHODS } from '../context/capabilities'
 import { TBError } from '../errors'
 
 /** export 的语义档位。 */
-export type PluginProfile = 'tools/v1' | 'context/v1'
+export type PluginProfile = 'tools/v1' | 'context/v1' | 'events/v1'
 
-export const PLUGIN_PROFILES: readonly PluginProfile[] = ['tools/v1', 'context/v1']
+export const PLUGIN_PROFILES: readonly PluginProfile[] = ['tools/v1', 'context/v1', 'events/v1']
 
 /** profile → 可挂载的树节点 kind(挂载校验用)。 */
-export const NODE_KIND_BY_PROFILE: Record<PluginProfile, 'tool' | 'context'> = {
+export const NODE_KIND_BY_PROFILE: Record<PluginProfile, 'tool' | 'context' | 'topic'> = {
   'tools/v1': 'tool',
   'context/v1': 'context',
+  'events/v1': 'topic',
 }
 
 /**
@@ -76,6 +78,7 @@ const exportAuthSchema = z.discriminatedUnion('kind', [
 const exportSchema = z.object({
   id: z.string().regex(EXPORT_ID_RE, 'export id 须为 [A-Za-z0-9._-] 且不以标点开头'),
   profile: z.enum(PLUGIN_PROFILES),
+  eventSource: eventSourceSchema.optional(),
   description: z.string().optional(),
   /** context/v1:实际提供的动词;tools/v1 由运行时 List 发现,可省。 */
   methods: z.array(z.string()).optional(),
@@ -154,6 +157,7 @@ export interface PluginExport {
    */
   credentialProbe?: string
   description?: string
+  eventSource?: PluginEventSource
   id: string
   methods?: string[]
   /**
@@ -353,6 +357,16 @@ export function validatePluginContract(input: PluginContractInput): PluginDescri
       }
     }
 
+    if (exported.profile === 'events/v1') {
+      if (!exported.eventSource || exported.auth?.kind !== 'single' || !exported.auth.required) {
+        throw new TBError('invalid_argument', 'event sources require a verifier credential and declared event types')
+      }
+      const names = exported.eventSource.types.map(item => item.type)
+      if (new Set(names).size !== names.length) throw new TBError('invalid_argument', 'duplicate event type')
+    } else if (exported.eventSource) {
+      throw new TBError('invalid_argument', 'eventSource requires events/v1')
+    }
+
     if (exported.profile === 'context/v1') {
       const known = new Set<string>(CONTEXT_METHODS)
       const unknown = (exported.methods ?? []).filter(m => !known.has(m))
@@ -392,7 +406,7 @@ export function validatePluginContract(input: PluginContractInput): PluginDescri
  */
 export function resolvePluginExport(
   describe: PluginDescribe,
-  opts: { exportId?: string, nodeKind: 'tool' | 'context', pluginId: string },
+  opts: { exportId?: string, nodeKind: 'tool' | 'context' | 'topic', pluginId: string },
 ): PluginExport {
   const { exports } = describe
   let chosen: PluginExport | undefined

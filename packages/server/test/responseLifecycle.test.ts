@@ -62,6 +62,17 @@ function slowResponse(options: { cancel?: (reason: unknown) => Promise<void>, er
 }
 
 describe('response body request lifecycle', () => {
+  it('releases a response when the client disconnected before its body was pulled', async () => {
+    const controller = new AbortController()
+    controller.abort()
+    const release = vi.fn()
+    const cancel = vi.fn()
+    const response = trackResponseBody(new Response(new ReadableStream({ cancel })), release, controller.signal)
+    expect(await response.text()).toBe('')
+    await vi.waitFor(() => expect(release).toHaveBeenCalledOnce())
+    expect(cancel).toHaveBeenCalledOnce()
+  })
+
   it('releases bodyless responses immediately without replacing them', () => {
     const release = vi.fn()
     const response = new Response(null, { status: 204 })
