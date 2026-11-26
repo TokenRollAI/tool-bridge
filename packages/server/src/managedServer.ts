@@ -30,6 +30,7 @@ import {
 } from './maintenanceManager'
 import { createTbServer, type TbServer } from './server'
 import pkg from '../package.json' with { type: 'json' }
+import { MCP_AUTHORIZE_PATH } from './mcpOAuth'
 import { resolveUiAssets } from './assets'
 import { KeyManager } from './keyManager'
 
@@ -56,7 +57,10 @@ export async function createManagedServer(options: ManagedServerOptions) {
   const replicaId = randomUUID()
   const assets = resolveUiAssets(options.uiDir)
   const app = new Hono()
-  app.use('*', secureHeaders())
+  const defaults = secureHeaders()
+  const consent = secureHeaders({ referrerPolicy: 'same-origin' })
+  // Chrome uses the document referrer policy when deriving Origin for a form POST.
+  app.use('*', (c, next) => c.req.path === MCP_AUTHORIZE_PATH ? consent(c, next) : defaults(c, next))
   app.use('/~setup/*', bodyLimit({ maxSize: 65536 }))
   app.use('/~setup/*', async (c, next) => {
     c.header('Cache-Control', 'no-store')

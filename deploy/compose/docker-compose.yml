@@ -1,7 +1,7 @@
 name: tool-bridge
 
 x-app-image: &app-image
-  image: ghcr.io/tokenrollai/tool-bridge:0.26.1
+  image: ghcr.io/tokenrollai/tool-bridge:0.26.2
 
 services:
   init:
