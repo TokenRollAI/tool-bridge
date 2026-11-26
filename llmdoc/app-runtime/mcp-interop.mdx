@@ -91,6 +91,8 @@ gateway 明确判断 `not_dispatched` 时入队；设备业务错误属于 compl
 `https://chatgpt.com/oauth/client.json` 和固定回调 `https://chatgpt.com/connector_platform_oauth_redirect`。
 授权使用一次性授权码与 S256 PKCE，默认且唯一的 scope 为 `mcp`。用户在网关授权页输入专用 SK，ChatGPT 获得访问令牌。
 
+授权端点忽略未知查询参数（如 `ui_locales=zh-CN`），授权表单的提交 URL 只带已识别参数。网关继续校验客户端 ID、回调 URI、资源和 PKCE，并拒绝重复的已识别字段。参见 [RFC 6749 §3.1](https://www.rfc-editor.org/rfc/rfc6749.html#section-3.1)。
+
 访问令牌有效期为一小时，到期需重新授权。它绑定签发时的网关 origin，只能作为 Bearer 用于该网关的 `/~mcp` 入口。
 网关逐请求读取原 SK 的当前身份与权限，继续执行 HTBP 节点权限检查。原 SK 变更、到期或撤销在下次请求或订阅权限复核时生效。
 
