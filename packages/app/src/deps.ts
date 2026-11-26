@@ -115,6 +115,12 @@ export interface TbAppDeps {
   locals?: LocalProviderHooks
   mailboxRepository?: MailboxRepository
   maintenanceManagement?: MaintenanceManagement
+  /** Optional inbound MCP authorization server, bound to one public resource. */
+  mcpOAuth?: {
+    handlePublic(request: Request): Promise<Response | undefined>
+    identify(authorization: string | undefined, now: string): Promise<CallContext | null>
+    resourceMetadataUrl: string
+  }
   /** context 平台对象存储('storage' provider 的落点);缺省 → 该 provider unavailable。 */
   objects?: () => Promise<ObjectStore> | ObjectStore
   /** Resolve an immutable backend identity; never substitute the active backend. */
@@ -196,7 +202,7 @@ export interface TbAppDeps {
 export const TOOL_CACHE_TTL_DEFAULT = 300
 
 /** 请求期变量:认证中间件写入,handler 只读。 */
-export type Vars = { ctx: CallContext, store: StateStore }
+export type Vars = { authenticate: () => Promise<CallContext | null>, ctx: CallContext, store: StateStore }
 
 export type AppContext = Context<{ Variables: Vars }>
 

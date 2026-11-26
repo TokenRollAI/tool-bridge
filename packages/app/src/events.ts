@@ -1,4 +1,4 @@
-import { check, EVENT_MAX_BYTES, eventCommands, type EventReadInput, type EventReadResult, type EventRepository, identify, negotiate, TBError } from '@tool-bridge/core'
+import { check, EVENT_MAX_BYTES, eventCommands, type EventReadInput, type EventReadResult, type EventRepository, negotiate, TBError } from '@tool-bridge/core'
 import type { AppContext } from './deps'
 import { mailboxJsonObject } from './routes/deviceMailbox'
 import { renderResult } from './responses'
@@ -57,7 +57,7 @@ export async function invokeEvent(c: AppContext, repository: EventRepository | u
   const result = await eventCommands.invoke(command, args, {
     publish: input => repository.publish(path, ctx, input),
     read: input => readEvents(repository, path, input, ctx.keyId, c.req.raw.signal, async () => {
-      const current = await identify(c.get('store'), c.req.header('authorization'), new Date().toISOString())
+      const current = await c.get('authenticate')()
       if (!current || current.keyId !== ctx.keyId || current.owner !== ctx.owner) throw TBError.unauthenticated()
       if (!check(current, path, 'read').allow) throw TBError.notFound()
     }),

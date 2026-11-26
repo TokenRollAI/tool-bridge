@@ -28,6 +28,7 @@ import { registerSearchRoute } from './routes/search'
 import { type TbAppDeps, type Vars } from './deps'
 import { registerMcpRoute } from './routes/mcp'
 import { handleInvoke } from './routes/invoke'
+import { mcpInternalAuth } from './mcpInvoke'
 import { requireDevice } from './deviceNodes'
 import { createRouteEnv } from './routes/env'
 import { handleHelp } from './routes/help'
@@ -57,14 +58,35 @@ export function createTbApp(deps: TbAppDeps): Hono<{ Variables: Vars }> {
   registerEventWebhooks(app, deps)
   registerStoreCapabilityRoutes(app, deps)
 
-  // 认证中间件(/healthz、/~ref、/~oauth/callback、/ui 静态资源之外全路由):Bearer → identify → 401 或注入 ctx。
+  const oauth = deps.mcpOAuth
+  if (oauth) {
+    app.use('*', async (c, next) => {
+      const response = await oauth.handlePublic(c.req.raw)
+      if (response) return response
+      await next()
+    })
+  }
+
   app.use('*', async (c, next) => {
     const store = deps.state
+    const bearer = c.req.header('authorization')
+    const mcp = c.req.path === '/~mcp'
+    const authenticate = mcpInternalAuth.get(c.req.raw) ?? (async () => {
+      const now = new Date().toISOString()
+      const key = await identify(store, bearer, now)
+      return key ?? (mcp && oauth ? oauth.identify(bearer, now) : null)
+    })
     try {
       await deps.ensureReady?.()
-      const now = new Date().toISOString()
-      const ctx = await identify(store, c.req.header('authorization'), now)
-      if (!ctx) return tbErrorResponse(TBError.unauthenticated())
+      const ctx = await authenticate()
+      if (!ctx) {
+        const response = tbErrorResponse(TBError.unauthenticated())
+        if (mcp && oauth) {
+          response.headers.set('www-authenticate', `Bearer resource_metadata="${oauth.resourceMetadataUrl}", scope="mcp"`)
+        }
+        return response
+      }
+      c.set('authenticate', authenticate)
       c.set('store', store)
       c.set('ctx', ctx)
     } catch (err) {

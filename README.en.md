@@ -222,6 +222,14 @@ Use Tool Bridge to find the documentation search tool, search for the HTBP permi
 
 The skill verifies the target, searches or browses progressively, reads the tool-level schema and existing feedback, and then follows the runtime invocation contract. If a call errors, times out, or returns an abnormal result, the agent immediately checks feedback on that exact path before deciding whether a retry is safe. It promptly votes for guidance that proves useful and, when feedback writes are authorized, deduplicates and submits a new reproducible issue or validated resolution. `~help` remains the contract source of truth; feedback is an experience layer and cannot override the current schema.
 
+### Connect ChatGPT to your gateway
+
+1. Set and apply `canonicalOrigin` in the Node gateway runtime settings to the public HTTPS origin, such as `https://bridge.example.com`. Forward `/.well-known/` and `/~oauth/` to the gateway along with `/~mcp`.
+2. In ChatGPT, open **Customize → Plugins**, add `https://bridge.example.com/~mcp`, and choose OAuth or no authentication. Use automatic discovery and Client ID Metadata Document (CIMD) registration. The default scope is `mcp`.
+3. Connect and enter a dedicated Tool Bridge secret key (SK) on your gateway's consent page. In ChatGPT, ask “List my accessible Tool Bridge nodes” to check the connection.
+
+The access token lasts one hour. Reconnect after expiry. Changes to the source key's permissions and revocation take effect on the next request.
+
 ## What you can use today
 
 | Use case | Current entry point | Typical purpose |

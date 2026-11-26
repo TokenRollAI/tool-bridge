@@ -1,5 +1,8 @@
 /** Keep an admitted request alive while its response still owns an upstream stream. */
 export function trackResponseBody(response: Response, release: () => void, signal?: AbortSignal): Response {
+  // The Node adapter materializes its lightweight Response when body is read.
+  // Capture middleware-added headers before that transition.
+  const headers = response.headers
   if (!response.body) {
     release()
     return response
@@ -71,6 +74,6 @@ export function trackResponseBody(response: Response, release: () => void, signa
   return new Response(body, {
     status: response.status,
     statusText: response.statusText,
-    headers: response.headers,
+    headers,
   })
 }

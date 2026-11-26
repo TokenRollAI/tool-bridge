@@ -222,6 +222,14 @@ npx skills use TokenRollAI/tool-bridge-skill@tool-bridge
 
 Skill 会先验证目标，再搜索或逐级浏览、读取工具级 schema 与已有 feedback，最后按运行时声明调用。遇到错误、超时或结果异常时，Agent 会立即查询该精确路径的 feedback，再决定是否安全重试；已有经验确实有效时及时投票，新问题或已验证解法则在获得 feedback 写入授权后去重提交。`~help` 始终是契约真源，feedback 只是经验层，不能覆盖当前 schema。
 
+### 用 ChatGPT 连接网关
+
+1. 在 Node 网关的运行设置里，将 `canonicalOrigin` 设为公网 HTTPS 地址并应用，例如 `https://bridge.example.com`。反向代理需把 `/.well-known/` 和 `/~oauth/` 一起转发给网关。
+2. 在 ChatGPT 的「自定义 → 插件」添加服务器，URL 填 `https://bridge.example.com/~mcp`，身份验证选「OAuth 或无需身份验证」。高级设置使用自动发现，客户端配置选择「客户端 ID 元数据文档」（CIMD），默认权限范围为 `mcp`。
+3. 连接时，在自己的网关授权页输入专用访问密钥（SK）并确认。返回 ChatGPT 后，可以问「列出我能访问的 Tool Bridge 节点」检查连接。
+
+ChatGPT 获得的令牌有效期为一小时，到期后需要重新授权。修改或撤销这把 SK 会在下次调用时生效。
+
 ## 现在可以怎么用
 
 | 使用方式 | 当前入口 | 典型用途 |

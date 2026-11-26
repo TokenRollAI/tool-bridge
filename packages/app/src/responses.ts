@@ -44,7 +44,8 @@ export function withSecurityHeaders(res: Response): Response {
     }
     headers.set('x-content-type-options', 'nosniff')
     headers.set('x-frame-options', 'DENY')
-    headers.set('referrer-policy', 'no-referrer')
+    // A same-origin HTML form needs its Origin for CSRF protection.
+    if (headers.get('referrer-policy') !== 'same-origin') headers.set('referrer-policy', 'no-referrer')
   }
   // 本 app 自建的 Response headers 可变,原地写可保留 Node 宿主的结构化对象流。
   // fetch/Static Assets 返回的不可变 headers 才克隆 Response(其 body 是原生流)。

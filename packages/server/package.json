@@ -1,6 +1,6 @@
 {
   "name": "@tool-bridge/server",
-  "version": "0.25.0",
+  "version": "0.26.0",
   "description": "Self-hosted Tool Bridge Node server with PostgreSQL, S3 object storage and WebSocket device channels",
   "type": "module",
   "license": "MIT",
@@ -45,6 +45,8 @@
   },
   "dependencies": {
     "@hono/node-server": "catalog:",
+    "@modelcontextprotocol/server": "catalog:",
+    "@node-oauth/oauth2-server": "^5.3.1",
     "@tool-bridge/dashboard": "workspace:*",
     "hono": "catalog:",
     "ioredis": "^6.0.0",

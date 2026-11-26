@@ -1,5 +1,5 @@
 import type { ServerEventBus } from '@modelcontextprotocol/server'
-import { canonicalizePath, check, type EventRepository, identify, NodeRegistryStore, TBError } from '@tool-bridge/core'
+import { canonicalizePath, check, type EventRepository, NodeRegistryStore, TBError } from '@tool-bridge/core'
 import { SubscriptionsListenRequestSchema } from '@modelcontextprotocol/core'
 import type { AppContext } from './deps'
 
@@ -22,7 +22,7 @@ export function mcpTopicResources(c: AppContext, repository: EventRepository, sh
   const registry = new NodeRegistryStore(state)
   async function authorize(uri: string): Promise<string> {
     const path = topicPath(uri)
-    const ctx = await identify(state, c.req.header('authorization'), new Date().toISOString())
+    const ctx = await c.get('authenticate')()
     if (!ctx || ctx.keyId !== keyId || !check(ctx, path, 'read').allow) throw TBError.notFound()
     if ((await registry.get(path)).kind !== 'topic') throw TBError.notFound()
     return path
