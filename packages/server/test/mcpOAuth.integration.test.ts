@@ -63,7 +63,7 @@ describe('ChatGPT links its MCP session using a scoped gateway key', () => {
 
   it('discovers OAuth, consents, exchanges once, calls tools and observes revocation', async () => {
     const manageKey = (command: string, body: object) => wire('/system/sk/' + command, {
-      method: 'POST', headers: { 'authorization': 'Bearer ' + adminSk, 'content-type': 'application/json' },
+      method: 'POST', headers: { 'authorization': 'Bearer ' + adminSk, 'content-type': 'application/json', 'accept': 'application/json' },
       body: JSON.stringify(body),
     })
     const created = await manageKey('write', {
