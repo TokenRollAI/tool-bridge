@@ -1,5 +1,5 @@
 ---
-description: MCP 固定入口与按需发现调用、事件资源 SSE 通知与空闲订阅权限复核、目标 schema 和结果保真、modern/legacy 互操作。
+description: MCP 固定入口与按需发现调用、ChatGPT 入站 OAuth（canonicalOrigin、CIMD、PKCE、SK 权限与撤销）、事件资源 SSE、目标 schema 和结果保真、modern/legacy 互操作。
 kind: guide
 relations:
   requires:
@@ -16,9 +16,14 @@ code:
     - packages/app/src/mcpInvoke.ts
     - packages/app/src/jsonSchemaValidator.ts
     - packages/app/src/routes/mcp.ts
+    - packages/app/src/tbApp.ts
     - packages/app/test/mcp.integration.test.ts
     - packages/app/test/mcpArguments.test.ts
     - packages/app/test/contracts/processSessionCoverage.test.ts
+    - packages/server/src/server.ts
+    - packages/server/src/mcpOAuth.ts
+    - packages/server/src/mcpOAuthModel.ts
+    - packages/server/test/mcpOAuth.integration.test.ts
     - scripts/verify-mcp.ts
 ---
 
@@ -76,6 +81,19 @@ gateway 明确判断 `not_dispatched` 时入队；设备业务错误属于 compl
 返回的 operation 通过 `tb_device_operations` 查询、分页或取消，复用 owner/admin 授权。设备身份必须使用
 原始 `deviceId`；claimed cancel 只是协作式请求，result_unknown 或可能执行过的 expired 都不证明重试安全。
 
+## ChatGPT 入站 OAuth
+
+在 Node 网关运行设置中应用公网 HTTPS origin（如 `https://bridge.example.com`）作为 `canonicalOrigin` 和 OAuth issuer。
+将 `https://bridge.example.com/~mcp` 填入客户端，反向代理转发 `/~mcp`、`/.well-known/` 和 `/~oauth/`。
+未认证的 MCP 请求收到带 `resource_metadata` 和 `mcp` scope 的 401，供客户端自动发现。直接使用 Bearer SK 的方式仍可用。
+
+在 ChatGPT 选择「OAuth 或无需身份验证」，启用自动发现并选择「客户端 ID 元数据文档」（CIMD）。首版只接受公开客户端
+`https://chatgpt.com/oauth/client.json` 和固定回调 `https://chatgpt.com/connector_platform_oauth_redirect`。
+授权使用一次性授权码与 S256 PKCE，默认且唯一的 scope 为 `mcp`。用户在网关授权页输入专用 SK，ChatGPT 获得访问令牌。
+
+访问令牌有效期为一小时，到期需重新授权。它绑定签发时的网关 origin，只能作为 Bearer 用于该网关的 `/~mcp` 入口。
+网关逐请求读取原 SK 的当前身份与权限，继续执行 HTBP 节点权限检查。原 SK 变更、到期或撤销在下次请求或订阅权限复核时生效。
+
 ## 事件主题通知
 
 装配事件仓库的 `/~mcp` 在 2026-07-28 modern 协议提供 `tb-event://topics/{+path}` 资源模板。已知 topic 路径可直接构造 URI，路径段分别编码。`resources/list` 保持空列表，`resources/read` 返回 `{path,cursor,readCommand}`，其中 cursor 位于当前尾部。2025 兼容入口继续使用单次 JSON 响应。
@@ -111,7 +129,8 @@ gateway 明确判断 `not_dispatched` 时入队；设备业务错误属于 compl
 2. app/server 集成：`~help`、单工具披露、完整命令路径与裸 arguments 调用、缓存命中。
 3. consumer E2E：用真实 MCP client 连接 `/~mcp`，验证 modern/legacy、固定入口，以及 help 返回路径直接
    进入 tb_call 的闭环；窄 SK 仍看到固定入口，但发现隐藏越权目标、已知越权路径调用被拒。
-4. 真实上游仅在明确提供 URL/凭据时运行 `pnpm verify:mcp`。
+4. 入站 OAuth 集成测试替换 ChatGPT 的 CIMD 响应，经 Node 网关验证发现、授权、单次兑换、MCP 权限、HTBP 拒绝令牌与原 SK 撤销。
+5. 真实上游仅在明确提供 URL/凭据时运行 `pnpm verify:mcp`。
 
 多入口共用 handler 不保证输入契约等价：Zod 默认值或 transform 可能使生成的 JSON Schema 描述输出，
 而 HTTP handler 接受的是输入；MCP 的 schema 前置校验会在到达 handler 前拒绝原本合法的省略字段。
