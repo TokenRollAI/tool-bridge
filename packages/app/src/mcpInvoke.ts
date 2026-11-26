@@ -10,7 +10,7 @@ import {
   virtualizeTools,
 } from '@tool-bridge/core'
 import { helpJsonSchema } from '@tool-bridge/core/protocol'
-import type { AppContext, TbHono } from './deps'
+import type { AppContext, TbHono, Vars } from './deps'
 import type { RouteEnv } from './routes/env'
 import { providerFor, upstreamTools } from './toolNodes'
 import { validateMcpArguments } from './mcpServer'
@@ -24,6 +24,9 @@ export function mcpPath(path: string, allowRoot = false): string {
   return canonicalizePath(path).split('/').map(encodeURIComponent).join('/')
 }
 
+// Only requests constructed by this in-process adapter inherit MCP authentication.
+export const mcpInternalAuth = new WeakMap<Request, Vars['authenticate']>()
+
 export function mcpRequest(
   c: AppContext,
   app: TbHono,
@@ -31,7 +34,7 @@ export function mcpRequest(
   body?: unknown,
   extraHeaders?: Record<string, string>,
 ): Promise<Response> {
-  return Promise.resolve(app.request(new Request(new URL(path, c.req.url), {
+  const request = new Request(new URL(path, c.req.url), {
     method: body === undefined ? 'GET' : 'POST',
     headers: {
       'authorization': c.req.header('authorization') ?? '',
@@ -41,7 +44,9 @@ export function mcpRequest(
     },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     signal: c.req.raw.signal,
-  })))
+  })
+  mcpInternalAuth.set(request, c.get('authenticate'))
+  return Promise.resolve(app.request(request))
 }
 
 export async function mcpResponse(response: Response): Promise<ToolResult> {

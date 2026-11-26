@@ -99,6 +99,7 @@ function mcpBridgeFor(c: AppContext, env: RouteEnv, app: TbHono): McpToolBridge 
   })
 
   return {
+    ...(env.deps.mcpOAuth ? { oauthScopes: ['mcp'] } : {}),
     ...(env.deps.eventRepository ? { topics: mcpTopicResources(c, env.deps.eventRepository, env.deps.eventStreamShutdown) } : {}),
     list: async () => operations.list(),
     call: async (tool, args) => operations.call(tool.name, args, undefined),

@@ -37,10 +37,12 @@ import { ConfigManager } from './configManager'
 import { PgSearchIndex } from './pgSearchIndex'
 import { PgStateStore } from './pgStateStore'
 import { DeviceRouter } from './deviceRouter'
+import { createMcpOAuth } from './mcpOAuth'
 import { resolveUiAssets } from './assets'
 import { DeviceHub } from './deviceHub'
 
 const providerOAuthFetch = createGuardedFetch({ crossOriginRedirect: 'error' })
+const chatGptMetadataFetch = createGuardedFetch({ maxRedirects: 0 })
 
 export interface TbServer {
   app: Hono
@@ -273,6 +275,8 @@ export function createTbServer(config: ServerConfig): TbServer {
     if (maintenancePromise) return maintenancePromise
     const snapshot = deps
     maintenancePromise = (async () => {
+      await sql`DELETE FROM tb_kv WHERE key >= 'mcp-inbound:' AND key < 'mcp-inbound;'
+        AND value->>'expiresAt' <= ${new Date().toISOString()}`
       await eventRepository.cleanup()
       await cleanupDefaultStore(snapshot)
       if (snapshot.encryptionKey !== undefined)
@@ -298,14 +302,18 @@ export function createTbServer(config: ServerConfig): TbServer {
     )
     maintenanceTimer.unref?.()
   }
-  let currentApp = createTbApp(deps)
+  const buildApp = () => createTbApp({
+    ...deps,
+    mcpOAuth: createMcpOAuth(state, deps.canonicalOrigin, chatGptMetadataFetch),
+  })
+  let currentApp = buildApp()
   const settings = new ConfigManager(sql, async (next) => {
     deps = {
       ...deps,
       ...runtimeAppSettings(next, config.instanceId),
       configManagement: settings,
     }
-    currentApp = createTbApp(deps)
+    currentApp = buildApp()
   }, async (next) => {
     await hub.setReclaimSec(next.deviceReclaimSec)
     const reschedule
@@ -318,7 +326,7 @@ export function createTbServer(config: ServerConfig): TbServer {
     }
   })
   deps.configManagement = settings
-  currentApp = createTbApp(deps)
+  currentApp = buildApp()
   let activeRequests = 0
   const drainWaiters: Array<() => void> = []
   const requestContext = new AsyncLocalStorage<{ release(): void }>()

@@ -35,6 +35,7 @@ export type McpBridgeTool = ToolSpec
 export interface McpToolBridge {
   call(tool: McpBridgeTool, args: Record<string, unknown>): Promise<ToolResult>
   list(): Promise<McpBridgeTool[]>
+  oauthScopes?: string[]
   topics?: McpTopicResources
 }
 
@@ -204,7 +205,11 @@ function buildMcpServer(version: string, bridge: McpToolBridge, listTtlMs: numbe
   let projected: Promise<ProjectedTool[]> | undefined
   const tools = () => projected ??= bridge.list().then(projectTools)
   server.setRequestHandler('tools/list', async () => ({
-    tools: (await tools()).map(item => item.tool),
+    tools: (await tools()).map(({ tool }) => {
+      if (!bridge.oauthScopes) return tool
+      const securitySchemes = [{ type: 'oauth2', scopes: bridge.oauthScopes }]
+      return { ...tool, securitySchemes, _meta: { ...tool._meta, securitySchemes } }
+    }),
   }))
   server.setRequestHandler('tools/call', async (rpc) => {
     const selected = (await tools()).find(item => item.tool.name === rpc.params.name)
@@ -268,7 +273,7 @@ export async function handleMcpRequest(
 ): Promise<Response> {
   if (await isLegacyRequest(request)) {
     // 2025 系:完全沿用迁移前的形态——单 JSON 响应,无会话,不开 SSE。
-    const server = buildMcpServer(version, { list: bridge.list, call: bridge.call }, listTtlMs)
+    const server = buildMcpServer(version, { list: bridge.list, call: bridge.call, oauthScopes: bridge.oauthScopes }, listTtlMs)
     const transport = new WebStandardStreamableHTTPServerTransport({ enableJsonResponse: true })
     await server.connect(transport)
     return await transport.handleRequest(request)
