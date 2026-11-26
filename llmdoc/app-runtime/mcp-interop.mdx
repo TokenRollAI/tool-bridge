@@ -131,7 +131,8 @@ gateway 明确判断 `not_dispatched` 时入队；设备业务错误属于 compl
 2. app/server 集成：`~help`、单工具披露、完整命令路径与裸 arguments 调用、缓存命中。
 3. consumer E2E：用真实 MCP client 连接 `/~mcp`，验证 modern/legacy、固定入口，以及 help 返回路径直接
    进入 tb_call 的闭环；窄 SK 仍看到固定入口，但发现隐藏越权目标、已知越权路径调用被拒。
-4. 入站 OAuth 集成测试替换 ChatGPT 的 CIMD 响应，经 Node 网关验证发现、授权、单次兑换、MCP 权限、HTBP 拒绝令牌与原 SK 撤销。
+4. 入站 OAuth 集成测试替换 ChatGPT 的 CIMD 响应，经正式 `managedServer` 入口验证发现、授权、单次兑换、MCP 权限、HTBP 拒绝令牌与原 SK 撤销。
+   授权验收检查外层 `secureHeaders` 应用后授权页仍返回 `Referrer-Policy: same-origin`，并验证表单提交的 `Origin` 必须匹配 `canonicalOrigin`。
 5. 真实上游仅在明确提供 URL/凭据时运行 `pnpm verify:mcp`。
 
 多入口共用 handler 不保证输入契约等价：Zod 默认值或 transform 可能使生成的 JSON Schema 描述输出，
