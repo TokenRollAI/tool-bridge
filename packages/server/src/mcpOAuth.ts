@@ -13,7 +13,7 @@ import {
 } from './mcpOAuthModel'
 import { consentPage } from './mcpOAuthPage'
 
-const AUTHORIZE = '/~oauth/mcp/authorize'
+export const MCP_AUTHORIZE_PATH = '/~oauth/mcp/authorize'
 const TOKEN = '/~oauth/mcp/token'
 const FORM_TYPE = 'application/x-www-form-urlencoded'
 const MAX_REQUEST = 8192
@@ -151,7 +151,7 @@ export function createMcpOAuth(
     scopesSupported: [SCOPE],
     oauthMetadata: {
       issuer,
-      authorization_endpoint: issuer + AUTHORIZE,
+      authorization_endpoint: issuer + MCP_AUTHORIZE_PATH,
       token_endpoint: issuer + TOKEN,
       scopes_supported: [SCOPE],
       response_types_supported: ['code'],
@@ -179,7 +179,7 @@ export function createMcpOAuth(
     }
     return Response.json({ error: 'server_error' }, { status: 500, headers: noStore })
   })
-  routes.all(AUTHORIZE, async (c) => {
+  routes.all(MCP_AUTHORIZE_PATH, async (c) => {
     const request = c.req.raw
     if (!['GET', 'POST'].includes(request.method)) return methodError('GET, POST')
     if (request.method === 'POST' && request.headers.get('origin') !== issuer) {
@@ -193,7 +193,7 @@ export function createMcpOAuth(
       throw new EndpointError('invalid_request')
     }
     if (params.has('state') && !/^[\x20-\x7e]+$/.test(params.get('state')!)) throw new EndpointError('invalid_request')
-    const action = issuer + AUTHORIZE + '?' + params.toString()
+    const action = issuer + MCP_AUTHORIZE_PATH + '?' + params.toString()
     if (request.method === 'GET') return consentPage(action, CALLBACK)
     const body = await form(request, ['sk', 'decision'])
     if (body.get('decision') === 'deny') return authorizationResponse(issuer, params, { error: 'access_denied' })
@@ -234,7 +234,7 @@ export function createMcpOAuth(
     resourceMetadataUrl: getOAuthProtectedResourceMetadataUrl(resourceServerUrl),
     async handlePublic(request) {
       const path = new URL(request.url).pathname
-      if (path === AUTHORIZE || path === TOKEN) return routes.fetch(request)
+      if (path === MCP_AUTHORIZE_PATH || path === TOKEN) return routes.fetch(request)
       return oauthMetadataResponse(request, metadata)
     },
     identify: (authorization, now) => identifyMcpToken(state, issuer, authorization, now),

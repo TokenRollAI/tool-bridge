@@ -1,8 +1,10 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
+import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { createHash, randomBytes } from 'node:crypto'
-import { SKRegistryStore } from '@tool-bridge/core'
-import { createTbServer, type TbServer } from '../src'
-import { testServerConfig } from './helpers/server'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { testS3Config, testServerConfig } from './helpers/server'
+import { createManagedServer } from '../src'
 
 const issuer = 'https://bridge.example'
 const resource = issuer + '/~mcp'
@@ -12,13 +14,31 @@ const redirectUri = 'https://chatgpt.com/connector_platform_oauth_redirect'
 // Requests travel over a real Node socket behind a simulated TLS terminator.
 // Only ChatGPT's public client metadata document is substituted.
 describe('ChatGPT links its MCP session using a scoped gateway key', () => {
-  let server: TbServer
+  let server: Awaited<ReturnType<typeof createManagedServer>>
+  let directory: string
+  let adminSk: string
   let local: string
   const transport = globalThis.fetch
 
+  function wire(url: string, init?: RequestInit) {
+    const target = new URL(url, issuer)
+    expect(target.origin).toBe(issuer)
+    return transport(local + target.pathname + target.search, { redirect: 'manual', ...init })
+  }
+
   beforeAll(async () => {
-    server = createTbServer(await testServerConfig({ canonicalOrigin: issuer }))
+    directory = await mkdtemp(join(tmpdir(), 'tb-oauth-'))
+    const config = await testServerConfig({ dataDir: directory })
+    server = await createManagedServer({ directory, host: '127.0.0.1', port: 0 })
     local = 'http://127.0.0.1:' + (await server.start()).port
+    await server.store.write('install-defaults.json', { databaseUrl: config.databaseUrl, storage: testS3Config() })
+    const pairingToken = (await readFile(join(directory, 'pairing-token'), 'utf8')).trim()
+    const setup = await wire('/~setup/configure', {
+      method: 'POST', headers: { 'content-type': 'application/json', 'x-tb-setup-token': pairingToken },
+      body: JSON.stringify({ settings: { canonicalOrigin: issuer } }),
+    })
+    expect(setup.status).toBe(200)
+    adminSk = (await setup.json()).adminSk
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
       if ((input instanceof Request ? input.url : String(input)) === clientId) {
         return Response.json({
@@ -38,20 +58,20 @@ describe('ChatGPT links its MCP session using a scoped gateway key', () => {
   afterAll(async () => {
     vi.restoreAllMocks()
     await server?.close()
+    if (directory) await rm(directory, { recursive: true, force: true })
   })
 
-  function wire(url: string, init?: RequestInit) {
-    const target = new URL(url, issuer)
-    expect(target.origin).toBe(issuer)
-    return transport(local + target.pathname + target.search, { redirect: 'manual', ...init })
-  }
-
   it('discovers OAuth, consents, exchanges once, calls tools and observes revocation', async () => {
-    const registry = new SKRegistryStore(server.state)
-    const { key, secret } = await registry.write({
+    const manageKey = (command: string, body: object) => wire('/system/sk/' + command, {
+      method: 'POST', headers: { 'authorization': 'Bearer ' + adminSk, 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+    const created = await manageKey('write', {
       owner: 'user:chatgpt-test',
       scopes: [{ pattern: 'system/status', actions: ['read', 'call'] }],
-    }, new Date().toISOString())
+    })
+    expect(created.status).toBe(200)
+    const { key, secret } = await created.json()
     const challenge = await wire(resource)
     expect(challenge.status).toBe(401)
     const metadataUrl = challenge.headers.get('www-authenticate')?.match(/resource_metadata="([^"]+)"/)?.[1]
@@ -135,7 +155,7 @@ describe('ChatGPT links its MCP session using a scoped gateway key', () => {
     expect((await help('system/status')).structuredContent.node.path).toBe('system/status')
     expect((await help('system/sk')).isError).toBe(true)
     expect((await wire('/system/status/~help', { headers: { authorization } })).status).toBe(401)
-    await registry.delete(key.id)
+    expect((await manageKey('delete', { id: key.id })).status).toBe(200)
     expect((await rpc('tools/list', {})).status).toBe(401)
   })
 })
