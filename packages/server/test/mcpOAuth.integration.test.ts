@@ -65,11 +65,13 @@ describe('ChatGPT links its MCP session using a scoped gateway key', () => {
     const verifier = randomBytes(48).toString('base64url')
     const query = new URLSearchParams({
       response_type: 'code', client_id: clientId, redirect_uri: redirectUri,
-      state: 'opaque-client-state', resource,
+      state: 'opaque-client-state', resource, ui_locales: 'zh-CN',
       code_challenge_method: 'S256',
       code_challenge: createHash('sha256').update(verifier).digest('base64url'),
     })
     const url = metadata.authorization_endpoint + '?' + query
+    const duplicate = await wire(url + '&client_id=' + encodeURIComponent(clientId))
+    expect(duplicate.status).toBe(400)
     const wrongTarget = new URL(url)
     wrongTarget.searchParams.set('resource', issuer + '/other')
     expect((await wire(wrongTarget.href)).status).toBe(400)
@@ -79,7 +81,9 @@ describe('ChatGPT links its MCP session using a scoped gateway key', () => {
     const page = await wire(url)
     expect(page.status).toBe(200)
     expect(page.headers.get('referrer-policy')).toBe('same-origin')
-    expect(await page.text()).toMatch(/type="password"/)
+    const html = await page.text()
+    expect(html).toMatch(/type="password"/)
+    expect(html).not.toContain('ui_locales')
     const denied = await wire(url, {
       method: 'POST', headers: { origin: issuer }, body: new URLSearchParams({ sk: '', decision: 'deny' }),
     })

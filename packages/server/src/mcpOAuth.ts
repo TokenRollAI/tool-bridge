@@ -58,7 +58,7 @@ async function boundedText(message: Request | Response, limit: number): Promise<
   }
 }
 
-function parameters(encoded: string, allowed: string[]): URLSearchParams {
+function parameters(encoded: string, allowed: string[], ignoreExtensions = false): URLSearchParams {
   if (Buffer.byteLength(encoded) > MAX_REQUEST) throw new EndpointError('invalid_request', 413)
   if (encoded.startsWith('?')) throw new EndpointError('invalid_request')
   // URLSearchParams alone silently repairs malformed percent escapes and invalid UTF-8.
@@ -67,11 +67,15 @@ function parameters(encoded: string, allowed: string[]): URLSearchParams {
   } catch {
     throw new EndpointError('invalid_request')
   }
-  const params = new URLSearchParams(encoded)
-  const seen = new Set<string>()
-  for (const [name, value] of params) {
-    if (!allowed.includes(name) || seen.has(name) || (!value && name !== 'sk')) throw new EndpointError('invalid_request')
-    seen.add(name)
+  const params = new URLSearchParams()
+  for (const [name, value] of new URLSearchParams(encoded)) {
+    if (!allowed.includes(name)) {
+      // RFC 6749 §3.1: ignore unrecognized authorization request parameters.
+      if (ignoreExtensions) continue
+      throw new EndpointError('invalid_request')
+    }
+    if (params.has(name) || (!value && name !== 'sk')) throw new EndpointError('invalid_request')
+    params.append(name, value)
   }
   return params
 }
@@ -182,14 +186,14 @@ export function createMcpOAuth(
       throw new EndpointError('access_denied', 403)
     }
     const search = new URL(request.url).search
-    const params = parameters(search.slice(1), authorizeFields)
+    const params = parameters(search.slice(1), authorizeFields, true)
     checkBinding(params, resourceServerUrl.href)
     if (params.get('response_type') !== 'code') throw new EndpointError('unsupported_response_type')
     if (params.get('code_challenge_method') !== 'S256' || !/^[\w-]{43}$/.test(params.get('code_challenge') ?? '')) {
       throw new EndpointError('invalid_request')
     }
     if (params.has('state') && !/^[\x20-\x7e]+$/.test(params.get('state')!)) throw new EndpointError('invalid_request')
-    const action = issuer + AUTHORIZE + search
+    const action = issuer + AUTHORIZE + '?' + params.toString()
     if (request.method === 'GET') return consentPage(action, CALLBACK)
     const body = await form(request, ['sk', 'decision'])
     if (body.get('decision') === 'deny') return authorizationResponse(issuer, params, { error: 'access_denied' })
