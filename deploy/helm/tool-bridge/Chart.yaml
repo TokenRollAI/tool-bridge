@@ -4,8 +4,8 @@ description: >-
   Node self-hosted Tool Bridge with paired setup, PostgreSQL and S3.
 type: application
 # chart 版本与 appVersion 解耦:appVersion 跟随 @tool-bridge/server 的镜像 tag。
-version: 0.2.4
-appVersion: "0.26.2"
+version: 0.2.5
+appVersion: "0.27.0"
 keywords:
   - tool-bridge
   - htbp
