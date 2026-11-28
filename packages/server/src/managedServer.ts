@@ -11,15 +11,17 @@ import {
   validateStoreTokenKeyring,
 } from '@tool-bridge/core'
 import { BUILTIN_CATALOG, builtinPluginBindings } from '@tool-bridge/plugins'
-import { serve, type ServerType } from '@hono/node-server'
 import { setTimeout as delay } from 'node:timers/promises'
 import { secureHeaders } from 'hono/secure-headers'
 import { serveUiAssets } from '@tool-bridge/app'
 import { bodyLimit } from 'hono/body-limit'
+import { serve } from '@hono/node-server'
 import { randomUUID } from 'node:crypto'
 import postgres from 'postgres'
+import pRetry from 'p-retry'
 import { Hono } from 'hono'
 import {
+  BootstrapLockBusyError,
   type BootstrapSecrets,
   type BootstrapState,
   BootstrapStateStore,
@@ -28,6 +30,7 @@ import {
   type MaintenanceHooks,
   MaintenanceManager,
 } from './maintenanceManager'
+import { RuntimeHandoffPendingError } from './pgMaintenanceFence'
 import { createTbServer, type TbServer } from './server'
 import pkg from '../package.json' with { type: 'json' }
 import { MCP_AUTHORIZE_PATH } from './mcpOAuth'
@@ -46,14 +49,20 @@ export interface ManagedServerOptions {
 export async function createManagedServer(options: ManagedServerOptions) {
   const store = new BootstrapStateStore(options.directory)
   let state: BootstrapState | undefined
-  let phase: 'setup' | 'installing' | 'ready' | 'recovery' = 'setup'
+  let phase: 'setup' | 'installing' | 'starting' | 'ready' | 'recovery' = 'setup'
+  const startup = new AbortController()
+  const ownershipLost = new AbortController()
+  const drainDelay = new AbortController()
   let business: TbServer | undefined
-  let listener: ServerType | undefined
+  let listener: http.Server | undefined
+  let listening: Promise<{ port: number }> | undefined
+  let closePromise: Promise<void> | undefined
+  let managementTask: Promise<unknown> | undefined
+  let managementClosed = false
   let maintaining = false
   let draining = false
   let shutdownPromise: Promise<void> | undefined
   let lastShutdownDrainSec = 0
-  let actualPort = options.port ?? 8787
   const replicaId = randomUUID()
   const assets = resolveUiAssets(options.uiDir)
   const app = new Hono()
@@ -61,36 +70,65 @@ export async function createManagedServer(options: ManagedServerOptions) {
   const consent = secureHeaders({ referrerPolicy: 'same-origin' })
   // Chrome uses the document referrer policy when deriving Origin for a form POST.
   app.use('*', (c, next) => c.req.path === MCP_AUTHORIZE_PATH ? consent(c, next) : defaults(c, next))
-  app.use('/~setup/*', bodyLimit({ maxSize: 65536 }))
   app.use('/~setup/*', async (c, next) => {
     c.header('Cache-Control', 'no-store')
     await next()
   })
 
+  const assertOwnershipIntact = () => {
+    if (ownershipLost.signal.aborted) throw new TBError('unavailable', 'runtime ownership lost; restart required')
+  }
+  const handoffBlocked = () => ownershipLost.signal.aborted || phase === 'starting'
+  const runtimeState = () => ownershipLost.signal.aborted ? 'ownership_lost' : phase
   const status = () => ({
-    state: phase,
+    state: handoffBlocked() ? 'installing' : phase,
     instanceId: state?.instanceId,
-    pairingRequired: phase !== 'ready',
+    pairingRequired: !handoffBlocked() && phase !== 'ready',
   })
   const management: { keys?: KeyManager, maintenance?: MaintenanceManager }
     = {}
+  const withManagementLock = <T>(run: () => Promise<T>) => store.exclusive(async () => {
+    if (managementClosed) throw new TBError('unavailable', 'server is closed')
+    const task = run()
+    managementTask = task
+    try {
+      return await task
+    } finally {
+      managementTask = undefined
+    }
+  })
   const launch = async (
     current: BootstrapState,
     input?: SetupInput,
     restoredKeys?: BootstrapSecrets,
+    signal?: AbortSignal,
   ): Promise<void> => {
+    let candidateLost = false
+    const checkLaunch = () => {
+      signal?.throwIfAborted()
+      assertOwnershipIntact()
+      if (candidateLost) throw new TBError('unavailable', 'runtime ownership lost during preparation')
+    }
+    checkLaunch()
+    if (!current.databaseUrl)
+      throw new TBError('unavailable', 'bootstrap database connection is unavailable')
     const keys
       = restoredKeys ?? (await store.read<BootstrapSecrets>('keys.json'))
-    if (!keys || !current.databaseUrl)
+    if (!keys)
       throw new TBError(
         'unavailable',
-        'local bootstrap secrets or database connection are unavailable',
+        'local bootstrap secrets are unavailable',
       )
+    checkLaunch()
     const sql = postgres(current.databaseUrl, {
       max: 1,
       connect_timeout: 5,
       onnotice: () => {},
     })
+    const cancelIdentityCheck = () => {
+      void sql.end({ timeout: 0 }).catch(() => {})
+    }
+    signal?.addEventListener('abort', cancelIdentityCheck, { once: true })
     try {
       await sql.begin(async (tx) => {
         await tx`SELECT pg_advisory_xact_lock(7283020)`
@@ -114,8 +152,10 @@ export async function createManagedServer(options: ManagedServerOptions) {
           await tx`INSERT INTO tb_instance(id,instance_id) VALUES(1,${current.instanceId})`
       })
     } finally {
+      signal?.removeEventListener('abort', cancelIdentityCheck)
       await sql.end({ timeout: 1 })
     }
+    checkLaunch()
     const settings = input?.settings ?? runtimeConfigSchema.parse({})
     const candidate = createTbServer({
       databaseUrl: current.databaseUrl,
@@ -164,21 +204,33 @@ export async function createManagedServer(options: ManagedServerOptions) {
       pluginCatalog: BUILTIN_CATALOG,
       pluginRunnerSocket: options.pluginRunnerSocket,
       ...(options.uiDir ? { uiDir: options.uiDir } : {}),
+    }, () => {
+      candidateLost = true
+      if (business === candidate) ownershipLost.abort()
     })
+    const cancelPreparation = () => {
+      // launch awaits the same close in its catch before the startup task settles.
+      void candidate.close().catch(() => {})
+    }
+    signal?.addEventListener('abort', cancelPreparation, { once: true })
     try {
       await candidate.prepare()
+      checkLaunch()
+      if (business) await business.close()
+      checkLaunch()
     } catch (error) {
       await candidate.close()
       throw error
+    } finally {
+      signal?.removeEventListener('abort', cancelPreparation)
     }
-    await business?.close()
     business = candidate
     if (draining) business.startDraining()
-    if (listener) business.deviceHub.attach(listener as http.Server)
+    if (listener) business.deviceHub.attach(listener)
   }
 
   const maintenanceHooks: MaintenanceHooks = {
-    exclusive: run => store.exclusive(run),
+    exclusive: withManagementLock,
     readSnapshot: async () => {
       const current = await store.state()
       if (!current?.databaseUrl)
@@ -244,7 +296,7 @@ export async function createManagedServer(options: ManagedServerOptions) {
   }
   management.maintenance = new MaintenanceManager(maintenanceHooks)
   management.keys = new KeyManager({
-    exclusive: run => store.exclusive(run),
+    exclusive: withManagementLock,
     readSnapshot: async () => ({
       ...(await maintenanceHooks.readSnapshot()),
       replicaId,
@@ -276,21 +328,58 @@ export async function createManagedServer(options: ManagedServerOptions) {
     },
   })
 
-  try {
-    state = await store.initialize()
-    if (state.phase === 'initialized') {
-      try {
-        await launch(state)
-        phase = 'ready'
-      } catch {
-        phase = 'recovery'
-      }
-    } else phase = state.phase
-  } catch {
+  const recover = (stage: 'bootstrap' | 'launch', error: unknown) => {
     phase = 'recovery'
+    let reason = 'dependency_or_io_failure'
+    if (isTBError(error)) reason = error.code
+    else if (error instanceof SyntaxError) reason = 'invalid_json'
+    else if (error instanceof Error && error.name === 'ZodError') reason = 'invalid_configuration'
+    console.error(JSON.stringify({ event: 'tool_bridge_recovery_required', stage, reason }))
   }
+  let stage: 'bootstrap' | 'launch' = 'bootstrap'
+  const attemptStartup = () => store.withStartupState(state?.instanceId, async (current) => {
+    startup.signal.throwIfAborted()
+    state = current
+    if (state.phase !== 'initialized') {
+      phase = state.phase
+      return
+    }
+    stage = 'launch'
+    await launch(state, undefined, undefined, startup.signal)
+    phase = 'ready'
+  })
+  let reportContention!: () => void
+  const contention = new Promise<void>((resolve) => {
+    reportContention = resolve
+  })
+  const startupTask = pRetry(attemptStartup, {
+    signal: startup.signal,
+    retries: Infinity,
+    minTimeout: 1000,
+    maxTimeout: 10000,
+    randomize: true,
+    unref: true,
+    shouldRetry: ({ error, attemptNumber }) => {
+      if (!(error instanceof BootstrapLockBusyError || error instanceof RuntimeHandoffPendingError)) return false
+      if (attemptNumber === 1) {
+        phase = 'starting'
+        console.info(JSON.stringify({ event: 'tool_bridge_waiting_for_runtime_owner' }))
+        reportContention()
+      }
+      return true
+    },
+  }).catch((error: unknown) => {
+    if (!startup.signal.aborted && !ownershipLost.signal.aborted) recover(stage, error)
+  })
+  await Promise.race([startupTask, contention])
 
   app.get('/~setup/status', c => c.json(status()))
+  app.use('/~setup/*', async (c, next) => {
+    if (handoffBlocked())
+      return c.json({ code: 'unavailable', state: runtimeState() }, 503)
+    await next()
+  })
+  app.use('/~setup/*', bodyLimit({ maxSize: 65536 }))
   app.get('/~setup/defaults', async (c) => {
     await store.authorize(
       c.req.header('x-tb-setup-token'),
@@ -316,7 +405,7 @@ export async function createManagedServer(options: ManagedServerOptions) {
     })
   })
   const configure = async (request: Request, recovery: boolean) =>
-    store.exclusive(async () => {
+    withManagementLock(async () => {
       const current = await store.authorize(
         request.headers.get('x-tb-setup-token') ?? undefined,
         recovery ? 'recovery' : 'setup',
@@ -379,6 +468,7 @@ export async function createManagedServer(options: ManagedServerOptions) {
           : current.internalS3Origin,
         revision: current.revision + 1,
       }
+      assertOwnershipIntact()
       phase = 'installing'
       await store.write(
         recovery ? 'bootstrap-pending.json' : 'bootstrap.json',
@@ -387,6 +477,7 @@ export async function createManagedServer(options: ManagedServerOptions) {
       if (!recovery) state = next
       try {
         await launch(next, input, restoredKeys)
+        assertOwnershipIntact()
         if (restoredKeys) await store.write('keys.json', restoredKeys)
         await store.finish(next)
         state = await store.state()
@@ -413,18 +504,20 @@ export async function createManagedServer(options: ManagedServerOptions) {
     c.json({
       healthy: true,
       version: pkg.version,
-      state: phase,
+      state: runtimeState(),
       instanceId: state?.instanceId,
     }),
   )
   app.get('/readyz', async c =>
-    business && phase === 'ready' && !maintaining
+    business && phase === 'ready' && !maintaining && !ownershipLost.signal.aborted
       ? business.app.fetch(c.req.raw)
-      : c.json({ ready: false, state: phase }, 503),
+      : c.json({ ready: false, state: runtimeState() }, 503),
   )
   app.all('*', async (c) => {
-    if (phase === 'ready' && business && !maintaining)
+    if (phase === 'ready' && business && !maintaining && !ownershipLost.signal.aborted)
       return business.app.fetch(c.req.raw)
+    if (handoffBlocked())
+      return c.json({ code: 'unavailable', state: runtimeState() }, 503)
     const path = new URL(c.req.url).pathname
     if ((path === '/ui' || path.startsWith('/ui/')) && assets)
       return serveUiAssets(c.req.raw, assets)
@@ -469,52 +562,86 @@ export async function createManagedServer(options: ManagedServerOptions) {
   })
   const startDraining = (): void => {
     draining = true
+    startup.abort()
     business?.startDraining()
   }
-  const close = async (): Promise<void> => {
-    const closed = listener
+  const close = (): Promise<void> => closePromise ??= (async () => {
+    startDraining()
+    drainDelay.abort()
+    // listen(host) can still be resolving the hostname when close is called.
+    await listening?.catch(() => {})
+    const socket = listener
+    const closed = socket?.listening
       ? new Promise<void>((resolve, reject) => {
-          listener!.close(error => (error ? reject(error) : resolve()));
-          (listener as http.Server).closeIdleConnections?.()
+          socket.close(error => (error ? reject(error) : resolve()))
+          socket.closeIdleConnections()
         })
       : Promise.resolve()
-    const previous = business
-    await previous?.close()
-    await closed
-    // An admitted maintenance request can finish a reload while the listener drains.
-    // Close that final runtime as well, before its durable registration is abandoned.
-    if (business !== previous) await business?.close()
-    listener = undefined
-    business = undefined
-  }
+    let previous: TbServer | undefined
+    const closeRuntime = async () => {
+      await startupTask
+      previous = business
+      await previous?.close()
+    }
+    // This listener also owns HTTP connections that never reached the business app.
+    const disconnectClients = () => socket?.closeAllConnections()
+    ownershipLost.signal.addEventListener('abort', disconnectClients, { once: true })
+    if (ownershipLost.signal.aborted) disconnectClients()
+    try {
+      const [runtime, connections] = await Promise.allSettled([closeRuntime(), closed])
+      // Embedded callers can also have an admitted setup or reload without an HTTP socket.
+      managementClosed = true
+      await managementTask?.catch(() => {})
+      if (business !== previous) await business?.close()
+      if (runtime.status === 'rejected') throw runtime.reason
+      if (connections.status === 'rejected') throw connections.reason
+    } finally {
+      ownershipLost.signal.removeEventListener('abort', disconnectClients)
+      listener = undefined
+      business = undefined
+    }
+  })()
   return {
     app,
     store,
+    ownershipLost: ownershipLost.signal,
     async start(): Promise<{ port: number }> {
-      return new Promise((resolve, reject) => {
-        listener = serve(
-          {
-            fetch: app.fetch,
-            port: options.port ?? state?.port ?? 8787,
-            hostname: options.host ?? state?.host ?? '0.0.0.0',
-          },
-          (info) => {
-            actualPort = info.port
-            business?.deviceHub.attach(listener as http.Server)
-            resolve({ port: actualPort })
-          },
-        )
-        listener.once('error', reject)
-      })
+      if (draining) throw new TBError('unavailable', 'server is shutting down')
+      return listening ??= (async () => {
+        // Maintenance may already have held the lock at boot. Use the persisted
+        // bind address for this listener; admission always re-reads under lock.
+        const bind = state ?? (phase === 'starting' ? await store.state() : undefined)
+        return new Promise<{ port: number }>((resolve, reject) => {
+          listener = serve(
+            {
+              fetch: app.fetch,
+              port: options.port ?? bind?.port ?? 8787,
+              hostname: options.host ?? bind?.host ?? '0.0.0.0',
+            },
+            (info) => {
+              if (listener && !draining && !ownershipLost.signal.aborted) business?.deviceHub.attach(listener)
+              resolve({ port: info.port })
+            },
+          ) as http.Server
+          listener.once('error', reject)
+        })
+      })()
     },
     startDraining,
     close,
     shutdown(): Promise<void> {
+      if (closePromise) return closePromise
       shutdownPromise ??= (async () => {
         startDraining()
         // Read the successfully applied local snapshot; shutdown cannot wait on PG.
         const seconds = business?.shutdownDrainSec ?? lastShutdownDrainSec
-        if (seconds > 0) await delay(seconds * 1000)
+        if (seconds > 0) {
+          try {
+            await delay(seconds * 1000, undefined, { signal: drainDelay.signal })
+          } catch (error) {
+            if (!drainDelay.signal.aborted) throw error
+          }
+        }
         await close()
       })()
       return shutdownPromise

@@ -1,4 +1,4 @@
-import type { ISql, ReservedSql, Sql } from 'postgres'
+import postgres, { type ISql, type Sql } from 'postgres'
 import { TBError } from '@tool-bridge/core'
 import { createHash } from 'node:crypto'
 
@@ -18,6 +18,7 @@ export async function ensureRuntimeCoordinationSchema(sql: Sql): Promise<void> {
     await tx`CREATE TABLE IF NOT EXISTS tb_runtime_router (
       instance_id text PRIMARY KEY, identity text NOT NULL, enforce_identity boolean NOT NULL DEFAULT false)`
     await tx`ALTER TABLE tb_runtime_replicas ADD COLUMN IF NOT EXISTS router_identity text`
+    await tx`ALTER TABLE tb_runtime_replicas ADD COLUMN IF NOT EXISTS session_fenced boolean NOT NULL DEFAULT false`
     // A pre-upgrade binary does not supply a router identity. After a switch it must
     // not admit itself with an outdated local bootstrap, even after the fence is lifted.
     await tx`CREATE OR REPLACE FUNCTION tb_check_runtime_router() RETURNS trigger LANGUAGE plpgsql AS $$
@@ -52,85 +53,127 @@ export interface RuntimeLease {
   release(): Promise<void>
 }
 
-async function runtimeLockHeld(sql: ISql, backendPid: number | undefined, mode = 'ShareLock'): Promise<boolean> {
-  if (backendPid === undefined) return false
-  const [row] = await sql<{ held: boolean }[]>`SELECT EXISTS(SELECT 1 FROM pg_locks
-    WHERE pid=${backendPid} AND locktype='advisory' AND mode=${mode} AND granted) AS held`
-  return row?.held === true
+export class RuntimeHandoffPendingError extends TBError {
+  constructor(message = 'another runtime still holds the database session lock') {
+    super('unavailable', message, { retryable: true })
+    this.name = 'RuntimeHandoffPendingError'
+  }
+}
+
+// postgres.js exposes onclose on a client, not on a reserve() handle. Give the
+// lock its own physical connection: closing it also drops locks after an unknown
+// query outcome, without returning a possibly locked session to the business pool.
+function lockConnection(sql: Sql, onclose?: () => void): Sql {
+  const options = { ...sql.options, max: 1, idle_timeout: 0, max_lifetime: null, onclose }
+  // postgres.js also clones parsed options for its LISTEN and subscription clients.
+  // @ts-expect-error The constructor types only describe unparsed hosts and ports.
+  return postgres(options)
+}
+
+interface SessionLock {
+  key: string
+  pid: number
+}
+
+async function tryRuntimeLock(sql: ISql, shared: boolean): Promise<SessionLock | undefined> {
+  const [row] = await sql<(SessionLock & { acquired: boolean })[]>`SELECT pg_backend_pid() AS pid, key::text,
+    CASE WHEN ${shared}::boolean THEN pg_try_advisory_lock_shared(key) ELSE pg_try_advisory_lock(key) END AS acquired
+    FROM (SELECT hashtextextended(current_schema() || ':tool-bridge-runtime',${RUNTIME_LOCK}) AS key) AS runtime`
+  return row?.acquired ? row : undefined
+}
+
+async function runtimeLockHeld(sql: ISql, lock: SessionLock, shared: boolean): Promise<boolean> {
+  const rows = await sql`SELECT 1 FROM pg_catalog.pg_locks
+    WHERE locktype='advisory' AND granted AND pid=pg_backend_pid() AND pid=${lock.pid}
+      AND database=(SELECT oid FROM pg_catalog.pg_database WHERE datname=current_database())
+      AND mode=${shared ? 'ShareLock' : 'ExclusiveLock'} AND objsubid=1
+      AND classid=((${lock.key}::bigint >> 32) & 4294967295)::oid
+      AND objid=(${lock.key}::bigint & 4294967295)::oid`
+  return rows.length === 1
 }
 
 /**
- * A live runtime holds a shared session lock until its requests/background work drain.
- * Migration also requires all foreign registry rows to have been explicitly removed
- * by graceful shutdown: a broken/reconnected session is not proof of stopped work.
- * The reserved connection is never used for business transactions or network I/O.
+ * Session locks arbitrate admission. A foreign row survives takeover so maintenance
+ * still requires proof of graceful drain. A lost lease calls onLost once, even
+ * between heartbeats, and can never regain authority by reconnecting.
  */
 export async function acquireRuntimeLease(
   sql: Sql,
-  input: { instanceId: string, redisUrl?: string, replicaId: string },
+  input: { instanceId: string, onLost?: () => void, redisUrl?: string, replicaId: string },
 ): Promise<RuntimeLease> {
-  await ensureRuntimeCoordinationSchema(sql)
-  const session = await sql.reserve()
-  let released = false
-  let admitted = false
   const router = routerIdentity(input.redisUrl)
-  let held = false
-  let backendPid: number | undefined
-  let lost = false
-  const heartbeat = async () => {
-    if (released) throw new TBError('unavailable', 'runtime lease has been released')
-    if (lost) throw new TBError('unavailable', 'runtime database session was lost; drain and restart this replica')
-    await sql.begin(async (tx) => {
+  const shared = Boolean(input.redisUrl)
+  await ensureRuntimeCoordinationSchema(sql)
+  let registered = false
+  let lost: TBError | undefined
+  let releasing: Promise<void> | undefined
+  const markLost = () => {
+    if (!lost) {
+      lost = new TBError('unavailable', 'runtime database session was lost; drain and restart this replica')
+      if (registered && !releasing) input.onLost?.()
+    }
+    return lost
+  }
+  const session = lockConnection(sql, markLost)
+  const checkSession = () => {
+    if (releasing) throw new TBError('unavailable', 'runtime lease has been released')
+    if (lost) throw lost
+  }
+  const release = () => releasing ??= (async () => {
+    try {
+      if (registered) await sql`DELETE FROM tb_runtime_replicas WHERE replica_id=${input.replicaId}`
+    } finally {
+      await session.end({ timeout: 5 })
+    }
+  })()
+
+  try {
+    const lock = await session.begin(async (tx) => {
       await tx`SELECT pg_advisory_xact_lock(${COORDINATION_LOCK})`
       await assertRuntimeAuthority(tx, input.replicaId)
-      if (!held) {
-        const [row] = await session<{ acquired: boolean, pid: number }[]>`SELECT pg_backend_pid() AS pid,
-          pg_try_advisory_lock_shared(hashtextextended(current_schema() || ':tool-bridge-runtime',${RUNTIME_LOCK})) AS acquired`
-        if (!row?.acquired) throw new TBError('unavailable', 'database migration is draining its previous authority')
-        held = true
-        backendPid = row.pid
-      } else {
-        // Do not execute through a disconnected reserved wrapper: postgres.js may
-        // reconnect it without its lock, or leave a query waiting on a closed socket.
-        if (!await runtimeLockHeld(tx, backendPid)) {
-          lost = true
-          throw new TBError('unavailable', 'runtime database session was lost; drain and restart this replica')
-        }
+      await tx`INSERT INTO tb_runtime_router(instance_id,identity) VALUES(${input.instanceId},${router}) ON CONFLICT DO NOTHING`
+      const [current] = await tx`SELECT identity FROM tb_runtime_router WHERE instance_id=${input.instanceId}`
+      if (current?.identity !== router) throw new TBError('conflict', 'Redis configuration differs from the active router; update this replica before joining')
+
+      const lock = await tryRuntimeLock(tx, shared)
+      if (!lock) {
+        // Even the maintenance owner cannot start a replacement during its own drain.
+        const maintenance = await tx`SELECT 1 FROM tb_runtime_maintenance WHERE id=1 AND expires_at>now()`
+        if (shared || maintenance.length) throw new TBError('unavailable', 'database authority is held by another runtime or maintenance')
+        throw new RuntimeHandoffPendingError()
       }
-      if (!admitted) {
-        await tx`INSERT INTO tb_runtime_router(instance_id,identity) VALUES(${input.instanceId},${router}) ON CONFLICT DO NOTHING`
-        const [current] = await tx`SELECT identity FROM tb_runtime_router WHERE instance_id=${input.instanceId}`
-        if (current?.identity !== router) throw new TBError('conflict', 'Redis configuration differs from the active router; update this replica before joining')
-        const duplicate = await tx`SELECT 1 FROM tb_runtime_replicas WHERE replica_id=${input.replicaId}`
-        if (duplicate.length) throw new TBError('conflict', 'runtime replica ID is already registered; drain the previous runtime')
+      if (!shared) {
+        // Older servers cannot seal their business pool when their lock session dies.
+        // Keep their original admission window during the initial stop-first upgrade.
+        const legacy = await tx`SELECT 1 FROM tb_runtime_replicas WHERE instance_id=${input.instanceId}
+          AND session_fenced=false AND expires_at>now() LIMIT 1`
+        if (legacy.length) throw new RuntimeHandoffPendingError('waiting for the previous gateway version to drain')
       }
-      const others = await tx`SELECT 1 FROM tb_runtime_replicas
-        WHERE instance_id=${input.instanceId} AND replica_id<>${input.replicaId} AND expires_at>now()`
-      if (others.length && !input.redisUrl) throw new TBError('unavailable', 'multiple replicas require a configured Redis device router')
-      await tx`INSERT INTO tb_runtime_replicas(replica_id,instance_id,expires_at,router_identity)
-        VALUES(${input.replicaId},${input.instanceId},now()+interval '60 seconds',${router})
-        ON CONFLICT(replica_id) DO UPDATE SET expires_at=excluded.expires_at`
+      const inserted = await tx`INSERT INTO tb_runtime_replicas(replica_id,instance_id,expires_at,router_identity,session_fenced)
+        VALUES(${input.replicaId},${input.instanceId},now()+interval '60 seconds',${router},true)
+        ON CONFLICT(replica_id) DO NOTHING RETURNING replica_id`
+      if (!inserted.length) throw new TBError('conflict', 'runtime replica ID is already registered; drain the previous runtime')
+      return lock
     })
-  }
-  const release = async () => {
-    if (released) return
-    released = true
-    try {
-      if (admitted) await sql`DELETE FROM tb_runtime_replicas WHERE replica_id=${input.replicaId}`
-    } finally {
-      try {
-        if (held && await runtimeLockHeld(sql, backendPid)) await session`SELECT pg_advisory_unlock_shared(hashtextextended(current_schema() || ':tool-bridge-runtime',${RUNTIME_LOCK}))`
-      } finally {
-        session.release()
-      }
+    registered = true
+    checkSession()
+    return {
+      heartbeat: async () => {
+        checkSession()
+        await session.begin(async (tx) => {
+          await tx`SELECT pg_advisory_xact_lock(${COORDINATION_LOCK})`
+          checkSession()
+          await assertRuntimeAuthority(tx, input.replicaId)
+          const updated = await tx`UPDATE tb_runtime_replicas SET expires_at=now()+interval '60 seconds'
+            WHERE replica_id=${input.replicaId} RETURNING replica_id`
+          if (!updated.length || !await runtimeLockHeld(tx, lock, shared)) throw markLost()
+        })
+        checkSession()
+      },
+      release,
     }
-  }
-  try {
-    await heartbeat()
-    admitted = true
-    return { heartbeat, release }
   } catch (error) {
-    await release().catch(() => {})
+    await release()
     throw error
   }
 }
@@ -166,28 +209,25 @@ async function acquireMaintenanceFence(
       ON CONFLICT(id) DO UPDATE SET owner_replica_id=excluded.owner_replica_id,expires_at=excluded.expires_at,
         purpose=excluded.purpose,phase=excluded.phase,operation_id=excluded.operation_id`
   })
-  let session: ReservedSql | undefined
-  let locked = false
-  let backendPid: number | undefined
+  let session: Sql | undefined
   const releaseLock = async () => {
     const previous = session
     session = undefined
-    if (!previous) return
-    try {
-      if (locked && await runtimeLockHeld(sql, backendPid, 'ExclusiveLock')) await previous`SELECT pg_advisory_unlock(hashtextextended(current_schema() || ':tool-bridge-runtime',${RUNTIME_LOCK}))`
-    } finally {
-      locked = false
-      previous.release()
-    }
+    await previous?.end()
   }
   return {
     drain: async () => {
-      session = await sql.reserve()
-      const [row] = await session<{ acquired: boolean, pid: number }[]>`SELECT pg_backend_pid() AS pid,
-        pg_try_advisory_lock(hashtextextended(current_schema() || ':tool-bridge-runtime',${RUNTIME_LOCK})) AS acquired`
-      if (!row?.acquired) throw new TBError('conflict', 'another runtime still holds this database; stop it before migration')
-      locked = true
-      backendPid = row.pid
+      if (session) throw new TBError('conflict', 'maintenance already has a drain in progress')
+      const attempt = lockConnection(sql)
+      session = attempt
+      try {
+        if (!await tryRuntimeLock(attempt, false))
+          throw new TBError('conflict', 'another runtime still holds this database; stop it before migration')
+      } catch (error) {
+        if (session === attempt) session = undefined
+        await attempt.end()
+        throw error
+      }
     },
     retire: async () => {
       const rows = await sql`UPDATE tb_runtime_maintenance SET phase='retired'

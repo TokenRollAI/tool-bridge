@@ -51,12 +51,15 @@ const program = new Command('tool-bridge-server')
       stopping = true
       console.log(JSON.stringify({ event: 'tool_bridge_draining' }))
       void server.shutdown().then(
-        () => process.exit(0),
+        () => process.exit(server.ownershipLost.aborted ? 1 : 0),
         () => process.exit(1),
       )
     }
     process.on('SIGINT', shutdown)
     process.on('SIGTERM', shutdown)
+    // Loss can occur before listen completes, or while SIGTERM is draining.
+    server.ownershipLost.addEventListener('abort', shutdown, { once: true })
+    if (server.ownershipLost.aborted) shutdown()
   })
 try {
   await program.parseAsync()

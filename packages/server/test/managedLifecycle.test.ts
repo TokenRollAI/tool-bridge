@@ -14,7 +14,7 @@ afterEach(async () => {
   for (const close of cleanup.splice(0).reverse()) await close()
 })
 
-async function executable() {
+async function executable(shutdownDrainSec = 0) {
   const directory = await mkdtemp(join(tmpdir(), 'tb-lifecycle-'))
   cleanup.push(() => rm(directory, { recursive: true, force: true }))
   const bootstrap = new BootstrapStateStore(directory)
@@ -64,7 +64,7 @@ async function executable() {
   const installed = await fetch(base + '/~setup/configure', {
     method: 'POST',
     headers: { 'content-type': 'application/json', 'x-tb-setup-token': token },
-    body: JSON.stringify({ settings: { shutdownDrainSec: 0 } }),
+    body: JSON.stringify({ settings: { shutdownDrainSec } }),
   })
   expect(installed.status).toBe(200)
   const { adminSk } = await installed.json() as { adminSk: string }
@@ -119,6 +119,33 @@ describe('managed executable lifecycle', () => {
     expect(await f.exit).toEqual({ code: 0, signal: null })
     expect(Date.now() - started).toBeGreaterThanOrEqual(1800)
     expect(Date.now() - started).toBeLessThan(8000)
+  })
+
+  it.each([false, true])('seals ingress and exits nonzero after ownership loss (SIGTERM already draining: %s)', async (signalFirst) => {
+    const f = await executable(2)
+    const sql = postgres(f.databaseUrl!, { max: 1, onnotice: () => {} })
+    cleanup.push(() => sql.end({ timeout: 1 }))
+    const started = Date.now()
+    if (signalFirst) {
+      f.child.kill('SIGTERM')
+      await f.draining
+    }
+    const stopped = await sql`SELECT pg_terminate_backend(pid) AS stopped FROM pg_locks
+      WHERE locktype='advisory' AND granted AND mode='ExclusiveLock' AND objsubid=1
+        AND database=(SELECT oid FROM pg_database WHERE datname=current_database())
+        AND objid=(hashtextextended(current_schema() || ':tool-bridge-runtime',7283023) & 4294967295)::oid
+        AND classid=((hashtextextended(current_schema() || ':tool-bridge-runtime',7283023) >> 32) & 4294967295)::oid`
+    expect(stopped.map(row => row.stopped)).toEqual([true])
+    await f.draining
+    await vi.waitFor(async () => {
+      const ready = await fetch(f.base + '/readyz')
+      expect(ready.status).toBe(503)
+      expect(await ready.json()).toEqual({ ready: false, state: 'ownership_lost' })
+    }, { timeout: 1500, interval: 20 })
+    expect((await f.post('/system/config/get')).status).toBe(503)
+    expect(await f.exit).toEqual({ code: 1, signal: null })
+    expect(Date.now() - started).toBeGreaterThanOrEqual(1800)
+    expect(await sql`SELECT replica_id FROM tb_runtime_replicas`).toHaveLength(0)
   })
 
   it('maintenance waits for other writes and a concurrent SIGTERM closes the reloaded runtime', async () => {
