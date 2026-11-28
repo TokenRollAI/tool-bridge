@@ -30,7 +30,7 @@
       "validatedRevision": "fbd9c512008b08799ea79bf2a64f2daf73df55cd"
     },
     "hosts-deploy/node-docker-and-helm.mdx": {
-      "validatedRevision": "fbd9c512008b08799ea79bf2a64f2daf73df55cd"
+      "validatedRevision": "bacdae22d619b6ccfe89d2f2d3d86a746e0eb3b6"
     },
     "hosts-deploy/state-store-decision.mdx": {
       "validatedRevision": "fbd9c512008b08799ea79bf2a64f2daf73df55cd"
@@ -60,10 +60,10 @@
       "validatedRevision": "fbd9c512008b08799ea79bf2a64f2daf73df55cd"
     },
     "hosts-deploy/managed-configuration.mdx": {
-      "validatedRevision": "fbd9c512008b08799ea79bf2a64f2daf73df55cd"
+      "validatedRevision": "bacdae22d619b6ccfe89d2f2d3d86a746e0eb3b6"
     },
     "hosts-deploy/maintenance-and-keys.mdx": {
-      "validatedRevision": "fbd9c512008b08799ea79bf2a64f2daf73df55cd"
+      "validatedRevision": "bacdae22d619b6ccfe89d2f2d3d86a746e0eb3b6"
     },
     "store/storage-backends.mdx": {
       "validatedRevision": "b7c8bc5f595b8e1c781a92f8a1d95bfda78a17dc"
