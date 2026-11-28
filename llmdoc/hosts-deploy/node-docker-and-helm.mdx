@@ -55,15 +55,21 @@ code:
 
 首次启动检查 init 完成、PG/S3 可用、受保护配对、setup ready 与业务授权调用。`/healthz` 在安装态仍能成功，这是为了让安装面存活；不能把 Docker HEALTHCHECK healthy 当作安装已经完成。首次安装、重新构建应用和重启 PG/S3 是不同验收，必须分别证明身份、配置和对象字节仍可恢复。`down` 与删卷重置不同，清空卷必须是明确的数据丢弃操作。
 
-正常 `docker compose up` 在 PostgreSQL 健康、init 与 init-bucket 成功完成后才启动 app。整组重启须先完整停止 app，使 runtime 登记和租约在 PG 可达时释放，再停止 PG/S3，最后通过 `up` 恢复依赖顺序。不能从这些启动闸门推导任意并发 `restart` 或 Docker daemon 重启都能自动恢复：应用启动失败会进入 recovery，不会自动重试 launch；依赖就绪后须重启 app，并重新核验原实例身份、权限、配置与对象字节。
+正常 `docker compose up` 在 PostgreSQL 健康、init 与 init-bucket 成功完成后才启动 app。整组重启须先完整停止 app，使 runtime 登记和租约在 PG 可达时释放，再停止 PG/S3，最后通过 `up` 恢复依赖顺序。如果并发 `restart` 或 Docker daemon 重启导致 app 在依赖可用前启动并进入 recovery，等依赖就绪后重启 app，再核验原实例身份、权限、配置与对象字节。
 
 正式镜像同时携带应用、Dashboard 和官方 PG dump/restore 客户端，运行用户无 root 权限；installer 的初始化容器才执行所需 owner 设置。镜像构建不得依赖宿主已存在 dist，Node 二进制与运行基础镜像也必须匹配。runtime 基于 Node slim，安装官方 PGDG client 工具，不继承数据库 server 镜像及其隐式 VOLUME。
+
+## Dokploy 单实例升级
+
+1. 升级前核对备份覆盖 bootstrap（含身份和密钥）、PostgreSQL 和 S3。在隔离环境验证可恢复，并读回业务记录和已有对象。
+2. 保持 PG/S3 可用，按 stop-first 顺序升级。先摘除旧 app 的流量并等待正常排空。首次从旧版升级时，旧进程即使丢掉锁会话仍可能使用业务连接。确认旧进程已退出后，再用原 bootstrap、PG 和 S3 启动新镜像。
+3. 等新 app 的 `/readyz` 返回 200，核对实例身份，再通过新 app 验证一次原有授权请求和已有对象读取，随后恢复流量。
 
 ## 探针、反向代理与关停
 
 - `/livez` 证明进程存活，PG 抖动不能触发 liveness 杀进程。
 - `/healthz` 返回版本、实例和安装状态，适合进程/安装面检查。
-- `/readyz` 在业务未初始化、恢复、维护或 draining 时返回 503；运行态检查 PG、已配置 Redis 与 active S3。需要摘流量的编排器使用 readiness。
+- `/readyz` 在业务未初始化、等待交接、失去运行权、恢复、维护或 draining 时返回 503。运行态会检查 PG、已配置 Redis 与 active S3。需要摘流量的编排器使用 readiness。
 
 平台仅可注入 `PORT` 与受保护 bootstrap 位置；业务设置在 PG。代理须保留 Host、Authorization 与 WebSocket upgrade。TLS 在代理终止时，`canonicalOrigin` 是 Store URL protocol 的信任根，对外 alias host/port 仍取当次请求；不信任客户端 `X-Forwarded-Proto`。
 
@@ -71,7 +77,7 @@ SIGTERM 经 managed shutdown 先标记 draining，让 readiness 立即失败；�
 
 所有实际 HTTP 请求都进入排空计数。`responseLifecycle.ts` 将释放延至 body 完成、取消清理结束或上游错误，保持背压并在消费者暂停时也处理上游错误。客户端断开会主动取消上游响应流，即使 HTTP adapter 尚未开始消费该响应。只有执行 quiesce 的当前维护调用能通过 AsyncLocalStorage 释放自身一次；不得按原始 URL 前缀猜调用归属，编码、大小写和别名不能改变该规则。
 
-`TbServer.close` 复用同一个 closePromise，但必须先释放当前维护调用，再复用已经开始的关停，避免彼此等待。开始关闭 runtime 时主动终止 MCP 事件订阅，并拒绝新订阅，排空无需等 SSE 的自然期限。managed listener 排空后还要关闭维护途中 reload 出的最终 runtime，不能让进程退出遗留其登记。正常请求、响应流与后台工作结束后才释放 runtime 登记和共享锁。慢 cleanup tick 不重入，首轮在监听后异步执行。
+`TbServer.close` 复用同一个 closePromise，但必须先释放当前维护调用，再复用已经开始的关停，避免彼此等待。开始关闭 runtime 时主动终止 MCP 事件订阅，并拒绝新订阅，排空无需等 SSE 的自然期限。managed listener 排空后还要关闭维护途中 reload 出的最终 runtime，不能让进程退出遗留其登记。正常请求、响应流与后台工作结束后才释放 runtime 登记和会话锁。慢 cleanup tick 不重入，首轮在监听后异步执行。
 
 ## 受限部署执行器
 
@@ -106,7 +112,7 @@ Helm chart 部署同一 managed 服务，PG/S3 由外部供应，用户仍先配
 
 Node DeviceHub 保有本副本活 socket，DeviceRouter 通过 Redis 路由到持有连接的副本。registry presence 是可见性提示，不是 socket 归属权威；跨副本调用的 `completed|not_dispatched|unknown` 仍遵守单次执行语义。Redis 中断会使路由不可用，不能退成“在线但随便发到本地”。
 
-服务器以 PG replica registry 和共享 session lock 登记 runtime。没有 Redis 时拒绝启动第二个活跃副本。已配置的副本须和 PG 记录的活动路由身份一致，调整 Redis 需要同时协调所有副本。受保护维护要求其它副本正常 drain 并删除登记，过期 heartbeat 或断开的 session 都不能替代该证明。崩溃残留走 [离线恢复边界](./maintenance-and-keys.mdx)。
+未配置 Redis 时，同一 PG schema 只允许一个 runtime 持有独立 PG 会话上的排他 advisory lock。新版接管以会话锁为准。同实例仍有旧版登记时，还须等该登记删除或原 heartbeat TTL 到期。候补的探针与配对行为见 [受管理启动](./managed-configuration.mdx#已初始化实例的启动与交接)。配置 Redis 的副本持有共享会话锁，须匹配 PG 记录的活动路由身份。Redis 调整与崩溃残留按 [专项维护](./maintenance-and-keys.mdx) 处理。
 
 ## 部署验证
 

@@ -62,7 +62,7 @@ Redis 维护同样要求其它副本先正常排空。PG 保存活动路由身�
 
 签名 rotate 默认保留旧 token 的有效窗口，旧根只有期限窗口结束且 upload/share/call 引用为零时才能退役。显式 revokeExisting 会撤销在途上传、call/share 并去掉旧签名根；既有 ref 随旧 kid 无法验证而失效。该选择会改变已有授权行为，CLI/UI 必须明确表达，不能当无影响换钥。
 
-数据库迁移、Redis 切换与 key mutation 都拒绝本实例任何 foreign runtime registry 行，包括 heartbeat 已过期的行。只有请求、设备和后台工作正常结束后，runtime 才删除自身登记。崩溃残留要求显式离线协调。runtime 的 shared session lock 是第二道并发检查，锁丢失后该 runtime 需排空并重启。key mutation 还持有专用 maintenance fence，新登记也服从它。重加密最终以引用复核和 completed 为准。异常退出的登记或永久 fence 会继续阻止维护或启动，不能按失联时间自动解封。
+数据库迁移、Redis 切换与 key mutation 都拒绝本实例其他 runtime 的登记，包括 heartbeat 已过期的行。正常排空后，runtime 删除自身登记。单实例交接保留前任的残留登记供维护检查，崩溃残留须显式离线协调。数据库迁移和 Redis 切换还须在本机排空后取得排他会话锁。key mutation 持有专用 maintenance fence，新登记也受它约束。重加密最终以引用复核和 completed 为准。持久数据库与 Redis fence 按维护阶段继续限制启动和写入。
 
 ## 备份与本机恢复
 
