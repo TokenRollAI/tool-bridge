@@ -16,9 +16,9 @@ import {
   type TbAppDeps,
 } from '@tool-bridge/app'
 import { createGuardedFetch } from '@tool-bridge/plugins/guarded-fetch'
-import { serve, type ServerType } from '@hono/node-server'
 import { AsyncLocalStorage } from 'node:async_hooks'
 import postgres, { type Sql } from 'postgres'
+import { serve } from '@hono/node-server'
 import { randomUUID } from 'node:crypto'
 import { Hono } from 'hono'
 import { acquireRuntimeLease, assertRuntimeAuthority, type RuntimeLease } from './pgMaintenanceFence'
@@ -64,7 +64,7 @@ export interface TbServer {
   storage: StorageManager
 }
 
-export function createTbServer(config: ServerConfig): TbServer {
+export function createTbServer(config: ServerConfig, onOwnershipLost?: () => void): TbServer {
   if (!config.databaseUrl)
     throw new TBError(
       'unavailable',
@@ -90,6 +90,7 @@ export function createTbServer(config: ServerConfig): TbServer {
   const storeRepository = new PgStoreRepository(sql)
   const eventRepository = new PgEventRepository(sql)
   const eventStreamShutdown = new AbortController()
+  const shutdown = new AbortController()
   const mailboxRepository = new PgMailboxRepository(sql)
   const storage = new StorageManager(sql, secrets, {
     ...(config.internalS3Origin
@@ -122,6 +123,14 @@ export function createTbServer(config: ServerConfig): TbServer {
 
   // draining:SIGTERM 后置位,/readyz 立即转 503;进程仍继续服务到 close()。
   let draining = false
+  let closing = false
+  let preparedForTraffic = false
+  const ownershipLost = new AbortController()
+  const accepting = () => preparedForTraffic && !closing && !ownershipLost.signal.aborted
+  const assertOpen = () => {
+    if (closing || ownershipLost.signal.aborted)
+      throw new TBError('unavailable', 'runtime is closed')
+  }
 
   /** 单项探测:限时 1s——探针不能反过来拖垮进程(PG 挂起时探测也会挂起)。 */
   const probeOne = async (
@@ -148,18 +157,12 @@ export function createTbServer(config: ServerConfig): TbServer {
   }
 
   const readiness = async (): Promise<ReadinessReport> => {
+    if (!accepting()) return { ready: false, checks: { runtime: { ok: false, detail: 'runtime not accepting requests' } } }
     const checks: ReadinessReport['checks'] = {}
     const probes: Array<Promise<void>> = []
-    const statePing = async () => {
-      await sql`SELECT 1`
-    }
-    if (statePing !== undefined) {
-      probes.push(
-        probeOne(statePing).then((r) => {
-          checks.state = r
-        }),
-      )
-    }
+    probes.push(probeOne(() => assertRuntimeAuthority(sql, replicaId)).then((r) => {
+      checks.state = r
+    }))
     if (redisBackend !== undefined) {
       probes.push(
         probeOne(async () => await redisBackend.ping()).then((r) => {
@@ -200,6 +203,8 @@ export function createTbServer(config: ServerConfig): TbServer {
     mailboxRepository,
     eventRepository,
     eventStreamShutdown: eventStreamShutdown.signal,
+    // In-process MCP calls can also enter the inner HTBP app.
+    ensureReady: async () => ownershipLost.signal.throwIfAborted(),
     storageManagement: storage,
     deploymentManagement: deployment,
     ...(config.adminAudit ? { adminAudit: config.adminAudit } : {}),
@@ -265,21 +270,25 @@ export function createTbServer(config: ServerConfig): TbServer {
     deps.storeCallAllowedContentTypes = config.storeCallAllowedContentTypes
   }
 
-  let server: ServerType | undefined
+  let server: http.Server | undefined
+  let listening: Promise<{ port: number }> | undefined
   let maintenanceTimer: NodeJS.Timeout | undefined
   let maintenancePromise: Promise<void> | undefined
   let replicaTimer: NodeJS.Timeout | undefined
-  let heartbeatInFlight: Promise<void> = Promise.resolve()
+  let heartbeatInFlight: Promise<void> | undefined
   let applied: RuntimeConfig | undefined
   const runMaintenance = async (): Promise<void> => {
+    if (closing) return
     if (maintenancePromise) return maintenancePromise
     const snapshot = deps
     maintenancePromise = (async () => {
       await sql`DELETE FROM tb_kv WHERE key >= 'mcp-inbound:' AND key < 'mcp-inbound;'
         AND value->>'expiresAt' <= ${new Date().toISOString()}`
+      if (ownershipLost.signal.aborted) return
       await eventRepository.cleanup()
+      if (ownershipLost.signal.aborted) return
       await cleanupDefaultStore(snapshot)
-      if (snapshot.encryptionKey !== undefined)
+      if (!ownershipLost.signal.aborted && snapshot.encryptionKey !== undefined)
         await cleanupDeviceMailbox(snapshot)
     })().finally(() => {
       maintenancePromise = undefined
@@ -292,6 +301,7 @@ export function createTbServer(config: ServerConfig): TbServer {
   }
   function scheduleStoreCleanup(): void {
     // 首次 cleanup 在端口就绪后异步执行；历史对象多时不得阻塞 readiness。
+    if (closing) return
     void runMaintenance().catch(reportStoreCleanupFailure)
     maintenanceTimer = setInterval(
       () => {
@@ -315,6 +325,7 @@ export function createTbServer(config: ServerConfig): TbServer {
     }
     currentApp = buildApp()
   }, async (next) => {
+    ownershipLost.signal.throwIfAborted()
     await hub.setReclaimSec(next.deviceReclaimSec)
     const reschedule
       = applied?.storeCleanupIntervalSec !== next.storeCleanupIntervalSec
@@ -331,7 +342,17 @@ export function createTbServer(config: ServerConfig): TbServer {
   const drainWaiters: Array<() => void> = []
   const requestContext = new AsyncLocalStorage<{ release(): void }>()
   const app = new Hono()
-  app.all('*', async (c) => {
+  app.mount('/', async (raw, env, executionCtx) => {
+    const path = new URL(raw.url).pathname
+    const read = raw.method === 'GET' || raw.method === 'HEAD'
+    const probe = read && ['/healthz', '/livez', '/readyz'].includes(path)
+    const unavailable = (message: string) => Response.json({ code: 'unavailable', message }, { status: 503 })
+    if (!accepting()) {
+      if (probe) return currentApp.fetch(raw, env, executionCtx)
+      return unavailable('runtime not accepting requests')
+    }
+    const transport = AbortSignal.any([raw.signal, ownershipLost.signal])
+    const signal = AbortSignal.any([transport, shutdown.signal])
     activeRequests++
     let released = false
     const request = {
@@ -344,49 +365,126 @@ export function createTbServer(config: ServerConfig): TbServer {
     }
     return requestContext.run(request, async () => {
       try {
-        const path = new URL(c.req.url).pathname
-        if (
-          !['/healthz', '/livez', '/readyz'].includes(path)
-          && !path.startsWith('/ui')
-        ) {
+        if (!probe && !(read && (path === '/ui' || path.startsWith('/ui/')))) {
           try {
             await assertRuntimeAuthority(sql, replicaId)
+            transport.throwIfAborted()
             await settings.sync()
           } catch {
-            return trackResponseBody(c.json(
-              {
-                code: 'unavailable',
-                message: 'configuration authority unavailable',
-              },
-              503,
-            ), request.release, c.req.raw.signal)
+            request.release()
+            return unavailable('configuration authority unavailable')
           }
         }
-        const snapshot = currentApp
-        return trackResponseBody(await snapshot.fetch(c.req.raw), request.release, c.req.raw.signal)
+        if (transport.aborted) {
+          request.release()
+          return unavailable('request interrupted before dispatch')
+        }
+        // A Request's signal alone does not interrupt json()/text() on a pending upload.
+        // Keep graceful drain for admitted bodies, and fail partial reads on disconnect/loss.
+        // Fetch forbids streaming input for keepalive and no-cors requests.
+        const body = !raw.keepalive && raw.mode !== 'no-cors'
+          ? raw.body?.pipeThrough(new TransformStream<Uint8Array, Uint8Array>(), { signal: transport })
+          : undefined
+        try {
+          const init = { signal, ...(body && { body, duplex: 'half' }) }
+          const forwarded = new Request(raw, init)
+          // The Node adapter represents TRACE with a GET-backed Request.
+          if (forwarded.method !== raw.method) Object.defineProperty(forwarded, 'method', { value: raw.method })
+          const response = await currentApp.fetch(forwarded, env, executionCtx)
+          const sse = response.headers.get('content-type')?.split(';')[0] === 'text/event-stream'
+          return trackResponseBody(response, request.release, sse ? AbortSignal.any([transport, eventStreamShutdown.signal]) : transport)
+        } finally {
+          // A rejected upload may never be consumed by the handler.
+          if (body && !body.locked) void body.cancel().catch(() => {})
+        }
       } catch (error) {
         request.release()
         throw error
       }
     })
-  })
+  }, { replaceRequest: false })
 
   let prepared: Promise<void> | undefined
   let runtimeLease: RuntimeLease | undefined
   let closePromise: Promise<void> | undefined
+  let listenerClosed: Promise<void> | undefined
+  const stopListening = async (listener: http.Server) => {
+    // listen(hostname) can still be resolving the address when ownership is lost.
+    if (!listener.listening) await listening?.catch(() => {})
+    if (!listener.listening) return
+    await new Promise<void>((resolve, reject) => {
+      listener.close(err => err ? reject(err) : resolve())
+      listener.closeIdleConnections()
+    })
+  }
+  const close: TbServer['close'] = async (options) => {
+    // The caller is identified by its actual async request, after dispatch/auth,
+    // not by an encoded URL prefix or a particular management entry point.
+    const caller = options?.excludeCurrentRequest ? requestContext.getStore() : undefined
+    caller?.release()
+    if (!closePromise) {
+      closing = true
+      draining = true
+      if (server) listenerClosed = stopListening(server)
+      closePromise = Promise.resolve().then(async () => {
+        eventStreamShutdown.abort()
+        // Maintenance drains admitted calls, including the command that initiated it.
+        if (!caller) shutdown.abort(new TBError('unavailable', 'runtime is shutting down'))
+        if (maintenanceTimer !== undefined) {
+          clearInterval(maintenanceTimer)
+          maintenanceTimer = undefined
+        }
+        // Finish any pending orphan sweep before removing the hub's timers.
+        if (!preparedForTraffic) await prepared?.catch(() => {})
+        await hub.close()
+        if (activeRequests > 0)
+          await new Promise<void>(resolve => drainWaiters.push(resolve))
+        await maintenancePromise?.catch(() => {})
+        if (replicaTimer) clearInterval(replicaTimer)
+        await heartbeatInFlight
+        try {
+          await runtimeLease?.release()
+        } finally {
+          storage.close()
+          await eventRepository.close().finally(() => sql.end({ timeout: 5 }))
+        }
+      })
+    }
+    // A maintenance handler can own a socket on this listener. Let it send its
+    // final response after runtime drain; external closers still wait for the socket.
+    await Promise.all([closePromise, caller ? undefined : listenerClosed])
+  }
   const prepare = async (): Promise<void> => {
+    assertOpen()
     prepared ??= (async () => {
-      await state.ensureSchema()
-      runtimeLease = await acquireRuntimeLease(sql, {
+      const lease = await acquireRuntimeLease(sql, {
         instanceId: config.instanceId ?? 'embedded',
         replicaId,
         redisUrl: config.redisUrl,
+        onLost: () => {
+          if (ownershipLost.signal.aborted) return
+          ownershipLost.abort(new TBError('unavailable', 'runtime ownership lost'))
+          if (replicaTimer) clearInterval(replicaTimer)
+          console.error(JSON.stringify({ event: 'tool_bridge_runtime_ownership_lost' }))
+          // The callback can run inside heartbeat. Never wait for close from there.
+          void close().catch(() => {
+            console.error(JSON.stringify({ event: 'tool_bridge_runtime_close_failed' }))
+          })
+          server?.closeAllConnections()
+          onOwnershipLost?.()
+        },
       })
+      runtimeLease = lease
+      assertOpen()
       replicaTimer = setInterval(() => {
-        heartbeatInFlight = heartbeatInFlight.then(() => runtimeLease?.heartbeat()).catch(() => {})
+        if (heartbeatInFlight) return
+        heartbeatInFlight = lease.heartbeat().catch(() => {}).finally(() => {
+          heartbeatInFlight = undefined
+        })
       }, 15000)
       replicaTimer.unref()
 
+      await state.ensureSchema()
       await storeRepository.ensureSchema()
       await state.ensureContextReferencesSchema()
       await eventRepository.ensureSchema()
@@ -407,6 +505,7 @@ export function createTbServer(config: ServerConfig): TbServer {
           ),
         ),
       )
+      assertOpen()
       await runBootstrap(state, {
         management: true,
         additionalModules: [
@@ -415,6 +514,7 @@ export function createTbServer(config: ServerConfig): TbServer {
         ],
         ...(config.adminSk ? { adminSk: config.adminSk } : {}),
       })
+      assertOpen()
       const backends = (await storage.list()).items
       let active = backends.find(backend => backend.active)
       if (!active && config.objectStore) {
@@ -455,12 +555,17 @@ export function createTbServer(config: ServerConfig): TbServer {
         throw new TBError('unavailable', 'no active storage backend')
       // A failed later capability probe blocks new uploads, but management remains reachable.
       await storage.resolveBackend(active.id)
+      assertOpen()
       await hub.startRouter()
       await settings.sync()
+      assertOpen()
       await hub.sweepOrphans()
+      assertOpen()
       scheduleStoreCleanup()
+      preparedForTraffic = true
     })()
     await prepared
+    assertOpen()
   }
   return {
     app,
@@ -472,16 +577,20 @@ export function createTbServer(config: ServerConfig): TbServer {
     deviceHub: hub,
     async start(): Promise<{ port: number }> {
       await prepare()
-      return await new Promise((resolve) => {
+      assertOpen()
+      listening ??= new Promise((resolve, reject) => {
         server = serve(
           { fetch: app.fetch, port: config.port, hostname: config.host },
           (info) => {
-            // 并发 tick 直接跳过，避免慢后端堆积 cleanup 扫描。
+            if (!closing) hub.attach(server!)
             resolve({ port: info.port })
           },
-        )
-        hub.attach(server as http.Server)
+        ) as http.Server
+        server.once('error', reject)
       })
+      const address = await listening
+      assertOpen()
+      return address
     },
     startDraining(): void {
       draining = true
@@ -489,47 +598,6 @@ export function createTbServer(config: ServerConfig): TbServer {
     get shutdownDrainSec(): number {
       return applied?.shutdownDrainSec ?? config.shutdownDrainSec ?? 0
     },
-    async close(options): Promise<void> {
-      // The caller is identified by its actual async request, after dispatch/auth,
-      // not by an encoded URL prefix or a particular management entry point.
-      if (options?.excludeCurrentRequest) requestContext.getStore()?.release()
-      return closePromise ??= (async () => {
-      // 顺序即关停语义:先停止接受新连接(既有请求继续跑完),再终止设备 WS,最后等
-      // HTTP 排空、关后端。反过来(旧序:先杀 hub)会出现"设备通道已死、HTTP 还在收
-      // 新请求"的窗口——期间到达的设备调用一律误报离线。
-        draining = true
-        eventStreamShutdown.abort()
-        if (maintenanceTimer !== undefined) {
-          clearInterval(maintenanceTimer)
-          maintenanceTimer = undefined
-        }
-        let closed: Promise<void> | undefined
-        if (server !== undefined) {
-          const s = server
-          closed = new Promise<void>((resolve, reject) => {
-            s.close(err => (err ? reject(err) : resolve()))
-          });
-          // keep-alive 空闲连接会让 close 永远等不完;设备 WS 由 hub.close() 终止。
-          (s as http.Server).closeIdleConnections?.()
-        }
-        await hub.close()
-        if (activeRequests > 0)
-          await new Promise<void>(resolve => drainWaiters.push(resolve))
-        await maintenancePromise?.catch(() => {})
-        if (replicaTimer) clearInterval(replicaTimer)
-        await heartbeatInFlight
-        try {
-          await runtimeLease?.release()
-        } finally {
-          try {
-            if (closed !== undefined) await closed
-          } finally {
-            server = undefined
-            storage.close()
-            await eventRepository.close().finally(() => sql.end({ timeout: 5 }))
-          }
-        }
-      })()
-    },
+    close,
   }
 }

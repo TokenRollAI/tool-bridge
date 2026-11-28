@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { request as httpRequest } from 'node:http'
 /**
  * Node 宿主集成测试:真实 http(port 0)全 wire 断言(与 curl 等价,不直捣内部对象)。
@@ -8,10 +8,12 @@ import { request as httpRequest } from 'node:http'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import postgres from 'postgres'
 import type { ServerConfig } from '../src/config'
 import pkg from '../package.json' with { type: 'json' }
 import { createTbServer, type TbServer } from '../src'
 import { testServerConfig } from './helpers/server'
+import * as fence from '../src/pgMaintenanceFence'
 
 const ADMIN_SK = 'tbk_server_test_admin_00000000'
 const ENCRYPTION_KEY = '3ZwpbBkSrp3eT9ylcZedfN33yq9fJLlmeusH98qNbt8'
@@ -26,6 +28,14 @@ function tmpDataDir(): string {
   const dir = mkdtempSync(join(tmpdir(), 'tb-server-'))
   cleanups.push(() => rmSync(dir, { recursive: true, force: true }))
   return dir
+}
+
+function offlineServer(): TbServer {
+  return createTbServer({
+    databaseUrl: 'postgres://127.0.0.1:1/test', dataDir: tmpDataDir(), host: '127.0.0.1', port: 0,
+    encryptionKey: ENCRYPTION_KEY, deviceReclaimSec: 60, storeCleanupIntervalSec: 60,
+    allowInsecureHttp: false, remote: { allowlist: [], maxHops: 4, allowInsecure: false },
+  })
 }
 
 async function startServer(
@@ -110,6 +120,185 @@ async function postJson(
 }
 
 describe('Node 宿主 HTTP 面', () => {
+  it('keeps embedded HTTP sealed before, during and after unsuccessful admission', async () => {
+    let refuse: ((reason: Error) => void) | undefined
+    const admission = vi.spyOn(fence, 'acquireRuntimeLease').mockImplementationOnce(() => new Promise<never>((_, reject) => {
+      refuse = reject
+    }))
+    const authority = vi.spyOn(fence, 'assertRuntimeAuthority')
+    const server = offlineServer()
+    const sealed = async () => {
+      const ready = await server.app.request('/readyz')
+      expect(ready.status).toBe(503)
+      expect(await ready.json()).toMatchObject({ ready: false })
+      const post = await server.app.fetch(new Request('http://embedded/ui/notes/~register', { method: 'POST' }))
+      expect(post.status).toBe(503)
+      expect((await server.app.request('/livez')).status).toBe(200)
+    }
+    try {
+      await sealed()
+      expect(admission).not.toHaveBeenCalled()
+      const preparation = expect(server.prepare()).rejects.toThrow('admission refused')
+      await sealed()
+      refuse!(new Error('admission refused'))
+      await preparation
+      await sealed()
+      await server.close()
+      await sealed()
+      expect(authority).not.toHaveBeenCalled()
+    } finally {
+      refuse?.(new Error('admission refused'))
+      admission.mockRestore()
+      authority.mockRestore()
+      await server.close()
+    }
+  })
+
+  it('closes a lease lost during admission once, and never starts or dispatches on that runtime', async () => {
+    const lease = { heartbeat: vi.fn(async () => {}), release: vi.fn(async () => {}) }
+    const admission = vi.spyOn(fence, 'acquireRuntimeLease').mockImplementationOnce(async (_sql, input) => {
+      // Deliver loss before prepare's continuation gets the returned lease.
+      queueMicrotask(() => input.onLost!())
+      return lease
+    })
+    const server = offlineServer()
+    try {
+      await expect(server.prepare()).rejects.toMatchObject({ code: 'unavailable' })
+      expect((await server.app.request('/readyz')).status).toBe(503)
+      expect((await server.app.request('/~help', admin())).status).toBe(503)
+      await expect(server.start()).rejects.toMatchObject({ code: 'unavailable' })
+      await server.close()
+      expect(admission).toHaveBeenCalledTimes(1)
+      expect(lease.heartbeat).not.toHaveBeenCalled()
+      expect(lease.release).toHaveBeenCalledTimes(1)
+    } finally {
+      admission.mockRestore()
+      await server.close()
+    }
+  })
+
+  it.each(['close', 'lease loss'] as const)('interrupts an admitted event read on %s and seals new work', async (cause) => {
+    const config = await testServerConfig()
+    const sql = postgres(config.databaseUrl!, { max: 1, onnotice: () => {} })
+    const acquire = fence.acquireRuntimeLease
+    let lose!: () => void
+    const admission = vi.spyOn(fence, 'acquireRuntimeLease').mockImplementationOnce((sql, input) => {
+      lose = input.onLost!
+      return acquire(sql, input)
+    })
+    const server = createTbServer(config)
+    const client = new AbortController()
+    const post = (path: string, body: BodyInit) => {
+      const init = {
+        ...admin({ headers: { 'content-type': 'application/json', 'accept': 'application/json' } }),
+        method: 'POST', body, duplex: 'half', signal: client.signal,
+      }
+      return server.app.fetch(new Request(new URL(path, 'http://embedded'), init))
+    }
+    try {
+      await server.prepare()
+      const created = await post('/alerts/~register', JSON.stringify({ path: 'alerts', kind: 'topic', description: 'Alerts' }))
+      expect(created.ok, await created.text()).toBe(true)
+      // Send two chunks through the same Hono app that an embedding host receives.
+      const waiting = post('/alerts/read', new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(Buffer.from('{"waitMs":'))
+          controller.enqueue(Buffer.from('30000}'))
+          controller.close()
+        },
+      }))
+      const waits = async () => (await sql`SELECT id FROM tb_event_waits`).length
+      await expect.poll(waits).toBe(1)
+      // Valid JSON, but the sender hasn't finished the body. Loss must error
+      // the read; ordinary drain must let the registration finish once.
+      let finishUpload!: () => void
+      const reading = vi.fn()
+      const cancelled = vi.fn()
+      const upload = post('/note/~register', new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(Buffer.from('{"path":"note","kind":"directory","description":"Note"}'))
+          finishUpload = () => controller.close()
+        },
+        pull: reading,
+        cancel: cancelled,
+      }, { highWaterMark: 0 }))
+      await vi.waitFor(() => expect(reading).toHaveBeenCalled())
+      const held = await server.app.request('/~help', admin({ signal: client.signal }))
+      expect(held.status).toBe(200)
+      if (cause === 'lease loss') lose()
+      const closing = server.close()
+      const denied = await post('/alerts/publish', JSON.stringify({ type: 'late', data: {} }))
+      expect(denied.status).toBe(503)
+      // The long poll must release its slot before either its deadline or client abort.
+      await expect.poll(waits, { timeout: 3000 }).toBe(0)
+      const result = await waiting
+      expect(result.status).toBe(503)
+      await result.text()
+      if (cause === 'close') {
+        expect(await sql`SELECT replica_id FROM tb_runtime_replicas`).toHaveLength(1)
+        finishUpload()
+        expect(await held.text()).toContain('system')
+      } else {
+        expect(await held.text()).toBe('')
+        await vi.waitFor(() => expect(cancelled).toHaveBeenCalledOnce())
+      }
+      const registered = await upload
+      expect(registered.ok, await registered.text()).toBe(cause === 'close')
+      await closing
+      expect(await sql`SELECT key FROM tb_kv WHERE key='node:note'`).toHaveLength(cause === 'close' ? 1 : 0)
+      expect(await sql`SELECT replica_id FROM tb_runtime_replicas`).toHaveLength(0)
+      expect(await sql`SELECT id FROM tb_event_records`).toHaveLength(0)
+    } finally {
+      client.abort()
+      admission.mockRestore()
+      await server.close()
+      await sql.end()
+    }
+  })
+
+  it('does not exempt UI-prefixed business routes from a live maintenance fence', async () => {
+    const config = await testServerConfig()
+    const server = createTbServer(config)
+    const sql = postgres(config.databaseUrl!, { onnotice: () => {} })
+    try {
+      await server.prepare()
+      await sql`INSERT INTO tb_runtime_maintenance (id,owner_replica_id,expires_at) VALUES (1,'other','infinity')`
+      const post = await server.app.request('/ui/notes/~register', admin({
+        method: 'POST', body: JSON.stringify({ path: 'ui/notes', kind: 'directory', description: 'Notes' }),
+      }))
+      expect(post.status, await post.text()).toBe(503)
+      const head = await server.app.request('/uikit/~help', admin({ method: 'HEAD' }))
+      expect(head.status).toBe(503)
+      expect(head.body).toBeNull()
+      const ready = await server.app.request('/readyz')
+      expect(await ready.json()).toMatchObject({ ready: false, checks: { state: { ok: false } } })
+    } finally {
+      await server.close()
+      await sql.end()
+    }
+  })
+
+  it('delivers the rotation response when the current request is on the closing listener', async () => {
+    const ring = { activeKeyId: 'next', keys: [] }
+    const rotate = vi.fn<NonNullable<ServerConfig['keyManagement']>['rotate']>()
+    const { server, baseUrl } = await startServer(tmpDataDir(), {
+      keyManagement: { rotate, backup: vi.fn(), status: vi.fn(), resume: vi.fn(), retire: vi.fn() },
+    })
+    rotate.mockImplementation(async () => {
+      await server.close({ excludeCurrentRequest: true })
+      return { instanceId: 'embedded', revision: 2, jobs: [], signing: ring, encryption: ring }
+    })
+    try {
+      const response = await postJson(baseUrl, 'system/%6beys/rotate', { expectedRevision: 1, target: 'signing' },
+        admin({ signal: AbortSignal.timeout(5000) }))
+      expect(response.status).toBe(200)
+      expect(await response.json()).toMatchObject({ revision: 2 })
+      expect(rotate).toHaveBeenCalledOnce()
+    } finally {
+      await server.close()
+    }
+  })
+
   it('TLS 终止代理下用 canonical protocol + 本次 alias host 签 Store URL', async () => {
     const { server, baseUrl } = await startServer(tmpDataDir(), {
       canonicalOrigin: 'https://canonical.example',

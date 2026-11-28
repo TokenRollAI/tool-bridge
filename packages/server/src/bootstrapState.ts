@@ -42,6 +42,12 @@ interface Pairing {
   tokenHash: string
 }
 
+export class BootstrapLockBusyError extends TBError {
+  constructor() {
+    super('conflict', 'another local maintenance operation is running')
+  }
+}
+
 export class BootstrapStateStore {
   constructor(readonly directory: string) {}
   path(name: string): string {
@@ -56,7 +62,7 @@ export class BootstrapStateStore {
       update: 10000,
     }).catch((error: unknown) => {
       if ((error as NodeJS.ErrnoException).code === 'ELOCKED') {
-        throw new TBError('conflict', 'another local maintenance operation is running')
+        throw new BootstrapLockBusyError()
       }
       throw error
     })
@@ -97,39 +103,48 @@ export class BootstrapStateStore {
   }
 
   async initialize(): Promise<BootstrapState> {
-    return this.exclusive(async () => {
-      const current = await this.state()
-      if (current) {
-        if (await this.read('initialized.json'))
-          return { ...current, phase: 'initialized' }
-        return current
-      }
-      // An identity without state means interrupted/corrupt provisioning, never a new public install.
-      if (await this.read('identity.json'))
-        throw new TBError(
-          'unavailable',
-          'bootstrap state requires local recovery',
-        )
-      const state: BootstrapState = {
-        instanceId: randomUUID(),
-        revision: 1,
-        phase: 'setup',
-        port: 8787,
-        host: '0.0.0.0',
-      }
-      await this.write('identity.json', { instanceId: state.instanceId })
-      await this.write('keys.json', {
-        keyring: createEncryptionKeyring(randomBytes(32).toString('base64url')),
-        storeTokenKeyring: createEncryptionKeyring(
-          randomBytes(32).toString('base64url'),
-        ),
-        oauthKey: randomBytes(32).toString('base64url'),
-        adminSk: `tb_sk_${randomBytes(32).toString('base64url')}`,
-      })
-      await this.write('bootstrap.json', state)
-      await this.pair(state.instanceId, 'setup')
-      return state
-    }, 5)
+    return this.exclusive(() => this.readOrInitialize(), 5)
+  }
+
+  /** Keep bootstrap reads, including the first initialization, locked through admission. */
+  async withStartupState(initializedInstanceId: string | undefined, admit: (state: BootstrapState) => Promise<void>): Promise<void> {
+    return this.exclusive(async () => admit(await this.readOrInitialize(initializedInstanceId)))
+  }
+
+  private async readOrInitialize(initializedInstanceId?: string): Promise<BootstrapState> {
+    const current = await this.state()
+    if (initializedInstanceId && current?.instanceId !== initializedInstanceId)
+      throw new TBError('conflict', 'bootstrap identity changed during handoff')
+    if (current) {
+      if (initializedInstanceId || await this.read('initialized.json'))
+        return { ...current, phase: 'initialized' }
+      return current
+    }
+    // An identity without state means interrupted/corrupt provisioning, never a new public install.
+    if (await this.read('identity.json'))
+      throw new TBError(
+        'unavailable',
+        'bootstrap state requires local recovery',
+      )
+    const state: BootstrapState = {
+      instanceId: randomUUID(),
+      revision: 1,
+      phase: 'setup',
+      port: 8787,
+      host: '0.0.0.0',
+    }
+    await this.write('identity.json', { instanceId: state.instanceId })
+    await this.write('keys.json', {
+      keyring: createEncryptionKeyring(randomBytes(32).toString('base64url')),
+      storeTokenKeyring: createEncryptionKeyring(
+        randomBytes(32).toString('base64url'),
+      ),
+      oauthKey: randomBytes(32).toString('base64url'),
+      adminSk: `tb_sk_${randomBytes(32).toString('base64url')}`,
+    })
+    await this.write('bootstrap.json', state)
+    await this.pair(state.instanceId, 'setup')
+    return state
   }
 
   private async pair(
